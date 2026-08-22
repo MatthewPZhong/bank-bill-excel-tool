@@ -1,0 +1,1711 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bank-bill-excel-tool.local/schemas/background-execution/platform-contract-v1.schema.json",
+  "title": "Background Execution Policy Registry v1",
+  "description": "Normative schema for action-level background execution policies. Runtime CI must additionally verify that each action object actionKey equals its property name and that referenced entry/adapters/inspectors are statically registered.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contractVersion",
+    "generatedAt",
+    "actions"
+  ],
+  "properties": {
+    "contractVersion": {
+      "const": 1
+    },
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "baselineRef": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "actions": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "$ref": "#/$defs/actionKey"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/actionPolicy"
+      }
+    }
+  },
+  "$defs": {
+    "actionKey": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*:[a-z0-9][a-z0-9._-]*$",
+      "minLength": 3,
+      "maxLength": 128
+    },
+    "safeKey": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "positiveInteger": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "nonNegativeInteger": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "actionPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "actionKey",
+        "moduleId",
+        "disposition",
+        "mode",
+        "adapterKind",
+        "lifetime",
+        "context",
+        "protocolLimits",
+        "resources",
+        "cancellation",
+        "failure",
+        "commit",
+        "result",
+        "artifacts",
+        "metrics",
+        "production",
+        "adapterKey",
+        "entryKey",
+        "service",
+        "blocker"
+      ],
+      "properties": {
+        "actionKey": {
+          "$ref": "#/$defs/actionKey"
+        },
+        "moduleId": {
+          "$ref": "#/$defs/safeKey"
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "disposition": {
+          "enum": [
+            "managed",
+            "legacy-preserved",
+            "inline-excluded",
+            "blocked"
+          ]
+        },
+        "mode": {
+          "enum": [
+            "inline-async",
+            "thread-single",
+            "thread-pool",
+            "utility-process"
+          ]
+        },
+        "adapterKind": {
+          "enum": [
+            "native",
+            "existing-dispatch"
+          ]
+        },
+        "adapterKey": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/safeKey"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "entryKey": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/safeKey"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lifetime": {
+          "enum": [
+            "job",
+            "service"
+          ]
+        },
+        "context": {
+          "$ref": "#/$defs/contextPolicy"
+        },
+        "workUnits": {
+          "$ref": "#/$defs/workUnitPolicy"
+        },
+        "resources": {
+          "$ref": "#/$defs/resourcePolicy"
+        },
+        "cancellation": {
+          "$ref": "#/$defs/cancellationPolicy"
+        },
+        "failure": {
+          "$ref": "#/$defs/failurePolicy"
+        },
+        "commit": {
+          "$ref": "#/$defs/commitPolicy"
+        },
+        "result": {
+          "$ref": "#/$defs/resultPolicy"
+        },
+        "artifacts": {
+          "$ref": "#/$defs/artifactPolicy"
+        },
+        "service": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/servicePolicy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "metrics": {
+          "$ref": "#/$defs/metricsPolicy"
+        },
+        "featureFlag": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/safeKey"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "legacyStrategyKey": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/safeKey"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "blocker": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "code",
+                "summary",
+                "owner",
+                "reviewVersion"
+              ],
+              "properties": {
+                "code": {
+                  "$ref": "#/$defs/safeKey"
+                },
+                "summary": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2000
+                },
+                "owner": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "reviewVersion": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "production": {
+          "$ref": "#/$defs/productionPolicy"
+        },
+        "protocolLimits": {
+          "$ref": "#/$defs/protocolLimitsPolicy"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "adapterKind": {
+                "const": "existing-dispatch"
+              }
+            },
+            "required": [
+              "adapterKind"
+            ]
+          },
+          "then": {
+            "required": [
+              "adapterKey",
+              "entryKey"
+            ],
+            "properties": {
+              "adapterKey": {
+                "$ref": "#/$defs/safeKey"
+              },
+              "entryKey": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "adapterKind": {
+                "const": "native"
+              }
+            },
+            "required": [
+              "adapterKind"
+            ]
+          },
+          "then": {
+            "required": [
+              "adapterKey",
+              "entryKey"
+            ],
+            "properties": {
+              "entryKey": {
+                "$ref": "#/$defs/safeKey"
+              },
+              "adapterKey": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "mode": {
+                "const": "thread-pool"
+              }
+            },
+            "required": [
+              "mode"
+            ]
+          },
+          "then": {
+            "required": [
+              "workUnits"
+            ],
+            "properties": {
+              "workUnits": {
+                "$ref": "#/$defs/workUnitPolicy"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "lifetime": {
+                "const": "service"
+              }
+            },
+            "required": [
+              "lifetime"
+            ]
+          },
+          "then": {
+            "required": [
+              "service"
+            ],
+            "properties": {
+              "service": {
+                "$ref": "#/$defs/servicePolicy"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "lifetime": {
+                "const": "job"
+              }
+            },
+            "required": [
+              "lifetime"
+            ]
+          },
+          "then": {
+            "required": [
+              "service"
+            ],
+            "properties": {
+              "service": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "commit": {
+                "properties": {
+                  "kind": {
+                    "const": "none"
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              }
+            },
+            "required": [
+              "commit"
+            ]
+          },
+          "then": {
+            "properties": {
+              "commit": {
+                "properties": {
+                  "criticalIntent": {
+                    "const": false
+                  },
+                  "receiptKind": {
+                    "type": "null"
+                  },
+                  "inspectorKey": {
+                    "type": "null"
+                  },
+                  "conflictScopeResolverKey": {
+                    "type": "null"
+                  },
+                  "settlementKey": {
+                    "type": "null"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "commit": {
+                "properties": {
+                  "kind": {
+                    "const": "main-settlement"
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              }
+            },
+            "required": [
+              "commit"
+            ]
+          },
+          "then": {
+            "properties": {
+              "commit": {
+                "properties": {
+                  "receiptKind": {
+                    "enum": [
+                      "publisher-journal",
+                      "target-post-image"
+                    ]
+                  },
+                  "inspectorKey": {
+                    "$ref": "#/$defs/safeKey"
+                  },
+                  "conflictScopeResolverKey": {
+                    "$ref": "#/$defs/safeKey"
+                  },
+                  "settlementKey": {
+                    "$ref": "#/$defs/safeKey"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "commit": {
+                "properties": {
+                  "kind": {
+                    "const": "main-settlement"
+                  },
+                  "receiptKind": {
+                    "const": "publisher-journal"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "receiptKind"
+                ]
+              }
+            },
+            "required": [
+              "commit"
+            ]
+          },
+          "then": {
+            "properties": {
+              "commit": {
+                "properties": {
+                  "criticalIntent": {
+                    "const": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "commit": {
+                "properties": {
+                  "kind": {
+                    "const": "main-settlement"
+                  },
+                  "receiptKind": {
+                    "const": "target-post-image"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "receiptKind"
+                ]
+              }
+            },
+            "required": [
+              "commit"
+            ]
+          },
+          "then": {
+            "properties": {
+              "commit": {
+                "properties": {
+                  "criticalIntent": {
+                    "const": true
+                  }
+                }
+              },
+              "artifacts": {
+                "properties": {
+                  "kind": {
+                    "const": "none"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "commit": {
+                "properties": {
+                  "kind": {
+                    "const": "worker-durable"
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              }
+            },
+            "required": [
+              "commit"
+            ]
+          },
+          "then": {
+            "properties": {
+              "commit": {
+                "properties": {
+                  "criticalIntent": {
+                    "const": true
+                  },
+                  "receiptKind": {
+                    "const": "module-local"
+                  },
+                  "inspectorKey": {
+                    "$ref": "#/$defs/safeKey"
+                  },
+                  "conflictScopeResolverKey": {
+                    "$ref": "#/$defs/safeKey"
+                  },
+                  "settlementKey": {
+                    "type": "null"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "commit": {
+                "properties": {
+                  "kind": {
+                    "const": "existing-critical-protocol"
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              }
+            },
+            "required": [
+              "commit"
+            ]
+          },
+          "then": {
+            "properties": {
+              "commit": {
+                "properties": {
+                  "criticalIntent": {
+                    "const": false
+                  },
+                  "receiptKind": {
+                    "const": "existing-protocol"
+                  },
+                  "inspectorKey": {
+                    "$ref": "#/$defs/safeKey"
+                  },
+                  "conflictScopeResolverKey": {
+                    "$ref": "#/$defs/safeKey"
+                  },
+                  "settlementKey": {
+                    "$ref": "#/$defs/safeKey"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "artifacts": {
+                "properties": {
+                  "kind": {
+                    "const": "none"
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              }
+            },
+            "required": [
+              "artifacts"
+            ]
+          },
+          "then": {
+            "properties": {
+              "artifacts": {
+                "properties": {
+                  "filePlanRequired": {
+                    "const": false
+                  },
+                  "technicalValidatorKey": {
+                    "type": "null"
+                  },
+                  "businessValidatorKey": {
+                    "type": "null"
+                  },
+                  "publisherKey": {
+                    "type": "null"
+                  },
+                  "maxArtifacts": {
+                    "const": 0
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "artifacts": {
+                "properties": {
+                  "kind": {
+                    "not": {
+                      "const": "none"
+                    }
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              }
+            },
+            "required": [
+              "artifacts"
+            ]
+          },
+          "then": {
+            "properties": {
+              "artifacts": {
+                "properties": {
+                  "filePlanRequired": {
+                    "const": true
+                  },
+                  "technicalValidatorKey": {
+                    "$ref": "#/$defs/safeKey"
+                  },
+                  "businessValidatorKey": {
+                    "$ref": "#/$defs/safeKey"
+                  },
+                  "publisherKey": {
+                    "$ref": "#/$defs/safeKey"
+                  },
+                  "maxArtifacts": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 10000
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "disposition": {
+                "const": "blocked"
+              }
+            },
+            "required": [
+              "disposition"
+            ]
+          },
+          "then": {
+            "required": [
+              "blocker"
+            ],
+            "properties": {
+              "blocker": {
+                "type": "object"
+              },
+              "production": {
+                "properties": {
+                  "enabled": {
+                    "const": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "disposition": {
+                "not": {
+                  "const": "blocked"
+                }
+              }
+            },
+            "required": [
+              "disposition"
+            ]
+          },
+          "then": {
+            "properties": {
+              "blocker": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "commit": {
+                "properties": {
+                  "kind": {
+                    "const": "main-settlement"
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              },
+              "artifacts": {
+                "properties": {
+                  "kind": {
+                    "not": {
+                      "const": "none"
+                    }
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              }
+            },
+            "required": [
+              "commit",
+              "artifacts"
+            ]
+          },
+          "then": {
+            "properties": {
+              "commit": {
+                "properties": {
+                  "receiptKind": {
+                    "const": "publisher-journal"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "commit": {
+                "properties": {
+                  "kind": {
+                    "const": "main-settlement"
+                  },
+                  "receiptKind": {
+                    "const": "publisher-journal"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "receiptKind"
+                ]
+              }
+            },
+            "required": [
+              "commit"
+            ]
+          },
+          "then": {
+            "properties": {
+              "commit": {
+                "properties": {
+                  "criticalIntent": {
+                    "const": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "commit": {
+                "properties": {
+                  "kind": {
+                    "const": "main-settlement"
+                  },
+                  "receiptKind": {
+                    "const": "target-post-image"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "receiptKind"
+                ]
+              }
+            },
+            "required": [
+              "commit"
+            ]
+          },
+          "then": {
+            "properties": {
+              "commit": {
+                "properties": {
+                  "criticalIntent": {
+                    "const": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "commit": {
+                "properties": {
+                  "kind": {
+                    "const": "main-settlement"
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              },
+              "artifacts": {
+                "properties": {
+                  "kind": {
+                    "const": "none"
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              }
+            },
+            "required": [
+              "commit",
+              "artifacts"
+            ]
+          },
+          "then": {
+            "properties": {
+              "commit": {
+                "properties": {
+                  "receiptKind": {
+                    "const": "target-post-image"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "contextPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "validatorKey"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "operation",
+            "file-batch",
+            "none"
+          ]
+        },
+        "validatorKey": {
+          "enum": [
+            "exact-5",
+            "exact-7",
+            "platform-none"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "operation"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "validatorKey": {
+                "const": "exact-5"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "file-batch"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "validatorKey": {
+                "const": "exact-7"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "none"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "validatorKey": {
+                "const": "platform-none"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "workUnitPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "ordering",
+        "requestedMaxWorkers",
+        "minUnitsPerWorker"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "file",
+            "chunk",
+            "subject",
+            "output",
+            "role",
+            "custom"
+          ]
+        },
+        "ordering": {
+          "enum": [
+            "completion-order-irrelevant",
+            "input-index-reducer",
+            "unit-index-reducer",
+            "module-defined"
+          ]
+        },
+        "requestedMaxWorkers": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "minUnitsPerWorker": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "plannerKey": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/safeKey"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reducerKey": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/safeKey"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "resourceVector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cpuSlots",
+        "workerThreadSlots",
+        "utilityProcessSlots",
+        "ioHeavySlots",
+        "memoryBytes"
+      ],
+      "properties": {
+        "cpuSlots": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "workerThreadSlots": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "utilityProcessSlots": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "ioHeavySlots": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "memoryBytes": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        }
+      }
+    },
+    "resourcePolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile",
+        "base",
+        "phase",
+        "lowMemoryBehavior"
+      ],
+      "properties": {
+        "profile": {
+          "$ref": "#/$defs/safeKey"
+        },
+        "base": {
+          "$ref": "#/$defs/resourceVector"
+        },
+        "persistentState": {
+          "$ref": "#/$defs/resourceVector"
+        },
+        "pendingInteraction": {
+          "$ref": "#/$defs/resourceVector"
+        },
+        "phase": {
+          "$ref": "#/$defs/resourceVector"
+        },
+        "compound": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "topologyKey",
+                "childrenMax",
+                "childResource"
+              ],
+              "properties": {
+                "topologyKey": {
+                  "$ref": "#/$defs/safeKey"
+                },
+                "childrenMax": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 128
+                },
+                "childResource": {
+                  "$ref": "#/$defs/resourceVector"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lowMemoryBehavior": {
+          "enum": [
+            "queue",
+            "downgrade-to-single",
+            "reject"
+          ]
+        },
+        "admissionPriority": {
+          "enum": [
+            "interactive",
+            "normal",
+            "maintenance",
+            "recovery"
+          ],
+          "default": "normal"
+        }
+      }
+    },
+    "cancellationPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capability",
+        "safePoints",
+        "cooperativeTimeoutMs",
+        "terminateTimeoutMs"
+      ],
+      "properties": {
+        "capability": {
+          "enum": [
+            "user-cooperative",
+            "shutdown-only",
+            "not-supported"
+          ]
+        },
+        "safePoints": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "cooperativeTimeoutMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 600000
+        },
+        "terminateTimeoutMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 600000
+        },
+        "protectedResult": {
+          "const": "protected/not-cancellable"
+        }
+      }
+    },
+    "failurePolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "unitBusinessError",
+        "unitTransportCrash",
+        "workerExit",
+        "automaticRetry"
+      ],
+      "properties": {
+        "unitBusinessError": {
+          "enum": [
+            "fail-job",
+            "collect-and-continue"
+          ]
+        },
+        "unitTransportCrash": {
+          "enum": [
+            "fail-job",
+            "fail-unit-and-continue"
+          ]
+        },
+        "workerExit": {
+          "enum": [
+            "fail-job",
+            "module-inspect"
+          ]
+        },
+        "automaticRetry": {
+          "const": false
+        }
+      }
+    },
+    "commitPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "criticalIntent",
+        "receiptKind",
+        "inspectorKey",
+        "conflictScopeResolverKey",
+        "settlementKey"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "none",
+            "main-settlement",
+            "worker-durable",
+            "existing-critical-protocol"
+          ]
+        },
+        "criticalIntent": {
+          "type": "boolean"
+        },
+        "receiptKind": {
+          "anyOf": [
+            {
+              "enum": [
+                "module-local",
+                "publisher-journal",
+                "target-post-image",
+                "existing-protocol"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "inspectorKey": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/safeKey"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "conflictScopeResolverKey": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/safeKey"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "settlementKey": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/safeKey"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "resultPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "maxBytes",
+        "maxErrorItems"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "compact-json",
+            "artifact-manifest",
+            "spool-manifest",
+            "existing-result"
+          ]
+        },
+        "maxBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 67108864
+        },
+        "maxErrorItems": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "validatorKey": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/safeKey"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "artifactPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "filePlanRequired",
+        "technicalValidatorKey",
+        "businessValidatorKey",
+        "publisherKey",
+        "maxArtifacts"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "none",
+            "single",
+            "all-or-none",
+            "existing-publication"
+          ]
+        },
+        "filePlanRequired": {
+          "type": "boolean"
+        },
+        "technicalValidatorKey": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/safeKey"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "businessValidatorKey": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/safeKey"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "publisherKey": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/safeKey"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "maxArtifacts": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        }
+      }
+    },
+    "servicePolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "generationRequired",
+        "busyPolicy",
+        "closePolicy",
+        "statusMaxBytes",
+        "tokenPolicy",
+        "serviceKey",
+        "controlProtocol",
+        "resourceControl",
+        "stateAdoption"
+      ],
+      "properties": {
+        "generationRequired": {
+          "const": true
+        },
+        "busyPolicy": {
+          "enum": [
+            "reject",
+            "bounded-queue"
+          ]
+        },
+        "closePolicy": {
+          "enum": [
+            "idle-only",
+            "cooperative",
+            "module-defined"
+          ]
+        },
+        "statusMaxBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16777216
+        },
+        "stateFootprintEstimatorKey": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/safeKey"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tokenPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "maxOutstanding",
+            "ttlMs",
+            "singleUse"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "maxOutstanding": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10000
+            },
+            "ttlMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 604800000
+            },
+            "singleUse": {
+              "type": "boolean"
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "enabled": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "enabled"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "maxOutstanding": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 10000
+                  },
+                  "ttlMs": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 604800000
+                  },
+                  "singleUse": {
+                    "const": true
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "enabled": {
+                    "const": false
+                  }
+                },
+                "required": [
+                  "enabled"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "maxOutstanding": {
+                    "const": 0
+                  },
+                  "ttlMs": {
+                    "const": 0
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "startupRecoveryKey": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/safeKey"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "serviceKey": {
+          "$ref": "#/$defs/safeKey"
+        },
+        "resourceControl": {
+          "$ref": "#/$defs/serviceResourceControlPolicy"
+        },
+        "controlProtocol": {
+          "const": "service-control-v1"
+        },
+        "stateAdoption": {
+          "$ref": "#/$defs/serviceStateAdoptionPolicy"
+        }
+      }
+    },
+    "metricsPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "phases",
+        "privacyProfile"
+      ],
+      "properties": {
+        "phases": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "privacyProfile": {
+          "$ref": "#/$defs/safeKey"
+        },
+        "progressRateLimitPerSecond": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1000
+        }
+      }
+    },
+    "productionPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "effectiveMode",
+        "effectiveWorkerCount",
+        "recoveryStatus",
+        "evidenceStatus"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "effectiveMode": {
+          "enum": [
+            "inline-async",
+            "thread-single",
+            "thread-pool",
+            "utility-process",
+            "legacy"
+          ]
+        },
+        "effectiveWorkerCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 128
+        },
+        "recoveryStatus": {
+          "enum": [
+            "not-applicable",
+            "proven",
+            "probe",
+            "blocked"
+          ]
+        },
+        "evidenceStatus": {
+          "enum": [
+            "none",
+            "baseline",
+            "golden-pass",
+            "benchmark-pass",
+            "release-pass"
+          ]
+        },
+        "downgradeReason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 1000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "benchmarkEvidenceId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/safeKey"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "serviceResourceControlPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "allowedRequestKinds",
+        "maxPendingRequests",
+        "grantTimeoutMs",
+        "adoptionTimeoutMs",
+        "grantIdentityRequired",
+        "releaseAckRequired"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "service-control-v1"
+        },
+        "allowedRequestKinds": {
+          "type": "array",
+          "uniqueItems": true,
+          "minItems": 1,
+          "maxItems": 3,
+          "items": {
+            "enum": [
+              "persistent-state-replace",
+              "pending-interaction-create",
+              "phase-extension"
+            ]
+          }
+        },
+        "maxPendingRequests": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1024
+        },
+        "grantTimeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 600000
+        },
+        "adoptionTimeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 600000
+        },
+        "grantIdentityRequired": {
+          "const": true
+        },
+        "releaseAckRequired": {
+          "const": true
+        }
+      }
+    },
+    "serviceStateAdoptionPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "grantIdentityRequired",
+        "atomicReplaceRequired",
+        "adoptAckRequired"
+      ],
+      "properties": {
+        "grantIdentityRequired": {
+          "const": true
+        },
+        "atomicReplaceRequired": {
+          "const": true
+        },
+        "adoptAckRequired": {
+          "const": true
+        }
+      }
+    },
+    "protocolLimitsPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "commandMaxBytes",
+        "eventMaxBytes"
+      ],
+      "properties": {
+        "commandMaxBytes": {
+          "const": 262144
+        },
+        "eventMaxBytes": {
+          "const": 262144
+        }
+      }
+    }
+  }
+}

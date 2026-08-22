@@ -1,0 +1,38 @@
+[
+  {
+    "name": "inspection-extra-field",
+    "mutation": "inspection-extra-field"
+  },
+  {
+    "name": "inspection-source-identity-mismatch",
+    "mutation": "inspection-source-identity-mismatch"
+  },
+  {
+    "name": "inspection-evidence-hash-mismatch",
+    "mutation": "inspection-evidence-hash-mismatch"
+  },
+  {
+    "name": "settlement-source-identity-mismatch",
+    "mutation": "settlement-source-identity-mismatch"
+  },
+  {
+    "name": "settlement-inspection-hash-mismatch",
+    "mutation": "settlement-inspection-hash-mismatch"
+  },
+  {
+    "name": "settlement-result-hash-mismatch",
+    "mutation": "settlement-result-hash-mismatch"
+  },
+  {
+    "name": "transient-failure-without-retry",
+    "mutation": "transient-failure-without-retry"
+  },
+  {
+    "name": "terminal-failure-with-retry",
+    "mutation": "terminal-failure-with-retry"
+  },
+  {
+    "name": "oversized-multibyte-evidence",
+    "mutation": "oversized-multibyte-evidence"
+  }
+]

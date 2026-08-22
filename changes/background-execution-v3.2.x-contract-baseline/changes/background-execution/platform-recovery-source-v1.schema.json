@@ -1,0 +1,365 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bank-bill-excel-tool.local/schemas/platform-recovery-source-v1.schema.json",
+  "title": "Background Execution RecoverySourceV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contractVersion",
+    "sourceKind",
+    "sourceRef",
+    "actionKey",
+    "operationKey",
+    "taskRunId",
+    "conflictScopeKey",
+    "inspectorKey",
+    "settlementKey",
+    "intentId",
+    "evidenceVersion",
+    "boundedEvidence"
+  ],
+  "properties": {
+    "contractVersion": {
+      "const": 1
+    },
+    "sourceKind": {
+      "enum": [
+        "critical-intent",
+        "publisher-journal",
+        "target-post-image",
+        "existing-protocol",
+        "module-recovery"
+      ]
+    },
+    "sourceRef": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^[^\\r\\n]+$"
+    },
+    "actionKey": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*:[a-z0-9][a-z0-9._-]*$",
+      "maxLength": 160
+    },
+    "operationKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^[^\\r\\n]+$"
+    },
+    "taskRunId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[^\\r\\n]+$"
+    },
+    "conflictScopeKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[^\\r\\n]+$"
+    },
+    "inspectorKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[a-z0-9][a-z0-9._:-]*$"
+    },
+    "settlementKey": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[a-z0-9][a-z0-9._:-]*$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "intentId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\r\\n]+$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "evidenceVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "boundedEvidence": {
+      "type": "object",
+      "maxProperties": 64
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "sourceKind": {
+            "const": "critical-intent"
+          }
+        },
+        "required": [
+          "sourceKind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "intentId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "settlementKey": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "sourceKind": {
+            "const": "target-post-image"
+          }
+        },
+        "required": [
+          "sourceKind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "intentId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "settlementKey": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "sourceKind": {
+            "enum": [
+              "publisher-journal",
+              "existing-protocol",
+              "module-recovery"
+            ]
+          }
+        },
+        "required": [
+          "sourceKind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "intentId": {
+            "type": "null"
+          },
+          "settlementKey": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "identityFields": {
+      "sourceKind": {
+        "enum": [
+          "critical-intent",
+          "publisher-journal",
+          "target-post-image",
+          "existing-protocol",
+          "module-recovery"
+        ]
+      },
+      "sourceRef": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512,
+        "pattern": "^[^\\r\\n]+$"
+      },
+      "actionKey": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9._-]*:[a-z0-9][a-z0-9._-]*$",
+        "maxLength": 160
+      },
+      "operationKey": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512,
+        "pattern": "^[^\\r\\n]+$"
+      },
+      "taskRunId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 160,
+        "pattern": "^[^\\r\\n]+$"
+      }
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "boundedObject": {
+      "type": "object",
+      "maxProperties": 64
+    },
+    "safeError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Z0-9_:-]+$"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000,
+          "pattern": "^[^\\r\\n]*$"
+        }
+      }
+    },
+    "RecoveryInspectionResultV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contractVersion", "sourceKind", "sourceRef", "actionKey",
+        "operationKey", "taskRunId", "outcome", "evidenceVersion",
+        "evidenceHash", "boundedEvidence"
+      ],
+      "properties": {
+        "contractVersion": { "const": 1 },
+        "sourceKind": { "$ref": "#/$defs/identityFields/sourceKind" },
+        "sourceRef": { "$ref": "#/$defs/identityFields/sourceRef" },
+        "actionKey": { "$ref": "#/$defs/identityFields/actionKey" },
+        "operationKey": { "$ref": "#/$defs/identityFields/operationKey" },
+        "taskRunId": { "$ref": "#/$defs/identityFields/taskRunId" },
+        "outcome": {
+          "enum": [
+            "committed", "not-committed", "partially-committed",
+            "compensated", "unknown"
+          ]
+        },
+        "evidenceVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "evidenceHash": { "$ref": "#/$defs/sha256" },
+        "boundedEvidence": { "$ref": "#/$defs/boundedObject" }
+      }
+    },
+    "SettlementRecoveryResultV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contractVersion", "sourceKind", "sourceRef", "actionKey",
+        "operationKey", "taskRunId", "settlementKey",
+        "inspectionEvidenceHash", "outcome", "resultVersion", "resultHash",
+        "boundedResult", "safeError", "retryAfterMs"
+      ],
+      "properties": {
+        "contractVersion": { "const": 1 },
+        "sourceKind": { "$ref": "#/$defs/identityFields/sourceKind" },
+        "sourceRef": { "$ref": "#/$defs/identityFields/sourceRef" },
+        "actionKey": { "$ref": "#/$defs/identityFields/actionKey" },
+        "operationKey": { "$ref": "#/$defs/identityFields/operationKey" },
+        "taskRunId": { "$ref": "#/$defs/identityFields/taskRunId" },
+        "settlementKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[a-z0-9][a-z0-9._:-]*$"
+        },
+        "inspectionEvidenceHash": { "$ref": "#/$defs/sha256" },
+        "outcome": {
+          "enum": [
+            "completed", "incomplete", "transient-failure", "terminal-failure"
+          ]
+        },
+        "resultVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "resultHash": { "$ref": "#/$defs/sha256" },
+        "boundedResult": { "$ref": "#/$defs/boundedObject" },
+        "safeError": {
+          "anyOf": [
+            { "$ref": "#/$defs/safeError" },
+            { "type": "null" }
+          ]
+        },
+        "retryAfterMs": {
+          "anyOf": [
+            { "type": "integer", "minimum": 1, "maximum": 86400000 },
+            { "type": "null" }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "outcome": { "enum": ["completed", "incomplete"] } },
+            "required": ["outcome"]
+          },
+          "then": {
+            "properties": {
+              "safeError": { "type": "null" },
+              "retryAfterMs": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "outcome": { "const": "transient-failure" } },
+            "required": ["outcome"]
+          },
+          "then": {
+            "properties": {
+              "safeError": { "$ref": "#/$defs/safeError" },
+              "retryAfterMs": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 86400000
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "outcome": { "const": "terminal-failure" } },
+            "required": ["outcome"]
+          },
+          "then": {
+            "properties": {
+              "safeError": { "$ref": "#/$defs/safeError" },
+              "retryAfterMs": { "type": "null" }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

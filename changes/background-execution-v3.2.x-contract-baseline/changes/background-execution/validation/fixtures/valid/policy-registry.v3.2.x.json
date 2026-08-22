@@ -1,0 +1,6080 @@
+{
+  "contractVersion": 1,
+  "generatedAt": "2026-08-21T00:00:00Z",
+  "baselineRef": "background-execution-v3.2.x-implementation-ready-final",
+  "actions": {
+    "acquiring:copy-existing-diff": {
+      "actionKey": "acquiring:copy-existing-diff",
+      "moduleId": "acquiring",
+      "description": "v3.2.x canonical policy fixture for acquiring:copy-existing-diff",
+      "disposition": "managed",
+      "mode": "inline-async",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.acquiring:copy-existing-diff",
+      "lifetime": "job",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.acquiring:copy-existing-diff",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        },
+        "phase": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 16777216
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "normal"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-copy",
+          "after-copy-before-publish"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "main-settlement",
+        "criticalIntent": false,
+        "receiptKind": "publisher-journal",
+        "inspectorKey": "inspector.acquiring:copy-existing-diff",
+        "conflictScopeResolverKey": "scope.acquiring:copy-existing-diff",
+        "settlementKey": "settlement.acquiring:copy-existing-diff"
+      },
+      "result": {
+        "kind": "artifact-manifest",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.acquiring:copy-existing-diff"
+      },
+      "artifacts": {
+        "kind": "single",
+        "filePlanRequired": true,
+        "technicalValidatorKey": "technical-validator.acquiring:copy-existing-diff",
+        "businessValidatorKey": "business-validator.acquiring:copy-existing-diff",
+        "publisherKey": "publisher.acquiring:copy-existing-diff",
+        "maxArtifacts": 1
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.acquiring:copy-existing-diff",
+      "legacyStrategyKey": null,
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "acquiring:export-diff-workbook": {
+      "actionKey": "acquiring:export-diff-workbook",
+      "moduleId": "acquiring",
+      "description": "v3.2.x canonical policy fixture for acquiring:export-diff-workbook",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.acquiring:export-diff-workbook",
+      "lifetime": "job",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.acquiring:export-diff-workbook",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "normal"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "main-settlement",
+        "criticalIntent": false,
+        "receiptKind": "publisher-journal",
+        "inspectorKey": "inspector.acquiring:export-diff-workbook",
+        "conflictScopeResolverKey": "scope.acquiring:export-diff-workbook",
+        "settlementKey": "settlement.acquiring:export-diff-workbook"
+      },
+      "result": {
+        "kind": "artifact-manifest",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.acquiring:export-diff-workbook"
+      },
+      "artifacts": {
+        "kind": "single",
+        "filePlanRequired": true,
+        "technicalValidatorKey": "technical-validator.acquiring:export-diff-workbook",
+        "businessValidatorKey": "business-validator.acquiring:export-diff-workbook",
+        "publisherKey": "publisher.acquiring:export-diff-workbook",
+        "maxArtifacts": 1
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.acquiring:export-diff-workbook",
+      "legacyStrategyKey": "legacy.acquiring:export-diff-workbook",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "acquiring:import": {
+      "actionKey": "acquiring:import",
+      "moduleId": "acquiring",
+      "description": "v3.2.x canonical policy fixture for acquiring:import",
+      "disposition": "managed",
+      "mode": "thread-pool",
+      "adapterKind": "existing-dispatch",
+      "adapterKey": "adapter.acquiring:import",
+      "entryKey": null,
+      "lifetime": "job",
+      "context": {
+        "kind": "file-batch",
+        "validatorKey": "exact-7"
+      },
+      "resources": {
+        "profile": "resource.acquiring:import",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 33554432
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 268435456
+        },
+        "compound": {
+          "topologyKey": "topology.acquiring:import",
+          "childrenMax": 4,
+          "childResource": {
+            "cpuSlots": 1,
+            "workerThreadSlots": 1,
+            "utilityProcessSlots": 0,
+            "ioHeavySlots": 1,
+            "memoryBytes": 268435456
+          }
+        },
+        "lowMemoryBehavior": "downgrade-to-single",
+        "admissionPriority": "normal"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "existing-critical-protocol",
+        "criticalIntent": false,
+        "receiptKind": "existing-protocol",
+        "inspectorKey": "inspector.acquiring:import",
+        "conflictScopeResolverKey": "scope.acquiring:import",
+        "settlementKey": "settlement.acquiring:import"
+      },
+      "result": {
+        "kind": "spool-manifest",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.acquiring:import"
+      },
+      "artifacts": {
+        "kind": "none",
+        "filePlanRequired": false,
+        "technicalValidatorKey": null,
+        "businessValidatorKey": null,
+        "publisherKey": null,
+        "maxArtifacts": 0
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.acquiring:import",
+      "legacyStrategyKey": "legacy.acquiring:import",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "workUnits": {
+        "kind": "file",
+        "ordering": "input-index-reducer",
+        "requestedMaxWorkers": 4,
+        "minUnitsPerWorker": 2,
+        "plannerKey": "planner.acquiring:import",
+        "reducerKey": "reducer.acquiring:import"
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "acquiring:run-new-eligible": {
+      "actionKey": "acquiring:run-new-eligible",
+      "moduleId": "acquiring",
+      "description": "v3.2.x canonical policy fixture for acquiring:run-new-eligible",
+      "disposition": "managed",
+      "mode": "thread-pool",
+      "adapterKind": "existing-dispatch",
+      "adapterKey": "adapter.acquiring:run-new-eligible",
+      "entryKey": null,
+      "lifetime": "job",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.acquiring:run-new-eligible",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 33554432
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 268435456
+        },
+        "compound": {
+          "topologyKey": "topology.acquiring:run-new-eligible",
+          "childrenMax": 4,
+          "childResource": {
+            "cpuSlots": 1,
+            "workerThreadSlots": 1,
+            "utilityProcessSlots": 0,
+            "ioHeavySlots": 1,
+            "memoryBytes": 268435456
+          }
+        },
+        "lowMemoryBehavior": "downgrade-to-single",
+        "admissionPriority": "normal"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "existing-critical-protocol",
+        "criticalIntent": false,
+        "receiptKind": "existing-protocol",
+        "inspectorKey": "inspector.acquiring:run-new-eligible",
+        "conflictScopeResolverKey": "scope.acquiring:run-new-eligible",
+        "settlementKey": "settlement.acquiring:run-new-eligible"
+      },
+      "result": {
+        "kind": "compact-json",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.acquiring:run-new-eligible"
+      },
+      "artifacts": {
+        "kind": "none",
+        "filePlanRequired": false,
+        "technicalValidatorKey": null,
+        "businessValidatorKey": null,
+        "publisherKey": null,
+        "maxArtifacts": 0
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.acquiring:run-new-eligible",
+      "legacyStrategyKey": "legacy.acquiring:run-new-eligible",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "workUnits": {
+        "kind": "chunk",
+        "ordering": "input-index-reducer",
+        "requestedMaxWorkers": 4,
+        "minUnitsPerWorker": 2,
+        "plannerKey": "planner.acquiring:run-new-eligible",
+        "reducerKey": "reducer.acquiring:run-new-eligible"
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "acquiring:run-single-or-resume": {
+      "actionKey": "acquiring:run-single-or-resume",
+      "moduleId": "acquiring",
+      "description": "v3.2.x canonical policy fixture for acquiring:run-single-or-resume",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "existing-dispatch",
+      "adapterKey": "adapter.acquiring:run-single-or-resume",
+      "entryKey": null,
+      "lifetime": "job",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.acquiring:run-single-or-resume",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": {
+          "topologyKey": "topology.acquiring:run-single-or-resume",
+          "childrenMax": 4,
+          "childResource": {
+            "cpuSlots": 1,
+            "workerThreadSlots": 1,
+            "utilityProcessSlots": 0,
+            "ioHeavySlots": 1,
+            "memoryBytes": 268435456
+          }
+        },
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "normal"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "existing-critical-protocol",
+        "criticalIntent": false,
+        "receiptKind": "existing-protocol",
+        "inspectorKey": "inspector.acquiring:run-single-or-resume",
+        "conflictScopeResolverKey": "scope.acquiring:run-single-or-resume",
+        "settlementKey": "settlement.acquiring:run-single-or-resume"
+      },
+      "result": {
+        "kind": "compact-json",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.acquiring:run-single-or-resume"
+      },
+      "artifacts": {
+        "kind": "none",
+        "filePlanRequired": false,
+        "technicalValidatorKey": null,
+        "businessValidatorKey": null,
+        "publisherKey": null,
+        "maxArtifacts": 0
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.acquiring:run-single-or-resume",
+      "legacyStrategyKey": "legacy.acquiring:run-single-or-resume",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "background-execution:canary": {
+      "actionKey": "background-execution:canary",
+      "moduleId": "background-execution",
+      "description": "v3.2.x canonical policy fixture for background-execution:canary",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.background-execution:canary",
+      "lifetime": "job",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.background-execution:canary",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "normal"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "worker-durable",
+        "criticalIntent": true,
+        "receiptKind": "module-local",
+        "inspectorKey": "inspector.background-execution:canary",
+        "conflictScopeResolverKey": "scope.background-execution:canary",
+        "settlementKey": null
+      },
+      "result": {
+        "kind": "compact-json",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.background-execution:canary"
+      },
+      "artifacts": {
+        "kind": "none",
+        "filePlanRequired": false,
+        "technicalValidatorKey": null,
+        "businessValidatorKey": null,
+        "publisherKey": null,
+        "maxArtifacts": 0
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.background-execution:canary",
+      "legacyStrategyKey": null,
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "background-execution:pure-compute-canary": {
+      "actionKey": "background-execution:pure-compute-canary",
+      "moduleId": "background-execution",
+      "description": "v3.2.x pure-compute protocol canary without business context or durable commit",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.background-execution:pure-compute-canary",
+      "lifetime": "job",
+      "context": {
+        "kind": "none",
+        "validatorKey": "platform-none"
+      },
+      "resources": {
+        "profile": "resource.background-execution:pure-compute-canary",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "normal"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "none",
+        "criticalIntent": false,
+        "receiptKind": null,
+        "inspectorKey": null,
+        "conflictScopeResolverKey": null,
+        "settlementKey": null
+      },
+      "result": {
+        "kind": "compact-json",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.background-execution:pure-compute-canary"
+      },
+      "artifacts": {
+        "kind": "none",
+        "filePlanRequired": false,
+        "technicalValidatorKey": null,
+        "businessValidatorKey": null,
+        "publisherKey": null,
+        "maxArtifacts": 0
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.background-execution:pure-compute-canary",
+      "legacyStrategyKey": null,
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "not-applicable",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "bank-bu:export-aggregate": {
+      "actionKey": "bank-bu:export-aggregate",
+      "moduleId": "bank-bu",
+      "description": "v3.2.x canonical policy fixture for bank-bu:export-aggregate",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.bank-bu:export-aggregate",
+      "lifetime": "job",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.bank-bu:export-aggregate",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "normal"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "main-settlement",
+        "criticalIntent": false,
+        "receiptKind": "publisher-journal",
+        "inspectorKey": "inspector.bank-bu:export-aggregate",
+        "conflictScopeResolverKey": "scope.bank-bu:export-aggregate",
+        "settlementKey": "settlement.bank-bu:export-aggregate"
+      },
+      "result": {
+        "kind": "artifact-manifest",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.bank-bu:export-aggregate"
+      },
+      "artifacts": {
+        "kind": "single",
+        "filePlanRequired": true,
+        "technicalValidatorKey": "technical-validator.bank-bu:export-aggregate",
+        "businessValidatorKey": "business-validator.bank-bu:export-aggregate",
+        "publisherKey": "publisher.bank-bu:export-aggregate",
+        "maxArtifacts": 1
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.bank-bu:export-aggregate",
+      "legacyStrategyKey": "legacy.bank-bu:export-aggregate",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "bank-bu:export-single": {
+      "actionKey": "bank-bu:export-single",
+      "moduleId": "bank-bu",
+      "description": "v3.2.x canonical policy fixture for bank-bu:export-single",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.bank-bu:export-single",
+      "lifetime": "job",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.bank-bu:export-single",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "normal"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "main-settlement",
+        "criticalIntent": false,
+        "receiptKind": "publisher-journal",
+        "inspectorKey": "inspector.bank-bu:export-single",
+        "conflictScopeResolverKey": "scope.bank-bu:export-single",
+        "settlementKey": "settlement.bank-bu:export-single"
+      },
+      "result": {
+        "kind": "artifact-manifest",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.bank-bu:export-single"
+      },
+      "artifacts": {
+        "kind": "single",
+        "filePlanRequired": true,
+        "technicalValidatorKey": "technical-validator.bank-bu:export-single",
+        "businessValidatorKey": "business-validator.bank-bu:export-single",
+        "publisherKey": "publisher.bank-bu:export-single",
+        "maxArtifacts": 1
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.bank-bu:export-single",
+      "legacyStrategyKey": "legacy.bank-bu:export-single",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "bank-bu:import-month": {
+      "actionKey": "bank-bu:import-month",
+      "moduleId": "bank-bu",
+      "description": "v3.2.x canonical policy fixture for bank-bu:import-month",
+      "disposition": "managed",
+      "mode": "thread-pool",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.bank-bu:import-month",
+      "lifetime": "job",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.bank-bu:import-month",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 33554432
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 268435456
+        },
+        "compound": {
+          "topologyKey": "topology.bank-bu:import-month",
+          "childrenMax": 4,
+          "childResource": {
+            "cpuSlots": 1,
+            "workerThreadSlots": 1,
+            "utilityProcessSlots": 0,
+            "ioHeavySlots": 1,
+            "memoryBytes": 268435456
+          }
+        },
+        "lowMemoryBehavior": "downgrade-to-single",
+        "admissionPriority": "normal"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "worker-durable",
+        "criticalIntent": true,
+        "receiptKind": "module-local",
+        "inspectorKey": "inspector.bank-bu:import-month",
+        "conflictScopeResolverKey": "scope.bank-bu:import-month",
+        "settlementKey": null
+      },
+      "result": {
+        "kind": "spool-manifest",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.bank-bu:import-month"
+      },
+      "artifacts": {
+        "kind": "none",
+        "filePlanRequired": false,
+        "technicalValidatorKey": null,
+        "businessValidatorKey": null,
+        "publisherKey": null,
+        "maxArtifacts": 0
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.bank-bu:import-month",
+      "legacyStrategyKey": "legacy.bank-bu:import-month",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "workUnits": {
+        "kind": "role",
+        "ordering": "input-index-reducer",
+        "requestedMaxWorkers": 4,
+        "minUnitsPerWorker": 2,
+        "plannerKey": "planner.bank-bu:import-month",
+        "reducerKey": "reducer.bank-bu:import-month"
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "bank-bu:run": {
+      "actionKey": "bank-bu:run",
+      "moduleId": "bank-bu",
+      "description": "v3.2.x canonical policy fixture for bank-bu:run",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.bank-bu:run",
+      "lifetime": "job",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.bank-bu:run",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "normal"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "worker-durable",
+        "criticalIntent": true,
+        "receiptKind": "module-local",
+        "inspectorKey": "inspector.bank-bu:run",
+        "conflictScopeResolverKey": "scope.bank-bu:run",
+        "settlementKey": null
+      },
+      "result": {
+        "kind": "compact-json",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.bank-bu:run"
+      },
+      "artifacts": {
+        "kind": "none",
+        "filePlanRequired": false,
+        "technicalValidatorKey": null,
+        "businessValidatorKey": null,
+        "publisherKey": null,
+        "maxArtifacts": 0
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.bank-bu:run",
+      "legacyStrategyKey": "legacy.bank-bu:run",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "biz-op:export-day": {
+      "actionKey": "biz-op:export-day",
+      "moduleId": "biz-op",
+      "description": "v3.2.x canonical policy fixture for biz-op:export-day",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.biz-op:export-day",
+      "lifetime": "job",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.biz-op:export-day",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "normal"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "main-settlement",
+        "criticalIntent": false,
+        "receiptKind": "publisher-journal",
+        "inspectorKey": "inspector.biz-op:export-day",
+        "conflictScopeResolverKey": "scope.biz-op:export-day",
+        "settlementKey": "settlement.biz-op:export-day"
+      },
+      "result": {
+        "kind": "artifact-manifest",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.biz-op:export-day"
+      },
+      "artifacts": {
+        "kind": "single",
+        "filePlanRequired": true,
+        "technicalValidatorKey": "technical-validator.biz-op:export-day",
+        "businessValidatorKey": "business-validator.biz-op:export-day",
+        "publisherKey": "publisher.biz-op:export-day",
+        "maxArtifacts": 1
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.biz-op:export-day",
+      "legacyStrategyKey": "legacy.biz-op:export-day",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "biz-op:export-range": {
+      "actionKey": "biz-op:export-range",
+      "moduleId": "biz-op",
+      "description": "v3.2.x canonical policy fixture for biz-op:export-range",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.biz-op:export-range",
+      "lifetime": "job",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.biz-op:export-range",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "normal"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "main-settlement",
+        "criticalIntent": false,
+        "receiptKind": "publisher-journal",
+        "inspectorKey": "inspector.biz-op:export-range",
+        "conflictScopeResolverKey": "scope.biz-op:export-range",
+        "settlementKey": "settlement.biz-op:export-range"
+      },
+      "result": {
+        "kind": "artifact-manifest",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.biz-op:export-range"
+      },
+      "artifacts": {
+        "kind": "single",
+        "filePlanRequired": true,
+        "technicalValidatorKey": "technical-validator.biz-op:export-range",
+        "businessValidatorKey": "business-validator.biz-op:export-range",
+        "publisherKey": "publisher.biz-op:export-range",
+        "maxArtifacts": 1
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.biz-op:export-range",
+      "legacyStrategyKey": "legacy.biz-op:export-range",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "biz-op:import-flow": {
+      "actionKey": "biz-op:import-flow",
+      "moduleId": "biz-op",
+      "description": "v3.2.x canonical policy fixture for biz-op:import-flow",
+      "disposition": "managed",
+      "mode": "thread-pool",
+      "adapterKind": "existing-dispatch",
+      "adapterKey": "adapter.biz-op:import-flow",
+      "entryKey": null,
+      "lifetime": "job",
+      "context": {
+        "kind": "file-batch",
+        "validatorKey": "exact-7"
+      },
+      "resources": {
+        "profile": "resource.biz-op:import-flow",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 33554432
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 268435456
+        },
+        "compound": {
+          "topologyKey": "topology.biz-op:import-flow",
+          "childrenMax": 4,
+          "childResource": {
+            "cpuSlots": 1,
+            "workerThreadSlots": 1,
+            "utilityProcessSlots": 0,
+            "ioHeavySlots": 1,
+            "memoryBytes": 268435456
+          }
+        },
+        "lowMemoryBehavior": "downgrade-to-single",
+        "admissionPriority": "normal"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "existing-critical-protocol",
+        "criticalIntent": false,
+        "receiptKind": "existing-protocol",
+        "inspectorKey": "inspector.biz-op:import-flow",
+        "conflictScopeResolverKey": "scope.biz-op:import-flow",
+        "settlementKey": "settlement.biz-op:import-flow"
+      },
+      "result": {
+        "kind": "spool-manifest",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.biz-op:import-flow"
+      },
+      "artifacts": {
+        "kind": "none",
+        "filePlanRequired": false,
+        "technicalValidatorKey": null,
+        "businessValidatorKey": null,
+        "publisherKey": null,
+        "maxArtifacts": 0
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.biz-op:import-flow",
+      "legacyStrategyKey": "legacy.biz-op:import-flow",
+      "blocker": null,
+      "production": {
+        "enabled": true,
+        "effectiveMode": "thread-pool",
+        "effectiveWorkerCount": 2,
+        "recoveryStatus": "proven",
+        "evidenceStatus": "baseline",
+        "downgradeReason": null,
+        "benchmarkEvidenceId": null
+      },
+      "workUnits": {
+        "kind": "file",
+        "ordering": "input-index-reducer",
+        "requestedMaxWorkers": 4,
+        "minUnitsPerWorker": 2,
+        "plannerKey": "planner.biz-op:import-flow",
+        "reducerKey": "reducer.biz-op:import-flow"
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "duplicate:export": {
+      "actionKey": "duplicate:export",
+      "moduleId": "duplicate",
+      "description": "v3.2.x canonical policy fixture for duplicate:export",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.duplicate:export",
+      "lifetime": "service",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.duplicate:export",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 67108864
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "normal",
+        "persistentState": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 268435456
+        },
+        "pendingInteraction": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        }
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "main-settlement",
+        "criticalIntent": false,
+        "receiptKind": "publisher-journal",
+        "inspectorKey": "inspector.duplicate:export",
+        "conflictScopeResolverKey": "scope.duplicate:export",
+        "settlementKey": "settlement.duplicate:export"
+      },
+      "result": {
+        "kind": "artifact-manifest",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.duplicate:export"
+      },
+      "artifacts": {
+        "kind": "single",
+        "filePlanRequired": true,
+        "technicalValidatorKey": "technical-validator.duplicate:export",
+        "businessValidatorKey": "business-validator.duplicate:export",
+        "publisherKey": "publisher.duplicate:export",
+        "maxArtifacts": 1
+      },
+      "service": {
+        "generationRequired": true,
+        "busyPolicy": "reject",
+        "closePolicy": "cooperative",
+        "statusMaxBytes": 1048576,
+        "stateFootprintEstimatorKey": "footprint.duplicate",
+        "tokenPolicy": {
+          "enabled": false,
+          "maxOutstanding": 0,
+          "ttlMs": 0,
+          "singleUse": true
+        },
+        "startupRecoveryKey": "startup-recovery.duplicate",
+        "serviceKey": "service.duplicate",
+        "controlProtocol": "service-control-v1",
+        "resourceControl": {
+          "protocol": "service-control-v1",
+          "allowedRequestKinds": [
+            "persistent-state-replace",
+            "phase-extension"
+          ],
+          "maxPendingRequests": 8,
+          "grantTimeoutMs": 30000,
+          "adoptionTimeoutMs": 30000,
+          "grantIdentityRequired": true,
+          "releaseAckRequired": true
+        },
+        "stateAdoption": {
+          "grantIdentityRequired": true,
+          "atomicReplaceRequired": true,
+          "adoptAckRequired": true
+        }
+      },
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.duplicate:export",
+      "legacyStrategyKey": "legacy.duplicate:export",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "duplicate:import": {
+      "actionKey": "duplicate:import",
+      "moduleId": "duplicate",
+      "description": "v3.2.x canonical policy fixture for duplicate:import",
+      "disposition": "managed",
+      "mode": "thread-pool",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.duplicate:import",
+      "lifetime": "service",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.duplicate:import",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 33554432
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 268435456
+        },
+        "compound": {
+          "topologyKey": "topology.duplicate:import",
+          "childrenMax": 4,
+          "childResource": {
+            "cpuSlots": 1,
+            "workerThreadSlots": 1,
+            "utilityProcessSlots": 0,
+            "ioHeavySlots": 1,
+            "memoryBytes": 268435456
+          }
+        },
+        "lowMemoryBehavior": "downgrade-to-single",
+        "admissionPriority": "normal",
+        "persistentState": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 268435456
+        },
+        "pendingInteraction": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        }
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "worker-durable",
+        "criticalIntent": true,
+        "receiptKind": "module-local",
+        "inspectorKey": "inspector.duplicate:import",
+        "conflictScopeResolverKey": "scope.duplicate:import",
+        "settlementKey": null
+      },
+      "result": {
+        "kind": "spool-manifest",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.duplicate:import"
+      },
+      "artifacts": {
+        "kind": "none",
+        "filePlanRequired": false,
+        "technicalValidatorKey": null,
+        "businessValidatorKey": null,
+        "publisherKey": null,
+        "maxArtifacts": 0
+      },
+      "service": {
+        "generationRequired": true,
+        "busyPolicy": "reject",
+        "closePolicy": "cooperative",
+        "statusMaxBytes": 1048576,
+        "stateFootprintEstimatorKey": "footprint.duplicate",
+        "tokenPolicy": {
+          "enabled": false,
+          "maxOutstanding": 0,
+          "ttlMs": 0,
+          "singleUse": true
+        },
+        "startupRecoveryKey": "startup-recovery.duplicate",
+        "serviceKey": "service.duplicate",
+        "controlProtocol": "service-control-v1",
+        "resourceControl": {
+          "protocol": "service-control-v1",
+          "allowedRequestKinds": [
+            "persistent-state-replace",
+            "phase-extension"
+          ],
+          "maxPendingRequests": 8,
+          "grantTimeoutMs": 30000,
+          "adoptionTimeoutMs": 30000,
+          "grantIdentityRequired": true,
+          "releaseAckRequired": true
+        },
+        "stateAdoption": {
+          "grantIdentityRequired": true,
+          "atomicReplaceRequired": true,
+          "adoptAckRequired": true
+        }
+      },
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.duplicate:import",
+      "legacyStrategyKey": "legacy.duplicate:import",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "workUnits": {
+        "kind": "role",
+        "ordering": "input-index-reducer",
+        "requestedMaxWorkers": 4,
+        "minUnitsPerWorker": 2,
+        "plannerKey": "planner.duplicate:import",
+        "reducerKey": "reducer.duplicate:import"
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "duplicate:run": {
+      "actionKey": "duplicate:run",
+      "moduleId": "duplicate",
+      "description": "v3.2.x canonical policy fixture for duplicate:run",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.duplicate:run",
+      "lifetime": "service",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.duplicate:run",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 67108864
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "normal",
+        "persistentState": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 268435456
+        },
+        "pendingInteraction": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        }
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "worker-durable",
+        "criticalIntent": true,
+        "receiptKind": "module-local",
+        "inspectorKey": "inspector.duplicate:run",
+        "conflictScopeResolverKey": "scope.duplicate:run",
+        "settlementKey": null
+      },
+      "result": {
+        "kind": "compact-json",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.duplicate:run"
+      },
+      "artifacts": {
+        "kind": "none",
+        "filePlanRequired": false,
+        "technicalValidatorKey": null,
+        "businessValidatorKey": null,
+        "publisherKey": null,
+        "maxArtifacts": 0
+      },
+      "service": {
+        "generationRequired": true,
+        "busyPolicy": "reject",
+        "closePolicy": "cooperative",
+        "statusMaxBytes": 1048576,
+        "stateFootprintEstimatorKey": "footprint.duplicate",
+        "tokenPolicy": {
+          "enabled": false,
+          "maxOutstanding": 0,
+          "ttlMs": 0,
+          "singleUse": true
+        },
+        "startupRecoveryKey": "startup-recovery.duplicate",
+        "serviceKey": "service.duplicate",
+        "controlProtocol": "service-control-v1",
+        "resourceControl": {
+          "protocol": "service-control-v1",
+          "allowedRequestKinds": [
+            "persistent-state-replace",
+            "phase-extension"
+          ],
+          "maxPendingRequests": 8,
+          "grantTimeoutMs": 30000,
+          "adoptionTimeoutMs": 30000,
+          "grantIdentityRequired": true,
+          "releaseAckRequired": true
+        },
+        "stateAdoption": {
+          "grantIdentityRequired": true,
+          "atomicReplaceRequired": true,
+          "adoptAckRequired": true
+        }
+      },
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.duplicate:run",
+      "legacyStrategyKey": "legacy.duplicate:run",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "fund-recon:export": {
+      "actionKey": "fund-recon:export",
+      "moduleId": "fund-recon",
+      "description": "v3.2.x canonical policy fixture for fund-recon:export",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.fund-recon:export",
+      "lifetime": "service",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.fund-recon:export",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 67108864
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "normal",
+        "persistentState": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 268435456
+        },
+        "pendingInteraction": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        }
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "main-settlement",
+        "criticalIntent": false,
+        "receiptKind": "publisher-journal",
+        "inspectorKey": "inspector.fund-recon:export",
+        "conflictScopeResolverKey": "scope.fund-recon:export",
+        "settlementKey": "settlement.fund-recon:export"
+      },
+      "result": {
+        "kind": "artifact-manifest",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.fund-recon:export"
+      },
+      "artifacts": {
+        "kind": "single",
+        "filePlanRequired": true,
+        "technicalValidatorKey": "technical-validator.fund-recon:export",
+        "businessValidatorKey": "business-validator.fund-recon:export",
+        "publisherKey": "publisher.fund-recon:export",
+        "maxArtifacts": 1
+      },
+      "service": {
+        "generationRequired": true,
+        "busyPolicy": "reject",
+        "closePolicy": "cooperative",
+        "statusMaxBytes": 1048576,
+        "stateFootprintEstimatorKey": "footprint.fund-recon",
+        "tokenPolicy": {
+          "enabled": false,
+          "maxOutstanding": 0,
+          "ttlMs": 0,
+          "singleUse": true
+        },
+        "startupRecoveryKey": "startup-recovery.fund-recon",
+        "serviceKey": "service.fund-recon",
+        "controlProtocol": "service-control-v1",
+        "resourceControl": {
+          "protocol": "service-control-v1",
+          "allowedRequestKinds": [
+            "persistent-state-replace",
+            "phase-extension"
+          ],
+          "maxPendingRequests": 8,
+          "grantTimeoutMs": 30000,
+          "adoptionTimeoutMs": 30000,
+          "grantIdentityRequired": true,
+          "releaseAckRequired": true
+        },
+        "stateAdoption": {
+          "grantIdentityRequired": true,
+          "atomicReplaceRequired": true,
+          "adoptAckRequired": true
+        }
+      },
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.fund-recon:export",
+      "legacyStrategyKey": "legacy.fund-recon:export",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "fund-recon:import": {
+      "actionKey": "fund-recon:import",
+      "moduleId": "fund-recon",
+      "description": "v3.2.x canonical policy fixture for fund-recon:import",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.fund-recon:import",
+      "lifetime": "service",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.fund-recon:import",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 67108864
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "normal",
+        "persistentState": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 268435456
+        },
+        "pendingInteraction": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        }
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "fail-job",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "none",
+        "criticalIntent": false,
+        "receiptKind": null,
+        "inspectorKey": null,
+        "conflictScopeResolverKey": null,
+        "settlementKey": null
+      },
+      "result": {
+        "kind": "compact-json",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.fund-recon:import"
+      },
+      "artifacts": {
+        "kind": "none",
+        "filePlanRequired": false,
+        "technicalValidatorKey": null,
+        "businessValidatorKey": null,
+        "publisherKey": null,
+        "maxArtifacts": 0
+      },
+      "service": {
+        "generationRequired": true,
+        "busyPolicy": "reject",
+        "closePolicy": "cooperative",
+        "statusMaxBytes": 1048576,
+        "stateFootprintEstimatorKey": "footprint.fund-recon",
+        "tokenPolicy": {
+          "enabled": false,
+          "maxOutstanding": 0,
+          "ttlMs": 0,
+          "singleUse": true
+        },
+        "startupRecoveryKey": "startup-recovery.fund-recon",
+        "serviceKey": "service.fund-recon",
+        "controlProtocol": "service-control-v1",
+        "resourceControl": {
+          "protocol": "service-control-v1",
+          "allowedRequestKinds": [
+            "persistent-state-replace",
+            "phase-extension"
+          ],
+          "maxPendingRequests": 8,
+          "grantTimeoutMs": 30000,
+          "adoptionTimeoutMs": 30000,
+          "grantIdentityRequired": true,
+          "releaseAckRequired": true
+        },
+        "stateAdoption": {
+          "grantIdentityRequired": true,
+          "atomicReplaceRequired": true,
+          "adoptAckRequired": true
+        }
+      },
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.fund-recon:import",
+      "legacyStrategyKey": "legacy.fund-recon:import",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "not-applicable",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "fund-recon:run": {
+      "actionKey": "fund-recon:run",
+      "moduleId": "fund-recon",
+      "description": "v3.2.x canonical policy fixture for fund-recon:run",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.fund-recon:run",
+      "lifetime": "service",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.fund-recon:run",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 67108864
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "normal",
+        "persistentState": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 268435456
+        },
+        "pendingInteraction": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        }
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "fail-job",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "none",
+        "criticalIntent": false,
+        "receiptKind": null,
+        "inspectorKey": null,
+        "conflictScopeResolverKey": null,
+        "settlementKey": null
+      },
+      "result": {
+        "kind": "compact-json",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.fund-recon:run"
+      },
+      "artifacts": {
+        "kind": "none",
+        "filePlanRequired": false,
+        "technicalValidatorKey": null,
+        "businessValidatorKey": null,
+        "publisherKey": null,
+        "maxArtifacts": 0
+      },
+      "service": {
+        "generationRequired": true,
+        "busyPolicy": "reject",
+        "closePolicy": "cooperative",
+        "statusMaxBytes": 1048576,
+        "stateFootprintEstimatorKey": "footprint.fund-recon",
+        "tokenPolicy": {
+          "enabled": false,
+          "maxOutstanding": 0,
+          "ttlMs": 0,
+          "singleUse": true
+        },
+        "startupRecoveryKey": "startup-recovery.fund-recon",
+        "serviceKey": "service.fund-recon",
+        "controlProtocol": "service-control-v1",
+        "resourceControl": {
+          "protocol": "service-control-v1",
+          "allowedRequestKinds": [
+            "persistent-state-replace",
+            "phase-extension"
+          ],
+          "maxPendingRequests": 8,
+          "grantTimeoutMs": 30000,
+          "adoptionTimeoutMs": 30000,
+          "grantIdentityRequired": true,
+          "releaseAckRequired": true
+        },
+        "stateAdoption": {
+          "grantIdentityRequired": true,
+          "atomicReplaceRequired": true,
+          "adoptAckRequired": true
+        }
+      },
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.fund-recon:run",
+      "legacyStrategyKey": "legacy.fund-recon:run",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "not-applicable",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "new-account:generate": {
+      "actionKey": "new-account:generate",
+      "moduleId": "new-account",
+      "description": "v3.2.x canonical policy fixture for new-account:generate",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.new-account:generate",
+      "lifetime": "job",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.new-account:generate",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "interactive"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "main-settlement",
+        "criticalIntent": false,
+        "receiptKind": "publisher-journal",
+        "inspectorKey": "inspector.new-account:generate",
+        "conflictScopeResolverKey": "scope.new-account:generate",
+        "settlementKey": "settlement.new-account:generate"
+      },
+      "result": {
+        "kind": "artifact-manifest",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.new-account:generate"
+      },
+      "artifacts": {
+        "kind": "single",
+        "filePlanRequired": true,
+        "technicalValidatorKey": "technical-validator.new-account:generate",
+        "businessValidatorKey": "business-validator.new-account:generate",
+        "publisherKey": "publisher.new-account:generate",
+        "maxArtifacts": 1
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.new-account:generate",
+      "legacyStrategyKey": "legacy.new-account:generate",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "new-account:save-as": {
+      "actionKey": "new-account:save-as",
+      "moduleId": "new-account",
+      "description": "v3.2.x canonical policy fixture for new-account:save-as",
+      "disposition": "managed",
+      "mode": "inline-async",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.new-account:save-as",
+      "lifetime": "job",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.new-account:save-as",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        },
+        "phase": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 16777216
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "interactive"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-copy",
+          "after-copy-before-publish"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "main-settlement",
+        "criticalIntent": false,
+        "receiptKind": "publisher-journal",
+        "inspectorKey": "inspector.new-account:save-as",
+        "conflictScopeResolverKey": "scope.new-account:save-as",
+        "settlementKey": "settlement.new-account:save-as"
+      },
+      "result": {
+        "kind": "artifact-manifest",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.new-account:save-as"
+      },
+      "artifacts": {
+        "kind": "single",
+        "filePlanRequired": true,
+        "technicalValidatorKey": "technical-validator.new-account:save-as",
+        "businessValidatorKey": "business-validator.new-account:save-as",
+        "publisherKey": "publisher.new-account:save-as",
+        "maxArtifacts": 1
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.new-account:save-as",
+      "legacyStrategyKey": null,
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "pending:export-diff": {
+      "actionKey": "pending:export-diff",
+      "moduleId": "pending",
+      "description": "v3.2.x canonical policy fixture for pending:export-diff",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.pending:export-diff",
+      "lifetime": "job",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.pending:export-diff",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "normal"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "main-settlement",
+        "criticalIntent": false,
+        "receiptKind": "publisher-journal",
+        "inspectorKey": "inspector.pending:export-diff",
+        "conflictScopeResolverKey": "scope.pending:export-diff",
+        "settlementKey": "settlement.pending:export-diff"
+      },
+      "result": {
+        "kind": "artifact-manifest",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.pending:export-diff"
+      },
+      "artifacts": {
+        "kind": "single",
+        "filePlanRequired": true,
+        "technicalValidatorKey": "technical-validator.pending:export-diff",
+        "businessValidatorKey": "business-validator.pending:export-diff",
+        "publisherKey": "publisher.pending:export-diff",
+        "maxArtifacts": 1
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.pending:export-diff",
+      "legacyStrategyKey": "legacy.pending:export-diff",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "pending:export-errors": {
+      "actionKey": "pending:export-errors",
+      "moduleId": "pending",
+      "description": "v3.2.x canonical policy fixture for pending:export-errors",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.pending:export-errors",
+      "lifetime": "job",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.pending:export-errors",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "normal"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "main-settlement",
+        "criticalIntent": false,
+        "receiptKind": "publisher-journal",
+        "inspectorKey": "inspector.pending:export-errors",
+        "conflictScopeResolverKey": "scope.pending:export-errors",
+        "settlementKey": "settlement.pending:export-errors"
+      },
+      "result": {
+        "kind": "artifact-manifest",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.pending:export-errors"
+      },
+      "artifacts": {
+        "kind": "single",
+        "filePlanRequired": true,
+        "technicalValidatorKey": "technical-validator.pending:export-errors",
+        "businessValidatorKey": "business-validator.pending:export-errors",
+        "publisherKey": "publisher.pending:export-errors",
+        "maxArtifacts": 1
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.pending:export-errors",
+      "legacyStrategyKey": "legacy.pending:export-errors",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "pending:export-summary": {
+      "actionKey": "pending:export-summary",
+      "moduleId": "pending",
+      "description": "v3.2.x canonical policy fixture for pending:export-summary",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.pending:export-summary",
+      "lifetime": "job",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.pending:export-summary",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "normal"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "main-settlement",
+        "criticalIntent": false,
+        "receiptKind": "publisher-journal",
+        "inspectorKey": "inspector.pending:export-summary",
+        "conflictScopeResolverKey": "scope.pending:export-summary",
+        "settlementKey": "settlement.pending:export-summary"
+      },
+      "result": {
+        "kind": "artifact-manifest",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.pending:export-summary"
+      },
+      "artifacts": {
+        "kind": "single",
+        "filePlanRequired": true,
+        "technicalValidatorKey": "technical-validator.pending:export-summary",
+        "businessValidatorKey": "business-validator.pending:export-summary",
+        "publisherKey": "publisher.pending:export-summary",
+        "maxArtifacts": 1
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.pending:export-summary",
+      "legacyStrategyKey": "legacy.pending:export-summary",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "pending:import": {
+      "actionKey": "pending:import",
+      "moduleId": "pending",
+      "description": "v3.2.x canonical policy fixture for pending:import",
+      "disposition": "managed",
+      "mode": "thread-pool",
+      "adapterKind": "existing-dispatch",
+      "adapterKey": "adapter.pending:import",
+      "entryKey": null,
+      "lifetime": "job",
+      "context": {
+        "kind": "file-batch",
+        "validatorKey": "exact-7"
+      },
+      "resources": {
+        "profile": "resource.pending:import",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 33554432
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 268435456
+        },
+        "compound": {
+          "topologyKey": "topology.pending:import",
+          "childrenMax": 4,
+          "childResource": {
+            "cpuSlots": 1,
+            "workerThreadSlots": 1,
+            "utilityProcessSlots": 0,
+            "ioHeavySlots": 1,
+            "memoryBytes": 268435456
+          }
+        },
+        "lowMemoryBehavior": "downgrade-to-single",
+        "admissionPriority": "normal"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "existing-critical-protocol",
+        "criticalIntent": false,
+        "receiptKind": "existing-protocol",
+        "inspectorKey": "inspector.pending:import",
+        "conflictScopeResolverKey": "scope.pending:import",
+        "settlementKey": "settlement.pending:import"
+      },
+      "result": {
+        "kind": "spool-manifest",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.pending:import"
+      },
+      "artifacts": {
+        "kind": "none",
+        "filePlanRequired": false,
+        "technicalValidatorKey": null,
+        "businessValidatorKey": null,
+        "publisherKey": null,
+        "maxArtifacts": 0
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.pending:import",
+      "legacyStrategyKey": "legacy.pending:import",
+      "blocker": null,
+      "production": {
+        "enabled": true,
+        "effectiveMode": "thread-pool",
+        "effectiveWorkerCount": 2,
+        "recoveryStatus": "proven",
+        "evidenceStatus": "baseline",
+        "downgradeReason": null,
+        "benchmarkEvidenceId": null
+      },
+      "workUnits": {
+        "kind": "file",
+        "ordering": "input-index-reducer",
+        "requestedMaxWorkers": 4,
+        "minUnitsPerWorker": 2,
+        "plannerKey": "planner.pending:import",
+        "reducerKey": "reducer.pending:import"
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "position:export-run": {
+      "actionKey": "position:export-run",
+      "moduleId": "position",
+      "description": "v3.2.x canonical policy fixture for position:export-run",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "existing-dispatch",
+      "adapterKey": "adapter.position:export-run",
+      "entryKey": null,
+      "lifetime": "job",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.position:export-run",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": {
+          "topologyKey": "topology.position:export-run",
+          "childrenMax": 4,
+          "childResource": {
+            "cpuSlots": 1,
+            "workerThreadSlots": 1,
+            "utilityProcessSlots": 0,
+            "ioHeavySlots": 1,
+            "memoryBytes": 268435456
+          }
+        },
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "normal"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "main-settlement",
+        "criticalIntent": false,
+        "receiptKind": "publisher-journal",
+        "inspectorKey": "inspector.position:export-run",
+        "conflictScopeResolverKey": "scope.position:export-run",
+        "settlementKey": "settlement.position:export-run"
+      },
+      "result": {
+        "kind": "artifact-manifest",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.position:export-run"
+      },
+      "artifacts": {
+        "kind": "single",
+        "filePlanRequired": true,
+        "technicalValidatorKey": "technical-validator.position:export-run",
+        "businessValidatorKey": "business-validator.position:export-run",
+        "publisherKey": "publisher.position:export-run",
+        "maxArtifacts": 1
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.position:export-run",
+      "legacyStrategyKey": "legacy.position:export-run",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "position:import": {
+      "actionKey": "position:import",
+      "moduleId": "position",
+      "description": "v3.2.x canonical policy fixture for position:import",
+      "disposition": "managed",
+      "mode": "utility-process",
+      "adapterKind": "existing-dispatch",
+      "adapterKey": "adapter.position:import",
+      "entryKey": null,
+      "lifetime": "job",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.position:import",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 1,
+          "ioHeavySlots": 1,
+          "memoryBytes": 536870912
+        },
+        "compound": {
+          "topologyKey": "topology.position:import",
+          "childrenMax": 4,
+          "childResource": {
+            "cpuSlots": 1,
+            "workerThreadSlots": 0,
+            "utilityProcessSlots": 1,
+            "ioHeavySlots": 1,
+            "memoryBytes": 268435456
+          }
+        },
+        "lowMemoryBehavior": "reject",
+        "admissionPriority": "normal"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "existing-critical-protocol",
+        "criticalIntent": false,
+        "receiptKind": "existing-protocol",
+        "inspectorKey": "inspector.position:import",
+        "conflictScopeResolverKey": "scope.position:import",
+        "settlementKey": "settlement.position:import"
+      },
+      "result": {
+        "kind": "compact-json",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.position:import"
+      },
+      "artifacts": {
+        "kind": "none",
+        "filePlanRequired": false,
+        "technicalValidatorKey": null,
+        "businessValidatorKey": null,
+        "publisherKey": null,
+        "maxArtifacts": 0
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.position:import",
+      "legacyStrategyKey": "legacy.position:import",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "pre-fund:export-audit": {
+      "actionKey": "pre-fund:export-audit",
+      "moduleId": "pre-fund",
+      "description": "v3.2.x canonical policy fixture for pre-fund:export-audit",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.pre-fund:export-audit",
+      "lifetime": "job",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.pre-fund:export-audit",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "normal"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "main-settlement",
+        "criticalIntent": false,
+        "receiptKind": "publisher-journal",
+        "inspectorKey": "inspector.pre-fund:export-audit",
+        "conflictScopeResolverKey": "scope.pre-fund:export-audit",
+        "settlementKey": "settlement.pre-fund:export-audit"
+      },
+      "result": {
+        "kind": "artifact-manifest",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.pre-fund:export-audit"
+      },
+      "artifacts": {
+        "kind": "single",
+        "filePlanRequired": true,
+        "technicalValidatorKey": "technical-validator.pre-fund:export-audit",
+        "businessValidatorKey": "business-validator.pre-fund:export-audit",
+        "publisherKey": "publisher.pre-fund:export-audit",
+        "maxArtifacts": 1
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.pre-fund:export-audit",
+      "legacyStrategyKey": "legacy.pre-fund:export-audit",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "pre-fund:export-channel": {
+      "actionKey": "pre-fund:export-channel",
+      "moduleId": "pre-fund",
+      "description": "v3.2.x canonical policy fixture for pre-fund:export-channel",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.pre-fund:export-channel",
+      "lifetime": "job",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.pre-fund:export-channel",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "normal"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "main-settlement",
+        "criticalIntent": false,
+        "receiptKind": "publisher-journal",
+        "inspectorKey": "inspector.pre-fund:export-channel",
+        "conflictScopeResolverKey": "scope.pre-fund:export-channel",
+        "settlementKey": "settlement.pre-fund:export-channel"
+      },
+      "result": {
+        "kind": "artifact-manifest",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.pre-fund:export-channel"
+      },
+      "artifacts": {
+        "kind": "single",
+        "filePlanRequired": true,
+        "technicalValidatorKey": "technical-validator.pre-fund:export-channel",
+        "businessValidatorKey": "business-validator.pre-fund:export-channel",
+        "publisherKey": "publisher.pre-fund:export-channel",
+        "maxArtifacts": 1
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.pre-fund:export-channel",
+      "legacyStrategyKey": "legacy.pre-fund:export-channel",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "pre-fund:mpt-import": {
+      "actionKey": "pre-fund:mpt-import",
+      "moduleId": "pre-fund",
+      "description": "v3.2.x canonical policy fixture for pre-fund:mpt-import",
+      "disposition": "managed",
+      "mode": "thread-pool",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.pre-fund:mpt-import",
+      "lifetime": "job",
+      "context": {
+        "kind": "file-batch",
+        "validatorKey": "exact-7"
+      },
+      "resources": {
+        "profile": "resource.pre-fund:mpt-import",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 33554432
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 268435456
+        },
+        "compound": {
+          "topologyKey": "topology.pre-fund:mpt-import",
+          "childrenMax": 4,
+          "childResource": {
+            "cpuSlots": 1,
+            "workerThreadSlots": 1,
+            "utilityProcessSlots": 0,
+            "ioHeavySlots": 1,
+            "memoryBytes": 268435456
+          }
+        },
+        "lowMemoryBehavior": "downgrade-to-single",
+        "admissionPriority": "normal"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "collect-and-continue",
+        "unitTransportCrash": "fail-unit-and-continue",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "worker-durable",
+        "criticalIntent": true,
+        "receiptKind": "module-local",
+        "inspectorKey": "inspector.pre-fund:mpt-import",
+        "conflictScopeResolverKey": "scope.pre-fund:mpt-import",
+        "settlementKey": null
+      },
+      "result": {
+        "kind": "spool-manifest",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.pre-fund:mpt-import"
+      },
+      "artifacts": {
+        "kind": "none",
+        "filePlanRequired": false,
+        "technicalValidatorKey": null,
+        "businessValidatorKey": null,
+        "publisherKey": null,
+        "maxArtifacts": 0
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.pre-fund:mpt-import",
+      "legacyStrategyKey": "legacy.pre-fund:mpt-import",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "workUnits": {
+        "kind": "file",
+        "ordering": "input-index-reducer",
+        "requestedMaxWorkers": 4,
+        "minUnitsPerWorker": 2,
+        "plannerKey": "planner.pre-fund:mpt-import",
+        "reducerKey": "reducer.pre-fund:mpt-import"
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "pre-fund:mpt-repair-import": {
+      "actionKey": "pre-fund:mpt-repair-import",
+      "moduleId": "pre-fund",
+      "description": "v3.2.x canonical policy fixture for pre-fund:mpt-repair-import",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.pre-fund:mpt-repair-import",
+      "lifetime": "job",
+      "context": {
+        "kind": "file-batch",
+        "validatorKey": "exact-7"
+      },
+      "resources": {
+        "profile": "resource.pre-fund:mpt-repair-import",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "normal"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "collect-and-continue",
+        "unitTransportCrash": "fail-unit-and-continue",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "worker-durable",
+        "criticalIntent": true,
+        "receiptKind": "module-local",
+        "inspectorKey": "inspector.pre-fund:mpt-repair-import",
+        "conflictScopeResolverKey": "scope.pre-fund:mpt-repair-import",
+        "settlementKey": null
+      },
+      "result": {
+        "kind": "compact-json",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.pre-fund:mpt-repair-import"
+      },
+      "artifacts": {
+        "kind": "none",
+        "filePlanRequired": false,
+        "technicalValidatorKey": null,
+        "businessValidatorKey": null,
+        "publisherKey": null,
+        "maxArtifacts": 0
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.pre-fund:mpt-repair-import",
+      "legacyStrategyKey": "legacy.pre-fund:mpt-repair-import",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "recon-fix:export": {
+      "actionKey": "recon-fix:export",
+      "moduleId": "recon-fix",
+      "description": "v3.2.x canonical policy fixture for recon-fix:export",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.recon-fix:export",
+      "lifetime": "service",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.recon-fix:export",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 67108864
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "normal",
+        "persistentState": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 268435456
+        },
+        "pendingInteraction": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        }
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "main-settlement",
+        "criticalIntent": false,
+        "receiptKind": "publisher-journal",
+        "inspectorKey": "inspector.recon-fix:export",
+        "conflictScopeResolverKey": "scope.recon-fix:export",
+        "settlementKey": "settlement.recon-fix:export"
+      },
+      "result": {
+        "kind": "artifact-manifest",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.recon-fix:export"
+      },
+      "artifacts": {
+        "kind": "all-or-none",
+        "filePlanRequired": true,
+        "technicalValidatorKey": "technical-validator.recon-fix:export",
+        "businessValidatorKey": "business-validator.recon-fix:export",
+        "publisherKey": "publisher.recon-fix:export",
+        "maxArtifacts": 64
+      },
+      "service": {
+        "generationRequired": true,
+        "busyPolicy": "reject",
+        "closePolicy": "cooperative",
+        "statusMaxBytes": 1048576,
+        "stateFootprintEstimatorKey": "footprint.recon-fix",
+        "tokenPolicy": {
+          "enabled": false,
+          "maxOutstanding": 0,
+          "ttlMs": 0,
+          "singleUse": true
+        },
+        "startupRecoveryKey": "startup-recovery.recon-fix",
+        "serviceKey": "service.recon-fix",
+        "controlProtocol": "service-control-v1",
+        "resourceControl": {
+          "protocol": "service-control-v1",
+          "allowedRequestKinds": [
+            "persistent-state-replace",
+            "phase-extension"
+          ],
+          "maxPendingRequests": 8,
+          "grantTimeoutMs": 30000,
+          "adoptionTimeoutMs": 30000,
+          "grantIdentityRequired": true,
+          "releaseAckRequired": true
+        },
+        "stateAdoption": {
+          "grantIdentityRequired": true,
+          "atomicReplaceRequired": true,
+          "adoptAckRequired": true
+        }
+      },
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.recon-fix:export",
+      "legacyStrategyKey": "legacy.recon-fix:export",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "recon-fix:import": {
+      "actionKey": "recon-fix:import",
+      "moduleId": "recon-fix",
+      "description": "v3.2.x canonical policy fixture for recon-fix:import",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.recon-fix:import",
+      "lifetime": "service",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.recon-fix:import",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 67108864
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "normal",
+        "persistentState": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 268435456
+        },
+        "pendingInteraction": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        }
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "fail-job",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "none",
+        "criticalIntent": false,
+        "receiptKind": null,
+        "inspectorKey": null,
+        "conflictScopeResolverKey": null,
+        "settlementKey": null
+      },
+      "result": {
+        "kind": "compact-json",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.recon-fix:import"
+      },
+      "artifacts": {
+        "kind": "none",
+        "filePlanRequired": false,
+        "technicalValidatorKey": null,
+        "businessValidatorKey": null,
+        "publisherKey": null,
+        "maxArtifacts": 0
+      },
+      "service": {
+        "generationRequired": true,
+        "busyPolicy": "reject",
+        "closePolicy": "cooperative",
+        "statusMaxBytes": 1048576,
+        "stateFootprintEstimatorKey": "footprint.recon-fix",
+        "tokenPolicy": {
+          "enabled": false,
+          "maxOutstanding": 0,
+          "ttlMs": 0,
+          "singleUse": true
+        },
+        "startupRecoveryKey": "startup-recovery.recon-fix",
+        "serviceKey": "service.recon-fix",
+        "controlProtocol": "service-control-v1",
+        "resourceControl": {
+          "protocol": "service-control-v1",
+          "allowedRequestKinds": [
+            "persistent-state-replace",
+            "phase-extension"
+          ],
+          "maxPendingRequests": 8,
+          "grantTimeoutMs": 30000,
+          "adoptionTimeoutMs": 30000,
+          "grantIdentityRequired": true,
+          "releaseAckRequired": true
+        },
+        "stateAdoption": {
+          "grantIdentityRequired": true,
+          "atomicReplaceRequired": true,
+          "adoptAckRequired": true
+        }
+      },
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.recon-fix:import",
+      "legacyStrategyKey": "legacy.recon-fix:import",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "not-applicable",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "recon-fix:run-jpm": {
+      "actionKey": "recon-fix:run-jpm",
+      "moduleId": "recon-fix",
+      "description": "v3.2.x canonical policy fixture for recon-fix:run-jpm",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.recon-fix:run-jpm",
+      "lifetime": "service",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.recon-fix:run-jpm",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 67108864
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "normal",
+        "persistentState": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 268435456
+        },
+        "pendingInteraction": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        }
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "worker-durable",
+        "criticalIntent": true,
+        "receiptKind": "module-local",
+        "inspectorKey": "inspector.recon-fix:run-jpm",
+        "conflictScopeResolverKey": "scope.recon-fix:run-jpm",
+        "settlementKey": null
+      },
+      "result": {
+        "kind": "compact-json",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.recon-fix:run-jpm"
+      },
+      "artifacts": {
+        "kind": "none",
+        "filePlanRequired": false,
+        "technicalValidatorKey": null,
+        "businessValidatorKey": null,
+        "publisherKey": null,
+        "maxArtifacts": 0
+      },
+      "service": {
+        "generationRequired": true,
+        "busyPolicy": "reject",
+        "closePolicy": "cooperative",
+        "statusMaxBytes": 1048576,
+        "stateFootprintEstimatorKey": "footprint.recon-fix",
+        "tokenPolicy": {
+          "enabled": false,
+          "maxOutstanding": 0,
+          "ttlMs": 0,
+          "singleUse": true
+        },
+        "startupRecoveryKey": "startup-recovery.recon-fix",
+        "serviceKey": "service.recon-fix",
+        "controlProtocol": "service-control-v1",
+        "resourceControl": {
+          "protocol": "service-control-v1",
+          "allowedRequestKinds": [
+            "persistent-state-replace",
+            "phase-extension"
+          ],
+          "maxPendingRequests": 8,
+          "grantTimeoutMs": 30000,
+          "adoptionTimeoutMs": 30000,
+          "grantIdentityRequired": true,
+          "releaseAckRequired": true
+        },
+        "stateAdoption": {
+          "grantIdentityRequired": true,
+          "atomicReplaceRequired": true,
+          "adoptAckRequired": true
+        }
+      },
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.recon-fix:run-jpm",
+      "legacyStrategyKey": "legacy.recon-fix:run-jpm",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "recon-fix:run-readonly": {
+      "actionKey": "recon-fix:run-readonly",
+      "moduleId": "recon-fix",
+      "description": "v3.2.x canonical policy fixture for recon-fix:run-readonly",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.recon-fix:run-readonly",
+      "lifetime": "service",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.recon-fix:run-readonly",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 67108864
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "normal",
+        "persistentState": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 268435456
+        },
+        "pendingInteraction": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        }
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "fail-job",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "none",
+        "criticalIntent": false,
+        "receiptKind": null,
+        "inspectorKey": null,
+        "conflictScopeResolverKey": null,
+        "settlementKey": null
+      },
+      "result": {
+        "kind": "compact-json",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.recon-fix:run-readonly"
+      },
+      "artifacts": {
+        "kind": "none",
+        "filePlanRequired": false,
+        "technicalValidatorKey": null,
+        "businessValidatorKey": null,
+        "publisherKey": null,
+        "maxArtifacts": 0
+      },
+      "service": {
+        "generationRequired": true,
+        "busyPolicy": "reject",
+        "closePolicy": "cooperative",
+        "statusMaxBytes": 1048576,
+        "stateFootprintEstimatorKey": "footprint.recon-fix",
+        "tokenPolicy": {
+          "enabled": false,
+          "maxOutstanding": 0,
+          "ttlMs": 0,
+          "singleUse": true
+        },
+        "startupRecoveryKey": "startup-recovery.recon-fix",
+        "serviceKey": "service.recon-fix",
+        "controlProtocol": "service-control-v1",
+        "resourceControl": {
+          "protocol": "service-control-v1",
+          "allowedRequestKinds": [
+            "persistent-state-replace",
+            "phase-extension"
+          ],
+          "maxPendingRequests": 8,
+          "grantTimeoutMs": 30000,
+          "adoptionTimeoutMs": 30000,
+          "grantIdentityRequired": true,
+          "releaseAckRequired": true
+        },
+        "stateAdoption": {
+          "grantIdentityRequired": true,
+          "atomicReplaceRequired": true,
+          "adoptAckRequired": true
+        }
+      },
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.recon-fix:run-readonly",
+      "legacyStrategyKey": "legacy.recon-fix:run-readonly",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "not-applicable",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "statement:generate-all": {
+      "actionKey": "statement:generate-all",
+      "moduleId": "statement",
+      "description": "v3.2.x canonical policy fixture for statement:generate-all",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.statement:generate-all",
+      "lifetime": "service",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.statement:generate-all",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 67108864
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "interactive",
+        "persistentState": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 268435456
+        },
+        "pendingInteraction": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 268435456
+        }
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "main-settlement",
+        "criticalIntent": false,
+        "receiptKind": "publisher-journal",
+        "inspectorKey": "inspector.statement:generate-all",
+        "conflictScopeResolverKey": "scope.statement:generate-all",
+        "settlementKey": "settlement.statement:generate-all"
+      },
+      "result": {
+        "kind": "artifact-manifest",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.statement:generate-all"
+      },
+      "artifacts": {
+        "kind": "all-or-none",
+        "filePlanRequired": true,
+        "technicalValidatorKey": "technical-validator.statement:generate-all",
+        "businessValidatorKey": "business-validator.statement:generate-all",
+        "publisherKey": "publisher.statement:generate-all",
+        "maxArtifacts": 64
+      },
+      "service": {
+        "generationRequired": true,
+        "busyPolicy": "reject",
+        "closePolicy": "cooperative",
+        "statusMaxBytes": 1048576,
+        "stateFootprintEstimatorKey": "footprint.statement",
+        "tokenPolicy": {
+          "enabled": true,
+          "maxOutstanding": 1,
+          "ttlMs": 900000,
+          "singleUse": true
+        },
+        "startupRecoveryKey": "startup-recovery.statement",
+        "serviceKey": "service.statement",
+        "controlProtocol": "service-control-v1",
+        "resourceControl": {
+          "protocol": "service-control-v1",
+          "allowedRequestKinds": [
+            "persistent-state-replace",
+            "pending-interaction-create",
+            "phase-extension"
+          ],
+          "maxPendingRequests": 8,
+          "grantTimeoutMs": 30000,
+          "adoptionTimeoutMs": 30000,
+          "grantIdentityRequired": true,
+          "releaseAckRequired": true
+        },
+        "stateAdoption": {
+          "grantIdentityRequired": true,
+          "atomicReplaceRequired": true,
+          "adoptAckRequired": true
+        }
+      },
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.statement:generate-all",
+      "legacyStrategyKey": "legacy.statement:generate-all",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "statement:generate-current": {
+      "actionKey": "statement:generate-current",
+      "moduleId": "statement",
+      "description": "v3.2.x canonical policy fixture for statement:generate-current",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.statement:generate-current",
+      "lifetime": "service",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.statement:generate-current",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 67108864
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "interactive",
+        "persistentState": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 268435456
+        },
+        "pendingInteraction": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 268435456
+        }
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "main-settlement",
+        "criticalIntent": false,
+        "receiptKind": "publisher-journal",
+        "inspectorKey": "inspector.statement:generate-current",
+        "conflictScopeResolverKey": "scope.statement:generate-current",
+        "settlementKey": "settlement.statement:generate-current"
+      },
+      "result": {
+        "kind": "artifact-manifest",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.statement:generate-current"
+      },
+      "artifacts": {
+        "kind": "all-or-none",
+        "filePlanRequired": true,
+        "technicalValidatorKey": "technical-validator.statement:generate-current",
+        "businessValidatorKey": "business-validator.statement:generate-current",
+        "publisherKey": "publisher.statement:generate-current",
+        "maxArtifacts": 64
+      },
+      "service": {
+        "generationRequired": true,
+        "busyPolicy": "reject",
+        "closePolicy": "cooperative",
+        "statusMaxBytes": 1048576,
+        "stateFootprintEstimatorKey": "footprint.statement",
+        "tokenPolicy": {
+          "enabled": true,
+          "maxOutstanding": 1,
+          "ttlMs": 900000,
+          "singleUse": true
+        },
+        "startupRecoveryKey": "startup-recovery.statement",
+        "serviceKey": "service.statement",
+        "controlProtocol": "service-control-v1",
+        "resourceControl": {
+          "protocol": "service-control-v1",
+          "allowedRequestKinds": [
+            "persistent-state-replace",
+            "pending-interaction-create",
+            "phase-extension"
+          ],
+          "maxPendingRequests": 8,
+          "grantTimeoutMs": 30000,
+          "adoptionTimeoutMs": 30000,
+          "grantIdentityRequired": true,
+          "releaseAckRequired": true
+        },
+        "stateAdoption": {
+          "grantIdentityRequired": true,
+          "atomicReplaceRequired": true,
+          "adoptAckRequired": true
+        }
+      },
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.statement:generate-current",
+      "legacyStrategyKey": "legacy.statement:generate-current",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "statement:import": {
+      "actionKey": "statement:import",
+      "moduleId": "statement",
+      "description": "v3.2.x canonical policy fixture for statement:import",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.statement:import",
+      "lifetime": "service",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.statement:import",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 67108864
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "interactive",
+        "persistentState": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 268435456
+        },
+        "pendingInteraction": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 268435456
+        }
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "fail-job",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "none",
+        "criticalIntent": false,
+        "receiptKind": null,
+        "inspectorKey": null,
+        "conflictScopeResolverKey": null,
+        "settlementKey": null
+      },
+      "result": {
+        "kind": "compact-json",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.statement:import"
+      },
+      "artifacts": {
+        "kind": "none",
+        "filePlanRequired": false,
+        "technicalValidatorKey": null,
+        "businessValidatorKey": null,
+        "publisherKey": null,
+        "maxArtifacts": 0
+      },
+      "service": {
+        "generationRequired": true,
+        "busyPolicy": "reject",
+        "closePolicy": "cooperative",
+        "statusMaxBytes": 1048576,
+        "stateFootprintEstimatorKey": "footprint.statement",
+        "tokenPolicy": {
+          "enabled": true,
+          "maxOutstanding": 1,
+          "ttlMs": 900000,
+          "singleUse": true
+        },
+        "startupRecoveryKey": "startup-recovery.statement",
+        "serviceKey": "service.statement",
+        "controlProtocol": "service-control-v1",
+        "resourceControl": {
+          "protocol": "service-control-v1",
+          "allowedRequestKinds": [
+            "persistent-state-replace",
+            "pending-interaction-create",
+            "phase-extension"
+          ],
+          "maxPendingRequests": 8,
+          "grantTimeoutMs": 30000,
+          "adoptionTimeoutMs": 30000,
+          "grantIdentityRequired": true,
+          "releaseAckRequired": true
+        },
+        "stateAdoption": {
+          "grantIdentityRequired": true,
+          "atomicReplaceRequired": true,
+          "adoptAckRequired": true
+        }
+      },
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.statement:import",
+      "legacyStrategyKey": "legacy.statement:import",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "not-applicable",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "statement:resolve-big-account": {
+      "actionKey": "statement:resolve-big-account",
+      "moduleId": "statement",
+      "description": "v3.2.x canonical policy fixture for statement:resolve-big-account",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.statement:resolve-big-account",
+      "lifetime": "service",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.statement:resolve-big-account",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 67108864
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "interactive",
+        "persistentState": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 268435456
+        },
+        "pendingInteraction": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 268435456
+        }
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "fail-job",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "none",
+        "criticalIntent": false,
+        "receiptKind": null,
+        "inspectorKey": null,
+        "conflictScopeResolverKey": null,
+        "settlementKey": null
+      },
+      "result": {
+        "kind": "compact-json",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.statement:resolve-big-account"
+      },
+      "artifacts": {
+        "kind": "none",
+        "filePlanRequired": false,
+        "technicalValidatorKey": null,
+        "businessValidatorKey": null,
+        "publisherKey": null,
+        "maxArtifacts": 0
+      },
+      "service": {
+        "generationRequired": true,
+        "busyPolicy": "reject",
+        "closePolicy": "cooperative",
+        "statusMaxBytes": 1048576,
+        "stateFootprintEstimatorKey": "footprint.statement",
+        "tokenPolicy": {
+          "enabled": true,
+          "maxOutstanding": 1,
+          "ttlMs": 900000,
+          "singleUse": true
+        },
+        "startupRecoveryKey": "startup-recovery.statement",
+        "serviceKey": "service.statement",
+        "controlProtocol": "service-control-v1",
+        "resourceControl": {
+          "protocol": "service-control-v1",
+          "allowedRequestKinds": [
+            "persistent-state-replace",
+            "pending-interaction-create",
+            "phase-extension"
+          ],
+          "maxPendingRequests": 8,
+          "grantTimeoutMs": 30000,
+          "adoptionTimeoutMs": 30000,
+          "grantIdentityRequired": true,
+          "releaseAckRequired": true
+        },
+        "stateAdoption": {
+          "grantIdentityRequired": true,
+          "atomicReplaceRequired": true,
+          "adoptAckRequired": true
+        }
+      },
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.statement:resolve-big-account",
+      "legacyStrategyKey": "legacy.statement:resolve-big-account",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "not-applicable",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "statement:resolve-manual-balance": {
+      "actionKey": "statement:resolve-manual-balance",
+      "moduleId": "statement",
+      "description": "v3.2.x canonical policy fixture for statement:resolve-manual-balance",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.statement:resolve-manual-balance",
+      "lifetime": "service",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.statement:resolve-manual-balance",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 67108864
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "interactive",
+        "persistentState": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 268435456
+        },
+        "pendingInteraction": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 268435456
+        }
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "main-settlement",
+        "criticalIntent": true,
+        "receiptKind": "target-post-image",
+        "inspectorKey": "inspector.statement:resolve-manual-balance",
+        "conflictScopeResolverKey": "scope.statement:resolve-manual-balance",
+        "settlementKey": "settlement.statement:resolve-manual-balance"
+      },
+      "result": {
+        "kind": "compact-json",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.statement:resolve-manual-balance"
+      },
+      "artifacts": {
+        "kind": "none",
+        "filePlanRequired": false,
+        "technicalValidatorKey": null,
+        "businessValidatorKey": null,
+        "publisherKey": null,
+        "maxArtifacts": 0
+      },
+      "service": {
+        "generationRequired": true,
+        "busyPolicy": "reject",
+        "closePolicy": "cooperative",
+        "statusMaxBytes": 1048576,
+        "stateFootprintEstimatorKey": "footprint.statement",
+        "tokenPolicy": {
+          "enabled": true,
+          "maxOutstanding": 1,
+          "ttlMs": 900000,
+          "singleUse": true
+        },
+        "startupRecoveryKey": "startup-recovery.statement",
+        "serviceKey": "service.statement",
+        "controlProtocol": "service-control-v1",
+        "resourceControl": {
+          "protocol": "service-control-v1",
+          "allowedRequestKinds": [
+            "persistent-state-replace",
+            "pending-interaction-create",
+            "phase-extension"
+          ],
+          "maxPendingRequests": 8,
+          "grantTimeoutMs": 30000,
+          "adoptionTimeoutMs": 30000,
+          "grantIdentityRequired": true,
+          "releaseAckRequired": true
+        },
+        "stateAdoption": {
+          "grantIdentityRequired": true,
+          "atomicReplaceRequired": true,
+          "adoptAckRequired": true
+        }
+      },
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.statement:resolve-manual-balance",
+      "legacyStrategyKey": "legacy.statement:resolve-manual-balance",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "toolbox:merge": {
+      "actionKey": "toolbox:merge",
+      "moduleId": "toolbox",
+      "description": "v3.2.x canonical policy fixture for toolbox:merge",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.toolbox:merge",
+      "lifetime": "job",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.toolbox:merge",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "normal"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "main-settlement",
+        "criticalIntent": false,
+        "receiptKind": "publisher-journal",
+        "inspectorKey": "inspector.toolbox:merge",
+        "conflictScopeResolverKey": "scope.toolbox:merge",
+        "settlementKey": "settlement.toolbox:merge"
+      },
+      "result": {
+        "kind": "artifact-manifest",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.toolbox:merge"
+      },
+      "artifacts": {
+        "kind": "single",
+        "filePlanRequired": true,
+        "technicalValidatorKey": "technical-validator.toolbox:merge",
+        "businessValidatorKey": "business-validator.toolbox:merge",
+        "publisherKey": "publisher.toolbox:merge",
+        "maxArtifacts": 1
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.toolbox:merge",
+      "legacyStrategyKey": "legacy.toolbox:merge",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "toolbox:publish": {
+      "actionKey": "toolbox:publish",
+      "moduleId": "toolbox",
+      "description": "v3.2.x canonical policy fixture for toolbox:publish",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "existing-dispatch",
+      "adapterKey": "adapter.toolbox:publish",
+      "entryKey": null,
+      "lifetime": "job",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.toolbox:publish",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": {
+          "topologyKey": "topology.toolbox:publish",
+          "childrenMax": 4,
+          "childResource": {
+            "cpuSlots": 1,
+            "workerThreadSlots": 1,
+            "utilityProcessSlots": 0,
+            "ioHeavySlots": 1,
+            "memoryBytes": 268435456
+          }
+        },
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "normal"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "existing-critical-protocol",
+        "criticalIntent": false,
+        "receiptKind": "existing-protocol",
+        "inspectorKey": "inspector.toolbox:publish",
+        "conflictScopeResolverKey": "scope.toolbox:publish",
+        "settlementKey": "settlement.toolbox:publish"
+      },
+      "result": {
+        "kind": "artifact-manifest",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.toolbox:publish"
+      },
+      "artifacts": {
+        "kind": "existing-publication",
+        "filePlanRequired": true,
+        "technicalValidatorKey": "technical-validator.toolbox:publish",
+        "businessValidatorKey": "business-validator.toolbox:publish",
+        "publisherKey": "publisher.toolbox:publish",
+        "maxArtifacts": 1
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.toolbox:publish",
+      "legacyStrategyKey": "legacy.toolbox:publish",
+      "blocker": null,
+      "production": {
+        "enabled": true,
+        "effectiveMode": "thread-single",
+        "effectiveWorkerCount": 1,
+        "recoveryStatus": "proven",
+        "evidenceStatus": "baseline",
+        "downgradeReason": null,
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "toolbox:split-large": {
+      "actionKey": "toolbox:split-large",
+      "moduleId": "toolbox",
+      "description": "v3.2.x canonical policy fixture for toolbox:split-large",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "existing-dispatch",
+      "adapterKey": "adapter.toolbox:split-large",
+      "entryKey": null,
+      "lifetime": "job",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.toolbox:split-large",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": {
+          "topologyKey": "topology.toolbox:split-large",
+          "childrenMax": 4,
+          "childResource": {
+            "cpuSlots": 1,
+            "workerThreadSlots": 1,
+            "utilityProcessSlots": 0,
+            "ioHeavySlots": 1,
+            "memoryBytes": 268435456
+          }
+        },
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "normal"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "main-settlement",
+        "criticalIntent": false,
+        "receiptKind": "publisher-journal",
+        "inspectorKey": "inspector.toolbox:split-large",
+        "conflictScopeResolverKey": "scope.toolbox:split-large",
+        "settlementKey": "settlement.toolbox:split-large"
+      },
+      "result": {
+        "kind": "artifact-manifest",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.toolbox:split-large"
+      },
+      "artifacts": {
+        "kind": "all-or-none",
+        "filePlanRequired": true,
+        "technicalValidatorKey": "technical-validator.toolbox:split-large",
+        "businessValidatorKey": "business-validator.toolbox:split-large",
+        "publisherKey": "publisher.toolbox:split-large",
+        "maxArtifacts": 64
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.toolbox:split-large",
+      "legacyStrategyKey": "legacy.toolbox:split-large",
+      "blocker": null,
+      "production": {
+        "enabled": true,
+        "effectiveMode": "thread-single",
+        "effectiveWorkerCount": 1,
+        "recoveryStatus": "proven",
+        "evidenceStatus": "baseline",
+        "downgradeReason": null,
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "toolbox:split-multi-output": {
+      "actionKey": "toolbox:split-multi-output",
+      "moduleId": "toolbox",
+      "description": "v3.2.x canonical policy fixture for toolbox:split-multi-output",
+      "disposition": "managed",
+      "mode": "thread-pool",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.toolbox:split-multi-output",
+      "lifetime": "job",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.toolbox:split-multi-output",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 33554432
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 268435456
+        },
+        "compound": {
+          "topologyKey": "topology.toolbox:split-multi-output",
+          "childrenMax": 4,
+          "childResource": {
+            "cpuSlots": 1,
+            "workerThreadSlots": 1,
+            "utilityProcessSlots": 0,
+            "ioHeavySlots": 1,
+            "memoryBytes": 268435456
+          }
+        },
+        "lowMemoryBehavior": "downgrade-to-single",
+        "admissionPriority": "normal"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "main-settlement",
+        "criticalIntent": false,
+        "receiptKind": "publisher-journal",
+        "inspectorKey": "inspector.toolbox:split-multi-output",
+        "conflictScopeResolverKey": "scope.toolbox:split-multi-output",
+        "settlementKey": "settlement.toolbox:split-multi-output"
+      },
+      "result": {
+        "kind": "artifact-manifest",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.toolbox:split-multi-output"
+      },
+      "artifacts": {
+        "kind": "all-or-none",
+        "filePlanRequired": true,
+        "technicalValidatorKey": "technical-validator.toolbox:split-multi-output",
+        "businessValidatorKey": "business-validator.toolbox:split-multi-output",
+        "publisherKey": "publisher.toolbox:split-multi-output",
+        "maxArtifacts": 64
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.toolbox:split-multi-output",
+      "legacyStrategyKey": "legacy.toolbox:split-multi-output",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "workUnits": {
+        "kind": "output",
+        "ordering": "unit-index-reducer",
+        "requestedMaxWorkers": 2,
+        "minUnitsPerWorker": 2,
+        "plannerKey": "planner.toolbox:split-multi-output",
+        "reducerKey": "reducer.toolbox:split-multi-output"
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "toolbox:split-single": {
+      "actionKey": "toolbox:split-single",
+      "moduleId": "toolbox",
+      "description": "v3.2.x canonical policy fixture for toolbox:split-single",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.toolbox:split-single",
+      "lifetime": "job",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.toolbox:split-single",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "normal"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "main-settlement",
+        "criticalIntent": false,
+        "receiptKind": "publisher-journal",
+        "inspectorKey": "inspector.toolbox:split-single",
+        "conflictScopeResolverKey": "scope.toolbox:split-single",
+        "settlementKey": "settlement.toolbox:split-single"
+      },
+      "result": {
+        "kind": "artifact-manifest",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.toolbox:split-single"
+      },
+      "artifacts": {
+        "kind": "all-or-none",
+        "filePlanRequired": true,
+        "technicalValidatorKey": "technical-validator.toolbox:split-single",
+        "businessValidatorKey": "business-validator.toolbox:split-single",
+        "publisherKey": "publisher.toolbox:split-single",
+        "maxArtifacts": 64
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.toolbox:split-single",
+      "legacyStrategyKey": "legacy.toolbox:split-single",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "vcc-financial-op:export-audit": {
+      "actionKey": "vcc-financial-op:export-audit",
+      "moduleId": "vcc-financial-op",
+      "description": "v3.2.x canonical policy fixture for vcc-financial-op:export-audit",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.vcc-financial-op:export-audit",
+      "lifetime": "job",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.vcc-financial-op:export-audit",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "normal"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "main-settlement",
+        "criticalIntent": false,
+        "receiptKind": "publisher-journal",
+        "inspectorKey": "inspector.vcc-financial-op:export-audit",
+        "conflictScopeResolverKey": "scope.vcc-financial-op:export-audit",
+        "settlementKey": "settlement.vcc-financial-op:export-audit"
+      },
+      "result": {
+        "kind": "artifact-manifest",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.vcc-financial-op:export-audit"
+      },
+      "artifacts": {
+        "kind": "single",
+        "filePlanRequired": true,
+        "technicalValidatorKey": "technical-validator.vcc-financial-op:export-audit",
+        "businessValidatorKey": "business-validator.vcc-financial-op:export-audit",
+        "publisherKey": "publisher.vcc-financial-op:export-audit",
+        "maxArtifacts": 1
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.vcc-financial-op:export-audit",
+      "legacyStrategyKey": "legacy.vcc-financial-op:export-audit",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "vcc-financial-op:export-single": {
+      "actionKey": "vcc-financial-op:export-single",
+      "moduleId": "vcc-financial-op",
+      "description": "v3.2.x canonical policy fixture for vcc-financial-op:export-single",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.vcc-financial-op:export-single",
+      "lifetime": "job",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.vcc-financial-op:export-single",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "normal"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "main-settlement",
+        "criticalIntent": false,
+        "receiptKind": "publisher-journal",
+        "inspectorKey": "inspector.vcc-financial-op:export-single",
+        "conflictScopeResolverKey": "scope.vcc-financial-op:export-single",
+        "settlementKey": "settlement.vcc-financial-op:export-single"
+      },
+      "result": {
+        "kind": "artifact-manifest",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.vcc-financial-op:export-single"
+      },
+      "artifacts": {
+        "kind": "single",
+        "filePlanRequired": true,
+        "technicalValidatorKey": "technical-validator.vcc-financial-op:export-single",
+        "businessValidatorKey": "business-validator.vcc-financial-op:export-single",
+        "publisherKey": "publisher.vcc-financial-op:export-single",
+        "maxArtifacts": 1
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.vcc-financial-op:export-single",
+      "legacyStrategyKey": "legacy.vcc-financial-op:export-single",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "vcc-financial-op:export-subjects": {
+      "actionKey": "vcc-financial-op:export-subjects",
+      "moduleId": "vcc-financial-op",
+      "description": "v3.2.x canonical policy fixture for vcc-financial-op:export-subjects",
+      "disposition": "managed",
+      "mode": "thread-pool",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.vcc-financial-op:export-subjects",
+      "lifetime": "job",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.vcc-financial-op:export-subjects",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 33554432
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 268435456
+        },
+        "compound": {
+          "topologyKey": "topology.vcc-financial-op:export-subjects",
+          "childrenMax": 4,
+          "childResource": {
+            "cpuSlots": 1,
+            "workerThreadSlots": 1,
+            "utilityProcessSlots": 0,
+            "ioHeavySlots": 1,
+            "memoryBytes": 268435456
+          }
+        },
+        "lowMemoryBehavior": "downgrade-to-single",
+        "admissionPriority": "normal"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "main-settlement",
+        "criticalIntent": false,
+        "receiptKind": "publisher-journal",
+        "inspectorKey": "inspector.vcc-financial-op:export-subjects",
+        "conflictScopeResolverKey": "scope.vcc-financial-op:export-subjects",
+        "settlementKey": "settlement.vcc-financial-op:export-subjects"
+      },
+      "result": {
+        "kind": "artifact-manifest",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.vcc-financial-op:export-subjects"
+      },
+      "artifacts": {
+        "kind": "all-or-none",
+        "filePlanRequired": true,
+        "technicalValidatorKey": "technical-validator.vcc-financial-op:export-subjects",
+        "businessValidatorKey": "business-validator.vcc-financial-op:export-subjects",
+        "publisherKey": "publisher.vcc-financial-op:export-subjects",
+        "maxArtifacts": 64
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.vcc-financial-op:export-subjects",
+      "legacyStrategyKey": "legacy.vcc-financial-op:export-subjects",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "workUnits": {
+        "kind": "subject",
+        "ordering": "unit-index-reducer",
+        "requestedMaxWorkers": 4,
+        "minUnitsPerWorker": 2,
+        "plannerKey": "planner.vcc-financial-op:export-subjects",
+        "reducerKey": "reducer.vcc-financial-op:export-subjects"
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "vcc-op:compute-amounts": {
+      "actionKey": "vcc-op:compute-amounts",
+      "moduleId": "vcc-op",
+      "description": "v3.2.x canonical policy fixture for vcc-op:compute-amounts",
+      "disposition": "inline-excluded",
+      "mode": "inline-async",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.vcc-op:compute-amounts",
+      "lifetime": "job",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.vcc-op:compute-amounts",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        },
+        "phase": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 16777216
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "normal"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-copy",
+          "after-copy-before-publish"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "fail-job",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "none",
+        "criticalIntent": false,
+        "receiptKind": null,
+        "inspectorKey": null,
+        "conflictScopeResolverKey": null,
+        "settlementKey": null
+      },
+      "result": {
+        "kind": "compact-json",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.vcc-op:compute-amounts"
+      },
+      "artifacts": {
+        "kind": "none",
+        "filePlanRequired": false,
+        "technicalValidatorKey": null,
+        "businessValidatorKey": null,
+        "publisherKey": null,
+        "maxArtifacts": 0
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.vcc-op:compute-amounts",
+      "legacyStrategyKey": null,
+      "blocker": null,
+      "production": {
+        "enabled": true,
+        "effectiveMode": "inline-async",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "not-applicable",
+        "evidenceStatus": "baseline",
+        "downgradeReason": null,
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "vcc-op:save-run": {
+      "actionKey": "vcc-op:save-run",
+      "moduleId": "vcc-op",
+      "description": "v3.2.x canonical policy fixture for vcc-op:save-run",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.vcc-op:save-run",
+      "lifetime": "job",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.vcc-op:save-run",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "normal"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "worker-durable",
+        "criticalIntent": true,
+        "receiptKind": "module-local",
+        "inspectorKey": "inspector.vcc-op:save-run",
+        "conflictScopeResolverKey": "scope.vcc-op:save-run",
+        "settlementKey": null
+      },
+      "result": {
+        "kind": "compact-json",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.vcc-op:save-run"
+      },
+      "artifacts": {
+        "kind": "none",
+        "filePlanRequired": false,
+        "technicalValidatorKey": null,
+        "businessValidatorKey": null,
+        "publisherKey": null,
+        "maxArtifacts": 0
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.vcc-op:save-run",
+      "legacyStrategyKey": "legacy.vcc-op:save-run",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    },
+    "vcc-op:scan-and-compute": {
+      "actionKey": "vcc-op:scan-and-compute",
+      "moduleId": "vcc-op",
+      "description": "v3.2.x canonical policy fixture for vcc-op:scan-and-compute",
+      "disposition": "managed",
+      "mode": "thread-pool",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.vcc-op:scan-and-compute",
+      "lifetime": "job",
+      "context": {
+        "kind": "file-batch",
+        "validatorKey": "exact-7"
+      },
+      "resources": {
+        "profile": "resource.vcc-op:scan-and-compute",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 33554432
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 268435456
+        },
+        "compound": {
+          "topologyKey": "topology.vcc-op:scan-and-compute",
+          "childrenMax": 4,
+          "childResource": {
+            "cpuSlots": 1,
+            "workerThreadSlots": 1,
+            "utilityProcessSlots": 0,
+            "ioHeavySlots": 1,
+            "memoryBytes": 268435456
+          }
+        },
+        "lowMemoryBehavior": "downgrade-to-single",
+        "admissionPriority": "normal"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "fail-job",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "none",
+        "criticalIntent": false,
+        "receiptKind": null,
+        "inspectorKey": null,
+        "conflictScopeResolverKey": null,
+        "settlementKey": null
+      },
+      "result": {
+        "kind": "spool-manifest",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.vcc-op:scan-and-compute"
+      },
+      "artifacts": {
+        "kind": "none",
+        "filePlanRequired": false,
+        "technicalValidatorKey": null,
+        "businessValidatorKey": null,
+        "publisherKey": null,
+        "maxArtifacts": 0
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.vcc-op:scan-and-compute",
+      "legacyStrategyKey": "legacy.vcc-op:scan-and-compute",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "not-applicable",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "workUnits": {
+        "kind": "file",
+        "ordering": "input-index-reducer",
+        "requestedMaxWorkers": 4,
+        "minUnitsPerWorker": 2,
+        "plannerKey": "planner.vcc-op:scan-and-compute",
+        "reducerKey": "reducer.vcc-op:scan-and-compute"
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    }
+  }
+}
