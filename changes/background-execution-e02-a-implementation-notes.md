@@ -15,7 +15,7 @@
 
 | 项目 | 决定与证据 | 影响 |
 | --- | --- | --- |
-| Runtime Schema | 最终合同的 Policy/Protocol Schema 逐字节固化到 `src/main-process/background-execution/schemas/`；生产模块只 require bundled `src` 路径，测试用 SHA-256 与合同基线对齐 | `package.json build.files=src/**/*` 可携带 Schema；运行时不读取 `changes/` |
+| Runtime Schema | 最终合同的 Policy/Protocol Schema 逐字节固化到 `src/main-process/background-execution/schemas/`；生产模块只 require bundled `src` 路径。测试先对 runtime/contract checkout bytes 做 raw equality，再仅为 canonical Git/package digest 将 `CRLF` 还原为 `LF`；裸 `CR`、BOM、尾空格和其他内容变化仍改变 hash | `package.json build.files=src/**/*` 可携带 Schema；运行时不读取 `changes/`。Windows `core.autocrlf` 不再使 canonical LF checksum 误报，且不修改冻结包或 checksum |
 | JSON Schema validator | 项目没有可用的 Draft 2020-12 runtime dependency；本 PR 不修改依赖，采用受控的冻结 JS evaluator。编译时递归审计每个 Schema 节点，未知 keyword、外部/unresolved `$ref`、未知 format 直接拒绝 | 当前实际 keyword 集完整支持；未来 Schema 扩张若先于 validator 支持会在启动/测试期 fail closed，不会静默忽略 |
 | 支持边界 | 覆盖当前 Schema 使用的 `$ref/$defs`、`allOf/anyOf/oneOf/not/if-then-else`、`additionalProperties/propertyNames/properties`、`const/enum/type/required`、字符串/数组/对象/数值上下界、`uniqueItems/pattern/date-time` | 不是通用 JSON Schema 引擎；新增 keyword/format 必须显式实现并增加 mutation self-test，或后续经依赖评审迁到 Ajv 8 |
 | Registry | 完整 policy document 在任何 normalize/extract 前先按原对象执行 JSON-safe、bundled Schema 与 semantic 校验；保留 root metadata 和原 property key，并要求 property/actionKey identity。`production.effectiveMode` 两条规则以及 pure/durable canary action-specific identity 均机械移植冻结 Python validator；canary identity 只在对应 own action 存在时执行，合法 subset registry 不被强制补 action。Protocol/sequence 共用唯一 `policyForAction`：只接受固定 data-method registry，或 plain snapshot 的 own-enumerable data `actions`/action；Proxy/accessor/inherited action fail closed | 注册失败不再被 normalization 静默修复；pure canary 的 entry/result/resource profile 均静态解析；plain-object registry 只读取 own data descriptor 的非 nullish value，不触发 getter/inherited fallback；native Map/Set 固定调用 prototype API，own `get/has` shadow 零调用拒绝 |
@@ -34,7 +34,7 @@
 
 | 检查 | 当前结果 | 覆盖 |
 | --- | --- | --- |
-| E02-A targeted unit | `93/93 PASS` | Schema keyword audit/self-test/JSON equality/RFC3339、policy raw-document/semantic/canary identity/subset/descriptor/binding/proxy 负例、23/11 message fixtures、5/24 sequence fixtures、固定 protocol byte cap、Reflect-own-key/invalid-UTF-8、统一 policy lookup/sequence snapshot、Map/Set shadow、SafeError detailLines/finance-safe 中英文 value/用户路径与 localhost file URL、四类 adapter（含 Worker messageerror、entry-owned cancel evidence、hanging cancel Promise、void legacy terminal-before-ACK 与同 tick terminal/cancel 顺序）、Supervisor request/start/cancel/settle/tombstone/progress/result/shutdown/diagnostic 竞态 |
+| E02-A targeted unit | `94/94 PASS` | Schema keyword audit/self-test/JSON equality/RFC3339、canonical Git LF/Windows CRLF checkout hash 等价且裸 CR 不被吞、policy raw-document/semantic/canary identity/subset/descriptor/binding/proxy 负例、23/11 message fixtures、5/24 sequence fixtures、固定 protocol byte cap、Reflect-own-key/invalid-UTF-8、统一 policy lookup/sequence snapshot、Map/Set shadow、SafeError detailLines/finance-safe 中英文 value/用户路径与 localhost file URL、四类 adapter（含 Worker messageerror、entry-owned cancel evidence、hanging cancel Promise、void legacy terminal-before-ACK 与同 tick terminal/cancel 顺序）、Supervisor request/start/cancel/settle/tombstone/progress/result/shutdown/diagnostic 竞态 |
 | pure-compute integration | `9/9 PASS` | 实际 Worker spawn、deterministic result、shutdown-only 内部取消、public cancel 拒绝、production gate、packaged path、权威 shutdown report |
 | existing error/worker integration | `18/18 PASS` + `40/40 PASS` | 既有 `serialize-error` round-trip 合同与 v2.1.10 worker dispatch/crash/cancel/progress 集成未回归 |
 | repository unit | `5695/5696 PASS`、0 fail、1 skip | 356 个 unit 文件的全量回归；新测试由递归 runner 自动发现 |
@@ -43,7 +43,7 @@
 | repository smoke / ESLint | PASS / PASS | important-variable Critical 命中要求的 smoke，以及完整 lint gate |
 | targeted ESLint / diff check | PASS | E02-A 源码、测试、integration script lint；无 whitespace error；integration script 由 runner 自动发现，无需手写注册 |
 | important-variable check | REVIEWED（命中时工具按设计 exit 2）；Critical `freezeWorkerBatchContext`、Runtime-state `state` | 只调用现有 exact-seven validator，未增删/放宽 context，未接 TaskLifecycle/recovery；命中的 `state` 是 Supervisor job/unit-local 状态字段，不是 `src/renderer.js` 单例，不影响模板/当前模块/导出可用性联动；full unit/integration/smoke 与 release-check 已通过 |
-| bundled Schema hash | Policy `e5a584903d8c88b1f6cce00cbe5e308796bed331ca476458833eb9c448f99ae8`；Protocol `d3f38eab7f0f5793fccc6d6f042199172c071887e386349d2559435565a99a43` | bundled bytes 与最终合同基线逐字节一致 |
+| bundled Schema hash | Policy `e5a584903d8c88b1f6cce00cbe5e308796bed331ca476458833eb9c448f99ae8`；Protocol `d3f38eab7f0f5793fccc6d6f042199172c071887e386349d2559435565a99a43` | bundled/contract checkout bytes 先保持 raw 逐字节一致；digest 输入只规范化 `CRLF → LF`，与 canonical Git blob 和冻结 `PACKAGE-SHA256SUMS.txt` 对齐 |
 | packaged-input checker | EXPECTED LOCAL WORKTREE FAILURE | checker 比较 `git diff HEAD`，所以已暂存但尚未提交的 E02-A `src` 仍属于 tracked dirty；用户既有未跟踪 `assets/清结算自有账户表.xlsx` 也命中 `build.files`，本任务不触碰该 asset。权威复跑位置是包含 E02-A PR commit 的 clean checkout/CI；合并前可在独立 clean worktree 或 CI 验证；该失败不代表 runtime 从 `changes/` 取 Schema |
 
 ## Remaining Unknowns

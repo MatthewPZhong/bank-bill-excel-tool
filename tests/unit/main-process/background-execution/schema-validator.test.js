@@ -25,7 +25,21 @@ function sha256(buffer) {
   return crypto.createHash('sha256').update(buffer).digest('hex');
 }
 
-test('运行时 bundled Schema 与最终合同逐字节一致且不依赖 changes 路径', () => {
+function canonicalGitTextBytes(buffer) {
+  const chunks = [];
+  let cursor = 0;
+  let crlf = buffer.indexOf('\r\n', cursor);
+  if (crlf === -1) return buffer;
+  while (crlf !== -1) {
+    chunks.push(buffer.subarray(cursor, crlf), Buffer.from([0x0a]));
+    cursor = crlf + 2;
+    crlf = buffer.indexOf('\r\n', cursor);
+  }
+  chunks.push(buffer.subarray(cursor));
+  return Buffer.concat(chunks);
+}
+
+test('运行时 bundled Schema 与最终合同逐字节一致且 canonical Git hash 跨 EOL 稳定', () => {
   const expected = {
     'platform-contract-v1.schema.json': 'e5a584903d8c88b1f6cce00cbe5e308796bed331ca476458833eb9c448f99ae8',
     'platform-protocol-v1.schema.json': 'd3f38eab7f0f5793fccc6d6f042199172c071887e386349d2559435565a99a43'
@@ -34,8 +48,22 @@ test('运行时 bundled Schema 与最终合同逐字节一致且不依赖 change
     const contractBytes = fs.readFileSync(path.join(CONTRACT_DIR, name));
     const bundledBytes = fs.readFileSync(path.join(BUNDLED_DIR, name));
     assert.deepEqual(bundledBytes, contractBytes);
-    assert.equal(sha256(bundledBytes), digest);
+    assert.equal(sha256(canonicalGitTextBytes(bundledBytes)), digest);
   }
+});
+
+test('canonical Git text 只把 CRLF checkout 还原为 LF，不吞裸 CR 或其他字节', () => {
+  const canonicalLf = Buffer.from('first line\nsecond line\n', 'utf8');
+  const windowsCheckout = Buffer.from('first line\r\nsecond line\r\n', 'utf8');
+  assert.deepEqual(canonicalGitTextBytes(windowsCheckout), canonicalLf);
+  assert.equal(sha256(canonicalGitTextBytes(windowsCheckout)), sha256(canonicalLf));
+
+  const bareCr = Buffer.from('first line\rsecond line\r', 'utf8');
+  assert.deepEqual(canonicalGitTextBytes(bareCr), bareCr);
+  assert.notEqual(sha256(canonicalGitTextBytes(bareCr)), sha256(canonicalLf));
+
+  const opaqueBytes = Buffer.from([0xff, 0x0d, 0x0a, 0xfe]);
+  assert.deepEqual(canonicalGitTextBytes(opaqueBytes), Buffer.from([0xff, 0x0a, 0xfe]));
 });
 
 test('启动编译递归盘点当前两个 Schema 的完整 keyword 集', () => {
