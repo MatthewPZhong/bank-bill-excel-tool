@@ -1,0 +1,89 @@
+{
+  "manifestVersion": 4,
+  "status": "Codex Implementation Ready at documentation/contract level",
+  "productionEnablement": "Action-level gated",
+  "supersedes": [
+    "background-execution-v3.2.x-codex-ready",
+    "background-execution-v3.2.x-codex-ready-final",
+    "background-execution-v3.2.x-codex-implementation-ready"
+  ],
+  "targetedClosures": [
+    "RecoverySourceV1 has one machine-readable schema",
+    "Critical Intent applicability matches Policy Schema",
+    "existing-critical-protocol never creates platform Critical Intent",
+    "InspectorRegistry is the sole outcome authority",
+    "SettlementRecoveryProvider exposes listOpenSources and recover only",
+    "validation report hashes all relevant package inputs",
+    "CODEX-TECHDOC Protocol summary is mechanically derived from Protocol Schema",
+    "Job context, unit:progress, jobRef.unitId and seq scopes are aligned",
+    "State transitions and recovery events commit in one Main control transaction",
+    "Renderer statuses are canonical; recovery/compensation use metadata",
+    "Critical Intent applicability is commit-policy specific",
+    "Validator includes Codex input drift and package hygiene checks",
+    "No __pycache__ or .pyc is shipped",
+    "Recovery-related TaskRun transitions and all Batch overlay, Hold and Intent transitions commit with their events in one Main control DB transaction",
+    "RecoveryControlRepository exposes runInControlTransaction as the only top-level recovery write entry",
+    "RecoveryControlTransactionV1 exposes the only state writer transitionWithRecoveryEvent and the event-only appendObservationEvent",
+    "Four observation-only event types distinguish inspection and settlement transient failures, cannot mutate state, reject manual sources and persist NULL previous/next state",
+    "A multi-object recovery action shares one explicit RecoveryControlTransactionV1 and commits once",
+    "TaskRunTransitionV1 is limited to interruption and recovery edges",
+    "Critical Intent rejects committed-to-recovered and preserves committed-to-closed",
+    "Independent appendRecoveryEvent is package-private and cannot be called by platform consumers",
+    "Validator scans Platform Contract, E00 Spec/TechDoc, Lifecycle Mapping, CODEX-SPEC and CODEX-TECHDOC for recovery-control drift",
+    "Validator runs twenty recovery-control mutation negative self-tests plus Protocol and Recovery Result mutations",
+    "Validation README enumerates all 24 executable gates",
+    "Protocol exact context/payload wrappers, byte ceilings, strict seq and unit terminal gate are machine frozen",
+    "RecoveryInspectionResultV1 and SettlementRecoveryResultV1 exact keys live in the RecoverySource schema defs",
+    "TaskRun recovery commands preserve canonical actionKey and legacy expectedTaskKey as distinct identities",
+    "Inspector and provider registries reject registration after freeze and startup scan precedes owner initialization",
+    "Service command and event seq trackers are independent by direction; replies correlate by control/resource identity and never echo peer seq",
+    "PreparedIntentInput coordinationKind matches SQLite and policy-derived worker-critical/main-owned-settlement values"
+  ],
+  "normativeFiles": [
+    "changes/background-execution/platform-contract-v1.md",
+    "changes/background-execution/E00-platform-contract-v1-spec.md",
+    "changes/background-execution/E00-platform-contract-v1-techdoc.md",
+    "changes/background-execution/platform-lifecycle-mapping.md",
+    "changes/background-execution/platform-contract-v1.schema.json",
+    "changes/background-execution/platform-protocol-v1.schema.json",
+    "changes/background-execution/platform-recovery-source-v1.schema.json"
+  ],
+  "evidenceFiles": [
+    "P0-targeted-closure-report.md",
+    "P0-final-recovery-contract-closure-report.md",
+    "P0-recovery-source-contract-final-alignment-report.md",
+    "P0-codex-entry-contract-final-closure-report.md",
+    "P0-recovery-audit-atomicity-final-closure-report.md",
+    "P0-recovery-control-transaction-observation-final-closure-report.md"
+  ],
+  "evidenceFilesAreNonNormative": true,
+  "implementationNotes": "implementation-notes.md",
+  "codexInputs": [
+    "CODEX-SPEC.md",
+    "CODEX-TECHDOC.md"
+  ],
+  "validation": {
+    "command": "PYTHON_BIN=python3 changes/background-execution/validation/run-validation.sh",
+    "expectedStatus": "PASS",
+    "jsonschemaVersion": "4.26.0",
+    "expectedCheckCount": 24,
+    "codexDriftCheck": "codex-input-contract-drift",
+    "recoveryControlDriftCheck": "recovery-control-transaction-contract-drift",
+    "recoveryControlNegativeSelfTestCount": 20,
+    "expectedActionPolicyCount": 52,
+    "expectedActionTableRowCount": 59,
+    "expectedValidProtocolMessageCount": 23,
+    "expectedValidProtocolSequenceCount": 5,
+    "expectedInvalidProtocolSequenceCount": 24,
+    "expectedHashedInputCount": 60,
+    "atomicityDocuments": 4,
+    "topLevelWriteEntry": "RecoveryControlRepository.runInControlTransaction",
+    "scopedStateMutationApi": "RecoveryControlTransactionV1.transitionWithRecoveryEvent",
+    "scopedObservationApi": "RecoveryControlTransactionV1.appendObservationEvent"
+  },
+  "notes": [
+    "This package changes documentation, schemas, fixtures and validators only.",
+    "No src business code, business database or release asset was modified.",
+    "Mutation actions remain disabled until their action-specific receipt, inspector, fault injection, Windows and manual financial gates pass."
+  ]
+}

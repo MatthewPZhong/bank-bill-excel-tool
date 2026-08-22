@@ -1,0 +1,151 @@
+{
+  "contractVersion": 1,
+  "actions": {
+    "statement:resolve-manual-balance": {
+      "actionKey": "statement:resolve-manual-balance",
+      "moduleId": "statement",
+      "description": "v3.2.x canonical policy fixture for statement:resolve-manual-balance",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.statement:resolve-manual-balance",
+      "lifetime": "service",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.statement:resolve-manual-balance",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 67108864
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "interactive",
+        "persistentState": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 268435456
+        },
+        "pendingInteraction": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 268435456
+        }
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "main-settlement",
+        "criticalIntent": false,
+        "receiptKind": "target-post-image",
+        "inspectorKey": "inspector.statement:resolve-manual-balance",
+        "conflictScopeResolverKey": "scope.statement:resolve-manual-balance",
+        "settlementKey": "settlement.statement:resolve-manual-balance"
+      },
+      "result": {
+        "kind": "compact-json",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.statement:resolve-manual-balance"
+      },
+      "artifacts": {
+        "kind": "none",
+        "filePlanRequired": false,
+        "technicalValidatorKey": null,
+        "businessValidatorKey": null,
+        "publisherKey": null,
+        "maxArtifacts": 0
+      },
+      "service": {
+        "generationRequired": true,
+        "busyPolicy": "reject",
+        "closePolicy": "cooperative",
+        "statusMaxBytes": 1048576,
+        "stateFootprintEstimatorKey": "footprint.statement",
+        "tokenPolicy": {
+          "enabled": true,
+          "maxOutstanding": 1,
+          "ttlMs": 900000,
+          "singleUse": true
+        },
+        "startupRecoveryKey": "startup-recovery.statement",
+        "serviceKey": "service.statement",
+        "controlProtocol": "service-control-v1",
+        "resourceControl": {
+          "protocol": "service-control-v1",
+          "allowedRequestKinds": [
+            "persistent-state-replace",
+            "pending-interaction-create",
+            "phase-extension"
+          ],
+          "maxPendingRequests": 8,
+          "grantTimeoutMs": 30000,
+          "adoptionTimeoutMs": 30000,
+          "grantIdentityRequired": true,
+          "releaseAckRequired": true
+        },
+        "stateAdoption": {
+          "grantIdentityRequired": true,
+          "atomicReplaceRequired": true,
+          "adoptAckRequired": true
+        }
+      },
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.statement:resolve-manual-balance",
+      "legacyStrategyKey": "legacy.statement:resolve-manual-balance",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    }
+  }
+}

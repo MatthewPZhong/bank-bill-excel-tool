@@ -1,0 +1,317 @@
+[
+  {
+    "name": "job-missing-operation-key",
+    "message": {
+      "protocolVersion": 1,
+      "channel": "job",
+      "direction": "command",
+      "operation": "job:start",
+      "actionKey": "statement:import",
+      "jobId": "job-1",
+      "workerInstanceId": "worker-1",
+      "serviceGeneration": 1,
+      "unitId": null,
+      "seq": 1,
+      "context": {
+        "kind": "operation",
+        "value": {}
+      },
+      "payload": {}
+    }
+  },
+  {
+    "name": "service-control-with-job-fields-at-top",
+    "message": {
+      "protocolVersion": 1,
+      "channel": "service-control",
+      "direction": "command",
+      "operation": "executor:init",
+      "serviceKey": "service.statement",
+      "controlId": "c",
+      "workerInstanceId": "w",
+      "serviceGeneration": 1,
+      "seq": 1,
+      "jobRef": null,
+      "actionKey": "statement:import",
+      "payload": {
+        "contractVersion": 1,
+        "policyDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+        "baseLeaseId": null
+      }
+    }
+  },
+  {
+    "name": "resource-grant-without-grant-identity",
+    "message": {
+      "protocolVersion": 1,
+      "channel": "service-control",
+      "direction": "command",
+      "operation": "resource:grant",
+      "serviceKey": "service.statement",
+      "controlId": "c2",
+      "workerInstanceId": "w",
+      "serviceGeneration": 1,
+      "seq": 2,
+      "jobRef": {
+        "actionKey": "statement:import",
+        "operationKey": "op",
+        "jobId": "job",
+        "unitId": null
+      },
+      "payload": {
+        "requestId": "r",
+        "replacesReservationId": null,
+        "granted": {
+          "memoryBytes": 1,
+          "cpuSlots": 0,
+          "ioHeavySlots": 0
+        },
+        "adoptionDeadlineMs": 1
+      }
+    }
+  },
+  {
+    "name": "operation-context-operation-key-mismatch",
+    "rejectionLayer": "semantic",
+    "message": {
+      "protocolVersion": 1,
+      "channel": "job",
+      "direction": "event",
+      "operation": "critical:ready",
+      "actionKey": "background-execution:canary",
+      "operationKey": "durable-op-1",
+      "jobId": "fixture-job-11",
+      "workerInstanceId": "fixture-worker-1",
+      "serviceGeneration": null,
+      "unitId": null,
+      "seq": 1,
+      "context": {
+        "kind": "operation",
+        "value": {
+          "taskRunId": "task-run-1",
+          "taskKey": "task-key-1",
+          "moduleId": "background-execution",
+          "parentRunId": "parent-run-1",
+          "operationKey": "different-operation"
+        }
+      },
+      "payload": {
+        "critical": {
+          "criticalOperationKey": "critical-1",
+          "evidenceDigest": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      }
+    }
+  },
+  {
+    "name": "operation-context-forbidden-job-id",
+    "message": {
+      "protocolVersion": 1,
+      "channel": "job",
+      "direction": "event",
+      "operation": "critical:ready",
+      "actionKey": "background-execution:canary",
+      "operationKey": "durable-op-1",
+      "jobId": "fixture-job-11",
+      "workerInstanceId": "fixture-worker-1",
+      "serviceGeneration": null,
+      "unitId": null,
+      "seq": 1,
+      "context": {
+        "kind": "operation",
+        "value": {
+          "taskRunId": "task-run-1",
+          "taskKey": "task-key-1",
+          "moduleId": "background-execution",
+          "parentRunId": "parent-run-1",
+          "operationKey": "durable-op-1",
+          "jobId": "forbidden-job"
+        }
+      },
+      "payload": {
+        "critical": {
+          "criticalOperationKey": "critical-1",
+          "evidenceDigest": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      }
+    }
+  },
+  {
+    "name": "file-batch-context-missing-exact-7-field",
+    "message": {
+      "protocolVersion": 1,
+      "channel": "job",
+      "direction": "command",
+      "operation": "unit:start",
+      "actionKey": "acquiring:import",
+      "operationKey": "batch-op-1",
+      "jobId": "fixture-job-2",
+      "workerInstanceId": "fixture-worker-1",
+      "serviceGeneration": null,
+      "unitId": "unit-1",
+      "seq": 1,
+      "context": {
+        "kind": "file-batch",
+        "value": {
+          "batchId": 1,
+          "taskRunId": "task-run-batch-1",
+          "taskKey": "task-key-batch-1",
+          "moduleId": "acquiring",
+          "parentRunId": "parent-run-batch-1",
+          "operationKey": "batch-op-1"
+        }
+      },
+      "payload": {
+        "input": {
+          "fileRef": "staging:file-1"
+        }
+      }
+    }
+  },
+  {
+    "name": "none-context-must-be-empty",
+    "message": {
+      "protocolVersion": 1,
+      "channel": "job",
+      "direction": "command",
+      "operation": "job:start",
+      "actionKey": "background-execution:pure-compute-canary",
+      "operationKey": "pure-op-1",
+      "jobId": "fixture-job-1",
+      "workerInstanceId": "fixture-worker-1",
+      "serviceGeneration": null,
+      "unitId": null,
+      "seq": 1,
+      "context": {
+        "kind": "none",
+        "value": {
+          "jobId": "forbidden-job"
+        }
+      },
+      "payload": {
+        "input": {
+          "probe": "pure-compute"
+        }
+      }
+    }
+  },
+  {
+    "name": "job-start-wrong-payload-wrapper",
+    "message": {
+      "protocolVersion": 1,
+      "channel": "job",
+      "direction": "command",
+      "operation": "job:start",
+      "actionKey": "background-execution:pure-compute-canary",
+      "operationKey": "pure-op-1",
+      "jobId": "fixture-job-1",
+      "workerInstanceId": "fixture-worker-1",
+      "serviceGeneration": null,
+      "unitId": null,
+      "seq": 1,
+      "context": {
+        "kind": "none",
+        "value": {}
+      },
+      "payload": {
+        "result": {}
+      }
+    }
+  },
+  {
+    "name": "job-payload-extra-outer-field",
+    "message": {
+      "protocolVersion": 1,
+      "channel": "job",
+      "direction": "command",
+      "operation": "job:start",
+      "actionKey": "background-execution:pure-compute-canary",
+      "operationKey": "pure-op-1",
+      "jobId": "fixture-job-1",
+      "workerInstanceId": "fixture-worker-1",
+      "serviceGeneration": null,
+      "unitId": null,
+      "seq": 1,
+      "context": {
+        "kind": "none",
+        "value": {}
+      },
+      "payload": {
+        "input": {
+          "probe": "pure-compute"
+        },
+        "extra": {}
+      }
+    }
+  },
+  {
+    "name": "resource-request-kind-owner-mismatch",
+    "message": {
+      "protocolVersion": 1,
+      "channel": "service-control",
+      "direction": "event",
+      "operation": "resource:request",
+      "serviceKey": "service.statement",
+      "controlId": "ctl-state-1",
+      "workerInstanceId": "state-worker-1",
+      "serviceGeneration": 1,
+      "seq": 2,
+      "jobRef": {
+        "actionKey": "statement:import",
+        "operationKey": "state-op-1",
+        "jobId": "state-job-1",
+        "unitId": null
+      },
+      "payload": {
+        "requestId": "state-1",
+        "requestKind": "persistent-state-replace",
+        "requested": {
+          "memoryBytes": 1048576,
+          "cpuSlots": 0,
+          "ioHeavySlots": 0
+        },
+        "replacesReservationId": null,
+        "owner": {
+          "kind": "interaction-token",
+          "ownerKeyHash": "statement-state",
+          "candidateRevision": 1
+        }
+      }
+    }
+  },
+  {
+    "name": "nonpersistent-request-illegal-replaces",
+    "message": {
+      "protocolVersion": 1,
+      "channel": "service-control",
+      "direction": "event",
+      "operation": "resource:request",
+      "serviceKey": "service.statement",
+      "controlId": "ctl-state-1",
+      "workerInstanceId": "state-worker-1",
+      "serviceGeneration": 1,
+      "seq": 2,
+      "jobRef": {
+        "actionKey": "statement:import",
+        "operationKey": "state-op-1",
+        "jobId": "state-job-1",
+        "unitId": null
+      },
+      "payload": {
+        "requestId": "state-1",
+        "requestKind": "pending-interaction-create",
+        "requested": {
+          "memoryBytes": 1048576,
+          "cpuSlots": 0,
+          "ioHeavySlots": 0
+        },
+        "replacesReservationId": "reservation-old",
+        "owner": {
+          "kind": "interaction-token",
+          "ownerKeyHash": "statement-state",
+          "candidateRevision": 1
+        }
+      }
+    }
+  }
+]

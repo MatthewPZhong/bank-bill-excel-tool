@@ -1,0 +1,106 @@
+{
+  "contractVersion": 1,
+  "generatedAt": "2026-08-21T00:00:00Z",
+  "baselineRef": "background-execution-v3.2.x-implementation-ready",
+  "actions": {
+    "vcc-op:save-run": {
+      "actionKey": "vcc-op:save-run",
+      "moduleId": "vcc-op",
+      "description": "v3.2.x canonical policy fixture for vcc-op:save-run",
+      "disposition": "managed",
+      "mode": "thread-single",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.vcc-op:save-run",
+      "lifetime": "job",
+      "context": {
+        "kind": "operation",
+        "validatorKey": "exact-5"
+      },
+      "resources": {
+        "profile": "resource.vcc-op:save-run",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 0,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 0
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 201326592
+        },
+        "compound": null,
+        "lowMemoryBehavior": "queue",
+        "admissionPriority": "normal"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "module-inspect",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "worker-durable",
+        "criticalIntent": true,
+        "receiptKind": "module-local",
+        "inspectorKey": "inspector.not-statically-registered",
+        "conflictScopeResolverKey": "scope.vcc-op:save-run",
+        "settlementKey": null
+      },
+      "result": {
+        "kind": "compact-json",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.vcc-op:save-run"
+      },
+      "artifacts": {
+        "kind": "none",
+        "filePlanRequired": false,
+        "technicalValidatorKey": null,
+        "businessValidatorKey": null,
+        "publisherKey": null,
+        "maxArtifacts": 0
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.vcc-op:save-run",
+      "legacyStrategyKey": "legacy.vcc-op:save-run",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "probe",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    }
+  }
+}

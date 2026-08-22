@@ -1,0 +1,282 @@
+# v3.2.3 TechDoc — Statement Token/Reservation、Atomic Balance Seed 与 NewAccount Generation
+
+| 项目 | 内容 |
+| --- | --- |
+| 目标版本 | v3.2.3 |
+| 日期 | 2026-08-21 |
+| 状态 | Implementation Ready / manual seed 默认 blocked 直至 inspector/fault injection 通过 |
+| 实施前置 | 进入本版本编码前，v3.2.0 E02-A～C2 必须已合并并通过 platform canary |
+| 产品 Spec | `changes/3.2.3/spec.md` |
+| 涉及范围 | Statement ServiceHost/token store/waiting-user/generation；balance seed main settlement；NewAccount Worker/async copy |
+
+## 0. 规范性技术依赖
+
+本 TechDoc 直接实现 Platform Contract v1，不另起协议方言。业务命令使用 JobEnvelope；Service 生命周期与资源协调使用独立 ServiceControlEnvelope。
+
+Job operations：
+
+```text
+job:start / unit:start / unit:done / unit:error
+critical:ready / critical:ack / critical:reject / commit:receipt
+job:done / job:error / job:cancel / cancel:ack
+```
+
+Service control operations：
+
+```text
+executor:init / executor:ready / executor:error / executor:close / executor:close-ack
+resource:request / resource:grant / resource:reject
+resource:adopted / resource:adopt-ack / resource:release / resource:release-ack
+```
+
+所有 Policy 使用 `actionKey` 作为静态主键；运行期 `operationKey` 只用于幂等、Critical Intent、module receipt 与 Recovery Hold。既有执行器使用真实 `mode` 加 `adapterKind='existing-dispatch'`，不得创建第五种 mode，也不得在外层再包一个 Worker。
+
+ResourceGovernor 必须计入：
+
+- BaseLease；
+- PersistentReservation；
+- PendingInteractionReservation；
+- PhaseLease；
+- CompoundLease；
+- `replacePersistentReservation` 原子替换。
+
+全局 Governor 仅在 Main。Statement Worker 必须通过 Service Control Envelope 的 `resource:request / grant / adopted / adopt-ack` 申请 state/token reservation，禁止直接调用 `governor.acquire*()`。
+
+本文件中的任何 action 只有在 Registry coverage、资源 lease、取消/关闭、receipt/inspector、故障注入、Windows packaged 和人工资金门禁全部满足后，才允许从 `blocked/legacy-preserved` 切到 managed production。
+
+## 1. 目录
+
+```text
+src/main-process/statement-worker/
+├── worker-entry.js
+├── service.js
+├── session-state.js
+├── state-footprint.js
+├── token-store.js
+├── interaction-reservation.js
+├── generation.js
+└── worker-client.js
+
+src/main-process/statement-balance-seed/
+├── atomic-seed-writer.js
+├── seed-intent-evidence.js
+└── seed-outcome-inspector.js
+
+src/main-process/new-account/
+├── generation-core.js
+├── worker-entry.js
+├── worker-client.js
+└── artifact-copy.js
+```
+
+## 2. Statement Service state
+
+```javascript
+{
+  serviceGeneration,
+  sessionRevision,
+  sessions: Map,
+  tokens: Map,
+  stableSummary,
+  activeJobId,
+  persistentReservation,
+  pendingInteractionReservations: Map
+}
+```
+
+Token private context不得进入status DTO。status返回数量、purpose、expiresAt、active phase等小型信息。
+
+## 3. Token contract
+
+```javascript
+{
+  tokenId,
+  purpose: 'big-account' | 'manual-balance' | 'scope-generation',
+  serviceGeneration,
+  sessionKey,
+  sessionRevision,
+  expiresAt,
+  allowedChoiceDigest,
+  reservationId
+}
+```
+
+创建函数必须按以下原子顺序：
+
+```javascript
+const bytes = estimatePendingContext(candidate);
+const request = buildResourceRequest({
+  requestKind: 'pending-interaction-create',
+  requested: { memoryBytes: bytes },
+  owner: tokenOwnerIdentity(candidate),
+  jobRef
+});
+serviceControl.postMessage(request);        // Worker → Main ServiceHost
+const grant = await waitForResourceGrant(request.requestId);
+tokenStore.insertPrivate(candidate, grant.reservationId, grant.grantId);
+serviceControl.postMessage(buildResourceAdopted(grant, candidate));
+await waitForResourceAdoptAck(grant.grantId);
+return publicTokenDto(candidate);            // adopt-ack 后才能返回 Renderer
+```
+
+消费时先校验generation/revision/purpose/TTL/allowedChoice，再标记single-use。业务采用成功或失败都释放reservation；若需要生成新token，先申请新的再关闭旧的。
+
+## 4. waiting-user coordinator
+
+Main保存TaskRun与token handle，不保存private context。
+
+```mermaid
+stateDiagram-v2
+    [*] --> executing
+    executing --> waiting_user: token issued
+    waiting_user --> executing: valid continuation
+    waiting_user --> cancelled: explicit user cancel
+    waiting_user --> interrupted: app crash/quit timeout
+    executing --> succeeded: settlement complete
+    executing --> failed: safe failure
+```
+
+进入waiting_user：
+
+- `job:done`返回interaction-required结果，但业务Task不终结；
+-释放active PhaseLease与operation lock；
+-保留Base/Persistent/PendingInteraction leases；
+-Renderer收到token+DTO。
+
+Continuation：
+
+-新jobId，复用同一TaskRunId；
+- Main 在 Task 持久 metadata 中原子分配 `interactionOrdinal`；
+- manual balance 的 operationKey 为 `derive(taskRunId, actionKey, interactionOrdinal)`；
+- 同 token transport recovery 复用 ordinal，新 token 使用新 ordinal；
+-重新获取lock/PhaseLease；
+- Service验证token/evidence；
+- stale返回业务错误并终结/等待重新导入，按现有UI合同处理。
+
+## 5. Session adoption
+
+Import构建candidate session。采用前：
+
+```text
+validate source/template evidence
+estimate new persistent bytes
+replacePersistentReservation(old,new)
+atomically replace session/batch/revision
+invalidate affected tokens/artifacts
+return bounded summary
+```
+
+若新reservation失败，candidate丢弃；旧session保留还是失效按当前import golden锁定，不得仅因资源失败改变业务语义。
+
+## 6. Generation
+
+Service内部调用现有单一真相函数：mapped rows merge、amount/bill split、balance、warning、template writer。Worker不并行detail/balance，避免改变warning/输出顺序。
+
+Artifact manifest含：artifactKey、generationPath、size、sha256、rowCounts、warning summary、sessionRevision、inputEvidenceHash。Main重新验证FilePlan和业务validator后Publisher。
+
+## 7. Balance seed atomic writer
+
+建议写法：
+
+```javascript
+async function writeSeedAtomically({ targetPath, bytes, expectedPre }) {
+  assertTargetSnapshot(targetPath, expectedPre);
+  const tempPath = sameDirectoryTemp(targetPath);
+  await openWriteFsync(tempPath, bytes);
+  await rename(tempPath, targetPath);
+  await fsyncDirectory(path.dirname(targetPath));
+  return inspectFile(targetPath);
+}
+```
+
+每个 manual balance token 同时保存：
+
+```javascript
+{
+  interactionOrdinal,
+  operationKey: `${taskRunId}/statement:resolve-manual-balance/${interactionOrdinal}`,
+  reservationId,
+  targetAliasKey
+}
+```
+
+同一 TaskRun 可以顺序产生多个 seed operation；不得复用 operationKey。
+
+Critical Intent evidence限制为bounded metadata：
+
+```javascript
+{
+  targetAliasKey,
+  pre: { exists, size, sha256 },
+  expectedPost: { size, sha256 },
+  sessionRevision,
+  tokenIdHash
+}
+```
+
+no-op：pre hash等于post hash时不创建 intent，直接返回 noop outcome。
+
+本 action 的 Policy 固定为：
+
+```text
+commit.kind = main-settlement
+receiptKind = target-post-image
+criticalIntent = true
+coordinationKind = main-owned-settlement
+```
+
+Main 在写 temp 前通过 `MainSettlementIntentCoordinator` 创建/ack intent；这里**不发送** Worker `critical:ready / critical:ack`。权威提交证据是 `targetPath` 的 durable post-image：rename + directory fsync 后由 Inspector 重新读取文件并比较 hash/size。Intent 只保存 expected pre/post 与 operation identity，不能自身证明 committed；任何“已观察到 post-image”的内存/消息通知都不是权威 receipt，startup recovery 仍必须重读目标文件。
+
+directory fsync 必须尝试；只有平台明确返回 unsupported 时可记录 capability=`unsupported`，但 intent/source 保持 open，进入 `unknown`/`terminal-failure` 并创建 `DURABILITY_BARRIER_UNAVAILABLE` hold。Windows packaged probe 验证 durable primitive 前本 action `production.enabled=false`；legacy ArchiveOutboxStore 的静默吞错不能作为 durability 证据。
+
+## 8. App quit / crash
+
+- idle Service协作close；
+- waiting-user Task：释放tokenreservation并将未终结Task映射interrupted；
+- pure compute安全点可shutdown-only取消；
+- seed critical后不得terminate并写cancelled；
+-重启 Startup Coordinator 将 open seed intent 转成 `RecoverySourceV1(sourceKind=target-post-image)`，调用 hash inspector；
+- committed seed可恢复后续Task状态，但内存session不可恢复。
+
+## 9. NewAccount Worker
+
+Worker输入：小型账户数组、冻结模板路径/snapshot、日期/币种配置、generationPath。Worker不接收final target。
+
+Core输出records并写workbook。业务validator回读：Sheet、列顺序、记录数、日期、账户、币种。Main technical validator后发布到managed location。
+
+Export copy：`fs.promises.copyFile`到task staging，校验源/副本hash，再调用Publisher；这是一等`inline-async`策略，不占CPU Worker slot但占I/O lease。
+
+## 10. Fault matrix
+
+| 故障 | 结果 |
+| --- | --- |
+| token reservation失败 | 不保存token/context，不泄漏内存 |
+| token issued后expiry | context清理，continuation stale |
+| waiting-user app crash | Task interrupted；session/token丢失 |
+| seed temp写失败 | pre保持，not-committed |
+| seed rename后回包前crash | post hash committed，startup恢复 |
+| seed target既非pre也非post | unknown + hold |
+| Service crash after seed | seed不重复；session需重新导入 |
+| NewAccount Worker crash | no artifact handle/publish |
+| copy source变化 | fail closed，不发布 |
+
+## 11. Tests
+
+- token maxOutstanding/TTL/singleUse/revision/generation；
+- reservation acquire/release/replace/expiry race；
+- waiting-user lock/lease释放和continuation；
+- heap/IPC payload无detailRows；
+- Statement四金额/余额/current/all golden；
+- seed no-op/pre/post/unknown/crash；
+- NewAccount日期/账户/币种/模板golden；
+- artifact tamper/Publisher failure；
+-连续十轮Service、Windows Setup/portable、app quit。
+
+## 12. Release strategy
+
+- Statement import可先shadow-free、单路切换；
+- manual seed保持legacy直到atomic writer/inspector通过；
+- NewAccount独立flag；
+- active Task不切换；
+- Service rollback前先close/使generation失效；
+-已提交seed不down-migrate或猜测回滚。

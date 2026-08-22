@@ -1,0 +1,82 @@
+[
+  {
+    "contractVersion": 1,
+    "sourceRef": "critical-intent:fixture",
+    "actionKey": "background-execution:canary",
+    "operationKey": "task-001/background-execution:canary/1",
+    "taskRunId": "task-001",
+    "conflictScopeKey": "scope:background-execution:canary",
+    "inspectorKey": "inspector.background-execution:canary",
+    "evidenceVersion": 1,
+    "boundedEvidence": {
+      "marker": "fixture"
+    },
+    "sourceKind": "critical-intent",
+    "intentId": "intent-001",
+    "settlementKey": null
+  },
+  {
+    "contractVersion": 1,
+    "sourceRef": "publisher-journal:fixture",
+    "actionKey": "background-execution:canary",
+    "operationKey": "task-001/background-execution:canary/1",
+    "taskRunId": "task-001",
+    "conflictScopeKey": "scope:background-execution:canary",
+    "inspectorKey": "inspector.background-execution:canary",
+    "evidenceVersion": 1,
+    "boundedEvidence": {
+      "marker": "fixture"
+    },
+    "sourceKind": "publisher-journal",
+    "intentId": null,
+    "settlementKey": "settlement.background-execution:canary"
+  },
+  {
+    "contractVersion": 1,
+    "sourceRef": "target-post-image:fixture",
+    "actionKey": "background-execution:canary",
+    "operationKey": "task-001/background-execution:canary/1",
+    "taskRunId": "task-001",
+    "conflictScopeKey": "scope:background-execution:canary",
+    "inspectorKey": "inspector.background-execution:canary",
+    "evidenceVersion": 1,
+    "boundedEvidence": {
+      "marker": "fixture"
+    },
+    "sourceKind": "target-post-image",
+    "intentId": "intent-002",
+    "settlementKey": "settlement.background-execution:canary"
+  },
+  {
+    "contractVersion": 1,
+    "sourceRef": "existing-protocol:fixture",
+    "actionKey": "background-execution:canary",
+    "operationKey": "task-001/background-execution:canary/1",
+    "taskRunId": "task-001",
+    "conflictScopeKey": "scope:background-execution:canary",
+    "inspectorKey": "inspector.background-execution:canary",
+    "evidenceVersion": 1,
+    "boundedEvidence": {
+      "marker": "fixture"
+    },
+    "sourceKind": "existing-protocol",
+    "intentId": null,
+    "settlementKey": "settlement.background-execution:canary"
+  },
+  {
+    "contractVersion": 1,
+    "sourceRef": "module-recovery:fixture",
+    "actionKey": "background-execution:canary",
+    "operationKey": "task-001/background-execution:canary/1",
+    "taskRunId": "task-001",
+    "conflictScopeKey": "scope:background-execution:canary",
+    "inspectorKey": "inspector.background-execution:canary",
+    "evidenceVersion": 1,
+    "boundedEvidence": {
+      "marker": "fixture"
+    },
+    "sourceKind": "module-recovery",
+    "intentId": null,
+    "settlementKey": "settlement.background-execution:canary"
+  }
+]
