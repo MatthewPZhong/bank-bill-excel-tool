@@ -8,6 +8,7 @@ const {
   createStaticRegistry
 } = require('../../src/main-process/background-execution/execution-policy-registry');
 const { createExecutionSupervisor } = require('../../src/main-process/background-execution/supervisor');
+const { createResourceGovernor } = require('../../src/main-process/background-execution/resource-governor');
 const canary = require('../../src/main-process/background-execution/canary');
 
 let passed = 0;
@@ -45,10 +46,20 @@ function buildSupervisor() {
     staticKeys: { resourceProfileKeys: [canary.pureComputePolicy.resources.profile] }
   });
   policyRegistry.freeze();
+  const resourceGovernor = createResourceGovernor({
+    budgets: {
+      cpuSlots: 16,
+      workerThreadSlots: 16,
+      utilityProcessSlots: 4,
+      ioHeavySlots: 16,
+      memoryBytes: 4 * 1024 * 1024 * 1024
+    }
+  });
   return createExecutionSupervisor({
     policyRegistry,
     entryRegistry,
     validatorRegistry,
+    resourceGovernor,
     executionTimeoutMs: 10000,
     shutdownTimeoutMs: 1000
   });

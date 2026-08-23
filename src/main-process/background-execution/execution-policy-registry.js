@@ -1,6 +1,6 @@
 'use strict';
 
-const { types: utilTypes } = require('node:util');
+const { isDeepStrictEqual, types: utilTypes } = require('node:util');
 const policySchema = require('./schemas/platform-contract-v1.schema.json');
 const { createSchemaValidator } = require('./schema-validator');
 const { assertJsonSafe, policyForAction } = require('./protocol-validator');
@@ -176,7 +176,10 @@ function snapshotRuntimeBinding(fieldPath, policy, value) {
     return Object.freeze({
       start: dataMethod(value, 'start').bind(value),
       cancel: dataMethod(value, 'cancel').bind(value),
-      close: dataMethod(value, 'close').bind(value)
+      close: dataMethod(value, 'close').bind(value),
+      ...(dataMethod(value, 'inspectTopology')
+        ? { inspectTopology: dataMethod(value, 'inspectTopology').bind(value) }
+        : {})
     });
   }
   if (fieldPath.endsWith('ValidatorKey') || fieldPath === 'result.validatorKey') {
@@ -186,6 +189,9 @@ function snapshotRuntimeBinding(fieldPath, policy, value) {
     return Object.freeze(assertValid
       ? { assertValid: assertValid.bind(value) }
       : { validate: validate.bind(value) });
+  }
+  if (fieldPath === 'service.serviceKey' && value && typeof value === 'object') {
+    return deepFreeze(deepClone(value));
   }
   return value;
 }
@@ -570,6 +576,32 @@ function createExecutionPolicyRegistry(options = {}) {
         }
       }
       frozenBindings.set(actionKey, Object.freeze(bindings));
+    }
+    const serviceProfiles = new Map();
+    for (const [actionKey, policy] of policies) {
+      if (policy.lifetime !== 'service' || !policy.service) continue;
+      const bindings = frozenBindings.get(actionKey) || {};
+      const carrier = policy.mode === 'utility-process' ? 'utility-process' : 'worker-thread';
+      const profile = Object.freeze({
+        carrier,
+        service: policy.service,
+        entry: bindings.entryKey,
+        serviceCapabilities: bindings['service.serviceKey']
+      });
+      const existing = serviceProfiles.get(policy.service.serviceKey);
+      if (existing && !isDeepStrictEqual(existing.profile, profile)) {
+        throw new PolicyRegistryError(
+          'POLICY_SERVICE_BINDING_CONFLICT',
+          `Policies sharing ${policy.service.serviceKey} resolve to different executable or capability bindings`,
+          `/actions/${actionKey.replace(/~/g, '~0').replace(/\//g, '~1')}/service/serviceKey`,
+          Object.freeze({
+            serviceKey: policy.service.serviceKey,
+            firstActionKey: existing.actionKey,
+            conflictingActionKey: actionKey
+          })
+        );
+      }
+      if (!existing) serviceProfiles.set(policy.service.serviceKey, { actionKey, profile });
     }
     frozen = true;
     return registry;

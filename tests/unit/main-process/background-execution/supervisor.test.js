@@ -7,7 +7,10 @@ const {
   createExecutionPolicyRegistry,
   createStaticRegistry
 } = require('../../../../src/main-process/background-execution/execution-policy-registry');
-const { createJobEnvelope } = require('../../../../src/main-process/background-execution/protocol');
+const {
+  createJobEnvelope,
+  createServiceControlEnvelope
+} = require('../../../../src/main-process/background-execution/protocol');
 const {
   createExistingDispatchAdapter,
   createExistingDispatchTransportAdapter
@@ -16,7 +19,27 @@ const {
   createExecutionSupervisor,
   validateResultBody
 } = require('../../../../src/main-process/background-execution/supervisor');
+const { createResourceGovernor } = require(
+  '../../../../src/main-process/background-execution/resource-governor'
+);
+const { ServiceHostProtocolError } = require(
+  '../../../../src/main-process/background-execution/service-host'
+);
+const { validateProtocolSequence } = require(
+  '../../../../src/main-process/background-execution/protocol-sequence-validator'
+);
 const canary = require('../../../../src/main-process/background-execution/canary');
+const servicePolicyFixture = require(
+  '../../../../changes/background-execution-v3.2.x-contract-baseline/changes/background-execution/validation/fixtures/valid/policy-registry.v3.2.x.json'
+).actions['statement:import'];
+
+function applyServicePolicy(policy, serviceKey) {
+  policy.lifetime = 'service';
+  policy.service = structuredClone(servicePolicyFixture.service);
+  policy.service.serviceKey = serviceKey;
+  policy.resources.persistentState = structuredClone(servicePolicyFixture.resources.persistentState);
+  policy.resources.pendingInteraction = structuredClone(servicePolicyFixture.resources.pendingInteraction);
+}
 
 function fakeAdapter(options = {}) {
   const state = { callbacks: null, sent: [], closeCount: 0, terminateCount: 0 };
@@ -98,20 +121,38 @@ function harness(
     policies: [policy],
     entryRegistry,
     validatorRegistry,
-    staticKeys: { resourceProfileKeys: [policy.resources.profile] },
+    staticKeys: {
+      resourceProfileKeys: [policy.resources.profile],
+      ...(policy.service ? { serviceKeys: [policy.service.serviceKey] } : {}),
+      ...(policy.resources.compound
+        ? { topologyKeys: [policy.resources.compound.topologyKey] }
+        : {})
+    },
     generatedAt: '2026-08-22T00:00:00Z'
   });
   policyRegistry.freeze();
   const diagnosticEntries = [];
+  let resourceId = 0;
+  const resourceGovernor = createResourceGovernor({
+    budgets: {
+      cpuSlots: 16,
+      workerThreadSlots: 16,
+      utilityProcessSlots: 4,
+      ioHeavySlots: 16,
+      memoryBytes: 4 * 1024 * 1024 * 1024
+    },
+    idFactory: (prefix) => `supervisor-${prefix}-${++resourceId}`
+  });
   const supervisor = createExecutionSupervisor({
     policyRegistry,
     entryRegistry,
     validatorRegistry,
     workerThreadAdapter: fake.adapter,
+    resourceGovernor,
     diagnostics: (entry) => diagnosticEntries.push(entry),
     ...supervisorOptions
   });
-  return { diagnosticEntries, policy, supervisor };
+  return { diagnosticEntries, policy, policyRegistry, resourceGovernor, supervisor };
 }
 
 function request(overrides = {}) {
@@ -1076,16 +1117,1456 @@ test('shutdown 不把已在 cooperative cancelling 的 job 误报为 protected',
   assert.equal(result.error.code, 'SHUTDOWN_TIMEOUT');
 });
 
-test('stopAcceptingNewJobs 与 E02-A closeService 都确定性 fail closed', async () => {
+test('stopAcceptingNewJobs fail closed，closeService 委托并对未托管 service 返回 false', async () => {
   const fake = fakeAdapter();
   const { supervisor } = harness(fake);
-  await assert.rejects(
-    supervisor.closeService('service.not-owned'),
-    (error) => error.code === 'E02A_SERVICE_UNSUPPORTED'
-  );
+  assert.equal(await supervisor.closeService('service.not-owned'), false);
   supervisor.stopAcceptingNewJobs();
   await assert.rejects(
     supervisor.execute(request()),
     (error) => error.code === 'SUPERVISOR_NOT_ACCEPTING'
   );
+});
+
+test('default Supervisor shutdown wire-drains a persistent service before cooperative close', async () => {
+  let initCommand = null;
+  let jobStart = null;
+  let serviceEventSeq = 0;
+  const serviceTrace = [];
+  const requestOwner = {
+    kind: 'service-state',
+    ownerKeyHash: 'supervisor-graceful-state',
+    candidateRevision: 1
+  };
+  const fake = fakeAdapter({
+    onSend(message, callbacks) {
+      function emitService(operation, controlId, jobRef, payload) {
+        serviceEventSeq += 1;
+        const event = createServiceControlEnvelope({
+          direction: 'event',
+          operation,
+          serviceKey: initCommand.serviceKey,
+          controlId,
+          workerInstanceId: initCommand.workerInstanceId,
+          serviceGeneration: initCommand.serviceGeneration,
+          seq: serviceEventSeq,
+          jobRef,
+          payload
+        }, { validate: false });
+        serviceTrace.push(event);
+        callbacks.onMessage(event);
+      }
+
+      if (message.channel === 'service-control') serviceTrace.push(message);
+      if (message.operation === 'executor:init') {
+        initCommand = message;
+        emitService('executor:ready', 'supervisor-graceful-ready', null, {
+          contractVersion: 1,
+          capabilities: ['resource-control-v1']
+        });
+      } else if (message.operation === 'job:start') {
+        jobStart = message;
+        emitService('resource:request', 'supervisor-graceful-request', {
+          actionKey: message.actionKey,
+          operationKey: message.operationKey,
+          jobId: message.jobId,
+          unitId: null
+        }, {
+          requestId: 'supervisor-graceful-request',
+          requestKind: 'persistent-state-replace',
+          requested: { memoryBytes: 1, cpuSlots: 0, ioHeavySlots: 0 },
+          replacesReservationId: null,
+          owner: requestOwner
+        });
+      } else if (message.operation === 'resource:grant') {
+        emitService('resource:adopted', 'supervisor-graceful-adopted', message.jobRef, {
+          requestId: message.payload.requestId,
+          grantId: message.payload.grantId,
+          reservationId: message.payload.reservationId,
+          owner: requestOwner
+        });
+      } else if (message.operation === 'resource:adopt-ack') {
+        callbacks.onMessage(createJobEnvelope({
+          direction: 'event',
+          operation: 'job:done',
+          actionKey: jobStart.actionKey,
+          operationKey: jobStart.operationKey,
+          jobId: jobStart.jobId,
+          workerInstanceId: jobStart.workerInstanceId,
+          serviceGeneration: jobStart.serviceGeneration,
+          unitId: null,
+          seq: 1,
+          context: jobStart.context,
+          payload: { result: { checksum: 6004, count: 2, rounds: 2, sum: 3 } }
+        }));
+      } else if (message.operation === 'resource:revoke') {
+        emitService('resource:release', message.controlId, message.jobRef, {
+          reservationId: message.payload.reservationId,
+          reason: 'service-close'
+        });
+      } else if (message.operation === 'executor:close') {
+        emitService('executor:close-ack', message.controlId, null, {});
+      }
+    }
+  });
+  const { policyRegistry, resourceGovernor, supervisor } = harness(fake, (policy) => {
+    applyServicePolicy(policy, 'service.supervisor-graceful');
+  });
+
+  const result = await supervisor.execute(request({ jobId: 'supervisor-graceful-job' }));
+  assert.equal(result.terminalSource, 'job:done');
+  const report = await supervisor.shutdown({ timeoutMs: 100 });
+
+  assert.deepEqual(report.closedServices, ['service.supervisor-graceful']);
+  assert.deepEqual(report.errors, []);
+  assert.deepEqual(serviceTrace.map((message) => message.operation), [
+    'executor:init',
+    'executor:ready',
+    'resource:request',
+    'resource:grant',
+    'resource:adopted',
+    'resource:adopt-ack',
+    'resource:revoke',
+    'resource:release',
+    'resource:release-ack',
+    'executor:close',
+    'executor:close-ack'
+  ]);
+  const validation = validateProtocolSequence(serviceTrace, { policyRegistry });
+  assert.equal(validation.valid, true, JSON.stringify(validation.errors));
+  assert.equal(resourceGovernor.snapshot().activeLeaseCount, 0);
+  assert.equal(resourceGovernor.snapshot().activeDependencyCount, 0);
+  assert.equal(fake.state.closeCount, 1);
+  assert.equal(fake.state.terminateCount, 1);
+});
+
+test('Supervisor normal terminal waits for adopted phase detach handshake before default shutdown', async () => {
+  let initCommand = null;
+  let jobStart = null;
+  let revokeCommand = null;
+  let emitServiceEvent = null;
+  let serviceEventSeq = 0;
+  const serviceTrace = [];
+  const requestOwner = {
+    kind: 'phase',
+    ownerKeyHash: 'supervisor-detach-phase',
+    candidateRevision: 1
+  };
+  const fake = fakeAdapter({
+    onSend(message, callbacks) {
+      function emitService(operation, controlId, jobRef, payload) {
+        serviceEventSeq += 1;
+        const event = createServiceControlEnvelope({
+          direction: 'event',
+          operation,
+          serviceKey: initCommand.serviceKey,
+          controlId,
+          workerInstanceId: initCommand.workerInstanceId,
+          serviceGeneration: initCommand.serviceGeneration,
+          seq: serviceEventSeq,
+          jobRef,
+          payload
+        }, { validate: false });
+        serviceTrace.push(event);
+        callbacks.onMessage(event);
+      }
+      emitServiceEvent = emitService;
+
+      if (message.channel === 'service-control') serviceTrace.push(message);
+      if (message.operation === 'executor:init') {
+        initCommand = message;
+        emitService('executor:ready', 'supervisor-detach-ready', null, {
+          contractVersion: 1,
+          capabilities: ['resource-control-v1']
+        });
+      } else if (message.operation === 'job:start') {
+        jobStart = message;
+        emitService('resource:request', 'supervisor-detach-request-control', {
+          actionKey: message.actionKey,
+          operationKey: message.operationKey,
+          jobId: message.jobId,
+          unitId: null
+        }, {
+          requestId: 'supervisor-detach-request',
+          requestKind: 'phase-extension',
+          requested: { memoryBytes: 1, cpuSlots: 0, ioHeavySlots: 0 },
+          replacesReservationId: null,
+          owner: requestOwner
+        });
+      } else if (message.operation === 'resource:grant') {
+        emitService('resource:adopted', 'supervisor-detach-adopted', message.jobRef, {
+          requestId: message.payload.requestId,
+          grantId: message.payload.grantId,
+          reservationId: message.payload.reservationId,
+          owner: requestOwner
+        });
+      } else if (message.operation === 'resource:adopt-ack') {
+        callbacks.onMessage(createJobEnvelope({
+          direction: 'event',
+          operation: 'job:done',
+          actionKey: jobStart.actionKey,
+          operationKey: jobStart.operationKey,
+          jobId: jobStart.jobId,
+          workerInstanceId: jobStart.workerInstanceId,
+          serviceGeneration: jobStart.serviceGeneration,
+          unitId: null,
+          seq: 1,
+          context: jobStart.context,
+          payload: { result: { checksum: 6004, count: 2, rounds: 2, sum: 3 } }
+        }));
+      } else if (message.operation === 'resource:revoke') {
+        revokeCommand = message;
+      } else if (message.operation === 'executor:close') {
+        emitService('executor:close-ack', message.controlId, null, {});
+      }
+    }
+  });
+  const { policyRegistry, resourceGovernor, supervisor } = harness(fake, (policy) => {
+    applyServicePolicy(policy, 'service.supervisor-detach-phase');
+  });
+
+  let executionSettled = false;
+  const execution = supervisor.execute(request({ jobId: 'supervisor-detach-phase-job' }))
+    .finally(() => { executionSettled = true; });
+  for (let attempt = 0; attempt < 5 && !revokeCommand; attempt += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.ok(revokeCommand);
+  assert.equal(executionSettled, false);
+  assert.equal(resourceGovernor.snapshot().activeLeaseCount, 3);
+
+  emitServiceEvent('resource:release', revokeCommand.controlId, revokeCommand.jobRef, {
+    reservationId: revokeCommand.payload.reservationId,
+    reason: 'phase-complete'
+  });
+  const result = await execution;
+  assert.equal(result.terminalSource, 'job:done');
+  assert.equal(resourceGovernor.snapshot().activeLeaseCount, 1);
+
+  const report = await supervisor.shutdown({ timeoutMs: 100 });
+  assert.deepEqual(report.closedServices, ['service.supervisor-detach-phase']);
+  assert.deepEqual(report.errors, []);
+  assert.deepEqual(serviceTrace.map((message) => message.operation), [
+    'executor:init',
+    'executor:ready',
+    'resource:request',
+    'resource:grant',
+    'resource:adopted',
+    'resource:adopt-ack',
+    'resource:revoke',
+    'resource:release',
+    'resource:release-ack',
+    'executor:close',
+    'executor:close-ack'
+  ]);
+  const validation = validateProtocolSequence(serviceTrace, { policyRegistry });
+  assert.equal(validation.valid, true, JSON.stringify(validation.errors));
+  assert.equal(resourceGovernor.snapshot().activeLeaseCount, 0);
+  assert.equal(resourceGovernor.snapshot().activeDependencyCount, 0);
+  assert.equal(fake.state.closeCount, 1);
+  assert.equal(fake.state.terminateCount, 1);
+});
+
+test('Supervisor successful interaction result retains token until null-ref expiry then shuts down leak-free', async () => {
+  let initCommand = null;
+  let jobStart = null;
+  let tokenReservationId = null;
+  let emitServiceEvent = null;
+  let serviceEventSeq = 0;
+  const serviceTrace = [];
+  const requestOwner = {
+    kind: 'interaction-token',
+    ownerKeyHash: 'supervisor-published-token',
+    candidateRevision: 1
+  };
+  const fake = fakeAdapter({
+    onSend(message, callbacks) {
+      function emitService(operation, controlId, jobRef, payload) {
+        serviceEventSeq += 1;
+        const event = createServiceControlEnvelope({
+          direction: 'event',
+          operation,
+          serviceKey: initCommand.serviceKey,
+          controlId,
+          workerInstanceId: initCommand.workerInstanceId,
+          serviceGeneration: initCommand.serviceGeneration,
+          seq: serviceEventSeq,
+          jobRef,
+          payload
+        }, { validate: false });
+        serviceTrace.push(event);
+        callbacks.onMessage(event);
+      }
+      emitServiceEvent = emitService;
+
+      if (message.channel === 'service-control') serviceTrace.push(message);
+      if (message.operation === 'executor:init') {
+        initCommand = message;
+        emitService('executor:ready', 'supervisor-token-ready', null, {
+          contractVersion: 1,
+          capabilities: ['resource-control-v1']
+        });
+      } else if (message.operation === 'job:start') {
+        jobStart = message;
+        emitService('resource:request', 'supervisor-token-request-control', {
+          actionKey: message.actionKey,
+          operationKey: message.operationKey,
+          jobId: message.jobId,
+          unitId: null
+        }, {
+          requestId: 'supervisor-token-request',
+          requestKind: 'pending-interaction-create',
+          requested: { memoryBytes: 1, cpuSlots: 0, ioHeavySlots: 0 },
+          replacesReservationId: null,
+          owner: requestOwner
+        });
+      } else if (message.operation === 'resource:grant') {
+        tokenReservationId = message.payload.reservationId;
+        emitService('resource:adopted', 'supervisor-token-adopted', message.jobRef, {
+          requestId: message.payload.requestId,
+          grantId: message.payload.grantId,
+          reservationId: message.payload.reservationId,
+          owner: requestOwner
+        });
+      } else if (message.operation === 'resource:adopt-ack') {
+        callbacks.onMessage(createJobEnvelope({
+          direction: 'event',
+          operation: 'job:done',
+          actionKey: jobStart.actionKey,
+          operationKey: jobStart.operationKey,
+          jobId: jobStart.jobId,
+          workerInstanceId: jobStart.workerInstanceId,
+          serviceGeneration: jobStart.serviceGeneration,
+          unitId: null,
+          seq: 1,
+          context: jobStart.context,
+          payload: { result: { checksum: 6004, count: 2, rounds: 2, sum: 3 } }
+        }));
+      } else if (message.operation === 'executor:close') {
+        emitService('executor:close-ack', message.controlId, null, {});
+      }
+    }
+  });
+  const { policyRegistry, resourceGovernor, supervisor } = harness(fake, (policy) => {
+    applyServicePolicy(policy, 'service.supervisor-published-token');
+  });
+
+  const result = await supervisor.execute(request({ jobId: 'supervisor-published-token-job' }));
+  assert.equal(result.terminalSource, 'job:done');
+  assert.equal(result.outcome, 'completed');
+  assert.ok(tokenReservationId);
+  assert.equal(resourceGovernor.snapshot().activeLeaseCount, 2);
+  assert.equal(
+    resourceGovernor.snapshot().activeUsage.memoryBytes,
+    canary.pureComputePolicy.resources.base.memoryBytes + 1
+  );
+  assert.equal(serviceTrace.some((message) => message.operation === 'resource:revoke'), false);
+
+  emitServiceEvent('resource:release', 'supervisor-token-expired', null, {
+    reservationId: tokenReservationId,
+    reason: 'token-expired'
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(serviceTrace.some((message) =>
+    message.operation === 'resource:release-ack' &&
+    message.payload.reservationId === tokenReservationId), true);
+  assert.equal(resourceGovernor.snapshot().activeLeaseCount, 1);
+
+  const report = await supervisor.shutdown({ timeoutMs: 100 });
+  assert.deepEqual(report.closedServices, ['service.supervisor-published-token']);
+  assert.deepEqual(report.errors, []);
+  assert.deepEqual(serviceTrace.map((message) => message.operation), [
+    'executor:init',
+    'executor:ready',
+    'resource:request',
+    'resource:grant',
+    'resource:adopted',
+    'resource:adopt-ack',
+    'resource:release',
+    'resource:release-ack',
+    'executor:close',
+    'executor:close-ack'
+  ]);
+  const validation = validateProtocolSequence(serviceTrace, { policyRegistry });
+  assert.equal(validation.valid, true, JSON.stringify(validation.errors));
+  assert.equal(resourceGovernor.snapshot().activeLeaseCount, 0);
+  assert.equal(resourceGovernor.snapshot().activeDependencyCount, 0);
+  assert.deepEqual(resourceGovernor.snapshot().activeUsage, {
+    cpuSlots: 0,
+    workerThreadSlots: 0,
+    utilityProcessSlots: 0,
+    ioHeavySlots: 0,
+    memoryBytes: 0
+  });
+  assert.equal(fake.state.closeCount, 1);
+  assert.equal(fake.state.terminateCount, 1);
+});
+
+test('Supervisor job:error and cooperative-cancel terminals both revoke interaction tokens before settle', async () => {
+  for (const terminal of ['job-error', 'cancel']) {
+    let initCommand = null;
+    let jobStart = null;
+    let serviceEventSeq = 0;
+    let jobEventSeq = 0;
+    let markTokenReady;
+    const tokenReady = new Promise((resolve) => { markTokenReady = resolve; });
+    const serviceTrace = [];
+    const requestOwner = {
+      kind: 'interaction-token',
+      ownerKeyHash: `supervisor-${terminal}-token`,
+      candidateRevision: 1
+    };
+    const fake = fakeAdapter({
+      onSend(message, callbacks) {
+        function emitService(operation, controlId, jobRef, payload) {
+          serviceEventSeq += 1;
+          const event = createServiceControlEnvelope({
+            direction: 'event',
+            operation,
+            serviceKey: initCommand.serviceKey,
+            controlId,
+            workerInstanceId: initCommand.workerInstanceId,
+            serviceGeneration: initCommand.serviceGeneration,
+            seq: serviceEventSeq,
+            jobRef,
+            payload
+          }, { validate: false });
+          serviceTrace.push(event);
+          callbacks.onMessage(event);
+        }
+        function emitJob(operation, payload) {
+          jobEventSeq += 1;
+          callbacks.onMessage(createJobEnvelope({
+            direction: 'event',
+            operation,
+            actionKey: jobStart.actionKey,
+            operationKey: jobStart.operationKey,
+            jobId: jobStart.jobId,
+            workerInstanceId: jobStart.workerInstanceId,
+            serviceGeneration: jobStart.serviceGeneration,
+            unitId: null,
+            seq: jobEventSeq,
+            context: jobStart.context,
+            payload
+          }));
+        }
+
+        if (message.channel === 'service-control') serviceTrace.push(message);
+        if (message.operation === 'executor:init') {
+          initCommand = message;
+          emitService('executor:ready', `${terminal}-ready`, null, {
+            contractVersion: 1,
+            capabilities: ['resource-control-v1']
+          });
+        } else if (message.operation === 'job:start') {
+          jobStart = message;
+          emitService('resource:request', `${terminal}-request-control`, {
+            actionKey: message.actionKey,
+            operationKey: message.operationKey,
+            jobId: message.jobId,
+            unitId: null
+          }, {
+            requestId: `${terminal}-request`,
+            requestKind: 'pending-interaction-create',
+            requested: { memoryBytes: 1, cpuSlots: 0, ioHeavySlots: 0 },
+            replacesReservationId: null,
+            owner: requestOwner
+          });
+        } else if (message.operation === 'resource:grant') {
+          emitService('resource:adopted', `${terminal}-adopted`, message.jobRef, {
+            requestId: message.payload.requestId,
+            grantId: message.payload.grantId,
+            reservationId: message.payload.reservationId,
+            owner: requestOwner
+          });
+        } else if (message.operation === 'resource:adopt-ack') {
+          markTokenReady();
+          if (terminal === 'job-error') {
+            emitJob('job:error', {
+              error: {
+                code: 'EXECUTION_FAILED',
+                message: 'safe failure',
+                stage: 'execute',
+                detailLines: []
+              }
+            });
+          }
+        } else if (message.operation === 'job:cancel') {
+          emitJob('cancel:ack', { cancellation: { scope: 'job' } });
+          emitJob('job:error', {
+            error: {
+              code: 'CANCELLED',
+              message: 'cancelled',
+              stage: 'cancel',
+              detailLines: []
+            }
+          });
+        } else if (message.operation === 'resource:revoke') {
+          emitService('resource:release', message.controlId, message.jobRef, {
+            reservationId: message.payload.reservationId,
+            reason: 'job-failed'
+          });
+        } else if (message.operation === 'executor:close') {
+          emitService('executor:close-ack', message.controlId, null, {});
+        }
+      }
+    });
+    const { policyRegistry, resourceGovernor, supervisor } = harness(fake, (policy) => {
+      applyServicePolicy(policy, `service.supervisor-${terminal}-token`);
+      if (terminal === 'cancel') policy.cancellation.capability = 'user-cooperative';
+    });
+
+    const execution = supervisor.execute(request({ jobId: `supervisor-${terminal}-token-job` }));
+    await tokenReady;
+    if (terminal === 'cancel') {
+      const cancellation = await supervisor.cancel(`supervisor-${terminal}-token-job`, {
+        reason: 'user-requested'
+      });
+      assert.equal(cancellation.accepted, true);
+    }
+    const result = await execution;
+    assert.equal(result.terminalSource, 'job:error', terminal);
+    assert.equal(resourceGovernor.snapshot().activeLeaseCount, 1, terminal);
+    assert.equal(serviceTrace.some((message) => message.operation === 'resource:revoke'), true, terminal);
+
+    const report = await supervisor.shutdown({ timeoutMs: 100 });
+    assert.deepEqual(report.errors, [], terminal);
+    const validation = validateProtocolSequence(serviceTrace, { policyRegistry });
+    assert.equal(validation.valid, true, `${terminal}: ${JSON.stringify(validation.errors)}`);
+    assert.equal(resourceGovernor.snapshot().activeLeaseCount, 0, terminal);
+    assert.equal(resourceGovernor.snapshot().activeDependencyCount, 0, terminal);
+    assert.equal(fake.state.closeCount, 1, terminal);
+    assert.equal(fake.state.terminateCount, 1, terminal);
+  }
+});
+
+test('Supervisor 在 adapter.start 前完成 Base/Phase admission，terminal 后 exactly-once 释放', async () => {
+  const order = [];
+  const released = [];
+  function lease(kind) {
+    let active = true;
+    return Object.freeze({
+      leaseId: `${kind}-lease`,
+      release(reason) {
+        if (!active) return false;
+        active = false;
+        released.push([kind, reason]);
+        return true;
+      }
+    });
+  }
+  const resourceGovernor = {
+    async acquireBaseLease() {
+      order.push('admit:base');
+      return lease('base');
+    },
+    async acquirePhaseLease() {
+      order.push('admit:phase');
+      return lease('phase');
+    }
+  };
+  const fake = fakeAdapter({
+    onStart() {
+      order.push('adapter:start');
+    },
+    onSend(message, callbacks) {
+      if (message.operation === 'job:start') {
+        callbacks.onMessage(eventFor(message, 'job:done', 1, {
+          result: { checksum: 6004, count: 2, rounds: 2, sum: 3 }
+        }));
+      }
+    }
+  });
+  const { supervisor } = harness(fake, null, canary.validatePureComputeCanaryResult, { resourceGovernor });
+  const result = await supervisor.execute(request({ jobId: 'admission-order-job' }));
+
+  assert.equal(result.outcome, 'completed');
+  assert.deepEqual(order, ['admit:base', 'admit:phase', 'adapter:start']);
+  assert.deepEqual(released, [['phase', 'job-terminal'], ['base', 'job-terminal']]);
+});
+
+test('E02-A factory without Governor preserves simple job execution and shuts down cleanly', async () => {
+  const fake = fakeAdapter({
+    onSend(message, callbacks) {
+      if (message.operation === 'job:start') {
+        callbacks.onMessage(eventFor(message, 'job:done', 1, {
+          result: { checksum: 6004, count: 2, rounds: 2, sum: 3 }
+        }));
+      }
+    }
+  });
+  const { supervisor } = harness(
+    fake,
+    null,
+    canary.validatePureComputeCanaryResult,
+    { resourceGovernor: undefined }
+  );
+  const result = await supervisor.execute(request({ jobId: 'e02a-no-governor-job' }));
+  assert.equal(result.outcome, 'completed');
+  assert.equal(result.terminalSource, 'job:done');
+  assert.equal(fake.state.sent[0].operation, 'job:start');
+  const report = await supervisor.shutdown({ timeoutMs: 20 });
+  assert.deepEqual(report.closedServices, []);
+});
+
+test('without Governor service and compound paths fail closed before adapter start', async () => {
+  const compoundFake = fakeAdapter();
+  const compound = harness(compoundFake, (policy) => {
+    policy.resources.compound = {
+      topologyKey: 'topology.no-governor',
+      childrenMax: 1,
+      childResource: {
+        cpuSlots: 1,
+        workerThreadSlots: 1,
+        utilityProcessSlots: 0,
+        ioHeavySlots: 0,
+        memoryBytes: 1
+      }
+    };
+  }, canary.validatePureComputeCanaryResult, { resourceGovernor: undefined });
+  await assert.rejects(
+    compound.supervisor.execute(request({ jobId: 'compound-no-governor' })),
+    (error) => error.code === 'RESOURCE_GOVERNOR_REQUIRED'
+  );
+  assert.equal(compoundFake.state.callbacks, null);
+
+  const servicePolicy = structuredClone(canary.pureComputePolicy);
+  servicePolicy.lifetime = 'service';
+  servicePolicy.service = { serviceKey: 'service.no-governor' };
+  const policyRegistry = Object.freeze({
+    assertRunnable() { return servicePolicy; },
+    getBinding(_actionKey, fieldPath) {
+      return fieldPath === 'result.validatorKey' ? canary.validatePureComputeCanaryResult : '/service.js';
+    }
+  });
+  const serviceSupervisor = createExecutionSupervisor({ policyRegistry });
+  await assert.rejects(
+    serviceSupervisor.execute(request({ jobId: 'service-no-governor' })),
+    (error) => error.code === 'RESOURCE_GOVERNOR_REQUIRED'
+  );
+});
+
+test('queued admission cancel aborts request, never calls adapter.start, and releases partial admission', async () => {
+  let baseReleaseCount = 0;
+  const resourceGovernor = {
+    async acquireBaseLease() {
+      return Object.freeze({
+        leaseId: 'base-lease',
+        release() {
+          baseReleaseCount += 1;
+          return baseReleaseCount === 1;
+        }
+      });
+    },
+    acquirePhaseLease(admission) {
+      return new Promise((_resolve, reject) => {
+        const rejectCancelled = () => {
+          const error = new Error('queued admission cancelled');
+          error.code = 'ADMISSION_CANCELLED';
+          reject(error);
+        };
+        if (admission.signal.aborted) rejectCancelled();
+        else admission.signal.addEventListener('abort', rejectCancelled, { once: true });
+      });
+    }
+  };
+  const fake = fakeAdapter();
+  const { supervisor } = harness(fake, (policy) => {
+    policy.cancellation.capability = 'not-supported';
+  }, canary.validatePureComputeCanaryResult, { resourceGovernor });
+  const execution = supervisor.execute(request({ jobId: 'queued-cancel-job' }));
+  await new Promise((resolve) => setImmediate(resolve));
+  const cancellation = await supervisor.cancel('queued-cancel-job', { reason: 'user-cancelled' });
+  const result = await execution;
+
+  assert.equal(cancellation.accepted, true);
+  assert.equal(result.outcome, 'cancelled');
+  assert.equal(result.terminalSource, 'spawn-error');
+  assert.equal(fake.state.callbacks, null);
+  assert.equal(baseReleaseCount, 1);
+});
+
+test('real Governor grant diagnostics cancellation releases a late phase grant before transport assignment', async () => {
+  let supervisor;
+  let cancellation;
+  let blockerLeaseId = null;
+  let resourceId = 0;
+  const phase = canary.pureComputePolicy.resources.phase;
+  const resourceGovernor = createResourceGovernor({
+    budgets: phase,
+    idFactory: (prefix) => `diagnostic-cancel-${prefix}-${++resourceId}`,
+    diagnostics(event) {
+      if (supervisor && event.type === 'resource-granted' && event.kind === 'phase' &&
+          event.leaseId !== blockerLeaseId) {
+        cancellation = supervisor.cancel('diagnostic-cancel-job', { reason: 'grant-diagnostic' });
+        cancellation.catch(() => {});
+      }
+    }
+  });
+  const blocker = await resourceGovernor.acquirePhaseLease({
+    ownerKey: 'blocker',
+    actionKey: canary.PURE_COMPUTE_ACTION_KEY,
+    operationKey: 'blocker',
+    resources: phase
+  });
+  blockerLeaseId = blocker.leaseId;
+  const fake = fakeAdapter();
+  ({ supervisor } = harness(
+    fake,
+    (policy) => { policy.cancellation.capability = 'not-supported'; },
+    canary.validatePureComputeCanaryResult,
+    { resourceGovernor }
+  ));
+
+  const execution = supervisor.execute(request({ jobId: 'diagnostic-cancel-job' }));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(resourceGovernor.snapshot().queued.size, 1);
+  assert.equal(blocker.release('admit-job'), true);
+  const result = await execution;
+  await cancellation;
+
+  assert.equal(result.outcome, 'cancelled');
+  assert.equal(result.terminalSource, 'spawn-error');
+  assert.equal(fake.state.callbacks, null);
+  assert.equal(resourceGovernor.snapshot().queued.size, 0);
+  assert.equal(resourceGovernor.snapshot().activeLeaseCount, 0);
+  assert.deepEqual(resourceGovernor.snapshot().activeUsage, {
+    cpuSlots: 0,
+    workerThreadSlots: 0,
+    utilityProcessSlots: 0,
+    ioHeavySlots: 0,
+    memoryBytes: 0
+  });
+});
+
+test('shutdown cancels queued admission even when runtime cancellation is not supported', async () => {
+  let baseReleaseCount = 0;
+  const resourceGovernor = {
+    async acquireBaseLease() {
+      return Object.freeze({
+        leaseId: 'shutdown-base-lease',
+        release() {
+          baseReleaseCount += 1;
+          return baseReleaseCount === 1;
+        }
+      });
+    },
+    acquirePhaseLease(admission) {
+      return new Promise((_resolve, reject) => {
+        const rejectCancelled = () => {
+          const error = new Error('queued admission cancelled by shutdown');
+          error.code = 'ADMISSION_CANCELLED';
+          reject(error);
+        };
+        if (admission.signal.aborted) rejectCancelled();
+        else admission.signal.addEventListener('abort', rejectCancelled, { once: true });
+      });
+    }
+  };
+  const fake = fakeAdapter();
+  const { supervisor } = harness(fake, (policy) => {
+    policy.cancellation.capability = 'not-supported';
+  }, canary.validatePureComputeCanaryResult, { resourceGovernor });
+  const execution = supervisor.execute(request({ jobId: 'queued-shutdown-job' }));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const report = await supervisor.shutdown({ timeoutMs: 100 });
+  const result = await execution;
+
+  assert.equal(result.outcome, 'cancelled');
+  assert.equal(result.terminalSource, 'spawn-error');
+  assert.deepEqual(report.cancelledJobs, ['queued-shutdown-job']);
+  assert.deepEqual(report.protectedJobs, []);
+  assert.equal(fake.state.callbacks, null);
+  assert.equal(baseReleaseCount, 1);
+});
+
+test('shutdown normalizes all finite non-negative E02-A timeout values before lifecycle mutation', async () => {
+  for (const [index, timeoutMs] of [Number.MAX_SAFE_INTEGER, 2_147_483_648, 1000.5].entries()) {
+    const fake = fakeAdapter();
+    const { supervisor } = harness(fake);
+    const report = await supervisor.shutdown({ timeoutMs });
+    assert.deepEqual(Object.keys(report), [
+      'closedServices',
+      'cancelledJobs',
+      'protectedJobs',
+      'interruptedTasks',
+      'activeHolds',
+      'leakedTransports',
+      'errors'
+    ]);
+    assert.deepEqual(report.errors, []);
+    await assert.rejects(
+      supervisor.execute(request({ jobId: `post-large-shutdown-${index}` })),
+      (error) => error.code === 'SUPERVISOR_NOT_ACCEPTING'
+    );
+  }
+});
+
+test('existing nested topology is inspected and frozen before compound admission with no wrapper Worker', async () => {
+  const order = [];
+  let dispatchedTopology = null;
+  const policy = structuredClone(canary.pureComputePolicy);
+  policy.adapterKind = 'existing-dispatch';
+  policy.adapterKey = 'adapter.existing-nested';
+  policy.entryKey = null;
+  policy.resources.base = {
+    cpuSlots: 0,
+    workerThreadSlots: 1,
+    utilityProcessSlots: 0,
+    ioHeavySlots: 0,
+    memoryBytes: 10
+  };
+  policy.resources.phase = {
+    cpuSlots: 0,
+    workerThreadSlots: 0,
+    utilityProcessSlots: 0,
+    ioHeavySlots: 1,
+    memoryBytes: 5
+  };
+  policy.resources.compound = {
+    topologyKey: 'topology.existing-nested',
+    childrenMax: 4,
+    childResource: {
+      cpuSlots: 1,
+      workerThreadSlots: 1,
+      utilityProcessSlots: 0,
+      ioHeavySlots: 0,
+      memoryBytes: 20
+    }
+  };
+  policy.resources.lowMemoryBehavior = 'downgrade-to-single';
+  const existingBinding = createExistingDispatchAdapter({
+    inspectTopology() {
+      order.push('inspect');
+      return { effectiveChildCount: 2 };
+    },
+    dispatch(dispatchRequest) {
+      order.push('dispatch');
+      dispatchedTopology = dispatchRequest.topology;
+      return Promise.resolve({ checksum: 6004, count: 2, rounds: 2, sum: 3 });
+    }
+  });
+  const adapterRegistry = createStaticRegistry({ [policy.adapterKey]: existingBinding });
+  const validatorRegistry = createStaticRegistry({
+    [canary.PURE_COMPUTE_RESULT_VALIDATOR_KEY]: canary.validatePureComputeCanaryResult
+  });
+  adapterRegistry.freeze();
+  validatorRegistry.freeze();
+  const policyRegistry = createExecutionPolicyRegistry({
+    policies: [policy],
+    adapterRegistry,
+    validatorRegistry,
+    staticKeys: {
+      resourceProfileKeys: [policy.resources.profile],
+      topologyKeys: [policy.resources.compound.topologyKey]
+    }
+  });
+  policyRegistry.freeze();
+  let resourceId = 0;
+  const resourceGovernor = createResourceGovernor({
+    budgets: {
+      cpuSlots: 4,
+      workerThreadSlots: 4,
+      utilityProcessSlots: 0,
+      ioHeavySlots: 2,
+      memoryBytes: 100
+    },
+    idFactory(prefix) {
+      order.push('admit');
+      return `${prefix}-${++resourceId}`;
+    }
+  });
+  const supervisor = createExecutionSupervisor({
+    policyRegistry,
+    resourceGovernor,
+    workerThreadAdapter: {
+      start() { throw new Error('wrapper Worker must not be created'); }
+    }
+  });
+
+  const result = await supervisor.execute(request({ jobId: 'existing-topology-job' }));
+  assert.equal(result.outcome, 'completed');
+  assert.deepEqual(order, ['inspect', 'admit', 'dispatch']);
+  assert.deepEqual(dispatchedTopology, {
+    topologyKey: 'topology.existing-nested',
+    childrenMax: 4,
+    childResource: policy.resources.compound.childResource,
+    effectiveChildCount: 2
+  });
+  assert.equal(Object.isFrozen(dispatchedTopology), true);
+  assert.deepEqual(resourceGovernor.snapshot().activeUsage, {
+    cpuSlots: 0,
+    workerThreadSlots: 0,
+    utilityProcessSlots: 0,
+    ioHeavySlots: 0,
+    memoryBytes: 0
+  });
+});
+
+test('service job 使用 Host generation 路由，正常 terminal 仅 detach 并释放 job admission', async () => {
+  const policy = structuredClone(canary.pureComputePolicy);
+  policy.lifetime = 'service';
+  policy.service = { serviceKey: 'service.test' };
+  const policyRegistry = Object.freeze({
+    assertRunnable(actionKey) {
+      if (actionKey !== policy.actionKey) throw new Error('unknown action');
+      return policy;
+    },
+    get(actionKey) {
+      return actionKey === policy.actionKey ? policy : null;
+    },
+    getBinding(_actionKey, fieldPath) {
+      if (fieldPath === 'result.validatorKey') return canary.validatePureComputeCanaryResult;
+      return null;
+    },
+    list() { return Object.freeze([policy]); }
+  });
+  let hostCallbacks = null;
+  let closeCount = 0;
+  let terminateCount = 0;
+  const sent = [];
+  const serviceHost = Object.freeze({
+    async openJob(openRequest) {
+      hostCallbacks = openRequest;
+      return Object.freeze({
+        workerInstanceId: 'service-worker-1',
+        serviceGeneration: 2,
+        baseLeaseId: 'service-base-1',
+        baseResources: policy.resources.base,
+        ready: Promise.resolve(),
+        send(message) {
+          sent.push(message);
+          if (message.operation !== 'job:start') return;
+          queueMicrotask(() => openRequest.onMessage(createJobEnvelope({
+            direction: 'event',
+            operation: 'job:done',
+            actionKey: message.actionKey,
+            operationKey: message.operationKey,
+            jobId: message.jobId,
+            workerInstanceId: 'service-worker-1',
+            serviceGeneration: 2,
+            unitId: null,
+            seq: 1,
+            context: message.context,
+            payload: { result: { checksum: 6004, count: 2, rounds: 2, sum: 3 } }
+          })));
+        },
+        close() { closeCount += 1; },
+        async terminate() { terminateCount += 1; }
+      });
+    },
+    async closeService() { return false; },
+    stopAcceptingNewServices() {},
+    async shutdown() { return Object.freeze([]); },
+    snapshot() { return Object.freeze({ services: Object.freeze([]) }); }
+  });
+  let resourceId = 0;
+  const resourceGovernor = createResourceGovernor({
+    budgets: {
+      cpuSlots: 4,
+      workerThreadSlots: 4,
+      utilityProcessSlots: 1,
+      ioHeavySlots: 4,
+      memoryBytes: 1024 * 1024 * 1024
+    },
+    idFactory: (prefix) => `${prefix}-${++resourceId}`
+  });
+  const supervisor = createExecutionSupervisor({ policyRegistry, resourceGovernor, serviceHost });
+  const result = await supervisor.execute(request({ jobId: 'service-job' }));
+
+  assert.equal(result.outcome, 'completed');
+  assert.equal(hostCallbacks.jobId, 'service-job');
+  assert.equal(sent[0].workerInstanceId, 'service-worker-1');
+  assert.equal(sent[0].serviceGeneration, 2);
+  assert.equal(closeCount, 1);
+  assert.equal(terminateCount, 0);
+  assert.equal(resourceGovernor.snapshot().activeLeaseCount, 0);
+});
+
+test('service Host exit callback remains an unexpected-exit terminal in Supervisor', async () => {
+  const policy = structuredClone(canary.pureComputePolicy);
+  policy.lifetime = 'service';
+  policy.service = { serviceKey: 'service.exit' };
+  const policyRegistry = Object.freeze({
+    assertRunnable(actionKey) {
+      if (actionKey !== policy.actionKey) throw new Error('unknown action');
+      return policy;
+    },
+    get(actionKey) {
+      return actionKey === policy.actionKey ? policy : null;
+    },
+    getBinding(_actionKey, fieldPath) {
+      if (fieldPath === 'result.validatorKey') return canary.validatePureComputeCanaryResult;
+      return null;
+    }
+  });
+  let closeCount = 0;
+  let terminateCount = 0;
+  const serviceHost = Object.freeze({
+    async openJob(openRequest) {
+      return Object.freeze({
+        workerInstanceId: 'service-exit-worker',
+        serviceGeneration: 3,
+        baseLeaseId: 'service-exit-base',
+        baseResources: policy.resources.base,
+        ready: Promise.resolve(),
+        send(message) {
+          if (message.operation === 'job:start') {
+            queueMicrotask(() => openRequest.onExit(17, 'SIGTERM'));
+          }
+        },
+        close() { closeCount += 1; },
+        async terminate() { terminateCount += 1; }
+      });
+    },
+    async closeService() { return false; },
+    stopAcceptingNewServices() {},
+    async shutdown() { return Object.freeze([]); },
+    snapshot() { return Object.freeze({ services: Object.freeze([]) }); }
+  });
+  let resourceId = 0;
+  const resourceGovernor = createResourceGovernor({
+    budgets: {
+      cpuSlots: 4,
+      workerThreadSlots: 4,
+      utilityProcessSlots: 1,
+      ioHeavySlots: 4,
+      memoryBytes: 1024 * 1024 * 1024
+    },
+    idFactory: (prefix) => `${prefix}-${++resourceId}`
+  });
+  const supervisor = createExecutionSupervisor({ policyRegistry, resourceGovernor, serviceHost });
+
+  const result = await supervisor.execute(request({ jobId: 'service-exit-job' }));
+
+  assert.equal(result.outcome, 'transport-lost');
+  assert.equal(result.terminalSource, 'unexpected-exit');
+  assert.equal(result.error.code, 'UNEXPECTED_EXIT');
+  assert.equal(terminateCount, 1);
+  assert.equal(closeCount, 1);
+  assert.equal(resourceGovernor.snapshot().activeLeaseCount, 0);
+});
+
+test('service Base startup pending 时取消会关闭 starting generation，且不会悬挂或发送 job:start', async () => {
+  const policy = structuredClone(canary.pureComputePolicy);
+  policy.lifetime = 'service';
+  policy.service = { serviceKey: 'service.starting' };
+  policy.cancellation.capability = 'user-cooperative';
+  const policyRegistry = Object.freeze({
+    assertRunnable(actionKey) {
+      if (actionKey !== policy.actionKey) throw new Error('unknown action');
+      return policy;
+    },
+    get(actionKey) {
+      return actionKey === policy.actionKey ? policy : null;
+    },
+    getBinding(_actionKey, fieldPath) {
+      if (fieldPath === 'result.validatorKey') return canary.validatePureComputeCanaryResult;
+      return null;
+    },
+    list() { return Object.freeze([policy]); }
+  });
+  let rejectOpening;
+  let closeRequest = null;
+  const serviceHost = Object.freeze({
+    openJob() {
+      return new Promise((_resolve, reject) => { rejectOpening = reject; });
+    },
+    async closeService(serviceKey, closeOptions) {
+      closeRequest = { serviceKey, closeOptions };
+      const error = new Error('service start cancelled');
+      error.code = 'ADMISSION_CANCELLED';
+      rejectOpening(error);
+      return true;
+    },
+    stopAcceptingNewServices() {},
+    async shutdown() { return Object.freeze([]); },
+    snapshot() { return Object.freeze({ services: Object.freeze([]) }); }
+  });
+  let phaseReleaseCount = 0;
+  const resourceGovernor = {
+    async acquirePhaseLease() {
+      return Object.freeze({
+        release() {
+          phaseReleaseCount += 1;
+          return phaseReleaseCount === 1;
+        }
+      });
+    }
+  };
+  const supervisor = createExecutionSupervisor({ policyRegistry, resourceGovernor, serviceHost });
+  const execution = supervisor.execute(request({ jobId: 'service-start-cancel-job' }));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(supervisor.inspect('service-start-cancel-job').state, 'spawning');
+
+  const cancellation = await supervisor.cancel('service-start-cancel-job', { reason: 'user-cancelled' });
+  const result = await execution;
+
+  assert.equal(cancellation.accepted, true);
+  assert.equal(result.outcome, 'cancelled');
+  assert.equal(result.terminalSource, 'spawn-error');
+  assert.deepEqual(closeRequest, {
+    serviceKey: 'service.starting',
+    closeOptions: { force: true }
+  });
+  assert.equal(phaseReleaseCount, 1);
+  assert.equal(supervisor.inspect('service-start-cancel-job'), null);
+});
+
+test('Host semantic protocol errors retain canonical protocol-error terminal classification', async () => {
+  let terminateCount = 0;
+  let closeCount = 0;
+  const serviceHost = Object.freeze({
+    async openJob(openRequest) {
+      return Object.freeze({
+        workerInstanceId: 'semantic-protocol-worker',
+        serviceGeneration: 4,
+        createdGeneration: false,
+        baseLeaseId: 'semantic-protocol-base',
+        baseResources: canary.pureComputePolicy.resources.base,
+        ready: Promise.resolve(),
+        send(message) {
+          if (message.operation === 'job:start') {
+            queueMicrotask(() => openRequest.onError(new ServiceHostProtocolError(
+              'SERVICE_RELEASE_UNKNOWN',
+              'Unknown reservation'
+            )));
+          }
+        },
+        close() { closeCount += 1; },
+        async terminate() { terminateCount += 1; }
+      });
+    },
+    async closeService() { return false; },
+    stopAcceptingNewServices() {},
+    async shutdown() { return Object.freeze([]); },
+    snapshot() { return Object.freeze({ services: Object.freeze([]) }); }
+  });
+  const fake = fakeAdapter();
+  const { supervisor } = harness(fake, (policy) => {
+    applyServicePolicy(policy, 'service.semantic-protocol');
+  }, canary.validatePureComputeCanaryResult, { serviceHost });
+
+  const result = await supervisor.execute(request({ jobId: 'semantic-protocol-job' }));
+  assert.equal(result.terminalSource, 'protocol-error');
+  assert.equal(result.outcome, 'transport-lost');
+  assert.equal(result.error.code, 'SERVICE_RELEASE_UNKNOWN');
+  assert.equal(terminateCount, 1);
+  assert.equal(closeCount, 1);
+});
+
+test('real Host control exchange reuse maps to protocol-error without reservation leaks', async () => {
+  let initCommand = null;
+  let serviceEventSeq = 0;
+  const fake = fakeAdapter({
+    onSend(message, callbacks) {
+      function emitService(operation, controlId, jobRef, payload) {
+        serviceEventSeq += 1;
+        callbacks.onMessage(createServiceControlEnvelope({
+          direction: 'event',
+          operation,
+          serviceKey: initCommand.serviceKey,
+          controlId,
+          workerInstanceId: initCommand.workerInstanceId,
+          serviceGeneration: initCommand.serviceGeneration,
+          seq: serviceEventSeq,
+          jobRef,
+          payload
+        }, { validate: false }));
+      }
+
+      if (message.operation === 'executor:init') {
+        initCommand = message;
+        emitService('executor:ready', 'runtime-control-ready', null, {
+          contractVersion: 1,
+          capabilities: ['resource-control-v1']
+        });
+      } else if (message.operation === 'job:start') {
+        emitService('resource:request', initCommand.controlId, {
+          actionKey: message.actionKey,
+          operationKey: message.operationKey,
+          jobId: message.jobId,
+          unitId: null
+        }, {
+          requestId: 'runtime-init-id-reuse',
+          requestKind: 'pending-interaction-create',
+          requested: { memoryBytes: 1, cpuSlots: 0, ioHeavySlots: 0 },
+          replacesReservationId: null,
+          owner: {
+            kind: 'interaction-token',
+            ownerKeyHash: 'runtime-init-id-reuse-owner',
+            candidateRevision: 1
+          }
+        });
+      }
+    }
+  });
+  const { resourceGovernor, supervisor } = harness(fake, (policy) => {
+    applyServicePolicy(policy, 'service.runtime-control-reuse');
+  });
+
+  const result = await supervisor.execute(request({ jobId: 'runtime-control-reuse-job' }));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(result.terminalSource, 'protocol-error');
+  assert.equal(result.outcome, 'transport-lost');
+  assert.equal(result.error.code, 'SERVICE_CONTROL_ID_REUSED');
+  assert.equal(result.error.stage, 'protocol');
+  assert.equal(fake.state.closeCount, 1);
+  assert.equal(fake.state.terminateCount, 1);
+  assert.equal(resourceGovernor.snapshot().queued.size, 0);
+  assert.equal(resourceGovernor.snapshot().activeDependencyCount, 0);
+  assert.equal(resourceGovernor.snapshot().activeLeaseCount, 0);
+});
+
+test('real Host rejects wire release while a persistent replacement is still queued', async () => {
+  let initCommand = null;
+  let currentJobRef = null;
+  let initialReservationId = null;
+  let serviceEventSeq = 0;
+  const ownerHash = 'a'.repeat(64);
+  const fake = fakeAdapter({
+    onSend(message, callbacks) {
+      function emitService(operation, controlId, jobRef, payload) {
+        serviceEventSeq += 1;
+        callbacks.onMessage(createServiceControlEnvelope({
+          direction: 'event',
+          operation,
+          serviceKey: initCommand.serviceKey,
+          controlId,
+          workerInstanceId: initCommand.workerInstanceId,
+          serviceGeneration: initCommand.serviceGeneration,
+          seq: serviceEventSeq,
+          jobRef,
+          payload
+        }, { validate: false }));
+      }
+
+      if (message.operation === 'executor:init') {
+        initCommand = message;
+        emitService('executor:ready', 'queued-wire-ready', null, {
+          contractVersion: 1,
+          capabilities: ['resource-control-v1']
+        });
+      } else if (message.operation === 'job:start') {
+        currentJobRef = {
+          actionKey: message.actionKey,
+          operationKey: message.operationKey,
+          jobId: message.jobId,
+          unitId: null
+        };
+        emitService('resource:request', 'queued-wire-request-1', currentJobRef, {
+          requestId: 'queued-wire-request-1',
+          requestKind: 'persistent-state-replace',
+          requested: { memoryBytes: 1, cpuSlots: 0, ioHeavySlots: 0 },
+          replacesReservationId: null,
+          owner: { kind: 'service-state', ownerKeyHash: ownerHash, candidateRevision: 1 }
+        });
+      } else if (message.operation === 'resource:grant' &&
+          message.payload.requestId === 'queued-wire-request-1') {
+        initialReservationId = message.payload.reservationId;
+        emitService('resource:adopted', 'queued-wire-adopt-1', currentJobRef, {
+          requestId: message.payload.requestId,
+          grantId: message.payload.grantId,
+          reservationId: message.payload.reservationId,
+          owner: { kind: 'service-state', ownerKeyHash: ownerHash, candidateRevision: 1 }
+        });
+      } else if (message.operation === 'resource:adopt-ack' &&
+          message.payload.requestId === 'queued-wire-request-1') {
+        emitService('resource:request', 'queued-wire-request-2', currentJobRef, {
+          requestId: 'queued-wire-request-2',
+          requestKind: 'persistent-state-replace',
+          requested: { memoryBytes: 2, cpuSlots: 0, ioHeavySlots: 0 },
+          replacesReservationId: initialReservationId,
+          owner: { kind: 'service-state', ownerKeyHash: ownerHash, candidateRevision: 2 }
+        });
+        emitService('resource:release', 'queued-wire-release-old', null, {
+          reservationId: initialReservationId,
+          reason: 'service-close'
+        });
+      }
+    }
+  });
+  const phase = canary.pureComputePolicy.resources.phase;
+  let resourceId = 0;
+  const resourceGovernor = createResourceGovernor({
+    budgets: {
+      ...phase,
+      memoryBytes: phase.memoryBytes + 1
+    },
+    idFactory: (prefix) => `queued-wire-${prefix}-${++resourceId}`
+  });
+  const { supervisor } = harness(fake, (policy) => {
+    applyServicePolicy(policy, 'service.queued-wire-release');
+  }, canary.validatePureComputeCanaryResult, { resourceGovernor });
+
+  const result = await supervisor.execute(request({ jobId: 'queued-wire-release-job' }));
+  for (let turn = 0; turn < 3; turn += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  assert.equal(result.terminalSource, 'protocol-error');
+  assert.equal(result.outcome, 'transport-lost');
+  assert.equal(result.error.code, 'SERVICE_RELEASE_DURING_TENTATIVE_REPLACEMENT');
+  assert.equal(result.error.stage, 'protocol');
+  assert.equal(fake.state.sent.some((message) => message.operation === 'resource:release-ack'), false);
+  assert.equal(fake.state.closeCount, 1);
+  assert.equal(fake.state.terminateCount, 1);
+  assert.equal(resourceGovernor.snapshot().queued.size, 0);
+  assert.equal(resourceGovernor.snapshot().activeDependencyCount, 0);
+  assert.equal(resourceGovernor.snapshot().activeLeaseCount, 0);
+  assert.deepEqual(resourceGovernor.snapshot().activeUsage, {
+    cpuSlots: 0,
+    workerThreadSlots: 0,
+    utilityProcessSlots: 0,
+    ioHeavySlots: 0,
+    memoryBytes: 0
+  });
+});
+
+test('cancelled compound admission on an existing service detaches only the current job', async () => {
+  let generationAlive = true;
+  let persistentReservationAlive = true;
+  let closeCount = 0;
+  let terminateCount = 0;
+  let jobStartCount = 0;
+  let compoundPending = false;
+  const serviceHost = Object.freeze({
+    async openJob() {
+      return Object.freeze({
+        workerInstanceId: 'shared-worker',
+        serviceGeneration: 7,
+        createdGeneration: false,
+        baseLeaseId: 'shared-base',
+        baseResources: canary.pureComputePolicy.resources.base,
+        ready: Promise.resolve(),
+        send(message) {
+          if (message.operation === 'job:start') jobStartCount += 1;
+        },
+        close() { closeCount += 1; },
+        async terminate() {
+          terminateCount += 1;
+          generationAlive = false;
+          persistentReservationAlive = false;
+        }
+      });
+    },
+    async closeService() {
+      generationAlive = false;
+      persistentReservationAlive = false;
+      return true;
+    },
+    stopAcceptingNewServices() {},
+    async shutdown() { return Object.freeze([]); },
+    snapshot() { return Object.freeze({ services: Object.freeze([]) }); }
+  });
+  const resourceGovernor = {
+    acquireCompoundLease(admission) {
+      compoundPending = true;
+      return new Promise((_resolve, reject) => {
+        const abort = () => {
+          compoundPending = false;
+          const error = new Error('compound admission cancelled');
+          error.code = 'ADMISSION_CANCELLED';
+          reject(error);
+        };
+        if (admission.signal.aborted) abort();
+        else admission.signal.addEventListener('abort', abort, { once: true });
+      });
+    }
+  };
+  const fake = fakeAdapter();
+  const { supervisor } = harness(fake, (policy) => {
+    applyServicePolicy(policy, 'service.shared');
+    policy.cancellation.capability = 'not-supported';
+    policy.resources.compound = {
+      topologyKey: 'topology.shared',
+      childrenMax: 2,
+      childResource: {
+        cpuSlots: 1,
+        workerThreadSlots: 1,
+        utilityProcessSlots: 0,
+        ioHeavySlots: 0,
+        memoryBytes: 1
+      }
+    };
+  }, canary.validatePureComputeCanaryResult, { resourceGovernor, serviceHost });
+  const execution = supervisor.execute(request({ jobId: 'shared-compound-job' }));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(compoundPending, true);
+  assert.equal(supervisor.inspect('shared-compound-job').state, 'admitting');
+
+  const cancellation = await supervisor.cancel('shared-compound-job', { reason: 'cancel-before-dispatch' });
+  const result = await execution;
+  assert.equal(cancellation.accepted, true);
+  assert.equal(result.outcome, 'cancelled');
+  assert.equal(result.terminalSource, 'spawn-error');
+  assert.equal(compoundPending, false);
+  assert.equal(jobStartCount, 0);
+  assert.equal(closeCount, 1);
+  assert.equal(terminateCount, 0);
+  assert.equal(generationAlive, true);
+  assert.equal(persistentReservationAlive, true);
+});
+
+test('cancellation while an existing service attach is pending does not close that generation', async () => {
+  let resolveOpen;
+  let markOpenStarted;
+  const openStarted = new Promise((resolve) => { markOpenStarted = resolve; });
+  let closeCount = 0;
+  let terminateCount = 0;
+  let closeServiceCount = 0;
+  let jobStartCount = 0;
+  const serviceKey = 'service.shared-attach-window';
+  const serviceHost = Object.freeze({
+    openJob() {
+      markOpenStarted();
+      return new Promise((resolve) => { resolveOpen = resolve; });
+    },
+    async closeService() {
+      closeServiceCount += 1;
+      return true;
+    },
+    stopAcceptingNewServices() {},
+    async shutdown() { return Object.freeze([]); },
+    snapshot() {
+      return Object.freeze({
+        services: Object.freeze([Object.freeze({ serviceKey })])
+      });
+    }
+  });
+  const fake = fakeAdapter();
+  const { supervisor } = harness(fake, (policy) => {
+    applyServicePolicy(policy, serviceKey);
+    policy.cancellation.capability = 'not-supported';
+  }, canary.validatePureComputeCanaryResult, { serviceHost });
+  const execution = supervisor.execute(request({ jobId: 'shared-attach-window-job' }));
+  await openStarted;
+  assert.equal(supervisor.inspect('shared-attach-window-job').state, 'spawning');
+
+  const cancellation = await supervisor.cancel(
+    'shared-attach-window-job',
+    { reason: 'cancel-during-attach' }
+  );
+  resolveOpen(Object.freeze({
+    workerInstanceId: 'shared-attach-window-worker',
+    serviceGeneration: 9,
+    createdGeneration: false,
+    baseLeaseId: 'shared-attach-window-base',
+    baseResources: canary.pureComputePolicy.resources.base,
+    ready: Promise.resolve(),
+    send(message) {
+      if (message.operation === 'job:start') jobStartCount += 1;
+    },
+    close() { closeCount += 1; },
+    async terminate() { terminateCount += 1; }
+  }));
+  const result = await execution;
+  assert.equal(cancellation.accepted, true);
+  assert.equal(result.outcome, 'cancelled');
+  assert.equal(jobStartCount, 0);
+  assert.equal(closeServiceCount, 0);
+  assert.equal(closeCount, 1);
+  assert.equal(terminateCount, 0);
 });

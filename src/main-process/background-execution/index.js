@@ -10,6 +10,8 @@ const protocol = require('./protocol');
 const protocolValidator = require('./protocol-validator');
 const { validateProtocolSequence } = require('./protocol-sequence-validator');
 const { createDirectionSequenceTracker } = require('./sequence-tracker');
+const { createResourceGovernor } = require('./resource-governor');
+const { createServiceHost } = require('./service-host');
 const errorCodec = require('./error-codec');
 const { createInlineAsyncAdapter } = require('./adapters/inline-async-adapter');
 const { createWorkerThreadAdapter } = require('./adapters/worker-thread-adapter');
@@ -27,6 +29,8 @@ module.exports = {
   createExecutionSupervisor,
   createExistingDispatchAdapter,
   createInlineAsyncAdapter,
+  createResourceGovernor,
+  createServiceHost,
   createStaticRegistry,
   createUtilityProcessAdapter,
   createWorkerThreadAdapter,

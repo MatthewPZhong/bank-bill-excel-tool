@@ -13,6 +13,9 @@ const {
   validatePolicyDocument
 } = require('../../../../src/main-process/background-execution/execution-policy-registry');
 const canary = require('../../../../src/main-process/background-execution/canary');
+const { createExistingDispatchAdapter } = require(
+  '../../../../src/main-process/background-execution/adapters/existing-dispatch-adapter'
+);
 
 const FIXTURES = path.resolve(
   __dirname,
@@ -534,4 +537,79 @@ test('canary identity lookup 只认 own action，不把 inherited canary 当第�
   });
   const errors = semanticPolicyErrors({ actions: inheritedActions });
   assert.equal(errors.some((error) => error.code === 'POLICY_PURE_CANARY_IDENTITY_INVALID'), false);
+});
+
+test('同一 serviceKey 只接受一致的 frozen executable/capability binding，且与注册顺序无关', () => {
+  const policies = fixture('valid/policy-registry.v3.2.x.json').actions;
+  const left = policies['fund-recon:import'];
+  const right = policies['fund-recon:run'];
+  const staticKeys = fixture('valid/static-key-manifest.v3.2.x.json');
+  const validatorRegistry = createStaticRegistry({
+    [left.result.validatorKey]: () => true,
+    [right.result.validatorKey]: () => true
+  });
+
+  function registryFor(orderedPolicies, rightEntry) {
+    return createExecutionPolicyRegistry({
+      policies: orderedPolicies,
+      entryRegistry: createStaticRegistry({
+        [left.entryKey]: {
+          path: '/packaged/fund-recon-service.js',
+          workerData: { capabilities: ['resource-control-v1'] }
+        },
+        [right.entryKey]: rightEntry
+      }),
+      validatorRegistry,
+      staticKeys,
+      generatedAt: '2026-08-22T00:00:00Z'
+    });
+  }
+
+  const compatible = registryFor([left, right], {
+    path: '/packaged/fund-recon-service.js',
+    workerData: { capabilities: ['resource-control-v1'] }
+  });
+  assert.doesNotThrow(() => compatible.freeze());
+
+  for (const order of [[left, right], [right, left]]) {
+    const conflicting = registryFor(order, {
+      path: '/packaged/other-service.js',
+      workerData: { capabilities: ['resource-control-v1', 'other-v1'] }
+    });
+    assert.throws(
+      () => conflicting.freeze(),
+      (error) => error.code === 'POLICY_SERVICE_BINDING_CONFLICT' &&
+        error.details.serviceKey === 'service.fund-recon'
+    );
+  }
+});
+
+test('official existing adapter freeze snapshot 保留 bind 后的 inspectTopology', () => {
+  const policy = structuredClone(canary.pureComputePolicy);
+  policy.adapterKind = 'existing-dispatch';
+  policy.adapterKey = 'adapter.background-execution:pure-compute-canary';
+  policy.entryKey = null;
+  let inspected = 0;
+  const official = createExistingDispatchAdapter({
+    dispatch() { return Promise.resolve({}); },
+    inspectTopology(request) {
+      inspected += 1;
+      assert.equal(request.actionKey, policy.actionKey);
+      return { effectiveChildCount: 2 };
+    }
+  });
+  const registry = createExecutionPolicyRegistry({
+    policies: [policy],
+    adapterRegistry: createStaticRegistry({ [policy.adapterKey]: official }),
+    validatorRegistry: createStaticRegistry({
+      [policy.result.validatorKey]: canary.validatePureComputeCanaryResult
+    }),
+    staticKeys: { resourceProfileKeys: [policy.resources.profile] },
+    generatedAt: '2026-08-22T00:00:00Z'
+  });
+  registry.freeze();
+  const binding = registry.getBinding(policy.actionKey, 'adapterKey');
+  assert.equal(typeof binding.inspectTopology, 'function');
+  assert.deepEqual(binding.inspectTopology({ actionKey: policy.actionKey }), { effectiveChildCount: 2 });
+  assert.equal(inspected, 1);
 });

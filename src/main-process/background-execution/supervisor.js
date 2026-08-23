@@ -21,6 +21,14 @@ const {
   validateJobEnvelope
 } = require('./protocol-validator');
 const { createDirectionSequenceTracker } = require('./sequence-tracker');
+const { checkedAdd } = require('./resource-lease');
+const { MAX_TIMER_DELAY_MS } = require('./admission-queue');
+const { closeResourceGovernor } = require('./resource-governor');
+const {
+  ServiceHostProtocolError,
+  createServiceHost,
+  serviceTransportCreatedGeneration
+} = require('./service-host');
 
 class SupervisorError extends Error {
   constructor(code, message) {
@@ -182,14 +190,28 @@ function createExecutionSupervisor(options = {}) {
   if (typeof options.policyRegistry.getBinding !== 'function') {
     throw new TypeError('ExecutionSupervisor requires a frozen policy registry binding snapshot');
   }
+  const resourceGovernor = options.resourceGovernor || null;
   const now = options.now || Date.now;
   const diagnostics = options.diagnostics || (() => {});
+  const workerThreadAdapter = options.workerThreadAdapter || createWorkerThreadAdapter();
+  const utilityProcessAdapter = options.utilityProcessAdapter || createUtilityProcessAdapter();
   const defaultAdapters = Object.freeze({
     'inline-async': options.inlineAsyncAdapter || createInlineAsyncAdapter(),
-    'thread-single': options.workerThreadAdapter || createWorkerThreadAdapter(),
-    'thread-pool': options.workerThreadAdapter || createWorkerThreadAdapter(),
-    'utility-process': options.utilityProcessAdapter || createUtilityProcessAdapter()
+    'thread-single': workerThreadAdapter,
+    'thread-pool': workerThreadAdapter,
+    'utility-process': utilityProcessAdapter
   });
+  const serviceHost = options.serviceHost || (resourceGovernor
+    ? createServiceHost({
+        policyRegistry: options.policyRegistry,
+        resourceGovernor,
+        workerThreadAdapter,
+        utilityProcessAdapter,
+        idFactory: options.idFactory,
+        now,
+        diagnostics
+      })
+    : null);
   const jobs = new Map();
   const pendingTransportCleanups = new Map();
   const failedTransportCleanups = new Map();
@@ -210,8 +232,11 @@ function createExecutionSupervisor(options = {}) {
     const onProgress = requestSnapshot.onProgress;
     const { actionKey, operationKey } = request;
     const policy = options.policyRegistry.assertRunnable(actionKey, { production: request.production === true });
-    if (policy.lifetime !== 'job') {
-      throw new SupervisorError('E02A_SERVICE_UNSUPPORTED', 'E02-A supervisor does not host service-lifetime actions');
+    if (!resourceGovernor && (policy.lifetime === 'service' || policy.resources.compound)) {
+      throw new SupervisorError(
+        'RESOURCE_GOVERNOR_REQUIRED',
+        `${policy.lifetime === 'service' ? 'Service' : 'Compound'} execution requires ResourceGovernor`
+      );
     }
     if (policy.commit.kind !== 'none') {
       throw new SupervisorError('E02A_DURABLE_COMMIT_UNSUPPORTED', 'E02-A supervisor only executes commit.kind=none actions');
@@ -222,8 +247,9 @@ function createExecutionSupervisor(options = {}) {
       : request.context;
     if (!context) throw new SupervisorError('CONTEXT_REQUIRED', 'Execute request requires policy context');
     const jobId = request.jobId || (options.idFactory ? options.idFactory('job') : makeId('job'));
-    const workerInstanceId = request.workerInstanceId ||
+    let workerInstanceId = request.workerInstanceId ||
       (options.idFactory ? options.idFactory('worker') : makeId('worker'));
+    let serviceGeneration = policy.lifetime === 'service' ? 1 : null;
     validateStringField(jobId, 'jobId', { required: true });
     validateStringField(workerInstanceId, 'workerInstanceId', { required: true });
 
@@ -254,7 +280,7 @@ function createExecutionSupervisor(options = {}) {
       operationKey,
       jobId,
       workerInstanceId,
-      serviceGeneration: null,
+      serviceGeneration,
       unitId: null,
       seq: 1,
       context,
@@ -268,7 +294,7 @@ function createExecutionSupervisor(options = {}) {
         operationKey,
         jobId,
         workerInstanceId,
-        serviceGeneration: null,
+        serviceGeneration,
         unitId,
         seq: 1,
         context,
@@ -322,6 +348,11 @@ function createExecutionSupervisor(options = {}) {
       transportCleanupErrors: [],
       terminateCalled: false,
       closeCalled: false,
+      admissionAbortController: new AbortController(),
+      resourceLeases: [],
+      resourceCleanupSettled: false,
+      serviceGenerationCreated: null,
+      topology: null,
       timers: new Set(),
       metrics: { queuedAt, startedAt: 0, endedAt: 0, workerCount: 1 },
       promise,
@@ -369,8 +400,14 @@ function createExecutionSupervisor(options = {}) {
     async function boundedCleanupPhase(phase, callback) {
       const timeoutMs = policy.cancellation.terminateTimeoutMs;
       try {
+        let cleanup;
+        try {
+          cleanup = callback();
+        } catch (error) {
+          cleanup = Promise.reject(error);
+        }
         await promiseWithTimeout(
-          Promise.resolve().then(callback),
+          cleanup,
           timeoutMs,
           () => new SupervisorError(
             `TRANSPORT_${phase.toUpperCase()}_TIMEOUT`,
@@ -390,7 +427,8 @@ function createExecutionSupervisor(options = {}) {
           record.transportCleanupSettled = true;
           return;
         }
-        const terminateRequired = force || policy.adapterKind !== 'existing-dispatch';
+        const terminateRequired = force ||
+          (policy.lifetime !== 'service' && policy.adapterKind !== 'existing-dispatch');
         if (terminateRequired && !record.terminateCalled) {
           record.terminateCalled = true;
           await boundedCleanupPhase('terminate', () => {
@@ -418,6 +456,40 @@ function createExecutionSupervisor(options = {}) {
       return record.transportCleanup;
     }
 
+    function cleanupResources(reason = 'job-terminal') {
+      if (record.resourceCleanupSettled) return;
+      record.resourceCleanupSettled = true;
+      for (const lease of record.resourceLeases.splice(0).reverse()) {
+        try { lease.release(reason); } catch (releaseError) {
+          reportDiagnostic({
+            type: 'resource-cleanup-error',
+            actionKey,
+            operationKey,
+            jobId,
+            code: releaseError && releaseError.code || 'RESOURCE_RELEASE_FAILED'
+          });
+        }
+      }
+    }
+
+    function retainGrantedLease(lease, reason = 'late-admission-grant') {
+      if (!record.terminal && !record.admissionAbortController.signal.aborted &&
+          !record.resourceCleanupSettled) {
+        record.resourceLeases.push(lease);
+        return true;
+      }
+      try { lease.release(reason); } catch (releaseError) {
+        reportDiagnostic({
+          type: 'resource-cleanup-error',
+          actionKey,
+          operationKey,
+          jobId,
+          code: releaseError && releaseError.code || 'RESOURCE_RELEASE_FAILED'
+        });
+      }
+      return false;
+    }
+
     function stageForTerminal(terminalSource) {
       if (terminalSource === 'spawn-error' || terminalSource === 'init-timeout') return 'spawn';
       if (terminalSource === 'cancel-timeout') return 'cancel';
@@ -431,18 +503,27 @@ function createExecutionSupervisor(options = {}) {
         return false;
       }
       record.terminal = true;
+      record.admissionAbortController.abort();
       record.state = 'settled';
       record.metrics.endedAt = now();
       clearTimers();
       const forceTransport = finishOptions.forceTransport === undefined
         ? !['job:done', 'job:error'].includes(terminalSource)
         : finishOptions.forceTransport;
+      const ownsFailedPreDispatchService = policy.lifetime === 'service' &&
+        record.startDispatchState === 'not-started' && record.serviceGenerationCreated === true;
+      const preserveExistingPreDispatchService = policy.lifetime === 'service' &&
+        record.startDispatchState === 'not-started' && record.serviceGenerationCreated === false;
+      const effectiveForceTransport = preserveExistingPreDispatchService
+        ? false
+        : (ownsFailedPreDispatchService ? true : forceTransport);
       const safeError = error
         ? toProtocolError(error, 'BACKGROUND_EXECUTION_ERROR', safeErrorOptions(stageForTerminal(terminalSource)))
         : null;
       const terminalResult = result === null ? null : canonicalJsonSnapshot(result);
       record.settlePromise = Promise.resolve().then(async () => {
-        await cleanupTransport({ force: forceTransport });
+        await cleanupTransport({ force: effectiveForceTransport });
+        cleanupResources(terminalSource === 'job:done' ? 'job-terminal' : 'job-failed');
         const executionResult = createExecutionResult({
           actionKey,
           operationKey,
@@ -475,7 +556,7 @@ function createExecutionSupervisor(options = {}) {
         operationKey,
         jobId,
         workerInstanceId,
-        serviceGeneration: null,
+        serviceGeneration,
         direction: 'event'
       };
     }
@@ -657,7 +738,7 @@ function createExecutionSupervisor(options = {}) {
           operationKey,
           jobId,
           workerInstanceId,
-          serviceGeneration: null,
+          serviceGeneration,
           unitId,
           seq,
           context,
@@ -698,16 +779,34 @@ function createExecutionSupervisor(options = {}) {
 
     function requestCancellation(reason, source) {
       if (record.terminal || record.cancelRequested) return false;
+      const awaitingPreDispatch = record.state === 'queued' || record.state === 'admitting' ||
+        (record.state === 'spawning' && !record.transport);
       const capability = policy.cancellation.capability;
-      const allowed = source === 'shutdown'
+      const allowed = awaitingPreDispatch || (source === 'shutdown'
         ? capability !== 'not-supported'
-        : capability === 'user-cooperative';
+        : capability === 'user-cooperative');
       if (!allowed) return false;
       const ownedReason = normalizeCancelReason(reason);
       record.cancelRequested = true;
       record.cancelReason = ownedReason;
       record.cancelSource = source;
       record.cancelCommandState = 'pending';
+      if (awaitingPreDispatch) {
+        record.admissionAbortController.abort();
+        if (policy.lifetime === 'service' && serviceHost && record.state === 'spawning' &&
+            !record.transport && record.serviceGenerationCreated !== false) {
+          Promise.resolve(serviceHost.closeService(policy.service.serviceKey, { force: true }))
+            .catch((error) => reportDiagnostic({
+              type: 'service-start-cancel-cleanup-error',
+              actionKey,
+              operationKey,
+              jobId,
+              code: error && error.code || 'SERVICE_CLOSE_FAILED'
+            }));
+        }
+        const error = new SupervisorError('ADMISSION_CANCELLED', 'Execution was cancelled during admission');
+        finish('spawn-error', 'cancelled', error, null);
+      }
       if (record.state === 'running') sendCancel(record.cancelReason);
       return true;
     }
@@ -721,22 +820,132 @@ function createExecutionSupervisor(options = {}) {
           (configured && typeof configured.dispatch === 'function')
           ? createExistingDispatchAdapter({ dispatch: configured })
           : configured;
-        return createExistingDispatchTransportAdapter(publicAdapter);
+        return Object.freeze({
+          adapter: createExistingDispatchTransportAdapter(publicAdapter),
+          inspectTopology: publicAdapter.inspectTopology
+        });
       }
       const adapter = defaultAdapters[policy.mode];
       if (!adapter) throw new SupervisorError('ADAPTER_NOT_FOUND', `No native adapter for mode ${policy.mode}`);
       if (!record.entry) throw new SupervisorError('ENTRY_NOT_FOUND', `Entry is not registered: ${policy.entryKey}`);
-      return adapter;
+      return Object.freeze({ adapter, inspectTopology: null });
+    }
+
+    function admissionRequest(resources) {
+      return {
+        ownerKey: `job:${jobId}`,
+        actionKey,
+        operationKey,
+        resources,
+        priority: policy.resources.admissionPriority || 'normal',
+        timeoutMs: request.initTimeoutMs === undefined ? (options.initTimeoutMs || 5000) : request.initTimeoutMs,
+        signal: record.admissionAbortController.signal,
+        lowMemoryBehavior: policy.resources.lowMemoryBehavior === 'reject' ? 'reject' : 'queue'
+      };
+    }
+
+    function freezeTopology(inspectTopology) {
+      if (!policy.resources.compound) return null;
+      let effectiveChildCount;
+      if (inspectTopology) {
+        const inspected = inspectTopology(Object.freeze({
+          actionKey,
+          operationKey,
+          jobId,
+          context,
+          input: request.input || {}
+        }));
+        if (inspected && typeof inspected.then === 'function') {
+          throw new SupervisorError(
+            'TOPOLOGY_INSPECTOR_ASYNC_UNSUPPORTED',
+            'Existing topology inspection must complete synchronously before admission'
+          );
+        }
+        const owned = canonicalJsonSnapshot(inspected);
+        if (!owned || typeof owned !== 'object' || Array.isArray(owned) ||
+            Object.keys(owned).length !== 1 || !Object.hasOwn(owned, 'effectiveChildCount')) {
+          throw new SupervisorError(
+            'TOPOLOGY_INSPECTION_INVALID',
+            'Topology inspector must return exactly { effectiveChildCount }'
+          );
+        }
+        effectiveChildCount = owned.effectiveChildCount;
+      } else {
+        effectiveChildCount = policy.production.effectiveWorkerCount || 1;
+      }
+      if (!Number.isSafeInteger(effectiveChildCount) || effectiveChildCount < 1 ||
+          effectiveChildCount > policy.resources.compound.childrenMax) {
+        throw new SupervisorError(
+          'TOPOLOGY_CHILD_COUNT_INVALID',
+          'effectiveChildCount must be within the declared compound childrenMax'
+        );
+      }
+      return Object.freeze({
+        topologyKey: policy.resources.compound.topologyKey,
+        childrenMax: policy.resources.compound.childrenMax,
+        childResource: policy.resources.compound.childResource,
+        effectiveChildCount
+      });
+    }
+
+    async function acquireSimpleJobResources({ includeBase }) {
+      if (!resourceGovernor) return true;
+      if (includeBase) {
+        const baseLease = await resourceGovernor.acquireBaseLease(admissionRequest(policy.resources.base));
+        if (!retainGrantedLease(baseLease)) return false;
+      }
+      const phaseLease = await resourceGovernor.acquirePhaseLease(admissionRequest(policy.resources.phase));
+      return retainGrantedLease(phaseLease);
+    }
+
+    async function acquireCompoundResources(existingBase = null) {
+      if (!resourceGovernor) {
+        throw new SupervisorError('RESOURCE_GOVERNOR_REQUIRED', 'Compound execution requires ResourceGovernor');
+      }
+      const ownerKey = existingBase ? `service:${policy.service.serviceKey}` : `job:${jobId}`;
+      const lease = await resourceGovernor.acquireCompoundLease({
+        ...admissionRequest(checkedAdd(policy.resources.base, policy.resources.phase)),
+        ownerKey,
+        base: existingBase ? existingBase.resources : policy.resources.base,
+        phase: policy.resources.phase,
+        childResource: record.topology.childResource,
+        childrenMax: record.topology.childrenMax,
+        effectiveChildCount: record.topology.effectiveChildCount,
+        lowMemoryBehavior: policy.resources.lowMemoryBehavior,
+        ...(existingBase ? { existingBaseLeaseId: existingBase.leaseId } : {})
+      });
+      if (!retainGrantedLease(lease)) return false;
+      if (lease.effectiveChildCount !== record.topology.effectiveChildCount) {
+        record.topology = Object.freeze({
+          ...record.topology,
+          effectiveChildCount: lease.effectiveChildCount,
+          downgraded: true,
+          downgradeReason: lease.downgradeReason
+        });
+      }
+      record.metrics.workerCount = lease.effectiveChildCount;
+      return true;
     }
 
     async function start() {
-      record.state = 'spawning';
       let candidate = null;
       try {
-        const adapter = resolveAdapter();
-        candidate = adapter.start({
-          entry: record.entry,
-          policy,
+        if (record.terminal) return;
+        record.state = 'admitting';
+        let resolved = null;
+        if (policy.lifetime === 'job') resolved = resolveAdapter();
+        record.topology = freezeTopology(resolved && resolved.inspectTopology);
+        if (policy.lifetime === 'job') {
+          const admitted = record.topology
+            ? await acquireCompoundResources()
+            : await acquireSimpleJobResources({ includeBase: true });
+          if (!admitted) return;
+        } else if (!record.topology) {
+          if (!await acquireSimpleJobResources({ includeBase: false })) return;
+        }
+        if (record.terminal) return;
+        record.state = 'spawning';
+        const callbacks = {
           onMessage,
           onCancellationTerminal() {
             if (!record.terminal && record.cancelRequested &&
@@ -745,7 +954,9 @@ function createExecutionSupervisor(options = {}) {
             }
           },
           onError(error) {
-            if (error instanceof ProtocolValidationError) failProtocol(error);
+            if (error instanceof ProtocolValidationError || error instanceof ServiceHostProtocolError) {
+              failProtocol(error);
+            }
             else finish('adapter-error', 'transport-lost', error, null);
           },
           onExit(code, signal) {
@@ -757,7 +968,45 @@ function createExecutionSupervisor(options = {}) {
               finish('unexpected-exit', 'transport-lost', error, null);
             }
           }
-        });
+        };
+        if (policy.lifetime === 'service') {
+          if (!serviceHost) {
+            throw new SupervisorError('RESOURCE_GOVERNOR_REQUIRED', 'Service execution requires ResourceGovernor');
+          }
+          const hostSnapshot = serviceHost.snapshot();
+          if (hostSnapshot.services.some((service) =>
+            service.serviceKey === policy.service.serviceKey)) {
+            record.serviceGenerationCreated = false;
+          }
+          candidate = await serviceHost.openJob({
+            actionKey,
+            operationKey,
+            jobId,
+            production: request.production === true,
+            initTimeoutMs: request.initTimeoutMs === undefined ? (options.initTimeoutMs || 5000) : request.initTimeoutMs,
+            ...callbacks
+          });
+          record.transport = candidate;
+          record.serviceGenerationCreated = serviceTransportCreatedGeneration(candidate);
+          workerInstanceId = candidate.workerInstanceId;
+          serviceGeneration = candidate.serviceGeneration;
+          record.workerInstanceId = workerInstanceId;
+          if (record.terminal) return;
+          if (record.topology) {
+            record.state = 'admitting';
+            if (!await acquireCompoundResources({
+              leaseId: candidate.baseLeaseId,
+              resources: candidate.baseResources
+            })) return;
+          }
+        } else {
+          candidate = resolved.adapter.start({
+            entry: record.entry,
+            policy,
+            topology: record.topology,
+            ...callbacks
+          });
+        }
         record.transport = candidate;
         if (!candidate || typeof candidate !== 'object' ||
             !candidate.ready || typeof candidate.ready.then !== 'function' ||
@@ -770,11 +1019,11 @@ function createExecutionSupervisor(options = {}) {
         }
       } catch (error) {
         if (candidate) record.transport = candidate;
-        finishTransportAssignment();
-        finish('spawn-error', 'transport-lost', error, null);
+        finish('spawn-error', record.cancelRequested ? 'cancelled' : 'transport-lost', error, null);
         return;
+      } finally {
+        finishTransportAssignment();
       }
-      finishTransportAssignment();
       if (record.terminal) return;
 
       try {
@@ -814,7 +1063,7 @@ function createExecutionSupervisor(options = {}) {
     queueMicrotask(() => {
       start().catch((error) => {
         finishTransportAssignment();
-        if (error instanceof ProtocolValidationError) failProtocol(error);
+        if (error instanceof ProtocolValidationError || error instanceof ServiceHostProtocolError) failProtocol(error);
         else finish('adapter-error', 'transport-lost', error, null);
       });
     });
@@ -839,20 +1088,42 @@ function createExecutionSupervisor(options = {}) {
     return control;
   }
 
+  function deadlineAfter(timeoutMs) {
+    const timestamp = Date.now();
+    return timeoutMs > Number.MAX_SAFE_INTEGER - timestamp
+      ? Number.POSITIVE_INFINITY
+      : timestamp + timeoutMs;
+  }
+
   function remainingTimeout(deadline) {
-    return Math.max(0, deadline - Date.now());
+    return deadline === Number.POSITIVE_INFINITY
+      ? Number.POSITIVE_INFINITY
+      : Math.max(0, deadline - Date.now());
+  }
+
+  function timerSafeDuration(timeoutMs) {
+    if (timeoutMs === Number.POSITIVE_INFINITY) return MAX_TIMER_DELAY_MS;
+    return Math.min(MAX_TIMER_DELAY_MS, Math.max(0, Math.ceil(timeoutMs)));
   }
 
   function waitUntil(promises, timeoutMs) {
     if (!promises.length) return Promise.resolve(true);
     return new Promise((resolve) => {
       let settled = false;
-      const timer = setTimeout(() => {
-        if (!settled) {
+      let timer = null;
+      const deadline = deadlineAfter(timeoutMs);
+      const armTimeout = () => {
+        timer = setTimeout(() => {
+          if (settled) return;
+          if (remainingTimeout(deadline) > 0) {
+            armTimeout();
+            return;
+          }
           settled = true;
           resolve(false);
-        }
-      }, timeoutMs);
+        }, timerSafeDuration(remainingTimeout(deadline)));
+      };
+      armTimeout();
       Promise.allSettled(promises).then(() => {
         if (!settled) {
           settled = true;
@@ -898,20 +1169,29 @@ function createExecutionSupervisor(options = {}) {
       }) : null;
     },
     async closeService(serviceKey) {
-      throw new SupervisorError(
-        'E02A_SERVICE_UNSUPPORTED',
-        `E02-A ExecutionSupervisor does not own service lifecycle: ${serviceKey}`
-      );
+      if (typeof serviceKey !== 'string' || serviceKey.length === 0) {
+        throw new SupervisorError('SERVICE_KEY_INVALID', 'closeService serviceKey must be a non-empty string');
+      }
+      if (!serviceHost) {
+        throw new SupervisorError('SERVICE_HOST_UNAVAILABLE', 'ServiceHost requires ResourceGovernor');
+      }
+      return serviceHost.closeService(serviceKey);
     },
     stopAcceptingNewJobs() {
       acceptingNewJobs = false;
     },
     async shutdown(shutdownOptions = {}) {
-      acceptingNewJobs = false;
+      const fallbackTimeoutMs = Number.isFinite(options.shutdownTimeoutMs) && options.shutdownTimeoutMs >= 0
+        ? options.shutdownTimeoutMs
+        : 5000;
       const timeoutMs = Number.isFinite(shutdownOptions.timeoutMs) && shutdownOptions.timeoutMs >= 0
         ? shutdownOptions.timeoutMs
-        : (options.shutdownTimeoutMs || 5000);
-      const deadline = Date.now() + timeoutMs;
+        : fallbackTimeoutMs;
+      const forceServices = shutdownOptions.forceServices === true;
+      const deadline = deadlineAfter(timeoutMs);
+      acceptingNewJobs = false;
+      if (serviceHost) serviceHost.stopAcceptingNewServices();
+      if (resourceGovernor) closeResourceGovernor(resourceGovernor, 'supervisor-shutdown');
       const active = [...jobs.values()];
       const protectedJobs = [];
       for (const record of active) {
@@ -982,8 +1262,26 @@ function createExecutionSupervisor(options = {}) {
           ));
         }
       }
+      const closedServices = serviceHost
+        ? serviceHost.snapshot().services.map((service) => service.serviceKey)
+        : [];
+      const serviceResults = serviceHost
+        ? await serviceHost.shutdown({
+            force: forceServices,
+            timeoutMs: timerSafeDuration(remainingTimeout(deadline))
+          })
+        : [];
+      for (const result of serviceResults) {
+        if (result.status === 'rejected') {
+          const error = result.reason instanceof Error ? result.reason : new Error(String(result.reason));
+          reportErrors.push(toProtocolError(error, error.code || 'SERVICE_CLOSE_FAILED', {
+            maxErrorItems: 100,
+            stage: 'shutdown'
+          }));
+        }
+      }
       return Object.freeze({
-        closedServices: Object.freeze([]),
+        closedServices: Object.freeze(closedServices),
         cancelledJobs: Object.freeze([...resultsByJob.values()]
           .filter((result) => result.outcome === 'cancelled')
           .map((result) => result.jobId)),
