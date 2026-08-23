@@ -94,6 +94,402 @@ test('最终 5 条 valid sequence 通过且 24 条 invalid sequence 全量拒绝
   }
 });
 
+test('adoption timeout 允许 Main 在 grant 后、adopt 前 revoke tentative reservation', () => {
+  const valid = fixture('valid/protocol-sequences.v1.json');
+  const source = valid.find((item) => item.name === 'service-independent-direction-seq-with-revoke');
+  const throughGrant = source.messages.slice(0, 4);
+  const grant = throughGrant.at(-1);
+  const revoke = structuredClone(source.messages.find((message) => message.operation === 'resource:revoke'));
+  revoke.seq = grant.seq + 1;
+  revoke.controlId = 'ctl-adoption-timeout';
+  revoke.payload.grantId = grant.payload.grantId;
+  revoke.payload.reservationId = grant.payload.reservationId;
+  revoke.payload.reasonCode = 'adoption-timeout';
+  let result = validateProtocolSequence([...throughGrant, revoke], { policyRegistry: registry });
+  assert.equal(result.valid, true, JSON.stringify(result.errors));
+
+  const release = structuredClone(source.messages.find((message) =>
+    message.operation === 'resource:release'));
+  release.seq = 3;
+  release.controlId = revoke.controlId;
+  release.jobRef = structuredClone(revoke.jobRef);
+  release.payload.reservationId = revoke.payload.reservationId;
+  const releaseAck = structuredClone(source.messages.find((message) =>
+    message.operation === 'resource:release-ack'));
+  releaseAck.seq = 4;
+  releaseAck.controlId = revoke.controlId;
+  releaseAck.jobRef = structuredClone(revoke.jobRef);
+  releaseAck.payload.reservationId = revoke.payload.reservationId;
+  result = validateProtocolSequence([...throughGrant, revoke, release, releaseAck], {
+    policyRegistry: registry
+  });
+  assert.equal(result.valid, true, JSON.stringify(result.errors));
+});
+
+test('tentative replacement 存活时 sequence validator 拒绝提前 release old reservation', () => {
+  const source = fixture('valid/protocol-sequences.v1.json')
+    .find((item) => item.name === 'persistent-state-first-and-exact-current-replacement');
+  const throughReplacementGrant = structuredClone(source.messages.slice(0, 8));
+  const releaseOld = structuredClone(source.messages[10]);
+  releaseOld.seq = source.messages[8].seq;
+  releaseOld.controlId = 'release-old-during-tentative';
+  releaseOld.payload.reservationId = 'reservation-state-1';
+  const result = validateProtocolSequence([...throughReplacementGrant, releaseOld], {
+    policyRegistry: registry
+  });
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((error) =>
+    error.code === 'PROTOCOL_RELEASE_DURING_TENTATIVE_REPLACEMENT'));
+});
+
+test('sequence owner claim starts at request and releases on reject, revoke, or release', () => {
+  const source = fixture('valid/protocol-sequences.v1.json')
+    .find((item) => item.name === 'statement-resource-adopt-release-close');
+  const [init, ready, request, grant, adopted, adoptAck, release, releaseAck] =
+    structuredClone(source.messages);
+
+  function retryRequest(seq, suffix) {
+    const retry = structuredClone(request);
+    retry.seq = seq;
+    retry.controlId = `owner-retry-${suffix}`;
+    retry.payload.requestId = `owner-retry-${suffix}`;
+    return retry;
+  }
+
+  const duplicate = retryRequest(3, 'duplicate');
+  const duplicateResult = validateProtocolSequence([init, ready, request, duplicate], {
+    policyRegistry: registry
+  });
+  assert.equal(duplicateResult.valid, false);
+  assert.ok(duplicateResult.errors.some((error) => error.code === 'PROTOCOL_DUPLICATE_OWNER'));
+
+  const reject = structuredClone(grant);
+  reject.operation = 'resource:reject';
+  reject.payload = {
+    requestId: request.payload.requestId,
+    reasonCode: 'RESOURCE_BUDGET_UNAVAILABLE',
+    retryable: true,
+    safeSummary: 'Resource request was not admitted'
+  };
+  const afterReject = validateProtocolSequence([
+    init,
+    ready,
+    request,
+    reject,
+    retryRequest(3, 'after-reject')
+  ], { policyRegistry: registry });
+  assert.equal(afterReject.valid, true, JSON.stringify(afterReject.errors));
+
+  const revoke = structuredClone(grant);
+  revoke.operation = 'resource:revoke';
+  revoke.controlId = 'owner-revoke';
+  revoke.seq = 3;
+  revoke.payload = {
+    grantId: grant.payload.grantId,
+    reservationId: grant.payload.reservationId,
+    reasonCode: 'adoption-timeout'
+  };
+  const afterRevoke = validateProtocolSequence([
+    init,
+    ready,
+    request,
+    grant,
+    revoke,
+    retryRequest(3, 'after-revoke')
+  ], { policyRegistry: registry });
+  assert.equal(afterRevoke.valid, true, JSON.stringify(afterRevoke.errors));
+
+  const afterRelease = validateProtocolSequence([
+    init,
+    ready,
+    request,
+    grant,
+    adopted,
+    adoptAck,
+    release,
+    retryRequest(5, 'after-release'),
+    releaseAck
+  ], { policyRegistry: registry });
+  assert.equal(afterRelease.valid, true, JSON.stringify(afterRelease.errors));
+});
+
+test('service resource sequence uses an explicit per-request response and adoption FSM', () => {
+  const source = fixture('valid/protocol-sequences.v1.json')
+    .find((item) => item.name === 'statement-resource-adopt-release-close').messages;
+  const [init, ready, request, grant, adopted, adoptAck, release, releaseAck] = structuredClone(source);
+
+  function rejected(seq) {
+    const message = structuredClone(grant);
+    message.operation = 'resource:reject';
+    message.seq = seq;
+    message.payload = {
+      requestId: request.payload.requestId,
+      reasonCode: 'RESOURCE_BUDGET_UNAVAILABLE',
+      retryable: true,
+      safeSummary: 'Resource request was not admitted'
+    };
+    return message;
+  }
+
+  function revoked() {
+    const message = structuredClone(grant);
+    message.operation = 'resource:revoke';
+    message.controlId = 'ctl-adoption-timeout';
+    message.seq = 3;
+    message.payload = {
+      grantId: grant.payload.grantId,
+      reservationId: grant.payload.reservationId,
+      reasonCode: 'adoption-timeout'
+    };
+    return message;
+  }
+
+  const duplicateGrant = structuredClone(grant);
+  duplicateGrant.seq = 3;
+  const duplicateAdopted = structuredClone(adopted);
+  duplicateAdopted.seq = 4;
+  duplicateAdopted.controlId = 'ctl-adopt-duplicate';
+  const duplicateReject = rejected(3);
+  const duplicateReleaseAck = structuredClone(releaseAck);
+  duplicateReleaseAck.seq = 5;
+
+  const cases = [
+    ['PROTOCOL_DUPLICATE_GRANT', [init, ready, request, grant, duplicateGrant]],
+    ['PROTOCOL_DUPLICATE_ADOPTED', [init, ready, request, grant, adopted, duplicateAdopted]],
+    ['PROTOCOL_DUPLICATE_REJECT', [init, ready, request, rejected(2), duplicateReject]],
+    ['PROTOCOL_DUPLICATE_RELEASE_ACK', [
+      init, ready, request, grant, adopted, adoptAck, release, releaseAck, duplicateReleaseAck
+    ]],
+    ['PROTOCOL_RESOURCE_RESPONSE_CONFLICT', [init, ready, request, grant, rejected(3)]],
+    ['PROTOCOL_ADOPT_AFTER_REVOKE', [init, ready, request, grant, revoked(), adopted]]
+  ];
+  for (const [code, messages] of cases) {
+    const result = validateProtocolSequence(messages, { policyRegistry: registry });
+    assert.equal(result.valid, false, code);
+    assert.ok(result.errors.some((error) => error.code === code), JSON.stringify(result.errors));
+  }
+});
+
+test('service sequence correlation identities are generation-wide tombstones with exact response echo', () => {
+  const sequences = fixture('valid/protocol-sequences.v1.json');
+  const normal = sequences.find((item) =>
+    item.name === 'statement-resource-adopt-release-close').messages;
+  const multi = sequences.find((item) =>
+    item.name === 'service-independent-direction-seq-with-revoke').messages;
+  const [init, ready, request, grant] = structuredClone(normal);
+
+  const reusedControlRequest = structuredClone(request);
+  reusedControlRequest.controlId = ready.controlId;
+  let result = validateProtocolSequence([init, ready, reusedControlRequest], {
+    policyRegistry: registry
+  });
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((error) => error.code === 'PROTOCOL_CONTROL_ID_REUSED'));
+
+  const initIdRequest = structuredClone(request);
+  initIdRequest.controlId = init.controlId;
+  result = validateProtocolSequence([init, ready, initIdRequest], {
+    policyRegistry: registry
+  });
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((error) => error.code === 'PROTOCOL_CONTROL_ID_REUSED'));
+
+  const mismatchedGrant = structuredClone(grant);
+  mismatchedGrant.controlId = 'ctl-wrong-response';
+  result = validateProtocolSequence([init, ready, request, mismatchedGrant], {
+    policyRegistry: registry
+  });
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((error) => error.code === 'PROTOCOL_CONTROL_ID_MISMATCH'));
+
+  const rejected = structuredClone(grant);
+  rejected.operation = 'resource:reject';
+  rejected.payload = {
+    requestId: request.payload.requestId,
+    reasonCode: 'RESOURCE_BUDGET_UNAVAILABLE',
+    retryable: true,
+    safeSummary: 'Resource request was not admitted'
+  };
+  const duplicateRejected = structuredClone(rejected);
+  duplicateRejected.controlId = 'ctl-invalid-response-tombstone';
+  duplicateRejected.seq = 3;
+  const closeReusingInvalidResponse = structuredClone(normal[8]);
+  closeReusingInvalidResponse.controlId = duplicateRejected.controlId;
+  closeReusingInvalidResponse.seq = 4;
+  result = validateProtocolSequence([
+    init,
+    ready,
+    request,
+    rejected,
+    duplicateRejected,
+    closeReusingInvalidResponse
+  ], { policyRegistry: registry });
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((error) => error.code === 'PROTOCOL_CONTROL_ID_REUSED'));
+
+  const grantReuse = structuredClone(multi.slice(0, 11));
+  const grantMessages = grantReuse.filter((message) => message.operation === 'resource:grant');
+  grantMessages[1].payload.grantId = grantMessages[0].payload.grantId;
+  result = validateProtocolSequence(grantReuse, { policyRegistry: registry });
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((error) => error.code === 'PROTOCOL_GRANT_ID_REUSED'));
+
+  const reservationReuse = structuredClone(multi.slice(0, 11));
+  const reservationGrants = reservationReuse.filter((message) =>
+    message.operation === 'resource:grant');
+  reservationGrants[1].payload.reservationId = reservationGrants[0].payload.reservationId;
+  result = validateProtocolSequence(reservationReuse, { policyRegistry: registry });
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((error) => error.code === 'PROTOCOL_RESERVATION_ID_REUSED'));
+
+  const revokeIdRequest = structuredClone(multi[9]);
+  revokeIdRequest.controlId = multi[6].controlId;
+  result = validateProtocolSequence([...structuredClone(multi.slice(0, 9)), revokeIdRequest], {
+    policyRegistry: registry
+  });
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((error) => error.code === 'PROTOCOL_CONTROL_ID_REUSED'));
+
+  result = validateProtocolSequence(structuredClone(multi), { policyRegistry: registry });
+  assert.equal(result.valid, true, JSON.stringify(result.errors));
+
+  const nextGeneration = structuredClone(normal);
+  for (const message of nextGeneration) {
+    message.workerInstanceId = 'worker-next-generation';
+    message.serviceGeneration = 2;
+  }
+  result = validateProtocolSequence(nextGeneration, { policyRegistry: registry });
+  assert.equal(result.valid, true, JSON.stringify(result.errors));
+});
+
+test('service sequence lifecycle FSM rejects duplicate, pending-close, and post-terminal messages', () => {
+  const normal = fixture('valid/protocol-sequences.v1.json')
+    .find((item) => item.name === 'statement-resource-adopt-release-close').messages;
+  const [init, ready, request] = structuredClone(normal);
+  const fatal = structuredClone(ready);
+  fatal.operation = 'executor:error';
+  fatal.controlId = 'ctl-fatal';
+  fatal.seq = 2;
+  fatal.payload = {};
+  const fatalResult = validateProtocolSequence([init, ready, fatal], { policyRegistry: registry });
+  assert.equal(fatalResult.valid, true, JSON.stringify(fatalResult.errors));
+
+  const closingFatal = structuredClone(normal[9]);
+  closingFatal.operation = 'executor:error';
+  closingFatal.controlId = 'ctl-fatal-while-closing';
+  closingFatal.payload = {};
+  const closingFatalResult = validateProtocolSequence([
+    ...structuredClone(normal.slice(0, 9)),
+    closingFatal
+  ], { policyRegistry: registry });
+  assert.equal(closingFatalResult.valid, true, JSON.stringify(closingFatalResult.errors));
+
+  const duplicateReady = structuredClone(ready);
+  duplicateReady.controlId = 'ctl-ready-duplicate';
+  duplicateReady.seq = 2;
+
+  const duplicateClose = structuredClone(normal[8]);
+  duplicateClose.controlId = 'ctl-close-duplicate';
+  duplicateClose.seq = 6;
+
+  const duplicateCloseAck = structuredClone(normal[9]);
+  duplicateCloseAck.seq = 6;
+
+  const closeWithPending = structuredClone(normal[8]);
+  closeWithPending.controlId = 'ctl-close-pending';
+  closeWithPending.seq = 2;
+
+  const postClosedRequest = structuredClone(request);
+  postClosedRequest.controlId = 'ctl-post-closed';
+  postClosedRequest.seq = 6;
+  postClosedRequest.payload.requestId = 'request-post-closed';
+  postClosedRequest.payload.owner.ownerKeyHash = 'post-closed-owner';
+
+  const postFailedRequest = structuredClone(request);
+  postFailedRequest.controlId = 'ctl-post-failed';
+  postFailedRequest.seq = 3;
+  postFailedRequest.payload.requestId = 'request-post-failed';
+  postFailedRequest.payload.owner.ownerKeyHash = 'post-failed-owner';
+
+  const cases = [
+    ['PROTOCOL_DUPLICATE_READY', [init, ready, duplicateReady]],
+    ['PROTOCOL_DUPLICATE_CLOSE', [...structuredClone(normal.slice(0, 9)), duplicateClose]],
+    ['PROTOCOL_DUPLICATE_CLOSE_ACK', [...structuredClone(normal), duplicateCloseAck]],
+    ['PROTOCOL_CLOSE_WITH_PENDING_RESOURCES', [init, ready, request, closeWithPending]],
+    ['PROTOCOL_SERVICE_MESSAGE_AFTER_TERMINAL', [...structuredClone(normal), postClosedRequest]],
+    ['PROTOCOL_SERVICE_MESSAGE_AFTER_TERMINAL', [init, ready, fatal, postFailedRequest]]
+  ];
+  for (const [code, messages] of cases) {
+    const result = validateProtocolSequence(messages, { policyRegistry: registry });
+    assert.equal(result.valid, false, code);
+    assert.ok(result.errors.some((error) => error.code === code), JSON.stringify(result.errors));
+  }
+});
+
+test('fatal executor terminal delegates unfinished resource tails to internal cleanup only', () => {
+  const normal = fixture('valid/protocol-sequences.v1.json')
+    .find((item) => item.name === 'statement-resource-adopt-release-close').messages;
+  const [init, ready, request, grant, adopted, adoptAck, release] = structuredClone(normal);
+
+  function fatalAfter(messages) {
+    const fatal = structuredClone(ready);
+    fatal.operation = 'executor:error';
+    fatal.controlId = `ctl-fatal-after-${messages.length}`;
+    fatal.seq = Math.max(
+      ...messages.filter((message) => message.direction === 'event').map((message) => message.seq)
+    ) + 1;
+    fatal.payload = {};
+    return [...messages, fatal];
+  }
+
+  const fatalBoundaries = [
+    [init, ready, request, grant],
+    [init, ready, request, grant, adopted],
+    [init, ready, request, grant, adopted, adoptAck, release]
+  ];
+  for (const messages of fatalBoundaries) {
+    const result = validateProtocolSequence(fatalAfter(messages), { policyRegistry: registry });
+    assert.equal(result.valid, true, JSON.stringify(result.errors));
+  }
+
+  const invalidRelease = structuredClone(release);
+  invalidRelease.controlId = 'invalid-release-before-fatal';
+  invalidRelease.payload.reservationId = 'unknown-before-fatal';
+  const invalidResult = validateProtocolSequence(fatalAfter([
+    init, ready, request, grant, adopted, adoptAck, invalidRelease
+  ]), { policyRegistry: registry });
+  assert.equal(invalidResult.valid, false);
+  assert.ok(invalidResult.errors.some((error) =>
+    error.code === 'PROTOCOL_RELEASE_UNKNOWN_RESERVATION'));
+});
+
+test('graceful close cannot use fatal terminal cleanup to skip revoke release acknowledgement', () => {
+  const sequences = fixture('valid/protocol-sequences.v1.json');
+  const normal = sequences.find((item) =>
+    item.name === 'statement-resource-adopt-release-close').messages;
+  const revokeSource = sequences.find((item) =>
+    item.name === 'service-independent-direction-seq-with-revoke').messages
+    .find((message) => message.operation === 'resource:revoke');
+  const [init, ready, request, grant] = structuredClone(normal);
+  const revoke = structuredClone(revokeSource);
+  revoke.controlId = 'graceful-unanswered-revoke';
+  revoke.seq = 3;
+  revoke.jobRef = structuredClone(grant.jobRef);
+  revoke.payload.grantId = grant.payload.grantId;
+  revoke.payload.reservationId = grant.payload.reservationId;
+  revoke.payload.reasonCode = 'service-close';
+  const close = structuredClone(normal.find((message) => message.operation === 'executor:close'));
+  close.controlId = 'close-before-revoke-release';
+  close.seq = 4;
+
+  const result = validateProtocolSequence([init, ready, request, grant, revoke, close], {
+    policyRegistry: registry
+  });
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((error) =>
+    error.code === 'PROTOCOL_CLOSE_WITH_PENDING_RESOURCES'));
+});
+
 test('完整 compact JSON 以 UTF-8 bytes 执行 exact ceiling，多字节越界拒绝', () => {
   const start = structuredClone(
     fixture('valid/protocol-messages.v1.json').find((message) => message.operation === 'job:start')

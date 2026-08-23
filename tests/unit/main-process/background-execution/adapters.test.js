@@ -360,6 +360,27 @@ test('inline/existing canonical bridge 将 emit/onMessage 异常送达 onError �
   assert.deepEqual(existingErrors.map((error) => error.code), ['OBSERVER_FAILED']);
 });
 
+test('existing fire-and-forget observers throw without creating unhandled rejection', async () => {
+  const publicAdapter = createExistingDispatchAdapter({
+    dispatch({ onProgress }) {
+      onProgress({ stage: 'observer-throws' });
+      return Promise.resolve({ ok: true });
+    }
+  });
+  publicAdapter.start({
+    entry: null,
+    actionKey: 'example',
+    operationKey: 'operation',
+    jobId: 'job',
+    context: { kind: 'none', value: {} },
+    input: {},
+    onError() { throw new Error('error observer failed'); }
+  }, () => {
+    throw new Error('event observer failed');
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+});
+
 test('worker-thread adapter 使用 packaged entry path 并原样传 canonical envelope', async () => {
   class FakeWorker extends EventEmitter {
     constructor(filename, options) {

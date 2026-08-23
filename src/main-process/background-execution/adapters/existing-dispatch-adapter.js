@@ -45,11 +45,15 @@ function createExistingDispatchAdapter(options = {}) {
     },
     start(request, emit) {
       const dispatch = resolveDispatch(request.entry, configuredDispatch);
+      function reportError(error) {
+        if (typeof request.onError !== 'function') return;
+        try { request.onError(error); } catch (_callbackError) {}
+      }
       function guardedEmit(operation, payload) {
         try {
           emit(operation, payload);
         } catch (error) {
-          if (typeof request.onError === 'function') request.onError(error);
+          reportError(error);
         }
       }
       const dispatched = dispatch({
@@ -58,6 +62,7 @@ function createExistingDispatchAdapter(options = {}) {
         jobId: request.jobId,
         context: request.context,
         input: request.input,
+        topology: request.topology || null,
         onProgress(progress) {
           guardedEmit('job:progress', { progress });
         }
@@ -76,7 +81,7 @@ function createExistingDispatchAdapter(options = {}) {
           try {
             request.onCancellationTerminal();
           } catch (callbackError) {
-            if (typeof request.onError === 'function') request.onError(callbackError);
+            reportError(callbackError);
           }
         }
       }
@@ -86,13 +91,13 @@ function createExistingDispatchAdapter(options = {}) {
           error: toProtocolError(error, 'EXISTING_DISPATCH_ERROR', request.safeErrorOptions)
         });
       }
-      Promise.resolve(handle.promise).then((result) => {
+      void Promise.resolve(handle.promise).then((result) => {
         cancellationState.terminalObserved = true;
         guardedEmit('job:done', { result });
       }, (error) => {
         cancellationState.terminalObserved = true;
         emitDispatchError(error);
-      });
+      }).catch(reportError);
       cancellationState.reportCancellationTerminal = reportCancellationTerminal;
       return handle;
     },
@@ -137,7 +142,9 @@ function createExistingDispatchTransportAdapter(existingAdapter) {
       let cancelInvoked = false;
 
       function reportError(error) {
-        if (!closed && typeof startOptions.onError === 'function') startOptions.onError(error);
+        if (!closed && typeof startOptions.onError === 'function') {
+          try { startOptions.onError(error); } catch (_callbackError) {}
+        }
       }
 
       return Object.freeze({
@@ -158,6 +165,7 @@ function createExistingDispatchTransportAdapter(existingAdapter) {
                 jobId: envelope.jobId,
                 context: envelope.context,
                 input: envelope.payload.input,
+                topology: startOptions.topology || null,
                 safeErrorOptions: {
                   maxBytes: policy.protocolLimits.eventMaxBytes,
                   maxErrorItems: policy.result.maxErrorItems,
@@ -193,11 +201,11 @@ function createExistingDispatchTransportAdapter(existingAdapter) {
             reportError(error);
             return;
           }
-          Promise.resolve(cancellation).then((result) => {
+          void Promise.resolve(cancellation).then((result) => {
               if (!closed && cancelWasAcknowledged(result)) {
                 emit('cancel:ack', { cancellation: { scope: 'job' } });
               }
-            }, reportError);
+            }, reportError).catch(reportError);
         },
         async close() {
           if (closed) return;
