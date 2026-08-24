@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
@@ -27,6 +28,7 @@ const {
   bindingSnapshot
 } = require('../../../../src/main-process/background-execution/action-task-binding-registry');
 const {
+  dispatchEngineImportHandle,
   inspectBigTableImportTopology
 } = require('../../../../src/main-process/big-table-import-dispatch');
 const bigTableFixtures = require('../../backend/big-table-import/_fixtures');
@@ -320,6 +322,97 @@ test('Pending mature adapter admission 前冻结 Parser topology，root+children
   const result = await execution;
   assert.equal(result.outcome, 'completed');
   assert.equal(result.receiptHint, null, 'execution terminal 不伪造 settlement receipt/task success');
+  assert.deepEqual(governor.snapshot().activeUsage, {
+    cpuSlots: 0,
+    workerThreadSlots: 0,
+    utilityProcessSlots: 0,
+    ioHeavySlots: 0,
+    memoryBytes: 0
+  });
+});
+
+test('Pending mature 正常终态等待共享 engine termination barrier 后才释放 CompoundLease', async () => {
+  const termination = deferred();
+  let dispatchHandle = null;
+  let fakeWorker = null;
+  let terminateCount = 0;
+
+  class ControlledTerminationWorker extends EventEmitter {
+    constructor() {
+      super();
+      fakeWorker = this;
+      this.jobId = null;
+    }
+
+    postMessage(message) {
+      if (message && message.type === 'run') this.jobId = message.jobId;
+    }
+
+    terminate() {
+      terminateCount += 1;
+      return termination.promise;
+    }
+
+    complete(result) {
+      this.emit('message', { type: 'done', jobId: this.jobId, result });
+    }
+  }
+
+  const bindings = createMatureActionAdapterBindings({
+    bigTable: {
+      pending: {
+        inspectTopology() { return { effectiveChildCount: 1 }; },
+        dispatch(request) {
+          dispatchHandle = dispatchEngineImportHandle({
+            ...request.input,
+            parallel: request.parallel,
+            parallelFrozen: request.parallelFrozen,
+            WorkerClass: ControlledTerminationWorker
+          });
+          return dispatchHandle;
+        }
+      }
+    }
+  });
+  const policy = pendingPolicy();
+  const governor = createResourceGovernor({
+    budgets: {
+      cpuSlots: 4,
+      workerThreadSlots: 4,
+      utilityProcessSlots: 0,
+      ioHeavySlots: 2,
+      memoryBytes: 200
+    }
+  });
+  const supervisor = createExecutionSupervisor({
+    policyRegistry: registryFor(policy, bindings[policy.actionKey]),
+    resourceGovernor: governor
+  });
+  const execution = supervisor.execute({
+    actionKey: policy.actionKey,
+    operationKey: 'pending-import-termination-barrier',
+    jobId: 'pending-import-termination-barrier-job',
+    input: { files: ['controlled.xlsx'], mode: 'append' }
+  });
+  let executionSettled = false;
+  void execution.then(() => { executionSettled = true; });
+
+  await waitFor(() => fakeWorker !== null && dispatchHandle !== null);
+  const activeUsage = governor.snapshot().activeUsage;
+  assert.equal(activeUsage.workerThreadSlots, 2);
+  fakeWorker.complete({ totalImported: 1, maxParallel: 1 });
+  await waitFor(() => terminateCount === 1);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(executionSettled, false);
+  assert.deepEqual(governor.snapshot().activeUsage, activeUsage);
+  assert.strictEqual(dispatchHandle.close(), dispatchHandle.terminate());
+  assert.equal(terminateCount, 1);
+
+  termination.resolve(0);
+  const result = await execution;
+  assert.equal(result.outcome, 'completed');
+  assert.equal(terminateCount, 1);
   assert.deepEqual(governor.snapshot().activeUsage, {
     cpuSlots: 0,
     workerThreadSlots: 0,

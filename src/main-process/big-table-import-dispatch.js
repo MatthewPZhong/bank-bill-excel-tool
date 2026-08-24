@@ -45,19 +45,33 @@ function dispatchEngineImportHandle({
   parallelFrozen,
   resourceLimits,
   onEngineProgress,
-  onLog
+  onLog,
+  WorkerClass = Worker
 }) {
   let worker = null;
   let jobId = null;
   let settled = false;
   let cancelMessagePosted = false;
+  let terminationPromise = null;
+
+  function ensureTermination() {
+    if (!worker) return Promise.resolve(0);
+    if (!terminationPromise) {
+      terminationPromise = Promise.resolve().then(() => worker.terminate());
+      // legacy 调用方只消费业务 promise；先挂 observer 避免 rejected termination
+      // 在 Supervisor close barrier 接手前形成 unhandled rejection。原 Promise 仍保留拒绝态。
+      void terminationPromise.catch(() => {});
+    }
+    return terminationPromise;
+  }
+
   const promise = new Promise((resolve, reject) => {
     try {
       // resourceLimits 仅在显式传入时透传（不传 = worker 默认堆，行为与收单 dispatch 一致）。
       const workerOptions = (resourceLimits && typeof resourceLimits === 'object')
         ? { resourceLimits }
         : undefined;
-      worker = new Worker(ENGINE_WORKER_ENTRY, workerOptions);
+      worker = new WorkerClass(ENGINE_WORKER_ENTRY, workerOptions);
     } catch (spawnErr) {
       reject(spawnErr);
       return;
@@ -67,7 +81,7 @@ function dispatchEngineImportHandle({
       if (settled) return;
       settled = true;
       try { worker.postMessage({ type: 'close' }); } catch (_e) { /* swallow */ }
-      try { worker.terminate(); } catch (_e) { /* swallow */ }
+      void ensureTermination();
       fn(arg);
     };
 
@@ -154,9 +168,11 @@ function dispatchEngineImportHandle({
     isCancellationTerminalError(error) {
       return cancelMessagePosted && Boolean(error && error.name === 'CancelError');
     },
+    close() {
+      return ensureTermination();
+    },
     terminate() {
-      if (!worker || settled) return Promise.resolve(0);
-      return worker.terminate();
+      return ensureTermination();
     }
   };
 }

@@ -1,7 +1,9 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
@@ -160,6 +162,19 @@ test('packaged background canary 仅在 GitHub-hosted Windows 的 RUNNER_TEMP �
   assert.match(harness, /CANARY_REPORT_CHECK_SHAPE_INVALID/);
   assert.match(harness, /CANARY_REPORT_UNSAFE_(?:KEY|VALUE)/);
   assert.match(harness, /Length -gt 16384/);
+  const waitFunction = harness.slice(
+    harness.indexOf('function Wait-CanaryProcess'),
+    harness.indexOf('function Assert-SafeJsonNode')
+  );
+  assert.match(
+    waitFunction,
+    /\$Process\.Refresh\(\)[\s\S]*\$Process\.HasExited[\s\S]*CANARY_PROCESS_EXITED_BEFORE_REPORT[\s\S]*Start-Sleep/
+  );
+  assert.ok(
+    waitFunction.indexOf('CANARY_PROCESS_EXITED_BEFORE_REPORT')
+      < waitFunction.indexOf('CANARY_REPORT_TIMEOUT'),
+    '报告前进程退出必须先于统一报告超时快速失败'
+  );
   assert.match(harness, /\$env:TEMP = \$runtimeTemp/);
   assert.match(harness, /\$env:TEMP = \$installerTemp/);
   assert.doesNotMatch(harness, /GetTempPath|\$env:(?:USERPROFILE|HOME)|Documents/);
@@ -175,6 +190,59 @@ test('packaged background canary 仅在 GitHub-hosted Windows 的 RUNNER_TEMP �
   }
   assert.equal((harness.match(/Invoke-PackagedCanaryVariant -Executable \$installedExecutable/g) || []).length, 1);
   assert.equal((harness.match(/Invoke-PackagedCanaryVariant -Executable \$portableFrozen/g) || []).length, 1);
+});
+
+test('Windows packaged canary 对报告前已退出进程快速返回专用 safe code', {
+  skip: process.platform !== 'win32'
+}, (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'packaged-canary-early-exit-'));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const probe = String.raw`
+$ErrorActionPreference = 'Stop'
+$source = Get-Content -LiteralPath $env:CANARY_HARNESS_PATH -Raw
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput(
+  $source,
+  [ref]$tokens,
+  [ref]$parseErrors
+)
+if ($parseErrors.Count -ne 0) { throw 'CANARY_HARNESS_PARSE_FAILED' }
+$definitions = $ast.FindAll({
+  param($node)
+  $node -is [System.Management.Automation.Language.FunctionDefinitionAst]
+}, $true)
+foreach ($name in @('Throw-SafeFailure', 'Wait-CanaryProcess')) {
+  $definition = $definitions | Where-Object { $_.Name -eq $name } | Select-Object -First 1
+  if ($null -eq $definition) { throw "CANARY_FUNCTION_NOT_FOUND:$name" }
+  Invoke-Expression ([string]$definition.Extent.Text)
+}
+$process = Start-Process -FilePath $env:ComSpec -ArgumentList '/d', '/c', 'exit 7' -PassThru -WindowStyle Hidden
+$process.WaitForExit()
+$stopwatch = [Diagnostics.Stopwatch]::StartNew()
+try {
+  Wait-CanaryProcess -Process $process -ReportPath $env:CANARY_REPORT_PATH -TimeoutSeconds 5 | Out-Null
+  throw 'EXPECTED_CANARY_PROCESS_EXIT_FAILURE'
+} catch {
+  $stopwatch.Stop()
+  if ($_.Exception.Data['safeCode'] -ne 'CANARY_PROCESS_EXITED_BEFORE_REPORT') {
+    throw "UNEXPECTED_SAFE_CODE:$($_.Exception.Data['safeCode'])"
+  }
+  if ($stopwatch.Elapsed.TotalSeconds -ge 2) {
+    throw "CANARY_EARLY_EXIT_TOO_SLOW:$($stopwatch.Elapsed.TotalSeconds)"
+  }
+}
+`;
+  const result = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', probe], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      CANARY_HARNESS_PATH: path.join(ROOT, 'scripts/run-windows-packaged-background-canary.ps1'),
+      CANARY_REPORT_PATH: path.join(tempDir, 'missing-report.json')
+    },
+    timeout: 15000
+  });
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
 });
 
 test('真实 Windows 进程探针不与全量单测并发，只由专用工作流环境显式开启', () => {

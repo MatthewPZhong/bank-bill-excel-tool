@@ -209,7 +209,27 @@ test('migration 对旧 VCC DB 加法升级，FK 指向真实 run 表且可重复
     db.prepare(`PRAGMA index_info('${uniqueIndex.name}')`).all().map((column) => column.name),
     ['action_key', 'operation_key']
   );
+  const runIdIndex = db.prepare("PRAGMA index_list('vcc_op_operation_receipts')").all()
+    .find((index) => index.name === 'idx_vcc_op_operation_receipts_run_id');
+  assert.ok(runIdIndex);
+  assert.equal(runIdIndex.unique, 0, 'run_id 只优化 Inspector 反查，不升级为唯一合同');
+  assert.deepEqual(
+    db.prepare(`PRAGMA index_info('${runIdIndex.name}')`).all().map((column) => column.name),
+    ['run_id']
+  );
   assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []);
+});
+
+test('3.2.0 TechDoc Receipt FK 使用真实物理 run 表名', () => {
+  const techdoc = fs.readFileSync(path.resolve(
+    __dirname,
+    '../../../changes/background-execution-v3.2.x-contract-baseline/changes/3.2.0/techdoc.md'
+  ), 'utf8');
+  assert.match(
+    techdoc,
+    /FOREIGN KEY\s*\(\s*run_id\s*\)\s+REFERENCES\s+vcc_op_calc_runs\s*\(\s*id\s*\)/
+  );
+  assert.doesNotMatch(techdoc, /REFERENCES\s+vcc_op_runs\s*\(/);
 });
 
 test('save 只接受 exact Main Task owner，缺失或 Renderer 式扩展字段均 fail closed', () => {

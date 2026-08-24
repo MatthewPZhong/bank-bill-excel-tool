@@ -131,12 +131,21 @@ function Wait-CanaryProcess {
   )
   $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
   while (-not (Test-Path -LiteralPath $ReportPath -PathType Leaf) -and [DateTime]::UtcNow -lt $deadline) {
+    $Process.Refresh()
+    if ($Process.HasExited) {
+      if (-not (Test-Path -LiteralPath $ReportPath -PathType Leaf)) {
+        Throw-SafeFailure 'CANARY_PROCESS_EXITED_BEFORE_REPORT'
+      }
+      break
+    }
     Start-Sleep -Milliseconds 100
   }
   if (-not (Test-Path -LiteralPath $ReportPath -PathType Leaf)) {
-    if (-not $Process.HasExited) {
-      Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
+    $Process.Refresh()
+    if ($Process.HasExited) {
+      Throw-SafeFailure 'CANARY_PROCESS_EXITED_BEFORE_REPORT'
     }
+    Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
     Throw-SafeFailure 'CANARY_REPORT_TIMEOUT'
   }
   while (-not $Process.HasExited -and [DateTime]::UtcNow -lt $deadline) {
