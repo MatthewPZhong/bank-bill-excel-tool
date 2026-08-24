@@ -60,6 +60,7 @@ const {
   RecoveryHoldActiveError
 } = require('./recovery-hold-gate');
 const durableFile = require('./durable-file');
+const matureActionAdapters = require('./mature-action-adapters');
 
 module.exports = {
   ...protocol,
@@ -68,6 +69,7 @@ module.exports = {
   ...canary,
   ...durableCanary,
   ...durableFile,
+  ...matureActionAdapters,
   ...recoverySource,
   ACTION_TASK_BINDING_CONTRACT,
   ActionTaskBindingRegistryError,

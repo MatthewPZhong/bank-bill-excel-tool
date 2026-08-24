@@ -250,9 +250,29 @@ function recoverToolboxPublicationsAsync(options) {
   return defaultDispatcher.recover(options);
 }
 
+function createToolboxPublicationMatureBinding(options = {}) {
+  const publish = options.publish || publishToolboxPublicationAsync;
+  const recover = options.recover || recoverToolboxPublicationsAsync;
+  return Object.freeze({
+    dispatch(request = {}) {
+      const input = request.input || {};
+      if (input.lifecycleOperation === 'recover') {
+        // Recovery 只进入既有 durable-journal recovery；这里没有 generation，
+        // 也绝不把 recovery 解释为一次新的 publish。
+        return recover({ ...(input.options || {}), onProgress: request.onProgress });
+      }
+      if (input.lifecycleOperation !== 'publish') {
+        throw new TypeError('toolbox publication mature adapter requires publish or recover lifecycleOperation');
+      }
+      return publish({ ...(input.options || {}), onProgress: request.onProgress });
+    }
+  });
+}
+
 module.exports = {
   DEFAULT_WORKER_ENTRY,
   createToolboxPublicationDispatcher,
+  createToolboxPublicationMatureBinding,
   publishToolboxPublicationAsync,
   recoverToolboxPublicationsAsync,
   runWorkerJob

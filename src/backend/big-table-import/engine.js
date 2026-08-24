@@ -168,6 +168,7 @@ function safeRollback(db) {
 //     mode                — 'append'（默认）| 'overwrite'
 //     monthKey            — 期望月份（跨月校验基准）；缺省时用 peek 出的首文件首行 monthKey
 //     parallel            — 期望并行度（默认 min(4, cpus-2)，内存闸再降 1）
+//     parallelFrozen      — true 仅供已获 CompoundLease 的 mature adapter，禁止二次选择并行度
 //     useWhitelist        — false 强制全列解码（byte-for-byte 对照组）；默认 true（契约白名单）
 //     onProgress          — ({ sourceFile, importedCount }) 每 1w 行节流（对齐收单现状）
 //     onLog               — ({ level, message }) 日志透传
@@ -182,6 +183,7 @@ async function importFiles({
   mode = 'append',
   monthKey,
   parallel,
+  parallelFrozen,
   useWhitelist,
   batchContext,
   onProgress,
@@ -475,6 +477,7 @@ async function importFiles({
       useWhitelist,
       writeBatch,
       parallel,
+      parallelFrozen,
       onProgress: null,    // 进度由 engine 在 writeBatch 内按全局累计节流（worker 的 per-file progress 不直接透传，避免回退）
       onLog,
       cancelToken

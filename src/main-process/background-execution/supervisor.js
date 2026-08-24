@@ -238,8 +238,13 @@ function createExecutionSupervisor(options = {}) {
         `${policy.lifetime === 'service' ? 'Service' : 'Compound'} execution requires ResourceGovernor`
       );
     }
-    if (policy.commit.kind !== 'none') {
-      throw new SupervisorError('E02A_DURABLE_COMMIT_UNSUPPORTED', 'E02-A supervisor only executes commit.kind=none actions');
+    const externalCommitLifecycleOnly = policy.adapterKind === 'existing-dispatch' &&
+      (policy.commit.kind === 'existing-critical-protocol' || policy.commit.kind === 'main-settlement');
+    if (policy.commit.kind !== 'none' && !externalCommitLifecycleOnly) {
+      throw new SupervisorError(
+        'E02A_DURABLE_COMMIT_UNSUPPORTED',
+        'Supervisor only observes non-none commit lifecycle for existing-dispatch actions'
+      );
     }
 
     const context = request.context === undefined
@@ -532,6 +537,9 @@ function createExecutionSupervisor(options = {}) {
           terminalSource,
           result: terminalResult,
           error: safeError,
+          // existing-dispatch 的 job terminal 只证明既有 dispatcher 已结束；平台没有
+          // 接管或重新判定其 settlement，也没有权威 receipt identity。保持 null，
+          // 不得把 execution completed 冒充资金/发布或 TaskRun success。
           receiptHint: null,
           metrics: record.metrics
         });
