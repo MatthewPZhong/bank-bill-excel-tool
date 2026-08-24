@@ -404,6 +404,216 @@ function applyBatchTransition(db, transition, timestamp) {
   });
 }
 
+function intentRow(db, intentId) {
+  return db.prepare(`
+    SELECT intent_id, action_key, operation_key, task_run_id,
+           coordination_kind, state
+    FROM background_execution_critical_intents
+    WHERE intent_id = ?
+  `).get(intentId) || null;
+}
+
+function applyIntentTransition(db, transition, timestamp) {
+  if (transition.command === 'create-prepared') {
+    const input = transition.input;
+    if (intentRow(db, input.intentId)) {
+      fail('RECOVERY_INTENT_ALREADY_EXISTS', 'Critical Intent 已存在，非 exact replay 不得同态写入');
+    }
+    assertOne(db.prepare(`
+      INSERT INTO background_execution_critical_intents (
+        contract_version, intent_id, action_key, operation_key, task_run_id,
+        job_id, coordination_kind, state, conflict_scope_key, inspector_key,
+        evidence_version, evidence_json, evidence_sha256,
+        receipt_ref_json, result_json, created_at, updated_at,
+        closed_at, retention_until
+      ) VALUES (
+        1, ?, ?, ?, ?, ?, ?, 'prepared', ?, ?, ?, ?, ?,
+        NULL, NULL, ?, ?, NULL, NULL
+      )
+    `).run(
+      input.intentId,
+      input.actionKey,
+      input.operationKey,
+      input.taskRunId,
+      input.jobId,
+      input.coordinationKind,
+      input.conflictScopeKey,
+      input.inspectorKey,
+      input.evidenceVersion,
+      canonicalizeJson(input.boundedEvidence, { maxBytes: 16384 }),
+      input.evidenceHash,
+      timestamp,
+      timestamp
+    ), 'RECOVERY_INTENT_CAS_CONFLICT', 'Critical Intent INSERT changes() 必须等于 1');
+    return Object.freeze({
+      actionKey: input.actionKey,
+      operationKey: input.operationKey,
+      taskRunId: input.taskRunId,
+      sourceKind: 'critical-intent',
+      sourceRef: `critical-intent:${input.intentId}`,
+      batchId: null,
+      intentId: input.intentId,
+      holdId: null,
+      recoveryAttemptId: null,
+      previousState: null,
+      nextState: 'prepared'
+    });
+  }
+
+  const current = intentRow(db, transition.intentId);
+  if (!current) fail('RECOVERY_INTENT_NOT_FOUND', 'Critical Intent 不存在');
+  if (current.state !== transition.expectedState) {
+    fail('RECOVERY_INTENT_STATE_CONFLICT', 'Critical Intent expectedState 不匹配');
+  }
+  const nextState = transition.command === 'mark-acked'
+    ? 'acked'
+    : transition.command === 'mark-committed'
+      ? 'committed'
+      : transition.command === 'mark-recovered'
+        ? 'recovered'
+        : 'closed';
+  const receiptRef = transition.command === 'mark-committed'
+    ? canonicalizeJson(transition.receiptRef, { maxBytes: 16384 })
+    : null;
+  const resultJson = transition.command === 'mark-recovered'
+    ? canonicalizeJson(transition.inspection, { maxBytes: 16384 })
+    : transition.command === 'close'
+      ? canonicalizeJson(transition.result, { maxBytes: 16384 })
+      : null;
+  assertOne(db.prepare(`
+    UPDATE background_execution_critical_intents
+    SET state = ?,
+        receipt_ref_json = CASE WHEN ? IS NULL THEN receipt_ref_json ELSE ? END,
+        result_json = CASE WHEN ? IS NULL THEN result_json ELSE ? END,
+        updated_at = ?,
+        closed_at = CASE WHEN ? = 'closed' THEN ? ELSE closed_at END
+    WHERE intent_id = ? AND state = ?
+  `).run(
+    nextState,
+    receiptRef,
+    receiptRef,
+    resultJson,
+    resultJson,
+    timestamp,
+    nextState,
+    timestamp,
+    transition.intentId,
+    transition.expectedState
+  ), 'RECOVERY_INTENT_CAS_CONFLICT', 'Critical Intent CAS changes() 必须等于 1');
+  return Object.freeze({
+    actionKey: current.action_key,
+    operationKey: current.operation_key,
+    taskRunId: current.task_run_id,
+    sourceKind: 'critical-intent',
+    sourceRef: `critical-intent:${transition.intentId}`,
+    batchId: null,
+    intentId: transition.intentId,
+    holdId: null,
+    recoveryAttemptId: null,
+    previousState: current.state,
+    nextState
+  });
+}
+
+function holdRow(db, holdId) {
+  return db.prepare(`
+    SELECT hold_id, source_kind, source_ref, intent_id, action_key,
+           operation_key, task_run_id, conflict_scope_key, status
+    FROM background_execution_recovery_holds
+    WHERE hold_id = ?
+  `).get(holdId) || null;
+}
+
+function applyHoldTransition(db, transition, timestamp) {
+  if (transition.command === 'create-or-get') {
+    const input = transition.input;
+    const existing = db.prepare(`
+      SELECT hold_id FROM background_execution_recovery_holds
+      WHERE source_kind = ? AND source_ref = ?
+    `).get(input.sourceKind, input.sourceRef);
+    if (existing) {
+      fail('RECOVERY_HOLD_ALREADY_EXISTS', 'Recovery Hold 已存在，非 exact replay 不得追加事件');
+    }
+    try {
+      assertOne(db.prepare(`
+        INSERT INTO background_execution_recovery_holds (
+          hold_id, source_kind, source_ref, intent_id, action_key,
+          operation_key, task_run_id, conflict_scope_key, reason_code,
+          status, resolution, safe_summary_json,
+          created_at, updated_at, resolved_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', NULL, ?, ?, ?, NULL)
+      `).run(
+        input.holdId,
+        input.sourceKind,
+        input.sourceRef,
+        input.intentId,
+        input.actionKey,
+        input.operationKey,
+        input.taskRunId,
+        input.conflictScopeKey,
+        input.reasonCode,
+        canonicalizeJson(input.safeSummary, { maxBytes: 16384 }),
+        timestamp,
+        timestamp
+      ), 'RECOVERY_HOLD_CAS_CONFLICT', 'Recovery Hold INSERT changes() 必须等于 1');
+    } catch (error) {
+      if (error instanceof RecoveryControlError) throw error;
+      const active = db.prepare(`
+        SELECT hold_id FROM background_execution_recovery_holds
+        WHERE conflict_scope_key = ? AND status = 'active'
+      `).get(input.conflictScopeKey);
+      if (active) {
+        fail('RECOVERY_HOLD_SCOPE_CONFLICT', 'conflict scope 已有 active Recovery Hold', {
+          holdId: active.hold_id
+        });
+      }
+      throw error;
+    }
+    return Object.freeze({
+      actionKey: input.actionKey,
+      operationKey: input.operationKey,
+      taskRunId: input.taskRunId,
+      sourceKind: input.sourceKind,
+      sourceRef: input.sourceRef,
+      batchId: null,
+      intentId: input.intentId,
+      holdId: input.holdId,
+      recoveryAttemptId: null,
+      previousState: null,
+      nextState: 'active'
+    });
+  }
+
+  const current = holdRow(db, transition.holdId);
+  if (!current) fail('RECOVERY_HOLD_NOT_FOUND', 'Recovery Hold 不存在');
+  if (current.status !== transition.expectedState) {
+    fail('RECOVERY_HOLD_STATE_CONFLICT', 'Recovery Hold expectedState 不匹配');
+  }
+  assertOne(db.prepare(`
+    UPDATE background_execution_recovery_holds
+    SET status = 'resolved', resolution = ?, updated_at = ?, resolved_at = ?
+    WHERE hold_id = ? AND status = 'active'
+  `).run(
+    transition.resolution,
+    timestamp,
+    timestamp,
+    transition.holdId
+  ), 'RECOVERY_HOLD_CAS_CONFLICT', 'Recovery Hold CAS changes() 必须等于 1');
+  return Object.freeze({
+    actionKey: current.action_key,
+    operationKey: current.operation_key,
+    taskRunId: current.task_run_id,
+    sourceKind: current.source_kind,
+    sourceRef: current.source_ref,
+    batchId: null,
+    intentId: current.intent_id,
+    holdId: current.hold_id,
+    recoveryAttemptId: null,
+    previousState: current.status,
+    nextState: 'resolved'
+  });
+}
+
 function insertEvent(db, value) {
   assertOne(db.prepare(`
     INSERT INTO background_execution_recovery_events (
@@ -516,7 +726,11 @@ function transitionWithEvent(db, input, now) {
 
   const lineage = transition.entityKind === 'task-run'
     ? applyTaskTransition(db, transition, request.event.createdAt)
-    : applyBatchTransition(db, transition, request.event.createdAt);
+    : transition.entityKind === 'batch-overlay'
+      ? applyBatchTransition(db, transition, request.event.createdAt)
+      : transition.entityKind === 'critical-intent'
+        ? applyIntentTransition(db, transition, request.event.createdAt)
+        : applyHoldTransition(db, transition, request.event.createdAt);
   insertEvent(db, {
     requestKey,
     writer: 'transitionWithRecoveryEvent',

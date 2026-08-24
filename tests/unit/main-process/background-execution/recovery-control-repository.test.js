@@ -249,7 +249,17 @@ test('runtime RecoveryControl Schema 与冻结 authority 逐字节一致，reque
 test('C1 migration 幂等且外键完整；RecoveryControlReadRepository 构造保持纯只读', () => {
   const bare = new DatabaseSync(':memory:');
   const read = createRecoveryControlReadRepository(bare);
-  assert.deepEqual(Object.keys(read), ['getEffectiveBatchStatus', 'listRecoveryEvents']);
+  assert.deepEqual(Object.keys(read), [
+    'getCriticalIntentById',
+    'getCriticalIntentByOperation',
+    'listOpenCriticalIntents',
+    'listCriticalIntentsByScope',
+    'getRecoveryHoldBySource',
+    'getActiveRecoveryHoldByScope',
+    'listActiveRecoveryHolds',
+    'getEffectiveBatchStatus',
+    'listRecoveryEvents'
+  ]);
   assert.equal(
     bare.prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE name LIKE 'background_execution_recovery_%'`).get().n,
     0
@@ -728,18 +738,81 @@ test('raw request 在 JSON.parse 前拒绝 nested duplicate key/unsafe integer�
   );
 });
 
-test('完整 Schema 的 C2 branch 在 C1 稳定 fail closed，且不建立 Intent/Hold 表', () => {
-  const db = createDb();
-  const c2 = FIXTURE.transitionRequests[9];
-  assert.throws(() => createRecoveryRequestOwnerRepository(db).reserveTransitionRequest({
-    requestKey: c2.requestKey,
-    transition: c2.request.transition,
-    safePayload: c2.request.event.safePayload
-  }), expectCode('RECOVERY_CONTROL_BRANCH_NOT_IMPLEMENTED'));
-  const tables = new Set(db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`).all().map((row) => row.name));
-  assert.equal(tables.has('background_execution_critical_intents'), false);
-  assert.equal(tables.has('background_execution_recovery_holds'), false);
-  db.close();
+test('C2 semantic guard 在 owner/hash 前拒绝 Hold source/intent 与 Intent 状态语义漂移', () => {
+  const fixture = FIXTURE.transitionRequests.slice(9, 16);
+  const recovered = structuredClone(fixture.find((entry) => entry.name === 'intent-mark-recovered').request.transition);
+  recovered.inspection.outcome = 'committed';
+  assert.throws(() => transitionRequestKey(recovered), expectCode('RECOVERY_INTENT_COMMITTED_CANNOT_RECOVER'));
+
+  const hold = structuredClone(fixture.find((entry) => entry.name === 'hold-create-or-get').request.transition);
+  hold.input.sourceKind = 'critical-intent';
+  hold.input.intentId = null;
+  assert.throws(() => transitionRequestKey(hold), expectCode('RECOVERY_HOLD_SOURCE_INTENT_MISMATCH'));
+});
+
+test('7 个 E02-C2 Intent/Hold transition 经真实 DDL/CAS/event SELECT 匹配独立 20-field KAT', async (t) => {
+  for (const entry of FIXTURE.transitionRequests.slice(9, 16)) {
+    await t.test(entry.name, () => {
+      const db = createDb();
+      ensureBackgroundExecutionRecoveryControlSchema(db);
+      const transition = entry.request.transition;
+      if (transition.entityKind === 'critical-intent' && transition.command !== 'create-prepared') {
+        db.prepare(`
+          INSERT INTO background_execution_critical_intents (
+            contract_version, intent_id, action_key, operation_key, task_run_id,
+            job_id, coordination_kind, state, conflict_scope_key, inspector_key,
+            evidence_version, evidence_json, evidence_sha256,
+            receipt_ref_json, result_json, created_at, updated_at,
+            closed_at, retention_until
+          ) VALUES (
+            1, ?, 'statement:generate-all', 'operation-1', 'task-run-1',
+            'job-1', 'main-owned-settlement', ?, 'scope-1',
+            'inspector.statement:generate-all', 1, '{}',
+            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            NULL, NULL, '2026-08-20T00:00:00.000Z',
+            '2026-08-20T00:00:00.000Z', NULL, NULL
+          )
+        `).run(transition.intentId, transition.expectedState);
+      }
+      if (transition.entityKind === 'recovery-hold' && transition.command === 'resolve') {
+        db.prepare(`
+          INSERT INTO background_execution_recovery_holds (
+            hold_id, source_kind, source_ref, intent_id, action_key,
+            operation_key, task_run_id, conflict_scope_key, reason_code,
+            status, resolution, safe_summary_json,
+            created_at, updated_at, resolved_at
+          ) VALUES (
+            ?, 'module-recovery', 'source-1', NULL, 'statement:generate-all',
+            'operation-1', 'task-run-1', 'scope-1', 'INSPECTOR_UNAVAILABLE',
+            'active', NULL, '{}',
+            '2026-08-20T00:00:00.000Z', '2026-08-20T00:00:00.000Z', NULL
+          )
+        `).run(transition.holdId);
+      }
+      const reserved = createRecoveryRequestOwnerRepository(db, {
+        now: () => new Date(entry.request.event.createdAt),
+        createEventId: () => entry.request.event.eventId
+      }).reserveTransitionRequest({
+        requestKey: entry.requestKey,
+        transition,
+        safePayload: entry.request.event.safePayload
+      });
+      const result = createRecoveryControlRepository(db, {
+        now: () => new Date('2026-08-24T12:00:00.000Z')
+      }).runInControlTransaction((tx) => tx.transitionWithRecoveryEvent(reserved));
+      const known = FIXTURE.resultProjectionKnownAnswers.find(
+        (candidate) => candidate.requestName === entry.name
+      );
+      assert.deepEqual(result, known.projection);
+      assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM background_execution_recovery_events`).get().n, 1);
+      const replay = createRecoveryControlRepository(db).runInControlTransaction(
+        (tx) => tx.transitionWithRecoveryEvent(reserved)
+      );
+      assert.deepEqual(replay, result);
+      assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM background_execution_recovery_events`).get().n, 1);
+      db.close();
+    });
+  }
 });
 
 test('唯一 writer API 无顶层 mutation，拒绝 async/nested callback 并关闭泄漏 tx object', () => {

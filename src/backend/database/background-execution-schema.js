@@ -35,6 +35,80 @@ function ensureBackgroundExecutionRecoveryControlSchema(db) {
   assertDatabase(db);
   return withMigrationTransaction(db, () => {
     db.exec(`
+      CREATE TABLE IF NOT EXISTS background_execution_critical_intents (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        contract_version INTEGER NOT NULL,
+        intent_id TEXT NOT NULL UNIQUE,
+        action_key TEXT NOT NULL,
+        operation_key TEXT NOT NULL,
+        task_run_id TEXT NOT NULL,
+        job_id TEXT NOT NULL,
+        coordination_kind TEXT NOT NULL CHECK (
+          coordination_kind IN ('worker-critical', 'main-owned-settlement')
+        ),
+        state TEXT NOT NULL CHECK (
+          state IN ('prepared', 'acked', 'committed', 'recovered', 'closed')
+        ),
+        conflict_scope_key TEXT NOT NULL,
+        inspector_key TEXT NOT NULL,
+        evidence_version INTEGER NOT NULL,
+        evidence_json TEXT NOT NULL,
+        evidence_sha256 TEXT NOT NULL,
+        receipt_ref_json TEXT,
+        result_json TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        closed_at TEXT,
+        retention_until TEXT,
+        UNIQUE(action_key, operation_key, task_run_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_bg_exec_intent_state
+        ON background_execution_critical_intents(state, updated_at);
+
+      CREATE INDEX IF NOT EXISTS idx_bg_exec_intent_scope
+        ON background_execution_critical_intents(conflict_scope_key, state);
+
+      CREATE TABLE IF NOT EXISTS background_execution_recovery_holds (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        hold_id TEXT NOT NULL UNIQUE,
+        source_kind TEXT NOT NULL CHECK (
+          source_kind IN (
+            'critical-intent', 'publisher-journal',
+            'target-post-image', 'existing-protocol',
+            'module-recovery', 'manual'
+          )
+        ),
+        source_ref TEXT NOT NULL,
+        intent_id TEXT,
+        action_key TEXT NOT NULL,
+        operation_key TEXT NOT NULL,
+        task_run_id TEXT NOT NULL,
+        conflict_scope_key TEXT NOT NULL,
+        reason_code TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('active', 'resolved')),
+        resolution TEXT CHECK (
+          resolution IS NULL OR resolution IN (
+            'committed', 'not-committed', 'compensated', 'manual-override'
+          )
+        ),
+        safe_summary_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        resolved_at TEXT,
+        CHECK (
+          (source_kind IN ('critical-intent', 'target-post-image') AND intent_id IS NOT NULL)
+          OR (source_kind NOT IN ('critical-intent', 'target-post-image') AND intent_id IS NULL)
+        ),
+        UNIQUE(source_kind, source_ref),
+        FOREIGN KEY(intent_id)
+          REFERENCES background_execution_critical_intents(intent_id)
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS ux_bg_exec_active_hold_scope
+        ON background_execution_recovery_holds(conflict_scope_key)
+        WHERE status = 'active';
+
       CREATE TABLE IF NOT EXISTS background_execution_batch_recovery_states (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         batch_id INTEGER NOT NULL,
@@ -180,6 +254,7 @@ function ensureBackgroundExecutionRecoveryControlSchema(db) {
 
       CREATE INDEX IF NOT EXISTS idx_bg_exec_recovery_events_operation
         ON background_execution_recovery_events(action_key, operation_key, id);
+
     `);
   });
 }

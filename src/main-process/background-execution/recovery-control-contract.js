@@ -109,16 +109,41 @@ function validateBoundedFields(request) {
   }
 }
 
+function validateTransitionSemantics(transition) {
+  if (transition.entityKind === 'critical-intent' && transition.command === 'mark-recovered'
+      && transition.inspection.outcome === 'committed') {
+    throw new RecoveryControlValidationError(
+      'RECOVERY_INTENT_COMMITTED_CANNOT_RECOVER',
+      'committed inspection 只能走 committed → closed，不得 mark-recovered',
+      '/inspection/outcome'
+    );
+  }
+  if (transition.entityKind === 'recovery-hold' && transition.command === 'create-or-get') {
+    const input = transition.input;
+    const requiresIntent = input.sourceKind === 'critical-intent'
+      || input.sourceKind === 'target-post-image';
+    if ((requiresIntent && input.intentId === null) || (!requiresIntent && input.intentId !== null)) {
+      throw new RecoveryControlValidationError(
+        'RECOVERY_HOLD_SOURCE_INTENT_MISMATCH',
+        'Recovery Hold sourceKind/intentId 组合非法',
+        '/input/intentId'
+      );
+    }
+  }
+  return transition;
+}
+
 function validateTransition(transition) {
   const owned = canonicalJsonSnapshot(transition);
   validateWith(validators.transition, owned, 'RECOVERY_TRANSITION_INVALID');
-  return owned;
+  return validateTransitionSemantics(owned);
 }
 
 function validateTransitionRequest(request) {
   const owned = canonicalJsonSnapshot(request);
   validateWith(validators.transitionRequest, owned, 'RECOVERY_TRANSITION_REQUEST_INVALID');
   validateBoundedFields(owned);
+  validateTransitionSemantics(owned.transition);
   return owned;
 }
 
@@ -137,17 +162,20 @@ function parseObservationRequest(raw) {
   return validateObservationRequest(parseStrictJson(raw, { maxBytes: RECOVERY_REQUEST_MAX_BYTES }));
 }
 
-function assertC1Transition(transition) {
+function assertImplementedTransition(transition) {
   const key = `${transition.entityKind}.${transition.command}`;
-  if (!key.startsWith('task-run.') && !key.startsWith('batch-overlay.')) {
+  if (!Object.prototype.hasOwnProperty.call(TRANSITION_EVENT_TYPES, key)) {
     throw new RecoveryControlValidationError(
       'RECOVERY_CONTROL_BRANCH_NOT_IMPLEMENTED',
-      `RecoveryControl v1 branch 尚不属于 E02-C1：${key}`,
+      `RecoveryControl v1 branch 未实现：${key}`,
       '/transition/entityKind'
     );
   }
   return transition;
 }
+
+// C1 的历史导出名保持兼容；C2 后它代表完整 v1 transition union。
+const assertC1Transition = assertImplementedTransition;
 
 function transitionEventType(transition) {
   const value = TRANSITION_EVENT_TYPES[`${transition.entityKind}.${transition.command}`];
@@ -183,9 +211,25 @@ function transitionIdentityTuple(transition) {
     if (transition.command !== 'mark-interrupted') values.push(transition.recoveryAttemptId);
     return [`recovery-control/v1/transition/batch-overlay/${transition.command}`, ...values];
   }
+  if (transition.entityKind === 'critical-intent') {
+    const intentId = transition.command === 'create-prepared'
+      ? transition.input.intentId
+      : transition.intentId;
+    return [`recovery-control/v1/transition/critical-intent/${transition.command}`, intentId];
+  }
+  if (transition.entityKind === 'recovery-hold') {
+    if (transition.command === 'create-or-get') {
+      return [
+        'recovery-control/v1/transition/recovery-hold/create-or-get',
+        transition.input.sourceKind,
+        transition.input.sourceRef
+      ];
+    }
+    return ['recovery-control/v1/transition/recovery-hold/resolve', transition.holdId];
+  }
   throw new RecoveryControlValidationError(
     'RECOVERY_CONTROL_BRANCH_NOT_IMPLEMENTED',
-    'E02-C1 仅实现 TaskRun 与 Batch overlay transition'
+    'RecoveryControl v1 transition branch 未实现'
   );
 }
 
@@ -302,6 +346,7 @@ module.exports = {
   TRANSITION_EVENT_TYPES,
   RecoveryControlValidationError,
   assertC1Transition,
+  assertImplementedTransition,
   observationRequestKey,
   observationScopeKey,
   parseObservationRequest,
