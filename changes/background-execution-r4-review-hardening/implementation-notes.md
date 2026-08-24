@@ -29,6 +29,7 @@
 | 原计划 | 实际方案 | 原因 | 影响 | Spec 已同步 |
 | --- | --- | --- | --- | --- |
 | 在 #174 组合 HEAD 直接重生冻结包 published validator report | 先恢复历史 PASS report，再在其原始 provenance HEAD `f7c4d5aa` 上叠加单行 TechDoc 勘误重跑 | validator 将 #165 的 Main/TaskPolicy source hash 与 60 条 call-site 行号冻结；后续 PR 栈会按设计触发 provenance drift，和 TechDoc 内容无关 | 不更新 authority/action manifest，不把后续代码漂移冒充合同失败；修正文档仍须生成真实 29/29 report 与 checksum | 是 |
+| PR #175 从旧堆叠基线直接等待 GitHub 合并 | PR base 改为 `v3.2.0` 后，将最新 `origin/v3.2.0`（`21181432`）合入 hardening head | #168～#174 已按序合并，旧堆叠拓扑在迁移测试处产生内容冲突 | 仅组合基线的显式关闭保护与本 PR 的 non-unique `run_id` 索引断言；相对新基线的净改动仍为原 13 个 hardening 文件，不改变产品合同 | 不适用；无行为偏差 |
 
 ## Evidence
 
@@ -43,6 +44,8 @@
 | `shasum -a 256 -c PACKAGE-SHA256SUMS.txt` | `69/69 PASS` | 冻结包除 checksum 自身外全部文件与新 validation report 完整一致 |
 | `npm run release-check` | PASS；lint/smoke PASS，unit `6017/6019`（0 fail、2 skip），integration `51/51` scripts、`2455/2455` assertions | 全仓回归；未调用 `check-vars`/`scan:vars` |
 | 最终定向回归（4 个 hardening test files） | `70 PASS / 1 Windows-only SKIP`，0 fail | 五项修复的资源生命周期、取消、资金持久化、文档与 Windows canary 合同 |
+| 合入最新 `v3.2.0` 后的冲突复核 | 唯一冲突为 `vcc-op-calc-save-run-receipt.test.js`；保留基线 `try/finally` 关闭数据库并保留本 PR non-unique index 断言；`git diff --cached --check` PASS | 证明冲突是测试清理与新增断言的机械组合，不改金额、方向、幂等、恢复或 production gate |
+| 合入最新 `v3.2.0` 后的最终验证 | 定向 `70 PASS / 1 Windows-only SKIP`；`npm run release-check` PASS，unit `6017/6019`（0 fail、2 skip），integration `51/51` scripts、`2455/2455` assertions；合同包 checksum `69/69 PASS` | 验证顺序合并后的组合快照；仍未调用 `check-vars`/`scan:vars` |
 
 ## Final Blindspot Review
 

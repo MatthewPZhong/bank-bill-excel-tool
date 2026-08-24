@@ -470,7 +470,10 @@ function Invoke-WindowsPackagedBackgroundCanary {
   }
   Set-Content -LiteralPath (Join-Path $workRoot '.owned-by-packaged-background-canary') -Value $runId -Encoding ascii -NoNewline
 
-  $installRoot = Join-Path $workRoot 'installed'
+  # assisted NSIS 会在 /D 不含 APP_FILENAME 时自动追加产品目录；在 owned work root
+  # 下保留固定容器并把产品名作为第二层，让选择、卸载和身份审计指向真实安装根。
+  $installContainer = Join-Path $workRoot 'installed'
+  $installRoot = Assert-RunnerTempChild -RunnerTemp $workRoot -Candidate (Join-Path $installContainer $productName) -DirectChild $false
   $installerEnvironmentRoot = Join-Path $workRoot 'installer-environment'
   $artifactRoot = Join-Path $workRoot 'artifacts'
   $installedExecutable = $null

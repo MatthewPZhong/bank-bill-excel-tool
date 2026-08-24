@@ -73,6 +73,7 @@ const VALID_RESULTS = require(path.join(
   AUTHORITY_DIR,
   'validation/fixtures/valid/recovery-results.v1.json'
 ));
+const SUPPORTED_DIRECTORY_FSYNC = () => Object.freeze({ capability: 'supported' });
 
 function openDb(filePath = ':memory:') {
   const db = new DatabaseSync(filePath);
@@ -397,7 +398,10 @@ test('publisher provider 可独立枚举 durable open journal，dedupe 后只 in
     crashAfterCommit: false
   });
   const journalDirectory = path.join(tempDir, 'journals');
-  const provider = createCanarySettlementProvider({ journalDirectory });
+  const provider = createCanarySettlementProvider({
+    journalDirectory,
+    fsyncDirectory: SUPPORTED_DIRECTORY_FSYNC
+  });
   const prepared = provider.prepare({
     sourceKind: 'publisher-journal',
     sourceRef: 'publisher-journal:canary-1',
@@ -788,7 +792,10 @@ test('target-post-image 从 open Main-owned Intent 枚举，回读 post-image �
     createCanaryPostImageInspector({ resolveTargetPath: () => targetPath })
   );
   inspectorRegistry.freeze();
-  const provider = createCanarySettlementProvider({ journalDirectory: path.join(tempDir, 'journal') });
+  const provider = createCanarySettlementProvider({
+    journalDirectory: path.join(tempDir, 'journal'),
+    fsyncDirectory: SUPPORTED_DIRECTORY_FSYNC
+  });
   const providerRegistry = createSettlementRecoveryProviderRegistry();
   providerRegistry.register('settlement.background-execution:canary', provider);
   providerRegistry.freeze();
@@ -963,12 +970,55 @@ test('inspection observation 与多个即时 transition 同 tx；末项 CAS 失�
   db.close();
 });
 
-test('target post-image durable replace 正常回读；directory fsync 明确 unsupported 与其他错误分流', () => {
+test('target post-image durable replace 正常回读；directory fsync 明确 unsupported 与其他错误分流', async (t) => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'c2-post-image-'));
+  const hostDirectoryBarrier = fsyncDirectory(tempDir);
+  assert.ok(['supported', 'unsupported'].includes(hostDirectoryBarrier.capability));
+  if (hostDirectoryBarrier.capability === 'unsupported') {
+    assert.equal(typeof hostDirectoryBarrier.errorCode, 'string');
+  }
+  t.diagnostic(
+    `hostDirectoryFsync=${hostDirectoryBarrier.capability}` +
+    (hostDirectoryBarrier.errorCode ? `:${hostDirectoryBarrier.errorCode}` : '')
+  );
+
   const target = path.join(tempDir, 'target.json');
-  const result = writeCanaryTargetPostImage(target, '{"value":1}');
+  const result = writeCanaryTargetPostImage(target, '{"value":1}', {
+    fsyncDirectory: SUPPORTED_DIRECTORY_FSYNC
+  });
   assert.equal(result.status, 'committed');
   assert.equal(fs.readFileSync(target, 'utf8'), '{"value":1}');
+
+  const unavailableTarget = path.join(tempDir, 'unavailable.json');
+  const unavailable = writeCanaryTargetPostImage(unavailableTarget, '{"value":2}', {
+    fsyncDirectory: () => Object.freeze({ capability: 'unsupported', errorCode: 'EPERM' })
+  });
+  assert.equal(unavailable.status, 'durability-unavailable');
+  assert.equal(unavailable.directoryFsync.errorCode, 'EPERM');
+  assert.equal(fs.readFileSync(unavailableTarget, 'utf8'), '{"value":2}');
+
+  const unsupportedProvider = createCanarySettlementProvider({
+    journalDirectory: path.join(tempDir, 'unsupported-provider'),
+    fsyncDirectory: () => Object.freeze({ capability: 'unsupported', errorCode: 'EPERM' })
+  });
+  const prepared = unsupportedProvider.prepare({
+    sourceKind: 'publisher-journal',
+    sourceRef: 'publisher-journal:unsupported-provider',
+    operationKey: 'operation-unsupported-provider',
+    taskRunId: 'task-unsupported-provider',
+    conflictScopeKey: 'scope:unsupported-provider',
+    settlementKey: 'settlement.background-execution:canary',
+    intentId: null,
+    boundedEvidence: { expectedValue: 'unsupported-provider' }
+  });
+  assert.equal(prepared.durability.status, 'durability-unavailable');
+  const terminal = await unsupportedProvider.recover(
+    prepared.source,
+    inspectionFor(prepared.source, 'committed')
+  );
+  assert.equal(terminal.outcome, 'terminal-failure');
+  assert.equal(terminal.safeError.code, 'DURABILITY_BARRIER_UNAVAILABLE');
+  assert.equal((await unsupportedProvider.listOpenSources()).length, 1);
 
   const unsupportedFs = {
     openSync() { throw Object.assign(new Error('unsupported'), { code: 'EINVAL' }); },
@@ -978,11 +1028,32 @@ test('target post-image durable replace 正常回读；directory fsync 明确 un
     capability: 'unsupported',
     errorCode: 'EINVAL'
   });
-  const deniedFs = {
-    openSync() { throw Object.assign(new Error('denied'), { code: 'EACCES' }); },
+
+  for (const errorCode of ['EACCES', 'EISDIR', 'EPERM']) {
+    const windowsUnsupportedFs = {
+      openSync() { throw Object.assign(new Error('unsupported on Windows'), { code: errorCode }); },
+      closeSync() {}
+    };
+    assert.deepEqual(fsyncDirectory(tempDir, {
+      fs: windowsUnsupportedFs,
+      platform: 'win32'
+    }), {
+      capability: 'unsupported',
+      errorCode
+    });
+    assert.throws(() => fsyncDirectory(tempDir, {
+      fs: windowsUnsupportedFs,
+      platform: 'linux'
+    }), {
+      code: 'DURABILITY_DIRECTORY_FSYNC_FAILED'
+    });
+  }
+
+  const failedFs = {
+    openSync() { throw Object.assign(new Error('I/O failure'), { code: 'EIO' }); },
     closeSync() {}
   };
-  assert.throws(() => fsyncDirectory(tempDir, { fs: deniedFs }), {
+  assert.throws(() => fsyncDirectory(tempDir, { fs: failedFs, platform: 'win32' }), {
     code: 'DURABILITY_DIRECTORY_FSYNC_FAILED'
   });
 });

@@ -91,6 +91,7 @@ test('Windows 本地与发布构建全部锁定 x64，避免检查陈旧 win-unp
 test('packaged background canary 仅在 GitHub-hosted Windows 的 RUNNER_TEMP 写入，并审计 exact 产品身份', () => {
   const harness = read('scripts/run-windows-packaged-background-canary.ps1');
   const manifest = JSON.parse(read('package.json'));
+  const assistedInstaller = read('node_modules/app-builder-lib/templates/nsis/assistedInstaller.nsh');
   const { UUID } = require('builder-util-runtime');
   const nsisTarget = read('node_modules/app-builder-lib/out/targets/nsis/NsisTarget.js');
   const electronBuilderNamespace = UUID.parse('50e065bc-3134-11e6-9bab-38c9862bdaf3');
@@ -150,6 +151,16 @@ test('packaged background canary 仅在 GitHub-hosted Windows 的 RUNNER_TEMP �
   assert.match(harness, /BACKGROUND_EXECUTION_PACKAGED_CANARY = '1'/);
   assert.match(harness, /BACKGROUND_EXECUTION_PACKAGED_CANARY_REPORT_PATH = \$ReportPath/);
   assert.match(harness, /Invoke-SilentInstaller[\s\S]*'\/S',[\s\S]*'\/currentuser',[\s\S]*'--no-desktop-shortcut',[\s\S]*"\/D=\$InstallRoot"/);
+  assert.match(
+    assistedInstaller,
+    /\$\{StrContains\} \$0 "\$\{APP_FILENAME\}" \$INSTDIR[\s\S]*StrCpy \$INSTDIR "\$INSTDIR\\\$\{APP_FILENAME\}"/
+  );
+  assert.match(harness, /\$installContainer = Join-Path \$workRoot 'installed'/);
+  assert.match(
+    harness,
+    /\$installRoot = Assert-RunnerTempChild -RunnerTemp \$workRoot -Candidate \(Join-Path \$installContainer \$productName\) -DirectChild \$false/
+  );
+  assert.doesNotMatch(harness, /\$installRoot = Join-Path \$workRoot \$productName/);
   assert.match(harness, /SETUP_FREEZE_IDENTITY_MISMATCH/);
   assert.match(harness, /Invoke-SilentInstaller -SetupPath \$setupFrozen/);
   assert.match(harness, /Select-InstalledExecutable[\s\S]*Invoke-PackagedCanaryVariant -Executable \$installedExecutable/);
