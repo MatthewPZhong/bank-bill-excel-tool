@@ -29,6 +29,24 @@ const { AsyncLocalStorage } = require('node:async_hooks');
 const XLSX = require('xlsx');
 const { performance } = require('node:perf_hooks');
 const { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, shell } = require('electron');
+const {
+  parsePackagedRuntimeRequest
+} = require('./main-process/background-execution/canary/packaged-runtime-request');
+
+let packagedRuntimeRequest = null;
+let packagedRuntimeRequestError = null;
+try {
+  packagedRuntimeRequest = parsePackagedRuntimeRequest(process.env);
+} catch (error) {
+  packagedRuntimeRequestError = error;
+}
+// Env 非法也属于显式 canary 请求，必须走隔离失败退出，不能回落到普通应用启动。
+const packagedRuntimeModeSelected = packagedRuntimeRequest !== null || packagedRuntimeRequestError !== null;
+function packagedRuntimeStartupErrorCode(error) {
+  return error && typeof error.code === 'string' && /^[A-Z0-9_:-]{1,64}$/.test(error.code)
+    ? error.code
+    : 'PACKAGED_CANARY_STARTUP_FAILED';
+}
 const { AppDatabase } = require('./backend/database');
 const { runStartupPhase, startStartupPhase } = require('./backend/startup-phase');
 const {
@@ -548,15 +566,15 @@ const {
   resolveRecognizedBigAccount
 } = require('./main-process/big-account-recognition');
 
-if (process.env.APP_USER_DATA_DIR) {
+if (!packagedRuntimeModeSelected && process.env.APP_USER_DATA_DIR) {
   app.setPath('userData', process.env.APP_USER_DATA_DIR);
 }
 
-if (process.env.APP_DOCUMENTS_DIR) {
+if (!packagedRuntimeModeSelected && process.env.APP_DOCUMENTS_DIR) {
   app.setPath('documents', process.env.APP_DOCUMENTS_DIR);
 }
 
-if (process.platform === 'win32') {
+if (!packagedRuntimeModeSelected && process.platform === 'win32') {
   app.setAppUserModelId('com.openai.bankbillexceltool');
 }
 
@@ -568,10 +586,12 @@ let initialStartupWebContentsId = null;
 // preview/startup:measure 使用隔离临时目录，允许并行启动，避免开发工具争抢正式实例锁。
 const requireSingleInstanceLock = !process.env.APP_CAPTURE_PATH
   && process.env.APP_STARTUP_MEASURE_AUTO_QUIT !== '1';
-const hasSingleInstanceLock = !requireSingleInstanceLock || app.requestSingleInstanceLock();
+const hasSingleInstanceLock = packagedRuntimeModeSelected
+  || !requireSingleInstanceLock
+  || app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
   app.quit();
-} else if (requireSingleInstanceLock) {
+} else if (requireSingleInstanceLock && !packagedRuntimeModeSelected) {
   app.on('second-instance', () => {
     if (!applicationStartupComplete || !mainWindowReady) return;
     if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -21360,6 +21380,31 @@ async function initializeApplication() {
 
 if (hasSingleInstanceLock) app.whenReady()
   .then(async () => {
+    if (packagedRuntimeModeSelected) {
+      let exitCode = 1;
+      let errorCode = packagedRuntimeRequestError
+        ? packagedRuntimeStartupErrorCode(packagedRuntimeRequestError)
+        : null;
+      try {
+        if (packagedRuntimeRequestError) throw packagedRuntimeRequestError;
+        const {
+          runPackagedRuntimeCanary
+        } = require('./main-process/background-execution/canary/packaged-runtime-runner');
+        const result = await runPackagedRuntimeCanary({
+          app,
+          request: packagedRuntimeRequest
+        });
+        exitCode = result.exitCode;
+        errorCode = result.errorCode;
+      } catch (error) {
+        errorCode = packagedRuntimeStartupErrorCode(error);
+      }
+      if (errorCode) {
+        process.stderr.write(`BACKGROUND_EXECUTION_PACKAGED_CANARY_ERROR=${errorCode}\n`);
+      }
+      app.exit(exitCode);
+      return;
+    }
     let finishStartupTotal = null;
     try {
       finishStartupTotal = startStartupPhase('startup-total', recordStartupPhase);
@@ -21404,6 +21449,17 @@ if (hasSingleInstanceLock) app.whenReady()
     }
   })
   .catch((error) => {
+    if (packagedRuntimeModeSelected) {
+      try {
+        process.stderr.write(
+          `BACKGROUND_EXECUTION_PACKAGED_CANARY_ERROR=${packagedRuntimeStartupErrorCode(error)}\n`
+        );
+      } catch (_stderrError) {
+        // 专用 canary 失败不得转入普通 startup failure/log/window 路径。
+      }
+      app.exit(1);
+      return;
+    }
     handleStartupFailure(error);
   });
 
@@ -22216,41 +22272,43 @@ function resumeApplicationAfterFailedRestart() {
   if (!idleCleanupTimer && database && database.db) setupIdleCleanupTimer();
 }
 
-app.on('before-quit', (event) => {
-  if (businessOperationRegistry.isInstallTransitionActive() && !quitPreparationComplete) {
+if (!packagedRuntimeModeSelected) {
+  app.on('before-quit', (event) => {
+    if (businessOperationRegistry.isInstallTransitionActive() && !quitPreparationComplete) {
+      event.preventDefault();
+      return;
+    }
+    if (normalQuitContinuation || quitPreparationComplete) return;
     event.preventDefault();
-    return;
-  }
-  if (normalQuitContinuation || quitPreparationComplete) return;
-  event.preventDefault();
-  if (normalQuitInProgress) return;
-  normalQuitInProgress = true;
+    if (normalQuitInProgress) return;
+    normalQuitInProgress = true;
 
-  prepareApplicationForQuit()
-    .catch((error) => {
-      // 普通退出维持历史容错语义；升级重启由调用方直接 await 并阻断安装。
-      appendActivityLogEntry({
-        level: 'error',
-        source: 'main',
-        domain: 'app-quit',
-        message: '退出清理未全部完成，普通退出继续执行',
-        details: [error && error.message ? error.message : String(error)]
+    prepareApplicationForQuit()
+      .catch((error) => {
+        // 普通退出维持历史容错语义；升级重启由调用方直接 await 并阻断安装。
+        appendActivityLogEntry({
+          level: 'error',
+          source: 'main',
+          domain: 'app-quit',
+          message: '退出清理未全部完成，普通退出继续执行',
+          details: [error && error.message ? error.message : String(error)]
+        });
+      })
+      .finally(() => {
+        normalQuitContinuation = true;
+        app.quit();
       });
-    })
-    .finally(() => {
-      normalQuitContinuation = true;
+  });
+
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') {
       app.quit();
-    });
-});
+    }
+  });
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
-});
-
-app.on('activate', () => {
-  if (applicationStartupComplete && BrowserWindow.getAllWindows().length === 0) {
-    createWindow({ instrumentation: 'supplemental' }).catch(handleStartupFailure);
-  }
-});
+  app.on('activate', () => {
+    if (applicationStartupComplete && BrowserWindow.getAllWindows().length === 0) {
+      createWindow({ instrumentation: 'supplemental' }).catch(handleStartupFailure);
+    }
+  });
+}
