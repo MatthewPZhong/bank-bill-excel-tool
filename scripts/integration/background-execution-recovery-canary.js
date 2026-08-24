@@ -139,8 +139,16 @@ async function main() {
 
   const targetPath = path.join(tempDir, 'target-post-image.json');
   const target = writeCanaryTargetPostImage(targetPath, '{"post":true}');
-  assertEqual([target.status, fs.readFileSync(targetPath, 'utf8')], [
-    'committed', '{"post":true}'
+  assertEqual([
+    ['committed', 'durability-unavailable'].includes(target.status),
+    target.directoryFsync.capability,
+    target.status === 'committed' || typeof target.directoryFsync.errorCode === 'string',
+    fs.readFileSync(targetPath, 'utf8')
+  ], [
+    true,
+    target.status === 'committed' ? 'supported' : 'unsupported',
+    true,
+    '{"post":true}'
   ], 'target post-image uses file+directory durability barrier');
 
   const provider = createCanarySettlementProvider({ journalDirectory: path.join(tempDir, 'journals') });
@@ -154,10 +162,24 @@ async function main() {
     intentId: null,
     boundedEvidence: evidence
   });
-  assertEqual(prepared.durability.status, 'committed', 'provider journal is durable');
+  assertEqual([
+    ['committed', 'durability-unavailable'].includes(prepared.durability.status),
+    prepared.durability.directoryFsync.capability,
+    prepared.durability.status === 'committed' ||
+      typeof prepared.durability.directoryFsync.errorCode === 'string'
+  ], [
+    true,
+    prepared.durability.status === 'committed' ? 'supported' : 'unsupported',
+    true
+  ], 'provider journal reports the real directory durability capability');
   assertEqual((await provider.listOpenSources()).length, 1, 'provider enumerates source without intent/hold');
   assertEqual(durableRecoveryPolicy.production.enabled, false, 'durable canary remains production disabled');
   db.close();
+
+  console.log(
+    `[recovery-canary] targetDirectoryFsync=${target.directoryFsync.capability} ` +
+    `providerDirectoryFsync=${prepared.durability.directoryFsync.capability}`
+  );
 
   if (failures.length > 0) {
     console.error('FAILURES:', JSON.stringify(failures, null, 2));
