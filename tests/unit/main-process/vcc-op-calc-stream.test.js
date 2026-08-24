@@ -12,6 +12,7 @@ const ExcelJS = require('exceljs');
 
 const { FLOW_HEADERS } = require('../../../src/backend/vcc-op-calc-db/columns');
 const { createVccOpCalcSession } = require('../../../src/main-process/vcc-op-calc-session');
+const { sourceSnapshotFromStat } = require('../../../src/main-process/archive-center/source-snapshot');
 
 // FLOW_HEADERS 0-based 列位：账单日期=1 出入方向=8 对账金额=13 币种=14（见真实文件 sharedStrings 顺序）
 const COL = { billDate: 1, direction: 8, amount: 13, currency: 14 };
@@ -164,6 +165,56 @@ test.describe('streamScanAndCompute（流式聚合，资金红线🔴）', () =>
     assert.equal(r.perFile.length, 2);
     assert.equal(r.perFile[0].amountIn, '100.00');
     assert.equal(r.perFile[1].amountOut, '40.00');
+  });
+
+  test('E03-A 真实 Parser Worker/Pipeline 与 legacy 逐字段等价，成功返回前已采用冻结 snapshot', async () => {
+    const fpA = await writeFixture([
+      { billDate: '2026-04-01', direction: '入', amount: '100.01', currency: 'USD' },
+      { billDate: '2026-04-02', direction: '出', amount: '40.00', currency: 'CNY' }
+    ]);
+    const fpB = await writeFixture([
+      { billDate: '2026-04-03', direction: '入', amount: '0.20', currency: 'CNY' }
+    ]);
+    const legacy = await newSession().streamScanAndCompute([fpA, fpB]);
+    const pipelineSession = newSession();
+    const pipelined = await pipelineSession.parserPipelineScanAndCompute([fpA, fpB].map((filePath) => ({
+      filePath,
+      sourceSnapshot: sourceSnapshotFromStat(fs.statSync(filePath, { bigint: true }))
+    })));
+
+    assert.deepEqual({
+      ok: pipelined.ok,
+      yearMonth: pipelined.yearMonth,
+      totalRows: pipelined.totalRows,
+      totals: pipelined.totals,
+      perFile: pipelined.perFile
+    }, legacy);
+    const cache = pipelineSession.getComputeCache();
+    assert.ok(cache.inputEvidenceHash);
+    assert.equal(Object.isFrozen(cache), true);
+    assert.equal(Object.isFrozen(cache.perFile), true);
+  });
+
+  test('E03-A 真实 Parser Worker/Pipeline 与 legacy 错误顺序、分类和拒绝结果等价', async () => {
+    const fp = await writeFixture([
+      { billDate: '2026-04-01', direction: '入', amount: '1.00', currency: 'CNY' },
+      { billDate: '2026-05-01', direction: '出', amount: '0.25', currency: 'USD' },
+      { billDate: '2026-04-03', direction: '非法', amount: '9.00', currency: 'CNY' }
+    ]);
+    const legacySession = newSession();
+    const pipelineSession = newSession();
+    const legacy = await legacySession.streamScanAndCompute([fp]);
+    const pipelined = await pipelineSession.parserPipelineScanAndCompute([{
+      filePath: fp,
+      sourceSnapshot: sourceSnapshotFromStat(fs.statSync(fp, { bigint: true }))
+    }]);
+
+    assert.deepEqual(pipelined, legacy);
+    assert.equal(pipelined.ok, false);
+    assert.equal(pipelined.errorCount, 2);
+    assert.match(pipelined.errorRows[0].reason, /出入方向非法/);
+    assert.match(pipelined.errorRows[1].reason, /跨多个月份/);
+    assert.equal(pipelineSession.getComputeCache(), null);
   });
 
   test('保存缓存：streamScanAndCompute 成功后 getComputeCache 可取（供 saveRun）', async () => {
