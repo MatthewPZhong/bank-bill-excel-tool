@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const DIRECTORY_FSYNC_UNSUPPORTED_CODES = new Set(['EINVAL', 'ENOSYS', 'ENOTSUP', 'EOPNOTSUPP']);
+const WINDOWS_DIRECTORY_FSYNC_UNSUPPORTED_CODES = new Set(['EACCES', 'EISDIR', 'EPERM']);
 
 class DurabilityBarrierError extends Error {
   constructor(code, message, details = null) {
@@ -16,13 +17,18 @@ class DurabilityBarrierError extends Error {
 
 function fsyncDirectory(directoryPath, options = {}) {
   const fileSystem = options.fs || fs;
+  const platform = options.platform || process.platform;
   let fd;
   try {
     fd = fileSystem.openSync(directoryPath, 'r');
     fileSystem.fsyncSync(fd);
     return Object.freeze({ capability: 'supported' });
   } catch (error) {
-    if (error && DIRECTORY_FSYNC_UNSUPPORTED_CODES.has(error.code)) {
+    const unsupported = error && (
+      DIRECTORY_FSYNC_UNSUPPORTED_CODES.has(error.code) ||
+      (platform === 'win32' && WINDOWS_DIRECTORY_FSYNC_UNSUPPORTED_CODES.has(error.code))
+    );
+    if (unsupported) {
       return Object.freeze({ capability: 'unsupported', errorCode: error.code });
     }
     throw new DurabilityBarrierError(
@@ -39,6 +45,7 @@ function fsyncDirectory(directoryPath, options = {}) {
 
 function writeFileAtomicDurable(targetPath, content, options = {}) {
   const fileSystem = options.fs || fs;
+  const syncDirectory = options.fsyncDirectory || fsyncDirectory;
   const bytes = Buffer.isBuffer(content) ? content : Buffer.from(String(content), 'utf8');
   const directory = path.dirname(targetPath);
   const tempPath = `${targetPath}.tmp-${process.pid}-${Date.now()}`;
@@ -51,7 +58,10 @@ function writeFileAtomicDurable(targetPath, content, options = {}) {
     fileSystem.closeSync(fd);
     fd = undefined;
     fileSystem.renameSync(tempPath, targetPath);
-    const directoryBarrier = fsyncDirectory(directory, { fs: fileSystem });
+    const directoryBarrier = syncDirectory(directory, {
+      fs: fileSystem,
+      platform: options.platform
+    });
     if (directoryBarrier.capability !== 'supported') {
       return Object.freeze({
         status: 'durability-unavailable',
