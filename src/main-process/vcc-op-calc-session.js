@@ -33,6 +33,7 @@ const {
 } = require('./vcc-op-calc/parser-core');
 const { runVccParserPipeline } = require('./vcc-op-calc/parser-pipeline');
 const { canonicalJsonSnapshot } = require('./background-execution/canonical-json-v1');
+const { saveVccOpRunWithReceipt } = require('./vcc-op-calc/save-run-contract');
 
 class VccComputeSnapshotError extends Error {
   constructor(code, message) {
@@ -168,7 +169,11 @@ function computeAmounts(fileResults) {
 
 // ---------------- session factory ----------------
 
-function createVccOpCalcSession({ getDb, parserPipeline = runVccParserPipeline }) {
+function createVccOpCalcSession({
+  getDb,
+  parserPipeline = runVccParserPipeline,
+  saveRunFaultInjector = null
+}) {
   // 中间结果缓存（仿 bank-bu-recon-session.js:154 lastRunCache）：
   //   选完文件后 scan/compute 的原始 rows + 统计结果存这里，save 时直接落库，避免重读盘。
   let lastScanCache = null;   // { fileResults, yearMonth, totalRows }
@@ -347,64 +352,37 @@ function createVccOpCalcSession({ getDb, parserPipeline = runVccParserPipeline }
     });
   }
 
-  // 落库（资金红线 🔴：收 beginOp → 算 endOp = beginOp + 发生额 → 原子写表 A/B），返回 { runId, endOp }。
-  // beginOp 解析走 parseAmountToCents（与发生额同口径整数分）；endOp = beginCents + totalAmountCents。
-  // totals/perFile 优先用入参，缺省回退 lastComputeCache。
-  function saveRun({ yearMonth, perFile, totals, beginOp } = {}) {
-    const effTotals = totals || (lastComputeCache && lastComputeCache.totals);
-    const effPerFile = perFile || (lastComputeCache && lastComputeCache.perFile);
-    const effYearMonth = yearMonth || (lastComputeCache && lastComputeCache.yearMonth);
-
-    if (!effTotals || !effPerFile || !effYearMonth) {
+  // E03-B 落库：Main Task owner + 冻结 Compute Snapshot + run/files/receipt 同一
+  // BEGIN IMMEDIATE transaction。显式 totals/perFile/yearMonth 仅保留给既有内部调用；
+  // 生产 Main handler 只使用当前 adopted snapshot，owner 不接收 Renderer payload。
+  function saveRun({ yearMonth, perFile, totals, beginOp, operationOwner } = {}) {
+    const hasExplicitSnapshot = yearMonth !== undefined
+      || perFile !== undefined
+      || totals !== undefined;
+    const computeSnapshot = hasExplicitSnapshot
+      ? canonicalJsonSnapshot({
+          yearMonth: yearMonth || (lastComputeCache && lastComputeCache.yearMonth),
+          totals: totals || (lastComputeCache && lastComputeCache.totals),
+          perFile: perFile || (lastComputeCache && lastComputeCache.perFile)
+        })
+      : lastComputeCache;
+    if (!computeSnapshot) {
       throw new Error('saveRun 缺少统计结果（请先 computeFiles）');
     }
-
-    // 期初OP 解析（资金红线 🔴）：必填、允许负数/小数；空或非数值 → 拒绝（spec Q10）
-    const beginParsed = parseAmountToCents(beginOp);
-    if (!beginParsed.ok || beginParsed.empty) {
-      throw new Error('期初OP 无效：必须为数值（允许负数/小数）');
-    }
-    const beginCents = beginParsed.cents;
-    const totalAmountCents = Number(effTotals.totalAmountCents) || 0;
-    const endCents = beginCents + totalAmountCents;   // 期末OP = 期初OP + 发生额（整数分相加）
-
-    const beginOpStr = centsToAmountString(beginCents);
-    const endOpStr = centsToAmountString(endCents);
-
     const db = getDb();
     if (!db) throw new Error('数据库未初始化');
+    const saved = saveVccOpRunWithReceipt({
+      db,
+      computeSnapshot,
+      beginOp,
+      operationOwner,
+      injectFault: saveRunFaultInjector
+    });
 
-    // 原子事务：runs + run_files 同落（资金红线：避免"汇总落了明细没落"的半截状态）
-    db.exec('BEGIN');
-    let runId;
-    try {
-      runId = runRepository.insertRun(db, {
-        yearMonth: effYearMonth,
-        fileCount: effPerFile.length,
-        totalAmountOut: effTotals.totalOut,
-        totalAmountIn: effTotals.totalIn,
-        totalAmount: effTotals.totalAmount,
-        beginOp: beginOpStr,
-        endOp: endOpStr,
-        currency: effTotals.currency
-      });
-      runRepository.insertRunFiles(db, runId, effPerFile.map((f) => ({
-        fileName: f.fileName,
-        rowCount: f.rowCount,
-        amountOut: f.amountOut,
-        amountIn: f.amountIn,
-        amount: f.amount
-      })));
-      db.exec('COMMIT');
-    } catch (err) {
-      db.exec('ROLLBACK');
-      throw err;
-    }
-
-    // 落库成功后清缓存（一次会话完成；下次导入重新 scan）
+    // 新 COMMIT 或唯一 receipt replay 均完成本次会话；COMMIT 后测试故障抛错时
+    // saveVccOpRunWithReceipt 不返回，因此保留 cache 供显式恢复/取证。
     beginScanGeneration();
-
-    return { runId, endOp: endOpStr, beginOp: beginOpStr, yearMonth: effYearMonth };
+    return saved;
   }
 
   // distinct 已计算月份（"显示余额"下拉），倒序 [{ yearMonth, latestRunId, latestRunAt }]
