@@ -39,6 +39,18 @@
 | `node --test tests/unit/main-process/vcc-op-calc-save-run-receipt.test.js` | `34/34 PASS` | non-unique run_id index、旧库升级、run/files/receipt 原子性、并发 exactly-one、金额守恒与 TechDoc 表名 |
 | `node --test tests/unit/windows-build-contract.test.js` | `4 PASS / 1 Windows-only SKIP` | 全平台源码顺序/专用 safe code；本机不伪造 Windows 动态结果 |
 | 合同 validator（#174 组合 HEAD probe） | `28/29 PASS`；唯一失败为历史 Main/TaskPolicy hash/line provenance drift | 证明 TechDoc 未触发 Schema/跨文档/恢复合同失败；该次 FAIL report 已恢复，不作为发布证据 |
+| 合同 validator（原报告 provenance `f7c4d5aa` + `ff091b47` exact authority inputs） | `29/29 PASS`，0 error；TechDoc input hash=`c3810217…f466b` | 修正后的物理表名通过 Schema、跨文档、恢复合同与完整 input-hash evidence gate |
+| `shasum -a 256 -c PACKAGE-SHA256SUMS.txt` | `69/69 PASS` | 冻结包除 checksum 自身外全部文件与新 validation report 完整一致 |
+| `npm run release-check` | PASS；lint/smoke PASS，unit `6017/6019`（0 fail、2 skip），integration `51/51` scripts、`2455/2455` assertions | 全仓回归；未调用 `check-vars`/`scan:vars` |
+| 最终定向回归（4 个 hardening test files） | `70 PASS / 1 Windows-only SKIP`，0 fail | 五项修复的资源生命周期、取消、资金持久化、文档与 Windows canary 合同 |
+
+## Final Blindspot Review
+
+- 生命周期：正常、错误、取消和重复 `close/terminate` 均收敛到同一个 termination barrier；Supervisor 先等 transport cleanup，再释放 CompoundLease。
+- 状态所有权：仅当前 Parser scan 可清理自己的 controller；新 scan、`clearCache` 与 save 后清理都会取消旧任务，generation CAS 继续阻止迟到 adoption。
+- 兼容性：未改 Renderer/public IPC、production gate、错误 DTO、operation identity 或 Receipt 唯一性；数据库变更是幂等的 non-unique 加法索引。
+- 资金红线：金额、方向、月份、币种、begin/end OP 与 run/files/receipt 原子性定向测试均通过；既有 exact Main owner 和人工签字 gate 仍为 `PENDING_HUMAN_REVIEW`，本 PR 不代替人工复核。
+- 平台盲区：macOS 无法执行真实 Windows PowerShell 动态探针；静态合同已通过，动态证据留给 GitHub-hosted Windows CI。
 
 ## Remaining Unknowns
 

@@ -365,8 +365,9 @@ function createVccOpCalcSession({
       superseded: false
     };
     activeParserScan = active;
-    const unlinkCallerAbort = linkParserScanAbortSignal(options.signal, active.controller);
+    let unlinkCallerAbort = () => {};
     try {
+      unlinkCallerAbort = linkParserScanAbortSignal(options.signal, active.controller);
       const result = await parserPipeline(inputs, {
         ...options,
         signal: active.controller.signal

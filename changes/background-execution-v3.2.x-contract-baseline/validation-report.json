@@ -1,6 +1,6 @@
 {
   "reportVersion": 17,
-  "generatedAt": "2026-08-24T05:41:55.310381+00:00",
+  "generatedAt": "2026-08-24T15:44:29.955317+00:00",
   "status": "PASS",
   "command": "PYTHON_BIN=<python3> changes/background-execution/validation/run-validation.sh --authority-mode repo --base-ref origin/v3.2.0",
   "pythonVersion": "3.14.3",
@@ -9807,7 +9807,7 @@
     "P0-targeted-closure-report.md": "90b1d31e8be3a0ef23489c48b99a4af50133590a6eb427ba9412e05d6e86b814",
     "README.md": "7acb1d2906292cd896d990fa907e99ec84378288d049776789672eab0370124a",
     "changes/3.2.0/spec.md": "d863f63a831b495d5e63d63fece1608afe9f39e8cc608f9d6ed0f39e77328a9f",
-    "changes/3.2.0/techdoc.md": "1e66fe925489b6cdfb894977c9aa76690128c2ff464a5634a3591136a96f935b",
+    "changes/3.2.0/techdoc.md": "c3810217c91d474a1dedc248619d441e661039bba3378da73313cdd5997f466b",
     "changes/3.2.1/spec.md": "79aa57ad49904c395bb7669354336d81500ff31fa3c1daf2f459ced3ac505151",
     "changes/3.2.1/techdoc.md": "613b40fd1b4a202af07d0629fcc400e5ac47c0bd141b16062d55ec0dd1139147",
     "changes/3.2.2/spec.md": "0cdf28e5310733355fb51d92818dde8fd837ee06b521a4694c0c9cc43300d47f",
