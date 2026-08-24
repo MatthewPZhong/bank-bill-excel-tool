@@ -181,35 +181,41 @@ test('migration 对旧 VCC DB 加法升级，FK 指向真实 run 表且可重复
   legacyDb.close();
 
   const firstStartup = new AppDatabase(dbPath);
-  firstStartup.init();
-  firstStartup.close();
+  try {
+    firstStartup.init();
+  } finally {
+    firstStartup.close();
+  }
   const restarted = new AppDatabase(dbPath);
-  restarted.init();
-  t.after(() => restarted.close());
-  const db = restarted.db;
+  try {
+    restarted.init();
+    const db = restarted.db;
 
-  assert.equal(db.prepare('SELECT file_name FROM vcc_op_calc_run_files WHERE run_id = 1').get().file_name, 'legacy.xlsx');
-  const columns = db.prepare("PRAGMA table_info('vcc_op_operation_receipts')").all();
-  assert.deepEqual(columns.map((column) => column.name), [
-    'id',
-    'action_key',
-    'operation_key',
-    'producer_task_run_id',
-    'run_id',
-    'year_month',
-    'compute_snapshot_hash',
-    'input_file_count',
-    'committed_at'
-  ]);
-  assert.equal(db.prepare("PRAGMA foreign_key_list('vcc_op_operation_receipts')").get().table, 'vcc_op_calc_runs');
-  const uniqueIndex = db.prepare("PRAGMA index_list('vcc_op_operation_receipts')").all()
-    .find((index) => index.unique === 1);
-  assert.ok(uniqueIndex);
-  assert.deepEqual(
-    db.prepare(`PRAGMA index_info('${uniqueIndex.name}')`).all().map((column) => column.name),
-    ['action_key', 'operation_key']
-  );
-  assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []);
+    assert.equal(db.prepare('SELECT file_name FROM vcc_op_calc_run_files WHERE run_id = 1').get().file_name, 'legacy.xlsx');
+    const columns = db.prepare("PRAGMA table_info('vcc_op_operation_receipts')").all();
+    assert.deepEqual(columns.map((column) => column.name), [
+      'id',
+      'action_key',
+      'operation_key',
+      'producer_task_run_id',
+      'run_id',
+      'year_month',
+      'compute_snapshot_hash',
+      'input_file_count',
+      'committed_at'
+    ]);
+    assert.equal(db.prepare("PRAGMA foreign_key_list('vcc_op_operation_receipts')").get().table, 'vcc_op_calc_runs');
+    const uniqueIndex = db.prepare("PRAGMA index_list('vcc_op_operation_receipts')").all()
+      .find((index) => index.unique === 1);
+    assert.ok(uniqueIndex);
+    assert.deepEqual(
+      db.prepare(`PRAGMA index_info('${uniqueIndex.name}')`).all().map((column) => column.name),
+      ['action_key', 'operation_key']
+    );
+    assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []);
+  } finally {
+    restarted.close();
+  }
 });
 
 test('save 只接受 exact Main Task owner，缺失或 Renderer 式扩展字段均 fail closed', () => {
