@@ -72,6 +72,10 @@ jobs:
       - name: Check packaged application
         run: npm run check:dist
 
+      - name: Run packaged background execution canary
+        shell: pwsh
+        run: ./scripts/run-windows-packaged-background-canary.ps1 -DistDirectory ./dist
+
       - name: Stage updater-compatible assets
         run: npm run stage:update-artifacts
 

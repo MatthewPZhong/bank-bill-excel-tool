@@ -22,7 +22,14 @@ const REQUIRED_FIXTURE_FILES = [
   'assets/VCC财务OP校验/VCC财务OP校验结果表_模板.xlsx',
   'COMMON枚举.xlsx',
   'src/main.js',
-  'src/build-info.js'
+  'src/build-info.js',
+  'src/main-process/background-execution/canary/packaged-runtime-runner.js',
+  'src/main-process/background-execution/canary/packaged-runtime-request.js',
+  'src/main-process/background-execution/canary/durable-worker.js',
+  'src/main-process/background-execution/canary/pure-compute-worker.js',
+  'src/main-process/background-execution/canary/canary-schema.js',
+  'src/main-process/background-execution/canary/pure-compute-policy.json',
+  'src/main-process/background-execution/canary/durable-policy.json'
 ];
 
 async function createFixtureAsar({
@@ -61,14 +68,21 @@ test('check-dist-size 接受同时包含两份 VCC 金标准模板的 app.asar',
     encoding: 'utf8'
   });
   assert.match(output, /check-dist-size PASS/);
-  assert.match(output, /必需文件：8\/8 齐全/);
+  assert.match(output, /必需文件：15\/15 齐全/);
   assert.match(output, new RegExp(`包内版本：${CURRENT_VERSION.replaceAll('.', '\\.')}（与当前源码一致）`));
   assert.match(output, new RegExp(`构建提交：${CURRENT_COMMIT}（与当前源码一致）`));
 });
 
 for (const missingTemplate of [
   'assets/VCC财务OP校验/VCC_移除归档Pending账单.xlsx',
-  'assets/VCC财务OP校验/VCC财务OP校验结果表_模板.xlsx'
+  'assets/VCC财务OP校验/VCC财务OP校验结果表_模板.xlsx',
+  'src/main-process/background-execution/canary/packaged-runtime-runner.js',
+  'src/main-process/background-execution/canary/packaged-runtime-request.js',
+  'src/main-process/background-execution/canary/durable-worker.js',
+  'src/main-process/background-execution/canary/pure-compute-worker.js',
+  'src/main-process/background-execution/canary/canary-schema.js',
+  'src/main-process/background-execution/canary/pure-compute-policy.json',
+  'src/main-process/background-execution/canary/durable-policy.json'
 ]) {
   test(`check-dist-size 缺少 ${path.basename(missingTemplate)} 时失败`, async (t) => {
     const fixture = await createFixtureAsar({ omit: missingTemplate });

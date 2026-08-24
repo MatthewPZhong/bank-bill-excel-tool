@@ -726,10 +726,21 @@ function mainStartupAstErrors(source) {
     ].includes(current.type)) current = parents.get(current);
     return current;
   };
+  const isolatedPackagedCanaryReturn = (node) => {
+    const block = parents.get(node);
+    const guard = parents.get(block);
+    return block?.type === 'BlockStatement'
+      && guard?.type === 'IfStatement'
+      && guard.consequent === block
+      && guard.alternate === null
+      && identifier(guard.test, 'packagedRuntimeModeSelected')
+      && parents.get(guard) === successCallback?.body;
+  };
   if (runCall && successCallback && nodes.some((node) => (
     node.type === 'ReturnStatement'
     && node.range[0] < runCall.range[0]
     && nearestFunction(node) === successCallback
+    && !isolatedPackagedCanaryReturn(node)
   ))) {
     errors.push('startup run follows early return');
   }

@@ -69,6 +69,10 @@ jobs:
       - name: Check dist size
         run: node scripts/check-dist-size.js
 
+      - name: Run packaged background execution canary
+        shell: pwsh
+        run: ./scripts/run-windows-packaged-background-canary.ps1 -DistDirectory ./dist
+
       - name: Stage updater-compatible assets
         run: npm run stage:update-artifacts
 
