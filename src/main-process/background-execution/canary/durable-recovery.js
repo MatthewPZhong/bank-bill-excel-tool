@@ -139,6 +139,12 @@ function createCanarySettlementProvider(options = {}) {
   if (typeof journalDirectory !== 'string' || journalDirectory.length === 0) {
     throw new TypeError('canary provider 需要 journalDirectory');
   }
+  if (options.fsyncDirectory !== undefined && typeof options.fsyncDirectory !== 'function') {
+    throw new TypeError('canary provider fsyncDirectory 必须是函数');
+  }
+  const durableWriteOptions = options.fsyncDirectory
+    ? Object.freeze({ fsyncDirectory: options.fsyncDirectory })
+    : Object.freeze({});
   const resultDirectory = path.join(journalDirectory, 'settled');
 
   function journalPath(sourceRef) {
@@ -151,7 +157,8 @@ function createCanarySettlementProvider(options = {}) {
       fs.mkdirSync(journalDirectory, { recursive: true });
       const result = writeFileAtomicDurable(
         journalPath(source.sourceRef),
-        canonicalizeJson({ state: 'prepared', source })
+        canonicalizeJson({ state: 'prepared', source }),
+        durableWriteOptions
       );
       return Object.freeze({ source, durability: result });
     },
@@ -185,7 +192,11 @@ function createCanarySettlementProvider(options = {}) {
       if (inspection.outcome === 'committed') {
         fs.mkdirSync(resultDirectory, { recursive: true });
         const target = path.join(resultDirectory, `${canonicalSha256(source.sourceRef)}.json`);
-        const durability = writeFileAtomicDurable(target, canonicalizeJson(boundedResult));
+        const durability = writeFileAtomicDurable(
+          target,
+          canonicalizeJson(boundedResult),
+          durableWriteOptions
+        );
         if (durability.status !== 'committed') {
           return Object.freeze({
             contractVersion: 1,
@@ -209,7 +220,11 @@ function createCanarySettlementProvider(options = {}) {
         }
         const journal = journalPath(source.sourceRef);
         const settledRecord = { state: 'settled', source, boundedResult };
-        const journalResult = writeFileAtomicDurable(journal, canonicalizeJson(settledRecord));
+        const journalResult = writeFileAtomicDurable(
+          journal,
+          canonicalizeJson(settledRecord),
+          durableWriteOptions
+        );
         if (journalResult.status !== 'committed') {
           throw Object.assign(new Error('canary journal close durability unavailable'), {
             code: 'DURABILITY_BARRIER_UNAVAILABLE'
