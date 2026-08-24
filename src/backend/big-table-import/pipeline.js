@@ -87,6 +87,7 @@ function computeMaxParallel({ requested, fileCount, freemem, cpuCount, onLog } =
 //                           parsed = { batch, errors, importedCount, rowErrorTotal, truncated, monthKeys, headerError }）
 //                           writeBatch 内部可抛错（如整批拒绝 / 跨月）→ 终止 pipeline、拒绝 promise。
 //     parallel            — 期望并行度（默认 min(4, cpus-2)）
+//     parallelFrozen      — true 表示 parallel 已由 CompoundLease admission 冻结，不再重复内存闸
 //     onProgress          — ({ sourceFile, importedCount }) 透传（worker 每 1w 行；engine 再节流到对外形状）
 //     onLog               — ({ level, message }) 日志透传（内存闸等）
 //     cancelToken         — { cancelled } 可选；置位后写循环在文件边界抛 CancelError
@@ -100,6 +101,7 @@ function runPipeline({
   useWhitelist,
   writeBatch,
   parallel,
+  parallelFrozen,
   onProgress,
   onLog,
   cancelToken
@@ -115,7 +117,9 @@ function runPipeline({
   const maxParallel = computeMaxParallel({
     requested: parallel,
     fileCount,
-    freemem: os.freemem(),
+    // mature adapter 已在 admission 前按同一函数完成内存闸并冻结 topology；
+    // 获批 childCount 不得在 engine 内二次降级，也不得重新扩容。
+    freemem: parallelFrozen === true ? Number.MAX_SAFE_INTEGER : os.freemem(),
     cpuCount: os.cpus().length,
     onLog
   });

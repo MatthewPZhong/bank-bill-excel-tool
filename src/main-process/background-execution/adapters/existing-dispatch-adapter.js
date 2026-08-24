@@ -69,6 +69,7 @@ function createExistingDispatchAdapter(options = {}) {
       });
       const handle = normalizeDispatchResult(dispatched);
       const cancellationState = {
+        cancelInvoked: false,
         terminalEvidenceReported: false,
         terminalObserved: false
       };
@@ -96,6 +97,14 @@ function createExistingDispatchAdapter(options = {}) {
         guardedEmit('job:done', { result });
       }, (error) => {
         cancellationState.terminalObserved = true;
+        // 可选私有握手只供能识别真实 executor 取消错误的 dispatcher 使用；
+        // generic void legacy-cancel 兼容语义保持不变。必须在 job:error 前上报，
+        // 让 Supervisor 的同一 terminal gate 看到真实取消因果。
+        if (cancellationState.cancelInvoked &&
+            typeof handle.isCancellationTerminalError === 'function' &&
+            handle.isCancellationTerminalError(error) === true) {
+          reportCancellationTerminal();
+        }
         emitDispatchError(error);
       }).catch(reportError);
       cancellationState.reportCancellationTerminal = reportCancellationTerminal;
@@ -107,6 +116,7 @@ function createExistingDispatchAdapter(options = {}) {
       return Promise.resolve().then(() => {
         if (cancellationState && cancellationState.terminalObserved) return null;
         const rawResult = handle.cancel(reason);
+        if (cancellationState) cancellationState.cancelInvoked = true;
         if (rawResult === undefined || rawResult === null) {
           if (cancellationState) {
             cancellationState.reportCancellationTerminal();
