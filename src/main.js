@@ -1,4 +1,26 @@
 const { initializeActionTaskBindingStartup } = require('./main-process/background-execution/action-task-binding-registry');
+const {
+  createRecoveryControlRepository
+} = require('./main-process/background-execution/critical/recovery-control-repository');
+const {
+  createRecoveryControlReadRepository
+} = require('./main-process/background-execution/critical/recovery-control-read-repository');
+const {
+  createRecoveryObservationAttemptRepository,
+  createRecoveryRequestOwnerRepository
+} = require('./main-process/background-execution/critical/recovery-request-owner-repository');
+const {
+  createInspectorRegistry
+} = require('./main-process/background-execution/inspector-registry');
+const {
+  createSettlementRecoveryProviderRegistry
+} = require('./main-process/background-execution/settlement-recovery-provider-registry');
+const {
+  createStartupRecoveryCoordinator
+} = require('./main-process/background-execution/startup-recovery-coordinator');
+const {
+  createRecoveryHoldGate
+} = require('./main-process/background-execution/recovery-hold-gate');
 const { createHash, randomUUID } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -570,6 +592,8 @@ let archiveCenterInitializationPromise = null;
 let toolboxStartupRecoveryError = null;
 let archiveOperationTracker = null;
 let archiveTaskLifecycle = null;
+let recoveryControlReadRepository = null;
+let recoveryHoldGate = null;
 let archiveOperationTail = Promise.resolve();
 const archiveOperationContext = new AsyncLocalStorage();
 const positionReconciliationOperationContext = new AsyncLocalStorage();
@@ -20788,6 +20812,19 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
   const contract = normalizeIpcTaskHandler(handler);
   const dialogContext = { dialogSelections: [], batchContext: null, phase: 'prepare' };
   return archiveOperationContext.run(dialogContext, async () => {
+    const policy = taskPolicyRegistry.get(meta.channel);
+    if (!policy) {
+      throw new Error(`未登记 task policy：${meta.channel}`);
+    }
+    if (policy.batchPolicy === 'exclude') {
+      throw new Error(`受控业务 helper 不得执行 exclude policy：${meta.channel}`);
+    }
+    if (!['reserve', 'no-file'].includes(policy.batchPolicy)) {
+      throw new Error(`不支持的 task batch policy：${meta.channel}`);
+    }
+    // 第一次 gate 在 picker/preview/preparation 前执行，避免已知 Hold 下仍进入
+    // 任何可能持有资源的业务准备流程。
+    assertTaskPolicyNotHeld(policy);
     // picker / preview / danger confirmation 必须全部在 BOR.begin 和 reserve 之前完成。
     const prepared = await prepareIpcTaskInvocation(contract, event, args);
     dialogContext.phase = 'execute';
@@ -20805,16 +20842,8 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
         taskContext
       )
     );
-    const policy = taskPolicyRegistry.get(meta.channel);
-    if (!policy) {
-      throw new Error(`未登记 task policy：${meta.channel}`);
-    }
-    if (policy.batchPolicy === 'exclude') {
-      throw new Error(`受控业务 helper 不得执行 exclude policy：${meta.channel}`);
-    }
-    if (!['reserve', 'no-file'].includes(policy.batchPolicy)) {
-      throw new Error(`不支持的 task batch policy：${meta.channel}`);
-    }
+    // 第二次 gate 关闭 preparation 期间新建 Hold 的窗口。
+    assertTaskPolicyNotHeld(policy);
 
     const center = archiveCenterService || initializeArchiveCenter();
     if (!center || !archiveTaskLifecycle) {
@@ -20866,9 +20895,12 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
           afterTerminalIntent: isPositionOperation
             ? { route: 'position-reconciliation', operationToken: positionOperationToken }
             : (prepared.afterTerminalIntent || null),
-          beforeStart: typeof prepared.beforeStart === 'function'
-            ? async (operationContext) => prepared.beforeStart(operationContext)
-            : null,
+          beforeStart: async (operationContext) => {
+            assertTaskPolicyNotHeld(policy);
+            return typeof prepared.beforeStart === 'function'
+              ? prepared.beforeStart(operationContext)
+              : null;
+          },
           execute: async (operationContext, controls) => {
             const taskContext = createIpcTaskContext(operationContext, controls);
             return executeAfterPositionAdmission({
@@ -20945,6 +20977,8 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
         ? { route: 'position-reconciliation', operationToken: positionOperationToken }
         : (prepared.afterTerminalIntent || null),
       beforeStart: async (batchContext, filePlanEvidence) => {
+        // lifecycle admission 后、任何模块 beforeStart 副作用前最终复核。
+        assertTaskPolicyNotHeld(policy);
         const preparedEvidence = typeof prepared.beforeStart === 'function'
           ? await prepared.beforeStart(batchContext, filePlanEvidence)
           : null;
@@ -21161,6 +21195,70 @@ function registerAllIpcHandlers() {
   markStartupMetric(STARTUP_METRIC_MARKS.handlersReady);
 }
 
+async function initializeBackgroundExecutionRecovery() {
+  if (!database || !database.db) throw new Error('Recovery Coordinator 要求 Main control DB 已初始化');
+  recoveryControlReadRepository = createRecoveryControlReadRepository(database.db);
+  const inspectorRegistry = createInspectorRegistry();
+  const providerRegistry = createSettlementRecoveryProviderRegistry();
+
+  // E02-C2 只注册平台合同能力；真实业务 action 的 Inspector/Provider 由后续版本逐项接入。
+  // canonical durable canary 只允许测试/private DB，不能在产品 userData 中注册或枚举。
+  inspectorRegistry.freeze();
+  providerRegistry.freeze();
+
+  const coordinator = createStartupRecoveryCoordinator({
+    readRepository: recoveryControlReadRepository,
+    inspectorRegistry,
+    providerRegistry,
+    requestOwnerRepository: createRecoveryRequestOwnerRepository(database.db),
+    observationAttemptRepository: createRecoveryObservationAttemptRepository(database.db),
+    recoveryControlRepository: createRecoveryControlRepository(database.db),
+    // 当前 E02-C2 不迁移任何真实业务 Action。若用户库意外存在 open Intent，
+    // coordinator 会创建/保留 Hold 并 fail closed，不从 legacy TaskPolicy 猜 settlementKey。
+    resolvePolicy: () => null
+  });
+  const summary = await coordinator.scanAndRecover();
+  for (const hold of recoveryControlReadRepository.listActiveRecoveryHolds()) {
+    const taskKeys = actionTaskBindingRegistry.allowedTaskKeys(hold.actionKey);
+    if (!Array.isArray(taskKeys) || taskKeys.length === 0) {
+      throw Object.assign(new Error(`Recovery Hold action 无法映射到生产 TaskPolicy：${hold.actionKey}`), {
+        code: 'RECOVERY_HOLD_ACTION_UNBOUND'
+      });
+    }
+  }
+  recoveryHoldGate = createRecoveryHoldGate(recoveryControlReadRepository);
+  appendActivityLogEntry({
+    level: 'info',
+    source: 'main',
+    domain: 'background-execution-recovery',
+    message: '启动恢复扫描完成',
+    details: [
+      `sources=${summary.sourceCount}`,
+      `activeHolds=${summary.activeHoldCount}`
+    ]
+  });
+  return summary;
+}
+
+function assertTaskPolicyNotHeld(policy) {
+  if (!recoveryHoldGate || !recoveryControlReadRepository) {
+    throw Object.assign(new Error('Recovery Hold gate 尚未初始化'), {
+      code: 'RECOVERY_HOLD_GATE_UNAVAILABLE'
+    });
+  }
+  for (const hold of recoveryControlReadRepository.listActiveRecoveryHolds()) {
+    const taskKeys = actionTaskBindingRegistry.allowedTaskKeys(hold.actionKey);
+    if (!Array.isArray(taskKeys) || taskKeys.length === 0) {
+      throw Object.assign(new Error(`Recovery Hold action 无法映射到生产 TaskPolicy：${hold.actionKey}`), {
+        code: 'RECOVERY_HOLD_ACTION_UNBOUND'
+      });
+    }
+    if (taskKeys.includes(policy.taskKey)) {
+      recoveryHoldGate.assertNoRecoveryHold({ conflictScopeKey: hold.conflictScopeKey });
+    }
+  }
+}
+
 async function initializeApplication() {
     const dataPath = path.join(app.getPath('userData'), 'tool-data.sqlite');
     // v3.1.10：VCC copy-on-write 迁移恢复必须先于任何数据库连接。
@@ -21169,6 +21267,9 @@ async function initializeApplication() {
     database = new AppDatabase(dataPath);
     database.init({ onStartupPhase: recordStartupPhase });
     markStartupMetric(STARTUP_METRIC_MARKS.databaseReady);
+    // Recovery Contract startup boundary：任何 Archive owner recovery、cleanup 或业务 IPC
+    // 之前，先完成 registry freeze 与 open Intent/source/Hold 扫描。失败沿启动链 fail closed。
+    await initializeBackgroundExecutionRecovery();
     initializeAppUpdaterService();
     try {
       pendingDb = openPendingDb(app.getPath('userData'));

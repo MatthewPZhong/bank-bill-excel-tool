@@ -1,6 +1,7 @@
 'use strict';
 
 const pureComputePolicy = require('./pure-compute-policy.json');
+const durableRecoveryPolicy = require('./durable-policy.json');
 const {
   executePureComputeCanary,
   validatePureComputeCanaryResult
@@ -32,6 +33,7 @@ module.exports = {
   PURE_COMPUTE_WORKER_BINDING,
   PURE_COMPUTE_WORKER_ENTRY,
   createPureComputeCanaryRegistrations,
+  durableRecoveryPolicy,
   executePureComputeCanary,
   pureComputePolicy,
   validatePureComputeCanaryResult

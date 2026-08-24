@@ -42,12 +42,33 @@ const { createWorkerThreadAdapter } = require('./adapters/worker-thread-adapter'
 const { createUtilityProcessAdapter } = require('./adapters/utility-process-adapter');
 const { createExistingDispatchAdapter } = require('./adapters/existing-dispatch-adapter');
 const canary = require('./canary');
+const durableCanary = require('./canary/durable-recovery');
+const {
+  createInspectorRegistry,
+  RecoveryRegistryError
+} = require('./inspector-registry');
+const {
+  createSettlementRecoveryProviderRegistry
+} = require('./settlement-recovery-provider-registry');
+const recoverySource = require('./recovery-source');
+const {
+  createStartupRecoveryCoordinator,
+  StartupRecoveryError
+} = require('./startup-recovery-coordinator');
+const {
+  createRecoveryHoldGate,
+  RecoveryHoldActiveError
+} = require('./recovery-hold-gate');
+const durableFile = require('./durable-file');
 
 module.exports = {
   ...protocol,
   ...protocolValidator,
   ...errorCodec,
   ...canary,
+  ...durableCanary,
+  ...durableFile,
+  ...recoverySource,
   ACTION_TASK_BINDING_CONTRACT,
   ActionTaskBindingRegistryError,
   bindingSnapshot,
@@ -55,6 +76,7 @@ module.exports = {
   initializeActionTaskBindingRegistry,
   initializeActionTaskBindingStartup,
   createDirectionSequenceTracker,
+  createInspectorRegistry,
   createExecutionPolicyRegistry,
   createExecutionSupervisor,
   createExistingDispatchAdapter,
@@ -67,11 +89,17 @@ module.exports = {
   createRecoveryTaskLifecycleAdapter,
   createRecoveryTransitionAdapter,
   createResourceGovernor,
+  createRecoveryHoldGate,
   createServiceHost,
+  createSettlementRecoveryProviderRegistry,
+  createStartupRecoveryCoordinator,
   createStaticRegistry,
   createUtilityProcessAdapter,
   createWorkerThreadAdapter,
   RecoveryControlError,
+  RecoveryHoldActiveError,
+  RecoveryRegistryError,
+  StartupRecoveryError,
   validatePolicyDocument,
   validateProtocolSequence
 };
