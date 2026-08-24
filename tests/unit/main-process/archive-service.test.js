@@ -29,6 +29,15 @@ const {
   createTaskLifecycle
 } = require('../../../src/main-process/archive-center/task-lifecycle');
 const {
+  transitionRequestKey
+} = require('../../../src/main-process/background-execution/recovery-control-contract');
+const {
+  createRecoveryControlRepository
+} = require('../../../src/main-process/background-execution/critical/recovery-control-repository');
+const {
+  createRecoveryRequestOwnerRepository
+} = require('../../../src/main-process/background-execution/critical/recovery-request-owner-repository');
+const {
   createBusinessFlowResolver
 } = require('../../../src/main-process/archive-center/business-flow-resolver');
 const {
@@ -1582,6 +1591,121 @@ test('手工删除与 cleanupExpired 共用 active 授权，任务终结后原�
     assert.equal(replay.status, 'deleted');
     assert.equal(replay.code, 'ARCHIVE_OPERATION_DELETED');
     assert.equal(replay.batchId, reserved.batchId);
+  } finally {
+    fixture.close();
+  }
+});
+
+test('Recovery overlay active 阻断手工/retention 删除，resolved 显式删 overlay 且保留事件与 owner', async () => {
+  let currentTime = new Date(2026, 6, 1, 12, 0, 0);
+  const fixture = createFixture({ now: () => currentTime });
+  try {
+    const operationKey = 'recovery-overlay-retention-operation';
+    const taskRunId = 'recovery-overlay-retention-task';
+    const begun = await fixture.service.beginTaskRun({
+      taskRunId,
+      taskKey: 'monthly-balance:export',
+      moduleId: 'bank-statement',
+      parentRunId: 'recovery-overlay-retention-parent',
+      operationKey
+    });
+    assert.equal(begun.ok, true);
+    const reserved = await fixture.service.reserveTaskBatch({
+      ...batchPayload(operationKey),
+      taskKey: 'monthly-balance:export',
+      taskRunId,
+      retentionUntil: '2026-07-10'
+    });
+    assert.equal(reserved.ok, true);
+
+    const ownerRepository = createRecoveryRequestOwnerRepository(fixture.db);
+    const controlRepository = createRecoveryControlRepository(fixture.db);
+    const baseTransition = {
+      entityKind: 'batch-overlay',
+      actionKey: 'statement:generate-all',
+      expectedTaskKey: 'monthly-balance:export',
+      operationKey,
+      batchId: reserved.batchId,
+      taskRunId,
+      sourceKind: 'module-recovery',
+      sourceRef: 'archive-delete-retention'
+    };
+    const applyTransition = (transition, safePayload) => {
+      const request = ownerRepository.reserveTransitionRequest({
+        requestKey: transitionRequestKey(transition),
+        transition,
+        safePayload
+      });
+      return controlRepository.runInControlTransaction(
+        (transaction) => transaction.transitionWithRecoveryEvent(request)
+      );
+    };
+    applyTransition({
+      ...baseTransition,
+      command: 'mark-interrupted',
+      expectedState: null,
+      failureCode: 'TRANSPORT_LOST',
+      failureMessage: 'batch transport lost'
+    }, { phase: 'interrupted' });
+
+    const manualDelete = await fixture.service.deleteBatch(reserved.batchId, { force: true });
+    assert.equal(manualDelete.ok, false);
+    assert.equal(manualDelete.status, 'recovery-active');
+    assert.equal(manualDelete.code, 'ARCHIVE_BATCH_RECOVERY_ACTIVE');
+    assert.deepEqual(manualDelete.recoveryState, {
+      state: 'interrupted',
+      finalOutcome: null,
+      recoveryAttemptId: null,
+      sourceKind: 'module-recovery',
+      sourceRef: 'archive-delete-retention',
+      updatedAt: manualDelete.recoveryState.updatedAt,
+      resolvedAt: null
+    });
+
+    currentTime = new Date(2026, 6, 20, 12, 0, 0);
+    const activeCleanup = await fixture.service.cleanupExpired({ asOfLocalDate: '2026-07-20' });
+    assert.equal(activeCleanup.ok, false);
+    assert.equal(activeCleanup.status, 'partial');
+    assert.equal(activeCleanup.candidateCount, 1);
+    assert.equal(activeCleanup.deletedBatchCount, 0);
+    assert.equal(activeCleanup.results[0].code, 'ARCHIVE_BATCH_RECOVERY_ACTIVE');
+    assert.equal(fixture.repository.getBatch(reserved.batchId).id, reserved.batchId);
+
+    const recoveryAttemptId = 'archive-delete-attempt-1';
+    applyTransition({
+      ...baseTransition,
+      command: 'begin-recovery',
+      expectedState: 'interrupted',
+      recoveryAttemptId
+    }, { phase: 'begin-recovery' });
+    applyTransition({
+      ...baseTransition,
+      command: 'resolve-success',
+      expectedState: 'recovering',
+      recoveryAttemptId,
+      finalOutcome: 'succeeded'
+    }, { phase: 'resolved' });
+
+    const terminalCleanup = await fixture.service.cleanupExpired({ asOfLocalDate: '2026-07-20' });
+    assert.equal(terminalCleanup.ok, true);
+    assert.equal(terminalCleanup.deletedBatchCount, 1);
+    assert.equal(fixture.repository.getBatch(reserved.batchId), null);
+    assert.equal(fixture.db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM background_execution_batch_recovery_states
+      WHERE batch_id = ?
+    `).get(reserved.batchId).count, 0);
+    assert.equal(fixture.db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM background_execution_recovery_events
+      WHERE batch_id = ?
+    `).get(reserved.batchId).count, 3);
+    assert.equal(fixture.db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM background_execution_recovery_request_owners
+      WHERE status = 'committed'
+    `).get().count, 3);
+    assert.deepEqual(fixture.db.prepare('PRAGMA foreign_key_check').all(), []);
   } finally {
     fixture.close();
   }
