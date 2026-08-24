@@ -15,6 +15,7 @@
 | supersession abort 保留 `VCC_COMPUTE_SCAN_SUPERSEDED` | 现有内部 generation 合同和测试已冻结该语义 | 对所有 supersession 改报 generic cancelled | 不扩大错误合同漂移 |
 | Receipt 仅增加普通 `run_id` 索引 | 一个 run 多 receipt 当前由 Inspector 检测，未授权唯一约束 | `UNIQUE(run_id)` | 只优化查询计划，不改变幂等/资金数据模型 |
 | Canary 新增 safe code `CANARY_PROCESS_EXITED_BEFORE_REPORT` | 报告前进程退出是可观测失败，现有隐私边界禁止采集 stdout/stderr | 继续等待统一报 report timeout；采集完整进程输出 | 快速、稳定、无敏感输出 |
+| launcher 退出后给 report 固定 2 秒宽限，并保留首个 canary safe code | #175 Windows CI 显示启动器先退出时立即进入 cleanup，二次卸载失败会把首错覆盖成 `UNINSTALL_CLEANUP_FAILED` | 继续立即判失败；恢复完整 180 秒等待；让 cleanup 覆盖首错 | 兼容 Electron/NSIS launcher hand-off，同时保持有界等待和无敏感输出；cleanup 仅追加固定 safe diagnostic |
 | 修正冻结 TechDoc 并重建 published report/checksum | 当前 runtime 的唯一物理表为 `vcc_op_calc_runs`，包完整性记录包含 TechDoc | 新建 `vcc_op_runs` 别名表；只改文档而留下失配 hash | 文档与实现恢复一致，历史 manifest 保持其显式 non-normative 含义 |
 
 ## Assumptions
@@ -46,6 +47,9 @@
 | 最终定向回归（4 个 hardening test files） | `70 PASS / 1 Windows-only SKIP`，0 fail | 五项修复的资源生命周期、取消、资金持久化、文档与 Windows canary 合同 |
 | 合入最新 `v3.2.0` 后的冲突复核 | 唯一冲突为 `vcc-op-calc-save-run-receipt.test.js`；保留基线 `try/finally` 关闭数据库并保留本 PR non-unique index 断言；`git diff --cached --check` PASS | 证明冲突是测试清理与新增断言的机械组合，不改金额、方向、幂等、恢复或 production gate |
 | 合入最新 `v3.2.0` 后的最终验证 | 定向 `70 PASS / 1 Windows-only SKIP`；`npm run release-check` PASS，unit `6017/6019`（0 fail、2 skip），integration `51/51` scripts、`2455/2455` assertions；合同包 checksum `69/69 PASS` | 验证顺序合并后的组合快照；仍未调用 `check-vars`/`scan:vars` |
+| #175 GitHub CI run `32786670809` / build job `97628007688` | smoke-test SUCCESS；build 在 packaged background canary 失败并最终报告 `UNINSTALL_CLEANUP_FAILED` | 将失败归因到 Windows launcher/report 生命周期与 cleanup 错误遮蔽，而非产品资金、恢复或默认 IPC 回归 |
+| launcher hand-off 修复定向验证 | `windows-build-contract`：`4 PASS / 1 Windows-only SKIP`；4 个 hardening files：`70 PASS / 1 Windows-only SKIP` | 固定 2 秒 report 宽限、首错优先、资源生命周期、取消、资金持久化与文档合同 |
+| launcher hand-off 修复全仓验证 | `npm run release-check` PASS；lint/smoke PASS，unit `6017/6019`（0 fail、2 skip），integration `51/51` scripts、`2455/2455` assertions | 修复未引入跨平台或业务回归；仍未调用 `check-vars`/`scan:vars` |
 
 ## Final Blindspot Review
 
@@ -54,6 +58,7 @@
 - 兼容性：未改 Renderer/public IPC、production gate、错误 DTO、operation identity 或 Receipt 唯一性；数据库变更是幂等的 non-unique 加法索引。
 - 资金红线：金额、方向、月份、币种、begin/end OP 与 run/files/receipt 原子性定向测试均通过；既有 exact Main owner 和人工签字 gate 仍为 `PENDING_HUMAN_REVIEW`，本 PR 不代替人工复核。
 - 平台盲区：macOS 无法执行真实 Windows PowerShell 动态探针；静态合同已通过，动态证据留给 GitHub-hosted Windows CI。
+- CI 失败修复边界：仅调整 packaged canary harness 的 launcher/report 等待和错误优先级；未改产品代码、金额/币种/身份/幂等/恢复语义、production enablement 或人工资金红线。
 
 ## Remaining Unknowns
 

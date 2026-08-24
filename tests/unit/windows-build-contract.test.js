@@ -181,6 +181,8 @@ test('packaged background canary 仅在 GitHub-hosted Windows 的 RUNNER_TEMP �
     waitFunction,
     /\$Process\.Refresh\(\)[\s\S]*\$Process\.HasExited[\s\S]*CANARY_PROCESS_EXITED_BEFORE_REPORT[\s\S]*Start-Sleep/
   );
+  assert.match(waitFunction, /\[ValidateRange\(100, 5000\)\]\[int\] \$ExitReportGraceMilliseconds = 2000/);
+  assert.match(waitFunction, /\$exitReportDeadline = \[DateTime\]::UtcNow\.AddMilliseconds\(\$ExitReportGraceMilliseconds\)/);
   assert.ok(
     waitFunction.indexOf('CANARY_PROCESS_EXITED_BEFORE_REPORT')
       < waitFunction.indexOf('CANARY_REPORT_TIMEOUT'),
@@ -201,6 +203,11 @@ test('packaged background canary 仅在 GitHub-hosted Windows 的 RUNNER_TEMP �
   }
   assert.equal((harness.match(/Invoke-PackagedCanaryVariant -Executable \$installedExecutable/g) || []).length, 1);
   assert.equal((harness.match(/Invoke-PackagedCanaryVariant -Executable \$portableFrozen/g) || []).length, 1);
+  assert.match(harness, /\$primaryFailure = \$_[\s\S]*throw[\s\S]*finally/);
+  assert.match(
+    harness,
+    /\$cleanupFailed -and \$null -ne \$primaryFailure[\s\S]*BACKGROUND_EXECUTION_PACKAGED_CANARY_CLEANUP_ERROR=UNINSTALL_CLEANUP_FAILED/
+  );
 });
 
 test('Windows packaged canary 对报告前已退出进程快速返回专用 safe code', {
@@ -232,12 +239,15 @@ $process = Start-Process -FilePath $env:ComSpec -ArgumentList '/d', '/c', 'exit 
 $process.WaitForExit()
 $stopwatch = [Diagnostics.Stopwatch]::StartNew()
 try {
-  Wait-CanaryProcess -Process $process -ReportPath $env:CANARY_REPORT_PATH -TimeoutSeconds 5 | Out-Null
+  Wait-CanaryProcess -Process $process -ReportPath $env:CANARY_REPORT_PATH -TimeoutSeconds 5 -ExitReportGraceMilliseconds 500 | Out-Null
   throw 'EXPECTED_CANARY_PROCESS_EXIT_FAILURE'
 } catch {
   $stopwatch.Stop()
   if ($_.Exception.Data['safeCode'] -ne 'CANARY_PROCESS_EXITED_BEFORE_REPORT') {
     throw "UNEXPECTED_SAFE_CODE:$($_.Exception.Data['safeCode'])"
+  }
+  if ($stopwatch.Elapsed.TotalMilliseconds -lt 300) {
+    throw "CANARY_EXIT_GRACE_NOT_OBSERVED:$($stopwatch.Elapsed.TotalMilliseconds)"
   }
   if ($stopwatch.Elapsed.TotalSeconds -ge 2) {
     throw "CANARY_EARLY_EXIT_TOO_SLOW:$($stopwatch.Elapsed.TotalSeconds)"

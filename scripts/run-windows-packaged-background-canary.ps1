@@ -127,16 +127,21 @@ function Wait-CanaryProcess {
   param(
     [Parameter(Mandatory = $true)][Diagnostics.Process] $Process,
     [Parameter(Mandatory = $true)][string] $ReportPath,
-    [int] $TimeoutSeconds = 180
+    [int] $TimeoutSeconds = 180,
+    [ValidateRange(100, 5000)][int] $ExitReportGraceMilliseconds = 2000
   )
   $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+  $exitReportDeadline = $null
   while (-not (Test-Path -LiteralPath $ReportPath -PathType Leaf) -and [DateTime]::UtcNow -lt $deadline) {
     $Process.Refresh()
     if ($Process.HasExited) {
-      if (-not (Test-Path -LiteralPath $ReportPath -PathType Leaf)) {
+      if ($null -eq $exitReportDeadline) {
+        # Electron/NSIS 启动器可能先结束，真正的 app 子进程随后才原子落 report。
+        # 只给固定短宽限，避免把合法 launcher hand-off 误判成失败，也不退回 180s timeout。
+        $exitReportDeadline = [DateTime]::UtcNow.AddMilliseconds($ExitReportGraceMilliseconds)
+      } elseif ([DateTime]::UtcNow -ge $exitReportDeadline) {
         Throw-SafeFailure 'CANARY_PROCESS_EXITED_BEFORE_REPORT'
       }
-      break
     }
     Start-Sleep -Milliseconds 100
   }
@@ -479,6 +484,7 @@ function Invoke-WindowsPackagedBackgroundCanary {
   $installedExecutable = $null
   $uninstallCompleted = $false
   $cleanupFailed = $false
+  $primaryFailure = $null
   try {
     New-Item -ItemType Directory -Path $artifactRoot | Out-Null
     $setupFrozen = Join-Path $artifactRoot 'setup.exe'
@@ -517,6 +523,9 @@ function Invoke-WindowsPackagedBackgroundCanary {
       status = 'PASS'
       variants = [ordered]@{ setup = 'PASS'; portable = 'PASS' }
     }
+  } catch {
+    $primaryFailure = $_
+    throw
   } finally {
     if (-not $uninstallCompleted -and (Test-Path -LiteralPath $installRoot -PathType Container)) {
       try {
@@ -539,7 +548,10 @@ function Invoke-WindowsPackagedBackgroundCanary {
     } else {
       Throw-SafeFailure 'WORK_ROOT_OWNERSHIP_INVALID'
     }
-    if ($cleanupFailed) {
+    if ($cleanupFailed -and $null -ne $primaryFailure) {
+      # finally 不得用二次卸载错误覆盖首个 canary safe code；仅追加固定安全诊断。
+      [Console]::Error.WriteLine('BACKGROUND_EXECUTION_PACKAGED_CANARY_CLEANUP_ERROR=UNINSTALL_CLEANUP_FAILED')
+    } elseif ($cleanupFailed) {
       Throw-SafeFailure 'UNINSTALL_CLEANUP_FAILED'
     }
   }
