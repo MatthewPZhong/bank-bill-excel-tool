@@ -632,8 +632,59 @@ test.describe('v3.1.13 设置与存档中心静态契约', () => {
       (initFlow.match(/pendingDb = openPendingDb\(app\.getPath\('userData'\)\)/g) || []).length,
       1
     );
-    const readyFlow = main.slice(main.indexOf('if (hasSingleInstanceLock) app.whenReady()'));
-    assert.match(readyFlow, /await initializeApplication\(\);[\s\S]*?registerAllIpcHandlers\(\);[\s\S]*?await createWindow\(\{ instrumentation: 'initial' \}\)/);
+    const ast = require('espree').parse(main, {
+      ecmaVersion: 2022,
+      sourceType: 'script',
+      range: true
+    });
+    const nodes = [];
+    const parents = new Map();
+    const visit = (node, parent = null) => {
+      if (!node || typeof node !== 'object') return;
+      if (typeof node.type === 'string') {
+        nodes.push(node);
+        if (parent) parents.set(node, parent);
+      }
+      for (const [key, value] of Object.entries(node)) {
+        if (key !== 'range') visit(value, node);
+      }
+    };
+    visit(ast);
+    const isIdentifier = (node, name) => node?.type === 'Identifier' && node.name === name;
+    const firstNonDirectiveStatement = ast.body.find((statement) => (
+      statement.type !== 'ExpressionStatement' || typeof statement.directive !== 'string'
+    ));
+    assert.equal(
+      main.slice(firstNonDirectiveStatement.range[0], firstNonDirectiveStatement.range[1]),
+      "const { initializeActionTaskBindingStartup } = require('./main-process/background-execution/action-task-binding-registry');"
+    );
+    const startupDeclaration = ast.body.flatMap((statement) => (
+      statement.type === 'VariableDeclaration' ? statement.declarations : []
+    )).find((declaration) => declaration.id.type === 'ObjectPattern'
+      && declaration.id.properties.some((property) => (
+        isIdentifier(property.value, 'runActionTaskBindingStartup')
+      )));
+    assert.equal(startupDeclaration?.init?.callee?.name, 'initializeActionTaskBindingStartup');
+    const continuationProperties = startupDeclaration.init.arguments[1].arguments[0].properties;
+    assert.deepEqual(
+      Object.fromEntries(continuationProperties.map((property) => [property.key.name, property.value.name])),
+      { initializeDatabase: 'initializeApplication', registerIpc: 'registerAllIpcHandlers' }
+    );
+    const readyIf = ast.body.find((statement) => statement.type === 'IfStatement'
+      && isIdentifier(statement.test, 'hasSingleInstanceLock'));
+    const inReadyPath = (node) => readyIf.range[0] <= node.range[0] && node.range[1] <= readyIf.range[1];
+    const runCalls = nodes.filter((node) => node.type === 'CallExpression'
+      && isIdentifier(node.callee, 'runActionTaskBindingStartup') && inReadyPath(node));
+    const initialWindowCalls = nodes.filter((node) => node.type === 'CallExpression'
+      && isIdentifier(node.callee, 'createWindow') && inReadyPath(node)
+      && node.arguments[0]?.type === 'ObjectExpression'
+      && node.arguments[0].properties.some((property) => (
+        isIdentifier(property.key, 'instrumentation') && property.value.value === 'initial'
+      )));
+    assert.equal(runCalls.length, 1);
+    assert.equal(parents.get(runCalls[0])?.type, 'AwaitExpression');
+    assert.equal(initialWindowCalls.length, 1);
+    assert.ok(runCalls[0].range[0] < initialWindowCalls[0].range[0]);
     assert.doesNotMatch(main, /DEFERRED_WINDOW_STARTUP|markAppInitDone|app:init-done/);
   });
 });

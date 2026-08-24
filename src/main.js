@@ -1,3 +1,4 @@
+const { initializeActionTaskBindingStartup } = require('./main-process/background-execution/action-task-binding-registry');
 const { createHash, randomUUID } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -68,9 +69,7 @@ const {
   createBankStatementRunFlowIdentity,
   createTaskPolicyRegistry
 } = require('./main-process/archive-center/task-policy-registry');
-const {
-  createBusinessFlowResolver
-} = require('./main-process/archive-center/business-flow-resolver');
+const { createBusinessFlowResolver } = require('./main-process/archive-center/business-flow-resolver');
 const {
   createTaskLifecycle
 } = require('./main-process/archive-center/task-lifecycle');
@@ -578,6 +577,12 @@ const statementSourceReadContext = new AsyncLocalStorage();
 let positionReconciliationOperationActive = null;
 const businessOperationRegistry = createBusinessOperationRegistry();
 const taskPolicyRegistry = createTaskPolicyRegistry();
+// Recovery adapter 只能消费这个启动期 frozen exact host。先一次性冻结 binding authority，
+// 再允许 initializeApplication 建 DB，之后才注册 IPC；任一 authority 漂移在基础设施前失败。
+const taskPolicyBindingHost = Object.freeze({
+  list: taskPolicyRegistry.list.bind(taskPolicyRegistry)
+});
+const { actionTaskBindingRegistry, run: runActionTaskBindingStartup } = initializeActionTaskBindingStartup(taskPolicyBindingHost, Object.freeze({ initializeDatabase: initializeApplication, registerIpc: registerAllIpcHandlers }));
 const supportActionChannels = new Set(SUPPORT_ACTION_POLICIES.map((policy) => policy.channel));
 const scenarioImportContextStore = createScenarioImportContextStore();
 const pendingSession = createPendingSession({
@@ -21268,8 +21273,7 @@ if (hasSingleInstanceLock) app.whenReady()
         }
         usageStats = usageStatsModule.defaultStats();
       }
-      await initializeApplication();
-      registerAllIpcHandlers();
+      await runActionTaskBindingStartup();
       await createWindow({ instrumentation: 'initial' });
       applicationStartupComplete = true;
       scheduleAppUpdaterStartupCheck();

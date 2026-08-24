@@ -1,5 +1,11 @@
 # Background Execution Platform Contract v1
 
+> Contract Authority v1 revision 1：独立、非生成机器权威为 `changes/background-execution/recovery-contract-authority.v1.json`；binding=`c217253cea4ccc377f030ff5119191a98e8e9c965853c9d9419fdedef9eef0ba`，TaskPolicy inventory=`9538102480f1a714f3839547f294fbe6fd1c19384734addd89dc0ca6e1dbb368`，result KAT=`1ced39a559f93c787da4d520e37dc0a4513c27dd9b60a4c229509e741b5ec039`。本 PR 是该 authority 首次引入，固定 `genesis=true`、`approvalStatus=PENDING_HUMAN_REVIEW`；repo gate 只从 merge-base 读取 previous，base 无该文件时才接受 revision 1 genesis。`genesis` 属于受控 payload；合并后完整 authority 不变可保留 genesis rev1，same-revision flip 必须失败。此 v1 authority 只承诺 `contractVersion=1` 内 revision 精确 +1；未来 v2 需独立 versioned authority 与人工 redline，不由本合同自动推导。机器技术 PASS 不改变人工红线 `PENDING_HUMAN_REVIEW`，也不表示 merge-ready 或 production enablement。
+
+> Genesis evidence gate：即使显式传入 `--authority-mode genesis`，Git worktree 也必须先解析声明的 merge-base；只要 previous authority 已存在就稳定拒绝 `AUTHORITY_GENESIS_PREVIOUS_EXISTS`。所有 Git subprocess 清除 inherited `GIT_*` repository/object/config 控制并设置 `GIT_NO_REPLACE_OBJECTS=1`，再把 Git 返回的 toplevel、gitDir、commonDir、HEAD OID 与物理 `.git` marker/ref 逐项核对；linked worktree 允许 gitDir 与 commonDir 不同，但两者都必须 exact 记录。仅 detached/index-only 的非 Git 副本可降级运行，但报告必须标为 `detached-genesis-non-merge-evidence`、`mergeEvidence=false`，不得冒充 merge evidence。
+
+> Validation report provenance gate：包内 published `validation-report.json` 只允许 repo/default 模式生成；`--no-write-report` 必须把所选 report target 的 complete normalized authority provenance、canonical generation command 与 exact input hashes 同本次实际 authority 解析结果逐项 exact 比较。repo、external、detached、base/merge-base、HEAD/Git physical identity 或 external resolved path/size/SHA-256 任一不同都必须 fail closed；external/detached 正向证据只能写入包外临时 report 后以相同 provenance 复验，不得复用 published repo report。
+
 | 项目 | 内容 |
 | --- | --- |
 | 合同版本 | 1 |
@@ -303,7 +309,21 @@ type RecoverySourceV1 = {
 
 `RecoveryInspectionResultV1` 与 `SettlementRecoveryResultV1` exact keys 只由 `platform-recovery-source-v1.schema.json` 的 `$defs` 定义。Inspector/Provider 输出 identity、canonical SHA-256 hash 或 byte ceiling mismatch 必须 fail closed；只有 settlement `completed` 可原子收口，`incomplete` 保持 open/interrupted，transient/terminal failure 进入 bounded failure/hold 路径且不得重做业务 mutation。InspectorRegistry 与 SettlementRecoveryProviderRegistry 均在 Main DB init 后完成静态注册并 `freeze()`，freeze 后拒绝 register；open intent/provider source/active hold 扫描结束后，才允许任何 owner initialize/recovery/cleanup。
 
+所有 v1 canonical JSON 正式冻结为 **RFC 8785 JSON Canonicalization Scheme（JCS）**，算法标识 `RFC8785-JCS`。object key 按 UTF-16 code unit 排序（因此 U+10000 在 U+E000 前），number 与 string 使用 ECMAScript 序列化（`1.0 → 1`、`-0 → 0`，指数与 escaping 服从 JCS），UTF-8 bytes 不做 Unicode normalization。runtime 只接受 dense array 与 Object/null-prototype plain object；invalid surrogate、non-finite、sparse/extra-key array、accessor、toJSON、Proxy、cycle、undefined/function/bigint/symbol/non-enumerable/non-plain object 全部 fail closed。raw 入口必须在 `JSON.parse` 前以 duplicate-aware parser 拒绝任意深度 duplicate key；任意嵌套整数必须在 ±(2^53-1) 内，`2^53` 与 `2^53+1` 都在转换前拒绝。SHA 算法固定 lowercase `[0-9a-f]{64}` SHA-256，禁止 SHA-1、Python `sort_keys` 或普通递归排序替代；共享 KAT 与 Node 参考入口见 `validation/fixtures/valid/canonical-json-jcs-v1.json`、`validation/canonicalize-jcs.js`。
+
 TaskRun recovery command exact identity 同时携带 canonical actionKey、persisted legacy expectedTaskKey、operationKey、taskRunId 与 nullable-pair sourceKind/sourceRef。Adapter 验证冻结 action binding；Repository 同事务 CAS legacy task_key、operation_key 与状态，旧 task_key 不改写，event 写 canonical actionKey。BoundedSafePayloadV1/metadataPatch 是 canonical plain JSON object，UTF-8 最大 16384 bytes，不得由 safePayload 反向推导业务列。
+
+public digest/count/version 的单一机器权威是独立、非生成的 `recovery-contract-authority.v1.json`；生产 `src/main-process/background-execution/action-task-binding-registry.js` 内不可注入/替换的模块私有 binding 常量仍是 runtime pair 内容来源，必须逐值服从该 anchor。`bindingSnapshot()` 只返回新的 deep-frozen 审计 copy。v1 受控 value（含 genesis）变化必须相对 external/merge-base previous 精确提升 revision +1；完整 authority 不变则保留 revision/genesis，`contractVersion` 固定为 1。Main 对真实 production module 的唯一 exact CommonJS `require` 必须是除 directive 外第一个 Program.body statement，禁止任何前置可执行 statement/side effect/helper wrapper，且 imported identifier 禁止 shadow/reassign/local fake。CI 必须从 byte 0 编译并执行到该 import 结束的完整 Main 源码前缀，fresh-load exact resolved target，证明唯一 loader request 与真实 export identity。随后把真实 TaskPolicyRegistry 包成 frozen exact plain `{ list }` host，并在 Program.body 直接调用 `initializeActionTaskBindingStartup(taskPolicyBindingHost, frozenContinuations)`、保留同一 registry。initializer declaration/call 不得进入 conditional/try/function/early-return；唯一 awaited `run()` 必须在真实 `app.whenReady()` success callback 的 rethrowing try block 中直接出现，禁止额外 conditional/loop/nested function/吞错 try 或前置 early return，严格执行 DB→IPC 后才建窗。binding freeze 早于任何 `new AppDatabase`/IPC invocation，binding 抛错时后两者调用数必须为 0。initializer 拒绝 Map、非 frozen、替换 prototype 或 extra API；catch/wrap 不读取 hostile `message` accessor，不透传不可信 cause，只返回稳定 `ActionTaskBindingRegistryError.code/message`。`assertPair` 在 type check 前不得读取、插值或 coercion 非 string hostile identity。factory 只调用一次 host `list()`，descriptor-safe 拒绝 Proxy/accessor/non-enumerable/symbol/sparse/extra data 与非 plain/exact policy shape，并复制为 registry-owned snapshot/private membership Sets；caller 后改原 object/array 无效，`allowedTaskKeys()` 不得返回内部数组。Action Manifest v3 的 `allowedLegacyTaskKeysByActionKeySnapshot` 只作审计，不授权新 pair。source map 的 RFC 8785/JCS digest 固定为 `c217253cea4ccc377f030ff5119191a98e8e9c965853c9d9419fdedef9eef0ba`，sorted 122-key TaskPolicy inventory digest 固定为 `9538102480f1a714f3839547f294fbe6fd1c19384734addd89dc0ca6e1dbb368`，并由 60 条独立 spec/call-site/TaskPolicy provenance 反证，不得用 forward snapshot 自生 reverse evidence。硬计数固定 52 actions、122 TaskPolicy、60 pairs、52 bound keys、70 unbound keys；hidden/getter/Proxy、equal-size substitution、duplicate、taskKey/channel mismatch、missing action、empty binding、missing/mismatch task key 均须在真实 Node API/adapter 进入 Repository 前 fail closed；全部 one-to-many 只接受 source 显式列出的每个 pair，禁止凭名称推断 legacy key。
+
+Batch overlay command exact identity 同时携带 canonical actionKey、persisted legacy expectedTaskKey、operationKey、batchId、taskRunId 与 source pair；`mark-interrupted` 还必须显式携带 bounded `failureCode/failureMessage`，不得从 safePayload 猜测。Adapter 验证冻结 action binding；Repository 同事务 CAS Task/Batch 的 legacy task_key、operation_key 与关联 identity，event.action_key 只取 command 中经验证的 canonical actionKey，不得从 legacy key、sourceRef 或 safePayload 猜造。
+
+每个 recovery event 必须持久 `request_key/writer/request_hash`。Main 的持久 request owner 首次生成并保存 eventId、createdAt、完整 request_jcs 与 hash；重启、startup scan 和 Hold 重扫必须按 durable requestKey 复用，不得重建时间或身份。20 个 branch 的 requestKey namespace/identity tuple 以 recovery-control valid fixture 的 `requestKeyContract` 为唯一机器权威：`recovery-control:v1:` + SHA-256(`JCS([namespace, ...identityValues])`)；tuple 含 writer/command 或 eventType discriminator 及 durable entity/attempt identity，并排除 eventId/createdAt/safePayload 等 volatile leaf，使 changed request 用同 key 命中 conflict。Hold create-or-get 的 durable identity 精确为 Hold 表 UNIQUE `(sourceKind, sourceRef)`，不含尚未持久的 holdId。owner/event 通过 `(request_key, writer, event_id, request_hash, created_at)` composite UNIQUE/FK 保证五项相等。Repository 对区分两个 writer 的完整 exact request envelope 计算 RFC 8785/JCS lowercase SHA-256；公共输入不接受 caller requestHash；Repository 在任何 state CAS 前返回 exact replay 或拒绝 conflict，跨进程重启不得退化为内存判定。
+
+四类 observation 在 request owner reserve 前，必须以 durable scope 在短 `BEGIN IMMEDIATE` transaction 中原子分配并持久正安全整数 `observationAttemptId`。同 scope + ordinal 的 prepared/committed row 跨重启复用相同 requestKey 与 immutable result；只有明确分配下一 ordinal 才可追加下一 event，瞬态阈值最后一次也独立可审计。attempt/event 必须以 `(observation_scope_key, observation_attempt_id, request_key)` composite FK 强制相等。
+
+`platform-recovery-control-v1.schema.json` 是两个 writer request、每个 Task/Batch/CriticalIntent/Hold discriminated branch、event input 与 `RecoveryControlTransitionResultV1`/`RecoveryObservationEventResultV1` 的唯一 exact runtime shape 权威，所有 object 都必须 unknown-key fail closed。transition result 的 writer 固定 `transitionWithRecoveryEvent`、transition event 与 null `observationAttemptId`；observation result 的 writer 固定 `appendObservationEvent`、正安全整数 attempt、四种 observation event、非 manual source 与 null previous/next，两个 DTO 交叉输入必须拒绝。两个 result 严格等于 machine mapping 从 exact request + 同次 CAS persisted values 推导的 immutable 20-field event projection；独立 versioned 20-result KAT 的 `JCS(resultProjectionKnownAnswers)` SHA-256 固定为 `1ced39a559f93c787da4d520e37dc0a4513c27dd9b60a4c229509e741b5ec039`。mapper、request/CAS/source mutants 必须经真实 owner/attempt/event SQLite DDL 与 immutable SELECT 后逐字段对该 KAT，不能以 mapper candidate 自比。A 提交、B 推进、重启后 replay A 必须逐字段返回首次 projection A，不得重建 current state、添加 replay flag、二次 CAS 或追加 event。
+
+物理 Batch identity 固定 `archive_batches.id === batchId`；`overlay.batch_id` 只属于 overlay 并引用该 id。Task/Batch identity join 与 CAS 必须完整匹配 taskRunId、expectedTaskKey、operationKey、expected state/recoveryAttempt，Task、Batch、overlay、event、owner 每个写 statement 都要求 `changes() === 1`，否则 outer control transaction 整体 rollback。完整冻结 SQL 见 E00 TechDoc §9.2.1。
 
 旧命名全部废弃：
 
@@ -868,6 +888,8 @@ Hold 按模块 `conflictScopeKey` 阻断冲突 mutation。Legacy fallback 不得
 - 平台 Repository 顶层公共写入口只能是 `RecoveryControlRepository.runInControlTransaction()`；事务作用域内唯一状态 mutation 是 `RecoveryControlTransactionV1.transitionWithRecoveryEvent()`，纯观察事件通过同一作用域内的 `appendObservationEvent()` 追加；
 - 无状态迁移的 `inspection-completed / inspection-failed-transient / settlement-resumed / settlement-failed-transient` 只能通过同一事务作用域内的 `RecoveryControlTransactionV1.appendObservationEvent()` 追加；该方法不得修改任何控制状态，写入事件的 `previous_state / next_state` 必须均为 `NULL`；
 - 一次恢复动作更新多个控制对象时，Main 必须只调用一次 `RecoveryControlRepository.runInControlTransaction()`，并在同一个 `RecoveryControlTransactionV1` 上完成全部 transition 与 observation event；事务作用域内方法不得独立 BEGIN、COMMIT 或 ROLLBACK；
+- Batch overlay command 必须以 exact keys 携带 canonical actionKey、legacy expectedTaskKey、operationKey、batchId、taskRunId 与 source pair；adapter 验证 action binding，Repository CAS Task/Batch identity 后才能写 canonical event lineage；
+- persistent request owner 与 recovery event 必须持久完整 exact request 的 RFC 8785/JCS lowercase SHA-256；在任何 state CAS 前先按 requestKey 加载 owner 并验证 exact request/eventId/hash/createdAt，再返回 replay 或拒绝 conflict，caller 不得传 requestHash；
 - `recovery-required` 是 Renderer outcome；
 - `COMMIT_STATE_UNKNOWN` 是 code；
 - unknown/partial/committed-but-result-lost MUST 映射 TaskRun `interrupted`；
@@ -896,14 +918,19 @@ Transition event type 必须按 E00 TechDoc 的 `RECOVERY_TRANSITION_EVENT_MAP_V
 
 Batch 首次 interrupted 时，兼容基础 `task_status=failed`、overlay `state=interrupted` 与对应 event 必须作为一个 `batch-overlay.mark-interrupted` 逻辑 transition 在同一事务写入；恢复成功不回写基础行，effective status 只由 overlay 计算。
 
+Batch overlay 的四个 command 都必须显式携带 canonical `actionKey`、persisted legacy `expectedTaskKey`、`operationKey`、`batchId`、`taskRunId` 与 source pair。Adapter 先验证冻结 action binding；Repository 在当前事务内 CAS Task/Batch identity，禁止从 legacy task_key、sourceRef 或 safePayload 推导 `event.action_key`。
+
 `transitionWithRecoveryEvent()` 必须在同一 Main control DB transaction 上：
 
-1. 校验当前状态与 compare-and-set 前置条件；
-2. 写入状态迁移；
-3. 追加唯一、append-only 的 recovery event；
-4. 将结果留在当前事务作用域，禁止自行 COMMIT。
+1. 按 `platform-recovery-control-v1.schema.json` 校验完整 exact request，并按 writer-specific envelope 生成 RFC 8785/JCS lowercase SHA-256；
+2. 在任何 state CAS 前按 requestKey 加载持久 owner：逐项验证 exact request JCS/hash 与 owner 的 eventId/createdAt；owner 为 committed 时再按 requestKey/eventId/hash 读取 event 并返回 immutable 结果，任一不同拒绝对应 conflict；
+3. owner 未提交且 candidate 与已冻结 request 完全一致时，校验当前状态与 compare-and-set 前置条件并写入状态迁移；
+4. 追加唯一、append-only 且持久 `request_hash` 的 recovery event；
+5. 将结果留在当前事务作用域，禁止自行 COMMIT。
 
 `appendObservationEvent()` 写入的 `previous_state / next_state` 必须均为 `NULL`。它可以是一次事务中的唯一写入，也可以和由同一恢复决定产生的多个状态迁移一起提交；不得使用 `state → same state` 或虚构 transition 代替观察事件。
+
+request hash envelope exact 为：transition writer 使用 `{ contractVersion: 1, writer: 'transitionWithRecoveryEvent', input: { transition, event } }`；observation writer 使用 `{ contractVersion: 1, writer: 'appendObservationEvent', input: { event } }`。完整 exact input 包含 eventId、createdAt、safePayload 及 transition/event 全字段；persistent owner 保存 stable eventId/createdAt/request_jcs/hash，Repository 内部生成 lowercase SHA-256，公共 request 不得出现 caller-controlled `requestHash`。
 
 一次恢复动作更新多个控制对象时，Main 必须只调用一次 `RecoveryControlRepository.runInControlTransaction()`，并在同一个 `RecoveryControlTransactionV1` 上完成全部 transition 与 observation event；事务作用域内方法不得独立 BEGIN、COMMIT 或 ROLLBACK。由最外层一次性 COMMIT；任一步失败时全部 ROLLBACK，也不得通过隐式 ambient transaction 猜测调用关系。
 

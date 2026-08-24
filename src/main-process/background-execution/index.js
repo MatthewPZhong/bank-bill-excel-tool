@@ -6,6 +6,14 @@ const {
   validatePolicyDocument
 } = require('./execution-policy-registry');
 const { createExecutionSupervisor } = require('./supervisor');
+const {
+  ACTION_TASK_BINDING_CONTRACT,
+  ActionTaskBindingRegistryError,
+  bindingSnapshot,
+  createActionTaskBindingRegistry,
+  initializeActionTaskBindingRegistry,
+  initializeActionTaskBindingStartup
+} = require('./action-task-binding-registry');
 const protocol = require('./protocol');
 const protocolValidator = require('./protocol-validator');
 const { validateProtocolSequence } = require('./protocol-sequence-validator');
@@ -24,6 +32,12 @@ module.exports = {
   ...protocolValidator,
   ...errorCodec,
   ...canary,
+  ACTION_TASK_BINDING_CONTRACT,
+  ActionTaskBindingRegistryError,
+  bindingSnapshot,
+  createActionTaskBindingRegistry,
+  initializeActionTaskBindingRegistry,
+  initializeActionTaskBindingStartup,
   createDirectionSequenceTracker,
   createExecutionPolicyRegistry,
   createExecutionSupervisor,
