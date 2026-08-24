@@ -17,6 +17,7 @@
 | Toolbox publication binding 用显式 `lifecycleOperation=publish/recover` | recovery 必须只调用现有 journal recovery，禁止隐式重发 generation/publish | recovery 复用 publish 或重建第二 Publisher | recovery 测试可直接断言 generation/publish 调用为 0 |
 | 默认 IPC 暂不切到 mature runtime | 4 个目标 action 按本 PR 边界必须 `production.enabled=false`，人工红线未签 | 绕过 production gate 让真实资金/发布路径执行 managed action | adapter seam production-reachable，但现有用户路径完全保持；未来只可在门禁完成后启用 |
 | big-table cancel 用显式真实错误分类握手，不使用 void 即时证据 | `worker.postMessage(cancel)` 只证明命令已投递，不是 Worker ACK；handle 仅在本次 cancel 已成功投递且真实 dispatch promise 拒绝为 `CancelError` 时由私有 `isCancellationTerminalError` 建立证据 | 返回 `{acknowledged:true}` 伪造 ACK，或 void bridge 在 Worker 观察 cancel 前提前认定取消 | CancelError 经 Supervisor 落 `cancelled`；cancel 后的非取消 error/crash 仍为 `failed`；`receiptHint` 继续为 null |
+| PR #171 通过 merge 同步当前 `v3.2.0` 基线后重跑 Windows CI | 失败 run `32715354244` 使用的 merge SHA `601d034c` 早于 #170 的 Windows directory-fsync 修复；当前基线 `961349f7` 已含真实 Windows 通过的 `e986132c` | 在 D 层复制 durability fallback、仅 rerun 旧 merge SHA、或用空提交掩盖 branch checkout 缺修复 | 分支自身包含已审查 C2 修复；E02-D 业务 diff 与 production gate 不变，新 head 可生成当前 merge 候选的 CI |
 
 ## Assumptions
 
@@ -47,6 +48,11 @@
 | `node --test tests/unit/main-process/background-execution/mature-action-adapters.test.js` | PASS（10/10） | Supervisor→真实 mature binding→真实 engine Worker/SQLite：用户 cancel 与 shutdown 均以真实 CancelError 落 `cancelled`，覆盖 DELETE/INSERT 同事务回滚且旧行保留；cancel 已投递但 Worker 先返回 ContractValidationError 时仍 `failed`；三路均不生成 receipt/task success |
 | `node --test --test-name-pattern='existing-dispatch' tests/unit/main-process/background-execution/adapters.test.js` | PASS（7/7） | generic existing-dispatch 的 Promise/handle、void legacy 私有桥、拒绝/永不 settle cancel 与 exactly-once cleanup 语义未被 big-table opt-in 分类握手改变 |
 | `npm run release-check`（Reviewer findings 收敛后的最终快照，且仅运行一次） | PASS：lint、smoke；unit 5929/5930（0 fail、1 existing skip）；integration 51/51 scripts、2455/2455 assertions | 全仓回归、Pending/BizOP 大表、Toolbox large-file/publication、background recovery 与 lifecycle 兼容 |
+| Windows run `32715354244` 失败诊断 | 3 fail 均为 C2 directory-fsync 旧快照：#1185/#1200 抛 `DURABILITY_DIRECTORY_FSYNC_FAILED`，#1194 因 Provider 未收口得到 `committed` 而非 `closed` | 反证 E02-D adapter 为直接根因；要求同步已修复基线而非改资金/发布业务逻辑 |
+| `git merge --no-edit origin/v3.2.0` | PASS，无冲突；branch ancestry 已包含 `961349f7` 与 `e986132c` | 当前 PR head checkout 与 PR merge candidate 均具备 #170 Windows fsync 修复 |
+| 基线刷新后定向组合测试 | PASS：recovery `35/35`、mature/existing adapters `28/28`、Pending migration `57/57`、BizOP migration `73/73` | directory-fsync、Supervisor lifecycle/cancel、生产关闭门禁、Pending/BizOP 行序与事务合同组合无回归 |
+| 基线刷新后 `npm run release-check` | PASS：lint、smoke；unit `5929/5930`（0 fail、1 existing skip）；integration `51/51` scripts、`2455/2455` assertions | 全仓与资金/发布路径回归通过；自动生成的耗时/时间戳噪声已从工作区撤销 |
+| 基线刷新 blindspot/reconciliation 复核 | 未发现会改变修复方案的新问题；C2 merge 未触及 E02-D big-table/Toolbox 业务文件，4 action 仍 `production=false` | 本次修复不改变主键、金额/币种、行数、事务、Publisher ownership 或默认 IPC；既有人工红线继续只阻塞 production enable |
 
 ## Remaining Unknowns
 
