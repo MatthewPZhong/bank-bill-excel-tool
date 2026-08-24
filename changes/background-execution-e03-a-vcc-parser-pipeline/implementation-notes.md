@@ -19,6 +19,7 @@
 8. 权威 action result `maxBytes=8388608` 同时约束 unit semantic/result 与最终 Compute Snapshot；Worker control error 复用 finance-safe/bounded protocol error codec。该限制当前在聚合/序列化后校验，不是分配前 byte budget。
 9. Session 在每轮 scan 开始时先清旧 snapshot，并用 generation token 做采用 CAS。成功方法只在递归冻结 snapshot 已采用后返回；旧任务迟到、失败、拒绝、取消或 clear 不得恢复旧 cache。
 10. 默认 `src/main.js` 继续调用 legacy `streamScanAndCompute`，因为生产 gate 未通过；新 pipeline 是可执行、真实 Worker 覆盖的 internal seam，不作为产品 enablement。
+11. PR #172 通过 merge 同步当前 `v3.2.0` 后重跑 Windows CI：失败 run `32719414816` 只包含 #170 修复前的 C2 directory-fsync 三项失败；不在 VCC 层复制 durability 逻辑，也不以空提交掩盖 branch checkout 缺少前序修复。
 
 ## Assumptions
 
@@ -42,6 +43,11 @@
 - 最终定向：`node --test tests/unit/main-process/vcc-op-calc-session.test.js tests/unit/main-process/vcc-op-calc-stream.test.js tests/unit/main-process/vcc-op-calc-parser-pipeline.test.js` → `49/49 PASS`。
 - Adjacent lint：`npm run lint` → PASS（eslint `src/`，无输出错误）。
 - `npm run release-check`（Reviewer 收敛后的最终快照，且仅运行一次）→ PASS：lint、smoke；unit 5950/5951（0 fail、1 existing skip）；integration 51/51 scripts、2455/2455 assertions。
+- Windows run `32719414816` 失败诊断：3 fail 均为 C2 旧快照 #1185/#1194/#1200；日志没有 VCC parser/pipeline failure，反证 E03-A 为直接根因。
+- `git merge --no-edit origin/v3.2.0`：PASS、无冲突；branch ancestry 已包含 `dffb2ab0` 与 Windows 修复 `e986132c`。
+- 基线刷新后定向组合测试：recovery `35/35 PASS`；VCC parser/session/legacy parity `49/49 PASS`；VCC effective-result integration `19/19 PASS`。
+- 基线刷新后 `npm run release-check`：PASS；unit `5950/5951`（0 fail、1 existing skip），integration `51/51` scripts、`2455/2455` assertions；自动生成的耗时/时间戳噪声已撤销。
+- 基线刷新 blindspot/reconciliation 复核：C2 merge 未触及 VCC parser/session 文件；金额整数分、方向、混币种、input order/source evidence、duplicate/missing、错误上限、整批拒绝与 generation-token adoption 均由定向测试覆盖；未发现改变方案的新问题。
 - 按用户明确指令未运行 `check-vars`。
 
 ## Reconciliation Blindspot / Human Review
