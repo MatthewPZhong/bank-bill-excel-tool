@@ -2849,6 +2849,16 @@ class ArchiveService {
         artifactIds: deleted.artifactIds
       };
     }
+    if (deleted.status === 'recovery-active') {
+      return {
+        ok: false,
+        status: 'recovery-active',
+        code: 'ARCHIVE_BATCH_RECOVERY_ACTIVE',
+        message: '批次仍处于中断或恢复处理中，暂不能删除',
+        batch: deleted.batch,
+        recoveryState: deleted.recoveryState
+      };
+    }
     await this._releaseSourcePaths(sourcePaths);
     const physical = deleted.cleanupJob
       ? await this._executeCleanupJobUnlocked(deleted.cleanupJob)

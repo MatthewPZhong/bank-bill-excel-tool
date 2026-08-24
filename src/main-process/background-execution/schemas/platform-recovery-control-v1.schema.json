@@ -1,0 +1,646 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bank-bill-excel-tool.local/schemas/background-execution/platform-recovery-control-v1.schema.json",
+  "title": "Background Execution Recovery Control v1",
+  "description": "Normative exact runtime shapes for recovery-control requests and immutable persisted event results. JavaScript values must additionally pass the RFC 8785/JCS runtime-domain checks frozen by the contract.",
+  "x-contract-authority": {
+    "path": "changes/background-execution/recovery-contract-authority.v1.json",
+    "contractVersion": 1,
+    "revision": 1,
+    "genesis": true,
+    "approvalStatus": "PENDING_HUMAN_REVIEW",
+    "gitGenesisRequiresVerifiedPreviousAbsence": true,
+    "bindingSourceContractVersion": 1,
+    "bindingMapSha256": "c217253cea4ccc377f030ff5119191a98e8e9c965853c9d9419fdedef9eef0ba",
+    "taskPolicyInventorySha256": "9538102480f1a714f3839547f294fbe6fd1c19384734addd89dc0ca6e1dbb368",
+    "resultSourceContractVersion": 1,
+    "resultKnownAnswerSha256": "1ced39a559f93c787da4d520e37dc0a4513c27dd9b60a4c229509e741b5ec039"
+  },
+  "$defs": {
+    "ActionKey": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*:[a-z0-9][a-z0-9._-]*$",
+      "minLength": 3,
+      "maxLength": 128
+    },
+    "NonEmptyString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "CanonicalSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "BoundedFailureCodeV1": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "BoundedFailureMessageV1": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000
+    },
+    "ObservationAttemptIdV1": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "CanonicalJsonValue": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "boolean" },
+        { "type": "string" },
+        {
+          "type": "number",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        {
+          "type": "array",
+          "items": { "$ref": "#/$defs/CanonicalJsonValue" }
+        },
+        {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/CanonicalJsonValue" }
+        }
+      ]
+    },
+    "BoundedJsonObject": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/CanonicalJsonValue" }
+    },
+    "RecoverySourceKind": {
+      "enum": [
+        "critical-intent",
+        "publisher-journal",
+        "target-post-image",
+        "existing-protocol",
+        "module-recovery"
+      ]
+    },
+    "RecoveryHoldSourceKind": {
+      "enum": [
+        "critical-intent",
+        "publisher-journal",
+        "target-post-image",
+        "existing-protocol",
+        "module-recovery",
+        "manual"
+      ]
+    },
+    "RecoveryTransitionEventInputV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["eventId", "createdAt", "safePayload"],
+      "properties": {
+        "eventId": {"$ref": "#/$defs/NonEmptyString"},
+        "createdAt": {"type": "string", "format": "date-time"},
+        "safePayload": {"$ref": "#/$defs/BoundedJsonObject"}
+      }
+    },
+    "RecoveryObservationEventInputV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "eventId",
+        "eventType",
+        "observationAttemptId",
+        "actionKey",
+        "operationKey",
+        "taskRunId",
+        "sourceKind",
+        "sourceRef",
+        "createdAt",
+        "safePayload"
+      ],
+      "properties": {
+        "eventId": {"$ref": "#/$defs/NonEmptyString"},
+        "eventType": {
+          "enum": [
+            "inspection-completed",
+            "inspection-failed-transient",
+            "settlement-resumed",
+            "settlement-failed-transient"
+          ]
+        },
+        "observationAttemptId": {"$ref": "#/$defs/ObservationAttemptIdV1"},
+        "actionKey": {"$ref": "#/$defs/ActionKey"},
+        "operationKey": {"$ref": "#/$defs/NonEmptyString"},
+        "taskRunId": {"$ref": "#/$defs/NonEmptyString"},
+        "sourceKind": {"$ref": "#/$defs/RecoverySourceKind"},
+        "sourceRef": {"$ref": "#/$defs/NonEmptyString"},
+        "batchId": {
+          "anyOf": [{"type": "integer", "minimum": 1, "maximum": 9007199254740991}, {"type": "null"}]
+        },
+        "intentId": {
+          "anyOf": [{"$ref": "#/$defs/NonEmptyString"}, {"type": "null"}]
+        },
+        "holdId": {
+          "anyOf": [{"$ref": "#/$defs/NonEmptyString"}, {"type": "null"}]
+        },
+        "recoveryAttemptId": {
+          "anyOf": [{"$ref": "#/$defs/NonEmptyString"}, {"type": "null"}]
+        },
+        "createdAt": {"type": "string", "format": "date-time"},
+        "safePayload": {"$ref": "#/$defs/BoundedJsonObject"}
+      }
+    },
+    "PreparedIntentInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contractVersion",
+        "intentId",
+        "actionKey",
+        "operationKey",
+        "taskRunId",
+        "jobId",
+        "coordinationKind",
+        "conflictScopeKey",
+        "inspectorKey",
+        "evidenceVersion",
+        "evidenceHash",
+        "boundedEvidence"
+      ],
+      "properties": {
+        "contractVersion": {"const": 1},
+        "intentId": {"$ref": "#/$defs/NonEmptyString"},
+        "actionKey": {"$ref": "#/$defs/ActionKey"},
+        "operationKey": {"$ref": "#/$defs/NonEmptyString"},
+        "taskRunId": {"$ref": "#/$defs/NonEmptyString"},
+        "jobId": {"$ref": "#/$defs/NonEmptyString"},
+        "coordinationKind": {
+          "enum": ["worker-critical", "main-owned-settlement"]
+        },
+        "conflictScopeKey": {"$ref": "#/$defs/NonEmptyString"},
+        "inspectorKey": {"$ref": "#/$defs/NonEmptyString"},
+        "evidenceVersion": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "evidenceHash": {"$ref": "#/$defs/CanonicalSha256"},
+        "boundedEvidence": {"$ref": "#/$defs/BoundedJsonObject"}
+      }
+    },
+    "RecoveryHoldCreateInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contractVersion",
+        "holdId",
+        "sourceKind",
+        "sourceRef",
+        "intentId",
+        "actionKey",
+        "operationKey",
+        "taskRunId",
+        "conflictScopeKey",
+        "reasonCode",
+        "safeSummary",
+        "evidenceHash"
+      ],
+      "properties": {
+        "contractVersion": {"const": 1},
+        "holdId": {"$ref": "#/$defs/NonEmptyString"},
+        "sourceKind": {"$ref": "#/$defs/RecoveryHoldSourceKind"},
+        "sourceRef": {"$ref": "#/$defs/NonEmptyString"},
+        "intentId": {
+          "anyOf": [{"$ref": "#/$defs/NonEmptyString"}, {"type": "null"}]
+        },
+        "actionKey": {"$ref": "#/$defs/ActionKey"},
+        "operationKey": {"$ref": "#/$defs/NonEmptyString"},
+        "taskRunId": {"$ref": "#/$defs/NonEmptyString"},
+        "conflictScopeKey": {"$ref": "#/$defs/NonEmptyString"},
+        "reasonCode": {"$ref": "#/$defs/NonEmptyString"},
+        "safeSummary": {"$ref": "#/$defs/BoundedJsonObject"},
+        "evidenceHash": {"$ref": "#/$defs/CanonicalSha256"}
+      }
+    },
+    "TaskRunTransitionV1": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["entityKind", "command", "actionKey", "expectedTaskKey", "operationKey", "taskRunId", "sourceKind", "sourceRef", "expectedState", "failureCode", "failureMessage", "metadataPatch"],
+          "properties": {
+            "entityKind": {"const": "task-run"},
+            "command": {"const": "mark-interrupted"},
+            "actionKey": {"$ref": "#/$defs/ActionKey"},
+            "expectedTaskKey": {"$ref": "#/$defs/NonEmptyString"},
+            "operationKey": {"$ref": "#/$defs/NonEmptyString"},
+            "taskRunId": {"$ref": "#/$defs/NonEmptyString"},
+            "sourceKind": {"anyOf": [{"$ref": "#/$defs/RecoverySourceKind"}, {"type": "null"}]},
+            "sourceRef": {"anyOf": [{"$ref": "#/$defs/NonEmptyString"}, {"type": "null"}]},
+            "expectedState": {"enum": ["prepared", "running"]},
+            "failureCode": {"$ref": "#/$defs/BoundedFailureCodeV1"},
+            "failureMessage": {"$ref": "#/$defs/BoundedFailureMessageV1"},
+            "metadataPatch": {"$ref": "#/$defs/BoundedJsonObject"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["entityKind", "command", "actionKey", "expectedTaskKey", "operationKey", "taskRunId", "sourceKind", "sourceRef", "expectedState", "recoveryAttemptId", "metadataPatch"],
+          "properties": {
+            "entityKind": {"const": "task-run"},
+            "command": {"const": "begin-recovery"},
+            "actionKey": {"$ref": "#/$defs/ActionKey"},
+            "expectedTaskKey": {"$ref": "#/$defs/NonEmptyString"},
+            "operationKey": {"$ref": "#/$defs/NonEmptyString"},
+            "taskRunId": {"$ref": "#/$defs/NonEmptyString"},
+            "sourceKind": {"anyOf": [{"$ref": "#/$defs/RecoverySourceKind"}, {"type": "null"}]},
+            "sourceRef": {"anyOf": [{"$ref": "#/$defs/NonEmptyString"}, {"type": "null"}]},
+            "expectedState": {"const": "interrupted"},
+            "recoveryAttemptId": {"$ref": "#/$defs/NonEmptyString"},
+            "metadataPatch": {"$ref": "#/$defs/BoundedJsonObject"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["entityKind", "command", "actionKey", "expectedTaskKey", "operationKey", "taskRunId", "sourceKind", "sourceRef", "expectedState", "recoveryAttemptId", "metadataPatch"],
+          "properties": {
+            "entityKind": {"const": "task-run"},
+            "command": {"const": "complete-recovery-success"},
+            "actionKey": {"$ref": "#/$defs/ActionKey"},
+            "expectedTaskKey": {"$ref": "#/$defs/NonEmptyString"},
+            "operationKey": {"$ref": "#/$defs/NonEmptyString"},
+            "taskRunId": {"$ref": "#/$defs/NonEmptyString"},
+            "sourceKind": {"anyOf": [{"$ref": "#/$defs/RecoverySourceKind"}, {"type": "null"}]},
+            "sourceRef": {"anyOf": [{"$ref": "#/$defs/NonEmptyString"}, {"type": "null"}]},
+            "expectedState": {"const": "running"},
+            "recoveryAttemptId": {"$ref": "#/$defs/NonEmptyString"},
+            "metadataPatch": {"$ref": "#/$defs/BoundedJsonObject"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["entityKind", "command", "actionKey", "expectedTaskKey", "operationKey", "taskRunId", "sourceKind", "sourceRef", "expectedState", "recoveryAttemptId", "failureCode", "failureMessage", "metadataPatch"],
+          "properties": {
+            "entityKind": {"const": "task-run"},
+            "command": {"const": "complete-recovery-failure"},
+            "actionKey": {"$ref": "#/$defs/ActionKey"},
+            "expectedTaskKey": {"$ref": "#/$defs/NonEmptyString"},
+            "operationKey": {"$ref": "#/$defs/NonEmptyString"},
+            "taskRunId": {"$ref": "#/$defs/NonEmptyString"},
+            "sourceKind": {"anyOf": [{"$ref": "#/$defs/RecoverySourceKind"}, {"type": "null"}]},
+            "sourceRef": {"anyOf": [{"$ref": "#/$defs/NonEmptyString"}, {"type": "null"}]},
+            "expectedState": {"const": "running"},
+            "recoveryAttemptId": {"$ref": "#/$defs/NonEmptyString"},
+            "failureCode": {"$ref": "#/$defs/BoundedFailureCodeV1"},
+            "failureMessage": {"$ref": "#/$defs/BoundedFailureMessageV1"},
+            "metadataPatch": {"$ref": "#/$defs/BoundedJsonObject"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["entityKind", "command", "actionKey", "expectedTaskKey", "operationKey", "taskRunId", "sourceKind", "sourceRef", "expectedState", "recoveryAttemptId", "failureCode", "failureMessage", "metadataPatch"],
+          "properties": {
+            "entityKind": {"const": "task-run"},
+            "command": {"const": "interrupt-recovery"},
+            "actionKey": {"$ref": "#/$defs/ActionKey"},
+            "expectedTaskKey": {"$ref": "#/$defs/NonEmptyString"},
+            "operationKey": {"$ref": "#/$defs/NonEmptyString"},
+            "taskRunId": {"$ref": "#/$defs/NonEmptyString"},
+            "sourceKind": {"anyOf": [{"$ref": "#/$defs/RecoverySourceKind"}, {"type": "null"}]},
+            "sourceRef": {"anyOf": [{"$ref": "#/$defs/NonEmptyString"}, {"type": "null"}]},
+            "expectedState": {"const": "running"},
+            "recoveryAttemptId": {"$ref": "#/$defs/NonEmptyString"},
+            "failureCode": {"$ref": "#/$defs/BoundedFailureCodeV1"},
+            "failureMessage": {"$ref": "#/$defs/BoundedFailureMessageV1"},
+            "metadataPatch": {"$ref": "#/$defs/BoundedJsonObject"}
+          }
+        }
+      ]
+    },
+    "BatchOverlayTransitionV1": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["entityKind", "command", "actionKey", "expectedTaskKey", "operationKey", "batchId", "taskRunId", "expectedState", "failureCode", "failureMessage", "sourceKind", "sourceRef"],
+          "properties": {
+            "entityKind": {"const": "batch-overlay"},
+            "command": {"const": "mark-interrupted"},
+            "actionKey": {"$ref": "#/$defs/ActionKey"},
+            "expectedTaskKey": {"$ref": "#/$defs/NonEmptyString"},
+            "operationKey": {"$ref": "#/$defs/NonEmptyString"},
+            "batchId": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+            "taskRunId": {"$ref": "#/$defs/NonEmptyString"},
+            "expectedState": {"type": "null"},
+            "failureCode": {"$ref": "#/$defs/BoundedFailureCodeV1"},
+            "failureMessage": {"$ref": "#/$defs/BoundedFailureMessageV1"},
+            "sourceKind": {"$ref": "#/$defs/RecoveryHoldSourceKind"},
+            "sourceRef": {"$ref": "#/$defs/NonEmptyString"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["entityKind", "command", "actionKey", "expectedTaskKey", "operationKey", "batchId", "taskRunId", "expectedState", "recoveryAttemptId", "sourceKind", "sourceRef"],
+          "properties": {
+            "entityKind": {"const": "batch-overlay"},
+            "command": {"const": "begin-recovery"},
+            "actionKey": {"$ref": "#/$defs/ActionKey"},
+            "expectedTaskKey": {"$ref": "#/$defs/NonEmptyString"},
+            "operationKey": {"$ref": "#/$defs/NonEmptyString"},
+            "batchId": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+            "taskRunId": {"$ref": "#/$defs/NonEmptyString"},
+            "expectedState": {"const": "interrupted"},
+            "recoveryAttemptId": {"$ref": "#/$defs/NonEmptyString"},
+            "sourceKind": {"$ref": "#/$defs/RecoveryHoldSourceKind"},
+            "sourceRef": {"$ref": "#/$defs/NonEmptyString"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["entityKind", "command", "actionKey", "expectedTaskKey", "operationKey", "batchId", "taskRunId", "expectedState", "recoveryAttemptId", "finalOutcome", "sourceKind", "sourceRef"],
+          "properties": {
+            "entityKind": {"const": "batch-overlay"},
+            "command": {"const": "resolve-success"},
+            "actionKey": {"$ref": "#/$defs/ActionKey"},
+            "expectedTaskKey": {"$ref": "#/$defs/NonEmptyString"},
+            "operationKey": {"$ref": "#/$defs/NonEmptyString"},
+            "batchId": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+            "taskRunId": {"$ref": "#/$defs/NonEmptyString"},
+            "expectedState": {"const": "recovering"},
+            "recoveryAttemptId": {"$ref": "#/$defs/NonEmptyString"},
+            "finalOutcome": {"const": "succeeded"},
+            "sourceKind": {"$ref": "#/$defs/RecoveryHoldSourceKind"},
+            "sourceRef": {"$ref": "#/$defs/NonEmptyString"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["entityKind", "command", "actionKey", "expectedTaskKey", "operationKey", "batchId", "taskRunId", "expectedState", "recoveryAttemptId", "finalOutcome", "sourceKind", "sourceRef"],
+          "properties": {
+            "entityKind": {"const": "batch-overlay"},
+            "command": {"const": "resolve-failure"},
+            "actionKey": {"$ref": "#/$defs/ActionKey"},
+            "expectedTaskKey": {"$ref": "#/$defs/NonEmptyString"},
+            "operationKey": {"$ref": "#/$defs/NonEmptyString"},
+            "batchId": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+            "taskRunId": {"$ref": "#/$defs/NonEmptyString"},
+            "expectedState": {"const": "recovering"},
+            "recoveryAttemptId": {"$ref": "#/$defs/NonEmptyString"},
+            "finalOutcome": {"const": "failed"},
+            "sourceKind": {"$ref": "#/$defs/RecoveryHoldSourceKind"},
+            "sourceRef": {"$ref": "#/$defs/NonEmptyString"}
+          }
+        }
+      ]
+    },
+    "CriticalIntentTransitionV1": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["entityKind", "command", "input"],
+          "properties": {
+            "entityKind": {"const": "critical-intent"},
+            "command": {"const": "create-prepared"},
+            "input": {"$ref": "#/$defs/PreparedIntentInput"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["entityKind", "command", "intentId", "expectedState", "patch"],
+          "properties": {
+            "entityKind": {"const": "critical-intent"},
+            "command": {"const": "mark-acked"},
+            "intentId": {"$ref": "#/$defs/NonEmptyString"},
+            "expectedState": {"const": "prepared"},
+            "patch": {"$ref": "#/$defs/BoundedJsonObject"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["entityKind", "command", "intentId", "expectedState", "receiptRef"],
+          "properties": {
+            "entityKind": {"const": "critical-intent"},
+            "command": {"const": "mark-committed"},
+            "intentId": {"$ref": "#/$defs/NonEmptyString"},
+            "expectedState": {"const": "acked"},
+            "receiptRef": {"$ref": "#/$defs/BoundedJsonObject"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["entityKind", "command", "intentId", "expectedState", "inspection"],
+          "properties": {
+            "entityKind": {"const": "critical-intent"},
+            "command": {"const": "mark-recovered"},
+            "intentId": {"$ref": "#/$defs/NonEmptyString"},
+            "expectedState": {"enum": ["prepared", "acked"]},
+            "inspection": {"$ref": "#/$defs/BoundedJsonObject"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["entityKind", "command", "intentId", "expectedState", "result"],
+          "properties": {
+            "entityKind": {"const": "critical-intent"},
+            "command": {"const": "close"},
+            "intentId": {"$ref": "#/$defs/NonEmptyString"},
+            "expectedState": {"enum": ["committed", "recovered"]},
+            "result": {"$ref": "#/$defs/BoundedJsonObject"}
+          }
+        }
+      ]
+    },
+    "RecoveryHoldTransitionV1": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["entityKind", "command", "input"],
+          "properties": {
+            "entityKind": {"const": "recovery-hold"},
+            "command": {"const": "create-or-get"},
+            "input": {"$ref": "#/$defs/RecoveryHoldCreateInput"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["entityKind", "command", "holdId", "expectedState", "resolution", "evidence"],
+          "properties": {
+            "entityKind": {"const": "recovery-hold"},
+            "command": {"const": "resolve"},
+            "holdId": {"$ref": "#/$defs/NonEmptyString"},
+            "expectedState": {"const": "active"},
+            "resolution": {
+              "enum": ["committed", "not-committed", "compensated", "manual-override"]
+            },
+            "evidence": {"$ref": "#/$defs/BoundedJsonObject"}
+          }
+        }
+      ]
+    },
+    "RecoveryControlTransitionV1": {
+      "oneOf": [
+        {"$ref": "#/$defs/TaskRunTransitionV1"},
+        {"$ref": "#/$defs/BatchOverlayTransitionV1"},
+        {"$ref": "#/$defs/CriticalIntentTransitionV1"},
+        {"$ref": "#/$defs/RecoveryHoldTransitionV1"}
+      ]
+    },
+    "RecoveryTransitionRequestV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["transition", "event"],
+      "properties": {
+        "transition": {"$ref": "#/$defs/RecoveryControlTransitionV1"},
+        "event": {"$ref": "#/$defs/RecoveryTransitionEventInputV1"}
+      }
+    },
+    "RecoveryObservationRequestV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event"],
+      "properties": {
+        "event": {"$ref": "#/$defs/RecoveryObservationEventInputV1"}
+      }
+    },
+    "RecoveryEventProjectionV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contractVersion",
+        "requestKey",
+        "writer",
+        "eventId",
+        "requestHash",
+        "actionKey",
+        "operationKey",
+        "taskRunId",
+        "sourceKind",
+        "sourceRef",
+        "batchId",
+        "intentId",
+        "holdId",
+        "recoveryAttemptId",
+        "observationAttemptId",
+        "eventType",
+        "previousState",
+        "nextState",
+        "safePayload",
+        "createdAt"
+      ],
+      "properties": {
+        "contractVersion": {"const": 1},
+        "requestKey": {"$ref": "#/$defs/NonEmptyString"},
+        "writer": {
+          "enum": ["transitionWithRecoveryEvent", "appendObservationEvent"]
+        },
+        "eventId": {"$ref": "#/$defs/NonEmptyString"},
+        "requestHash": {"$ref": "#/$defs/CanonicalSha256"},
+        "actionKey": {"$ref": "#/$defs/ActionKey"},
+        "operationKey": {"$ref": "#/$defs/NonEmptyString"},
+        "taskRunId": {"$ref": "#/$defs/NonEmptyString"},
+        "sourceKind": {
+          "anyOf": [{"$ref": "#/$defs/RecoveryHoldSourceKind"}, {"type": "null"}]
+        },
+        "sourceRef": {
+          "anyOf": [{"$ref": "#/$defs/NonEmptyString"}, {"type": "null"}]
+        },
+        "batchId": {
+          "anyOf": [{"type": "integer", "minimum": 1, "maximum": 9007199254740991}, {"type": "null"}]
+        },
+        "intentId": {
+          "anyOf": [{"$ref": "#/$defs/NonEmptyString"}, {"type": "null"}]
+        },
+        "holdId": {
+          "anyOf": [{"$ref": "#/$defs/NonEmptyString"}, {"type": "null"}]
+        },
+        "recoveryAttemptId": {
+          "anyOf": [{"$ref": "#/$defs/NonEmptyString"}, {"type": "null"}]
+        },
+        "observationAttemptId": {
+          "anyOf": [{"$ref": "#/$defs/ObservationAttemptIdV1"}, {"type": "null"}]
+        },
+        "eventType": {
+          "enum": [
+            "interrupted-recorded",
+            "inspection-completed",
+            "inspection-failed-transient",
+            "recovery-started",
+            "settlement-resumed",
+            "settlement-failed-transient",
+            "recovery-succeeded",
+            "recovery-failed",
+            "recovery-interrupted",
+            "batch-overlay-transitioned",
+            "critical-intent-transitioned",
+            "hold-created",
+            "hold-resolved"
+          ]
+        },
+        "previousState": {
+          "anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]
+        },
+        "nextState": {
+          "anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]
+        },
+        "safePayload": {"$ref": "#/$defs/BoundedJsonObject"},
+        "createdAt": {"type": "string", "format": "date-time"}
+      }
+    },
+    "RecoveryControlTransitionResultV1": {
+      "allOf": [
+        {"$ref": "#/$defs/RecoveryEventProjectionV1"},
+        {
+          "type": "object",
+          "properties": {
+            "writer": {"const": "transitionWithRecoveryEvent"},
+            "observationAttemptId": {"type": "null"},
+            "eventType": {
+              "enum": [
+                "interrupted-recorded",
+                "recovery-started",
+                "recovery-succeeded",
+                "recovery-failed",
+                "recovery-interrupted",
+                "batch-overlay-transitioned",
+                "critical-intent-transitioned",
+                "hold-created",
+                "hold-resolved"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "RecoveryObservationEventResultV1": {
+      "allOf": [
+        {"$ref": "#/$defs/RecoveryEventProjectionV1"},
+        {
+          "type": "object",
+          "properties": {
+            "writer": {"const": "appendObservationEvent"},
+            "observationAttemptId": {"$ref": "#/$defs/ObservationAttemptIdV1"},
+            "eventType": {
+              "enum": [
+                "inspection-completed",
+                "inspection-failed-transient",
+                "settlement-resumed",
+                "settlement-failed-transient"
+              ]
+            },
+            "previousState": {"type": "null"},
+            "nextState": {"type": "null"},
+            "sourceKind": {"$ref": "#/$defs/RecoverySourceKind"},
+            "sourceRef": {"$ref": "#/$defs/NonEmptyString"}
+          }
+        }
+      ]
+    }
+  }
+}

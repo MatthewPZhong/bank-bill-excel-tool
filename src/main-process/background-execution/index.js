@@ -20,6 +20,22 @@ const { validateProtocolSequence } = require('./protocol-sequence-validator');
 const { createDirectionSequenceTracker } = require('./sequence-tracker');
 const { createResourceGovernor } = require('./resource-governor');
 const { createServiceHost } = require('./service-host');
+const {
+  createBatchRecoveryOverlayAdapter,
+  createRecoveryTaskLifecycleAdapter,
+  createRecoveryTransitionAdapter
+} = require('./task-lifecycle-adapter');
+const {
+  createRecoveryControlRepository
+} = require('./critical/recovery-control-repository');
+const {
+  createRecoveryControlReadRepository
+} = require('./critical/recovery-control-read-repository');
+const {
+  RecoveryControlError,
+  createRecoveryObservationAttemptRepository,
+  createRecoveryRequestOwnerRepository
+} = require('./critical/recovery-request-owner-repository');
 const errorCodec = require('./error-codec');
 const { createInlineAsyncAdapter } = require('./adapters/inline-async-adapter');
 const { createWorkerThreadAdapter } = require('./adapters/worker-thread-adapter');
@@ -43,11 +59,19 @@ module.exports = {
   createExecutionSupervisor,
   createExistingDispatchAdapter,
   createInlineAsyncAdapter,
+  createBatchRecoveryOverlayAdapter,
+  createRecoveryControlReadRepository,
+  createRecoveryControlRepository,
+  createRecoveryObservationAttemptRepository,
+  createRecoveryRequestOwnerRepository,
+  createRecoveryTaskLifecycleAdapter,
+  createRecoveryTransitionAdapter,
   createResourceGovernor,
   createServiceHost,
   createStaticRegistry,
   createUtilityProcessAdapter,
   createWorkerThreadAdapter,
+  RecoveryControlError,
   validatePolicyDocument,
   validateProtocolSequence
 };
