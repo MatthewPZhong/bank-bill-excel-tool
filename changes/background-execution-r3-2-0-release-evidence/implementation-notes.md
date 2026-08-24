@@ -26,6 +26,9 @@
   deterministically by scenario and run so later workers do not receive a systematic cache advantage.
 - Benchmark JSON is always emitted to stdout. Optional `--evidence-file` publication is
   same-directory, exclusive, atomic, and refuses to overwrite an existing file.
+- PR #174's Windows CI repair is a baseline refresh only: it imports the already reviewed
+  directory-fsync and SQLite-cleanup fixes from `v3.2.0` without changing any R3 behavior,
+  evidence meaning, or production policy.
 
 ## Assumptions
 
@@ -52,6 +55,20 @@
 - Final `npm run release-check`: `PASS` (`lint` and `smoke` PASS; unit
   `6013/6014 PASS` with `0` failures and `1` skipped; integration `51/51`
   scripts and `2455/2455` assertions PASS).
+- PR #174 failed Windows workflow `32735879695` was diagnosed as three pre-existing
+  directory-fsync failures plus one pre-existing SQLite cleanup `EBUSY`; no R3-specific
+  test failed.
+- Latest `origin/v3.2.0` was merged into the PR branch without conflicts, importing the
+  reviewed PR #170 and PR #173 fixes.
+- Inherited directory-fsync and SQLite-cleanup targeted tests: `68/68 PASS`.
+- R3 packaged-runtime, Windows-build, distribution-size, and benchmark targeted tests:
+  `52/52 PASS`.
+- Post-refresh `npm run release-check`: `PASS` (`lint` and `smoke` PASS; unit
+  `6013/6014 PASS` with `0` failures and `1` skipped; integration `51/51`
+  scripts and `2455/2455` assertions PASS).
+- Blind-spot and reconciliation review found no product, amount/currency, recovery,
+  evidence-semantics, or production-enablement change in this repair. Real Windows and
+  benchmark evidence therefore remains `NOT_RUN`, and all human-review gates remain open.
 
 ### Benchmark timing definitions
 
@@ -88,3 +105,4 @@ privacy, medians, and eligibility logic only and are not performance evidence.
 - Real Windows portable executable behavior has not been measured.
 - Packaged Windows directory-fsync behavior has not been evidenced.
 - Parser concurrency eligibility has not been evaluated with the required complete benchmark matrix.
+- The refreshed PR #174 head still requires a successful hosted Windows CI run before merge.
