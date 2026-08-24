@@ -308,6 +308,12 @@ hold-resolved
 
 Transition event type 不由调用方传入：TaskRun command 映射到对应 `interrupted/recovery-*` event，Batch overlay command 统一映射 `batch-overlay-transitioned`，Critical Intent command 统一映射 `critical-intent-transitioned`，Hold create/resolve 映射 `hold-created/hold-resolved`。逐 command 唯一映射以 E00 TechDoc 的 `RECOVERY_TRANSITION_EVENT_MAP_V1` 为准。
 
+每个 event 还必须持久 Repository 生成的 `request_key/writer/request_hash`。Main-owned persistent request owner 首次保存 stable eventId、createdAt、完整 RFC 8785/JCS `request_jcs` 与 lowercase SHA-256，startup/Hold 重扫按 durable requestKey 复用；20 个 branch 的 namespace + durable entity/attempt tuple 由 recovery-control fixture 冻结，volatile leaf 不进入 key，changed exact request 仍用同 key conflict。owner/event 的 requestKey/writer/eventId/requestHash/createdAt 通过 composite UNIQUE/FK 强制相等；调用方不得传 requestHash。hash 覆盖 writer-specific 完整 exact request 的每个 leaf。Repository 必须在任何 state CAS 前判定 exact replay 或 conflict，因此进程重启不改变幂等结论。
+
+四类 observation 在 owner reserve 前必须先按 durable scope 原子持久正安全整数 `observationAttemptId`。同 scope + ordinal 跨重启复用同一 requestKey/result；下一 ordinal 才能追加新 event，瞬态阈值的最后一次也独立可审计。attempt/event 的 `(observation_scope_key, observation_attempt_id, request_key)` 必须由 composite FK 保持一致。
+
+transition 与 observation 的 exact input/union/result shape 只由 `platform-recovery-control-v1.schema.json` 定义，未知字段或缺 required field 均 fail closed；Batch mark-interrupted 显式携带 failureCode/failureMessage。transition/observation result 分别固定 writer/event domain，transition attempt 为 null，observation attempt 为正安全整数且固定 null previous/next 与非 manual source，cross-DTO 拒绝。两个 result 是从 exact request + 同次 CAS persisted values 推导的 immutable 20-field projection，并须匹配独立 versioned 20-result KAT（JCS SHA-256 `1ced39a559f93c787da4d520e37dc0a4513c27dd9b60a4c229509e741b5ec039`）；field/owner mutations 必须实际经过 mapper→SQLite event projection 后比较，不能 candidate 自比。A 提交、B 推进、进程重启后 replay A 仍逐字段返回首次 A，不读取 B 后 current state、不二次 CAS/event。
+
 ## 8. Batch 兼容方案：Option B（冻结）
 
 当前 Batch `task_status` 不支持 `interrupted`，且现有兼容行为把 Task `interrupted` 映射为基础 Batch `failed`。本合同不要求 SQLite 重建旧 Batch 表，正式采用 overlay 方案：
@@ -319,6 +325,8 @@ Transition event type 不由调用方传入：TaskRun command 映射到对应 `i
 5. 恢复完成不覆盖原 interruption 历史，最终状态由 overlay + recovery events 计算。
 
 首次 interruption 的基础兼容写 `task_status=failed`、overlay `state=interrupted` 与 `batch-overlay-transitioned` event 必须由 `batch-overlay.mark-interrupted` 在同一个 control transaction 完成。恢复成功时不把基础行改回 succeeded，避免旧 interruption 历史被覆盖；平台读路径只使用 effective status。
+
+四个 Batch overlay command 必须以 exact keys 携带 canonical actionKey、legacy expectedTaskKey、operationKey、batchId、taskRunId 与 source pair。Adapter 必须注入生产 `ActionTaskBindingRegistry` 并只接受模块私有 source authority 中从真实 TaskPolicy owned snapshot 验证的 exact canonical/legacy binding；factory 禁止 caller map，只 `list()` 一次，122-key inventory JCS digest 固定 `9538102480f1a714f3839547f294fbe6fd1c19384734addd89dc0ca6e1dbb368`，caller/返回数组 mutation 均不得改变内部 membership。Action Manifest v3 仅为审计 snapshot。Repository 同事务 CAS Task/Batch identity，禁止从 legacy task_key、sourceRef 或 safePayload 猜造 event.action_key。物理映射固定 `archive_batches.id === batchId`，仅 overlay 使用 `overlay.batch_id`；完整 identity predicate 后每条写入都必须 `changes() === 1`。
 
 规范状态：
 

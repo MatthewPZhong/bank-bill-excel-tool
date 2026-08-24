@@ -1,0 +1,1684 @@
+{
+  "requestKeyContract": {
+    "contractVersion": 1,
+    "format": "recovery-control:v1:<lowercase-sha256>",
+    "prefix": "recovery-control:v1:",
+    "canonicalization": "RFC8785-JCS",
+    "preimage": "JCS([namespace, ...identityValues])",
+    "tupleEncoding": "RFC8785-JCS-array",
+    "identityPathEncoding": "RFC6901-JSON-Pointer",
+    "delimiterConcatenation": false,
+    "missingOptionalIdentityValue": null,
+    "forbiddenIdentityLeafNames": [
+      "eventId",
+      "requestHash",
+      "request_hash",
+      "createdAt",
+      "safePayload",
+      "failureCode",
+      "failureMessage",
+      "metadataPatch",
+      "expectedState"
+    ],
+    "branches": [
+      {
+        "name": "task-mark-interrupted",
+        "writer": "transitionWithRecoveryEvent",
+        "namespace": "recovery-control/v1/transition/task-run/mark-interrupted",
+        "identityPaths": [
+          "/transition/actionKey",
+          "/transition/expectedTaskKey",
+          "/transition/operationKey",
+          "/transition/taskRunId",
+          "/transition/sourceKind",
+          "/transition/sourceRef"
+        ]
+      },
+      {
+        "name": "task-begin-recovery",
+        "writer": "transitionWithRecoveryEvent",
+        "namespace": "recovery-control/v1/transition/task-run/begin-recovery",
+        "identityPaths": [
+          "/transition/actionKey",
+          "/transition/expectedTaskKey",
+          "/transition/operationKey",
+          "/transition/taskRunId",
+          "/transition/sourceKind",
+          "/transition/sourceRef",
+          "/transition/recoveryAttemptId"
+        ]
+      },
+      {
+        "name": "task-complete-recovery-success",
+        "writer": "transitionWithRecoveryEvent",
+        "namespace": "recovery-control/v1/transition/task-run/complete-recovery-success",
+        "identityPaths": [
+          "/transition/actionKey",
+          "/transition/expectedTaskKey",
+          "/transition/operationKey",
+          "/transition/taskRunId",
+          "/transition/sourceKind",
+          "/transition/sourceRef",
+          "/transition/recoveryAttemptId"
+        ]
+      },
+      {
+        "name": "task-complete-recovery-failure",
+        "writer": "transitionWithRecoveryEvent",
+        "namespace": "recovery-control/v1/transition/task-run/complete-recovery-failure",
+        "identityPaths": [
+          "/transition/actionKey",
+          "/transition/expectedTaskKey",
+          "/transition/operationKey",
+          "/transition/taskRunId",
+          "/transition/sourceKind",
+          "/transition/sourceRef",
+          "/transition/recoveryAttemptId"
+        ]
+      },
+      {
+        "name": "task-interrupt-recovery",
+        "writer": "transitionWithRecoveryEvent",
+        "namespace": "recovery-control/v1/transition/task-run/interrupt-recovery",
+        "identityPaths": [
+          "/transition/actionKey",
+          "/transition/expectedTaskKey",
+          "/transition/operationKey",
+          "/transition/taskRunId",
+          "/transition/sourceKind",
+          "/transition/sourceRef",
+          "/transition/recoveryAttemptId"
+        ]
+      },
+      {
+        "name": "batch-mark-interrupted",
+        "writer": "transitionWithRecoveryEvent",
+        "namespace": "recovery-control/v1/transition/batch-overlay/mark-interrupted",
+        "identityPaths": [
+          "/transition/actionKey",
+          "/transition/expectedTaskKey",
+          "/transition/operationKey",
+          "/transition/batchId",
+          "/transition/taskRunId",
+          "/transition/sourceKind",
+          "/transition/sourceRef"
+        ]
+      },
+      {
+        "name": "batch-begin-recovery",
+        "writer": "transitionWithRecoveryEvent",
+        "namespace": "recovery-control/v1/transition/batch-overlay/begin-recovery",
+        "identityPaths": [
+          "/transition/actionKey",
+          "/transition/expectedTaskKey",
+          "/transition/operationKey",
+          "/transition/batchId",
+          "/transition/taskRunId",
+          "/transition/sourceKind",
+          "/transition/sourceRef",
+          "/transition/recoveryAttemptId"
+        ]
+      },
+      {
+        "name": "batch-resolve-success",
+        "writer": "transitionWithRecoveryEvent",
+        "namespace": "recovery-control/v1/transition/batch-overlay/resolve-success",
+        "identityPaths": [
+          "/transition/actionKey",
+          "/transition/expectedTaskKey",
+          "/transition/operationKey",
+          "/transition/batchId",
+          "/transition/taskRunId",
+          "/transition/sourceKind",
+          "/transition/sourceRef",
+          "/transition/recoveryAttemptId"
+        ]
+      },
+      {
+        "name": "batch-resolve-failure",
+        "writer": "transitionWithRecoveryEvent",
+        "namespace": "recovery-control/v1/transition/batch-overlay/resolve-failure",
+        "identityPaths": [
+          "/transition/actionKey",
+          "/transition/expectedTaskKey",
+          "/transition/operationKey",
+          "/transition/batchId",
+          "/transition/taskRunId",
+          "/transition/sourceKind",
+          "/transition/sourceRef",
+          "/transition/recoveryAttemptId"
+        ]
+      },
+      {
+        "name": "intent-create-prepared",
+        "writer": "transitionWithRecoveryEvent",
+        "namespace": "recovery-control/v1/transition/critical-intent/create-prepared",
+        "identityPaths": ["/transition/input/intentId"]
+      },
+      {
+        "name": "intent-mark-acked",
+        "writer": "transitionWithRecoveryEvent",
+        "namespace": "recovery-control/v1/transition/critical-intent/mark-acked",
+        "identityPaths": ["/transition/intentId"]
+      },
+      {
+        "name": "intent-mark-committed",
+        "writer": "transitionWithRecoveryEvent",
+        "namespace": "recovery-control/v1/transition/critical-intent/mark-committed",
+        "identityPaths": ["/transition/intentId"]
+      },
+      {
+        "name": "intent-mark-recovered",
+        "writer": "transitionWithRecoveryEvent",
+        "namespace": "recovery-control/v1/transition/critical-intent/mark-recovered",
+        "identityPaths": ["/transition/intentId"]
+      },
+      {
+        "name": "intent-close",
+        "writer": "transitionWithRecoveryEvent",
+        "namespace": "recovery-control/v1/transition/critical-intent/close",
+        "identityPaths": ["/transition/intentId"]
+      },
+      {
+        "name": "hold-create-or-get",
+        "writer": "transitionWithRecoveryEvent",
+        "namespace": "recovery-control/v1/transition/recovery-hold/create-or-get",
+        "identityPaths": [
+          "/transition/input/sourceKind",
+          "/transition/input/sourceRef"
+        ]
+      },
+      {
+        "name": "hold-resolve",
+        "writer": "transitionWithRecoveryEvent",
+        "namespace": "recovery-control/v1/transition/recovery-hold/resolve",
+        "identityPaths": ["/transition/holdId"]
+      },
+      {
+        "name": "inspection-completed-all-lineage-present",
+        "writer": "appendObservationEvent",
+        "namespace": "recovery-control/v1/observation/inspection-completed",
+        "identityPaths": [
+          "/event/actionKey",
+          "/event/operationKey",
+          "/event/taskRunId",
+          "/event/sourceKind",
+          "/event/sourceRef",
+          "/event/observationAttemptId",
+          "/event/batchId",
+          "/event/intentId",
+          "/event/holdId",
+          "/event/recoveryAttemptId"
+        ]
+      },
+      {
+        "name": "inspection-failed-transient-minimal-lineage",
+        "writer": "appendObservationEvent",
+        "namespace": "recovery-control/v1/observation/inspection-failed-transient",
+        "identityPaths": [
+          "/event/actionKey",
+          "/event/operationKey",
+          "/event/taskRunId",
+          "/event/sourceKind",
+          "/event/sourceRef",
+          "/event/observationAttemptId",
+          "/event/batchId",
+          "/event/intentId",
+          "/event/holdId",
+          "/event/recoveryAttemptId"
+        ]
+      },
+      {
+        "name": "settlement-resumed",
+        "writer": "appendObservationEvent",
+        "namespace": "recovery-control/v1/observation/settlement-resumed",
+        "identityPaths": [
+          "/event/actionKey",
+          "/event/operationKey",
+          "/event/taskRunId",
+          "/event/sourceKind",
+          "/event/sourceRef",
+          "/event/observationAttemptId",
+          "/event/batchId",
+          "/event/intentId",
+          "/event/holdId",
+          "/event/recoveryAttemptId"
+        ]
+      },
+      {
+        "name": "settlement-failed-transient",
+        "writer": "appendObservationEvent",
+        "namespace": "recovery-control/v1/observation/settlement-failed-transient",
+        "identityPaths": [
+          "/event/actionKey",
+          "/event/operationKey",
+          "/event/taskRunId",
+          "/event/sourceKind",
+          "/event/sourceRef",
+          "/event/observationAttemptId",
+          "/event/batchId",
+          "/event/intentId",
+          "/event/holdId",
+          "/event/recoveryAttemptId"
+        ]
+      }
+    ]
+  },
+  "observationAttemptContract": {
+    "contractVersion": 1,
+    "idType": "positive-safe-integer",
+    "allocation": "allocateNextObservationAttempt(scope) persists prepared before request owner reserve",
+    "restart": "resumePreparedObservationAttempt(scope) returns the same durable ordinal",
+    "newAttempt": "only allocateNextObservationAttempt(scope) may create the next ordinal after commit",
+    "scopeNamespace": "recovery-control/v1/observation-attempt-scope",
+    "scopeKeyFormat": "observation-attempt:v1:<lowercase-sha256>",
+    "scopeIdentityPaths": [
+      "/event/eventType",
+      "/event/actionKey",
+      "/event/operationKey",
+      "/event/taskRunId",
+      "/event/sourceKind",
+      "/event/sourceRef",
+      "/event/batchId",
+      "/event/intentId",
+      "/event/holdId",
+      "/event/recoveryAttemptId"
+    ],
+    "forbiddenScopeLeafNames": [
+      "observationAttemptId",
+      "eventId",
+      "requestHash",
+      "request_hash",
+      "createdAt",
+      "safePayload"
+    ],
+    "statuses": ["prepared", "committed"]
+  },
+  "transitionRequests": [
+    {
+      "name": "task-mark-interrupted",
+      "requestKey": "recovery-control:v1:0dd4ee379d849fb632640e8fe5866e180f2a9785978077cff3d6a4d23c8546a9",
+      "request": {
+        "transition": {
+          "entityKind": "task-run",
+          "command": "mark-interrupted",
+          "actionKey": "statement:generate-all",
+          "expectedTaskKey": "monthly-balance:export",
+          "operationKey": "operation-1",
+          "taskRunId": "task-run-1",
+          "sourceKind": "module-recovery",
+          "sourceRef": "source-1",
+          "expectedState": "running",
+          "failureCode": "TRANSPORT_LOST",
+          "failureMessage": "transport lost",
+          "metadataPatch": {"recovered": false}
+        },
+        "event": {
+          "eventId": "event-task-mark-interrupted",
+          "createdAt": "2026-08-23T00:00:00.000Z",
+          "safePayload": {"reason": "transport-lost"}
+        }
+      }
+    },
+    {
+      "name": "task-begin-recovery",
+      "requestKey": "recovery-control:v1:9378ae3b18032d7bedcd3038c136fe16ada8d37f19d43eb512c18714ab50678f",
+      "request": {
+        "transition": {
+          "entityKind": "task-run",
+          "command": "begin-recovery",
+          "actionKey": "statement:generate-all",
+          "expectedTaskKey": "monthly-balance:export",
+          "operationKey": "operation-1",
+          "taskRunId": "task-run-1",
+          "sourceKind": "module-recovery",
+          "sourceRef": "source-1",
+          "expectedState": "interrupted",
+          "recoveryAttemptId": "attempt-1",
+          "metadataPatch": {"recoveryMode": true}
+        },
+        "event": {
+          "eventId": "event-task-begin-recovery",
+          "createdAt": "2026-08-23T00:00:01.000Z",
+          "safePayload": {"attempt": 1}
+        }
+      }
+    },
+    {
+      "name": "task-complete-recovery-success",
+      "requestKey": "recovery-control:v1:4897f255a3f108e173373120e777de1d320e5475563db4fb73e273e1efc67bf5",
+      "request": {
+        "transition": {
+          "entityKind": "task-run",
+          "command": "complete-recovery-success",
+          "actionKey": "statement:generate-all",
+          "expectedTaskKey": "monthly-balance:export",
+          "operationKey": "operation-1",
+          "taskRunId": "task-run-1",
+          "sourceKind": "module-recovery",
+          "sourceRef": "source-1",
+          "expectedState": "running",
+          "recoveryAttemptId": "attempt-1",
+          "metadataPatch": {"recovered": true}
+        },
+        "event": {
+          "eventId": "event-task-success",
+          "createdAt": "2026-08-23T00:00:02.000Z",
+          "safePayload": {"outcome": "succeeded"}
+        }
+      }
+    },
+    {
+      "name": "task-complete-recovery-failure",
+      "requestKey": "recovery-control:v1:649778169efa1f36f759744f41edfa88eac8aee98d1a50082eeb84c623b18478",
+      "request": {
+        "transition": {
+          "entityKind": "task-run",
+          "command": "complete-recovery-failure",
+          "actionKey": "statement:generate-all",
+          "expectedTaskKey": "monthly-balance:export",
+          "operationKey": "operation-1",
+          "taskRunId": "task-run-1",
+          "sourceKind": "module-recovery",
+          "sourceRef": "source-1",
+          "expectedState": "running",
+          "recoveryAttemptId": "attempt-1",
+          "failureCode": "RECOVERY_FAILED",
+          "failureMessage": "recovery failed",
+          "metadataPatch": {"recovered": false}
+        },
+        "event": {
+          "eventId": "event-task-failure",
+          "createdAt": "2026-08-23T00:00:03.000Z",
+          "safePayload": {"outcome": "failed"}
+        }
+      }
+    },
+    {
+      "name": "task-interrupt-recovery",
+      "requestKey": "recovery-control:v1:fd5fe658d76d14d44cd42b3cf1f5501c38304e51828b6c3755b4a671d6290924",
+      "request": {
+        "transition": {
+          "entityKind": "task-run",
+          "command": "interrupt-recovery",
+          "actionKey": "statement:generate-all",
+          "expectedTaskKey": "monthly-balance:export",
+          "operationKey": "operation-1",
+          "taskRunId": "task-run-1",
+          "sourceKind": "module-recovery",
+          "sourceRef": "source-1",
+          "expectedState": "running",
+          "recoveryAttemptId": "attempt-1",
+          "failureCode": "RECOVERY_INTERRUPTED",
+          "failureMessage": "recovery interrupted",
+          "metadataPatch": {"retryable": true}
+        },
+        "event": {
+          "eventId": "event-task-interrupted",
+          "createdAt": "2026-08-23T00:00:04.000Z",
+          "safePayload": {"outcome": "interrupted"}
+        }
+      }
+    },
+    {
+      "name": "batch-mark-interrupted",
+      "requestKey": "recovery-control:v1:b6b8cd88448314afe19450756aebd721686f4e2a60c1fad5e4c31cdf52528e22",
+      "request": {
+        "transition": {
+          "entityKind": "batch-overlay",
+          "command": "mark-interrupted",
+          "actionKey": "statement:generate-all",
+          "expectedTaskKey": "monthly-balance:export",
+          "operationKey": "operation-1",
+          "batchId": 7,
+          "taskRunId": "task-run-1",
+          "expectedState": null,
+          "failureCode": "TRANSPORT_LOST",
+          "failureMessage": "batch transport lost",
+          "sourceKind": "module-recovery",
+          "sourceRef": "source-1"
+        },
+        "event": {
+          "eventId": "event-batch-mark-interrupted",
+          "createdAt": "2026-08-23T00:00:05.000Z",
+          "safePayload": {"batch": 7}
+        }
+      }
+    },
+    {
+      "name": "batch-begin-recovery",
+      "requestKey": "recovery-control:v1:6cfabed5d16629673e98e008d4d6a4b52cfa29f7104369f9cd7e697679d028d6",
+      "request": {
+        "transition": {
+          "entityKind": "batch-overlay",
+          "command": "begin-recovery",
+          "actionKey": "statement:generate-all",
+          "expectedTaskKey": "monthly-balance:export",
+          "operationKey": "operation-1",
+          "batchId": 7,
+          "taskRunId": "task-run-1",
+          "expectedState": "interrupted",
+          "recoveryAttemptId": "attempt-1",
+          "sourceKind": "module-recovery",
+          "sourceRef": "source-1"
+        },
+        "event": {
+          "eventId": "event-batch-begin-recovery",
+          "createdAt": "2026-08-23T00:00:06.000Z",
+          "safePayload": {"batch": 7}
+        }
+      }
+    },
+    {
+      "name": "batch-resolve-success",
+      "requestKey": "recovery-control:v1:e37680a148cbb0e18efadbfe210475090705516393b98ee5346f9bf7d1cd2b56",
+      "request": {
+        "transition": {
+          "entityKind": "batch-overlay",
+          "command": "resolve-success",
+          "actionKey": "statement:generate-all",
+          "expectedTaskKey": "monthly-balance:export",
+          "operationKey": "operation-1",
+          "batchId": 7,
+          "taskRunId": "task-run-1",
+          "expectedState": "recovering",
+          "recoveryAttemptId": "attempt-1",
+          "finalOutcome": "succeeded",
+          "sourceKind": "module-recovery",
+          "sourceRef": "source-1"
+        },
+        "event": {
+          "eventId": "event-batch-success",
+          "createdAt": "2026-08-23T00:00:07.000Z",
+          "safePayload": {"batchOutcome": "succeeded"}
+        }
+      }
+    },
+    {
+      "name": "batch-resolve-failure",
+      "requestKey": "recovery-control:v1:7f4e983b4e67c069147abc6382ac5c9ff8a436d73c88f5a871908a593d8db491",
+      "request": {
+        "transition": {
+          "entityKind": "batch-overlay",
+          "command": "resolve-failure",
+          "actionKey": "statement:generate-all",
+          "expectedTaskKey": "monthly-balance:export",
+          "operationKey": "operation-1",
+          "batchId": 7,
+          "taskRunId": "task-run-1",
+          "expectedState": "recovering",
+          "recoveryAttemptId": "attempt-1",
+          "finalOutcome": "failed",
+          "sourceKind": "module-recovery",
+          "sourceRef": "source-1"
+        },
+        "event": {
+          "eventId": "event-batch-failure",
+          "createdAt": "2026-08-23T00:00:08.000Z",
+          "safePayload": {"batchOutcome": "failed"}
+        }
+      }
+    },
+    {
+      "name": "intent-create-prepared",
+      "requestKey": "recovery-control:v1:9ae1ba1495197528c65412325f1197582d450d9155d14e4fdbce88b7e1d12783",
+      "request": {
+        "transition": {
+          "entityKind": "critical-intent",
+          "command": "create-prepared",
+          "input": {
+            "contractVersion": 1,
+            "intentId": "intent-1",
+            "actionKey": "statement:generate-all",
+            "operationKey": "operation-1",
+            "taskRunId": "task-run-1",
+            "jobId": "job-1",
+            "coordinationKind": "main-owned-settlement",
+            "conflictScopeKey": "scope-1",
+            "inspectorKey": "inspector.statement:generate-all",
+            "evidenceVersion": 1,
+            "evidenceHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "boundedEvidence": {"target": "post-image"}
+          }
+        },
+        "event": {
+          "eventId": "event-intent-create",
+          "createdAt": "2026-08-23T00:00:09.000Z",
+          "safePayload": {"intent": "prepared"}
+        }
+      }
+    },
+    {
+      "name": "intent-mark-acked",
+      "requestKey": "recovery-control:v1:d6ef64410eb286611e5464e52e3922df0b60cb4841ce867400c1db376467f714",
+      "request": {
+        "transition": {
+          "entityKind": "critical-intent",
+          "command": "mark-acked",
+          "intentId": "intent-1",
+          "expectedState": "prepared",
+          "patch": {"ack": "main"}
+        },
+        "event": {
+          "eventId": "event-intent-acked",
+          "createdAt": "2026-08-23T00:00:10.000Z",
+          "safePayload": {"intent": "acked"}
+        }
+      }
+    },
+    {
+      "name": "intent-mark-committed",
+      "requestKey": "recovery-control:v1:b81f9264bb93faa2c2dc8b3cd3d8b762bc7736d2bd0d02a1b52855e466ed5a6a",
+      "request": {
+        "transition": {
+          "entityKind": "critical-intent",
+          "command": "mark-committed",
+          "intentId": "intent-1",
+          "expectedState": "acked",
+          "receiptRef": {"receiptId": "receipt-1"}
+        },
+        "event": {
+          "eventId": "event-intent-committed",
+          "createdAt": "2026-08-23T00:00:11.000Z",
+          "safePayload": {"intent": "committed"}
+        }
+      }
+    },
+    {
+      "name": "intent-mark-recovered",
+      "requestKey": "recovery-control:v1:3ba6edc7604da492183c1e453993380f1854e84560c825a9b174dddc2300d5b5",
+      "request": {
+        "transition": {
+          "entityKind": "critical-intent",
+          "command": "mark-recovered",
+          "intentId": "intent-1",
+          "expectedState": "acked",
+          "inspection": {"outcome": "not-committed"}
+        },
+        "event": {
+          "eventId": "event-intent-recovered",
+          "createdAt": "2026-08-23T00:00:12.000Z",
+          "safePayload": {"intent": "recovered"}
+        }
+      }
+    },
+    {
+      "name": "intent-close",
+      "requestKey": "recovery-control:v1:1ac3460337a0fe11239ef8172f51e828febb651034426bbc0d874068383805c7",
+      "request": {
+        "transition": {
+          "entityKind": "critical-intent",
+          "command": "close",
+          "intentId": "intent-1",
+          "expectedState": "committed",
+          "result": {"outcome": "completed"}
+        },
+        "event": {
+          "eventId": "event-intent-closed",
+          "createdAt": "2026-08-23T00:00:13.000Z",
+          "safePayload": {"intent": "closed"}
+        }
+      }
+    },
+    {
+      "name": "hold-create-or-get",
+      "requestKey": "recovery-control:v1:26bd79d0e1174685836e29b94cc5099f8d16108161ff749c09481de0f86c20cc",
+      "request": {
+        "transition": {
+          "entityKind": "recovery-hold",
+          "command": "create-or-get",
+          "input": {
+            "contractVersion": 1,
+            "holdId": "hold-1",
+            "sourceKind": "module-recovery",
+            "sourceRef": "source-1",
+            "intentId": null,
+            "actionKey": "statement:generate-all",
+            "operationKey": "operation-1",
+            "taskRunId": "task-run-1",
+            "conflictScopeKey": "scope-1",
+            "reasonCode": "INSPECTOR_UNAVAILABLE",
+            "safeSummary": {"message": "bounded"},
+            "evidenceHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        },
+        "event": {
+          "eventId": "event-hold-created",
+          "createdAt": "2026-08-23T00:00:14.000Z",
+          "safePayload": {"hold": "active"}
+        }
+      }
+    },
+    {
+      "name": "hold-resolve",
+      "requestKey": "recovery-control:v1:913358af9bd6a58dec7c8df7ed65888a504908824228b155d4803a027c43c627",
+      "request": {
+        "transition": {
+          "entityKind": "recovery-hold",
+          "command": "resolve",
+          "holdId": "hold-1",
+          "expectedState": "active",
+          "resolution": "manual-override",
+          "evidence": {"reviewRef": "redacted-review-1"}
+        },
+        "event": {
+          "eventId": "event-hold-resolved",
+          "createdAt": "2026-08-23T00:00:15.000Z",
+          "safePayload": {"hold": "resolved"}
+        }
+      }
+    }
+  ],
+  "observationRequests": [
+    {
+      "name": "inspection-completed-all-lineage-present",
+      "requestKey": "recovery-control:v1:43f57f003ec61611da16c78064e7e648b35faeec913657ec3b532a114a0086f6",
+      "request": {
+        "event": {
+          "eventId": "event-observation-inspection-completed",
+          "eventType": "inspection-completed",
+          "observationAttemptId": 1,
+          "actionKey": "statement:generate-all",
+          "operationKey": "operation-1",
+          "taskRunId": "task-run-1",
+          "sourceKind": "module-recovery",
+          "sourceRef": "source-1",
+          "batchId": 7,
+          "intentId": "intent-1",
+          "holdId": "hold-1",
+          "recoveryAttemptId": "attempt-1",
+          "createdAt": "2026-08-23T00:00:16.000Z",
+          "safePayload": {"inspection": "committed"}
+        }
+      }
+    },
+    {
+      "name": "inspection-failed-transient-minimal-lineage",
+      "requestKey": "recovery-control:v1:dce995322efe13c2bbed66083f03df96f882017ac3b108bae191a094c179b146",
+      "request": {
+        "event": {
+          "eventId": "event-observation-inspection-failed",
+          "eventType": "inspection-failed-transient",
+          "observationAttemptId": 1,
+          "actionKey": "statement:generate-all",
+          "operationKey": "operation-1",
+          "taskRunId": "task-run-1",
+          "sourceKind": "module-recovery",
+          "sourceRef": "source-1",
+          "createdAt": "2026-08-23T00:00:17.000Z",
+          "safePayload": {"errorCode": "INSPECTOR_TIMEOUT"}
+        }
+      }
+    },
+    {
+      "name": "settlement-resumed",
+      "requestKey": "recovery-control:v1:4f26cb777620a0e2750eaca132a272893e4e532617013edc471be35de8c6096d",
+      "request": {
+        "event": {
+          "eventId": "event-observation-settlement-resumed",
+          "eventType": "settlement-resumed",
+          "observationAttemptId": 1,
+          "actionKey": "statement:generate-all",
+          "operationKey": "operation-1",
+          "taskRunId": "task-run-1",
+          "sourceKind": "module-recovery",
+          "sourceRef": "source-1",
+          "recoveryAttemptId": "attempt-1",
+          "createdAt": "2026-08-23T00:00:18.000Z",
+          "safePayload": {"settlement": "resumed"}
+        }
+      }
+    },
+    {
+      "name": "settlement-failed-transient",
+      "requestKey": "recovery-control:v1:3f983ed7fe46e66eb974faed0765cf16ae1e6fdc7c2065194a24fdf562610b7f",
+      "request": {
+        "event": {
+          "eventId": "event-observation-settlement-failed",
+          "eventType": "settlement-failed-transient",
+          "observationAttemptId": 1,
+          "actionKey": "statement:generate-all",
+          "operationKey": "operation-1",
+          "taskRunId": "task-run-1",
+          "sourceKind": "module-recovery",
+          "sourceRef": "source-1",
+          "holdId": "hold-1",
+          "createdAt": "2026-08-23T00:00:19.000Z",
+          "safePayload": {"errorCode": "PROVIDER_TIMEOUT"}
+        }
+      }
+    }
+  ],
+  "resultProjectionContract": {
+    "contractVersion": 1,
+    "fieldOrder": [
+      "contractVersion",
+      "requestKey",
+      "writer",
+      "eventId",
+      "requestHash",
+      "actionKey",
+      "operationKey",
+      "taskRunId",
+      "sourceKind",
+      "sourceRef",
+      "batchId",
+      "intentId",
+      "holdId",
+      "recoveryAttemptId",
+      "observationAttemptId",
+      "eventType",
+      "previousState",
+      "nextState",
+      "safePayload",
+      "createdAt"
+    ],
+    "commonFieldSources": {
+      "contractVersion": "constant:1",
+      "requestKey": "derived:JCS([namespace,...identityValues])",
+      "writer": "branch.writer",
+      "eventId": "/request/event/eventId",
+      "requestHash": "derived:sha256(JCS(fullExactEnvelope))",
+      "safePayload": "/request/event/safePayload",
+      "createdAt": "/request/event/createdAt"
+    },
+    "transitionFieldSources": {
+      "actionKey": "request-transition-owner-or-cas-owner",
+      "operationKey": "request-transition-owner-or-cas-owner",
+      "taskRunId": "request-transition-owner-or-cas-owner",
+      "sourceKind": "request-transition-owner-or-cas-owner",
+      "sourceRef": "request-transition-owner-or-cas-owner",
+      "batchId": "request-transition-owner-or-cas-owner-or-null",
+      "intentId": "request-transition-owner-or-cas-owner-or-null",
+      "holdId": "request-transition-owner-or-cas-owner-or-null",
+      "recoveryAttemptId": "request-transition-owner-or-cas-owner-or-null",
+      "observationAttemptId": "constant:null",
+      "eventType": "TRANSITION_EVENT_MAP_V1[entityKind.command]",
+      "previousState": "cas.previousState",
+      "nextState": "cas.nextState"
+    },
+    "observationFieldSources": {
+      "actionKey": "/request/event/actionKey",
+      "operationKey": "/request/event/operationKey",
+      "taskRunId": "/request/event/taskRunId",
+      "sourceKind": "/request/event/sourceKind",
+      "sourceRef": "/request/event/sourceRef",
+      "batchId": "/request/event/batchId-or-null",
+      "intentId": "/request/event/intentId-or-null",
+      "holdId": "/request/event/holdId-or-null",
+      "recoveryAttemptId": "/request/event/recoveryAttemptId-or-null",
+      "observationAttemptId": "/request/event/observationAttemptId",
+      "eventType": "/request/event/eventType",
+      "previousState": "constant:null",
+      "nextState": "constant:null"
+    },
+    "transitionBranchEventTypes": {
+      "task-mark-interrupted": "interrupted-recorded",
+      "task-begin-recovery": "recovery-started",
+      "task-complete-recovery-success": "recovery-succeeded",
+      "task-complete-recovery-failure": "recovery-failed",
+      "task-interrupt-recovery": "recovery-interrupted",
+      "batch-mark-interrupted": "batch-overlay-transitioned",
+      "batch-begin-recovery": "batch-overlay-transitioned",
+      "batch-resolve-success": "batch-overlay-transitioned",
+      "batch-resolve-failure": "batch-overlay-transitioned",
+      "intent-create-prepared": "critical-intent-transitioned",
+      "intent-mark-acked": "critical-intent-transitioned",
+      "intent-mark-committed": "critical-intent-transitioned",
+      "intent-mark-recovered": "critical-intent-transitioned",
+      "intent-close": "critical-intent-transitioned",
+      "hold-create-or-get": "hold-created",
+      "hold-resolve": "hold-resolved"
+    }
+  },
+  "resultProjectionKnownAnswerContract": {
+    "contractVersion": 1,
+    "contractAuthority": {
+      "path": "changes/background-execution/recovery-contract-authority.v1.json",
+      "contractVersion": 1,
+      "revision": 1,
+      "genesis": true,
+      "approvalStatus": "PENDING_HUMAN_REVIEW",
+      "gitGenesisRequiresVerifiedPreviousAbsence": true
+    },
+    "canonicalization": "RFC8785-JCS",
+    "preimage": "JCS(resultProjectionKnownAnswers)",
+    "knownAnswerCount": 20,
+    "projectionFieldCount": 20,
+    "sha256": "1ced39a559f93c787da4d520e37dc0a4513c27dd9b60a4c229509e741b5ec039"
+  },
+  "resultProjectionKnownAnswers": [
+    {
+      "requestName": "task-mark-interrupted",
+      "writer": "transitionWithRecoveryEvent",
+      "projection": {
+        "contractVersion": 1,
+        "requestKey": "recovery-control:v1:0dd4ee379d849fb632640e8fe5866e180f2a9785978077cff3d6a4d23c8546a9",
+        "writer": "transitionWithRecoveryEvent",
+        "eventId": "event-task-mark-interrupted",
+        "requestHash": "dfd70ba78f570220c3d11af71620ef062b259954fddc1e8d4111d0565fb3ffed",
+        "actionKey": "statement:generate-all",
+        "operationKey": "operation-1",
+        "taskRunId": "task-run-1",
+        "sourceKind": "module-recovery",
+        "sourceRef": "source-1",
+        "batchId": null,
+        "intentId": null,
+        "holdId": null,
+        "recoveryAttemptId": null,
+        "observationAttemptId": null,
+        "eventType": "interrupted-recorded",
+        "previousState": "running",
+        "nextState": "interrupted",
+        "safePayload": {
+          "reason": "transport-lost"
+        },
+        "createdAt": "2026-08-23T00:00:00.000Z"
+      }
+    },
+    {
+      "requestName": "task-begin-recovery",
+      "writer": "transitionWithRecoveryEvent",
+      "projection": {
+        "contractVersion": 1,
+        "requestKey": "recovery-control:v1:9378ae3b18032d7bedcd3038c136fe16ada8d37f19d43eb512c18714ab50678f",
+        "writer": "transitionWithRecoveryEvent",
+        "eventId": "event-task-begin-recovery",
+        "requestHash": "38ffe37fbf0096f439816b2ae038060d0131f32de11c88a0d849c5ff0728dab5",
+        "actionKey": "statement:generate-all",
+        "operationKey": "operation-1",
+        "taskRunId": "task-run-1",
+        "sourceKind": "module-recovery",
+        "sourceRef": "source-1",
+        "batchId": null,
+        "intentId": null,
+        "holdId": null,
+        "recoveryAttemptId": "attempt-1",
+        "observationAttemptId": null,
+        "eventType": "recovery-started",
+        "previousState": "interrupted",
+        "nextState": "running",
+        "safePayload": {
+          "attempt": 1
+        },
+        "createdAt": "2026-08-23T00:00:01.000Z"
+      }
+    },
+    {
+      "requestName": "task-complete-recovery-success",
+      "writer": "transitionWithRecoveryEvent",
+      "projection": {
+        "contractVersion": 1,
+        "requestKey": "recovery-control:v1:4897f255a3f108e173373120e777de1d320e5475563db4fb73e273e1efc67bf5",
+        "writer": "transitionWithRecoveryEvent",
+        "eventId": "event-task-success",
+        "requestHash": "fec6a92daaaf33c2532f0bb0d3fbcbfc55d4513bfcfa51b5436f50fc857dc7f3",
+        "actionKey": "statement:generate-all",
+        "operationKey": "operation-1",
+        "taskRunId": "task-run-1",
+        "sourceKind": "module-recovery",
+        "sourceRef": "source-1",
+        "batchId": null,
+        "intentId": null,
+        "holdId": null,
+        "recoveryAttemptId": "attempt-1",
+        "observationAttemptId": null,
+        "eventType": "recovery-succeeded",
+        "previousState": "running",
+        "nextState": "succeeded",
+        "safePayload": {
+          "outcome": "succeeded"
+        },
+        "createdAt": "2026-08-23T00:00:02.000Z"
+      }
+    },
+    {
+      "requestName": "task-complete-recovery-failure",
+      "writer": "transitionWithRecoveryEvent",
+      "projection": {
+        "contractVersion": 1,
+        "requestKey": "recovery-control:v1:649778169efa1f36f759744f41edfa88eac8aee98d1a50082eeb84c623b18478",
+        "writer": "transitionWithRecoveryEvent",
+        "eventId": "event-task-failure",
+        "requestHash": "a0b4460759c23e83e424bb9a01b5963d68dd5841142cd7c1af55d1fba2e41b8b",
+        "actionKey": "statement:generate-all",
+        "operationKey": "operation-1",
+        "taskRunId": "task-run-1",
+        "sourceKind": "module-recovery",
+        "sourceRef": "source-1",
+        "batchId": null,
+        "intentId": null,
+        "holdId": null,
+        "recoveryAttemptId": "attempt-1",
+        "observationAttemptId": null,
+        "eventType": "recovery-failed",
+        "previousState": "running",
+        "nextState": "failed",
+        "safePayload": {
+          "outcome": "failed"
+        },
+        "createdAt": "2026-08-23T00:00:03.000Z"
+      }
+    },
+    {
+      "requestName": "task-interrupt-recovery",
+      "writer": "transitionWithRecoveryEvent",
+      "projection": {
+        "contractVersion": 1,
+        "requestKey": "recovery-control:v1:fd5fe658d76d14d44cd42b3cf1f5501c38304e51828b6c3755b4a671d6290924",
+        "writer": "transitionWithRecoveryEvent",
+        "eventId": "event-task-interrupted",
+        "requestHash": "03eecbb1559e419c51e66881b016cd52d0a3ff1526ea9f666b17a75ef474353a",
+        "actionKey": "statement:generate-all",
+        "operationKey": "operation-1",
+        "taskRunId": "task-run-1",
+        "sourceKind": "module-recovery",
+        "sourceRef": "source-1",
+        "batchId": null,
+        "intentId": null,
+        "holdId": null,
+        "recoveryAttemptId": "attempt-1",
+        "observationAttemptId": null,
+        "eventType": "recovery-interrupted",
+        "previousState": "running",
+        "nextState": "interrupted",
+        "safePayload": {
+          "outcome": "interrupted"
+        },
+        "createdAt": "2026-08-23T00:00:04.000Z"
+      }
+    },
+    {
+      "requestName": "batch-mark-interrupted",
+      "writer": "transitionWithRecoveryEvent",
+      "projection": {
+        "contractVersion": 1,
+        "requestKey": "recovery-control:v1:b6b8cd88448314afe19450756aebd721686f4e2a60c1fad5e4c31cdf52528e22",
+        "writer": "transitionWithRecoveryEvent",
+        "eventId": "event-batch-mark-interrupted",
+        "requestHash": "b8cf59629139652c93cdcae4a434bc7f653febe241cf7f015a87b20e02ef1f68",
+        "actionKey": "statement:generate-all",
+        "operationKey": "operation-1",
+        "taskRunId": "task-run-1",
+        "sourceKind": "module-recovery",
+        "sourceRef": "source-1",
+        "batchId": 7,
+        "intentId": null,
+        "holdId": null,
+        "recoveryAttemptId": null,
+        "observationAttemptId": null,
+        "eventType": "batch-overlay-transitioned",
+        "previousState": "running",
+        "nextState": "interrupted",
+        "safePayload": {
+          "batch": 7
+        },
+        "createdAt": "2026-08-23T00:00:05.000Z"
+      }
+    },
+    {
+      "requestName": "batch-begin-recovery",
+      "writer": "transitionWithRecoveryEvent",
+      "projection": {
+        "contractVersion": 1,
+        "requestKey": "recovery-control:v1:6cfabed5d16629673e98e008d4d6a4b52cfa29f7104369f9cd7e697679d028d6",
+        "writer": "transitionWithRecoveryEvent",
+        "eventId": "event-batch-begin-recovery",
+        "requestHash": "3be76137d5849b0a0767dced7c02a678aaa5aa7333cb41809a53f0f080c69ad2",
+        "actionKey": "statement:generate-all",
+        "operationKey": "operation-1",
+        "taskRunId": "task-run-1",
+        "sourceKind": "module-recovery",
+        "sourceRef": "source-1",
+        "batchId": 7,
+        "intentId": null,
+        "holdId": null,
+        "recoveryAttemptId": "attempt-1",
+        "observationAttemptId": null,
+        "eventType": "batch-overlay-transitioned",
+        "previousState": "interrupted",
+        "nextState": "recovering",
+        "safePayload": {
+          "batch": 7
+        },
+        "createdAt": "2026-08-23T00:00:06.000Z"
+      }
+    },
+    {
+      "requestName": "batch-resolve-success",
+      "writer": "transitionWithRecoveryEvent",
+      "projection": {
+        "contractVersion": 1,
+        "requestKey": "recovery-control:v1:e37680a148cbb0e18efadbfe210475090705516393b98ee5346f9bf7d1cd2b56",
+        "writer": "transitionWithRecoveryEvent",
+        "eventId": "event-batch-success",
+        "requestHash": "bb57eea9e87965ab86673bbbb74382d35428f5c2a10a0cdecc9ae729aa01ef59",
+        "actionKey": "statement:generate-all",
+        "operationKey": "operation-1",
+        "taskRunId": "task-run-1",
+        "sourceKind": "module-recovery",
+        "sourceRef": "source-1",
+        "batchId": 7,
+        "intentId": null,
+        "holdId": null,
+        "recoveryAttemptId": "attempt-1",
+        "observationAttemptId": null,
+        "eventType": "batch-overlay-transitioned",
+        "previousState": "recovering",
+        "nextState": "resolved",
+        "safePayload": {
+          "batchOutcome": "succeeded"
+        },
+        "createdAt": "2026-08-23T00:00:07.000Z"
+      }
+    },
+    {
+      "requestName": "batch-resolve-failure",
+      "writer": "transitionWithRecoveryEvent",
+      "projection": {
+        "contractVersion": 1,
+        "requestKey": "recovery-control:v1:7f4e983b4e67c069147abc6382ac5c9ff8a436d73c88f5a871908a593d8db491",
+        "writer": "transitionWithRecoveryEvent",
+        "eventId": "event-batch-failure",
+        "requestHash": "12d288f2dae4274d7e6b74573e734555ab4d483b545ddb1cecfbd227f9b19544",
+        "actionKey": "statement:generate-all",
+        "operationKey": "operation-1",
+        "taskRunId": "task-run-1",
+        "sourceKind": "module-recovery",
+        "sourceRef": "source-1",
+        "batchId": 7,
+        "intentId": null,
+        "holdId": null,
+        "recoveryAttemptId": "attempt-1",
+        "observationAttemptId": null,
+        "eventType": "batch-overlay-transitioned",
+        "previousState": "recovering",
+        "nextState": "resolved",
+        "safePayload": {
+          "batchOutcome": "failed"
+        },
+        "createdAt": "2026-08-23T00:00:08.000Z"
+      }
+    },
+    {
+      "requestName": "intent-create-prepared",
+      "writer": "transitionWithRecoveryEvent",
+      "projection": {
+        "contractVersion": 1,
+        "requestKey": "recovery-control:v1:9ae1ba1495197528c65412325f1197582d450d9155d14e4fdbce88b7e1d12783",
+        "writer": "transitionWithRecoveryEvent",
+        "eventId": "event-intent-create",
+        "requestHash": "335d9bf8201f81fe0fae0a526bb47dac5f190d954bddb9413dd466fb49ad4221",
+        "actionKey": "statement:generate-all",
+        "operationKey": "operation-1",
+        "taskRunId": "task-run-1",
+        "sourceKind": "critical-intent",
+        "sourceRef": "critical-intent:intent-1",
+        "batchId": null,
+        "intentId": "intent-1",
+        "holdId": null,
+        "recoveryAttemptId": null,
+        "observationAttemptId": null,
+        "eventType": "critical-intent-transitioned",
+        "previousState": null,
+        "nextState": "prepared",
+        "safePayload": {
+          "intent": "prepared"
+        },
+        "createdAt": "2026-08-23T00:00:09.000Z"
+      }
+    },
+    {
+      "requestName": "intent-mark-acked",
+      "writer": "transitionWithRecoveryEvent",
+      "projection": {
+        "contractVersion": 1,
+        "requestKey": "recovery-control:v1:d6ef64410eb286611e5464e52e3922df0b60cb4841ce867400c1db376467f714",
+        "writer": "transitionWithRecoveryEvent",
+        "eventId": "event-intent-acked",
+        "requestHash": "dfe0d0b294050f38a5a37a858b048a7f3eee806084eb73aa19ce77d71fc81dce",
+        "actionKey": "statement:generate-all",
+        "operationKey": "operation-1",
+        "taskRunId": "task-run-1",
+        "sourceKind": "critical-intent",
+        "sourceRef": "critical-intent:intent-1",
+        "batchId": null,
+        "intentId": "intent-1",
+        "holdId": null,
+        "recoveryAttemptId": null,
+        "observationAttemptId": null,
+        "eventType": "critical-intent-transitioned",
+        "previousState": "prepared",
+        "nextState": "acked",
+        "safePayload": {
+          "intent": "acked"
+        },
+        "createdAt": "2026-08-23T00:00:10.000Z"
+      }
+    },
+    {
+      "requestName": "intent-mark-committed",
+      "writer": "transitionWithRecoveryEvent",
+      "projection": {
+        "contractVersion": 1,
+        "requestKey": "recovery-control:v1:b81f9264bb93faa2c2dc8b3cd3d8b762bc7736d2bd0d02a1b52855e466ed5a6a",
+        "writer": "transitionWithRecoveryEvent",
+        "eventId": "event-intent-committed",
+        "requestHash": "9657e591c86fafa71d35fef76e13e0dcc5e61e83ce812eb2244f64578246205a",
+        "actionKey": "statement:generate-all",
+        "operationKey": "operation-1",
+        "taskRunId": "task-run-1",
+        "sourceKind": "critical-intent",
+        "sourceRef": "critical-intent:intent-1",
+        "batchId": null,
+        "intentId": "intent-1",
+        "holdId": null,
+        "recoveryAttemptId": null,
+        "observationAttemptId": null,
+        "eventType": "critical-intent-transitioned",
+        "previousState": "acked",
+        "nextState": "committed",
+        "safePayload": {
+          "intent": "committed"
+        },
+        "createdAt": "2026-08-23T00:00:11.000Z"
+      }
+    },
+    {
+      "requestName": "intent-mark-recovered",
+      "writer": "transitionWithRecoveryEvent",
+      "projection": {
+        "contractVersion": 1,
+        "requestKey": "recovery-control:v1:3ba6edc7604da492183c1e453993380f1854e84560c825a9b174dddc2300d5b5",
+        "writer": "transitionWithRecoveryEvent",
+        "eventId": "event-intent-recovered",
+        "requestHash": "61c2be5104235f76d76bb50e481ddcf526c37c5ecbd47439e1990ed8e5ff881b",
+        "actionKey": "statement:generate-all",
+        "operationKey": "operation-1",
+        "taskRunId": "task-run-1",
+        "sourceKind": "critical-intent",
+        "sourceRef": "critical-intent:intent-1",
+        "batchId": null,
+        "intentId": "intent-1",
+        "holdId": null,
+        "recoveryAttemptId": null,
+        "observationAttemptId": null,
+        "eventType": "critical-intent-transitioned",
+        "previousState": "acked",
+        "nextState": "recovered",
+        "safePayload": {
+          "intent": "recovered"
+        },
+        "createdAt": "2026-08-23T00:00:12.000Z"
+      }
+    },
+    {
+      "requestName": "intent-close",
+      "writer": "transitionWithRecoveryEvent",
+      "projection": {
+        "contractVersion": 1,
+        "requestKey": "recovery-control:v1:1ac3460337a0fe11239ef8172f51e828febb651034426bbc0d874068383805c7",
+        "writer": "transitionWithRecoveryEvent",
+        "eventId": "event-intent-closed",
+        "requestHash": "a2c9e324606ff7a901b26966d426014edc502192244d427d38f9cdfc1ff8577d",
+        "actionKey": "statement:generate-all",
+        "operationKey": "operation-1",
+        "taskRunId": "task-run-1",
+        "sourceKind": "critical-intent",
+        "sourceRef": "critical-intent:intent-1",
+        "batchId": null,
+        "intentId": "intent-1",
+        "holdId": null,
+        "recoveryAttemptId": null,
+        "observationAttemptId": null,
+        "eventType": "critical-intent-transitioned",
+        "previousState": "committed",
+        "nextState": "closed",
+        "safePayload": {
+          "intent": "closed"
+        },
+        "createdAt": "2026-08-23T00:00:13.000Z"
+      }
+    },
+    {
+      "requestName": "hold-create-or-get",
+      "writer": "transitionWithRecoveryEvent",
+      "projection": {
+        "contractVersion": 1,
+        "requestKey": "recovery-control:v1:26bd79d0e1174685836e29b94cc5099f8d16108161ff749c09481de0f86c20cc",
+        "writer": "transitionWithRecoveryEvent",
+        "eventId": "event-hold-created",
+        "requestHash": "96fad816d8c740c3b5b6521563aee4d9f82b06a8002e5ac2285ca63438038c94",
+        "actionKey": "statement:generate-all",
+        "operationKey": "operation-1",
+        "taskRunId": "task-run-1",
+        "sourceKind": "module-recovery",
+        "sourceRef": "source-1",
+        "batchId": null,
+        "intentId": null,
+        "holdId": "hold-1",
+        "recoveryAttemptId": null,
+        "observationAttemptId": null,
+        "eventType": "hold-created",
+        "previousState": null,
+        "nextState": "active",
+        "safePayload": {
+          "hold": "active"
+        },
+        "createdAt": "2026-08-23T00:00:14.000Z"
+      }
+    },
+    {
+      "requestName": "hold-resolve",
+      "writer": "transitionWithRecoveryEvent",
+      "projection": {
+        "contractVersion": 1,
+        "requestKey": "recovery-control:v1:913358af9bd6a58dec7c8df7ed65888a504908824228b155d4803a027c43c627",
+        "writer": "transitionWithRecoveryEvent",
+        "eventId": "event-hold-resolved",
+        "requestHash": "9477dee5e44d02e03608319bae04af1e7072933fbdc8908c311df1449976c1b2",
+        "actionKey": "statement:generate-all",
+        "operationKey": "operation-1",
+        "taskRunId": "task-run-1",
+        "sourceKind": "module-recovery",
+        "sourceRef": "source-1",
+        "batchId": null,
+        "intentId": null,
+        "holdId": "hold-1",
+        "recoveryAttemptId": null,
+        "observationAttemptId": null,
+        "eventType": "hold-resolved",
+        "previousState": "active",
+        "nextState": "resolved",
+        "safePayload": {
+          "hold": "resolved"
+        },
+        "createdAt": "2026-08-23T00:00:15.000Z"
+      }
+    },
+    {
+      "requestName": "inspection-completed-all-lineage-present",
+      "writer": "appendObservationEvent",
+      "projection": {
+        "contractVersion": 1,
+        "requestKey": "recovery-control:v1:43f57f003ec61611da16c78064e7e648b35faeec913657ec3b532a114a0086f6",
+        "writer": "appendObservationEvent",
+        "eventId": "event-observation-inspection-completed",
+        "requestHash": "33c0a39d48bcde1d8c51ee89422fba929f52df221f7d0b36f03e32ece5f0af9f",
+        "actionKey": "statement:generate-all",
+        "operationKey": "operation-1",
+        "taskRunId": "task-run-1",
+        "sourceKind": "module-recovery",
+        "sourceRef": "source-1",
+        "batchId": 7,
+        "intentId": "intent-1",
+        "holdId": "hold-1",
+        "recoveryAttemptId": "attempt-1",
+        "observationAttemptId": 1,
+        "eventType": "inspection-completed",
+        "previousState": null,
+        "nextState": null,
+        "safePayload": {
+          "inspection": "committed"
+        },
+        "createdAt": "2026-08-23T00:00:16.000Z"
+      }
+    },
+    {
+      "requestName": "inspection-failed-transient-minimal-lineage",
+      "writer": "appendObservationEvent",
+      "projection": {
+        "contractVersion": 1,
+        "requestKey": "recovery-control:v1:dce995322efe13c2bbed66083f03df96f882017ac3b108bae191a094c179b146",
+        "writer": "appendObservationEvent",
+        "eventId": "event-observation-inspection-failed",
+        "requestHash": "e133da4fd7eb01cc80d312be85feb7eea37eeec36fd70562a61298a48e48119e",
+        "actionKey": "statement:generate-all",
+        "operationKey": "operation-1",
+        "taskRunId": "task-run-1",
+        "sourceKind": "module-recovery",
+        "sourceRef": "source-1",
+        "batchId": null,
+        "intentId": null,
+        "holdId": null,
+        "recoveryAttemptId": null,
+        "observationAttemptId": 1,
+        "eventType": "inspection-failed-transient",
+        "previousState": null,
+        "nextState": null,
+        "safePayload": {
+          "errorCode": "INSPECTOR_TIMEOUT"
+        },
+        "createdAt": "2026-08-23T00:00:17.000Z"
+      }
+    },
+    {
+      "requestName": "settlement-resumed",
+      "writer": "appendObservationEvent",
+      "projection": {
+        "contractVersion": 1,
+        "requestKey": "recovery-control:v1:4f26cb777620a0e2750eaca132a272893e4e532617013edc471be35de8c6096d",
+        "writer": "appendObservationEvent",
+        "eventId": "event-observation-settlement-resumed",
+        "requestHash": "d9baf622b713664259dcb1d9f18bd9bebf1cbc58ba104a9311e6748f390acad8",
+        "actionKey": "statement:generate-all",
+        "operationKey": "operation-1",
+        "taskRunId": "task-run-1",
+        "sourceKind": "module-recovery",
+        "sourceRef": "source-1",
+        "batchId": null,
+        "intentId": null,
+        "holdId": null,
+        "recoveryAttemptId": "attempt-1",
+        "observationAttemptId": 1,
+        "eventType": "settlement-resumed",
+        "previousState": null,
+        "nextState": null,
+        "safePayload": {
+          "settlement": "resumed"
+        },
+        "createdAt": "2026-08-23T00:00:18.000Z"
+      }
+    },
+    {
+      "requestName": "settlement-failed-transient",
+      "writer": "appendObservationEvent",
+      "projection": {
+        "contractVersion": 1,
+        "requestKey": "recovery-control:v1:3f983ed7fe46e66eb974faed0765cf16ae1e6fdc7c2065194a24fdf562610b7f",
+        "writer": "appendObservationEvent",
+        "eventId": "event-observation-settlement-failed",
+        "requestHash": "3f568494332630fd9ee71de875f47ce3136fe1b0bd5c967ad364f268aa275fed",
+        "actionKey": "statement:generate-all",
+        "operationKey": "operation-1",
+        "taskRunId": "task-run-1",
+        "sourceKind": "module-recovery",
+        "sourceRef": "source-1",
+        "batchId": null,
+        "intentId": null,
+        "holdId": "hold-1",
+        "recoveryAttemptId": null,
+        "observationAttemptId": 1,
+        "eventType": "settlement-failed-transient",
+        "previousState": null,
+        "nextState": null,
+        "safePayload": {
+          "errorCode": "PROVIDER_TIMEOUT"
+        },
+        "createdAt": "2026-08-23T00:00:19.000Z"
+      }
+    }
+  ],
+  "resultProjectionCasByRequest": {
+    "task-mark-interrupted": {"casChanges":1,"expectedTaskKey":"monthly-balance:export","actionKey":"statement:generate-all","operationKey":"operation-1","taskRunId":"task-run-1","sourceKind":"module-recovery","sourceRef":"source-1","batchId":null,"intentId":null,"holdId":null,"recoveryAttemptId":null,"previousState":"running","nextState":"interrupted"},
+    "task-begin-recovery": {"casChanges":1,"expectedTaskKey":"monthly-balance:export","actionKey":"statement:generate-all","operationKey":"operation-1","taskRunId":"task-run-1","sourceKind":"module-recovery","sourceRef":"source-1","batchId":null,"intentId":null,"holdId":null,"recoveryAttemptId":"attempt-1","previousState":"interrupted","nextState":"running"},
+    "task-complete-recovery-success": {"casChanges":1,"expectedTaskKey":"monthly-balance:export","actionKey":"statement:generate-all","operationKey":"operation-1","taskRunId":"task-run-1","sourceKind":"module-recovery","sourceRef":"source-1","batchId":null,"intentId":null,"holdId":null,"recoveryAttemptId":"attempt-1","previousState":"running","nextState":"succeeded"},
+    "task-complete-recovery-failure": {"casChanges":1,"expectedTaskKey":"monthly-balance:export","actionKey":"statement:generate-all","operationKey":"operation-1","taskRunId":"task-run-1","sourceKind":"module-recovery","sourceRef":"source-1","batchId":null,"intentId":null,"holdId":null,"recoveryAttemptId":"attempt-1","previousState":"running","nextState":"failed"},
+    "task-interrupt-recovery": {"casChanges":1,"expectedTaskKey":"monthly-balance:export","actionKey":"statement:generate-all","operationKey":"operation-1","taskRunId":"task-run-1","sourceKind":"module-recovery","sourceRef":"source-1","batchId":null,"intentId":null,"holdId":null,"recoveryAttemptId":"attempt-1","previousState":"running","nextState":"interrupted"},
+    "batch-mark-interrupted": {"casChanges":1,"expectedTaskKey":"monthly-balance:export","actionKey":"statement:generate-all","operationKey":"operation-1","taskRunId":"task-run-1","sourceKind":"module-recovery","sourceRef":"source-1","batchId":7,"intentId":null,"holdId":null,"recoveryAttemptId":null,"previousState":"running","nextState":"interrupted"},
+    "batch-begin-recovery": {"casChanges":1,"expectedTaskKey":"monthly-balance:export","actionKey":"statement:generate-all","operationKey":"operation-1","taskRunId":"task-run-1","sourceKind":"module-recovery","sourceRef":"source-1","batchId":7,"intentId":null,"holdId":null,"recoveryAttemptId":"attempt-1","previousState":"interrupted","nextState":"recovering"},
+    "batch-resolve-success": {"casChanges":1,"expectedTaskKey":"monthly-balance:export","actionKey":"statement:generate-all","operationKey":"operation-1","taskRunId":"task-run-1","sourceKind":"module-recovery","sourceRef":"source-1","batchId":7,"intentId":null,"holdId":null,"recoveryAttemptId":"attempt-1","previousState":"recovering","nextState":"resolved"},
+    "batch-resolve-failure": {"casChanges":1,"expectedTaskKey":"monthly-balance:export","actionKey":"statement:generate-all","operationKey":"operation-1","taskRunId":"task-run-1","sourceKind":"module-recovery","sourceRef":"source-1","batchId":7,"intentId":null,"holdId":null,"recoveryAttemptId":"attempt-1","previousState":"recovering","nextState":"resolved"},
+    "intent-create-prepared": {"casChanges":1,"expectedTaskKey":null,"actionKey":"statement:generate-all","operationKey":"operation-1","taskRunId":"task-run-1","sourceKind":"critical-intent","sourceRef":"critical-intent:intent-1","batchId":null,"intentId":"intent-1","holdId":null,"recoveryAttemptId":null,"previousState":null,"nextState":"prepared"},
+    "intent-mark-acked": {"casChanges":1,"expectedTaskKey":null,"actionKey":"statement:generate-all","operationKey":"operation-1","taskRunId":"task-run-1","sourceKind":"critical-intent","sourceRef":"critical-intent:intent-1","batchId":null,"intentId":"intent-1","holdId":null,"recoveryAttemptId":null,"previousState":"prepared","nextState":"acked"},
+    "intent-mark-committed": {"casChanges":1,"expectedTaskKey":null,"actionKey":"statement:generate-all","operationKey":"operation-1","taskRunId":"task-run-1","sourceKind":"critical-intent","sourceRef":"critical-intent:intent-1","batchId":null,"intentId":"intent-1","holdId":null,"recoveryAttemptId":null,"previousState":"acked","nextState":"committed"},
+    "intent-mark-recovered": {"casChanges":1,"expectedTaskKey":null,"actionKey":"statement:generate-all","operationKey":"operation-1","taskRunId":"task-run-1","sourceKind":"critical-intent","sourceRef":"critical-intent:intent-1","batchId":null,"intentId":"intent-1","holdId":null,"recoveryAttemptId":null,"previousState":"acked","nextState":"recovered"},
+    "intent-close": {"casChanges":1,"expectedTaskKey":null,"actionKey":"statement:generate-all","operationKey":"operation-1","taskRunId":"task-run-1","sourceKind":"critical-intent","sourceRef":"critical-intent:intent-1","batchId":null,"intentId":"intent-1","holdId":null,"recoveryAttemptId":null,"previousState":"committed","nextState":"closed"},
+    "hold-create-or-get": {"casChanges":1,"expectedTaskKey":null,"actionKey":"statement:generate-all","operationKey":"operation-1","taskRunId":"task-run-1","sourceKind":"module-recovery","sourceRef":"source-1","batchId":null,"intentId":null,"holdId":"hold-1","recoveryAttemptId":null,"previousState":null,"nextState":"active"},
+    "hold-resolve": {"casChanges":1,"expectedTaskKey":null,"actionKey":"statement:generate-all","operationKey":"operation-1","taskRunId":"task-run-1","sourceKind":"module-recovery","sourceRef":"source-1","batchId":null,"intentId":null,"holdId":"hold-1","recoveryAttemptId":null,"previousState":"active","nextState":"resolved"}
+  },
+  "results": [
+    {
+      "name": "transition-event-projection",
+      "definition": "RecoveryControlTransitionResultV1",
+      "value": {
+        "contractVersion": 1,
+        "requestKey": "recovery-control:v1:e37680a148cbb0e18efadbfe210475090705516393b98ee5346f9bf7d1cd2b56",
+        "writer": "transitionWithRecoveryEvent",
+        "eventId": "event-batch-success",
+        "requestHash": "bb57eea9e87965ab86673bbbb74382d35428f5c2a10a0cdecc9ae729aa01ef59",
+        "actionKey": "statement:generate-all",
+        "operationKey": "operation-1",
+        "taskRunId": "task-run-1",
+        "sourceKind": "module-recovery",
+        "sourceRef": "source-1",
+        "batchId": 7,
+        "intentId": null,
+        "holdId": null,
+        "recoveryAttemptId": "attempt-1",
+        "observationAttemptId": null,
+        "eventType": "batch-overlay-transitioned",
+        "previousState": "recovering",
+        "nextState": "resolved",
+        "safePayload": {"batchOutcome": "succeeded"},
+        "createdAt": "2026-08-23T00:00:07.000Z"
+      }
+    },
+    {
+      "name": "observation-event-projection",
+      "definition": "RecoveryObservationEventResultV1",
+      "value": {
+        "contractVersion": 1,
+        "requestKey": "recovery-control:v1:43f57f003ec61611da16c78064e7e648b35faeec913657ec3b532a114a0086f6",
+        "writer": "appendObservationEvent",
+        "eventId": "event-observation-inspection-completed",
+        "requestHash": "33c0a39d48bcde1d8c51ee89422fba929f52df221f7d0b36f03e32ece5f0af9f",
+        "actionKey": "statement:generate-all",
+        "operationKey": "operation-1",
+        "taskRunId": "task-run-1",
+        "sourceKind": "module-recovery",
+        "sourceRef": "source-1",
+        "batchId": 7,
+        "intentId": "intent-1",
+        "holdId": "hold-1",
+        "recoveryAttemptId": "attempt-1",
+        "observationAttemptId": 1,
+        "eventType": "inspection-completed",
+        "previousState": null,
+        "nextState": null,
+        "safePayload": {"inspection": "committed"},
+        "createdAt": "2026-08-23T00:00:16.000Z"
+      }
+    }
+  ],
+  "ownerLifecycleFixtures": [
+    {
+      "name": "batch-begin-recovery-prepared-to-committed",
+      "requestName": "batch-begin-recovery",
+      "eventOwnerEqualityFields": [
+        "requestKey",
+        "writer",
+        "eventId",
+        "requestHash",
+        "createdAt"
+      ],
+      "preparedOwner": {
+        "requestKey": "recovery-control:v1:6cfabed5d16629673e98e008d4d6a4b52cfa29f7104369f9cd7e697679d028d6",
+        "writer": "transitionWithRecoveryEvent",
+        "eventId": "event-batch-begin-recovery",
+        "requestHash": "3be76137d5849b0a0767dced7c02a678aaa5aa7333cb41809a53f0f080c69ad2",
+        "requestJcs": "{\"contractVersion\":1,\"input\":{\"event\":{\"createdAt\":\"2026-08-23T00:00:06.000Z\",\"eventId\":\"event-batch-begin-recovery\",\"safePayload\":{\"batch\":7}},\"transition\":{\"actionKey\":\"statement:generate-all\",\"batchId\":7,\"command\":\"begin-recovery\",\"entityKind\":\"batch-overlay\",\"expectedState\":\"interrupted\",\"expectedTaskKey\":\"monthly-balance:export\",\"operationKey\":\"operation-1\",\"recoveryAttemptId\":\"attempt-1\",\"sourceKind\":\"module-recovery\",\"sourceRef\":\"source-1\",\"taskRunId\":\"task-run-1\"}},\"writer\":\"transitionWithRecoveryEvent\"}",
+        "status": "prepared",
+        "createdAt": "2026-08-23T00:00:06.000Z",
+        "committedAt": null
+      },
+      "committedOwner": {
+        "requestKey": "recovery-control:v1:6cfabed5d16629673e98e008d4d6a4b52cfa29f7104369f9cd7e697679d028d6",
+        "writer": "transitionWithRecoveryEvent",
+        "eventId": "event-batch-begin-recovery",
+        "requestHash": "3be76137d5849b0a0767dced7c02a678aaa5aa7333cb41809a53f0f080c69ad2",
+        "requestJcs": "{\"contractVersion\":1,\"input\":{\"event\":{\"createdAt\":\"2026-08-23T00:00:06.000Z\",\"eventId\":\"event-batch-begin-recovery\",\"safePayload\":{\"batch\":7}},\"transition\":{\"actionKey\":\"statement:generate-all\",\"batchId\":7,\"command\":\"begin-recovery\",\"entityKind\":\"batch-overlay\",\"expectedState\":\"interrupted\",\"expectedTaskKey\":\"monthly-balance:export\",\"operationKey\":\"operation-1\",\"recoveryAttemptId\":\"attempt-1\",\"sourceKind\":\"module-recovery\",\"sourceRef\":\"source-1\",\"taskRunId\":\"task-run-1\"}},\"writer\":\"transitionWithRecoveryEvent\"}",
+        "status": "committed",
+        "createdAt": "2026-08-23T00:00:06.000Z",
+        "committedAt": "2026-08-23T00:00:06.100Z"
+      }
+    }
+  ],
+  "observationAttemptLifecycleFixtures": [
+    {
+      "name": "inspection-transient-attempt-1-prepared-committed-restart",
+      "requestName": "inspection-failed-transient-minimal-lineage",
+      "scopeKey": "observation-attempt:v1:39d361d4d37bcb088fc27b701ec1f8f0b109ac8f4470a363cdb05d1a2a568cba",
+      "allocatedBeforeOwner": {
+        "observationAttemptId": 1,
+        "requestKey": null,
+        "status": "prepared"
+      },
+      "boundPrepared": {
+        "observationAttemptId": 1,
+        "requestKey": "recovery-control:v1:dce995322efe13c2bbed66083f03df96f882017ac3b108bae191a094c179b146",
+        "status": "prepared"
+      },
+      "committed": {
+        "observationAttemptId": 1,
+        "requestKey": "recovery-control:v1:dce995322efe13c2bbed66083f03df96f882017ac3b108bae191a094c179b146",
+        "status": "committed"
+      },
+      "restartPreparedLookup": "same-scope-and-observationAttemptId",
+      "exactReplayAfterCommit": "same-requestKey-and-full-request-hash"
+    }
+  ],
+  "observationRetryScenarios": [
+    {
+      "name": "same-inspection-source-two-transient-attempts",
+      "attempt1RequestName": "inspection-failed-transient-minimal-lineage",
+      "attempt2": {
+        "requestKey": "recovery-control:v1:124b9b487f307b85d24d63e4d4ca0aed709a1ecd2542fa724d70fbb0e23537a3",
+        "request": {
+          "event": {
+            "eventId": "event-observation-inspection-failed-attempt-2",
+            "eventType": "inspection-failed-transient",
+            "observationAttemptId": 2,
+            "actionKey": "statement:generate-all",
+            "operationKey": "operation-1",
+            "taskRunId": "task-run-1",
+            "sourceKind": "module-recovery",
+            "sourceRef": "source-1",
+            "createdAt": "2026-08-23T00:00:20.000Z",
+            "safePayload": {"errorCode": "INSPECTOR_TIMEOUT", "thresholdReached": true}
+          }
+        }
+      },
+      "expected": {
+        "sameScopeKey": true,
+        "sameOrdinalRestartExactReplay": true,
+        "nextOrdinalAppendsNewEvent": true,
+        "committedEventCount": 2,
+        "transientThresholdAttemptAuditable": true
+      }
+    }
+  ],
+  "holdSourceCollisionScenarios": [
+    {
+      "name": "identical-source-and-owner-deduplicates",
+      "rows": [
+        {"sourceKind":"module-recovery","sourceRef":"source-collision-1","actionKey":"statement:generate-all","operationKey":"operation-1","taskRunId":"task-run-1"},
+        {"sourceKind":"module-recovery","sourceRef":"source-collision-1","actionKey":"statement:generate-all","operationKey":"operation-1","taskRunId":"task-run-1"}
+      ],
+      "expected": {"decision":"inspect-once","unknown":false,"holdCreated":false,"inspectorCalls":1,"providerCalls":1}
+    },
+    {
+      "name": "same-source-different-owner-fails-closed",
+      "rows": [
+        {"sourceKind":"module-recovery","sourceRef":"source-collision-2","actionKey":"statement:generate-all","operationKey":"operation-1","taskRunId":"task-run-1"},
+        {"sourceKind":"module-recovery","sourceRef":"source-collision-2","actionKey":"statement:generate-current","operationKey":"operation-2","taskRunId":"task-run-2"}
+      ],
+      "expected": {"decision":"unknown-and-hold","unknown":true,"holdCreated":true,"inspectorCalls":0,"providerCalls":0}
+    }
+  ],
+  "restartReplayScenarios": [
+    {
+      "name": "batch-A-then-B-restart-replay-A",
+      "requestA": "batch-begin-recovery",
+      "requestB": "batch-resolve-success",
+      "stateSequence": ["interrupted", "recovering", "resolved", "restart", "replay-A"],
+      "expectedReplayResultA": {
+        "contractVersion": 1,
+        "requestKey": "recovery-control:v1:6cfabed5d16629673e98e008d4d6a4b52cfa29f7104369f9cd7e697679d028d6",
+        "writer": "transitionWithRecoveryEvent",
+        "eventId": "event-batch-begin-recovery",
+        "requestHash": "3be76137d5849b0a0767dced7c02a678aaa5aa7333cb41809a53f0f080c69ad2",
+        "actionKey": "statement:generate-all",
+        "operationKey": "operation-1",
+        "taskRunId": "task-run-1",
+        "sourceKind": "module-recovery",
+        "sourceRef": "source-1",
+        "batchId": 7,
+        "intentId": null,
+        "holdId": null,
+        "recoveryAttemptId": "attempt-1",
+        "observationAttemptId": null,
+        "eventType": "batch-overlay-transitioned",
+        "previousState": "interrupted",
+        "nextState": "recovering",
+        "safePayload": {"batch": 7},
+        "createdAt": "2026-08-23T00:00:06.000Z"
+      },
+      "expected": {
+        "replayResultEqualsFirstResult": true,
+        "replayAdditionalCasCount": 0,
+        "replayAdditionalEventCount": 0,
+        "changedLeafConflicts": true,
+        "wrongRequestKeyRejected": true,
+        "immutableProjectionFieldComparisonCount": 20
+      }
+    }
+  ],
+  "physicalSqlContract": {
+    "contractVersion": 1,
+    "mappingMarker": "PHYSICAL_BATCH_IDENTITY_MAPPING_V1",
+    "mappingSentence": "PHYSICAL_BATCH_IDENTITY_V1: logical `batchId` maps exactly to column `id` of table `archive_batches`; `overlay.batch_id` names only the child foreign key in `background_execution_batch_recovery_states` and references that parent `id`.",
+    "statements": [
+      {
+        "name": "identity-join",
+        "marker": "PHYSICAL_SQL_IDENTITY_JOIN_V1",
+        "exactSqlSha256": "96c5b723b09ecd991c57bde208be10a82a21f7f6f2a240686726bda60e6663d4",
+        "statementKinds": ["SELECT"],
+        "tables": ["archive_batches AS batch", "archive_task_runs AS task"],
+        "selectedColumns": ["batch.id", "batch.task_run_id", "batch.task_key", "batch.operation_key", "batch.task_status", "task.status", "task.metadata_json"],
+        "predicates": ["task.task_run_id = batch.task_run_id", "task.task_key = batch.task_key", "task.operation_key = batch.operation_key", "batch.id = :batchId", "batch.task_run_id = :taskRunId", "batch.task_key = :expectedTaskKey", "batch.operation_key = :operationKey", "task.task_run_id = :taskRunId", "task.task_key = :expectedTaskKey", "task.operation_key = :operationKey"],
+        "expectedChangesOneCount": 0
+      },
+      {
+        "name": "task-cas",
+        "marker": "PHYSICAL_SQL_TASK_CAS_V1",
+        "exactSqlSha256": "bc2c9cf3e603ac5d71347feadae54b33c9d43a2cb1d4359ded6a6ced966b3012",
+        "statementKinds": ["UPDATE", "SELECT changes"],
+        "tables": ["archive_task_runs"],
+        "updatedColumns": ["status", "failure_code", "failure_message", "metadata_json", "started_at", "finished_at", "updated_at"],
+        "predicates": ["task_run_id = :taskRunId", "task_key = :expectedTaskKey", "operation_key = :operationKey", "status = :expectedState", ":recoveryAttemptId IS NULL", "json_extract(metadata_json, '$.recoveryAttemptId') = :recoveryAttemptId"],
+        "expectedChangesOneCount": 1
+      },
+      {
+        "name": "batch-cas",
+        "marker": "PHYSICAL_SQL_BATCH_CAS_V1",
+        "exactSqlSha256": "b3d826a951a6ef90339aa06b3369ca46508561445eb65c776fc33bdbb2cef01c",
+        "statementKinds": ["UPDATE", "SELECT changes"],
+        "tables": ["archive_batches"],
+        "updatedColumns": ["task_status", "failure_code", "failure_message", "finished_at", "updated_at"],
+        "predicates": ["id = :batchId", "task_run_id = :taskRunId", "task_key = :expectedTaskKey", "operation_key = :operationKey", "task_status IN ('reserved', 'running')"],
+        "expectedChangesOneCount": 1
+      },
+      {
+        "name": "overlay-cas",
+        "marker": "PHYSICAL_SQL_OVERLAY_CAS_V1",
+        "exactSqlSha256": "87369c634a5e590ae1c185303680092a55fa75d769d817bf06a65c3dc602b514",
+        "statementKinds": ["INSERT", "SELECT changes", "UPDATE", "SELECT changes", "UPDATE", "SELECT changes"],
+        "tables": ["background_execution_batch_recovery_states AS overlay"],
+        "identityColumn": "overlay.batch_id",
+        "predicates": ["overlay.batch_id = :batchId", "overlay.task_run_id = :taskRunId", "overlay.state = 'interrupted'", "overlay.state = 'recovering'", "overlay.final_outcome IS NULL", "overlay.recovery_attempt_id IS NULL", "overlay.recovery_attempt_id = :recoveryAttemptId", "overlay.source_kind = :sourceKind", "overlay.source_ref = :sourceRef"],
+        "expectedChangesOneCount": 3
+      },
+      {
+        "name": "immutable-result",
+        "marker": "PHYSICAL_SQL_IMMUTABLE_RESULT_V1",
+        "exactSqlSha256": "25d9be11e12f0c98b539c3e98f8b0a206f66013155c60a2e6ec5965b1c116ff2",
+        "statementKinds": ["SELECT"],
+        "tables": ["background_execution_recovery_events AS event"],
+        "projectionAliases": ["contractVersion", "requestKey", "writer", "eventId", "requestHash", "actionKey", "operationKey", "taskRunId", "sourceKind", "sourceRef", "batchId", "intentId", "holdId", "recoveryAttemptId", "observationAttemptId", "eventType", "previousState", "nextState", "safePayload", "createdAt"],
+        "predicates": ["event.request_key = :requestKey", "event.event_id = :eventId", "event.request_hash = :requestHash"],
+        "expectedChangesOneCount": 0
+      }
+    ]
+  }
+}
