@@ -449,6 +449,15 @@ function standardResultClassifier(result) {
   return classifyKnownStatus(result);
 }
 
+function vccOpSaveRunResultClassifier(result) {
+  // E03-B unknown 已由 Main exact owner seam 先 CAS 为 interrupted；这里仍分类为
+  // failure，使 TaskLifecycle 的通用 terminal 路径执行并以状态冲突保留 interrupted。
+  if (String(result && result.status || '').trim().toLowerCase() === 'recovery-required') {
+    return 'failed';
+  }
+  return standardResultClassifier(result);
+}
+
 function standardResultMetadataResolver(result) {
   const status = String(result && result.status || '').trim().toLowerCase();
   if (!status) return {};
@@ -765,6 +774,7 @@ function resultClassifierForChannel(channel) {
   }
   if (channel.startsWith('position-reconciliation:')) return positionResultClassifier;
   if (channel.startsWith('vccFinancialOp:')) return vccFinancialOpResultClassifier;
+  if (channel === 'vccOpCalc:run:save') return vccOpSaveRunResultClassifier;
   return standardResultClassifier;
 }
 
@@ -949,6 +959,7 @@ module.exports = {
   standardResultMetadataResolver,
   statementResultClassifier,
   standardResultClassifier,
+  vccOpSaveRunResultClassifier,
   vccDeleteFlowPlan,
   vccFinancialOpResultClassifier,
   vccImportResultFlowIdentities,

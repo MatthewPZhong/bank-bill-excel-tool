@@ -22,6 +22,13 @@ const {
   createTaskPolicyRegistry
 } = require('../../../src/main-process/archive-center/task-policy-registry');
 const {
+  VCC_OP_SAVE_RUN_ACTION_KEY,
+  VccOpSaveRunContractError
+} = require('../../../src/main-process/vcc-op-calc/save-run-contract');
+const {
+  interruptVccOpSaveRunTask
+} = require('../../../src/main-process/vcc-op-calc/save-run-lifecycle');
+const {
   artifactManifestFromFilePlan,
   normalizeFilePlanV1
 } = require('../../../src/main-process/archive-center/file-plan');
@@ -895,6 +902,92 @@ test('no-file Task Run 使用 exact-5 operation owner，且不进入 batch reser
     'begin', 'resolve-flow', 'begin-task-run', 'start-task-run',
     'finish-task-run', 'end'
   ]);
+});
+
+test('VCC save unknown 先落 interrupted；通用 failed CAS 不得覆盖且 Renderer evidence 有界', async () => {
+  let terminalStatus = 'running';
+  const { archiveService, calls, lifecycle } = createHarness({
+    finishTaskRun(taskRunId, outcome) {
+      if (terminalStatus !== 'running') {
+        return {
+          ok: false,
+          code: 'ARCHIVE_TASK_STATUS_CONFLICT',
+          taskRun: { taskRunId, status: terminalStatus }
+        };
+      }
+      terminalStatus = outcome.taskStatus;
+      return { ok: true, taskRun: { taskRunId, status: terminalStatus } };
+    }
+  });
+  const policy = createTaskPolicyRegistry().require('vccOpCalc:run:save');
+  const result = await lifecycle.runOperationOnly({
+    policy,
+    meta: { channel: policy.channel },
+    execute(operationOwner) {
+      const unknown = new VccOpSaveRunContractError(
+        'VCC_OP_SAVE_RUN_OUTCOME_UNKNOWN',
+        'VCC 业务 OP 保存结果需要恢复检查',
+        {
+          outcome: 'unknown',
+          recoveryRequired: true,
+          preserveArchiveTaskRun: true,
+          boundedEvidence: {
+            reasonCode: 'RECEIPT_RUN_CONFLICT',
+            forbiddenPath: '/private/sensitive/source.xlsx'
+          },
+          recoveryIdentity: {
+            actionKey: VCC_OP_SAVE_RUN_ACTION_KEY,
+            operationKey: operationOwner.operationKey,
+            taskRunId: operationOwner.taskRunId,
+            computeSnapshotHash: 'a'.repeat(64),
+            yearMonth: '2026-03',
+            inputFileCount: 2,
+            beginOp: '1000.00'
+          }
+        }
+      );
+      return interruptVccOpSaveRunTask({ archiveService, operationOwner, error: unknown });
+    }
+  });
+
+  assert.deepEqual(result, {
+    status: 'recovery-required',
+    code: 'VCC_OP_SAVE_RUN_OUTCOME_UNKNOWN',
+    outcome: 'unknown',
+    recoveryRequired: true,
+    message: 'VCC 业务 OP 保存结果需要恢复检查'
+  });
+  assert.equal(JSON.stringify(result).includes('boundedEvidence'), false);
+  assert.equal(JSON.stringify(result).includes('source.xlsx'), false);
+  assert.equal(terminalStatus, 'interrupted');
+  assert.deepEqual(
+    calls.filter((call) => call[0] === 'finish-task-run').map((call) => call[2].taskStatus),
+    ['interrupted', 'failed']
+  );
+});
+
+test('VCC save 普通 validation error 仍 failed；commit/replay result 仍 succeeded', async () => {
+  const policy = createTaskPolicyRegistry().require('vccOpCalc:run:save');
+  assert.equal(policy.resultClassifier({ status: 'success', outcome: 'committed' }), 'succeeded');
+  assert.equal(
+    policy.resultClassifier({ status: 'success', outcome: 'recovered-existing-commit' }),
+    'succeeded'
+  );
+  assert.equal(policy.resultClassifier({ status: 'recovery-required', outcome: 'unknown' }), 'failed');
+
+  const { calls, lifecycle } = createHarness();
+  const result = await lifecycle.runOperationOnly({
+    policy,
+    meta: { channel: policy.channel },
+    execute: () => ({
+      status: 'error',
+      message: '期初OP 无效：必须为安全整数分数值'
+    })
+  });
+  assert.equal(result.status, 'error');
+  const terminal = calls.find((call) => call[0] === 'finish-task-run');
+  assert.equal(terminal[2].taskStatus, 'failed');
+  assert.equal(calls.filter((call) => call[0] === 'finish-task-run').length, 1);
 });
 
 test('lifecycle 只在 begin 边界规范化 lineage，并把同一冻结集合交给 taskContext', async () => {

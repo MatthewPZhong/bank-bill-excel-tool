@@ -21,6 +21,15 @@ function row(direction, amount, billDate = '2026-03-15', currency = 'CNY') {
   return { direction, recon_amount: amount, bill_date_raw: billDate, currency };
 }
 function files(rows) { return [{ fileName: 'f1.xlsx', rows }]; }
+function saveOwner(label = 'default') {
+  return {
+    taskRunId: `vcc-save-task-${label}`,
+    taskKey: 'vccOpCalc:run:save',
+    moduleId: 'vcc-op-calc',
+    parentRunId: `vcc-parent-${label}`,
+    operationKey: `vcc-save-operation-${label}`
+  };
+}
 
 test.describe('VCC session — 金额精度 helper（整数分 🔴）', () => {
   test('parseAmountToCents：整数分 + 浮点尾差吸收 + 千分位 + 负数', () => {
@@ -133,7 +142,7 @@ test.describe('VCC session — saveRun 落库（期末OP=期初+发生额 🔴 +
     const fr = [{ fileName: 'f.xlsx', rows: [row('入', '100'), row('出', '30')] }];
     assert.equal(session.scanFiles(fr).ok, true);
     assert.equal(session.computeFiles(fr).ok, true);
-    const saved = session.saveRun({ beginOp: '1000' }); // 1000 + (100-30) = 1070
+    const saved = session.saveRun({ beginOp: '1000', operationOwner: saveOwner('golden') }); // 1000 + (100-30) = 1070
     assert.equal(saved.endOp, '1070.00');
     const months = session.listCalculatedMonths(); // 返回对象数组 [{ yearMonth, ... }]
     assert.ok(months.some((m) => (m.yearMonth || m.year_month) === '2026-03'), 'listCalculatedMonths 应含 2026-03');
@@ -149,7 +158,21 @@ test.describe('VCC session — saveRun 落库（期末OP=期初+发生额 🔴 +
     const fr = [{ fileName: 'f.xlsx', rows: [row('入', '100')] }];
     session.scanFiles(fr);
     session.computeFiles(fr);
-    assert.throws(() => session.saveRun({ beginOp: '' }));
-    assert.throws(() => session.saveRun({ beginOp: 'abc' }));
+    assert.throws(() => session.saveRun({ beginOp: '', operationOwner: saveOwner('empty') }));
+    assert.throws(() => session.saveRun({ beginOp: 'abc', operationOwner: saveOwner('invalid') }));
+  });
+  test('saveRun 既有 partial explicit seam 仍从 adopted snapshot 补齐其余字段', () => {
+    const db = new DatabaseSync(':memory:');
+    ensureVccOpCalcTablesSupport(db);
+    const session = createVccOpCalcSession({ getDb: () => db });
+    const fr = [{ fileName: 'f.xlsx', rows: [row('入', '100')] }];
+    session.computeFiles(fr);
+    const saved = session.saveRun({
+      yearMonth: '2026-03',
+      beginOp: '1.00',
+      operationOwner: saveOwner('partial-explicit')
+    });
+    assert.equal(saved.endOp, '101.00');
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM vcc_op_operation_receipts').get().count, 1);
   });
 });

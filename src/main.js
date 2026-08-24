@@ -321,6 +321,10 @@ const {
 } = require('./backend/biz-op-recon-import/reader');
 // v2.1.12 需求1：VCC业务OP计算模块（仅流水文件 → 按月聚合发生额出/入 → 算期末OP，资金红线 🔴）
 const { createVccOpCalcSession } = require('./main-process/vcc-op-calc-session');
+const {
+  interruptVccOpSaveRunTask,
+  isVccOpSaveRunRecoveryRequired
+} = require('./main-process/vcc-op-calc/save-run-lifecycle');
 // v3.1.6：VCC财务OP校验（四类明细幂等、逐币种计算、系统OP比较与归档）。
 const { createVccFinancialOpService } = require('./main-process/vcc-financial-op-service');
 const {
@@ -15015,7 +15019,11 @@ function registerNewAccountHandlers() {
     if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
     const { beginOp } = payload || {};
     try {
-      const saved = vccOpCalcSession.saveRun({ beginOp });
+      const saved = vccOpCalcSession.saveRun({
+        beginOp,
+        // operation identity 只取 Main TaskLifecycle owner；Renderer payload 无法注入或覆盖。
+        operationOwner: taskContext.operationContext
+      });
       appendActivityLogEntry({
         level: 'info',
         source: 'main',
@@ -15025,6 +15033,13 @@ function registerNewAccountHandlers() {
       });
       return { status: 'success', ...saved };
     } catch (err) {
+      if (isVccOpSaveRunRecoveryRequired(err)) {
+        return interruptVccOpSaveRunTask({
+          archiveService: archiveCenterService && archiveCenterService.service,
+          operationOwner: taskContext.operationContext,
+          error: err
+        });
+      }
       return { status: 'error', message: err && err.message ? err.message : String(err) };
     }
     }
