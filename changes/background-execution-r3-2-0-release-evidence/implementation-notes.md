@@ -29,6 +29,10 @@
 - PR #174's Windows CI repair is a baseline refresh only: it imports the already reviewed
   directory-fsync and SQLite-cleanup fixes from `v3.2.0` without changing any R3 behavior,
   evidence meaning, or production policy.
+- The packaged Setup harness uses a product-name directory beneath a fixed owned install
+  container as its `/D` root. This matches assisted NSIS `${APP_FILENAME}` behavior so
+  executable selection, uninstall, and post-uninstall identity audit all address the actual
+  installed directory without allowing the manifest value to escape the owned work root.
 
 ## Assumptions
 
@@ -69,6 +73,18 @@
 - Blind-spot and reconciliation review found no product, amount/currency, recovery,
   evidence-semantics, or production-enablement change in this repair. Real Windows and
   benchmark evidence therefore remains `NOT_RUN`, and all human-review gates remain open.
+- Refreshed Windows workflow `32775513740`: `smoke-test PASS`; build failed in the packaged
+  canary with `UNINSTALL_CLEANUP_FAILED`.
+- Root-cause evidence: electron-builder's assisted installer appends `${APP_FILENAME}` to
+  a `/D` path that does not already contain it, while the harness used generic directory
+  `installed` for subsequent executable and uninstaller discovery.
+- Install-root repair Windows build contract test: `4/4 PASS`.
+- Install-root repair `npm run release-check`: `PASS` (`lint` and `smoke` PASS; unit
+  `6013/6014 PASS` with `0` failures and `1` skipped; integration `51/51`
+  scripts and `2455/2455` assertions PASS).
+- Post-repair blind-spot review found no alternate installer invocation, unbounded external
+  cleanup, evidence upgrade, production-policy mutation, or amount/currency behavior change.
+  The install and uninstall roots remain under the ownership-marked disposable work root.
 
 ### Benchmark timing definitions
 
@@ -105,4 +121,4 @@ privacy, medians, and eligibility logic only and are not performance evidence.
 - Real Windows portable executable behavior has not been measured.
 - Packaged Windows directory-fsync behavior has not been evidenced.
 - Parser concurrency eligibility has not been evaluated with the required complete benchmark matrix.
-- The refreshed PR #174 head still requires a successful hosted Windows CI run before merge.
+- The install-root repair still requires a successful hosted Windows CI run before merge.
