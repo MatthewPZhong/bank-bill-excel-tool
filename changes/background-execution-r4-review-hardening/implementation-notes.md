@@ -98,6 +98,60 @@
 | RSS 默认真实链 | `31/31 PASS`；50万/150万行为 `93→137MB`，effective budget 150MB，paired/独立 margin `-13MB` | 真 multi-sheet、worker、readback 与内存门禁保持；未依赖新容差制造 PASS |
 | RSS 修复完整门禁 | `npm run release-check` PASS：lint/smoke PASS，unit `6017/6020`（0 fail、3 skip），integration `51/51` scripts / `2455/2455` assertions；目标 RSS 脚本在全链中再次 `31/31 PASS`；合同包 checksum `69/69 PASS`；`git diff --check` PASS | 产品、业务/资金/恢复语义、production gate 与冻结合同包均未变化；仍未运行 `check-vars`/`scan:vars` |
 
+## PR #175 Windows NSIS per-user access violation Follow-up（2026-08-25）
+
+### Task Brief
+
+- Goal：修复 packaged canary 在真实 GitHub-hosted Windows 上启动 assisted per-user NSIS Setup 时稳定以 `0xC0000005` 崩溃的问题，不改变安装模式、产品身份或 production gate。
+- Context：run `32805840596` 的 smoke-test SUCCESS；build 唯一失败为 Setup `EXIT_HEX_C0000005_ROOT_ABSENT_IDENTITY_ABSENT`。当前 lock 为 `electron-builder/app-builder-lib 26.8.1`，其 `multiUser.nsh` 仍在非 Win7 系统执行 `System::Store` + `SHGetKnownFolderPath`；electron-builder 上游 #8536/#9564 将同条件、同异常码归因为该路径的竞态。
+- Constraints：保持 assisted installer、per-user `/currentuser` canary、精确产品身份、安装/卸载审计、失败关闭、业务/资金/恢复合同和人工红线；不运行 `check-vars`/`scan:vars`，不改 main。
+- Done when：依赖下限与 lock 升到同 major 的修复版本 `26.15.7`；静态测试拒绝旧 `System::Store` 模板并确认安全的 known-folder 字符串复制；定向测试、`release-check`、合同包 checksum、diff/local review PASS；新 Windows CI packaged canary PASS。
+
+### 已确认事实
+
+| 事实 | 证据 | 对方案的约束 |
+| --- | --- | --- |
+| 本轮不是 smoke/产品运行失败，而是 Setup 在任何 install root/Registry identity 落地前 native crash | Actions run `32805840596`：smoke SUCCESS；build 输出 `EXIT_HEX_C0000005_ROOT_ABSENT_IDENTITY_ABSENT` | 不得放宽 Setup exit 或把失败快照合并 |
+| `0xC0000005` 是 Windows access violation | Microsoft Learn C0000005 调试说明 | 不能继续把它当普通 NSIS 参数返回码 |
+| 上游已复现 assisted、per-user NSIS 的同异常码，并定位到 `multiUser.nsh` 的 `System::Store` 竞态 | electron-builder issue #8536、merged PR #9564 | 修复应消除依赖缺陷，不改 oneClick/perMachine UX 来绕过 |
+| 当前 26.8.1 模板含 `System::Store S/L`；26.15.7 npm tarball 已改为显式 push/pop 与 `KERNEL32::lstrcpynW`，不再使用 `System::Store` | 本地 `node_modules/.../multiUser.nsh` 与只读 npm tarball 对比 | 可用同 major 依赖升级最小修复，无需 vendored node_modules patch |
+
+### Unknowns Register
+
+| 未知 | 类型 | 影响 | 处理 | 最便宜验证 | 当前决定 |
+| --- | --- | --- | --- | --- | --- |
+| 本次 faulting module 是否精确为上游所述 `System.dll` | 归因 | 中 | PROBE | 以修复依赖重跑同一 packaged canary；不收集路径或任意 crash 文本 | 条件、异常码与受影响模板完全匹配，允许同 major 修复；CI 结果为最终证据 |
+| 26.15.7 是否引入项目可见兼容回归 | 依赖兼容 | 高 | PROBE | lock diff、安装树、静态 Windows 合同、完整 `release-check` | 保持 major 26，只接受 lock 可审查且全门禁通过的结果 |
+| 是否应改为 oneClick/perMachine 或让 canary 改跑 `/allusers` | 合同旁路 | 高 | 已反证 | 对照既有 installer UX 与 canary per-user 合同 | 不采用；这些方案会掩盖真实用户路径或改变安装体验 |
+
+无 BLOCK 问题；该修复不改变数据模型、公开接口、资金边界或主要用户流程。
+
+### Decision
+
+| 决策 | 原因/证据 | 放弃方案与边界 |
+| --- | --- | --- |
+| 将 `electron-builder` 最低版本和 lock 提升至同 major `26.15.7`，并由模板合同测试锁住修复形态 | 官方 26.15.7 npm tarball 已消除受影响的 `System::Store` 路径；同 major 升级比自维护 node_modules patch 更可审计 | 不升级到 27 alpha；不修改 node_modules 后提交；不通过 `/allusers`、oneClick 或忽略非零退出绕过 |
+| 保留现有 fail-closed Setup 诊断和 per-user canary | 新证据解释崩溃来源，但不证明失败可以忽略 | 不打印路径、installer stdout/stderr 或任意异常；不降低产品身份/卸载检查 |
+
+### 风险优先计划
+
+| 顺序 | 步骤 | 消除的未知/保护的不变量 | 成功证据 | 失败影响 | 回滚/收缩 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 升级并审查 package/lock/模板 | 同 major 依赖确实携带上游修复 | install tree 为 26.15.7；模板不含 `System::Store` | 推翻版本选择 | 回退依赖，不提交 |
+| 2 | 增加 Windows build contract 反例 | 防止 lock 或模板回退重新引入 native crash | 定向单测 PASS，旧模板形态 FAIL | 不进入全仓验证 | 只保留可解释最小断言 |
+| 3 | 完整本地门禁与 blindspot review | 保护产品、资金/恢复、打包合同和证据链 | `release-check`、checksum、diff PASS | 不推送 | 回退该 follow-up |
+| 4 | 推送后由相同 Windows canary 验证 | 消除平台归因剩余未知 | Setup/portable packaged canary 均 PASS | 保持 Draft，不合并 | 继续 fail closed 并按新证据收敛 |
+
+### Evidence
+
+| 检查 | 结果 | 证明/边界 |
+| --- | --- | --- |
+| GitHub Actions run `32805840596` / build job `97682555041` | smoke-test SUCCESS；Setup 固定诊断为 `EXIT_HEX_C0000005_ROOT_ABSENT_IDENTITY_ABSENT`，build 因 `SETUP_NONZERO_EXIT` FAIL | 异常是安装落地前的 native access violation；失败快照未合并 |
+| 依赖与模板复核 | `npm ci` PASS；`npm ls electron-builder app-builder-lib --depth=1` 均为 `26.15.7`；per-user macro 不含 `System::Store`，保留 `SHGetKnownFolderPath`、显式 push/pop、`lstrcpynW` 与 `CoTaskMemFree` | lock 可重现地携带上游修复；未修改 installer 模式、产品名、路径合同或 canary 参数 |
+| Windows build contract + hardening 定向回归 | `73` tests：`71 PASS / 2 Windows-only SKIP`，0 fail；目标 ESLint 与 `git diff --check` PASS | 新断言阻止依赖/模板回退；资源生命周期、Parser、资金 receipt 与 Windows 合同均保持 |
+| 完整本地门禁 | `npm run release-check` PASS：lint/smoke PASS，unit `6018/6021`（0 fail、3 skip），integration `51/51` scripts / `2455/2455` assertions | 同 major 构建依赖升级未造成可见产品、业务、资金或恢复回归；未运行 `check-vars`/`scan:vars` |
+| 冻结合同包与变更面 | checksum `69/69 PASS`；本 follow-up 仅修改 package/lock、Windows build contract test 与本实施记录，未改 `src/`、workflow、canary harness 或 production gate | 冻结 spec/techdoc/资金与恢复合同未漂移；真实 Windows Setup/portable 结果仍由新 CI 决定 |
+
 ## Final Blindspot Review
 
 - 生命周期：正常、错误、取消和重复 `close/terminate` 均收敛到同一个 termination barrier；Supervisor 先等 transport cleanup，再释放 CompoundLease。
@@ -107,12 +161,13 @@
 - 平台盲区：macOS 无法执行真实 Windows PowerShell 动态探针；静态合同已通过，动态证据留给 GitHub-hosted Windows CI。
 - CI 失败修复边界：仅调整 packaged canary harness 的 launcher/report 等待、错误优先级和有界 Setup 诊断；未改产品代码、金额/币种/身份/幂等/恢复语义、production enablement 或人工资金红线。
 - RSS 盲区：独立中位容差只覆盖 MB rounding 的理论传播上界；paired budget/linear margin 与每样本 150MB ceiling 仍严格。稳定 `48→97`、`49→98`、`32→73/96`、错配及线性反例均由 self-check/单测锁定为 FAIL；未按 Windows、run ID 或当前样本硬编码。
+- NSIS 依赖盲区：本 follow-up 不改安装模式或放宽 canary，只把同 major 构建链提升到已移除 `System::Store` 竞态的 `26.15.7`；本机静态/全仓门禁不能替代真实 Windows 安装，故新 CI 仍是 merge 前硬证据。
 
 ## Remaining Unknowns
 
 | 未知 | 处理 | 负责人/下一步 | 合并影响 |
 | --- | --- | --- | --- |
 | Windows-only 提前退出动态探针 | PROBE | GitHub-hosted Windows CI | 本地静态/跨平台测试通过后可提 Draft；合并前需 CI PASS |
-| Setup 非零的真实退出码与失败时安装/Registry 落地阶段 | PROBE | 固定枚举诊断推送后的 GitHub-hosted Windows CI | 当前不得把非零当成功；诊断收敛前不合并 |
+| `electron-builder/app-builder-lib 26.15.7` 下真实 Windows Setup/portable 结果 | PROBE | 新 head 的 GitHub-hosted Windows packaged canary | 当前不得把非零当成功；Setup/portable 全部 PASS 前不合并 |
 | RSS 取整组合修复后的 Windows 结果 | PROBE | 新 head 的 GitHub-hosted Windows CI；必须先通过完整 smoke/release-check 才进入 packaged build | 阻断 Ready/merge，不阻断本地修复提交 |
 | 真实 Windows Setup/portable packaged canary 与资金红线签字 | BLOCK | 既有 R3 人工/Windows gate | 本 PR 不改变其 `PENDING_HUMAN_REVIEW` 状态，仍阻塞 production enablement |

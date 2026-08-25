@@ -88,6 +88,27 @@ test('Windows 本地与发布构建全部锁定 x64，避免检查陈旧 win-unp
   }
 });
 
+test('Windows assisted per-user installer 锁定 NSIS access-violation 修复版本与模板', () => {
+  const manifest = JSON.parse(read('package.json'));
+  const lock = JSON.parse(read('package-lock.json'));
+  const multiUserInstaller = read('node_modules/app-builder-lib/templates/nsis/multiUser.nsh');
+  const perUserMacro = multiUserInstaller.slice(
+    multiUserInstaller.indexOf('!macro setInstallModePerUser'),
+    multiUserInstaller.indexOf('!macroend', multiUserInstaller.indexOf('!macro setInstallModePerUser'))
+  );
+
+  assert.equal(manifest.devDependencies['electron-builder'], '^26.15.7');
+  assert.equal(lock.packages['node_modules/electron-builder'].version, '26.15.7');
+  assert.equal(lock.packages['node_modules/app-builder-lib'].version, '26.15.7');
+  assert.doesNotMatch(perUserMacro, /System::Store/);
+  assert.match(perUserMacro, /Push \$1[\s\S]*Push \$2/);
+  assert.match(
+    perUserMacro,
+    /SHGetKnownFolderPath[\s\S]*KERNEL32::lstrcpynW[\s\S]*CoTaskMemFree/
+  );
+  assert.match(perUserMacro, /Pop \$2[\s\S]*Pop \$1/);
+});
+
 test('packaged background canary 仅在 GitHub-hosted Windows 的 RUNNER_TEMP 写入，并审计 exact 产品身份', () => {
   const harness = read('scripts/run-windows-packaged-background-canary.ps1');
   const manifest = JSON.parse(read('package.json'));

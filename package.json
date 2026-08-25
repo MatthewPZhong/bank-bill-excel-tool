@@ -249,7 +249,7 @@
     "@electron/asar": "^3.4.1",
     "@napi-rs/canvas": "^0.1.97",
     "electron": "^36.0.0",
-    "electron-builder": "^26.0.12",
+    "electron-builder": "^26.15.7",
     "eslint": "^9.39.4",
     "globals": "^17.6.0",
     "yazl": "^3.3.1"
