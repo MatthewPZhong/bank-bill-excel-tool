@@ -534,14 +534,32 @@ class PreFundReconciliationService {
     return result;
   }
 
-  countTempByDateRange(payload = {}) {
+  normalizeTempDateRange(payload = {}) {
     const sourceType = requireManagedMptSourceType(payload.sourceType);
-    return this.tempStore.countByDateRange(payload.start, payload.end, { sourceType });
+    const range = this.tempStore.normalizeDateRange(payload.start, payload.end);
+    return Object.freeze({ sourceType, start: range.start, end: range.end });
+  }
+
+  inspectTempDateRange(payload = {}) {
+    const range = this.normalizeTempDateRange(payload);
+    const identities = this.listTempBatches()
+      .filter((batch) => batch.sourceType === range.sourceType &&
+        batch.sourceDate >= range.start && batch.sourceDate <= range.end)
+      .map((batch) => Object.freeze({
+        sourceType: batch.sourceType,
+        sourceBatch: batch.sourceBatch
+      }));
+    return Object.freeze({ range, identities: Object.freeze(identities) });
+  }
+
+  countTempByDateRange(payload = {}) {
+    const range = this.normalizeTempDateRange(payload);
+    return this.tempStore.countByDateRange(range.start, range.end, { sourceType: range.sourceType });
   }
 
   async deleteTempByDateRange(payload = {}) {
-    const sourceType = requireManagedMptSourceType(payload.sourceType);
-    return this.tempStore.deleteByDateRange(payload.start, payload.end, { sourceType });
+    const range = this.normalizeTempDateRange(payload);
+    return this.tempStore.deleteByDateRange(range.start, range.end, { sourceType: range.sourceType });
   }
 
   async clearTemp() {

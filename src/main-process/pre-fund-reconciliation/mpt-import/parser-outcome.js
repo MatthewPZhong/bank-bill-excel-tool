@@ -4,15 +4,18 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { fsyncDirectory } = require('../../background-execution/durable-file');
-const { financeSafeTextViolation } = require('../../background-execution/error-codec');
 const { deriveFileIdentity, mptSpoolPaths, spoolError } = require('./spool-contract');
 const { assertDirectoryDurable, ensureMptSpoolDirectory } = require('./spool-writer');
+const {
+  isSafeMptErrorCode,
+  isSafeMptErrorText,
+  safeMptFileName,
+  toSafeMptErrorFields
+} = require('./file-result-safety');
 
 const MAX_BYTES = 128 * 1024;
 const MAX_DETAIL_LINES = 1000;
 const MAX_DETAIL_LINE_BYTES = 2048;
-const ABSOLUTE_PATH_PATTERN = /(?:file:\/\/|(?:^|[\s：:=（(])(?:[A-Za-z]:[\\/]|\\\\[^\\\s]+[\\/]|\/(?:[^/\s]+\/)+[^/\s]+))/i;
-const SAFE_ERROR_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,127}$/;
 const BASE_FAILURE_KEYS = Object.freeze(['code', 'detailLines', 'fileName', 'message', 'status']);
 const CLEANUP_FAILURE_KEYS = Object.freeze([
   ...BASE_FAILURE_KEYS, 'causeCode', 'cleanupRequired', 'cleanupScope'
@@ -23,10 +26,6 @@ function boundedText(value, label, maxBytes, allowEmpty = false) {
     throw spoolError('PREFUND_PARSER_OUTCOME_INVALID', `Parser error ${label}非法`);
   }
   return value;
-}
-
-function unsafeParserText(value) {
-  return ABSOLUTE_PATH_PATTERN.test(value) || financeSafeTextViolation(value);
 }
 
 function exactFileResult(value) {
@@ -40,8 +39,7 @@ function exactFileResult(value) {
       value.detailLines.some((line) => typeof line !== 'string' ||
         Buffer.byteLength(line) > MAX_DETAIL_LINE_BYTES) ||
       (cleanup && (value.cleanupScope !== 'current-file-spool' ||
-        (value.causeCode !== null && (typeof value.causeCode !== 'string' ||
-          !/^[A-Z][A-Z0-9_]{0,127}$/.test(value.causeCode)))))) {
+        (value.causeCode !== null && !isSafeMptErrorCode(value.causeCode))))) {
     throw spoolError('PREFUND_PARSER_OUTCOME_INVALID', 'Parser error fileResult字段非法');
   }
   const fileName = boundedText(value.fileName, 'fileName', 1024);
@@ -50,7 +48,12 @@ function exactFileResult(value) {
   }
   const code = boundedText(value.code, 'code', 256);
   const message = boundedText(value.message, 'message', 8192);
-  if ([message, ...value.detailLines].some(unsafeParserText)) {
+  if (!isSafeMptErrorCode(code) ||
+      !isSafeMptErrorText(message) ||
+      value.detailLines.some((line) => !isSafeMptErrorText(line, {
+        maxBytes: MAX_DETAIL_LINE_BYTES,
+        allowEmpty: true
+      }))) {
     throw spoolError('PREFUND_PARSER_OUTCOME_INVALID', 'Parser error不得包含用户路径');
   }
   return Object.freeze({
@@ -68,35 +71,22 @@ function exactFileResult(value) {
 }
 
 function toSafeParserFileResult(filePath, error) {
-  const rawFileName = typeof filePath === 'string' ? path.basename(filePath) : '';
-  const fileName = rawFileName && Buffer.byteLength(rawFileName) <= 1024 &&
-    !/[\\/]/.test(rawFileName) && !unsafeParserText(rawFileName)
-    ? rawFileName
-    : 'unknown-file';
-  const rawCode = error && typeof error.code === 'string' ? error.code : '';
-  const code = SAFE_ERROR_CODE_PATTERN.test(rawCode)
-    ? rawCode
-    : 'PREFUND_PARSER_WORKER_FAILED';
-  const rawMessage = error && typeof error.message === 'string' ? error.message : '';
-  const message = rawMessage && Buffer.byteLength(rawMessage) <= 8192 && !unsafeParserText(rawMessage)
-    ? rawMessage
-    : 'MPT parser worker处理当前文件失败';
-  const detailLines = Array.isArray(error && error.detailLines)
-    ? error.detailLines.filter((line) => typeof line === 'string' &&
-      Buffer.byteLength(line) <= MAX_DETAIL_LINE_BYTES && !unsafeParserText(line)).slice(0, MAX_DETAIL_LINES)
-    : [];
+  const fileName = safeMptFileName(filePath);
+  const safeError = toSafeMptErrorFields(error, {
+    fallbackCode: 'PREFUND_PARSER_WORKER_FAILED',
+    fallbackMessage: 'MPT parser worker处理当前文件失败',
+    maxDetailLines: MAX_DETAIL_LINES
+  });
   const cleanup = error && error.cleanupRequired === true &&
     error.cleanupScope === 'current-file-spool';
   return exactFileResult({
     status: 'failed',
     fileName,
-    code,
-    message,
-    detailLines,
+    ...safeError,
     ...(cleanup ? {
       cleanupRequired: true,
       cleanupScope: 'current-file-spool',
-      causeCode: typeof error.causeCode === 'string' && SAFE_ERROR_CODE_PATTERN.test(error.causeCode)
+      causeCode: isSafeMptErrorCode(error.causeCode)
         ? error.causeCode
         : null
     } : {})

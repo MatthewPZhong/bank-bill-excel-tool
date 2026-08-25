@@ -19,6 +19,10 @@
 | Inspector按全体PreFund Side DB核对operation mutation。 | 单库receipt合法不足以排除跨月重复mutation。 | 只信receipt所在月batch。 | inserted/replaced全局恰好一个且定位到receipt batch；noop全局零本operation mutation，否则unknown/Hold。 |
 | spool严格验证固定为pre-critical首遍 + ACK后transaction streaming遍。 | 首遍完成hash/count/source identity验证后才允许critical；第二遍逐record重验并写入，末尾TOCTOU失败整体rollback。 | Store先完整重验再为callback第三遍扫描。 | rows/issues各总计两遍；不弱化hash/count/source snapshot/lineage验证。 |
 | strict row error复用`createMptRowAggregateError`并只携带bounded sample。 | legacy与managed必须保持可定位detail及repair UX；spool issue的rawLine/fields不得进入result。 | Writer仅构造计数消息或复制完整issue。 | managed与legacy同文件的公开错误shape精确一致；sample仅行号+generic message。 |
+| transport在dispatch后、critical前丢失时由Supervisor以`cleanupOwnership:'main'`显式交还当前file staging。 | `dispatchAccepted`只证明交接，不能证明Worker已经完成cleanup；普通transport crash由Inspector/critical state证明不是资金不确定后才可交还。 | 永久以`writerOwned`跳过Main cleanup；用微任务时序猜owner。 | precritical/not-committed为普通file失败并清净staging；committed-lost/unknown仍保留Writer/recovery证据。 |
+| 首次Critical Intent的`create-prepared`与`mark-acked`在同一RecoveryControl transaction提交。 | Worker尚未收到ACK时，分步持久化失败不得留下当前进程无法追踪的open prepared Intent。 | 留到下次启动扫描；把pre-ACK失败升级为Recovery Hold。 | 第二步注入失败整体回滚，不发ACK、不建Hold；正常/exact replay合同不变。 |
+| Parser sidecar、Writer file result与parent validator复用同一safe error边界，并按import/repair exact public shape校验。 | sealed读取与`job:done`都属于独立privacy边界；构造器过滤不能替代消费者exact validation。 | 只过滤Parser message；parent浅层shape；复制多套path regex。 | 拒绝unsafe code、单段/多段POSIX、Windows、UNC与额外字段；正常URL/自然语言斜杠保留；cleanup内部字段不外泄。 |
+| date-range Hold gate与删除共享service/store权威归一化range。 | raw payload与trim后的实际删除范围不一致可绕过active Hold。 | gate与delete各自比较原始字符串。 | 带空白的合法payload仍按真实受影响batch scope阻断，范围外batch不误阻。⚠️ 资金红线，请人工复核。 |
 
 ## Assumptions
 
@@ -30,7 +34,7 @@
 
 | 原计划 | 实际方案 | 原因 | 影响 | Spec 已同步 |
 | --- | --- | --- | --- | --- |
-| repair policy无CompoundLease | repair使用Writer phase + childrenMax=1 Parser child | 实际执行图同时存在Parser/Writer；只申报phase会漏算一个worker。 | runtime预算不变且可容纳；production gate不变。 | 冻结TechDoc §12已有“Parser + Writer图申请CompoundLease”；实现按其收紧。 |
+| repair policy无CompoundLease | repair使用冻结Writer phase 192MiB + childrenMax=1 Parser child 256MiB | 实际执行图同时存在Parser/Writer；Parser Core与import相同，不能错误复用192MiB Writer资源。 | runtime预算可容纳精确组合；production gate不变。 | 冻结TechDoc §12已有“Parser + Writer图申请CompoundLease”，policy fixture保留repair Writer 192MiB。 |
 | parser error由Coordinator内存传递 | 固定identity的fsync/rename sidecar，exact safe schema | 单Writer transport只能消费预注册unit；错误不能靠missing spool或input override表达。 | sidecar纳入known-file cleanup、tamper/path/privacy测试。 | 无public/data schema变更。 |
 
 ## Evidence
@@ -48,6 +52,9 @@
 | spool pass counter + strict result parity | PASS | rows/issues首遍+transaction遍各2次；managed/legacy `code/message/detailLines/rowErrorCount/canRepair/sourceType`一致。 |
 | parser privacy boundary | PASS | `/private/tmp/...` OS error转稳定safe result，首file失败后续继续，结果/progress无路径。 |
 | Main cleanup ownership counter | PASS | active shutdown下当前与未来未dispatch file各由Main cleanup delegate调用恰好1次；parent parser终止只由外层catch统一清理。 |
+| 本轮项目负责人findings定向unit | `234/234 PASS` | dispatch后precritical transport exit清理交还、prepared→acked原子回滚、sidecar tamper code、单段POSIX/Windows/UNC隐私、Writer parent result exact validator、date-range trim Hold gate、repair 192+256MiB资源。 |
+| 本轮 Recovery/Side DB integration | `27/27`、`9/9`、`69/69 PASS` | RecoveryControl事务/CAS、durable recovery canary，以及PreFund金额/币种/source sequence/version/候选与side DB parity不漂移。 |
+| 本轮静态验证 | affected ESLint、14个JS `node --check`、`git diff --check` PASS | 新共享privacy helper、Main/runtime/store/service/worker/supervisor与测试均通过语法、风格和whitespace检查。 |
 
 ## Remaining Unknowns
 
@@ -55,3 +62,4 @@
 | --- | --- | --- | --- |
 | Windows packaged、人工资金与性能门禁 | BLOCK production enable | E05-C/R3.2.1负责人 | 不阻断E05-B capability；production保持false |
 | Windows目录fsync与真实杀进程fault矩阵尚未在Windows人工执行 | 保留unknown，不伪造通过 | E05-C/最终版本负责人 | 不阻断本地capability；阻断production enable |
+| date-range destructive Hold gate与同batch恢复证据的资金边界 | 已用真实Side DB与空白payload定向回归，仍要求人工复核 | 项目负责人 | ⚠️ 资金红线，请人工复核；production保持false |

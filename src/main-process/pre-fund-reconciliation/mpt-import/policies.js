@@ -1,5 +1,12 @@
 'use strict';
 
+const {
+  isSafeMptDetailLines,
+  isSafeMptErrorCode,
+  isSafeMptErrorText,
+  safeMptFileName
+} = require('./file-result-safety');
+
 const PRE_FUND_MPT_IMPORT_ACTION = 'pre-fund:mpt-import';
 const PRE_FUND_MPT_REPAIR_ACTION = 'pre-fund:mpt-repair-import';
 const PRE_FUND_MPT_STATIC_KEYS = Object.freeze({
@@ -24,7 +31,21 @@ const ZERO_RESOURCES = Object.freeze({
   ioHeavySlots: 0,
   memoryBytes: 0
 });
-const WRITER_RESOURCES = Object.freeze({
+const IMPORT_WRITER_RESOURCES = Object.freeze({
+  cpuSlots: 1,
+  workerThreadSlots: 1,
+  utilityProcessSlots: 0,
+  ioHeavySlots: 1,
+  memoryBytes: 268435456
+});
+const PARSER_RESOURCES = Object.freeze({
+  cpuSlots: 1,
+  workerThreadSlots: 1,
+  utilityProcessSlots: 0,
+  ioHeavySlots: 1,
+  memoryBytes: 268435456
+});
+const REPAIR_WRITER_RESOURCES = Object.freeze({
   cpuSlots: 1,
   workerThreadSlots: 1,
   utilityProcessSlots: 0,
@@ -65,28 +86,16 @@ function preFundMptPolicy(actionKey) {
         ioHeavySlots: 0,
         memoryBytes: 33554432
       },
-      phase: repair ? WRITER_RESOURCES : {
-        cpuSlots: 1,
-        workerThreadSlots: 1,
-        utilityProcessSlots: 0,
-        ioHeavySlots: 1,
-        memoryBytes: 268435456
-      },
+      phase: repair ? REPAIR_WRITER_RESOURCES : IMPORT_WRITER_RESOURCES,
       compound: repair ? {
         topologyKey: 'topology.pre-fund:mpt-repair-import',
         childrenMax: 1,
-        childResource: WRITER_RESOURCES
+        childResource: PARSER_RESOURCES
       } : {
-          topologyKey: 'topology.pre-fund:mpt-import',
-          childrenMax: 4,
-          childResource: {
-            cpuSlots: 1,
-            workerThreadSlots: 1,
-            utilityProcessSlots: 0,
-            ioHeavySlots: 1,
-            memoryBytes: 268435456
-          }
-        },
+        topologyKey: 'topology.pre-fund:mpt-import',
+        childrenMax: 4,
+        childResource: PARSER_RESOURCES
+      },
       lowMemoryBehavior: repair ? 'queue' : 'downgrade-to-single',
       admissionPriority: 'normal'
     },
@@ -150,30 +159,67 @@ function preFundMptPolicy(actionKey) {
   });
 }
 
-function validateFileResult(item) {
+function validateFileResult(item, { allowManagedRepairEvidence = false } = {}) {
   if (!item || typeof item !== 'object' || Array.isArray(item) ||
       !['ok', 'failed'].includes(item.status) || typeof item.fileName !== 'string') return false;
   if (item.status === 'ok') {
-    return ['imported', 'replaced', 'noop'].includes(item.importStatus) &&
-      typeof item.sourceType === 'string' && Number.isSafeInteger(item.rowCount) && item.rowCount >= 0 &&
+    return Object.keys(item).sort().join(',') ===
+      'excludedRowCount,fileName,importStatus,rowCount,sourceType,status' &&
+      safeMptFileName(item.fileName) === item.fileName &&
+      ['imported', 'replaced', 'noop'].includes(item.importStatus) &&
+      ['MPT_INBOUND_GATEWAY', 'MPT_OUTBOUND_GATEWAY'].includes(item.sourceType) &&
+      Number.isSafeInteger(item.rowCount) && item.rowCount >= 0 &&
       Number.isSafeInteger(item.excludedRowCount) && item.excludedRowCount >= 0;
   }
-  return typeof item.code === 'string' && typeof item.message === 'string' && Array.isArray(item.detailLines);
+  const keys = Object.keys(item).sort().join(',');
+  if (!['code,detailLines,fileName,message,status',
+    'code,detailLines,fileName,managedRepairEvidence,message,status'].includes(keys) ||
+      safeMptFileName(item.fileName) !== item.fileName ||
+      !isSafeMptErrorCode(item.code) || !isSafeMptErrorText(item.message) ||
+      !isSafeMptDetailLines(item.detailLines)) return false;
+  if (!item.managedRepairEvidence) return true;
+  if (!allowManagedRepairEvidence) return false;
+  const evidence = item.managedRepairEvidence;
+  return evidence && typeof evidence === 'object' && !Array.isArray(evidence) &&
+    Object.keys(evidence).sort().join(',') === 'contentHash,rowErrorCount,sourceBatch,sourceType' &&
+    ['MPT_INBOUND_GATEWAY', 'MPT_OUTBOUND_GATEWAY'].includes(evidence.sourceType) &&
+    typeof evidence.sourceBatch === 'string' && evidence.sourceBatch.length > 0 &&
+    /^[a-f0-9]{64}$/.test(evidence.contentHash) &&
+    Number.isSafeInteger(evidence.rowErrorCount) && evidence.rowErrorCount > 0;
 }
 
-function validatePreFundMptParentResult(value) {
+function validatePreFundMptParentResult(value, actionKey) {
   // Native unit:done与job:done共用冻结的action validator key；unit结果是单文件
   // golden，parent结果是等长聚合，故validator必须精确接受这两个既有shape。
-  if (validateFileResult(value)) return true;
+  const repair = actionKey === PRE_FUND_MPT_REPAIR_ACTION;
+  if (!repair && actionKey !== PRE_FUND_MPT_IMPORT_ACTION) return false;
+  const validateActionFileResult = (item) => validateFileResult(item, {
+    allowManagedRepairEvidence: !repair
+  });
+  if (validateActionFileResult(value)) return true;
+  const expectedParentKeys = repair
+    ? 'excludedRowCount,failedCount,importedRowCount,results,status,successCount'
+    : 'failedCount,results,status,successCount';
   if (!value || typeof value !== 'object' || Array.isArray(value) || value.status !== 'ok' ||
-      !Array.isArray(value.results) || !value.results.every(validateFileResult) ||
+      Object.keys(value).sort().join(',') !== expectedParentKeys ||
+      !Array.isArray(value.results) || !value.results.every(validateActionFileResult) ||
       !Number.isSafeInteger(value.successCount) || !Number.isSafeInteger(value.failedCount) ||
       value.successCount + value.failedCount !== value.results.length ||
       value.successCount !== value.results.filter((item) => item.status === 'ok').length) return false;
-  for (const key of ['importedRowCount', 'excludedRowCount']) {
-    if (value[key] !== undefined && (!Number.isSafeInteger(value[key]) || value[key] < 0)) return false;
+  if (repair) {
+    for (const key of ['importedRowCount', 'excludedRowCount']) {
+      if (!Number.isSafeInteger(value[key]) || value[key] < 0) return false;
+    }
   }
   return true;
+}
+
+function validatePreFundMptImportResult(value) {
+  return validatePreFundMptParentResult(value, PRE_FUND_MPT_IMPORT_ACTION);
+}
+
+function validatePreFundMptRepairResult(value) {
+  return validatePreFundMptParentResult(value, PRE_FUND_MPT_REPAIR_ACTION);
 }
 
 const PRE_FUND_MPT_POLICIES = Object.freeze([
@@ -187,5 +233,7 @@ module.exports = {
   PRE_FUND_MPT_REPAIR_ACTION,
   PRE_FUND_MPT_STATIC_KEYS,
   preFundMptPolicy,
-  validatePreFundMptParentResult
+  validatePreFundMptImportResult,
+  validatePreFundMptParentResult,
+  validatePreFundMptRepairResult
 };

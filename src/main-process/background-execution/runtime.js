@@ -19,7 +19,9 @@ const {
 } = require('../toolbox-background/policies');
 const {
   PRE_FUND_MPT_POLICIES,
-  validatePreFundMptParentResult
+  PRE_FUND_MPT_REPAIR_ACTION,
+  validatePreFundMptImportResult,
+  validatePreFundMptRepairResult
 } = require('../pre-fund-reconciliation/mpt-import/policies');
 
 const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
@@ -56,7 +58,9 @@ function createBackgroundExecutionRuntime(options = {}) {
   const validatorEntries = {};
   for (const policy of BACKGROUND_EXECUTION_POLICIES) {
     const resultValidator = policy.moduleId === 'pre-fund'
-      ? validatePreFundMptParentResult
+      ? (policy.actionKey === PRE_FUND_MPT_REPAIR_ACTION
+          ? validatePreFundMptRepairResult
+          : validatePreFundMptImportResult)
       : (policy.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
           ? validateToolboxMultiGenerationResult
           : (value) => validateToolboxGenerationResult(value, policy.actionKey));
@@ -93,7 +97,7 @@ function createBackgroundExecutionRuntime(options = {}) {
   });
   policyRegistry.freeze();
   // E05-B capability最大单job拓扑为import base32MiB + Writer256MiB + Parser256MiB；
-  // repair同样以Writer phase + exactly-one Parser child申报CompoundLease。
+  // repair按冻结fixture申报Writer192MiB + exactly-one Parser256MiB child。
   const memoryBudget = Math.max(768 * 1024 * 1024, Math.floor(os.totalmem() / 4));
   const resourceGovernor = createResourceGovernor({
     budgets: {
@@ -113,7 +117,8 @@ function createBackgroundExecutionRuntime(options = {}) {
     diagnostics: options.diagnostics,
     executionTimeoutMs: options.executionTimeoutMs,
     shutdownTimeoutMs: options.shutdownTimeoutMs || 5000,
-    workerDurableCoordinator: options.workerDurableCoordinator
+    workerDurableCoordinator: options.workerDurableCoordinator,
+    ...(options.workerThreadAdapter ? { workerThreadAdapter: options.workerThreadAdapter } : {})
   });
   return Object.freeze({
     start(request) {

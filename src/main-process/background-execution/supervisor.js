@@ -556,11 +556,15 @@ function createExecutionSupervisor(options = {}) {
 
     function settleUnfinishedUnit(unit, outcome, safeError) {
       if (unit.terminalSettled) return;
+      let cleanupOwnership = null;
       if (isRecoveryInterruptedUnit(unit)) {
         unit.state = 'interrupted';
       } else if (!['done', 'error', 'cancelled'].includes(unit.state)) {
         // transport终止前已真正派发的unit是当前普通file失败；尚未派发的unit
         // 没有业务执行，只能按父级取消收口。两者都不得冒充资金结果不确定。
+        if (outcome === 'transport-lost' && unit.state === 'running') {
+          cleanupOwnership = 'main';
+        }
         unit.state = outcome === 'cancelled' || unit.state !== 'running'
           ? 'cancelled'
           : 'error';
@@ -568,7 +572,8 @@ function createExecutionSupervisor(options = {}) {
       settleUnit(unit, {
         status: unit.state,
         error: safeError,
-        inspection: unit.inspection
+        inspection: unit.inspection,
+        ...(cleanupOwnership ? { cleanupOwnership } : {})
       });
     }
 

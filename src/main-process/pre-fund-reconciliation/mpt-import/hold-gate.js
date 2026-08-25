@@ -72,13 +72,13 @@ function createPreFundMptHoldGate(options) {
   }
 
   function assertDeleteDateRange(service, payload = {}) {
-    // 复用业务层校验日期/sourceType，再只读枚举真正受影响的batch scope。
-    service.countTempByDateRange(payload);
-    const identities = service.listTempBatches()
-      .filter((batch) => batch.sourceType === payload.sourceType &&
-        batch.sourceDate >= payload.start && batch.sourceDate <= payload.end)
-      .map((batch) => ({ sourceType: batch.sourceType, sourceBatch: batch.sourceBatch }));
-    return assertIdentities(identities);
+    if (!service || typeof service.inspectTempDateRange !== 'function') {
+      throw new TypeError('PreFund date-range Hold gate缺少业务归一化inspector');
+    }
+    // scope枚举与后续删除共享业务层权威归一化后的同一range，禁止raw payload漂移。
+    const inspected = service.inspectTempDateRange(payload);
+    assertIdentities(inspected.identities);
+    return inspected.range;
   }
 
   return Object.freeze({

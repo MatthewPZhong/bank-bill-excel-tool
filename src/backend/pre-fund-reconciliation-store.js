@@ -1043,6 +1043,10 @@ class PreFundReconciliationStore {
     return { batchCount, rowCount };
   }
 
+  normalizeDateRange(startDate, endDate) {
+    return Object.freeze(normalizeDateRange(startDate, endDate));
+  }
+
   async deleteByDateRange(startDate, endDate, options = {}) {
     const range = normalizeDateRange(startDate, endDate);
     const sourceType = normalizeSourceTypeFilter(options);

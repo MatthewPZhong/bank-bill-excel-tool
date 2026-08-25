@@ -34,15 +34,26 @@ function createWorkerDurableCoordinator(options) {
     ? options.conflictScopeGate
     : null;
 
-  function writeTransition(transition, safePayload) {
-    const reserved = requestOwnerRepository.reserveTransitionRequest({
+  function reserveTransition(transition, safePayload) {
+    return requestOwnerRepository.reserveTransitionRequest({
       requestKey: transitionRequestKey(transition),
       transition,
       safePayload
     });
+  }
+
+  function writeTransition(transition, safePayload) {
+    const reserved = reserveTransition(transition, safePayload);
     return recoveryControlRepository.runInControlTransaction(
       (tx) => tx.transitionWithRecoveryEvent(reserved)
     );
+  }
+
+  function writeTransitions(entries) {
+    const reserved = entries.map(({ transition, safePayload }) =>
+      reserveTransition(transition, safePayload));
+    return recoveryControlRepository.runInControlTransaction((tx) =>
+      reserved.map((request) => tx.transitionWithRecoveryEvent(request)));
   }
 
   function exactCritical(input) {
@@ -133,24 +144,36 @@ function createWorkerDurableCoordinator(options) {
       input.taskRunId
     );
     if (!existing) {
-      writeTransition({
-        entityKind: 'critical-intent',
-        command: 'create-prepared',
-        input: {
-          contractVersion: 1,
+      writeTransitions([{
+        transition: {
+          entityKind: 'critical-intent',
+          command: 'create-prepared',
+          input: {
+            contractVersion: 1,
+            intentId: prepared.intentId,
+            actionKey: input.actionKey,
+            operationKey: prepared.fileOperationKey,
+            taskRunId: input.taskRunId,
+            jobId: input.jobId,
+            coordinationKind: 'worker-critical',
+            conflictScopeKey: prepared.conflictScopeKey,
+            inspectorKey: input.policy.commit.inspectorKey,
+            evidenceVersion: 1,
+            evidenceHash: prepared.evidenceHash,
+            boundedEvidence: prepared.boundedEvidence
+          }
+        },
+        safePayload: { state: 'prepared', unitId: input.unitId }
+      }, {
+        transition: {
+          entityKind: 'critical-intent',
+          command: 'mark-acked',
           intentId: prepared.intentId,
-          actionKey: input.actionKey,
-          operationKey: prepared.fileOperationKey,
-          taskRunId: input.taskRunId,
-          jobId: input.jobId,
-          coordinationKind: 'worker-critical',
-          conflictScopeKey: prepared.conflictScopeKey,
-          inspectorKey: input.policy.commit.inspectorKey,
-          evidenceVersion: 1,
-          evidenceHash: prepared.evidenceHash,
-          boundedEvidence: prepared.boundedEvidence
-        }
-      }, { state: 'prepared', unitId: input.unitId });
+          expectedState: 'prepared',
+          patch: { admission: 'main-persisted-before-worker-ack' }
+        },
+        safePayload: { state: 'acked', unitId: input.unitId }
+      }]);
       existing = readRepository.getCriticalIntentById(prepared.intentId);
     }
     assertExistingExact(existing, input, prepared);

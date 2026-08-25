@@ -343,6 +343,7 @@ test('worker-durable pre-critical transport loss只收口普通file error，不�
   assert.equal(await terminalPromise.dispatchAccepted, true);
   const [unit, result] = await Promise.all([terminalPromise, control.promise]);
   assert.equal(unit.status, 'error');
+  assert.equal(unit.cleanupOwnership, 'main');
   assert.equal(unit.inspection, null);
   assert.equal(inspectCount, 0);
   assert.equal(result.outcome, 'transport-lost');
@@ -385,10 +386,49 @@ test('worker-durable ACK后transport loss且inspect not-committed仍是普通fil
   assert.equal(await terminalPromise.dispatchAccepted, true);
   const [unit, result] = await Promise.all([terminalPromise, control.promise]);
   assert.equal(unit.status, 'error');
+  assert.equal(unit.cleanupOwnership, 'main');
   assert.equal(unit.inspection.outcome, 'not-committed');
   assert.equal(inspectCount, 1);
   assert.equal(result.outcome, 'transport-lost');
   assert.equal(result.terminalSource, 'unexpected-exit');
+});
+
+test('worker-durable prepare/ack持久化失败不发ACK且unit保持普通error', async () => {
+  const coordinator = {
+    async prepareAndAck() {
+      throw Object.assign(new Error('atomic prepare/ack failed'), { code: 'TEST_MARK_ACKED_FAILED' });
+    },
+    async observeReceipt() {},
+    async settleCommitted() {},
+    async resolveUncertain() {
+      throw new Error('Worker未收到ACK，不应inspect');
+    }
+  };
+  const fake = fakeAdapter({
+    onSend(message, callbacks) {
+      if (message.operation === 'unit:start') {
+        callbacks.onMessage(eventFor(message, 'critical:ready', 1, {
+          critical: { fileOperationKey: 'parent/file/000000' }
+        }, message.unitId));
+      }
+    }
+  });
+  const { supervisor } = harness(fake, makeWorkerDurable, undefined, {
+    workerDurableCoordinator: coordinator
+  });
+  const control = supervisor.start(request({
+    actionKey: 'test:worker-durable',
+    deferUnitStart: true,
+    units: [{ unitId: 'file:000000', input: { fileIndex: 0 } }]
+  }));
+  const terminalPromise = control.startUnit('file:000000');
+  assert.equal(await terminalPromise.dispatchAccepted, true);
+  const [unit, result] = await Promise.all([terminalPromise, control.promise]);
+  assert.equal(unit.status, 'error');
+  assert.equal(unit.cleanupOwnership, 'main');
+  assert.equal(result.outcome, 'transport-lost');
+  assert.equal(result.terminalSource, 'protocol-error');
+  assert.deepEqual(fake.state.sent.map((message) => message.operation), ['job:start', 'unit:start']);
 });
 
 test('worker-durable ACK后unit error必须inspect；committed-lost阻断普通job完成并收口unit promise', async () => {

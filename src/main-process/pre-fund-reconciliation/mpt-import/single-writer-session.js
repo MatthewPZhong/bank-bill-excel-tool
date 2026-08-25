@@ -7,18 +7,22 @@ const { readAndValidateMptFileSpool } = require('./spool-reader');
 const { deriveFileIdentity, normalizeFileIndex } = require('./spool-contract');
 const { cleanupMptFileSpool, cleanupMptSpoolParents } = require('./spool-writer');
 const { readParserOutcome } = require('./parser-outcome');
+const { safeMptFileName, toSafeMptErrorFields } = require('./file-result-safety');
 
 function writerError(code, message) {
   return Object.assign(new Error(message), { code });
 }
 
 function errorResult(fileName, error, extra = {}) {
+  const safeError = toSafeMptErrorFields(error, {
+    fallbackCode: 'PREFUND_WRITER_FILE_FAILED',
+    fallbackMessage: 'PreFund Writer处理当前文件失败',
+    maxDetailLines: 100
+  });
   return Object.freeze({
     status: 'failed',
-    fileName: path.basename(fileName || ''),
-    code: error && error.code ? error.code : 'pre-fund-import-failed',
-    message: error && error.message ? error.message : String(error),
-    detailLines: Array.isArray(error && error.detailLines) ? error.detailLines : [],
+    fileName: safeMptFileName(fileName),
+    ...safeError,
     ...extra
   });
 }
@@ -140,7 +144,8 @@ function createSingleWriterSession(options) {
       if (parserOutcome.kind === 'parser-error') parserFileResult = parserOutcome.fileResult;
     }
     if (parserFileResult) {
-      let failed = Object.freeze({ ...parserFileResult });
+      // sealed sidecar的cleanup元数据只用于当前owner收口，不进入公开file result。
+      let failed = errorResult(parserFileResult.fileName, parserFileResult);
       try { cleanupUnit(unit); } catch (cleanupError) {
         failed = errorResult(unit.spool && unit.spool.source.filePath, cleanupError);
       }

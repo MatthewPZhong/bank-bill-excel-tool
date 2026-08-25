@@ -188,6 +188,7 @@ async function executeManagedPreFundMptImport(rawOptions) {
   await control.ready;
   const executionSignal = control.promise.then((execution) => ({ kind: 'execution', execution }));
   const writerOwned = new Set();
+  const mainCleanupAttempted = new Set();
   const cleanupMainOwnedFile = options.cleanupMainOwnedFile || ((spool) => {
     cleanupMptFileSpool(spool);
     cleanupMptSpoolParents(spool);
@@ -196,7 +197,8 @@ async function executeManagedPreFundMptImport(rawOptions) {
   function cleanupMainOwned(predicate) {
     let cleanupFailure = null;
     for (let index = 0; index < inputs.length; index += 1) {
-      if (!predicate(index)) continue;
+      if (!predicate(index) || mainCleanupAttempted.has(index)) continue;
+      mainCleanupAttempted.add(index);
       try {
         cleanupMainOwnedFile(inputs[index].spool);
       } catch (error) { cleanupFailure ||= error; }
@@ -211,6 +213,10 @@ async function executeManagedPreFundMptImport(rawOptions) {
     }
     if (await terminalPromise.dispatchAccepted) writerOwned.add(fileIndex);
     const terminal = await terminalPromise;
+    if (terminal.cleanupOwnership === 'main') {
+      writerOwned.delete(fileIndex);
+      cleanupMainOwned((index) => index === fileIndex);
+    }
     if (terminal.status === 'interrupted') {
       const error = managedError(
         'PREFUND_WRITER_UNIT_INTERRUPTED',

@@ -17953,8 +17953,8 @@ function registerPreFundReconciliationHandlers() {
       if (!lock.acquired) return { status: 'busy', message: lock.message };
       try {
         const service = getPreFundReconciliationService();
-        preFundMptHoldGate.assertDeleteDateRange(service, payload);
-        const result = await service.deleteTempByDateRange(payload);
+        const normalizedRange = preFundMptHoldGate.assertDeleteDateRange(service, payload);
+        const result = await service.deleteTempByDateRange(normalizedRange);
         return { status: 'ok', deleted: result.deletedRows, ...result };
       } catch (error) {
         return preFundFailureResult(error);
