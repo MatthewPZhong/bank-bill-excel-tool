@@ -112,7 +112,7 @@ test('Windows assisted per-user installer 锁定 NSIS access-violation 修复版
 test('packaged background canary 仅在 GitHub-hosted Windows 的 RUNNER_TEMP 写入，并审计 exact 产品身份', () => {
   const harness = read('scripts/run-windows-packaged-background-canary.ps1');
   const manifest = JSON.parse(read('package.json'));
-  const assistedInstaller = read('node_modules/app-builder-lib/templates/nsis/assistedInstaller.nsh');
+  const multiUserInstaller = read('node_modules/app-builder-lib/templates/nsis/multiUser.nsh');
   const { UUID } = require('builder-util-runtime');
   const nsisTarget = read('node_modules/app-builder-lib/out/targets/nsis/NsisTarget.js');
   const electronBuilderNamespace = UUID.parse('50e065bc-3134-11e6-9bab-38c9862bdaf3');
@@ -207,8 +207,8 @@ test('packaged background canary 仅在 GitHub-hosted Windows 的 RUNNER_TEMP �
     /\$setupExitCode = Invoke-SilentInstaller[\s\S]*Get-SafeSetupFailureDiagnostic[\s\S]*BACKGROUND_EXECUTION_PACKAGED_CANARY_SETUP_DIAGNOSTIC=\$setupDiagnostic[\s\S]*Throw-SafeFailure 'SETUP_NONZERO_EXIT'/
   );
   assert.match(
-    assistedInstaller,
-    /\$\{StrContains\} \$0 "\$\{APP_FILENAME\}" \$INSTDIR[\s\S]*StrCpy \$INSTDIR "\$INSTDIR\\\$\{APP_FILENAME\}"/
+    multiUserInstaller,
+    /!insertmacro GetDParameter \$R0[\s\S]*\$\{If\} \$R0 != ""[\s\S]*StrCpy \$INSTDIR \$R0/
   );
   assert.match(harness, /\$installContainer = Join-Path \$workRoot 'installed'/);
   assert.match(
@@ -217,12 +217,12 @@ test('packaged background canary 仅在 GitHub-hosted Windows 的 RUNNER_TEMP �
   );
   assert.match(
     harness,
-    /Invoke-SilentInstaller -SetupPath \$setupFrozen -DestinationRoot \$installContainer -EnvironmentRoot \$installerEnvironmentRoot/
+    /Invoke-SilentInstaller -SetupPath \$setupFrozen -DestinationRoot \$installRoot -EnvironmentRoot \$installerEnvironmentRoot/
   );
-  assert.doesNotMatch(harness, /Invoke-SilentInstaller -SetupPath \$setupFrozen -DestinationRoot \$installRoot/);
+  assert.doesNotMatch(harness, /Invoke-SilentInstaller -SetupPath \$setupFrozen -DestinationRoot \$installContainer/);
   assert.doesNotMatch(harness, /\$installRoot = Join-Path \$workRoot \$productName/);
   assert.match(harness, /SETUP_FREEZE_IDENTITY_MISMATCH/);
-  assert.match(harness, /Invoke-SilentInstaller -SetupPath \$setupFrozen -DestinationRoot \$installContainer/);
+  assert.match(harness, /Invoke-SilentInstaller -SetupPath \$setupFrozen -DestinationRoot \$installRoot/);
   assert.match(harness, /Select-InstalledExecutable[\s\S]*Invoke-PackagedCanaryVariant -Executable \$installedExecutable/);
   assert.match(harness, /PORTABLE_FREEZE_IDENTITY_MISMATCH/);
   assert.match(harness, /Invoke-PackagedCanaryVariant -Executable \$portableFrozen/);

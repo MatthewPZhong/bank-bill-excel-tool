@@ -152,6 +152,42 @@
 | 完整本地门禁 | `npm run release-check` PASS：lint/smoke PASS，unit `6018/6021`（0 fail、3 skip），integration `51/51` scripts / `2455/2455` assertions | 同 major 构建依赖升级未造成可见产品、业务、资金或恢复回归；未运行 `check-vars`/`scan:vars` |
 | 冻结合同包与变更面 | checksum `69/69 PASS`；本 follow-up 仅修改 package/lock、Windows build contract test 与本实施记录，未改 `src/`、workflow、canary harness 或 production gate | 冻结 spec/techdoc/资金与恢复合同未漂移；真实 Windows Setup/portable 结果仍由新 CI 决定 |
 
+## PR #175 Windows silent `/D` install-root Follow-up（2026-08-25）
+
+### Task Brief
+
+- Goal：修复 `electron-builder/app-builder-lib 26.15.7` 消除 native crash 后，packaged canary 在 Setup 阶段约 14 秒输出通用 `CANARY_HARNESS_FAILED` 的问题。
+- Context：run `32809372865` / build job `97692416380` 的 smoke-test SUCCESS，build 成功后 canary 无其他诊断文本，仅输出通用失败 JSON。
+- Constraints：保持 assisted `oneClick=false`、`/currentuser`、exact 产品身份、Setup/installed/portable/卸载审计、失败关闭、固定隐私安全码、production enablement=false 与资金/恢复人工红线；不运行 `check-vars`/`scan:vars`。
+- Done when：`/D` 与 harness 审计的 final install root 一致；定向测试、ESLint、checksum、`release-check`、diff/self-review PASS；真实 Windows canary 验证 Setup/installed/portable/uninstall 全链。
+
+### 已确认事实与 Unknowns Register
+
+| 事实/未知 | 类型 | 影响 | 处理 | 证据与当前决定 |
+| --- | --- | --- | --- | --- |
+| 通用码只能来自没有 `safeCode` 的 PowerShell/.NET 异常 | 事实 | 高 | PROBE | 顶层 catch 仅在 `Exception.Data` 无 `safeCode` 时输出 `CANARY_HARNESS_FAILED`；job 无任意异常文本可用 |
+| `/S` 下 `instFilesPre` 不执行，`/D` 被当作最终安装目录 | 事实 | 高 | PROBE | NSIS 官方手册 §4.12 明确 silent mode 不调用 page-specific callback，且 `/D` 直接指定 installation directory；26.15.7 `multiUser.nsh` 的 `GetDParameter` 直接 `StrCpy $INSTDIR $R0` |
+| 失败 head 的 harness 传 `installContainer`，却在 `installContainer/productName` 下选 executable/卸载 | 事实 | 高 | PROBE | `Invoke-SilentInstaller ... -DestinationRoot $installContainer` 与 `Select-InstalledExecutable -InstallRoot $installRoot` 不一致；正常 Setup 落在 container 后，对不存在子目录的 `Get-ChildItem` 会抛无 safeCode 的 PathNotFound，与本次唯一输出完全一致 |
+| 修复后真实 Windows 的 Setup/installed/portable/uninstall 是否全 PASS | 动态平台未知 | 高 | PROBE | 本机无法执行 Windows 产物；保持 CI fail closed，由新 GitHub-hosted Windows canary 消除 |
+
+无新 BLOCK 问题；不改产品、数据、资金、恢复或公开接口合同。
+
+### Decision
+
+| 决策 | 原因/证据 | 放弃方案与边界 |
+| --- | --- | --- |
+| 继续以 `installContainer/productName` 作为唯一 exact install root，并将该根目录直接传给 silent `/D` | silent NSIS 不执行追加 APP_FILENAME 的 page callback；传入最终根目录使 Setup、executable 选择、卸载和身份审计回到同一路径 | 不用 `/allusers`、perMachine、oneClick、目录 fallback 或忽略异常绕过 |
+
+### Evidence
+
+| 检查 | 结果 | 证明/边界 |
+| --- | --- | --- |
+| GitHub Actions run `32809372865` / build job `97692416380` | smoke-test SUCCESS；packaged canary 约 14 秒后仅输出 `CANARY_HARNESS_FAILED`，无 setup diagnostic、cleanup diagnostic 或任意异常文本 | 失败是 harness 无 safeCode 路径，不得依赖日志中不存在的隐藏细节 |
+| 根因定向合同测试 | `node --test tests/unit/windows-build-contract.test.js`：`5 PASS / 2 Windows-only SKIP`，0 fail | 锁定 26.15.7 `/D` exact-root 模板、harness 传 final root，并禁止退回 container |
+| 最终定向回归与静态门禁 | 4 个 hardening test files：`71 PASS / 2 Windows-only SKIP`；目标 ESLint、`git diff --check` PASS | 安装根合同、资源生命周期、Parser 取消与资金 receipt 回归均通过；本机不伪造 Windows 动态结果 |
+| 最终完整门禁 | `npm run release-check` PASS：lint/smoke PASS，unit `6018/6021`（0 fail、3 skip），integration `51/51` scripts / `2455/2455` assertions | 核心修复和删除不可达防御后全仓再验证；未运行 `check-vars`/`scan:vars` |
+| 冻结合同包与最终变更面 | checksum `69/69 PASS`；纯计时 `rules/integration-test-policy.md` 生成差异已恢复，最终仅 harness、Windows contract test 和本记录 3 文件 | 未改 `src/`、workflow、package/lock、业务/资金/恢复合同或 production gate |
+
 ## Final Blindspot Review
 
 - 生命周期：正常、错误、取消和重复 `close/terminate` 均收敛到同一个 termination barrier；Supervisor 先等 transport cleanup，再释放 CompoundLease。
@@ -162,12 +198,13 @@
 - CI 失败修复边界：仅调整 packaged canary harness 的 launcher/report 等待、错误优先级和有界 Setup 诊断；未改产品代码、金额/币种/身份/幂等/恢复语义、production enablement 或人工资金红线。
 - RSS 盲区：独立中位容差只覆盖 MB rounding 的理论传播上界；paired budget/linear margin 与每样本 150MB ceiling 仍严格。稳定 `48→97`、`49→98`、`32→73/96`、错配及线性反例均由 self-check/单测锁定为 FAIL；未按 Windows、run ID 或当前样本硬编码。
 - NSIS 依赖盲区：本 follow-up 不改安装模式或放宽 canary，只把同 major 构建链提升到已移除 `System::Store` 竞态的 `26.15.7`；本机静态/全仓门禁不能替代真实 Windows 安装，故新 CI 仍是 merge 前硬证据。
+- Silent install-root 盲区：`/S` 不执行 page callback，harness 现将带 exact productName 的 final root 直接传给 `/D`；不存在子目录 fallback，仍保持失败关闭。
 
 ## Remaining Unknowns
 
 | 未知 | 处理 | 负责人/下一步 | 合并影响 |
 | --- | --- | --- | --- |
 | Windows-only 提前退出动态探针 | PROBE | GitHub-hosted Windows CI | 本地静态/跨平台测试通过后可提 Draft；合并前需 CI PASS |
-| `electron-builder/app-builder-lib 26.15.7` 下真实 Windows Setup/portable 结果 | PROBE | 新 head 的 GitHub-hosted Windows packaged canary | 当前不得把非零当成功；Setup/portable 全部 PASS 前不合并 |
+| exact silent `/D` 修复后的真实 Windows Setup/installed/portable/uninstall 结果 | PROBE | 新 head 的 GitHub-hosted Windows packaged canary | 不得把非零或缺失身份/卸载审计当成成功；全部 PASS 前不合并 |
 | RSS 取整组合修复后的 Windows 结果 | PROBE | 新 head 的 GitHub-hosted Windows CI；必须先通过完整 smoke/release-check 才进入 packaged build | 阻断 Ready/merge，不阻断本地修复提交 |
 | 真实 Windows Setup/portable packaged canary 与资金红线签字 | BLOCK | 既有 R3 人工/Windows gate | 本 PR 不改变其 `PENDING_HUMAN_REVIEW` 状态，仍阻塞 production enablement |

@@ -534,8 +534,8 @@ function Invoke-WindowsPackagedBackgroundCanary {
   }
   Set-Content -LiteralPath (Join-Path $workRoot '.owned-by-packaged-background-canary') -Value $runId -Encoding ascii -NoNewline
 
-  # /D 只传 owned ASCII 容器，让 assisted NSIS 按模板追加 APP_FILENAME；脚本仍以
-  # 明确的产品子目录做选择、卸载和身份审计，避免把 Unicode 产品名塞进原始 /D 参数。
+  # /S 会跳过 assisted NSIS 的 page callback，因此 /D 必须直接给出带产品名的最终安装根。
+  # 不依赖 instFilesPre 追加 APP_FILENAME，确保选择、卸载与身份审计指向同一根目录。
   $installContainer = Join-Path $workRoot 'installed'
   $installRoot = Assert-RunnerTempChild -RunnerTemp $workRoot -Candidate (Join-Path $installContainer $productName) -DirectChild $false
   $installerEnvironmentRoot = Join-Path $workRoot 'installer-environment'
@@ -553,7 +553,7 @@ function Invoke-WindowsPackagedBackgroundCanary {
       Throw-SafeFailure 'SETUP_FREEZE_IDENTITY_MISMATCH'
     }
     Assert-ProductIdentityAbsent -ProductName $productName -EffectiveUninstallDisplayName $effectiveUninstallDisplayName -UninstallRegistryKey $expectedUninstallRegistryKey -FailureCode 'PRODUCT_IDENTITY_PREEXISTING'
-    $setupExitCode = Invoke-SilentInstaller -SetupPath $setupFrozen -DestinationRoot $installContainer -EnvironmentRoot $installerEnvironmentRoot
+    $setupExitCode = Invoke-SilentInstaller -SetupPath $setupFrozen -DestinationRoot $installRoot -EnvironmentRoot $installerEnvironmentRoot
     if ($setupExitCode -ne 0) {
       $setupDiagnostic = Get-SafeSetupFailureDiagnostic `
         -ExitCode $setupExitCode `
