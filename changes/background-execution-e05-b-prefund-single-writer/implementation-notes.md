@@ -24,6 +24,7 @@
 | Parser sidecar、Writer file result与parent validator复用同一safe error边界，并按import/repair exact public shape校验。 | sealed读取与`job:done`都属于独立privacy边界；构造器过滤不能替代消费者exact validation。 | 只过滤Parser message；parent浅层shape；复制多套path regex。 | 拒绝unsafe code、单段/多段POSIX、Windows、UNC与额外字段；正常URL/自然语言斜杠保留；cleanup内部字段不外泄。 |
 | date-range Hold gate与删除共享service/store权威归一化range。 | raw payload与trim后的实际删除范围不一致可绕过active Hold。 | gate与delete各自比较原始字符串。 | 带空白的合法payload仍按真实受影响batch scope阻断，范围外batch不误阻。⚠️ 资金红线，请人工复核。 |
 | finance-safe-v1通过既有action result-validator binding注入PreFund exact domain value delegate。 | 合法超长十进制sequence、batch suffix、UUID/file operation与opaque intent SHA会被通用full-account启发式误杀，且receipt/result属于COMMIT后边界。 | 在generic error codec内硬编码MPT grammar；全局放行长数字或hash；仅修`safeMptFileName`。 | 公共privacy walker保持业务无关；仅PreFund action的exact field+grammar放行，message/detailLines与arbitrary account-like identifier继续拒绝。 |
+| file operation privacy grammar只接受两个冻结TaskPolicy prefix。 | 真实parent operation是`taskKey:taskRunId`而非裸UUID。 | 放行裸UUID或任意task prefix。 | 仅`pre-fund-reconciliation:import-mpt:<uuid>/file/NNNNNN`与`pre-fund-reconciliation:mpt-errors:repair:<uuid>/file/NNNNNN`可通过，并与同payload fileIndex交叉校验。 |
 
 ## Assumptions
 
@@ -59,6 +60,7 @@
 | long sequence完整managed protocol回归 | PASS | canonical long `fileName/sourceFileSequence/sourceBatch`、UUID `datasetId/producerTaskRunId/fileOperationKey`与deterministic opaque `intentId`贯穿critical-ready→ACK→receipt→unit/job done；COMMIT后validator不误报，结果保留legacy basename。 |
 | finance-safe窄域反例 | PASS | arbitrary account-like filename、错误sequence/fileIndex、以及相同数字或opaque ID放入message时仍为`PRIVACY_VALUE_FORBIDDEN`；generic profile未全局放行MPT值。 |
 | long numeric batch strict parity | PASS | `managedRepairEvidence`无sourceDate时仍以exact sourceType+sourceBatch grammar通过完整job result，legacy/managed row-error detail与repair shape一致。 |
+| production TaskLifecycle operation identity | PASS | deterministic digit-run UUID使用真实import `taskKey:taskRunId/file`贯穿完整managed protocol；repair prefix正例通过，裸UUID、任意prefix、run task与fileIndex mismatch均拒绝。 |
 
 ## Remaining Unknowns
 

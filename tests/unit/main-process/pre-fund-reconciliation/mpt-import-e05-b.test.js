@@ -1102,7 +1102,10 @@ test('canonical MPT超长sequence fileName保持公开parity，任意账号样�
   });
   const opaqueIntentId =
     'prefund-intent-cf114ee865cd8ef8b5b4e36eb724822113685f6984de474104e52c9166abbb6e';
-  const fileOperationKey = '4bcc9162-9748-4470-b9d0-91a4233a8fb7/file/000000';
+  const fileOperationKey =
+    'pre-fund-reconciliation:import-mpt:4bcc9162-9748-4470-b9d0-91a4233a8fb7/file/000000';
+  const repairFileOperationKey =
+    'pre-fund-reconciliation:mpt-errors:repair:4bcc9162-9748-4470-b9d0-91a4233a8fb7/file/000000';
   const producerTaskRunId = 'f1234567-1234-4123-8123-123456789012';
   assert.doesNotThrow(() => assertFinanceSafeValue({
     intentId: opaqueIntentId,
@@ -1110,6 +1113,11 @@ test('canonical MPT超长sequence fileName保持公开parity，任意账号样�
     operationKey: fileOperationKey,
     datasetId: 'a1234567-1234-4123-8123-123456789012',
     producerTaskRunId,
+    fileIndex: 0
+  }, 'finance-safe-v1', '/', { allowValue: allowMptFinanceSafeValue }));
+  assert.doesNotThrow(() => assertFinanceSafeValue({
+    fileOperationKey: repairFileOperationKey,
+    operationKey: repairFileOperationKey,
     fileIndex: 0
   }, 'finance-safe-v1', '/', { allowValue: allowMptFinanceSafeValue }));
   assert.throws(() => assertFinanceSafeValue({
@@ -1123,6 +1131,18 @@ test('canonical MPT超长sequence fileName保持公开parity，任意账号样�
   }, 'finance-safe-v1', '/', { allowValue: allowMptFinanceSafeValue }), {
     code: 'PRIVACY_VALUE_FORBIDDEN'
   }, 'fileOperationKey suffix必须与同payload fileIndex一致');
+  for (const rejectedOperationKey of [
+    '4bcc9162-9748-4470-b9d0-91a4233a8fb7/file/000000',
+    'other-task:4bcc9162-9748-4470-b9d0-91a4233a8fb7/file/000000',
+    'pre-fund-reconciliation:run:4bcc9162-9748-4470-b9d0-91a4233a8fb7/file/000000'
+  ]) {
+    assert.throws(() => assertFinanceSafeValue({
+      fileOperationKey: rejectedOperationKey,
+      fileIndex: 0
+    }, 'finance-safe-v1', '/', { allowValue: allowMptFinanceSafeValue }), {
+      code: 'PRIVACY_VALUE_FORBIDDEN'
+    });
+  }
   assert.throws(() => assertFinanceSafeValue({
     sourceFileName: longFileName,
     sourceFileSequence: '99999999999999999999',
@@ -1270,7 +1290,8 @@ test('managed Writer以canonical超长sequence形成receipt后unit与parent vali
         taskKey: 'pre-fund-reconciliation:import-mpt',
         moduleId: 'pre-fund',
         parentRunId: 'managed-long-sequence-parent',
-        operationKey: '4bcc9162-9748-4470-b9d0-91a4233a8fb7'
+        operationKey:
+          'pre-fund-reconciliation:import-mpt:4bcc9162-9748-4470-b9d0-91a4233a8fb7'
       },
       production: false
     });

@@ -11,7 +11,7 @@ const ABSOLUTE_PATH_PATTERN = /(?:file:\/\/|(?:^|[\s：:=（(])(?:[A-Za-z]:[\\/]
 const PREFUND_INTENT_ID_PATTERN = /^prefund-intent-[a-f0-9]{64}$/;
 const UUID_V4_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const PREFUND_FILE_OPERATION_PATTERN =
-  /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\/file\/[0-9]{6}$/;
+  /^pre-fund-reconciliation:(?:import-mpt|mpt-errors:repair):[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\/file\/[0-9]{6}$/;
 
 function isSafeMptErrorCode(value) {
   return typeof value === 'string' && SAFE_ERROR_CODE_PATTERN.test(value);
