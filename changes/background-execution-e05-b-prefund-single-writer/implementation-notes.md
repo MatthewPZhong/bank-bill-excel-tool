@@ -25,6 +25,10 @@
 | date-range Hold gate与删除共享service/store权威归一化range。 | raw payload与trim后的实际删除范围不一致可绕过active Hold。 | gate与delete各自比较原始字符串。 | 带空白的合法payload仍按真实受影响batch scope阻断，范围外batch不误阻。⚠️ 资金红线，请人工复核。 |
 | finance-safe-v1通过既有action result-validator binding注入PreFund exact domain value delegate。 | 合法超长十进制sequence、batch suffix、UUID/file operation与opaque intent SHA会被通用full-account启发式误杀，且receipt/result属于COMMIT后边界。 | 在generic error codec内硬编码MPT grammar；全局放行长数字或hash；仅修`safeMptFileName`。 | 公共privacy walker保持业务无关；仅PreFund action的exact field+grammar放行，message/detailLines与arbitrary account-like identifier继续拒绝。 |
 | file operation privacy grammar只接受两个冻结TaskPolicy prefix。 | 真实parent operation是`taskKey:taskRunId`而非裸UUID。 | 放行裸UUID或任意task prefix。 | 仅`pre-fund-reconciliation:import-mpt:<uuid>/file/NNNNNN`与`pre-fund-reconciliation:mpt-errors:repair:<uuid>/file/NNNNNN`可通过，并与同payload fileIndex交叉校验。 |
+| Worker `commit:receipt`只作为提交观察信号，Main在`mark-committed`前读取Side DB authoritative receipt并复用canonical Inspector。 | Worker payload不是资金提交权威；Intent、消息receipt、Side DB receipt、batch lineage与实际行数必须唯一一致。 | 只核对receipt id/action/operation/task；只信Worker payload后持久mark-committed。 | inserted/replaced/noop均做exact shape、identity、dataset/version与真实业务证据交叉核验；冲突继续由唯一Inspector判定，不能被后续`unit:done/job:done`覆盖。⚠️ 资金红线，请人工复核。 |
+| worker-durable unit一旦由Inspector判为`committed-lost`或`unknown`，Supervisor立即以parent recovery终态收口。 | 非末unit若只settle terminal Promise，单Writer仍等待下一unit且CompoundLease无界占用。 | 由managed调用层补cancel；等待Worker自行退出。 | Supervisor强制有界结束transport、取消未启动unit并释放lease；managed在抛出前等待`control.promise` cleanup barrier；pre-critical普通错误仍继续后续file。 |
+| transport terminate/close或resource lease release失败使整体execution使用既有`failed`终态，并保留cleanup ownership供shutdown重试。 | 冻结合同要求cleanup failure被记录且不得报告成功；业务result与cleanup ownership是两类事实。 | 仅诊断cleanup错误但继续`completed`；失败后丢弃lease/transport ownership。 | 已校验业务result可保留，整体不成功；成功重试清除leak，持续失败进入shutdown report。 |
+| Parser/Writer公开错误复用同一PreFund path-safe边界识别引号包裹的Node fs.Error。 | 单/双引号中的POSIX、Windows drive与UNC绝对路径可经sidecar或parent result泄露。 | 只识别空格/冒号后的未加引号路径；静默丢弃unsafe detail。 | unsafe message使用稳定业务fallback；detail保留safe项并以单条稳定占位替代unsafe项；URL与普通`a/b`文案不误伤。 |
 
 ## Assumptions
 
@@ -38,6 +42,7 @@
 | --- | --- | --- | --- | --- |
 | repair policy无CompoundLease | repair使用冻结Writer phase 192MiB + childrenMax=1 Parser child 256MiB | 实际执行图同时存在Parser/Writer；Parser Core与import相同，不能错误复用192MiB Writer资源。 | runtime预算可容纳精确组合；production gate不变。 | 冻结TechDoc §12已有“Parser + Writer图申请CompoundLease”，policy fixture保留repair Writer 192MiB。 |
 | parser error由Coordinator内存传递 | 固定identity的fsync/rename sidecar，exact safe schema | 单Writer transport只能消费预注册unit；错误不能靠missing spool或input override表达。 | sidecar纳入known-file cleanup、tamper/path/privacy测试。 | 无public/data schema变更。 |
+| generic Supervisor过去在`job:done`后cleanup失败仍返回`completed` | cleanup失败返回既有`failed` outcome、保留已验证result与可重试ownership | Reviewer确认该行为违反冻结“cleanup failures recorded, never success” | 调用方继续以`outcome`判成功；未新增public字段或终态枚举。 | 无冻结合同偏差；修正既有实现偏差。 |
 
 ## Evidence
 
@@ -61,6 +66,11 @@
 | finance-safe窄域反例 | PASS | arbitrary account-like filename、错误sequence/fileIndex、以及相同数字或opaque ID放入message时仍为`PRIVACY_VALUE_FORBIDDEN`；generic profile未全局放行MPT值。 |
 | long numeric batch strict parity | PASS | `managedRepairEvidence`无sourceDate时仍以exact sourceType+sourceBatch grammar通过完整job result，legacy/managed row-error detail与repair shape一致。 |
 | production TaskLifecycle operation identity | PASS | deterministic digit-run UUID使用真实import `taskKey:taskRunId/file`贯穿完整managed protocol；repair prefix正例通过，裸UUID、任意prefix、run task与fileIndex mismatch均拒绝。 |
+| Reviewer四项修复扩展unit（18个相关test files） | `416/416 PASS` | receipt authoritative exact evidence、非末committed/unknown parent终结、pre-critical继续、quoted fs path、terminate/close/resource release失败与正常cleanup回归。 |
+| receipt authority模块定向 | `35/35 PASS` | inserted/replaced/noop exact receipt+batch actual evidence；不完整receipt拒绝；canonical Inspector identity/schema/evidenceHash复核；拒绝后Intent保持acked并由Inspector形成RESULT_LOST Hold。⚠️ 资金红线，请人工复核。 |
+| 本轮平台与资金integration | RecoveryControl `27/27`、recovery canary `9/9`、pure-compute canary `9/9`、PreFund Side DB parity `69/69 PASS` | Control transaction/CAS/startup recovery、共享Supervisor兼容，以及金额/币种/source sequence/dataset version/候选与Side DB语义不漂移。 |
+| Main startup contract | `7/7 PASS` | 新receipt authority wiring未改变DB→IPC→window启动屏障、loader与VCC gate入口。 |
+| Reviewer修复静态验证 | affected ESLint、9个改动JS `node --check`、`git diff --check` PASS | Main wiring、receipt authority、Supervisor cleanup/recovery终态、privacy helper及其测试通过语法、风格与whitespace门禁。 |
 
 ## Remaining Unknowns
 
@@ -69,3 +79,4 @@
 | Windows packaged、人工资金与性能门禁 | BLOCK production enable | E05-C/R3.2.1负责人 | 不阻断E05-B capability；production保持false |
 | Windows目录fsync与真实杀进程fault矩阵尚未在Windows人工执行 | 保留unknown，不伪造通过 | E05-C/最终版本负责人 | 不阻断本地capability；阻断production enable |
 | date-range destructive Hold gate与同batch恢复证据的资金边界 | 已用真实Side DB与空白payload定向回归，仍要求人工复核 | 项目负责人 | ⚠️ 资金红线，请人工复核；production保持false |
+| packaged Windows中的真实transport terminate/close与ResourceGovernor release失败恢复 | 本地以确定性fault injection覆盖失败、ownership保留及shutdown重试 | E05-C/最终版本负责人 | 不阻断E05-B capability；production保持false，人工门禁前不得宣称实机通过 |

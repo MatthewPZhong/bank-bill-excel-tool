@@ -7,11 +7,14 @@ const { MPT_SCHEMAS, isMptSourceBatch, parseMptFileName } = require('../mpt-sche
 const { isPreFundMptConflictScopeKey } = require('./conflict-scope');
 
 const SAFE_ERROR_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,127}$/;
-const ABSOLUTE_PATH_PATTERN = /(?:file:\/\/|(?:^|[\s：:=（(])(?:[A-Za-z]:[\\/]|\\\\[^\\/\s]+[\\/]|\/(?!\/)[^/\s:]+(?:\/[^/\s]+)*))/i;
+// Node fs.Error常把路径放在单/双引号中；只识别具备absolute-path起点的形状，
+// 不把https URL或普通a/b自然语言误判成文件路径。
+const ABSOLUTE_PATH_PATTERN = /(?:file:\/\/|(?:^|[\s'"“”‘’：:=（(,;\[])(?:[A-Za-z]:[\\/][^\s'"“”‘’<>;,\])}]*|\\\\[^\\/\s'"“”‘’<>;,\])}]+[\\/][^\s'"“”‘’<>;,\])}]+|\/(?!\/)[^\s/'"“”‘’<>:;,\])}]+(?:\/[^\s'"“”‘’<>:;,\])}]+)*))/i;
 const PREFUND_INTENT_ID_PATTERN = /^prefund-intent-[a-f0-9]{64}$/;
 const UUID_V4_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const PREFUND_FILE_OPERATION_PATTERN =
   /^pre-fund-reconciliation:(?:import-mpt|mpt-errors:repair):[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\/file\/[0-9]{6}$/;
+const SAFE_DETAIL_FALLBACK = '当前文件技术错误详情已隐藏';
 
 function isSafeMptErrorCode(value) {
   return typeof value === 'string' && SAFE_ERROR_CODE_PATTERN.test(value);
@@ -77,8 +80,17 @@ function allowMptFinanceSafeValue({ value, key, parent }) {
 
 function safeDetailLines(value, maxItems) {
   if (!Array.isArray(value)) return [];
-  return value.filter((line) =>
-    isSafeMptErrorText(line, { maxBytes: 2048, allowEmpty: true })).slice(0, maxItems);
+  const result = [];
+  let addedFallback = false;
+  for (const line of value.slice(0, maxItems)) {
+    if (isSafeMptErrorText(line, { maxBytes: 2048, allowEmpty: true })) {
+      result.push(line);
+    } else if (!addedFallback) {
+      result.push(SAFE_DETAIL_FALLBACK);
+      addedFallback = true;
+    }
+  }
+  return result;
 }
 
 function toSafeMptErrorFields(error, options = {}) {

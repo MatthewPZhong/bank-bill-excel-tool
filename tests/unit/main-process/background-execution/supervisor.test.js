@@ -474,7 +474,151 @@ test('worker-durable ACK后unit error必须inspect；committed-lost阻断普通j
   assert.equal(unit.status, 'interrupted');
   assert.equal(unit.inspection.outcome, 'committed');
   assert.equal(result.outcome, 'interrupted');
-  assert.equal(result.terminalSource, 'protocol-error');
+  assert.equal(result.terminalSource, 'job:error');
+});
+
+test('worker-durable非末unit committed/unknown立即终结parent并有界释放transport', async () => {
+  for (const inspectedOutcome of ['committed', 'unknown']) {
+    const coordinator = {
+      async prepareAndAck() {
+        return { intentId: `intent-${inspectedOutcome}`, fileOperationKey: 'parent/file/000000' };
+      },
+      async observeReceipt() { throw new Error('不应收到receipt'); },
+      async settleCommitted() {},
+      async resolveUncertain() { return { outcome: inspectedOutcome }; }
+    };
+    const fake = fakeAdapter({
+      onSend(message, callbacks) {
+        if (message.operation === 'unit:start') {
+          callbacks.onMessage(eventFor(message, 'critical:ready', 1, {
+            critical: { fileOperationKey: 'parent/file/000000' }
+          }, message.unitId));
+        } else if (message.operation === 'critical:ack') {
+          callbacks.onMessage(eventFor(message, 'unit:error', 2, {
+            error: { code: 'WRITER_AFTER_ACK_FAILED', message: 'writer failed after ACK' }
+          }, message.unitId));
+        }
+      }
+    });
+    const { supervisor } = harness(fake, makeWorkerDurable, undefined, {
+      workerDurableCoordinator: coordinator
+    });
+    const control = supervisor.start(request({
+      actionKey: 'test:worker-durable',
+      jobId: `non-last-${inspectedOutcome}`,
+      deferUnitStart: true,
+      units: [
+        { unitId: 'file:000000', input: { fileIndex: 0 } },
+        { unitId: 'file:000001', input: { fileIndex: 1 } }
+      ]
+    }));
+    const [unit, result] = await Promise.all([
+      control.startUnit('file:000000'),
+      control.promise
+    ]);
+    assert.equal(unit.status, 'interrupted');
+    assert.equal(unit.inspection.outcome, inspectedOutcome);
+    assert.equal(result.outcome, 'interrupted');
+    assert.equal(result.terminalSource, 'job:error');
+    assert.equal(fake.state.terminateCount, 1);
+    assert.equal(fake.state.closeCount, 1);
+    assert.deepEqual(fake.state.sent.map((message) => message.operation), [
+      'job:start', 'unit:start', 'critical:ack'
+    ]);
+    await assert.rejects(control.startUnit('file:000001'), { code: 'UNIT_START_STATE_INVALID' });
+  }
+});
+
+test('worker-durable错误receipt后的合法unit/job done不能覆盖canonical committed inspection', async () => {
+  let settleCalls = 0;
+  const coordinator = {
+    async prepareAndAck() {
+      return { intentId: 'receipt-intent', fileOperationKey: 'parent/file/000000' };
+    },
+    async observeReceipt() {
+      throw Object.assign(new Error('receipt exact evidence mismatch'), {
+        code: 'WORKER_DURABLE_RECEIPT_SHAPE_INVALID'
+      });
+    },
+    async settleCommitted() { settleCalls += 1; },
+    async resolveUncertain() { return { outcome: 'committed' }; }
+  };
+  const fake = fakeAdapter({
+    onSend(message, callbacks, state) {
+      if (message.operation === 'unit:start') {
+        callbacks.onMessage(eventFor(message, 'critical:ready', 1, {
+          critical: { fileOperationKey: 'parent/file/000000' }
+        }, message.unitId));
+      } else if (message.operation === 'critical:ack') {
+        callbacks.onMessage(eventFor(message, 'commit:receipt', 2, {
+          receipt: { id: 1, operationKey: 'parent/file/000000' }
+        }, message.unitId));
+        callbacks.onMessage(eventFor(message, 'unit:done', 3, {
+          result: { checksum: 6004, count: 2, rounds: 2, sum: 3 }
+        }, message.unitId));
+        callbacks.onMessage(eventFor(state.sent[0], 'job:done', 4, {
+          result: { checksum: 6004, count: 2, rounds: 2, sum: 3 }
+        }));
+      }
+    }
+  });
+  const { supervisor } = harness(fake, makeWorkerDurable, undefined, {
+    workerDurableCoordinator: coordinator
+  });
+  const control = supervisor.start(request({
+    actionKey: 'test:worker-durable',
+    jobId: 'bad-receipt-job',
+    deferUnitStart: true,
+    units: [{ unitId: 'file:000000', input: { fileIndex: 0 } }]
+  }));
+  const [unit, result] = await Promise.all([
+    control.startUnit('file:000000'),
+    control.promise
+  ]);
+  assert.equal(settleCalls, 0);
+  assert.equal(unit.status, 'interrupted');
+  assert.equal(unit.inspection.outcome, 'committed');
+  assert.equal(result.outcome, 'interrupted');
+  assert.equal(result.result, null);
+});
+
+test('worker-durable precritical ordinary unit:error仍按policy继续后续file', async () => {
+  const coordinator = {
+    async prepareAndAck() { throw new Error('ordinary error不应进入critical'); },
+    async observeReceipt() {},
+    async settleCommitted() {},
+    async resolveUncertain() { throw new Error('ordinary error不应inspect'); }
+  };
+  let unitEventSeq = 0;
+  const fake = fakeAdapter({
+    onSend(message, callbacks, state) {
+      if (message.operation !== 'unit:start') return;
+      unitEventSeq += 1;
+      callbacks.onMessage(eventFor(message, 'unit:error', unitEventSeq, {
+        error: { code: 'FILE_BUSINESS_ERROR', message: 'current file failed' }
+      }, message.unitId));
+      if (message.unitId === 'file:000001') {
+        callbacks.onMessage(eventFor(state.sent[0], 'job:done', ++unitEventSeq, {
+          result: { checksum: 6004, count: 2, rounds: 2, sum: 3 }
+        }));
+      }
+    }
+  });
+  const { supervisor } = harness(fake, makeWorkerDurable, undefined, {
+    workerDurableCoordinator: coordinator
+  });
+  const control = supervisor.start(request({
+    actionKey: 'test:worker-durable',
+    jobId: 'ordinary-error-continues',
+    deferUnitStart: true,
+    units: [
+      { unitId: 'file:000000', input: { fileIndex: 0 } },
+      { unitId: 'file:000001', input: { fileIndex: 1 } }
+    ]
+  }));
+  assert.equal((await control.startUnit('file:000000')).status, 'error');
+  assert.equal((await control.startUnit('file:000001')).status, 'error');
+  assert.equal((await control.promise).outcome, 'completed');
 });
 
 test('worker-durable job:error inspect unknown时started unit不得降级为cancelled', async () => {
@@ -1397,7 +1541,9 @@ test('shutdown 也追踪已 settle 但 terminate 悬挂的 transport', async () 
     policy.cancellation.terminateTimeoutMs = 5;
   });
   const result = await supervisor.execute(request({ jobId: 'settled-leak-job' }));
-  assert.equal(result.outcome, 'completed');
+  assert.equal(result.outcome, 'failed');
+  assert.equal(result.error.code, 'BACKGROUND_EXECUTION_CLEANUP_FAILED');
+  assert.deepEqual(result.result, { checksum: 6004, count: 2, rounds: 2, sum: 3 });
   assert.equal(fake.state.closeCount, 1);
   await assert.rejects(
     supervisor.execute(request({ jobId: 'settled-leak-job' })),
@@ -1408,7 +1554,7 @@ test('shutdown 也追踪已 settle 但 terminate 悬挂的 transport', async () 
   assert.ok(report.errors.some((error) => error.code === 'TRANSPORT_TERMINATE_TIMEOUT'));
 });
 
-test('terminate/close 独立 exactly-once，双失败均保留且阻止 jobId 复用', async () => {
+test('terminate/close 独立失败使job非成功，shutdown保留并重试cleanup ownership', async () => {
   const terminateError = new Error('terminate rejected');
   terminateError.code = 'TRANSPORT_TERMINATE_REJECTED';
   const closeError = new Error('close rejected');
@@ -1426,7 +1572,8 @@ test('terminate/close 独立 exactly-once，双失败均保留且阻止 jobId �
   });
   const { supervisor } = harness(fake);
   const result = await supervisor.execute(request({ jobId: 'terminate-rejection-job' }));
-  assert.equal(result.outcome, 'completed');
+  assert.equal(result.outcome, 'failed');
+  assert.equal(result.error.code, 'BACKGROUND_EXECUTION_CLEANUP_FAILED');
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(fake.state.terminateCount, 1);
   assert.equal(fake.state.closeCount, 1);
@@ -1438,8 +1585,73 @@ test('terminate/close 独立 exactly-once，双失败均保留且阻止 jobId �
   assert.deepEqual(report.leakedTransports, ['terminate-rejection-job']);
   assert.ok(report.errors.some((error) => error.code === 'TRANSPORT_TERMINATE_REJECTED'));
   assert.ok(report.errors.some((error) => error.code === 'TRANSPORT_CLOSE_REJECTED'));
+  assert.equal(fake.state.terminateCount, 2);
+  assert.equal(fake.state.closeCount, 2);
+});
+
+test('close首次失败使job非成功，shutdown重试成功后不再报告transport leak', async () => {
+  let closeAttempts = 0;
+  const fake = fakeAdapter({
+    close() {
+      closeAttempts += 1;
+      if (closeAttempts === 1) {
+        throw Object.assign(new Error('close once'), { code: 'TRANSPORT_CLOSE_ONCE_FAILED' });
+      }
+    },
+    onSend(message, callbacks) {
+      if (message.operation === 'job:start') {
+        callbacks.onMessage(eventFor(message, 'job:done', 1, {
+          result: { checksum: 6004, count: 2, rounds: 2, sum: 3 }
+        }));
+      }
+    }
+  });
+  const { supervisor } = harness(fake);
+  const result = await supervisor.execute(request({ jobId: 'close-once-job' }));
+  assert.equal(result.outcome, 'failed');
+  assert.equal(result.error.code, 'BACKGROUND_EXECUTION_CLEANUP_FAILED');
   assert.equal(fake.state.terminateCount, 1);
   assert.equal(fake.state.closeCount, 1);
+  const report = await supervisor.shutdown({ timeoutMs: 20 });
+  assert.deepEqual(report.leakedTransports, []);
+  assert.deepEqual(report.errors, []);
+  assert.equal(fake.state.terminateCount, 1);
+  assert.equal(fake.state.closeCount, 2);
+});
+
+test('resource lease release失败使job非成功并保留到shutdown重试', async () => {
+  let phaseReleaseAttempts = 0;
+  const baseLease = { release() {} };
+  const phaseLease = {
+    release() {
+      phaseReleaseAttempts += 1;
+      if (phaseReleaseAttempts === 1) {
+        throw Object.assign(new Error('phase release once'), { code: 'RESOURCE_RELEASE_ONCE_FAILED' });
+      }
+    }
+  };
+  const resourceGovernor = {
+    async acquireBaseLease() { return baseLease; },
+    async acquirePhaseLease() { return phaseLease; },
+    snapshot() { return { services: [] }; }
+  };
+  const fake = fakeAdapter({
+    onSend(message, callbacks) {
+      if (message.operation === 'job:start') {
+        callbacks.onMessage(eventFor(message, 'job:done', 1, {
+          result: { checksum: 6004, count: 2, rounds: 2, sum: 3 }
+        }));
+      }
+    }
+  });
+  const { supervisor } = harness(fake, null, undefined, { resourceGovernor });
+  const result = await supervisor.execute(request({ jobId: 'resource-release-once-job' }));
+  assert.equal(result.outcome, 'failed');
+  assert.equal(result.error.code, 'BACKGROUND_EXECUTION_CLEANUP_FAILED');
+  assert.equal(phaseReleaseAttempts, 1);
+  const report = await supervisor.shutdown({ timeoutMs: 20 });
+  assert.deepEqual(report.errors, []);
+  assert.equal(phaseReleaseAttempts, 2);
 });
 
 test('transport cleanup 成功后 jobId/worker route 仍是永久 one-shot tombstone', async () => {

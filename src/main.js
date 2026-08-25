@@ -192,6 +192,9 @@ const {
 const {
   createWorkerDurableCoordinator: createPreFundMptWorkerDurableCoordinator
 } = require('./main-process/pre-fund-reconciliation/mpt-import/worker-durable-coordinator');
+const {
+  createPreFundMptReceiptAuthority
+} = require('./main-process/pre-fund-reconciliation/mpt-import/receipt-authority');
 // v3.0.15：重复入金匹配（银行 Reversal/Inbound 分组 + 临时入金 MPT 回填 + 双 sheet 导出）。
 const {
   createDuplicateInboundMatchService
@@ -21499,6 +21502,10 @@ async function initializeBackgroundExecutionRecovery() {
     requestOwnerRepository,
     recoveryControlRepository,
     recoveryCoordinator: coordinator,
+    receiptAuthority: createPreFundMptReceiptAuthority({
+      userDataDir: path.dirname(database.dbPath),
+      outcomeInspector: inspectPreFundMpt
+    }),
     conflictScopeGate: (identity) => preFundMptHoldGate.assertIdentities([identity])
   });
   appendActivityLogEntry({

@@ -219,6 +219,7 @@ function createExecutionSupervisor(options = {}) {
   const jobs = new Map();
   const pendingTransportCleanups = new Map();
   const failedTransportCleanups = new Map();
+  const failedResourceCleanups = new Map();
   const usedJobIds = new Set();
   const usedWorkerRoutes = new Set();
   let acceptingNewJobs = true;
@@ -386,11 +387,15 @@ function createExecutionSupervisor(options = {}) {
       transportCleanup: null,
       transportCleanupSettled: false,
       transportCleanupErrors: [],
+      transportCleanupErrorByPhase: new Map(),
       terminateCalled: false,
+      terminateSettled: false,
       closeCalled: false,
+      closeSettled: false,
       admissionAbortController: new AbortController(),
       resourceLeases: [],
       resourceCleanupSettled: false,
+      resourceCleanupErrors: [],
       serviceGenerationCreated: null,
       topology: null,
       timers: new Set(),
@@ -438,7 +443,8 @@ function createExecutionSupervisor(options = {}) {
     function retainCleanupError(phase, error) {
       const normalized = error instanceof Error ? error : new Error(String(error));
       if (!normalized.code) normalized.code = `TRANSPORT_${phase.toUpperCase()}_FAILED`;
-      record.transportCleanupErrors.push(Object.freeze({ phase, error: normalized }));
+      record.transportCleanupErrorByPhase.set(phase, Object.freeze({ phase, error: normalized }));
+      record.transportCleanupErrors = [...record.transportCleanupErrorByPhase.values()];
       failedTransportCleanups.set(jobId, record);
       reportDiagnostic({
         type: 'transport-cleanup-error',
@@ -448,6 +454,11 @@ function createExecutionSupervisor(options = {}) {
         jobId,
         error: toProtocolError(normalized, normalized.code, safeErrorOptions('cleanup'))
       });
+    }
+
+    function clearCleanupError(phase) {
+      record.transportCleanupErrorByPhase.delete(phase);
+      record.transportCleanupErrors = [...record.transportCleanupErrorByPhase.values()];
     }
 
     async function boundedCleanupPhase(phase, callback) {
@@ -467,13 +478,22 @@ function createExecutionSupervisor(options = {}) {
             `Transport ${phase} timed out after ${timeoutMs}ms`
           )
         );
+        clearCleanupError(phase);
+        return true;
       } catch (error) {
         retainCleanupError(phase, error);
+        return false;
       }
     }
 
-    function cleanupTransport({ force = false } = {}) {
-      if (record.transportCleanup) return record.transportCleanup;
+    function cleanupTransport({ force = false, retry = false } = {}) {
+      if (record.transportCleanup && pendingTransportCleanups.has(jobId)) {
+        return record.transportCleanup;
+      }
+      if (record.transportCleanupSettled && record.transportCleanupErrors.length === 0) {
+        return record.transportCleanup || Promise.resolve();
+      }
+      if (record.transportCleanup && !retry) return record.transportCleanup;
       record.transportCleanup = Promise.resolve().then(async () => {
         await record.transportAssignment;
         if (!record.transport) {
@@ -482,28 +502,33 @@ function createExecutionSupervisor(options = {}) {
         }
         const terminateRequired = force ||
           (policy.lifetime !== 'service' && policy.adapterKind !== 'existing-dispatch');
-        if (terminateRequired && !record.terminateCalled) {
+        if (terminateRequired && !record.terminateSettled) {
           record.terminateCalled = true;
-          await boundedCleanupPhase('terminate', () => {
+          record.terminateSettled = await boundedCleanupPhase('terminate', () => {
             if (typeof record.transport.terminate !== 'function') {
               throw new SupervisorError('TRANSPORT_TERMINATE_MISSING', 'Transport has no terminate() API');
             }
             return record.transport.terminate();
           });
         }
-        if (!record.closeCalled) {
+        if (!record.closeSettled) {
           record.closeCalled = true;
-          await boundedCleanupPhase('close', () => {
+          record.closeSettled = await boundedCleanupPhase('close', () => {
             if (typeof record.transport.close !== 'function') {
               throw new SupervisorError('TRANSPORT_CLOSE_MISSING', 'Transport has no close() API');
             }
             return record.transport.close();
           });
         }
-        record.transportCleanupSettled = true;
+        record.transportCleanupSettled = (!terminateRequired || record.terminateSettled) &&
+          record.closeSettled;
       }).finally(() => {
         pendingTransportCleanups.delete(jobId);
-        if (record.transportCleanupErrors.length === 0) failedTransportCleanups.delete(jobId);
+        if (record.transportCleanupSettled && record.transportCleanupErrors.length === 0) {
+          failedTransportCleanups.delete(jobId);
+        } else {
+          failedTransportCleanups.set(jobId, record);
+        }
       });
       pendingTransportCleanups.set(jobId, record);
       return record.transportCleanup;
@@ -511,18 +536,32 @@ function createExecutionSupervisor(options = {}) {
 
     function cleanupResources(reason = 'job-terminal') {
       if (record.resourceCleanupSettled) return;
-      record.resourceCleanupSettled = true;
-      for (const lease of record.resourceLeases.splice(0).reverse()) {
-        try { lease.release(reason); } catch (releaseError) {
+      const failedLeases = [];
+      const cleanupErrors = [];
+      for (const lease of record.resourceLeases.slice().reverse()) {
+        try {
+          lease.release(reason);
+        } catch (releaseError) {
+          failedLeases.unshift(lease);
+          const normalized = releaseError instanceof Error
+            ? releaseError
+            : new Error(String(releaseError));
+          if (!normalized.code) normalized.code = 'RESOURCE_RELEASE_FAILED';
+          cleanupErrors.push(Object.freeze({ phase: 'resource-release', error: normalized }));
           reportDiagnostic({
             type: 'resource-cleanup-error',
             actionKey,
             operationKey,
             jobId,
-            code: releaseError && releaseError.code || 'RESOURCE_RELEASE_FAILED'
+            code: normalized.code
           });
         }
       }
+      record.resourceLeases = failedLeases;
+      record.resourceCleanupErrors = cleanupErrors;
+      record.resourceCleanupSettled = failedLeases.length === 0;
+      if (record.resourceCleanupSettled) failedResourceCleanups.delete(jobId);
+      else failedResourceCleanups.set(jobId, record);
     }
 
     function retainGrantedLease(lease, reason = 'late-admission-grant') {
@@ -532,15 +571,34 @@ function createExecutionSupervisor(options = {}) {
         return true;
       }
       try { lease.release(reason); } catch (releaseError) {
+        record.resourceLeases.push(lease);
+        record.resourceCleanupSettled = false;
+        const normalized = releaseError instanceof Error
+          ? releaseError
+          : new Error(String(releaseError));
+        if (!normalized.code) normalized.code = 'RESOURCE_RELEASE_FAILED';
+        record.resourceCleanupErrors = [Object.freeze({ phase: 'resource-release', error: normalized })];
+        failedResourceCleanups.set(jobId, record);
         reportDiagnostic({
           type: 'resource-cleanup-error',
           actionKey,
           operationKey,
           jobId,
-          code: releaseError && releaseError.code || 'RESOURCE_RELEASE_FAILED'
+          code: normalized.code
         });
       }
       return false;
+    }
+
+    function cleanupFailureProtocolError() {
+      if (record.transportCleanupErrors.length === 0 && record.resourceCleanupErrors.length === 0) {
+        return null;
+      }
+      const error = new SupervisorError(
+        'BACKGROUND_EXECUTION_CLEANUP_FAILED',
+        'Execution cleanup did not complete'
+      );
+      return toProtocolError(error, error.code, safeErrorOptions('cleanup'));
     }
 
     function stageForTerminal(terminalSource) {
@@ -613,14 +671,15 @@ function createExecutionSupervisor(options = {}) {
           settleUnfinishedUnit(unit, outcome, safeError);
         }
         cleanupResources(terminalSource === 'job:done' ? 'job-terminal' : 'job-failed');
+        const cleanupError = cleanupFailureProtocolError();
         const executionResult = createExecutionResult({
           actionKey,
           operationKey,
           jobId,
-          outcome: interrupted ? 'interrupted' : outcome,
+          outcome: interrupted ? 'interrupted' : (cleanupError ? 'failed' : outcome),
           terminalSource,
           result: interrupted ? null : terminalResult,
-          error: safeError,
+          error: safeError || cleanupError,
           // existing-dispatch 的 job terminal 只证明既有 dispatcher 已结束；平台没有
           // 接管或重新判定其 settlement，也没有权威 receipt identity。保持 null，
           // 不得把 execution completed 冒充资金/发布或 TaskRun success。
@@ -669,6 +728,7 @@ function createExecutionSupervisor(options = {}) {
     }
     record.finish = finish;
     record.cleanupTransport = cleanupTransport;
+    record.cleanupResources = cleanupResources;
 
     function failProtocol(error) {
       const protocolError = error instanceof Error ? error : new Error('Protocol validation failed');
@@ -928,6 +988,11 @@ function createExecutionSupervisor(options = {}) {
             error: unit.error,
             inspection: unit.inspection
           });
+          if (recoveryInterrupted) {
+            // committed-lost/unknown 是 parent 级恢复终态。由持有 transport/leases 的
+            // Supervisor 立即收口，不能让单 Writer继续等待下一个 deferred unit。
+            finish('job:error', 'failed', unit.error, null, { forceTransport: true });
+          }
           return;
         }
         case 'cancel:ack':
@@ -1666,11 +1731,19 @@ function createExecutionSupervisor(options = {}) {
       }
 
       const cleanupRecords = [...new Map(
-        [...active, ...pendingTransportCleanups.values(), ...failedTransportCleanups.values()]
+        [
+          ...active,
+          ...pendingTransportCleanups.values(),
+          ...failedTransportCleanups.values(),
+          ...failedResourceCleanups.values()
+        ]
           .map((record) => [record.jobId, record])
       ).values()];
       await waitUntil(
-        cleanupRecords.map((record) => record.transportCleanup || Promise.resolve()),
+        cleanupRecords.map(async (record) => {
+          await record.cleanupTransport({ force: true, retry: true });
+          record.cleanupResources('supervisor-shutdown');
+        }),
         remainingTimeout(deadline)
       );
 
@@ -1694,6 +1767,17 @@ function createExecutionSupervisor(options = {}) {
           reportErrors.push(toProtocolError(
             cleanupError.error,
             cleanupError.error.code || 'TRANSPORT_CLEANUP_ERROR',
+            {
+              maxErrorItems: record.policy.result.maxErrorItems,
+              privacyProfile: record.policy.metrics.privacyProfile,
+              stage: 'cleanup'
+            }
+          ));
+        }
+        for (const cleanupError of record.resourceCleanupErrors) {
+          reportErrors.push(toProtocolError(
+            cleanupError.error,
+            cleanupError.error.code || 'RESOURCE_RELEASE_FAILED',
             {
               maxErrorItems: record.policy.result.maxErrorItems,
               privacyProfile: record.policy.metrics.privacyProfile,

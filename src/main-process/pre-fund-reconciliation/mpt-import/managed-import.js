@@ -218,6 +218,9 @@ async function executeManagedPreFundMptImport(rawOptions) {
       cleanupMainOwned((index) => index === fileIndex);
     }
     if (terminal.status === 'interrupted') {
+      // Supervisor拥有Writer transport与CompoundLease；资金结果不确定时先等待其
+      // authoritative parent cleanup barrier，再把中断交还TaskLifecycle。
+      await control.promise;
       const error = managedError(
         'PREFUND_WRITER_UNIT_INTERRUPTED',
         'PreFund Writer当前file提交结果无法唯一判定，父任务已中断'

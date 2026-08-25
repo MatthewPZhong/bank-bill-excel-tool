@@ -21,7 +21,8 @@ function exactCounts(value) {
 
 function createWorkerDurableCoordinator(options) {
   const required = [
-    'readRepository', 'requestOwnerRepository', 'recoveryControlRepository', 'recoveryCoordinator'
+    'readRepository', 'requestOwnerRepository', 'recoveryControlRepository', 'recoveryCoordinator',
+    'receiptAuthority'
   ];
   if (!options || required.some((key) => !options[key])) {
     throw new TypeError('WorkerDurableCoordinator依赖不完整');
@@ -30,6 +31,10 @@ function createWorkerDurableCoordinator(options) {
   const requestOwnerRepository = options.requestOwnerRepository;
   const recoveryControlRepository = options.recoveryControlRepository;
   const recoveryCoordinator = options.recoveryCoordinator;
+  const receiptAuthority = options.receiptAuthority;
+  if (typeof receiptAuthority.verify !== 'function') {
+    throw new TypeError('WorkerDurableCoordinator receiptAuthority依赖不完整');
+  }
   const conflictScopeGate = typeof options.conflictScopeGate === 'function'
     ? options.conflictScopeGate
     : null;
@@ -196,16 +201,33 @@ function createWorkerDurableCoordinator(options) {
     });
   }
 
+  function sourceForIntent(intent) {
+    return normalizeRecoverySource({
+      contractVersion: 1,
+      sourceKind: 'critical-intent',
+      sourceRef: `critical-intent:${intent.intentId}`,
+      actionKey: intent.actionKey,
+      operationKey: intent.operationKey,
+      taskRunId: intent.taskRunId,
+      conflictScopeKey: intent.conflictScopeKey,
+      inspectorKey: intent.inspectorKey,
+      settlementKey: null,
+      intentId: intent.intentId,
+      evidenceVersion: intent.evidenceVersion,
+      boundedEvidence: intent.boundedEvidence
+    });
+  }
+
   async function observeReceipt(input) {
-    const receipt = input.receipt;
-    if (!receipt || receipt.actionKey !== input.actionKey ||
-        receipt.operationKey !== input.fileOperationKey ||
-        receipt.producerTaskRunId !== input.taskRunId ||
-        !Number.isSafeInteger(receipt.id) || receipt.id < 1) {
-      throw coordinatorError('WORKER_DURABLE_RECEIPT_MISMATCH', 'commit receipt与当前Intent不匹配');
-    }
     const intent = readRepository.getCriticalIntentById(input.intentId);
-    if (!intent) throw coordinatorError('WORKER_DURABLE_INTENT_MISSING', 'commit receipt缺少Intent');
+    if (!intent || intent.actionKey !== input.actionKey ||
+        intent.operationKey !== input.fileOperationKey || intent.taskRunId !== input.taskRunId) {
+      throw coordinatorError('WORKER_DURABLE_INTENT_MISSING', 'commit receipt缺少matching Intent');
+    }
+    const receipt = await receiptAuthority.verify(Object.freeze({
+      source: sourceForIntent(intent),
+      receipt: input.receipt
+    }));
     if (intent.state === 'acked') {
       writeTransition({
         entityKind: 'critical-intent',
@@ -251,20 +273,7 @@ function createWorkerDurableCoordinator(options) {
   async function resolveUncertain(input) {
     const intent = readRepository.getCriticalIntentById(input.intentId);
     if (!intent) throw coordinatorError('WORKER_DURABLE_INTENT_MISSING', 'inspection缺少Intent');
-    const source = normalizeRecoverySource({
-      contractVersion: 1,
-      sourceKind: 'critical-intent',
-      sourceRef: `critical-intent:${intent.intentId}`,
-      actionKey: intent.actionKey,
-      operationKey: intent.operationKey,
-      taskRunId: intent.taskRunId,
-      conflictScopeKey: intent.conflictScopeKey,
-      inspectorKey: intent.inspectorKey,
-      settlementKey: null,
-      intentId: intent.intentId,
-      evidenceVersion: intent.evidenceVersion,
-      boundedEvidence: intent.boundedEvidence
-    });
+    const source = sourceForIntent(intent);
     const activeHold = readRepository.getActiveRecoveryHoldByScope(source.conflictScopeKey);
     const decision = await recoveryCoordinator.recoverSource(source, activeHold);
     if (!decision || !decision.inspection) {

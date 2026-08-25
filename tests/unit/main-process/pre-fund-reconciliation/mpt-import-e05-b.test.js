@@ -81,6 +81,7 @@ const {
 } = require('../../../../src/main-process/pre-fund-reconciliation/mpt-import/parser-outcome');
 const {
   allowMptFinanceSafeValue,
+  isSafeMptErrorText,
   safeMptFileName
 } = require('../../../../src/main-process/pre-fund-reconciliation/mpt-import/file-result-safety');
 const {
@@ -97,6 +98,9 @@ const {
 const {
   createWorkerDurableCoordinator
 } = require('../../../../src/main-process/pre-fund-reconciliation/mpt-import/worker-durable-coordinator');
+const {
+  createPreFundMptReceiptAuthority
+} = require('../../../../src/main-process/pre-fund-reconciliation/mpt-import/receipt-authority');
 const {
   getOperationReceipt
 } = require('../../../../src/main-process/pre-fund-reconciliation/mpt-import/operation-receipt-repository');
@@ -210,9 +214,14 @@ function mirrorDatabase() {
 
 test('validated spool Writer以同事务receipt覆盖insert、exact replay、noop与replacement lineage', async () => {
   const store = new PreFundReconciliationStore(userDataDir);
+  const inspect = createPreFundMptOutcomeInspector({ userDataDir });
+  const receiptAuthority = createPreFundMptReceiptAuthority({
+    userDataDir,
+    outcomeInspector: inspect
+  });
   const firstPath = writeFile('101', [inboundRow({ reconId: 'FIRST', amount: '001.2300' })]);
   const firstInput = spoolInput(firstPath, 'parent-insert');
-  await writeMptFileSpool(firstInput);
+  const firstWritten = await writeMptFileSpool(firstInput);
   const firstOptions = managedOptions('parent-insert', 'dataset-1');
 
   const inserted = await store.importValidatedSpool(firstInput, firstOptions);
@@ -222,6 +231,26 @@ test('validated spool Writer以同事务receipt覆盖insert、exact replay、noo
   assert.equal(inserted.batch.producerTaskRunId, 'task-run-1');
   assert.equal(inserted.batch.rowCount, 1);
   const originalBatchId = inserted.batch.id;
+  assert.equal((await receiptAuthority.verify({
+    source: recoverySourceFrom(firstWritten, firstOptions, inserted),
+    receipt: inserted.receipt
+  })).outcomeKind, 'inserted');
+  const incompleteReceipt = { ...inserted.receipt };
+  delete incompleteReceipt.contentHash;
+  await assert.rejects(() => receiptAuthority.verify({
+    source: recoverySourceFrom(firstWritten, firstOptions, inserted),
+    receipt: incompleteReceipt
+  }), { code: 'WORKER_DURABLE_RECEIPT_SHAPE_INVALID' });
+  const wrongInspectionAuthority = createPreFundMptReceiptAuthority({
+    userDataDir,
+    async outcomeInspector(source) {
+      return { ...(await inspect(source)), operationKey: 'wrong/file/000000' };
+    }
+  });
+  await assert.rejects(() => wrongInspectionAuthority.verify({
+    source: recoverySourceFrom(firstWritten, firstOptions, inserted),
+    receipt: inserted.receipt
+  }), { code: 'WORKER_DURABLE_RECEIPT_EVIDENCE_INVALID' });
 
   const replay = await store.importValidatedSpool(firstInput, firstOptions);
   assert.equal(replay.status, 'imported');
@@ -229,24 +258,32 @@ test('validated spool Writer以同事务receipt覆盖insert、exact replay、noo
   assert.equal(replay.receipt.id, inserted.receipt.id);
 
   const noopInput = spoolInput(firstPath, 'parent-noop');
-  await writeMptFileSpool(noopInput);
-  const noop = await store.importValidatedSpool(noopInput, managedOptions('parent-noop', 'unused-seed'));
+  const noopWritten = await writeMptFileSpool(noopInput);
+  const noopOptions = managedOptions('parent-noop', 'unused-seed');
+  const noop = await store.importValidatedSpool(noopInput, noopOptions);
   assert.equal(noop.status, 'noop');
   assert.equal(noop.batch.id, originalBatchId);
   assert.equal(noop.receipt.outcomeKind, 'noop-existing-batch');
   assert.equal(noop.receipt.datasetId, 'dataset-1');
   assert.equal(noop.receipt.datasetVersionBefore, 1);
   assert.equal(noop.receipt.datasetVersionAfter, 1);
+  assert.equal((await receiptAuthority.verify({
+    source: recoverySourceFrom(noopWritten, noopOptions, noop),
+    receipt: noop.receipt
+  })).outcomeKind, 'noop-existing-batch');
 
   const replacementPath = writeFile('102', [
     inboundRow({ reconId: 'REPLACED-1', currency: 'EUR', amount: '2.50' }),
     inboundRow({ reconId: 'REPLACED-2', currency: 'USD', amount: '3.75' })
   ]);
   const replacementInput = spoolInput(replacementPath, 'parent-replace');
-  await writeMptFileSpool(replacementInput);
+  const replacementWritten = await writeMptFileSpool(replacementInput);
+  const replacementOptions = managedOptions('parent-replace', 'dataset-2', {
+    producerTaskRunId: 'task-run-2'
+  });
   const replaced = await store.importValidatedSpool(
     replacementInput,
-    managedOptions('parent-replace', 'dataset-2', { producerTaskRunId: 'task-run-2' })
+    replacementOptions
   );
   assert.equal(replaced.status, 'replaced');
   assert.equal(replaced.batch.id, originalBatchId, 'replacement必须保留batch.id');
@@ -255,6 +292,10 @@ test('validated spool Writer以同事务receipt覆盖insert、exact replay、noo
   assert.equal(replaced.receipt.datasetVersionBefore, 1);
   assert.equal(replaced.receipt.datasetVersionAfter, 2);
   assert.equal(replaced.receipt.outcomeKind, 'replaced');
+  assert.equal((await receiptAuthority.verify({
+    source: recoverySourceFrom(replacementWritten, replacementOptions, replaced),
+    receipt: replaced.receipt
+  })).outcomeKind, 'replaced');
 
   const db = runDataStore.openExistingSideDb(
     runDataStore.sideDbPath(userDataDir, runDataStore.MODULE_PRE_FUND_RECONCILIATION, '2026-07')
@@ -704,6 +745,21 @@ test('sealed parser outcome绑定固定identity并拒绝tamper与symlink，clean
     }
   });
   assert.equal(readParserOutcome(unsafeInput).fileResult.code, 'SAFE_URL');
+  for (const unsafeText of [
+    "ENOENT: open '/private/tmp/customer.csv'",
+    'ENOENT: open "/tmp"',
+    "EACCES: open 'C:\\Users\\alice\\statement.txt'",
+    'EACCES: open "\\\\server\\share\\statement.txt"'
+  ]) {
+    assert.equal(isSafeMptErrorText(unsafeText), false, unsafeText);
+  }
+  for (const safeText of [
+    'See https://example.com/a/b',
+    'compare input/output before retry',
+    'use / as the separator'
+  ]) {
+    assert.equal(isSafeMptErrorText(safeText), true, safeText);
+  }
   const unsafePaths = mptSpoolPaths(unsafeInput);
   const unsafeCode = JSON.parse(fs.readFileSync(unsafePaths.parserOutcomeReady, 'utf8'));
   unsafeCode.outcome.fileResult.code = '/private/tmp/secret-code';
@@ -909,9 +965,13 @@ test('Writer技术错误与parent validator独立清除或拒绝绝对路径，�
       async importValidatedSpool(_spool, options) {
         storeCalls += 1;
         if (storeCalls === 1) {
-          throw Object.assign(new Error('open /tmp failed at C:\\Users\\secret\\input.txt'), {
+          throw Object.assign(new Error("ENOENT: no such file, open '/private/tmp/input.txt'"), {
             code: '/private/tmp/private-code',
-            detailLines: ['safe writer detail', '\\\\server\\share\\secret.txt']
+            detailLines: [
+              'safe writer detail',
+              'EACCES: open "C:\\Users\\secret\\input.txt"',
+              "EIO: open '\\\\server\\share\\secret.txt'"
+            ]
           });
         }
         return {
@@ -952,7 +1012,7 @@ test('Writer技术错误与parent validator独立清除或拒绝绝对路径，�
     code: 'PREFUND_WRITER_FILE_FAILED',
     message: 'PreFund Writer处理当前文件失败',
     stage: 'execute',
-    detailLines: ['safe writer detail']
+    detailLines: ['safe writer detail', '当前文件技术错误详情已隐藏']
   });
   assert.deepEqual(parentResult.results.map((item) => item.status), ['failed', 'ok']);
   assert.equal(validatePreFundMptImportResult(parentResult), true);
@@ -961,8 +1021,9 @@ test('Writer技术错误与parent validator独立清除或拒绝绝对路径，�
 
   for (const mutate of [
     (item) => { item.code = '/private/tmp/code'; },
-    (item) => { item.message = 'source /tmp'; },
-    (item) => { item.detailLines = ['C:\\Users\\secret\\input.txt']; },
+    (item) => { item.message = "ENOENT: open '/tmp'"; },
+    (item) => { item.detailLines = ['EACCES: open "C:\\Users\\secret\\input.txt"']; },
+    (item) => { item.detailLines = ["EIO: open '\\\\server\\share\\secret.txt'"]; },
     (item) => { item.extra = 'unsafe-extra'; }
   ]) {
     const tampered = structuredClone(parentResult);
@@ -1557,7 +1618,10 @@ test('Parser OS error在sidecar边界清除绝对路径，当前file失败且后
     assert.equal(result.results[0].status, 'failed');
     assert.equal(result.results[0].code, 'ENOENT');
     assert.equal(result.results[0].message, 'MPT parser worker处理当前文件失败');
-    assert.deepEqual(result.results[0].detailLines, ['safe parser detail']);
+    assert.deepEqual(result.results[0].detailLines, [
+      'safe parser detail',
+      '当前文件技术错误详情已隐藏'
+    ]);
     assert.equal(result.results[1].status, 'ok');
     assert.deepEqual(criticalUnits, ['file:000001']);
     assert.doesNotMatch(JSON.stringify({ result, progress }), /\/private\/tmp|customer-secret/);
@@ -1883,6 +1947,9 @@ async function recoveryHarness(outcome, options = {}) {
     requestOwnerRepository,
     recoveryControlRepository,
     recoveryCoordinator: startup,
+    receiptAuthority: options.receiptAuthority || {
+      async verify({ receipt }) { return receipt; }
+    },
     ...(options.conflictScopeGate ? { conflictScopeGate: options.conflictScopeGate } : {})
   });
   if (options.skipPrepare === true) {
@@ -2031,6 +2098,34 @@ test('durable recovery：prepared→acked；COMMIT结果丢失原子写interrupt
     assert.equal(unknown.readRepository.listActiveRecoveryHolds()[0].reasonCode, 'INSPECTION_UNKNOWN');
   } finally {
     unknown.db.close();
+  }
+});
+
+test('receipt authority拒绝后Intent保持acked并由唯一Inspector形成RESULT_LOST Hold', async () => {
+  const observed = await recoveryHarness('committed', {
+    receiptAuthority: {
+      async verify() {
+        throw Object.assign(new Error('authoritative receipt conflict'), {
+          code: 'WORKER_DURABLE_RECEIPT_AUTHORITY_CONFLICT'
+        });
+      }
+    }
+  });
+  try {
+    await assert.rejects(() => observed.durable.observeReceipt({
+      actionKey: 'pre-fund:mpt-import',
+      fileOperationKey: `${observed.parentOperationKey}/file/000000`,
+      taskRunId: observed.taskRunId,
+      intentId: observed.prepared.intentId,
+      receipt: { tampered: true }
+    }), { code: 'WORKER_DURABLE_RECEIPT_AUTHORITY_CONFLICT' });
+    assert.equal(observed.readRepository.getCriticalIntentById(observed.prepared.intentId).state, 'acked');
+    const decision = await observed.durable.resolveUncertain({ intentId: observed.prepared.intentId });
+    assert.equal(decision.outcome, 'committed');
+    assert.equal(observed.readRepository.getCriticalIntentById(observed.prepared.intentId).state, 'closed');
+    assert.equal(observed.readRepository.listActiveRecoveryHolds()[0].reasonCode, 'RESULT_LOST');
+  } finally {
+    observed.db.close();
   }
 });
 
