@@ -43,8 +43,9 @@ function exactFileResult(value) {
     throw spoolError('PREFUND_PARSER_OUTCOME_INVALID', 'Parser error fileResult字段非法');
   }
   const fileName = boundedText(value.fileName, 'fileName', 1024);
-  if (fileName !== path.basename(fileName) || /[\\/]/.test(fileName)) {
-    throw spoolError('PREFUND_PARSER_OUTCOME_INVALID', 'Parser error fileName不得包含路径');
+  if (fileName !== path.basename(fileName) || /[\\/]/.test(fileName) ||
+      safeMptFileName(fileName) !== fileName) {
+    throw spoolError('PREFUND_PARSER_OUTCOME_INVALID', 'Parser error fileName非法或包含路径');
   }
   const code = boundedText(value.code, 'code', 256);
   const message = boundedText(value.message, 'message', 8192);

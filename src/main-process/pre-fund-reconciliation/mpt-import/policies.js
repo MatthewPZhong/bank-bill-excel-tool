@@ -1,6 +1,7 @@
 'use strict';
 
 const {
+  allowMptFinanceSafeValue,
   isSafeMptDetailLines,
   isSafeMptErrorCode,
   isSafeMptErrorText,
@@ -221,6 +222,13 @@ function validatePreFundMptImportResult(value) {
 function validatePreFundMptRepairResult(value) {
   return validatePreFundMptParentResult(value, PRE_FUND_MPT_REPAIR_ACTION);
 }
+
+Object.defineProperty(validatePreFundMptImportResult, 'allowFinanceSafeValue', {
+  value: allowMptFinanceSafeValue
+});
+Object.defineProperty(validatePreFundMptRepairResult, 'allowFinanceSafeValue', {
+  value: allowMptFinanceSafeValue
+});
 
 const PRE_FUND_MPT_POLICIES = Object.freeze([
   preFundMptPolicy(PRE_FUND_MPT_IMPORT_ACTION),

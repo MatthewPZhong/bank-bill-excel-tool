@@ -19,6 +19,9 @@ const {
   canonicalSha256
 } = require('../../../../src/main-process/background-execution/canonical-json-v1');
 const {
+  assertFinanceSafeValue
+} = require('../../../../src/main-process/background-execution/error-codec');
+const {
   createRecoveryControlReadRepository
 } = require('../../../../src/main-process/background-execution/critical/recovery-control-read-repository');
 const {
@@ -76,6 +79,10 @@ const {
   readParserOutcome,
   writeParserOutcome
 } = require('../../../../src/main-process/pre-fund-reconciliation/mpt-import/parser-outcome');
+const {
+  allowMptFinanceSafeValue,
+  safeMptFileName
+} = require('../../../../src/main-process/pre-fund-reconciliation/mpt-import/file-result-safety');
 const {
   preFundMptRecoveryPlanTransitions
 } = require('../../../../src/main-process/pre-fund-reconciliation/mpt-import/recovery-plan');
@@ -1060,6 +1067,115 @@ test('import与repair parent result validator保持action-specific exact public 
   assert.equal(validatePreFundMptRepairResult(importWithRepairEvidence), false);
 });
 
+test('canonical MPT超长sequence fileName保持公开parity，任意账号样式文件名仍fail closed', () => {
+  const longFileName = 'MPT_INBOUND_GATEWAY_20260708_12345678901234567890.txt';
+  const arbitraryAccountFileName = '12345678901234567890.txt';
+  const success = {
+    status: 'ok',
+    importStatus: 'imported',
+    fileName: longFileName,
+    sourceType: 'MPT_INBOUND_GATEWAY',
+    rowCount: 1,
+    excludedRowCount: 0
+  };
+  assert.equal(safeMptFileName(path.join('/private/tmp', longFileName)), longFileName);
+  assert.equal(safeMptFileName(arbitraryAccountFileName), 'unknown-file');
+  assert.throws(() => assertFinanceSafeValue({ fileName: longFileName }), {
+    code: 'PRIVACY_VALUE_FORBIDDEN'
+  }, '通用finance-safe不得全局放行MPT业务文件名');
+  assert.doesNotThrow(() => assertFinanceSafeValue({
+    sourceFileName: longFileName,
+    sourceFileSequence: '12345678901234567890',
+    sourceType: 'MPT_INBOUND_GATEWAY',
+    sourceDate: '2026-07-08',
+    sourceBatch: 'MPT_INBOUND_20260708_12345678901234567890'
+  }, 'finance-safe-v1', '/', { allowValue: allowMptFinanceSafeValue }));
+  assert.throws(() => assertFinanceSafeValue({
+    message: longFileName
+  }, 'finance-safe-v1', '/', { allowValue: allowMptFinanceSafeValue }), {
+    code: 'PRIVACY_VALUE_FORBIDDEN'
+  }, '同一长数字只允许在exact domain filename/source identity key中出现');
+  assert.throws(() => assertFinanceSafeValue({
+    fileName: 'report_12345678901234567890.txt'
+  }, 'finance-safe-v1', '/', { allowValue: allowMptFinanceSafeValue }), {
+    code: 'PRIVACY_VALUE_FORBIDDEN'
+  });
+  const opaqueIntentId =
+    'prefund-intent-cf114ee865cd8ef8b5b4e36eb724822113685f6984de474104e52c9166abbb6e';
+  const fileOperationKey = '4bcc9162-9748-4470-b9d0-91a4233a8fb7/file/000000';
+  const producerTaskRunId = 'f1234567-1234-4123-8123-123456789012';
+  assert.doesNotThrow(() => assertFinanceSafeValue({
+    intentId: opaqueIntentId,
+    fileOperationKey,
+    operationKey: fileOperationKey,
+    datasetId: 'a1234567-1234-4123-8123-123456789012',
+    producerTaskRunId,
+    fileIndex: 0
+  }, 'finance-safe-v1', '/', { allowValue: allowMptFinanceSafeValue }));
+  assert.throws(() => assertFinanceSafeValue({
+    message: opaqueIntentId
+  }, 'finance-safe-v1', '/', { allowValue: allowMptFinanceSafeValue }), {
+    code: 'PRIVACY_VALUE_FORBIDDEN'
+  });
+  assert.throws(() => assertFinanceSafeValue({
+    fileOperationKey,
+    fileIndex: 1
+  }, 'finance-safe-v1', '/', { allowValue: allowMptFinanceSafeValue }), {
+    code: 'PRIVACY_VALUE_FORBIDDEN'
+  }, 'fileOperationKey suffix必须与同payload fileIndex一致');
+  assert.throws(() => assertFinanceSafeValue({
+    sourceFileName: longFileName,
+    sourceFileSequence: '99999999999999999999',
+    sourceType: 'MPT_INBOUND_GATEWAY',
+    sourceDate: '2026-07-08'
+  }, 'finance-safe-v1', '/', { allowValue: allowMptFinanceSafeValue }), {
+    code: 'PRIVACY_VALUE_FORBIDDEN'
+  });
+  assert.equal(validatePreFundMptImportResult(success), true);
+  assert.equal(validatePreFundMptRepairResult(success), true);
+  assert.equal(validatePreFundMptImportResult({
+    status: 'ok', results: [success], successCount: 1, failedCount: 0
+  }), true);
+  assert.equal(validatePreFundMptRepairResult({
+    status: 'ok', results: [success], successCount: 1, failedCount: 0,
+    importedRowCount: 1, excludedRowCount: 0
+  }), true);
+  assert.equal(validatePreFundMptImportResult({
+    ...success, fileName: arbitraryAccountFileName
+  }), false);
+});
+
+test('sealed Parser error保留canonical超长sequence basename并拒绝任意账号样式fileName', () => {
+  const sequence = '12345678901234567890';
+  const filePath = writeFile(sequence, [inboundRow({ reconId: 'LONG-PARSER-SEQUENCE' })]);
+  const input = spoolInput(filePath, 'long-parser-sequence-parent');
+  const fileResult = {
+    status: 'failed',
+    fileName: path.basename(filePath),
+    code: 'MPT_ROW_ERRORS',
+    message: '文件包含格式错误',
+    detailLines: ['第2行：字段数量不匹配']
+  };
+  writeParserOutcome(input, { kind: 'parser-error', fileResult });
+  assert.deepEqual(readParserOutcome(input), {
+    kind: 'parser-error',
+    fileResult
+  });
+
+  const unsafeInput = {
+    ...input,
+    fileIndex: 1,
+    source: {
+      filePath: path.join(tempRoot, '12345678901234567890.txt'),
+      sourceSnapshot: input.source.sourceSnapshot
+    }
+  };
+  assert.throws(() => writeParserOutcome(unsafeInput, {
+    kind: 'parser-error',
+    fileResult: { ...fileResult, fileName: '12345678901234567890.txt' }
+  }), { code: 'PREFUND_PARSER_OUTCOME_INVALID' });
+});
+
 test('PreFund policy保持冻结action-specific static keys、资源和production gate', () => {
   const [importPolicy, repairPolicy] = PRE_FUND_MPT_POLICIES;
   assert.deepEqual({
@@ -1113,6 +1229,60 @@ test('PreFund policy保持冻结action-specific static keys、资源和productio
   });
   assert.equal(repairPolicy.production.enabled, false);
   assert.equal(repairPolicy.production.effectiveWorkerCount, 0);
+});
+
+test('managed Writer以canonical超长sequence形成receipt后unit与parent validator仍接受', async () => {
+  const calls = [];
+  const opaqueIntentId =
+    'prefund-intent-cf114ee865cd8ef8b5b4e36eb724822113685f6984de474104e52c9166abbb6e';
+  const runtime = createBackgroundExecutionRuntime({
+    workerDurableCoordinator: {
+      async prepareAndAck(input) {
+        calls.push(`prepare:${input.unitId}`);
+        return { intentId: opaqueIntentId, fileOperationKey: input.critical.fileOperationKey };
+      },
+      async observeReceipt(input) {
+        calls.push(`receipt:${input.unitId}`);
+        return { receiptHint: { receiptKind: 'module-local', receiptIdentity: String(input.receipt.id) } };
+      },
+      async settleCommitted(input) { calls.push(`closed:${input.unitId}`); },
+      async resolveUncertain() { return { outcome: 'not-committed' }; }
+    }
+  });
+  const sequence = '12345678901234567890';
+  const sourceBatch = `MPT_INBOUND_20260708_${sequence}`;
+  const filePath = writeFile(sequence, [inboundRow({
+    batchNo: sourceBatch,
+    reconId: 'LONG-MANAGED-SEQUENCE'
+  })], sourceBatch);
+  try {
+    const result = await executeManagedPreFundMptImport({
+      actionKey: 'pre-fund:mpt-import',
+      runtime,
+      service: { adoptManagedMptImportResults: (_paths, items) => items },
+      filePaths: [filePath],
+      userDataDir,
+      taskStagingDir: path.join(tempRoot, 'managed-long-sequence-staging'),
+      batchContext: {
+        batchId: 1,
+        batchNumber: 'BATCH-LONG-SEQUENCE',
+        taskRunId: 'f1234567-1234-4123-8123-123456789012',
+        taskKey: 'pre-fund-reconciliation:import-mpt',
+        moduleId: 'pre-fund',
+        parentRunId: 'managed-long-sequence-parent',
+        operationKey: '4bcc9162-9748-4470-b9d0-91a4233a8fb7'
+      },
+      production: false
+    });
+    assert.equal(result.results[0].status, 'ok');
+    assert.equal(result.results[0].fileName, path.basename(filePath));
+    assert.equal(validatePreFundMptImportResult(result), true);
+    assert.deepEqual(calls, [
+      'prepare:file:000000', 'receipt:file:000000', 'closed:file:000000'
+    ]);
+  } finally {
+    await runtime.shutdown();
+  }
 });
 
 test('一个parent job复用单一Writer transport，Parser effective=1按unit receipt后递增提交', async () => {
@@ -1238,10 +1408,11 @@ test('parser-error作为显式预注册unit保留原错误并继续后续file', 
 });
 
 test('managed strict MPT_ROW_ERRORS与legacy保持可定位detail及顶层repair shape', async () => {
+  const sourceBatch = 'MPT_INBOUND_20260708_12345678901234567890';
   const filePath = writeFile('8121', [
-    inboundRow({ reconId: 'BAD-AMOUNT', amount: 'not-decimal' }),
-    inboundRow({ reconId: 'BAD-DATE', billDate: '2026-02-30' })
-  ]);
+    inboundRow({ batchNo: sourceBatch, reconId: 'BAD-AMOUNT', amount: 'not-decimal' }),
+    inboundRow({ batchNo: sourceBatch, reconId: 'BAD-DATE', billDate: '2026-02-30' })
+  ], sourceBatch);
   const service = createPreFundReconciliationService({
     userDataDir,
     database: mirrorDatabase(),

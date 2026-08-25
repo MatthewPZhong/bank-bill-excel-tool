@@ -77,8 +77,15 @@ function financeSafeTextViolation(value, role = 'value') {
   return null;
 }
 
-function privacyViolation(value, path = '') {
+function privacyViolation(value, path = '', options = {}, parent = null, key = null) {
   if (typeof value === 'string') {
+    if (typeof options.allowValue === 'function') {
+      try {
+        if (options.allowValue(Object.freeze({ value, path: path || '/', parent, key })) === true) {
+          return null;
+        }
+      } catch (_error) { /* domain delegate异常时继续走通用fail-closed判断。 */ }
+    }
     const kind = financeSafeTextViolation(value);
     return kind ? { path: path || '/', kind } : null;
   }
@@ -92,7 +99,13 @@ function privacyViolation(value, path = '') {
       if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) {
         return { path: `${path}/${index}`, kind: 'unsafe-container' };
       }
-      const violation = privacyViolation(descriptor.value, `${path}/${index}`);
+      const violation = privacyViolation(
+        descriptor.value,
+        `${path}/${index}`,
+        options,
+        value,
+        String(index)
+      );
       if (violation) return violation;
     }
     return null;
@@ -116,13 +129,13 @@ function privacyViolation(value, path = '') {
     if (isSha256Digest || isFilePlanArtifactKey) {
       continue;
     }
-    const violation = privacyViolation(fieldValue, childPath);
+    const violation = privacyViolation(fieldValue, childPath, options, value, key);
     if (violation) return violation;
   }
   return null;
 }
 
-function assertFinanceSafeValue(value, privacyProfile = 'finance-safe-v1', path = '') {
+function assertFinanceSafeValue(value, privacyProfile = 'finance-safe-v1', path = '', options = {}) {
   if (privacyProfile !== 'finance-safe-v1') {
     throw new SafeErrorValidationError(
       'PRIVACY_PROFILE_UNSUPPORTED',
@@ -130,7 +143,7 @@ function assertFinanceSafeValue(value, privacyProfile = 'finance-safe-v1', path 
       path || '/'
     );
   }
-  const violation = privacyViolation(value, path);
+  const violation = privacyViolation(value, path, options);
   if (violation) {
     throw new SafeErrorValidationError(
       'PRIVACY_VALUE_FORBIDDEN',

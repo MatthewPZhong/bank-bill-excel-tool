@@ -23,6 +23,7 @@
 | 首次Critical Intent的`create-prepared`与`mark-acked`在同一RecoveryControl transaction提交。 | Worker尚未收到ACK时，分步持久化失败不得留下当前进程无法追踪的open prepared Intent。 | 留到下次启动扫描；把pre-ACK失败升级为Recovery Hold。 | 第二步注入失败整体回滚，不发ACK、不建Hold；正常/exact replay合同不变。 |
 | Parser sidecar、Writer file result与parent validator复用同一safe error边界，并按import/repair exact public shape校验。 | sealed读取与`job:done`都属于独立privacy边界；构造器过滤不能替代消费者exact validation。 | 只过滤Parser message；parent浅层shape；复制多套path regex。 | 拒绝unsafe code、单段/多段POSIX、Windows、UNC与额外字段；正常URL/自然语言斜杠保留；cleanup内部字段不外泄。 |
 | date-range Hold gate与删除共享service/store权威归一化range。 | raw payload与trim后的实际删除范围不一致可绕过active Hold。 | gate与delete各自比较原始字符串。 | 带空白的合法payload仍按真实受影响batch scope阻断，范围外batch不误阻。⚠️ 资金红线，请人工复核。 |
+| finance-safe-v1通过既有action result-validator binding注入PreFund exact domain value delegate。 | 合法超长十进制sequence、batch suffix、UUID/file operation与opaque intent SHA会被通用full-account启发式误杀，且receipt/result属于COMMIT后边界。 | 在generic error codec内硬编码MPT grammar；全局放行长数字或hash；仅修`safeMptFileName`。 | 公共privacy walker保持业务无关；仅PreFund action的exact field+grammar放行，message/detailLines与arbitrary account-like identifier继续拒绝。 |
 
 ## Assumptions
 
@@ -55,6 +56,9 @@
 | 本轮项目负责人findings定向unit | `234/234 PASS` | dispatch后precritical transport exit清理交还、prepared→acked原子回滚、sidecar tamper code、单段POSIX/Windows/UNC隐私、Writer parent result exact validator、date-range trim Hold gate、repair 192+256MiB资源。 |
 | 本轮 Recovery/Side DB integration | `27/27`、`9/9`、`69/69 PASS` | RecoveryControl事务/CAS、durable recovery canary，以及PreFund金额/币种/source sequence/version/候选与side DB parity不漂移。 |
 | 本轮静态验证 | affected ESLint、14个JS `node --check`、`git diff --check` PASS | 新共享privacy helper、Main/runtime/store/service/worker/supervisor与测试均通过语法、风格和whitespace检查。 |
+| long sequence完整managed protocol回归 | PASS | canonical long `fileName/sourceFileSequence/sourceBatch`、UUID `datasetId/producerTaskRunId/fileOperationKey`与deterministic opaque `intentId`贯穿critical-ready→ACK→receipt→unit/job done；COMMIT后validator不误报，结果保留legacy basename。 |
+| finance-safe窄域反例 | PASS | arbitrary account-like filename、错误sequence/fileIndex、以及相同数字或opaque ID放入message时仍为`PRIVACY_VALUE_FORBIDDEN`；generic profile未全局放行MPT值。 |
+| long numeric batch strict parity | PASS | `managedRepairEvidence`无sourceDate时仍以exact sourceType+sourceBatch grammar通过完整job result，legacy/managed row-error detail与repair shape一致。 |
 
 ## Remaining Unknowns
 
