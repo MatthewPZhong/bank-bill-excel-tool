@@ -326,14 +326,69 @@ function Invoke-SilentInstaller {
       '--no-desktop-shortcut',
       "/D=$DestinationRoot"
     ) -PassThru -Wait -WindowStyle Hidden
+    $process.Refresh()
   } finally {
     foreach ($name in $savedEnvironment.Keys) {
       [Environment]::SetEnvironmentVariable($name, $savedEnvironment[$name], 'Process')
     }
   }
-  if ($process.ExitCode -ne 0) {
-    Throw-SafeFailure 'SETUP_NONZERO_EXIT'
+  if ($null -eq $process.ExitCode) {
+    Throw-SafeFailure 'SETUP_EXIT_CODE_UNAVAILABLE'
   }
+  return [int]$process.ExitCode
+}
+
+function Get-SafeSetupFailureDiagnostic {
+  param(
+    [Parameter(Mandatory = $true)][int] $ExitCode,
+    [Parameter(Mandatory = $true)][string] $InstallRoot,
+    [Parameter(Mandatory = $true)][string] $EffectiveUninstallDisplayName,
+    [Parameter(Mandatory = $true)][string] $UninstallRegistryKey
+  )
+
+  $exitState = switch ($ExitCode) {
+    1 { 'EXIT_1'; break }
+    2 { 'EXIT_2'; break }
+    default { 'EXIT_OTHER' }
+  }
+
+  $rootState = 'ROOT_ABSENT'
+  try {
+    if (Test-Path -LiteralPath $InstallRoot -PathType Container) {
+      $appExecutables = @(
+        Get-ChildItem -LiteralPath $InstallRoot -File -Filter '*.exe' -ErrorAction Stop |
+          Where-Object { $_.Name -notmatch '^(?:uninstall|unins)' }
+      )
+      $uninstallers = @(
+        Get-ChildItem -LiteralPath $InstallRoot -File -Filter '*.exe' -ErrorAction Stop |
+          Where-Object { $_.Name -match '^(?:uninstall|unins)' }
+      )
+      if ($appExecutables.Count -eq 1 -and $uninstallers.Count -eq 1) {
+        $rootState = 'ROOT_COMPLETE'
+      } elseif ($appExecutables.Count -eq 0 -and $uninstallers.Count -eq 0) {
+        $rootState = 'ROOT_EMPTY'
+      } else {
+        $rootState = 'ROOT_PARTIAL'
+      }
+    }
+  } catch {
+    $rootState = 'ROOT_AUDIT_FAILED'
+  }
+
+  try {
+    if (Test-ExactRegistryProductIdentity `
+      -EffectiveUninstallDisplayName $EffectiveUninstallDisplayName `
+      -UninstallRegistryKey $UninstallRegistryKey) {
+      $identityState = 'IDENTITY_PRESENT'
+    } else {
+      $identityState = 'IDENTITY_ABSENT'
+    }
+  } catch {
+    $identityState = 'IDENTITY_AUDIT_FAILED'
+  }
+
+  # 三段均来自固定枚举；不拼接路径、异常文本或任意 installer 输出。
+  return "$exitState`_$rootState`_$identityState"
 }
 
 function Select-InstalledExecutable {
@@ -494,7 +549,16 @@ function Invoke-WindowsPackagedBackgroundCanary {
       Throw-SafeFailure 'SETUP_FREEZE_IDENTITY_MISMATCH'
     }
     Assert-ProductIdentityAbsent -ProductName $productName -EffectiveUninstallDisplayName $effectiveUninstallDisplayName -UninstallRegistryKey $expectedUninstallRegistryKey -FailureCode 'PRODUCT_IDENTITY_PREEXISTING'
-    Invoke-SilentInstaller -SetupPath $setupFrozen -DestinationRoot $installContainer -EnvironmentRoot $installerEnvironmentRoot
+    $setupExitCode = Invoke-SilentInstaller -SetupPath $setupFrozen -DestinationRoot $installContainer -EnvironmentRoot $installerEnvironmentRoot
+    if ($setupExitCode -ne 0) {
+      $setupDiagnostic = Get-SafeSetupFailureDiagnostic `
+        -ExitCode $setupExitCode `
+        -InstallRoot $installRoot `
+        -EffectiveUninstallDisplayName $effectiveUninstallDisplayName `
+        -UninstallRegistryKey $expectedUninstallRegistryKey
+      [Console]::Error.WriteLine("BACKGROUND_EXECUTION_PACKAGED_CANARY_SETUP_DIAGNOSTIC=$setupDiagnostic")
+      Throw-SafeFailure 'SETUP_NONZERO_EXIT'
+    }
     $installedExecutable = Select-InstalledExecutable -InstallRoot $installRoot
     $setupVariantRoot = Join-Path $workRoot 'setup-runtime'
     New-Item -ItemType Directory -Path $setupVariantRoot | Out-Null

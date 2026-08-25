@@ -151,6 +151,37 @@ test('packaged background canary 仅在 GitHub-hosted Windows 的 RUNNER_TEMP �
   assert.match(harness, /BACKGROUND_EXECUTION_PACKAGED_CANARY = '1'/);
   assert.match(harness, /BACKGROUND_EXECUTION_PACKAGED_CANARY_REPORT_PATH = \$ReportPath/);
   assert.match(harness, /Invoke-SilentInstaller[\s\S]*'\/S',[\s\S]*'\/currentuser',[\s\S]*'--no-desktop-shortcut',[\s\S]*"\/D=\$DestinationRoot"/);
+  const installerFunction = harness.slice(
+    harness.indexOf('function Invoke-SilentInstaller'),
+    harness.indexOf('function Get-SafeSetupFailureDiagnostic')
+  );
+  assert.match(installerFunction, /\$process\.Refresh\(\)/);
+  assert.match(installerFunction, /SETUP_EXIT_CODE_UNAVAILABLE/);
+  assert.match(installerFunction, /return \[int\]\$process\.ExitCode/);
+  const setupDiagnosticFunction = harness.slice(
+    harness.indexOf('function Get-SafeSetupFailureDiagnostic'),
+    harness.indexOf('function Select-InstalledExecutable')
+  );
+  for (const fixedDiagnosticToken of [
+    'EXIT_1',
+    'EXIT_2',
+    'EXIT_OTHER',
+    'ROOT_ABSENT',
+    'ROOT_COMPLETE',
+    'ROOT_EMPTY',
+    'ROOT_PARTIAL',
+    'ROOT_AUDIT_FAILED',
+    'IDENTITY_PRESENT',
+    'IDENTITY_ABSENT',
+    'IDENTITY_AUDIT_FAILED'
+  ]) {
+    assert.match(setupDiagnosticFunction, new RegExp(`'${fixedDiagnosticToken}'`));
+  }
+  assert.doesNotMatch(setupDiagnosticFunction, /SetupPath|Exception|WriteLine/);
+  assert.match(
+    harness,
+    /\$setupExitCode = Invoke-SilentInstaller[\s\S]*Get-SafeSetupFailureDiagnostic[\s\S]*BACKGROUND_EXECUTION_PACKAGED_CANARY_SETUP_DIAGNOSTIC=\$setupDiagnostic[\s\S]*Throw-SafeFailure 'SETUP_NONZERO_EXIT'/
+  );
   assert.match(
     assistedInstaller,
     /\$\{StrContains\} \$0 "\$\{APP_FILENAME\}" \$INSTDIR[\s\S]*StrCpy \$INSTDIR "\$INSTDIR\\\$\{APP_FILENAME\}"/
@@ -265,6 +296,60 @@ try {
       ...process.env,
       CANARY_HARNESS_PATH: path.join(ROOT, 'scripts/run-windows-packaged-background-canary.ps1'),
       CANARY_REPORT_PATH: path.join(tempDir, 'missing-report.json')
+    },
+    timeout: 15000
+  });
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+});
+
+test('Windows packaged canary 的 Setup 失败诊断仅返回固定退出/落地/身份枚举', {
+  skip: process.platform !== 'win32'
+}, (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'packaged-canary-setup-diagnostic-'));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const probe = String.raw`
+$ErrorActionPreference = 'Stop'
+$source = Get-Content -LiteralPath $env:CANARY_HARNESS_PATH -Raw
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput(
+  $source,
+  [ref]$tokens,
+  [ref]$parseErrors
+)
+if ($parseErrors.Count -ne 0) { throw 'CANARY_HARNESS_PARSE_FAILED' }
+$definition = $ast.FindAll({
+  param($node)
+  $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+    $node.Name -eq 'Get-SafeSetupFailureDiagnostic'
+}, $true) | Select-Object -First 1
+if ($null -eq $definition) { throw 'CANARY_DIAGNOSTIC_FUNCTION_NOT_FOUND' }
+Invoke-Expression ([string]$definition.Extent.Text)
+
+$script:IdentityPresent = $false
+function Test-ExactRegistryProductIdentity { return $script:IdentityPresent }
+
+$missingCode = Get-SafeSetupFailureDiagnostic -ExitCode 2 -InstallRoot $env:CANARY_MISSING_INSTALL_ROOT -EffectiveUninstallDisplayName 'fixed-display-name' -UninstallRegistryKey 'fixed-registry-key'
+if ($missingCode -ne 'EXIT_2_ROOT_ABSENT_IDENTITY_ABSENT') {
+  throw "UNEXPECTED_MISSING_CODE:$missingCode"
+}
+
+New-Item -ItemType Directory -Path $env:CANARY_COMPLETE_INSTALL_ROOT | Out-Null
+Set-Content -LiteralPath (Join-Path $env:CANARY_COMPLETE_INSTALL_ROOT 'app.exe') -Value '' -NoNewline
+Set-Content -LiteralPath (Join-Path $env:CANARY_COMPLETE_INSTALL_ROOT 'Uninstall app.exe') -Value '' -NoNewline
+$script:IdentityPresent = $true
+$completeCode = Get-SafeSetupFailureDiagnostic -ExitCode -7 -InstallRoot $env:CANARY_COMPLETE_INSTALL_ROOT -EffectiveUninstallDisplayName 'fixed-display-name' -UninstallRegistryKey 'fixed-registry-key'
+if ($completeCode -ne 'EXIT_OTHER_ROOT_COMPLETE_IDENTITY_PRESENT') {
+  throw "UNEXPECTED_COMPLETE_CODE:$completeCode"
+}
+`;
+  const result = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', probe], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      CANARY_HARNESS_PATH: path.join(ROOT, 'scripts/run-windows-packaged-background-canary.ps1'),
+      CANARY_MISSING_INSTALL_ROOT: path.join(tempDir, 'missing'),
+      CANARY_COMPLETE_INSTALL_ROOT: path.join(tempDir, 'complete')
     },
     timeout: 15000
   });

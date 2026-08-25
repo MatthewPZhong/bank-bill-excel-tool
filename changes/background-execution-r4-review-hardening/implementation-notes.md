@@ -16,7 +16,8 @@
 | Receipt 仅增加普通 `run_id` 索引 | 一个 run 多 receipt 当前由 Inspector 检测，未授权唯一约束 | `UNIQUE(run_id)` | 只优化查询计划，不改变幂等/资金数据模型 |
 | Canary 新增 safe code `CANARY_PROCESS_EXITED_BEFORE_REPORT` | 报告前进程退出是可观测失败，现有隐私边界禁止采集 stdout/stderr | 继续等待统一报 report timeout；采集完整进程输出 | 快速、稳定、无敏感输出 |
 | launcher 退出后给 report 固定 2 秒宽限，并保留首个 canary safe code | 代码审查确认 Electron launcher 可先退出；#175 首次 Windows CI 另行证明二次卸载错误会把首错覆盖成 `UNINSTALL_CLEANUP_FAILED` | 继续立即判失败；恢复完整 180 秒等待；让 cleanup 覆盖首错 | 兼容 launcher hand-off，同时保持有界等待和无敏感输出；cleanup 仅追加固定 safe diagnostic |
-| NSIS `/D=` 只传 owned install container，实际安装根固定推导为 `container/productName` | #175 连续两次在把 Unicode 产品名直接放入 `/D=` 时返回 `SETUP_NONZERO_EXIT`；assisted installer 模板本就负责追加 `${APP_FILENAME}` | 继续把最终 Unicode 产品目录直接作为 `/D=`；忽略 Setup 非零退出 | 保持实际安装、选择、卸载和身份审计根不变，收窄原始命令行编码面，Setup 非零仍 fail closed |
+| NSIS `/D=` 只传 owned install container，实际安装根固定推导为 `container/productName` | assisted installer 模板在目标中缺少 `${APP_FILENAME}` 时负责追加产品目录；最新 CI 已证明该选择不是 `SETUP_NONZERO_EXIT` 的充分根因 | 继续把最终 Unicode 产品目录直接作为 `/D=`；忽略 Setup 非零退出 | 保持实际安装、选择、卸载和身份审计根不变；该布局选择继续保留，但不再作为 CI 根因结论 |
+| Setup 非零仍 fail closed，并额外输出固定枚举诊断 | #175 第三次真实 Windows 仍只有聚合码 `SETUP_NONZERO_EXIT`；完整 stdout/stderr 或路径违反隐私边界，继续猜参数缺少证据 | 忽略非零退出；打印任意异常、路径或 installer 输出；继续无证据改安装参数 | 主 safe code 不变；仅追加退出码桶、安装根状态、精确 Registry 身份状态三个固定枚举，下一轮 CI 可区分退出前/部分落地/完整落地 |
 | 修正冻结 TechDoc 并重建 published report/checksum | 当前 runtime 的唯一物理表为 `vcc_op_calc_runs`，包完整性记录包含 TechDoc | 新建 `vcc_op_runs` 别名表；只改文档而留下失配 hash | 文档与实现恢复一致，历史 manifest 保持其显式 non-normative 含义 |
 
 ## Assumptions
@@ -32,7 +33,7 @@
 | --- | --- | --- | --- | --- |
 | 在 #174 组合 HEAD 直接重生冻结包 published validator report | 先恢复历史 PASS report，再在其原始 provenance HEAD `f7c4d5aa` 上叠加单行 TechDoc 勘误重跑 | validator 将 #165 的 Main/TaskPolicy source hash 与 60 条 call-site 行号冻结；后续 PR 栈会按设计触发 provenance drift，和 TechDoc 内容无关 | 不更新 authority/action manifest，不把后续代码漂移冒充合同失败；修正文档仍须生成真实 29/29 report 与 checksum | 是 |
 | PR #175 从旧堆叠基线直接等待 GitHub 合并 | PR base 改为 `v3.2.0` 后，将最新 `origin/v3.2.0`（`21181432`）合入 hardening head | #168～#174 已按序合并，旧堆叠拓扑在迁移测试处产生内容冲突 | 仅组合基线的显式关闭保护与本 PR 的 non-unique `run_id` 索引断言；相对新基线的净改动仍为原 13 个 hardening 文件，不改变产品合同 | 不适用；无行为偏差 |
-| R3 repair 将最终产品目录直接作为 NSIS `/D=` | R4 CI repair 改为把 owned ASCII container 作为 `/D=`，并继续用 `container/productName` 作为唯一实际安装根 | #175 两次真实 Windows Setup 在直接 Unicode `/D=` 上稳定返回非零；模板已冻结自动追加产品目录的行为 | 不改安装结果、产品身份、卸载边界或 evidence 意义；只改变受控 harness 的参数编码路径 | 不适用；内部 harness 修复 |
+| R3 repair 将最终产品目录直接作为 NSIS `/D=` | R4 CI repair 改为把 owned ASCII container 作为 `/D=`，并继续用 `container/productName` 作为唯一实际安装根 | 当时以两次 Windows 失败和模板追加行为形成待验证假设；run `32794520190` 在 ASCII container 下仍同样失败，已反证“Unicode `/D=` 是根因”的归因 | 安装结果、产品身份、卸载边界或 evidence 意义未变；保留较窄参数布局，但后续诊断不得继续依赖该归因 | 不适用；内部 harness 历史偏差已更正 |
 
 ## Evidence
 
@@ -56,6 +57,9 @@
 | Windows runner 与包结构对比 | #174 成功 run `32781005010` 和 #175 两次失败使用同一 `windows-2025-vs2026/20260818.207` 镜像；#175 两次分别落在 westus3 与 westcentralus；asar 均为 64.27MB/3251 entries | 排除单一区域或 runner 镜像漂移；修复聚焦 harness `/D=` 参数，而非放宽产品 canary |
 | NSIS destination-root 修复定向验证 | `windows-build-contract`：`4 PASS / 1 Windows-only SKIP`；`git diff --check` PASS | 冻结 container 参数、模板追加、最终产品根选择及 fail-closed Setup 退出合同 |
 | NSIS destination-root 修复全仓验证 | 4 个 hardening files：`70 PASS / 1 Windows-only SKIP`；`npm run release-check` PASS，unit `6017/6019`（0 fail、2 skip），integration `51/51` scripts、`2455/2455` assertions；合同包 checksum `69/69 PASS` | 证明参数修复未改变产品、资金/恢复语义、默认 IPC、证据包或 production gate；仍未调用 `check-vars`/`scan:vars` |
+| #175 GitHub CI run `32794520190` / build job `97649991756` | smoke-test SUCCESS；ASCII destination-root 修复后 build 仍报告 `SETUP_NONZERO_EXIT`，且无 cleanup 覆盖诊断 | 反证 Unicode `/D=` 根因假设；当前证据只能确认 installer 真实返回非零，尚不能区分退出码及落地阶段 |
+| Setup 有界诊断定向验证 | `windows-build-contract`：`4 PASS / 2 Windows-only SKIP`；4 个 hardening files：`70 PASS / 2 Windows-only SKIP`；`git diff --check` PASS | 固定退出码桶、安装根状态、精确 Registry 身份状态；macOS 不伪造两个 Windows 动态探针 |
+| Setup 有界诊断全仓验证 | `npm run release-check` PASS；unit `6017/6020`（0 fail、3 skip），integration `51/51` scripts、`2455/2455` assertions；合同包 checksum `69/69 PASS` | 诊断保持主 safe code、业务/资金/恢复语义、production gate 与冻结合同包不变；仍未调用 `check-vars`/`scan:vars` |
 
 ## Final Blindspot Review
 
@@ -64,11 +68,12 @@
 - 兼容性：未改 Renderer/public IPC、production gate、错误 DTO、operation identity 或 Receipt 唯一性；数据库变更是幂等的 non-unique 加法索引。
 - 资金红线：金额、方向、月份、币种、begin/end OP 与 run/files/receipt 原子性定向测试均通过；既有 exact Main owner 和人工签字 gate 仍为 `PENDING_HUMAN_REVIEW`，本 PR 不代替人工复核。
 - 平台盲区：macOS 无法执行真实 Windows PowerShell 动态探针；静态合同已通过，动态证据留给 GitHub-hosted Windows CI。
-- CI 失败修复边界：仅调整 packaged canary harness 的 launcher/report 等待和错误优先级；未改产品代码、金额/币种/身份/幂等/恢复语义、production enablement 或人工资金红线。
+- CI 失败修复边界：仅调整 packaged canary harness 的 launcher/report 等待、错误优先级和有界 Setup 诊断；未改产品代码、金额/币种/身份/幂等/恢复语义、production enablement 或人工资金红线。
 
 ## Remaining Unknowns
 
 | 未知 | 处理 | 负责人/下一步 | 合并影响 |
 | --- | --- | --- | --- |
 | Windows-only 提前退出动态探针 | PROBE | GitHub-hosted Windows CI | 本地静态/跨平台测试通过后可提 Draft；合并前需 CI PASS |
+| Setup 非零的真实退出码与失败时安装/Registry 落地阶段 | PROBE | 固定枚举诊断推送后的 GitHub-hosted Windows CI | 当前不得把非零当成功；诊断收敛前不合并 |
 | 真实 Windows Setup/portable packaged canary 与资金红线签字 | BLOCK | 既有 R3 人工/Windows gate | 本 PR 不改变其 `PENDING_HUMAN_REVIEW` 状态，仍阻塞 production enablement |
