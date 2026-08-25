@@ -71,10 +71,15 @@ test('run-data-store 注册临时 MPT 模块并建立批次/明细/错误审计�
   try {
     const tables = db.prepare(`
       SELECT name FROM sqlite_master
-      WHERE type = 'table' AND name LIKE 'pre_fund_reconciliation_%'
+      WHERE type = 'table'
+        AND (
+          name LIKE 'pre_fund_reconciliation_%'
+          OR name = 'pre_fund_operation_receipts'
+        )
       ORDER BY name
     `).all().map((row) => row.name);
     assert.deepEqual(tables, [
+      'pre_fund_operation_receipts',
       'pre_fund_reconciliation_gateway_batches',
       'pre_fund_reconciliation_gateway_excluded_rows',
       'pre_fund_reconciliation_gateway_rows'
