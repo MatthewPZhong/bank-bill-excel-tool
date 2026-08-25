@@ -135,9 +135,9 @@ function normalizeMultiSplitInput(value) {
     throw contractError('TOOLBOX_GENERATION_CONTRACT_INVALID', 'multi split input非法');
   }
   assertExactKeys(value.operation, ['groups'], 'multi split operation');
-  if (!Array.isArray(value.operation.groups) || value.operation.groups.length < 2 ||
+  if (!Array.isArray(value.operation.groups) || value.operation.groups.length < 1 ||
       value.operation.groups.length > 8) {
-    throw contractError('TOOLBOX_GENERATION_CONTRACT_INVALID', 'multi split groups必须为2..8组');
+    throw contractError('TOOLBOX_GENERATION_CONTRACT_INVALID', 'multi split groups必须为1..8组');
   }
   if (!Array.isArray(value.generations) ||
       value.generations.length !== value.operation.groups.length) {
@@ -329,7 +329,7 @@ function validateToolboxMultiGenerationResult(value) {
     );
     if (value.schemaVersion !== TOOLBOX_GENERATION_SCHEMA_VERSION ||
         value.actionKey !== TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT ||
-        !Array.isArray(value.artifacts) || value.artifacts.length < 2 ||
+        !Array.isArray(value.artifacts) || value.artifacts.length < 1 ||
         value.artifacts.length > 8) return false;
     const seenIds = new Set();
     const seenKeys = new Set();

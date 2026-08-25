@@ -261,6 +261,79 @@ test('Scanner等待Writer exit barrier；message后非0/transport error不能冒
   await assert.rejects(cancelled.promise, (error) => error.code === 'TOOLBOX_ROUTE_WRITER_EXIT');
 });
 
+test('E04-B managed单组保持legacy值/格式与零命中语义，Main验证后每次Publisher恰好一次', async () => {
+  const dir = tempDir();
+  const sourcePath = path.join(dir, 'single-source.xlsx');
+  await writeStyledFixture(sourcePath);
+  const scenarios = [
+    { key: 'matched', values: ['A'], expectedRows: 2 },
+    { key: 'zero-hit', values: ['不存在'], expectedRows: 0 }
+  ];
+
+  for (const scenario of scenarios) {
+    const finalPath = path.join(dir, `${scenario.key}-final.xlsx`);
+    const generationPath = path.join(dir, `${scenario.key}-route.xlsx`);
+    const legacyPath = path.join(dir, `${scenario.key}-legacy.xlsx`);
+    const routeDbPath = path.join(dir, `${scenario.key}-route.sqlite`);
+    const routeManifestPath = path.join(dir, `${scenario.key}-route.sealed.json`);
+    const groups = [{
+      outputId: `single-${scenario.key}`,
+      fileName: `${scenario.key}.xlsx`,
+      field: 'Group',
+      values: scenario.values
+    }];
+    const filePlan = multiFilePlan(sourcePath, [finalPath]);
+    const runtime = createBackgroundExecutionRuntime({ shutdownTimeoutMs: 10000 });
+    let publisherCalls = 0;
+    try {
+      const generated = await generateValidateAndPublishMultiOutput({
+        runtime,
+        filePlan,
+        batchContext: operationContext(`toolbox-route-single-${scenario.key}`),
+        groups,
+        generationPaths: [generationPath],
+        routeDbPath,
+        routeManifestPath,
+        production: false,
+        publisher: async (artifacts) => {
+          publisherCalls += 1;
+          assert.equal(artifacts.length, 1);
+          assert.equal(artifacts[0].outputIndex, 0);
+          assert.equal(artifacts[0].outputArtifactKey, filePlan.outputs[0].artifactKey);
+          assert.equal(artifacts[0].matchedCount, scenario.expectedRows);
+          return { taskId: `single-${scenario.key}-published` };
+        }
+      });
+      assert.equal(publisherCalls, 1);
+      assert.equal(generated.artifacts.length, 1);
+      assert.equal(generated.artifacts[0].matchedCount, scenario.expectedRows);
+      assert.equal(generated.summary.inputDataRowCount, 3);
+      assert.equal(generated.summary.outputDataRowCount, scenario.expectedRows);
+      assert.equal(generated.route.rowCount, scenario.expectedRows);
+      assert.equal(fs.existsSync(finalPath), false, 'Publisher stub不应伪造正式目标');
+
+      const legacy = await exportToolboxMultiFilters({
+        filePath: sourcePath,
+        groups: [{ ...groups[0], savePath: legacyPath }]
+      });
+      assert.equal(legacy.files.length, 1);
+      assert.equal(legacy.files[0].matchedCount, scenario.expectedRows);
+      const routeProjection = await workbookProjection(generationPath);
+      assert.deepEqual(routeProjection, await workbookProjection(legacyPath));
+      assert.equal(routeProjection.length, 1);
+      assert.equal(
+        routeProjection[0].rows.length,
+        scenario.expectedRows + 1,
+        '零命中仍应保留一个格式化逻辑表头'
+      );
+    } finally {
+      const shutdown = await runtime.shutdown({ timeoutMs: 10000 });
+      assert.deepEqual(shutdown.leakedTransports, []);
+      assert.deepEqual(shutdown.errors, []);
+    }
+  }
+});
+
 test('E04-B真实Scanner→sealed Route DB→单Writer与legacy输出等价，Main join后Publisher恰好一次', async () => {
   const dir = tempDir();
   const sourcePath = path.join(dir, 'source.xlsx');

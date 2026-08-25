@@ -56,10 +56,10 @@ function createMultiGenerationInput({
 }) {
   if (!filePlan || filePlan.allocation !== 'eager' || !Array.isArray(filePlan.inputs) ||
       filePlan.inputs.length !== 1 || !Array.isArray(filePlan.outputs) ||
-      filePlan.outputs.length < 2 || filePlan.outputs.length > 8 ||
+      filePlan.outputs.length < 1 || filePlan.outputs.length > 8 ||
       !Array.isArray(groups) || groups.length !== filePlan.outputs.length ||
       !Array.isArray(generationPaths) || generationPaths.length !== groups.length) {
-    throw validationError('TOOLBOX_GENERATION_FILE_PLAN_INVALID', '多文件拆分需要2..8输出的eager FilePlan');
+    throw validationError('TOOLBOX_GENERATION_FILE_PLAN_INVALID', '多文件拆分需要1..8输出的eager FilePlan');
   }
   const resolvedGenerationPaths = generationPaths.map((item) => path.resolve(String(item || '')));
   const resolvedRouteDbPath = path.resolve(String(routeDbPath || ''));
