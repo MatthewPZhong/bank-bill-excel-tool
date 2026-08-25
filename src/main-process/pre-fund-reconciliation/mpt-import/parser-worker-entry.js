@@ -6,17 +6,33 @@ const { writeMptFileSpool } = require('./spool-writer');
 
 if (!parentPort) throw new Error('PreFund MPT parser worker必须运行在worker_threads');
 
+const CLEANUP_ERROR_CODES = new Set([
+  'PREFUND_SPOOL_CLEANUP_INCOMPLETE',
+  'PREFUND_SPOOL_CLEANUP_PATH_INVALID'
+]);
+const SAFE_CAUSE_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,127}$/;
+
 const controller = new AbortController();
 parentPort.on('message', (message) => {
   if (message && message.operation === 'cancel') controller.abort();
 });
 
 function safeError(error) {
-  return Object.freeze({
+  const result = {
     name: error && error.name ? String(error.name) : 'Error',
     code: error && error.code ? String(error.code) : 'PREFUND_PARSER_WORKER_FAILED',
     message: error && error.message ? String(error.message) : 'MPT parser worker失败'
-  });
+  };
+  const residualPaths = error && error.details && error.details.residualPaths;
+  if (CLEANUP_ERROR_CODES.has(result.code) && Array.isArray(residualPaths) && residualPaths.length > 0) {
+    const causeCode = error.cause && typeof error.cause.code === 'string'
+      ? error.cause.code
+      : null;
+    result.cleanupRequired = true;
+    result.cleanupScope = 'current-file-spool';
+    result.causeCode = causeCode && SAFE_CAUSE_CODE_PATTERN.test(causeCode) ? causeCode : null;
+  }
+  return Object.freeze(result);
 }
 
 (async () => {

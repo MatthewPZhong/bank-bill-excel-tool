@@ -702,6 +702,62 @@ test('one-shot Parser Worker真实成功、取消与transport终止不留下伪m
     await readAndValidateMptFileSpool(input);
   });
 
+  await t.test('真实Worker cleanup incomplete只回传bounded当前file cleanup信号与原cause code', async () => {
+    const filePath = writeInboundFile(
+      'MPT_INBOUND_GATEWAY_20260708_404.txt',
+      [inboundRow()],
+      2
+    );
+    const input = spoolInput(filePath, { jobId: 'job-worker-cleanup-incomplete' });
+    const paths = mptSpoolPaths(input);
+    const foreignPath = path.join(paths.fileDir, 'foreign.keep');
+    fs.mkdirSync(paths.fileDir, { recursive: true });
+    fs.writeFileSync(foreignPath, 'foreign', 'utf8');
+
+    const worker = new Worker(workerEntry, { workerData: { input } });
+    const exitPromise = once(worker, 'exit');
+    const [message] = await once(worker, 'message');
+    const [exitCode] = await exitPromise;
+    assert.equal(exitCode, 0);
+    assert.equal(message.ok, false);
+    assert.deepEqual(Object.keys(message.error), [
+      'name', 'code', 'message', 'cleanupRequired', 'cleanupScope', 'causeCode'
+    ]);
+    assert.equal(message.error.code, 'PREFUND_SPOOL_CLEANUP_INCOMPLETE');
+    assert.equal(message.error.cleanupRequired, true);
+    assert.equal(message.error.cleanupScope, 'current-file-spool');
+    assert.equal(message.error.causeCode, 'MPT_DECLARED_COUNT_MISMATCH');
+    assert.ok(message.error.causeCode.length <= 128);
+    const serialized = JSON.stringify(message);
+    for (const forbidden of [tempRoot, paths.fileDir, filePath, path.basename(filePath), 'foreign.keep']) {
+      assert.equal(serialized.includes(forbidden), false, `Worker错误回包不得包含路径/文件名：${forbidden}`);
+    }
+    assert.equal(fs.existsSync(foreignPath), true, '无法安全删除的残留必须留给task owner');
+
+    fs.rmSync(foreignPath);
+    assert.equal(cleanupMptFileSpool(input).status, 'cleaned');
+    assert.equal(fs.existsSync(paths.fileDir), false);
+  });
+
+  await t.test('真实Worker普通解析错误保持原三字段语义且不误标cleanup', async () => {
+    const filePath = writeInboundFile(
+      'MPT_INBOUND_GATEWAY_20260708_405.txt',
+      [inboundRow()],
+      2
+    );
+    const input = spoolInput(filePath, { jobId: 'job-worker-business-error' });
+    const worker = new Worker(workerEntry, { workerData: { input } });
+    const exitPromise = once(worker, 'exit');
+    const [message] = await once(worker, 'message');
+    const [exitCode] = await exitPromise;
+    assert.equal(exitCode, 0);
+    assert.equal(message.ok, false);
+    assert.deepEqual(Object.keys(message.error), ['name', 'code', 'message']);
+    assert.equal(message.error.code, 'MPT_DECLARED_COUNT_MISMATCH');
+    assert.equal(Object.prototype.hasOwnProperty.call(message.error, 'cleanupRequired'), false);
+    assert.equal(fs.existsSync(mptSpoolPaths(input).fileDir), false);
+  });
+
   await t.test('真实Worker取消清理当前file spool', async () => {
     const rows = Array.from({ length: 20_000 }, (_, index) => inboundRow({ reconId: `CANCEL-${index}` }));
     const filePath = writeInboundFile('MPT_INBOUND_GATEWAY_20260708_402.txt', rows);
