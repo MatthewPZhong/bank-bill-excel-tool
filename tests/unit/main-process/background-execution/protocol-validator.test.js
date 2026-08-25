@@ -793,10 +793,11 @@ test('operation body gate 冻结 SafeError/cancel ACK，并拒绝 privacy 与 ma
   );
 });
 
-test('finance-safe-v1 仅对明确 digest/FilePlan artifact 字段放行严格 hash 语义', () => {
+test('finance-safe-v1 仅对明确 digest/output plan/FilePlan artifact 字段放行严格 hash 语义', () => {
   const digestWithAccountLikeRun = `abcdef123456789012${'a'.repeat(46)}`;
   assert.equal(digestWithAccountLikeRun.length, 64);
   assert.doesNotThrow(() => assertFinanceSafeValue({ sha256: digestWithAccountLikeRun }));
+  assert.doesNotThrow(() => assertFinanceSafeValue({ outputPlanHash: digestWithAccountLikeRun }));
   assert.doesNotThrow(() => assertFinanceSafeValue({
     artifactKey: `input-${digestWithAccountLikeRun}`,
     outputArtifactKey: `output-${digestWithAccountLikeRun}`
@@ -806,6 +807,7 @@ test('finance-safe-v1 仅对明确 digest/FilePlan artifact 字段放行严格 h
     [{ sha256: '123456789012' }, '/sha256'],
     [{ sha_256: digestWithAccountLikeRun }, '/sha_256'],
     [{ digest: digestWithAccountLikeRun }, '/digest'],
+    [{ output_plan_hash: digestWithAccountLikeRun }, '/output_plan_hash'],
     [{ artifact_key: `output-${digestWithAccountLikeRun}` }, '/artifact_key'],
     [{ futureArtifactKey: `output-${digestWithAccountLikeRun}` }, '/futureArtifactKey'],
     [{ artifactKey: 'output-123456789012' }, '/artifactKey'],

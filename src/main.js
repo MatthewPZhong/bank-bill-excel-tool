@@ -441,6 +441,9 @@ const {
   generateValidateAndPublish: generateValidateAndPublishToolboxArtifact
 } = require('./main-process/toolbox-background/generation-validator');
 const {
+  generateValidateAndPublishMultiOutput
+} = require('./main-process/toolbox-background/multi-output-validator');
+const {
   publishToolboxPublicationAsync,
   recoverToolboxPublicationsAsync
 } = require('./main-process/toolbox-output-publication-dispatch');
@@ -20374,6 +20377,7 @@ function registerToolboxHandlers() {
             }));
 
           let generationResult;
+          let publishResult = null;
           if (await shouldUseLargeChannel(sourceFilePath)) {
             generationResult = await dispatchLargeSplit({
               op: 'exportMultiFilters',
@@ -20387,6 +20391,52 @@ function registerToolboxHandlers() {
               })),
               batchContext: taskContext.batchContext
             }).promise;
+          } else if (backgroundExecutionRuntimeManager.isProductionEnabled(
+            TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
+          )) {
+            const generated = await generateValidateAndPublishMultiOutput({
+              runtime: backgroundExecutionRuntimeManager.get(),
+              filePlan: taskContext.fileEvidence.filePlan,
+              batchContext: taskContext.batchContext,
+              groups: preparedPlans,
+              generationPaths: preparedPlans.map((plan) => plan.temporaryPath),
+              routeDbPath: path.join(tempDir, 'route.sqlite'),
+              routeManifestPath: path.join(tempDir, 'route.sealed.json'),
+              production: true,
+              publisher: (artifacts) => publishToolboxArtifacts(
+                'split-multi',
+                artifacts.map((artifact, index) => ({
+                  sourcePath: artifact.generationPath,
+                  outputId: artifact.outputId,
+                  fileName: preparedPlans[index].fileName,
+                  matchedCount: artifact.matchedCount,
+                  byteSize: artifact.byteSize,
+                  sha256: artifact.sha256,
+                  dataRowCount: artifact.dataRowCount,
+                  sheetCount: artifact.sheetCount,
+                  warningSummary: artifact.warningSummary,
+                  styleStats: artifact.styleStats
+                })),
+                preparedPlans.map((plan) => ({ targetPath: plan.targetPath })),
+                taskContext.batchContext,
+                {
+                  protectedSourcePaths: [sourceFilePath],
+                  targetSnapshots: taskContext.fileEvidence.targetSnapshots,
+                  archiveInputFiles: taskContext.fileEvidence.inputFiles,
+                  settleManifestArtifacts: taskContext.settleArtifacts,
+                  fileEvidence: taskContext.fileEvidence
+                }
+              )
+            });
+            publishResult = generated.publication;
+            generationResult = {
+              files: generated.artifacts.map((artifact, index) => ({
+                ...artifact,
+                savePath: artifact.generationPath,
+                fileName: preparedPlans[index].fileName
+              })),
+              inputDataRowCount: generated.summary.inputDataRowCount
+            };
           } else {
             generationResult = await exportToolboxMultiFilters({
               filePath: sourceFilePath,
@@ -20430,30 +20480,32 @@ function registerToolboxHandlers() {
             plan.styleStats = generated.styleStats || null;
           }
 
-          const publishResult = await publishToolboxArtifacts(
-            'split-multi',
-            preparedPlans.map((plan, index) => ({
-              sourcePath: plan.temporaryPath,
-              outputId: plan.outputId || `split-${index + 1}`,
-              fileName: plan.fileName,
-              matchedCount: plan.matchedCount,
-              byteSize: plan.byteSize,
-              sha256: plan.sha256,
-              dataRowCount: plan.dataRowCount,
-              sheetCount: plan.sheetCount,
-              warningSummary: plan.warningSummary || EMPTY_TOOLBOX_WARNING_SUMMARY,
-              styleStats: plan.styleStats || null
-            })),
-            preparedPlans.map((plan) => ({ targetPath: plan.targetPath })),
-            taskContext.batchContext,
-            {
-              protectedSourcePaths: [sourceFilePath],
-              targetSnapshots: taskContext.fileEvidence.targetSnapshots,
-              archiveInputFiles: taskContext.fileEvidence.inputFiles,
-              settleManifestArtifacts: taskContext.settleArtifacts,
-              fileEvidence: taskContext.fileEvidence
-            }
-          );
+          if (!publishResult) {
+            publishResult = await publishToolboxArtifacts(
+              'split-multi',
+              preparedPlans.map((plan, index) => ({
+                sourcePath: plan.temporaryPath,
+                outputId: plan.outputId || `split-${index + 1}`,
+                fileName: plan.fileName,
+                matchedCount: plan.matchedCount,
+                byteSize: plan.byteSize,
+                sha256: plan.sha256,
+                dataRowCount: plan.dataRowCount,
+                sheetCount: plan.sheetCount,
+                warningSummary: plan.warningSummary || EMPTY_TOOLBOX_WARNING_SUMMARY,
+                styleStats: plan.styleStats || null
+              })),
+              preparedPlans.map((plan) => ({ targetPath: plan.targetPath })),
+              taskContext.batchContext,
+              {
+                protectedSourcePaths: [sourceFilePath],
+                targetSnapshots: taskContext.fileEvidence.targetSnapshots,
+                archiveInputFiles: taskContext.fileEvidence.inputFiles,
+                settleManifestArtifacts: taskContext.settleArtifacts,
+                fileEvidence: taskContext.fileEvidence
+              }
+            );
+          }
           prepared.toolboxPublicationTaskIds = [publishResult.taskId];
           const files = publishResult.files;
           prepared.outputFiles = toolboxFinalOutputFiles(

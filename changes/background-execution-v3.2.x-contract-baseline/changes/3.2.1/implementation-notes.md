@@ -1,4 +1,4 @@
-# v3.2.1 E04-A Implementation Notes
+# v3.2.1 E04-A / E04-B Implementation Notes
 
 ## Baseline
 
@@ -102,3 +102,95 @@ No behavioral or contract deviations recorded.
 - Failure ordering: generation, result schema, FilePlan ownership, workbook stat/size/hash, sidecar stat/size/hash/strict content and workbook business readback all precede Publisher. Missing/tampered/mismatched/zero-hit cases assert Publisher count zero; real split/merge success asserts one publication handoff.
 - Compatibility/privacy: external merge/split result and warning shapes remain sourced from the existing Publisher. Protocol result has no path/header/warning business strings; Windows user paths and account-like result strings remain rejected. The SHA/FilePlan-key exception is restricted to exact semantic fields and strict canonical shapes.
 - Reconciliation/fund red line: no amount, currency, matching, settlement arithmetic or Publisher rollback implementation changed. Automated cross-format row/order/style tests are supporting evidence only; representative business row-set/format/all-or-none review remains a human production-enable gate.
+
+## E04-B Increment — Single Scanner + Sealed Route DB + One Writer
+
+### Goal / Context / Constraints / Done when
+
+- Goal: add the smallest testable `toolbox:split-multi-output` managed capability: one Scanner Worker, one task-private sealed Route DB, one read-only Writer Worker, Main join by `outputIndex`, then exactly one existing FIFO Publisher handoff.
+- Context: a disposable macOS benchmark of the real current `exportToolboxMultiFilters` path showed generation is the objective main hotspot. The existing path already parses the source workbook once and fans every row to all output writers; E04-B therefore changes the inter-Worker handoff, not the number of Excel structure parses.
+- Constraints: `production.enabled=false`; large split remains its existing dispatch; live non-large multi-output remains the legacy facade; no second Writer/E04-C, no Publisher changes, no final target in either Worker, no cross-restart Route DB recovery, no general-purpose/cross-Node codec.
+- Done when: v1 row/style codec fidelity is locked by golden and real XLSX/BIFF8/CSV tests; the sealed DB has one meta row, no WAL/SHM/journal, read-only integrity/count/size/hash evidence and a last-written manifest; Writer and Main independently validate the seal; all artifacts join uniquely and in order to FilePlan outputs; failure calls Publisher zero times; success calls it once; task-private files and handles cleanly release.
+
+### Confirmed Facts and Gate Benchmark
+
+| Fact | Direct evidence | Consequence |
+| --- | --- | --- |
+| Current non-large multi-output parses the source structure exactly once. | `toolbox:split:export` → `exportToolboxMultiFilters` → one `streamToolboxTables`/`openToolboxXlsxPass`; `onDataRow` tests every group and emits to its writer. Benchmark monkeypatch of the exact source `yauzl.open` observed one open in every measured generation and zero in Publisher. | Do not claim E04-B eliminates repeated source parsing. Scanner continues one structural parse; source SHA is a separate raw-byte read. |
+| Generation owns almost all current wall time. | Synthetic 50,000-row × 12-column styled XLSX, 8 outputs, 4,247,000 bytes, SHA-256 `054733d06cfe908d369f0d308ad78958a0817997511e7e056d15e3e1c7c52b67`; one warmup plus five real-path measurements. | Project owner approved the E04-B gate; this is not the E04-C ≥15% production-parallel threshold. |
+| Existing row/style representation is reusable. | `ToolboxCell`/`ToolboxRow`/`ToolboxSheetMeta`, `SourceStyleRegistry.get/size`, normalized static style objects, and `createToolboxOutputWriter` resolver contract. | Route DB v1 serializes these task-private values and reconstructs through the existing constructors/normalizer. |
+| The renderer and existing multi-output normalizer cap output count at eight. | Current multi-split UI/normalizer tests and handler plan. | Route mask v1 is one byte and the strict contract accepts 2..8 outputs without narrowing existing behavior. |
+| FilePlan source evidence is stat-only; no reusable source SHA exists. | `archive-center/source-snapshot.js` contains size/mtime/ctime/inode but no hash. | Scanner performs a raw-byte SHA pass, with FilePlan snapshot checks before and after hash and after structural parse. Raw hashing is not a second Excel parse. |
+
+Benchmark raw milliseconds:
+
+| Run | generation | Main join validation | Publisher | total wall | generation share |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| warmup | 11981.605 | 0.060 | 256.167 | 12239.086 | 97.906% |
+| 1 | 12005.546 | 0.061 | 256.684 | 12263.070 | 97.906% |
+| 2 | 12086.872 | 0.065 | 250.091 | 12337.634 | 97.972% |
+| 3 | 12297.484 | 0.066 | 255.758 | 12553.865 | 97.962% |
+| 4 | 12199.686 | 0.059 | 251.812 | 12452.152 | 97.977% |
+| 5 | 11996.776 | 0.061 | 254.764 | 12252.280 | 97.920% |
+| median (measurements only) | 12086.872 | 0.061 | 254.764 | 12337.634 | 97.962% |
+
+- Row evidence: 50,000 input rows, 50,000 total output rows and eight committed publications in each iteration.
+- Event loop: generation heartbeat maximum delay per measured run was 23.838/18.881/12.373/11.788/11.874 ms (median 12.373 ms); Publisher median maximum delay 1.143 ms. Generation `monitorEventLoopDelay` p99 was about 13 ms.
+- RSS boundary: same-process cumulative high-water maximum 368,345,088 bytes (about 351.3 MiB), median cumulative high-water 353,533,952 bytes; this is not an independent per-iteration peak.
+- Disk boundary: stable generation staging 3,885,372 bytes, Publisher journal/meta about 16,776 bytes, final targets 3,885,372 bytes, stable post-Publisher task footprint about 7,805,837 bytes. These are phase-boundary sizes, not a continuous transient disk watermark.
+- E04-B disk diagnosis first exposed a 410,120,192-byte Route DB because v8 serialized every object key and repeated cell-level source file/Sheet/row/registry values. The narrow v1 codec now uses fixed arrays, row-level source/registry fallback and `General` format elision, while decoding through the same model constructors. A preliminary compact probe produced 54,034,432 bytes; the final five-run fixture consistently produced 57,528,320 bytes. Golden and real XLSX/BIFF8/CSV parity remained green.
+- Platform boundary: macOS 15.7.4 arm64, Node 25.8.0, 14 CPUs, 48 GiB. This evidence cannot replace Windows packaged, directory-fsync, file-lock, RSS/disk and Excel/WPS gates.
+
+### E04-B Unknowns Register
+
+| Unknown | Type | Impact | Evidence/handling | Decision |
+| --- | --- | --- | --- | --- |
+| Can a task-private codec preserve values and styles without a new canonical business model? | PROBE | High | Golden covers formula/negative zero/row/layout/style metadata; real XLSX comparison covers values, formats, font/fill/border/alignment, widths/heights/hidden state; BIFF8/CSV cover long IDs and row routing. | Use versioned `node:v8` BLOB only inside one job and one Node runtime; reconstruct through current model/style validators. It is not restart/version durable. |
+| Does the additional source hash race the Excel parse? | PROBE | High | FilePlan snapshot is checked before hash, after hash and after structural parse. | Keep raw hash pass required by Route DB meta; label it separately from the single structure parse. |
+| Can current Supervisor dynamically release Scanner phase then acquire Writer phase? | Known platform gap | Medium now, high for production | Current job-scoped CompoundLease admits root phase + child together and exposes no narrow Worker-driven phase transition. | Do not widen public Supervisor/Protocol in E04-B. Functionally seal then spawn Writer; conservatively hold both accounted slots for the whole job. This blocks production enablement/E04-C production gate until separately resolved. |
+| Is directory fsync reliable on packaged Windows filesystems? | PROBE | High | Shared durability helper explicitly reports EACCES/EISDIR/EPERM as unsupported; Route DB converts unsupported to a fail-closed seal error. | Capability code may merge with production false, but Windows production remains blocked until packaged evidence succeeds; never fake durability. |
+| Is a second Writer beneficial and safe? | Deferred E04-C PROBE | High | This increment intentionally has one child and `childrenMax=1`. | No second Writer or production threshold claim in E04-B. |
+| Can job-start disk need be bounded safely from current evidence? | Known implementation gap | High | Existing reusable limits bound shared-strings extraction, Excel row/text dimensions and style counts, but do not bound total row payload, output bytes or Route DB bytes. Compressed source bytes cannot safely upper-bound the 410 MB observed DB. | Do not invent a multiplier. This increment does not claim the spec disk preflight; production/E04-C remain blocked pending a proven estimator or explicit spool quota design. |
+
+### E04-B Decisions / Deviations
+
+| Decision or deviation | Evidence and boundary | Impact |
+| --- | --- | --- |
+| SQLite schema v1 stores one `route_meta`, normalized styles, ordered routed rows and a one-byte route mask. | Existing output cap is eight; rows are ordered by a job-local source ordinal so repeated worksheet row numbers cannot collide. | Preserves flattened multi-sheet scan order and permits overlapping groups without reparsing. |
+| Seal uses DELETE journal, transaction completion, close, no-sidecar assertion, DB file + parent fsync, read-only integrity/meta/count, DB size/hash, then atomic durable manifest last. | Writer and Main each call the same read-only seal inspector; manifest contains only basename and evidence, no final target. | Missing/tampered/mismatched DB or manifest cannot reach Publisher. |
+| Writer owns all outputs in this increment and reads ordered Route DB rows once. | One child Worker creates existing output writers, decodes each row once and dispatches by mask; it commits/validates in `outputIndex` order. | This is E04-B one-Writer capability only, not E04-C parallel generation. |
+| Main derives every task-private path, binds generation artifacts to FilePlan `artifactKey`, rejects alias/duplicates, and validates all outputs before Publisher. | Result carries IDs/index/count/hash only; headers/warnings remain existing bounded evidence sidecars. | Neither Worker receives final targets or Publisher access; result ordering alone is insufficient ownership evidence. |
+| Resource accounting intentionally over-holds Scanner + Writer resources. | Functional sequence is strictly Scanner seal → spawn Writer, but the current CompoundLease holds phase + one child for the whole job. | This is an explicit implementation deviation from the desired dynamic phase handoff. It does not underestimate resources, but it must not be described as releasing/reacquiring phases and blocks production enablement. |
+
+### Compact E04-B Cost Probe (one warmup + five measurements)
+
+- Fixture: synthetic 50,000 rows × 12 columns × 8 outputs; compressed source 4,247,000 bytes; ten ZIP entries total 27,464,836 uncompressed bytes (6.467× compressed). The exact synthetic package SHA changes with workbook package metadata.
+- Phase boundary: Scanner Worker includes raw SHA + structural scan + SQLite transaction/seal; Writer Worker includes read-only seal validation, row decode/routing, eight writes and each writer's `commitAndValidate`; Main validation independently rechecks Route DB, artifact/evidence hashes and business workbooks. No Publisher is included in the E04-B total below.
+
+| Run | Scanner hash+seal ms | Writer ms | Main validation ms | total ms |
+| --- | ---: | ---: | ---: | ---: |
+| warmup | 4750.858 | 9696.188 | 3497.815 | 17945.378 |
+| 1 | 4639.268 | 9667.424 | 3455.790 | 17762.759 |
+| 2 | 4691.537 | 9726.799 | 3453.563 | 17872.191 |
+| 3 | 4842.904 | 9716.414 | 3461.609 | 18021.201 |
+| 4 | 4702.161 | 9664.991 | 3472.593 | 17839.978 |
+| 5 | 4682.980 | 9697.696 | 3471.962 | 17852.943 |
+| median | 4691.537 | 9697.696 | 3461.609 | 17852.943 |
+
+- Disk median/stable: Route DB 57,528,320 bytes; generation workbooks 3,885,372 bytes; stable task-private footprint and 10 ms sampled peak 61,415,901 bytes. Route density is 1,150.57 bytes/input row, 95.88 bytes/cell, 13.546× compressed source and 2.095× measured uncompressed ZIP entries. Sampling is not proof that a sub-10 ms transient never exceeded the recorded peak.
+- RSS sample medians: Scanner 529,039,360 bytes, Writer 534,151,168 bytes, Main validation 491,487,232 bytes. These are same-process phase samples, not independent clean-process peaks; compared with the legacy cumulative high-water median 353,533,952 bytes, direction is unfavorable.
+- Event loop heartbeat median maxima: Scanner 1.676 ms, Writer 1.673 ms, Main validation 44.563 ms; each phase's event-loop-delay p99 stayed about 11.6–11.8 ms. Worker phases keep Main responsive, but independent Main workbook validation still has a visible bounded stall.
+- Conservative comparison: compact E04-B median total 17,852.943 ms is materially slower than the recorded legacy total median 12,337.634 ms; even Scanner + Writer alone total 14,389.233 ms versus legacy generation median 12,086.872 ms. RSS and disk direction are also unfavorable. This capability therefore stays `production.enabled=false`; the raw evidence is handed to the later E04-C decision without implementing or pre-judging a second Writer here.
+
+### E04-B Evidence and Blindspot Closeout
+
+- Entrypoints/bypass: `shouldUseLargeChannel` remains first; large multi-output still uses `dispatchLargeSplit`. Only non-large and future `production.enabled=true` can enter the managed route. With the frozen false flag, live requests still call the legacy `exportToolboxMultiFilters` and do not lazily construct runtime for this action.
+- Ownership/order: strict input accepts 2..8 unique indexed groups/generations; task-private DB/manifest/generation paths cannot alias one another, FilePlan inputs or formal outputs. Worker result requires the complete `[0..N-1]` order; Main rejoins each artifact to the exact FilePlan output key and revalidates every staging workbook before one Publisher call.
+- Seal/tamper: codec version mismatch, invalid mask, path alias, route hash tamper, missing/invalid evidence and reordered artifact cases fail closed. Scanner failure removes DB/manifest/sidecars; Writer failure aborts every generation and evidence file. Successful runtime shutdown reports no leaked transport and the task directory is removable after handles close.
+- Worker lifecycle: Scanner stores the child result but does not complete until the child emits `exit(0)`; a result followed by nonzero exit and a transport error both reject, and cancellation waits for exit/termination. The narrow `outputPlanHash` result field is privacy-exempt only when it is exactly a 64-character lowercase hexadecimal digest; similarly named/general strings remain rejected.
+- Compatibility: XLSX Route DB output is projection-equal to the current legacy multi-output path for values, long IDs, date/number formats, header styling, column widths, row height/hidden state and scan order. Real BIFF8 and CSV Scanner/Writer paths preserve routed row counts and long IDs. Zero-hit groups remain header-only outputs through the unchanged writer behavior.
+- Publisher/idempotency: generation and Route DB are non-durable task-private handoff facts. All validation completes before Publisher; reordered/tampered/failing cases observe zero calls and success observes exactly one. Existing Publisher journal remains the only publication/recovery fact and was not edited.
+- Financial blindspot: no amount/currency matching, reconciliation keys, row filtering, settlement arithmetic, Publisher rollback or archive semantics changed. Row/output disposition remains explainable by source ordinal + route mask + outputIndex, but representative Windows business-file review is still required before production enablement.
+- Required remaining gates: proven job-start disk estimator/quota, packaged Windows directory fsync/file-lock/cleanup, peak RSS and transient disk watermark, representative Excel/WPS format review, and the independent resource-phase platform decision. `production.enabled` remains false.
+- Final targeted self-check: the E04-B focused unit set passed 78/78, affected ESLint passed, and `git diff --check` passed after lifecycle, codec and benchmark closeout edits.
+- Validation policy: this E04-B intermediate PR runs targeted tests, affected ESLint and `git diff --check` only. It did not run `release-check`, `check-vars` or `scan:vars`; the complete v3.2.1 `release-check` is reserved for exactly one run before the final v3.2.1 PR is sent remotely.
