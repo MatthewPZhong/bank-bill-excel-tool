@@ -165,7 +165,6 @@ test('packaged background canary 仅在 GitHub-hosted Windows 的 RUNNER_TEMP �
   for (const fixedDiagnosticToken of [
     'EXIT_1',
     'EXIT_2',
-    'EXIT_OTHER',
     'ROOT_ABSENT',
     'ROOT_COMPLETE',
     'ROOT_EMPTY',
@@ -177,6 +176,10 @@ test('packaged background canary 仅在 GitHub-hosted Windows 的 RUNNER_TEMP �
   ]) {
     assert.match(setupDiagnosticFunction, new RegExp(`'${fixedDiagnosticToken}'`));
   }
+  assert.match(
+    setupDiagnosticFunction,
+    /\[uint32\]\(\[int64\]\$ExitCode -band 0xFFFFFFFFL\)[\s\S]*EXIT_HEX_\$\(\$unsignedExitCode\.ToString\('X8'\)\)/
+  );
   assert.doesNotMatch(setupDiagnosticFunction, /SetupPath|Exception|WriteLine/);
   assert.match(
     harness,
@@ -339,7 +342,7 @@ Set-Content -LiteralPath (Join-Path $env:CANARY_COMPLETE_INSTALL_ROOT 'app.exe')
 Set-Content -LiteralPath (Join-Path $env:CANARY_COMPLETE_INSTALL_ROOT 'Uninstall app.exe') -Value '' -NoNewline
 $script:IdentityPresent = $true
 $completeCode = Get-SafeSetupFailureDiagnostic -ExitCode -7 -InstallRoot $env:CANARY_COMPLETE_INSTALL_ROOT -EffectiveUninstallDisplayName 'fixed-display-name' -UninstallRegistryKey 'fixed-registry-key'
-if ($completeCode -ne 'EXIT_OTHER_ROOT_COMPLETE_IDENTITY_PRESENT') {
+if ($completeCode -ne 'EXIT_HEX_FFFFFFF9_ROOT_COMPLETE_IDENTITY_PRESENT') {
   throw "UNEXPECTED_COMPLETE_CODE:$completeCode"
 }
 `;

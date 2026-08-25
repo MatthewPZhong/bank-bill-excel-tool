@@ -349,7 +349,10 @@ function Get-SafeSetupFailureDiagnostic {
   $exitState = switch ($ExitCode) {
     1 { 'EXIT_1'; break }
     2 { 'EXIT_2'; break }
-    default { 'EXIT_OTHER' }
+    default {
+      $unsignedExitCode = [uint32]([int64]$ExitCode -band 0xFFFFFFFFL)
+      "EXIT_HEX_$($unsignedExitCode.ToString('X8'))"
+    }
   }
 
   $rootState = 'ROOT_ABSENT'
@@ -387,7 +390,8 @@ function Get-SafeSetupFailureDiagnostic {
     $identityState = 'IDENTITY_AUDIT_FAILED'
   }
 
-  # 三段均来自固定枚举；不拼接路径、异常文本或任意 installer 输出。
+  # 非标准退出码仅编码为固定 8 位 32-bit hex；其余两段来自固定枚举。
+  # 不拼接路径、异常文本或任意 installer 输出。
   return "$exitState`_$rootState`_$identityState"
 }
 

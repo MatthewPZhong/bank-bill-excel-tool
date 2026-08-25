@@ -17,7 +17,7 @@
 | Canary 新增 safe code `CANARY_PROCESS_EXITED_BEFORE_REPORT` | 报告前进程退出是可观测失败，现有隐私边界禁止采集 stdout/stderr | 继续等待统一报 report timeout；采集完整进程输出 | 快速、稳定、无敏感输出 |
 | launcher 退出后给 report 固定 2 秒宽限，并保留首个 canary safe code | 代码审查确认 Electron launcher 可先退出；#175 首次 Windows CI 另行证明二次卸载错误会把首错覆盖成 `UNINSTALL_CLEANUP_FAILED` | 继续立即判失败；恢复完整 180 秒等待；让 cleanup 覆盖首错 | 兼容 launcher hand-off，同时保持有界等待和无敏感输出；cleanup 仅追加固定 safe diagnostic |
 | NSIS `/D=` 只传 owned install container，实际安装根固定推导为 `container/productName` | assisted installer 模板在目标中缺少 `${APP_FILENAME}` 时负责追加产品目录；最新 CI 已证明该选择不是 `SETUP_NONZERO_EXIT` 的充分根因 | 继续把最终 Unicode 产品目录直接作为 `/D=`；忽略 Setup 非零退出 | 保持实际安装、选择、卸载和身份审计根不变；该布局选择继续保留，但不再作为 CI 根因结论 |
-| Setup 非零仍 fail closed，并额外输出固定枚举诊断 | #175 第三次真实 Windows 仍只有聚合码 `SETUP_NONZERO_EXIT`；完整 stdout/stderr 或路径违反隐私边界，继续猜参数缺少证据 | 忽略非零退出；打印任意异常、路径或 installer 输出；继续无证据改安装参数 | 主 safe code 不变；仅追加退出码桶、安装根状态、精确 Registry 身份状态三个固定枚举，下一轮 CI 可区分退出前/部分落地/完整落地 |
+| Setup 非零仍 fail closed，并额外输出有界诊断 | #175 第三次真实 Windows 仍只有聚合码 `SETUP_NONZERO_EXIT`；完整 stdout/stderr 或路径违反隐私边界，继续猜参数缺少证据 | 忽略非零退出；打印任意异常、路径或 installer 输出；继续无证据改安装参数 | 主 safe code 不变；标准 1/2 保留固定枚举，非标准退出仅输出 8 位 32-bit hex，另带安装根状态与精确 Registry 身份固定枚举 |
 | 修正冻结 TechDoc 并重建 published report/checksum | 当前 runtime 的唯一物理表为 `vcc_op_calc_runs`，包完整性记录包含 TechDoc | 新建 `vcc_op_runs` 别名表；只改文档而留下失配 hash | 文档与实现恢复一致，历史 manifest 保持其显式 non-normative 含义 |
 
 ## Assumptions
@@ -60,6 +60,8 @@
 | #175 GitHub CI run `32794520190` / build job `97649991756` | smoke-test SUCCESS；ASCII destination-root 修复后 build 仍报告 `SETUP_NONZERO_EXIT`，且无 cleanup 覆盖诊断 | 反证 Unicode `/D=` 根因假设；当前证据只能确认 installer 真实返回非零，尚不能区分退出码及落地阶段 |
 | Setup 有界诊断定向验证 | `windows-build-contract`：`4 PASS / 2 Windows-only SKIP`；4 个 hardening files：`70 PASS / 2 Windows-only SKIP`；`git diff --check` PASS | 固定退出码桶、安装根状态、精确 Registry 身份状态；macOS 不伪造两个 Windows 动态探针 |
 | Setup 有界诊断全仓验证 | `npm run release-check` PASS；unit `6017/6020`（0 fail、3 skip），integration `51/51` scripts、`2455/2455` assertions；合同包 checksum `69/69 PASS` | 诊断保持主 safe code、业务/资金/恢复语义、production gate 与冻结合同包不变；仍未调用 `check-vars`/`scan:vars` |
+| #175 GitHub CI run `32799419428` / build job `97662624541` | smoke-test SUCCESS；build 固定诊断为 `EXIT_OTHER_ROOT_ABSENT_IDENTITY_ABSENT`，随后保持 `SETUP_NONZERO_EXIT` fail closed | 排除产品目录、Registry 身份和旧版卸载路径；失败发生在安装落地前，下一 probe 只需把非标准进程码细化为安全 32-bit hex |
+| Setup 精确 32-bit 退出码 probe 验证 | `windows-build-contract`：`4 PASS / 2 Windows-only SKIP`；4 个 hardening files：`70 PASS / 2 Windows-only SKIP`；`npm run release-check` PASS（unit `6017/6020`、integration `51/51` scripts / `2455/2455` assertions）；合同包 checksum `69/69 PASS`；`git diff --check` PASS | 只细化失败诊断，不改变 installer 行为、主 safe code、业务/资金/恢复语义、production gate 或冻结合同包；仍未调用 `check-vars`/`scan:vars` |
 
 ## Final Blindspot Review
 
