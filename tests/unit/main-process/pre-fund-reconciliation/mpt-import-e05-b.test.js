@@ -102,7 +102,8 @@ const {
   createPreFundMptReceiptAuthority
 } = require('../../../../src/main-process/pre-fund-reconciliation/mpt-import/receipt-authority');
 const {
-  getOperationReceipt
+  getOperationReceipt,
+  normalizeExactOperationReceipt
 } = require('../../../../src/main-process/pre-fund-reconciliation/mpt-import/operation-receipt-repository');
 const {
   cleanupMptFileSpool,
@@ -271,7 +272,6 @@ test('validated spool Writer以同事务receipt覆盖insert、exact replay、noo
     source: recoverySourceFrom(noopWritten, noopOptions, noop),
     receipt: noop.receipt
   })).outcomeKind, 'noop-existing-batch');
-
   const replacementPath = writeFile('102', [
     inboundRow({ reconId: 'REPLACED-1', currency: 'EUR', amount: '2.50' }),
     inboundRow({ reconId: 'REPLACED-2', currency: 'USD', amount: '3.75' })
@@ -296,7 +296,6 @@ test('validated spool Writer以同事务receipt覆盖insert、exact replay、noo
     source: recoverySourceFrom(replacementWritten, replacementOptions, replaced),
     receipt: replaced.receipt
   })).outcomeKind, 'replaced');
-
   const db = runDataStore.openExistingSideDb(
     runDataStore.sideDbPath(userDataDir, runDataStore.MODULE_PRE_FUND_RECONCILIATION, '2026-07')
   );
@@ -307,6 +306,112 @@ test('validated spool Writer以同事务receipt覆盖insert、exact replay、noo
   } finally {
     db.close();
   }
+});
+
+test('historical additive migration v0的repair noop 0→0与import replacement 0→1可形成authoritative receipt', async () => {
+  const store = new PreFundReconciliationStore(userDataDir);
+  const originalPath = writeFile('120', [inboundRow({ reconId: 'HISTORICAL-V0' })]);
+  const historical = await store.importLegacyFile(originalPath);
+  assert.equal(historical.batch.datasetVersion, 0);
+
+  const dbPath = runDataStore.sideDbPath(
+    userDataDir,
+    runDataStore.MODULE_PRE_FUND_RECONCILIATION,
+    '2026-07'
+  );
+  const legacyDb = runDataStore.openExistingSideDb(dbPath);
+  try {
+    legacyDb.exec(`
+      DROP TRIGGER trg_pre_fund_gateway_batch_legacy_update;
+      DROP INDEX idx_pre_fund_gateway_batches_dataset;
+      ALTER TABLE pre_fund_reconciliation_gateway_batches DROP COLUMN archive_contract_version;
+      ALTER TABLE pre_fund_reconciliation_gateway_batches DROP COLUMN dataset_version;
+      ALTER TABLE pre_fund_reconciliation_gateway_batches DROP COLUMN producer_task_run_id;
+      ALTER TABLE pre_fund_reconciliation_gateway_batches DROP COLUMN dataset_id;
+    `);
+  } finally {
+    legacyDb.close();
+  }
+
+  const migrated = store.listBatches({ monthKey: '2026-07' })[0];
+  assert.equal(migrated.id, historical.batch.id);
+  assert.equal(migrated.datasetVersion, 0);
+  assert.equal(migrated.archiveContractVersion, 0);
+  assert.equal(migrated.producerTaskRunId, null);
+  assert.match(migrated.datasetId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+
+  const inspect = createPreFundMptOutcomeInspector({ userDataDir });
+  const receiptAuthority = createPreFundMptReceiptAuthority({
+    userDataDir,
+    outcomeInspector: inspect
+  });
+  const noopInput = spoolInput(originalPath, 'parent-historical-v0-noop', 0, 'excluded');
+  const noopWritten = await writeMptFileSpool(noopInput);
+  const noopOptions = managedOptions('parent-historical-v0-noop', 'unused-v1-seed', {
+    actionKey: 'pre-fund:mpt-repair-import',
+    skipInvalidRows: true,
+    expectedContentHash: noopWritten.manifest.contentHash
+  });
+  const noop = await store.importValidatedSpool(noopInput, noopOptions);
+  assert.equal(noop.status, 'noop');
+  assert.equal(noop.receipt.datasetVersionBefore, 0);
+  assert.equal(noop.receipt.datasetVersionAfter, 0);
+  assert.equal((await inspect(recoverySourceFrom(noopWritten, noopOptions, noop))).outcome, 'committed');
+  assert.equal((await receiptAuthority.verify({
+    source: recoverySourceFrom(noopWritten, noopOptions, noop),
+    receipt: noop.receipt
+  })).outcomeKind, 'noop-existing-batch');
+  const noopReplay = await store.importValidatedSpool(noopInput, noopOptions);
+  assert.equal(noopReplay.receipt.id, noop.receipt.id);
+  assert.equal(noopReplay.receipt.datasetVersionBefore, 0);
+  assert.equal(noopReplay.receipt.datasetVersionAfter, 0);
+  assert.throws(() => normalizeExactOperationReceipt({
+    ...noop.receipt,
+    datasetVersionBefore: -1
+  }), TypeError);
+  assert.throws(() => normalizeExactOperationReceipt({
+    ...noop.receipt,
+    datasetVersionBefore: Number.MAX_SAFE_INTEGER + 1,
+    datasetVersionAfter: Number.MAX_SAFE_INTEGER + 1
+  }), TypeError);
+  assert.throws(() => normalizeExactOperationReceipt({
+    ...noop.receipt,
+    datasetVersionAfter: 1
+  }), TypeError);
+
+  const replacementPath = writeFile('121', [inboundRow({ reconId: 'HISTORICAL-V0-REPLACED' })]);
+  const replacementInput = spoolInput(replacementPath, 'parent-historical-v0-replace');
+  const replacementWritten = await writeMptFileSpool(replacementInput);
+  const replacementOptions = managedOptions(
+    'parent-historical-v0-replace',
+    'historical-v0-upgraded-dataset',
+    { producerTaskRunId: 'historical-v0-replacement-task' }
+  );
+  const replaced = await store.importValidatedSpool(replacementInput, replacementOptions);
+  assert.equal(replaced.status, 'replaced');
+  assert.equal(replaced.batch.id, historical.batch.id);
+  assert.equal(replaced.receipt.datasetVersionBefore, 0);
+  assert.equal(replaced.receipt.datasetVersionAfter, 1);
+  assert.equal((await inspect(
+    recoverySourceFrom(replacementWritten, replacementOptions, replaced)
+  )).outcome, 'committed');
+  assert.equal((await receiptAuthority.verify({
+    source: recoverySourceFrom(replacementWritten, replacementOptions, replaced),
+    receipt: replaced.receipt
+  })).outcomeKind, 'replaced');
+  const replacementReplay = await store.importValidatedSpool(replacementInput, replacementOptions);
+  assert.equal(replacementReplay.receipt.id, replaced.receipt.id);
+  assert.equal(replacementReplay.receipt.datasetVersionBefore, 0);
+  assert.equal(replacementReplay.receipt.datasetVersionAfter, 1);
+  assert.throws(() => normalizeExactOperationReceipt({
+    ...replaced.receipt,
+    datasetVersionAfter: 2
+  }), TypeError);
+  assert.throws(() => normalizeExactOperationReceipt({
+    ...replaced.receipt,
+    outcomeKind: 'inserted',
+    datasetVersionBefore: 0
+  }), TypeError);
 });
 
 test('Single Writer首遍预验证加ACK后streaming transaction总计只扫描spool两遍', async () => {

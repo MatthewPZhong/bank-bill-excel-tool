@@ -29,6 +29,7 @@
 | worker-durable unit一旦由Inspector判为`committed-lost`或`unknown`，Supervisor立即以parent recovery终态收口。 | 非末unit若只settle terminal Promise，单Writer仍等待下一unit且CompoundLease无界占用。 | 由managed调用层补cancel；等待Worker自行退出。 | Supervisor强制有界结束transport、取消未启动unit并释放lease；managed在抛出前等待`control.promise` cleanup barrier；pre-critical普通错误仍继续后续file。 |
 | transport terminate/close或resource lease release失败使整体execution使用既有`failed`终态，并保留cleanup ownership供shutdown重试。 | 冻结合同要求cleanup failure被记录且不得报告成功；业务result与cleanup ownership是两类事实。 | 仅诊断cleanup错误但继续`completed`；失败后丢弃lease/transport ownership。 | 已校验业务result可保留，整体不成功；成功重试清除leak，持续失败进入shutdown report。 |
 | Parser/Writer公开错误复用同一PreFund path-safe边界识别引号包裹的Node fs.Error。 | 单/双引号中的POSIX、Windows drive与UNC绝对路径可经sidecar或parent result泄露。 | 只识别空格/冒号后的未加引号路径；静默丢弃unsafe detail。 | unsafe message使用稳定业务fallback；detail保留safe项并以单条稳定占位替代unsafe项；URL与普通`a/b`文案不误伤。 |
+| exact receipt version-shape把historical migration v0视为合法版本起点。 | additive migration明确将旧batch回填`dataset_version=0`；共享transaction core会合法生成noop `0→0`与replacement `0→1`。 | 把所有非insert receipt错误限定为before>=1，导致已COMMIT的v0操作被误报RESULT_LOST。 | replaced/noop接受非负安全整数起点，仍分别强制`after=before+1`/`after=before`；inserted保持`null→1`，负数、非安全整数与跨步继续fail closed。⚠️ 资金红线，请人工复核。 |
 
 ## Assumptions
 
@@ -43,6 +44,7 @@
 | repair policy无CompoundLease | repair使用冻结Writer phase 192MiB + childrenMax=1 Parser child 256MiB | 实际执行图同时存在Parser/Writer；Parser Core与import相同，不能错误复用192MiB Writer资源。 | runtime预算可容纳精确组合；production gate不变。 | 冻结TechDoc §12已有“Parser + Writer图申请CompoundLease”，policy fixture保留repair Writer 192MiB。 |
 | parser error由Coordinator内存传递 | 固定identity的fsync/rename sidecar，exact safe schema | 单Writer transport只能消费预注册unit；错误不能靠missing spool或input override表达。 | sidecar纳入known-file cleanup、tamper/path/privacy测试。 | 无public/data schema变更。 |
 | generic Supervisor过去在`job:done`后cleanup失败仍返回`completed` | cleanup失败返回既有`failed` outcome、保留已验证result与可重试ownership | Reviewer确认该行为违反冻结“cleanup failures recorded, never success” | 调用方继续以`outcome`判成功；未新增public字段或终态枚举。 | 无冻结合同偏差；修正既有实现偏差。 |
+| receipt authority曾把historical v0误作非法shape | version下界由1修正为0，其他exact identity与Side DB/Inspector authority不变 | 正式迁移与receipt transaction core已证明v0可达 | 避免合法COMMIT后误建RESULT_LOST Hold；没有迁移、schema或public shape变化。 | 无冻结合同偏差；恢复历史兼容语义。 |
 
 ## Evidence
 
@@ -71,6 +73,9 @@
 | 本轮平台与资金integration | RecoveryControl `27/27`、recovery canary `9/9`、pure-compute canary `9/9`、PreFund Side DB parity `69/69 PASS` | Control transaction/CAS/startup recovery、共享Supervisor兼容，以及金额/币种/source sequence/dataset version/候选与Side DB语义不漂移。 |
 | Main startup contract | `7/7 PASS` | 新receipt authority wiring未改变DB→IPC→window启动屏障、loader与VCC gate入口。 |
 | Reviewer修复静态验证 | affected ESLint、9个改动JS `node --check`、`git diff --check` PASS | Main wiring、receipt authority、Supervisor cleanup/recovery终态、privacy helper及其测试通过语法、风格与whitespace门禁。 |
+| historical v0 receipt authority定向 | E05-B `36/36 PASS`；相关PreFund六文件 `133/133 PASS` | 真实store历史batch→删除archive columns→additive migration回填v0→validated spool→同事务receipt→Inspector→authority；repair noop `0→0`、import replacement `0→1`及其exact same-operation replay与v1+正例通过，负数/非安全整数/跨步/伪inserted反例拒绝。⚠️ 资金红线，请人工复核。 |
+| historical v0相关integration | RecoveryControl `27/27`、recovery canary `9/9`、PreFund Side DB parity `69/69 PASS` | 恢复CAS/扫描与金额、币种、source sequence、dataset lineage、Side DB候选语义无漂移。 |
+| historical v0静态验证 | affected ESLint、2个改动JS `node --check`、`git diff --check` PASS | version-shape谓词、真实迁移测试与implementation notes通过风格、语法和whitespace门禁。 |
 
 ## Remaining Unknowns
 
@@ -80,3 +85,4 @@
 | Windows目录fsync与真实杀进程fault矩阵尚未在Windows人工执行 | 保留unknown，不伪造通过 | E05-C/最终版本负责人 | 不阻断本地capability；阻断production enable |
 | date-range destructive Hold gate与同batch恢复证据的资金边界 | 已用真实Side DB与空白payload定向回归，仍要求人工复核 | 项目负责人 | ⚠️ 资金红线，请人工复核；production保持false |
 | packaged Windows中的真实transport terminate/close与ResourceGovernor release失败恢复 | 本地以确定性fault injection覆盖失败、ownership保留及shutdown重试 | E05-C/最终版本负责人 | 不阻断E05-B capability；production保持false，人工门禁前不得宣称实机通过 |
+| 真实客户历史Side DB中的v0 noop/replacement资金审计 | 自动测试使用真实迁移DDL与transaction core证明合同；仍需在脱敏历史库副本人工核对receipt/batch lineage | 项目负责人 | ⚠️ 资金红线，请人工复核；不阻断production=false capability |

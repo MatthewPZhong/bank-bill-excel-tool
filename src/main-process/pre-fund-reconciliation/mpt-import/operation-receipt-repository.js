@@ -147,10 +147,10 @@ function normalizeExactOperationReceipt(value) {
     (payload.outcomeKind === 'inserted' && payload.datasetVersionBefore === null &&
       payload.datasetVersionAfter === 1) ||
     (payload.outcomeKind === 'replaced' && Number.isSafeInteger(payload.datasetVersionBefore) &&
-      payload.datasetVersionBefore >= 1 &&
+      payload.datasetVersionBefore >= 0 &&
       payload.datasetVersionAfter === payload.datasetVersionBefore + 1) ||
     (payload.outcomeKind === 'noop-existing-batch' &&
-      Number.isSafeInteger(payload.datasetVersionBefore) && payload.datasetVersionBefore >= 1 &&
+      Number.isSafeInteger(payload.datasetVersionBefore) && payload.datasetVersionBefore >= 0 &&
       payload.datasetVersionAfter === payload.datasetVersionBefore)
   );
   if (!versionShapeValid) {
