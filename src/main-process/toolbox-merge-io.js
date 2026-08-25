@@ -236,6 +236,7 @@ async function mergeToolboxFilesToXlsx({
   savePath,
   sheetBaseName = 'COMMON',
   maxRowsPerSheet,
+  cancelToken = null,
   writerFactory = createToolboxOutputWriter
 }) {
   const sources = Array.isArray(filePaths) ? filePaths.filter(Boolean) : [];
@@ -292,7 +293,8 @@ async function mergeToolboxFilesToXlsx({
       const summary = await streamMergeInputFile(filePath, {
         onSheetHeader,
         onDataRow,
-        sourceRegistryResolver
+        sourceRegistryResolver,
+        cancelToken
       });
       if (!summary || summary.nonEmptySheetCount === 0) {
         const sourceFile = path.basename(filePath);

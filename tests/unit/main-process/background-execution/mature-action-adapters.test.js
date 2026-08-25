@@ -640,8 +640,8 @@ test('Supervisor 已投递 cancel 后真实 Worker 先返回非取消 error 仍�
   ]);
 });
 
-test('non-none commit 仅 existing-dispatch 可被 Supervisor 观察；native adapter 继续 fail-closed', async () => {
-  const policy = pendingPolicy('main-settlement');
+test('native existing-critical-protocol 仍 fail-closed，不借 main-settlement seam 扩张 Worker commit', async () => {
+  const policy = pendingPolicy('existing-critical-protocol');
   policy.adapterKind = 'native';
   policy.adapterKey = null;
   policy.entryKey = 'native.entry';
@@ -660,8 +660,8 @@ test('non-none commit 仅 existing-dispatch 可被 Supervisor 观察；native ad
   await assert.rejects(
     supervisor.execute({
       actionKey: policy.actionKey,
-      operationKey: 'native-must-fail',
-      jobId: 'native-must-fail-job',
+      operationKey: 'native-existing-critical-must-fail',
+      jobId: 'native-existing-critical-must-fail-job',
       input: { files: ['a.xlsx'] }
     }),
     (error) => error.code === 'E02A_DURABLE_COMMIT_UNSUPPORTED'
