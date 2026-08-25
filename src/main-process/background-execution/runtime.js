@@ -104,9 +104,18 @@ function createBackgroundExecutionRuntime(options = {}) {
 function createBackgroundExecutionRuntimeManager(options = {}) {
   const runtimeFactory = options.runtimeFactory || (() => createBackgroundExecutionRuntime(options));
   let runtime = null;
+  let shutdownOwner = null;
   let closing = false;
   let shutdownPromise = null;
   let shutdownReport = null;
+  let shutdownOutcome = 'none';
+
+  function isCleanShutdownReport(report) {
+    return Array.isArray(report && report.leakedTransports)
+      && report.leakedTransports.length === 0
+      && Array.isArray(report && report.errors)
+      && report.errors.length === 0;
+  }
 
   return Object.freeze({
     get() {
@@ -126,14 +135,32 @@ function createBackgroundExecutionRuntimeManager(options = {}) {
     },
     resume() {
       if (shutdownPromise) throw new Error('后台执行 runtime 尚未完成关闭');
+      if (!closing) return;
+      if (shutdownOwner || shutdownOutcome !== 'clean') {
+        const error = new Error('后台执行 runtime 存在未解决的关闭失败');
+        error.code = 'BACKGROUND_EXECUTION_RUNTIME_SHUTDOWN_UNRESOLVED';
+        throw error;
+      }
       closing = false;
       shutdownReport = null;
+      shutdownOutcome = 'none';
     },
     shutdown(shutdownOptions = {}) {
       if (shutdownPromise) return shutdownPromise;
-      if (!runtime) {
-        closing = true;
-        return Promise.resolve(shutdownReport || Object.freeze({
+      closing = true;
+      if (!shutdownOwner && runtime) {
+        shutdownOwner = runtime;
+        runtime = null;
+        shutdownOutcome = 'unresolved';
+        try {
+          shutdownOwner.stopAcceptingNewJobs();
+        } catch (error) {
+          return Promise.reject(error);
+        }
+      }
+      if (!shutdownOwner) {
+        shutdownOutcome = 'clean';
+        shutdownReport = shutdownReport || Object.freeze({
           closedServices: Object.freeze([]),
           cancelledJobs: Object.freeze([]),
           protectedJobs: Object.freeze([]),
@@ -141,16 +168,30 @@ function createBackgroundExecutionRuntimeManager(options = {}) {
           activeHolds: Object.freeze([]),
           leakedTransports: Object.freeze([]),
           errors: Object.freeze([])
-        }));
+        });
+        return Promise.resolve(shutdownReport);
       }
-      closing = true;
-      const ownedRuntime = runtime;
-      runtime = null;
-      ownedRuntime.stopAcceptingNewJobs();
-      shutdownPromise = Promise.resolve(ownedRuntime.shutdown(shutdownOptions))
+      const ownedRuntime = shutdownOwner;
+      let ownedShutdown;
+      try {
+        ownedShutdown = ownedRuntime.shutdown(shutdownOptions);
+      } catch (error) {
+        shutdownOutcome = 'unresolved';
+        return Promise.reject(error);
+      }
+      shutdownPromise = Promise.resolve(ownedShutdown)
         .then((report) => {
           shutdownReport = report;
+          if (isCleanShutdownReport(report)) {
+            shutdownOwner = null;
+            shutdownOutcome = 'clean';
+          } else {
+            shutdownOutcome = 'unresolved';
+          }
           return report;
+        }, (error) => {
+          shutdownOutcome = 'unresolved';
+          throw error;
         })
         .finally(() => {
           shutdownPromise = null;

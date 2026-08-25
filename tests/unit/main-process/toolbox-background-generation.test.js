@@ -537,7 +537,7 @@ test('quit shutdown 会取消在途 one-shot generation 并收净 transport/资�
   assert.equal(fs.existsSync(finalPath), false);
 });
 
-test('Main runtime manager 单例持有资源，shutdown 并发可重入且 resume 后才重建', async () => {
+test('Main runtime manager clean shutdown 并发可重入，rollback 后只懒创建一个替代 runtime', async () => {
   let factoryCalls = 0;
   let stopCalls = 0;
   let shutdownCalls = 0;
@@ -566,7 +566,99 @@ test('Main runtime manager 单例持有资源，shutdown 并发可重入且 resu
   releaseShutdown();
   await first;
   assert.throws(() => manager.get(), (error) => error.code === 'BACKGROUND_EXECUTION_RUNTIME_CLOSING');
+  assert.deepEqual(manager.snapshot(), {
+    active: false,
+    closing: true,
+    shutdownPending: false
+  });
   manager.resume();
-  manager.get();
+  assert.equal(manager.get(), manager.get());
   assert.equal(factoryCalls, 2);
+});
+
+test('Main runtime manager incomplete shutdown 保留同一 owner，重试前 fail closed', async () => {
+  let factoryCalls = 0;
+  let stopCalls = 0;
+  let shutdownCalls = 0;
+  const runtime = {
+    stopAcceptingNewJobs() { stopCalls += 1; },
+    shutdown() {
+      shutdownCalls += 1;
+      if (shutdownCalls === 1) {
+        return Promise.resolve({ leakedTransports: ['job-leak'], errors: [] });
+      }
+      return Promise.resolve({ leakedTransports: [], errors: [] });
+    }
+  };
+  const manager = createBackgroundExecutionRuntimeManager({
+    runtimeFactory() {
+      factoryCalls += 1;
+      return runtime;
+    }
+  });
+
+  assert.equal(manager.get(), runtime);
+  await manager.shutdown();
+  assert.equal(factoryCalls, 1);
+  assert.equal(stopCalls, 1);
+  assert.equal(shutdownCalls, 1);
+  assert.throws(
+    () => manager.resume(),
+    (error) => error.code === 'BACKGROUND_EXECUTION_RUNTIME_SHUTDOWN_UNRESOLVED'
+  );
+
+  await manager.shutdown();
+  assert.equal(factoryCalls, 1);
+  assert.equal(stopCalls, 1);
+  assert.equal(shutdownCalls, 2);
+  manager.resume();
+});
+
+test('Main runtime manager shutdown throw 保留 owner 并禁止 resume', async () => {
+  let factoryCalls = 0;
+  let shutdownCalls = 0;
+  const runtime = {
+    stopAcceptingNewJobs() {},
+    shutdown() {
+      shutdownCalls += 1;
+      throw new Error('shutdown transport failed');
+    }
+  };
+  const manager = createBackgroundExecutionRuntimeManager({
+    runtimeFactory() {
+      factoryCalls += 1;
+      return runtime;
+    }
+  });
+
+  manager.get();
+  await assert.rejects(manager.shutdown(), /shutdown transport failed/);
+  assert.throws(
+    () => manager.resume(),
+    (error) => error.code === 'BACKGROUND_EXECUTION_RUNTIME_SHUTDOWN_UNRESOLVED'
+  );
+  await assert.rejects(manager.shutdown(), /shutdown transport failed/);
+  assert.equal(factoryCalls, 1);
+  assert.equal(shutdownCalls, 2);
+});
+
+test('Main runtime manager no-runtime clean shutdown 允许 rollback 并在首次 get 创建', async () => {
+  let factoryCalls = 0;
+  const runtime = {};
+  const manager = createBackgroundExecutionRuntimeManager({
+    runtimeFactory() {
+      factoryCalls += 1;
+      return runtime;
+    }
+  });
+
+  const report = await manager.shutdown();
+  assert.deepEqual(report.leakedTransports, []);
+  assert.deepEqual(report.errors, []);
+  assert.equal(factoryCalls, 0);
+  assert.equal(manager.snapshot().closing, true);
+  manager.resume();
+  assert.equal(manager.snapshot().closing, false);
+  assert.equal(manager.get(), runtime);
+  assert.equal(factoryCalls, 1);
 });

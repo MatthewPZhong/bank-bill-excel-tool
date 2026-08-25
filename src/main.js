@@ -22247,6 +22247,7 @@ async function prepareApplicationForQuit(options = {}) {
     : options.transitionToken;
   const suppliedTransitionOwner = String(options.transitionOwner || '');
   let acquiredTransitionToken = null;
+  let backgroundRuntimeShutdownClean = false;
   quitPreparationPromise = (async () => {
     if (suppliedTransitionToken !== null) {
       if (suppliedTransitionOwner !== 'app-updater'
@@ -22282,6 +22283,7 @@ async function prepareApplicationForQuit(options = {}) {
     }
 
     await shutdownBackgroundExecutionRuntimeGracefully();
+    backgroundRuntimeShutdownClean = true;
     if (needsWorkerShutdown()) await shutdownWorkerPoolGracefully();
 
     const archiveDrainTimer = setTimeout(() => {
@@ -22341,6 +22343,11 @@ async function prepareApplicationForQuit(options = {}) {
     quitPreparationPreviousLastClosedAt = usageStats ? usageStats.lastClosedAt : null;
     flushUsageStatsForQuit();
     quitPreparationComplete = true;
+  })().catch((error) => {
+    if (backgroundRuntimeShutdownClean) {
+      backgroundExecutionRuntimeManager.resume();
+    }
+    throw error;
   })().finally(() => {
     if (!quitPreparationComplete) {
       if (acquiredTransitionToken !== null
