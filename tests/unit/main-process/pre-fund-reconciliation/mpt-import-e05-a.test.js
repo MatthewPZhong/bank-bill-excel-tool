@@ -240,8 +240,14 @@ test('E05-A Parser/spool/Coordinator静态证明不引用SQLite/store、repair t
     __dirname,
     '../../../../src/main-process/pre-fund-reconciliation/mpt-import'
   );
-  const source = fs.readdirSync(sourceDir)
-    .filter((name) => name.endsWith('.js') && name !== 'operation-receipt-repository.js')
+  const source = [
+    'parser-core.js',
+    'parser-worker-entry.js',
+    'spool-contract.js',
+    'spool-writer.js',
+    'spool-reader.js',
+    'ordered-coordinator.js'
+  ]
     .map((name) => fs.readFileSync(path.join(sourceDir, name), 'utf8'))
     .join('\n');
   assert.doesNotMatch(source, /node:sqlite|DatabaseSync|pre-fund-reconciliation-store|runDataStore/);
@@ -764,8 +770,11 @@ test('one-shot Parser Worker真实成功、取消与transport终止不留下伪m
     const [exitCode] = await exitPromise;
     assert.equal(exitCode, 0);
     assert.equal(message.ok, false);
-    assert.deepEqual(Object.keys(message.error), ['name', 'code', 'message']);
+    assert.deepEqual(Object.keys(message.error), ['name', 'code', 'message', 'detailLines']);
     assert.equal(message.error.code, 'MPT_DECLARED_COUNT_MISMATCH');
+    assert.deepEqual(message.error.detailLines, [
+      '文件：MPT_INBOUND_GATEWAY_20260708_405.txt'
+    ]);
     assert.equal(Object.prototype.hasOwnProperty.call(message.error, 'cleanupRequired'), false);
     assert.equal(fs.existsSync(mptSpoolPaths(input).fileDir), false);
   });

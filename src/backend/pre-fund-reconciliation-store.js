@@ -6,9 +6,21 @@ const path = require('node:path');
 const { FileValidationError } = require('./file-service/common');
 const runDataStore = require('./run-data-store');
 const {
-  hasAnyOperationReceipts
+  getOperationReceipt,
+  hasAnyOperationReceipts,
+  insertOperationReceipt
 } = require('../main-process/pre-fund-reconciliation/mpt-import/operation-receipt-repository');
-const { parseMptFile } = require('../main-process/pre-fund-reconciliation/mpt-parser');
+const {
+  readAndValidateMptFileSpool
+} = require('../main-process/pre-fund-reconciliation/mpt-import/spool-reader');
+const {
+  batchMatchesReceiptEvidence,
+  readBatchActualCounts
+} = require('../main-process/pre-fund-reconciliation/mpt-import/business-evidence');
+const {
+  createMptRowAggregateError: rowAggregateError,
+  parseMptFile
+} = require('../main-process/pre-fund-reconciliation/mpt-parser');
 const {
   compareFileSequences,
   MPT_SCHEMAS,
@@ -138,37 +150,6 @@ function freezeDatasetSeedV1(raw) {
   });
 }
 
-function rowAggregateError(parsed) {
-  const samples = Array.isArray(parsed.rowErrorSamples) ? parsed.rowErrorSamples : [];
-  const detailLines = samples.map((issue) => (
-    `第${issue.sourceRowNumber}行：${issue.message}`
-  ));
-  if (Number(parsed.rowErrorCount) > samples.length) {
-    detailLines.push(`另有 ${Number(parsed.rowErrorCount) - samples.length} 条错误未在页面展开`);
-  }
-  const error = new FileValidationError(
-    'MPT_ROW_ERRORS',
-    `MPT 文件包含 ${Number(parsed.rowErrorCount) || 0} 条可定位明细错误，严格导入已整文件回滚`,
-    {
-      context: {
-        fileName: parsed.sourceFileName,
-        sourceType: parsed.sourceType,
-        sourceBatch: parsed.sourceBatch,
-        rowErrorCount: parsed.rowErrorCount,
-        contentHash: parsed.contentHash
-      },
-      detailLines
-    }
-  );
-  error.canRepair = true;
-  error.rowErrorCount = Number(parsed.rowErrorCount) || 0;
-  error.rowErrorSamples = samples;
-  error.contentHash = parsed.contentHash;
-  error.sourceType = parsed.sourceType;
-  error.sourceBatch = parsed.sourceBatch;
-  return error;
-}
-
 function normalizeDateRange(startDate, endDate) {
   const start = startDate == null ? '' : String(startDate).trim();
   const end = endDate == null ? '' : String(endDate).trim();
@@ -196,6 +177,61 @@ function normalizeSourceTypeFilter(options = {}) {
 
 function lastInsertId(db) {
   return db.prepare('SELECT last_insert_rowid() AS id').get().id;
+}
+
+function assertManagedSpoolOptions(options) {
+  const actionKey = String(options.actionKey || '');
+  const operationKey = String(options.operationKey || '');
+  const producerTaskRunId = String(options.producerTaskRunId || '');
+  const datasetId = String(options.datasetId || '');
+  if (!['pre-fund:mpt-import', 'pre-fund:mpt-repair-import'].includes(actionKey) ||
+      !operationKey || !producerTaskRunId || !datasetId ||
+      !Number.isSafeInteger(options.fileIndex) || options.fileIndex < 0) {
+    throw new TypeError('PreFund managed spool operation identity非法');
+  }
+  return Object.freeze({ actionKey, operationKey, producerTaskRunId, datasetId, fileIndex: options.fileIndex });
+}
+
+function resultFromManagedReceipt(receipt, batch, monthKey) {
+  return {
+    status: receipt.outcomeKind === 'inserted'
+      ? 'imported'
+      : (receipt.outcomeKind === 'replaced' ? 'replaced' : 'noop'),
+    monthKey,
+    replacedFileName: receipt.outcomeKind === 'replaced' ? null : undefined,
+    batch: mapBatchRow(batch, monthKey),
+    excludedRowCount: Number(batch.excluded_row_count) || 0,
+    receipt
+  };
+}
+
+function assertReceiptReplay(db, receipt, manifest, managed, monthKey) {
+  const expectedStatic = receipt.actionKey === managed.actionKey &&
+    receipt.operationKey === managed.operationKey &&
+    receipt.producerTaskRunId === managed.producerTaskRunId &&
+    receipt.fileIndex === managed.fileIndex &&
+    receipt.sourceFileName === manifest.header.sourceFileName &&
+    receipt.sourceSha256 === manifest.source.sha256 &&
+    receipt.contentHash === manifest.contentHash;
+  const batch = db.prepare('SELECT * FROM pre_fund_reconciliation_gateway_batches WHERE id = ?')
+    .get(receipt.batchId);
+  const evidence = {
+    sourceType: manifest.header.sourceType,
+    sourceBatch: manifest.header.sourceBatch,
+    sourceDate: manifest.header.sourceDate,
+    sourceFileSequence: manifest.header.sourceFileSequence,
+    sourceFileName: manifest.header.sourceFileName,
+    contentHash: manifest.contentHash,
+    datasetId: managed.datasetId,
+    counts: manifest.counts
+  };
+  const actualCounts = batch ? readBatchActualCounts(db, batch.id) : { valid: -1, excluded: -1 };
+  if (!expectedStatic || !batchMatchesReceiptEvidence(batch, receipt, evidence, actualCounts)) {
+    throw Object.assign(new Error('同一PreFund fileOperationKey的receipt或业务lineage冲突'), {
+      code: 'PREFUND_RECEIPT_IDENTITY_CONFLICT'
+    });
+  }
+  return resultFromManagedReceipt(receipt, batch, monthKey);
 }
 
 // 同一 userData 下导入/删除/清空串行化。DatabaseSync 的 BEGIN IMMEDIATE 会同步等待写锁；
@@ -236,6 +272,219 @@ function mapBatchRow(row, monthKey) {
     archiveContractVersion: Number(row.archive_contract_version) === 1 ? 1 : 0,
     importedAt: row.imported_at,
   };
+}
+
+class MptImportTransaction {
+  constructor(db, monthKey, importOptions, datasetSeed, receiptOwner = null) {
+    this.db = db;
+    this.monthKey = monthKey;
+    this.importOptions = importOptions;
+    this.datasetSeed = datasetSeed;
+    this.receiptOwner = receiptOwner;
+    this.started = false;
+    this.header = null;
+    this.verifyExistingFile = null;
+    this.replacedBatch = null;
+    this.incomingBatchId = null;
+    this.insertRowStatement = null;
+    this.insertExcludedRowStatement = null;
+  }
+
+  begin(header, options = {}) {
+    this.header = header;
+    if (options.alreadyStarted !== true) this.db.exec('BEGIN IMMEDIATE');
+    this.started = true;
+    this.verifyExistingFile = this.db.prepare(SELECT_BATCH_BY_FILE).get(header.sourceFileName) || null;
+    if (this.verifyExistingFile) return;
+    const existingBatch = this.db.prepare(SELECT_BATCH_BY_IDENTITY)
+      .get(header.sourceType, header.sourceBatch) || null;
+    if (existingBatch) {
+      const order = compareFileSequences(header.sourceFileSequence, existingBatch.source_file_sequence);
+      if (order <= 0) {
+        throw storeError(
+          'MPT_BATCH_SEQUENCE_STALE',
+          '同一批次只接受文件序号更高的新文件，已拒绝旧序号或相同序号文件',
+          {
+            fileName: header.sourceFileName,
+            sourceType: header.sourceType,
+            sourceBatch: header.sourceBatch,
+            incomingSequence: header.sourceFileSequence,
+            currentSequence: existingBatch.source_file_sequence
+          }
+        );
+      }
+      this.replacedBatch = existingBatch;
+    }
+    if (this.replacedBatch) {
+      this.db.prepare('DELETE FROM pre_fund_reconciliation_gateway_rows WHERE batch_id = ?')
+        .run(this.replacedBatch.id);
+      this.db.prepare('DELETE FROM pre_fund_reconciliation_gateway_excluded_rows WHERE batch_id = ?')
+        .run(this.replacedBatch.id);
+      this.db.prepare(`
+        UPDATE pre_fund_reconciliation_gateway_batches
+        SET source_date = ?, source_file_name = ?, source_file_sequence = ?,
+            content_hash = '', declared_row_count = ?, row_count = 0,
+            excluded_row_count = 0, import_mode = 'strict',
+            imported_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(
+        header.sourceDate,
+        header.sourceFileName,
+        header.sourceFileSequence,
+        header.declaredRowCount,
+        this.replacedBatch.id
+      );
+      this.incomingBatchId = this.replacedBatch.id;
+    } else {
+      this.db.prepare(INSERT_BATCH).run(
+        header.sourceType,
+        header.sourceBatch,
+        header.sourceDate,
+        header.sourceFileName,
+        header.sourceFileSequence,
+        header.declaredRowCount
+      );
+      this.incomingBatchId = lastInsertId(this.db);
+    }
+    this.insertRowStatement = this.db.prepare(INSERT_ROW);
+    this.insertExcludedRowStatement = this.db.prepare(INSERT_EXCLUDED_ROW);
+  }
+
+  writeRows(rows) {
+    if (this.verifyExistingFile || rows.length === 0) return;
+    this.db.exec('SAVEPOINT mpt_gateway_row_batch');
+    try {
+      for (const row of rows) {
+        this.insertRowStatement.run(
+          this.incomingBatchId,
+          row.sourceType,
+          row.sourceBatch,
+          row.sourceDate,
+          row.sourceFileName,
+          row.sourceFileSequence,
+          row.sourceRowNumber,
+          row.reconciliationId,
+          row.date,
+          row.channel,
+          row.merchantId,
+          row.orderId,
+          row.billReconId,
+          row.reconBillBizId,
+          row.currency,
+          row.amount,
+          row.tradeType,
+          row.name,
+          row.cardNo,
+          row.realChannel,
+          row.clearingNetwork,
+          row.rawJson,
+          row.fingerprint
+        );
+      }
+      this.db.exec('RELEASE SAVEPOINT mpt_gateway_row_batch');
+    } catch (error) {
+      this.db.exec('ROLLBACK TO SAVEPOINT mpt_gateway_row_batch');
+      this.db.exec('RELEASE SAVEPOINT mpt_gateway_row_batch');
+      throw error;
+    }
+  }
+
+  writeIssue(issue) {
+    if (this.verifyExistingFile || !this.importOptions.skipInvalidRows) return;
+    this.insertExcludedRowStatement.run(
+      this.incomingBatchId,
+      this.header.sourceType,
+      this.header.sourceFileName,
+      issue.sourceRowNumber,
+      issue.code,
+      issue.message,
+      issue.fieldName || '',
+      JSON.stringify(issue.fields || []),
+      issue.rawLine || ''
+    );
+  }
+
+  finalize(summary) {
+    let outcomeKind;
+    let batch;
+    if (this.verifyExistingFile) {
+      if (this.verifyExistingFile.content_hash !== summary.contentHash) {
+        throw storeError(
+          'MPT_FILE_IDENTITY_CONFLICT',
+          '同文件名的内容 hash 与已导入文件不同，已拒绝文件身份冲突',
+          this.header
+        );
+      }
+      outcomeKind = 'noop-existing-batch';
+      batch = this.verifyExistingFile;
+    } else {
+      if (this.importOptions.expectedContentHash && summary.contentHash !== this.importOptions.expectedContentHash) {
+        throw storeError(
+          'MPT_REPAIR_SOURCE_CHANGED',
+          '原始 MPT 文件内容已变化，不能继续导出错误数据或删除错误数据并重跑',
+          this.header
+        );
+      }
+      if (summary.rowErrorCount > 0 && !this.importOptions.skipInvalidRows) {
+        throw rowAggregateError(summary);
+      }
+      const nextVersion = this.replacedBatch
+        ? Number(this.replacedBatch.dataset_version) + 1
+        : (this.datasetSeed ? 1 : 0);
+      this.db.prepare(`
+        UPDATE pre_fund_reconciliation_gateway_batches
+        SET content_hash = ?, row_count = ?, excluded_row_count = ?, import_mode = ?,
+            dataset_id = ?, producer_task_run_id = ?, dataset_version = ?,
+            archive_contract_version = ?
+        WHERE id = ?
+      `).run(
+        summary.contentHash,
+        summary.validRowCount,
+        summary.excludedRowCount,
+        this.importOptions.skipInvalidRows ? 'exclude-invalid-rows' : 'strict',
+        this.datasetSeed ? this.datasetSeed.datasetId : randomUUID(),
+        this.datasetSeed ? this.datasetSeed.producerTaskRunId : null,
+        nextVersion,
+        this.datasetSeed ? 1 : 0,
+        this.incomingBatchId
+      );
+      batch = this.db.prepare('SELECT * FROM pre_fund_reconciliation_gateway_batches WHERE id = ?')
+        .get(this.incomingBatchId);
+      outcomeKind = this.replacedBatch ? 'replaced' : 'inserted';
+    }
+    let receipt = null;
+    if (this.receiptOwner) {
+      receipt = insertOperationReceipt(this.db, {
+        ...this.receiptOwner,
+        outcomeKind,
+        batchId: Number(batch.id),
+        datasetId: batch.dataset_id || null,
+        datasetVersionBefore: this.replacedBatch
+          ? Number(this.replacedBatch.dataset_version)
+          : (outcomeKind === 'noop-existing-batch' ? Number(batch.dataset_version) : null),
+        datasetVersionAfter: Number(batch.dataset_version),
+        sourceFileName: summary.sourceFileName,
+        contentHash: summary.contentHash
+      }).receipt;
+    }
+    this.db.exec('COMMIT');
+    this.started = false;
+    const result = {
+      status: outcomeKind === 'inserted' ? 'imported' : (outcomeKind === 'replaced' ? 'replaced' : 'noop'),
+      monthKey: this.monthKey,
+      batch: mapBatchRow(batch, this.monthKey),
+      excludedRowCount: Number(summary.excludedRowCount) || 0
+    };
+    if (this.replacedBatch) result.replacedFileName = this.replacedBatch.source_file_name;
+    if (receipt) result.receipt = receipt;
+    return result;
+  }
+
+  rollback() {
+    if (!this.started) return;
+    rollbackQuietly(this.db);
+    this.started = false;
+  }
 }
 
 function mapGatewayRow(row, monthKey) {
@@ -322,7 +571,13 @@ class PreFundReconciliationStore {
     const datasetSeed = freezeDatasetSeedV1(options.datasetSeed);
     return withMutationLock(
       this.userDataDir,
-      () => this._importFileUnlocked(filePath, fileMetadata, importOptions, datasetSeed)
+      () => this._importFileUnlocked(
+        filePath,
+        fileMetadata,
+        importOptions,
+        datasetSeed,
+        options.identityGate
+      )
     );
   }
 
@@ -335,207 +590,142 @@ class PreFundReconciliationStore {
     );
   }
 
-  async _importFileUnlocked(filePath, fileMetadata, importOptions, datasetSeed) {
+  async importValidatedSpool(spoolInput, options = {}) {
+    const managed = assertManagedSpoolOptions(options);
+    const importOptions = normalizeImportOptions(options);
+    // Single Writer已在critical前严格验证过spool；直接复用该只读证据，事务内仍会
+    // 完整重验一次以关闭ACK到BEGIN IMMEDIATE之间的TOCTOU窗口。独立调用者未提供
+    // prevalidatedSpool时保持原有预验证行为。
+    const validated = options.prevalidatedSpool || await readAndValidateMptFileSpool(spoolInput);
+    if (validated.fileIndex !== managed.fileIndex || validated.fileOperationKey !== managed.operationKey) {
+      throw Object.assign(new Error('PreFund spool与managed operation identity不一致'), {
+        code: 'PREFUND_SPOOL_IDENTITY_MISMATCH'
+      });
+    }
+    if (validated.counts.error > 0 && !importOptions.skipInvalidRows) {
+      throw rowAggregateError({
+        sourceFileName: validated.header.sourceFileName,
+        sourceType: validated.header.sourceType,
+        sourceBatch: validated.header.sourceBatch,
+        rowErrorCount: validated.counts.error,
+        rowErrorSamples: validated.rowErrorSamples,
+        contentHash: validated.contentHash
+      });
+    }
+    if (importOptions.skipInvalidRows && validated.counts.error !== 0) {
+      throw Object.assign(new Error('repair spool必须把非法行标记为excluded'), {
+        code: 'PREFUND_SPOOL_DISPOSITION_INVALID'
+      });
+    }
+    return withMutationLock(
+      this.userDataDir,
+      () => this._importValidatedSpoolUnlocked(spoolInput, validated, importOptions, managed)
+    );
+  }
+
+  async _importValidatedSpoolUnlocked(spoolInput, initial, importOptions, managed) {
+    const monthKey = initial.header.sourceDate.slice(0, 7);
+    const db = runDataStore.openSideDb(this.userDataDir, MODULE, monthKey);
+    ensureRepairSchema(db);
+    let replayResult = null;
+    const rowBuffer = [];
+    const transaction = new MptImportTransaction(
+      db,
+      monthKey,
+      importOptions,
+      { datasetId: managed.datasetId, producerTaskRunId: managed.producerTaskRunId },
+      {
+        actionKey: managed.actionKey,
+        operationKey: managed.operationKey,
+        producerTaskRunId: managed.producerTaskRunId,
+        fileIndex: managed.fileIndex,
+        sourceSha256: initial.source.sha256
+      }
+    );
+
+    try {
+      const parsed = await readAndValidateMptFileSpool(spoolInput, {
+        streamRecordsDuringValidation: true,
+        onValidated: async (manifest) => {
+          if (manifest.contentHash !== initial.contentHash ||
+              manifest.header.identity !== initial.header.identity) {
+            throw Object.assign(new Error('PreFund spool在critical ACK后发生变化'), {
+              code: 'PREFUND_SPOOL_SOURCE_CHANGED'
+            });
+          }
+          db.exec('BEGIN IMMEDIATE');
+          const receipt = getOperationReceipt(db, managed.actionKey, managed.operationKey);
+          if (receipt) {
+            replayResult = assertReceiptReplay(db, receipt, manifest, managed, monthKey);
+            return;
+          }
+          transaction.begin(manifest.header, { alreadyStarted: true });
+        },
+        onRow: async (row) => {
+          if (replayResult) return;
+          rowBuffer.push(row);
+          if (rowBuffer.length >= this.writeBatchSize) transaction.writeRows(rowBuffer.splice(0));
+        },
+        onIssue: async (issue, kind) => {
+          if (!replayResult && kind === 'excluded') transaction.writeIssue(issue);
+        }
+      });
+
+      if (replayResult) {
+        db.exec('COMMIT');
+        return replayResult;
+      }
+      transaction.writeRows(rowBuffer.splice(0));
+      return transaction.finalize({
+        sourceType: parsed.header.sourceType,
+        sourceBatch: parsed.header.sourceBatch,
+        sourceFileName: parsed.header.sourceFileName,
+        contentHash: parsed.contentHash,
+        validRowCount: parsed.counts.valid,
+        rowErrorCount: parsed.counts.error,
+        rowErrorSamples: parsed.rowErrorSamples,
+        excludedRowCount: parsed.counts.excluded
+      });
+    } catch (error) {
+      transaction.rollback();
+      if (db.isTransaction === true) rollbackQuietly(db);
+      throw error;
+    } finally {
+      db.close();
+    }
+  }
+
+  async _importFileUnlocked(filePath, fileMetadata, importOptions, datasetSeed, identityGate = null) {
     const db = runDataStore.openSideDb(this.userDataDir, MODULE, fileMetadata.monthKey);
     ensureRepairSchema(db);
-    let transactionStarted = false;
-    let verifyExistingFile = null;
-    let replacedBatch = null;
-    let incomingBatchId = null;
-    let insertRowStatement = null;
-    let insertExcludedRowStatement = null;
+    const transaction = new MptImportTransaction(
+      db,
+      fileMetadata.monthKey,
+      importOptions,
+      datasetSeed
+    );
 
     try {
       const parsed = await parseMptFile(filePath, {
         batchSize: this.writeBatchSize,
         collectRowErrors: true,
         onHeader: async (header) => {
-          // 先拿写锁再查身份/序号，避免两个并发导入都在锁外读到“尚不存在”后竞态插入。
-          db.exec('BEGIN IMMEDIATE');
-          transactionStarted = true;
-          verifyExistingFile = db.prepare(SELECT_BATCH_BY_FILE).get(header.sourceFileName) || null;
-          if (verifyExistingFile) return;
-
-          const existingBatch = db.prepare(SELECT_BATCH_BY_IDENTITY).get(
-            header.sourceType,
-            header.sourceBatch
-          ) || null;
-          if (existingBatch) {
-            const order = compareFileSequences(header.sourceFileSequence, existingBatch.source_file_sequence);
-            if (order <= 0) {
-              throw storeError(
-                'MPT_BATCH_SEQUENCE_STALE',
-                '同一批次只接受文件序号更高的新文件，已拒绝旧序号或相同序号文件',
-                {
-                  fileName: header.sourceFileName,
-                  sourceType: header.sourceType,
-                  sourceBatch: header.sourceBatch,
-                  incomingSequence: header.sourceFileSequence,
-                  currentSequence: existingBatch.source_file_sequence,
-                }
-              );
-            }
-            replacedBatch = existingBatch;
-          }
-
-          if (replacedBatch) {
-            // 保留 batch.id，避免同批次重推后跑到其它临时批次末尾，改变严格1:1候选顺序。
-            db.prepare('DELETE FROM pre_fund_reconciliation_gateway_rows WHERE batch_id = ?')
-              .run(replacedBatch.id);
-            db.prepare('DELETE FROM pre_fund_reconciliation_gateway_excluded_rows WHERE batch_id = ?')
-              .run(replacedBatch.id);
-            db.prepare(`
-              UPDATE pre_fund_reconciliation_gateway_batches
-              SET source_date = ?, source_file_name = ?, source_file_sequence = ?,
-                  content_hash = '', declared_row_count = ?, row_count = 0,
-                  excluded_row_count = 0, import_mode = 'strict',
-                  imported_at = CURRENT_TIMESTAMP
-              WHERE id = ?
-            `).run(
-              header.sourceDate,
-              header.sourceFileName,
-              header.sourceFileSequence,
-              header.declaredRowCount,
-              replacedBatch.id
-            );
-            incomingBatchId = replacedBatch.id;
-          } else {
-            db.prepare(INSERT_BATCH).run(
-              header.sourceType,
-              header.sourceBatch,
-              header.sourceDate,
-              header.sourceFileName,
-              header.sourceFileSequence,
-              header.declaredRowCount
-            );
-            incomingBatchId = lastInsertId(db);
-          }
-          insertRowStatement = db.prepare(INSERT_ROW);
-          insertExcludedRowStatement = db.prepare(INSERT_EXCLUDED_ROW);
+          if (typeof identityGate === 'function') await identityGate(header);
+          transaction.begin(header);
         },
         onRows: async (rows) => {
-          if (verifyExistingFile) return;
-          // 每个 parser batch 用 SAVEPOINT 分批写；外层 BEGIN IMMEDIATE 仍包住完整文件，
-          // 因而兼顾大文件批量写入和“任一行失败整文件回滚”的原子性。
-          db.exec('SAVEPOINT mpt_gateway_row_batch');
-          try {
-            for (const row of rows) {
-              insertRowStatement.run(
-                incomingBatchId,
-                row.sourceType,
-                row.sourceBatch,
-                row.sourceDate,
-                row.sourceFileName,
-                row.sourceFileSequence,
-                row.sourceRowNumber,
-                row.reconciliationId,
-                row.date,
-                row.channel,
-                row.merchantId,
-                row.orderId,
-                row.billReconId,
-                row.reconBillBizId,
-                row.currency,
-                row.amount,
-                row.tradeType,
-                row.name,
-                row.cardNo,
-                row.realChannel,
-                row.clearingNetwork,
-                row.rawJson,
-                row.fingerprint
-              );
-            }
-            db.exec('RELEASE SAVEPOINT mpt_gateway_row_batch');
-          } catch (error) {
-            db.exec('ROLLBACK TO SAVEPOINT mpt_gateway_row_batch');
-            db.exec('RELEASE SAVEPOINT mpt_gateway_row_batch');
-            throw error;
-          }
+          transaction.writeRows(rows);
         },
         onRowError: async (issue) => {
-          if (verifyExistingFile || !importOptions.skipInvalidRows) return;
-          insertExcludedRowStatement.run(
-            incomingBatchId,
-            fileMetadata.sourceType,
-            fileMetadata.sourceFileName,
-            issue.sourceRowNumber,
-            issue.code,
-            issue.message,
-            issue.fieldName || '',
-            JSON.stringify(issue.fields || []),
-            issue.rawLine || ''
-          );
+          transaction.writeIssue(issue);
         }
       });
-
-      if (verifyExistingFile) {
-        if (verifyExistingFile.content_hash === parsed.contentHash) {
-          db.exec('COMMIT');
-          transactionStarted = false;
-          return {
-            status: 'noop',
-            monthKey: fileMetadata.monthKey,
-            batch: mapBatchRow(verifyExistingFile, fileMetadata.monthKey),
-          };
-        }
-        throw storeError(
-          'MPT_FILE_IDENTITY_CONFLICT',
-          '同文件名的内容 hash 与已导入文件不同，已拒绝文件身份冲突',
-          {
-            fileName: parsed.sourceFileName,
-            sourceType: parsed.sourceType,
-            sourceBatch: parsed.sourceBatch,
-          }
-        );
-      }
-
-      if (importOptions.expectedContentHash && parsed.contentHash !== importOptions.expectedContentHash) {
-        throw storeError(
-          'MPT_REPAIR_SOURCE_CHANGED',
-          '原始 MPT 文件内容已变化，不能继续导出错误数据或删除错误数据并重跑',
-          {
-            fileName: parsed.sourceFileName,
-            sourceType: parsed.sourceType,
-            sourceBatch: parsed.sourceBatch
-          }
-        );
-      }
-      if (parsed.rowErrorCount > 0 && !importOptions.skipInvalidRows) {
-        throw rowAggregateError(parsed);
-      }
-
-      db.prepare(`
-        UPDATE pre_fund_reconciliation_gateway_batches
-        SET content_hash = ?, row_count = ?, excluded_row_count = ?, import_mode = ?,
-            dataset_id = ?, producer_task_run_id = ?, dataset_version = ?,
-            archive_contract_version = ?
-        WHERE id = ?
-      `).run(
-        parsed.contentHash,
-        parsed.validRowCount,
-        parsed.rowErrorCount,
-        importOptions.skipInvalidRows ? 'exclude-invalid-rows' : 'strict',
-        datasetSeed ? datasetSeed.datasetId : randomUUID(),
-        datasetSeed ? datasetSeed.producerTaskRunId : null,
-        replacedBatch ? Number(replacedBatch.dataset_version) + 1 : (datasetSeed ? 1 : 0),
-        datasetSeed ? 1 : 0,
-        incomingBatchId
-      );
-      db.exec('COMMIT');
-      transactionStarted = false;
-
-      const saved = db.prepare('SELECT * FROM pre_fund_reconciliation_gateway_batches WHERE id = ?')
-        .get(incomingBatchId);
-      return {
-        status: replacedBatch ? 'replaced' : 'imported',
-        monthKey: fileMetadata.monthKey,
-        replacedFileName: replacedBatch ? replacedBatch.source_file_name : null,
-        batch: mapBatchRow(saved, fileMetadata.monthKey),
+      return transaction.finalize({
+        ...parsed,
         excludedRowCount: Number(parsed.rowErrorCount) || 0
-      };
+      });
     } catch (error) {
-      if (transactionStarted) rollbackQuietly(db);
+      transaction.rollback();
       throw error;
     } finally {
       db.close();

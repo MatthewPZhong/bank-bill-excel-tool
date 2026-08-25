@@ -23,7 +23,14 @@ const USER_PATH_PATTERN =
 const LOCAL_FILE_URL_HOST_PATTERN = /file:\/\/localhost(?=[\\/])/gi;
 const FULL_ACCOUNT_PATTERN = /(?:^|\D)\d(?:[ -]?\d){11,31}(?:\D|$)/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
-const SHA256_DIGEST_FIELDS = new Set(['sha256', 'outputPlanHash']);
+const SHA256_DIGEST_FIELDS = new Set([
+  'sha256',
+  'sourceSha256',
+  'contentHash',
+  'expectedContentHash',
+  'evidenceHash',
+  'outputPlanHash'
+]);
 const FILE_PLAN_ARTIFACT_KEY_PATTERN = /^(?:input|output)-[a-f0-9]{64}$/;
 const FILE_PLAN_ARTIFACT_KEY_FIELDS = new Set(['artifactKey', 'outputArtifactKey']);
 

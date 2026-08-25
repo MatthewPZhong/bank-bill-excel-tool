@@ -159,6 +159,9 @@ function snapshotExecuteRequest(request) {
   if (data.production !== undefined && typeof data.production !== 'boolean') {
     throw new SupervisorError('EXECUTE_REQUEST_FIELD_INVALID', 'Execute request production must be boolean');
   }
+  if (data.deferUnitStart !== undefined && typeof data.deferUnitStart !== 'boolean') {
+    throw new SupervisorError('EXECUTE_REQUEST_FIELD_INVALID', 'Execute request deferUnitStart must be boolean');
+  }
   for (const field of ['initTimeoutMs', 'executionTimeoutMs']) {
     if (data[field] !== undefined && (typeof data[field] !== 'number' || !Number.isFinite(data[field]) || data[field] < 0)) {
       throw new SupervisorError('EXECUTE_REQUEST_FIELD_INVALID', `Execute request ${field} must be a non-negative number`);
@@ -212,6 +215,7 @@ function createExecutionSupervisor(options = {}) {
         diagnostics
       })
     : null);
+  const workerDurableCoordinator = options.workerDurableCoordinator || null;
   const jobs = new Map();
   const pendingTransportCleanups = new Map();
   const failedTransportCleanups = new Map();
@@ -238,9 +242,21 @@ function createExecutionSupervisor(options = {}) {
         `${policy.lifetime === 'service' ? 'Service' : 'Compound'} execution requires ResourceGovernor`
       );
     }
+    const nativeWorkerDurable = policy.adapterKind === 'native' &&
+      policy.commit.kind === 'worker-durable';
     const externalCommitLifecycleOnly = policy.commit.kind === 'main-settlement' ||
       (policy.adapterKind === 'existing-dispatch' && policy.commit.kind === 'existing-critical-protocol');
-    if (policy.commit.kind !== 'none' && !externalCommitLifecycleOnly) {
+    if (nativeWorkerDurable && (!workerDurableCoordinator ||
+        typeof workerDurableCoordinator.prepareAndAck !== 'function' ||
+        typeof workerDurableCoordinator.observeReceipt !== 'function' ||
+        typeof workerDurableCoordinator.settleCommitted !== 'function' ||
+        typeof workerDurableCoordinator.resolveUncertain !== 'function')) {
+      throw new SupervisorError(
+        'WORKER_DURABLE_COORDINATOR_REQUIRED',
+        'Native worker-durable execution requires the Main-owned critical coordinator'
+      );
+    }
+    if (policy.commit.kind !== 'none' && !externalCommitLifecycleOnly && !nativeWorkerDurable) {
       throw new SupervisorError(
         'E02A_DURABLE_COMMIT_UNSUPPORTED',
         'Supervisor only observes native main-settlement or existing-dispatch durable commit lifecycle'
@@ -273,7 +289,22 @@ function createExecutionSupervisor(options = {}) {
           !input || typeof input !== 'object' || Array.isArray(input)) {
         throw new SupervisorError('UNIT_REGISTRATION_INVALID', `Duplicate or invalid unitId: ${String(unitId)}`);
       }
-      units.set(unitId, { state: 'registered', input, result: null, error: null });
+      let resolveTerminal;
+      const terminalPromise = new Promise((resolve) => { resolveTerminal = resolve; });
+      units.set(unitId, {
+        state: 'registered',
+        input,
+        result: null,
+        error: null,
+        criticalState: 'none',
+        fileOperationKey: null,
+        intentId: null,
+        receiptHint: null,
+        inspection: null,
+        terminalPromise,
+        resolveTerminal,
+        terminalSettled: false
+      });
     }
 
     // adapter 分配 Worker/process 前预检全部 request-derived command；真实 direction
@@ -319,6 +350,8 @@ function createExecutionSupervisor(options = {}) {
     const promise = new Promise((resolve) => { resolvePromise = resolve; });
     let resolveTransportAssignment;
     const transportAssignment = new Promise((resolve) => { resolveTransportAssignment = resolve; });
+    let resolveDispatchReady;
+    const dispatchReady = new Promise((resolve) => { resolveDispatchReady = resolve; });
     const record = {
       actionKey,
       operationKey,
@@ -333,6 +366,8 @@ function createExecutionSupervisor(options = {}) {
       state: 'queued',
       transport: null,
       transportAssignment,
+      dispatchReady,
+      dispatchReadySettled: false,
       transportAssignmentSettled: false,
       incomingSeq: createDirectionSequenceTracker(),
       outgoingSeq: createDirectionSequenceTracker(),
@@ -370,6 +405,19 @@ function createExecutionSupervisor(options = {}) {
       if (record.transportAssignmentSettled) return;
       record.transportAssignmentSettled = true;
       resolveTransportAssignment();
+    }
+
+    function finishDispatchReady() {
+      if (record.dispatchReadySettled) return;
+      record.dispatchReadySettled = true;
+      resolveDispatchReady();
+    }
+
+    function settleUnit(unit, value) {
+      if (!unit || unit.terminalSettled) return false;
+      unit.terminalSettled = true;
+      unit.resolveTerminal(Object.freeze(value));
+      return true;
     }
 
     function safeErrorOptions(stage) {
@@ -502,6 +550,28 @@ function createExecutionSupervisor(options = {}) {
       return 'execute';
     }
 
+    function isRecoveryInterruptedUnit(unit) {
+      return nativeWorkerDurable && ['committed-lost', 'unknown'].includes(unit.criticalState);
+    }
+
+    function settleUnfinishedUnit(unit, outcome, safeError) {
+      if (unit.terminalSettled) return;
+      if (isRecoveryInterruptedUnit(unit)) {
+        unit.state = 'interrupted';
+      } else if (!['done', 'error', 'cancelled'].includes(unit.state)) {
+        // transport终止前已真正派发的unit是当前普通file失败；尚未派发的unit
+        // 没有业务执行，只能按父级取消收口。两者都不得冒充资金结果不确定。
+        unit.state = outcome === 'cancelled' || unit.state !== 'running'
+          ? 'cancelled'
+          : 'error';
+      }
+      settleUnit(unit, {
+        status: unit.state,
+        error: safeError,
+        inspection: unit.inspection
+      });
+    }
+
     function finish(terminalSource, outcome, error, result = null, finishOptions = {}) {
       if (record.terminal) {
         reportDiagnostic({ type: 'late-terminal', actionKey, operationKey, jobId, terminalSource });
@@ -527,15 +597,24 @@ function createExecutionSupervisor(options = {}) {
         : null;
       const terminalResult = result === null ? null : canonicalJsonSnapshot(result);
       record.settlePromise = Promise.resolve().then(async () => {
+        if (nativeWorkerDurable && record.eventChain) {
+          await record.eventChain.catch(() => {});
+        }
         await cleanupTransport({ force: effectiveForceTransport });
+        if (nativeWorkerDurable) await resolveOutstandingCritical(terminalSource);
+        const interrupted = nativeWorkerDurable && [...record.units.values()].some((unit) =>
+          ['committed-lost', 'unknown'].includes(unit.criticalState));
+        for (const unit of record.units.values()) {
+          settleUnfinishedUnit(unit, outcome, safeError);
+        }
         cleanupResources(terminalSource === 'job:done' ? 'job-terminal' : 'job-failed');
         const executionResult = createExecutionResult({
           actionKey,
           operationKey,
           jobId,
-          outcome,
+          outcome: interrupted ? 'interrupted' : outcome,
           terminalSource,
-          result: terminalResult,
+          result: interrupted ? null : terminalResult,
           error: safeError,
           // existing-dispatch 的 job terminal 只证明既有 dispatcher 已结束；平台没有
           // 接管或重新判定其 settlement，也没有权威 receipt identity。保持 null，
@@ -546,7 +625,41 @@ function createExecutionSupervisor(options = {}) {
         jobs.delete(jobId);
         resolvePromise(executionResult);
         return executionResult;
+      }).catch((settlementError) => {
+        // Inspector/RecoveryControl失败必须保留open Intent供启动恢复，同时当前调用方
+        // 仍得到确定的interrupted终态，不能因settle链reject永久悬挂。
+        reportDiagnostic({
+          type: 'worker-durable-settlement-error',
+          actionKey,
+          operationKey,
+          jobId,
+          code: settlementError && settlementError.code || 'WORKER_DURABLE_SETTLEMENT_FAILED'
+        });
+        for (const unit of record.units.values()) {
+          if (['acked', 'committed'].includes(unit.criticalState)) unit.criticalState = 'unknown';
+          settleUnfinishedUnit(unit, outcome, safeError);
+        }
+        cleanupResources('job-interrupted');
+        const executionResult = createExecutionResult({
+          actionKey,
+          operationKey,
+          jobId,
+          outcome: 'interrupted',
+          terminalSource,
+          result: null,
+          error: safeError || toProtocolError(
+            settlementError,
+            'WORKER_DURABLE_SETTLEMENT_FAILED',
+            safeErrorOptions('settle')
+          ),
+          receiptHint: null,
+          metrics: record.metrics
+        });
+        jobs.delete(jobId);
+        resolvePromise(executionResult);
+        return executionResult;
       });
+      finishDispatchReady();
       return true;
     }
     record.finish = finish;
@@ -556,6 +669,51 @@ function createExecutionSupervisor(options = {}) {
       const protocolError = error instanceof Error ? error : new Error('Protocol validation failed');
       if (!protocolError.code) protocolError.code = 'PROTOCOL_ERROR';
       finish('protocol-error', 'transport-lost', protocolError, null);
+    }
+
+    function refreshProtectedState() {
+      if (record.terminal) return;
+      const protectedUnit = [...record.units.values()].some((unit) =>
+        ['acked', 'committed'].includes(unit.criticalState));
+      record.state = protectedUnit ? 'protected' : 'running';
+    }
+
+    async function resolveCriticalUnit(unit, terminalSource) {
+      if (!nativeWorkerDurable || !unit || !['acked', 'committed'].includes(unit.criticalState)) {
+        return null;
+      }
+      const inspection = await workerDurableCoordinator.resolveUncertain(Object.freeze({
+        policy,
+        actionKey,
+        parentOperationKey: operationKey,
+        fileOperationKey: unit.fileOperationKey,
+        taskRunId: context.kind === 'file-batch' ? context.value.taskRunId : null,
+        batchId: context.kind === 'file-batch' ? context.value.batchId : null,
+        jobId,
+        workerInstanceId,
+        unitId: [...record.units].find(([, candidate]) => candidate === unit)?.[0] || null,
+        intentId: unit.intentId,
+        receiptHint: unit.receiptHint,
+        terminalSource
+      }));
+      unit.inspection = inspection || null;
+      if (inspection && inspection.outcome === 'not-committed') {
+        unit.criticalState = 'recovered';
+      } else if (inspection && inspection.outcome === 'committed') {
+        unit.criticalState = 'committed-lost';
+      } else {
+        unit.criticalState = 'unknown';
+      }
+      refreshProtectedState();
+      return inspection;
+    }
+
+    async function resolveOutstandingCritical(terminalSource) {
+      for (const unit of record.units.values()) {
+        if (['acked', 'committed'].includes(unit.criticalState)) {
+          await resolveCriticalUnit(unit, terminalSource);
+        }
+      }
     }
 
     function expectedEventRoute() {
@@ -576,7 +734,7 @@ function createExecutionSupervisor(options = {}) {
         throw new ProtocolValidationError('PROTOCOL_UNKNOWN_UNIT', `Unknown unitId: ${message.unitId}`, '/unitId');
       }
       if (!allowedStates.includes(unit.state)) {
-        const terminalStates = ['done', 'error', 'cancelled'];
+        const terminalStates = ['done', 'error', 'cancelled', 'interrupted'];
         throw new ProtocolValidationError(
           terminalStates.includes(unit.state)
             ? 'PROTOCOL_UNIT_TERMINAL_IMMUTABLE'
@@ -624,6 +782,216 @@ function createExecutionSupervisor(options = {}) {
       });
     }
 
+    async function processMessage(message) {
+      switch (message.operation) {
+        case 'job:progress':
+          observeProgressRate(message);
+          if (onProgress) {
+            try { onProgress(message.payload.progress); } catch (error) { reportProgressObserverError(error); }
+          }
+          return;
+        case 'unit:progress': {
+          unitForMessage(message);
+          observeProgressRate(message);
+          if (onProgress) {
+            try { onProgress(message.payload.progress, Object.freeze({ unitId: message.unitId })); } catch (error) {
+              reportProgressObserverError(error);
+            }
+          }
+          return;
+        }
+        case 'critical:ready': {
+          if (!nativeWorkerDurable) {
+            throw new ProtocolValidationError(
+              'PROTOCOL_COMMIT_OPERATION_FORBIDDEN',
+              'critical:ready is not owned by this execution transport',
+              '/operation'
+            );
+          }
+          const unit = unitForMessage(message);
+          if (unit.criticalState !== 'none') {
+            throw new ProtocolValidationError(
+              'PROTOCOL_DUPLICATE_CRITICAL_READY',
+              'A unit may enter critical readiness only once',
+              '/unitId'
+            );
+          }
+          unit.criticalState = 'preparing';
+          const prepared = await workerDurableCoordinator.prepareAndAck(Object.freeze({
+            policy,
+            actionKey,
+            parentOperationKey: operationKey,
+            taskRunId: context.kind === 'file-batch' ? context.value.taskRunId : null,
+            batchId: context.kind === 'file-batch' ? context.value.batchId : null,
+            jobId,
+            workerInstanceId,
+            unitId: message.unitId,
+            critical: message.payload.critical
+          }));
+          if (!prepared || typeof prepared.intentId !== 'string' || prepared.intentId.length === 0 ||
+              typeof prepared.fileOperationKey !== 'string' || prepared.fileOperationKey.length === 0) {
+            throw new SupervisorError(
+              'WORKER_DURABLE_PREPARE_INVALID',
+              'Critical coordinator must return intentId and fileOperationKey'
+            );
+          }
+          unit.intentId = prepared.intentId;
+          unit.fileOperationKey = prepared.fileOperationKey;
+          unit.criticalState = 'acked';
+          refreshProtectedState();
+          send('critical:ack', {
+            critical: { intentId: unit.intentId, fileOperationKey: unit.fileOperationKey }
+          }, message.unitId);
+          return;
+        }
+        case 'commit:receipt': {
+          if (!nativeWorkerDurable) {
+            throw new ProtocolValidationError(
+              'PROTOCOL_COMMIT_OPERATION_FORBIDDEN',
+              'commit:receipt is not owned by this execution transport',
+              '/operation'
+            );
+          }
+          const unit = unitForMessage(message);
+          if (unit.criticalState !== 'acked') {
+            throw new ProtocolValidationError(
+              'PROTOCOL_RECEIPT_BEFORE_ACK',
+              'commit:receipt requires matching persisted critical ACK',
+              '/unitId'
+            );
+          }
+          const observed = await workerDurableCoordinator.observeReceipt(Object.freeze({
+            policy,
+            actionKey,
+            parentOperationKey: operationKey,
+            fileOperationKey: unit.fileOperationKey,
+            taskRunId: context.kind === 'file-batch' ? context.value.taskRunId : null,
+            batchId: context.kind === 'file-batch' ? context.value.batchId : null,
+            jobId,
+            workerInstanceId,
+            unitId: message.unitId,
+            intentId: unit.intentId,
+            receipt: message.payload.receipt
+          }));
+          unit.receiptHint = observed && observed.receiptHint ? observed.receiptHint : null;
+          unit.criticalState = 'committed';
+          return;
+        }
+        case 'unit:done': {
+          const unit = unitForMessage(message);
+          if (nativeWorkerDurable && unit.criticalState !== 'committed') {
+            throw new ProtocolValidationError(
+              'PROTOCOL_UNIT_DONE_WITHOUT_RECEIPT',
+              'worker-durable unit:done requires a persisted matching commit:receipt',
+              '/unitId'
+            );
+          }
+          unit.result = validateResultBody(policy, message.payload.result, record.resultValidator);
+          if (nativeWorkerDurable) {
+            await workerDurableCoordinator.settleCommitted(Object.freeze({
+              policy,
+              actionKey,
+              parentOperationKey: operationKey,
+              fileOperationKey: unit.fileOperationKey,
+              taskRunId: context.kind === 'file-batch' ? context.value.taskRunId : null,
+              batchId: context.kind === 'file-batch' ? context.value.batchId : null,
+              jobId,
+              workerInstanceId,
+              unitId: message.unitId,
+              intentId: unit.intentId,
+              receiptHint: unit.receiptHint,
+              result: unit.result
+            }));
+          }
+          unit.state = 'done';
+          if (nativeWorkerDurable) unit.criticalState = 'settled';
+          refreshProtectedState();
+          settleUnit(unit, { status: 'done', result: unit.result });
+          return;
+        }
+        case 'unit:error': {
+          const unit = unitForMessage(message);
+          if (nativeWorkerDurable && ['acked', 'committed'].includes(unit.criticalState)) {
+            await resolveCriticalUnit(unit, 'unit:error');
+          }
+          unit.error = message.payload.error;
+          const recoveryInterrupted = nativeWorkerDurable &&
+            ['committed-lost', 'unknown'].includes(unit.criticalState);
+          unit.state = recoveryInterrupted ? 'interrupted' : 'error';
+          settleUnit(unit, {
+            status: recoveryInterrupted ? 'interrupted' : 'error',
+            error: unit.error,
+            inspection: unit.inspection
+          });
+          return;
+        }
+        case 'cancel:ack':
+          if (record.cancelCommandState !== 'dispatching' && record.cancelCommandState !== 'sent') {
+            throw new ProtocolValidationError(
+              'PROTOCOL_UNSOLICITED_CANCEL_ACK',
+              'cancel:ack arrived without a dispatched cancel command',
+              '/operation'
+            );
+          }
+          if (record.cancelAckState !== 'none') {
+            throw new ProtocolValidationError(
+              'PROTOCOL_DUPLICATE_CANCEL_ACK',
+              'cancel:ack may be observed at most once',
+              '/operation'
+            );
+          }
+          record.cancelAckState = 'acknowledged';
+          return;
+        case 'job:done': {
+          const allowUnitError = policy.failure.unitBusinessError === 'collect-and-continue' ||
+            policy.failure.unitTransportCrash === 'fail-unit-and-continue';
+          const invalidUnits = [...record.units.values()].filter((unit) =>
+            unit.state !== 'done' && !(allowUnitError && unit.state === 'error'));
+          const openCritical = nativeWorkerDurable && [...record.units.values()].some((unit) =>
+            ['preparing', 'acked', 'committed'].includes(unit.criticalState));
+          const recoveryInterrupted = nativeWorkerDurable && [...record.units.values()].some((unit) =>
+            ['committed-lost', 'unknown'].includes(unit.criticalState));
+          if (record.unknownUnits.size || invalidUnits.length || openCritical || recoveryInterrupted) {
+            throw new ProtocolValidationError(
+              'PROTOCOL_JOB_DONE_GATE_FAILED',
+              'job:done requires every unit terminal and no unresolved critical unit',
+              '/operation'
+            );
+          }
+          const result = validateResultBody(policy, message.payload.result, record.resultValidator);
+          finish('job:done', 'completed', null, result);
+          return;
+        }
+        case 'job:error':
+          if (nativeWorkerDurable) await resolveOutstandingCritical('job:error');
+          for (const unit of record.units.values()) {
+            if (unit.state === 'registered' || unit.state === 'queued' || unit.state === 'running') {
+              const recoveryInterrupted = nativeWorkerDurable &&
+                ['committed-lost', 'unknown'].includes(unit.criticalState);
+              unit.state = recoveryInterrupted ? 'interrupted' : 'cancelled';
+              settleUnit(unit, {
+                status: recoveryInterrupted ? 'interrupted' : 'cancelled',
+                error: message.payload.error,
+                inspection: unit.inspection
+              });
+            }
+          }
+          finish(
+            'job:error',
+            record.cancelTerminalEvidence ? 'cancelled' : 'failed',
+            message.payload.error,
+            null
+          );
+          return;
+        default:
+          throw new ProtocolValidationError(
+            'PROTOCOL_EVENT_OPERATION_UNEXPECTED',
+            `Unexpected worker event operation: ${message.operation}`,
+            '/operation'
+          );
+      }
+    }
+
     function onMessage(rawMessage) {
       if (record.terminal) {
         reportDiagnostic({ type: 'late-message', actionKey, operationKey, jobId });
@@ -641,6 +1009,13 @@ function createExecutionSupervisor(options = {}) {
           policyRegistry: options.policyRegistry
         });
         record.incomingSeq.observe(message);
+
+        if (nativeWorkerDurable) {
+          record.eventChain = (record.eventChain || Promise.resolve())
+            .then(() => processMessage(message))
+            .catch((error) => failProtocol(error));
+          return;
+        }
 
         switch (message.operation) {
           case 'job:progress':
@@ -787,6 +1162,7 @@ function createExecutionSupervisor(options = {}) {
 
     function requestCancellation(reason, source) {
       if (record.terminal || record.cancelRequested) return false;
+      if (record.state === 'protected') return false;
       const awaitingPreDispatch = record.state === 'queued' || record.state === 'admitting' ||
         (record.state === 'spawning' && !record.transport);
       const capability = policy.cancellation.capability;
@@ -1049,9 +1425,12 @@ function createExecutionSupervisor(options = {}) {
       record.state = 'running';
       record.metrics.startedAt = now();
       if (!send('job:start', { input: request.input || {} }) || record.terminal) return;
-      for (const [unitId, unit] of record.units) {
-        unit.state = 'running';
-        if (!send('unit:start', { input: unit.input }, unitId) || record.terminal) return;
+      finishDispatchReady();
+      if (request.deferUnitStart !== true) {
+        for (const [unitId, unit] of record.units) {
+          unit.state = 'running';
+          if (!send('unit:start', { input: unit.input }, unitId) || record.terminal) return;
+        }
       }
       if (record.cancelRequested) sendCancel(record.cancelReason);
       if (record.terminal) return;
@@ -1079,8 +1458,53 @@ function createExecutionSupervisor(options = {}) {
     const control = Object.freeze({
       jobId,
       promise,
+      ready: dispatchReady,
       cancel(reason = { reason: 'cancelled' }) {
         return requestCancellation(reason, 'user');
+      },
+      startUnit(unitId, ...identityOverrides) {
+        let resolveDispatchAccepted;
+        const dispatchAccepted = new Promise((resolve) => { resolveDispatchAccepted = resolve; });
+        const terminal = (async () => {
+          try {
+            if (request.deferUnitStart !== true) {
+              throw new SupervisorError('UNIT_DEFERRED_START_DISABLED', 'This job eagerly dispatches units');
+            }
+            if (identityOverrides.length !== 0) {
+              throw new SupervisorError(
+                'UNIT_INPUT_OVERRIDE_FORBIDDEN',
+                'Deferred unit input is frozen at parent job registration'
+              );
+            }
+            const unit = record.units.get(unitId);
+            if (!unit || unit.state !== 'registered' || record.terminal) {
+              throw new SupervisorError('UNIT_START_STATE_INVALID', `Unit cannot start: ${String(unitId)}`);
+            }
+            unit.state = 'queued';
+            await record.dispatchReady;
+            if (record.terminal) {
+              resolveDispatchAccepted(false);
+              return unit.terminalPromise;
+            }
+            if (record.state !== 'running' || !record.transport) {
+              throw new SupervisorError('UNIT_START_STATE_INVALID', `Unit cannot start: ${String(unitId)}`);
+            }
+            unit.state = 'running';
+            const accepted = Boolean(send('unit:start', { input: unit.input }, unitId) && !record.terminal);
+            resolveDispatchAccepted(accepted);
+            return unit.terminalPromise;
+          } catch (error) {
+            resolveDispatchAccepted(false);
+            throw error;
+          }
+        })();
+        Object.defineProperty(terminal, 'dispatchAccepted', {
+          value: dispatchAccepted,
+          enumerable: false,
+          configurable: false,
+          writable: false
+        });
+        return terminal;
       },
       snapshot() {
         return Object.freeze({
@@ -1143,6 +1567,9 @@ function createExecutionSupervisor(options = {}) {
   }
 
   return Object.freeze({
+    start(request) {
+      return startExecution(request);
+    },
     execute(request) {
       try {
         return startExecution(request).promise;

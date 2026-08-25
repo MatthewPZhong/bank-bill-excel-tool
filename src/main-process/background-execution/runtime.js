@@ -17,32 +17,49 @@ const {
 const {
   TOOLBOX_GENERATION_POLICIES
 } = require('../toolbox-background/policies');
+const {
+  PRE_FUND_MPT_POLICIES,
+  validatePreFundMptParentResult
+} = require('../pre-fund-reconciliation/mpt-import/policies');
+
+const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
+  ...TOOLBOX_GENERATION_POLICIES,
+  ...PRE_FUND_MPT_POLICIES
+]);
 
 function isBackgroundExecutionProductionEnabled(actionKey) {
-  const policy = TOOLBOX_GENERATION_POLICIES.find((item) => item.actionKey === actionKey);
+  const policy = BACKGROUND_EXECUTION_POLICIES.find((item) => item.actionKey === actionKey);
   return Boolean(policy && policy.production.enabled === true);
 }
 
 function createBackgroundExecutionRuntime(options = {}) {
   const workerRoot = path.resolve(__dirname, '..', 'toolbox-background');
   const entryRegistry = createStaticRegistry(Object.fromEntries(
-    TOOLBOX_GENERATION_POLICIES.map((policy) => [policy.entryKey, {
+    BACKGROUND_EXECUTION_POLICIES.map((policy) => [policy.entryKey, {
       path: path.join(
-        workerRoot,
-        policy.actionKey === TOOLBOX_GENERATION_ACTIONS.MERGE
-          ? 'merge-worker-entry.js'
-          : (policy.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
-            ? 'route-scanner-worker-entry.js'
-            : 'split-worker-entry.js')
+        policy.moduleId === 'pre-fund'
+          ? path.resolve(__dirname, '..', 'pre-fund-reconciliation', 'mpt-import')
+          : workerRoot,
+        policy.moduleId === 'pre-fund'
+          ? 'writer-worker-entry.js'
+          : (policy.actionKey === TOOLBOX_GENERATION_ACTIONS.MERGE
+              ? 'merge-worker-entry.js'
+              : (policy.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
+                  ? 'route-scanner-worker-entry.js'
+                  : 'split-worker-entry.js'))
       ),
-      cancellationTerminalErrorCodes: ['TOOLBOX_GENERATION_CANCELLED']
+      cancellationTerminalErrorCodes: policy.moduleId === 'pre-fund'
+        ? ['PREFUND_WRITER_CANCELLED']
+        : ['TOOLBOX_GENERATION_CANCELLED']
     }])
   ));
   const validatorEntries = {};
-  for (const policy of TOOLBOX_GENERATION_POLICIES) {
-    const resultValidator = policy.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
-      ? validateToolboxMultiGenerationResult
-      : (value) => validateToolboxGenerationResult(value, policy.actionKey);
+  for (const policy of BACKGROUND_EXECUTION_POLICIES) {
+    const resultValidator = policy.moduleId === 'pre-fund'
+      ? validatePreFundMptParentResult
+      : (policy.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
+          ? validateToolboxMultiGenerationResult
+          : (value) => validateToolboxGenerationResult(value, policy.actionKey));
     validatorEntries[policy.result.validatorKey] = resultValidator;
     // Main explicitly executes the asynchronous technical/business validators before Publisher.
     // Registry bindings remain synchronous capability declarations for static contract coverage.
@@ -54,30 +71,36 @@ function createBackgroundExecutionRuntime(options = {}) {
   validatorRegistry.freeze();
 
   const staticKeys = {
-    resourceProfileKeys: TOOLBOX_GENERATION_POLICIES.map((policy) => policy.resources.profile),
-    topologyKeys: TOOLBOX_GENERATION_POLICIES
+    resourceProfileKeys: BACKGROUND_EXECUTION_POLICIES.map((policy) => policy.resources.profile),
+    topologyKeys: BACKGROUND_EXECUTION_POLICIES
       .map((policy) => policy.resources.compound && policy.resources.compound.topologyKey)
       .filter(Boolean),
-    inspectorKeys: TOOLBOX_GENERATION_POLICIES.map((policy) => policy.commit.inspectorKey),
-    conflictScopeResolverKeys: TOOLBOX_GENERATION_POLICIES.map(
+    inspectorKeys: BACKGROUND_EXECUTION_POLICIES.map((policy) => policy.commit.inspectorKey),
+    conflictScopeResolverKeys: BACKGROUND_EXECUTION_POLICIES.map(
       (policy) => policy.commit.conflictScopeResolverKey
     ),
-    settlementKeys: TOOLBOX_GENERATION_POLICIES.map((policy) => policy.commit.settlementKey),
-    publisherKeys: TOOLBOX_GENERATION_POLICIES.map((policy) => policy.artifacts.publisherKey)
+    settlementKeys: BACKGROUND_EXECUTION_POLICIES.map((policy) => policy.commit.settlementKey),
+    publisherKeys: BACKGROUND_EXECUTION_POLICIES.map((policy) => policy.artifacts.publisherKey),
+    plannerKeys: ['planner.pre-fund:mpt-import'],
+    reducerKeys: ['reducer.pre-fund:mpt-import']
   };
   const policyRegistry = createExecutionPolicyRegistry({
-    policies: TOOLBOX_GENERATION_POLICIES,
+    policies: BACKGROUND_EXECUTION_POLICIES,
     entryRegistry,
     validatorRegistry,
     staticKeys,
     generatedAt: '2026-08-25T00:00:00+08:00'
   });
   policyRegistry.freeze();
-  const memoryBudget = Math.max(512 * 1024 * 1024, Math.floor(os.totalmem() / 4));
+  // E05-B capability最大单job拓扑为import base32MiB + Writer256MiB + Parser256MiB；
+  // repair同样以Writer phase + exactly-one Parser child申报CompoundLease。
+  const memoryBudget = Math.max(768 * 1024 * 1024, Math.floor(os.totalmem() / 4));
   const resourceGovernor = createResourceGovernor({
     budgets: {
       cpuSlots: 2,
-      workerThreadSlots: 2,
+      // E05-B false-gated capability以 effective parser=1 验证冻结 compound：
+      // parent base + Writer phase + 1 parser child，恰需3个worker slot。
+      workerThreadSlots: 3,
       utilityProcessSlots: 0,
       ioHeavySlots: 2,
       memoryBytes: memoryBudget
@@ -89,9 +112,13 @@ function createBackgroundExecutionRuntime(options = {}) {
     resourceGovernor,
     diagnostics: options.diagnostics,
     executionTimeoutMs: options.executionTimeoutMs,
-    shutdownTimeoutMs: options.shutdownTimeoutMs || 5000
+    shutdownTimeoutMs: options.shutdownTimeoutMs || 5000,
+    workerDurableCoordinator: options.workerDurableCoordinator
   });
   return Object.freeze({
+    start(request) {
+      return supervisor.start(request);
+    },
     execute(request) {
       return supervisor.execute(request);
     },
@@ -110,7 +137,12 @@ function createBackgroundExecutionRuntime(options = {}) {
 }
 
 function createBackgroundExecutionRuntimeManager(options = {}) {
-  const runtimeFactory = options.runtimeFactory || (() => createBackgroundExecutionRuntime(options));
+  const runtimeFactory = options.runtimeFactory || (() => createBackgroundExecutionRuntime({
+    ...options,
+    workerDurableCoordinator: typeof options.workerDurableCoordinatorProvider === 'function'
+      ? options.workerDurableCoordinatorProvider()
+      : options.workerDurableCoordinator
+  }));
   let runtime = null;
   let shutdownOwner = null;
   let closing = false;
@@ -217,6 +249,7 @@ function createBackgroundExecutionRuntimeManager(options = {}) {
 }
 
 module.exports = {
+  BACKGROUND_EXECUTION_POLICIES,
   createBackgroundExecutionRuntime,
   createBackgroundExecutionRuntimeManager,
   isBackgroundExecutionProductionEnabled

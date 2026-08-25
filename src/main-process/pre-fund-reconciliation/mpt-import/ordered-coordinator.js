@@ -24,6 +24,7 @@ class OrderedMptCoordinator {
       throw new TypeError('Ordered Coordinator需要consumeReady函数');
     }
     this.consumeReady = options.consumeReady;
+    this.consumeError = typeof options.consumeError === 'function' ? options.consumeError : null;
     this.readyHighWaterMark = normalizeHighWaterMark(options.readyHighWaterMark);
     this.nextConsumeIndex = 0;
     this.entries = new Map();
@@ -111,6 +112,9 @@ class OrderedMptCoordinator {
           this.consumerActive = false;
         }
       } else {
+        if (this.consumeError) {
+          await this.consumeError(entry.fileResult, Object.freeze({ fileIndex, kind: entry.kind }));
+        }
         this.results[fileIndex] = entry.fileResult;
       }
       this.nextConsumeIndex += 1;

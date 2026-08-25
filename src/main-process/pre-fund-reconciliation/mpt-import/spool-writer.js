@@ -86,7 +86,7 @@ function createDirectoryLayer(directory, rootReal, paths) {
   assertContainedDirectory(directory, rootReal, 'PREFUND_SPOOL_PATH_INVALID', paths);
 }
 
-function ensurePrivateDirectory(paths) {
+function ensurePrivateDirectory(paths, options = {}) {
   try {
     fs.mkdirSync(paths.taskStagingDir, { recursive: true, mode: 0o700 });
   } catch (_error) {
@@ -105,6 +105,7 @@ function ensurePrivateDirectory(paths) {
   for (const directory of [paths.mptDir, paths.jobDir, paths.fileDir]) {
     createDirectoryLayer(directory, rootReal, paths);
   }
+  if (options.requireEmpty === false) return;
   for (const basename of Object.values(MPT_SPOOL_FILE_NAMES)) {
     try {
       fs.lstatSync(path.join(paths.fileDir, basename));
@@ -113,6 +114,12 @@ function ensurePrivateDirectory(paths) {
       if (!error || error.code !== 'ENOENT') throw error;
     }
   }
+}
+
+function ensureMptSpoolDirectory(input) {
+  const paths = mptSpoolPaths(input);
+  ensurePrivateDirectory(paths, { requireEmpty: false });
+  return paths;
 }
 
 function existingCleanupTree(paths) {
@@ -367,8 +374,20 @@ function cleanupMptFileSpool(input) {
   return Object.freeze({ status: 'cleaned', residualPaths: Object.freeze([]) });
 }
 
+function cleanupMptSpoolParents(input) {
+  const paths = mptSpoolPaths(input);
+  // 仅rmdir空目录；任一其它file、恢复证据或外来文件存在时都保留owner目录。
+  for (const directory of [paths.jobDir, paths.mptDir, paths.taskStagingDir]) {
+    try { fs.rmdirSync(directory); } catch (error) {
+      if (!error || !['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error.code)) throw error;
+    }
+  }
+}
+
 module.exports = {
   assertDirectoryDurable,
   cleanupMptFileSpool,
+  cleanupMptSpoolParents,
+  ensureMptSpoolDirectory,
   writeMptFileSpool
 };

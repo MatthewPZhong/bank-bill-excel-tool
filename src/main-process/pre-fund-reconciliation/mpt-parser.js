@@ -19,6 +19,37 @@ const DEFAULT_BATCH_SIZE = 1000;
 const DEFAULT_ROW_ERROR_SAMPLE_LIMIT = 20;
 const MAX_LINE_LENGTH = 4 * 1024 * 1024;
 
+function createMptRowAggregateError(parsed) {
+  const samples = Array.isArray(parsed.rowErrorSamples) ? parsed.rowErrorSamples : [];
+  const detailLines = samples.map((issue) => (
+    `第${issue.sourceRowNumber}行：${issue.message}`
+  ));
+  if (Number(parsed.rowErrorCount) > samples.length) {
+    detailLines.push(`另有 ${Number(parsed.rowErrorCount) - samples.length} 条错误未在页面展开`);
+  }
+  const error = new FileValidationError(
+    'MPT_ROW_ERRORS',
+    `MPT 文件包含 ${Number(parsed.rowErrorCount) || 0} 条可定位明细错误，严格导入已整文件回滚`,
+    {
+      context: {
+        fileName: parsed.sourceFileName,
+        sourceType: parsed.sourceType,
+        sourceBatch: parsed.sourceBatch,
+        rowErrorCount: parsed.rowErrorCount,
+        contentHash: parsed.contentHash
+      },
+      detailLines
+    }
+  );
+  error.canRepair = true;
+  error.rowErrorCount = Number(parsed.rowErrorCount) || 0;
+  error.rowErrorSamples = samples;
+  error.contentHash = parsed.contentHash;
+  error.sourceType = parsed.sourceType;
+  error.sourceBatch = parsed.sourceBatch;
+  return error;
+}
+
 function createHashingTransform(hash) {
   return new Transform({
     transform(chunk, _encoding, callback) {
@@ -252,6 +283,7 @@ async function parseMptFile(filePath, options = {}) {
 }
 
 module.exports = {
+  createMptRowAggregateError,
   DEFAULT_BATCH_SIZE,
   DEFAULT_ROW_ERROR_SAMPLE_LIMIT,
   MAX_LINE_LENGTH,

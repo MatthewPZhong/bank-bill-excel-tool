@@ -24,6 +24,11 @@ function safeError(error) {
     message: error && error.message ? String(error.message) : 'MPT parser worker失败'
   };
   const residualPaths = error && error.details && error.details.residualPaths;
+  if (Array.isArray(error && error.detailLines)) {
+    result.detailLines = error.detailLines
+      .filter((line) => typeof line === 'string')
+      .slice(0, 1000);
+  }
   if (CLEANUP_ERROR_CODES.has(result.code) && Array.isArray(residualPaths) && residualPaths.length > 0) {
     const causeCode = error.cause && typeof error.cause.code === 'string'
       ? error.cause.code

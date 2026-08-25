@@ -173,6 +173,25 @@ const runDataStore = require('./backend/run-data-store');
 const {
   createPreFundReconciliationService
 } = require('./main-process/pre-fund-reconciliation/service');
+const {
+  createPreFundMptHoldGate
+} = require('./main-process/pre-fund-reconciliation/mpt-import/hold-gate');
+const {
+  executeManagedPreFundMptImport
+} = require('./main-process/pre-fund-reconciliation/mpt-import/managed-import');
+const {
+  createPreFundMptOutcomeInspector
+} = require('./main-process/pre-fund-reconciliation/mpt-import/outcome-inspector');
+const {
+  PRE_FUND_MPT_POLICIES,
+  PRE_FUND_MPT_STATIC_KEYS
+} = require('./main-process/pre-fund-reconciliation/mpt-import/policies');
+const {
+  preFundMptRecoveryPlanTransitions
+} = require('./main-process/pre-fund-reconciliation/mpt-import/recovery-plan');
+const {
+  createWorkerDurableCoordinator: createPreFundMptWorkerDurableCoordinator
+} = require('./main-process/pre-fund-reconciliation/mpt-import/worker-durable-coordinator');
 // v3.0.15：重复入金匹配（银行 Reversal/Inbound 分组 + 临时入金 MPT 回填 + 双 sheet 导出）。
 const {
   createDuplicateInboundMatchService
@@ -630,8 +649,12 @@ let archiveOperationTracker = null;
 let archiveTaskLifecycle = null;
 let recoveryControlReadRepository = null;
 let recoveryHoldGate = null;
+let preFundMptHoldGate = null;
+let preFundMptWorkerDurableCoordinator = null;
 let archiveOperationTail = Promise.resolve();
-const backgroundExecutionRuntimeManager = createBackgroundExecutionRuntimeManager();
+const backgroundExecutionRuntimeManager = createBackgroundExecutionRuntimeManager({
+  workerDurableCoordinatorProvider: () => preFundMptWorkerDurableCoordinator
+});
 const archiveOperationContext = new AsyncLocalStorage();
 const positionReconciliationOperationContext = new AsyncLocalStorage();
 const statementSourceReadContext = new AsyncLocalStorage();
@@ -17703,8 +17726,15 @@ function registerPreFundReconciliationHandlers() {
       if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
         return { proceed: false, result: { status: 'cancelled' } };
       }
+      const holdEvidence = await preFundMptHoldGate.inspectFiles(choice.filePaths);
       return {
         proceed: true,
+        recoveryConflictScopeKeys: holdEvidence.conflictScopeKeys,
+        preparedMptIdentities: holdEvidence.identities,
+        async beforeStart() {
+          await preFundMptHoldGate.inspectFiles(choice.filePaths);
+          return null;
+        },
         filePlan: {
           version: 1,
           allocation: 'eager',
@@ -17721,17 +17751,39 @@ function registerPreFundReconciliationHandlers() {
     const lock = tryAcquireBankStatementOpLock('pre-fund-import-mpt');
     if (!lock.acquired) return { status: 'busy', message: lock.message };
     try {
-      const imported = await getPreFundReconciliationService().importMptFiles(
-        taskContext.fileEvidence.filePlan.inputs.map((item) => item.filePath),
-        {
-          producerTaskRunId: taskContext.batchContext.taskRunId,
-          onProgress: (progress) => sendPreFundProgress(
-            event,
-            'pre-fund-reconciliation:import-progress',
-            progress
-          )
-        }
+      const service = getPreFundReconciliationService();
+      const filePaths = taskContext.fileEvidence.filePlan.inputs.map((item) => item.filePath);
+      const progress = (value) => sendPreFundProgress(
+        event,
+        'pre-fund-reconciliation:import-progress',
+        value
       );
+      if (!backgroundExecutionRuntimeManager.isProductionEnabled('pre-fund:mpt-import')) {
+        const imported = await getPreFundReconciliationService().importMptFiles(
+          filePaths,
+          {
+            producerTaskRunId: taskContext.batchContext.taskRunId,
+            identityGate: (identity) => preFundMptHoldGate.assertIdentities([identity]),
+            onProgress: progress
+          }
+        );
+        return imported;
+      }
+      const imported = await executeManagedPreFundMptImport({
+        actionKey: 'pre-fund:mpt-import',
+        runtime: backgroundExecutionRuntimeManager.get(),
+        service,
+        filePaths,
+        userDataDir: app.getPath('userData'),
+        taskStagingDir: path.join(
+          app.getPath('userData'),
+          'background-execution-staging',
+          taskContext.batchContext.taskRunId
+        ),
+        batchContext: taskContext.batchContext,
+        production: true,
+        onProgress: progress
+      });
       return imported;
     } catch (error) {
       return preFundFailureResult(error);
@@ -17791,9 +17843,22 @@ function registerPreFundReconciliationHandlers() {
     async prepare(_event, repairTokens = []) {
       const tokens = Array.isArray(repairTokens) ? repairTokens.slice() : [];
       const failures = getPreFundReconciliationService().resolveMptImportFailures(tokens);
+      const holdEvidence = await preFundMptHoldGate.inspectFiles(
+        failures.map((failure) => failure.filePath),
+        failures
+      );
       return {
         proceed: true,
         repairTokens: tokens,
+        recoveryConflictScopeKeys: holdEvidence.conflictScopeKeys,
+        preparedMptIdentities: holdEvidence.identities,
+        async beforeStart() {
+          await preFundMptHoldGate.inspectFiles(
+            failures.map((failure) => failure.filePath),
+            failures
+          );
+          return null;
+        },
         filePlan: {
           version: 1,
           allocation: 'eager',
@@ -17811,19 +17876,35 @@ function registerPreFundReconciliationHandlers() {
     if (!lock.acquired) return { status: 'busy', message: lock.message };
     try {
       const service = getPreFundReconciliationService();
-      const result = await service.retryMptImportFailures(
-        prepared.repairTokens,
-        {
-          filePaths: taskContext.fileEvidence.filePlan.inputs
-            .map((item) => item.filePath),
-          producerTaskRunId: taskContext.batchContext.taskRunId,
-          onProgress: (progress) => sendPreFundProgress(
-            event,
-            'pre-fund-reconciliation:import-progress',
-            progress
-          )
-        }
+      const filePaths = taskContext.fileEvidence.filePlan.inputs.map((item) => item.filePath);
+      const progress = (value) => sendPreFundProgress(
+        event,
+        'pre-fund-reconciliation:import-progress',
+        value
       );
+      const result = backgroundExecutionRuntimeManager.isProductionEnabled('pre-fund:mpt-repair-import')
+        ? await executeManagedPreFundMptImport({
+            actionKey: 'pre-fund:mpt-repair-import',
+            runtime: backgroundExecutionRuntimeManager.get(),
+            service,
+            filePaths,
+            repairFailures: service.resolveMptImportFailures(prepared.repairTokens),
+            userDataDir: app.getPath('userData'),
+            taskStagingDir: path.join(
+              app.getPath('userData'),
+              'background-execution-staging',
+              taskContext.batchContext.taskRunId
+            ),
+            batchContext: taskContext.batchContext,
+            production: true,
+            onProgress: progress
+          })
+        : await service.retryMptImportFailures(prepared.repairTokens, {
+          filePaths,
+          producerTaskRunId: taskContext.batchContext.taskRunId,
+          identityGate: (identity) => preFundMptHoldGate.assertIdentities([identity]),
+          onProgress: progress
+        });
       return result;
     } catch (error) {
       return preFundFailureResult(error);
@@ -17845,6 +17926,7 @@ function registerPreFundReconciliationHandlers() {
     const lock = tryAcquireBankStatementOpLock('pre-fund-delete-temp');
     if (!lock.acquired) return { status: 'busy', message: lock.message };
     try {
+      preFundMptHoldGate.assertDeleteBatch(payload);
       return { status: 'ok', ...await getPreFundReconciliationService().deleteTempBatch(payload) };
     } catch (error) {
       return preFundFailureResult(error);
@@ -17870,7 +17952,9 @@ function registerPreFundReconciliationHandlers() {
       const lock = tryAcquireBankStatementOpLock('pre-fund-delete-temp-by-date-range');
       if (!lock.acquired) return { status: 'busy', message: lock.message };
       try {
-        const result = await getPreFundReconciliationService().deleteTempByDateRange(payload);
+        const service = getPreFundReconciliationService();
+        preFundMptHoldGate.assertDeleteDateRange(service, payload);
+        const result = await service.deleteTempByDateRange(payload);
         return { status: 'ok', deleted: result.deletedRows, ...result };
       } catch (error) {
         return preFundFailureResult(error);
@@ -17884,6 +17968,7 @@ function registerPreFundReconciliationHandlers() {
     const lock = tryAcquireBankStatementOpLock('pre-fund-clear-temp');
     if (!lock.acquired) return { status: 'busy', message: lock.message };
     try {
+      preFundMptHoldGate.assertAnyMutationAllowed();
       return { status: 'ok', ...await getPreFundReconciliationService().clearTemp() };
     } catch (error) {
       return preFundFailureResult(error);
@@ -20995,7 +21080,7 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
     }
     // 第一次 gate 在 picker/preview/preparation 前执行，避免已知 Hold 下仍进入
     // 任何可能持有资源的业务准备流程。
-    assertTaskPolicyNotHeld(policy);
+    assertTaskPolicyNotHeld(policy, null);
     // picker / preview / danger confirmation 必须全部在 BOR.begin 和 reserve 之前完成。
     const prepared = await prepareIpcTaskInvocation(contract, event, args);
     dialogContext.phase = 'execute';
@@ -21014,7 +21099,7 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
       )
     );
     // 第二次 gate 关闭 preparation 期间新建 Hold 的窗口。
-    assertTaskPolicyNotHeld(policy);
+    assertTaskPolicyNotHeld(policy, prepared);
 
     const center = archiveCenterService || initializeArchiveCenter();
     if (!center || !archiveTaskLifecycle) {
@@ -21067,7 +21152,7 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
             ? { route: 'position-reconciliation', operationToken: positionOperationToken }
             : (prepared.afterTerminalIntent || null),
           beforeStart: async (operationContext) => {
-            assertTaskPolicyNotHeld(policy);
+            assertTaskPolicyNotHeld(policy, prepared);
             return typeof prepared.beforeStart === 'function'
               ? prepared.beforeStart(operationContext)
               : null;
@@ -21149,7 +21234,7 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
         : (prepared.afterTerminalIntent || null),
       beforeStart: async (batchContext, filePlanEvidence) => {
         // lifecycle admission 后、任何模块 beforeStart 副作用前最终复核。
-        assertTaskPolicyNotHeld(policy);
+        assertTaskPolicyNotHeld(policy, prepared);
         const preparedEvidence = typeof prepared.beforeStart === 'function'
           ? await prepared.beforeStart(batchContext, filePlanEvidence)
           : null;
@@ -21371,22 +21456,29 @@ async function initializeBackgroundExecutionRecovery() {
   recoveryControlReadRepository = createRecoveryControlReadRepository(database.db);
   const inspectorRegistry = createInspectorRegistry();
   const providerRegistry = createSettlementRecoveryProviderRegistry();
+  const inspectPreFundMpt = createPreFundMptOutcomeInspector({
+    userDataDir: path.dirname(database.dbPath)
+  });
+  for (const actionKey of Object.keys(PRE_FUND_MPT_STATIC_KEYS)) {
+    inspectorRegistry.register(PRE_FUND_MPT_STATIC_KEYS[actionKey].inspector, inspectPreFundMpt);
+  }
 
-  // E02-C2 只注册平台合同能力；真实业务 action 的 Inspector/Provider 由后续版本逐项接入。
-  // canonical durable canary 只允许测试/private DB，不能在产品 userData 中注册或枚举。
   inspectorRegistry.freeze();
   providerRegistry.freeze();
 
+  const requestOwnerRepository = createRecoveryRequestOwnerRepository(database.db);
+  const observationAttemptRepository = createRecoveryObservationAttemptRepository(database.db);
+  const recoveryControlRepository = createRecoveryControlRepository(database.db);
   const coordinator = createStartupRecoveryCoordinator({
     readRepository: recoveryControlReadRepository,
     inspectorRegistry,
     providerRegistry,
-    requestOwnerRepository: createRecoveryRequestOwnerRepository(database.db),
-    observationAttemptRepository: createRecoveryObservationAttemptRepository(database.db),
-    recoveryControlRepository: createRecoveryControlRepository(database.db),
-    // 当前 E02-C2 不迁移任何真实业务 Action。若用户库意外存在 open Intent，
-    // coordinator 会创建/保留 Hold 并 fail closed，不从 legacy TaskPolicy 猜 settlementKey。
-    resolvePolicy: () => null
+    requestOwnerRepository,
+    observationAttemptRepository,
+    recoveryControlRepository,
+    resolvePolicy: (actionKey) => PRE_FUND_MPT_POLICIES
+      .find((policy) => policy.actionKey === actionKey) || null,
+    planTransitions: preFundMptRecoveryPlanTransitions
   });
   const summary = await coordinator.scanAndRecover();
   for (const hold of recoveryControlReadRepository.listActiveRecoveryHolds()) {
@@ -21398,6 +21490,17 @@ async function initializeBackgroundExecutionRecovery() {
     }
   }
   recoveryHoldGate = createRecoveryHoldGate(recoveryControlReadRepository);
+  preFundMptHoldGate = createPreFundMptHoldGate({
+    readRepository: recoveryControlReadRepository,
+    recoveryHoldGate
+  });
+  preFundMptWorkerDurableCoordinator = createPreFundMptWorkerDurableCoordinator({
+    readRepository: recoveryControlReadRepository,
+    requestOwnerRepository,
+    recoveryControlRepository,
+    recoveryCoordinator: coordinator,
+    conflictScopeGate: (identity) => preFundMptHoldGate.assertIdentities([identity])
+  });
   appendActivityLogEntry({
     level: 'info',
     source: 'main',
@@ -21411,11 +21514,30 @@ async function initializeBackgroundExecutionRecovery() {
   return summary;
 }
 
-function assertTaskPolicyNotHeld(policy) {
+const PRE_FUND_SCOPED_HOLD_TASK_KEYS = new Set([
+  'pre-fund-reconciliation:import-mpt',
+  'pre-fund-reconciliation:mpt-errors:repair'
+]);
+
+function assertTaskPolicyNotHeld(policy, prepared = null) {
   if (!recoveryHoldGate || !recoveryControlReadRepository) {
     throw Object.assign(new Error('Recovery Hold gate 尚未初始化'), {
       code: 'RECOVERY_HOLD_GATE_UNAVAILABLE'
     });
+  }
+  if (PRE_FUND_SCOPED_HOLD_TASK_KEYS.has(policy.taskKey)) {
+    // MPT必须在picker/header只读识别后按exact batch scope gate；首次picker前
+    // 不得因同action下任意无关batch Hold而全局拒绝。
+    if (prepared === null) return true;
+    if (!preFundMptHoldGate || !Array.isArray(prepared.recoveryConflictScopeKeys)) {
+      throw Object.assign(new Error('PreFund MPT exact Recovery Hold gate证据缺失'), {
+        code: 'PREFUND_RECOVERY_SCOPE_UNAVAILABLE'
+      });
+    }
+    for (const conflictScopeKey of prepared.recoveryConflictScopeKeys) {
+      recoveryHoldGate.assertNoRecoveryHold({ conflictScopeKey });
+    }
+    return true;
   }
   for (const hold of recoveryControlReadRepository.listActiveRecoveryHolds()) {
     const taskKeys = actionTaskBindingRegistry.allowedTaskKeys(hold.actionKey);

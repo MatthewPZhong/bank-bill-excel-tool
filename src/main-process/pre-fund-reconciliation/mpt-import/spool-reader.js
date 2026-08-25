@@ -44,6 +44,7 @@ const ISSUE_KEYS = Object.freeze([
 ]);
 const ROW_TEXT_KEYS = Object.freeze(NORMALIZED_ROW_KEYS.filter((key) => key !== 'sourceRowNumber'));
 const MAX_ISSUE_FIELDS = Math.floor((4 * 1024 * 1024) / MPT_DELIMITER.length) + 1;
+const ROW_ERROR_SAMPLE_LIMIT = 20;
 
 function assertPlainObject(value, code, message) {
   if (!value || typeof value !== 'object' || Array.isArray(value) ||
@@ -423,41 +424,7 @@ async function readAndValidateMptFileSpool(input, options = {}) {
     throw spoolError('PREFUND_SPOOL_SOURCE_CHANGED', 'MPT源文件在header校验期间发生变化');
   }
   assertHeaderAnchoredToSource(manifest, sourceHeader);
-  const rowsStats = await scanNdjson(
-    paths.rowsReady,
-    manifest.files.rows,
-    (envelope) => validateRowEnvelope(envelope, manifest)
-  );
-  const issuesStats = await scanNdjson(
-    paths.issuesReady,
-    manifest.files.issues,
-    (envelope) => validateIssueEnvelope(envelope, manifest)
-  );
-  const ordinal = expectedOrdinalStats(manifest.header.declaredRowCount);
-  if (rowsStats.sourceRowSum + issuesStats.sourceRowSum !== ordinal.sum ||
-      rowsStats.sourceRowSquareSum + issuesStats.sourceRowSquareSum !== ordinal.squareSum ||
-      issuesStats.errorCount !== manifest.counts.error ||
-      issuesStats.excludedCount !== manifest.counts.excluded) {
-    throw spoolError('PREFUND_SPOOL_COUNT_MISMATCH', 'spool源行去向、错误或排除计数不守恒');
-  }
-
-  if (typeof options.onRow === 'function') {
-    await scanNdjson(
-      paths.rowsReady,
-      manifest.files.rows,
-      (envelope) => validateRowEnvelope(envelope, manifest),
-      (envelope) => options.onRow(envelope.row)
-    );
-  }
-  if (typeof options.onIssue === 'function') {
-    await scanNdjson(
-      paths.issuesReady,
-      manifest.files.issues,
-      (envelope) => validateIssueEnvelope(envelope, manifest),
-      (envelope) => options.onIssue(envelope.issue, envelope.kind)
-    );
-  }
-  return Object.freeze({
+  const identityEvidence = Object.freeze({
     schemaVersion: manifest.schemaVersion,
     jobId: manifest.jobId,
     fileIndex: manifest.fileIndex,
@@ -470,6 +437,69 @@ async function readAndValidateMptFileSpool(input, options = {}) {
     fileDir: paths.fileDir,
     manifestPath: paths.manifestReady
   });
+  const streamRecordsDuringValidation = options.streamRecordsDuringValidation === true;
+  if (streamRecordsDuringValidation && typeof options.onValidated === 'function') {
+    await options.onValidated(identityEvidence);
+  }
+  const rowErrorSamples = [];
+  const rowsStats = await scanNdjson(
+    paths.rowsReady,
+    manifest.files.rows,
+    (envelope) => validateRowEnvelope(envelope, manifest),
+    streamRecordsDuringValidation && typeof options.onRow === 'function'
+      ? (envelope) => options.onRow(envelope.row)
+      : null
+  );
+  const issuesStats = await scanNdjson(
+    paths.issuesReady,
+    manifest.files.issues,
+    (envelope) => {
+      const record = validateIssueEnvelope(envelope, manifest);
+      if (record.kind === 'error' && rowErrorSamples.length < ROW_ERROR_SAMPLE_LIMIT) {
+        rowErrorSamples.push(Object.freeze({
+          sourceRowNumber: record.issue.sourceRowNumber,
+          message: record.issue.message
+        }));
+      }
+      return record;
+    },
+    streamRecordsDuringValidation && typeof options.onIssue === 'function'
+      ? (envelope) => options.onIssue(envelope.issue, envelope.kind)
+      : null
+  );
+  const ordinal = expectedOrdinalStats(manifest.header.declaredRowCount);
+  if (rowsStats.sourceRowSum + issuesStats.sourceRowSum !== ordinal.sum ||
+      rowsStats.sourceRowSquareSum + issuesStats.sourceRowSquareSum !== ordinal.squareSum ||
+      issuesStats.errorCount !== manifest.counts.error ||
+      issuesStats.excludedCount !== manifest.counts.excluded) {
+    throw spoolError('PREFUND_SPOOL_COUNT_MISMATCH', 'spool源行去向、错误或排除计数不守恒');
+  }
+
+  const validated = Object.freeze({
+    ...identityEvidence,
+    rowErrorSamples: Object.freeze(rowErrorSamples)
+  });
+  if (!streamRecordsDuringValidation && typeof options.onValidated === 'function') {
+    await options.onValidated(validated);
+  }
+
+  if (!streamRecordsDuringValidation && typeof options.onRow === 'function') {
+    await scanNdjson(
+      paths.rowsReady,
+      manifest.files.rows,
+      (envelope) => validateRowEnvelope(envelope, manifest),
+      (envelope) => options.onRow(envelope.row)
+    );
+  }
+  if (!streamRecordsDuringValidation && typeof options.onIssue === 'function') {
+    await scanNdjson(
+      paths.issuesReady,
+      manifest.files.issues,
+      (envelope) => validateIssueEnvelope(envelope, manifest),
+      (envelope) => options.onIssue(envelope.issue, envelope.kind)
+    );
+  }
+  return validated;
 }
 
 module.exports = {
