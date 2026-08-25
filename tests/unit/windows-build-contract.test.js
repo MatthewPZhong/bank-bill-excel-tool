@@ -53,20 +53,27 @@ function assertPerUserDestinationOverride(perUserMacro, getDParameterMacro) {
   assert.match(getDParameterMacro, /StrCpy \$\{outVar\} \$R9/);
 }
 
-test('Windows PR 对任意目标分支跑 release-check、x64 完整构建与 check-dist', () => {
+test('Windows PR 仅跳过 v3.2.1 中间分支 release-check，其余 x64 构建仍执行', () => {
   const workflow = read('.github/workflows/build-windows.yml');
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /pull_request:\s*\n\s*branches:\s*\n\s*- '\*\*'/);
   const smokeJob = workflow.slice(workflow.indexOf('\n  smoke-test:'), workflow.indexOf('\n  build:'));
   assert.match(smokeJob, /uses: actions\/checkout@v6\s*\n\s*with:\s*\n\s*fetch-depth: 0/);
-  assert.match(workflow, /Run release checks\s*\n\s*run: npm run release-check/);
+  const releaseChecksStep = smokeJob.slice(
+    smokeJob.indexOf('- name: Run release checks'),
+    smokeJob.indexOf('- name: Verify Windows startup process adapter semantics')
+  );
+  assert.match(
+    releaseChecksStep,
+    /if: >-\s*\n\s*github\.event_name != 'pull_request' \|\|\s*\n\s*!startsWith\(github\.head_ref, 'codex\/v3\.2\.1-'\) \|\|\s*\n\s*github\.head_ref == 'codex\/v3\.2\.1-r3-release-evidence'/
+  );
+  assert.match(releaseChecksStep, /run: npm run release-check/);
   assert.match(workflow, /Verify Windows startup process adapter semantics\s*\n\s*env:\s*\n\s*WINDOWS_STARTUP_PROCESS_ADAPTER_REAL_TEST: '1'\s*\n\s*run: node --test tests\/unit\/scripts\/startup-process-adapter\.test\.js/);
   assert.ok(
     workflow.indexOf('Run release checks')
       < workflow.indexOf('Verify Windows startup process adapter semantics'),
     '真实 Windows 进程探针必须在全量 release-check 之后独立串行运行'
   );
-  assert.doesNotMatch(workflow, /if:\s*github\.event_name\s*!=\s*'pull_request'/);
 
   const buildJob = workflow.slice(workflow.indexOf('\n  build:'));
   assert.match(buildJob, /npm run prepare:dist\s*\n\s*npx electron-builder/);
