@@ -127,16 +127,30 @@ function Wait-CanaryProcess {
   param(
     [Parameter(Mandatory = $true)][Diagnostics.Process] $Process,
     [Parameter(Mandatory = $true)][string] $ReportPath,
-    [int] $TimeoutSeconds = 180
+    [int] $TimeoutSeconds = 180,
+    [ValidateRange(100, 5000)][int] $ExitReportGraceMilliseconds = 2000
   )
   $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+  $exitReportDeadline = $null
   while (-not (Test-Path -LiteralPath $ReportPath -PathType Leaf) -and [DateTime]::UtcNow -lt $deadline) {
+    $Process.Refresh()
+    if ($Process.HasExited) {
+      if ($null -eq $exitReportDeadline) {
+        # Electron/NSIS 启动器可能先结束，真正的 app 子进程随后才原子落 report。
+        # 只给固定短宽限，避免把合法 launcher hand-off 误判成失败，也不退回 180s timeout。
+        $exitReportDeadline = [DateTime]::UtcNow.AddMilliseconds($ExitReportGraceMilliseconds)
+      } elseif ([DateTime]::UtcNow -ge $exitReportDeadline) {
+        Throw-SafeFailure 'CANARY_PROCESS_EXITED_BEFORE_REPORT'
+      }
+    }
     Start-Sleep -Milliseconds 100
   }
   if (-not (Test-Path -LiteralPath $ReportPath -PathType Leaf)) {
-    if (-not $Process.HasExited) {
-      Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
+    $Process.Refresh()
+    if ($Process.HasExited) {
+      Throw-SafeFailure 'CANARY_PROCESS_EXITED_BEFORE_REPORT'
     }
+    Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
     Throw-SafeFailure 'CANARY_REPORT_TIMEOUT'
   }
   while (-not $Process.HasExited -and [DateTime]::UtcNow -lt $deadline) {
@@ -287,10 +301,10 @@ function Invoke-PackagedCanaryVariant {
 function Invoke-SilentInstaller {
   param(
     [Parameter(Mandatory = $true)][string] $SetupPath,
-    [Parameter(Mandatory = $true)][string] $InstallRoot,
+    [Parameter(Mandatory = $true)][string] $DestinationRoot,
     [Parameter(Mandatory = $true)][string] $EnvironmentRoot
   )
-  New-Item -ItemType Directory -Path $InstallRoot | Out-Null
+  New-Item -ItemType Directory -Path $DestinationRoot | Out-Null
   $installerTemp = Join-Path $EnvironmentRoot 'temp'
   $installerAppData = Join-Path $EnvironmentRoot 'app-data'
   $installerLocalAppData = Join-Path $EnvironmentRoot 'local-app-data'
@@ -310,16 +324,75 @@ function Invoke-SilentInstaller {
       '/S',
       '/currentuser',
       '--no-desktop-shortcut',
-      "/D=$InstallRoot"
+      "/D=$DestinationRoot"
     ) -PassThru -Wait -WindowStyle Hidden
+    $process.Refresh()
   } finally {
     foreach ($name in $savedEnvironment.Keys) {
       [Environment]::SetEnvironmentVariable($name, $savedEnvironment[$name], 'Process')
     }
   }
-  if ($process.ExitCode -ne 0) {
-    Throw-SafeFailure 'SETUP_NONZERO_EXIT'
+  if ($null -eq $process.ExitCode) {
+    Throw-SafeFailure 'SETUP_EXIT_CODE_UNAVAILABLE'
   }
+  return [int]$process.ExitCode
+}
+
+function Get-SafeSetupFailureDiagnostic {
+  param(
+    [Parameter(Mandatory = $true)][int] $ExitCode,
+    [Parameter(Mandatory = $true)][string] $InstallRoot,
+    [Parameter(Mandatory = $true)][string] $EffectiveUninstallDisplayName,
+    [Parameter(Mandatory = $true)][string] $UninstallRegistryKey
+  )
+
+  $exitState = switch ($ExitCode) {
+    1 { 'EXIT_1'; break }
+    2 { 'EXIT_2'; break }
+    default {
+      $unsignedExitCode = [uint32]([int64]$ExitCode -band 0xFFFFFFFFL)
+      "EXIT_HEX_$($unsignedExitCode.ToString('X8'))"
+    }
+  }
+
+  $rootState = 'ROOT_ABSENT'
+  try {
+    if (Test-Path -LiteralPath $InstallRoot -PathType Container) {
+      $appExecutables = @(
+        Get-ChildItem -LiteralPath $InstallRoot -File -Filter '*.exe' -ErrorAction Stop |
+          Where-Object { $_.Name -notmatch '^(?:uninstall|unins)' }
+      )
+      $uninstallers = @(
+        Get-ChildItem -LiteralPath $InstallRoot -File -Filter '*.exe' -ErrorAction Stop |
+          Where-Object { $_.Name -match '^(?:uninstall|unins)' }
+      )
+      if ($appExecutables.Count -eq 1 -and $uninstallers.Count -eq 1) {
+        $rootState = 'ROOT_COMPLETE'
+      } elseif ($appExecutables.Count -eq 0 -and $uninstallers.Count -eq 0) {
+        $rootState = 'ROOT_EMPTY'
+      } else {
+        $rootState = 'ROOT_PARTIAL'
+      }
+    }
+  } catch {
+    $rootState = 'ROOT_AUDIT_FAILED'
+  }
+
+  try {
+    if (Test-ExactRegistryProductIdentity `
+      -EffectiveUninstallDisplayName $EffectiveUninstallDisplayName `
+      -UninstallRegistryKey $UninstallRegistryKey) {
+      $identityState = 'IDENTITY_PRESENT'
+    } else {
+      $identityState = 'IDENTITY_ABSENT'
+    }
+  } catch {
+    $identityState = 'IDENTITY_AUDIT_FAILED'
+  }
+
+  # 非标准退出码仅编码为固定 8 位 32-bit hex；其余两段来自固定枚举。
+  # 不拼接路径、异常文本或任意 installer 输出。
+  return "$exitState`_$rootState`_$identityState"
 }
 
 function Select-InstalledExecutable {
@@ -461,8 +534,8 @@ function Invoke-WindowsPackagedBackgroundCanary {
   }
   Set-Content -LiteralPath (Join-Path $workRoot '.owned-by-packaged-background-canary') -Value $runId -Encoding ascii -NoNewline
 
-  # assisted NSIS 会在 /D 不含 APP_FILENAME 时自动追加产品目录；在 owned work root
-  # 下保留固定容器并把产品名作为第二层，让选择、卸载和身份审计指向真实安装根。
+  # /S 会跳过 assisted NSIS 的 page callback，因此 /D 必须直接给出带产品名的最终安装根。
+  # 不依赖 instFilesPre 追加 APP_FILENAME，确保选择、卸载与身份审计指向同一根目录。
   $installContainer = Join-Path $workRoot 'installed'
   $installRoot = Assert-RunnerTempChild -RunnerTemp $workRoot -Candidate (Join-Path $installContainer $productName) -DirectChild $false
   $installerEnvironmentRoot = Join-Path $workRoot 'installer-environment'
@@ -470,6 +543,7 @@ function Invoke-WindowsPackagedBackgroundCanary {
   $installedExecutable = $null
   $uninstallCompleted = $false
   $cleanupFailed = $false
+  $primaryFailure = $null
   try {
     New-Item -ItemType Directory -Path $artifactRoot | Out-Null
     $setupFrozen = Join-Path $artifactRoot 'setup.exe'
@@ -479,7 +553,16 @@ function Invoke-WindowsPackagedBackgroundCanary {
       Throw-SafeFailure 'SETUP_FREEZE_IDENTITY_MISMATCH'
     }
     Assert-ProductIdentityAbsent -ProductName $productName -EffectiveUninstallDisplayName $effectiveUninstallDisplayName -UninstallRegistryKey $expectedUninstallRegistryKey -FailureCode 'PRODUCT_IDENTITY_PREEXISTING'
-    Invoke-SilentInstaller -SetupPath $setupFrozen -InstallRoot $installRoot -EnvironmentRoot $installerEnvironmentRoot
+    $setupExitCode = Invoke-SilentInstaller -SetupPath $setupFrozen -DestinationRoot $installRoot -EnvironmentRoot $installerEnvironmentRoot
+    if ($setupExitCode -ne 0) {
+      $setupDiagnostic = Get-SafeSetupFailureDiagnostic `
+        -ExitCode $setupExitCode `
+        -InstallRoot $installRoot `
+        -EffectiveUninstallDisplayName $effectiveUninstallDisplayName `
+        -UninstallRegistryKey $expectedUninstallRegistryKey
+      [Console]::Error.WriteLine("BACKGROUND_EXECUTION_PACKAGED_CANARY_SETUP_DIAGNOSTIC=$setupDiagnostic")
+      Throw-SafeFailure 'SETUP_NONZERO_EXIT'
+    }
     $installedExecutable = Select-InstalledExecutable -InstallRoot $installRoot
     $setupVariantRoot = Join-Path $workRoot 'setup-runtime'
     New-Item -ItemType Directory -Path $setupVariantRoot | Out-Null
@@ -508,6 +591,9 @@ function Invoke-WindowsPackagedBackgroundCanary {
       status = 'PASS'
       variants = [ordered]@{ setup = 'PASS'; portable = 'PASS' }
     }
+  } catch {
+    $primaryFailure = $_
+    throw
   } finally {
     if (-not $uninstallCompleted -and (Test-Path -LiteralPath $installRoot -PathType Container)) {
       try {
@@ -530,7 +616,10 @@ function Invoke-WindowsPackagedBackgroundCanary {
     } else {
       Throw-SafeFailure 'WORK_ROOT_OWNERSHIP_INVALID'
     }
-    if ($cleanupFailed) {
+    if ($cleanupFailed -and $null -ne $primaryFailure) {
+      # finally 不得用二次卸载错误覆盖首个 canary safe code；仅追加固定安全诊断。
+      [Console]::Error.WriteLine('BACKGROUND_EXECUTION_PACKAGED_CANARY_CLEANUP_ERROR=UNINSTALL_CLEANUP_FAILED')
+    } elseif ($cleanupFailed) {
       Throw-SafeFailure 'UNINSTALL_CLEANUP_FAILED'
     }
   }

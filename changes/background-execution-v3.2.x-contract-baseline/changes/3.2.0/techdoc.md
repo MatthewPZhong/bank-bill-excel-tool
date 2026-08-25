@@ -331,7 +331,7 @@ CREATE TABLE IF NOT EXISTS vcc_op_operation_receipts (
   input_file_count INTEGER NOT NULL,
   committed_at TEXT NOT NULL,
   UNIQUE(action_key, operation_key),
-  FOREIGN KEY(run_id) REFERENCES vcc_op_runs(id)
+  FOREIGN KEY(run_id) REFERENCES vcc_op_calc_runs(id)
 );
 ```
 

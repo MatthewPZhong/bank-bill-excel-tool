@@ -95,6 +95,23 @@ function computeSnapshot(label, amountInCents) {
   };
 }
 
+function controlledCancellablePipeline(calls) {
+  return (_inputs, options = {}) => new Promise((resolve, reject) => {
+    const signal = options.signal;
+    assert.ok(signal instanceof AbortSignal);
+    const rejectCancelled = () => reject(Object.assign(
+      new Error('cancelled'),
+      { code: 'VCC_PARSER_PIPELINE_CANCELLED' }
+    ));
+    calls.push({ reject, resolve, signal });
+    if (signal.aborted) {
+      queueMicrotask(rejectCancelled);
+      return;
+    }
+    signal.addEventListener('abort', rejectCancelled, { once: true });
+  });
+}
+
 function row({ direction = '入', amount = '1.00', billDate = '2026-08-01', currency = 'CNY', rowIndex = 2 } = {}) {
   const value = Object.fromEntries(FLOW_DB_COLUMNS.map((column) => [column, '']));
   value[VCC_DIRECTION_DB_COLUMN] = direction;
@@ -466,6 +483,66 @@ describe('VCC session Compute Snapshot adoption', () => {
     );
     assert.equal(session.getComputeCache().totals.totalInCents, 200);
     assert.equal(session.getComputeCache().inputEvidenceHash, 'n'.repeat(64));
+  });
+
+  test('新 Parser scan 立即 abort 旧 signal，旧调用保持 superseded 且新 snapshot 正常采用', async () => {
+    const calls = [];
+    const session = createVccOpCalcSession({
+      getDb: () => null,
+      parserPipeline: controlledCancellablePipeline(calls)
+    });
+    const oldScan = session.parserPipelineScanAndCompute([{ filePath: '/private/tmp/old.xlsx' }]);
+    const oldRejected = assert.rejects(
+      oldScan,
+      (error) => error && error.code === 'VCC_COMPUTE_SCAN_SUPERSEDED'
+    );
+    assert.equal(calls[0].signal.aborted, false);
+
+    const newScan = session.parserPipelineScanAndCompute([{ filePath: '/private/tmp/new.xlsx' }]);
+    assert.equal(calls[0].signal.aborted, true);
+    assert.equal(calls[1].signal.aborted, false);
+    await oldRejected;
+
+    calls[1].resolve({ ok: true, snapshot: computeSnapshot('n', 200) });
+    const result = await newScan;
+    assert.equal(result.totals.totalInCents, 200);
+    assert.equal(session.getComputeCache().inputEvidenceHash, 'n'.repeat(64));
+  });
+
+  test('旧 scan finally 不清除新 controller；clearCache 与调用方 signal 分别保持取消语义', async () => {
+    const calls = [];
+    const session = createVccOpCalcSession({
+      getDb: () => null,
+      parserPipeline: controlledCancellablePipeline(calls)
+    });
+    const oldScan = session.parserPipelineScanAndCompute([{}]);
+    const oldRejected = assert.rejects(
+      oldScan,
+      (error) => error && error.code === 'VCC_COMPUTE_SCAN_SUPERSEDED'
+    );
+    const currentScan = session.parserPipelineScanAndCompute([{}]);
+    const currentRejected = assert.rejects(
+      currentScan,
+      (error) => error && error.code === 'VCC_COMPUTE_SCAN_SUPERSEDED'
+    );
+    await oldRejected;
+
+    session.clearCache();
+    assert.equal(calls[1].signal.aborted, true, '旧 finally 不得清除当前 controller');
+    await currentRejected;
+
+    const callerController = new AbortController();
+    const callerScan = session.parserPipelineScanAndCompute([{}], {
+      signal: callerController.signal
+    });
+    const callerRejected = assert.rejects(
+      callerScan,
+      (error) => error && error.code === 'VCC_PARSER_PIPELINE_CANCELLED'
+    );
+    assert.equal(calls[2].signal.aborted, false);
+    callerController.abort();
+    assert.equal(calls[2].signal.aborted, true);
+    await callerRejected;
   });
 
   test('新 scan 的业务拒绝、crash/cancel、clearCache 都先清除旧 snapshot', async () => {

@@ -3175,6 +3175,11 @@ function ensureVccOpCalcTablesSupport(db) {
       );
     `);
 
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_vcc_op_operation_receipts_run_id
+        ON vcc_op_operation_receipts(run_id);
+    `);
+
     db.exec('COMMIT');
   } catch (error) {
     db.exec('ROLLBACK');

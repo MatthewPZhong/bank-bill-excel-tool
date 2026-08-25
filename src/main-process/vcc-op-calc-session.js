@@ -179,10 +179,31 @@ function createVccOpCalcSession({
   let lastScanCache = null;   // { fileResults, yearMonth, totalRows }
   let lastComputeCache = null; // immutable { yearMonth, totals, perFile, ...pipeline evidence }
   let scanGeneration = 0;
+  let activeParserScan = null;
 
-  // 每次新 scan/clear 都先失效旧 snapshot。异步旧任务即使迟到，也只能在 generation CAS 处失败，
-  // 不得覆盖新任务已经采用的 Compute Snapshot。
+  function abortActiveParserScan() {
+    const active = activeParserScan;
+    if (!active) return;
+    activeParserScan = null;
+    active.superseded = true;
+    active.controller.abort();
+  }
+
+  function linkParserScanAbortSignal(source, target) {
+    if (!source) return () => {};
+    if (source.aborted) {
+      target.abort();
+      return () => {};
+    }
+    const abort = () => target.abort();
+    source.addEventListener('abort', abort, { once: true });
+    return () => source.removeEventListener('abort', abort);
+  }
+
+  // 每次新 scan/clear 都先取消旧 Parser scan 并失效 snapshot。若注入的 Pipeline
+  // 不响应 signal，generation CAS 仍保证迟到任务不能覆盖新 Compute Snapshot。
   function beginScanGeneration() {
+    abortActiveParserScan();
     scanGeneration += 1;
     lastScanCache = null;
     lastComputeCache = null;
@@ -339,17 +360,37 @@ function createVccOpCalcSession({
   // 一旦后续 gate 启用，scan Task 也必须在本方法完成 snapshot adoption 后才能返回 success。
   async function parserPipelineScanAndCompute(inputs, options = {}) {
     const generation = beginScanGeneration();
-    const result = await parserPipeline(inputs, options);
-    assertCurrentScanGeneration(generation);
-    if (!result || result.ok !== true) return result;
-    const snapshot = adoptComputeSnapshot(result.snapshot, generation);
-    return canonicalJsonSnapshot({
-      ok: true,
-      yearMonth: snapshot.yearMonth,
-      totalRows: snapshot.totalRows,
-      totals: snapshot.totals,
-      perFile: snapshot.perFile
-    });
+    const active = {
+      controller: new AbortController(),
+      superseded: false
+    };
+    activeParserScan = active;
+    let unlinkCallerAbort = () => {};
+    try {
+      unlinkCallerAbort = linkParserScanAbortSignal(options.signal, active.controller);
+      const result = await parserPipeline(inputs, {
+        ...options,
+        signal: active.controller.signal
+      });
+      assertCurrentScanGeneration(generation);
+      if (!result || result.ok !== true) return result;
+      const snapshot = adoptComputeSnapshot(result.snapshot, generation);
+      return canonicalJsonSnapshot({
+        ok: true,
+        yearMonth: snapshot.yearMonth,
+        totalRows: snapshot.totalRows,
+        totals: snapshot.totals,
+        perFile: snapshot.perFile
+      });
+    } catch (error) {
+      // Session 自己发起的 supersession 保留既有 generation 错误合同；调用方
+      // AbortSignal 触发的取消则继续透传 Pipeline cancellation。
+      if (active.superseded) assertCurrentScanGeneration(generation);
+      throw error;
+    } finally {
+      unlinkCallerAbort();
+      if (activeParserScan === active) activeParserScan = null;
+    }
   }
 
   // E03-B 落库：Main Task owner + 冻结 Compute Snapshot + run/files/receipt 同一
