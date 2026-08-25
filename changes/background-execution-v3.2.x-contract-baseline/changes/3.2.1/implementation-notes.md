@@ -194,3 +194,100 @@ Benchmark raw milliseconds:
 - Required remaining gates: proven job-start disk estimator/quota, packaged Windows directory fsync/file-lock/cleanup, peak RSS and transient disk watermark, representative Excel/WPS format review, and the independent resource-phase platform decision. `production.enabled` remains false.
 - Final targeted self-check: the initial E04-B focused set passed 78/78; after the Review P2 corrected managed output cardinality to 1..8, the expanded focused set passed 90/90, including real single-group matched and zero-hit Scanner/Writer/Main/Publisher parity. Affected ESLint, `node --check` and `git diff --check` passed.
 - Validation policy: this E04-B intermediate PR runs targeted tests, affected ESLint and `git diff --check` only. It did not run `release-check`, `check-vars` or `scan:vars`; the complete v3.2.1 `release-check` is reserved for exactly one run before the final v3.2.1 PR is sent remotely.
+
+## E04-C Gate — Second Writer Rejected
+
+### Goal / Method / Decision Boundary
+
+- Goal: independently test whether a second read-only Writer merits a production implementation without first adding it to production code.
+- Baseline: exact reviewed E04-B head `5008eef12316910cb5c487382c18d7d191bac2b1`; the probe itself lived outside the repository and changed no production source, Policy, test or feature flag.
+- Candidate topology: one real `scanAndSealRouteDb` Scanner pass writes and seals one task-private Route DB; two disposable Writer processes both open that DB read-only and deterministically own global `outputIndex` shards `[0,2,4,6]` and `[1,3,5,7]`; Main joins only the unique complete `[0..7]` set and calls the real `validateMultiGenerationResult`; the existing durable Publisher prepares and commits exactly eight task-private targets once.
+- Comparator topology: the same Scanner/sealed DB/Main validation/Publisher chain with the existing one Writer owning `[0..7]`. The current legacy `exportToolboxMultiFilters` path was measured separately through workbook validation and the same task-private durable Publisher.
+- Sampling: every mode/run executed in a fresh Node process. Each scenario ran one warmup per mode followed by five measured runs. Measured order rotated (`one→two→legacy`, `legacy→two→one`, `two→one→legacy`, `legacy→one→two`, `two→legacy→one`) so a fixed later mode could not inherit all cache/order advantage. Semantic equivalence rereads ran after the product-path timer and were not counted in end-to-end time.
+- Resource sampling: phase timers recorded wall time, 10 ms event-loop heartbeat, `monitorEventLoopDelay` p99, process `maxRSS`, 10 ms sampled task-root bytes and stable phase/task-root bytes. RSS is fresh-process high-water; sampled disk is not proof against a sub-10 ms transient. Event-loop figures are supporting evidence because a timer can under-observe a fully synchronous interval.
+- Platform: macOS Darwin `24.6.0`, arm64, Node `v25.8.0`, 14 logical CPUs, 51,539,607,552 bytes RAM. This evidence does not represent packaged Windows, directory-fsync or Windows file-lock behavior.
+
+The representative fixture is one styled XLSX with 50,000 rows × 12 columns, eight equally sized `Group` routes, 3,518,118 bytes, SHA-256 `d6c0f883490e6ecc1292684de6a9c24f810afff32928c1375f5b1689e0d9cb3b`. The small fixture uses the same 12-column/style/routing shape with 800 rows, 59,761 bytes, SHA-256 `0aa1909fb7eb7e88c6bf3f836afab49663747d1a40a7a51e2c2b600c41b7e54b`.
+
+### Raw End-to-end Evidence
+
+All values below are milliseconds. Warmups are recorded but excluded from medians.
+
+| Scenario | Mode | Warmup | Run 1 | Run 2 | Run 3 | Run 4 | Run 5 | Measured median |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 50k × 12 × 8 | one Writer | 17097.340 | 17627.156 | 17665.905 | 17583.591 | 17696.555 | 17403.465 | 17627.156 |
+| 50k × 12 × 8 | two Writers | 13656.725 | 13389.223 | 13908.494 | 13953.733 | 13913.439 | 13873.662 | 13908.494 |
+| 50k × 12 × 8 | legacy | 15109.913 | 15044.089 | 15221.480 | 15061.306 | 15214.014 | 15272.738 | 15214.014 |
+| 800 × 12 × 8 | one Writer | 987.976 | 998.441 | 981.809 | 993.358 | 978.148 | 979.386 | 981.809 |
+| 800 × 12 × 8 | two Writers | 907.747 | 900.022 | 920.462 | 919.208 | 901.000 | 911.821 | 911.821 |
+| 800 × 12 × 8 | legacy | 593.390 | 617.981 | 608.230 | 621.817 | 609.293 | 608.549 | 609.293 |
+
+- On the representative fixture, two Writers improve end-to-end median by `21.096%` relative to one Writer, but only `8.581%` relative to the current legacy path.
+- On the small fixture, two Writers improve the one-Writer median by `7.128%`; expressed as the specified regression metric, `(two - one) / one`, the result is `-7.128%`, within the `≤5%` ceiling.
+- The frozen Spec says only that production parallelism needs end-to-end median improvement `≥15%` and that E04-C needs “15%收益、RSS、Windows”; it does not name one Writer or legacy as the comparison denominator. The delegated E04-C probe selected one Writer as the incremental comparator, but the production decision conservatively also considered the current legacy path and all resource/platform gates.
+
+### Phase / Resource Evidence
+
+Representative medians and maxima:
+
+| Mode | Scanner median ms | Writer median ms | Main validation median ms | Publisher median ms | RSS median / max bytes | Stable / sampled max disk bytes | Route DB median bytes |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| one Writer | 4333.042 | 9509.590 | 3475.559 | 267.562 | 451,002,368 / 457,211,904 | 74,844,015 / 74,844,015 | 68,448,256 |
+| two Writers | 4405.560 | 5709.854 | 3494.706 | 263.608 | 593,887,232 / 600,424,448 | 74,844,015 / 74,844,015 | 68,448,256 |
+| legacy | n/a | 11470.910 | 3496.960 | 270.911 | 288,391,168 / 289,865,728 | 6,393,790 / 6,393,790 | 0 |
+
+Small-fixture medians and maxima:
+
+| Mode | Scanner median ms | Writer median ms | Main validation median ms | Publisher median ms | RSS median / max bytes | Stable / sampled max disk bytes | Route DB median bytes |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| one Writer | 241.755 | 386.143 | 109.576 | 252.591 | 218,005,504 / 229,654,528 | 1,320,424 / 1,320,424 | 1,110,016 |
+| two Writers | 241.599 | 305.333 | 111.757 | 247.483 | 316,751,872 / 318,275,584 | 1,320,424 / 1,320,424 | 1,110,016 |
+| legacy | n/a | 282.119 | 78.285 | 246.673 | 166,658,048 / 170,442,752 | 208,442 / 208,442 | 0 |
+
+- Representative two-Writer RSS median is `31.682%` above one Writer and `105.931%` above legacy. Absolute two-Writer median/max are about 566.4/572.6 MiB.
+- Route topology stable disk is the same for one and two Writers because both retain the same Route DB and eight generated/final workbooks at the sampled boundary, but 74,844,015 bytes is `11.706×` the legacy 6,393,790-byte task footprint. No job-start estimator or hard spool quota exists to prove this safe from compressed source size.
+- Representative event-loop heartbeat maxima across measured phases were 50.068 ms for one Writer, 45.820 ms for two Writers and 17.918 ms for legacy. The route maxima occur in independent Main workbook validation, not Scanner/Writer: two-Writer Scanner/Writer heartbeat maxima were 1.461/1.529 ms with p99 maxima 11.264/11.387 ms; Main validation heartbeat/p99 maxima were 45.820/11.624 ms. One-Writer Main validation heartbeat max was 50.068 ms. These local samples do not satisfy a Windows packaged responsiveness gate.
+
+### Equivalence / Publisher Evidence
+
+Every warmup and all 30 measured mode/scenario runs satisfied the following checks:
+
+- input row count equalled output row count (`50,000` or `800`); each of eight outputs contained exactly one eighth of the fixture rows;
+- the complete `outputIndex` sequence was exactly `[0,1,2,3,4,5,6,7]`, with no duplicate or missing owner;
+- canonical semantic digests matched across one Writer, two Writers and legacy for every output. The digest covered cell values/types/formulas/number formats, resolved font/fill/border/alignment styles, header/layout metadata, column widths, row height/hidden/outline state and row order;
+- warning counts were `[0,0,0,0,0,0,0,0]` in every mode/run;
+- Main accepted the sealed Route DB and every staging artifact only after hash/size/business validation; Publisher committed exactly once with eight files and no Writer accessed a final target;
+- all benchmark Publisher state, generation paths and final targets lived below a benchmark-created temporary root and were removed after each child exit. No user output or repository business file was used as a target.
+
+### Conservative Gate Decision
+
+E04-C fails the combined production gate and is rejected. No second Writer production code, shard planner, Policy change, test path or permanent generic benchmark framework is retained; `production.enabled` remains `false` and live requests remain legacy.
+
+Although the local incremental comparison clears `≥15%` against one Writer and the small regression threshold, it does not make the complete E04-C gate green:
+
+1. benefit against the actual current legacy path is only `8.581%` on the representative fixture;
+2. two-Writer RSS materially increases relative to both one Writer and legacy;
+3. Route DB disk remains about `11.706×` legacy and has neither a proven job-start estimator nor an explicit quota;
+4. the current CompoundLease cannot release Scanner active phase and then acquire the Writer phase as specified;
+5. packaged Windows directory-fsync, file lock, cleanup, RSS, disk and Excel/WPS evidence was not run and is not inferred from macOS;
+6. the event-loop maximum still comes from Main validation and is not improved into a production acceptance result by adding the second Writer.
+
+`productionImplementationAuthorized=false`. E04-C creates no PR and does not enable a second Writer. The next v3.2.1 implementation step may carry this decision evidence forward, but must not reinterpret the rejected probe as production authorization.
+
+### E04-C Decisions / Evidence / Remaining Unknowns
+
+| Type | Record | Impact |
+| --- | --- | --- |
+| Decision | Treat the frozen comparison-baseline ambiguity conservatively: examine both one Writer and current legacy, then apply RSS/disk/Windows requirements as co-equal gates. | A local `+21.096%` incremental result cannot override `+8.581%` versus live legacy or failed/missing resource and platform evidence. |
+| Decision | Reject, rather than land production-false second-Writer scaffolding. | Avoids carrying unused concurrency/failure/cleanup complexity for a topology that does not pass the combined gate. |
+| Evidence | One disposable harness run; raw JSON was 155,899 bytes with SHA-256 `f3fc31c02ef0ef5e85ab4c29ed8c1031db9d5a20b54f065a76f6ee29b10774a0`. The necessary reproducible contract and raw timings are preserved above; the disposable file itself is not tracked. | Evidence remains reviewable without creating a permanent general-purpose benchmark surface. |
+| PROBE / production BLOCK | Packaged Windows durability/file-lock/resource/Excel-WPS behavior. | Blocks production enablement; no local substitute or fabricated PASS. |
+| BLOCK | Dynamic Scanner→Writer phase lease transition and job-start Route DB/staging disk estimator or quota. | Blocks production enablement even if a future benchmark produces a larger speedup. |
+| Human gate | Representative business-file row-set/format/all-or-none inspection. | Automated semantic equivalence supports review but does not replace the required human production gate. |
+
+### E04-C Blindspot / Financial Closeout
+
+- Entrypoint and lifecycle: because the probe is rejected and no source is retained, there is no new Worker entrypoint, production selector, cancellation race, partial-success cleanup path or Publisher bypass to maintain. The reviewed E04-B one-Writer capability remains production-false and live execution remains legacy.
+- Data lineage and disposition: the disposable evidence proved one source structural scan, stable source ordinal + route mask lineage, exact row-count conservation and deterministic artifact ownership for its synthetic fixtures. It did not change amount, currency, matching, filtering, reconciliation key, archive or settlement semantics.
+- Failure/resource blindspots: a real two-Writer implementation would still need sibling cancellation, wait-for-exit, all-artifact cleanup and Publisher=0 fault evidence. Rejecting the implementation avoids claiming those unimplemented properties. Windows durability and transient disk high-water remain unknown rather than being relabelled PASS.
+- ⚠️ Financial/manual boundary: automated styled-fixture parity does not replace human inspection of representative business workbooks for row set, formats, warnings and all-or-none publication. This remains a production blocker, not a task completed by the E04-C probe.
