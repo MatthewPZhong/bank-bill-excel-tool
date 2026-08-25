@@ -150,7 +150,7 @@ test('packaged background canary 仅在 GitHub-hosted Windows 的 RUNNER_TEMP �
   assert.doesNotMatch(harness, /Remove-Item[^\n]*(?:Registry::|CurrentVersion\\Uninstall|CommonPrograms|SpecialFolder)/);
   assert.match(harness, /BACKGROUND_EXECUTION_PACKAGED_CANARY = '1'/);
   assert.match(harness, /BACKGROUND_EXECUTION_PACKAGED_CANARY_REPORT_PATH = \$ReportPath/);
-  assert.match(harness, /Invoke-SilentInstaller[\s\S]*'\/S',[\s\S]*'\/currentuser',[\s\S]*'--no-desktop-shortcut',[\s\S]*"\/D=\$InstallRoot"/);
+  assert.match(harness, /Invoke-SilentInstaller[\s\S]*'\/S',[\s\S]*'\/currentuser',[\s\S]*'--no-desktop-shortcut',[\s\S]*"\/D=\$DestinationRoot"/);
   assert.match(
     assistedInstaller,
     /\$\{StrContains\} \$0 "\$\{APP_FILENAME\}" \$INSTDIR[\s\S]*StrCpy \$INSTDIR "\$INSTDIR\\\$\{APP_FILENAME\}"/
@@ -160,9 +160,14 @@ test('packaged background canary 仅在 GitHub-hosted Windows 的 RUNNER_TEMP �
     harness,
     /\$installRoot = Assert-RunnerTempChild -RunnerTemp \$workRoot -Candidate \(Join-Path \$installContainer \$productName\) -DirectChild \$false/
   );
+  assert.match(
+    harness,
+    /Invoke-SilentInstaller -SetupPath \$setupFrozen -DestinationRoot \$installContainer -EnvironmentRoot \$installerEnvironmentRoot/
+  );
+  assert.doesNotMatch(harness, /Invoke-SilentInstaller -SetupPath \$setupFrozen -DestinationRoot \$installRoot/);
   assert.doesNotMatch(harness, /\$installRoot = Join-Path \$workRoot \$productName/);
   assert.match(harness, /SETUP_FREEZE_IDENTITY_MISMATCH/);
-  assert.match(harness, /Invoke-SilentInstaller -SetupPath \$setupFrozen/);
+  assert.match(harness, /Invoke-SilentInstaller -SetupPath \$setupFrozen -DestinationRoot \$installContainer/);
   assert.match(harness, /Select-InstalledExecutable[\s\S]*Invoke-PackagedCanaryVariant -Executable \$installedExecutable/);
   assert.match(harness, /PORTABLE_FREEZE_IDENTITY_MISMATCH/);
   assert.match(harness, /Invoke-PackagedCanaryVariant -Executable \$portableFrozen/);

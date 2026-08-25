@@ -301,10 +301,10 @@ function Invoke-PackagedCanaryVariant {
 function Invoke-SilentInstaller {
   param(
     [Parameter(Mandatory = $true)][string] $SetupPath,
-    [Parameter(Mandatory = $true)][string] $InstallRoot,
+    [Parameter(Mandatory = $true)][string] $DestinationRoot,
     [Parameter(Mandatory = $true)][string] $EnvironmentRoot
   )
-  New-Item -ItemType Directory -Path $InstallRoot | Out-Null
+  New-Item -ItemType Directory -Path $DestinationRoot | Out-Null
   $installerTemp = Join-Path $EnvironmentRoot 'temp'
   $installerAppData = Join-Path $EnvironmentRoot 'app-data'
   $installerLocalAppData = Join-Path $EnvironmentRoot 'local-app-data'
@@ -324,7 +324,7 @@ function Invoke-SilentInstaller {
       '/S',
       '/currentuser',
       '--no-desktop-shortcut',
-      "/D=$InstallRoot"
+      "/D=$DestinationRoot"
     ) -PassThru -Wait -WindowStyle Hidden
   } finally {
     foreach ($name in $savedEnvironment.Keys) {
@@ -475,8 +475,8 @@ function Invoke-WindowsPackagedBackgroundCanary {
   }
   Set-Content -LiteralPath (Join-Path $workRoot '.owned-by-packaged-background-canary') -Value $runId -Encoding ascii -NoNewline
 
-  # assisted NSIS 会在 /D 不含 APP_FILENAME 时自动追加产品目录；在 owned work root
-  # 下保留固定容器并把产品名作为第二层，让选择、卸载和身份审计指向真实安装根。
+  # /D 只传 owned ASCII 容器，让 assisted NSIS 按模板追加 APP_FILENAME；脚本仍以
+  # 明确的产品子目录做选择、卸载和身份审计，避免把 Unicode 产品名塞进原始 /D 参数。
   $installContainer = Join-Path $workRoot 'installed'
   $installRoot = Assert-RunnerTempChild -RunnerTemp $workRoot -Candidate (Join-Path $installContainer $productName) -DirectChild $false
   $installerEnvironmentRoot = Join-Path $workRoot 'installer-environment'
@@ -494,7 +494,7 @@ function Invoke-WindowsPackagedBackgroundCanary {
       Throw-SafeFailure 'SETUP_FREEZE_IDENTITY_MISMATCH'
     }
     Assert-ProductIdentityAbsent -ProductName $productName -EffectiveUninstallDisplayName $effectiveUninstallDisplayName -UninstallRegistryKey $expectedUninstallRegistryKey -FailureCode 'PRODUCT_IDENTITY_PREEXISTING'
-    Invoke-SilentInstaller -SetupPath $setupFrozen -InstallRoot $installRoot -EnvironmentRoot $installerEnvironmentRoot
+    Invoke-SilentInstaller -SetupPath $setupFrozen -DestinationRoot $installContainer -EnvironmentRoot $installerEnvironmentRoot
     $installedExecutable = Select-InstalledExecutable -InstallRoot $installRoot
     $setupVariantRoot = Join-Path $workRoot 'setup-runtime'
     New-Item -ItemType Directory -Path $setupVariantRoot | Out-Null

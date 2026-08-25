@@ -15,7 +15,8 @@
 | supersession abort 保留 `VCC_COMPUTE_SCAN_SUPERSEDED` | 现有内部 generation 合同和测试已冻结该语义 | 对所有 supersession 改报 generic cancelled | 不扩大错误合同漂移 |
 | Receipt 仅增加普通 `run_id` 索引 | 一个 run 多 receipt 当前由 Inspector 检测，未授权唯一约束 | `UNIQUE(run_id)` | 只优化查询计划，不改变幂等/资金数据模型 |
 | Canary 新增 safe code `CANARY_PROCESS_EXITED_BEFORE_REPORT` | 报告前进程退出是可观测失败，现有隐私边界禁止采集 stdout/stderr | 继续等待统一报 report timeout；采集完整进程输出 | 快速、稳定、无敏感输出 |
-| launcher 退出后给 report 固定 2 秒宽限，并保留首个 canary safe code | #175 Windows CI 显示启动器先退出时立即进入 cleanup，二次卸载失败会把首错覆盖成 `UNINSTALL_CLEANUP_FAILED` | 继续立即判失败；恢复完整 180 秒等待；让 cleanup 覆盖首错 | 兼容 Electron/NSIS launcher hand-off，同时保持有界等待和无敏感输出；cleanup 仅追加固定 safe diagnostic |
+| launcher 退出后给 report 固定 2 秒宽限，并保留首个 canary safe code | 代码审查确认 Electron launcher 可先退出；#175 首次 Windows CI 另行证明二次卸载错误会把首错覆盖成 `UNINSTALL_CLEANUP_FAILED` | 继续立即判失败；恢复完整 180 秒等待；让 cleanup 覆盖首错 | 兼容 launcher hand-off，同时保持有界等待和无敏感输出；cleanup 仅追加固定 safe diagnostic |
+| NSIS `/D=` 只传 owned install container，实际安装根固定推导为 `container/productName` | #175 连续两次在把 Unicode 产品名直接放入 `/D=` 时返回 `SETUP_NONZERO_EXIT`；assisted installer 模板本就负责追加 `${APP_FILENAME}` | 继续把最终 Unicode 产品目录直接作为 `/D=`；忽略 Setup 非零退出 | 保持实际安装、选择、卸载和身份审计根不变，收窄原始命令行编码面，Setup 非零仍 fail closed |
 | 修正冻结 TechDoc 并重建 published report/checksum | 当前 runtime 的唯一物理表为 `vcc_op_calc_runs`，包完整性记录包含 TechDoc | 新建 `vcc_op_runs` 别名表；只改文档而留下失配 hash | 文档与实现恢复一致，历史 manifest 保持其显式 non-normative 含义 |
 
 ## Assumptions
@@ -31,6 +32,7 @@
 | --- | --- | --- | --- | --- |
 | 在 #174 组合 HEAD 直接重生冻结包 published validator report | 先恢复历史 PASS report，再在其原始 provenance HEAD `f7c4d5aa` 上叠加单行 TechDoc 勘误重跑 | validator 将 #165 的 Main/TaskPolicy source hash 与 60 条 call-site 行号冻结；后续 PR 栈会按设计触发 provenance drift，和 TechDoc 内容无关 | 不更新 authority/action manifest，不把后续代码漂移冒充合同失败；修正文档仍须生成真实 29/29 report 与 checksum | 是 |
 | PR #175 从旧堆叠基线直接等待 GitHub 合并 | PR base 改为 `v3.2.0` 后，将最新 `origin/v3.2.0`（`21181432`）合入 hardening head | #168～#174 已按序合并，旧堆叠拓扑在迁移测试处产生内容冲突 | 仅组合基线的显式关闭保护与本 PR 的 non-unique `run_id` 索引断言；相对新基线的净改动仍为原 13 个 hardening 文件，不改变产品合同 | 不适用；无行为偏差 |
+| R3 repair 将最终产品目录直接作为 NSIS `/D=` | R4 CI repair 改为把 owned ASCII container 作为 `/D=`，并继续用 `container/productName` 作为唯一实际安装根 | #175 两次真实 Windows Setup 在直接 Unicode `/D=` 上稳定返回非零；模板已冻结自动追加产品目录的行为 | 不改安装结果、产品身份、卸载边界或 evidence 意义；只改变受控 harness 的参数编码路径 | 不适用；内部 harness 修复 |
 
 ## Evidence
 
@@ -47,9 +49,13 @@
 | 最终定向回归（4 个 hardening test files） | `70 PASS / 1 Windows-only SKIP`，0 fail | 五项修复的资源生命周期、取消、资金持久化、文档与 Windows canary 合同 |
 | 合入最新 `v3.2.0` 后的冲突复核 | 唯一冲突为 `vcc-op-calc-save-run-receipt.test.js`；保留基线 `try/finally` 关闭数据库并保留本 PR non-unique index 断言；`git diff --cached --check` PASS | 证明冲突是测试清理与新增断言的机械组合，不改金额、方向、幂等、恢复或 production gate |
 | 合入最新 `v3.2.0` 后的最终验证 | 定向 `70 PASS / 1 Windows-only SKIP`；`npm run release-check` PASS，unit `6017/6019`（0 fail、2 skip），integration `51/51` scripts、`2455/2455` assertions；合同包 checksum `69/69 PASS` | 验证顺序合并后的组合快照；仍未调用 `check-vars`/`scan:vars` |
-| #175 GitHub CI run `32786670809` / build job `97628007688` | smoke-test SUCCESS；build 在 packaged background canary 失败并最终报告 `UNINSTALL_CLEANUP_FAILED` | 将失败归因到 Windows launcher/report 生命周期与 cleanup 错误遮蔽，而非产品资金、恢复或默认 IPC 回归 |
+| #175 GitHub CI run `32786670809` / build job `97628007688` | smoke-test SUCCESS；build 在 packaged background canary 失败并最终报告 `UNINSTALL_CLEANUP_FAILED` | 证明 cleanup 会遮蔽首错；该快照不能单独支持 launcher 或 Setup 根因归因 |
 | launcher hand-off 修复定向验证 | `windows-build-contract`：`4 PASS / 1 Windows-only SKIP`；4 个 hardening files：`70 PASS / 1 Windows-only SKIP` | 固定 2 秒 report 宽限、首错优先、资源生命周期、取消、资金持久化与文档合同 |
 | launcher hand-off 修复全仓验证 | `npm run release-check` PASS；lint/smoke PASS，unit `6017/6019`（0 fail、2 skip），integration `51/51` scripts、`2455/2455` assertions | 修复未引入跨平台或业务回归；仍未调用 `check-vars`/`scan:vars` |
+| #175 GitHub CI run `32790663601` / build job `97638885396` | smoke-test SUCCESS；build 输出首错 `SETUP_NONZERO_EXIT`，cleanup 仅追加 `UNINSTALL_CLEANUP_FAILED` 诊断 | 验证首错优先修复有效，并把剩余失败收敛到真实 Setup 调用 |
+| Windows runner 与包结构对比 | #174 成功 run `32781005010` 和 #175 两次失败使用同一 `windows-2025-vs2026/20260818.207` 镜像；#175 两次分别落在 westus3 与 westcentralus；asar 均为 64.27MB/3251 entries | 排除单一区域或 runner 镜像漂移；修复聚焦 harness `/D=` 参数，而非放宽产品 canary |
+| NSIS destination-root 修复定向验证 | `windows-build-contract`：`4 PASS / 1 Windows-only SKIP`；`git diff --check` PASS | 冻结 container 参数、模板追加、最终产品根选择及 fail-closed Setup 退出合同 |
+| NSIS destination-root 修复全仓验证 | 4 个 hardening files：`70 PASS / 1 Windows-only SKIP`；`npm run release-check` PASS，unit `6017/6019`（0 fail、2 skip），integration `51/51` scripts、`2455/2455` assertions；合同包 checksum `69/69 PASS` | 证明参数修复未改变产品、资金/恢复语义、默认 IPC、证据包或 production gate；仍未调用 `check-vars`/`scan:vars` |
 
 ## Final Blindspot Review
 
