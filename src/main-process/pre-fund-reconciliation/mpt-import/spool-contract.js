@@ -40,11 +40,11 @@ function requiredText(value, label, maxLength = 2048) {
 }
 
 function normalizeJobId(value) {
-  const jobId = requiredText(value, 'jobId', 128);
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(jobId) || jobId === '.' || jobId === '..') {
-    throw spoolError('PREFUND_SPOOL_CONTRACT_INVALID', 'jobId不能用于安全的任务私有目录');
+  if (typeof value !== 'string' || value.length === 0 || value.length > 160 ||
+      !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value)) {
+    throw spoolError('PREFUND_SPOOL_CONTRACT_INVALID', 'jobId必须符合Platform Protocol safeKey');
   }
-  return jobId;
+  return value;
 }
 
 function normalizeFileIndex(value) {
@@ -52,6 +52,11 @@ function normalizeFileIndex(value) {
     throw spoolError('PREFUND_SPOOL_CONTRACT_INVALID', 'fileIndex必须是0..999999安全整数');
   }
   return value;
+}
+
+function jobDirectoryToken(jobId) {
+  const exactJobId = normalizeJobId(jobId);
+  return `job-${crypto.createHash('sha256').update(exactJobId, 'utf8').digest('hex')}`;
 }
 
 function paddedFileIndex(fileIndex) {
@@ -80,7 +85,7 @@ function mptSpoolPaths({ taskStagingDir, jobId, fileIndex }) {
   const normalizedJobId = normalizeJobId(jobId);
   const padded = paddedFileIndex(fileIndex);
   const mptDir = path.join(staging, 'mpt');
-  const jobDir = path.join(mptDir, normalizedJobId);
+  const jobDir = path.join(mptDir, jobDirectoryToken(normalizedJobId));
   const fileDir = path.join(jobDir, `file-${padded}`);
   const paths = { taskStagingDir: staging, mptDir, jobDir, fileDir };
   for (const [key, basename] of Object.entries(MPT_SPOOL_FILE_NAMES)) {
@@ -139,6 +144,7 @@ module.exports = {
   MptSpoolError,
   buildHeaderIdentity,
   deriveFileIdentity,
+  jobDirectoryToken,
   mptSpoolPaths,
   normalizeFileIndex,
   normalizeJobId,

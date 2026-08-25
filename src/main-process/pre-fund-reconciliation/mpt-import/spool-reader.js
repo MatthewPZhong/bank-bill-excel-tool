@@ -10,6 +10,7 @@ const {
   sourceSnapshotFromStat,
   sourceSnapshotMatchesStat
 } = require('../../archive-center/source-snapshot');
+const { readMptHeader } = require('../mpt-parser');
 const {
   MPT_DELIMITER,
   MPT_SCHEMAS,
@@ -91,6 +92,13 @@ function assertRegularNoSymlink(filePath, code, maxBytes = null) {
 }
 
 function assertSafeDirectoryTree(paths) {
+  let rootStat;
+  try { rootStat = fs.lstatSync(paths.taskStagingDir); } catch (_error) {
+    throw spoolError('PREFUND_SPOOL_PATH_INVALID', 'task staging目录缺失');
+  }
+  if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
+    throw spoolError('PREFUND_SPOOL_PATH_INVALID', 'task staging不能是符号链接且必须是目录');
+  }
   const rootReal = fs.realpathSync(paths.taskStagingDir);
   for (const directory of [paths.mptDir, paths.jobDir, paths.fileDir]) {
     let stat;
@@ -200,7 +208,7 @@ function validateManifest(manifest, expected) {
     'PREFUND_SPOOL_MANIFEST_INVALID',
     'manifest.header'
   );
-  if (!MPT_SCHEMAS[manifest.header.sourceType] ||
+  if (!Object.prototype.hasOwnProperty.call(MPT_SCHEMAS, manifest.header.sourceType) ||
       typeof manifest.header.sourceBatch !== 'string' || !manifest.header.sourceBatch ||
       normalizeDate(manifest.header.sourceDate) !== manifest.header.sourceDate ||
       manifest.header.sourceFileName !== manifest.source.fileName ||
@@ -245,6 +253,24 @@ function validateManifest(manifest, expected) {
     throw spoolError('PREFUND_SPOOL_COUNT_MISMATCH', 'manifest文件计数与候选计数不一致');
   }
   return manifest;
+}
+
+function assertHeaderAnchoredToSource(manifest, sourceHeader) {
+  const anchored = {
+    sourceType: sourceHeader.sourceType,
+    sourceBatch: sourceHeader.sourceBatch,
+    sourceDate: sourceHeader.sourceDate,
+    sourceFileName: sourceHeader.sourceFileName,
+    sourceFileSequence: sourceHeader.sourceFileSequence,
+    declaredRowCount: sourceHeader.declaredRowCount
+  };
+  anchored.identity = buildHeaderIdentity(anchored);
+  if (stableJson(manifest.header) !== stableJson(anchored)) {
+    throw spoolError(
+      'PREFUND_SPOOL_HEADER_IDENTITY_INVALID',
+      'manifest header与真实MPT文件名或首行metadata不一致'
+    );
+  }
 }
 
 function validateRowEnvelope(envelope, manifest) {
@@ -388,6 +414,15 @@ async function readAndValidateMptFileSpool(input, options = {}) {
   if (sourceSha256 !== manifest.source.sha256) {
     throw spoolError('PREFUND_SPOOL_SOURCE_CHANGED', 'MPT源文件SHA-256与manifest不一致');
   }
+  const sourceHeader = await readMptHeader(expected.source.filePath);
+  const sourceAfterHeader = assertRegularNoSymlink(
+    expected.source.filePath,
+    'PREFUND_SPOOL_SOURCE_CHANGED'
+  );
+  if (!sourceSnapshotMatchesStat(expected.source.sourceSnapshot, sourceAfterHeader)) {
+    throw spoolError('PREFUND_SPOOL_SOURCE_CHANGED', 'MPT源文件在header校验期间发生变化');
+  }
+  assertHeaderAnchoredToSource(manifest, sourceHeader);
   const rowsStats = await scanNdjson(
     paths.rowsReady,
     manifest.files.rows,

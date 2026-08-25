@@ -140,6 +140,28 @@ function mapStreamError(error, fileMetadata) {
 }
 
 /**
+ * 只读取并验证真实源文件的首行 metadata。
+ * 与完整 parser 共用 filename、gzip、UTF-8、BOM、单行上限和错误映射规则，
+ * 但在首行完成后立即关闭 stream，不解析明细。
+ */
+async function readMptHeader(filePath) {
+  const fileMetadata = parseMptFileName(filePath);
+  const hash = crypto.createHash('sha256');
+  try {
+    for await (let line of iterateUtf8Lines(filePath, fileMetadata, hash)) {
+      if (line.charCodeAt(0) === 0xFEFF) line = line.slice(1);
+      return identifyMptHeader(line.split(MPT_DELIMITER), fileMetadata);
+    }
+    throw validationError('MPT_HEADER_MISSING', 'MPT 文件为空或缺少有效首行', {
+      fileName: fileMetadata.sourceFileName,
+      rowNumber: 1,
+    });
+  } catch (error) {
+    throw mapStreamError(error, fileMetadata);
+  }
+}
+
+/**
  * 流式解析一个 MPT 文件。
  *
  * options.onHeader(metadata)：首行完成强校验后调用一次。
@@ -234,4 +256,5 @@ module.exports = {
   DEFAULT_ROW_ERROR_SAMPLE_LIMIT,
   MAX_LINE_LENGTH,
   parseMptFile,
+  readMptHeader,
 };

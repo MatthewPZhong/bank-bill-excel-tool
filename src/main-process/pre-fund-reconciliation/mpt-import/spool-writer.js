@@ -44,19 +44,115 @@ function assertFreshRegularSource(source) {
   return stat;
 }
 
-function ensurePrivateDirectory(paths) {
-  fs.mkdirSync(paths.fileDir, { recursive: true, mode: 0o700 });
-  for (const directory of [paths.mptDir, paths.jobDir, paths.fileDir]) {
-    const stat = fs.lstatSync(directory);
-    if (stat.isSymbolicLink() || !stat.isDirectory()) {
-      throw spoolError('PREFUND_SPOOL_PATH_INVALID', 'MPT spool目录不能是符号链接且必须是目录');
+function pathFailure(code, message, paths, invalidPath) {
+  return spoolError(code, message, {
+    invalidPath,
+    residualPaths: [paths.fileDir]
+  });
+}
+
+function lstatDirectory(directory, code, paths) {
+  let stat;
+  try {
+    stat = fs.lstatSync(directory);
+  } catch (error) {
+    throw pathFailure(code, 'MPT spool目录缺失或不可访问', paths, directory);
+  }
+  if (stat.isSymbolicLink() || !stat.isDirectory()) {
+    throw pathFailure(code, 'MPT spool目录不能是符号链接且必须是目录', paths, directory);
+  }
+  try {
+    return fs.realpathSync(directory);
+  } catch (_error) {
+    throw pathFailure(code, 'MPT spool目录真实路径不可访问', paths, directory);
+  }
+}
+
+function assertContainedDirectory(directory, rootReal, code, paths) {
+  const real = lstatDirectory(directory, code, paths);
+  if (real === rootReal || !real.startsWith(`${rootReal}${path.sep}`)) {
+    throw pathFailure(code, 'MPT spool目录越过task staging边界', paths, directory);
+  }
+}
+
+function createDirectoryLayer(directory, rootReal, paths) {
+  try {
+    fs.mkdirSync(directory, { mode: 0o700 });
+  } catch (error) {
+    if (!error || error.code !== 'EEXIST') {
+      throw pathFailure('PREFUND_SPOOL_PATH_INVALID', 'MPT spool目录创建失败', paths, directory);
     }
+  }
+  assertContainedDirectory(directory, rootReal, 'PREFUND_SPOOL_PATH_INVALID', paths);
+}
+
+function ensurePrivateDirectory(paths) {
+  try {
+    fs.mkdirSync(paths.taskStagingDir, { recursive: true, mode: 0o700 });
+  } catch (_error) {
+    throw pathFailure(
+      'PREFUND_SPOOL_PATH_INVALID',
+      'task staging目录创建失败',
+      paths,
+      paths.taskStagingDir
+    );
+  }
+  const rootReal = lstatDirectory(
+    paths.taskStagingDir,
+    'PREFUND_SPOOL_PATH_INVALID',
+    paths
+  );
+  for (const directory of [paths.mptDir, paths.jobDir, paths.fileDir]) {
+    createDirectoryLayer(directory, rootReal, paths);
   }
   for (const basename of Object.values(MPT_SPOOL_FILE_NAMES)) {
-    if (fs.existsSync(path.join(paths.fileDir, basename))) {
+    try {
+      fs.lstatSync(path.join(paths.fileDir, basename));
       throw spoolError('PREFUND_SPOOL_ALREADY_EXISTS', '当前job/fileIndex的spool已存在');
+    } catch (error) {
+      if (!error || error.code !== 'ENOENT') throw error;
     }
   }
+}
+
+function existingCleanupTree(paths) {
+  let rootReal;
+  try {
+    rootReal = lstatDirectory(
+      paths.taskStagingDir,
+      'PREFUND_SPOOL_CLEANUP_PATH_INVALID',
+      paths
+    );
+  } catch (error) {
+    if (error.details && error.details.invalidPath === paths.taskStagingDir) {
+      try {
+        fs.lstatSync(paths.taskStagingDir);
+      } catch (statError) {
+        if (statError && statError.code === 'ENOENT') return false;
+      }
+    }
+    throw error;
+  }
+  for (const directory of [paths.mptDir, paths.jobDir, paths.fileDir]) {
+    try {
+      fs.lstatSync(directory);
+    } catch (error) {
+      if (error && error.code === 'ENOENT') return false;
+      throw pathFailure(
+        'PREFUND_SPOOL_CLEANUP_PATH_INVALID',
+        'MPT spool cleanup目录不可访问',
+        paths,
+        directory
+      );
+    }
+    assertContainedDirectory(
+      directory,
+      rootReal,
+      'PREFUND_SPOOL_CLEANUP_PATH_INVALID',
+      paths
+    );
+  }
+  return true;
 }
 
 function cleanupKnownFiles(paths) {
@@ -64,6 +160,23 @@ function cleanupKnownFiles(paths) {
     try { fs.rmSync(path.join(paths.fileDir, basename), { force: true }); } catch (_error) { /* best effort */ }
   }
   try { fs.rmdirSync(paths.fileDir); } catch (_error) { /* 非空或已删除时保留给任务级清理 */ }
+  const residualPaths = [];
+  for (const basename of Object.values(MPT_SPOOL_FILE_NAMES)) {
+    const artifactPath = path.join(paths.fileDir, basename);
+    try {
+      fs.lstatSync(artifactPath);
+      residualPaths.push(artifactPath);
+    } catch (error) {
+      if (!error || error.code !== 'ENOENT') residualPaths.push(artifactPath);
+    }
+  }
+  try {
+    fs.lstatSync(paths.fileDir);
+    residualPaths.push(paths.fileDir);
+  } catch (error) {
+    if (!error || error.code !== 'ENOENT') residualPaths.push(paths.fileDir);
+  }
+  return residualPaths;
 }
 
 function openPart(filePath) {
@@ -226,14 +339,32 @@ async function writeMptFileSpool(input, options = {}) {
     if (manifestFd !== null) {
       try { fs.closeSync(manifestFd); } catch (_closeError) { /* original error wins */ }
     }
-    if (ownsFiles) cleanupKnownFiles(paths);
+    if (ownsFiles) {
+      try {
+        cleanupMptFileSpool(normalized);
+      } catch (cleanupError) {
+        cleanupError.cause = error;
+        throw cleanupError;
+      }
+    }
     throw error;
   }
 }
 
 function cleanupMptFileSpool(input) {
   const paths = mptSpoolPaths(input);
-  cleanupKnownFiles(paths);
+  if (!existingCleanupTree(paths)) {
+    return Object.freeze({ status: 'absent', residualPaths: Object.freeze([]) });
+  }
+  const residualPaths = cleanupKnownFiles(paths);
+  if (residualPaths.length > 0) {
+    throw spoolError(
+      'PREFUND_SPOOL_CLEANUP_INCOMPLETE',
+      'MPT spool cleanup未能删除全部当前file artifact',
+      { residualPaths: Object.freeze(residualPaths.slice()) }
+    );
+  }
+  return Object.freeze({ status: 'cleaned', residualPaths: Object.freeze([]) });
 }
 
 module.exports = {

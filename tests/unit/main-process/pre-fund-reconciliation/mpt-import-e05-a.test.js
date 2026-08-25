@@ -25,7 +25,9 @@ const {
   parseMptCandidates
 } = require('../../../../src/main-process/pre-fund-reconciliation/mpt-import/parser-core');
 const {
+  buildHeaderIdentity,
   deriveFileIdentity,
+  jobDirectoryToken,
   mptSpoolPaths
 } = require('../../../../src/main-process/pre-fund-reconciliation/mpt-import/spool-contract');
 const {
@@ -276,12 +278,71 @@ test('fileOperationKey和unitId稳定派生，file目录固定为task staging/jo
     jobId: 'job-1',
     fileIndex: 7
   });
-  assert.equal(paths.fileDir, path.join(tempRoot, 'task/mpt/job-1/file-000007'));
+  assert.equal(
+    paths.fileDir,
+    path.join(tempRoot, `task/mpt/${jobDirectoryToken('job-1')}/file-000007`)
+  );
   assert.equal(path.basename(paths.rowsReady), 'rows.ndjson.ready');
   assert.throws(
     () => mptSpoolPaths({ taskStagingDir: path.join(tempRoot, 'task'), jobId: '../escape', fileIndex: 0 }),
     (error) => error.code === 'PREFUND_SPOOL_CONTRACT_INVALID'
   );
+});
+
+test('writer与cleanup逐层拒绝symlink目录且不越界删除', async (t) => {
+  await t.test('taskStagingDir symlink在创建spool前拒绝', async () => {
+    const filePath = writeInboundFile('MPT_INBOUND_GATEWAY_20260708_701.txt', [inboundRow()]);
+    const outside = path.join(tempRoot, 'outside-staging');
+    const stagingLink = path.join(tempRoot, 'linked-task-staging');
+    fs.mkdirSync(outside);
+    fs.symlinkSync(outside, stagingLink, 'dir');
+    const input = spoolInput(filePath, { taskStagingDir: stagingLink, jobId: 'job-symlink-root' });
+    await assert.rejects(
+      () => writeMptFileSpool(input),
+      (error) => error.code === 'PREFUND_SPOOL_PATH_INVALID'
+        && error.details.invalidPath === stagingLink
+    );
+    assert.equal(fs.existsSync(path.join(outside, 'mpt')), false);
+  });
+
+  await t.test('fileDir symlink cleanup fail closed且不删除外部文件', () => {
+    const filePath = writeInboundFile('MPT_INBOUND_GATEWAY_20260708_702.txt', [inboundRow()]);
+    const input = spoolInput(filePath, { jobId: 'job-symlink-cleanup' });
+    const paths = mptSpoolPaths(input);
+    const outside = path.join(tempRoot, 'outside-cleanup');
+    const outsideArtifact = path.join(outside, 'rows.ndjson.part');
+    fs.mkdirSync(paths.jobDir, { recursive: true });
+    fs.mkdirSync(outside);
+    fs.writeFileSync(outsideArtifact, 'must-survive', 'utf8');
+    fs.symlinkSync(outside, paths.fileDir, 'dir');
+    assert.throws(
+      () => cleanupMptFileSpool(input),
+      (error) => error.code === 'PREFUND_SPOOL_CLEANUP_PATH_INVALID'
+        && error.details.invalidPath === paths.fileDir
+        && error.details.residualPaths.includes(paths.fileDir)
+    );
+    assert.equal(fs.readFileSync(outsideArtifact, 'utf8'), 'must-survive');
+  });
+});
+
+test('jobId目录token对大小写、尾点和设备保留名隔离，cleanup不串扰', async () => {
+  const filePath = writeInboundFile('MPT_INBOUND_GATEWAY_20260708_703.txt', [inboundRow()]);
+  const jobIds = ['CaseJob', 'casejob', 'job', 'job.', 'CON', 'Job:Case'];
+  const inputs = jobIds.map((jobId) => spoolInput(filePath, { jobId }));
+  for (const input of inputs) await writeMptFileSpool(input);
+  const paths = inputs.map((input) => mptSpoolPaths(input));
+  assert.equal(new Set(paths.map((item) => item.jobDir)).size, jobIds.length);
+  for (const item of paths) assert.match(path.basename(item.jobDir), /^job-[a-f0-9]{64}$/);
+  assert.deepEqual(inputs.map((input) => manifestOf(input).jobId), jobIds);
+
+  cleanupMptFileSpool(inputs[0]);
+  cleanupMptFileSpool(inputs[2]);
+  cleanupMptFileSpool(inputs[4]);
+  assert.equal(fs.existsSync(paths[0].manifestReady), false);
+  assert.equal(fs.existsSync(paths[2].manifestReady), false);
+  assert.equal(fs.existsSync(paths[4].manifestReady), false);
+  assert.equal(fs.existsSync(paths[1].manifestReady), true, '大小写不同job不得被串清理');
+  assert.equal(fs.existsSync(paths[3].manifestReady), true, '尾点不同job不得被串清理');
 });
 
 test('Spool success：part先收口、ready三件套、Reader完整回放且计数/行序守恒', async () => {
@@ -468,6 +529,43 @@ test('Reader tamper matrix：manifest/path/symlink/hash/count/header/source全�
     );
   });
 
+  await t.test('零行与全-invalid即使联动重签header也必须锚定真实source', async (headerTest) => {
+    const mutations = [
+      ['sourceBatch', (header) => { header.sourceBatch = 'MPT_INBOUND_20260708_TAMPER'; }],
+      ['sourceType原型键', (header) => { header.sourceType = 'constructor'; }],
+      ['sourceFileSequence', (header) => { header.sourceFileSequence = '999999999999999999'; }]
+    ];
+    for (const [fixtureLabel, rows] of [
+      ['zero', []],
+      ['all-invalid', [inboundRow({ amount: 'bad' })]]
+    ]) {
+      for (const [mutationIndex, [fieldLabel, mutate]] of mutations.entries()) {
+        await headerTest.test(`${fixtureLabel}/${fieldLabel}`, async () => {
+          const suffix = `header-${fixtureLabel}-${fieldLabel}`.replace(/[^A-Za-z0-9-]/g, '-');
+          const filePath = writeInboundFile(
+            `MPT_INBOUND_GATEWAY_20260708_${fixtureLabel === 'zero' ? '610' : '620'}${mutationIndex}.txt`,
+            rows
+          );
+          const input = spoolInput(filePath, { jobId: `job-${suffix}` });
+          await writeMptFileSpool(input);
+          rewriteManifest(input, (manifest) => {
+            mutate(manifest.header);
+            manifest.header.identity = buildHeaderIdentity(manifest.header);
+          });
+          let callbacks = 0;
+          await assert.rejects(
+            () => readAndValidateMptFileSpool(input, {
+              onRow() { callbacks += 1; },
+              onIssue() { callbacks += 1; }
+            }),
+            (error) => error.code === 'PREFUND_SPOOL_HEADER_IDENTITY_INVALID'
+          );
+          assert.equal(callbacks, 0);
+        });
+      }
+    }
+  });
+
   await t.test('source change拒绝', async () => {
     const item = await fixture('207');
     fs.appendFileSync(item.filePath, 'changed');
@@ -590,7 +688,7 @@ test('one-shot Parser Worker真实成功、取消与transport终止不留下伪m
 
   await t.test('真实Worker发布ready spool且结果不携带路径或业务提交字段', async () => {
     const filePath = writeInboundFile('MPT_INBOUND_GATEWAY_20260708_401.txt', [inboundRow()]);
-    const input = spoolInput(filePath, { jobId: 'job-worker-success' });
+    const input = spoolInput(filePath, { jobId: 'WorkerJob.' });
     const worker = new Worker(workerEntry, { workerData: { input } });
     const exitPromise = once(worker, 'exit');
     const [message] = await once(worker, 'message');
@@ -600,6 +698,7 @@ test('one-shot Parser Worker真实成功、取消与transport终止不留下伪m
     assert.deepEqual(Object.keys(message.result), [
       'schemaVersion', 'jobId', 'fileIndex', 'fileOperationKey', 'unitId'
     ]);
+    assert.equal(message.result.jobId, 'WorkerJob.');
     await readAndValidateMptFileSpool(input);
   });
 
