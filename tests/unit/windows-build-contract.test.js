@@ -65,9 +65,49 @@ test('Windows PR 仅跳过 v3.2.1 中间分支 release-check，其余 x64 构建
   );
   assert.match(
     releaseChecksStep,
-    /if: >-\s*\n\s*github\.event_name != 'pull_request' \|\|\s*\n\s*!startsWith\(github\.head_ref, 'codex\/v3\.2\.1-'\) \|\|\s*\n\s*github\.head_ref == 'codex\/v3\.2\.1-r3-release-evidence'/
+    /if: >-\s*\n\s*github\.event_name != 'pull_request' \|\|\s*\n\s*github\.event\.pull_request\.head\.repo\.full_name != github\.repository \|\|\s*\n\s*!startsWith\(github\.head_ref, 'codex\/v3\.2\.1-'\) \|\|\s*\n\s*github\.head_ref == 'codex\/v3\.2\.1-r3-release-evidence'/
   );
   assert.match(releaseChecksStep, /run: npm run release-check/);
+  const shouldRunReleaseChecks = ({
+    eventName,
+    headRef = '',
+    headRepository = '',
+    repository = 'owner/bank-bill-excel-tool'
+  }) => eventName !== 'pull_request'
+    || headRepository !== repository
+    || !headRef.startsWith('codex/v3.2.1-')
+    || headRef === 'codex/v3.2.1-r3-release-evidence';
+  const sameRepository = 'owner/bank-bill-excel-tool';
+  assert.equal(shouldRunReleaseChecks({
+    eventName: 'pull_request',
+    headRef: 'codex/v3.2.1-e04-a-toolbox-single-worker',
+    headRepository: sameRepository,
+    repository: sameRepository
+  }), false, 'same-repo v3.2.1 中间 PR 必须跳过');
+  assert.equal(shouldRunReleaseChecks({
+    eventName: 'pull_request',
+    headRef: 'codex/v3.2.1-r3-release-evidence',
+    headRepository: sameRepository,
+    repository: sameRepository
+  }), true, 'same-repo 最终证据 PR 必须执行');
+  assert.equal(shouldRunReleaseChecks({
+    eventName: 'pull_request',
+    headRef: 'codex/v3.2.1-e04-a-toolbox-single-worker',
+    headRepository: 'fork-owner/bank-bill-excel-tool',
+    repository: sameRepository
+  }), true, 'fork prefix PR 必须执行');
+  assert.equal(shouldRunReleaseChecks({
+    eventName: 'pull_request',
+    headRef: 'feature/windows-build',
+    headRepository: sameRepository,
+    repository: sameRepository
+  }), true, '普通 PR 必须执行');
+  assert.equal(shouldRunReleaseChecks({ eventName: 'push' }), true, 'push 必须执行');
+  assert.equal(
+    shouldRunReleaseChecks({ eventName: 'workflow_dispatch' }),
+    true,
+    'workflow_dispatch 必须执行'
+  );
   assert.match(workflow, /Verify Windows startup process adapter semantics\s*\n\s*env:\s*\n\s*WINDOWS_STARTUP_PROCESS_ADAPTER_REAL_TEST: '1'\s*\n\s*run: node --test tests\/unit\/scripts\/startup-process-adapter\.test\.js/);
   assert.ok(
     workflow.indexOf('Run release checks')
