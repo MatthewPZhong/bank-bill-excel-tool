@@ -10,6 +10,49 @@ const test = require('node:test');
 const ROOT = path.resolve(__dirname, '../..');
 const read = (relativePath) => fs.readFileSync(path.join(ROOT, relativePath), 'utf8');
 
+function extractNsisMacro(source, name) {
+  const startMarker = `!macro ${name}`;
+  const start = source.indexOf(startMarker);
+  assert.notEqual(start, -1, `NSIS macro missing: ${name}`);
+  const end = source.indexOf('!macroend', start);
+  assert.notEqual(end, -1, `NSIS macro end missing: ${name}`);
+  return source.slice(start, end + '!macroend'.length);
+}
+
+function assertSilentInstallerArguments(harness) {
+  const installerFunction = harness.slice(
+    harness.indexOf('function Invoke-SilentInstaller'),
+    harness.indexOf('function Get-SafeSetupFailureDiagnostic')
+  );
+  const argumentListMatch = installerFunction.match(
+    /\$process = Start-Process -FilePath \$SetupPath -ArgumentList @\(\r?\n([\s\S]*?)\r?\n\s*\) -PassThru -Wait -WindowStyle Hidden/
+  );
+  assert.ok(argumentListMatch, 'Setup Start-Process ArgumentList missing');
+  const argumentLines = argumentListMatch[1]
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  assert.deepEqual(argumentLines, [
+    "'/S',",
+    "'/currentuser',",
+    "'--no-desktop-shortcut',",
+    '"/D=$DestinationRoot"'
+  ]);
+  assert.doesNotMatch(argumentLines[3], /`"/, '/D argument must not contain embedded quotes');
+}
+
+function assertPerUserDestinationOverride(perUserMacro, getDParameterMacro) {
+  assert.match(perUserMacro, /StrCpy \$installMode CurrentUser/);
+  assert.match(perUserMacro, /SetShellVarContext current/);
+  assert.match(
+    perUserMacro,
+    /!insertmacro GetDParameter \$R0\s*\r?\n\s*\$\{If\} \$R0 != ""\s*\r?\n\s*StrCpy \$INSTDIR \$R0\s*\r?\n\s*\$\{endif\}\s*\r?\n\s*!macroend$/
+  );
+  assert.match(getDParameterMacro, /\$\{StdUtils\.GetAllParameters\} \$R8 "0"/);
+  assert.match(getDParameterMacro, /StrCpy \$R9 \$R8 "" \$R6/);
+  assert.match(getDParameterMacro, /StrCpy \$\{outVar\} \$R9/);
+}
+
 test('Windows PR 对任意目标分支跑 release-check、x64 完整构建与 check-dist', () => {
   const workflow = read('.github/workflows/build-windows.yml');
   assert.match(workflow, /workflow_dispatch:/);
@@ -92,10 +135,7 @@ test('Windows assisted per-user installer 锁定 NSIS access-violation 修复版
   const manifest = JSON.parse(read('package.json'));
   const lock = JSON.parse(read('package-lock.json'));
   const multiUserInstaller = read('node_modules/app-builder-lib/templates/nsis/multiUser.nsh');
-  const perUserMacro = multiUserInstaller.slice(
-    multiUserInstaller.indexOf('!macro setInstallModePerUser'),
-    multiUserInstaller.indexOf('!macroend', multiUserInstaller.indexOf('!macro setInstallModePerUser'))
-  );
+  const perUserMacro = extractNsisMacro(multiUserInstaller, 'setInstallModePerUser');
 
   assert.equal(manifest.devDependencies['electron-builder'], '^26.15.7');
   assert.equal(lock.packages['node_modules/electron-builder'].version, '26.15.7');
@@ -113,11 +153,18 @@ test('packaged background canary 仅在 GitHub-hosted Windows 的 RUNNER_TEMP �
   const harness = read('scripts/run-windows-packaged-background-canary.ps1');
   const manifest = JSON.parse(read('package.json'));
   const multiUserInstaller = read('node_modules/app-builder-lib/templates/nsis/multiUser.nsh');
+  const perUserMacro = extractNsisMacro(multiUserInstaller, 'setInstallModePerUser');
+  const getDParameterMacro = extractNsisMacro(multiUserInstaller, 'GetDParameter');
   const { UUID } = require('builder-util-runtime');
   const nsisTarget = read('node_modules/app-builder-lib/out/targets/nsis/NsisTarget.js');
   const electronBuilderNamespace = UUID.parse('50e065bc-3134-11e6-9bab-38c9862bdaf3');
   const expectedUninstallRegistryKey = UUID.v5(manifest.build.appId, electronBuilderNamespace);
   const effectiveUninstallDisplayName = `${manifest.build.productName} ${manifest.version}`;
+  assert.equal(manifest.build.nsis.oneClick, false);
+  assert.notEqual(manifest.build.nsis.perMachine, true);
+  assert.notEqual(manifest.build.nsis.unicode, false);
+  assert.equal(manifest.build.productName, '清结算小助手');
+  assert.match(manifest.build.productName, /[^\x00-\x7F]/);
   assert.ok(
     manifest.build.nsis.uninstallDisplayName === undefined
       || manifest.build.nsis.uninstallDisplayName === ''
@@ -171,7 +218,7 @@ test('packaged background canary 仅在 GitHub-hosted Windows 的 RUNNER_TEMP �
   assert.doesNotMatch(harness, /Remove-Item[^\n]*(?:Registry::|CurrentVersion\\Uninstall|CommonPrograms|SpecialFolder)/);
   assert.match(harness, /BACKGROUND_EXECUTION_PACKAGED_CANARY = '1'/);
   assert.match(harness, /BACKGROUND_EXECUTION_PACKAGED_CANARY_REPORT_PATH = \$ReportPath/);
-  assert.match(harness, /Invoke-SilentInstaller[\s\S]*'\/S',[\s\S]*'\/currentuser',[\s\S]*'--no-desktop-shortcut',[\s\S]*"\/D=\$DestinationRoot"/);
+  assertSilentInstallerArguments(harness);
   const installerFunction = harness.slice(
     harness.indexOf('function Invoke-SilentInstaller'),
     harness.indexOf('function Get-SafeSetupFailureDiagnostic')
@@ -206,9 +253,34 @@ test('packaged background canary 仅在 GitHub-hosted Windows 的 RUNNER_TEMP �
     harness,
     /\$setupExitCode = Invoke-SilentInstaller[\s\S]*Get-SafeSetupFailureDiagnostic[\s\S]*BACKGROUND_EXECUTION_PACKAGED_CANARY_SETUP_DIAGNOSTIC=\$setupDiagnostic[\s\S]*Throw-SafeFailure 'SETUP_NONZERO_EXIT'/
   );
-  assert.match(
-    multiUserInstaller,
-    /!insertmacro GetDParameter \$R0[\s\S]*\$\{If\} \$R0 != ""[\s\S]*StrCpy \$INSTDIR \$R0/
+  assertPerUserDestinationOverride(perUserMacro, getDParameterMacro);
+  const dNotLast = harness.replace(
+    /([ \t]*"\/D=\$DestinationRoot")(\r?\n)([ \t]*\) -PassThru -Wait)/,
+    (_match, dArgument, newline, invocationEnd) => (
+      `${dArgument},${newline}      '--unexpected-after-d'${newline}${invocationEnd}`
+    )
+  );
+  assert.notEqual(dNotLast, harness);
+  assert.throws(() => assertSilentInstallerArguments(dNotLast), { code: 'ERR_ASSERTION' });
+
+  const perUserOverrideRemoved = perUserMacro.replace(
+    /\s*!insertmacro GetDParameter \$R0\s*\r?\n\s*\$\{If\} \$R0 != ""\s*\r?\n\s*StrCpy \$INSTDIR \$R0\s*\r?\n\s*\$\{endif\}/,
+    ''
+  );
+  assert.notEqual(perUserOverrideRemoved, perUserMacro);
+  assert.throws(
+    () => assertPerUserDestinationOverride(perUserOverrideRemoved, getDParameterMacro),
+    { code: 'ERR_ASSERTION' }
+  );
+
+  const truncatedDestinationRemainder = getDParameterMacro.replace(
+    'StrCpy $R9 $R8 "" $R6',
+    'StrCpy $R9 $R8 8 $R6'
+  );
+  assert.notEqual(truncatedDestinationRemainder, getDParameterMacro);
+  assert.throws(
+    () => assertPerUserDestinationOverride(perUserMacro, truncatedDestinationRemainder),
+    { code: 'ERR_ASSERTION' }
   );
   assert.match(harness, /\$installContainer = Join-Path \$workRoot 'installed'/);
   assert.match(

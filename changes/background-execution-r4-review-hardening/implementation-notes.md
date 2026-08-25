@@ -16,7 +16,7 @@
 | Receipt 仅增加普通 `run_id` 索引 | 一个 run 多 receipt 当前由 Inspector 检测，未授权唯一约束 | `UNIQUE(run_id)` | 只优化查询计划，不改变幂等/资金数据模型 |
 | Canary 新增 safe code `CANARY_PROCESS_EXITED_BEFORE_REPORT` | 报告前进程退出是可观测失败，现有隐私边界禁止采集 stdout/stderr | 继续等待统一报 report timeout；采集完整进程输出 | 快速、稳定、无敏感输出 |
 | launcher 退出后给 report 固定 2 秒宽限，并保留首个 canary safe code | 代码审查确认 Electron launcher 可先退出；#175 首次 Windows CI 另行证明二次卸载错误会把首错覆盖成 `UNINSTALL_CLEANUP_FAILED` | 继续立即判失败；恢复完整 180 秒等待；让 cleanup 覆盖首错 | 兼容 launcher hand-off，同时保持有界等待和无敏感输出；cleanup 仅追加固定 safe diagnostic |
-| NSIS `/D=` 只传 owned install container，实际安装根固定推导为 `container/productName` | assisted installer 模板在目标中缺少 `${APP_FILENAME}` 时负责追加产品目录；最新 CI 已证明该选择不是 `SETUP_NONZERO_EXIT` 的充分根因 | 继续把最终 Unicode 产品目录直接作为 `/D=`；忽略 Setup 非零退出 | 保持实际安装、选择、卸载和身份审计根不变；该布局选择继续保留，但不再作为 CI 根因结论 |
+| NSIS `/D=` 直接传 owned exact final install root `container/productName` | `/S` 不执行 assisted page callback；26.15.7 per-user `GetDParameter` 会将 `/D=` 的完整余串原样赋给 `$INSTDIR` | 只传 container 并依赖 `instFilesPre` 追加产品目录；忽略 Setup 非零退出 | Setup、installed executable、uninstall 与 exact identity 审计共用唯一安装根；保留 Unicode 产品名、assisted/per-user 安装和失败关闭 |
 | Setup 非零仍 fail closed，并额外输出有界诊断 | #175 第三次真实 Windows 仍只有聚合码 `SETUP_NONZERO_EXIT`；完整 stdout/stderr 或路径违反隐私边界，继续猜参数缺少证据 | 忽略非零退出；打印任意异常、路径或 installer 输出；继续无证据改安装参数 | 主 safe code 不变；标准 1/2 保留固定枚举，非标准退出仅输出 8 位 32-bit hex，另带安装根状态与精确 Registry 身份固定枚举 |
 | 修正冻结 TechDoc 并重建 published report/checksum | 当前 runtime 的唯一物理表为 `vcc_op_calc_runs`，包完整性记录包含 TechDoc | 新建 `vcc_op_runs` 别名表；只改文档而留下失配 hash | 文档与实现恢复一致，历史 manifest 保持其显式 non-normative 含义 |
 
@@ -33,7 +33,7 @@
 | --- | --- | --- | --- | --- |
 | 在 #174 组合 HEAD 直接重生冻结包 published validator report | 先恢复历史 PASS report，再在其原始 provenance HEAD `f7c4d5aa` 上叠加单行 TechDoc 勘误重跑 | validator 将 #165 的 Main/TaskPolicy source hash 与 60 条 call-site 行号冻结；后续 PR 栈会按设计触发 provenance drift，和 TechDoc 内容无关 | 不更新 authority/action manifest，不把后续代码漂移冒充合同失败；修正文档仍须生成真实 29/29 report 与 checksum | 是 |
 | PR #175 从旧堆叠基线直接等待 GitHub 合并 | PR base 改为 `v3.2.0` 后，将最新 `origin/v3.2.0`（`21181432`）合入 hardening head | #168～#174 已按序合并，旧堆叠拓扑在迁移测试处产生内容冲突 | 仅组合基线的显式关闭保护与本 PR 的 non-unique `run_id` 索引断言；相对新基线的净改动仍为原 13 个 hardening 文件，不改变产品合同 | 不适用；无行为偏差 |
-| R3 repair 将最终产品目录直接作为 NSIS `/D=` | R4 CI repair 改为把 owned ASCII container 作为 `/D=`，并继续用 `container/productName` 作为唯一实际安装根 | 当时以两次 Windows 失败和模板追加行为形成待验证假设；run `32794520190` 在 ASCII container 下仍同样失败，已反证“Unicode `/D=` 是根因”的归因 | 安装结果、产品身份、卸载边界或 evidence 意义未变；保留较窄参数布局，但后续诊断不得继续依赖该归因 | 不适用；内部 harness 历史偏差已更正 |
+| R3 repair 将最终产品目录直接作为 NSIS `/D=` | 历史 R4 CI repair 曾改为 owned ASCII container；本次 follow-up 已 supersede 该 container 方案，当前合同恢复为 exact final root `container/productName` | run `32794520190` 反证“Unicode `/D=` 是根因”；run `32809372865` 的无 safeCode 失败与 Setup 落在 container、harness 却在其不存在的 productName 子目录选取 executable 一致 | container-only 只作为已被取代的历史偏差保留；产品身份、卸载边界、失败关闭与 evidence 语义不变 | 不适用；内部 harness 历史偏差已更正 |
 
 ## Evidence
 
@@ -183,7 +183,7 @@
 | 检查 | 结果 | 证明/边界 |
 | --- | --- | --- |
 | GitHub Actions run `32809372865` / build job `97692416380` | smoke-test SUCCESS；packaged canary 约 14 秒后仅输出 `CANARY_HARNESS_FAILED`，无 setup diagnostic、cleanup diagnostic 或任意异常文本 | 失败是 harness 无 safeCode 路径，不得依赖日志中不存在的隐藏细节 |
-| 根因定向合同测试 | `node --test tests/unit/windows-build-contract.test.js`：`5 PASS / 2 Windows-only SKIP`，0 fail | 锁定 26.15.7 `/D` exact-root 模板、harness 传 final root，并禁止退回 container |
+| 根因定向合同测试 | `node --test tests/unit/windows-build-contract.test.js`：`5 PASS / 2 Windows-only SKIP`，0 fail | 锁定 assisted/per-user/Unicode 配置、Setup 仅有固定四参且 `/D` 为最后无嵌入引号参数、26.15.7 per-user exact override 与完整 `/D` 余串；三种 in-memory mutation 均被拒绝 |
 | 最终定向回归与静态门禁 | 4 个 hardening test files：`71 PASS / 2 Windows-only SKIP`；目标 ESLint、`git diff --check` PASS | 安装根合同、资源生命周期、Parser 取消与资金 receipt 回归均通过；本机不伪造 Windows 动态结果 |
 | 最终完整门禁 | `npm run release-check` PASS：lint/smoke PASS，unit `6018/6021`（0 fail、3 skip），integration `51/51` scripts / `2455/2455` assertions | 核心修复和删除不可达防御后全仓再验证；未运行 `check-vars`/`scan:vars` |
 | 冻结合同包与最终变更面 | checksum `69/69 PASS`；纯计时 `rules/integration-test-policy.md` 生成差异已恢复，最终仅 harness、Windows contract test 和本记录 3 文件 | 未改 `src/`、workflow、package/lock、业务/资金/恢复合同或 production gate |
@@ -195,10 +195,10 @@
 - 兼容性：未改 Renderer/public IPC、production gate、错误 DTO、operation identity 或 Receipt 唯一性；数据库变更是幂等的 non-unique 加法索引。
 - 资金红线：金额、方向、月份、币种、begin/end OP 与 run/files/receipt 原子性定向测试均通过；既有 exact Main owner 和人工签字 gate 仍为 `PENDING_HUMAN_REVIEW`，本 PR 不代替人工复核。
 - 平台盲区：macOS 无法执行真实 Windows PowerShell 动态探针；静态合同已通过，动态证据留给 GitHub-hosted Windows CI。
-- CI 失败修复边界：仅调整 packaged canary harness 的 launcher/report 等待、错误优先级和有界 Setup 诊断；未改产品代码、金额/币种/身份/幂等/恢复语义、production enablement 或人工资金红线。
+- CI 失败修复边界：仅调整 packaged canary harness 的 launcher/report 等待、错误优先级、有界 Setup 诊断和 silent `/D` exact final install-root alignment；未改产品代码、金额/币种/身份/幂等/恢复语义、production enablement 或人工资金红线。
 - RSS 盲区：独立中位容差只覆盖 MB rounding 的理论传播上界；paired budget/linear margin 与每样本 150MB ceiling 仍严格。稳定 `48→97`、`49→98`、`32→73/96`、错配及线性反例均由 self-check/单测锁定为 FAIL；未按 Windows、run ID 或当前样本硬编码。
 - NSIS 依赖盲区：本 follow-up 不改安装模式或放宽 canary，只把同 major 构建链提升到已移除 `System::Store` 竞态的 `26.15.7`；本机静态/全仓门禁不能替代真实 Windows 安装，故新 CI 仍是 merge 前硬证据。
-- Silent install-root 盲区：`/S` 不执行 page callback，harness 现将带 exact productName 的 final root 直接传给 `/D`；不存在子目录 fallback，仍保持失败关闭。
+- Silent install-root 盲区：`/S` 不执行 page callback，harness 现将带 exact Unicode productName 的 final root 直接传给 `/D`；合同测试锁定 assisted `oneClick=false`、per-user、Unicode NSIS、固定四个 ArgumentList 且 `/D` 最后/无嵌入引号，并分别锁定 per-user override 与完整 `/D` 余串；三个 in-memory mutation 证明追加 `/D` 后续参数、删除 per-user override 或截断含空格余串均会被拒绝。不存在子目录 fallback，仍保持失败关闭。
 
 ## Remaining Unknowns
 
