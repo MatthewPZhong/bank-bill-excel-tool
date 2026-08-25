@@ -63,6 +63,41 @@
 | #175 GitHub CI run `32799419428` / build job `97662624541` | smoke-test SUCCESS；build 固定诊断为 `EXIT_OTHER_ROOT_ABSENT_IDENTITY_ABSENT`，随后保持 `SETUP_NONZERO_EXIT` fail closed | 排除产品目录、Registry 身份和旧版卸载路径；失败发生在安装落地前，下一 probe 只需把非标准进程码细化为安全 32-bit hex |
 | Setup 精确 32-bit 退出码 probe 验证 | `windows-build-contract`：`4 PASS / 2 Windows-only SKIP`；4 个 hardening files：`70 PASS / 2 Windows-only SKIP`；`npm run release-check` PASS（unit `6017/6020`、integration `51/51` scripts / `2455/2455` assertions）；合同包 checksum `69/69 PASS`；`git diff --check` PASS | 只细化失败诊断，不改变 installer 行为、主 safe code、业务/资金/恢复语义、production gate 或冻结合同包；仍未调用 `check-vars`/`scan:vars` |
 
+## PR #175 Windows RSS 独立中位组合 Follow-up（2026-08-25）
+
+### Task Brief
+
+- Goal：修复 GitHub-hosted Windows 上 RSS 三组成对样本因独立中位数组合产生的 1MB 假越界，不放宽稳定预算越界、精确线性或 150MB 硬上限。
+- Context：run `32802238314` 的 50 个其他 integration scripts 均 PASS；唯一失败为 `toolbox-large-split-multi-sheet` `30/31`，样本 `[48,49,48]→[96,97,97]MB`，paired effective-budget margin 中位数 `0MB`、paired linear margin 中位数 `-48MB`，但独立中位组合 `48→97MB` 相对 96MB 预算超 1MB。
+- Constraints：不改生产 `src/`、24MB relative noise、57MB absolute delta、8/32MB low-signal、0.5 fraction、150MB hard cap、业务/资金/恢复合同或 production gate；不运行 `check-vars`/`scan:vars`。
+- Done when：本次交错样本 PASS；稳定 `48→97`、`49→98`、`32→73/96`、paired mismatch、精确线性、非法输入与任一 150MB spike 仍 FAIL；真实 50万/150万链、完整 `release-check`、合同包 checksum 与 diff review PASS。
+
+### Unknowns Register
+
+| 未知 | 类型 | 影响 | 处理 | 最便宜验证 | 当前决定 |
+| --- | --- | --- | --- | --- | --- |
+| 失败是否来自 #175 产品/安装器回归 | 归因 | 高 | PROBE | 对照 head diff、51 条 integration 结果与 RSS 样本 | 否；当前 head 的新增行为只在 canary harness/tests/docs，RSS 生产扫描路径未变，50 条其他 integration PASS |
+| 能否不抬预算而消除独立中位丢失配对关系的假失败 | 统计门禁 | 高 | PROBE | 回放本次交错样本、稳定越界与 paired mismatch | 仅对独立中位 budget margin 应用 `Math.round(MB)` 的理论传播误差；paired budget/linear margin 保持严格 |
+| 取整容差是否会让稳定越界或线性增长通过 | 回归边界 | 高 | PROBE | 稳定 `48→97`、`49→98`、`32→73/96` 与 `[20,40,100]→[60,120,20]` | 均继续 FAIL；单样本/稳定样本无法借容差越界，因为 paired budget margin 仍必须 `<=0` |
+
+无 BLOCK 问题；该修复不改变产品、数据、资金或公开接口。
+
+### Decision
+
+| 决策 | 原因/证据 | 放弃方案与边界 |
+| --- | --- | --- |
+| 独立中位 budget margin 允许由 `Math.round(MB)` 推导的最大误差；relative 模型在 rowsRatio=3 时为 `0.5×(1+3×0.5)=1.25MB`，absolute 模型为 1MB | tier1/tier2 各自到 MB 仅有 ±0.5MB 量化误差；独立取中位会丢失 pair，但单调 rounding 与奇数中位仍有有界误差 | 不增加 24/57MB，不提高 150MB，不按平台或 run ID 特判 |
+| paired effective-budget margin 中位数继续严格 `<=0`，paired linear margin 继续 `<0`；每个原始样本继续 `<150MB` | 当前三对 margin `[0,-0.5,+1]` 中位数 0，说明多数 pair 未越预算；稳定 `48→97` 的 paired margin 为 1，仍 FAIL | 不让 paired 规则普遍覆盖独立中位大幅失败；独立超差仍受 1/1.25MB 有界限制 |
+
+### Evidence
+
+| 检查 | 结果 | 证明/边界 |
+| --- | --- | --- |
+| GitHub Actions run `32802238314` / smoke job `97665243096` | unit 全 PASS；integration 仅 RSS 脚本 `30/31`，其余 50 scripts PASS；build 因 smoke dependency SKIPPED | 精确失败样本与单一失败面可追溯；失败快照未合并 |
+| RSS 确定性单测 + ESLint | `6/6 PASS`；目标两文件 ESLint PASS；`git diff --check` PASS | 交错样本 PASS，稳定越界、线性、错配、硬上限与非法输入继续 fail-closed |
+| RSS 默认真实链 | `31/31 PASS`；50万/150万行为 `93→137MB`，effective budget 150MB，paired/独立 margin `-13MB` | 真 multi-sheet、worker、readback 与内存门禁保持；未依赖新容差制造 PASS |
+| RSS 修复完整门禁 | `npm run release-check` PASS：lint/smoke PASS，unit `6017/6020`（0 fail、3 skip），integration `51/51` scripts / `2455/2455` assertions；目标 RSS 脚本在全链中再次 `31/31 PASS`；合同包 checksum `69/69 PASS`；`git diff --check` PASS | 产品、业务/资金/恢复语义、production gate 与冻结合同包均未变化；仍未运行 `check-vars`/`scan:vars` |
+
 ## Final Blindspot Review
 
 - 生命周期：正常、错误、取消和重复 `close/terminate` 均收敛到同一个 termination barrier；Supervisor 先等 transport cleanup，再释放 CompoundLease。
@@ -71,6 +106,7 @@
 - 资金红线：金额、方向、月份、币种、begin/end OP 与 run/files/receipt 原子性定向测试均通过；既有 exact Main owner 和人工签字 gate 仍为 `PENDING_HUMAN_REVIEW`，本 PR 不代替人工复核。
 - 平台盲区：macOS 无法执行真实 Windows PowerShell 动态探针；静态合同已通过，动态证据留给 GitHub-hosted Windows CI。
 - CI 失败修复边界：仅调整 packaged canary harness 的 launcher/report 等待、错误优先级和有界 Setup 诊断；未改产品代码、金额/币种/身份/幂等/恢复语义、production enablement 或人工资金红线。
+- RSS 盲区：独立中位容差只覆盖 MB rounding 的理论传播上界；paired budget/linear margin 与每样本 150MB ceiling 仍严格。稳定 `48→97`、`49→98`、`32→73/96`、错配及线性反例均由 self-check/单测锁定为 FAIL；未按 Windows、run ID 或当前样本硬编码。
 
 ## Remaining Unknowns
 
@@ -78,4 +114,5 @@
 | --- | --- | --- | --- |
 | Windows-only 提前退出动态探针 | PROBE | GitHub-hosted Windows CI | 本地静态/跨平台测试通过后可提 Draft；合并前需 CI PASS |
 | Setup 非零的真实退出码与失败时安装/Registry 落地阶段 | PROBE | 固定枚举诊断推送后的 GitHub-hosted Windows CI | 当前不得把非零当成功；诊断收敛前不合并 |
+| RSS 取整组合修复后的 Windows 结果 | PROBE | 新 head 的 GitHub-hosted Windows CI；必须先通过完整 smoke/release-check 才进入 packaged build | 阻断 Ready/merge，不阻断本地修复提交 |
 | 真实 Windows Setup/portable packaged canary 与资金红线签字 | BLOCK | 既有 R3 人工/Windows gate | 本 PR 不改变其 `PENDING_HUMAN_REVIEW` 状态，仍阻塞 production enablement |
