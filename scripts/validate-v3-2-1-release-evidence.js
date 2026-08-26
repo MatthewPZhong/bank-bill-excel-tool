@@ -25,9 +25,9 @@ const E04_NOTES_SOURCE =
 const E05_BENCHMARK_SOURCE =
   'changes/background-execution-e05-c-prefund-parser-pool/benchmark-evidence.json';
 const WINDOWS_BUILD_WORKFLOW_SOURCE = '.github/workflows/build-windows.yml';
-const FINAL_RELEASE_BRANCH = 'codex/v3.2.1-r3-release-evidence';
-const PENDING_REVIEW_HARDENING_BRANCH = 'codex/v3.2.1-r4-review-hardening';
-const FINAL_RELEASE_BASE = 'codex/v3.2.1-e05-c-prefund-parser-pool';
+const PREVIOUS_FINAL_RELEASE_BRANCH = 'codex/v3.2.1-r3-release-evidence';
+const FINAL_RELEASE_BRANCH = 'codex/v3.2.1-r4-review-hardening';
+const FINAL_RELEASE_BASE = 'codex/v3.2.1-r3-release-evidence';
 const EXACT_BASE = '4598b9c67787ef1736831a186a199bd6fe9ae626';
 const EXPECTED_CHECKOUT_REF =
   "ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}";
@@ -46,11 +46,11 @@ const EXPECTED_RELEASE_CHECK_CONDITION =
   "!startsWith(github.head_ref, 'codex/v3.2.1-')) )";
 const EXPECTED_UNAUTHORIZED_FINAL_CONDITION =
   "( ( github.event_name == 'pull_request' && " +
-  `( github.head_ref == '${FINAL_RELEASE_BRANCH}' || ` +
-  `github.head_ref == '${PENDING_REVIEW_HARDENING_BRANCH}' ) ) || ` +
+  `( github.head_ref == '${PREVIOUS_FINAL_RELEASE_BRANCH}' || ` +
+  `github.head_ref == '${FINAL_RELEASE_BRANCH}' ) ) || ` +
   "( github.event_name == 'workflow_dispatch' && " +
-  `( github.ref_name == '${FINAL_RELEASE_BRANCH}' || ` +
-  `github.ref_name == '${PENDING_REVIEW_HARDENING_BRANCH}' ) ) ) && ` +
+  `( github.ref_name == '${PREVIOUS_FINAL_RELEASE_BRANCH}' || ` +
+  `github.ref_name == '${FINAL_RELEASE_BRANCH}' ) ) ) && ` +
   "!( github.event_name == 'pull_request' && " +
   `github.head_ref == '${FINAL_RELEASE_BRANCH}' && ` +
   `github.base_ref == '${FINAL_RELEASE_BASE}' && ` +
@@ -374,7 +374,7 @@ const EXPECTED_RELEASE_CHECK = Object.freeze({
   manualRerunAllowed: false,
   workflowDispatchRerunAllowed: false,
   automaticRequiredCi: {
-    attemptNumber: 2,
+    attemptNumber: 3,
     status: 'PENDING_REMOTE_REQUIRED_CI',
     authorization: 'PR_OPENING_ONLY_WAIVER',
     workflowSource: WINDOWS_BUILD_WORKFLOW_SOURCE,

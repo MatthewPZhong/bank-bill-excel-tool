@@ -66,7 +66,7 @@ test('local release-check attempt #1失败不能被改写为PASS或被组件结�
   assert.ok(errorPaths(result).includes('/releaseCheckEvidence'));
 });
 
-test('remote required CI attempt #2只能在final PR target base/exact head执行一次且保持pending', () => {
+test('remote required CI attempt #3只能在R4 final PR target base/exact head执行一次且保持pending', () => {
   const snapshot = loadSnapshot();
   const automaticCi = snapshot.releaseCheckEvidence.automaticRequiredCi;
   automaticCi.status = 'PASS';

@@ -75,8 +75,8 @@ test('Windows PR final release-check只允许target base的same-repo opened首�
     "( github.ref_name == 'codex/v3.2.1-r3-release-evidence' || " +
     "github.ref_name == 'codex/v3.2.1-r4-review-hardening' ) ) ) && " +
     "!( github.event_name == 'pull_request' && " +
-    "github.head_ref == 'codex/v3.2.1-r3-release-evidence' && " +
-    "github.base_ref == 'codex/v3.2.1-e05-c-prefund-parser-pool' && " +
+    "github.head_ref == 'codex/v3.2.1-r4-review-hardening' && " +
+    "github.base_ref == 'codex/v3.2.1-r3-release-evidence' && " +
     'github.event.pull_request.head.repo.full_name == github.repository && ' +
     "github.event.action == 'opened' && github.run_attempt == 1 )");
   assert.match(guardStep, /Unauthorized v3\.2\.1 final release-gate invocation[\s\S]*exit 1/);
@@ -95,14 +95,14 @@ test('Windows PR final release-check只允许target base的same-repo opened首�
     .join(' ');
   assert.equal(normalizedCondition,
     "( github.event_name == 'pull_request' && " +
-    "github.head_ref == 'codex/v3.2.1-r3-release-evidence' && " +
-    "github.base_ref == 'codex/v3.2.1-e05-c-prefund-parser-pool' && " +
+    "github.head_ref == 'codex/v3.2.1-r4-review-hardening' && " +
+    "github.base_ref == 'codex/v3.2.1-r3-release-evidence' && " +
     'github.event.pull_request.head.repo.full_name == github.repository && ' +
     "github.event.action == 'opened' && github.run_attempt == 1 ) || " +
     "( (github.event_name != 'pull_request' || " +
-    "github.head_ref != 'codex/v3.2.1-r3-release-evidence') && " +
+    "github.head_ref != 'codex/v3.2.1-r4-review-hardening') && " +
     "(github.event_name != 'workflow_dispatch' || " +
-    "github.ref_name != 'codex/v3.2.1-r3-release-evidence') && " +
+    "github.ref_name != 'codex/v3.2.1-r4-review-hardening') && " +
     "(github.event_name != 'pull_request' || " +
     'github.event.pull_request.head.repo.full_name != github.repository || ' +
     "!startsWith(github.head_ref, 'codex/v3.2.1-')) )");
@@ -117,8 +117,8 @@ test('Windows PR final release-check只允许target base的same-repo opened首�
     headRepository = '',
     repository = 'owner/bank-bill-excel-tool'
   }) => {
-    const finalBranch = 'codex/v3.2.1-r3-release-evidence';
-    const finalBase = 'codex/v3.2.1-e05-c-prefund-parser-pool';
+    const finalBranch = 'codex/v3.2.1-r4-review-hardening';
+    const finalBase = 'codex/v3.2.1-r3-release-evidence';
     if (eventName === 'pull_request' && headRef === finalBranch) {
       return baseRef === finalBase
         && headRepository === repository
@@ -140,10 +140,10 @@ test('Windows PR final release-check只允许target base的same-repo opened首�
     headRepository = '',
     repository = 'owner/bank-bill-excel-tool'
   }) => {
-    const finalBranch = 'codex/v3.2.1-r3-release-evidence';
-    const pendingReviewHardeningBranch = 'codex/v3.2.1-r4-review-hardening';
-    const finalBase = 'codex/v3.2.1-e05-c-prefund-parser-pool';
-    const finalBranches = new Set([finalBranch, pendingReviewHardeningBranch]);
+    const previousFinalBranch = 'codex/v3.2.1-r3-release-evidence';
+    const finalBranch = 'codex/v3.2.1-r4-review-hardening';
+    const finalBase = 'codex/v3.2.1-r3-release-evidence';
+    const finalBranches = new Set([previousFinalBranch, finalBranch]);
     const finalInvocation = (eventName === 'pull_request' && finalBranches.has(headRef)) ||
       (eventName === 'workflow_dispatch' && finalBranches.has(refName));
     const authorized = eventName === 'pull_request' && headRef === finalBranch &&
@@ -163,8 +163,8 @@ test('Windows PR final release-check只允许target base的same-repo opened首�
   const authorized = {
     eventName: 'pull_request',
     action: 'opened',
-    headRef: 'codex/v3.2.1-r3-release-evidence',
-    baseRef: 'codex/v3.2.1-e05-c-prefund-parser-pool',
+    headRef: 'codex/v3.2.1-r4-review-hardening',
+    baseRef: 'codex/v3.2.1-r3-release-evidence',
     headRepository: sameRepository,
     repository: sameRepository
   };
@@ -173,7 +173,7 @@ test('Windows PR final release-check只允许target base的same-repo opened首�
   const wrongBase = {
     eventName: 'pull_request',
     action: 'opened',
-    headRef: 'codex/v3.2.1-r3-release-evidence',
+    headRef: 'codex/v3.2.1-r4-review-hardening',
     baseRef: 'main',
     headRepository: sameRepository,
     repository: sameRepository
@@ -183,8 +183,8 @@ test('Windows PR final release-check只允许target base的same-repo opened首�
   const synchronize = {
     eventName: 'pull_request',
     action: 'synchronize',
-    headRef: 'codex/v3.2.1-r3-release-evidence',
-    baseRef: 'codex/v3.2.1-e05-c-prefund-parser-pool',
+    headRef: 'codex/v3.2.1-r4-review-hardening',
+    baseRef: 'codex/v3.2.1-r3-release-evidence',
     headRepository: sameRepository,
     repository: sameRepository
   };
@@ -196,8 +196,8 @@ test('Windows PR final release-check只允许target base的same-repo opened首�
     eventName: 'pull_request',
     action: 'opened',
     runAttempt: 2,
-    headRef: 'codex/v3.2.1-r3-release-evidence',
-    baseRef: 'codex/v3.2.1-e05-c-prefund-parser-pool',
+    headRef: 'codex/v3.2.1-r4-review-hardening',
+    baseRef: 'codex/v3.2.1-r3-release-evidence',
     headRepository: sameRepository,
     repository: sameRepository
   };
@@ -206,8 +206,8 @@ test('Windows PR final release-check只允许target base的same-repo opened首�
   const forkFinal = {
     eventName: 'pull_request',
     action: 'opened',
-    headRef: 'codex/v3.2.1-r3-release-evidence',
-    baseRef: 'codex/v3.2.1-e05-c-prefund-parser-pool',
+    headRef: 'codex/v3.2.1-r4-review-hardening',
+    baseRef: 'codex/v3.2.1-r3-release-evidence',
     headRepository: 'fork-owner/bank-bill-excel-tool',
     repository: sameRepository
   };
@@ -230,23 +230,23 @@ test('Windows PR final release-check只允许target base的same-repo opened首�
     '普通push不得被final guard拒绝');
   const finalDispatch = {
     eventName: 'workflow_dispatch',
-    refName: 'codex/v3.2.1-r3-release-evidence'
+    refName: 'codex/v3.2.1-r4-review-hardening'
   };
   assert.equal(shouldRunReleaseChecks(finalDispatch), false, 'final workflow_dispatch 必须跳过');
   assert.equal(shouldRejectUnauthorizedFinal(finalDispatch), true,
     'final workflow_dispatch必须稳定FAIL');
-  const pendingReviewHardening = {
+  const previousFinal = {
     eventName: 'pull_request',
     action: 'opened',
-    headRef: 'codex/v3.2.1-r4-review-hardening',
-    baseRef: 'codex/v3.2.1-r3-release-evidence',
+    headRef: 'codex/v3.2.1-r3-release-evidence',
+    baseRef: 'codex/v3.2.1-e05-c-prefund-parser-pool',
     headRepository: sameRepository,
     repository: sameRepository
   };
-  assert.equal(shouldRunReleaseChecks(pendingReviewHardening), false,
-    '未授权R4不得运行release-check');
-  assert.equal(shouldRejectUnauthorizedFinal(pendingReviewHardening), true,
-    '未授权R4必须在checkout前稳定FAIL');
+  assert.equal(shouldRunReleaseChecks(previousFinal), false,
+    '旧R3 final不得再次运行release-check');
+  assert.equal(shouldRejectUnauthorizedFinal(previousFinal), true,
+    '旧R3 final必须在checkout前稳定FAIL');
   assert.equal(
     shouldRunReleaseChecks({ eventName: 'workflow_dispatch', refName: 'feature/windows-build' }),
     true,
