@@ -66,7 +66,7 @@ test('local release-check attempt #1失败不能被改写为PASS或被组件结�
   assert.ok(errorPaths(result).includes('/releaseCheckEvidence'));
 });
 
-test('remote required CI attempt #2只能在final PR exact head自动执行一次且保持pending', () => {
+test('remote required CI attempt #2只能在final PR target base/exact head执行一次且保持pending', () => {
   const snapshot = loadSnapshot();
   const automaticCi = snapshot.releaseCheckEvidence.automaticRequiredCi;
   automaticCi.status = 'PASS';
@@ -76,6 +76,7 @@ test('remote required CI attempt #2只能在final PR exact head自动执行一�
   automaticCi.sameRepositoryOnly = false;
   automaticCi.runAttempt = 2;
   automaticCi.branch = 'main';
+  automaticCi.baseRef = 'main';
   automaticCi.headBinding = 'github.sha';
   automaticCi.invocationLimit = 2;
   snapshot.releaseCheckEvidence.manualRerunAllowed = true;

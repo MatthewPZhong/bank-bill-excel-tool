@@ -26,12 +26,14 @@ const E05_BENCHMARK_SOURCE =
   'changes/background-execution-e05-c-prefund-parser-pool/benchmark-evidence.json';
 const WINDOWS_BUILD_WORKFLOW_SOURCE = '.github/workflows/build-windows.yml';
 const FINAL_RELEASE_BRANCH = 'codex/v3.2.1-r3-release-evidence';
+const FINAL_RELEASE_BASE = 'codex/v3.2.1-e05-c-prefund-parser-pool';
 const EXACT_BASE = '4598b9c67787ef1736831a186a199bd6fe9ae626';
 const EXPECTED_CHECKOUT_REF =
   "ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}";
 const EXPECTED_RELEASE_CHECK_CONDITION =
   "( github.event_name == 'pull_request' && " +
   `github.head_ref == '${FINAL_RELEASE_BRANCH}' && ` +
+  `github.base_ref == '${FINAL_RELEASE_BASE}' && ` +
   'github.event.pull_request.head.repo.full_name == github.repository && ' +
   "github.event.action == 'opened' && github.run_attempt == 1 ) || " +
   "( (github.event_name != 'pull_request' || " +
@@ -368,6 +370,7 @@ const EXPECTED_RELEASE_CHECK = Object.freeze({
     runAttempt: 1,
     command: 'npm run release-check',
     branch: FINAL_RELEASE_BRANCH,
+    baseRef: FINAL_RELEASE_BASE,
     headBinding: 'github.event.pull_request.head.sha',
     nonPullRequestHeadBinding: 'github.sha',
     invocationLimit: 1,

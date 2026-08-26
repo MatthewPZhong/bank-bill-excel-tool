@@ -53,7 +53,7 @@ function assertPerUserDestinationOverride(perUserMacro, getDParameterMacro) {
   assert.match(getDParameterMacro, /StrCpy \$\{outVar\} \$R9/);
 }
 
-test('Windows PR final release-check只允许same-repo opened首轮并checkout exact head', () => {
+test('Windows PR final release-check只允许target base的same-repo opened首轮并checkout exact head', () => {
   const workflow = read('.github/workflows/build-windows.yml');
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /pull_request:\s*\n\s*branches:\s*\n\s*- '\*\*'/);
@@ -74,6 +74,7 @@ test('Windows PR final release-check只允许same-repo opened首轮并checkout e
   assert.equal(normalizedCondition,
     "( github.event_name == 'pull_request' && " +
     "github.head_ref == 'codex/v3.2.1-r3-release-evidence' && " +
+    "github.base_ref == 'codex/v3.2.1-e05-c-prefund-parser-pool' && " +
     'github.event.pull_request.head.repo.full_name == github.repository && ' +
     "github.event.action == 'opened' && github.run_attempt == 1 ) || " +
     "( (github.event_name != 'pull_request' || " +
@@ -89,13 +90,18 @@ test('Windows PR final release-check只允许same-repo opened首轮并checkout e
     action = '',
     runAttempt = 1,
     headRef = '',
+    baseRef = '',
     refName = '',
     headRepository = '',
     repository = 'owner/bank-bill-excel-tool'
   }) => {
     const finalBranch = 'codex/v3.2.1-r3-release-evidence';
+    const finalBase = 'codex/v3.2.1-e05-c-prefund-parser-pool';
     if (eventName === 'pull_request' && headRef === finalBranch) {
-      return headRepository === repository && action === 'opened' && runAttempt === 1;
+      return baseRef === finalBase
+        && headRepository === repository
+        && action === 'opened'
+        && runAttempt === 1;
     }
     if (eventName === 'workflow_dispatch' && refName === finalBranch) return false;
     return eventName !== 'pull_request'
@@ -113,13 +119,23 @@ test('Windows PR final release-check只允许same-repo opened首轮并checkout e
     eventName: 'pull_request',
     action: 'opened',
     headRef: 'codex/v3.2.1-r3-release-evidence',
+    baseRef: 'codex/v3.2.1-e05-c-prefund-parser-pool',
     headRepository: sameRepository,
     repository: sameRepository
-  }), true, 'same-repo final PR opened首轮必须执行');
+  }), true, 'same-repo final PR到精确base的opened首轮必须执行');
+  assert.equal(shouldRunReleaseChecks({
+    eventName: 'pull_request',
+    action: 'opened',
+    headRef: 'codex/v3.2.1-r3-release-evidence',
+    baseRef: 'main',
+    headRepository: sameRepository,
+    repository: sameRepository
+  }), false, 'final PR目标base漂移必须跳过');
   assert.equal(shouldRunReleaseChecks({
     eventName: 'pull_request',
     action: 'synchronize',
     headRef: 'codex/v3.2.1-r3-release-evidence',
+    baseRef: 'codex/v3.2.1-e05-c-prefund-parser-pool',
     headRepository: sameRepository,
     repository: sameRepository
   }), false, 'final PR synchronize必须跳过');
@@ -128,6 +144,7 @@ test('Windows PR final release-check只允许same-repo opened首轮并checkout e
     action: 'opened',
     runAttempt: 2,
     headRef: 'codex/v3.2.1-r3-release-evidence',
+    baseRef: 'codex/v3.2.1-e05-c-prefund-parser-pool',
     headRepository: sameRepository,
     repository: sameRepository
   }), false, 'final PR rerun必须跳过');
@@ -135,6 +152,7 @@ test('Windows PR final release-check只允许same-repo opened首轮并checkout e
     eventName: 'pull_request',
     action: 'opened',
     headRef: 'codex/v3.2.1-r3-release-evidence',
+    baseRef: 'codex/v3.2.1-e05-c-prefund-parser-pool',
     headRepository: 'fork-owner/bank-bill-excel-tool',
     repository: sameRepository
   }), false, 'fork final PR不得使用waiver');

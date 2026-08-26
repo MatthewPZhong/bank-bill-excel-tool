@@ -118,6 +118,7 @@
       "runAttempt": 1,
       "command": "npm run release-check",
       "branch": "codex/v3.2.1-r3-release-evidence",
+      "baseRef": "codex/v3.2.1-e05-c-prefund-parser-pool",
       "headBinding": "github.event.pull_request.head.sha",
       "nonPullRequestHeadBinding": "github.sha",
       "invocationLimit": 1,
