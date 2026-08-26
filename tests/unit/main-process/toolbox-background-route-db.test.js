@@ -8,6 +8,7 @@ const path = require('node:path');
 const test = require('node:test');
 const v8 = require('node:v8');
 const { DatabaseSync } = require('node:sqlite');
+const { Worker } = require('node:worker_threads');
 const ExcelJS = require('exceljs');
 const XLSX = require('xlsx');
 
@@ -22,6 +23,12 @@ const { exportToolboxMultiFilters } = require('../../../src/main-process/toolbox
 const {
   createBackgroundExecutionRuntime
 } = require('../../../src/main-process/background-execution/runtime');
+const {
+  createWorkerThreadAdapter
+} = require('../../../src/main-process/background-execution/adapters/worker-thread-adapter');
+const {
+  fsyncDirectory
+} = require('../../../src/main-process/background-execution/durable-file');
 const {
   TOOLBOX_GENERATION_ACTIONS,
   validateToolboxMultiGenerationResult
@@ -48,6 +55,24 @@ const {
 const {
   runOutputWriter
 } = require('../../../src/main-process/toolbox-background/route-scanner-core');
+const {
+  createSupportedDirectoryFsyncWorkerClass
+} = require('../shared/directory-fsync-test-runtime');
+
+const SupportedDirectoryFsyncWorker = createSupportedDirectoryFsyncWorkerClass(Worker);
+const TEST_GIBIBYTE = 1024 ** 3;
+
+function createDirectoryFsyncSupportedRuntime(options = {}) {
+  return createBackgroundExecutionRuntime({
+    availableParallelism: 4,
+    freeMemoryBytes: 8 * TEST_GIBIBYTE,
+    totalMemoryBytes: 16 * TEST_GIBIBYTE,
+    ...options,
+    workerThreadAdapter: createWorkerThreadAdapter({
+      WorkerClass: SupportedDirectoryFsyncWorker
+    })
+  });
+}
 
 const tempDirs = [];
 test.after(() => {
@@ -212,6 +237,16 @@ test('Windows目录fsync unsupported 会阻断Route DB seal，不伪造durabilit
   );
   assert.doesNotThrow(() => assertDirectoryDurable({ capability: 'supported' }));
   assert.doesNotThrow(() => assertDirectoryDurable({ status: 'committed' }));
+  const hostBarrier = fsyncDirectory(tempDir());
+  if (hostBarrier.capability === 'supported') {
+    assert.doesNotThrow(() => assertDirectoryDurable(hostBarrier));
+  } else {
+    assert.equal(hostBarrier.capability, 'unsupported');
+    assert.throws(
+      () => assertDirectoryDurable(hostBarrier),
+      (error) => error.code === 'TOOLBOX_ROUTE_DURABILITY_UNAVAILABLE'
+    );
+  }
 });
 
 test('Scanner等待Writer exit barrier；message后非0/transport error不能冒充成功', async () => {
@@ -283,7 +318,7 @@ test('E04-B managed单组保持legacy值/格式与零命中语义，Main验证�
       values: scenario.values
     }];
     const filePlan = multiFilePlan(sourcePath, [finalPath]);
-    const runtime = createBackgroundExecutionRuntime({ shutdownTimeoutMs: 10000 });
+    const runtime = createDirectoryFsyncSupportedRuntime({ shutdownTimeoutMs: 10000 });
     let publisherCalls = 0;
     try {
       const generated = await generateValidateAndPublishMultiOutput({
@@ -355,7 +390,7 @@ test('E04-B真实Scanner→sealed Route DB→单Writer与legacy输出等价，Ma
     routeDbPath,
     routeManifestPath
   });
-  const runtime = createBackgroundExecutionRuntime({ shutdownTimeoutMs: 10000 });
+  const runtime = createDirectoryFsyncSupportedRuntime({ shutdownTimeoutMs: 10000 });
   const context = operationContext('toolbox-route-real');
   const workerContext = {
     taskRunId: context.taskRunId,
@@ -527,7 +562,7 @@ test('Writer独立复核sealed Route DB，非法route mask失败并清理全部g
     routeDbPath: dbPath,
     routeManifestPath: manifestPath
   });
-  const runtime = createBackgroundExecutionRuntime({ shutdownTimeoutMs: 10000 });
+  const runtime = createDirectoryFsyncSupportedRuntime({ shutdownTimeoutMs: 10000 });
   const batch = operationContext('toolbox-route-writer-failure');
   const result = await runtime.execute({
     actionKey: TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT,
@@ -598,7 +633,7 @@ test('Route DB codec在BIFF8/CSV真实Scanner与Writer路径保持行序和长�
     'Group,LongId\nA,001234567890123456789\nB,999999999999999999999\n',
     'utf8'
   );
-  const runtime = createBackgroundExecutionRuntime({ shutdownTimeoutMs: 10000 });
+  const runtime = createDirectoryFsyncSupportedRuntime({ shutdownTimeoutMs: 10000 });
   for (const [kind, sourcePath] of [['xls', xlsPath], ['csv', csvPath]]) {
     const filePlan = multiFilePlan(sourcePath, [
       path.join(dir, `${kind}-final-A.xlsx`),

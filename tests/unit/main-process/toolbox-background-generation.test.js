@@ -30,12 +30,23 @@ const {
   TOOLBOX_GENERATION_POLICIES
 } = require('../../../src/main-process/toolbox-background/policies');
 const {
-  createBackgroundExecutionRuntime,
+  createBackgroundExecutionRuntime: createBackgroundExecutionRuntimeRaw,
   createBackgroundExecutionRuntimeManager,
   isBackgroundExecutionProductionEnabled
 } = require('../../../src/main-process/background-execution/runtime');
 const { mergeToolboxFilesToXlsx } = require('../../../src/main-process/toolbox-merge-io');
 const { writeToolboxRows } = require('../../../src/main-process/toolbox-output-writer');
+
+const TEST_GIBIBYTE = 1024 ** 3;
+
+function createBackgroundExecutionRuntime(options = {}) {
+  return createBackgroundExecutionRuntimeRaw({
+    availableParallelism: 4,
+    freeMemoryBytes: 8 * TEST_GIBIBYTE,
+    totalMemoryBytes: 16 * TEST_GIBIBYTE,
+    ...options
+  });
+}
 
 const tmpDirs = [];
 test.after(() => {

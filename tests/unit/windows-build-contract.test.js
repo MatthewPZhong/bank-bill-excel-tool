@@ -53,30 +53,61 @@ function assertPerUserDestinationOverride(perUserMacro, getDParameterMacro) {
   assert.match(getDParameterMacro, /StrCpy \$\{outVar\} \$R9/);
 }
 
-test('Windows PR 仅跳过 v3.2.1 中间分支 release-check，其余 x64 构建仍执行', () => {
+test('Windows PR final release-check只允许target base的same-repo opened首轮并checkout exact head', () => {
   const workflow = read('.github/workflows/build-windows.yml');
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /pull_request:\s*\n\s*branches:\s*\n\s*- '\*\*'/);
   const smokeJob = workflow.slice(workflow.indexOf('\n  smoke-test:'), workflow.indexOf('\n  build:'));
+  const checkoutRef = "ref: ${{ github.event_name == 'pull_request' && " +
+    'github.event.pull_request.head.sha || github.sha }}';
   assert.match(smokeJob, /uses: actions\/checkout@v6\s*\n\s*with:\s*\n\s*fetch-depth: 0/);
+  assert.ok(smokeJob.includes(checkoutRef), 'smoke-test checkout必须绑定PR head SHA');
   const releaseChecksStep = smokeJob.slice(
     smokeJob.indexOf('- name: Run release checks'),
     smokeJob.indexOf('- name: Verify Windows startup process adapter semantics')
   );
-  assert.match(
-    releaseChecksStep,
-    /if: >-\s*\n\s*github\.event_name != 'pull_request' \|\|\s*\n\s*github\.event\.pull_request\.head\.repo\.full_name != github\.repository \|\|\s*\n\s*!startsWith\(github\.head_ref, 'codex\/v3\.2\.1-'\) \|\|\s*\n\s*github\.head_ref == 'codex\/v3\.2\.1-r3-release-evidence'/
-  );
+  const conditionMatch = releaseChecksStep.match(/if: >-\s*\n([\s\S]*?)\n\s*run: npm run release-check/);
+  assert.ok(conditionMatch, 'release-check if contract missing');
+  const normalizedCondition = conditionMatch[1].split(/\r?\n/)
+    .map((line) => line.trim())
+    .join(' ');
+  assert.equal(normalizedCondition,
+    "( github.event_name == 'pull_request' && " +
+    "github.head_ref == 'codex/v3.2.1-r3-release-evidence' && " +
+    "github.base_ref == 'codex/v3.2.1-e05-c-prefund-parser-pool' && " +
+    'github.event.pull_request.head.repo.full_name == github.repository && ' +
+    "github.event.action == 'opened' && github.run_attempt == 1 ) || " +
+    "( (github.event_name != 'pull_request' || " +
+    "github.head_ref != 'codex/v3.2.1-r3-release-evidence') && " +
+    "(github.event_name != 'workflow_dispatch' || " +
+    "github.ref_name != 'codex/v3.2.1-r3-release-evidence') && " +
+    "(github.event_name != 'pull_request' || " +
+    'github.event.pull_request.head.repo.full_name != github.repository || ' +
+    "!startsWith(github.head_ref, 'codex/v3.2.1-')) )");
   assert.match(releaseChecksStep, /run: npm run release-check/);
   const shouldRunReleaseChecks = ({
     eventName,
+    action = '',
+    runAttempt = 1,
     headRef = '',
+    baseRef = '',
+    refName = '',
     headRepository = '',
     repository = 'owner/bank-bill-excel-tool'
-  }) => eventName !== 'pull_request'
-    || headRepository !== repository
-    || !headRef.startsWith('codex/v3.2.1-')
-    || headRef === 'codex/v3.2.1-r3-release-evidence';
+  }) => {
+    const finalBranch = 'codex/v3.2.1-r3-release-evidence';
+    const finalBase = 'codex/v3.2.1-e05-c-prefund-parser-pool';
+    if (eventName === 'pull_request' && headRef === finalBranch) {
+      return baseRef === finalBase
+        && headRepository === repository
+        && action === 'opened'
+        && runAttempt === 1;
+    }
+    if (eventName === 'workflow_dispatch' && refName === finalBranch) return false;
+    return eventName !== 'pull_request'
+      || headRepository !== repository
+      || !headRef.startsWith('codex/v3.2.1-');
+  };
   const sameRepository = 'owner/bank-bill-excel-tool';
   assert.equal(shouldRunReleaseChecks({
     eventName: 'pull_request',
@@ -86,10 +117,45 @@ test('Windows PR 仅跳过 v3.2.1 中间分支 release-check，其余 x64 构建
   }), false, 'same-repo v3.2.1 中间 PR 必须跳过');
   assert.equal(shouldRunReleaseChecks({
     eventName: 'pull_request',
+    action: 'opened',
     headRef: 'codex/v3.2.1-r3-release-evidence',
+    baseRef: 'codex/v3.2.1-e05-c-prefund-parser-pool',
     headRepository: sameRepository,
     repository: sameRepository
-  }), true, 'same-repo 最终证据 PR 必须执行');
+  }), true, 'same-repo final PR到精确base的opened首轮必须执行');
+  assert.equal(shouldRunReleaseChecks({
+    eventName: 'pull_request',
+    action: 'opened',
+    headRef: 'codex/v3.2.1-r3-release-evidence',
+    baseRef: 'main',
+    headRepository: sameRepository,
+    repository: sameRepository
+  }), false, 'final PR目标base漂移必须跳过');
+  assert.equal(shouldRunReleaseChecks({
+    eventName: 'pull_request',
+    action: 'synchronize',
+    headRef: 'codex/v3.2.1-r3-release-evidence',
+    baseRef: 'codex/v3.2.1-e05-c-prefund-parser-pool',
+    headRepository: sameRepository,
+    repository: sameRepository
+  }), false, 'final PR synchronize必须跳过');
+  assert.equal(shouldRunReleaseChecks({
+    eventName: 'pull_request',
+    action: 'opened',
+    runAttempt: 2,
+    headRef: 'codex/v3.2.1-r3-release-evidence',
+    baseRef: 'codex/v3.2.1-e05-c-prefund-parser-pool',
+    headRepository: sameRepository,
+    repository: sameRepository
+  }), false, 'final PR rerun必须跳过');
+  assert.equal(shouldRunReleaseChecks({
+    eventName: 'pull_request',
+    action: 'opened',
+    headRef: 'codex/v3.2.1-r3-release-evidence',
+    baseRef: 'codex/v3.2.1-e05-c-prefund-parser-pool',
+    headRepository: 'fork-owner/bank-bill-excel-tool',
+    repository: sameRepository
+  }), false, 'fork final PR不得使用waiver');
   assert.equal(shouldRunReleaseChecks({
     eventName: 'pull_request',
     headRef: 'codex/v3.2.1-e04-a-toolbox-single-worker',
@@ -104,9 +170,17 @@ test('Windows PR 仅跳过 v3.2.1 中间分支 release-check，其余 x64 构建
   }), true, '普通 PR 必须执行');
   assert.equal(shouldRunReleaseChecks({ eventName: 'push' }), true, 'push 必须执行');
   assert.equal(
-    shouldRunReleaseChecks({ eventName: 'workflow_dispatch' }),
+    shouldRunReleaseChecks({
+      eventName: 'workflow_dispatch',
+      refName: 'codex/v3.2.1-r3-release-evidence'
+    }),
+    false,
+    'final branch workflow_dispatch 必须跳过'
+  );
+  assert.equal(
+    shouldRunReleaseChecks({ eventName: 'workflow_dispatch', refName: 'feature/windows-build' }),
     true,
-    'workflow_dispatch 必须执行'
+    '其他 branch workflow_dispatch 保持执行'
   );
   assert.match(workflow, /Verify Windows startup process adapter semantics\s*\n\s*env:\s*\n\s*WINDOWS_STARTUP_PROCESS_ADAPTER_REAL_TEST: '1'\s*\n\s*run: node --test tests\/unit\/scripts\/startup-process-adapter\.test\.js/);
   assert.ok(
@@ -116,6 +190,7 @@ test('Windows PR 仅跳过 v3.2.1 中间分支 release-check，其余 x64 构建
   );
 
   const buildJob = workflow.slice(workflow.indexOf('\n  build:'));
+  assert.ok(buildJob.includes(checkoutRef), 'build checkout必须绑定PR head SHA');
   assert.match(buildJob, /npm run prepare:dist\s*\n\s*npx electron-builder/);
   assert.match(buildJob, /npx electron-builder --win --x64 --publish never/);
   assert.match(buildJob, /node scripts\/check-dist-size\.js/);
