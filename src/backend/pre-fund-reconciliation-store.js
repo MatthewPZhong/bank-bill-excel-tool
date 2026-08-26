@@ -5,6 +5,9 @@ const path = require('node:path');
 
 const { FileValidationError } = require('./file-service/common');
 const runDataStore = require('./run-data-store');
+const {
+  hasAnyOperationReceipts
+} = require('../main-process/pre-fund-reconciliation/mpt-import/operation-receipt-repository');
 const { parseMptFile } = require('../main-process/pre-fund-reconciliation/mpt-parser');
 const {
   compareFileSequences,
@@ -818,7 +821,7 @@ class PreFundReconciliationStore {
         deletedRows += rowCount;
         deleteFileAfterClose = Number(
           db.prepare('SELECT COUNT(*) AS count FROM pre_fund_reconciliation_gateway_batches').get().count
-        ) === 0;
+        ) === 0 && !hasAnyOperationReceipts(db);
       } finally {
         db.close();
       }
@@ -891,7 +894,7 @@ class PreFundReconciliationStore {
         deletedRows += fileRowCount;
         deleteFileAfterClose = fileBatchCount > 0 && Number(
           db.prepare('SELECT COUNT(*) AS count FROM pre_fund_reconciliation_gateway_batches').get().count
-        ) === 0;
+        ) === 0 && !hasAnyOperationReceipts(db);
       } catch (error) {
         rollbackQuietly(db);
         throw new Error(
@@ -924,6 +927,7 @@ class PreFundReconciliationStore {
     const files = this._listTargetFiles();
     for (const file of files) {
       const db = runDataStore.openExistingSideDb(file.path);
+      let preserveReceiptDb = false;
       try {
         deletedBatches += db.prepare(
           'SELECT COUNT(*) AS count FROM pre_fund_reconciliation_gateway_batches'
@@ -931,9 +935,21 @@ class PreFundReconciliationStore {
         deletedRows += db.prepare(
           'SELECT COUNT(*) AS count FROM pre_fund_reconciliation_gateway_rows'
         ).get().count;
+        preserveReceiptDb = hasAnyOperationReceipts(db);
+        if (preserveReceiptDb) {
+          db.exec('BEGIN IMMEDIATE');
+          try {
+            db.prepare('DELETE FROM pre_fund_reconciliation_gateway_batches').run();
+            db.exec('COMMIT');
+          } catch (error) {
+            rollbackQuietly(db);
+            throw error;
+          }
+        }
       } finally {
         db.close();
       }
+      if (preserveReceiptDb) continue;
       const removal = runDataStore.deleteSideDbByPath(file.path);
       if (!removal.deleted) throw new Error(`临时网关账单月侧库删除失败：${file.path}`);
       deletedFiles += 1;

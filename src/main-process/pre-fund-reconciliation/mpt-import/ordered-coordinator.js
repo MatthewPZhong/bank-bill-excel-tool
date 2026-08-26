@@ -146,16 +146,15 @@ class OrderedMptCoordinator {
     this._scheduleDrain();
   }
 
-  submitTransportCrash(fileIndex, cause) {
+  submitTransportCrash(fileIndex, fileResult) {
     this._assertOpen();
     const index = this._assertIndex(fileIndex);
-    const error = spoolError(
-      'PREFUND_PARSER_TRANSPORT_POLICY_UNRESOLVED',
-      'Parser transport crash的产品映射留待E05-P0，当前fail closed',
-      { fileIndex: index }
-    );
-    if (cause instanceof Error) error.cause = cause;
-    this._fail(error);
+    if (!fileResult || typeof fileResult !== 'object') {
+      throw new TypeError('transport crash必须提供按旧service合同构造的当前file结果对象');
+    }
+    this.acceptedIndexes.add(index);
+    this.entries.set(index, Object.freeze({ kind: 'transport-crash', fileResult }));
+    this._scheduleDrain();
   }
 
   waitForDispatchCapacity() {

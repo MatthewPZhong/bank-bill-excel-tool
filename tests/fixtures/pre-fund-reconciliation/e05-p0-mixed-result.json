@@ -1,0 +1,35 @@
+{
+  "serviceResult": {
+    "status": "ok",
+    "results": [
+      {
+        "status": "ok",
+        "importStatus": "imported",
+        "fileName": "first.txt",
+        "sourceType": "MPT_INBOUND_GATEWAY",
+        "rowCount": 1,
+        "excludedRowCount": 0
+      },
+      {
+        "status": "failed",
+        "fileName": "crashed.txt",
+        "code": "PREFUND_PARSER_TRANSPORT_CRASH",
+        "message": "worker exited 9",
+        "detailLines": []
+      },
+      {
+        "status": "ok",
+        "importStatus": "replaced",
+        "fileName": "last.txt",
+        "sourceType": "MPT_OUTBOUND_GATEWAY",
+        "rowCount": 3,
+        "excludedRowCount": 1
+      }
+    ],
+    "successCount": 2,
+    "failedCount": 1
+  },
+  "transportPolicy": "fail-unit-and-continue",
+  "taskTerminal": "succeeded",
+  "rendererTerminal": "partial-failure-alert-then-session-refresh"
+}

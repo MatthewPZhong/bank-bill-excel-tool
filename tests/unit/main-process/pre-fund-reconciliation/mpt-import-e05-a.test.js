@@ -235,13 +235,13 @@ test('Parser Core与当前parser golden等价：行序、长ID、日期、金额
   assert.match(strict.result.headerIdentity, /^[a-f0-9]{64}$/);
 });
 
-test('E05-A新增生产模块静态证明不引用SQLite/store、repair token、replacement或候选排序', () => {
+test('E05-A Parser/spool/Coordinator静态证明不引用SQLite/store、repair token、replacement或候选排序', () => {
   const sourceDir = path.join(
     __dirname,
     '../../../../src/main-process/pre-fund-reconciliation/mpt-import'
   );
   const source = fs.readdirSync(sourceDir)
-    .filter((name) => name.endsWith('.js'))
+    .filter((name) => name.endsWith('.js') && name !== 'operation-receipt-repository.js')
     .map((name) => fs.readFileSync(path.join(sourceDir, name), 'utf8'))
     .join('\n');
   assert.doesNotMatch(source, /node:sqlite|DatabaseSync|pre-fund-reconciliation-store|runDataStore/);
@@ -631,7 +631,7 @@ test('Ordered Coordinator乱序ready/error仍严格递增、consumer单飞、结
   assert.equal(results[2].status, 'failed');
 });
 
-test('Ordered Coordinator高水位背压、取消与transport crash seam均fail closed', async (t) => {
+test('Ordered Coordinator高水位背压、取消与transport crash按各自合同收口', async (t) => {
   await t.test('ready高水位阻止继续派发，前序到达后释放', async () => {
     const coordinator = createOrderedMptCoordinator({
       fileCount: 3,
@@ -665,18 +665,30 @@ test('Ordered Coordinator高水位背压、取消与transport crash seam均fail 
     assert.equal(calls, 0);
   });
 
-  await t.test('transport crash不猜当前file/parent产品映射', async () => {
+  await t.test('transport crash按旧service语义形成当前file error并继续', async () => {
     const coordinator = createOrderedMptCoordinator({
       fileCount: 2,
-      consumeReady: async () => ({ status: 'ok' })
+      consumeReady: async (_spool, { fileIndex }) => ({ status: 'ok', fileIndex })
     });
-    coordinator.submitTransportCrash(0, new Error('worker exited 9'));
-    await assert.rejects(
-      coordinator.completion(),
-      (error) => error.code === 'PREFUND_PARSER_TRANSPORT_POLICY_UNRESOLVED'
-        && error.details.fileIndex === 0
-        && error.cause.message === 'worker exited 9'
-    );
+    coordinator.submitTransportCrash(0, {
+      status: 'failed',
+      fileName: 'crashed.txt',
+      code: 'PREFUND_PARSER_TRANSPORT_CRASH',
+      message: 'worker exited 9',
+      detailLines: []
+    });
+    coordinator.submitReady(1, { id: 1 });
+    const results = await coordinator.completion();
+    assert.deepEqual(results, [{
+      status: 'failed',
+      fileName: 'crashed.txt',
+      code: 'PREFUND_PARSER_TRANSPORT_CRASH',
+      message: 'worker exited 9',
+      detailLines: []
+    }, {
+      status: 'ok',
+      fileIndex: 1
+    }]);
   });
 });
 

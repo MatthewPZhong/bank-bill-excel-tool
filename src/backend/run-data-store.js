@@ -607,6 +607,26 @@ const SIDE_DB_DDL_PRE_FUND_GATEWAY = `
   );
   CREATE INDEX IF NOT EXISTS idx_pre_fund_gateway_excluded_batch
     ON pre_fund_reconciliation_gateway_excluded_rows(batch_id, source_row_number);
+
+  CREATE TABLE IF NOT EXISTS pre_fund_operation_receipts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    action_key TEXT NOT NULL,
+    operation_key TEXT NOT NULL,
+    producer_task_run_id TEXT NOT NULL,
+    file_index INTEGER NOT NULL,
+    outcome_kind TEXT NOT NULL CHECK(outcome_kind IN (
+      'inserted','replaced','noop-existing-batch'
+    )),
+    batch_id INTEGER NOT NULL,
+    dataset_id TEXT,
+    dataset_version_before INTEGER,
+    dataset_version_after INTEGER,
+    source_file_name TEXT NOT NULL,
+    source_sha256 TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    committed_at TEXT NOT NULL,
+    UNIQUE(action_key, operation_key)
+  );
 `;
 
 // 前置资金对账 run 级数据：候选池和结果均为 bulk，放独立 results 月侧库，主库不落明细。
