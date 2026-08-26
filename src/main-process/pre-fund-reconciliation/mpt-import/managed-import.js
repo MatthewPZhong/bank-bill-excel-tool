@@ -183,6 +183,10 @@ function normalizeOptions(options) {
       typeof options.onParserWorkerState !== 'function') {
     throw new TypeError('managed onParserWorkerState必须是函数');
   }
+  if (options.parserOutcomeFsyncDirectory !== undefined &&
+      typeof options.parserOutcomeFsyncDirectory !== 'function') {
+    throw new TypeError('managed parserOutcomeFsyncDirectory必须是函数');
+  }
   return { ...options, repairFailures };
 }
 
@@ -418,13 +422,20 @@ async function executeManagedPreFundMptImport(rawOptions) {
         }
         try {
           if (!settled.ok) throw settled.error;
-          writeParserOutcome(inputs[fileIndex].spool, { kind: 'spool' });
+          writeParserOutcome(inputs[fileIndex].spool, { kind: 'spool' }, {
+            fsyncDirectory: options.parserOutcomeFsyncDirectory
+          });
           readyForWriter = true;
         } catch (error) {
           transportCrash = error && error.code === 'PREFUND_PARSER_TRANSPORT_CRASH';
           failed = parserFailure(options.filePaths[fileIndex], error);
           try {
-            writeParserOutcome(inputs[fileIndex].spool, { kind: 'parser-error', fileResult: failed });
+            writeParserOutcome(inputs[fileIndex].spool, {
+              kind: 'parser-error',
+              fileResult: failed
+            }, {
+              fsyncDirectory: options.parserOutcomeFsyncDirectory
+            });
           } catch (sealError) {
             failed = parserFailure(options.filePaths[fileIndex], sealError);
           }

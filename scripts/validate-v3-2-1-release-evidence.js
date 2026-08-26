@@ -29,10 +29,11 @@ const PREVIOUS_FINAL_RELEASE_BRANCH = 'codex/v3.2.1-r3-release-evidence';
 const FINAL_RELEASE_BRANCH = 'codex/v3.2.1-r4-review-hardening';
 const FINAL_RELEASE_BASE = 'codex/v3.2.1-r3-release-evidence';
 const FINAL_RELEASE_PULL_REQUEST = 183;
-const FINAL_RELEASE_PULL_REQUEST_COMMITS = 5;
+const FINAL_RELEASE_PULL_REQUEST_COMMITS = 6;
 const FINAL_RELEASE_ORIGINAL_HEAD = '962e4ae1549035d4eb875dbfb19417c19d1f95f6';
 const FINAL_RELEASE_CONFLICTING_HEAD = 'ce599e206894f3683b748254068dd750479ffc74';
 const FINAL_RELEASE_R3_HEAD = 'd7d96938196a61a36892c40721cdba56992a14a8';
+const FINAL_RELEASE_FAILED_ATTEMPT_HEAD = 'f87f2b2994e86b75d350f64eec53252fe24a67b6';
 const EXACT_BASE = '4598b9c67787ef1736831a186a199bd6fe9ae626';
 const EXPECTED_CHECKOUT_REF =
   "ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}";
@@ -411,11 +412,34 @@ const EXPECTED_RELEASE_CHECK = Object.freeze({
     intendedHead: FINAL_RELEASE_CONFLICTING_HEAD,
     reason: 'PULL_REQUEST_MERGE_CONFLICT',
     satisfiesHardGate: false
+  }, {
+    attemptNumber: 5,
+    status: 'FAILURE',
+    authorization: 'PR_CONFLICT_RESOLUTION_SYNCHRONIZE_SINGLE_USE_WAIVER',
+    trigger: 'PULL_REQUEST_SYNCHRONIZE_REQUIRED_CI',
+    workflowRunId: 32995472567,
+    reviewedHead: FINAL_RELEASE_FAILED_ATTEMPT_HEAD,
+    smokeTestConclusion: 'FAILURE',
+    buildConclusion: 'SKIPPED',
+    unit: {
+      passed: 6154,
+      total: 6176,
+      failed: 20,
+      skipped: 2,
+      cancelled: 0
+    },
+    failureGroups: [
+      { id: 'PREFUND_MAIN_PARSER_OUTCOME_DIRECTORY_FSYNC', leafFailures: 13 },
+      { id: 'TOOLBOX_MANIFEST_DIRECTORY_FSYNC_SEAM', leafFailures: 4 },
+      { id: 'WINDOWS_CRLF_STATIC_CONTRACT', leafFailures: 1 },
+      { id: 'WINDOWS_CRLF_EVIDENCE_HASH', leafFailures: 2 }
+    ],
+    satisfiesHardGate: false
   }],
   automaticRequiredCi: {
-    attemptNumber: 5,
+    attemptNumber: 6,
     status: 'PENDING_REMOTE_REQUIRED_CI',
-    authorization: 'PR_CONFLICT_RESOLUTION_SYNCHRONIZE_SINGLE_USE_WAIVER',
+    authorization: 'PR_WINDOWS_UNIT_REPAIR_SYNCHRONIZE_SINGLE_USE_WAIVER',
     workflowSource: WINDOWS_BUILD_WORKFLOW_SOURCE,
     trigger: 'PULL_REQUEST_SYNCHRONIZE_REQUIRED_CI',
     sameRepositoryOnly: true,
@@ -425,8 +449,9 @@ const EXPECTED_RELEASE_CHECK = Object.freeze({
     baseRef: FINAL_RELEASE_BASE,
     pullRequestNumber: FINAL_RELEASE_PULL_REQUEST,
     expectedPullRequestCommits: FINAL_RELEASE_PULL_REQUEST_COMMITS,
-    expectedFirstParentHead: FINAL_RELEASE_CONFLICTING_HEAD,
-    expectedSecondParentHead: FINAL_RELEASE_R3_HEAD,
+    expectedParentHead: FINAL_RELEASE_FAILED_ATTEMPT_HEAD,
+    preservedMergeFirstParentHead: FINAL_RELEASE_CONFLICTING_HEAD,
+    preservedMergeSecondParentHead: FINAL_RELEASE_R3_HEAD,
     headBinding: 'github.event.pull_request.head.sha',
     nonPullRequestHeadBinding: 'github.sha',
     invocationLimit: 1,
@@ -456,7 +481,10 @@ function projectPolicy(policy) {
 }
 
 function sha256File(filePath) {
-  return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+  // GitHub Windows checkout may materialize repository text as CRLF. Evidence hashes
+  // describe the canonical repository text, not the runner's checkout convention.
+  const canonicalText = fs.readFileSync(filePath, 'utf8').replace(/\r\n/g, '\n');
+  return crypto.createHash('sha256').update(canonicalText, 'utf8').digest('hex');
 }
 
 function normalizeYamlCondition(source) {
@@ -556,12 +584,16 @@ function validateReleaseEvidence(snapshot, options = {}) {
           ), true);
         expectEqual('/authority/windowsWorkflow/repairLineageFirstParent',
           lineageStep.includes(
-            `test "$(git rev-parse HEAD^1)" = "${FINAL_RELEASE_CONFLICTING_HEAD}"`
+            `test "$(git rev-parse HEAD^1)" = "${FINAL_RELEASE_FAILED_ATTEMPT_HEAD}"`
           ),
           true);
-        expectEqual('/authority/windowsWorkflow/repairLineageSecondParent',
+        expectEqual('/authority/windowsWorkflow/repairLineagePreservedFirstParent',
           lineageStep.includes(
-            `test "$(git rev-parse HEAD^2)" = "${FINAL_RELEASE_R3_HEAD}"`
+            `test "$(git rev-parse HEAD^1^1)" = "${FINAL_RELEASE_CONFLICTING_HEAD}"`
+          ), true);
+        expectEqual('/authority/windowsWorkflow/repairLineagePreservedSecondParent',
+          lineageStep.includes(
+            `test "$(git rev-parse HEAD^1^2)" = "${FINAL_RELEASE_R3_HEAD}"`
           ), true);
       }
       const releaseChecksStep = smokeJob.slice(
@@ -720,5 +752,6 @@ if (require.main === module) runCli();
 
 module.exports = {
   SNAPSHOT_PATH,
+  sha256File,
   validateReleaseEvidence
 };

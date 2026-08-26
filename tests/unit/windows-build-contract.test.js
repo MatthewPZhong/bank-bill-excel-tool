@@ -53,7 +53,7 @@ function assertPerUserDestinationOverride(perUserMacro, getDParameterMacro) {
   assert.match(getDParameterMacro, /StrCpy \$\{outVar\} \$R9/);
 }
 
-test('Windows PR final release-check只允许#183一次性冲突合并synchronize并checkout exact head', () => {
+test('Windows PR final release-check只允许#183一次性Windows unit修复synchronize并checkout exact head', () => {
   const workflow = read('.github/workflows/build-windows.yml');
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /pull_request:\s*\n\s*branches:\s*\n\s*- '\*\*'/);
@@ -80,7 +80,7 @@ test('Windows PR final release-check只允许#183一次性冲突合并synchroniz
     "github.base_ref == 'codex/v3.2.1-r3-release-evidence' && " +
     'github.event.pull_request.head.repo.full_name == github.repository && ' +
     "github.event.action == 'synchronize' && " +
-    'github.event.pull_request.commits == 5 && github.run_attempt == 1 )');
+    'github.event.pull_request.commits == 6 && github.run_attempt == 1 )');
   assert.match(guardStep, /Unauthorized v3\.2\.1 final release-gate invocation[\s\S]*exit 1/);
   const checkoutRef = "ref: ${{ github.event_name == 'pull_request' && " +
     'github.event.pull_request.head.sha || github.sha }}';
@@ -92,9 +92,11 @@ test('Windows PR final release-check只允许#183一次性冲突合并synchroniz
     '一次性repair lineage必须在exact checkout后、安装依赖前验证');
   const lineageStep = smokeJob.slice(lineageStart, setupNodeStart);
   assert.match(lineageStep,
-    /git rev-parse HEAD\^1\)" = "ce599e206894f3683b748254068dd750479ffc74"/);
+    /git rev-parse HEAD\^1\)" = "f87f2b2994e86b75d350f64eec53252fe24a67b6"/);
   assert.match(lineageStep,
-    /git rev-parse HEAD\^2\)" = "d7d96938196a61a36892c40721cdba56992a14a8"/);
+    /git rev-parse HEAD\^1\^1\)" = "ce599e206894f3683b748254068dd750479ffc74"/);
+  assert.match(lineageStep,
+    /git rev-parse HEAD\^1\^2\)" = "d7d96938196a61a36892c40721cdba56992a14a8"/);
   assert.match(lineageStep,
     /git rev-parse HEAD\)" = "\$\{\{ github\.event\.pull_request\.head\.sha \}\}"/);
   const releaseChecksStep = smokeJob.slice(
@@ -113,7 +115,7 @@ test('Windows PR final release-check只允许#183一次性冲突合并synchroniz
     "github.base_ref == 'codex/v3.2.1-r3-release-evidence' && " +
     'github.event.pull_request.head.repo.full_name == github.repository && ' +
     "github.event.action == 'synchronize' && " +
-    'github.event.pull_request.commits == 5 && github.run_attempt == 1 ) || ' +
+    'github.event.pull_request.commits == 6 && github.run_attempt == 1 ) || ' +
     "( (github.event_name != 'pull_request' || " +
     "github.head_ref != 'codex/v3.2.1-r4-review-hardening') && " +
     "(github.event_name != 'workflow_dispatch' || " +
@@ -141,7 +143,7 @@ test('Windows PR final release-check只允许#183一次性冲突合并synchroniz
         && baseRef === finalBase
         && headRepository === repository
         && action === 'synchronize'
-        && commits === 5
+        && commits === 6
         && runAttempt === 1;
     }
     if (eventName === 'workflow_dispatch' && refName === finalBranch) return false;
@@ -169,7 +171,7 @@ test('Windows PR final release-check只允许#183一次性冲突合并synchroniz
       (eventName === 'workflow_dispatch' && finalBranches.has(refName));
     const authorized = eventName === 'pull_request' && pullRequestNumber === 183 &&
       headRef === finalBranch && baseRef === finalBase && headRepository === repository &&
-      action === 'synchronize' && commits === 5 && runAttempt === 1;
+      action === 'synchronize' && commits === 6 && runAttempt === 1;
     return finalInvocation && !authorized;
   };
   const sameRepository = 'owner/bank-bill-excel-tool';
@@ -185,7 +187,7 @@ test('Windows PR final release-check只允许#183一次性冲突合并synchroniz
     eventName: 'pull_request',
     action: 'synchronize',
     pullRequestNumber: 183,
-    commits: 5,
+    commits: 6,
     headRef: 'codex/v3.2.1-r4-review-hardening',
     baseRef: 'codex/v3.2.1-r3-release-evidence',
     headRepository: sameRepository,
@@ -207,7 +209,7 @@ test('Windows PR final release-check只允许#183一次性冲突合并synchroniz
     eventName: 'pull_request',
     action: 'synchronize',
     pullRequestNumber: 183,
-    commits: 4,
+    commits: 5,
     headRef: 'codex/v3.2.1-r4-review-hardening',
     baseRef: 'codex/v3.2.1-r3-release-evidence',
     headRepository: sameRepository,
@@ -217,7 +219,7 @@ test('Windows PR final release-check只允许#183一次性冲突合并synchroniz
     '非精确commit count的final synchronize必须跳过');
   assert.equal(shouldRejectUnauthorizedFinal(staleSynchronize), true,
     '非精确commit count的final synchronize必须稳定FAIL');
-  assert.equal(shouldRejectUnauthorizedFinal({ ...authorized, commits: 6 }), true,
+  assert.equal(shouldRejectUnauthorizedFinal({ ...authorized, commits: 7 }), true,
     '授权push之后的再次synchronize必须稳定FAIL');
   assert.equal(shouldRejectUnauthorizedFinal({ ...authorized, action: 'reopened' }), true,
     'final reopened必须稳定FAIL');

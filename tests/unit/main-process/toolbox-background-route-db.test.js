@@ -47,7 +47,8 @@ const {
   sha256FileSync
 } = require('../../../src/main-process/toolbox-background/route-db-contract');
 const {
-  assertDirectoryDurable
+  assertDirectoryDurable,
+  writeSealedManifest
 } = require('../../../src/main-process/toolbox-background/route-db-sealer');
 const {
   writeOutputsFromSealedRouteDb
@@ -247,6 +248,28 @@ test('Windows目录fsync unsupported 会阻断Route DB seal，不伪造durabilit
       (error) => error.code === 'TOOLBOX_ROUTE_DURABILITY_UNAVAILABLE'
     );
   }
+});
+
+test('Route DB manifest与DB seal共享同一directory barrier且unsupported保持fail closed', () => {
+  const dir = tempDir();
+  const supportedPath = path.join(dir, 'supported.json');
+  let barrierCalls = 0;
+  const artifact = writeSealedManifest(supportedPath, { status: 'sealed' }, {
+    fsyncDirectory() {
+      barrierCalls += 1;
+      return { capability: 'supported' };
+    }
+  });
+  assert.equal(barrierCalls, 1);
+  assert.equal(artifact.byteSize, fs.statSync(supportedPath).size);
+
+  const unsupportedPath = path.join(dir, 'unsupported.json');
+  assert.throws(
+    () => writeSealedManifest(unsupportedPath, { status: 'sealed' }, {
+      fsyncDirectory() { return { capability: 'unsupported', errorCode: 'EPERM' }; }
+    }),
+    (error) => error.code === 'TOOLBOX_ROUTE_DURABILITY_UNAVAILABLE'
+  );
 });
 
 test('Scanner等待Writer exit barrier；message后非0/transport error不能冒充成功', async () => {

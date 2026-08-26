@@ -128,12 +128,48 @@
         "intendedHead": "ce599e206894f3683b748254068dd750479ffc74",
         "reason": "PULL_REQUEST_MERGE_CONFLICT",
         "satisfiesHardGate": false
+      },
+      {
+        "attemptNumber": 5,
+        "status": "FAILURE",
+        "authorization": "PR_CONFLICT_RESOLUTION_SYNCHRONIZE_SINGLE_USE_WAIVER",
+        "trigger": "PULL_REQUEST_SYNCHRONIZE_REQUIRED_CI",
+        "workflowRunId": 32995472567,
+        "reviewedHead": "f87f2b2994e86b75d350f64eec53252fe24a67b6",
+        "smokeTestConclusion": "FAILURE",
+        "buildConclusion": "SKIPPED",
+        "unit": {
+          "passed": 6154,
+          "total": 6176,
+          "failed": 20,
+          "skipped": 2,
+          "cancelled": 0
+        },
+        "failureGroups": [
+          {
+            "id": "PREFUND_MAIN_PARSER_OUTCOME_DIRECTORY_FSYNC",
+            "leafFailures": 13
+          },
+          {
+            "id": "TOOLBOX_MANIFEST_DIRECTORY_FSYNC_SEAM",
+            "leafFailures": 4
+          },
+          {
+            "id": "WINDOWS_CRLF_STATIC_CONTRACT",
+            "leafFailures": 1
+          },
+          {
+            "id": "WINDOWS_CRLF_EVIDENCE_HASH",
+            "leafFailures": 2
+          }
+        ],
+        "satisfiesHardGate": false
       }
     ],
     "automaticRequiredCi": {
-      "attemptNumber": 5,
+      "attemptNumber": 6,
       "status": "PENDING_REMOTE_REQUIRED_CI",
-      "authorization": "PR_CONFLICT_RESOLUTION_SYNCHRONIZE_SINGLE_USE_WAIVER",
+      "authorization": "PR_WINDOWS_UNIT_REPAIR_SYNCHRONIZE_SINGLE_USE_WAIVER",
       "workflowSource": ".github/workflows/build-windows.yml",
       "trigger": "PULL_REQUEST_SYNCHRONIZE_REQUIRED_CI",
       "sameRepositoryOnly": true,
@@ -142,9 +178,10 @@
       "branch": "codex/v3.2.1-r4-review-hardening",
       "baseRef": "codex/v3.2.1-r3-release-evidence",
       "pullRequestNumber": 183,
-      "expectedPullRequestCommits": 5,
-      "expectedFirstParentHead": "ce599e206894f3683b748254068dd750479ffc74",
-      "expectedSecondParentHead": "d7d96938196a61a36892c40721cdba56992a14a8",
+      "expectedPullRequestCommits": 6,
+      "expectedParentHead": "f87f2b2994e86b75d350f64eec53252fe24a67b6",
+      "preservedMergeFirstParentHead": "ce599e206894f3683b748254068dd750479ffc74",
+      "preservedMergeSecondParentHead": "d7d96938196a61a36892c40721cdba56992a14a8",
       "headBinding": "github.event.pull_request.head.sha",
       "nonPullRequestHeadBinding": "github.sha",
       "invocationLimit": 1,

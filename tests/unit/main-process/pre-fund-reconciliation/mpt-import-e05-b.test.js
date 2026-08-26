@@ -93,7 +93,7 @@ const {
 } = require('../../../../src/main-process/pre-fund-reconciliation/mpt-import/policies');
 const {
   readParserOutcome,
-  writeParserOutcome
+  writeParserOutcome: writeParserOutcomeRaw
 } = require('../../../../src/main-process/pre-fund-reconciliation/mpt-import/parser-outcome');
 const {
   allowMptFinanceSafeValue,
@@ -131,6 +131,7 @@ const {
 } = require('../../../../src/main-process/pre-fund-reconciliation/service');
 const {
   createSupportedDirectoryFsyncWorkerClass,
+  supportedDirectoryFsync,
   withSupportedDirectoryFsync
 } = require('../../shared/directory-fsync-test-runtime');
 
@@ -140,9 +141,14 @@ function writeMptFileSpool(input, options = {}) {
   return writeMptFileSpoolRaw(input, withSupportedDirectoryFsync(options));
 }
 
+function writeParserOutcome(input, outcome, options = {}) {
+  return writeParserOutcomeRaw(input, outcome, withSupportedDirectoryFsync(options));
+}
+
 function executeManagedPreFundMptImport(options) {
   return executeManagedPreFundMptImportRaw({
     ParserWorkerClass: SupportedDirectoryFsyncWorker,
+    parserOutcomeFsyncDirectory: supportedDirectoryFsync,
     ...options
   });
 }
@@ -921,6 +927,19 @@ test('sealed parser outcome绑定固定identity并拒绝tamper与symlink，clean
     cleanupMptFileSpool(unsafeInput);
     cleanupMptSpoolParents(unsafeInput);
   });
+});
+
+test('Parser outcome测试注入不放宽生产默认directory durability fail-closed', () => {
+  const filePath = writeFile('622', [inboundRow({ reconId: 'OUTCOME-DURABILITY' })]);
+  const input = spoolInput(filePath, 'parser-outcome-durability-parent');
+  assert.throws(
+    () => writeParserOutcomeRaw(input, { kind: 'spool' }, {
+      fsyncDirectory() { return { capability: 'unsupported', errorCode: 'EPERM' }; }
+    }),
+    (error) => error.code === 'PREFUND_SPOOL_DURABILITY_UNAVAILABLE'
+  );
+  cleanupMptFileSpool(input);
+  cleanupMptSpoolParents(input);
 });
 
 test('sealed success sidecar后的Coordinator失败保留原cause且Main清理未交接spool', async () => {

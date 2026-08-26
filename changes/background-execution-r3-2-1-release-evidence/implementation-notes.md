@@ -20,6 +20,7 @@
 | Windows unit 的 spool/Route DB 行为测试显式注入 supported directory barrier，同时保留默认生产实现的真实平台 fail-closed 回归。 | PR #182 attempt #2 在 Windows 上按生产合同拒绝目录 `fsync` unsupported；schema、顺序、receipt、Pool、Route DB 与生命周期用例不应由宿主目录屏障能力决定。 | 放宽生产 barrier；在 Windows 跳过行为测试；把 unsupported 当作 durability success。 | 只新增 `tests/unit/shared` helper/preload并改测试调用点；`src/`、金额、币种、sequence、receipt、Hold和production gate零改动。 |
 | 依赖真实 Worker 的行为测试固定可复现的测试资源预算；专门的资源降级测试继续显式覆盖边界。 | 当前host可用内存贴近E00 2 GiB reserve时，真实行为测试会在5秒准入期内被拒绝，形成与业务无关的随机失败。 | 放宽生产5秒准入或内存reserve；按当前host结果降低断言。 | 仅在测试runtime wrapper和单个host探针断言中固定资源；显式budget、downgrade与production topology实现不变。 |
 | #182 follow-up 不重跑全量 `release-check`；最终全量门禁只属于 v3.2.1 最后一张 PR #183。 | release owner 最新约束：`release-check` 仅在 3.2.1 最后一张 PR 提远端时对整个版本执行一次。 | 手工 rerun、`workflow_dispatch`、在 #182 synchronize 上再次执行。 | #182 仅运行定向验证与正常非全量 CI；final hard gate仍由 #183 的独立远端结果决定。 |
+| 将 #183 attempt #5 固定为 FAILURE，并只为其单个 Windows unit 修复提交授权 automatic attempt #6。 | run `32995472567` 已通过 lint/实际 smoke 后在 full unit 出现 20 个 leaf failure；四组根因均为 Windows 测试宿主或 CRLF 文本差异，不是业务金额、币种、receipt 或 Hold 合同变化。 | rerun attempt #5；允许任意后续 synchronize；用 #182 CI 代偿 #183。 | workflow 锁定 PR commits 6、`HEAD^1=f87f2b29` 并复核其双父；未来 push、rerun、reopened、dispatch及错误base均在 checkout 前拒绝。 |
 
 ## Assumptions
 
@@ -55,6 +56,8 @@
 | #182 Windows test isolation 定向验证 | E05-A `42/42 PASS`（含默认真实平台 supported/unsupported分支）；E05-B `38/38 PASS`；E05-C `15/15 PASS`；Toolbox Route DB `8/8 PASS`；Toolbox generation `10/10 PASS`；mature adapters `11/11 PASS`；全部正常退出 | test seam覆盖直接 Writer、真实 Parser/Scanner/Writer Worker与资源准入；默认生产 barrier仍单独验证 fail closed；未运行 `release-check`。 |
 | #182 follow-up全量unit组件 | `npm run test:unit` `EXIT 0`：6174 tests、6171 pass、0 fail、3 skip、377 unit files、24989ms；log `logs/unit-tests/unit-20260826-230615.log` | 证明跨文件并发下无准入假失败且Node测试进程正常退出；这是独立unit组件，不是`release-check`，不替代最终PR #183远端全量证据。 |
 | #183 conflict-resolution本地验证 | 定向矩阵 `149 tests / 147 pass / 0 fail / 2 Windows-only skip`；affected ESLint、`node --check`、Windows contract `5 pass / 2 skip`、release evidence `11/11`、validator与`git diff --check` PASS；全量unit `6173/6176 PASS`、0 fail、3 skip、377 unit files、25514ms；log `logs/unit-tests/unit-20260827-013456.log` | 证明双父冲突消解保留 #182 isolation 与 #183 hardening，且本地跨文件收口正常；未运行本地`release-check`，不替代attempt #5远端Windows hard gate。 |
+| PR #183 automatic attempt #5（Actions run `32995472567`，reviewed HEAD `f87f2b2994e86b75d350f64eec53252fe24a67b6`） | smoke-test job `FAILURE`、build `SKIPPED`；lint与实际 smoke PASS，full unit `6154/6176 PASS`、20 fail、2 skip | attempt #5 不满足 hard gate；20 个 leaf failure归为 Parser outcome 13、Route DB 4、Renderer CRLF 1、release evidence CRLF 2，不是 smoke phase循环失败。 |
+| #183 attempt #6 Windows unit修复本地验证 | core四组定向 `85/85 PASS`；最终组合矩阵 `90/92 PASS`、0 fail、2 Windows-only skip；full unit `6176/6179 PASS`、0 fail、3 skip、377 files、24910ms；log `logs/unit-tests/unit-20260827-031902.log`；validator、affected ESLint、`node --check`、`git diff --check` PASS | 生产默认仍使用真实目录 `fsync` 并在 unsupported 时 fail closed；test seam不进入生产默认；CRLF canonicalization只作用于静态合同/证据文本；未运行本地`release-check`。 |
 
 ## Blindspot Pass
 
@@ -76,11 +79,11 @@
 - 影响：自动测试若把任一项升级为PASS，会越过durability、格式或恢复边界。
 - 处置：BLOCK production enable。每action gate独立记录，tamper test禁止升级。
 
-### [Important] PR-opening CI waiver不得扩大
+### [Important] final PR CI waiver不得扩大
 
-- 事实：local attempt #1失败；remote required CI attempt #2尚未运行。
-- 影响：若pending被伪造为PASS、改到其他head branch/target base/commit或增加invocation，会绕过最终hard gate。
-- 处置：workflow、Windows contract test、validator与tamper test共同锁定same-repo final PR `opened`、E05-C target base、PR head SHA、首次automatic run和所有非授权动作false；CI PASS前不允许merge或production enable。
+- 事实：local attempt #1失败；#182 attempt #2取消；#183 attempt #3取消、#4未启动、#5在Windows full unit失败；当前只授权修复提交的 attempt #6。
+- 影响：若任一失败/取消结果被伪造为PASS，或放宽到其他head/base/commit、未来push、rerun或dispatch，会绕过最终hard gate。
+- 处置：workflow、Windows contract test、validator与tamper test共同锁定same-repo PR #183、R4→R3、synchronize、run attempt 1、PR commits 6、`HEAD^1=f87f2b29`及其双父血缘；attempt #6 PASS前不允许merge #183或production enable。
 
 ### [Important] 测试 barrier 不得逃逸到生产或掩盖真实平台失败
 
@@ -117,7 +120,7 @@
 | Packaged Windows、Excel/WPS、真实进程终止证据 | BLOCK production enable / `NOT_RUN` | Release owner 在真实 packaged Windows 与 Office 环境执行 | 不阻断 evidence artifact；阻断相关 native production enable。 |
 | 真实业务文件与资金/恢复人工复核 | BLOCK production enable / `PENDING_HUMAN_REVIEW` | Toolbox/PreFund 业务与恢复 owner | ⚠️ 资金与恢复红线，请人工复核。 |
 | 当前host资源波动曾使重量级real Worker测试被admission拒绝 | CLOSED FOR TEST DETERMINISM / production gate unchanged | 行为测试固定测试预算；专门的resource/downgrade测试继续覆盖真实边界 | 定向矩阵与全量unit均已通过；生产reserve、降级与5秒准入未放宽。 |
-| #182 automatic attempt #2 已取消；#183 attempt #4 因冲突未启动；v3.2.1 最终全量 CI 证据尚未闭合 | OPEN HARD GATE / final PR required CI | #182 不运行全量 `release-check`；由最后一张 PR #183 attempt #5 在精确head/base与双父血缘上提供一次独立远端结果 | 旧取消/未启动结果不能代替 #183 attempt #5，也不能被本地定向 PASS 改写；远端 PASS 前不授权 main/tag/production enable。 |
+| #182 automatic attempt #2 已取消；#183 attempt #4 因冲突未启动、attempt #5 在 Windows full unit失败；v3.2.1 最终全量 CI 证据尚未闭合 | OPEN HARD GATE / final PR required CI | #182 不运行全量 `release-check`；由最后一张 PR #183 attempt #6 在精确修复head/base与父链上提供一次独立远端结果 | 旧取消/未启动/失败结果不能代替 #183 attempt #6，也不能被本地定向 PASS 改写；远端 PASS 前不授权 main/tag/production enable。 |
 
 ## PR #183 Conflict-Resolution Final Gate 授权记录（2026-08-27）
 
@@ -128,3 +131,12 @@
 - checkout 后 lineage：HEAD 必须等于 event head SHA；`HEAD^1` 必须精确等于 `ce599e206894f3683b748254068dd750479ffc74`；`HEAD^2` 必须精确等于 `d7d96938196a61a36892c40721cdba56992a14a8`。任一条件漂移都会在 `npm ci` 与 `release-check` 前失败。
 - 冲突仅出现在本 evidence notes/preflight；E05-C 测试自动合并，`src/` 无冲突。保留 #182 测试隔离与 #183 hardening，不改变金额、币种、sequence、receipt、Recovery Hold 或 production policy。
 - 本地只运行定向测试、静态合同和 full unit component；没有运行本地 `release-check`、`check-vars` 或 `scan:vars`。hard gate、main/tag/production enablement 与资金/恢复人工红线均未闭合。
+
+## PR #183 Windows Unit Repair Final Gate 授权记录（2026-08-27）
+
+- automatic attempt #5：Actions run `32995472567`，reviewed head `f87f2b2994e86b75d350f64eec53252fe24a67b6`；lint与实际 smoke PASS，full unit `6154/6176 PASS`、20 fail、2 skip，build `SKIPPED`。该结果固定为 `FAILURE`，永不满足 hard gate。
+- 20 个 leaf failure 分成四个同源组：PreFund Parser outcome 13、Toolbox Route DB 4、Renderer静态LF搜索1、release evidence source hash CRLF 2。修复只为Main/Worker测试共享barrier、Route manifest barrier注入与静态文本canonicalization；生产默认仍调用真实目录`fsync`并在unsupported时fail closed。
+- release owner 授权：只允许一个以`f87f2b29`为唯一父的修复提交，并仅由该次normal synchronize触发automatic attempt #6；禁止rerun、`workflow_dispatch`、reopened、未来push、admin绕过或用#182结果代偿。
+- machine tuple：PR number `183`、same repository、head `codex/v3.2.1-r4-review-hardening`、base `codex/v3.2.1-r3-release-evidence`、action `synchronize`、`github.run_attempt == 1`、`pull_request.commits == 6`；两个job继续checkout exact event head。
+- checkout后lineage：`HEAD^1=f87f2b2994e86b75d350f64eec53252fe24a67b6`；并复核`HEAD^1^1=ce599e206894f3683b748254068dd750479ffc74`、`HEAD^1^2=d7d96938196a61a36892c40721cdba56992a14a8`。任一漂移都在依赖安装与`release-check`前失败。
+- 本地只运行定向矩阵、full unit component、validator和静态检查；没有运行本地`release-check`、`check-vars`或`scan:vars`。attempt #6远端成功前，hard gate、main/tag/production enablement及资金/恢复人工红线均保持open。

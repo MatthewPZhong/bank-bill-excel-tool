@@ -110,7 +110,9 @@ test.describe('前置资金对账 UI / preload / IPC 接线', () => {
       assert.ok(main.includes(`'${channel}'`), `main 缺少 ${channel}`);
     }
     assert.match(main, /temp:count-by-date-range'[\s\S]*countTempByDateRange\(payload\)/);
-    const deleteRangeStart = main.indexOf("trackedIpcHandle(\n    'pre-fund-reconciliation:temp:delete-by-date-range'");
+    const deleteRangeStart = main.search(
+      /trackedIpcHandle\(\r?\n\s+'pre-fund-reconciliation:temp:delete-by-date-range'/
+    );
     const deleteRangeEnd = main.indexOf(
       "trackedIpcHandle('pre-fund-reconciliation:temp:clear'",
       deleteRangeStart

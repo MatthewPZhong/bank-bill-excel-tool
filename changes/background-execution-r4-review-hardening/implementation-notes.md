@@ -274,3 +274,49 @@
 | attempt #5 Windows full gate 与 packaged build | 只等待这次 normal push 的自动 Actions；不 rerun、不 dispatch、不再 push | 任一失败/取消均停止，不能合并 #183 |
 | #182 先合并后 #183 改 base 产生的新 checks | 严格顺序处理并等待自然 CI | 新 base checks 未成功前不得 merge #183 |
 | 真实业务文件、资金与恢复人工复核 | 保持 `PENDING_HUMAN_REVIEW` | 不阻断 evidence PR；持续阻断 production enablement |
+
+## PR #183 Windows Unit Repair Synchronize Attempt #6（2026-08-27）
+
+### Decisions
+
+| 决定 | 原因与证据 | 放弃方案 | 影响 |
+| --- | --- | --- | --- |
+| 把 attempt #5 记为独立 FAILURE，不把 job 名 `smoke-test` 当成 smoke phase 失败 | run `32995472567` 已执行到 full unit；因此 lint 与 smoke 已完成，unit 汇总为 20 fail | rerun attempt #5；只看 job 名反复修改 smoke script | 失败证据可审计，attempt #5 永不满足 hard gate |
+| Parser outcome sidecar采用显式可注入 directory barrier，managed B/C 测试统一注入 supported | 13 个 leaf failure均是 Main sidecar publication调用真实 Windows directory fsync；Worker preload只覆盖 Parser Worker | 在 Windows 跳过测试；把 production Windows unsupported 当 supported；全局 monkey-patch | normal product call不传 seam，继续真实 fsync/fail closed；测试只隔离宿主能力，不改 receipt 或业务结果 |
+| Route DB manifest原子写复用 seal 已选择的同一个 barrier | 4 个 leaf failure证明 direct Route DB barrier已注入，但 `writeFileAtomicDurable` 默认闭包仍是真实 barrier | 删除 manifest durability；在 Windows 特判成功 | DB 与 manifest共享能力结论；任一 unsupported继续拒绝 sealed result |
+| 文本 static/hash合同 canonicalize line ending | Renderer marker硬编码 LF；10 个 evidence source hash在 Windows CRLF同时漂移 | 更新 10 个 Windows-only hash；修改业务源码排版；依赖 runner git config | 同一 repository文本在 LF/CRLF checkout下结论一致，真实内容变化仍失败 |
+| attempt #6 绑定单一修复提交 | release owner已授权修复；attempt #5 head是唯一审查父 | 放宽任意 synchronize；rerun/dispatch/admin bypass | commits=6，`HEAD^1=f87f2b29`，并复核 `f87^1=ce599e20`、`f87^2=d7d96938`；未来 push稳定失败 |
+
+### Deviations
+
+| 原计划 | 实际 | 原因 | 影响 | Spec 已同步 |
+| --- | --- | --- | --- | --- |
+| attempt #5 完成后直接进入 #182/#183 顺序合并 | attempt #5 在 full unit 失败，build skipped；新增一次明确授权的 attempt #6 | Windows runner首次同时暴露 Main/test barrier seam 与 CRLF checkout差异 | 不合并失败快照；修复范围限定为平台测试隔离、文本 canonicalization 与 gate evidence | 是，见同目录 preflight attempt #6 |
+
+### Evidence
+
+| 检查 | 结果 | 证明/边界 |
+| --- | --- | --- |
+| GitHub run `32995472567` | smoke-test job `FAILURE`、build `SKIPPED`；unit `6154/6176 PASS`、20 fail、2 skip | attempt #5 不满足 hard gate；失败发生在 unit phase，不是 `npm run smoke` phase |
+| 精确 `not ok` 聚类 | MPT 13；Toolbox 4；Renderer CRLF leaf 1（另有 suite aggregate）；release evidence CRLF 2 | 20 个 leaf failure均被四个根因完整覆盖，无未归因失败 |
+| 修复定向矩阵 | `85/85 PASS`、0 fail、0 skip | 覆盖 E05-B/C managed与direct sidecar、Toolbox DB/manifest、Renderer CRLF marker、evidence CRLF hash |
+| deterministic durability probes | parser outcome unsupported抛 `PREFUND_SPOOL_DURABILITY_UNAVAILABLE`；Route manifest unsupported抛 `TOOLBOX_ROUTE_DURABILITY_UNAVAILABLE` | 测试 seam未把真实生产 fail-closed改成伪成功 |
+| final combined targeted matrix | `90/92 PASS`、0 fail、2 Windows-only skip；其中core四组修复先独立 `85/85 PASS` | barrier、CRLF、release evidence与Windows gate合同共同收口 |
+| full unit component | `6176/6179 PASS`、0 fail、3 skip、377 files、24910ms；log `logs/unit-tests/unit-20260827-031902.log` | 全仓组件回归；未运行本地 `release-check`，不替代远端 attempt #6 |
+| gate/validator static matrix | validator PASS；affected ESLint、`node --check`、`git diff --check` PASS | attempt #6 tuple、lineage、failure history和machine snapshot一致 |
+
+### Blindspot / Reconciliation Review
+
+- 入口旁路：direct parser outcome、managed B/C、Parser Worker、Route DB与manifest五个入口均有覆盖；没有以 platform skip、environment flag 或 production selector 绕过真实 durability。
+- 状态生命周期：attempt #5固定为 FAILURE；attempt #6保持 PENDING，只有远端 success 才能关闭 hard gate。build skipped不能被解释为 PASS，未来第 7 个 commit、rerun、reopened、dispatch或错误base均在 checkout 前拒绝。
+- 兼容性：CRLF canonicalization仅用于 repository文本证据；不应用于业务输入文件、MPT内容hash、数据库receipt或输出文件hash。
+- 资金/恢复：金额、币种、source identity、fileIndex、sequence、row conservation、receipt、幂等、Recovery Hold与cleanup ownership均未改。生产默认 barrier仍是真实能力并fail closed；native production继续 disabled。
+- 资金红线人工复核：本次没有新增金额/方向/主键/幂等变更；既有真实业务文件、资金与恢复 `PENDING_HUMAN_REVIEW` 仍阻断 production enablement，不由自动 CI 改写。
+
+### Remaining Unknowns
+
+| 未知 | 处理 | 合并影响 |
+| --- | --- | --- |
+| attempt #6 在 GitHub-hosted Windows 的 full gate 与 packaged build | 只允许修复提交的自然 synchronize；不 rerun、dispatch或追加push | 任一失败/取消均暂停，#183不得 merge |
+| #182 合并与 #183 改 base 后的自然 checks | 继续按 #182→#183 严格顺序处理 | 新 base pending/failed 时等待或暂停，不用旧结果替代 |
+| 真实业务文件、资金与恢复人工复核 | 保持 `PENDING_HUMAN_REVIEW` | 持续阻断 production enablement；不由本修复声明 PASS |

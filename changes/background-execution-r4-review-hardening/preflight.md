@@ -66,3 +66,31 @@
 | #182 与 #183 同时修改 evidence docs 与 E05-C tests | 堆叠拓扑 | 中 | PROBE | 实际仅两份 evidence docs 文本冲突；E05-C tests 自动合并，`src/` 无冲突。merge commit 以 #182 exact head 为第二父，避免内容等价但血缘分叉 |
 
 无新增产品、资金、数据模型或公开接口 BLOCK；远端 final gate PASS 仍是合并前硬证据。
+
+## PR #183 Windows Unit Repair Final Gate Attempt #6（2026-08-27）
+
+### Task Brief
+
+- Goal：修复 attempt #5 在 Windows full unit 暴露的 20 个 leaf failure，并只授权修复提交的一次自动 final gate。
+- Context：run `32995472567` 在 exact head `f87f2b2994e86b75d350f64eec53252fe24a67b6` 上进入 `npm run release-check`；lint 与 smoke 已通过后，unit 为 `6154/6176 PASS`、20 fail、2 skip，build 因 `needs: smoke-test` 跳过。
+- Constraints：不运行本地 `release-check`、`check-vars` 或 `scan:vars`；不 rerun、`workflow_dispatch`、admin 绕过或额外 push；不改变金额、币种、主键、sequence、receipt、Recovery Hold、production selector 或人工资金/恢复门禁。
+- Done when：20 个失败按四个同源组全部收口；生产默认仍使用真实 directory `fsync` 并在 unsupported 时 fail closed；文本合同跨 LF/CRLF 一致；本地定向与 full unit 通过；attempt #6 仅允许 PR #183、same-repo、R4→R3、synchronize、run attempt 1、PR commits=6，且新 head 的唯一父为 `f87f2b29`。
+
+### 已确认事实与 Unknowns Register
+
+| 事实/未知 | 类型 | 影响 | 处理 | 当前决定 |
+| --- | --- | --- | --- | --- |
+| 13 个 MPT leaf failure 都发生在 Main 发布 parser outcome sidecar；Parser Worker spool 已使用 supported test barrier | 平台/状态边界 | 高 | PROBE | `writeParserOutcome` 增加与 spool writer 同型的可注入 barrier；managed test wrapper 注入 supported，生产未传参数时继续使用真实 `fsyncDirectory` |
+| 4 个 Toolbox leaf failure的 Route DB 本体 barrier 已注入，但 manifest 的 `writeFileAtomicDurable` 捕获了模块内真实 barrier | 平台/持久化 | 高 | PROBE | manifest 原子写显式复用 Route DB seal 的同一个 barrier；unsupported 仍由 `assertDirectoryDurable` 拒绝 |
+| 1 个 Renderer static contract 与 2 个 evidence test 只在 CRLF checkout 漂移 | 兼容性 | 中 | PROBE | 源码定位接受 `CRLF/LF`；evidence hash 以 LF canonical text 为权威，并新增 CRLF parity test |
+| 测试 barrier 是否可能进入产品调用 | 资金/恢复 | 高 | PROBE | seam 仅为可选内部依赖；normal call 缺省真实 barrier，另加 deterministic unsupported fail-closed test；production policy 仍 disabled |
+| Windows runner 是否完整消除 20 个失败 | 外部平台证据 | 高 | BLOCK（合并前） | 仅由 attempt #6 的自然 synchronize CI 回答；失败不得 rerun、绕过或 merge |
+
+### 风险优先计划
+
+| 顺序 | 步骤 | 保护的不变量 | 成功证据 | 失败处置 |
+| --- | --- | --- | --- | --- |
+| 1 | 绑定 20 个 leaf failure 到四个同源组 | 不把 job 名称误判为 smoke 失败；不盲改业务 | 远端 `not ok` 列表与 13/4/1/2 计数一致 | 停止扩散修复，继续取精确错误证据 |
+| 2 | 修复 barrier test seam 与 CRLF 合同 | 真实 unsupported 仍 fail closed；receipt/金额/行数不变 | core四组85/85；最终组合90/92（2个Windows-only skip）；新增supported/unsupported barrier tests | 回滚对应 seam，不动 production policy |
+| 3 | full unit、validator、静态合同与 blindspot review | 无跨模块、证据或 gate 漂移 | full unit 0 fail；validator PASS；workflow exact lineage PASS | 不提交/不 push |
+| 4 | 单提交、单 push attempt #6 | attempt #5 失败不可改写；未来 push/rerun稳定拒绝 | commits=6、`HEAD^1=f87f2b29`、保留其 exact 双父 | 任一漂移暂停并重新请求授权 |

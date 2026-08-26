@@ -59,6 +59,7 @@ const {
 } = require('../../../../src/main-process/pre-fund-reconciliation/mpt-import/spool-writer');
 const {
   createSupportedDirectoryFsyncWorkerClass,
+  supportedDirectoryFsync,
   withSupportedDirectoryFsync
 } = require('../../shared/directory-fsync-test-runtime');
 
@@ -71,6 +72,7 @@ function writeMptFileSpool(input, options = {}) {
 function executeManagedPreFundMptImport(options) {
   return executeManagedPreFundMptImportRaw({
     ParserWorkerClass: SupportedDirectoryFsyncWorker,
+    parserOutcomeFsyncDirectory: supportedDirectoryFsync,
     ...options
   });
 }
