@@ -616,6 +616,7 @@ test('Ordered Coordinator乱序ready/error仍严格递增、consumer单飞、结
   let maxActive = 0;
   const coordinator = createOrderedMptCoordinator({
     fileCount: 4,
+    readyHighWaterMark: 4,
     async consumeReady(spool, { fileIndex }) {
       active += 1;
       maxActive = Math.max(maxActive, active);
@@ -625,10 +626,11 @@ test('Ordered Coordinator乱序ready/error仍严格递增、consumer单飞、结
       return { status: 'ok', fileIndex, spoolId: spool.id };
     }
   });
-  coordinator.submitReady(3, { id: 'spool-3' });
-  coordinator.submitReady(1, { id: 'spool-1' });
-  coordinator.submitBusinessError(2, { status: 'failed', fileIndex: 2, code: 'MPT_ROW_ERRORS' });
-  coordinator.submitReady(0, { id: 'spool-0' });
+  const permits = await Promise.all(Array.from({ length: 4 }, () => coordinator.acquireDispatchPermit()));
+  permits[3].submitReady(3, { id: 'spool-3' });
+  permits[1].submitReady(1, { id: 'spool-1' });
+  permits[2].submitBusinessError(2, { status: 'failed', fileIndex: 2, code: 'MPT_ROW_ERRORS' });
+  permits[0].submitReady(0, { id: 'spool-0' });
   const results = await coordinator.completion();
   assert.deepEqual(consumed, [0, 1, 3]);
   assert.equal(maxActive, 1);
@@ -644,16 +646,23 @@ test('Ordered Coordinator高水位背压、取消与transport crash按各自合�
       readyHighWaterMark: 2,
       consumeReady: async (spool) => ({ status: 'ok', id: spool.id })
     });
-    coordinator.submitReady(1, { id: 1 });
-    coordinator.submitReady(2, { id: 2 });
+    const permit0 = await coordinator.acquireDispatchPermit();
+    const permit1 = await coordinator.acquireDispatchPermit();
+    permit1.submitReady(1, { id: 1 });
     let capacityReleased = false;
-    const capacity = coordinator.waitForDispatchCapacity().then(() => { capacityReleased = true; });
+    const capacity = coordinator.acquireDispatchPermit().then((permit) => {
+      capacityReleased = true;
+      return permit;
+    });
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(capacityReleased, false);
-    coordinator.submitBusinessError(0, { status: 'failed', id: 0 });
-    await capacity;
+    permit0.submitBusinessError(0, { status: 'failed', id: 0 });
+    const permit2 = await capacity;
+    permit2.submitReady(2, { id: 2 });
     const results = await coordinator.completion();
     assert.deepEqual(results.map((item) => item.id), [0, 1, 2]);
+    assert.equal(coordinator.snapshot().maxObservedPermitCount, 2);
+    assert.equal(coordinator.snapshot().activePermitCount, 0);
   });
 
   await t.test('取消后completion拒绝且不消费后续', async () => {

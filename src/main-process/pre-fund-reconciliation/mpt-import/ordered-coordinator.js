@@ -32,7 +32,12 @@ class OrderedMptCoordinator {
     this.results = new Array(this.fileCount);
     this.bufferedReadyCount = 0;
     this.consumerActive = false;
+    this.activePermitCount = 0;
+    this.maxObservedPermitCount = 0;
+    this.nextPermitId = 0;
+    this.permitRecords = new WeakMap();
     this.capacityWaiters = [];
+    this.capacityObservers = [];
     this.fatalError = null;
     this.settled = false;
     this.drainPromise = Promise.resolve();
@@ -68,15 +73,74 @@ class OrderedMptCoordinator {
     return index;
   }
 
-  _releaseCapacityWaiters() {
-    if (this.bufferedReadyCount >= this.readyHighWaterMark) return;
-    const waiters = this.capacityWaiters.splice(0);
-    for (const waiter of waiters) waiter.resolve();
+  _newPermit() {
+    const record = { id: ++this.nextPermitId, state: 'reserved' };
+    let permit;
+    permit = Object.freeze({
+      id: record.id,
+      submitReady: (fileIndex, spool) => this.submitReady(fileIndex, spool, permit),
+      submitBusinessError: (fileIndex, fileResult) =>
+        this.submitBusinessError(fileIndex, fileResult, permit),
+      submitTransportCrash: (fileIndex, fileResult) =>
+        this.submitTransportCrash(fileIndex, fileResult, permit),
+      release: () => this._releaseReservedPermit(record)
+    });
+    this.permitRecords.set(permit, record);
+    this.activePermitCount += 1;
+    this.maxObservedPermitCount = Math.max(this.maxObservedPermitCount, this.activePermitCount);
+    return permit;
+  }
+
+  _notifyCapacityAvailable() {
+    if (this.fatalError || this.settled || this.activePermitCount >= this.readyHighWaterMark) return;
+    const observers = this.capacityObservers.splice(0);
+    for (const observer of observers) observer.resolve();
+    while (!this.fatalError && !this.settled &&
+        this.activePermitCount < this.readyHighWaterMark && this.capacityWaiters.length) {
+      this.capacityWaiters.shift().resolve(this._newPermit());
+    }
   }
 
   _rejectCapacityWaiters(error) {
     const waiters = this.capacityWaiters.splice(0);
     for (const waiter of waiters) waiter.reject(error);
+    const observers = this.capacityObservers.splice(0);
+    for (const observer of observers) observer.reject(error);
+  }
+
+  _releaseReservedPermit(record) {
+    if (!record || record.state !== 'reserved') return false;
+    record.state = 'released';
+    this.activePermitCount -= 1;
+    this._notifyCapacityAvailable();
+    return true;
+  }
+
+  _releaseSubmittedPermit(record) {
+    if (!record || record.state !== 'submitted') return false;
+    record.state = 'released';
+    this.activePermitCount -= 1;
+    this._notifyCapacityAvailable();
+    return true;
+  }
+
+  _claimPermit(permit) {
+    let ownedPermit = permit;
+    if (ownedPermit === undefined) {
+      if (this.activePermitCount >= this.readyHighWaterMark) {
+        throw spoolError(
+          'PREFUND_COORDINATOR_CAPACITY_REQUIRED',
+          '提交parser结果前必须取得有界dispatch permit'
+        );
+      }
+      ownedPermit = this._newPermit();
+    }
+    const record = this.permitRecords.get(ownedPermit);
+    if (!record || record.state !== 'reserved') {
+      throw spoolError('PREFUND_COORDINATOR_PERMIT_INVALID', 'dispatch permit无效或已消费');
+    }
+    record.state = 'submitted';
+    return record;
   }
 
   _fail(error) {
@@ -85,6 +149,10 @@ class OrderedMptCoordinator {
     this.settled = true;
     if (this.signal) this.signal.removeEventListener('abort', this.onAbort);
     this._rejectCapacityWaiters(error);
+    for (const entry of this.entries.values()) {
+      this._releaseSubmittedPermit(entry.permitRecord);
+    }
+    this.entries.clear();
     this.rejectCompletion(error);
   }
 
@@ -99,9 +167,9 @@ class OrderedMptCoordinator {
       const fileIndex = this.nextConsumeIndex;
       const entry = this.entries.get(fileIndex);
       this.entries.delete(fileIndex);
+      this._releaseSubmittedPermit(entry.permitRecord);
       if (entry.kind === 'ready') {
         this.bufferedReadyCount -= 1;
-        this._releaseCapacityWaiters();
         if (this.consumerActive) {
           throw spoolError('PREFUND_COORDINATOR_CONSUMER_OVERLAP', 'Ordered Coordinator consumer不能并发');
         }
@@ -122,49 +190,62 @@ class OrderedMptCoordinator {
     if (!this.fatalError && this.nextConsumeIndex === this.fileCount) {
       this.settled = true;
       if (this.signal) this.signal.removeEventListener('abort', this.onAbort);
-      this._releaseCapacityWaiters();
+      this._notifyCapacityAvailable();
       this.resolveCompletion(Object.freeze(this.results.slice()));
     }
   }
 
-  submitReady(fileIndex, spool) {
+  _submit(fileIndex, entry, permit) {
     this._assertOpen();
     const index = this._assertIndex(fileIndex);
+    const permitRecord = this._claimPermit(permit);
+    this.acceptedIndexes.add(index);
+    this.entries.set(index, Object.freeze({ ...entry, permitRecord }));
+    this._scheduleDrain();
+  }
+
+  submitReady(fileIndex, spool, permit) {
     if (!spool || typeof spool !== 'object') {
       throw new TypeError('ready parser结果必须包含spool descriptor');
     }
-    this.acceptedIndexes.add(index);
-    this.entries.set(index, Object.freeze({ kind: 'ready', spool }));
     this.bufferedReadyCount += 1;
-    this._scheduleDrain();
+    try {
+      this._submit(fileIndex, { kind: 'ready', spool }, permit);
+    } catch (error) {
+      this.bufferedReadyCount -= 1;
+      throw error;
+    }
   }
 
-  submitBusinessError(fileIndex, fileResult) {
-    this._assertOpen();
-    const index = this._assertIndex(fileIndex);
+  submitBusinessError(fileIndex, fileResult, permit) {
     if (!fileResult || typeof fileResult !== 'object') {
       throw new TypeError('business error必须提供当前file结果对象');
     }
-    this.acceptedIndexes.add(index);
-    this.entries.set(index, Object.freeze({ kind: 'business-error', fileResult }));
-    this._scheduleDrain();
+    this._submit(fileIndex, { kind: 'business-error', fileResult }, permit);
   }
 
-  submitTransportCrash(fileIndex, fileResult) {
-    this._assertOpen();
-    const index = this._assertIndex(fileIndex);
+  submitTransportCrash(fileIndex, fileResult, permit) {
     if (!fileResult || typeof fileResult !== 'object') {
       throw new TypeError('transport crash必须提供按旧service合同构造的当前file结果对象');
     }
-    this.acceptedIndexes.add(index);
-    this.entries.set(index, Object.freeze({ kind: 'transport-crash', fileResult }));
-    this._scheduleDrain();
+    this._submit(fileIndex, { kind: 'transport-crash', fileResult }, permit);
+  }
+
+  acquireDispatchPermit() {
+    if (this.fatalError) return Promise.reject(this.fatalError);
+    if (this.settled) {
+      return Promise.reject(spoolError('PREFUND_COORDINATOR_SETTLED', 'Ordered Coordinator已结束'));
+    }
+    if (this.activePermitCount < this.readyHighWaterMark) {
+      return Promise.resolve(this._newPermit());
+    }
+    return new Promise((resolve, reject) => this.capacityWaiters.push({ resolve, reject }));
   }
 
   waitForDispatchCapacity() {
     if (this.fatalError) return Promise.reject(this.fatalError);
-    if (this.settled || this.bufferedReadyCount < this.readyHighWaterMark) return Promise.resolve();
-    return new Promise((resolve, reject) => this.capacityWaiters.push({ resolve, reject }));
+    if (this.settled || this.activePermitCount < this.readyHighWaterMark) return Promise.resolve();
+    return new Promise((resolve, reject) => this.capacityObservers.push({ resolve, reject }));
   }
 
   cancel() {
@@ -173,6 +254,20 @@ class OrderedMptCoordinator {
 
   completion() {
     return this.completionPromise;
+  }
+
+  snapshot() {
+    return Object.freeze({
+      fileCount: this.fileCount,
+      nextConsumeIndex: this.nextConsumeIndex,
+      acceptedCount: this.acceptedIndexes.size,
+      bufferedReadyCount: this.bufferedReadyCount,
+      activePermitCount: this.activePermitCount,
+      maxObservedPermitCount: this.maxObservedPermitCount,
+      readyHighWaterMark: this.readyHighWaterMark,
+      consumerActive: this.consumerActive,
+      settled: this.settled
+    });
   }
 }
 

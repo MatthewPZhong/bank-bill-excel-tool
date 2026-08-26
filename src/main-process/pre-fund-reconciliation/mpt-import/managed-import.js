@@ -9,6 +9,7 @@ const { sourceSnapshotFromStat } = require('../../archive-center/source-snapshot
 const { createOrderedMptCoordinator } = require('./ordered-coordinator');
 const { toSafeParserFileResult, writeParserOutcome } = require('./parser-outcome');
 const { deriveFileIdentity } = require('./spool-contract');
+const { assertMptSpoolDiskCapacity } = require('./spool-admission');
 const { cleanupMptFileSpool, cleanupMptSpoolParents } = require('./spool-writer');
 
 const PARSER_ENTRY = path.join(__dirname, 'parser-worker-entry.js');
@@ -25,6 +26,20 @@ function runParserWorker(input, options = {}) {
   const WorkerClass = options.WorkerClass || Worker;
   return new Promise((resolve, reject) => {
     const worker = new WorkerClass(PARSER_ENTRY, { workerData: { input } });
+    const observeWorkerState = typeof options.onWorkerState === 'function'
+      ? options.onWorkerState
+      : null;
+    const notifyWorkerState = (event) => {
+      if (!observeWorkerState) return;
+      try {
+        observeWorkerState(Object.freeze(event));
+      } catch (_error) {
+        // 可观测性回调不得改变Parser/Writer业务生命周期。
+      }
+    };
+    if (observeWorkerState) {
+      notifyWorkerState({ state: 'started', fileIndex: input.fileIndex });
+    }
     let settled = false;
     let terminalMessage = null;
     let transportError = null;
@@ -63,6 +78,7 @@ function runParserWorker(input, options = {}) {
     worker.once('error', (error) => { transportError = error; });
     worker.once('exit', (code) => {
       workerExited = true;
+      notifyWorkerState({ state: 'exited', fileIndex: input.fileIndex, exitCode: code });
       if (code !== 0) {
         finish(reject, managedError('PREFUND_PARSER_TRANSPORT_CRASH', `Parser Worker异常退出：${code}`));
         return;
@@ -132,6 +148,14 @@ function normalizeOptions(options) {
       typeof options.cleanupMainOwnedFile !== 'function') {
     throw new TypeError('managed cleanupMainOwnedFile必须是函数');
   }
+  if (options.getAvailableDiskBytes !== undefined &&
+      typeof options.getAvailableDiskBytes !== 'function') {
+    throw new TypeError('managed getAvailableDiskBytes必须是函数');
+  }
+  if (options.onParserWorkerState !== undefined &&
+      typeof options.onParserWorkerState !== 'function') {
+    throw new TypeError('managed onParserWorkerState必须是函数');
+  }
   return { ...options, repairFailures };
 }
 
@@ -139,6 +163,8 @@ async function executeManagedPreFundMptImport(rawOptions) {
   const options = normalizeOptions(rawOptions);
   const parentOperationKey = options.batchContext.operationKey;
   const jobId = `prefund-writer-${randomUUID()}`;
+  // 保持legacy/E05-B生命周期：新一轮ordinary import一经接受即清空上一轮repair tokens，
+  // 后续source snapshot或磁盘admission失败也不得把旧token继续暴露给用户。
   if (options.actionKey === 'pre-fund:mpt-import' && options.service &&
       typeof options.service.beginManagedMptImport === 'function') {
     options.service.beginManagedMptImport();
@@ -167,6 +193,13 @@ async function executeManagedPreFundMptImport(rawOptions) {
         : ''
     });
   });
+  assertMptSpoolDiskCapacity({
+    taskStagingDir: options.taskStagingDir,
+    sourceSizes: inputs.map((input) => input.spool.source.sourceSnapshot.sizeBytes),
+    ...(options.getAvailableDiskBytes ? {
+      getAvailableDiskBytes: options.getAvailableDiskBytes
+    } : {})
+  });
   const control = options.runtime.start({
     actionKey: options.actionKey,
     operationKey: parentOperationKey,
@@ -183,10 +216,16 @@ async function executeManagedPreFundMptImport(rawOptions) {
     production: options.production === true,
     ...(typeof options.onProgress === 'function' ? { onProgress: options.onProgress } : {})
   });
-  // job:start前Supervisor已经持有parent base/phase/compound child leases。
-  // E05-B随后才派发唯一Parser Worker，资源申报与真实并发保持一致。
+  // job:start前Supervisor已经按冻结topology持有Writer与全部Parser的CompoundLease。
   await control.ready;
-  const executionSignal = control.promise.then((execution) => ({ kind: 'execution', execution }));
+  const admittedTopology = typeof control.snapshot === 'function' && control.snapshot().topology;
+  const parserCount = admittedTopology && admittedTopology.effectiveChildCount;
+  if (!Number.isSafeInteger(parserCount) || parserCount < 1 || parserCount > 4) {
+    throw managedError('PREFUND_ADMITTED_TOPOLOGY_INVALID', 'Supervisor未提供合法的已获批Parser topology');
+  }
+  if (options.actionKey === 'pre-fund:mpt-repair-import' && parserCount !== 1) {
+    throw managedError('PREFUND_REPAIR_TOPOLOGY_INVALID', 'managed repair必须exactly one Parser');
+  }
   const writerOwned = new Set();
   const mainCleanupAttempted = new Set();
   const cleanupMainOwnedFile = options.cleanupMainOwnedFile || ((spool) => {
@@ -234,7 +273,7 @@ async function executeManagedPreFundMptImport(rawOptions) {
   const coordinatorFactory = options.coordinatorFactory || createOrderedMptCoordinator;
   const coordinator = coordinatorFactory({
     fileCount: inputs.length,
-    readyHighWaterMark: 2,
+    readyHighWaterMark: Math.max(2, parserCount),
     async consumeReady(_spool, { fileIndex }) {
       const terminal = await requireOrdinaryUnitTerminal(fileIndex);
       return terminal.result || null;
@@ -244,57 +283,115 @@ async function executeManagedPreFundMptImport(rawOptions) {
     }
   });
 
-  try {
-  for (let fileIndex = 0; fileIndex < inputs.length; fileIndex += 1) {
+  async function acquireDispatchPermit() {
+    if (typeof coordinator.acquireDispatchPermit === 'function') {
+      return coordinator.acquireDispatchPermit();
+    }
     await coordinator.waitForDispatchCapacity();
-    if (typeof options.onProgress === 'function') {
-      options.onProgress({
-        stage: options.actionKey === 'pre-fund:mpt-repair-import' ? 'mpt-repair' : 'mpt-import',
-        current: fileIndex + 1,
-        total: inputs.length,
-        fileName: path.basename(options.filePaths[fileIndex])
-      });
-    }
-    const parserController = new AbortController();
-    let parentTerminatedDuringParser = false;
-    let readyForWriter = false;
-    let failed = null;
-    try {
-      const parserAttempt = runParserWorker(inputs[fileIndex].spool, {
-        signal: parserController.signal,
-        ...(options.ParserWorkerClass ? { WorkerClass: options.ParserWorkerClass } : {})
-      }).then(
-        (value) => ({ kind: 'parser', ok: true, value }),
-        (error) => ({ kind: 'parser', ok: false, error })
-      );
-      const settled = await Promise.race([parserAttempt, executionSignal]);
-      if (settled.kind === 'execution') {
-        parentTerminatedDuringParser = true;
-        parserController.abort();
-        await parserAttempt;
-        throw managedError(
-          'PREFUND_WRITER_PARENT_INTERRUPTED',
-          'PreFund Single Writer在Parser完成前已结束，未提交spool已清理'
-        );
-      }
-      if (!settled.ok) throw settled.error;
-      writeParserOutcome(inputs[fileIndex].spool, { kind: 'spool' });
-      readyForWriter = true;
-    } catch (error) {
-      if (parentTerminatedDuringParser) throw error;
-      failed = parserFailure(options.filePaths[fileIndex], error);
-      try { writeParserOutcome(inputs[fileIndex].spool, { kind: 'parser-error', fileResult: failed }); } catch (sealError) {
-        // Writer将missing/invalid sealed outcome作为当前file技术错误收口；Main仍保留
-        // seal错误用于父mixed结果，不改变unit identity或绕过Single Writer。
-        failed = parserFailure(options.filePaths[fileIndex], sealError);
-      }
-    }
-    // sidecar已经sealed后，Coordinator失败必须保留原始原因并由Main owner清理，
-    // 不能再次以wx写parser-error覆盖或掩盖已发布的outcome。
-    if (readyForWriter) coordinator.submitReady(fileIndex, inputs[fileIndex].spool);
-    else coordinator.submitBusinessError(fileIndex, failed);
+    let submitted = false;
+    return Object.freeze({
+      submitReady(fileIndex, spool) {
+        coordinator.submitReady(fileIndex, spool);
+        submitted = true;
+      },
+      submitBusinessError(fileIndex, fileResult) {
+        coordinator.submitBusinessError(fileIndex, fileResult);
+        submitted = true;
+      },
+      submitTransportCrash(fileIndex, fileResult) {
+        if (typeof coordinator.submitTransportCrash === 'function') {
+          coordinator.submitTransportCrash(fileIndex, fileResult);
+        } else {
+          coordinator.submitBusinessError(fileIndex, fileResult);
+        }
+        submitted = true;
+      },
+      release() { return !submitted; }
+    });
   }
-  await coordinator.completion();
+
+  const parserPoolController = new AbortController();
+  let parserPhaseComplete = false;
+  let parentExecution = null;
+  let nextParserIndex = 0;
+  const executionSignal = control.promise.then((execution) => {
+    parentExecution = execution;
+    if (!parserPhaseComplete && execution.outcome !== 'completed') {
+      parserPoolController.abort();
+      if (typeof coordinator.cancel === 'function') coordinator.cancel();
+    }
+    return { kind: 'execution', execution };
+  });
+
+  async function parseNextFiles() {
+    while (true) {
+      const fileIndex = nextParserIndex;
+      if (fileIndex >= inputs.length) return;
+      nextParserIndex += 1;
+      const permit = await acquireDispatchPermit();
+      let submitted = false;
+      try {
+        if (typeof options.onProgress === 'function') {
+          options.onProgress({
+            stage: options.actionKey === 'pre-fund:mpt-repair-import' ? 'mpt-repair' : 'mpt-import',
+            current: fileIndex + 1,
+            total: inputs.length,
+            fileName: path.basename(options.filePaths[fileIndex])
+          });
+        }
+        let readyForWriter = false;
+        let transportCrash = false;
+        let failed = null;
+        const parserAttempt = runParserWorker(inputs[fileIndex].spool, {
+          signal: parserPoolController.signal,
+          ...(options.onParserWorkerState ? { onWorkerState: options.onParserWorkerState } : {}),
+          ...(options.ParserWorkerClass ? { WorkerClass: options.ParserWorkerClass } : {})
+        }).then(
+          (value) => ({ kind: 'parser', ok: true, value }),
+          (error) => ({ kind: 'parser', ok: false, error })
+        );
+        const settled = await Promise.race([parserAttempt, executionSignal]);
+        if (settled.kind === 'execution') {
+          parserPoolController.abort();
+          await parserAttempt;
+          throw managedError(
+            'PREFUND_WRITER_PARENT_INTERRUPTED',
+            'PreFund Single Writer在Parser Pool完成前已结束，未提交spool已清理'
+          );
+        }
+        try {
+          if (!settled.ok) throw settled.error;
+          writeParserOutcome(inputs[fileIndex].spool, { kind: 'spool' });
+          readyForWriter = true;
+        } catch (error) {
+          transportCrash = error && error.code === 'PREFUND_PARSER_TRANSPORT_CRASH';
+          failed = parserFailure(options.filePaths[fileIndex], error);
+          try {
+            writeParserOutcome(inputs[fileIndex].spool, { kind: 'parser-error', fileResult: failed });
+          } catch (sealError) {
+            failed = parserFailure(options.filePaths[fileIndex], sealError);
+          }
+        }
+        if (readyForWriter) permit.submitReady(fileIndex, inputs[fileIndex].spool);
+        else if (transportCrash) permit.submitTransportCrash(fileIndex, failed);
+        else permit.submitBusinessError(fileIndex, failed);
+        submitted = true;
+      } finally {
+        if (!submitted) permit.release();
+      }
+    }
+  }
+
+  const parserTasks = Array.from(
+    { length: Math.min(parserCount, inputs.length) },
+    () => parseNextFiles()
+  );
+
+  try {
+  await Promise.all([
+    Promise.all(parserTasks).then(() => { parserPhaseComplete = true; }),
+    coordinator.completion()
+  ]);
   const execution = await control.promise;
   if (execution.outcome !== 'completed' || !execution.result || !Array.isArray(execution.result.results)) {
     throw managedError(
@@ -322,6 +419,15 @@ async function executeManagedPreFundMptImport(rawOptions) {
     } : {})
   });
   } catch (error) {
+    parserPoolController.abort();
+    if (typeof coordinator.cancel === 'function') coordinator.cancel();
+    await Promise.allSettled(parserTasks);
+    if (error && error.code === 'PREFUND_COORDINATOR_CANCELLED' && parentExecution) {
+      error = managedError(
+        'PREFUND_WRITER_PARENT_INTERRUPTED',
+        'PreFund Single Writer在Parser Pool完成前已结束，未提交spool已清理'
+      );
+    }
     try {
       cleanupMainOwned((index) => !writerOwned.has(index));
     } catch (cleanupError) {

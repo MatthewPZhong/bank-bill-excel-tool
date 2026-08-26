@@ -19,10 +19,15 @@ const {
 } = require('../toolbox-background/policies');
 const {
   PRE_FUND_MPT_POLICIES,
+  PRE_FUND_MPT_IMPORT_ACTION,
   PRE_FUND_MPT_REPAIR_ACTION,
   validatePreFundMptImportResult,
   validatePreFundMptRepairResult
 } = require('../pre-fund-reconciliation/mpt-import/policies');
+const {
+  createPreFundMptRuntimeResourcePlan,
+  createPreFundMptTopologyPlanner
+} = require('../pre-fund-reconciliation/mpt-import/topology');
 
 const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   ...TOOLBOX_GENERATION_POLICIES,
@@ -35,6 +40,14 @@ function isBackgroundExecutionProductionEnabled(actionKey) {
 }
 
 function createBackgroundExecutionRuntime(options = {}) {
+  const availableParallelism = options.availableParallelism === undefined
+    ? (typeof os.availableParallelism === 'function' ? os.availableParallelism() : 1)
+    : options.availableParallelism;
+  const totalMemoryBytes = options.totalMemoryBytes === undefined ? os.totalmem() : options.totalMemoryBytes;
+  const runtimeResourcePlan = createPreFundMptRuntimeResourcePlan({
+    availableParallelism,
+    totalMemoryBytes
+  });
   const workerRoot = path.resolve(__dirname, '..', 'toolbox-background');
   const entryRegistry = createStaticRegistry(Object.fromEntries(
     BACKGROUND_EXECUTION_POLICIES.map((policy) => [policy.entryKey, {
@@ -71,8 +84,18 @@ function createBackgroundExecutionRuntime(options = {}) {
     validatorEntries[policy.artifacts.businessValidatorKey] = resultValidator;
   }
   const validatorRegistry = createStaticRegistry(validatorEntries);
+  const preFundTopologyPlanner = createPreFundMptTopologyPlanner({ runtimeResourcePlan });
+  const topologyRegistry = createStaticRegistry(Object.fromEntries(
+    BACKGROUND_EXECUTION_POLICIES
+      .filter((policy) => policy.resources.compound)
+      .map((policy) => [policy.resources.compound.topologyKey,
+        policy.actionKey === PRE_FUND_MPT_IMPORT_ACTION || policy.actionKey === PRE_FUND_MPT_REPAIR_ACTION
+          ? preFundTopologyPlanner
+          : () => Object.freeze({ effectiveChildCount: 1 })])
+  ));
   entryRegistry.freeze();
   validatorRegistry.freeze();
+  topologyRegistry.freeze();
 
   const staticKeys = {
     resourceProfileKeys: BACKGROUND_EXECUTION_POLICIES.map((policy) => policy.resources.profile),
@@ -92,23 +115,15 @@ function createBackgroundExecutionRuntime(options = {}) {
     policies: BACKGROUND_EXECUTION_POLICIES,
     entryRegistry,
     validatorRegistry,
+    topologyRegistry,
     staticKeys,
     generatedAt: '2026-08-25T00:00:00+08:00'
   });
   policyRegistry.freeze();
-  // E05-B capability最大单job拓扑为import base32MiB + Writer256MiB + Parser256MiB；
-  // repair按冻结fixture申报Writer192MiB + exactly-one Parser256MiB child。
-  const memoryBudget = Math.max(768 * 1024 * 1024, Math.floor(os.totalmem() / 4));
   const resourceGovernor = createResourceGovernor({
-    budgets: {
-      cpuSlots: 2,
-      // E05-B false-gated capability以 effective parser=1 验证冻结 compound：
-      // parent base + Writer phase + 1 parser child，恰需3个worker slot。
-      workerThreadSlots: 3,
-      utilityProcessSlots: 0,
-      ioHeavySlots: 2,
-      memoryBytes: memoryBudget
-    },
+    // Planner与Governor共享同一host-safe预算。Planner负责4/3/2/1静态收敛，
+    // Governor只处理同进程竞争造成的requested→single动态降级。
+    budgets: runtimeResourcePlan.budgets,
     diagnostics: options.diagnostics
   });
   const supervisor = createExecutionSupervisor({

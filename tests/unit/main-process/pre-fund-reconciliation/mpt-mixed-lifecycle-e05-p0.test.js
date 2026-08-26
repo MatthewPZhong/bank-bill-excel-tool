@@ -116,14 +116,20 @@ test('Ordered Coordinator乱序transport crash同样只失败当前unit并继续
   const consumed = [];
   const coordinator = createOrderedMptCoordinator({
     fileCount: 3,
+    readyHighWaterMark: 3,
     async consumeReady(spool, { fileIndex }) {
       consumed.push(fileIndex);
       return { status: 'ok', fileIndex, spoolId: spool.id };
     }
   });
-  coordinator.submitReady(2, { id: 'last' });
-  coordinator.submitTransportCrash(1, fixture.serviceResult.results[1]);
-  coordinator.submitReady(0, { id: 'first' });
+  const [lastPermit, crashPermit, firstPermit] = await Promise.all([
+    coordinator.acquireDispatchPermit(),
+    coordinator.acquireDispatchPermit(),
+    coordinator.acquireDispatchPermit()
+  ]);
+  lastPermit.submitReady(2, { id: 'last' });
+  crashPermit.submitTransportCrash(1, fixture.serviceResult.results[1]);
+  firstPermit.submitReady(0, { id: 'first' });
   const results = await coordinator.completion();
   assert.deepEqual(consumed, [0, 2]);
   assert.deepEqual(results.map((result) => result.status), ['ok', 'failed', 'ok']);

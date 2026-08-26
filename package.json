@@ -175,6 +175,7 @@
     "startup:rehearsal:golden": "node scripts/generate-startup-rehearsal-golden.js",
     "benchmark:duplicate-inbound": "node scripts/benchmark-duplicate-inbound-match.js",
     "benchmark:vcc-op-parser": "node --no-warnings scripts/vcc-op-parser-benchmark.js",
+    "benchmark:prefund-parser-pool": "node --no-warnings scripts/benchmark-prefund-parser-pool.js",
     "test:position-import:parity": "node scripts/test-position-import-parity.js",
     "test:position-import:faults": "node scripts/test-position-import-faults.js",
     "benchmark:position-import": "node scripts/benchmark-position-import.js",

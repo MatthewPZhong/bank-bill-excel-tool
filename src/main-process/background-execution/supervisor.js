@@ -1300,14 +1300,23 @@ function createExecutionSupervisor(options = {}) {
 
     function freezeTopology(inspectTopology) {
       if (!policy.resources.compound) return null;
+      const topologyBinding = options.policyRegistry.getBinding(
+        actionKey,
+        'resources.compound.topologyKey'
+      );
+      const nativePlanner = typeof topologyBinding === 'function'
+        ? topologyBinding
+        : topologyBinding && topologyBinding.plan;
+      const topologyInspector = inspectTopology || nativePlanner;
       let effectiveChildCount;
-      if (inspectTopology) {
-        const inspected = inspectTopology(Object.freeze({
+      if (typeof topologyInspector === 'function') {
+        const inspected = topologyInspector(canonicalJsonSnapshot({
           actionKey,
           operationKey,
           jobId,
           context,
-          input: request.input || {}
+          input: request.input || {},
+          unitCount: units.size
         }));
         if (inspected && typeof inspected.then === 'function') {
           throw new SupervisorError(
@@ -1325,7 +1334,9 @@ function createExecutionSupervisor(options = {}) {
         }
         effectiveChildCount = owned.effectiveChildCount;
       } else {
-        effectiveChildCount = policy.production.effectiveWorkerCount || 1;
+        // 兼容尚未接入native topology registry的既有compound/service action；
+        // E05-C PreFund runtime始终提供冻结planner，不经过此保守分支。
+        effectiveChildCount = 1;
       }
       if (!Number.isSafeInteger(effectiveChildCount) || effectiveChildCount < 1 ||
           effectiveChildCount > policy.resources.compound.childrenMax) {
@@ -1577,11 +1588,22 @@ function createExecutionSupervisor(options = {}) {
         return terminal;
       },
       snapshot() {
+        const admittedTopology = record.topology
+          ? Object.freeze({
+              topologyKey: record.topology.topologyKey,
+              effectiveChildCount: record.topology.effectiveChildCount,
+              ...(record.topology.downgraded === true ? {
+                downgraded: true,
+                downgradeReason: record.topology.downgradeReason
+              } : {})
+            })
+          : null;
         return Object.freeze({
           actionKey,
           operationKey,
           jobId,
           state: record.state,
+          topology: admittedTopology,
           units: Object.freeze(Object.fromEntries([...record.units].map(([key, value]) => [key, value.state])))
         });
       }

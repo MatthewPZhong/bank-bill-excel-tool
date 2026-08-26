@@ -151,6 +151,11 @@ function referenceApiValid(fieldPath, policy, value) {
   if (fieldPath.endsWith('ValidatorKey') || fieldPath === 'result.validatorKey') {
     return isValidatorReference(value);
   }
+  if (fieldPath === 'resources.compound.topologyKey') {
+    return typeof value === 'function' || Boolean(
+      value && typeof value === 'object' && !utilTypes.isProxy(value) && dataMethod(value, 'plan')
+    );
+  }
   return value !== null && value !== undefined;
 }
 
@@ -189,6 +194,11 @@ function snapshotRuntimeBinding(fieldPath, policy, value) {
     return Object.freeze(assertValid
       ? { assertValid: assertValid.bind(value) }
       : { validate: validate.bind(value) });
+  }
+  if (fieldPath === 'resources.compound.topologyKey') {
+    if (typeof value === 'function') return value;
+    const plan = dataMethod(value, 'plan');
+    return Object.freeze({ plan: plan.bind(value) });
   }
   if (fieldPath === 'service.serviceKey' && value && typeof value === 'object') {
     return deepFreeze(deepClone(value));

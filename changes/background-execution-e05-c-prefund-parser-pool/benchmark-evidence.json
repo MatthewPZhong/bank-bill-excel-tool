@@ -1,0 +1,469 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-26T01:46:51.298Z",
+  "environment": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "node": "v25.8.0",
+    "cpuModel": "Apple M4 Pro",
+    "availableParallelism": 14,
+    "totalMemoryBytes": 51539607552
+  },
+  "config": {
+    "runs": 5,
+    "representativeRowsPerFile": 1200,
+    "smallRowsPerFile": 80,
+    "fileCount": 8,
+    "runOrder": "alternating-single-pool-by-run-index"
+  },
+  "cases": {
+    "representative": {
+      "single": [
+        {
+          "runIndex": 0,
+          "orderPosition": 1,
+          "durationMs": 607.653,
+          "rssStartBytes": 69713920,
+          "peakRssBytes": 160284672,
+          "peakRssDeltaBytes": 90570752,
+          "peakSpoolBytes": 3962782,
+          "eventLoopMeanMs": 11.534,
+          "eventLoopP99Ms": 16.31,
+          "maxParserActive": 1,
+          "business": {
+            "rowCount": 9600,
+            "receiptCount": 8,
+            "sha256": "105353c9983553d69727ff72ba0cb8472e282d0b591b938ab4228c99b710f1a6"
+          }
+        },
+        {
+          "runIndex": 1,
+          "orderPosition": 2,
+          "durationMs": 583.588,
+          "rssStartBytes": 242876416,
+          "peakRssBytes": 244776960,
+          "peakRssDeltaBytes": 1900544,
+          "peakSpoolBytes": 3962782,
+          "eventLoopMeanMs": 11.356,
+          "eventLoopP99Ms": 15.524,
+          "maxParserActive": 1,
+          "business": {
+            "rowCount": 9600,
+            "receiptCount": 8,
+            "sha256": "105353c9983553d69727ff72ba0cb8472e282d0b591b938ab4228c99b710f1a6"
+          }
+        },
+        {
+          "runIndex": 2,
+          "orderPosition": 1,
+          "durationMs": 584.378,
+          "rssStartBytes": 244891648,
+          "peakRssBytes": 247431168,
+          "peakRssDeltaBytes": 2539520,
+          "peakSpoolBytes": 3962782,
+          "eventLoopMeanMs": 11.333,
+          "eventLoopP99Ms": 14.688,
+          "maxParserActive": 1,
+          "business": {
+            "rowCount": 9600,
+            "receiptCount": 8,
+            "sha256": "105353c9983553d69727ff72ba0cb8472e282d0b591b938ab4228c99b710f1a6"
+          }
+        },
+        {
+          "runIndex": 3,
+          "orderPosition": 2,
+          "durationMs": 581.11,
+          "rssStartBytes": 285868032,
+          "peakRssBytes": 287162368,
+          "peakRssDeltaBytes": 1294336,
+          "peakSpoolBytes": 3962782,
+          "eventLoopMeanMs": 11.453,
+          "eventLoopP99Ms": 17.678,
+          "maxParserActive": 1,
+          "business": {
+            "rowCount": 9600,
+            "receiptCount": 8,
+            "sha256": "105353c9983553d69727ff72ba0cb8472e282d0b591b938ab4228c99b710f1a6"
+          }
+        },
+        {
+          "runIndex": 4,
+          "orderPosition": 1,
+          "durationMs": 584.598,
+          "rssStartBytes": 287506432,
+          "peakRssBytes": 289603584,
+          "peakRssDeltaBytes": 2097152,
+          "peakSpoolBytes": 3962782,
+          "eventLoopMeanMs": 11.212,
+          "eventLoopP99Ms": 12.288,
+          "maxParserActive": 1,
+          "business": {
+            "rowCount": 9600,
+            "receiptCount": 8,
+            "sha256": "105353c9983553d69727ff72ba0cb8472e282d0b591b938ab4228c99b710f1a6"
+          }
+        }
+      ],
+      "pool": [
+        {
+          "runIndex": 0,
+          "orderPosition": 2,
+          "durationMs": 562.115,
+          "rssStartBytes": 170737664,
+          "peakRssBytes": 211714048,
+          "peakRssDeltaBytes": 40976384,
+          "peakSpoolBytes": 9906933,
+          "eventLoopMeanMs": 12.536,
+          "eventLoopP99Ms": 51.544,
+          "maxParserActive": 4,
+          "business": {
+            "rowCount": 9600,
+            "receiptCount": 8,
+            "sha256": "105353c9983553d69727ff72ba0cb8472e282d0b591b938ab4228c99b710f1a6"
+          }
+        },
+        {
+          "runIndex": 1,
+          "orderPosition": 1,
+          "durationMs": 583.695,
+          "rssStartBytes": 214990848,
+          "peakRssBytes": 235683840,
+          "peakRssDeltaBytes": 20692992,
+          "peakSpoolBytes": 9906933,
+          "eventLoopMeanMs": 12.384,
+          "eventLoopP99Ms": 44.63,
+          "maxParserActive": 4,
+          "business": {
+            "rowCount": 9600,
+            "receiptCount": 8,
+            "sha256": "105353c9983553d69727ff72ba0cb8472e282d0b591b938ab4228c99b710f1a6"
+          }
+        },
+        {
+          "runIndex": 2,
+          "orderPosition": 2,
+          "durationMs": 552.677,
+          "rssStartBytes": 251346944,
+          "peakRssBytes": 269418496,
+          "peakRssDeltaBytes": 18071552,
+          "peakSpoolBytes": 9906933,
+          "eventLoopMeanMs": 12.297,
+          "eventLoopP99Ms": 47.022,
+          "maxParserActive": 4,
+          "business": {
+            "rowCount": 9600,
+            "receiptCount": 8,
+            "sha256": "105353c9983553d69727ff72ba0cb8472e282d0b591b938ab4228c99b710f1a6"
+          }
+        },
+        {
+          "runIndex": 3,
+          "orderPosition": 1,
+          "durationMs": 587.343,
+          "rssStartBytes": 277118976,
+          "peakRssBytes": 282198016,
+          "peakRssDeltaBytes": 5079040,
+          "peakSpoolBytes": 9906933,
+          "eventLoopMeanMs": 12.524,
+          "eventLoopP99Ms": 57.475,
+          "maxParserActive": 4,
+          "business": {
+            "rowCount": 9600,
+            "receiptCount": 8,
+            "sha256": "105353c9983553d69727ff72ba0cb8472e282d0b591b938ab4228c99b710f1a6"
+          }
+        },
+        {
+          "runIndex": 4,
+          "orderPosition": 2,
+          "durationMs": 585.408,
+          "rssStartBytes": 289619968,
+          "peakRssBytes": 289652736,
+          "peakRssDeltaBytes": 32768,
+          "peakSpoolBytes": 9906933,
+          "eventLoopMeanMs": 11.967,
+          "eventLoopP99Ms": 39.518,
+          "maxParserActive": 4,
+          "business": {
+            "rowCount": 9600,
+            "receiptCount": 8,
+            "sha256": "105353c9983553d69727ff72ba0cb8472e282d0b591b938ab4228c99b710f1a6"
+          }
+        }
+      ],
+      "summary": {
+        "single": {
+          "durationMedianMs": 584.378,
+          "rssStartMedianBytes": 244891648,
+          "peakRssAbsoluteMedianBytes": 247431168,
+          "peakRssDeltaMedianBytes": 2097152,
+          "peakSpoolMedianBytes": 3962782,
+          "eventLoopMeanMedianMs": 11.356,
+          "eventLoopP99MedianMs": 15.524,
+          "businessParityWithinMode": true,
+          "businessSha256": "105353c9983553d69727ff72ba0cb8472e282d0b591b938ab4228c99b710f1a6"
+        },
+        "pool": {
+          "durationMedianMs": 583.695,
+          "rssStartMedianBytes": 251346944,
+          "peakRssAbsoluteMedianBytes": 269418496,
+          "peakRssDeltaMedianBytes": 18071552,
+          "peakSpoolMedianBytes": 9906933,
+          "eventLoopMeanMedianMs": 12.384,
+          "eventLoopP99MedianMs": 47.022,
+          "businessParityWithinMode": true,
+          "businessSha256": "105353c9983553d69727ff72ba0cb8472e282d0b591b938ab4228c99b710f1a6"
+        },
+        "improvementPercent": 0.12,
+        "businessParity": true
+      }
+    },
+    "small": {
+      "single": [
+        {
+          "runIndex": 0,
+          "orderPosition": 1,
+          "durationMs": 401.053,
+          "rssStartBytes": 294551552,
+          "peakRssBytes": 294551552,
+          "peakRssDeltaBytes": 0,
+          "peakSpoolBytes": 124204,
+          "eventLoopMeanMs": 11.95,
+          "eventLoopP99Ms": 16.237,
+          "maxParserActive": 1,
+          "business": {
+            "rowCount": 640,
+            "receiptCount": 8,
+            "sha256": "6cb71cb4e434d3fbcb2718de3ea48561aa66946c0e5ffbefbfc5fa0bce18d3f7"
+          }
+        },
+        {
+          "runIndex": 1,
+          "orderPosition": 2,
+          "durationMs": 391.265,
+          "rssStartBytes": 291946496,
+          "peakRssBytes": 294862848,
+          "peakRssDeltaBytes": 2916352,
+          "peakSpoolBytes": 124204,
+          "eventLoopMeanMs": 11.647,
+          "eventLoopP99Ms": 15.229,
+          "maxParserActive": 1,
+          "business": {
+            "rowCount": 640,
+            "receiptCount": 8,
+            "sha256": "6cb71cb4e434d3fbcb2718de3ea48561aa66946c0e5ffbefbfc5fa0bce18d3f7"
+          }
+        },
+        {
+          "runIndex": 2,
+          "orderPosition": 1,
+          "durationMs": 389.421,
+          "rssStartBytes": 291667968,
+          "peakRssBytes": 295075840,
+          "peakRssDeltaBytes": 3407872,
+          "peakSpoolBytes": 124204,
+          "eventLoopMeanMs": 11.519,
+          "eventLoopP99Ms": 17.678,
+          "maxParserActive": 1,
+          "business": {
+            "rowCount": 640,
+            "receiptCount": 8,
+            "sha256": "6cb71cb4e434d3fbcb2718de3ea48561aa66946c0e5ffbefbfc5fa0bce18d3f7"
+          }
+        },
+        {
+          "runIndex": 3,
+          "orderPosition": 2,
+          "durationMs": 391.928,
+          "rssStartBytes": 292519936,
+          "peakRssBytes": 296075264,
+          "peakRssDeltaBytes": 3555328,
+          "peakSpoolBytes": 124204,
+          "eventLoopMeanMs": 11.645,
+          "eventLoopP99Ms": 15.581,
+          "maxParserActive": 1,
+          "business": {
+            "rowCount": 640,
+            "receiptCount": 8,
+            "sha256": "6cb71cb4e434d3fbcb2718de3ea48561aa66946c0e5ffbefbfc5fa0bce18d3f7"
+          }
+        },
+        {
+          "runIndex": 4,
+          "orderPosition": 1,
+          "durationMs": 385.143,
+          "rssStartBytes": 292814848,
+          "peakRssBytes": 295780352,
+          "peakRssDeltaBytes": 2965504,
+          "peakSpoolBytes": 124204,
+          "eventLoopMeanMs": 11.444,
+          "eventLoopP99Ms": 14.246,
+          "maxParserActive": 1,
+          "business": {
+            "rowCount": 640,
+            "receiptCount": 8,
+            "sha256": "6cb71cb4e434d3fbcb2718de3ea48561aa66946c0e5ffbefbfc5fa0bce18d3f7"
+          }
+        }
+      ],
+      "pool": [
+        {
+          "runIndex": 0,
+          "orderPosition": 2,
+          "durationMs": 265.027,
+          "rssStartBytes": 291258368,
+          "peakRssBytes": 297877504,
+          "peakRssDeltaBytes": 6619136,
+          "peakSpoolBytes": 619631,
+          "eventLoopMeanMs": 14.136,
+          "eventLoopP99Ms": 49.316,
+          "maxParserActive": 4,
+          "business": {
+            "rowCount": 640,
+            "receiptCount": 8,
+            "sha256": "6cb71cb4e434d3fbcb2718de3ea48561aa66946c0e5ffbefbfc5fa0bce18d3f7"
+          }
+        },
+        {
+          "runIndex": 1,
+          "orderPosition": 1,
+          "durationMs": 256.867,
+          "rssStartBytes": 291553280,
+          "peakRssBytes": 298041344,
+          "peakRssDeltaBytes": 6488064,
+          "peakSpoolBytes": 496796,
+          "eventLoopMeanMs": 13.435,
+          "eventLoopP99Ms": 52.101,
+          "maxParserActive": 4,
+          "business": {
+            "rowCount": 640,
+            "receiptCount": 8,
+            "sha256": "6cb71cb4e434d3fbcb2718de3ea48561aa66946c0e5ffbefbfc5fa0bce18d3f7"
+          }
+        },
+        {
+          "runIndex": 2,
+          "orderPosition": 2,
+          "durationMs": 259.114,
+          "rssStartBytes": 291667968,
+          "peakRssBytes": 298926080,
+          "peakRssDeltaBytes": 7258112,
+          "peakSpoolBytes": 496796,
+          "eventLoopMeanMs": 12.884,
+          "eventLoopP99Ms": 40.337,
+          "maxParserActive": 4,
+          "business": {
+            "rowCount": 640,
+            "receiptCount": 8,
+            "sha256": "6cb71cb4e434d3fbcb2718de3ea48561aa66946c0e5ffbefbfc5fa0bce18d3f7"
+          }
+        },
+        {
+          "runIndex": 3,
+          "orderPosition": 1,
+          "durationMs": 267.42,
+          "rssStartBytes": 292782080,
+          "peakRssBytes": 299122688,
+          "peakRssDeltaBytes": 6340608,
+          "peakSpoolBytes": 496796,
+          "eventLoopMeanMs": 13.531,
+          "eventLoopP99Ms": 44.335,
+          "maxParserActive": 4,
+          "business": {
+            "rowCount": 640,
+            "receiptCount": 8,
+            "sha256": "6cb71cb4e434d3fbcb2718de3ea48561aa66946c0e5ffbefbfc5fa0bce18d3f7"
+          }
+        },
+        {
+          "runIndex": 4,
+          "orderPosition": 2,
+          "durationMs": 265.648,
+          "rssStartBytes": 292585472,
+          "peakRssBytes": 298991616,
+          "peakRssDeltaBytes": 6406144,
+          "peakSpoolBytes": 619631,
+          "eventLoopMeanMs": 14.77,
+          "eventLoopP99Ms": 41.648,
+          "maxParserActive": 4,
+          "business": {
+            "rowCount": 640,
+            "receiptCount": 8,
+            "sha256": "6cb71cb4e434d3fbcb2718de3ea48561aa66946c0e5ffbefbfc5fa0bce18d3f7"
+          }
+        }
+      ],
+      "summary": {
+        "single": {
+          "durationMedianMs": 391.265,
+          "rssStartMedianBytes": 292519936,
+          "peakRssAbsoluteMedianBytes": 295075840,
+          "peakRssDeltaMedianBytes": 2965504,
+          "peakSpoolMedianBytes": 124204,
+          "eventLoopMeanMedianMs": 11.645,
+          "eventLoopP99MedianMs": 15.581,
+          "businessParityWithinMode": true,
+          "businessSha256": "6cb71cb4e434d3fbcb2718de3ea48561aa66946c0e5ffbefbfc5fa0bce18d3f7"
+        },
+        "pool": {
+          "durationMedianMs": 265.027,
+          "rssStartMedianBytes": 291667968,
+          "peakRssAbsoluteMedianBytes": 298926080,
+          "peakRssDeltaMedianBytes": 6488064,
+          "peakSpoolMedianBytes": 496796,
+          "eventLoopMeanMedianMs": 13.531,
+          "eventLoopP99MedianMs": 44.335,
+          "businessParityWithinMode": true,
+          "businessSha256": "6cb71cb4e434d3fbcb2718de3ea48561aa66946c0e5ffbefbfc5fa0bce18d3f7"
+        },
+        "improvementPercent": 32.26,
+        "businessParity": true
+      }
+    }
+  },
+  "gate": {
+    "productionEligible": false,
+    "conclusion": "DOWNGRADE / KEEP PRODUCTION DISABLED",
+    "checks": {
+      "representativePerformance": {
+        "qualified": false,
+        "threshold": "median improvement >= 15%",
+        "observedPercent": 0.12
+      },
+      "smallRegression": {
+        "qualified": true,
+        "threshold": "median regression <= 5%",
+        "observedPercent": -32.26
+      },
+      "rss": {
+        "qualified": false,
+        "status": "recorded-local-only"
+      },
+      "disk": {
+        "qualified": false,
+        "status": "recorded-local-only"
+      },
+      "eventLoop": {
+        "qualified": false,
+        "status": "recorded-local-only"
+      },
+      "windowsPackaged": {
+        "qualified": false,
+        "status": "not-run"
+      },
+      "fundsManualReview": {
+        "qualified": false,
+        "status": "not-run"
+      }
+    },
+    "reasons": [
+      "代表集中位数改善未达15%",
+      "RSS仅记录，尚未qualified",
+      "磁盘仅记录，尚未qualified",
+      "event-loop仅记录，尚未qualified",
+      "Windows packaged门禁未完成",
+      "真实资金与恢复人工门禁未完成"
+    ]
+  }
+}
