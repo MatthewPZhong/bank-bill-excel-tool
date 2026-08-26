@@ -121,31 +121,70 @@ function completedRuntime(result, captures) {
   });
 }
 
-test('E04-A policy 与 Main source selector 保持 production false，真实用户路径不伪装 canary', () => {
+test('E04-A/B policy 与 Main source selector 保持 production false，真实用户路径不伪装 canary', () => {
   assert.deepEqual(
     TOOLBOX_GENERATION_POLICIES.map((policy) => policy.actionKey),
-    [TOOLBOX_GENERATION_ACTIONS.MERGE, TOOLBOX_GENERATION_ACTIONS.SPLIT_SINGLE]
+    [
+      TOOLBOX_GENERATION_ACTIONS.MERGE,
+      TOOLBOX_GENERATION_ACTIONS.SPLIT_SINGLE,
+      TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
+    ]
   );
   for (const policy of TOOLBOX_GENERATION_POLICIES) {
-    assert.equal(policy.mode, 'thread-single');
+    assert.equal(
+      policy.mode,
+      policy.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
+        ? 'thread-pool'
+        : 'thread-single'
+    );
     assert.equal(policy.lifetime, 'job');
     assert.equal(policy.adapterKind, 'native');
     assert.equal(policy.commit.kind, 'main-settlement');
     assert.equal(policy.context.kind, 'operation');
     assert.equal(policy.context.validatorKey, 'exact-5');
-    assert.equal(policy.artifacts.maxArtifacts, 1);
+    assert.equal(
+      policy.artifacts.maxArtifacts,
+      policy.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT ? 8 : 1
+    );
     assert.equal(policy.production.enabled, false);
     assert.equal(policy.production.effectiveMode, 'legacy');
     assert.equal(isBackgroundExecutionProductionEnabled(policy.actionKey), false);
   }
+  const multiPolicy = TOOLBOX_GENERATION_POLICIES.find(
+    (policy) => policy.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
+  );
+  assert.equal(multiPolicy.workUnits.requestedMaxWorkers, 1);
+  assert.equal(multiPolicy.resources.compound.childrenMax, 1);
+  assert.equal(multiPolicy.resources.phase.workerThreadSlots, 1);
+  assert.equal(multiPolicy.resources.compound.childResource.workerThreadSlots, 1);
 
   const mainSource = fs.readFileSync(path.resolve(__dirname, '../../../src/main.js'), 'utf8');
-  assert.equal((mainSource.match(/backgroundExecutionRuntimeManager\.get\(\)/g) || []).length, 2);
+  assert.equal((mainSource.match(/backgroundExecutionRuntimeManager\.get\(\)/g) || []).length, 3);
   assert.equal((mainSource.match(/generateValidateAndPublishToolboxArtifact\(\{/g) || []).length, 2);
-  assert.equal((mainSource.match(/production:\s*true/g) || []).length >= 2, true);
+  assert.equal((mainSource.match(/generateValidateAndPublishMultiOutput\(\{/g) || []).length, 1);
+  assert.equal((mainSource.match(/production:\s*true/g) || []).length >= 3, true);
   assert.doesNotMatch(mainSource, /generateValidateAndPublishToolboxArtifact\(\{[\s\S]{0,900}?production:\s*false/);
   assert.match(mainSource, /shouldUseLargeChannel[\s\S]*?dispatchLargeSplit/);
   assert.match(mainSource, /async function publishToolboxArtifacts[\s\S]*?publishToolboxPublicationAsync/);
+});
+
+test('E04-B runtime预算完整计入Scanner phase与一个Writer child，idle/shutdown不泄漏', async () => {
+  const runtime = createBackgroundExecutionRuntime({ shutdownTimeoutMs: 10000 });
+  const snapshot = runtime.resourceGovernor.snapshot();
+  assert.equal(snapshot.budgets.cpuSlots, 2);
+  assert.equal(snapshot.budgets.workerThreadSlots, 2);
+  assert.equal(snapshot.budgets.ioHeavySlots, 2);
+  assert.deepEqual(snapshot.activeUsage, {
+    cpuSlots: 0,
+    workerThreadSlots: 0,
+    utilityProcessSlots: 0,
+    ioHeavySlots: 0,
+    memoryBytes: 0
+  });
+  const report = await runtime.shutdown({ timeoutMs: 10000 });
+  assert.deepEqual(report.leakedTransports, []);
+  assert.deepEqual(report.errors, []);
+  assert.deepEqual(runtime.resourceGovernor.snapshot().activeUsage, snapshot.activeUsage);
 });
 
 test('generation result 接受真实 writer 的结构化 warning sample，不改变既有 warning 语义', async () => {

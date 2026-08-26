@@ -161,7 +161,9 @@ async function executeSplitGeneration(rawInput, signal) {
 }
 
 module.exports = {
+  artifactFrom,
   assertSourcesFresh,
   executeMergeGeneration,
-  executeSplitGeneration
+  executeSplitGeneration,
+  writeGenerationEvidence
 };

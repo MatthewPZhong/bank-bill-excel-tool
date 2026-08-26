@@ -11,7 +11,8 @@ const { createResourceGovernor } = require('./resource-governor');
 const { createExecutionSupervisor } = require('./supervisor');
 const {
   TOOLBOX_GENERATION_ACTIONS,
-  validateToolboxGenerationResult
+  validateToolboxGenerationResult,
+  validateToolboxMultiGenerationResult
 } = require('../toolbox-background/generation-contract');
 const {
   TOOLBOX_GENERATION_POLICIES
@@ -30,14 +31,18 @@ function createBackgroundExecutionRuntime(options = {}) {
         workerRoot,
         policy.actionKey === TOOLBOX_GENERATION_ACTIONS.MERGE
           ? 'merge-worker-entry.js'
-          : 'split-worker-entry.js'
+          : (policy.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
+            ? 'route-scanner-worker-entry.js'
+            : 'split-worker-entry.js')
       ),
       cancellationTerminalErrorCodes: ['TOOLBOX_GENERATION_CANCELLED']
     }])
   ));
   const validatorEntries = {};
   for (const policy of TOOLBOX_GENERATION_POLICIES) {
-    const resultValidator = (value) => validateToolboxGenerationResult(value, policy.actionKey);
+    const resultValidator = policy.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
+      ? validateToolboxMultiGenerationResult
+      : (value) => validateToolboxGenerationResult(value, policy.actionKey);
     validatorEntries[policy.result.validatorKey] = resultValidator;
     // Main explicitly executes the asynchronous technical/business validators before Publisher.
     // Registry bindings remain synchronous capability declarations for static contract coverage.
@@ -50,6 +55,9 @@ function createBackgroundExecutionRuntime(options = {}) {
 
   const staticKeys = {
     resourceProfileKeys: TOOLBOX_GENERATION_POLICIES.map((policy) => policy.resources.profile),
+    topologyKeys: TOOLBOX_GENERATION_POLICIES
+      .map((policy) => policy.resources.compound && policy.resources.compound.topologyKey)
+      .filter(Boolean),
     inspectorKeys: TOOLBOX_GENERATION_POLICIES.map((policy) => policy.commit.inspectorKey),
     conflictScopeResolverKeys: TOOLBOX_GENERATION_POLICIES.map(
       (policy) => policy.commit.conflictScopeResolverKey
@@ -68,10 +76,10 @@ function createBackgroundExecutionRuntime(options = {}) {
   const memoryBudget = Math.max(512 * 1024 * 1024, Math.floor(os.totalmem() / 4));
   const resourceGovernor = createResourceGovernor({
     budgets: {
-      cpuSlots: 1,
-      workerThreadSlots: 1,
+      cpuSlots: 2,
+      workerThreadSlots: 2,
       utilityProcessSlots: 0,
-      ioHeavySlots: 1,
+      ioHeavySlots: 2,
       memoryBytes: memoryBudget
     },
     diagnostics: options.diagnostics
