@@ -37,7 +37,8 @@ const {
   estimateMptSpoolBytes
 } = require('../../../../src/main-process/pre-fund-reconciliation/mpt-import/spool-admission');
 const {
-  deriveFileIdentity
+  deriveFileIdentity,
+  mptSpoolPaths
 } = require('../../../../src/main-process/pre-fund-reconciliation/mpt-import/spool-contract');
 const {
   createPreFundMptRuntimeResourcePlan,
@@ -617,18 +618,55 @@ test('parent终止会取消全部active Parser并等待clean exit barrier，Main
   });
 });
 
-test('真实Supervisor Writer transport中断会取消其余active Parser并保持Main cleanup ownership', async () => {
+test('真实Supervisor在file0 dispatchAccepted后pre-critical中断，混合ownership与Pool clean barrier准确收口', async () => {
   const filePaths = Array.from({ length: 8 }, (_, index) => writeInboundFile(String(1200 + index)));
   let parserActive = 0;
   let parserMaxActive = 0;
   let parserCancelCount = 0;
+  let hangingParserActive = 0;
   let writerExitCount = 0;
-  class HangingParserWorker extends EventEmitter {
-    constructor() {
+  let writerCallbacks = null;
+  let writerUnitStarted = false;
+  let writerExitScheduled = false;
+  let parserActiveAtWriterDispatch = null;
+  let writerDispatchedFileIndex = null;
+  let writerSawReadyManifest = false;
+  const writerUnitStarts = [];
+  function scheduleWriterExitAtMixedOwnershipBoundary() {
+    if (!writerCallbacks || !writerUnitStarted || hangingParserActive < 4 || writerExitScheduled) return;
+    writerExitScheduled = true;
+    setImmediate(() => {
+      writerExitCount += 1;
+      writerCallbacks.onExit(9, null);
+    });
+  }
+  class MixedOwnershipParserWorker extends EventEmitter {
+    constructor(_entry, workerOptions) {
       super();
       this.exited = false;
+      this.input = workerOptions.workerData.input;
       parserActive += 1;
       parserMaxActive = Math.max(parserMaxActive, parserActive);
+      if (this.input.fileIndex === 0) {
+        setImmediate(async () => {
+          try {
+            await writeMptFileSpool(this.input);
+            const identity = deriveFileIdentity(this.input.parentOperationKey, this.input.fileIndex);
+            this.emit('message', { ok: true, result: { fileIndex: 0, ...identity } });
+            this.exited = true;
+            parserActive -= 1;
+            this.emit('exit', 0);
+          } catch (error) {
+            this.emit('error', error);
+            this.exited = true;
+            parserActive -= 1;
+            this.emit('exit', 1);
+          }
+        });
+      } else {
+        hangingParserActive += 1;
+        scheduleWriterExitAtMixedOwnershipBoundary();
+      }
     }
     postMessage(message) {
       if (!message || message.operation !== 'cancel' || this.exited) return;
@@ -637,6 +675,7 @@ test('真实Supervisor Writer transport中断会取消其余active Parser并保�
         if (this.exited) return;
         this.exited = true;
         parserActive -= 1;
+        hangingParserActive -= 1;
         this.emit('exit', 0);
       });
     }
@@ -644,34 +683,45 @@ test('真实Supervisor Writer transport中断会取消其余active Parser并保�
   }
   const writerAdapter = {
     start(callbacks) {
-      let exitTimer = null;
+      writerCallbacks = callbacks;
       return {
         ready: Promise.resolve(),
         send(command) {
-          if (command.operation === 'job:start' && !exitTimer) {
-            exitTimer = setTimeout(() => {
-              writerExitCount += 1;
-              callbacks.onExit(9, null);
-            }, 15);
-          }
+          if (command.operation !== 'unit:start') return;
+          writerUnitStarts.push(command.unitId);
+          writerDispatchedFileIndex = command.payload.input.fileIndex;
+          writerSawReadyManifest = fs.existsSync(
+            mptSpoolPaths(command.payload.input.spool).manifestReady
+          );
+          parserActiveAtWriterDispatch = parserActive;
+          writerUnitStarted = true;
+          scheduleWriterExitAtMixedOwnershipBoundary();
         },
         close() {},
         terminate() { return Promise.resolve(9); }
       };
     }
   };
+  let prepareCount = 0;
+  let inspectCount = 0;
   const runtime = createBackgroundExecutionRuntime({
     availableParallelism: 8,
     totalMemoryBytes: 8 * GIBIBYTE,
     workerThreadAdapter: writerAdapter,
-    workerDurableCoordinator: unusedDurableCoordinator()
+    workerDurableCoordinator: {
+      async prepareAndAck() { prepareCount += 1; throw new Error('pre-critical不得创建Intent'); },
+      async observeReceipt() { throw new Error('pre-critical不得观察receipt'); },
+      async settleCommitted() { throw new Error('pre-critical不得settle'); },
+      async resolveUncertain() { inspectCount += 1; return { outcome: 'unknown' }; }
+    }
   });
   const cleanupCounts = new Map();
+  const cleanupObservations = [];
   try {
     await assert.rejects(() => executeManagedPreFundMptImport({
       actionKey: PRE_FUND_MPT_IMPORT_ACTION,
       runtime,
-      ParserWorkerClass: HangingParserWorker,
+      ParserWorkerClass: MixedOwnershipParserWorker,
       service: { beginManagedMptImport() {} },
       filePaths,
       userDataDir: tempRoot,
@@ -679,16 +729,29 @@ test('真实Supervisor Writer transport中断会取消其余active Parser并保�
       getAvailableDiskBytes: () => Number.MAX_SAFE_INTEGER,
       cleanupMainOwnedFile(spool) {
         cleanupCounts.set(spool.fileIndex, (cleanupCounts.get(spool.fileIndex) || 0) + 1);
+        cleanupObservations.push({ fileIndex: spool.fileIndex, parserActive });
       },
       batchContext: batchContext('e05-c-writer-interruption')
     }), { code: 'PREFUND_WRITER_PARENT_INTERRUPTED' });
     assert.equal(writerExitCount, 1);
+    assert.deepEqual(writerUnitStarts, ['file:000000']);
+    assert.equal(writerDispatchedFileIndex, 0);
+    assert.equal(writerSawReadyManifest, true);
+    assert.ok(parserActiveAtWriterDispatch >= 3, 'file0 dispatch时其余Parser必须仍active');
+    assert.equal(prepareCount, 0, 'pre-critical exit不得创建Intent或转移到unknown ownership');
+    assert.equal(inspectCount, 0, 'pre-critical exit不得进入Inspector/Hold路径');
     assert.equal(parserMaxActive, 4);
     assert.equal(parserCancelCount, 4);
     assert.equal(parserActive, 0);
     assert.deepEqual(Object.fromEntries(cleanupCounts), {
       0: 1, 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 1
     });
+    assert.equal(
+      cleanupObservations.filter(({ fileIndex }) => fileIndex !== 0)
+        .every(({ parserActive: active }) => active === 0),
+      true,
+      '未dispatch文件只能在全部active Parser clean exit barrier后由Main清理'
+    );
   } finally {
     await runtime.shutdown();
   }

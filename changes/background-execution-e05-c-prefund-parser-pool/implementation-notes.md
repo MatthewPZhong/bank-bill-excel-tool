@@ -32,6 +32,7 @@
 | --- | --- | --- | --- | --- |
 | 建议count主要按`availableParallelism-1`与`floor(fileCount/2)`规划。 | 额外把runtime memory/worker/IO预算纳入同源上限。 | Governor不支持4→3→2；只看CPU会在中等内存主机从4直接降1。 | 不改变Spec的max4/低内存single语义，只减少不必要退化。 | 不需要，属于TechDoc资源合同的实现细化。 |
 | 性能门禁预期通过后再评估production。 | 消除固定single先跑的热缓存顺序偏置后，代表集五次中位数改善0.12%，未达15%；资源/平台门禁也未qualified。 | capability与业务parity仍保留，但production继续legacy并记录downgrade。 | 用户路径零变化；后续若优化Parser/Writer瓶颈必须重跑完整门禁。 | 不需要，符合冻结gate。 |
+| 初版Writer interruption测试在`job:start`后退出并把8个file都视为Main-owned。 | 终审确认它没有进入`unit:start`，不能证明dispatch ownership；替换为file0真实spool→实际`unit:start`/dispatchAccepted→pre-critical transport exit，其余4个active Parser取消并等待barrier。 | 保留全hanging用例并声称覆盖Writer-owned；重复E05-B critical/unknown完整恢复case。 | E05-C精确证明Supervisor把已dispatch但未critical的file0明确交还Main且8个Main-owned各清一次；critical/unknown Writer-owned边界继续由E05-B恢复/Hold合同覆盖。 | 不需要，修正测试证据范围，不改变产品合同。 |
 
 ## Evidence
 
@@ -41,7 +42,8 @@
 | `node --test tests/unit/main-process/background-execution/*.test.js ...mpt-import-e05-{a,b,c}.test.js ...mpt-mixed-lifecycle-e05-p0.test.js` | 444/444 PASS | 平台回归、E05-P0/A/B合同、topology 4/3/2/1、Governor downgrade、permit/straggler、disk、真实Pool/Writer/receipt、crash/cancel/cleanup。 |
 | 真实8-file managed import | PASS | OS Parser overlap >1；Writer critical/receipt严格0..7；8条唯一insert receipt；Side DB业务行与独立legacy库逐字段一致。 |
 | 真实Pool单Parser transport crash | PASS | 当前file失败、后续7 file继续；Side DB仅7条receipt/7行业务数据；失败file无receipt。 |
-| Writer transport interruption fault | PASS | 4个active Parser全部取消并等待clean exit；8个Main-owned file各清理一次，无Writer-owned误删。 |
+| Writer transport interruption mixed-ownership fault | PASS | file0先形成真实ready spool并实际发送`unit:start`，dispatchAccepted后pre-critical transport exit由Supervisor以`cleanupOwnership=main`明确交回；其余4个active Parser全部取消并等待clean exit barrier，随后8个权威Main-owned file各清理一次。critical/unknown Writer-owned保留由E05-B既有恢复/Hold合同覆盖，本用例不重复声称直接证明。 |
+| E05-C mixed-ownership fault稳定性复跑 | 连续5轮均10/10 PASS | 触发序列不依赖固定延时：Writer退出只在file0实际dispatch且4个其余Parser active时安排，锁定dispatchAccepted/pre-critical/clean barrier边界。 |
 | `background-execution-pure-compute-canary.js` / `background-execution-recovery-canary.js` | 9/9 + 9/9 PASS | native平台与durable recovery canary无回归。 |
 | `pre-fund-reconciliation-side-db-parity.js` / `pre-fund-reconciliation-output-contract.js` | 69/69 + 15/15 PASS | Side DB与输出业务合同无回归。 |
 | `npm run benchmark:prefund-parser-pool` | 5-run/mode/case evidence generated；DOWNGRADE | 每个runIndex交替single/pool先后顺序；representative single/pool median 584.378/583.695ms（+0.12%）；small 391.265/265.027ms（+32.26%，即回退-32.26%）；业务摘要parity。代表集pool RSS absolute/delta中位数269418496/18071552 bytes、spool 9906933 bytes、event-loop p99 47.022ms；资源仅本机记录，均未qualified。 |
@@ -60,7 +62,7 @@
 
 ### [Important] 部分失败、取消与cleanup ownership
 - 场景：Parser crash、Writer中断或parent shutdown时可能误删Writer evidence或遗留Main spool。
-- 事实与证据：真实Parser crash继续后续；真实Supervisor Writer中断取消4个active Parser并等待exit；Main-owned 8 files各清理一次；E05-B unknown/receipt/Hold测试保持通过。
+- 事实与证据：真实Parser crash继续后续；E05-C file0真实spool实际dispatch后在pre-critical退出，Supervisor明确交回Main，另4个active Parser取消并等待barrier，8个权威Main-owned各清一次；critical/unknown Writer-owned evidence由E05-B既有unknown/receipt/Hold合同保护，本E05-C用例不直接重复该边界。
 - 推断/未知：Windows文件锁/fsync/rename仍未在packaged环境验证。
 - 资损或审计影响：误删unknown evidence会破坏Inspector/Hold，漏清理会放大磁盘占用。
 - 最便宜验证：Windows packaged fault matrix。
