@@ -3,6 +3,7 @@
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { DatabaseSync } = require('node:sqlite');
@@ -256,7 +257,8 @@ function executeRollbackImport(supervisor, policy, fixture, jobId) {
 
 test.after(() => bigTableFixtures.cleanupTmpDirs());
 
-test('生产 topology inspector 同步复用 engine 并行度算法并拒绝空文件批次', () => {
+test('生产 topology inspector 同步复用 engine 并行度算法并拒绝空文件批次', (t) => {
+  t.mock.method(os, 'freemem', () => 8 * 1024 ** 3);
   const inspected = inspectBigTableImportTopology({
     input: { files: ['1.xlsx', '2.xlsx'], parallel: 4 }
   });
