@@ -45,20 +45,39 @@ test('R3.2.1 release evidence CLI输出有界machine-readable摘要', () => {
     actionCount: 7,
     nativeProductionEnabledCount: 0,
     inheritedProductionStateChanges: 0,
-    releaseCheckStatus: 'FAIL',
-    releaseCheckRerunAllowed: false
+    releaseCheckStatus: 'PENDING_REMOTE_REQUIRED_CI',
+    releaseCheckLocalAttemptStatus: 'FAIL',
+    releaseCheckManualRerunAllowed: false,
+    releaseCheckAutomaticCiInvocationLimit: 1,
+    releaseCheckHardGateClosed: false
   });
 });
 
-test('唯一release-check失败不能被改写为PASS或把post-failure组件伪造为重跑', () => {
+test('local release-check attempt #1失败不能被改写为PASS或被组件结果替代', () => {
   const snapshot = loadSnapshot();
   snapshot.releaseCheckEvidence.status = 'PASS';
   snapshot.releaseCheckEvidence.phases.integration.status = 'PASS';
-  snapshot.releaseCheckEvidence.rerunAllowed = true;
   snapshot.releaseCheckEvidence.postFixVerification.standaloneUnit.relationship =
     'RELEASE_CHECK_RERUN';
   snapshot.releaseCheckEvidence.postFixVerification.standaloneIntegration.relationship =
     'RELEASE_CHECK_RERUN';
+  const result = validateReleaseEvidence(snapshot);
+  assert.equal(result.valid, false);
+  assert.ok(errorPaths(result).includes('/releaseCheckEvidence'));
+});
+
+test('remote required CI attempt #2只能在final PR exact head自动执行一次且保持pending', () => {
+  const snapshot = loadSnapshot();
+  const automaticCi = snapshot.releaseCheckEvidence.automaticRequiredCi;
+  automaticCi.status = 'PASS';
+  automaticCi.authorization = 'GENERAL_WAIVER';
+  automaticCi.branch = 'main';
+  automaticCi.headBinding = 'ANY_HEAD';
+  automaticCi.invocationLimit = 2;
+  snapshot.releaseCheckEvidence.manualRerunAllowed = true;
+  snapshot.releaseCheckEvidence.workflowDispatchRerunAllowed = true;
+  snapshot.releaseCheckEvidence.mergeAuthorized = true;
+  snapshot.releaseCheckEvidence.hardGateClosed = true;
   const result = validateReleaseEvidence(snapshot);
   assert.equal(result.valid, false);
   assert.ok(errorPaths(result).includes('/releaseCheckEvidence'));

@@ -4,7 +4,7 @@
 
 - Goal：为冻结的 `R3.2.1 | release evidence | action独立 enable/rollback` 建立可机器校验、可审计的 7-action production snapshot，不改变任何生产业务路径。
 - Context：E04-A/E04-B/E05-A/E05-P0/E05-B 已落 capability；E04-C 第二 Writer probe 已拒绝生产实现；E05-C representative Parser Pool 改善仅 0.57%，结论为 `DOWNGRADE / KEEP PRODUCTION DISABLED`。
-- Constraints：5 个 v3.2.1 native action 保持 `production.enabled=false`、live legacy、effective worker 0；`toolbox:split-large` / `toolbox:publish` 保留 inherited canonical production state；不改金额、币种、receipt、sequence、Publisher 或 Recovery Hold 语义；不实现第二 Writer；本 PR Dev 不运行 `release-check`，Lead 最终仅运行一次且现已完成，任何 agent 禁止重跑；不运行 `check-vars` 或 `scan:vars`。
+- Constraints：5 个 v3.2.1 native action 保持 `production.enabled=false`、live legacy、effective worker 0；`toolbox:split-large` / `toolbox:publish` 保留 inherited canonical production state；不改金额、币种、receipt、sequence、Publisher 或 Recovery Hold 语义；不实现第二 Writer；本 PR Dev、人工触发与 `workflow_dispatch` 均不运行/重跑 `release-check`；Lead local attempt #1 已完成且失败，仅授权 final PR `codex/v3.2.1-r3-release-evidence` 的 automatic required CI 在 exact pushed HEAD 运行一次 attempt #2，当前为 `PENDING_REMOTE_REQUIRED_CI`；CI PASS 前 hard gate 保持open，且不授权 merge/main/tag/production enable；不运行 `check-vars` 或 `scan:vars`。
 - Done when：snapshot 对每个 action 独立给出 current policy、live disposition/effective mode/worker count、enable 决定、禁用/保留原因、rollback、证据引用和 Windows/人工/资金恢复门禁；validator 能同时发现 policy drift、证据漂移、跨 action 代偿和门禁误报；定向测试、affected ESLint/语法与 `git diff --check` 通过。
 
 ## 已确认事实
@@ -19,6 +19,7 @@
 | policy schema 的 `evidenceStatus` 没有 `benchmark-fail`。 | Platform Contract schema。 | 失败结论只记录在 release decision/reasons/evidence refs，不伪造 policy pass/fail 枚举。 |
 | Windows packaged、Excel/WPS、真实进程终止、资金与恢复人工证据仍未闭合。 | R3.2.0、E04、E05 implementation notes。 | snapshot 必须保留 `NOT_RUN` / `PENDING_HUMAN_REVIEW`，自动测试不得升级。 |
 | `package.json.version` 为 `3.1.14`，R3.2.0 release-evidence 未 bump 产品版本。 | `package.json` 与 R3.2.0 release-evidence commit。 | 本证据 PR 不 bump，不更新 release 用户文档三件套。 |
+| local `release-check` attempt #1 在 `c9e89db7` 失败；release owner 仅为开 final PR 授权 automatic required CI attempt #2。 | release-owner 授权与 tracked release snapshot。 | 锁定 branch、exact pushed PR HEAD 和一次 invocation；pending 不得伪装为PASS，也不扩大到人工重跑或merge。 |
 
 ## Unknowns Register
 
@@ -36,4 +37,4 @@
 | 1 | 冻结 7-action snapshot schema 与 authority 分层。 | inherited state、native false gate、canonical enum。 | validator 对实际 authority 全匹配。 | 会误开/误关 action 或伪造 policy。 | 只保留 notes，不接收 snapshot。 |
 | 2 | 建立 evidence refs 与 gate/decision 独立校验。 | 不跨 action 代偿；E04-C/E05-C fail 保真。 | tamper tests 分别击穿 enable、benchmark、gate、rollback。 | release 文档可能漂移或误报 PASS。 | 收缩到更严格的固定 release schema。 |
 | 3 | 运行定向验证与两类 blindspot pass。 | 入口、状态、恢复、资金/审计边界。 | unit、CLI、lint/syntax、diff-check；人工边界仍 open。 | 不能作为最终 PR 证据。 | 保持所有 native disabled，不触碰产品路径。 |
-| 4 | 完成 notes 与本地提交。 | Evidence/Remaining Unknowns 可复现。 | clean tree、精确 base/HEAD。 | 交付不可审计。 | 不 push、不 merge，保留本地分支修正。 |
+| 4 | 完成 notes 与本地提交。 | Evidence/Remaining Unknowns 可复现。 | clean tree、精确 base/HEAD。 | 交付不可审计。 | Dev不push/merge；release owner开PR后仅由required CI按授权运行attempt #2。 |

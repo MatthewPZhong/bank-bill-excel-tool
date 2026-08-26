@@ -256,10 +256,10 @@ const EXPECTED_E05C = Object.freeze({
 });
 const EXPECTED_RELEASE_CHECK = Object.freeze({
   id: 'R3.2.1-RELEASE-CHECK-C9E89DB7-FAILED',
+  attemptNumber: 1,
   authority: 'lead',
+  executionMode: 'LOCAL',
   reviewedHead: 'c9e89db7a700f27460a264a1c6bf4d1b7a02136f',
-  invocationCount: 1,
-  rerunAllowed: false,
   status: 'FAIL',
   exitCode: 1,
   phases: {
@@ -299,7 +299,7 @@ const EXPECTED_RELEASE_CHECK = Object.freeze({
     postFixTargetedStatus: 'PASS_5_OF_7_WITH_2_SKIPPED'
   }],
   postFixVerification: {
-    status: 'COMPONENTS_PASS_RELEASE_CHECK_REMAINS_FAIL',
+    status: 'COMPONENTS_PASS_LOCAL_ATTEMPT_REMAINS_FAIL',
     rendererContract: { status: 'PASS', passed: 8, total: 8, failed: 0 },
     windowsBuildContract: {
       status: 'PASS',
@@ -338,9 +338,27 @@ const EXPECTED_RELEASE_CHECK = Object.freeze({
       assertionsTotal: 2455,
       durationMs: 278953,
       generatedPolicyUpdate: 'rules/integration-test-policy.md'
-    },
-    releaseCheckRerun: 'FORBIDDEN'
-  }
+    }
+  },
+  manualRerunAllowed: false,
+  workflowDispatchRerunAllowed: false,
+  automaticRequiredCi: {
+    attemptNumber: 2,
+    status: 'PENDING_REMOTE_REQUIRED_CI',
+    authorization: 'PR_OPENING_ONLY_WAIVER',
+    trigger: 'PULL_REQUEST_REQUIRED_CI',
+    command: 'npm run release-check',
+    branch: 'codex/v3.2.1-r3-release-evidence',
+    headBinding: 'EXACT_PUSHED_PR_HEAD',
+    invocationLimit: 1,
+    completedInvocations: 0,
+    passRequiredToCloseHardGate: true
+  },
+  hardGateClosed: false,
+  mergeAuthorized: false,
+  mainUpdateAuthorized: false,
+  tagAuthorized: false,
+  productionEnablementAuthorized: false
 });
 
 function parseJsonFile(filePath) {
@@ -389,7 +407,7 @@ function validateReleaseEvidence(snapshot, options = {}) {
     secondWriterProductionImplementationAuthorized: false,
     policyMutationAuthorized: false,
     businessSemanticsChanged: false,
-    releaseCheck: 'FAILED_BY_LEAD_DO_NOT_RERUN'
+    releaseCheck: 'LOCAL_ATTEMPT_FAILED_REMOTE_REQUIRED_CI_PENDING'
   });
   expectEqual('/releaseCheckEvidence', snapshot.releaseCheckEvidence, EXPECTED_RELEASE_CHECK);
 
@@ -520,8 +538,11 @@ function runCli() {
     nativeProductionEnabledCount: snapshot.actions.filter((action) =>
       action.policyAuthority === 'native-runtime' && action.decision.enabled).length,
     inheritedProductionStateChanges: 0,
-    releaseCheckStatus: snapshot.releaseCheckEvidence.status,
-    releaseCheckRerunAllowed: snapshot.releaseCheckEvidence.rerunAllowed
+    releaseCheckStatus: snapshot.releaseCheckEvidence.automaticRequiredCi.status,
+    releaseCheckLocalAttemptStatus: snapshot.releaseCheckEvidence.status,
+    releaseCheckManualRerunAllowed: snapshot.releaseCheckEvidence.manualRerunAllowed,
+    releaseCheckAutomaticCiInvocationLimit: snapshot.releaseCheckEvidence.automaticRequiredCi.invocationLimit,
+    releaseCheckHardGateClosed: snapshot.releaseCheckEvidence.hardGateClosed
   })}\n`);
 }
 
