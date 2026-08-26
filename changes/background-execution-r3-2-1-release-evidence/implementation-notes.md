@@ -44,7 +44,8 @@
 | 既有重量级组合环境 probe | `57/64 PASS`；7 fail 均为当前 host resource gate | 当时 `os.freemem()` 约 0.8–1.0 GiB，低于 E00 2 GiB system reserve：mature topology保守降1；E04 real Worker固定5秒 admission timeout。串行复跑仍同因失败；未改相关 `src/`，不把环境拒绝重标为产品 PASS。更广 E05-A/B probe 出现同类 admission timeout 后停止，不作通过声明。 |
 | Lead唯一完整 `npm run release-check`（reviewed HEAD `c9e89db7`） | `EXIT 1`：lint PASS；smoke PASS；unit `6166/6171 PASS`、2 fail、3 skip；integration因`&&`未执行 | 失败事实、phase边界和禁止重跑均进入machine snapshot；绝不宣称release-check PASS。 |
 | renderer PreFund失败root cause与修复 | 过时静态regex；生产顺序正确。更新测试锁定handler内operation lock → `assertDeleteDateRange(service,payload)` → `deleteTempByDateRange(normalizedRange)`；定向 `8/8 PASS` | 不改`src/main.js`、Hold gate、资金删除口径或normalized range。 |
-| Windows contract失败root cause与修复 | 首次run的worktree依赖解析到`electron-builder/app-builder-lib 26.8.1`；按lock重建后installed/locked `electron-builder=26.15.7`、`app-builder-lib=26.15.7`，未改package/lock；Windows contract `EXIT 0`、5 pass/0 fail/2 skip | 环境漂移已解决；这是post-failure定向验证，不改变唯一release-check `FAIL`。 |
+| Windows contract失败root cause与修复 | 首次run的worktree依赖解析到`electron-builder/app-builder-lib 26.8.1`；按lock重建后installed/locked `electron-builder=26.15.7`、`app-builder-lib=26.15.7`，并用`npm rebuild electron`补全Electron postinstall，未改package/lock；Windows contract `EXIT 0`、5 pass/0 fail/2 skip | 环境漂移已解决，中间失败属于隔离依赖安装状态而非产品缺陷；这是post-failure定向验证，不改变唯一release-check `FAIL`。 |
+| post-failure独立unit component（reviewed HEAD `634671b`） | `npm run test:unit` `EXIT 0`：6172 tests、6169 pass、0 fail、3 skip、377 unit files、25275ms；log `logs/unit-tests/unit-20260826-122322.log` | correct-lock依赖与Electron postinstall完成后的全unit组件验证；不是release-check重跑，也不把唯一release-check改写为PASS。 |
 | post-failure独立integration component | `npm run test:integration` `EXIT 0`：51/51 scripts、2455/2455 assertions、278953ms | 唯一release-check因unit失败未进入integration；本次独立component PASS不构成release-check重跑或PASS。runner合法同步`rules/integration-test-policy.md`时间与耗时清单，随最终commit保留。 |
 
 ## Blindspot Pass
@@ -96,4 +97,4 @@
 | Packaged Windows、Excel/WPS、真实进程终止证据 | BLOCK production enable / `NOT_RUN` | Release owner 在真实 packaged Windows 与 Office 环境执行 | 不阻断 evidence artifact；阻断相关 native production enable。 |
 | 真实业务文件与资金/恢复人工复核 | BLOCK production enable / `PENDING_HUMAN_REVIEW` | Toolbox/PreFund 业务与恢复 owner | ⚠️ 资金与恢复红线，请人工复核。 |
 | 当前host低于E00 system reserve，重量级real Worker定向测试被admission拒绝 | PROBE / 环境限制 | 项目负责人在满足E00内存预算的review环境复跑定向Toolbox/E05-B或最终唯一release-check | release专属validator及纯合同测试已通过；不把未跑完的real Worker矩阵声明PASS。 |
-| 唯一完整 `release-check` 已失败 | CLOSED AS EVIDENCE / `EXIT 1` | 禁止任何agent再次运行；修复后renderer/Windows定向与独立integration component已通过 | release-check自身的integration phase保持`NOT_RUN`；standalone integration另记PASS，最终状态不得写为release-check PASS。 |
+| 唯一完整 `release-check` 已失败 | CLOSED AS EVIDENCE / `EXIT 1` | 禁止任何agent再次运行；修复后renderer/Windows定向与独立unit/integration components已通过 | release-check自身的integration phase保持`NOT_RUN`；standalone unit/integration另记PASS，最终状态不得写为release-check PASS。 |

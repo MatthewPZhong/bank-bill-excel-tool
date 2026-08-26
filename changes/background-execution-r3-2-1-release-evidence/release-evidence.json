@@ -79,6 +79,20 @@
         "lockedElectronBuilderVersion": "26.15.7",
         "lockedAppBuilderLibVersion": "26.15.7"
       },
+      "standaloneUnit": {
+        "status": "PASS",
+        "relationship": "POST_FAILURE_COMPONENT_NOT_RELEASE_CHECK_RERUN",
+        "command": "npm run test:unit",
+        "reviewedHead": "634671bbe66c7d66782e528825105b7534db8971",
+        "exitCode": 0,
+        "tests": 6172,
+        "passed": 6169,
+        "failed": 0,
+        "skipped": 3,
+        "unitFiles": 377,
+        "log": "logs/unit-tests/unit-20260826-122322.log",
+        "durationMs": 25275
+      },
       "standaloneIntegration": {
         "status": "PASS",
         "relationship": "POST_FAILURE_COMPONENT_NOT_RELEASE_CHECK_RERUN",

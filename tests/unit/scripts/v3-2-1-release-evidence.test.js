@@ -50,11 +50,13 @@ test('R3.2.1 release evidence CLI输出有界machine-readable摘要', () => {
   });
 });
 
-test('唯一release-check失败不能被改写为PASS或伪造integration已运行', () => {
+test('唯一release-check失败不能被改写为PASS或把post-failure组件伪造为重跑', () => {
   const snapshot = loadSnapshot();
   snapshot.releaseCheckEvidence.status = 'PASS';
   snapshot.releaseCheckEvidence.phases.integration.status = 'PASS';
   snapshot.releaseCheckEvidence.rerunAllowed = true;
+  snapshot.releaseCheckEvidence.postFixVerification.standaloneUnit.relationship =
+    'RELEASE_CHECK_RERUN';
   snapshot.releaseCheckEvidence.postFixVerification.standaloneIntegration.relationship =
     'RELEASE_CHECK_RERUN';
   const result = validateReleaseEvidence(snapshot);
