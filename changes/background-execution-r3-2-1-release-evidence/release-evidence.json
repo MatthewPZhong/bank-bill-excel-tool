@@ -1,0 +1,509 @@
+{
+  "schemaVersion": 1,
+  "release": "3.2.1",
+  "releaseStep": "R3.2.1",
+  "baseCommit": "4598b9c67787ef1736831a186a199bd6fe9ae626",
+  "scope": "release-evidence-only",
+  "globalDecision": {
+    "newNativeProductionEnablement": "REJECTED",
+    "secondWriterProductionImplementationAuthorized": false,
+    "policyMutationAuthorized": false,
+    "businessSemanticsChanged": false,
+    "releaseCheck": "NOT_RUN_BY_DEV"
+  },
+  "evidenceCatalog": [
+    {
+      "id": "POLICY-CANONICAL-V3.2.X",
+      "source": "changes/background-execution-v3.2.x-contract-baseline/changes/background-execution/validation/fixtures/valid/policy-registry.v3.2.x.json",
+      "sha256": "8ab98e4b7a7b0c669892f069881c25eaaf1f8241b1e7d71e5b63eed8b2c38a22",
+      "reviewedHead": null
+    },
+    {
+      "id": "E02-D-MATURE-ADAPTERS",
+      "source": "changes/background-execution-e02-d-mature-adapters/implementation-notes.md",
+      "sha256": "5172caea8e2b035658c680202331279d0c5468cb57f41cd159cf9e95b29140b4",
+      "reviewedHead": "a9fb43cf97a089510baa440ee020c8247d66266e"
+    },
+    {
+      "id": "E04-A-ONE-SHOT-WORKER",
+      "source": "changes/background-execution-v3.2.x-contract-baseline/changes/3.2.1/implementation-notes.md",
+      "sha256": "be132fe2d901631559531d0ba44a2141bd7304f7acd4a8a49d67022c07dbfbe6",
+      "reviewedHead": "89fc52dba479edb4a641f6638c5879c847ecb36d"
+    },
+    {
+      "id": "E04-B-SEALED-ROUTE-DB-ONE-WRITER",
+      "source": "changes/background-execution-v3.2.x-contract-baseline/changes/3.2.1/implementation-notes.md",
+      "sha256": "be132fe2d901631559531d0ba44a2141bd7304f7acd4a8a49d67022c07dbfbe6",
+      "reviewedHead": "5008eef12316910cb5c487382c18d7d191bac2b1"
+    },
+    {
+      "id": "E04-C-SECOND-WRITER-REJECTED",
+      "source": "changes/background-execution-v3.2.x-contract-baseline/changes/3.2.1/implementation-notes.md",
+      "sha256": "be132fe2d901631559531d0ba44a2141bd7304f7acd4a8a49d67022c07dbfbe6",
+      "reviewedHead": "3cc967d7343305b7292cf7efc1f97d14c4a6a1c1"
+    },
+    {
+      "id": "E05-A-PARSER-SPOOL",
+      "source": "changes/background-execution-e05-a-prefund-parser-spool/implementation-notes.md",
+      "sha256": "8f6e393d90612783c7690040c5c5c993a23e90fe55a8d50381ea3e22d73db89d",
+      "reviewedHead": "5da07fc3b9d73a39aa7864fb42576a0583ec5500"
+    },
+    {
+      "id": "E05-P0-RECEIPT-LIFECYCLE",
+      "source": "changes/background-execution-e05-p0-receipt-lifecycle/implementation-notes.md",
+      "sha256": "f497b25c38ba8dd78470d4d84d9eaf664acca83ab019e4d8cb5612fd1a00f344",
+      "reviewedHead": "aef27d36a985b13ff745b21625ae24105c6952f4"
+    },
+    {
+      "id": "E05-B-DURABLE-SINGLE-WRITER",
+      "source": "changes/background-execution-e05-b-prefund-single-writer/implementation-notes.md",
+      "sha256": "b1a29a47727df61852c0c8fbd8e9a443ff15134115c7f4848f340195ded65305",
+      "reviewedHead": "ed936addb7e97960a004ce739c35695afccbf01a"
+    },
+    {
+      "id": "E05-C-PARSER-POOL-DOWNGRADE",
+      "source": "changes/background-execution-e05-c-prefund-parser-pool/implementation-notes.md",
+      "sha256": "a73055e7de74842b5ca8c9629b95eeaccb8f165d6553222232d41eeed47fd5e1",
+      "reviewedHead": "4598b9c67787ef1736831a186a199bd6fe9ae626"
+    },
+    {
+      "id": "E05-C-BENCHMARK-88E6D5AA",
+      "source": "changes/background-execution-e05-c-prefund-parser-pool/benchmark-evidence.json",
+      "sha256": "88e6d5aa340710dfd77ccb31c96b1e8629e263453ce66f957f495d06a67d3cdf",
+      "reviewedHead": "4598b9c67787ef1736831a186a199bd6fe9ae626"
+    }
+  ],
+  "actions": [
+    {
+      "actionKey": "toolbox:merge",
+      "policyAuthority": "native-runtime",
+      "currentPolicy": {
+        "disposition": "managed",
+        "mode": "thread-single",
+        "lifetime": "job",
+        "adapterKind": "native",
+        "commitKind": "main-settlement",
+        "production": {
+          "enabled": false,
+          "effectiveMode": "legacy",
+          "effectiveWorkerCount": 0,
+          "recoveryStatus": "probe",
+          "evidenceStatus": "baseline",
+          "downgradeReason": "production gate not yet passed",
+          "benchmarkEvidenceId": null
+        }
+      },
+      "live": {
+        "disposition": "legacy-preserved",
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "path": "legacy-main-generation"
+      },
+      "decision": {
+        "kind": "KEEP_DISABLED",
+        "enabled": false,
+        "independent": true,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "EXCEL_WPS_REVIEW_PENDING",
+          "BUSINESS_FILE_REVIEW_PENDING"
+        ]
+      },
+      "rollback": {
+        "strategy": "KEEP_LEGACY_SELECTOR",
+        "steps": [
+          "keep production.enabled=false",
+          "continue legacy Main generation",
+          "preserve existing FIFO Publisher and journal recovery"
+        ]
+      },
+      "evidenceRefs": [
+        "POLICY-CANONICAL-V3.2.X",
+        "E04-A-ONE-SHOT-WORKER"
+      ],
+      "gates": {
+        "windowsPackaged": "NOT_RUN",
+        "excelWps": "PENDING_HUMAN_REVIEW",
+        "realProcessTermination": "NOT_RUN",
+        "businessFile": "PENDING_HUMAN_REVIEW",
+        "funds": "NOT_APPLICABLE",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      }
+    },
+    {
+      "actionKey": "toolbox:split-single",
+      "policyAuthority": "native-runtime",
+      "currentPolicy": {
+        "disposition": "managed",
+        "mode": "thread-single",
+        "lifetime": "job",
+        "adapterKind": "native",
+        "commitKind": "main-settlement",
+        "production": {
+          "enabled": false,
+          "effectiveMode": "legacy",
+          "effectiveWorkerCount": 0,
+          "recoveryStatus": "probe",
+          "evidenceStatus": "baseline",
+          "downgradeReason": "production gate not yet passed",
+          "benchmarkEvidenceId": null
+        }
+      },
+      "live": {
+        "disposition": "legacy-preserved",
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "path": "legacy-main-generation"
+      },
+      "decision": {
+        "kind": "KEEP_DISABLED",
+        "enabled": false,
+        "independent": true,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "EXCEL_WPS_REVIEW_PENDING",
+          "BUSINESS_FILE_REVIEW_PENDING"
+        ]
+      },
+      "rollback": {
+        "strategy": "KEEP_LEGACY_SELECTOR",
+        "steps": [
+          "keep production.enabled=false",
+          "continue legacy Main generation",
+          "preserve existing FIFO Publisher and journal recovery"
+        ]
+      },
+      "evidenceRefs": [
+        "POLICY-CANONICAL-V3.2.X",
+        "E04-A-ONE-SHOT-WORKER"
+      ],
+      "gates": {
+        "windowsPackaged": "NOT_RUN",
+        "excelWps": "PENDING_HUMAN_REVIEW",
+        "realProcessTermination": "NOT_RUN",
+        "businessFile": "PENDING_HUMAN_REVIEW",
+        "funds": "NOT_APPLICABLE",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      }
+    },
+    {
+      "actionKey": "toolbox:split-multi-output",
+      "policyAuthority": "native-runtime",
+      "currentPolicy": {
+        "disposition": "managed",
+        "mode": "thread-pool",
+        "lifetime": "job",
+        "adapterKind": "native",
+        "commitKind": "main-settlement",
+        "production": {
+          "enabled": false,
+          "effectiveMode": "legacy",
+          "effectiveWorkerCount": 0,
+          "recoveryStatus": "probe",
+          "evidenceStatus": "baseline",
+          "downgradeReason": "Windows durability and production performance gates not yet passed",
+          "benchmarkEvidenceId": null
+        }
+      },
+      "live": {
+        "disposition": "legacy-preserved",
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "path": "legacy-main-generation"
+      },
+      "decision": {
+        "kind": "KEEP_DISABLED",
+        "enabled": false,
+        "independent": true,
+        "reasonCodes": [
+          "E04_C_COMBINED_GATE_FAILED",
+          "LEGACY_RELATIVE_IMPROVEMENT_BELOW_15_PERCENT",
+          "RSS_INCREASE_UNQUALIFIED",
+          "DISK_FOOTPRINT_UNQUALIFIED",
+          "PHASE_LEASE_MISSING",
+          "JOB_START_QUOTA_MISSING",
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "EXCEL_WPS_REVIEW_PENDING",
+          "BUSINESS_FILE_REVIEW_PENDING"
+        ]
+      },
+      "rollback": {
+        "strategy": "KEEP_LEGACY_SELECTOR",
+        "steps": [
+          "keep production.enabled=false",
+          "retain the one-Writer capability as non-production evidence only",
+          "do not create a second Writer production path",
+          "preserve existing FIFO Publisher and journal recovery"
+        ]
+      },
+      "evidenceRefs": [
+        "POLICY-CANONICAL-V3.2.X",
+        "E04-B-SEALED-ROUTE-DB-ONE-WRITER",
+        "E04-C-SECOND-WRITER-REJECTED"
+      ],
+      "gates": {
+        "windowsPackaged": "NOT_RUN",
+        "excelWps": "PENDING_HUMAN_REVIEW",
+        "realProcessTermination": "NOT_RUN",
+        "businessFile": "PENDING_HUMAN_REVIEW",
+        "funds": "NOT_APPLICABLE",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      }
+    },
+    {
+      "actionKey": "toolbox:split-large",
+      "policyAuthority": "canonical-inherited",
+      "currentPolicy": {
+        "disposition": "managed",
+        "mode": "thread-single",
+        "lifetime": "job",
+        "adapterKind": "existing-dispatch",
+        "commitKind": "main-settlement",
+        "production": {
+          "enabled": true,
+          "effectiveMode": "thread-single",
+          "effectiveWorkerCount": 1,
+          "recoveryStatus": "proven",
+          "evidenceStatus": "baseline",
+          "downgradeReason": null,
+          "benchmarkEvidenceId": null
+        }
+      },
+      "live": {
+        "disposition": "managed",
+        "effectiveMode": "thread-single",
+        "effectiveWorkerCount": 1,
+        "path": "inherited-existing-dispatch"
+      },
+      "decision": {
+        "kind": "KEEP_INHERITED_ENABLED",
+        "enabled": true,
+        "independent": true,
+        "reasonCodes": [
+          "INHERITED_STATE_UNCHANGED",
+          "NO_WRAPPER_WORKER"
+        ]
+      },
+      "rollback": {
+        "strategy": "NO_R3_2_1_CHANGE",
+        "steps": [
+          "do not change the inherited selector or adapter",
+          "use the existing large-split cancel and staging cleanup path",
+          "leave publication to the independent toolbox:publish action"
+        ]
+      },
+      "evidenceRefs": [
+        "POLICY-CANONICAL-V3.2.X",
+        "E02-D-MATURE-ADAPTERS"
+      ],
+      "gates": {
+        "windowsPackaged": "NOT_RUN",
+        "excelWps": "PENDING_HUMAN_REVIEW",
+        "realProcessTermination": "NOT_RUN",
+        "businessFile": "PENDING_HUMAN_REVIEW",
+        "funds": "NOT_APPLICABLE",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      }
+    },
+    {
+      "actionKey": "toolbox:publish",
+      "policyAuthority": "canonical-inherited",
+      "currentPolicy": {
+        "disposition": "managed",
+        "mode": "thread-single",
+        "lifetime": "job",
+        "adapterKind": "existing-dispatch",
+        "commitKind": "existing-critical-protocol",
+        "production": {
+          "enabled": true,
+          "effectiveMode": "thread-single",
+          "effectiveWorkerCount": 1,
+          "recoveryStatus": "proven",
+          "evidenceStatus": "baseline",
+          "downgradeReason": null,
+          "benchmarkEvidenceId": null
+        }
+      },
+      "live": {
+        "disposition": "managed",
+        "effectiveMode": "thread-single",
+        "effectiveWorkerCount": 1,
+        "path": "inherited-existing-dispatch"
+      },
+      "decision": {
+        "kind": "KEEP_INHERITED_ENABLED",
+        "enabled": true,
+        "independent": true,
+        "reasonCodes": [
+          "INHERITED_STATE_UNCHANGED",
+          "EXISTING_DURABLE_JOURNAL_IS_AUTHORITY"
+        ]
+      },
+      "rollback": {
+        "strategy": "NO_R3_2_1_CHANGE",
+        "steps": [
+          "do not change the inherited selector or adapter",
+          "recover only through the existing durable publication journal",
+          "do not rerun generation from publication recovery"
+        ]
+      },
+      "evidenceRefs": [
+        "POLICY-CANONICAL-V3.2.X",
+        "E02-D-MATURE-ADAPTERS"
+      ],
+      "gates": {
+        "windowsPackaged": "NOT_RUN",
+        "excelWps": "PENDING_HUMAN_REVIEW",
+        "realProcessTermination": "NOT_RUN",
+        "businessFile": "PENDING_HUMAN_REVIEW",
+        "funds": "NOT_APPLICABLE",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      }
+    },
+    {
+      "actionKey": "pre-fund:mpt-import",
+      "policyAuthority": "native-runtime",
+      "currentPolicy": {
+        "disposition": "managed",
+        "mode": "thread-pool",
+        "lifetime": "job",
+        "adapterKind": "native",
+        "commitKind": "worker-durable",
+        "production": {
+          "enabled": false,
+          "effectiveMode": "legacy",
+          "effectiveWorkerCount": 0,
+          "recoveryStatus": "probe",
+          "evidenceStatus": "baseline",
+          "downgradeReason": "production gate not yet passed",
+          "benchmarkEvidenceId": null
+        }
+      },
+      "live": {
+        "disposition": "legacy-preserved",
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "path": "legacy-import-service"
+      },
+      "decision": {
+        "kind": "KEEP_DISABLED",
+        "enabled": false,
+        "independent": true,
+        "reasonCodes": [
+          "E05_C_REPRESENTATIVE_IMPROVEMENT_0_57_PERCENT",
+          "NATIVE_ADMISSION_EFFECTIVE_PARSER_COUNT_1",
+          "RSS_DISK_EVENT_LOOP_UNQUALIFIED",
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_PROCESS_TERMINATION_NOT_RUN",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING"
+        ]
+      },
+      "rollback": {
+        "strategy": "KEEP_LEGACY_SELECTOR_PRESERVE_DURABLE_EVIDENCE",
+        "steps": [
+          "keep production.enabled=false",
+          "continue the legacy import service behind the existing Recovery Hold gate",
+          "preserve committed receipts and do not down-migrate or auto-rerun unknown outcomes"
+        ]
+      },
+      "evidenceRefs": [
+        "POLICY-CANONICAL-V3.2.X",
+        "E05-A-PARSER-SPOOL",
+        "E05-P0-RECEIPT-LIFECYCLE",
+        "E05-B-DURABLE-SINGLE-WRITER",
+        "E05-C-PARSER-POOL-DOWNGRADE",
+        "E05-C-BENCHMARK-88E6D5AA"
+      ],
+      "gates": {
+        "windowsPackaged": "NOT_RUN",
+        "excelWps": "NOT_APPLICABLE",
+        "realProcessTermination": "NOT_RUN",
+        "businessFile": "PENDING_HUMAN_REVIEW",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      }
+    },
+    {
+      "actionKey": "pre-fund:mpt-repair-import",
+      "policyAuthority": "native-runtime",
+      "currentPolicy": {
+        "disposition": "managed",
+        "mode": "thread-single",
+        "lifetime": "job",
+        "adapterKind": "native",
+        "commitKind": "worker-durable",
+        "production": {
+          "enabled": false,
+          "effectiveMode": "legacy",
+          "effectiveWorkerCount": 0,
+          "recoveryStatus": "probe",
+          "evidenceStatus": "baseline",
+          "downgradeReason": "production gate not yet passed",
+          "benchmarkEvidenceId": null
+        }
+      },
+      "live": {
+        "disposition": "legacy-preserved",
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "path": "legacy-repair-service"
+      },
+      "decision": {
+        "kind": "KEEP_DISABLED",
+        "enabled": false,
+        "independent": true,
+        "reasonCodes": [
+          "REPAIR_REMAINS_EXACTLY_ONE_PARSER",
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_PROCESS_TERMINATION_NOT_RUN",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING"
+        ]
+      },
+      "rollback": {
+        "strategy": "KEEP_LEGACY_SELECTOR_PRESERVE_DURABLE_EVIDENCE",
+        "steps": [
+          "keep production.enabled=false",
+          "continue the legacy repair service behind the existing Recovery Hold gate",
+          "preserve committed receipts and repair evidence; do not auto-rerun unknown outcomes"
+        ]
+      },
+      "evidenceRefs": [
+        "POLICY-CANONICAL-V3.2.X",
+        "E05-A-PARSER-SPOOL",
+        "E05-P0-RECEIPT-LIFECYCLE",
+        "E05-B-DURABLE-SINGLE-WRITER",
+        "E05-C-PARSER-POOL-DOWNGRADE"
+      ],
+      "gates": {
+        "windowsPackaged": "NOT_RUN",
+        "excelWps": "NOT_APPLICABLE",
+        "realProcessTermination": "NOT_RUN",
+        "businessFile": "PENDING_HUMAN_REVIEW",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      }
+    }
+  ],
+  "rejectedProbeEvidence": {
+    "e04c": {
+      "productionImplementationAuthorized": false,
+      "representativeImprovementVsOneWriterPercent": 21.096,
+      "representativeImprovementVsLiveLegacyPercent": 8.581,
+      "representativeRssIncreaseVsOneWriterPercent": 31.682,
+      "representativeRssIncreaseVsLegacyPercent": 105.931,
+      "representativeDiskMultipleVsLegacy": 11.706,
+      "externalRawEvidenceSha256": "f3fc31c02ef0ef5e85ab4c29ed8c1031db9d5a20b54f065a76f6ee29b10774a0"
+    },
+    "e05c": {
+      "productionEligible": false,
+      "conclusion": "DOWNGRADE / KEEP PRODUCTION DISABLED",
+      "representativeImprovementPercent": 0.57,
+      "smallImprovementPercent": 33.04,
+      "requestedParserCount": 4,
+      "nativeEffectiveParserCount": 1,
+      "smallCanSubstituteRepresentativeGate": false
+    }
+  }
+}
