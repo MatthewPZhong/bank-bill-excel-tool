@@ -41,7 +41,7 @@ jobs:
             github.base_ref == 'codex/v3.2.1-r3-release-evidence' &&
             github.event.pull_request.head.repo.full_name == github.repository &&
             github.event.action == 'synchronize' &&
-            github.event.pull_request.commits == 4 &&
+            github.event.pull_request.commits == 5 &&
             github.run_attempt == 1
           )
         run: |
@@ -62,13 +62,13 @@ jobs:
           github.base_ref == 'codex/v3.2.1-r3-release-evidence' &&
           github.event.pull_request.head.repo.full_name == github.repository &&
           github.event.action == 'synchronize' &&
-          github.event.pull_request.commits == 4 &&
+          github.event.pull_request.commits == 5 &&
           github.run_attempt == 1
         shell: bash
         run: |
           test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
-          git merge-base --is-ancestor 962e4ae1549035d4eb875dbfb19417c19d1f95f6 HEAD
-          test "$(git rev-list --count 962e4ae1549035d4eb875dbfb19417c19d1f95f6..HEAD)" -eq 2
+          test "$(git rev-parse HEAD^1)" = "ce599e206894f3683b748254068dd750479ffc74"
+          test "$(git rev-parse HEAD^2)" = "d7d96938196a61a36892c40721cdba56992a14a8"
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -87,7 +87,7 @@ jobs:
             github.base_ref == 'codex/v3.2.1-r3-release-evidence' &&
             github.event.pull_request.head.repo.full_name == github.repository &&
             github.event.action == 'synchronize' &&
-            github.event.pull_request.commits == 4 &&
+            github.event.pull_request.commits == 5 &&
             github.run_attempt == 1
           ) ||
           (

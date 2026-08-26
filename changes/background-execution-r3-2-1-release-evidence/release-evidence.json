@@ -108,21 +108,32 @@
     },
     "manualRerunAllowed": false,
     "workflowDispatchRerunAllowed": false,
-    "priorAutomaticRequiredCi": {
-      "attemptNumber": 3,
-      "status": "CANCELLED",
-      "authorization": "PR_OPENING_ONLY_WAIVER",
-      "trigger": "PULL_REQUEST_OPENED_REQUIRED_CI",
-      "workflowRunId": 32953558996,
-      "reviewedHead": "962e4ae1549035d4eb875dbfb19417c19d1f95f6",
-      "smokeTestConclusion": "CANCELLED",
-      "buildConclusion": "SKIPPED",
-      "satisfiesHardGate": false
-    },
+    "priorAutomaticRequiredCi": [
+      {
+        "attemptNumber": 3,
+        "status": "CANCELLED",
+        "authorization": "PR_OPENING_ONLY_WAIVER",
+        "trigger": "PULL_REQUEST_OPENED_REQUIRED_CI",
+        "workflowRunId": 32953558996,
+        "reviewedHead": "962e4ae1549035d4eb875dbfb19417c19d1f95f6",
+        "smokeTestConclusion": "CANCELLED",
+        "buildConclusion": "SKIPPED",
+        "satisfiesHardGate": false
+      },
+      {
+        "attemptNumber": 4,
+        "status": "NOT_STARTED",
+        "authorization": "PR_REPAIR_SYNCHRONIZE_SINGLE_USE_WAIVER",
+        "trigger": "PULL_REQUEST_SYNCHRONIZE_REQUIRED_CI",
+        "intendedHead": "ce599e206894f3683b748254068dd750479ffc74",
+        "reason": "PULL_REQUEST_MERGE_CONFLICT",
+        "satisfiesHardGate": false
+      }
+    ],
     "automaticRequiredCi": {
-      "attemptNumber": 4,
+      "attemptNumber": 5,
       "status": "PENDING_REMOTE_REQUIRED_CI",
-      "authorization": "PR_REPAIR_SYNCHRONIZE_SINGLE_USE_WAIVER",
+      "authorization": "PR_CONFLICT_RESOLUTION_SYNCHRONIZE_SINGLE_USE_WAIVER",
       "workflowSource": ".github/workflows/build-windows.yml",
       "trigger": "PULL_REQUEST_SYNCHRONIZE_REQUIRED_CI",
       "sameRepositoryOnly": true,
@@ -131,9 +142,9 @@
       "branch": "codex/v3.2.1-r4-review-hardening",
       "baseRef": "codex/v3.2.1-r3-release-evidence",
       "pullRequestNumber": 183,
-      "expectedPullRequestCommits": 4,
-      "requiredAncestorHead": "962e4ae1549035d4eb875dbfb19417c19d1f95f6",
-      "commitsAfterRequiredAncestor": 2,
+      "expectedPullRequestCommits": 5,
+      "expectedFirstParentHead": "ce599e206894f3683b748254068dd750479ffc74",
+      "expectedSecondParentHead": "d7d96938196a61a36892c40721cdba56992a14a8",
       "headBinding": "github.event.pull_request.head.sha",
       "nonPullRequestHeadBinding": "github.sha",
       "invocationLimit": 1,

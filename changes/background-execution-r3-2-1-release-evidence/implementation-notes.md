@@ -54,6 +54,7 @@
 | PR #182 automatic attempt #2（Actions run `32932672610`，reviewed HEAD `7e739036609d16f7fce78eaba0f92029d67d0311`） | `CANCELLED` at 6h；Windows unit 中 E05 spool Writer 正确抛 `PREFUND_SPOOL_DURABILITY_UNAVAILABLE`，之后 Node test process 未退出直到平台上限 | 该结果不能标记为 PASS，也不授权 production；根因是宿主目录屏障能力泄漏到独立行为测试，且失败后存在进程收口风险。 |
 | #182 Windows test isolation 定向验证 | E05-A `42/42 PASS`（含默认真实平台 supported/unsupported分支）；E05-B `38/38 PASS`；E05-C `15/15 PASS`；Toolbox Route DB `8/8 PASS`；Toolbox generation `10/10 PASS`；mature adapters `11/11 PASS`；全部正常退出 | test seam覆盖直接 Writer、真实 Parser/Scanner/Writer Worker与资源准入；默认生产 barrier仍单独验证 fail closed；未运行 `release-check`。 |
 | #182 follow-up全量unit组件 | `npm run test:unit` `EXIT 0`：6174 tests、6171 pass、0 fail、3 skip、377 unit files、24989ms；log `logs/unit-tests/unit-20260826-230615.log` | 证明跨文件并发下无准入假失败且Node测试进程正常退出；这是独立unit组件，不是`release-check`，不替代最终PR #183远端全量证据。 |
+| #183 conflict-resolution本地验证 | 定向矩阵 `149 tests / 147 pass / 0 fail / 2 Windows-only skip`；affected ESLint、`node --check`、Windows contract `5 pass / 2 skip`、release evidence `11/11`、validator与`git diff --check` PASS；全量unit `6173/6176 PASS`、0 fail、3 skip、377 unit files、25514ms；log `logs/unit-tests/unit-20260827-013456.log` | 证明双父冲突消解保留 #182 isolation 与 #183 hardening，且本地跨文件收口正常；未运行本地`release-check`，不替代attempt #5远端Windows hard gate。 |
 
 ## Blindspot Pass
 
@@ -116,12 +117,14 @@
 | Packaged Windows、Excel/WPS、真实进程终止证据 | BLOCK production enable / `NOT_RUN` | Release owner 在真实 packaged Windows 与 Office 环境执行 | 不阻断 evidence artifact；阻断相关 native production enable。 |
 | 真实业务文件与资金/恢复人工复核 | BLOCK production enable / `PENDING_HUMAN_REVIEW` | Toolbox/PreFund 业务与恢复 owner | ⚠️ 资金与恢复红线，请人工复核。 |
 | 当前host资源波动曾使重量级real Worker测试被admission拒绝 | CLOSED FOR TEST DETERMINISM / production gate unchanged | 行为测试固定测试预算；专门的resource/downgrade测试继续覆盖真实边界 | 定向矩阵与全量unit均已通过；生产reserve、降级与5秒准入未放宽。 |
-| #182 automatic attempt #2 已取消；v3.2.1 最终全量 CI 证据尚未闭合 | OPEN HARD GATE / final PR required CI | #182 只推送本测试隔离修复且不得运行全量 `release-check`；由最后一张 PR #183 在精确head/base上提供一次独立远端结果 | #182 的取消不能代替 #183，也不能被定向 PASS 改写；#183 PASS 前不授权 main/tag/production enable。 |
+| #182 automatic attempt #2 已取消；#183 attempt #4 因冲突未启动；v3.2.1 最终全量 CI 证据尚未闭合 | OPEN HARD GATE / final PR required CI | #182 不运行全量 `release-check`；由最后一张 PR #183 attempt #5 在精确head/base与双父血缘上提供一次独立远端结果 | 旧取消/未启动结果不能代替 #183 attempt #5，也不能被本地定向 PASS 改写；远端 PASS 前不授权 main/tag/production enable。 |
 
-## PR #183 Repair Final Gate 授权记录（2026-08-27）
+## PR #183 Conflict-Resolution Final Gate 授权记录（2026-08-27）
 
 - 原 automatic attempt #3：Actions run `32953558996`，reviewed head `962e4ae1549035d4eb875dbfb19417c19d1f95f6`，smoke-test `CANCELLED`、build `SKIPPED`；该结果不满足 hard gate。
-- release owner 新授权：仅允许 PR #183 从该旧 head 演进的一次 `pull_request/synchronize` automatic attempt #4；禁止手工 rerun、`workflow_dispatch`、reopened、第二次 push、admin 绕过或把旧 #182 CI 当成 final 证据。
-- machine tuple：PR number `183`、same repository、head `codex/v3.2.1-r4-review-hardening`、base `codex/v3.2.1-r3-release-evidence`、action `synchronize`、`github.run_attempt == 1`、`pull_request.commits == 4`；两个 job 继续 checkout `github.event.pull_request.head.sha`。
-- checkout 后 lineage：HEAD 必须等于 event head SHA；`962e4ae1` 必须是 ancestor；`962e4ae1..HEAD` 必须恰好 2 commits。任一条件漂移都会在 `npm ci` 与 `release-check` 前失败。
+- automatic attempt #4 原计划验证 reviewed head `ce599e206894f3683b748254068dd750479ffc74`，但 #183 与 #182 exact head `d7d96938196a61a36892c40721cdba56992a14a8` 存在堆叠冲突，GitHub 未启动该 `pull_request/synchronize` workflow；该次记为 `NOT_STARTED / PULL_REQUEST_MERGE_CONFLICT`，不满足 hard gate。
+- release owner 随后授权：仅允许一个以 `ce599e20` 为第一父、`d7d96938` 为第二父的冲突消解 merge commit，并仅对该次 push 运行 automatic attempt #5；禁止手工 rerun、`workflow_dispatch`、reopened、后续 push、admin 绕过或把旧 #182 CI 当成 final 证据。
+- machine tuple：PR number `183`、same repository、head `codex/v3.2.1-r4-review-hardening`、base `codex/v3.2.1-r3-release-evidence`、action `synchronize`、`github.run_attempt == 1`、`pull_request.commits == 5`；两个 job 继续 checkout `github.event.pull_request.head.sha`。
+- checkout 后 lineage：HEAD 必须等于 event head SHA；`HEAD^1` 必须精确等于 `ce599e206894f3683b748254068dd750479ffc74`；`HEAD^2` 必须精确等于 `d7d96938196a61a36892c40721cdba56992a14a8`。任一条件漂移都会在 `npm ci` 与 `release-check` 前失败。
+- 冲突仅出现在本 evidence notes/preflight；E05-C 测试自动合并，`src/` 无冲突。保留 #182 测试隔离与 #183 hardening，不改变金额、币种、sequence、receipt、Recovery Hold 或 production policy。
 - 本地只运行定向测试、静态合同和 full unit component；没有运行本地 `release-check`、`check-vars` 或 `scan:vars`。hard gate、main/tag/production enablement 与资金/恢复人工红线均未闭合。

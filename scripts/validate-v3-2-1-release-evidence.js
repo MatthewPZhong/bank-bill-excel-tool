@@ -29,8 +29,10 @@ const PREVIOUS_FINAL_RELEASE_BRANCH = 'codex/v3.2.1-r3-release-evidence';
 const FINAL_RELEASE_BRANCH = 'codex/v3.2.1-r4-review-hardening';
 const FINAL_RELEASE_BASE = 'codex/v3.2.1-r3-release-evidence';
 const FINAL_RELEASE_PULL_REQUEST = 183;
-const FINAL_RELEASE_PULL_REQUEST_COMMITS = 4;
-const FINAL_RELEASE_PREVIOUS_HEAD = '962e4ae1549035d4eb875dbfb19417c19d1f95f6';
+const FINAL_RELEASE_PULL_REQUEST_COMMITS = 5;
+const FINAL_RELEASE_ORIGINAL_HEAD = '962e4ae1549035d4eb875dbfb19417c19d1f95f6';
+const FINAL_RELEASE_CONFLICTING_HEAD = 'ce599e206894f3683b748254068dd750479ffc74';
+const FINAL_RELEASE_R3_HEAD = 'd7d96938196a61a36892c40721cdba56992a14a8';
 const EXACT_BASE = '4598b9c67787ef1736831a186a199bd6fe9ae626';
 const EXPECTED_CHECKOUT_REF =
   "ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}";
@@ -391,21 +393,29 @@ const EXPECTED_RELEASE_CHECK = Object.freeze({
   },
   manualRerunAllowed: false,
   workflowDispatchRerunAllowed: false,
-  priorAutomaticRequiredCi: {
+  priorAutomaticRequiredCi: [{
     attemptNumber: 3,
     status: 'CANCELLED',
     authorization: 'PR_OPENING_ONLY_WAIVER',
     trigger: 'PULL_REQUEST_OPENED_REQUIRED_CI',
     workflowRunId: 32953558996,
-    reviewedHead: FINAL_RELEASE_PREVIOUS_HEAD,
+    reviewedHead: FINAL_RELEASE_ORIGINAL_HEAD,
     smokeTestConclusion: 'CANCELLED',
     buildConclusion: 'SKIPPED',
     satisfiesHardGate: false
-  },
-  automaticRequiredCi: {
+  }, {
     attemptNumber: 4,
-    status: 'PENDING_REMOTE_REQUIRED_CI',
+    status: 'NOT_STARTED',
     authorization: 'PR_REPAIR_SYNCHRONIZE_SINGLE_USE_WAIVER',
+    trigger: 'PULL_REQUEST_SYNCHRONIZE_REQUIRED_CI',
+    intendedHead: FINAL_RELEASE_CONFLICTING_HEAD,
+    reason: 'PULL_REQUEST_MERGE_CONFLICT',
+    satisfiesHardGate: false
+  }],
+  automaticRequiredCi: {
+    attemptNumber: 5,
+    status: 'PENDING_REMOTE_REQUIRED_CI',
+    authorization: 'PR_CONFLICT_RESOLUTION_SYNCHRONIZE_SINGLE_USE_WAIVER',
     workflowSource: WINDOWS_BUILD_WORKFLOW_SOURCE,
     trigger: 'PULL_REQUEST_SYNCHRONIZE_REQUIRED_CI',
     sameRepositoryOnly: true,
@@ -415,8 +425,8 @@ const EXPECTED_RELEASE_CHECK = Object.freeze({
     baseRef: FINAL_RELEASE_BASE,
     pullRequestNumber: FINAL_RELEASE_PULL_REQUEST,
     expectedPullRequestCommits: FINAL_RELEASE_PULL_REQUEST_COMMITS,
-    requiredAncestorHead: FINAL_RELEASE_PREVIOUS_HEAD,
-    commitsAfterRequiredAncestor: 2,
+    expectedFirstParentHead: FINAL_RELEASE_CONFLICTING_HEAD,
+    expectedSecondParentHead: FINAL_RELEASE_R3_HEAD,
     headBinding: 'github.event.pull_request.head.sha',
     nonPullRequestHeadBinding: 'github.sha',
     invocationLimit: 1,
@@ -544,12 +554,14 @@ function validateReleaseEvidence(snapshot, options = {}) {
           lineageStep.includes(
             'test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"'
           ), true);
-        expectEqual('/authority/windowsWorkflow/repairLineageAncestor',
-          lineageStep.includes(`git merge-base --is-ancestor ${FINAL_RELEASE_PREVIOUS_HEAD} HEAD`),
-          true);
-        expectEqual('/authority/windowsWorkflow/repairLineageCommitCount',
+        expectEqual('/authority/windowsWorkflow/repairLineageFirstParent',
           lineageStep.includes(
-            `test "$(git rev-list --count ${FINAL_RELEASE_PREVIOUS_HEAD}..HEAD)" -eq 2`
+            `test "$(git rev-parse HEAD^1)" = "${FINAL_RELEASE_CONFLICTING_HEAD}"`
+          ),
+          true);
+        expectEqual('/authority/windowsWorkflow/repairLineageSecondParent',
+          lineageStep.includes(
+            `test "$(git rev-parse HEAD^2)" = "${FINAL_RELEASE_R3_HEAD}"`
           ), true);
       }
       const releaseChecksStep = smokeJob.slice(

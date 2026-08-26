@@ -66,7 +66,7 @@ test('local release-check attempt #1失败不能被改写为PASS或被组件结�
   assert.ok(errorPaths(result).includes('/releaseCheckEvidence'));
 });
 
-test('remote required CI attempt #4只能在#183一次性repair synchronize执行且保持pending', () => {
+test('remote required CI attempt #5只能在#183一次性冲突合并synchronize执行且保持pending', () => {
   const snapshot = loadSnapshot();
   const automaticCi = snapshot.releaseCheckEvidence.automaticRequiredCi;
   automaticCi.status = 'PASS';
@@ -78,11 +78,12 @@ test('remote required CI attempt #4只能在#183一次性repair synchronize执�
   automaticCi.branch = 'main';
   automaticCi.baseRef = 'main';
   automaticCi.pullRequestNumber = 184;
-  automaticCi.expectedPullRequestCommits = 5;
-  automaticCi.requiredAncestorHead = '0000000000000000000000000000000000000000';
-  automaticCi.commitsAfterRequiredAncestor = 3;
+  automaticCi.expectedPullRequestCommits = 6;
+  automaticCi.expectedFirstParentHead = '0000000000000000000000000000000000000000';
+  automaticCi.expectedSecondParentHead = '1111111111111111111111111111111111111111';
   automaticCi.headBinding = 'github.sha';
   automaticCi.invocationLimit = 2;
+  snapshot.releaseCheckEvidence.priorAutomaticRequiredCi[1].status = 'PASS';
   snapshot.releaseCheckEvidence.manualRerunAllowed = true;
   snapshot.releaseCheckEvidence.workflowDispatchRerunAllowed = true;
   snapshot.releaseCheckEvidence.mergeAuthorized = true;

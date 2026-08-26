@@ -47,22 +47,22 @@
 | 4 | Canary fast failure + static/Windows dynamic contract | 提前退出快速可观测且不泄露信息 | safe code、等待时间、源码顺序 | 仅影响 Windows 工具链 | 保留静态守卫，动态探针 Windows-only |
 | 5 | TechDoc/report/checksum 同步与全量验证 | 规范与运行时物理表唯一真相一致 | validator、checksum、docs contract、release-check | 文档包不可重新分发 | 不触运行时；修复证据链后再打包 |
 
-## PR #183 一次性 Repair Final Gate（2026-08-27）
+## PR #183 一次性 Conflict-Resolution Final Gate（2026-08-27）
 
 ### Task Brief
 
-- Goal：把 #182 已审查的跨平台测试隔离修复纳入 #183，并仅授权一次自动 `pull_request/synchronize` 全量 final gate。
-- Context：#183 原始 head `962e4ae1549035d4eb875dbfb19417c19d1f95f6` 的 opened run `32953558996` 已取消，build skipped；该 head 也不包含 #182 最新测试隔离修复。
+- Goal：把 #182 exact head 作为第二父合入 #183，消除堆叠冲突，并仅授权该双父 merge commit 的一次自动 `pull_request/synchronize` 全量 final gate。
+- Context：#183 原始 head `962e4ae1549035d4eb875dbfb19417c19d1f95f6` 的 opened run `32953558996` 已取消；第一次 repair head `ce599e206894f3683b748254068dd750479ffc74` 因 PR conflict 未触发 workflow。#182 exact head 为 `d7d96938196a61a36892c40721cdba56992a14a8`。
 - Constraints：不运行本地 `release-check`、`check-vars` 或 `scan:vars`；不手工 rerun、`workflow_dispatch`、admin 绕过、合并 main、删除分支或启用 production；资金/恢复人工红线保持 open。
-- Done when：#183 只产生一个包含测试隔离与门禁合同的 reviewed head；远端仅在 PR #183、same-repo、R4→R3、`synchronize`、`run_attempt == 1`、PR commits=4 时运行；checkout 后验证 exact event head、旧 head ancestor 与恰好 2 个新增提交；其他 final invocation 在 release-check 前稳定失败。
+- Done when：#183 只新增一个冲突消解 merge commit；远端仅在 PR #183、same-repo、R4→R3、`synchronize`、`run_attempt == 1`、PR commits=5 时运行；checkout 后验证 exact event head、`HEAD^1=ce599e20` 与 `HEAD^2=d7d96938`；其他 final invocation 在 release-check 前稳定失败。
 
 ### 已确认事实与 Unknowns Register
 
 | 事实/未知 | 类型 | 影响 | 处理 | 当前决定 |
 | --- | --- | --- | --- | --- |
-| `pull_request/synchronize` 会携带当前 PR head SHA，但没有可依赖的已冻结 previous-head expression | 事件合同 | 高 | PROBE | checkout 继续绑定 `github.event.pull_request.head.sha`；授权前置条件用精确 PR/branch/base/repo/action/attempt/commit count，checkout 后再验证旧 head 血缘与新增提交数 |
+| `pull_request/synchronize` 会携带当前 PR head SHA，但没有可依赖的已冻结 previous-head expression | 事件合同 | 高 | PROBE | checkout 继续绑定 `github.event.pull_request.head.sha`；授权前置条件用精确 PR/branch/base/repo/action/attempt/commit count，checkout 后验证两个 exact parent |
 | 同一 head 无法在自身 workflow 中预先硬编码自身 commit SHA | 完整性 | 中 | ASSUME | 不伪造自引用 SHA；push 后将真实新 SHA登记为 reviewed head，并由监控只读核对 |
-| 仅 action=`synchronize` 会把未来 push 一并放行 | 重复执行 | 高 | PROBE | 固定 `pull_request.commits == 4` 且 `962e4ae1..HEAD == 2`；本次后续新增提交使前置或血缘门禁失败 |
-| #182 与 #183 的修复提交 SHA 不同但内容等价 | 堆叠拓扑 | 中 | PROBE | 本地以 cherry-pick 保留相同 test-only diff；#182 仍须先按顺序合并，#183 不借旧 CI 替代新 final gate |
+| 仅 action=`synchronize` 会把未来 push 一并放行 | 重复执行 | 高 | PROBE | 固定 `pull_request.commits == 5` 且 exact 双父；本次后续新增提交使前置或血缘门禁失败 |
+| #182 与 #183 同时修改 evidence docs 与 E05-C tests | 堆叠拓扑 | 中 | PROBE | 实际仅两份 evidence docs 文本冲突；E05-C tests 自动合并，`src/` 无冲突。merge commit 以 #182 exact head 为第二父，避免内容等价但血缘分叉 |
 
 无新增产品、资金、数据模型或公开接口 BLOCK；远端 final gate PASS 仍是合并前硬证据。

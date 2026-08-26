@@ -209,7 +209,7 @@
 | RSS 取整组合修复后的 Windows 结果 | PROBE | 新 head 的 GitHub-hosted Windows CI；必须先通过完整 smoke/release-check 才进入 packaged build | 阻断 Ready/merge，不阻断本地修复提交 |
 | 真实 Windows Setup/portable packaged canary 与资金红线签字 | BLOCK | 既有 R3 人工/Windows gate | 本 PR 不改变其 `PENDING_HUMAN_REVIEW` 状态，仍阻塞 production enablement |
 
-## PR #183 一次性 Repair Synchronize（2026-08-27）
+## PR #183 一次性 Repair Synchronize Attempt #4（2026-08-27，未触发）
 
 ### Decision
 
@@ -226,11 +226,51 @@
 | #183 原始 Actions run `32953558996` | smoke-test `CANCELLED`；build `SKIPPED` | attempt #3 不闭合 hard gate，不授权 merge 或 production |
 | #182 isolation cherry-pick | #183 本地新增 `d6d2ecf3`，相对旧 #183 head 恰好 1 个提交；相对最新 R3 base 的 PR commits 当前为 3 | 门禁合同作为唯一下一提交后，event commits 必须精确为 4，旧 head 后新增提交必须精确为 2 |
 | isolation 定向测试 | E05-A `42/42`、E05-B `38/38`、E05-C `17/17`、mixed lifecycle `5/5`、Toolbox generation `10/10`、Route DB `8/8`、mature adapters `11/11`、release evidence `11/11`；Windows contract `5 PASS / 2 SKIP` | 测试宿主能力隔离、Worker 生命周期、资金 receipt 与现有 gate 静态合同通过；不是 final release-check |
-| 全量 unit component | `6173/6176 PASS`，0 fail、3 skip | 不运行本地 `release-check` 的前提下验证跨文件收口；远端 attempt #4 才是最终全量证据 |
+| 全量 unit component | `6173/6176 PASS`，0 fail、3 skip | 不运行本地 `release-check` 的前提下验证跨文件收口；当时计划由远端 attempt #4 提供最终证据，后因冲突未启动并由 attempt #5 supersede |
 
 ### Remaining Unknowns
 
 | 未知 | 处理 | 合并影响 |
 | --- | --- | --- |
-| 一次性 synchronize 的 Windows full gate 与 packaged build 结果 | 仅等待自动 Actions；不 rerun、不 dispatch、不 push 第二次 | 任一失败/取消均停止，不能合并 #183 |
+| 一次性 synchronize 的 Windows full gate 与 packaged build 结果 | attempt #4 因 PR conflict 未启动；该项由下方明确授权的 attempt #5 supersede | attempt #4 不满足 hard gate，不能授权 merge #183 |
 | #182 先合并后 #183 改 base 产生的新 checks | 严格顺序处理并等待自然 CI | 新 base checks 未成功前不得 merge #183 |
+
+## PR #183 Conflict-Resolution Synchronize Attempt #5（2026-08-27）
+
+### Decision
+
+| 决策 | 原因与证据 | 放弃方案 | 影响 |
+| --- | --- | --- | --- |
+| 将 #182 exact head `d7d96938` 作为第二父合入 #183 | attempt #4 head `ce599e20` 在 GitHub 显示 `CONFLICTING`，`pull_request` workflow 因冲突未启动；仅 cherry-pick 内容不能消除 PR 拓扑冲突 | 重推等价 cherry-pick；把 #182 旧 CI 当作 final；修改 product source | 新提交明确承认 #182 血缘；冲突只涉及两份 evidence docs，E05-C tests 自动合并，`src/` 无冲突 |
+| 将单次 final gate 收紧到 PR commits=5 与 exact 双父 | release owner 只授权这一个冲突消解 merge commit 和一次 push | 继续使用 attempt #4 的 commits=4/ancestor 规则；放宽任意 synchronize | workflow 在依赖安装前验证 `HEAD^1=ce599e20`、`HEAD^2=d7d96938`；后续 push、reopened、rerun、dispatch 均失败关闭 |
+| 保留 hard gate 与资金/恢复人工红线 open | 本地组件验证不等于远端 Windows full gate，也不替代真实业务/恢复人工复核 | 将冲突消解或 unit PASS 记为 release PASS | native production disabled；main/tag/production enablement均未授权 |
+
+### Deviations
+
+| 原计划 | 实际 | 原因 | 影响 |
+| --- | --- | --- | --- |
+| attempt #4 在 `ce599e20` 上自动运行 | `NOT_STARTED / PULL_REQUEST_MERGE_CONFLICT` | PR 与 #182 exact head 存在堆叠冲突，GitHub 未创建该 workflow run | 不消耗或满足 hard gate；经用户明确授权后改为唯一一次 attempt #5 |
+
+### Evidence
+
+| 检查 | 结果 | 证明/边界 |
+| --- | --- | --- |
+| merge conflict audit | 仅 `changes/background-execution-r3-2-1-release-evidence/{implementation-notes,preflight}.md` 两个文本冲突；E05-C tests 自动合并；无 `src/` 冲突 | 冲突消解不改变金额、币种、sequence、receipt、Recovery Hold、Worker production topology 或 policy |
+| lineage contract | PR #183、same-repo、R4→R3、synchronize、run attempt 1、PR commits 5；exact event head；exact first/second parent | 任一 tuple 或 parent 漂移在 `npm ci` 与 `release-check` 前失败 |
+| conflict-resolution定向矩阵 | `149 tests / 147 pass / 0 fail / 2 Windows-only skip` | E05-A/B/C、mixed lifecycle、Toolbox generation/Route DB、mature adapters、Windows与release evidence静态合同均保持 |
+| affected static checks | ESLint、`node --check`、validator、Windows contract `5 pass / 2 skip`、release evidence `11/11`、`git diff --check` PASS | workflow、machine snapshot和tamper合同一致；不是远端Windows full gate |
+| conflict-resolution全量unit组件 | `6173/6176 PASS`、0 fail、3 skip、377 unit files、25514ms；log `logs/unit-tests/unit-20260827-013456.log` | 跨文件收口正常；未运行本地`release-check`，不替代attempt #5 |
+
+### Blindspot / Reconciliation Review
+
+- 入口旁路：final branch 的未授权 PR/dispatch 在 checkout 前失败；授权路径在依赖安装前验证 event head 与 exact 双父，后续 push、错误 base、reopened、rerun、fork 或 dispatch 均不能进入 `release-check`。
+- 状态生命周期：attempt #3=`CANCELLED`、attempt #4=`NOT_STARTED`、attempt #5=`PENDING_REMOTE_REQUIRED_CI` 独立记录；本地 component PASS 不升级 hard gate。#182/#183 仍严格顺序处理，改 base 后若产生新 pending/failed check，必须等待或暂停。
+- 兼容与资金边界：合并相对 #183 原 head 无 `src/` 或 E05-C test tree 变化；金额、币种、主键、sequence、receipt、幂等、Recovery Hold 与 production policy 不变。真实业务文件、资金与恢复人工复核继续作为 production gate，⚠️ 资金红线仍需人工确认。
+
+### Remaining Unknowns
+
+| 未知 | 处理 | 合并影响 |
+| --- | --- | --- |
+| attempt #5 Windows full gate 与 packaged build | 只等待这次 normal push 的自动 Actions；不 rerun、不 dispatch、不再 push | 任一失败/取消均停止，不能合并 #183 |
+| #182 先合并后 #183 改 base 产生的新 checks | 严格顺序处理并等待自然 CI | 新 base checks 未成功前不得 merge #183 |
+| 真实业务文件、资金与恢复人工复核 | 保持 `PENDING_HUMAN_REVIEW` | 不阻断 evidence PR；持续阻断 production enablement |
