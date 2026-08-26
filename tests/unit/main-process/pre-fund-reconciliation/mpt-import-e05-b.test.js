@@ -10,8 +10,12 @@ const { DatabaseSync } = require('node:sqlite');
 const { Worker } = require('node:worker_threads');
 
 const {
-  createBackgroundExecutionRuntime
+  createBackgroundExecutionRuntime,
+  createNonProductionBackgroundExecutionRuntime
 } = require('../../../../src/main-process/background-execution/runtime');
+const {
+  createResourceGovernor
+} = require('../../../../src/main-process/background-execution/resource-governor');
 const {
   createArchiveRepository,
   ensureArchiveMetadataSupport
@@ -117,6 +121,18 @@ const {
 
 let tempRoot;
 let userDataDir;
+
+function createIsolatedPoolGovernor() {
+  return createResourceGovernor({
+    budgets: {
+      cpuSlots: 5,
+      workerThreadSlots: 6,
+      utilityProcessSlots: 1,
+      ioHeavySlots: 5,
+      memoryBytes: 2 * 1024 ** 3
+    }
+  });
+}
 
 test.beforeEach(() => {
   tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'prefund-e05-b-'));
@@ -1476,6 +1492,10 @@ test('managed Writer以canonical超长sequence形成receipt后unit与parent vali
 test('一个parent job复用单一Writer transport，Parser effective=1按unit receipt后递增提交', async () => {
   const calls = [];
   const runtime = createBackgroundExecutionRuntime({
+    availableParallelism: 8,
+    freeMemoryBytes: 8 * 1024 ** 3,
+    memoryHardCeilingBytes: 4 * 1024 ** 3,
+    systemReserveBytes: 1024 ** 3,
     workerDurableCoordinator: {
       async prepareAndAck(input) {
         calls.push(`prepare:${input.unitId}`);
@@ -1489,9 +1509,13 @@ test('一个parent job复用单一Writer transport，Parser effective=1按unit r
       async resolveUncertain() { return { outcome: 'not-committed' }; }
     }
   });
-  assert.ok(runtime.resourceGovernor.snapshot().budgets.workerThreadSlots >= 3);
-  assert.ok(runtime.resourceGovernor.snapshot().budgets.workerThreadSlots <= 6);
-  assert.ok(runtime.resourceGovernor.snapshot().budgets.memoryBytes >= 768 * 1024 * 1024);
+  assert.deepEqual(runtime.resourceGovernor.snapshot().budgets, {
+    cpuSlots: 4,
+    workerThreadSlots: 5,
+    utilityProcessSlots: 1,
+    ioHeavySlots: 2,
+    memoryBytes: 4 * 1024 ** 3
+  });
   const firstPath = writeFile('801', [inboundRow({ reconId: 'MANAGED-1' })]);
   const otherBatch = 'MPT_INBOUND_20260708_MANAGED2';
   const secondPath = writeFile('802', [
@@ -1544,9 +1568,9 @@ test('一个parent job复用单一Writer transport，Parser effective=1按unit r
 test('E05-C真实8文件Parser Pool + Single Writer形成逐file唯一receipt并与legacy业务行parity', async () => {
   const criticalOrder = [];
   const receiptOrder = [];
-  const runtime = createBackgroundExecutionRuntime({
+  const runtime = createNonProductionBackgroundExecutionRuntime({
     availableParallelism: 8,
-    totalMemoryBytes: 8 * 1024 * 1024 * 1024,
+    resourceGovernor: createIsolatedPoolGovernor(),
     workerDurableCoordinator: {
       async prepareAndAck(input) {
         criticalOrder.push(input.unitId);
@@ -1659,9 +1683,9 @@ test('E05-C真实8文件Parser Pool + Single Writer形成逐file唯一receipt并
 
 test('E05-C Pool中一个真实transport crash只失败当前file，后续真实Writer/receipt继续', async () => {
   const criticalOrder = [];
-  const runtime = createBackgroundExecutionRuntime({
+  const runtime = createNonProductionBackgroundExecutionRuntime({
     availableParallelism: 8,
-    totalMemoryBytes: 8 * 1024 * 1024 * 1024,
+    resourceGovernor: createIsolatedPoolGovernor(),
     workerDurableCoordinator: {
       async prepareAndAck(input) {
         criticalOrder.push(input.unitId);

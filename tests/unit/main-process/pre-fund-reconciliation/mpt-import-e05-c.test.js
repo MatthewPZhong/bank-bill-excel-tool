@@ -13,8 +13,16 @@ const {
 } = require('../../../../src/main-process/background-execution/execution-policy-registry');
 const { createJobEnvelope } = require('../../../../src/main-process/background-execution/protocol');
 const {
-  createBackgroundExecutionRuntime
+  createBackgroundExecutionRuntime,
+  createNonProductionBackgroundExecutionRuntime
 } = require('../../../../src/main-process/background-execution/runtime');
+const {
+  createPlatformResourceBudgets
+} = require('../../../../src/main-process/background-execution/resource-budget');
+const {
+  createResourceGovernor
+} = require('../../../../src/main-process/background-execution/resource-governor');
+const backgroundExecutionPackage = require('../../../../src/main-process/background-execution');
 const {
   INBOUND_FIELDS,
   MPT_DELIMITER
@@ -41,9 +49,9 @@ const {
   mptSpoolPaths
 } = require('../../../../src/main-process/pre-fund-reconciliation/mpt-import/spool-contract');
 const {
-  createPreFundMptRuntimeResourcePlan,
-  createPreFundMptTopologyPlanner,
-  maximumChildrenWithinBudget
+  IMPORT_WRITER_RESOURCES,
+  PARSER_RESOURCES,
+  createPreFundMptTopologyPlanner
 } = require('../../../../src/main-process/pre-fund-reconciliation/mpt-import/topology');
 const {
   writeMptFileSpool
@@ -120,31 +128,90 @@ function topologyRequest(actionKey, count) {
   return Object.freeze({ actionKey, input: Object.freeze({ fileCount: count }), unitCount: count });
 }
 
-test('host-safe topology与runtime预算同源收敛4/3/2/1，fileCount与repair边界冻结', () => {
-  for (const [parallelism, totalMemoryBytes, expected] of [
-    [8, 8 * GIBIBYTE, 4],
-    [4, 8 * GIBIBYTE, 3],
-    [3, 8 * GIBIBYTE, 2],
-    [2, 8 * GIBIBYTE, 1],
-    [8, 4 * GIBIBYTE, 2]
-  ]) {
-    const runtimeResourcePlan = createPreFundMptRuntimeResourcePlan({
+function createIsolatedPoolGovernor() {
+  return createResourceGovernor({
+    budgets: {
+      cpuSlots: 5,
+      workerThreadSlots: 6,
+      utilityProcessSlots: 1,
+      ioHeavySlots: 5,
+      memoryBytes: 2 * GIBIBYTE
+    }
+  });
+}
+
+function assertGovernorIdle(resourceGovernor) {
+  const snapshot = resourceGovernor.snapshot();
+  assert.deepEqual(snapshot.activeUsage, {
+    cpuSlots: 0,
+    workerThreadSlots: 0,
+    utilityProcessSlots: 0,
+    ioHeavySlots: 0,
+    memoryBytes: 0
+  });
+  assert.equal(snapshot.activeLeaseCount, 0);
+  assert.equal(snapshot.queued.size, 0);
+}
+
+test('E00 platform factory冻结canonical CPU/worker/utility/IO与freemem-reserve内存预算', () => {
+  for (const [parallelism, expectedCpu] of [[8, 4], [5, 3], [4, 2], [3, 1], [1, 1]]) {
+    const budgets = createPlatformResourceBudgets({
       availableParallelism: parallelism,
-      totalMemoryBytes
+      freeMemoryBytes: 8 * GIBIBYTE,
+      memoryHardCeilingBytes: 4 * GIBIBYTE,
+      systemReserveBytes: GIBIBYTE
     });
-    const planner = createPreFundMptTopologyPlanner({ runtimeResourcePlan });
-    assert.equal(runtimeResourcePlan.hostSafeParserCount, expected);
+    assert.deepEqual(budgets, {
+      cpuSlots: expectedCpu,
+      workerThreadSlots: expectedCpu + 1,
+      utilityProcessSlots: 1,
+      ioHeavySlots: 2,
+      memoryBytes: 4 * GIBIBYTE
+    });
+    assert.equal(Object.isFrozen(budgets), true);
+  }
+  assert.equal(createPlatformResourceBudgets({
+    availableParallelism: 8,
+    freeMemoryBytes: 3 * GIBIBYTE,
+    memoryHardCeilingBytes: 4 * GIBIBYTE,
+    systemReserveBytes: GIBIBYTE
+  }).memoryBytes, 2 * GIBIBYTE);
+  assert.equal(createPlatformResourceBudgets({
+    availableParallelism: 8,
+    freeMemoryBytes: GIBIBYTE / 2,
+    memoryHardCeilingBytes: 4 * GIBIBYTE,
+    systemReserveBytes: GIBIBYTE
+  }).memoryBytes, 0);
+  assert.equal(createPlatformResourceBudgets({
+    availableParallelism: 8,
+    totalMemoryBytes: 8 * GIBIBYTE,
+    freeMemoryBytes: 8 * GIBIBYTE
+  }).memoryBytes, 2 * GIBIBYTE, '默认hard ceiling沿用E05-B totalmem/4且reserve沿用2GiB gate');
+  assert.equal(IMPORT_WRITER_RESOURCES.ioHeavySlots, 1);
+  assert.equal(PARSER_RESOURCES.ioHeavySlots, 1);
+  assert.throws(() => createBackgroundExecutionRuntime({ resourceGovernor: {} }), {
+    name: 'TypeError'
+  });
+  assert.equal(Object.hasOwn(
+    backgroundExecutionPackage,
+    'createNonProductionBackgroundExecutionRuntime'
+  ), false);
+  assert.doesNotMatch(
+    fs.readFileSync(path.resolve(__dirname, '../../../../src/main.js'), 'utf8'),
+    /createNonProductionBackgroundExecutionRuntime/
+  );
+});
+
+test('PreFund requested topology独立收敛4/3/2/1，fileCount/unitCount与repair边界冻结', () => {
+  for (const [parallelism, expected] of [[8, 4], [4, 3], [3, 2], [2, 1], [1, 1]]) {
+    const planner = createPreFundMptTopologyPlanner({ availableParallelism: parallelism });
     assert.equal(
       planner(topologyRequest(PRE_FUND_MPT_IMPORT_ACTION, 8)).effectiveChildCount,
       expected
     );
   }
 
-  const runtimeResourcePlan = createPreFundMptRuntimeResourcePlan({
-    availableParallelism: 8,
-    totalMemoryBytes: 8 * GIBIBYTE
-  });
-  const planner = createPreFundMptTopologyPlanner({ runtimeResourcePlan });
+  const planner = createPreFundMptTopologyPlanner({ availableParallelism: 8 });
   assert.deepEqual([1, 2, 4, 6, 8].map((count) =>
     planner(topologyRequest(PRE_FUND_MPT_IMPORT_ACTION, count)).effectiveChildCount), [1, 1, 2, 3, 4]);
   assert.equal(
@@ -156,13 +223,6 @@ test('host-safe topology与runtime预算同源收敛4/3/2/1，fileCount与repair
     input: { fileCount: 8 },
     unitCount: 7
   }), { code: 'PREFUND_TOPOLOGY_UNIT_COUNT_MISMATCH' });
-  assert.equal(maximumChildrenWithinBudget({
-    budgets: { cpuSlots: 0, workerThreadSlots: 0, utilityProcessSlots: 0, ioHeavySlots: 0, memoryBytes: 0 },
-    base: { cpuSlots: 0, workerThreadSlots: 1, utilityProcessSlots: 0, ioHeavySlots: 0, memoryBytes: 1 },
-    phase: { cpuSlots: 1, workerThreadSlots: 1, utilityProcessSlots: 0, ioHeavySlots: 1, memoryBytes: 1 },
-    childResource: { cpuSlots: 1, workerThreadSlots: 1, utilityProcessSlots: 0, ioHeavySlots: 1, memoryBytes: 1 },
-    maximum: 4
-  }), 0);
 });
 
 test('topology registry freeze捕获带receiver的planner，后续method替换不改变native binding', () => {
@@ -237,7 +297,7 @@ function unusedDurableCoordinator() {
   };
 }
 
-function startTopologyProbe(runtime, actionKey, count, suffix) {
+function startTopologyProbe(runtime, actionKey, count, suffix, production = false) {
   return runtime.start({
     actionKey,
     operationKey: `e05-c-topology-${suffix}`,
@@ -253,51 +313,70 @@ function startTopologyProbe(runtime, actionKey, count, suffix) {
       unitId: `file:${String(fileIndex).padStart(6, '0')}`,
       input: { fileIndex }
     })),
-    deferUnitStart: true
+    deferUnitStart: true,
+    production
   });
 }
 
-test('native Supervisor在admission前使用冻结topology，ready后只读暴露Governor实际count', async () => {
+test('native Supervisor使用E00 canonical预算，requested4诚实降级为实际1并在ready后只读暴露', async () => {
   const captured = [];
   const runtime = createBackgroundExecutionRuntime({
     availableParallelism: 8,
-    totalMemoryBytes: 8 * GIBIBYTE,
+    freeMemoryBytes: 8 * GIBIBYTE,
+    memoryHardCeilingBytes: 4 * GIBIBYTE,
+    systemReserveBytes: GIBIBYTE,
     workerThreadAdapter: terminalAdapter(captured),
     workerDurableCoordinator: unusedDurableCoordinator()
   });
   try {
-    const control = startTopologyProbe(runtime, PRE_FUND_MPT_IMPORT_ACTION, 8, 'native-four');
+    assert.deepEqual(runtime.resourceGovernor.snapshot().budgets, {
+      cpuSlots: 4,
+      workerThreadSlots: 5,
+      utilityProcessSlots: 1,
+      ioHeavySlots: 2,
+      memoryBytes: 4 * GIBIBYTE
+    });
+    const control = startTopologyProbe(runtime, PRE_FUND_MPT_IMPORT_ACTION, 8, 'native-single');
     await control.ready;
     assert.deepEqual(control.snapshot().topology, {
       topologyKey: 'topology.pre-fund:mpt-import',
-      effectiveChildCount: 4
+      effectiveChildCount: 1,
+      downgraded: true,
+      downgradeReason: 'resource-budget'
     });
+    assert.equal(control.snapshot().state, 'running');
     assert.equal(Object.isFrozen(control.snapshot().topology), true);
-    assert.equal(captured[0].effectiveChildCount, 4);
+    assert.equal(captured[0].effectiveChildCount, 1);
     await control.promise;
   } finally {
     await runtime.shutdown();
   }
 });
 
-test('Governor竞争压力把requested4降为1，repair无论文件数都只获批1', async () => {
+test('隔离Governor竞争压力把requested4降为1，repair无论文件数都只获批1', async () => {
   const captured = [];
-  const runtime = createBackgroundExecutionRuntime({
+  const resourceGovernor = createIsolatedPoolGovernor();
+  const runtime = createNonProductionBackgroundExecutionRuntime({
     availableParallelism: 8,
-    totalMemoryBytes: 8 * GIBIBYTE,
+    resourceGovernor,
     workerThreadAdapter: terminalAdapter(captured),
     workerDurableCoordinator: unusedDurableCoordinator()
   });
+  assert.throws(
+    () => startTopologyProbe(runtime, PRE_FUND_MPT_IMPORT_ACTION, 8, 'production-forbidden', true),
+    { code: 'BACKGROUND_EXECUTION_RESOURCE_GOVERNOR_OVERRIDE_FORBIDDEN' }
+  );
+  assertGovernorIdle(resourceGovernor);
   const blocker = await runtime.resourceGovernor.acquirePhaseLease({
-    ownerKey: 'e05-c-memory-blocker',
+    ownerKey: 'e05-c-cpu-blocker',
     actionKey: 'test:e05-c-blocker',
     operationKey: 'e05-c-blocker-operation',
     resources: {
-      cpuSlots: 0,
+      cpuSlots: 1,
       workerThreadSlots: 0,
       utilityProcessSlots: 0,
       ioHeavySlots: 0,
-      memoryBytes: GIBIBYTE
+      memoryBytes: 0
     }
   });
   try {
@@ -447,6 +526,164 @@ test('spool估算覆盖source放大与余量，溢出/不足fail closed且错误
   assert.deepEqual(calls, ['begin', 'missing-begin']);
 });
 
+test('valid+symlink+valid中null source snapshot磁盘贡献0，Parser逐file fail-closed且结果等长同序脱敏', async (t) => {
+  const firstPath = writeInboundFile('910');
+  const thirdPath = writeInboundFile('914');
+  const privateTarget = path.join(tempRoot, 'customer-secret-symlink-target.txt');
+  fs.copyFileSync(firstPath, privateTarget);
+  const symlinkPath = path.join(tempRoot, 'MPT_INBOUND_GATEWAY_20260708_912.txt');
+  try {
+    fs.symlinkSync(privateTarget, symlinkPath, 'file');
+  } catch (error) {
+    if (process.platform === 'win32' && ['EPERM', 'EACCES'].includes(error && error.code)) {
+      t.skip('Windows测试环境未授予创建文件symlink权限');
+      return;
+    }
+    throw error;
+  }
+  const runtime = createBackgroundExecutionRuntime({
+    availableParallelism: 8,
+    freeMemoryBytes: 8 * GIBIBYTE,
+    memoryHardCeilingBytes: 4 * GIBIBYTE,
+    systemReserveBytes: GIBIBYTE,
+    workerDurableCoordinator: {
+      async prepareAndAck(input) {
+        return { intentId: `symlink-intent-${input.unitId}`, fileOperationKey: input.critical.fileOperationKey };
+      },
+      async observeReceipt(input) {
+        return { receiptHint: { receiptKind: 'module-local', receiptIdentity: String(input.receipt.id) } };
+      },
+      async settleCommitted() {},
+      async resolveUncertain() { return { outcome: 'not-committed' }; }
+    }
+  });
+  try {
+    const result = await executeManagedPreFundMptImport({
+      actionKey: PRE_FUND_MPT_IMPORT_ACTION,
+      runtime,
+      service: { beginManagedMptImport() {}, adoptManagedMptImportResults: (_paths, items) => items },
+      filePaths: [firstPath, symlinkPath, thirdPath],
+      userDataDir: path.join(tempRoot, 'symlink-user-data'),
+      taskStagingDir: path.join(tempRoot, 'symlink-staging'),
+      getAvailableDiskBytes: () => Number.MAX_SAFE_INTEGER,
+      batchContext: batchContext('e05-c-symlink-input')
+    });
+    assert.deepEqual(result.results.map((item) => item.status), ['ok', 'failed', 'ok']);
+    assert.deepEqual(
+      result.results.map((item) => item.fileName),
+      [firstPath, symlinkPath, thirdPath].map((item) => path.basename(item))
+    );
+    assert.equal(result.successCount, 2);
+    assert.equal(result.failedCount, 1);
+    assert.equal(result.results[1].code, 'PREFUND_SPOOL_CONTRACT_INVALID');
+    const failureEvidence = JSON.stringify(result.results[1]);
+    assert.equal(failureEvidence.includes(tempRoot), false);
+    assert.equal(failureEvidence.includes(privateTarget), false);
+    assert.equal(failureEvidence.includes('customer-secret'), false);
+  } finally {
+    await runtime.shutdown();
+  }
+});
+
+test('admission cancel先完成parent terminal/release barrier，Parser构造与spool均为0', async () => {
+  const resourceGovernor = createResourceGovernor({
+    budgets: {
+      cpuSlots: 0,
+      workerThreadSlots: 0,
+      utilityProcessSlots: 0,
+      ioHeavySlots: 0,
+      memoryBytes: 0
+    }
+  });
+  let writerStartCount = 0;
+  let parserConstructorCount = 0;
+  class ForbiddenParserWorker {
+    constructor() { parserConstructorCount += 1; }
+  }
+  const nativeRuntime = createNonProductionBackgroundExecutionRuntime({
+    availableParallelism: 8,
+    resourceGovernor,
+    workerThreadAdapter: {
+      start() {
+        writerStartCount += 1;
+        throw new Error('admission cancel不得spawn Writer');
+      }
+    },
+    workerDurableCoordinator: unusedDurableCoordinator()
+  });
+  const runtime = {
+    start(request) {
+      const control = nativeRuntime.start({ ...request, initTimeoutMs: 1000 });
+      queueMicrotask(() => control.cancel({ reason: 'test-admission-cancel' }));
+      return control;
+    }
+  };
+  const filePaths = Array.from({ length: 4 }, (_, index) => writeInboundFile(String(920 + index)));
+  const staging = path.join(tempRoot, 'cancel-before-running-staging');
+  try {
+    await assert.rejects(() => executeManagedPreFundMptImport({
+      actionKey: PRE_FUND_MPT_IMPORT_ACTION,
+      runtime,
+      ParserWorkerClass: ForbiddenParserWorker,
+      service: { beginManagedMptImport() {} },
+      filePaths,
+      userDataDir: tempRoot,
+      taskStagingDir: staging,
+      getAvailableDiskBytes: () => Number.MAX_SAFE_INTEGER,
+      batchContext: batchContext('e05-c-admission-cancel')
+    }), { code: 'PREFUND_WRITER_START_FAILED' });
+    assert.equal(writerStartCount, 0);
+    assert.equal(parserConstructorCount, 0);
+    assert.equal(fs.existsSync(staging), false);
+    assertGovernorIdle(resourceGovernor);
+  } finally {
+    await nativeRuntime.shutdown();
+  }
+});
+
+test('Writer spawn失败先完成authoritative terminal/release barrier，Parser构造与spool均为0', async () => {
+  let writerStartCount = 0;
+  let parserConstructorCount = 0;
+  class ForbiddenParserWorker {
+    constructor() { parserConstructorCount += 1; }
+  }
+  const runtime = createBackgroundExecutionRuntime({
+    availableParallelism: 8,
+    freeMemoryBytes: 8 * GIBIBYTE,
+    memoryHardCeilingBytes: 4 * GIBIBYTE,
+    systemReserveBytes: GIBIBYTE,
+    workerThreadAdapter: {
+      start() {
+        writerStartCount += 1;
+        throw new Error('/private/customer-secret Writer spawn failed');
+      }
+    },
+    workerDurableCoordinator: unusedDurableCoordinator()
+  });
+  const filePaths = Array.from({ length: 4 }, (_, index) => writeInboundFile(String(930 + index)));
+  const staging = path.join(tempRoot, 'spawn-failure-staging');
+  try {
+    await assert.rejects(() => executeManagedPreFundMptImport({
+      actionKey: PRE_FUND_MPT_IMPORT_ACTION,
+      runtime,
+      ParserWorkerClass: ForbiddenParserWorker,
+      service: { beginManagedMptImport() {} },
+      filePaths,
+      userDataDir: tempRoot,
+      taskStagingDir: staging,
+      getAvailableDiskBytes: () => Number.MAX_SAFE_INTEGER,
+      batchContext: batchContext('e05-c-writer-spawn-failure')
+    }), (error) => error.code === 'PREFUND_WRITER_START_FAILED' &&
+      !/private|customer-secret/i.test(error.message));
+    assert.equal(writerStartCount, 1);
+    assert.equal(parserConstructorCount, 0);
+    assert.equal(fs.existsSync(staging), false);
+    assertGovernorIdle(runtime.resourceGovernor);
+  } finally {
+    await runtime.shutdown();
+  }
+});
+
 test('Parser Pool可乱序完成但fake Writer严格fileIndex单飞，parent结果仍等长同序', async () => {
   const filePaths = Array.from({ length: 8 }, (_, index) => writeInboundFile(String(1000 + index)));
   let parserActive = 0;
@@ -493,7 +730,10 @@ test('Parser Pool可乱序完成但fake Writer严格fileIndex单飞，parent结�
         ready: Promise.resolve(),
         promise: parentPromise,
         snapshot() {
-          return { topology: { topologyKey: 'topology.pre-fund:mpt-import', effectiveChildCount: 4 } };
+          return {
+            state: 'running',
+            topology: { topologyKey: 'topology.pre-fund:mpt-import', effectiveChildCount: 4 }
+          };
         },
         startUnit(unitId) {
           const fileIndex = Number(unitId.slice('file:'.length));
@@ -584,6 +824,7 @@ test('parent终止会取消全部active Parser并等待clean exit barrier，Main
         ready: Promise.resolve(),
         promise: parentPromise,
         snapshot: () => ({
+          state: 'running',
           topology: { topologyKey: 'topology.pre-fund:mpt-import', effectiveChildCount: 4 }
         }),
         startUnit() { throw new Error('parent终止前不得启动Writer unit'); }
@@ -704,9 +945,9 @@ test('真实Supervisor在file0 dispatchAccepted后pre-critical中断，混合own
   };
   let prepareCount = 0;
   let inspectCount = 0;
-  const runtime = createBackgroundExecutionRuntime({
+  const runtime = createNonProductionBackgroundExecutionRuntime({
     availableParallelism: 8,
-    totalMemoryBytes: 8 * GIBIBYTE,
+    resourceGovernor: createIsolatedPoolGovernor(),
     workerThreadAdapter: writerAdapter,
     workerDurableCoordinator: {
       async prepareAndAck() { prepareCount += 1; throw new Error('pre-critical不得创建Intent'); },

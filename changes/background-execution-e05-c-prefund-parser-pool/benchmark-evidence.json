@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-26T01:46:51.298Z",
+  "generatedAt": "2026-08-26T02:55:13.236Z",
   "environment": {
     "platform": "darwin",
     "arch": "arm64",
@@ -14,7 +14,15 @@
     "representativeRowsPerFile": 1200,
     "smallRowsPerFile": 80,
     "fileCount": 8,
-    "runOrder": "alternating-single-pool-by-run-index"
+    "runOrder": "alternating-single-pool-by-run-index",
+    "admission": "explicit-isolated-governor-non-production",
+    "isolatedGovernorBudgets": {
+      "cpuSlots": 5,
+      "workerThreadSlots": 6,
+      "utilityProcessSlots": 1,
+      "ioHeavySlots": 5,
+      "memoryBytes": 2147483648
+    }
   },
   "cases": {
     "representative": {
@@ -22,13 +30,13 @@
         {
           "runIndex": 0,
           "orderPosition": 1,
-          "durationMs": 607.653,
-          "rssStartBytes": 69713920,
-          "peakRssBytes": 160284672,
-          "peakRssDeltaBytes": 90570752,
+          "durationMs": 609.796,
+          "rssStartBytes": 72417280,
+          "peakRssBytes": 164069376,
+          "peakRssDeltaBytes": 91652096,
           "peakSpoolBytes": 3962782,
-          "eventLoopMeanMs": 11.534,
-          "eventLoopP99Ms": 16.31,
+          "eventLoopMeanMs": 11.571,
+          "eventLoopP99Ms": 18.072,
           "maxParserActive": 1,
           "business": {
             "rowCount": 9600,
@@ -39,13 +47,13 @@
         {
           "runIndex": 1,
           "orderPosition": 2,
-          "durationMs": 583.588,
-          "rssStartBytes": 242876416,
-          "peakRssBytes": 244776960,
-          "peakRssDeltaBytes": 1900544,
+          "durationMs": 585.831,
+          "rssStartBytes": 231653376,
+          "peakRssBytes": 233799680,
+          "peakRssDeltaBytes": 2146304,
           "peakSpoolBytes": 3962782,
-          "eventLoopMeanMs": 11.356,
-          "eventLoopP99Ms": 15.524,
+          "eventLoopMeanMs": 11.619,
+          "eventLoopP99Ms": 18.334,
           "maxParserActive": 1,
           "business": {
             "rowCount": 9600,
@@ -56,13 +64,13 @@
         {
           "runIndex": 2,
           "orderPosition": 1,
-          "durationMs": 584.378,
-          "rssStartBytes": 244891648,
-          "peakRssBytes": 247431168,
-          "peakRssDeltaBytes": 2539520,
+          "durationMs": 586.468,
+          "rssStartBytes": 237305856,
+          "peakRssBytes": 238698496,
+          "peakRssDeltaBytes": 1392640,
           "peakSpoolBytes": 3962782,
-          "eventLoopMeanMs": 11.333,
-          "eventLoopP99Ms": 14.688,
+          "eventLoopMeanMs": 11.631,
+          "eventLoopP99Ms": 18.17,
           "maxParserActive": 1,
           "business": {
             "rowCount": 9600,
@@ -73,13 +81,13 @@
         {
           "runIndex": 3,
           "orderPosition": 2,
-          "durationMs": 581.11,
-          "rssStartBytes": 285868032,
-          "peakRssBytes": 287162368,
-          "peakRssDeltaBytes": 1294336,
+          "durationMs": 591.665,
+          "rssStartBytes": 269959168,
+          "peakRssBytes": 273137664,
+          "peakRssDeltaBytes": 3178496,
           "peakSpoolBytes": 3962782,
-          "eventLoopMeanMs": 11.453,
-          "eventLoopP99Ms": 17.678,
+          "eventLoopMeanMs": 11.291,
+          "eventLoopP99Ms": 13.722,
           "maxParserActive": 1,
           "business": {
             "rowCount": 9600,
@@ -90,13 +98,13 @@
         {
           "runIndex": 4,
           "orderPosition": 1,
-          "durationMs": 584.598,
-          "rssStartBytes": 287506432,
-          "peakRssBytes": 289603584,
-          "peakRssDeltaBytes": 2097152,
+          "durationMs": 601.414,
+          "rssStartBytes": 277184512,
+          "peakRssBytes": 279461888,
+          "peakRssDeltaBytes": 2277376,
           "peakSpoolBytes": 3962782,
-          "eventLoopMeanMs": 11.212,
-          "eventLoopP99Ms": 12.288,
+          "eventLoopMeanMs": 11.675,
+          "eventLoopP99Ms": 18.694,
           "maxParserActive": 1,
           "business": {
             "rowCount": 9600,
@@ -109,13 +117,13 @@
         {
           "runIndex": 0,
           "orderPosition": 2,
-          "durationMs": 562.115,
-          "rssStartBytes": 170737664,
-          "peakRssBytes": 211714048,
-          "peakRssDeltaBytes": 40976384,
+          "durationMs": 597.185,
+          "rssStartBytes": 174637056,
+          "peakRssBytes": 203489280,
+          "peakRssDeltaBytes": 28852224,
           "peakSpoolBytes": 9906933,
-          "eventLoopMeanMs": 12.536,
-          "eventLoopP99Ms": 51.544,
+          "eventLoopMeanMs": 12.361,
+          "eventLoopP99Ms": 42.238,
           "maxParserActive": 4,
           "business": {
             "rowCount": 9600,
@@ -126,13 +134,13 @@
         {
           "runIndex": 1,
           "orderPosition": 1,
-          "durationMs": 583.695,
-          "rssStartBytes": 214990848,
-          "peakRssBytes": 235683840,
-          "peakRssDeltaBytes": 20692992,
+          "durationMs": 573.357,
+          "rssStartBytes": 207962112,
+          "peakRssBytes": 224149504,
+          "peakRssDeltaBytes": 16187392,
           "peakSpoolBytes": 9906933,
-          "eventLoopMeanMs": 12.384,
-          "eventLoopP99Ms": 44.63,
+          "eventLoopMeanMs": 12.143,
+          "eventLoopP99Ms": 43.778,
           "maxParserActive": 4,
           "business": {
             "rowCount": 9600,
@@ -143,13 +151,13 @@
         {
           "runIndex": 2,
           "orderPosition": 2,
-          "durationMs": 552.677,
-          "rssStartBytes": 251346944,
-          "peakRssBytes": 269418496,
-          "peakRssDeltaBytes": 18071552,
+          "durationMs": 588.272,
+          "rssStartBytes": 242483200,
+          "peakRssBytes": 249069568,
+          "peakRssDeltaBytes": 6586368,
           "peakSpoolBytes": 9906933,
-          "eventLoopMeanMs": 12.297,
-          "eventLoopP99Ms": 47.022,
+          "eventLoopMeanMs": 12.046,
+          "eventLoopP99Ms": 40.501,
           "maxParserActive": 4,
           "business": {
             "rowCount": 9600,
@@ -160,13 +168,13 @@
         {
           "runIndex": 3,
           "orderPosition": 1,
-          "durationMs": 587.343,
-          "rssStartBytes": 277118976,
-          "peakRssBytes": 282198016,
-          "peakRssDeltaBytes": 5079040,
+          "durationMs": 561.627,
+          "rssStartBytes": 248528896,
+          "peakRssBytes": 262324224,
+          "peakRssDeltaBytes": 13795328,
           "peakSpoolBytes": 9906933,
-          "eventLoopMeanMs": 12.524,
-          "eventLoopP99Ms": 57.475,
+          "eventLoopMeanMs": 12.826,
+          "eventLoopP99Ms": 52.363,
           "maxParserActive": 4,
           "business": {
             "rowCount": 9600,
@@ -177,13 +185,13 @@
         {
           "runIndex": 4,
           "orderPosition": 2,
-          "durationMs": 585.408,
-          "rssStartBytes": 289619968,
-          "peakRssBytes": 289652736,
-          "peakRssDeltaBytes": 32768,
+          "durationMs": 597.69,
+          "rssStartBytes": 285704192,
+          "peakRssBytes": 289800192,
+          "peakRssDeltaBytes": 4096000,
           "peakSpoolBytes": 9906933,
-          "eventLoopMeanMs": 11.967,
-          "eventLoopP99Ms": 39.518,
+          "eventLoopMeanMs": 12.474,
+          "eventLoopP99Ms": 50.594,
           "maxParserActive": 4,
           "business": {
             "rowCount": 9600,
@@ -194,28 +202,28 @@
       ],
       "summary": {
         "single": {
-          "durationMedianMs": 584.378,
-          "rssStartMedianBytes": 244891648,
-          "peakRssAbsoluteMedianBytes": 247431168,
-          "peakRssDeltaMedianBytes": 2097152,
+          "durationMedianMs": 591.665,
+          "rssStartMedianBytes": 237305856,
+          "peakRssAbsoluteMedianBytes": 238698496,
+          "peakRssDeltaMedianBytes": 2277376,
           "peakSpoolMedianBytes": 3962782,
-          "eventLoopMeanMedianMs": 11.356,
-          "eventLoopP99MedianMs": 15.524,
+          "eventLoopMeanMedianMs": 11.619,
+          "eventLoopP99MedianMs": 18.17,
           "businessParityWithinMode": true,
           "businessSha256": "105353c9983553d69727ff72ba0cb8472e282d0b591b938ab4228c99b710f1a6"
         },
         "pool": {
-          "durationMedianMs": 583.695,
-          "rssStartMedianBytes": 251346944,
-          "peakRssAbsoluteMedianBytes": 269418496,
-          "peakRssDeltaMedianBytes": 18071552,
+          "durationMedianMs": 588.272,
+          "rssStartMedianBytes": 242483200,
+          "peakRssAbsoluteMedianBytes": 249069568,
+          "peakRssDeltaMedianBytes": 13795328,
           "peakSpoolMedianBytes": 9906933,
-          "eventLoopMeanMedianMs": 12.384,
-          "eventLoopP99MedianMs": 47.022,
+          "eventLoopMeanMedianMs": 12.361,
+          "eventLoopP99MedianMs": 43.778,
           "businessParityWithinMode": true,
           "businessSha256": "105353c9983553d69727ff72ba0cb8472e282d0b591b938ab4228c99b710f1a6"
         },
-        "improvementPercent": 0.12,
+        "improvementPercent": 0.57,
         "businessParity": true
       }
     },
@@ -224,12 +232,63 @@
         {
           "runIndex": 0,
           "orderPosition": 1,
-          "durationMs": 401.053,
-          "rssStartBytes": 294551552,
-          "peakRssBytes": 294551552,
+          "durationMs": 404.04,
+          "rssStartBytes": 286818304,
+          "peakRssBytes": 286818304,
           "peakRssDeltaBytes": 0,
           "peakSpoolBytes": 124204,
-          "eventLoopMeanMs": 11.95,
+          "eventLoopMeanMs": 12.087,
+          "eventLoopP99Ms": 17.089,
+          "maxParserActive": 1,
+          "business": {
+            "rowCount": 640,
+            "receiptCount": 8,
+            "sha256": "6cb71cb4e434d3fbcb2718de3ea48561aa66946c0e5ffbefbfc5fa0bce18d3f7"
+          }
+        },
+        {
+          "runIndex": 1,
+          "orderPosition": 2,
+          "durationMs": 386.636,
+          "rssStartBytes": 284164096,
+          "peakRssBytes": 287178752,
+          "peakRssDeltaBytes": 3014656,
+          "peakSpoolBytes": 124204,
+          "eventLoopMeanMs": 11.515,
+          "eventLoopP99Ms": 14.475,
+          "maxParserActive": 1,
+          "business": {
+            "rowCount": 640,
+            "receiptCount": 8,
+            "sha256": "6cb71cb4e434d3fbcb2718de3ea48561aa66946c0e5ffbefbfc5fa0bce18d3f7"
+          }
+        },
+        {
+          "runIndex": 2,
+          "orderPosition": 1,
+          "durationMs": 402.967,
+          "rssStartBytes": 284000256,
+          "peakRssBytes": 287440896,
+          "peakRssDeltaBytes": 3440640,
+          "peakSpoolBytes": 124204,
+          "eventLoopMeanMs": 12.008,
+          "eventLoopP99Ms": 16.531,
+          "maxParserActive": 1,
+          "business": {
+            "rowCount": 640,
+            "receiptCount": 8,
+            "sha256": "6cb71cb4e434d3fbcb2718de3ea48561aa66946c0e5ffbefbfc5fa0bce18d3f7"
+          }
+        },
+        {
+          "runIndex": 3,
+          "orderPosition": 2,
+          "durationMs": 390.151,
+          "rssStartBytes": 284164096,
+          "peakRssBytes": 287571968,
+          "peakRssDeltaBytes": 3407872,
+          "peakSpoolBytes": 124204,
+          "eventLoopMeanMs": 11.608,
           "eventLoopP99Ms": 16.237,
           "maxParserActive": 1,
           "business": {
@@ -239,66 +298,15 @@
           }
         },
         {
-          "runIndex": 1,
-          "orderPosition": 2,
-          "durationMs": 391.265,
-          "rssStartBytes": 291946496,
-          "peakRssBytes": 294862848,
-          "peakRssDeltaBytes": 2916352,
-          "peakSpoolBytes": 124204,
-          "eventLoopMeanMs": 11.647,
-          "eventLoopP99Ms": 15.229,
-          "maxParserActive": 1,
-          "business": {
-            "rowCount": 640,
-            "receiptCount": 8,
-            "sha256": "6cb71cb4e434d3fbcb2718de3ea48561aa66946c0e5ffbefbfc5fa0bce18d3f7"
-          }
-        },
-        {
-          "runIndex": 2,
-          "orderPosition": 1,
-          "durationMs": 389.421,
-          "rssStartBytes": 291667968,
-          "peakRssBytes": 295075840,
-          "peakRssDeltaBytes": 3407872,
-          "peakSpoolBytes": 124204,
-          "eventLoopMeanMs": 11.519,
-          "eventLoopP99Ms": 17.678,
-          "maxParserActive": 1,
-          "business": {
-            "rowCount": 640,
-            "receiptCount": 8,
-            "sha256": "6cb71cb4e434d3fbcb2718de3ea48561aa66946c0e5ffbefbfc5fa0bce18d3f7"
-          }
-        },
-        {
-          "runIndex": 3,
-          "orderPosition": 2,
-          "durationMs": 391.928,
-          "rssStartBytes": 292519936,
-          "peakRssBytes": 296075264,
-          "peakRssDeltaBytes": 3555328,
-          "peakSpoolBytes": 124204,
-          "eventLoopMeanMs": 11.645,
-          "eventLoopP99Ms": 15.581,
-          "maxParserActive": 1,
-          "business": {
-            "rowCount": 640,
-            "receiptCount": 8,
-            "sha256": "6cb71cb4e434d3fbcb2718de3ea48561aa66946c0e5ffbefbfc5fa0bce18d3f7"
-          }
-        },
-        {
           "runIndex": 4,
           "orderPosition": 1,
-          "durationMs": 385.143,
-          "rssStartBytes": 292814848,
-          "peakRssBytes": 295780352,
-          "peakRssDeltaBytes": 2965504,
+          "durationMs": 420.96,
+          "rssStartBytes": 284377088,
+          "peakRssBytes": 287358976,
+          "peakRssDeltaBytes": 2981888,
           "peakSpoolBytes": 124204,
-          "eventLoopMeanMs": 11.444,
-          "eventLoopP99Ms": 14.246,
+          "eventLoopMeanMs": 12.583,
+          "eventLoopP99Ms": 23.052,
           "maxParserActive": 1,
           "business": {
             "rowCount": 640,
@@ -311,13 +319,13 @@
         {
           "runIndex": 0,
           "orderPosition": 2,
-          "durationMs": 265.027,
-          "rssStartBytes": 291258368,
-          "peakRssBytes": 297877504,
-          "peakRssDeltaBytes": 6619136,
-          "peakSpoolBytes": 619631,
-          "eventLoopMeanMs": 14.136,
-          "eventLoopP99Ms": 49.316,
+          "durationMs": 268.383,
+          "rssStartBytes": 283508736,
+          "peakRssBytes": 289882112,
+          "peakRssDeltaBytes": 6373376,
+          "peakSpoolBytes": 496800,
+          "eventLoopMeanMs": 15.719,
+          "eventLoopP99Ms": 51.479,
           "maxParserActive": 4,
           "business": {
             "rowCount": 640,
@@ -328,13 +336,13 @@
         {
           "runIndex": 1,
           "orderPosition": 1,
-          "durationMs": 256.867,
-          "rssStartBytes": 291553280,
-          "peakRssBytes": 298041344,
-          "peakRssDeltaBytes": 6488064,
-          "peakSpoolBytes": 496796,
-          "eventLoopMeanMs": 13.435,
-          "eventLoopP99Ms": 52.101,
+          "durationMs": 270.883,
+          "rssStartBytes": 283557888,
+          "peakRssBytes": 290209792,
+          "peakRssDeltaBytes": 6651904,
+          "peakSpoolBytes": 496800,
+          "eventLoopMeanMs": 14.926,
+          "eventLoopP99Ms": 54.788,
           "maxParserActive": 4,
           "business": {
             "rowCount": 640,
@@ -345,13 +353,13 @@
         {
           "runIndex": 2,
           "orderPosition": 2,
-          "durationMs": 259.114,
-          "rssStartBytes": 291667968,
-          "peakRssBytes": 298926080,
-          "peakRssDeltaBytes": 7258112,
-          "peakSpoolBytes": 496796,
-          "eventLoopMeanMs": 12.884,
-          "eventLoopP99Ms": 40.337,
+          "durationMs": 275.564,
+          "rssStartBytes": 284000256,
+          "peakRssBytes": 290422784,
+          "peakRssDeltaBytes": 6422528,
+          "peakSpoolBytes": 496800,
+          "eventLoopMeanMs": 13.964,
+          "eventLoopP99Ms": 52.232,
           "maxParserActive": 4,
           "business": {
             "rowCount": 640,
@@ -362,13 +370,13 @@
         {
           "runIndex": 3,
           "orderPosition": 1,
-          "durationMs": 267.42,
-          "rssStartBytes": 292782080,
-          "peakRssBytes": 299122688,
-          "peakRssDeltaBytes": 6340608,
-          "peakSpoolBytes": 496796,
-          "eventLoopMeanMs": 13.531,
-          "eventLoopP99Ms": 44.335,
+          "durationMs": 269.813,
+          "rssStartBytes": 284262400,
+          "peakRssBytes": 290668544,
+          "peakRssDeltaBytes": 6406144,
+          "peakSpoolBytes": 498120,
+          "eventLoopMeanMs": 13.549,
+          "eventLoopP99Ms": 51.511,
           "maxParserActive": 4,
           "business": {
             "rowCount": 640,
@@ -379,13 +387,13 @@
         {
           "runIndex": 4,
           "orderPosition": 2,
-          "durationMs": 265.648,
-          "rssStartBytes": 292585472,
-          "peakRssBytes": 298991616,
-          "peakRssDeltaBytes": 6406144,
-          "peakSpoolBytes": 619631,
-          "eventLoopMeanMs": 14.77,
-          "eventLoopP99Ms": 41.648,
+          "durationMs": 268.221,
+          "rssStartBytes": 284164096,
+          "peakRssBytes": 290684928,
+          "peakRssDeltaBytes": 6520832,
+          "peakSpoolBytes": 496800,
+          "eventLoopMeanMs": 13.328,
+          "eventLoopP99Ms": 44.597,
           "maxParserActive": 4,
           "business": {
             "rowCount": 640,
@@ -396,28 +404,28 @@
       ],
       "summary": {
         "single": {
-          "durationMedianMs": 391.265,
-          "rssStartMedianBytes": 292519936,
-          "peakRssAbsoluteMedianBytes": 295075840,
-          "peakRssDeltaMedianBytes": 2965504,
+          "durationMedianMs": 402.967,
+          "rssStartMedianBytes": 284164096,
+          "peakRssAbsoluteMedianBytes": 287358976,
+          "peakRssDeltaMedianBytes": 3014656,
           "peakSpoolMedianBytes": 124204,
-          "eventLoopMeanMedianMs": 11.645,
-          "eventLoopP99MedianMs": 15.581,
+          "eventLoopMeanMedianMs": 12.008,
+          "eventLoopP99MedianMs": 16.531,
           "businessParityWithinMode": true,
           "businessSha256": "6cb71cb4e434d3fbcb2718de3ea48561aa66946c0e5ffbefbfc5fa0bce18d3f7"
         },
         "pool": {
-          "durationMedianMs": 265.027,
-          "rssStartMedianBytes": 291667968,
-          "peakRssAbsoluteMedianBytes": 298926080,
-          "peakRssDeltaMedianBytes": 6488064,
-          "peakSpoolMedianBytes": 496796,
-          "eventLoopMeanMedianMs": 13.531,
-          "eventLoopP99MedianMs": 44.335,
+          "durationMedianMs": 269.813,
+          "rssStartMedianBytes": 284000256,
+          "peakRssAbsoluteMedianBytes": 290422784,
+          "peakRssDeltaMedianBytes": 6422528,
+          "peakSpoolMedianBytes": 496800,
+          "eventLoopMeanMedianMs": 13.964,
+          "eventLoopP99MedianMs": 51.511,
           "businessParityWithinMode": true,
           "businessSha256": "6cb71cb4e434d3fbcb2718de3ea48561aa66946c0e5ffbefbfc5fa0bce18d3f7"
         },
-        "improvementPercent": 32.26,
+        "improvementPercent": 33.04,
         "businessParity": true
       }
     }
@@ -429,12 +437,12 @@
       "representativePerformance": {
         "qualified": false,
         "threshold": "median improvement >= 15%",
-        "observedPercent": 0.12
+        "observedPercent": 0.57
       },
       "smallRegression": {
         "qualified": true,
         "threshold": "median regression <= 5%",
-        "observedPercent": -32.26
+        "observedPercent": -33.04
       },
       "rss": {
         "qualified": false,
@@ -447,6 +455,10 @@
       "eventLoop": {
         "qualified": false,
         "status": "recorded-local-only"
+      },
+      "nativeResourceAdmission": {
+        "qualified": false,
+        "status": "canonical-e00-effective-parser-count-1"
       },
       "windowsPackaged": {
         "qualified": false,
@@ -462,6 +474,7 @@
       "RSS仅记录，尚未qualified",
       "磁盘仅记录，尚未qualified",
       "event-loop仅记录，尚未qualified",
+      "native E00资源预算只获批1 Parser，Pool仅由隔离Governor取证",
       "Windows packaged门禁未完成",
       "真实资金与恢复人工门禁未完成"
     ]

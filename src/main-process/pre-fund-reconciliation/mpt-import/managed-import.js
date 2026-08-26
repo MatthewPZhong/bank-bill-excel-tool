@@ -195,7 +195,12 @@ async function executeManagedPreFundMptImport(rawOptions) {
   });
   assertMptSpoolDiskCapacity({
     taskStagingDir: options.taskStagingDir,
-    sourceSizes: inputs.map((input) => input.spool.source.sourceSnapshot.sizeBytes),
+    // lstat对symlink/非普通文件不产生可信regular-file snapshot：磁盘估算贡献0，
+    // 但Parser仍按输入顺序逐file fail closed。
+    sourceSizes: inputs.map((input) =>
+      input.spool.source.sourceSnapshot
+        ? input.spool.source.sourceSnapshot.sizeBytes
+        : 0),
     ...(options.getAvailableDiskBytes ? {
       getAvailableDiskBytes: options.getAvailableDiskBytes
     } : {})
@@ -218,7 +223,14 @@ async function executeManagedPreFundMptImport(rawOptions) {
   });
   // job:start前Supervisor已经按冻结topology持有Writer与全部Parser的CompoundLease。
   await control.ready;
-  const admittedTopology = typeof control.snapshot === 'function' && control.snapshot().topology;
+  const admittedSnapshot = typeof control.snapshot === 'function' ? control.snapshot() : null;
+  if (!admittedSnapshot || admittedSnapshot.state !== 'running') {
+    // pre-running terminal也会打开dispatchReady；必须先等parent权威barrier完成
+    // transport与CompoundLease清理，再返回稳定的managed-start失败。
+    await control.promise;
+    throw managedError('PREFUND_WRITER_START_FAILED', 'PreFund Writer未进入可运行状态');
+  }
+  const admittedTopology = admittedSnapshot.topology;
   const parserCount = admittedTopology && admittedTopology.effectiveChildCount;
   if (!Number.isSafeInteger(parserCount) || parserCount < 1 || parserCount > 4) {
     throw managedError('PREFUND_ADMITTED_TOPOLOGY_INVALID', 'Supervisor未提供合法的已获批Parser topology');

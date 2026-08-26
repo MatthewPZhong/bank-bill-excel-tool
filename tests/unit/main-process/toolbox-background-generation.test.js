@@ -169,7 +169,13 @@ test('E04-A/B policy 与 Main source selector 保持 production false，真实�
 });
 
 test('E04-B runtime预算完整计入Scanner phase与一个Writer child，idle/shutdown不泄漏', async () => {
-  const runtime = createBackgroundExecutionRuntime({ shutdownTimeoutMs: 10000 });
+  const runtime = createBackgroundExecutionRuntime({
+    shutdownTimeoutMs: 10000,
+    availableParallelism: 4,
+    freeMemoryBytes: 3 * 1024 ** 3,
+    memoryHardCeilingBytes: 4 * 1024 ** 3,
+    systemReserveBytes: 1024 ** 3
+  });
   const snapshot = runtime.resourceGovernor.snapshot();
   assert.deepEqual(runtime.policyRegistry.list().map((policy) => policy.actionKey), [
     TOOLBOX_GENERATION_ACTIONS.MERGE,
@@ -183,7 +189,9 @@ test('E04-B runtime预算完整计入Scanner phase与一个Writer child，idle/s
   }
   assert.equal(snapshot.budgets.cpuSlots, 2);
   assert.equal(snapshot.budgets.workerThreadSlots, 3);
+  assert.equal(snapshot.budgets.utilityProcessSlots, 1);
   assert.equal(snapshot.budgets.ioHeavySlots, 2);
+  assert.equal(snapshot.budgets.memoryBytes, 2 * 1024 ** 3);
   const multiPolicy = TOOLBOX_GENERATION_POLICIES.find(
     (policy) => policy.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
   );

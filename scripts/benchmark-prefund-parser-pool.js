@@ -7,8 +7,11 @@ const os = require('node:os');
 const path = require('node:path');
 
 const {
-  createBackgroundExecutionRuntime
+  createNonProductionBackgroundExecutionRuntime
 } = require('../src/main-process/background-execution/runtime');
+const {
+  createResourceGovernor
+} = require('../src/main-process/background-execution/resource-governor');
 const {
   INBOUND_FIELDS,
   MPT_DELIMITER
@@ -22,6 +25,19 @@ const DEFAULT_RUNS = 5;
 const DEFAULT_REPRESENTATIVE_ROWS_PER_FILE = 1200;
 const DEFAULT_SMALL_ROWS_PER_FILE = 80;
 const FILE_COUNT = 8;
+const ISOLATED_BENCHMARK_BUDGETS = Object.freeze({
+  cpuSlots: 5,
+  workerThreadSlots: 6,
+  utilityProcessSlots: 1,
+  ioHeavySlots: 5,
+  memoryBytes: 2 * 1024 ** 3
+});
+
+function createIsolatedBenchmarkGovernor() {
+  return createResourceGovernor({
+    budgets: ISOLATED_BENCHMARK_BUDGETS
+  });
+}
 
 function parsePositiveInteger(value, name) {
   const parsed = Number(value);
@@ -142,9 +158,11 @@ async function runOnce({ root, filePaths, label, mode, runIndex, orderPosition }
   const taskStagingDir = path.join(runRoot, 'staging');
   fs.mkdirSync(userDataDir, { recursive: true });
   const parserWorkerCount = mode === 'pool' ? 4 : 1;
-  const runtime = createBackgroundExecutionRuntime({
+  const runtime = createNonProductionBackgroundExecutionRuntime({
     availableParallelism: parserWorkerCount === 4 ? 8 : 2,
-    totalMemoryBytes: 8 * 1024 * 1024 * 1024,
+    // canonical E00 IO预算下Pool保持false-gated；显式隔离Governor只测scheduler
+    // capability，不作为native admission或production enablement证据。
+    resourceGovernor: createIsolatedBenchmarkGovernor(),
     workerDurableCoordinator: {
       async prepareAndAck(input) {
         return { intentId: `bench-intent-${input.unitId}`, fileOperationKey: input.critical.fileOperationKey };
@@ -284,6 +302,8 @@ function markdown(report) {
     `- Representative: ${FILE_COUNT} files × ${report.config.representativeRowsPerFile} rows\n` +
     `- Small: ${FILE_COUNT} files × ${report.config.smallRowsPerFile} rows\n` +
     `- Scope: real managed import, OS Parser Workers, Single Writer, Side DB receipts\n` +
+    `- Admission: explicit isolated benchmark Governor ` +
+      `(cpu=5/worker=6/utility=1/io=5/memory=2GiB); native E00 admission remains one Parser\n` +
     `- Run order: alternating single/pool by run index to reduce warm-cache ordering bias\n` +
     `- RSS: same-process absolute peak plus per-sample delta from starting RSS\n\n` +
     `| Case | Single median ms | Pool median ms | Improvement | Single RSS abs/delta | Pool RSS abs/delta | Single/pool spool | Single/pool event-loop p99 | Parity |\n` +
@@ -292,7 +312,7 @@ function markdown(report) {
     `| small | ${small.single.durationMedianMs} | ${small.pool.durationMedianMs} | ${small.improvementPercent}% | ${small.single.peakRssAbsoluteMedianBytes}/${small.single.peakRssDeltaMedianBytes} | ${small.pool.peakRssAbsoluteMedianBytes}/${small.pool.peakRssDeltaMedianBytes} | ${small.single.peakSpoolMedianBytes}/${small.pool.peakSpoolMedianBytes} | ${small.single.eventLoopP99MedianMs}/${small.pool.eventLoopP99MedianMs} | ${small.businessParity} |\n\n` +
     `## Gate conclusion\n\n` +
     `**${report.gate.conclusion}**. ${report.gate.reasons.join('；')}。\n\n` +
-    `RSS、磁盘与event-loop在本机仅记录，尚无冻结阈值/Windows packaged证据，均为not qualified。` +
+    `Native resource admission、RSS、磁盘与event-loop均未qualified；尚无冻结阈值/Windows packaged证据。` +
     `此报告不会修改 production policy；真实脱敏资金与恢复人工复核仍未完成。\n`;
 }
 
@@ -313,6 +333,7 @@ async function main(argv = process.argv.slice(2)) {
     reasons.push('RSS仅记录，尚未qualified');
     reasons.push('磁盘仅记录，尚未qualified');
     reasons.push('event-loop仅记录，尚未qualified');
+    reasons.push('native E00资源预算只获批1 Parser，Pool仅由隔离Governor取证');
     reasons.push('Windows packaged门禁未完成');
     reasons.push('真实资金与恢复人工门禁未完成');
     const report = Object.freeze({
@@ -331,7 +352,9 @@ async function main(argv = process.argv.slice(2)) {
         representativeRowsPerFile: config.representativeRowsPerFile,
         smallRowsPerFile: config.smallRowsPerFile,
         fileCount: FILE_COUNT,
-        runOrder: 'alternating-single-pool-by-run-index'
+        runOrder: 'alternating-single-pool-by-run-index',
+        admission: 'explicit-isolated-governor-non-production',
+        isolatedGovernorBudgets: ISOLATED_BENCHMARK_BUDGETS
       }),
       cases: Object.freeze({ representative, small }),
       gate: Object.freeze({
@@ -351,6 +374,10 @@ async function main(argv = process.argv.slice(2)) {
           rss: Object.freeze({ qualified: false, status: 'recorded-local-only' }),
           disk: Object.freeze({ qualified: false, status: 'recorded-local-only' }),
           eventLoop: Object.freeze({ qualified: false, status: 'recorded-local-only' }),
+          nativeResourceAdmission: Object.freeze({
+            qualified: false,
+            status: 'canonical-e00-effective-parser-count-1'
+          }),
           windowsPackaged: Object.freeze({ qualified: false, status: 'not-run' }),
           fundsManualReview: Object.freeze({ qualified: false, status: 'not-run' })
         }),
