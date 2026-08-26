@@ -4,7 +4,7 @@
 
 - Goal：为冻结的 `R3.2.1 | release evidence | action独立 enable/rollback` 建立可机器校验、可审计的 7-action production snapshot，不改变任何生产业务路径。
 - Context：E04-A/E04-B/E05-A/E05-P0/E05-B 已落 capability；E04-C 第二 Writer probe 已拒绝生产实现；E05-C representative Parser Pool 改善仅 0.57%，结论为 `DOWNGRADE / KEEP PRODUCTION DISABLED`。
-- Constraints：5 个 v3.2.1 native action 保持 `production.enabled=false`、live legacy、effective worker 0；`toolbox:split-large` / `toolbox:publish` 保留 inherited canonical production state；不改金额、币种、receipt、sequence、Publisher 或 Recovery Hold 语义；不实现第二 Writer；不运行 `release-check`、`check-vars` 或 `scan:vars`。
+- Constraints：5 个 v3.2.1 native action 保持 `production.enabled=false`、live legacy、effective worker 0；`toolbox:split-large` / `toolbox:publish` 保留 inherited canonical production state；不改金额、币种、receipt、sequence、Publisher 或 Recovery Hold 语义；不实现第二 Writer；本 PR Dev 不运行 `release-check`，Lead 最终仅运行一次且现已完成，任何 agent 禁止重跑；不运行 `check-vars` 或 `scan:vars`。
 - Done when：snapshot 对每个 action 独立给出 current policy、live disposition/effective mode/worker count、enable 决定、禁用/保留原因、rollback、证据引用和 Windows/人工/资金恢复门禁；validator 能同时发现 policy drift、证据漂移、跨 action 代偿和门禁误报；定向测试、affected ESLint/语法与 `git diff --check` 通过。
 
 ## 已确认事实

@@ -96,5 +96,5 @@
 | --- | --- | --- | --- |
 | Packaged Windows、Excel/WPS、真实进程终止证据 | BLOCK production enable / `NOT_RUN` | Release owner 在真实 packaged Windows 与 Office 环境执行 | 不阻断 evidence artifact；阻断相关 native production enable。 |
 | 真实业务文件与资金/恢复人工复核 | BLOCK production enable / `PENDING_HUMAN_REVIEW` | Toolbox/PreFund 业务与恢复 owner | ⚠️ 资金与恢复红线，请人工复核。 |
-| 当前host低于E00 system reserve，重量级real Worker定向测试被admission拒绝 | PROBE / 环境限制 | 项目负责人在满足E00内存预算的review环境复跑定向Toolbox/E05-B或最终唯一release-check | release专属validator及纯合同测试已通过；不把未跑完的real Worker矩阵声明PASS。 |
+| 当前host低于E00 system reserve，重量级real Worker定向测试被admission拒绝 | PROBE / 环境限制 | 项目负责人在满足E00内存预算的review环境仅复跑定向Toolbox/E05-B probe；该probe不是`release-check` | release专属validator及纯合同测试已通过；不把未跑完的real Worker矩阵声明PASS。 |
 | 唯一完整 `release-check` 已失败 | CLOSED AS EVIDENCE / `EXIT 1` | 禁止任何agent再次运行；修复后renderer/Windows定向与独立unit/integration components已通过 | release-check自身的integration phase保持`NOT_RUN`；standalone unit/integration另记PASS，最终状态不得写为release-check PASS。 |
