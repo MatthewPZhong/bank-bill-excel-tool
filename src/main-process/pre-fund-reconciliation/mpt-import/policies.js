@@ -7,6 +7,12 @@ const {
   isSafeMptErrorText,
   safeMptFileName
 } = require('./file-result-safety');
+const {
+  IMPORT_BASE_RESOURCES,
+  IMPORT_WRITER_RESOURCES,
+  PARSER_RESOURCES,
+  REPAIR_WRITER_RESOURCES
+} = require('./topology');
 
 const PRE_FUND_MPT_IMPORT_ACTION = 'pre-fund:mpt-import';
 const PRE_FUND_MPT_REPAIR_ACTION = 'pre-fund:mpt-repair-import';
@@ -32,28 +38,6 @@ const ZERO_RESOURCES = Object.freeze({
   ioHeavySlots: 0,
   memoryBytes: 0
 });
-const IMPORT_WRITER_RESOURCES = Object.freeze({
-  cpuSlots: 1,
-  workerThreadSlots: 1,
-  utilityProcessSlots: 0,
-  ioHeavySlots: 1,
-  memoryBytes: 268435456
-});
-const PARSER_RESOURCES = Object.freeze({
-  cpuSlots: 1,
-  workerThreadSlots: 1,
-  utilityProcessSlots: 0,
-  ioHeavySlots: 1,
-  memoryBytes: 268435456
-});
-const REPAIR_WRITER_RESOURCES = Object.freeze({
-  cpuSlots: 1,
-  workerThreadSlots: 1,
-  utilityProcessSlots: 0,
-  ioHeavySlots: 1,
-  memoryBytes: 201326592
-});
-
 function preFundMptPolicy(actionKey) {
   const repair = actionKey === PRE_FUND_MPT_REPAIR_ACTION;
   const keys = PRE_FUND_MPT_STATIC_KEYS[actionKey];
@@ -80,13 +64,7 @@ function preFundMptPolicy(actionKey) {
     }),
     resources: {
       profile: `resource.${actionKey}`,
-      base: repair ? ZERO_RESOURCES : {
-        cpuSlots: 0,
-        workerThreadSlots: 1,
-        utilityProcessSlots: 0,
-        ioHeavySlots: 0,
-        memoryBytes: 33554432
-      },
+      base: repair ? ZERO_RESOURCES : IMPORT_BASE_RESOURCES,
       phase: repair ? REPAIR_WRITER_RESOURCES : IMPORT_WRITER_RESOURCES,
       compound: repair ? {
         topologyKey: 'topology.pre-fund:mpt-repair-import',

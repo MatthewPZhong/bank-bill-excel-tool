@@ -1,0 +1,482 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-26T02:55:13.236Z",
+  "environment": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "node": "v25.8.0",
+    "cpuModel": "Apple M4 Pro",
+    "availableParallelism": 14,
+    "totalMemoryBytes": 51539607552
+  },
+  "config": {
+    "runs": 5,
+    "representativeRowsPerFile": 1200,
+    "smallRowsPerFile": 80,
+    "fileCount": 8,
+    "runOrder": "alternating-single-pool-by-run-index",
+    "admission": "explicit-isolated-governor-non-production",
+    "isolatedGovernorBudgets": {
+      "cpuSlots": 5,
+      "workerThreadSlots": 6,
+      "utilityProcessSlots": 1,
+      "ioHeavySlots": 5,
+      "memoryBytes": 2147483648
+    }
+  },
+  "cases": {
+    "representative": {
+      "single": [
+        {
+          "runIndex": 0,
+          "orderPosition": 1,
+          "durationMs": 609.796,
+          "rssStartBytes": 72417280,
+          "peakRssBytes": 164069376,
+          "peakRssDeltaBytes": 91652096,
+          "peakSpoolBytes": 3962782,
+          "eventLoopMeanMs": 11.571,
+          "eventLoopP99Ms": 18.072,
+          "maxParserActive": 1,
+          "business": {
+            "rowCount": 9600,
+            "receiptCount": 8,
+            "sha256": "105353c9983553d69727ff72ba0cb8472e282d0b591b938ab4228c99b710f1a6"
+          }
+        },
+        {
+          "runIndex": 1,
+          "orderPosition": 2,
+          "durationMs": 585.831,
+          "rssStartBytes": 231653376,
+          "peakRssBytes": 233799680,
+          "peakRssDeltaBytes": 2146304,
+          "peakSpoolBytes": 3962782,
+          "eventLoopMeanMs": 11.619,
+          "eventLoopP99Ms": 18.334,
+          "maxParserActive": 1,
+          "business": {
+            "rowCount": 9600,
+            "receiptCount": 8,
+            "sha256": "105353c9983553d69727ff72ba0cb8472e282d0b591b938ab4228c99b710f1a6"
+          }
+        },
+        {
+          "runIndex": 2,
+          "orderPosition": 1,
+          "durationMs": 586.468,
+          "rssStartBytes": 237305856,
+          "peakRssBytes": 238698496,
+          "peakRssDeltaBytes": 1392640,
+          "peakSpoolBytes": 3962782,
+          "eventLoopMeanMs": 11.631,
+          "eventLoopP99Ms": 18.17,
+          "maxParserActive": 1,
+          "business": {
+            "rowCount": 9600,
+            "receiptCount": 8,
+            "sha256": "105353c9983553d69727ff72ba0cb8472e282d0b591b938ab4228c99b710f1a6"
+          }
+        },
+        {
+          "runIndex": 3,
+          "orderPosition": 2,
+          "durationMs": 591.665,
+          "rssStartBytes": 269959168,
+          "peakRssBytes": 273137664,
+          "peakRssDeltaBytes": 3178496,
+          "peakSpoolBytes": 3962782,
+          "eventLoopMeanMs": 11.291,
+          "eventLoopP99Ms": 13.722,
+          "maxParserActive": 1,
+          "business": {
+            "rowCount": 9600,
+            "receiptCount": 8,
+            "sha256": "105353c9983553d69727ff72ba0cb8472e282d0b591b938ab4228c99b710f1a6"
+          }
+        },
+        {
+          "runIndex": 4,
+          "orderPosition": 1,
+          "durationMs": 601.414,
+          "rssStartBytes": 277184512,
+          "peakRssBytes": 279461888,
+          "peakRssDeltaBytes": 2277376,
+          "peakSpoolBytes": 3962782,
+          "eventLoopMeanMs": 11.675,
+          "eventLoopP99Ms": 18.694,
+          "maxParserActive": 1,
+          "business": {
+            "rowCount": 9600,
+            "receiptCount": 8,
+            "sha256": "105353c9983553d69727ff72ba0cb8472e282d0b591b938ab4228c99b710f1a6"
+          }
+        }
+      ],
+      "pool": [
+        {
+          "runIndex": 0,
+          "orderPosition": 2,
+          "durationMs": 597.185,
+          "rssStartBytes": 174637056,
+          "peakRssBytes": 203489280,
+          "peakRssDeltaBytes": 28852224,
+          "peakSpoolBytes": 9906933,
+          "eventLoopMeanMs": 12.361,
+          "eventLoopP99Ms": 42.238,
+          "maxParserActive": 4,
+          "business": {
+            "rowCount": 9600,
+            "receiptCount": 8,
+            "sha256": "105353c9983553d69727ff72ba0cb8472e282d0b591b938ab4228c99b710f1a6"
+          }
+        },
+        {
+          "runIndex": 1,
+          "orderPosition": 1,
+          "durationMs": 573.357,
+          "rssStartBytes": 207962112,
+          "peakRssBytes": 224149504,
+          "peakRssDeltaBytes": 16187392,
+          "peakSpoolBytes": 9906933,
+          "eventLoopMeanMs": 12.143,
+          "eventLoopP99Ms": 43.778,
+          "maxParserActive": 4,
+          "business": {
+            "rowCount": 9600,
+            "receiptCount": 8,
+            "sha256": "105353c9983553d69727ff72ba0cb8472e282d0b591b938ab4228c99b710f1a6"
+          }
+        },
+        {
+          "runIndex": 2,
+          "orderPosition": 2,
+          "durationMs": 588.272,
+          "rssStartBytes": 242483200,
+          "peakRssBytes": 249069568,
+          "peakRssDeltaBytes": 6586368,
+          "peakSpoolBytes": 9906933,
+          "eventLoopMeanMs": 12.046,
+          "eventLoopP99Ms": 40.501,
+          "maxParserActive": 4,
+          "business": {
+            "rowCount": 9600,
+            "receiptCount": 8,
+            "sha256": "105353c9983553d69727ff72ba0cb8472e282d0b591b938ab4228c99b710f1a6"
+          }
+        },
+        {
+          "runIndex": 3,
+          "orderPosition": 1,
+          "durationMs": 561.627,
+          "rssStartBytes": 248528896,
+          "peakRssBytes": 262324224,
+          "peakRssDeltaBytes": 13795328,
+          "peakSpoolBytes": 9906933,
+          "eventLoopMeanMs": 12.826,
+          "eventLoopP99Ms": 52.363,
+          "maxParserActive": 4,
+          "business": {
+            "rowCount": 9600,
+            "receiptCount": 8,
+            "sha256": "105353c9983553d69727ff72ba0cb8472e282d0b591b938ab4228c99b710f1a6"
+          }
+        },
+        {
+          "runIndex": 4,
+          "orderPosition": 2,
+          "durationMs": 597.69,
+          "rssStartBytes": 285704192,
+          "peakRssBytes": 289800192,
+          "peakRssDeltaBytes": 4096000,
+          "peakSpoolBytes": 9906933,
+          "eventLoopMeanMs": 12.474,
+          "eventLoopP99Ms": 50.594,
+          "maxParserActive": 4,
+          "business": {
+            "rowCount": 9600,
+            "receiptCount": 8,
+            "sha256": "105353c9983553d69727ff72ba0cb8472e282d0b591b938ab4228c99b710f1a6"
+          }
+        }
+      ],
+      "summary": {
+        "single": {
+          "durationMedianMs": 591.665,
+          "rssStartMedianBytes": 237305856,
+          "peakRssAbsoluteMedianBytes": 238698496,
+          "peakRssDeltaMedianBytes": 2277376,
+          "peakSpoolMedianBytes": 3962782,
+          "eventLoopMeanMedianMs": 11.619,
+          "eventLoopP99MedianMs": 18.17,
+          "businessParityWithinMode": true,
+          "businessSha256": "105353c9983553d69727ff72ba0cb8472e282d0b591b938ab4228c99b710f1a6"
+        },
+        "pool": {
+          "durationMedianMs": 588.272,
+          "rssStartMedianBytes": 242483200,
+          "peakRssAbsoluteMedianBytes": 249069568,
+          "peakRssDeltaMedianBytes": 13795328,
+          "peakSpoolMedianBytes": 9906933,
+          "eventLoopMeanMedianMs": 12.361,
+          "eventLoopP99MedianMs": 43.778,
+          "businessParityWithinMode": true,
+          "businessSha256": "105353c9983553d69727ff72ba0cb8472e282d0b591b938ab4228c99b710f1a6"
+        },
+        "improvementPercent": 0.57,
+        "businessParity": true
+      }
+    },
+    "small": {
+      "single": [
+        {
+          "runIndex": 0,
+          "orderPosition": 1,
+          "durationMs": 404.04,
+          "rssStartBytes": 286818304,
+          "peakRssBytes": 286818304,
+          "peakRssDeltaBytes": 0,
+          "peakSpoolBytes": 124204,
+          "eventLoopMeanMs": 12.087,
+          "eventLoopP99Ms": 17.089,
+          "maxParserActive": 1,
+          "business": {
+            "rowCount": 640,
+            "receiptCount": 8,
+            "sha256": "6cb71cb4e434d3fbcb2718de3ea48561aa66946c0e5ffbefbfc5fa0bce18d3f7"
+          }
+        },
+        {
+          "runIndex": 1,
+          "orderPosition": 2,
+          "durationMs": 386.636,
+          "rssStartBytes": 284164096,
+          "peakRssBytes": 287178752,
+          "peakRssDeltaBytes": 3014656,
+          "peakSpoolBytes": 124204,
+          "eventLoopMeanMs": 11.515,
+          "eventLoopP99Ms": 14.475,
+          "maxParserActive": 1,
+          "business": {
+            "rowCount": 640,
+            "receiptCount": 8,
+            "sha256": "6cb71cb4e434d3fbcb2718de3ea48561aa66946c0e5ffbefbfc5fa0bce18d3f7"
+          }
+        },
+        {
+          "runIndex": 2,
+          "orderPosition": 1,
+          "durationMs": 402.967,
+          "rssStartBytes": 284000256,
+          "peakRssBytes": 287440896,
+          "peakRssDeltaBytes": 3440640,
+          "peakSpoolBytes": 124204,
+          "eventLoopMeanMs": 12.008,
+          "eventLoopP99Ms": 16.531,
+          "maxParserActive": 1,
+          "business": {
+            "rowCount": 640,
+            "receiptCount": 8,
+            "sha256": "6cb71cb4e434d3fbcb2718de3ea48561aa66946c0e5ffbefbfc5fa0bce18d3f7"
+          }
+        },
+        {
+          "runIndex": 3,
+          "orderPosition": 2,
+          "durationMs": 390.151,
+          "rssStartBytes": 284164096,
+          "peakRssBytes": 287571968,
+          "peakRssDeltaBytes": 3407872,
+          "peakSpoolBytes": 124204,
+          "eventLoopMeanMs": 11.608,
+          "eventLoopP99Ms": 16.237,
+          "maxParserActive": 1,
+          "business": {
+            "rowCount": 640,
+            "receiptCount": 8,
+            "sha256": "6cb71cb4e434d3fbcb2718de3ea48561aa66946c0e5ffbefbfc5fa0bce18d3f7"
+          }
+        },
+        {
+          "runIndex": 4,
+          "orderPosition": 1,
+          "durationMs": 420.96,
+          "rssStartBytes": 284377088,
+          "peakRssBytes": 287358976,
+          "peakRssDeltaBytes": 2981888,
+          "peakSpoolBytes": 124204,
+          "eventLoopMeanMs": 12.583,
+          "eventLoopP99Ms": 23.052,
+          "maxParserActive": 1,
+          "business": {
+            "rowCount": 640,
+            "receiptCount": 8,
+            "sha256": "6cb71cb4e434d3fbcb2718de3ea48561aa66946c0e5ffbefbfc5fa0bce18d3f7"
+          }
+        }
+      ],
+      "pool": [
+        {
+          "runIndex": 0,
+          "orderPosition": 2,
+          "durationMs": 268.383,
+          "rssStartBytes": 283508736,
+          "peakRssBytes": 289882112,
+          "peakRssDeltaBytes": 6373376,
+          "peakSpoolBytes": 496800,
+          "eventLoopMeanMs": 15.719,
+          "eventLoopP99Ms": 51.479,
+          "maxParserActive": 4,
+          "business": {
+            "rowCount": 640,
+            "receiptCount": 8,
+            "sha256": "6cb71cb4e434d3fbcb2718de3ea48561aa66946c0e5ffbefbfc5fa0bce18d3f7"
+          }
+        },
+        {
+          "runIndex": 1,
+          "orderPosition": 1,
+          "durationMs": 270.883,
+          "rssStartBytes": 283557888,
+          "peakRssBytes": 290209792,
+          "peakRssDeltaBytes": 6651904,
+          "peakSpoolBytes": 496800,
+          "eventLoopMeanMs": 14.926,
+          "eventLoopP99Ms": 54.788,
+          "maxParserActive": 4,
+          "business": {
+            "rowCount": 640,
+            "receiptCount": 8,
+            "sha256": "6cb71cb4e434d3fbcb2718de3ea48561aa66946c0e5ffbefbfc5fa0bce18d3f7"
+          }
+        },
+        {
+          "runIndex": 2,
+          "orderPosition": 2,
+          "durationMs": 275.564,
+          "rssStartBytes": 284000256,
+          "peakRssBytes": 290422784,
+          "peakRssDeltaBytes": 6422528,
+          "peakSpoolBytes": 496800,
+          "eventLoopMeanMs": 13.964,
+          "eventLoopP99Ms": 52.232,
+          "maxParserActive": 4,
+          "business": {
+            "rowCount": 640,
+            "receiptCount": 8,
+            "sha256": "6cb71cb4e434d3fbcb2718de3ea48561aa66946c0e5ffbefbfc5fa0bce18d3f7"
+          }
+        },
+        {
+          "runIndex": 3,
+          "orderPosition": 1,
+          "durationMs": 269.813,
+          "rssStartBytes": 284262400,
+          "peakRssBytes": 290668544,
+          "peakRssDeltaBytes": 6406144,
+          "peakSpoolBytes": 498120,
+          "eventLoopMeanMs": 13.549,
+          "eventLoopP99Ms": 51.511,
+          "maxParserActive": 4,
+          "business": {
+            "rowCount": 640,
+            "receiptCount": 8,
+            "sha256": "6cb71cb4e434d3fbcb2718de3ea48561aa66946c0e5ffbefbfc5fa0bce18d3f7"
+          }
+        },
+        {
+          "runIndex": 4,
+          "orderPosition": 2,
+          "durationMs": 268.221,
+          "rssStartBytes": 284164096,
+          "peakRssBytes": 290684928,
+          "peakRssDeltaBytes": 6520832,
+          "peakSpoolBytes": 496800,
+          "eventLoopMeanMs": 13.328,
+          "eventLoopP99Ms": 44.597,
+          "maxParserActive": 4,
+          "business": {
+            "rowCount": 640,
+            "receiptCount": 8,
+            "sha256": "6cb71cb4e434d3fbcb2718de3ea48561aa66946c0e5ffbefbfc5fa0bce18d3f7"
+          }
+        }
+      ],
+      "summary": {
+        "single": {
+          "durationMedianMs": 402.967,
+          "rssStartMedianBytes": 284164096,
+          "peakRssAbsoluteMedianBytes": 287358976,
+          "peakRssDeltaMedianBytes": 3014656,
+          "peakSpoolMedianBytes": 124204,
+          "eventLoopMeanMedianMs": 12.008,
+          "eventLoopP99MedianMs": 16.531,
+          "businessParityWithinMode": true,
+          "businessSha256": "6cb71cb4e434d3fbcb2718de3ea48561aa66946c0e5ffbefbfc5fa0bce18d3f7"
+        },
+        "pool": {
+          "durationMedianMs": 269.813,
+          "rssStartMedianBytes": 284000256,
+          "peakRssAbsoluteMedianBytes": 290422784,
+          "peakRssDeltaMedianBytes": 6422528,
+          "peakSpoolMedianBytes": 496800,
+          "eventLoopMeanMedianMs": 13.964,
+          "eventLoopP99MedianMs": 51.511,
+          "businessParityWithinMode": true,
+          "businessSha256": "6cb71cb4e434d3fbcb2718de3ea48561aa66946c0e5ffbefbfc5fa0bce18d3f7"
+        },
+        "improvementPercent": 33.04,
+        "businessParity": true
+      }
+    }
+  },
+  "gate": {
+    "productionEligible": false,
+    "conclusion": "DOWNGRADE / KEEP PRODUCTION DISABLED",
+    "checks": {
+      "representativePerformance": {
+        "qualified": false,
+        "threshold": "median improvement >= 15%",
+        "observedPercent": 0.57
+      },
+      "smallRegression": {
+        "qualified": true,
+        "threshold": "median regression <= 5%",
+        "observedPercent": -33.04
+      },
+      "rss": {
+        "qualified": false,
+        "status": "recorded-local-only"
+      },
+      "disk": {
+        "qualified": false,
+        "status": "recorded-local-only"
+      },
+      "eventLoop": {
+        "qualified": false,
+        "status": "recorded-local-only"
+      },
+      "nativeResourceAdmission": {
+        "qualified": false,
+        "status": "canonical-e00-effective-parser-count-1"
+      },
+      "windowsPackaged": {
+        "qualified": false,
+        "status": "not-run"
+      },
+      "fundsManualReview": {
+        "qualified": false,
+        "status": "not-run"
+      }
+    },
+    "reasons": [
+      "代表集中位数改善未达15%",
+      "RSS仅记录，尚未qualified",
+      "磁盘仅记录，尚未qualified",
+      "event-loop仅记录，尚未qualified",
+      "native E00资源预算只获批1 Parser，Pool仅由隔离Governor取证",
+      "Windows packaged门禁未完成",
+      "真实资金与恢复人工门禁未完成"
+    ]
+  }
+}

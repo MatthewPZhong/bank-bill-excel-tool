@@ -19,6 +19,9 @@ const protocolValidator = require('./protocol-validator');
 const { validateProtocolSequence } = require('./protocol-sequence-validator');
 const { createDirectionSequenceTracker } = require('./sequence-tracker');
 const { createResourceGovernor } = require('./resource-governor');
+const {
+  createPlatformResourceBudgets
+} = require('./resource-budget');
 const { createServiceHost } = require('./service-host');
 const {
   createBatchRecoveryOverlayAdapter,
@@ -91,6 +94,7 @@ module.exports = {
   createRecoveryTaskLifecycleAdapter,
   createRecoveryTransitionAdapter,
   createResourceGovernor,
+  createPlatformResourceBudgets,
   createRecoveryHoldGate,
   createServiceHost,
   createSettlementRecoveryProviderRegistry,

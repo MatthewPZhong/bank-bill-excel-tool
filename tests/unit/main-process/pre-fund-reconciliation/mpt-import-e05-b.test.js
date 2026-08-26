@@ -7,10 +7,15 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { DatabaseSync } = require('node:sqlite');
+const { Worker } = require('node:worker_threads');
 
 const {
-  createBackgroundExecutionRuntime
+  createBackgroundExecutionRuntime,
+  createNonProductionBackgroundExecutionRuntime
 } = require('../../../../src/main-process/background-execution/runtime');
+const {
+  createResourceGovernor
+} = require('../../../../src/main-process/background-execution/resource-governor');
 const {
   createArchiveRepository,
   ensureArchiveMetadataSupport
@@ -116,6 +121,18 @@ const {
 
 let tempRoot;
 let userDataDir;
+
+function createIsolatedPoolGovernor() {
+  return createResourceGovernor({
+    budgets: {
+      cpuSlots: 5,
+      workerThreadSlots: 6,
+      utilityProcessSlots: 1,
+      ioHeavySlots: 5,
+      memoryBytes: 2 * 1024 ** 3
+    }
+  });
+}
 
 test.beforeEach(() => {
   tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'prefund-e05-b-'));
@@ -1475,6 +1492,10 @@ test('managed Writer以canonical超长sequence形成receipt后unit与parent vali
 test('一个parent job复用单一Writer transport，Parser effective=1按unit receipt后递增提交', async () => {
   const calls = [];
   const runtime = createBackgroundExecutionRuntime({
+    availableParallelism: 8,
+    freeMemoryBytes: 8 * 1024 ** 3,
+    memoryHardCeilingBytes: 4 * 1024 ** 3,
+    systemReserveBytes: 1024 ** 3,
     workerDurableCoordinator: {
       async prepareAndAck(input) {
         calls.push(`prepare:${input.unitId}`);
@@ -1488,8 +1509,13 @@ test('一个parent job复用单一Writer transport，Parser effective=1按unit r
       async resolveUncertain() { return { outcome: 'not-committed' }; }
     }
   });
-  assert.equal(runtime.resourceGovernor.snapshot().budgets.workerThreadSlots, 3);
-  assert.ok(runtime.resourceGovernor.snapshot().budgets.memoryBytes >= 768 * 1024 * 1024);
+  assert.deepEqual(runtime.resourceGovernor.snapshot().budgets, {
+    cpuSlots: 4,
+    workerThreadSlots: 5,
+    utilityProcessSlots: 1,
+    ioHeavySlots: 2,
+    memoryBytes: 4 * 1024 ** 3
+  });
   const firstPath = writeFile('801', [inboundRow({ reconId: 'MANAGED-1' })]);
   const otherBatch = 'MPT_INBOUND_20260708_MANAGED2';
   const secondPath = writeFile('802', [
@@ -1534,6 +1560,210 @@ test('一个parent job复用单一Writer transport，Parser effective=1按unit r
       { stage: 'mpt-import', current: 1, total: 2, fileName: path.basename(firstPath) },
       { stage: 'mpt-import', current: 2, total: 2, fileName: path.basename(secondPath) }
     ]);
+  } finally {
+    await runtime.shutdown();
+  }
+});
+
+test('E05-C真实8文件Parser Pool + Single Writer形成逐file唯一receipt并与legacy业务行parity', async () => {
+  const criticalOrder = [];
+  const receiptOrder = [];
+  const runtime = createNonProductionBackgroundExecutionRuntime({
+    availableParallelism: 8,
+    resourceGovernor: createIsolatedPoolGovernor(),
+    workerDurableCoordinator: {
+      async prepareAndAck(input) {
+        criticalOrder.push(input.unitId);
+        return { intentId: `pool-intent-${input.unitId}`, fileOperationKey: input.critical.fileOperationKey };
+      },
+      async observeReceipt(input) {
+        receiptOrder.push(input.unitId);
+        return { receiptHint: { receiptKind: 'module-local', receiptIdentity: String(input.receipt.id) } };
+      },
+      async settleCommitted() {},
+      async resolveUncertain() { return { outcome: 'not-committed' }; }
+    }
+  });
+  const filePaths = Array.from({ length: 8 }, (_, index) => {
+    const sourceBatch = `MPT_INBOUND_20260708_POOL_${index}`;
+    return writeFile(String(830 + index), [inboundRow({
+      batchNo: sourceBatch,
+      reconId: `REAL-POOL-${index}`,
+      currency: index % 2 ? 'EUR' : 'USD',
+      amount: `${index + 1}.25`
+    })], sourceBatch);
+  });
+  let parserActive = 0;
+  let parserMaxActive = 0;
+  const parserExited = new Set();
+  try {
+    const result = await executeManagedPreFundMptImport({
+      actionKey: 'pre-fund:mpt-import',
+      runtime,
+      service: {
+        beginManagedMptImport() {},
+        adoptManagedMptImportResults: (_paths, items) => items
+      },
+      filePaths,
+      userDataDir,
+      taskStagingDir: path.join(tempRoot, 'real-pool-staging'),
+      getAvailableDiskBytes: () => Number.MAX_SAFE_INTEGER,
+      onParserWorkerState(event) {
+        if (event.state === 'started') {
+          parserActive += 1;
+          parserMaxActive = Math.max(parserMaxActive, parserActive);
+        } else {
+          parserActive -= 1;
+          parserExited.add(event.fileIndex);
+        }
+      },
+      batchContext: {
+        batchId: 11, batchNumber: 'BATCH-REAL-POOL', taskRunId: 'real-pool-task',
+        taskKey: 'pre-fund-reconciliation:import-mpt', moduleId: 'pre-fund',
+        parentRunId: 'real-pool-parent', operationKey: 'real-pool-operation'
+      }
+    });
+    assert.equal(parserMaxActive > 1, true);
+    assert.equal(parserActive, 0);
+    assert.equal(parserExited.size, 8);
+    assert.deepEqual(criticalOrder, Array.from({ length: 8 }, (_, index) =>
+      `file:${String(index).padStart(6, '0')}`));
+    assert.deepEqual(receiptOrder, criticalOrder);
+    assert.deepEqual(result.results.map((item) => item.fileName), filePaths.map((item) => path.basename(item)));
+    assert.deepEqual(result.results.map((item) => item.status), Array(8).fill('ok'));
+
+    const managedDbPath = runDataStore.sideDbPath(
+      userDataDir, runDataStore.MODULE_PRE_FUND_RECONCILIATION, '2026-07'
+    );
+    const managedDb = runDataStore.openExistingSideDb(managedDbPath);
+    let managedRows;
+    try {
+      const receipts = managedDb.prepare(`
+        SELECT file_index, operation_key, outcome_kind
+        FROM pre_fund_operation_receipts ORDER BY file_index
+      `).all();
+      assert.deepEqual(receipts.map((item) => Number(item.file_index)), [0, 1, 2, 3, 4, 5, 6, 7]);
+      assert.deepEqual(receipts.map((item) => item.operation_key), Array.from(
+        { length: 8 },
+        (_, index) => `real-pool-operation/file/${String(index).padStart(6, '0')}`
+      ));
+      assert.deepEqual(receipts.map((item) => item.outcome_kind), Array(8).fill('inserted'));
+      managedRows = managedDb.prepare(`
+        SELECT source_batch, source_file_name, source_file_sequence, source_row_number,
+          reconciliation_id, gateway_date, currency, amount, fingerprint
+        FROM pre_fund_reconciliation_gateway_rows
+        ORDER BY source_file_sequence, source_row_number
+      `).all();
+    } finally {
+      managedDb.close();
+    }
+
+    const legacyDir = path.join(tempRoot, 'legacy-parity-user-data');
+    fs.mkdirSync(legacyDir);
+    const legacyStore = new PreFundReconciliationStore(legacyDir);
+    for (const filePath of filePaths) await legacyStore.importLegacyFile(filePath);
+    const legacyDb = runDataStore.openExistingSideDb(runDataStore.sideDbPath(
+      legacyDir, runDataStore.MODULE_PRE_FUND_RECONCILIATION, '2026-07'
+    ));
+    try {
+      const legacyRows = legacyDb.prepare(`
+        SELECT source_batch, source_file_name, source_file_sequence, source_row_number,
+          reconciliation_id, gateway_date, currency, amount, fingerprint
+        FROM pre_fund_reconciliation_gateway_rows
+        ORDER BY source_file_sequence, source_row_number
+      `).all();
+      assert.deepEqual(managedRows, legacyRows);
+    } finally {
+      legacyDb.close();
+    }
+  } finally {
+    await runtime.shutdown();
+  }
+});
+
+test('E05-C Pool中一个真实transport crash只失败当前file，后续真实Writer/receipt继续', async () => {
+  const criticalOrder = [];
+  const runtime = createNonProductionBackgroundExecutionRuntime({
+    availableParallelism: 8,
+    resourceGovernor: createIsolatedPoolGovernor(),
+    workerDurableCoordinator: {
+      async prepareAndAck(input) {
+        criticalOrder.push(input.unitId);
+        return { intentId: `crash-intent-${input.unitId}`, fileOperationKey: input.critical.fileOperationKey };
+      },
+      async observeReceipt(input) {
+        return { receiptHint: { receiptKind: 'module-local', receiptIdentity: String(input.receipt.id) } };
+      },
+      async settleCommitted() {},
+      async resolveUncertain() { return { outcome: 'not-committed' }; }
+    }
+  });
+  const filePaths = Array.from({ length: 8 }, (_, index) => {
+    const sourceBatch = `MPT_INBOUND_20260708_POOL_CRASH_${index}`;
+    return writeFile(String(850 + index), [inboundRow({
+      batchNo: sourceBatch,
+      reconId: `POOL-CRASH-${index}`
+    })], sourceBatch);
+  });
+  function SelectiveCrashWorker(entry, workerOptions) {
+    if (workerOptions.workerData.input.fileIndex !== 1) {
+      return new Worker(entry, workerOptions);
+    }
+    const fake = new EventEmitter();
+    fake.postMessage = () => {};
+    fake.terminate = () => Promise.resolve(9);
+    setImmediate(() => fake.emit('exit', 9));
+    return fake;
+  }
+  let parserActive = 0;
+  let parserMaxActive = 0;
+  try {
+    const result = await executeManagedPreFundMptImport({
+      actionKey: 'pre-fund:mpt-import',
+      runtime,
+      ParserWorkerClass: SelectiveCrashWorker,
+      service: {
+        beginManagedMptImport() {},
+        adoptManagedMptImportResults: (_paths, items) => items
+      },
+      filePaths,
+      userDataDir,
+      taskStagingDir: path.join(tempRoot, 'pool-crash-staging'),
+      getAvailableDiskBytes: () => Number.MAX_SAFE_INTEGER,
+      onParserWorkerState(event) {
+        if (event.state === 'started') {
+          parserActive += 1;
+          parserMaxActive = Math.max(parserMaxActive, parserActive);
+        } else {
+          parserActive -= 1;
+        }
+      },
+      batchContext: {
+        batchId: 12, batchNumber: 'BATCH-POOL-CRASH', taskRunId: 'pool-crash-task',
+        taskKey: 'pre-fund-reconciliation:import-mpt', moduleId: 'pre-fund',
+        parentRunId: 'pool-crash-parent', operationKey: 'pool-crash-operation'
+      }
+    });
+    assert.equal(parserMaxActive > 1, true);
+    assert.equal(parserActive, 0);
+    assert.deepEqual(result.results.map((item) => item.status), [
+      'ok', 'failed', 'ok', 'ok', 'ok', 'ok', 'ok', 'ok'
+    ]);
+    assert.equal(result.results[1].code, 'PREFUND_PARSER_TRANSPORT_CRASH');
+    assert.deepEqual(criticalOrder, [0, 2, 3, 4, 5, 6, 7].map((index) =>
+      `file:${String(index).padStart(6, '0')}`));
+    const db = runDataStore.openExistingSideDb(runDataStore.sideDbPath(
+      userDataDir, runDataStore.MODULE_PRE_FUND_RECONCILIATION, '2026-07'
+    ));
+    try {
+      assert.equal(db.prepare('SELECT COUNT(*) AS n FROM pre_fund_operation_receipts').get().n, 7);
+      assert.equal(db.prepare('SELECT COUNT(*) AS n FROM pre_fund_reconciliation_gateway_rows').get().n, 7);
+      assert.equal(db.prepare(`
+        SELECT COUNT(*) AS n FROM pre_fund_operation_receipts WHERE file_index = 1
+      `).get().n, 0);
+    } finally {
+      db.close();
+    }
   } finally {
     await runtime.shutdown();
   }

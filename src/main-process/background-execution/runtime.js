@@ -7,6 +7,7 @@ const {
   createExecutionPolicyRegistry,
   createStaticRegistry
 } = require('./execution-policy-registry');
+const { createPlatformResourceBudgets } = require('./resource-budget');
 const { createResourceGovernor } = require('./resource-governor');
 const { createExecutionSupervisor } = require('./supervisor');
 const {
@@ -19,10 +20,14 @@ const {
 } = require('../toolbox-background/policies');
 const {
   PRE_FUND_MPT_POLICIES,
+  PRE_FUND_MPT_IMPORT_ACTION,
   PRE_FUND_MPT_REPAIR_ACTION,
   validatePreFundMptImportResult,
   validatePreFundMptRepairResult
 } = require('../pre-fund-reconciliation/mpt-import/policies');
+const {
+  createPreFundMptTopologyPlanner
+} = require('../pre-fund-reconciliation/mpt-import/topology');
 
 const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   ...TOOLBOX_GENERATION_POLICIES,
@@ -34,7 +39,23 @@ function isBackgroundExecutionProductionEnabled(actionKey) {
   return Boolean(policy && policy.production.enabled === true);
 }
 
-function createBackgroundExecutionRuntime(options = {}) {
+function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverride = null) {
+  const availableParallelism = options.availableParallelism === undefined
+    ? (typeof os.availableParallelism === 'function'
+        ? os.availableParallelism()
+        : Math.max(1, os.cpus().length))
+    : options.availableParallelism;
+  const platformBudgets = createPlatformResourceBudgets({
+    availableParallelism,
+    ...(options.freeMemoryBytes === undefined ? {} : { freeMemoryBytes: options.freeMemoryBytes }),
+    ...(options.totalMemoryBytes === undefined ? {} : { totalMemoryBytes: options.totalMemoryBytes }),
+    ...(options.memoryHardCeilingBytes === undefined
+      ? {}
+      : { memoryHardCeilingBytes: options.memoryHardCeilingBytes }),
+    ...(options.systemReserveBytes === undefined
+      ? {}
+      : { systemReserveBytes: options.systemReserveBytes })
+  });
   const workerRoot = path.resolve(__dirname, '..', 'toolbox-background');
   const entryRegistry = createStaticRegistry(Object.fromEntries(
     BACKGROUND_EXECUTION_POLICIES.map((policy) => [policy.entryKey, {
@@ -71,8 +92,18 @@ function createBackgroundExecutionRuntime(options = {}) {
     validatorEntries[policy.artifacts.businessValidatorKey] = resultValidator;
   }
   const validatorRegistry = createStaticRegistry(validatorEntries);
+  const preFundTopologyPlanner = createPreFundMptTopologyPlanner({ availableParallelism });
+  const topologyRegistry = createStaticRegistry(Object.fromEntries(
+    BACKGROUND_EXECUTION_POLICIES
+      .filter((policy) => policy.resources.compound)
+      .map((policy) => [policy.resources.compound.topologyKey,
+        policy.actionKey === PRE_FUND_MPT_IMPORT_ACTION || policy.actionKey === PRE_FUND_MPT_REPAIR_ACTION
+          ? preFundTopologyPlanner
+          : () => Object.freeze({ effectiveChildCount: 1 })])
+  ));
   entryRegistry.freeze();
   validatorRegistry.freeze();
+  topologyRegistry.freeze();
 
   const staticKeys = {
     resourceProfileKeys: BACKGROUND_EXECUTION_POLICIES.map((policy) => policy.resources.profile),
@@ -92,23 +123,15 @@ function createBackgroundExecutionRuntime(options = {}) {
     policies: BACKGROUND_EXECUTION_POLICIES,
     entryRegistry,
     validatorRegistry,
+    topologyRegistry,
     staticKeys,
     generatedAt: '2026-08-25T00:00:00+08:00'
   });
   policyRegistry.freeze();
-  // E05-B capability最大单job拓扑为import base32MiB + Writer256MiB + Parser256MiB；
-  // repair按冻结fixture申报Writer192MiB + exactly-one Parser256MiB child。
-  const memoryBudget = Math.max(768 * 1024 * 1024, Math.floor(os.totalmem() / 4));
-  const resourceGovernor = createResourceGovernor({
-    budgets: {
-      cpuSlots: 2,
-      // E05-B false-gated capability以 effective parser=1 验证冻结 compound：
-      // parent base + Writer phase + 1 parser child，恰需3个worker slot。
-      workerThreadSlots: 3,
-      utilityProcessSlots: 0,
-      ioHeavySlots: 2,
-      memoryBytes: memoryBudget
-    },
+  // PreFund topology可以请求false-gated Pool，但不得扩大全局E00预算；
+  // Governor是native admission的唯一资源权威。
+  const resourceGovernor = resourceGovernorOverride || createResourceGovernor({
+    budgets: platformBudgets,
     diagnostics: options.diagnostics
   });
   const supervisor = createExecutionSupervisor({
@@ -122,9 +145,11 @@ function createBackgroundExecutionRuntime(options = {}) {
   });
   return Object.freeze({
     start(request) {
+      if (resourceGovernorOverride) assertNonProductionGovernorRequest(request);
       return supervisor.start(request);
     },
     execute(request) {
+      if (resourceGovernorOverride) assertNonProductionGovernorRequest(request);
       return supervisor.execute(request);
     },
     inspect(jobId) {
@@ -139,6 +164,33 @@ function createBackgroundExecutionRuntime(options = {}) {
       supervisor.stopAcceptingNewJobs();
     }
   });
+}
+
+function assertNonProductionGovernorRequest(request) {
+  const descriptor = request && typeof request === 'object'
+    ? Object.getOwnPropertyDescriptor(request, 'production')
+    : null;
+  if (!descriptor || !Object.hasOwn(descriptor, 'value') || descriptor.value !== true) return;
+  const error = new Error('隔离ResourceGovernor不得执行production request');
+  error.code = 'BACKGROUND_EXECUTION_RESOURCE_GOVERNOR_OVERRIDE_FORBIDDEN';
+  throw error;
+}
+
+function createBackgroundExecutionRuntime(options = {}) {
+  if (options && Object.hasOwn(options, 'resourceGovernor')) {
+    throw new TypeError('resourceGovernor override只允许显式non-production runtime');
+  }
+  return createBackgroundExecutionRuntimeInternal(options);
+}
+
+// 仅供false-gated测试/benchmark注入隔离Governor；不从production barrel导出，
+// 且production request在Supervisor/admission前拒绝。
+function createNonProductionBackgroundExecutionRuntime(options = {}) {
+  if (!options || !Object.hasOwn(options, 'resourceGovernor') || !options.resourceGovernor) {
+    throw new TypeError('non-production runtime需要显式resourceGovernor');
+  }
+  const { resourceGovernor, ...runtimeOptions } = options;
+  return createBackgroundExecutionRuntimeInternal(runtimeOptions, resourceGovernor);
 }
 
 function createBackgroundExecutionRuntimeManager(options = {}) {
@@ -257,5 +309,6 @@ module.exports = {
   BACKGROUND_EXECUTION_POLICIES,
   createBackgroundExecutionRuntime,
   createBackgroundExecutionRuntimeManager,
+  createNonProductionBackgroundExecutionRuntime,
   isBackgroundExecutionProductionEnabled
 };
