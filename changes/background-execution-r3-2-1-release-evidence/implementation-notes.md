@@ -16,6 +16,7 @@
 | E04-C/E05-C 失败只表达为 release decision、reason和 evidence ref。 | schema 没有 `benchmark-fail`，伪造 `benchmark-pass/release-pass` 会抬高证据。 | 修改 policy schema；把 small fixture 收益当 representative pass。 | policy canonical enum 保持合法，production拒绝原因可审计。 |
 | 不 bump `package.json.version`，不更新 release 用户文档三件套。 | R3.2.0 release-evidence precedent 未 bump；本 PR 无用户可见功能或版本发布。 | 猜测 bump 到 3.2.1；只改三件套中的一份。 | 保持当前 `3.1.14`；若后续负责人决定版本迭代，三件套必须一起更新。 |
 | 每个 action 单列 `realProcessTermination` gate。 | blindspot pass 发现首版仅在部分 reason code 提及真实终止，没有形成逐 action machine-check 字段。 | 用 Windows packaged 或 deterministic fault injection 代替真实进程终止证据。 | 7 action 均固定 `NOT_RUN`，不得由自动测试升级。 |
+| 唯一一次完整 `release-check` 的失败是最终证据，不得重跑或改写为PASS。 | Lead在reviewed HEAD `c9e89db7`运行一次，lint/smoke通过，unit `6166/6171`且2 fail，`&&`使integration未执行。 | 修复后再次运行完整链；只记录修复后定向PASS并隐去初始失败。 | snapshot固定run authority、HEAD、phase结果、两个root cause及`rerunAllowed=false`。 |
 
 ## Assumptions
 
@@ -35,12 +36,16 @@
 | --- | --- | --- |
 | 冻结合同、R3.2.0、E04/E05 notes 与 current policy/runtime preflight | PASS | authority 分层、版本策略、benchmark与人工门禁边界。 |
 | `node scripts/validate-v3-2-1-release-evidence.js` | PASS：7 action、native production enabled 0、inherited state changes 0 | current policy/live mode/worker、action独立 decision/rollback/evidence/gates 与 source SHA-256。 |
-| release-evidence专属 unit | `9/9 PASS` | native误启、inherited误关、E04-C授权、E05-C small代偿、Windows/真实终止/资金人工gate误升级、跨action evidence/rollback借用与source hash drift均拒绝。 |
+| release-evidence专属 unit | `10/10 PASS` | 唯一release-check失败/未运行integration不可篡改；native误启、inherited误关、E04-C授权、E05-C small代偿、人工gate误升级、跨action evidence/rollback借用与source hash drift均拒绝。 |
 | canonical policy registry unit | `20/20 PASS` | canonical schema/enum、production/effective mode、static reference与freeze authority。 |
 | E05-P0 receipt + mixed lifecycle unit | `11/11 PASS` | per-file mixed结果继续、strict/repair shape、receipt三outcome/唯一键与含receipt删除语义。 |
 | E05-C专属 unit | `15/15 PASS` | requested 4/native actual 1、repair 1、permit、disk/symlink、cancel/spawn/invalid topology、Pool/Writer/cleanup。 |
-| affected static checks | PASS | validator/test ESLint；2 个 `node --check`；JSON parse；`git diff --check`。 |
+| affected static checks | PASS | validator及3个改动test ESLint；3个 `node --check`；JSON parse；`git diff --check`。 |
 | 既有重量级组合环境 probe | `57/64 PASS`；7 fail 均为当前 host resource gate | 当时 `os.freemem()` 约 0.8–1.0 GiB，低于 E00 2 GiB system reserve：mature topology保守降1；E04 real Worker固定5秒 admission timeout。串行复跑仍同因失败；未改相关 `src/`，不把环境拒绝重标为产品 PASS。更广 E05-A/B probe 出现同类 admission timeout 后停止，不作通过声明。 |
+| Lead唯一完整 `npm run release-check`（reviewed HEAD `c9e89db7`） | `EXIT 1`：lint PASS；smoke PASS；unit `6166/6171 PASS`、2 fail、3 skip；integration因`&&`未执行 | 失败事实、phase边界和禁止重跑均进入machine snapshot；绝不宣称release-check PASS。 |
+| renderer PreFund失败root cause与修复 | 过时静态regex；生产顺序正确。更新测试锁定handler内operation lock → `assertDeleteDateRange(service,payload)` → `deleteTempByDateRange(normalizedRange)`；定向 `8/8 PASS` | 不改`src/main.js`、Hold gate、资金删除口径或normalized range。 |
+| Windows contract失败root cause与修复 | 首次run的worktree依赖解析到`electron-builder/app-builder-lib 26.8.1`；按lock重建后installed/locked `electron-builder=26.15.7`、`app-builder-lib=26.15.7`，未改package/lock；Windows contract `EXIT 0`、5 pass/0 fail/2 skip | 环境漂移已解决；这是post-failure定向验证，不改变唯一release-check `FAIL`。 |
+| post-failure独立integration component | `npm run test:integration` `EXIT 0`：51/51 scripts、2455/2455 assertions、278953ms | 唯一release-check因unit失败未进入integration；本次独立component PASS不构成release-check重跑或PASS。runner合法同步`rules/integration-test-policy.md`时间与耗时清单，随最终commit保留。 |
 
 ## Blindspot Pass
 
@@ -91,4 +96,4 @@
 | Packaged Windows、Excel/WPS、真实进程终止证据 | BLOCK production enable / `NOT_RUN` | Release owner 在真实 packaged Windows 与 Office 环境执行 | 不阻断 evidence artifact；阻断相关 native production enable。 |
 | 真实业务文件与资金/恢复人工复核 | BLOCK production enable / `PENDING_HUMAN_REVIEW` | Toolbox/PreFund 业务与恢复 owner | ⚠️ 资金与恢复红线，请人工复核。 |
 | 当前host低于E00 system reserve，重量级real Worker定向测试被admission拒绝 | PROBE / 环境限制 | 项目负责人在满足E00内存预算的review环境复跑定向Toolbox/E05-B或最终唯一release-check | release专属validator及纯合同测试已通过；不把未跑完的real Worker矩阵声明PASS。 |
-| Release owner 最终一次完整 `release-check` | 保留未运行 | 项目负责人最终 review/fix 收口后只运行一次 | 本 Dev PR 按明确约束不得运行。 |
+| 唯一完整 `release-check` 已失败 | CLOSED AS EVIDENCE / `EXIT 1` | 禁止任何agent再次运行；修复后renderer/Windows定向与独立integration component已通过 | release-check自身的integration phase保持`NOT_RUN`；standalone integration另记PASS，最终状态不得写为release-check PASS。 |

@@ -110,7 +110,14 @@ test.describe('前置资金对账 UI / preload / IPC 接线', () => {
       assert.ok(main.includes(`'${channel}'`), `main 缺少 ${channel}`);
     }
     assert.match(main, /temp:count-by-date-range'[\s\S]*countTempByDateRange\(payload\)/);
-    assert.match(main, /temp:delete-by-date-range'[\s\S]*tryAcquireBankStatementOpLock\('pre-fund-delete-temp-by-date-range'\)[\s\S]*deleteTempByDateRange\(payload\)/);
+    const deleteRangeStart = main.indexOf("trackedIpcHandle(\n    'pre-fund-reconciliation:temp:delete-by-date-range'");
+    const deleteRangeEnd = main.indexOf(
+      "trackedIpcHandle('pre-fund-reconciliation:temp:clear'",
+      deleteRangeStart
+    );
+    assert.ok(deleteRangeStart >= 0 && deleteRangeEnd > deleteRangeStart);
+    const deleteRangeHandler = main.slice(deleteRangeStart, deleteRangeEnd);
+    assert.match(deleteRangeHandler, /tryAcquireBankStatementOpLock\('pre-fund-delete-temp-by-date-range'\)[\s\S]*const normalizedRange = preFundMptHoldGate\.assertDeleteDateRange\(service, payload\)[\s\S]*service\.deleteTempByDateRange\(normalizedRange\)/);
     assert.match(main, /function schedulePreFundReconciliationStartupCleanup\(\)[\s\S]*getPreFundReconciliationService\(\)/);
     assert.match(main, /database\.init\(\{ onStartupPhase: recordStartupPhase \}\);[\s\S]*schedulePreFundReconciliationStartupCleanup\(\)/);
     assert.match(preload, /countTempByDateRange:\s*\(start, end, sourceType\)[\s\S]*\{ start, end, sourceType \}/);

@@ -254,6 +254,80 @@ const EXPECTED_E05C = Object.freeze({
   nativeEffectiveParserCount: 1,
   smallCanSubstituteRepresentativeGate: false
 });
+const EXPECTED_RELEASE_CHECK = Object.freeze({
+  id: 'R3.2.1-RELEASE-CHECK-C9E89DB7-FAILED',
+  authority: 'lead',
+  reviewedHead: 'c9e89db7a700f27460a264a1c6bf4d1b7a02136f',
+  invocationCount: 1,
+  rerunAllowed: false,
+  status: 'FAIL',
+  exitCode: 1,
+  phases: {
+    lint: { status: 'PASS' },
+    smoke: { status: 'PASS' },
+    unit: {
+      status: 'FAIL',
+      passed: 6166,
+      total: 6171,
+      failed: 2,
+      skipped: 3,
+      cancelled: 0
+    },
+    integration: {
+      status: 'NOT_RUN',
+      reason: 'npm && short-circuited after unit exit 1'
+    }
+  },
+  failures: [{
+    id: 'renderer-prefund-delete-range-static-contract',
+    test: 'tests/unit/renderer-pre-fund-reconciliation.test.js:113',
+    rootCause: 'static regex expected deleteTempByDateRange(payload) after the handler added Hold-gate normalization',
+    productionSourceCorrect: true,
+    remediation: 'lock the handler-local operation lock, assertDeleteDateRange(service, payload), and ' +
+      'deleteTempByDateRange(normalizedRange) order',
+    resolutionStatus: 'RESOLVED_TEST_CONTRACT',
+    postFixTargetedStatus: 'PASS_8_OF_8'
+  }, {
+    id: 'windows-builder-installed-dependency-drift',
+    test: 'tests/unit/windows-build-contract.test.js:181',
+    rootCause: 'worktree node_modules resolved electron-builder/app-builder-lib 26.8.1 while ' +
+      'package-lock requires 26.15.7',
+    productionSourceCorrect: true,
+    remediation: 'rebuild isolated worktree dependencies from package-lock without changing package.json or ' +
+      'package-lock.json',
+    resolutionStatus: 'RESOLVED_ENVIRONMENT_DRIFT',
+    postFixTargetedStatus: 'PASS_5_OF_7_WITH_2_SKIPPED'
+  }],
+  postFixVerification: {
+    status: 'COMPONENTS_PASS_RELEASE_CHECK_REMAINS_FAIL',
+    rendererContract: { status: 'PASS', passed: 8, total: 8, failed: 0 },
+    windowsBuildContract: {
+      status: 'PASS',
+      exitCode: 0,
+      passed: 5,
+      total: 7,
+      failed: 0,
+      skipped: 2,
+      installedElectronBuilderVersion: '26.15.7',
+      installedAppBuilderLibVersion: '26.15.7',
+      lockedElectronBuilderVersion: '26.15.7',
+      lockedAppBuilderLibVersion: '26.15.7'
+    },
+    standaloneIntegration: {
+      status: 'PASS',
+      relationship: 'POST_FAILURE_COMPONENT_NOT_RELEASE_CHECK_RERUN',
+      command: 'npm run test:integration',
+      exitCode: 0,
+      scriptsPassed: 51,
+      scriptsTotal: 51,
+      assertionsPassed: 2455,
+      assertionsTotal: 2455,
+      durationMs: 278953,
+      generatedPolicyUpdate: 'rules/integration-test-policy.md'
+    },
+    releaseCheckRerun: 'FORBIDDEN'
+  }
+});
 
 function parseJsonFile(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
@@ -289,7 +363,7 @@ function validateReleaseEvidence(snapshot, options = {}) {
 
   expectEqual('/', Object.keys(snapshot).sort(), [
     'actions', 'baseCommit', 'evidenceCatalog', 'globalDecision', 'rejectedProbeEvidence',
-    'release', 'releaseStep', 'schemaVersion', 'scope'
+    'release', 'releaseCheckEvidence', 'releaseStep', 'schemaVersion', 'scope'
   ]);
   expectEqual('/schemaVersion', snapshot.schemaVersion, 1);
   expectEqual('/release', snapshot.release, '3.2.1');
@@ -301,8 +375,9 @@ function validateReleaseEvidence(snapshot, options = {}) {
     secondWriterProductionImplementationAuthorized: false,
     policyMutationAuthorized: false,
     businessSemanticsChanged: false,
-    releaseCheck: 'NOT_RUN_BY_DEV'
+    releaseCheck: 'FAILED_BY_LEAD_DO_NOT_RERUN'
   });
+  expectEqual('/releaseCheckEvidence', snapshot.releaseCheckEvidence, EXPECTED_RELEASE_CHECK);
 
   expectEqual('/evidenceCatalog', snapshot.evidenceCatalog, EXPECTED_EVIDENCE);
   const evidenceIds = new Set();
@@ -430,7 +505,9 @@ function runCli() {
     actionCount: result.actionCount,
     nativeProductionEnabledCount: snapshot.actions.filter((action) =>
       action.policyAuthority === 'native-runtime' && action.decision.enabled).length,
-    inheritedProductionStateChanges: 0
+    inheritedProductionStateChanges: 0,
+    releaseCheckStatus: snapshot.releaseCheckEvidence.status,
+    releaseCheckRerunAllowed: snapshot.releaseCheckEvidence.rerunAllowed
   })}\n`);
 }
 

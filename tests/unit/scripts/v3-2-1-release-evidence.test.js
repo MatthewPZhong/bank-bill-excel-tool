@@ -44,8 +44,22 @@ test('R3.2.1 release evidence CLI输出有界machine-readable摘要', () => {
     baseCommit: '4598b9c67787ef1736831a186a199bd6fe9ae626',
     actionCount: 7,
     nativeProductionEnabledCount: 0,
-    inheritedProductionStateChanges: 0
+    inheritedProductionStateChanges: 0,
+    releaseCheckStatus: 'FAIL',
+    releaseCheckRerunAllowed: false
   });
+});
+
+test('唯一release-check失败不能被改写为PASS或伪造integration已运行', () => {
+  const snapshot = loadSnapshot();
+  snapshot.releaseCheckEvidence.status = 'PASS';
+  snapshot.releaseCheckEvidence.phases.integration.status = 'PASS';
+  snapshot.releaseCheckEvidence.rerunAllowed = true;
+  snapshot.releaseCheckEvidence.postFixVerification.standaloneIntegration.relationship =
+    'RELEASE_CHECK_RERUN';
+  const result = validateReleaseEvidence(snapshot);
+  assert.equal(result.valid, false);
+  assert.ok(errorPaths(result).includes('/releaseCheckEvidence'));
 });
 
 test('native action不能由release snapshot误启用', () => {
