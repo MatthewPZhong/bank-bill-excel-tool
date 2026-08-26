@@ -23,6 +23,9 @@ const {
 const {
   createDirectionSequenceTracker
 } = require('../../../../src/main-process/background-execution/sequence-tracker');
+const {
+  assertFinanceSafeValue
+} = require('../../../../src/main-process/background-execution/error-codec');
 
 const FIXTURES = path.resolve(
   __dirname,
@@ -788,6 +791,48 @@ test('operation body gate 冻结 SafeError/cancel ACK，并拒绝 privacy 与 ma
     () => validateEnvelope(nonCanonicalAck, { policyRegistry: registry }),
     (error) => error.code === 'PROTOCOL_CANCELLATION_ACK_INVALID'
   );
+});
+
+test('finance-safe-v1 仅对明确 digest/FilePlan artifact 字段放行严格 hash 语义', () => {
+  const digestWithAccountLikeRun = `abcdef123456789012${'a'.repeat(46)}`;
+  assert.equal(digestWithAccountLikeRun.length, 64);
+  assert.doesNotThrow(() => assertFinanceSafeValue({ sha256: digestWithAccountLikeRun }));
+  assert.doesNotThrow(() => assertFinanceSafeValue({
+    artifactKey: `input-${digestWithAccountLikeRun}`,
+    outputArtifactKey: `output-${digestWithAccountLikeRun}`
+  }));
+
+  for (const [value, expectedPath] of [
+    [{ sha256: '123456789012' }, '/sha256'],
+    [{ sha_256: digestWithAccountLikeRun }, '/sha_256'],
+    [{ digest: digestWithAccountLikeRun }, '/digest'],
+    [{ artifact_key: `output-${digestWithAccountLikeRun}` }, '/artifact_key'],
+    [{ futureArtifactKey: `output-${digestWithAccountLikeRun}` }, '/futureArtifactKey'],
+    [{ artifactKey: 'output-123456789012' }, '/artifactKey'],
+    [{ outputArtifactKey: '123456789012' }, '/outputArtifactKey']
+  ]) {
+    assert.throws(
+      () => assertFinanceSafeValue(value),
+      (error) => error.code === 'PRIVACY_VALUE_FORBIDDEN' && error.path === expectedPath
+    );
+  }
+});
+
+test('job:done result 继续拒绝 Windows 用户目录与真实账号样式业务字符串', () => {
+  const done = fixture('valid/protocol-messages.v1.json')
+    .find((message) => message.operation === 'job:done');
+  for (const privateResult of [
+    { generationPath: 'C:\\Users\\alice\\AppData\\Local\\Temp\\toolbox.xlsx' },
+    { normalizedHeaders: ['账号6222021234567890'] },
+    { warning: { sourceFileName: '6222021234567890.xlsx' } }
+  ]) {
+    const message = structuredClone(done);
+    message.payload.result = privateResult;
+    assert.throws(
+      () => validateEnvelope(message, { policyRegistry: registry }),
+      (error) => error.code === 'PROTOCOL_PRIVACY_VIOLATION'
+    );
+  }
 });
 
 test('validated envelope 是 owned canonical snapshot，调用方后续 mutation 不改 terminal body', () => {

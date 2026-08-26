@@ -192,6 +192,7 @@ async function exportToolboxFilter({
   let writer = null;
   let filter = null;
   let streamSummary = null;
+  let normalizedHeaders = null;
   try {
     streamSummary = await streamToolboxTables(filePath, {
       strategy: TOOLBOX_SHEET_STRATEGIES.SPLIT,
@@ -199,6 +200,7 @@ async function exportToolboxFilter({
       sourceRegistryResolver,
       onHeader: (headerInfo) => {
         assertUniqueSplitHeaders(headerInfo.normalizedHeaders);
+        normalizedHeaders = headerInfo.normalizedHeaders.slice();
         filter = createSplitFilter(headerInfo.normalizedHeaders, field, values);
         writer = createWriterFromHeader({
           headerInfo,
@@ -218,6 +220,7 @@ async function exportToolboxFilter({
     return {
       ...artifact,
       savePath,
+      normalizedHeaders,
       matchedCount: artifact.dataRowCount,
       inputDataRowCount: Number(streamSummary && streamSummary.dataRowCount) || 0
     };

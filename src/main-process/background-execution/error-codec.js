@@ -22,6 +22,9 @@ const USER_PATH_PATTERN =
   /(?:^|[^A-Za-z0-9/\\])(?:file:(?:\/\/)?)?(?:[\\/]+(?:Users|home)[\\/]+|[A-Za-z]:[\\/]+Users[\\/]+)/i;
 const LOCAL_FILE_URL_HOST_PATTERN = /file:\/\/localhost(?=[\\/])/gi;
 const FULL_ACCOUNT_PATTERN = /(?:^|\D)\d(?:[ -]?\d){11,31}(?:\D|$)/;
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const FILE_PLAN_ARTIFACT_KEY_PATTERN = /^(?:input|output)-[a-f0-9]{64}$/;
+const FILE_PLAN_ARTIFACT_KEY_FIELDS = new Set(['artifactKey', 'outputArtifactKey']);
 
 class SafeErrorValidationError extends Error {
   constructor(code, message, path = '/') {
@@ -95,7 +98,17 @@ function privacyViolation(value, path = '') {
     if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) {
       return { path: childPath, kind: 'unsafe-container' };
     }
-    const violation = privacyViolation(descriptor.value, childPath);
+    const fieldValue = descriptor.value;
+    const isSha256Digest = key === 'sha256'
+      && typeof fieldValue === 'string'
+      && SHA256_PATTERN.test(fieldValue);
+    const isFilePlanArtifactKey = FILE_PLAN_ARTIFACT_KEY_FIELDS.has(key)
+      && typeof fieldValue === 'string'
+      && FILE_PLAN_ARTIFACT_KEY_PATTERN.test(fieldValue);
+    if (isSha256Digest || isFilePlanArtifactKey) {
+      continue;
+    }
+    const violation = privacyViolation(fieldValue, childPath);
     if (violation) return violation;
   }
   return null;

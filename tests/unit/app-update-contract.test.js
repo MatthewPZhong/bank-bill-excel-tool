@@ -170,6 +170,16 @@ test.describe('v3.0.18 在线升级静态契约', () => {
     assert.match(quitFlow, /if \(!transition\.acquired\)/);
     assert.match(quitFlow, /suppliedTransitionToken !== appUpdateTransitionToken/);
     assert.match(quitFlow, /releaseTransition\(acquiredTransitionToken\)/);
+    assert.match(
+      quitFlow,
+      /await shutdownBackgroundExecutionRuntimeGracefully\(\);\s*backgroundRuntimeShutdownClean = true;/,
+      '只有 runtime clean shutdown 后才可标记为可回滚'
+    );
+    assert.match(
+      quitFlow,
+      /\.catch\(\(error\) => \{\s*if \(backgroundRuntimeShutdownClean\) \{\s*backgroundExecutionRuntimeManager\.resume\(\);\s*\}\s*throw error;/,
+      '后续 cleanup 失败必须在 rethrow 前回滚已 clean 的 runtime manager'
+    );
   });
 
   test('Windows 发布工作流验证 main、版本、更新哈希并直接发布稳定 Release', () => {

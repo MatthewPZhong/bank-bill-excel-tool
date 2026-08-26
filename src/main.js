@@ -432,6 +432,15 @@ const {
   normalizeMultiSplitGroups: toolboxNormalizeMultiSplitGroups
 } = require('./main-process/toolbox-multi-split');
 const {
+  createBackgroundExecutionRuntimeManager
+} = require('./main-process/background-execution/runtime');
+const {
+  TOOLBOX_GENERATION_ACTIONS
+} = require('./main-process/toolbox-background/generation-contract');
+const {
+  generateValidateAndPublish: generateValidateAndPublishToolboxArtifact
+} = require('./main-process/toolbox-background/generation-validator');
+const {
   publishToolboxPublicationAsync,
   recoverToolboxPublicationsAsync
 } = require('./main-process/toolbox-output-publication-dispatch');
@@ -619,6 +628,7 @@ let archiveTaskLifecycle = null;
 let recoveryControlReadRepository = null;
 let recoveryHoldGate = null;
 let archiveOperationTail = Promise.resolve();
+const backgroundExecutionRuntimeManager = createBackgroundExecutionRuntimeManager();
 const archiveOperationContext = new AsyncLocalStorage();
 const positionReconciliationOperationContext = new AsyncLocalStorage();
 const statementSourceReadContext = new AsyncLocalStorage();
@@ -20064,15 +20074,63 @@ function registerToolboxHandlers() {
         const tempPath = path.join(tempDir, `toolbox-${Date.now()}.xlsx`);
         let preserveTempDir = false;
         try {
-          const writeRes = await toolboxMergeFilesToXlsx({
-            filePaths,
-            savePath: tempPath,
-            sheetBaseName: 'COMMON'
-          });
-
-          const publishResult = await publishToolboxArtifacts(
-            'merge',
-            [{
+          const publishMergeArtifacts = async (artifacts) => {
+            const publication = await publishToolboxArtifacts(
+              'merge',
+              artifacts,
+              [{ targetPath: outputPath }],
+              taskContext.batchContext,
+              {
+                protectedSourcePaths: filePaths,
+                targetSnapshots: taskContext.fileEvidence.targetSnapshots,
+                archiveInputFiles: taskContext.fileEvidence.inputFiles,
+                settleManifestArtifacts: taskContext.settleArtifacts,
+                fileEvidence: taskContext.fileEvidence
+              }
+            );
+            return publication;
+          };
+          let writeRes;
+          let publishResult;
+          if (backgroundExecutionRuntimeManager.isProductionEnabled(
+            TOOLBOX_GENERATION_ACTIONS.MERGE
+          )) {
+            const generated = await generateValidateAndPublishToolboxArtifact({
+              runtime: backgroundExecutionRuntimeManager.get(),
+              actionKey: TOOLBOX_GENERATION_ACTIONS.MERGE,
+              filePlan: taskContext.fileEvidence.filePlan,
+              batchContext: taskContext.batchContext,
+              generationPath: tempPath,
+              operationConfig: { sheetBaseName: 'COMMON' },
+              production: true,
+              publisher: (artifacts) => publishMergeArtifacts(
+                artifacts.map((artifact) => ({
+                  sourcePath: artifact.generationPath,
+                  outputId: artifact.outputId,
+                  fileName: path.basename(outputPath),
+                  byteSize: artifact.byteSize,
+                  sha256: artifact.sha256,
+                  dataRowCount: artifact.dataRowCount,
+                  sheetCount: artifact.sheetCount,
+                  warningSummary: artifact.warningSummary,
+                  styleStats: artifact.styleStats
+                }))
+              )
+            });
+            writeRes = {
+              ...generated.artifact,
+              fileCount: generated.summary.sourceFileCount,
+              inputSheetCount: generated.summary.inputSheetCount,
+              dataRowCount: generated.summary.outputDataRowCount
+            };
+            publishResult = generated.publication;
+          } else {
+            writeRes = await toolboxMergeFilesToXlsx({
+              filePaths,
+              savePath: tempPath,
+              sheetBaseName: 'COMMON'
+            });
+            publishResult = await publishMergeArtifacts([{
               sourcePath: tempPath,
               outputId: 'merge-1',
               fileName: path.basename(outputPath),
@@ -20082,17 +20140,8 @@ function registerToolboxHandlers() {
               sheetCount: writeRes.sheetCount,
               warningSummary: writeRes.warningSummary || EMPTY_TOOLBOX_WARNING_SUMMARY,
               styleStats: writeRes.styleStats || null
-            }],
-            [{ targetPath: outputPath }],
-            taskContext.batchContext,
-            {
-              protectedSourcePaths: filePaths,
-              targetSnapshots: taskContext.fileEvidence.targetSnapshots,
-              archiveInputFiles: taskContext.fileEvidence.inputFiles,
-              settleManifestArtifacts: taskContext.settleArtifacts,
-              fileEvidence: taskContext.fileEvidence
-            }
-          );
+            }]);
+          }
           prepared.toolboxPublicationTaskIds = [publishResult.taskId];
           const publishedFile = publishResult.files[0];
           prepared.outputFiles = toolboxFinalOutputFiles(
@@ -20532,31 +20581,75 @@ function registerToolboxHandlers() {
       const generationDir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-'));
       const outputPath = outputPaths[0];
       const tempPath = path.join(generationDir, `toolbox-${Date.now()}.xlsx`);
-      let generationResult;
-      try {
-        generationResult = await exportToolboxFilter({
-          filePath: sourceFilePath,
-          field,
-          values,
-          savePath: tempPath,
-          outputId: 'split-1'
-        });
-      } catch (error) {
-        try { fs.rmSync(generationDir, { recursive: true, force: true }); } catch (_e) { /* swallow */ }
-        throw error;
-      }
-      const matchedCount = Number(generationResult.matchedCount) || 0;
-      const inputDataRowCount = Number(generationResult.inputDataRowCount) || 0;
-      if (matchedCount === 0) {
-        try { fs.rmSync(generationDir, { recursive: true, force: true }); } catch (_e) { /* swallow */ }
-        return { status: 'failed', message: '所选值在源文件中无匹配行，未生成文件', detailLines: [] };
-      }
-
       let preserveTempDir = false;
       try {
-        const publishResult = await publishToolboxArtifacts(
-          'split-single',
-          [{
+        const publishSplitArtifact = async (artifacts) => {
+          const publication = await publishToolboxArtifacts(
+            'split-single',
+            artifacts,
+            [{ targetPath: outputPath }],
+            taskContext.batchContext,
+            {
+              protectedSourcePaths: [sourceFilePath],
+              targetSnapshots: taskContext.fileEvidence.targetSnapshots,
+              archiveInputFiles: taskContext.fileEvidence.inputFiles,
+              settleManifestArtifacts: taskContext.settleArtifacts,
+              fileEvidence: taskContext.fileEvidence
+            }
+          );
+          return publication;
+        };
+        let matchedCount;
+        let inputDataRowCount;
+        let publishResult;
+        if (backgroundExecutionRuntimeManager.isProductionEnabled(
+          TOOLBOX_GENERATION_ACTIONS.SPLIT_SINGLE
+        )) {
+          const generated = await generateValidateAndPublishToolboxArtifact({
+            runtime: backgroundExecutionRuntimeManager.get(),
+            actionKey: TOOLBOX_GENERATION_ACTIONS.SPLIT_SINGLE,
+            filePlan: taskContext.fileEvidence.filePlan,
+            batchContext: taskContext.batchContext,
+            generationPath: tempPath,
+            operationConfig: { field, values },
+            requireNonEmptySplit: true,
+            production: true,
+            publisher: (artifacts) => publishSplitArtifact(
+              artifacts.map((artifact) => ({
+                sourcePath: artifact.generationPath,
+                outputId: artifact.outputId,
+                fileName: path.basename(outputPath),
+                matchedCount: artifact.matchedCount,
+                byteSize: artifact.byteSize,
+                sha256: artifact.sha256,
+                dataRowCount: artifact.dataRowCount,
+                sheetCount: artifact.sheetCount,
+                warningSummary: artifact.warningSummary,
+                styleStats: artifact.styleStats
+              }))
+            )
+          });
+          matchedCount = generated.artifact.matchedCount;
+          inputDataRowCount = generated.summary.inputDataRowCount;
+          publishResult = generated.publication;
+        } else {
+          const generationResult = await exportToolboxFilter({
+            filePath: sourceFilePath,
+            field,
+            values,
+            savePath: tempPath,
+            outputId: 'split-1'
+          });
+          matchedCount = Number(generationResult.matchedCount) || 0;
+          inputDataRowCount = Number(generationResult.inputDataRowCount) || 0;
+          if (matchedCount === 0) {
+            return {
+              status: 'failed',
+              message: '所选值在源文件中无匹配行，未生成文件',
+              detailLines: []
+            };
+          }
+          publishResult = await publishSplitArtifact([{
             sourcePath: tempPath,
             outputId: 'split-1',
             fileName: path.basename(outputPath),
@@ -20567,17 +20660,8 @@ function registerToolboxHandlers() {
             sheetCount: generationResult.sheetCount,
             warningSummary: generationResult.warningSummary || EMPTY_TOOLBOX_WARNING_SUMMARY,
             styleStats: generationResult.styleStats || null
-          }],
-          [{ targetPath: outputPath }],
-          taskContext.batchContext,
-          {
-            protectedSourcePaths: [sourceFilePath],
-            targetSnapshots: taskContext.fileEvidence.targetSnapshots,
-            archiveInputFiles: taskContext.fileEvidence.inputFiles,
-            settleManifestArtifacts: taskContext.settleArtifacts,
-            fileEvidence: taskContext.fileEvidence
-          }
-        );
+          }]);
+        }
         prepared.toolboxPublicationTaskIds = [publishResult.taskId];
         const publishedFile = publishResult.files[0];
         prepared.outputFiles = toolboxFinalOutputFiles(
@@ -22076,6 +22160,24 @@ async function shutdownWorkerPoolGracefully() {
   }
 }
 
+async function shutdownBackgroundExecutionRuntimeGracefully() {
+  const report = await backgroundExecutionRuntimeManager.shutdown({ timeoutMs: 5000 });
+  const leakedTransports = Array.isArray(report && report.leakedTransports)
+    ? report.leakedTransports
+    : [];
+  const errors = Array.isArray(report && report.errors) ? report.errors : [];
+  if (leakedTransports.length === 0 && errors.length === 0) return report;
+  const error = new Error(
+    `后台执行 runtime 关闭不完整：${leakedTransports.length} 个 transport，${errors.length} 个错误`
+  );
+  error.code = 'BACKGROUND_EXECUTION_SHUTDOWN_INCOMPLETE';
+  error.detailLines = [
+    ...leakedTransports.map((jobId) => `未关闭任务：${jobId}`),
+    ...errors.map((item) => item && item.message ? item.message : String(item))
+  ];
+  throw error;
+}
+
 function flushUsageStatsForQuit() {
   let failure = null;
   const previousLastClosedAt = usageStats ? usageStats.lastClosedAt : null;
@@ -22145,6 +22247,7 @@ async function prepareApplicationForQuit(options = {}) {
     : options.transitionToken;
   const suppliedTransitionOwner = String(options.transitionOwner || '');
   let acquiredTransitionToken = null;
+  let backgroundRuntimeShutdownClean = false;
   quitPreparationPromise = (async () => {
     if (suppliedTransitionToken !== null) {
       if (suppliedTransitionOwner !== 'app-updater'
@@ -22179,6 +22282,8 @@ async function prepareApplicationForQuit(options = {}) {
       clearTimeout(businessDrainTimer);
     }
 
+    await shutdownBackgroundExecutionRuntimeGracefully();
+    backgroundRuntimeShutdownClean = true;
     if (needsWorkerShutdown()) await shutdownWorkerPoolGracefully();
 
     const archiveDrainTimer = setTimeout(() => {
@@ -22238,6 +22343,11 @@ async function prepareApplicationForQuit(options = {}) {
     quitPreparationPreviousLastClosedAt = usageStats ? usageStats.lastClosedAt : null;
     flushUsageStatsForQuit();
     quitPreparationComplete = true;
+  })().catch((error) => {
+    if (backgroundRuntimeShutdownClean) {
+      backgroundExecutionRuntimeManager.resume();
+    }
+    throw error;
   })().finally(() => {
     if (!quitPreparationComplete) {
       if (acquiredTransitionToken !== null
@@ -22265,6 +22375,7 @@ function resumeApplicationAfterFailedRestart() {
     flushUsageStats();
   }
   quitPreparationPreviousLastClosedAt = null;
+  backgroundExecutionRuntimeManager.resume();
 
   if (!usageStatsAutoFlushTimer) {
     usageStatsAutoFlushTimer = setInterval(flushUsageStats, USAGE_STATS_FLUSH_INTERVAL_MS);

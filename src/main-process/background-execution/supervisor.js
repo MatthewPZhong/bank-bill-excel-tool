@@ -238,12 +238,12 @@ function createExecutionSupervisor(options = {}) {
         `${policy.lifetime === 'service' ? 'Service' : 'Compound'} execution requires ResourceGovernor`
       );
     }
-    const externalCommitLifecycleOnly = policy.adapterKind === 'existing-dispatch' &&
-      (policy.commit.kind === 'existing-critical-protocol' || policy.commit.kind === 'main-settlement');
+    const externalCommitLifecycleOnly = policy.commit.kind === 'main-settlement' ||
+      (policy.adapterKind === 'existing-dispatch' && policy.commit.kind === 'existing-critical-protocol');
     if (policy.commit.kind !== 'none' && !externalCommitLifecycleOnly) {
       throw new SupervisorError(
         'E02A_DURABLE_COMMIT_UNSUPPORTED',
-        'Supervisor only observes non-none commit lifecycle for existing-dispatch actions'
+        'Supervisor only observes native main-settlement or existing-dispatch durable commit lifecycle'
       );
     }
 
@@ -675,7 +675,7 @@ function createExecutionSupervisor(options = {}) {
           case 'commit:receipt':
             throw new ProtocolValidationError(
               'PROTOCOL_COMMIT_OPERATION_FORBIDDEN',
-              `${message.operation} is forbidden for commit.kind=none`,
+              `${message.operation} is not owned by this execution transport`,
               '/operation'
             );
           case 'cancel:ack':

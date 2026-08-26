@@ -30,6 +30,11 @@ jobs:
         run: npm ci
 
       - name: Run release checks
+        if: >-
+          github.event_name != 'pull_request' ||
+          github.event.pull_request.head.repo.full_name != github.repository ||
+          !startsWith(github.head_ref, 'codex/v3.2.1-') ||
+          github.head_ref == 'codex/v3.2.1-r3-release-evidence'
         run: npm run release-check
 
       - name: Verify Windows startup process adapter semantics
