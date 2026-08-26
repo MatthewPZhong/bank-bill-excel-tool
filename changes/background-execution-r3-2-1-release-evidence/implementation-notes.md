@@ -16,7 +16,7 @@
 | E04-C/E05-C 失败只表达为 release decision、reason和 evidence ref。 | schema 没有 `benchmark-fail`，伪造 `benchmark-pass/release-pass` 会抬高证据。 | 修改 policy schema；把 small fixture 收益当 representative pass。 | policy canonical enum 保持合法，production拒绝原因可审计。 |
 | 不 bump `package.json.version`，不更新 release 用户文档三件套。 | R3.2.0 release-evidence precedent 未 bump；本 PR 无用户可见功能或版本发布。 | 猜测 bump 到 3.2.1；只改三件套中的一份。 | 保持当前 `3.1.14`；若后续负责人决定版本迭代，三件套必须一起更新。 |
 | 每个 action 单列 `realProcessTermination` gate。 | blindspot pass 发现首版仅在部分 reason code 提及真实终止，没有形成逐 action machine-check 字段。 | 用 Windows packaged 或 deterministic fault injection 代替真实进程终止证据。 | 7 action 均固定 `NOT_RUN`，不得由自动测试升级。 |
-| 保留 local `release-check` attempt #1失败；仅为开 final PR 授权automatic required CI attempt #2。 | Lead在reviewed HEAD `c9e89db7`的attempt #1中lint/smoke通过，unit `6166/6171`且2 fail，`&&`使integration未执行；release owner随后批准PR-opening-only waiver。 | 本地、人工或`workflow_dispatch`重跑；把waiver扩展到任意branch/HEAD、merge或生产启用。 | attempt #2固定final branch、exact pushed PR HEAD、invocation limit 1和`PENDING_REMOTE_REQUIRED_CI`；CI PASS前hard gate不闭合。 |
+| 保留 local `release-check` attempt #1失败；仅为开 final PR 授权automatic required CI attempt #2。 | Lead在reviewed HEAD `c9e89db7`的attempt #1中lint/smoke通过，unit `6166/6171`且2 fail，`&&`使integration未执行；release owner随后批准PR-opening-only waiver。 | 本地、人工或`workflow_dispatch`重跑；把waiver扩展到任意branch/HEAD、merge或生产启用。 | workflow锁定same-repo `pull_request/opened`、final branch、PR head SHA、`run_attempt == 1`和`PENDING_REMOTE_REQUIRED_CI`；CI PASS前hard gate不闭合。 |
 
 ## Assumptions
 
@@ -35,7 +35,7 @@
 | 证据 | 结果 | 覆盖的行为/风险 |
 | --- | --- | --- |
 | 冻结合同、R3.2.0、E04/E05 notes 与 current policy/runtime preflight | PASS | authority 分层、版本策略、benchmark与人工门禁边界。 |
-| `node scripts/validate-v3-2-1-release-evidence.js` | PASS：7 action、native production enabled 0、inherited state changes 0 | current policy/live mode/worker、action独立 decision/rollback/evidence/gates 与 source SHA-256。 |
+| `node scripts/validate-v3-2-1-release-evidence.js` | PASS：7 action、native production enabled 0、inherited state changes 0、remote CI pending/hard gate open | current policy/live mode/worker、action独立 decision/rollback/evidence/gates、source SHA-256，以及真实Windows workflow的release-check条件和两个job checkout head binding。 |
 | release-evidence专属 unit | `11/11 PASS` | local attempt #1失败/未运行integration与remote attempt #2 pending/scope不可篡改；native误启、inherited误关、E04-C授权、E05-C small代偿、人工gate误升级、跨action evidence/rollback借用与source hash drift均拒绝。 |
 | canonical policy registry unit | `20/20 PASS` | canonical schema/enum、production/effective mode、static reference与freeze authority。 |
 | E05-P0 receipt + mixed lifecycle unit | `11/11 PASS` | per-file mixed结果继续、strict/repair shape、receipt三outcome/唯一键与含receipt删除语义。 |
@@ -47,7 +47,7 @@
 | Windows contract失败root cause与修复 | 首次run的worktree依赖解析到`electron-builder/app-builder-lib 26.8.1`；按lock重建后installed/locked `electron-builder=26.15.7`、`app-builder-lib=26.15.7`，并用`npm rebuild electron`补全Electron postinstall，未改package/lock；Windows contract `EXIT 0`、5 pass/0 fail/2 skip | 环境漂移已解决，中间失败属于隔离依赖安装状态而非产品缺陷；这是post-failure定向验证，不改变local attempt #1 `FAIL`。 |
 | post-failure独立unit component（reviewed HEAD `634671b`） | `npm run test:unit` `EXIT 0`：6172 tests、6169 pass、0 fail、3 skip、377 unit files、25275ms；log `logs/unit-tests/unit-20260826-122322.log` | correct-lock依赖与Electron postinstall完成后的全unit组件验证；不是release-check attempt，不把local attempt #1改写为PASS。 |
 | post-failure独立integration component | `npm run test:integration` `EXIT 0`：51/51 scripts、2455/2455 assertions、278953ms | local attempt #1因unit失败未进入integration；本次独立component PASS不构成release-check attempt或PASS。runner合法同步`rules/integration-test-policy.md`时间与耗时清单，随最终commit保留。 |
-| automatic required CI attempt #2授权 | `PENDING_REMOTE_REQUIRED_CI`；final PR branch、exact pushed PR HEAD、一次invocation | 仅PR-opening waiver；CI PASS前hard gate保持open，不授权manual/`workflow_dispatch`、merge/main/tag/production enable。 |
+| automatic required CI attempt #2授权 | `PENDING_REMOTE_REQUIRED_CI`；same-repo final PR `opened`、`github.event.pull_request.head.sha`、`github.run_attempt == 1` | `.github/workflows/build-windows.yml`已将final branch synchronize/rerun/`workflow_dispatch`排除；其他既有branch/event语义保持。CI PASS前hard gate保持open，不授权merge/main/tag/production enable。 |
 
 ## Blindspot Pass
 
@@ -73,7 +73,7 @@
 
 - 事实：local attempt #1失败；remote required CI attempt #2尚未运行。
 - 影响：若pending被伪造为PASS、改到其他branch/HEAD或增加invocation，会绕过最终hard gate。
-- 处置：validator与tamper test锁定final PR、exact pushed HEAD、一次automatic invocation和所有非授权动作false；CI PASS前不允许merge或production enable。
+- 处置：workflow、Windows contract test、validator与tamper test共同锁定same-repo final PR `opened`、PR head SHA、首次automatic run和所有非授权动作false；CI PASS前不允许merge或production enable。
 
 未发现会改变实现方案的其他存活盲区。已被证据反证的候选问题：snapshot不会被runtime读取；没有第二Writer源码/入口；没有版本bump规范要求；本diff没有Publisher、receipt或Recovery Hold旁路。
 
@@ -104,4 +104,4 @@
 | Packaged Windows、Excel/WPS、真实进程终止证据 | BLOCK production enable / `NOT_RUN` | Release owner 在真实 packaged Windows 与 Office 环境执行 | 不阻断 evidence artifact；阻断相关 native production enable。 |
 | 真实业务文件与资金/恢复人工复核 | BLOCK production enable / `PENDING_HUMAN_REVIEW` | Toolbox/PreFund 业务与恢复 owner | ⚠️ 资金与恢复红线，请人工复核。 |
 | 当前host低于E00 system reserve，重量级real Worker定向测试被admission拒绝 | PROBE / 环境限制 | 项目负责人在满足E00内存预算的review环境仅复跑定向Toolbox/E05-B probe；该probe不是`release-check` | release专属validator及纯合同测试已通过；不把未跑完的real Worker矩阵声明PASS。 |
-| local `release-check` attempt #1失败；automatic required CI attempt #2待运行 | OPEN HARD GATE / `PENDING_REMOTE_REQUIRED_CI` | release owner开final PR后，仅由required CI在exact pushed HEAD执行一次；manual/`workflow_dispatch`禁止 | attempt #1保持`FAIL`且integration `NOT_RUN`；attempt #2 PASS前不得关闭hard gate，不授权merge/main/tag/production enable。 |
+| local `release-check` attempt #1失败；automatic required CI attempt #2待运行 | OPEN HARD GATE / `PENDING_REMOTE_REQUIRED_CI` | release owner开final PR后，仅由same-repo `opened` required CI在PR head SHA首次run执行；manual/final branch `workflow_dispatch`/synchronize/rerun禁止 | attempt #1保持`FAIL`且integration `NOT_RUN`；attempt #2 PASS前不得关闭hard gate，不授权merge/main/tag/production enable。 |

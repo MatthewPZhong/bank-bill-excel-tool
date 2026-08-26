@@ -20,6 +20,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -31,10 +32,22 @@ jobs:
 
       - name: Run release checks
         if: >-
-          github.event_name != 'pull_request' ||
-          github.event.pull_request.head.repo.full_name != github.repository ||
-          !startsWith(github.head_ref, 'codex/v3.2.1-') ||
-          github.head_ref == 'codex/v3.2.1-r3-release-evidence'
+          (
+            github.event_name == 'pull_request' &&
+            github.head_ref == 'codex/v3.2.1-r3-release-evidence' &&
+            github.event.pull_request.head.repo.full_name == github.repository &&
+            github.event.action == 'opened' &&
+            github.run_attempt == 1
+          ) ||
+          (
+            (github.event_name != 'pull_request' ||
+             github.head_ref != 'codex/v3.2.1-r3-release-evidence') &&
+            (github.event_name != 'workflow_dispatch' ||
+             github.ref_name != 'codex/v3.2.1-r3-release-evidence') &&
+            (github.event_name != 'pull_request' ||
+             github.event.pull_request.head.repo.full_name != github.repository ||
+             !startsWith(github.head_ref, 'codex/v3.2.1-'))
+          )
         run: npm run release-check
 
       - name: Verify Windows startup process adapter semantics
@@ -57,6 +70,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v6

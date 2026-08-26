@@ -24,7 +24,23 @@ const E04_NOTES_SOURCE =
   'changes/background-execution-v3.2.x-contract-baseline/changes/3.2.1/implementation-notes.md';
 const E05_BENCHMARK_SOURCE =
   'changes/background-execution-e05-c-prefund-parser-pool/benchmark-evidence.json';
+const WINDOWS_BUILD_WORKFLOW_SOURCE = '.github/workflows/build-windows.yml';
+const FINAL_RELEASE_BRANCH = 'codex/v3.2.1-r3-release-evidence';
 const EXACT_BASE = '4598b9c67787ef1736831a186a199bd6fe9ae626';
+const EXPECTED_CHECKOUT_REF =
+  "ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}";
+const EXPECTED_RELEASE_CHECK_CONDITION =
+  "( github.event_name == 'pull_request' && " +
+  `github.head_ref == '${FINAL_RELEASE_BRANCH}' && ` +
+  'github.event.pull_request.head.repo.full_name == github.repository && ' +
+  "github.event.action == 'opened' && github.run_attempt == 1 ) || " +
+  "( (github.event_name != 'pull_request' || " +
+  `github.head_ref != '${FINAL_RELEASE_BRANCH}') && ` +
+  "(github.event_name != 'workflow_dispatch' || " +
+  `github.ref_name != '${FINAL_RELEASE_BRANCH}') && ` +
+  "(github.event_name != 'pull_request' || " +
+  'github.event.pull_request.head.repo.full_name != github.repository || ' +
+  "!startsWith(github.head_ref, 'codex/v3.2.1-')) )";
 
 const EXPECTED_EVIDENCE = Object.freeze([
   ['POLICY-CANONICAL-V3.2.X', CANONICAL_POLICY_SOURCE,
@@ -346,10 +362,14 @@ const EXPECTED_RELEASE_CHECK = Object.freeze({
     attemptNumber: 2,
     status: 'PENDING_REMOTE_REQUIRED_CI',
     authorization: 'PR_OPENING_ONLY_WAIVER',
-    trigger: 'PULL_REQUEST_REQUIRED_CI',
+    workflowSource: WINDOWS_BUILD_WORKFLOW_SOURCE,
+    trigger: 'PULL_REQUEST_OPENED_REQUIRED_CI',
+    sameRepositoryOnly: true,
+    runAttempt: 1,
     command: 'npm run release-check',
-    branch: 'codex/v3.2.1-r3-release-evidence',
-    headBinding: 'EXACT_PUSHED_PR_HEAD',
+    branch: FINAL_RELEASE_BRANCH,
+    headBinding: 'github.event.pull_request.head.sha',
+    nonPullRequestHeadBinding: 'github.sha',
     invocationLimit: 1,
     completedInvocations: 0,
     passRequiredToCloseHardGate: true
@@ -378,6 +398,10 @@ function projectPolicy(policy) {
 
 function sha256File(filePath) {
   return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+}
+
+function normalizeYamlCondition(source) {
+  return source.split(/\r?\n/).map((line) => line.trim()).join(' ');
 }
 
 function validateReleaseEvidence(snapshot, options = {}) {
@@ -410,6 +434,39 @@ function validateReleaseEvidence(snapshot, options = {}) {
     releaseCheck: 'LOCAL_ATTEMPT_FAILED_REMOTE_REQUIRED_CI_PENDING'
   });
   expectEqual('/releaseCheckEvidence', snapshot.releaseCheckEvidence, EXPECTED_RELEASE_CHECK);
+
+  const windowsWorkflowPath = path.join(repositoryRoot, WINDOWS_BUILD_WORKFLOW_SOURCE);
+  if (!fs.existsSync(windowsWorkflowPath)) {
+    add('/authority/windowsWorkflow', 'Windows build workflow is missing');
+  } else {
+    const workflow = fs.readFileSync(windowsWorkflowPath, 'utf8');
+    const smokeStart = workflow.indexOf('\n  smoke-test:');
+    const buildStart = workflow.indexOf('\n  build:');
+    if (smokeStart === -1 || buildStart === -1 || smokeStart >= buildStart) {
+      add('/authority/windowsWorkflow/jobs', 'smoke-test/build job boundary is missing');
+    } else {
+      const smokeJob = workflow.slice(smokeStart, buildStart);
+      const buildJob = workflow.slice(buildStart);
+      expectEqual('/authority/windowsWorkflow/smokeCheckoutRef',
+        smokeJob.includes(EXPECTED_CHECKOUT_REF), true);
+      expectEqual('/authority/windowsWorkflow/buildCheckoutRef',
+        buildJob.includes(EXPECTED_CHECKOUT_REF), true);
+      const releaseChecksStep = smokeJob.slice(
+        smokeJob.indexOf('- name: Run release checks'),
+        smokeJob.indexOf('- name: Verify Windows startup process adapter semantics')
+      );
+      const conditionMatch = releaseChecksStep.match(
+        /if: >-\s*\n([\s\S]*?)\n\s*run: npm run release-check/
+      );
+      if (!conditionMatch) {
+        add('/authority/windowsWorkflow/releaseCheckCondition',
+          'release-check condition or command is missing');
+      } else {
+        expectEqual('/authority/windowsWorkflow/releaseCheckCondition',
+          normalizeYamlCondition(conditionMatch[1]), EXPECTED_RELEASE_CHECK_CONDITION);
+      }
+    }
+  }
 
   expectEqual('/evidenceCatalog', snapshot.evidenceCatalog, EXPECTED_EVIDENCE);
   const evidenceIds = new Set();

@@ -71,8 +71,12 @@ test('remote required CI attempt #2只能在final PR exact head自动执行一�
   const automaticCi = snapshot.releaseCheckEvidence.automaticRequiredCi;
   automaticCi.status = 'PASS';
   automaticCi.authorization = 'GENERAL_WAIVER';
+  automaticCi.workflowSource = '.github/workflows/release-windows.yml';
+  automaticCi.trigger = 'WORKFLOW_DISPATCH';
+  automaticCi.sameRepositoryOnly = false;
+  automaticCi.runAttempt = 2;
   automaticCi.branch = 'main';
-  automaticCi.headBinding = 'ANY_HEAD';
+  automaticCi.headBinding = 'github.sha';
   automaticCi.invocationLimit = 2;
   snapshot.releaseCheckEvidence.manualRerunAllowed = true;
   snapshot.releaseCheckEvidence.workflowDispatchRerunAllowed = true;
