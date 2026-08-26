@@ -684,6 +684,90 @@ test('Writer spawn失败先完成authoritative terminal/release barrier，Parser
   }
 });
 
+test('running但非法topology先cancel并等待parent terminal，Parser构造与spool均为0', async () => {
+  const filePath = writeInboundFile('940');
+  const staging = path.join(tempRoot, 'invalid-topology-staging');
+  let parserConstructorCount = 0;
+  let cancelCount = 0;
+  let cancelPayload = null;
+  let cancelSawParentTerminal = null;
+  let parentTerminal = false;
+  let importSettled = false;
+  let resolveCancelObserved;
+  let resolveParent;
+  const cancelObserved = new Promise((resolve) => { resolveCancelObserved = resolve; });
+  const parentPromise = new Promise((resolve) => {
+    resolveParent = (execution) => {
+      parentTerminal = true;
+      resolve(execution);
+    };
+  });
+  class ForbiddenParserWorker {
+    constructor() { parserConstructorCount += 1; }
+  }
+  const runtime = {
+    start() {
+      return {
+        ready: Promise.resolve(),
+        promise: parentPromise,
+        snapshot() {
+          return {
+            state: 'running',
+            topology: {
+              topologyKey: 'topology.pre-fund:mpt-import',
+              effectiveChildCount: 0
+            }
+          };
+        },
+        cancel(payload) {
+          cancelCount += 1;
+          cancelPayload = payload;
+          cancelSawParentTerminal = parentTerminal;
+          resolveCancelObserved();
+          return true;
+        },
+        startUnit() { throw new Error('非法topology不得dispatch unit'); }
+      };
+    }
+  };
+  const importAttempt = executeManagedPreFundMptImport({
+    actionKey: PRE_FUND_MPT_IMPORT_ACTION,
+    runtime,
+    ParserWorkerClass: ForbiddenParserWorker,
+    service: { beginManagedMptImport() {} },
+    filePaths: [filePath],
+    userDataDir: tempRoot,
+    taskStagingDir: staging,
+    getAvailableDiskBytes: () => Number.MAX_SAFE_INTEGER,
+    batchContext: batchContext('e05-c-invalid-admitted-topology')
+  });
+  importAttempt.then(
+    () => { importSettled = true; },
+    () => { importSettled = true; }
+  );
+
+  await cancelObserved;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(cancelCount, 1);
+  assert.deepEqual(cancelPayload, { reason: 'invalid-admitted-topology' });
+  assert.equal(cancelSawParentTerminal, false);
+  assert.equal(parentTerminal, false);
+  assert.equal(importSettled, false, 'managed失败必须等待parent terminal barrier');
+  assert.equal(parserConstructorCount, 0);
+  assert.equal(fs.existsSync(staging), false);
+
+  const rejection = assert.rejects(importAttempt, {
+    code: 'PREFUND_ADMITTED_TOPOLOGY_INVALID',
+    message: 'Supervisor未提供合法的已获批Parser topology'
+  });
+  resolveParent({ outcome: 'cancelled', result: null });
+  await rejection;
+  assert.equal(parentTerminal, true);
+  assert.equal(importSettled, true);
+  assert.equal(parserConstructorCount, 0);
+  assert.equal(fs.existsSync(staging), false);
+});
+
 test('Parser Pool可乱序完成但fake Writer严格fileIndex单飞，parent结果仍等长同序', async () => {
   const filePaths = Array.from({ length: 8 }, (_, index) => writeInboundFile(String(1000 + index)));
   let parserActive = 0;

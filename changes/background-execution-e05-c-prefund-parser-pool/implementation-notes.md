@@ -16,7 +16,7 @@
 | 全局Governor预算恢复E00统一platform factory。 | E00冻结`cpu=max(1,min(4,p-2))`、`worker=cpu+1`、`utility=1`、`io=2`以及`freemem-reserve`内存公式；真实Writer/Parser各占1 IO。 | PreFund按期望Pool反向构造更大runtime预算；把真实IO资源伪报0。 | native requested4当前诚实降级为实际1；Pool能力只通过显式non-production runtime注入隔离Governor，标准factory拒绝override、barrel不导出harness、`production:true`在admission前拒绝，因此不构成或绕过production资源证据。 |
 | repair不进入并行planner。 | 冻结合同childrenMax=1，repair有更强恢复/人工边界。 | 与普通import共享Pool。 | repair行为与E05-B不变。 |
 | production policy在E05-C保持disabled。 | 显式隔离Governor、交替single/pool顺序后的代表集五次中位数仅改善0.57%；native资源、RSS/磁盘/event-loop、Windows、真实资金/恢复门禁均未qualified。 | benchmark自动改开关；把隔离Governor结果冒充native资源通过。 | capability可评测，但用户路径仍legacy，resource gate明确FAIL。 |
-| `control.ready`后先验证权威`state==='running'`与合法topology。 | Supervisor的pre-running cancel/timeout/spawn/init failure也会resolve ready，但parent cleanup/lease release在后续settle链。 | ready一开就构造Parser；从requested metrics猜count。 | 非running先await parent authoritative terminal；admission cancel/Writer spawn fault均为Parser constructor 0、无spool、lease/usage/queue归零后稳定失败。 |
+| `control.ready`后先验证权威`state==='running'`与合法topology。 | Supervisor的pre-running cancel/timeout/spawn/init failure也会resolve ready，但parent cleanup/lease release在后续settle链；running snapshot若暴露非法Parser count也不能绕过同一terminal barrier。 | ready一开就构造Parser；从requested metrics猜count；非法topology直接throw并遗留parent lease。 | 非running先await parent authoritative terminal；running但非法topology先以明确原因cancel再await同一barrier，之后才抛原稳定错误。admission cancel/Writer spawn/非法topology均为Parser constructor 0、无spool。 |
 | Coordinator使用覆盖in-flight与ready的原子permit。 | 旧`waitForDispatchCapacity()`可被并发Parser同时穿透；file0 straggler会放大spool。 | 无界Promise.all；只统计ready count。 | permit在派发前预留，Writer开始消费或fatal/cancel时exactly once释放。 |
 | job-start磁盘估算采用regular source总量5倍+64MiB固定余量+每file 1MiB；null snapshot贡献0。 | NDJSON规范化spool可大于source；symlink/非普通文件的`lstat` snapshot为null且不能裸解引用；估算只应作为保守admission。 | source 1:1估算；整批TypeError；把估算写入业务/恢复证据。 | 不足时runtime/Parser/Writer均不启动；valid+symlink+valid仍由Parser逐file形成ok/failed/ok且不解引用/泄路径；实际磁盘满仍由现有spool/事务合同fail closed。 |
 
@@ -41,11 +41,11 @@
 | 证据 | 结果 | 覆盖的行为/风险 |
 | --- | --- | --- |
 | 预检代码/合同取证 | PASS | topology seam、Governor downgrade、Coordinator并发穿透风险与false production gate已定位。 |
-| E05-C专属：`node --test .../mpt-import-e05-c.test.js` | 14/14 PASS | E00 factory 4/3/2/1与memory边界/兼容默认、requested topology、native实际1、隔离Governor production拒绝与Pool/downgrade/repair1、permit/straggler、disk/symlink、admission cancel、spawn failure、Pool/Writer/cancel/cleanup。 |
+| E05-C专属：`node --test .../mpt-import-e05-c.test.js` | 15/15 PASS | E00 factory 4/3/2/1与memory边界/兼容默认、requested topology、native实际1、隔离Governor production拒绝与Pool/downgrade/repair1、permit/straggler、disk/symlink、admission cancel、spawn failure、running+invalid topology cancel/terminal barrier、Pool/Writer/cancel/cleanup。 |
 | E05-B：`node --test .../mpt-import-e05-b.test.js` | 38/38 PASS | 真实OS Parser Pool+Single Writer/Side DB receipt parity、Parser transport crash继续、Writer critical/receipt/Inspector/Hold与cleanup合同。 |
 | E05-A + mixed lifecycle | 46/46 PASS | spool/source fail-closed、Coordinator既有P0 permit迁移、legacy/managed repair token与mixed-result合同。 |
 | policy registry + ResourceGovernor + Supervisor + packaged runner/request | 127/127 PASS | registry receiver冻结、native admission/lease释放、queued cancel、spawn/transport cleanup与packaged canary相邻平台合同。 |
-| 全background-execution + E05-A/B/C/mixed + Toolbox组合矩阵 | 466/466 PASS | 全局E00 budget factory对既有平台/Toolbox合同无回归；E05-C fault matrix与E05-B资金边界在同一进程组合执行稳定。 |
+| 全background-execution + E05-A/B/C/mixed + Toolbox组合矩阵 | 697/697 PASS | 全局E00 budget factory对既有平台/Toolbox合同无回归；E05-C fault matrix与E05-B资金边界在同一进程组合执行稳定。 |
 | 真实8-file managed import | PASS | OS Parser overlap >1；Writer critical/receipt严格0..7；8条唯一insert receipt；Side DB业务行与独立legacy库逐字段一致。 |
 | 真实Pool单Parser transport crash | PASS | 当前file失败、后续7 file继续；Side DB仅7条receipt/7行业务数据；失败file无receipt。 |
 | Writer transport interruption mixed-ownership fault | PASS | file0先形成真实ready spool并实际发送`unit:start`，dispatchAccepted后pre-critical transport exit由Supervisor以`cleanupOwnership=main`明确交回；其余4个active Parser全部取消并等待clean exit barrier，随后8个权威Main-owned file各清理一次。critical/unknown Writer-owned保留由E05-B既有恢复/Hold合同覆盖，本用例不重复声称直接证明。 |
@@ -68,7 +68,7 @@
 
 ### [Important] 部分失败、取消与cleanup ownership
 - 场景：Parser crash、Writer中断或parent shutdown时可能误删Writer evidence或遗留Main spool。
-- 事实与证据：真实Parser crash继续后续；E05-C file0真实spool实际dispatch后在pre-critical退出，Supervisor明确交回Main，另4个active Parser取消并等待barrier，8个权威Main-owned各清一次；critical/unknown Writer-owned evidence由E05-B既有unknown/receipt/Hold合同保护，本E05-C用例不直接重复该边界。
+- 事实与证据：真实Parser crash继续后续；E05-C file0真实spool实际dispatch后在pre-critical退出，Supervisor明确交回Main，另4个active Parser取消并等待barrier，8个权威Main-owned各清一次；running但非法topology会先cancel并等待parent terminal/CompoundLease barrier，且Parser constructor与spool均为0；critical/unknown Writer-owned evidence由E05-B既有unknown/receipt/Hold合同保护，本E05-C用例不直接重复该边界。
 - 推断/未知：Windows文件锁/fsync/rename仍未在packaged环境验证。
 - 资损或审计影响：误删unknown evidence会破坏Inspector/Hold，漏清理会放大磁盘占用。
 - 最便宜验证：Windows packaged fault matrix。

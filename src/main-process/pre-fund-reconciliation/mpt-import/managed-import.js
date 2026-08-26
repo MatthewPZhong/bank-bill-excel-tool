@@ -18,6 +18,12 @@ function managedError(code, message) {
   return Object.assign(new Error(message), { code });
 }
 
+async function failAfterParentTerminal(control, code, message, cancelReason = null) {
+  if (cancelReason) control.cancel({ reason: cancelReason });
+  await control.promise;
+  throw managedError(code, message);
+}
+
 function parserFailure(filePath, error) {
   return toSafeParserFileResult(filePath, error);
 }
@@ -227,16 +233,29 @@ async function executeManagedPreFundMptImport(rawOptions) {
   if (!admittedSnapshot || admittedSnapshot.state !== 'running') {
     // pre-running terminal也会打开dispatchReady；必须先等parent权威barrier完成
     // transport与CompoundLease清理，再返回稳定的managed-start失败。
-    await control.promise;
-    throw managedError('PREFUND_WRITER_START_FAILED', 'PreFund Writer未进入可运行状态');
+    return failAfterParentTerminal(
+      control,
+      'PREFUND_WRITER_START_FAILED',
+      'PreFund Writer未进入可运行状态'
+    );
   }
   const admittedTopology = admittedSnapshot.topology;
   const parserCount = admittedTopology && admittedTopology.effectiveChildCount;
   if (!Number.isSafeInteger(parserCount) || parserCount < 1 || parserCount > 4) {
-    throw managedError('PREFUND_ADMITTED_TOPOLOGY_INVALID', 'Supervisor未提供合法的已获批Parser topology');
+    return failAfterParentTerminal(
+      control,
+      'PREFUND_ADMITTED_TOPOLOGY_INVALID',
+      'Supervisor未提供合法的已获批Parser topology',
+      'invalid-admitted-topology'
+    );
   }
   if (options.actionKey === 'pre-fund:mpt-repair-import' && parserCount !== 1) {
-    throw managedError('PREFUND_REPAIR_TOPOLOGY_INVALID', 'managed repair必须exactly one Parser');
+    return failAfterParentTerminal(
+      control,
+      'PREFUND_REPAIR_TOPOLOGY_INVALID',
+      'managed repair必须exactly one Parser',
+      'invalid-repair-topology'
+    );
   }
   const writerOwned = new Set();
   const mainCleanupAttempted = new Set();
