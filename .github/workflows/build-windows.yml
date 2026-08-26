@@ -16,6 +16,36 @@ jobs:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
+      - name: Reject unauthorized v3.2.1 final-gate invocation
+        if: >-
+          (
+            (
+              github.event_name == 'pull_request' &&
+              (
+                github.head_ref == 'codex/v3.2.1-r3-release-evidence' ||
+                github.head_ref == 'codex/v3.2.1-r4-review-hardening'
+              )
+            ) ||
+            (
+              github.event_name == 'workflow_dispatch' &&
+              (
+                github.ref_name == 'codex/v3.2.1-r3-release-evidence' ||
+                github.ref_name == 'codex/v3.2.1-r4-review-hardening'
+              )
+            )
+          ) &&
+          !(
+            github.event_name == 'pull_request' &&
+            github.head_ref == 'codex/v3.2.1-r3-release-evidence' &&
+            github.base_ref == 'codex/v3.2.1-e05-c-prefund-parser-pool' &&
+            github.event.pull_request.head.repo.full_name == github.repository &&
+            github.event.action == 'opened' &&
+            github.run_attempt == 1
+          )
+        run: |
+          echo "Unauthorized v3.2.1 final release-gate invocation"
+          exit 1
+
       - name: Checkout
         uses: actions/checkout@v6
         with:

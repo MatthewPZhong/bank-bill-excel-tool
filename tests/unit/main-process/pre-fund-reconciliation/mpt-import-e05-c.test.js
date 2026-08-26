@@ -514,16 +514,171 @@ test('spool估算覆盖source放大与余量，溢出/不足fail closed且错误
   }), { code: 'PREFUND_SPOOL_DISK_INSUFFICIENT' });
   assert.deepEqual(calls, ['begin']);
 
+  const programmingErrorCalls = [];
   await assert.rejects(() => executeManagedPreFundMptImport({
     actionKey: PRE_FUND_MPT_IMPORT_ACTION,
-    runtime: { start() { calls.push('missing-runtime.start'); throw new Error('不得启动Writer'); } },
-    service: { beginManagedMptImport() { calls.push('missing-begin'); } },
-    filePaths: [path.join(tempRoot, 'missing-customer-secret.txt')],
+    runtime: {
+      start() {
+        programmingErrorCalls.push('runtime.start');
+        throw new Error('参数错误不得启动Writer');
+      }
+    },
+    service: {
+      beginManagedMptImport() { programmingErrorCalls.push('begin'); }
+    },
+    filePaths: [{}],
     userDataDir: tempRoot,
-    taskStagingDir: path.join(tempRoot, 'missing'),
-    batchContext: batchContext('e05-c-source-missing')
-  }), { code: 'ENOENT' });
-  assert.deepEqual(calls, ['begin', 'missing-begin']);
+    taskStagingDir: path.join(tempRoot, 'programming-error'),
+    getAvailableDiskBytes: () => Number.MAX_SAFE_INTEGER,
+    batchContext: batchContext('e05-c-programming-error')
+  }), (error) => error && error.code === 'ERR_INVALID_ARG_TYPE');
+  assert.deepEqual(programmingErrorCalls, ['begin']);
+});
+
+test('valid+missing+valid逐file fail-closed，结果等长同序且缺失file无critical/receipt', async () => {
+  const firstPath = writeInboundFile('901');
+  const missingPath = path.join(tempRoot, 'MPT_INBOUND_GATEWAY_20260708_902.txt');
+  const thirdPath = writeInboundFile('903');
+  const stagingDir = path.join(tempRoot, 'missing-source-staging');
+  const criticalUnits = [];
+  const receiptUnits = [];
+  const settledUnits = [];
+  const parserStarted = [];
+  const runtime = createBackgroundExecutionRuntime({
+    availableParallelism: 8,
+    freeMemoryBytes: 8 * GIBIBYTE,
+    memoryHardCeilingBytes: 4 * GIBIBYTE,
+    systemReserveBytes: GIBIBYTE,
+    workerDurableCoordinator: {
+      async prepareAndAck(input) {
+        criticalUnits.push(input.unitId);
+        return {
+          intentId: `missing-source-intent-${input.unitId}`,
+          fileOperationKey: input.critical.fileOperationKey
+        };
+      },
+      async observeReceipt(input) {
+        receiptUnits.push(input.unitId);
+        return {
+          receiptHint: {
+            receiptKind: 'module-local',
+            receiptIdentity: String(input.receipt.id)
+          }
+        };
+      },
+      async settleCommitted(input) { settledUnits.push(input.unitId); },
+      async resolveUncertain() { return { outcome: 'not-committed' }; }
+    }
+  });
+  try {
+    const result = await executeManagedPreFundMptImport({
+      actionKey: PRE_FUND_MPT_IMPORT_ACTION,
+      runtime,
+      service: {
+        beginManagedMptImport() {},
+        adoptManagedMptImportResults: (_paths, items) => items
+      },
+      filePaths: [firstPath, missingPath, thirdPath],
+      userDataDir: path.join(tempRoot, 'missing-source-user-data'),
+      taskStagingDir: stagingDir,
+      getAvailableDiskBytes: () => Number.MAX_SAFE_INTEGER,
+      onParserWorkerState(event) {
+        if (event.state === 'started') parserStarted.push(event.fileIndex);
+      },
+      batchContext: batchContext('e05-c-source-missing-mixed')
+    });
+    assert.deepEqual(result.results.map((item) => item.status), ['ok', 'failed', 'ok']);
+    assert.deepEqual(
+      result.results.map((item) => item.fileName),
+      [firstPath, missingPath, thirdPath].map((item) => path.basename(item))
+    );
+    assert.equal(result.successCount, 2);
+    assert.equal(result.failedCount, 1);
+    assert.equal(result.results[1].code, 'PREFUND_SPOOL_SOURCE_CHANGED');
+    assert.deepEqual(criticalUnits, ['file:000000', 'file:000002']);
+    assert.deepEqual(receiptUnits, criticalUnits);
+    assert.deepEqual(settledUnits, criticalUnits);
+    assert.deepEqual(parserStarted.sort((left, right) => left - right), [0, 2]);
+    assert.equal(fs.existsSync(path.join(stagingDir, 'mpt')), false);
+    const failureEvidence = JSON.stringify(result.results[1]);
+    assert.equal(failureEvidence.includes(tempRoot), false);
+    assert.equal(failureEvidence.includes('customer-secret'), false);
+  } finally {
+    await runtime.shutdown();
+  }
+});
+
+test('repair源文件缺失逐file失败并交还adopter，缺失file无critical/receipt或Parser启动', async () => {
+  const missingPath = path.join(tempRoot, 'MPT_INBOUND_GATEWAY_20260708_904.txt');
+  const repairFailure = Object.freeze({
+    failureId: '11111111-1111-4111-8111-111111111111',
+    filePath: missingPath,
+    sourceType: 'MPT_INBOUND_GATEWAY',
+    sourceBatch: 'MPT_INBOUND_20260708_904',
+    contentHash: 'a'.repeat(64),
+    rowErrorCount: 1
+  });
+  const criticalUnits = [];
+  const receiptUnits = [];
+  const parserStarted = [];
+  let adopterInput = null;
+  const runtime = createBackgroundExecutionRuntime({
+    availableParallelism: 8,
+    freeMemoryBytes: 8 * GIBIBYTE,
+    memoryHardCeilingBytes: 4 * GIBIBYTE,
+    systemReserveBytes: GIBIBYTE,
+    workerDurableCoordinator: {
+      async prepareAndAck(input) {
+        criticalUnits.push(input.unitId);
+        return {
+          intentId: `missing-repair-intent-${input.unitId}`,
+          fileOperationKey: input.critical.fileOperationKey
+        };
+      },
+      async observeReceipt(input) {
+        receiptUnits.push(input.unitId);
+        return {
+          receiptHint: {
+            receiptKind: 'module-local',
+            receiptIdentity: String(input.receipt.id)
+          }
+        };
+      },
+      async settleCommitted() {},
+      async resolveUncertain() { return { outcome: 'not-committed' }; }
+    }
+  });
+  try {
+    const result = await executeManagedPreFundMptImport({
+      actionKey: PRE_FUND_MPT_REPAIR_ACTION,
+      runtime,
+      service: {
+        adoptManagedMptRepairResults(failures, items) {
+          adopterInput = { failures, items };
+          return items;
+        }
+      },
+      filePaths: [missingPath],
+      repairFailures: [repairFailure],
+      userDataDir: path.join(tempRoot, 'missing-repair-user-data'),
+      taskStagingDir: path.join(tempRoot, 'missing-repair-staging'),
+      getAvailableDiskBytes: () => Number.MAX_SAFE_INTEGER,
+      onParserWorkerState(event) {
+        if (event.state === 'started') parserStarted.push(event.fileIndex);
+      },
+      batchContext: batchContext('e05-c-repair-source-missing')
+    });
+    assert.deepEqual(result.results.map((item) => item.status), ['failed']);
+    assert.equal(result.results[0].code, 'PREFUND_SPOOL_SOURCE_CHANGED');
+    assert.deepEqual(adopterInput.failures, [repairFailure]);
+    assert.deepEqual(adopterInput.items, result.results);
+    assert.deepEqual(criticalUnits, []);
+    assert.deepEqual(receiptUnits, []);
+    assert.deepEqual(parserStarted, []);
+    assert.equal(JSON.stringify(result.results[0]).includes(tempRoot), false);
+  } finally {
+    await runtime.shutdown();
+  }
 });
 
 test('valid+symlink+valid中null source snapshot磁盘贡献0，Parser逐file fail-closed且结果等长同序脱敏', async (t) => {

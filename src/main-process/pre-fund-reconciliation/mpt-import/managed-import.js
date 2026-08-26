@@ -28,6 +28,27 @@ function parserFailure(filePath, error) {
   return toSafeParserFileResult(filePath, error);
 }
 
+function captureSourceSnapshot(filePath) {
+  let stat;
+  try {
+    stat = fs.lstatSync(filePath, { bigint: true });
+  } catch (error) {
+    // 文件在picker接受后仍可能被移动、删除或暂时失去访问权限。
+    // 只把真实文件系统错误降为当前file失败；参数/程序错误继续显式抛出。
+    if (!error || typeof error.code !== 'string' || typeof error.syscall !== 'string') {
+      throw error;
+    }
+    return Object.freeze({
+      sourceSnapshot: null,
+      failure: managedError('PREFUND_SPOOL_SOURCE_CHANGED', 'MPT源文件不可读或已变化')
+    });
+  }
+  return Object.freeze({
+    sourceSnapshot: sourceSnapshotFromStat(stat),
+    failure: null
+  });
+}
+
 function runParserWorker(input, options = {}) {
   const WorkerClass = options.WorkerClass || Worker;
   return new Promise((resolve, reject) => {
@@ -175,8 +196,11 @@ async function executeManagedPreFundMptImport(rawOptions) {
       typeof options.service.beginManagedMptImport === 'function') {
     options.service.beginManagedMptImport();
   }
+  const sourceFailures = new Array(options.filePaths.length).fill(null);
   const inputs = options.filePaths.map((filePath, fileIndex) => {
     const identity = deriveFileIdentity(parentOperationKey, fileIndex);
+    const capturedSource = captureSourceSnapshot(filePath);
+    sourceFailures[fileIndex] = capturedSource.failure;
     const spool = {
       taskStagingDir: options.taskStagingDir,
       jobId,
@@ -184,7 +208,7 @@ async function executeManagedPreFundMptImport(rawOptions) {
       parentOperationKey,
       source: {
         filePath,
-        sourceSnapshot: sourceSnapshotFromStat(fs.lstatSync(filePath, { bigint: true }))
+        sourceSnapshot: capturedSource.sourceSnapshot
       },
       invalidRowDisposition: options.actionKey === 'pre-fund:mpt-repair-import' ? 'excluded' : 'error'
     };
@@ -373,14 +397,16 @@ async function executeManagedPreFundMptImport(rawOptions) {
         let readyForWriter = false;
         let transportCrash = false;
         let failed = null;
-        const parserAttempt = runParserWorker(inputs[fileIndex].spool, {
-          signal: parserPoolController.signal,
-          ...(options.onParserWorkerState ? { onWorkerState: options.onParserWorkerState } : {}),
-          ...(options.ParserWorkerClass ? { WorkerClass: options.ParserWorkerClass } : {})
-        }).then(
-          (value) => ({ kind: 'parser', ok: true, value }),
-          (error) => ({ kind: 'parser', ok: false, error })
-        );
+        const parserAttempt = sourceFailures[fileIndex]
+          ? Promise.resolve({ kind: 'parser', ok: false, error: sourceFailures[fileIndex] })
+          : runParserWorker(inputs[fileIndex].spool, {
+              signal: parserPoolController.signal,
+              ...(options.onParserWorkerState ? { onWorkerState: options.onParserWorkerState } : {}),
+              ...(options.ParserWorkerClass ? { WorkerClass: options.ParserWorkerClass } : {})
+            }).then(
+              (value) => ({ kind: 'parser', ok: true, value }),
+              (error) => ({ kind: 'parser', ok: false, error })
+            );
         const settled = await Promise.race([parserAttempt, executionSignal]);
         if (settled.kind === 'execution') {
           parserPoolController.abort();

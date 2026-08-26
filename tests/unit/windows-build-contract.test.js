@@ -58,6 +58,28 @@ test('Windows PR final release-check只允许target base的same-repo opened首�
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /pull_request:\s*\n\s*branches:\s*\n\s*- '\*\*'/);
   const smokeJob = workflow.slice(workflow.indexOf('\n  smoke-test:'), workflow.indexOf('\n  build:'));
+  const guardStart = smokeJob.indexOf('- name: Reject unauthorized v3.2.1 final-gate invocation');
+  const checkoutStart = smokeJob.indexOf('- name: Checkout');
+  assert.ok(guardStart !== -1 && guardStart < checkoutStart, '未授权final gate必须在checkout前稳定失败');
+  const guardStep = smokeJob.slice(guardStart, checkoutStart);
+  const guardConditionMatch = guardStep.match(/if: >-\s*\n([\s\S]*?)\n\s*run: \|/);
+  assert.ok(guardConditionMatch, 'final gate拒绝条件缺失');
+  const normalizedGuardCondition = guardConditionMatch[1].split(/\r?\n/)
+    .map((line) => line.trim())
+    .join(' ');
+  assert.equal(normalizedGuardCondition,
+    "( ( github.event_name == 'pull_request' && " +
+    "( github.head_ref == 'codex/v3.2.1-r3-release-evidence' || " +
+    "github.head_ref == 'codex/v3.2.1-r4-review-hardening' ) ) || " +
+    "( github.event_name == 'workflow_dispatch' && " +
+    "( github.ref_name == 'codex/v3.2.1-r3-release-evidence' || " +
+    "github.ref_name == 'codex/v3.2.1-r4-review-hardening' ) ) ) && " +
+    "!( github.event_name == 'pull_request' && " +
+    "github.head_ref == 'codex/v3.2.1-r3-release-evidence' && " +
+    "github.base_ref == 'codex/v3.2.1-e05-c-prefund-parser-pool' && " +
+    'github.event.pull_request.head.repo.full_name == github.repository && ' +
+    "github.event.action == 'opened' && github.run_attempt == 1 )");
+  assert.match(guardStep, /Unauthorized v3\.2\.1 final release-gate invocation[\s\S]*exit 1/);
   const checkoutRef = "ref: ${{ github.event_name == 'pull_request' && " +
     'github.event.pull_request.head.sha || github.sha }}';
   assert.match(smokeJob, /uses: actions\/checkout@v6\s*\n\s*with:\s*\n\s*fetch-depth: 0/);
@@ -108,38 +130,69 @@ test('Windows PR final release-check只允许target base的same-repo opened首�
       || headRepository !== repository
       || !headRef.startsWith('codex/v3.2.1-');
   };
+  const shouldRejectUnauthorizedFinal = ({
+    eventName,
+    action = '',
+    runAttempt = 1,
+    headRef = '',
+    baseRef = '',
+    refName = '',
+    headRepository = '',
+    repository = 'owner/bank-bill-excel-tool'
+  }) => {
+    const finalBranch = 'codex/v3.2.1-r3-release-evidence';
+    const pendingReviewHardeningBranch = 'codex/v3.2.1-r4-review-hardening';
+    const finalBase = 'codex/v3.2.1-e05-c-prefund-parser-pool';
+    const finalBranches = new Set([finalBranch, pendingReviewHardeningBranch]);
+    const finalInvocation = (eventName === 'pull_request' && finalBranches.has(headRef)) ||
+      (eventName === 'workflow_dispatch' && finalBranches.has(refName));
+    const authorized = eventName === 'pull_request' && headRef === finalBranch &&
+      baseRef === finalBase && headRepository === repository && action === 'opened' &&
+      runAttempt === 1;
+    return finalInvocation && !authorized;
+  };
   const sameRepository = 'owner/bank-bill-excel-tool';
-  assert.equal(shouldRunReleaseChecks({
+  const intermediate = {
     eventName: 'pull_request',
     headRef: 'codex/v3.2.1-e04-a-toolbox-single-worker',
     headRepository: sameRepository,
     repository: sameRepository
-  }), false, 'same-repo v3.2.1 中间 PR 必须跳过');
-  assert.equal(shouldRunReleaseChecks({
+  };
+  assert.equal(shouldRunReleaseChecks(intermediate), false, 'same-repo v3.2.1 中间 PR 必须跳过');
+  assert.equal(shouldRejectUnauthorizedFinal(intermediate), false, '中间PR不得被final guard拒绝');
+  const authorized = {
     eventName: 'pull_request',
     action: 'opened',
     headRef: 'codex/v3.2.1-r3-release-evidence',
     baseRef: 'codex/v3.2.1-e05-c-prefund-parser-pool',
     headRepository: sameRepository,
     repository: sameRepository
-  }), true, 'same-repo final PR到精确base的opened首轮必须执行');
-  assert.equal(shouldRunReleaseChecks({
+  };
+  assert.equal(shouldRunReleaseChecks(authorized), true, '精确authorized final tuple必须执行');
+  assert.equal(shouldRejectUnauthorizedFinal(authorized), false, '精确authorized final tuple不得拒绝');
+  const wrongBase = {
     eventName: 'pull_request',
     action: 'opened',
     headRef: 'codex/v3.2.1-r3-release-evidence',
     baseRef: 'main',
     headRepository: sameRepository,
     repository: sameRepository
-  }), false, 'final PR目标base漂移必须跳过');
-  assert.equal(shouldRunReleaseChecks({
+  };
+  assert.equal(shouldRunReleaseChecks(wrongBase), false, 'final PR目标base漂移必须跳过');
+  assert.equal(shouldRejectUnauthorizedFinal(wrongBase), true, '错误base必须稳定FAIL');
+  const synchronize = {
     eventName: 'pull_request',
     action: 'synchronize',
     headRef: 'codex/v3.2.1-r3-release-evidence',
     baseRef: 'codex/v3.2.1-e05-c-prefund-parser-pool',
     headRepository: sameRepository,
     repository: sameRepository
-  }), false, 'final PR synchronize必须跳过');
-  assert.equal(shouldRunReleaseChecks({
+  };
+  assert.equal(shouldRunReleaseChecks(synchronize), false, 'final PR synchronize必须跳过');
+  assert.equal(shouldRejectUnauthorizedFinal(synchronize), true, 'final synchronize必须稳定FAIL');
+  assert.equal(shouldRejectUnauthorizedFinal({ ...synchronize, action: 'reopened' }), true,
+    'final reopened必须稳定FAIL');
+  const rerun = {
     eventName: 'pull_request',
     action: 'opened',
     runAttempt: 2,
@@ -147,15 +200,19 @@ test('Windows PR final release-check只允许target base的same-repo opened首�
     baseRef: 'codex/v3.2.1-e05-c-prefund-parser-pool',
     headRepository: sameRepository,
     repository: sameRepository
-  }), false, 'final PR rerun必须跳过');
-  assert.equal(shouldRunReleaseChecks({
+  };
+  assert.equal(shouldRunReleaseChecks(rerun), false, 'final PR rerun必须跳过');
+  assert.equal(shouldRejectUnauthorizedFinal(rerun), true, 'final rerun必须稳定FAIL');
+  const forkFinal = {
     eventName: 'pull_request',
     action: 'opened',
     headRef: 'codex/v3.2.1-r3-release-evidence',
     baseRef: 'codex/v3.2.1-e05-c-prefund-parser-pool',
     headRepository: 'fork-owner/bank-bill-excel-tool',
     repository: sameRepository
-  }), false, 'fork final PR不得使用waiver');
+  };
+  assert.equal(shouldRunReleaseChecks(forkFinal), false, 'fork final PR不得使用waiver');
+  assert.equal(shouldRejectUnauthorizedFinal(forkFinal), true, 'fork final PR必须稳定FAIL');
   assert.equal(shouldRunReleaseChecks({
     eventName: 'pull_request',
     headRef: 'codex/v3.2.1-e04-a-toolbox-single-worker',
@@ -169,18 +226,36 @@ test('Windows PR final release-check只允许target base的same-repo opened首�
     repository: sameRepository
   }), true, '普通 PR 必须执行');
   assert.equal(shouldRunReleaseChecks({ eventName: 'push' }), true, 'push 必须执行');
-  assert.equal(
-    shouldRunReleaseChecks({
-      eventName: 'workflow_dispatch',
-      refName: 'codex/v3.2.1-r3-release-evidence'
-    }),
-    false,
-    'final branch workflow_dispatch 必须跳过'
-  );
+  assert.equal(shouldRejectUnauthorizedFinal({ eventName: 'push' }), false,
+    '普通push不得被final guard拒绝');
+  const finalDispatch = {
+    eventName: 'workflow_dispatch',
+    refName: 'codex/v3.2.1-r3-release-evidence'
+  };
+  assert.equal(shouldRunReleaseChecks(finalDispatch), false, 'final workflow_dispatch 必须跳过');
+  assert.equal(shouldRejectUnauthorizedFinal(finalDispatch), true,
+    'final workflow_dispatch必须稳定FAIL');
+  const pendingReviewHardening = {
+    eventName: 'pull_request',
+    action: 'opened',
+    headRef: 'codex/v3.2.1-r4-review-hardening',
+    baseRef: 'codex/v3.2.1-r3-release-evidence',
+    headRepository: sameRepository,
+    repository: sameRepository
+  };
+  assert.equal(shouldRunReleaseChecks(pendingReviewHardening), false,
+    '未授权R4不得运行release-check');
+  assert.equal(shouldRejectUnauthorizedFinal(pendingReviewHardening), true,
+    '未授权R4必须在checkout前稳定FAIL');
   assert.equal(
     shouldRunReleaseChecks({ eventName: 'workflow_dispatch', refName: 'feature/windows-build' }),
     true,
     '其他 branch workflow_dispatch 保持执行'
+  );
+  assert.equal(
+    shouldRejectUnauthorizedFinal({ eventName: 'workflow_dispatch', refName: 'feature/windows-build' }),
+    false,
+    '其他branch workflow_dispatch不得被final guard拒绝'
   );
   assert.match(workflow, /Verify Windows startup process adapter semantics\s*\n\s*env:\s*\n\s*WINDOWS_STARTUP_PROCESS_ADAPTER_REAL_TEST: '1'\s*\n\s*run: node --test tests\/unit\/scripts\/startup-process-adapter\.test\.js/);
   assert.ok(

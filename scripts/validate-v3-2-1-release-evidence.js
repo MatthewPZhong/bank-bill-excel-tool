@@ -26,6 +26,7 @@ const E05_BENCHMARK_SOURCE =
   'changes/background-execution-e05-c-prefund-parser-pool/benchmark-evidence.json';
 const WINDOWS_BUILD_WORKFLOW_SOURCE = '.github/workflows/build-windows.yml';
 const FINAL_RELEASE_BRANCH = 'codex/v3.2.1-r3-release-evidence';
+const PENDING_REVIEW_HARDENING_BRANCH = 'codex/v3.2.1-r4-review-hardening';
 const FINAL_RELEASE_BASE = 'codex/v3.2.1-e05-c-prefund-parser-pool';
 const EXACT_BASE = '4598b9c67787ef1736831a186a199bd6fe9ae626';
 const EXPECTED_CHECKOUT_REF =
@@ -43,6 +44,18 @@ const EXPECTED_RELEASE_CHECK_CONDITION =
   "(github.event_name != 'pull_request' || " +
   'github.event.pull_request.head.repo.full_name != github.repository || ' +
   "!startsWith(github.head_ref, 'codex/v3.2.1-')) )";
+const EXPECTED_UNAUTHORIZED_FINAL_CONDITION =
+  "( ( github.event_name == 'pull_request' && " +
+  `( github.head_ref == '${FINAL_RELEASE_BRANCH}' || ` +
+  `github.head_ref == '${PENDING_REVIEW_HARDENING_BRANCH}' ) ) || ` +
+  "( github.event_name == 'workflow_dispatch' && " +
+  `( github.ref_name == '${FINAL_RELEASE_BRANCH}' || ` +
+  `github.ref_name == '${PENDING_REVIEW_HARDENING_BRANCH}' ) ) ) && ` +
+  "!( github.event_name == 'pull_request' && " +
+  `github.head_ref == '${FINAL_RELEASE_BRANCH}' && ` +
+  `github.base_ref == '${FINAL_RELEASE_BASE}' && ` +
+  'github.event.pull_request.head.repo.full_name == github.repository && ' +
+  "github.event.action == 'opened' && github.run_attempt == 1 )";
 
 const EXPECTED_EVIDENCE = Object.freeze([
   ['POLICY-CANONICAL-V3.2.X', CANONICAL_POLICY_SOURCE,
@@ -454,6 +467,25 @@ function validateReleaseEvidence(snapshot, options = {}) {
         smokeJob.includes(EXPECTED_CHECKOUT_REF), true);
       expectEqual('/authority/windowsWorkflow/buildCheckoutRef',
         buildJob.includes(EXPECTED_CHECKOUT_REF), true);
+      const guardStart = smokeJob.indexOf(
+        '- name: Reject unauthorized v3.2.1 final-gate invocation'
+      );
+      const checkoutStart = smokeJob.indexOf('- name: Checkout');
+      if (guardStart === -1 || checkoutStart === -1 || guardStart >= checkoutStart) {
+        add('/authority/windowsWorkflow/unauthorizedFinalGuard',
+          'unauthorized final-gate guard must fail before checkout');
+      } else {
+        const guardStep = smokeJob.slice(guardStart, checkoutStart);
+        const guardConditionMatch = guardStep.match(/if: >-\s*\n([\s\S]*?)\n\s*run: \|/);
+        if (!guardConditionMatch || !guardStep.includes('exit 1')) {
+          add('/authority/windowsWorkflow/unauthorizedFinalGuard',
+            'unauthorized final-gate condition or explicit failure is missing');
+        } else {
+          expectEqual('/authority/windowsWorkflow/unauthorizedFinalGuard',
+            normalizeYamlCondition(guardConditionMatch[1]),
+            EXPECTED_UNAUTHORIZED_FINAL_CONDITION);
+        }
+      }
       const releaseChecksStep = smokeJob.slice(
         smokeJob.indexOf('- name: Run release checks'),
         smokeJob.indexOf('- name: Verify Windows startup process adapter semantics')
