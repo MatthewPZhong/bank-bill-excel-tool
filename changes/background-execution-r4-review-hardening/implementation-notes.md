@@ -208,3 +208,29 @@
 | exact silent `/D` 修复后的真实 Windows Setup/installed/portable/uninstall 结果 | PROBE | 新 head 的 GitHub-hosted Windows packaged canary | 不得把非零或缺失身份/卸载审计当成成功；全部 PASS 前不合并 |
 | RSS 取整组合修复后的 Windows 结果 | PROBE | 新 head 的 GitHub-hosted Windows CI；必须先通过完整 smoke/release-check 才进入 packaged build | 阻断 Ready/merge，不阻断本地修复提交 |
 | 真实 Windows Setup/portable packaged canary 与资金红线签字 | BLOCK | 既有 R3 人工/Windows gate | 本 PR 不改变其 `PENDING_HUMAN_REVIEW` 状态，仍阻塞 production enablement |
+
+## PR #183 一次性 Repair Synchronize（2026-08-27）
+
+### Decision
+
+| 决策 | 原因与证据 | 放弃方案 | 影响 |
+| --- | --- | --- | --- |
+| 将 #182 test-only isolation commit cherry-pick 到 #183 | 原 opened CI 取消且旧 #183 head 不含最新测试宿主隔离；本地 diff 仍不触 `src/` | 用 #182 旧结果替代 #183；直接改生产 durability barrier | final head 可在 Windows 验证完整 3.2.1，生产 fail-closed 与资金/恢复合同不变 |
+| 仅为本次 synchronize 开一个单次 waiver | release owner 明确授权一次精确修复后 final gate | 放宽所有 synchronize、reopened、rerun 或 workflow_dispatch | 必须同时满足 PR #183、same-repo、R4→R3、action synchronize、attempt 1、PR commits 4 |
+| checkout 后增加旧 head 血缘屏障 | 自引用 commit SHA 无法预先写入同一 workflow；仅 commit count 不足以证明从 reviewed old head 演进 | 依赖未文档化的 event previous-head 字段 | exact event head、`962e4ae1` ancestor、`962e4ae1..HEAD == 2` 在依赖安装与 release-check 前验证 |
+
+### Evidence
+
+| 检查 | 结果 | 证明/边界 |
+| --- | --- | --- |
+| #183 原始 Actions run `32953558996` | smoke-test `CANCELLED`；build `SKIPPED` | attempt #3 不闭合 hard gate，不授权 merge 或 production |
+| #182 isolation cherry-pick | #183 本地新增 `d6d2ecf3`，相对旧 #183 head 恰好 1 个提交；相对最新 R3 base 的 PR commits 当前为 3 | 门禁合同作为唯一下一提交后，event commits 必须精确为 4，旧 head 后新增提交必须精确为 2 |
+| isolation 定向测试 | E05-A `42/42`、E05-B `38/38`、E05-C `17/17`、mixed lifecycle `5/5`、Toolbox generation `10/10`、Route DB `8/8`、mature adapters `11/11`、release evidence `11/11`；Windows contract `5 PASS / 2 SKIP` | 测试宿主能力隔离、Worker 生命周期、资金 receipt 与现有 gate 静态合同通过；不是 final release-check |
+| 全量 unit component | `6173/6176 PASS`，0 fail、3 skip | 不运行本地 `release-check` 的前提下验证跨文件收口；远端 attempt #4 才是最终全量证据 |
+
+### Remaining Unknowns
+
+| 未知 | 处理 | 合并影响 |
+| --- | --- | --- |
+| 一次性 synchronize 的 Windows full gate 与 packaged build 结果 | 仅等待自动 Actions；不 rerun、不 dispatch、不 push 第二次 | 任一失败/取消均停止，不能合并 #183 |
+| #182 先合并后 #183 改 base 产生的新 checks | 严格顺序处理并等待自然 CI | 新 base checks 未成功前不得 merge #183 |

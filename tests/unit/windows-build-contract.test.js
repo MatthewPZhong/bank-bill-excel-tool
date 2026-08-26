@@ -53,7 +53,7 @@ function assertPerUserDestinationOverride(perUserMacro, getDParameterMacro) {
   assert.match(getDParameterMacro, /StrCpy \$\{outVar\} \$R9/);
 }
 
-test('Windows PR final release-check只允许target base的same-repo opened首轮并checkout exact head', () => {
+test('Windows PR final release-check只允许#183一次性repair synchronize并checkout exact head', () => {
   const workflow = read('.github/workflows/build-windows.yml');
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /pull_request:\s*\n\s*branches:\s*\n\s*- '\*\*'/);
@@ -75,15 +75,28 @@ test('Windows PR final release-check只允许target base的same-repo opened首�
     "( github.ref_name == 'codex/v3.2.1-r3-release-evidence' || " +
     "github.ref_name == 'codex/v3.2.1-r4-review-hardening' ) ) ) && " +
     "!( github.event_name == 'pull_request' && " +
+    'github.event.pull_request.number == 183 && ' +
     "github.head_ref == 'codex/v3.2.1-r4-review-hardening' && " +
     "github.base_ref == 'codex/v3.2.1-r3-release-evidence' && " +
     'github.event.pull_request.head.repo.full_name == github.repository && ' +
-    "github.event.action == 'opened' && github.run_attempt == 1 )");
+    "github.event.action == 'synchronize' && " +
+    'github.event.pull_request.commits == 4 && github.run_attempt == 1 )');
   assert.match(guardStep, /Unauthorized v3\.2\.1 final release-gate invocation[\s\S]*exit 1/);
   const checkoutRef = "ref: ${{ github.event_name == 'pull_request' && " +
     'github.event.pull_request.head.sha || github.sha }}';
   assert.match(smokeJob, /uses: actions\/checkout@v6\s*\n\s*with:\s*\n\s*fetch-depth: 0/);
   assert.ok(smokeJob.includes(checkoutRef), 'smoke-test checkout必须绑定PR head SHA');
+  const lineageStart = smokeJob.indexOf('- name: Verify authorized v3.2.1 repair lineage');
+  const setupNodeStart = smokeJob.indexOf('- name: Setup Node.js');
+  assert.ok(checkoutStart < lineageStart && lineageStart < setupNodeStart,
+    '一次性repair lineage必须在exact checkout后、安装依赖前验证');
+  const lineageStep = smokeJob.slice(lineageStart, setupNodeStart);
+  assert.match(lineageStep,
+    /git merge-base --is-ancestor 962e4ae1549035d4eb875dbfb19417c19d1f95f6 HEAD/);
+  assert.match(lineageStep,
+    /git rev-list --count 962e4ae1549035d4eb875dbfb19417c19d1f95f6\.\.HEAD\)" -eq 2/);
+  assert.match(lineageStep,
+    /git rev-parse HEAD\)" = "\$\{\{ github\.event\.pull_request\.head\.sha \}\}"/);
   const releaseChecksStep = smokeJob.slice(
     smokeJob.indexOf('- name: Run release checks'),
     smokeJob.indexOf('- name: Verify Windows startup process adapter semantics')
@@ -95,10 +108,12 @@ test('Windows PR final release-check只允许target base的same-repo opened首�
     .join(' ');
   assert.equal(normalizedCondition,
     "( github.event_name == 'pull_request' && " +
+    'github.event.pull_request.number == 183 && ' +
     "github.head_ref == 'codex/v3.2.1-r4-review-hardening' && " +
     "github.base_ref == 'codex/v3.2.1-r3-release-evidence' && " +
     'github.event.pull_request.head.repo.full_name == github.repository && ' +
-    "github.event.action == 'opened' && github.run_attempt == 1 ) || " +
+    "github.event.action == 'synchronize' && " +
+    'github.event.pull_request.commits == 4 && github.run_attempt == 1 ) || ' +
     "( (github.event_name != 'pull_request' || " +
     "github.head_ref != 'codex/v3.2.1-r4-review-hardening') && " +
     "(github.event_name != 'workflow_dispatch' || " +
@@ -111,6 +126,8 @@ test('Windows PR final release-check只允许target base的same-repo opened首�
     eventName,
     action = '',
     runAttempt = 1,
+    pullRequestNumber = 0,
+    commits = 0,
     headRef = '',
     baseRef = '',
     refName = '',
@@ -120,9 +137,11 @@ test('Windows PR final release-check只允许target base的same-repo opened首�
     const finalBranch = 'codex/v3.2.1-r4-review-hardening';
     const finalBase = 'codex/v3.2.1-r3-release-evidence';
     if (eventName === 'pull_request' && headRef === finalBranch) {
-      return baseRef === finalBase
+      return pullRequestNumber === 183
+        && baseRef === finalBase
         && headRepository === repository
-        && action === 'opened'
+        && action === 'synchronize'
+        && commits === 4
         && runAttempt === 1;
     }
     if (eventName === 'workflow_dispatch' && refName === finalBranch) return false;
@@ -134,6 +153,8 @@ test('Windows PR final release-check只允许target base的same-repo opened首�
     eventName,
     action = '',
     runAttempt = 1,
+    pullRequestNumber = 0,
+    commits = 0,
     headRef = '',
     baseRef = '',
     refName = '',
@@ -146,9 +167,9 @@ test('Windows PR final release-check只允许target base的same-repo opened首�
     const finalBranches = new Set([previousFinalBranch, finalBranch]);
     const finalInvocation = (eventName === 'pull_request' && finalBranches.has(headRef)) ||
       (eventName === 'workflow_dispatch' && finalBranches.has(refName));
-    const authorized = eventName === 'pull_request' && headRef === finalBranch &&
-      baseRef === finalBase && headRepository === repository && action === 'opened' &&
-      runAttempt === 1;
+    const authorized = eventName === 'pull_request' && pullRequestNumber === 183 &&
+      headRef === finalBranch && baseRef === finalBase && headRepository === repository &&
+      action === 'synchronize' && commits === 4 && runAttempt === 1;
     return finalInvocation && !authorized;
   };
   const sameRepository = 'owner/bank-bill-excel-tool';
@@ -162,7 +183,9 @@ test('Windows PR final release-check只允许target base的same-repo opened首�
   assert.equal(shouldRejectUnauthorizedFinal(intermediate), false, '中间PR不得被final guard拒绝');
   const authorized = {
     eventName: 'pull_request',
-    action: 'opened',
+    action: 'synchronize',
+    pullRequestNumber: 183,
+    commits: 4,
     headRef: 'codex/v3.2.1-r4-review-hardening',
     baseRef: 'codex/v3.2.1-r3-release-evidence',
     headRepository: sameRepository,
@@ -180,34 +203,32 @@ test('Windows PR final release-check只允许target base的same-repo opened首�
   };
   assert.equal(shouldRunReleaseChecks(wrongBase), false, 'final PR目标base漂移必须跳过');
   assert.equal(shouldRejectUnauthorizedFinal(wrongBase), true, '错误base必须稳定FAIL');
-  const synchronize = {
+  const staleSynchronize = {
     eventName: 'pull_request',
     action: 'synchronize',
+    pullRequestNumber: 183,
+    commits: 3,
     headRef: 'codex/v3.2.1-r4-review-hardening',
     baseRef: 'codex/v3.2.1-r3-release-evidence',
     headRepository: sameRepository,
     repository: sameRepository
   };
-  assert.equal(shouldRunReleaseChecks(synchronize), false, 'final PR synchronize必须跳过');
-  assert.equal(shouldRejectUnauthorizedFinal(synchronize), true, 'final synchronize必须稳定FAIL');
-  assert.equal(shouldRejectUnauthorizedFinal({ ...synchronize, action: 'reopened' }), true,
+  assert.equal(shouldRunReleaseChecks(staleSynchronize), false,
+    '非精确commit count的final synchronize必须跳过');
+  assert.equal(shouldRejectUnauthorizedFinal(staleSynchronize), true,
+    '非精确commit count的final synchronize必须稳定FAIL');
+  assert.equal(shouldRejectUnauthorizedFinal({ ...authorized, commits: 5 }), true,
+    '授权push之后的再次synchronize必须稳定FAIL');
+  assert.equal(shouldRejectUnauthorizedFinal({ ...authorized, action: 'reopened' }), true,
     'final reopened必须稳定FAIL');
   const rerun = {
-    eventName: 'pull_request',
-    action: 'opened',
-    runAttempt: 2,
-    headRef: 'codex/v3.2.1-r4-review-hardening',
-    baseRef: 'codex/v3.2.1-r3-release-evidence',
-    headRepository: sameRepository,
-    repository: sameRepository
+    ...authorized,
+    runAttempt: 2
   };
   assert.equal(shouldRunReleaseChecks(rerun), false, 'final PR rerun必须跳过');
   assert.equal(shouldRejectUnauthorizedFinal(rerun), true, 'final rerun必须稳定FAIL');
   const forkFinal = {
-    eventName: 'pull_request',
-    action: 'opened',
-    headRef: 'codex/v3.2.1-r4-review-hardening',
-    baseRef: 'codex/v3.2.1-r3-release-evidence',
+    ...authorized,
     headRepository: 'fork-owner/bank-bill-excel-tool',
     repository: sameRepository
   };

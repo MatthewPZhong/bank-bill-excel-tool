@@ -28,15 +28,21 @@ const WINDOWS_BUILD_WORKFLOW_SOURCE = '.github/workflows/build-windows.yml';
 const PREVIOUS_FINAL_RELEASE_BRANCH = 'codex/v3.2.1-r3-release-evidence';
 const FINAL_RELEASE_BRANCH = 'codex/v3.2.1-r4-review-hardening';
 const FINAL_RELEASE_BASE = 'codex/v3.2.1-r3-release-evidence';
+const FINAL_RELEASE_PULL_REQUEST = 183;
+const FINAL_RELEASE_PULL_REQUEST_COMMITS = 4;
+const FINAL_RELEASE_PREVIOUS_HEAD = '962e4ae1549035d4eb875dbfb19417c19d1f95f6';
 const EXACT_BASE = '4598b9c67787ef1736831a186a199bd6fe9ae626';
 const EXPECTED_CHECKOUT_REF =
   "ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}";
 const EXPECTED_RELEASE_CHECK_CONDITION =
   "( github.event_name == 'pull_request' && " +
+  `github.event.pull_request.number == ${FINAL_RELEASE_PULL_REQUEST} && ` +
   `github.head_ref == '${FINAL_RELEASE_BRANCH}' && ` +
   `github.base_ref == '${FINAL_RELEASE_BASE}' && ` +
   'github.event.pull_request.head.repo.full_name == github.repository && ' +
-  "github.event.action == 'opened' && github.run_attempt == 1 ) || " +
+  "github.event.action == 'synchronize' && " +
+  `github.event.pull_request.commits == ${FINAL_RELEASE_PULL_REQUEST_COMMITS} && ` +
+  'github.run_attempt == 1 ) || ' +
   "( (github.event_name != 'pull_request' || " +
   `github.head_ref != '${FINAL_RELEASE_BRANCH}') && ` +
   "(github.event_name != 'workflow_dispatch' || " +
@@ -52,10 +58,22 @@ const EXPECTED_UNAUTHORIZED_FINAL_CONDITION =
   `( github.ref_name == '${PREVIOUS_FINAL_RELEASE_BRANCH}' || ` +
   `github.ref_name == '${FINAL_RELEASE_BRANCH}' ) ) ) && ` +
   "!( github.event_name == 'pull_request' && " +
+  `github.event.pull_request.number == ${FINAL_RELEASE_PULL_REQUEST} && ` +
   `github.head_ref == '${FINAL_RELEASE_BRANCH}' && ` +
   `github.base_ref == '${FINAL_RELEASE_BASE}' && ` +
   'github.event.pull_request.head.repo.full_name == github.repository && ' +
-  "github.event.action == 'opened' && github.run_attempt == 1 )";
+  "github.event.action == 'synchronize' && " +
+  `github.event.pull_request.commits == ${FINAL_RELEASE_PULL_REQUEST_COMMITS} && ` +
+  'github.run_attempt == 1 )';
+const EXPECTED_REPAIR_LINEAGE_CONDITION =
+  "github.event_name == 'pull_request' && " +
+  `github.event.pull_request.number == ${FINAL_RELEASE_PULL_REQUEST} && ` +
+  `github.head_ref == '${FINAL_RELEASE_BRANCH}' && ` +
+  `github.base_ref == '${FINAL_RELEASE_BASE}' && ` +
+  'github.event.pull_request.head.repo.full_name == github.repository && ' +
+  "github.event.action == 'synchronize' && " +
+  `github.event.pull_request.commits == ${FINAL_RELEASE_PULL_REQUEST_COMMITS} && ` +
+  'github.run_attempt == 1';
 
 const EXPECTED_EVIDENCE = Object.freeze([
   ['POLICY-CANONICAL-V3.2.X', CANONICAL_POLICY_SOURCE,
@@ -373,17 +391,32 @@ const EXPECTED_RELEASE_CHECK = Object.freeze({
   },
   manualRerunAllowed: false,
   workflowDispatchRerunAllowed: false,
-  automaticRequiredCi: {
+  priorAutomaticRequiredCi: {
     attemptNumber: 3,
-    status: 'PENDING_REMOTE_REQUIRED_CI',
+    status: 'CANCELLED',
     authorization: 'PR_OPENING_ONLY_WAIVER',
-    workflowSource: WINDOWS_BUILD_WORKFLOW_SOURCE,
     trigger: 'PULL_REQUEST_OPENED_REQUIRED_CI',
+    workflowRunId: 32953558996,
+    reviewedHead: FINAL_RELEASE_PREVIOUS_HEAD,
+    smokeTestConclusion: 'CANCELLED',
+    buildConclusion: 'SKIPPED',
+    satisfiesHardGate: false
+  },
+  automaticRequiredCi: {
+    attemptNumber: 4,
+    status: 'PENDING_REMOTE_REQUIRED_CI',
+    authorization: 'PR_REPAIR_SYNCHRONIZE_SINGLE_USE_WAIVER',
+    workflowSource: WINDOWS_BUILD_WORKFLOW_SOURCE,
+    trigger: 'PULL_REQUEST_SYNCHRONIZE_REQUIRED_CI',
     sameRepositoryOnly: true,
     runAttempt: 1,
     command: 'npm run release-check',
     branch: FINAL_RELEASE_BRANCH,
     baseRef: FINAL_RELEASE_BASE,
+    pullRequestNumber: FINAL_RELEASE_PULL_REQUEST,
+    expectedPullRequestCommits: FINAL_RELEASE_PULL_REQUEST_COMMITS,
+    requiredAncestorHead: FINAL_RELEASE_PREVIOUS_HEAD,
+    commitsAfterRequiredAncestor: 2,
     headBinding: 'github.event.pull_request.head.sha',
     nonPullRequestHeadBinding: 'github.sha',
     invocationLimit: 1,
@@ -485,6 +518,39 @@ function validateReleaseEvidence(snapshot, options = {}) {
             normalizeYamlCondition(guardConditionMatch[1]),
             EXPECTED_UNAUTHORIZED_FINAL_CONDITION);
         }
+      }
+      const lineageStart = smokeJob.indexOf(
+        '- name: Verify authorized v3.2.1 repair lineage'
+      );
+      const setupNodeStart = smokeJob.indexOf('- name: Setup Node.js');
+      if (lineageStart === -1 || setupNodeStart === -1 ||
+          checkoutStart >= lineageStart || lineageStart >= setupNodeStart) {
+        add('/authority/windowsWorkflow/repairLineage',
+          'authorized repair lineage must run after exact checkout and before dependency setup');
+      } else {
+        const lineageStep = smokeJob.slice(lineageStart, setupNodeStart);
+        const lineageConditionMatch = lineageStep.match(
+          /if: >-\s*\n([\s\S]*?)\n\s*shell: bash/
+        );
+        if (!lineageConditionMatch) {
+          add('/authority/windowsWorkflow/repairLineage',
+            'authorized repair lineage condition is missing');
+        } else {
+          expectEqual('/authority/windowsWorkflow/repairLineageCondition',
+            normalizeYamlCondition(lineageConditionMatch[1]),
+            EXPECTED_REPAIR_LINEAGE_CONDITION);
+        }
+        expectEqual('/authority/windowsWorkflow/repairLineageHeadBinding',
+          lineageStep.includes(
+            'test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"'
+          ), true);
+        expectEqual('/authority/windowsWorkflow/repairLineageAncestor',
+          lineageStep.includes(`git merge-base --is-ancestor ${FINAL_RELEASE_PREVIOUS_HEAD} HEAD`),
+          true);
+        expectEqual('/authority/windowsWorkflow/repairLineageCommitCount',
+          lineageStep.includes(
+            `test "$(git rev-list --count ${FINAL_RELEASE_PREVIOUS_HEAD}..HEAD)" -eq 2`
+          ), true);
       }
       const releaseChecksStep = smokeJob.slice(
         smokeJob.indexOf('- name: Run release checks'),

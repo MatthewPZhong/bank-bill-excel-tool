@@ -36,10 +36,12 @@ jobs:
           ) &&
           !(
             github.event_name == 'pull_request' &&
+            github.event.pull_request.number == 183 &&
             github.head_ref == 'codex/v3.2.1-r4-review-hardening' &&
             github.base_ref == 'codex/v3.2.1-r3-release-evidence' &&
             github.event.pull_request.head.repo.full_name == github.repository &&
-            github.event.action == 'opened' &&
+            github.event.action == 'synchronize' &&
+            github.event.pull_request.commits == 4 &&
             github.run_attempt == 1
           )
         run: |
@@ -51,6 +53,22 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify authorized v3.2.1 repair lineage
+        if: >-
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.number == 183 &&
+          github.head_ref == 'codex/v3.2.1-r4-review-hardening' &&
+          github.base_ref == 'codex/v3.2.1-r3-release-evidence' &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.event.action == 'synchronize' &&
+          github.event.pull_request.commits == 4 &&
+          github.run_attempt == 1
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          git merge-base --is-ancestor 962e4ae1549035d4eb875dbfb19417c19d1f95f6 HEAD
+          test "$(git rev-list --count 962e4ae1549035d4eb875dbfb19417c19d1f95f6..HEAD)" -eq 2
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -64,10 +82,12 @@ jobs:
         if: >-
           (
             github.event_name == 'pull_request' &&
+            github.event.pull_request.number == 183 &&
             github.head_ref == 'codex/v3.2.1-r4-review-hardening' &&
             github.base_ref == 'codex/v3.2.1-r3-release-evidence' &&
             github.event.pull_request.head.repo.full_name == github.repository &&
-            github.event.action == 'opened' &&
+            github.event.action == 'synchronize' &&
+            github.event.pull_request.commits == 4 &&
             github.run_attempt == 1
           ) ||
           (

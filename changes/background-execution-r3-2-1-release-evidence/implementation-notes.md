@@ -117,3 +117,11 @@
 | 真实业务文件与资金/恢复人工复核 | BLOCK production enable / `PENDING_HUMAN_REVIEW` | Toolbox/PreFund 业务与恢复 owner | ⚠️ 资金与恢复红线，请人工复核。 |
 | 当前host资源波动曾使重量级real Worker测试被admission拒绝 | CLOSED FOR TEST DETERMINISM / production gate unchanged | 行为测试固定测试预算；专门的resource/downgrade测试继续覆盖真实边界 | 定向矩阵与全量unit均已通过；生产reserve、降级与5秒准入未放宽。 |
 | #182 automatic attempt #2 已取消；v3.2.1 最终全量 CI 证据尚未闭合 | OPEN HARD GATE / final PR required CI | #182 只推送本测试隔离修复且不得运行全量 `release-check`；由最后一张 PR #183 在精确head/base上提供一次独立远端结果 | #182 的取消不能代替 #183，也不能被定向 PASS 改写；#183 PASS 前不授权 main/tag/production enable。 |
+
+## PR #183 Repair Final Gate 授权记录（2026-08-27）
+
+- 原 automatic attempt #3：Actions run `32953558996`，reviewed head `962e4ae1549035d4eb875dbfb19417c19d1f95f6`，smoke-test `CANCELLED`、build `SKIPPED`；该结果不满足 hard gate。
+- release owner 新授权：仅允许 PR #183 从该旧 head 演进的一次 `pull_request/synchronize` automatic attempt #4；禁止手工 rerun、`workflow_dispatch`、reopened、第二次 push、admin 绕过或把旧 #182 CI 当成 final 证据。
+- machine tuple：PR number `183`、same repository、head `codex/v3.2.1-r4-review-hardening`、base `codex/v3.2.1-r3-release-evidence`、action `synchronize`、`github.run_attempt == 1`、`pull_request.commits == 4`；两个 job 继续 checkout `github.event.pull_request.head.sha`。
+- checkout 后 lineage：HEAD 必须等于 event head SHA；`962e4ae1` 必须是 ancestor；`962e4ae1..HEAD` 必须恰好 2 commits。任一条件漂移都会在 `npm ci` 与 `release-check` 前失败。
+- 本地只运行定向测试、静态合同和 full unit component；没有运行本地 `release-check`、`check-vars` 或 `scan:vars`。hard gate、main/tag/production enablement 与资金/恢复人工红线均未闭合。
