@@ -11,6 +11,7 @@ const zlib = require('node:zlib');
 const {
   MAX_LINE_LENGTH,
   parseMptFile,
+  readMptHeader,
 } = require('../../../../src/main-process/pre-fund-reconciliation/mpt-parser');
 const {
   INBOUND_FIELDS,
@@ -194,6 +195,36 @@ test.describe('txt/gz、BOM、首行形状识别与批量背压', () => {
       assert.match(rows[0].fingerprint, /^[a-f0-9]{64}$/);
     });
   }
+
+  test('header-only seam复用gzip/BOM/filename/header规则且不解析明细', async () => {
+    const filePath = writeFixture({
+      fileName: 'MPT_INBOUND_GATEWAY_20260708_109.gz',
+      header: ['MPT_INBOUND_20260708', '1', '20260708'],
+      rows: [inboundRow().slice(0, 2)],
+      bom: true,
+    });
+    const header = await readMptHeader(filePath);
+    assert.equal(header.sourceType, SOURCE_TYPE_INBOUND);
+    assert.equal(header.sourceBatch, 'MPT_INBOUND_20260708');
+    assert.equal(header.sourceDate, '2026-07-08');
+    assert.equal(header.sourceFileName, path.basename(filePath));
+    assert.equal(header.sourceFileSequence, '109');
+    assert.equal(header.declaredRowCount, 1);
+  });
+
+  test('header-only seam复用UTF-8、4MB单行上限和stream error映射', async () => {
+    const invalidUtf8 = path.join(tmpdir, 'MPT_INBOUND_GATEWAY_20260708_110.txt');
+    fs.writeFileSync(invalidUtf8, Buffer.from([0xff, 0x0a]));
+    await assert.rejects(() => readMptHeader(invalidUtf8), (error) => error.code === 'MPT_UTF8_INVALID');
+
+    const overlong = path.join(tmpdir, 'MPT_INBOUND_GATEWAY_20260708_111.txt');
+    fs.writeFileSync(overlong, 'x'.repeat(MAX_LINE_LENGTH + 1), 'utf8');
+    await assert.rejects(() => readMptHeader(overlong), (error) => error.code === 'MPT_LINE_TOO_LONG');
+
+    const invalidGzip = path.join(tmpdir, 'MPT_INBOUND_GATEWAY_20260708_112.gz');
+    fs.writeFileSync(invalidGzip, 'not-a-gzip', 'utf8');
+    await assert.rejects(() => readMptHeader(invalidGzip), (error) => error.code === 'MPT_GZIP_INVALID');
+  });
 
   test('按 batchSize 回调，不累计全文件对象', async () => {
     const rows = Array.from({ length: 5 }, (_, index) => inboundRow({ reconId: `R-${index}` }));
