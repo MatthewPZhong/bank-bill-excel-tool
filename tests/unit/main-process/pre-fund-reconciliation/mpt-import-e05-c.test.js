@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { Worker } = require('node:worker_threads');
 
 const {
   createExecutionPolicyRegistry,
@@ -28,7 +29,7 @@ const {
   MPT_DELIMITER
 } = require('../../../../src/main-process/pre-fund-reconciliation/mpt-schema');
 const {
-  executeManagedPreFundMptImport
+  executeManagedPreFundMptImport: executeManagedPreFundMptImportRaw
 } = require('../../../../src/main-process/pre-fund-reconciliation/mpt-import/managed-import');
 const {
   createOrderedMptCoordinator
@@ -54,8 +55,25 @@ const {
   createPreFundMptTopologyPlanner
 } = require('../../../../src/main-process/pre-fund-reconciliation/mpt-import/topology');
 const {
-  writeMptFileSpool
+  writeMptFileSpool: writeMptFileSpoolRaw
 } = require('../../../../src/main-process/pre-fund-reconciliation/mpt-import/spool-writer');
+const {
+  createSupportedDirectoryFsyncWorkerClass,
+  withSupportedDirectoryFsync
+} = require('../../shared/directory-fsync-test-runtime');
+
+const SupportedDirectoryFsyncWorker = createSupportedDirectoryFsyncWorkerClass(Worker);
+
+function writeMptFileSpool(input, options = {}) {
+  return writeMptFileSpoolRaw(input, withSupportedDirectoryFsync(options));
+}
+
+function executeManagedPreFundMptImport(options) {
+  return executeManagedPreFundMptImportRaw({
+    ParserWorkerClass: SupportedDirectoryFsyncWorker,
+    ...options
+  });
+}
 
 const GIBIBYTE = 1024 ** 3;
 let tempRoot;

@@ -13,6 +13,9 @@ const {
   sourceSnapshotFromStat
 } = require('../../../../src/main-process/archive-center/source-snapshot');
 const {
+  fsyncDirectory
+} = require('../../../../src/main-process/background-execution/durable-file');
+const {
   parseMptFile
 } = require('../../../../src/main-process/pre-fund-reconciliation/mpt-parser');
 const {
@@ -35,11 +38,21 @@ const {
 } = require('../../../../src/main-process/pre-fund-reconciliation/mpt-import/spool-reader');
 const {
   cleanupMptFileSpool,
-  writeMptFileSpool
+  writeMptFileSpool: writeMptFileSpoolRaw
 } = require('../../../../src/main-process/pre-fund-reconciliation/mpt-import/spool-writer');
 const {
   createOrderedMptCoordinator
 } = require('../../../../src/main-process/pre-fund-reconciliation/mpt-import/ordered-coordinator');
+const {
+  createSupportedDirectoryFsyncWorkerClass,
+  withSupportedDirectoryFsync
+} = require('../../shared/directory-fsync-test-runtime');
+
+const SupportedDirectoryFsyncWorker = createSupportedDirectoryFsyncWorkerClass(Worker);
+
+function writeMptFileSpool(input, options = {}) {
+  return writeMptFileSpoolRaw(input, withSupportedDirectoryFsync(options));
+}
 
 let tempRoot;
 test.beforeEach(() => {
@@ -424,6 +437,26 @@ test('durability unsupported时manifest不发布且当前file spool清理', asyn
   assert.equal(fs.existsSync(paths.issuesReady), false);
 });
 
+test('真实平台目录屏障决定ready发布且unsupported保持fail closed', async () => {
+  const filePath = writeInboundFile('MPT_INBOUND_GATEWAY_20260708_1031.txt', [inboundRow()]);
+  const input = spoolInput(filePath, { jobId: 'job-real-platform-directory-barrier' });
+  const barrier = fsyncDirectory(tempRoot);
+  if (barrier.capability === 'supported') {
+    const written = await writeMptFileSpoolRaw(input);
+    assert.equal(fs.existsSync(written.manifestPath), true);
+    cleanupMptFileSpool(input);
+    return;
+  }
+  assert.equal(barrier.capability, 'unsupported');
+  await assert.rejects(
+    () => writeMptFileSpoolRaw(input),
+    (error) => error.code === 'PREFUND_SPOOL_DURABILITY_UNAVAILABLE'
+  );
+  const paths = mptSpoolPaths(input);
+  assert.equal(fs.existsSync(paths.manifestReady), false);
+  assert.equal(fs.existsSync(paths.fileDir), false);
+});
+
 test('取消与解析业务错误均清理part/ready，不留下伪manifest', async () => {
   const filePath = writeInboundFile('MPT_INBOUND_GATEWAY_20260708_104.txt', [
     inboundRow({ reconId: 'R-1' }), inboundRow({ reconId: 'R-2' })
@@ -716,7 +749,7 @@ test('one-shot Parser Worker真实成功、取消与transport终止不留下伪m
   await t.test('真实Worker发布ready spool且结果不携带路径或业务提交字段', async () => {
     const filePath = writeInboundFile('MPT_INBOUND_GATEWAY_20260708_401.txt', [inboundRow()]);
     const input = spoolInput(filePath, { jobId: 'WorkerJob.' });
-    const worker = new Worker(workerEntry, { workerData: { input } });
+    const worker = new SupportedDirectoryFsyncWorker(workerEntry, { workerData: { input } });
     const exitPromise = once(worker, 'exit');
     const [message] = await once(worker, 'message');
     const [exitCode] = await exitPromise;
@@ -741,7 +774,7 @@ test('one-shot Parser Worker真实成功、取消与transport终止不留下伪m
     fs.mkdirSync(paths.fileDir, { recursive: true });
     fs.writeFileSync(foreignPath, 'foreign', 'utf8');
 
-    const worker = new Worker(workerEntry, { workerData: { input } });
+    const worker = new SupportedDirectoryFsyncWorker(workerEntry, { workerData: { input } });
     const exitPromise = once(worker, 'exit');
     const [message] = await once(worker, 'message');
     const [exitCode] = await exitPromise;
@@ -773,7 +806,7 @@ test('one-shot Parser Worker真实成功、取消与transport终止不留下伪m
       2
     );
     const input = spoolInput(filePath, { jobId: 'job-worker-business-error' });
-    const worker = new Worker(workerEntry, { workerData: { input } });
+    const worker = new SupportedDirectoryFsyncWorker(workerEntry, { workerData: { input } });
     const exitPromise = once(worker, 'exit');
     const [message] = await once(worker, 'message');
     const [exitCode] = await exitPromise;
@@ -792,7 +825,7 @@ test('one-shot Parser Worker真实成功、取消与transport终止不留下伪m
     const rows = Array.from({ length: 20_000 }, (_, index) => inboundRow({ reconId: `CANCEL-${index}` }));
     const filePath = writeInboundFile('MPT_INBOUND_GATEWAY_20260708_402.txt', rows);
     const input = spoolInput(filePath, { jobId: 'job-worker-cancel', batchSize: 10 });
-    const worker = new Worker(workerEntry, { workerData: { input } });
+    const worker = new SupportedDirectoryFsyncWorker(workerEntry, { workerData: { input } });
     const exitPromise = once(worker, 'exit');
     worker.postMessage({ operation: 'cancel' });
     const [message] = await once(worker, 'message');
@@ -807,7 +840,7 @@ test('one-shot Parser Worker真实成功、取消与transport终止不留下伪m
     const rows = Array.from({ length: 20_000 }, (_, index) => inboundRow({ reconId: `CRASH-${index}` }));
     const filePath = writeInboundFile('MPT_INBOUND_GATEWAY_20260708_403.txt', rows);
     const input = spoolInput(filePath, { jobId: 'job-worker-crash', batchSize: 10 });
-    const worker = new Worker(workerEntry, { workerData: { input } });
+    const worker = new SupportedDirectoryFsyncWorker(workerEntry, { workerData: { input } });
     const exitPromise = once(worker, 'exit');
     await once(worker, 'online');
     await worker.terminate();

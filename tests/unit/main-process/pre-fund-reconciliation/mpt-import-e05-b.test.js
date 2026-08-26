@@ -10,7 +10,7 @@ const { DatabaseSync } = require('node:sqlite');
 const { Worker } = require('node:worker_threads');
 
 const {
-  createBackgroundExecutionRuntime,
+  createBackgroundExecutionRuntime: createBackgroundExecutionRuntimeRaw,
   createNonProductionBackgroundExecutionRuntime
 } = require('../../../../src/main-process/background-execution/runtime');
 const {
@@ -46,6 +46,17 @@ const {
   createStartupRecoveryCoordinator
 } = require('../../../../src/main-process/background-execution/startup-recovery-coordinator');
 
+const TEST_GIBIBYTE = 1024 ** 3;
+
+function createBackgroundExecutionRuntime(options = {}) {
+  return createBackgroundExecutionRuntimeRaw({
+    availableParallelism: 8,
+    freeMemoryBytes: 8 * TEST_GIBIBYTE,
+    totalMemoryBytes: 16 * TEST_GIBIBYTE,
+    ...options
+  });
+}
+
 const { PreFundReconciliationStore } = require(
   '../../../../src/backend/pre-fund-reconciliation-store'
 );
@@ -64,7 +75,7 @@ const {
   createPreFundMptHoldGate
 } = require('../../../../src/main-process/pre-fund-reconciliation/mpt-import/hold-gate');
 const {
-  executeManagedPreFundMptImport
+  executeManagedPreFundMptImport: executeManagedPreFundMptImportRaw
 } = require('../../../../src/main-process/pre-fund-reconciliation/mpt-import/managed-import');
 const {
   readAndValidateMptFileSpool
@@ -113,11 +124,28 @@ const {
 const {
   cleanupMptFileSpool,
   cleanupMptSpoolParents,
-  writeMptFileSpool
+  writeMptFileSpool: writeMptFileSpoolRaw
 } = require('../../../../src/main-process/pre-fund-reconciliation/mpt-import/spool-writer');
 const {
   createPreFundReconciliationService
 } = require('../../../../src/main-process/pre-fund-reconciliation/service');
+const {
+  createSupportedDirectoryFsyncWorkerClass,
+  withSupportedDirectoryFsync
+} = require('../../shared/directory-fsync-test-runtime');
+
+const SupportedDirectoryFsyncWorker = createSupportedDirectoryFsyncWorkerClass(Worker);
+
+function writeMptFileSpool(input, options = {}) {
+  return writeMptFileSpoolRaw(input, withSupportedDirectoryFsync(options));
+}
+
+function executeManagedPreFundMptImport(options) {
+  return executeManagedPreFundMptImportRaw({
+    ParserWorkerClass: SupportedDirectoryFsyncWorker,
+    ...options
+  });
+}
 
 let tempRoot;
 let userDataDir;
@@ -1707,7 +1735,7 @@ test('E05-C Pool中一个真实transport crash只失败当前file，后续真实
   });
   function SelectiveCrashWorker(entry, workerOptions) {
     if (workerOptions.workerData.input.fileIndex !== 1) {
-      return new Worker(entry, workerOptions);
+      return new SupportedDirectoryFsyncWorker(entry, workerOptions);
     }
     const fake = new EventEmitter();
     fake.postMessage = () => {};
