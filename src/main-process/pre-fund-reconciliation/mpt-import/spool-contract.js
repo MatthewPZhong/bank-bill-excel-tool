@@ -15,7 +15,9 @@ const MPT_SPOOL_FILE_NAMES = Object.freeze({
   issuesPart: 'issues.ndjson.part',
   issuesReady: 'issues.ndjson.ready',
   manifestPart: 'manifest.json.part',
-  manifestReady: 'manifest.json.ready'
+  manifestReady: 'manifest.json.ready',
+  parserOutcomePart: 'parser-outcome.json.part',
+  parserOutcomeReady: 'parser-outcome.json.ready'
 });
 
 class MptSpoolError extends Error {

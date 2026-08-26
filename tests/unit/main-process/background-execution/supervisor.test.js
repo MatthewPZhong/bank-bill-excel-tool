@@ -123,6 +123,11 @@ function harness(
     validatorRegistry,
     staticKeys: {
       resourceProfileKeys: [policy.resources.profile],
+      ...(policy.commit.inspectorKey ? { inspectorKeys: [policy.commit.inspectorKey] } : {}),
+      ...(policy.commit.conflictScopeResolverKey
+        ? { conflictScopeResolverKeys: [policy.commit.conflictScopeResolverKey] }
+        : {}),
+      ...(policy.commit.settlementKey ? { settlementKeys: [policy.commit.settlementKey] } : {}),
       ...(policy.service ? { serviceKeys: [policy.service.serviceKey] } : {}),
       ...(policy.resources.compound
         ? { topologyKeys: [policy.resources.compound.topologyKey] }
@@ -178,7 +183,7 @@ test('公共 API exact：execute 返回 Promise，transport ready 后直接 job:
   });
   const { supervisor } = harness(fake);
   assert.deepEqual(Object.keys(supervisor).sort(), [
-    'cancel', 'closeService', 'execute', 'inspect', 'shutdown', 'stopAcceptingNewJobs'
+    'cancel', 'closeService', 'execute', 'inspect', 'shutdown', 'start', 'stopAcceptingNewJobs'
   ]);
   const execution = supervisor.execute(request());
   assert.equal(typeof execution.then, 'function');
@@ -189,6 +194,514 @@ test('公共 API exact：execute 返回 Promise，transport ready 后直接 job:
   assert.equal(fake.state.sent[0].operation, 'job:start');
   assert.equal(fake.state.sent[0].direction, 'command');
   assert.equal(supervisor.inspect('supervisor-job'), null);
+});
+
+function makeWorkerDurable(policy) {
+  policy.actionKey = 'test:worker-durable';
+  policy.commit = {
+    kind: 'worker-durable',
+    criticalIntent: true,
+    receiptKind: 'module-local',
+    inspectorKey: 'inspector.test:worker-durable',
+    conflictScopeResolverKey: 'scope.test:worker-durable',
+    settlementKey: null
+  };
+  policy.failure.unitBusinessError = 'collect-and-continue';
+}
+
+test('deferred unit在transport ready和job:start后才派发，旧eager路径不变', async () => {
+  let releaseReady;
+  const ready = new Promise((resolve) => { releaseReady = resolve; });
+  const fake = fakeAdapter({ ready });
+  const { supervisor } = harness(fake);
+  const control = supervisor.start(request({
+    deferUnitStart: true,
+    units: [{ unitId: 'file:000000', input: { fileIndex: 0 } }]
+  }));
+  const rejectedDispatch = control.startUnit('file:000000', { fileIndex: 999 });
+  await assert.rejects(rejectedDispatch, {
+    code: 'UNIT_INPUT_OVERRIDE_FORBIDDEN'
+  });
+  assert.equal(await rejectedDispatch.dispatchAccepted, false);
+  const terminal = control.startUnit('file:000000');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(fake.state.sent, []);
+  releaseReady();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(fake.state.sent.map((message) => message.operation), ['job:start', 'unit:start']);
+  assert.equal(await terminal.dispatchAccepted, true);
+  fake.state.callbacks.onMessage(eventFor(fake.state.sent[1], 'unit:done', 1, {
+    result: { checksum: 6004, count: 2, rounds: 2, sum: 3 }
+  }, 'file:000000'));
+  fake.state.callbacks.onMessage(eventFor(fake.state.sent[0], 'job:done', 2, {
+    result: { checksum: 6004, count: 2, rounds: 2, sum: 3 }
+  }));
+  assert.equal((await terminal).status, 'done');
+  assert.equal((await control.promise).outcome, 'completed');
+});
+
+test('worker-durable逐unit严格执行 persisted prepare/ack、receipt/mark-committed、done gate', async () => {
+  const calls = [];
+  let finishPrepare;
+  const prepareGate = new Promise((resolve) => { finishPrepare = resolve; });
+  const coordinator = {
+    async prepareAndAck(input) {
+      calls.push(['prepare', input.unitId]);
+      await prepareGate;
+      calls.push(['acked', input.unitId]);
+      return { intentId: 'intent-0', fileOperationKey: 'parent/file/000000' };
+    },
+    async observeReceipt(input) {
+      calls.push(['receipt', input.unitId]);
+      return { receiptHint: { receiptKind: 'module-local', receiptIdentity: 'receipt-0' } };
+    },
+    async settleCommitted(input) {
+      calls.push(['settled', input.unitId]);
+    },
+    async resolveUncertain() {
+      calls.push(['inspect']);
+      return { outcome: 'not-committed' };
+    }
+  };
+  const fake = fakeAdapter({
+    onSend(message, callbacks, state) {
+      if (message.operation === 'unit:start') {
+        callbacks.onMessage(eventFor(message, 'critical:ready', 1, {
+          critical: { fileOperationKey: 'parent/file/000000' }
+        }, message.unitId));
+      } else if (message.operation === 'critical:ack') {
+        callbacks.onMessage(eventFor(message, 'commit:receipt', 2, {
+          receipt: { operationKey: 'parent/file/000000' }
+        }, message.unitId));
+        callbacks.onMessage(eventFor(message, 'unit:done', 3, {
+          result: { checksum: 6004, count: 2, rounds: 2, sum: 3 }
+        }, message.unitId));
+        callbacks.onMessage(eventFor(state.sent[0], 'job:done', 4, {
+          result: { checksum: 6004, count: 2, rounds: 2, sum: 3 }
+        }));
+      }
+    }
+  });
+  const { supervisor } = harness(fake, makeWorkerDurable, undefined, {
+    workerDurableCoordinator: coordinator
+  });
+  const control = supervisor.start(request({
+    actionKey: 'test:worker-durable',
+    deferUnitStart: true,
+    units: [{ unitId: 'file:000000', input: { fileIndex: 0 } }]
+  }));
+  const unitPromise = control.startUnit('file:000000');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(fake.state.sent.map((message) => message.operation), ['job:start', 'unit:start']);
+  assert.deepEqual(calls, [['prepare', 'file:000000']]);
+  finishPrepare();
+  const unit = await unitPromise;
+  const result = await control.promise;
+  assert.equal(unit.status, 'done');
+  assert.equal(result.outcome, 'completed');
+  assert.equal(result.receiptHint, null, 'parent多unit不得冒充单receipt identity');
+  assert.deepEqual(calls, [
+    ['prepare', 'file:000000'],
+    ['acked', 'file:000000'],
+    ['receipt', 'file:000000'],
+    ['settled', 'file:000000']
+  ]);
+  assert.deepEqual(fake.state.sent.map((message) => message.operation), [
+    'job:start', 'unit:start', 'critical:ack'
+  ]);
+});
+
+test('worker-durable pre-critical transport loss只收口普通file error，不得升级为interrupted', async () => {
+  let inspectCount = 0;
+  const coordinator = {
+    async prepareAndAck() {
+      throw new Error('pre-critical transport loss不应prepare');
+    },
+    async observeReceipt() {},
+    async settleCommitted() {},
+    async resolveUncertain() {
+      inspectCount += 1;
+      return { outcome: 'unknown' };
+    }
+  };
+  const fake = fakeAdapter({
+    onSend(message, callbacks) {
+      if (message.operation === 'unit:start') {
+        queueMicrotask(() => callbacks.onExit(17, null));
+      }
+    }
+  });
+  const { supervisor } = harness(fake, makeWorkerDurable, undefined, {
+    workerDurableCoordinator: coordinator
+  });
+  const control = supervisor.start(request({
+    actionKey: 'test:worker-durable',
+    deferUnitStart: true,
+    units: [{ unitId: 'file:000000', input: { fileIndex: 0 } }]
+  }));
+  const terminalPromise = control.startUnit('file:000000');
+  assert.equal(await terminalPromise.dispatchAccepted, true);
+  const [unit, result] = await Promise.all([terminalPromise, control.promise]);
+  assert.equal(unit.status, 'error');
+  assert.equal(unit.cleanupOwnership, 'main');
+  assert.equal(unit.inspection, null);
+  assert.equal(inspectCount, 0);
+  assert.equal(result.outcome, 'transport-lost');
+  assert.equal(result.terminalSource, 'unexpected-exit');
+});
+
+test('worker-durable ACK后transport loss且inspect not-committed仍是普通file error', async () => {
+  let inspectCount = 0;
+  const coordinator = {
+    async prepareAndAck() {
+      return { intentId: 'intent-0', fileOperationKey: 'parent/file/000000' };
+    },
+    async observeReceipt() {},
+    async settleCommitted() {},
+    async resolveUncertain() {
+      inspectCount += 1;
+      return { outcome: 'not-committed' };
+    }
+  };
+  const fake = fakeAdapter({
+    onSend(message, callbacks) {
+      if (message.operation === 'unit:start') {
+        callbacks.onMessage(eventFor(message, 'critical:ready', 1, {
+          critical: { fileOperationKey: 'parent/file/000000' }
+        }, message.unitId));
+      } else if (message.operation === 'critical:ack') {
+        queueMicrotask(() => callbacks.onExit(17, null));
+      }
+    }
+  });
+  const { supervisor } = harness(fake, makeWorkerDurable, undefined, {
+    workerDurableCoordinator: coordinator
+  });
+  const control = supervisor.start(request({
+    actionKey: 'test:worker-durable',
+    deferUnitStart: true,
+    units: [{ unitId: 'file:000000', input: { fileIndex: 0 } }]
+  }));
+  const terminalPromise = control.startUnit('file:000000');
+  assert.equal(await terminalPromise.dispatchAccepted, true);
+  const [unit, result] = await Promise.all([terminalPromise, control.promise]);
+  assert.equal(unit.status, 'error');
+  assert.equal(unit.cleanupOwnership, 'main');
+  assert.equal(unit.inspection.outcome, 'not-committed');
+  assert.equal(inspectCount, 1);
+  assert.equal(result.outcome, 'transport-lost');
+  assert.equal(result.terminalSource, 'unexpected-exit');
+});
+
+test('worker-durable prepare/ack持久化失败不发ACK且unit保持普通error', async () => {
+  const coordinator = {
+    async prepareAndAck() {
+      throw Object.assign(new Error('atomic prepare/ack failed'), { code: 'TEST_MARK_ACKED_FAILED' });
+    },
+    async observeReceipt() {},
+    async settleCommitted() {},
+    async resolveUncertain() {
+      throw new Error('Worker未收到ACK，不应inspect');
+    }
+  };
+  const fake = fakeAdapter({
+    onSend(message, callbacks) {
+      if (message.operation === 'unit:start') {
+        callbacks.onMessage(eventFor(message, 'critical:ready', 1, {
+          critical: { fileOperationKey: 'parent/file/000000' }
+        }, message.unitId));
+      }
+    }
+  });
+  const { supervisor } = harness(fake, makeWorkerDurable, undefined, {
+    workerDurableCoordinator: coordinator
+  });
+  const control = supervisor.start(request({
+    actionKey: 'test:worker-durable',
+    deferUnitStart: true,
+    units: [{ unitId: 'file:000000', input: { fileIndex: 0 } }]
+  }));
+  const terminalPromise = control.startUnit('file:000000');
+  assert.equal(await terminalPromise.dispatchAccepted, true);
+  const [unit, result] = await Promise.all([terminalPromise, control.promise]);
+  assert.equal(unit.status, 'error');
+  assert.equal(unit.cleanupOwnership, 'main');
+  assert.equal(result.outcome, 'transport-lost');
+  assert.equal(result.terminalSource, 'protocol-error');
+  assert.deepEqual(fake.state.sent.map((message) => message.operation), ['job:start', 'unit:start']);
+});
+
+test('worker-durable ACK后unit error必须inspect；committed-lost阻断普通job完成并收口unit promise', async () => {
+  const coordinator = {
+    async prepareAndAck() {
+      return { intentId: 'intent-0', fileOperationKey: 'parent/file/000000' };
+    },
+    async observeReceipt() {
+      throw new Error('不应收到receipt');
+    },
+    async settleCommitted() {},
+    async resolveUncertain() {
+      return { outcome: 'committed' };
+    }
+  };
+  const fake = fakeAdapter({
+    onSend(message, callbacks, state) {
+      if (message.operation === 'unit:start') {
+        callbacks.onMessage(eventFor(message, 'critical:ready', 1, {
+          critical: { fileOperationKey: 'parent/file/000000' }
+        }, message.unitId));
+      } else if (message.operation === 'critical:ack') {
+        callbacks.onMessage(eventFor(message, 'unit:error', 2, {
+          error: { code: 'RESULT_LOST', message: 'lost' }
+        }, message.unitId));
+        callbacks.onMessage(eventFor(state.sent[0], 'job:done', 3, {
+          result: { checksum: 6004, count: 2, rounds: 2, sum: 3 }
+        }));
+      }
+    }
+  });
+  const { supervisor } = harness(fake, makeWorkerDurable, undefined, {
+    workerDurableCoordinator: coordinator
+  });
+  const control = supervisor.start(request({
+    actionKey: 'test:worker-durable',
+    deferUnitStart: true,
+    units: [{ unitId: 'file:000000', input: { fileIndex: 0 } }]
+  }));
+  const unitPromise = control.startUnit('file:000000');
+  const unit = await unitPromise;
+  const result = await control.promise;
+  assert.equal(unit.status, 'interrupted');
+  assert.equal(unit.inspection.outcome, 'committed');
+  assert.equal(result.outcome, 'interrupted');
+  assert.equal(result.terminalSource, 'job:error');
+});
+
+test('worker-durable非末unit committed/unknown立即终结parent并有界释放transport', async () => {
+  for (const inspectedOutcome of ['committed', 'unknown']) {
+    const coordinator = {
+      async prepareAndAck() {
+        return { intentId: `intent-${inspectedOutcome}`, fileOperationKey: 'parent/file/000000' };
+      },
+      async observeReceipt() { throw new Error('不应收到receipt'); },
+      async settleCommitted() {},
+      async resolveUncertain() { return { outcome: inspectedOutcome }; }
+    };
+    const fake = fakeAdapter({
+      onSend(message, callbacks) {
+        if (message.operation === 'unit:start') {
+          callbacks.onMessage(eventFor(message, 'critical:ready', 1, {
+            critical: { fileOperationKey: 'parent/file/000000' }
+          }, message.unitId));
+        } else if (message.operation === 'critical:ack') {
+          callbacks.onMessage(eventFor(message, 'unit:error', 2, {
+            error: { code: 'WRITER_AFTER_ACK_FAILED', message: 'writer failed after ACK' }
+          }, message.unitId));
+        }
+      }
+    });
+    const { supervisor } = harness(fake, makeWorkerDurable, undefined, {
+      workerDurableCoordinator: coordinator
+    });
+    const control = supervisor.start(request({
+      actionKey: 'test:worker-durable',
+      jobId: `non-last-${inspectedOutcome}`,
+      deferUnitStart: true,
+      units: [
+        { unitId: 'file:000000', input: { fileIndex: 0 } },
+        { unitId: 'file:000001', input: { fileIndex: 1 } }
+      ]
+    }));
+    const [unit, result] = await Promise.all([
+      control.startUnit('file:000000'),
+      control.promise
+    ]);
+    assert.equal(unit.status, 'interrupted');
+    assert.equal(unit.inspection.outcome, inspectedOutcome);
+    assert.equal(result.outcome, 'interrupted');
+    assert.equal(result.terminalSource, 'job:error');
+    assert.equal(fake.state.terminateCount, 1);
+    assert.equal(fake.state.closeCount, 1);
+    assert.deepEqual(fake.state.sent.map((message) => message.operation), [
+      'job:start', 'unit:start', 'critical:ack'
+    ]);
+    await assert.rejects(control.startUnit('file:000001'), { code: 'UNIT_START_STATE_INVALID' });
+  }
+});
+
+test('worker-durable错误receipt后的合法unit/job done不能覆盖canonical committed inspection', async () => {
+  let settleCalls = 0;
+  const coordinator = {
+    async prepareAndAck() {
+      return { intentId: 'receipt-intent', fileOperationKey: 'parent/file/000000' };
+    },
+    async observeReceipt() {
+      throw Object.assign(new Error('receipt exact evidence mismatch'), {
+        code: 'WORKER_DURABLE_RECEIPT_SHAPE_INVALID'
+      });
+    },
+    async settleCommitted() { settleCalls += 1; },
+    async resolveUncertain() { return { outcome: 'committed' }; }
+  };
+  const fake = fakeAdapter({
+    onSend(message, callbacks, state) {
+      if (message.operation === 'unit:start') {
+        callbacks.onMessage(eventFor(message, 'critical:ready', 1, {
+          critical: { fileOperationKey: 'parent/file/000000' }
+        }, message.unitId));
+      } else if (message.operation === 'critical:ack') {
+        callbacks.onMessage(eventFor(message, 'commit:receipt', 2, {
+          receipt: { id: 1, operationKey: 'parent/file/000000' }
+        }, message.unitId));
+        callbacks.onMessage(eventFor(message, 'unit:done', 3, {
+          result: { checksum: 6004, count: 2, rounds: 2, sum: 3 }
+        }, message.unitId));
+        callbacks.onMessage(eventFor(state.sent[0], 'job:done', 4, {
+          result: { checksum: 6004, count: 2, rounds: 2, sum: 3 }
+        }));
+      }
+    }
+  });
+  const { supervisor } = harness(fake, makeWorkerDurable, undefined, {
+    workerDurableCoordinator: coordinator
+  });
+  const control = supervisor.start(request({
+    actionKey: 'test:worker-durable',
+    jobId: 'bad-receipt-job',
+    deferUnitStart: true,
+    units: [{ unitId: 'file:000000', input: { fileIndex: 0 } }]
+  }));
+  const [unit, result] = await Promise.all([
+    control.startUnit('file:000000'),
+    control.promise
+  ]);
+  assert.equal(settleCalls, 0);
+  assert.equal(unit.status, 'interrupted');
+  assert.equal(unit.inspection.outcome, 'committed');
+  assert.equal(result.outcome, 'interrupted');
+  assert.equal(result.result, null);
+});
+
+test('worker-durable precritical ordinary unit:error仍按policy继续后续file', async () => {
+  const coordinator = {
+    async prepareAndAck() { throw new Error('ordinary error不应进入critical'); },
+    async observeReceipt() {},
+    async settleCommitted() {},
+    async resolveUncertain() { throw new Error('ordinary error不应inspect'); }
+  };
+  let unitEventSeq = 0;
+  const fake = fakeAdapter({
+    onSend(message, callbacks, state) {
+      if (message.operation !== 'unit:start') return;
+      unitEventSeq += 1;
+      callbacks.onMessage(eventFor(message, 'unit:error', unitEventSeq, {
+        error: { code: 'FILE_BUSINESS_ERROR', message: 'current file failed' }
+      }, message.unitId));
+      if (message.unitId === 'file:000001') {
+        callbacks.onMessage(eventFor(state.sent[0], 'job:done', ++unitEventSeq, {
+          result: { checksum: 6004, count: 2, rounds: 2, sum: 3 }
+        }));
+      }
+    }
+  });
+  const { supervisor } = harness(fake, makeWorkerDurable, undefined, {
+    workerDurableCoordinator: coordinator
+  });
+  const control = supervisor.start(request({
+    actionKey: 'test:worker-durable',
+    jobId: 'ordinary-error-continues',
+    deferUnitStart: true,
+    units: [
+      { unitId: 'file:000000', input: { fileIndex: 0 } },
+      { unitId: 'file:000001', input: { fileIndex: 1 } }
+    ]
+  }));
+  assert.equal((await control.startUnit('file:000000')).status, 'error');
+  assert.equal((await control.startUnit('file:000001')).status, 'error');
+  assert.equal((await control.promise).outcome, 'completed');
+});
+
+test('worker-durable job:error inspect unknown时started unit不得降级为cancelled', async () => {
+  const coordinator = {
+    async prepareAndAck() {
+      return { intentId: 'intent-0', fileOperationKey: 'parent/file/000000' };
+    },
+    async observeReceipt() {
+      throw new Error('不应收到receipt');
+    },
+    async settleCommitted() {},
+    async resolveUncertain() {
+      return { outcome: 'unknown' };
+    }
+  };
+  const fake = fakeAdapter({
+    onSend(message, callbacks, state) {
+      if (message.operation === 'unit:start') {
+        callbacks.onMessage(eventFor(message, 'critical:ready', 1, {
+          critical: { fileOperationKey: 'parent/file/000000' }
+        }, message.unitId));
+      } else if (message.operation === 'critical:ack') {
+        callbacks.onMessage(eventFor(state.sent[0], 'job:error', 2, {
+          error: { code: 'SQL_LOST', message: 'writer failed' }
+        }));
+      }
+    }
+  });
+  const { supervisor } = harness(fake, makeWorkerDurable, undefined, {
+    workerDurableCoordinator: coordinator
+  });
+  const control = supervisor.start(request({
+    actionKey: 'test:worker-durable',
+    deferUnitStart: true,
+    units: [{ unitId: 'file:000000', input: { fileIndex: 0 } }]
+  }));
+  const [unit, result] = await Promise.all([
+    control.startUnit('file:000000'),
+    control.promise
+  ]);
+  assert.equal(unit.status, 'interrupted');
+  assert.equal(unit.inspection.outcome, 'unknown');
+  assert.equal(result.outcome, 'interrupted');
+  assert.equal(result.terminalSource, 'job:error');
+});
+
+test('worker-durable inspector异常不悬挂，open Intent语义映射interrupted且started unit确定收口', async () => {
+  const coordinator = {
+    async prepareAndAck() {
+      return { intentId: 'intent-0', fileOperationKey: 'parent/file/000000' };
+    },
+    async observeReceipt() {
+      throw new Error('不应收到receipt');
+    },
+    async settleCommitted() {},
+    async resolveUncertain() {
+      throw Object.assign(new Error('inspector unavailable'), { code: 'INSPECTOR_UNAVAILABLE' });
+    }
+  };
+  const fake = fakeAdapter({
+    onSend(message, callbacks) {
+      if (message.operation === 'unit:start') {
+        callbacks.onMessage(eventFor(message, 'critical:ready', 1, {
+          critical: { fileOperationKey: 'parent/file/000000' }
+        }, message.unitId));
+      } else if (message.operation === 'critical:ack') {
+        callbacks.onExit(9, null);
+      }
+    }
+  });
+  const { supervisor } = harness(fake, makeWorkerDurable, undefined, {
+    workerDurableCoordinator: coordinator
+  });
+  const control = supervisor.start(request({
+    actionKey: 'test:worker-durable',
+    deferUnitStart: true,
+    units: [{ unitId: 'file:000000', input: { fileIndex: 0 } }]
+  }));
+  const unitPromise = control.startUnit('file:000000');
+  const [unit, result] = await Promise.all([unitPromise, control.promise]);
+  assert.equal(unit.status, 'interrupted');
+  assert.equal(result.outcome, 'interrupted');
+  assert.equal(result.terminalSource, 'unexpected-exit');
 });
 
 test('第一个合法 terminal 赢得 settle gate，late terminal 仅诊断不二次 settle', async () => {
@@ -1028,7 +1541,9 @@ test('shutdown 也追踪已 settle 但 terminate 悬挂的 transport', async () 
     policy.cancellation.terminateTimeoutMs = 5;
   });
   const result = await supervisor.execute(request({ jobId: 'settled-leak-job' }));
-  assert.equal(result.outcome, 'completed');
+  assert.equal(result.outcome, 'failed');
+  assert.equal(result.error.code, 'BACKGROUND_EXECUTION_CLEANUP_FAILED');
+  assert.deepEqual(result.result, { checksum: 6004, count: 2, rounds: 2, sum: 3 });
   assert.equal(fake.state.closeCount, 1);
   await assert.rejects(
     supervisor.execute(request({ jobId: 'settled-leak-job' })),
@@ -1039,7 +1554,7 @@ test('shutdown 也追踪已 settle 但 terminate 悬挂的 transport', async () 
   assert.ok(report.errors.some((error) => error.code === 'TRANSPORT_TERMINATE_TIMEOUT'));
 });
 
-test('terminate/close 独立 exactly-once，双失败均保留且阻止 jobId 复用', async () => {
+test('terminate/close 独立失败使job非成功，shutdown保留并重试cleanup ownership', async () => {
   const terminateError = new Error('terminate rejected');
   terminateError.code = 'TRANSPORT_TERMINATE_REJECTED';
   const closeError = new Error('close rejected');
@@ -1057,7 +1572,8 @@ test('terminate/close 独立 exactly-once，双失败均保留且阻止 jobId �
   });
   const { supervisor } = harness(fake);
   const result = await supervisor.execute(request({ jobId: 'terminate-rejection-job' }));
-  assert.equal(result.outcome, 'completed');
+  assert.equal(result.outcome, 'failed');
+  assert.equal(result.error.code, 'BACKGROUND_EXECUTION_CLEANUP_FAILED');
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(fake.state.terminateCount, 1);
   assert.equal(fake.state.closeCount, 1);
@@ -1069,8 +1585,73 @@ test('terminate/close 独立 exactly-once，双失败均保留且阻止 jobId �
   assert.deepEqual(report.leakedTransports, ['terminate-rejection-job']);
   assert.ok(report.errors.some((error) => error.code === 'TRANSPORT_TERMINATE_REJECTED'));
   assert.ok(report.errors.some((error) => error.code === 'TRANSPORT_CLOSE_REJECTED'));
+  assert.equal(fake.state.terminateCount, 2);
+  assert.equal(fake.state.closeCount, 2);
+});
+
+test('close首次失败使job非成功，shutdown重试成功后不再报告transport leak', async () => {
+  let closeAttempts = 0;
+  const fake = fakeAdapter({
+    close() {
+      closeAttempts += 1;
+      if (closeAttempts === 1) {
+        throw Object.assign(new Error('close once'), { code: 'TRANSPORT_CLOSE_ONCE_FAILED' });
+      }
+    },
+    onSend(message, callbacks) {
+      if (message.operation === 'job:start') {
+        callbacks.onMessage(eventFor(message, 'job:done', 1, {
+          result: { checksum: 6004, count: 2, rounds: 2, sum: 3 }
+        }));
+      }
+    }
+  });
+  const { supervisor } = harness(fake);
+  const result = await supervisor.execute(request({ jobId: 'close-once-job' }));
+  assert.equal(result.outcome, 'failed');
+  assert.equal(result.error.code, 'BACKGROUND_EXECUTION_CLEANUP_FAILED');
   assert.equal(fake.state.terminateCount, 1);
   assert.equal(fake.state.closeCount, 1);
+  const report = await supervisor.shutdown({ timeoutMs: 20 });
+  assert.deepEqual(report.leakedTransports, []);
+  assert.deepEqual(report.errors, []);
+  assert.equal(fake.state.terminateCount, 1);
+  assert.equal(fake.state.closeCount, 2);
+});
+
+test('resource lease release失败使job非成功并保留到shutdown重试', async () => {
+  let phaseReleaseAttempts = 0;
+  const baseLease = { release() {} };
+  const phaseLease = {
+    release() {
+      phaseReleaseAttempts += 1;
+      if (phaseReleaseAttempts === 1) {
+        throw Object.assign(new Error('phase release once'), { code: 'RESOURCE_RELEASE_ONCE_FAILED' });
+      }
+    }
+  };
+  const resourceGovernor = {
+    async acquireBaseLease() { return baseLease; },
+    async acquirePhaseLease() { return phaseLease; },
+    snapshot() { return { services: [] }; }
+  };
+  const fake = fakeAdapter({
+    onSend(message, callbacks) {
+      if (message.operation === 'job:start') {
+        callbacks.onMessage(eventFor(message, 'job:done', 1, {
+          result: { checksum: 6004, count: 2, rounds: 2, sum: 3 }
+        }));
+      }
+    }
+  });
+  const { supervisor } = harness(fake, null, undefined, { resourceGovernor });
+  const result = await supervisor.execute(request({ jobId: 'resource-release-once-job' }));
+  assert.equal(result.outcome, 'failed');
+  assert.equal(result.error.code, 'BACKGROUND_EXECUTION_CLEANUP_FAILED');
+  assert.equal(phaseReleaseAttempts, 1);
+  const report = await supervisor.shutdown({ timeoutMs: 20 });
+  assert.deepEqual(report.errors, []);
+  assert.equal(phaseReleaseAttempts, 2);
 });
 
 test('transport cleanup 成功后 jobId/worker route 仍是永久 one-shot tombstone', async () => {

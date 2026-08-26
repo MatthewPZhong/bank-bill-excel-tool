@@ -13,6 +13,23 @@ const OUTCOME_KINDS = Object.freeze([
 const ACTION_KEY_SET = new Set(ACTION_KEYS);
 const OUTCOME_KIND_SET = new Set(OUTCOME_KINDS);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const COMMITTED_AT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
+const EXACT_RECEIPT_KEYS = Object.freeze([
+  'actionKey',
+  'batchId',
+  'committedAt',
+  'contentHash',
+  'datasetId',
+  'datasetVersionAfter',
+  'datasetVersionBefore',
+  'fileIndex',
+  'id',
+  'operationKey',
+  'outcomeKind',
+  'producerTaskRunId',
+  'sourceFileName',
+  'sourceSha256'
+].sort());
 
 function receiptError(code, message) {
   return Object.assign(new Error(message), { code });
@@ -106,6 +123,46 @@ function mapReceipt(row) {
   });
 }
 
+function normalizeExactOperationReceipt(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      JSON.stringify(Object.keys(value).sort()) !== JSON.stringify(EXACT_RECEIPT_KEYS)) {
+    throw new TypeError('PreFund authoritative receipt字段必须exact');
+  }
+  const payload = normalizeReceiptPayload(value);
+  const textFields = [
+    'actionKey', 'operationKey', 'producerTaskRunId', 'outcomeKind',
+    'sourceFileName', 'sourceSha256', 'contentHash'
+  ];
+  if (textFields.some((key) => typeof value[key] !== 'string' || value[key] !== payload[key]) ||
+      !Number.isSafeInteger(value.id) || value.id < 1 ||
+      !Number.isSafeInteger(value.fileIndex) || value.fileIndex !== payload.fileIndex ||
+      !Number.isSafeInteger(value.batchId) || value.batchId !== payload.batchId ||
+      value.datasetId !== payload.datasetId ||
+      value.datasetVersionBefore !== payload.datasetVersionBefore ||
+      value.datasetVersionAfter !== payload.datasetVersionAfter ||
+      typeof value.committedAt !== 'string' || !COMMITTED_AT_PATTERN.test(value.committedAt)) {
+    throw new TypeError('PreFund authoritative receipt类型或值非法');
+  }
+  const versionShapeValid = payload.datasetId !== null && (
+    (payload.outcomeKind === 'inserted' && payload.datasetVersionBefore === null &&
+      payload.datasetVersionAfter === 1) ||
+    (payload.outcomeKind === 'replaced' && Number.isSafeInteger(payload.datasetVersionBefore) &&
+      payload.datasetVersionBefore >= 0 &&
+      payload.datasetVersionAfter === payload.datasetVersionBefore + 1) ||
+    (payload.outcomeKind === 'noop-existing-batch' &&
+      Number.isSafeInteger(payload.datasetVersionBefore) && payload.datasetVersionBefore >= 0 &&
+      payload.datasetVersionAfter === payload.datasetVersionBefore)
+  );
+  if (!versionShapeValid) {
+    throw new TypeError('PreFund authoritative receipt outcome/version identity非法');
+  }
+  return Object.freeze({ id: value.id, ...payload, committedAt: value.committedAt });
+}
+
+function sameExactOperationReceipt(left, right) {
+  return EXACT_RECEIPT_KEYS.every((key) => left[key] === right[key]);
+}
+
 function getOperationReceipt(db, actionKey, operationKey) {
   assertDatabase(db);
   return mapReceipt(db.prepare(`
@@ -190,5 +247,7 @@ module.exports = {
   hasAnyOperationReceipts,
   hasOperationReceiptTable,
   insertOperationReceipt,
-  normalizeReceiptPayload
+  normalizeExactOperationReceipt,
+  normalizeReceiptPayload,
+  sameExactOperationReceipt
 };

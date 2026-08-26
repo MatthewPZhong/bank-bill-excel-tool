@@ -159,7 +159,7 @@ test('E04-A/B policy 与 Main source selector 保持 production false，真实�
   assert.equal(multiPolicy.resources.compound.childResource.workerThreadSlots, 1);
 
   const mainSource = fs.readFileSync(path.resolve(__dirname, '../../../src/main.js'), 'utf8');
-  assert.equal((mainSource.match(/backgroundExecutionRuntimeManager\.get\(\)/g) || []).length, 3);
+  assert.equal((mainSource.match(/backgroundExecutionRuntimeManager\.get\(\)/g) || []).length, 5);
   assert.equal((mainSource.match(/generateValidateAndPublishToolboxArtifact\(\{/g) || []).length, 2);
   assert.equal((mainSource.match(/generateValidateAndPublishMultiOutput\(\{/g) || []).length, 1);
   assert.equal((mainSource.match(/production:\s*true/g) || []).length >= 3, true);
@@ -171,9 +171,34 @@ test('E04-A/B policy 与 Main source selector 保持 production false，真实�
 test('E04-B runtime预算完整计入Scanner phase与一个Writer child，idle/shutdown不泄漏', async () => {
   const runtime = createBackgroundExecutionRuntime({ shutdownTimeoutMs: 10000 });
   const snapshot = runtime.resourceGovernor.snapshot();
+  assert.deepEqual(runtime.policyRegistry.list().map((policy) => policy.actionKey), [
+    TOOLBOX_GENERATION_ACTIONS.MERGE,
+    TOOLBOX_GENERATION_ACTIONS.SPLIT_SINGLE,
+    TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT,
+    'pre-fund:mpt-import',
+    'pre-fund:mpt-repair-import'
+  ]);
+  for (const policy of runtime.policyRegistry.list()) {
+    assert.equal(policy.production.enabled, false);
+  }
   assert.equal(snapshot.budgets.cpuSlots, 2);
-  assert.equal(snapshot.budgets.workerThreadSlots, 2);
+  assert.equal(snapshot.budgets.workerThreadSlots, 3);
   assert.equal(snapshot.budgets.ioHeavySlots, 2);
+  const multiPolicy = TOOLBOX_GENERATION_POLICIES.find(
+    (policy) => policy.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
+  );
+  assert.deepEqual(multiPolicy.resources.base, {
+    cpuSlots: 0, workerThreadSlots: 0, utilityProcessSlots: 0,
+    ioHeavySlots: 0, memoryBytes: 0
+  });
+  assert.deepEqual(multiPolicy.resources.phase, {
+    cpuSlots: 1, workerThreadSlots: 1, utilityProcessSlots: 0,
+    ioHeavySlots: 1, memoryBytes: 201326592
+  });
+  assert.deepEqual(multiPolicy.resources.compound.childResource, {
+    cpuSlots: 1, workerThreadSlots: 1, utilityProcessSlots: 0,
+    ioHeavySlots: 1, memoryBytes: 201326592
+  });
   assert.deepEqual(snapshot.activeUsage, {
     cpuSlots: 0,
     workerThreadSlots: 0,

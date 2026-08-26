@@ -329,6 +329,21 @@ function createStartupRecoveryCoordinator(options = {}) {
       } else if (intent.state !== 'committed') {
         return [];
       }
+      // worker-critical没有后续Main-owned settlement。将 committed 结果丢失的
+      // Intent close 与 inspection observation / Task / Batch / Hold transition 放进
+      // 同一个RecoveryControl事务，避免启动中断留下半收口状态。
+      if (!source.settlementKey) {
+        items.push({
+          transition: {
+            entityKind: 'critical-intent',
+            command: 'close',
+            intentId: intent.intentId,
+            expectedState: 'committed',
+            result: { outcome: 'completed', recoveredFrom: 'committed-result-lost' }
+          },
+          safePayload: { outcome: 'committed', closed: true }
+        });
+      }
     } else if (['not-committed', 'compensated'].includes(inspection.outcome)
         && ['prepared', 'acked'].includes(intent.state)) {
       items.push({
@@ -492,23 +507,16 @@ function createStartupRecoveryCoordinator(options = {}) {
 
     const immediate = [
       ...immediateItems.map((item) => reserveTransition(item.transition, item.safePayload)),
-      ...normalizePlannedTransitions(planTransitions({ phase: 'inspection-result', source, inspection }))
+      ...normalizePlannedTransitions(planTransitions({
+        phase: 'inspection-result',
+        source,
+        inspection,
+        holdId: activeHold ? activeHold.holdId : holdIdFor(source)
+      }))
     ];
     writeAtomic(inspected.observation, immediate);
     if (inspection.outcome === 'committed' && source.settlementKey) {
       return recoverWithProvider(source, inspection, activeHold);
-    }
-    if (inspection.outcome === 'committed' && source.intentId) {
-      const intent = readRepository.getCriticalIntentById(source.intentId);
-      if (intent && intent.state === 'committed') {
-        writeAtomic(null, [reserveTransition({
-          entityKind: 'critical-intent',
-          command: 'close',
-          intentId: intent.intentId,
-          expectedState: 'committed',
-          result: { outcome: 'completed' }
-        }, { outcome: 'completed' })]);
-      }
     }
     return Object.freeze({ source, inspection, held: false });
   }

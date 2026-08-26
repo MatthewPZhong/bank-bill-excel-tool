@@ -129,3 +129,90 @@ test('Ordered Coordinator乱序transport crash同样只失败当前unit并继续
   assert.deepEqual(results.map((result) => result.status), ['ok', 'failed', 'ok']);
   assert.deepEqual(results[1], fixture.serviceResult.results[1]);
 });
+
+test('managed strict failure沿用legacy顶层repair token shape且新轮清除旧token', (t) => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'prefund-e05-b-managed-token-'));
+  t.after(() => fs.rmSync(userDataDir, { recursive: true, force: true }));
+  const service = createPreFundReconciliationService({
+    userDataDir,
+    database: mirrorDatabase(userDataDir),
+    templatePath: path.join(root, 'assets', '前置资金对账模板.xlsx')
+  });
+  service.beginManagedMptImport();
+  const [failed] = service.adoptManagedMptImportResults(['/tmp/MPT_INBOUND_GATEWAY_20260708_1.txt'], [{
+    status: 'failed',
+    fileName: 'MPT_INBOUND_GATEWAY_20260708_1.txt',
+    code: 'MPT_ROW_ERRORS',
+    message: 'row failed',
+    detailLines: [],
+    managedRepairEvidence: {
+      sourceType: 'MPT_INBOUND_GATEWAY',
+      sourceBatch: 'MPT_INBOUND_20260708',
+      contentHash: 'a'.repeat(64),
+      rowErrorCount: 2
+    }
+  }]);
+  assert.equal(failed.canRepair, true);
+  assert.match(failed.repairToken, /^[a-f0-9-]{36}$/i);
+  assert.equal(failed.sourceType, 'MPT_INBOUND_GATEWAY');
+  assert.equal(failed.rowErrorCount, 2);
+  assert.equal(Object.hasOwn(failed, 'repair'), false);
+  assert.equal(Object.hasOwn(failed, 'managedRepairEvidence'), false);
+  assert.equal(service.resolveMptImportFailures([failed.repairToken]).length, 1);
+  service.beginManagedMptImport();
+  assert.throws(() => service.resolveMptImportFailures([failed.repairToken]), {
+    code: 'pre-fund-mpt-failure-token-expired'
+  });
+});
+
+test('managed repair与legacy逐项保持token删除/保留和顶层结果shape', (t) => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'prefund-e05-b-managed-repair-token-'));
+  t.after(() => fs.rmSync(userDataDir, { recursive: true, force: true }));
+  const service = createPreFundReconciliationService({
+    userDataDir,
+    database: mirrorDatabase(userDataDir),
+    templatePath: path.join(root, 'assets', '前置资金对账模板.xlsx')
+  });
+  const paths = [1, 2, 3].map((index) => `/tmp/MPT_INBOUND_GATEWAY_20260708_${index}.txt`);
+  const seeded = service.adoptManagedMptImportResults(paths, paths.map((filePath, index) => ({
+    status: 'failed',
+    fileName: path.basename(filePath),
+    code: 'MPT_ROW_ERRORS',
+    message: `row failed ${index}`,
+    detailLines: [`line ${index}`],
+    managedRepairEvidence: {
+      sourceType: 'MPT_INBOUND_GATEWAY',
+      sourceBatch: `MPT_INBOUND_20260708_${index}`,
+      contentHash: String(index + 1).repeat(64),
+      rowErrorCount: index + 1
+    }
+  })));
+  const failures = service.resolveMptImportFailures(seeded.map((item) => item.repairToken));
+  const repaired = service.adoptManagedMptRepairResults(failures, [{
+    status: 'ok', fileName: path.basename(paths[0]), sourceType: 'MPT_INBOUND_GATEWAY',
+    importStatus: 'imported', rowCount: 1, excludedRowCount: 0
+  }, {
+    status: 'failed', fileName: path.basename(paths[1]), code: 'MPT_REPAIR_SOURCE_CHANGED',
+    message: 'source changed', detailLines: []
+  }, {
+    status: 'failed', fileName: path.basename(paths[2]), code: 'SQLITE_BUSY',
+    message: 'sql busy', detailLines: ['retry later']
+  }]);
+  assert.equal(Object.hasOwn(repaired[0], 'repairToken'), false);
+  assert.equal(Object.hasOwn(repaired[1], 'repairToken'), false);
+  assert.deepEqual(repaired[2], {
+    status: 'failed', fileName: path.basename(paths[2]), code: 'SQLITE_BUSY',
+    message: 'sql busy', detailLines: ['retry later'],
+    canRepair: true,
+    repairToken: seeded[2].repairToken,
+    sourceType: 'MPT_INBOUND_GATEWAY',
+    rowErrorCount: 3
+  });
+  assert.throws(() => service.resolveMptImportFailures([seeded[0].repairToken]), {
+    code: 'pre-fund-mpt-failure-token-expired'
+  });
+  assert.throws(() => service.resolveMptImportFailures([seeded[1].repairToken]), {
+    code: 'pre-fund-mpt-failure-token-expired'
+  });
+  assert.deepEqual(service.resolveMptImportFailures([seeded[2].repairToken]), [failures[2]]);
+});
