@@ -29,10 +29,15 @@ const SHA256_DIGEST_FIELDS = new Set([
   'contentHash',
   'expectedContentHash',
   'evidenceHash',
-  'outputPlanHash'
+  'outputPlanHash',
+  'ownerKeyHash',
+  'inputEvidenceHash',
+  'allowedChoiceDigest'
 ]);
 const FILE_PLAN_ARTIFACT_KEY_PATTERN = /^(?:input|output)-[a-f0-9]{64}$/;
 const FILE_PLAN_ARTIFACT_KEY_FIELDS = new Set(['artifactKey', 'outputArtifactKey']);
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID_FIELDS = new Set(['tokenId']);
 
 class SafeErrorValidationError extends Error {
   constructor(code, message, path = '/') {
@@ -126,7 +131,10 @@ function privacyViolation(value, path = '', options = {}, parent = null, key = n
     const isFilePlanArtifactKey = FILE_PLAN_ARTIFACT_KEY_FIELDS.has(key)
       && typeof fieldValue === 'string'
       && FILE_PLAN_ARTIFACT_KEY_PATTERN.test(fieldValue);
-    if (isSha256Digest || isFilePlanArtifactKey) {
+    const isUuid = UUID_FIELDS.has(key)
+      && typeof fieldValue === 'string'
+      && UUID_PATTERN.test(fieldValue);
+    if (isSha256Digest || isFilePlanArtifactKey || isUuid) {
       continue;
     }
     const violation = privacyViolation(fieldValue, childPath, options, value, key);

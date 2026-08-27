@@ -3,6 +3,7 @@
 const { createHash } = require('node:crypto');
 const { isDeepStrictEqual } = require('node:util');
 
+const { canonicalSha256 } = require('../background-execution/canonical-json-v1');
 const { createCanonicalEventEmitter } = require('../background-execution/adapters/canonical-event-emitter');
 const { toProtocolError } = require('../background-execution/error-codec');
 const {
@@ -18,6 +19,8 @@ const {
   createStatementStatusResult
 } = require('./contracts');
 const { createStatementServiceRequest } = require('./import-contracts');
+const { createStatementGenerationRequest } = require('./generation-contracts');
+const { executeStatementGeneration } = require('./generation');
 const {
   createStatementBigAccountContinuationRequest,
   createStatementCancelInteractionRequest
@@ -31,7 +34,8 @@ const {
   buildStableSummary,
   buildBigAccountInteractionDraft,
   buildStatementImportCandidate,
-  createStatementServiceState
+  createStatementServiceState,
+  statementGenerationInputEvidence
 } = require('./session-state');
 const { createStatementTokenStore } = require('./token-store');
 
@@ -273,6 +277,120 @@ function createStatementService(options = {}) {
     };
     activeJob = job;
     try {
+      if (start.actionKey === 'statement:generate-current' ||
+          start.actionKey === 'statement:generate-all') {
+        const scope = start.actionKey === 'statement:generate-all' ? 'all' : 'current';
+        const request = createStatementGenerationRequest(start.payload.input);
+        const session = state.sessions.get(request.sessionKey);
+        if (!session) {
+          throw new StatementServiceError(
+            'STATEMENT_GENERATION_SESSION_MISSING',
+            'Statement generation session does not exist'
+          );
+        }
+        if (request.command === 'prepare-generation') {
+          const scopeEvidenceHashes = {
+            current: statementGenerationInputEvidence(session, 'current').hash,
+            all: statementGenerationInputEvidence(session, 'all').hash
+          };
+          const tokenInputEvidenceHash = canonicalSha256({
+            sessionKey: request.sessionKey,
+            sessionRevision: state.sessionRevision,
+            scopeEvidenceHashes
+          });
+          const interactionDraft = Object.freeze({
+            purpose: 'scope-generation',
+            sessionKey: request.sessionKey,
+            sessionRevision: state.sessionRevision,
+            prompt: {
+              status: 'select-export-scope',
+              kind: request.kind === 'both' ? 'detail' : request.kind,
+              options: [
+                { scope: 'current', label: `导出当前批次文件的${request.kind === 'balance' ? '余额' : '明细'}` },
+                { scope: 'all', label: `导出所有批次文件的${request.kind === 'balance' ? '余额' : '明细'}` }
+              ]
+            },
+            allowedChoices: {
+              kind: request.kind,
+              scopes: ['current', 'all'],
+              inputEvidenceHash: tokenInputEvidenceHash
+            },
+            privateContext: {
+              evidence: {
+                sessionKey: request.sessionKey,
+                sessionRevision: state.sessionRevision,
+                inputEvidenceHash: tokenInputEvidenceHash
+              },
+              choiceDomain: {
+                kind: request.kind,
+                scopes: ['current', 'all'],
+                inputEvidenceHash: tokenInputEvidenceHash
+              },
+              scopeEvidenceHashes
+            }
+          });
+          const existingToken = tokenStore.listRecords()[0];
+          if (existingToken) {
+            releaseToken(existingToken, 'session-invalidated', { job, interactionDraft });
+            return;
+          }
+          requestInteractionToken(job, interactionDraft);
+          return;
+        }
+        if (request.sessionRevision !== state.sessionRevision ||
+            request.token.sessionRevision !== state.sessionRevision) {
+          throw new StatementServiceError('STATEMENT_TOKEN_STALE', 'Statement generation revision is stale');
+        }
+        const pendingToken = tokenStore.inspect(request.token.tokenId);
+        if (!pendingToken) {
+          throw new StatementServiceError('STATEMENT_TOKEN_STALE', 'Statement generation token is stale');
+        }
+        if (pendingToken.handle.purpose !== 'scope-generation' ||
+            !pendingToken.privateContext || !pendingToken.privateContext.scopeEvidenceHashes ||
+            !pendingToken.privateContext.choiceDomain) {
+          throw new StatementServiceError('STATEMENT_TOKEN_STALE', 'Statement generation token is stale');
+        }
+        if (pendingToken.privateContext.choiceDomain.kind !== request.kind ||
+            !pendingToken.privateContext.choiceDomain.scopes.includes(scope)) {
+          throw new StatementServiceError(
+            'STATEMENT_GENERATION_CHOICE_INVALID',
+            'Statement generation choice is not allowed'
+          );
+        }
+        const currentEvidence = statementGenerationInputEvidence(session, scope);
+        const privateEvidence = pendingToken.privateContext.evidence;
+        if (pendingToken.privateContext.scopeEvidenceHashes[scope] !== currentEvidence.hash) {
+          throw new StatementServiceError(
+            'STATEMENT_GENERATION_INPUT_STALE',
+            'Statement generation input evidence changed'
+          );
+        }
+        const tokenRecord = tokenStore.beginConsume(request.token, {
+          serviceGeneration: state.serviceGeneration,
+          sessionRevision: state.sessionRevision,
+          purpose: 'scope-generation',
+          sessionKey: request.sessionKey,
+          evidence: privateEvidence,
+          choiceDomain: pendingToken.privateContext.choiceDomain
+        });
+        Object.assign(job, { kind: 'generation', tokenRecord });
+        await new Promise((resolve) => setImmediate(resolve));
+        assertJobActive(job);
+        const result = (options.executeGeneration || executeStatementGeneration)({
+          session,
+          entries: currentEvidence.entries,
+          request,
+          scope,
+          inputEvidenceHash: currentEvidence.hash,
+          stagingRoot: options.stagingRoot,
+          storageRoot: options.storageRoot,
+          balanceTemplatePath: options.balanceTemplatePath,
+          assertNotCancelled: () => assertJobActive(job)
+        });
+        assertJobActive(job);
+        releaseToken(tokenRecord, 'token-consumed', { job, result });
+        return;
+      }
       if (start.actionKey === 'statement:resolve-big-account') {
         if (start.payload.input && start.payload.input.command === 'cancel-interaction') {
           const cancellation = createStatementCancelInteractionRequest(start.payload.input);

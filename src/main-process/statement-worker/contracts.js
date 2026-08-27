@@ -9,6 +9,10 @@ const {
 const {
   financeSafeTextViolation
 } = require('../background-execution/error-codec');
+const {
+  validateManifestItem,
+  validateStatementGenerationResult
+} = require('./generation-contracts');
 
 const MEBIBYTE = 1024 ** 2;
 const STATEMENT_PURPOSES = Object.freeze([
@@ -874,8 +878,23 @@ function createStatementFinanceSafeValueDelegate(actionKey) {
   return function allowStatementFinanceSafeValue(input = {}) {
     if (!input || typeof input !== 'object') return false;
     const { value, path, parent, key } = input;
-    if (key !== 'merchantId' || typeof value !== 'string' ||
-        financeSafeTextViolation(value) !== 'full-account') return false;
+    if (typeof value !== 'string') return false;
+    const violation = financeSafeTextViolation(value);
+    if (['statement:generate-current', 'statement:generate-all'].includes(actionKey)) {
+      try {
+        if (/^\/payload\/result\/artifacts\/(0|1)\/(artifactKey|generationPath|sha256|inputEvidenceHash)$/.test(path) &&
+            ['artifactKey', 'generationPath', 'sha256', 'inputEvidenceHash'].includes(key) &&
+            parent && parent[key] === value && validateManifestItem(parent)) {
+          return true;
+        }
+        if (path === '/payload/result/inputEvidenceHash' && key === 'inputEvidenceHash' &&
+            parent && parent[key] === value && validateStatementGenerationResult(parent)) {
+          return true;
+        }
+      } catch (_generationError) {}
+    }
+    if (violation !== 'full-account') return false;
+    if (key !== 'merchantId') return false;
     const pathKind = merchantPathKind(path);
     if (!pathKind) return false;
     const impliedPurpose = pathKind.kind === 'manual-balance' ? 'manual-balance' : 'big-account';
@@ -895,6 +914,9 @@ function createStatementResultValidator(actionKey) {
       const normalized = createStatementInteractionRequiredResult(value, actionKey);
       return canonicalizeJson(normalized) === canonicalizeJson(value);
     } catch (_error) {
+      if (['statement:generate-current', 'statement:generate-all'].includes(actionKey)) {
+        return validateStatementGenerationResult(value);
+      }
       if (!['statement:import', 'statement:resolve-big-account'].includes(actionKey)) return false;
       try {
         createStatementImportResult(value);
