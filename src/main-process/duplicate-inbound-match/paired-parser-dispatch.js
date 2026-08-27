@@ -214,10 +214,11 @@ async function executeManagedDuplicatePairedImport(rawOptions) {
   let primaryError = null;
   let parserController = null;
   let parserPhaseFailure = null;
+  let parserFailureSpool = null;
   let failureOutcomePublished = false;
   let forcedOutcomeFailure = null;
 
-  function publishParserFailure(spool, error, { deferTransportFailure = false } = {}) {
+  function publishParserFailure(spool, error) {
     try {
       writeDuplicateParserFailure(spool, error);
       failureOutcomePublished = true;
@@ -225,9 +226,7 @@ async function executeManagedDuplicatePairedImport(rawOptions) {
     } catch (publicationError) {
       const failure = outcomePublicationFailure(error, publicationError);
       forcedOutcomeFailure ||= failure;
-      if (!deferTransportFailure) {
-        failExecutionTransportForCoordinator(control, forcedOutcomeFailure);
-      }
+      failExecutionTransportForCoordinator(control, forcedOutcomeFailure);
       return forcedOutcomeFailure;
     }
   }
@@ -290,25 +289,26 @@ async function executeManagedDuplicatePairedImport(rawOptions) {
         } catch (error) {
           const ownsParserFailure = parserPhaseFailure === null;
           parserPhaseFailure ||= error;
+          if (ownsParserFailure) parserFailureSpool = spools[slotIndex];
           parserController.abort();
-          if (!ownsParserFailure || forcedOutcomeFailure || failureOutcomePublished) throw error;
-          throw publishParserFailure(spools[slotIndex], error, { deferTransportFailure: true });
+          throw error;
         }
       }
     }
     const parserTasks = Array.from({ length: parserCount }, () => parseNext());
     const settled = await Promise.allSettled(parserTasks);
     parserPhaseComplete = true;
-    // Outcome filesystem失效时Service无法自行观察terminal marker。保持parent
-    // reservation/CompoundLease直到所有真实Parser Worker exit，再权威关闭当前transport。
-    if (forcedOutcomeFailure) {
-      failExecutionTransportForCoordinator(control, forcedOutcomeFailure);
-    }
     const parserFailure = settled.find((item) => item.status === 'rejected');
     if (parserFailure) {
+      // 正常failure marker也会让Service立即终态；必须等全部真实Parser Worker exit
+      // 后才能发布，避免parent reservation/CompoundLease提前释放。
+      const terminalError = publishParserFailure(
+        parserFailureSpool || spools[0],
+        parserPhaseFailure || parserFailure.reason
+      );
       await parentWatcher;
       parentTerminal = true;
-      throw forcedOutcomeFailure || parserPhaseFailure || parserFailure.reason;
+      throw terminalError;
     }
     const bankResults = results.filter((result) => result && result.role === DUPLICATE_INPUT_ROLES.BANK);
     const documentResults = results.filter(
