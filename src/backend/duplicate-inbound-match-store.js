@@ -528,9 +528,12 @@ class DuplicateInboundMatchStore {
           sideRunId: Number(runId)
         }).receipt;
       }
-      db.exec('COMMIT');
+      // 返回值必须在事务内完整物化。COMMIT 后不得再执行可能失败的 SQL/JSON map，
+      // 否则调用方无法区分“事务未提交”与“已提交但回读/回包失败”。
       const run = this.getRun(monthKey, runId, db);
-      return receipt ? { ...run, operationReceipt: receipt } : run;
+      const completed = receipt ? { ...run, operationReceipt: receipt } : run;
+      db.exec('COMMIT');
+      return completed;
     } catch (error) {
       rollbackQuietly(db);
       throw error;
@@ -562,8 +565,27 @@ class DuplicateInboundMatchStore {
       runDataStore.sideDbPath(this.userDataDir, MODULE, monthKey)
     );
     try {
-      return db.prepare('DELETE FROM duplicate_inbound_match_runs WHERE id = ?')
-        .run(Number(runId)).changes === 1;
+      db.exec('BEGIN IMMEDIATE');
+      const receiptOwner = db.prepare(`
+        SELECT action_key, operation_key
+        FROM duplicate_inbound_match_operation_receipts
+        WHERE side_run_id = ?
+        LIMIT 1
+      `).get(Number(runId));
+      if (receiptOwner) {
+        const error = new Error('Duplicate receipt-owned run禁止cleanup删除');
+        error.code = 'DUPLICATE_RECEIPT_OWNED_RUN_DELETE_FORBIDDEN';
+        throw error;
+      }
+      const result = db.prepare(`
+        DELETE FROM duplicate_inbound_match_runs
+        WHERE id = ? AND status = 'running'
+      `).run(Number(runId));
+      db.exec('COMMIT');
+      return result.changes === 1;
+    } catch (error) {
+      rollbackQuietly(db);
+      throw error;
     } finally {
       db.close();
     }

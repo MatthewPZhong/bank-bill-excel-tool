@@ -268,6 +268,7 @@ function recoveryRequiredError() {
 }
 
 function frozenJsonCopy(value) {
+  if (value == null) return value;
   const copied = JSON.parse(JSON.stringify(value));
   const freeze = (item) => {
     if (item && typeof item === 'object' && !Object.isFrozen(item)) {
@@ -294,6 +295,25 @@ function exactManagedMirror(mirror, expected) {
     mirror.documentFileHash === expected.documentFileHash &&
     sameDuplicateSideDbRelPath(mirror.sideDbRelPath, expected.sideDbRelPath) &&
     isDeepStrictEqual(mirror.summary, expected.summary));
+}
+
+function exactRecoveryLatchPostImage(latch, expected) {
+  return Boolean(latch &&
+    latch.actionKey === expected.actionKey &&
+    latch.operationKey === expected.operationKey &&
+    latch.producerTaskRunId === expected.producerTaskRunId &&
+    latch.inputEvidenceHash === expected.inputEvidenceHash &&
+    latch.monthKey === expected.monthKey &&
+    latch.importBundleId === expected.importBundleId &&
+    (latch.sideRunId == null || latch.sideRunId === expected.sideRunId) &&
+    latch.snapshotHash === expected.snapshotHash &&
+    latch.bankFileName === expected.bankFileName &&
+    latch.bankFileHash === expected.bankFileHash &&
+    latch.documentFileName === expected.documentFileName &&
+    latch.documentFileHash === expected.documentFileHash &&
+    sameDuplicateSideDbRelPath(latch.sideDbRelPath, expected.sideDbRelPath) &&
+    (latch.resultDigest == null || latch.resultDigest === expected.resultDigest) &&
+    (latch.summary == null || isDeepStrictEqual(latch.summary, expected.summary)));
 }
 
 function runInvalidationActions(label, actions) {
@@ -419,11 +439,24 @@ class DuplicateInboundMatchService {
   observeManagedRunCommit(expected) {
     try {
       const receipt = this.store.findOperationReceipt(expected.actionKey, expected.operationKey);
-      const result = receipt
-        ? this.store.readCommittedResult(receipt.monthKey, receipt.sideRunId)
-        : null;
       const mirrors = this.database.listDuplicateInboundMatchRunMirrors()
         .filter((mirror) => mirror.operationKey === expected.operationKey);
+      if (!receipt) {
+        const pendingRun = this.store.getRun(expected.monthKey, expected.sideRunId);
+        const exactRunningPlaceholder = pendingRun && pendingRun.status === 'running' &&
+          pendingRun.id === expected.sideRunId && pendingRun.importId === expected.importBundleId &&
+          pendingRun.monthKey === expected.monthKey &&
+          pendingRun.snapshotHash === expected.snapshotHash && pendingRun.resultDigest === null;
+        const notCommitted = mirrors.length === 0 && (!pendingRun || exactRunningPlaceholder);
+        return Object.freeze({
+          outcome: notCommitted ? 'not-committed' : 'unknown',
+          receipt: null,
+          result: null,
+          mirror: null,
+          expected
+        });
+      }
+      const result = this.store.readCommittedResult(receipt.monthKey, receipt.sideRunId);
       const receiptMatches = receipt && receipt.actionKey === expected.actionKey &&
         receipt.operationKey === expected.operationKey &&
         receipt.producerTaskRunId === expected.producerTaskRunId &&
@@ -435,18 +468,64 @@ class DuplicateInboundMatchService {
       const resultMatches = receiptMatches && run && run.status === 'success' &&
         run.id === expected.sideRunId && run.importId === expected.importBundleId &&
         run.monthKey === expected.monthKey && run.snapshotHash === expected.snapshotHash &&
-        run.resultDigest === expected.resultDigest &&
-        isDeepStrictEqual(run.summary, expected.summary);
-      if (!resultMatches) return Object.freeze({ outcome: 'unknown', receipt, result, mirror: null });
+        (expected.resultDigest == null || run.resultDigest === expected.resultDigest) &&
+        (expected.summary == null || isDeepStrictEqual(run.summary, expected.summary));
+      if (!resultMatches) {
+        return Object.freeze({ outcome: 'unknown', receipt, result, mirror: null, expected });
+      }
+      const authoritativeExpected = Object.freeze({
+        ...expected,
+        resultDigest: run.resultDigest,
+        summary: run.summary
+      });
       if (mirrors.length === 0) {
-        return Object.freeze({ outcome: 'partially-committed', receipt, result, mirror: null });
+        return Object.freeze({
+          outcome: 'partially-committed',
+          receipt,
+          result,
+          mirror: null,
+          expected: authoritativeExpected
+        });
       }
-      if (mirrors.length === 1 && exactManagedMirror(mirrors[0], expected)) {
-        return Object.freeze({ outcome: 'committed', receipt, result, mirror: mirrors[0] });
+      if (mirrors.length === 1 && exactManagedMirror(mirrors[0], authoritativeExpected)) {
+        return Object.freeze({
+          outcome: 'committed',
+          receipt,
+          result,
+          mirror: mirrors[0],
+          expected: authoritativeExpected
+        });
       }
-      return Object.freeze({ outcome: 'unknown', receipt, result, mirror: null });
+      return Object.freeze({
+        outcome: 'unknown', receipt, result, mirror: null, expected: authoritativeExpected
+      });
     } catch (_error) {
-      return Object.freeze({ outcome: 'unknown', receipt: null, result: null, mirror: null });
+      return Object.freeze({
+        outcome: 'unknown', receipt: null, result: null, mirror: null, expected
+      });
+    }
+  }
+
+  reconcileManagedRunFailure(expected) {
+    const observed = this.observeManagedRunCommit(expected);
+    if (observed.outcome !== 'not-committed') {
+      this.latchRecovery(observed.expected || expected, observed.outcome);
+      return observed;
+    }
+    try {
+      const deleted = this.store.deleteRun(expected.monthKey, expected.sideRunId);
+      if (deleted) return observed;
+      const after = this.observeManagedRunCommit(expected);
+      if (after.outcome === 'not-committed') return after;
+      this.latchRecovery(after.expected || expected, after.outcome);
+      return after;
+    } catch (_cleanupError) {
+      // cleanup与receipt写入由同一side DB BEGIN IMMEDIATE互斥；任何拒绝或异常都要
+      // 再读authoritative状态并poison generation，不能继续猜测“仍未提交”。
+      const after = this.observeManagedRunCommit(expected);
+      this.latchRecovery(after.expected || expected,
+        after.outcome === 'not-committed' ? 'unknown' : after.outcome);
+      return after;
     }
   }
 
@@ -457,7 +536,7 @@ class DuplicateInboundMatchService {
       return before;
     }
     if (before.outcome !== 'partially-committed') {
-      this.latchRecovery(expected, 'unknown');
+      this.latchRecovery(before.expected || expected, 'unknown');
       throw recoveryRequiredError();
     }
     let writerError = null;
@@ -484,7 +563,7 @@ class DuplicateInboundMatchService {
     // Writer 抛错可能发生在 Main commit 之后；必须重读 side receipt/result 与 Main mirror
     // 才能决定成功、partial 或 unknown，禁止凭异常类型猜测持久状态。
     const after = this.observeManagedRunCommit(expected);
-    this.latchRecovery(expected, after.outcome);
+    this.latchRecovery(after.expected || expected, after.outcome);
     if (after.outcome === 'committed') return after;
     if (writerError) throw writerError;
     throw recoveryRequiredError();
@@ -978,25 +1057,75 @@ class DuplicateInboundMatchService {
     this.assertRunAllowedByRecoveryLatch(operationIdentity, inputEvidenceHash);
     if (!operationIdentity) this.clearPreviousRun();
     if (operationIdentity) {
-      const receipt = this.store.findOperationReceipt(
-        operationIdentity.actionKey, operationIdentity.operationKey
-      );
+      let receipt;
+      try {
+        receipt = this.store.findOperationReceipt(
+          operationIdentity.actionKey, operationIdentity.operationKey
+        );
+      } catch (error) {
+        this.latchRecovery(this.recoveryLatch || {
+          ...operationIdentity,
+          inputEvidenceHash,
+          monthKey: this.bankSession.monthKey,
+          sideRunId: null,
+          importBundleId: this.bankSession.importId,
+          snapshotHash: before.snapshotHash,
+          resultDigest: null,
+          bankFileName: this.bankSession.fileName,
+          bankFileHash: this.bankSession.fileHash,
+          documentFileName: this.documentSession.fileName,
+          documentFileHash: this.documentSession.fileHash,
+          sideDbRelPath: duplicateSideDbRelPath(this.bankSession.monthKey),
+          summary: null
+        }, 'unknown');
+        throw new DuplicateInboundMatchServiceError(
+          'duplicate-inbound-run-receipt-unreadable',
+          'Duplicate run receipt不可唯一读取',
+          { cause: error }
+        );
+      }
       if (receipt) {
+        const receiptExpected = {
+          actionKey: receipt.actionKey,
+          operationKey: receipt.operationKey,
+          producerTaskRunId: receipt.producerTaskRunId,
+          inputEvidenceHash: receipt.inputEvidenceHash,
+          monthKey: receipt.monthKey,
+          sideRunId: receipt.sideRunId,
+          importBundleId: receipt.importBundleId,
+          snapshotHash: before.snapshotHash,
+          resultDigest: null,
+          bankFileName: this.bankSession.fileName,
+          bankFileHash: this.bankSession.fileHash,
+          documentFileName: this.documentSession.fileName,
+          documentFileHash: this.documentSession.fileHash,
+          sideDbRelPath: duplicateSideDbRelPath(receipt.monthKey),
+          summary: null
+        };
         if (receipt.producerTaskRunId !== operationIdentity.producerTaskRunId ||
             receipt.monthKey !== this.bankSession.monthKey ||
             receipt.importBundleId !== this.bankSession.importId ||
             receipt.inputEvidenceHash !== inputEvidenceHash) {
-          if (this.recoveryLatch) this.latchRecovery(this.recoveryLatch, 'unknown');
+          this.latchRecovery(receiptExpected, 'unknown');
           throw new DuplicateInboundMatchServiceError(
             'duplicate-inbound-operation-identity-conflict',
             '同一Duplicate run operationKey的owner或输入证据冲突'
           );
         }
-        const result = this.recoveryLatch
-          ? null
-          : this.store.readCommittedResult(receipt.monthKey, receipt.sideRunId);
-        const committedRun = result ? result.run : this.recoveryLatch;
-        if (!committedRun || (result && result.run.status !== 'success')) {
+        let result;
+        try {
+          result = this.store.readCommittedResult(receipt.monthKey, receipt.sideRunId);
+        } catch (error) {
+          this.latchRecovery(receiptExpected, 'unknown');
+          throw new DuplicateInboundMatchServiceError(
+            'duplicate-inbound-run-receipt-target-unreadable',
+            'Duplicate run receipt对应committed side结果不可读',
+            { cause: error }
+          );
+        }
+        const committedRun = result && result.run;
+        if (!committedRun || committedRun.status !== 'success') {
+          this.latchRecovery(receiptExpected, 'unknown');
           throw new DuplicateInboundMatchServiceError(
             'duplicate-inbound-run-receipt-target-missing',
             'Duplicate run receipt对应committed side结果不存在'
@@ -1019,8 +1148,7 @@ class DuplicateInboundMatchService {
           sideDbRelPath: duplicateSideDbRelPath(receipt.monthKey),
           summary: committedRun.summary
         };
-        if (this.recoveryLatch && (receipt.sideRunId !== this.recoveryLatch.sideRunId ||
-            receipt.importBundleId !== this.recoveryLatch.importBundleId)) {
+        if (this.recoveryLatch && !exactRecoveryLatchPostImage(this.recoveryLatch, expected)) {
           this.latchRecovery(this.recoveryLatch, 'unknown');
           throw recoveryRequiredError();
         }
@@ -1059,6 +1187,25 @@ class DuplicateInboundMatchService {
         snapshot: before.snapshot,
         snapshotHash: before.snapshotHash
       });
+      if (operationIdentity) {
+        managedExpected = {
+          actionKey: operationIdentity.actionKey,
+          operationKey: operationIdentity.operationKey,
+          producerTaskRunId: operationIdentity.producerTaskRunId,
+          inputEvidenceHash,
+          monthKey: this.bankSession.monthKey,
+          sideRunId,
+          snapshotHash: before.snapshotHash,
+          resultDigest: null,
+          importBundleId: this.bankSession.importId,
+          bankFileName: this.bankSession.fileName,
+          bankFileHash: this.bankSession.fileHash,
+          documentFileName: this.documentSession.fileName,
+          documentFileHash: this.documentSession.fileHash,
+          sideDbRelPath: duplicateSideDbRelPath(this.bankSession.monthKey),
+          summary: null
+        };
+      }
       if (!operationIdentity) {
         mirrorRunId = this.database.createDuplicateInboundMatchRunMirror({
           monthKey: this.bankSession.monthKey,
@@ -1158,6 +1305,7 @@ class DuplicateInboundMatchService {
         }
       };
 
+      if (managedExpected) managedExpected = { ...managedExpected, summary };
       const finishedRun = this.store.finishRun({
         monthKey: this.bankSession.monthKey,
         runId: sideRunId,
@@ -1175,21 +1323,8 @@ class DuplicateInboundMatchService {
       sideCommitted = true;
       if (operationIdentity) {
         managedExpected = {
-          actionKey: operationIdentity.actionKey,
-          operationKey: operationIdentity.operationKey,
-          producerTaskRunId: operationIdentity.producerTaskRunId,
-          inputEvidenceHash,
-          monthKey: this.bankSession.monthKey,
-          sideRunId,
-          snapshotHash: before.snapshotHash,
+          ...managedExpected,
           resultDigest: finishedRun.resultDigest,
-          importBundleId: this.bankSession.importId,
-          bankFileName: this.bankSession.fileName,
-          bankFileHash: this.bankSession.fileHash,
-          documentFileName: this.documentSession.fileName,
-          documentFileHash: this.documentSession.fileHash,
-          sideDbRelPath: duplicateSideDbRelPath(this.bankSession.monthKey),
-          summary,
         };
         const completed = this.completeManagedMirror(managedExpected);
         mirrorRunId = completed.mirror.id;
@@ -1214,10 +1349,18 @@ class DuplicateInboundMatchService {
       };
     } catch (error) {
       if (sideRunId !== null && !sideCommitted) {
-        try {
-          if (operationIdentity) this.store.deleteRun(this.bankSession.monthKey, sideRunId);
-          else this.store.failRun(this.bankSession.monthKey, sideRunId, error);
-        } catch (_sideError) { /* 原错误优先 */ }
+        if (operationIdentity && managedExpected) {
+          try {
+            this.reconcileManagedRunFailure(managedExpected);
+          } catch (_sideError) {
+            // 观察本身异常时也绝不能回退到delete；保留完整identity poison本generation。
+            this.latchRecovery(managedExpected, 'unknown');
+          }
+        } else {
+          try {
+            this.store.failRun(this.bankSession.monthKey, sideRunId, error);
+          } catch (_sideError) { /* 原错误优先 */ }
+        }
       }
       if (mirrorRunId !== null && !(operationIdentity && managedMirrorCommitted)) {
         try {

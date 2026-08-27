@@ -525,6 +525,227 @@ test.describe('DuplicateInboundMatchService', () => {
     assert.equal(matchingLookupCount, 1, 'same receipt replay只补Main mirror');
   });
 
+  test('managed finishRun COMMIT durable回包歧义保留side并poison generation，exact replay只补mirror', async () => {
+    writeBankFile(bankFile, duplicateGroup({ prefix: 'SIDE-COMMIT-AMBIGUOUS', amount: '100' }));
+    const mptFile = path.join(userDataDir, 'MPT_INBOUND_GATEWAY_20260714001.txt');
+    writeMptFile(mptFile, '20260714', [
+      inboundMptRow({
+        reconId: 'SIDE-COMMIT-AMBIGUOUS-RECON-1', orderId: 'ORDER-1', batchSeq: '1'
+      }),
+      inboundMptRow({
+        reconId: 'SIDE-COMMIT-AMBIGUOUS-RECON-2', orderId: 'ORDER-2', batchSeq: '2'
+      })
+    ]);
+    await service.tempStore.importLegacyFile(mptFile);
+    await service.importFiles([bankFile, documentFile], null, {
+      actionKey: 'duplicate:import',
+      operationKey: 'duplicate/import/side-commit-ambiguous',
+      producerTaskRunId: 'task-duplicate-import-side-commit-ambiguous'
+    });
+    const runIdentity = {
+      actionKey: 'duplicate:run',
+      operationKey: 'duplicate/run/side-commit-ambiguous',
+      producerTaskRunId: 'task-duplicate-run-side-commit-ambiguous'
+    };
+    const originalLookup = service.tempStore.lookupInboundRows.bind(service.tempStore);
+    let matchingLookupCount = 0;
+    service.tempStore.lookupInboundRows = (...args) => {
+      matchingLookupCount += 1;
+      return originalLookup(...args);
+    };
+    const originalFinishRun = service.store.finishRun.bind(service.store);
+    service.store.finishRun = (payload) => {
+      originalFinishRun(payload);
+      throw Object.assign(new Error('injected fault after durable side COMMIT'), {
+        code: 'INJECTED_POST_COMMIT_RESULT_MAP_FAULT'
+      });
+    };
+    await assert.rejects(
+      () => service.run({ operationIdentity: runIdentity }),
+      (error) => error.code === 'INJECTED_POST_COMMIT_RESULT_MAP_FAULT'
+    );
+    assert.equal(service.recoveryLatch.outcome, 'partially-committed');
+    assert.equal(matchingLookupCount, 1);
+    assert.equal(mirrorRepository.listRunMirrors(mirror.db).length, 0);
+
+    const sidePath = runDataStore.sideDbPath(
+      userDataDir, runDataStore.MODULE_DUPLICATE_INBOUND_MATCH, '2026-07'
+    );
+    const committedSide = runDataStore.openExistingSideDb(sidePath);
+    let committedSideRunId;
+    try {
+      const receipt = operationReceipts.getOperationReceipt(
+        committedSide, runIdentity.actionKey, runIdentity.operationKey
+      );
+      committedSideRunId = receipt.sideRunId;
+      const run = committedSide.prepare(`
+        SELECT status, result_digest FROM duplicate_inbound_match_runs WHERE id = ?
+      `).get(committedSideRunId);
+      assert.equal(run.status, 'success');
+      assert.match(run.result_digest, /^[a-f0-9]{64}$/);
+      assert.equal(committedSide.prepare(`
+        SELECT COUNT(*) AS count FROM duplicate_inbound_match_runs
+      `).get().count, 1);
+      assert.ok(Number(committedSide.prepare(`
+        SELECT
+          (SELECT COUNT(*) FROM duplicate_inbound_match_mail_rows WHERE run_id = ?) +
+          (SELECT COUNT(*) FROM duplicate_inbound_match_manual_rows WHERE run_id = ?) AS count
+      `).get(committedSideRunId, committedSideRunId).count) > 0);
+      assert.equal(committedSide.prepare(`
+        SELECT COUNT(*) AS count
+        FROM duplicate_inbound_match_operation_receipts
+        WHERE action_key = 'duplicate:run'
+      `).get().count, 1);
+    } finally {
+      committedSide.close();
+    }
+
+    for (const blocked of [
+      () => service.importFiles([bankFile, documentFile], null, {
+        actionKey: 'duplicate:import',
+        operationKey: 'duplicate/import/after-side-ambiguity',
+        producerTaskRunId: 'task-duplicate-import-after-side-ambiguity'
+      }),
+      () => service.run({ operationIdentity: {
+        actionKey: 'duplicate:run',
+        operationKey: 'duplicate/run/after-side-ambiguity',
+        producerTaskRunId: 'task-duplicate-run-after-side-ambiguity'
+      } }),
+      () => service.export({ savePath: path.join(userDataDir, 'after-side-ambiguity.xlsx') })
+    ]) {
+      await assert.rejects(
+        blocked,
+        (error) => error.code === 'duplicate-inbound-recovery-required'
+      );
+    }
+
+    const originalReadCommittedResult = service.store.readCommittedResult.bind(service.store);
+    service.store.readCommittedResult = () => null;
+    await assert.rejects(
+      () => service.run({ operationIdentity: runIdentity }),
+      (error) => error.code === 'duplicate-inbound-run-receipt-target-missing'
+    );
+    assert.equal(service.recoveryLatch.outcome, 'unknown');
+    service.store.readCommittedResult = () => {
+      throw Object.assign(new Error('injected committed result read failure'), {
+        code: 'INJECTED_COMMITTED_RESULT_READ_FAILURE'
+      });
+    };
+    await assert.rejects(
+      () => service.run({ operationIdentity: runIdentity }),
+      (error) => error.code === 'duplicate-inbound-run-receipt-target-unreadable'
+    );
+    assert.equal(service.recoveryLatch.outcome, 'unknown');
+    const originalFindOperationReceipt = service.store.findOperationReceipt.bind(service.store);
+    service.store.findOperationReceipt = () => {
+      throw Object.assign(new Error('injected receipt identity ambiguity'), {
+        code: 'INJECTED_RECEIPT_IDENTITY_AMBIGUITY'
+      });
+    };
+    await assert.rejects(
+      () => service.run({ operationIdentity: runIdentity }),
+      (error) => error.code === 'duplicate-inbound-run-receipt-unreadable'
+    );
+    assert.equal(service.recoveryLatch.outcome, 'unknown');
+
+    service.store.findOperationReceipt = originalFindOperationReceipt;
+    service.store.readCommittedResult = originalReadCommittedResult;
+    service.store.finishRun = originalFinishRun;
+    const replay = await service.run({ operationIdentity: runIdentity });
+    assert.equal(replay.replayed, true);
+    assert.equal(service.lastRun.sideRunId, committedSideRunId);
+    assert.equal(service.recoveryLatch, null);
+    assert.equal(matchingLookupCount, 1, 'exact replay不得重新执行matching');
+    assert.equal(mirrorRepository.listRunMirrors(mirror.db).length, 1);
+    const verifySide = runDataStore.openExistingSideDb(sidePath);
+    try {
+      assert.equal(verifySide.prepare(
+        'SELECT COUNT(*) AS count FROM duplicate_inbound_match_runs'
+      ).get().count, 1);
+      assert.equal(verifySide.prepare(`
+        SELECT COUNT(*) AS count
+        FROM duplicate_inbound_match_operation_receipts
+        WHERE action_key = 'duplicate:run'
+      `).get().count, 1);
+    } finally {
+      verifySide.close();
+    }
+  });
+
+  test('managed pre-COMMIT无receipt只清理running placeholder并允许安全重试', async () => {
+    writeBankFile(bankFile, duplicateGroup({ prefix: 'PRE-COMMIT-ROLLBACK', amount: '100' }));
+    const mptFile = path.join(userDataDir, 'MPT_INBOUND_GATEWAY_20260714001.txt');
+    writeMptFile(mptFile, '20260714', [
+      inboundMptRow({ reconId: 'PRE-COMMIT-RECON-1', orderId: 'ORDER-1', batchSeq: '1' }),
+      inboundMptRow({ reconId: 'PRE-COMMIT-RECON-2', orderId: 'ORDER-2', batchSeq: '2' })
+    ]);
+    await service.tempStore.importLegacyFile(mptFile);
+    await service.importFiles([bankFile, documentFile], null, {
+      actionKey: 'duplicate:import',
+      operationKey: 'duplicate/import/pre-commit-cleanup',
+      producerTaskRunId: 'task-duplicate-import-pre-commit-cleanup'
+    });
+    const runIdentity = {
+      actionKey: 'duplicate:run',
+      operationKey: 'duplicate/run/pre-commit-cleanup',
+      producerTaskRunId: 'task-duplicate-run-pre-commit-cleanup'
+    };
+    const originalLookup = service.tempStore.lookupInboundRows.bind(service.tempStore);
+    let matchingLookupCount = 0;
+    service.tempStore.lookupInboundRows = (...args) => {
+      matchingLookupCount += 1;
+      return originalLookup(...args);
+    };
+    const originalFinishRun = service.store.finishRun.bind(service.store);
+    service.store.finishRun = () => {
+      throw Object.assign(new Error('injected before side COMMIT'), {
+        code: 'INJECTED_PRE_COMMIT_FAILURE'
+      });
+    };
+    await assert.rejects(
+      () => service.run({ operationIdentity: runIdentity }),
+      (error) => error.code === 'INJECTED_PRE_COMMIT_FAILURE'
+    );
+    assert.equal(service.recoveryLatch, null);
+    assert.equal(matchingLookupCount, 1);
+    const sidePath = runDataStore.sideDbPath(
+      userDataDir, runDataStore.MODULE_DUPLICATE_INBOUND_MATCH, '2026-07'
+    );
+    const afterFailure = runDataStore.openExistingSideDb(sidePath);
+    try {
+      assert.equal(afterFailure.prepare(
+        'SELECT COUNT(*) AS count FROM duplicate_inbound_match_runs'
+      ).get().count, 0);
+      assert.equal(afterFailure.prepare(`
+        SELECT COUNT(*) AS count
+        FROM duplicate_inbound_match_operation_receipts
+        WHERE action_key = 'duplicate:run'
+      `).get().count, 0);
+    } finally {
+      afterFailure.close();
+    }
+
+    service.store.finishRun = originalFinishRun;
+    const retried = await service.run({ operationIdentity: runIdentity });
+    assert.equal(retried.status, 'success');
+    assert.equal(retried.replayed, undefined);
+    assert.equal(matchingLookupCount, 2, '未提交attempt可重新执行matching');
+    assert.equal(mirrorRepository.listRunMirrors(mirror.db).length, 1);
+    const afterRetry = runDataStore.openExistingSideDb(sidePath);
+    try {
+      assert.equal(afterRetry.prepare(
+        'SELECT COUNT(*) AS count FROM duplicate_inbound_match_runs'
+      ).get().count, 1);
+      assert.equal(afterRetry.prepare(`
+        SELECT COUNT(*) AS count
+        FROM duplicate_inbound_match_operation_receipts
+        WHERE action_key = 'duplicate:run'
+      `).get().count, 1);
+    } finally {
+      afterRetry.close();
+    }
+  });
+
   test('managed conflicting mirror建立unknown latch并阻断同进程所有后续命令', async () => {
     writeBankFile(bankFile, duplicateGroup({ prefix: 'CONFLICT', amount: '100' }));
     const mptFile = path.join(userDataDir, 'MPT_INBOUND_GATEWAY_20260714001.txt');

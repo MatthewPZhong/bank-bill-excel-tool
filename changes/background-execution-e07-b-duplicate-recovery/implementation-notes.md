@@ -25,6 +25,9 @@
 | Duplicate managed side path统一写POSIX，历史path只做separator canonical comparison | Windows持久值`\\`与provider POSIX值是同一文件identity；全局修改`runDataStore`会扩大legacy行为 | 全局normalize/resolve；折叠`.`/`..`/重复separator/大小写 | 新writer跨平台稳定；历史Windows mirror可exact replay/inspect，非separator差异仍identity conflict |
 | side commit后Main CAS前后均authoritative重读并维护generation latch | writer exception既可能pre-commit，也可能commit-after-reply；同进程若继续import/run/export会删除或旁路partial证据 | 只在catch设布尔flag；盲重试matching；允许其它command | latch绑定action/operation/task/evidence/month/import/sideRun与result digest；仅exact receipt replay可补mirror，partial/unknown时其它command全部fail closed |
 | `finishRun`同side事务持久化完整result post-image SHA-256 | 三路row count无法发现同计数金额/币种/raw/reason/lineage/snapshot变化 | Startup recovery复制/重跑matching；Main保存敏感结果行 | digest覆盖稳定排序的mail/manual/audit实际JSON、snapshot/summary及五路count/disposition守恒；Main仅保存digest、summary/count，不保存raw行 |
+| `finishRun`在side事务内完成返回对象map，COMMIT后不再回读 | 二审证明COMMIT后`getRun`抛错会让Service误判未提交并执行cleanup | COMMIT后查询；只给`sideCommitted`提前赋值 | map/read失败发生在COMMIT前并整体rollback；COMMIT自身或回包歧义交由authoritative receipt/result观察 |
+| managed失败cleanup必须先证明`not-committed`，且store DELETE与receipt owner互斥 | 内存布尔不能证明SQLite COMMIT outcome；观察与删除间还需防owner race | catch无条件delete；按异常code猜结果 | receipt+validated result命中则partial/committed，读取异常/冲突则unknown latch；仅receipt absent + exact running/absent可进入`BEGIN IMMEDIATE` cleanup，receipt-owned run硬拒绝 |
+| poisoned generation的exact replay始终重读side result | latch可能源于target missing/unreadable，不能把不完整内存对象冒充committed run | latch存在时跳过side read | transient读取恢复后仍须通过digest/summary/full identity才补mirror；持续missing/unreadable保持unknown且不运行matching |
 
 ## Assumptions
 
@@ -48,7 +51,7 @@
 | 冻结验收 | 实现证据 | 测试证据 |
 | --- | --- | --- |
 | Duplicate import/run operation receipt与side mutation同事务 | `duplicate-inbound-match-store.js`在`createImportBundle`/`finishRun`的既有事务COMMIT前写receipt；`operation-receipt-repository.js`冻结exact identity | `v322-operation-receipt-e06-p0.test.js` writer fault整体rollback；`service.test.js`真实import/run receipt |
-| duplicate replay不重复业务mutation | `service.js`在invalidate/clear/matching前查receipt；Main writer异常后authoritative重读并以完整owner/op/evidence/side identity建立generation latch | `service.test.js`partial latch阻断import/different run/export；same replay只补mirror，matching lookup/side run/mirror计数不增长；conflicting mirror保持unknown |
+| duplicate replay不重复业务mutation | `service.js`在invalidate/clear/matching前查receipt；side/Main writer异常均authoritative重读并以完整owner/op/evidence/side identity建立generation latch | post-COMMIT side回包歧义保留run/result/digest/receipt；partial latch阻断import/different run/export；missing/unreadable poison；same replay只补mirror且matching/run/receipt计数不增长 |
 | Main mirror保留operationKey/producerTaskRunId与exact post-image | nullable历史migration；managed writer强校验；operation CAS比较owner/input/side/files/summary/result digest；新side path固定POSIX，历史path只做separator comparison | repository Windows `\\`→POSIX exact replay/CAS与重复separator/不同month冲突；service owner lineage、commit-after-reply authoritative成功 |
 | exact inspector五态 | `startup-recovery.js`枚举receipt source、复制DB/WAL/SHM只读证据，校验完整result digest、五路count/disposition守恒与mirror | committed/not-committed/partial/compensated/unknown、历史backslash、owner/mirror冲突、孤立sidecar、WAL零写测试 |
 | 仅committed-side执行CAS complete-mirror | provider复检相同evidence与完整side post-image；只把持久digest/summary/count写Main，不导入或调用matching engine | 同计数金额/币种内容变化TOCTOU fail closed；敏感结果不进入mirror/audit；partial由Platform Hold且不自动recover |
@@ -57,14 +60,14 @@
 
 ### Blindspot passes
 
-- `blindspot-pass`：独立review新增发现并修复跨平台path identity、Main异常后的同进程partial窗口、count-only post-image三项；复核startup模块仅做DB family复制、receipt/result/mirror检查与Main CAS/audit，没有matching算法或E07-C parser入口。
-- `reconciliation-blindspot-pass`：operation/task/import/sideRun/mirror血缘可追溯；digest覆盖mail金额币种/输出、manual raw/reason/order、audit disposition/reason与Bank/MPT/document lineage、snapshot及五路守恒；partial/unknown不重跑算法；资金红线保留真实样本人工复核。
+- `blindspot-pass`：二审发现并修复side COMMIT后回读失败仍走cleanup的真实窗口；复核所有managed cleanup现在都经过receipt/result/mirror观察，delete guard与receipt写入同side DB写锁互斥，target unreadable不会留下latch空窗。
+- `reconciliation-blindspot-pass`：operation/task/import/sideRun/mirror血缘可追溯；已提交结果在回包歧义后不删、不重跑matching，同一receipt exact replay只补Main mirror；金额/币种/匹配/候选消费/Excel仍未改，资金红线保留真实样本人工复核。
 
 ### Automated evidence
 
-- Focused/affected unit：137/137 PASS（Duplicate全部unit、digest/store/repository/wiring、E06 receipt fault）。
+- Focused/affected unit：140/140 PASS（Duplicate全部unit、digest/store/repository/wiring、E06 receipt fault；含side COMMIT ambiguity、pre-COMMIT cleanup、receipt-owned delete guard）。
 - Integration：`duplicate-inbound-match-end-to-end.js` 31/31 PASS；`background-execution-recovery-control.js` 27/27 PASS。
-- Full unit：6245/6250 PASS、3 SKIP；仅2项`windows-build-contract.test.js`因隔离worktree没有本地`node_modules/app-builder-lib/templates/nsis/multiUser.nsh`而ENOENT，非业务断言失败；相关测试以上述focused/integration覆盖。
+- Full unit：6248/6253 PASS、3 SKIP；仅2项`windows-build-contract.test.js`因隔离worktree没有本地`node_modules/app-builder-lib/templates/nsis/multiUser.nsh`而ENOENT，非业务断言失败；首轮并行压力下1项无关MPT symlink用例瞬时失败，单文件复跑与第二轮全量均PASS。
 - Static：所有改动JS `node --check` PASS；ESLint 9.39.4 `src/` PASS；`git diff --check` PASS。
 - 未运行（明确禁止）：`release-check`、`check-vars`、`scan:vars`。
 

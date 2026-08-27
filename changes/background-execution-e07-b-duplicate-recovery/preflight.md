@@ -79,3 +79,26 @@ E07-B production-false 实现没有需要用户决策的 BLOCK。以下继续阻
 
 - 新增 BLOCK：无。三项均可由既有side/Main schema、startup gate与测试确定，不需要改变公共合同或用户流程。
 - ASSUME：历史managed run/mirror缺少`result_digest`时不能安全回填，按unknown/Hold处理；这是fail-closed兼容，不放宽legacy null-operation。
+
+## Second Independent Review Repair Preflight（2026-08-28）
+
+### Goal / Context / Constraints / Done when
+
+- Goal：关闭`finishRun` side COMMIT后可失败回读导致的错误清理窗口，保证任何COMMIT outcome ambiguity都先由authoritative receipt/result证明，再决定latch或仅清理未提交placeholder。
+- Context：二审确认当前`finishRun`在`COMMIT`后调用`getRun`；该调用抛错时Service仍认为`sideCommitted=false`并执行`deleteRun`，可删除已提交run/result而留下orphan receipt且generation未poison。
+- Constraints：不改operation receipt/Main mirror公共字段，不实现E07-C/general compensation；legacy/live与production=false不变；store cleanup只收紧，不扩大删除范围。
+- Done when：事务内形成返回post-image后才COMMIT；managed failure先exact observe；receipt/result已提交或不可读/冲突均不删除并建立partial/unknown latch；只有receipt absent且target为exact running placeholder（或已不存在）才允许cleanup；receipt-owned run在store层不可删除；same exact replay只补mirror。
+
+### Unknowns Register
+
+| 未知 | 分类 | 仓库证据/探针 | 决定 |
+| --- | --- | --- | --- |
+| 如何区分COMMIT已durable但调用方未收到返回与真正pre-COMMIT失败 | PROBE | receipt与result digest在同一side事务；`running` placeholder在此前独立创建 | catch后重读exact receipt+validated result；命中为committed-side，receipt缺失且exact `running`为not-committed，其余unknown |
+| receipt查询或result map/digest读取失败时能否继续cleanup | PROBE | 当前catch吞观察错误后仍可能走`deleteRun` | 任何读取异常/identity冲突均unknown latch且不删除；不从异常类型猜COMMIT结果 |
+| cleanup检查与DELETE之间会否新出现receipt | PROBE | receipt与run位于同一side DB，SQLite可用`BEGIN IMMEDIATE`串行写入 | `deleteRun`同事务先查receipt owner，再仅删除`running`；owner存在抛专用错误 |
+| poisoned generation的exact replay如何避免复用不完整内存result | PROBE | 当前latch replay跳过side result重读 | exact replay每次重新读取authoritative committed result；missing/unreadable再次保持unknown，不用latch冒充run post-image |
+
+### BLOCK / ASSUME
+
+- 新增 BLOCK：无；提交边界、owner evidence与删除互斥均可由现有side schema和单Service模型确定。
+- ASSUME：同一Service内managed run串行，authoritative observe期间不存在第二个side writer；跨generation仍由既有startup inspector/Hold gate处理。
