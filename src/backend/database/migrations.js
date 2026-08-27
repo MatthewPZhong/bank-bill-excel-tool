@@ -1101,6 +1101,28 @@ function ensureBankBuReconRunsSideDbPath(db) {
   db.exec(`ALTER TABLE bank_bu_recon_runs ADD COLUMN side_db_rel_path TEXT`);
 }
 
+// v3.2.2 E08-A：BankBU managed run 的 side/main 共同 operation identity。
+// 历史镜像无法安全回填，因此新增列保持 nullable；managed writer 对新镜像强制完整 identity。
+function ensureBankBuReconRunIdentitySupport(db) {
+  const additions = [
+    ['side_run_id', 'INTEGER'],
+    ['operation_key', 'TEXT'],
+    ['producer_task_run_id', 'TEXT'],
+    ['input_evidence_hash', 'TEXT'],
+    ['stable_hash', 'TEXT']
+  ];
+  for (const [column, type] of additions) {
+    if (!hasColumn(db, 'bank_bu_recon_runs', column)) {
+      db.exec(`ALTER TABLE bank_bu_recon_runs ADD COLUMN ${column} ${type}`);
+    }
+  }
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_bank_bu_recon_runs_operation
+      ON bank_bu_recon_runs(operation_key)
+      WHERE operation_key IS NOT NULL;
+  `);
+}
+
 // v3.0.5 PR-4（Part B Phase 2）：给 biz_op_recon_runs 加 side_db_rel_path 列（per-月侧库元数据镜像）。
 //   值：侧库文件相对路径（run-data/biz-op-recon/month-{month(date)}.sqlite），NULL = 历史主库 run（双源过渡）。
 //   biz-op run 粒度 = (data_date, bu_name)，但侧库按对账归属月 month(date) 分片，故 rel_path 指向月侧库。
@@ -4029,6 +4051,7 @@ module.exports = {
   ensureAcquiringBillCurrencyRunsSideDbPath,
   // v3.0.5 PR-4（Part B Phase 2）：bank-bu / biz-op runs 表加 side_db_rel_path 列（侧库镜像）
   ensureBankBuReconRunsSideDbPath,
+  ensureBankBuReconRunIdentitySupport,
   ensureBizOpReconRunsSideDbPath,
   // v2.1.10 N4-cont-1 T22 (Phase 4)：raw_json idle 自动清理保留窗口 settings（v0.2 单键）
   ensureAcquiringBillCurrencyRawJsonRetentionSettings,

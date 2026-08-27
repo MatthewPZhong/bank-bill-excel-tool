@@ -524,7 +524,10 @@ const SIDE_DB_DDL_BANK_BU = `
     bank_unmatched INTEGER NOT NULL,
     anomaly_count INTEGER NOT NULL DEFAULT 0,
     anomaly_report_path TEXT,
-    export_path TEXT
+    export_path TEXT,
+    operation_key TEXT,
+    producer_task_run_id TEXT,
+    input_evidence_hash TEXT
   );
   CREATE INDEX IF NOT EXISTS idx_bbr_runs_month
     ON bank_bu_recon_runs(year_month, run_at DESC);
@@ -545,7 +548,40 @@ const SIDE_DB_DDL_BANK_BU = `
       (action_key = 'bank-bu:run' AND operation_kind = 'run' AND side_run_id IS NOT NULL AND side_run_id > 0)
     )
   );
+
+  CREATE TABLE IF NOT EXISTS bank_bu_dataset_evidence (
+    year_month TEXT PRIMARY KEY,
+    pending_count INTEGER NOT NULL CHECK (pending_count >= 0),
+    bank_count INTEGER NOT NULL CHECK (bank_count >= 0),
+    pending_evidence_hash TEXT NOT NULL,
+    bank_evidence_hash TEXT NOT NULL,
+    dataset_hash TEXT NOT NULL,
+    operation_key TEXT NOT NULL,
+    producer_task_run_id TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
 `;
+
+function ensureBankBuManagedSchema(db) {
+  db.exec(SIDE_DB_DDL_BANK_BU);
+  const columns = new Set(
+    db.prepare('PRAGMA table_info(bank_bu_recon_runs)').all().map((column) => column.name)
+  );
+  if (!columns.has('operation_key')) {
+    db.exec('ALTER TABLE bank_bu_recon_runs ADD COLUMN operation_key TEXT');
+  }
+  if (!columns.has('producer_task_run_id')) {
+    db.exec('ALTER TABLE bank_bu_recon_runs ADD COLUMN producer_task_run_id TEXT');
+  }
+  if (!columns.has('input_evidence_hash')) {
+    db.exec('ALTER TABLE bank_bu_recon_runs ADD COLUMN input_evidence_hash TEXT');
+  }
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_bbr_runs_operation
+      ON bank_bu_recon_runs(operation_key)
+      WHERE operation_key IS NOT NULL;
+  `);
+}
 
 // ── 前置资金对账临时 MPT 网关账单（v3.0.14 PR2）──
 //   一个 side DB 对应一个账单月份。批次表负责文件身份、hash 和重推序号；规范行表保留
@@ -1016,6 +1052,8 @@ function openSideDb(userDataDir, module, monthKey) {
     ensurePreFundRunArchiveSupport(db);
   } else if (module === MODULE_DUPLICATE_INBOUND_MATCH) {
     ensureDuplicateInboundMatchResultDigestSupport(db);
+  } else if (module === MODULE_BANK_BU) {
+    ensureBankBuManagedSchema(db);
   } else {
     db.exec(MODULE_DDL[module]);
   }
@@ -1121,4 +1159,5 @@ module.exports = {
   ensurePreFundGatewayArchiveSupport,
   ensurePreFundRunArchiveSupport,
   ensureDuplicateInboundMatchResultDigestSupport,
+  ensureBankBuManagedSchema,
 };
