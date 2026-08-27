@@ -36,6 +36,9 @@ let serviceIdentity = null;
 let service = null;
 let controlEventSeq = 0;
 let activeJob = null;
+// Service 一次只有一个 job；仅保留同 Worker generation 最近一个
+// 已发 terminal 的 jobId，下一个 terminal 直接替换，不建立历史集合。
+let lastTerminalJobId = null;
 let closeRequested = false;
 
 function nextId(prefix) {
@@ -63,6 +66,12 @@ function jobRef(job) {
     jobId: job.envelope.jobId,
     unitId: null
   });
+}
+
+function emitJobTerminal(job, operation, payload) {
+  const event = job.emit(operation, payload);
+  if (event) lastTerminalJobId = job.envelope.jobId;
+  return event;
 }
 
 function emitControl(operation, controlId, reference, payload) {
@@ -235,7 +244,7 @@ async function runJob(job) {
       const resultCandidate = plan.execute();
       result = await adoptCandidateAtSafepoint(job, resultCandidate);
     }
-    job.emit('job:done', { result });
+    emitJobTerminal(job, 'job:done', { result });
   } catch (error) {
     if (error && error.code === RECON_FIX_CANCELLED) {
       if (!job.cancelAckEmitted) {
@@ -243,7 +252,7 @@ async function runJob(job) {
         job.emit('cancel:ack', { cancellation: { scope: 'job' } });
       }
     }
-    job.emit('job:error', {
+    emitJobTerminal(job, 'job:error', {
       error: toProtocolError(error, error && error.code || 'RECON_FIX_SERVICE_FAILED')
     });
   } finally {
@@ -269,6 +278,11 @@ function handleJob(rawEnvelope) {
   assertJobIdentity(envelope);
   incomingJobSequence.observe(envelope);
   if (envelope.operation === 'job:cancel') {
+    if (!activeJob && lastTerminalJobId === envelope.jobId) {
+      // Worker terminal 已投递、Main 尚未 settle 时的 shutdown cancel：
+      // 同 jobId 幂等忽略，不再发 ACK/terminal，也不放宽未知 job。
+      return;
+    }
     if (!activeJob || activeJob.envelope.jobId !== envelope.jobId || activeJob.cancelRequested) {
       const error = new Error('ReconFix Service 收到无对应 active job 或重复的 cancel');
       error.code = 'RECON_FIX_CANCEL_INVALID';
@@ -361,7 +375,7 @@ parentPort.on('message', (rawMessage) => {
     else handleJob(envelope);
   } catch (error) {
     if (activeJob) {
-      activeJob.emit('job:error', {
+      emitJobTerminal(activeJob, 'job:error', {
         error: toProtocolError(error, error && error.code || 'RECON_FIX_SERVICE_PROTOCOL_ERROR')
       });
       if (service && !closeRequested) service.finish();

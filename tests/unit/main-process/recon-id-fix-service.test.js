@@ -54,6 +54,8 @@ const {
 } = require('../../../src/main-process/recon-id-fix-service/service');
 
 const tmpDirs = [];
+const TERMINAL_IN_FLIGHT_ITERATIONS =
+  process.env.RECON_FIX_TERMINAL_RACE_ITERATIONS === '100' ? 100 : 10;
 test.after(() => {
   for (const dir of tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -227,6 +229,7 @@ async function waitFor(predicate, label) {
 
 function createActiveShutdownHarness(targetAction, trigger) {
   const baseAdapter = createWorkerThreadAdapter();
+  const commands = [];
   const diagnostics = [];
   const events = [];
   let armed = false;
@@ -243,6 +246,15 @@ function createActiveShutdownHarness(targetAction, trigger) {
         ...options,
         onMessage(message) {
           events.push(message);
+          const terminalTrigger = trigger === 'job:done-before-supervisor' &&
+            message.channel === 'job' && message.direction === 'event' &&
+            message.operation === 'job:done' && message.actionKey === targetAction;
+          if (armed && !interceptedJobId && terminalTrigger) {
+            interceptedJobId = message.jobId;
+            observedActiveState = runtime.inspect(interceptedJobId).state;
+            shutdownPromise = runtime.shutdown({ timeoutMs: 10000 });
+            resolveShutdownStarted();
+          }
           options.onMessage(message);
         }
       });
@@ -250,6 +262,7 @@ function createActiveShutdownHarness(targetAction, trigger) {
         ready: handle.ready,
         worker: handle.worker,
         send(message, transferList) {
+          commands.push(message);
           handle.send(message, transferList);
           const startTrigger = trigger === 'job:start' && message.channel === 'job' &&
             message.direction === 'command' && message.operation === 'job:start' &&
@@ -281,6 +294,7 @@ function createActiveShutdownHarness(targetAction, trigger) {
     workerThreadAdapter: adapter
   });
   return Object.freeze({
+    commands,
     diagnostics,
     events,
     runtime,
@@ -619,6 +633,54 @@ test('active run shutdown 等 invalidation adoption 收口后在 result 前取�
   assert.equal(shutdown.jobId, control.jobId);
   const [result, report] = await Promise.all([control.promise, shutdown.promise]);
   assertCleanCancelledShutdown(harness, control, result, report, shutdown.observedActiveState);
+});
+
+test('adopt-ack 后 terminal-in-flight shutdown race 幂等收口且不泄漏', async () => {
+  const dir = tempDir('recon-fix-service-terminal-race-');
+  const filePath = writeStandardWorkbook(path.join(dir, 'standard.xlsx'));
+  for (let index = 0; index < TERMINAL_IN_FLIGHT_ITERATIONS; index += 1) {
+    const harness = createActiveShutdownHarness(
+      RECON_FIX_IMPORT_ACTION,
+      'job:done-before-supervisor'
+    );
+    harness.armShutdown();
+    const control = harness.runtime.start(runtimeRequest(
+      RECON_FIX_IMPORT_ACTION,
+      `recon-terminal-race-${index}`,
+      { expectedRevision: 0, filePath, subMode: 'business' }
+    ));
+    const shutdown = await harness.shutdownResult();
+    assert.equal(shutdown.jobId, control.jobId);
+    assert.equal(shutdown.observedActiveState, 'running');
+    const [result, report] = await Promise.all([control.promise, shutdown.promise]);
+    assert.equal(['completed', 'cancelled'].includes(result.outcome), true, JSON.stringify(result));
+    assert.deepEqual(report.protectedJobs, []);
+    assert.deepEqual(report.leakedTransports, []);
+    assert.deepEqual(report.errors, []);
+    assert.deepEqual(report.closedServices, [RECON_FIX_SERVICE_KEY]);
+    assert.equal(harness.runtime.resourceGovernor.snapshot().activeLeaseCount, 0);
+    assert.equal(harness.runtime.resourceGovernor.snapshot().activeDependencyCount, 0);
+    const commandOperations = harness.commands
+      .filter((message) => message.channel === 'job' && message.jobId === control.jobId)
+      .map((message) => message.operation);
+    assert.deepEqual(commandOperations, ['job:start', 'job:cancel']);
+    const eventOperations = harness.events
+      .filter((message) => message.channel === 'job' && message.jobId === control.jobId)
+      .map((message) => message.operation);
+    if (result.outcome === 'completed') {
+      assert.equal(result.terminalSource, 'job:done');
+      assert.deepEqual(report.cancelledJobs, []);
+      assert.deepEqual(eventOperations, ['job:done']);
+    } else {
+      assert.equal(result.terminalSource, 'job:error');
+      assert.equal(result.error.code, 'RECON_FIX_CANCELLED');
+      assert.deepEqual(report.cancelledJobs, [control.jobId]);
+      assert.deepEqual(eventOperations, ['cancel:ack', 'job:error']);
+    }
+    assert.equal(harness.diagnostics.some((entry) =>
+      entry.type === 'service-fatal' || entry.type === 'service-fatal-cleanup-error'), false);
+    assert.equal(harness.diagnostics.some((entry) => entry.type === 'late-message'), false);
+  }
 });
 
 test('E11-A source 不引入 JPM writer/receipt/export 实现', () => {
