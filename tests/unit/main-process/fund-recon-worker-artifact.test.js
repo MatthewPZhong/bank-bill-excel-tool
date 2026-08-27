@@ -83,6 +83,49 @@ test('任一Writer失败时清理全部planned staging文件且不留下manifest
   }
 });
 
+test('business output与manifest均拒绝指向root外不存在文件的dangling symlink', async (t) => {
+  for (const targetKind of ['business-output', 'manifest']) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'fund-recon-artifact-'));
+    const outsideRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'fund-recon-artifact-outside-'));
+    const stagingPlan = plan(root, ['main']);
+    const externalTarget = path.join(outsideRoot, `${targetKind}.xlsx`);
+    const stagedTarget = targetKind === 'manifest'
+      ? stagingPlan.manifestPath
+      : stagingPlan.outputs[0].stagingPath;
+    let writerCalled = false;
+    try {
+      fs.symlinkSync(externalTarget, stagedTarget, 'file');
+    } catch (error) {
+      fs.rmSync(root, { recursive: true, force: true });
+      fs.rmSync(outsideRoot, { recursive: true, force: true });
+      if (process.platform === 'win32' && ['EPERM', 'EACCES', 'UNKNOWN'].includes(error.code)) {
+        t.skip(`当前Windows环境不能创建文件symlink：${error.code}`);
+        return;
+      }
+      throw error;
+    }
+    try {
+      assert.equal(fs.lstatSync(stagedTarget).isSymbolicLink(), true, '测试前置必须为dangling symlink');
+      assert.equal(fs.existsSync(stagedTarget), false, 'dangling symlink必须复现existsSync=false');
+      await assert.rejects(createFundReconArtifactGenerator({
+        async writeBankStatementMainOutput() {
+          writerCalled = true;
+        }
+      }).generate({
+        processingResult: processingResult({ unmatchedRows: [{}] }),
+        bankSession: { headers: [], filePath: '/tmp/source.xlsx' },
+        evidenceSnapshot: null,
+        stagingPlan
+      }), (error) => error.code === 'FUND_RECON_STAGING_TARGET_EXISTS');
+      assert.equal(writerCalled, false, '发现既存leaf entry后不得调用Writer');
+      assert.equal(fs.existsSync(externalTarget), false, '不得在staging root外生成文件');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+      fs.rmSync(outsideRoot, { recursive: true, force: true });
+    }
+  }
+});
+
 test('成功只返回单manifest artifact，manifest绑定每个staged输出hash', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'fund-recon-artifact-'));
   const stagingPlan = plan(root, ['main']);

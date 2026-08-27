@@ -44,13 +44,13 @@
 | 证据 | 结果 | 覆盖的行为/风险 |
 | --- | --- | --- |
 | exact base / canonical checksum | Base `aa160cbf351afbe21932a8c9a536fedb25136141`；Spec `0cdf28e5310733355fb51d92818dde8fd837ee06b521a4694c0c9cc43300d47f`；TechDoc `9fd15a46b482e6801616554978dff67a02676b437b9759e18d15fce29dcff209`；policy fixture `8ab98e4b7a7b0c669892f069881c25eaaf1f8241b1e7d71e5b63eed8b2c38a22` | 防基线/合同漂移 |
-| E06-A focused tests | `23/23 PASS`（policy/service/evidence/artifact/footprint/host/真实 runtime/source reader） | action/service、state adoption、stale、staging、真实 Worker protocol |
+| E06-A focused tests | `24/24 PASS`（policy/service/evidence/artifact/footprint/host/真实 runtime/source reader） | action/service、state adoption、stale、staging、真实 Worker protocol |
 | 真实 native Worker | 两次真实 XLSX import 在同一 Service 内 revision 1→2；PersistentReservation replace/adopt完成；shutdown `leakedTransports=[]`、`errors=[]`、Governor lease/dependency=0 | init/ready、request/grant、adopted/ack、generation、资源释放与结果脱敏 |
 | service/inline golden | 相同 input/evidence 使用既有 `runReconciliation`，逐字段比较 result且行数守恒；既有资金轮次/全部场景引擎 `1012/1012 PASS` | R1→R5/M2M编排、first-match/no-op、金额币种、候选消费、标黄字段 |
 | Platform 回归 | registry/action binding/protocol/adapters/packaged request/E05-C `100/100 PASS` | 未放宽Platform v1、122-key inventory、ServiceHost correlation与既有Worker |
 | 最终组合回归 | E06-A focused + runtime inventory + Platform targets + E05-C `133/133 PASS` | 最终 runtime 注册改动与既有静态 inventory 同步且无回归 |
 | invalidation/export focused | signature drift、derivation缺失/过期、database identity、invalidate adopt ACK loss均fail closed | scenario/link/date/派生数据 stale result不可导出 |
-| artifact staging focused | lexical/physical symlink escape、path alias、pre-existing target、writer fault cleanup、单manifest hash、退款marker settlement | all-or-none、Main Publisher/settlement ownership、路径安全、低RSS hash |
+| artifact staging focused | `6/6 PASS`：lexical/physical symlink escape、业务输出与manifest dangling leaf symlink、path alias、pre-existing target、writer fault cleanup、单manifest hash、退款marker settlement | `lstat` 拒绝任何既存 leaf entry（含 dangling symlink）；all-or-none、Main Publisher/settlement ownership、路径安全、低RSS hash |
 | state footprint/十轮 | 共享引用去重、35% headroom、4KiB page、256MiB边界与连续十轮当前-state替换通过 | 证明 estimator 不累计历史 graph；**不是**真实进程 RSS/大样本证明 |
 
 ## Blindspot Self-review

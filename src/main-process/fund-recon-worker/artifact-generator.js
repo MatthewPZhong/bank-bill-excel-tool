@@ -64,6 +64,19 @@ function assertPhysicalParentInside(rootPath, candidatePath, label) {
   }
 }
 
+function assertStagingTargetAbsent(targetPath) {
+  try {
+    fs.lstatSync(targetPath);
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return;
+    throw error;
+  }
+  throw new FundReconArtifactError(
+    'FUND_RECON_STAGING_TARGET_EXISTS',
+    `staging target 已存在：${path.basename(targetPath)}`
+  );
+}
+
 function normalizeStagingPlan(rawPlan) {
   const plan = requirePlainObject(rawPlan, 'stagingPlan');
   if (plan.version !== 1 || typeof plan.stagingRoot !== 'string' || !plan.stagingRoot) {
@@ -228,12 +241,7 @@ function createFundReconArtifactGenerator(options = {}) {
       for (const plannedPath of plannedPaths) {
         fs.mkdirSync(path.dirname(plannedPath), { recursive: true });
         assertPhysicalParentInside(plan.stagingRoot, plannedPath, plannedPath);
-        if (fs.existsSync(plannedPath)) {
-          throw new FundReconArtifactError(
-            'FUND_RECON_STAGING_TARGET_EXISTS',
-            `staging target 已存在：${path.basename(plannedPath)}`
-          );
-        }
+        assertStagingTargetAbsent(plannedPath);
       }
       const channels = evidenceSnapshot && evidenceSnapshot.db
         ? listChannels(evidenceSnapshot.db)
