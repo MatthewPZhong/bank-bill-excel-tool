@@ -99,6 +99,9 @@ function createServiceHost(options = {}) {
   const setTimer = options.setTimer || setTimeout;
   const clearTimer = options.clearTimer || clearTimeout;
   const diagnostics = options.diagnostics || (() => {});
+  const persistentStateAdoptionGate = typeof options.persistentStateAdoptionGate === 'function'
+    ? options.persistentStateAdoptionGate
+    : null;
   const adapters = Object.freeze({
     'worker-thread': options.workerThreadAdapter || createWorkerThreadAdapter(),
     'utility-process': options.utilityProcessAdapter || createUtilityProcessAdapter()
@@ -1120,6 +1123,17 @@ function createServiceHost(options = {}) {
     try {
       let lease;
       try {
+        if (payload.requestKind === 'persistent-state-replace' && persistentStateAdoptionGate) {
+          await persistentStateAdoptionGate(Object.freeze({
+            actionKey: job.actionKey,
+            operationKey: job.operationKey,
+            jobId: job.jobId,
+            unitId: message.jobRef.unitId,
+            workerInstanceId: record.workerInstanceId,
+            serviceGeneration: record.serviceGeneration,
+            signal: pending.abortController.signal
+          }));
+        }
         const reservationIdentity = stableReservationIdentity(record, ownerKey);
         lease = await governor[matrix.leaseMethod]({
           ...reservationIdentity,

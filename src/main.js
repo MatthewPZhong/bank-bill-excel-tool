@@ -21,6 +21,9 @@ const {
 const {
   createRecoveryHoldGate
 } = require('./main-process/background-execution/recovery-hold-gate');
+const {
+  createWorkerDurableCoordinatorRouter
+} = require('./main-process/background-execution/worker-durable-coordinator-router');
 const { createHash, randomUUID } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -195,6 +198,25 @@ const {
 const {
   createPreFundMptReceiptAuthority
 } = require('./main-process/pre-fund-reconciliation/mpt-import/receipt-authority');
+const {
+  createReconFixJpmHoldGate
+} = require('./main-process/recon-id-fix-service/jpm-hold-gate');
+const {
+  createReconFixJpmOutcomeInspector
+} = require('./main-process/recon-id-fix-service/jpm-outcome-inspector');
+const {
+  createReconFixJpmReceiptAuthority
+} = require('./main-process/recon-id-fix-service/jpm-receipt-authority');
+const {
+  reconFixJpmRecoveryPlanTransitions
+} = require('./main-process/recon-id-fix-service/jpm-recovery-plan');
+const {
+  createReconFixJpmWorkerDurableCoordinator
+} = require('./main-process/recon-id-fix-service/jpm-worker-durable-coordinator');
+const {
+  RECON_FIX_JPM_POLICY,
+  RECON_FIX_RUN_JPM_ACTION
+} = require('./main-process/recon-id-fix-service/policies');
 // v3.0.15：重复入金匹配（银行 Reversal/Inbound 分组 + 临时入金 MPT 回填 + 双 sheet 导出）。
 const {
   createDuplicateInboundMatchService
@@ -654,9 +676,11 @@ let recoveryControlReadRepository = null;
 let recoveryHoldGate = null;
 let preFundMptHoldGate = null;
 let preFundMptWorkerDurableCoordinator = null;
+let reconFixJpmHoldGate = null;
+let backgroundWorkerDurableCoordinator = null;
 let archiveOperationTail = Promise.resolve();
 const backgroundExecutionRuntimeManager = createBackgroundExecutionRuntimeManager({
-  workerDurableCoordinatorProvider: () => preFundMptWorkerDurableCoordinator
+  workerDurableCoordinatorProvider: () => backgroundWorkerDurableCoordinator
 });
 const archiveOperationContext = new AsyncLocalStorage();
 const positionReconciliationOperationContext = new AsyncLocalStorage();
@@ -6581,12 +6605,23 @@ function registerAppHandlers() {
       //   仅 BOC 场景读 readBocFxLinkRows（普通 gateway/business/JPM 场景不查 BOC 表，零影响）。
       const isBocScenario = scenario.category === 'gateway-recon-id-fix'
         && scenario.config && scenario.config.subCategory === 'boc-dispatch-order-fix';
+      if (isJpmScenario) {
+        if (!reconFixJpmHoldGate) {
+          throw Object.assign(new Error('ReconFix JPM Recovery Hold gate 尚未初始化'), {
+            code: 'RECON_FIX_JPM_HOLD_GATE_UNAVAILABLE'
+          });
+        }
+        reconFixJpmHoldGate.assertMutationAllowed();
+      }
       const runOpts = isJpmScenario
         ? { admRows: database.readAdmBankDepositRows() }
         : (isBocScenario ? { bocLinkRows: database.readBocFxLinkRows() } : {});
       const result = runReconIdFix(scenario, clonedSheets, runOpts);
       if (isJpmScenario && result && Array.isArray(result.admUpdates)) {
         // 整批幂等重写 ADM 表匹配标志 / 资金对账ID（与 C4「run 无副作用」不同 —— TECH §4.5 标注）。
+        // engine执行期间可能有startup/live recovery创建ADM Hold；写回前再次按
+        // exact scope gate，禁止legacy路径跨过恢复阻断。
+        reconFixJpmHoldGate.assertMutationAllowed();
         database.writeAdmMatchFlags(result.admUpdates);
       }
       // v3.0.4 块 E 需求3（O2 拍板）：BOC 修复运行后若有警告 → 写 activity log（warning 级，含逐条明细）。
@@ -21462,9 +21497,13 @@ async function initializeBackgroundExecutionRecovery() {
   const inspectPreFundMpt = createPreFundMptOutcomeInspector({
     userDataDir: path.dirname(database.dbPath)
   });
+  const inspectReconFixJpm = createReconFixJpmOutcomeInspector({
+    databasePath: database.dbPath
+  });
   for (const actionKey of Object.keys(PRE_FUND_MPT_STATIC_KEYS)) {
     inspectorRegistry.register(PRE_FUND_MPT_STATIC_KEYS[actionKey].inspector, inspectPreFundMpt);
   }
+  inspectorRegistry.register(RECON_FIX_JPM_POLICY.commit.inspectorKey, inspectReconFixJpm);
 
   inspectorRegistry.freeze();
   providerRegistry.freeze();
@@ -21479,9 +21518,16 @@ async function initializeBackgroundExecutionRecovery() {
     requestOwnerRepository,
     observationAttemptRepository,
     recoveryControlRepository,
-    resolvePolicy: (actionKey) => PRE_FUND_MPT_POLICIES
-      .find((policy) => policy.actionKey === actionKey) || null,
-    planTransitions: preFundMptRecoveryPlanTransitions
+    resolvePolicy: (actionKey) => [
+      ...PRE_FUND_MPT_POLICIES,
+      RECON_FIX_JPM_POLICY
+    ].find((policy) => policy.actionKey === actionKey) || null,
+    planTransitions(input) {
+      return [
+        ...preFundMptRecoveryPlanTransitions(input),
+        ...reconFixJpmRecoveryPlanTransitions(input)
+      ];
+    }
   });
   const summary = await coordinator.scanAndRecover();
   for (const hold of recoveryControlReadRepository.listActiveRecoveryHolds()) {
@@ -21497,6 +21543,7 @@ async function initializeBackgroundExecutionRecovery() {
     readRepository: recoveryControlReadRepository,
     recoveryHoldGate
   });
+  reconFixJpmHoldGate = createReconFixJpmHoldGate({ recoveryHoldGate });
   preFundMptWorkerDurableCoordinator = createPreFundMptWorkerDurableCoordinator({
     readRepository: recoveryControlReadRepository,
     requestOwnerRepository,
@@ -21507,6 +21554,24 @@ async function initializeBackgroundExecutionRecovery() {
       outcomeInspector: inspectPreFundMpt
     }),
     conflictScopeGate: (identity) => preFundMptHoldGate.assertIdentities([identity])
+  });
+  const reconFixJpmWorkerDurableCoordinator = createReconFixJpmWorkerDurableCoordinator({
+    readRepository: recoveryControlReadRepository,
+    requestOwnerRepository,
+    recoveryControlRepository,
+    recoveryCoordinator: coordinator,
+    receiptAuthority: createReconFixJpmReceiptAuthority({
+      databasePath: database.dbPath,
+      outcomeInspector: inspectReconFixJpm
+    }),
+    conflictScopeGate: () => reconFixJpmHoldGate.assertMutationAllowed()
+  });
+  backgroundWorkerDurableCoordinator = createWorkerDurableCoordinatorRouter({
+    ...Object.fromEntries(PRE_FUND_MPT_POLICIES.map((policy) => [
+      policy.actionKey,
+      preFundMptWorkerDurableCoordinator
+    ])),
+    [RECON_FIX_RUN_JPM_ACTION]: reconFixJpmWorkerDurableCoordinator
   });
   appendActivityLogEntry({
     level: 'info',
@@ -21547,6 +21612,7 @@ function assertTaskPolicyNotHeld(policy, prepared = null) {
     return true;
   }
   for (const hold of recoveryControlReadRepository.listActiveRecoveryHolds()) {
+    if (hold.actionKey === RECON_FIX_RUN_JPM_ACTION) continue;
     const taskKeys = actionTaskBindingRegistry.allowedTaskKeys(hold.actionKey);
     if (!Array.isArray(taskKeys) || taskKeys.length === 0) {
       throw Object.assign(new Error(`Recovery Hold action 无法映射到生产 TaskPolicy：${hold.actionKey}`), {

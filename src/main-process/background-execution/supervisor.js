@@ -204,6 +204,7 @@ function createExecutionSupervisor(options = {}) {
     'thread-pool': workerThreadAdapter,
     'utility-process': utilityProcessAdapter
   });
+  const workerDurableCoordinator = options.workerDurableCoordinator || null;
   const serviceHost = options.serviceHost || (resourceGovernor
     ? createServiceHost({
         policyRegistry: options.policyRegistry,
@@ -212,10 +213,13 @@ function createExecutionSupervisor(options = {}) {
         utilityProcessAdapter,
         idFactory: options.idFactory,
         now,
-        diagnostics
+        diagnostics,
+        persistentStateAdoptionGate: workerDurableCoordinator &&
+          typeof workerDurableCoordinator.awaitPersistentStateAdoption === 'function'
+          ? workerDurableCoordinator.awaitPersistentStateAdoption
+          : null
       })
     : null);
-  const workerDurableCoordinator = options.workerDurableCoordinator || null;
   const jobs = new Map();
   const pendingTransportCleanups = new Map();
   const failedTransportCleanups = new Map();
@@ -275,8 +279,23 @@ function createExecutionSupervisor(options = {}) {
     validateStringField(jobId, 'jobId', { required: true });
     validateStringField(workerInstanceId, 'workerInstanceId', { required: true });
 
+    const defaultUnitValues = typeof options.defaultUnitsForAction === 'function'
+      ? options.defaultUnitsForAction(actionKey)
+      : [];
+    if (!Array.isArray(defaultUnitValues)) {
+      throw new SupervisorError('UNIT_REGISTRATION_INVALID', 'defaultUnitsForAction must return an array');
+    }
+    if (defaultUnitValues.length > 0 &&
+        (request.units !== undefined || request.deferUnitStart === true)) {
+      throw new SupervisorError(
+        'UNIT_REGISTRATION_OVERRIDE_FORBIDDEN',
+        'Action-owned critical unit identity cannot be overridden or deferred'
+      );
+    }
     const units = new Map();
-    for (const unitValue of request.units || []) {
+    for (const unitValue of defaultUnitValues.length > 0
+      ? defaultUnitValues
+      : (request.units || [])) {
       let unitId;
       let input;
       if (typeof unitValue === 'string') {
@@ -743,6 +762,12 @@ function createExecutionSupervisor(options = {}) {
       record.state = protectedUnit ? 'protected' : 'running';
     }
 
+    function contextTaskRunId() {
+      return ['operation', 'file-batch'].includes(context.kind)
+        ? context.value.taskRunId
+        : null;
+    }
+
     async function resolveCriticalUnit(unit, terminalSource) {
       if (!nativeWorkerDurable || !unit || !['acked', 'committed'].includes(unit.criticalState)) {
         return null;
@@ -752,7 +777,7 @@ function createExecutionSupervisor(options = {}) {
         actionKey,
         parentOperationKey: operationKey,
         fileOperationKey: unit.fileOperationKey,
-        taskRunId: context.kind === 'file-batch' ? context.value.taskRunId : null,
+        taskRunId: contextTaskRunId(),
         batchId: context.kind === 'file-batch' ? context.value.batchId : null,
         jobId,
         workerInstanceId,
@@ -886,7 +911,7 @@ function createExecutionSupervisor(options = {}) {
             policy,
             actionKey,
             parentOperationKey: operationKey,
-            taskRunId: context.kind === 'file-batch' ? context.value.taskRunId : null,
+            taskRunId: contextTaskRunId(),
             batchId: context.kind === 'file-batch' ? context.value.batchId : null,
             jobId,
             workerInstanceId,
@@ -930,7 +955,7 @@ function createExecutionSupervisor(options = {}) {
             actionKey,
             parentOperationKey: operationKey,
             fileOperationKey: unit.fileOperationKey,
-            taskRunId: context.kind === 'file-batch' ? context.value.taskRunId : null,
+            taskRunId: contextTaskRunId(),
             batchId: context.kind === 'file-batch' ? context.value.batchId : null,
             jobId,
             workerInstanceId,
@@ -944,21 +969,35 @@ function createExecutionSupervisor(options = {}) {
         }
         case 'unit:done': {
           const unit = unitForMessage(message);
-          if (nativeWorkerDurable && unit.criticalState !== 'committed') {
+          unit.result = validateResultBody(policy, message.payload.result, record.resultValidator);
+          const authorizedNoop = nativeWorkerDurable && unit.criticalState === 'none' &&
+            workerDurableCoordinator && typeof workerDurableCoordinator.acceptNoop === 'function'
+            ? await workerDurableCoordinator.acceptNoop(Object.freeze({
+                policy,
+                actionKey,
+                parentOperationKey: operationKey,
+                taskRunId: contextTaskRunId(),
+                batchId: context.kind === 'file-batch' ? context.value.batchId : null,
+                jobId,
+                workerInstanceId,
+                unitId: message.unitId,
+                result: unit.result
+              }))
+            : false;
+          if (nativeWorkerDurable && unit.criticalState !== 'committed' && authorizedNoop !== true) {
             throw new ProtocolValidationError(
               'PROTOCOL_UNIT_DONE_WITHOUT_RECEIPT',
               'worker-durable unit:done requires a persisted matching commit:receipt',
               '/unitId'
             );
           }
-          unit.result = validateResultBody(policy, message.payload.result, record.resultValidator);
-          if (nativeWorkerDurable) {
+          if (nativeWorkerDurable && unit.criticalState === 'committed') {
             await workerDurableCoordinator.settleCommitted(Object.freeze({
               policy,
               actionKey,
               parentOperationKey: operationKey,
               fileOperationKey: unit.fileOperationKey,
-              taskRunId: context.kind === 'file-batch' ? context.value.taskRunId : null,
+              taskRunId: contextTaskRunId(),
               batchId: context.kind === 'file-batch' ? context.value.batchId : null,
               jobId,
               workerInstanceId,
@@ -969,7 +1008,7 @@ function createExecutionSupervisor(options = {}) {
             }));
           }
           unit.state = 'done';
-          if (nativeWorkerDurable) unit.criticalState = 'settled';
+          if (nativeWorkerDurable) unit.criticalState = authorizedNoop === true ? 'noop' : 'settled';
           refreshProtectedState();
           settleUnit(unit, { status: 'done', result: unit.result });
           return;

@@ -29,15 +29,18 @@ const {
   createPreFundMptTopologyPlanner
 } = require('../pre-fund-reconciliation/mpt-import/topology');
 const {
-  RECON_FIX_READONLY_POLICIES,
+  RECON_FIX_JPM_UNIT_ID,
+  RECON_FIX_POLICIES,
+  RECON_FIX_RUN_JPM_ACTION,
   RECON_FIX_SERVICE_KEY,
+  validateReconFixJpmResult,
   validateReconFixServiceResult
 } = require('../recon-id-fix-service/policies');
 
 const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   ...TOOLBOX_GENERATION_POLICIES,
   ...PRE_FUND_MPT_POLICIES,
-  ...RECON_FIX_READONLY_POLICIES
+  ...RECON_FIX_POLICIES
 ]);
 
 function isBackgroundExecutionProductionEnabled(actionKey) {
@@ -92,7 +95,9 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
   const validatorEntries = {};
   for (const policy of BACKGROUND_EXECUTION_POLICIES) {
     const resultValidator = policy.moduleId === 'recon-fix'
-      ? validateReconFixServiceResult
+      ? (policy.actionKey === RECON_FIX_RUN_JPM_ACTION
+          ? validateReconFixJpmResult
+          : validateReconFixServiceResult)
       : (policy.moduleId === 'pre-fund'
       ? (policy.actionKey === PRE_FUND_MPT_REPAIR_ACTION
           ? validatePreFundMptRepairResult
@@ -157,6 +162,11 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
     executionTimeoutMs: options.executionTimeoutMs,
     shutdownTimeoutMs: options.shutdownTimeoutMs || 5000,
     workerDurableCoordinator: options.workerDurableCoordinator,
+    defaultUnitsForAction(actionKey) {
+      return actionKey === RECON_FIX_RUN_JPM_ACTION
+        ? Object.freeze([Object.freeze({ unitId: RECON_FIX_JPM_UNIT_ID, input: Object.freeze({}) })])
+        : Object.freeze([]);
+    },
     ...(options.workerThreadAdapter ? { workerThreadAdapter: options.workerThreadAdapter } : {})
   });
   return Object.freeze({
