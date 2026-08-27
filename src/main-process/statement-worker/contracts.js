@@ -614,15 +614,78 @@ const STATEMENT_RESULT_VALIDATORS = Object.freeze(Object.fromEntries(
   ])
 ));
 
+function readStatusPendingInteractions(value, pendingInteractionCount) {
+  const count = nonNegativeInteger(pendingInteractionCount, 'pendingInteractionCount');
+  const maxOutstanding = STATEMENT_RESOURCE_CONTRACT.tokenMaxOutstanding;
+  if (count > maxOutstanding) {
+    fail(
+      'STATEMENT_STATUS_INTERACTION_COUNT_INVALID',
+      'pendingInteractionCount exceeds the canonical outstanding-token limit'
+    );
+  }
+  if (utilTypes.isProxy(value) || !Array.isArray(value) ||
+      Object.getPrototypeOf(value) !== Array.prototype) {
+    fail(
+      'STATEMENT_STATUS_INTERACTIONS_INVALID',
+      'pendingInteractions must be an exact non-Proxy Array'
+    );
+  }
+
+  const lengthDescriptor = Object.getOwnPropertyDescriptor(value, 'length');
+  if (!lengthDescriptor ||
+      !Object.prototype.hasOwnProperty.call(lengthDescriptor, 'value') ||
+      !Number.isSafeInteger(lengthDescriptor.value) ||
+      lengthDescriptor.value < 0) {
+    fail(
+      'STATEMENT_STATUS_INTERACTIONS_INVALID',
+      'pendingInteractions.length must be an own data property'
+    );
+  }
+  const length = lengthDescriptor.value;
+  if (length > maxOutstanding || count !== length) {
+    fail(
+      'STATEMENT_STATUS_INTERACTION_COUNT_INVALID',
+      'pendingInteractionCount must match the bounded pendingInteractions list'
+    );
+  }
+
+  const ownKeys = Reflect.ownKeys(value);
+  const expectedKeys = Array.from({ length }, (_unused, index) => String(index));
+  expectedKeys.push('length');
+  if (ownKeys.some((key) => typeof key === 'symbol') ||
+      ownKeys.length !== expectedKeys.length ||
+      expectedKeys.some((key) => !ownKeys.includes(key))) {
+    fail(
+      'STATEMENT_STATUS_INTERACTIONS_INVALID',
+      'pendingInteractions must contain only dense index data properties and length'
+    );
+  }
+
+  const items = [];
+  for (let index = 0; index < length; index += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+    if (!descriptor || descriptor.enumerable !== true ||
+        !Object.prototype.hasOwnProperty.call(descriptor, 'value')) {
+      fail(
+        'STATEMENT_STATUS_INTERACTIONS_INVALID',
+        `pendingInteractions[${index}] must be an enumerable own data property`
+      );
+    }
+    items.push(descriptor.value);
+  }
+  return { count, items };
+}
+
 function createStatementStatusDto(input) {
   const record = ownDataRecord(input, STATUS_KEYS, 'StatementStatusDto');
   if (!STATEMENT_ACTIVE_PHASES.includes(record.activePhase)) {
     fail('STATEMENT_STATUS_PHASE_INVALID', 'activePhase is not a supported Statement phase');
   }
-  if (!Array.isArray(record.pendingInteractions)) {
-    fail('STATEMENT_STATUS_INTERACTIONS_INVALID', 'pendingInteractions must be an array');
-  }
-  const pendingInteractions = record.pendingInteractions.map((item, index) => {
+  const pendingInput = readStatusPendingInteractions(
+    record.pendingInteractions,
+    record.pendingInteractionCount
+  );
+  const pendingInteractions = pendingInput.items.map((item, index) => {
     const pending = ownDataRecord(item, STATUS_INTERACTION_KEYS, `pendingInteractions[${index}]`);
     return {
       purpose: purpose(pending.purpose, `pendingInteractions[${index}].purpose`),
@@ -636,20 +699,10 @@ function createStatementStatusDto(input) {
     batchCount: nonNegativeInteger(record.batchCount, 'batchCount'),
     fileCount: nonNegativeInteger(record.fileCount, 'fileCount'),
     rowCount: nonNegativeInteger(record.rowCount, 'rowCount'),
-    pendingInteractionCount: nonNegativeInteger(
-      record.pendingInteractionCount,
-      'pendingInteractionCount'
-    ),
+    pendingInteractionCount: pendingInput.count,
     pendingInteractions,
     activePhase: record.activePhase
   };
-  if (result.pendingInteractionCount !== pendingInteractions.length ||
-      result.pendingInteractionCount > STATEMENT_RESOURCE_CONTRACT.tokenMaxOutstanding) {
-    fail(
-      'STATEMENT_STATUS_INTERACTION_COUNT_INVALID',
-      'pendingInteractionCount must match the bounded pendingInteractions list'
-    );
-  }
   try {
     canonicalizeJson(result, { maxBytes: STATEMENT_RESOURCE_CONTRACT.statusMaxBytes });
   } catch (_error) {

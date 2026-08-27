@@ -1,12 +1,30 @@
 # E09-P0 Statement Probes Unknowns Preflight
 
+## Reviewer 4 Status Array / Progress Evidence Addendum（2026-08-28）
+
+### 合同取证与决定
+
+| 未知 | 分类 | 证据 | 当前决定 |
+| --- | --- | --- | --- |
+| `StatementStatusDto.pendingInteractions` 能否在任何元素读取前执行冻结上限检查 | PROBE | canonical `token.maxOutstanding=1`；现实现对调用方数组直接 `.map()`，计数/上限检查发生在元素访问后 | 仅为该字段增加专用 exact-Array reader：先读 own data `length`，再校验 count、上限和一致性，最后按 own data descriptor 读取最多一个元素 |
+| generic-safe interaction-shaped progress 是否应被本 PR 生产拒绝 | PROBE | Platform progress 是通用 bounded DTO 且不调用 action result validator；Statement 尚无 live Worker producer；Reviewer 已明确拒绝新增 Protocol/Supervisor deny | 不改 production progress 路径；真实 Registry/Protocol/Supervisor 只证明 generic-safe M001/scope progress 可进入 `onProgress`，但不会产生 waiting-user 或 settlement |
+
+### 修复边界
+
+- `pendingInteractions` 在任何 `map`/索引访问前拒绝 Proxy、非 exact Array、accessor、symbol/额外 own key、稀疏数组与自定义 prototype；overlimit/count mismatch 在逐项读取前稳定失败。
+- 专用 reader 只服务冻结 status 数组，最多检查一个 index；不扩成通用 hostile-JS 沙箱，也不改变 status 字段、错误语义或 canonical 上限。
+- 只声称含 `full-account` 的 Statement interaction progress 会被 canonical privacy 在 `onProgress` 前拒绝；generic-safe progress 仍遵循 Platform 通用可观测合同，不能被解释成 waiting-user/settlement。
+- `interaction-required` 仍只能由未来 Statement Worker 经 `job:done` 发出；本轮不增加 Service、token store、waiting-user hook 或 live wiring。
+
+没有新的用户选择型 BLOCK。五项 Statement policy 继续 `production=false / effectiveMode=legacy / effectiveWorkerCount=0`，资金与 Windows/真实样本人工门禁不变。
+
 ## Reviewer 3 Progress / Formatted Account Addendum（2026-08-28）
 
 ### 合同取证与决定
 
 | 未知 | 分类 | 证据 | 当前决定 |
 | --- | --- | --- | --- |
-| Statement interaction 是否允许经 `job:progress` 公开 | PROBE | v3.2.3 TechDoc §4 唯一冻结“`job:done`返回interaction-required”；Platform Contract只给progress通用bounded/rate-limit校验；E09-A/B Worker尚不存在，仓库没有Statement interaction progress producer | interaction只允许走`job:done -> result.interaction`；删除`/payload/progress/prompt/` finance-safe例外，不为尚未冻结的progress造第二套根validator |
+| Statement interaction 是否允许经 `job:progress` 公开 | PROBE | v3.2.3 TechDoc §4 唯一冻结“`job:done`返回interaction-required”；Platform Contract只给progress通用bounded/rate-limit校验；E09-A/B Worker尚不存在，仓库没有Statement interaction progress producer | 只有`job:done -> result.interaction`能形成interaction-required终态；删除`/payload/progress/prompt/` finance-safe例外，但generic-safe progress仍按Platform通用合同可观测且不形成interaction状态 |
 | 带空格/连字符的legacy merchantId如何与finance-safe对齐 | PROBE | legacy/public DTO允许bounded non-empty string；canonical `financeSafeTextViolation`把纯数字、空格或连字符格式账号归为`full-account` | delegate不复制新regex；只在四个exact merchantId domain slot且canonical violation exact为`full-account`时放行 |
 
 ### 修复边界
@@ -31,7 +49,7 @@
 | 未知 | 分类 | 证据路径 | 关闭标准 |
 | --- | --- | --- | --- |
 | function validator 的 allow delegate 能否经冻结 Registry binding 保留 | PROBE | `execution-policy-registry.js#snapshotRuntimeBinding`、`protocol-validator.js#financeSafeValueDelegate` | 使用真实 `createExecutionPolicyRegistry` 冻结后，`getBinding(action, 'result.validatorKey').allowFinanceSafeValue` 仍为本域 delegate |
-| privacy 早于 Supervisor result validator 时，合法账号能否通过且相邻伪造仍拒绝 | PROBE | `error-codec.js#assertFinanceSafeValue`、真实 `createJobEnvelope`、真实Supervisor与`validateResultBody` | 纯数字/空格/连字符账号只经done通过；interaction progress及错误action/purpose/path/parent/unknown key均在onProgress前或由exact result validator拒绝 |
+| privacy 早于 Supervisor result validator 时，合法账号能否通过且相邻伪造仍拒绝 | PROBE | `error-codec.js#assertFinanceSafeValue`、真实 `createJobEnvelope`、真实Supervisor与`validateResultBody` | 纯数字/空格/连字符账号只经done通过；含`full-account`的interaction-shaped progress在onProgress前拒绝，错误action/purpose/path/parent/unknown key由privacy或exact result validator拒绝 |
 
 没有新的用户选择型 BLOCK；完整账号只在当前真实 public interaction DTO 的 exact domain slot 获得例外，不能复用到通用日志、错误、文件名或未来未冻结 DTO。
 

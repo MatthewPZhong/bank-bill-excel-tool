@@ -19,7 +19,8 @@
 | public interaction 采用240 KiB inner ceiling + 16 KiB wire reserve，status独立保持1 MiB | 最大合法purpose DTO经真实最大route/context Protocol envelope仍低于256 KiB，+1 byte在封装前拒绝 | 让prompt共用1 MiB status ceiling；inner直接占满256 KiB | E09-B不得以status ceiling放宽Renderer payload，也不得先adopt后发现wire不可发送 |
 | 完整 `merchantId` 只由 Statement action-specific result validator 的 path-aware delegate 放行 | legacy Renderer 的大账号选择与 manual-balance prompt 明确展示完整账号；Platform privacy 为 exact domain validator 预留 allow delegate | mask/opaque choice（会改UI/选择合同并越到E09-B）；修改全局privacy regex | 仅canonical判定为`full-account`、exact done wrapper path、exact parent shape可穿越；纯数字/空格/连字符兼容，scope/message/fileName/raw/private仍拒绝 |
 | P0 result validator只冻结 `interaction-required + interaction` exact result | TechDoc明确waiting-user由`job:done`返回interaction-required；artifact success manifest属E09-C | 在P0预造artifact manifest/Publisher结果 | production仍false；E09-C必须在启用前扩展同一validator，而不是旁路本privacy binding |
-| Statement interaction不走`job:progress` | TechDoc §4唯一冻结done interaction；Platform progress没有action result validator，当前也无Statement Worker producer | 在叶子delegate前另造完整progress根validator；保留progress叶子例外 | interaction progress在Supervisor `onProgress`前被privacy拒绝；普通非interaction progress合同不变 |
+| 只有`job:done`能形成Statement interaction-required终态 | TechDoc §4唯一冻结done interaction；Platform progress没有action result validator，当前也无Statement Worker producer | 在叶子delegate前另造完整progress根validator；保留progress叶子例外；新增Protocol/Supervisor production deny | 含`full-account`的interaction-shaped progress在`onProgress`前被privacy拒绝；generic-safe M001/scope progress仍可观测，但不形成waiting-user/settlement |
+| status pending interactions使用冻结上限专用exact-Array reader | canonical maxOutstanding=1，原直接`.map()`会在count/limit前读取调用方元素 | 通用hostile graph walker；先map再校验；放宽status shape | Proxy零trap拒绝；count、own data length、上限和一致性先于最多一个own data index读取 |
 
 ## Assumptions
 
@@ -38,20 +39,23 @@
 | probe只构造session与一个pending clone | 扩为五globals inventory/projection并抽共享builder | Reviewer P1：未证明prepared/selected/source/remembered/pending唯一所有权 | probe更贴近现状但仍不是E09-A实现 | 不需要 |
 | golden只执行file-service/session core | 抽取production generation characterization seam并直接执行 | Reviewer P1：未锁定current/all workbook/name/warning/cache/missing seed/error零artifact | 保持live行为，禁止Publisher/atomic seed | 不需要 |
 | exact footprint包含TMPDIR绝对路径 | graph内改用稳定逻辑source identity，真实临时workbook仅用于seed | Reviewer P2：跨runner rawBytes漂移 | 默认与`TMPDIR=/tmp`一致 | 不需要 |
-| finance-safe-v1 会把真实纯数字或格式化账号当通用隐私泄漏拒绝 | 为五个canonical Statement result validator附加action-specific `allowFinanceSafeValue`，值域直接复用canonical `financeSafeTextViolation === 'full-account'`，并让exact result validator核对outer purpose/wrapper | 放宽/复制全局regex；按字段名全局允许；mask/choice改变业务合同 | 合法public interaction只经done走真实Protocol；错误action/purpose/path/parent与所有interaction progress仍fail closed | 不需要，属于Platform预留domain delegate |
+| finance-safe-v1 会把真实纯数字或格式化账号当通用隐私泄漏拒绝 | 为五个canonical Statement result validator附加action-specific `allowFinanceSafeValue`，值域直接复用canonical `financeSafeTextViolation === 'full-account'`，并让exact result validator核对outer purpose/wrapper | 放宽/复制全局regex；按字段名全局允许；mask/choice改变业务合同 | 合法public interaction只经done走真实Protocol；错误action/purpose/path/parent与含`full-account`的interaction-shaped progress仍fail closed；generic-safe progress不借此获得interaction语义 | 不需要，属于Platform预留domain delegate |
+| status直接对调用方`pendingInteractions`执行`.map()` | 冻结为maxOutstanding=1专用exact-Array reader，count/own data length/上限/一致性先验后才读own data index | Reviewer 4 P2：Proxy/accessor或overlimit可在拒绝前进入元素读取 | status字段、数量上限和合法0/1语义不变；hostile shape使用稳定错误码且零getter/trap读取 | 不需要，收紧既有exact DTO边界 |
+| 证据曾笼统称所有Statement interaction-shaped progress都会在`onProgress`前拒绝 | 仅保留canonical `full-account` privacy拒绝声明；补真实main-settlement action证明generic-safe M001/scope progress进入`onProgress`但`result/receiptHint`保持null | Reviewer 4 P3：Platform通用progress不调用action result validator，原描述超出真实可达证据 | 不增加production deny/hook；waiting-user仍只由未来Worker的done interaction形成 | 不需要，属于证据校正 |
 
 ## Evidence
 
 | 证据 | 结果 | 覆盖的行为/风险 |
 | --- | --- | --- |
 | exact base / canonical policy probe | HEAD `7577d5ae...`；Statement 五 action production=false；state/token budget 256 MiB；1 token；TTL 900000 ms | 防基线、资源、production gate 漂移 |
-| E09-P0 focused tests | 25/25 PASS | 五action parity、三purpose DTO/contextId替代、真实done Protocol boundary、path-aware finance-safe binding、真实Supervisor progress拒绝、footprint、五globals/TMPDIR、production generation seam与资金golden |
+| E09-P0 focused tests（Reviewer 4） | 27/27 PASS | 五action parity、三purpose DTO/contextId替代、真实done Protocol boundary、path-aware finance-safe binding、full-account progress privacy拒绝、generic-safe progress可观测边界、status exact Array、footprint、五globals/TMPDIR及资金golden |
 | Reviewer 2 affected regressions | 133/133 PASS（6 files） | 真实PolicyRegistry/Protocol/Supervisor、16/20位账号四domain slot、三purpose、错误action/purpose/path/parent/unknown key，以及legacy/probe回归 |
-| Reviewer 3 affected regressions | 134/134 PASS（6 files） | 真实PolicyRegistry/createJobEnvelope/Supervisor、formatted与纯数字四domain slot done、合法/错误purpose/private extra/non-array progress在onProgress前拒绝，以及Platform/legacy/probe回归 |
+| Reviewer 3 affected regressions | 134/134 PASS（6 files） | 真实PolicyRegistry/createJobEnvelope/Supervisor、formatted与纯数字四domain slot done、含full-account的合法/错误purpose/private extra/non-array progress在onProgress前拒绝，以及Platform/legacy/probe回归 |
+| Reviewer 4 affected regressions | 136/136 PASS（6 files） | frozen PolicyRegistry、Protocol与Supervisor通用progress合同、status 0/1及hostile array边界、formatted/pure-digit merchantId closure、Platform/legacy/probe回归 |
 | impacted unit regressions | 209/209 PASS（43 suites） | seed/file-service、policy/interactive preflight、big-account preview与新增合同/golden/probe |
 | 全量unit（环境审计） | 6195 PASS、2 FAIL、3 SKIP（6200 tests/831 suites） | 两个失败均为隔离worktree无本地`node_modules/app-builder-lib/.../multiUser.nsh`的Windows contract环境路径；其余6195通过，非业务断言失败 |
-| 50k/4批次/1 token standalone probe | Reviewer 3复跑default与`TMPDIR=/tmp`的deterministic部分一致：state raw/estimated 23,614,188/35,422,208 B；pending raw/estimated 5,912,626/8,871,936 B；public DTO 805 B；default retained heap/RSS delta 13,615,592/48,316,416 B，`/tmp`为13,615,392/48,906,240 B；两类各自低于268,435,456 B | 五globals production-shape target的retained-state量级、唯一所有权与estimator headroom；动态heap/RSS不进入exact golden，不代表parser peak/真实业务/Windows批准 |
-| affected ESLint + `node --check` + `git diff --check` | PASS | Main薄委托、generation seam、三个contract/probe模块及全部变更JS语法/空白检查 |
+| 50k/4批次/1 token standalone probe | Reviewer 4复跑default与`TMPDIR=/tmp`的deterministic部分一致：state raw/estimated 23,614,188/35,422,208 B；pending raw/estimated 5,912,626/8,871,936 B；public DTO 805 B；default retained heap/RSS delta 13,615,592/48,431,104 B，`/tmp`为13,615,392/48,873,472 B；两类各自低于268,435,456 B | 五globals production-shape target的retained-state量级、唯一所有权与estimator headroom；动态heap/RSS不进入exact golden，不代表parser peak/真实业务/Windows批准 |
+| affected ESLint + `node --check` + `git diff --check` | PASS | Reviewer 4变更的Statement contracts/test语法、lint与全部diff空白检查通过；此前Main薄委托、generation seam与probe模块检查仍保留 |
 | static live-path gate | PASS：`src/main.js` 与 background runtime无 `statement-worker` 引用；canonical 五 action仍 production=false | P0未切Main/IPC/Worker/live路径 |
 
 隔离 worktree 没有独立 `node_modules`，直接运行依赖 `xlsx` 的用例会报 `MODULE_NOT_FOUND`。上述所有测试与 probe 均通过只读 `NODE_PATH=/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules` 使用主仓库已安装依赖执行；这是环境依赖，不是业务断言失败。
@@ -62,7 +66,8 @@
 | --- | --- | --- |
 | 入口旁路 | 新模块只被probe/tests引用，未注册Main、IPC、ServiceHost、Worker entry或background index | 静态测试与`rg`；五action production=false/effectiveMode=legacy |
 | DTO/private泄露 | token handle exact-eight且拒绝extra/getter/Proxy；public DTO剥离`reservationId/sessionKey`并递归拒绝rows/prepared batch/path/grant/private context；status不含token/reservation | DTO正反测试、getter零读取与256 KiB超限测试 |
-| domain privacy例外 | delegate由冻结canonical `result.validatorKey` binding取得，只接受四个真实`merchantId` slot、canonical `full-account`值域、exact done path与exact邻接shape；outer purpose由exact result validator复核；progress无例外 | 真实Registry + Protocol/Supervisor；formatted/pure-digit done正例，message/fileName/scope注入、错误action/wrapper/parent/unknown key及合法/伪造progress反例 |
+| domain privacy例外 | delegate由冻结canonical `result.validatorKey` binding取得，只接受四个真实`merchantId` slot、canonical `full-account`值域、exact done path与exact邻接shape；outer purpose由exact result validator复核；progress无delegate例外 | 真实Registry + Protocol/Supervisor；formatted/pure-digit done正例，message/fileName/scope注入、错误action/wrapper/parent/unknown key及full-account-bearing progress反例；generic-safe M001/scope progress进入`onProgress`但不产生terminal result |
+| status summary边界 | `pendingInteractions`只接受exact non-Proxy Array；own data length与count/上限/一致性先验，随后才descriptor-read最多一个dense index | 0/1正例、accessor index、Proxy零trap、sparse/extra/symbol/custom prototype/non-array、overlimit/count mismatch零item读取与稳定错误码 |
 | 资源双算/漏算 | persistent与pending独立计费；shared/cycle只计一次；数组enumerable/non-enumerable metadata与exact Map/Set计入；production-shape不需要的binary O(1)拒绝；unsupported prototype/accessor/Proxy/function/symbol/weak collection fail closed | footprint unit + large-view快速拒绝 + 25k child probe + 50k standalone probe |
 | 状态生命周期 | P0没有token store、grant/adopt、TTL/replay/stale/crash逻辑，因此不会用本地对象假装resource handshake完成 | E09-B继续保持BLOCK；本PR只冻结DTO/estimator |
 | 失败模式 | estimator超预算抛稳定错误且不返回reservation大小；public/status超byte ceiling fail closed | budget/size反例；live未接线所以无半采用状态 |

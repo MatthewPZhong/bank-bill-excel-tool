@@ -116,7 +116,14 @@ function statementEventEnvelope({ actionKey, operation, payload }, policyRegistr
   }, { policyRegistry });
 }
 
-function statementEventForCommand(command, operation, payload, policyRegistry, validate = true) {
+function statementEventForCommand(
+  command,
+  operation,
+  payload,
+  policyRegistry,
+  validate = true,
+  seq = 1
+) {
   return createJobEnvelope({
     direction: 'event',
     operation,
@@ -126,7 +133,7 @@ function statementEventForCommand(command, operation, payload, policyRegistry, v
     workerInstanceId: command.workerInstanceId,
     serviceGeneration: command.serviceGeneration,
     unitId: null,
-    seq: 1,
+    seq,
     context: command.context,
     payload
   }, validate ? { policyRegistry } : { validate: false });
@@ -149,7 +156,7 @@ function createStatementSupervisorHarness(policyRegistry, onJobStart) {
         serviceGeneration: 3,
         createdGeneration: false,
         baseLeaseId: 'statement-supervisor-base',
-        baseResources: policyRegistry.get('statement:import').resources.base,
+        baseResources: policyRegistry.get(openRequest.actionKey).resources.base,
         ready: Promise.resolve(),
         send(message) {
           if (message.operation === 'job:start') onJobStart(message, openRequest);
@@ -244,6 +251,31 @@ function scopeGenerationPrompt(kind = 'detail') {
       { scope: 'all', label: `导出所有批次文件的${fieldLabel}` }
     ]
   };
+}
+
+function statementStatusInput(overrides = {}) {
+  return {
+    serviceGeneration: 3,
+    sessionRevision: 9,
+    sessionCount: 1,
+    batchCount: 2,
+    fileCount: 3,
+    rowCount: 1200,
+    pendingInteractionCount: 0,
+    pendingInteractions: [],
+    activePhase: 'idle',
+    ...overrides
+  };
+}
+
+function assertStatusPendingInteractionsError(pendingInteractions, count, expectedCode) {
+  assert.throws(
+    () => createStatementStatusDto(statementStatusInput({
+      pendingInteractionCount: count,
+      pendingInteractions
+    })),
+    (error) => error.code === expectedCode
+  );
 }
 
 function formattedBigAccountInteraction() {
@@ -672,7 +704,7 @@ test('done merchantId例外对错误action/purpose/path/parent/unknown key保持
   );
 });
 
-test('真实Supervisor在onProgress前拒绝Statement interaction progress且只接受合法done', async () => {
+test('真实Supervisor在onProgress前拒绝含full-account的Statement interaction progress且接受合法done', async () => {
   const policyRegistry = createStatementPolicyRegistry();
   const validInteraction = formattedBigAccountInteraction();
   const wrongPurpose = structuredClone(validInteraction);
@@ -730,6 +762,68 @@ test('真实Supervisor在onProgress前拒绝Statement interaction progress且只
   assert.equal(completed.outcome, 'completed');
   assert.deepEqual(completed.result, doneResult);
   assert.deepEqual(observed, []);
+  await supervisor.shutdown({ timeoutMs: 1000 });
+});
+
+test('真实Supervisor让generic-safe M001/scope progress进入onProgress但不产生waiting-user/settlement终态', async () => {
+  const policyRegistry = createStatementPolicyRegistry();
+  const m001Interaction = createStatementPublicInteractionDto({
+    token: token({ purpose: 'manual-balance' }),
+    prompt: manualBalancePrompt()
+  });
+  const scopeInteraction = createStatementPublicInteractionDto({
+    token: token({ purpose: 'scope-generation' }),
+    prompt: scopeGenerationPrompt()
+  });
+  const observed = [];
+  const supervisor = createStatementSupervisorHarness(policyRegistry, (command, openRequest) => {
+    openRequest.onMessage(statementEventForCommand(
+      command,
+      'job:progress',
+      { progress: m001Interaction },
+      policyRegistry,
+      true,
+      1
+    ));
+    openRequest.onMessage(statementEventForCommand(
+      command,
+      'job:progress',
+      { progress: scopeInteraction },
+      policyRegistry,
+      true,
+      2
+    ));
+    openRequest.onMessage(statementEventForCommand(
+      command,
+      'job:error',
+      {
+        error: {
+          code: 'STATEMENT_PROGRESS_BOUNDARY_STOP',
+          message: '结束通用progress边界验证',
+          stage: 'execute',
+          detailLines: []
+        }
+      },
+      policyRegistry,
+      true,
+      3
+    ));
+  });
+  const execution = await supervisor.execute(statementSupervisorRequest(
+    (value) => observed.push(value),
+    {
+      actionKey: 'statement:generate-current',
+      jobId: 'statement-supervisor-generic-safe-progress'
+    }
+  ));
+
+  assert.equal(policyRegistry.get('statement:generate-current').commit.kind, 'main-settlement');
+  assert.deepEqual(observed, [m001Interaction, scopeInteraction]);
+  assert.equal(execution.outcome, 'failed');
+  assert.equal(execution.terminalSource, 'job:error');
+  assert.equal(execution.result, null);
+  assert.equal(execution.receiptHint, null);
+  assert.equal(execution.error.code, 'STATEMENT_PROGRESS_BOUNDARY_STOP');
   await supervisor.shutdown({ timeoutMs: 1000 });
 });
 
@@ -843,17 +937,11 @@ test('Token/status DTO对extra key、getter、Proxy、digest和outstanding数量
   );
   assert.equal(promptGetterReads, 0);
 
-  const status = createStatementStatusDto({
-    serviceGeneration: 3,
-    sessionRevision: 9,
-    sessionCount: 1,
-    batchCount: 2,
-    fileCount: 3,
-    rowCount: 1200,
+  const status = createStatementStatusDto(statementStatusInput({
     pendingInteractionCount: 1,
     pendingInteractions: [{ purpose: 'manual-balance', expiresAt: 1787847300000 }],
     activePhase: 'waiting-user'
-  });
+  }));
   assert.deepEqual(status.pendingInteractions, [
     { expiresAt: 1787847300000, purpose: 'manual-balance' }
   ]);
@@ -861,22 +949,130 @@ test('Token/status DTO对extra key、getter、Proxy、digest和outstanding数量
   assert.equal(JSON.stringify(status).includes('reservation'), false);
 
   assert.throws(
-    () => createStatementStatusDto({
-      serviceGeneration: 3,
-      sessionRevision: 9,
-      sessionCount: 1,
-      batchCount: 2,
-      fileCount: 3,
-      rowCount: 1200,
+    () => createStatementStatusDto(statementStatusInput({
       pendingInteractionCount: 2,
       pendingInteractions: [
         { purpose: 'big-account', expiresAt: 1787847300000 },
         { purpose: 'manual-balance', expiresAt: 1787847300001 }
       ],
       activePhase: 'waiting-user'
-    }),
+    })),
     (error) => error.code === 'STATEMENT_STATUS_INTERACTION_COUNT_INVALID'
   );
+});
+
+test('status pendingInteractions在任何item读取前冻结exact Array shape、count和单token上限', () => {
+  const emptyStatus = createStatementStatusDto(statementStatusInput());
+  assert.equal(emptyStatus.pendingInteractionCount, 0);
+  assert.deepEqual(emptyStatus.pendingInteractions, []);
+
+  const oneStatus = createStatementStatusDto(statementStatusInput({
+    pendingInteractionCount: 1,
+    pendingInteractions: [{ purpose: 'big-account', expiresAt: 1787847300000 }],
+    activePhase: 'waiting-user'
+  }));
+  assert.deepEqual(oneStatus.pendingInteractions, [
+    { expiresAt: 1787847300000, purpose: 'big-account' }
+  ]);
+
+  let accessorReads = 0;
+  const accessorIndex = [];
+  Object.defineProperty(accessorIndex, '0', {
+    enumerable: true,
+    configurable: true,
+    get() {
+      accessorReads += 1;
+      return { purpose: 'big-account', expiresAt: 1787847300000 };
+    }
+  });
+  assertStatusPendingInteractionsError(
+    accessorIndex,
+    1,
+    'STATEMENT_STATUS_INTERACTIONS_INVALID'
+  );
+  assert.equal(accessorReads, 0);
+
+  let proxyTraps = 0;
+  const proxyArray = new Proxy([], {
+    get(target, key, receiver) {
+      proxyTraps += 1;
+      return Reflect.get(target, key, receiver);
+    },
+    getPrototypeOf(target) {
+      proxyTraps += 1;
+      return Reflect.getPrototypeOf(target);
+    },
+    ownKeys(target) {
+      proxyTraps += 1;
+      return Reflect.ownKeys(target);
+    },
+    getOwnPropertyDescriptor(target, key) {
+      proxyTraps += 1;
+      return Reflect.getOwnPropertyDescriptor(target, key);
+    }
+  });
+  assertStatusPendingInteractionsError(proxyArray, 0, 'STATEMENT_STATUS_INTERACTIONS_INVALID');
+  assert.equal(proxyTraps, 0);
+
+  const sparse = new Array(1);
+  const extraKey = [];
+  extraKey.privateContext = {};
+  const symbolKey = [];
+  symbolKey[Symbol('private')] = {};
+  const customPrototype = [];
+  Object.setPrototypeOf(customPrototype, Object.create(Array.prototype));
+  for (const [value, count] of [
+    [sparse, 1],
+    [extraKey, 0],
+    [symbolKey, 0],
+    [customPrototype, 0],
+    [Object.create(Array.prototype), 0]
+  ]) {
+    assertStatusPendingInteractionsError(value, count, 'STATEMENT_STATUS_INTERACTIONS_INVALID');
+  }
+
+  let overlimitItemReads = 0;
+  const overlimit = [];
+  Object.defineProperty(overlimit, '0', {
+    enumerable: true,
+    configurable: true,
+    get() {
+      overlimitItemReads += 1;
+      return { purpose: 'big-account', expiresAt: 1787847300000 };
+    }
+  });
+  overlimit.length = 2;
+  assertStatusPendingInteractionsError(
+    overlimit,
+    1,
+    'STATEMENT_STATUS_INTERACTION_COUNT_INVALID'
+  );
+  assert.equal(overlimitItemReads, 0);
+
+  assertStatusPendingInteractionsError(
+    accessorIndex,
+    0,
+    'STATEMENT_STATUS_INTERACTION_COUNT_INVALID'
+  );
+  assert.equal(accessorReads, 0);
+
+  let overcountProxyTraps = 0;
+  const overcountProxy = new Proxy([], {
+    get() {
+      overcountProxyTraps += 1;
+      return undefined;
+    },
+    ownKeys() {
+      overcountProxyTraps += 1;
+      return ['length'];
+    }
+  });
+  assertStatusPendingInteractionsError(
+    overcountProxy,
+    2,
+    'STATEMENT_STATUS_INTERACTION_COUNT_INVALID'
+  );
+  assert.equal(overcountProxyTraps, 0);
 });
 
 test('footprint覆盖Statement数组metadata/共享引用/循环图并按50% headroom页对齐', () => {
