@@ -28,6 +28,7 @@ const { createReconFixService } = require('./service');
 if (!parentPort) throw new Error('ReconFix Service 需要 worker_threads parentPort');
 
 const ALLOWED_ACTIONS = new Set([RECON_FIX_IMPORT_ACTION, RECON_FIX_RUN_READONLY_ACTION]);
+const RECON_FIX_CANCELLED = 'RECON_FIX_CANCELLED';
 const incomingControlSequence = createDirectionSequenceTracker();
 const incomingJobSequence = createDirectionSequenceTracker();
 const pendingRequests = new Map();
@@ -39,6 +40,20 @@ let closeRequested = false;
 
 function nextId(prefix) {
   return `${prefix}-${crypto.randomUUID()}`;
+}
+
+function cancellationError() {
+  const error = new Error('ReconFix Service 已在安全点取消');
+  error.code = RECON_FIX_CANCELLED;
+  error.stage = 'cancel';
+  return error;
+}
+
+async function cancellationSafepoint(job) {
+  // parse/engine 都是同步 legacy 逻辑；先让出一个 event-loop turn，
+  // 使 parse 期间到达的 job:cancel 能被观测，再决定是否进入 adoption。
+  await new Promise((resolve) => setImmediate(resolve));
+  if (job.cancelRequested) throw cancellationError();
 }
 
 function jobRef(job) {
@@ -128,6 +143,20 @@ function requestPersistentAdoption(job, candidate) {
   });
 }
 
+async function adoptCandidateAtSafepoint(job, candidate) {
+  await cancellationSafepoint(job);
+  try {
+    const result = await requestPersistentAdoption(job, candidate);
+    // resource request 一旦发出就不伪造平台 cancel 方言；等待
+    // grant/reject/adopt-ack 真实收口后，再在下一安全点终止 job。
+    await cancellationSafepoint(job);
+    return result;
+  } catch (error) {
+    if (job.cancelRequested) throw cancellationError();
+    throw error;
+  }
+}
+
 function handleResourceGrant(envelope) {
   const payload = envelope.payload;
   const pending = pendingRequests.get(payload.requestId);
@@ -196,15 +225,24 @@ async function runJob(job) {
     const plan = service.begin(job.envelope.actionKey, job.envelope.payload.input);
     let result;
     if (plan.kind === 'candidate') {
-      result = await requestPersistentAdoption(job, plan.candidate);
+      result = await adoptCandidateAtSafepoint(job, plan.candidate);
     } else {
       if (plan.invalidationCandidate) {
-        await requestPersistentAdoption(job, plan.invalidationCandidate);
+        await adoptCandidateAtSafepoint(job, plan.invalidationCandidate);
       }
-      result = await requestPersistentAdoption(job, plan.execute());
+      // invalidation 已 adopt 后、result 计算/采用前的阶段边界。
+      await cancellationSafepoint(job);
+      const resultCandidate = plan.execute();
+      result = await adoptCandidateAtSafepoint(job, resultCandidate);
     }
     job.emit('job:done', { result });
   } catch (error) {
+    if (error && error.code === RECON_FIX_CANCELLED) {
+      if (!job.cancelAckEmitted) {
+        job.cancelAckEmitted = true;
+        job.emit('cancel:ack', { cancellation: { scope: 'job' } });
+      }
+    }
     job.emit('job:error', {
       error: toProtocolError(error, error && error.code || 'RECON_FIX_SERVICE_FAILED')
     });
@@ -230,6 +268,15 @@ function handleJob(rawEnvelope) {
   });
   assertJobIdentity(envelope);
   incomingJobSequence.observe(envelope);
+  if (envelope.operation === 'job:cancel') {
+    if (!activeJob || activeJob.envelope.jobId !== envelope.jobId || activeJob.cancelRequested) {
+      const error = new Error('ReconFix Service 收到无对应 active job 或重复的 cancel');
+      error.code = 'RECON_FIX_CANCEL_INVALID';
+      throw error;
+    }
+    activeJob.cancelRequested = true;
+    return;
+  }
   if (envelope.operation !== 'job:start') {
     const error = new Error(`ReconFix E11-A 不支持 job operation：${envelope.operation}`);
     error.code = 'RECON_FIX_JOB_OPERATION_UNSUPPORTED';
@@ -244,7 +291,9 @@ function handleJob(rawEnvelope) {
   }
   const job = {
     envelope,
-    emit: createCanonicalEventEmitter(envelope, (event) => parentPort.postMessage(event))
+    emit: createCanonicalEventEmitter(envelope, (event) => parentPort.postMessage(event)),
+    cancelRequested: false,
+    cancelAckEmitted: false
   };
   activeJob = job;
   void runJob(job);

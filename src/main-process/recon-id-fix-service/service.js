@@ -9,6 +9,7 @@ const { canonicalSha256 } = require('../background-execution/canonical-json-v1')
 const { sanitizeFinanceSafeValue } = require('../background-execution/error-codec');
 const { readReconIdFixFile } = require('../recon-id-fix-io');
 const { runReconIdFix } = require('../recon-id-fix-engine');
+const { reconFixEvidenceSha256 } = require('./evidence-projection');
 const {
   RECON_FIX_IMPORT_ACTION,
   RECON_FIX_RUN_READONLY_ACTION
@@ -111,7 +112,7 @@ function buildScenarioSnapshot(scenario) {
   }
   return Object.freeze({
     value: owned,
-    hash: canonicalSha256(owned, { maxBytes: 262144 })
+    hash: reconFixEvidenceSha256(owned, { maxBytes: 262144 })
   });
 }
 
@@ -126,7 +127,7 @@ function readBocEvidence(dbPath) {
     const rows = readBocFxLinkRows(db);
     return Object.freeze({
       rows,
-      hash: canonicalSha256(rows)
+      hash: reconFixEvidenceSha256(rows)
     });
   } finally {
     if (db) db.close();
@@ -225,7 +226,7 @@ function createReconFixService(options = {}) {
           importedAt: imported.importedAt,
           subMode,
           sheetCounts,
-          inputEvidenceHash: canonicalSha256({ subMode, sheets: imported.sheets })
+          inputEvidenceHash: reconFixEvidenceSha256({ subMode, sheets: imported.sheets })
         };
         return Object.freeze({
           kind: 'candidate',
@@ -288,7 +289,7 @@ function createReconFixService(options = {}) {
             unmatchedRows: ownedResult.unmatchedRows || [],
             stats: ownedResult.stats
           };
-          const resultDigest = canonicalSha256({
+          const resultDigest = reconFixEvidenceSha256({
             fixedRows: privateResult.fixedRows,
             warnings: privateResult.warnings,
             unmatchedRows: privateResult.unmatchedRows,

@@ -65,7 +65,7 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
   const workerRoot = path.resolve(__dirname, '..', 'toolbox-background');
   const reconFixEntry = Object.freeze({
     path: path.resolve(__dirname, '..', 'recon-id-fix-service', 'worker-entry.js'),
-    cancellationTerminalErrorCodes: Object.freeze([])
+    cancellationTerminalErrorCodes: Object.freeze(['RECON_FIX_CANCELLED'])
   });
   const entryRegistry = createStaticRegistry(Object.fromEntries(
     BACKGROUND_EXECUTION_POLICIES.map((policy) => {

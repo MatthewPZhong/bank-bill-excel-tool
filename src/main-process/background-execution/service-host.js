@@ -1452,6 +1452,15 @@ function createServiceHost(options = {}) {
     job.onMessage(message);
   }
 
+  function routeCancellationTerminal(record) {
+    // WorkerThreadAdapter 已按 entry 白名单确认 cancellation terminal code；
+    // ServiceHost 只把这份现有私有因果证据转交给当前唯一 job。
+    const job = record.jobs.values().next().value;
+    if (job && typeof job.onCancellationTerminal === 'function') {
+      job.onCancellationTerminal();
+    }
+  }
+
   function handleMessage(record, rawMessage) {
     if (record.closed) return;
     try {
@@ -1610,6 +1619,7 @@ function createServiceHost(options = {}) {
         entry: profile.entry,
         policy,
         onMessage: (message) => handleMessage(record, message),
+        onCancellationTerminal: () => routeCancellationTerminal(record),
         onError: (error) => { void fatal(record, error); },
         onExit: (code, signal) => { void fatalExit(record, code, signal); }
       });
@@ -1705,6 +1715,7 @@ function createServiceHost(options = {}) {
       jobId: request.jobId,
       policy,
       onMessage: request.onMessage,
+      onCancellationTerminal: request.onCancellationTerminal,
       onError: request.onError,
       onExit: request.onExit,
       detaching: false,
