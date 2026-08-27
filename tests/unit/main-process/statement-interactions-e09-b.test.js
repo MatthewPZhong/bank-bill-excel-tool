@@ -561,6 +561,13 @@ test('continuation phase取得失败且lock补偿首次失败时仅同owner可�
 
 test('waiting-user cancel仅在exact token owner ack后终结且失败仅允许同owner重试', async () => {
   const coordinator = createStatementWaitingUserCoordinator();
+  assert.deepEqual(Object.keys(coordinator).sort(), [
+    'beginContinuation',
+    'cancelInteraction',
+    'enterWaiting',
+    'forgetCancelled',
+    'settleContinuation'
+  ], '公开facade不得暴露无exact cleanup receipt的waiting删除入口');
   const token = {
     tokenId: 'token-cancel', purpose: 'big-account', serviceGeneration: 2, sessionRevision: 4,
     expiresAt: 3000, allowedChoiceDigest: 'd'.repeat(64)
@@ -578,6 +585,7 @@ test('waiting-user cancel仅在exact token owner ack后终结且失败仅允许�
       attempts += 1;
       assert.deepEqual(input.token, token);
       if (attempts === 1) return Promise.reject(new Error('transient owner failure'));
+      if (attempts === 2) return Promise.resolve(undefined);
       return new Promise((resolve) => { acknowledge = resolve; });
     }
   };
@@ -585,11 +593,19 @@ test('waiting-user cancel仅在exact token owner ack后终结且失败仅允许�
     taskRunId: 'task-cancel', taskKey: 'file:import', originOperationKey: 'op-origin',
     token, cancelOwnerKey: 'worker-generation-2', cancelOwner: owner
   };
+  assert.throws(() => coordinator.cancelInteraction({
+    ...request,
+    token: { tokenId: token.tokenId }
+  }), (error) => error.code === 'STATEMENT_WAITING_TOKEN_INVALID');
   await assert.rejects(coordinator.cancelInteraction(request), /transient owner failure/);
   assert.throws(() => coordinator.cancelInteraction({
     ...request,
     cancelOwnerKey: 'worker-generation-3'
   }), (error) => error.code === 'STATEMENT_CONTINUATION_OWNER_MISMATCH');
+  await assert.rejects(
+    coordinator.cancelInteraction(request),
+    (error) => error.code === 'STATEMENT_CANCEL_ACK_INVALID'
+  );
   const first = coordinator.cancelInteraction(request);
   const duplicate = coordinator.cancelInteraction(request);
   assert.strictEqual(first, duplicate, 'in-flight duplicate必须共用同一ack promise');
@@ -599,7 +615,7 @@ test('waiting-user cancel仅在exact token owner ack后终结且失败仅允许�
   assert.equal(settled, false, 'owner ack前Task不得cancelled');
   acknowledge({ status: 'interaction-cancelled', tokenId: token.tokenId });
   assert.deepEqual(await first, { taskRunId: 'task-cancel', status: 'cancelled', phase: null });
-  assert.equal(attempts, 2);
+  assert.equal(attempts, 3);
   assert.equal(coordinator.forgetCancelled({ taskRunId: 'task-cancel', tokenId: token.tokenId }), true);
 });
 
@@ -1096,6 +1112,7 @@ test('真实Host/Governor/Worker显式cancel-interaction等待exact release-ack�
   );
 
   const coordinator = createStatementWaitingUserCoordinator();
+  assert.equal(coordinator.invalidate, undefined, '真实Host调用面不得有无ack invalidation旁路');
   await coordinator.enterWaiting({
     taskRunId,
     taskKey: 'file:import',
@@ -1186,6 +1203,13 @@ test('真实Host/Governor/Worker显式cancel-interaction等待exact release-ack�
   assert.equal(status.result.summary.sessionRevision, 1);
   assert.equal(status.result.summary.fileCount, 1);
   assert.equal(status.result.summary.pendingInteractionCount, 0);
+  assert.equal(
+    harness.resourceGovernor.snapshot().activeLeases.filter((lease) =>
+      lease.kind === 'pending-interaction'
+    ).length,
+    0,
+    'exact release-ack后PendingInteractionReservation必须归零'
+  );
   assert.deepEqual(
     harness.resourceGovernor.snapshot().activeLeases.map((lease) => lease.kind).sort(),
     ['base', 'persistent']

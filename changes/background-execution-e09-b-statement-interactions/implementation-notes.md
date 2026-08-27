@@ -18,6 +18,7 @@
 | 新 interaction 先 release/ack 旧 token 再申请新 reservation | 单 Service 一个重 token，session mutation 必须使旧 token 失效 | 超限报错或并存两个 token | mutation race 保持 one-owner/one-token，旧 context 在新 request 前已删除 |
 | token `prepare` 阶段先构造最终 public projection/result | Ultra finding 证明合法大 prompt 可在 adopt 后才触发 240 KiB 上限 | grant 后再裁剪；提高 public 上限 | 任何 pending-interaction resource request 前即稳定拒绝，public DTO 不裁剪、不泄露 private rows |
 | 显式 waiting-user cancel 复用既有 `statement:resolve-big-account` action 的 exact command | 不新增第六 action，不关闭整代；Worker 才能权威校验并释放自己的 token | Main 只删 coordinator record；关闭 generation 代偿 | full public token identity 校验，release-ack 后返回 bounded cancel result；同 owner/同 token 幂等 |
+| waiting-user public facade 只保留 `cancelInteraction()` 取消入口 | 全仓检索证明无 `invalidate()` 真实调用方，原入口仅凭 `taskRunId + tokenId` 删记录，可跳过 Worker exact cleanup/release-ack | 保留无 ack invalidation；关闭 generation 代偿 | facade 删除 `invalidate()`；partial token、错 owner、无 receipt 均 fail closed；`forgetCancelled()` 仅在 exact receipt 已将状态推进到 `cancelled` 后删除本地终态记录 |
 | post-grant 异常保存 exact tentative tombstone，等待 Host revoke 后回声 release | tentative reservation 只能由 Main 发起 revoke，Worker 直接 release 会违反 platform FSM | Worker 主动 release tentative；依赖 crash 清理 | token/persistent 两条 grant 异常均单终态、revoke/release/ack、同 generation 继续 |
 | continuation phase 失败且 lock 补偿失败进入 cleanup-required | 盲目回到 waiting-user 会遗失仍持有的 lock | 无条件复位后重新 acquire | 保存首个 phase error 与 exact owner/lock；同 owner 只先重试 release，确认后下一 job 才能重获 |
 
@@ -39,13 +40,13 @@
 
 | 证据 | 结果 | 覆盖的行为/风险 |
 | --- | --- | --- |
-| 修复后 E09-B 定向 unit/真实 Worker probes | `15/15 PASS` | 双 source initial/continuation cancel、600 accounts pre-grant reject、token adoption timeout、post-grant token/persistent cleanup、显式 cancel、零交易、cleanup-required |
+| 修复后 E09-B 定向 unit/真实 Worker probes | `15/15 PASS` | 双 source initial/continuation cancel、600 accounts pre-grant reject、token adoption timeout、post-grant token/persistent cleanup、显式 cancel、零交易、cleanup-required；facade 无 invalidation 旁路，partial token/错 owner/无 receipt 拒绝，release-ack 前 Task 不终结、后 Worker pending/PendingInteraction lease 归零 |
 | E09-B + E09-A + E09-P0 + ServiceHost/Governor/Supervisor 定向 unit | `208/208 PASS` | reservation FSM、TTL/single-use/stale/tamper、mutation invalidation、candidate digest、lock/phase、同 TaskRun/new job、privacy/bounded DTO、production gate |
 | `scripts/integration/statement-generation-pipeline.js` | `45/45 PASS` | 既有金额/借贷/余额生成 pipeline 未回归 |
-| changed JS ESLint | PASS | 7 个实现 JS 文件与 E09-B 测试无 lint 问题 |
+| changed JS ESLint | PASS | 8 个实现 JS 文件与 E09-B 测试无 lint 问题；第二轮改动的 coordinator/测试使用共享 `NODE_PATH` 复验通过 |
 | changed JS `node --check` | PASS | 语法检查 |
 | `git diff --check` | PASS | whitespace/patch 完整性 |
-| blindspot-pass | 已复核入口旁路、source alias、grant/adopt 可见性、mutation/expiry/cancel/crash/quit、late release ack、partial lock cleanup | 修复 post-terminal request、tentative owner、consumed/cancel tombstone disposition 与 cleanup-required；未发现可解除人工门禁的新证据 |
+| blindspot-pass | 已枚举 public coordinator `cancelInteraction`、Worker `cancel-interaction` 与 Worker 内部 mutation/expiry/consume/close release；`forgetCancelled` 只清理已确认终态 | 移除唯一无 ack public `invalidate` 旁路；保留 exact receipt/crash-cleanup、late release ack 与 owner-aware retry 合同；未发现可解除人工门禁的新证据 |
 | reconciliation-blindspot-pass | 资金红线保持人工复核；自动证据证明 mapper 单一来源、零交易 fail closed、两 block 行守恒与 token evidence | 不改变非零金额/币种/余额算法，不生成 artifact，不自动声明资金正确 |
 
 ## Remaining Unknowns

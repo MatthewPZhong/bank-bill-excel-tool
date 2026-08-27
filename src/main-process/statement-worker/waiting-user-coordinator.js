@@ -200,17 +200,6 @@ function createStatementWaitingUserCoordinator() {
     return Object.freeze({ taskRunId: input.taskRunId, status: input.outcome, phase: null });
   }
 
-  function invalidate(input) {
-    const record = tasks.get(input.taskRunId);
-    if (!record) return false;
-    if (record.token.tokenId !== input.tokenId) fail('STATEMENT_WAITING_IDENTITY_MISMATCH', 'Invalidation token mismatch');
-    if (record.state !== 'waiting-user') {
-      fail('STATEMENT_CONTINUATION_ACTIVE', 'Cannot invalidate while an ownership transition is active');
-    }
-    tasks.delete(input.taskRunId);
-    return true;
-  }
-
   function cancelInteraction(input) {
     const token = boundedToken(input.token);
     const record = tasks.get(input.taskRunId);
@@ -275,7 +264,6 @@ function createStatementWaitingUserCoordinator() {
     cancelInteraction,
     enterWaiting,
     forgetCancelled,
-    invalidate,
     settleContinuation
   });
 }
