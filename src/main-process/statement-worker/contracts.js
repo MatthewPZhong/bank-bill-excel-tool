@@ -6,6 +6,9 @@ const {
   canonicalJsonSnapshot,
   canonicalizeJson
 } = require('../background-execution/canonical-json-v1');
+const {
+  financeSafeTextViolation
+} = require('../background-execution/error-codec');
 
 const MEBIBYTE = 1024 ** 2;
 const STATEMENT_PURPOSES = Object.freeze([
@@ -133,7 +136,6 @@ const FORBIDDEN_PUBLIC_KEYS = new Set([
   'privateContext'
 ]);
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
-const FINANCE_SAFE_MERCHANT_ID_PATTERN = /^\d{12,32}$/;
 
 class StatementContractError extends Error {
   constructor(code, message, details = null) {
@@ -542,12 +544,8 @@ function createStatementInteractionRequiredResult(input, actionKey) {
 
 function merchantPathKind(path) {
   if (typeof path !== 'string') return null;
-  const prefixes = [
-    '/payload/progress/prompt/',
-    '/payload/result/interaction/prompt/'
-  ];
-  const prefix = prefixes.find((candidate) => path.startsWith(candidate));
-  if (!prefix) return null;
+  const prefix = '/payload/result/interaction/prompt/';
+  if (!path.startsWith(prefix)) return null;
   const relativePath = path.slice(prefix.length);
   if (relativePath === 'merchantId') return Object.freeze({ kind: 'manual-balance', index: 0 });
   const match = /^(bigAccounts|expandedBigAccountOptions|fixedAssignments)\/(0|[1-9]\d*)\/merchantId$/.exec(
@@ -580,7 +578,7 @@ function createStatementFinanceSafeValueDelegate(actionKey) {
     if (!input || typeof input !== 'object') return false;
     const { value, path, parent, key } = input;
     if (key !== 'merchantId' || typeof value !== 'string' ||
-        !FINANCE_SAFE_MERCHANT_ID_PATTERN.test(value)) return false;
+        financeSafeTextViolation(value) !== 'full-account') return false;
     const pathKind = merchantPathKind(path);
     if (!pathKind) return false;
     const impliedPurpose = pathKind.kind === 'manual-balance' ? 'manual-balance' : 'big-account';

@@ -1,11 +1,28 @@
 # E09-P0 Statement Probes Unknowns Preflight
 
+## Reviewer 3 Progress / Formatted Account Addendum（2026-08-28）
+
+### 合同取证与决定
+
+| 未知 | 分类 | 证据 | 当前决定 |
+| --- | --- | --- | --- |
+| Statement interaction 是否允许经 `job:progress` 公开 | PROBE | v3.2.3 TechDoc §4 唯一冻结“`job:done`返回interaction-required”；Platform Contract只给progress通用bounded/rate-limit校验；E09-A/B Worker尚不存在，仓库没有Statement interaction progress producer | interaction只允许走`job:done -> result.interaction`；删除`/payload/progress/prompt/` finance-safe例外，不为尚未冻结的progress造第二套根validator |
+| 带空格/连字符的legacy merchantId如何与finance-safe对齐 | PROBE | legacy/public DTO允许bounded non-empty string；canonical `financeSafeTextViolation`把纯数字、空格或连字符格式账号归为`full-account` | delegate不复制新regex；只在四个exact merchantId domain slot且canonical violation exact为`full-account`时放行 |
+
+### 修复边界
+
+- 真实Supervisor测试必须证明含完整账号的合法/错误purpose/private extra/non-array interaction progress都在`onProgress`前被拒；合法formatted/pure-digit interaction只经done与exact result validator完成。
+- 不修改Protocol progress schema、Supervisor、全局error-codec/regex或Renderer业务shape；普通模块progress仍沿用Platform bounded contract。
+- 五项Statement policy继续`production=false / effectiveMode=legacy / effectiveWorkerCount=0`；E09-A/B仍是后续门禁。
+
+没有新的用户选择型 BLOCK。若后续合同要让interaction走progress，必须先冻结purpose-specific完整progress根validator并反向同步TechDoc，不能恢复叶子级例外。
+
 ## Reviewer 2 Privacy Addendum（2026-08-28）
 
 ### 接受的 finding 与边界
 
 - BLOCK 已关闭：legacy Renderer 的大账号选择与 manual-balance prompt 都展示完整 `merchantId`，因此不能改成 masked/opaque choice；本轮仅为 Statement exact domain result validator 增加路径感知的 `allowFinanceSafeValue`。
-- delegate 只在 canonical Statement action binding 下、真实 `job:progress` 或 `job:done -> interaction-required` wrapper 的 exact `merchantId` 路径、且 immediate parent 是对应 purpose 的 exact public prompt/item shape 时，允许 12～32 位纯数字账号穿越 `finance-safe-v1`。
+- 第三轮收紧后，delegate只在canonical Statement action binding下、真实`job:done -> interaction-required` wrapper的exact `merchantId`路径、且immediate parent是对应purpose的exact public prompt/item shape时，允许canonical判定为`full-account`的账号穿越`finance-safe-v1`。
 - `scope-generation` 没有 `merchantId` 例外；错误 action/purpose/path/parent、unknown key、message/fileName/raw row/private context 继续 fail closed。
 - 不修改全局 `error-codec`、privacy regex 或 Protocol；不实现 E09-A Service、E09-B token store/waiting-user，也不改变五项 policy 的 `production=false / effectiveMode=legacy / effectiveWorkerCount=0`。
 
@@ -14,7 +31,7 @@
 | 未知 | 分类 | 证据路径 | 关闭标准 |
 | --- | --- | --- | --- |
 | function validator 的 allow delegate 能否经冻结 Registry binding 保留 | PROBE | `execution-policy-registry.js#snapshotRuntimeBinding`、`protocol-validator.js#financeSafeValueDelegate` | 使用真实 `createExecutionPolicyRegistry` 冻结后，`getBinding(action, 'result.validatorKey').allowFinanceSafeValue` 仍为本域 delegate |
-| privacy 早于 Supervisor result validator 时，合法账号能否通过且相邻伪造仍拒绝 | PROBE | `error-codec.js#assertFinanceSafeValue`、真实 `createJobEnvelope`、`validateResultBody` | 16/20 位账号覆盖 progress/done；错误 action/purpose/path/parent/unknown key 均由 privacy 或 exact result validator 拒绝 |
+| privacy 早于 Supervisor result validator 时，合法账号能否通过且相邻伪造仍拒绝 | PROBE | `error-codec.js#assertFinanceSafeValue`、真实 `createJobEnvelope`、真实Supervisor与`validateResultBody` | 纯数字/空格/连字符账号只经done通过；interaction progress及错误action/purpose/path/parent/unknown key均在onProgress前或由exact result validator拒绝 |
 
 没有新的用户选择型 BLOCK；完整账号只在当前真实 public interaction DTO 的 exact domain slot 获得例外，不能复用到通用日志、错误、文件名或未来未冻结 DTO。
 

@@ -17,8 +17,9 @@
 | pending private context 与 persistent state 独立估算、独立对 256 MiB ceiling 判定 | canonical policy 明确两类资源，不能以共享总额掩盖任一超限 | 把两类 graph 合成一个预算；用 JSON byte length 代替 retained graph | E09-A/B 申请 reservation 时可分别 fail closed |
 | estimator 固定 50% headroom 并按 4 KiB 向上取整 | 修复后50k probe的state+token reservation为44,294,144 B，高于本次retained heap delta 13,615,608 B；数组metadata/shared/cycle已覆盖 | 把单次RSS当精确资源值；只算enumerable JSON | P0提供可复现保守输入，但仍不宣称真实峰值上界 |
 | public interaction 采用240 KiB inner ceiling + 16 KiB wire reserve，status独立保持1 MiB | 最大合法purpose DTO经真实最大route/context Protocol envelope仍低于256 KiB，+1 byte在封装前拒绝 | 让prompt共用1 MiB status ceiling；inner直接占满256 KiB | E09-B不得以status ceiling放宽Renderer payload，也不得先adopt后发现wire不可发送 |
-| 完整 `merchantId` 只由 Statement action-specific result validator 的 path-aware delegate 放行 | legacy Renderer 的大账号选择与 manual-balance prompt 明确展示完整账号；Platform privacy 为 exact domain validator 预留 allow delegate | mask/opaque choice（会改UI/选择合同并越到E09-B）；修改全局privacy regex | 仅12～32位纯数字、exact progress/done wrapper path、exact parent shape可穿越；scope/message/fileName/raw/private仍拒绝 |
+| 完整 `merchantId` 只由 Statement action-specific result validator 的 path-aware delegate 放行 | legacy Renderer 的大账号选择与 manual-balance prompt 明确展示完整账号；Platform privacy 为 exact domain validator 预留 allow delegate | mask/opaque choice（会改UI/选择合同并越到E09-B）；修改全局privacy regex | 仅canonical判定为`full-account`、exact done wrapper path、exact parent shape可穿越；纯数字/空格/连字符兼容，scope/message/fileName/raw/private仍拒绝 |
 | P0 result validator只冻结 `interaction-required + interaction` exact result | TechDoc明确waiting-user由`job:done`返回interaction-required；artifact success manifest属E09-C | 在P0预造artifact manifest/Publisher结果 | production仍false；E09-C必须在启用前扩展同一validator，而不是旁路本privacy binding |
+| Statement interaction不走`job:progress` | TechDoc §4唯一冻结done interaction；Platform progress没有action result validator，当前也无Statement Worker producer | 在叶子delegate前另造完整progress根validator；保留progress叶子例外 | interaction progress在Supervisor `onProgress`前被privacy拒绝；普通非interaction progress合同不变 |
 
 ## Assumptions
 
@@ -37,18 +38,19 @@
 | probe只构造session与一个pending clone | 扩为五globals inventory/projection并抽共享builder | Reviewer P1：未证明prepared/selected/source/remembered/pending唯一所有权 | probe更贴近现状但仍不是E09-A实现 | 不需要 |
 | golden只执行file-service/session core | 抽取production generation characterization seam并直接执行 | Reviewer P1：未锁定current/all workbook/name/warning/cache/missing seed/error零artifact | 保持live行为，禁止Publisher/atomic seed | 不需要 |
 | exact footprint包含TMPDIR绝对路径 | graph内改用稳定逻辑source identity，真实临时workbook仅用于seed | Reviewer P2：跨runner rawBytes漂移 | 默认与`TMPDIR=/tmp`一致 | 不需要 |
-| finance-safe-v1 会把真实数字账号当通用隐私泄漏拒绝 | 为五个canonical Statement result validator附加action-specific `allowFinanceSafeValue`，并让exact result validator核对outer purpose/wrapper | 放宽全局regex；按字段名全局允许；mask/choice改变业务合同 | 合法public interaction可走真实Protocol；错误action/purpose/path/parent仍fail closed | 不需要，属于Platform预留domain delegate |
+| finance-safe-v1 会把真实纯数字或格式化账号当通用隐私泄漏拒绝 | 为五个canonical Statement result validator附加action-specific `allowFinanceSafeValue`，值域直接复用canonical `financeSafeTextViolation === 'full-account'`，并让exact result validator核对outer purpose/wrapper | 放宽/复制全局regex；按字段名全局允许；mask/choice改变业务合同 | 合法public interaction只经done走真实Protocol；错误action/purpose/path/parent与所有interaction progress仍fail closed | 不需要，属于Platform预留domain delegate |
 
 ## Evidence
 
 | 证据 | 结果 | 覆盖的行为/风险 |
 | --- | --- | --- |
 | exact base / canonical policy probe | HEAD `7577d5ae...`；Statement 五 action production=false；state/token budget 256 MiB；1 token；TTL 900000 ms | 防基线、资源、production gate 漂移 |
-| E09-P0 focused tests | 24/24 PASS | 五action parity、三purpose DTO/contextId替代、真实Protocol boundary、path-aware finance-safe binding、footprint、五globals/TMPDIR、production generation seam与资金golden |
+| E09-P0 focused tests | 25/25 PASS | 五action parity、三purpose DTO/contextId替代、真实done Protocol boundary、path-aware finance-safe binding、真实Supervisor progress拒绝、footprint、五globals/TMPDIR、production generation seam与资金golden |
 | Reviewer 2 affected regressions | 133/133 PASS（6 files） | 真实PolicyRegistry/Protocol/Supervisor、16/20位账号四domain slot、三purpose、错误action/purpose/path/parent/unknown key，以及legacy/probe回归 |
+| Reviewer 3 affected regressions | 134/134 PASS（6 files） | 真实PolicyRegistry/createJobEnvelope/Supervisor、formatted与纯数字四domain slot done、合法/错误purpose/private extra/non-array progress在onProgress前拒绝，以及Platform/legacy/probe回归 |
 | impacted unit regressions | 209/209 PASS（43 suites） | seed/file-service、policy/interactive preflight、big-account preview与新增合同/golden/probe |
 | 全量unit（环境审计） | 6195 PASS、2 FAIL、3 SKIP（6200 tests/831 suites） | 两个失败均为隔离worktree无本地`node_modules/app-builder-lib/.../multiUser.nsh`的Windows contract环境路径；其余6195通过，非业务断言失败 |
-| 50k/4批次/1 token standalone probe | Reviewer 2复跑default与`TMPDIR=/tmp`的deterministic部分一致：state raw/estimated 23,614,188/35,422,208 B；pending raw/estimated 5,912,626/8,871,936 B；public DTO 805 B；default retained heap/RSS delta 13,615,592/48,906,240 B，`/tmp`为13,615,408/47,759,360 B；两类各自低于268,435,456 B | 五globals production-shape target的retained-state量级、唯一所有权与estimator headroom；动态heap/RSS不进入exact golden，不代表parser peak/真实业务/Windows批准 |
+| 50k/4批次/1 token standalone probe | Reviewer 3复跑default与`TMPDIR=/tmp`的deterministic部分一致：state raw/estimated 23,614,188/35,422,208 B；pending raw/estimated 5,912,626/8,871,936 B；public DTO 805 B；default retained heap/RSS delta 13,615,592/48,316,416 B，`/tmp`为13,615,392/48,906,240 B；两类各自低于268,435,456 B | 五globals production-shape target的retained-state量级、唯一所有权与estimator headroom；动态heap/RSS不进入exact golden，不代表parser peak/真实业务/Windows批准 |
 | affected ESLint + `node --check` + `git diff --check` | PASS | Main薄委托、generation seam、三个contract/probe模块及全部变更JS语法/空白检查 |
 | static live-path gate | PASS：`src/main.js` 与 background runtime无 `statement-worker` 引用；canonical 五 action仍 production=false | P0未切Main/IPC/Worker/live路径 |
 
@@ -60,7 +62,7 @@
 | --- | --- | --- |
 | 入口旁路 | 新模块只被probe/tests引用，未注册Main、IPC、ServiceHost、Worker entry或background index | 静态测试与`rg`；五action production=false/effectiveMode=legacy |
 | DTO/private泄露 | token handle exact-eight且拒绝extra/getter/Proxy；public DTO剥离`reservationId/sessionKey`并递归拒绝rows/prepared batch/path/grant/private context；status不含token/reservation | DTO正反测试、getter零读取与256 KiB超限测试 |
-| domain privacy例外 | delegate由冻结canonical `result.validatorKey` binding取得，只接受四个真实`merchantId` slot、12～32位数字、exact progress/done path与exact邻接shape；outer purpose由exact result validator复核 | 真实Registry + `job:progress`/`job:done` builders；message/fileName/scope注入、错误action/wrapper/parent/unknown key反例 |
+| domain privacy例外 | delegate由冻结canonical `result.validatorKey` binding取得，只接受四个真实`merchantId` slot、canonical `full-account`值域、exact done path与exact邻接shape；outer purpose由exact result validator复核；progress无例外 | 真实Registry + Protocol/Supervisor；formatted/pure-digit done正例，message/fileName/scope注入、错误action/wrapper/parent/unknown key及合法/伪造progress反例 |
 | 资源双算/漏算 | persistent与pending独立计费；shared/cycle只计一次；数组enumerable/non-enumerable metadata与exact Map/Set计入；production-shape不需要的binary O(1)拒绝；unsupported prototype/accessor/Proxy/function/symbol/weak collection fail closed | footprint unit + large-view快速拒绝 + 25k child probe + 50k standalone probe |
 | 状态生命周期 | P0没有token store、grant/adopt、TTL/replay/stale/crash逻辑，因此不会用本地对象假装resource handshake完成 | E09-B继续保持BLOCK；本PR只冻结DTO/estimator |
 | 失败模式 | estimator超预算抛稳定错误且不返回reservation大小；public/status超byte ceiling fail closed | budget/size反例；live未接线所以无半采用状态 |
@@ -74,6 +76,7 @@
 - 主键/状态血缘：golden按真实session key、batch id、entry id冻结current/all成员和稳定顺序；删除当前entry后只回退到上一有效batch。P0未改legacy globals、session mutation或artifact cache。
 - 金额/方向/行数：direct、signed、field-conditional、bill split/merge均执行真实`buildMappedRows`；零金额进入`skippedRows`，Credit/Debit双非零进入`simultaneousRows`，并确认Main gate先于writer。没有复制金额算法或改变行去向。
 - 币种/余额：多币种balance writer回读保持USD/EUR记录顺序和值；余额计算与manual seed复合键/previous选择/exact file bytes均锁定。未新增币种归一、seed overwrite或fallback。
+- 账号格式/隐私：formatted `merchantId`只在public done DTO的既有展示值上获得transport例外，不做trim、去空格、去连字符、账号匹配或持久化转换；因此不改变大账号识别/资金归属语义，真实账号格式仍保留人工复核红线。
 - 幂等/部分失败：manual seed现状仍为legacy直接写；P0不实现atomic replace、intent/outcome inspector或unknown-state自动续跑，因此不声称已关闭crash window。
 - ⚠️ 关联功能 review：`src/main.js`的`generateStatementFiles`抽取触及`lastGeneratedExports`关联的导出/重复导出路径，但仅改为同一函数薄委托，cache current/all characterization与209项回归通过；未修改`statementImportSessions`、`lastFileImportContext`、四金额模式标识或`BALANCE_CALCULATED_OPTION`的生命周期/值。新`STATEMENT_RESOURCE_CONTRACT`语义上属于后续跨进程Critical候选，E09-A接线时必须重新评估。本轮按负责人明确要求未运行`check-vars`/`scan:vars`。
 - 🔴 人工门禁：金额、借贷方向、币种、余额seed、current/all成员与输出仍需资金负责人用脱敏真实样本逐笔复核；自动golden与generated footprint probe不解除production enablement红线。

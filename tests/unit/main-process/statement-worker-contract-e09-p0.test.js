@@ -32,8 +32,12 @@ const {
   utf8Size
 } = require('../../../src/main-process/background-execution/protocol-validator');
 const {
+  createExecutionSupervisor,
   validateResultBody
 } = require('../../../src/main-process/background-execution/supervisor');
+const {
+  createResourceGovernor
+} = require('../../../src/main-process/background-execution/resource-governor');
 
 const ROOT = path.join(__dirname, '..', '..', '..');
 const POLICY_FIXTURE = path.join(
@@ -112,6 +116,78 @@ function statementEventEnvelope({ actionKey, operation, payload }, policyRegistr
   }, { policyRegistry });
 }
 
+function statementEventForCommand(command, operation, payload, policyRegistry, validate = true) {
+  return createJobEnvelope({
+    direction: 'event',
+    operation,
+    actionKey: command.actionKey,
+    operationKey: command.operationKey,
+    jobId: command.jobId,
+    workerInstanceId: command.workerInstanceId,
+    serviceGeneration: command.serviceGeneration,
+    unitId: null,
+    seq: 1,
+    context: command.context,
+    payload
+  }, validate ? { policyRegistry } : { validate: false });
+}
+
+function createStatementSupervisorHarness(policyRegistry, onJobStart) {
+  const resourceGovernor = createResourceGovernor({
+    budgets: {
+      cpuSlots: 16,
+      workerThreadSlots: 16,
+      utilityProcessSlots: 4,
+      ioHeavySlots: 16,
+      memoryBytes: 2 * 1024 * 1024 * 1024
+    }
+  });
+  const serviceHost = Object.freeze({
+    async openJob(openRequest) {
+      return {
+        workerInstanceId: 'statement-supervisor-worker',
+        serviceGeneration: 3,
+        createdGeneration: false,
+        baseLeaseId: 'statement-supervisor-base',
+        baseResources: policyRegistry.get('statement:import').resources.base,
+        ready: Promise.resolve(),
+        send(message) {
+          if (message.operation === 'job:start') onJobStart(message, openRequest);
+        },
+        close() {},
+        async terminate() {}
+      };
+    },
+    async closeService() { return false; },
+    stopAcceptingNewServices() {},
+    async shutdown() { return Object.freeze([]); },
+    snapshot() { return Object.freeze({ services: Object.freeze([]) }); }
+  });
+  return createExecutionSupervisor({ policyRegistry, resourceGovernor, serviceHost });
+}
+
+function statementSupervisorRequest(onProgress, overrides = {}) {
+  const operationKey = 'statement-supervisor-operation';
+  return {
+    actionKey: 'statement:import',
+    operationKey,
+    jobId: 'statement-supervisor-job',
+    input: {},
+    context: {
+      kind: 'operation',
+      value: {
+        taskRunId: 'statement-supervisor-task-run',
+        taskKey: 'statement-supervisor-task',
+        moduleId: 'statement',
+        parentRunId: 'statement-supervisor-parent-run',
+        operationKey
+      }
+    },
+    onProgress,
+    ...overrides
+  };
+}
+
 function token(overrides = {}) {
   return {
     tokenId: 'opaque-token-1',
@@ -168,6 +244,33 @@ function scopeGenerationPrompt(kind = 'detail') {
       { scope: 'all', label: `导出所有批次文件的${fieldLabel}` }
     ]
   };
+}
+
+function formattedBigAccountInteraction() {
+  return createStatementPublicInteractionDto({
+    token: token(),
+    prompt: bigAccountPrompt({
+      bigAccounts: [{
+        merchantId: '6222 0212 3456 7890',
+        currencies: ['USD'],
+        isMultiCurrency: false
+      }, {
+        merchantId: '62220212345678901234',
+        currencies: ['EUR'],
+        isMultiCurrency: false
+      }],
+      expandedBigAccountOptions: [{
+        merchantId: '6222-0212-3456-7890-1234',
+        currency: 'USD',
+        accountNature: 'client'
+      }],
+      fixedAssignments: [{
+        merchantId: '6217 0012-3456 7890',
+        currency: 'USD',
+        rowIndex: 0
+      }]
+    })
+  });
 }
 
 test('Statement E09-P0资源/token合同与五个canonical policy逐字段一致且production保持false', () => {
@@ -368,33 +471,9 @@ test('Statement exact result validator通过真实冻结PolicyRegistry暴露路�
   }
 });
 
-test('16/20位merchantId仅在三purpose真实progress/done wrapper的exact domain slot通过', () => {
+test('纯数字/空格/连字符merchantId仅在三purpose真实done wrapper的四个domain slot通过', () => {
   const policyRegistry = createStatementPolicyRegistry();
-  const bigInteraction = createStatementPublicInteractionDto({
-    token: token(),
-    prompt: bigAccountPrompt({
-      bigAccounts: [{
-        merchantId: '6222021234567890',
-        currencies: ['USD'],
-        isMultiCurrency: false
-      }],
-      expandedBigAccountOptions: [{
-        merchantId: '62220212345678901234',
-        currency: 'USD',
-        accountNature: 'client'
-      }],
-      fixedAssignments: [{
-        merchantId: '6217001234567890',
-        currency: 'USD',
-        rowIndex: 0
-      }]
-    })
-  });
-  assert.doesNotThrow(() => statementEventEnvelope({
-    actionKey: 'statement:import',
-    operation: 'job:progress',
-    payload: { progress: bigInteraction }
-  }, policyRegistry));
+  const bigInteraction = formattedBigAccountInteraction();
   const bigResult = createStatementInteractionRequiredResult({
     status: 'interaction-required',
     interaction: bigInteraction
@@ -415,13 +494,8 @@ test('16/20位merchantId仅在三purpose真实progress/done wrapper的exact doma
 
   const manualInteraction = createStatementPublicInteractionDto({
     token: token({ purpose: 'manual-balance' }),
-    prompt: manualBalancePrompt({ merchantId: '62220212345678901234' })
+    prompt: manualBalancePrompt({ merchantId: '6222 0212 3456 7890 1234' })
   });
-  assert.doesNotThrow(() => statementEventEnvelope({
-    actionKey: 'statement:resolve-manual-balance',
-    operation: 'job:progress',
-    payload: { progress: manualInteraction }
-  }, policyRegistry));
   const manualResult = createStatementInteractionRequiredResult({
     status: 'interaction-required',
     interaction: manualInteraction
@@ -447,11 +521,6 @@ test('16/20位merchantId仅在三purpose真实progress/done wrapper的exact doma
   }, 'statement:generate-current');
   assert.doesNotThrow(() => statementEventEnvelope({
     actionKey: 'statement:generate-current',
-    operation: 'job:progress',
-    payload: { progress: scopeInteraction }
-  }, policyRegistry));
-  assert.doesNotThrow(() => statementEventEnvelope({
-    actionKey: 'statement:generate-current',
     operation: 'job:done',
     payload: { result: scopeResult }
   }, policyRegistry));
@@ -462,30 +531,23 @@ test('16/20位merchantId仅在三purpose真实progress/done wrapper的exact doma
   ));
 });
 
-test('merchantId例外对错误action/purpose/path/parent/unknown key保持fail closed', () => {
+test('done merchantId例外对错误action/purpose/path/parent/unknown key保持fail closed', () => {
   const policyRegistry = createStatementPolicyRegistry();
-  const account = '62220212345678901234';
-  const bigInteraction = createStatementPublicInteractionDto({
-    token: token(),
-    prompt: bigAccountPrompt({
-      bigAccounts: [{ merchantId: account, currencies: ['USD'], isMultiCurrency: false }],
-      expandedBigAccountOptions: [{
-        merchantId: account,
-        currency: 'USD',
-        accountNature: 'client'
-      }],
-      fixedAssignments: [{ merchantId: account, currency: 'USD', rowIndex: 0 }]
-    })
+  const account = '6222 0212 3456 7890 1234';
+  const bigInteraction = formattedBigAccountInteraction();
+  const interactionResult = (interaction) => ({
+    status: 'interaction-required',
+    interaction
   });
 
   assert.throws(
     () => statementEventEnvelope({
       actionKey: 'statement:resolve-big-account',
-      operation: 'job:progress',
-      payload: { progress: bigInteraction }
+      operation: 'job:done',
+      payload: { result: interactionResult(bigInteraction) }
     }, policyRegistry),
     (error) => error.code === 'PROTOCOL_PRIVACY_VIOLATION' &&
-      error.path === '/payload/progress/prompt/bigAccounts/0/merchantId'
+      error.path === '/payload/result/interaction/prompt/bigAccounts/0/merchantId'
   );
 
   const wrongPath = structuredClone(bigInteraction);
@@ -493,11 +555,11 @@ test('merchantId例外对错误action/purpose/path/parent/unknown key保持fail 
   assert.throws(
     () => statementEventEnvelope({
       actionKey: 'statement:import',
-      operation: 'job:progress',
-      payload: { progress: wrongPath }
+      operation: 'job:done',
+      payload: { result: interactionResult(wrongPath) }
     }, policyRegistry),
     (error) => error.code === 'PROTOCOL_PRIVACY_VIOLATION' &&
-      error.path === '/payload/progress/prompt/message'
+      error.path === '/payload/result/interaction/prompt/message'
   );
 
   const wrongParent = structuredClone(bigInteraction);
@@ -505,11 +567,11 @@ test('merchantId例外对错误action/purpose/path/parent/unknown key保持fail 
   assert.throws(
     () => statementEventEnvelope({
       actionKey: 'statement:import',
-      operation: 'job:progress',
-      payload: { progress: wrongParent }
+      operation: 'job:done',
+      payload: { result: interactionResult(wrongParent) }
     }, policyRegistry),
     (error) => error.code === 'PROTOCOL_PRIVACY_VIOLATION' &&
-      error.path === '/payload/progress/prompt/bigAccounts/0/merchantId'
+      error.path === '/payload/result/interaction/prompt/bigAccounts/0/merchantId'
   );
 
   for (const field of ['expandedBigAccountOptions', 'fixedAssignments']) {
@@ -518,11 +580,11 @@ test('merchantId例外对错误action/purpose/path/parent/unknown key保持fail 
     assert.throws(
       () => statementEventEnvelope({
         actionKey: 'statement:import',
-        operation: 'job:progress',
-        payload: { progress: wrongItemParent }
+        operation: 'job:done',
+        payload: { result: interactionResult(wrongItemParent) }
       }, policyRegistry),
       (error) => error.code === 'PROTOCOL_PRIVACY_VIOLATION' &&
-        error.path === `/payload/progress/prompt/${field}/0/merchantId`
+        error.path === `/payload/result/interaction/prompt/${field}/0/merchantId`
     );
   }
 
@@ -534,11 +596,11 @@ test('merchantId例外对错误action/purpose/path/parent/unknown key保持fail 
   assert.throws(
     () => statementEventEnvelope({
       actionKey: 'statement:resolve-manual-balance',
-      operation: 'job:progress',
-      payload: { progress: wrongManualParent }
+      operation: 'job:done',
+      payload: { result: interactionResult(wrongManualParent) }
     }, policyRegistry),
     (error) => error.code === 'PROTOCOL_PRIVACY_VIOLATION' &&
-      error.path === '/payload/progress/prompt/merchantId'
+      error.path === '/payload/result/interaction/prompt/merchantId'
   );
 
   const privateFileName = structuredClone(bigInteraction);
@@ -546,11 +608,11 @@ test('merchantId例外对错误action/purpose/path/parent/unknown key保持fail 
   assert.throws(
     () => statementEventEnvelope({
       actionKey: 'statement:import',
-      operation: 'job:progress',
-      payload: { progress: privateFileName }
+      operation: 'job:done',
+      payload: { result: interactionResult(privateFileName) }
     }, policyRegistry),
     (error) => error.code === 'PROTOCOL_PRIVACY_VIOLATION' &&
-      error.path === '/payload/progress/prompt/rows/0/fileName'
+      error.path === '/payload/result/interaction/prompt/rows/0/fileName'
   );
 
   const scopeWithMerchant = structuredClone(createStatementPublicInteractionDto({
@@ -561,11 +623,11 @@ test('merchantId例外对错误action/purpose/path/parent/unknown key保持fail 
   assert.throws(
     () => statementEventEnvelope({
       actionKey: 'statement:generate-all',
-      operation: 'job:progress',
-      payload: { progress: scopeWithMerchant }
+      operation: 'job:done',
+      payload: { result: interactionResult(scopeWithMerchant) }
     }, policyRegistry),
     (error) => error.code === 'PROTOCOL_PRIVACY_VIOLATION' &&
-      error.path === '/payload/progress/prompt/merchantId'
+      error.path === '/payload/result/interaction/prompt/merchantId'
   );
 
   assert.throws(
@@ -580,10 +642,7 @@ test('merchantId例外对错误action/purpose/path/parent/unknown key保持fail 
 
   const wrongPurposeInteraction = structuredClone(bigInteraction);
   wrongPurposeInteraction.purpose = 'manual-balance';
-  const wrongPurposeResult = {
-    status: 'interaction-required',
-    interaction: wrongPurposeInteraction
-  };
+  const wrongPurposeResult = interactionResult(wrongPurposeInteraction);
   assert.doesNotThrow(() => statementEventEnvelope({
     actionKey: 'statement:import',
     operation: 'job:done',
@@ -613,6 +672,67 @@ test('merchantId例外对错误action/purpose/path/parent/unknown key保持fail 
   );
 });
 
+test('真实Supervisor在onProgress前拒绝Statement interaction progress且只接受合法done', async () => {
+  const policyRegistry = createStatementPolicyRegistry();
+  const validInteraction = formattedBigAccountInteraction();
+  const wrongPurpose = structuredClone(validInteraction);
+  wrongPurpose.purpose = 'manual-balance';
+  const privateExtra = structuredClone(validInteraction);
+  privateExtra.prompt.detailRows = [['MerchantId'], ['6222 0212 3456 7890']];
+  const nonArrayContainer = structuredClone(validInteraction);
+  nonArrayContainer.prompt.bigAccounts = {
+    0: nonArrayContainer.prompt.bigAccounts[0]
+  };
+
+  for (const [index, progress] of [
+    validInteraction,
+    wrongPurpose,
+    privateExtra,
+    nonArrayContainer
+  ].entries()) {
+    const observed = [];
+    const supervisor = createStatementSupervisorHarness(policyRegistry, (command, openRequest) => {
+      openRequest.onMessage(statementEventForCommand(
+        command,
+        'job:progress',
+        { progress },
+        policyRegistry,
+        false
+      ));
+    });
+    const result = await supervisor.execute(statementSupervisorRequest(
+      (value) => observed.push(value),
+      { jobId: `statement-supervisor-progress-${index}` }
+    ));
+    assert.equal(result.terminalSource, 'protocol-error');
+    assert.equal(result.error.code, 'PROTOCOL_PRIVACY_VIOLATION');
+    assert.deepEqual(observed, []);
+    await supervisor.shutdown({ timeoutMs: 1000 });
+  }
+
+  const observed = [];
+  const doneResult = createStatementInteractionRequiredResult({
+    status: 'interaction-required',
+    interaction: validInteraction
+  }, 'statement:import');
+  const supervisor = createStatementSupervisorHarness(policyRegistry, (command, openRequest) => {
+    openRequest.onMessage(statementEventForCommand(
+      command,
+      'job:done',
+      { result: doneResult },
+      policyRegistry
+    ));
+  });
+  const completed = await supervisor.execute(statementSupervisorRequest(
+    (value) => observed.push(value),
+    { jobId: 'statement-supervisor-done' }
+  ));
+  assert.equal(completed.outcome, 'completed');
+  assert.deepEqual(completed.result, doneResult);
+  assert.deepEqual(observed, []);
+  await supervisor.shutdown({ timeoutMs: 1000 });
+});
+
 function maximalBigAccountPublicDto() {
   const rows = Array.from({ length: 1024 }, (_, index) => ({
     index,
@@ -635,13 +755,18 @@ function maximalBigAccountPublicDto() {
   return { dto, prompt, rows };
 }
 
-test('最大合法public interaction经真实最大route/context Protocol envelope仍可发送，+1 byte预先拒绝', () => {
+test('最大合法public interaction经真实done route/context Protocol envelope仍可发送，+1 byte预先拒绝', () => {
   const { dto, prompt, rows } = maximalBigAccountPublicDto();
+  const policyRegistry = createStatementPolicyRegistry();
+  const result = createStatementInteractionRequiredResult({
+    status: 'interaction-required',
+    interaction: dto
+  }, 'statement:import');
   const operationKey = 'o'.repeat(512);
   const envelope = createJobEnvelope({
     direction: 'event',
-    operation: 'job:progress',
-    actionKey: 'statement:resolve-big-account',
+    operation: 'job:done',
+    actionKey: 'statement:import',
     operationKey,
     jobId: 'j'.repeat(160),
     workerInstanceId: 'w'.repeat(160),
@@ -658,11 +783,9 @@ test('最大合法public interaction经真实最大route/context Protocol envelo
         operationKey
       }
     },
-    payload: { progress: dto }
-  }, { policyRegistry: JSON.parse(fs.readFileSync(POLICY_FIXTURE, 'utf8')) });
-  const serialized = serializeEnvelope(envelope, {
-    policyRegistry: JSON.parse(fs.readFileSync(POLICY_FIXTURE, 'utf8'))
-  });
+    payload: { result }
+  }, { policyRegistry });
+  const serialized = serializeEnvelope(envelope, { policyRegistry });
   const wrapperBytes = Buffer.byteLength(serialized) - utf8Size(dto);
   assert.ok(wrapperBytes <= STATEMENT_RESOURCE_CONTRACT.publicInteractionWireReserveBytes);
   assert.ok(Buffer.byteLength(serialized) <= STATEMENT_RESOURCE_CONTRACT.protocolEnvelopeMaxBytes);
