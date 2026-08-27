@@ -6,7 +6,7 @@
 
 | 未知 | 分类 | 证据 | 当前决定 |
 | --- | --- | --- | --- |
-| `StatementStatusDto.pendingInteractions` 能否在任何元素读取前执行冻结上限检查 | PROBE | canonical `token.maxOutstanding=1`；现实现对调用方数组直接 `.map()`，计数/上限检查发生在元素访问后 | 仅为该字段增加专用 exact-Array reader：先读 own data `length`，再校验 count、上限和一致性，最后按 own data descriptor 读取最多一个元素 |
+| `StatementStatusDto.pendingInteractions` 能否在任何元素读取前执行冻结上限检查 | PROBE | canonical `token.maxOutstanding=1`；修复前实现对调用方数组直接 `.map()`，计数/上限检查发生在元素访问后 | 仅为该字段增加专用 exact-Array reader：先descriptor-safe读取外层count并拒绝`> 1`，再拒绝Proxy/非exact Array/custom prototype，随后读取own-data length并校验上限与count一致性，再核对dense exact own keys，最后按own data descriptor读取最多一个index |
 | generic-safe interaction-shaped progress 是否应被本 PR 生产拒绝 | PROBE | Platform progress 是通用 bounded DTO 且不调用 action result validator；Statement 尚无 live Worker producer；Reviewer 已明确拒绝新增 Protocol/Supervisor deny | 不改 production progress 路径；真实 Registry/Protocol/Supervisor 只证明 generic-safe M001/scope progress 可进入 `onProgress`，但不会产生 waiting-user 或 settlement |
 
 ### 修复边界
