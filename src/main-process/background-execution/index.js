@@ -23,6 +23,7 @@ const {
   createPlatformResourceBudgets
 } = require('./resource-budget');
 const { createServiceHost } = require('./service-host');
+const { createServiceClient, ServiceClientError } = require('./service-client');
 const {
   createBatchRecoveryOverlayAdapter,
   createRecoveryTaskLifecycleAdapter,
@@ -96,6 +97,7 @@ module.exports = {
   createResourceGovernor,
   createPlatformResourceBudgets,
   createRecoveryHoldGate,
+  createServiceClient,
   createServiceHost,
   createSettlementRecoveryProviderRegistry,
   createStartupRecoveryCoordinator,
@@ -105,6 +107,7 @@ module.exports = {
   RecoveryControlError,
   RecoveryHoldActiveError,
   RecoveryRegistryError,
+  ServiceClientError,
   StartupRecoveryError,
   validatePolicyDocument,
   validateProtocolSequence
