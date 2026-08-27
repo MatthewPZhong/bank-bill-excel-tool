@@ -274,6 +274,15 @@ function parserResult(result) {
   return Object.freeze({ ...result, rssBytes: process.memoryUsage().rss });
 }
 
+async function waitForCondition(predicate, message, timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.fail(message);
+}
+
 async function withBlockedParserOutcomeWrites(taskStagingDir, callback, onBlocked = null) {
   const originalOpenSync = fs.openSync;
   const stagingRoot = path.resolve(taskStagingDir);
@@ -1166,6 +1175,146 @@ test('app shutdown按shutdown-only取消等待中的paired命令并收口Parser/
   assert.deepEqual(report.leakedTransports, []);
   assert.equal(fs.existsSync(path.join(dir, 'shutdown-staging')), false);
   assert.equal(fs.existsSync(path.join(dir, 'run-data', 'duplicate-inbound-match')), false);
+});
+
+test('真实Parser graceful shutdown等待Worker exit与dispatcher cleanup后才报告clean', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'duplicate-paired-real-shutdown-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const databasePath = path.join(dir, 'tool-data.sqlite');
+  initializeMainDatabase(databasePath);
+  const documentPath = path.join(dir, 'document.xlsx');
+  const bankPath = path.join(dir, 'bank.xlsx');
+  writeWorkbook(documentPath, BILL_HEADERS, '单据对账单');
+  writeSparseBankWorkbook(bankPath, 100000, 12);
+  const runtime = createRuntime(dir, databasePath, { omitExecutionTimeout: true });
+  let shutdown = false;
+  t.after(async () => { if (!shutdown) await runtime.shutdown({ timeoutMs: 10000 }); });
+  const taskStagingDir = path.join(dir, 'real-shutdown-staging');
+  const jobId = 'paired-real-worker-graceful-shutdown';
+  const context = batchContext('paired-real-worker-graceful-shutdown');
+  const documentPaths = duplicateSpoolPaths({ taskStagingDir, jobId, slotIndex: 0 });
+  const bankPaths = duplicateSpoolPaths({ taskStagingDir, jobId, slotIndex: 1 });
+  const exitedSlots = new Set();
+  const timeline = [];
+  let resolveBankExited;
+  const bankExited = new Promise((resolve) => { resolveBankExited = resolve; });
+  const pairedOutcome = executeManagedDuplicatePairedImport({
+    runtime,
+    workerRuntime: workerRuntime(dir, databasePath),
+    filePaths: [documentPath, bankPath],
+    taskStagingDir,
+    batchContext: context,
+    jobId,
+    cleanupSpool(spool) {
+      timeline.push(`cleanup:${spool.slotIndex}`);
+      assert.deepEqual([...exitedSlots].sort(), [0, 1], 'cleanup前两个真实Parser必须已exit');
+      assert.equal(runtime.inspect(jobId), null, 'cleanup必须晚于parent terminal');
+      assert.equal(runtime.resourceGovernor.snapshot().activeDependencyCount, 0);
+      return cleanupDuplicateSpool(spool);
+    },
+    onParserWorkerState(event) {
+      if (event.state !== 'exited') return;
+      exitedSlots.add(event.slotIndex);
+      timeline.push(`exit:${event.slotIndex}`);
+      if (event.slotIndex === 1) resolveBankExited();
+    }
+  }).then(
+    (value) => Object.freeze({ value }),
+    (error) => Object.freeze({ error })
+  );
+
+  await waitForCondition(
+    () => fs.existsSync(documentPaths.rowsReady) && fs.existsSync(bankPaths.rowsPart),
+    'shutdown probe未观察到ready/part staging窗口'
+  );
+  assert.equal(exitedSlots.has(1), false, 'shutdown开始前large Bank必须仍存活');
+  const heldBeforeShutdown = runtime.resourceGovernor.snapshot();
+  assert.equal(heldBeforeShutdown.activeDependencyCount > 0, true);
+  let shutdownResolved = false;
+  const shutdownPromise = runtime.shutdown({ timeoutMs: 10000 }).then((report) => {
+    shutdownResolved = true;
+    timeline.push('shutdown:resolved');
+    return report;
+  });
+  await Promise.resolve();
+  assert.equal(shutdownResolved, false, 'shutdown不得在Parser finalization前返回');
+  assert.equal(runtime.inspect(jobId) !== null, true, 'Worker exit barrier前parent job必须保留');
+  assert.equal(runtime.resourceGovernor.snapshot().activeDependencyCount > 0, true);
+
+  await bankExited;
+  const paired = await pairedOutcome;
+  const report = await shutdownPromise;
+  shutdown = true;
+  assert.ok(paired.error, 'shutdown中的paired command必须形成terminal error');
+  assert.deepEqual([...exitedSlots].sort(), [0, 1]);
+  assert.deepEqual(report.errors, []);
+  assert.deepEqual(report.leakedTransports, []);
+  assert.equal(timeline.indexOf('exit:0') < timeline.indexOf('cleanup:0'), true);
+  assert.equal(timeline.indexOf('exit:1') < timeline.indexOf('cleanup:0'), true);
+  assert.equal(timeline.indexOf('cleanup:1') < timeline.indexOf('shutdown:resolved'), true);
+  assert.equal(fs.existsSync(taskStagingDir), false, 'clean返回后不得遗留staging');
+  assert.equal(runtime.inspect(jobId), null);
+  const released = runtime.resourceGovernor.snapshot();
+  assert.equal(released.activeLeaseCount, 0);
+  assert.equal(released.activeDependencyCount, 0);
+  assertNoDuplicateMutation(dir, databasePath);
+});
+
+test('真实Parser shutdown timeout进入errors/leakedTransports且最终仍清理staging', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'duplicate-paired-shutdown-timeout-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const databasePath = path.join(dir, 'tool-data.sqlite');
+  initializeMainDatabase(databasePath);
+  const documentPath = path.join(dir, 'document.xlsx');
+  const bankPath = path.join(dir, 'bank.xlsx');
+  writeWorkbook(documentPath, BILL_HEADERS, '单据对账单');
+  writeSparseBankWorkbook(bankPath, 100000, 12);
+  const runtime = createRuntime(dir, databasePath, { omitExecutionTimeout: true });
+  let shutdown = false;
+  t.after(async () => { if (!shutdown) await runtime.shutdown({ timeoutMs: 10000 }); });
+  const taskStagingDir = path.join(dir, 'timeout-staging');
+  const jobId = 'paired-real-worker-shutdown-timeout';
+  const context = batchContext('paired-real-worker-shutdown-timeout');
+  const documentPaths = duplicateSpoolPaths({ taskStagingDir, jobId, slotIndex: 0 });
+  const bankPaths = duplicateSpoolPaths({ taskStagingDir, jobId, slotIndex: 1 });
+  const exitedSlots = new Set();
+  const pairedOutcome = executeManagedDuplicatePairedImport({
+    runtime,
+    workerRuntime: workerRuntime(dir, databasePath),
+    filePaths: [documentPath, bankPath],
+    taskStagingDir,
+    batchContext: context,
+    jobId,
+    onParserWorkerState(event) {
+      if (event.state === 'exited') exitedSlots.add(event.slotIndex);
+    }
+  }).then(
+    (value) => Object.freeze({ value }),
+    (error) => Object.freeze({ error })
+  );
+
+  await waitForCondition(
+    () => fs.existsSync(documentPaths.rowsReady) && fs.existsSync(bankPaths.rowsPart),
+    'timeout probe未观察到ready/part staging窗口'
+  );
+  const report = await runtime.shutdown({ timeoutMs: 0 });
+  assert.equal(exitedSlots.has(1), false, '零截止报告时large Bank应仍由非clean leak追踪');
+  assert.equal(report.leakedTransports.includes(jobId), true);
+  assert.equal(report.errors.some(
+    (error) => error.code === 'DUPLICATE_PAIRED_WORKER_SHUTDOWN_TIMEOUT'
+  ), true);
+  assert.equal(report.errors.length > 0, true, 'timeout不得报告clean');
+
+  const paired = await pairedOutcome;
+  assert.ok(paired.error, 'timeout teardown后paired command必须形成terminal error');
+  await waitForCondition(
+    () => exitedSlots.size === 2 && !fs.existsSync(taskStagingDir),
+    'timeout诊断后Parser或staging未最终收口'
+  );
+  assertNoDuplicateMutation(dir, databasePath);
+  const cleanupReport = await runtime.shutdown({ timeoutMs: 10000 });
+  shutdown = true;
+  assert.deepEqual(cleanupReport.leakedTransports, []);
 });
 
 test('native ResourceGovernor诚实降为single Parser且仍完成同一两侧校验/采用', async (t) => {

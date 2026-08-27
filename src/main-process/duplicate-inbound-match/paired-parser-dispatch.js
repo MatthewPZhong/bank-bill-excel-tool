@@ -22,6 +22,9 @@ const {
   writeDuplicateParserFailure,
   writeDuplicateParserSuccess
 } = require('./parser-outcome');
+const {
+  registerDuplicatePairedParserFinalization
+} = require('./paired-parser-shutdown');
 
 const PARSER_ENTRY = path.join(__dirname, 'parser-worker-entry.js');
 const MIN_PAIRED_IMPROVEMENT_RATIO = 0.15;
@@ -217,6 +220,34 @@ async function executeManagedDuplicatePairedImport(rawOptions) {
   let parserFailureSpool = null;
   let failureOutcomePublished = false;
   let forcedOutcomeFailure = null;
+  let parserPhaseStarted = false;
+  let shutdownRequested = false;
+  let workersTerminalSettled = false;
+  let resolveWorkersTerminal;
+  const workersTerminal = new Promise((resolve) => { resolveWorkersTerminal = resolve; });
+  let resolveFinalized;
+  let rejectFinalized;
+  const finalized = new Promise((resolve, reject) => {
+    resolveFinalized = resolve;
+    rejectFinalized = reject;
+  });
+
+  function settleWorkersTerminal() {
+    if (workersTerminalSettled) return;
+    workersTerminalSettled = true;
+    resolveWorkersTerminal();
+  }
+
+  registerDuplicatePairedParserFinalization(options.runtime, {
+    jobId,
+    workersTerminal,
+    finalized,
+    abort() {
+      shutdownRequested = true;
+      if (parserController) parserController.abort();
+      if (!parserPhaseStarted) settleWorkersTerminal();
+    }
+  });
 
   function publishParserFailure(spool, error) {
     try {
@@ -239,6 +270,14 @@ async function executeManagedDuplicatePairedImport(rawOptions) {
       parentTerminal = true;
       throw managedError('DUPLICATE_PAIRED_START_FAILED', 'Duplicate paired Service未进入running');
     }
+    if (shutdownRequested) {
+      const execution = await control.promise;
+      parentTerminal = true;
+      throw managedError(
+        execution && execution.error && execution.error.code || 'DUPLICATE_PAIRED_SHUTDOWN',
+        execution && execution.error && execution.error.message || 'Duplicate paired Parser随runtime关闭'
+      );
+    }
     const parserCount = snapshot.topology && snapshot.topology.effectiveChildCount;
     if (![1, 2].includes(parserCount)) {
       const topologyError = managedError(
@@ -251,6 +290,7 @@ async function executeManagedDuplicatePairedImport(rawOptions) {
     }
 
     parserController = new AbortController();
+    parserPhaseStarted = true;
     const parserRunner = options.parserRunner || runDuplicateParserWorker;
     let parserPhaseComplete = false;
     const parentWatcher = control.promise.then((execution) => {
@@ -297,6 +337,7 @@ async function executeManagedDuplicatePairedImport(rawOptions) {
     }
     const parserTasks = Array.from({ length: parserCount }, () => parseNext());
     const settled = await Promise.allSettled(parserTasks);
+    settleWorkersTerminal();
     parserPhaseComplete = true;
     const parserFailure = settled.find((item) => item.status === 'rejected');
     if (parserFailure) {
@@ -348,7 +389,8 @@ async function executeManagedDuplicatePairedImport(rawOptions) {
     primaryError = terminalError;
     if (!parentTerminal) {
       if (parserController) parserController.abort();
-      if (!forcedOutcomeFailure && !failureOutcomePublished) {
+      if (!forcedOutcomeFailure && !failureOutcomePublished &&
+          !(shutdownRequested && !parserPhaseStarted)) {
         terminalError = publishParserFailure(spools[0], error);
         primaryError = terminalError;
       }
@@ -357,8 +399,13 @@ async function executeManagedDuplicatePairedImport(rawOptions) {
     }
     throw terminalError;
   } finally {
-    try { cleanupSpools(spools, options.cleanupSpool || cleanupDuplicateSpool); } catch (cleanupError) {
+    settleWorkersTerminal();
+    try {
+      cleanupSpools(spools, options.cleanupSpool || cleanupDuplicateSpool);
+      resolveFinalized();
+    } catch (cleanupError) {
       if (primaryError) cleanupError.cause = primaryError;
+      rejectFinalized(cleanupError);
       throw cleanupError;
     }
   }

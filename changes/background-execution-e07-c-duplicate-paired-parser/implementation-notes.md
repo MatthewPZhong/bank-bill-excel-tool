@@ -18,6 +18,7 @@
 | 两个Parser直接复用既有Bank reader、Document streaming reader、BizId/model helper，并各写独立slot spool。 | 禁止复制normalizer/parser业务逻辑；single/paired side post-image逐字段一致。 | 在新Worker重写XLSX/字段转换；构建未来N-role框架。 | 仅固定两个slot与唯一Bank/Document角色，不泛化未来role。 |
 | manifest-last不等于Parser成功；coordinator只在terminal message且Worker clean exit 0后发布exact success outcome，任一failure先记录并abort，全部Parser exit后才发布脱敏failure outcome。 | manifest发布后transport crash存在真实窗口；正常failure marker也会被Service立即解释为parent terminal。两类100k Bank真实Worker测试证明marker/teardown都不能越过`allSettled`。 | Service看到manifest即采用；Parser首错即发布marker；用普通`control.cancel()`绕过shutdown-only policy。 | outcome仍绑定job/op/producerTaskRunId/slot/unit且只含bounded causeCode；barrier前Service持续等待并保留job/CompoundLease，两侧success后才继续采用。 |
 | terminal outcome文件系统不可用时，coordinator在Parser terminal barrier后以exact control触发Supervisor权威`transport-lost + forceTransport`终态。 | failure marker本身可能因ENOSPC/EACCES/readonly同步失败；普通cancel受shutdown-only policy拒绝，全runtime shutdown又会阻断后续命令。`runDuplicateParserWorker()`只在真实Worker `exit`后settle，故`Promise.allSettled(parserTasks)`是已有权威barrier。 | 吞掉marker错误后无界等execution timeout；marker或teardown提前释放parent lease；把普通user cancel伪装为基础设施失败；关闭全runtime；向control/runtime枚举API增加通用权限。 | 全部Parser exit后先尝试写normal marker；仅写入失败时才exact-control终态。正常failure保留可复用Service BaseLease但释放job CompoundLease，transport failure关闭当前generation。 |
+| runtime graceful shutdown通过exact runtime identity登记paired coordinator两阶段finalization，clean报告必须晚于Worker terminal、parent terminal/resource release和dispatcher spool cleanup。 | Supervisor只拥有parent transport；第四轮Reviewer真实100k Bank probe证明旧路径可在Worker仍活且`rows.ndjson.ready`残留时返回clean。 | 把Parser通用注册进public runtime/control API；只在Supervisor返回后best-effort cleanup；提前force parent后再等Worker；关闭其他execution。 | shutdown先停止接单并abort exact paired controller，等待全部真实Worker exit，再执行Supervisor shutdown，最后等待dispatcher `finally`；同一绝对deadline耗尽会在既有`errors/leakedTransports`中保留jobId，不伪造clean。 |
 | Service先完整校验两份manifest/source/spool/role/count/ordinal，再查exact receipt；无receipt才进入原side事务。 | paired evidence必须由两份源SHA形成，解析前无法证明exact replay；E07-B禁止的是cleanup/matching/side mutation重跑。 | 在Parser前凭operationKey猜replay；双侧任一成功即部分采用。 | exact replay仍在任何side mutation前，只恢复bounded session；bundle/rows/receipt计数不增。 |
 | Service采用顺序固定Bank→Document，并在COMMIT前按首次manifest digest与rows/source hash再次完整复验。 | Parser完成时序不得影响业务顺序；仅重读“当前新manifest”会留下validate/commit TOCTOU。 | 按完成顺序adopt；只校验count；COMMIT前接受替换后的manifest。 | 同计数内容变化、manifest变化、source变化、role/identity冲突均fail closed且事务回滚。 |
 | task-private spool由Main coordinator在parent terminal barrier后清理，只删除已知文件并只`rmdir`空目录。 | Parser不写DB，E07-B side receipt/result/Main mirror才是durable恢复权威。 | recursive删除宽目录；把spool纳入E07-B recovery或E07-C compensation。 | failure、transport crash、shutdown、success与replay均收口双spool；不扩E07-B/E08。 |
@@ -43,6 +44,7 @@
 | 初版默认terminal outcome总能写入task-private filesystem。 | outcome发布失败时保留原Parser错误与marker错误关系，并由exact-control coordinator capability强制transport teardown。 | Reviewer在无`executionTimeoutMs` runtime用EACCES/readonly同类故障复现parent永久pending、reservation/lease不释放。 | 不改变shutdown-only取消语义或Platform公开协议；只关闭当前失败Service generation，后续runtime继续可用。 | 不需要；这是E07-C failure barrier的可达故障修复。 |
 | P1修复在outcome写失败时同步触发exact-control teardown。 | 先abort并记录错误，等待全部`parserTasks` settle后才触发teardown。 | 真实tiny Document + 100k Bank证明同步teardown会在sibling exit前释放parent job/CompoundLease，形成未记账活Worker窗口。 | barrier期间后续Duplicate命令继续`SERVICE_BUSY`；真实Worker exit后才释放资源、清理spool，不新增公开接口。 | 不需要；收紧E07-C既有Parser资源所有权。 |
 | 第二轮只把outcome写失败后的exact-control teardown延后到`allSettled`。 | Parser catch只记录首错/spool identity并abort；`allSettled`后才发布正常failure marker，若写失败再exact-control。 | Service以10ms轮询读取正常marker；Reviewer用坏表头Document + 100k Bank证明marker提前发布仍会在sibling exit前释放job/CompoundLease。 | 正常marker与EACCES共用同一Worker terminal barrier；marker证据仍bounded，ordinary Service复用/BaseLease合同不变。 | 不需要；修复同一E07-C资源所有权不变量。 |
+| 前三轮把parent terminal视为shutdown完整终态。 | 新增exact-runtime paired lifecycle registry，把Worker barrier与dispatcher cleanup分别置于Supervisor shutdown前后。 | Reviewer在正常graceful shutdown观察到parent/job/lease已释放且报告clean，但真实Worker稍后才exit并遗留ready spool。 | 不扩public facade/schema；clean顺序固定为Worker terminal→parent/resource terminal→spool cleanup→report resolve；deadline内未完成则报告error/leak，后续异步finalization仍按known-file ownership清理。 | 不需要；收紧E07-C app shutdown/cleanup Done-when。 |
 
 冻结产品合同无行为偏差；以上均为实施探针后对初始方案的收紧。
 
@@ -50,13 +52,13 @@
 
 | 证据 | 结果 | 覆盖的行为/风险 |
 | --- | --- | --- |
-| E07-C专属：`NODE_PATH=/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules node --test tests/unit/main-process/duplicate-inbound-match/paired-parser-e07-c.test.js` | 16/16 PASS | 两slot独立spool、exact manifest/outcome identity、source/spool/manifest TOCTOU、clean-exit barrier、乱序固定Bank→Document、single完整post-image/receipt parity、exact replay零新增、busy三命令、role conflict、failure/crash/shutdown、cleanup、native actual1、gate与依赖边界；P1双EACCES、100k Bank outcome-EACCES barrier与坏表头Document + 100k Bank normal-marker barrier均通过。两种barrier前job/Compound dependency保持、冲突命令busy，exit后零mutation/adopt、cleanup与后续命令可用。 |
-| Duplicate affected：`NODE_PATH=/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules node --test tests/unit/main-process/duplicate-inbound-match/*.test.js` | 114/114 PASS | reader/writer/matching/Service/managed Worker/startup recovery、E07-B receipt/replay/partial recovery与E07-C组合无回归。 |
+| E07-C专属：`NODE_PATH=/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules node --test tests/unit/main-process/duplicate-inbound-match/paired-parser-e07-c.test.js` | 18/18 PASS | 原16项E07-C证据保持；新增两条Reviewer-isomorphic真实OS Worker shutdown回归均在100k Bank + tiny Document的`rows.ready`/`rows.part`窗口触发。正常shutdown严格记录双Worker exit→parent/resource terminal→双spool cleanup→clean resolve；零timeout明确进入error/leak且报告后Worker与staging最终收口，两条均零side/Main/adopt。 |
+| Duplicate affected：`NODE_PATH=/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules node --test tests/unit/main-process/duplicate-inbound-match/*.test.js` | 116/116 PASS | reader/writer/matching/Service/managed Worker/startup recovery、E07-B receipt/replay/partial recovery与E07-C shutdown组合无回归。 |
 | side authority：store + result digest定向unit | 9/9 PASS | import事务、receipt-owned边界、完整result digest未回归；Main CAS/Inspector同时由Duplicate affected覆盖。 |
 | Platform adjacent：`NODE_PATH=... node --test tests/unit/main-process/background-execution/*.test.js` | 356/356 PASS | exact-control capability未知/已终态安全返回false且不改变control/runtime枚举API；topology/CompoundLease、downgrade-to-single、shutdown-only、ServiceHost generation、worker-durable receipt gate与资源收口无回归。 |
 | Duplicate integration：`node scripts/integration/duplicate-inbound-match-end-to-end.js` | 31/31 PASS | 真实Bank/Document import、匹配、side/Main、导出与行数守恒无回归。 |
 | 5轮benchmark：`DUPLICATE_PAIRED_BENCH_ROWS=3000 DUPLICATE_PAIRED_BENCH_ITERATIONS=5 node scripts/benchmark-duplicate-paired-parser.js` | 本地gate PASS；single median 531.251ms，paired 317.776ms，改善40.18%；paired peak RSS 507150336 < budget 838860800 bytes | 真实OS Parser Workers，交替顺序与warmup；详见[benchmark evidence](./benchmark-evidence.md)。只证明darwin parser-only capability，不解除native/Windows/production/人工门禁。 |
-| Static | ESLint `src/` PASS；新增test/benchmark ESLint PASS；全部changed/new JS `node --check` PASS | 语法、lint与边界代码静态质量。 |
+| Static | `NODE_PATH=/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules npx eslint` 对本轮3个source与E07-C test PASS；全部本轮changed/new JS `node --check` PASS；`git diff --check` PASS | 语法、lint与边界代码静态质量。 |
 | 明确未执行 | `release-check`、`check-vars`、`scan:vars` | 按冻结任务禁止；不把跳过项宣称PASS。 |
 
 ## Frozen Done-when Mapping
@@ -69,7 +71,7 @@
 | 固定Bank→Document与single等价 | `service.js#importPreparedSpools`、抽取的`input-classifier.js`/`import-model.js` | reverse completion仍固定role order；imports/Bank rows/Document rows/receipt evidence逐字段post-image parity。 |
 | E07-B committed replay不重跑 | `service.js#importPreparedSpools` receipt-first branch | same owner/op/evidence replay后imports/bank/document/receipts计数完全不增。 |
 | source/manifest/spool TOCTOU与行数守恒 | `spool-reader.js` + store `beforeCommit` | 同count内容改变、manifest替换、source改变、identity/role冲突全部拒绝。 |
-| cancel/crash/outcome filesystem/cleanup | `paired-parser-dispatch.js` Parser/parent双terminal barrier + Supervisor exact-control transport failure + known-file cleanup | normal marker、success/failure outcome EACCES、两类100k真实Worker、manifest transport crash、app shutdown均先全部Parser terminal、再发布marker/teardown并parent terminal，最后双spool cleanup；barrier期间仍busy，之后job Compound/dependency归零且下一命令非`SERVICE_BUSY`。 |
+| cancel/crash/outcome filesystem/cleanup | `paired-parser-dispatch.js` Parser/parent双terminal barrier + `paired-parser-shutdown.js` exact-runtime shutdown lifecycle + Supervisor exact-control transport failure + known-file cleanup | normal marker、success/failure outcome EACCES、两类100k真实Worker、manifest transport crash均先全部Parser terminal再parent terminal/cleanup；真实graceful shutdown进一步证明clean resolve晚于Worker exit与双spool cleanup，零timeout进入error/leak并最终收口。 |
 | single/low-resource/perf/RSS/production gate | optional wrapper、Governor topology、benchmark script/evidence | native actual1；<15%或RSS超限gate=false；`production:true`拒绝；production policy与live Main未改。 |
 
 ## Reconciliation Blindspot Pass
@@ -91,9 +93,9 @@
 ### [Important] 部分失败、取消、crash与隐私
 
 - Parser在两侧success前不触碰DB/adopt；manifest不是成功证据，clean exit后的terminal outcome才是。failure outcome只含bounded causeCode，不写路径/行；Main result也拒绝额外字段。
-- cleanup只删除task-private known files并在parent terminal后执行；不调用startup recovery、不复制matching、不把spool当durable证据。
+- cleanup只删除task-private known files并在parent terminal后执行；runtime clean shutdown还必须等待该dispatcher finalization完成；不调用startup recovery、不复制matching、不把spool当durable证据。
 - normal failure marker与outcome write失败都不再越过Parser terminal barrier；coordinator只在全部真实Parser Worker exit后发布bounded marker，写失败才凭exact control触发当前transport teardown，不开放通用control/runtime方法，也不改变ordinary cancel policy。
-- 证据：failure、role conflict、manifest-after-crash、shutdown、failure/success outcome EACCES、outcome-EACCES与正常marker两类100k Bank真实Worker barrier、敏感manifest/outcome scan；barrier前marker为空且job/Compound dependency保持、下一命令busy，barrier后side/Main/adopt和spool均为零/空、下一命令不再busy。
+- 证据：failure、role conflict、manifest-after-crash、failure/success outcome EACCES、outcome-EACCES与正常marker两类100k Bank真实Worker barrier、真实Worker graceful/timeout shutdown、敏感manifest/outcome scan；clean shutdown严格晚于Worker exit/parent release/cleanup，timeout不伪造clean且最终无staging残留，全部路径side/Main/adopt为零。
 - 处置：本地自动化PASS；Windows文件锁/Worker terminate/RSS连续十轮为production PROBE。
 
 ## Important Variables Review
@@ -101,6 +103,7 @@
 - ⚠️ `DuplicateInboundMatchService` / per-month Duplicate side DB（Risk-sensitive）：仅新增prepared spool import入口并抽取既有classifier/model；未改金额、币种、七元组、MPT/document candidate、result digest、mirror schema或writer。paired/single逐字段side post-image、全部Duplicate unit与E2E已通过。
 - ⚠️ background runtime topology/CompoundLease：只为`duplicate:import`绑定module-private topology planner；policy fixture、Governor预算、production字段、其它action topology均未改。background-execution 356/356与Duplicate policy unit通过。
 - ⚠️ background Supervisor terminal/resource lifecycle：新增module-internal exact-control WeakMap capability，只复用既有`adapter-error/transport-lost/forceTransport`收口；Supervisor/control/runtime enumerable API、cancel policy、protocol/schema均未改。background-execution 356/356通过。
+- ⚠️ background runtime shutdown：新增Duplicate paired专用WeakMap finalization registry，只按exact runtime记录本action的Worker/finally barrier；runtime/control facade key、Supervisor report schema与其他execution均未改。正常路径保持同一绝对deadline，超时只合并到既有`errors/leakedTransports`；background-execution 356/356与真实Worker shutdown两测通过。
 - 未修改`freezeWorkerBatchContext`、公开协议/schema、`src/main.js` live IPC、package/version或重要变量清单本身。
 
 ## Remaining Unknowns
