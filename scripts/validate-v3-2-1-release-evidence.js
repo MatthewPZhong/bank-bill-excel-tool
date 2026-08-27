@@ -25,17 +25,27 @@ const E04_NOTES_SOURCE =
 const E05_BENCHMARK_SOURCE =
   'changes/background-execution-e05-c-prefund-parser-pool/benchmark-evidence.json';
 const WINDOWS_BUILD_WORKFLOW_SOURCE = '.github/workflows/build-windows.yml';
-const FINAL_RELEASE_BRANCH = 'codex/v3.2.1-r3-release-evidence';
-const FINAL_RELEASE_BASE = 'codex/v3.2.1-e05-c-prefund-parser-pool';
+const PREVIOUS_FINAL_RELEASE_BRANCH = 'codex/v3.2.1-r3-release-evidence';
+const FINAL_RELEASE_BRANCH = 'codex/v3.2.1-r4-review-hardening';
+const FINAL_RELEASE_BASE = 'codex/v3.2.1-r3-release-evidence';
+const FINAL_RELEASE_PULL_REQUEST = 183;
+const FINAL_RELEASE_PULL_REQUEST_COMMITS = 6;
+const FINAL_RELEASE_ORIGINAL_HEAD = '962e4ae1549035d4eb875dbfb19417c19d1f95f6';
+const FINAL_RELEASE_CONFLICTING_HEAD = 'ce599e206894f3683b748254068dd750479ffc74';
+const FINAL_RELEASE_R3_HEAD = 'd7d96938196a61a36892c40721cdba56992a14a8';
+const FINAL_RELEASE_FAILED_ATTEMPT_HEAD = 'f87f2b2994e86b75d350f64eec53252fe24a67b6';
 const EXACT_BASE = '4598b9c67787ef1736831a186a199bd6fe9ae626';
 const EXPECTED_CHECKOUT_REF =
   "ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}";
 const EXPECTED_RELEASE_CHECK_CONDITION =
   "( github.event_name == 'pull_request' && " +
+  `github.event.pull_request.number == ${FINAL_RELEASE_PULL_REQUEST} && ` +
   `github.head_ref == '${FINAL_RELEASE_BRANCH}' && ` +
   `github.base_ref == '${FINAL_RELEASE_BASE}' && ` +
   'github.event.pull_request.head.repo.full_name == github.repository && ' +
-  "github.event.action == 'opened' && github.run_attempt == 1 ) || " +
+  "github.event.action == 'synchronize' && " +
+  `github.event.pull_request.commits == ${FINAL_RELEASE_PULL_REQUEST_COMMITS} && ` +
+  'github.run_attempt == 1 ) || ' +
   "( (github.event_name != 'pull_request' || " +
   `github.head_ref != '${FINAL_RELEASE_BRANCH}') && ` +
   "(github.event_name != 'workflow_dispatch' || " +
@@ -43,6 +53,30 @@ const EXPECTED_RELEASE_CHECK_CONDITION =
   "(github.event_name != 'pull_request' || " +
   'github.event.pull_request.head.repo.full_name != github.repository || ' +
   "!startsWith(github.head_ref, 'codex/v3.2.1-')) )";
+const EXPECTED_UNAUTHORIZED_FINAL_CONDITION =
+  "( ( github.event_name == 'pull_request' && " +
+  `( github.head_ref == '${PREVIOUS_FINAL_RELEASE_BRANCH}' || ` +
+  `github.head_ref == '${FINAL_RELEASE_BRANCH}' ) ) || ` +
+  "( github.event_name == 'workflow_dispatch' && " +
+  `( github.ref_name == '${PREVIOUS_FINAL_RELEASE_BRANCH}' || ` +
+  `github.ref_name == '${FINAL_RELEASE_BRANCH}' ) ) ) && ` +
+  "!( github.event_name == 'pull_request' && " +
+  `github.event.pull_request.number == ${FINAL_RELEASE_PULL_REQUEST} && ` +
+  `github.head_ref == '${FINAL_RELEASE_BRANCH}' && ` +
+  `github.base_ref == '${FINAL_RELEASE_BASE}' && ` +
+  'github.event.pull_request.head.repo.full_name == github.repository && ' +
+  "github.event.action == 'synchronize' && " +
+  `github.event.pull_request.commits == ${FINAL_RELEASE_PULL_REQUEST_COMMITS} && ` +
+  'github.run_attempt == 1 )';
+const EXPECTED_REPAIR_LINEAGE_CONDITION =
+  "github.event_name == 'pull_request' && " +
+  `github.event.pull_request.number == ${FINAL_RELEASE_PULL_REQUEST} && ` +
+  `github.head_ref == '${FINAL_RELEASE_BRANCH}' && ` +
+  `github.base_ref == '${FINAL_RELEASE_BASE}' && ` +
+  'github.event.pull_request.head.repo.full_name == github.repository && ' +
+  "github.event.action == 'synchronize' && " +
+  `github.event.pull_request.commits == ${FINAL_RELEASE_PULL_REQUEST_COMMITS} && ` +
+  'github.run_attempt == 1';
 
 const EXPECTED_EVIDENCE = Object.freeze([
   ['POLICY-CANONICAL-V3.2.X', CANONICAL_POLICY_SOURCE,
@@ -360,17 +394,64 @@ const EXPECTED_RELEASE_CHECK = Object.freeze({
   },
   manualRerunAllowed: false,
   workflowDispatchRerunAllowed: false,
-  automaticRequiredCi: {
-    attemptNumber: 2,
-    status: 'PENDING_REMOTE_REQUIRED_CI',
+  priorAutomaticRequiredCi: [{
+    attemptNumber: 3,
+    status: 'CANCELLED',
     authorization: 'PR_OPENING_ONLY_WAIVER',
-    workflowSource: WINDOWS_BUILD_WORKFLOW_SOURCE,
     trigger: 'PULL_REQUEST_OPENED_REQUIRED_CI',
+    workflowRunId: 32953558996,
+    reviewedHead: FINAL_RELEASE_ORIGINAL_HEAD,
+    smokeTestConclusion: 'CANCELLED',
+    buildConclusion: 'SKIPPED',
+    satisfiesHardGate: false
+  }, {
+    attemptNumber: 4,
+    status: 'NOT_STARTED',
+    authorization: 'PR_REPAIR_SYNCHRONIZE_SINGLE_USE_WAIVER',
+    trigger: 'PULL_REQUEST_SYNCHRONIZE_REQUIRED_CI',
+    intendedHead: FINAL_RELEASE_CONFLICTING_HEAD,
+    reason: 'PULL_REQUEST_MERGE_CONFLICT',
+    satisfiesHardGate: false
+  }, {
+    attemptNumber: 5,
+    status: 'FAILURE',
+    authorization: 'PR_CONFLICT_RESOLUTION_SYNCHRONIZE_SINGLE_USE_WAIVER',
+    trigger: 'PULL_REQUEST_SYNCHRONIZE_REQUIRED_CI',
+    workflowRunId: 32995472567,
+    reviewedHead: FINAL_RELEASE_FAILED_ATTEMPT_HEAD,
+    smokeTestConclusion: 'FAILURE',
+    buildConclusion: 'SKIPPED',
+    unit: {
+      passed: 6154,
+      total: 6176,
+      failed: 20,
+      skipped: 2,
+      cancelled: 0
+    },
+    failureGroups: [
+      { id: 'PREFUND_MAIN_PARSER_OUTCOME_DIRECTORY_FSYNC', leafFailures: 13 },
+      { id: 'TOOLBOX_MANIFEST_DIRECTORY_FSYNC_SEAM', leafFailures: 4 },
+      { id: 'WINDOWS_CRLF_STATIC_CONTRACT', leafFailures: 1 },
+      { id: 'WINDOWS_CRLF_EVIDENCE_HASH', leafFailures: 2 }
+    ],
+    satisfiesHardGate: false
+  }],
+  automaticRequiredCi: {
+    attemptNumber: 6,
+    status: 'PENDING_REMOTE_REQUIRED_CI',
+    authorization: 'PR_WINDOWS_UNIT_REPAIR_SYNCHRONIZE_SINGLE_USE_WAIVER',
+    workflowSource: WINDOWS_BUILD_WORKFLOW_SOURCE,
+    trigger: 'PULL_REQUEST_SYNCHRONIZE_REQUIRED_CI',
     sameRepositoryOnly: true,
     runAttempt: 1,
     command: 'npm run release-check',
     branch: FINAL_RELEASE_BRANCH,
     baseRef: FINAL_RELEASE_BASE,
+    pullRequestNumber: FINAL_RELEASE_PULL_REQUEST,
+    expectedPullRequestCommits: FINAL_RELEASE_PULL_REQUEST_COMMITS,
+    expectedParentHead: FINAL_RELEASE_FAILED_ATTEMPT_HEAD,
+    preservedMergeFirstParentHead: FINAL_RELEASE_CONFLICTING_HEAD,
+    preservedMergeSecondParentHead: FINAL_RELEASE_R3_HEAD,
     headBinding: 'github.event.pull_request.head.sha',
     nonPullRequestHeadBinding: 'github.sha',
     invocationLimit: 1,
@@ -400,7 +481,10 @@ function projectPolicy(policy) {
 }
 
 function sha256File(filePath) {
-  return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+  // GitHub Windows checkout may materialize repository text as CRLF. Evidence hashes
+  // describe the canonical repository text, not the runner's checkout convention.
+  const canonicalText = fs.readFileSync(filePath, 'utf8').replace(/\r\n/g, '\n');
+  return crypto.createHash('sha256').update(canonicalText, 'utf8').digest('hex');
 }
 
 function normalizeYamlCondition(source) {
@@ -454,6 +538,64 @@ function validateReleaseEvidence(snapshot, options = {}) {
         smokeJob.includes(EXPECTED_CHECKOUT_REF), true);
       expectEqual('/authority/windowsWorkflow/buildCheckoutRef',
         buildJob.includes(EXPECTED_CHECKOUT_REF), true);
+      const guardStart = smokeJob.indexOf(
+        '- name: Reject unauthorized v3.2.1 final-gate invocation'
+      );
+      const checkoutStart = smokeJob.indexOf('- name: Checkout');
+      if (guardStart === -1 || checkoutStart === -1 || guardStart >= checkoutStart) {
+        add('/authority/windowsWorkflow/unauthorizedFinalGuard',
+          'unauthorized final-gate guard must fail before checkout');
+      } else {
+        const guardStep = smokeJob.slice(guardStart, checkoutStart);
+        const guardConditionMatch = guardStep.match(/if: >-\s*\n([\s\S]*?)\n\s*run: \|/);
+        if (!guardConditionMatch || !guardStep.includes('exit 1')) {
+          add('/authority/windowsWorkflow/unauthorizedFinalGuard',
+            'unauthorized final-gate condition or explicit failure is missing');
+        } else {
+          expectEqual('/authority/windowsWorkflow/unauthorizedFinalGuard',
+            normalizeYamlCondition(guardConditionMatch[1]),
+            EXPECTED_UNAUTHORIZED_FINAL_CONDITION);
+        }
+      }
+      const lineageStart = smokeJob.indexOf(
+        '- name: Verify authorized v3.2.1 repair lineage'
+      );
+      const setupNodeStart = smokeJob.indexOf('- name: Setup Node.js');
+      if (lineageStart === -1 || setupNodeStart === -1 ||
+          checkoutStart >= lineageStart || lineageStart >= setupNodeStart) {
+        add('/authority/windowsWorkflow/repairLineage',
+          'authorized repair lineage must run after exact checkout and before dependency setup');
+      } else {
+        const lineageStep = smokeJob.slice(lineageStart, setupNodeStart);
+        const lineageConditionMatch = lineageStep.match(
+          /if: >-\s*\n([\s\S]*?)\n\s*shell: bash/
+        );
+        if (!lineageConditionMatch) {
+          add('/authority/windowsWorkflow/repairLineage',
+            'authorized repair lineage condition is missing');
+        } else {
+          expectEqual('/authority/windowsWorkflow/repairLineageCondition',
+            normalizeYamlCondition(lineageConditionMatch[1]),
+            EXPECTED_REPAIR_LINEAGE_CONDITION);
+        }
+        expectEqual('/authority/windowsWorkflow/repairLineageHeadBinding',
+          lineageStep.includes(
+            'test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"'
+          ), true);
+        expectEqual('/authority/windowsWorkflow/repairLineageFirstParent',
+          lineageStep.includes(
+            `test "$(git rev-parse HEAD^1)" = "${FINAL_RELEASE_FAILED_ATTEMPT_HEAD}"`
+          ),
+          true);
+        expectEqual('/authority/windowsWorkflow/repairLineagePreservedFirstParent',
+          lineageStep.includes(
+            `test "$(git rev-parse HEAD^1^1)" = "${FINAL_RELEASE_CONFLICTING_HEAD}"`
+          ), true);
+        expectEqual('/authority/windowsWorkflow/repairLineagePreservedSecondParent',
+          lineageStep.includes(
+            `test "$(git rev-parse HEAD^1^2)" = "${FINAL_RELEASE_R3_HEAD}"`
+          ), true);
+      }
       const releaseChecksStep = smokeJob.slice(
         smokeJob.indexOf('- name: Run release checks'),
         smokeJob.indexOf('- name: Verify Windows startup process adapter semantics')
@@ -610,5 +752,6 @@ if (require.main === module) runCli();
 
 module.exports = {
   SNAPSHOT_PATH,
+  sha256File,
   validateReleaseEvidence
 };

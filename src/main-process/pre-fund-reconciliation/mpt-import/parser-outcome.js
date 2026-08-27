@@ -112,8 +112,9 @@ function exactOutcome(input, outcome) {
   });
 }
 
-function writeParserOutcome(input, outcome) {
+function writeParserOutcome(input, outcome, options = {}) {
   const paths = ensureMptSpoolDirectory(input);
+  const syncDirectory = options.fsyncDirectory || fsyncDirectory;
   const sealed = exactOutcome(input, outcome);
   const bytes = Buffer.from(`${JSON.stringify(sealed)}\n`, 'utf8');
   if (bytes.length > MAX_BYTES) throw spoolError('PREFUND_PARSER_OUTCOME_INVALID', 'Parser outcome过大');
@@ -125,7 +126,7 @@ function writeParserOutcome(input, outcome) {
     fs.closeSync(fd);
   }
   fs.renameSync(paths.parserOutcomePart, paths.parserOutcomeReady);
-  assertDirectoryDurable(fsyncDirectory(paths.fileDir));
+  assertDirectoryDurable(syncDirectory(paths.fileDir));
   return sealed;
 }
 

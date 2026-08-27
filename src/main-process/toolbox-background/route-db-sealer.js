@@ -50,9 +50,11 @@ function assertDirectoryDurable(result) {
   return result;
 }
 
-function writeSealedManifest(manifestPath, value) {
+function writeSealedManifest(manifestPath, value, options = {}) {
   const bytes = Buffer.from(`${JSON.stringify(value)}\n`, 'utf8');
-  const durability = writeFileAtomicDurable(manifestPath, bytes);
+  const durability = writeFileAtomicDurable(manifestPath, bytes, {
+    fsyncDirectory: options.fsyncDirectory || fsyncDirectory
+  });
   assertDirectoryDurable(durability);
   return Object.freeze({ byteSize: bytes.length, sha256: sha256Bytes(bytes) });
 }
@@ -231,7 +233,11 @@ async function scanAndSealRouteDb(input, signal) {
       sourceSha256,
       sealedAt
     });
-    const manifestArtifact = writeSealedManifest(manifestPath, manifestValue);
+    const manifestArtifact = writeSealedManifest(manifestPath, manifestValue, {
+      // 测试 Worker 的 preload 只替换导出的 directory barrier；显式透传后，
+      // manifest 原子写与 Route DB seal 使用同一能力结论。生产默认仍是真实 fsync。
+      fsyncDirectory
+    });
     return Object.freeze({ ...manifestValue, manifestArtifact });
   } catch (error) {
     if (db) {
@@ -251,5 +257,6 @@ async function scanAndSealRouteDb(input, signal) {
 module.exports = {
   assertDirectoryDurable,
   removeRouteFiles,
-  scanAndSealRouteDb
+  scanAndSealRouteDb,
+  writeSealedManifest
 };

@@ -179,7 +179,7 @@ test('managed repair与legacy逐项保持token删除/保留和顶层结果shape'
     database: mirrorDatabase(userDataDir),
     templatePath: path.join(root, 'assets', '前置资金对账模板.xlsx')
   });
-  const paths = [1, 2, 3].map((index) => `/tmp/MPT_INBOUND_GATEWAY_20260708_${index}.txt`);
+  const paths = [1, 2, 3, 4].map((index) => `/tmp/MPT_INBOUND_GATEWAY_20260708_${index}.txt`);
   const seeded = service.adoptManagedMptImportResults(paths, paths.map((filePath, index) => ({
     status: 'failed',
     fileName: path.basename(filePath),
@@ -203,6 +203,9 @@ test('managed repair与legacy逐项保持token删除/保留和顶层结果shape'
   }, {
     status: 'failed', fileName: path.basename(paths[2]), code: 'SQLITE_BUSY',
     message: 'sql busy', detailLines: ['retry later']
+  }, {
+    status: 'failed', fileName: path.basename(paths[3]), code: 'PREFUND_SPOOL_SOURCE_CHANGED',
+    message: 'source temporarily unavailable', detailLines: []
   }]);
   assert.equal(Object.hasOwn(repaired[0], 'repairToken'), false);
   assert.equal(Object.hasOwn(repaired[1], 'repairToken'), false);
@@ -214,6 +217,14 @@ test('managed repair与legacy逐项保持token删除/保留和顶层结果shape'
     sourceType: 'MPT_INBOUND_GATEWAY',
     rowErrorCount: 3
   });
+  assert.deepEqual(repaired[3], {
+    status: 'failed', fileName: path.basename(paths[3]), code: 'PREFUND_SPOOL_SOURCE_CHANGED',
+    message: 'source temporarily unavailable', detailLines: [],
+    canRepair: true,
+    repairToken: seeded[3].repairToken,
+    sourceType: 'MPT_INBOUND_GATEWAY',
+    rowErrorCount: 4
+  });
   assert.throws(() => service.resolveMptImportFailures([seeded[0].repairToken]), {
     code: 'pre-fund-mpt-failure-token-expired'
   });
@@ -221,4 +232,5 @@ test('managed repair与legacy逐项保持token删除/保留和顶层结果shape'
     code: 'pre-fund-mpt-failure-token-expired'
   });
   assert.deepEqual(service.resolveMptImportFailures([seeded[2].repairToken]), [failures[2]]);
+  assert.deepEqual(service.resolveMptImportFailures([seeded[3].repairToken]), [failures[3]]);
 });

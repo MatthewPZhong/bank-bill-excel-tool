@@ -4,7 +4,7 @@
 
 - Goal：为冻结的 `R3.2.1 | release evidence | action独立 enable/rollback` 建立可机器校验、可审计的 7-action production snapshot，不改变任何生产业务路径。
 - Context：E04-A/E04-B/E05-A/E05-P0/E05-B 已落 capability；E04-C 第二 Writer probe 已拒绝生产实现；E05-C representative Parser Pool 改善仅 0.57%，结论为 `DOWNGRADE / KEEP PRODUCTION DISABLED`。
-- Constraints：5 个 v3.2.1 native action 保持 `production.enabled=false`、live legacy、effective worker 0；`toolbox:split-large` / `toolbox:publish` 保留 inherited canonical production state；不改金额、币种、receipt、sequence、Publisher 或 Recovery Hold 语义；不实现第二 Writer；本 PR Dev、人工触发与 `workflow_dispatch` 均不运行/重跑 `release-check`；冻结 snapshot 记录的是 final PR opening 前的 `PENDING_REMOTE_REQUIRED_CI`。PR #182 的 automatic attempt #2 后续在 Windows 运行满 6 小时被平台取消，follow-up 只修复跨平台测试隔离并跑定向测试；按 release owner 最新约束，#182 不再运行 `release-check`，全量 `release-check` 只允许在 v3.2.1 最后一张 PR #183 的远端 CI 执行一次。hard gate 在该最终证据成功前保持 open，且不授权 main/tag/production enable；不运行 `check-vars` 或 `scan:vars`。
+- Constraints：5 个 v3.2.1 native action 保持 `production.enabled=false`、live legacy、effective worker 0；`toolbox:split-large` / `toolbox:publish` 保留 inherited canonical production state；不改金额、币种、receipt、sequence、Publisher 或 Recovery Hold 语义；不实现第二 Writer；本 PR Dev、人工触发与 `workflow_dispatch` 均不运行/重跑 `release-check`；冻结 snapshot 记录的是 final PR opening 前的 `PENDING_REMOTE_REQUIRED_CI`。PR #182 的 automatic attempt #2 后续在 Windows 运行满 6 小时被平台取消，follow-up 只修复跨平台测试隔离并跑定向测试；#183 attempt #5 已在 Windows full unit 失败，release owner 只为同一 final PR 的单个修复提交追加授权 automatic attempt #6。不得手工 rerun、dispatch、追加 push 或把 #182 结果代偿为 final gate。hard gate 在 attempt #6 成功前保持 open，且不授权 main/tag/production enable；不运行本地 `release-check`、`check-vars` 或 `scan:vars`。
 - Done when：snapshot 对每个 action 独立给出 current policy、live disposition/effective mode/worker count、enable 决定、禁用/保留原因、rollback、证据引用和 Windows/人工/资金恢复门禁；validator 能同时发现 policy drift、证据漂移、跨 action 代偿和门禁误报；定向测试、affected ESLint/语法与 `git diff --check` 通过。
 
 ## 已确认事实
@@ -21,6 +21,7 @@
 | `package.json.version` 为 `3.1.14`，R3.2.0 release-evidence 未 bump 产品版本。 | `package.json` 与 R3.2.0 release-evidence commit。 | 本证据 PR 不 bump，不更新 release 用户文档三件套。 |
 | local `release-check` attempt #1 在 `c9e89db7` 失败；release owner 仅为开 final PR 授权 automatic required CI attempt #2。 | release-owner 授权、tracked release snapshot与`.github/workflows/build-windows.yml`。 | 锁定same-repo `opened`、head branch、target base、PR head SHA和`run_attempt == 1`；错误base及final branch `workflow_dispatch`/synchronize/rerun必须skip。 |
 | PR #182 automatic attempt #2 在 Windows unit 阶段触发真实目录 `fsync` unsupported，随后测试进程未退出并在 6 小时上限被取消。 | Actions run `32932672610`；E05-A/B/C spool 日志；Windows `fsyncDirectory` 平台返回。 | 生产 `ready` 发布仍必须 fail closed；只能隔离测试宿主能力，不能把 unsupported 降级成成功。#182 follow-up 不得重跑全量 `release-check`。 |
+| PR #183 automatic attempt #5 已通过 lint 与实际 smoke，随后在 Windows full unit 出现 20 个 leaf failure；build 因依赖该 job 而跳过。 | Actions run `32995472567`；unit `6154/6176 PASS`、20 fail、2 skip。 | 失败发生在 unit phase而非 smoke phase；按 Parser outcome 13、Route DB 4、Renderer CRLF 1、release evidence CRLF 2 四组收口，attempt #5 永不改写为 PASS。 |
 
 ## Unknowns Register
 
@@ -41,3 +42,5 @@
 | 3 | 运行定向验证与两类 blindspot pass。 | 入口、状态、恢复、资金/审计边界。 | unit、CLI、lint/syntax、diff-check；人工边界仍 open。 | 不能作为最终 PR 证据。 | 保持所有 native disabled，不触碰产品路径。 |
 | 4 | 完成 notes 与本地提交。 | Evidence/Remaining Unknowns 可复现。 | clean tree、精确 base/HEAD。 | 交付不可审计。 | Dev不push/merge；release owner开PR后仅由required CI按授权运行attempt #2。 |
 | 5 | PR #182 follow-up 隔离 Windows 测试宿主能力。 | 生产 durability fail-closed、Worker 生命周期、资源准入、资金/receipt合同。 | E05-A/B/C、Toolbox Route/generation、mature adapter定向测试及全量unit正常通过且进程退出；affected static checks通过。 | 若修改生产 barrier会形成伪durability；若资源探针或Worker残留泄漏会再次耗尽CI。 | 仅保留test seam、确定性测试预算与真实平台回归；#182不运行全量`release-check`。 |
+| 6 | PR #183 一次性 conflict-resolution synchronize final gate。 | attempt #4 因 PR 堆叠冲突未启动；waiver 不得扩散到后续 push。 | PR #183 / same-repo / R4→R3 / synchronize / attempt 1 / commits 5；exact checkout 后验证 `HEAD^1=ce599e20`、`HEAD^2=d7d96938`。 | 任一 tuple 或双父 lineage 漂移必须在 release-check 前失败；远端失败/取消不允许重跑。 | 只撤回本次 waiver；保持 hard gate open、native production disabled、main/tag未授权。 |
+| 7 | 修复 attempt #5 的 Windows unit 平台测试缝隙，并只开放 automatic attempt #6。 | 生产 durability fail-closed、文本证据 canonicalization、失败历史与 final gate 单次性。 | 新提交 `HEAD^1=f87f2b29`、PR commits 6；四组定向测试、full unit、validator与静态合同通过；远端只接受该自然 synchronize。 | 任一未来 push、rerun、错误 base/head 或测试失败均不得 merge #183。 | 回退单个修复提交并保持 hard gate open；不触碰业务金额/币种/receipt/Hold、main/tag或production。 |

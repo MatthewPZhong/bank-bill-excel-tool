@@ -2,12 +2,14 @@
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 
 const {
   SNAPSHOT_PATH,
+  sha256File,
   validateReleaseEvidence
 } = require('../../../scripts/validate-v3-2-1-release-evidence');
 
@@ -24,6 +26,16 @@ function findAction(snapshot, actionKey) {
 function errorPaths(result) {
   return result.errors.map((error) => error.path);
 }
+
+test('release evidence文本hash不受Windows CRLF checkout影响', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'v321-evidence-eol-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const lfPath = path.join(dir, 'lf.md');
+  const crlfPath = path.join(dir, 'crlf.md');
+  fs.writeFileSync(lfPath, 'line-1\nline-2\n', 'utf8');
+  fs.writeFileSync(crlfPath, 'line-1\r\nline-2\r\n', 'utf8');
+  assert.equal(sha256File(crlfPath), sha256File(lfPath));
+});
 
 test('R3.2.1 release snapshot锁定7 action独立production与rollback证据', () => {
   const result = validateReleaseEvidence(loadSnapshot());
@@ -66,7 +78,7 @@ test('local release-check attempt #1失败不能被改写为PASS或被组件结�
   assert.ok(errorPaths(result).includes('/releaseCheckEvidence'));
 });
 
-test('remote required CI attempt #2只能在final PR target base/exact head执行一次且保持pending', () => {
+test('remote required CI attempt #6只能在#183一次性Windows unit修复synchronize执行且保持pending', () => {
   const snapshot = loadSnapshot();
   const automaticCi = snapshot.releaseCheckEvidence.automaticRequiredCi;
   automaticCi.status = 'PASS';
@@ -77,8 +89,14 @@ test('remote required CI attempt #2只能在final PR target base/exact head执�
   automaticCi.runAttempt = 2;
   automaticCi.branch = 'main';
   automaticCi.baseRef = 'main';
+  automaticCi.pullRequestNumber = 184;
+  automaticCi.expectedPullRequestCommits = 7;
+  automaticCi.expectedParentHead = '0000000000000000000000000000000000000000';
+  automaticCi.preservedMergeFirstParentHead = '1111111111111111111111111111111111111111';
+  automaticCi.preservedMergeSecondParentHead = '2222222222222222222222222222222222222222';
   automaticCi.headBinding = 'github.sha';
   automaticCi.invocationLimit = 2;
+  snapshot.releaseCheckEvidence.priorAutomaticRequiredCi[2].status = 'PASS';
   snapshot.releaseCheckEvidence.manualRerunAllowed = true;
   snapshot.releaseCheckEvidence.workflowDispatchRerunAllowed = true;
   snapshot.releaseCheckEvidence.mergeAuthorized = true;
