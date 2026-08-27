@@ -41,6 +41,7 @@ function createStatementService(options = {}) {
   let controlOrdinal = 0;
   let state = null;
   let activeJob = null;
+  let cancelledRequestTombstone = null;
   let closing = false;
 
   function nextControlId(prefix) {
@@ -71,6 +72,22 @@ function createStatementService(options = {}) {
       jobId: start.jobId,
       unitId: null
     });
+  }
+
+  function sameJobRef(left, right) {
+    return Boolean(left && right &&
+      left.actionKey === right.actionKey &&
+      left.operationKey === right.operationKey &&
+      left.jobId === right.jobId &&
+      left.unitId === right.unitId);
+  }
+
+  function matchesCancelledRequest(message) {
+    return Boolean(cancelledRequestTombstone &&
+      cancelledRequestTombstone.phase === 'awaiting-response' &&
+      message.controlId === cancelledRequestTombstone.requestControlId &&
+      message.payload.requestId === cancelledRequestTombstone.requestId &&
+      sameJobRef(message.jobRef, cancelledRequestTombstone.jobRef));
   }
 
   function safeError(error, fallbackCode, fallbackMessage) {
@@ -107,6 +124,7 @@ function createStatementService(options = {}) {
         'Statement source resource resolver is unavailable'
       );
     }
+    const canonicalPaths = new Set();
     return Object.freeze(request.sources.map((source) => {
       const resolved = options.resolveSourceResource(source.resourceId);
       if (typeof resolved !== 'string' || resolved.length === 0) {
@@ -115,9 +133,17 @@ function createStatementService(options = {}) {
           'Statement source resource identity is unavailable'
         );
       }
+      const canonicalPath = path.resolve(resolved);
+      if (canonicalPaths.has(canonicalPath)) {
+        throw new StatementServiceError(
+          'STATEMENT_SOURCE_CANONICAL_DUPLICATE',
+          'Statement source resources must resolve to distinct canonical paths'
+        );
+      }
+      canonicalPaths.add(canonicalPath);
       return Object.freeze({
         resourceId: source.resourceId,
-        path: path.resolve(resolved),
+        path: canonicalPath,
         snapshot: source.snapshot
       });
     }));
@@ -205,6 +231,15 @@ function createStatementService(options = {}) {
   function handleResourceGrant(message) {
     const job = activeJob;
     if (!job || job.terminal || !job.candidate || message.payload.requestId !== job.requestId) {
+      if (matchesCancelledRequest(message)) {
+        cancelledRequestTombstone = {
+          ...cancelledRequestTombstone,
+          phase: 'awaiting-revoke',
+          grantId: message.payload.grantId,
+          reservationId: message.payload.reservationId
+        };
+        return;
+      }
       throw new StatementServiceError('STATEMENT_SERVICE_GRANT_STALE', 'Resource grant does not match active candidate');
     }
     if (job.cancelled) {
@@ -230,6 +265,10 @@ function createStatementService(options = {}) {
   function handleResourceReject(message) {
     const job = activeJob;
     if (!job || job.terminal || message.payload.requestId !== job.requestId) {
+      if (matchesCancelledRequest(message)) {
+        cancelledRequestTombstone = null;
+        return;
+      }
       throw new StatementServiceError('STATEMENT_SERVICE_REJECT_STALE', 'Resource reject does not match active candidate');
     }
     const error = new StatementServiceError(
@@ -261,6 +300,17 @@ function createStatementService(options = {}) {
     const job = activeJob;
     if (!job || job.terminal || message.jobId !== job.start.jobId) return;
     if (job.adoptionStarted) return;
+    if (job.requestId && !job.grant) {
+      cancelledRequestTombstone = {
+        phase: 'awaiting-response',
+        requestId: job.requestId,
+        requestControlId: job.requestControlId,
+        jobRef: jobRef(job.start),
+        grantId: null,
+        reservationId: null,
+        revokeControlId: null
+      };
+    }
     job.cancelled = true;
     job.candidate = null;
     job.emit('cancel:ack', { cancellation: { scope: 'job' } });
@@ -273,6 +323,22 @@ function createStatementService(options = {}) {
 
   function handleResourceRevoke(message) {
     const reservationId = message.payload.reservationId;
+    if (cancelledRequestTombstone &&
+        cancelledRequestTombstone.phase === 'awaiting-revoke' &&
+        reservationId === cancelledRequestTombstone.reservationId &&
+        message.payload.grantId === cancelledRequestTombstone.grantId &&
+        sameJobRef(message.jobRef, cancelledRequestTombstone.jobRef)) {
+      cancelledRequestTombstone = {
+        ...cancelledRequestTombstone,
+        phase: 'awaiting-release-ack',
+        revokeControlId: message.controlId
+      };
+      postControl('resource:release', message.controlId, message.jobRef, {
+        reservationId,
+        reason: 'job-failed'
+      });
+      return;
+    }
     if (activeJob && activeJob.grant &&
         reservationId === activeJob.grant.reservationId) {
       activeJob.revokedCandidateError = new StatementServiceError(
@@ -322,6 +388,14 @@ function createStatementService(options = {}) {
       if (message.operation === 'resource:adopt-ack') return handleAdoptAck(message);
       if (message.operation === 'resource:revoke') return handleResourceRevoke(message);
       if (message.operation === 'resource:release-ack') {
+        if (cancelledRequestTombstone &&
+            cancelledRequestTombstone.phase === 'awaiting-release-ack' &&
+            message.controlId === cancelledRequestTombstone.revokeControlId &&
+            message.payload.reservationId === cancelledRequestTombstone.reservationId &&
+            sameJobRef(message.jobRef, cancelledRequestTombstone.jobRef)) {
+          cancelledRequestTombstone = null;
+          return;
+        }
         if (activeJob && activeJob.revokedCandidateError && activeJob.grant &&
             message.payload.reservationId === activeJob.grant.reservationId) {
           const job = activeJob;

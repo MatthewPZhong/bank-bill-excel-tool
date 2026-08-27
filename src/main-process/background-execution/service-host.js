@@ -166,10 +166,15 @@ function createServiceHost(options = {}) {
         `ServiceHost does not implement busyPolicy for ${serviceKey}: ${matches[0].service.busyPolicy}`
       );
     }
+    const cancellationTerminalErrorCodes = entry && typeof entry === 'object' &&
+      Array.isArray(entry.cancellationTerminalErrorCodes)
+      ? Object.freeze([...new Set(entry.cancellationTerminalErrorCodes)])
+      : Object.freeze([]);
     return Object.freeze({
       policies: Object.freeze(matches),
       carrier,
       entry,
+      cancellationTerminalErrorCodes,
       base: componentMax(matches.map((policy) => policy.resources.base)),
       policyDigest: digest(matches.map((policy) => policy.actionKey).sort().map((actionKey) =>
         matches.find((policy) => policy.actionKey === actionKey)))
@@ -1430,6 +1435,15 @@ function createServiceHost(options = {}) {
     }, { policyRegistry });
     record.jobSequences.observe(message);
     if (!job.detaching && job.terminalOperation === null &&
+        message.operation === 'job:error' && !job.cancellationTerminalForwarded &&
+        (job.cancelCommandState === 'dispatching' || job.cancelCommandState === 'sent') &&
+        record.profile.cancellationTerminalErrorCodes.includes(
+          message.payload && message.payload.error && message.payload.error.code
+        )) {
+      job.cancellationTerminalForwarded = true;
+      if (typeof job.onCancellationTerminal === 'function') job.onCancellationTerminal();
+    }
+    if (!job.detaching && job.terminalOperation === null &&
         (message.operation === 'job:done' || message.operation === 'job:error')) {
       job.terminalOperation = message.operation;
       if (message.operation === 'job:done') {
@@ -1705,8 +1719,11 @@ function createServiceHost(options = {}) {
       jobId: request.jobId,
       policy,
       onMessage: request.onMessage,
+      onCancellationTerminal: request.onCancellationTerminal,
       onError: request.onError,
       onExit: request.onExit,
+      cancelCommandState: 'not-dispatched',
+      cancellationTerminalForwarded: false,
       detaching: false,
       detached: false,
       detachPromise: null,
@@ -1791,7 +1808,15 @@ function createServiceHost(options = {}) {
           direction: 'command'
         }, { policyRegistry });
         record.jobSequences.observe(owned);
-        record.rawTransport.send(owned, transferList);
+        const dispatchingCancel = owned.operation === 'job:cancel';
+        if (dispatchingCancel) job.cancelCommandState = 'dispatching';
+        try {
+          record.rawTransport.send(owned, transferList);
+        } catch (error) {
+          if (dispatchingCancel) job.cancelCommandState = 'not-dispatched';
+          throw error;
+        }
+        if (dispatchingCancel) job.cancelCommandState = 'sent';
       },
       close() {
         return detach('job-terminal');

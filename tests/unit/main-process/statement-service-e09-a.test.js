@@ -477,6 +477,52 @@ test('source candidate evidence 失败保留旧 session/revision', async (t) => 
   assert.equal(status.result.summary.rowCount, 1);
 });
 
+test('canonical source alias 在读文件与 resource request 前 fail closed 并保留旧 revision', async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-e09-a-canonical-'));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const inputPath = path.join(tempDir, 'a.xlsx');
+  writeStatement(inputPath, [['2026-08-01', 10, '', 'USD', 'M001']]);
+  const harness = createHarness({ sourceRoot: tempDir });
+  t.after(async () => { await harness.supervisor.shutdown({ forceServices: true, timeoutMs: 5000 }); });
+  const evidence = templateEvidence();
+  const sourceEvidence = source(inputPath);
+  const imported = await harness.supervisor.execute(executionRequest({
+    command: 'import',
+    sessionKey: 'template-direct',
+    sources: [sourceEvidence],
+    templateEvidence: evidence
+  }, 'canonical-initial'));
+  assert.equal(imported.outcome, 'completed');
+  assert.equal(imported.result.summary.sessionRevision, 1);
+
+  for (const [ordinal, alias] of ['./a.xlsx', 'sub/../a.xlsx'].entries()) {
+    const jobId = `statement-import-job-canonical-alias-${ordinal}`;
+    const failed = await harness.supervisor.execute(executionRequest({
+      command: 'import',
+      sessionKey: 'template-direct',
+      sources: [
+        sourceEvidence,
+        { resourceId: alias, snapshot: sourceEvidence.snapshot }
+      ],
+      templateEvidence: evidence
+    }, `canonical-alias-${ordinal}`));
+    assert.equal(failed.outcome, 'failed');
+    assert.equal(failed.error.code, 'STATEMENT_SOURCE_CANONICAL_DUPLICATE');
+    assert.equal(harness.trace.some((message) =>
+      message.jobRef && message.jobRef.jobId === jobId &&
+      message.operation === 'resource:request'), false);
+    const status = await harness.supervisor.execute(executionRequest(
+      { command: 'status' },
+      `canonical-status-${ordinal}`
+    ));
+    assert.equal(status.result.summary.serviceGeneration, 1);
+    assert.equal(status.result.summary.sessionRevision, 1);
+    assert.equal(status.result.summary.fileCount, 1);
+    assert.equal(status.result.summary.rowCount, 1);
+  }
+  assert.equal(harness.diagnostics.some((event) => event.type === 'service-fatal'), false);
+});
+
 test('E09-B 大账号交互上下文保持 blocked，不创建 token/DTO/本地 Map', async (t) => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-e09-a-blocked-'));
   t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
@@ -622,6 +668,153 @@ test('adoption 前取消丢弃 candidate 并保持空 session', async (t) => {
   const status = await harness.supervisor.execute(executionRequest({ command: 'status' }, 'cancel-status'));
   assert.equal(status.result.summary.sessionRevision, 0);
   assert.equal(status.result.summary.sessionCount, 0);
+});
+
+test('shutdown 对 attached native Worker 桥接取消终态并收口 exact late reject', async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-e09-a-shutdown-reject-'));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const initialPath = path.join(tempDir, 'initial.xlsx');
+  const inputPath = path.join(tempDir, 'cancel.xlsx');
+  writeStatement(initialPath, [['2026-07-31', 4, '', 'USD', 'M000']]);
+  writeStatement(inputPath, [['2026-08-01', 9, '', 'USD', 'M001']]);
+  let persistentCalls = 0;
+  const harness = createHarness({
+    sourceRoot: tempDir,
+    wrapGovernor(governor) {
+      return Object.freeze({
+        ...governor,
+        acquirePersistentReservation(request) {
+          persistentCalls += 1;
+          if (persistentCalls === 1) return governor.acquirePersistentReservation(request);
+          return new Promise((resolve, reject) => {
+            const rejectCancelled = () => {
+              const error = new Error('injected pending admission cancellation');
+              error.code = 'ADMISSION_CANCELLED';
+              queueMicrotask(() => reject(error));
+            };
+            if (request.signal.aborted) rejectCancelled();
+            else request.signal.addEventListener('abort', rejectCancelled, { once: true });
+          });
+        }
+      });
+    }
+  });
+  t.after(async () => { await harness.supervisor.shutdown({ forceServices: true, timeoutMs: 5000 }); });
+  const initialRequest = executionRequest({
+    command: 'import',
+    sessionKey: 'template-direct',
+    sources: [source(initialPath)],
+    templateEvidence: templateEvidence()
+  }, 'shutdown-reject-initial');
+  const initial = await harness.supervisor.execute(initialRequest);
+  assert.equal(initial.outcome, 'completed');
+  assert.equal(initial.result.summary.sessionRevision, 1);
+  const request = executionRequest({
+    command: 'import',
+    sessionKey: 'template-direct',
+    sources: [source(inputPath)],
+    templateEvidence: templateEvidence()
+  }, 'shutdown-reject');
+  const control = harness.supervisor.start(request);
+  await waitFor(() => harness.trace.some((message) =>
+    message.operation === 'resource:request' &&
+    message.jobRef && message.jobRef.jobId === request.jobId), 'pending resource request');
+
+  const report = await harness.supervisor.shutdown({ timeoutMs: 5000 });
+  const result = await control.promise;
+  assert.equal(result.outcome, 'cancelled');
+  assert.deepEqual(report.cancelledJobs, [request.jobId]);
+  assert.deepEqual(report.leakedTransports, []);
+  assert.deepEqual(report.errors, []);
+  assert.equal(harness.trace.some((message) =>
+    message.operation === 'job:cancel' && message.jobId === request.jobId), true);
+  assert.equal(harness.trace.some((message) =>
+    message.operation === 'job:error' && message.jobId === request.jobId &&
+    message.payload.error.code === 'STATEMENT_IMPORT_CANCELLED'), true);
+  assert.equal(harness.trace.some((message) =>
+    message.operation === 'resource:reject' &&
+    message.jobRef && message.jobRef.jobId === request.jobId), true);
+  assert.equal(harness.trace.some((message) =>
+    message.operation === 'resource:revoke' &&
+    message.jobRef && message.jobRef.jobId === initialRequest.jobId), true);
+  assert.equal(harness.trace.some((message) =>
+    message.operation === 'resource:release' &&
+    message.jobRef && message.jobRef.jobId === initialRequest.jobId), true);
+  assert.equal(harness.diagnostics.some((event) => event.type === 'service-fatal'), false);
+  assert.equal(harness.diagnostics.some((event) =>
+    event.type === 'service-generation-closed' && event.reason === 'service-crash'), false);
+  assert.equal(harness.baseGovernor.snapshot().activeLeaseCount, 0);
+  assert.equal(harness.baseGovernor.snapshot().activeDependencyCount, 0);
+});
+
+test('shutdown 取消后 exact late grant 经 revoke/release 完整结算且不 crash generation', async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-e09-a-shutdown-grant-'));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const initialPath = path.join(tempDir, 'initial.xlsx');
+  const inputPath = path.join(tempDir, 'cancel.xlsx');
+  writeStatement(initialPath, [['2026-07-31', 4, '', 'USD', 'M000']]);
+  writeStatement(inputPath, [['2026-08-01', 9, '', 'USD', 'M001']]);
+  let releaseGrant = null;
+  let grantOrdinal = 0;
+  const harness = createHarness({
+    sourceRoot: tempDir,
+    onHostSend(message, dispatch) {
+      if (message.operation === 'resource:grant') grantOrdinal += 1;
+      if (message.operation === 'resource:grant' && grantOrdinal === 2 && !releaseGrant) {
+        releaseGrant = dispatch;
+        return true;
+      }
+      if (message.operation === 'job:cancel' && releaseGrant) {
+        const dispatchGrant = releaseGrant;
+        releaseGrant = null;
+        dispatch();
+        dispatchGrant();
+        return true;
+      }
+      return false;
+    }
+  });
+  t.after(async () => { await harness.supervisor.shutdown({ forceServices: true, timeoutMs: 5000 }); });
+  const initialRequest = executionRequest({
+    command: 'import',
+    sessionKey: 'template-direct',
+    sources: [source(initialPath)],
+    templateEvidence: templateEvidence()
+  }, 'shutdown-grant-initial');
+  const initial = await harness.supervisor.execute(initialRequest);
+  assert.equal(initial.outcome, 'completed');
+  assert.equal(initial.result.summary.sessionRevision, 1);
+  const request = executionRequest({
+    command: 'import',
+    sessionKey: 'template-direct',
+    sources: [source(inputPath)],
+    templateEvidence: templateEvidence()
+  }, 'shutdown-grant');
+  const control = harness.supervisor.start(request);
+  await waitFor(() => releaseGrant !== null, 'withheld resource grant');
+
+  const report = await harness.supervisor.shutdown({ timeoutMs: 5000 });
+  const result = await control.promise;
+  const jobTrace = harness.trace.filter((message) =>
+    (message.jobRef && message.jobRef.jobId === request.jobId) || message.jobId === request.jobId);
+  assert.equal(result.outcome, 'cancelled');
+  assert.deepEqual(report.cancelledJobs, [request.jobId]);
+  assert.deepEqual(report.leakedTransports, []);
+  assert.deepEqual(report.errors, []);
+  for (const operation of ['resource:grant', 'resource:revoke', 'resource:release', 'resource:release-ack']) {
+    assert.equal(jobTrace.some((message) => message.operation === operation), true, operation);
+  }
+  assert.equal(harness.trace.some((message) =>
+    message.operation === 'resource:revoke' &&
+    message.jobRef && message.jobRef.jobId === initialRequest.jobId), true);
+  assert.equal(harness.trace.some((message) =>
+    message.operation === 'resource:release' &&
+    message.jobRef && message.jobRef.jobId === initialRequest.jobId), true);
+  assert.equal(harness.diagnostics.some((event) => event.type === 'service-fatal'), false);
+  assert.equal(harness.diagnostics.some((event) =>
+    event.type === 'service-generation-closed' && event.reason === 'service-crash'), false);
+  assert.equal(harness.baseGovernor.snapshot().activeLeaseCount, 0);
+  assert.equal(harness.baseGovernor.snapshot().activeDependencyCount, 0);
 });
 
 test('Service crash 丢失内存 session 且新 generation 不扫描已发布文件恢复', async (t) => {
