@@ -69,6 +69,8 @@ const {
   ensureLinkedTableSupport,
   // v2.1.16-beta.5 需求3：ADM 银行对账单隐藏表建表（独立幂等迁移）
   ensureAdmBankDepositSupport,
+  // v3.2.4 E11-P0：JPM ADM 同库 operation receipt schema
+  ensureReconFixOperationReceiptSupport,
   ensureFundTransferReconSupport,
   // v3.0.4 块 E 需求2：BOC 链接表两张隐藏表建表（独立幂等迁移；不进 ALL_TABLE_KEYS）
   ensureBocFxLinkSupport,
@@ -586,6 +588,8 @@ class AppDatabase {
     this.ensureLinkedTableSupport();
     // v2.1.16-beta.5 需求3：ADM 银行对账单隐藏表（紧随 linked 表；幂等 CREATE IF NOT EXISTS，无依赖、不进 ALL_TABLE_KEYS）
     this.ensureAdmBankDepositSupport();
+    // v3.2.4 E11-P0：receipt 与 ADM mutation 必须共享当前主库事务域。
+    this.ensureReconFixOperationReceiptSupport();
     // v3.0.6 需求1：调拨对账单隐藏表（紧随 ADM 表；幂等 CREATE IF NOT EXISTS，无依赖、不进 ALL_TABLE_KEYS）
     this.ensureFundTransferReconSupport();
     // v3.0.4 块 E 需求2：BOC 链接表两张隐藏表（紧随 ADM 表；幂等 CREATE IF NOT EXISTS，无依赖、不进 ALL_TABLE_KEYS）
@@ -1445,6 +1449,11 @@ class AppDatabase {
   // v2.1.16-beta.5 需求3：ADM 银行对账单隐藏表 facade（建表 + 仓储三函数转发）
   ensureAdmBankDepositSupport() {
     return ensureAdmBankDepositSupport(this.db);
+  }
+
+  // v3.2.4 E11-P0：JPM ADM operation receipt 加法 schema。
+  ensureReconFixOperationReceiptSupport() {
+    return ensureReconFixOperationReceiptSupport(this.db);
   }
 
   // ADM 表整表覆盖写入（rows = 13+6 字段对象数组）；6 列 INSERT，整表重建 = 匹配标志归零

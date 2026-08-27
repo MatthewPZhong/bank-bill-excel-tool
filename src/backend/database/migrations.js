@@ -3675,6 +3675,34 @@ function ensureAdmBankDepositSupport(db) {
   }
 }
 
+// v3.2.4 E11-P0：JPM ADM 写回 operation receipt。
+//   receipt 与 linked_adm_bank_deposit 同属 Main-owned 主库，未来 mutation 必须在同一
+//   BEGIN IMMEDIATE 中写入两者；本迁移只做加法建表，不接 worker-durable/Inspector。
+function ensureReconFixOperationReceiptSupport(db) {
+  db.exec('BEGIN');
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS recon_fix_adm_operation_receipts (
+        action_key TEXT NOT NULL,
+        operation_key TEXT NOT NULL,
+        producer_task_run_id TEXT NOT NULL,
+        scenario_id TEXT NOT NULL,
+        pre_image_hash TEXT NOT NULL,
+        post_image_hash TEXT NOT NULL,
+        id_sequence_digest TEXT NOT NULL,
+        row_count INTEGER NOT NULL,
+        changed_row_count INTEGER NOT NULL,
+        committed_at TEXT NOT NULL,
+        PRIMARY KEY(action_key, operation_key)
+      );
+    `);
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
 // v3.0.6 需求1：调拨对账单隐藏表（linked_fund_transfer_recon）。
 //   由中台调拨订单（mid-allocation）经 buildFundTransferReconRows 派生（一行 → FundTransfer-in + out 两行，
 //   recon 13 字段全进 raw_json），供需求2（r5-fund-transfer-recon-backfill）/ 需求3（dbs-charge）引擎读取匹配。
@@ -4016,6 +4044,8 @@ module.exports = {
   ensureLinkedTableSupport,
   // v2.1.16-beta.5 需求3：ADM 银行对账单隐藏表（紧随 linked 表，独立幂等迁移函数）
   ensureAdmBankDepositSupport,
+  // v3.2.4 E11-P0：JPM ADM mutation 同库 operation receipt（加法 schema）
+  ensureReconFixOperationReceiptSupport,
   // v3.0.6 需求1：调拨对账单隐藏表（紧随 ADM 表，独立幂等迁移；不进 ALL_TABLE_KEYS）
   ensureFundTransferReconSupport,
   // v3.0.4 块 E 需求2：BOC 链接表两张隐藏表（紧随 ADM 表，独立幂等迁移；不进 ALL_TABLE_KEYS）
