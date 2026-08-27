@@ -28,10 +28,16 @@ const {
 const {
   createPreFundMptTopologyPlanner
 } = require('../pre-fund-reconciliation/mpt-import/topology');
+const {
+  RECON_FIX_READONLY_POLICIES,
+  RECON_FIX_SERVICE_KEY,
+  validateReconFixServiceResult
+} = require('../recon-id-fix-service/policies');
 
 const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   ...TOOLBOX_GENERATION_POLICIES,
-  ...PRE_FUND_MPT_POLICIES
+  ...PRE_FUND_MPT_POLICIES,
+  ...RECON_FIX_READONLY_POLICIES
 ]);
 
 function isBackgroundExecutionProductionEnabled(actionKey) {
@@ -57,34 +63,43 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
       : { systemReserveBytes: options.systemReserveBytes })
   });
   const workerRoot = path.resolve(__dirname, '..', 'toolbox-background');
+  const reconFixEntry = Object.freeze({
+    path: path.resolve(__dirname, '..', 'recon-id-fix-service', 'worker-entry.js'),
+    cancellationTerminalErrorCodes: Object.freeze([])
+  });
   const entryRegistry = createStaticRegistry(Object.fromEntries(
-    BACKGROUND_EXECUTION_POLICIES.map((policy) => [policy.entryKey, {
-      path: path.join(
-        policy.moduleId === 'pre-fund'
-          ? path.resolve(__dirname, '..', 'pre-fund-reconciliation', 'mpt-import')
-          : workerRoot,
-        policy.moduleId === 'pre-fund'
-          ? 'writer-worker-entry.js'
-          : (policy.actionKey === TOOLBOX_GENERATION_ACTIONS.MERGE
-              ? 'merge-worker-entry.js'
-              : (policy.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
-                  ? 'route-scanner-worker-entry.js'
-                  : 'split-worker-entry.js'))
-      ),
-      cancellationTerminalErrorCodes: policy.moduleId === 'pre-fund'
-        ? ['PREFUND_WRITER_CANCELLED']
-        : ['TOOLBOX_GENERATION_CANCELLED']
-    }])
+    BACKGROUND_EXECUTION_POLICIES.map((policy) => {
+      if (policy.moduleId === 'recon-fix') return [policy.entryKey, reconFixEntry];
+      return [policy.entryKey, {
+        path: path.join(
+          policy.moduleId === 'pre-fund'
+            ? path.resolve(__dirname, '..', 'pre-fund-reconciliation', 'mpt-import')
+            : workerRoot,
+          policy.moduleId === 'pre-fund'
+            ? 'writer-worker-entry.js'
+            : (policy.actionKey === TOOLBOX_GENERATION_ACTIONS.MERGE
+                ? 'merge-worker-entry.js'
+                : (policy.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
+                    ? 'route-scanner-worker-entry.js'
+                    : 'split-worker-entry.js'))
+        ),
+        cancellationTerminalErrorCodes: policy.moduleId === 'pre-fund'
+          ? ['PREFUND_WRITER_CANCELLED']
+          : ['TOOLBOX_GENERATION_CANCELLED']
+      }];
+    })
   ));
   const validatorEntries = {};
   for (const policy of BACKGROUND_EXECUTION_POLICIES) {
-    const resultValidator = policy.moduleId === 'pre-fund'
+    const resultValidator = policy.moduleId === 'recon-fix'
+      ? validateReconFixServiceResult
+      : (policy.moduleId === 'pre-fund'
       ? (policy.actionKey === PRE_FUND_MPT_REPAIR_ACTION
           ? validatePreFundMptRepairResult
           : validatePreFundMptImportResult)
       : (policy.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
           ? validateToolboxMultiGenerationResult
-          : (value) => validateToolboxGenerationResult(value, policy.actionKey));
+          : (value) => validateToolboxGenerationResult(value, policy.actionKey)));
     validatorEntries[policy.result.validatorKey] = resultValidator;
     // Main explicitly executes the asynchronous technical/business validators before Publisher.
     // Registry bindings remain synchronous capability declarations for static contract coverage.
@@ -116,6 +131,7 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
     ),
     settlementKeys: BACKGROUND_EXECUTION_POLICIES.map((policy) => policy.commit.settlementKey),
     publisherKeys: BACKGROUND_EXECUTION_POLICIES.map((policy) => policy.artifacts.publisherKey),
+    serviceKeys: [RECON_FIX_SERVICE_KEY],
     plannerKeys: ['planner.pre-fund:mpt-import'],
     reducerKeys: ['reducer.pre-fund:mpt-import']
   };
@@ -154,6 +170,9 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
     },
     inspect(jobId) {
       return supervisor.inspect(jobId);
+    },
+    closeService(serviceKey) {
+      return supervisor.closeService(serviceKey);
     },
     policyRegistry,
     resourceGovernor,
