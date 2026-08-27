@@ -1,0 +1,118 @@
+{
+  "contractVersion": 1,
+  "source": "legacy-production-core",
+  "footprintBaseline": {
+    "inputs": {"rows": 25000, "batches": 4, "tokenCount": 1},
+    "state": {
+      "rawBytes": 11767830,
+      "estimatedBytes": 17653760,
+      "budgetBytes": 268435456,
+      "headroomNumerator": 3,
+      "headroomDenominator": 2,
+      "pageBytes": 4096
+    },
+    "pending": {
+      "rawBytes": 2947252,
+      "estimatedBytes": 4423680,
+      "budgetBytes": 268435456,
+      "headroomNumerator": 3,
+      "headroomDenominator": 2,
+      "pageBytes": 4096
+    },
+    "publicDtoBytes": 334
+  },
+  "amountModes": {
+    "direct": {
+      "mappedData": [
+        ["2026-08-01", "M001", "USD", "100", ""],
+        ["2026-08-02", "M001", "USD", "", "40"],
+        ["2026-08-03", "M001", "USD", "0", "0"],
+        ["2026-08-04", "M001", "USD", "5", "6"]
+      ],
+      "exportData": [
+        ["2026-08-01", "M001", "USD", "100", ""],
+        ["2026-08-02", "M001", "USD", "", "40"]
+      ],
+      "workbookData": [
+        [46235, "M001", "USD", 100, ""],
+        [46236, "M001", "USD", "", 40]
+      ],
+      "skippedRows": [{"sourceRowNumber": 4, "creditAmount": "0", "debitAmount": "0"}],
+      "simultaneousRows": [{"sourceRowNumber": 5, "creditAmount": "5", "debitAmount": "6"}],
+      "amountSplitMatchStats": null,
+      "billSplitMatchStats": null
+    },
+    "signed": {
+      "mappedData": [
+        ["2026-08-01", "M001", "USD", "123.45", ""],
+        ["2026-08-02", "M001", "USD", "", "54.3"],
+        ["2026-08-03", "M001", "USD", "", ""]
+      ],
+      "exportData": [
+        ["2026-08-01", "M001", "USD", "123.45", ""],
+        ["2026-08-02", "M001", "USD", "", "54.3"]
+      ],
+      "skippedRows": [{"sourceRowNumber": 4, "creditAmount": "", "debitAmount": ""}],
+      "simultaneousRows": [],
+      "amountSplitMatchStats": null,
+      "billSplitMatchStats": null
+    },
+    "fieldConditional": {
+      "mappedData": [
+        ["2026-08-01", "M001", "USD", "70", ""],
+        ["2026-08-02", "M001", "USD", "", "20"],
+        ["2026-08-03", "M001", "USD", "", ""]
+      ],
+      "exportData": [
+        ["2026-08-01", "M001", "USD", "70", ""],
+        ["2026-08-02", "M001", "USD", "", "20"]
+      ],
+      "skippedRows": [{"sourceRowNumber": 4, "creditAmount": "", "debitAmount": ""}],
+      "simultaneousRows": [],
+      "amountSplitMatchStats": {"enabled": true, "totalRows": 3, "hitCredit": 1, "hitDebit": 1},
+      "billSplitMatchStats": null
+    },
+    "billSplitMerge": {
+      "mappedData": [["2026-08-01", "M001", "USD", "110", ""]],
+      "exportData": [["2026-08-01", "M001", "USD", "110", ""]],
+      "skippedRows": [],
+      "simultaneousRows": [],
+      "amountSplitMatchStats": null,
+      "billSplitMatchStats": {"enabled": true, "totalRows": 2, "outputRows": 1}
+    }
+  },
+  "sessionScope": {
+    "current": ["entry-3"],
+    "all": ["entry-1", "entry-2", "entry-3"],
+    "afterCurrentEntryRemoved": {
+      "current": ["entry-1", "entry-2"],
+      "all": ["entry-1", "entry-2"],
+      "currentBatchId": "batch-1",
+      "batches": [{"id": "batch-1", "entryIds": ["entry-1", "entry-2"]}]
+    }
+  },
+  "balance": {
+    "calculatedEndingBalance": 1075,
+    "multiCurrencyRecords": [
+      ["中行", "上海", "USD", "M001", "2026-08-01", "", "", 1075, ""],
+      ["中行", "上海", "EUR", "M001", "2026-08-01", "", "", 880, ""]
+    ],
+    "multiCurrencyWorkbookRows": [
+      ["中行", "上海", "USD", "M001", 46235, "", "", 1075, ""],
+      ["中行", "上海", "EUR", "M001", 46235, "", "", 880, ""]
+    ]
+  },
+  "manualSeed": {
+    "record": {
+      "merchantId": "M001",
+      "currency": "USD",
+      "billDate": "2026-07-31",
+      "endBalance": 1234.56,
+      "templateName": "中行-上海",
+      "generationMethod": "人工录入",
+      "updatedAt": "2026-08-27T12:34:56.000Z"
+    },
+    "relativePath": "balance-seeds/中行.json",
+    "fileText": "[\n  {\n    \"merchantId\": \"M001\",\n    \"currency\": \"USD\",\n    \"billDate\": \"2026-07-31\",\n    \"endBalance\": 1234.56,\n    \"templateName\": \"中行-上海\",\n    \"生成方式\": \"人工录入\",\n    \"updatedAt\": \"2026-08-27T12:34:56.000Z\"\n  }\n]\n"
+  }
+}
