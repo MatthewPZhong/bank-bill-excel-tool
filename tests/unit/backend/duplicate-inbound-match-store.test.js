@@ -124,6 +124,8 @@ test('重复入金侧库保存双文件导入与结果，保持稳定顺序并�
 
     const result = store.readResult('2026-07', runId);
     assert.equal(result.run.status, 'success');
+    assert.match(result.run.resultDigest, /^[a-f0-9]{64}$/);
+    assert.equal(store.readCommittedResult('2026-07', runId).run.resultDigest, result.run.resultDigest);
     assert.deepEqual(result.mailRows, [{ BillDate: '2026-07-01' }]);
     assert.deepEqual(result.manualRows.map((row) => row.row.BizId), ['B1', 'B2']);
     assert.equal(runDataStore.listSideDbFiles(userDataDir, runDataStore.MODULE_DUPLICATE_INBOUND_MATCH).length, 1);

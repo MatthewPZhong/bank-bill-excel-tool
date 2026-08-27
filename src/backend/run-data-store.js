@@ -850,8 +850,8 @@ function ensurePreFundRunArchiveSupport(db) {
 
 // 重复入金匹配当前会话侧库。一个导入会话对应一组银行+单据输入；每次 run 只保留最新结果。
 // 银行原始 46 列、单据身份字段和人工判定行均只存在本侧库，不进入 tool-data.sqlite。
-// v3.2.2 operation receipt 是加法 schema；E06-P0 只冻结 identity/transaction contract，
-// 不接 live mutation，也不宣称已满足 E07-A startup inspector 或 E07-B main mirror recovery。
+// v3.2.2 operation receipt 与 E07-B result_digest 均为加法 schema；managed writer 才要求
+// side mutation + receipt + 完整 post-image digest 同事务，legacy/live 路由保持原状。
 const SIDE_DB_DDL_DUPLICATE_INBOUND_MATCH = `
   CREATE TABLE IF NOT EXISTS duplicate_inbound_match_imports (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -904,6 +904,11 @@ const SIDE_DB_DDL_DUPLICATE_INBOUND_MATCH = `
     snapshot_hash TEXT NOT NULL,
     status TEXT NOT NULL,
     summary_json TEXT NOT NULL DEFAULT '{}',
+    result_digest TEXT CHECK (
+      result_digest IS NULL OR (
+        length(result_digest) = 64 AND result_digest NOT GLOB '*[^0-9a-f]*'
+      )
+    ),
     error_message TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     finished_at TEXT,
@@ -967,6 +972,20 @@ const SIDE_DB_DDL_DUPLICATE_INBOUND_MATCH = `
   );
 `;
 
+function ensureDuplicateInboundMatchResultDigestSupport(db) {
+  db.exec(SIDE_DB_DDL_DUPLICATE_INBOUND_MATCH);
+  if (!hasTableColumn(db, 'duplicate_inbound_match_runs', 'result_digest')) {
+    db.exec(`
+      ALTER TABLE duplicate_inbound_match_runs
+      ADD COLUMN result_digest TEXT CHECK (
+        result_digest IS NULL OR (
+          length(result_digest) = 64 AND result_digest NOT GLOB '*[^0-9a-f]*'
+        )
+      )
+    `);
+  }
+}
+
 const MODULE_DDL = Object.freeze({
   [MODULE_ACQUIRING]: SIDE_DB_DDL_ACQUIRING,
   [MODULE_BIZ_OP]: SIDE_DB_DDL_BIZ_OP,
@@ -995,6 +1014,8 @@ function openSideDb(userDataDir, module, monthKey) {
     ensurePreFundGatewayArchiveSupport(db);
   } else if (module === MODULE_PRE_FUND_RECONCILIATION_RESULTS) {
     ensurePreFundRunArchiveSupport(db);
+  } else if (module === MODULE_DUPLICATE_INBOUND_MATCH) {
+    ensureDuplicateInboundMatchResultDigestSupport(db);
   } else {
     db.exec(MODULE_DDL[module]);
   }
@@ -1099,4 +1120,5 @@ module.exports = {
   SIDE_DB_DDL_DUPLICATE_INBOUND_MATCH,
   ensurePreFundGatewayArchiveSupport,
   ensurePreFundRunArchiveSupport,
+  ensureDuplicateInboundMatchResultDigestSupport,
 };

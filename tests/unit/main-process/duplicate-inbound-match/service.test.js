@@ -2,6 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -403,6 +404,8 @@ test.describe('DuplicateInboundMatchService', () => {
     const mirrorRow = mirrorRepository.getRunMirror(mirror.db, firstRun.runId);
     assert.equal(mirrorRow.operationKey, runIdentity.operationKey);
     assert.equal(mirrorRow.producerTaskRunId, runIdentity.producerTaskRunId);
+    assert.equal(mirrorRow.sideDbRelPath, 'run-data/duplicate-inbound-match/month-2026-07.sqlite');
+    assert.match(mirrorRow.resultDigest, /^[a-f0-9]{64}$/);
     assert.equal(mirrorRepository.listRunMirrors(mirror.db).length, 1);
   });
 
@@ -425,6 +428,12 @@ test.describe('DuplicateInboundMatchService', () => {
       producerTaskRunId: 'task-duplicate-run-partial-1'
     };
     const originalCreateMirror = service.database.createCommittedDuplicateInboundMatchRunMirror;
+    const originalLookup = service.tempStore.lookupInboundRows.bind(service.tempStore);
+    let matchingLookupCount = 0;
+    service.tempStore.lookupInboundRows = (...args) => {
+      matchingLookupCount += 1;
+      return originalLookup(...args);
+    };
     service.database.createCommittedDuplicateInboundMatchRunMirror = () => {
       throw Object.assign(new Error('injected Main mirror failure'), {
         code: 'INJECTED_MAIN_MIRROR_FAILURE'
@@ -435,6 +444,54 @@ test.describe('DuplicateInboundMatchService', () => {
       (error) => error.code === 'INJECTED_MAIN_MIRROR_FAILURE'
     );
     assert.equal(mirrorRepository.listRunMirrors(mirror.db).length, 0);
+    assert.equal(matchingLookupCount, 1);
+    assert.equal(service.status().canRun, false);
+    assert.equal(service.status().canExport, false);
+    for (const blocked of [
+      () => service.importFiles([bankFile, documentFile], null, {
+        actionKey: 'duplicate:import',
+        operationKey: 'duplicate/import/blocked-by-partial',
+        producerTaskRunId: 'task-duplicate-import-blocked-by-partial'
+      }),
+      () => service.run({
+        operationIdentity: {
+          actionKey: 'duplicate:run',
+          operationKey: 'duplicate/run/blocked-by-partial',
+          producerTaskRunId: 'task-duplicate-run-blocked-by-partial'
+        }
+      }),
+      () => service.export({ savePath: path.join(userDataDir, 'blocked.xlsx') })
+    ]) {
+      await assert.rejects(
+        blocked,
+        (error) => error.code === 'duplicate-inbound-recovery-required'
+      );
+    }
+    await assert.rejects(
+      () => service.run({ operationIdentity: {
+        ...runIdentity,
+        producerTaskRunId: 'task-duplicate-run-different-owner'
+      } }),
+      (error) => error.code === 'duplicate-inbound-recovery-required'
+    );
+    const originalCurrentMptSnapshot = service.currentMptSnapshot.bind(service);
+    service.currentMptSnapshot = () => {
+      const current = originalCurrentMptSnapshot();
+      const snapshot = { ...current.snapshot, changedAfterPartial: true };
+      return {
+        snapshot,
+        snapshotHash: crypto.createHash('sha256').update(JSON.stringify(snapshot), 'utf8').digest('hex')
+      };
+    };
+    try {
+      await assert.rejects(
+        () => service.run({ operationIdentity: runIdentity }),
+        (error) => error.code === 'duplicate-inbound-recovery-required'
+      );
+    } finally {
+      service.currentMptSnapshot = originalCurrentMptSnapshot;
+    }
+    assert.equal(matchingLookupCount, 1, 'partial latch阻断路径不得再次调用matching');
     const sidePath = runDataStore.sideDbPath(
       userDataDir, runDataStore.MODULE_DUPLICATE_INBOUND_MATCH, '2026-07'
     );
@@ -464,6 +521,108 @@ test.describe('DuplicateInboundMatchService', () => {
     } finally {
       verifyDb.close();
     }
+    assert.equal(mirrorRepository.listRunMirrors(mirror.db).length, 1);
+    assert.equal(matchingLookupCount, 1, 'same receipt replay只补Main mirror');
+  });
+
+  test('managed conflicting mirror建立unknown latch并阻断同进程所有后续命令', async () => {
+    writeBankFile(bankFile, duplicateGroup({ prefix: 'CONFLICT', amount: '100' }));
+    const mptFile = path.join(userDataDir, 'MPT_INBOUND_GATEWAY_20260714001.txt');
+    writeMptFile(mptFile, '20260714', [
+      inboundMptRow({ reconId: 'CONFLICT-RECON-1', orderId: 'ORDER-1', batchSeq: '1' }),
+      inboundMptRow({ reconId: 'CONFLICT-RECON-2', orderId: 'ORDER-2', batchSeq: '2' })
+    ]);
+    await service.tempStore.importLegacyFile(mptFile);
+    await service.importFiles([bankFile, documentFile], null, {
+      actionKey: 'duplicate:import',
+      operationKey: 'duplicate/import/conflicting-mirror-1',
+      producerTaskRunId: 'task-duplicate-import-conflicting-mirror-1'
+    });
+    const runIdentity = {
+      actionKey: 'duplicate:run',
+      operationKey: 'duplicate/run/conflicting-mirror-1',
+      producerTaskRunId: 'task-duplicate-run-conflicting-mirror-1'
+    };
+    service.database.createCommittedDuplicateInboundMatchRunMirror = (payload) => {
+      mirrorRepository.createCommittedRunMirror(mirror.db, {
+        ...payload,
+        resultDigest: 'f'.repeat(64)
+      });
+      throw Object.assign(new Error('injected conflicting mirror'), {
+        code: 'INJECTED_CONFLICTING_MIRROR'
+      });
+    };
+    await assert.rejects(
+      () => service.run({ operationIdentity: runIdentity }),
+      (error) => error.code === 'INJECTED_CONFLICTING_MIRROR'
+    );
+    assert.equal(service.recoveryLatch.outcome, 'unknown');
+    assert.equal(service.status().canRun, false);
+    assert.equal(service.status().canExport, false);
+    await assert.rejects(
+      () => service.run({ operationIdentity: runIdentity }),
+      (error) => error.code === 'duplicate-inbound-recovery-required'
+    );
+    await assert.rejects(
+      () => service.importFiles([bankFile, documentFile], null, {
+        actionKey: 'duplicate:import',
+        operationKey: 'duplicate/import/after-conflict',
+        producerTaskRunId: 'task-duplicate-import-after-conflict'
+      }),
+      (error) => error.code === 'duplicate-inbound-recovery-required'
+    );
+    await assert.rejects(
+      () => service.run({ operationIdentity: {
+        actionKey: 'duplicate:run',
+        operationKey: 'duplicate/run/after-conflict',
+        producerTaskRunId: 'task-duplicate-run-after-conflict'
+      } }),
+      (error) => error.code === 'duplicate-inbound-recovery-required'
+    );
+    await assert.rejects(
+      () => service.export({ savePath: path.join(userDataDir, 'after-conflict.xlsx') }),
+      (error) => error.code === 'duplicate-inbound-recovery-required'
+    );
+    const sideDb = runDataStore.openExistingSideDb(runDataStore.sideDbPath(
+      userDataDir, runDataStore.MODULE_DUPLICATE_INBOUND_MATCH, '2026-07'
+    ));
+    try {
+      assert.equal(sideDb.prepare(
+        'SELECT COUNT(*) AS count FROM duplicate_inbound_match_runs'
+      ).get().count, 1);
+    } finally {
+      sideDb.close();
+    }
+    assert.equal(mirrorRepository.listRunMirrors(mirror.db).length, 1);
+  });
+
+  test('managed mirror writer在Main commit后抛错时以authoritative重读判成功', async () => {
+    writeBankFile(bankFile, duplicateGroup({ prefix: 'CAS-REPLY-LOST', amount: '100' }));
+    const mptFile = path.join(userDataDir, 'MPT_INBOUND_GATEWAY_20260714001.txt');
+    writeMptFile(mptFile, '20260714', [
+      inboundMptRow({ reconId: 'CAS-REPLY-LOST-RECON-1', orderId: 'ORDER-1', batchSeq: '1' }),
+      inboundMptRow({ reconId: 'CAS-REPLY-LOST-RECON-2', orderId: 'ORDER-2', batchSeq: '2' })
+    ]);
+    await service.tempStore.importLegacyFile(mptFile);
+    await service.importFiles([bankFile, documentFile], null, {
+      actionKey: 'duplicate:import',
+      operationKey: 'duplicate/import/cas-reply-lost-1',
+      producerTaskRunId: 'task-duplicate-import-cas-reply-lost-1'
+    });
+    const originalCreateMirror = service.database.createCommittedDuplicateInboundMatchRunMirror;
+    service.database.createCommittedDuplicateInboundMatchRunMirror = (payload) => {
+      originalCreateMirror(payload);
+      throw Object.assign(new Error('injected reply loss after Main commit'), {
+        code: 'INJECTED_AFTER_MAIN_COMMIT'
+      });
+    };
+    const result = await service.run({ operationIdentity: {
+      actionKey: 'duplicate:run',
+      operationKey: 'duplicate/run/cas-reply-lost-1',
+      producerTaskRunId: 'task-duplicate-run-cas-reply-lost-1'
+    } });
+    assert.equal(result.status, 'success');
+    assert.equal(service.recoveryLatch, null);
     assert.equal(mirrorRepository.listRunMirrors(mirror.db).length, 1);
   });
 

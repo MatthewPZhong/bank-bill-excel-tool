@@ -322,10 +322,23 @@ test('Duplicate import/run receipt writer故障与side mutation同事务回滚',
     assert.throws(() => store.finishRun({
       monthKey: '2026-08',
       runId,
-      summary: { mailRowCount: 1, manualRowCount: 0, auditGroupCount: 0 },
+      summary: {
+        mailRowCount: 1,
+        manualRowCount: 0,
+        auditGroupCount: 1,
+        finalSuccessGroupCount: 1,
+        manualGroupCount: 0
+      },
       mailRows: [{ sourceOrdinal: 0, output: { BizId: 'sensitive' } }],
       manualRows: [],
-      auditRows: [],
+      auditRows: [{
+        groupOrder: 0,
+        disposition: 'success',
+        reasonCodes: [],
+        bankLineage: [],
+        mptLineage: [],
+        documentLineage: []
+      }],
       operationReceipt: duplicatePayload({
         actionKey: 'duplicate:run', importBundleId: importId, sideRunId: runId
       })
@@ -334,11 +347,16 @@ test('Duplicate import/run receipt writer故障与side mutation同事务回滚',
       tempRoot, runDataStore.MODULE_DUPLICATE_INBOUND_MATCH, '2026-08'
     ));
     try {
-      assert.equal(verify.prepare(
-        'SELECT status FROM duplicate_inbound_match_runs WHERE id = ?'
-      ).get(runId).status, 'running');
+      const rolledBackRun = verify.prepare(
+        'SELECT status, result_digest FROM duplicate_inbound_match_runs WHERE id = ?'
+      ).get(runId);
+      assert.equal(rolledBackRun.status, 'running');
+      assert.equal(rolledBackRun.result_digest, null);
       assert.equal(verify.prepare(
         'SELECT COUNT(*) AS count FROM duplicate_inbound_match_mail_rows WHERE run_id = ?'
+      ).get(runId).count, 0);
+      assert.equal(verify.prepare(
+        'SELECT COUNT(*) AS count FROM duplicate_inbound_match_group_audits WHERE run_id = ?'
       ).get(runId).count, 0);
       assert.equal(verify.prepare(
         `SELECT COUNT(*) AS count FROM ${duplicateReceipts.RECEIPTS_TABLE}`

@@ -12,6 +12,9 @@ const {
   createRecoveryControlRepository
 } = require('../../../../src/main-process/background-execution/critical/recovery-control-repository');
 const {
+  createDuplicateManagedStartupGate
+} = require('../../../../src/main-process/duplicate-inbound-match/startup-gate');
+const {
   createRecoveryControlReadRepository
 } = require('../../../../src/main-process/background-execution/critical/recovery-control-read-repository');
 const {
@@ -51,6 +54,9 @@ const runDataStore = require('../../../../src/backend/run-data-store');
 const operationReceipts = require(
   '../../../../src/main-process/duplicate-inbound-match/operation-receipt-repository'
 );
+const {
+  computeDuplicateResultPostImage
+} = require('../../../../src/backend/duplicate-inbound-match-result-digest');
 
 function stableHash(value) {
   return crypto.createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex');
@@ -91,14 +97,44 @@ function createCommittedSideRun(userDataDir, suffix = '1', options = {}) {
       sideRunId: null,
       inputEvidenceHash: importEvidenceHash
     });
+    const summary = {
+      mailRowCount: 1,
+      manualRowCount: 0,
+      auditGroupCount: 1,
+      finalSuccessGroupCount: 1,
+      manualGroupCount: 0
+    };
     const runResult = db.prepare(`
       INSERT INTO duplicate_inbound_match_runs (
         import_id, snapshot_json, snapshot_hash, status, summary_json, finished_at
       ) VALUES (?, '{}', ?, 'success', ?, CURRENT_TIMESTAMP)
-    `).run(importId, snapshotHash, JSON.stringify({
-      mailRowCount: 0, manualRowCount: 0, auditGroupCount: 0
-    }));
+    `).run(importId, snapshotHash, JSON.stringify(summary));
     const sideRunId = Number(runResult.lastInsertRowid);
+    const sensitiveSentinel = `SENSITIVE-RESULT-${suffix}`;
+    db.prepare(`
+      INSERT INTO duplicate_inbound_match_mail_rows (run_id, source_ordinal, output_json)
+      VALUES (?, 0, ?)
+    `).run(sideRunId, JSON.stringify({
+      MerchantId: sensitiveSentinel,
+      Currency: 'USD',
+      'Debit Amount': '88.00',
+      '加款单号': `ORDER-${suffix}`
+    }));
+    db.prepare(`
+      INSERT INTO duplicate_inbound_match_group_audits (
+        run_id, group_order, disposition, reason_codes_json,
+        bank_lineage_json, mpt_lineage_json, document_lineage_json
+      ) VALUES (?, 0, 'success', '[]', ?, ?, ?)
+    `).run(
+      sideRunId,
+      JSON.stringify([{ bizId: sensitiveSentinel, sourceOrdinal: 0 }]),
+      JSON.stringify([{ candidateId: `MPT-${suffix}` }]),
+      JSON.stringify([{ businessOrderKey: `DOC-${suffix}` }])
+    );
+    const postImage = computeDuplicateResultPostImage(db, sideRunId);
+    db.prepare(`
+      UPDATE duplicate_inbound_match_runs SET result_digest = ? WHERE id = ?
+    `).run(postImage.digest, sideRunId);
     const inputEvidenceHash = stableHash({
       evidenceVersion: 1,
       importBundleId: importId,
@@ -120,6 +156,7 @@ function createCommittedSideRun(userDataDir, suffix = '1', options = {}) {
     return {
       monthKey, bankHash, documentHash, snapshotHash, importId, sideRunId,
       operationKey: runOperationKey, producerTaskRunId: runTaskRunId, inputEvidenceHash,
+      resultDigest: postImage.digest, sensitiveSentinel,
       openDb: options.keepOpen === true ? db : null
     };
   } catch (error) {
@@ -337,6 +374,8 @@ test('exact run inspector区分partial/committed/unknown且complete-mirror CAS�
   const partial = await inspect(source);
   assert.equal(partial.outcome, 'partially-committed');
   assert.equal(partial.boundedEvidence.sideRunId, side.sideRunId);
+  assert.equal(partial.boundedEvidence.sidePostImageHash.length, 64);
+  assert.equal(JSON.stringify(partial).includes(side.sensitiveSentinel), false);
   const importSource = operationSource({
     actionKey: 'duplicate:import',
     operationKey: 'duplicate/import/recovery-atomic',
@@ -364,6 +403,24 @@ test('exact run inspector区分partial/committed/unknown且complete-mirror CAS�
   assert.equal(mirror.sideRunId, side.sideRunId);
   assert.equal(mirror.operationKey, side.operationKey);
   assert.equal(mirror.producerTaskRunId, side.producerTaskRunId);
+  assert.equal(mirror.resultDigest, side.resultDigest);
+  assert.equal(mirror.sideDbRelPath, 'run-data/duplicate-inbound-match/month-2026-08.sqlite');
+  assert.equal(JSON.stringify({ mirror, recovered }).includes(side.sensitiveSentinel), false);
+  assert.equal((await inspect(source)).outcome, 'committed');
+  mainDb.prepare(`
+    UPDATE duplicate_inbound_match_run_mirrors
+    SET side_db_rel_path = ? WHERE id = ?
+  `).run('run-data\\duplicate-inbound-match\\month-2026-08.sqlite', mirror.id);
+  assert.equal((await inspect(source)).outcome, 'committed');
+  mainDb.prepare(`
+    UPDATE duplicate_inbound_match_run_mirrors
+    SET side_db_rel_path = ? WHERE id = ?
+  `).run('run-data\\duplicate-inbound-match\\month-2026-09.sqlite', mirror.id);
+  assert.equal((await inspect(source)).outcome, 'unknown');
+  mainDb.prepare(`
+    UPDATE duplicate_inbound_match_run_mirrors
+    SET side_db_rel_path = ? WHERE id = ?
+  `).run('run-data\\duplicate-inbound-match\\month-2026-08.sqlite', mirror.id);
   assert.equal((await inspect(source)).outcome, 'committed');
   const audit = mirrorRepository.getRecoveryAuditBySource(mainDb, source.sourceRef);
   assert.equal(audit.recoveryAction, 'complete-mirror');
@@ -388,7 +445,8 @@ test('exact run inspector区分partial/committed/unknown且complete-mirror CAS�
     documentFileName: 'document.xlsx', documentFileHash: '3'.repeat(64),
     sideDbRelPath: 'run-data/duplicate-inbound-match/month-2026-08.sqlite',
     summary: {}, operationKey: absentSource.operationKey,
-    producerTaskRunId: absentSource.taskRunId, inputEvidenceHash: '4'.repeat(64)
+    producerTaskRunId: absentSource.taskRunId, inputEvidenceHash: '4'.repeat(64),
+    resultDigest: '5'.repeat(64)
   });
   assert.equal((await inspect(absentSource)).outcome, 'unknown');
 
@@ -427,6 +485,10 @@ test('exact partial由Platform创建Hold且不会自动调用complete-mirror pro
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'duplicate-e07-b-partial-hold-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const side = createCommittedSideRun(dir, 'hold');
+  const sidePath = runDataStore.sideDbPath(
+    dir, runDataStore.MODULE_DUPLICATE_INBOUND_MATCH, side.monthKey
+  );
+  const sideBefore = snapshotFamily(sidePath);
   const source = operationSource({
     actionKey: 'duplicate:run',
     operationKey: side.operationKey,
@@ -453,9 +515,53 @@ test('exact partial由Platform创建Hold且不会自动调用complete-mirror pro
       DUPLICATE_STARTUP_CONFLICT_SCOPE_KEY
     );
     assert.equal(hold.reasonCode, 'PARTIALLY_COMMITTED');
+    const repeated = await harness.coordinator.scanAndRecover();
+    assert.equal(repeated.activeHoldCount, 1);
+    assert.equal(recoverCalls, 0, '重复启动扫描不得调用complete-mirror provider');
+    const sideAfter = snapshotFamily(sidePath);
+    assert.deepEqual(Object.keys(sideAfter).sort(), Object.keys(sideBefore).sort());
+    for (const key of Object.keys(sideBefore)) {
+      assert.equal(sideAfter[key].size, sideBefore[key].size);
+      assert.equal(sideAfter[key].mtimeNs, sideBefore[key].mtimeNs);
+      assert.deepEqual(sideAfter[key].bytes, sideBefore[key].bytes);
+    }
   } finally {
     harness.db.close();
   }
+});
+
+test('新Worker generation startup gate重复检测partial并保持side/Main零写入', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'duplicate-e07-b-generation-gate-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const side = createCommittedSideRun(dir, 'generation-gate');
+  const databasePath = path.join(dir, 'tool-data.sqlite');
+  const mainDb = new DatabaseSync(databasePath);
+  ensureDuplicateInboundMatchRunMetadataSupport(mainDb);
+  createRecoveryControlRepository(mainDb);
+  mainDb.close();
+  const sidePath = runDataStore.sideDbPath(
+    dir, runDataStore.MODULE_DUPLICATE_INBOUND_MATCH, side.monthKey
+  );
+  const sideBefore = snapshotFamily(sidePath);
+  const mainBefore = fs.readFileSync(databasePath);
+  const gate = createDuplicateManagedStartupGate({
+    contractVersion: 1,
+    startupRecoveryReady: true
+  });
+  for (let generation = 0; generation < 2; generation += 1) {
+    assert.throws(
+      () => gate.assertOperationAllowed({ userDataDir: dir, databasePath }, { initializing: true }),
+      (error) => error.code === 'DUPLICATE_STARTUP_RESIDUE_UNRESOLVED'
+    );
+  }
+  const sideAfter = snapshotFamily(sidePath);
+  assert.deepEqual(Object.keys(sideAfter).sort(), Object.keys(sideBefore).sort());
+  for (const key of Object.keys(sideBefore)) {
+    assert.equal(sideAfter[key].size, sideBefore[key].size);
+    assert.equal(sideAfter[key].mtimeNs, sideBefore[key].mtimeNs);
+    assert.deepEqual(sideAfter[key].bytes, sideBefore[key].bytes);
+  }
+  assert.deepEqual(fs.readFileSync(databasePath), mainBefore);
 });
 
 test('Platform critical-intent source不依赖module policy marker也走exact inspector', async (t) => {
@@ -649,13 +755,13 @@ test('complete-mirror复检后side post-image变化会fail closed且不写mirror
       ));
       try {
         sideDb.prepare(`
-          UPDATE duplicate_inbound_match_runs
-          SET summary_json = ? WHERE id = ?
+          UPDATE duplicate_inbound_match_mail_rows
+          SET output_json = ? WHERE run_id = ? AND source_ordinal = 0
         `).run(JSON.stringify({
-          mailRowCount: 0,
-          manualRowCount: 0,
-          auditGroupCount: 0,
-          injectedPostInspectionChange: true
+          MerchantId: side.sensitiveSentinel,
+          Currency: 'EUR',
+          'Debit Amount': '99.00',
+          '加款单号': 'ORDER-CONTENT-CHANGED'
         }), side.sideRunId);
       } finally {
         sideDb.close();

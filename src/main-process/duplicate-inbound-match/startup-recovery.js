@@ -9,6 +9,14 @@ const { DatabaseSync } = require('node:sqlite');
 const { canonicalSha256 } = require('../background-execution/canonical-json-v1');
 const { normalizeRecoverySource } = require('../background-execution/recovery-source');
 const mirrorRepository = require('../../backend/database/duplicate-inbound-match-run-repository');
+const {
+  computeDuplicateResultPostImage
+} = require('../../backend/duplicate-inbound-match-result-digest');
+const {
+  canonicalDuplicateSideDbRelPath,
+  duplicateSideDbRelPath,
+  sameDuplicateSideDbRelPath
+} = require('../../backend/duplicate-inbound-match-side-db-identity');
 const operationReceipts = require('./operation-receipt-repository');
 
 const DUPLICATE_STARTUP_ACTION = 'duplicate:run';
@@ -50,6 +58,20 @@ function tableNames(db) {
 function tablePresence(db, tables, tableName) {
   if (!tables.has(tableName)) return null;
   return Number(db.prepare(`SELECT EXISTS(SELECT 1 FROM ${tableName} LIMIT 1) AS present`).get().present);
+}
+
+function tableColumns(db, tables, tableName) {
+  if (!tables.has(tableName)) return new Set();
+  return new Set(db.prepare(`PRAGMA table_info(${tableName})`).all().map((row) => row.name));
+}
+
+function parseObjectJson(value) {
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch (_error) {
+    return null;
+  }
 }
 
 function inspectSideDatabases(userDataDir) {
@@ -191,6 +213,7 @@ function sideOperationSnapshots(userDataDir) {
     const sidePath = path.join(directory, entry.name);
     withSideFamilySnapshot(sidePath, (db) => {
       const tables = tableNames(db);
+      const runColumns = tableColumns(db, tables, 'duplicate_inbound_match_runs');
       const receipts = tables.has(operationReceipts.RECEIPTS_TABLE)
         ? operationReceipts.listOperationReceipts(db)
         : [];
@@ -217,19 +240,16 @@ function sideOperationSnapshots(userDataDir) {
         const runRow = receipt.sideRunId != null && tables.has('duplicate_inbound_match_runs')
           ? db.prepare('SELECT * FROM duplicate_inbound_match_runs WHERE id = ?').get(receipt.sideRunId)
           : null;
-        let resultCounts = null;
+        let postImage = null;
+        let resultDigestError = null;
         if (runRow) {
-          resultCounts = {
-            mailRowCount: Number(db.prepare(
-              'SELECT COUNT(*) AS count FROM duplicate_inbound_match_mail_rows WHERE run_id = ?'
-            ).get(receipt.sideRunId).count),
-            manualRowCount: Number(db.prepare(
-              'SELECT COUNT(*) AS count FROM duplicate_inbound_match_manual_rows WHERE run_id = ?'
-            ).get(receipt.sideRunId).count),
-            auditGroupCount: Number(db.prepare(
-              'SELECT COUNT(*) AS count FROM duplicate_inbound_match_group_audits WHERE run_id = ?'
-            ).get(receipt.sideRunId).count)
-          };
+          try {
+            postImage = computeDuplicateResultPostImage(db, receipt.sideRunId);
+          } catch (error) {
+            resultDigestError = String(
+              error && error.code ? error.code : 'duplicate-inbound-result-digest-unreadable'
+            );
+          }
         }
         operations.push({
           receipt,
@@ -254,8 +274,12 @@ function sideOperationSnapshots(userDataDir) {
             importId: Number(runRow.import_id),
             snapshotHash: runRow.snapshot_hash,
             status: runRow.status,
-            summary: JSON.parse(runRow.summary_json),
-            resultCounts
+            summary: parseObjectJson(runRow.summary_json),
+            resultDigest: runColumns.has('result_digest') ? runRow.result_digest || null : null,
+            computedResultDigest: postImage ? postImage.digest : null,
+            resultCounts: postImage ? postImage.counts : null,
+            conservation: postImage ? postImage.conservation : null,
+            resultDigestError
           } : null
         });
       }
@@ -322,10 +346,11 @@ function mirrorPostImageHash(mirror) {
     bankFileHash: mirror.bankFileHash,
     documentFileName: mirror.documentFileName,
     documentFileHash: mirror.documentFileHash,
-    sideDbRelPath: mirror.sideDbRelPath,
+    sideDbRelPath: canonicalDuplicateSideDbRelPath(mirror.sideDbRelPath),
     operationKey: mirror.operationKey,
     producerTaskRunId: mirror.producerTaskRunId,
-    inputEvidenceHash: mirror.inputEvidenceHash
+    inputEvidenceHash: mirror.inputEvidenceHash,
+    resultDigest: mirror.resultDigest
   });
 }
 
@@ -380,7 +405,10 @@ function exactOperationInspection(options, source) {
     );
   } else if (sideValid && source.actionKey === 'duplicate:run') {
     sideValid = Boolean(item.run && item.run.id === receipt.sideRunId &&
-      item.run.importId === receipt.importBundleId && item.run.status === 'success');
+      item.run.importId === receipt.importBundleId && item.run.status === 'success' &&
+      item.run.summary && /^[a-f0-9]{64}$/.test(String(item.run.resultDigest || '')) &&
+      item.run.resultDigest === item.run.computedResultDigest && item.run.resultCounts &&
+      item.run.conservation && item.run.conservation.isBalanced === true);
     if (sideValid) {
       expectedEvidenceHash = runEvidenceHash(
         item.imported.id,
@@ -388,10 +416,6 @@ function exactOperationInspection(options, source) {
         item.imported.documentFileHash,
         item.run.snapshotHash
       );
-      const summary = item.run.summary || {};
-      sideValid = item.run.resultCounts.mailRowCount === Number(summary.mailRowCount) &&
-        item.run.resultCounts.manualRowCount === Number(summary.manualRowCount) &&
-        item.run.resultCounts.auditGroupCount === Number(summary.auditGroupCount);
     }
   }
   sideValid = sideValid && expectedEvidenceHash === receipt.inputEvidenceHash;
@@ -430,9 +454,10 @@ function exactOperationInspection(options, source) {
     mirror.bankFileHash === item.imported.bankFileHash &&
     mirror.documentFileName === item.imported.documentFileName &&
     mirror.documentFileHash === item.imported.documentFileHash &&
-    mirror.sideDbRelPath === path.posix.join(
-      'run-data', 'duplicate-inbound-match', `month-${receipt.monthKey}.sqlite`
-    ) && canonicalSha256(mirror.summary) === canonicalSha256(item.run.summary);
+    sameDuplicateSideDbRelPath(
+      mirror.sideDbRelPath, duplicateSideDbRelPath(receipt.monthKey)
+    ) && mirror.resultDigest === item.run.resultDigest &&
+    canonicalSha256(mirror.summary) === canonicalSha256(item.run.summary);
   return makeInspection(source, mirrorMatches ? 'committed' : 'unknown', {
     disposition: mirrorMatches ? 'side-and-main-identity-committed' : 'side-main-identity-conflict',
     importBundleId: receipt.importBundleId,
@@ -628,13 +653,12 @@ function createDuplicateStartupRecoveryProvider(options = {}) {
             monthKey: item.receipt.monthKey,
             sideRunId: item.receipt.sideRunId,
             snapshotHash: item.run.snapshotHash,
+            resultDigest: item.run.resultDigest,
             bankFileName: item.imported.bankFileName,
             bankFileHash: item.imported.bankFileHash,
             documentFileName: item.imported.documentFileName,
             documentFileHash: item.imported.documentFileHash,
-            sideDbRelPath: path.posix.join(
-              'run-data', 'duplicate-inbound-match', `month-${item.receipt.monthKey}.sqlite`
-            ),
+            sideDbRelPath: duplicateSideDbRelPath(item.receipt.monthKey),
             summary: item.run.summary,
             operationKey: item.receipt.operationKey,
             producerTaskRunId: item.receipt.producerTaskRunId,
@@ -649,7 +673,13 @@ function createDuplicateStartupRecoveryProvider(options = {}) {
             : 'committed-evidence-observed',
           recoveryAction,
           sideRunId: item.receipt.sideRunId,
-          mirrorId: mirror ? mirror.id : null
+          mirrorId: mirror ? mirror.id : null,
+          resultDigest: normalizedSource.actionKey === 'duplicate:run'
+            ? item.run.resultDigest
+            : null,
+          resultCounts: normalizedSource.actionKey === 'duplicate:run'
+            ? item.run.resultCounts
+            : null
         };
         const resultHash = canonicalSha256(boundedResult);
         mirrorRepository.insertRecoveryAudit(db, {

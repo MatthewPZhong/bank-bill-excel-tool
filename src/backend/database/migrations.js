@@ -3924,6 +3924,11 @@ function ensureDuplicateInboundMatchRunMetadataSupport(db) {
       document_file_name TEXT NOT NULL DEFAULT '',
       document_file_hash TEXT NOT NULL DEFAULT '',
       side_db_rel_path TEXT NOT NULL,
+      result_digest TEXT CHECK (
+        result_digest IS NULL OR (
+          length(result_digest) = 64 AND result_digest NOT GLOB '*[^0-9a-f]*'
+        )
+      ),
       error_message TEXT,
       started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       finished_at TEXT
@@ -3949,6 +3954,16 @@ function ensureDuplicateInboundMatchRunMetadataSupport(db) {
   }
   if (!hasColumn(db, 'duplicate_inbound_match_run_mirrors', 'input_evidence_hash')) {
     db.exec('ALTER TABLE duplicate_inbound_match_run_mirrors ADD COLUMN input_evidence_hash TEXT;');
+  }
+  if (!hasColumn(db, 'duplicate_inbound_match_run_mirrors', 'result_digest')) {
+    db.exec(`
+      ALTER TABLE duplicate_inbound_match_run_mirrors
+      ADD COLUMN result_digest TEXT CHECK (
+        result_digest IS NULL OR (
+          length(result_digest) = 64 AND result_digest NOT GLOB '*[^0-9a-f]*'
+        )
+      )
+    `);
   }
   db.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS ux_duplicate_inbound_run_mirrors_operation

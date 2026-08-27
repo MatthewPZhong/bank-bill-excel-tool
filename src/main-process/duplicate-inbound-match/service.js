@@ -3,6 +3,7 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const { isDeepStrictEqual } = require('node:util');
 const XLSX = require('xlsx');
 
 const { readBankStatement, BANK_STATEMENT_SHEET_NAME } = require('../bank-statement-io');
@@ -19,6 +20,10 @@ const {
   SOURCE_TYPE_INBOUND
 } = require('../pre-fund-reconciliation/mpt-schema');
 const runDataStore = require('../../backend/run-data-store');
+const {
+  duplicateSideDbRelPath,
+  sameDuplicateSideDbRelPath
+} = require('../../backend/duplicate-inbound-match-side-db-identity');
 const operationReceipts = require('./operation-receipt-repository');
 const {
   FUND_TYPES,
@@ -255,6 +260,42 @@ function countManualReversals(groups) {
   );
 }
 
+function recoveryRequiredError() {
+  return new DuplicateInboundMatchServiceError(
+    'duplicate-inbound-recovery-required',
+    '重复入金存在已提交但未完成确认的运行，请先完成持久恢复'
+  );
+}
+
+function frozenJsonCopy(value) {
+  const copied = JSON.parse(JSON.stringify(value));
+  const freeze = (item) => {
+    if (item && typeof item === 'object' && !Object.isFrozen(item)) {
+      for (const child of Object.values(item)) freeze(child);
+      Object.freeze(item);
+    }
+    return item;
+  };
+  return freeze(copied);
+}
+
+function exactManagedMirror(mirror, expected) {
+  return Boolean(mirror && mirror.status === 'success' &&
+    mirror.operationKey === expected.operationKey &&
+    mirror.producerTaskRunId === expected.producerTaskRunId &&
+    mirror.inputEvidenceHash === expected.inputEvidenceHash &&
+    mirror.monthKey === expected.monthKey &&
+    mirror.sideRunId === expected.sideRunId &&
+    mirror.snapshotHash === expected.snapshotHash &&
+    mirror.resultDigest === expected.resultDigest &&
+    mirror.bankFileName === expected.bankFileName &&
+    mirror.bankFileHash === expected.bankFileHash &&
+    mirror.documentFileName === expected.documentFileName &&
+    mirror.documentFileHash === expected.documentFileHash &&
+    sameDuplicateSideDbRelPath(mirror.sideDbRelPath, expected.sideDbRelPath) &&
+    isDeepStrictEqual(mirror.summary, expected.summary));
+}
+
 function runInvalidationActions(label, actions) {
   const errors = [];
   for (const action of actions) {
@@ -343,6 +384,110 @@ class DuplicateInboundMatchService {
     this.bankSession = null;
     this.documentSession = null;
     this.lastRun = null;
+    this.recoveryLatch = null;
+  }
+
+  assertImportAllowedByRecoveryLatch() {
+    if (this.recoveryLatch) throw recoveryRequiredError();
+  }
+
+  assertRunAllowedByRecoveryLatch(operationIdentity, inputEvidenceHash) {
+    const latch = this.recoveryLatch;
+    if (!latch) return;
+    const exact = operationIdentity && operationIdentity.actionKey === latch.actionKey &&
+      operationIdentity.operationKey === latch.operationKey &&
+      operationIdentity.producerTaskRunId === latch.producerTaskRunId &&
+      inputEvidenceHash === latch.inputEvidenceHash && this.bankSession &&
+      this.bankSession.monthKey === latch.monthKey &&
+      this.bankSession.importId === latch.importBundleId;
+    if (!exact) throw recoveryRequiredError();
+  }
+
+  latchRecovery(expected, outcome) {
+    if (outcome === 'committed') {
+      this.recoveryLatch = null;
+      return;
+    }
+    this.recoveryLatch = Object.freeze({
+      ...expected,
+      summary: frozenJsonCopy(expected.summary),
+      outcome: outcome === 'partially-committed' ? outcome : 'unknown'
+    });
+    this.lastRun = null;
+  }
+
+  observeManagedRunCommit(expected) {
+    try {
+      const receipt = this.store.findOperationReceipt(expected.actionKey, expected.operationKey);
+      const result = receipt
+        ? this.store.readCommittedResult(receipt.monthKey, receipt.sideRunId)
+        : null;
+      const mirrors = this.database.listDuplicateInboundMatchRunMirrors()
+        .filter((mirror) => mirror.operationKey === expected.operationKey);
+      const receiptMatches = receipt && receipt.actionKey === expected.actionKey &&
+        receipt.operationKey === expected.operationKey &&
+        receipt.producerTaskRunId === expected.producerTaskRunId &&
+        receipt.phase === 'run-side-committed' && receipt.monthKey === expected.monthKey &&
+        receipt.importBundleId === expected.importBundleId &&
+        receipt.sideRunId === expected.sideRunId &&
+        receipt.inputEvidenceHash === expected.inputEvidenceHash;
+      const run = result && result.run;
+      const resultMatches = receiptMatches && run && run.status === 'success' &&
+        run.id === expected.sideRunId && run.importId === expected.importBundleId &&
+        run.monthKey === expected.monthKey && run.snapshotHash === expected.snapshotHash &&
+        run.resultDigest === expected.resultDigest &&
+        isDeepStrictEqual(run.summary, expected.summary);
+      if (!resultMatches) return Object.freeze({ outcome: 'unknown', receipt, result, mirror: null });
+      if (mirrors.length === 0) {
+        return Object.freeze({ outcome: 'partially-committed', receipt, result, mirror: null });
+      }
+      if (mirrors.length === 1 && exactManagedMirror(mirrors[0], expected)) {
+        return Object.freeze({ outcome: 'committed', receipt, result, mirror: mirrors[0] });
+      }
+      return Object.freeze({ outcome: 'unknown', receipt, result, mirror: null });
+    } catch (_error) {
+      return Object.freeze({ outcome: 'unknown', receipt: null, result: null, mirror: null });
+    }
+  }
+
+  completeManagedMirror(expected) {
+    const before = this.observeManagedRunCommit(expected);
+    if (before.outcome === 'committed') {
+      this.latchRecovery(expected, 'committed');
+      return before;
+    }
+    if (before.outcome !== 'partially-committed') {
+      this.latchRecovery(expected, 'unknown');
+      throw recoveryRequiredError();
+    }
+    let writerError = null;
+    try {
+      this.database.createCommittedDuplicateInboundMatchRunMirror({
+        monthKey: expected.monthKey,
+        sideRunId: expected.sideRunId,
+        snapshotHash: expected.snapshotHash,
+        resultDigest: expected.resultDigest,
+        bankFileName: expected.bankFileName,
+        bankFileHash: expected.bankFileHash,
+        documentFileName: expected.documentFileName,
+        documentFileHash: expected.documentFileHash,
+        sideDbRelPath: expected.sideDbRelPath,
+        summary: expected.summary,
+        actionKey: expected.actionKey,
+        operationKey: expected.operationKey,
+        producerTaskRunId: expected.producerTaskRunId,
+        inputEvidenceHash: expected.inputEvidenceHash
+      });
+    } catch (error) {
+      writerError = error;
+    }
+    // Writer 抛错可能发生在 Main commit 之后；必须重读 side receipt/result 与 Main mirror
+    // 才能决定成功、partial 或 unknown，禁止凭异常类型猜测持久状态。
+    const after = this.observeManagedRunCommit(expected);
+    this.latchRecovery(expected, after.outcome);
+    if (after.outcome === 'committed') return after;
+    if (writerError) throw writerError;
+    throw recoveryRequiredError();
   }
 
   revokeSuccessfulMirrors(message) {
@@ -425,7 +570,8 @@ class DuplicateInboundMatchService {
         '重复入金运行结果不可读，请重新导入并运行'
       );
     }
-    if (!run || run.status !== 'success') {
+    if (!run || run.status !== 'success' ||
+        (this.lastRun.resultDigest && run.resultDigest !== this.lastRun.resultDigest)) {
       return this.unavailableLastRun(
         'invalid-side-db',
         '重复入金运行结果记录缺失或状态非法',
@@ -444,7 +590,9 @@ class DuplicateInboundMatchService {
   }
 
   status() {
-    const availability = this.inspectLastRun();
+    const availability = this.recoveryLatch
+      ? { available: false, unavailable: true, stale: false, message: '' }
+      : this.inspectLastRun();
     const run = this.lastRun
       ? {
         id: this.lastRun.mirrorRunId,
@@ -478,8 +626,8 @@ class DuplicateInboundMatchService {
         }
         : null,
       run,
-      canRun: Boolean(this.bankSession && this.documentSession),
-      canExport: Boolean(this.lastRun && availability.available && resultCount > 0)
+      canRun: Boolean(!this.recoveryLatch && this.bankSession && this.documentSession),
+      canExport: Boolean(!this.recoveryLatch && this.lastRun && availability.available && resultCount > 0)
     };
   }
 
@@ -528,6 +676,7 @@ class DuplicateInboundMatchService {
   }
 
   async importFiles(filePaths, onProgress, rawOperationIdentity = null) {
+    this.assertImportAllowedByRecoveryLatch();
     const operationIdentity = normalizeOperationIdentity(rawOperationIdentity, 'duplicate:import');
     if (operationIdentity) {
       const receipt = this.store.findOperationReceipt(
@@ -819,7 +968,6 @@ class DuplicateInboundMatchService {
       );
     }
     const operationIdentity = normalizeOperationIdentity(rawOperationIdentity, 'duplicate:run');
-    if (!operationIdentity) this.clearPreviousRun();
     const before = this.currentMptSnapshot();
     const inputEvidenceHash = runEvidenceHash(
       this.bankSession.importId,
@@ -827,60 +975,83 @@ class DuplicateInboundMatchService {
       this.documentSession.fileHash,
       before.snapshotHash
     );
+    this.assertRunAllowedByRecoveryLatch(operationIdentity, inputEvidenceHash);
+    if (!operationIdentity) this.clearPreviousRun();
     if (operationIdentity) {
       const receipt = this.store.findOperationReceipt(
         operationIdentity.actionKey, operationIdentity.operationKey
       );
       if (receipt) {
         if (receipt.producerTaskRunId !== operationIdentity.producerTaskRunId ||
+            receipt.monthKey !== this.bankSession.monthKey ||
             receipt.importBundleId !== this.bankSession.importId ||
             receipt.inputEvidenceHash !== inputEvidenceHash) {
+          if (this.recoveryLatch) this.latchRecovery(this.recoveryLatch, 'unknown');
           throw new DuplicateInboundMatchServiceError(
             'duplicate-inbound-operation-identity-conflict',
             '同一Duplicate run operationKey的owner或输入证据冲突'
           );
         }
-        const result = this.store.readResult(receipt.monthKey, receipt.sideRunId);
-        if (!result || result.run.status !== 'success') {
+        const result = this.recoveryLatch
+          ? null
+          : this.store.readCommittedResult(receipt.monthKey, receipt.sideRunId);
+        const committedRun = result ? result.run : this.recoveryLatch;
+        if (!committedRun || (result && result.run.status !== 'success')) {
           throw new DuplicateInboundMatchServiceError(
             'duplicate-inbound-run-receipt-target-missing',
             'Duplicate run receipt对应committed side结果不存在'
           );
         }
-        const completed = this.database.createCommittedDuplicateInboundMatchRunMirror({
+        const expected = {
+          actionKey: operationIdentity.actionKey,
+          operationKey: operationIdentity.operationKey,
+          producerTaskRunId: operationIdentity.producerTaskRunId,
+          inputEvidenceHash,
           monthKey: receipt.monthKey,
           sideRunId: receipt.sideRunId,
-          snapshotHash: result.run.snapshotHash,
+          importBundleId: receipt.importBundleId,
+          snapshotHash: committedRun.snapshotHash,
+          resultDigest: committedRun.resultDigest,
           bankFileName: this.bankSession.fileName,
           bankFileHash: this.bankSession.fileHash,
           documentFileName: this.documentSession.fileName,
           documentFileHash: this.documentSession.fileHash,
-          sideDbRelPath: runDataStore.sideDbRelPath(MODULE, receipt.monthKey),
-          summary: result.run.summary,
-          ...operationIdentity,
-          inputEvidenceHash
-        });
+          sideDbRelPath: duplicateSideDbRelPath(receipt.monthKey),
+          summary: committedRun.summary
+        };
+        if (this.recoveryLatch && (receipt.sideRunId !== this.recoveryLatch.sideRunId ||
+            receipt.importBundleId !== this.recoveryLatch.importBundleId)) {
+          this.latchRecovery(this.recoveryLatch, 'unknown');
+          throw recoveryRequiredError();
+        }
+        const completed = this.completeManagedMirror(expected);
         this.lastRun = {
           monthKey: receipt.monthKey,
           sideRunId: receipt.sideRunId,
           mirrorRunId: completed.mirror.id,
-          snapshotHash: result.run.snapshotHash,
-          summary: result.run.summary
+          snapshotHash: committedRun.snapshotHash,
+          resultDigest: committedRun.resultDigest,
+          summary: committedRun.summary
         };
         return {
           status: 'success',
           runId: completed.mirror.id,
-          summary: { ...result.run.summary },
+          summary: { ...committedRun.summary },
           replayed: true,
           durableCommit: true
         };
       }
+    }
+    if (this.recoveryLatch) {
+      this.latchRecovery(this.recoveryLatch, 'unknown');
+      throw recoveryRequiredError();
     }
     if (operationIdentity) this.detachCommittedRun();
     let sideRunId = null;
     let mirrorRunId = null;
     let sideCommitted = false;
     let managedMirrorCommitted = false;
+    let managedExpected = null;
     try {
       sideRunId = this.store.createRun({
         monthKey: this.bankSession.monthKey,
@@ -987,7 +1158,7 @@ class DuplicateInboundMatchService {
         }
       };
 
-      this.store.finishRun({
+      const finishedRun = this.store.finishRun({
         monthKey: this.bankSession.monthKey,
         runId: sideRunId,
         summary,
@@ -1003,22 +1174,24 @@ class DuplicateInboundMatchService {
       });
       sideCommitted = true;
       if (operationIdentity) {
-        if (typeof this.database.createCommittedDuplicateInboundMatchRunMirror !== 'function') {
-          throw new Error('Duplicate managed Main mirror CAS writer未配置');
-        }
-        const completed = this.database.createCommittedDuplicateInboundMatchRunMirror({
+        managedExpected = {
+          actionKey: operationIdentity.actionKey,
+          operationKey: operationIdentity.operationKey,
+          producerTaskRunId: operationIdentity.producerTaskRunId,
+          inputEvidenceHash,
           monthKey: this.bankSession.monthKey,
           sideRunId,
           snapshotHash: before.snapshotHash,
+          resultDigest: finishedRun.resultDigest,
+          importBundleId: this.bankSession.importId,
           bankFileName: this.bankSession.fileName,
           bankFileHash: this.bankSession.fileHash,
           documentFileName: this.documentSession.fileName,
           documentFileHash: this.documentSession.fileHash,
-          sideDbRelPath: runDataStore.sideDbRelPath(MODULE, this.bankSession.monthKey),
+          sideDbRelPath: duplicateSideDbRelPath(this.bankSession.monthKey),
           summary,
-          ...operationIdentity,
-          inputEvidenceHash
-        });
+        };
+        const completed = this.completeManagedMirror(managedExpected);
         mirrorRunId = completed.mirror.id;
         managedMirrorCommitted = true;
       } else {
@@ -1029,6 +1202,7 @@ class DuplicateInboundMatchService {
         sideRunId,
         mirrorRunId,
         snapshotHash: before.snapshotHash,
+        resultDigest: finishedRun.resultDigest,
         summary
       };
       if (onProgress) onProgress({ stage: 'done', message: '重复入金匹配完成' });
@@ -1056,6 +1230,7 @@ class DuplicateInboundMatchService {
   }
 
   async export({ savePath, onProgress } = {}) {
+    if (this.recoveryLatch) throw recoveryRequiredError();
     if (!this.lastRun) {
       throw new DuplicateInboundMatchServiceError(
         'duplicate-inbound-run-missing',

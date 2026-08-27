@@ -22,6 +22,9 @@
 | exact Inspector evidence绑定完整side/mirror post-image hash | 仅绑定receipt identity会漏掉复检后summary/result变化 | 只比较sideRunId/snapshot；相信启动期无并发 | TOCTOU或数据损坏在补镜像前终止，不把变化后的结果写入Main |
 | import/run分别使用policy冻结的Inspector key | `duplicate:import`与`duplicate:run`各有独立policy inspector key | import source复用run key | 共享同一个只读实现但registry identity不混用 |
 | managed新import/run保留旧authoritative side receipt/result | operation replay和重启恢复需要原target；side与Main无法跨库原子“审计后删除” | 沿用legacy `clearAll/clearRuns`；先记Main expiration再删side | production-false managed路径append-only保留，legacy清理语义完全不变；容量/retention列production gate |
+| Duplicate managed side path统一写POSIX，历史path只做separator canonical comparison | Windows持久值`\\`与provider POSIX值是同一文件identity；全局修改`runDataStore`会扩大legacy行为 | 全局normalize/resolve；折叠`.`/`..`/重复separator/大小写 | 新writer跨平台稳定；历史Windows mirror可exact replay/inspect，非separator差异仍identity conflict |
+| side commit后Main CAS前后均authoritative重读并维护generation latch | writer exception既可能pre-commit，也可能commit-after-reply；同进程若继续import/run/export会删除或旁路partial证据 | 只在catch设布尔flag；盲重试matching；允许其它command | latch绑定action/operation/task/evidence/month/import/sideRun与result digest；仅exact receipt replay可补mirror，partial/unknown时其它command全部fail closed |
+| `finishRun`同side事务持久化完整result post-image SHA-256 | 三路row count无法发现同计数金额/币种/raw/reason/lineage/snapshot变化 | Startup recovery复制/重跑matching；Main保存敏感结果行 | digest覆盖稳定排序的mail/manual/audit实际JSON、snapshot/summary及五路count/disposition守恒；Main仅保存digest、summary/count，不保存raw行 |
 
 ## Assumptions
 
@@ -45,23 +48,24 @@
 | 冻结验收 | 实现证据 | 测试证据 |
 | --- | --- | --- |
 | Duplicate import/run operation receipt与side mutation同事务 | `duplicate-inbound-match-store.js`在`createImportBundle`/`finishRun`的既有事务COMMIT前写receipt；`operation-receipt-repository.js`冻结exact identity | `v322-operation-receipt-e06-p0.test.js` writer fault整体rollback；`service.test.js`真实import/run receipt |
-| duplicate replay不重复业务mutation | `service.js`在invalidate/clear/matching前查receipt，校验owner+input evidence后恢复target | `service.test.js`same operation行/run/mirror计数不增长；Main mirror失败后重放只补镜像 |
-| Main mirror保留operationKey/producerTaskRunId与exact post-image | nullable历史migration；managed writer强校验；repository operation unique CAS比较owner/input/side/files/summary | repository exact replay/identity conflict；service owner lineage；reply丢失镜像仍success |
-| exact inspector五态 | `startup-recovery.js`枚举receipt source、复制DB/WAL/SHM只读证据、验证target/result counts/post-image与mirror | committed/not-committed/partial/compensated/unknown、owner/mirror冲突、孤立sidecar、WAL零写测试 |
-| 仅committed-side执行CAS complete-mirror | provider复检相同evidence与side post-image；只把持久side result写Main，不导入matching engine | partial→complete、复检后side变化fail closed、partial由Platform Hold且不自动recover |
+| duplicate replay不重复业务mutation | `service.js`在invalidate/clear/matching前查receipt；Main writer异常后authoritative重读并以完整owner/op/evidence/side identity建立generation latch | `service.test.js`partial latch阻断import/different run/export；same replay只补mirror，matching lookup/side run/mirror计数不增长；conflicting mirror保持unknown |
+| Main mirror保留operationKey/producerTaskRunId与exact post-image | nullable历史migration；managed writer强校验；operation CAS比较owner/input/side/files/summary/result digest；新side path固定POSIX，历史path只做separator comparison | repository Windows `\\`→POSIX exact replay/CAS与重复separator/不同month冲突；service owner lineage、commit-after-reply authoritative成功 |
+| exact inspector五态 | `startup-recovery.js`枚举receipt source、复制DB/WAL/SHM只读证据，校验完整result digest、五路count/disposition守恒与mirror | committed/not-committed/partial/compensated/unknown、历史backslash、owner/mirror冲突、孤立sidecar、WAL零写测试 |
+| 仅committed-side执行CAS complete-mirror | provider复检相同evidence与完整side post-image；只把持久digest/summary/count写Main，不导入或调用matching engine | 同计数金额/币种内容变化TOCTOU fail closed；敏感结果不进入mirror/audit；partial由Platform Hold且不自动recover |
 | durable recovery audit/crash matrix | Main `BEGIN IMMEDIATE`内mirror CAS+append-only audit；source/result hash支持exact replay | CAS后audit前fault整体rollback、provider replay单mirror/单audit、mirror后reply丢失replay |
-| production/live/E07-C不启用 | 只在既有startup boundary注册import/run inspector/provider；`policies.js`未改且三项`production.enabled=false`；无IPC/preload/renderer/parser改动 | policy冻结fixture、wiring、真实Worker crash/restart/active Hold测试 |
+| production/live/E07-C不启用 | 只在既有startup boundary注册import/run inspector/provider；`policies.js`未改且三项`production.enabled=false`；无IPC/preload/renderer/parser改动 | policy冻结fixture、wiring、真实Worker crash/restart/active Hold与重复generation gate零写测试 |
 
 ### Blindspot passes
 
-- `blindspot-pass`：发现并修复 mirror replay未比较summary/file name、exact source旁孤立WAL遗漏legacy Hold、side post-image TOCTOU、mirror提交后progress/reply异常误降级success mirror、compensation audit与live residue冲突五项；未发现入口旁路或Service-before-inspector路径。
-- `reconciliation-blindspot-pass`：operation/task/import/sideRun/mirror血缘可追溯；matching/金额/币种/候选消费/Excel口径未改；side结果行数与summary守恒仍由真实查询验证；partial与unknown不重跑算法；资金红线保留人工复核。
+- `blindspot-pass`：独立review新增发现并修复跨平台path identity、Main异常后的同进程partial窗口、count-only post-image三项；复核startup模块仅做DB family复制、receipt/result/mirror检查与Main CAS/audit，没有matching算法或E07-C parser入口。
+- `reconciliation-blindspot-pass`：operation/task/import/sideRun/mirror血缘可追溯；digest覆盖mail金额币种/输出、manual raw/reason/order、audit disposition/reason与Bank/MPT/document lineage、snapshot及五路守恒；partial/unknown不重跑算法；资金红线保留真实样本人工复核。
 
 ### Automated evidence
 
-- Focused/affected unit：114/114 PASS（Duplicate全部unit、store/repository/wiring、E06 receipt fault）。
+- Focused/affected unit：137/137 PASS（Duplicate全部unit、digest/store/repository/wiring、E06 receipt fault）。
 - Integration：`duplicate-inbound-match-end-to-end.js` 31/31 PASS；`background-execution-recovery-control.js` 27/27 PASS。
-- Static：所有改动JS `node --check` PASS；ESLint 9.39.4 `src/` PASS；`git diff --check`将在提交前执行。
+- Full unit：6245/6250 PASS、3 SKIP；仅2项`windows-build-contract.test.js`因隔离worktree没有本地`node_modules/app-builder-lib/templates/nsis/multiUser.nsh`而ENOENT，非业务断言失败；相关测试以上述focused/integration覆盖。
+- Static：所有改动JS `node --check` PASS；ESLint 9.39.4 `src/` PASS；`git diff --check` PASS。
 - 未运行（明确禁止）：`release-check`、`check-vars`、`scan:vars`。
 
 ## Remaining Unknowns
@@ -73,3 +77,4 @@
 | Windows packaged native SQLite/WAL/CAS | PROBE | R3.2.2 release evidence | 阻断enable |
 | BizId/MPT/document/candidate与恢复真实样本 | REVIEW | 业务/资金人工复核 | 自动测试不能解除资金红线 |
 | managed receipt/result磁盘retention与安全expiration协议 | BLOCK production | R3.2.2 recovery/control owner | 不阻断production-false E07-B；启用前需容量策略、补偿原子性与人工样本 |
+| 历史managed side/mirror无`result_digest` | HOLD compatibility | recovery/control owner决定是否离线人工迁移；当前不猜测内容 | 不阻断本PR；exact Inspector保持unknown/Hold，禁止自动补镜像 |

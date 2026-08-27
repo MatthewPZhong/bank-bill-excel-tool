@@ -57,3 +57,25 @@ E07-B production-false 实现没有需要用户决策的 BLOCK。以下继续阻
 | 4 | approved complete-mirror provider | 只消费committed side；Main CAS+audit | side-only crash、mirror后reply crash、并发冲突、audit fault | partial恢复可能重复matching/错镜像 | provider只返回terminal failure/保持Hold |
 | 5 | managed接线与生命周期失效审计 | identity从envelope到receipt/mirror；旧结果去向可审计 |真实Worker/restart/replay与E2E守恒 | live行为漂移或receipt悬空 | 不动live IPC/production flag |
 | 6 | 双盲区复核与affected验证 | 旁路、部分失败、行数/状态守恒 | focused/affected tests、lint/check/diff clean | 不能交付 | 缩回未证实能力，不做较小替代上线 |
+
+## Independent Review Repair Preflight（2026-08-28）
+
+### Review Goal / Constraints / Done when
+
+- Goal：只修复独立 review 接受的 Windows side path identity、同进程 partial latch、完整 result post-image digest 三项，不扩成 E07-C/general compensation。
+- Constraints：新 managed writer持久化 POSIX identity；历史 `\\`/`/` 只做 separator comparison；legacy null-operation继续unknown/Hold；recovery不调用matching；production/live仍关闭。
+- Done when：跨separator exact replay/CAS成立且其它路径冲突；Main mirror异常后立即authoritative重读并建立完整generation latch；same replay只补mirror，三类其它命令阻断；restart partial进入Hold/新generation gate且重复扫描零side/Main mutation；同计数内容变化被digest拒绝，Main只保留bounded digest/count。
+
+### Review Unknowns Register
+
+| 未知 | 分类 | 仓库证据/探针 | 决定 |
+| --- | --- | --- | --- |
+| Windows历史side path能否用全局path normalization修复 | PROBE | `runDataStore.sideDbRelPath`被多个legacy模块共用；全局改动会扩大兼容面 | 新增Duplicate局部POSIX writer；comparison只替换separator，不折叠`.`、`..`、重复separator或大小写 |
+| mirror writer异常后如何区分commit-before-reply与真实partial | PROBE | Main CAS writer可能在commit后抛错；仅凭exception无法确定post-image | 每次CAS前后按receipt/result/mirror完整identity重读；exact mirror视为committed，absent视为partial，任何conflict/read ambiguity视为unknown |
+| Worker crash会否绕过内存latch | PROBE | 新generation首构已有`startup-gate`且会调用exact `sideOperationSnapshots` | 内存latch关闭同process窗口；新generation由持久receipt/digest触发`DUPLICATE_STARTUP_RESIDUE_UNRESOLVED`或Platform Hold，无需新公共协议 |
+| 只校验三路count能否发现内容被改但count不变 | PROBE | side表含mail/manual/audit实际JSON与完整血缘；Main不得复制敏感行 | `finishRun`同side事务生成canonical SHA-256，覆盖snapshot、summary、三类内容与五路守恒；Inspector复制DB family后只重算digest/count |
+
+### BLOCK / ASSUME
+
+- 新增 BLOCK：无。三项均可由既有side/Main schema、startup gate与测试确定，不需要改变公共合同或用户流程。
+- ASSUME：历史managed run/mirror缺少`result_digest`时不能安全回填，按unknown/Hold处理；这是fail-closed兼容，不放宽legacy null-operation。

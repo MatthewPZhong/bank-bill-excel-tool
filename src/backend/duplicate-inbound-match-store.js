@@ -4,6 +4,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const runDataStore = require('./run-data-store');
+const {
+  assertDuplicateResultConservation,
+  computeDuplicateResultPostImage
+} = require('./duplicate-inbound-match-result-digest');
 
 const MODULE = runDataStore.MODULE_DUPLICATE_INBOUND_MATCH;
 const SIDE_DB_FAMILY_RE = /^(month-\d{4}-\d{2}\.sqlite)(?:-wal|-shm)?$/;
@@ -66,6 +70,7 @@ function mapRun(row, monthKey) {
     snapshotHash: row.snapshot_hash,
     status: row.status,
     summary: parseObjectJson(row.summary_json, '重复入金运行汇总'),
+    resultDigest: row.result_digest || null,
     errorMessage: row.error_message || '',
     createdAt: row.created_at,
     finishedAt: row.finished_at
@@ -128,7 +133,17 @@ function loadValidatedRun(db, monthKey, runId) {
   if (!run) return null;
   const counts = resultCounts(db, runId);
   assertResultCounts(run, counts);
-  return { run, counts };
+  let postImage = null;
+  if (run.resultDigest) {
+    postImage = computeDuplicateResultPostImage(db, runId);
+    assertDuplicateResultConservation(postImage);
+    if (!postImage || postImage.digest !== run.resultDigest) {
+      const error = new Error('重复入金运行结果内容摘要与已提交摘要不一致');
+      error.code = 'duplicate-inbound-side-result-digest-mismatch';
+      throw error;
+    }
+  }
+  return { run, counts, postImage };
 }
 
 class DuplicateInboundMatchStore {
@@ -426,9 +441,7 @@ class DuplicateInboundMatchStore {
   }
 
   createRun({ monthKey, importId, snapshot, snapshotHash }) {
-    const db = runDataStore.openExistingSideDb(
-      runDataStore.sideDbPath(this.userDataDir, MODULE, monthKey)
-    );
+    const db = runDataStore.openSideDb(this.userDataDir, MODULE, monthKey);
     try {
       const result = db.prepare(`
         INSERT INTO duplicate_inbound_match_runs (
@@ -448,9 +461,7 @@ class DuplicateInboundMatchStore {
   finishRun({
     monthKey, runId, summary, mailRows, manualRows, auditRows, operationReceipt = null
   }) {
-    const db = runDataStore.openExistingSideDb(
-      runDataStore.sideDbPath(this.userDataDir, MODULE, monthKey)
-    );
+    const db = runDataStore.openSideDb(this.userDataDir, MODULE, monthKey);
     try {
       db.exec('BEGIN IMMEDIATE');
       const insertMail = db.prepare(`
@@ -498,6 +509,14 @@ class DuplicateInboundMatchStore {
         WHERE id = ? AND status = 'running'
       `).run(JSON.stringify(summary || {}), Number(runId));
       if (updated.changes !== 1) throw new Error(`重复入金侧库 run 不存在或状态非法：${runId}`);
+      const postImage = computeDuplicateResultPostImage(db, runId);
+      assertDuplicateResultConservation(postImage);
+      const digestUpdated = db.prepare(`
+        UPDATE duplicate_inbound_match_runs SET result_digest = ? WHERE id = ?
+      `).run(postImage.digest, Number(runId));
+      if (digestUpdated.changes !== 1) {
+        throw new Error(`重复入金侧库 run 结果摘要写入失败：${runId}`);
+      }
       let receipt = null;
       if (operationReceipt) {
         if (!this.operationReceipts || typeof this.operationReceipts.insertOperationReceipt !== 'function') {
@@ -583,9 +602,13 @@ class DuplicateInboundMatchStore {
       runDataStore.sideDbPath(this.userDataDir, MODULE, monthKey)
     );
     try {
+      db.exec('BEGIN');
       const validated = loadValidatedRun(db, monthKey, runId);
       const run = validated && validated.run;
-      if (!run || run.status !== 'success') return null;
+      if (!run || run.status !== 'success') {
+        db.exec('COMMIT');
+        return null;
+      }
       const mailRows = db.prepare(`
         SELECT source_ordinal, output_json
         FROM duplicate_inbound_match_mail_rows
@@ -617,10 +640,25 @@ class DuplicateInboundMatchStore {
         mptLineage: JSON.parse(row.mpt_lineage_json),
         documentLineage: JSON.parse(row.document_lineage_json)
       }));
+      db.exec('COMMIT');
       return { run, mailRows, manualRows, auditRows };
+    } catch (error) {
+      rollbackQuietly(db);
+      throw error;
     } finally {
       db.close();
     }
+  }
+
+  readCommittedResult(monthKey, runId) {
+    const result = this.readResult(monthKey, runId);
+    if (!result) return null;
+    if (!/^[a-f0-9]{64}$/.test(String(result.run.resultDigest || ''))) {
+      const error = new Error('Duplicate managed run缺少已提交结果摘要');
+      error.code = 'duplicate-inbound-side-result-digest-missing';
+      throw error;
+    }
+    return result;
   }
 
   getOperationReceipt(monthKey, actionKey, operationKey) {

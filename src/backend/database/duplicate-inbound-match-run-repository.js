@@ -2,6 +2,10 @@
 
 const { isDeepStrictEqual } = require('node:util');
 
+const {
+  sameDuplicateSideDbRelPath
+} = require('../duplicate-inbound-match-side-db-identity');
+
 function parseJson(value, fallback) {
   try { return JSON.parse(value); } catch (_error) { return fallback; }
 }
@@ -23,6 +27,7 @@ function mapMirror(row) {
     operationKey: row.operation_key || null,
     producerTaskRunId: row.producer_task_run_id || null,
     inputEvidenceHash: row.input_evidence_hash || null,
+    resultDigest: row.result_digest || null,
     errorMessage: row.error_message || '',
     startedAt: row.started_at,
     finishedAt: row.finished_at
@@ -71,8 +76,8 @@ function createRunMirror(db, payload = {}) {
     INSERT INTO duplicate_inbound_match_run_mirrors (
       month_key, side_run_id, status, summary_json, snapshot_hash,
       bank_file_name, bank_file_hash, document_file_name, document_file_hash, side_db_rel_path,
-      operation_key, producer_task_run_id, input_evidence_hash
-    ) VALUES (?, ?, 'running', '{}', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      operation_key, producer_task_run_id, input_evidence_hash, result_digest
+    ) VALUES (?, ?, 'running', '{}', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     String(payload.monthKey || ''),
     Number(payload.sideRunId),
@@ -84,7 +89,8 @@ function createRunMirror(db, payload = {}) {
     String(payload.sideDbRelPath || ''),
     identity.operationKey,
     identity.producerTaskRunId,
-    identity.inputEvidenceHash
+    identity.inputEvidenceHash,
+    payload.resultDigest == null ? null : requireHash(payload.resultDigest, 'resultDigest')
   );
   return Number(result.lastInsertRowid);
 }
@@ -100,6 +106,7 @@ function sameCommittedMirror(mirror, payload, identity) {
     mirror.operationKey === identity.operationKey &&
     mirror.producerTaskRunId === identity.producerTaskRunId &&
     mirror.inputEvidenceHash === identity.inputEvidenceHash &&
+    mirror.resultDigest === payload.resultDigest &&
     mirror.monthKey === String(payload.monthKey || '') &&
     mirror.sideRunId === Number(payload.sideRunId) &&
     mirror.snapshotHash === String(payload.snapshotHash || '') &&
@@ -107,13 +114,14 @@ function sameCommittedMirror(mirror, payload, identity) {
     mirror.bankFileHash === String(payload.bankFileHash || '') &&
     mirror.documentFileName === String(payload.documentFileName || '') &&
     mirror.documentFileHash === String(payload.documentFileHash || '') &&
-    mirror.sideDbRelPath === String(payload.sideDbRelPath || '') &&
+    sameDuplicateSideDbRelPath(mirror.sideDbRelPath, payload.sideDbRelPath) &&
     isDeepStrictEqual(mirror.summary, payload.summary || {}));
 }
 
 function createCommittedRunMirror(db, payload = {}) {
   const identity = normalizeManagedIdentity(payload);
   requireSafeId(payload.sideRunId, 'sideRunId');
+  const resultDigest = requireHash(payload.resultDigest, 'resultDigest');
   const existing = getRunMirrorByOperation(db, identity.operationKey);
   if (existing) {
     if (!sameCommittedMirror(existing, payload, identity)) {
@@ -128,8 +136,8 @@ function createCommittedRunMirror(db, payload = {}) {
       month_key, side_run_id, status, summary_json, snapshot_hash,
       bank_file_name, bank_file_hash, document_file_name, document_file_hash,
       side_db_rel_path, operation_key, producer_task_run_id, input_evidence_hash,
-      error_message, finished_at
-    ) VALUES (?, ?, 'success', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, CURRENT_TIMESTAMP)
+      result_digest, error_message, finished_at
+    ) VALUES (?, ?, 'success', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, CURRENT_TIMESTAMP)
   `).run(
     String(payload.monthKey || ''),
     Number(payload.sideRunId),
@@ -142,7 +150,8 @@ function createCommittedRunMirror(db, payload = {}) {
     String(payload.sideDbRelPath || ''),
     identity.operationKey,
     identity.producerTaskRunId,
-    identity.inputEvidenceHash
+    identity.inputEvidenceHash,
+    resultDigest
   );
   return { created: true, mirror: getRunMirror(db, Number(result.lastInsertRowid)) };
 }
