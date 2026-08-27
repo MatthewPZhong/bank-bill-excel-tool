@@ -227,6 +227,33 @@ test.describe('DuplicateInboundMatchService', () => {
     fs.rmSync(userDataDir, { recursive: true, force: true });
   });
 
+  test('constructor只建内存门面，不失效主镜像也不清理既有侧库', () => {
+    const mirrorId = mirrorRepository.createRunMirror(mirror.db, {
+      monthKey: '2026-07',
+      sideRunId: 91,
+      snapshotHash: 'a'.repeat(64),
+      bankFileName: 'bank.xlsx',
+      bankFileHash: 'b'.repeat(64),
+      documentFileName: 'document.xlsx',
+      documentFileHash: 'c'.repeat(64),
+      sideDbRelPath: 'run-data/duplicate-inbound-match/month-2026-07.sqlite'
+    });
+    const sideDir = path.join(userDataDir, 'run-data', 'duplicate-inbound-match');
+    fs.mkdirSync(sideDir, { recursive: true });
+    const sidePath = path.join(sideDir, 'month-2026-07.sqlite');
+    fs.writeFileSync(sidePath, 'sentinel');
+
+    createDuplicateInboundMatchService({
+      userDataDir,
+      database: mirror.facade,
+      mailTemplatePath: MAIL_TEMPLATE,
+      bankTemplatePath: BANK_TEMPLATE
+    });
+
+    assert.equal(mirrorRepository.getRunMirror(mirror.db, mirrorId).status, 'running');
+    assert.equal(fs.readFileSync(sidePath, 'utf8'), 'sentinel');
+  });
+
   test('完整执行银行分组、MPT 回填、人工分流和双 sheet 导出', async () => {
     const pureInbound = bankRow({
       BizId: 'PURE-I', FundType: 'Inbound', 'Credit Amount': '300', Channel: 'CIT',

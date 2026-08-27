@@ -35,11 +35,20 @@ const {
   validateFundReconImportResult,
   validateFundReconRunResult
 } = require('../fund-recon-worker/policies');
+const {
+  DUPLICATE_ACTIONS,
+  DUPLICATE_POLICIES,
+  DUPLICATE_SERVICE_KEY,
+  validateDuplicateExportResult,
+  validateDuplicateImportResult,
+  validateDuplicateRunResult
+} = require('../duplicate-inbound-match/policies');
 
 const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   ...TOOLBOX_GENERATION_POLICIES,
   ...PRE_FUND_MPT_POLICIES,
-  ...FUND_RECON_POLICIES
+  ...FUND_RECON_POLICIES,
+  ...DUPLICATE_POLICIES
 ]);
 
 function isBackgroundExecutionProductionEnabled(actionKey) {
@@ -48,6 +57,12 @@ function isBackgroundExecutionProductionEnabled(actionKey) {
 }
 
 function entryBindingForPolicy(policy, workerRoot) {
+  if (policy.moduleId === 'duplicate') {
+    return Object.freeze({
+      path: path.resolve(__dirname, '..', 'duplicate-inbound-match', 'worker-entry.js'),
+      cancellationTerminalErrorCodes: Object.freeze(['DUPLICATE_SHUTDOWN'])
+    });
+  }
   if (policy.moduleId === 'fund-recon') {
     return Object.freeze({
       path: path.resolve(__dirname, '..', 'fund-recon-worker', 'worker-entry.js'),
@@ -100,7 +115,13 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
   ));
   const validatorEntries = {};
   for (const policy of BACKGROUND_EXECUTION_POLICIES) {
-    const resultValidator = policy.moduleId === 'fund-recon'
+    const resultValidator = policy.moduleId === 'duplicate'
+      ? (policy.actionKey === DUPLICATE_ACTIONS.IMPORT
+          ? validateDuplicateImportResult
+          : (policy.actionKey === DUPLICATE_ACTIONS.RUN
+              ? validateDuplicateRunResult
+              : validateDuplicateExportResult))
+      : policy.moduleId === 'fund-recon'
       ? (policy.actionKey === 'fund-recon:import'
           ? validateFundReconImportResult
           : (policy.actionKey === 'fund-recon:run'
@@ -144,9 +165,9 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
     ),
     settlementKeys: BACKGROUND_EXECUTION_POLICIES.map((policy) => policy.commit.settlementKey),
     publisherKeys: BACKGROUND_EXECUTION_POLICIES.map((policy) => policy.artifacts.publisherKey),
-    serviceKeys: [FUND_RECON_SERVICE_KEY],
-    plannerKeys: ['planner.pre-fund:mpt-import'],
-    reducerKeys: ['reducer.pre-fund:mpt-import']
+    serviceKeys: [FUND_RECON_SERVICE_KEY, DUPLICATE_SERVICE_KEY],
+    plannerKeys: ['planner.pre-fund:mpt-import', 'planner.duplicate:import'],
+    reducerKeys: ['reducer.pre-fund:mpt-import', 'reducer.duplicate:import']
   };
   const policyRegistry = createExecutionPolicyRegistry({
     policies: BACKGROUND_EXECUTION_POLICIES,
