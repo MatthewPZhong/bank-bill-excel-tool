@@ -28,6 +28,9 @@ function createDuplicateMirrorDatabase(databasePath) {
     createDuplicateInboundMatchRunMirror(payload) {
       return mirrorRepository.createRunMirror(open(), payload);
     },
+    createCommittedDuplicateInboundMatchRunMirror(payload) {
+      return mirrorRepository.createCommittedRunMirror(open(), payload);
+    },
     finishDuplicateInboundMatchRunMirror(id, summary) {
       return mirrorRepository.finishRunMirror(open(), id, summary);
     },

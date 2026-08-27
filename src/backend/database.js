@@ -1605,6 +1605,10 @@ class AppDatabase {
     return duplicateInboundMatchRunRepository.createRunMirror(this.db, payload);
   }
 
+  createCommittedDuplicateInboundMatchRunMirror(payload) {
+    return duplicateInboundMatchRunRepository.createCommittedRunMirror(this.db, payload);
+  }
+
   finishDuplicateInboundMatchRunMirror(mirrorId, summary) {
     return duplicateInboundMatchRunRepository.finishRunMirror(this.db, mirrorId, summary);
   }
@@ -1628,6 +1632,16 @@ class AppDatabase {
 
   listDuplicateInboundMatchRunMirrors() {
     return duplicateInboundMatchRunRepository.listRunMirrors(this.db);
+  }
+
+  getDuplicateInboundMatchRecoveryAuditByOperation(actionKey, operationKey, taskRunId) {
+    return duplicateInboundMatchRunRepository.getRecoveryAuditByOperation(
+      this.db, actionKey, operationKey, taskRunId
+    );
+  }
+
+  getDuplicateInboundMatchRecoveryAuditBySource(sourceRef) {
+    return duplicateInboundMatchRunRepository.getRecoveryAuditBySource(this.db, sourceRef);
   }
 
   listFundTransferAccountMappings() {

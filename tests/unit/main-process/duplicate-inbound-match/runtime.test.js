@@ -28,7 +28,8 @@ const {
 const {
   DUPLICATE_STARTUP_CONFLICT_SCOPE_KEY,
   createDuplicateStartupOutcomeInspector,
-  createDuplicateStartupRecoveryProvider
+  createDuplicateStartupRecoveryProvider,
+  operationSource
 } = require('../../../../src/main-process/duplicate-inbound-match/startup-recovery');
 const mirrorRepository = require(
   '../../../../src/backend/database/duplicate-inbound-match-run-repository'
@@ -85,7 +86,7 @@ function listRunMirrors(databasePath) {
   }
 }
 
-test('真实native Worker跨两条import复用单Service、替换reservation并在shutdown释放', async (t) => {
+test('真实native Worker跨两条import复用单Service、crash后exact receipt允许新generation安全续跑', async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'duplicate-native-worker-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const databasePath = path.join(dir, 'tool-data.sqlite');
@@ -160,10 +161,9 @@ test('真实native Worker跨两条import复用单Service、替换reservation并�
   const sideDirectory = path.join(dir, 'run-data', 'duplicate-inbound-match');
   const beforeRetry = fs.readdirSync(sideDirectory).sort();
   const afterCrash = await executeImport('duplicate-import-after-crash', bankOne);
-  assert.equal(afterCrash.outcome, 'failed');
-  assert.equal(afterCrash.error.code, 'DUPLICATE_STARTUP_RESIDUE_UNRESOLVED');
+  assert.equal(afterCrash.outcome, 'completed');
   assert.deepEqual(fs.readdirSync(sideDirectory).sort(), beforeRetry,
-    'crash后不得cold-start清理旧generation证据');
+    'crash后新generation保留旧receipt/side证据并追加新bundle');
   assert.equal(workerHandles.length, 2, 'crash后必须cold-start新Worker generation');
   const report = await runtime.shutdown({ timeoutMs: 10000 });
   shutdown = true;
@@ -237,7 +237,7 @@ test('active Hold阻断managed runtime import且零删持久证据', async (t) =
   assert.deepEqual(report.errors, []);
 });
 
-test('normal close保留side证据且下次startup inspector判unknown', async (t) => {
+test('normal close保留exact side receipt且下次startup inspector判committed', async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'duplicate-native-close-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const databasePath = path.join(dir, 'tool-data.sqlite');
@@ -274,11 +274,15 @@ test('normal close保留side证据且下次startup inspector判unknown', async (
   assert.equal(fs.readdirSync(sideDirectory).some((name) => name.endsWith('.sqlite')), true);
   const report = await runtime.shutdown({ timeoutMs: 10000 });
   assert.deepEqual(report.errors, []);
-  const [source] = await createDuplicateStartupRecoveryProvider().listOpenSources();
+  const source = operationSource({
+    actionKey: 'duplicate:import',
+    operationKey: 'duplicate-close-import',
+    producerTaskRunId: 'task-duplicate-close-import'
+  });
   const inspection = await createDuplicateStartupOutcomeInspector({
     userDataDir: dir,
     listRunMirrors: () => listRunMirrors(databasePath)
   })(source);
-  assert.equal(inspection.outcome, 'unknown');
-  assert.equal(inspection.boundedEvidence.sideDbCount > 0, true);
+  assert.equal(inspection.outcome, 'committed');
+  assert.equal(inspection.boundedEvidence.importBundleId > 0, true);
 });

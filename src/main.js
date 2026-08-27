@@ -201,6 +201,7 @@ const {
 } = require('./main-process/duplicate-inbound-match/service');
 const {
   DUPLICATE_STARTUP_CONFLICT_SCOPE_KEY,
+  DUPLICATE_IMPORT_STARTUP_INSPECTOR_KEY,
   DUPLICATE_STARTUP_INSPECTOR_KEY,
   DUPLICATE_STARTUP_RECOVERY_KEY,
   createDuplicateStartupOutcomeInspector,
@@ -21478,14 +21479,30 @@ async function initializeBackgroundExecutionRecovery() {
   for (const actionKey of Object.keys(PRE_FUND_MPT_STATIC_KEYS)) {
     inspectorRegistry.register(PRE_FUND_MPT_STATIC_KEYS[actionKey].inspector, inspectPreFundMpt);
   }
-  inspectorRegistry.register(DUPLICATE_STARTUP_INSPECTOR_KEY,
-    createDuplicateStartupOutcomeInspector({
-      userDataDir: path.dirname(database.dbPath),
-      listRunMirrors: () => database.listDuplicateInboundMatchRunMirrors()
-    }));
+  const duplicateRecoveryOptions = {
+    userDataDir: path.dirname(database.dbPath),
+    listRunMirrors: () => database.listDuplicateInboundMatchRunMirrors(),
+    getRecoveryAuditBySource: (sourceRef) => (
+      database.getDuplicateInboundMatchRecoveryAuditBySource(sourceRef)
+    )
+  };
+  const inspectDuplicateRecovery = createDuplicateStartupOutcomeInspector(
+    duplicateRecoveryOptions
+  );
+  inspectorRegistry.register(DUPLICATE_IMPORT_STARTUP_INSPECTOR_KEY, inspectDuplicateRecovery);
+  inspectorRegistry.register(DUPLICATE_STARTUP_INSPECTOR_KEY, inspectDuplicateRecovery);
   providerRegistry.register(
     DUPLICATE_STARTUP_RECOVERY_KEY,
-    createDuplicateStartupRecoveryProvider()
+    createDuplicateStartupRecoveryProvider({
+      ...duplicateRecoveryOptions,
+      mainDatabase: database.db,
+      getRecoveryAuditByOperation: (actionKey, operationKey, taskRunId) => (
+        database.getDuplicateInboundMatchRecoveryAuditByOperation(
+          actionKey, operationKey, taskRunId
+        )
+      ),
+      inspectOperation: inspectDuplicateRecovery
+    })
   );
 
   inspectorRegistry.freeze();

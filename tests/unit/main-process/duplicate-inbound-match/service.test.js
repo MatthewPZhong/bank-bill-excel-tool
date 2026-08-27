@@ -15,6 +15,10 @@ const {
   ensureDuplicateInboundMatchRunMetadataSupport
 } = require('../../../../src/backend/database/migrations');
 const mirrorRepository = require('../../../../src/backend/database/duplicate-inbound-match-run-repository');
+const runDataStore = require('../../../../src/backend/run-data-store');
+const operationReceipts = require(
+  '../../../../src/main-process/duplicate-inbound-match/operation-receipt-repository'
+);
 const {
   INBOUND_FIELDS,
   MPT_DELIMITER,
@@ -190,6 +194,9 @@ function createMirrorDatabase() {
     db,
     facade: {
       createDuplicateInboundMatchRunMirror: (payload) => mirrorRepository.createRunMirror(db, payload),
+      createCommittedDuplicateInboundMatchRunMirror: (payload) => (
+        mirrorRepository.createCommittedRunMirror(db, payload)
+      ),
       finishDuplicateInboundMatchRunMirror: (id, summary) => mirrorRepository.finishRunMirror(db, id, summary),
       failDuplicateInboundMatchRunMirror: (id, error) => mirrorRepository.failRunMirror(db, id, error),
       markDuplicateInboundMatchRunMirrorUnavailable: (id, status, message) => (
@@ -340,6 +347,163 @@ test.describe('DuplicateInboundMatchService', () => {
     assert.equal(mirrorRow.documentFileName, 'document.xlsx');
     const mainDbText = JSON.stringify(mirrorRow);
     assert.doesNotMatch(mainDbText, /Payee-SUCCESS|P-SUCCESS|Drawee-SUCCESS/);
+  });
+
+  test('managed import/run receipt同side事务且duplicate operation replay不重复mutation', async () => {
+    writeBankFile(bankFile, duplicateGroup({ prefix: 'REPLAY', amount: '100' }));
+    const mptFile = path.join(userDataDir, 'MPT_INBOUND_GATEWAY_20260714001.txt');
+    writeMptFile(mptFile, '20260714', [
+      inboundMptRow({ reconId: 'REPLAY-RECON-1', orderId: 'ORDER-1', batchSeq: '1' }),
+      inboundMptRow({ reconId: 'REPLAY-RECON-2', orderId: 'ORDER-2', batchSeq: '2' })
+    ]);
+    await service.tempStore.importLegacyFile(mptFile);
+    const importIdentity = {
+      actionKey: 'duplicate:import',
+      operationKey: 'duplicate/import/replay-1',
+      producerTaskRunId: 'task-duplicate-import-1'
+    };
+    const imported = await service.importFiles([bankFile, documentFile], null, importIdentity);
+    assert.equal(imported.durableCommit, true);
+    const firstImportId = service.bankSession.importId;
+    const replayImport = await service.importFiles([bankFile, documentFile], null, importIdentity);
+    assert.equal(replayImport.replayed, true);
+    assert.equal(service.bankSession.importId, firstImportId);
+
+    const runIdentity = {
+      actionKey: 'duplicate:run',
+      operationKey: 'duplicate/run/replay-1',
+      producerTaskRunId: 'task-duplicate-run-1'
+    };
+    const firstRun = await service.run({ operationIdentity: runIdentity });
+    assert.equal(firstRun.durableCommit, true);
+    const firstSideRunId = service.lastRun.sideRunId;
+    const replayRun = await service.run({ operationIdentity: runIdentity });
+    assert.equal(replayRun.replayed, true);
+    assert.equal(service.lastRun.sideRunId, firstSideRunId);
+    assert.equal(replayRun.runId, firstRun.runId);
+
+    const sideDb = runDataStore.openExistingSideDb(runDataStore.sideDbPath(
+      userDataDir, runDataStore.MODULE_DUPLICATE_INBOUND_MATCH, '2026-07'
+    ));
+    try {
+      assert.equal(sideDb.prepare(
+        'SELECT COUNT(*) AS count FROM duplicate_inbound_match_imports'
+      ).get().count, 1);
+      assert.equal(sideDb.prepare(
+        'SELECT COUNT(*) AS count FROM duplicate_inbound_match_runs'
+      ).get().count, 1);
+      const receipts = operationReceipts.listOperationReceipts(sideDb);
+      assert.equal(receipts.length, 2);
+      assert.deepEqual(receipts.map((item) => item.producerTaskRunId), [
+        'task-duplicate-import-1', 'task-duplicate-run-1'
+      ]);
+    } finally {
+      sideDb.close();
+    }
+    const mirrorRow = mirrorRepository.getRunMirror(mirror.db, firstRun.runId);
+    assert.equal(mirrorRow.operationKey, runIdentity.operationKey);
+    assert.equal(mirrorRow.producerTaskRunId, runIdentity.producerTaskRunId);
+    assert.equal(mirrorRepository.listRunMirrors(mirror.db).length, 1);
+  });
+
+  test('managed run在Main mirror失败后只重放committed side结果', async () => {
+    writeBankFile(bankFile, duplicateGroup({ prefix: 'PARTIAL', amount: '100' }));
+    const mptFile = path.join(userDataDir, 'MPT_INBOUND_GATEWAY_20260714001.txt');
+    writeMptFile(mptFile, '20260714', [
+      inboundMptRow({ reconId: 'PARTIAL-RECON-1', orderId: 'ORDER-1', batchSeq: '1' }),
+      inboundMptRow({ reconId: 'PARTIAL-RECON-2', orderId: 'ORDER-2', batchSeq: '2' })
+    ]);
+    await service.tempStore.importLegacyFile(mptFile);
+    await service.importFiles([bankFile, documentFile], null, {
+      actionKey: 'duplicate:import',
+      operationKey: 'duplicate/import/partial-1',
+      producerTaskRunId: 'task-duplicate-import-partial-1'
+    });
+    const runIdentity = {
+      actionKey: 'duplicate:run',
+      operationKey: 'duplicate/run/partial-1',
+      producerTaskRunId: 'task-duplicate-run-partial-1'
+    };
+    const originalCreateMirror = service.database.createCommittedDuplicateInboundMatchRunMirror;
+    service.database.createCommittedDuplicateInboundMatchRunMirror = () => {
+      throw Object.assign(new Error('injected Main mirror failure'), {
+        code: 'INJECTED_MAIN_MIRROR_FAILURE'
+      });
+    };
+    await assert.rejects(
+      () => service.run({ operationIdentity: runIdentity }),
+      (error) => error.code === 'INJECTED_MAIN_MIRROR_FAILURE'
+    );
+    assert.equal(mirrorRepository.listRunMirrors(mirror.db).length, 0);
+    const sidePath = runDataStore.sideDbPath(
+      userDataDir, runDataStore.MODULE_DUPLICATE_INBOUND_MATCH, '2026-07'
+    );
+    const sideDb = runDataStore.openExistingSideDb(sidePath);
+    let committedSideRunId;
+    try {
+      const receipt = operationReceipts.getOperationReceipt(
+        sideDb, runIdentity.actionKey, runIdentity.operationKey
+      );
+      committedSideRunId = receipt.sideRunId;
+      assert.equal(sideDb.prepare(
+        'SELECT COUNT(*) AS count FROM duplicate_inbound_match_runs'
+      ).get().count, 1);
+    } finally {
+      sideDb.close();
+    }
+
+    service.database.createCommittedDuplicateInboundMatchRunMirror = originalCreateMirror;
+    const replay = await service.run({ operationIdentity: runIdentity });
+    assert.equal(replay.replayed, true);
+    assert.equal(service.lastRun.sideRunId, committedSideRunId);
+    const verifyDb = runDataStore.openExistingSideDb(sidePath);
+    try {
+      assert.equal(verifyDb.prepare(
+        'SELECT COUNT(*) AS count FROM duplicate_inbound_match_runs'
+      ).get().count, 1, 'mirror恢复不得重新执行matching或新增side run');
+    } finally {
+      verifyDb.close();
+    }
+    assert.equal(mirrorRepository.listRunMirrors(mirror.db).length, 1);
+  });
+
+  test('managed mirror提交后reply丢失不降级镜像且same operation可幂等重放', async () => {
+    writeBankFile(bankFile, duplicateGroup({ prefix: 'REPLY-LOST', amount: '100' }));
+    const mptFile = path.join(userDataDir, 'MPT_INBOUND_GATEWAY_20260714001.txt');
+    writeMptFile(mptFile, '20260714', [
+      inboundMptRow({ reconId: 'REPLY-LOST-RECON-1', orderId: 'ORDER-1', batchSeq: '1' }),
+      inboundMptRow({ reconId: 'REPLY-LOST-RECON-2', orderId: 'ORDER-2', batchSeq: '2' })
+    ]);
+    await service.tempStore.importLegacyFile(mptFile);
+    await service.importFiles([bankFile, documentFile], null, {
+      actionKey: 'duplicate:import',
+      operationKey: 'duplicate/import/reply-lost-1',
+      producerTaskRunId: 'task-duplicate-import-reply-lost-1'
+    });
+    const runIdentity = {
+      actionKey: 'duplicate:run',
+      operationKey: 'duplicate/run/reply-lost-1',
+      producerTaskRunId: 'task-duplicate-run-reply-lost-1'
+    };
+    await assert.rejects(
+      () => service.run({
+        operationIdentity: runIdentity,
+        onProgress(progress) {
+          if (progress.stage === 'done') {
+            throw Object.assign(new Error('injected reply loss'), { code: 'INJECTED_REPLY_LOSS' });
+          }
+        }
+      }),
+      (error) => error.code === 'INJECTED_REPLY_LOSS'
+    );
+    const [committedMirror] = mirrorRepository.listRunMirrors(mirror.db);
+    assert.equal(committedMirror.status, 'success');
+    assert.equal(service.status().canExport, false);
+
+    const replay = await service.run({ operationIdentity: runIdentity });
+    assert.equal(replay.replayed, true);
+    assert.equal(replay.runId, committedMirror.id);
+    assert.equal(mirrorRepository.listRunMirrors(mirror.db).length, 1);
   });
 
   test('单据订单零候选只把对应成功候选组转人工并保留审计血缘', async () => {

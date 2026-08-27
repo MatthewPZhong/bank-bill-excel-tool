@@ -132,11 +132,12 @@ function loadValidatedRun(db, monthKey, runId) {
 }
 
 class DuplicateInboundMatchStore {
-  constructor(userDataDir) {
+  constructor(userDataDir, options = {}) {
     if (!userDataDir || typeof userDataDir !== 'string') {
       throw new TypeError('重复入金匹配 store 需要 userDataDir');
     }
     this.userDataDir = path.resolve(userDataDir);
+    this.operationReceipts = options.operationReceipts || null;
     runDataStore.moduleDir(this.userDataDir, MODULE);
   }
 
@@ -182,7 +183,14 @@ class DuplicateInboundMatchStore {
     return { deletedFiles };
   }
 
-  async createImportBundle({ monthKey, bank, document, writeDocumentRows }) {
+  async createImportBundle({
+    monthKey,
+    bank,
+    document,
+    writeDocumentRows,
+    beforeCommit = null,
+    operationReceipt = null
+  }) {
     if (!bank || !Array.isArray(bank.rows)) throw new TypeError('重复入金银行 rows 必须是数组');
     if (!document || typeof writeDocumentRows !== 'function') {
       throw new TypeError('重复入金单据流式写入函数必填');
@@ -257,11 +265,28 @@ class DuplicateInboundMatchStore {
         Number(documentStats.emptyBusinessOrderCount) || 0,
         importId
       );
+      if (beforeCommit) {
+        if (typeof beforeCommit !== 'function') throw new TypeError('Duplicate beforeCommit必须是函数');
+        await beforeCommit();
+      }
+      let receipt = null;
+      if (operationReceipt) {
+        if (!this.operationReceipts || typeof this.operationReceipts.insertOperationReceipt !== 'function') {
+          throw new Error('Duplicate import receipt writer未配置');
+        }
+        receipt = this.operationReceipts.insertOperationReceipt(db, {
+          ...operationReceipt,
+          monthKey,
+          importBundleId: importId,
+          sideRunId: null
+        }).receipt;
+      }
       db.exec('COMMIT');
-      return mapImport(
+      const imported = mapImport(
         db.prepare('SELECT * FROM duplicate_inbound_match_imports WHERE id = ?').get(importId),
         monthKey
       );
+      return receipt ? { ...imported, operationReceipt: receipt } : imported;
     } catch (error) {
       rollbackQuietly(db);
       throw error;
@@ -420,7 +445,9 @@ class DuplicateInboundMatchStore {
     }
   }
 
-  finishRun({ monthKey, runId, summary, mailRows, manualRows, auditRows }) {
+  finishRun({
+    monthKey, runId, summary, mailRows, manualRows, auditRows, operationReceipt = null
+  }) {
     const db = runDataStore.openExistingSideDb(
       runDataStore.sideDbPath(this.userDataDir, MODULE, monthKey)
     );
@@ -471,8 +498,20 @@ class DuplicateInboundMatchStore {
         WHERE id = ? AND status = 'running'
       `).run(JSON.stringify(summary || {}), Number(runId));
       if (updated.changes !== 1) throw new Error(`重复入金侧库 run 不存在或状态非法：${runId}`);
+      let receipt = null;
+      if (operationReceipt) {
+        if (!this.operationReceipts || typeof this.operationReceipts.insertOperationReceipt !== 'function') {
+          throw new Error('Duplicate run receipt writer未配置');
+        }
+        receipt = this.operationReceipts.insertOperationReceipt(db, {
+          ...operationReceipt,
+          monthKey,
+          sideRunId: Number(runId)
+        }).receipt;
+      }
       db.exec('COMMIT');
-      return this.getRun(monthKey, runId, db);
+      const run = this.getRun(monthKey, runId, db);
+      return receipt ? { ...run, operationReceipt: receipt } : run;
     } catch (error) {
       rollbackQuietly(db);
       throw error;
@@ -493,6 +532,19 @@ class DuplicateInboundMatchStore {
         WHERE id = ?
       `).run(error && error.message ? error.message : String(error || '运行失败'), Number(runId));
       return result.changes === 1;
+    } finally {
+      db.close();
+    }
+  }
+
+  deleteRun(monthKey, runId) {
+    if (!runDataStore.sideDbExists(this.userDataDir, MODULE, monthKey)) return false;
+    const db = runDataStore.openExistingSideDb(
+      runDataStore.sideDbPath(this.userDataDir, MODULE, monthKey)
+    );
+    try {
+      return db.prepare('DELETE FROM duplicate_inbound_match_runs WHERE id = ?')
+        .run(Number(runId)).changes === 1;
     } finally {
       db.close();
     }
@@ -570,10 +622,49 @@ class DuplicateInboundMatchStore {
       db.close();
     }
   }
+
+  getOperationReceipt(monthKey, actionKey, operationKey) {
+    if (!this.operationReceipts || !runDataStore.sideDbExists(this.userDataDir, MODULE, monthKey)) {
+      return null;
+    }
+    const db = runDataStore.openExistingSideDb(
+      runDataStore.sideDbPath(this.userDataDir, MODULE, monthKey)
+    );
+    try {
+      return this.operationReceipts.getOperationReceipt(db, actionKey, operationKey);
+    } finally {
+      db.close();
+    }
+  }
+
+  findOperationReceipt(actionKey, operationKey) {
+    if (!this.operationReceipts) return null;
+    const dir = runDataStore.moduleDir(this.userDataDir, MODULE);
+    const matches = [];
+    let entries;
+    try {
+      entries = fs.readdirSync(dir);
+    } catch (error) {
+      if (error && error.code === 'ENOENT') return null;
+      throw error;
+    }
+    for (const entry of entries) {
+      const match = /^month-(\d{4}-\d{2})\.sqlite$/.exec(entry);
+      if (!match) continue;
+      const receipt = this.getOperationReceipt(match[1], actionKey, operationKey);
+      if (receipt) matches.push(receipt);
+    }
+    if (matches.length > 1) {
+      const error = new Error('同一Duplicate operationKey出现在多个side DB');
+      error.code = 'DUPLICATE_RECEIPT_IDENTITY_CONFLICT';
+      throw error;
+    }
+    return matches[0] || null;
+  }
 }
 
-function createDuplicateInboundMatchStore(userDataDir) {
-  return new DuplicateInboundMatchStore(userDataDir);
+function createDuplicateInboundMatchStore(userDataDir, options) {
+  return new DuplicateInboundMatchStore(userDataDir, options);
 }
 
 module.exports = {

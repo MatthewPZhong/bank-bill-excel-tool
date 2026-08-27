@@ -3939,6 +3939,48 @@ function ensureDuplicateInboundMatchRunMetadataSupport(db) {
   if (!hasColumn(db, 'duplicate_inbound_match_run_mirrors', 'document_file_hash')) {
     db.exec("ALTER TABLE duplicate_inbound_match_run_mirrors ADD COLUMN document_file_hash TEXT NOT NULL DEFAULT ''");
   }
+  // v3.2.2 E07-B：历史镜像无法安全回填 operation owner，因此列保持 nullable；
+  // managed writer 对新增行强制非空，startup inspector 对历史 NULL identity fail closed。
+  if (!hasColumn(db, 'duplicate_inbound_match_run_mirrors', 'operation_key')) {
+    db.exec('ALTER TABLE duplicate_inbound_match_run_mirrors ADD COLUMN operation_key TEXT;');
+  }
+  if (!hasColumn(db, 'duplicate_inbound_match_run_mirrors', 'producer_task_run_id')) {
+    db.exec('ALTER TABLE duplicate_inbound_match_run_mirrors ADD COLUMN producer_task_run_id TEXT;');
+  }
+  if (!hasColumn(db, 'duplicate_inbound_match_run_mirrors', 'input_evidence_hash')) {
+    db.exec('ALTER TABLE duplicate_inbound_match_run_mirrors ADD COLUMN input_evidence_hash TEXT;');
+  }
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_duplicate_inbound_run_mirrors_operation
+      ON duplicate_inbound_match_run_mirrors(operation_key)
+      WHERE operation_key IS NOT NULL;
+
+    CREATE TABLE IF NOT EXISTS duplicate_inbound_match_recovery_audits (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_ref TEXT NOT NULL UNIQUE,
+      action_key TEXT NOT NULL CHECK (action_key IN ('duplicate:import', 'duplicate:run')),
+      operation_key TEXT NOT NULL,
+      producer_task_run_id TEXT NOT NULL,
+      inspection_evidence_hash TEXT NOT NULL CHECK (
+        length(inspection_evidence_hash) = 64
+        AND inspection_evidence_hash NOT GLOB '*[^0-9a-f]*'
+      ),
+      outcome TEXT NOT NULL CHECK (outcome IN ('committed', 'compensated')),
+      recovery_action TEXT NOT NULL CHECK (
+        recovery_action IN ('observe-committed', 'complete-mirror', 'compensate', 'expire')
+      ),
+      side_run_id INTEGER,
+      mirror_id INTEGER,
+      bounded_result_json TEXT NOT NULL,
+      result_hash TEXT NOT NULL CHECK (
+        length(result_hash) = 64 AND result_hash NOT GLOB '*[^0-9a-f]*'
+      ),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(action_key, operation_key, producer_task_run_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_duplicate_inbound_recovery_audits_operation
+      ON duplicate_inbound_match_recovery_audits(action_key, operation_key);
+  `);
 }
 
 module.exports = {
