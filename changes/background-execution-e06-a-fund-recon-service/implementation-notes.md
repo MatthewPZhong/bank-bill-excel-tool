@@ -48,7 +48,7 @@
 | 真实 native Worker | 两次真实 XLSX import 在同一 Service 内 revision 1→2；PersistentReservation replace/adopt完成；shutdown `leakedTransports=[]`、`errors=[]`、Governor lease/dependency=0 | init/ready、request/grant、adopted/ack、generation、资源释放与结果脱敏 |
 | service/inline golden | 相同 input/evidence 使用既有 `runReconciliation`，逐字段比较 result且行数守恒；既有资金轮次/全部场景引擎 `1012/1012 PASS` | R1→R5/M2M编排、first-match/no-op、金额币种、候选消费、标黄字段 |
 | Platform 回归 | registry/action binding/protocol/adapters/packaged request/E05-C `100/100 PASS` | 未放宽Platform v1、122-key inventory、ServiceHost correlation与既有Worker |
-| 最终组合回归 | E06-A focused + runtime inventory + Platform targets + E05-C `133/133 PASS` | 最终 runtime 注册改动与既有静态 inventory 同步且无回归 |
+| 最终组合回归 | exact code head `490a2ffd2554eed3b7b4b4c688c81283da2c8dfd` 已重跑 E06-A focused + runtime inventory + Platform targets + E05-C，`134/134 PASS` | 最终 runtime 注册改动与既有静态 inventory 同步且无回归 |
 | invalidation/export focused | signature drift、derivation缺失/过期、database identity、invalidate adopt ACK loss均fail closed | scenario/link/date/派生数据 stale result不可导出 |
 | artifact staging focused | `6/6 PASS`：lexical/physical symlink escape、业务输出与manifest dangling leaf symlink、path alias、pre-existing target、writer fault cleanup、单manifest hash、退款marker settlement | `lstat` 拒绝任何既存 leaf entry（含 dangling symlink）；all-or-none、Main Publisher/settlement ownership、路径安全、低RSS hash |
 | state footprint/十轮 | 共享引用去重、35% headroom、4KiB page、256MiB边界与连续十轮当前-state替换通过 | 证明 estimator 不累计历史 graph；**不是**真实进程 RSS/大样本证明 |
