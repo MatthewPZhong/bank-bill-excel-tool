@@ -108,6 +108,16 @@ function getDatasetEvidence(db, yearMonth) {
   return db.prepare('SELECT * FROM bank_bu_dataset_evidence WHERE year_month = ?').get(yearMonth) || null;
 }
 
+function assertDatasetCurrent(db, yearMonth, inputEvidenceHash) {
+  const dataset = getDatasetEvidence(db, yearMonth);
+  if (!dataset || dataset.dataset_hash !== inputEvidenceHash) {
+    const error = new Error('BankBU run输入dataset在算法后发生变化');
+    error.code = 'BANK_BU_RUN_DATASET_CHANGED';
+    throw error;
+  }
+  return dataset;
+}
+
 function getCommittedRunByOperation(db, operationIdentity, yearMonth, inputEvidenceHash) {
   const receipt = receiptRepository.getOperationReceipt(
     db, operationIdentity.actionKey, operationIdentity.operationKey
@@ -141,6 +151,7 @@ function commitRun(options) {
   }
   db.exec('BEGIN IMMEDIATE');
   try {
+    assertDatasetCurrent(db, yearMonth, inputEvidenceHash);
     const lockedReplay = getCommittedRunByOperation(
       db, operationIdentity, yearMonth, inputEvidenceHash
     );
@@ -187,6 +198,7 @@ function commitRun(options) {
 
 module.exports = {
   commitRun,
+  assertDatasetCurrent,
   getDatasetEvidence,
   getCommittedRunByOperation,
   importCommittedDataset,

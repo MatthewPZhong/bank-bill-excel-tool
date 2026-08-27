@@ -244,10 +244,46 @@ test('run side receipt先提交；exact replay不新增side run', async () => {
     });
     assert.equal(replay.replay, true);
     assert.equal(replay.sideRunId, first.sideRunId);
-    assert.equal(criticalCount, 1, 'committed replay不再进入critical/算法路径');
+    assert.equal(criticalCount, 2, '每次Supervisor execution均重做critical gate，replay不重跑算法');
     const side = runDataStore.openSideDb(dir, runDataStore.MODULE_BANK_BU, '2026-08');
     assert.equal(side.prepare('SELECT COUNT(*) AS count FROM bank_bu_recon_runs').get().count, 1);
     assert.equal(side.prepare("SELECT COUNT(*) AS count FROM bank_bu_operation_receipts WHERE action_key='bank-bu:run'").get().count, 1);
+    side.close();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('run算法read snapshot后同月dataset变化会在side写事务内失败关闭', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bank-bu-e08-run-race-'));
+  try {
+    importMonth(dir);
+    const pendingRows = [pending('R-NEW', 'BU-NEW', 20)];
+    const bankRows = [bank('R-NEW', 'BU-NEW', 20)];
+    const evidence = buildImportEvidence({
+      yearMonth: '2026-08', pendingFileSha256: '3'.repeat(64),
+      bankFileSha256: '4'.repeat(64), pendingRows, bankRows
+    });
+    await assert.rejects(executeRun({ userDataDir: dir, yearMonth: '2026-08' }, {
+      operationIdentity: {
+        actionKey: 'bank-bu:run', operationKey: 'bank-bu/run/dataset-race',
+        producerTaskRunId: 'task-bank-bu-run-dataset-race'
+      },
+      async awaitCritical() {
+        importCommittedDataset({
+          userDataDir: dir, yearMonth: '2026-08', pendingRows, bankRows, evidence,
+          operationIdentity: {
+            actionKey: 'bank-bu:import-month', operationKey: 'bank-bu/import/dataset-race',
+            producerTaskRunId: 'task-bank-bu-import-dataset-race'
+          }
+        });
+      }
+    }), (error) => error.code === 'BANK_BU_RUN_DATASET_CHANGED');
+    const side = runDataStore.openSideDb(dir, runDataStore.MODULE_BANK_BU, '2026-08');
+    assert.equal(side.prepare('SELECT COUNT(*) AS count FROM bank_bu_recon_runs').get().count, 0);
+    assert.equal(side.prepare(`
+      SELECT recon_id FROM bank_bu_recon_pending_imports WHERE year_month='2026-08'
+    `).get().recon_id, 'R-NEW');
     side.close();
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

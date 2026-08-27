@@ -23,6 +23,7 @@ const {
   ensureBankBuReconRunsSideDbPath,
   ensureBankBuReconRunIdentitySupport
 } = require('../../src/backend/database/migrations');
+const runDataStore = require('../../src/backend/run-data-store');
 const { executeImportMonth } = require('../../src/main-process/bank-bu-worker/import-operation');
 const { executeRun } = require('../../src/main-process/bank-bu-worker/run-operation');
 const { executeExportSingle, executeExportAggregate } = require(
@@ -109,6 +110,97 @@ async function importAndRun({ dir, mainDb, yearMonth, suffix, reconId, operation
     async awaitCritical() {}
   });
   return { files, imported, run, criticalEvidence };
+}
+
+async function runExportSnapshotRaceProbes() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bank-bu-e08-export-race-'));
+  const mainPath = path.join(dir, 'tool-data.sqlite');
+  const mainDb = openMain(mainPath);
+  try {
+    const singleBase = await importAndRun({
+      dir, mainDb, yearMonth: '2026-08', suffix: 'single-old',
+      reconId: 'SINGLE-OLD', operationNumber: 101
+    });
+    const singleMirror = completeMirrorFromCommittedSide({
+      mainDb, userDataDir: dir, criticalEvidence: singleBase.criticalEvidence
+    });
+    const singleNewFiles = makeFiles(
+      dir, 'single-new', 'SINGLE-NEW', 'BU-NEW', 'BU-NEW'
+    );
+    const singlePath = path.join(dir, 'staging', 'single-race.xlsx');
+    let singleWriterCommitted = false;
+    await assert.rejects(executeExportSingle({
+      userDataDir: dir,
+      mainDatabasePath: mainPath,
+      stagingRoot: path.join(dir, 'staging'),
+      stagingPath: singlePath,
+      runId: singleMirror.mirror.mirrorId
+    }, {
+      async onManagedSnapshot(identity) {
+        assert.equal(identity.yearMonth, '2026-08');
+        await executeImportMonth({
+          userDataDir: dir, yearMonth: '2026-08', ...singleNewFiles
+        }, {
+          operationIdentity: {
+            actionKey: 'bank-bu:import-month', operationKey: 'bank-bu/import/race-single',
+            producerTaskRunId: 'task-import-race-single'
+          },
+          async awaitCritical() {}
+        });
+        singleWriterCommitted = true;
+      }
+    }), (error) => error.code === 'BANK_BU_EXPORT_SNAPSHOT_STALE');
+    check(singleWriterCommitted, 'single snapshot持有时第二WAL连接成功COMMIT新import');
+    check(!fs.existsSync(singlePath), 'single snapshot身份变化后删除staging且不返回错配artifact');
+    const singleSide = runDataStore.openSideDb(
+      dir, runDataStore.MODULE_BANK_BU, '2026-08'
+    );
+    try {
+      check(singleSide.prepare(`
+        SELECT recon_id FROM bank_bu_recon_pending_imports WHERE year_month='2026-08'
+      `).get().recon_id === 'SINGLE-NEW', 'single并发probe确认side当前为NEW dataset');
+    } finally {
+      singleSide.close();
+    }
+
+    const aggregateBase = await importAndRun({
+      dir, mainDb, yearMonth: '2026-09', suffix: 'aggregate-old',
+      reconId: 'AGGREGATE-OLD', operationNumber: 102
+    });
+    completeMirrorFromCommittedSide({
+      mainDb, userDataDir: dir, criticalEvidence: aggregateBase.criticalEvidence
+    });
+    const aggregateNewFiles = makeFiles(
+      dir, 'aggregate-new', 'AGGREGATE-NEW', 'BU-NEW', 'BU-NEW'
+    );
+    const aggregatePath = path.join(dir, 'staging', 'aggregate-race.xlsx');
+    let aggregateWriterCommitted = false;
+    await assert.rejects(executeExportAggregate({
+      userDataDir: dir,
+      mainDatabasePath: mainPath,
+      stagingRoot: path.join(dir, 'staging'),
+      stagingPath: aggregatePath
+    }, {
+      async onManagedSnapshot(identity) {
+        if (identity.yearMonth !== '2026-09' || aggregateWriterCommitted) return;
+        await executeImportMonth({
+          userDataDir: dir, yearMonth: '2026-09', ...aggregateNewFiles
+        }, {
+          operationIdentity: {
+            actionKey: 'bank-bu:import-month', operationKey: 'bank-bu/import/race-aggregate',
+            producerTaskRunId: 'task-import-race-aggregate'
+          },
+          async awaitCritical() {}
+        });
+        aggregateWriterCommitted = true;
+      }
+    }), (error) => error.code === 'BANK_BU_EXPORT_SNAPSHOT_STALE');
+    check(aggregateWriterCommitted, 'aggregate逐月snapshot时第二WAL连接成功COMMIT新import');
+    check(!fs.existsSync(aggregatePath), 'aggregate任一included identity变化后整artifact删除');
+  } finally {
+    mainDb.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 async function run() {
@@ -255,6 +347,8 @@ async function run() {
     try { mainDb.close(); } catch (_error) { /* cleanup */ }
     fs.rmSync(dir, { recursive: true, force: true });
   }
+
+  await runExportSnapshotRaceProbes();
 
   const total = passed + failures.length;
   console.log(`==== ${passed}/${total} PASS ====`);

@@ -52,3 +52,40 @@
 | operation lock归属 | 已关闭：Main注入唯一锁，coordinator单callback覆盖prepare→side→CAS | coordinator端到端锁测试 |
 
 唯一保留BLOCK是Windows packaged/真实财务样本/人工恢复以及live FilePlan validator、Publisher journal、Task settle门禁；因此四个policy继续固定`production=false / legacy / 0`。
+
+## Reviewer P1 Remediation Preflight
+
+### Task Brief
+
+- Goal：修复 mutation Worker 与现有 Supervisor 的 registered-unit 协议断层，以及 export managed identity 校验与业务读取之间的 WAL TOCTOU。
+- Context：Reviewer 真实 Supervisor/worker_threads/SQLite 与双连接 WAL 复现分别得到 `PROTOCOL_UNKNOWN_UNIT` 和“旧 runId + 新 dataset Excel”。
+- Constraints：只做 E08-A 最小修复；复用现有 singleton unit / worker-durable，不新造 job-level durable 平台；不接 live、不扩 E08-B、不改变 frozen policy 或资金算法。
+- Done when：真实 Supervisor 能按 `job:start → unit:start → critical → side receipt → Main CAS settle → unit:done → job:done` 收口；single/aggregate 的 managed identity 与完整数据来自同一 side read snapshot，artifact 返回前身份变化会删 staging 并失败关闭。
+
+### 已确认事实
+
+| 事实 | 证据 | 对方案的约束 |
+| --- | --- | --- |
+| Supervisor 的 durable critical/receipt/unit done 都先按 `unitId` 查 registered unit | `background-execution/supervisor.js#unitForMessage/processMessage` | mutation host必须等待唯一`unit:start`并在所有unit事件携带同一unitId |
+| Supervisor ACK body是`intentId + fileOperationKey`，不是yearMonth | `supervisor.js` critical ready分支 | Worker ACK校验必须绑定unit/operation key，不能要求私有yearMonth字段 |
+| operation context已有taskRunId，但Supervisor durable callback只给file-batch传taskRunId | `supervisor.js`四个coordinator调用 | 最小修正共享取值，operation/file-batch均沿context taskRunId，不从Worker payload猜 |
+| 现Main coordinator锁只存在于单次callback，尚无Supervisor四方法adapter | `bank-bu-worker/main-coordinator.js` | adapter须让同一个锁跨prepare/ACK、side COMMIT、Main CAS，并在失败检查后有界释放 |
+| managed export身份检查和`loadExportDataByRun`各自open side DB | `bank-bu-worker/export-operation.js`、`bank-bu-recon-run-data.js` | 不能只做artifact后复核；算法读取本身必须与首次identity处于同一SQLite snapshot |
+
+### Unknowns Register
+
+| 未知 | 类型 | 影响 | 可逆性 | 当前证据 | 处理 | 最便宜验证方式 | 当前决定 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| singleton unit如何兼容未来role units | 协议边界 | 高 | 容易 | E08-A明确single，E08-B另PR | PROBE | 真实Supervisor只注册一个`operation:000000`，断言无role child | 当前只认唯一operation unit；不实现role planner/parser |
+| 锁如何跨Supervisor分段callback | 生命周期 | 高 | 一般 | Supervisor依次await prepare/observe/settle | PROBE | deferred release gate +真实Worker端到端 | Main coordinator维护有界in-flight session，settle/inspection终态释放 |
+| WAL snapshot后并发import如何处理 | 资金一致性 | 高 | 一般 | 同连接read transaction可固定旧视图，但artifact期间状态仍可变 | PROBE | 两连接在snapshot内提交新import | identity校验+算法同snapshot；artifact后fresh revalidation，不一致删artifact并失败 |
+| aggregate是否需要跨月大锁 | 并发范围 | 高 | 困难 | 用户明确禁止跨月/全模块扩锁 | ASSUME | 每月独立snapshot+最终全选择集复核 | 不加锁；任一included identity或Main latest集合变化即整artifact失败 |
+
+### 风险优先计划
+
+| 顺序 | 步骤 | 消除的未知/保护的不变量 | 成功证据 | 失败影响 | 回滚/收缩 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | mutation host改singleton unit并补Supervisor operation taskRunId透传 | 平台unit ownership与task identity | 真Supervisor不再unknown unit且prepare=1 | 阻断mutation修复 | 保持production false，撤回host改动 |
+| 2 | Main coordinator增加Supervisor adapter与跨阶段锁session | preimage/intent/side/Main/dual identity顺序 | 真实side/main DB与callback次序断言 | partial/Hold不可判 | 仅保留Inspector、不启用mutation |
+| 3 | export改同连接read snapshot及artifact后fresh复核 | runId/dataset/Excel一致 | single/aggregate两连接WAL并发测试 | 资金输出可能错配 | staging失败关闭、零发布 |
+| 4 | kill/reply-loss/Hold与全套回归 | 恢复/取消/旧路径不漂移 | Supervisor+SQLite、parity、smoke、lint/check | 保留人工BLOCK | 不改live/production |

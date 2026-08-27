@@ -8,6 +8,7 @@ const { executeImportMonth } = require('./import-operation');
 const { executeRun } = require('./run-operation');
 const { executeExportSingle, executeExportAggregate } = require('./export-operation');
 const { BANK_BU_ACTIONS } = require('./policies');
+const { BANK_BU_SINGLETON_UNIT_ID } = require('./singleton-unit');
 
 const EXECUTORS = Object.freeze({
   [BANK_BU_ACTIONS.IMPORT_MONTH]: executeImportMonth,
@@ -15,6 +16,7 @@ const EXECUTORS = Object.freeze({
   [BANK_BU_ACTIONS.EXPORT_SINGLE]: executeExportSingle,
   [BANK_BU_ACTIONS.EXPORT_AGGREGATE]: executeExportAggregate
 });
+const MUTATION_ACTIONS = new Set([BANK_BU_ACTIONS.IMPORT_MONTH, BANK_BU_ACTIONS.RUN]);
 
 function startBankBuWorker(port, options = {}) {
   if (!port || typeof port.on !== 'function' || typeof port.postMessage !== 'function') {
@@ -27,6 +29,8 @@ function startBankBuWorker(port, options = {}) {
   let critical = null;
   let terminal = false;
   let protectedPhase = false;
+  let activeUnitId = null;
+  let unitTerminal = false;
 
   function assertStartIdentity(envelope) {
     if (!startEnvelope) return;
@@ -40,11 +44,16 @@ function startBankBuWorker(port, options = {}) {
 
   function fail(error) {
     if (!emit || terminal) throw error;
+    const safeError = toProtocolError(error, 'BANK_BU_JOB_FAILED');
+    if (activeUnitId && !unitTerminal) {
+      unitTerminal = true;
+      emit('unit:error', { error: safeError }, activeUnitId);
+    }
     terminal = true;
-    emit('job:error', { error: toProtocolError(error, 'BANK_BU_JOB_FAILED') });
+    emit('job:error', { error: safeError });
   }
 
-  function awaitCritical(body) {
+  function awaitCritical(body, unitId) {
     if (critical) throw new Error('BankBU重复进入critical');
     if (abortController && abortController.signal.aborted) {
       const error = new Error('BankBU在critical前已取消');
@@ -52,12 +61,12 @@ function startBankBuWorker(port, options = {}) {
       return Promise.reject(error);
     }
     return new Promise((resolve, reject) => {
-      critical = { body, resolve, reject };
-      emit('critical:ready', { critical: body });
+      critical = { body, resolve, reject, unitId };
+      emit('critical:ready', { critical: body }, unitId);
     });
   }
 
-  async function runJob(envelope) {
+  async function executeEnvelope(envelope, unitId = null) {
     const execute = options.executors && options.executors[envelope.actionKey] || EXECUTORS[envelope.actionKey];
     if (typeof execute !== 'function') throw new Error(`BankBU action未注册：${envelope.actionKey}`);
     const result = await execute(envelope.payload.input, {
@@ -68,10 +77,14 @@ function startBankBuWorker(port, options = {}) {
         producerTaskRunId: envelope.context.value.taskRunId
       }),
       awaitCritical: [BANK_BU_ACTIONS.IMPORT_MONTH, BANK_BU_ACTIONS.RUN].includes(envelope.actionKey)
-        ? awaitCritical
+        ? (body) => awaitCritical(body, unitId)
         : undefined
     });
-    if (result.receipt) emit('commit:receipt', { receipt: result.receipt });
+    if (result.receipt) emit('commit:receipt', { receipt: result.receipt }, unitId);
+    if (unitId) {
+      unitTerminal = true;
+      emit('unit:done', { result }, unitId);
+    }
     terminal = true;
     emit('job:done', { result });
   }
@@ -88,15 +101,27 @@ function startBankBuWorker(port, options = {}) {
         startEnvelope = envelope;
         emit = createCanonicalEventEmitter(envelope, (event) => port.postMessage(event));
         abortController = new AbortController();
-        Promise.resolve().then(() => runJob(envelope)).catch(fail);
+        if (!MUTATION_ACTIONS.has(envelope.actionKey)) {
+          Promise.resolve().then(() => executeEnvelope(envelope)).catch(fail);
+        }
         return;
       }
       if (!startEnvelope) throw new Error('BankBU Worker必须先收到job:start');
       assertStartIdentity(envelope);
+      if (envelope.operation === 'unit:start') {
+        if (!MUTATION_ACTIONS.has(envelope.actionKey) || activeUnitId ||
+            envelope.unitId !== BANK_BU_SINGLETON_UNIT_ID) {
+          throw new Error('BankBU mutation必须使用唯一singleton operation unit');
+        }
+        activeUnitId = envelope.unitId;
+        Promise.resolve().then(() => executeEnvelope(envelope, activeUnitId)).catch(fail);
+        return;
+      }
       if (envelope.operation === 'critical:ack') {
         if (!critical || protectedPhase || !envelope.payload.critical ||
             typeof envelope.payload.critical.intentId !== 'string' ||
-            envelope.payload.critical.yearMonth !== critical.body.yearMonth) {
+            envelope.unitId !== critical.unitId ||
+            envelope.payload.critical.fileOperationKey !== startEnvelope.operationKey) {
           throw new Error('BankBU critical ACK identity非法');
         }
         protectedPhase = true;
@@ -106,7 +131,9 @@ function startBankBuWorker(port, options = {}) {
         return;
       }
       if (envelope.operation === 'critical:reject') {
-        if (!critical || protectedPhase) throw new Error('BankBU critical reject状态非法');
+        if (!critical || protectedPhase || envelope.unitId !== critical.unitId) {
+          throw new Error('BankBU critical reject状态非法');
+        }
         const error = new Error('BankBU Main拒绝进入critical');
         error.code = 'BANK_BU_CRITICAL_REJECTED';
         const reject = critical.reject;
