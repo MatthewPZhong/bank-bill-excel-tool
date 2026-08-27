@@ -1,0 +1,175 @@
+'use strict';
+
+const { randomUUID } = require('node:crypto');
+const { isDeepStrictEqual } = require('node:util');
+
+const {
+  canonicalJsonSnapshot,
+  canonicalSha256
+} = require('../background-execution/canonical-json-v1');
+const {
+  STATEMENT_RESOURCE_CONTRACT,
+  createStatementInteractionPromptDto,
+  createStatementTokenHandleDto
+} = require('./contracts');
+const {
+  estimateStatementPendingInteractionFootprint
+} = require('./state-footprint');
+
+class StatementTokenStoreError extends Error {
+  constructor(code, message) {
+    super(message);
+    this.name = 'StatementTokenStoreError';
+    this.code = code;
+  }
+}
+
+function createStatementTokenStore(options = {}) {
+  const now = typeof options.now === 'function' ? options.now : Date.now;
+  const createId = typeof options.createId === 'function' ? options.createId : randomUUID;
+  const ttlMs = options.ttlMs || STATEMENT_RESOURCE_CONTRACT.tokenTtlMs;
+  const budgetBytes = options.budgetBytes || STATEMENT_RESOURCE_CONTRACT.pendingInteractionBudgetBytes;
+  const maxOutstanding = options.maxOutstanding || STATEMENT_RESOURCE_CONTRACT.tokenMaxOutstanding;
+  const records = new Map();
+  let totalBytes = 0;
+
+  function fail(code, message) {
+    throw new StatementTokenStoreError(code, message);
+  }
+
+  function prepare(input) {
+    if (records.size >= maxOutstanding) fail('STATEMENT_TOKEN_LIMIT_EXCEEDED', 'Statement token limit exceeded');
+    const privateContext = canonicalJsonSnapshot(input.privateContext);
+    const footprint = estimateStatementPendingInteractionFootprint(privateContext, { budgetBytes });
+    if (totalBytes + footprint.estimatedBytes > budgetBytes) {
+      fail('STATEMENT_TOKEN_BUDGET_EXCEEDED', 'Statement pending-interaction budget exceeded');
+    }
+    const tokenId = createId();
+    const expiresAt = now() + ttlMs;
+    const allowedChoiceDigest = canonicalSha256(input.allowedChoices);
+    return Object.freeze({
+      tokenId,
+      purpose: input.purpose,
+      serviceGeneration: input.serviceGeneration,
+      sessionKey: input.sessionKey,
+      sessionRevision: input.sessionRevision,
+      expiresAt,
+      allowedChoiceDigest,
+      privateContext,
+      prompt: createStatementInteractionPromptDto(input.purpose, input.prompt),
+      footprint
+    });
+  }
+
+  function insertPrivate(draft, grant) {
+    if (records.has(draft.tokenId) || records.size >= maxOutstanding) {
+      fail('STATEMENT_TOKEN_LIMIT_EXCEEDED', 'Statement token cannot be inserted');
+    }
+    const handle = createStatementTokenHandleDto({
+      tokenId: draft.tokenId,
+      purpose: draft.purpose,
+      serviceGeneration: draft.serviceGeneration,
+      sessionKey: draft.sessionKey,
+      sessionRevision: draft.sessionRevision,
+      expiresAt: draft.expiresAt,
+      allowedChoiceDigest: draft.allowedChoiceDigest,
+      reservationId: grant.reservationId
+    });
+    const record = {
+      handle,
+      grantId: grant.grantId,
+      requestId: grant.requestId,
+      owner: grant.owner,
+      ownerJobRef: grant.ownerJobRef,
+      privateContext: draft.privateContext,
+      prompt: draft.prompt,
+      bytes: draft.footprint.estimatedBytes,
+      state: 'inserted'
+    };
+    records.set(handle.tokenId, record);
+    totalBytes += record.bytes;
+    return record;
+  }
+
+  function markAdopted(tokenId, identity) {
+    const record = records.get(tokenId);
+    if (!record || record.state !== 'inserted' || record.grantId !== identity.grantId ||
+        record.handle.reservationId !== identity.reservationId) {
+      fail('STATEMENT_TOKEN_ADOPT_ACK_STALE', 'Token adopt ack does not match private insert');
+    }
+    record.state = 'published';
+    return record;
+  }
+
+  function inspect(tokenId) {
+    return records.get(tokenId) || null;
+  }
+
+  function beginConsume(publicToken, expected) {
+    const token = canonicalJsonSnapshot(publicToken);
+    const record = records.get(token.tokenId);
+    if (!record || record.state !== 'published') fail('STATEMENT_TOKEN_STALE', 'Statement token is stale');
+    const handle = record.handle;
+    if (now() >= handle.expiresAt) fail('STATEMENT_TOKEN_EXPIRED', 'Statement token expired');
+    for (const key of ['purpose', 'serviceGeneration', 'sessionRevision', 'expiresAt', 'allowedChoiceDigest']) {
+      if (token[key] !== handle[key]) fail('STATEMENT_TOKEN_TAMPERED', `Statement token ${key} mismatch`);
+    }
+    if (expected.serviceGeneration !== handle.serviceGeneration ||
+        expected.sessionRevision !== handle.sessionRevision ||
+        expected.purpose !== handle.purpose || expected.sessionKey !== handle.sessionKey ||
+        !isDeepStrictEqual(expected.evidence, record.privateContext.evidence)) {
+      fail('STATEMENT_TOKEN_STALE', 'Statement token evidence is stale');
+    }
+    if (canonicalSha256(expected.choiceDomain) !== handle.allowedChoiceDigest) {
+      fail('STATEMENT_TOKEN_CHOICE_DOMAIN_STALE', 'Statement token choice domain changed');
+    }
+    record.state = 'consuming';
+    return record;
+  }
+
+  function remove(tokenId) {
+    const record = records.get(tokenId);
+    if (!record) return null;
+    records.delete(tokenId);
+    totalBytes -= record.bytes;
+    record.state = 'released';
+    return record;
+  }
+
+  function markReleasing(tokenId) {
+    const record = records.get(tokenId);
+    if (!record || !['published', 'consuming', 'inserted'].includes(record.state)) {
+      fail('STATEMENT_TOKEN_STALE', 'Statement token cannot be released');
+    }
+    record.state = 'releasing';
+    return record;
+  }
+
+  function listStatus() {
+    return [...records.values()]
+      .filter((record) => record.state === 'published')
+      .map((record) => ({ purpose: record.handle.purpose, expiresAt: record.handle.expiresAt }));
+  }
+
+  function listRecords() {
+    return [...records.values()];
+  }
+
+  return Object.freeze({
+    beginConsume,
+    insertPrivate,
+    inspect,
+    listStatus,
+    listRecords,
+    markAdopted,
+    markReleasing,
+    prepare,
+    remove,
+    snapshot: () => Object.freeze({ count: records.size, totalBytes })
+  });
+}
+
+module.exports = {
+  StatementTokenStoreError,
+  createStatementTokenStore
+};

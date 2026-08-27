@@ -25,6 +25,7 @@ const TEMPLATE_KEYS = Object.freeze([
   'billSplitMerge',
   'dateParseOrder'
 ]);
+const TEMPLATE_INTERACTION_KEYS = Object.freeze(['bigAccounts', 'fixedAssignments']);
 const MAX_IMPORT_INPUT_BYTES = 1024 * 1024;
 const MAX_IMPORT_SOURCES = 1024;
 const MAX_TEMPLATE_CATALOG_ENTRIES = 1024;
@@ -114,7 +115,8 @@ function assertNoRetainedBusinessState(value, label) {
 
 function createStatementTemplateSnapshot(input) {
   const value = canonicalJsonSnapshot(input, { maxBytes: MAX_IMPORT_INPUT_BYTES });
-  const record = exactRecord(value, TEMPLATE_KEYS, 'StatementTemplateSnapshot');
+  const interactionKeys = TEMPLATE_INTERACTION_KEYS.filter((key) => Object.hasOwn(value, key));
+  const record = exactRecord(value, TEMPLATE_KEYS.concat(interactionKeys), 'StatementTemplateSnapshot');
   assertNoRetainedBusinessState(value, 'StatementTemplateSnapshot');
   const templateId = templateIdentity(record.templateId, 'templateId');
   const templateName = boundedText(record.templateName, 'templateName', 512);
@@ -134,7 +136,7 @@ function createStatementTemplateSnapshot(input) {
   if (orderedTargetFields.length === 0) {
     fail('STATEMENT_IMPORT_TEMPLATE_INVALID', 'orderedTargetFields must not be empty');
   }
-  return canonicalJsonSnapshot({
+  const result = {
     templateId,
     templateName,
     expectedSourceHeaders,
@@ -159,7 +161,20 @@ function createStatementTemplateSnapshot(input) {
       { objectOnly: true }
     ),
     dateParseOrder: boundedText(record.dateParseOrder, 'dateParseOrder', 32)
-  });
+  };
+  if (interactionKeys.includes('bigAccounts')) {
+    if (!Array.isArray(record.bigAccounts) || record.bigAccounts.length > 1024) {
+      fail('STATEMENT_IMPORT_CONFIG_INVALID', 'bigAccounts must be a bounded array');
+    }
+    result.bigAccounts = canonicalJsonSnapshot(record.bigAccounts);
+  }
+  if (interactionKeys.includes('fixedAssignments')) {
+    if (!Array.isArray(record.fixedAssignments) || record.fixedAssignments.length > 1024) {
+      fail('STATEMENT_IMPORT_CONFIG_INVALID', 'fixedAssignments must be a bounded array');
+    }
+    result.fixedAssignments = canonicalJsonSnapshot(record.fixedAssignments);
+  }
+  return canonicalJsonSnapshot(result);
 }
 
 function createStatementTemplateEvidence(snapshot) {

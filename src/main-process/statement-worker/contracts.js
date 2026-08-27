@@ -651,6 +651,10 @@ function createPurposePromptDto(promptPurpose, input) {
   fail('STATEMENT_TOKEN_PURPOSE_INVALID', 'Unsupported Statement interaction purpose');
 }
 
+function createStatementInteractionPromptDto(promptPurpose, input) {
+  return canonicalJsonSnapshot(createPurposePromptDto(promptPurpose, input));
+}
+
 function createStatementTokenHandleDto(input) {
   const record = ownDataRecord(input, TOKEN_HANDLE_KEYS, 'StatementTokenHandleDto');
   const snapshot = {
@@ -875,11 +879,12 @@ function createStatementResultValidator(actionKey) {
       const normalized = createStatementInteractionRequiredResult(value, actionKey);
       return canonicalizeJson(normalized) === canonicalizeJson(value);
     } catch (_error) {
-      if (actionKey !== 'statement:import') return false;
+      if (!['statement:import', 'statement:resolve-big-account'].includes(actionKey)) return false;
       try {
         createStatementImportResult(value);
         return true;
       } catch (_importError) {
+        if (actionKey !== 'statement:import') return false;
         try {
           createStatementStatusResult(value);
           return true;
@@ -1012,6 +1017,7 @@ module.exports = {
   createStatementFinanceSafeValueDelegate,
   createStatementImportResult,
   createStatementInteractionRequiredResult,
+  createStatementInteractionPromptDto,
   createStatementPublicInteractionDto,
   createStatementResultValidator,
   createStatementStatusDto,
