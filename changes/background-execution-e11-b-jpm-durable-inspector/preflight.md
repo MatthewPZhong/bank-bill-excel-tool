@@ -54,3 +54,19 @@
 | 是否需要泛化所有 prepared transition replay | PROBE | 不需要；body-divergent resume 只保留给 Main 已 reserve 的 committed Intent `mark-committed` / `close`，Task/Hold 继续 exact compare |
 
 BLOCK：无。Reviewer 已给出冻结边界内的唯一真实触发窗口；production enable、Windows packaged WAL 与真实 JPM 样本仍保留人工 gate。
+
+## Review remediation：atomic threshold anchor / 71c1 legacy gap
+
+- Goal：确保任何 Task/Hold prepared owner 之前已有完整、可 exact resume 的 threshold observation anchor，并让 `71c1ac1066613f2009b4dfcd5e43dc1d2a735b65` 可能留下的 incomplete gap 在新 Inspector 前确定性收口。
+- Context：第三轮无 Hold 顺序为 Task owner → Hold owner → attempt → observation owner → control transaction；已有 Hold + running Task 也先 reserve Task；任一早期独立提交后 crash 都可能留下 owner-without-anchor 或 unbound attempt。
+- Constraints：普通 changed-body requestKey conflict 不变；body-divergent resume 仍只允许 committed Intent `mark-committed` / `close`；不得猜旧 observation payload、不得在 gap 未处理时运行 Inspector、不得错误关闭 ACKed Intent。
+- Done when：新路径以单事务持久化 attempt + bound requestKey + observation owner，再 reserve Task/Hold；旧 Task-only、Task+Hold、Task+Hold+unbound-attempt 只在 exact transition body 可证明时同事务清理；committed/not-committed 均二启收敛、三启零动作。
+
+| 未知 | 分类 | 证据与决定 |
+| --- | --- | --- |
+| attempt 与 observation owner 能否复用旧两段 API 达到原子性 | PROBE | 不能；旧 attempt repository 会先独立提交。新增 Main-internal `reserveObservationAnchor`，在一个短 `BEGIN IMMEDIATE` 内分配 ordinal、写已绑定 attempt 与 owner，owner 故障整体 rollback |
+| 无 anchor 的旧 owner 是否能恢复原 threshold observation | PROBE | 不能；safePayload/event identity 不存在权威持久来源，禁止重建或猜测。只删除 exact 可证明的 incomplete Task/Hold owner 与 unbound attempt，再运行新 Inspector |
+| 哪些残留形状属于当前版本可达迁移集合 | PROBE | 无 active Hold 严格限定 Task-only、Task+Hold、Task+Hold+unbound-attempt；已有 Hold 限定 Task-only、Task+unbound-attempt（以及无 Task 的 unbound attempt）；Hold-without-Task、多条 owner/attempt、body 不兼容均 fail closed，不扩成通用修复器 |
+| cleanup 会否提前改变资金 authority | PROBE | cleanup 只删 `status=prepared` 的 incomplete control owners/attempt，不改 Task/Hold/Intent/ADM/receipt；Inspector 入口测试断言 Task running、Hold 0、Intent acked 且旧 gap 已清零 |
+
+BLOCK：无。真实临时 SQLite 的 17 个新增 crash/migration case 已覆盖无/已有 Hold 与两种 definitive outcome；production/live/export/VCC 与资金人工门禁保持不变。

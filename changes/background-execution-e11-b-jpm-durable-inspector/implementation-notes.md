@@ -6,6 +6,7 @@
 - Review remediation 起点：`6b239559c8e219f32651abd0514a1d67ef30f976`。
 - 第二轮 Review remediation 起点：`74bb75468c3d1e30fe889a3ca751168ce48e8547`。
 - 第三轮 Review remediation 起点：`615cf64992917221be0890a7270518c98fe57ffd`。
+- 第四轮 Review remediation 起点：`71c1ac1066613f2009b4dfcd5e43dc1d2a735b65`。
 - Frozen contract：v3.2.4 Spec/TechDoc、Platform critical/recovery contract、E11-A 与 E11-P0 notes。
 - Preflight：[preflight.md](./preflight.md)。
 
@@ -29,6 +30,8 @@
 | JPM recovery plan 读取模块私有 Task state 投影 | `INSPECTOR_UNAVAILABLE` Hold 的既有 Task 可能是 ordinary running，也可能已 interrupted，不能仅凭 active Hold 猜状态 | threshold 新建 Hold 时把必要 interruption 与 observation/Hold 同 control transaction；重启按 Hold reason + persisted Task state 选择合法边，非法 identity/recovery attempt fail closed |
 | bank/mid source 与 ADM replace 共用 JPM durable scope gate | ACKed Intent/active Hold 下 source import/delete 会间接重建全局 ADM image | bank-deposit/mid-allocation 在 source write 前检查；真实 `replaceAdmBankDeposit` 同步边界复检；gate 拒绝不进入历史派生兼容 catch |
 | threshold bundle 先恢复、再做新 inspection | `task-run.mark-interrupted` requestKey 不含 reason/message/metadataPatch，不能把旧 `INSPECTOR_UNAVAILABLE` owner 当成新 definitive body | prepared threshold observation attempt/owner 作为 anchor；严格验证后用普通 exact reserve 回验 Task/Hold，并把旧 observation+Hold+Task 原子提交；随后以 active Hold 进入既有 definitive recovery |
+| threshold observation anchor 必须先于 Task/Hold owner 且原子完整 | 第三轮仍按 Task owner → Hold owner → attempt → observation owner 排序；已有 Hold + running Task 也会先 reserve Task；这些独立提交点均可能留下无法证明 payload 的残留 | 单个短 `BEGIN IMMEDIATE` 同时写 attempt、绑定 requestKey、写 observation owner；无/已有 Hold 都先 anchor，再 normal-exact reserve Task/Hold，任一后续 crash 均从完整 anchor resume |
+| 只迁移 71c1 可证明的 incomplete threshold gap | 无 Hold 时可能留下 Task-only、Task+Hold、Task+Hold+unbound-attempt；已有 Hold 时可能留下 Task-only、Task+unbound-attempt；这些状态没有 observation payload authority | startup 在 Inspector 前按 source/scope/active Hold 分类；同事务逐字节核验 deterministic Task/Hold exact body 后删除 incomplete owner/unbound attempt；不构造旧 observation、不关闭 Intent，随后才允许新 Inspector |
 | prepared body-divergent replay 只允许 committed Intent | live `observeReceipt/settleCommitted` 的 mark-committed/close owner 必须可跨 crash exact 续写，但 Task/Hold phase 不能复用不同 body | 默认 reserve 恢复 exact conflict；只有 expected `acked→committed` 与 `committed→closed` 的 Intent transition 可取回 persisted exact request |
 | JPM 使用独立 result validator | 不能因新增 bounded JPM terminal shape 放宽 E11-A import/standard/BOC validator | readonly validator 继续拒绝 JPM result，runtime 按 action 绑定 validator |
 
@@ -65,12 +68,18 @@
 | --- | --- | --- |
 | P1 prepared threshold owner 被新 definitive phase 按 requestKey 盲回放 | 接受；撤销 generic transition blind replay；新 inspection 前只对 JPM exact threshold observation anchor 完成旧 Task/Hold/observation bundle，body 不兼容即 fail closed；live committed Intent 两条 exact resume 保留 | 真实磁盘 owner-reserve 后 crash：committed/not-committed 均验证首启 Task running/Hold 0/prepared owner 3/attempt 1，二启最终 Task/Hold/Intent 且 prepared owner/attempt 清零，三启零 control action；另证 Task body 不兼容时 Intent 保持 acked；原 mark-committed/close case 保持通过 |
 
+### 第四轮 Review finding
+
+| Finding | 裁决与最小修复 | 定向证据 |
+| --- | --- | --- |
+| P1 threshold persistence 在完整 observation anchor 前提交 Task/Hold owner | 接受；新增单事务 `reserveObservationAnchor`，原子写 attempt + requestKey bind + observation owner；之后才按 Task→Hold normal-exact reserve；已有 Hold 的 Task transition 也使用同一顺序；对 71c1 只清理可证明 legacy gap，exact body 不兼容继续 conflict，Intent 不先关闭 | 真实临时 SQLite：anchor owner trigger 故障证明 attempt/owner 全 rollback；无 Hold 的 Task/Hold owner crash 四路与已有 Hold 的 Task owner crash 两路均二启先恢复 bundle、三启零动作；无 Hold 三种 legacy gap 六路与已有 Hold 两种 gap 四路均在 Inspector 前清零旧 gap、二启收敛、三启 owner/attempt 数量不变 |
+
 ## Evidence
 
-- `tests/unit/main-process/recon-id-fix-jpm-durable-e11-b.test.js`：28/28 PASS；新增真实磁盘 committed/not-committed threshold-bundle crash 两路与 incompatible Task body fail-closed case，并保留 mark-committed/close prepared-owner、既有 running Task + Hold、global ADM gate 全部证据。
-- E11-P0 + E11-A + RecoveryControl + Supervisor/ServiceHost：217/217 PASS；linked ADM/BOC 派生：26/26 PASS；PreFund E05-B：39/39 PASS；legacy JPM/standard/BOC/linked repository 定向组：78/78 PASS。
-- 定向 integration：RecoveryControl 27/27、recovery canary 9/9、linked delete/rebuild 73/73 PASS；未运行任务明确禁止的 `release-check` / `check-vars` / `scan:vars`。
-- 全部 7 个变更 JS `node --check`、affected ESLint 与 `git diff --check` 通过。
+- `tests/unit/main-process/recon-id-fix-jpm-durable-e11-b.test.js`：45/45 PASS；第四轮新增 17 个真实磁盘 case，覆盖原子 anchor rollback、无/已有 Hold 的 Task/Hold owner 后 crash 六路、71c1 无 Hold 三种 gap 六路与已有 Hold 两种 gap 四路；原 mark-committed/close、incompatible Task body + ACKed Intent、global ADM gate 全部保持通过。
+- RecoveryControl / recovery platform：74/74 PASS；E11-P0 + E11-A + Supervisor/ServiceHost + PreFund E05-B + linked 派生：208/208 PASS。
+- 定向 integration：RecoveryControl 27/27、recovery canary 9/9、linked streaming 19/19、gateway upsert 40/40、linked delete/rebuild 73/73 PASS；未运行任务明确禁止的 `release-check` / `check-vars` / `scan:vars`。
+- 本轮 3 个变更 JS `node --check`、affected ESLint 与 `git diff --check` 通过。
 - production gate 断言 `recon-fix:run-jpm` 仍为 false；Main live IPC 未切 managed，standard/BOC 与 PreFund 回归保持通过。
 
 ## Reconciliation blindspot pass

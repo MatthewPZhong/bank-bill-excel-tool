@@ -94,6 +94,9 @@ function createStartupRecoveryCoordinator(options = {}) {
   const inspectorRegistry = requireDependency(options.inspectorRegistry, 'get', 'inspectorRegistry');
   const providerRegistry = requireDependency(options.providerRegistry, 'list', 'providerRegistry');
   const ownerRepository = requireDependency(options.requestOwnerRepository, 'reserveTransitionRequest', 'requestOwnerRepository');
+  requireDependency(ownerRepository, 'cleanupPreparedInspectionUnavailableLegacyGap', 'requestOwnerRepository');
+  requireDependency(ownerRepository, 'inspectPreparedInspectionUnavailableState', 'requestOwnerRepository');
+  requireDependency(ownerRepository, 'reserveObservationAnchor', 'requestOwnerRepository');
   requireDependency(ownerRepository, 'resumePreparedObservationRequest', 'requestOwnerRepository');
   requireDependency(ownerRepository, 'resumePreparedTransitionRequest', 'requestOwnerRepository');
   const attemptRepository = requireDependency(options.observationAttemptRepository, 'allocateNextObservationAttempt', 'observationAttemptRepository');
@@ -188,6 +191,26 @@ function createStartupRecoveryCoordinator(options = {}) {
     });
   }
 
+  function reserveObservationAnchor(source, eventType, safePayload, lineage = {}) {
+    const scope = {
+      eventType,
+      actionKey: source.actionKey,
+      operationKey: source.operationKey,
+      taskRunId: source.taskRunId,
+      sourceKind: source.sourceKind,
+      sourceRef: source.sourceRef,
+      batchId: lineage.batchId ?? null,
+      intentId: lineage.intentId ?? source.intentId ?? null,
+      holdId: lineage.holdId ?? null,
+      recoveryAttemptId: lineage.recoveryAttemptId ?? null
+    };
+    return ownerRepository.reserveObservationAnchor({
+      observationScopeKey: observationScopeKey(scope),
+      scope,
+      safePayload
+    });
+  }
+
   function holdTransition(source, reasonCode) {
     const summary = safeSummaryFor(source, reasonCode);
     return {
@@ -262,22 +285,26 @@ function createStartupRecoveryCoordinator(options = {}) {
     return writeAtomic(observation, extraTransitions);
   }
 
-  function inspectionUnavailableTransitions(source, activeHold) {
+  function inspectionUnavailablePlan(source, activeHold) {
     if (activeHold && (activeHold.sourceKind !== source.sourceKind
         || activeHold.sourceRef !== source.sourceRef)) {
       return [];
     }
-    return normalizePlannedTransitions(planTransitions({
+    return planTransitions({
       phase: 'inspection-unavailable-hold',
       source,
       inspection: null,
       activeHold,
       holdId: activeHold ? activeHold.holdId : holdIdFor(source),
       taskState: taskStateFor(source)
-    }));
+    });
   }
 
-  function inspectionUnavailableObservationScope(source) {
+  function inspectionUnavailableTransitions(source, activeHold) {
+    return normalizePlannedTransitions(inspectionUnavailablePlan(source, activeHold));
+  }
+
+  function inspectionUnavailableObservationScope(source, activeHold = null) {
     return {
       eventType: 'inspection-failed-transient',
       actionKey: source.actionKey,
@@ -287,9 +314,46 @@ function createStartupRecoveryCoordinator(options = {}) {
       sourceRef: source.sourceRef,
       batchId: null,
       intentId: source.intentId ?? null,
-      holdId: holdIdFor(source),
+      holdId: activeHold ? activeHold.holdId : holdIdFor(source),
       recoveryAttemptId: null
     };
+  }
+
+  function inspectionUnavailableSource(source) {
+    return {
+      actionKey: source.actionKey,
+      operationKey: source.operationKey,
+      taskRunId: source.taskRunId,
+      sourceKind: source.sourceKind,
+      sourceRef: source.sourceRef,
+      intentId: source.intentId ?? null
+    };
+  }
+
+  function exactInspectionUnavailableTaskPlan(source, taskState, activeHold = null) {
+    const planned = planTransitions({
+      phase: 'inspection-unavailable-hold',
+      source,
+      inspection: null,
+      activeHold,
+      holdId: activeHold ? activeHold.holdId : holdIdFor(source),
+      taskState
+    });
+    if (Array.isArray(planned) && planned.length === 0 && (activeHold || !taskState)) {
+      return planned;
+    }
+    if (!Array.isArray(planned) || planned.length !== 1
+        || !planned[0] || !planned[0].transition || !planned[0].safePayload
+        || planned[0].transition.entityKind !== 'task-run'
+        || planned[0].transition.command !== 'mark-interrupted'
+        || planned[0].transition.failureCode !== 'INSPECTOR_UNAVAILABLE') {
+      throw new StartupRecoveryError(
+        'STARTUP_RECOVERY_PREPARED_THRESHOLD_BUNDLE_INVALID',
+        'INSPECTOR_UNAVAILABLE bundle 缺少 exact Task interruption plan',
+        { sourceKind: source.sourceKind, sourceRef: source.sourceRef }
+      );
+    }
+    return planned;
   }
 
   function validatePreparedInspectionUnavailableObservation(event, scope, attemptId) {
@@ -309,9 +373,14 @@ function createStartupRecoveryCoordinator(options = {}) {
     const payloadKeys = payload && typeof payload === 'object' && !Array.isArray(payload)
       ? Object.keys(payload).sort()
       : [];
-    const payloadMatches = payloadKeys.length === 2
+    const hasBlockedDisposition = payloadKeys.length === 3
+      && payloadKeys[0] === 'disposition'
+      && payloadKeys[1] === 'errorCode'
+      && payloadKeys[2] === 'thresholdReached'
+      && payload.disposition === 'blocked-by-active-scope-hold';
+    const payloadMatches = ((payloadKeys.length === 2
       && payloadKeys[0] === 'errorCode'
-      && payloadKeys[1] === 'thresholdReached'
+      && payloadKeys[1] === 'thresholdReached') || hasBlockedDisposition)
       && typeof payload.errorCode === 'string'
       && /^[A-Z0-9_:-]{1,64}$/.test(payload.errorCode)
       && payload.thresholdReached === true;
@@ -324,12 +393,63 @@ function createStartupRecoveryCoordinator(options = {}) {
     }
   }
 
+  function cleanupPreparedInspectionUnavailableLegacyGap(source, activeHold) {
+    const scope = inspectionUnavailableObservationScope(source, activeHold);
+    const sourceIdentity = inspectionUnavailableSource(source);
+    const observed = ownerRepository.inspectPreparedInspectionUnavailableState({
+      observationScopeKey: observationScopeKey(scope),
+      source: sourceIdentity
+    });
+    if (observed.state !== 'legacy-gap') return observed;
+    const taskState = taskStateFor(source);
+    if (!taskState) return observed;
+    const planned = exactInspectionUnavailableTaskPlan(source, taskState, activeHold);
+    const task = planned[0] || null;
+    const hold = activeHold ? null : holdTransition(source, 'INSPECTOR_UNAVAILABLE');
+    return ownerRepository.cleanupPreparedInspectionUnavailableLegacyGap({
+      observationScopeKey: observationScopeKey(scope),
+      source: sourceIdentity,
+      taskRequest: task ? {
+        requestKey: transitionRequestKey(task.transition),
+        transition: task.transition,
+        safePayload: task.safePayload
+      } : null,
+      holdRequest: hold ? {
+        requestKey: transitionRequestKey(hold),
+        transition: hold,
+        safePayload: { reasonCode: 'INSPECTOR_UNAVAILABLE' }
+      } : null
+    });
+  }
+
+  function persistInspectionUnavailableThreshold(source, activeHold, safePayload) {
+    const blockedByOtherHold = activeHold
+      && (activeHold.sourceKind !== source.sourceKind || activeHold.sourceRef !== source.sourceRef);
+    const hold = activeHold || holdTransition(source, 'INSPECTOR_UNAVAILABLE');
+    // E11-B：threshold anchor 必须先于任何 Task/Hold owner，以一个短事务同时
+    // 持久化 attempt、request_key bind 与 observation owner；之后的任一 crash
+    // 都能由 exact anchor 找回完整 bundle。
+    const observation = reserveObservationAnchor(
+      source,
+      'inspection-failed-transient',
+      blockedByOtherHold
+        ? { ...safePayload, disposition: 'blocked-by-active-scope-hold' }
+        : safePayload,
+      { holdId: activeHold ? activeHold.holdId : hold.input.holdId }
+    );
+    const taskTransitions = inspectionUnavailableTransitions(source, activeHold);
+    if (activeHold) return writeAtomic(observation, taskTransitions);
+    const holdRequest = reserveTransition(hold, {
+      reasonCode: 'INSPECTOR_UNAVAILABLE'
+    });
+    return writeAtomic(observation, [holdRequest, ...taskTransitions]);
+  }
+
   function resumePreparedInspectionUnavailableBundle(source, activeHold) {
-    if (activeHold) return activeHold;
-    const scope = inspectionUnavailableObservationScope(source);
+    const scope = inspectionUnavailableObservationScope(source, activeHold);
     const scopeKey = observationScopeKey(scope);
     const attempt = attemptRepository.resumePreparedObservationAttempt(scopeKey);
-    if (!attempt) return null;
+    if (!attempt) return activeHold || null;
     const taskState = taskStateFor(source);
     const requestKey = observationRequestKey({
       ...scope,
@@ -348,27 +468,12 @@ function createStartupRecoveryCoordinator(options = {}) {
       scope,
       attempt.observationAttemptId
     );
-    const planned = planTransitions({
-      phase: 'inspection-unavailable-hold',
-      source,
-      inspection: null,
-      activeHold: null,
-      holdId: scope.holdId,
-      taskState
-    });
-    if (!taskState && Array.isArray(planned) && planned.length === 0) return null;
-    if (!Array.isArray(planned) || planned.length !== 1
-        || !planned[0] || !planned[0].transition
-        || planned[0].transition.entityKind !== 'task-run'
-        || planned[0].transition.command !== 'mark-interrupted'
-        || planned[0].transition.failureCode !== 'INSPECTOR_UNAVAILABLE') {
-      throw new StartupRecoveryError(
-        'STARTUP_RECOVERY_PREPARED_THRESHOLD_BUNDLE_INVALID',
-        'prepared INSPECTOR_UNAVAILABLE bundle 缺少 exact Task interruption plan',
-        { sourceKind: source.sourceKind, sourceRef: source.sourceRef }
-      );
-    }
+    const planned = exactInspectionUnavailableTaskPlan(source, taskState, activeHold);
     const taskTransitions = normalizePlannedTransitions(planned);
+    if (activeHold) {
+      writeAtomic(observation, taskTransitions);
+      return activeHold;
+    }
     const hold = holdTransition(source, 'INSPECTOR_UNAVAILABLE');
     const holdRequest = reserveTransition(hold, { reasonCode: 'INSPECTOR_UNAVAILABLE' });
     writeAtomic(observation, [holdRequest, ...taskTransitions]);
@@ -396,10 +501,10 @@ function createStartupRecoveryCoordinator(options = {}) {
     try {
       inspector = inspectorRegistry.get(source.inspectorKey);
     } catch (error) {
-      holdOrLinkObservation(source, activeHold, 'inspection-failed-transient', {
+      persistInspectionUnavailableThreshold(source, activeHold, {
         errorCode: 'RECOVERY_INSPECTOR_NOT_FOUND',
         thresholdReached: true
-      }, 'INSPECTOR_UNAVAILABLE', inspectionUnavailableTransitions(source, activeHold));
+      });
       throw new StartupRecoveryError(
         'STARTUP_RECOVERY_INSPECTOR_MISSING',
         `持久 RecoverySource 缺少 Inspector：${source.inspectorKey}`,
@@ -423,10 +528,10 @@ function createStartupRecoveryCoordinator(options = {}) {
         return Object.freeze({ source, inspection, observation, blocked: false, hold: activeHold || null });
       } catch (error) {
         if (error && error.name === 'RecoverySourceValidationError') {
-          holdOrLinkObservation(source, activeHold, 'inspection-failed-transient', {
+          persistInspectionUnavailableThreshold(source, activeHold, {
             errorCode: error.code,
             thresholdReached: true
-          }, 'INSPECTOR_UNAVAILABLE', inspectionUnavailableTransitions(source, activeHold));
+          });
           throw new StartupRecoveryError(
             'STARTUP_RECOVERY_INSPECTION_INVALID',
             'Inspector 返回不符合 RecoveryInspectionResultV1 的结果',
@@ -439,25 +544,11 @@ function createStartupRecoveryCoordinator(options = {}) {
           thresholdReached
         };
         if (blockedByOtherHold) {
-          holdOrLinkObservation(
-            source,
-            activeHold,
-            'inspection-failed-transient',
-            safePayload,
-            'INSPECTOR_UNAVAILABLE',
-            inspectionUnavailableTransitions(source, activeHold)
-          );
+          persistInspectionUnavailableThreshold(source, activeHold, safePayload);
           return Object.freeze({ source, inspection: null, blocked: true, hold: activeHold });
         }
         if (thresholdReached) {
-          holdOrLinkObservation(
-            source,
-            activeHold,
-            'inspection-failed-transient',
-            safePayload,
-            'INSPECTOR_UNAVAILABLE',
-            inspectionUnavailableTransitions(source, activeHold)
-          );
+          persistInspectionUnavailableThreshold(source, activeHold, safePayload);
           return Object.freeze({ source, inspection: null, blocked: true, transientFailure: true });
         }
         writeAtomic(reserveObservation(source, 'inspection-failed-transient', safePayload, {
@@ -640,6 +731,7 @@ function createStartupRecoveryCoordinator(options = {}) {
   }
 
   async function recoverSource(source, activeHold = null) {
+    cleanupPreparedInspectionUnavailableLegacyGap(source, activeHold);
     activeHold = resumePreparedInspectionUnavailableBundle(source, activeHold);
     const inspected = await inspectSource(source, activeHold);
     if (inspected.blocked || !inspected.inspection) return inspected;
