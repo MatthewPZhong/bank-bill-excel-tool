@@ -11,13 +11,16 @@ const {
 const { createDirectionSequenceTracker } = require('../background-execution/sequence-tracker');
 const {
   createStatementImportResult,
+  createStatementInteractionCancelledResult,
   createStatementInteractionRequiredResult,
-  createStatementPublicInteractionDto,
   createStatementStatusDto,
   createStatementStatusResult
 } = require('./contracts');
 const { createStatementServiceRequest } = require('./import-contracts');
-const { createStatementBigAccountContinuationRequest } = require('./interaction-contracts');
+const {
+  createStatementBigAccountContinuationRequest,
+  createStatementCancelInteractionRequest
+} = require('./interaction-contracts');
 const { estimateStatementServiceStateFootprint } = require('./state-footprint');
 const {
   createStatementSourceIdentityGuard,
@@ -58,6 +61,7 @@ function createStatementService(options = {}) {
   const tokenExpiryTimers = new Map();
   const tokenReleases = new Map();
   let releasedTokenTombstone = null;
+  let failedGrantTombstone = null;
 
   function nextControlId(prefix) {
     controlOrdinal += 1;
@@ -161,11 +165,40 @@ function createStatementService(options = {}) {
     });
   }
 
+  function publicTokenIdentity(record) {
+    const interaction = record.publicInteraction;
+    return Object.freeze({
+      tokenId: interaction.tokenId,
+      purpose: interaction.purpose,
+      serviceGeneration: interaction.serviceGeneration,
+      sessionRevision: interaction.sessionRevision,
+      expiresAt: interaction.expiresAt,
+      allowedChoiceDigest: interaction.allowedChoiceDigest
+    });
+  }
+
+  function samePublicToken(left, right) {
+    return Boolean(left && right &&
+      ['tokenId', 'purpose', 'serviceGeneration', 'sessionRevision', 'expiresAt', 'allowedChoiceDigest']
+        .every((key) => left[key] === right[key]));
+  }
+
+  function assertJobActive(job) {
+    if (!job.cancelled && !job.terminal && activeJob === job) return;
+    throw new StatementServiceError('STATEMENT_IMPORT_CANCELLED', 'Statement operation cancelled before adoption');
+  }
+
   function requestInteractionToken(job, interactionDraft) {
+    assertJobActive(job);
     const draft = tokenStore.prepare({
       ...interactionDraft,
       serviceGeneration: state.serviceGeneration
     });
+    const result = createStatementInteractionRequiredResult({
+      status: 'interaction-required',
+      interaction: draft.publicInteraction
+    }, job.start.actionKey);
+    assertJobActive(job);
     const requestId = nextControlId('request');
     const owner = Object.freeze({
       kind: 'interaction-token',
@@ -174,18 +207,14 @@ function createStatementService(options = {}) {
     });
     Object.assign(job, {
       kind: 'token', interactionDraft: draft, requestId,
-      requestControlId: nextControlId('request-control'), owner
+      requestControlId: nextControlId('request-control'), owner, result
     });
+    assertJobActive(job);
     postControl('resource:request', job.requestControlId, jobRef(job.start), {
       requestId, requestKind: 'pending-interaction-create',
       requested: { memoryBytes: draft.footprint.estimatedBytes, cpuSlots: 0, ioHeavySlots: 0 },
       replacesReservationId: null, owner
     });
-  }
-
-  function assertNotCancelled(job) {
-    if (!job.cancelled) return;
-    throw new StatementServiceError('STATEMENT_IMPORT_CANCELLED', 'Statement import cancelled before adoption');
   }
 
   async function resolvePrivateSources(request, job) {
@@ -198,7 +227,7 @@ function createStatementService(options = {}) {
     const sources = [];
     const identityGuard = createStatementSourceIdentityGuard(state);
     for (const source of request.sources) {
-      assertNotCancelled(job);
+      assertJobActive(job);
       const resolved = options.resolveSourceResource(source.resourceId);
       const resolution = typeof resolved === 'string'
         ? { path: resolved, legacyPath: resolved, allowedRoot: null }
@@ -216,7 +245,7 @@ function createStatementService(options = {}) {
       const privateSource = await resolveStatementSourceIdentity(source, resolution.path, {
         allowedRoot: resolution.allowedRoot,
         legacyPath: resolution.legacyPath,
-        assertNotCancelled: () => assertNotCancelled(job)
+        assertNotCancelled: () => assertJobActive(job)
       });
       identityGuard.accept(privateSource);
       sources.push(privateSource);
@@ -244,6 +273,26 @@ function createStatementService(options = {}) {
     activeJob = job;
     try {
       if (start.actionKey === 'statement:resolve-big-account') {
+        if (start.payload.input && start.payload.input.command === 'cancel-interaction') {
+          const cancellation = createStatementCancelInteractionRequest(start.payload.input);
+          const result = createStatementInteractionCancelledResult({
+            status: 'interaction-cancelled',
+            tokenId: cancellation.token.tokenId
+          });
+          if (releasedTokenTombstone && releasedTokenTombstone.kind === 'cancel-interaction' &&
+              samePublicToken(cancellation.token, releasedTokenTombstone.token)) {
+            finishDone(job, result);
+            return;
+          }
+          const tokenRecord = tokenStore.claimCancellation(cancellation.token, {
+            serviceGeneration: state.serviceGeneration,
+            sessionRevision: state.sessionRevision,
+            purpose: 'big-account'
+          });
+          Object.assign(job, { kind: 'cancel-interaction', tokenRecord, result });
+          releaseToken(tokenRecord, 'job-failed', { job, result });
+          return;
+        }
         const continuation = createStatementBigAccountContinuationRequest(start.payload.input);
         const privateRequest = Object.freeze({
           ...continuation.importEvidence,
@@ -265,6 +314,7 @@ function createStatementService(options = {}) {
           },
           choiceDomain: pendingToken.privateContext.choiceDomain
         });
+        Object.assign(job, { kind: 'continuation', tokenRecord });
         const originalSources = tokenRecord.privateContext.request.sources;
         if (privateRequest.sources.length !== originalSources.length ||
             privateRequest.sources.some((source, index) => source.path !== originalSources[index].path)) {
@@ -295,11 +345,12 @@ function createStatementService(options = {}) {
             };
           });
         const candidate = await buildStatementImportCandidate(state, privateRequest, {
-          assertNotCancelled: () => assertNotCancelled(job),
+          assertNotCancelled: () => assertJobActive(job),
           bigAccountAssignments,
           bigAccountChoiceMode: continuation.choice.mode,
           expectedProvisionalDigest: tokenRecord.privateContext.candidateDigest
         });
+        assertJobActive(job);
         const footprint = estimateStatementServiceStateFootprint(candidate.state);
         const result = createStatementImportResult({
           status: 'imported', summary: candidate.state.stableSummary, session: candidate.result
@@ -314,6 +365,7 @@ function createStatementService(options = {}) {
           kind: 'persistent-after-token', tokenRecord, requestId,
           requestControlId: nextControlId('request-control'), owner, candidate, footprint, result
         });
+        assertJobActive(job);
         postControl('resource:request', job.requestControlId, jobRef(start), {
           requestId, requestKind: 'persistent-state-replace',
           requested: { memoryBytes: footprint.estimatedBytes, cpuSlots: 0, ioHeavySlots: 0 },
@@ -335,14 +387,15 @@ function createStatementService(options = {}) {
       }
 
       await new Promise((resolve) => setImmediate(resolve));
-      assertNotCancelled(job);
+      assertJobActive(job);
       const privateRequest = Object.freeze({
         ...request,
         sources: await resolvePrivateSources(request, job)
       });
       const interactionDraft = await buildBigAccountInteractionDraft(state, privateRequest, {
-        assertNotCancelled: () => assertNotCancelled(job)
+        assertNotCancelled: () => assertJobActive(job)
       });
+      assertJobActive(job);
       if (interactionDraft) {
         const existingToken = tokenStore.listRecords()[0];
         if (existingToken) {
@@ -353,9 +406,9 @@ function createStatementService(options = {}) {
         return;
       }
       const candidate = await buildStatementImportCandidate(state, privateRequest, {
-        assertNotCancelled: () => assertNotCancelled(job)
+        assertNotCancelled: () => assertJobActive(job)
       });
-      assertNotCancelled(job);
+      assertJobActive(job);
       const footprint = estimateStatementServiceStateFootprint(candidate.state);
       const result = createStatementImportResult({
         status: 'imported',
@@ -367,6 +420,7 @@ function createStatementService(options = {}) {
           candidateRevision: candidate.state.sessionRevision
         }));
       }
+      assertJobActive(job);
       const requestId = nextControlId('request');
       const owner = Object.freeze({
         kind: 'service-state',
@@ -379,6 +433,7 @@ function createStatementService(options = {}) {
       job.candidate = candidate;
       job.footprint = footprint;
       job.result = result;
+      assertJobActive(job);
       postControl('resource:request', job.requestControlId, jobRef(start), {
         requestId,
         requestKind: 'persistent-state-replace',
@@ -387,6 +442,8 @@ function createStatementService(options = {}) {
         owner
       });
     } catch (error) {
+      if (job.terminal) return;
+      if (job.tokenRecord && tokenReleases.has(job.tokenRecord.handle.reservationId)) return;
       if (job.tokenRecord && ['published', 'consuming', 'inserted'].includes(job.tokenRecord.state)) {
         releaseToken(job.tokenRecord, 'job-failed', { job, error });
         return;
@@ -418,29 +475,41 @@ function createStatementService(options = {}) {
     if (job.cancelled) {
       throw new StatementServiceError('STATEMENT_IMPORT_CANCELLED', 'Cancelled candidate received a resource grant');
     }
-    job.grant = message.payload;
-    job.adoptionStarted = true;
-    if (job.kind === 'token') {
-      const record = tokenStore.insertPrivate(job.interactionDraft, {
-        ...message.payload,
-        owner: job.owner,
-        ownerJobRef: jobRef(job.start)
+    try {
+      job.grant = message.payload;
+      job.adoptionStarted = true;
+      if (job.kind === 'token') {
+        const record = tokenStore.insertPrivate(job.interactionDraft, {
+          ...message.payload,
+          owner: job.owner,
+          ownerJobRef: jobRef(job.start)
+        });
+        job.tokenRecord = record;
+      }
+      if (typeof options.withholdAdopt === 'function' && options.withholdAdopt(Object.freeze({
+        candidateRevision: job.owner.candidateRevision,
+        requestId: job.requestId,
+        reservationId: message.payload.reservationId
+      }))) {
+        return;
+      }
+      postControl('resource:adopted', nextControlId('adopted'), jobRef(job.start), {
+        requestId: job.requestId,
+        grantId: message.payload.grantId,
+        reservationId: message.payload.reservationId,
+        owner: job.owner
       });
-      job.tokenRecord = record;
+    } catch (error) {
+      job.candidate = null;
+      failedGrantTombstone = {
+        phase: 'awaiting-revoke',
+        reservationId: message.payload.reservationId,
+        grantId: message.payload.grantId,
+        jobRef: jobRef(job.start),
+        revokeControlId: null
+      };
+      finishError(job, error, 'STATEMENT_ADOPTION_FAILED');
     }
-    if (typeof options.withholdAdopt === 'function' && options.withholdAdopt(Object.freeze({
-      candidateRevision: job.owner.candidateRevision,
-      requestId: job.requestId,
-      reservationId: message.payload.reservationId
-    }))) {
-      return;
-    }
-    postControl('resource:adopted', nextControlId('adopted'), jobRef(job.start), {
-      requestId: job.requestId,
-      grantId: message.payload.grantId,
-      reservationId: message.payload.reservationId,
-      owner: job.owner
-    });
   }
 
   function handleResourceReject(message) {
@@ -474,13 +543,6 @@ function createStatementService(options = {}) {
     }
     if (job.kind === 'token') {
       const record = tokenStore.markAdopted(job.tokenRecord.handle.tokenId, message.payload);
-      const publicInteraction = createStatementPublicInteractionDto({
-        token: record.handle,
-        prompt: record.prompt
-      });
-      const result = createStatementInteractionRequiredResult({
-        status: 'interaction-required', interaction: publicInteraction
-      }, job.start.actionKey);
       const delay = Math.max(0, record.handle.expiresAt - tokenClockNow());
       const expiryTimer = setTimeout(() => {
         if (tokenStore.inspect(record.handle.tokenId)?.state === 'published') {
@@ -489,7 +551,7 @@ function createStatementService(options = {}) {
       }, delay);
       if (typeof expiryTimer.unref === 'function') expiryTimer.unref();
       tokenExpiryTimers.set(record.handle.tokenId, expiryTimer);
-      finishDone(job, result);
+      finishDone(job, job.result);
       return;
     }
     const adopted = job.candidate.state;
@@ -529,7 +591,7 @@ function createStatementService(options = {}) {
     job.candidate = null;
     job.emit('cancel:ack', { cancellation: { scope: 'job' } });
     if (job.tokenRecord) {
-      releaseToken(job.tokenRecord, 'token-cancelled', {
+      releaseToken(job.tokenRecord, 'job-failed', {
         job,
         error: new StatementServiceError('STATEMENT_IMPORT_CANCELLED', 'Statement continuation cancelled')
       });
@@ -544,24 +606,65 @@ function createStatementService(options = {}) {
 
   function handleResourceRevoke(message) {
     const reservationId = message.payload.reservationId;
+    const failedGrant = failedGrantTombstone &&
+      failedGrantTombstone.phase === 'awaiting-revoke' &&
+      reservationId === failedGrantTombstone.reservationId &&
+      message.payload.grantId === failedGrantTombstone.grantId &&
+      sameJobRef(message.jobRef, failedGrantTombstone.jobRef);
     const tokenRecord = tokenStore.listRecords().find((record) =>
       record.handle.reservationId === reservationId);
     if (tokenRecord) {
+      const adoptionTimeoutJob = message.payload.reasonCode === 'adoption-timeout' &&
+        activeJob && !activeJob.terminal && activeJob.kind === 'token' &&
+        activeJob.tokenRecord === tokenRecord && tokenRecord.state === 'inserted' &&
+        activeJob.grant && activeJob.grant.grantId === message.payload.grantId &&
+        sameJobRef(message.jobRef, jobRef(activeJob.start));
+      const timeoutCompletion = adoptionTimeoutJob
+        ? {
+            job: activeJob,
+            error: new StatementServiceError(
+              'STATEMENT_ADOPTION_TIMEOUT',
+              'Statement token adoption timed out'
+            )
+          }
+        : null;
       const existingRelease = tokenReleases.get(reservationId);
       if (!existingRelease) {
         tokenStore.markReleasing(tokenRecord.handle.tokenId);
         tokenReleases.set(reservationId, {
           record: tokenRecord,
-          completion: null,
+          completion: timeoutCompletion,
           controlId: message.controlId,
           controlIds: new Set([message.controlId])
         });
       } else {
         existingRelease.controlIds.add(message.controlId);
+        if (timeoutCompletion && !existingRelease.completion) {
+          existingRelease.completion = timeoutCompletion;
+        }
+      }
+      if (failedGrant) {
+        failedGrantTombstone = {
+          ...failedGrantTombstone,
+          phase: 'awaiting-release-ack',
+          revokeControlId: message.controlId
+        };
       }
       postControl('resource:release', message.controlId, message.jobRef, {
         reservationId,
-        reason: 'service-close'
+        reason: adoptionTimeoutJob || failedGrant ? 'job-failed' : 'service-close'
+      });
+      return;
+    }
+    if (failedGrant) {
+      failedGrantTombstone = {
+        ...failedGrantTombstone,
+        phase: 'awaiting-release-ack',
+        revokeControlId: message.controlId
+      };
+      postControl('resource:release', message.controlId, message.jobRef, {
+        reservationId,
+        reason: 'job-failed'
       });
       return;
     }
@@ -635,9 +738,21 @@ function createStatementService(options = {}) {
           tokenReleases.delete(message.payload.reservationId);
           tokenStore.remove(release.record.handle.tokenId);
           releasedTokenTombstone = Object.freeze({
+            kind: release.completion && release.completion.job &&
+              release.completion.job.kind === 'cancel-interaction'
+              ? 'cancel-interaction'
+              : 'other-release',
             reservationId: message.payload.reservationId,
-            controlIds: Object.freeze([...release.controlIds])
+            controlIds: Object.freeze([...release.controlIds]),
+            token: publicTokenIdentity(release.record)
           });
+          if (failedGrantTombstone &&
+              failedGrantTombstone.phase === 'awaiting-release-ack' &&
+              message.payload.reservationId === failedGrantTombstone.reservationId &&
+              message.controlId === failedGrantTombstone.revokeControlId &&
+              sameJobRef(message.jobRef, failedGrantTombstone.jobRef)) {
+            failedGrantTombstone = null;
+          }
           if (release.completion) {
             if (release.completion.interactionDraft) {
               if (release.completion.job.terminal || release.completion.job.cancelled) return;
@@ -652,6 +767,14 @@ function createStatementService(options = {}) {
               finishDone(release.completion.job, release.completion.result);
             }
           }
+          return;
+        }
+        if (failedGrantTombstone &&
+            failedGrantTombstone.phase === 'awaiting-release-ack' &&
+            message.payload.reservationId === failedGrantTombstone.reservationId &&
+            message.controlId === failedGrantTombstone.revokeControlId &&
+            sameJobRef(message.jobRef, failedGrantTombstone.jobRef)) {
+          failedGrantTombstone = null;
           return;
         }
         if (releasedTokenTombstone &&

@@ -74,6 +74,7 @@ const PUBLIC_INTERACTION_KEYS = Object.freeze([
   'prompt'
 ]);
 const INTERACTION_REQUIRED_RESULT_KEYS = Object.freeze(['status', 'interaction']);
+const INTERACTION_CANCELLED_RESULT_KEYS = Object.freeze(['status', 'tokenId']);
 const IMPORT_RESULT_KEYS = Object.freeze(['status', 'summary', 'session']);
 const IMPORT_SESSION_KEYS = Object.freeze([
   'sessionKey',
@@ -780,6 +781,21 @@ function createStatementInteractionRequiredResult(input, actionKey) {
   return canonicalJsonSnapshot({ status: record.status, interaction });
 }
 
+function createStatementInteractionCancelledResult(input) {
+  const record = ownDataRecord(
+    input,
+    INTERACTION_CANCELLED_RESULT_KEYS,
+    'StatementInteractionCancelledResult'
+  );
+  if (record.status !== 'interaction-cancelled') {
+    fail('STATEMENT_RESULT_STATUS_INVALID', 'Statement interaction cancellation status is invalid');
+  }
+  return canonicalJsonSnapshot({
+    status: record.status,
+    tokenId: boundedText(record.tokenId, 'tokenId')
+  });
+}
+
 function createStatementImportResult(input) {
   const record = ownDataRecord(input, IMPORT_RESULT_KEYS, 'StatementImportResult');
   if (record.status !== 'imported') {
@@ -884,7 +900,14 @@ function createStatementResultValidator(actionKey) {
         createStatementImportResult(value);
         return true;
       } catch (_importError) {
-        if (actionKey !== 'statement:import') return false;
+        if (actionKey === 'statement:resolve-big-account') {
+          try {
+            createStatementInteractionCancelledResult(value);
+            return true;
+          } catch (_cancelError) {
+            return false;
+          }
+        }
         try {
           createStatementStatusResult(value);
           return true;
@@ -1016,6 +1039,7 @@ module.exports = {
   createStatementBalanceSeedOverwriteReleaseCharacterization,
   createStatementFinanceSafeValueDelegate,
   createStatementImportResult,
+  createStatementInteractionCancelledResult,
   createStatementInteractionRequiredResult,
   createStatementInteractionPromptDto,
   createStatementPublicInteractionDto,

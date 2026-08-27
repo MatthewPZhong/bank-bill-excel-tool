@@ -37,6 +37,28 @@ function createStatementWaitingUserCoordinator() {
     return Object.freeze(token);
   }
 
+  function continuationIdentityMatches(record, input, token) {
+    return record.taskKey === input.taskKey &&
+      record.operationKey === input.originOperationKey &&
+      typeof input.operationKey === 'string' && input.operationKey.length > 0 &&
+      TOKEN_KEYS.every((key) => record.token[key] === token[key]);
+  }
+
+  function phaseAcquireError(error) {
+    const code = error && typeof error.code === 'string'
+      ? error.code
+      : 'STATEMENT_PHASE_ACQUIRE_FAILED';
+    const message = error && typeof error.message === 'string'
+      ? error.message.slice(0, 1024)
+      : 'Continuation phase acquisition failed';
+    return Object.freeze({ code, message });
+  }
+
+  function throwRecordedPhaseError(record) {
+    const saved = record.phaseAcquireError;
+    throw new StatementWaitingUserError(saved.code, saved.message);
+  }
+
   async function enterWaiting(input) {
     const token = boundedToken(input.token);
     let record = tasks.get(input.taskRunId);
@@ -82,11 +104,27 @@ function createStatementWaitingUserCoordinator() {
   async function beginContinuation(input) {
     const token = boundedToken(input.token);
     const record = tasks.get(input.taskRunId);
-    if (!record || record.state !== 'waiting-user') fail('STATEMENT_WAITING_STALE', 'Task is not waiting for this interaction');
-    if (record.taskKey !== input.taskKey || record.operationKey !== input.originOperationKey ||
-        typeof input.operationKey !== 'string' || input.operationKey.length === 0 ||
-        TOKEN_KEYS.some((key) => record.token[key] !== token[key])) {
+    if (!record || !['waiting-user', 'continuation-cleanup-required'].includes(record.state)) {
+      fail('STATEMENT_WAITING_STALE', 'Task is not waiting for this interaction');
+    }
+    if (!continuationIdentityMatches(record, input, token)) {
       fail('STATEMENT_WAITING_IDENTITY_MISMATCH', 'Continuation identity does not match waiting task');
+    }
+    if (record.state === 'continuation-cleanup-required') {
+      if (record.continuationJobId !== input.jobId ||
+          record.continuationOperationKey !== input.operationKey) {
+        fail(
+          'STATEMENT_CONTINUATION_OWNER_MISMATCH',
+          'Only the failed continuation owner may retry lock cleanup'
+        );
+      }
+      await input.lockOwner.release(record.lockId, input.jobId);
+      record.lockId = null;
+      record.lockReleased = true;
+      record.state = 'waiting-user';
+      record.continuationJobId = null;
+      record.continuationOperationKey = null;
+      throwRecordedPhaseError(record);
     }
     record.state = 'acquiring-continuation';
     let lock;
@@ -95,8 +133,29 @@ function createStatementWaitingUserCoordinator() {
       lock = await input.lockOwner.acquire(input.taskRunId, input.jobId);
       phase = await input.phaseOwner.acquire(input.taskRunId, input.jobId);
     } catch (error) {
-      if (lock) await input.lockOwner.release(lock.id, input.jobId);
+      if (!lock) {
+        record.state = 'waiting-user';
+        throw error;
+      }
+      record.state = 'continuation-cleanup-required';
+      record.continuationJobId = input.jobId;
+      record.continuationOperationKey = input.operationKey;
+      record.lockId = lock.id;
+      record.lockReleased = false;
+      record.phaseAcquireError = phaseAcquireError(error);
+      try {
+        await input.lockOwner.release(lock.id, input.jobId);
+      } catch (_cleanupError) {
+        fail(
+          'STATEMENT_CONTINUATION_CLEANUP_REQUIRED',
+          'Continuation phase failed and the acquired business lock still requires cleanup'
+        );
+      }
+      record.lockId = null;
+      record.lockReleased = true;
       record.state = 'waiting-user';
+      record.continuationJobId = null;
+      record.continuationOperationKey = null;
       throw error;
     }
     record.state = 'executing';
@@ -106,6 +165,7 @@ function createStatementWaitingUserCoordinator() {
     record.phaseLeaseId = phase.id;
     record.phaseReleased = false;
     record.lockReleased = false;
+    record.phaseAcquireError = null;
     return Object.freeze({ taskRunId: input.taskRunId, status: 'running', phase: 'executing' });
   }
 
@@ -151,7 +211,73 @@ function createStatementWaitingUserCoordinator() {
     return true;
   }
 
-  return Object.freeze({ beginContinuation, enterWaiting, invalidate, settleContinuation });
+  function cancelInteraction(input) {
+    const token = boundedToken(input.token);
+    const record = tasks.get(input.taskRunId);
+    if (!record || !['waiting-user', 'cancelling-interaction', 'cancelled'].includes(record.state)) {
+      fail('STATEMENT_WAITING_STALE', 'Task is not waiting for this interaction');
+    }
+    if (record.taskKey !== input.taskKey || record.operationKey !== input.originOperationKey ||
+        TOKEN_KEYS.some((key) => record.token[key] !== token[key]) ||
+        typeof input.cancelOwnerKey !== 'string' || input.cancelOwnerKey.length === 0 ||
+        input.cancelOwnerKey.length > 256) {
+      fail('STATEMENT_WAITING_IDENTITY_MISMATCH', 'Cancellation identity does not match waiting task');
+    }
+    if (record.cancelOwnerKey && record.cancelOwnerKey !== input.cancelOwnerKey) {
+      fail('STATEMENT_CONTINUATION_OWNER_MISMATCH', 'Cancellation retry owner does not match');
+    }
+    if (record.state === 'cancelled') return Promise.resolve(record.cancelResult);
+    if (record.state === 'cancelling-interaction') return record.cancelPromise;
+    if (!input.cancelOwner || typeof input.cancelOwner.cancel !== 'function') {
+      fail('STATEMENT_CANCEL_OWNER_INVALID', 'Cancellation owner is unavailable');
+    }
+    record.state = 'cancelling-interaction';
+    record.cancelOwnerKey = input.cancelOwnerKey;
+    const cancellation = Promise.resolve().then(() => input.cancelOwner.cancel(Object.freeze({
+      taskRunId: record.taskRunId,
+      taskKey: record.taskKey,
+      originOperationKey: record.operationKey,
+      token: record.token
+    }))).then((result) => {
+      if (!result || !['interaction-cancelled', 'interaction-crash-cleaned'].includes(result.status) ||
+          result.tokenId !== record.token.tokenId) {
+        fail('STATEMENT_CANCEL_ACK_INVALID', 'Cancellation owner did not confirm exact token cleanup');
+      }
+      record.state = 'cancelled';
+      record.cancelPromise = null;
+      record.cancelResult = Object.freeze({
+        taskRunId: record.taskRunId,
+        status: 'cancelled',
+        phase: null
+      });
+      return record.cancelResult;
+    }).catch((error) => {
+      record.state = 'waiting-user';
+      record.cancelPromise = null;
+      throw error;
+    });
+    record.cancelPromise = cancellation;
+    return cancellation;
+  }
+
+  function forgetCancelled(input) {
+    const record = tasks.get(input.taskRunId);
+    if (!record || record.state !== 'cancelled') return false;
+    if (record.token.tokenId !== input.tokenId) {
+      fail('STATEMENT_WAITING_IDENTITY_MISMATCH', 'Cancelled token identity does not match');
+    }
+    tasks.delete(input.taskRunId);
+    return true;
+  }
+
+  return Object.freeze({
+    beginContinuation,
+    cancelInteraction,
+    enterWaiting,
+    forgetCancelled,
+    invalidate,
+    settleContinuation
+  });
 }
 
 module.exports = {

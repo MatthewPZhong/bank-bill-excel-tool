@@ -11,6 +11,10 @@ class StatementInteractionContractError extends Error {
   }
 }
 
+const PUBLIC_TOKEN_KEYS = Object.freeze([
+  'tokenId', 'purpose', 'serviceGeneration', 'sessionRevision', 'expiresAt', 'allowedChoiceDigest'
+]);
+
 function exact(value, keys, label) {
   if (!value || typeof value !== 'object' || Array.isArray(value) ||
       ![Object.prototype, null].includes(Object.getPrototypeOf(value)) ||
@@ -20,15 +24,12 @@ function exact(value, keys, label) {
   return value;
 }
 
-function createStatementBigAccountContinuationRequest(input) {
-  const value = canonicalJsonSnapshot(input, { maxBytes: 1024 * 1024 });
-  const record = exact(value, ['command', 'token', 'choice', 'importEvidence'], 'StatementBigAccountContinuation');
-  if (record.command !== 'resolve-big-account') {
-    throw new StatementInteractionContractError('STATEMENT_CONTINUATION_COMMAND_INVALID', 'Continuation command is invalid');
-  }
-  const token = exact(record.token, [
-    'tokenId', 'purpose', 'serviceGeneration', 'sessionRevision', 'expiresAt', 'allowedChoiceDigest'
-  ], 'StatementPublicToken');
+function createStatementPublicTokenIdentity(input) {
+  const token = exact(
+    canonicalJsonSnapshot(input, { maxBytes: 4096 }),
+    PUBLIC_TOKEN_KEYS,
+    'StatementPublicToken'
+  );
   if (token.purpose !== 'big-account') {
     throw new StatementInteractionContractError('STATEMENT_CONTINUATION_PURPOSE_INVALID', 'Continuation purpose is invalid');
   }
@@ -39,6 +40,16 @@ function createStatementBigAccountContinuationRequest(input) {
       typeof token.allowedChoiceDigest !== 'string' || !/^[0-9a-f]{64}$/.test(token.allowedChoiceDigest)) {
     throw new StatementInteractionContractError('STATEMENT_CONTINUATION_TOKEN_INVALID', 'Continuation token is invalid');
   }
+  return Object.freeze(token);
+}
+
+function createStatementBigAccountContinuationRequest(input) {
+  const value = canonicalJsonSnapshot(input, { maxBytes: 1024 * 1024 });
+  const record = exact(value, ['command', 'token', 'choice', 'importEvidence'], 'StatementBigAccountContinuation');
+  if (record.command !== 'resolve-big-account') {
+    throw new StatementInteractionContractError('STATEMENT_CONTINUATION_COMMAND_INVALID', 'Continuation command is invalid');
+  }
+  const token = createStatementPublicTokenIdentity(record.token);
   const choice = exact(record.choice, ['mode', 'assignments'], 'StatementBigAccountChoice');
   if (!['fixed', 'unfixed'].includes(choice.mode) ||
       !Array.isArray(choice.assignments) || choice.assignments.length === 0) {
@@ -61,7 +72,24 @@ function createStatementBigAccountContinuationRequest(input) {
   });
 }
 
+function createStatementCancelInteractionRequest(input) {
+  const value = canonicalJsonSnapshot(input, { maxBytes: 8192 });
+  const record = exact(value, ['command', 'token'], 'StatementCancelInteraction');
+  if (record.command !== 'cancel-interaction') {
+    throw new StatementInteractionContractError(
+      'STATEMENT_CONTINUATION_COMMAND_INVALID',
+      'Cancel-interaction command is invalid'
+    );
+  }
+  return Object.freeze({
+    command: record.command,
+    token: createStatementPublicTokenIdentity(record.token)
+  });
+}
+
 module.exports = {
   StatementInteractionContractError,
-  createStatementBigAccountContinuationRequest
+  createStatementBigAccountContinuationRequest,
+  createStatementCancelInteractionRequest,
+  createStatementPublicTokenIdentity
 };

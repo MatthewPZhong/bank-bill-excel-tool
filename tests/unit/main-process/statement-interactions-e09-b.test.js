@@ -9,11 +9,30 @@ const XLSX = require('xlsx');
 
 const { canonicalSha256 } = require('../../../src/main-process/background-execution/canonical-json-v1');
 const {
+  createWorkerThreadAdapter
+} = require('../../../src/main-process/background-execution/adapters/worker-thread-adapter');
+const {
+  createExecutionPolicyRegistry,
+  createStaticRegistry
+} = require('../../../src/main-process/background-execution/execution-policy-registry');
+const {
   createJobEnvelope,
   createServiceControlEnvelope
 } = require('../../../src/main-process/background-execution/protocol');
+const {
+  createResourceGovernor
+} = require('../../../src/main-process/background-execution/resource-governor');
+const {
+  createExecutionSupervisor
+} = require('../../../src/main-process/background-execution/supervisor');
 const { sourceSnapshotFromStat } = require('../../../src/main-process/archive-center/source-snapshot');
+const {
+  STATEMENT_RESULT_VALIDATORS
+} = require('../../../src/main-process/statement-worker/contracts');
 const { createStatementTemplateEvidence } = require('../../../src/main-process/statement-worker/import-contracts');
+const {
+  createStatementWorkerEntryRegistry
+} = require('../../../src/main-process/statement-worker/runtime-bindings');
 const { createStatementService } = require('../../../src/main-process/statement-worker/service');
 const {
   buildBigAccountInteractionDraft,
@@ -26,6 +45,20 @@ const {
 const {
   createStatementWaitingUserCoordinator
 } = require('../../../src/main-process/statement-worker/waiting-user-coordinator');
+
+const ROOT = path.join(__dirname, '..', '..', '..');
+const POLICY_FIXTURE = path.join(
+  ROOT,
+  'changes',
+  'background-execution-v3.2.x-contract-baseline',
+  'changes',
+  'background-execution',
+  'validation',
+  'fixtures',
+  'valid',
+  'policy-registry.v3.2.x.json'
+);
+const STATIC_KEY_FIXTURE = path.join(path.dirname(POLICY_FIXTURE), 'static-key-manifest.v3.2.x.json');
 
 function tokenDraft(overrides = {}) {
   const evidence = {
@@ -60,6 +93,228 @@ function tokenDraft(overrides = {}) {
     privateContext: { evidence, choiceDomain, detailRows: [['private']] },
     ...overrides
   };
+}
+
+function createManagedPolicyRegistry(options = {}) {
+  const fixture = JSON.parse(fs.readFileSync(POLICY_FIXTURE, 'utf8'));
+  const actionKeys = ['statement:import', 'statement:resolve-big-account'];
+  const policies = actionKeys.map((actionKey) => {
+    const policy = structuredClone(fixture.actions[actionKey]);
+    if (typeof options.policyMutation === 'function') options.policyMutation(policy, actionKey);
+    return policy;
+  });
+  const entryRegistry = createStaticRegistry(createStatementWorkerEntryRegistry({
+    workerData: options.workerData
+  })).freeze();
+  const validatorRegistry = createStaticRegistry(Object.fromEntries(policies.map((policy) => [
+    policy.result.validatorKey,
+    STATEMENT_RESULT_VALIDATORS[policy.actionKey]
+  ]))).freeze();
+  return createExecutionPolicyRegistry({
+    policies,
+    entryRegistry,
+    validatorRegistry,
+    staticKeys: JSON.parse(fs.readFileSync(STATIC_KEY_FIXTURE, 'utf8')),
+    generatedAt: '2026-08-28T00:00:00.000Z',
+    baselineRef: 'e09-b-statement-interactions'
+  }).freeze();
+}
+
+function createManagedHarness(options = {}) {
+  const harnessOptions = options;
+  const policyRegistry = createManagedPolicyRegistry({
+    ...options,
+    workerData: {
+      ...(options.workerData || {}),
+      ...(options.sourceRoot ? { statementSourceRoot: options.sourceRoot } : {})
+    }
+  });
+  const baseGovernor = createResourceGovernor({
+    budgets: {
+      cpuSlots: 4,
+      workerThreadSlots: 4,
+      utilityProcessSlots: 1,
+      ioHeavySlots: 4,
+      memoryBytes: 1024 * 1024 * 1024
+    }
+  });
+  const trace = [];
+  const diagnostics = [];
+  const workerHandles = [];
+  const nativeAdapter = createWorkerThreadAdapter();
+  const workerThreadAdapter = Object.freeze({
+    kind: 'worker-thread',
+    start(startOptions) {
+      const handle = nativeAdapter.start({
+        ...startOptions,
+        onMessage(message) {
+          trace.push(structuredClone(message));
+          startOptions.onMessage(message);
+        }
+      });
+      workerHandles.push(handle);
+      const send = handle.send.bind(handle);
+      return Object.freeze({
+        ...handle,
+        send(message, transferList) {
+          trace.push(structuredClone(message));
+          if (typeof harnessOptions.onHostSend === 'function' &&
+              harnessOptions.onHostSend(message, () => send(message, transferList)) === true) {
+            return undefined;
+          }
+          return send(message, transferList);
+        }
+      });
+    }
+  });
+  return {
+    policyRegistry,
+    resourceGovernor: baseGovernor,
+    trace,
+    diagnostics,
+    workerHandles,
+    supervisor: createExecutionSupervisor({
+      policyRegistry,
+      resourceGovernor: baseGovernor,
+      workerThreadAdapter,
+      diagnostics: (event) => diagnostics.push(event),
+      initTimeoutMs: 5000,
+      executionTimeoutMs: 15000
+    })
+  };
+}
+
+async function waitFor(predicate, label, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${label}`);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+function writeRows(filePath, rows) {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(rows), 'Sheet1');
+  XLSX.writeFile(workbook, filePath);
+}
+
+function writeStatement(filePath, rows) {
+  writeRows(filePath, [
+    ['日期', '贷', '借', '币种', '账号'],
+    ...rows
+  ]);
+}
+
+function source(filePath) {
+  return {
+    resourceId: path.basename(filePath),
+    snapshot: sourceSnapshotFromStat(fs.lstatSync(filePath, { bigint: true }))
+  };
+}
+
+function directTemplateEvidence(templateId = 'template-direct') {
+  return createStatementTemplateEvidence({
+    templateId,
+    templateName: '测试银行-Direct',
+    expectedSourceHeaders: ['日期', '贷', '借', '币种', '账号'],
+    orderedTargetFields: ['Bill Date', 'Credit Amount', 'Debit Amount', 'Currency', 'MerchantId'],
+    mappingByField: {
+      'Bill Date': '日期',
+      'Credit Amount': '贷',
+      'Debit Amount': '借',
+      Currency: '币种',
+      MerchantId: '账号'
+    },
+    accountMappingByBankId: {},
+    currencyMappings: [],
+    amountMappingRules: {
+      nameSourceField: '',
+      accountSourceField: '',
+      signedAmountSourceField: ''
+    },
+    amountSplitByField: null,
+    billSplitMerge: null,
+    dateParseOrder: 'auto'
+  });
+}
+
+function bigAccountTemplateEvidence(options = {}) {
+  const templateId = options.templateId || 'template-big';
+  return createStatementTemplateEvidence({
+    templateId,
+    templateName: '测试银行-大账号',
+    expectedSourceHeaders: ['日期', '贷', '借', '币种', '账号'],
+    orderedTargetFields: ['Bill Date', 'Credit Amount', 'Debit Amount', 'Currency', 'MerchantId'],
+    mappingByField: {
+      'Bill Date': '日期',
+      'Credit Amount': '贷',
+      'Debit Amount': '借',
+      Currency: '币种',
+      MerchantId: '__FIXED__:__MULTI_BIG_ACCOUNT__'
+    },
+    accountMappingByBankId: {},
+    currencyMappings: [],
+    amountMappingRules: {
+      nameSourceField: '',
+      accountSourceField: '',
+      signedAmountSourceField: ''
+    },
+    amountSplitByField: null,
+    billSplitMerge: null,
+    dateParseOrder: 'auto',
+    bigAccounts: options.bigAccounts || [
+      { merchantId: 'M001', currencies: ['USD'], accountNature: 'client' }
+    ],
+    fixedAssignments: options.fixedAssignments || []
+  });
+}
+
+function importInput(templateEvidence, sourceFiles) {
+  return {
+    command: 'import',
+    sessionKey: templateEvidence.snapshot.templateId,
+    sources: sourceFiles.map(source),
+    templateEvidence
+  };
+}
+
+function managedRequest(actionKey, input, ordinal, options = {}) {
+  const operationKey = `statement-operation-${ordinal}`;
+  const taskRunId = options.taskRunId || `statement-task-${ordinal}`;
+  return {
+    actionKey,
+    operationKey,
+    jobId: `statement-job-${ordinal}`,
+    production: false,
+    input,
+    context: {
+      kind: 'operation',
+      value: {
+        taskRunId,
+        taskKey: 'file:import',
+        moduleId: 'statement',
+        parentRunId: options.parentRunId || `statement-parent-${ordinal}`,
+        operationKey
+      }
+    },
+    units: []
+  };
+}
+
+function publicToken(interaction) {
+  return {
+    tokenId: interaction.tokenId,
+    purpose: interaction.purpose,
+    serviceGeneration: interaction.serviceGeneration,
+    sessionRevision: interaction.sessionRevision,
+    expiresAt: interaction.expiresAt,
+    allowedChoiceDigest: interaction.allowedChoiceDigest
+  };
+}
+
+function jobTrace(trace, jobId) {
+  return trace.filter((message) =>
+    message.jobId === jobId || (message.jobRef && message.jobRef.jobId === jobId));
 }
 
 test('token registry严格执行estimate→private insert→adopt ack→single-use并保持bounded状态', () => {
@@ -225,6 +480,127 @@ test('waiting-user部分release失败可按同一owner幂等重试且不重复�
     taskRunId: 'task-retry', status: 'running', phase: 'waiting-user'
   });
   assert.deepEqual(events, ['phase:phase-origin', 'lock:lock-origin', 'lock:lock-origin']);
+});
+
+test('continuation phase取得失败且lock补偿首次失败时仅同owner可精确清理后重获', async () => {
+  const coordinator = createStatementWaitingUserCoordinator();
+  const token = {
+    tokenId: 'token-cleanup', purpose: 'big-account', serviceGeneration: 1, sessionRevision: 0,
+    expiresAt: 2000, allowedChoiceDigest: 'c'.repeat(64)
+  };
+  await coordinator.enterWaiting({
+    taskRunId: 'task-cleanup', taskKey: 'file:import', operationKey: 'op-origin', jobId: 'job-origin',
+    token,
+    phaseOwner: { async release() {} }, phaseLeaseId: 'phase-origin',
+    lockOwner: { async release() {} }, lockId: 'lock-origin'
+  });
+  const events = [];
+  let releaseAttempts = 0;
+  const phaseError = Object.assign(new Error('phase unavailable'), { code: 'PHASE_BUSY' });
+  const phaseOwner = {
+    async acquire() {
+      events.push('phase:acquire');
+      throw phaseError;
+    }
+  };
+  const lockOwner = {
+    async acquire(_taskRunId, jobId) {
+      events.push(`lock:acquire:${jobId}`);
+      return { id: `lock-${jobId}` };
+    },
+    async release(id, jobId) {
+      releaseAttempts += 1;
+      events.push(`lock:release:${id}:${jobId}:${releaseAttempts}`);
+      if (releaseAttempts === 1) throw new Error('transient cleanup failure');
+    }
+  };
+  const continuation = {
+    taskRunId: 'task-cleanup', taskKey: 'file:import', originOperationKey: 'op-origin',
+    operationKey: 'op-continuation', jobId: 'job-continuation', token, phaseOwner, lockOwner
+  };
+  await assert.rejects(
+    coordinator.beginContinuation(continuation),
+    (error) => error.code === 'STATEMENT_CONTINUATION_CLEANUP_REQUIRED'
+  );
+  await assert.rejects(
+    coordinator.beginContinuation({
+      ...continuation,
+      operationKey: 'op-late',
+      jobId: 'job-late'
+    }),
+    (error) => error.code === 'STATEMENT_CONTINUATION_OWNER_MISMATCH'
+  );
+  await assert.rejects(
+    coordinator.beginContinuation(continuation),
+    (error) => error.code === 'PHASE_BUSY' && error.message === 'phase unavailable'
+  );
+  assert.deepEqual(events, [
+    'lock:acquire:job-continuation',
+    'phase:acquire',
+    'lock:release:lock-job-continuation:job-continuation:1',
+    'lock:release:lock-job-continuation:job-continuation:2'
+  ], 'cleanup确认前不得重新acquire lock/phase');
+
+  let reacquired = false;
+  const resumed = await coordinator.beginContinuation({
+    ...continuation,
+    operationKey: 'op-resumed',
+    jobId: 'job-resumed',
+    phaseOwner: {
+      async acquire() {
+        reacquired = true;
+        return { id: 'phase-resumed' };
+      }
+    }
+  });
+  assert.equal(reacquired, true);
+  assert.deepEqual(resumed, {
+    taskRunId: 'task-cleanup', status: 'running', phase: 'executing'
+  });
+});
+
+test('waiting-user cancel仅在exact token owner ack后终结且失败仅允许同owner重试', async () => {
+  const coordinator = createStatementWaitingUserCoordinator();
+  const token = {
+    tokenId: 'token-cancel', purpose: 'big-account', serviceGeneration: 2, sessionRevision: 4,
+    expiresAt: 3000, allowedChoiceDigest: 'd'.repeat(64)
+  };
+  await coordinator.enterWaiting({
+    taskRunId: 'task-cancel', taskKey: 'file:import', operationKey: 'op-origin', jobId: 'job-origin',
+    token,
+    phaseOwner: { async release() {} }, phaseLeaseId: 'phase-origin',
+    lockOwner: { async release() {} }, lockId: 'lock-origin'
+  });
+  let attempts = 0;
+  let acknowledge;
+  const owner = {
+    cancel(input) {
+      attempts += 1;
+      assert.deepEqual(input.token, token);
+      if (attempts === 1) return Promise.reject(new Error('transient owner failure'));
+      return new Promise((resolve) => { acknowledge = resolve; });
+    }
+  };
+  const request = {
+    taskRunId: 'task-cancel', taskKey: 'file:import', originOperationKey: 'op-origin',
+    token, cancelOwnerKey: 'worker-generation-2', cancelOwner: owner
+  };
+  await assert.rejects(coordinator.cancelInteraction(request), /transient owner failure/);
+  assert.throws(() => coordinator.cancelInteraction({
+    ...request,
+    cancelOwnerKey: 'worker-generation-3'
+  }), (error) => error.code === 'STATEMENT_CONTINUATION_OWNER_MISMATCH');
+  const first = coordinator.cancelInteraction(request);
+  const duplicate = coordinator.cancelInteraction(request);
+  assert.strictEqual(first, duplicate, 'in-flight duplicate必须共用同一ack promise');
+  let settled = false;
+  first.finally(() => { settled = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false, 'owner ack前Task不得cancelled');
+  acknowledge({ status: 'interaction-cancelled', tokenId: token.tokenId });
+  assert.deepEqual(await first, { taskRunId: 'task-cancel', status: 'cancelled', phase: null });
+  assert.equal(attempts, 2);
+  assert.equal(coordinator.forgetCancelled({ taskRunId: 'task-cancel', tokenId: token.tokenId }), true);
 });
 
 test('continuation重新映射的candidate digest变化时在session mutation前fail closed', async () => {
@@ -428,4 +804,524 @@ test('真实Statement Service完成pending reservation adoption、同Task contin
   assert.equal(continuationDone.payload.result.summary.sessionRevision, 1);
   assert.equal(continuationDone.payload.result.summary.rowCount, 2);
   assert.equal(continuationDone.jobId, 'job-continuation');
+
+  const staleCancelStart = trace.length;
+  start('statement:resolve-big-account', 'same-task/statement:resolve-big-account/2', 'job-stale-cancel', {
+    command: 'cancel-interaction',
+    token: publicToken(interaction)
+  });
+  const staleCancel = await nextOperation('job:error', staleCancelStart);
+  assert.equal(staleCancel.payload.error.code, 'STATEMENT_TOKEN_STALE',
+    '已consume token的release tombstone不得冒充pending interaction cancel ack');
+  assert.equal(trace.slice(staleCancelStart).some((message) => message.operation === 'resource:request'), false);
+});
+
+test('真实Host/Worker在600个合法维护账号的最终public DTO超限时于资源申请前稳定拒绝', async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-e09-b-public-limit-'));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const filePath = path.join(tempDir, 'large-prompt.xlsx');
+  writeStatement(filePath, [['2026-08-01', 10, '', 'USD', 'BANK-1']]);
+  const accounts = Array.from({ length: 600 }, (_value, index) => ({
+    merchantId: `ACCOUNT-${String(index).padStart(3, '0')}-${'M'.repeat(180)}`,
+    currencies: ['USD'],
+    accountNature: 'client'
+  }));
+  const evidence = bigAccountTemplateEvidence({
+    templateId: 'template-public-limit',
+    bigAccounts: accounts
+  });
+  const harness = createManagedHarness({ sourceRoot: tempDir });
+  t.after(async () => {
+    await harness.supervisor.shutdown({ forceServices: true, timeoutMs: 5000 });
+  });
+  const request = managedRequest(
+    'statement:import',
+    importInput(evidence, [filePath]),
+    'public-limit'
+  );
+  assert.ok(Buffer.byteLength(JSON.stringify(request), 'utf8') < 256 * 1024,
+    '测试请求本身必须是合法bounded transport input');
+  const result = await harness.supervisor.execute(request);
+  assert.equal(result.outcome, 'failed');
+  assert.equal(result.error.code, 'STATEMENT_PUBLIC_DTO_TOO_LARGE');
+  const trace = jobTrace(harness.trace, request.jobId);
+  assert.equal(trace.some((message) => message.operation === 'resource:request'), false,
+    '最终public projection必须在任何heavy token resource request前验证');
+  assert.equal(trace.filter((message) => ['job:done', 'job:error'].includes(message.operation)).length, 1);
+  const status = await harness.supervisor.execute(managedRequest(
+    'statement:import',
+    { command: 'status' },
+    'public-limit-status'
+  ));
+  assert.equal(status.outcome, 'completed');
+  assert.equal(status.result.summary.serviceGeneration, 1);
+  assert.equal(status.result.summary.sessionRevision, 0);
+  assert.equal(status.result.summary.pendingInteractionCount, 0);
+  assert.deepEqual(
+    harness.resourceGovernor.snapshot().activeLeases.map((lease) => lease.kind),
+    ['base']
+  );
+});
+
+test('真实Host adoption timer撤销未adopt token后等待release-ack唯一终结且同generation可继续', async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-e09-b-token-timeout-'));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const filePath = path.join(tempDir, 'timeout.xlsx');
+  writeStatement(filePath, [['2026-08-01', 10, '', 'USD', 'BANK-1']]);
+  const harness = createManagedHarness({
+    sourceRoot: tempDir,
+    workerData: { statementFaultInjection: { withholdAdoptOrdinal: 1 } },
+    policyMutation(policy) {
+      policy.service.resourceControl.adoptionTimeoutMs = 20;
+    }
+  });
+  t.after(async () => {
+    await harness.supervisor.shutdown({ forceServices: true, timeoutMs: 5000 });
+  });
+  const request = managedRequest(
+    'statement:import',
+    importInput(bigAccountTemplateEvidence({ templateId: 'template-timeout' }), [filePath]),
+    'token-timeout'
+  );
+  const failed = await harness.supervisor.execute(request);
+  assert.equal(failed.outcome, 'failed');
+  assert.equal(failed.error.code, 'STATEMENT_ADOPTION_TIMEOUT');
+  const trace = jobTrace(harness.trace, request.jobId);
+  for (const operation of ['resource:grant', 'resource:revoke', 'resource:release', 'resource:release-ack']) {
+    assert.equal(trace.some((message) => message.operation === operation), true, operation);
+  }
+  assert.equal(trace.some((message) => message.operation === 'resource:adopted'), false);
+  const releaseAckIndex = trace.findIndex((message) => message.operation === 'resource:release-ack');
+  const terminalIndex = trace.findIndex((message) => message.operation === 'job:error');
+  assert.ok(releaseAckIndex >= 0 && terminalIndex > releaseAckIndex,
+    'token release-ack必须先于唯一job:error');
+  assert.equal(trace.filter((message) => ['job:done', 'job:error'].includes(message.operation)).length, 1);
+
+  const status = await harness.supervisor.execute(managedRequest(
+    'statement:import',
+    { command: 'status' },
+    'token-timeout-status'
+  ));
+  assert.equal(status.outcome, 'completed');
+  assert.equal(status.result.summary.serviceGeneration, 1);
+  assert.equal(status.result.summary.sessionRevision, 0);
+  assert.equal(status.result.summary.pendingInteractionCount, 0);
+  assert.deepEqual(
+    harness.resourceGovernor.snapshot().activeLeases.map((lease) => lease.kind),
+    ['base']
+  );
+});
+
+test('真实Host/Worker对grant后token adoption异常走exact revoke/release且不关闭generation', async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-e09-b-post-grant-failure-'));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const filePath = path.join(tempDir, 'post-grant.xlsx');
+  writeStatement(filePath, [['2026-08-01', 10, '', 'USD', 'BANK-1']]);
+  const harness = createManagedHarness({
+    sourceRoot: tempDir,
+    workerData: { statementFaultInjection: { failAfterGrantOrdinal: 1 } }
+  });
+  t.after(async () => {
+    await harness.supervisor.shutdown({ forceServices: true, timeoutMs: 5000 });
+  });
+  const request = managedRequest(
+    'statement:import',
+    importInput(bigAccountTemplateEvidence({ templateId: 'template-post-grant' }), [filePath]),
+    'post-grant-failure'
+  );
+  const failed = await harness.supervisor.execute(request);
+  assert.equal(failed.outcome, 'failed');
+  assert.equal(failed.error.code, 'STATEMENT_POST_GRANT_ADOPTION_FAILED');
+  const trace = jobTrace(harness.trace, request.jobId);
+  for (const operation of ['resource:grant', 'resource:revoke', 'resource:release', 'resource:release-ack']) {
+    assert.equal(trace.some((message) => message.operation === operation), true, operation);
+  }
+  assert.equal(trace.some((message) => message.operation === 'resource:adopted'), false);
+  assert.equal(trace.filter((message) => ['job:done', 'job:error'].includes(message.operation)).length, 1);
+  assert.equal(harness.diagnostics.some((event) => event.type === 'service-generation-closed'), false);
+  const status = await harness.supervisor.execute(managedRequest(
+    'statement:import',
+    { command: 'status' },
+    'post-grant-status'
+  ));
+  assert.equal(status.outcome, 'completed');
+  assert.equal(status.result.summary.serviceGeneration, 1);
+  assert.equal(status.result.summary.pendingInteractionCount, 0);
+  assert.deepEqual(harness.resourceGovernor.snapshot().activeLeases.map((lease) => lease.kind), ['base']);
+});
+
+test('真实Host/Worker对grant后persistent异常也保留exact cleanup tombstone并同代复用', async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-e09-b-persistent-grant-failure-'));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const filePath = path.join(tempDir, 'persistent.xlsx');
+  writeStatement(filePath, [['2026-08-01', 10, '', 'USD', 'M001']]);
+  const harness = createManagedHarness({
+    sourceRoot: tempDir,
+    workerData: { statementFaultInjection: { failAfterGrantOrdinal: 1 } }
+  });
+  t.after(async () => {
+    await harness.supervisor.shutdown({ forceServices: true, timeoutMs: 5000 });
+  });
+  const request = managedRequest(
+    'statement:import',
+    importInput(directTemplateEvidence('template-persistent-post-grant'), [filePath]),
+    'persistent-post-grant-failure'
+  );
+  const failed = await harness.supervisor.execute(request);
+  assert.equal(failed.outcome, 'failed');
+  assert.equal(failed.error.code, 'STATEMENT_POST_GRANT_ADOPTION_FAILED');
+  const trace = jobTrace(harness.trace, request.jobId);
+  for (const operation of ['resource:grant', 'resource:revoke', 'resource:release', 'resource:release-ack']) {
+    assert.equal(trace.some((message) => message.operation === operation), true, operation);
+  }
+  assert.equal(trace.some((message) => message.operation === 'resource:adopted'), false);
+  assert.equal(trace.filter((message) => ['job:done', 'job:error'].includes(message.operation)).length, 1);
+  assert.equal(harness.diagnostics.some((event) => event.type === 'service-generation-closed'), false);
+  const status = await harness.supervisor.execute(managedRequest(
+    'statement:import',
+    { command: 'status' },
+    'persistent-post-grant-status'
+  ));
+  assert.equal(status.result.summary.serviceGeneration, 1);
+  assert.equal(status.result.summary.sessionRevision, 0);
+  assert.deepEqual(harness.resourceGovernor.snapshot().activeLeases.map((lease) => lease.kind), ['base']);
+});
+
+test('真实fixed-mode Worker对repeated-header全空/全零按legacy NO_TRANSACTION_DATA零资源收口', async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-e09-b-zero-'));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const emptyPath = path.join(tempDir, 'empty.xlsx');
+  const zeroPath = path.join(tempDir, 'zero.xlsx');
+  writeRows(emptyPath, [
+    ['日期', '贷', '借', '币种', '账号'],
+    ['2026-08-01', '', '', 'USD', 'BANK-EMPTY'],
+    ['日期', '贷', '借', '币种', '账号'],
+    ['2026-08-02', '', '', 'USD', 'BANK-EMPTY-2']
+  ]);
+  writeRows(zeroPath, [
+    ['日期', '贷', '借', '币种', '账号'],
+    ['2026-08-03', 0, 0, 'USD', 'BANK-ZERO'],
+    ['日期', '贷', '借', '币种', '账号'],
+    ['2026-08-04', '0.00', '-0', 'USD', 'BANK-ZERO-2']
+  ]);
+  const evidence = bigAccountTemplateEvidence({
+    templateId: 'template-zero',
+    fixedAssignments: [
+      { merchantId: 'M001', currency: 'USD', rowIndex: 0 },
+      { merchantId: 'M001', currency: 'USD', rowIndex: 1 }
+    ]
+  });
+  const harness = createManagedHarness({ sourceRoot: tempDir });
+  t.after(async () => {
+    await harness.supervisor.shutdown({ forceServices: true, timeoutMs: 5000 });
+  });
+  const request = managedRequest(
+    'statement:import',
+    importInput(evidence, [emptyPath, zeroPath]),
+    'zero'
+  );
+  const failed = await harness.supervisor.execute(request);
+  assert.equal(failed.outcome, 'failed');
+  assert.equal(failed.error.code, 'NO_TRANSACTION_DATA');
+  const trace = jobTrace(harness.trace, request.jobId);
+  assert.equal(trace.some((message) => message.operation === 'resource:request'), false);
+  assert.equal(trace.filter((message) => ['job:done', 'job:error'].includes(message.operation)).length, 1);
+  const status = await harness.supervisor.execute(managedRequest(
+    'statement:import',
+    { command: 'status' },
+    'zero-status'
+  ));
+  assert.equal(status.outcome, 'completed');
+  assert.equal(status.result.summary.serviceGeneration, 1);
+  assert.equal(status.result.summary.sessionRevision, 0);
+  assert.equal(status.result.summary.sessionCount, 0);
+  assert.equal(status.result.summary.rowCount, 0);
+  assert.equal(status.result.summary.pendingInteractionCount, 0);
+  assert.deepEqual(
+    harness.resourceGovernor.snapshot().activeLeases.map((lease) => lease.kind),
+    ['base']
+  );
+});
+
+test('真实Host/Governor/Worker显式cancel-interaction等待exact release-ack且保留Base/Persistent', async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-e09-b-explicit-cancel-'));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const stablePath = path.join(tempDir, 'stable.xlsx');
+  const promptPath = path.join(tempDir, 'prompt.xlsx');
+  writeStatement(stablePath, [['2026-07-31', 5, '', 'USD', 'STABLE']]);
+  writeStatement(promptPath, [['2026-08-01', 10, '', 'USD', 'BANK-1']]);
+  let heldReleaseAck = null;
+  let didWithholdReleaseAck = false;
+  const harness = createManagedHarness({
+    sourceRoot: tempDir,
+    onHostSend(message, dispatch) {
+      if (message.operation === 'resource:release-ack' && !didWithholdReleaseAck) {
+        didWithholdReleaseAck = true;
+        heldReleaseAck = dispatch;
+        return true;
+      }
+      return false;
+    }
+  });
+  t.after(async () => {
+    await harness.supervisor.shutdown({ forceServices: true, timeoutMs: 5000 });
+  });
+  const taskRunId = 'same-task-explicit-cancel';
+  const stable = await harness.supervisor.execute(managedRequest(
+    'statement:import',
+    importInput(directTemplateEvidence('template-cancel-stable'), [stablePath]),
+    'cancel-stable',
+    { taskRunId }
+  ));
+  assert.equal(stable.outcome, 'completed');
+  assert.equal(stable.result.summary.sessionRevision, 1);
+  assert.deepEqual(
+    harness.resourceGovernor.snapshot().activeLeases.map((lease) => lease.kind).sort(),
+    ['base', 'persistent']
+  );
+
+  const issuedRequest = managedRequest(
+    'statement:import',
+    importInput(bigAccountTemplateEvidence({ templateId: 'template-cancel-prompt' }), [promptPath]),
+    'cancel-issued',
+    { taskRunId }
+  );
+  const issued = await harness.supervisor.execute(issuedRequest);
+  assert.equal(issued.outcome, 'completed');
+  assert.equal(issued.result.status, 'interaction-required');
+  const token = publicToken(issued.result.interaction);
+  assert.deepEqual(
+    harness.resourceGovernor.snapshot().activeLeases.map((lease) => lease.kind).sort(),
+    ['base', 'pending-interaction', 'persistent']
+  );
+
+  const coordinator = createStatementWaitingUserCoordinator();
+  await coordinator.enterWaiting({
+    taskRunId,
+    taskKey: 'file:import',
+    operationKey: issuedRequest.operationKey,
+    jobId: issuedRequest.jobId,
+    token,
+    phaseOwner: { async release() {} },
+    phaseLeaseId: 'phase-issued',
+    lockOwner: { async release() {} },
+    lockId: 'lock-issued'
+  });
+  let cancelOwnerAttempts = 0;
+  let workerCancelExecutions = 0;
+  const cancelOwner = {
+    cancel() {
+      cancelOwnerAttempts += 1;
+      if (cancelOwnerAttempts === 1) return Promise.reject(new Error('transient cancel route failure'));
+      workerCancelExecutions += 1;
+      return harness.supervisor.execute(managedRequest(
+        'statement:resolve-big-account',
+        { command: 'cancel-interaction', token },
+        `cancel-interaction-${workerCancelExecutions}`,
+        { taskRunId }
+      )).then((result) => {
+        assert.equal(result.outcome, 'completed', JSON.stringify({
+          outcome: result.outcome,
+          error: result.error,
+          diagnostics: harness.diagnostics
+        }));
+        return result.result;
+      });
+    }
+  };
+  const cancellationInput = {
+    taskRunId,
+    taskKey: 'file:import',
+    originOperationKey: issuedRequest.operationKey,
+    token,
+    cancelOwnerKey: 'service.statement/generation/1',
+    cancelOwner
+  };
+  await assert.rejects(coordinator.cancelInteraction(cancellationInput), /transient cancel route failure/);
+  assert.throws(() => coordinator.cancelInteraction({
+    ...cancellationInput,
+    cancelOwnerKey: 'service.statement/generation/2'
+  }), (error) => error.code === 'STATEMENT_CONTINUATION_OWNER_MISMATCH');
+  const first = coordinator.cancelInteraction(cancellationInput);
+  const duplicate = coordinator.cancelInteraction(cancellationInput);
+  assert.strictEqual(first, duplicate);
+  let taskCancelled = false;
+  first.then(() => { taskCancelled = true; });
+  await waitFor(() => heldReleaseAck !== null, 'withheld token release ack');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(taskCancelled, false, 'release-ack前Task必须保持running/waiting-user');
+  assert.deepEqual(
+    harness.resourceGovernor.snapshot().activeLeases.map((lease) => lease.kind).sort(),
+    ['base', 'persistent', 'phase']
+  );
+  const dispatchReleaseAck = heldReleaseAck;
+  heldReleaseAck = null;
+  dispatchReleaseAck();
+  assert.deepEqual(await first, { taskRunId, status: 'cancelled', phase: null });
+  assert.equal(cancelOwnerAttempts, 2);
+  assert.equal(workerCancelExecutions, 1);
+  assert.deepEqual(await coordinator.cancelInteraction(cancellationInput), {
+    taskRunId, status: 'cancelled', phase: null
+  });
+  assert.equal(workerCancelExecutions, 1, '已ack重复cancel不得再次命中Worker');
+  const workerRetry = await harness.supervisor.execute(managedRequest(
+    'statement:resolve-big-account',
+    { command: 'cancel-interaction', token },
+    'cancel-interaction-owner-retry',
+    { taskRunId }
+  ));
+  assert.equal(workerRetry.outcome, 'completed');
+  assert.deepEqual(workerRetry.result, {
+    status: 'interaction-cancelled',
+    tokenId: token.tokenId
+  }, 'Worker必须对同一exact cancel token的结果丢失重试保持幂等');
+
+  const status = await harness.supervisor.execute(managedRequest(
+    'statement:import',
+    { command: 'status' },
+    'cancel-status',
+    { taskRunId }
+  ));
+  assert.equal(status.result.summary.serviceGeneration, 1);
+  assert.equal(status.result.summary.sessionRevision, 1);
+  assert.equal(status.result.summary.fileCount, 1);
+  assert.equal(status.result.summary.pendingInteractionCount, 0);
+  assert.deepEqual(
+    harness.resourceGovernor.snapshot().activeLeases.map((lease) => lease.kind).sort(),
+    ['base', 'persistent']
+  );
+  assert.equal(harness.diagnostics.some((event) => event.type === 'service-generation-closed'), false);
+});
+
+test('真实Supervisor/Host/Worker双source initial与continuation safe-point cancel无终态后request且同代复用', async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-e09-b-multisource-cancel-'));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const firstPath = path.join(tempDir, 'first-large.xlsx');
+  const secondPath = path.join(tempDir, 'second.xlsx');
+  const largeRows = Array.from({ length: 20000 }, (_value, index) => [
+    `2026-08-${String((index % 28) + 1).padStart(2, '0')}`,
+    index + 1,
+    '',
+    'USD',
+    `BANK-${index}`
+  ]);
+  writeStatement(firstPath, largeRows);
+  writeStatement(secondPath, [['2026-08-29', '', 2, 'USD', 'BANK-LAST']]);
+  const evidence = bigAccountTemplateEvidence({ templateId: 'template-multisource-cancel' });
+  const input = importInput(evidence, [firstPath, secondPath]);
+  const harness = createManagedHarness({
+    sourceRoot: tempDir,
+    policyMutation(policy) {
+      policy.cancellation.capability = 'user-cooperative';
+    }
+  });
+  let shutDown = false;
+  t.after(async () => {
+    if (!shutDown) {
+      await harness.supervisor.shutdown({ forceServices: true, timeoutMs: 5000 });
+    }
+  });
+
+  async function cancelAfterWorkerStarts(request) {
+    const control = harness.supervisor.start(request);
+    await waitFor(() => harness.trace.some((message) =>
+      message.operation === 'job:start' && message.jobId === request.jobId), `${request.jobId} start`);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(control.cancel({ reason: 'test-safe-point' }), true);
+    const result = await control.promise;
+    assert.equal(result.outcome, 'cancelled', JSON.stringify({ result, diagnostics: harness.diagnostics }));
+    const trace = jobTrace(harness.trace, request.jobId);
+    const terminals = trace.filter((message) => ['job:done', 'job:error'].includes(message.operation));
+    assert.equal(terminals.length, 1, '每个job只能有一个Worker终态');
+    assert.equal(trace.some((message) => message.operation === 'resource:request'), false,
+      'safe-point cancel后不得发任何resource request');
+    const terminalIndex = harness.trace.indexOf(terminals[0]);
+    assert.equal(harness.trace.slice(terminalIndex + 1).some((message) =>
+      message.operation === 'resource:request' &&
+      message.jobRef && message.jobRef.jobId === request.jobId), false,
+    'terminal后不得出现late resource request');
+    return result;
+  }
+
+  const initialRequest = managedRequest(
+    'statement:import',
+    input,
+    'multisource-initial-cancel'
+  );
+  await cancelAfterWorkerStarts(initialRequest);
+  let status = await harness.supervisor.execute(managedRequest(
+    'statement:import',
+    { command: 'status' },
+    'multisource-after-initial-cancel'
+  ));
+  assert.equal(status.result.summary.serviceGeneration, 1);
+  assert.equal(status.result.summary.sessionRevision, 0);
+  assert.equal(status.result.summary.pendingInteractionCount, 0);
+  assert.deepEqual(harness.resourceGovernor.snapshot().activeLeases.map((lease) => lease.kind), ['base']);
+
+  const taskRunId = 'same-task-multisource-continuation';
+  const issued = await harness.supervisor.execute(managedRequest(
+    'statement:import',
+    input,
+    'multisource-issued',
+    { taskRunId }
+  ));
+  assert.equal(issued.outcome, 'completed');
+  assert.equal(issued.result.status, 'interaction-required');
+  assert.equal(issued.result.interaction.prompt.rows.length, 2);
+  const token = publicToken(issued.result.interaction);
+  const continuationRequest = managedRequest(
+    'statement:resolve-big-account',
+    {
+      command: 'resolve-big-account',
+      token,
+      choice: {
+        mode: 'unfixed',
+        assignments: [
+          { rowIndex: 0, merchantId: 'M001', currency: 'USD' },
+          { rowIndex: 1, merchantId: 'M001', currency: 'USD' }
+        ]
+      },
+      importEvidence: input
+    },
+    'multisource-continuation-cancel',
+    { taskRunId }
+  );
+  await cancelAfterWorkerStarts(continuationRequest);
+  const continuationTrace = jobTrace(harness.trace, continuationRequest.jobId);
+  for (const operation of ['resource:release', 'resource:release-ack']) {
+    assert.equal(continuationTrace.some((message) => message.operation === operation), false,
+      `${operation}使用token原owner jobRef，不得错误冒充continuation owner`);
+  }
+  const tokenRelease = harness.trace.find((message) =>
+    message.operation === 'resource:release' &&
+    message.payload.reason === 'job-failed' &&
+    message.jobRef && message.jobRef.jobId === `statement-job-multisource-issued`);
+  assert.ok(tokenRelease, 'consuming token必须按原reservation owner精确释放');
+  const tokenReleaseAck = harness.trace.find((message) =>
+    message.operation === 'resource:release-ack' &&
+    message.controlId === tokenRelease.controlId &&
+    message.payload.reservationId === tokenRelease.payload.reservationId);
+  assert.ok(tokenReleaseAck, 'consuming token取消必须等待exact release-ack');
+  const continuationTerminal = continuationTrace.find((message) => message.operation === 'job:error');
+  assert.ok(
+    harness.trace.indexOf(tokenReleaseAck) < harness.trace.indexOf(continuationTerminal),
+    'continuation取消终态必须在token release-ack之后'
+  );
+  status = await harness.supervisor.execute(managedRequest(
+    'statement:import',
+    { command: 'status' },
+    'multisource-after-continuation-cancel',
+    { taskRunId }
+  ));
+  assert.equal(status.result.summary.serviceGeneration, 1);
+  assert.equal(status.result.summary.sessionRevision, 0);
+  assert.equal(status.result.summary.pendingInteractionCount, 0);
+  assert.deepEqual(harness.resourceGovernor.snapshot().activeLeases.map((lease) => lease.kind), ['base']);
+  assert.equal(harness.diagnostics.some((event) => event.type === 'service-generation-closed'), false);
+
+  await harness.supervisor.shutdown({ forceServices: true, timeoutMs: 5000 });
+  shutDown = true;
+  assert.equal(harness.resourceGovernor.snapshot().activeLeaseCount, 0);
+  assert.equal(harness.resourceGovernor.snapshot().activeDependencyCount, 0);
 });

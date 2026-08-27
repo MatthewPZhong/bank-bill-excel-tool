@@ -16,6 +16,9 @@ const failBeforeAdoptOrdinal = workerData && workerData.statementFaultInjection
 const withholdAdoptOrdinal = workerData && workerData.statementFaultInjection
   ? workerData.statementFaultInjection.withholdAdoptOrdinal
   : null;
+const failAfterGrantOrdinal = workerData && workerData.statementFaultInjection
+  ? workerData.statementFaultInjection.failAfterGrantOrdinal
+  : null;
 let statementSourceRoot = null;
 if (workerData && typeof workerData.statementSourceRoot === 'string') {
   try {
@@ -63,6 +66,12 @@ const service = createStatementService({
   },
   withholdAdopt() {
     adoptionGrantOrdinal += 1;
+    if (Number.isSafeInteger(failAfterGrantOrdinal) &&
+        adoptionGrantOrdinal === failAfterGrantOrdinal) {
+      const error = new Error('Injected Statement post-grant adoption failure');
+      error.code = 'STATEMENT_POST_GRANT_ADOPTION_FAILED';
+      throw error;
+    }
     return Number.isSafeInteger(withholdAdoptOrdinal) &&
       adoptionGrantOrdinal === withholdAdoptOrdinal;
   }

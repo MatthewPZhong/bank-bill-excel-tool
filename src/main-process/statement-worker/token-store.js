@@ -10,8 +10,12 @@ const {
 const {
   STATEMENT_RESOURCE_CONTRACT,
   createStatementInteractionPromptDto,
+  createStatementPublicInteractionDto,
   createStatementTokenHandleDto
 } = require('./contracts');
+const {
+  createStatementPublicTokenIdentity
+} = require('./interaction-contracts');
 const {
   estimateStatementPendingInteractionFootprint
 } = require('./state-footprint');
@@ -47,6 +51,20 @@ function createStatementTokenStore(options = {}) {
     const tokenId = createId();
     const expiresAt = now() + ttlMs;
     const allowedChoiceDigest = canonicalSha256(input.allowedChoices);
+    const prompt = createStatementInteractionPromptDto(input.purpose, input.prompt);
+    const publicInteraction = createStatementPublicInteractionDto({
+      token: {
+        tokenId,
+        purpose: input.purpose,
+        serviceGeneration: input.serviceGeneration,
+        sessionKey: input.sessionKey,
+        sessionRevision: input.sessionRevision,
+        expiresAt,
+        allowedChoiceDigest,
+        reservationId: 'preflight-reservation'
+      },
+      prompt
+    });
     return Object.freeze({
       tokenId,
       purpose: input.purpose,
@@ -56,7 +74,8 @@ function createStatementTokenStore(options = {}) {
       expiresAt,
       allowedChoiceDigest,
       privateContext,
-      prompt: createStatementInteractionPromptDto(input.purpose, input.prompt),
+      prompt,
+      publicInteraction,
       footprint
     });
   }
@@ -83,6 +102,7 @@ function createStatementTokenStore(options = {}) {
       ownerJobRef: grant.ownerJobRef,
       privateContext: draft.privateContext,
       prompt: draft.prompt,
+      publicInteraction: draft.publicInteraction,
       bytes: draft.footprint.estimatedBytes,
       state: 'inserted'
     };
@@ -127,6 +147,24 @@ function createStatementTokenStore(options = {}) {
     return record;
   }
 
+  function claimCancellation(publicToken, expected) {
+    const token = createStatementPublicTokenIdentity(publicToken);
+    const record = records.get(token.tokenId);
+    if (!record || !['published', 'releasing'].includes(record.state)) {
+      fail('STATEMENT_TOKEN_STALE', 'Statement token is not cancellable');
+    }
+    const handle = record.handle;
+    for (const key of ['purpose', 'serviceGeneration', 'sessionRevision', 'expiresAt', 'allowedChoiceDigest']) {
+      if (token[key] !== handle[key]) fail('STATEMENT_TOKEN_TAMPERED', `Statement token ${key} mismatch`);
+    }
+    if (expected.serviceGeneration !== handle.serviceGeneration ||
+        expected.sessionRevision !== handle.sessionRevision ||
+        expected.purpose !== handle.purpose) {
+      fail('STATEMENT_TOKEN_STALE', 'Statement cancellation identity is stale');
+    }
+    return record;
+  }
+
   function remove(tokenId) {
     const record = records.get(tokenId);
     if (!record) return null;
@@ -157,6 +195,7 @@ function createStatementTokenStore(options = {}) {
 
   return Object.freeze({
     beginConsume,
+    claimCancellation,
     insertPrivate,
     inspect,
     listStatus,

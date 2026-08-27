@@ -47,3 +47,33 @@
 | 3 | 接 big-account continuation重新读取/采用 | generation/revision/purpose/TTL/choice/template/source fail closed | stale/tamper/single-use/session revision tests | 资金输入边界不可信则不采用 | 保留 token 基础设施 dormant |
 | 4 | 实现 Main waiting-user coordinator | 同 TaskRun/new job，phase/lock exact release/reacquire | ownership/late event/idempotency unit tests | 不接 live | 仅保留 contract tests |
 | 5 | cancellation/crash/quit/invalidation与盲区复核 | 无 generalized stale ignore、无 lease/context泄漏 | fault/race/status/privacy tests | 保持 production false | 不扩大功能范围 |
+
+## Ultra Review Repair Round (`88edf636`)
+
+### Task Brief
+
+- Goal：在同一 E09-B PR 内最小修复 Ultra Reviewer 已证明并由项目负责人接受的 `P1=5 / P2=1`。
+- Context：repair base/parent 为 `88edf636306e8c1064cb5f0ad2885f1aff776df0`；六项均已有真实当前路径证据，不重开需求决策。
+- Constraints：不泛化为未来 action，不接 Main/Renderer live、E09-C/D/E10，不修改 production gate、金额/币种/恢复语义；所有资源终态等待 exact release/release-ack。
+- Done when：双 source safe-point cancel、oversize prompt pre-grant reject、token adoption-timeout、waiting-user cancel、零交易 repeated-header、phase cleanup-required 均有对应真实链路或精确 owner 测试，且旧证据无回归。
+
+### Repair Unknowns Register
+
+| 未知 | 类型 | 影响 | 可逆性 | 当前证据 | 处理 | 最便宜验证方式 | 当前决定 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| cancel 在 async draft/candidate 间隙如何禁止 post-terminal request | 状态/竞态 | 高 | 一般 | Reviewer 双 source trace；`beginJob` await 后缺统一终态检查 | PROBE | real Supervisor/Host/Worker cancel at source safe-point | consume 后立即绑定 owner；每个 await 与 request 前统一 assert active |
+| public DTO ceiling 应在哪个原子点验证 | 资源/隐私 | 高 | 容易 | 最终 projection 仅在 adopt-ack 构造 | PROBE | 600 maintained accounts + temp XLSX | `prepare` 阶段用 draft token fields 构造最终 public projection，request 前拒绝 |
+| token adoption-timeout completion 所有者 | 状态/资源 | 高 | 一般 | revoke path 给 inserted token 走 generic token branch，未保存 terminal completion | PROBE | real Host adoption timer + withholdAdopt | matching active inserted token 记录 timeout completion，release-ack 唯一 error |
+| waiting-user cancel 是否可不关闭 generation | 公共契约/ownership | 高 | 一般 | 当前只有 job cancel 与 coordinator invalidate | PROBE | issued→waiting→duplicate cancel + retry | 新增 exact bounded token identity 的 cancel job；Worker 校验并 release/ack 后 done，coordinator ack 后 cancelled |
+| repeated-header 零交易的最早拒绝点 | 资金/行数守恒 | 高 | 容易 | legacy `NO_TRANSACTION_DATA`；当前 draft 仍为 empty block 发 token | PROBE | real fixed-mode all-empty/all-zero Worker | provisional `rows.length===0` 时 resource/token/session mutation 前 fail closed |
+| phase acquire 补偿失败如何恢复 | ownership/幂等 | 中 | 容易 | catch 无条件重置 waiting-user | PROBE | release 第一次失败、第二次成功 fake owner | 保留 cleanup-required + exact lock/job/首错；同 owner 仅先重试 cleanup |
+
+### Repair 风险优先计划
+
+| 顺序 | 步骤 | 消除的未知/保护的不变量 | 成功证据 | 失败影响 | 回滚/收缩 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | safe-point cancel 与 token owner 绑定 | terminal 后零 request、consuming token不泄漏 | initial/continuation双 source真实链路 | 若失败不得继续资源修复 | 保留旧同步路径并撤销异步改动 |
+| 2 | prompt preflight 与 adoption-timeout terminal | grant 前有界；grant 后异常必回收且终结 | oversize/Host timer probes | 资源泄漏则不提交 | 将校验收缩至 E09-B big-account |
+| 3 | cancel-interaction 原语 | 不以关闭 generation 代偿 token cancel | duplicate/retry/base+persistent保留 | Task cancel不可信 | 保持 dormant、不接 live |
+| 4 | 零交易与 cleanup-required | 零输出可见；owner cleanup不盲重获 | repeated-header + fake owner tests | 资金/锁红线未关闭 | fail closed 保持旧 token 不采用 |
+| 5 | 全量定向验证与两类 blindspot pass | production/资金/恢复边界不漂移 | unit/integration/lint/check | 不提交 | 回退本修复轮 commit |

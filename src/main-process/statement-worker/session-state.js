@@ -4,6 +4,7 @@ const fs = require('node:fs');
 
 const { buildMappedRows } = require('../../backend/file-service');
 const { normalizeCell } = require('../../backend/file-service/common');
+const { hasEffectiveAmount } = require('../../backend/file-service/normalizers');
 const { canonicalSha256 } = require('../background-execution/canonical-json-v1');
 const {
   appendStatementSessionImport,
@@ -180,20 +181,12 @@ function identifyAccountBlocks(detailRows, options = {}) {
   const dataRows = detailRows.slice(1);
   const rowMetas = Array.isArray(detailRows.rowMetas) ? detailRows.rowMetas : [];
   const headerBreaks = Array.isArray(detailRows.headerBreaks) ? detailRows.headerBreaks : [];
-  if (!headerBreaks.length) {
-    return [{
-      blockOrdinal: 0,
-      startIndex: 0,
-      endIndex: Math.max(0, dataRows.length - 1),
-      startRowNumber: rowMetas[0]?.sourceRowNumber || 2
-    }];
-  }
   const creditIndex = headerRow.indexOf('Credit Amount');
   const debitIndex = headerRow.indexOf('Debit Amount');
   const isTransactionRow = (row) => {
-    const credit = creditIndex >= 0 && Array.isArray(row) ? normalizeCell(row[creditIndex]) : '';
-    const debit = debitIndex >= 0 && Array.isArray(row) ? normalizeCell(row[debitIndex]) : '';
-    return credit !== '' || debit !== '';
+    const credit = creditIndex >= 0 && Array.isArray(row) ? row[creditIndex] : '';
+    const debit = debitIndex >= 0 && Array.isArray(row) ? row[debitIndex] : '';
+    return hasEffectiveAmount(credit) || hasEffectiveAmount(debit);
   };
   const trimBlock = (startIndex, initialEndIndex) => {
     let endIndex = initialEndIndex;
@@ -201,6 +194,16 @@ function identifyAccountBlocks(detailRows, options = {}) {
     while (startIndex <= endIndex && !isTransactionRow(dataRows[startIndex])) startIndex += 1;
     return { startIndex, endIndex };
   };
+  if (!headerBreaks.length) {
+    const trimmed = trimBlock(0, dataRows.length - 1);
+    if (!includeEmptyBlocks && trimmed.startIndex > trimmed.endIndex) return [];
+    return [{
+      blockOrdinal: 0,
+      startIndex: trimmed.startIndex,
+      endIndex: trimmed.endIndex,
+      startRowNumber: rowMetas[trimmed.startIndex]?.sourceRowNumber || 2
+    }];
+  }
   const blocks = [];
   let blockStart = 0;
   let previousBreak = null;
@@ -508,6 +511,12 @@ async function buildBigAccountInteractionDraft(state, request, options = {}) {
     await new Promise((resolve) => setImmediate(resolve));
   }
   const rows = selectionRows(provisionalEntries);
+  if (rows.length === 0) {
+    throw new StatementSessionError(
+      'NO_TRANSACTION_DATA',
+      '导入文件中没有账号存在交易数据'
+    );
+  }
   const rowsWithEmptyBlocks = selectionRows(provisionalEntries, { includeEmptyBlocks: true });
   const bigAccounts = [];
   for (const choice of choices) {
