@@ -5,6 +5,7 @@
 - Exact base：`1d9588a7e5303e9b8a5621095c445d7a9c1c6005`。
 - Review remediation 起点：`6b239559c8e219f32651abd0514a1d67ef30f976`。
 - 第二轮 Review remediation 起点：`74bb75468c3d1e30fe889a3ca751168ce48e8547`。
+- 第三轮 Review remediation 起点：`615cf64992917221be0890a7270518c98fe57ffd`。
 - Frozen contract：v3.2.4 Spec/TechDoc、Platform critical/recovery contract、E11-A 与 E11-P0 notes。
 - Preflight：[preflight.md](./preflight.md)。
 
@@ -27,6 +28,8 @@
 | startup 按 requestKey exact 恢复 prepared transition owner | live `mark-committed`/`close` owner 可在独立 reserve COMMIT 后、control transaction 前崩溃；startup 重新构造的安全摘要不是首次 exact request | Main-internal owner reader严格回验 persisted JCS/hash/eventId/createdAt 后原样 replay；普通 changed-body reserve 仍 conflict，不放宽 owner 合同 |
 | JPM recovery plan 读取模块私有 Task state 投影 | `INSPECTOR_UNAVAILABLE` Hold 的既有 Task 可能是 ordinary running，也可能已 interrupted，不能仅凭 active Hold 猜状态 | threshold 新建 Hold 时把必要 interruption 与 observation/Hold 同 control transaction；重启按 Hold reason + persisted Task state 选择合法边，非法 identity/recovery attempt fail closed |
 | bank/mid source 与 ADM replace 共用 JPM durable scope gate | ACKed Intent/active Hold 下 source import/delete 会间接重建全局 ADM image | bank-deposit/mid-allocation 在 source write 前检查；真实 `replaceAdmBankDeposit` 同步边界复检；gate 拒绝不进入历史派生兼容 catch |
+| threshold bundle 先恢复、再做新 inspection | `task-run.mark-interrupted` requestKey 不含 reason/message/metadataPatch，不能把旧 `INSPECTOR_UNAVAILABLE` owner 当成新 definitive body | prepared threshold observation attempt/owner 作为 anchor；严格验证后用普通 exact reserve 回验 Task/Hold，并把旧 observation+Hold+Task 原子提交；随后以 active Hold 进入既有 definitive recovery |
+| prepared body-divergent replay 只允许 committed Intent | live `observeReceipt/settleCommitted` 的 mark-committed/close owner 必须可跨 crash exact 续写，但 Task/Hold phase 不能复用不同 body | 默认 reserve 恢复 exact conflict；只有 expected `acked→committed` 与 `committed→closed` 的 Intent transition 可取回 persisted exact request |
 | JPM 使用独立 result validator | 不能因新增 bounded JPM terminal shape 放宽 E11-A import/standard/BOC validator | readonly validator 继续拒绝 JPM result，runtime 按 action 绑定 validator |
 
 ## Assumptions
@@ -56,9 +59,15 @@
 | P1 INSPECTOR_UNAVAILABLE Hold 与 running Task 状态冲突 | 接受；新增 JPM 私有 Task state reader；threshold 原子 interruption，definitive 恢复按 reason/state 复用既有 mark-interrupted/begin/complete 合法边 | committed/not-committed 两条 transient-threshold→重启→definitive→再重启矩阵 |
 | P1 linked source mutation 绕过 ADM durable lease | 接受；bank/mid import 和 bank delete 在 source write 前 gate，ADM replace 同步边界再次 gate，拒绝错误向 caller 传播 | ACKed Intent 下真实 bank source/ADM 零变化；active Hold 下真实 rebuild 未进入 replace、source/ADM image 零变化；Main 两入口静态顺序锁 |
 
+### 第三轮 Review finding
+
+| Finding | 裁决与最小修复 | 定向证据 |
+| --- | --- | --- |
+| P1 prepared threshold owner 被新 definitive phase 按 requestKey 盲回放 | 接受；撤销 generic transition blind replay；新 inspection 前只对 JPM exact threshold observation anchor 完成旧 Task/Hold/observation bundle，body 不兼容即 fail closed；live committed Intent 两条 exact resume 保留 | 真实磁盘 owner-reserve 后 crash：committed/not-committed 均验证首启 Task running/Hold 0/prepared owner 3/attempt 1，二启最终 Task/Hold/Intent 且 prepared owner/attempt 清零，三启零 control action；另证 Task body 不兼容时 Intent 保持 acked；原 mark-committed/close case 保持通过 |
+
 ## Evidence
 
-- `tests/unit/main-process/recon-id-fix-jpm-durable-e11-b.test.js`：25/25 PASS；第二轮新增 7 个 accepted-finding case，覆盖真实磁盘 mark-committed/close prepared-owner 崩溃窗口、既有 running Task + INSPECTOR_UNAVAILABLE Hold 的 committed/not-committed 收敛、新 threshold 原子 interruption、ACKed Intent source gate 与 active Hold ADM replace gate。
+- `tests/unit/main-process/recon-id-fix-jpm-durable-e11-b.test.js`：28/28 PASS；新增真实磁盘 committed/not-committed threshold-bundle crash 两路与 incompatible Task body fail-closed case，并保留 mark-committed/close prepared-owner、既有 running Task + Hold、global ADM gate 全部证据。
 - E11-P0 + E11-A + RecoveryControl + Supervisor/ServiceHost：217/217 PASS；linked ADM/BOC 派生：26/26 PASS；PreFund E05-B：39/39 PASS；legacy JPM/standard/BOC/linked repository 定向组：78/78 PASS。
 - 定向 integration：RecoveryControl 27/27、recovery canary 9/9、linked delete/rebuild 73/73 PASS；未运行任务明确禁止的 `release-check` / `check-vars` / `scan:vars`。
 - 全部 7 个变更 JS `node --check`、affected ESLint 与 `git diff --check` 通过。

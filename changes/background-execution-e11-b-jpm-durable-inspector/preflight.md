@@ -39,3 +39,18 @@
 3. 实现 exact coordinator、receipt authority 与 receipt-first read-only Inspector。
 4. 接 startup registry/recovery plan/ADM Hold，并在 legacy JPM mutation 前后二次 gate。
 5. 跑真实 SQLite/WAL、fault/crash/cancel/legacy/standard/BOC 定向测试，完成资金盲区复核。
+
+## Review remediation：prepared threshold bundle
+
+- Goal：关闭 `INSPECTOR_UNAVAILABLE` threshold 已 reserve Task/Hold/observation owner、但 control transaction 尚未提交时的重启窗口。
+- Context：reviewed head `615cf64992917221be0890a7270518c98fe57ffd` 会按 transition requestKey 直接恢复任意 prepared body；该 key 只覆盖实体 identity，不覆盖 Task failure/message/metadata patch。
+- Constraints：普通 reserve 的 changed-body conflict 不变；只允许已持久化的 committed Intent `mark-committed` / `close` exact replay；不得在不兼容 Task/Hold bundle 下关闭 Intent。
+- Done when：真实磁盘 committed/not-committed 两路都先原子完成旧 threshold bundle，再经现有 Hold recovery 收敛；Task reason、Hold、Intent、owner、attempt 一致，第三次 startup 零动作。
+
+| 未知 | 处理 | 证据与决定 |
+| --- | --- | --- |
+| prepared Task owner 能否仅凭 requestKey 当成新 definitive body | PROBE | 不能；`transitionIdentityTuple()` 的 `task-run.mark-interrupted` 不含 failureCode/message/metadataPatch，默认恢复 exact reserve/conflict |
+| 如何在新 inspection 前识别旧 threshold bundle | PROBE | `inspection-failed-transient` + deterministic holdId 的 prepared observation attempt/owner 是持久 anchor；严格回验 source/attempt/threshold payload 后，重建当前 exact Task/Hold request 并在一个 control transaction 提交 |
+| 是否需要泛化所有 prepared transition replay | PROBE | 不需要；body-divergent resume 只保留给 Main 已 reserve 的 committed Intent `mark-committed` / `close`，Task/Hold 继续 exact compare |
+
+BLOCK：无。Reviewer 已给出冻结边界内的唯一真实触发窗口；production enable、Windows packaged WAL 与真实 JPM 样本仍保留人工 gate。

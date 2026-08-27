@@ -165,16 +165,16 @@ function transitionReservation(db, input, now, createEventId) {
   });
 }
 
-function preparedTransitionRequest(db, requestKey) {
+function preparedExactRequest(db, requestKey, writer, validateRequest, requestKeyFor) {
   if (typeof requestKey !== 'string' || !/^recovery-control:v1:[a-f0-9]{64}$/.test(requestKey)) {
-    throw new TypeError('transition requestKey 非法');
+    throw new TypeError('prepared requestKey 非法');
   }
   const existing = ownerRow(db, requestKey);
   if (!existing || existing.status !== 'prepared') return null;
-  if (existing.writer !== 'transitionWithRecoveryEvent') {
+  if (existing.writer !== writer) {
     fail(
       'RECOVERY_REQUEST_KEY_CONFLICT',
-      'prepared requestKey 已绑定到非 transition writer',
+      'prepared requestKey 已绑定到不同 writer',
       { requestKey }
     );
   }
@@ -193,26 +193,26 @@ function preparedTransitionRequest(db, requestKey) {
       { requestKey }
     );
   }
-  if (envelope.contractVersion !== 1 || envelope.writer !== 'transitionWithRecoveryEvent') {
+  if (envelope.contractVersion !== 1 || envelope.writer !== writer) {
     fail(
       'RECOVERY_PREPARED_OWNER_INVALID',
-      'prepared transition owner envelope identity 非法',
+      'prepared owner envelope identity 非法',
       { requestKey }
     );
   }
 
   let request;
   try {
-    request = validateTransitionRequest(envelope.input);
+    request = validateRequest(envelope.input);
   } catch (_error) {
     fail(
       'RECOVERY_PREPARED_OWNER_INVALID',
-      'prepared transition owner request schema 非法',
+      'prepared owner request schema 非法',
       { requestKey }
     );
   }
-  const computedRequestKey = transitionRequestKey(request.transition);
-  const evidence = requestEvidence('transitionWithRecoveryEvent', request);
+  const computedRequestKey = requestKeyFor(request);
+  const evidence = requestEvidence(writer, request);
   if (computedRequestKey !== requestKey
       || existing.event_id !== request.event.eventId
       || existing.created_at !== request.event.createdAt
@@ -220,11 +220,35 @@ function preparedTransitionRequest(db, requestKey) {
       || existing.request_jcs !== evidence.requestJcs) {
     fail(
       'RECOVERY_REQUEST_KEY_CONFLICT',
-      'prepared transition owner 与 persisted exact request 不一致',
+      'prepared owner 与 persisted exact request 不一致',
       { requestKey }
     );
   }
-  return Object.freeze({ transition: request.transition, event: request.event });
+  return request;
+}
+
+function preparedTransitionRequest(db, requestKey) {
+  const request = preparedExactRequest(
+    db,
+    requestKey,
+    'transitionWithRecoveryEvent',
+    validateTransitionRequest,
+    (value) => transitionRequestKey(value.transition)
+  );
+  return request
+    ? Object.freeze({ transition: request.transition, event: request.event })
+    : null;
+}
+
+function preparedObservationRequest(db, requestKey) {
+  const request = preparedExactRequest(
+    db,
+    requestKey,
+    'appendObservationEvent',
+    validateObservationRequest,
+    (value) => observationRequestKey(value.event)
+  );
+  return request ? request.event : null;
 }
 
 const OBSERVATION_DRAFT_REQUIRED = Object.freeze([
@@ -474,6 +498,9 @@ function createRecoveryRequestOwnerRepository(db, options = {}) {
   }
   ensureBackgroundExecutionRecoveryControlSchema(db);
   return Object.freeze({
+    resumePreparedObservationRequest(requestKey) {
+      return preparedObservationRequest(db, requestKey);
+    },
     resumePreparedTransitionRequest(requestKey) {
       return preparedTransitionRequest(db, requestKey);
     },

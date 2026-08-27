@@ -94,8 +94,10 @@ function createStartupRecoveryCoordinator(options = {}) {
   const inspectorRegistry = requireDependency(options.inspectorRegistry, 'get', 'inspectorRegistry');
   const providerRegistry = requireDependency(options.providerRegistry, 'list', 'providerRegistry');
   const ownerRepository = requireDependency(options.requestOwnerRepository, 'reserveTransitionRequest', 'requestOwnerRepository');
+  requireDependency(ownerRepository, 'resumePreparedObservationRequest', 'requestOwnerRepository');
   requireDependency(ownerRepository, 'resumePreparedTransitionRequest', 'requestOwnerRepository');
   const attemptRepository = requireDependency(options.observationAttemptRepository, 'allocateNextObservationAttempt', 'observationAttemptRepository');
+  requireDependency(attemptRepository, 'resumePreparedObservationAttempt', 'observationAttemptRepository');
   const controlRepository = requireDependency(options.recoveryControlRepository, 'runInControlTransaction', 'recoveryControlRepository');
   const resolvePolicy = typeof options.resolvePolicy === 'function' ? options.resolvePolicy : (() => null);
   const resolveTaskState = typeof options.resolveTaskState === 'function'
@@ -122,13 +124,36 @@ function createStartupRecoveryCoordinator(options = {}) {
 
   function reserveTransition(transition, safePayload) {
     const requestKey = transitionRequestKey(transition);
-    const prepared = ownerRepository.resumePreparedTransitionRequest(requestKey);
-    if (prepared) return prepared;
     return ownerRepository.reserveTransitionRequest({
       requestKey,
       transition,
       safePayload
     });
+  }
+
+  function reserveCommittedIntentTransition(transition, safePayload) {
+    const isAllowed = transition && transition.entityKind === 'critical-intent' && (
+      (transition.command === 'mark-committed' && transition.expectedState === 'acked') ||
+      (transition.command === 'close' && transition.expectedState === 'committed')
+    );
+    if (!isAllowed) {
+      throw new TypeError('prepared exact resume 仅允许 committed Intent mark-committed/close');
+    }
+    const requestKey = transitionRequestKey(transition);
+    const prepared = ownerRepository.resumePreparedTransitionRequest(requestKey);
+    if (!prepared) return reserveTransition(transition, safePayload);
+    const persisted = prepared.transition;
+    if (persisted.entityKind !== transition.entityKind
+        || persisted.command !== transition.command
+        || persisted.intentId !== transition.intentId
+        || persisted.expectedState !== transition.expectedState) {
+      throw new StartupRecoveryError(
+        'STARTUP_RECOVERY_PREPARED_INTENT_TRANSITION_INVALID',
+        'prepared committed Intent transition identity 不兼容',
+        { intentId: transition.intentId, command: transition.command }
+      );
+    }
+    return prepared;
   }
 
   function taskStateFor(source) {
@@ -250,6 +275,113 @@ function createStartupRecoveryCoordinator(options = {}) {
       holdId: activeHold ? activeHold.holdId : holdIdFor(source),
       taskState: taskStateFor(source)
     }));
+  }
+
+  function inspectionUnavailableObservationScope(source) {
+    return {
+      eventType: 'inspection-failed-transient',
+      actionKey: source.actionKey,
+      operationKey: source.operationKey,
+      taskRunId: source.taskRunId,
+      sourceKind: source.sourceKind,
+      sourceRef: source.sourceRef,
+      batchId: null,
+      intentId: source.intentId ?? null,
+      holdId: holdIdFor(source),
+      recoveryAttemptId: null
+    };
+  }
+
+  function validatePreparedInspectionUnavailableObservation(event, scope, attemptId) {
+    const identityMatches = event
+      && event.eventType === scope.eventType
+      && event.observationAttemptId === attemptId
+      && event.actionKey === scope.actionKey
+      && event.operationKey === scope.operationKey
+      && event.taskRunId === scope.taskRunId
+      && event.sourceKind === scope.sourceKind
+      && event.sourceRef === scope.sourceRef
+      && event.batchId === scope.batchId
+      && event.intentId === scope.intentId
+      && event.holdId === scope.holdId
+      && event.recoveryAttemptId === scope.recoveryAttemptId;
+    const payload = event && event.safePayload;
+    const payloadKeys = payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? Object.keys(payload).sort()
+      : [];
+    const payloadMatches = payloadKeys.length === 2
+      && payloadKeys[0] === 'errorCode'
+      && payloadKeys[1] === 'thresholdReached'
+      && typeof payload.errorCode === 'string'
+      && /^[A-Z0-9_:-]{1,64}$/.test(payload.errorCode)
+      && payload.thresholdReached === true;
+    if (!identityMatches || !payloadMatches) {
+      throw new StartupRecoveryError(
+        'STARTUP_RECOVERY_PREPARED_THRESHOLD_BUNDLE_INVALID',
+        'prepared INSPECTOR_UNAVAILABLE observation 与 threshold bundle 不兼容',
+        { sourceKind: scope.sourceKind, sourceRef: scope.sourceRef }
+      );
+    }
+  }
+
+  function resumePreparedInspectionUnavailableBundle(source, activeHold) {
+    if (activeHold) return activeHold;
+    const scope = inspectionUnavailableObservationScope(source);
+    const scopeKey = observationScopeKey(scope);
+    const attempt = attemptRepository.resumePreparedObservationAttempt(scopeKey);
+    if (!attempt) return null;
+    const taskState = taskStateFor(source);
+    const requestKey = observationRequestKey({
+      ...scope,
+      observationAttemptId: attempt.observationAttemptId
+    });
+    const observation = ownerRepository.resumePreparedObservationRequest(requestKey);
+    if (!observation) {
+      throw new StartupRecoveryError(
+        'STARTUP_RECOVERY_PREPARED_THRESHOLD_BUNDLE_INCOMPLETE',
+        'prepared INSPECTOR_UNAVAILABLE attempt 缺少 exact observation owner',
+        { sourceKind: source.sourceKind, sourceRef: source.sourceRef }
+      );
+    }
+    validatePreparedInspectionUnavailableObservation(
+      observation,
+      scope,
+      attempt.observationAttemptId
+    );
+    const planned = planTransitions({
+      phase: 'inspection-unavailable-hold',
+      source,
+      inspection: null,
+      activeHold: null,
+      holdId: scope.holdId,
+      taskState
+    });
+    if (!taskState && Array.isArray(planned) && planned.length === 0) return null;
+    if (!Array.isArray(planned) || planned.length !== 1
+        || !planned[0] || !planned[0].transition
+        || planned[0].transition.entityKind !== 'task-run'
+        || planned[0].transition.command !== 'mark-interrupted'
+        || planned[0].transition.failureCode !== 'INSPECTOR_UNAVAILABLE') {
+      throw new StartupRecoveryError(
+        'STARTUP_RECOVERY_PREPARED_THRESHOLD_BUNDLE_INVALID',
+        'prepared INSPECTOR_UNAVAILABLE bundle 缺少 exact Task interruption plan',
+        { sourceKind: source.sourceKind, sourceRef: source.sourceRef }
+      );
+    }
+    const taskTransitions = normalizePlannedTransitions(planned);
+    const hold = holdTransition(source, 'INSPECTOR_UNAVAILABLE');
+    const holdRequest = reserveTransition(hold, { reasonCode: 'INSPECTOR_UNAVAILABLE' });
+    writeAtomic(observation, [holdRequest, ...taskTransitions]);
+    const resumedHold = readRepository.getRecoveryHoldBySource(source.sourceKind, source.sourceRef);
+    if (!resumedHold || resumedHold.status !== 'active'
+        || resumedHold.reasonCode !== 'INSPECTOR_UNAVAILABLE') {
+      throw new StartupRecoveryError(
+        'STARTUP_RECOVERY_PREPARED_THRESHOLD_BUNDLE_INVALID',
+        'INSPECTOR_UNAVAILABLE threshold bundle 未形成 active Hold',
+        { sourceKind: source.sourceKind, sourceRef: source.sourceRef }
+      );
+    }
+    return resumedHold;
   }
 
   async function backoff(attemptNumber) {
@@ -508,6 +640,7 @@ function createStartupRecoveryCoordinator(options = {}) {
   }
 
   async function recoverSource(source, activeHold = null) {
+    activeHold = resumePreparedInspectionUnavailableBundle(source, activeHold);
     const inspected = await inspectSource(source, activeHold);
     if (inspected.blocked || !inspected.inspection) return inspected;
     const inspection = inspected.inspection;
@@ -536,7 +669,9 @@ function createStartupRecoveryCoordinator(options = {}) {
     }
 
     const immediate = [
-      ...immediateItems.map((item) => reserveTransition(item.transition, item.safePayload)),
+      ...immediateItems.map((item) => inspection.outcome === 'committed'
+        ? reserveCommittedIntentTransition(item.transition, item.safePayload)
+        : reserveTransition(item.transition, item.safePayload)),
       ...normalizePlannedTransitions(planTransitions({
         phase: 'inspection-result',
         source,
