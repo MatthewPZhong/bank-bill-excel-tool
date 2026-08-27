@@ -449,7 +449,7 @@ function createStartupRecoveryCoordinator(options = {}) {
 
       const terminal = result.outcome === 'terminal-failure';
       const planned = normalizePlannedTransitions(planTransitions({
-        phase: 'settlement-result', source, inspection, settlement: result
+        phase: 'settlement-result', source, inspection, settlement: result, activeHold
       }));
       if (terminal) {
         const holdReason = result.safeError.code === 'DURABILITY_BARRIER_UNAVAILABLE'
@@ -490,6 +490,7 @@ function createStartupRecoveryCoordinator(options = {}) {
           phase: 'inspection-hold',
           source,
           inspection,
+          activeHold,
           holdId: activeHold ? activeHold.holdId : holdIdFor(source)
         }))
       ];
@@ -511,6 +512,7 @@ function createStartupRecoveryCoordinator(options = {}) {
         phase: 'inspection-result',
         source,
         inspection,
+        activeHold,
         holdId: activeHold ? activeHold.holdId : holdIdFor(source)
       }))
     ];

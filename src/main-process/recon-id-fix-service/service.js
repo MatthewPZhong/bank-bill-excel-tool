@@ -30,6 +30,9 @@ const {
 const {
   boundedJpmReceiptFromExact
 } = require('./jpm-receipt-evidence');
+const {
+  deriveReconFixJpmDatabaseIdentity
+} = require('./jpm-database-authority');
 
 const MAX_PERSISTENT_STATE_BYTES = 268435456;
 const MEMORY_OVERHEAD_MULTIPLIER = 4;
@@ -574,6 +577,7 @@ function createReconFixService(options = {}) {
         }
         const jpmSnapshot = prepareAdmReadSnapshot(input.databasePath);
         const databasePath = jpmSnapshot.databasePath;
+        const databaseIdentity = deriveReconFixJpmDatabaseIdentity(databasePath);
         if (typeof identity.operationKey !== 'string' || !identity.operationKey) {
           fail('RECON_FIX_JPM_OPERATION_KEY_REQUIRED', 'JPM run 缺少 operationKey identity');
         }
@@ -684,6 +688,7 @@ function createReconFixService(options = {}) {
             : null,
           critical: Object.freeze({
             contractVersion: 1,
+            databaseIdentity,
             scenarioId: String(snapshot.value.id),
             preImageHash: writebackPlan.preImageHash,
             postImageHash: writebackPlan.expectedPostImageHash,

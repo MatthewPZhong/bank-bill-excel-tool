@@ -224,6 +224,8 @@ function allowReconFixFinanceSafeValue({ value, key }) {
     'preImageHash',
     'postImageHash',
     'idSequenceDigest',
+    'databaseIdentity',
+    'workerInstanceIdentity',
     'receiptDigest'
   ].includes(key) && safeHash(value);
 }

@@ -14,6 +14,18 @@ function coordinatorError(code, message) {
   return Object.assign(new Error(message), { code });
 }
 
+function deriveWorkerInstanceIdentity(workerInstanceId) {
+  if (typeof workerInstanceId !== 'string' || !workerInstanceId ||
+      workerInstanceId.trim() !== workerInstanceId ||
+      Buffer.byteLength(workerInstanceId, 'utf8') > 256) {
+    throw coordinatorError(
+      'RECON_FIX_JPM_CRITICAL_IDENTITY_INVALID',
+      'JPM worker instance identity 非法'
+    );
+  }
+  return canonicalSha256(['recon-fix-jpm-worker-instance-v1', workerInstanceId]);
+}
+
 function createReceiptWaiter(identity) {
   let resolve;
   let reject;
@@ -34,6 +46,8 @@ function createReconFixJpmWorkerDurableCoordinator(options = {}) {
     'receiptAuthority'
   ];
   if (required.some((key) => !options[key]) ||
+      typeof options.databaseIdentity !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(options.databaseIdentity) ||
       typeof options.receiptAuthority.find !== 'function' ||
       typeof options.receiptAuthority.verify !== 'function') {
     throw new TypeError('ReconFix JPM WorkerDurableCoordinator依赖不完整');
@@ -43,6 +57,7 @@ function createReconFixJpmWorkerDurableCoordinator(options = {}) {
   const recoveryControlRepository = options.recoveryControlRepository;
   const recoveryCoordinator = options.recoveryCoordinator;
   const receiptAuthority = options.receiptAuthority;
+  const databaseIdentity = options.databaseIdentity;
   const conflictScopeGate = typeof options.conflictScopeGate === 'function'
     ? options.conflictScopeGate
     : null;
@@ -88,13 +103,14 @@ function createReconFixJpmWorkerDurableCoordinator(options = {}) {
           'boundedSummary',
           'changedRowCount',
           'contractVersion',
+          'databaseIdentity',
           'idSequenceDigest',
           'postImageHash',
           'preImageHash',
           'resultHandle',
           'rowCount',
           'scenarioId'
-        ].sort().join(',')) {
+        ].sort().join(',') || critical.databaseIdentity !== databaseIdentity) {
       throw coordinatorError(
         'RECON_FIX_JPM_CRITICAL_PAYLOAD_INVALID',
         'JPM critical contractVersion 非法'
@@ -102,6 +118,8 @@ function createReconFixJpmWorkerDurableCoordinator(options = {}) {
     }
     const boundedEvidence = normalizeJpmIntentEvidence(Object.freeze({
       scenarioId: critical.scenarioId,
+      databaseIdentity: critical.databaseIdentity,
+      workerInstanceIdentity: deriveWorkerInstanceIdentity(input.workerInstanceId),
       preImageHash: critical.preImageHash,
       postImageHash: critical.postImageHash,
       idSequenceDigest: critical.idSequenceDigest,
@@ -134,17 +152,11 @@ function createReconFixJpmWorkerDurableCoordinator(options = {}) {
     const conflicts = readRepository.listCriticalIntentsByScope(prepared.conflictScopeKey)
       .filter((intent) => intent.actionKey === input.actionKey &&
         intent.operationKey === prepared.operationKey);
-    for (const intent of conflicts) {
-      const exactPreparedReplay = intent.intentId === prepared.intentId &&
-        intent.taskRunId === input.taskRunId && intent.jobId === input.jobId &&
-        ['prepared', 'acked'].includes(intent.state) &&
-        intent.evidenceHash === prepared.evidenceHash;
-      if (!exactPreparedReplay) {
-        throw coordinatorError(
-          'RECON_FIX_JPM_OPERATION_REPLAY_FORBIDDEN',
-          'JPM operationKey 已有非 prepared exact identity，禁止重新 ACK mutation'
-        );
-      }
+    if (conflicts.length > 0) {
+      throw coordinatorError(
+        'RECON_FIX_JPM_OPERATION_REPLAY_FORBIDDEN',
+        'JPM operationKey 已有 Critical Intent，禁止重新 ACK mutation'
+      );
     }
   }
 
@@ -168,13 +180,13 @@ function createReconFixJpmWorkerDurableCoordinator(options = {}) {
     const prepared = exactCritical(input);
     if (conflictScopeGate) await conflictScopeGate(prepared.conflictScopeKey);
     assertNoReplay(input, prepared);
-    let existing = readRepository.getCriticalIntentByOperation(
-      input.actionKey,
-      prepared.operationKey,
-      input.taskRunId
-    );
-    if (!existing) {
-      writeTransitions([{
+    if (receiptWaiters.has(input.jobId)) {
+      throw coordinatorError(
+        'RECON_FIX_JPM_RECEIPT_WAITER_CONFLICT',
+        'JPM jobId 已绑定 pending receipt waiter'
+      );
+    }
+    writeTransitions([{
         transition: {
           entityKind: 'critical-intent',
           command: 'create-prepared',
@@ -204,19 +216,8 @@ function createReconFixJpmWorkerDurableCoordinator(options = {}) {
         },
         safePayload: { state: 'acked', unitId: input.unitId }
       }]);
-      existing = readRepository.getCriticalIntentById(prepared.intentId);
-    }
+    let existing = readRepository.getCriticalIntentById(prepared.intentId);
     assertExistingExact(existing, input, prepared);
-    if (existing.state === 'prepared') {
-      writeTransition({
-        entityKind: 'critical-intent',
-        command: 'mark-acked',
-        intentId: existing.intentId,
-        expectedState: 'prepared',
-        patch: { admission: 'main-persisted-before-worker-ack' }
-      }, { state: 'acked', unitId: input.unitId });
-      existing = readRepository.getCriticalIntentById(existing.intentId);
-    }
     if (existing.state !== 'acked') {
       throw coordinatorError(
         'RECON_FIX_JPM_INTENT_STATE_INVALID',
@@ -228,7 +229,7 @@ function createReconFixJpmWorkerDurableCoordinator(options = {}) {
       actionKey: input.actionKey,
       operationKey: prepared.operationKey,
       jobId: input.jobId,
-      workerInstanceId: input.workerInstanceId,
+      workerInstanceIdentity: prepared.boundedEvidence.workerInstanceIdentity,
       unitId: input.unitId,
       intentId: existing.intentId
     });
@@ -293,7 +294,7 @@ function createReconFixJpmWorkerDurableCoordinator(options = {}) {
     const waiter = receiptWaiters.get(input.jobId);
     if (!waiter || waiter.actionKey !== input.actionKey ||
         waiter.operationKey !== input.fileOperationKey ||
-        waiter.workerInstanceId !== input.workerInstanceId ||
+        waiter.workerInstanceIdentity !== deriveWorkerInstanceIdentity(input.workerInstanceId) ||
         waiter.unitId !== input.unitId || waiter.intentId !== input.intentId) {
       throw coordinatorError(
         'RECON_FIX_JPM_RECEIPT_WAITER_MISSING',
@@ -353,7 +354,7 @@ function createReconFixJpmWorkerDurableCoordinator(options = {}) {
       return true;
     }
     if (waiter.operationKey !== input.operationKey || waiter.unitId !== input.unitId ||
-        waiter.workerInstanceId !== input.workerInstanceId) {
+        waiter.workerInstanceIdentity !== deriveWorkerInstanceIdentity(input.workerInstanceId)) {
       throw coordinatorError(
         'RECON_FIX_JPM_ADOPTION_IDENTITY_CONFLICT',
         'JPM persistent adoption 与 Critical Intent identity 不匹配'

@@ -237,10 +237,29 @@ function createExecutionSupervisor(options = {}) {
       throw new SupervisorError('SUPERVISOR_NOT_ACCEPTING', 'ExecutionSupervisor is not accepting new jobs');
     }
     const requestSnapshot = snapshotExecuteRequest(rawRequest);
-    const request = requestSnapshot.data;
+    let request = requestSnapshot.data;
     const onProgress = requestSnapshot.onProgress;
     const { actionKey, operationKey } = request;
     const policy = options.policyRegistry.assertRunnable(actionKey, { production: request.production === true });
+    if (typeof options.bindInputForAction === 'function') {
+      const boundInput = options.bindInputForAction(Object.freeze({
+        actionKey,
+        operationKey,
+        policy,
+        input: request.input || Object.freeze({})
+      }));
+      if (!boundInput || typeof boundInput !== 'object' || Array.isArray(boundInput)) {
+        throw new SupervisorError(
+          'EXECUTE_REQUEST_INPUT_BINDING_INVALID',
+          'Main-owned input binding must return a plain JSON object'
+        );
+      }
+      try {
+        request = canonicalJsonSnapshot({ ...request, input: boundInput });
+      } catch (error) {
+        throw new SupervisorError('EXECUTE_REQUEST_INPUT_BINDING_INVALID', error.message);
+      }
+    }
     if (!resourceGovernor && (policy.lifetime === 'service' || policy.resources.compound)) {
       throw new SupervisorError(
         'RESOURCE_GOVERNOR_REQUIRED',

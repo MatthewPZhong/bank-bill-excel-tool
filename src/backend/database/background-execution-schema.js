@@ -69,6 +69,10 @@ function ensureBackgroundExecutionRecoveryControlSchema(db) {
       CREATE INDEX IF NOT EXISTS idx_bg_exec_intent_scope
         ON background_execution_critical_intents(conflict_scope_key, state);
 
+      CREATE UNIQUE INDEX IF NOT EXISTS ux_bg_exec_recon_jpm_open_intent_scope
+        ON background_execution_critical_intents(conflict_scope_key)
+        WHERE action_key = 'recon-fix:run-jpm' AND state <> 'closed';
+
       CREATE TABLE IF NOT EXISTS background_execution_recovery_holds (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         hold_id TEXT NOT NULL UNIQUE,

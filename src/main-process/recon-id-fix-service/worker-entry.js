@@ -371,6 +371,9 @@ async function runJob(job) {
   let phase = null;
   let terminal = null;
   try {
+    if (job.envelope.actionKey === RECON_FIX_RUN_JPM_ACTION) {
+      await cancellationSafepoint(job);
+    }
     const preparation = await service.prepare(
       job.envelope.actionKey,
       job.envelope.payload.input,
@@ -535,6 +538,7 @@ function handleJob(rawEnvelope) {
       throw error;
     }
     activeJob.unitStarted = true;
+    void runJob(activeJob);
     return;
   }
   if (envelope.operation === 'critical:ack') {
@@ -590,7 +594,9 @@ function handleJob(rawEnvelope) {
     rejectCriticalAck: null
   };
   activeJob = job;
-  void runJob(job);
+  if (envelope.actionKey !== RECON_FIX_RUN_JPM_ACTION) {
+    void runJob(job);
+  }
 }
 
 function handleControl(rawEnvelope) {

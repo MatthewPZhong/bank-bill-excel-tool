@@ -202,6 +202,9 @@ const {
   createReconFixJpmHoldGate
 } = require('./main-process/recon-id-fix-service/jpm-hold-gate');
 const {
+  deriveReconFixJpmDatabaseIdentity
+} = require('./main-process/recon-id-fix-service/jpm-database-authority');
+const {
   createReconFixJpmOutcomeInspector
 } = require('./main-process/recon-id-fix-service/jpm-outcome-inspector');
 const {
@@ -680,7 +683,8 @@ let reconFixJpmHoldGate = null;
 let backgroundWorkerDurableCoordinator = null;
 let archiveOperationTail = Promise.resolve();
 const backgroundExecutionRuntimeManager = createBackgroundExecutionRuntimeManager({
-  workerDurableCoordinatorProvider: () => backgroundWorkerDurableCoordinator
+  workerDurableCoordinatorProvider: () => backgroundWorkerDurableCoordinator,
+  reconFixJpmDatabasePathProvider: () => database && database.dbPath
 });
 const archiveOperationContext = new AsyncLocalStorage();
 const positionReconciliationOperationContext = new AsyncLocalStorage();
@@ -6611,18 +6615,20 @@ function registerAppHandlers() {
             code: 'RECON_FIX_JPM_HOLD_GATE_UNAVAILABLE'
           });
         }
-        reconFixJpmHoldGate.assertMutationAllowed();
       }
       const runOpts = isJpmScenario
-        ? { admRows: database.readAdmBankDepositRows() }
+        ? { admRows: reconFixJpmHoldGate.runSynchronousMutationBoundary(
+            () => database.readAdmBankDepositRows()
+          ) }
         : (isBocScenario ? { bocLinkRows: database.readBocFxLinkRows() } : {});
       const result = runReconIdFix(scenario, clonedSheets, runOpts);
       if (isJpmScenario && result && Array.isArray(result.admUpdates)) {
         // 整批幂等重写 ADM 表匹配标志 / 资金对账ID（与 C4「run 无副作用」不同 —— TECH §4.5 标注）。
         // engine执行期间可能有startup/live recovery创建ADM Hold；写回前再次按
         // exact scope gate，禁止legacy路径跨过恢复阻断。
-        reconFixJpmHoldGate.assertMutationAllowed();
-        database.writeAdmMatchFlags(result.admUpdates);
+        reconFixJpmHoldGate.runSynchronousMutationBoundary(
+          () => database.writeAdmMatchFlags(result.admUpdates)
+        );
       }
       // v3.0.4 块 E 需求3（O2 拍板）：BOC 修复运行后若有警告 → 写 activity log（warning 级，含逐条明细）。
       //   不写 bankStatementStatusBox（renderer.js:4392/:4465 既有禁写决策保留）；前端逐条文案落运行结果弹框。
@@ -21543,7 +21549,10 @@ async function initializeBackgroundExecutionRecovery() {
     readRepository: recoveryControlReadRepository,
     recoveryHoldGate
   });
-  reconFixJpmHoldGate = createReconFixJpmHoldGate({ recoveryHoldGate });
+  reconFixJpmHoldGate = createReconFixJpmHoldGate({
+    recoveryHoldGate,
+    readRepository: recoveryControlReadRepository
+  });
   preFundMptWorkerDurableCoordinator = createPreFundMptWorkerDurableCoordinator({
     readRepository: recoveryControlReadRepository,
     requestOwnerRepository,
@@ -21564,6 +21573,7 @@ async function initializeBackgroundExecutionRecovery() {
       databasePath: database.dbPath,
       outcomeInspector: inspectReconFixJpm
     }),
+    databaseIdentity: deriveReconFixJpmDatabaseIdentity(database.dbPath),
     conflictScopeGate: () => reconFixJpmHoldGate.assertMutationAllowed()
   });
   backgroundWorkerDurableCoordinator = createWorkerDurableCoordinatorRouter({

@@ -36,6 +36,9 @@ const {
   validateReconFixJpmResult,
   validateReconFixServiceResult
 } = require('../recon-id-fix-service/policies');
+const {
+  createReconFixJpmDatabaseAuthority
+} = require('../recon-id-fix-service/jpm-database-authority');
 
 const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   ...TOOLBOX_GENERATION_POLICIES,
@@ -49,6 +52,10 @@ function isBackgroundExecutionProductionEnabled(actionKey) {
 }
 
 function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverride = null) {
+  const reconFixJpmDatabaseAuthority = options.reconFixJpmDatabasePath === undefined ||
+    options.reconFixJpmDatabasePath === null
+    ? null
+    : createReconFixJpmDatabaseAuthority(options.reconFixJpmDatabasePath);
   const availableParallelism = options.availableParallelism === undefined
     ? (typeof os.availableParallelism === 'function'
         ? os.availableParallelism()
@@ -162,6 +169,23 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
     executionTimeoutMs: options.executionTimeoutMs,
     shutdownTimeoutMs: options.shutdownTimeoutMs || 5000,
     workerDurableCoordinator: options.workerDurableCoordinator,
+    bindInputForAction({ actionKey, input }) {
+      if (actionKey !== RECON_FIX_RUN_JPM_ACTION) return input;
+      if (!reconFixJpmDatabaseAuthority) {
+        const error = new Error('ReconFix JPM runtime generation 缺少 Main database authority');
+        error.code = 'RECON_FIX_JPM_DATABASE_AUTHORITY_UNAVAILABLE';
+        throw error;
+      }
+      if (Object.hasOwn(input, 'databasePath') || Object.hasOwn(input, 'databaseIdentity')) {
+        const error = new Error('ReconFix JPM database authority 不接受 caller override');
+        error.code = 'RECON_FIX_JPM_DATABASE_AUTHORITY_OVERRIDE_FORBIDDEN';
+        throw error;
+      }
+      return Object.freeze({
+        ...input,
+        databasePath: reconFixJpmDatabaseAuthority.databasePath
+      });
+    },
     defaultUnitsForAction(actionKey) {
       return actionKey === RECON_FIX_RUN_JPM_ACTION
         ? Object.freeze([Object.freeze({ unitId: RECON_FIX_JPM_UNIT_ID, input: Object.freeze({}) })])
@@ -227,7 +251,10 @@ function createBackgroundExecutionRuntimeManager(options = {}) {
     ...options,
     workerDurableCoordinator: typeof options.workerDurableCoordinatorProvider === 'function'
       ? options.workerDurableCoordinatorProvider()
-      : options.workerDurableCoordinator
+      : options.workerDurableCoordinator,
+    reconFixJpmDatabasePath: typeof options.reconFixJpmDatabasePathProvider === 'function'
+      ? options.reconFixJpmDatabasePathProvider()
+      : options.reconFixJpmDatabasePath
   }));
   let runtime = null;
   let shutdownOwner = null;

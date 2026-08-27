@@ -14,12 +14,14 @@ const HASH = /^[a-f0-9]{64}$/;
 const EVIDENCE_KEYS = Object.freeze([
   'boundedSummary',
   'changedRowCount',
+  'databaseIdentity',
   'idSequenceDigest',
   'postImageHash',
   'preImageHash',
   'resultHandle',
   'rowCount',
-  'scenarioId'
+  'scenarioId',
+  'workerInstanceIdentity'
 ].sort());
 
 function exactKeys(value, keys) {
@@ -32,6 +34,8 @@ function normalizeJpmIntentEvidence(value) {
   if (!exactKeys(value, EVIDENCE_KEYS) || typeof value.scenarioId !== 'string' ||
       !value.scenarioId || value.scenarioId.trim() !== value.scenarioId ||
       Buffer.byteLength(value.scenarioId, 'utf8') > 256 ||
+      !HASH.test(value.databaseIdentity || '') ||
+      !HASH.test(value.workerInstanceIdentity || '') ||
       !HASH.test(value.preImageHash || '') ||
       !HASH.test(value.postImageHash || '') || !HASH.test(value.idSequenceDigest || '') ||
       !HASH.test(value.resultHandle || '') || value.preImageHash === value.postImageHash ||
@@ -49,6 +53,8 @@ function normalizeJpmIntentEvidence(value) {
   }
   return Object.freeze({
     scenarioId: value.scenarioId,
+    databaseIdentity: value.databaseIdentity,
+    workerInstanceIdentity: value.workerInstanceIdentity,
     preImageHash: value.preImageHash,
     postImageHash: value.postImageHash,
     idSequenceDigest: value.idSequenceDigest,
