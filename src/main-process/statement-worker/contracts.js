@@ -13,6 +13,13 @@ const STATEMENT_PURPOSES = Object.freeze([
   'manual-balance',
   'scope-generation'
 ]);
+const STATEMENT_ACTION_PURPOSES = Object.freeze({
+  'statement:import': Object.freeze(['big-account', 'manual-balance']),
+  'statement:resolve-big-account': Object.freeze(['manual-balance']),
+  'statement:resolve-manual-balance': Object.freeze(['manual-balance']),
+  'statement:generate-current': Object.freeze(['manual-balance', 'scope-generation']),
+  'statement:generate-all': Object.freeze(['manual-balance', 'scope-generation'])
+});
 const STATEMENT_ACTIVE_PHASES = Object.freeze([
   'idle',
   'import',
@@ -54,6 +61,16 @@ const TOKEN_HANDLE_KEYS = Object.freeze([
   'allowedChoiceDigest',
   'reservationId'
 ]);
+const PUBLIC_INTERACTION_KEYS = Object.freeze([
+  'tokenId',
+  'purpose',
+  'serviceGeneration',
+  'sessionRevision',
+  'expiresAt',
+  'allowedChoiceDigest',
+  'prompt'
+]);
+const INTERACTION_REQUIRED_RESULT_KEYS = Object.freeze(['status', 'interaction']);
 const STATUS_KEYS = Object.freeze([
   'serviceGeneration',
   'sessionRevision',
@@ -116,6 +133,7 @@ const FORBIDDEN_PUBLIC_KEYS = new Set([
   'privateContext'
 ]);
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
+const FINANCE_SAFE_MERCHANT_ID_PATTERN = /^\d{12,32}$/;
 
 class StatementContractError extends Error {
   constructor(code, message, details = null) {
@@ -216,6 +234,70 @@ function createBigAccountRowDto(input, index, label) {
   };
 }
 
+function createBigAccountItemDto(input, index = 0) {
+  const account = ownDataRecord(input, BIG_ACCOUNT_KEYS, `bigAccounts[${index}]`);
+  if (typeof account.isMultiCurrency !== 'boolean') {
+    fail('STATEMENT_DTO_BOOLEAN_INVALID', `bigAccounts[${index}].isMultiCurrency must be boolean`);
+  }
+  return {
+    merchantId: boundedText(account.merchantId, `bigAccounts[${index}].merchantId`, 512),
+    currencies: boundedArray(
+      account.currencies,
+      `bigAccounts[${index}].currencies`,
+      MAX_CURRENCIES_PER_ACCOUNT
+    ).map((currency, currencyIndex) => boundedText(
+      currency,
+      `bigAccounts[${index}].currencies[${currencyIndex}]`,
+      32
+    )),
+    isMultiCurrency: account.isMultiCurrency
+  };
+}
+
+function createExpandedBigAccountItemDto(input, index = 0) {
+  const option = ownDataRecord(
+    input,
+    EXPANDED_BIG_ACCOUNT_KEYS,
+    `expandedBigAccountOptions[${index}]`
+  );
+  if (!['own', 'client'].includes(option.accountNature)) {
+    fail(
+      'STATEMENT_PUBLIC_DTO_ACCOUNT_NATURE_INVALID',
+      `expandedBigAccountOptions[${index}].accountNature is invalid`
+    );
+  }
+  return {
+    merchantId: boundedText(
+      option.merchantId,
+      `expandedBigAccountOptions[${index}].merchantId`,
+      512
+    ),
+    currency: boundedOptionalText(
+      option.currency,
+      `expandedBigAccountOptions[${index}].currency`,
+      32
+    ),
+    accountNature: option.accountNature
+  };
+}
+
+function createFixedAssignmentItemDto(input, index = 0) {
+  const assignment = ownDataRecord(input, FIXED_ASSIGNMENT_KEYS, `fixedAssignments[${index}]`);
+  return {
+    merchantId: boundedText(
+      assignment.merchantId,
+      `fixedAssignments[${index}].merchantId`,
+      512
+    ),
+    currency: boundedOptionalText(
+      assignment.currency,
+      `fixedAssignments[${index}].currency`,
+      32
+    ),
+    rowIndex: nonNegativeInteger(assignment.rowIndex, `fixedAssignments[${index}].rowIndex`)
+  };
+}
+
 function createBigAccountPromptDto(input) {
   const statusDescriptor = input && typeof input === 'object' && !utilTypes.isProxy(input)
     ? Object.getOwnPropertyDescriptor(input, 'status')
@@ -256,75 +338,17 @@ function createBigAccountPromptDto(input) {
     MAX_BIG_ACCOUNT_ROWS
   ).map((row, index) => createBigAccountRowDto(row, index, 'rowsWithEmptyBlocks'));
   const bigAccounts = boundedArray(record.bigAccounts, 'bigAccounts', MAX_BIG_ACCOUNTS)
-    .map((item, index) => {
-      const account = ownDataRecord(item, BIG_ACCOUNT_KEYS, `bigAccounts[${index}]`);
-      if (typeof account.isMultiCurrency !== 'boolean') {
-        fail('STATEMENT_DTO_BOOLEAN_INVALID', `bigAccounts[${index}].isMultiCurrency must be boolean`);
-      }
-      return {
-        merchantId: boundedText(account.merchantId, `bigAccounts[${index}].merchantId`, 512),
-        currencies: boundedArray(
-          account.currencies,
-          `bigAccounts[${index}].currencies`,
-          MAX_CURRENCIES_PER_ACCOUNT
-        ).map((currency, currencyIndex) => boundedText(
-          currency,
-          `bigAccounts[${index}].currencies[${currencyIndex}]`,
-          32
-        )),
-        isMultiCurrency: account.isMultiCurrency
-      };
-    });
+    .map(createBigAccountItemDto);
   const expandedBigAccountOptions = boundedArray(
     record.expandedBigAccountOptions,
     'expandedBigAccountOptions',
     MAX_BIG_ACCOUNTS * MAX_CURRENCIES_PER_ACCOUNT
-  ).map((item, index) => {
-    const option = ownDataRecord(
-      item,
-      EXPANDED_BIG_ACCOUNT_KEYS,
-      `expandedBigAccountOptions[${index}]`
-    );
-    if (!['own', 'client'].includes(option.accountNature)) {
-      fail(
-        'STATEMENT_PUBLIC_DTO_ACCOUNT_NATURE_INVALID',
-        `expandedBigAccountOptions[${index}].accountNature is invalid`
-      );
-    }
-    return {
-      merchantId: boundedText(
-        option.merchantId,
-        `expandedBigAccountOptions[${index}].merchantId`,
-        512
-      ),
-      currency: boundedOptionalText(
-        option.currency,
-        `expandedBigAccountOptions[${index}].currency`,
-        32
-      ),
-      accountNature: option.accountNature
-    };
-  });
+  ).map(createExpandedBigAccountItemDto);
   const fixedAssignments = boundedArray(
     record.fixedAssignments,
     'fixedAssignments',
     MAX_BIG_ACCOUNT_ROWS
-  ).map((item, index) => {
-    const assignment = ownDataRecord(item, FIXED_ASSIGNMENT_KEYS, `fixedAssignments[${index}]`);
-    return {
-      merchantId: boundedText(
-        assignment.merchantId,
-        `fixedAssignments[${index}].merchantId`,
-        512
-      ),
-      currency: boundedOptionalText(
-        assignment.currency,
-        `fixedAssignments[${index}].currency`,
-        32
-      ),
-      rowIndex: nonNegativeInteger(assignment.rowIndex, `fixedAssignments[${index}].rowIndex`)
-    };
-  });
+  ).map(createFixedAssignmentItemDto);
   const result = {
     status,
     message: boundedText(record.message, 'message', 1024),
@@ -440,25 +464,28 @@ function assertNoPrivatePublicKeys(value, path = '', ancestors = new Set()) {
   }
 }
 
-function createStatementPublicInteractionDto({ token, prompt }) {
-  const handle = createStatementTokenHandleDto(token);
+function createStatementPublicInteractionValue(input) {
+  const record = ownDataRecord(input, PUBLIC_INTERACTION_KEYS, 'StatementPublicInteractionDto');
+  const interactionPurpose = purpose(record.purpose);
   let promptSnapshot;
   try {
-    promptSnapshot = canonicalJsonSnapshot(prompt);
+    promptSnapshot = canonicalJsonSnapshot(record.prompt);
   } catch (_error) {
     fail('STATEMENT_PUBLIC_DTO_JSON_INVALID', 'Statement public prompt must be safe plain JSON');
   }
   assertNoPrivatePublicKeys(promptSnapshot, '/prompt');
-  const boundedPrompt = createPurposePromptDto(handle.purpose, promptSnapshot);
   const result = {
-    tokenId: handle.tokenId,
-    purpose: handle.purpose,
-    serviceGeneration: handle.serviceGeneration,
-    sessionRevision: handle.sessionRevision,
-    expiresAt: handle.expiresAt,
-    allowedChoiceDigest: handle.allowedChoiceDigest,
-    prompt: boundedPrompt
+    tokenId: boundedText(record.tokenId, 'tokenId'),
+    purpose: interactionPurpose,
+    serviceGeneration: positiveInteger(record.serviceGeneration, 'serviceGeneration'),
+    sessionRevision: nonNegativeInteger(record.sessionRevision, 'sessionRevision'),
+    expiresAt: positiveInteger(record.expiresAt, 'expiresAt'),
+    allowedChoiceDigest: record.allowedChoiceDigest,
+    prompt: createPurposePromptDto(interactionPurpose, promptSnapshot)
   };
+  if (!SHA256_PATTERN.test(result.allowedChoiceDigest)) {
+    fail('STATEMENT_TOKEN_DIGEST_INVALID', 'allowedChoiceDigest must be a lowercase SHA-256 digest');
+  }
   try {
     canonicalizeJson(result, { maxBytes: STATEMENT_RESOURCE_CONTRACT.publicInteractionMaxBytes });
   } catch (_error) {
@@ -469,6 +496,125 @@ function createStatementPublicInteractionDto({ token, prompt }) {
   }
   return canonicalJsonSnapshot(result);
 }
+
+function createStatementPublicInteractionDto({ token, prompt }) {
+  const handle = createStatementTokenHandleDto(token);
+  return createStatementPublicInteractionValue({
+    tokenId: handle.tokenId,
+    purpose: handle.purpose,
+    serviceGeneration: handle.serviceGeneration,
+    sessionRevision: handle.sessionRevision,
+    expiresAt: handle.expiresAt,
+    allowedChoiceDigest: handle.allowedChoiceDigest,
+    prompt
+  });
+}
+
+function allowedInteractionPurposes(actionKey) {
+  const allowed = STATEMENT_ACTION_PURPOSES[actionKey];
+  if (!allowed) {
+    fail('STATEMENT_ACTION_INVALID', `Unsupported Statement action: ${String(actionKey)}`);
+  }
+  return allowed;
+}
+
+function createStatementInteractionRequiredResult(input, actionKey) {
+  const record = ownDataRecord(
+    input,
+    INTERACTION_REQUIRED_RESULT_KEYS,
+    'StatementInteractionRequiredResult'
+  );
+  if (record.status !== 'interaction-required') {
+    fail(
+      'STATEMENT_RESULT_STATUS_INVALID',
+      'Statement interaction result status must be interaction-required'
+    );
+  }
+  const interaction = createStatementPublicInteractionValue(record.interaction);
+  if (!allowedInteractionPurposes(actionKey).includes(interaction.purpose)) {
+    fail(
+      'STATEMENT_RESULT_PURPOSE_INVALID',
+      `${actionKey} cannot return ${interaction.purpose} interaction`
+    );
+  }
+  return canonicalJsonSnapshot({ status: record.status, interaction });
+}
+
+function merchantPathKind(path) {
+  if (typeof path !== 'string') return null;
+  const prefixes = [
+    '/payload/progress/prompt/',
+    '/payload/result/interaction/prompt/'
+  ];
+  const prefix = prefixes.find((candidate) => path.startsWith(candidate));
+  if (!prefix) return null;
+  const relativePath = path.slice(prefix.length);
+  if (relativePath === 'merchantId') return Object.freeze({ kind: 'manual-balance', index: 0 });
+  const match = /^(bigAccounts|expandedBigAccountOptions|fixedAssignments)\/(0|[1-9]\d*)\/merchantId$/.exec(
+    relativePath
+  );
+  if (!match) return null;
+  const index = Number(match[2]);
+  const maxItems = match[1] === 'expandedBigAccountOptions'
+    ? MAX_BIG_ACCOUNTS * MAX_CURRENCIES_PER_ACCOUNT
+    : match[1] === 'bigAccounts' ? MAX_BIG_ACCOUNTS : MAX_BIG_ACCOUNT_ROWS;
+  if (!Number.isSafeInteger(index) || index >= maxItems) return null;
+  return Object.freeze({ kind: match[1], index });
+}
+
+function parentMerchantIdForPath(parent, pathKind) {
+  if (pathKind.kind === 'manual-balance') return createManualBalancePromptDto(parent).merchantId;
+  if (pathKind.kind === 'bigAccounts') return createBigAccountItemDto(parent, pathKind.index).merchantId;
+  if (pathKind.kind === 'expandedBigAccountOptions') {
+    return createExpandedBigAccountItemDto(parent, pathKind.index).merchantId;
+  }
+  if (pathKind.kind === 'fixedAssignments') {
+    return createFixedAssignmentItemDto(parent, pathKind.index).merchantId;
+  }
+  return null;
+}
+
+function createStatementFinanceSafeValueDelegate(actionKey) {
+  const allowedPurposes = allowedInteractionPurposes(actionKey);
+  return function allowStatementFinanceSafeValue(input = {}) {
+    if (!input || typeof input !== 'object') return false;
+    const { value, path, parent, key } = input;
+    if (key !== 'merchantId' || typeof value !== 'string' ||
+        !FINANCE_SAFE_MERCHANT_ID_PATTERN.test(value)) return false;
+    const pathKind = merchantPathKind(path);
+    if (!pathKind) return false;
+    const impliedPurpose = pathKind.kind === 'manual-balance' ? 'manual-balance' : 'big-account';
+    if (!allowedPurposes.includes(impliedPurpose)) return false;
+    try {
+      return parentMerchantIdForPath(parent, pathKind) === value;
+    } catch (_error) {
+      return false;
+    }
+  };
+}
+
+function createStatementResultValidator(actionKey) {
+  const allowFinanceSafeValue = createStatementFinanceSafeValueDelegate(actionKey);
+  const validator = function validateStatementInteractionRequiredResult(value) {
+    try {
+      createStatementInteractionRequiredResult(value, actionKey);
+      return true;
+    } catch (_error) {
+      return false;
+    }
+  };
+  Object.defineProperty(validator, 'allowFinanceSafeValue', {
+    value: allowFinanceSafeValue
+  });
+  return validator;
+}
+
+const STATEMENT_RESULT_VALIDATORS = Object.freeze(Object.fromEntries(
+  Object.keys(STATEMENT_ACTION_PURPOSES).map((actionKey) => [
+    actionKey,
+    createStatementResultValidator(actionKey)
+  ])
+));
 
 function createStatementStatusDto(input) {
   const record = ownDataRecord(input, STATUS_KEYS, 'StatementStatusDto');
@@ -515,11 +661,16 @@ function createStatementStatusDto(input) {
 }
 
 module.exports = {
+  STATEMENT_ACTION_PURPOSES,
   STATEMENT_ACTIVE_PHASES,
   STATEMENT_PURPOSES,
   STATEMENT_RESOURCE_CONTRACT,
+  STATEMENT_RESULT_VALIDATORS,
   StatementContractError,
+  createStatementFinanceSafeValueDelegate,
+  createStatementInteractionRequiredResult,
   createStatementPublicInteractionDto,
+  createStatementResultValidator,
   createStatementStatusDto,
   createStatementTokenHandleDto
 };

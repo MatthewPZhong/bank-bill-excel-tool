@@ -17,6 +17,8 @@
 | pending private context 与 persistent state 独立估算、独立对 256 MiB ceiling 判定 | canonical policy 明确两类资源，不能以共享总额掩盖任一超限 | 把两类 graph 合成一个预算；用 JSON byte length 代替 retained graph | E09-A/B 申请 reservation 时可分别 fail closed |
 | estimator 固定 50% headroom 并按 4 KiB 向上取整 | 修复后50k probe的state+token reservation为44,294,144 B，高于本次retained heap delta 13,615,608 B；数组metadata/shared/cycle已覆盖 | 把单次RSS当精确资源值；只算enumerable JSON | P0提供可复现保守输入，但仍不宣称真实峰值上界 |
 | public interaction 采用240 KiB inner ceiling + 16 KiB wire reserve，status独立保持1 MiB | 最大合法purpose DTO经真实最大route/context Protocol envelope仍低于256 KiB，+1 byte在封装前拒绝 | 让prompt共用1 MiB status ceiling；inner直接占满256 KiB | E09-B不得以status ceiling放宽Renderer payload，也不得先adopt后发现wire不可发送 |
+| 完整 `merchantId` 只由 Statement action-specific result validator 的 path-aware delegate 放行 | legacy Renderer 的大账号选择与 manual-balance prompt 明确展示完整账号；Platform privacy 为 exact domain validator 预留 allow delegate | mask/opaque choice（会改UI/选择合同并越到E09-B）；修改全局privacy regex | 仅12～32位纯数字、exact progress/done wrapper path、exact parent shape可穿越；scope/message/fileName/raw/private仍拒绝 |
+| P0 result validator只冻结 `interaction-required + interaction` exact result | TechDoc明确waiting-user由`job:done`返回interaction-required；artifact success manifest属E09-C | 在P0预造artifact manifest/Publisher结果 | production仍false；E09-C必须在启用前扩展同一validator，而不是旁路本privacy binding |
 
 ## Assumptions
 
@@ -35,16 +37,18 @@
 | probe只构造session与一个pending clone | 扩为五globals inventory/projection并抽共享builder | Reviewer P1：未证明prepared/selected/source/remembered/pending唯一所有权 | probe更贴近现状但仍不是E09-A实现 | 不需要 |
 | golden只执行file-service/session core | 抽取production generation characterization seam并直接执行 | Reviewer P1：未锁定current/all workbook/name/warning/cache/missing seed/error零artifact | 保持live行为，禁止Publisher/atomic seed | 不需要 |
 | exact footprint包含TMPDIR绝对路径 | graph内改用稳定逻辑source identity，真实临时workbook仅用于seed | Reviewer P2：跨runner rawBytes漂移 | 默认与`TMPDIR=/tmp`一致 | 不需要 |
+| finance-safe-v1 会把真实数字账号当通用隐私泄漏拒绝 | 为五个canonical Statement result validator附加action-specific `allowFinanceSafeValue`，并让exact result validator核对outer purpose/wrapper | 放宽全局regex；按字段名全局允许；mask/choice改变业务合同 | 合法public interaction可走真实Protocol；错误action/purpose/path/parent仍fail closed | 不需要，属于Platform预留domain delegate |
 
 ## Evidence
 
 | 证据 | 结果 | 覆盖的行为/风险 |
 | --- | --- | --- |
 | exact base / canonical policy probe | HEAD `7577d5ae...`；Statement 五 action production=false；state/token budget 256 MiB；1 token；TTL 900000 ms | 防基线、资源、production gate 漂移 |
-| E09-P0 focused tests | 21/21 PASS | 五action parity、三purpose DTO/contextId替代、真实Protocol boundary、footprint、五globals/TMPDIR、production generation seam与资金golden |
+| E09-P0 focused tests | 24/24 PASS | 五action parity、三purpose DTO/contextId替代、真实Protocol boundary、path-aware finance-safe binding、footprint、五globals/TMPDIR、production generation seam与资金golden |
+| Reviewer 2 affected regressions | 133/133 PASS（6 files） | 真实PolicyRegistry/Protocol/Supervisor、16/20位账号四domain slot、三purpose、错误action/purpose/path/parent/unknown key，以及legacy/probe回归 |
 | impacted unit regressions | 209/209 PASS（43 suites） | seed/file-service、policy/interactive preflight、big-account preview与新增合同/golden/probe |
 | 全量unit（环境审计） | 6195 PASS、2 FAIL、3 SKIP（6200 tests/831 suites） | 两个失败均为隔离worktree无本地`node_modules/app-builder-lib/.../multiUser.nsh`的Windows contract环境路径；其余6195通过，非业务断言失败 |
-| 50k/4批次/1 token standalone probe | default与`TMPDIR=/tmp`的deterministic部分一致：state raw/estimated 23,614,188/35,422,208 B；pending raw/estimated 5,912,626/8,871,936 B；public DTO 805 B；default retained heap delta 13,615,608 B、RSS delta 48,955,392 B；两类各自低于268,435,456 B | 五globals production-shape target的retained-state量级、唯一所有权与estimator headroom；动态heap/RSS不进入exact golden，不代表parser peak/真实业务/Windows批准 |
+| 50k/4批次/1 token standalone probe | Reviewer 2复跑default与`TMPDIR=/tmp`的deterministic部分一致：state raw/estimated 23,614,188/35,422,208 B；pending raw/estimated 5,912,626/8,871,936 B；public DTO 805 B；default retained heap/RSS delta 13,615,592/48,906,240 B，`/tmp`为13,615,408/47,759,360 B；两类各自低于268,435,456 B | 五globals production-shape target的retained-state量级、唯一所有权与estimator headroom；动态heap/RSS不进入exact golden，不代表parser peak/真实业务/Windows批准 |
 | affected ESLint + `node --check` + `git diff --check` | PASS | Main薄委托、generation seam、三个contract/probe模块及全部变更JS语法/空白检查 |
 | static live-path gate | PASS：`src/main.js` 与 background runtime无 `statement-worker` 引用；canonical 五 action仍 production=false | P0未切Main/IPC/Worker/live路径 |
 
@@ -56,6 +60,7 @@
 | --- | --- | --- |
 | 入口旁路 | 新模块只被probe/tests引用，未注册Main、IPC、ServiceHost、Worker entry或background index | 静态测试与`rg`；五action production=false/effectiveMode=legacy |
 | DTO/private泄露 | token handle exact-eight且拒绝extra/getter/Proxy；public DTO剥离`reservationId/sessionKey`并递归拒绝rows/prepared batch/path/grant/private context；status不含token/reservation | DTO正反测试、getter零读取与256 KiB超限测试 |
+| domain privacy例外 | delegate由冻结canonical `result.validatorKey` binding取得，只接受四个真实`merchantId` slot、12～32位数字、exact progress/done path与exact邻接shape；outer purpose由exact result validator复核 | 真实Registry + `job:progress`/`job:done` builders；message/fileName/scope注入、错误action/wrapper/parent/unknown key反例 |
 | 资源双算/漏算 | persistent与pending独立计费；shared/cycle只计一次；数组enumerable/non-enumerable metadata与exact Map/Set计入；production-shape不需要的binary O(1)拒绝；unsupported prototype/accessor/Proxy/function/symbol/weak collection fail closed | footprint unit + large-view快速拒绝 + 25k child probe + 50k standalone probe |
 | 状态生命周期 | P0没有token store、grant/adopt、TTL/replay/stale/crash逻辑，因此不会用本地对象假装resource handshake完成 | E09-B继续保持BLOCK；本PR只冻结DTO/estimator |
 | 失败模式 | estimator超预算抛稳定错误且不返回reservation大小；public/status超byte ceiling fail closed | budget/size反例；live未接线所以无半采用状态 |
@@ -81,5 +86,6 @@
 | E09-A Service adoption 与旧 session mutation 等价 | PROBE | E09-A 复用本合同与 golden | 不阻断 P0；阻断 Statement import production |
 | E09-B token lifecycle/waiting-user | PROBE | E09-B | 不阻断 P0；阻断所有 interaction production |
 | E09-C current/all workbook all-or-none | PROBE | E09-C | 不阻断 P0；阻断 generation production |
+| E09-C success artifact manifest尚未加入同一Statement result validator | PROBE | E09-C沿用本action binding扩展exact success shape，保留本delegate | P0 production=false不受影响；阻断generate-current/all production |
 | E09-D seed atomic settlement/inspector/Windows | BLOCK（后续） | E09-D + release owner | manual seed 必须保持 legacy/production false |
 | 金额/币种/seed/current-all 人工资金复核 | REVIEW | Reviewer / release owner | 自动测试不可解除；阻断 production enable |

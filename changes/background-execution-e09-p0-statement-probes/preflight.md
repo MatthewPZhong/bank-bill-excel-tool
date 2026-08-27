@@ -1,5 +1,23 @@
 # E09-P0 Statement Probes Unknowns Preflight
 
+## Reviewer 2 Privacy Addendum（2026-08-28）
+
+### 接受的 finding 与边界
+
+- BLOCK 已关闭：legacy Renderer 的大账号选择与 manual-balance prompt 都展示完整 `merchantId`，因此不能改成 masked/opaque choice；本轮仅为 Statement exact domain result validator 增加路径感知的 `allowFinanceSafeValue`。
+- delegate 只在 canonical Statement action binding 下、真实 `job:progress` 或 `job:done -> interaction-required` wrapper 的 exact `merchantId` 路径、且 immediate parent 是对应 purpose 的 exact public prompt/item shape 时，允许 12～32 位纯数字账号穿越 `finance-safe-v1`。
+- `scope-generation` 没有 `merchantId` 例外；错误 action/purpose/path/parent、unknown key、message/fileName/raw row/private context 继续 fail closed。
+- 不修改全局 `error-codec`、privacy regex 或 Protocol；不实现 E09-A Service、E09-B token store/waiting-user，也不改变五项 policy 的 `production=false / effectiveMode=legacy / effectiveWorkerCount=0`。
+
+### 新增 PROBE
+
+| 未知 | 分类 | 证据路径 | 关闭标准 |
+| --- | --- | --- | --- |
+| function validator 的 allow delegate 能否经冻结 Registry binding 保留 | PROBE | `execution-policy-registry.js#snapshotRuntimeBinding`、`protocol-validator.js#financeSafeValueDelegate` | 使用真实 `createExecutionPolicyRegistry` 冻结后，`getBinding(action, 'result.validatorKey').allowFinanceSafeValue` 仍为本域 delegate |
+| privacy 早于 Supervisor result validator 时，合法账号能否通过且相邻伪造仍拒绝 | PROBE | `error-codec.js#assertFinanceSafeValue`、真实 `createJobEnvelope`、`validateResultBody` | 16/20 位账号覆盖 progress/done；错误 action/purpose/path/parent/unknown key 均由 privacy 或 exact result validator 拒绝 |
+
+没有新的用户选择型 BLOCK；完整账号只在当前真实 public interaction DTO 的 exact domain slot 获得例外，不能复用到通用日志、错误、文件名或未来未冻结 DTO。
+
 ## Reviewer Repair Addendum（2026-08-27）
 
 ### 接受的 finding 与范围

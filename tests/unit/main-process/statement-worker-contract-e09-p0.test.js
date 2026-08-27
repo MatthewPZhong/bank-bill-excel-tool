@@ -6,11 +6,18 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
+  STATEMENT_ACTION_PURPOSES,
   STATEMENT_RESOURCE_CONTRACT,
+  STATEMENT_RESULT_VALIDATORS,
+  createStatementInteractionRequiredResult,
   createStatementPublicInteractionDto,
   createStatementStatusDto,
   createStatementTokenHandleDto
 } = require('../../../src/main-process/statement-worker/contracts');
+const {
+  createExecutionPolicyRegistry,
+  createStaticRegistry
+} = require('../../../src/main-process/background-execution/execution-policy-registry');
 const {
   estimateStatementPendingInteractionFootprint,
   estimateStatementServiceStateFootprint,
@@ -24,6 +31,9 @@ const {
 const {
   utf8Size
 } = require('../../../src/main-process/background-execution/protocol-validator');
+const {
+  validateResultBody
+} = require('../../../src/main-process/background-execution/supervisor');
 
 const ROOT = path.join(__dirname, '..', '..', '..');
 const POLICY_FIXTURE = path.join(
@@ -37,6 +47,10 @@ const POLICY_FIXTURE = path.join(
   'valid',
   'policy-registry.v3.2.x.json'
 );
+const STATIC_KEY_FIXTURE = path.join(
+  path.dirname(POLICY_FIXTURE),
+  'static-key-manifest.v3.2.x.json'
+);
 const STATEMENT_ACTION_KEYS = Object.freeze([
   'statement:generate-all',
   'statement:generate-current',
@@ -44,6 +58,59 @@ const STATEMENT_ACTION_KEYS = Object.freeze([
   'statement:resolve-big-account',
   'statement:resolve-manual-balance'
 ]);
+
+function createStatementPolicyRegistry() {
+  const fixture = JSON.parse(fs.readFileSync(POLICY_FIXTURE, 'utf8'));
+  const policies = STATEMENT_ACTION_KEYS.map((actionKey) => fixture.actions[actionKey]);
+  const entryBindings = {};
+  const validatorBindings = {};
+  for (const policy of policies) {
+    entryBindings[policy.entryKey] = { path: '/app/statement-service.js' };
+    validatorBindings[policy.result.validatorKey] = STATEMENT_RESULT_VALIDATORS[policy.actionKey];
+    for (const key of [
+      policy.artifacts.technicalValidatorKey,
+      policy.artifacts.businessValidatorKey
+    ].filter(Boolean)) {
+      validatorBindings[key] = () => true;
+    }
+  }
+  const entryRegistry = createStaticRegistry(entryBindings).freeze();
+  const validatorRegistry = createStaticRegistry(validatorBindings).freeze();
+  return createExecutionPolicyRegistry({
+    policies,
+    entryRegistry,
+    validatorRegistry,
+    staticKeys: JSON.parse(fs.readFileSync(STATIC_KEY_FIXTURE, 'utf8')),
+    generatedAt: '2026-08-28T00:00:00.000Z',
+    baselineRef: 'e09-p0-statement-contract'
+  }).freeze();
+}
+
+function statementEventEnvelope({ actionKey, operation, payload }, policyRegistry) {
+  const operationKey = `operation-${actionKey.replace(/[^a-z]+/g, '-')}`;
+  return createJobEnvelope({
+    direction: 'event',
+    operation,
+    actionKey,
+    operationKey,
+    jobId: `job-${actionKey.replace(/[^a-z]+/g, '-')}`,
+    workerInstanceId: 'statement-service-worker-1',
+    serviceGeneration: 3,
+    unitId: null,
+    seq: 1,
+    context: {
+      kind: 'operation',
+      value: {
+        taskRunId: 'statement-task-run-1',
+        taskKey: 'statement-task',
+        moduleId: 'statement',
+        parentRunId: 'statement-parent-run-1',
+        operationKey
+      }
+    },
+    payload
+  }, { policyRegistry });
+}
 
 function token(overrides = {}) {
   return {
@@ -276,6 +343,273 @@ test('三类真实Statement prompt按purpose exact冻结并拒绝未知字段、
       prompt: bigAccountPrompt()
     }),
     (error) => error.code === 'STATEMENT_DTO_KEYS_INVALID'
+  );
+});
+
+test('Statement exact result validator通过真实冻结PolicyRegistry暴露路径感知finance-safe delegate', () => {
+  const policyRegistry = createStatementPolicyRegistry();
+  assert.equal(policyRegistry.isFrozen(), true);
+  for (const actionKey of STATEMENT_ACTION_KEYS) {
+    const policy = policyRegistry.get(actionKey);
+    const binding = policyRegistry.getBinding(actionKey, 'result.validatorKey');
+    assert.equal(binding, STATEMENT_RESULT_VALIDATORS[actionKey]);
+    assert.equal(typeof binding.allowFinanceSafeValue, 'function');
+    assert.deepEqual(
+      STATEMENT_ACTION_PURPOSES[actionKey],
+      actionKey === 'statement:import'
+        ? ['big-account', 'manual-balance']
+        : actionKey.startsWith('statement:generate-')
+          ? ['manual-balance', 'scope-generation']
+          : ['manual-balance']
+    );
+    assert.equal(policy.production.enabled, false);
+    assert.equal(policy.production.effectiveMode, 'legacy');
+    assert.equal(policy.production.effectiveWorkerCount, 0);
+  }
+});
+
+test('16/20位merchantId仅在三purpose真实progress/done wrapper的exact domain slot通过', () => {
+  const policyRegistry = createStatementPolicyRegistry();
+  const bigInteraction = createStatementPublicInteractionDto({
+    token: token(),
+    prompt: bigAccountPrompt({
+      bigAccounts: [{
+        merchantId: '6222021234567890',
+        currencies: ['USD'],
+        isMultiCurrency: false
+      }],
+      expandedBigAccountOptions: [{
+        merchantId: '62220212345678901234',
+        currency: 'USD',
+        accountNature: 'client'
+      }],
+      fixedAssignments: [{
+        merchantId: '6217001234567890',
+        currency: 'USD',
+        rowIndex: 0
+      }]
+    })
+  });
+  assert.doesNotThrow(() => statementEventEnvelope({
+    actionKey: 'statement:import',
+    operation: 'job:progress',
+    payload: { progress: bigInteraction }
+  }, policyRegistry));
+  const bigResult = createStatementInteractionRequiredResult({
+    status: 'interaction-required',
+    interaction: bigInteraction
+  }, 'statement:import');
+  assert.doesNotThrow(() => statementEventEnvelope({
+    actionKey: 'statement:import',
+    operation: 'job:done',
+    payload: { result: bigResult }
+  }, policyRegistry));
+  assert.deepEqual(
+    validateResultBody(
+      policyRegistry.get('statement:import'),
+      bigResult,
+      policyRegistry.getBinding('statement:import', 'result.validatorKey')
+    ),
+    bigResult
+  );
+
+  const manualInteraction = createStatementPublicInteractionDto({
+    token: token({ purpose: 'manual-balance' }),
+    prompt: manualBalancePrompt({ merchantId: '62220212345678901234' })
+  });
+  assert.doesNotThrow(() => statementEventEnvelope({
+    actionKey: 'statement:resolve-manual-balance',
+    operation: 'job:progress',
+    payload: { progress: manualInteraction }
+  }, policyRegistry));
+  const manualResult = createStatementInteractionRequiredResult({
+    status: 'interaction-required',
+    interaction: manualInteraction
+  }, 'statement:resolve-manual-balance');
+  assert.doesNotThrow(() => statementEventEnvelope({
+    actionKey: 'statement:resolve-manual-balance',
+    operation: 'job:done',
+    payload: { result: manualResult }
+  }, policyRegistry));
+  assert.doesNotThrow(() => validateResultBody(
+    policyRegistry.get('statement:resolve-manual-balance'),
+    manualResult,
+    policyRegistry.getBinding('statement:resolve-manual-balance', 'result.validatorKey')
+  ));
+
+  const scopeInteraction = createStatementPublicInteractionDto({
+    token: token({ purpose: 'scope-generation' }),
+    prompt: scopeGenerationPrompt('detail')
+  });
+  const scopeResult = createStatementInteractionRequiredResult({
+    status: 'interaction-required',
+    interaction: scopeInteraction
+  }, 'statement:generate-current');
+  assert.doesNotThrow(() => statementEventEnvelope({
+    actionKey: 'statement:generate-current',
+    operation: 'job:progress',
+    payload: { progress: scopeInteraction }
+  }, policyRegistry));
+  assert.doesNotThrow(() => statementEventEnvelope({
+    actionKey: 'statement:generate-current',
+    operation: 'job:done',
+    payload: { result: scopeResult }
+  }, policyRegistry));
+  assert.doesNotThrow(() => validateResultBody(
+    policyRegistry.get('statement:generate-current'),
+    scopeResult,
+    policyRegistry.getBinding('statement:generate-current', 'result.validatorKey')
+  ));
+});
+
+test('merchantId例外对错误action/purpose/path/parent/unknown key保持fail closed', () => {
+  const policyRegistry = createStatementPolicyRegistry();
+  const account = '62220212345678901234';
+  const bigInteraction = createStatementPublicInteractionDto({
+    token: token(),
+    prompt: bigAccountPrompt({
+      bigAccounts: [{ merchantId: account, currencies: ['USD'], isMultiCurrency: false }],
+      expandedBigAccountOptions: [{
+        merchantId: account,
+        currency: 'USD',
+        accountNature: 'client'
+      }],
+      fixedAssignments: [{ merchantId: account, currency: 'USD', rowIndex: 0 }]
+    })
+  });
+
+  assert.throws(
+    () => statementEventEnvelope({
+      actionKey: 'statement:resolve-big-account',
+      operation: 'job:progress',
+      payload: { progress: bigInteraction }
+    }, policyRegistry),
+    (error) => error.code === 'PROTOCOL_PRIVACY_VIOLATION' &&
+      error.path === '/payload/progress/prompt/bigAccounts/0/merchantId'
+  );
+
+  const wrongPath = structuredClone(bigInteraction);
+  wrongPath.prompt.message = account;
+  assert.throws(
+    () => statementEventEnvelope({
+      actionKey: 'statement:import',
+      operation: 'job:progress',
+      payload: { progress: wrongPath }
+    }, policyRegistry),
+    (error) => error.code === 'PROTOCOL_PRIVACY_VIOLATION' &&
+      error.path === '/payload/progress/prompt/message'
+  );
+
+  const wrongParent = structuredClone(bigInteraction);
+  wrongParent.prompt.bigAccounts[0].unknown = true;
+  assert.throws(
+    () => statementEventEnvelope({
+      actionKey: 'statement:import',
+      operation: 'job:progress',
+      payload: { progress: wrongParent }
+    }, policyRegistry),
+    (error) => error.code === 'PROTOCOL_PRIVACY_VIOLATION' &&
+      error.path === '/payload/progress/prompt/bigAccounts/0/merchantId'
+  );
+
+  for (const field of ['expandedBigAccountOptions', 'fixedAssignments']) {
+    const wrongItemParent = structuredClone(bigInteraction);
+    wrongItemParent.prompt[field][0].unknown = true;
+    assert.throws(
+      () => statementEventEnvelope({
+        actionKey: 'statement:import',
+        operation: 'job:progress',
+        payload: { progress: wrongItemParent }
+      }, policyRegistry),
+      (error) => error.code === 'PROTOCOL_PRIVACY_VIOLATION' &&
+        error.path === `/payload/progress/prompt/${field}/0/merchantId`
+    );
+  }
+
+  const wrongManualParent = structuredClone(createStatementPublicInteractionDto({
+    token: token({ purpose: 'manual-balance' }),
+    prompt: manualBalancePrompt({ merchantId: account })
+  }));
+  wrongManualParent.prompt.queueTotal = 0;
+  assert.throws(
+    () => statementEventEnvelope({
+      actionKey: 'statement:resolve-manual-balance',
+      operation: 'job:progress',
+      payload: { progress: wrongManualParent }
+    }, policyRegistry),
+    (error) => error.code === 'PROTOCOL_PRIVACY_VIOLATION' &&
+      error.path === '/payload/progress/prompt/merchantId'
+  );
+
+  const privateFileName = structuredClone(bigInteraction);
+  privateFileName.prompt.rows[0].fileName = account;
+  assert.throws(
+    () => statementEventEnvelope({
+      actionKey: 'statement:import',
+      operation: 'job:progress',
+      payload: { progress: privateFileName }
+    }, policyRegistry),
+    (error) => error.code === 'PROTOCOL_PRIVACY_VIOLATION' &&
+      error.path === '/payload/progress/prompt/rows/0/fileName'
+  );
+
+  const scopeWithMerchant = structuredClone(createStatementPublicInteractionDto({
+    token: token({ purpose: 'scope-generation' }),
+    prompt: scopeGenerationPrompt('balance')
+  }));
+  scopeWithMerchant.prompt.merchantId = account;
+  assert.throws(
+    () => statementEventEnvelope({
+      actionKey: 'statement:generate-all',
+      operation: 'job:progress',
+      payload: { progress: scopeWithMerchant }
+    }, policyRegistry),
+    (error) => error.code === 'PROTOCOL_PRIVACY_VIOLATION' &&
+      error.path === '/payload/progress/prompt/merchantId'
+  );
+
+  assert.throws(
+    () => statementEventEnvelope({
+      actionKey: 'statement:import',
+      operation: 'job:done',
+      payload: { result: bigInteraction }
+    }, policyRegistry),
+    (error) => error.code === 'PROTOCOL_PRIVACY_VIOLATION' &&
+      error.path === '/payload/result/prompt/bigAccounts/0/merchantId'
+  );
+
+  const wrongPurposeInteraction = structuredClone(bigInteraction);
+  wrongPurposeInteraction.purpose = 'manual-balance';
+  const wrongPurposeResult = {
+    status: 'interaction-required',
+    interaction: wrongPurposeInteraction
+  };
+  assert.doesNotThrow(() => statementEventEnvelope({
+    actionKey: 'statement:import',
+    operation: 'job:done',
+    payload: { result: wrongPurposeResult }
+  }, policyRegistry));
+  assert.throws(
+    () => validateResultBody(
+      policyRegistry.get('statement:import'),
+      wrongPurposeResult,
+      policyRegistry.getBinding('statement:import', 'result.validatorKey')
+    ),
+    (error) => error.code === 'RESULT_VALIDATION_FAILED'
+  );
+
+  const unknownResultKey = {
+    status: 'interaction-required',
+    interaction: bigInteraction,
+    rawRows: []
+  };
+  assert.throws(
+    () => validateResultBody(
+      policyRegistry.get('statement:import'),
+      unknownResultKey,
+      policyRegistry.getBinding('statement:import', 'result.validatorKey')
+    ),
+    (error) => error.code === 'RESULT_VALIDATION_FAILED'
   );
 });
 
