@@ -15,6 +15,10 @@ const ARRAY_OVERHEAD_BYTES = 32;
 const MAP_ENTRY_OVERHEAD_BYTES = 40;
 const SET_ENTRY_OVERHEAD_BYTES = 24;
 const PROPERTY_SLOT_BYTES = 8;
+const MAP_SIZE_GETTER = Object.getOwnPropertyDescriptor(Map.prototype, 'size').get;
+const SET_SIZE_GETTER = Object.getOwnPropertyDescriptor(Set.prototype, 'size').get;
+const MAP_ENTRIES = Map.prototype.entries;
+const SET_VALUES = Set.prototype.values;
 
 class StatementStateFootprintError extends Error {
   constructor(code, message, details = null) {
@@ -51,6 +55,22 @@ function assertDataDescriptor(value, key, path) {
   return descriptor;
 }
 
+function assertNoOwnState(value, path, label) {
+  const ownKeys = Reflect.ownKeys(value);
+  if (ownKeys.length !== 0) {
+    const key = ownKeys[0];
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) {
+      fail('STATEMENT_FOOTPRINT_ACCESSOR_FORBIDDEN', `${label} must not contain own accessors`, {
+        path: `${path}/${String(key)}`
+      });
+    }
+    fail('STATEMENT_FOOTPRINT_BUILTIN_OWN_STATE_FORBIDDEN', `${label} must not retain extra own state`, {
+      path: `${path}/${String(key)}`
+    });
+  }
+}
+
 function estimateStatementValueBytes(value, options = {}) {
   const seen = options.seen || new Set();
   const path = options.path || '/';
@@ -78,11 +98,12 @@ function estimateStatementValueBytes(value, options = {}) {
   if (seen.has(value)) return 0;
   seen.add(value);
 
-  if (Buffer.isBuffer(value) || ArrayBuffer.isView(value)) {
-    return addChecked(OBJECT_OVERHEAD_BYTES, value.byteLength);
-  }
-  if (value instanceof ArrayBuffer) {
-    return addChecked(OBJECT_OVERHEAD_BYTES, value.byteLength);
+  if (Buffer.isBuffer(value) || ArrayBuffer.isView(value) || value instanceof ArrayBuffer) {
+    fail(
+      'STATEMENT_FOOTPRINT_BINARY_FORBIDDEN',
+      'Statement retained state does not support Buffer, TypedArray, DataView, or ArrayBuffer',
+      { path }
+    );
   }
   if (value instanceof Date) {
     if (Object.getPrototypeOf(value) !== Date.prototype) {
@@ -90,6 +111,7 @@ function estimateStatementValueBytes(value, options = {}) {
         path
       });
     }
+    assertNoOwnState(value, path, 'Statement Date');
     return OBJECT_OVERHEAD_BYTES;
   }
   if (value instanceof WeakMap || value instanceof WeakSet) {
@@ -103,9 +125,11 @@ function estimateStatementValueBytes(value, options = {}) {
         path
       });
     }
-    let bytes = addChecked(OBJECT_OVERHEAD_BYTES, value.size * SET_ENTRY_OVERHEAD_BYTES);
+    assertNoOwnState(value, path, 'Statement Set');
+    const size = SET_SIZE_GETTER.call(value);
+    let bytes = addChecked(OBJECT_OVERHEAD_BYTES, size * SET_ENTRY_OVERHEAD_BYTES);
     let index = 0;
-    for (const item of value) {
+    for (const item of SET_VALUES.call(value)) {
       bytes = addChecked(bytes, estimateStatementValueBytes(item, {
         seen,
         path: `${path}/set/${index}`
@@ -120,9 +144,11 @@ function estimateStatementValueBytes(value, options = {}) {
         path
       });
     }
-    let bytes = addChecked(OBJECT_OVERHEAD_BYTES, value.size * MAP_ENTRY_OVERHEAD_BYTES);
+    assertNoOwnState(value, path, 'Statement Map');
+    const size = MAP_SIZE_GETTER.call(value);
+    let bytes = addChecked(OBJECT_OVERHEAD_BYTES, size * MAP_ENTRY_OVERHEAD_BYTES);
     let index = 0;
-    for (const [key, item] of value) {
+    for (const [key, item] of MAP_ENTRIES.call(value)) {
       bytes = addChecked(bytes, estimateStatementValueBytes(key, {
         seen,
         path: `${path}/map/${index}/key`
@@ -212,6 +238,9 @@ function estimateStatementFootprint(value, options = {}) {
   const budgetBytes = options.budgetBytes === undefined ? defaultBudget : options.budgetBytes;
   if (!Number.isSafeInteger(budgetBytes) || budgetBytes < 1) {
     throw new TypeError('Statement footprint budget must be a positive safe integer');
+  }
+  if (budgetBytes > defaultBudget) {
+    throw new TypeError('Statement footprint budget override may only tighten the canonical ceiling');
   }
   const rawBytes = estimateStatementValueBytes(value);
   const estimatedBytes = roundStatementReservationBytes(withHeadroom(rawBytes));

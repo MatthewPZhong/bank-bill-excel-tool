@@ -18,11 +18,9 @@ const {
   estimateStatementServiceStateFootprint
 } = require('../src/main-process/statement-worker/state-footprint');
 const {
-  appendStatementSessionImport,
-  buildStatementFileEntry,
-  cloneRowsWithMetadata,
-  createStatementImportSession
-} = require('../src/main-process/statement-session');
+  buildStatementProbeProjection,
+  createStatementProbeLegacyGlobals
+} = require('../src/main-process/statement-worker/probe-state-builder');
 
 function positiveArg(name, fallback) {
   const index = process.argv.indexOf(`--${name}`);
@@ -72,98 +70,31 @@ function mappedProbeSeed(root) {
   });
 }
 
-function expandMappedRows(seed, count, offset) {
-  const rows = [seed[0].slice()];
-  rows.rowMetas = [];
-  rows.issues = [];
-  rows.headerBreaks = [];
-  for (let index = 0; index < count; index += 1) {
-    const ordinal = offset + index;
-    const row = seed[1].slice();
-    row[0] = `2026-08-${String(ordinal % 28 + 1).padStart(2, '0')}`;
-    row[1] = `M${String(ordinal % 5000).padStart(6, '0')}`;
-    row[2] = ordinal % 3 === 0 ? 'USD' : ordinal % 3 === 1 ? 'EUR' : 'HKD';
-    row[3] = ordinal % 2 === 0 ? `${ordinal + 100}.01` : '';
-    row[4] = ordinal % 2 === 0 ? '' : `${ordinal + 50}.02`;
-    rows.push(row);
-    rows.rowMetas.push({ sourceRowNumber: index + 2 });
-  }
-  return rows;
-}
-
 function createBaselineGraph({ rows: totalRows, batches, tokenCount }, root) {
   const seed = mappedProbeSeed(root);
   forceGc();
   const before = process.memoryUsage();
-  const session = createStatementImportSession({
-    templateId: 17,
-    templateName: 'E09ProbeBank-上海'
+  let legacyGlobals = createStatementProbeLegacyGlobals({
+    seed,
+    rows: totalRows,
+    batches,
+    root,
+    purpose: 'big-account'
   });
-  const generatedExports = {
-    statementSessionKey: session.key,
-    allDetail: null,
-    allBalance: null
-  };
-  let nextEntry = 0;
-  let nextBatch = 0;
-  let assigned = 0;
-  for (let batchIndex = 0; batchIndex < batches; batchIndex += 1) {
-    const remaining = totalRows - assigned;
-    const count = batchIndex === batches - 1
-      ? remaining
-      : Math.floor(totalRows / batches);
-    const detailRows = expandMappedRows(seed, count, assigned);
-    const fileEntry = buildStatementFileEntry({
-      buildEntryId: () => `entry-${++nextEntry}`,
-      filePath: path.join(root, `source-${batchIndex + 1}.xlsx`),
-      detailRows
-    });
-    appendStatementSessionImport({
-      buildBatchId: () => `batch-${++nextBatch}`,
-      lastGeneratedExports: generatedExports,
-      session,
-      fileEntries: [fileEntry]
-    });
-    assigned += count;
-  }
-
-  const state = {
+  const projection = buildStatementProbeProjection(legacyGlobals, {
+    purpose: 'big-account',
     serviceGeneration: 1,
     sessionRevision: batches,
-    sessions: new Map([[session.key, session]]),
-    tokens: new Map(),
-    stableSummary: {
-      sessionCount: 1,
-      batchCount: session.batches.length,
-      fileCount: session.fileEntries.length,
-      rowCount: totalRows
-    },
-    activeJobId: null,
-    persistentReservation: null,
-    pendingInteractionReservations: new Map()
-  };
-
-  const currentEntry = session.fileEntries.at(-1);
-  const privateContexts = [];
-  for (let tokenIndex = 0; tokenIndex < tokenCount; tokenIndex += 1) {
-    privateContexts.push({
-      purpose: 'big-account',
-      serviceGeneration: 1,
-      sessionKey: session.key,
-      sessionRevision: batches,
-      allowedChoices: [
-        { merchantId: 'M000001', currencies: ['USD', 'EUR', 'HKD'] }
-      ],
-      fileEntries: [{
-        id: currentEntry.id,
-        matchedTemplateId: currentEntry.matchedTemplateId,
-        detailRows: cloneRowsWithMetadata(currentEntry.detailRows)
-      }]
-    });
-  }
+    tokenId: 'probe-token',
+    reservationId: 'probe-reservation'
+  });
+  legacyGlobals = null;
   forceGc();
   const after = process.memoryUsage();
-  return { before, after, privateContexts, state };
+  if (projection.mainTokenHandles.length !== tokenCount) {
+    throw new Error('probe projection token count does not match requested canonical sample');
+  }
+  return { before, after, projection };
 }
 
 function main() {
@@ -178,25 +109,30 @@ function main() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-footprint-probe-'));
   try {
     const graph = createBaselineGraph(inputs, root);
-    const stateFootprint = estimateStatementServiceStateFootprint(graph.state);
-    const pendingFootprints = graph.privateContexts.map((context) => (
+    const stateFootprint = estimateStatementServiceStateFootprint(
+      graph.projection.serviceState
+    );
+    const pendingFootprints = graph.projection.privateContexts.map((context) => (
       estimateStatementPendingInteractionFootprint(context)
     ));
     const publicDto = createStatementPublicInteractionDto({
-      token: {
-        tokenId: 'probe-token',
-        purpose: 'big-account',
-        serviceGeneration: 1,
-        sessionKey: '17',
-        sessionRevision: inputs.batches,
-        expiresAt: Date.UTC(2026, 7, 27, 15, 0, 0),
-        allowedChoiceDigest: 'a'.repeat(64),
-        reservationId: 'probe-reservation'
-      },
+      token: graph.projection.mainTokenHandles[0],
       prompt: {
         status: 'select-big-account',
-        rowCount: inputs.rows,
-        choices: [{ merchantId: 'M000001', currencies: ['USD', 'EUR', 'HKD'] }]
+        message: '请选择本次使用的大账号 / 币种',
+        selectionMode: 'multi-row',
+        templateId: 17,
+        rows: [{ index: 0, label: '1.', sourceRowNumber: 2, fileName: 'pending-source.xlsx' }],
+        rowsWithEmptyBlocks: [
+          { index: 0, label: '1.', sourceRowNumber: 2, fileName: 'pending-source.xlsx' }
+        ],
+        bigAccounts: [
+          { merchantId: 'M000001', currencies: ['USD', 'EUR', 'HKD'], isMultiCurrency: true }
+        ],
+        expandedBigAccountOptions: [
+          { merchantId: 'M000001', currency: 'USD', accountNature: 'client' }
+        ],
+        fixedAssignments: [{ merchantId: 'M000001', currency: 'USD', rowIndex: 0 }]
       }
     });
     const result = {
@@ -213,6 +149,12 @@ function main() {
       },
       stateFootprint,
       pendingFootprints,
+      legacyInventory: graph.projection.legacyInventory,
+      ownership: graph.projection.ownership,
+      mainTokenHandleBytes: Buffer.byteLength(
+        JSON.stringify(graph.projection.mainTokenHandles[0]),
+        'utf8'
+      ),
       publicDtoBytes: Buffer.byteLength(JSON.stringify(publicDto), 'utf8'),
       productionEnabled: false,
       caveat: 'This fixed generated graph calibrates retained state only; it is not a parser peak, Windows packaged, or real business sample approval.'

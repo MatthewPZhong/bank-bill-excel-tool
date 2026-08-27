@@ -1,5 +1,30 @@
 # E09-P0 Statement Probes Unknowns Preflight
 
+## Reviewer Repair Addendum（2026-08-27）
+
+### 接受的 finding 与范围
+
+| Finding | 类型 | 本轮处理 | 明确非目标 |
+| --- | --- | --- | --- |
+| exact built-ins / binary fast-fail / budget override | BLOCK（P0合同） | production retained graph无binary需求，Buffer/TypedArray/DataView/ArrayBuffer均O(1)拒绝；Map/Set只接受exact descriptor-safe shape；override只可收紧 | 任意自定义class/Proxy iterator沙箱 |
+| purpose-specific public interaction DTO | BLOCK（P0合同） | 从现有Main→Renderer三类真实prompt取证，冻结exact bounded schema | token store、waiting-user continuation、新UI字段 |
+| Protocol envelope ceiling | BLOCK（P0合同） | 用真实envelope builder/validator证明最大合法public DTO可发送 | 修改Platform ceiling或runtime adopt顺序 |
+| 完整五globals projection | BLOCK（P0 probe） | 抽取可复用production-shape builder，明确persistent/token handle/private context唯一所有权；callback只characterize不进入目标graph | Worker state adoption/E09-A |
+| production generation seam golden | BLOCK（P0 golden） | 抽取只读characterization seam，真实执行current/all、余额、warning/cache/error零artifact | Publisher/all-or-none、atomic seed settlement |
+| TMPDIR deterministic | PROBE | 去除绝对临时路径长度对exact rawBytes的影响，默认与`TMPDIR=/tmp`双跑 | 把heap/RSS动态值冻结为跨平台合同 |
+
+### Repair Unknowns Register
+
+| 未知 | 分类 | 证据路径 | 关闭标准 |
+| --- | --- | --- | --- |
+| 三类Renderer prompt的现有真实字段与unknown-field行为 | PROBE | `src/main.js` pending builders、renderer/preload consumer、既有unit | purpose-specific constructor只接受现有展示字段；二维原始行/private path/unknown拒绝 |
+| 实际Platform command envelope的固定wrapper开销 | PROBE | background-execution protocol builder/schema/validator | 最大合法public DTO经真实builder+validator不超过256 KiB，超1 byte fail closed |
+| 五globals中同一detailRows的唯一目标所有者 | PROBE | globals lifecycle、remembered context/pending clone/session | projection inventory与测试证明persistent只持session/remembered summary，private rows只在token context一次；callback只转serializable evidence |
+| 可测试production generation seam的最小抽取点 | PROBE | `generateStatementFiles`与statement-generation helper依赖图 | 直接执行同一production函数，覆盖current/all、name/warning/cache/balance/error零artifact，live handler无行为变化 |
+| BigAccount展示prompt是否仍应携带legacy `contextId` | PROBE | `buildBigAccountSelectionRequiredResult`、`buildBigAccountPreviewResult`与冻结TechDoc exact-eight handle | prompt不携带第二handle；外层token的`tokenId`唯一替代legacy Main `contextId` |
+
+本 addendum 没有需要用户再次选择的 BLOCK；Reviewer 已批准六项修复方向。若现有真实prompt或generation语义与 finding 描述冲突，则只记录证据并停止扩大合同，不自行发明行为。
+
 ## Task Brief
 
 - Goal：冻结 Statement 现有重状态 footprint、pending interaction token/DTO 与资源模型，并用真实 production core 的 characterization/golden 证明 current/all、金额路径、余额 seed prompt 和状态失效现状；为 E09-A～D 提供不可漂移的输入合同。
@@ -25,12 +50,12 @@
 | 未知 | 类型 | 影响 | 可逆性 | 当前证据 | 处理 | 最便宜验证方式 | 当前决定 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 哪些字段属于 stable service state、private token context 与 public DTO | 数据所有权/隐私 | 高 | 一般 | Spec 给所有权原则，legacy graph 可取证 | PROBE | 沿 globals、pending builder、renderer 消费字段建立字段级 inventory | 已关闭：Main handle 按 TechDoc exact-eight；public DTO 剥离 reservation/session/private rows/path；status 仅 bounded summary |
-| footprint 如何对共享引用、数组自定义 metadata、Map/Set/Buffer 计费 | 资源/容量 | 高 | 一般 | legacy rows 用数组加 enumerable metadata；E06 estimator 有可复用原则 | PROBE | 构造 production-shape graph 与实际 heap delta/structured graph 交叉 probe | 已关闭：deterministic graph estimator + 50% headroom + 4 KiB rounding，shared/cycle只计一次，hostile/unsupported fail closed |
+| footprint 如何对共享引用、数组自定义 metadata 与 exact Map/Set 计费，binary是否属于支持域 | 资源/容量 | 高 | 一般 | legacy rows 用数组加 enumerable metadata；现有五globals无binary retained graph | PROBE | 构造production-shape graph与实际heap delta/structured graph交叉probe；large view必须在预算扫描前快速完成 | 已关闭：deterministic graph estimator + 50% headroom + 4 KiB rounding，shared/cycle只计一次；exact Map/Set计费；所有binary O(1) fail closed；override只可收紧canonical上限 |
 | 基线规模应覆盖多少行/列/批次/token | 容量 | 高 | 容易 | canonical budget 256 MiB，但真实样本批准尚未存在 | PROBE | 用现有 Statement row shape 扩展到固定多批次规模，记录 estimator 与 child-process heap/RSS delta | 已关闭P0基线：50k行/4批次/1 token；仅为 generated production-shape evidence，不解除真实样本/Windows gate |
 | legacy import reservation 失败时旧 session 保留还是失效 | 状态生命周期 | 高 | 一般 | E09-A 尚未实现 resource adoption | PROBE（后续） | E09-A 在 candidate adoption fault injection 对照本 P0 golden | P0 不实现；冻结当前 legacy mutation/golden，E09-A 必须保持行为 |
 | token single-use/TTL/stale 的 runtime 实现细节 | 状态生命周期 | 高 | 一般 | canonical policy 已冻结规则，但 token store 属 E09-B | PROBE（后续） | E09-B token store fault/race tests | P0 只冻结 DTO/resource contract，不提前实现 store |
 | current/all、四金额路径与 balance/manual seed 的最小 golden 集 | 资金语义 | 高 | 一般 | file-service/session/balance modules可真实执行 | PROBE | 真实 XLSX/CSV input + production core，冻结 canonical result/row disposition/hash | 已关闭：覆盖 direct、signed、field-conditional、bill split/merge、zero/both、current/all、balance writer与manual seed exact bytes |
-| public DTO byte ceiling 是否应直接等于 policy 1 MiB status ceiling | 协议/隐私 | 中 | 容易 | policy 只冻结 status 1 MiB；Job envelope 256 KiB | ASSUME | 对 canonical fixture 与 Renderer 实际字段取证 | 已采用 Platform command/event ceiling 256 KiB；status 仍独立1 MiB；正反测试锁定 |
+| public DTO byte ceiling 是否应直接等于 policy 1 MiB status ceiling | 协议/隐私 | 中 | 容易 | policy 只冻结 status 1 MiB；Job envelope 256 KiB | ASSUME | 对 canonical fixture 与 Renderer 实际字段取证 | 已采用240 KiB保守inner ceiling + 16 KiB wire reserve；真实最大route/context envelope不超过Platform 256 KiB；status仍独立1 MiB |
 
 ## BLOCK 问题
 
@@ -63,7 +88,7 @@ E09-P0 自身没有需要用户选择的 BLOCK。以下条件继续阻断后续 
 | 顺序 | 步骤 | 消除的未知/保护的不变量 | 成功证据 | 失败影响 | 回滚/收缩 |
 | --- | --- | --- | --- | --- | --- |
 | 1 | 冻结 Statement contract 常量与 exact plain DTO validators | private rows 不回 Main/Renderer；canonical policy 不漂移 | 正反 DTO、fixture parity、hostile object tests | 推翻后续 E09-A/B 公共边界，停止实现 | 只保留 preflight 与现状 inventory |
-| 2 | 实现 state/private-context deterministic footprint | reservation 在采用前覆盖当前 graph，共享引用不重复、unsupported fail closed | metadata/shared/cycle/Map/Set/Buffer/预算边界 tests | 无法可信申请资源，阻断 E09-A | 收缩为 probe-only estimator，不接任何 runtime |
+| 2 | 实现 state/private-context deterministic footprint | reservation 在采用前覆盖当前 graph，共享引用不重复、unsupported fail closed | metadata/shared/cycle、exact Map/Set、binary快速拒绝、预算收紧边界 tests | 无法可信申请资源，阻断 E09-A | 收缩为 probe-only estimator，不接任何 runtime |
 | 3 | 建固定基线规模 graph 与 child-process probe | 记录 estimator 与真实 heap/RSS 量级，避免空壳小对象自证 | 固定行/列/批次/token计数与可复跑 JSON 输出 | canonical 256 MiB 不足则升级 BLOCK | 降低声明，只记录超限事实，不改预算 |
 | 4 | 建 legacy current/all、金额/余额/manual seed golden | 保护金额币种、row disposition、batch 顺序与 seed 文件语义 | production core + 真实 workbook/seed bytes golden | 任何漂移阻断 E09-A～D | 不改 legacy code，修正候选合同/测试 |
 | 5 | blindspot/资金盲区与静态复核 | 防 live 接线、状态旁路、人工红线被误解除 | production flag/live diff 为零、无存活 P0 Critical 自动缺口 | 不提交 | 删除越界实现或补证据 |

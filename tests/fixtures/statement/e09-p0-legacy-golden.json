@@ -4,22 +4,39 @@
   "footprintBaseline": {
     "inputs": {"rows": 25000, "batches": 4, "tokenCount": 1},
     "state": {
-      "rawBytes": 11767830,
-      "estimatedBytes": 17653760,
+      "rawBytes": 11774180,
+      "estimatedBytes": 17661952,
       "budgetBytes": 268435456,
       "headroomNumerator": 3,
       "headroomDenominator": 2,
       "pageBytes": 4096
     },
     "pending": {
-      "rawBytes": 2947252,
-      "estimatedBytes": 4423680,
+      "rawBytes": 2952624,
+      "estimatedBytes": 4431872,
       "budgetBytes": 268435456,
       "headroomNumerator": 3,
       "headroomDenominator": 2,
       "pageBytes": 4096
     },
-    "publicDtoBytes": 334
+    "legacyInventory": {
+      "globalNames": ["statementImportSessions", "lastFileImportContext", "lastPendingBigAccountSelection", "lastManualBalancePrompt", "lastGeneratedExports"],
+      "sessionCount": 1,
+      "sessionFileEntryCount": 4,
+      "sessionRowCount": 25000,
+      "rememberedPreparedRowCount": 6250,
+      "rememberedSelectedBigAccount": true,
+      "pendingFileEntryCount": 1,
+      "pendingRowCount": 6250,
+      "pendingSourceSelectionCount": 1,
+      "assertSessionCurrentPresent": true,
+      "legacyBigAccountContextIdPresent": true,
+      "manualBalancePromptPresent": false,
+      "generatedExportKeys": ["detail", "balance", "allDetail", "allBalance"],
+      "excludedNonStatementExportKeys": ["newAccount", "monthlyBalance"]
+    },
+    "mainTokenHandleBytes": 260,
+    "publicDtoBytes": 805
   },
   "amountModes": {
     "direct": {

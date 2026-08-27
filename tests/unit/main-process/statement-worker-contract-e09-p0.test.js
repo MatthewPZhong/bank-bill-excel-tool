@@ -17,6 +17,13 @@ const {
   estimateStatementValueBytes,
   roundStatementReservationBytes
 } = require('../../../src/main-process/statement-worker/state-footprint');
+const {
+  createJobEnvelope,
+  serializeEnvelope
+} = require('../../../src/main-process/background-execution/protocol');
+const {
+  utf8Size
+} = require('../../../src/main-process/background-execution/protocol-validator');
 
 const ROOT = path.join(__dirname, '..', '..', '..');
 const POLICY_FIXTURE = path.join(
@@ -49,6 +56,50 @@ function token(overrides = {}) {
     allowedChoiceDigest: 'a'.repeat(64),
     reservationId: 'reservation-1',
     ...overrides
+  };
+}
+
+function bigAccountPrompt(overrides = {}) {
+  return {
+    status: 'select-big-account',
+    message: '请选择本次使用的大账号 / 币种',
+    selectionMode: 'multi-row',
+    templateId: 17,
+    rows: [{ index: 0, label: '1.', sourceRowNumber: 2, fileName: '账单.xlsx' }],
+    rowsWithEmptyBlocks: [
+      { index: 0, label: '1.', sourceRowNumber: 2, fileName: '账单.xlsx' }
+    ],
+    bigAccounts: [{ merchantId: 'M001', currencies: ['USD'], isMultiCurrency: false }],
+    expandedBigAccountOptions: [
+      { merchantId: 'M001', currency: 'USD', accountNature: 'client' }
+    ],
+    fixedAssignments: [],
+    ...overrides
+  };
+}
+
+function manualBalancePrompt(overrides = {}) {
+  return {
+    templateName: '中行-上海',
+    bankName: '中行',
+    merchantId: 'M001',
+    currency: 'USD',
+    targetBillDate: '2026-08-01',
+    queueIndex: 1,
+    queueTotal: 2,
+    ...overrides
+  };
+}
+
+function scopeGenerationPrompt(kind = 'detail') {
+  const fieldLabel = kind === 'detail' ? '明细' : '余额';
+  return {
+    status: 'select-export-scope',
+    kind,
+    options: [
+      { scope: 'current', label: `导出当前批次文件的${fieldLabel}` },
+      { scope: 'all', label: `导出所有批次文件的${fieldLabel}` }
+    ]
   };
 }
 
@@ -125,11 +176,7 @@ test('Main token handle冻结TechDoc exact字段，Renderer DTO剥离reservation
 
   const publicDto = createStatementPublicInteractionDto({
     token: token(),
-    prompt: {
-      status: 'select-big-account',
-      rows: [{ index: 0, label: '1.', sourceRowNumber: 2, fileName: '账单.xlsx' }],
-      choices: [{ merchantId: 'M001', currencies: ['USD'] }]
-    }
+    prompt: bigAccountPrompt()
   });
   assert.equal(Object.isFrozen(publicDto), true);
   assert.equal(Object.hasOwn(publicDto, 'reservationId'), false);
@@ -139,29 +186,158 @@ test('Main token handle冻结TechDoc exact字段，Renderer DTO剥离reservation
   assert.throws(
     () => createStatementPublicInteractionDto({
       token: token(),
-      prompt: { detailRows: [['Credit Amount'], ['100']] }
+      prompt: { ...bigAccountPrompt(), detailRows: [['Credit Amount'], ['100']] }
     }),
     (error) => error.code === 'STATEMENT_PUBLIC_DTO_PRIVATE_FIELD'
   );
   assert.throws(
     () => createStatementPublicInteractionDto({
       token: token(),
-      prompt: { evidence: { sourceFilePath: '/Users/name/private.xlsx' } }
+      prompt: { ...bigAccountPrompt(), sourceFilePath: '/Users/name/private.xlsx' }
     }),
     (error) => error.code === 'STATEMENT_PUBLIC_DTO_PRIVATE_FIELD'
   );
   assert.throws(
     () => createStatementPublicInteractionDto({
       token: token(),
-      prompt: { evidence: { sessionKey: 'template:17' } }
+      prompt: { ...bigAccountPrompt(), sessionKey: 'template:17' }
     }),
     (error) => error.code === 'STATEMENT_PUBLIC_DTO_PRIVATE_FIELD'
   );
   assert.throws(
     () => createStatementPublicInteractionDto({
       token: token(),
-      prompt: { message: 'x'.repeat(STATEMENT_RESOURCE_CONTRACT.publicInteractionMaxBytes) }
+      prompt: bigAccountPrompt({
+        rows: Array.from({ length: 1024 }, (_, index) => ({
+          index,
+          label: `${index + 1}.`,
+          sourceRowNumber: index + 2,
+          fileName: 'x'.repeat(512)
+        }))
+      })
     }),
+    (error) => error.code === 'STATEMENT_PUBLIC_DTO_TOO_LARGE'
+  );
+});
+
+test('三类真实Statement prompt按purpose exact冻结并拒绝未知字段、二维原始行与purpose错配', () => {
+  const manual = createStatementPublicInteractionDto({
+    token: token({ purpose: 'manual-balance' }),
+    prompt: manualBalancePrompt()
+  });
+  assert.deepEqual(manual.prompt, manualBalancePrompt());
+
+  const scope = createStatementPublicInteractionDto({
+    token: token({ purpose: 'scope-generation' }),
+    prompt: scopeGenerationPrompt('balance')
+  });
+  assert.deepEqual(scope.prompt, scopeGenerationPrompt('balance'));
+
+  const mainSource = fs.readFileSync(path.join(ROOT, 'src', 'main.js'), 'utf8');
+  const selectionStart = mainSource.indexOf('function buildBigAccountSelectionRequiredResult(');
+  const previewStart = mainSource.indexOf('function buildBigAccountPreviewResult(', selectionStart);
+  const previewEnd = mainSource.indexOf('\nfunction ', previewStart + 1);
+  assert.ok(selectionStart >= 0 && previewStart > selectionStart && previewEnd > previewStart);
+  assert.doesNotMatch(
+    mainSource.slice(selectionStart, previewStart),
+    /contextId/,
+    '真实展示DTO本身不含legacy Main handle'
+  );
+  assert.match(
+    mainSource.slice(previewStart, previewEnd),
+    /contextId/,
+    'legacy preview只为Main全局pending lookup追加旧handle'
+  );
+  assert.throws(
+    () => createStatementPublicInteractionDto({
+      token: token(),
+      prompt: bigAccountPrompt({ contextId: 'legacy-context-1' })
+    }),
+    (error) => error.code === 'STATEMENT_DTO_KEYS_INVALID'
+  );
+
+  assert.throws(
+    () => createStatementPublicInteractionDto({
+      token: token(),
+      prompt: bigAccountPrompt({ unknown: true })
+    }),
+    (error) => error.code === 'STATEMENT_DTO_KEYS_INVALID'
+  );
+  assert.throws(
+    () => createStatementPublicInteractionDto({
+      token: token(),
+      prompt: bigAccountPrompt({ rows: [['2026-08-01', 'M001', 'USD', '100']] })
+    }),
+    (error) => error.code === 'STATEMENT_DTO_SHAPE_INVALID'
+  );
+  assert.throws(
+    () => createStatementPublicInteractionDto({
+      token: token({ purpose: 'manual-balance' }),
+      prompt: bigAccountPrompt()
+    }),
+    (error) => error.code === 'STATEMENT_DTO_KEYS_INVALID'
+  );
+});
+
+function maximalBigAccountPublicDto() {
+  const rows = Array.from({ length: 1024 }, (_, index) => ({
+    index,
+    label: `${index + 1}.`,
+    sourceRowNumber: index + 2,
+    fileName: ''
+  }));
+  const prompt = bigAccountPrompt({ rows });
+  let dto = createStatementPublicInteractionDto({ token: token(), prompt });
+  let remaining = STATEMENT_RESOURCE_CONTRACT.publicInteractionMaxBytes - utf8Size(dto);
+  for (const row of rows) {
+    const count = Math.min(512, remaining);
+    row.fileName = 'x'.repeat(count);
+    remaining -= count;
+    if (remaining === 0) break;
+  }
+  assert.equal(remaining, 0, '合法summary rows必须能填满保守inner ceiling');
+  dto = createStatementPublicInteractionDto({ token: token(), prompt });
+  assert.equal(utf8Size(dto), STATEMENT_RESOURCE_CONTRACT.publicInteractionMaxBytes);
+  return { dto, prompt, rows };
+}
+
+test('最大合法public interaction经真实最大route/context Protocol envelope仍可发送，+1 byte预先拒绝', () => {
+  const { dto, prompt, rows } = maximalBigAccountPublicDto();
+  const operationKey = 'o'.repeat(512);
+  const envelope = createJobEnvelope({
+    direction: 'event',
+    operation: 'job:progress',
+    actionKey: 'statement:resolve-big-account',
+    operationKey,
+    jobId: 'j'.repeat(160),
+    workerInstanceId: 'w'.repeat(160),
+    serviceGeneration: 3,
+    unitId: null,
+    seq: 1,
+    context: {
+      kind: 'operation',
+      value: {
+        taskRunId: 'r'.repeat(512),
+        taskKey: 'k'.repeat(512),
+        moduleId: 'm'.repeat(512),
+        parentRunId: 'p'.repeat(512),
+        operationKey
+      }
+    },
+    payload: { progress: dto }
+  }, { policyRegistry: JSON.parse(fs.readFileSync(POLICY_FIXTURE, 'utf8')) });
+  const serialized = serializeEnvelope(envelope, {
+    policyRegistry: JSON.parse(fs.readFileSync(POLICY_FIXTURE, 'utf8'))
+  });
+  const wrapperBytes = Buffer.byteLength(serialized) - utf8Size(dto);
+  assert.ok(wrapperBytes <= STATEMENT_RESOURCE_CONTRACT.publicInteractionWireReserveBytes);
+  assert.ok(Buffer.byteLength(serialized) <= STATEMENT_RESOURCE_CONTRACT.protocolEnvelopeMaxBytes);
+
+  const expandableRow = rows.find((row) => row.fileName.length < 512);
+  assert.ok(expandableRow, '至少一行仍可在单字段上合法增加一个byte');
+  expandableRow.fileName += 'x';
+  assert.throws(
+    () => createStatementPublicInteractionDto({ token: token(), prompt }),
     (error) => error.code === 'STATEMENT_PUBLIC_DTO_TOO_LARGE'
   );
 });
@@ -289,6 +465,12 @@ test('state与pending interaction使用独立预算，超限和hostile graph在r
     (error) => error.code === 'STATEMENT_PENDING_INTERACTION_BUDGET_EXCEEDED'
   );
   assert.throws(
+    () => estimateStatementPendingInteractionFootprint(privateContext, {
+      budgetBytes: STATEMENT_RESOURCE_CONTRACT.pendingInteractionBudgetBytes + 1
+    }),
+    /may only tighten/
+  );
+  assert.throws(
     () => estimateStatementServiceStateFootprint({ callback() {} }),
     (error) => error.code === 'STATEMENT_FOOTPRINT_TYPE_FORBIDDEN'
   );
@@ -311,6 +493,72 @@ test('state与pending interaction使用独立预算，超限和hostile graph在r
     () => estimateStatementServiceStateFootprint({ sessions: new HostileMap() }),
     (error) => error.code === 'STATEMENT_FOOTPRINT_PROTOTYPE_FORBIDDEN'
   );
+});
+
+test('production-shape不需要binary，large view/slice/shared backing均O(1)拒绝且own getter零读取', () => {
+  const sharedBacking = new ArrayBuffer(1024);
+  assert.throws(
+    () => estimateStatementValueBytes({
+      left: new Uint8Array(sharedBacking, 0, 512),
+      right: new Uint8Array(sharedBacking, 512, 512)
+    }),
+    (error) => error.code === 'STATEMENT_FOOTPRINT_BINARY_FORBIDDEN'
+  );
+
+  const whole = Buffer.allocUnsafeSlow(1024);
+  const slice = whole.subarray(100, 200);
+  assert.throws(
+    () => estimateStatementValueBytes(slice),
+    (error) => error.code === 'STATEMENT_FOOTPRINT_BINARY_FORBIDDEN'
+  );
+
+  let getterReads = 0;
+  const hostile = new Uint8Array(4);
+  Object.defineProperty(hostile, 'metadata', {
+    enumerable: true,
+    get() {
+      getterReads += 1;
+      return { retained: 'x'.repeat(1000) };
+    }
+  });
+  assert.throws(
+    () => estimateStatementValueBytes(hostile),
+    (error) => error.code === 'STATEMENT_FOOTPRINT_BINARY_FORBIDDEN'
+  );
+  assert.equal(getterReads, 0);
+
+  const largeView = new Uint8Array(16 * 1024 * 1024);
+  const startedAt = process.hrtime.bigint();
+  assert.throws(
+    () => estimateStatementValueBytes(largeView),
+    (error) => error.code === 'STATEMENT_FOOTPRINT_BINARY_FORBIDDEN'
+  );
+  const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+  assert.ok(elapsedMs < 250, `large view必须快速拒绝，实际${elapsedMs.toFixed(2)}ms`);
+});
+
+test('Map/Set只接受exact built-in无own retained graph且不消费变异iterator', () => {
+  const map = new Map([['key', { value: 1 }]]);
+  map.extra = { retained: true };
+  assert.throws(
+    () => estimateStatementValueBytes(map),
+    (error) => error.code === 'STATEMENT_FOOTPRINT_BUILTIN_OWN_STATE_FORBIDDEN'
+  );
+
+  let iteratorReads = 0;
+  const set = new Set(['value']);
+  Object.defineProperty(set, Symbol.iterator, {
+    enumerable: false,
+    value() {
+      iteratorReads += 1;
+      throw new Error('must not iterate');
+    }
+  });
+  assert.throws(
+    () => estimateStatementValueBytes(set),
+    (error) => error.code === 'STATEMENT_FOOTPRINT_BUILTIN_OWN_STATE_FORBIDDEN'
+  );
+  assert.equal(iteratorReads, 0);
 });
 
 test('E09-P0 contract/footprint未接入Main live IPC或background runtime', () => {
