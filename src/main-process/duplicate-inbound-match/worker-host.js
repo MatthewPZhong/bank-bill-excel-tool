@@ -15,6 +15,12 @@ const {
   DUPLICATE_STATE_OWNER_KEY
 } = require('./policies');
 const { createDuplicateManagedService } = require('./managed-service');
+const {
+  normalizePairedImportDescriptor
+} = require('./spool-contract');
+const {
+  waitForDuplicateSpoolPairReady
+} = require('./spool-reader');
 
 const OWNED_ACTIONS = new Set(Object.values(DUPLICATE_ACTIONS));
 const OWNER_KEY_HASH = crypto.createHash('sha256')
@@ -163,6 +169,10 @@ function startDuplicateWorker(port, options = {}) {
     }
     const emitJob = createCanonicalEventEmitter(envelope, (event) => port.postMessage(event));
     const abortController = new AbortController();
+    const pairedImport = envelope.actionKey === DUPLICATE_ACTIONS.IMPORT &&
+      envelope.payload && envelope.payload.input && envelope.payload.input.pairedImport
+      ? normalizePairedImportDescriptor(envelope.payload.input.pairedImport)
+      : null;
     const record = {
       envelope,
       ref: jobRef(envelope),
@@ -179,6 +189,13 @@ function startDuplicateWorker(port, options = {}) {
         producerTaskRunId: envelope.context.value.taskRunId
       }),
       adoptCandidate,
+      ...(pairedImport ? {
+        awaitPreparedImport() {
+          return waitForDuplicateSpoolPairReady(pairedImport, {
+            signal: abortController.signal
+          });
+        }
+      } : {}),
       onProgress(progress) {
         if (abortController.signal.aborted) {
           const error = new Error('Duplicate Service正在关闭');

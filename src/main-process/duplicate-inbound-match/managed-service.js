@@ -165,9 +165,27 @@ function createDuplicateManagedService(options = {}) {
     let imported = false;
     let durableCommit = false;
     try {
-      const result = await current.importFiles(
-        input.filePaths, jobContext.onProgress, jobContext.operationIdentity
-      );
+      let result;
+      if (input.pairedImport) {
+        if (typeof jobContext.awaitPreparedImport !== 'function' ||
+            typeof current.importPreparedSpools !== 'function') {
+          throw new DuplicateManagedServiceError(
+            'DUPLICATE_PAIRED_IMPORT_UNAVAILABLE',
+            'Duplicate paired import依赖未完整注册'
+          );
+        }
+        // command一经Service接受，旧generation内session/lastRun资格立即失效；
+        // Parser仍只产生private spool，不在此之前触碰side/Main DB或adopt。
+        current.detachCommittedSession();
+        await jobContext.awaitPreparedImport();
+        result = await current.importPreparedSpools(
+          input.pairedImport, jobContext.onProgress, jobContext.operationIdentity
+        );
+      } else {
+        result = await current.importFiles(
+          input.filePaths, jobContext.onProgress, jobContext.operationIdentity
+        );
+      }
       imported = true;
       durableCommit = Boolean(result && result.durableCommit);
       await adopt(jobContext, 'import');

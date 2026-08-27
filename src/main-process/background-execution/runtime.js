@@ -46,6 +46,9 @@ const {
 const {
   normalizeDuplicateStartupGateDescriptor
 } = require('../duplicate-inbound-match/startup-gate');
+const {
+  createDuplicatePairedTopologyPlanner
+} = require('../duplicate-inbound-match/topology');
 
 const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   ...TOOLBOX_GENERATION_POLICIES,
@@ -149,13 +152,16 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
   }
   const validatorRegistry = createStaticRegistry(validatorEntries);
   const preFundTopologyPlanner = createPreFundMptTopologyPlanner({ availableParallelism });
+  const duplicateTopologyPlanner = createDuplicatePairedTopologyPlanner({ availableParallelism });
   const topologyRegistry = createStaticRegistry(Object.fromEntries(
     BACKGROUND_EXECUTION_POLICIES
       .filter((policy) => policy.resources.compound)
       .map((policy) => [policy.resources.compound.topologyKey,
         policy.actionKey === PRE_FUND_MPT_IMPORT_ACTION || policy.actionKey === PRE_FUND_MPT_REPAIR_ACTION
           ? preFundTopologyPlanner
-          : () => Object.freeze({ effectiveChildCount: 1 })])
+          : (policy.actionKey === DUPLICATE_ACTIONS.IMPORT
+              ? duplicateTopologyPlanner
+              : () => Object.freeze({ effectiveChildCount: 1 }))])
   ));
   entryRegistry.freeze();
   validatorRegistry.freeze();

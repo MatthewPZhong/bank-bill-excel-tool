@@ -4,11 +4,8 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { isDeepStrictEqual } = require('node:util');
-const XLSX = require('xlsx');
 
-const { readBankStatement, BANK_STATEMENT_SHEET_NAME } = require('../bank-statement-io');
-const { BANK_STATEMENT_FIELDS } = require('../../constants/bank-statement-fields');
-const { FileValidationError } = require('../../backend/file-service/common');
+const { readBankStatement } = require('../bank-statement-io');
 const {
   createDuplicateInboundMatchStore,
   MODULE
@@ -32,9 +29,19 @@ const {
   resolveDuplicateInboundDocumentMatches
 } = require('./matching-engine');
 const {
-  readXlsxSheetNames,
   streamDocumentStatement
 } = require('./document-statement-reader');
+const { identifyInputFiles } = require('./input-classifier');
+const {
+  pickBankFields,
+  prepareStoredBankRows,
+  validateBizIds
+} = require('./import-model');
+const {
+  consumeDuplicateInputSpool,
+  validateDuplicateInputSpool,
+  validateDuplicateSpoolPair
+} = require('./spool-reader');
 const {
   buildDefaultFileName,
   writeDuplicateInboundWorkbook
@@ -108,62 +115,6 @@ function hashFile(filePath) {
   });
 }
 
-async function inspectSheetNames(filePath) {
-  if (path.extname(filePath).toLowerCase() === '.xlsx') {
-    return readXlsxSheetNames(filePath);
-  }
-  const workbook = XLSX.readFile(filePath, { bookSheets: true });
-  return Array.isArray(workbook.SheetNames) ? workbook.SheetNames.slice() : [];
-}
-
-async function identifyInputFiles(filePaths) {
-  if (!Array.isArray(filePaths) || filePaths.length !== 2) {
-    throw new FileValidationError(
-      'duplicate-inbound-input-file-count',
-      '请一次选择 1 份银行对账单和 1 份单据对账单（共 2 个文件）'
-    );
-  }
-  const inspected = await Promise.all(filePaths.map(async (filePath) => {
-    if (!filePath || !fs.existsSync(filePath)) {
-      throw new FileValidationError('file-not-found', `文件不存在：${filePath}`);
-    }
-    let sheetNames;
-    try {
-      sheetNames = await inspectSheetNames(filePath);
-    } catch (error) {
-      if (error instanceof FileValidationError) throw error;
-      throw new FileValidationError(
-        'duplicate-inbound-input-unreadable',
-        `文件无法读取：${path.basename(filePath)}`,
-        { detailLines: [error && error.message ? error.message : String(error)] }
-      );
-    }
-    return {
-      filePath,
-      fileName: path.basename(filePath),
-      sheetNames,
-      isBank: sheetNames.includes(BANK_STATEMENT_SHEET_NAME)
-    };
-  }));
-  const bankFiles = inspected.filter((file) => file.isBank);
-  if (bankFiles.length !== 1) {
-    throw new FileValidationError(
-      'duplicate-inbound-input-type-ambiguous',
-      '无法唯一识别银行对账单：两份文件中必须且只能有一份包含 sheet“渠道对账单”',
-      { detailLines: inspected.map((file) => `${file.fileName}：${file.sheetNames.join(' / ') || '无工作表'}`) }
-    );
-  }
-  const bank = bankFiles[0];
-  const document = inspected.find((file) => file !== bank);
-  if (path.extname(document.filePath).toLowerCase() !== '.xlsx') {
-    throw new FileValidationError(
-      'duplicate-inbound-document-extension',
-      '单据对账单只支持 .xlsx 文件'
-    );
-  }
-  return { bank, document };
-}
-
 function yieldToEventLoop() {
   return new Promise((resolve) => setImmediate(resolve));
 }
@@ -176,10 +127,6 @@ function trimText(value) {
   return toText(value).trim();
 }
 
-function pickBankFields(row) {
-  return Object.fromEntries(BANK_STATEMENT_FIELDS.map((field) => [field, row[field] ?? '']));
-}
-
 function countFundTypes(rows) {
   let reversalCount = 0;
   let inboundCount = 0;
@@ -189,33 +136,6 @@ function countFundTypes(rows) {
     if (fundType === FUND_TYPES.INBOUND) inboundCount += 1;
   }
   return { reversalCount, inboundCount };
-}
-
-function validateBizIds(rows) {
-  const firstRowByBizId = new Map();
-  const detailLines = [];
-  for (let index = 0; index < rows.length; index += 1) {
-    const excelRowNumber = index + 2;
-    const bizId = trimText(rows[index].BizId);
-    if (bizId === '') {
-      detailLines.push(`第 ${excelRowNumber} 行：BizId 为空`);
-      continue;
-    }
-    if (firstRowByBizId.has(bizId)) {
-      detailLines.push(
-        `第 ${excelRowNumber} 行：BizId「${bizId}」与第 ${firstRowByBizId.get(bizId)} 行重复`
-      );
-      continue;
-    }
-    firstRowByBizId.set(bizId, excelRowNumber);
-  }
-  if (detailLines.length > 0) {
-    throw new FileValidationError(
-      'duplicate-inbound-invalid-biz-id',
-      `BizId 必须非空且全文件唯一（发现 ${detailLines.length} 处异常）`,
-      { detailLines }
-    );
-  }
 }
 
 function batchSnapshotEntry(batch) {
@@ -827,7 +747,7 @@ class DuplicateInboundMatchService {
       this.fileHasher(inputs.document.filePath)
     ]);
     const parsed = this.bankReader(inputs.bank.filePath);
-    validateBizIds(parsed.rows);
+    const storedRows = prepareStoredBankRows(parsed.rows);
     const bankHashAfterRead = await this.fileHasher(inputs.bank.filePath);
     if (bankHashAfterRead !== bankFileHash) {
       throw new DuplicateInboundMatchServiceError(
@@ -838,13 +758,6 @@ class DuplicateInboundMatchService {
     const { reversalCount, inboundCount } = countFundTypes(parsed.rows);
     const monthKey = localMonthKey(this.now());
     const inputEvidenceHash = importEvidenceHash(bankFileHash, documentFileHash);
-    const storedRows = parsed.rows.map((row, index) => ({
-      sourceOrdinal: index,
-      excelRowNumber: index + 2,
-      bizId: trimText(row.BizId),
-      fundType: trimText(row.FundType),
-      raw: pickBankFields(row)
-    }));
     if (onProgress) onProgress({ stage: 'persist', message: '正在保存银行与单据导入会话...' });
     await yieldToEventLoop();
     const imported = await this.store.createImportBundle({
@@ -922,6 +835,135 @@ class DuplicateInboundMatchService {
       bank: {
         fileName: parsed.fileName,
         rowCount: parsed.rows.length,
+        reversalCount,
+        inboundCount
+      },
+      document: {
+        fileName: imported.document.fileName,
+        rowCount: imported.document.rowCount,
+        matchableRowCount: imported.document.matchableRowCount,
+        emptyBusinessOrderCount: imported.document.emptyBusinessOrderCount
+      }
+    };
+  }
+
+  async importPreparedSpools(rawPairedImport, onProgress, rawOperationIdentity = null) {
+    this.assertImportAllowedByRecoveryLatch();
+    const operationIdentity = normalizeOperationIdentity(rawOperationIdentity, 'duplicate:import');
+    if (!operationIdentity) {
+      throw new DuplicateInboundMatchServiceError(
+        'duplicate-inbound-operation-identity-invalid',
+        'Duplicate paired import必须绑定managed operation identity'
+      );
+    }
+    if (onProgress) {
+      onProgress({ stage: 'validate-spools', message: '正在完整校验银行与单据解析结果...' });
+    }
+    await yieldToEventLoop();
+    // 两份spool、role/source/job/op/owner identity与完整行守恒全部通过前，
+    // 禁止进入side事务或Main reservation adoption。
+    const pair = await validateDuplicateSpoolPair(rawPairedImport);
+    const bankFileHash = pair.bank.source.sha256;
+    const documentFileHash = pair.document.source.sha256;
+    const inputEvidenceHash = importEvidenceHash(bankFileHash, documentFileHash);
+    const receipt = this.store.findOperationReceipt(
+      operationIdentity.actionKey, operationIdentity.operationKey
+    );
+    if (receipt) {
+      if (receipt.producerTaskRunId !== operationIdentity.producerTaskRunId ||
+          receipt.inputEvidenceHash !== inputEvidenceHash) {
+        throw new DuplicateInboundMatchServiceError(
+          'duplicate-inbound-operation-identity-conflict',
+          '同一Duplicate import operationKey的owner或输入证据冲突'
+        );
+      }
+      const imported = this.restoreImportReceipt(receipt);
+      return {
+        status: 'ok',
+        replayed: true,
+        durableCommit: true,
+        bank: {
+          fileName: imported.bank.fileName,
+          rowCount: imported.bank.rowCount,
+          reversalCount: this.bankSession.reversalCount,
+          inboundCount: this.bankSession.inboundCount
+        },
+        document: {
+          fileName: imported.document.fileName,
+          rowCount: imported.document.rowCount,
+          matchableRowCount: imported.document.matchableRowCount,
+          emptyBusinessOrderCount: imported.document.emptyBusinessOrderCount
+        }
+      };
+    }
+
+    const bankRows = [];
+    await consumeDuplicateInputSpool(pair.bank, (row) => { bankRows.push(row); });
+    const { reversalCount, inboundCount } = countFundTypes(
+      bankRows.map((row) => row.raw)
+    );
+    const monthKey = localMonthKey(this.now());
+    if (onProgress) {
+      onProgress({ stage: 'persist', message: '正在单事务采用银行与单据解析结果...' });
+    }
+    await yieldToEventLoop();
+    const imported = await this.store.createImportBundle({
+      monthKey,
+      bank: {
+        fileName: pair.bank.source.fileName,
+        contentHash: bankFileHash,
+        rows: bankRows
+      },
+      document: {
+        fileName: pair.document.source.fileName,
+        contentHash: documentFileHash
+      },
+      // COMMIT前再次完整读取两个task-private artifact与源文件identity，关闭
+      // validate/consume之间及consume/commit之间的TOCTOU窗口。
+      beforeCommit: async () => {
+        await Promise.all([
+          validateDuplicateInputSpool(pair.bank),
+          validateDuplicateInputSpool(pair.document)
+        ]);
+      },
+      operationReceipt: {
+        ...operationIdentity,
+        phase: 'import-side-committed',
+        inputEvidenceHash
+      },
+      writeDocumentRows: (insertRow) => consumeDuplicateInputSpool(pair.document, insertRow)
+    });
+    const importedAt = this.now().toISOString();
+    this.bankSession = {
+      monthKey,
+      importId: imported.id,
+      fileName: pair.bank.source.fileName,
+      fileHash: bankFileHash,
+      rowCount: pair.bank.counts.rowCount,
+      reversalCount,
+      inboundCount,
+      importedAt
+    };
+    this.documentSession = {
+      monthKey,
+      importId: imported.id,
+      fileName: pair.document.source.fileName,
+      fileHash: documentFileHash,
+      rowCount: imported.document.rowCount,
+      matchableRowCount: imported.document.matchableRowCount,
+      emptyBusinessOrderCount: imported.document.emptyBusinessOrderCount,
+      importedAt
+    };
+    this.lastRun = null;
+    if (onProgress) {
+      onProgress({ stage: 'done', message: '银行对账单和单据对账单导入完成' });
+    }
+    return {
+      status: 'ok',
+      durableCommit: true,
+      bank: {
+        fileName: pair.bank.source.fileName,
+        rowCount: pair.bank.counts.rowCount,
         reversalCount,
         inboundCount
       },
