@@ -63,6 +63,24 @@ function writeWorkbook(filePath, headers, sheetName, rows = []) {
   XLSX.writeFile(workbook, filePath);
 }
 
+function writeSparseBankWorkbook(filePath, rowCount) {
+  const workbook = XLSX.utils.book_new();
+  const worksheet = XLSX.utils.aoa_to_sheet([BANK_STATEMENT_FIELDS]);
+  const bizIdColumn = BANK_STATEMENT_FIELDS.indexOf('BizId');
+  for (let index = 0; index < rowCount; index += 1) {
+    worksheet[XLSX.utils.encode_cell({ r: index + 1, c: bizIdColumn })] = {
+      t: 's',
+      v: `BARRIER-${index}`
+    };
+  }
+  worksheet['!ref'] = XLSX.utils.encode_range({
+    s: { r: 0, c: 0 },
+    e: { r: rowCount, c: BANK_STATEMENT_FIELDS.length - 1 }
+  });
+  XLSX.utils.book_append_sheet(workbook, worksheet, '渠道对账单');
+  XLSX.writeFile(workbook, filePath);
+}
+
 function bankRow(overrides = {}) {
   return BANK_STATEMENT_FIELDS.map((field) => overrides[field] ?? '');
 }
@@ -250,13 +268,14 @@ function parserResult(result) {
   return Object.freeze({ ...result, rssBytes: process.memoryUsage().rss });
 }
 
-async function withBlockedParserOutcomeWrites(taskStagingDir, callback) {
+async function withBlockedParserOutcomeWrites(taskStagingDir, callback, onBlocked = null) {
   const originalOpenSync = fs.openSync;
   const stagingRoot = path.resolve(taskStagingDir);
   fs.openSync = function blockedParserOutcomeOpen(filePath, ...args) {
     const absolutePath = typeof filePath === 'string' ? path.resolve(filePath) : '';
     if (absolutePath.startsWith(`${stagingRoot}${path.sep}`) &&
         path.basename(absolutePath) === DUPLICATE_SPOOL_FILE_NAMES.outcomePart) {
+      if (onBlocked) onBlocked(absolutePath);
       throw Object.assign(new Error('injected parser outcome filesystem failure'), { code: 'EACCES' });
     }
     return originalOpenSync(filePath, ...args);
@@ -778,6 +797,105 @@ test('success outcome发布EACCES时无execution timeout也中止sibling并保�
   assert.equal(released.activeDependencyCount, 0);
 
   const nextContext = batchContext('paired-success-outcome-next-run');
+  const next = await runtime.execute({
+    actionKey: 'duplicate:run',
+    operationKey: nextContext.operationKey,
+    production: false,
+    context: { kind: 'operation', value: nextContext },
+    input: { runtime: workerRuntime(dir, databasePath) }
+  });
+  assert.notEqual(next.error && next.error.code, 'SERVICE_BUSY');
+  assertNoDuplicateMutation(dir, databasePath);
+  assert.equal(runtime.resourceGovernor.snapshot().activeLeases.some(
+    (lease) => lease.kind === 'persistent'
+  ), false);
+  const report = await runtime.shutdown({ timeoutMs: 10000 });
+  shutdown = true;
+  assert.deepEqual(report.errors, []);
+  assert.deepEqual(report.leakedTransports, []);
+});
+
+test('真实Parser Worker outcome EACCES保持reservation/lease直到全部Worker exit', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'duplicate-paired-worker-barrier-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const databasePath = path.join(dir, 'tool-data.sqlite');
+  initializeMainDatabase(databasePath);
+  const documentPath = path.join(dir, 'document.xlsx');
+  const bankPath = path.join(dir, 'bank.xlsx');
+  writeWorkbook(documentPath, BILL_HEADERS, '单据对账单');
+  writeSparseBankWorkbook(bankPath, 100000);
+  const runtime = createRuntime(dir, databasePath, { omitExecutionTimeout: true });
+  let shutdown = false;
+  t.after(async () => { if (!shutdown) await runtime.shutdown({ timeoutMs: 10000 }); });
+  const taskStagingDir = path.join(dir, 'worker-barrier-staging');
+  const jobId = 'paired-real-worker-outcome-barrier';
+  const exitedSlots = new Set();
+  let bankExitedAt = 0;
+  let cleanupTerminalChecks = 0;
+  let blockedOutcomeWrites = 0;
+  let resolveFailureOutcomeBlocked;
+  const failureOutcomeBlocked = new Promise((resolve) => { resolveFailureOutcomeBlocked = resolve; });
+  let rejection = null;
+
+  await withBlockedParserOutcomeWrites(taskStagingDir, async () => {
+    const pairedPromise = executeManagedDuplicatePairedImport({
+      runtime,
+      workerRuntime: workerRuntime(dir, databasePath),
+      filePaths: [documentPath, bankPath],
+      taskStagingDir,
+      batchContext: batchContext('paired-real-worker-outcome-barrier'),
+      jobId,
+      cleanupSpool(spool) {
+        cleanupTerminalChecks += 1;
+        assert.equal(runtime.inspect(jobId), null, 'spool cleanup必须晚于parent terminal');
+        assert.deepEqual([...exitedSlots].sort(), [0, 1], 'cleanup前两个真实Parser必须已exit');
+        return cleanupDuplicateSpool(spool);
+      },
+      onParserWorkerState(event) {
+        if (event.state !== 'exited') return;
+        exitedSlots.add(event.slotIndex);
+        if (event.slotIndex === 1) bankExitedAt = Date.now();
+      }
+    });
+
+    await failureOutcomeBlocked;
+    assert.equal(exitedSlots.has(0), true, 'tiny Document必须先完成并触发outcome failure');
+    assert.equal(exitedSlots.has(1), false, '检查窗口内large Bank sibling必须仍存活');
+    assert.notEqual(runtime.inspect(jobId), null, 'Parser terminal barrier前parent job必须仍存在');
+    const held = runtime.resourceGovernor.snapshot();
+    assert.equal(held.activeLeaseCount > 0, true, 'Parser terminal barrier前lease必须保持占用');
+    assert.equal(held.activeDependencyCount > 0, true, 'Parser terminal barrier前compound依赖必须保持');
+
+    const busyContext = batchContext('paired-real-worker-outcome-barrier-busy');
+    const busy = await runtime.execute({
+      actionKey: 'duplicate:run',
+      operationKey: busyContext.operationKey,
+      production: false,
+      context: { kind: 'operation', value: busyContext },
+      input: { runtime: workerRuntime(dir, databasePath) }
+    });
+    assert.equal(busy.error && busy.error.code, 'SERVICE_BUSY');
+    assert.equal(exitedSlots.has(1), false, 'SERVICE_BUSY证据必须发生在sibling exit之前');
+
+    try { await pairedPromise; } catch (error) { rejection = error; }
+  }, () => {
+    blockedOutcomeWrites += 1;
+    if (blockedOutcomeWrites === 2) resolveFailureOutcomeBlocked();
+  });
+
+  assert.equal(rejection instanceof AggregateError, true);
+  assert.equal(rejection.code, 'DUPLICATE_PARSER_OUTCOME_PUBLISH_FAILED');
+  assert.equal(bankExitedAt > 0, true, 'large Bank真实Worker必须已exit');
+  assert.deepEqual([...exitedSlots].sort(), [0, 1]);
+  assert.equal(cleanupTerminalChecks, 2);
+  assert.equal(runtime.inspect(jobId), null);
+  assert.equal(fs.existsSync(taskStagingDir), false);
+  assertNoDuplicateMutation(dir, databasePath);
+  const released = runtime.resourceGovernor.snapshot();
+  assert.equal(released.activeLeaseCount, 0);
+  assert.equal(released.activeDependencyCount, 0);
+
+  const nextContext = batchContext('paired-real-worker-outcome-barrier-next');
   const next = await runtime.execute({
     actionKey: 'duplicate:run',
     operationKey: nextContext.operationKey,

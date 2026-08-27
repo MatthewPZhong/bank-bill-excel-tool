@@ -217,7 +217,7 @@ async function executeManagedDuplicatePairedImport(rawOptions) {
   let failureOutcomePublished = false;
   let forcedOutcomeFailure = null;
 
-  function publishParserFailure(spool, error) {
+  function publishParserFailure(spool, error, { deferTransportFailure = false } = {}) {
     try {
       writeDuplicateParserFailure(spool, error);
       failureOutcomePublished = true;
@@ -225,7 +225,9 @@ async function executeManagedDuplicatePairedImport(rawOptions) {
     } catch (publicationError) {
       const failure = outcomePublicationFailure(error, publicationError);
       forcedOutcomeFailure ||= failure;
-      failExecutionTransportForCoordinator(control, forcedOutcomeFailure);
+      if (!deferTransportFailure) {
+        failExecutionTransportForCoordinator(control, forcedOutcomeFailure);
+      }
       return forcedOutcomeFailure;
     }
   }
@@ -290,13 +292,18 @@ async function executeManagedDuplicatePairedImport(rawOptions) {
           parserPhaseFailure ||= error;
           parserController.abort();
           if (!ownsParserFailure || forcedOutcomeFailure || failureOutcomePublished) throw error;
-          throw publishParserFailure(spools[slotIndex], error);
+          throw publishParserFailure(spools[slotIndex], error, { deferTransportFailure: true });
         }
       }
     }
     const parserTasks = Array.from({ length: parserCount }, () => parseNext());
     const settled = await Promise.allSettled(parserTasks);
     parserPhaseComplete = true;
+    // Outcome filesystem失效时Service无法自行观察terminal marker。保持parent
+    // reservation/CompoundLease直到所有真实Parser Worker exit，再权威关闭当前transport。
+    if (forcedOutcomeFailure) {
+      failExecutionTransportForCoordinator(control, forcedOutcomeFailure);
+    }
     const parserFailure = settled.find((item) => item.status === 'rejected');
     if (parserFailure) {
       await parentWatcher;
