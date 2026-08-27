@@ -43,6 +43,9 @@ const {
   validateDuplicateImportResult,
   validateDuplicateRunResult
 } = require('../duplicate-inbound-match/policies');
+const {
+  normalizeDuplicateStartupGateDescriptor
+} = require('../duplicate-inbound-match/startup-gate');
 
 const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   ...TOOLBOX_GENERATION_POLICIES,
@@ -56,11 +59,12 @@ function isBackgroundExecutionProductionEnabled(actionKey) {
   return Boolean(policy && policy.production.enabled === true);
 }
 
-function entryBindingForPolicy(policy, workerRoot) {
+function entryBindingForPolicy(policy, workerRoot, duplicateStartupGate) {
   if (policy.moduleId === 'duplicate') {
     return Object.freeze({
       path: path.resolve(__dirname, '..', 'duplicate-inbound-match', 'worker-entry.js'),
-      cancellationTerminalErrorCodes: Object.freeze(['DUPLICATE_SHUTDOWN'])
+      cancellationTerminalErrorCodes: Object.freeze(['DUPLICATE_SHUTDOWN']),
+      workerData: Object.freeze({ startupGate: duplicateStartupGate })
     });
   }
   if (policy.moduleId === 'fund-recon') {
@@ -107,10 +111,13 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
       : { systemReserveBytes: options.systemReserveBytes })
   });
   const workerRoot = path.resolve(__dirname, '..', 'toolbox-background');
+  const duplicateStartupGate = normalizeDuplicateStartupGateDescriptor(
+    options.duplicateStartupGate
+  );
   const entryRegistry = createStaticRegistry(Object.fromEntries(
     BACKGROUND_EXECUTION_POLICIES.map((policy) => [
       policy.entryKey,
-      entryBindingForPolicy(policy, workerRoot)
+      entryBindingForPolicy(policy, workerRoot, duplicateStartupGate)
     ])
   ));
   const validatorEntries = {};
@@ -244,12 +251,18 @@ function createNonProductionBackgroundExecutionRuntime(options = {}) {
 }
 
 function createBackgroundExecutionRuntimeManager(options = {}) {
-  const runtimeFactory = options.runtimeFactory || (() => createBackgroundExecutionRuntime({
-    ...options,
-    workerDurableCoordinator: typeof options.workerDurableCoordinatorProvider === 'function'
-      ? options.workerDurableCoordinatorProvider()
-      : options.workerDurableCoordinator
-  }));
+  const runtimeFactory = options.runtimeFactory || (() => {
+    const duplicateStartupGate = typeof options.duplicateStartupGateProvider === 'function'
+      ? options.duplicateStartupGateProvider()
+      : options.duplicateStartupGate;
+    return createBackgroundExecutionRuntime({
+      ...options,
+      duplicateStartupGate,
+      workerDurableCoordinator: typeof options.workerDurableCoordinatorProvider === 'function'
+        ? options.workerDurableCoordinatorProvider()
+        : options.workerDurableCoordinator
+    });
+  });
   let runtime = null;
   let shutdownOwner = null;
   let closing = false;

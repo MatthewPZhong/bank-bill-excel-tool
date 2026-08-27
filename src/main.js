@@ -206,6 +206,9 @@ const {
   createDuplicateStartupOutcomeInspector,
   createDuplicateStartupRecoveryProvider
 } = require('./main-process/duplicate-inbound-match/startup-recovery');
+const {
+  DUPLICATE_STARTUP_GATE_CONTRACT_VERSION
+} = require('./main-process/duplicate-inbound-match/startup-gate');
 // v3.1.0：平盘资金性质校验（持久化银行/链接侧库 + 严格1:1匹配 + 结果回导确认）。
 const {
   createPositionReconciliationService
@@ -664,7 +667,11 @@ let preFundMptWorkerDurableCoordinator = null;
 let duplicateStartupRecoveryReady = false;
 let archiveOperationTail = Promise.resolve();
 const backgroundExecutionRuntimeManager = createBackgroundExecutionRuntimeManager({
-  workerDurableCoordinatorProvider: () => preFundMptWorkerDurableCoordinator
+  workerDurableCoordinatorProvider: () => preFundMptWorkerDurableCoordinator,
+  duplicateStartupGateProvider: () => Object.freeze({
+    contractVersion: DUPLICATE_STARTUP_GATE_CONTRACT_VERSION,
+    startupRecoveryReady: duplicateStartupRecoveryReady
+  })
 });
 const archiveOperationContext = new AsyncLocalStorage();
 const positionReconciliationOperationContext = new AsyncLocalStorage();

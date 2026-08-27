@@ -7,6 +7,7 @@ const path = require('node:path');
 const { createDuplicateInboundMatchService } = require('./service');
 const { createDuplicateMirrorDatabase } = require('./mirror-database');
 const { DUPLICATE_ACTIONS } = require('./policies');
+const { createDuplicateManagedStartupGate } = require('./startup-gate');
 const { estimateDuplicateStateFootprint } = require('./state-footprint');
 
 class DuplicateManagedServiceError extends Error {
@@ -22,11 +23,18 @@ function emptySummary() {
 }
 
 function summaryFromService(service) {
+  if (!service || typeof service.status !== 'function') {
+    throw new DuplicateManagedServiceError(
+      'DUPLICATE_STATUS_UNAVAILABLE',
+      'Duplicate Service缺少真实status资格'
+    );
+  }
+  const status = service.status();
   return Object.freeze({
-    bankRowCount: service.bankSession ? Number(service.bankSession.rowCount) || 0 : 0,
-    documentRowCount: service.documentSession ? Number(service.documentSession.rowCount) || 0 : 0,
-    canRun: Boolean(service.bankSession && service.documentSession),
-    canExport: Boolean(service.lastRun)
+    bankRowCount: status && status.bank ? Number(status.bank.rowCount) || 0 : 0,
+    documentRowCount: status && status.document ? Number(status.document.rowCount) || 0 : 0,
+    canRun: Boolean(status && status.canRun === true),
+    canExport: Boolean(status && status.canExport === true)
   });
 }
 
@@ -78,6 +86,12 @@ function createDuplicateManagedService(options = {}) {
   const createMirrorDatabase = options.createMirrorDatabase || createDuplicateMirrorDatabase;
   const createLegacyService = options.createLegacyService || createDuplicateInboundMatchService;
   const estimateFootprint = options.estimateFootprint || estimateDuplicateStateFootprint;
+  const startupGate = options.startupGate || createDuplicateManagedStartupGate(
+    options.startupGateDescriptor
+  );
+  if (!startupGate || typeof startupGate.assertOperationAllowed !== 'function') {
+    throw new TypeError('Duplicate managed Service需要startupGate');
+  }
   let service = null;
   let mirrorDatabase = null;
   let runtime = null;
@@ -95,6 +109,7 @@ function createDuplicateManagedService(options = {}) {
     if (runtime && !sameRuntime(runtime, next)) {
       throw new DuplicateManagedServiceError('DUPLICATE_RUNTIME_CHANGED', 'Duplicate Service runtime身份不可变');
     }
+    startupGate.assertOperationAllowed(next, { initializing: !service });
     if (!service) {
       runtime = next;
       mirrorDatabase = createMirrorDatabase(runtime.databasePath);
@@ -108,6 +123,11 @@ function createDuplicateManagedService(options = {}) {
     return service;
   }
 
+  function refreshStableSummary() {
+    if (service) stableSummary = summaryFromService(service);
+    return stableSummary;
+  }
+
   async function adopt(jobContext, operation) {
     if (!jobContext || typeof jobContext.adoptCandidate !== 'function') {
       throw new DuplicateManagedServiceError(
@@ -115,6 +135,7 @@ function createDuplicateManagedService(options = {}) {
         'Duplicate mutation必须等待PersistentReservation adopt ACK'
       );
     }
+    // candidate在ACK前只能作为adoption payload存在，不能写入对外稳定快照。
     const candidateSummary = summaryFromService(service);
     const candidateRevision = stateRevision + 1;
     const footprint = estimateFootprint({ runtime, summary: candidateSummary });
@@ -199,6 +220,7 @@ function createDuplicateManagedService(options = {}) {
       if (actionKey === DUPLICATE_ACTIONS.EXPORT) return await executeExport(input, jobContext);
       throw new DuplicateManagedServiceError('DUPLICATE_ACTION_UNKNOWN', `未知Duplicate action：${actionKey}`);
     } finally {
+      refreshStableSummary();
       active = false;
     }
   }
@@ -206,15 +228,20 @@ function createDuplicateManagedService(options = {}) {
   return Object.freeze({
     execute,
     status() {
-      return Object.freeze({ active, closed, stateRevision, stableSummary });
+      return Object.freeze({
+        active,
+        closed,
+        stateRevision,
+        // Legacy Service会在PersistentReservation adopt ACK前先持有candidate。
+        // managed边界在命令active期间只发布最后一个稳定快照，避免绕过adopt。
+        stableSummary: active ? stableSummary : refreshStableSummary()
+      });
     },
     close() {
       if (active) throw new DuplicateManagedServiceError('SERVICE_BUSY', 'Duplicate Service仍在执行命令');
       if (closed) return;
       closed = true;
-      if (service) {
-        try { service.invalidateForNewImport(); } finally { mirrorDatabase.close(); }
-      }
+      if (mirrorDatabase) mirrorDatabase.close();
       service = null;
       mirrorDatabase = null;
       runtime = null;

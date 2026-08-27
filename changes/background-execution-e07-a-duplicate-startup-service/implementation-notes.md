@@ -20,6 +20,9 @@
 | Duplicate三action共用一个Service Worker | frozen `service.duplicate`与single mutable owner合同 | 每action一个Worker；Main/Worker双state | 一次最多一个command，busy reject；完整managed state只在Worker |
 | import topology固定1 | paired parser属于E07-C且尚无15%/RSS证据 | 预先spawn双parser；改fixture为thread-single | 保留canonical thread-pool声明与未来扩展点，但本PR无并行 |
 | managed result/status只发布exact bounded DTO，artifact hash流式计算 | Main不应持有完整rows/result，导出文件可能很大 | 返回legacy run summary；一次性读完整artifact做hash | import/run只返回count/capability/revision，export只返回单artifact manifest，不复制业务state |
+| managed Worker必须携带Main startup gate descriptor，并在每条command前重读持久active Hold | Dedicated review证明直接runtime入口和crash后的新generation可绕过Main getter gate；仅靠进程内ready布尔值不足 | 只在Main legacy handler检查；Worker内相信调用方；crash后自动新generation清库 | descriptor缺失/未ready、主库/门禁不可读均fail closed；首构发现side/main residue也fail closed，同generation仍允许已拥有Service继续工作 |
+| cooperative close只释放内存owner和连接，不调用业务失效/清库 | Dedicated review证明close调用`invalidateForNewImport()`会删除成功import证据，令下次inspector误判clean | close时沿用“新import”失效语义 | normal close保留side/main恢复事实；下次startup inspector得到unknown/Hold，而不是false-clean |
+| bounded summary只投影legacy `service.status()`资格，adopt ACK前不发布candidate | `Boolean(lastRun)`无法表达纯Inbound零结果、MPT stale或side unavailable；直接刷新又会在ACK前暴露candidate | managed层复制第二套canExport判断；只在命令结束刷新 | pureInbound/stale/unavailable与legacy保持单一真值；active命令只暴露最后稳定快照，ACK后才发布candidate revision |
 | live IPC不切换 | production=false且E07-B恢复闭环未完成 | 合并即让legacy handler走runtime | 用户路径/资金算法零漂移；capability只做显式本地验证 |
 
 ## Assumptions
@@ -35,20 +38,22 @@
 | 原计划 | 实际方案 | 原因 | 影响 | Spec 已同步 |
 | --- | --- | --- | --- | --- |
 | 既有E2E把constructor隐式清理当成重启语义 | 改为断言constructor保留side/main证据，并在显式`invalidateForNewImport()`后验证原清理合同 | 冻结E07-A要求inspector先取证，旧断言与新合同冲突 | 只更新过时验收；命令期失效语义继续覆盖 | 不需要；与冻结Spec一致 |
+| 首轮managed runtime只依赖Main getter/Hold gate，close仍调用失效，summary读取`lastRun` | 在Worker内部增加持久gate、close纯释放、summary投影legacy status | Dedicated review用真实active Hold、crash cold start、normal close、pureInbound/stale/unavailable反例证明原方案不完整 | 不改变live routing、matching或E07-B/C合同；只封闭E07-A能力入口和生命周期 | 不需要；属于冻结Spec要求的缺陷修复 |
 
 ## Evidence
 
 | 证据 | 结果 | 覆盖的行为/风险 |
 | --- | --- | --- |
 | exact base / contract hashes | HEAD与三份权威合同hash已核对 | 防基线/合同漂移 |
-| E07-A定向unit：`node --test tests/unit/main-process/duplicate-inbound-match/*.test.js tests/unit/duplicate-inbound-match-wiring.test.js` | 84/84 PASS | constructor纯、严格startup顺序、unknown/failure Hold、legacy gate、policy parity、topology=1、single Service、busy/adoption/revision、real Worker crash/cold start、bounded result |
+| Dedicated review复现：managed Service + native runtime | 9/9 PASS | explicit gate缺失fail closed、active Hold零mutation/零删证据、crash cold-start residue阻断、normal close保留side且inspector unknown、pureInbound/MPT stale/side unavailable的真实`canExport`、adopt ACK前candidate不发布 |
+| E07-A定向unit：`node --test tests/unit/main-process/duplicate-inbound-match/*.test.js tests/unit/duplicate-inbound-match-wiring.test.js`，并加side store/repository | 96/96 PASS | constructor纯、严格startup顺序、unknown/failure Hold、legacy与managed gate、policy parity、topology=1、single Service、busy/adoption/revision、real Worker close/crash、bounded result |
 | Platform Contract回归：policy registry/protocol validator/ServiceHost/Supervisor | 160/160 PASS | canonical policy、generation/control envelope、PersistentReservation replace/adopt/release、close/crash资源收口 |
 | Duplicate E2E：`node scripts/integration/duplicate-inbound-match-end-to-end.js` | 31/31 PASS | 真实import/run/export、constructor保留证据、显式import失效仍清side并supersede mirror、BizId/MPT/document与行数守恒 |
 | Duplicate store/repository unit | 8/8 PASS | side store持久状态与main mirror repository既有合同未回归 |
-| runtime registry旧清单回归 | 10/10 PASS | 通用runtime inventory包含三项canonical Duplicate action，既有Toolbox/FundRecon预算与生命周期不回归 |
+| runtime registry/Toolbox/FundRecon回归 | 11/11 PASS | 通用runtime inventory包含三项canonical Duplicate action，既有Toolbox/FundRecon预算与生命周期不回归 |
 | Duplicate 150k benchmark：`npm run benchmark:duplicate-inbound` | PASS；150,000 MPT rows / 6,000 keys，fixture 530.0 ms，query 82.5 ms，RSS 104.1→122.3 MiB | matching与side-store规模回归；未作为E07-C并行收益证据 |
 | WAL只读探针与startup recovery tests | PASS；普通readOnly会创建sidecar，immutable URI下bytes/mtime/目录不变；孤立WAL/SHM仍Hold | Inspector零破坏、证据family不遗漏 |
-| 全量unit：`NODE_PATH=/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules npm run test:unit` | 6224/6229 PASS；2项Windows build contract因隔离worktree硬编码的本地`node_modules/app-builder-lib/templates/nsis/multiUser.nsh`不存在而ENOENT，3项SKIP；主仓库对应dependency存在 | 产品/新增回归无失败；2项仅为worktree依赖布局限制，不把全量命令宣称PASS |
+| 全量unit：`NODE_PATH=/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules npm run test:unit` | 6228/6233 PASS；2项Windows build contract因隔离worktree硬编码的本地`node_modules/app-builder-lib/templates/nsis/multiUser.nsh`不存在而ENOENT，3项SKIP；主仓库对应dependency存在 | 产品/新增回归无失败；2项仅为worktree依赖布局限制，不把全量命令宣称PASS |
 | 静态检查 | `git diff --check`及全部触及JS的`node --check`通过 | 语法与补丁格式 |
 | 明确未执行 | `release-check`、`check-vars`、`scan:vars` | 按任务冻结约束跳过；不把跳过项宣称PASS |
 
