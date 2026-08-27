@@ -24,13 +24,14 @@ function exact(value, keys, label) {
   return value;
 }
 
-function createStatementPublicTokenIdentity(input) {
+function createStatementPublicTokenIdentity(input, options = {}) {
   const token = exact(
     canonicalJsonSnapshot(input, { maxBytes: 4096 }),
     PUBLIC_TOKEN_KEYS,
     'StatementPublicToken'
   );
-  if (token.purpose !== 'big-account') {
+  const expectedPurpose = options.purpose || 'big-account';
+  if (token.purpose !== expectedPurpose) {
     throw new StatementInteractionContractError('STATEMENT_CONTINUATION_PURPOSE_INVALID', 'Continuation purpose is invalid');
   }
   if (typeof token.tokenId !== 'string' || token.tokenId.length === 0 || token.tokenId.length > 256 ||

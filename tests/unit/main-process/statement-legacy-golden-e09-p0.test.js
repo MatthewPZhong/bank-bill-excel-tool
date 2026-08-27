@@ -14,27 +14,28 @@ const {
   calculateEndingBalanceFromAmounts,
   extractHeaders,
   FileValidationError,
-  inferEndingBalance,
   normalizeCell,
   parseDateValue,
-  parseNumericValue,
   writeBalanceWorkbook,
   writeWorkbookRows
 } = require('../../../src/backend/file-service');
 const {
-  BALANCE_SEED_GENERATION_METHODS,
   findPreviousBalanceSeed,
   readBalanceSeedRecords,
   splitTemplateName,
   upsertBalanceSeedRecord
 } = require('../../../src/backend/balance-seed-store');
-const {
-  readBalanceAdjustments,
-  resolveBalanceAdjustment
-} = require('../../../src/backend/balance-adjustment-store');
+const { readBalanceAdjustments } = require('../../../src/backend/balance-adjustment-store');
 const {
   createStatementGenerationHelpers
 } = require('../../../src/main-process/statement-generation');
+const {
+  buildDateRangeLabel,
+  buildFieldIndexMap,
+  deriveBalanceRecords,
+  parseRequiredBillDates,
+  scanBalanceSeedStatus: scanStatementBalanceSeedStatus
+} = require('../../../src/main-process/statement-generation-business');
 const {
   buildManualBalanceSeedPlan,
   writeManualBalanceSeedPlan
@@ -98,105 +99,7 @@ function createProductionGenerationSeam(storageRoot) {
   const formatDateLabel = loadMainFunction('formatDateLabel', ['pad'], [pad]);
   const getToday = loadMainFunction('getToday', ['pad'], [pad]);
   const sanitizeFileName = loadMainFunction('sanitizeFileName');
-  const buildDateRangeLabel = loadMainFunction('buildDateRangeLabel');
-  const buildFieldIndexMap = loadMainFunction(
-    'buildFieldIndexMap',
-    ['normalizeCell'],
-    [normalizeCell]
-  );
-  const getMappedFieldValue = loadMainFunction('getMappedFieldValue');
-  const parseRequiredBillDates = loadMainFunction(
-    'parseRequiredBillDates',
-    [
-      'buildFieldIndexMap',
-      'normalizeCell',
-      'parseDateValue',
-      'FileValidationError',
-      'formatDateLabel'
-    ],
-    [buildFieldIndexMap, normalizeCell, parseDateValue, FileValidationError, formatDateLabel]
-  );
-  const ensureNumericValue = loadMainFunction(
-    'ensureNumericValue',
-    ['normalizeCell', 'parseNumericValue', 'FileValidationError'],
-    [normalizeCell, parseNumericValue, FileValidationError]
-  );
-  const buildBalanceTemplateRow = loadMainFunction(
-    'buildBalanceTemplateRow',
-    ['normalizeCell'],
-    [normalizeCell]
-  );
-  const hasMultipleEndingBalances = loadMainFunction('hasMultipleEndingBalances');
-  const buildBalanceSeedPrompt = loadMainFunction(
-    'buildBalanceSeedPrompt',
-    ['normalizeCell'],
-    [normalizeCell]
-  );
-  const resolveSeededPreviousEndBalance = loadMainFunction(
-    'resolveSeededPreviousEndBalance',
-    ['FileValidationError'],
-    [FileValidationError]
-  );
-  const deriveBalanceRecords = loadMainFunction(
-    'deriveBalanceRecords',
-    [
-      'buildFieldIndexMap',
-      'FileValidationError',
-      'splitTemplateName',
-      'normalizeCell',
-      'parseDateValue',
-      'formatDateLabel',
-      'ensureNumericValue',
-      'getMappedFieldValue',
-      'buildBalanceSeedPrompt',
-      'resolveSeededPreviousEndBalance',
-      'calculateEndingBalanceFromAmounts',
-      'inferEndingBalance',
-      'hasMultipleEndingBalances',
-      'resolveBalanceAdjustment',
-      'buildBalanceTemplateRow',
-      'BALANCE_SEED_GENERATION_METHODS'
-    ],
-    [
-      buildFieldIndexMap,
-      FileValidationError,
-      splitTemplateName,
-      normalizeCell,
-      parseDateValue,
-      formatDateLabel,
-      ensureNumericValue,
-      getMappedFieldValue,
-      buildBalanceSeedPrompt,
-      resolveSeededPreviousEndBalance,
-      calculateEndingBalanceFromAmounts,
-      inferEndingBalance,
-      hasMultipleEndingBalances,
-      resolveBalanceAdjustment,
-      buildBalanceTemplateRow,
-      BALANCE_SEED_GENERATION_METHODS
-    ]
-  );
-  const scanBalanceSeedStatus = loadMainFunction(
-    'scanBalanceSeedStatus',
-    [
-      'buildFieldIndexMap',
-      'splitTemplateName',
-      'normalizeCell',
-      'parseDateValue',
-      'formatDateLabel',
-      'findPreviousBalanceSeed',
-      'ensureStorageRoot'
-    ],
-    [
-      buildFieldIndexMap,
-      splitTemplateName,
-      normalizeCell,
-      parseDateValue,
-      formatDateLabel,
-      findPreviousBalanceSeed,
-      ensureStorageRoot
-    ]
-  );
+  const scanBalanceSeedStatus = (input) => scanStatementBalanceSeedStatus(input, ensureStorageRoot());
   const storeGeneratedBalanceSeeds = loadMainFunction(
     'storeGeneratedBalanceSeeds',
     ['ensureStorageRoot', 'upsertBalanceSeedRecord'],

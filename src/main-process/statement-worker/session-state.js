@@ -10,7 +10,8 @@ const {
   appendStatementSessionImport,
   buildStatementFileEntry,
   cloneRowsWithMetadata,
-  createStatementImportSession
+  createStatementImportSession,
+  getStatementSessionEntries
 } = require('../statement-session');
 const {
   assertMetadataCurrent,
@@ -72,6 +73,12 @@ function cloneSession(session) {
     templateName: session.templateName,
     importCount: session.importCount,
     currentBatchId: session.currentBatchId,
+    generationConfig: session.generationConfig ? structuredClone(session.generationConfig) : null,
+    templateEvidenceDigest: session.templateEvidenceDigest || '',
+    generationConfigByDigest: new Map(
+      [...(session.generationConfigByDigest || new Map())]
+        .map(([digest, config]) => [digest, structuredClone(config)])
+    ),
     fileEntries: session.fileEntries.map((entry) => ({
       ...entry,
       sourceIdentity: entry.sourceIdentity ? { ...entry.sourceIdentity } : null,
@@ -86,6 +93,49 @@ function cloneSession(session) {
         .map(([digest, snapshot]) => [digest, structuredClone(snapshot)])
     )
   };
+}
+
+function generationConfigFromTemplate(template) {
+  const mappingByTargetField = structuredClone(template.mappingByField);
+  return {
+    template: {
+      id: template.templateId,
+      name: template.templateName,
+      headers: template.expectedSourceHeaders.slice()
+    },
+    mappingByTargetField,
+    selectedMerchantId: '',
+    selectedCurrency: '',
+    balanceRequested: Boolean(mappingByTargetField.Balance && mappingByTargetField.Balance !== '无'),
+    balanceMode: mappingByTargetField.Balance === '通过发生额计算' ? 'calculated' : 'statement',
+    exportTargetFields: template.orderedTargetFields.slice(),
+    accountMappingByBankId: structuredClone(template.accountMappingByBankId),
+    currencyMappings: structuredClone(template.currencyMappings),
+    amountMappingRules: structuredClone(template.amountMappingRules),
+    amountSplitByField: structuredClone(template.amountSplitByField),
+    billSplitMerge: structuredClone(template.billSplitMerge),
+    dateParseOrder: template.dateParseOrder
+  };
+}
+
+function statementGenerationInputEvidence(session, scope) {
+  const entries = getStatementSessionEntries(session, scope);
+  return Object.freeze({
+    hash: canonicalSha256({
+      sessionKey: session.key,
+      scope,
+      currentBatchId: scope === 'current' ? session.currentBatchId : '',
+      templateEvidenceDigest: session.templateEvidenceDigest,
+      entries: entries.map((entry) => ({
+        id: entry.id,
+        resourceId: entry.sourceIdentity.resourceId,
+        templateRef: entry.templateRef,
+        templateDigest: entry.templateDigest,
+        sourceIdentity: entry.sourceIdentity
+      }))
+    }),
+    entries: Object.freeze(entries)
+  });
 }
 
 function cloneStatementServiceState(state) {
@@ -383,6 +433,22 @@ async function buildStatementImportCandidate(state, request, options = {}) {
     );
   }
   candidate.sessions.set(owner.sessionKey, session);
+  session.generationConfigByDigest = new Map(
+    [...templates.values()].map((evidence) => [
+      evidence.digest,
+      generationConfigFromTemplate(evidence.snapshot)
+    ])
+  );
+  const ownerEvidence = [...templates.values()].find(
+    (evidence) => String(evidence.snapshot.templateId) === owner.templateId
+  ) || [...templates.values()][0];
+  session.generationConfig = ownerEvidence
+    ? generationConfigFromTemplate(ownerEvidence.snapshot)
+    : null;
+  session.templateEvidenceDigest = canonicalSha256(request.templateCatalog.map((evidence) => ({
+    templateRef: evidence.templateRef,
+    digest: evidence.digest
+  })));
 
   const mappedEntries = [];
   for (const [sourceIndex, source] of request.sources.entries()) {
@@ -438,7 +504,11 @@ async function buildStatementImportCandidate(state, request, options = {}) {
       ...entry,
       templateRef: source.templateRef,
       templateDigest: mapped.evidence.digest,
-      sourceIdentity: { ...source.sourceIdentity }
+      sourceIdentity: { ...source.sourceIdentity },
+      sourceEvidence: {
+        resourceId: source.resourceId,
+        snapshot: { ...source.snapshot }
+      }
     });
     await new Promise((resolve) => setImmediate(resolve));
   }
@@ -601,5 +671,6 @@ module.exports = {
   buildStatementImportCandidate,
   cloneStatementServiceState,
   createStatementServiceState,
-  importRequiresBigAccountInteraction
+  importRequiresBigAccountInteraction,
+  statementGenerationInputEvidence
 };

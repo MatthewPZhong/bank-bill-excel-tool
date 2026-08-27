@@ -27,6 +27,15 @@ if (workerData && typeof workerData.statementSourceRoot === 'string') {
     statementSourceRoot = null;
   }
 }
+const statementStagingRoot = workerData && typeof workerData.statementStagingRoot === 'string'
+  ? path.resolve(workerData.statementStagingRoot)
+  : null;
+const statementStorageRoot = workerData && typeof workerData.statementStorageRoot === 'string'
+  ? path.resolve(workerData.statementStorageRoot)
+  : null;
+const statementBalanceTemplatePath = workerData && typeof workerData.statementBalanceTemplatePath === 'string'
+  ? path.resolve(workerData.statementBalanceTemplatePath)
+  : null;
 
 function resolveSourceResource(resourceId) {
   if (!statementSourceRoot || typeof resourceId !== 'string') return null;
@@ -53,6 +62,9 @@ const service = createStatementService({
     parentPort.postMessage(message);
   },
   resolveSourceResource,
+  stagingRoot: statementStagingRoot,
+  storageRoot: statementStorageRoot,
+  balanceTemplatePath: statementBalanceTemplatePath,
   close() {
     parentPort.close();
   },
