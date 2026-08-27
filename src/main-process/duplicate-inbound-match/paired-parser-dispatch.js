@@ -5,6 +5,10 @@ const { randomUUID } = require('node:crypto');
 const { Worker } = require('node:worker_threads');
 
 const {
+  failExecutionTransportForCoordinator
+} = require('../background-execution/supervisor');
+
+const {
   DUPLICATE_INPUT_ROLES,
   DUPLICATE_PAIRED_IMPORT_CONTRACT_VERSION,
   deriveSlotIdentity,
@@ -26,6 +30,19 @@ function managedError(code, message, details = null) {
   const error = new Error(message);
   error.code = code;
   if (details) error.details = details;
+  return error;
+}
+
+function outcomePublicationFailure(primaryError, publicationError) {
+  const failures = primaryError === publicationError
+    ? [publicationError]
+    : [primaryError, publicationError];
+  const error = new AggregateError(
+    failures,
+    'Duplicate Parser terminal outcome无法发布',
+    { cause: primaryError }
+  );
+  error.code = 'DUPLICATE_PARSER_OUTCOME_PUBLISH_FAILED';
   return error;
 }
 
@@ -195,6 +212,24 @@ async function executeManagedDuplicatePairedImport(rawOptions) {
   });
   let parentTerminal = false;
   let primaryError = null;
+  let parserController = null;
+  let parserPhaseFailure = null;
+  let failureOutcomePublished = false;
+  let forcedOutcomeFailure = null;
+
+  function publishParserFailure(spool, error) {
+    try {
+      writeDuplicateParserFailure(spool, error);
+      failureOutcomePublished = true;
+      return error;
+    } catch (publicationError) {
+      const failure = outcomePublicationFailure(error, publicationError);
+      forcedOutcomeFailure ||= failure;
+      failExecutionTransportForCoordinator(control, forcedOutcomeFailure);
+      return forcedOutcomeFailure;
+    }
+  }
+
   try {
     await control.ready;
     const snapshot = control.snapshot();
@@ -205,15 +240,16 @@ async function executeManagedDuplicatePairedImport(rawOptions) {
     }
     const parserCount = snapshot.topology && snapshot.topology.effectiveChildCount;
     if (![1, 2].includes(parserCount)) {
-      writeDuplicateParserFailure(spools[0], managedError(
+      const topologyError = managedError(
         'DUPLICATE_PAIRED_TOPOLOGY_INVALID', 'Duplicate paired topology非法'
-      ));
+      );
+      const terminalError = publishParserFailure(spools[0], topologyError);
       await control.promise;
       parentTerminal = true;
-      throw managedError('DUPLICATE_PAIRED_TOPOLOGY_INVALID', 'Duplicate paired topology非法');
+      throw terminalError;
     }
 
-    const parserController = new AbortController();
+    parserController = new AbortController();
     const parserRunner = options.parserRunner || runDuplicateParserWorker;
     let parserPhaseComplete = false;
     const parentWatcher = control.promise.then((execution) => {
@@ -250,9 +286,11 @@ async function executeManagedDuplicatePairedImport(rawOptions) {
             } catch (_error) { /* diagnostics cannot change parser/service lifecycle */ }
           }
         } catch (error) {
-          writeDuplicateParserFailure(spools[slotIndex], error);
+          const ownsParserFailure = parserPhaseFailure === null;
+          parserPhaseFailure ||= error;
           parserController.abort();
-          throw error;
+          if (!ownsParserFailure || forcedOutcomeFailure || failureOutcomePublished) throw error;
+          throw publishParserFailure(spools[slotIndex], error);
         }
       }
     }
@@ -263,7 +301,7 @@ async function executeManagedDuplicatePairedImport(rawOptions) {
     if (parserFailure) {
       await parentWatcher;
       parentTerminal = true;
-      throw parserFailure.reason;
+      throw forcedOutcomeFailure || parserPhaseFailure || parserFailure.reason;
     }
     const bankResults = results.filter((result) => result && result.role === DUPLICATE_INPUT_ROLES.BANK);
     const documentResults = results.filter(
@@ -299,13 +337,18 @@ async function executeManagedDuplicatePairedImport(rawOptions) {
       })
     });
   } catch (error) {
-    primaryError = error;
+    let terminalError = forcedOutcomeFailure || error;
+    primaryError = terminalError;
     if (!parentTerminal) {
-      try { writeDuplicateParserFailure(spools[0], error); } catch (_markerError) { /* barrier timeout wins */ }
+      if (parserController) parserController.abort();
+      if (!forcedOutcomeFailure && !failureOutcomePublished) {
+        terminalError = publishParserFailure(spools[0], error);
+        primaryError = terminalError;
+      }
       await control.promise;
       parentTerminal = true;
     }
-    throw error;
+    throw terminalError;
   } finally {
     try { cleanupSpools(spools, options.cleanupSpool || cleanupDuplicateSpool); } catch (cleanupError) {
       if (primaryError) cleanupError.cause = primaryError;

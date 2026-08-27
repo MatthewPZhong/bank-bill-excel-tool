@@ -30,6 +30,7 @@ const {
   runDuplicateParserWorker
 } = require('../../../../src/main-process/duplicate-inbound-match/paired-parser-dispatch');
 const {
+  DUPLICATE_SPOOL_FILE_NAMES,
   DUPLICATE_PAIRED_IMPORT_CONTRACT_VERSION,
   deriveSlotIdentity,
   duplicateSpoolPaths
@@ -117,7 +118,7 @@ function requiredWorkerDurableCoordinator() {
   });
 }
 
-function createRuntime(dir, databasePath) {
+function createRuntime(dir, databasePath, options = {}) {
   const resourceGovernor = createResourceGovernor({
     budgets: Object.freeze({
       cpuSlots: 8,
@@ -127,18 +128,19 @@ function createRuntime(dir, databasePath) {
       memoryBytes: 4 * (2 ** 30)
     })
   });
-  return createNonProductionBackgroundExecutionRuntime({
+  const runtimeOptions = {
     resourceGovernor,
     availableParallelism: 8,
     freeMemoryBytes: 4 * (2 ** 30),
     totalMemoryBytes: 4 * (2 ** 30),
     memoryHardCeilingBytes: 2 * (2 ** 30),
     systemReserveBytes: 0,
-    executionTimeoutMs: 10000,
     shutdownTimeoutMs: 10000,
     duplicateStartupGate: { contractVersion: 1, startupRecoveryReady: true },
     workerDurableCoordinator: requiredWorkerDurableCoordinator()
-  });
+  };
+  if (options.omitExecutionTimeout !== true) runtimeOptions.executionTimeoutMs = 10000;
+  return createNonProductionBackgroundExecutionRuntime(runtimeOptions);
 }
 
 function createNativeRuntime() {
@@ -246,6 +248,39 @@ function sideImportSnapshots(dir) {
 
 function parserResult(result) {
   return Object.freeze({ ...result, rssBytes: process.memoryUsage().rss });
+}
+
+async function withBlockedParserOutcomeWrites(taskStagingDir, callback) {
+  const originalOpenSync = fs.openSync;
+  const stagingRoot = path.resolve(taskStagingDir);
+  fs.openSync = function blockedParserOutcomeOpen(filePath, ...args) {
+    const absolutePath = typeof filePath === 'string' ? path.resolve(filePath) : '';
+    if (absolutePath.startsWith(`${stagingRoot}${path.sep}`) &&
+        path.basename(absolutePath) === DUPLICATE_SPOOL_FILE_NAMES.outcomePart) {
+      throw Object.assign(new Error('injected parser outcome filesystem failure'), { code: 'EACCES' });
+    }
+    return originalOpenSync(filePath, ...args);
+  };
+  try {
+    return await callback();
+  } finally {
+    fs.openSync = originalOpenSync;
+  }
+}
+
+function assertNoDuplicateMutation(dir, databasePath) {
+  const sideDir = path.join(dir, 'run-data', 'duplicate-inbound-match');
+  if (fs.existsSync(sideDir)) {
+    assert.deepEqual(sideCounts(dir), { imports: 0, bankRows: 0, documentRows: 0, receipts: 0 });
+  }
+  const db = new DatabaseSync(databasePath, { readOnly: true });
+  try {
+    assert.equal(Number(db.prepare(
+      'SELECT COUNT(*) AS count FROM duplicate_inbound_match_run_mirrors'
+    ).get().count), 0);
+  } finally {
+    db.close();
+  }
 }
 
 test('两角色独立spool固定Bank→Document，完整hash/ordinal/identity守恒且manifest不泄漏业务行', async (t) => {
@@ -573,6 +608,192 @@ test('Parser单侧失败时reservation阻断import/run/export且零side/Main/ado
   assert.deepEqual(report.leakedTransports, []);
   assert.equal(failureDuration < 1000, true, `failure barrier耗时${failureDuration}ms`);
   assert.equal(shutdownDuration < 1000, true, `shutdown耗时${shutdownDuration}ms`);
+});
+
+test('failure outcome发布EACCES时无execution timeout也权威终态并释放reservation/lease', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'duplicate-paired-failure-outcome-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const databasePath = path.join(dir, 'tool-data.sqlite');
+  initializeMainDatabase(databasePath);
+  const bankPath = path.join(dir, 'bank.xlsx');
+  const documentPath = path.join(dir, 'document.xlsx');
+  writeWorkbook(bankPath, BANK_STATEMENT_FIELDS, '渠道对账单');
+  writeWorkbook(documentPath, BILL_HEADERS, '单据对账单');
+  const runtime = createRuntime(dir, databasePath, { omitExecutionTimeout: true });
+  let shutdown = false;
+  t.after(async () => { if (!shutdown) await runtime.shutdown({ timeoutMs: 10000 }); });
+  const taskStagingDir = path.join(dir, 'failure-outcome-staging');
+  const jobId = 'paired-failure-outcome-no-timeout';
+  const parserError = Object.assign(new Error('injected parser business failure'), {
+    code: 'PARSER_INJECTED'
+  });
+  let started = 0;
+  let resolveStarted;
+  const allStarted = new Promise((resolve) => { resolveStarted = resolve; });
+  let rejectPrimary;
+  let siblingAborted = false;
+  let cleanupTerminalChecks = 0;
+  let rejection = null;
+  let failedAt = 0;
+  await withBlockedParserOutcomeWrites(taskStagingDir, async () => {
+    const pairedPromise = executeManagedDuplicatePairedImport({
+      runtime,
+      workerRuntime: workerRuntime(dir, databasePath),
+      filePaths: [bankPath, documentPath],
+      taskStagingDir,
+      batchContext: batchContext('paired-failure-outcome'),
+      jobId,
+      cleanupSpool(spool) {
+        cleanupTerminalChecks += 1;
+        assert.equal(runtime.inspect(jobId), null, 'spool cleanup必须晚于parent terminal');
+        return cleanupDuplicateSpool(spool);
+      },
+      parserRunner(spool, { signal }) {
+        started += 1;
+        if (started === 2) resolveStarted();
+        if (spool.slotIndex === 0) {
+          return new Promise((_resolve, reject) => { rejectPrimary = reject; });
+        }
+        return new Promise((_resolve, reject) => {
+          const abort = () => {
+            siblingAborted = true;
+            reject(Object.assign(new Error('sibling aborted'), {
+              code: 'DUPLICATE_PARSER_CANCELLED'
+            }));
+          };
+          if (signal.aborted) abort();
+          else signal.addEventListener('abort', abort, { once: true });
+        });
+      }
+    });
+    await allStarted;
+    failedAt = Date.now();
+    rejectPrimary(parserError);
+    try { await pairedPromise; } catch (error) { rejection = error; }
+  });
+  assert.equal(rejection instanceof AggregateError, true);
+  assert.equal(rejection.code, 'DUPLICATE_PARSER_OUTCOME_PUBLISH_FAILED');
+  assert.equal(rejection.cause, parserError, '原始Parser错误必须保留为cause');
+  assert.deepEqual(rejection.errors.map((error) => error.code), ['PARSER_INJECTED', 'EACCES']);
+  assert.equal(siblingAborted, true);
+  assert.equal(cleanupTerminalChecks, 2);
+  assert.equal(Date.now() - failedAt < 1000, true, 'parent terminal必须在1秒内完成');
+  assert.equal(runtime.inspect(jobId), null);
+  assert.equal(fs.existsSync(taskStagingDir), false);
+  assertNoDuplicateMutation(dir, databasePath);
+  const released = runtime.resourceGovernor.snapshot();
+  assert.equal(released.activeLeaseCount, 0);
+  assert.equal(released.activeDependencyCount, 0);
+
+  const nextContext = batchContext('paired-failure-outcome-next-run');
+  const nextStartedAt = Date.now();
+  const next = await runtime.execute({
+    actionKey: 'duplicate:run',
+    operationKey: nextContext.operationKey,
+    production: false,
+    context: { kind: 'operation', value: nextContext },
+    input: { runtime: workerRuntime(dir, databasePath) }
+  });
+  assert.notEqual(next.error && next.error.code, 'SERVICE_BUSY');
+  assert.equal(Date.now() - nextStartedAt < 1000, true);
+  assertNoDuplicateMutation(dir, databasePath);
+  assert.equal(runtime.resourceGovernor.snapshot().activeLeases.some(
+    (lease) => lease.kind === 'persistent'
+  ), false, '失败paired与后续失败命令均不得adopt persistent reservation');
+  const report = await runtime.shutdown({ timeoutMs: 10000 });
+  shutdown = true;
+  assert.deepEqual(report.errors, []);
+  assert.deepEqual(report.leakedTransports, []);
+});
+
+test('success outcome发布EACCES时无execution timeout也中止sibling并保持零adopt', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'duplicate-paired-success-outcome-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const databasePath = path.join(dir, 'tool-data.sqlite');
+  initializeMainDatabase(databasePath);
+  const bankPath = path.join(dir, 'bank.xlsx');
+  const documentPath = path.join(dir, 'document.xlsx');
+  writeWorkbook(bankPath, BANK_STATEMENT_FIELDS, '渠道对账单', [bankRow({ BizId: 'SUCCESS-OUTCOME' })]);
+  writeWorkbook(documentPath, BILL_HEADERS, '单据对账单');
+  const runtime = createRuntime(dir, databasePath, { omitExecutionTimeout: true });
+  let shutdown = false;
+  t.after(async () => { if (!shutdown) await runtime.shutdown({ timeoutMs: 10000 }); });
+  const taskStagingDir = path.join(dir, 'success-outcome-staging');
+  const jobId = 'paired-success-outcome-no-timeout';
+  let started = 0;
+  let resolveStarted;
+  const allStarted = new Promise((resolve) => { resolveStarted = resolve; });
+  let siblingAborted = false;
+  let cleanupTerminalChecks = 0;
+  let rejection = null;
+  let failedAt = 0;
+  await withBlockedParserOutcomeWrites(taskStagingDir, async () => {
+    const pairedPromise = executeManagedDuplicatePairedImport({
+      runtime,
+      workerRuntime: workerRuntime(dir, databasePath),
+      filePaths: [bankPath, documentPath],
+      taskStagingDir,
+      batchContext: batchContext('paired-success-outcome'),
+      jobId,
+      cleanupSpool(spool) {
+        cleanupTerminalChecks += 1;
+        assert.equal(runtime.inspect(jobId), null, 'spool cleanup必须晚于parent terminal');
+        return cleanupDuplicateSpool(spool);
+      },
+      async parserRunner(spool, { signal }) {
+        started += 1;
+        if (started === 2) resolveStarted();
+        if (spool.slotIndex === 0) {
+          await allStarted;
+          return parserResult(await writeDuplicateInputSpool(spool));
+        }
+        return await new Promise((_resolve, reject) => {
+          const abort = () => {
+            siblingAborted = true;
+            reject(Object.assign(new Error('sibling aborted'), {
+              code: 'DUPLICATE_PARSER_CANCELLED'
+            }));
+          };
+          if (signal.aborted) abort();
+          else signal.addEventListener('abort', abort, { once: true });
+        });
+      }
+    });
+    await allStarted;
+    failedAt = Date.now();
+    try { await pairedPromise; } catch (error) { rejection = error; }
+  });
+  assert.equal(rejection instanceof AggregateError, true);
+  assert.equal(rejection.code, 'DUPLICATE_PARSER_OUTCOME_PUBLISH_FAILED');
+  assert.equal(rejection.cause && rejection.cause.code, 'EACCES');
+  assert.deepEqual(rejection.errors.map((error) => error.code), ['EACCES', 'EACCES']);
+  assert.equal(siblingAborted, true);
+  assert.equal(cleanupTerminalChecks, 2);
+  assert.equal(Date.now() - failedAt < 1000, true, 'parent terminal必须在1秒内完成');
+  assert.equal(runtime.inspect(jobId), null);
+  assert.equal(fs.existsSync(taskStagingDir), false);
+  assertNoDuplicateMutation(dir, databasePath);
+  const released = runtime.resourceGovernor.snapshot();
+  assert.equal(released.activeLeaseCount, 0);
+  assert.equal(released.activeDependencyCount, 0);
+
+  const nextContext = batchContext('paired-success-outcome-next-run');
+  const next = await runtime.execute({
+    actionKey: 'duplicate:run',
+    operationKey: nextContext.operationKey,
+    production: false,
+    context: { kind: 'operation', value: nextContext },
+    input: { runtime: workerRuntime(dir, databasePath) }
+  });
+  assert.notEqual(next.error && next.error.code, 'SERVICE_BUSY');
+  assertNoDuplicateMutation(dir, databasePath);
+  assert.equal(runtime.resourceGovernor.snapshot().activeLeases.some(
+    (lease) => lease.kind === 'persistent'
+  ), false);
+  const report = await runtime.shutdown({ timeoutMs: 10000 });
+  shutdown = true;
+  assert.deepEqual(report.errors, []);
+  assert.deepEqual(report.leakedTransports, []);
 });
 
 test('两侧角色冲突在完整pair validation前fail closed且零side/Main/adopt', async (t) => {

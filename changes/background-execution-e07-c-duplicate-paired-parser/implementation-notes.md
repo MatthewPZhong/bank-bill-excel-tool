@@ -17,6 +17,7 @@
 | Main coordinator只调度descriptor与bounded terminal/result；Parser业务行只在各自task-private NDJSON spool和Service Worker中出现。 | Main不得保留第二份完整业务state；静态依赖测试证明dispatcher不加载Bank/Document reader，Parser不加载DB/matching/MPT/candidate。 | Main读取或合并业务行；把两侧rows放Job result。 | Main只见role/fileName/count/RSS/elapsed与路径descriptor，不解析业务行。 |
 | 两个Parser直接复用既有Bank reader、Document streaming reader、BizId/model helper，并各写独立slot spool。 | 禁止复制normalizer/parser业务逻辑；single/paired side post-image逐字段一致。 | 在新Worker重写XLSX/字段转换；构建未来N-role框架。 | 仅固定两个slot与唯一Bank/Document角色，不泛化未来role。 |
 | manifest-last不等于Parser成功；coordinator只在terminal message且Worker clean exit 0后发布exact success outcome，任一failure发布脱敏failure outcome。 | manifest发布后transport crash存在真实窗口；专属测试先观察manifest 50ms仍零side/Main，再触发crash并在1秒内terminal。 | Service看到manifest即采用；用普通`control.cancel()`绕过shutdown-only policy。 | outcome绑定job/op/producerTaskRunId/slot/unit；Service只在两侧success后继续，failure不等待execution timeout。 |
+| terminal outcome文件系统不可用时，coordinator以exact control触发Supervisor权威`transport-lost + forceTransport`终态。 | failure marker本身可能因ENOSPC/EACCES/readonly同步失败；普通cancel受shutdown-only policy拒绝，全runtime shutdown又会阻断后续命令。Supervisor内部WeakMap capability只接受原control，并复用既有transport/resource cleanup。 | 吞掉marker错误后无界等execution timeout；把普通user cancel伪装为基础设施失败；关闭全runtime；向control/runtime枚举API增加通用权限。 | sibling先abort；failure/success outcome均不可发布时parent仍立即terminal，Service generation/CompoundLease释放后才清理spool，下一命令可新建generation。 |
 | Service先完整校验两份manifest/source/spool/role/count/ordinal，再查exact receipt；无receipt才进入原side事务。 | paired evidence必须由两份源SHA形成，解析前无法证明exact replay；E07-B禁止的是cleanup/matching/side mutation重跑。 | 在Parser前凭operationKey猜replay；双侧任一成功即部分采用。 | exact replay仍在任何side mutation前，只恢复bounded session；bundle/rows/receipt计数不增。 |
 | Service采用顺序固定Bank→Document，并在COMMIT前按首次manifest digest与rows/source hash再次完整复验。 | Parser完成时序不得影响业务顺序；仅重读“当前新manifest”会留下validate/commit TOCTOU。 | 按完成顺序adopt；只校验count；COMMIT前接受替换后的manifest。 | 同计数内容变化、manifest变化、source变化、role/identity冲突均fail closed且事务回滚。 |
 | task-private spool由Main coordinator在parent terminal barrier后清理，只删除已知文件并只`rmdir`空目录。 | Parser不写DB，E07-B side receipt/result/Main mirror才是durable恢复权威。 | recursive删除宽目录；把spool纳入E07-B recovery或E07-C compensation。 | failure、transport crash、shutdown、success与replay均收口双spool；不扩E07-B/E08。 |
@@ -39,6 +40,7 @@
 | 预检初稿写成exact replay先于Parser准备、Parser/spool=0。 | paired先解析并完整验证两份source evidence，随后在任何side mutation前receipt-first。 | receipt的`inputEvidenceHash`由两份源SHA组成；未取证前不能证明exact replay。 | replay有临时Parser I/O但side bundle/rows/receipt/matching均不重跑；spool仍terminal后清理。 | 不需要；符合E07-B“mutation前replay”不变量。 |
 | 初版failure路径尝试普通cancel parent。 | failure outcome由Service在既有reservation内权威读取并自行terminal；只有app shutdown走shutdown-only cancel。 | policy明确拒绝普通cancel，错误使用会等待execution timeout并制造伪语义。 | failure立即收口且不改变cancel policy。 | 不需要；纠正方案回到冻结shutdown-only合同。 |
 | 初版Service把ready manifest当Parser完成。 | clean Worker exit后才发布success outcome，两侧exact success是采用前置。 | manifest写完到Worker transport terminal之间存在真实crash窗口。 | manifest后crash必然零commit，不再依赖竞态时序。 | 不需要；补足冻结crash/partial-failure要求。 |
+| 初版默认terminal outcome总能写入task-private filesystem。 | outcome发布失败时保留原Parser错误与marker错误关系，并由exact-control coordinator capability强制transport teardown。 | Reviewer在无`executionTimeoutMs` runtime用EACCES/readonly同类故障复现parent永久pending、reservation/lease不释放。 | 不改变shutdown-only取消语义或Platform公开协议；只关闭当前失败Service generation，后续runtime继续可用。 | 不需要；这是E07-C failure barrier的可达故障修复。 |
 
 冻结产品合同无行为偏差；以上均为实施探针后对初始方案的收紧。
 
@@ -46,10 +48,10 @@
 
 | 证据 | 结果 | 覆盖的行为/风险 |
 | --- | --- | --- |
-| E07-C专属：`NODE_PATH=/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules node --test tests/unit/main-process/duplicate-inbound-match/paired-parser-e07-c.test.js` | 12/12 PASS | 两slot独立spool、exact manifest/outcome identity、source/spool/manifest TOCTOU、clean-exit barrier、乱序固定Bank→Document、single完整post-image/receipt parity、exact replay零新增、busy三命令、role conflict、failure/crash/shutdown、cleanup、native actual1、gate与依赖边界。 |
-| Duplicate affected：`node --test tests/unit/main-process/duplicate-inbound-match/*.test.js` | 110/110 PASS | reader/writer/matching/Service/managed Worker/startup recovery、E07-B receipt/replay/partial recovery与E07-C组合无回归。 |
+| E07-C专属：`NODE_PATH=/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules node --test tests/unit/main-process/duplicate-inbound-match/paired-parser-e07-c.test.js` | 14/14 PASS | 两slot独立spool、exact manifest/outcome identity、source/spool/manifest TOCTOU、clean-exit barrier、乱序固定Bank→Document、single完整post-image/receipt parity、exact replay零新增、busy三命令、role conflict、failure/crash/shutdown、cleanup、native actual1、gate与依赖边界；新增failure/success outcome EACCES在默认无execution timeout下均<1秒terminal、abort sibling、零mutation/adopt并释放全部lease。 |
+| Duplicate affected：`NODE_PATH=/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules node --test tests/unit/main-process/duplicate-inbound-match/*.test.js` | 112/112 PASS | reader/writer/matching/Service/managed Worker/startup recovery、E07-B receipt/replay/partial recovery与E07-C组合无回归。 |
 | side/Main authority：store + result digest + mirror repository定向unit | 11/11 PASS | import事务、receipt-owned边界、完整result digest、Main CAS identity未回归。 |
-| Platform adjacent：policy registry + ResourceGovernor/lease + ServiceHost + Supervisor | 172/172 PASS | topology/CompoundLease、downgrade-to-single、shutdown-only、service reservation、worker-durable receipt gate与资源收口。 |
+| Platform adjacent：`NODE_PATH=... node --test tests/unit/main-process/background-execution/*.test.js` | 356/356 PASS | exact-control capability未知/已终态安全返回false且不改变control/runtime枚举API；topology/CompoundLease、downgrade-to-single、shutdown-only、ServiceHost generation、worker-durable receipt gate与资源收口无回归。 |
 | Duplicate integration：`node scripts/integration/duplicate-inbound-match-end-to-end.js` | 31/31 PASS | 真实Bank/Document import、匹配、side/Main、导出与行数守恒无回归。 |
 | 5轮benchmark：`DUPLICATE_PAIRED_BENCH_ROWS=3000 DUPLICATE_PAIRED_BENCH_ITERATIONS=5 node scripts/benchmark-duplicate-paired-parser.js` | 本地gate PASS；single median 531.251ms，paired 317.776ms，改善40.18%；paired peak RSS 507150336 < budget 838860800 bytes | 真实OS Parser Workers，交替顺序与warmup；详见[benchmark evidence](./benchmark-evidence.md)。只证明darwin parser-only capability，不解除native/Windows/production/人工门禁。 |
 | Static | ESLint `src/` PASS；新增test/benchmark ESLint PASS；全部changed/new JS `node --check` PASS | 语法、lint与边界代码静态质量。 |
@@ -65,7 +67,7 @@
 | 固定Bank→Document与single等价 | `service.js#importPreparedSpools`、抽取的`input-classifier.js`/`import-model.js` | reverse completion仍固定role order；imports/Bank rows/Document rows/receipt evidence逐字段post-image parity。 |
 | E07-B committed replay不重跑 | `service.js#importPreparedSpools` receipt-first branch | same owner/op/evidence replay后imports/bank/document/receipts计数完全不增。 |
 | source/manifest/spool TOCTOU与行数守恒 | `spool-reader.js` + store `beforeCommit` | 同count内容改变、manifest替换、source改变、identity/role冲突全部拒绝。 |
-| cancel/crash/cleanup | `paired-parser-dispatch.js` terminal barrier + known-file cleanup | parser failure、manifest transport crash、app shutdown均双spool/root无残留、资源无leak。 |
+| cancel/crash/outcome filesystem/cleanup | `paired-parser-dispatch.js` terminal barrier + Supervisor exact-control transport failure + known-file cleanup | parser failure、success/failure outcome EACCES、manifest transport crash、app shutdown均先parent terminal再双spool cleanup；无timeout窗口下资源归零且后续命令非`SERVICE_BUSY`。 |
 | single/low-resource/perf/RSS/production gate | optional wrapper、Governor topology、benchmark script/evidence | native actual1；<15%或RSS超限gate=false；`production:true`拒绝；production policy与live Main未改。 |
 
 ## Reconciliation Blindspot Pass
@@ -81,20 +83,22 @@
 
 - 本PR不改matching engine、金额十进制规范化、Currency/Channel分组、MPT/document candidate选择、result digest或Excel writer。
 - Parser仅复用既有reader/model生成与single相同的Bank raw与Document row；Service仍调用同一store事务。Bank BizId/raw/FundType关系、ordinal唯一递增、Document matchable/empty完整守恒均在消费端复验。
-- 证据：全部Duplicate 110/110、backend 11/11、E2E 31/31与paired/single逐字段side post-image parity。
+- 证据：全部Duplicate 112/112、backend 11/11、E2E 31/31与paired/single逐字段side post-image parity。
 - 处置：自动化PASS；金额币种、候选复用、三方血缘和真实Excel/WPS仍需人工复核，不能由benchmark解除。
 
 ### [Important] 部分失败、取消、crash与隐私
 
 - Parser在两侧success前不触碰DB/adopt；manifest不是成功证据，clean exit后的terminal outcome才是。failure outcome只含bounded causeCode，不写路径/行；Main result也拒绝额外字段。
 - cleanup只删除task-private known files并在parent terminal后执行；不调用startup recovery、不复制matching、不把spool当durable证据。
-- 证据：failure、role conflict、manifest-after-crash、shutdown、敏感manifest/outcome scan；side/Main/adopt和spool均为零/空。
+- outcome write失败不再依赖execution timeout；coordinator只凭exact control触发当前transport teardown，不开放通用control/runtime方法，也不改变ordinary cancel policy。
+- 证据：failure、role conflict、manifest-after-crash、shutdown、failure/success outcome EACCES、敏感manifest/outcome scan；side/Main/adopt和spool均为零/空，lease/dependency归零后下一命令不再busy。
 - 处置：本地自动化PASS；Windows文件锁/Worker terminate/RSS连续十轮为production PROBE。
 
 ## Important Variables Review
 
 - ⚠️ `DuplicateInboundMatchService` / per-month Duplicate side DB（Risk-sensitive）：仅新增prepared spool import入口并抽取既有classifier/model；未改金额、币种、七元组、MPT/document candidate、result digest、mirror schema或writer。paired/single逐字段side post-image、全部Duplicate unit与E2E已通过。
-- ⚠️ background runtime topology/CompoundLease：只为`duplicate:import`绑定module-private topology planner；policy fixture、Governor预算、production字段、其它action topology均未改。platform 172/172与Duplicate policy unit通过。
+- ⚠️ background runtime topology/CompoundLease：只为`duplicate:import`绑定module-private topology planner；policy fixture、Governor预算、production字段、其它action topology均未改。background-execution 356/356与Duplicate policy unit通过。
+- ⚠️ background Supervisor terminal/resource lifecycle：新增module-internal exact-control WeakMap capability，只复用既有`adapter-error/transport-lost/forceTransport`收口；Supervisor/control/runtime enumerable API、cancel policy、protocol/schema均未改。background-execution 356/356通过。
 - 未修改`freezeWorkerBatchContext`、公开协议/schema、`src/main.js` live IPC、package/version或重要变量清单本身。
 
 ## Remaining Unknowns
