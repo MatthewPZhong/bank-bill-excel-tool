@@ -19,6 +19,7 @@ const {
   ensureBankBuReconRunsSideDbPath,
   ensureBankBuReconRunIdentitySupport
 } = require('../../../src/backend/database/migrations');
+const runDataStore = require('../../../src/backend/run-data-store');
 const {
   PENDING_GUANLI_DB_COLUMNS,
   BANK_DB_COLUMNS
@@ -108,7 +109,37 @@ function seedMonth(userDataDir, yearMonth) {
   return evidence.datasetHash;
 }
 
-function createIntentStore(mainDb, calls, isLocked) {
+function mirrorCount(mainDb) {
+  return mainDb.prepare('SELECT COUNT(*) AS count FROM bank_bu_recon_runs').get().count;
+}
+
+function sideRunCount(userDataDir) {
+  const sideDb = runDataStore.openSideDb(
+    userDataDir, runDataStore.MODULE_BANK_BU, '2026-08'
+  );
+  try {
+    return sideDb.prepare('SELECT COUNT(*) AS count FROM bank_bu_recon_runs').get().count;
+  } finally {
+    sideDb.close();
+  }
+}
+
+function assertPersistedCombinedReceipt(mainDb, receipt) {
+  assert.ok(receipt && receipt.side);
+  if (receipt.side.actionKey === BANK_BU_ACTIONS.IMPORT_MONTH) {
+    assert.equal(receipt.main, null);
+    return;
+  }
+  const mirror = mainDb.prepare('SELECT * FROM bank_bu_recon_runs').get();
+  assert.ok(mirror, 'run commit receipt持久化前Main mirror必须已CAS COMMIT');
+  assert.ok(receipt.main);
+  assert.equal(receipt.main.operationKey, receipt.side.operationKey);
+  assert.equal(receipt.main.sideRunId, receipt.side.sideRunId);
+  assert.equal(receipt.main.mirrorId, Number(mirror.id));
+  assert.equal(receipt.main.stableHash, mirror.stable_hash);
+}
+
+function createIntentStore(mainDb, calls, isLocked, options = {}) {
   return {
     async persistCriticalIntent(evidence, metadata) {
       assert.equal(isLocked(), true);
@@ -122,22 +153,29 @@ function createIntentStore(mainDb, calls, isLocked) {
         intentId, metadata.actionKey, metadata.operationKey,
         metadata.taskRunId, JSON.stringify(evidence)
       );
-      calls.push('prepare');
+      calls.push(`intent:mirror=${mirrorCount(mainDb)}`);
       return { intentId };
     },
     async markCriticalCommitted(value) {
       assert.equal(isLocked(), true);
+      assertPersistedCombinedReceipt(mainDb, value.receipt);
       mainDb.prepare(`
         UPDATE e08_test_intents SET state='committed', receipt_json=? WHERE intent_id=?
-      `).run(JSON.stringify(value.sideReceipt), value.intentId);
-      calls.push('receipt');
+      `).run(JSON.stringify(value.receipt), value.intentId);
+      calls.push(`receipt:mirror=${mirrorCount(mainDb)}`);
+      if (options.failMarkAfterPersist) {
+        throw Object.assign(new Error('模拟Main committed evidence响应丢失'), {
+          code: 'E08_TEST_MARK_RESPONSE_LOST'
+        });
+      }
     },
     async closeCriticalIntent(value) {
       assert.equal(isLocked(), true);
+      if (value.receipt) assertPersistedCombinedReceipt(mainDb, value.receipt);
       mainDb.prepare(`
         UPDATE e08_test_intents SET state='closed', receipt_json=? WHERE intent_id=?
       `).run(JSON.stringify(value.receipt), value.intentId);
-      calls.push(`close:${value.outcome}`);
+      calls.push(`close:${value.outcome}:mirror=${mirrorCount(mainDb)}`);
     },
     async loadCriticalIntent(intentId) {
       const row = mainDb.prepare('SELECT * FROM e08_test_intents WHERE intent_id=?').get(intentId);
@@ -159,9 +197,9 @@ function createIntentStore(mainDb, calls, isLocked) {
   };
 }
 
-function createCoordinator(mainDb, userDataDir, calls) {
+function createCoordinator(mainDb, userDataDir, calls, storeOptions = {}) {
   let locked = false;
-  const store = createIntentStore(mainDb, calls, () => locked);
+  const store = createIntentStore(mainDb, calls, () => locked, storeOptions);
   return createBankBuMainCoordinator({
     mainDb,
     userDataDir,
@@ -219,14 +257,15 @@ async function executeSupervisor({
   coordinator,
   userDataDir,
   mainDatabasePath,
-  failureMode = null
+  failureMode = null,
+  executionTimeoutMs = 5000
 }) {
   const operationKey = `bank-bu/run/supervisor/${failureMode || 'success'}`;
   const taskRunId = `task-${failureMode || 'success'}`;
   const supervisor = createExecutionSupervisor({
     policyRegistry: createRegistry(entryPath),
     workerDurableCoordinator: coordinator,
-    executionTimeoutMs: 5000
+    executionTimeoutMs
   });
   return supervisor.execute({
     actionKey: BANK_BU_ACTIONS.RUN,
@@ -264,7 +303,11 @@ test('真实Supervisor+worker_threads singleton mutation完成intent→side→Ma
       mainDatabasePath: mainPath
     });
     assert.equal(result.outcome, 'completed');
-    assert.deepEqual(calls, ['prepare', 'receipt', 'close:committed']);
+    calls.push(`done:mirror=${mirrorCount(mainDb)}`);
+    assert.deepEqual(calls, [
+      'intent:mirror=0', 'receipt:mirror=1',
+      'close:committed:mirror=1', 'done:mirror=1'
+    ]);
     const mirror = mainDb.prepare('SELECT * FROM bank_bu_recon_runs').get();
     assert.equal(mirror.operation_key, 'bank-bu/run/supervisor/success');
     assert.ok(Number(mirror.side_run_id) > 0);
@@ -339,7 +382,9 @@ test('import singleton coordinator在同月锁内持久ACK、验证side receipt�
         replay: false, receipt: committed.receipt
       }
     });
-    assert.deepEqual(calls, ['prepare', 'receipt', 'close:committed']);
+    assert.deepEqual(calls, [
+      'intent:mirror=0', 'receipt:mirror=0', 'close:committed:mirror=0'
+    ]);
     assert.equal(mainDb.prepare('SELECT COUNT(*) AS count FROM bank_bu_recon_runs').get().count, 0);
     const closed = mainDb.prepare('SELECT state,receipt_json FROM e08_test_intents').get();
     assert.equal(closed.state, 'closed');
@@ -369,8 +414,9 @@ for (const scenario of [
         failureMode: scenario.mode
       });
       assert.equal(result.outcome, 'interrupted');
-      assert.equal(calls.includes('prepare'), true);
-      assert.equal(calls.includes('receipt'), false, 'reply丢失时不得伪造wire receipt');
+      assert.equal(calls.includes('intent:mirror=0'), true);
+      assert.equal(calls.some((entry) => entry.startsWith('receipt:')), false,
+        'reply丢失时不得伪造wire receipt');
       assert.equal(calls.includes('hold'), scenario.expectedHold);
       assert.equal(
         mainDb.prepare('SELECT COUNT(*) AS count FROM e08_test_holds').get().count,
@@ -383,7 +429,8 @@ for (const scenario of [
       } else {
         const mirror = mainDb.prepare('SELECT operation_key FROM bank_bu_recon_runs').get();
         assert.equal(mirror.operation_key, 'bank-bu/run/supervisor/reply-loss');
-        assert.equal(calls.includes('close:committed'), true);
+        assert.equal(calls.includes('close:committed:mirror=1'), true);
+        assert.equal(sideRunCount(dir), 1, 'CAS前reply-loss恢复不得重跑算法或新增side run');
       }
     } finally {
       mainDb.close();
@@ -391,3 +438,60 @@ for (const scenario of [
     }
   });
 }
+
+test('真实Supervisor Main CAS后committed evidence响应丢失由Inspector幂等收口', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bank-bu-e08-mark-loss-'));
+  const mainPath = path.join(dir, 'tool-data.sqlite');
+  const mainDb = openMain(mainPath);
+  const calls = [];
+  try {
+    seedMonth(dir, '2026-08');
+    const result = await executeSupervisor({
+      entryPath: fixturePath('../../../src/main-process/bank-bu-worker/worker-entry.js'),
+      coordinator: createCoordinator(mainDb, dir, calls, { failMarkAfterPersist: true }),
+      userDataDir: dir,
+      mainDatabasePath: mainPath,
+      failureMode: 'mark-response-loss'
+    });
+    assert.equal(result.outcome, 'interrupted');
+    assert.deepEqual(calls, [
+      'intent:mirror=0', 'receipt:mirror=1', 'close:committed:mirror=1'
+    ]);
+    assert.equal(mainDb.prepare('SELECT COUNT(*) AS count FROM e08_test_holds').get().count, 0);
+    assert.equal(sideRunCount(dir), 1, 'CAS后mark响应丢失恢复不得新增side run');
+    const intent = mainDb.prepare('SELECT state,receipt_json FROM e08_test_intents').get();
+    assert.equal(intent.state, 'closed');
+    assertPersistedCombinedReceipt(mainDb, JSON.parse(intent.receipt_json));
+  } finally {
+    mainDb.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('真实Supervisor Main CAS与mark后unit done丢失由Inspector committed收口', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bank-bu-e08-unit-done-loss-'));
+  const mainPath = path.join(dir, 'tool-data.sqlite');
+  const mainDb = openMain(mainPath);
+  const calls = [];
+  try {
+    seedMonth(dir, '2026-08');
+    const result = await executeSupervisor({
+      entryPath: fixturePath('fixtures/bank-bu-supervisor-loss-worker.js'),
+      coordinator: createCoordinator(mainDb, dir, calls),
+      userDataDir: dir,
+      mainDatabasePath: mainPath,
+      failureMode: 'unit-done-loss',
+      executionTimeoutMs: 250
+    });
+    assert.equal(result.outcome, 'interrupted');
+    assert.deepEqual(calls, [
+      'intent:mirror=0', 'receipt:mirror=1', 'close:committed:mirror=1'
+    ]);
+    assert.equal(mainDb.prepare('SELECT COUNT(*) AS count FROM e08_test_holds').get().count, 0);
+    assert.equal(mainDb.prepare('SELECT COUNT(*) AS count FROM bank_bu_recon_runs').get().count, 1);
+    assert.equal(sideRunCount(dir), 1, 'CAS后unit done丢失恢复不得新增side run');
+  } finally {
+    mainDb.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

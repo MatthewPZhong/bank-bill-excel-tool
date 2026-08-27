@@ -194,6 +194,8 @@ function createBankBuMainCoordinator(options = {}) {
       intentId: null,
       boundedEvidence: null,
       receipt: null,
+      mirror: null,
+      combinedReceipt: null,
       release,
       released: false,
       lockPromise: null
@@ -323,10 +325,16 @@ function createBankBuMainCoordinator(options = {}) {
     const session = sessionFor(input);
     const receipt = verifyReceipt(session, input.receipt);
     session.receipt = receipt;
+    if (session.identity.actionKey === BANK_BU_ACTIONS.RUN) {
+      const committed = await session.tools.settleRun();
+      session.mirror = committed.mirror;
+      assertRunMirrorIdentity(session, session.mirror);
+    }
+    session.combinedReceipt = combinedReceipt(session, session.mirror);
     await options.markCriticalCommitted(Object.freeze({
       intentId: session.intentId,
       boundedEvidence: session.boundedEvidence,
-      sideReceipt: receipt
+      receipt: session.combinedReceipt
     }));
     return Object.freeze({
       receiptHint: Object.freeze({
@@ -350,36 +358,62 @@ function createBankBuMainCoordinator(options = {}) {
     });
   }
 
+  function assertRunMirrorIdentity(session, mirror) {
+    if (!mirror || !Number.isSafeInteger(mirror.mirrorId) || mirror.mirrorId < 1 ||
+        mirror.operationKey !== session.identity.operationKey ||
+        mirror.sideRunId !== session.receipt.sideRunId ||
+        mirror.inputEvidenceHash !== session.boundedEvidence.inputEvidenceHash ||
+        !/^[a-f0-9]{64}$/.test(mirror.stableHash || '')) {
+      throw coordinatorError(
+        'BANK_BU_MAIN_MIRROR_IDENTITY_CONFLICT',
+        'BankBU Main mirror未保存matching operationKey/sideRunId/mirrorId/stableHash'
+      );
+    }
+  }
+
   async function settleSession(session, result) {
-    let mirror = null;
     if (session.identity.actionKey === BANK_BU_ACTIONS.RUN) {
-      const committed = await session.tools.settleRun();
-      mirror = committed.mirror;
-      if (!mirror || mirror.operationKey !== session.identity.operationKey ||
-          mirror.sideRunId !== session.receipt.sideRunId ||
-          Number(result.sideRunId) !== mirror.sideRunId) {
+      assertRunMirrorIdentity(session, session.mirror);
+      if (Number(result.sideRunId) !== session.mirror.sideRunId) {
         throw coordinatorError(
-          'BANK_BU_MAIN_MIRROR_IDENTITY_CONFLICT',
-          'BankBU Main mirror未保存matching operationKey/sideRunId'
+          'BANK_BU_SUPERVISOR_RESULT_IDENTITY_CONFLICT',
+          'BankBU unit result的sideRunId与已持久双identity receipt冲突'
         );
       }
     }
-    const receipt = combinedReceipt(session, mirror);
+    if (!session.combinedReceipt ||
+        !isDeepStrictEqual(session.combinedReceipt.side, session.receipt) ||
+        (session.identity.actionKey === BANK_BU_ACTIONS.RUN
+          ? !session.combinedReceipt.main ||
+            session.combinedReceipt.main.mirrorId !== session.mirror.mirrorId
+          : session.combinedReceipt.main !== null)) {
+      throw coordinatorError(
+        'BANK_BU_COMBINED_RECEIPT_IDENTITY_CONFLICT',
+        'BankBU unit done缺少matching side/Main combined receipt'
+      );
+    }
     await options.closeCriticalIntent(Object.freeze({
       intentId: session.intentId,
       outcome: 'committed',
-      receipt,
+      receipt: session.combinedReceipt,
       result
     }));
     await releaseSession(session);
-    return Object.freeze({ outcome: 'committed', receipt, mirror });
+    return Object.freeze({
+      outcome: 'committed', receipt: session.combinedReceipt, mirror: session.mirror
+    });
   }
 
   async function settleCommitted(input) {
     const session = sessionFor(input);
     if (!session.receipt || !input.result || input.result.operation !==
         (session.identity.actionKey === BANK_BU_ACTIONS.RUN ? 'run' : 'import-month') ||
-        input.result.inputEvidenceHash !== session.boundedEvidence.inputEvidenceHash) {
+        input.result.inputEvidenceHash !== session.boundedEvidence.inputEvidenceHash ||
+        !input.result.receipt ||
+        !isDeepStrictEqual(
+          receiptRepository.normalizeExactOperationReceipt(input.result.receipt),
+          session.receipt
+        )) {
       throw coordinatorError(
         'BANK_BU_SUPERVISOR_RESULT_IDENTITY_CONFLICT',
         'BankBU unit result与side receipt identity冲突'

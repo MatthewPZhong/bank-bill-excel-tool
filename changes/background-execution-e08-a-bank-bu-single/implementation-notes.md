@@ -18,6 +18,7 @@
 | Registry中import仍逐字段保持冻结`thread-pool/compound` policy，E08-A执行器只实现single | authoritative fixture是静态未来拓扑，任务明确E08-B dual parser不在范围 | 为当前single擅改冻结policy | production仍`false/legacy/0`；不创建parser child或live route |
 | mutation复用Platform现有registered singleton unit `operation:000000` | Supervisor的worker-durable critical/receipt/done均以registered unit为所有权边界；job-level `unitId=null`会被权威协议拒绝 | 新造BankBU job-level durable分支 | `job:start`只初始化，唯一`unit:start`才执行；所有critical/receipt/unit terminal携带同一unitId，未引入E08-B role unit |
 | Supervisor四段callback共享一个有界locked session | run必须在ACK前capture/persist preimage，且锁不能在side COMMIT与Main CAS之间释放 | 每个callback重新取同月锁 | 同月锁覆盖prepare/ACK→权威side receipt→Main CAS→双identity receipt/Intent close；inspection/Hold终态后释放 |
+| run在`observeReceipt`内先幂等Main CAS，再持久combined receipt | TechDoc §8.2把`commit:receipt with both identities`定义在Main CAS之后；仅side receipt不能代表整个run已提交 | 等`unit:done`才首次CAS | mark committed evidence固定含matching operationKey/sideRunId/mirrorId/stableHash；`unit:done`只验证、close Intent并释放锁 |
 | exact replay仍为本次Supervisor execution重新走critical handshake | persisted side result只能免除算法与新side run，不能绕过本次registered unit的Intent/ACK/receipt/settle所有权 | replay直接在ACK前返回 | replay测试保持side run/receipt各1行，同时两次execution的critical计数为2 |
 | managed export用同一side只读事务绑定identity与完整业务读取，并在artifact后fresh复核 | WAL允许第二连接在首读后提交；分离连接会产生旧runId配新dataset Excel | 先查identity、关闭连接、再用legacy loader重算 | single/aggregate任一Main选择或side state变化即删task-private staging并以`BANK_BU_EXPORT_SNAPSHOT_STALE`失败关闭，不增加跨月锁 |
 | run算法读取Pending/Bank与dataset evidence共用一个side read snapshot，写事务再校验dataset hash | 若两个业务表分次读取，同月覆盖导入可在中间提交，形成跨dataset混合结果 | 只在算法前读一次hash | 新run在`BEGIN IMMEDIATE`内验证input evidence后才落side run/receipt；变化则零run写入失败关闭 |
@@ -38,8 +39,8 @@
 
 | 证据 | 结果 | 覆盖的行为/风险 |
 | --- | --- | --- |
-| E08-A focused unit | `19/19 PASS` | policy exact、dataset/金额币种血缘、import/run事务、四态、singleton Worker协议、真实Supervisor+worker_threads正常settle/reply-loss/Hold |
-| 相关BankBU/receipt/Supervisor unit | `141/141 PASS`（含上述19条focused） | month/run repository、side store、legacy dual-source、E06 receipt、Platform worker-durable/unknown-unit/settle/shutdown回归 |
+| E08-A focused unit | `21/21 PASS` | policy exact、dataset/金额币种血缘、import/run事务、四态、singleton Worker协议、真实Supervisor正常settle/CAS前reply-loss/CAS后mark响应或unit-done丢失/Hold |
+| 相关BankBU/receipt/Supervisor unit | `143/143 PASS`（含上述21条focused） | month/run repository、side store、legacy dual-source、E06 receipt、Platform worker-durable/unknown-unit/settle/shutdown回归 |
 | 真实临时SQLite/XLSX集成 | `21/21 PASS` | 两reader、critical前kill、side COMMIT后kill/restart、CAS complete-mirror、single/aggregate三sheet、included/skipped，以及single/aggregate真实双连接WAL并发变化后零artifact |
 | 既有side-db parity | `17/17 PASS` | 1:1/1:N/N:1/N:M数据与输出golden不漂移 |
 | 既有BankBU资金smoke | `41/41 PASS` | normalize、匹配基数、异常sheet、source row index、覆盖导入清旧run |
@@ -59,6 +60,8 @@
 | side COMMIT后reply丢失或Main identity并发冲突 | Inspector权威回读；partial只complete-mirror CAS，identity冲突创建Recovery Hold且不覆盖并发Main mirror | 真实Worker在side commit后exit的reply-loss与Hold测试 |
 | export identity/read分离连接造成WAL TOCTOU | managed identity、dataset及完整Pending/Bank算法读取共用单一read transaction；artifact后复核Main选择与全部managed side state | single/aggregate分别在snapshot中由第二真实连接COMMIT新import，均报stale并删除staging |
 | run Pending/Bank跨dataset混读 | 算法读事务固定dataset/Pending/Bank；side写事务再次验证dataset hash | critical期间第二连接覆盖导入后`BANK_BU_RUN_DATASET_CHANGED`且side run为0 |
+| Main CAS与committed receipt次序倒置 | run receipt callback在同一locked session内先权威回读side、CAS Main并验证mirror identity，再持久`{side,main}`；settle路径不再调用CAS | mark callback实时断言mirror已存在；正常时序为intent(mirror=0)→receipt(mirror=1)→close(mirror=1)→done |
+| CAS前后丢回复造成重复算法或错误Hold | CAS前side-only由Inspector partial补mirror；CAS后mark响应或unit-done丢失均按side+Main判committed并close combined receipt | 三个真实Supervisor failure-window测试均side run=1；CAS后Hold=0，identity conflict仍Hold |
 
 ## Reconciliation Blindspot Pass
 
@@ -68,7 +71,7 @@
 | 金额与币种 | 不做数值转换或币种归一；金额/币种原串进入canonical evidence，变更会改变dataset hash |
 | 行数守恒 | import实际insert count写dataset；run totals来自同一side read snapshot且commit前hash再校验；parity/smoke覆盖四种基数及N:M行处置 |
 | 幂等与重复 | exact replay要求operation/task/input/current dataset全等；identity冲突失败关闭；partial只读side committed result做CAS |
-| 部分失败/恢复 | reader失败在事务前；import mutation/evidence/receipt同事务；run side先提交、Main后CAS；not/committed/partial/unknown由唯一Inspector决定 |
+| 部分失败/恢复 | reader失败在事务前；import mutation/evidence/receipt同事务；run严格side COMMIT→Main CAS→combined receipt；CAS前side-only为partial，CAS后丢失为committed，四态仍由唯一Inspector决定 |
 | 输出可审计性 | single/aggregate保留dual-source、月份升序、included/skipped、异常sheet与Main runId；managed identity与XLSX行来自同一snapshot，artifact后变化使整份staging删除 |
 | 资金红线 | 自动证据通过不替代人工复核；Windows packaged、真实财务样本、真实恢复操作仍BLOCK production enablement |
 

@@ -89,3 +89,46 @@
 | 2 | Main coordinator增加Supervisor adapter与跨阶段锁session | preimage/intent/side/Main/dual identity顺序 | 真实side/main DB与callback次序断言 | partial/Hold不可判 | 仅保留Inspector、不启用mutation |
 | 3 | export改同连接read snapshot及artifact后fresh复核 | runId/dataset/Excel一致 | single/aggregate两连接WAL并发测试 | 资金输出可能错配 | staging失败关闭、零发布 |
 | 4 | kill/reply-loss/Hold与全套回归 | 恢复/取消/旧路径不漂移 | Supervisor+SQLite、parity、smoke、lint/check | 保留人工BLOCK | 不改live/production |
+
+## Reviewer Round2 P1 Remediation Preflight
+
+### Task Brief
+
+- Goal：使 BankBU run 严格满足 TechDoc §8.2 的 `side COMMIT → Main CAS → commit receipt with both identities`，不再等到 `unit:done` 才首次写 Main mirror。
+- Context：Round2 真实时序证明 `observeReceipt` 仅持久 side receipt，`settleCommitted` 才调用 `settleRun()`；权威合同要求 receipt 被 Main 接受为 committed 前已有 matching side/Main 双身份。
+- Constraints：只改 BankBU run coordinator 与定向测试；保持 Worker raw side receipt、Platform envelope/schema、import `main:null`、production=false/live/E08-B 边界不变。
+- Done when：`observeReceipt` 在既有同月 locked session 内权威回读 side、幂等 CAS Main、构造并持久 `{side,main}`；`unit:done` 仅验证并 close/release；CAS 前丢回复可 partial 补 mirror，CAS 后任意丢失由 Inspector 判 committed 且 Hold=0。
+
+### 已确认事实
+
+| 事实 | 证据 | 对方案的约束 |
+| --- | --- | --- |
+| TechDoc冻结顺序是 side COMMIT → Main CAS → 双identity receipt | `changes/.../3.2.2/techdoc.md` §8.2 lines 237-248 | run 的 `markCriticalCommitted` 前必须完成Main CAS并携带mirrorId/operationKey/sideRunId/stableHash |
+| Supervisor串行await `observeReceipt`，成功后才把unit标`committed`并处理后续`unit:done` | `background-execution/supervisor.js#processMessage` | CAS可安全前移到`observeReceipt`；无需修改协议或Worker event格式 |
+| 当前locked session从prepare持续到settle/inspection | `bank-bu-worker/main-coordinator.js#openLockedSession/releaseSession` | 前移CAS仍在同一个同月operation lock内，不新增锁或扩大作用域 |
+| `settleRun()` 的 CAS 对目标post-image幂等 | `mirror-repository.js#commitMirrorCas`与现有old/absent/replay测试 | CAS后callback失败可由Inspector按matching post-image判committed，不得再次运行算法 |
+
+### Unknowns Register
+
+| 未知 | 类型 | 影响 | 可逆性 | 当前证据 | 处理 | 最便宜验证方式 | 当前决定 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| CAS后`markCriticalCommitted`抛错时Supervisor是否进入Inspector | 生命周期 | 高 | 容易 | durable event chain将callback异常交给`failProtocol/finish`，acked unit会inspect | PROBE | callback在确认mirror存在后故意抛错，跑真实Supervisor | Inspector应判committed、close combined receipt、Hold=0 |
+| `unit:done`如何证明不再首次CAS | 顺序/幂等 | 高 | 容易 | 当前CAS位于`settleSession` | PROBE | 在mark callback内断言mirror=1，并在close callback再次断言同一mirror identity | session缓存mirror/combined receipt；settle只校验result并close |
+| import是否被combined receipt重构误伤 | 兼容 | 高 | 容易 | import无Main mirror且现有close receipt已为`main:null` | PROBE | direct import coordinator在mark与close两处断言`main:null` | observe import直接构造`{side,main:null}`，不调用settleRun |
+
+### 风险优先计划
+
+| 顺序 | 步骤 | 消除的未知/保护的不变量 | 成功证据 | 失败影响 | 回滚/收缩 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 先把正常run与import的mark callback断言收紧到combined receipt | 双identity持久边界、import兼容 | mark时mirror/receipt实时断言 | 阻断代码修改 | 保留旧测试并缩小到run coordinator |
+| 2 | 将run CAS移入`observeReceipt`，session缓存mirror/combined receipt | TechDoc提交顺序、同锁CAS | intent→mark(mirror=1)→close(mirror=1)→done | 直接阻断Round2 | 撤回单函数改动，production仍false |
+| 3 | 注入CAS前reply-loss、CAS后mark/response/unit-done loss | 四态Inspector、幂等与Hold边界 | partial补mirror；post-CAS committed/close/Hold=0；算法零重跑 | 阻断合并 | 不启用capability |
+| 4 | focused/Supervisor/integration/parity/smoke与blindspot收口 | 旧协议、资金输出、生命周期不漂移 | 全部定向回归与static/diff check | 保留人工BLOCK | 不改live/production |
+
+### Unknowns Closure
+
+| 原未知 | 结论 | 证据 |
+| --- | --- | --- |
+| CAS后mark callback异常 | 已关闭：Supervisor进入Inspector，side+Main matching时判committed并以combined receipt关闭Intent，Hold=0 | 真实worker_threads中mark持久后抛错测试，side run保持1行 |
+| `unit:done`是否仍承担首次CAS | 已关闭：CAS唯一发生在`observeReceipt`；settle只校验result/receipt/mirror后close/release | mark callback内mirror=1，close callback仍为同一mirror；unit-done丢失Inspector committed |
+| import兼容 | 已关闭：import observe/mark/close始终为`{side,main:null}`，Main mirror保持0行 | import singleton coordinator定向测试 |

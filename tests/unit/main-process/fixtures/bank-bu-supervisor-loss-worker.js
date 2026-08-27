@@ -64,7 +64,13 @@ parentPort.on('message', (raw) => {
           emit('critical:ready', { critical }, envelope.unitId);
         });
       }
-    }).then(() => exitAfterSideCommit(envelope.payload.input));
+    }).then((result) => {
+      if (envelope.payload.input.failureMode === 'unit-done-loss') {
+        emit('commit:receipt', { receipt: result.receipt }, envelope.unitId);
+        return;
+      }
+      exitAfterSideCommit(envelope.payload.input);
+    });
     return;
   }
   if (envelope.operation === 'critical:ack') {
