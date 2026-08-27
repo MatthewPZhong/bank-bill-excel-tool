@@ -4,6 +4,7 @@
 
 - Exact base：`1d9588a7e5303e9b8a5621095c445d7a9c1c6005`。
 - Review remediation 起点：`6b239559c8e219f32651abd0514a1d67ef30f976`。
+- 第二轮 Review remediation 起点：`74bb75468c3d1e30fe889a3ca751168ce48e8547`。
 - Frozen contract：v3.2.4 Spec/TechDoc、Platform critical/recovery contract、E11-A 与 E11-P0 notes。
 - Preflight：[preflight.md](./preflight.md)。
 
@@ -23,6 +24,9 @@
 | recovery 不重建 full result | E11-B 的 full candidate 只存在 Worker Service 私有 map，crash 后不可安全复原 | 首次 definitive inspection 仍按既有 interrupted 收口；unknown 建 Hold 后，人工修复得到 committed/not-committed 时复用 Task begin/complete recovery，把 observation、Intent close、Task failed 与 Hold resolve 放入一个 control transaction，第三次 startup 零动作 |
 | JPM 只在 exact fixed `unit:start` 后执行 Service plan | `job:start` send 栈内的 stale/invalid 同步终态会被 Host 当作 generation protocol failure | stale/invalid 只终结当前 job；同一 generation、同一已导入 session 可继续合法 run；不改通用 result binding 协议 |
 | Worker instance 只以 canonical digest 进入 durable/in-memory adoption identity | raw Worker UUID 既不应进入持久 evidence，也可能触发 finance-safe 账号模式 | evidence 与 receipt waiter 存储/比较同一 SHA-256 identity；同 Worker 与换 Worker replay 均拒绝，raw ID 不进入状态或错误 |
+| startup 按 requestKey exact 恢复 prepared transition owner | live `mark-committed`/`close` owner 可在独立 reserve COMMIT 后、control transaction 前崩溃；startup 重新构造的安全摘要不是首次 exact request | Main-internal owner reader严格回验 persisted JCS/hash/eventId/createdAt 后原样 replay；普通 changed-body reserve 仍 conflict，不放宽 owner 合同 |
+| JPM recovery plan 读取模块私有 Task state 投影 | `INSPECTOR_UNAVAILABLE` Hold 的既有 Task 可能是 ordinary running，也可能已 interrupted，不能仅凭 active Hold 猜状态 | threshold 新建 Hold 时把必要 interruption 与 observation/Hold 同 control transaction；重启按 Hold reason + persisted Task state 选择合法边，非法 identity/recovery attempt fail closed |
+| bank/mid source 与 ADM replace 共用 JPM durable scope gate | ACKed Intent/active Hold 下 source import/delete 会间接重建全局 ADM image | bank-deposit/mid-allocation 在 source write 前检查；真实 `replaceAdmBankDeposit` 同步边界复检；gate 拒绝不进入历史派生兼容 catch |
 | JPM 使用独立 result validator | 不能因新增 bounded JPM terminal shape 放宽 E11-A import/standard/BOC validator | readonly validator 继续拒绝 JPM result，runtime 按 action 绑定 validator |
 
 ## Assumptions
@@ -44,12 +48,20 @@
 | P2 synchronous pre-critical reject 终止 Service generation | 接受；JPM plan 延后至 fixed `unit:start`，不改变其它 action eager 路径 | import→stale→同 generation 合法 JPM run，无需重导入 |
 | P2-2 unit/job result cross-binding | 拒绝；仅伪造 fault adapter 可制造，不属于可达生产路径 | 未新增通用 Supervisor 协议/缓存，既有 Supervisor 全回归通过 |
 
+### 第二轮 Review findings
+
+| Finding | 裁决与最小修复 | 定向证据 |
+| --- | --- | --- |
+| P1 prepared owner 后崩溃导致 startup request body conflict | 接受；只为 Main-internal startup 增加 exact prepared transition request resume，逐项验证 requestKey/writer/JCS/hash/event identity，不修改 reserve conflict 语义 | 真实磁盘 DB 的 live mark-committed/close 两个 reserve 后故障窗口，第二次 startup 收敛、第三次零 control action |
+| P1 INSPECTOR_UNAVAILABLE Hold 与 running Task 状态冲突 | 接受；新增 JPM 私有 Task state reader；threshold 原子 interruption，definitive 恢复按 reason/state 复用既有 mark-interrupted/begin/complete 合法边 | committed/not-committed 两条 transient-threshold→重启→definitive→再重启矩阵 |
+| P1 linked source mutation 绕过 ADM durable lease | 接受；bank/mid import 和 bank delete 在 source write 前 gate，ADM replace 同步边界再次 gate，拒绝错误向 caller 传播 | ACKed Intent 下真实 bank source/ADM 零变化；active Hold 下真实 rebuild 未进入 replace、source/ADM image 零变化；Main 两入口静态顺序锁 |
+
 ## Evidence
 
-- `tests/unit/main-process/recon-id-fix-jpm-durable-e11-b.test.js`：18/18 PASS；除原 11 项外，新增 A/B database authority、真实 schema migration probe、DB-enforced scope race、同/换 Worker replay、legacy 双 gate、stale→same-generation 合法 run，以及 unknown→committed/not-committed 原子收敛与第三次 startup 幂等。
-- E11-P0 + E11-A：29/29 PASS；Supervisor/ServiceHost/recovery/toolbox：163/163 PASS；PreFund/standard/BOC/legacy JPM：117/117 PASS。
-- 完整 `npm run test:integration`：51/51 scripts、2455/2455 assertions PASS；runner 自动耗时快照已从工作树还原，未混入提交。
-- `src/` 全量 ESLint、全部 15 个变更 JS `node --check` 与 `git diff --check` 通过。
+- `tests/unit/main-process/recon-id-fix-jpm-durable-e11-b.test.js`：25/25 PASS；第二轮新增 7 个 accepted-finding case，覆盖真实磁盘 mark-committed/close prepared-owner 崩溃窗口、既有 running Task + INSPECTOR_UNAVAILABLE Hold 的 committed/not-committed 收敛、新 threshold 原子 interruption、ACKed Intent source gate 与 active Hold ADM replace gate。
+- E11-P0 + E11-A + RecoveryControl + Supervisor/ServiceHost：217/217 PASS；linked ADM/BOC 派生：26/26 PASS；PreFund E05-B：39/39 PASS；legacy JPM/standard/BOC/linked repository 定向组：78/78 PASS。
+- 定向 integration：RecoveryControl 27/27、recovery canary 9/9、linked delete/rebuild 73/73 PASS；未运行任务明确禁止的 `release-check` / `check-vars` / `scan:vars`。
+- 全部 7 个变更 JS `node --check`、affected ESLint 与 `git diff --check` 通过。
 - production gate 断言 `recon-fix:run-jpm` 仍为 false；Main live IPC 未切 managed，standard/BOC 与 PreFund 回归保持通过。
 
 ## Reconciliation blindspot pass

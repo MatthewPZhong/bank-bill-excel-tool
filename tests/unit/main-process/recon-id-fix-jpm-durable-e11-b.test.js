@@ -19,6 +19,12 @@ const {
   readAdmRowsForWriteback
 } = require('../../../src/backend/database/linked-table-writeback-reader');
 const {
+  buildAdmRows
+} = require('../../../src/main-process/adm-bank-deposit-builder');
+const {
+  rebuildAdmDerivation
+} = require('../../../src/main-process/linked-derive-rebuild');
+const {
   CHANNEL_BILL_FIELDS,
   CHANNEL_BILL_SHEET_NAME,
   GATEWAY_BILL_FIELDS,
@@ -83,8 +89,14 @@ const {
   createReconFixJpmReceiptAuthority
 } = require('../../../src/main-process/recon-id-fix-service/jpm-receipt-authority');
 const {
+  boundedJpmReceiptFromExact
+} = require('../../../src/main-process/recon-id-fix-service/jpm-receipt-evidence');
+const {
   reconFixJpmRecoveryPlanTransitions
 } = require('../../../src/main-process/recon-id-fix-service/jpm-recovery-plan');
+const {
+  createReconFixJpmRecoveryTaskStateReader
+} = require('../../../src/main-process/recon-id-fix-service/jpm-recovery-task-state');
 const {
   createReconFixJpmWorkerDurableCoordinator
 } = require('../../../src/main-process/recon-id-fix-service/jpm-worker-durable-coordinator');
@@ -339,7 +351,8 @@ function createHarness(options = {}) {
   const recoveryControlRepository = options.wrapRecoveryControlRepository
     ? options.wrapRecoveryControlRepository(baseRecoveryControlRepository)
     : baseRecoveryControlRepository;
-  const inspector = createReconFixJpmOutcomeInspector({ databasePath });
+  const baseInspector = createReconFixJpmOutcomeInspector({ databasePath });
+  const inspector = options.wrapInspector ? options.wrapInspector(baseInspector) : baseInspector;
   const inspectors = createInspectorRegistry();
   inspectors.register(RECON_FIX_JPM_POLICY.commit.inspectorKey, inspector);
   inspectors.freeze();
@@ -353,6 +366,7 @@ function createHarness(options = {}) {
     observationAttemptRepository: createRecoveryObservationAttemptRepository(database.db),
     recoveryControlRepository,
     resolvePolicy: () => RECON_FIX_JPM_POLICY,
+    resolveTaskState: createReconFixJpmRecoveryTaskStateReader(database.db),
     planTransitions: options.planTransitions || (() => []),
     transientAttempts: 1,
     backoffBaseMs: 0,
@@ -405,6 +419,88 @@ function createHarness(options = {}) {
     runtime,
     messages: capture.messages
   };
+}
+
+function openRecoveryLayer(databasePath, options = {}) {
+  const database = new AppDatabase(databasePath);
+  database.init();
+  const readRepository = createRecoveryControlReadRepository(database.db);
+  const requestOwnerRepository = createRecoveryRequestOwnerRepository(database.db);
+  const inspectors = createInspectorRegistry();
+  inspectors.register(
+    RECON_FIX_JPM_POLICY.commit.inspectorKey,
+    options.inspector || createReconFixJpmOutcomeInspector({ databasePath })
+  );
+  inspectors.freeze();
+  const providers = createSettlementRecoveryProviderRegistry();
+  providers.freeze();
+  let controlTransactionCount = 0;
+  const baseControlRepository = createRecoveryControlRepository(database.db);
+  const recoveryControlRepository = Object.freeze({
+    runInControlTransaction(work) {
+      controlTransactionCount += 1;
+      return baseControlRepository.runInControlTransaction(work);
+    }
+  });
+  const recoveryCoordinator = createStartupRecoveryCoordinator({
+    readRepository,
+    inspectorRegistry: inspectors,
+    providerRegistry: providers,
+    requestOwnerRepository,
+    observationAttemptRepository: createRecoveryObservationAttemptRepository(database.db),
+    recoveryControlRepository,
+    resolvePolicy: () => RECON_FIX_JPM_POLICY,
+    resolveTaskState: createReconFixJpmRecoveryTaskStateReader(database.db),
+    planTransitions: reconFixJpmRecoveryPlanTransitions,
+    transientAttempts: 1,
+    backoffBaseMs: 0,
+    backoffMaxMs: 0
+  });
+  return Object.freeze({
+    database,
+    readRepository,
+    recoveryCoordinator,
+    controlTransactionCount: () => controlTransactionCount
+  });
+}
+
+function criticalIdentity(operationKey, taskRunId, critical) {
+  return Object.freeze({
+    policy: RECON_FIX_JPM_POLICY,
+    actionKey: RECON_FIX_RUN_JPM_ACTION,
+    parentOperationKey: operationKey,
+    taskRunId,
+    batchId: null,
+    jobId: `job-${operationKey}`,
+    workerInstanceId: `worker-${operationKey}`,
+    unitId: RECON_FIX_JPM_UNIT_ID,
+    critical
+  });
+}
+
+function commitCriticalFixture(harness, fixture, identity) {
+  harness.database.db.exec('BEGIN IMMEDIATE');
+  try {
+    harness.database.db.prepare(
+      'UPDATE linked_adm_bank_deposit SET raw_json = ? WHERE id = 1'
+    ).run(JSON.stringify(fixture.post));
+    const receipt = receiptRepository.insertOperationReceipt(harness.database.db, {
+      actionKey: identity.actionKey,
+      operationKey: identity.parentOperationKey,
+      producerTaskRunId: identity.taskRunId,
+      scenarioId: fixture.critical.scenarioId,
+      preImageHash: fixture.critical.preImageHash,
+      postImageHash: fixture.critical.postImageHash,
+      idSequenceDigest: fixture.critical.idSequenceDigest,
+      rowCount: fixture.critical.rowCount,
+      changedRowCount: fixture.critical.changedRowCount
+    });
+    harness.database.db.exec('COMMIT');
+    return receipt;
+  } catch (error) {
+    if (harness.database.db.isTransaction) harness.database.db.exec('ROLLBACK');
+    throw error;
+  }
 }
 
 async function importSession(harness) {
@@ -727,6 +823,97 @@ test('control DB唯一租约拒绝跨operation ACK及同/换worker再ACK，legac
       handler.indexOf('database.readAdmBankDepositRows'));
     assert.ok(handler.lastIndexOf('runSynchronousMutationBoundary') <
       handler.indexOf('database.writeAdmMatchFlags'));
+  } finally {
+    await harness.runtime.shutdown();
+    harness.database.close();
+  }
+});
+
+test('ACKed JPM Intent在真实bank source mutation前fail closed且Main import/delete接线早于写入', async () => {
+  const harness = createHarness();
+  try {
+    harness.database.upsertLinkedBankDeposit([{
+      MerchantId: ADM_MERCHANT_ID,
+      Channel: 'ADM',
+      FundType: 'FundTransfer',
+      BillDate: '2026-05-04',
+      BizId: 'BANK-SOURCE-LEASE',
+      ReconciliationId: 'BANK-SOURCE-LEASE'
+    }], { sourceFileName: 'lease-source.xlsx' });
+    const beforeSource = harness.database.readLinkedTableRows('bank-deposit');
+    const beforeAdm = readAdmRowsForWriteback(harness.database.db);
+    const operationKey = 'source-mutation-open-intent-gate';
+    const { taskRunId } = seedRunningReconTask(harness, operationKey);
+    const fixture = buildCriticalFixture(harness, operationKey);
+    await harness.durable.prepareAndAck(criticalIdentity(operationKey, taskRunId, fixture.critical));
+
+    let sourceMutationRan = false;
+    assert.throws(() => {
+      harness.holdGate.assertMutationAllowed();
+      sourceMutationRan = true;
+      harness.database.deleteBankDepositByDateRange('2026-05-04', '2026-05-04');
+    }, { code: 'RECON_FIX_JPM_SCOPE_LEASE_HELD' });
+    assert.equal(sourceMutationRan, false);
+    assert.deepEqual(harness.database.readLinkedTableRows('bank-deposit'), beforeSource);
+    assert.equal(readAdmRowsForWriteback(harness.database.db).imageHash, beforeAdm.imageHash);
+
+    const mainSource = fs.readFileSync(path.resolve(__dirname, '../../../src/main.js'), 'utf8');
+    const importBlock = mainSource.slice(
+      mainSource.indexOf('async function importLinkedFileToRepo'),
+      mainSource.indexOf('// v3.0.0 块 B / PR-2', mainSource.indexOf('async function importLinkedFileToRepo'))
+    );
+    assert.match(importBlock, /isBankDeposit \|\| isMidAllocation/);
+    const importGateIndex = importBlock.indexOf('assertReconFixJpmAdmMutationAllowed()');
+    const bankStreamingWriteIndex = importBlock.indexOf('upsertLinkedBankDepositStreaming');
+    const midStreamingWriteIndex = importBlock.indexOf('replaceLinkedTableStreaming');
+    assert.notEqual(importGateIndex, -1);
+    assert.notEqual(bankStreamingWriteIndex, -1);
+    assert.notEqual(midStreamingWriteIndex, -1);
+    assert.ok(importGateIndex < bankStreamingWriteIndex);
+    assert.ok(importGateIndex < midStreamingWriteIndex);
+    assert.match(importBlock, /admMutationBoundary: runReconFixJpmAdmMutationBoundary/);
+    const deleteBlock = mainSource.slice(
+      mainSource.indexOf("if (tableKey === 'bank-deposit')", mainSource.indexOf("trackedIpcHandle('linked-table:delete-by-date-range'")),
+      mainSource.indexOf('// gateway-bill（缺省）', mainSource.indexOf("trackedIpcHandle('linked-table:delete-by-date-range'"))
+    );
+    const deleteGateIndex = deleteBlock.indexOf('assertReconFixJpmAdmMutationAllowed()');
+    const deleteWriteIndex = deleteBlock.indexOf('deleteBankDepositByDateRange');
+    assert.notEqual(deleteGateIndex, -1);
+    assert.notEqual(deleteWriteIndex, -1);
+    assert.ok(deleteGateIndex < deleteWriteIndex);
+    assert.match(deleteBlock, /admMutationBoundary: runReconFixJpmAdmMutationBoundary/);
+  } finally {
+    await harness.runtime.shutdown();
+    harness.database.close();
+  }
+});
+
+test('active JPM Hold在真实ADM replace同步边界重检，gate错误不被兼容catch吞且source/image不变', async () => {
+  const harness = createHarness({ planTransitions: reconFixJpmRecoveryPlanTransitions });
+  try {
+    harness.database.upsertLinkedBankDeposit([{
+      MerchantId: ADM_MERCHANT_ID,
+      Channel: 'ADM',
+      FundType: 'FundTransfer',
+      BillDate: '2026-05-04',
+      BizId: 'BANK-SOURCE-HOLD',
+      ReconciliationId: 'BANK-SOURCE-HOLD'
+    }], { sourceFileName: 'hold-source.xlsx' });
+    await establishUnknownPostWithoutReceipt(harness, 'source-mutation-active-hold');
+    const beforeSource = harness.database.readLinkedTableRows('bank-deposit');
+    const beforeAdm = readAdmRowsForWriteback(harness.database.db);
+    let replaceBoundaryEntered = false;
+    assert.throws(() => rebuildAdmDerivation({
+      database: harness.database,
+      buildAdmRows,
+      admMutationBoundary(work) {
+        replaceBoundaryEntered = true;
+        return harness.holdGate.runSynchronousMutationBoundary(work);
+      }
+    }), { code: 'RECOVERY_HOLD_ACTIVE' });
+    assert.equal(replaceBoundaryEntered, true);
+    assert.deepEqual(harness.database.readLinkedTableRows('bank-deposit'), beforeSource);
+    assert.equal(readAdmRowsForWriteback(harness.database.db).imageHash, beforeAdm.imageHash);
   } finally {
     await harness.runtime.shutdown();
     harness.database.close();
@@ -1082,6 +1269,304 @@ test('receipt-first Inspector覆盖pre/post-without-receipt/committed/bad-json�
       'tool-data.sqlite', 'tool-data.sqlite-wal', 'tool-data.sqlite-shm'
     ].includes(name)));
     postHashDb.close();
+  } finally {
+    await harness.runtime.shutdown();
+    harness.database.close();
+  }
+});
+
+test('mark-committed owner已reserve后崩溃，第二次startup exact replay收敛且第三次零动作', async () => {
+  const fault = { armed: false };
+  const harness = createHarness({
+    planTransitions: reconFixJpmRecoveryPlanTransitions,
+    wrapRecoveryControlRepository(base) {
+      return Object.freeze({
+        runInControlTransaction(work) {
+          if (fault.armed) {
+            fault.armed = false;
+            throw Object.assign(new Error('injected post-owner mark-committed crash'), {
+              code: 'TEST_POST_OWNER_MARK_COMMITTED_CRASH'
+            });
+          }
+          return base.runInControlTransaction(work);
+        }
+      });
+    }
+  });
+  let harnessClosed = false;
+  let second = null;
+  let third = null;
+  try {
+    const operationKey = 'owner-resume-mark-committed';
+    const { taskRunId } = seedRunningReconTask(harness, operationKey);
+    const fixture = buildCriticalFixture(harness, operationKey);
+    const identity = criticalIdentity(operationKey, taskRunId, fixture.critical);
+    const prepared = await harness.durable.prepareAndAck(identity);
+    const receipt = commitCriticalFixture(harness, fixture, identity);
+    fault.armed = true;
+    await assert.rejects(() => harness.durable.observeReceipt({
+      actionKey: identity.actionKey,
+      fileOperationKey: identity.parentOperationKey,
+      taskRunId,
+      jobId: identity.jobId,
+      workerInstanceId: identity.workerInstanceId,
+      unitId: identity.unitId,
+      intentId: prepared.intentId,
+      receipt: boundedJpmReceiptFromExact(receipt)
+    }), { code: 'TEST_POST_OWNER_MARK_COMMITTED_CRASH' });
+    const owner = harness.database.db.prepare(`
+      SELECT status, request_jcs FROM background_execution_recovery_request_owners
+      WHERE status = 'prepared' AND writer = 'transitionWithRecoveryEvent'
+      ORDER BY rowid DESC LIMIT 1
+    `).get();
+    assert.equal(owner.status, 'prepared');
+    assert.equal(JSON.parse(owner.request_jcs).input.transition.command, 'mark-committed');
+    assert.equal(harness.readRepository.getCriticalIntentById(prepared.intentId).state, 'acked');
+
+    await harness.runtime.shutdown();
+    harness.database.close();
+    harnessClosed = true;
+    second = openRecoveryLayer(harness.databasePath);
+    const recovered = await second.recoveryCoordinator.scanAndRecover();
+    assert.equal(recovered.sourceCount, 1);
+    assert.equal(recovered.decisions[0].inspection.outcome, 'committed');
+    const intent = second.readRepository.getCriticalIntentById(prepared.intentId);
+    assert.equal(intent.state, 'closed');
+    assert.deepEqual(intent.receiptRef, {
+      receiptKind: 'module-local',
+      receiptDigest: boundedJpmReceiptFromExact(receipt).receiptDigest,
+      actionKey: identity.actionKey,
+      operationKey
+    });
+    const task = createArchiveRepository(second.database.db).getTaskRun(taskRunId);
+    assert.equal(task.status, 'interrupted');
+    assert.equal(task.failureCode, 'RESULT_LOST');
+    assert.equal(second.database.db.prepare(`
+      SELECT COUNT(*) AS count FROM background_execution_recovery_request_owners
+      WHERE status = 'prepared'
+    `).get().count, 0);
+    second.database.close();
+    second = null;
+
+    third = openRecoveryLayer(harness.databasePath);
+    const beforeThird = third.controlTransactionCount();
+    const replay = await third.recoveryCoordinator.scanAndRecover();
+    assert.equal(replay.sourceCount, 0);
+    assert.equal(replay.activeHoldCount, 0);
+    assert.equal(third.controlTransactionCount(), beforeThird);
+  } finally {
+    if (!harnessClosed) {
+      await harness.runtime.shutdown();
+      harness.database.close();
+    }
+    if (second) second.database.close();
+    if (third) third.database.close();
+  }
+});
+
+test('close owner已reserve后崩溃，第二次startup exact replay收敛且第三次零动作', async () => {
+  const fault = { armed: false };
+  const harness = createHarness({
+    planTransitions: reconFixJpmRecoveryPlanTransitions,
+    wrapRecoveryControlRepository(base) {
+      return Object.freeze({
+        runInControlTransaction(work) {
+          if (fault.armed) {
+            fault.armed = false;
+            throw Object.assign(new Error('injected post-owner close crash'), {
+              code: 'TEST_POST_OWNER_CLOSE_CRASH'
+            });
+          }
+          return base.runInControlTransaction(work);
+        }
+      });
+    }
+  });
+  let harnessClosed = false;
+  let second = null;
+  let third = null;
+  try {
+    const operationKey = 'owner-resume-close';
+    const { taskRunId } = seedRunningReconTask(harness, operationKey);
+    const fixture = buildCriticalFixture(harness, operationKey);
+    const identity = criticalIdentity(operationKey, taskRunId, fixture.critical);
+    const prepared = await harness.durable.prepareAndAck(identity);
+    const receipt = commitCriticalFixture(harness, fixture, identity);
+    await harness.durable.observeReceipt({
+      actionKey: identity.actionKey,
+      fileOperationKey: identity.parentOperationKey,
+      taskRunId,
+      jobId: identity.jobId,
+      workerInstanceId: identity.workerInstanceId,
+      unitId: identity.unitId,
+      intentId: prepared.intentId,
+      receipt: boundedJpmReceiptFromExact(receipt)
+    });
+    assert.equal(harness.readRepository.getCriticalIntentById(prepared.intentId).state, 'committed');
+    fault.armed = true;
+    await assert.rejects(() => harness.durable.settleCommitted({
+      intentId: prepared.intentId,
+      jobId: identity.jobId,
+      result: {
+        resultKind: 'committed',
+        resultHandle: fixture.critical.resultHandle,
+        boundedSummary: fixture.critical.boundedSummary
+      }
+    }), { code: 'TEST_POST_OWNER_CLOSE_CRASH' });
+    const owner = harness.database.db.prepare(`
+      SELECT status, request_jcs FROM background_execution_recovery_request_owners
+      WHERE status = 'prepared' AND writer = 'transitionWithRecoveryEvent'
+      ORDER BY rowid DESC LIMIT 1
+    `).get();
+    assert.equal(owner.status, 'prepared');
+    assert.equal(JSON.parse(owner.request_jcs).input.transition.command, 'close');
+
+    await harness.runtime.shutdown();
+    harness.database.close();
+    harnessClosed = true;
+    second = openRecoveryLayer(harness.databasePath);
+    const recovered = await second.recoveryCoordinator.scanAndRecover();
+    assert.equal(recovered.sourceCount, 1);
+    assert.equal(recovered.decisions[0].inspection.outcome, 'committed');
+    const intent = second.readRepository.getCriticalIntentById(prepared.intentId);
+    assert.equal(intent.state, 'closed');
+    assert.deepEqual(intent.result, {
+      outcome: 'completed',
+      resultHandle: fixture.critical.resultHandle,
+      resultKind: 'committed'
+    });
+    const task = createArchiveRepository(second.database.db).getTaskRun(taskRunId);
+    assert.equal(task.status, 'interrupted');
+    assert.equal(task.failureCode, 'RESULT_LOST');
+    assert.equal(second.database.db.prepare(`
+      SELECT COUNT(*) AS count FROM background_execution_recovery_request_owners
+      WHERE status = 'prepared'
+    `).get().count, 0);
+    second.database.close();
+    second = null;
+
+    third = openRecoveryLayer(harness.databasePath);
+    const beforeThird = third.controlTransactionCount();
+    const replay = await third.recoveryCoordinator.scanAndRecover();
+    assert.equal(replay.sourceCount, 0);
+    assert.equal(replay.activeHoldCount, 0);
+    assert.equal(third.controlTransactionCount(), beforeThird);
+  } finally {
+    if (!harnessClosed) {
+      await harness.runtime.shutdown();
+      harness.database.close();
+    }
+    if (second) second.database.close();
+    if (third) third.database.close();
+  }
+});
+
+for (const definitiveOutcome of ['committed', 'not-committed']) {
+  test(`既有INSPECTOR_UNAVAILABLE Hold + running Task重启收敛${definitiveOutcome}且再重启零动作`, async () => {
+    let inspectorUnavailable = true;
+    const harness = createHarness({
+      // 模拟 74bb754 reviewed head 已持久化的旧窗口：threshold 创建 Hold 时尚未
+      // 规划 Task interruption；第二次 startup 改由当前 reason+state plan 收敛。
+      planTransitions(input) {
+        return input.phase === 'inspection-unavailable-hold'
+          ? []
+          : reconFixJpmRecoveryPlanTransitions(input);
+      },
+      wrapInspector(base) {
+        return async (source) => {
+          if (inspectorUnavailable) {
+            throw Object.assign(new Error('injected transient inspector failure'), {
+              code: 'TEST_INSPECTOR_TRANSIENT'
+            });
+          }
+          return base(source);
+        };
+      }
+    });
+    let harnessClosed = false;
+    let second = null;
+    let third = null;
+    try {
+      const operationKey = `inspector-unavailable-${definitiveOutcome}`;
+      const { archive, taskRunId } = seedRunningReconTask(harness, operationKey);
+      const fixture = buildCriticalFixture(harness, operationKey);
+      const identity = criticalIdentity(operationKey, taskRunId, fixture.critical);
+      const prepared = await harness.durable.prepareAndAck(identity);
+      if (definitiveOutcome === 'committed') {
+        commitCriticalFixture(harness, fixture, identity);
+      }
+
+      const threshold = await harness.recoveryCoordinator.scanAndRecover();
+      assert.equal(threshold.sourceCount, 1);
+      assert.equal(threshold.activeHoldCount, 1);
+      const activeHold = harness.readRepository.listActiveRecoveryHolds()[0];
+      assert.equal(activeHold.reasonCode, 'INSPECTOR_UNAVAILABLE');
+      const heldTask = archive.getTaskRun(taskRunId);
+      assert.equal(heldTask.status, 'running');
+      assert.equal(heldTask.failureCode, '');
+
+      await harness.runtime.shutdown();
+      harness.database.close();
+      harnessClosed = true;
+      inspectorUnavailable = false;
+      second = openRecoveryLayer(harness.databasePath);
+      const recovered = await second.recoveryCoordinator.scanAndRecover();
+      assert.equal(recovered.sourceCount, 1);
+      assert.equal(recovered.decisions[0].inspection.outcome, definitiveOutcome);
+      const task = createArchiveRepository(second.database.db).getTaskRun(taskRunId);
+      assert.equal(task.status, 'failed');
+      assert.equal(task.failureCode, definitiveOutcome === 'committed' ? 'RESULT_LOST' : 'NOT_COMMITTED');
+      const hold = second.readRepository.getRecoveryHoldBySource(
+        'critical-intent',
+        `critical-intent:${prepared.intentId}`
+      );
+      assert.equal(hold.status, 'resolved');
+      assert.equal(hold.resolution, definitiveOutcome);
+      assert.equal(second.readRepository.getCriticalIntentById(prepared.intentId).state, 'closed');
+      second.database.close();
+      second = null;
+
+      third = openRecoveryLayer(harness.databasePath);
+      const beforeThird = third.controlTransactionCount();
+      const replay = await third.recoveryCoordinator.scanAndRecover();
+      assert.equal(replay.sourceCount, 0);
+      assert.equal(replay.activeHoldCount, 0);
+      assert.equal(third.controlTransactionCount(), beforeThird);
+    } finally {
+      if (!harnessClosed) {
+        await harness.runtime.shutdown();
+        harness.database.close();
+      }
+      if (second) second.database.close();
+      if (third) third.database.close();
+    }
+  });
+}
+
+test('新INSPECTOR_UNAVAILABLE threshold把Task interruption与Hold同次收口', async () => {
+  const harness = createHarness({
+    planTransitions: reconFixJpmRecoveryPlanTransitions,
+    wrapInspector() {
+      return async () => {
+        throw Object.assign(new Error('injected transient inspector failure'), {
+          code: 'TEST_INSPECTOR_TRANSIENT'
+        });
+      };
+    }
+  });
+  try {
+    const operationKey = 'inspector-unavailable-atomic-threshold';
+    const { archive, taskRunId } = seedRunningReconTask(harness, operationKey);
+    const fixture = buildCriticalFixture(harness, operationKey);
+    await harness.durable.prepareAndAck(criticalIdentity(operationKey, taskRunId, fixture.critical));
+    const threshold = await harness.recoveryCoordinator.scanAndRecover();
+    assert.equal(threshold.sourceCount, 1);
+    assert.equal(threshold.activeHoldCount, 1);
+    assert.equal(harness.readRepository.listActiveRecoveryHolds()[0].reasonCode, 'INSPECTOR_UNAVAILABLE');
+    const heldTask = archive.getTaskRun(taskRunId);
+    assert.equal(heldTask.status, 'interrupted');
+    assert.equal(heldTask.failureCode, 'INSPECTOR_UNAVAILABLE');
+    assert.equal(heldTask.metadata.recoveryHold, true);
   } finally {
     await harness.runtime.shutdown();
     harness.database.close();

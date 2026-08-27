@@ -3,6 +3,10 @@
 const { canonicalSha256 } = require('../background-execution/canonical-json-v1');
 const { RECON_FIX_RUN_JPM_ACTION } = require('./policies');
 
+function recoveryPlanError(code, message) {
+  return Object.assign(new Error(message), { code });
+}
+
 function failureForOutcome(outcome) {
   return outcome === 'committed'
     ? Object.freeze({
@@ -29,13 +33,62 @@ function interruptedTransition(source, failureCode, failureMessage) {
       expectedState: 'running',
       failureCode,
       failureMessage,
-      metadataPatch: { recoveryHold: failureCode === 'INSPECTION_UNKNOWN' }
+      metadataPatch: {
+        recoveryHold: ['INSPECTION_UNKNOWN', 'INSPECTOR_UNAVAILABLE'].includes(failureCode)
+      }
     },
     safePayload: { reasonCode: failureCode }
   };
 }
 
-function definitiveHeldRecoveryTransitions(source, inspection, activeHold) {
+function exactTaskState(source, taskState) {
+  if (!taskState || taskState.taskRunId !== source.taskRunId ||
+      taskState.taskKey !== 'recon-id-fix:run' ||
+      taskState.operationKey !== source.operationKey) {
+    throw recoveryPlanError(
+      'RECON_FIX_JPM_RECOVERY_TASK_IDENTITY_CONFLICT',
+      'JPM recovery 持久 Task identity 不匹配'
+    );
+  }
+  return taskState;
+}
+
+function ordinaryRunningTask(taskState) {
+  return taskState.status === 'running' && taskState.recoveryMode === false &&
+    taskState.recoveryAttemptId === null;
+}
+
+function inspectorUnavailableInterruption(source, taskState) {
+  const current = exactTaskState(source, taskState);
+  if (current.status === 'interrupted' && current.recoveryMode === false &&
+      current.recoveryAttemptId === null) {
+    return [];
+  }
+  if (!ordinaryRunningTask(current)) {
+    throw recoveryPlanError(
+      'RECON_FIX_JPM_RECOVERY_TASK_STATE_CONFLICT',
+      'JPM INSPECTOR_UNAVAILABLE Hold 与持久 Task state 不兼容'
+    );
+  }
+  return [interruptedTransition(
+    source,
+    'INSPECTOR_UNAVAILABLE',
+    'JPM ADM写回 Inspector 暂不可用，任务进入恢复保留'
+  )];
+}
+
+function definitiveHeldRecoveryTransitions(source, inspection, activeHold, taskState) {
+  const current = exactTaskState(source, taskState);
+  const prefix = activeHold.reasonCode === 'INSPECTOR_UNAVAILABLE'
+    ? inspectorUnavailableInterruption(source, current)
+    : [];
+  if (prefix.length === 0 && (current.status !== 'interrupted' ||
+      current.recoveryMode !== false || current.recoveryAttemptId !== null)) {
+    throw recoveryPlanError(
+      'RECON_FIX_JPM_RECOVERY_TASK_STATE_CONFLICT',
+      'JPM definitive Hold recovery 要求合法 interrupted Task state'
+    );
+  }
   const failure = failureForOutcome(inspection.outcome);
   const recoveryAttemptId = `recon-jpm-recovery:${canonicalSha256([
     source.sourceKind,
@@ -54,7 +107,7 @@ function definitiveHeldRecoveryTransitions(source, inspection, activeHold) {
     sourceRef: source.sourceRef,
     recoveryAttemptId
   };
-  return [{
+  return [...prefix, {
     transition: {
       ...base,
       command: 'begin-recovery',
@@ -94,8 +147,19 @@ function definitiveHeldRecoveryTransitions(source, inspection, activeHold) {
   }];
 }
 
-function reconFixJpmRecoveryPlanTransitions({ phase, source, inspection, activeHold = null }) {
-  if (!source || source.actionKey !== RECON_FIX_RUN_JPM_ACTION || !inspection) return [];
+function reconFixJpmRecoveryPlanTransitions({
+  phase,
+  source,
+  inspection,
+  activeHold = null,
+  taskState = null
+}) {
+  if (!source || source.actionKey !== RECON_FIX_RUN_JPM_ACTION) return [];
+  if (phase === 'inspection-unavailable-hold') {
+    if (activeHold && activeHold.reasonCode !== 'INSPECTOR_UNAVAILABLE') return [];
+    return inspectorUnavailableInterruption(source, taskState);
+  }
+  if (!inspection) return [];
   if (phase === 'inspection-hold' && inspection.outcome === 'unknown') {
     return [interruptedTransition(
       source,
@@ -104,7 +168,9 @@ function reconFixJpmRecoveryPlanTransitions({ phase, source, inspection, activeH
     )];
   }
   if (phase === 'inspection-result' && inspection.outcome === 'committed') {
-    if (activeHold) return definitiveHeldRecoveryTransitions(source, inspection, activeHold);
+    if (activeHold) {
+      return definitiveHeldRecoveryTransitions(source, inspection, activeHold, taskState);
+    }
     return [interruptedTransition(
       source,
       failureForOutcome(inspection.outcome).code,
@@ -112,7 +178,9 @@ function reconFixJpmRecoveryPlanTransitions({ phase, source, inspection, activeH
     )];
   }
   if (phase === 'inspection-result' && inspection.outcome === 'not-committed') {
-    if (activeHold) return definitiveHeldRecoveryTransitions(source, inspection, activeHold);
+    if (activeHold) {
+      return definitiveHeldRecoveryTransitions(source, inspection, activeHold, taskState);
+    }
     return [interruptedTransition(
       source,
       failureForOutcome(inspection.outcome).code,

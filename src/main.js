@@ -214,6 +214,9 @@ const {
   reconFixJpmRecoveryPlanTransitions
 } = require('./main-process/recon-id-fix-service/jpm-recovery-plan');
 const {
+  createReconFixJpmRecoveryTaskStateReader
+} = require('./main-process/recon-id-fix-service/jpm-recovery-task-state');
+const {
   createReconFixJpmWorkerDurableCoordinator
 } = require('./main-process/recon-id-fix-service/jpm-worker-durable-coordinator');
 const {
@@ -681,6 +684,25 @@ let preFundMptHoldGate = null;
 let preFundMptWorkerDurableCoordinator = null;
 let reconFixJpmHoldGate = null;
 let backgroundWorkerDurableCoordinator = null;
+
+function assertReconFixJpmAdmMutationAllowed() {
+  if (!reconFixJpmHoldGate) {
+    throw Object.assign(new Error('ReconFix JPM Recovery Hold gate 尚未初始化'), {
+      code: 'RECON_FIX_JPM_HOLD_GATE_UNAVAILABLE'
+    });
+  }
+  return reconFixJpmHoldGate.assertMutationAllowed();
+}
+
+function runReconFixJpmAdmMutationBoundary(work) {
+  if (!reconFixJpmHoldGate) {
+    throw Object.assign(new Error('ReconFix JPM Recovery Hold gate 尚未初始化'), {
+      code: 'RECON_FIX_JPM_HOLD_GATE_UNAVAILABLE'
+    });
+  }
+  return reconFixJpmHoldGate.runSynchronousMutationBoundary(work);
+}
+
 let archiveOperationTail = Promise.resolve();
 const backgroundExecutionRuntimeManager = createBackgroundExecutionRuntimeManager({
   workerDurableCoordinatorProvider: () => backgroundWorkerDurableCoordinator,
@@ -15939,7 +15961,11 @@ function registerNewAccountHandlers() {
     const transform = repoKey === 'bank-deposit' ? pickBankDepositFields : (x) => x;
     const isGatewayBill = repoKey === 'gateway-bill';
     const isBankDeposit = repoKey === 'bank-deposit';
+    const isMidAllocation = repoKey === 'mid-allocation';
     const isFxSettlement = repoKey === 'fx-settlement';
+    // E11-B：bank/mid 都是全局 ADM image 的 source。先于任何 source write 检查
+    // 同一 durable Hold/open Intent scope；ADM replace 前还会在同步写边界复检。
+    if (isBankDeposit || isMidAllocation) assertReconFixJpmAdmMutationAllowed();
     // v3.0.4 块 E 需求2（🔴 守卫）：外汇交割表（fx-settlement）强制走数组路径，绝不走流式（BOC 分组依赖物理行号断档）。
     const useStreamingPath = detected.streamingEligible && repoKey !== 'fx-settlement';
     let ret;
@@ -16032,7 +16058,11 @@ function registerNewAccountHandlers() {
       catch (probeErr) { bankExistsForAdm = false; }
     }
     if (bankExistsForAdm) {
-      const { admDerive } = rebuildAdmDerivation({ database, buildAdmRows });
+      const { admDerive } = rebuildAdmDerivation({
+        database,
+        buildAdmRows,
+        admMutationBoundary: runReconFixJpmAdmMutationBoundary
+      });
       okResult.admDerive = admDerive;
       // v2.1.16-beta.6 PR#65 Codex FindingB（🔴 资金红线）：ADM 成功重建 → 旧 JPM 修复结果失效 → 清空。
       if (admDerive && admDerive.created) {
@@ -16179,9 +16209,14 @@ function registerNewAccountHandlers() {
       }
       if (tableKey === 'bank-deposit') {
         // 🔴 资金红线：删银行对账单入金表（T6a 单事务删 + 返回 deletedBizIds 供清标记/派生重建）。
+        assertReconFixJpmAdmMutationAllowed();
         const ret = database.deleteBankDepositByDateRange(start, end);
         // 派生重建（复用 T6b-1 抽取函数，禁复制 = R-5）：ADM（全库 Channel=ADM 候选重建）+ BOC bank（2.4 + 2.5 全量回填）。
-        const { admDerive } = rebuildAdmDerivation({ database, buildAdmRows });
+        const { admDerive } = rebuildAdmDerivation({
+          database,
+          buildAdmRows,
+          admMutationBoundary: runReconFixJpmAdmMutationBoundary
+        });
         const { bocBankDerive } = rebuildBankDepositBocDerivation(
           { database, buildBocBankRows, backfillBocReconLinkIds, appendActivityLogEntry }
         );
@@ -21517,6 +21552,7 @@ async function initializeBackgroundExecutionRecovery() {
   const requestOwnerRepository = createRecoveryRequestOwnerRepository(database.db);
   const observationAttemptRepository = createRecoveryObservationAttemptRepository(database.db);
   const recoveryControlRepository = createRecoveryControlRepository(database.db);
+  const resolveReconFixJpmTaskState = createReconFixJpmRecoveryTaskStateReader(database.db);
   const coordinator = createStartupRecoveryCoordinator({
     readRepository: recoveryControlReadRepository,
     inspectorRegistry,
@@ -21528,6 +21564,7 @@ async function initializeBackgroundExecutionRecovery() {
       ...PRE_FUND_MPT_POLICIES,
       RECON_FIX_JPM_POLICY
     ].find((policy) => policy.actionKey === actionKey) || null,
+    resolveTaskState: resolveReconFixJpmTaskState,
     planTransitions(input) {
       return [
         ...preFundMptRecoveryPlanTransitions(input),
