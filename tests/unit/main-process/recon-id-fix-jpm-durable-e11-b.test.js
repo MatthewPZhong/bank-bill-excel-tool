@@ -209,6 +209,19 @@ function operationContext(operationKey, taskRunId = `task-${operationKey}`) {
   };
 }
 
+function exportOperationContext(operationKey, taskRunId = `task-${operationKey}`) {
+  return {
+    kind: 'operation',
+    value: {
+      taskRunId,
+      taskKey: 'recon-id-fix:export',
+      moduleId: 'recon-fix',
+      parentRunId: 'parent-e11-b',
+      operationKey
+    }
+  };
+}
+
 function createAdapterCapture() {
   const base = createWorkerThreadAdapter();
   const messages = [];
@@ -857,6 +870,24 @@ test('JPM canonical policy保持production false，runtime固定single unit且�
       unmatchedRowCount: 0, resultDigest: '2'.repeat(64)
     }
   };
+  const exportAuthorityBody = {
+    contractVersion: 1,
+    resultHandle: jpmResult.resultHandle,
+    runKind: 'jpm',
+    subMode: 'gateway',
+    inputEvidenceHash: '3'.repeat(64),
+    scenarioSnapshotHash: '4'.repeat(64),
+    linkedEvidenceHash: '5'.repeat(64),
+    resultDigest: jpmResult.boundedSummary.resultDigest,
+    fixedRowCount: 0,
+    unmatchedRowCount: 0,
+    warningCount: 0,
+    artifacts: []
+  };
+  jpmResult.exportAuthority = {
+    ...exportAuthorityBody,
+    authorityDigest: reconFixEvidenceSha256(exportAuthorityBody)
+  };
   assert.equal(validateReconFixJpmResult(jpmResult), true);
   assert.equal(validateReconFixServiceResult(jpmResult), false);
   const harness = createHarness();
@@ -1292,13 +1323,19 @@ test('E11-C JPM exact adopted result可导出，ADM evidence漂移时Publisher�
         sourceOperation: 'recon-id-fix:export'
       }]
     });
+    const artifactBindings = [{
+      artifactKind: 'main',
+      outputArtifactKey: filePlan.outputs[0].artifactKey,
+      targetPath: filePlan.outputs[0].filePath
+    }];
     const published = await generateValidateAndPublishReconFixExport({
       runtime: harness.runtime,
       result: run.result,
       filePlan,
+      artifactBindings,
       stagingDirectory,
       operationKey: 'jpm-export-e11-c-success',
-      context: operationContext('jpm-export-e11-c-success'),
+      context: exportOperationContext('jpm-export-e11-c-success'),
       batchContext: {
         batchId: 9001,
         batchNumber: '2026-08-28-9001',
@@ -1314,6 +1351,7 @@ test('E11-C JPM exact adopted result可导出，ADM evidence漂移时Publisher�
           serviceGeneration: run.result.serviceGeneration,
           revision: run.result.revision,
           resultHandle: run.result.resultHandle,
+          inputEvidenceHash: run.result.exportAuthority.inputEvidenceHash,
           scenarioSnapshotHash: reconFixEvidenceSha256(SCENARIO, { maxBytes: 262144 }),
           linkedEvidenceHash: linkedEvidence.imageHash
         };
@@ -1326,6 +1364,13 @@ test('E11-C JPM exact adopted result可导出，ADM evidence漂移时Publisher�
     });
     assert.equal(published.summary.fixedRowCount, 1);
     assert.equal(publisherCalls, 1);
+    const postImageHash = readAdmRowsForWriteback(harness.database.db).imageHash;
+    assert.equal(run.result.exportAuthority.linkedEvidenceHash, postImageHash);
+    assert.equal(published.artifacts[0].lineage.linkedEvidenceHash, postImageHash);
+    assert.equal(
+      published.artifacts[0].lineage.exportAuthorityDigest,
+      run.result.exportAuthority.authorityDigest
+    );
 
     const current = readAdmRowsForWriteback(harness.database.db).rows[0].parsed;
     harness.database.db.prepare(
@@ -1337,9 +1382,10 @@ test('E11-C JPM exact adopted result可导出，ADM evidence漂移时Publisher�
       runtime: harness.runtime,
       result: run.result,
       filePlan,
+      artifactBindings,
       stagingDirectory: staleStaging,
       operationKey: 'jpm-export-e11-c-stale',
-      context: operationContext('jpm-export-e11-c-stale'),
+      context: exportOperationContext('jpm-export-e11-c-stale'),
       batchContext: {
         batchId: 9002,
         batchNumber: '2026-08-28-9002',
@@ -1350,7 +1396,15 @@ test('E11-C JPM exact adopted result可导出，ADM evidence漂移时Publisher�
         operationKey: 'jpm-export-e11-c-stale'
       },
       readCurrentEvidence() {
-        throw new Error('Worker evidence gate 后不应进入 Main Join');
+        const linkedEvidence = readAdmRowsForWriteback(harness.database.db);
+        return {
+          serviceGeneration: run.result.serviceGeneration,
+          revision: run.result.revision,
+          resultHandle: run.result.resultHandle,
+          inputEvidenceHash: run.result.exportAuthority.inputEvidenceHash,
+          scenarioSnapshotHash: run.result.exportAuthority.scenarioSnapshotHash,
+          linkedEvidenceHash: linkedEvidence.imageHash
+        };
       },
       async publishPublication() {
         publisherCalls += 1;

@@ -454,6 +454,7 @@ function publicResult(state) {
     revision: state.revision,
     stateDigest: digest,
     resultHandle: state.result.resultHandle,
+    exportAuthority: state.result.exportAuthority,
     scenarioSnapshotHash: state.result.scenarioSnapshotHash,
     linkedEvidenceHash: state.result.linkedEvidenceHash,
     summary: state.result.summary
@@ -508,6 +509,50 @@ function projectRows(rows, headers) {
       projected[header] = value === null || value === undefined ? '' : value;
     }
     return projected;
+  });
+}
+
+function buildReconFixExportAuthority(result) {
+  const artifacts = [];
+  if (result.fixedRows.length > 0) {
+    const contract = getReconIdFixOutputContract(result.subMode);
+    artifacts.push(Object.freeze({
+      artifactKind: 'main',
+      sheetName: contract.sheetName,
+      headersDigest: reconFixEvidenceSha256(contract.headers),
+      recordsDigest: reconFixEvidenceSha256(projectRows(result.fixedRows, contract.headers)),
+      rowCount: result.fixedRows.length
+    }));
+  }
+  if (result.unmatchedRows.length > 0) {
+    artifacts.push(Object.freeze({
+      artifactKind: 'unmatched',
+      sheetName: UNMATCHED_REPORT_SHEET_NAME,
+      headersDigest: reconFixEvidenceSha256(UNMATCHED_REPORT_HEADERS),
+      recordsDigest: reconFixEvidenceSha256(projectRows(
+        result.unmatchedRows,
+        UNMATCHED_REPORT_HEADERS
+      )),
+      rowCount: result.unmatchedRows.length
+    }));
+  }
+  const bounded = Object.freeze({
+    contractVersion: 1,
+    resultHandle: result.resultHandle,
+    runKind: result.runKind,
+    subMode: result.subMode,
+    inputEvidenceHash: result.inputEvidenceHash,
+    scenarioSnapshotHash: result.scenarioSnapshotHash,
+    linkedEvidenceHash: result.linkedEvidenceHash,
+    resultDigest: result.summary.resultDigest,
+    fixedRowCount: result.summary.fixedRowCount,
+    unmatchedRowCount: result.summary.unmatchedRowCount,
+    warningCount: result.summary.warningCount,
+    artifacts: Object.freeze(artifacts)
+  });
+  return Object.freeze({
+    ...bounded,
+    authorityDigest: reconFixEvidenceSha256(bounded)
   });
 }
 
@@ -685,8 +730,8 @@ function createReconFixService(options = {}) {
 
       if (actionKey === RECON_FIX_EXPORT_ACTION) {
         assertExactKeys(input, [
-          'artifacts', 'expectedRevision', 'expectedServiceGeneration',
-          'resultHandle', 'stagingDirectory'
+          'artifacts', 'expectedExportAuthorityDigest', 'expectedRevision',
+          'expectedServiceGeneration', 'resultHandle', 'stagingDirectory'
         ], 'export input');
         if (input.expectedServiceGeneration !== state.serviceGeneration) {
           fail('RECON_FIX_EXPORT_GENERATION_STALE', 'ReconFix Service generation 已变化');
@@ -696,6 +741,10 @@ function createReconFixService(options = {}) {
           fail('RECON_FIX_EXPORT_RESULT_STALE', 'ReconFix result handle 不存在或已变化');
         }
         const result = state.result;
+        if (!result.exportAuthority ||
+            input.expectedExportAuthorityDigest !== result.exportAuthority.authorityDigest) {
+          fail('RECON_FIX_EXPORT_AUTHORITY_STALE', 'ReconFix export authority 与 current result 不一致');
+        }
         const artifacts = requireTaskPrivateArtifacts(input, result);
         assertCurrentLinkedEvidence(result);
         return Object.freeze({
@@ -777,6 +826,7 @@ function createReconFixService(options = {}) {
                     lastAuthor: business.lastAuthor
                   }),
                   lineage: Object.freeze({
+                    exportAuthorityDigest: result.exportAuthority.authorityDigest,
                     inputEvidenceHash: result.inputEvidenceHash,
                     scenarioSnapshotHash: result.scenarioSnapshotHash,
                     linkedEvidenceHash: result.linkedEvidenceHash,
@@ -791,6 +841,7 @@ function createReconFixService(options = {}) {
               }
               return Object.freeze({
                 contractVersion: 1,
+                exportAuthorityDigest: result.exportAuthority.authorityDigest,
                 serviceGeneration: state.serviceGeneration,
                 revision: state.revision,
                 resultHandle: result.resultHandle,
@@ -904,6 +955,7 @@ function createReconFixService(options = {}) {
           boundedSummary: privateResult.summary
         });
         privateResult.linkedEvidenceHash = writebackPlan.expectedPostImageHash;
+        privateResult.exportAuthority = buildReconFixExportAuthority(privateResult);
         const invalidationCandidate = evidenceChanged
           ? createCandidate(serviceApi, { session: state.session, result: null })
           : null;
@@ -924,6 +976,7 @@ function createReconFixService(options = {}) {
           scenarioId: String(snapshot.value.id),
           resultHandle: privateResult.resultHandle,
           boundedSummary: privateResult.summary,
+          exportAuthority: privateResult.exportAuthority,
           writebackPlan,
           candidate,
           invalidationCandidate,
@@ -1049,6 +1102,7 @@ function createReconFixService(options = {}) {
               unmatchedRowCount: privateResult.unmatchedRows.length,
               resultDigest
             });
+            privateResult.exportAuthority = buildReconFixExportAuthority(privateResult);
             return createCandidate(serviceApi, { session: state.session, result: privateResult });
           }
         });
@@ -1135,7 +1189,8 @@ function createReconFixService(options = {}) {
       serviceGeneration: adopted.serviceGeneration,
       revision: adopted.revision,
       resultHandle: pending.resultHandle,
-      boundedSummary: pending.boundedSummary
+      boundedSummary: pending.boundedSummary,
+      exportAuthority: pending.exportAuthority
     });
   }
 

@@ -3,14 +3,18 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const { isDeepStrictEqual } = require('node:util');
 const { fromProtocolError } = require('../background-execution/error-codec');
+const { canonicalJsonSnapshot } = require('../background-execution/protocol-validator');
 const { normalizeFilePlanV1 } = require('../archive-center/file-plan');
 const { publishToolboxPublicationAsync } = require('../toolbox-output-publication-dispatch');
 const { pathsAlias } = require('../toolbox-target-identity');
 const { freezeWorkerBatchContext } = require('../archive-center/worker-batch-context');
 const { readReconFixArtifactEvidence } = require('./artifact-evidence');
+const { reconFixEvidenceSha256 } = require('./evidence-projection');
 const {
   RECON_FIX_EXPORT_ACTION,
+  validateReconFixExportAuthority,
   validateReconFixExportResult,
   validateReconFixJpmResult,
   validateReconFixServiceResult
@@ -44,18 +48,63 @@ function exactResultReference(result) {
       !Number.isSafeInteger(result.serviceGeneration) || result.serviceGeneration < 1 ||
       !Number.isSafeInteger(result.revision) || result.revision < 1 ||
       typeof result.resultHandle !== 'string' || !/^[a-f0-9]{64}$/.test(result.resultHandle) ||
+      !validateReconFixExportAuthority(result.exportAuthority) ||
       !summary || !Number.isSafeInteger(summary.fixedRowCount) || summary.fixedRowCount < 0 ||
       !Number.isSafeInteger(summary.unmatchedRowCount) || summary.unmatchedRowCount < 0 ||
       summary.fixedRowCount + summary.unmatchedRowCount < 1) {
     throw exportError('RECON_FIX_EXPORT_RESULT_REFERENCE_INVALID', 'ReconFix export 缺少 exact result identity/revision');
+  }
+  const authority = canonicalJsonSnapshot(result.exportAuthority);
+  const { authorityDigest, ...authorityBody } = authority;
+  if (authority.resultHandle !== result.resultHandle ||
+      authorityDigest !== reconFixEvidenceSha256(authorityBody)) {
+    throw exportError(
+      'RECON_FIX_EXPORT_RESULT_REFERENCE_INVALID',
+      'ReconFix export authority 未绑定 exact result handle/digest'
+    );
   }
   return Object.freeze({
     serviceGeneration: result.serviceGeneration,
     revision: result.revision,
     resultHandle: result.resultHandle,
     fixedRowCount: summary.fixedRowCount,
-    unmatchedRowCount: summary.unmatchedRowCount
+    unmatchedRowCount: summary.unmatchedRowCount,
+    authority
   });
+}
+
+function freezeReconFixExportBatchAuthority(options) {
+  let batchContext;
+  try {
+    batchContext = freezeWorkerBatchContext(options.batchContext, { required: true });
+  } catch (_error) {
+    throw exportError('RECON_FIX_EXPORT_BATCH_CONTEXT_INVALID', 'ReconFix export 缺少 exact batch authority');
+  }
+  if (batchContext.moduleId !== 'recon-fix' ||
+      batchContext.taskKey !== RECON_FIX_EXPORT_SOURCE_OPERATION) {
+    throw exportError(
+      'RECON_FIX_EXPORT_BATCH_CONTEXT_INVALID',
+      'ReconFix export batch authority 的 action/task/module 不一致'
+    );
+  }
+  const context = Object.freeze({
+    kind: 'operation',
+    value: Object.freeze({
+      taskRunId: batchContext.taskRunId,
+      taskKey: batchContext.taskKey,
+      moduleId: batchContext.moduleId,
+      parentRunId: batchContext.parentRunId,
+      operationKey: batchContext.operationKey
+    })
+  });
+  if ((options.operationKey !== undefined && options.operationKey !== batchContext.operationKey) ||
+      (options.context !== undefined && !isDeepStrictEqual(options.context, context))) {
+    throw exportError(
+      'RECON_FIX_EXPORT_BATCH_CONTEXT_INVALID',
+      'ReconFix export runtime identity 与 batch authority 不一致'
+    );
+  }
+  return Object.freeze({ batchContext, context, operationKey: batchContext.operationKey });
 }
 
 function assertStagingDirectory(stagingDirectory) {
@@ -114,13 +163,51 @@ function canonicalReconFixFilePlan(filePlan, expectedKinds) {
   return canonical;
 }
 
-function createReconFixExportInput({ result, filePlan, stagingDirectory }) {
-  const reference = exactResultReference(result);
+function freezeReconFixArtifactBindings(artifactBindings, filePlan, authority) {
+  if (!Array.isArray(artifactBindings) ||
+      artifactBindings.length !== authority.artifacts.length) {
+    throw exportError(
+      'RECON_FIX_EXPORT_ARTIFACT_BINDING_INVALID',
+      'ReconFix export 缺少 exact Main-owned artifact binding'
+    );
+  }
+  const expectedKeys = 'artifactKind,outputArtifactKey,targetPath';
+  return Object.freeze(artifactBindings.map((binding, index) => {
+    const expectedArtifact = authority.artifacts[index];
+    const output = filePlan.outputs[index];
+    if (!binding || typeof binding !== 'object' || Array.isArray(binding) ||
+        Object.keys(binding).sort().join(',') !== expectedKeys ||
+        binding.artifactKind !== expectedArtifact.artifactKind ||
+        binding.outputArtifactKey !== output.artifactKey ||
+        binding.targetPath !== output.filePath) {
+      throw exportError(
+        'RECON_FIX_EXPORT_ARTIFACT_BINDING_INVALID',
+        'ReconFix export artifact kind/key/target binding 与 FilePlan 不一致'
+      );
+    }
+    return Object.freeze({
+      artifactKind: binding.artifactKind,
+      outputArtifactKey: binding.outputArtifactKey,
+      targetPath: binding.targetPath
+    });
+  }));
+}
+
+function createReconFixExportInputFromReference({
+  artifactBindings,
+  filePlan,
+  stagingDirectory
+}, reference) {
   const stagingRoot = assertStagingDirectory(stagingDirectory);
   const kinds = expectedArtifactKinds(reference);
   const canonicalFilePlan = canonicalReconFixFilePlan(filePlan, kinds);
-  const artifacts = kinds.map((artifactKind, outputIndex) => {
-    const output = canonicalFilePlan.outputs[outputIndex];
+  const bindings = freezeReconFixArtifactBindings(
+    artifactBindings,
+    canonicalFilePlan,
+    reference.authority
+  );
+  const artifacts = bindings.map((binding, outputIndex) => {
+    const artifactKind = binding.artifactKind;
     const generationPath = path.join(
       stagingRoot,
       `${String(outputIndex).padStart(3, '0')}-${artifactKind}.xlsx`
@@ -135,49 +222,92 @@ function createReconFixExportInput({ result, filePlan, stagingDirectory }) {
     return Object.freeze({
       outputIndex,
       artifactKind,
-      outputArtifactKey: output.artifactKey,
+      outputArtifactKey: binding.outputArtifactKey,
       generationPath
     });
   });
   return Object.freeze({
     expectedServiceGeneration: reference.serviceGeneration,
     expectedRevision: reference.revision,
+    expectedExportAuthorityDigest: reference.authority.authorityDigest,
     resultHandle: reference.resultHandle,
     stagingDirectory: stagingRoot,
     artifacts: Object.freeze(artifacts)
   });
 }
 
-function assertCurrentEvidence(result, currentEvidence) {
+function createReconFixExportInput(options) {
+  return createReconFixExportInputFromReference(options, exactResultReference(options.result));
+}
+
+function assertCurrentEvidence(reference, currentEvidence) {
+  const authority = reference.authority;
   if (!currentEvidence ||
-      currentEvidence.serviceGeneration !== result.serviceGeneration ||
-      currentEvidence.revision !== result.revision ||
-      currentEvidence.resultHandle !== result.resultHandle) {
+      Object.keys(currentEvidence).sort().join(',') !== [
+        'inputEvidenceHash', 'linkedEvidenceHash', 'resultHandle', 'revision',
+        'scenarioSnapshotHash', 'serviceGeneration'
+      ].sort().join(',') ||
+      currentEvidence.serviceGeneration !== reference.serviceGeneration ||
+      currentEvidence.revision !== reference.revision ||
+      currentEvidence.resultHandle !== reference.resultHandle) {
     throw exportError('RECON_FIX_EXPORT_RESULT_STALE', 'Main Join 发现 Service result identity/revision 已变化');
   }
-  if (currentEvidence.scenarioSnapshotHash !== result.scenarioSnapshotHash) {
+  if (currentEvidence.inputEvidenceHash !== authority.inputEvidenceHash) {
+    throw exportError('RECON_FIX_EXPORT_INPUT_EVIDENCE_STALE', 'Main Join 发现 input evidence 已变化');
+  }
+  if (currentEvidence.scenarioSnapshotHash !== authority.scenarioSnapshotHash) {
     throw exportError('RECON_FIX_EXPORT_SCENARIO_STALE', 'Main Join 发现 scenario evidence 已变化');
   }
-  if (currentEvidence.linkedEvidenceHash !== result.linkedEvidenceHash) {
+  if (currentEvidence.linkedEvidenceHash !== authority.linkedEvidenceHash) {
     throw exportError('RECON_FIX_EXPORT_LINKED_EVIDENCE_STALE', 'Main Join 发现 linked evidence 已变化');
   }
 }
 
-async function validateReconFixExportJoin({ filePlan, generationInput, result, currentEvidence }) {
+async function validateReconFixExportJoin({
+  artifactBindings,
+  filePlan,
+  generationInput,
+  reference,
+  result
+}) {
   if (!validateReconFixExportResult(result)) {
     throw exportError('RECON_FIX_EXPORT_MANIFEST_INVALID', 'ReconFix Worker artifact manifest 非法');
   }
+  const authority = reference.authority;
   if (result.serviceGeneration !== generationInput.expectedServiceGeneration ||
       result.revision !== generationInput.expectedRevision ||
-      result.resultHandle !== generationInput.resultHandle) {
+      result.resultHandle !== generationInput.resultHandle ||
+      result.serviceGeneration !== reference.serviceGeneration ||
+      result.revision !== reference.revision ||
+      result.resultHandle !== reference.resultHandle) {
     throw exportError('RECON_FIX_EXPORT_RESULT_STALE', 'Main Join 的 Worker result identity/revision 与请求不一致');
   }
-  assertCurrentEvidence(result, currentEvidence);
+  if (generationInput.expectedExportAuthorityDigest !== authority.authorityDigest ||
+      result.exportAuthorityDigest !== authority.authorityDigest ||
+      result.runKind !== authority.runKind || result.subMode !== authority.subMode ||
+      result.inputEvidenceHash !== authority.inputEvidenceHash ||
+      result.scenarioSnapshotHash !== authority.scenarioSnapshotHash ||
+      result.linkedEvidenceHash !== authority.linkedEvidenceHash ||
+      result.summary.fixedRowCount !== authority.fixedRowCount ||
+      result.summary.unmatchedRowCount !== authority.unmatchedRowCount ||
+      result.summary.warningCount !== authority.warningCount ||
+      result.summary.resultDigest !== authority.resultDigest ||
+      result.summary.artifactCount !== authority.artifacts.length) {
+    throw exportError(
+      'RECON_FIX_EXPORT_AUTHORITY_MISMATCH',
+      'Main Join 的 Worker manifest 与 generation 前 authority 不一致'
+    );
+  }
   if (generationInput.artifacts.length !== result.artifacts.length) {
     throw exportError('RECON_FIX_EXPORT_FILE_PLAN_INVALID', 'Main Join 的 FilePlan artifact set 不一致');
   }
   const expectedKinds = generationInput.artifacts.map((artifact) => artifact.artifactKind);
   const canonicalFilePlan = canonicalReconFixFilePlan(filePlan, expectedKinds);
+  const bindings = freezeReconFixArtifactBindings(
+    artifactBindings,
+    canonicalFilePlan,
+    authority
+  );
   const stagingRoot = assertStagingDirectory(generationInput.stagingDirectory);
   const realStagingRoot = fs.realpathSync(stagingRoot);
   const validated = [];
@@ -185,9 +315,15 @@ async function validateReconFixExportJoin({ filePlan, generationInput, result, c
     const artifact = result.artifacts[index];
     const expected = generationInput.artifacts[index];
     const output = canonicalFilePlan.outputs[index];
+    const binding = bindings[index];
+    const expectedBusiness = authority.artifacts[index];
     if (artifact.outputIndex !== index || artifact.artifactKind !== expected.artifactKind ||
+        artifact.artifactKind !== expectedBusiness.artifactKind ||
+        artifact.artifactKind !== binding.artifactKind ||
         artifact.outputArtifactKey !== expected.outputArtifactKey ||
+        artifact.outputArtifactKey !== binding.outputArtifactKey ||
         artifact.outputArtifactKey !== output.artifactKey ||
+        binding.targetPath !== output.filePath ||
         path.dirname(expected.generationPath) !== stagingRoot) {
       throw exportError('RECON_FIX_EXPORT_ARTIFACT_ORDER_MISMATCH', 'Main Join 的 artifact set/order/ownership 不一致');
     }
@@ -222,23 +358,27 @@ async function validateReconFixExportJoin({ filePlan, generationInput, result, c
     const business = await readReconFixArtifactEvidence(
       expected.generationPath,
       artifact.artifactKind,
-      result.subMode
+      authority.subMode
     );
-    if (business.sheetName !== artifact.sheetName ||
-        business.headersDigest !== artifact.headersDigest ||
-        business.recordsDigest !== artifact.recordsDigest ||
-        business.rowCount !== artifact.rowCount ||
+    if (business.sheetName !== expectedBusiness.sheetName ||
+        business.headersDigest !== expectedBusiness.headersDigest ||
+        business.recordsDigest !== expectedBusiness.recordsDigest ||
+        business.rowCount !== expectedBusiness.rowCount ||
+        artifact.sheetName !== expectedBusiness.sheetName ||
+        artifact.headersDigest !== expectedBusiness.headersDigest ||
+        artifact.recordsDigest !== expectedBusiness.recordsDigest ||
+        artifact.rowCount !== expectedBusiness.rowCount ||
         business.headerFontSize !== artifact.style.headerFontSize ||
         business.lastAuthor !== artifact.style.lastAuthor ||
-        artifact.lineage.inputEvidenceHash !== result.inputEvidenceHash ||
-        artifact.lineage.scenarioSnapshotHash !== result.scenarioSnapshotHash ||
-        artifact.lineage.linkedEvidenceHash !== result.linkedEvidenceHash ||
-        artifact.lineage.resultDigest !== result.summary.resultDigest) {
+        business.headerFontSize !== 10 || business.lastAuthor !== 'pzhong' ||
+        artifact.lineage.exportAuthorityDigest !== authority.authorityDigest ||
+        artifact.lineage.inputEvidenceHash !== authority.inputEvidenceHash ||
+        artifact.lineage.scenarioSnapshotHash !== authority.scenarioSnapshotHash ||
+        artifact.lineage.linkedEvidenceHash !== authority.linkedEvidenceHash ||
+        artifact.lineage.resultDigest !== authority.resultDigest) {
       throw exportError('RECON_FIX_EXPORT_BUSINESS_EVIDENCE_MISMATCH', 'ReconFix staging artifact 业务回读或 lineage 不一致');
     }
-    const expectedRows = artifact.artifactKind === 'main'
-      ? result.summary.fixedRowCount
-      : result.summary.unmatchedRowCount;
+    const expectedRows = expectedBusiness.rowCount;
     if (artifact.rowCount !== expectedRows) {
       throw exportError('RECON_FIX_EXPORT_ROW_COUNT_MISMATCH', 'ReconFix artifact rowCount 与 result 不守恒');
     }
@@ -261,12 +401,9 @@ async function validateReconFixExportJoin({ filePlan, generationInput, result, c
 
 async function publishReconFixExportArtifacts(options, artifacts) {
   const publish = options.publishPublication || publishToolboxPublicationAsync;
-  let batchContext;
-  try {
-    batchContext = freezeWorkerBatchContext(options.batchContext, { required: true });
-  } catch (_error) {
-    throw exportError('RECON_FIX_EXPORT_BATCH_CONTEXT_INVALID', 'ReconFix Publisher 缺少 exact batch context');
-  }
+  const { batchContext } = freezeReconFixExportBatchAuthority({
+    batchContext: options.batchContext
+  });
   return publish({
     taskId: `recon-fix-export-${batchContext.taskRunId}-${crypto.randomUUID()}`,
     artifacts: artifacts.map((artifact) => ({
@@ -290,49 +427,69 @@ async function publishReconFixExportArtifacts(options, artifacts) {
 
 async function generateValidateAndPublishReconFixExport(options = {}) {
   const runtime = options.runtime;
-  if (!runtime || typeof runtime.execute !== 'function') {
+  if (!runtime || typeof runtime.reserveServiceOperation !== 'function') {
     throw new TypeError('ReconFix export background runtime 缺失');
   }
   if (typeof options.readCurrentEvidence !== 'function') {
     throw new TypeError('ReconFix export Main evidence reader 缺失');
   }
-  const generationInput = createReconFixExportInput(options);
-  const execution = await runtime.execute({
+  const batchAuthority = freezeReconFixExportBatchAuthority(options);
+  const reservation = runtime.reserveServiceOperation({
     actionKey: RECON_FIX_EXPORT_ACTION,
-    operationKey: options.operationKey,
-    production: options.production === true,
-    context: options.context,
-    input: generationInput
+    operationKey: batchAuthority.operationKey
   });
-  if (!execution || execution.outcome !== 'completed' || execution.terminalSource !== 'job:done') {
-    if (execution && execution.error) throw fromProtocolError(execution.error);
-    throw exportError('RECON_FIX_EXPORT_GENERATION_FAILED', 'ReconFix Worker staging 生成失败');
+  try {
+    const reference = exactResultReference(options.result);
+    const generationInput = createReconFixExportInputFromReference(options, reference);
+    const currentEvidence = await options.readCurrentEvidence(reference);
+    assertCurrentEvidence(reference, currentEvidence);
+    const execution = await reservation.execute({
+      actionKey: RECON_FIX_EXPORT_ACTION,
+      operationKey: batchAuthority.operationKey,
+      production: options.production === true,
+      context: batchAuthority.context,
+      input: generationInput
+    });
+    if (!execution || execution.outcome !== 'completed' || execution.terminalSource !== 'job:done') {
+      if (execution && execution.error) throw fromProtocolError(execution.error);
+      throw exportError('RECON_FIX_EXPORT_GENERATION_FAILED', 'ReconFix Worker staging 生成失败');
+    }
+    const artifacts = await validateReconFixExportJoin({
+      artifactBindings: options.artifactBindings,
+      filePlan: options.filePlan,
+      generationInput,
+      reference,
+      result: execution.result
+    });
+    const expectedKinds = generationInput.artifacts.map((artifact) => artifact.artifactKind);
+    const finalFilePlan = canonicalReconFixFilePlan(options.filePlan, expectedKinds);
+    freezeReconFixArtifactBindings(options.artifactBindings, finalFilePlan, reference.authority);
+    const publication = await publishReconFixExportArtifacts({
+      ...options,
+      batchContext: batchAuthority.batchContext
+    }, artifacts);
+    return Object.freeze({
+      artifacts,
+      summary: Object.freeze({
+        fixedRowCount: reference.authority.fixedRowCount,
+        unmatchedRowCount: reference.authority.unmatchedRowCount,
+        warningCount: reference.authority.warningCount,
+        resultDigest: reference.authority.resultDigest,
+        artifactCount: reference.authority.artifacts.length
+      }),
+      publication
+    });
+  } finally {
+    reservation.release();
   }
-  const currentEvidence = await options.readCurrentEvidence(execution.result);
-  const artifacts = await validateReconFixExportJoin({
-    filePlan: options.filePlan,
-    generationInput,
-    result: execution.result,
-    currentEvidence
-  });
-  const finalEvidence = await options.readCurrentEvidence(execution.result);
-  assertCurrentEvidence(execution.result, finalEvidence);
-  canonicalReconFixFilePlan(
-    options.filePlan,
-    generationInput.artifacts.map((artifact) => artifact.artifactKind)
-  );
-  const publication = await publishReconFixExportArtifacts(options, artifacts);
-  return Object.freeze({
-    artifacts,
-    summary: execution.result.summary,
-    publication
-  });
 }
 
 module.exports = {
   canonicalReconFixFilePlan,
   createReconFixExportInput,
   exactResultReference,
+  freezeReconFixArtifactBindings,
+  freezeReconFixExportBatchAuthority,
   generateValidateAndPublishReconFixExport,
   publishReconFixExportArtifacts,
   validateReconFixExportJoin

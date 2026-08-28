@@ -273,6 +273,8 @@ function allowReconFixFinanceSafeValue({ value, key }) {
     'headersDigest',
     'recordsDigest',
     'resultDigest',
+    'authorityDigest',
+    'exportAuthorityDigest',
     'preImageHash',
     'postImageHash',
     'idSequenceDigest',
@@ -282,11 +284,46 @@ function allowReconFixFinanceSafeValue({ value, key }) {
   ].includes(key) && safeHash(value);
 }
 
+function validateReconFixExportAuthority(value) {
+  if (!exactKeys(value, [
+    'artifacts', 'authorityDigest', 'contractVersion', 'fixedRowCount',
+    'inputEvidenceHash', 'linkedEvidenceHash', 'resultDigest', 'resultHandle',
+    'runKind', 'scenarioSnapshotHash', 'subMode', 'unmatchedRowCount', 'warningCount'
+  ]) || value.contractVersion !== 1 || !safeHash(value.authorityDigest) ||
+      !safeHash(value.resultHandle) || !safeHash(value.inputEvidenceHash) ||
+      !safeHash(value.scenarioSnapshotHash) || !safeHash(value.resultDigest) ||
+      !(value.linkedEvidenceHash === null || safeHash(value.linkedEvidenceHash)) ||
+      !['standard', 'boc', 'jpm'].includes(value.runKind) ||
+      !['business', 'gateway'].includes(value.subMode) ||
+      (value.runKind === 'jpm' && value.subMode !== 'gateway') ||
+      (['boc', 'jpm'].includes(value.runKind) && !safeHash(value.linkedEvidenceHash)) ||
+      !safeCount(value.fixedRowCount) || !safeCount(value.unmatchedRowCount) ||
+      !safeCount(value.warningCount) ||
+      !Array.isArray(value.artifacts) ||
+      value.artifacts.length > 2) return false;
+  const expectedKinds = [];
+  if (value.fixedRowCount > 0) expectedKinds.push('main');
+  if (value.unmatchedRowCount > 0) expectedKinds.push('unmatched');
+  if (value.artifacts.length !== expectedKinds.length) return false;
+  return value.artifacts.every((artifact, index) => (
+    exactKeys(artifact, [
+      'artifactKind', 'headersDigest', 'recordsDigest', 'rowCount', 'sheetName'
+    ]) && artifact.artifactKind === expectedKinds[index] &&
+    safeCount(artifact.rowCount) &&
+    artifact.rowCount === (artifact.artifactKind === 'main'
+      ? value.fixedRowCount
+      : value.unmatchedRowCount) &&
+    safeHash(artifact.headersDigest) && safeHash(artifact.recordsDigest) &&
+    typeof artifact.sheetName === 'string' && artifact.sheetName.length > 0 &&
+    Buffer.byteLength(artifact.sheetName, 'utf8') <= 256
+  ));
+}
+
 function validateReconFixServiceResult(value) {
   if (!exactKeys(value, value && value.kind === 'imported'
     ? ['kind', 'revision', 'serviceGeneration', 'stateDigest', 'summary']
-    : ['kind', 'linkedEvidenceHash', 'resultHandle', 'revision', 'scenarioSnapshotHash',
-        'serviceGeneration', 'stateDigest', 'summary'])) return false;
+    : ['exportAuthority', 'kind', 'linkedEvidenceHash', 'resultHandle', 'revision',
+        'scenarioSnapshotHash', 'serviceGeneration', 'stateDigest', 'summary'])) return false;
   if (!safeCount(value.revision) || value.revision < 1 ||
       !safeCount(value.serviceGeneration) || value.serviceGeneration < 1 ||
       !safeHash(value.stateDigest)) return false;
@@ -301,20 +338,32 @@ function validateReconFixServiceResult(value) {
   }
   if (value.kind !== 'readonly-result' || !safeHash(value.resultHandle) ||
       !safeHash(value.scenarioSnapshotHash) ||
-      !(value.linkedEvidenceHash === null || safeHash(value.linkedEvidenceHash))) return false;
+      !(value.linkedEvidenceHash === null || safeHash(value.linkedEvidenceHash)) ||
+      !validateReconFixExportAuthority(value.exportAuthority) ||
+      value.exportAuthority.resultHandle !== value.resultHandle ||
+      value.exportAuthority.scenarioSnapshotHash !== value.scenarioSnapshotHash ||
+      value.exportAuthority.linkedEvidenceHash !== value.linkedEvidenceHash) return false;
   const summary = value.summary;
   return exactKeys(summary, ['fixedRowCount', 'resultDigest', 'runKind', 'unmatchedRowCount', 'warningCount']) &&
     ['standard', 'boc'].includes(summary.runKind) && safeHash(summary.resultDigest) &&
     safeCount(summary.fixedRowCount) && safeCount(summary.unmatchedRowCount) &&
-    safeCount(summary.warningCount);
+    safeCount(summary.warningCount) && value.exportAuthority.runKind === summary.runKind &&
+    value.exportAuthority.fixedRowCount === summary.fixedRowCount &&
+    value.exportAuthority.unmatchedRowCount === summary.unmatchedRowCount &&
+    value.exportAuthority.warningCount === summary.warningCount &&
+    value.exportAuthority.resultDigest === summary.resultDigest;
 }
 
 function validateReconFixJpmResult(value) {
   if (!exactKeys(value, [
-    'boundedSummary', 'resultHandle', 'resultKind', 'revision', 'serviceGeneration'
+    'boundedSummary', 'exportAuthority', 'resultHandle', 'resultKind', 'revision',
+    'serviceGeneration'
   ]) || !['noop', 'committed'].includes(value.resultKind) || !safeHash(value.resultHandle) ||
       !safeCount(value.revision) || value.revision < 1 ||
-      !safeCount(value.serviceGeneration) || value.serviceGeneration < 1) {
+      !safeCount(value.serviceGeneration) || value.serviceGeneration < 1 ||
+      !validateReconFixExportAuthority(value.exportAuthority) ||
+      value.exportAuthority.runKind !== 'jpm' ||
+      value.exportAuthority.resultHandle !== value.resultHandle) {
     return false;
   }
   const summary = value.boundedSummary;
@@ -322,18 +371,23 @@ function validateReconFixJpmResult(value) {
     'fixedRowCount', 'resultDigest', 'runKind', 'unmatchedRowCount', 'warningCount'
   ]) && summary.runKind === 'jpm' && safeHash(summary.resultDigest) &&
     safeCount(summary.fixedRowCount) && safeCount(summary.unmatchedRowCount) &&
-    safeCount(summary.warningCount);
+    safeCount(summary.warningCount) &&
+    value.exportAuthority.fixedRowCount === summary.fixedRowCount &&
+    value.exportAuthority.unmatchedRowCount === summary.unmatchedRowCount &&
+    value.exportAuthority.warningCount === summary.warningCount &&
+    value.exportAuthority.resultDigest === summary.resultDigest;
 }
 
 function validateReconFixExportResult(value) {
   try {
     if (!exactKeys(value, [
-      'artifacts', 'contractVersion', 'inputEvidenceHash', 'linkedEvidenceHash',
+      'artifacts', 'contractVersion', 'exportAuthorityDigest', 'inputEvidenceHash', 'linkedEvidenceHash',
       'resultHandle', 'revision', 'runKind', 'scenarioSnapshotHash',
       'serviceGeneration', 'subMode', 'summary'
     ]) || value.contractVersion !== 1 || !safeCount(value.revision) || value.revision < 1 ||
         !safeCount(value.serviceGeneration) || value.serviceGeneration < 1 ||
-        !safeHash(value.resultHandle) || !safeHash(value.inputEvidenceHash) ||
+        !safeHash(value.resultHandle) || !safeHash(value.exportAuthorityDigest) ||
+        !safeHash(value.inputEvidenceHash) ||
         !safeHash(value.scenarioSnapshotHash) ||
         !(value.linkedEvidenceHash === null || safeHash(value.linkedEvidenceHash)) ||
         !['standard', 'boc', 'jpm'].includes(value.runKind) ||
@@ -359,8 +413,10 @@ function validateReconFixExportResult(value) {
           !exactKeys(artifact.style, ['headerFontSize', 'lastAuthor']) ||
           artifact.style.headerFontSize !== 10 || artifact.style.lastAuthor !== 'pzhong' ||
           !exactKeys(artifact.lineage, [
-            'inputEvidenceHash', 'linkedEvidenceHash', 'resultDigest', 'scenarioSnapshotHash'
+            'exportAuthorityDigest', 'inputEvidenceHash', 'linkedEvidenceHash',
+            'resultDigest', 'scenarioSnapshotHash'
           ]) || !safeHash(artifact.lineage.inputEvidenceHash) ||
+          !safeHash(artifact.lineage.exportAuthorityDigest) ||
           !safeHash(artifact.lineage.resultDigest) ||
           !safeHash(artifact.lineage.scenarioSnapshotHash) ||
           !(artifact.lineage.linkedEvidenceHash === null ||
@@ -421,6 +477,7 @@ module.exports = {
   reconFixJpmPolicy,
   reconFixExportPolicy,
   reconFixReadonlyPolicy,
+  validateReconFixExportAuthority,
   validateReconFixJpmResult,
   validateReconFixExportResult,
   validateReconFixServiceResult

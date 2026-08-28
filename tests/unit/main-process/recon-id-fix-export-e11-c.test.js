@@ -7,6 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { DatabaseSync } = require('node:sqlite');
+const JSZip = require('jszip');
 const XLSX = require('xlsx');
 const XLSXStyle = require('xlsx-js-style');
 
@@ -44,6 +45,9 @@ const {
   createReconFixExportInput,
   generateValidateAndPublishReconFixExport
 } = require('../../../src/main-process/recon-id-fix-service/export-operation');
+const {
+  readReconFixArtifactEvidence
+} = require('../../../src/main-process/recon-id-fix-service/artifact-evidence');
 const {
   RECON_FIX_EXPORT_ACTION,
   RECON_FIX_EXPORT_POLICY,
@@ -229,10 +233,19 @@ function currentEvidence(result, patch = {}) {
     serviceGeneration: result.serviceGeneration,
     revision: result.revision,
     resultHandle: result.resultHandle,
+    inputEvidenceHash: result.exportAuthority.inputEvidenceHash,
     scenarioSnapshotHash: result.scenarioSnapshotHash,
     linkedEvidenceHash: result.linkedEvidenceHash,
     ...patch
   };
+}
+
+function artifactBindingsFor(filePlan, result) {
+  return result.exportAuthority.artifacts.map((artifact, index) => Object.freeze({
+    artifactKind: artifact.artifactKind,
+    outputArtifactKey: filePlan.outputs[index] && filePlan.outputs[index].artifactKey,
+    targetPath: filePlan.outputs[index] && filePlan.outputs[index].filePath
+  }));
 }
 
 async function setupStandard() {
@@ -258,7 +271,7 @@ async function setupStandard() {
   assert.equal(run.outcome, 'completed', JSON.stringify(run));
   assert.equal(run.result.summary.fixedRowCount, 1);
   assert.equal(run.result.summary.unmatchedRowCount > 0, true);
-  return { root, runtime, run: run.result };
+  return { root, runtime, run: run.result, workbookPath };
 }
 
 function sha256(filePath) {
@@ -267,12 +280,39 @@ function sha256(filePath) {
 
 function wrappedRuntime(runtime, mutate) {
   return Object.freeze({
-    async execute(requestValue) {
-      const execution = await runtime.execute(requestValue);
-      if (execution.outcome !== 'completed') return execution;
-      const cloned = structuredClone(execution);
-      await mutate(cloned);
-      return cloned;
+    reserveServiceOperation(authority) {
+      const reservation = runtime.reserveServiceOperation(authority);
+      return Object.freeze({
+        identity: reservation.identity,
+        async execute(requestValue) {
+          const execution = await reservation.execute(requestValue);
+          if (execution.outcome !== 'completed') return execution;
+          const cloned = structuredClone(execution);
+          await mutate(cloned);
+          return cloned;
+        },
+        release() {
+          return reservation.release();
+        }
+      });
+    }
+  });
+}
+
+function observedRuntime(runtime, onExecute) {
+  return Object.freeze({
+    reserveServiceOperation(authority) {
+      const reservation = runtime.reserveServiceOperation(authority);
+      return Object.freeze({
+        identity: reservation.identity,
+        execute(requestValue) {
+          onExecute(requestValue);
+          return reservation.execute(requestValue);
+        },
+        release() {
+          return reservation.release();
+        }
+      });
     }
   });
 }
@@ -281,6 +321,29 @@ async function refreshArtifactTechnicalEvidence(execution, generationPath, index
   const stat = fs.lstatSync(generationPath);
   execution.result.artifacts[index].byteSize = stat.size;
   execution.result.artifacts[index].sha256 = sha256(generationPath);
+}
+
+function replaceInlineStringCell(xml, address, value) {
+  const cellPattern = new RegExp(`<c\\b([^>]*\\br="${address}"[^>]*)>[\\s\\S]*?<\\/c>`);
+  const match = xml.match(cellPattern);
+  assert.ok(match, `missing cell ${address}`);
+  const attributes = match[1].replace(/\s+t="[^"]*"/g, '');
+  return xml.replace(
+    cellPattern,
+    `<c${attributes} t="inlineStr"><is><t>${value}</t></is></c>`
+  );
+}
+
+async function mutateFirstWorksheetXml(filePath, mutate) {
+  const zip = await JSZip.loadAsync(fs.readFileSync(filePath));
+  const worksheetEntry = zip.file('xl/worksheets/sheet1.xml');
+  assert.ok(worksheetEntry);
+  const original = await worksheetEntry.async('string');
+  zip.file('xl/worksheets/sheet1.xml', mutate(original));
+  fs.writeFileSync(filePath, await zip.generateAsync({
+    type: 'nodebuffer',
+    compression: 'DEFLATE'
+  }));
 }
 
 test('canonical export policy byte-for-byte、strict bounded manifest与production false', () => {
@@ -301,6 +364,7 @@ test('standard main+unmatched按FilePlan顺序回读并只调用一次Publisher'
       runtime: harness.runtime,
       result: harness.run,
       filePlan,
+      artifactBindings: artifactBindingsFor(filePlan, harness.run),
       stagingDirectory,
       operationKey: 'standard-export',
       context: operationContext('standard-export'),
@@ -323,7 +387,7 @@ test('standard main+unmatched按FilePlan顺序回读并只调用一次Publisher'
   }
 });
 
-test('BOC export重读linked evidence；变化时Worker fail closed且Publisher=0', async () => {
+test('BOC export成功回读gateway业务；linked evidence变化时Publisher=0新增调用', async () => {
   const root = tempRoot('recon-export-boc-');
   const workbookPath = writeGatewayWorkbook(path.join(root, 'gateway.xlsx'));
   const dbPath = createBocDatabase(path.join(root, 'tool-data.sqlite'));
@@ -344,6 +408,26 @@ test('BOC export重读linked evidence；变化时Worker fail closed且Publisher=
       scenario: bocScenario()
     }));
     assert.equal(run.result.summary.runKind, 'boc');
+    const filePlan = planFor(root, run.result.summary.unmatchedRowCount > 0 ? 2 : 1);
+    const successfulStaging = path.join(root, 'staging-success');
+    fs.mkdirSync(successfulStaging);
+    const successful = await generateValidateAndPublishReconFixExport({
+      runtime,
+      result: run.result,
+      filePlan,
+      artifactBindings: artifactBindingsFor(filePlan, run.result),
+      stagingDirectory: successfulStaging,
+      operationKey: 'boc-export-success',
+      context: operationContext('boc-export-success'),
+      batchContext: batchContext('boc-export-success'),
+      readCurrentEvidence: async () => currentEvidence(run.result),
+      publishPublication: async () => {
+        publisherCalls += 1;
+        return { committed: true };
+      }
+    });
+    assert.equal(successful.summary.fixedRowCount, run.result.summary.fixedRowCount);
+    assert.equal(publisherCalls, 1);
     const writable = new DatabaseSync(dbPath);
     const row = writable.prepare('SELECT id, raw_json FROM linked_boc_fx_settlement').get();
     const changed = JSON.parse(row.raw_json);
@@ -357,7 +441,8 @@ test('BOC export重读linked evidence；变化时Worker fail closed且Publisher=
       generateValidateAndPublishReconFixExport({
         runtime,
         result: run.result,
-        filePlan: planFor(root, run.result.summary.unmatchedRowCount > 0 ? 2 : 1),
+        filePlan,
+        artifactBindings: artifactBindingsFor(filePlan, run.result),
         stagingDirectory,
         operationKey: 'boc-export-stale',
         context: operationContext('boc-export-stale'),
@@ -367,7 +452,7 @@ test('BOC export重读linked evidence；变化时Worker fail closed且Publisher=
       }),
       (error) => error.code === 'RECON_FIX_EXPORT_LINKED_EVIDENCE_STALE'
     );
-    assert.equal(publisherCalls, 0);
+    assert.equal(publisherCalls, 1);
   } finally {
     await runtime.shutdown({ timeoutMs: 10000 });
   }
@@ -386,6 +471,7 @@ test('artifact set/collision/target alias/symlink staging均在Publisher前拒�
         runtime: harness.runtime,
         result: harness.run,
         filePlan: correctPlan,
+        artifactBindings: artifactBindingsFor(correctPlan, harness.run),
         stagingDirectory: staging,
         operationKey: 'collision',
         context: operationContext('collision'),
@@ -403,6 +489,7 @@ test('artifact set/collision/target alias/symlink staging均在Publisher前拒�
       () => createReconFixExportInput({
         result: harness.run,
         filePlan: wrongPlan,
+        artifactBindings: artifactBindingsFor(wrongPlan, harness.run),
         stagingDirectory: emptyStaging
       }),
       (error) => error.code === 'RECON_FIX_EXPORT_FILE_PLAN_INVALID'
@@ -420,7 +507,12 @@ test('artifact set/collision/target alias/symlink staging均在Publisher前拒�
       ]
     });
     assert.throws(
-      () => createReconFixExportInput({ result: harness.run, filePlan: aliasPlan, stagingDirectory: aliasStaging }),
+      () => createReconFixExportInput({
+        result: harness.run,
+        filePlan: aliasPlan,
+        artifactBindings: artifactBindingsFor(aliasPlan, harness.run),
+        stagingDirectory: aliasStaging
+      }),
       (error) => error.code === 'RECON_FIX_EXPORT_PATH_ALIAS'
     );
 
@@ -429,7 +521,12 @@ test('artifact set/collision/target alias/symlink staging均在Publisher前拒�
     fs.mkdirSync(realStaging);
     fs.symlinkSync(realStaging, linkedStaging, 'dir');
     assert.throws(
-      () => createReconFixExportInput({ result: harness.run, filePlan: correctPlan, stagingDirectory: linkedStaging }),
+      () => createReconFixExportInput({
+        result: harness.run,
+        filePlan: correctPlan,
+        artifactBindings: artifactBindingsFor(correctPlan, harness.run),
+        stagingDirectory: linkedStaging
+      }),
       (error) => error.code === 'RECON_FIX_EXPORT_STAGING_INVALID'
     );
 
@@ -439,6 +536,7 @@ test('artifact set/collision/target alias/symlink staging均在Publisher前拒�
       () => createReconFixExportInput({
         result: harness.run,
         filePlan: forgedOwnershipPlan,
+        artifactBindings: artifactBindingsFor(correctPlan, harness.run),
         stagingDirectory: emptyStaging
       }),
       (error) => error.code === 'RECON_FIX_EXPORT_FILE_PLAN_INVALID'
@@ -451,11 +549,87 @@ test('artifact set/collision/target alias/symlink staging均在Publisher前拒�
       () => createReconFixExportInput({
         result: harness.run,
         filePlan: staleTargetPlan,
+        artifactBindings: artifactBindingsFor(staleTargetPlan, harness.run),
         stagingDirectory: emptyStaging
       }),
       (error) => error.code === 'RECON_FIX_EXPORT_FILE_PLAN_INVALID'
     );
     assert.equal(publisherCalls, 0);
+  } finally {
+    await harness.runtime.shutdown({ timeoutMs: 10000 });
+  }
+});
+
+test('batchContext是唯一authority：A runtime context/B journal batch在Worker前拒绝', async () => {
+  const harness = await setupStandard();
+  let reservationCalls = 0;
+  let evidenceReads = 0;
+  let publisherCalls = 0;
+  try {
+    const filePlan = planFor(harness.root, 2);
+    const stagingDirectory = path.join(harness.root, 'staging-mixed-batch-authority');
+    fs.mkdirSync(stagingDirectory);
+    await assert.rejects(
+      generateValidateAndPublishReconFixExport({
+        runtime: Object.freeze({
+          reserveServiceOperation() {
+            reservationCalls += 1;
+            throw new Error('batch authority 失败后不得到达 reservation');
+          }
+        }),
+        result: harness.run,
+        filePlan,
+        artifactBindings: artifactBindingsFor(filePlan, harness.run),
+        stagingDirectory,
+        operationKey: 'execution-a',
+        context: operationContext('execution-a'),
+        batchContext: batchContext('journal-b'),
+        readCurrentEvidence: async () => {
+          evidenceReads += 1;
+          return currentEvidence(harness.run);
+        },
+        publishPublication: async () => { publisherCalls += 1; }
+      }),
+      (error) => error.code === 'RECON_FIX_EXPORT_BATCH_CONTEXT_INVALID'
+    );
+    assert.equal(reservationCalls, 0);
+    assert.equal(evidenceReads, 0);
+    assert.equal(publisherCalls, 0);
+    assert.deepEqual(fs.readdirSync(stagingDirectory), []);
+  } finally {
+    await harness.runtime.shutdown({ timeoutMs: 10000 });
+  }
+});
+
+test('Main-owned kind/artifactKey/target binding拒绝反序 targets且Publisher=0', async () => {
+  const harness = await setupStandard();
+  let workerCalls = 0;
+  let publisherCalls = 0;
+  try {
+    const originalPlan = planFor(harness.root, 2);
+    const artifactBindings = artifactBindingsFor(originalPlan, harness.run);
+    const reversedPlan = structuredClone(originalPlan);
+    reversedPlan.outputs.reverse();
+    const stagingDirectory = path.join(harness.root, 'staging-reversed-targets');
+    fs.mkdirSync(stagingDirectory);
+    await assert.rejects(
+      generateValidateAndPublishReconFixExport({
+        runtime: observedRuntime(harness.runtime, () => { workerCalls += 1; }),
+        result: harness.run,
+        filePlan: reversedPlan,
+        artifactBindings,
+        stagingDirectory,
+        operationKey: 'reversed-targets',
+        context: operationContext('reversed-targets'),
+        batchContext: batchContext('reversed-targets'),
+        readCurrentEvidence: async () => currentEvidence(harness.run),
+        publishPublication: async () => { publisherCalls += 1; }
+      }),
+      (error) => error.code === 'RECON_FIX_EXPORT_ARTIFACT_BINDING_INVALID'
+    );
+    assert.equal(workerCalls, 0);
+    assert.equal(publisherCalls, 0);
+    assert.deepEqual(fs.readdirSync(stagingDirectory), []);
   } finally {
     await harness.runtime.shutdown({ timeoutMs: 10000 });
   }
@@ -483,7 +657,7 @@ test('tamper、stale identity/revision/scenario/linked、order与lineage全部Pu
         execution.result.artifacts[0].rowCount += 1;
         execution.result.summary.fixedRowCount += 1;
       }),
-      code: 'RECON_FIX_EXPORT_BUSINESS_EVIDENCE_MISMATCH'
+      code: 'RECON_FIX_EXPORT_AUTHORITY_MISMATCH'
     },
     {
       name: 'lineage',
@@ -500,12 +674,19 @@ test('tamper、stale identity/revision/scenario/linked、order与lineage全部Pu
       const filePlan = planFor(harness.root, 2);
       const stagingDirectory = path.join(harness.root, `staging-${candidate.name.replaceAll(' ', '-')}`);
       fs.mkdirSync(stagingDirectory);
-      const input = createReconFixExportInput({ result: harness.run, filePlan, stagingDirectory });
+      const artifactBindings = artifactBindingsFor(filePlan, harness.run);
+      const input = createReconFixExportInput({
+        result: harness.run,
+        filePlan,
+        artifactBindings,
+        stagingDirectory
+      });
       await assert.rejects(
         generateValidateAndPublishReconFixExport({
           runtime: candidate.wrap(harness.runtime, input),
           result: harness.run,
           filePlan,
+          artifactBindings,
           stagingDirectory,
           operationKey: `fault-${candidate.name}`,
           context: operationContext(`fault-${candidate.name}`),
@@ -525,6 +706,7 @@ test('tamper、stale identity/revision/scenario/linked、order与lineage全部Pu
   const staleCases = [
     ['result', { resultHandle: '0'.repeat(64) }, 'RECON_FIX_EXPORT_RESULT_STALE'],
     ['revision', { revision: 999 }, 'RECON_FIX_EXPORT_RESULT_STALE'],
+    ['input', { inputEvidenceHash: '0'.repeat(64) }, 'RECON_FIX_EXPORT_INPUT_EVIDENCE_STALE'],
     ['scenario', { scenarioSnapshotHash: '0'.repeat(64) }, 'RECON_FIX_EXPORT_SCENARIO_STALE'],
     ['linked', { linkedEvidenceHash: '0'.repeat(64) }, 'RECON_FIX_EXPORT_LINKED_EVIDENCE_STALE']
   ];
@@ -540,6 +722,7 @@ test('tamper、stale identity/revision/scenario/linked、order与lineage全部Pu
           runtime: harness.runtime,
           result: harness.run,
           filePlan,
+          artifactBindings: artifactBindingsFor(filePlan, harness.run),
           stagingDirectory,
           operationKey: `stale-${name}`,
           context: operationContext(`stale-${name}`),
@@ -556,36 +739,70 @@ test('tamper、stale identity/revision/scenario/linked、order与lineage全部Pu
     }
   }
 
-  const finalEvidenceHarness = await setupStandard();
+  const reservationHarness = await setupStandard();
   let evidenceReads = 0;
   let publisherCalls = 0;
   try {
-    const filePlan = planFor(finalEvidenceHarness.root, 2);
-    const stagingDirectory = path.join(finalEvidenceHarness.root, 'staging-final-evidence-race');
+    const filePlan = planFor(reservationHarness.root, 2);
+    const stagingDirectory = path.join(reservationHarness.root, 'staging-reservation-race');
     fs.mkdirSync(stagingDirectory);
-    await assert.rejects(
-      generateValidateAndPublishReconFixExport({
-        runtime: finalEvidenceHarness.runtime,
-        result: finalEvidenceHarness.run,
-        filePlan,
-        stagingDirectory,
-        operationKey: 'final-evidence-race',
-        context: operationContext('final-evidence-race'),
-        batchContext: batchContext('final-evidence-race'),
-        readCurrentEvidence: async () => {
-          evidenceReads += 1;
-          return currentEvidence(finalEvidenceHarness.run, evidenceReads === 1
-            ? {}
-            : { linkedEvidenceHash: '0'.repeat(64) });
-        },
-        publishPublication: async () => { publisherCalls += 1; }
-      }),
-      (error) => error.code === 'RECON_FIX_EXPORT_LINKED_EVIDENCE_STALE'
-    );
-    assert.equal(evidenceReads, 2);
-    assert.equal(publisherCalls, 0);
+    const exported = await generateValidateAndPublishReconFixExport({
+      runtime: reservationHarness.runtime,
+      result: reservationHarness.run,
+      filePlan,
+      artifactBindings: artifactBindingsFor(filePlan, reservationHarness.run),
+      stagingDirectory,
+      operationKey: 'reservation-race',
+      context: operationContext('reservation-race'),
+      batchContext: batchContext('reservation-race'),
+      readCurrentEvidence: async () => {
+        evidenceReads += 1;
+        return currentEvidence(reservationHarness.run);
+      },
+      publishPublication: async () => {
+        publisherCalls += 1;
+        assert.throws(
+          () => reservationHarness.runtime.execute(request(
+            RECON_FIX_IMPORT_ACTION,
+            'import-during-publisher',
+            {
+              expectedRevision: reservationHarness.run.revision,
+              filePath: reservationHarness.workbookPath,
+              subMode: 'business'
+            }
+          )),
+          (error) => error.code === 'SERVICE_BUSY'
+        );
+        assert.throws(
+          () => reservationHarness.runtime.execute(request(
+            RECON_FIX_RUN_READONLY_ACTION,
+            'run-during-publisher',
+            {
+              bocDatabasePath: null,
+              expectedRevision: reservationHarness.run.revision,
+              scenario: standardScenario()
+            }
+          )),
+          (error) => error.code === 'SERVICE_BUSY'
+        );
+        return { committed: true };
+      }
+    });
+    assert.equal(exported.publication.committed, true);
+    assert.equal(evidenceReads, 1);
+    assert.equal(publisherCalls, 1);
+    const importedAfterSettlement = await reservationHarness.runtime.execute(request(
+      RECON_FIX_IMPORT_ACTION,
+      'import-after-publisher',
+      {
+        expectedRevision: reservationHarness.run.revision,
+        filePath: reservationHarness.workbookPath,
+        subMode: 'business'
+      }
+    ));
+    assert.equal(importedAfterSettlement.outcome, 'completed');
   } finally {
-    await finalEvidenceHarness.runtime.shutdown({ timeoutMs: 10000 });
+    await reservationHarness.runtime.shutdown({ timeoutMs: 10000 });
   }
 });
 
@@ -605,7 +822,13 @@ test('sheet/headers/records/style业务篡改即使同步伪造size/hash仍Publi
       const filePlan = planFor(harness.root, 2);
       const stagingDirectory = path.join(harness.root, `staging-business-${name}`);
       fs.mkdirSync(stagingDirectory);
-      const input = createReconFixExportInput({ result: harness.run, filePlan, stagingDirectory });
+      const artifactBindings = artifactBindingsFor(filePlan, harness.run);
+      const input = createReconFixExportInput({
+        result: harness.run,
+        filePlan,
+        artifactBindings,
+        stagingDirectory
+      });
       const runtime = wrappedRuntime(harness.runtime, async (execution) => {
         const generationPath = input.artifacts[0].generationPath;
         const workbook = XLSXStyle.readFile(generationPath, { cellStyles: true });
@@ -618,6 +841,7 @@ test('sheet/headers/records/style业务篡改即使同步伪造size/hash仍Publi
           runtime,
           result: harness.run,
           filePlan,
+          artifactBindings,
           stagingDirectory,
           operationKey: `business-${name}`,
           context: operationContext(`business-${name}`),
@@ -640,6 +864,80 @@ test('sheet/headers/records/style业务篡改即使同步伪造size/hash仍Publi
   }
 });
 
+test('业务cell/新增行与自洽Worker manifest/summary仍必须对generation前authority失败', async () => {
+  const forgeries = [
+    ['business-cell', (xml) => replaceInlineStringCell(
+      xml,
+      'A2',
+      'FORGED-BUSINESS-KEY'
+    ), 'RECON_FIX_EXPORT_BUSINESS_EVIDENCE_MISMATCH'],
+    ['added-row', (xml) => {
+      const rowMatch = xml.match(/<row\b([^>]*\br="2"[^>]*)>[\s\S]*?<\/row>/);
+      assert.ok(rowMatch, 'missing source business row');
+      let clonedRow = rowMatch[0]
+        .replace(/\br="2"/, 'r="3"')
+        .replace(/\br="([A-Z]+)2"/g, 'r="$1' + '3"');
+      clonedRow = replaceInlineStringCell(clonedRow, 'A3', 'FORGED-ADDED-ROW');
+      return xml
+        .replace(/(<dimension\b[^>]*\bref="[A-Z]+1:[A-Z]+)2("[^>]*>)/, '$1' + '3$2')
+        .replace('</sheetData>', `${clonedRow}</sheetData>`);
+    }, 'RECON_FIX_EXPORT_AUTHORITY_MISMATCH']
+  ];
+  for (const [name, mutateWorkbook, expectedCode] of forgeries) {
+    const harness = await setupStandard();
+    let publisherCalls = 0;
+    try {
+      const filePlan = planFor(harness.root, 2);
+      const artifactBindings = artifactBindingsFor(filePlan, harness.run);
+      const stagingDirectory = path.join(harness.root, `staging-self-consistent-${name}`);
+      fs.mkdirSync(stagingDirectory);
+      const input = createReconFixExportInput({
+        result: harness.run,
+        filePlan,
+        artifactBindings,
+        stagingDirectory
+      });
+      const runtime = wrappedRuntime(harness.runtime, async (execution) => {
+        const generationPath = input.artifacts[0].generationPath;
+        await mutateFirstWorksheetXml(generationPath, mutateWorkbook);
+        const business = await readReconFixArtifactEvidence(
+          generationPath,
+          'main',
+          harness.run.exportAuthority.subMode
+        );
+        Object.assign(execution.result.artifacts[0], {
+          sheetName: business.sheetName,
+          headersDigest: business.headersDigest,
+          recordsDigest: business.recordsDigest,
+          rowCount: business.rowCount
+        });
+        execution.result.summary.fixedRowCount = business.rowCount;
+        await refreshArtifactTechnicalEvidence(execution, generationPath);
+        assert.equal(validateReconFixExportResult(execution.result), true);
+      });
+      await assert.rejects(
+        generateValidateAndPublishReconFixExport({
+          runtime,
+          result: harness.run,
+          filePlan,
+          artifactBindings,
+          stagingDirectory,
+          operationKey: `self-consistent-${name}`,
+          context: operationContext(`self-consistent-${name}`),
+          batchContext: batchContext(`self-consistent-${name}`),
+          readCurrentEvidence: async () => currentEvidence(harness.run),
+          publishPublication: async () => { publisherCalls += 1; }
+        }),
+        (error) => error.code === expectedCode,
+        name
+      );
+      assert.equal(publisherCalls, 0, name);
+    } finally {
+      await harness.runtime.shutdown({ timeoutMs: 10000 });
+    }
+  }
+});
+
 test('真实 journal Publisher 一次提交 main+unmatched 且保留原批次 recovery receipt', async () => {
   const harness = await setupStandard();
   try {
@@ -651,6 +949,7 @@ test('真实 journal Publisher 一次提交 main+unmatched 且保留原批次 re
       runtime: harness.runtime,
       result: harness.run,
       filePlan,
+      artifactBindings: artifactBindingsFor(filePlan, harness.run),
       stagingDirectory,
       userDataDir,
       operationKey: 'journal-success',
@@ -689,6 +988,7 @@ test('Publisher failure/uncertain只调用一次且不猜成功、不自动重�
           runtime: harness.runtime,
           result: harness.run,
           filePlan,
+          artifactBindings: artifactBindingsFor(filePlan, harness.run),
           stagingDirectory,
           operationKey: code,
           context: operationContext(code),
@@ -726,6 +1026,7 @@ test('双artifact Publisher kill后沿用journal recovery：未提交回滚、�
         runtime: harness.runtime,
         result: harness.run,
         filePlan,
+        artifactBindings: artifactBindingsFor(filePlan, harness.run),
         stagingDirectory,
         userDataDir,
         operationKey: label,

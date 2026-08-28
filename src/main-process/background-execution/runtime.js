@@ -197,23 +197,175 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
     },
     ...(options.workerThreadAdapter ? { workerThreadAdapter: options.workerThreadAdapter } : {})
   });
+  const activeServiceOperations = new Map();
+  const serviceOperationReservations = new Map();
+
+  function serviceOperationError(code, message) {
+    const error = new Error(message);
+    error.code = code;
+    return error;
+  }
+
+  function serviceKeyForAction(actionKey) {
+    const policy = policyRegistry.get(actionKey);
+    return policy && policy.lifetime === 'service' && policy.service
+      ? policy.service.serviceKey
+      : null;
+  }
+
+  function enterUnreservedServiceOperation(request) {
+    const serviceKey = serviceKeyForAction(request && request.actionKey);
+    if (!serviceKey) return () => {};
+    if (serviceOperationReservations.has(serviceKey)) {
+      throw serviceOperationError(
+        'SERVICE_BUSY',
+        `Service operation 已被 Main settlement reservation 占用：${serviceKey}`
+      );
+    }
+    activeServiceOperations.set(serviceKey, (activeServiceOperations.get(serviceKey) || 0) + 1);
+    let released = false;
+    return () => {
+      if (released) return false;
+      released = true;
+      const next = (activeServiceOperations.get(serviceKey) || 1) - 1;
+      if (next > 0) activeServiceOperations.set(serviceKey, next);
+      else activeServiceOperations.delete(serviceKey);
+      return true;
+    };
+  }
+
+  function executeUnreserved(request) {
+    const leave = enterUnreservedServiceOperation(request);
+    try {
+      return Promise.resolve(supervisor.execute(request)).finally(leave);
+    } catch (error) {
+      leave();
+      throw error;
+    }
+  }
+
+  function startUnreserved(request) {
+    const leave = enterUnreservedServiceOperation(request);
+    try {
+      const control = supervisor.start(request);
+      Promise.resolve(control.promise).finally(leave).catch(() => undefined);
+      return control;
+    } catch (error) {
+      leave();
+      throw error;
+    }
+  }
+
+  function reserveServiceOperation(authority) {
+    if (!authority || typeof authority !== 'object' || Array.isArray(authority) ||
+        Object.keys(authority).sort().join(',') !== 'actionKey,operationKey' ||
+        typeof authority.actionKey !== 'string' || !authority.actionKey ||
+        typeof authority.operationKey !== 'string' || !authority.operationKey) {
+      throw serviceOperationError(
+        'SERVICE_OPERATION_RESERVATION_INVALID',
+        'Service operation reservation authority 必须是 exact actionKey/operationKey'
+      );
+    }
+    const policy = policyRegistry.get(authority.actionKey);
+    const serviceKey = serviceKeyForAction(authority.actionKey);
+    if (!policy || !serviceKey) {
+      throw serviceOperationError(
+        'SERVICE_OPERATION_RESERVATION_INVALID',
+        'Service operation reservation 只接受已注册 service action'
+      );
+    }
+    if (serviceOperationReservations.has(serviceKey) ||
+        (activeServiceOperations.get(serviceKey) || 0) > 0) {
+      throw serviceOperationError('SERVICE_BUSY', `Service 已有 active operation/reservation：${serviceKey}`);
+    }
+    const identity = Object.freeze({
+      actionKey: authority.actionKey,
+      operationKey: authority.operationKey,
+      serviceKey
+    });
+    const token = Object.freeze({});
+    serviceOperationReservations.set(serviceKey, token);
+    let executionStarted = false;
+    let executionSettled = true;
+    let released = false;
+    return Object.freeze({
+      identity,
+      execute(request) {
+        if (released || serviceOperationReservations.get(serviceKey) !== token) {
+          throw serviceOperationError(
+            'SERVICE_OPERATION_RESERVATION_STALE',
+            'Service operation reservation 已释放或失效'
+          );
+        }
+        if (executionStarted) {
+          throw serviceOperationError(
+            'SERVICE_OPERATION_RESERVATION_REUSED',
+            'Service operation reservation 只能执行一次'
+          );
+        }
+        if (!request || request.actionKey !== identity.actionKey ||
+            request.operationKey !== identity.operationKey) {
+          throw serviceOperationError(
+            'SERVICE_OPERATION_RESERVATION_IDENTITY_MISMATCH',
+            'Service operation request 与 reservation identity 不一致'
+          );
+        }
+        if (resourceGovernorOverride) assertNonProductionGovernorRequest(request);
+        executionStarted = true;
+        executionSettled = false;
+        try {
+          return Promise.resolve(supervisor.execute(request)).finally(() => {
+            executionSettled = true;
+          });
+        } catch (error) {
+          executionSettled = true;
+          throw error;
+        }
+      },
+      release() {
+        if (released) return false;
+        if (!executionSettled) {
+          throw serviceOperationError(
+            'SERVICE_OPERATION_RESERVATION_ACTIVE',
+            'Service operation execution 未结算，不能提前释放 reservation'
+          );
+        }
+        if (serviceOperationReservations.get(serviceKey) !== token) {
+          throw serviceOperationError(
+            'SERVICE_OPERATION_RESERVATION_STALE',
+            'Service operation reservation owner 已变化'
+          );
+        }
+        released = true;
+        serviceOperationReservations.delete(serviceKey);
+        return true;
+      }
+    });
+  }
   return Object.freeze({
     start(request) {
       if (resourceGovernorOverride) assertNonProductionGovernorRequest(request);
-      return supervisor.start(request);
+      return startUnreserved(request);
     },
     execute(request) {
       if (resourceGovernorOverride) assertNonProductionGovernorRequest(request);
-      return supervisor.execute(request);
+      return executeUnreserved(request);
     },
     inspect(jobId) {
       return supervisor.inspect(jobId);
     },
     closeService(serviceKey) {
+      if (serviceOperationReservations.has(serviceKey)) {
+        throw serviceOperationError(
+          'SERVICE_BUSY',
+          `Service settlement reservation 尚未释放：${serviceKey}`
+        );
+      }
       return supervisor.closeService(serviceKey);
     },
     policyRegistry,
     resourceGovernor,
+    reserveServiceOperation,
     shutdown(shutdownOptions) {
       return supervisor.shutdown(shutdownOptions);
     },
