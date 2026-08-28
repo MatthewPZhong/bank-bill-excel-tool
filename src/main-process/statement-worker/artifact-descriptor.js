@@ -3,6 +3,7 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const sax = require('sax');
 const XLSX = require('xlsx');
 
 const { normalizeCell } = require('../../backend/file-service/common');
@@ -26,6 +27,12 @@ const SHA256 = /^[0-9a-f]{64}$/;
 const DETAIL_PROFILE = 'statement-detail-v1';
 const BALANCE_PROFILE = 'statement-balance-v1';
 const DATE_FORMATS = new Set(['yyyy-mm-dd', 'yyyy/mm/dd', 'yyyymmdd']);
+const WORKBOOK_PART = 'xl/workbook.xml';
+const WORKBOOK_RELATIONSHIPS_PART = 'xl/_rels/workbook.xml.rels';
+const OFFICE_RELATIONSHIP_NAMESPACES = new Set([
+  'http://schemas.openxmlformats.org/officeDocument/2006/relationships',
+  'http://purl.oclc.org/ooxml/officeDocument/relationships'
+]);
 const DETAIL_REQUIRED_HEADERS = Object.freeze([
   'BillDate',
   'MerchantId',
@@ -260,19 +267,151 @@ function createStatementBusinessEvidence(input) {
   return accumulator.finish();
 }
 
-function rawSheetXml(workbook) {
-  const entry = workbook.files && workbook.files['xl/worksheets/sheet1.xml'];
-  return entry && entry.content ? String(entry.content) : '';
+function workbookPartXml(workbook, partName) {
+  const entry = workbook.files && workbook.files[partName];
+  if (!entry || entry.content === undefined || entry.content === null) {
+    fail('STATEMENT_GENERATION_WORKBOOK_STYLE_INVALID', `Statement workbook part is missing: ${partName}`);
+  }
+  return String(entry.content);
+}
+
+function parseStyleEvidenceXml(xml, label, handlers) {
+  const parser = sax.parser(true, { trim: false, normalize: false, xmlns: true });
+  parser.onopentag = handlers.onOpenTag;
+  parser.onclosetag = handlers.onCloseTag;
+  try {
+    parser.write(xml).close();
+  } catch (error) {
+    if (error instanceof StatementArtifactDescriptorError) throw error;
+    fail('STATEMENT_GENERATION_WORKBOOK_STYLE_INVALID', `Statement ${label} XML is invalid`);
+  }
+}
+
+function xmlAttribute(node, localName, namespace = '') {
+  const matches = Object.values(node.attributes || {}).filter((attribute) =>
+    attribute && attribute.local === localName && attribute.uri === namespace);
+  if (matches.length > 1) {
+    fail('STATEMENT_GENERATION_WORKBOOK_STYLE_INVALID', `Statement XML attribute ${localName} is ambiguous`);
+  }
+  return matches[0] || null;
+}
+
+function workbookSheetRelationshipId(workbook) {
+  const sheetName = workbook.SheetNames[0];
+  let relationshipId = null;
+  const stack = [];
+  parseStyleEvidenceXml(workbookPartXml(workbook, WORKBOOK_PART), 'workbook', {
+    onOpenTag(node) {
+      if (stack.length === 2 && stack[0] === 'workbook' && stack[1] === 'sheets' &&
+          node.local === 'sheet') {
+        const name = xmlAttribute(node, 'name');
+        if (name && name.value === sheetName) {
+          const relationship = Object.values(node.attributes || {}).filter((attribute) =>
+            attribute && attribute.local === 'id' &&
+            OFFICE_RELATIONSHIP_NAMESPACES.has(attribute.uri));
+          if (relationshipId !== null || relationship.length !== 1 ||
+              typeof relationship[0].value !== 'string' || relationship[0].value.length < 1) {
+            fail('STATEMENT_GENERATION_WORKBOOK_STYLE_INVALID', 'Statement worksheet relationship is invalid');
+          }
+          relationshipId = relationship[0].value;
+        }
+      }
+      stack.push(node.local);
+    },
+    onCloseTag() {
+      stack.pop();
+    }
+  });
+  if (relationshipId === null) {
+    fail('STATEMENT_GENERATION_WORKBOOK_STYLE_INVALID', 'Statement worksheet relationship is missing');
+  }
+  return relationshipId;
+}
+
+function normalizeWorkbookRelationshipTarget(target) {
+  if (typeof target !== 'string' || target.length < 1 || target.includes('\\') ||
+      target.includes('?') || target.includes('#')) {
+    fail('STATEMENT_GENERATION_WORKBOOK_STYLE_INVALID', 'Statement worksheet relationship target is invalid');
+  }
+  const resolved = path.posix.normalize(target.startsWith('/')
+    ? target.slice(1)
+    : path.posix.join(path.posix.dirname(WORKBOOK_PART), target));
+  if (!resolved || resolved === '.' || resolved === '..' || resolved.startsWith('../')) {
+    fail('STATEMENT_GENERATION_WORKBOOK_STYLE_INVALID', 'Statement worksheet relationship target is invalid');
+  }
+  return resolved;
+}
+
+function workbookSheetPartName(workbook) {
+  const relationshipId = workbookSheetRelationshipId(workbook);
+  let target = null;
+  const stack = [];
+  parseStyleEvidenceXml(
+    workbookPartXml(workbook, WORKBOOK_RELATIONSHIPS_PART),
+    'workbook relationships',
+    {
+      onOpenTag(node) {
+        if (stack.length === 1 && stack[0] === 'Relationships' && node.local === 'Relationship') {
+          const id = xmlAttribute(node, 'Id');
+          if (id && id.value === relationshipId) {
+            const type = xmlAttribute(node, 'Type');
+            const candidate = xmlAttribute(node, 'Target');
+            const targetMode = xmlAttribute(node, 'TargetMode');
+            if (target !== null || !type || !type.value.endsWith('/worksheet') || !candidate ||
+                (targetMode && targetMode.value.toLowerCase() === 'external')) {
+              fail('STATEMENT_GENERATION_WORKBOOK_STYLE_INVALID', 'Statement worksheet relationship target is invalid');
+            }
+            target = normalizeWorkbookRelationshipTarget(candidate.value);
+          }
+        }
+        stack.push(node.local);
+      },
+      onCloseTag() {
+        stack.pop();
+      }
+    }
+  );
+  if (target === null) {
+    fail('STATEMENT_GENERATION_WORKBOOK_STYLE_INVALID', 'Statement worksheet relationship target is missing');
+  }
+  return target;
 }
 
 function cellStyleIndexes(workbook) {
   const result = new Map();
-  const xml = rawSheetXml(workbook);
-  for (const match of xml.matchAll(/<c\b([^>]*)>/g)) {
-    const address = match[1].match(/\br="([^"]+)"/);
-    const style = match[1].match(/\bs="(\d+)"/);
-    if (address) result.set(address[1], style ? Number(style[1]) : 0);
-  }
+  const stack = [];
+  const cellXfs = workbook.Styles && workbook.Styles.CellXf;
+  const sheetPartName = workbookSheetPartName(workbook);
+  parseStyleEvidenceXml(workbookPartXml(workbook, sheetPartName), 'worksheet', {
+    onOpenTag(node) {
+      if (stack.length === 3 && stack[0] === 'worksheet' && stack[1] === 'sheetData' &&
+          stack[2] === 'row' && node.local === 'c') {
+        const address = xmlAttribute(node, 'r');
+        if (!address || !/^[A-Z]{1,3}[1-9][0-9]*$/.test(address.value) || result.has(address.value)) {
+          fail('STATEMENT_GENERATION_WORKBOOK_STYLE_INVALID', 'Statement worksheet cell coordinate is invalid');
+        }
+        const style = xmlAttribute(node, 's');
+        let styleIndex = 0;
+        if (style) {
+          if (!/^(?:0|[1-9][0-9]*)$/.test(style.value)) {
+            fail('STATEMENT_GENERATION_WORKBOOK_STYLE_INVALID', 'Statement worksheet cell style is invalid');
+          }
+          styleIndex = Number(style.value);
+          if (!Number.isSafeInteger(styleIndex)) {
+            fail('STATEMENT_GENERATION_WORKBOOK_STYLE_INVALID', 'Statement worksheet cell style is invalid');
+          }
+        }
+        if (!Array.isArray(cellXfs) || !cellXfs[styleIndex]) {
+          fail('STATEMENT_GENERATION_WORKBOOK_STYLE_INVALID', 'Statement worksheet cell style cannot be resolved');
+        }
+        result.set(address.value, styleIndex);
+      }
+      stack.push(node.local);
+    },
+    onCloseTag() {
+      stack.pop();
+    }
+  });
   return result;
 }
 
@@ -323,6 +462,10 @@ function normalizedFontStyle(font) {
     italic: Boolean(value.italic),
     underline,
     strike: Boolean(value.strike),
+    outline: Boolean(value.outline),
+    shadow: Boolean(value.shadow),
+    condense: Boolean(value.condense),
+    extend: Boolean(value.extend),
     vertAlign: typeof value.vertAlign === 'string' ? value.vertAlign : null,
     color: normalizedStyleColor(value.color)
   };
@@ -346,6 +489,10 @@ function expectedWriterCellStyle(header = false) {
       italic: false,
       underline: null,
       strike: false,
+      outline: false,
+      shadow: false,
+      condense: false,
+      extend: false,
       vertAlign: null,
       color: null
     }

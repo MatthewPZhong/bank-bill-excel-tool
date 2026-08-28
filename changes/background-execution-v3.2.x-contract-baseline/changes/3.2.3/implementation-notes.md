@@ -35,6 +35,7 @@
 | generation Worker 不持久化 balance seed | Worker 只能写 task-private FilePlan staging，manifest 不承载 seed mutation；manual seed 属 E09-D | Worker 直接改共享 balance-seeds | dormant 路径只生成 workbook；seed settlement 继续由后续独立门禁负责 |
 | Main 对 journal manual-recovery 保留 generation | 既有 Publisher 的 `preserveTemporaryFiles=true` 是人工恢复证据 | finally 无条件删除 generation | 普通成功/失败清 staging，uncertain/manual-recovery 保留证据 |
 | Main descriptor 以 cell-contract digest 绑定 writer 持久化语义 | Round 2 证明业务值 digest 会把非特殊字段的 string/number 归一为同值，且原 style gate 未覆盖 data font 与 header bold/color | 把 raw rows/完整 style XML 放入 descriptor，或校验 XF id/apply flags 等默认噪声 | descriptor 只增加定长 `cellCount/cellsSha256`；逐格绑定 writer 实际 t/z 和有意义 style，仍不携带 raw rows |
+| style evidence 按 workbook relationship 解析实际 worksheet part | Round 3 证明硬编码 `sheet1.xml` 与正则扫描任意 `<c>` 可被 relationship decoy、注释和属性语法旁路 | 继续硬编码 part、扩大 raw XF 摘要或引入第二套 ZIP reader | 复用现有 `sax` 结构化解析 `workbook.xml`/rels/`worksheet/sheetData/row/c`；重复坐标及显式 style 不可解析时 fail closed，只有缺失 `s` 使用 style 0 |
 | workbook 公式使用单一 sheet-wide gate | 原实现只在 data record loop 检查 `cell.f`，header 正确缓存值可旁路 | 在每类 header/data validator 分散补检查 | bounded range 确认后统一拒绝所有正式输出 cell 的 formula，再执行业务 readback |
 
 ## Assumptions
@@ -85,6 +86,21 @@ format 来自受信模板。既有 header/template lineage validator 继续负�
 分支。现有 spec/techdoc 已明确要求该摘要 readback，因此本轮无需反向改写合同文本，仅在 notes
 记录实现闭环。
 
+### Reviewer Round 3 parser/font closure
+
+Round 3 的两个 P2 均由项目负责 Agent 裁决为真实可达。原 style evidence 固定读取
+`xl/worksheets/sheet1.xml`，并以正则扫描整个 XML 的 `<c>` 开标签：workbook relationship 可指向
+另一个实际 worksheet part，注释内伪造 cell 可覆盖真实坐标，单引号与属性空白不能按 XML 语义解析，
+重复坐标则静默 last-wins。修复通过 workbook sheet 的 relationship id 解析内部 worksheet target，
+再用现有 `sax` 依赖只遍历根 `worksheet/sheetData/row/c`。cell coordinate 重复/非法、显式 `s`
+不是非负安全整数或不能解析到 `CellXf` 时统一 fail closed；只有完全缺失 `s` 才按 OOXML style 0。
+
+font 摘要只在 normalized/expected 两侧加入 legacy writer 已持久化为 false 的
+`outline/shadow/condense/extend` 四个布尔字段。未增加 raw XF id、apply flags、alignment、protection
+或其它 style 字段；公式/type/format、token/revision/evidence/single-use、staging/Publisher、manual seed
+及 production=false/legacy/0 均保持不变。Round 3 没有改变用户可见行为、数据契约或验收口径，
+因此无 spec/techdoc 偏差。
+
 除上述合同澄清外无业务偏差；production policy、manual seed 与 live IPC 范围均不变。
 
 ## Evidence
@@ -92,8 +108,8 @@ format 来自受信模板。既有 header/template lineage validator 继续负�
 | 证据 | 结果 | 覆盖的行为/风险 |
 | --- | --- | --- |
 | `git merge-base HEAD 654393e9...` / reviewer rework parents | merge-base `654393e9a24c772f51db9114888a2114382ce39d`；Round 1 parent `78d9a19777e9680907413194195a00741c6037f2`；Round 2 parent `3edd474c15d40c8a1187b60760f9054cb92593df` | 精确 base/堆叠边界 |
-| E09-C 专项 `node --test ...statement-generation-e09-c.test.js ...error-codec.test.js` | 20/20 PASS | 真实 Supervisor/ServiceHost/Worker、临时 XLSX/SQLite、current/all、stale/replay/revision/evidence、Round 1/2 findings、tamper、all-or-none、四金额、混币余额、0 输出、partial writer、manual prompt、bounded manifest |
-| Round 2 自洽 workbook mutations | header/data formula、非特殊 string→numeric、data font、Courier New 10 header bold/color 全部 Publisher=0 | formula、全 grid t/z 与 writer-owned font 摘要 readback；manifest size/hash/rowCounts 均按篡改后文件重算 |
+| E09-C 专项 `node --test ...statement-generation-e09-c.test.js ...error-codec.test.js` | 20/20 PASS | 真实 Supervisor/ServiceHost/Worker、临时 XLSX/SQLite、current/all、stale/replay/revision/evidence、Round 1/2/3 findings、tamper、all-or-none、四金额、混币余额、0 输出、partial writer、manual prompt、bounded manifest |
+| Round 2/3 自洽 workbook mutations | formula、type/format、font 及其四个扩展布尔、single-quote style、comment spoof、relationship decoy、duplicate coordinate、非法显式 style 全部 Publisher=0 | 实际 worksheet relationship/结构化 cell style、全 grid t/z 与 writer-owned font 摘要 readback；manifest size/hash/rowCounts 均按篡改后文件重算 |
 | E09-P0/A/B + Supervisor/ServiceHost/Governor 聚焦回归 | 228/228 PASS | 既有 token/session/取消/crash/资源生命周期、legacy golden 与 dormant policy 基线 |
 | `node scripts/integration/statement-generation-pipeline.js` | 45/45 PASS | legacy generation pipeline 业务等价 |
 | `npm run test:integration` | 51/51 scripts、2455/2455 PASS | 全仓集成、Publisher/cleanup 与资金相关输出回归；runner 自动清单的本地耗时刷新已回退，不纳入 change |
