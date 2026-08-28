@@ -1321,7 +1321,10 @@ test('authority拒绝commit receipt时resource adoption gate不grant full candid
     ));
     const controls = harness.messages.filter((message) => message.channel === 'service-control' &&
       message.jobRef && message.jobRef.actionKey === RECON_FIX_RUN_JPM_ACTION);
-    assert.equal(controls.some((message) => message.operation === 'resource:adopted'), false);
+    assert.equal(controls.some((message) => message.operation === 'resource:adopted' &&
+      message.payload.owner.kind === 'phase'), true);
+    assert.equal(controls.some((message) => message.operation === 'resource:adopted' &&
+      message.payload.owner.kind === 'service-state'), false);
   } finally {
     await harness.runtime.shutdown();
     harness.database.close();

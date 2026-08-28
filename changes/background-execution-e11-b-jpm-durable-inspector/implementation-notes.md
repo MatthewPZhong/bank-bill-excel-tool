@@ -2,7 +2,8 @@
 
 ## Baseline
 
-- Exact base：`1d9588a7e5303e9b8a5621095c445d7a9c1c6005`。
+- Exact base：最终 E11-P0 restack `888688afdeea9a32b8ac0277a027533308a277bb`。
+- Restack provenance：旧 E11-B 独有提交 `6b239559`、`74bb7546`、`615cf649`、`71c1ac10`、`225ab05f` 按原顺序重叠；旧基线为 `1d9588a7e5303e9b8a5621095c445d7a9c1c6005`。
 - Review remediation 起点：`6b239559c8e219f32651abd0514a1d67ef30f976`。
 - 第二轮 Review remediation 起点：`74bb75468c3d1e30fe889a3ca751168ce48e8547`。
 - 第三轮 Review remediation 起点：`615cf64992917221be0890a7270518c98fe57ffd`。
@@ -34,6 +35,7 @@
 | 只迁移 71c1 可证明的 incomplete threshold gap | 无 Hold 时可能留下 Task-only、Task+Hold、Task+Hold+unbound-attempt；已有 Hold 时可能留下 Task-only、Task+unbound-attempt；这些状态没有 observation payload authority | startup 在 Inspector 前按 source/scope/active Hold 分类；同事务逐字节核验 deterministic Task/Hold exact body 后删除 incomplete owner/unbound attempt；不构造旧 observation、不关闭 Intent，随后才允许新 Inspector |
 | prepared body-divergent replay 只允许 committed Intent | live `observeReceipt/settleCommitted` 的 mark-committed/close owner 必须可跨 crash exact 续写，但 Task/Hold phase 不能复用不同 body | 默认 reserve 恢复 exact conflict；只有 expected `acked→committed` 与 `committed→closed` 的 Intent transition 可取回 persisted exact request |
 | JPM 使用独立 result validator | 不能因新增 bounded JPM terminal shape 放宽 E11-A import/standard/BOC validator | readonly validator 继续拒绝 JPM result，runtime 按 action 绑定 validator |
+| JPM strict reader/engine/plan/commit 共用最终 E11-A 的单一 phase lease | 新 E11-A 已证明 `XLSX.readFile`/BOC `.all()` 之后准入会漏掉大分配；旧 E11-B 同步读取全 ADM 也有相同传播风险 | `prepareAdmReadSnapshot()` 在同一只读事务只做 `COUNT/SUM(raw bytes)`，ServiceHost/Governor grant+adopt-ack 后才 strict `.all()`；phase 一直持有到 receipt authority/adoption 收口，finally release；没有新增 resource authority |
 
 ## Assumptions
 
@@ -43,6 +45,8 @@
 ## Deviations
 
 - Reviewer P2-2（同一 Worker 连续 unit/job result cross-binding）经负责人裁决为 fault-adapter-only 不可达路径，本轮明确不实现，也不扩展 Supervisor 通用协议或缓存。
+- Restack propagation：旧 E11-B 在资源准入前同步读取整张 ADM，与最终 E11-A 的 pre-allocation phase 合同不兼容；已改为 bounded aggregate preflight + canonical phase lease。资金、ID、receipt、Inspector、Hold 与 public result 合同不变，因此无需反向修改冻结 Spec/TechDoc。
+- 旧测试“authority 拒绝后不得出现任何 `resource:adopted`”把 phase lease adoption 与 full result adoption 混为一谈；断言已收窄为允许且要求 `owner.kind=phase`，同时禁止 `owner.kind=service-state`，不放宽 receipt authority。
 
 ## Review findings 与裁决
 
@@ -76,10 +80,12 @@
 
 ## Evidence
 
-- `tests/unit/main-process/recon-id-fix-jpm-durable-e11-b.test.js`：45/45 PASS；第四轮新增 17 个真实磁盘 case，覆盖原子 anchor rollback、无/已有 Hold 的 Task/Hold owner 后 crash 六路、71c1 无 Hold 三种 gap 六路与已有 Hold 两种 gap 四路；原 mark-committed/close、incompatible Task body + ACKed Intent、global ADM gate 全部保持通过。
-- RecoveryControl / recovery platform：74/74 PASS；E11-P0 + E11-A + Supervisor/ServiceHost + PreFund E05-B + linked 派生：208/208 PASS。
-- 定向 integration：RecoveryControl 27/27、recovery canary 9/9、linked streaming 19/19、gateway upsert 40/40、linked delete/rebuild 73/73 PASS；未运行任务明确禁止的 `release-check` / `check-vars` / `scan:vars`。
-- 本轮 3 个变更 JS `node --check`、affected ESLint 与 `git diff --check` 通过。
+- Restack 定向单测：E11-B 45/45 PASS，E11-P0 19/19 PASS，E11-A 14/14 PASS；E11-B 仍覆盖原子 anchor rollback、无/已有 Hold 的 Task/Hold owner crash、71c1 gap、mark-committed/close、incompatible Task body + ACKed Intent 与 global ADM gate。
+- 受影响单测合并回归 340/340 PASS：包含 E11-B、E11-P0、E11-A、RecoveryControl、Supervisor、ServiceHost、PreFund E05-B 与 linked ADM 派生/重建。
+- 定向 integration：RecoveryControl 27/27、recovery canary 9/9、linked streaming 19/19、gateway upsert 40/40、linked delete/rebuild 73/73 PASS。
+- ReconFix memory benchmark gate PASS：5k delta `207732736 < 384223040`、10k delta `386023424 < 496732512`、near-boundary delta `349028352 < 482488408`；`nearBoundaryUtilization=0.916666...`。
+- `npm run smoke` PASS；restack 全部变更 JS `node --check`、定向 ESLint、变更 JSON parse 与 `git diff --check` 通过。隔离 worktree 的 ESLint 首次缺少依赖解析环境，补用共享仓库 `NODE_PATH` 后通过，未修改 lint 规则。
+- 未运行任务明确禁止的 `release-check` / `check-vars` / `scan:vars`。
 - production gate 断言 `recon-fix:run-jpm` 仍为 false；Main live IPC 未切 managed，standard/BOC 与 PreFund 回归保持通过。
 
 ## Reconciliation blindspot pass

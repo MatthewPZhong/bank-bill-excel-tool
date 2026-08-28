@@ -17,7 +17,7 @@ const { runReconIdFix } = require('../recon-id-fix-engine');
 const { reconFixEvidenceSha256 } = require('./evidence-projection');
 const {
   RECON_FIX_IMPORT_ACTION,
-  RECON_FIX_READONLY_POLICIES,
+  RECON_FIX_POLICIES,
   RECON_FIX_RUN_JPM_ACTION,
   RECON_FIX_RUN_READONLY_ACTION
 } = require('./policies');
@@ -36,7 +36,7 @@ const {
 
 const MAX_PERSISTENT_STATE_BYTES = 268435456;
 const MEMORY_OVERHEAD_MULTIPLIER = 4;
-const MAX_PHASE_EXTENSION_BYTES = Math.min(...RECON_FIX_READONLY_POLICIES.map(
+const MAX_PHASE_EXTENSION_BYTES = Math.min(...RECON_FIX_POLICIES.map(
   (policy) => policy.resources.phase.memoryBytes
 ));
 const PHASE_EXTENSION_GRANULARITY_BYTES = 16 * 1024 * 1024;
@@ -575,9 +575,6 @@ function createReconFixService(options = {}) {
         if (state.session.subMode !== 'gateway') {
           fail('RECON_FIX_SUB_MODE_MISMATCH', 'JPM run 只接受已导入的网关对账单');
         }
-        const jpmSnapshot = prepareAdmReadSnapshot(input.databasePath);
-        const databasePath = jpmSnapshot.databasePath;
-        const databaseIdentity = deriveReconFixJpmDatabaseIdentity(databasePath);
         if (typeof identity.operationKey !== 'string' || !identity.operationKey) {
           fail('RECON_FIX_JPM_OPERATION_KEY_REQUIRED', 'JPM run 缺少 operationKey identity');
         }
@@ -585,10 +582,19 @@ function createReconFixService(options = {}) {
         if (snapshot.value.id === null || snapshot.value.id === undefined) {
           fail('RECON_FIX_JPM_SCENARIO_ID_REQUIRED', 'JPM scenario.id 不能为空');
         }
-        const phaseExtensionMemoryBytes = estimateRunPhaseBytes(stateMemoryBytes, {
-          rowCount: jpmSnapshot.rowCount,
-          rawJsonBytes: jpmSnapshot.rawJsonBytes
-        });
+        const jpmSnapshot = prepareAdmReadSnapshot(input.databasePath);
+        const databasePath = jpmSnapshot.databasePath;
+        const databaseIdentity = deriveReconFixJpmDatabaseIdentity(databasePath);
+        let phaseExtensionMemoryBytes;
+        try {
+          phaseExtensionMemoryBytes = estimateRunPhaseBytes(stateMemoryBytes, {
+            rowCount: jpmSnapshot.rowCount,
+            rawJsonBytes: jpmSnapshot.rawJsonBytes
+          });
+        } catch (error) {
+          jpmSnapshot.close();
+          throw error;
+        }
         return createPreparation(phaseExtensionMemoryBytes, () => {
           const source = jpmSnapshot.read();
           const clonedSheets = {
