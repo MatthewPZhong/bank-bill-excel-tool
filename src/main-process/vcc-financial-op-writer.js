@@ -570,6 +570,26 @@ function assertCanonicalCellAmount(cell, expected, label) {
   }
 }
 
+function assertResultPageLayout(sheet, contract, lastRow) {
+  const expectedPageSetup = cloneStyle(contract.pageSetup);
+  expectedPageSetup.printArea = `A1:${contract.printAreaRightColumn}${lastRow}`;
+  const actual = {
+    state: sheet.state,
+    properties: cloneStyle(sheet.properties || {}),
+    pageSetup: cloneStyle(sheet.pageSetup || {}),
+    headerFooter: cloneStyle(sheet.headerFooter || {})
+  };
+  const expected = {
+    state: contract.state,
+    properties: cloneStyle(contract.properties || {}),
+    pageSetup: expectedPageSetup,
+    headerFooter: cloneStyle(contract.headerFooter || {})
+  };
+  if (styleSignature(actual) !== styleSignature(expected)) {
+    throw exportValidationError('VCC 财务OP导出完整页面布局语义校验失败');
+  }
+}
+
 function markerModels(workbook) {
   const prefix = ADJUSTMENT_LINEAGE_NAME_PREFIX.toLocaleLowerCase('en-US');
   return (workbook.definedNames.model || []).filter((item) => (
@@ -644,9 +664,7 @@ function validateResultSheet(workbook, contract, plan, renderedRows, lastRow) {
   if (sheet.getCell('A2').text !== plan.subject) {
     throw exportValidationError('VCC 财务OP导出主体校验失败');
   }
-  if (sheet.pageSetup.printArea !== `A1:${contract.printAreaRightColumn}${lastRow}`) {
-    throw exportValidationError('VCC 财务OP导出打印区域校验失败');
-  }
+  assertResultPageLayout(sheet, contract, lastRow);
   if (sheet.autoFilter !== `A1:${contract.printAreaRightColumn}${lastRow}`) {
     throw exportValidationError('VCC 财务OP导出筛选区域校验失败');
   }

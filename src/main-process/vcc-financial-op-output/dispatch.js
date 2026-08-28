@@ -17,6 +17,7 @@ const {
   assertVccExportAuthorityEqual
 } = require('./authority');
 const {
+  assertTaskStagingIdentity,
   createTaskStagingIdentity
 } = require('./staging-identity');
 const {
@@ -171,20 +172,36 @@ function cleanupGenerationArtifacts(
   const failures = [];
   const patternsByDirectory = new Map();
   let scanFailed = false;
-  try {
-    const stat = fs.lstatSync(stagingRoot);
-    const currentReal = fs.realpathSync(stagingRoot);
-    if (stat.isSymbolicLink() || !stat.isDirectory() ||
-        (expectedRealStagingRoot && currentReal !== expectedRealStagingRoot)) {
-      throw dispatchError(
-        'VCC_EXPORT_STAGING_ESCAPE',
-        'VCC cleanup exact task-private staging identity 已变化'
-      );
-    }
-  } catch (identityError) {
-    failures.push(identityError);
+  const finish = () => {
     appendCleanupDiagnostics(error, failures);
     return generationCleanupEvidence(error, failures, stagingIdentity && stagingIdentity.identityDigest);
+  };
+  const checkIdentity = (stage) => {
+    try {
+      if (!stagingIdentity ||
+          (expectedRealStagingRoot && expectedRealStagingRoot !== stagingIdentity.realPath) ||
+          path.resolve(stagingRoot) !== stagingIdentity.resolvedPath) {
+        throw dispatchError(
+          'VCC_EXPORT_STAGING_IDENTITY_CHANGED',
+          'VCC cleanup 缺少 exact task-private staging identity'
+        );
+      }
+      assertTaskStagingIdentity({
+        identity: stagingIdentity,
+        // cleanup 只复用 frozen task root/parent identity；具体 child 由下方
+        // exact generation/strict UUID containment 决定，不能因 child 已损坏
+        // 而失去 unlink 自有目录项并收口 task dir 的能力。
+        generationPaths: [],
+        stage
+      });
+      return true;
+    } catch (identityError) {
+      failures.push(identityError);
+      return false;
+    }
+  };
+  if (!checkIdentity('main-cleanup-entry')) {
+    return finish();
   }
   for (const item of generations) {
     const generationPath = item.generationPath;
@@ -207,6 +224,7 @@ function cleanupGenerationArtifacts(
     patternsByDirectory.set(directory, patterns);
   }
   for (const [directory, patterns] of patternsByDirectory) {
+    if (!checkIdentity('main-cleanup-before-scan')) return finish();
     let entries;
     try {
       entries = fs.readdirSync(directory, { withFileTypes: true });
@@ -222,28 +240,32 @@ function cleanupGenerationArtifacts(
     }
   }
   for (const cleanupPath of cleanupPaths) {
+    if (!checkIdentity('main-cleanup-before-delete')) return finish();
     try { fs.rmSync(cleanupPath, { force: true }); } catch (cleanupError) {
       failures.push(cleanupError);
     }
   }
   if (scanFailed) {
-    appendCleanupDiagnostics(error, failures);
+    if (!checkIdentity('main-cleanup-before-recovery-scan')) return finish();
     publishCleanupRecovery(error, [stagingRoot], stagingRoot, { allowTaskDirectory: true });
-    return generationCleanupEvidence(error, failures, stagingIdentity && stagingIdentity.identityDigest);
+    return finish();
   }
+  if (!checkIdentity('main-cleanup-before-residual-scan')) return finish();
   const knownResiduals = publishCleanupRecovery(error, cleanupPaths, stagingRoot);
   if (knownResiduals.length === 0) {
+    if (!checkIdentity('main-cleanup-before-rmdir')) return finish();
     try {
       fs.rmdirSync(stagingRoot);
     } catch (cleanupError) {
       if (!cleanupError || cleanupError.code !== 'ENOENT') {
         failures.push(cleanupError);
-        publishCleanupRecovery(error, [stagingRoot], stagingRoot, { allowTaskDirectory: true });
+        if (checkIdentity('main-cleanup-after-rmdir-failure')) {
+          publishCleanupRecovery(error, [stagingRoot], stagingRoot, { allowTaskDirectory: true });
+        }
       }
     }
   }
-  appendCleanupDiagnostics(error, failures);
-  return generationCleanupEvidence(error, failures, stagingIdentity && stagingIdentity.identityDigest);
+  return finish();
 }
 
 function freezeTaskAuthority(value, batchContext) {
@@ -382,7 +404,7 @@ function taskStagingDirectoryName({
   return `vcc-export-${digest.slice(0, 32)}`;
 }
 
-function prepareTaskStagingDirectory(parent, directoryName) {
+function prepareTaskStagingDirectory(parent, directoryName, generations) {
   if (!/^vcc-export-[0-9a-f]{32}$/.test(directoryName)) {
     throw dispatchError('VCC_EXPORT_STAGING_INVALID', 'VCC task-private staging identity 非法');
   }
@@ -400,26 +422,70 @@ function prepareTaskStagingDirectory(parent, directoryName) {
       throw dispatchError('VCC_EXPORT_STAGING_INVALID', 'VCC task-private staging 创建失败');
     }
   }
-  let stat;
-  let real;
-  try {
-    stat = fs.lstatSync(taskDirectory);
-    real = fs.realpathSync(taskDirectory);
-  } catch (_error) {
-    throw dispatchError('VCC_EXPORT_STAGING_INVALID', 'VCC task-private staging identity 无法确认');
-  }
   const expectedReal = path.join(parent.real, directoryName);
-  if (stat.isSymbolicLink() || !stat.isDirectory() || real !== expectedReal ||
-      path.dirname(real) !== parent.real) {
-    throw dispatchError('VCC_EXPORT_STAGING_ESCAPE', 'VCC task-private staging symlink/reparse 越界');
-  }
   if (!created) {
+    let stat;
+    let real;
+    try {
+      stat = fs.lstatSync(taskDirectory);
+      real = fs.realpathSync(taskDirectory);
+    } catch (_error) {
+      throw dispatchError('VCC_EXPORT_STAGING_INVALID', 'VCC task-private staging identity 无法确认');
+    }
+    if (stat.isSymbolicLink() || !stat.isDirectory() || real !== expectedReal ||
+        path.dirname(real) !== parent.real) {
+      throw dispatchError('VCC_EXPORT_STAGING_ESCAPE', 'VCC task-private staging symlink/reparse 越界');
+    }
     throw dispatchError(
       'VCC_EXPORT_STAGING_COLLISION',
       'VCC task-private staging 已存在，必须先由原 cleanup/recovery owner 收口'
     );
   }
-  return Object.freeze({ resolved: taskDirectory, real });
+  let stagingIdentity = null;
+  try {
+    stagingIdentity = createTaskStagingIdentity({
+      resolvedPath: taskDirectory,
+      realPath: expectedReal
+    });
+    assertTaskStagingIdentity({
+      identity: stagingIdentity,
+      generationPaths: generations.map((item) => item.generationPath),
+      stage: 'main-post-create'
+    });
+    return Object.freeze({
+      resolved: taskDirectory,
+      real: expectedReal,
+      stagingIdentity
+    });
+  } catch (cause) {
+    const error = dispatchError(
+      'VCC_EXPORT_STAGING_IDENTITY_CHANGED',
+      'VCC task-private staging 创建后 identity 校验失败'
+    );
+    error.detailLines = Array.isArray(cause && cause.detailLines)
+      ? cause.detailLines.slice(0, VCC_EXPORT_CLEANUP_DIAGNOSTIC_LIMIT)
+      : [];
+    if (!stagingIdentity) {
+      try {
+        stagingIdentity = createTaskStagingIdentity({
+          resolvedPath: taskDirectory,
+          realPath: expectedReal
+        });
+      } catch (identityError) {
+        appendCleanupDiagnostics(error, [identityError]);
+      }
+    }
+    if (stagingIdentity) {
+      cleanupGenerationArtifacts(
+        generations,
+        error,
+        taskDirectory,
+        expectedReal,
+        stagingIdentity
+      );
+    }
+    throw error;
+  }
 }
 
 function selectedIndexesForAction(actionKey, authority, value) {
@@ -475,28 +541,39 @@ function createGenerationInput({
       generationPath
     });
   });
-  const taskDirectory = prepareTaskStagingDirectory(parent, path.basename(stagingRoot));
-  const stagingIdentity = createTaskStagingIdentity({
-    resolvedPath: taskDirectory.resolved,
-    realPath: taskDirectory.real
-  });
-  const generations = generationDescriptors.map((descriptor) => {
-    if (fs.existsSync(descriptor.generationPath)) {
-      throw dispatchError('VCC_EXPORT_STAGING_COLLISION', 'VCC generation path 已被占用');
-    }
-    return descriptor;
-  });
-  return Object.freeze({
-    contractVersion: 1,
-    authority,
-    task: taskAuthority,
-    generations: Object.freeze(generations),
-    actionKey,
-    filePlan: plan,
-    stagingRoot,
-    stagingRootReal: taskDirectory.real,
-    stagingIdentity
-  });
+  const taskDirectory = prepareTaskStagingDirectory(
+    parent,
+    path.basename(stagingRoot),
+    generationDescriptors
+  );
+  try {
+    const generations = generationDescriptors.map((descriptor) => {
+      if (fs.existsSync(descriptor.generationPath)) {
+        throw dispatchError('VCC_EXPORT_STAGING_COLLISION', 'VCC generation path 已被占用');
+      }
+      return descriptor;
+    });
+    return Object.freeze({
+      contractVersion: 1,
+      authority,
+      task: taskAuthority,
+      generations: Object.freeze(generations),
+      actionKey,
+      filePlan: plan,
+      stagingRoot,
+      stagingRootReal: taskDirectory.real,
+      stagingIdentity: taskDirectory.stagingIdentity
+    });
+  } catch (error) {
+    cleanupGenerationArtifacts(
+      generationDescriptors,
+      error,
+      stagingRoot,
+      taskDirectory.real,
+      taskDirectory.stagingIdentity
+    );
+    throw error;
+  }
 }
 
 async function sha256File(filePath) {

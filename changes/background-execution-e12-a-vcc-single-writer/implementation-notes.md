@@ -29,7 +29,7 @@
 | 原计划 | 实际方案 | 原因 | 影响 | Spec 已同步 |
 | --- | --- | --- | --- | --- |
 | preflight 初始假设 E12-A 只实现 `export-subjects` | 同一 core 同时实现 `export-subjects` + `export-single` exact-one specialization | 项目 owner 明确冻结 Action 范围要求两者均属 E12-A | 增加第二 canonical policy/entry/validator 与单主体 golden；不扩大到 E12-B/C | 是（本记录与 preflight 已反向同步） |
-| 原 Reviewer 完成扩展场景前连续受到平台安全分类器阻断 | 替补 Reviewer 完成全量结论后亦在扩展场景受阻；Round4 改由新的独立 Ultra Reviewer 做全 diff 复核 | 保留独立 review 且不把工具阻断误判为代码结论 | 仅是 review 流程偏差；Round4 两项 finding 均由 owner 接受并以动态复现闭合 | 不适用 |
+| 原 Reviewer 完成扩展场景前连续受到平台安全分类器阻断 | 替补 Reviewer 完成全量结论后亦在扩展场景受阻；Round4 改由新的独立 Ultra Reviewer 做全 diff 复核 | 保留独立 review 且不把工具阻断误判为代码结论 | 仅是 review 流程偏差；Round4 及 follow-up findings 均由 owner 接受并以动态复现闭合 | 不适用 |
 
 ## Evidence
 
@@ -51,8 +51,8 @@
 | Restack Review Round2 E11-C interaction | ReconFix export 15/15 PASS | E11-C export plan closure 与 E12-A exact task directory 各自保持唯一 cleanup owner；同 staging retry、symlink/collision、Publisher 0/1 不互相覆盖。 |
 | Restack Review Round2 platform/Publisher | Supervisor/Governor/policy/binding/packaged/recovery/toolbox generation/Publisher 共 320/320 PASS | 单一 cleanup/Publisher authority、transport/lease、journal recovery 与 task inventory 未漂移。 |
 | Restack Review Round2 integration/smoke | VCC 19/19、29/29、226/226、77/77；recovery 9/9、27/27、pure 9/9；smoke PASS | 正常/历史/调整/破坏性链、recovery canary 与全局 smoke。 |
-| Independent Review Round4 focused | E12-A 34/34 PASS；writer/recovery 19/19 PASS | committed 后 generation `EBUSY/EPERM`、task-dir `rmdir` 失败、bounded pending evidence、retry collision/owner 收口；before-worker/before-handoff replacement、外部同名文件不触碰、Windows-compatible 正常路径零残留。 |
-| Independent Review Round4 affected VCC | 全 VCC 单元矩阵 549/549 PASS | amount/currency/style/order/revision/archive、Writer/Join/Publisher 与历史回归未漂移。 |
+| Independent Review Round4 focused | E12-A 49/49 PASS；writer/recovery 19/19 PASS | committed 后 generation `EBUSY/EPERM`、task-dir `rmdir` 失败、bounded pending evidence、retry collision/owner 收口；before-worker/before-handoff replacement；cleanup scan/delete/rmdir 前 identity replacement；post-create identity/collision owner 收口；外部同名文件不触碰；Windows-compatible 正常路径零残留。 |
+| Independent Review Round4 affected VCC | 全 VCC 单元矩阵 564/564 PASS | amount/currency/style/page layout/order/revision/archive、Writer/Join/Publisher 与历史回归未漂移。 |
 | Independent Review Round4 platform/recovery | E11-C/background runtime/policy/toolbox Publisher 共 529/529 PASS；recovery control 27/27、pure 9/9、recovery canary 9/9 PASS | 单一 cleanup/Publisher authority、transport/lease/journal recovery、E11-C cleanup/runtime 交互未漂移。 |
 | Independent Review Round4 integration/smoke | VCC 19/19、29/29、226/226、77/77 PASS；`npm run smoke` PASS | 正常/历史/调整/破坏性资金链及全局 smoke。 |
 
@@ -87,6 +87,14 @@
 | P2 committed Publisher 后 generation/task-dir cleanup 错误被吞，成功返回无 pending cleanup 证据 | 接受。E12-A 调用现有 wrapper 时显式 defer generation cleanup，由既有 Main cleanup owner 在 publication committed/manifest handoff 后唯一收口；不改变正式目标与首个 publication 结果。owner 返回有界、finance-safe 的 `generationCleanup` status/recoveryPaths/diagnosticCodes/task-root digest；exact task dir 未清空前，确定性名称使同 operation retry 在 Worker 前 collision。legacy wrapper 默认行为不变。 | 动态注入 generation `EBUSY`、`EPERM` 与空 task dir `rmdir EPERM`：正式目标只成功一次、Publisher=1、结果为 committed 且 `generationCleanup=pending`，只暴露确知 task-private path；同 operation retry Publisher=0/Worker=0；恢复权限后同一 owner 可收净并正常重试。正常 success 为 `complete` 且 task dir 零残留。 |
 | P2 Main 创建 task dir 后、Worker 开始或 atomic handoff 前的目录替换窗口没有绑定同一 identity | 接受。Main 将 resolved/real path、task dir device/inode、parent path 与 canonical digest 冻结成 exact Worker input；唯一 checker 在 Worker entry、每个 subject write 前及 atomic rename/handoff 前验证 parent/root real directory、root identity、generation direct child/no alias、strict UUID tmp identity。identity error 只保留原 task-private recovery evidence，不删除替换目录或外部同名文件。 | before-worker replacement 与 before-finalize replacement 均 Publisher=0；外部同名 generation/tmp 保持原内容，原 task dir 的 UUID tmp 作为可恢复证据保留；恢复正确 identity 后同 cleanup owner 可收口。Unicode/空格及 Windows-compatible 路径正常成功、Publisher=1、零残留。 |
 
+## Independent Review Round4 Follow-up Findings And Fixes
+
+| Finding | Owner triage / 最小修复 | 可达证据 |
+| --- | --- | --- |
+| P2 cleanup 在一次 identity 校验后继续 scan/delete/rmdir，同路径真实目录或 parent inode replacement 仍可能被误触碰 | 接受。冻结 contract 同时绑定 task root 与 parent 的 resolved/real/device/inode；现有 Main cleanup owner 在每次 scan、exact child delete、residual scan 和 task-dir rmdir 前复用同一 checker。identity mismatch 立即停止，不扫描、不删除、不 rmdir 当前路径，只返回有界 task-root digest/diagnostic evidence；不新增 scanner 或 recovery authority。 | 精确动态复现 scan 后、delete 前替换真实 task dir；generation delete 后、residual scan/rmdir 前替换；把原 task inode 移入同 lexical path 但 parent inode 已替换。replacement generation/sentinel 均原样保留，cleanup `pending`；恢复原 identity 后同 owner 收净。 |
+| P2 task dir 已创建后 identity/collision 校验失败没有统一收口，可能泄漏目录并令 retry 永久 collision | 接受。`prepareTaskStagingDirectory` 只把本次成功 `mkdir` 的 exact task dir 标记为 owned；post-create identity、generation collision 及后续验证失败均交给同一 generation cleanup owner。已有目录绝不当作 owned 删除；cleanup 失败只附有界 exact recovery evidence，保留首错。 | post-create realpath/identity failure 可收净后重试成功；generation collision 可收净且目录消失；注入 generation `EBUSY`/task-dir `EPERM` 时 recoveryPaths 只含 exact task-private 残留，retry 先 collision fail closed，恢复权限后同 owner 清理并成功重试。 |
+| P2 Result validator 与 Pending projection 未闭合模板页面/行布局语义，自洽 OOXML 篡改仍可能绕过 size/hash | 接受。继续复用唯一 `validateResultSheet`：除动态 `printArea` 外 exact 比较 sheet state/properties/pageSetup/headerFooter，并保留既有 autoFilter/views/row/column/cell/merge 矩阵；Pending projection 补入 row `hidden/outlineLevel`，不比较不稳定 styleId，不在 artifact evidence 建第二套样式 authority。 | raw OOXML 自洽篡改 Result orientation/margin/header-footer/sheet state，以及 Pending row hidden/outline，重新压缩并重算 size/hash，均在 Main Join 拒绝且 Publisher=0；正常、调整、merge golden 全通过。 |
+
 ## Blindspot Pass
 
 | 维度 | 证据型结论 | 处置 |
@@ -94,7 +102,7 @@
 | 入口与旁路 | managed dispatcher 尚未接入 live Main；legacy handler 仍是唯一 production 路径。 | 符合 dormant/production-false 边界；禁止在 E12-A 偷接 live。 |
 | 数据合同 | Worker input/result exact keys；Main 绑定 DB/assets；DTO 只有 run/task/digest/count/path authority，不含 subject 文本、金额或币种原始行。 | validator、finance-safe allowlist 与 <8 KiB 实测闭合。 |
 | 状态生命周期 | task authority 与 run/archive authority 在 generation 前、Join 后、Publisher 前复核；Worker 在 read transaction 内首尾复核。 | B 点变化均 fail closed，Publisher=0。 |
-| 失败模式 | Main 是 generation/task-dir 唯一 cleanup owner；普通失败删除 exact generation 及严格同源 UUID atomic tmp，manual recovery 明示 preserve 时全部保留；committed 后 cleanup 失败只返回 pending evidence，不把业务成功重解释为可重发失败。 | focused fault tests 覆盖 pre-cancel、between-subject cancel、crash partial、Join 前后 tamper、Publisher throw/preserve、committed cleanup EBUSY/EPERM/rmdir failure。 |
+| 失败模式 | Main 是 generation/task-dir 唯一 cleanup owner；普通失败删除 exact generation 及严格同源 UUID atomic tmp，manual recovery 明示 preserve 时全部保留；committed 后 cleanup 失败只返回 pending evidence，不把业务成功重解释为可重发失败。每次 scan/delete/rmdir 都先复核 frozen root/parent identity；post-create 失败也由该 owner 收口。 | focused fault tests 覆盖 pre-cancel、between-subject cancel、crash partial、Join 前后 tamper、Publisher throw/preserve、committed cleanup EBUSY/EPERM/rmdir failure、same-path root/parent replacement、post-create failure/collision/retry。 |
 | 并发/幂等 | `export-subjects` compound topology 恒为 1；subjectIndex exact set/order；FilePlan fresh target snapshot；一次 journal publication。 | 不引入 shard、第二 Writer 或自动二次发布。 |
 | 可观测性 | runtime 继续用 `finance-safe-v1`；protocol error/result 受现有 maxBytes/rate-limit/validator 管控。 | 不新增 raw finance diagnostics；production enable 另行收集门禁证据。 |
 | 测试缺口 | 自动测试无法证明 Windows packaged Worker、Excel/WPS 渲染及真实资金样本人工逐项等价。 | 保留为不可绕过的人工 production gate。 |

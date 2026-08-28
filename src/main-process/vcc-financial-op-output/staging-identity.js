@@ -51,6 +51,8 @@ function identityPayload(value) {
     realPath: value.realPath,
     parentResolvedPath: value.parentResolvedPath,
     parentRealPath: value.parentRealPath,
+    parentDeviceId: value.parentDeviceId,
+    parentInodeId: value.parentInodeId,
     deviceId: value.deviceId,
     inodeId: value.inodeId
   });
@@ -65,12 +67,19 @@ function createTaskStagingIdentity({ resolvedPath, realPath }) {
   const parentResolvedPath = path.dirname(resolved);
   const parentRealPath = path.dirname(real);
   const stat = statIdentity(resolved);
+  const parentStat = statIdentity(parentResolvedPath);
+  if (fs.realpathSync(resolved) !== real ||
+      fs.realpathSync(parentResolvedPath) !== parentRealPath) {
+    throw new TypeError('VCC task-private staging identity realpath 已变化');
+  }
   const payload = Object.freeze({
     contractVersion: STAGING_IDENTITY_CONTRACT_VERSION,
     resolvedPath: resolved,
     realPath: real,
     parentResolvedPath,
     parentRealPath,
+    parentDeviceId: parentStat.deviceId,
+    parentInodeId: parentStat.inodeId,
     deviceId: stat.deviceId,
     inodeId: stat.inodeId
   });
@@ -83,10 +92,13 @@ function createTaskStagingIdentity({ resolvedPath, realPath }) {
 function normalizeTaskStagingIdentity(value) {
   if (!exactKeys(value, [
     'contractVersion', 'deviceId', 'identityDigest', 'inodeId',
-    'parentRealPath', 'parentResolvedPath', 'realPath', 'resolvedPath'
+    'parentDeviceId', 'parentInodeId', 'parentRealPath', 'parentResolvedPath',
+    'realPath', 'resolvedPath'
   ]) || value.contractVersion !== STAGING_IDENTITY_CONTRACT_VERSION ||
       typeof value.deviceId !== 'string' || !/^\d+$/.test(value.deviceId) ||
       typeof value.inodeId !== 'string' || !/^\d+$/.test(value.inodeId) ||
+      typeof value.parentDeviceId !== 'string' || !/^\d+$/.test(value.parentDeviceId) ||
+      typeof value.parentInodeId !== 'string' || !/^\d+$/.test(value.parentInodeId) ||
       typeof value.identityDigest !== 'string' || !/^[a-f0-9]{64}$/.test(value.identityDigest)) {
     throw new TypeError('VCC task-private staging identity contract 非法');
   }
@@ -121,12 +133,14 @@ function assertTaskStagingIdentity({
     throw identityError(stage, rawIdentity, 'VCC task-private staging identity contract 已变化');
   }
   try {
-    const parentStat = fs.lstatSync(identity.parentResolvedPath);
+    const parentStat = fs.lstatSync(identity.parentResolvedPath, { bigint: true });
     const taskStat = fs.lstatSync(identity.resolvedPath, { bigint: true });
     if (parentStat.isSymbolicLink() || !parentStat.isDirectory() ||
         taskStat.isSymbolicLink() || !taskStat.isDirectory() ||
         fs.realpathSync(identity.parentResolvedPath) !== identity.parentRealPath ||
         fs.realpathSync(identity.resolvedPath) !== identity.realPath ||
+        String(parentStat.dev) !== identity.parentDeviceId ||
+        String(parentStat.ino) !== identity.parentInodeId ||
         String(taskStat.dev) !== identity.deviceId || String(taskStat.ino) !== identity.inodeId) {
       throw new Error('identity mismatch');
     }

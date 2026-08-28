@@ -44,6 +44,14 @@
 | Publisher committed 后 generation 或 task dir 删除失败，是否应把业务结果改为 failed。 | PROBE（高） | 正式目标已由 durable Publisher 唯一提交，重新解释为业务失败会诱发不可安全重发；但静默吞错会丢失恢复责任。 | 保留首个 publication committed 事实与 Publisher=1；由同一 Main generation cleanup owner 返回 `complete/pending`、确知 recovery paths、有限诊断 code 与 task-root digest。cleanup pending 不自动重发；同 operation retry 在残留 task dir 上 fail closed，恢复后仍由同 owner 收口。 |
 | Main 创建 task dir 后到 Worker/atomic handoff 之间，路径字符串与一次 realpath 是否足以阻止替换。 | PROBE（高） | 可在 Worker 开始前或 staged tmp 写完后替换 task dir，旧实现会把外部同名路径当 generation/tmp；测试可稳定复现。 | Main 冻结 resolved/real、device/inode、parent path 与 canonical digest到 exact Worker input；Worker 入口、每个 subject 写前、atomic handoff 前复用一个 checker，要求 root identity 未变、generation 为直接 child/no alias、tmp 是 strict UUID direct child。已变化则 Publisher=0，且不触碰替换路径。明确不声称闭合检查后的 OS 纳秒竞态，不引入 native/openat。 |
 
+## Independent Review Round4 Follow-up Unknowns Closure
+
+| 补充未知 | 分类 | 证据收口 | 最终决定 |
+| --- | --- | --- | --- |
+| cleanup 入口一次 identity 校验能否保护后续 scan/delete/rmdir。 | PROBE（高） | 同路径 task root 可在 scan 后、delete/rmdir 前替换；即使 root inode 被移动到相同 lexical path，新 parent inode 也可能已变。 | frozen identity 同时绑定 root 与 parent 的 resolved/real/device/inode；现有唯一 cleanup owner 在每次 scan/delete/residual scan/rmdir 前复用 checker。mismatch 时零文件触碰，只返回有界诊断/digest；不新增第二 scanner 或恢复 authority。 |
+| `mkdir` 成功后的 identity/collision 失败是否属于本次 cleanup owner。 | PROBE（高） | 已创建目录在后续校验失败时若直接抛出，会泄漏 exact task dir并让同 operation retry 永久 collision；但 caller 已有目录不可误删。 | 只对本次成功创建的 exact task dir建立 owned identity；所有 post-create failure 走同一 cleanup owner。cleanup 成功后 retry 可继续；失败时返回有界 exact recovery evidence，retry fail closed，恢复后仍由同 owner 收口。 |
+| Result/Pending 是否已闭合页面和行布局 authority。 | PROBE（高） | OOXML 的 orientation、margin、header/footer、sheet state 与 Pending row hidden/outline 可独立篡改并重算 size/hash；仅 cell style/row height 比较不足。 | 唯一 Result validator 比较 sheet state/properties/pageSetup/headerFooter（仅动态 printArea 例外）及原有完整布局矩阵；Pending projection补 row hidden/outlineLevel。Writer self-check/Main Join 继续复用 canonical authority。 |
+
 ## BLOCK 问题
 
 无。单 Writer topology、run/archive authority、FilePlan/Publisher ownership 可由冻结合同和现有代码唯一收口。

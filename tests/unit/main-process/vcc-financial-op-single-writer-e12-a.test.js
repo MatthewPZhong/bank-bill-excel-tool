@@ -296,18 +296,22 @@ async function injectBlankCellStyle(filePath, cellReference) {
   }));
 }
 
-async function rewriteWorksheetXml(filePath, rewrite) {
+async function rewriteZipXml(filePath, entryPath, rewrite) {
   const zip = await JSZip.loadAsync(fs.readFileSync(filePath));
-  const worksheetEntry = zip.file('xl/worksheets/sheet1.xml');
-  assert.ok(worksheetEntry);
-  const worksheetXml = await worksheetEntry.async('string');
-  const rewritten = rewrite(worksheetXml);
-  assert.notEqual(rewritten, worksheetXml);
-  zip.file('xl/worksheets/sheet1.xml', rewritten);
+  const entry = zip.file(entryPath);
+  assert.ok(entry);
+  const originalXml = await entry.async('string');
+  const rewritten = rewrite(originalXml);
+  assert.notEqual(rewritten, originalXml);
+  zip.file(entryPath, rewritten);
   fs.writeFileSync(filePath, await zip.generateAsync({
     type: 'nodebuffer',
     compression: 'DEFLATE'
   }));
+}
+
+async function rewriteWorksheetXml(filePath, rewrite, sheetNumber = 1) {
+  return rewriteZipXml(filePath, `xl/worksheets/sheet${sheetNumber}.xml`, rewrite);
 }
 
 async function rewriteRowHidden(filePath, rowNumber) {
@@ -337,6 +341,60 @@ async function rewriteColumnHidden(filePath, columnNumber) {
     assert.equal(replaced, true);
     return rewritten;
   });
+}
+
+async function rewriteResultPageOrientation(filePath) {
+  await rewriteWorksheetXml(filePath, (worksheetXml) => {
+    const pattern = /(<pageSetup\b[^>]*\borientation=")landscape(")/;
+    assert.match(worksheetXml, pattern);
+    return worksheetXml.replace(pattern, '$1portrait$2');
+  });
+}
+
+async function rewriteResultPageMargin(filePath) {
+  await rewriteWorksheetXml(filePath, (worksheetXml) => {
+    const pattern = /(<pageMargins\b[^>]*\bleft=")[^"]+(")/;
+    assert.match(worksheetXml, pattern);
+    return worksheetXml.replace(pattern, (_match, prefix, suffix) => `${prefix}0.75${suffix}`);
+  });
+}
+
+async function rewriteResultHeaderFooter(filePath) {
+  await rewriteWorksheetXml(filePath, (worksheetXml) => {
+    if (/<headerFooter\b/.test(worksheetXml)) {
+      return worksheetXml.replace(
+        /<headerFooter\b[^>]*>[\s\S]*?<\/headerFooter>/,
+        '<headerFooter><oddHeader>&amp;Ctampered</oddHeader></headerFooter>'
+      );
+    }
+    return worksheetXml.replace(
+      '</worksheet>',
+      '<headerFooter><oddHeader>&amp;Ctampered</oddHeader></headerFooter></worksheet>'
+    );
+  });
+}
+
+async function rewriteResultSheetState(filePath) {
+  await rewriteZipXml(filePath, 'xl/workbook.xml', (workbookXml) => {
+    const pattern = /(<sheet\b(?=[^>]*\bname="财务OP校验结果表")[^>]*?)(\/?>)/;
+    const match = pattern.exec(workbookXml);
+    assert.ok(match);
+    const withoutState = match[1].replace(/\sstate="[^"]*"/g, '');
+    return workbookXml.replace(
+      pattern,
+      (_matched, _attributes, closing) => `${withoutState} state="hidden"${closing}`
+    );
+  });
+}
+
+async function rewritePendingRowLayout(filePath, rowNumber, attribute) {
+  await rewriteWorksheetXml(filePath, (worksheetXml) => {
+    const pattern = new RegExp(`<row\\b([^>]*\\br="${rowNumber}"[^>]*)>`);
+    const match = pattern.exec(worksheetXml);
+    assert.ok(match);
+    assert.doesNotMatch(match[0], new RegExp(`\\b${attribute}="`));
+    return worksheetXml.replace(pattern, `<row$1 ${attribute}="1">`);
+  }, 2);
 }
 
 function recomputeArtifactIdentity(result, generationPath) {
@@ -748,7 +806,7 @@ test('自洽伪造 size/hash 的 workbook 业务篡改仍由 Main 深度回读�
   assert.deepEqual(fs.readdirSync(stagingDirectory), []);
 });
 
-test('raw XLSX XML 自洽篡改语义矩阵样式/行列布局仍由 canonical Result validator 阻断', async (t) => {
+test('raw XLSX XML 自洽篡改样式与完整 Result/Pending 页面布局仍在 Main Join 阻断', async (t) => {
   const harness = setup(t, ['PPHK']);
   const tamperCases = [
     ['C1 header style', (filePath) => rewriteCellStyleId(filePath, 'C1')],
@@ -757,7 +815,13 @@ test('raw XLSX XML 自洽篡改语义矩阵样式/行列布局仍由 canonical R
     ['M3 ordinary blank style', (filePath) => injectBlankCellStyle(filePath, 'M3')],
     ['N3 ordinary blank style', (filePath) => injectBlankCellStyle(filePath, 'N3')],
     ['row 3 hidden', (filePath) => rewriteRowHidden(filePath, 3)],
-    ['column C hidden', (filePath) => rewriteColumnHidden(filePath, 3)]
+    ['column C hidden', (filePath) => rewriteColumnHidden(filePath, 3)],
+    ['result page orientation', rewriteResultPageOrientation],
+    ['result page margin', rewriteResultPageMargin],
+    ['result header footer', rewriteResultHeaderFooter],
+    ['result sheet state', rewriteResultSheetState],
+    ['pending row 2 hidden', (filePath) => rewritePendingRowLayout(filePath, 2, 'hidden')],
+    ['pending row 2 outline', (filePath) => rewritePendingRowLayout(filePath, 2, 'outlineLevel')]
   ];
   for (const [label, tamper] of tamperCases) {
     await t.test(label, async () => {
@@ -1152,6 +1216,7 @@ test('真实 FS readdir EACCES 仅保留 exact task dir，恢复权限后同 cle
   let publisherCalls = 0;
   let generations = [];
   let taskStagingDirectory = null;
+  let taskStagingIdentity = null;
   let generationPath = null;
   let atomicTempPath = null;
   let caught = null;
@@ -1161,6 +1226,7 @@ test('真实 FS readdir EACCES 仅保留 exact task dir，恢复权限后同 cle
       runtime: {
         async execute(request) {
           generations = request.input.generations;
+          taskStagingIdentity = request.input.stagingIdentity;
           generationPath = generations[0].generationPath;
           taskStagingDirectory = path.dirname(generationPath);
           atomicTempPath = `${generationPath}.11111111-2222-3333-4444-555555555555.tmp`;
@@ -1210,7 +1276,13 @@ test('真实 FS readdir EACCES 仅保留 exact task dir，恢复权限后同 cle
 
   fs.chmodSync(taskStagingDirectory, 0o700);
   const recoveryCleanupError = new Error('recovery cleanup owner');
-  cleanupGenerationArtifacts(generations, recoveryCleanupError, taskStagingDirectory);
+  cleanupGenerationArtifacts(
+    generations,
+    recoveryCleanupError,
+    taskStagingDirectory,
+    taskStagingIdentity.realPath,
+    taskStagingIdentity
+  );
   assert.equal(fs.existsSync(taskStagingDirectory), false);
   assert.equal(recoveryCleanupError.preserveTemporaryFiles, undefined);
   assert.equal(fs.existsSync(sharedRootEvidence), true);
@@ -1290,6 +1362,362 @@ test('task staging 拒绝 shared-root symlink、非规范 escape 与 exact child
   ));
 });
 
+test('task dir post-create identity/collision 失败统一由既有 cleanup owner 收口', async (t) => {
+  await t.test('post-create identity probe 一次失败后清掉精确自建目录且可重试', () => {
+    const harness = setup(t, ['PPHK']);
+    const stagingDirectory = path.join(harness.root, 'post-create-identity');
+    fs.mkdirSync(stagingDirectory);
+    const plan = filePlan(harness.root, 1, 'post-create-identity');
+    const batch = batchContext('post-create-identity');
+    const task = Object.freeze({
+      action: 'export-result', taskGeneration: 0, taskRunId: batch.taskRunId
+    });
+    const originalRealpathSync = fs.realpathSync;
+    let injected = false;
+    fs.realpathSync = function patchedRealpathSync(filePath, options) {
+      const candidate = path.resolve(String(filePath));
+      if (!injected && path.dirname(candidate) === stagingDirectory &&
+          path.basename(candidate).startsWith('vcc-export-') &&
+          fs.existsSync(candidate)) {
+        injected = true;
+        const error = new Error('fixture post-create realpath EIO');
+        error.code = 'EIO';
+        throw error;
+      }
+      return originalRealpathSync.call(this, filePath, options);
+    };
+    try {
+      assert.throws(() => createGenerationInput({
+        actionKey: VCC_EXPORT_SINGLE_ACTION,
+        authority: harness.snapshot.authority,
+        filePlan: plan,
+        operationKey: batch.operationKey,
+        selectedSubjectIndexes: [0],
+        stagingDirectory,
+        taskAuthority: task
+      }), (error) => error.code === 'VCC_EXPORT_STAGING_IDENTITY_CHANGED');
+    } finally {
+      fs.realpathSync = originalRealpathSync;
+    }
+    assert.equal(injected, true);
+    assert.deepEqual(fs.readdirSync(stagingDirectory), []);
+    const retry = createGenerationInput({
+      actionKey: VCC_EXPORT_SINGLE_ACTION,
+      authority: harness.snapshot.authority,
+      filePlan: plan,
+      operationKey: batch.operationKey,
+      selectedSubjectIndexes: [0],
+      stagingDirectory,
+      taskAuthority: task
+    });
+    assert.equal(cleanupGenerationArtifacts(
+      retry.generations,
+      new Error('post-create identity retry cleanup'),
+      retry.stagingRoot,
+      retry.stagingRootReal,
+      retry.stagingIdentity
+    ).status, 'complete');
+  });
+
+  await t.test('post-create identity failure 的 task-dir rmdir 失败返回有界证据且可恢复', () => {
+    const harness = setup(t, ['PPHK']);
+    const stagingDirectory = path.join(harness.root, 'post-create-identity-rmdir');
+    fs.mkdirSync(stagingDirectory);
+    const plan = filePlan(harness.root, 1, 'post-create-identity-rmdir');
+    const batch = batchContext('post-create-identity-rmdir');
+    const task = Object.freeze({
+      action: 'export-result', taskGeneration: 0, taskRunId: batch.taskRunId
+    });
+    const create = () => createGenerationInput({
+      actionKey: VCC_EXPORT_SINGLE_ACTION,
+      authority: harness.snapshot.authority,
+      filePlan: plan,
+      operationKey: batch.operationKey,
+      selectedSubjectIndexes: [0],
+      stagingDirectory,
+      taskAuthority: task
+    });
+    const originalRealpathSync = fs.realpathSync;
+    const originalRmdirSync = fs.rmdirSync;
+    let taskRoot = null;
+    let injected = false;
+    fs.realpathSync = function patchedRealpathSync(filePath, options) {
+      const candidate = path.resolve(String(filePath));
+      if (!injected && path.dirname(candidate) === stagingDirectory &&
+          path.basename(candidate).startsWith('vcc-export-') && fs.existsSync(candidate)) {
+        taskRoot = candidate;
+        injected = true;
+        const error = new Error('fixture post-create identity probe EIO');
+        error.code = 'EIO';
+        throw error;
+      }
+      return originalRealpathSync.call(this, filePath, options);
+    };
+    fs.rmdirSync = function patchedRmdirSync(directory) {
+      if (taskRoot && path.resolve(String(directory)) === taskRoot) {
+        const error = new Error('fixture post-create rmdir EPERM');
+        error.code = 'EPERM';
+        throw error;
+      }
+      return originalRmdirSync.call(this, directory);
+    };
+    let caught;
+    try {
+      create();
+    } catch (error) {
+      caught = error;
+    } finally {
+      fs.realpathSync = originalRealpathSync;
+      fs.rmdirSync = originalRmdirSync;
+    }
+    assert.ok(caught);
+    assert.equal(caught.code, 'VCC_EXPORT_STAGING_IDENTITY_CHANGED');
+    assert.equal(caught.preserveTemporaryFiles, true);
+    assert.deepEqual(caught.recoveryPaths, [taskRoot]);
+    assert.ok(caught.recoveryPaths.length <= 100);
+    assert.throws(() => create(), (error) => error.code === 'VCC_EXPORT_STAGING_COLLISION');
+    const identity = createTaskStagingIdentity({
+      resolvedPath: taskRoot,
+      realPath: fs.realpathSync(taskRoot)
+    });
+    assert.equal(cleanupGenerationArtifacts(
+      [],
+      new Error('post-create rmdir recovery owner'),
+      taskRoot,
+      identity.realPath,
+      identity
+    ).status, 'complete');
+    const retry = create();
+    assert.equal(cleanupGenerationArtifacts(
+      retry.generations,
+      new Error('post-create rmdir retry cleanup'),
+      retry.stagingRoot,
+      retry.stagingRootReal,
+      retry.stagingIdentity
+    ).status, 'complete');
+  });
+
+  for (const failDelete of [false, true]) {
+    await t.test(
+      failDelete
+        ? 'post-create generation collision 删除失败返回有界恢复证据并阻断重试'
+        : 'post-create generation collision 删除成功不遗留 task dir',
+      () => {
+        const harness = setup(t, ['PPHK']);
+        const suffix = failDelete ? 'post-create-collision-ebusy' : 'post-create-collision-clean';
+        const stagingDirectory = path.join(harness.root, suffix);
+        fs.mkdirSync(stagingDirectory);
+        const plan = filePlan(harness.root, 1, suffix);
+        const batch = batchContext(suffix);
+        const task = Object.freeze({
+          action: 'export-result', taskGeneration: 0, taskRunId: batch.taskRunId
+        });
+        const create = () => createGenerationInput({
+          actionKey: VCC_EXPORT_SINGLE_ACTION,
+          authority: harness.snapshot.authority,
+          filePlan: plan,
+          operationKey: batch.operationKey,
+          selectedSubjectIndexes: [0],
+          stagingDirectory,
+          taskAuthority: task
+        });
+        const originalExistsSync = fs.existsSync;
+        const originalRmSync = fs.rmSync;
+        let injectedPath = null;
+        fs.existsSync = function patchedExistsSync(filePath) {
+          const candidate = path.resolve(String(filePath));
+          if (!injectedPath && candidate.endsWith('.xlsx') &&
+              candidate.startsWith(`${stagingDirectory}${path.sep}vcc-export-`) &&
+              originalExistsSync.call(this, path.dirname(candidate))) {
+            fs.writeFileSync(candidate, 'post-create-collision');
+            injectedPath = candidate;
+            return true;
+          }
+          return originalExistsSync.call(this, filePath);
+        };
+        fs.rmSync = function patchedRmSync(filePath, options) {
+          if (failDelete && injectedPath && path.resolve(String(filePath)) === injectedPath) {
+            const error = new Error('fixture post-create cleanup EBUSY');
+            error.code = 'EBUSY';
+            throw error;
+          }
+          return originalRmSync.call(this, filePath, options);
+        };
+        let caught;
+        try {
+          create();
+        } catch (error) {
+          caught = error;
+        } finally {
+          fs.existsSync = originalExistsSync;
+          fs.rmSync = originalRmSync;
+        }
+        assert.ok(caught);
+        assert.equal(caught.code, 'VCC_EXPORT_STAGING_COLLISION');
+        assert.ok(injectedPath);
+        if (!failDelete) {
+          assert.deepEqual(fs.readdirSync(stagingDirectory), []);
+          assert.equal(caught.preserveTemporaryFiles, undefined);
+          return;
+        }
+        assert.equal(caught.preserveTemporaryFiles, true);
+        assert.deepEqual(caught.recoveryPaths, [injectedPath]);
+        assert.ok(caught.recoveryPaths.length <= 100);
+        assert.throws(() => create(), (error) => error.code === 'VCC_EXPORT_STAGING_COLLISION');
+        const taskRoot = path.dirname(injectedPath);
+        const identity = createTaskStagingIdentity({
+          resolvedPath: taskRoot,
+          realPath: fs.realpathSync(taskRoot)
+        });
+        assert.equal(cleanupGenerationArtifacts(
+          [{
+            subjectIndex: 0,
+            outputArtifactKey: `output-${'e'.repeat(64)}`,
+            generationPath: injectedPath
+          }],
+          new Error('post-create collision recovery owner'),
+          taskRoot,
+          identity.realPath,
+          identity
+        ).status, 'complete');
+        const retry = create();
+        assert.equal(cleanupGenerationArtifacts(
+          retry.generations,
+          new Error('post-create collision retry cleanup'),
+          retry.stagingRoot,
+          retry.stagingRootReal,
+          retry.stagingIdentity
+        ).status, 'complete');
+      }
+    );
+  }
+});
+
+test('cleanup 在 scan/delete/rmdir 前复核 frozen root/parent dev+ino，同路径 replacement 零触碰', async (t) => {
+  const createFixture = (label) => {
+    const harness = setup(t, ['PPHK']);
+    const parent = path.join(harness.root, `cleanup-identity-${label}`);
+    fs.mkdirSync(parent);
+    const taskRoot = path.join(parent, `vcc-export-${'a'.repeat(32)}`);
+    fs.mkdirSync(taskRoot);
+    const generationPath = path.join(taskRoot, '000-fixture.xlsx');
+    fs.writeFileSync(generationPath, 'original-generation');
+    const identity = createTaskStagingIdentity({
+      resolvedPath: taskRoot,
+      realPath: fs.realpathSync(taskRoot)
+    });
+    const generations = [{
+      subjectIndex: 0,
+      outputArtifactKey: `output-${'f'.repeat(64)}`,
+      generationPath
+    }];
+    return { harness, parent, taskRoot, generationPath, identity, generations };
+  };
+  const runCleanup = (fixture) => cleanupGenerationArtifacts(
+    fixture.generations,
+    new Error('replacement cleanup evidence'),
+    fixture.taskRoot,
+    fixture.identity.realPath,
+    fixture.identity
+  );
+  const assertPendingIdentity = (fixture, evidence) => {
+    assert.equal(evidence.status, 'pending');
+    assert.equal(evidence.taskRootIdentityDigest, fixture.identity.identityDigest);
+    assert.deepEqual(evidence.recoveryPaths, []);
+    assert.ok(evidence.diagnosticCodes.includes('VCC_EXPORT_STAGING_IDENTITY_CHANGED'));
+  };
+
+  await t.test('scan 后 delete 前替换为同路径真实目录，不删除 replacement generation', () => {
+    const fixture = createFixture('before-delete');
+    const backup = `${fixture.taskRoot}.original`;
+    const originalReaddirSync = fs.readdirSync;
+    let replaced = false;
+    fs.readdirSync = function patchedReaddirSync(directory, options) {
+      const entries = originalReaddirSync.call(this, directory, options);
+      if (!replaced && path.resolve(String(directory)) === fixture.taskRoot) {
+        fs.renameSync(fixture.taskRoot, backup);
+        fs.mkdirSync(fixture.taskRoot);
+        fs.writeFileSync(fixture.generationPath, 'replacement-generation');
+        replaced = true;
+      }
+      return entries;
+    };
+    let evidence;
+    try {
+      evidence = runCleanup(fixture);
+    } finally {
+      fs.readdirSync = originalReaddirSync;
+    }
+    assert.equal(replaced, true);
+    assertPendingIdentity(fixture, evidence);
+    assert.equal(fs.readFileSync(fixture.generationPath, 'utf8'), 'replacement-generation');
+    fs.rmSync(fixture.taskRoot, { recursive: true, force: true });
+    fs.renameSync(backup, fixture.taskRoot);
+    assert.equal(runCleanup(fixture).status, 'complete');
+  });
+
+  await t.test('scan 后 parent 换 inode但保留原 task inode，不删除 generation', () => {
+    const fixture = createFixture('parent-before-delete');
+    const parentBackup = `${fixture.parent}.original`;
+    const taskName = path.basename(fixture.taskRoot);
+    const originalReaddirSync = fs.readdirSync;
+    let replaced = false;
+    fs.readdirSync = function patchedReaddirSync(directory, options) {
+      const entries = originalReaddirSync.call(this, directory, options);
+      if (!replaced && path.resolve(String(directory)) === fixture.taskRoot) {
+        fs.renameSync(fixture.parent, parentBackup);
+        fs.mkdirSync(fixture.parent);
+        fs.renameSync(path.join(parentBackup, taskName), fixture.taskRoot);
+        replaced = true;
+      }
+      return entries;
+    };
+    let evidence;
+    try {
+      evidence = runCleanup(fixture);
+    } finally {
+      fs.readdirSync = originalReaddirSync;
+    }
+    assert.equal(replaced, true);
+    assertPendingIdentity(fixture, evidence);
+    assert.equal(fs.readFileSync(fixture.generationPath, 'utf8'), 'original-generation');
+    fs.renameSync(fixture.taskRoot, path.join(parentBackup, taskName));
+    fs.rmdirSync(fixture.parent);
+    fs.renameSync(parentBackup, fixture.parent);
+    assert.equal(runCleanup(fixture).status, 'complete');
+  });
+
+  await t.test('delete 后 rmdir 前替换为同路径真实目录，不删除 replacement task dir', () => {
+    const fixture = createFixture('before-rmdir');
+    const backup = `${fixture.taskRoot}.original`;
+    const sentinel = path.join(fixture.taskRoot, 'replacement.keep');
+    const originalRmSync = fs.rmSync;
+    let replaced = false;
+    fs.rmSync = function patchedRmSync(filePath, options) {
+      const result = originalRmSync.call(this, filePath, options);
+      if (!replaced && path.resolve(String(filePath)) === fixture.generationPath) {
+        fs.renameSync(fixture.taskRoot, backup);
+        fs.mkdirSync(fixture.taskRoot);
+        fs.writeFileSync(sentinel, 'replacement-task-root');
+        replaced = true;
+      }
+      return result;
+    };
+    let evidence;
+    try {
+      evidence = runCleanup(fixture);
+    } finally {
+      fs.rmSync = originalRmSync;
+    }
+    assert.equal(replaced, true);
+    assertPendingIdentity(fixture, evidence);
+    assert.equal(fs.readFileSync(sentinel, 'utf8'), 'replacement-task-root');
+    fs.rmSync(fixture.taskRoot, { recursive: true, force: true });
+    fs.renameSync(backup, fixture.taskRoot);
+    assert.equal(runCleanup(fixture).status, 'complete');
+  });
+});
+
 test('runtime 后 exact task dir 被换成 reparse 时 cleanup fail closed 且不删除外部同名文件', async (t) => {
   const harness = setup(t, ['PPHK']);
   const stagingDirectory = path.join(harness.root, 'staging-reparse-race');
@@ -1343,7 +1771,7 @@ test('runtime 后 exact task dir 被换成 reparse 时 cleanup fail closed 且�
   assert.ok(caught);
   assert.equal(caught.code, 'VCC_FIXTURE_PRIMARY_FAILURE');
   assert.equal(caught.message, 'fixture primary failure before cleanup');
-  assert.match(caught.detailLines.join('\n'), /VCC_EXPORT_STAGING_ESCAPE/);
+  assert.match(caught.detailLines.join('\n'), /VCC_EXPORT_STAGING_IDENTITY_CHANGED/);
   assert.equal(caught.preserveTemporaryFiles, undefined);
   assert.equal(fs.readFileSync(outsideGenerationPath, 'utf8'), 'external-evidence');
   assert.equal(publisherCalls, 0);

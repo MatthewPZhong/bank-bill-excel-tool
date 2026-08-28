@@ -51,7 +51,12 @@ function pendingSheetProjection(sheet) {
         numFmt: cell.numFmt || 'General'
       });
     }
-    rows.push({ height: row.height == null ? null : row.height, cells });
+    rows.push({
+      height: row.height == null ? null : row.height,
+      hidden: Boolean(row.hidden),
+      outlineLevel: row.outlineLevel || 0,
+      cells
+    });
   }
   return {
     name: sheet.name,
