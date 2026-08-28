@@ -35,6 +35,9 @@ const {
 } = require('../../../src/main-process/statement-worker/runtime-bindings');
 const { createStatementService } = require('../../../src/main-process/statement-worker/service');
 const {
+  resolveStatementSourceIdentity
+} = require('../../../src/main-process/statement-worker/source-identity');
+const {
   buildBigAccountInteractionDraft,
   buildStatementImportCandidate,
   createStatementServiceState
@@ -205,10 +208,11 @@ function writeStatement(filePath, rows) {
   ]);
 }
 
-function source(filePath) {
+function source(filePath, templateRef) {
   return {
     resourceId: path.basename(filePath),
-    snapshot: sourceSnapshotFromStat(fs.lstatSync(filePath, { bigint: true }))
+    snapshot: sourceSnapshotFromStat(fs.lstatSync(filePath, { bigint: true })),
+    templateRef
   };
 }
 
@@ -270,11 +274,20 @@ function bigAccountTemplateEvidence(options = {}) {
 }
 
 function importInput(templateEvidence, sourceFiles) {
+  const templateRef = `template:${templateEvidence.snapshot.templateId}`;
   return {
     command: 'import',
-    sessionKey: templateEvidence.snapshot.templateId,
-    sources: sourceFiles.map(source),
-    templateEvidence
+    sessionOwner: {
+      sessionKey: templateEvidence.snapshot.templateId,
+      templateId: templateEvidence.snapshot.templateId,
+      templateName: templateEvidence.snapshot.templateName
+    },
+    sources: sourceFiles.map((filePath) => source(filePath, templateRef)),
+    templateCatalog: [{
+      templateRef,
+      digest: templateEvidence.digest,
+      snapshot: templateEvidence.snapshot
+    }]
   };
 }
 
@@ -619,7 +632,7 @@ test('waiting-user cancel仅在exact token owner ack后终结且失败仅允许�
   assert.equal(coordinator.forgetCancelled({ taskRunId: 'task-cancel', tokenId: token.tokenId }), true);
 });
 
-test('continuation重新映射的candidate digest变化时在session mutation前fail closed', async () => {
+test('continuation重新映射的candidate digest变化时在session mutation前fail closed', async (t) => {
   const templateEvidence = createStatementTemplateEvidence({
     templateId: 'template-digest', templateName: 'digest', expectedSourceHeaders: ['日期', '贷'],
     orderedTargetFields: ['Bill Date', 'Credit Amount', 'Debit Amount', 'Currency', 'MerchantId'],
@@ -633,11 +646,32 @@ test('continuation重新映射的candidate digest变化时在session mutation前
     bigAccounts: [{ merchantId: 'M001', currencies: ['USD'], accountNature: 'client' }],
     fixedAssignments: []
   });
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-e09-b-digest-'));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const filePath = path.join(tempDir, 'source-digest.xlsx');
+  fs.writeFileSync(filePath, 'source-digest');
+  const templateRef = 'template:template-digest';
+  const publicSource = {
+    resourceId: 'source-digest.xlsx',
+    snapshot: sourceSnapshotFromStat(fs.lstatSync(filePath, { bigint: true })),
+    templateRef
+  };
+  const privateSource = await resolveStatementSourceIdentity(publicSource, filePath, {
+    allowedRoot: tempDir,
+    legacyPath: filePath
+  });
   const request = {
-    command: 'import', sessionKey: 'template-digest', templateEvidence,
-    sources: [{
-      resourceId: 'source-digest', path: '/private/source-digest.xlsx',
-      snapshot: { sizeBytes: 1, mtimeMs: 2, ctimeMs: 3, ino: '4' }
+    command: 'import',
+    sessionOwner: {
+      sessionKey: 'template-digest',
+      templateId: 'template-digest',
+      templateName: 'digest'
+    },
+    sources: [privateSource],
+    templateCatalog: [{
+      templateRef,
+      digest: templateEvidence.digest,
+      snapshot: templateEvidence.snapshot
     }]
   };
   let value = 10;
@@ -648,6 +682,9 @@ test('continuation重新映射的candidate digest变化时在session mutation前
     ];
     rows.rowMetas = [{ sourceRowNumber: 2 }];
     rows.headerBreaks = [];
+    rows.amountSplitMatchStats = { enabled: true, totalRows: 1, matchedRows: 1, outputRows: 1 };
+    rows.billSplitMatchStats = { enabled: true, totalRows: 1, matchedRows: 1, outputRows: 1 };
+    rows.sourceRows = [['日期', '贷'], ['2026-08-01', value]];
     return rows;
   };
   const state = createStatementServiceState(1);
@@ -656,6 +693,18 @@ test('continuation重新映射的candidate digest变化时在session mutation前
     fileCount: 0, rowCount: 0, pendingInteractionCount: 0, pendingInteractions: [], activePhase: 'idle'
   };
   const draft = await buildBigAccountInteractionDraft(state, request, { buildMappedRows });
+  const valid = await buildStatementImportCandidate(state, request, {
+    buildMappedRows,
+    bigAccountAssignments: [{ rowIndex: 0, merchantId: 'M001', currency: 'USD' }],
+    bigAccountChoiceMode: 'unfixed',
+    expectedProvisionalDigest: draft.privateContext.candidateDigest
+  });
+  const validRows = valid.state.sessions.get('template-digest').fileEntries[0].detailRows;
+  assert.deepEqual(validRows.amountSplitMatchStats,
+    { enabled: true, totalRows: 1, matchedRows: 1, outputRows: 1 });
+  assert.deepEqual(validRows.billSplitMatchStats,
+    { enabled: true, totalRows: 1, matchedRows: 1, outputRows: 1 });
+  assert.deepEqual(validRows.sourceRows, [['日期', '贷'], ['2026-08-01', 10]]);
   value = 11;
   await assert.rejects(buildStatementImportCandidate(state, request, {
     buildMappedRows,
@@ -665,6 +714,72 @@ test('continuation重新映射的candidate digest变化时在session mutation前
   }), (error) => error.code === 'STATEMENT_TOKEN_CANDIDATE_STALE');
   assert.equal(state.sessionRevision, 0);
   assert.equal(state.sessions.size, 0);
+});
+
+test('parent session的逐来源template lineage在交互draft与continuation candidate中保持精确', async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-e09-b-lineage-'));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const directPath = path.join(tempDir, 'parent-direct.xlsx');
+  const bigPath = path.join(tempDir, 'child-big.xlsx');
+  writeStatement(directPath, [['2026-08-01', 10, '', 'USD', 'DIRECT-MERCHANT']]);
+  writeStatement(bigPath, [['2026-08-02', '', 3, 'EUR', 'IGNORED-BANK-ID']]);
+  const direct = directTemplateEvidence('template-child-direct');
+  const big = bigAccountTemplateEvidence({
+    templateId: 'template-child-big',
+    bigAccounts: [{ merchantId: 'BIG-MERCHANT', currencies: ['EUR'], accountNature: 'client' }]
+  });
+  const directRef = 'template:child-direct';
+  const bigRef = 'template:child-big';
+  const publicSources = [source(directPath, directRef), source(bigPath, bigRef)];
+  const privateSources = await Promise.all(publicSources.map((item, index) =>
+    resolveStatementSourceIdentity(item, index === 0 ? directPath : bigPath, {
+      allowedRoot: tempDir,
+      legacyPath: index === 0 ? directPath : bigPath
+    })));
+  const request = {
+    command: 'import',
+    sessionOwner: {
+      sessionKey: 'parent-template-session',
+      templateId: 'template-parent',
+      templateName: '父模板'
+    },
+    sources: privateSources,
+    templateCatalog: [
+      { templateRef: directRef, digest: direct.digest, snapshot: direct.snapshot },
+      { templateRef: bigRef, digest: big.digest, snapshot: big.snapshot }
+    ]
+  };
+  const state = createStatementServiceState(1);
+  state.stableSummary = {
+    serviceGeneration: 1, sessionRevision: 0, sessionCount: 0, batchCount: 0,
+    fileCount: 0, rowCount: 0, pendingInteractionCount: 0, pendingInteractions: [], activePhase: 'idle'
+  };
+  const draft = await buildBigAccountInteractionDraft(state, request);
+  assert.equal(draft.sessionKey, 'parent-template-session');
+  assert.equal(draft.prompt.templateId, 'template-parent');
+  assert.deepEqual(draft.prompt.rows.map((row) => row.fileName), ['child-big.xlsx']);
+  assert.deepEqual(
+    draft.privateContext.evidence.sources.map((item) => item.templateRef),
+    [directRef, bigRef]
+  );
+
+  const candidate = await buildStatementImportCandidate(state, request, {
+    bigAccountAssignments: [{ rowIndex: 0, merchantId: 'BIG-MERCHANT', currency: 'EUR' }],
+    bigAccountChoiceMode: 'unfixed',
+    expectedProvisionalDigest: draft.privateContext.candidateDigest
+  });
+  const entries = candidate.state.sessions.get('parent-template-session').fileEntries;
+  assert.deepEqual(entries.map((entry) => entry.templateRef), [directRef, bigRef]);
+  assert.deepEqual(entries.map((entry) => entry.matchedTemplateId), [
+    'template-child-direct',
+    'template-child-big'
+  ]);
+  const directMerchantIndex = entries[0].detailRows[0].indexOf('MerchantId');
+  const bigMerchantIndex = entries[1].detailRows[0].indexOf('MerchantId');
+  assert.equal(entries[0].detailRows[1][directMerchantIndex], 'DIRECT-MERCHANT');
+  assert.equal(entries[1].detailRows[1][bigMerchantIndex], 'BIG-MERCHANT');
+  assert.equal(candidate.result.importedEntryIds.length, 2);
+  assert.equal(candidate.state.stableSummary.rowCount, 2);
 });
 
 test('真实Statement Service完成pending reservation adoption、同Task continuation与token release ack', async (t) => {
@@ -679,33 +794,17 @@ test('真实Statement Service完成pending reservation adoption、同Task contin
     ['2026-08-02', '', 2, 'USD', 'BANK-2']
   ]), 'Sheet1');
   XLSX.writeFile(workbook, filePath);
-  const importEvidence = {
-    command: 'import',
-    sessionKey: 'template-big',
-    sources: [{
-      resourceId: 'source.xlsx',
-      snapshot: sourceSnapshotFromStat(fs.lstatSync(filePath, { bigint: true }))
-    }],
-    templateEvidence: createStatementTemplateEvidence({
-      templateId: 'template-big',
-      templateName: '大账号模板',
-      expectedSourceHeaders: ['日期', '贷', '借', '币种', '账号'],
-      orderedTargetFields: ['Bill Date', 'Credit Amount', 'Debit Amount', 'Currency', 'MerchantId'],
-      mappingByField: {
-        'Bill Date': '日期', 'Credit Amount': '贷', 'Debit Amount': '借',
-        Currency: '币种', MerchantId: '__FIXED__:__MULTI_BIG_ACCOUNT__'
-      },
-      accountMappingByBankId: {}, currencyMappings: [],
-      amountMappingRules: { nameSourceField: '', accountSourceField: '', signedAmountSourceField: '' },
-      amountSplitByField: null, billSplitMerge: null, dateParseOrder: 'auto',
-      bigAccounts: [{ merchantId: 'M001', currencies: ['USD'], accountNature: 'client' }],
-      fixedAssignments: []
-    })
-  };
+  const importEvidence = importInput(bigAccountTemplateEvidence({
+    templateId: 'template-big'
+  }), [filePath]);
   const trace = [];
+  let sourceResolutionCount = 0;
   const service = createStatementService({
     postMessage(message) { trace.push(message); },
-    resolveSourceResource(resourceId) { return path.join(tempDir, resourceId); }
+    resolveSourceResource(resourceId) {
+      sourceResolutionCount += 1;
+      return path.join(tempDir, resourceId);
+    }
   });
   let controlSeq = 0;
   function control(operation, controlId, jobRef, payload) {
@@ -787,6 +886,27 @@ test('真实Statement Service完成pending reservation adoption、同Task contin
   const interaction = refreshedDone.payload.result.interaction;
   assert.equal(interaction.prompt.rows.length, 2, '同一文件的两个header block必须分别选择');
   assert.deepEqual(interaction.prompt.rows.map((row) => row.sourceRowNumber), [2, 4]);
+
+  const tamperedEvidence = structuredClone(importEvidence);
+  tamperedEvidence.sessionOwner.templateName = '篡改父模板';
+  const tamperedStart = trace.length;
+  const resolutionsBeforeTamper = sourceResolutionCount;
+  start('statement:resolve-big-account', 'same-task/statement:resolve-big-account/tampered', 'job-tampered', {
+    command: 'resolve-big-account',
+    token: publicToken(interaction),
+    choice: { mode: 'unfixed', assignments: [
+      { rowIndex: 0, merchantId: 'M001', currency: 'USD' },
+      { rowIndex: 1, merchantId: 'M001', currency: 'USD' }
+    ] },
+    importEvidence: tamperedEvidence
+  });
+  const tampered = await nextOperation('job:error', tamperedStart);
+  assert.equal(tampered.payload.error.code, 'STATEMENT_TOKEN_STALE');
+  assert.equal(sourceResolutionCount, resolutionsBeforeTamper,
+    'parent/template evidence篡改必须在source resolver前由token authority拒绝');
+  assert.equal(trace.slice(tamperedStart).some((message) => message.operation === 'resource:request'), false,
+    'token evidence篡改不得申请任何资源');
+
   const continuationStart = trace.length;
   start('statement:resolve-big-account', 'same-task/statement:resolve-big-account/1', 'job-continuation', {
     command: 'resolve-big-account',

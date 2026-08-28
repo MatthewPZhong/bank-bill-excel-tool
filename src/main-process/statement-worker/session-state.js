@@ -42,6 +42,14 @@ function importRequiresBigAccountInteraction(template) {
   return requiresBigAccount;
 }
 
+function assertImportDoesNotRequireInteraction(template) {
+  if (!importRequiresBigAccountInteraction(template)) return;
+  throw new StatementSessionError(
+    'STATEMENT_BIG_ACCOUNT_INTERACTION_BLOCKED',
+    'Big-account selection remains blocked until an E09-B continuation supplies exact assignments'
+  );
+}
+
 function createStatementServiceState(serviceGeneration) {
   return {
     serviceGeneration,
@@ -323,6 +331,15 @@ function applyBigAccountAssignments(entries, assignments, options = {}) {
     if (Array.isArray(nextRows.headerBreaks)) result.headerBreaks = [];
     if (Array.isArray(nextRows.skippedRows)) result.skippedRows = nextRows.skippedRows;
     if (Array.isArray(nextRows.simultaneousRows)) result.simultaneousRows = nextRows.simultaneousRows;
+    if (nextRows.amountSplitMatchStats && typeof nextRows.amountSplitMatchStats === 'object') {
+      result.amountSplitMatchStats = { ...nextRows.amountSplitMatchStats };
+    }
+    if (nextRows.billSplitMatchStats && typeof nextRows.billSplitMatchStats === 'object') {
+      result.billSplitMatchStats = { ...nextRows.billSplitMatchStats };
+    }
+    if (Array.isArray(nextRows.sourceRows)) {
+      result.sourceRows = cloneRowsWithMetadata(nextRows.sourceRows);
+    }
     return result;
   });
 }

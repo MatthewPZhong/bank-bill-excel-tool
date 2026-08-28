@@ -1,6 +1,7 @@
 'use strict';
 
 const { createHash } = require('node:crypto');
+const { isDeepStrictEqual } = require('node:util');
 
 const { createCanonicalEventEmitter } = require('../background-execution/adapters/canonical-event-emitter');
 const { toProtocolError } = require('../background-execution/error-codec');
@@ -294,10 +295,6 @@ function createStatementService(options = {}) {
           return;
         }
         const continuation = createStatementBigAccountContinuationRequest(start.payload.input);
-        const privateRequest = Object.freeze({
-          ...continuation.importEvidence,
-          sources: await resolvePrivateSources(continuation.importEvidence, job)
-        });
         const pendingToken = tokenStore.inspect(continuation.token.tokenId);
         if (!pendingToken) {
           throw new StatementServiceError('STATEMENT_TOKEN_STALE', 'Statement token is stale');
@@ -306,7 +303,7 @@ function createStatementService(options = {}) {
           serviceGeneration: state.serviceGeneration,
           sessionRevision: state.sessionRevision,
           purpose: 'big-account',
-          sessionKey: privateRequest.sessionOwner.sessionKey,
+          sessionKey: continuation.importEvidence.sessionOwner.sessionKey,
           evidence: {
             sessionOwner: continuation.importEvidence.sessionOwner,
             templateCatalog: continuation.importEvidence.templateCatalog,
@@ -315,9 +312,20 @@ function createStatementService(options = {}) {
           choiceDomain: pendingToken.privateContext.choiceDomain
         });
         Object.assign(job, { kind: 'continuation', tokenRecord });
+        const privateRequest = Object.freeze({
+          ...continuation.importEvidence,
+          sources: await resolvePrivateSources(continuation.importEvidence, job)
+        });
         const originalSources = tokenRecord.privateContext.request.sources;
         if (privateRequest.sources.length !== originalSources.length ||
-            privateRequest.sources.some((source, index) => source.path !== originalSources[index].path)) {
+            privateRequest.sources.some((source, index) => {
+              const original = originalSources[index];
+              return source.resourceId !== original.resourceId ||
+                source.templateRef !== original.templateRef ||
+                source.path !== original.path ||
+                !isDeepStrictEqual(source.snapshot, original.snapshot) ||
+                !isDeepStrictEqual(source.sourceIdentity, original.sourceIdentity);
+            })) {
           throw new StatementServiceError(
             'STATEMENT_TOKEN_SOURCE_IDENTITY_STALE',
             'Statement source resource identity changed before continuation'

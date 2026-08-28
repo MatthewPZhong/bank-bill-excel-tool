@@ -3,7 +3,7 @@
 ## Task Brief
 
 - Goal：仅实现 frozen v3.2.3 E09-B 的 Statement pending-interaction reservation、opaque single-use token 与 waiting-user continuation 生命周期。
-- Context：精确 base/初始 HEAD 为 `04b6ca3f1e87c0ddcda4d709fbc95d4a39eba6ad`；E09-A 已实现 dormant Statement Service import/session/revision 与真实 Service Control persistent adoption。
+- Context：本 restack 精确 base/初始 HEAD 为 `ddac924bba79fd920e85580bde9865b850ee9dff`；E09-A 已实现 dormant Statement Service import/session/revision、逐来源 template/source lineage 与真实 Service Control persistent adoption。旧 E09-B 三提交的历史 base 为 `04b6ca3f1e87c0ddcda4d709fbc95d4a39eba6ad`，只作为移植来源，不再是合同真值。
 - Constraints：不接 live IPC，不实现 E09-C generation、E09-D manual seed settlement 或 E10；五个 Statement action 必须保持 `production=false / effectiveMode=legacy / effectiveWorkerCount=0`。Renderer 不得取得 rows、private context、reservationId 或 source path。资金、恢复与人工门禁不改写。
 - Done when：token 严格按 estimate → request/grant → private insert → adopted/adopt-ack → bounded public DTO 发布；每 Service 单一重 token、TTL/总预算/single-use 与 mutation/expiry/cancel/crash/quit invalidate/release 可证明；waiting-user 保持同一 TaskRun running，释放 phase/lock、continuation 新 job 重取并精确重验全部 evidence；定向 tests/lint/check 通过。
 
@@ -16,7 +16,7 @@
 | E09-P0 已冻结 purpose-specific public DTO、240 KiB inner ceiling、15min TTL、maxOutstanding=1 与 deterministic private footprint estimator | `statement-worker/contracts.js`、`state-footprint.js`、E09-P0 tests | E09-B 必须直接复用，不放宽 status 1 MiB ceiling 到交互 DTO |
 | Supervisor 每个新 job 重新获取并在 settle 后释放 PhaseLease | `background-execution/supervisor.js` admission/settle；Supervisor tests | waiting-user 不保留 Phase CPU/I/O；continuation 自然是同 Service 的新 job |
 | frozen lifecycle 将 waiting-user 映射为 TaskRun running，而 crash/quit 未完成交互映射 interrupted | v3.2.3 Spec §5、TechDoc §4/§8、platform lifecycle §9/§12 | Main coordinator 只保存 bounded task/token handle；不能把 job:done 误当 Task terminal |
-| 现有 E09-A 对大账号 mapping 明确 blocked，template evidence 尚未携带维护的大账号候选 | `session-state.js#assertImportDoesNotRequireInteraction`、E09-A preflight/notes/test | E09-B 需 additive 扩展 template evidence，并由 Worker 读源后构造 prompt/private draft；旧 evidence 必须兼容 |
+| 新 E09-A 对大账号 mapping 明确 blocked，但 import evidence 已冻结 `sessionOwner + templateCatalog + sources[].templateRef` 与逐来源 source identity | `import-contracts.js`、`source-identity.js`、E09-A parent/child/filename/duplicate tests | E09-B 只能 additive 扩展每个 catalog snapshot 的维护候选；draft/candidate/continuation 必须保留逐来源 lineage，不能退回单 template/sessionKey |
 
 ## Unknowns Register
 
@@ -37,6 +37,16 @@
 - E09-B 只接通 `big-account` interaction；manual-balance 与 scope-generation 只保留已冻结 DTO/purpose，不提前实现 E09-C/D。
 - dormant waiting-user coordinator 以注入的 Main-owned lock/phase owner API 验证合同；live handler 接线留给 action enable PR，避免改变当前用户路径。
 - E09-A 老 template evidence 不含候选字段时继续非交互路径；只有明确 multi-big-account mapping 且携带合法维护候选时才发行 token，否则 fail closed。
+
+## E09-A Restack 适配（`ddac924b`）
+
+| 发现 | 分类 | 旧 E09-B 风险 | 采用方案 | 验证 |
+| --- | --- | --- | --- | --- |
+| session owner 与 source template 不再等价 | PROBE | 用单一 `templateId/sessionKey` 构造 prompt/candidate 会覆盖 parent/child 与 filename mapping | prompt 使用 `sessionOwner`；每个 source 按 `templateRef` 取 catalog snapshot，entry 保存 exact ref/digest/matchedTemplateId | mixed direct + big-account parent session test |
+| source identity 是 path + snapshot + layered identity 的组合 | PROBE | continuation 只比 path 可被 alias/TOCTOU/source mutation 绕过 | token private request保留完整 Worker-only identity；continuation token-first 校验 evidence 后重新解析并逐字段比较完整 identity，再重新映射/比 candidate digest | E09-A identity tests + E09-B token-first tamper/valid retry |
+| future action wrong-action 必须在 payload/source I/O 前 fail fast | ASSUME（冻结合同） | 通用 import parser 会让 E09-C/D action误入 E09-B | 仅允许 import/resolve-big-account；其余 action在解析 payload、读文件、申请 resource 前拒绝 | E09-A unsupported-action test |
+
+本次无新的用户选择 BLOCK。上述都是从 exact E09-A head 可直接取证的兼容修复；不改变 frozen E09-B public token、waiting-user 或资金合同。
 
 ## 风险优先计划
 
