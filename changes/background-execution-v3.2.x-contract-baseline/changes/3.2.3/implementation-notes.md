@@ -43,23 +43,49 @@
 
 ## Deviations
 
-当前无偏差。
+### Reviewer Round 1 contract clarification
+
+Round 1 证明原实现的“Main business validator”只有单 sheet/行数回读，且
+`FilePlan + Worker manifest` 不能独立绑定 artifact kind 与业务内容。为闭合既有
+“全部 technical/business validation 后才 Publisher”的合同，本 change 增加
+`MainExpectedArtifactDescriptorV1`：由 Main 持有并在调用 publication seam 时传入，
+绑定 artifactKey、kind、冻结顺序、task-owned staging resource、sheet/header、行守恒、
+有序记录及日期/账户/币种/金额摘要、writer/style/watermark/template lineage。该 descriptor
+不进入 Worker manifest，也不携带 raw rows/prepared batch；manifest 冻结字段保持不变。
+`spec.md`/`techdoc.md` 已同步此验证与清理边界，属于原合同的安全澄清，不改变 legacy 业务输出。
+
+此外，Round 1 的四个 P1 已由项目负责 Agent 接受为真实可达：
+
+| Finding | 分类 | 决定 |
+| --- | --- | --- |
+| staging 中间祖先 symlink 可越界发布/清理 | PROBE → CLOSED | technical、默认 Publisher 前、restart cleanup 共用逐级 `lstat` + `realpath` + inode/alias 的 task-owned validator |
+| invalid/outside manifest 可驱动 finally 删除外部文件 | PROBE → CLOSED | 清理只从 Main-owned descriptor 解析且通过归属验证的资源；不再把未验证 manifest 交给通用 disposer |
+| detail/balance resource alias 可先后覆盖 | PROBE → CLOSED | request 拒绝 dot/parent，Worker 写入前对完整集合做平台 alias 检查，Main 再做集合 alias 与 kind/order 绑定 |
+| 自洽 manifest 可用错误 workbook 冒充业务 artifact | PROBE → CLOSED | Main 按 descriptor 做完整 bounded readback；任一内容/type/format/style/lineage 不符时 Publisher=0 |
+
+最终 blindspot pass 另关闭两个同边界可达缺口：journal Publisher 只白名单接受
+`checkpoint/now/randomUUID` test runtime，不允许 `publisherOptions` 覆盖 Main-owned task/artifact/target/
+validation 参数；余额 0 输出模板占位行必须为空，禁止在自洽 `rowCounts.output=0` 下夹带业务记录。
+
+除上述合同澄清外无业务偏差；production policy、manual seed 与 live IPC 范围均不变。
 
 ## Evidence
 
 | 证据 | 结果 | 覆盖的行为/风险 |
 | --- | --- | --- |
-| `git rev-parse HEAD` | `654393e9a24c772f51db9114888a2114382ce39d` | 精确 parent/base |
-| E09-C 专项 `node --test ...statement-generation-e09-c.test.js ...error-codec.test.js` | 15/15 PASS | 真实 Supervisor/ServiceHost/Worker、临时 XLSX/SQLite、current/all、跨 action scope、stale/replay/evidence、tamper、all-or-none、四金额、混币余额、partial writer、manual prompt、路径/cleanup、bounded manifest |
-| E09-P0/A/B + Supervisor/ServiceHost/Governor 回归 | 205/205 PASS | 既有 token/session/取消/crash/资源生命周期及 platform 基线 |
+| `git merge-base HEAD 654393e9...` / Round 1 rework parent | merge-base `654393e9a24c772f51db9114888a2114382ce39d`；parent `78d9a19777e9680907413194195a00741c6037f2` | 精确 base/堆叠边界 |
+| E09-C 专项 `node --test ...statement-generation-e09-c.test.js ...error-codec.test.js` | 20/20 PASS | 真实 Supervisor/ServiceHost/Worker、临时 XLSX/SQLite、current/all、stale/replay/revision/evidence、四项 Round 1 P1、tamper、all-or-none、四金额、混币余额、0 输出、partial writer、manual prompt、bounded manifest |
+| E09-P0/A/B + Supervisor/ServiceHost/Governor 聚焦回归 | 228/228 PASS | 既有 token/session/取消/crash/资源生命周期、legacy golden 与 dormant policy 基线 |
 | `node scripts/integration/statement-generation-pipeline.js` | 45/45 PASS | legacy generation pipeline 业务等价 |
-| 全量 `npm run test:unit` | 6242/6246 PASS，1 FAIL，3 SKIP | 唯一失败为共享依赖 `app-builder-lib` 的 `multiUser.nsh` 仍含 `System::Store`，与本 change 无关；隔离 worktree 无本地依赖时另有两个 ENOENT，临时依赖 symlink 后已归因 |
+| `npm run test:integration` | 51/51 scripts、2455/2455 PASS | 全仓集成、Publisher/cleanup 与资金相关输出回归；runner 自动清单的本地耗时刷新已回退，不纳入 change |
+| 全量 `npm run test:unit` | 6246 PASS，2 FAIL，3 SKIP（6251 total） | 两个失败均为 `windows-build-contract.test.js` 直接读取隔离 worktree 缺失的 `node_modules/app-builder-lib/templates/nsis/multiUser.nsh`；共享安装为 26.8.1、lockfile 为 26.15.7，属于既有依赖环境漂移，未改依赖掩盖 |
 | changed JS ESLint + `node --check` + parent/overall `git diff --check` | PASS | 静态质量与 diff 完整性 |
-| `statement-legacy-golden-e09-p0.test.js` 与 fixture | current/all、四金额、混合币种/余额、manual prompt 已冻结且回归通过 | 业务等价基线 |
+| `statement-legacy-golden-e09-p0.test.js` 与真实 descriptor readback | current/all、四金额、混合币种/余额、manual prompt、sheet/header/type/style/watermark/template lineage 已冻结且回归通过 | 业务等价与资金输出防冒充基线 |
 
 ## Remaining Unknowns
 
 | 未知 | 处理 | 负责人/下一步 | 合并影响 |
 | --- | --- | --- | --- |
+| 真实脱敏资金样本的逐行金额方向、币种、余额与 Excel/WPS 展示 | BLOCK production/release gate | 资金负责人按 current/all、四金额、混合币种、0 输出和余额提示逐项人工复核 | 自动化业务等价不替代人工资损验收；不阻塞 dormant E09-C，阻止 production 启用 |
 | Windows packaged durable publication | BLOCK release gate | R3.2.3 人工/packaged 门禁 | 不阻塞 dormant E09-C 合并，production 必须保持 false |
 | balance seed durable settlement（含自动派生 seed 的最终 owner） | BLOCK production gate | E09-D/后续合同按 Main-owned settlement 闭环 | E09-C 不允许 Worker 修改共享 seed；不阻塞 dormant 合并，阻止 production 启用 |

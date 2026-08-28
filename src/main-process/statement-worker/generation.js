@@ -7,6 +7,12 @@ const XLSX = require('xlsx');
 
 const { sourceSnapshotMatchesStat } = require('../archive-center/source-snapshot');
 const { createGenerationHelpers } = require('../statement-generation-business');
+const {
+  assertDistinctTaskOwnedPaths,
+  resolveTaskStagingResource,
+  validateTaskOwnedStagingPath
+} = require('./staging-ownership');
+const { MAX_ARTIFACT_BYTES } = require('./generation-contracts');
 
 class StatementGenerationError extends Error {
   constructor(code, message) {
@@ -68,45 +74,6 @@ function assertSourcesCurrent(entries) {
   }
 }
 
-function assertWithinRoot(root, resourceId) {
-  const resolvedRoot = path.resolve(root);
-  const candidate = path.resolve(resolvedRoot, resourceId);
-  if (candidate === resolvedRoot || !candidate.startsWith(`${resolvedRoot}${path.sep}`)) {
-    throw new StatementGenerationError(
-      'STATEMENT_GENERATION_STAGING_PATH_INVALID',
-      'Statement generation path escapes task staging root'
-    );
-  }
-  let cursor = path.dirname(candidate);
-  while (cursor !== resolvedRoot) {
-    let stat;
-    try {
-      stat = fs.lstatSync(cursor);
-    } catch (error) {
-      if (error && error.code === 'ENOENT') {
-        cursor = path.dirname(cursor);
-        continue;
-      }
-      throw error;
-    }
-    if (stat.isSymbolicLink() || !stat.isDirectory()) {
-      throw new StatementGenerationError(
-        'STATEMENT_GENERATION_STAGING_PATH_INVALID',
-        'Statement staging ancestors must be regular directories'
-      );
-    }
-    cursor = path.dirname(cursor);
-  }
-  const rootStat = fs.lstatSync(resolvedRoot);
-  if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
-    throw new StatementGenerationError(
-      'STATEMENT_GENERATION_STAGING_PATH_INVALID',
-      'Statement staging root must be a regular directory'
-    );
-  }
-  return candidate;
-}
-
 function workbookOutputRows(filePath) {
   const workbook = XLSX.readFile(filePath, { raw: true });
   if (workbook.SheetNames.length !== 1) {
@@ -123,12 +90,45 @@ function workbookOutputRows(filePath) {
   return Math.max(0, rows.length - 1);
 }
 
-function removeArtifacts(paths) {
+function removeArtifacts(paths, options = {}) {
   for (const filePath of paths) {
     try {
-      const stat = fs.lstatSync(filePath);
-      if (stat.isFile() && !stat.isSymbolicLink()) fs.rmSync(filePath, { force: true });
+      validateTaskOwnedStagingPath({
+        stagingRoot: options.stagingRoot,
+        candidatePath: filePath,
+        finalState: 'file'
+      });
+      fs.rmSync(filePath, { force: true });
     } catch (_error) {}
+  }
+}
+
+function resolveArtifactPlans(stagingRoot, artifacts) {
+  try {
+    const plans = artifacts.map((artifact) => Object.freeze({
+      artifact,
+      generationPath: resolveTaskStagingResource(stagingRoot, artifact.stagingResourceId)
+    }));
+    for (const plan of plans) {
+      validateTaskOwnedStagingPath({
+        stagingRoot,
+        candidatePath: plan.generationPath,
+        finalState: 'missing',
+        allowMissingAncestors: true
+      });
+    }
+    assertDistinctTaskOwnedPaths(plans.map((plan) => plan.generationPath));
+    return Object.freeze(plans);
+  } catch (error) {
+    if (error && error.code === 'STATEMENT_STAGING_OWNERSHIP_INVALID') {
+      throw new StatementGenerationError(
+        error.reason === 'collision'
+          ? 'STATEMENT_GENERATION_STAGING_COLLISION'
+          : 'STATEMENT_GENERATION_STAGING_PATH_INVALID',
+        error.message
+      );
+    }
+    throw error;
   }
 }
 
@@ -152,29 +152,31 @@ function executeStatementGeneration(options) {
   }
   assertSourcesCurrent(entries);
   assertNotCancelled();
+  const artifactPlans = resolveArtifactPlans(stagingRoot, request.artifacts);
   const artifactPaths = {};
-  for (const artifact of request.artifacts) {
-    const generationPath = assertWithinRoot(stagingRoot, artifact.stagingResourceId);
-    fs.mkdirSync(path.dirname(generationPath), { recursive: true });
-    let existing = null;
-    try {
-      existing = fs.lstatSync(generationPath);
-    } catch (error) {
-      if (!error || error.code !== 'ENOENT') throw error;
+  for (const plan of artifactPlans) {
+    fs.mkdirSync(path.dirname(plan.generationPath), { recursive: true });
+  }
+  try {
+    for (const plan of artifactPlans) {
+      validateTaskOwnedStagingPath({
+        stagingRoot,
+        candidatePath: plan.generationPath,
+        finalState: 'missing'
+      });
+      artifactPaths[plan.artifact.kind] = plan.generationPath;
     }
-    if (existing && existing.isSymbolicLink()) {
+    assertDistinctTaskOwnedPaths(Object.values(artifactPaths));
+  } catch (error) {
+    if (error && error.code === 'STATEMENT_STAGING_OWNERSHIP_INVALID') {
       throw new StatementGenerationError(
-        'STATEMENT_GENERATION_STAGING_PATH_INVALID',
-        'Statement staging artifact cannot be a symbolic link'
+        error.reason === 'collision'
+          ? 'STATEMENT_GENERATION_STAGING_COLLISION'
+          : 'STATEMENT_GENERATION_STAGING_PATH_INVALID',
+        error.message
       );
     }
-    if (existing) {
-      throw new StatementGenerationError(
-        'STATEMENT_GENERATION_STAGING_COLLISION',
-        'Statement staging artifact already exists'
-      );
-    }
-    artifactPaths[artifact.kind] = generationPath;
+    throw error;
   }
   const helpers = createGenerationHelpers({
     storageRoot,
@@ -213,8 +215,26 @@ function executeStatementGeneration(options) {
           `Statement ${plan.kind} artifact is missing`
         );
       }
-      const stat = fs.lstatSync(generatedFile.filePath);
-      if (stat.isSymbolicLink() || !stat.isFile() || stat.size < 1) {
+      let ownership;
+      try {
+        ownership = validateTaskOwnedStagingPath({
+          stagingRoot,
+          candidatePath: generatedFile.filePath,
+          finalState: 'file'
+        });
+      } catch (error) {
+        if (error && error.code === 'STATEMENT_STAGING_OWNERSHIP_INVALID') {
+          throw new StatementGenerationError(
+            'STATEMENT_GENERATION_ARTIFACT_INVALID',
+            error.message
+          );
+        }
+        throw error;
+      }
+      const stat = ownership.stat;
+      const artifactSize = Number(stat.size);
+      if (!Number.isSafeInteger(artifactSize) || artifactSize < 1 ||
+          artifactSize > MAX_ARTIFACT_BYTES) {
         throw new StatementGenerationError(
           'STATEMENT_GENERATION_ARTIFACT_INVALID',
           `Statement ${plan.kind} artifact is invalid`
@@ -223,7 +243,7 @@ function executeStatementGeneration(options) {
       return Object.freeze({
         artifactKey: plan.artifactKey,
         generationPath: generatedFile.filePath,
-        size: stat.size,
+        size: artifactSize,
         sha256: sha256File(generatedFile.filePath),
         rowCounts: Object.freeze({ input: inputRows, output: workbookOutputRows(generatedFile.filePath) }),
         warningSummary: summary,
@@ -240,7 +260,7 @@ function executeStatementGeneration(options) {
       inputEvidenceHash
     });
   } catch (error) {
-    removeArtifacts(plannedPaths);
+    removeArtifacts(plannedPaths, { stagingRoot });
     throw error;
   }
 }
@@ -250,6 +270,7 @@ module.exports = {
   assertSourcesCurrent,
   executeStatementGeneration,
   removeArtifacts,
+  resolveArtifactPlans,
   sha256File,
   warningSummary
 };
