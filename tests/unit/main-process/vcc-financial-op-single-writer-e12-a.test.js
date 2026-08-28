@@ -60,6 +60,7 @@ const {
   pendingSheetProjection
 } = require('../../../src/main-process/vcc-financial-op-output/artifact-evidence');
 const {
+  PENDING_SHEET_NAME,
   writeRunWorkbooks
 } = require('../../../src/main-process/vcc-financial-op-writer');
 const {
@@ -374,9 +375,9 @@ async function rewriteResultHeaderFooter(filePath) {
   });
 }
 
-async function rewriteResultSheetState(filePath) {
+async function rewriteSheetState(filePath, sheetName) {
   await rewriteZipXml(filePath, 'xl/workbook.xml', (workbookXml) => {
-    const pattern = /(<sheet\b(?=[^>]*\bname="财务OP校验结果表")[^>]*?)(\/?>)/;
+    const pattern = new RegExp(`(<sheet\\b(?=[^>]*\\bname="${sheetName}")[^>]*?)(\\/?>)`);
     const match = pattern.exec(workbookXml);
     assert.ok(match);
     const withoutState = match[1].replace(/\sstate="[^"]*"/g, '');
@@ -385,6 +386,50 @@ async function rewriteResultSheetState(filePath) {
       (_matched, _attributes, closing) => `${withoutState} state="hidden"${closing}`
     );
   });
+}
+
+async function rewriteResultSheetState(filePath) {
+  return rewriteSheetState(filePath, '财务OP校验结果表');
+}
+
+async function rewritePendingSheetState(filePath) {
+  return rewriteSheetState(filePath, PENDING_SHEET_NAME);
+}
+
+async function rewritePendingHeaderFooter(filePath) {
+  await rewriteWorksheetXml(filePath, (worksheetXml) => {
+    if (/<headerFooter\b/.test(worksheetXml)) {
+      return worksheetXml.replace(
+        /<headerFooter\b[^>]*>[\s\S]*?<\/headerFooter>/,
+        '<headerFooter><oddFooter>&amp;Rtampered</oddFooter></headerFooter>'
+      );
+    }
+    return worksheetXml.replace(
+      '</worksheet>',
+      '<headerFooter><oddFooter>&amp;Rtampered</oddFooter></headerFooter></worksheet>'
+    );
+  }, 2);
+}
+
+async function rewritePendingSheetProperties(filePath) {
+  await rewriteWorksheetXml(filePath, (worksheetXml) => {
+    if (/<sheetPr\b[^>]*>[\s\S]*?<\/sheetPr>/.test(worksheetXml)) {
+      return worksheetXml.replace(
+        /(<sheetPr\b[^>]*>)/,
+        '$1<tabColor rgb="FFFF0000"/>'
+      );
+    }
+    if (/<sheetPr\b[^>]*\/>/.test(worksheetXml)) {
+      return worksheetXml.replace(
+        /<sheetPr\b([^>]*)\/>/,
+        '<sheetPr$1><tabColor rgb="FFFF0000"/></sheetPr>'
+      );
+    }
+    return worksheetXml.replace(
+      /(<worksheet\b[^>]*>)/,
+      '$1<sheetPr><tabColor rgb="FFFF0000"/></sheetPr>'
+    );
+  }, 2);
 }
 
 async function rewritePendingRowLayout(filePath, rowNumber, attribute) {
@@ -450,6 +495,31 @@ async function runManaged({ harness, actionKey, selectedSubjectIndexes, suffix }
     settleManifestArtifacts: async () => {}
   });
   return { result, publisherCalls, publishedDigests, plan, selected };
+}
+
+async function runSingleCreationProbe({
+  harness,
+  plan,
+  stagingDirectory,
+  batch,
+  runtime,
+  publishPublication
+}) {
+  return generateValidateAndPublishVccExport({
+    actionKey: VCC_EXPORT_SINGLE_ACTION,
+    runtime,
+    expectedAuthority: harness.snapshot.authority,
+    readCurrentSnapshot: async () => harness.snapshot,
+    readCurrentTaskAuthority: async () => ({
+      action: 'export-result', taskGeneration: 0, taskRunId: batch.taskRunId
+    }),
+    selectedSubjectIndexes: [0],
+    filePlan: plan,
+    stagingDirectory,
+    assetsDir: ASSETS_DIR,
+    batchContext: batch,
+    publishPublication
+  });
 }
 
 test('E12-A 两 action canonical policy byte-for-byte、production false 且 validator 隔离', () => {
@@ -821,7 +891,10 @@ test('raw XLSX XML 自洽篡改样式与完整 Result/Pending 页面布局仍在
     ['result header footer', rewriteResultHeaderFooter],
     ['result sheet state', rewriteResultSheetState],
     ['pending row 2 hidden', (filePath) => rewritePendingRowLayout(filePath, 2, 'hidden')],
-    ['pending row 2 outline', (filePath) => rewritePendingRowLayout(filePath, 2, 'outlineLevel')]
+    ['pending row 2 outline', (filePath) => rewritePendingRowLayout(filePath, 2, 'outlineLevel')],
+    ['pending workbook sheet hidden', rewritePendingSheetState],
+    ['pending header footer', rewritePendingHeaderFooter],
+    ['pending sheet properties', rewritePendingSheetProperties]
   ];
   for (const [label, tamper] of tamperCases) {
     await t.test(label, async () => {
@@ -1417,6 +1490,189 @@ test('task dir post-create identity/collision 失败统一由既有 cleanup owne
       retry.stagingRootReal,
       retry.stagingIdentity
     ).status, 'complete');
+  });
+
+  await t.test('post-mkdir freeze 发生 replacement+EIO 时不从 lexical replacement 重取删除 authority', async () => {
+    const harness = setup(t, ['PPHK']);
+    const stagingDirectory = path.join(harness.root, 'post-create-replacement-eio');
+    fs.mkdirSync(stagingDirectory);
+    const plan = filePlan(harness.root, 1, 'post-create-replacement-eio');
+    const batch = batchContext('post-create-replacement-eio');
+    const originalRealpathSync = fs.realpathSync;
+    let taskRoot = null;
+    let originalTaskRoot = null;
+    let replacementSentinel = null;
+    let injected = false;
+    let workerCalls = 0;
+    let publisherCalls = 0;
+    fs.realpathSync = function patchedRealpathSync(filePath, options) {
+      const candidate = path.resolve(String(filePath));
+      if (!injected && path.dirname(candidate) === stagingDirectory &&
+          path.basename(candidate).startsWith('vcc-export-') && fs.existsSync(candidate)) {
+        taskRoot = candidate;
+        originalTaskRoot = `${candidate}.original`;
+        fs.renameSync(taskRoot, originalTaskRoot);
+        fs.mkdirSync(taskRoot);
+        replacementSentinel = path.join(taskRoot, 'replacement.keep');
+        fs.writeFileSync(replacementSentinel, 'must-not-delete');
+        injected = true;
+        const error = new Error('fixture replacement during first full freeze');
+        error.code = 'EIO';
+        throw error;
+      }
+      return originalRealpathSync.call(this, filePath, options);
+    };
+    let caught;
+    try {
+      await runSingleCreationProbe({
+        harness,
+        plan,
+        stagingDirectory,
+        batch,
+        runtime: { async execute() { workerCalls += 1; } },
+        publishPublication: async () => { publisherCalls += 1; }
+      });
+    } catch (error) {
+      caught = error;
+    } finally {
+      fs.realpathSync = originalRealpathSync;
+    }
+    assert.equal(injected, true);
+    assert.ok(caught);
+    assert.equal(caught.code, 'VCC_EXPORT_STAGING_IDENTITY_CHANGED');
+    assert.equal(caught.preserveTemporaryFiles, true);
+    assert.deepEqual(caught.recoveryPaths, [taskRoot]);
+    assert.match(caught.detailLines.join('\n'), /identityCauseCode=EIO/);
+    assert.match(caught.detailLines.join('\n'), /VCC_EXPORT_STAGING_IDENTITY_CHANGED/);
+    assert.equal(fs.readFileSync(replacementSentinel, 'utf8'), 'must-not-delete');
+    assert.equal(fs.existsSync(originalTaskRoot), true);
+    assert.equal(workerCalls, 0);
+    assert.equal(publisherCalls, 0);
+    await assert.rejects(runSingleCreationProbe({
+      harness,
+      plan,
+      stagingDirectory,
+      batch,
+      runtime: { async execute() { workerCalls += 1; } },
+      publishPublication: async () => { publisherCalls += 1; }
+    }), (error) => error.code === 'VCC_EXPORT_STAGING_COLLISION');
+    assert.equal(workerCalls, 0);
+
+    // recoveryPaths 要求人工确认 lexical replacement 与原 inode 的去向；这里显式
+    // 模拟 operator 恢复原目录，自动 owner 从未重新获取 replacement authority。
+    fs.rmSync(taskRoot, { recursive: true, force: true });
+    fs.renameSync(originalTaskRoot, taskRoot);
+    fs.rmdirSync(taskRoot);
+    await assert.rejects(runSingleCreationProbe({
+      harness,
+      plan,
+      stagingDirectory,
+      batch,
+      runtime: {
+        async execute() {
+          workerCalls += 1;
+          return {
+            outcome: 'failed',
+            terminalSource: 'job:error',
+            error: {
+              code: 'VCC_FIXTURE_RETRY_EXECUTED',
+              message: 'fixture retry reached Writer after manual recovery',
+              stage: 'execute',
+              detailLines: []
+            }
+          };
+        }
+      },
+      publishPublication: async () => { publisherCalls += 1; }
+    }), (error) => error.code === 'VCC_FIXTURE_RETRY_EXECUTED');
+    assert.equal(workerCalls, 1);
+    assert.equal(publisherCalls, 0);
+    assert.deepEqual(fs.readdirSync(stagingDirectory), []);
+  });
+
+  await t.test('post-mkdir full freeze 持续 EACCES 时保留有界人工恢复证据且不静默永久 collision', async () => {
+    const harness = setup(t, ['PPHK']);
+    const stagingDirectory = path.join(harness.root, 'post-create-persistent-eacces');
+    fs.mkdirSync(stagingDirectory);
+    const plan = filePlan(harness.root, 1, 'post-create-persistent-eacces');
+    const batch = batchContext('post-create-persistent-eacces');
+    const originalRealpathSync = fs.realpathSync;
+    let taskRoot = null;
+    let workerCalls = 0;
+    let publisherCalls = 0;
+    fs.realpathSync = function patchedRealpathSync(filePath, options) {
+      const candidate = path.resolve(String(filePath));
+      if (path.dirname(candidate) === stagingDirectory &&
+          path.basename(candidate).startsWith('vcc-export-') && fs.existsSync(candidate)) {
+        taskRoot = candidate;
+        const error = new Error('fixture persistent post-create EACCES');
+        error.code = 'EACCES';
+        throw error;
+      }
+      return originalRealpathSync.call(this, filePath, options);
+    };
+    let caught;
+    try {
+      await runSingleCreationProbe({
+        harness,
+        plan,
+        stagingDirectory,
+        batch,
+        runtime: { async execute() { workerCalls += 1; } },
+        publishPublication: async () => { publisherCalls += 1; }
+      });
+    } catch (error) {
+      caught = error;
+    } finally {
+      fs.realpathSync = originalRealpathSync;
+    }
+    assert.ok(caught);
+    assert.equal(caught.code, 'VCC_EXPORT_STAGING_IDENTITY_CHANGED');
+    assert.equal(caught.preserveTemporaryFiles, true);
+    assert.deepEqual(caught.recoveryPaths, [taskRoot]);
+    assert.ok(caught.recoveryPaths.length <= 100);
+    assert.match(caught.detailLines.join('\n'), /identityCauseCode=EACCES/);
+    assert.equal(fs.existsSync(taskRoot), true);
+    assert.equal(workerCalls, 0);
+    assert.equal(publisherCalls, 0);
+    await assert.rejects(runSingleCreationProbe({
+      harness,
+      plan,
+      stagingDirectory,
+      batch,
+      runtime: { async execute() { workerCalls += 1; } },
+      publishPublication: async () => { publisherCalls += 1; }
+    }), (error) => error.code === 'VCC_EXPORT_STAGING_COLLISION');
+    assert.equal(workerCalls, 0);
+
+    // 自动 owner 没有 deletion authority；operator 按 recoveryPaths 确认空目录后
+    // 显式收口。恢复完成后 deterministic retry 不再永久 collision。
+    fs.rmdirSync(taskRoot);
+    await assert.rejects(runSingleCreationProbe({
+      harness,
+      plan,
+      stagingDirectory,
+      batch,
+      runtime: {
+        async execute() {
+          workerCalls += 1;
+          return {
+            outcome: 'failed',
+            terminalSource: 'job:error',
+            error: {
+              code: 'VCC_FIXTURE_RETRY_EXECUTED',
+              message: 'fixture retry reached Writer after EACCES recovery',
+              stage: 'execute',
+              detailLines: []
+            }
+          };
+        }
+      },
+      publishPublication: async () => { publisherCalls += 1; }
+    }), (error) => error.code === 'VCC_FIXTURE_RETRY_EXECUTED');
+    assert.equal(workerCalls, 1);
+    assert.equal(publisherCalls, 0);
+    assert.deepEqual(fs.readdirSync(stagingDirectory), []);
   });
 
   await t.test('post-create identity failure 的 task-dir rmdir 失败返回有界证据且可恢复', () => {

@@ -52,6 +52,13 @@
 | `mkdir` 成功后的 identity/collision 失败是否属于本次 cleanup owner。 | PROBE（高） | 已创建目录在后续校验失败时若直接抛出，会泄漏 exact task dir并让同 operation retry 永久 collision；但 caller 已有目录不可误删。 | 只对本次成功创建的 exact task dir建立 owned identity；所有 post-create failure 走同一 cleanup owner。cleanup 成功后 retry 可继续；失败时返回有界 exact recovery evidence，retry fail closed，恢复后仍由同 owner 收口。 |
 | Result/Pending 是否已闭合页面和行布局 authority。 | PROBE（高） | OOXML 的 orientation、margin、header/footer、sheet state 与 Pending row hidden/outline 可独立篡改并重算 size/hash；仅 cell style/row height 比较不足。 | 唯一 Result validator 比较 sheet state/properties/pageSetup/headerFooter（仅动态 printArea 例外）及原有完整布局矩阵；Pending projection补 row hidden/outlineLevel。Writer self-check/Main Join 继续复用 canonical authority。 |
 
+## Independent Review Round4 Re-review Unknowns Closure
+
+| 补充未知 | 分类 | 证据收口 | 最终决定 |
+| --- | --- | --- | --- |
+| post-mkdir full freeze 首次失败后是否还能从 lexical path 安全重取 cleanup authority。 | PROBE（高） | 首次 realpath/freeze 可同时发生 replacement 与 I/O error；再次 stat/realpath 会把 replacement 误认作自建目录。mkdir 不提供持久目录句柄，不能声称消除检查后的 OS 竞态。 | 紧邻 mkdir 冻结 root/parent dev+ino provisional identity；full identity 只能由 provisional + expected real path 派生，后续只验证。无法确认则零删除、Worker/Publisher=0、preserve+有界 recovery path/diagnostic，要求人工恢复；绝不自动从当前 lexical path 重新授权。 |
+| Pending writer 的完整页面 authority 是否包含 sheet visibility/properties/headerFooter。 | PROBE（高） | canonical `buildPendingSheet` 明确创建 visible worksheet并确定 page layout；expected workbook由同一 writer序列化，properties/headerFooter的默认语义稳定可比较。raw OOXML hidden/header-footer/tabColor 可独立篡改并重算 manifest。 | Pending projection纳入 state（visible）、properties、headerFooter，并保留 rows/columns/views/autoFilter/pageSetup/cell style；Main Join复用同一 projection，不新增第二 validator。 |
+
 ## BLOCK 问题
 
 无。单 Writer topology、run/archive authority、FilePlan/Publisher ownership 可由冻结合同和现有代码唯一收口。

@@ -60,6 +60,9 @@ function pendingSheetProjection(sheet) {
   }
   return {
     name: sheet.name,
+    state: sheet.state || 'visible',
+    properties: normalizeStyle(sheet.properties || {}),
+    headerFooter: normalizeStyle(sheet.headerFooter || {}),
     rowCount,
     columnCount,
     columns: Array.from({ length: columnCount }, (_unused, index) => {

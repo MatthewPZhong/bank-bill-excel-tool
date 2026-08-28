@@ -16,7 +16,7 @@
 | 业务生成复用现有 `writeRunWorkbooks`/template validator，只增加 exact generation paths、cancel safe point 和 Join 证据。 | 金额/币种/样式/lineage 零漂移要求。 | 在新 Writer 重写 Excel 生成。 | legacy 和 managed 共享同一业务 core。 |
 | 一次现有 `publishVccFinancialOpOutputs` 是唯一正式发布边界。 | 现有 wrapper 已使用 durable journal、target snapshot 与 source size/hash。 | Writer rename 到正式目标；新建 VCC Publisher/receipt。 | 任一 generation/Join 失败 Publisher=0；全集成功后仅一次调用。 |
 | Main dispatch 是 E12-A generation/task-dir 的唯一 cleanup/recovery owner；atomic writer 只拥有当前 UUID tmp。 | committed Publisher 后 cleanup 失败不能改写业务成功，也不能由 recovery wrapper 与 dispatch 双删；既有 Main owner 已能做 exact-path、严格 UUID tmp 与 task-dir 收口。 | Worker finally 删除 generation；wrapper 吞错删除；新增第二 cleanup/recovery service。 | publication 结果附带有界 `generationCleanup` evidence；pending cleanup 不触发二次 Publisher，原 task dir 未收口前同 operation retry fail closed。 |
-| Main 创建 task dir 后冻结 exact staging identity，并随 exact Worker input 传递；Worker 入口、逐主体写入前、atomic handoff 前复用一个 checker。 | 关闭 Main create 与 Worker 使用之间可复现的目录替换窗口，同时保留单一路径 authority。 | 仅靠字符串 containment；每个阶段各写一套校验；引入 native/openat。 | 已发生的 replacement 在外部写入前 fail closed、Publisher=0；不声称消除校验后的 OS 纳秒级竞态。 |
+| Main `mkdir` 后立即冻结 provisional root/parent dev+ino，exact staging identity 只能从该 provisional authority 派生并随 Worker input 传递；Worker 入口、逐主体写入前、atomic handoff 前复用一个 checker。 | 关闭 Main create 与 Worker 使用之间可复现的目录替换窗口，并确保首次 full freeze 失败后不会从当前 lexical path 重新取得 deletion authority。 | 仅靠字符串 containment；freeze 失败后重新 realpath/lstat 授权；每个阶段各写一套校验；引入 native/openat。 | 只有当前 root/parent 仍匹配 provisional identity 才允许同一 owner cleanup；无法确认时 Publisher/Worker=0、preserve+有界 recovery evidence，要求人工收口；不声称消除校验后的 OS 纳秒级竞态。 |
 
 ## Assumptions
 
@@ -51,8 +51,8 @@
 | Restack Review Round2 E11-C interaction | ReconFix export 15/15 PASS | E11-C export plan closure 与 E12-A exact task directory 各自保持唯一 cleanup owner；同 staging retry、symlink/collision、Publisher 0/1 不互相覆盖。 |
 | Restack Review Round2 platform/Publisher | Supervisor/Governor/policy/binding/packaged/recovery/toolbox generation/Publisher 共 320/320 PASS | 单一 cleanup/Publisher authority、transport/lease、journal recovery 与 task inventory 未漂移。 |
 | Restack Review Round2 integration/smoke | VCC 19/19、29/29、226/226、77/77；recovery 9/9、27/27、pure 9/9；smoke PASS | 正常/历史/调整/破坏性链、recovery canary 与全局 smoke。 |
-| Independent Review Round4 focused | E12-A 49/49 PASS；writer/recovery 19/19 PASS | committed 后 generation `EBUSY/EPERM`、task-dir `rmdir` 失败、bounded pending evidence、retry collision/owner 收口；before-worker/before-handoff replacement；cleanup scan/delete/rmdir 前 identity replacement；post-create identity/collision owner 收口；外部同名文件不触碰；Windows-compatible 正常路径零残留。 |
-| Independent Review Round4 affected VCC | 全 VCC 单元矩阵 564/564 PASS | amount/currency/style/page layout/order/revision/archive、Writer/Join/Publisher 与历史回归未漂移。 |
+| Independent Review Round4 focused | E12-A 54/54 PASS；writer/recovery 19/19 PASS | committed 后 generation `EBUSY/EPERM`、task-dir `rmdir` 失败、bounded pending evidence、retry collision/owner 收口；before-worker/before-handoff replacement；cleanup scan/delete/rmdir 前 identity replacement；post-mkdir replacement+EIO/持续 EACCES 不重取 authority；post-create identity/collision owner 收口；外部同名文件不触碰；Windows-compatible 正常路径零残留。 |
+| Independent Review Round4 affected VCC | 全 VCC 单元矩阵 569/569 PASS | amount/currency/style/Result+Pending page layout/order/revision/archive、Writer/Join/Publisher 与历史回归未漂移。 |
 | Independent Review Round4 platform/recovery | E11-C/background runtime/policy/toolbox Publisher 共 529/529 PASS；recovery control 27/27、pure 9/9、recovery canary 9/9 PASS | 单一 cleanup/Publisher authority、transport/lease/journal recovery、E11-C cleanup/runtime 交互未漂移。 |
 | Independent Review Round4 integration/smoke | VCC 19/19、29/29、226/226、77/77 PASS；`npm run smoke` PASS | 正常/历史/调整/破坏性资金链及全局 smoke。 |
 
@@ -95,6 +95,13 @@
 | P2 task dir 已创建后 identity/collision 校验失败没有统一收口，可能泄漏目录并令 retry 永久 collision | 接受。`prepareTaskStagingDirectory` 只把本次成功 `mkdir` 的 exact task dir 标记为 owned；post-create identity、generation collision 及后续验证失败均交给同一 generation cleanup owner。已有目录绝不当作 owned 删除；cleanup 失败只附有界 exact recovery evidence，保留首错。 | post-create realpath/identity failure 可收净后重试成功；generation collision 可收净且目录消失；注入 generation `EBUSY`/task-dir `EPERM` 时 recoveryPaths 只含 exact task-private 残留，retry 先 collision fail closed，恢复权限后同 owner 清理并成功重试。 |
 | P2 Result validator 与 Pending projection 未闭合模板页面/行布局语义，自洽 OOXML 篡改仍可能绕过 size/hash | 接受。继续复用唯一 `validateResultSheet`：除动态 `printArea` 外 exact 比较 sheet state/properties/pageSetup/headerFooter，并保留既有 autoFilter/views/row/column/cell/merge 矩阵；Pending projection 补入 row `hidden/outlineLevel`，不比较不稳定 styleId，不在 artifact evidence 建第二套样式 authority。 | raw OOXML 自洽篡改 Result orientation/margin/header-footer/sheet state，以及 Pending row hidden/outline，重新压缩并重算 size/hash，均在 Main Join 拒绝且 Publisher=0；正常、调整、merge golden 全通过。 |
 
+## Independent Review Round4 Re-review Findings And Fixes
+
+| Finding | Owner triage / 最小修复 | 可达证据 |
+| --- | --- | --- |
+| P2 首次 post-mkdir full freeze 失败后再次从当前 lexical path 建 identity，可能把 replacement 当成自建目录删除 | 接受。`mkdir` 返回后立即以最小 lstat 组合冻结 root/parent dev+ino provisional identity；full identity 仅从 provisional + Main 已确认 expected real path 派生。后续 full freeze/cleanup 只做 exact identity 验证，绝不从当前 path 重新授权。无法验证时零删除，error 置 `preserveTemporaryFiles=true`、唯一 task-root recoveryPath、bounded cause/digest diagnostics；同 operation retry collision fail closed，明确要求 operator 收口后再重试。 | full freeze 首次 realpath 时替换 task dir并抛 `EIO`：replacement sentinel/原 inode均保留、Worker=0、Publisher=0；持续 `EACCES`：task dir保留、recoveryPaths 有界且含 cause code，retry先 collision。fixture 明确模拟 operator 恢复/删除 recoveryPath 后，retry 可达 Writer，不形成静默永久 collision。一次性 EIO 且 identity 未变时，同一 owner 仍可验证 provisional identity并自动收净。 |
+| P2 Pending canonical projection 未冻结 workbook sheet visibility，hidden sheet 可在重算 manifest 后绕过 | 接受。Pending projection 补 `sheet.state`（默认/期望 `visible`），并按 canonical writer 已确定的页面语义同时纳入 `properties/headerFooter`；既有 rows（height/hidden/outline）、columns、views、autoFilter、pageSetup、cell/style仍由同一 projection authority 比较。 | raw OOXML 将 Pending workbook sheet 改 hidden，并分别篡改 Pending header/footer 与 sheet properties；重新压缩、重算 byteSize/SHA 后 Main Join 均拒绝且 Publisher=0。正常/调整/merge goldens 与全 VCC 569/569 通过。 |
+
 ## Blindspot Pass
 
 | 维度 | 证据型结论 | 处置 |
@@ -102,7 +109,7 @@
 | 入口与旁路 | managed dispatcher 尚未接入 live Main；legacy handler 仍是唯一 production 路径。 | 符合 dormant/production-false 边界；禁止在 E12-A 偷接 live。 |
 | 数据合同 | Worker input/result exact keys；Main 绑定 DB/assets；DTO 只有 run/task/digest/count/path authority，不含 subject 文本、金额或币种原始行。 | validator、finance-safe allowlist 与 <8 KiB 实测闭合。 |
 | 状态生命周期 | task authority 与 run/archive authority 在 generation 前、Join 后、Publisher 前复核；Worker 在 read transaction 内首尾复核。 | B 点变化均 fail closed，Publisher=0。 |
-| 失败模式 | Main 是 generation/task-dir 唯一 cleanup owner；普通失败删除 exact generation 及严格同源 UUID atomic tmp，manual recovery 明示 preserve 时全部保留；committed 后 cleanup 失败只返回 pending evidence，不把业务成功重解释为可重发失败。每次 scan/delete/rmdir 都先复核 frozen root/parent identity；post-create 失败也由该 owner 收口。 | focused fault tests 覆盖 pre-cancel、between-subject cancel、crash partial、Join 前后 tamper、Publisher throw/preserve、committed cleanup EBUSY/EPERM/rmdir failure、same-path root/parent replacement、post-create failure/collision/retry。 |
+| 失败模式 | Main 是 generation/task-dir 唯一 cleanup owner；普通失败删除 exact generation 及严格同源 UUID atomic tmp，manual recovery 明示 preserve 时全部保留；committed 后 cleanup 失败只返回 pending evidence，不把业务成功重解释为可重发失败。每次 scan/delete/rmdir 都先复核 frozen root/parent identity；post-create cleanup 也只能使用 `mkdir` 后立即取得的 provisional authority。 | focused fault tests 覆盖 pre-cancel、between-subject cancel、crash partial、Join 前后 tamper、Publisher throw/preserve、committed cleanup EBUSY/EPERM/rmdir failure、same-path root/parent replacement、post-mkdir freeze EIO/EACCES、post-create failure/collision/manual recovery/retry。 |
 | 并发/幂等 | `export-subjects` compound topology 恒为 1；subjectIndex exact set/order；FilePlan fresh target snapshot；一次 journal publication。 | 不引入 shard、第二 Writer 或自动二次发布。 |
 | 可观测性 | runtime 继续用 `finance-safe-v1`；protocol error/result 受现有 maxBytes/rate-limit/validator 管控。 | 不新增 raw finance diagnostics；production enable 另行收集门禁证据。 |
 | 测试缺口 | 自动测试无法证明 Windows packaged Worker、Excel/WPS 渲染及真实资金样本人工逐项等价。 | 保留为不可绕过的人工 production gate。 |

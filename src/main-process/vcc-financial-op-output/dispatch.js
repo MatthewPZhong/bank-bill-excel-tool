@@ -18,7 +18,8 @@ const {
 } = require('./authority');
 const {
   assertTaskStagingIdentity,
-  createTaskStagingIdentity
+  captureProvisionalTaskStagingIdentity,
+  taskStagingIdentityFromProvisional
 } = require('./staging-identity');
 const {
   loadValidationContext,
@@ -159,6 +160,14 @@ function generationCleanupEvidence(error, failures, identityDigest = null) {
       ? identityDigest
       : null
   });
+}
+
+function preserveUnconfirmedTaskDirectory(error, taskDirectory, cause) {
+  appendCleanupDiagnostics(error, cause ? [cause] : []);
+  try {
+    error.preserveTemporaryFiles = true;
+    error.recoveryPaths = [taskDirectory].slice(0, VCC_EXPORT_RECOVERY_PATH_LIMIT);
+  } catch (_recoveryError) { /* recovery annotation 不能覆盖首错 */ }
 }
 
 function cleanupGenerationArtifacts(
@@ -441,10 +450,25 @@ function prepareTaskStagingDirectory(parent, directoryName, generations) {
       'VCC task-private staging 已存在，必须先由原 cleanup/recovery owner 收口'
     );
   }
+  let provisionalIdentity;
+  try {
+    provisionalIdentity = captureProvisionalTaskStagingIdentity({
+      resolvedPath: taskDirectory
+    });
+  } catch (cause) {
+    const error = dispatchError(
+      'VCC_EXPORT_STAGING_IDENTITY_CHANGED',
+      'VCC task-private staging 创建后 provisional identity 无法确认'
+    );
+    preserveUnconfirmedTaskDirectory(error, taskDirectory, cause);
+    throw error;
+  }
+  // full identity 只从 mkdir 后立即冻结的 provisional dev/ino 派生；后续失败
+  // 只能验证该 identity，严禁从当前 lexical path 重新获取删除 authority。
   let stagingIdentity = null;
   try {
-    stagingIdentity = createTaskStagingIdentity({
-      resolvedPath: taskDirectory,
+    stagingIdentity = taskStagingIdentityFromProvisional({
+      provisionalIdentity,
       realPath: expectedReal
     });
     assertTaskStagingIdentity({
@@ -466,23 +490,18 @@ function prepareTaskStagingDirectory(parent, directoryName, generations) {
       ? cause.detailLines.slice(0, VCC_EXPORT_CLEANUP_DIAGNOSTIC_LIMIT)
       : [];
     if (!stagingIdentity) {
-      try {
-        stagingIdentity = createTaskStagingIdentity({
-          resolvedPath: taskDirectory,
-          realPath: expectedReal
-        });
-      } catch (identityError) {
-        appendCleanupDiagnostics(error, [identityError]);
-      }
+      preserveUnconfirmedTaskDirectory(error, taskDirectory, cause);
+      throw error;
     }
-    if (stagingIdentity) {
-      cleanupGenerationArtifacts(
-        generations,
-        error,
-        taskDirectory,
-        expectedReal,
-        stagingIdentity
-      );
+    const cleanupEvidence = cleanupGenerationArtifacts(
+      generations,
+      error,
+      taskDirectory,
+      expectedReal,
+      stagingIdentity
+    );
+    if (cleanupEvidence.status !== 'complete') {
+      preserveUnconfirmedTaskDirectory(error, taskDirectory, null);
     }
     throw error;
   }

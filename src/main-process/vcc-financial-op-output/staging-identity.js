@@ -7,16 +7,21 @@ const { canonicalSha256 } = require('../background-execution/canonical-json-v1')
 const { pathsAlias } = require('../toolbox-target-identity');
 
 const STAGING_IDENTITY_CONTRACT_VERSION = 1;
+const PROVISIONAL_STAGING_IDENTITY_CONTRACT_VERSION = 1;
 const UUID_TOKEN_PATTERN = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 
-function identityError(stage, identity, message) {
+function identityError(stage, identity, message, cause = null) {
   const error = new Error(message);
   error.code = 'VCC_EXPORT_STAGING_IDENTITY_CHANGED';
   error.stage = stage;
+  const causeCode = cause && typeof cause.code === 'string' && /^[A-Z0-9_]+$/.test(cause.code)
+    ? cause.code
+    : 'UNKNOWN';
   error.detailLines = [
     `taskRootIdentityDigest=${identity && identity.identityDigest
       ? identity.identityDigest
-      : 'unavailable'}`
+      : 'unavailable'}`,
+    `identityCauseCode=${causeCode}`
   ];
   error.preserveTemporaryFiles = true;
   error.recoveryPaths = [];
@@ -55,6 +60,86 @@ function identityPayload(value) {
     parentInodeId: value.parentInodeId,
     deviceId: value.deviceId,
     inodeId: value.inodeId
+  });
+}
+
+function provisionalIdentityPayload(value) {
+  return Object.freeze({
+    contractVersion: value.contractVersion,
+    resolvedPath: value.resolvedPath,
+    parentResolvedPath: value.parentResolvedPath,
+    parentDeviceId: value.parentDeviceId,
+    parentInodeId: value.parentInodeId,
+    deviceId: value.deviceId,
+    inodeId: value.inodeId
+  });
+}
+
+function captureProvisionalTaskStagingIdentity({ resolvedPath }) {
+  const resolved = path.resolve(String(resolvedPath || ''));
+  if (resolved !== resolvedPath) {
+    throw new TypeError('VCC provisional task-private staging identity 必须是规范绝对路径');
+  }
+  const parentResolvedPath = path.dirname(resolved);
+  // mkdir 没有返回可持久目录句柄；在不引入 native/openat 的合同内，紧邻 mkdir
+  // 冻结 root/parent dev+ino 是 cleanup 能持有的最早可信 authority。
+  const stat = statIdentity(resolved);
+  const parentStat = statIdentity(parentResolvedPath);
+  const payload = Object.freeze({
+    contractVersion: PROVISIONAL_STAGING_IDENTITY_CONTRACT_VERSION,
+    resolvedPath: resolved,
+    parentResolvedPath,
+    parentDeviceId: parentStat.deviceId,
+    parentInodeId: parentStat.inodeId,
+    deviceId: stat.deviceId,
+    inodeId: stat.inodeId
+  });
+  return Object.freeze({
+    ...payload,
+    identityDigest: canonicalSha256(payload)
+  });
+}
+
+function normalizeProvisionalTaskStagingIdentity(value) {
+  if (!exactKeys(value, [
+    'contractVersion', 'deviceId', 'identityDigest', 'inodeId',
+    'parentDeviceId', 'parentInodeId', 'parentResolvedPath', 'resolvedPath'
+  ]) || value.contractVersion !== PROVISIONAL_STAGING_IDENTITY_CONTRACT_VERSION ||
+      typeof value.deviceId !== 'string' || !/^\d+$/.test(value.deviceId) ||
+      typeof value.inodeId !== 'string' || !/^\d+$/.test(value.inodeId) ||
+      typeof value.parentDeviceId !== 'string' || !/^\d+$/.test(value.parentDeviceId) ||
+      typeof value.parentInodeId !== 'string' || !/^\d+$/.test(value.parentInodeId) ||
+      typeof value.identityDigest !== 'string' || !/^[a-f0-9]{64}$/.test(value.identityDigest) ||
+      typeof value.resolvedPath !== 'string' || path.resolve(value.resolvedPath) !== value.resolvedPath ||
+      typeof value.parentResolvedPath !== 'string' ||
+      path.resolve(value.parentResolvedPath) !== value.parentResolvedPath ||
+      path.dirname(value.resolvedPath) !== value.parentResolvedPath ||
+      canonicalSha256(provisionalIdentityPayload(value)) !== value.identityDigest) {
+    throw new TypeError('VCC provisional task-private staging identity contract 非法');
+  }
+  return Object.freeze({ ...value });
+}
+
+function taskStagingIdentityFromProvisional({ provisionalIdentity: rawIdentity, realPath }) {
+  const provisionalIdentity = normalizeProvisionalTaskStagingIdentity(rawIdentity);
+  const real = path.resolve(String(realPath || ''));
+  if (real !== realPath) {
+    throw new TypeError('VCC task-private staging identity realPath 必须是规范绝对路径');
+  }
+  const payload = Object.freeze({
+    contractVersion: STAGING_IDENTITY_CONTRACT_VERSION,
+    resolvedPath: provisionalIdentity.resolvedPath,
+    realPath: real,
+    parentResolvedPath: provisionalIdentity.parentResolvedPath,
+    parentRealPath: path.dirname(real),
+    parentDeviceId: provisionalIdentity.parentDeviceId,
+    parentInodeId: provisionalIdentity.parentInodeId,
+    deviceId: provisionalIdentity.deviceId,
+    inodeId: provisionalIdentity.inodeId
+  });
+  return Object.freeze({
+    ...payload,
+    identityDigest: canonicalSha256(payload)
   });
 }
 
@@ -129,8 +214,8 @@ function assertTaskStagingIdentity({
   let identity;
   try {
     identity = normalizeTaskStagingIdentity(rawIdentity);
-  } catch (_error) {
-    throw identityError(stage, rawIdentity, 'VCC task-private staging identity contract 已变化');
+  } catch (cause) {
+    throw identityError(stage, rawIdentity, 'VCC task-private staging identity contract 已变化', cause);
   }
   try {
     const parentStat = fs.lstatSync(identity.parentResolvedPath, { bigint: true });
@@ -181,8 +266,8 @@ function assertTaskStagingIdentity({
         throw new Error('atomic transient identity mismatch');
       }
     }
-  } catch (_error) {
-    throw identityError(stage, identity, 'VCC task-private staging identity 已变化');
+  } catch (cause) {
+    throw identityError(stage, identity, 'VCC task-private staging identity 已变化', cause);
   }
   return identity;
 }
@@ -190,6 +275,8 @@ function assertTaskStagingIdentity({
 module.exports = {
   STAGING_IDENTITY_CONTRACT_VERSION,
   assertTaskStagingIdentity,
+  captureProvisionalTaskStagingIdentity,
   createTaskStagingIdentity,
-  normalizeTaskStagingIdentity
+  normalizeTaskStagingIdentity,
+  taskStagingIdentityFromProvisional
 };
