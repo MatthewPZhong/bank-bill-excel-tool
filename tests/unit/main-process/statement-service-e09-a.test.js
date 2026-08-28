@@ -747,7 +747,7 @@ test('source candidate evidence 失败保留旧 session/revision', async (t) => 
   assert.equal(status.result.summary.rowCount, 1);
 });
 
-test('canonical source alias 在读文件与 resource request 前 fail closed 并保留旧 revision', async (t) => {
+test('canonical source alias 允许 identity streaming read 但在 candidate mutation/resource request/adopt 前 fail closed 并保留旧 revision', async (t) => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-e09-a-canonical-'));
   t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
   const inputPath = path.join(tempDir, 'a.xlsx');
