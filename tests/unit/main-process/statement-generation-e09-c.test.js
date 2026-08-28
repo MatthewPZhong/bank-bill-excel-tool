@@ -940,6 +940,20 @@ test('Main-owned descriptor拒绝manifest自洽但sheet/header/kind/record/formu
     fs.writeFileSync(filePath, await zip.generateAsync({ type: 'nodebuffer' }));
   }
 
+  async function addWrongTextFontStyle(filePath) {
+    await rewriteWorkbookEntry(filePath, 'xl/styles.xml', (xml) => xml
+      .replace(/<fonts count="3"([^>]*)>/, '<fonts count="4"$1>')
+      .replace(
+        '</fonts>',
+        '<font><sz val="11"/><name val="Arial"/></font></fonts>'
+      )
+      .replace(/<cellXfs count="7">/, '<cellXfs count="8">')
+      .replace(
+        '</cellXfs>',
+        '<xf numFmtId="49" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1" applyNumberFormat="1"/></cellXfs>'
+      ));
+  }
+
   async function rejectCase({
     name,
     kind = 'detail',
@@ -1092,6 +1106,72 @@ test('Main-owned descriptor拒绝manifest自洽但sheet/header/kind/record/formu
     expectedCode: 'STATEMENT_GENERATION_WORKBOOK_STYLE_INVALID'
   });
   await rejectCase({
+    name: 'single-quote-style',
+    async writeInvalid(filePath) {
+      writeDetailArtifact(filePath, correctDetailRecords);
+      await addWrongTextFontStyle(filePath);
+      await rewriteWorkbookEntry(filePath, 'xl/worksheets/sheet1.xml', (xml) =>
+        xml.replace('<c r="B2" s="5"', "<c r=\"B2\" s = '7'"));
+    },
+    expectedCode: 'STATEMENT_GENERATION_WORKBOOK_CELL_CONTRACT_MISMATCH'
+  });
+  await rejectCase({
+    name: 'comment-style-spoof',
+    async writeInvalid(filePath) {
+      writeDetailArtifact(filePath, correctDetailRecords);
+      await rewriteWorkbookEntry(filePath, 'xl/worksheets/sheet1.xml', (xml) => xml
+        .replace('<c r="A1" s="3"', '<c r="A1" s="0"')
+        .replace('</sheetData>', '</sheetData><!-- <c r="A1" s="3"> -->'));
+    },
+    expectedCode: 'STATEMENT_GENERATION_WORKBOOK_STYLE_INVALID'
+  });
+  await rejectCase({
+    name: 'relationship-style-decoy',
+    async writeInvalid(filePath) {
+      writeDetailArtifact(filePath, correctDetailRecords);
+      const zip = await JSZip.loadAsync(fs.readFileSync(filePath));
+      const sheetEntry = zip.file('xl/worksheets/sheet1.xml');
+      assert.ok(sheetEntry, 'sheet1.xml must exist');
+      const decoyXml = await sheetEntry.async('string');
+      const actualXml = decoyXml.replace('<c r="A1" s="3"', '<c r="A1" s="0"');
+      assert.notEqual(actualXml, decoyXml, 'actual worksheet mutation must change bytes');
+      zip.file('xl/worksheets/sheet2.xml', actualXml);
+      const relationships = await zip.file('xl/_rels/workbook.xml.rels').async('string');
+      zip.file(
+        'xl/_rels/workbook.xml.rels',
+        relationships.replace('Target="worksheets/sheet1.xml"', 'Target="worksheets/sheet2.xml"')
+      );
+      const contentTypes = await zip.file('[Content_Types].xml').async('string');
+      zip.file(
+        '[Content_Types].xml',
+        contentTypes.replace(
+          'PartName="/xl/worksheets/sheet1.xml"',
+          'PartName="/xl/worksheets/sheet2.xml"'
+        )
+      );
+      fs.writeFileSync(filePath, await zip.generateAsync({ type: 'nodebuffer' }));
+    },
+    expectedCode: 'STATEMENT_GENERATION_WORKBOOK_STYLE_INVALID'
+  });
+  await rejectCase({
+    name: 'duplicate-cell-coordinate',
+    async writeInvalid(filePath) {
+      writeDetailArtifact(filePath, correctDetailRecords);
+      await rewriteWorkbookEntry(filePath, 'xl/worksheets/sheet1.xml', (xml) =>
+        xml.replace('</c><c r="B1"', '</c><c r="A1" s="3" t="str"><v>BillDate</v></c><c r="B1"'));
+    },
+    expectedCode: 'STATEMENT_GENERATION_WORKBOOK_STYLE_INVALID'
+  });
+  await rejectCase({
+    name: 'invalid-explicit-style',
+    async writeInvalid(filePath) {
+      writeDetailArtifact(filePath, correctDetailRecords);
+      await rewriteWorkbookEntry(filePath, 'xl/worksheets/sheet1.xml', (xml) =>
+        xml.replace('<c r="A1" s="3"', '<c r="A1" s="+3"'));
+    },
+    expectedCode: 'STATEMENT_GENERATION_WORKBOOK_STYLE_INVALID'
+  });
+  await rejectCase({
     name: 'wrong-watermark',
     async writeInvalid(filePath) {
       writeDetailArtifact(filePath, correctDetailRecords);
@@ -1145,6 +1225,18 @@ test('Main-owned descriptor拒绝manifest自洽但sheet/header/kind/record/formu
         xml.replace(
           '<font><sz val="11"/><name val="Calibri"/></font>',
           '<font><sz val="11"/><name val="Arial"/></font>'
+        ));
+    },
+    expectedCode: 'STATEMENT_GENERATION_WORKBOOK_CELL_CONTRACT_MISMATCH'
+  });
+  await rejectCase({
+    name: 'data-font-extended-flags',
+    async writeInvalid(filePath) {
+      writeDetailArtifact(filePath, correctDetailRecords);
+      await rewriteWorkbookEntry(filePath, 'xl/styles.xml', (xml) =>
+        xml.replace(
+          '<font><sz val="11"/><name val="Calibri"/></font>',
+          '<font><outline/><shadow/><condense/><extend/><sz val="11"/><name val="Calibri"/></font>'
         ));
     },
     expectedCode: 'STATEMENT_GENERATION_WORKBOOK_CELL_CONTRACT_MISMATCH'
