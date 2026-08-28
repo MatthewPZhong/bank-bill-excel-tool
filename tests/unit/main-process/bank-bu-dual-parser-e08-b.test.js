@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { Worker } = require('node:worker_threads');
 
 const XLSX = require('xlsx');
 
@@ -42,8 +43,15 @@ const {
   createBankBuDualTopologyPlanner
 } = require('../../../src/main-process/bank-bu-worker/topology');
 const {
+  cleanupBankBuSpool
+} = require('../../../src/main-process/bank-bu-worker/spool-filesystem');
+const {
   BANK_BU_SINGLETON_UNIT_ID
 } = require('../../../src/main-process/bank-bu-worker/singleton-unit');
+const {
+  beginExternalParserShutdown,
+  waitForExternalParserShutdownPhase
+} = require('../../../src/main-process/background-execution/external-parser-finalization');
 
 function writeWorkbook(filePath, headers, rows) {
   const workbook = XLSX.utils.book_new();
@@ -157,6 +165,83 @@ function fakeRuntime({ critical, parserCount = 2 } = {}) {
   };
 }
 
+function remainingTimeout(deadline) {
+  return Math.max(0, deadline - Date.now());
+}
+
+function ownedFakeRuntime(options = {}) {
+  const base = fakeRuntime(options);
+  const parentPromises = new Set();
+  let accepting = true;
+  let shutdownPromise = null;
+  const runtime = {
+    start(request) {
+      if (!accepting) throw new Error('测试runtime已停止接收任务');
+      const control = base.start(request);
+      parentPromises.add(control.promise);
+      control.promise.finally(() => parentPromises.delete(control.promise));
+      return control;
+    },
+    execute(request) { return base.execute(request); },
+    stopAcceptingNewJobs() { accepting = false; },
+    activeParentCount() { return parentPromises.size; },
+    shutdown(shutdownOptions = {}) {
+      if (shutdownPromise) return shutdownPromise;
+      accepting = false;
+      const timeoutMs = shutdownOptions.timeoutMs || 2000;
+      const deadline = Date.now() + timeoutMs;
+      const session = beginExternalParserShutdown(runtime);
+      shutdownPromise = Promise.resolve().then(async () => {
+        const workerReport = await waitForExternalParserShutdownPhase(
+          session, 'workersTerminal', remainingTimeout(deadline)
+        );
+        await Promise.allSettled([...parentPromises]);
+        const finalizationReport = await waitForExternalParserShutdownPhase(
+          session, 'finalized', remainingTimeout(deadline)
+        );
+        return Object.freeze({
+          closedServices: Object.freeze([]),
+          cancelledJobs: Object.freeze([]),
+          protectedJobs: Object.freeze([]),
+          interruptedTasks: Object.freeze([]),
+          activeHolds: Object.freeze([]),
+          leakedTransports: Object.freeze([...new Set([
+            ...workerReport.leakedTransports,
+            ...finalizationReport.leakedTransports
+          ])]),
+          errors: Object.freeze([
+            ...session.errors,
+            ...workerReport.errors,
+            ...finalizationReport.errors
+          ])
+        });
+      }).finally(() => { shutdownPromise = null; });
+      return shutdownPromise;
+    }
+  };
+  return runtime;
+}
+
+async function waitForCondition(predicate, timeoutMs = 2000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error('等待测试条件超时');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+const delayedParserEntry = path.join(
+  __dirname,
+  'fixtures',
+  'bank-bu-delayed-parser-worker.js'
+);
+
+class DelayedTerminalParserWorker extends Worker {
+  constructor(_entry, options) {
+    super(delayedParserEntry, options);
+  }
+}
+
 const approvedGate = Object.freeze({
   enabled: true,
   measuredImprovementRatio: MIN_DUAL_IMPROVEMENT_RATIO,
@@ -223,6 +308,108 @@ test('真实worker_threads Parser只返回bounded role manifest并在clean exit�
     ]);
     assert.equal(states.length, 1);
     assert.equal(states[0].exitCode, 0);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('exact runtime shutdown等待延迟abort的真实Parser终态、parent终态与spool清理后才clean', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bank-bu-e08-b-shutdown-'));
+  try {
+    const files = fixture(root);
+    const runtime = ownedFakeRuntime();
+    const list = spools(root, files);
+    const parserStates = [];
+    const operation = executeManagedBankBuDualImport(dispatchOptions(root, files, {
+      runtime,
+      jobId: 'bank-bu-dual-test',
+      ParserWorkerClass: DelayedTerminalParserWorker,
+      onParserWorkerState(state) { parserStates.push(state); }
+    })).then(
+      (value) => ({ status: 'fulfilled', value }),
+      (error) => ({ status: 'rejected', error })
+    );
+    await waitForCondition(() => list.every((spool) =>
+      fs.existsSync(bankBuSpoolPaths(spool).manifestReady)
+    ));
+
+    let shutdownSettled = false;
+    const shutdownStartedAt = Date.now();
+    const shutdown = runtime.shutdown({ timeoutMs: 2000 }).then((report) => {
+      shutdownSettled = true;
+      return report;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    assert.equal(shutdownSettled, false, 'Parser未terminal时不得提前报告clean');
+    assert.equal(runtime.activeParentCount(), 1, 'parent terminal/lease不得先于Parser barrier释放');
+    assert.equal(fs.existsSync(path.join(root, 'staging')), true, 'finalization前spool仍由owner持有');
+
+    const report = await shutdown;
+    const result = await operation;
+    assert.equal(result.status, 'rejected');
+    assert.equal(result.error.code, 'BANK_BU_PARSER_CANCELLED');
+    assert.equal(Date.now() - shutdownStartedAt >= 150, true);
+    assert.equal(parserStates.length, 2);
+    assert.equal(report.errors.length, 0);
+    assert.equal(report.leakedTransports.length, 0);
+    assert.equal(runtime.activeParentCount(), 0);
+    assert.equal(fs.existsSync(path.join(root, 'staging')), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('cleanup外部lock使连续shutdown保持non-clean，解除后同一owner重试真实删除并clean', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bank-bu-e08-b-cleanup-retry-'));
+  try {
+    const files = fixture(root);
+    const runtime = ownedFakeRuntime();
+    let locked = true;
+    let cleanupAttempts = 0;
+    const operation = executeManagedBankBuDualImport(dispatchOptions(root, files, {
+      runtime,
+      jobId: 'bank-bu-dual-test',
+      cleanupSpool(spool) {
+        cleanupAttempts += 1;
+        if (locked) {
+          const error = new Error('external lock');
+          error.code = 'EBUSY';
+          throw error;
+        }
+        return cleanupBankBuSpool(spool);
+      },
+      parserRunner: async (spool) => ({
+        ...(await writeBankBuInputSpool(spool)), rssBytes: 10, elapsedMs: 1
+      })
+    })).then(
+      (value) => ({ status: 'fulfilled', value }),
+      (error) => ({ status: 'rejected', error })
+    );
+    const result = await operation;
+    assert.equal(result.status, 'rejected');
+    assert.equal(result.error.code, 'EBUSY');
+    assert.equal(fs.existsSync(path.join(root, 'staging')), true);
+
+    const first = await runtime.shutdown({ timeoutMs: 1000 });
+    assert.deepEqual(first.leakedTransports, ['bank-bu-dual-test']);
+    assert.equal(first.errors.some((error) =>
+      error.code === 'BANK_BU_DUAL_FINALIZATION_FAILED'
+    ), true);
+    assert.equal(fs.existsSync(path.join(root, 'staging')), true);
+
+    const second = await runtime.shutdown({ timeoutMs: 1000 });
+    assert.deepEqual(second.leakedTransports, ['bank-bu-dual-test']);
+    assert.equal(second.errors.some((error) =>
+      error.code === 'BANK_BU_DUAL_FINALIZATION_FAILED'
+    ), true);
+    assert.equal(fs.existsSync(path.join(root, 'staging')), true);
+
+    locked = false;
+    const recovered = await runtime.shutdown({ timeoutMs: 1000 });
+    assert.deepEqual(recovered.leakedTransports, []);
+    assert.deepEqual(recovered.errors, []);
+    assert.equal(cleanupAttempts >= 4, true);
+    assert.equal(fs.existsSync(path.join(root, 'staging')), false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -313,6 +500,7 @@ test('任一Parser失败或取消时等待sibling终态，critical前失败并�
       const files = fixture(root);
       let criticalCount = 0;
       const controller = new AbortController();
+      if (mode === 'cancel') controller.abort();
       let siblingObservedAbort = false;
       const promise = executeManagedBankBuDualImport(dispatchOptions(root, files, {
         signal: controller.signal,
@@ -333,7 +521,6 @@ test('任一Parser失败或取消时等待sibling终态，critical前失败并�
           });
         }
       }));
-      if (mode === 'cancel') setImmediate(() => controller.abort());
       await assert.rejects(promise, (error) => [
         'BANK_BU_TEST_PARSE_FAILED', 'BANK_BU_PARSER_CANCELLED'
       ].includes(error.code));

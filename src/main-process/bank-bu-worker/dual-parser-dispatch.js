@@ -8,6 +8,9 @@ const {
   failExecutionTransportForCoordinator
 } = require('../background-execution/supervisor');
 const {
+  registerExternalParserFinalization
+} = require('../background-execution/external-parser-finalization');
+const {
   BANK_BU_DUAL_IMPORT_CONTRACT_VERSION,
   BANK_BU_INPUT_ROLES,
   normalizeDualImportDescriptor
@@ -24,6 +27,10 @@ const { BANK_BU_SINGLETON_UNIT_ID } = require('./singleton-unit');
 
 const PARSER_ENTRY = path.join(__dirname, 'parser-worker-entry.js');
 const MIN_DUAL_IMPROVEMENT_RATIO = 0.15;
+const BANK_BU_DUAL_PROFILE = Object.freeze({
+  codePrefix: 'BANK_BU_DUAL',
+  label: 'BankBU dual Parser'
+});
 
 function managedError(code, message, details = null) {
   const error = new Error(message);
@@ -180,6 +187,22 @@ function cleanupSpools(spools, cleanup = cleanupBankBuSpool) {
   if (failure) throw failure;
 }
 
+function createRetryableSpoolCleanup(spools, cleanup) {
+  let completed = false;
+  let inFlight = null;
+  return function retryCleanup() {
+    if (completed) return Promise.resolve();
+    if (inFlight) return inFlight;
+    inFlight = Promise.resolve().then(() => {
+      cleanupSpools(spools, cleanup);
+      completed = true;
+    }).finally(() => {
+      inFlight = null;
+    });
+    return inFlight;
+  };
+}
+
 function directRequest(options) {
   const input = {
     userDataDir: options.userDataDir,
@@ -221,14 +244,53 @@ async function executeManagedBankBuDualImport(rawOptions) {
     input: writerInput,
     units: Object.freeze([{ unitId: BANK_BU_SINGLETON_UNIT_ID, input: writerInput }])
   });
-  const parserController = new AbortController();
+  let parserController = null;
   const outerSignal = options.signal || null;
-  const abort = () => parserController.abort();
+  let parserPhaseStarted = false;
+  let shutdownRequested = false;
+  let workersTerminalSettled = false;
+  let resolveWorkersTerminal;
+  const workersTerminal = new Promise((resolve) => { resolveWorkersTerminal = resolve; });
+  let resolveFinalized;
+  let rejectFinalized;
+  const finalized = new Promise((resolve, reject) => {
+    resolveFinalized = resolve;
+    rejectFinalized = reject;
+  });
+  const retryCleanup = createRetryableSpoolCleanup(
+    spools,
+    options.cleanupSpool || cleanupBankBuSpool
+  );
+
+  function settleWorkersTerminal() {
+    if (workersTerminalSettled) return;
+    workersTerminalSettled = true;
+    resolveWorkersTerminal();
+  }
+
+  registerExternalParserFinalization(options.runtime, BANK_BU_DUAL_PROFILE, {
+    jobId,
+    workersTerminal,
+    finalized,
+    retryCleanup,
+    abort() {
+      shutdownRequested = true;
+      if (parserController) parserController.abort();
+      if (!parserPhaseStarted) settleWorkersTerminal();
+    }
+  });
+
+  let abortRequested = Boolean(outerSignal && outerSignal.aborted);
+  const abort = () => {
+    abortRequested = true;
+    if (parserController) parserController.abort();
+  };
   if (outerSignal) {
     if (outerSignal.aborted) abort();
     else outerSignal.addEventListener('abort', abort, { once: true });
   }
   let parentTerminal = false;
+  let primaryError = null;
   let failureOutcomePublished = false;
   try {
     await control.ready;
@@ -238,10 +300,21 @@ async function executeManagedBankBuDualImport(rawOptions) {
       parentTerminal = true;
       throw managedError('BANK_BU_DUAL_START_FAILED', 'BankBU dual Writer未进入running');
     }
+    if (shutdownRequested) {
+      const execution = await control.promise;
+      parentTerminal = true;
+      throw managedError(
+        execution && execution.error && execution.error.code || 'BANK_BU_DUAL_SHUTDOWN',
+        execution && execution.error && execution.error.message || 'BankBU dual Parser随runtime关闭'
+      );
+    }
     const parserCount = snapshot.topology && snapshot.topology.effectiveChildCount;
     if (![1, 2].includes(parserCount)) {
       throw managedError('BANK_BU_DUAL_TOPOLOGY_INVALID', 'BankBU dual topology非法');
     }
+    parserController = new AbortController();
+    if (abortRequested) parserController.abort();
+    parserPhaseStarted = true;
     const parserRunner = options.parserRunner || runBankBuParserWorker;
     let parserPhaseComplete = false;
     const parentWatcher = control.promise.then((execution) => {
@@ -285,6 +358,7 @@ async function executeManagedBankBuDualImport(rawOptions) {
     const settled = await Promise.allSettled(
       Array.from({ length: parserCount }, () => parseNext())
     );
+    settleWorkersTerminal();
     parserPhaseComplete = true;
     const parserFailure = settled.find((item) => item.status === 'rejected');
     if (parserFailure) {
@@ -328,9 +402,10 @@ async function executeManagedBankBuDualImport(rawOptions) {
       })
     });
   } catch (error) {
+    primaryError = error;
     abort();
     if (!parentTerminal) {
-      if (!failureOutcomePublished) {
+      if (!failureOutcomePublished && !(shutdownRequested && !parserPhaseStarted)) {
         try {
           writeBankBuParserFailure(spools[0], error);
           failureOutcomePublished = true;
@@ -347,8 +422,16 @@ async function executeManagedBankBuDualImport(rawOptions) {
     }
     throw error;
   } finally {
+    settleWorkersTerminal();
     if (outerSignal) outerSignal.removeEventListener('abort', abort);
-    cleanupSpools(spools, options.cleanupSpool || cleanupBankBuSpool);
+    try {
+      await retryCleanup();
+      resolveFinalized();
+    } catch (cleanupError) {
+      if (primaryError) cleanupError.cause = primaryError;
+      rejectFinalized(cleanupError);
+      throw cleanupError;
+    }
   }
 }
 
