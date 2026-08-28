@@ -89,3 +89,42 @@
 | 2 | run-time bounded export authority | Main 不信 Worker；无 raw row | forged cell/row + self-consistent manifest 拒绝 | 阻断 Join | 保留旧 result DTO并停止 follow-up |
 | 3 | Main-owned artifact binding | target kind/order 不靠文件名 | reversed target 在 Worker 前拒绝 | 阻断 generation | 不改 FilePlan，要求调用方重新规划 |
 | 4 | 定向/恢复/legacy 回归与双盲区复核 | all-or-none、JPM post-image、人工门禁 | E11-C/B/Service/Publisher/smoke/static | 不得提交 | 收缩至可证明边界 |
+
+## Round 2 Evidence Settlement Admission（2026-08-28）
+
+### Task Brief
+
+- Goal：在不接 live IPC/E12 的前提下，增加可由 scenario、BOC linked、JPM import 正常 writer 入口共用的 Main-owned evidence settlement admission；export 必须在 current evidence read 前获得 lease，直到 Publisher promise resolve/reject 后释放。
+- Context：Round 1 的 runtime Service reservation 只能阻断 managed import/run/close；当前 `main.js` scenario 写、linked-table import/delete 与 JPM ADM import writer 都是 runtime 之外的 Main/DB 写路径。
+- Constraints：不增加第三次 evidence read；不锁外部进程；不改 JPM mutation/receipt/Inspector/Hold；不无限持锁；不在 E11-C 修改 `main.js` handler wiring；缺失 branded shared admission/lease 时 export 必须在 evidence/Worker/Publisher 前 fail closed。
+- Done when：settlement 期间 scenario/BOC/JPM 三类正常 writer admission 均拒绝且 write body=0，Publisher 返回后同一 admission 全部放行；无 admission 的 export 不读 evidence/不调 Worker/不调 Publisher；上轮四项闭环与 journal recovery 不回归。
+
+### 已确认事实
+
+| 事实 | 证据 | 对方案的约束 |
+| --- | --- | --- |
+| scenario create/update/delete/toggle/transfer/batch-delete 直接调 `AppDatabase` repository，不经 background runtime | `src/main.js` `scenarios:*` handlers | Service reservation 不能保护 scenario evidence；E12 wiring 必须在 DB write 前咨询共享 admission |
+| BOC `fx-settlement` import/delete 会重建 linked evidence；bank/mid import/delete 会重建 JPM ADM | `importLinkedFileToRepo`、`linked-table:delete-by-date-range` | writer lease 必须覆盖真正 write/derive 边界，不能只在完成后清 cache |
+| 既有 JPM Hold gate 只阻断 durable Hold/open Intent，不感知 ReconFix export settlement | `jpm-hold-gate.js`、`assertReconFixJpmAdmMutationAllowed` | 新 primitive 与 Hold gate 是正交合同；不改 receipt/Inspector/Hold，E12 在现有 admission 外层组合 |
+| BOC/JPM legacy 引擎不返回 unmatchedRows；standard C4 真实返回 fixed/unmatched 两集 | `boc-dispatch-order-fix.js`、`jpm-dispatch-order-fix.js`、`c4-recon-id-fix.js` | P3 覆盖只测真实可达 output set；不为 BOC/JPM 虚构 unmatched 业务行 |
+
+### Unknowns Register
+
+| 未知 | 类型 | 影响 | 可逆性 | 当前证据 | 处理 | 最便宜验证方式 | 当前决定 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| admission 应归 runtime 还是独立 Main authority | 所有权/生命周期 | 高 | 一般 | writer 不经 background action，但 E12 composition root 可让 handler 从 runtime owner 取 admission；runtime manager 可替换 runtime | PROBE | runtime A export 分别接 A/B admission，三 writer 只取 A owner lease | 每个 Main/runtime owner 内部创建并暴露唯一 branded admission；export 强制 exact object identity，不同合法实例不可混用 |
+| writer 是否需要等待队列 | 并发/用户体验 | 中 | 容易 | 现有 Service/Hold 边界均 fail closed；settlement 短时 | ASSUME | Publisher callback 内 writer admission 立即失败，settlement 后立即成功 | 同步 BUSY，不增加无限等待/超时状态机 |
+| P3 output-set 是否需要 3×3 虚构矩阵 | 业务可达性 | 中 | 容易 | BOC/JPM 引擎没有 unmatched 输出 | PROBE | 用真实 Service run 构造 standard 三 set + BOC/JPM main-only | 持久 table-driven 覆盖全部真实可达集，至少一个真实 unmatched-only；不扩业务引擎 |
+
+### BLOCK
+
+无。共享 authority 归属、writer BUSY 语义与可达 output set 都已可由仓库事实闭合。
+
+### 风险优先计划
+
+| 顺序 | 步骤 | 消除的未知/保护的不变量 | 成功证据 | 失败影响 | 回滚/收缩 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 实现 runtime-owner branded settlement/writer lease primitive | Main/runtime 单一 authority；有界释放；不锁外部 | 三 writer BUSY/后续放行 + missing/mismatched owner contract | 不得改 export | 删除独立模块，不触业务 writer |
+| 2 | export 在 current read 前取 lease，Publisher settlement 后 finally 释放 | evidence 不在 Main writer 窗口漂移 | missing/BUSY 均 evidence=0/Worker=0/Publisher=0；resolve/reject 后 writer 放行 | 阻断 E11-C | 保留 primitive，撤下 export capability |
+| 3 | table-driven 真实 output-set 回归 | artifact set/order 与真实业务可达性 | standard 三 set（含 unmatched-only）+ BOC/JPM main-only | P3 不成立 | 不改引擎，只补测试 |
+| 4 | E11/Publisher/smoke/static + 双盲区 | journal、lineage、资金与 legacy 不漂移 | 定向矩阵全 PASS，clean commit | 不得提交 | 修复或收缩 |

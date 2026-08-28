@@ -41,6 +41,9 @@ const {
 const {
   createReconFixJpmDatabaseAuthority
 } = require('../recon-id-fix-service/jpm-database-authority');
+const {
+  createReconFixEvidenceSettlementAdmission
+} = require('../recon-id-fix-service/evidence-settlement-admission');
 
 const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   ...TOOLBOX_GENERATION_POLICIES,
@@ -199,6 +202,7 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
   });
   const activeServiceOperations = new Map();
   const serviceOperationReservations = new Map();
+  const reconFixEvidenceSettlementAdmission = createReconFixEvidenceSettlementAdmission();
 
   function serviceOperationError(code, message) {
     const error = new Error(message);
@@ -364,6 +368,7 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
       return supervisor.closeService(serviceKey);
     },
     policyRegistry,
+    reconFixEvidenceSettlementAdmission,
     resourceGovernor,
     reserveServiceOperation,
     shutdown(shutdownOptions) {

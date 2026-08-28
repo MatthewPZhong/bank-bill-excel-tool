@@ -13,6 +13,9 @@ const { freezeWorkerBatchContext } = require('../archive-center/worker-batch-con
 const { readReconFixArtifactEvidence } = require('./artifact-evidence');
 const { reconFixEvidenceSha256 } = require('./evidence-projection');
 const {
+  assertReconFixEvidenceSettlementAdmission
+} = require('./evidence-settlement-admission');
+const {
   RECON_FIX_EXPORT_ACTION,
   validateReconFixExportAuthority,
   validateReconFixExportResult,
@@ -105,6 +108,22 @@ function freezeReconFixExportBatchAuthority(options) {
     );
   }
   return Object.freeze({ batchContext, context, operationKey: batchContext.operationKey });
+}
+
+function exactRuntimeEvidenceSettlementAdmission(options, runtime) {
+  const owned = assertReconFixEvidenceSettlementAdmission(
+    runtime.reconFixEvidenceSettlementAdmission
+  );
+  const supplied = assertReconFixEvidenceSettlementAdmission(
+    options.evidenceSettlementAdmission
+  );
+  if (supplied !== owned) {
+    throw exportError(
+      'RECON_FIX_EVIDENCE_SETTLEMENT_OWNER_MISMATCH',
+      'ReconFix export evidence admission 不属于当前 Main/runtime owner'
+    );
+  }
+  return owned;
 }
 
 function assertStagingDirectory(stagingDirectory) {
@@ -434,53 +453,62 @@ async function generateValidateAndPublishReconFixExport(options = {}) {
     throw new TypeError('ReconFix export Main evidence reader 缺失');
   }
   const batchAuthority = freezeReconFixExportBatchAuthority(options);
-  const reservation = runtime.reserveServiceOperation({
-    actionKey: RECON_FIX_EXPORT_ACTION,
-    operationKey: batchAuthority.operationKey
+  const reference = exactResultReference(options.result);
+  const evidenceAdmission = exactRuntimeEvidenceSettlementAdmission(options, runtime);
+  const evidenceLease = evidenceAdmission.acquireSettlement({
+    operationKey: batchAuthority.operationKey,
+    resultHandle: reference.resultHandle
   });
   try {
-    const reference = exactResultReference(options.result);
-    const generationInput = createReconFixExportInputFromReference(options, reference);
-    const currentEvidence = await options.readCurrentEvidence(reference);
-    assertCurrentEvidence(reference, currentEvidence);
-    const execution = await reservation.execute({
+    const reservation = runtime.reserveServiceOperation({
       actionKey: RECON_FIX_EXPORT_ACTION,
-      operationKey: batchAuthority.operationKey,
-      production: options.production === true,
-      context: batchAuthority.context,
-      input: generationInput
+      operationKey: batchAuthority.operationKey
     });
-    if (!execution || execution.outcome !== 'completed' || execution.terminalSource !== 'job:done') {
-      if (execution && execution.error) throw fromProtocolError(execution.error);
-      throw exportError('RECON_FIX_EXPORT_GENERATION_FAILED', 'ReconFix Worker staging 生成失败');
+    try {
+      const generationInput = createReconFixExportInputFromReference(options, reference);
+      const currentEvidence = await options.readCurrentEvidence(reference);
+      assertCurrentEvidence(reference, currentEvidence);
+      const execution = await reservation.execute({
+        actionKey: RECON_FIX_EXPORT_ACTION,
+        operationKey: batchAuthority.operationKey,
+        production: options.production === true,
+        context: batchAuthority.context,
+        input: generationInput
+      });
+      if (!execution || execution.outcome !== 'completed' || execution.terminalSource !== 'job:done') {
+        if (execution && execution.error) throw fromProtocolError(execution.error);
+        throw exportError('RECON_FIX_EXPORT_GENERATION_FAILED', 'ReconFix Worker staging 生成失败');
+      }
+      const artifacts = await validateReconFixExportJoin({
+        artifactBindings: options.artifactBindings,
+        filePlan: options.filePlan,
+        generationInput,
+        reference,
+        result: execution.result
+      });
+      const expectedKinds = generationInput.artifacts.map((artifact) => artifact.artifactKind);
+      const finalFilePlan = canonicalReconFixFilePlan(options.filePlan, expectedKinds);
+      freezeReconFixArtifactBindings(options.artifactBindings, finalFilePlan, reference.authority);
+      const publication = await publishReconFixExportArtifacts({
+        ...options,
+        batchContext: batchAuthority.batchContext
+      }, artifacts);
+      return Object.freeze({
+        artifacts,
+        summary: Object.freeze({
+          fixedRowCount: reference.authority.fixedRowCount,
+          unmatchedRowCount: reference.authority.unmatchedRowCount,
+          warningCount: reference.authority.warningCount,
+          resultDigest: reference.authority.resultDigest,
+          artifactCount: reference.authority.artifacts.length
+        }),
+        publication
+      });
+    } finally {
+      reservation.release();
     }
-    const artifacts = await validateReconFixExportJoin({
-      artifactBindings: options.artifactBindings,
-      filePlan: options.filePlan,
-      generationInput,
-      reference,
-      result: execution.result
-    });
-    const expectedKinds = generationInput.artifacts.map((artifact) => artifact.artifactKind);
-    const finalFilePlan = canonicalReconFixFilePlan(options.filePlan, expectedKinds);
-    freezeReconFixArtifactBindings(options.artifactBindings, finalFilePlan, reference.authority);
-    const publication = await publishReconFixExportArtifacts({
-      ...options,
-      batchContext: batchAuthority.batchContext
-    }, artifacts);
-    return Object.freeze({
-      artifacts,
-      summary: Object.freeze({
-        fixedRowCount: reference.authority.fixedRowCount,
-        unmatchedRowCount: reference.authority.unmatchedRowCount,
-        warningCount: reference.authority.warningCount,
-        resultDigest: reference.authority.resultDigest,
-        artifactCount: reference.authority.artifacts.length
-      }),
-      publication
-    });
   } finally {
-    reservation.release();
+    evidenceLease.release();
   }
 }
 

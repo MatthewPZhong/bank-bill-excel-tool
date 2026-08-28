@@ -49,6 +49,9 @@ const {
   readReconFixArtifactEvidence
 } = require('../../../src/main-process/recon-id-fix-service/artifact-evidence');
 const {
+  RECON_FIX_EVIDENCE_WRITER_KINDS
+} = require('../../../src/main-process/recon-id-fix-service/evidence-settlement-admission');
+const {
   RECON_FIX_EXPORT_ACTION,
   RECON_FIX_EXPORT_POLICY,
   RECON_FIX_IMPORT_ACTION,
@@ -80,23 +83,32 @@ function appendSheet(workbook, name, fields, rows = []) {
   ]), name);
 }
 
-function writeStandardWorkbook(filePath) {
+function writeStandardWorkbook(filePath, outputSet = 'main+unmatched') {
   const workbook = XLSX.utils.book_new();
   appendSheet(workbook, RECON_RESULT_SHEET_NAME, RECON_RESULT_FIELDS);
-  appendSheet(workbook, BUSINESS_BILL_SHEET_NAME, BUSINESS_BILL_FIELDS, [
-    {
+  const businessRows = [];
+  if (outputSet !== 'unmatched-only') {
+    businessRows.push({
       OrderId: 'MATCH-1', BillType: 'biz', BillDate: '2026-08-28', Amount: 100,
       Bank: '工行', Currency: 'CNY', reconId: ''
-    },
-    {
+    });
+  }
+  if (outputSet !== 'main-only') {
+    businessRows.push({
       OrderId: 'UNMATCHED-1', BillType: 'biz', BillDate: '2026-08-28', Amount: 200,
       Bank: '工行', Currency: 'CNY', reconId: ''
-    }
-  ]);
-  appendSheet(workbook, OPPONENT_BILL_SHEET_NAME, OPPONENT_BILL_FIELDS, [{
-    OrderId: 'MATCH-1', BillType: 'biz', BillDate: '2026-08-28', Amount: 100,
-    Bank: '工行', Currency: 'CNY', reconId: 'RID-MATCH-1'
-  }]);
+    });
+  }
+  appendSheet(workbook, BUSINESS_BILL_SHEET_NAME, BUSINESS_BILL_FIELDS, businessRows);
+  appendSheet(
+    workbook,
+    OPPONENT_BILL_SHEET_NAME,
+    OPPONENT_BILL_FIELDS,
+    outputSet === 'unmatched-only' ? [] : [{
+      OrderId: 'MATCH-1', BillType: 'biz', BillDate: '2026-08-28', Amount: 100,
+      Bank: '工行', Currency: 'CNY', reconId: 'RID-MATCH-1'
+    }]
+  );
   appendSheet(workbook, ORDER_REPAIR_SHEET_NAME, ORDER_REPAIR_FIELDS);
   XLSX.writeFile(workbook, filePath);
   return filePath;
@@ -248,9 +260,10 @@ function artifactBindingsFor(filePlan, result) {
   }));
 }
 
-async function setupStandard() {
+async function setupStandard(options = {}) {
+  const outputSet = options.outputSet || 'main+unmatched';
   const root = tempRoot();
-  const workbookPath = writeStandardWorkbook(path.join(root, 'standard.xlsx'));
+  const workbookPath = writeStandardWorkbook(path.join(root, 'standard.xlsx'), outputSet);
   const runtime = createBackgroundExecutionRuntime({
     availableParallelism: 4,
     freeMemoryBytes: 8 * 1024 ** 3,
@@ -269,8 +282,8 @@ async function setupStandard() {
     scenario: standardScenario()
   }));
   assert.equal(run.outcome, 'completed', JSON.stringify(run));
-  assert.equal(run.result.summary.fixedRowCount, 1);
-  assert.equal(run.result.summary.unmatchedRowCount > 0, true);
+  assert.equal(run.result.summary.fixedRowCount, outputSet === 'unmatched-only' ? 0 : 1);
+  assert.equal(run.result.summary.unmatchedRowCount, outputSet === 'main-only' ? 0 : 1);
   return { root, runtime, run: run.result, workbookPath };
 }
 
@@ -280,6 +293,7 @@ function sha256(filePath) {
 
 function wrappedRuntime(runtime, mutate) {
   return Object.freeze({
+    reconFixEvidenceSettlementAdmission: runtime.reconFixEvidenceSettlementAdmission,
     reserveServiceOperation(authority) {
       const reservation = runtime.reserveServiceOperation(authority);
       return Object.freeze({
@@ -301,6 +315,7 @@ function wrappedRuntime(runtime, mutate) {
 
 function observedRuntime(runtime, onExecute) {
   return Object.freeze({
+    reconFixEvidenceSettlementAdmission: runtime.reconFixEvidenceSettlementAdmission,
     reserveServiceOperation(authority) {
       const reservation = runtime.reserveServiceOperation(authority);
       return Object.freeze({
@@ -362,6 +377,7 @@ test('standard main+unmatched按FilePlan顺序回读并只调用一次Publisher'
     fs.mkdirSync(stagingDirectory);
     const result = await generateValidateAndPublishReconFixExport({
       runtime: harness.runtime,
+      evidenceSettlementAdmission: harness.runtime.reconFixEvidenceSettlementAdmission,
       result: harness.run,
       filePlan,
       artifactBindings: artifactBindingsFor(filePlan, harness.run),
@@ -387,6 +403,58 @@ test('standard main+unmatched按FilePlan顺序回读并只调用一次Publisher'
   }
 });
 
+test('standard真实数据驱动覆盖main-only/unmatched-only/main+unmatched output-set', async () => {
+  const cases = [
+    ['main-only', ['main']],
+    ['unmatched-only', ['unmatched']],
+    ['main+unmatched', ['main', 'unmatched']]
+  ];
+  for (const [outputSet, expectedKinds] of cases) {
+    const harness = await setupStandard({ outputSet });
+    let publisherCalls = 0;
+    try {
+      assert.deepEqual(
+        harness.run.exportAuthority.artifacts.map((artifact) => artifact.artifactKind),
+        expectedKinds,
+        outputSet
+      );
+      const filePlan = planFor(path.join(harness.root, outputSet), expectedKinds.length);
+      const stagingDirectory = path.join(harness.root, `staging-${outputSet}`);
+      fs.mkdirSync(stagingDirectory);
+      const result = await generateValidateAndPublishReconFixExport({
+        runtime: harness.runtime,
+        evidenceSettlementAdmission: harness.runtime.reconFixEvidenceSettlementAdmission,
+        result: harness.run,
+        filePlan,
+        artifactBindings: artifactBindingsFor(filePlan, harness.run),
+        stagingDirectory,
+        operationKey: `output-set-${outputSet}`,
+        context: operationContext(`output-set-${outputSet}`),
+        batchContext: batchContext(`output-set-${outputSet}`),
+        readCurrentEvidence: async () => currentEvidence(harness.run),
+        publishPublication: async (payload) => {
+          publisherCalls += 1;
+          assert.deepEqual(
+            payload.artifacts.map((artifact) => artifact.outputId),
+            expectedKinds.map((kind) => `recon-fix-${kind}`),
+            outputSet
+          );
+          assert.equal(payload.targets.length, expectedKinds.length, outputSet);
+          return { committed: true };
+        }
+      });
+      assert.deepEqual(
+        result.artifacts.map((artifact) => artifact.artifactKind),
+        expectedKinds,
+        outputSet
+      );
+      assert.equal(publisherCalls, 1, outputSet);
+    } finally {
+      await harness.runtime.shutdown({ timeoutMs: 10000 });
+    }
+  }
+});
+
 test('BOC export成功回读gateway业务；linked evidence变化时Publisher=0新增调用', async () => {
   const root = tempRoot('recon-export-boc-');
   const workbookPath = writeGatewayWorkbook(path.join(root, 'gateway.xlsx'));
@@ -408,11 +476,16 @@ test('BOC export成功回读gateway业务；linked evidence变化时Publisher=0�
       scenario: bocScenario()
     }));
     assert.equal(run.result.summary.runKind, 'boc');
+    assert.deepEqual(
+      run.result.exportAuthority.artifacts.map((artifact) => artifact.artifactKind),
+      ['main']
+    );
     const filePlan = planFor(root, run.result.summary.unmatchedRowCount > 0 ? 2 : 1);
     const successfulStaging = path.join(root, 'staging-success');
     fs.mkdirSync(successfulStaging);
     const successful = await generateValidateAndPublishReconFixExport({
       runtime,
+      evidenceSettlementAdmission: runtime.reconFixEvidenceSettlementAdmission,
       result: run.result,
       filePlan,
       artifactBindings: artifactBindingsFor(filePlan, run.result),
@@ -427,6 +500,7 @@ test('BOC export成功回读gateway业务；linked evidence变化时Publisher=0�
       }
     });
     assert.equal(successful.summary.fixedRowCount, run.result.summary.fixedRowCount);
+    assert.deepEqual(successful.artifacts.map((artifact) => artifact.artifactKind), ['main']);
     assert.equal(publisherCalls, 1);
     const writable = new DatabaseSync(dbPath);
     const row = writable.prepare('SELECT id, raw_json FROM linked_boc_fx_settlement').get();
@@ -440,6 +514,7 @@ test('BOC export成功回读gateway业务；linked evidence变化时Publisher=0�
     await assert.rejects(
       generateValidateAndPublishReconFixExport({
         runtime,
+        evidenceSettlementAdmission: runtime.reconFixEvidenceSettlementAdmission,
         result: run.result,
         filePlan,
         artifactBindings: artifactBindingsFor(filePlan, run.result),
@@ -469,6 +544,7 @@ test('artifact set/collision/target alias/symlink staging均在Publisher前拒�
     await assert.rejects(
       generateValidateAndPublishReconFixExport({
         runtime: harness.runtime,
+        evidenceSettlementAdmission: harness.runtime.reconFixEvidenceSettlementAdmission,
         result: harness.run,
         filePlan: correctPlan,
         artifactBindings: artifactBindingsFor(correctPlan, harness.run),
@@ -601,6 +677,89 @@ test('batchContext是唯一authority：A runtime context/B journal batch在Worke
   }
 });
 
+test('export必须使用当前runtime owner的唯一evidence admission', async () => {
+  const harness = await setupStandard();
+  const otherRuntime = createBackgroundExecutionRuntime({
+    availableParallelism: 2,
+    freeMemoryBytes: 4 * 1024 ** 3,
+    totalMemoryBytes: 8 * 1024 ** 3,
+    shutdownTimeoutMs: 10000
+  });
+  let workerCalls = 0;
+  let evidenceReads = 0;
+  let publisherCalls = 0;
+  try {
+    const runtime = observedRuntime(harness.runtime, () => { workerCalls += 1; });
+    const filePlan = planFor(harness.root, 2);
+    const artifactBindings = artifactBindingsFor(filePlan, harness.run);
+    const stagingDirectory = path.join(harness.root, 'staging-evidence-owner');
+    fs.mkdirSync(stagingDirectory);
+    const attempt = (operationKey, evidenceSettlementAdmission) => (
+      generateValidateAndPublishReconFixExport({
+        runtime,
+        ...(evidenceSettlementAdmission === undefined
+          ? {}
+          : { evidenceSettlementAdmission }),
+        result: harness.run,
+        filePlan,
+        artifactBindings,
+        stagingDirectory,
+        operationKey,
+        context: operationContext(operationKey),
+        batchContext: batchContext(operationKey),
+        readCurrentEvidence: async () => {
+          evidenceReads += 1;
+          return currentEvidence(harness.run);
+        },
+        publishPublication: async () => { publisherCalls += 1; }
+      })
+    );
+    await assert.rejects(
+      () => attempt('missing-evidence-owner'),
+      (error) => error.code === 'RECON_FIX_EVIDENCE_SETTLEMENT_ADMISSION_REQUIRED'
+    );
+    await assert.rejects(
+      () => attempt(
+        'mismatched-evidence-owner',
+        otherRuntime.reconFixEvidenceSettlementAdmission
+      ),
+      (error) => error.code === 'RECON_FIX_EVIDENCE_SETTLEMENT_OWNER_MISMATCH'
+    );
+    assert.notEqual(
+      harness.runtime.reconFixEvidenceSettlementAdmission,
+      otherRuntime.reconFixEvidenceSettlementAdmission
+    );
+
+    let finishWriter;
+    const activeWriter = harness.runtime.reconFixEvidenceSettlementAdmission.runWriter({
+      writerKind: RECON_FIX_EVIDENCE_WRITER_KINDS.SCENARIO,
+      operationKey: 'active-scenario-writer'
+    }, () => new Promise((resolve) => { finishWriter = resolve; }));
+    try {
+      await assert.rejects(
+        () => attempt(
+          'active-writer-blocks-export',
+          harness.runtime.reconFixEvidenceSettlementAdmission
+        ),
+        (error) => error.code === 'RECON_FIX_EVIDENCE_SETTLEMENT_BUSY'
+      );
+    } finally {
+      finishWriter();
+    }
+    await activeWriter;
+
+    assert.equal(workerCalls, 0);
+    assert.equal(evidenceReads, 0);
+    assert.equal(publisherCalls, 0);
+    assert.deepEqual(fs.readdirSync(stagingDirectory), []);
+  } finally {
+    await Promise.all([
+      harness.runtime.shutdown({ timeoutMs: 10000 }),
+      otherRuntime.shutdown({ timeoutMs: 10000 })
+    ]);
+  }
+});
+
 test('Main-owned kind/artifactKey/target binding拒绝反序 targets且Publisher=0', async () => {
   const harness = await setupStandard();
   let workerCalls = 0;
@@ -615,6 +774,7 @@ test('Main-owned kind/artifactKey/target binding拒绝反序 targets且Publisher
     await assert.rejects(
       generateValidateAndPublishReconFixExport({
         runtime: observedRuntime(harness.runtime, () => { workerCalls += 1; }),
+        evidenceSettlementAdmission: harness.runtime.reconFixEvidenceSettlementAdmission,
         result: harness.run,
         filePlan: reversedPlan,
         artifactBindings,
@@ -684,6 +844,7 @@ test('tamper、stale identity/revision/scenario/linked、order与lineage全部Pu
       await assert.rejects(
         generateValidateAndPublishReconFixExport({
           runtime: candidate.wrap(harness.runtime, input),
+          evidenceSettlementAdmission: harness.runtime.reconFixEvidenceSettlementAdmission,
           result: harness.run,
           filePlan,
           artifactBindings,
@@ -720,6 +881,7 @@ test('tamper、stale identity/revision/scenario/linked、order与lineage全部Pu
       await assert.rejects(
         generateValidateAndPublishReconFixExport({
           runtime: harness.runtime,
+          evidenceSettlementAdmission: harness.runtime.reconFixEvidenceSettlementAdmission,
           result: harness.run,
           filePlan,
           artifactBindings: artifactBindingsFor(filePlan, harness.run),
@@ -742,12 +904,16 @@ test('tamper、stale identity/revision/scenario/linked、order与lineage全部Pu
   const reservationHarness = await setupStandard();
   let evidenceReads = 0;
   let publisherCalls = 0;
+  const writerBodyCalls = new Map(
+    Object.values(RECON_FIX_EVIDENCE_WRITER_KINDS).map((writerKind) => [writerKind, 0])
+  );
   try {
     const filePlan = planFor(reservationHarness.root, 2);
     const stagingDirectory = path.join(reservationHarness.root, 'staging-reservation-race');
     fs.mkdirSync(stagingDirectory);
     const exported = await generateValidateAndPublishReconFixExport({
       runtime: reservationHarness.runtime,
+      evidenceSettlementAdmission: reservationHarness.runtime.reconFixEvidenceSettlementAdmission,
       result: reservationHarness.run,
       filePlan,
       artifactBindings: artifactBindingsFor(filePlan, reservationHarness.run),
@@ -785,6 +951,17 @@ test('tamper、stale identity/revision/scenario/linked、order与lineage全部Pu
           )),
           (error) => error.code === 'SERVICE_BUSY'
         );
+        for (const writerKind of Object.values(RECON_FIX_EVIDENCE_WRITER_KINDS)) {
+          assert.throws(
+            () => reservationHarness.runtime.reconFixEvidenceSettlementAdmission.runWriter({
+              writerKind,
+              operationKey: `${writerKind}-during-publisher`
+            }, () => {
+              writerBodyCalls.set(writerKind, writerBodyCalls.get(writerKind) + 1);
+            }),
+            (error) => error.code === 'RECON_FIX_EVIDENCE_SETTLEMENT_BUSY'
+          );
+        }
         return { committed: true };
       }
     });
@@ -801,6 +978,17 @@ test('tamper、stale identity/revision/scenario/linked、order与lineage全部Pu
       }
     ));
     assert.equal(importedAfterSettlement.outcome, 'completed');
+    for (const writerKind of Object.values(RECON_FIX_EVIDENCE_WRITER_KINDS)) {
+      const writerResult = reservationHarness.runtime.reconFixEvidenceSettlementAdmission.runWriter({
+        writerKind,
+        operationKey: `${writerKind}-after-publisher`
+      }, () => {
+        writerBodyCalls.set(writerKind, writerBodyCalls.get(writerKind) + 1);
+        return `${writerKind}-written`;
+      });
+      assert.equal(writerResult, `${writerKind}-written`);
+      assert.equal(writerBodyCalls.get(writerKind), 1);
+    }
   } finally {
     await reservationHarness.runtime.shutdown({ timeoutMs: 10000 });
   }
@@ -839,6 +1027,7 @@ test('sheet/headers/records/style业务篡改即使同步伪造size/hash仍Publi
       await assert.rejects(
         generateValidateAndPublishReconFixExport({
           runtime,
+          evidenceSettlementAdmission: harness.runtime.reconFixEvidenceSettlementAdmission,
           result: harness.run,
           filePlan,
           artifactBindings,
@@ -918,6 +1107,7 @@ test('业务cell/新增行与自洽Worker manifest/summary仍必须对generation
       await assert.rejects(
         generateValidateAndPublishReconFixExport({
           runtime,
+          evidenceSettlementAdmission: harness.runtime.reconFixEvidenceSettlementAdmission,
           result: harness.run,
           filePlan,
           artifactBindings,
@@ -947,6 +1137,7 @@ test('真实 journal Publisher 一次提交 main+unmatched 且保留原批次 re
     fs.mkdirSync(stagingDirectory);
     const result = await generateValidateAndPublishReconFixExport({
       runtime: harness.runtime,
+      evidenceSettlementAdmission: harness.runtime.reconFixEvidenceSettlementAdmission,
       result: harness.run,
       filePlan,
       artifactBindings: artifactBindingsFor(filePlan, harness.run),
@@ -986,6 +1177,7 @@ test('Publisher failure/uncertain只调用一次且不猜成功、不自动重�
       await assert.rejects(
         generateValidateAndPublishReconFixExport({
           runtime: harness.runtime,
+          evidenceSettlementAdmission: harness.runtime.reconFixEvidenceSettlementAdmission,
           result: harness.run,
           filePlan,
           artifactBindings: artifactBindingsFor(filePlan, harness.run),
@@ -1003,6 +1195,11 @@ test('Publisher failure/uncertain只调用一次且不猜成功、不自动重�
       );
       assert.equal(publisherCalls, 1);
       assert.equal(filePlan.outputs.every((output) => !fs.existsSync(output.filePath)), true);
+      const writerResult = harness.runtime.reconFixEvidenceSettlementAdmission.runWriter({
+        writerKind: RECON_FIX_EVIDENCE_WRITER_KINDS.SCENARIO,
+        operationKey: `${code}-writer-after-reject`
+      }, () => 'writer-released');
+      assert.equal(writerResult, 'writer-released');
     } finally {
       await harness.runtime.shutdown({ timeoutMs: 10000 });
     }
@@ -1024,6 +1221,7 @@ test('双artifact Publisher kill后沿用journal recovery：未提交回滚、�
       });
       const execute = () => generateValidateAndPublishReconFixExport({
         runtime: harness.runtime,
+        evidenceSettlementAdmission: harness.runtime.reconFixEvidenceSettlementAdmission,
         result: harness.run,
         filePlan,
         artifactBindings: artifactBindingsFor(filePlan, harness.run),

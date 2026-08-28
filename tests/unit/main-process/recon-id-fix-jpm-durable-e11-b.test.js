@@ -1308,6 +1308,11 @@ test('E11-C JPM exact adopted result可导出，ADM evidence漂移时Publisher�
     assert.equal(run.result.serviceGeneration, 1);
     assert.equal(run.result.revision, 2);
     assert.equal(run.result.boundedSummary.fixedRowCount, 1);
+    assert.equal(run.result.boundedSummary.unmatchedRowCount, 0);
+    assert.deepEqual(
+      run.result.exportAuthority.artifacts.map((artifact) => artifact.artifactKind),
+      ['main']
+    );
 
     const targetDirectory = path.join(harness.root, 'export-target');
     const stagingDirectory = path.join(harness.root, 'export-staging');
@@ -1330,6 +1335,7 @@ test('E11-C JPM exact adopted result可导出，ADM evidence漂移时Publisher�
     }];
     const published = await generateValidateAndPublishReconFixExport({
       runtime: harness.runtime,
+      evidenceSettlementAdmission: harness.runtime.reconFixEvidenceSettlementAdmission,
       result: run.result,
       filePlan,
       artifactBindings,
@@ -1363,6 +1369,7 @@ test('E11-C JPM exact adopted result可导出，ADM evidence漂移时Publisher�
       }
     });
     assert.equal(published.summary.fixedRowCount, 1);
+    assert.deepEqual(published.artifacts.map((artifact) => artifact.artifactKind), ['main']);
     assert.equal(publisherCalls, 1);
     const postImageHash = readAdmRowsForWriteback(harness.database.db).imageHash;
     assert.equal(run.result.exportAuthority.linkedEvidenceHash, postImageHash);
@@ -1380,6 +1387,7 @@ test('E11-C JPM exact adopted result可导出，ADM evidence漂移时Publisher�
     fs.mkdirSync(staleStaging);
     await assert.rejects(() => generateValidateAndPublishReconFixExport({
       runtime: harness.runtime,
+      evidenceSettlementAdmission: harness.runtime.reconFixEvidenceSettlementAdmission,
       result: run.result,
       filePlan,
       artifactBindings,
