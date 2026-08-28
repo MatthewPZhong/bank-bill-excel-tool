@@ -6,6 +6,7 @@ const { createHash, randomUUID } = require('node:crypto');
 
 const {
   getBalanceSeedFilePath,
+  readBalanceSeedRecords,
   serializeBalanceSeedRecords
 } = require('../backend/balance-seed-store');
 const {
@@ -28,7 +29,11 @@ const {
   normalizeRecoverySource
 } = require('./background-execution/recovery-source');
 const {
-  normalizeTargetAliasKey,
+  createRecoveryHoldRequest,
+  inspectionObservationSafePayload,
+  recoveryHoldReasonForInspection
+} = require('./background-execution/recovery-hold-request');
+const {
   targetPathAliasKey
 } = require('./toolbox-target-identity');
 
@@ -139,16 +144,13 @@ function ensureTargetDirectoryEntryDurable(directory, options = {}) {
   });
 }
 
-function createManualBalanceTargetAlias(bankName, options = {}) {
+function createManualBalanceTargetAlias(bankName) {
   if (typeof bankName !== 'string' || !bankName.trim()) {
     fail('MANUAL_BALANCE_TARGET_ALIAS_INVALID', '余额种子银行别名不能为空');
   }
   const normalized = bankName.trim();
-  const canonicalTargetName = normalizeTargetAliasKey(
-    path.basename(getBalanceSeedFilePath('', normalized), '.json'),
-    { platform: options.platform }
-  );
-  return `balance-seed:${Buffer.from(canonicalTargetName, 'utf8').toString('base64url')}`;
+  const legacyTargetName = path.basename(getBalanceSeedFilePath('', normalized), '.json');
+  return `balance-seed:${Buffer.from(legacyTargetName, 'utf8').toString('base64url')}`;
 }
 
 function resolveManualBalanceTargetAlias(storageRoot, targetAliasKey, options = {}) {
@@ -156,20 +158,20 @@ function resolveManualBalanceTargetAlias(storageRoot, targetAliasKey, options = 
   if (typeof targetAliasKey !== 'string' || !targetAliasKey.startsWith(prefix)) {
     fail('MANUAL_BALANCE_TARGET_ALIAS_INVALID', '余额种子目标别名非法');
   }
-  let canonicalTargetName;
+  let legacyTargetName;
   try {
-    canonicalTargetName = Buffer.from(
+    legacyTargetName = Buffer.from(
       targetAliasKey.slice(prefix.length),
       'base64url'
     ).toString('utf8');
   } catch (_error) {
     fail('MANUAL_BALANCE_TARGET_ALIAS_INVALID', '余额种子目标别名无法解析');
   }
-  if (!canonicalTargetName ||
-      createManualBalanceTargetAlias(canonicalTargetName, options) !== targetAliasKey) {
+  if (!legacyTargetName ||
+      createManualBalanceTargetAlias(legacyTargetName, options) !== targetAliasKey) {
     fail('MANUAL_BALANCE_TARGET_ALIAS_INVALID', '余额种子目标别名不规范');
   }
-  return getBalanceSeedFilePath(storageRoot, canonicalTargetName);
+  return getBalanceSeedFilePath(storageRoot, legacyTargetName);
 }
 
 function manualBalanceConflictScopeKey(targetPath, options = {}) {
@@ -470,8 +472,7 @@ function createManualBalanceSeedInspector(options = {}) {
       targetSha256: actual.sha256,
       matchesExpectedPost: matchesPost,
       matchesExpectedPre: matchesPre,
-      durabilityBarrierCompleted,
-      durabilityBlocked
+      durabilityBarrierCompleted
     };
     return Object.freeze({
       contractVersion: 1,
@@ -574,11 +575,7 @@ function createRecoveryTransitionWriter(options = {}) {
       return writeObservation({
         source,
         eventType: 'inspection-completed',
-        safePayload: {
-          outcome: inspection.outcome,
-          evidenceHash: inspection.evidenceHash,
-          ...safePayload
-        },
+        safePayload: inspectionObservationSafePayload(inspection, safePayload),
         transitions,
         holdId
       });
@@ -618,6 +615,81 @@ function manualBalancePlanBinding(plan) {
     binding: Object.freeze(binding),
     bindingHash: canonicalSha256(binding),
     planSnapshot
+  });
+}
+
+function createManualBalanceSeedPlanFreshnessGate(options = {}) {
+  if (typeof options.assertContinuationFresh !== 'function') {
+    throw new TypeError('manual balance freshness gate 需要 assertContinuationFresh');
+  }
+  const readRecords = options.readRecords || readBalanceSeedRecords;
+  if (typeof readRecords !== 'function') {
+    throw new TypeError('manual balance freshness gate 需要 readRecords');
+  }
+  const fileSystem = options.fs || fs;
+  return Object.freeze({
+    async assertFresh(input = {}) {
+      if (!input || typeof input !== 'object' || Array.isArray(input) ||
+          typeof input.targetPath !== 'string' ||
+          typeof input.targetAliasKey !== 'string' ||
+          typeof input.planBindingHash !== 'string') {
+        throw new TypeError('manual balance freshness evidence 非法');
+      }
+      const bound = manualBalancePlanBinding(input.planSnapshot);
+      const expectedAlias = createManualBalanceTargetAlias(bound.binding.bankName, {
+        platform: options.platform
+      });
+      if (bound.bindingHash !== input.planBindingHash || expectedAlias !== input.targetAliasKey) {
+        fail('MANUAL_BALANCE_PLAN_PROVENANCE_MISMATCH', 'manual balance plan provenance 不一致');
+      }
+      await options.assertContinuationFresh(Object.freeze({
+        taskRunId: input.taskRunId,
+        operationKey: input.operationKey,
+        jobId: input.jobId,
+        tokenIdHash: input.tokenIdHash,
+        sessionRevision: input.sessionRevision,
+        interactionOrdinal: input.interactionOrdinal,
+        targetAliasKey: input.targetAliasKey,
+        planBindingHash: input.planBindingHash
+      }));
+
+      const legacyTargetPath = getBalanceSeedFilePath(
+        bound.planSnapshot.storageRoot,
+        bound.binding.bankName
+      );
+      const targetIdentity = targetPathAliasKey(fileSystem, input.targetPath, {
+        platform: options.platform,
+        allowMissingParentLexicalFallback: true
+      });
+      const legacyIdentity = targetPathAliasKey(fileSystem, legacyTargetPath, {
+        platform: options.platform,
+        allowMissingParentLexicalFallback: true
+      });
+      if (targetIdentity !== legacyIdentity) {
+        fail('MANUAL_BALANCE_PLAN_TARGET_MISMATCH', 'manual balance target 与 legacy plan 不一致');
+      }
+
+      const beforeRead = targetSnapshot(input.targetPath, { fs: fileSystem });
+      const currentRecords = readRecords(
+        bound.planSnapshot.storageRoot,
+        bound.binding.bankName
+      );
+      if (!Array.isArray(currentRecords)) {
+        throw new TypeError('manual balance freshness readRecords 必须同步返回数组');
+      }
+      const afterRead = targetSnapshot(input.targetPath, { fs: fileSystem });
+      if (!snapshotsEqual(beforeRead, afterRead)) {
+        fail('MANUAL_BALANCE_PREIMAGE_STALE', '余额种子在 freshness 读取期间已变化');
+      }
+      const recordsEvidence = balanceSeedRecordsEvidence(currentRecords);
+      if (recordsEvidence !== bound.binding.sourceRecordsEvidence) {
+        fail('MANUAL_BALANCE_PLAN_STALE', '余额种子 records 已偏离 legacy plan provenance');
+      }
+      return Object.freeze({
+        targetSnapshot: afterRead,
+        recordsEvidence
+      });
+    }
   });
 }
 
@@ -688,6 +760,13 @@ function createMainSettlementIntentCoordinator(options = {}) {
       typeof options.readRepository.getCriticalIntentByOperation !== 'function') {
     throw new TypeError('MainSettlementIntentCoordinator 需要 canonical readRepository');
   }
+  if (!options.recoveryHoldGate ||
+      typeof options.recoveryHoldGate.assertNoRecoveryHold !== 'function') {
+    throw new TypeError('MainSettlementIntentCoordinator 需要 canonical RecoveryHoldGate');
+  }
+  if (!options.preCommitGate || typeof options.preCommitGate.assertFresh !== 'function') {
+    throw new TypeError('MainSettlementIntentCoordinator 需要 canonical manual balance freshness gate');
+  }
   const inspect = options.inspect || createManualBalanceSeedInspector({
     resolveTargetPath: options.resolveTargetPath,
     fs: options.fs,
@@ -696,6 +775,8 @@ function createMainSettlementIntentCoordinator(options = {}) {
   const atomicWrite = options.atomicWrite || writeManualBalanceTargetPostImage;
   const transitionWriter = options.transitionWriter;
   const readRepository = options.readRepository;
+  const recoveryHoldGate = options.recoveryHoldGate;
+  const preCommitGate = options.preCommitGate;
   const now = options.now || (() => new Date());
   if (typeof now !== 'function') throw new TypeError('MainSettlementIntentCoordinator now 必须是函数');
 
@@ -703,38 +784,14 @@ function createMainSettlementIntentCoordinator(options = {}) {
     return transitionWriter.write(transition, safePayload);
   }
 
-  function holdTransition(source, reasonCode) {
-    const holdId = `hold:${canonicalSha256(`${source.sourceKind}|${source.sourceRef}`)}`;
-    const safeSummary = {
-      reasonCode,
-      sourceKind: source.sourceKind,
-      sourceRefHash: canonicalSha256(source.sourceRef),
-      targetAliasKey: source.boundedEvidence.targetAliasKey
-    };
-    return Object.freeze({
-      holdId,
-      item: Object.freeze({
-        transition: {
-          entityKind: 'recovery-hold',
-          command: 'create-or-get',
-          input: {
-            contractVersion: 1,
-            holdId,
-            sourceKind: source.sourceKind,
-            sourceRef: source.sourceRef,
-            intentId: source.intentId,
-            actionKey: source.actionKey,
-            operationKey: source.operationKey,
-            taskRunId: source.taskRunId,
-            conflictScopeKey: source.conflictScopeKey,
-            reasonCode,
-            safeSummary,
-            evidenceHash: canonicalSha256(safeSummary)
-          }
-        },
-        safePayload: { reasonCode }
-      })
-    });
+  function assertNoHold(conflictScopeKey) {
+    const result = recoveryHoldGate.assertNoRecoveryHold({ conflictScopeKey });
+    if (result && typeof result.then === 'function') {
+      throw new TypeError('canonical RecoveryHoldGate 必须同步完成 exact scope 检查');
+    }
+    if (result !== true) {
+      throw new TypeError('canonical RecoveryHoldGate 必须返回 true 或抛错');
+    }
   }
 
   function recoverAndClose(intentId, inspection, expectedState = 'acked') {
@@ -788,12 +845,12 @@ function createMainSettlementIntentCoordinator(options = {}) {
   }
 
   function writeHeldInspection(source, inspection, reasonCode, durabilityBarrierCompleted) {
-    const hold = holdTransition(source, reasonCode);
+    const hold = createRecoveryHoldRequest(source, reasonCode);
     transitionWriter.writeInspection({
       source,
       inspection,
       safePayload: { durabilityBarrierCompleted },
-      transitions: [hold.item],
+      transitions: [{ transition: hold.transition, safePayload: hold.safePayload }],
       holdId: hold.holdId
     });
     return hold.holdId;
@@ -803,9 +860,10 @@ function createMainSettlementIntentCoordinator(options = {}) {
     try {
       return await inspect(source, context);
     } catch (error) {
-      const hold = holdTransition(source, context.durabilityFailure === true
-        ? 'DURABILITY_BARRIER_UNAVAILABLE'
-        : 'MANUAL_BALANCE_POST_IMAGE_UNKNOWN');
+      const hold = createRecoveryHoldRequest(source,
+        context.durabilityFailure === true || context.durabilityBarrierCompleted === true
+          ? 'DURABILITY_BARRIER_UNAVAILABLE'
+          : 'INSPECTION_UNKNOWN');
       transitionWriter.writeObservation({
         source,
         eventType: 'inspection-failed-transient',
@@ -813,7 +871,7 @@ function createMainSettlementIntentCoordinator(options = {}) {
           errorCode: error && error.code || 'MANUAL_BALANCE_TARGET_READ_FAILED',
           thresholdReached: true
         },
-        transitions: [hold.item],
+        transitions: [{ transition: hold.transition, safePayload: hold.safePayload }],
         holdId: hold.holdId
       });
       if (error && typeof error === 'object') {
@@ -877,6 +935,12 @@ function createMainSettlementIntentCoordinator(options = {}) {
 
   return Object.freeze({
     async settle(input) {
+      if (Object.hasOwn(input || {}, 'preCommitCheck')) {
+        fail(
+          'MANUAL_BALANCE_PRECOMMIT_AUTHORITY_INVALID',
+          'manual balance settlement 不接受调用方自带 preCommit authority'
+        );
+      }
       const identity = validateSettlementIdentity(input, {
         resolveTargetPath: options.resolveTargetPath,
         fs: options.fs,
@@ -889,16 +953,39 @@ function createMainSettlementIntentCoordinator(options = {}) {
       );
       if (existingIntent) return replayDecidedIntent(existingIntent, identity);
 
-      if (typeof options.assertNoHold === 'function') {
-        await options.assertNoHold({ conflictScopeKey: identity.conflictScopeKey });
+      assertNoHold(identity.conflictScopeKey);
+      const freshnessEvidence = await preCommitGate.assertFresh(Object.freeze({
+        taskRunId: identity.taskRunId,
+        operationKey: identity.operationKey,
+        jobId: identity.jobId,
+        tokenIdHash: identity.tokenIdHash,
+        sessionRevision: identity.sessionRevision,
+        interactionOrdinal: identity.interactionOrdinal,
+        targetAliasKey: identity.targetAliasKey,
+        targetPath: identity.targetPath,
+        planSnapshot: identity.planSnapshot,
+        planBindingHash: identity.planBindingHash
+      }));
+      if (!freshnessEvidence ||
+          freshnessEvidence.recordsEvidence !== identity.planBinding.sourceRecordsEvidence ||
+          !freshnessEvidence.targetSnapshot) {
+        fail(
+          'MANUAL_BALANCE_FRESHNESS_EVIDENCE_INVALID',
+          'manual balance freshness gate 未返回 canonical plan/target evidence'
+        );
       }
+      assertNoHold(identity.conflictScopeKey);
+      const pre = targetSnapshot(identity.targetPath, { fs: options.fs || fs });
+      if (!snapshotsEqual(pre, freshnessEvidence.targetSnapshot)) {
+        fail('MANUAL_BALANCE_PREIMAGE_STALE', '余额种子在 awaited admission 后已变化');
+      }
+
       const commitNow = now();
       const materialized = materializeManualBalanceSeedPlan(identity.planSnapshot, commitNow);
       const expectedPostBytes = Buffer.from(
         serializeBalanceSeedRecords(materialized.records),
         'utf8'
       );
-      const pre = targetSnapshot(identity.targetPath, { fs: options.fs || fs });
       const expectedPost = snapshotForBytes(expectedPostBytes);
       const intentId = intentIdForOperation(identity.operationKey);
       const boundedEvidence = {
@@ -932,16 +1019,6 @@ function createMainSettlementIntentCoordinator(options = {}) {
       if (orphanedReservation) {
         fail('MANUAL_BALANCE_PREPARED_REQUEST_ORPHANED', 'manual balance prepared request缺少Intent');
       }
-      if (typeof input.preCommitCheck === 'function') {
-        await input.preCommitCheck({
-          operationKey: identity.operationKey,
-          targetAliasKey: identity.targetAliasKey,
-          pre,
-          expectedPost,
-          planBindingHash: identity.planBindingHash,
-          commitUpdatedAt: materialized.commitUpdatedAt
-        });
-      }
       if (snapshotsEqual(pre, expectedPost)) {
         return Object.freeze({
           status: 'noop',
@@ -952,6 +1029,7 @@ function createMainSettlementIntentCoordinator(options = {}) {
         });
       }
       const source = sourceForIntent(identity, intentId, boundedEvidence);
+      assertNoHold(identity.conflictScopeKey);
       write(createPrepared, preparedPayload);
       write({
         entityKind: 'critical-intent',
@@ -997,7 +1075,7 @@ function createMainSettlementIntentCoordinator(options = {}) {
           error.holdId = writeHeldInspection(
             source,
             inspection,
-            'MANUAL_BALANCE_POST_IMAGE_UNKNOWN',
+            recoveryHoldReasonForInspection(inspection),
             false
           );
         }
@@ -1068,7 +1146,7 @@ function createMainSettlementIntentCoordinator(options = {}) {
       const holdId = writeHeldInspection(
         source,
         inspection,
-        'MANUAL_BALANCE_POST_IMAGE_UNKNOWN',
+        recoveryHoldReasonForInspection(inspection),
         true
       );
       return Object.freeze({
@@ -1172,6 +1250,7 @@ module.exports = {
   createManualBalanceInteractionOrdinalAllocator,
   createManualBalanceOperationIdentity,
   createManualBalanceRecoveryPlanTransitions,
+  createManualBalanceSeedPlanFreshnessGate,
   createManualBalanceSeedInspector,
   createManualBalanceSettlementRecoveryProvider,
   createManualBalanceTargetAlias,
