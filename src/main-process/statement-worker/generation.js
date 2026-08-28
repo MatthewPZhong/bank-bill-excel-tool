@@ -301,10 +301,63 @@ function executeStatementGeneration(options) {
   }
 }
 
+function defaultGenerationSafepoint() {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+async function executeStatementGenerationWithSafepoints(options) {
+  const {
+    request,
+    stagingRoot,
+    assertNotCancelled = () => {},
+    yieldToEventLoop = defaultGenerationSafepoint
+  } = options;
+  const plannedPaths = resolveArtifactPlans(stagingRoot, request.artifacts)
+    .map((plan) => plan.generationPath);
+  const unitResults = [];
+  try {
+    for (const artifact of request.artifacts) {
+      assertNotCancelled();
+      const unitResult = executeStatementGeneration({
+        ...options,
+        request: Object.freeze({ ...request, artifacts: Object.freeze([artifact]) })
+      });
+      unitResults.push(unitResult);
+
+      // 同步 XLSX writer 无法观察排队中的取消；仍持有全部未发布 staging 时，
+      // 在每个 artifact 后让出事件循环，再复核同一取消权威。
+      await yieldToEventLoop();
+      assertNotCancelled();
+    }
+
+    // 最终 safepoint 位于单元内部的来源复核之后，manifest handoff 前必须
+    // 再确认同一来源 identity/content evidence 未在让出期间漂移。
+    assertSourcesCurrent(options.entries);
+    const finalUnit = unitResults[unitResults.length - 1];
+    const warningSummary = finalUnit.warningSummary;
+    const artifacts = unitResults.map((unit) => Object.freeze({
+      ...unit.artifacts[0],
+      warningSummary
+    }));
+    return Object.freeze({
+      status: 'generated',
+      scope: finalUnit.scope,
+      artifacts: Object.freeze(artifacts),
+      warningSummary,
+      sessionRevision: finalUnit.sessionRevision,
+      inputEvidenceHash: finalUnit.inputEvidenceHash
+    });
+  } catch (error) {
+    removeArtifacts(plannedPaths, { stagingRoot });
+    throw error;
+  }
+}
+
 module.exports = {
   StatementGenerationError,
   assertSourcesCurrent,
   executeStatementGeneration,
+  executeStatementGenerationWithSafepoints,
   removeArtifacts,
   resolveGenerationGroups,
   resolveArtifactPlans,

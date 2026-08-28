@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { Worker } = require('node:worker_threads');
 const { DatabaseSync } = require('node:sqlite');
 const JSZip = require('jszip');
 const XLSX = require('xlsx');
@@ -48,6 +49,7 @@ const {
 } = require('../../../src/main-process/statement-worker/runtime-bindings');
 const {
   executeStatementGeneration,
+  executeStatementGenerationWithSafepoints,
   resolveArtifactPlans
 } = require('../../../src/main-process/statement-worker/generation');
 const {
@@ -317,7 +319,7 @@ function policyRegistry(workerData) {
   }).freeze();
 }
 
-function harness(workerData) {
+function harness(workerData, options = {}) {
   const registry = policyRegistry(workerData);
   const governor = createResourceGovernor({
     budgets: {
@@ -331,10 +333,61 @@ function harness(workerData) {
   return createExecutionSupervisor({
     policyRegistry: registry,
     resourceGovernor: governor,
-    workerThreadAdapter: createWorkerThreadAdapter(),
+    workerThreadAdapter: options.workerThreadAdapter || createWorkerThreadAdapter(),
     initTimeoutMs: 5000,
     executionTimeoutMs: 10000
   });
+}
+
+function observedWorkerAdapter(events, control = null) {
+  class ObservedWorker extends Worker {
+    constructor(filename, options) {
+      super(filename, options);
+      this.on('message', (message) => {
+        events.push({
+          operation: message && message.operation,
+          jobId: message && (message.jobId || (message.jobRef && message.jobRef.jobId))
+        });
+      });
+    }
+
+    postMessage(message, transferList) {
+      if (control && Array.isArray(control.seen)) {
+        control.seen.push({
+          operation: message && message.operation,
+          jobId: message && (message.jobId || (message.jobRef && message.jobRef.jobId))
+        });
+      }
+      if (control && message && message.operation === 'resource:release-ack' &&
+          typeof control.shouldHoldReleaseAck === 'function' &&
+          control.shouldHoldReleaseAck(message)) {
+        control.releaseAck = () => super.postMessage(message, transferList);
+        return;
+      }
+      return super.postMessage(message, transferList);
+    }
+  }
+  return createWorkerThreadAdapter({ WorkerClass: ObservedWorker });
+}
+
+async function waitFor(predicate, label, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.fail(`Timed out waiting for ${label}`);
+}
+
+function filesUnder(root) {
+  if (!fs.existsSync(root)) return [];
+  const files = [];
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    const entryPath = path.join(root, entry.name);
+    if (entry.isDirectory()) files.push(...filesUnder(entryPath));
+    else files.push(entryPath);
+  }
+  return files;
 }
 
 function request(actionKey, input, ordinal) {
@@ -502,6 +555,314 @@ test('真实 Supervisor/ServiceHost/Worker 以token+revision+evidence生成curre
     { scope: 'all', row_count: 2 },
     { scope: 'current', row_count: 1 }
   ]);
+});
+
+test('真实Supervisor/ServiceHost/Worker在current/all与detail/both safepoint取消后先ack再error且清空staging', async (t) => {
+  const scenarios = [
+    ['statement:generate-current', 'detail'],
+    ['statement:generate-all', 'detail'],
+    ['statement:generate-current', 'both'],
+    ['statement:generate-all', 'both']
+  ];
+
+  for (const [scenarioIndex, [actionKey, kind]] of scenarios.entries()) {
+    await t.test(`${actionKey}/${kind}`, async (t) => {
+      const root = tempRoot(t);
+      const staging = path.join(root, 'staging');
+      const storage = path.join(root, 'storage');
+      fs.mkdirSync(staging);
+      fs.mkdirSync(storage);
+      const inputPath = writeRows(path.join(root, 'cancel-source.xlsx'), [
+        ['Date', 'Credit', 'Debit', 'Currency', 'Account', 'Balance'],
+        ['2026-08-01', 10, '', 'USD', 'M001', 100]
+      ]);
+      const evidence = templateEvidence({
+        expectedSourceHeaders: ['Date', 'Credit', 'Debit', 'Currency', 'Account', 'Balance'],
+        orderedTargetFields: DETAIL_HEADERS.concat('Balance'),
+        mappingByField: {
+          BillDate: 'Date',
+          'Credit Amount': 'Credit',
+          'Debit Amount': 'Debit',
+          Currency: 'Currency',
+          MerchantId: 'Account',
+          Balance: 'Balance'
+        }
+      });
+      const events = [];
+      const supervisor = harness({
+        statementSourceRoot: root,
+        statementStagingRoot: staging,
+        statementStorageRoot: storage,
+        statementBalanceTemplatePath: BALANCE_TEMPLATE_PATH,
+        statementFaultInjection: { generationSafepointDelayMs: 150 }
+      }, { workerThreadAdapter: observedWorkerAdapter(events) });
+      let shutdownComplete = false;
+      t.after(async () => {
+        if (!shutdownComplete) await supervisor.shutdown({ forceServices: true, timeoutMs: 5000 });
+      });
+
+      const imported = await supervisor.execute(request(
+        'statement:import',
+        importInput(inputPath, evidence),
+        300 + scenarioIndex * 10
+      ));
+      assert.equal(imported.outcome, 'completed', JSON.stringify(imported));
+      const prepared = await supervisor.execute(request(actionKey, {
+        command: 'prepare-generation', sessionKey: 'template-e09-c', kind
+      }, 301 + scenarioIndex * 10));
+      assert.equal(prepared.outcome, 'completed', JSON.stringify(prepared));
+
+      const resourcePrefix = `${scenarioIndex}-${actionKey.endsWith('all') ? 'all' : 'current'}-${kind}`;
+      const artifacts = kind === 'both'
+        ? [
+            { kind: 'detail', artifactKey: `${resourcePrefix}-detail`, stagingResourceId: `${resourcePrefix}/detail.xlsx` },
+            { kind: 'balance', artifactKey: `${resourcePrefix}-balance`, stagingResourceId: `${resourcePrefix}/balance.xlsx` }
+          ]
+        : [{ kind: 'detail', artifactKey: `${resourcePrefix}-detail`, stagingResourceId: `${resourcePrefix}/detail.xlsx` }];
+      const generateRequest = request(actionKey, {
+        command: 'generate',
+        token: tokenFrom(prepared.result.interaction),
+        sessionKey: 'template-e09-c',
+        sessionRevision: 1,
+        kind,
+        artifacts
+      }, 302 + scenarioIndex * 10);
+      const execution = supervisor.execute(generateRequest);
+      const detailPath = path.join(staging, resourcePrefix, 'detail.xlsx');
+      const balancePath = path.join(staging, resourcePrefix, 'balance.xlsx');
+      await waitFor(() => fs.existsSync(detailPath), `${resourcePrefix} first artifact`);
+      if (kind === 'both') {
+        assert.equal(fs.existsSync(balancePath), false, 'artifact间safepoint前不得抢先写balance');
+      }
+      const shutdown = supervisor.shutdown({ timeoutMs: 5000 });
+      const result = await execution;
+      await shutdown;
+      shutdownComplete = true;
+      assert.equal(result.outcome, 'cancelled', JSON.stringify(result));
+      assert.equal(result.terminalSource, 'job:error');
+      assert.equal(result.error.code, 'STATEMENT_IMPORT_CANCELLED');
+      const jobEvents = events.filter((event) => event.jobId === generateRequest.jobId);
+      const ackIndex = jobEvents.findIndex((event) => event.operation === 'cancel:ack');
+      const errorIndex = jobEvents.findIndex((event) => event.operation === 'job:error');
+      assert.ok(ackIndex >= 0 && errorIndex > ackIndex, JSON.stringify(jobEvents));
+      assert.deepEqual(filesUnder(staging), [], '取消终态前必须由unpublished generation owner清空全部staging');
+    });
+  }
+});
+
+test('真实Supervisor/ServiceHost/Worker在generation早期shutdown时保持canonical取消且无staging残留', async (t) => {
+  const root = tempRoot(t);
+  const staging = path.join(root, 'staging');
+  const storage = path.join(root, 'storage');
+  fs.mkdirSync(staging);
+  fs.mkdirSync(storage);
+  const inputPath = writeRows(path.join(root, 'early-cancel-source.xlsx'), [
+    ['Date', 'Credit', 'Debit', 'Currency', 'Account', 'Balance'],
+    ['2026-08-01', 10, '', 'USD', 'M001', 100]
+  ]);
+  const evidence = templateEvidence({
+    expectedSourceHeaders: ['Date', 'Credit', 'Debit', 'Currency', 'Account', 'Balance'],
+    orderedTargetFields: DETAIL_HEADERS.concat('Balance'),
+    mappingByField: {
+      BillDate: 'Date', 'Credit Amount': 'Credit', 'Debit Amount': 'Debit',
+      Currency: 'Currency', MerchantId: 'Account', Balance: 'Balance'
+    }
+  });
+  const events = [];
+  const control = { seen: [] };
+  const supervisor = harness({
+    statementSourceRoot: root,
+    statementStagingRoot: staging,
+    statementStorageRoot: storage,
+    statementBalanceTemplatePath: BALANCE_TEMPLATE_PATH,
+    statementFaultInjection: { generationSafepointDelayMs: 150 }
+  }, { workerThreadAdapter: observedWorkerAdapter(events, control) });
+  let shutdownComplete = false;
+  t.after(async () => {
+    if (!shutdownComplete) await supervisor.shutdown({ forceServices: true, timeoutMs: 5000 });
+  });
+
+  const imported = await supervisor.execute(request(
+    'statement:import',
+    importInput(inputPath, evidence),
+    350
+  ));
+  assert.equal(imported.outcome, 'completed', JSON.stringify(imported));
+  const prepared = await supervisor.execute(request('statement:generate-current', {
+    command: 'prepare-generation', sessionKey: 'template-e09-c', kind: 'both'
+  }, 351));
+  assert.equal(prepared.outcome, 'completed', JSON.stringify(prepared));
+  const generateRequest = request('statement:generate-current', {
+    command: 'generate',
+    token: tokenFrom(prepared.result.interaction),
+    sessionKey: 'template-e09-c',
+    sessionRevision: 1,
+    kind: 'both',
+    artifacts: [
+      { kind: 'detail', artifactKey: 'early-cancel-detail', stagingResourceId: 'early-cancel/detail.xlsx' },
+      { kind: 'balance', artifactKey: 'early-cancel-balance', stagingResourceId: 'early-cancel/balance.xlsx' }
+    ]
+  }, 352);
+
+  const execution = supervisor.execute(generateRequest);
+  await waitFor(
+    () => control.seen.some((message) =>
+      message.operation === 'job:start' && message.jobId === generateRequest.jobId),
+    'generation job:start dispatch'
+  );
+  const shutdown = supervisor.shutdown({ timeoutMs: 5000 });
+  const result = await execution;
+  await shutdown;
+  shutdownComplete = true;
+  assert.equal(result.outcome, 'cancelled', JSON.stringify(result));
+  assert.equal(result.terminalSource, 'job:error');
+  assert.equal(result.error.code, 'STATEMENT_IMPORT_CANCELLED');
+  const jobEvents = events.filter((event) => event.jobId === generateRequest.jobId);
+  const ackIndex = jobEvents.findIndex((event) => event.operation === 'cancel:ack');
+  const errorIndex = jobEvents.findIndex((event) => event.operation === 'job:error');
+  assert.ok(ackIndex >= 0 && errorIndex > ackIndex, JSON.stringify(jobEvents));
+  assert.deepEqual(filesUnder(staging), []);
+});
+
+test('final generation safepoint后来源漂移在manifest handoff前fail closed并清空staging', async (t) => {
+  const root = tempRoot(t);
+  const staging = path.join(root, 'staging');
+  const storage = path.join(root, 'storage');
+  fs.mkdirSync(staging);
+  fs.mkdirSync(storage);
+  const inputPath = writeRows(path.join(root, 'final-safepoint-drift.xlsx'), [
+    ['Date', 'Credit', 'Debit', 'Currency', 'Account'],
+    ['2026-08-01', 10, '', 'USD', 'M001']
+  ]);
+  const mappingByTargetField = {
+    BillDate: 'Date', 'Credit Amount': 'Credit', 'Debit Amount': 'Debit',
+    Currency: 'Currency', MerchantId: 'Account'
+  };
+  const detailRows = buildMappedRows({
+    inputFilePath: inputPath,
+    orderedTargetFields: DETAIL_HEADERS,
+    mappingByField: mappingByTargetField
+  });
+
+  await assert.rejects(
+    executeStatementGenerationWithSafepoints({
+      session: generationSession({
+        template: { name: '中行-上海' },
+        mappingByTargetField,
+        balanceRequested: false
+      }),
+      entries: [generationEntry({ id: 'final-drift', filePath: inputPath, detailRows })],
+      request: {
+        sessionRevision: 1,
+        artifacts: [{
+          kind: 'detail',
+          artifactKey: 'final-drift-detail',
+          stagingResourceId: 'final-drift/detail.xlsx'
+        }]
+      },
+      scope: 'current',
+      inputEvidenceHash: '7'.repeat(64),
+      stagingRoot: staging,
+      storageRoot: storage,
+      balanceTemplatePath: BALANCE_TEMPLATE_PATH,
+      async yieldToEventLoop() {
+        fs.appendFileSync(inputPath, Buffer.from([0]));
+      }
+    }),
+    (error) => error && error.code === 'STATEMENT_GENERATION_INPUT_STALE'
+  );
+  assert.deepEqual(filesUnder(staging), []);
+});
+
+test('已登记success completion但release-ack未到时shutdown cancel仍权威胜出并撤销未发布generation', async (t) => {
+  const root = tempRoot(t);
+  const staging = path.join(root, 'staging');
+  const storage = path.join(root, 'storage');
+  fs.mkdirSync(staging);
+  fs.mkdirSync(storage);
+  const inputPath = writeRows(path.join(root, 'release-race.xlsx'), [
+    ['Date', 'Credit', 'Debit', 'Currency', 'Account', 'Balance'],
+    ['2026-08-01', 10, '', 'USD', 'M001', 100]
+  ]);
+  const evidence = templateEvidence({
+    expectedSourceHeaders: ['Date', 'Credit', 'Debit', 'Currency', 'Account', 'Balance'],
+    orderedTargetFields: DETAIL_HEADERS.concat('Balance'),
+    mappingByField: {
+      BillDate: 'Date', 'Credit Amount': 'Credit', 'Debit Amount': 'Debit',
+      Currency: 'Currency', MerchantId: 'Account', Balance: 'Balance'
+    }
+  });
+  const events = [];
+  const control = {
+    releaseAck: null,
+    seen: [],
+    targetJobId: null,
+    shouldHoldReleaseAck() {
+      return this.seen.some((message) =>
+        message.operation === 'job:start' && message.jobId === this.targetJobId);
+    }
+  };
+  const supervisor = harness({
+    statementSourceRoot: root,
+    statementStagingRoot: staging,
+    statementStorageRoot: storage,
+    statementBalanceTemplatePath: BALANCE_TEMPLATE_PATH
+  }, { workerThreadAdapter: observedWorkerAdapter(events, control) });
+  let shutdownComplete = false;
+  t.after(async () => {
+    if (!shutdownComplete) await supervisor.shutdown({ forceServices: true, timeoutMs: 5000 });
+  });
+  const imported = await supervisor.execute(request('statement:import', importInput(inputPath, evidence), 400));
+  assert.equal(imported.outcome, 'completed', JSON.stringify(imported));
+  const prepared = await supervisor.execute(request('statement:generate-current', {
+    command: 'prepare-generation', sessionKey: 'template-e09-c', kind: 'both'
+  }, 401));
+  assert.equal(prepared.outcome, 'completed', JSON.stringify(prepared));
+  const generateRequest = request('statement:generate-current', {
+    command: 'generate',
+    token: tokenFrom(prepared.result.interaction),
+    sessionKey: 'template-e09-c',
+    sessionRevision: 1,
+    kind: 'both',
+    artifacts: [
+      { kind: 'detail', artifactKey: 'release-race-detail', stagingResourceId: 'release-race/detail.xlsx' },
+      { kind: 'balance', artifactKey: 'release-race-balance', stagingResourceId: 'release-race/balance.xlsx' }
+    ]
+  }, 402);
+  control.targetJobId = generateRequest.jobId;
+  const execution = supervisor.execute(generateRequest);
+  let earlyExecutionResult = null;
+  void execution.then(
+    (result) => { earlyExecutionResult = { result }; },
+    (error) => { earlyExecutionResult = { error: { code: error.code, message: error.message } }; }
+  );
+  await waitFor(
+    () => typeof control.releaseAck === 'function' || earlyExecutionResult !== null,
+    `withheld generation token release ack: ${JSON.stringify(control.seen)}`
+  );
+  assert.equal(earlyExecutionResult, null, JSON.stringify({ earlyExecutionResult, seen: control.seen }));
+  assert.deepEqual(filesUnder(staging).map((filePath) => path.basename(filePath)).sort(), [
+    'balance.xlsx', 'detail.xlsx'
+  ], 'success completion已登记但Main publication尚未取得generation ownership');
+
+  const shutdown = supervisor.shutdown({ timeoutMs: 5000 });
+  await waitFor(
+    () => events.some((event) => event.jobId === generateRequest.jobId && event.operation === 'cancel:ack'),
+    'generation cancel ack'
+  );
+  control.releaseAck();
+  const result = await execution;
+  await shutdown;
+  shutdownComplete = true;
+  assert.equal(result.outcome, 'cancelled', JSON.stringify(result));
+  assert.equal(result.terminalSource, 'job:error');
+  assert.equal(result.error.code, 'STATEMENT_IMPORT_CANCELLED');
+  const jobEvents = events.filter((event) => event.jobId === generateRequest.jobId);
+  const ackIndex = jobEvents.findIndex((event) => event.operation === 'cancel:ack');
+  const errorIndex = jobEvents.findIndex((event) => event.operation === 'job:error');
+  assert.ok(ackIndex >= 0 && errorIndex > ackIndex, JSON.stringify(jobEvents));
+  assert.equal(jobEvents.some((event) => event.operation === 'job:done'), false);
+  assert.deepEqual(filesUnder(staging), []);
 });
 
 test('filename parent session按child template digest生成混合明细与余额golden且不退化到owner配置', async (t) => {
