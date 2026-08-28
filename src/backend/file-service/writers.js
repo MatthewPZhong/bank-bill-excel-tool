@@ -303,6 +303,7 @@ function writeBalanceWorkbook({
 module.exports = {
   applyBalanceFieldFormats,
   applyExportFieldFormats,
+  buildNumericCellValue,
   writeBalanceWorkbook,
   writeWorkbookRows
 };
