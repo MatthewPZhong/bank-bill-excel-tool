@@ -579,6 +579,8 @@ function ensureVccFinancialOpStateModelSupport(db) {
 
       CREATE INDEX IF NOT EXISTS idx_vcc_fin_op_adjustments_run_row
         ON vcc_fin_op_run_adjustments(run_id, row_key, currency);
+      CREATE INDEX IF NOT EXISTS idx_vcc_fin_op_adjustments_run_subject
+        ON vcc_fin_op_run_adjustments(run_id, subject, sequence, id);
       CREATE INDEX IF NOT EXISTS idx_vcc_fin_op_operation_audit_month
         ON vcc_fin_op_operation_audit(target_month, operation_type, created_at DESC, id DESC);
     `);
@@ -969,6 +971,10 @@ function ensureVccFinancialOpTablesSupport(db, options = {}) {
       ON vcc_fin_op_system_snapshot_attempts(import_record_id, disposition, id);
     CREATE INDEX IF NOT EXISTS idx_vcc_fin_op_runs_month
       ON vcc_fin_op_runs(target_month, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_vcc_fin_op_run_rows_run_subject
+      ON vcc_fin_op_run_rows(run_id, subject, id);
+    CREATE INDEX IF NOT EXISTS idx_vcc_fin_op_pending_summary_run_subject
+      ON vcc_fin_op_pending_summary_rows(run_id, subject);
     CREATE INDEX IF NOT EXISTS idx_vcc_fin_op_opening_month
       ON vcc_fin_op_opening_balances(target_month, initialized_at);
     CREATE INDEX IF NOT EXISTS idx_vcc_fin_op_dataset_deletions_month

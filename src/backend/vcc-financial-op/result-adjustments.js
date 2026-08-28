@@ -223,15 +223,33 @@ function finalizeSummaryAmounts(accumulators, {
   return totals;
 }
 
-function validateBaseRows(db, runId) {
-  const rawRows = db.prepare(`
+function normalizeSubjectFilter(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'string' || value.length < 1) {
+    throw resultStateError('invalid-subject', '财务OP主体不能为空');
+  }
+  return value;
+}
+
+function validateBaseRows(db, runId, subject = null) {
+  const normalizedSubject = normalizeSubjectFilter(subject);
+  const rawRows = normalizedSubject === null ? db.prepare(`
     SELECT id, subject, row_kind, source_type, category_major, category_minor,
            currency, amount
     FROM vcc_fin_op_run_rows
     WHERE run_id = ?
     ORDER BY id
-  `).all(runId);
-  if (rawRows.length === 0) {
+  `).all(runId) : db.prepare(`
+    SELECT id, subject, row_kind, source_type, category_major, category_minor,
+           currency, amount
+    FROM vcc_fin_op_run_rows
+    WHERE run_id = ? AND subject = ?
+    ORDER BY id
+  `).all(runId, normalizedSubject);
+  const runHasRows = rawRows.length > 0 || (normalizedSubject !== null && Boolean(db.prepare(`
+    SELECT 1 FROM vcc_fin_op_run_rows WHERE run_id = ? LIMIT 1
+  `).get(runId)));
+  if (!runHasRows) {
     throw resultStateError(
       'run-base-rows-empty',
       `run ${runId} 没有基础结果行，不能读取生效结果`,
@@ -307,15 +325,23 @@ function validateBaseRows(db, runId) {
   return { baseRows, coordinates, logicalRows, periodTotals };
 }
 
-function validateAdjustments(db, runId, logicalRows) {
-  const rows = db.prepare(`
+function validateAdjustments(db, runId, logicalRows, subject = null) {
+  const normalizedSubject = normalizeSubjectFilter(subject);
+  const rows = normalizedSubject === null ? db.prepare(`
     SELECT id, run_id, row_key, subject, source_type, category_major, category_minor,
            currency, adjustment_amount, reason, sequence, created_at,
            created_app_version, created_build_sha
     FROM vcc_fin_op_run_adjustments
     WHERE run_id = ?
     ORDER BY sequence, id
-  `).all(runId);
+  `).all(runId) : db.prepare(`
+    SELECT id, run_id, row_key, subject, source_type, category_major, category_minor,
+           currency, adjustment_amount, reason, sequence, created_at,
+           created_app_version, created_build_sha
+    FROM vcc_fin_op_run_adjustments
+    WHERE run_id = ? AND subject = ?
+    ORDER BY sequence, id
+  `).all(runId, normalizedSubject);
   const coordinates = new Set();
   const totalAccumulators = new Map();
   const adjustments = rows.map((row) => {
@@ -413,14 +439,18 @@ function validateAdjustments(db, runId, logicalRows) {
   });
   for (let index = 0; index < adjustments.length; index += 1) {
     const expected = index + 1;
-    if (adjustments[index].sequence !== expected) {
+    if ((normalizedSubject === null && adjustments[index].sequence !== expected) ||
+        (normalizedSubject !== null && index > 0 &&
+          adjustments[index].sequence <= adjustments[index - 1].sequence)) {
       throw resultStateError(
         'adjustment-sequence-inconsistent',
-        `run ${runId} 的调整 sequence 必须从 1 连续递增，期望 ${expected}，实际 ${adjustments[index].sequence}`,
+        normalizedSubject === null
+          ? `run ${runId} 的调整 sequence 必须从 1 连续递增，期望 ${expected}，实际 ${adjustments[index].sequence}`
+          : `run ${runId} 的 ${normalizedSubject} 调整 sequence 局部顺序非法`,
         {
           runId,
           adjustmentId: adjustments[index].id,
-          expectedSequence: expected,
+          expectedSequence: normalizedSubject === null ? expected : null,
           actualSequence: adjustments[index].sequence
         }
       );
@@ -505,14 +535,21 @@ function buildEffectiveRows(runId, baseState, adjustments) {
   });
 }
 
-function buildEffectiveBalances(db, runId, baseState, adjustmentTotals) {
-  const rows = db.prepare(`
+function buildEffectiveBalances(db, runId, baseState, adjustmentTotals, subject = null) {
+  const normalizedSubject = normalizeSubjectFilter(subject);
+  const rows = normalizedSubject === null ? db.prepare(`
     SELECT subject, currency, opening_balance, period_amount,
            calculated_balance, system_balance, difference
     FROM vcc_fin_op_run_balances
     WHERE run_id = ?
     ORDER BY subject, currency
-  `).all(runId);
+  `).all(runId) : db.prepare(`
+    SELECT subject, currency, opening_balance, period_amount,
+           calculated_balance, system_balance, difference
+    FROM vcc_fin_op_run_balances
+    WHERE run_id = ? AND subject = ?
+    ORDER BY currency
+  `).all(runId, normalizedSubject);
   if (rows.length === 0) {
     throw resultStateError(
       'run-balances-empty',
@@ -781,7 +818,7 @@ function buildReviewSubjects(reviewRows, balances) {
   });
 }
 
-function getEffectiveRunResult(db, runId) {
+function getEffectiveRunResultInternal(db, runId, subject = null) {
   const normalizedRunId = Number(runId);
   if (!Number.isSafeInteger(normalizedRunId) || normalizedRunId < 1) {
     throw resultStateError('invalid-run-id', `财务OP run id 无效：${runId}`);
@@ -793,11 +830,17 @@ function getEffectiveRunResult(db, runId) {
     WHERE id = ?
   `).get(normalizedRunId);
   if (!run) return null;
-  const baseState = validateBaseRows(db, normalizedRunId);
-  const adjustmentState = validateAdjustments(db, normalizedRunId, baseState.logicalRows);
+  const normalizedSubject = normalizeSubjectFilter(subject);
+  const baseState = validateBaseRows(db, normalizedRunId, normalizedSubject);
+  const adjustmentState = validateAdjustments(
+    db,
+    normalizedRunId,
+    baseState.logicalRows,
+    normalizedSubject
+  );
   const resultRevision = Number(run.result_revision);
   if (!Number.isSafeInteger(resultRevision) || resultRevision < 0
-      || resultRevision !== adjustmentState.adjustments.length) {
+      || (normalizedSubject === null && resultRevision !== adjustmentState.adjustments.length)) {
     throw resultStateError(
       'result-revision-inconsistent',
       `run ${normalizedRunId} 的 result_revision 与调整事实不一致`,
@@ -817,7 +860,8 @@ function getEffectiveRunResult(db, runId) {
     db,
     normalizedRunId,
     baseState,
-    adjustmentState.totals
+    adjustmentState.totals,
+    normalizedSubject
   );
   const reviewRows = buildReviewRows(baseState, adjustmentState.adjustments);
   const reviewSubjects = buildReviewSubjects(reviewRows, balances);
@@ -842,6 +886,14 @@ function getEffectiveRunResult(db, runId) {
       subjects: Object.freeze(reviewSubjects)
     })
   });
+}
+
+function getEffectiveRunResult(db, runId) {
+  return getEffectiveRunResultInternal(db, runId);
+}
+
+function getEffectiveRunResultForSubject(db, runId, subject) {
+  return getEffectiveRunResultInternal(db, runId, normalizeSubjectFilter(subject));
 }
 
 function requireEffectiveRun(db, runId) {
@@ -1172,6 +1224,7 @@ module.exports = {
   normalizeAdjustmentReason,
   assertExpectedResultRevision,
   getEffectiveRunResult,
+  getEffectiveRunResultForSubject,
   listAdjustmentOptions,
   addRunAdjustment
 };

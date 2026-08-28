@@ -6,9 +6,10 @@ const fs = require('node:fs');
 const { openVccReadDatabase } = require('../../backend/vcc-financial-op/read-schema');
 const { writeRunWorkbooks } = require('../vcc-financial-op-writer');
 const {
-  assertVccExportAuthorityEqual,
-  readVccExportSnapshot
+  assertVccExportWorkerSnapshotEqual,
+  readVccExportWorkerSnapshot
 } = require('./authority');
+const { canonicalSha256 } = require('../background-execution/canonical-json-v1');
 const {
   VCC_EXPORT_SINGLE_ACTION,
   VCC_EXPORT_SUBJECTS_ACTION,
@@ -132,11 +133,11 @@ async function executeVccExportWriter(rawInput, signal, actionKey = VCC_EXPORT_S
     throwIfCancelled(signal);
     db.exec('BEGIN DEFERRED');
     transactionOpen = true;
-    const start = readVccExportSnapshot(db, {
-      runId: input.authority.runId,
-      targetMonth: input.authority.targetMonth
+    const subjectIndexes = input.generations.map((item) => item.subjectIndex);
+    const start = readVccExportWorkerSnapshot(db, {
+      expectedAuthority: input.authority,
+      subjectIndexes
     });
-    assertVccExportAuthorityEqual(input.authority, start.authority);
     const written = await writeRunWorkbooks({
       db,
       runId: input.authority.runId,
@@ -144,7 +145,10 @@ async function executeVccExportWriter(rawInput, signal, actionKey = VCC_EXPORT_S
       assetsDir: input.assetsDir,
       abortSignal: signal,
       cleanupOnFailure: false,
-      subjectIndexes: input.generations.map((item) => item.subjectIndex),
+      subjectIndexes,
+      subjectQueryPushdown: true,
+      subjectNames: start.subjects.map((item) => item.subject),
+      subjectCount: input.authority.subjects.length,
       beforeSubjectWrite: ({ subjectIndex }) => {
         assertStaging(`subject-${subjectIndex}-before-write`);
       },
@@ -152,17 +156,22 @@ async function executeVccExportWriter(rawInput, signal, actionKey = VCC_EXPORT_S
         assertStaging(`subject-${subjectIndex}-before-atomic-handoff`, [stagedPath]);
       }
     });
-    const expectedSubjects = input.generations.map((item) => start.data.subjects[item.subjectIndex]);
+    const expectedSubjects = start.subjects.map((item) => item.subject);
     if (JSON.stringify(written.subjects) !== JSON.stringify(expectedSubjects) ||
-        JSON.stringify(written.filePaths) !== JSON.stringify(generationPaths)) {
+        JSON.stringify(written.filePaths) !== JSON.stringify(generationPaths) ||
+        !Array.isArray(written.subjectEvidence) ||
+        written.subjectEvidence.length !== subjectIndexes.length ||
+        written.subjectEvidence.some((subject, index) => (
+          canonicalSha256(subject) !== canonicalSha256(input.authority.subjects[subjectIndexes[index]])
+        ))) {
       throw writerError('VCC_EXPORT_WRITER_RESULT_INVALID', 'Writer output set/order 与 authority 不一致');
     }
     throwIfCancelled(signal);
-    const end = readVccExportSnapshot(db, {
-      runId: input.authority.runId,
-      targetMonth: input.authority.targetMonth
+    const end = readVccExportWorkerSnapshot(db, {
+      expectedAuthority: input.authority,
+      subjectIndexes
     });
-    assertVccExportAuthorityEqual(input.authority, end.authority);
+    assertVccExportWorkerSnapshotEqual(start, end);
     const artifacts = [];
     for (let index = 0; index < input.generations.length; index += 1) {
       throwIfCancelled(signal);

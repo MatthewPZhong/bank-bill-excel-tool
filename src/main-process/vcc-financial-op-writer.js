@@ -10,7 +10,10 @@ const {
   SUPPORTED_CURRENCIES
 } = require('../backend/vcc-financial-op/definitions');
 const { canonicalizeVccAmount } = require('../backend/vcc-financial-op/amount-rules');
-const { getEffectiveRunResult } = require('../backend/vcc-financial-op/result-adjustments');
+const {
+  getEffectiveRunResult,
+  getEffectiveRunResultForSubject
+} = require('../backend/vcc-financial-op/result-adjustments');
 const {
   RESULT_TEMPLATE_FILE_NAME,
   RESULT_TEMPLATE_SHEET_NAME,
@@ -35,6 +38,10 @@ const {
   normalizedSaxAttributes
 } = require('../backend/toolbox-format/ooxml-namespaces');
 const { writeXlsxAtomically } = require('./vcc-financial-op-output-publication');
+const {
+  buildVccSubjectAuthority,
+  compareVccSubjects
+} = require('./vcc-financial-op-output/subject-evidence');
 
 const RESULT_SHEET_NAME = RESULT_TEMPLATE_SHEET_NAME;
 const PENDING_SHEET_NAME = '移除归档Pending发生额计算表';
@@ -95,11 +102,84 @@ function loadEffectiveRunData(db, runId) {
     SELECT * FROM vcc_fin_op_pending_currency_totals
     WHERE run_id = ? ORDER BY subject, currency
   `).all(effective.run.runId);
-  const subjects = effective.review.subjects.map((row) => row.subject).sort((left, right) => (
-    left < right ? -1 : (left > right ? 1 : 0)
-  ));
+  const subjects = effective.review.subjects.map((row) => row.subject).sort(compareVccSubjects);
   if (subjects.length === 0) throw new Error('财务OP校验结果没有主体数据');
   return { effective, run: effective.run, pendingSummary, pendingTotals, subjects };
+}
+
+function loadEffectiveRunDataForSubject(db, runId, subject) {
+  const effective = getEffectiveRunResultForSubject(db, runId, subject);
+  if (!effective) throw new Error(`财务OP校验结果不存在：${runId}`);
+  const pendingSummary = db.prepare(`
+    SELECT * FROM vcc_fin_op_pending_summary_rows
+    WHERE run_id = ? AND subject = ?
+    ORDER BY channel_name, currency_mismatch, flow_currency, pending_currency, recon_type
+  `).all(effective.run.runId, subject);
+  const pendingTotals = db.prepare(`
+    SELECT * FROM vcc_fin_op_pending_currency_totals
+    WHERE run_id = ? AND subject = ?
+    ORDER BY currency
+  `).all(effective.run.runId, subject);
+  if (effective.review.subjects.length !== 1 ||
+      effective.review.subjects[0].subject !== subject) {
+    throw new Error(`财务OP校验结果缺少主体：${subject}`);
+  }
+  return Object.freeze({
+    effective,
+    run: effective.run,
+    pendingSummary: Object.freeze(pendingSummary),
+    pendingTotals: Object.freeze(pendingTotals),
+    subjects: Object.freeze([subject]),
+    readCounts: Object.freeze({
+      baseRows: effective.baseRows.length,
+      adjustments: effective.adjustments.length,
+      effectiveRows: effective.effectiveRows.length,
+      balances: effective.balances.length,
+      pendingSummary: pendingSummary.length,
+      pendingTotals: pendingTotals.length
+    })
+  });
+}
+
+function loadEffectiveRunMetadata(db, runId) {
+  const normalizedRunId = Number(runId);
+  if (!Number.isSafeInteger(normalizedRunId) || normalizedRunId < 1) {
+    throw new TypeError(`财务OP run id 无效：${runId}`);
+  }
+  const run = db.prepare(`
+    SELECT id, target_month, status, input_revisions_json, result_revision,
+           input_fingerprint, created_at, updated_at, archived_at
+    FROM vcc_fin_op_runs WHERE id = ?
+  `).get(normalizedRunId);
+  if (!run) throw new Error(`财务OP校验结果不存在：${runId}`);
+  return Object.freeze({
+    runId: Number(run.id),
+    targetMonth: run.target_month,
+    status: run.status,
+    inputRevisionsJson: run.input_revisions_json,
+    resultRevision: Number(run.result_revision),
+    inputFingerprint: run.input_fingerprint,
+    createdAt: run.created_at,
+    updatedAt: run.updated_at,
+    archivedAt: run.archived_at
+  });
+}
+
+function loadEffectiveRunSubjectIndex(db, runId) {
+  const run = loadEffectiveRunMetadata(db, runId);
+  const subjects = db.prepare(`
+    SELECT subject
+    FROM vcc_fin_op_run_balances
+    WHERE run_id = ?
+    GROUP BY subject
+  `).all(run.runId).map((row) => String(row.subject)).sort(compareVccSubjects);
+  if (subjects.length === 0 || subjects.some((subject) => !subject)) {
+    throw new Error('财务OP校验结果没有主体数据');
+  }
+  return Object.freeze({
+    run,
+    subjects: Object.freeze(subjects)
+  });
 }
 
 function rowAnchorKind(row) {
@@ -1106,6 +1186,9 @@ async function writeRunWorkbooks({
   subjectIndexes = null,
   beforeSubjectWrite = null,
   beforeAtomicHandoff = null,
+  subjectQueryPushdown = false,
+  subjectNames = null,
+  subjectCount = null,
   writeSubjectWorkbookFn = writeSubjectWorkbook
 }) {
   const throwIfAborted = () => {
@@ -1124,20 +1207,35 @@ async function writeRunWorkbooks({
   const pendingTemplateSheet = pendingTemplate.worksheets[0];
   if (!pendingTemplateSheet) throw new Error('移除归档Pending发生额计算模板缺少工作表');
 
-  const data = loadEffectiveRunData(db, Number(runId));
+  const boundSubjectNames = Array.isArray(subjectNames)
+    ? subjectNames.map((subject) => String(subject))
+    : null;
+  const usesBoundSubjects = subjectQueryPushdown && boundSubjectNames !== null;
+  const fullData = subjectQueryPushdown ? null : loadEffectiveRunData(db, Number(runId));
+  const subjectIndex = subjectQueryPushdown
+    ? (usesBoundSubjects
+        ? { run: loadEffectiveRunMetadata(db, Number(runId)), subjects: null }
+        : loadEffectiveRunSubjectIndex(db, Number(runId)))
+    : { run: fullData.run, subjects: fullData.subjects };
   const selectedIndexes = subjectIndexes === null
-    ? data.subjects.map((_subject, index) => index)
+    ? (subjectIndex.subjects || []).map((_subject, index) => index)
     : subjectIndexes.map(Number);
+  const availableSubjectCount = usesBoundSubjects ? Number(subjectCount) : subjectIndex.subjects.length;
   if ((subjectIndexes !== null && selectedIndexes.length < 1) ||
       new Set(selectedIndexes).size !== selectedIndexes.length ||
       selectedIndexes.some((index) => !Number.isSafeInteger(index) || index < 0 ||
-        index >= data.subjects.length)) {
+        index >= availableSubjectCount) ||
+      (usesBoundSubjects &&
+        (!Number.isSafeInteger(availableSubjectCount) || availableSubjectCount < 1 ||
+         boundSubjectNames.length !== selectedIndexes.length ||
+         boundSubjectNames.some((subject) => !subject)))) {
     throw new TypeError('VCC 财务OP导出 subjectIndexes 非法');
   }
-  const selectedSubjects = selectedIndexes.map((index) => data.subjects[index]);
-  const plans = selectedSubjects.map((subject) => buildSubjectRowPlan(data, subject));
+  const selectedSubjects = usesBoundSubjects
+    ? boundSubjectNames
+    : selectedIndexes.map((index) => subjectIndex.subjects[index]);
   const destinations = outputPaths.map((filePath) => path.resolve(filePath));
-  if (destinations.length !== plans.length) {
+  if (destinations.length !== selectedSubjects.length) {
     throw new TypeError('VCC 财务OP导出目标与主体数量不一致');
   }
   const deferredPublication = Boolean(publicationStagingDirectory);
@@ -1145,10 +1243,25 @@ async function writeRunWorkbooks({
   if (deferredPublication) {
     fs.mkdirSync(publicationStagingDirectory, { recursive: true });
   }
+  const subjectEvidence = [];
+  const subjectReadCounts = [];
   try {
-    for (let index = 0; index < plans.length; index += 1) {
+    for (let index = 0; index < selectedSubjects.length; index += 1) {
       throwIfAborted();
-      const plan = plans[index];
+      const subject = selectedSubjects[index];
+      const data = subjectQueryPushdown
+        ? loadEffectiveRunDataForSubject(db, Number(runId), subject)
+        : fullData;
+      const plan = buildSubjectRowPlan(data, subject);
+      if (subjectQueryPushdown) {
+        subjectEvidence.push(buildVccSubjectAuthority({
+          data,
+          plan,
+          subject,
+          subjectIndex: selectedIndexes[index]
+        }));
+        subjectReadCounts.push(data.readCounts);
+      }
       const destination = destinations[index];
       if (typeof beforeSubjectWrite === 'function') {
         // eslint-disable-next-line no-await-in-loop
@@ -1191,7 +1304,7 @@ async function writeRunWorkbooks({
       status: 'error',
       partialCommitted: deferredPublication || cleanupOnFailure ? false : generationPaths.length > 0,
       runId: Number(runId),
-      targetMonth: data.run.targetMonth,
+      targetMonth: subjectIndex.run.targetMonth,
       subjects: Object.freeze(selectedSubjects.slice(0, generationPaths.length)),
       filePaths: Object.freeze(deferredPublication || cleanupOnFailure ? [] : [...generationPaths])
     });
@@ -1199,9 +1312,15 @@ async function writeRunWorkbooks({
   }
   return {
     runId: Number(runId),
-    targetMonth: data.run.targetMonth,
+    targetMonth: subjectIndex.run.targetMonth,
     subjects: selectedSubjects,
     filePaths: destinations,
+    ...(subjectQueryPushdown
+      ? {
+          subjectEvidence: Object.freeze(subjectEvidence),
+          subjectReadCounts: Object.freeze(subjectReadCounts)
+        }
+      : {}),
     ...(deferredPublication
       ? { generationFilePaths: generationPaths.map((filePath) => path.resolve(filePath)) }
       : {})
@@ -1220,6 +1339,9 @@ module.exports = {
   configurePrintLayout,
   sanitizeFilePart,
   loadEffectiveRunData,
+  loadEffectiveRunDataForSubject,
+  loadEffectiveRunMetadata,
+  loadEffectiveRunSubjectIndex,
   rowAnchorKind,
   buildSubjectRowPlan,
   buildResultSheet,
