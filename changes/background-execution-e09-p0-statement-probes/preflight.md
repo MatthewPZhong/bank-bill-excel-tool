@@ -1,13 +1,31 @@
 # E09-P0 Statement Probes Unknowns Preflight
 
+## Reviewer Round 2 Canonical Overwrite / Wire Addendum（2026-08-28）
+
+### 合同取证与决定
+
+| 未知 | 分类 | 证据 | 当前决定 |
+| --- | --- | --- | --- |
+| overwrite confirmation 是否能作为孤立 transport 冻结 | BLOCK（合同） | v3.2.3 只冻结 `job:done -> {status:'interaction-required',interaction}`；公开 token authority 已唯一存在于 interaction handle。现有孤立 `{status:'confirm-overwrite',message,tokenId}` 绕过 action result validator，且为同一 token 发明第二种 transport | 删除孤立 continuation；将 `{status:'confirm-overwrite',message}` 冻结为现有 `manual-balance` purpose 的 exact prompt variant，token 只在既有 interaction wrapper；仅 `statement:resolve-manual-balance` 的 canonical result 接受该 variant |
+| alias 前的 legacy mismatch message 是否应受 public DTO 字段上限 | PROBE | Main 的真实公式会为每个失败 basename 拼接一行，但该 raw message 随后必定被固定摘要重建，不进入 public graph；1024 个合法 255 字符 basename 可使原文超过任意较低字段上限 | raw message 只检查字符串类型与非空；重建后的完整 public interaction 仍受 240 KiB UTF-8 ceiling，真实 Protocol envelope 仍受 256 KiB ceiling；不放宽最终 wire 门禁 |
+
+### 修复边界
+
+- 不增加 overwrite purpose、第二 tokenId 字段或 token authority，不实现 choice/store/waiting-user；private overwrite evidence 与四类 release characterization 保持 P0 dormant。
+- canonical overwrite 必须依次通过 `createStatementPublicInteractionDto`、`createStatementInteractionRequiredResult`、真实 `STATEMENT_RESULT_VALIDATORS`/PolicyRegistry、`validateResultBody` 与 Supervisor `job:done`；tamper、错 purpose、错 action fail closed。
+- mismatch 只移除必定丢弃的 raw message 预清洗长度上限；rows/fileName/failedFileNames 的 exact shape、单项上限、alias 顺序及最终 240/256 KiB ceiling 均不变。
+- 五项 Statement policy 继续 `production=false / effectiveMode=legacy / effectiveWorkerCount=0`，live Main/IPC/Worker 不接线，资金与 Windows/真实样本人工门禁不变。
+
+没有新的用户选择型 BLOCK；上述两项由冻结 action/purpose 与真实 Main 拼接路径直接决定。
+
 ## Reviewer Final Legacy Confirmation / Public Alias / Golden Addendum（2026-08-28）
 
 ### 合同取证与决定
 
 | 未知 | 分类 | 证据 | 当前决定 |
 | --- | --- | --- | --- |
-| `lastPendingBalanceSeedConfirmation` 是否属于 Statement legacy retained state | PROBE | `src/main.js` 持有并在 manual prompt reset、首次覆盖请求、确认成功与下一次请求时替换；`manual-balance-seed-preflight.js` 的 legacy 对象同时保留完整 plan/import/session 与 `assertFresh` callback | 将其作为第六个 legacy global 纳入 inventory；只投影 bounded、可序列化的 overwrite continuation evidence，并使用独立 pending-interaction footprint，callback/records/import/session/绝对路径不进入目标 graph |
-| overwrite confirmation 如何复用冻结 token purpose | PROBE | canonical 只允许 `big-account / manual-balance / scope-generation`，现有确认是 manual-balance 补录的第二步 | 不增加 purpose；冻结 `manual-balance` token 下的 public `{status,message,tokenId}` continuation 与 private evidence，并只 characterization confirm/cancel/stale/replacement 的 release 义务，不实现 token store/live Worker |
+| `lastPendingBalanceSeedConfirmation` 是否属于 Statement legacy retained state | PROBE | `src/main.js` 持有并在 manual prompt reset、首次覆盖请求、确认成功与下一次请求时替换；`manual-balance-seed-preflight.js` 的 legacy 对象同时保留完整 plan/import/session 与 `assertFresh` callback | 将其作为第六个 legacy global 纳入 inventory；只投影 bounded、可序列化的 overwrite private evidence，并使用独立 pending-interaction footprint，callback/records/import/session/绝对路径不进入目标 graph |
+| overwrite confirmation 如何复用冻结 token purpose | PROBE | canonical 只允许 `big-account / manual-balance / scope-generation`，现有确认是 manual-balance 补录的第二步 | 不增加 purpose；冻结 `manual-balance` 下 exact `{status,message}` prompt variant，由既有 interaction handle 唯一携带 token，并只 characterization confirm/cancel/stale/replacement 的 release 义务，不实现 token store/live Worker |
 | legacy 文件名能否直接进入 public prompt | BLOCK（privacy） | Main 的 rows/failedFileNames 来自真实 basename，canonical finance-safe 不允许 fileName/message 获得域例外 | 构造 public DTO 时按首次出现顺序生成稳定 `来源文件 N` alias；raw filename 仅保留在 private context，不修改 finance-safe delegate |
 | mismatch message 如何同时有界且保留业务提示 | PROBE | legacy message 可拼接任意数量/长度的 raw filename；public DTO 的整体硬上限为 240 KiB，旧 1024 字段上限不应使合法输入在别名化前后随机失败 | 使用固定摘要、总数与有界 alias preview 重建 message；完整 bounded alias 列表放 `failedFileNames`，最终仍由整体 240 KiB UTF-8 ceiling fail closed |
 | current/all golden 是否锁定 merge/source 与 balance-only all | PROBE | production `buildPreparedStatementBatchFromEntries` 按 entry 顺序调用 `mergeMappedDetailRows`，并保留 `rowMetas`；`generateStatementFiles` 已有 `scope/includeDetail/includeBalance` 参数 | 直接执行同一 production seam，冻结 current/all workbook exact rows、rowMetas/inputFilePaths 顺序，并增加 `scope=all + includeDetail=false + includeBalance=true` 的真实 balance-only 输出/cache golden |
@@ -16,7 +34,7 @@
 
 - P0 继续 dormant：不引用到 `src/main.js` live IPC，不实现 E09-A Service、E09-B token store/waiting-user、E09-C Publisher 或 E09-D atomic seed settlement。
 - public alias 只替换 `rows[*].fileName`、`rowsWithEmptyBlocks[*].fileName` 与 `failedFileNames[*]`；不改变三类 prompt 的业务字段、选择顺序或 merchantId 展示合同。
-- overwrite continuation footprint 与主 service state 分开计费；生命周期测试执行真实 legacy preflight seam，再对 future release 义务做 characterization，不能把 callback 或重 plan 作为可序列化自证。
+- overwrite private-context footprint 与主 service state 分开计费；生命周期测试执行真实 legacy preflight seam，公开值只走完整 canonical interaction-required result，再对 future release 义务做 characterization，不能把 callback 或重 plan 作为可序列化自证。
 - golden 仍以真实 workbook writer/reader 与 production generation seam 为真相；金额、币种、余额 seed、Windows 与真实样本继续保留人工门禁。
 
 没有新的用户选择型 BLOCK。若 production seam 证明 alias 或 confirmation ownership 与上述证据冲突，则停止扩大合同并回报，不修改 live 行为。

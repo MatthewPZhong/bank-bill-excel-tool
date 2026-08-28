@@ -49,7 +49,7 @@
       "headroomDenominator": 2,
       "pageBytes": 4096
     },
-    "balanceSeedOverwritePublicDtoBytes": 125
+    "balanceSeedOverwritePublicDtoBytes": 368
   },
   "amountModes": {
     "direct": {

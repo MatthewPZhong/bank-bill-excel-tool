@@ -13,8 +13,10 @@ const {
   createStatementImportSession
 } = require('../statement-session');
 const {
-  createStatementBalanceSeedOverwriteContinuationDto,
   createStatementBalanceSeedOverwritePrivateContextDto,
+  createStatementBalanceSeedOverwritePromptDto,
+  createStatementInteractionRequiredResult,
+  createStatementPublicInteractionDto,
   createStatementTokenHandleDto
 } = require('./contracts');
 
@@ -481,15 +483,21 @@ function buildStatementProbeProjection(legacyInput, options = {}) {
     )),
     excludedNonStatementExportKeys: ['newAccount', 'monthlyBalance']
   });
-  const balanceSeedOverwriteContinuation = privateContext.kind === 'balance-seed-overwrite'
-    ? createStatementBalanceSeedOverwriteContinuationDto({ token: handle })
+  const balanceSeedOverwriteResult = privateContext.kind === 'balance-seed-overwrite'
+    ? createStatementInteractionRequiredResult({
+        status: 'interaction-required',
+        interaction: createStatementPublicInteractionDto({
+          token: handle,
+          prompt: createStatementBalanceSeedOverwritePromptDto()
+        })
+      }, 'statement:resolve-manual-balance')
     : null;
   return Object.freeze({
     legacyInventory,
     serviceState,
     mainTokenHandles: Object.freeze([handle]),
     privateContexts: Object.freeze([privateContext]),
-    balanceSeedOverwriteContinuation,
+    balanceSeedOverwriteResult,
     ownership: Object.freeze({
       persistent: 'sessions/all fileEntries + remembered generation + bounded artifact summary',
       mainTokenHandle: 'exact-eight identity only; tokenId replaces legacy Main contextId',

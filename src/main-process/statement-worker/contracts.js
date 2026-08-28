@@ -115,6 +115,7 @@ const MANUAL_BALANCE_PROMPT_KEYS = Object.freeze([
   'queueIndex',
   'queueTotal'
 ]);
+const BALANCE_SEED_OVERWRITE_PROMPT_KEYS = Object.freeze(['status', 'message']);
 const SCOPE_GENERATION_PROMPT_KEYS = Object.freeze(['status', 'kind', 'options']);
 const SCOPE_OPTION_KEYS = Object.freeze(['scope', 'label']);
 const BALANCE_SEED_OVERWRITE_PRIVATE_KEYS = Object.freeze([
@@ -423,8 +424,11 @@ function createBigAccountPromptDto(input) {
         const previewText = preview.length ? `：${preview.join('、')}${suffix}` : '';
         return `${BIG_ACCOUNT_MISMATCH_MESSAGE}（共${failedFileNames.length}个${previewText}）`;
       })();
-  // 只校验 legacy 字段类型与总量边界，不把可能含敏感文件名的原始文本复制到 public DTO。
-  boundedText(record.message, 'message', STATEMENT_RESOURCE_CONTRACT.publicInteractionMaxBytes);
+  // legacy Main 会把全部失败 basename 拼入该字段，但这里必定以固定摘要重建，原文不进入
+  // public graph；因此只冻结真实 producer 的非空字符串类型，不设置任意预清洗长度上限。
+  if (typeof record.message !== 'string' || record.message.length === 0) {
+    fail('STATEMENT_DTO_TEXT_INVALID', 'message must be a non-empty string');
+  }
   const result = {
     status,
     message: publicMessage,
@@ -467,7 +471,7 @@ function createStatementBalanceSeedOverwritePrivateContextDto(input) {
   if (record.kind !== 'balance-seed-overwrite' || record.purpose !== 'manual-balance') {
     fail(
       'STATEMENT_BALANCE_SEED_OVERWRITE_KIND_INVALID',
-      'Balance-seed overwrite continuation must use the manual-balance purpose'
+      'Balance-seed overwrite private context must use the manual-balance purpose'
     );
   }
   if (typeof seedRecord.endBalance !== 'number' || !Number.isFinite(seedRecord.endBalance)) {
@@ -526,21 +530,6 @@ function createStatementBalanceSeedOverwritePrivateContextDto(input) {
   return canonicalJsonSnapshot(result);
 }
 
-function createStatementBalanceSeedOverwriteContinuationDto({ token }) {
-  const handle = createStatementTokenHandleDto(token);
-  if (handle.purpose !== 'manual-balance') {
-    fail(
-      'STATEMENT_TOKEN_PURPOSE_INVALID',
-      'Balance-seed overwrite continuation requires a manual-balance token'
-    );
-  }
-  return canonicalJsonSnapshot({
-    status: 'confirm-overwrite',
-    message: BALANCE_SEED_OVERWRITE_MESSAGE,
-    tokenId: handle.tokenId
-  });
-}
-
 function createStatementBalanceSeedOverwriteReleaseCharacterization(input) {
   const record = ownDataRecord(
     input,
@@ -583,7 +572,36 @@ function createStatementBalanceSeedOverwriteReleaseCharacterization(input) {
   });
 }
 
+function createBalanceSeedOverwritePromptDto(input) {
+  const record = ownDataRecord(
+    input,
+    BALANCE_SEED_OVERWRITE_PROMPT_KEYS,
+    'BalanceSeedOverwriteInteractionPrompt'
+  );
+  if (record.status !== 'confirm-overwrite' || record.message !== BALANCE_SEED_OVERWRITE_MESSAGE) {
+    fail(
+      'STATEMENT_BALANCE_SEED_OVERWRITE_PROMPT_INVALID',
+      'Balance-seed overwrite prompt must use the canonical status and message'
+    );
+  }
+  return {
+    status: record.status,
+    message: record.message
+  };
+}
+
+function createStatementBalanceSeedOverwritePromptDto() {
+  return canonicalJsonSnapshot({
+    status: 'confirm-overwrite',
+    message: BALANCE_SEED_OVERWRITE_MESSAGE
+  });
+}
+
 function createManualBalancePromptDto(input) {
+  const statusDescriptor = input && typeof input === 'object' && !utilTypes.isProxy(input)
+    ? Object.getOwnPropertyDescriptor(input, 'status')
+    : null;
+  if (statusDescriptor) return createBalanceSeedOverwritePromptDto(input);
   const record = ownDataRecord(input, MANUAL_BALANCE_PROMPT_KEYS, 'ManualBalanceInteractionPrompt');
   return {
     templateName: boundedText(record.templateName, 'templateName', 512),
@@ -738,6 +756,13 @@ function createStatementInteractionRequiredResult(input, actionKey) {
     fail(
       'STATEMENT_RESULT_PURPOSE_INVALID',
       `${actionKey} cannot return ${interaction.purpose} interaction`
+    );
+  }
+  if (interaction.prompt.status === 'confirm-overwrite' &&
+      actionKey !== 'statement:resolve-manual-balance') {
+    fail(
+      'STATEMENT_RESULT_PURPOSE_INVALID',
+      'Balance-seed overwrite confirmation is only valid for statement:resolve-manual-balance'
     );
   }
   return canonicalJsonSnapshot({ status: record.status, interaction });
@@ -919,7 +944,7 @@ module.exports = {
   STATEMENT_RESOURCE_CONTRACT,
   STATEMENT_RESULT_VALIDATORS,
   StatementContractError,
-  createStatementBalanceSeedOverwriteContinuationDto,
+  createStatementBalanceSeedOverwritePromptDto,
   createStatementBalanceSeedOverwritePrivateContextDto,
   createStatementBalanceSeedOverwriteReleaseCharacterization,
   createStatementFinanceSafeValueDelegate,

@@ -9,8 +9,8 @@ const {
   STATEMENT_ACTION_PURPOSES,
   STATEMENT_RESOURCE_CONTRACT,
   STATEMENT_RESULT_VALIDATORS,
-  createStatementBalanceSeedOverwriteContinuationDto,
   createStatementBalanceSeedOverwritePrivateContextDto,
+  createStatementBalanceSeedOverwritePromptDto,
   createStatementInteractionRequiredResult,
   createStatementPublicInteractionDto,
   createStatementStatusDto,
@@ -28,6 +28,7 @@ const {
 } = require('../../../src/main-process/statement-worker/state-footprint');
 const {
   createJobEnvelope,
+  parseAndValidateEnvelope,
   serializeEnvelope
 } = require('../../../src/main-process/background-execution/protocol');
 const {
@@ -241,6 +242,19 @@ function manualBalancePrompt(overrides = {}) {
     queueTotal: 2,
     ...overrides
   };
+}
+
+function balanceSeedOverwritePrompt(overrides = {}) {
+  return {
+    ...createStatementBalanceSeedOverwritePromptDto(),
+    ...overrides
+  };
+}
+
+function legacyMainMismatchMessage(failedFileNames) {
+  return failedFileNames
+    .map((name) => `${name}的账户个数或账户号匹配不上（账户个数和账户号都匹配不上），请检查。`)
+    .join('\n');
 }
 
 function scopeGenerationPrompt(kind = 'detail') {
@@ -465,6 +479,64 @@ test('Main token handle冻结TechDoc exact字段，Renderer DTO剥离reservation
   assert.ok(boundedMismatch.prompt.message.length < 1024);
   assert.match(boundedMismatch.prompt.message, /共1024个/);
   assert.ok(utf8Size(boundedMismatch) < STATEMENT_RESOURCE_CONTRACT.publicInteractionMaxBytes);
+
+  const maxLegacyBasenames = Array.from({ length: 1024 }, (_, index) => {
+    const prefix = `${String(index).padStart(4, '0')}-`;
+    return `${prefix}${'x'.repeat(255 - prefix.length)}`;
+  });
+  const legacyMessage = legacyMainMismatchMessage(maxLegacyBasenames);
+  const mainSource = fs.readFileSync(path.join(ROOT, 'src', 'main.js'), 'utf8');
+  assert.match(
+    mainSource,
+    /failedFileNames\s*\.map\(\(name\) => `\$\{name\}的账户个数或账户号匹配不上（账户个数和账户号都匹配不上），请检查。`\)\s*\.join\('\\n'\)/,
+    '测试拼接公式必须与Main真实legacy producer保持一致'
+  );
+  assert.ok(
+    Buffer.byteLength(legacyMessage, 'utf8') >
+      STATEMENT_RESOURCE_CONTRACT.publicInteractionMaxBytes,
+    'alias前必定丢弃的legacy message可合法超过public DTO ceiling'
+  );
+  const maxLegacyMismatch = createStatementPublicInteractionDto({
+    token: token(),
+    prompt: bigAccountPrompt({
+      status: 'remember-order-mismatch',
+      message: legacyMessage,
+      failedFileNames: maxLegacyBasenames,
+      forceMode: 'unfixed'
+    })
+  });
+  const maxLegacyResult = createStatementInteractionRequiredResult({
+    status: 'interaction-required',
+    interaction: maxLegacyMismatch
+  }, 'statement:import');
+  const policyRegistry = createStatementPolicyRegistry();
+  assert.equal(policyRegistry.isFrozen(), true);
+  const maxLegacyEnvelope = statementEventEnvelope({
+    actionKey: 'statement:import',
+    operation: 'job:done',
+    payload: { result: maxLegacyResult }
+  }, policyRegistry);
+  const maxLegacySerialized = serializeEnvelope(maxLegacyEnvelope, { policyRegistry });
+  assert.ok(utf8Size(maxLegacyMismatch) < STATEMENT_RESOURCE_CONTRACT.publicInteractionMaxBytes);
+  assert.ok(
+    Buffer.byteLength(maxLegacySerialized, 'utf8') <
+      STATEMENT_RESOURCE_CONTRACT.protocolEnvelopeMaxBytes
+  );
+  assert.doesNotMatch(maxLegacySerialized, new RegExp(maxLegacyBasenames[0]));
+  assert.doesNotThrow(() => validateResultBody(
+    policyRegistry.get('statement:import'),
+    maxLegacyResult,
+    policyRegistry.getBinding('statement:import', 'result.validatorKey')
+  ));
+  for (const message of ['', null]) {
+    assert.throws(
+      () => createStatementPublicInteractionDto({
+        token: token(),
+        prompt: bigAccountPrompt({ message })
+      }),
+      (error) => error.code === 'STATEMENT_DTO_TEXT_INVALID'
+    );
+  }
 });
 
 test('三类真实Statement prompt按purpose exact冻结并拒绝未知字段、二维原始行与purpose错配', () => {
@@ -526,7 +598,7 @@ test('三类真实Statement prompt按purpose exact冻结并拒绝未知字段、
   );
 });
 
-test('overwrite confirmation冻结manual-balance单token的exact private/public continuation且拒绝重对象', () => {
+test('overwrite confirmation冻结manual-balance单token的exact private/public result且拒绝重对象', () => {
   const privateContextInput = {
     kind: 'balance-seed-overwrite',
     purpose: 'manual-balance',
@@ -553,17 +625,30 @@ test('overwrite confirmation冻结manual-balance单token的exact private/public 
     allowedChoiceDigest: 'a'.repeat(64)
   };
   const privateContext = createStatementBalanceSeedOverwritePrivateContextDto(privateContextInput);
-  const publicContinuation = createStatementBalanceSeedOverwriteContinuationDto({
-    token: token({ purpose: 'manual-balance' })
+  const interaction = createStatementPublicInteractionDto({
+    token: token({ purpose: 'manual-balance' }),
+    prompt: balanceSeedOverwritePrompt()
   });
+  const publicResult = createStatementInteractionRequiredResult({
+    status: 'interaction-required',
+    interaction
+  }, 'statement:resolve-manual-balance');
 
   assert.equal(Object.isFrozen(privateContext), true);
-  assert.deepEqual(publicContinuation, {
-    message: '该日期的余额已存在，确认覆盖吗？',
-    status: 'confirm-overwrite',
-    tokenId: 'opaque-token-1'
+  assert.deepEqual(publicResult, {
+    interaction: {
+      allowedChoiceDigest: 'a'.repeat(64),
+      expiresAt: 1787847300000,
+      prompt: balanceSeedOverwritePrompt(),
+      purpose: 'manual-balance',
+      serviceGeneration: 3,
+      sessionRevision: 9,
+      tokenId: 'opaque-token-1'
+    },
+    status: 'interaction-required'
   });
-  assert.equal(Object.hasOwn(publicContinuation, 'contextId'), false);
+  assert.equal(Object.hasOwn(publicResult.interaction.prompt, 'tokenId'), false);
+  assert.equal(Object.hasOwn(publicResult.interaction, 'contextId'), false);
   assert.doesNotMatch(
     JSON.stringify(privateContext),
     /storageRoot|records\"|inputFilePaths|importContext|session\"|assertFresh|contextId/
@@ -576,9 +661,139 @@ test('overwrite confirmation冻结manual-balance单token的exact private/public 
     (error) => error.code === 'STATEMENT_DTO_KEYS_INVALID'
   );
   assert.throws(
-    () => createStatementBalanceSeedOverwriteContinuationDto({ token: token() }),
-    (error) => error.code === 'STATEMENT_TOKEN_PURPOSE_INVALID'
+    () => createStatementPublicInteractionDto({
+      token: token(),
+      prompt: balanceSeedOverwritePrompt()
+    }),
+    (error) => ['STATEMENT_PUBLIC_DTO_STATUS_INVALID', 'STATEMENT_DTO_KEYS_INVALID'].includes(
+      error.code
+    )
   );
+  assert.throws(
+    () => createStatementInteractionRequiredResult({
+      status: 'interaction-required',
+      interaction
+    }, 'statement:import'),
+    (error) => error.code === 'STATEMENT_RESULT_PURPOSE_INVALID'
+  );
+  for (const prompt of [
+    balanceSeedOverwritePrompt({ status: 'overwrite' }),
+    balanceSeedOverwritePrompt({ message: '确认吗？' }),
+    balanceSeedOverwritePrompt({ unknown: true })
+  ]) {
+    assert.throws(
+      () => createStatementPublicInteractionDto({
+        token: token({ purpose: 'manual-balance' }),
+        prompt
+      }),
+      (error) => [
+        'STATEMENT_BALANCE_SEED_OVERWRITE_PROMPT_INVALID',
+        'STATEMENT_DTO_KEYS_INVALID'
+      ].includes(error.code)
+    );
+  }
+  assert.equal(
+    Object.hasOwn(
+      require('../../../src/main-process/statement-worker/contracts'),
+      'createStatementBalanceSeedOverwriteContinuationDto'
+    ),
+    false,
+    '不得保留绕过canonical result wrapper的孤立overwrite transport'
+  );
+});
+
+test('overwrite result经真实Registry/Protocol/validateResult/Supervisor接受且tamper/错action/错purpose拒绝', async () => {
+  const policyRegistry = createStatementPolicyRegistry();
+  assert.equal(policyRegistry.isFrozen(), true);
+  const interaction = createStatementPublicInteractionDto({
+    token: token({ purpose: 'manual-balance' }),
+    prompt: balanceSeedOverwritePrompt()
+  });
+  const result = createStatementInteractionRequiredResult({
+    status: 'interaction-required',
+    interaction
+  }, 'statement:resolve-manual-balance');
+  const binding = policyRegistry.getBinding(
+    'statement:resolve-manual-balance',
+    'result.validatorKey'
+  );
+
+  assert.equal(binding, STATEMENT_RESULT_VALIDATORS['statement:resolve-manual-balance']);
+  assert.doesNotThrow(() => statementEventEnvelope({
+    actionKey: 'statement:resolve-manual-balance',
+    operation: 'job:done',
+    payload: { result }
+  }, policyRegistry));
+  assert.deepEqual(
+    validateResultBody(policyRegistry.get('statement:resolve-manual-balance'), result, binding),
+    result
+  );
+
+  const tamperedMessage = structuredClone(result);
+  tamperedMessage.interaction.prompt.message = '确认覆盖吗？';
+  const wrongPurpose = structuredClone(result);
+  wrongPurpose.interaction.purpose = 'big-account';
+  for (const invalid of [tamperedMessage, wrongPurpose]) {
+    assert.throws(
+      () => validateResultBody(
+        policyRegistry.get('statement:resolve-manual-balance'),
+        invalid,
+        binding
+      ),
+      (error) => error.code === 'RESULT_VALIDATION_FAILED'
+    );
+  }
+  assert.throws(
+    () => validateResultBody(
+      policyRegistry.get('statement:import'),
+      result,
+      policyRegistry.getBinding('statement:import', 'result.validatorKey')
+    ),
+    (error) => error.code === 'RESULT_VALIDATION_FAILED'
+  );
+
+  const supervisor = createStatementSupervisorHarness(policyRegistry, (command, openRequest) => {
+    openRequest.onMessage(statementEventForCommand(
+      command,
+      'job:done',
+      { result },
+      policyRegistry
+    ));
+  });
+  const completed = await supervisor.execute(statementSupervisorRequest(
+    () => {},
+    {
+      actionKey: 'statement:resolve-manual-balance',
+      jobId: 'statement-supervisor-overwrite-canonical'
+    }
+  ));
+  assert.equal(completed.outcome, 'completed');
+  assert.deepEqual(completed.result, result);
+  await supervisor.shutdown({ timeoutMs: 1000 });
+
+  const wrongActionSupervisor = createStatementSupervisorHarness(
+    policyRegistry,
+    (command, openRequest) => {
+      openRequest.onMessage(statementEventForCommand(
+        command,
+        'job:done',
+        { result },
+        policyRegistry
+      ));
+    }
+  );
+  const rejected = await wrongActionSupervisor.execute(statementSupervisorRequest(
+    () => {},
+    {
+      actionKey: 'statement:import',
+      jobId: 'statement-supervisor-overwrite-wrong-action'
+    }
+  ));
+  assert.equal(rejected.outcome, 'transport-lost');
+  assert.equal(rejected.terminalSource, 'protocol-error');
+  assert.equal(rejected.error.code, 'RESULT_VALIDATION_FAILED');
+  assert.equal(rejected.result, null);
+  await wrongActionSupervisor.shutdown({ timeoutMs: 1000 });
 });
 
 test('Statement exact result validator通过真实冻结PolicyRegistry暴露路径感知finance-safe delegate', () => {
@@ -983,7 +1198,7 @@ function maximalBigAccountPublicDto() {
   return { dto, prompt, bigAccounts };
 }
 
-test('最大合法public interaction经真实done route/context Protocol envelope仍可发送，+1 byte预先拒绝', () => {
+test('最大合法public interaction经真实done route/context发送，inner +1与真实over-wire拒绝', () => {
   const { dto, prompt, bigAccounts } = maximalBigAccountPublicDto();
   const policyRegistry = createStatementPolicyRegistry();
   const result = createStatementInteractionRequiredResult({
@@ -1017,6 +1232,20 @@ test('最大合法public interaction经真实done route/context Protocol envelop
   const wrapperBytes = Buffer.byteLength(serialized) - utf8Size(dto);
   assert.ok(wrapperBytes <= STATEMENT_RESOURCE_CONTRACT.publicInteractionWireReserveBytes);
   assert.ok(Buffer.byteLength(serialized) <= STATEMENT_RESOURCE_CONTRACT.protocolEnvelopeMaxBytes);
+  assert.deepEqual(parseAndValidateEnvelope(serialized, { policyRegistry }), envelope);
+
+  const overWire = serialized + ' '.repeat(
+    STATEMENT_RESOURCE_CONTRACT.protocolEnvelopeMaxBytes - Buffer.byteLength(serialized) + 1
+  );
+  assert.equal(
+    Buffer.byteLength(overWire),
+    STATEMENT_RESOURCE_CONTRACT.protocolEnvelopeMaxBytes + 1
+  );
+  assert.throws(
+    () => parseAndValidateEnvelope(overWire, { policyRegistry }),
+    (error) => error.code === 'PROTOCOL_MESSAGE_TOO_LARGE' &&
+      error.details.actualBytes === STATEMENT_RESOURCE_CONTRACT.protocolEnvelopeMaxBytes + 1
+  );
 
   const expandableAccount = bigAccounts.find((account) => account.merchantId.length < 512);
   assert.ok(expandableAccount, '至少一个domain summary字段仍可合法增加一个byte');

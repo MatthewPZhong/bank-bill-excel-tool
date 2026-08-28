@@ -205,14 +205,25 @@ test('真实legacy overwrite confirmation投影为独立可序列化footprint并
   assert.equal(projection.legacyInventory.balanceSeedConfirmationCallbackPresent, true);
   assert.equal(projection.legacyInventory.balanceSeedConfirmationRecordCount, 1);
   assert.equal(privateContext.kind, 'balance-seed-overwrite');
-  assert.deepEqual(projection.balanceSeedOverwriteContinuation, {
-    message: '该日期的余额已存在，确认覆盖吗？',
-    status: 'confirm-overwrite',
-    tokenId: 'overwrite-token-1'
+  const overwriteHandle = projection.mainTokenHandles[0];
+  assert.deepEqual(projection.balanceSeedOverwriteResult, {
+    interaction: {
+      allowedChoiceDigest: overwriteHandle.allowedChoiceDigest,
+      expiresAt: overwriteHandle.expiresAt,
+      prompt: {
+        message: '该日期的余额已存在，确认覆盖吗？',
+        status: 'confirm-overwrite'
+      },
+      purpose: 'manual-balance',
+      serviceGeneration: overwriteHandle.serviceGeneration,
+      sessionRevision: overwriteHandle.sessionRevision,
+      tokenId: overwriteHandle.tokenId
+    },
+    status: 'interaction-required'
   });
   const projectedJson = JSON.stringify({
     privateContext,
-    publicContinuation: projection.balanceSeedOverwriteContinuation
+    publicResult: projection.balanceSeedOverwriteResult
   });
   assert.doesNotMatch(projectedJson, /legacy-balance-context|assertFresh|storageRoot|inputFilePaths/);
   assert.doesNotMatch(projectedJson, new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));

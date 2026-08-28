@@ -177,7 +177,7 @@ function main() {
       ),
       publicDtoBytes: Buffer.byteLength(JSON.stringify(publicDto), 'utf8'),
       balanceSeedOverwritePublicDtoBytes: Buffer.byteLength(
-        JSON.stringify(graph.overwriteProjection.balanceSeedOverwriteContinuation),
+        JSON.stringify(graph.overwriteProjection.balanceSeedOverwriteResult),
         'utf8'
       ),
       productionEnabled: false,
