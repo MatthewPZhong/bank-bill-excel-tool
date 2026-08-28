@@ -29,10 +29,12 @@ const {
   createPreFundMptTopologyPlanner
 } = require('../pre-fund-reconciliation/mpt-import/topology');
 const {
+  RECON_FIX_EXPORT_ACTION,
   RECON_FIX_JPM_UNIT_ID,
   RECON_FIX_POLICIES,
   RECON_FIX_RUN_JPM_ACTION,
   RECON_FIX_SERVICE_KEY,
+  validateReconFixExportResult,
   validateReconFixJpmResult,
   validateReconFixServiceResult
 } = require('../recon-id-fix-service/policies');
@@ -102,9 +104,11 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
   const validatorEntries = {};
   for (const policy of BACKGROUND_EXECUTION_POLICIES) {
     const resultValidator = policy.moduleId === 'recon-fix'
-      ? (policy.actionKey === RECON_FIX_RUN_JPM_ACTION
+      ? (policy.actionKey === RECON_FIX_EXPORT_ACTION
+          ? validateReconFixExportResult
+          : (policy.actionKey === RECON_FIX_RUN_JPM_ACTION
           ? validateReconFixJpmResult
-          : validateReconFixServiceResult)
+          : validateReconFixServiceResult))
       : (policy.moduleId === 'pre-fund'
       ? (policy.actionKey === PRE_FUND_MPT_REPAIR_ACTION
           ? validatePreFundMptRepairResult

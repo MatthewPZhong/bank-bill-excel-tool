@@ -904,7 +904,7 @@ test('adopt-ack 后 terminal-in-flight shutdown race 幂等收口且不泄漏', 
   }
 });
 
-test('E11-A source 不引入 JPM writer/receipt/export 实现', () => {
+test('E11-A legacy/live 边界不被后续 ReconFix Worker tranche 改写', () => {
   const sourcePaths = [
     '../../../src/main-process/recon-id-fix-service/evidence-projection.js',
     '../../../src/main-process/recon-id-fix-service/service.js',
@@ -913,6 +913,7 @@ test('E11-A source 不引入 JPM writer/receipt/export 实现', () => {
   ].map((relative) => path.resolve(__dirname, relative));
   const source = sourcePaths.map((file) => fs.readFileSync(file, 'utf8')).join('\n');
   assert.doesNotMatch(source, /require\([^)]*jpm-dispatch-order-fix/);
-  assert.doesNotMatch(source, /readAdmBankDepositRows|writeAdmMatchFlags|writeReconIdFixOutput/);
-  assert.doesNotMatch(source, /recon-fix:export|operation-receipt/);
+  assert.doesNotMatch(source, /readAdmBankDepositRows|writeAdmMatchFlags/);
+  const mainSource = fs.readFileSync(path.resolve(__dirname, '../../../src/main.js'), 'utf8');
+  assert.doesNotMatch(mainSource, /generateValidateAndPublishReconFixExport/);
 });

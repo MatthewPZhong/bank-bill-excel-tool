@@ -19,6 +19,7 @@ const {
   createDirectionSequenceTracker
 } = require('../background-execution/sequence-tracker');
 const {
+  RECON_FIX_EXPORT_ACTION,
   RECON_FIX_IMPORT_ACTION,
   RECON_FIX_JPM_UNIT_ID,
   RECON_FIX_RUN_JPM_ACTION,
@@ -30,6 +31,7 @@ const { createReconFixService } = require('./service');
 if (!parentPort) throw new Error('ReconFix Service 需要 worker_threads parentPort');
 
 const ALLOWED_ACTIONS = new Set([
+  RECON_FIX_EXPORT_ACTION,
   RECON_FIX_IMPORT_ACTION,
   RECON_FIX_RUN_READONLY_ACTION,
   RECON_FIX_RUN_JPM_ACTION
@@ -439,6 +441,10 @@ async function runJob(job) {
       job.emit('unit:done', { result }, RECON_FIX_JPM_UNIT_ID);
     } else if (plan.kind === 'candidate') {
       result = await adoptCandidateAtSafepoint(job, plan.candidate);
+    } else if (plan.kind === 'export-plan') {
+      await cancellationSafepoint(job);
+      result = await plan.execute();
+      await cancellationSafepoint(job);
     } else {
       if (plan.invalidationCandidate) {
         await adoptCandidateAtSafepoint(job, plan.invalidationCandidate);

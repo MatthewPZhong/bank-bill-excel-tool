@@ -94,6 +94,14 @@ function getSheetConfigBySubMode(subMode) {
   };
 }
 
+function getReconIdFixOutputContract(subMode = 'business') {
+  const cfg = getSheetConfigBySubMode(subMode);
+  return Object.freeze({
+    sheetName: cfg.orderRepairSheetName,
+    headers: Object.freeze(cfg.orderRepairFields.slice())
+  });
+}
+
 // ===== 共用：把 sheet 转换成对象数组 + 严格列校验 =====
 // 模式与 bank-statement-io.js sheetToObjects 一致；为保留 sheetName 在 detailLines 里区分
 function sheetToObjects(sheet, expectedHeaders, sheetName) {
@@ -453,6 +461,7 @@ function applyHeaderRowFont(worksheet, headerRowIndex = 0) {
 }
 
 module.exports = {
+  getReconIdFixOutputContract,
   readReconIdFixFile,
   writeReconIdFixOutput,
   writeUnmatchedReport,                  // Round 3 新增

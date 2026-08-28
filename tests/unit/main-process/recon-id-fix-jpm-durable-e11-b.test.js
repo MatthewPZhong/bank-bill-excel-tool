@@ -13,6 +13,9 @@ const {
   ensureBackgroundExecutionRecoveryControlSchema
 } = require('../../../src/backend/database/background-execution-schema');
 const { createArchiveRepository } = require('../../../src/backend/database/archive-repository');
+const {
+  normalizeFilePlanV1
+} = require('../../../src/main-process/archive-center/file-plan');
 const legacyLinkedRepository = require('../../../src/backend/database/linked-table-repository');
 const receiptRepository = require('../../../src/backend/database/recon-fix-operation-receipt-repository');
 const {
@@ -105,6 +108,13 @@ const {
   createReconFixJpmWorkerDurableCoordinator
 } = require('../../../src/main-process/recon-id-fix-service/jpm-worker-durable-coordinator');
 const {
+  generateValidateAndPublishReconFixExport
+} = require('../../../src/main-process/recon-id-fix-service/export-operation');
+const {
+  reconFixEvidenceSha256
+} = require('../../../src/main-process/recon-id-fix-service/evidence-projection');
+const {
+  RECON_FIX_EXPORT_ACTION,
   RECON_FIX_IMPORT_ACTION,
   RECON_FIX_JPM_POLICY,
   RECON_FIX_JPM_UNIT_ID,
@@ -839,6 +849,8 @@ test('JPM canonical policy保持production false，runtime固定single unit且�
   assert.deepEqual(RECON_FIX_JPM_POLICY, fixture[RECON_FIX_RUN_JPM_ACTION]);
   const jpmResult = {
     resultKind: 'noop',
+    serviceGeneration: 1,
+    revision: 2,
     resultHandle: '1'.repeat(64),
     boundedSummary: {
       runKind: 'jpm', fixedRowCount: 0, warningCount: 0,
@@ -1248,6 +1260,104 @@ test('managed JPM mutation按ACK→同事务receipt→authority gate→adopt收�
     const freshNoop = await runManagedJpm(harness, 'jpm-fresh-noop-after-replay', 2);
     assert.equal(freshNoop.outcome, 'completed', JSON.stringify(freshNoop));
     assert.equal(freshNoop.result.resultKind, 'noop');
+  } finally {
+    await harness.runtime.shutdown();
+    harness.database.close();
+  }
+});
+
+test('E11-C JPM exact adopted result可导出，ADM evidence漂移时Publisher保持0新增调用', async () => {
+  const harness = createHarness();
+  let publisherCalls = 0;
+  try {
+    await importSession(harness);
+    const run = await runManagedJpm(harness, 'jpm-export-e11-c');
+    assert.equal(run.outcome, 'completed', JSON.stringify(run));
+    assert.equal(run.result.resultKind, 'committed');
+    assert.equal(run.result.serviceGeneration, 1);
+    assert.equal(run.result.revision, 2);
+    assert.equal(run.result.boundedSummary.fixedRowCount, 1);
+
+    const targetDirectory = path.join(harness.root, 'export-target');
+    const stagingDirectory = path.join(harness.root, 'export-staging');
+    fs.mkdirSync(targetDirectory);
+    fs.mkdirSync(stagingDirectory);
+    const filePlan = normalizeFilePlanV1({
+      version: 1,
+      allocation: 'eager',
+      inputs: [],
+      outputs: [{
+        filePath: path.join(targetDirectory, 'jpm-result.xlsx'),
+        role: 'output',
+        sourceOperation: 'recon-id-fix:export'
+      }]
+    });
+    const published = await generateValidateAndPublishReconFixExport({
+      runtime: harness.runtime,
+      result: run.result,
+      filePlan,
+      stagingDirectory,
+      operationKey: 'jpm-export-e11-c-success',
+      context: operationContext('jpm-export-e11-c-success'),
+      batchContext: {
+        batchId: 9001,
+        batchNumber: '2026-08-28-9001',
+        taskRunId: 'task-jpm-export-e11-c-success',
+        taskKey: 'recon-id-fix:export',
+        moduleId: 'recon-fix',
+        parentRunId: 'parent-e11-b',
+        operationKey: 'jpm-export-e11-c-success'
+      },
+      readCurrentEvidence() {
+        const linkedEvidence = readAdmRowsForWriteback(harness.database.db);
+        return {
+          serviceGeneration: run.result.serviceGeneration,
+          revision: run.result.revision,
+          resultHandle: run.result.resultHandle,
+          scenarioSnapshotHash: reconFixEvidenceSha256(SCENARIO, { maxBytes: 262144 }),
+          linkedEvidenceHash: linkedEvidence.imageHash
+        };
+      },
+      async publishPublication(payload) {
+        publisherCalls += 1;
+        assert.deepEqual(payload.artifacts.map((artifact) => artifact.outputId), ['recon-fix-main']);
+        return { outcome: 'committed' };
+      }
+    });
+    assert.equal(published.summary.fixedRowCount, 1);
+    assert.equal(publisherCalls, 1);
+
+    const current = readAdmRowsForWriteback(harness.database.db).rows[0].parsed;
+    harness.database.db.prepare(
+      'UPDATE linked_adm_bank_deposit SET raw_json = ? WHERE id = 1'
+    ).run(JSON.stringify({ ...current, Amount: 101 }));
+    const staleStaging = path.join(harness.root, 'export-staging-stale');
+    fs.mkdirSync(staleStaging);
+    await assert.rejects(() => generateValidateAndPublishReconFixExport({
+      runtime: harness.runtime,
+      result: run.result,
+      filePlan,
+      stagingDirectory: staleStaging,
+      operationKey: 'jpm-export-e11-c-stale',
+      context: operationContext('jpm-export-e11-c-stale'),
+      batchContext: {
+        batchId: 9002,
+        batchNumber: '2026-08-28-9002',
+        taskRunId: 'task-jpm-export-e11-c-stale',
+        taskKey: 'recon-id-fix:export',
+        moduleId: 'recon-fix',
+        parentRunId: 'parent-e11-b',
+        operationKey: 'jpm-export-e11-c-stale'
+      },
+      readCurrentEvidence() {
+        throw new Error('Worker evidence gate 后不应进入 Main Join');
+      },
+      async publishPublication() {
+        publisherCalls += 1;
+      }
+    }), { code: 'RECON_FIX_EXPORT_LINKED_EVIDENCE_STALE' });
+    assert.equal(publisherCalls, 1);
+    assert.equal(isBackgroundExecutionProductionEnabled(RECON_FIX_EXPORT_ACTION), false);
   } finally {
     await harness.runtime.shutdown();
     harness.database.close();
