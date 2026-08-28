@@ -12,13 +12,17 @@ const {
 } = require('../../../src/main-process/toolbox-target-identity');
 
 test.describe('toolbox target identity', () => {
-  test('所有平台统一 NFC，阻止预组合与组合字符目标别名', () => {
-    for (const platform of ['darwin', 'win32', 'linux']) {
+  test('Darwin/Linux沿用NFC；Windows lexical fallback保留NFC/NFD不同legacy名称', () => {
+    for (const platform of ['darwin', 'linux']) {
       assert.equal(
         normalizeTargetAliasKey('\u00e9.xlsx', { platform }),
         normalizeTargetAliasKey('e\u0301.xlsx', { platform })
       );
     }
+    assert.notEqual(
+      normalizeTargetAliasKey('\u00e9.xlsx', { platform: 'win32' }),
+      normalizeTargetAliasKey('e\u0301.xlsx', { platform: 'win32' })
+    );
   });
 
   test('macOS/Windows 折叠大小写，Linux 保留大小写差异', () => {
@@ -36,8 +40,8 @@ test.describe('toolbox target identity', () => {
     );
   });
 
-  test('macOS/Windows 完整折叠 ß/SS、sigma/final-sigma 与 ligature', () => {
-    for (const platform of ['darwin', 'win32']) {
+  test('macOS按实机inode证据完整折叠；Windows不把expansion名称拍脑袋合并', () => {
+    for (const platform of ['darwin']) {
       assert.equal(
         normalizeTargetAliasKey('straße.xlsx', { platform }),
         normalizeTargetAliasKey('STRASSE.xlsx', { platform })
@@ -49,6 +53,16 @@ test.describe('toolbox target identity', () => {
       assert.equal(
         normalizeTargetAliasKey('oﬃce.xlsx', { platform }),
         normalizeTargetAliasKey('OFFICE.xlsx', { platform })
+      );
+    }
+    for (const [left, right] of [
+      ['straße.xlsx', 'STRASSE.xlsx'],
+      ['οσ.xlsx', 'ος.xlsx'],
+      ['oﬃce.xlsx', 'OFFICE.xlsx']
+    ]) {
+      assert.notEqual(
+        normalizeTargetAliasKey(left, { platform: 'win32' }),
+        normalizeTargetAliasKey(right, { platform: 'win32' })
       );
     }
   });

@@ -46,6 +46,9 @@ const {
   createStartupRecoveryCoordinator
 } = require('../../../src/main-process/background-execution/startup-recovery-coordinator');
 const {
+  createRecoveryHoldGate
+} = require('../../../src/main-process/background-execution/recovery-hold-gate');
+const {
   transitionRequestKey
 } = require('../../../src/main-process/background-execution/recovery-control-contract');
 const {
@@ -56,6 +59,7 @@ const {
   createManualBalanceInteractionOrdinalAllocator,
   createManualBalanceOperationIdentity,
   createManualBalanceRecoveryPlanTransitions,
+  createManualBalanceSeedPlanFreshnessGate,
   createManualBalanceSeedInspector,
   createManualBalanceSettlementRecoveryProvider,
   createManualBalanceTargetAlias,
@@ -116,10 +120,18 @@ function createHarness(t, additions = {}) {
     recoveryControlRepository
   });
   const resolveTargetPath = (alias) => resolveManualBalanceTargetAlias(root, alias);
+  const recoveryHoldGate = additions.recoveryHoldGate || createRecoveryHoldGate(readRepository);
+  const preCommitGate = additions.preCommitGate || createManualBalanceSeedPlanFreshnessGate({
+    assertContinuationFresh: additions.assertContinuationFresh || (async () => true),
+    fs: additions.fs,
+    platform: additions.platform
+  });
   const coordinator = createMainSettlementIntentCoordinator({
     transitionWriter,
     readRepository,
     resolveTargetPath,
+    recoveryHoldGate,
+    preCommitGate,
     fsyncDirectory: SUPPORTED_DIRECTORY_FSYNC,
     now: () => new Date(NOW),
     ...additions
@@ -133,6 +145,8 @@ function createHarness(t, additions = {}) {
     recoveryControlRepository,
     transitionWriter,
     resolveTargetPath,
+    recoveryHoldGate,
+    preCommitGate,
     coordinator
   };
 }
@@ -189,7 +203,6 @@ function settlementInput(overrides = {}) {
       existingIndex,
       record: incoming
     },
-    ...(overrides.preCommitCheck ? { preCommitCheck: overrides.preCommitCheck } : {}),
     ...(overrides.faultHooks ? { faultHooks: overrides.faultHooks } : {})
   };
 }
@@ -299,7 +312,13 @@ test('TaskRun ordinal history拒绝重复token/ordinal与非单调映射', () =>
 
 test('no-op在Intent/critical前返回且不产生任何control event', async (t) => {
   const h = createHarness(t);
-  const input = settlementInput({ storageRoot: h.root });
+  const input = settlementInput({
+    storageRoot: h.root,
+    records: [
+      record({ endBalance: 1201 }),
+      record({ endBalance: 1201 })
+    ]
+  });
   const targetPath = h.resolveTargetPath(targetAlias(input));
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });
   fs.writeFileSync(targetPath, serializeBalanceSeedRecords(expectedRecords(input)));
@@ -310,22 +329,135 @@ test('no-op在Intent/critical前返回且不产生任何control event', async (t
   assert.deepEqual(h.readRepository.listRecoveryEvents(input.taskRunId), []);
 });
 
-test('async preCommit stale gate与persistent prepared request conflict均在no-op前fail closed', async (t) => {
+test('MainSettlementIntentCoordinator缺canonical Hold/freshness依赖时构造即fail closed', (t) => {
   const h = createHarness(t);
-  const noopInput = settlementInput({
+  const base = {
+    transitionWriter: h.transitionWriter,
+    readRepository: h.readRepository,
+    resolveTargetPath: h.resolveTargetPath
+  };
+  assert.throws(() => createMainSettlementIntentCoordinator({
+    ...base,
+    preCommitGate: h.preCommitGate
+  }), /canonical RecoveryHoldGate/);
+  assert.throws(() => createMainSettlementIntentCoordinator({
+    ...base,
+    recoveryHoldGate: h.recoveryHoldGate
+  }), /canonical manual balance freshness gate/);
+});
+
+test('awaited admission后noop target漂移由final preimage复核fail closed', async (t) => {
+  const h = createHarness(t);
+  const input = settlementInput({
     storageRoot: h.root,
-    preCommitCheck: async () => {
+    records: [
+      record({ endBalance: 1201 }),
+      record({ endBalance: 1201 })
+    ]
+  });
+  const target = h.resolveTargetPath(targetAlias(input));
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, serializeBalanceSeedRecords(expectedRecords(input)));
+  let holdChecks = 0;
+  const coordinator = createMainSettlementIntentCoordinator({
+    transitionWriter: h.transitionWriter,
+    readRepository: h.readRepository,
+    resolveTargetPath: h.resolveTargetPath,
+    preCommitGate: h.preCommitGate,
+    recoveryHoldGate: {
+      assertNoRecoveryHold(scope) {
+        h.recoveryHoldGate.assertNoRecoveryHold(scope);
+        holdChecks += 1;
+        if (holdChecks === 2) {
+          fs.writeFileSync(target, serializeBalanceSeedRecords([
+            record({ endBalance: 9999 })
+          ]));
+        }
+        return true;
+      }
+    },
+    fsyncDirectory: SUPPORTED_DIRECTORY_FSYNC,
+    now: () => new Date(NOW)
+  });
+  await assert.rejects(coordinator.settle(input), { code: 'MANUAL_BALANCE_PREIMAGE_STALE' });
+  assert.equal(readBalanceSeedRecords(h.root, '中行')[0].endBalance, 9999);
+  assert.deepEqual(h.readRepository.listOpenCriticalIntents(), []);
+});
+
+test('canonical freshness gate拒绝stale plan并守恒并发新增seed record', async (t) => {
+  let h;
+  let injected = false;
+  h = createHarness(t, {
+    async assertContinuationFresh() {
+      await Promise.resolve();
+      if (injected) return;
+      injected = true;
+      writeBalanceSeedRecords(h.root, '中行', [
+        record({ endBalance: 10 }),
+        record({
+          merchantId: 'concurrent-account',
+          billDate: '2026-07-31',
+          endBalance: 88
+        })
+      ]);
+    }
+  });
+  writeBalanceSeedRecords(h.root, '中行', [record({ endBalance: 10 })]);
+  const input = settlementInput({
+    storageRoot: h.root,
+    records: [record({ endBalance: 10 }), record({ endBalance: 20 })]
+  });
+  await assert.rejects(h.coordinator.settle(input), { code: 'MANUAL_BALANCE_PLAN_STALE' });
+  const records = readBalanceSeedRecords(h.root, '中行');
+  assert.equal(records.length, 2);
+  assert.equal(records.some((item) => item.merchantId === 'concurrent-account'), true);
+  assert.equal(records.find((item) => item.merchantId !== 'concurrent-account').endBalance, 10);
+  assert.deepEqual(h.readRepository.listOpenCriticalIntents(), []);
+});
+
+test('updatedAt只在await admission与final preimage后按commit attempt时钟materialize', async (t) => {
+  const delayedNow = '2026-08-29T00:00:09.000Z';
+  let admitted = false;
+  let nowCalls = 0;
+  const h = createHarness(t, {
+    async assertContinuationFresh() {
+      await Promise.resolve();
+      admitted = true;
+    },
+    now() {
+      assert.equal(admitted, true, 'now不得早于awaited admission');
+      nowCalls += 1;
+      return new Date(delayedNow);
+    }
+  });
+  const result = await h.coordinator.settle(settlementInput({ storageRoot: h.root }));
+  const intent = h.readRepository.getCriticalIntentById(result.intentId);
+  assert.equal(nowCalls, 1);
+  assert.equal(intent.boundedEvidence.commitUpdatedAt, delayedNow);
+  assert.equal(readBalanceSeedRecords(h.root, '中行')[0].updatedAt, delayedNow);
+});
+
+test('async preCommit stale gate与persistent prepared request conflict均在no-op前fail closed', async (t) => {
+  const stale = createHarness(t, {
+    assertContinuationFresh: async () => {
       await Promise.resolve();
       throw Object.assign(new Error('stale'), { code: 'ACTION_TOKEN_STALE' });
     }
   });
-  const noopTarget = h.resolveTargetPath(targetAlias(noopInput));
+  const noopInput = settlementInput({
+    storageRoot: stale.root,
+    records: [
+      record({ endBalance: 1201 }),
+      record({ endBalance: 1201 })
+    ]
+  });
+  const noopTarget = stale.resolveTargetPath(targetAlias(noopInput));
   fs.mkdirSync(path.dirname(noopTarget), { recursive: true });
   fs.writeFileSync(noopTarget, serializeBalanceSeedRecords(expectedRecords(noopInput)));
-  await assert.rejects(h.coordinator.settle(noopInput), { code: 'ACTION_TOKEN_STALE' });
-  assert.deepEqual(h.readRepository.listRecoveryEvents(noopInput.taskRunId), []);
+  await assert.rejects(stale.coordinator.settle(noopInput), { code: 'ACTION_TOKEN_STALE' });
+  assert.deepEqual(stale.readRepository.listRecoveryEvents(noopInput.taskRunId), []);
 
-  fs.rmSync(noopTarget);
+  const h = createHarness(t);
   let reserveOnly = true;
   const crashyWriter = {
     ...h.transitionWriter,
@@ -347,14 +479,24 @@ test('async preCommit stale gate与persistent prepared request conflict均在no-
     transitionWriter: crashyWriter,
     readRepository: h.readRepository,
     resolveTargetPath: h.resolveTargetPath,
+    recoveryHoldGate: h.recoveryHoldGate,
+    preCommitGate: h.preCommitGate,
     fsyncDirectory: SUPPORTED_DIRECTORY_FSYNC,
     now: () => new Date(NOW)
   });
   const input = settlementInput({ storageRoot: h.root });
   await assert.rejects(coordinator.settle(input), { simulatedCrash: true });
-  fs.mkdirSync(path.dirname(noopTarget), { recursive: true });
-  fs.writeFileSync(noopTarget, serializeBalanceSeedRecords(expectedRecords(input)));
-  await assert.rejects(coordinator.settle(input), { code: 'RECOVERY_REQUEST_KEY_CONFLICT' });
+  const conflictTarget = h.resolveTargetPath(targetAlias(input));
+  fs.mkdirSync(path.dirname(conflictTarget), { recursive: true });
+  fs.writeFileSync(conflictTarget, serializeBalanceSeedRecords(expectedRecords(input)));
+  const noopRetry = settlementInput({
+    storageRoot: h.root,
+    records: [
+      record({ endBalance: 1201 }),
+      record({ endBalance: 1201 })
+    ]
+  });
+  await assert.rejects(coordinator.settle(noopRetry), { code: 'RECOVERY_REQUEST_KEY_CONFLICT' });
   assert.deepEqual(h.readRepository.listRecoveryEvents(input.taskRunId), []);
 });
 
@@ -383,7 +525,7 @@ test('temp/rename前失败保持pre并以not-committed recovered关闭；可用�
   const original = fs.readFileSync(target);
   const input = settlementInput({
     storageRoot: h.root,
-    records: [record({ endBalance: 20 })],
+    records: [record({ endBalance: 10 }), record({ endBalance: 20 })],
     faultHooks: { beforeRename() { throw Object.assign(new Error('rename blocked'), { code: 'EIO' }); } }
   });
   let firstIntentId;
@@ -404,7 +546,7 @@ test('temp/rename前失败保持pre并以not-committed recovered关闭；可用�
   const retry = await h.coordinator.settle(settlementInput({
     storageRoot: h.root,
     interactionOrdinal: 2,
-    records: [record({ endBalance: 20 })]
+    records: [record({ endBalance: 10 }), record({ endBalance: 20 })]
   }));
   assert.equal(retry.status, 'committed');
   assert.equal(readBalanceSeedRecords(h.root, '中行')[0].endBalance, 20);
@@ -424,6 +566,73 @@ test('directory fsync unsupported保持acked Intent并建立DURABILITY_BARRIER_U
   assert.equal(holds.length, 1);
   assert.equal(holds[0].reasonCode, 'DURABILITY_BARRIER_UNAVAILABLE');
   assert.equal(readBalanceSeedRecords(h.root, '中行')[0].endBalance, 1201);
+});
+
+test('active durability Hold经canonical gate阻止后续operation提交或覆盖target', async (t) => {
+  const h = createHarness(t, {
+    fsyncDirectory: () => Object.freeze({ capability: 'unsupported', errorCode: 'EPERM' })
+  });
+  const first = settlementInput({ storageRoot: h.root });
+  fs.mkdirSync(path.dirname(h.resolveTargetPath(targetAlias(first))), { recursive: true });
+  const failed = await h.coordinator.settle(first);
+  assert.equal(failed.status, 'terminal-failure');
+  assert.equal(h.readRepository.listActiveRecoveryHolds()[0].reasonCode,
+    'DURABILITY_BARRIER_UNAVAILABLE');
+  const bytesBeforeRetry = fs.readFileSync(h.resolveTargetPath(targetAlias(first)));
+  const second = settlementInput({
+    storageRoot: h.root,
+    taskRunId: 'task-held-scope-retry',
+    records: [record({ endBalance: 1201 }), record({ endBalance: 1300 })]
+  });
+  await assert.rejects(h.coordinator.settle(second), { code: 'RECOVERY_HOLD_ACTIVE' });
+  assert.deepEqual(fs.readFileSync(h.resolveTargetPath(targetAlias(first))), bytesBeforeRetry);
+  assert.equal(h.readRepository.listOpenCriticalIntents().length, 1,
+    'active Hold后不得创建第二Intent');
+});
+
+test('Hold reservation后control-tx崩溃由startup复用exact request并双启动幂等收口', async (t) => {
+  const h = createHarness(t);
+  const crash = Object.assign(new Error('crash after hold reservations'), {
+    simulatedCrash: true
+  });
+  let controlTransactions = 0;
+  const crashingControlRepository = {
+    runInControlTransaction(work) {
+      controlTransactions += 1;
+      if (controlTransactions === 3) throw crash;
+      return h.recoveryControlRepository.runInControlTransaction(work);
+    }
+  };
+  const crashingWriter = createRecoveryTransitionWriter({
+    requestOwnerRepository: h.requestOwnerRepository,
+    observationAttemptRepository: h.observationAttemptRepository,
+    recoveryControlRepository: crashingControlRepository
+  });
+  const coordinator = createMainSettlementIntentCoordinator({
+    transitionWriter: crashingWriter,
+    readRepository: h.readRepository,
+    resolveTargetPath: h.resolveTargetPath,
+    recoveryHoldGate: h.recoveryHoldGate,
+    preCommitGate: h.preCommitGate,
+    fsyncDirectory: () => Object.freeze({ capability: 'unsupported', errorCode: 'EPERM' }),
+    now: () => new Date(NOW)
+  });
+  const input = settlementInput({ storageRoot: h.root });
+  fs.mkdirSync(path.dirname(h.resolveTargetPath(targetAlias(input))), { recursive: true });
+  await assert.rejects(coordinator.settle(input), (error) => error === crash);
+  assert.equal(h.readRepository.listActiveRecoveryHolds().length, 0,
+    'control transaction前Hold尚未可见');
+  assert.equal(h.readRepository.listOpenCriticalIntents()[0].state, 'acked');
+
+  const firstStartup = await createStartupForHarness(h).scanAndRecover();
+  assert.equal(firstStartup.decisions[0].inspection.outcome, 'unknown');
+  assert.equal(h.readRepository.listActiveRecoveryHolds().length, 1);
+  assert.equal(h.readRepository.listActiveRecoveryHolds()[0].reasonCode,
+    'DURABILITY_BARRIER_UNAVAILABLE');
+  const secondStartup = await createStartupForHarness(h).scanAndRecover();
+  assert.equal(secondStartup.decisions[0].inspection.outcome, 'unknown');
+  assert.equal(h.readRepository.listActiveRecoveryHolds().length, 1);
+  assert.equal(h.readRepository.listOpenCriticalIntents()[0].state, 'acked');
 });
 
 test('首次创建target目录时先持久化parent entry；unsupported不写target并保持Intent/Hold', async (t) => {
@@ -559,7 +768,7 @@ test('live Inspector不可用时保留acked Intent并立即建立unknown Hold', 
     assert.equal(error.settlementOutcome, 'unknown');
     assert.equal(h.readRepository.getCriticalIntentById(error.intentId).state, 'acked');
     assert.equal(h.readRepository.listActiveRecoveryHolds()[0].reasonCode,
-      'MANUAL_BALANCE_POST_IMAGE_UNKNOWN');
+      'DURABILITY_BARRIER_UNAVAILABLE');
     return true;
   });
 });
@@ -655,14 +864,19 @@ test('post-image neither/rename后异常进入Hold，后续自动settlement不�
 test('hold与业务preCommit阻断均发生在prepared前，不留下Intent或文件写入', async (t) => {
   for (const blocked of ['hold', 'preCommit']) {
     const h = createHarness(t, blocked === 'hold'
-      ? { assertNoHold() { throw Object.assign(new Error('active hold'), { code: 'RECOVERY_HOLD_ACTIVE' }); } }
-      : {});
+      ? {
+          recoveryHoldGate: {
+            assertNoRecoveryHold() {
+              throw Object.assign(new Error('active hold'), { code: 'RECOVERY_HOLD_ACTIVE' });
+            }
+          }
+        }
+      : {
+          assertContinuationFresh() {
+            throw Object.assign(new Error('token stale'), { code: 'ACTION_TOKEN_STALE' });
+          }
+        });
     const input = settlementInput({ storageRoot: h.root, taskRunId: `task-${blocked}` });
-    if (blocked === 'preCommit') {
-      input.preCommitCheck = () => {
-        throw Object.assign(new Error('token stale'), { code: 'ACTION_TOKEN_STALE' });
-      };
-    }
     await assert.rejects(h.coordinator.settle(input), { code: blocked === 'hold'
       ? 'RECOVERY_HOLD_ACTIVE'
       : 'ACTION_TOKEN_STALE' });
@@ -752,13 +966,16 @@ test('async admission期间调用方篡改plan不能改变已绑定post-image', 
     transitionWriter: h.transitionWriter,
     readRepository: h.readRepository,
     resolveTargetPath: h.resolveTargetPath,
+    recoveryHoldGate: h.recoveryHoldGate,
+    preCommitGate: createManualBalanceSeedPlanFreshnessGate({
+      async assertContinuationFresh() {
+        await Promise.resolve();
+        input.plan.record.endBalance = 9999;
+        input.plan.record.currency = 'USD';
+      }
+    }),
     fsyncDirectory: SUPPORTED_DIRECTORY_FSYNC,
-    now: () => new Date(NOW),
-    async assertNoHold() {
-      await Promise.resolve();
-      input.plan.record.endBalance = 9999;
-      input.plan.record.currency = 'USD';
-    }
+    now: () => new Date(NOW)
   });
   const result = await coordinator.settle(input);
   assert.equal(result.status, 'committed');
@@ -767,20 +984,40 @@ test('async admission期间调用方篡改plan不能改变已绑定post-image', 
   assert.equal(readBalanceSeedRecords(h.root, '中行')[0].endBalance, 1201);
 });
 
-test('Darwin/Windows target alias与conflict scope复用NFC+full case-fold权威规范化', async (t) => {
+test('物理target alias可逆，Darwin同物理拼写共享scope，Windows NFD/ß不改写或误合并', async (t) => {
   const composed = 'ÉBANK';
   const decomposed = 'e\u0301bank';
-  assert.equal(
+  assert.notEqual(
     createManualBalanceTargetAlias(composed, { platform: 'darwin' }),
     createManualBalanceTargetAlias(decomposed, { platform: 'darwin' })
   );
-  assert.equal(
+  assert.notEqual(
     createManualBalanceTargetAlias('BANK', { platform: 'win32' }),
     createManualBalanceTargetAlias('bank', { platform: 'win32' })
   );
   assert.notEqual(
-    createManualBalanceTargetAlias('BANK', { platform: 'linux' }),
-    createManualBalanceTargetAlias('bank', { platform: 'linux' })
+    createManualBalanceTargetAlias('ébank', { platform: 'win32' }),
+    createManualBalanceTargetAlias('e\u0301bank', { platform: 'win32' })
+  );
+  assert.notEqual(
+    createManualBalanceTargetAlias('straße', { platform: 'win32' }),
+    createManualBalanceTargetAlias('STRASSE', { platform: 'win32' })
+  );
+  assert.equal(
+    path.basename(resolveManualBalanceTargetAlias(
+      'C:\\storage',
+      createManualBalanceTargetAlias('e\u0301bank', { platform: 'win32' }),
+      { platform: 'win32' }
+    )),
+    'e\u0301bank.json'
+  );
+  assert.equal(
+    path.basename(resolveManualBalanceTargetAlias(
+      'C:\\storage',
+      createManualBalanceTargetAlias('straße', { platform: 'win32' }),
+      { platform: 'win32' }
+    )),
+    'straße.json'
   );
 
   const h = createHarness(t, { platform: 'darwin' });
@@ -793,7 +1030,10 @@ test('Darwin/Windows target alias与conflict scope复用NFC+full case-fold权威
     storageRoot: h.root,
     taskRunId: 'task-alias-second',
     bankName: decomposed,
-    records: [record({ templateName: `${decomposed}-上海`, endBalance: 20 })]
+    records: [
+      record({ templateName: `${composed}-上海`, endBalance: 10 }),
+      record({ templateName: `${decomposed}-上海`, endBalance: 20 })
+    ]
   });
   const firstResult = await h.coordinator.settle(first);
   const secondResult = await h.coordinator.settle(second);

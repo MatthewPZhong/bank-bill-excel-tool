@@ -4,7 +4,7 @@
 
 - [x] Live `file:save-balance-seed` remains legacy while canonical production is `false/legacy/0`.
 - [x] No second token, reservation, business lock, PhaseLease, intent repository, receipt, Inspector, Publisher, config or transition authority was introduced.
-- [x] Hold admission and business/token `preCommitCheck` run before `prepared`; known rejection leaves no Intent or target mutation.
+- [x] Canonical RecoveryHoldGate and plan-freshness gate are required dependencies; exact-scope Hold checks run before admission, after await and immediately before `prepared`, so known rejection leaves no Intent or target mutation.
 - [x] `prepared -> acked` is Main-owned and has no Worker `critical:ready/critical:ack` messages.
 - [x] Manual recovery supplies only the frozen action binding over generic RecoverySourceV1 transitions; RecoveryControl remains the sole observation/transition authority.
 
@@ -14,8 +14,9 @@
 - [x] Complete token history is strict, monotonic and one-to-one: current token reuses, new token increments, A/B/A historical replay fails stale, and corrupt/duplicate metadata fails closed.
 - [x] Intent identity is deterministic from operationKey and the canonical request hash binds target alias, exact pre/post, revision and token hash.
 - [x] Exact closed/recovered retry returns its stable decision before mutation; same operation with a changed post-image conflicts before mutation.
-- [x] Canonical target alias/scope uses the repository target identity authority (sanitized basename, NFC/full case-fold and existing-ancestor realpath), so Darwin/Windows spellings of one physical file share scope.
+- [x] Physical target alias reversibly preserves the sanitized legacy basename. Conflict scope separately uses repository target identity: Darwin physical aliases proven by realpath/inode and full fold share scope; existing Windows targets use realpath, while missing Windows NFD/ß names remain distinct except stable ASCII case fold.
 - [x] Persisted request-owner conflict and awaited continuation pre-commit gate run before no-op; accepted no-op then returns before Intent/critical transition and creates no control event.
+- [x] After awaited admission, the target and legacy records are re-read; target drift or records-evidence drift fails closed before no-op/Intent, preserving concurrently added records.
 
 ## File Durability And Recovery
 
@@ -27,13 +28,14 @@
 - [x] Unknown target never regenerates or overwrites automatically.
 - [x] Live durable rename is closed by canonical observation plus Intent transition before reply; reply loss replays without rewrite, while crash before that observation remains unknown/held on startup.
 - [x] Inspector observation attempt is canonical/resumable; its event and all Intent/Hold transitions commit atomically, so repeated startup continues the same state instead of creating a second authority or permanent recovered loop.
+- [x] Live and startup use the same canonical Hold request builder; a crash after reservation but before control transaction resumes the exact requestKey/transition/safe payload and converges over repeated startup.
 - [x] App-critical section has no cancellation branch; caller must preserve the existing non-cancellable E09-B lock/lease owner.
 
 ## Funds And Business Invariants
 
 - [x] Legacy and atomic paths share one serializer; ordering, fields, Chinese `生成方式` and trailing newline are byte-identical.
 - [x] Settlement freezes and accepts only the validated legacy preflight plan snapshot; bank target, records/account, currency, bill date, balance amount and template lineage cannot be independently spliced or changed during an awaited gate.
-- [x] `updatedAt` is materialized at commit time through the shared legacy normalizer/serializer, preserving legacy field ordering and bytes.
+- [x] `updatedAt` is materialized only after all awaited admission and the final target CAS; the same materialized bytes bind Intent evidence and the atomic post-image while preserving legacy field ordering.
 - [x] Record count and key replacement behavior remain owned by the existing manual preflight plan.
 - [x] Target/operation evidence contains only bounded alias, size/hash, revision, ordinal and token hash; no raw account, rows or filesystem path enters recovery control data.
 - [x] All failures are structured/bounded; ambiguous or durability-unproven state creates an observable Hold.
