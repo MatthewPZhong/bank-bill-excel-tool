@@ -4,15 +4,15 @@ const fs = require('node:fs');
 
 const { buildMappedRows } = require('../../backend/file-service');
 const {
-  sourceSnapshotMatchesStat
-} = require('../archive-center/source-snapshot');
-const {
   appendStatementSessionImport,
   buildStatementFileEntry,
   cloneRowsWithMetadata,
-  createStatementImportSession,
-  removeStatementSessionEntriesByFilePath
+  createStatementImportSession
 } = require('../statement-session');
+const {
+  assertMetadataCurrent,
+  assertStatementSourceIdentityCurrent
+} = require('./source-identity');
 
 class StatementSessionError extends Error {
   constructor(code, message) {
@@ -68,12 +68,17 @@ function cloneSession(session) {
     currentBatchId: session.currentBatchId,
     fileEntries: session.fileEntries.map((entry) => ({
       ...entry,
+      sourceIdentity: entry.sourceIdentity ? { ...entry.sourceIdentity } : null,
       detailRows: cloneRowsWithMetadata(entry.detailRows)
     })),
     batches: session.batches.map((batch) => ({
       ...batch,
       entryIds: batch.entryIds.slice()
-    }))
+    })),
+    templateEvidenceByDigest: new Map(
+      [...(session.templateEvidenceByDigest || new Map())]
+        .map(([digest, snapshot]) => [digest, structuredClone(snapshot)])
+    )
   };
 }
 
@@ -122,49 +127,85 @@ function readGuardForSource(source, fsImpl) {
   return Object.freeze({
     beforeRead() {
       try {
-        const stat = fsImpl.lstatSync(source.path, { bigint: true });
-        if (stat.isSymbolicLink() || !sourceSnapshotMatchesStat(source.snapshot, stat)) {
-          throw sourceChanged();
-        }
+        assertMetadataCurrent(source, fsImpl);
         return source.snapshot;
-      } catch (error) {
-        if (error instanceof StatementSessionError) throw error;
+      } catch (_error) {
         throw sourceChanged();
       }
     },
-    afterRead(startedSnapshot) {
+    afterRead(_startedSnapshot) {
       try {
-        const stat = fsImpl.lstatSync(source.path, { bigint: true });
-        if (stat.isSymbolicLink() || !sourceSnapshotMatchesStat(startedSnapshot, stat)) {
-          throw sourceChanged();
-        }
-      } catch (error) {
-        if (error instanceof StatementSessionError) throw error;
+        assertMetadataCurrent(source, fsImpl);
+      } catch (_error) {
         throw sourceChanged();
       }
     }
   });
 }
 
+function templateCatalogByRef(request) {
+  return new Map(request.templateCatalog.map((entry) => [entry.templateRef, entry]));
+}
+
+function assertSessionOwner(session, owner) {
+  if (session.key !== owner.sessionKey ||
+      String(session.templateId) !== owner.templateId ||
+      session.templateName !== owner.templateName) {
+    throw new StatementSessionError(
+      'STATEMENT_SESSION_OWNER_MISMATCH',
+      'Statement session owner identity does not match existing state'
+    );
+  }
+}
+
 async function buildStatementImportCandidate(state, request, options = {}) {
   const fsImpl = options.fs || fs;
   const mapRows = options.buildMappedRows || buildMappedRows;
+  const templates = templateCatalogByRef(request);
+  for (const evidence of templates.values()) {
+    assertImportDoesNotRequireInteraction(evidence.snapshot);
+  }
   const candidate = cloneStatementServiceState(state);
   candidate.sessionRevision += 1;
   candidate.activePhase = 'import';
   candidate.persistentReservationId = 'pending-reservation'.padEnd(256, 'x');
-  const template = request.templateEvidence.snapshot;
-  assertImportDoesNotRequireInteraction(template);
-  const existing = candidate.sessions.get(request.sessionKey);
+  const owner = request.sessionOwner;
+  const existing = candidate.sessions.get(owner.sessionKey);
   const session = existing || createStatementImportSession({
-    templateId: template.templateId,
-    templateName: template.templateName
+    templateId: owner.templateId,
+    templateName: owner.templateName
   });
-  candidate.sessions.set(request.sessionKey, session);
+  if (!existing) {
+    session.key = owner.sessionKey;
+    session.templateEvidenceByDigest = new Map();
+  } else {
+    assertSessionOwner(session, owner);
+    if (!(session.templateEvidenceByDigest instanceof Map)) {
+      throw new StatementSessionError(
+        'STATEMENT_TEMPLATE_EVIDENCE_MISSING',
+        'Existing Statement session lacks template evidence'
+      );
+    }
+  }
+  for (const evidence of templates.values()) {
+    session.templateEvidenceByDigest.set(
+      evidence.digest,
+      structuredClone(evidence.snapshot)
+    );
+  }
+  candidate.sessions.set(owner.sessionKey, session);
 
   const importedEntries = [];
   for (const source of request.sources) {
     if (typeof options.assertNotCancelled === 'function') options.assertNotCancelled();
+    const evidence = templates.get(source.templateRef);
+    if (!evidence) {
+      throw new StatementSessionError(
+        'STATEMENT_IMPORT_TEMPLATE_REF_UNKNOWN',
+        'Statement source templateRef is not in the template catalog'
+      );
+    }
+    const template = evidence.snapshot;
     const detailRows = mapRows({
       inputFilePath: source.path,
       orderedTargetFields: template.orderedTargetFields,
@@ -179,13 +220,22 @@ async function buildStatementImportCandidate(state, request, options = {}) {
       dateParseOrder: template.dateParseOrder,
       readOptions: { readGuard: readGuardForSource(source, fsImpl) }
     });
-    removeStatementSessionEntriesByFilePath(session, source.path);
-    importedEntries.push(buildStatementFileEntry({
+    await assertStatementSourceIdentityCurrent(source, {
+      fs: fsImpl,
+      assertNotCancelled: options.assertNotCancelled
+    });
+    const entry = buildStatementFileEntry({
       buildEntryId: () => `statement-entry-${state.serviceGeneration}-${candidate.nextEntryOrdinal++}`,
       detailRows,
       filePath: source.path,
       matchedTemplateId: template.templateId
-    }));
+    });
+    importedEntries.push({
+      ...entry,
+      templateRef: source.templateRef,
+      templateDigest: evidence.digest,
+      sourceIdentity: { ...source.sourceIdentity }
+    });
     await new Promise((resolve) => setImmediate(resolve));
   }
 
@@ -200,7 +250,7 @@ async function buildStatementImportCandidate(state, request, options = {}) {
   return Object.freeze({
     state: candidate,
     result: Object.freeze({
-      sessionKey: session.key,
+      sessionKey: owner.sessionKey,
       currentBatchId,
       entryCount: session.fileEntries.length,
       importedEntryIds: Object.freeze(importedEntries.map((entry) => entry.id))

@@ -1,6 +1,7 @@
 'use strict';
 
 const { parentPort, workerData } = require('node:worker_threads');
+const fs = require('node:fs');
 const path = require('node:path');
 
 const { createStatementService } = require('./service');
@@ -15,17 +16,33 @@ const failBeforeAdoptOrdinal = workerData && workerData.statementFaultInjection
 const withholdAdoptOrdinal = workerData && workerData.statementFaultInjection
   ? workerData.statementFaultInjection.withholdAdoptOrdinal
   : null;
-const statementSourceRoot = workerData && typeof workerData.statementSourceRoot === 'string'
-  ? path.resolve(workerData.statementSourceRoot)
-  : null;
+let statementSourceRoot = null;
+if (workerData && typeof workerData.statementSourceRoot === 'string') {
+  try {
+    statementSourceRoot = path.resolve(fs.realpathSync(workerData.statementSourceRoot));
+  } catch (_error) {
+    statementSourceRoot = null;
+  }
+}
 
 function resolveSourceResource(resourceId) {
   if (!statementSourceRoot || typeof resourceId !== 'string') return null;
-  const resolved = path.resolve(statementSourceRoot, resourceId);
-  if (resolved !== statementSourceRoot && !resolved.startsWith(`${statementSourceRoot}${path.sep}`)) {
+  try {
+    const requested = path.resolve(statementSourceRoot, resourceId);
+    const resolved = path.resolve(fs.realpathSync(requested));
+    const relative = path.relative(statementSourceRoot, resolved);
+    if (relative === '' ||
+        (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`))) {
+      return Object.freeze({
+        path: resolved,
+        legacyPath: requested,
+        allowedRoot: statementSourceRoot
+      });
+    }
+  } catch (_error) {
     return null;
   }
-  return resolved;
+  return null;
 }
 
 const service = createStatementService({

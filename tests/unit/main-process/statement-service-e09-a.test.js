@@ -26,6 +26,7 @@ const {
 } = require('../../../src/main-process/statement-worker/contracts');
 const {
   createStatementImportRequest,
+  createStatementTemplateCatalogEntry,
   createStatementTemplateEvidence
 } = require('../../../src/main-process/statement-worker/import-contracts');
 const {
@@ -38,6 +39,9 @@ const {
 const {
   sourceSnapshotFromStat
 } = require('../../../src/main-process/archive-center/source-snapshot');
+const {
+  resolveStatementSourceIdentity
+} = require('../../../src/main-process/statement-worker/source-identity');
 
 const ROOT = path.join(__dirname, '..', '..', '..');
 const POLICY_FIXTURE = path.join(
@@ -55,16 +59,28 @@ const STATIC_KEY_FIXTURE = path.join(path.dirname(POLICY_FIXTURE), 'static-key-m
 
 function createPolicyRegistry(options = {}) {
   const fixture = JSON.parse(fs.readFileSync(POLICY_FIXTURE, 'utf8'));
-  const policy = structuredClone(fixture.actions['statement:import']);
-  if (typeof options.policyMutation === 'function') options.policyMutation(policy);
+  const policies = Object.entries(fixture.actions)
+    .filter(([actionKey]) => actionKey.startsWith('statement:'))
+    .map(([, policy]) => structuredClone(policy));
+  if (typeof options.policyMutation === 'function') {
+    policies.forEach((policy) => options.policyMutation(policy));
+  }
   const entryRegistry = createStaticRegistry(createStatementWorkerEntryRegistry({
     workerData: options.workerData
   })).freeze();
-  const validatorRegistry = createStaticRegistry({
-    [policy.result.validatorKey]: STATEMENT_RESULT_VALIDATORS['statement:import']
-  }).freeze();
+  const validatorBindings = {};
+  for (const policy of policies) {
+    validatorBindings[policy.result.validatorKey] = STATEMENT_RESULT_VALIDATORS[policy.actionKey];
+    for (const validatorKey of [
+      policy.artifacts.technicalValidatorKey,
+      policy.artifacts.businessValidatorKey
+    ].filter(Boolean)) {
+      validatorBindings[validatorKey] = () => true;
+    }
+  }
+  const validatorRegistry = createStaticRegistry(validatorBindings).freeze();
   return createExecutionPolicyRegistry({
-    policies: [policy],
+    policies,
     entryRegistry,
     validatorRegistry,
     staticKeys: JSON.parse(fs.readFileSync(STATIC_KEY_FIXTURE, 'utf8')),
@@ -150,27 +166,35 @@ async function waitFor(predicate, label, timeoutMs = 3000) {
 }
 
 function writeStatement(filePath, rows) {
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+  writeWorkbook(filePath, [
     ['日期', '贷', '借', '币种', '账号'],
     ...rows
-  ]), 'Sheet1');
+  ]);
+}
+
+function writeWorkbook(filePath, rows) {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(rows), 'Sheet1');
   XLSX.writeFile(workbook, filePath);
 }
 
-function source(filePath) {
+function source(filePath, templateRef = 'direct', resourceId = path.basename(filePath)) {
   return {
-    resourceId: path.basename(filePath),
-    snapshot: sourceSnapshotFromStat(fs.lstatSync(filePath, { bigint: true }))
+    resourceId,
+    snapshot: sourceSnapshotFromStat(fs.statSync(filePath, { bigint: true })),
+    templateRef
   };
 }
 
-function privateSource(filePath) {
-  return { ...source(filePath), path: filePath };
+async function privateSource(filePath, templateRef = 'direct') {
+  return resolveStatementSourceIdentity(
+    source(filePath, templateRef),
+    filePath
+  );
 }
 
-function templateEvidence() {
-  return createStatementTemplateEvidence({
+function templateSnapshot(overrides = {}) {
+  return {
     templateId: 'template-direct',
     templateName: '测试银行-Direct',
     expectedSourceHeaders: ['日期', '贷', '借', '币种', '账号'],
@@ -191,23 +215,66 @@ function templateEvidence() {
     },
     amountSplitByField: null,
     billSplitMerge: null,
-    dateParseOrder: 'auto'
-  });
+    dateParseOrder: 'auto',
+    ...overrides
+  };
 }
 
-function executionRequest(input, ordinal) {
+function templateEvidence(overrides = {}) {
+  return createStatementTemplateEvidence(templateSnapshot(overrides));
+}
+
+function sessionOwner(overrides = {}) {
+  return {
+    sessionKey: 'template-direct',
+    templateId: 'template-direct',
+    templateName: '测试银行-Direct',
+    ...overrides
+  };
+}
+
+function templateCatalogEntry(templateRef, evidence) {
+  return createStatementTemplateCatalogEntry(templateRef, evidence.snapshot);
+}
+
+function importPayload(sources, evidence = templateEvidence(), options = {}) {
+  const defaultRef = options.templateRef || 'direct';
+  const templateCatalog = options.templateCatalog || [
+    templateCatalogEntry(defaultRef, evidence)
+  ];
+  return {
+    command: 'import',
+    sessionOwner: options.sessionOwner || sessionOwner({
+      sessionKey: options.sessionKey || evidence.snapshot.templateId,
+      templateId: options.ownerTemplateId || evidence.snapshot.templateId,
+      templateName: options.ownerTemplateName || evidence.snapshot.templateName
+    }),
+    sources: sources.map((item) => ({
+      ...item,
+      templateRef: item.templateRef || defaultRef
+    })),
+    templateCatalog
+  };
+}
+
+function normalizeTestInput(input) {
+  if (!input || input.command !== 'import' || !input.templateEvidence) return input;
+  return importPayload(input.sources, input.templateEvidence, { sessionKey: input.sessionKey });
+}
+
+function executionRequest(input, ordinal, actionKey = 'statement:import') {
   const operationKey = `statement-import-operation-${ordinal}`;
   return {
-    actionKey: 'statement:import',
+    actionKey,
     operationKey,
     jobId: `statement-import-job-${ordinal}`,
     production: false,
-    input,
+    input: normalizeTestInput(input),
     context: {
       kind: 'operation',
       value: {
         taskRunId: `statement-task-${ordinal}`,
-        taskKey: 'statement-import',
+        taskKey: actionKey,
         moduleId: 'statement',
         parentRunId: `statement-parent-${ordinal}`,
         operationKey
@@ -300,19 +367,15 @@ test('import result以entryCount保持跨1024文件session有界且不伪造文�
   assert.equal(Object.hasOwn(result.session, 'entryIds'), false);
 });
 
-test('import contract拒绝template篡改、重复resource与公开path/private rows', () => {
+test('import contract冻结session owner、template catalog/source ref并拒绝篡改与未知/重复ref', () => {
   const evidence = templateEvidence();
   const snapshot = { sizeBytes: 1, mtimeMs: 2, ctimeMs: 3, ino: '4' };
-  const input = {
-    command: 'import',
-    sessionKey: 'template-direct',
-    sources: [{ resourceId: 'source-1', snapshot }],
-    templateEvidence: evidence
-  };
+  const input = importPayload([{ resourceId: 'source-1', snapshot, templateRef: 'direct' }], evidence);
   assert.equal(createStatementImportRequest(input).sources[0].resourceId, 'source-1');
+  assert.equal(createStatementImportRequest(input).sessionOwner.sessionKey, 'template-direct');
 
   const tampered = structuredClone(input);
-  tampered.templateEvidence.snapshot.templateName = '被篡改模板';
+  tampered.templateCatalog[0].snapshot.templateName = '被篡改模板';
   assert.throws(
     () => createStatementImportRequest(tampered),
     (error) => error.code === 'STATEMENT_IMPORT_TEMPLATE_EVIDENCE_INVALID'
@@ -322,8 +385,8 @@ test('import contract拒绝template篡改、重复resource与公开path/private 
     () => createStatementImportRequest({
       ...input,
       sources: [
-        { resourceId: 'source-1', snapshot },
-        { resourceId: 'source-1', snapshot }
+        { resourceId: 'source-1', snapshot, templateRef: 'direct' },
+        { resourceId: 'source-1', snapshot, templateRef: 'direct' }
       ]
     }),
     (error) => error.code === 'STATEMENT_IMPORT_SOURCE_DUPLICATE'
@@ -332,7 +395,12 @@ test('import contract拒绝template篡改、重复resource与公开path/private 
   assert.throws(
     () => createStatementImportRequest({
       ...input,
-      sources: [{ resourceId: 'source-1', snapshot, path: '/private/source.xlsx' }]
+      sources: [{
+        resourceId: 'source-1',
+        snapshot,
+        templateRef: 'direct',
+        path: '/private/source.xlsx'
+      }]
     }),
     (error) => error.code === 'STATEMENT_IMPORT_KEYS_INVALID'
   );
@@ -343,6 +411,208 @@ test('import contract拒绝template篡改、重复resource与公开path/private 
     () => createStatementTemplateEvidence(privateTemplate),
     (error) => error.code === 'STATEMENT_IMPORT_PRIVATE_STATE_FORBIDDEN'
   );
+
+  assert.throws(
+    () => createStatementImportRequest({
+      ...input,
+      sources: [{ resourceId: 'source-1', snapshot, templateRef: 'missing' }]
+    }),
+    (error) => error.code === 'STATEMENT_IMPORT_TEMPLATE_REF_UNKNOWN'
+  );
+
+  assert.throws(
+    () => createStatementImportRequest({
+      ...input,
+      templateCatalog: [input.templateCatalog[0], input.templateCatalog[0]]
+    }),
+    (error) => error.code === 'STATEMENT_IMPORT_TEMPLATE_REF_DUPLICATE'
+  );
+
+  const reused = createStatementImportRequest({
+    ...input,
+    sources: [
+      { resourceId: 'source-1', snapshot, templateRef: 'direct' },
+      { resourceId: 'source-2', snapshot, templateRef: 'direct' }
+    ]
+  });
+  assert.equal(reused.templateCatalog.length, 1);
+  assert.deepEqual(reused.sources.map((item) => item.templateRef), ['direct', 'direct']);
+
+  assert.throws(
+    () => createStatementImportRequest({
+      ...input,
+      templateCatalog: [
+        input.templateCatalog[0],
+        { ...input.templateCatalog[0], templateRef: 'same-template-second-ref' }
+      ]
+    }),
+    (error) => error.code === 'STATEMENT_IMPORT_TEMPLATE_ID_DUPLICATE'
+  );
+});
+
+test('parent session同batch按source templateRef使用父子配置并保持来源顺序与golden', async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-e09-a-parent-child-'));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const parentPath = path.join(tempDir, 'parent.xlsx');
+  const childPath = path.join(tempDir, 'child.xlsx');
+  writeWorkbook(parentPath, [
+    ['父日期', '父贷', '父币', '父账号'],
+    ['2026-08-10', '12.5', '美元', ' P 001 ']
+  ]);
+  writeWorkbook(childPath, [
+    ['子日期', '子金额', '子币', '子账号'],
+    ['2026-08-11', '-7', '港币', ' C 001 ']
+  ]);
+  const parentEvidence = templateEvidence({
+    templateId: 'template-parent',
+    templateName: '测试银行-父模板',
+    expectedSourceHeaders: ['父日期', '父贷', '父币', '父账号'],
+    mappingByField: {
+      'Bill Date': '父日期',
+      'Credit Amount': '父贷',
+      'Debit Amount': '',
+      Currency: '父币',
+      MerchantId: '父账号'
+    },
+    currencyMappings: [{ aliases: ['美元'], englishCode: 'USD' }]
+  });
+  const childEvidence = templateEvidence({
+    templateId: 'template-child',
+    templateName: '测试银行-子模板',
+    expectedSourceHeaders: ['子日期', '子金额', '子币', '子账号'],
+    mappingByField: {
+      'Bill Date': '子日期',
+      Currency: '子币',
+      MerchantId: '子账号'
+    },
+    currencyMappings: [{ aliases: ['港币'], englishCode: 'HKD' }],
+    amountMappingRules: {
+      nameSourceField: '',
+      accountSourceField: '',
+      signedAmountSourceField: '子金额'
+    }
+  });
+  const state = createStatementServiceState(3);
+  const candidate = await buildStatementImportCandidate(state, importPayload([
+    await privateSource(parentPath, 'parent-ref'),
+    await privateSource(childPath, 'child-ref')
+  ], parentEvidence, {
+    sessionOwner: sessionOwner({
+      sessionKey: 'parent-session-key',
+      templateId: 'template-parent',
+      templateName: '测试银行-父模板'
+    }),
+    templateCatalog: [
+      templateCatalogEntry('parent-ref', parentEvidence),
+      templateCatalogEntry('child-ref', childEvidence)
+    ]
+  }));
+
+  const session = candidate.state.sessions.get('parent-session-key');
+  assert.equal(candidate.result.sessionKey, 'parent-session-key');
+  assert.equal(session.templateId, 'template-parent');
+  assert.deepEqual(session.fileEntries.map((entry) => entry.templateRef), [
+    'parent-ref',
+    'child-ref'
+  ]);
+  assert.deepEqual(session.fileEntries.map((entry) => entry.matchedTemplateId), [
+    'template-parent',
+    'template-child'
+  ]);
+  assert.deepEqual(session.batches[0].entryIds, session.fileEntries.map((entry) => entry.id));
+  assert.deepEqual(session.fileEntries[0].detailRows.slice(), [
+    ['Bill Date', 'Credit Amount', 'Debit Amount', 'Currency', 'MerchantId'],
+    ['2026-08-10', '12.5', '', 'USD', 'P001']
+  ]);
+  assert.deepEqual(session.fileEntries[1].detailRows.slice(), [
+    ['Bill Date', 'Credit Amount', 'Debit Amount', 'Currency', 'MerchantId'],
+    ['2026-08-11', '', '7', 'HKD', 'C001']
+  ]);
+  assert.deepEqual(
+    session.templateEvidenceByDigest.get(parentEvidence.digest),
+    parentEvidence.snapshot
+  );
+  assert.deepEqual(
+    session.templateEvidenceByDigest.get(childEvidence.digest),
+    childEvidence.snapshot
+  );
+});
+
+test('__FILENAME_MAPPING__ owner按source ref而非catalog顺序映射并保留matchedTemplateId', async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-e09-a-filename-map-'));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const alphaPath = path.join(tempDir, 'alpha.xlsx');
+  const betaPath = path.join(tempDir, 'beta.xlsx');
+  writeWorkbook(alphaPath, [
+    ['A日期', 'A贷', 'A币', 'A账号'],
+    ['2026-08-12', '88', '欧元', 'A 001']
+  ]);
+  writeWorkbook(betaPath, [
+    ['B日期', 'B金额', 'B币', 'B账号'],
+    ['2026-08-13', '-9', '日元', 'B 001']
+  ]);
+  const alphaEvidence = templateEvidence({
+    templateId: 'template-alpha',
+    templateName: '文件名模板-A',
+    expectedSourceHeaders: ['A日期', 'A贷', 'A币', 'A账号'],
+    mappingByField: {
+      'Bill Date': 'A日期',
+      'Credit Amount': 'A贷',
+      'Debit Amount': '',
+      Currency: 'A币',
+      MerchantId: 'A账号'
+    },
+    currencyMappings: [{ aliases: ['欧元'], englishCode: 'EUR' }]
+  });
+  const betaEvidence = templateEvidence({
+    templateId: 'template-beta',
+    templateName: '文件名模板-B',
+    expectedSourceHeaders: ['B日期', 'B金额', 'B币', 'B账号'],
+    mappingByField: {
+      'Bill Date': 'B日期',
+      Currency: 'B币',
+      MerchantId: 'B账号'
+    },
+    currencyMappings: [{ aliases: ['日元'], englishCode: 'JPY' }],
+    amountMappingRules: {
+      nameSourceField: '',
+      accountSourceField: '',
+      signedAmountSourceField: 'B金额'
+    }
+  });
+  const candidate = await buildStatementImportCandidate(
+    createStatementServiceState(4),
+    importPayload([
+      await privateSource(betaPath, 'beta-ref'),
+      await privateSource(alphaPath, 'alpha-ref')
+    ], alphaEvidence, {
+      sessionOwner: sessionOwner({
+        sessionKey: '__FILENAME_MAPPING__',
+        templateId: '__FILENAME_MAPPING__',
+        templateName: '按文件名映射模板'
+      }),
+      templateCatalog: [
+        templateCatalogEntry('alpha-ref', alphaEvidence),
+        templateCatalogEntry('beta-ref', betaEvidence)
+      ]
+    })
+  );
+
+  const session = candidate.state.sessions.get('__FILENAME_MAPPING__');
+  assert.deepEqual(session.fileEntries.map((entry) => entry.templateRef), [
+    'beta-ref',
+    'alpha-ref'
+  ]);
+  assert.deepEqual(session.fileEntries.map((entry) => entry.matchedTemplateId), [
+    'template-beta',
+    'template-alpha'
+  ]);
+  assert.deepEqual(session.fileEntries[0].detailRows.slice(1), [
+    ['2026-08-13', '', '9', 'JPY', 'B001']
+  ]);
+  assert.deepEqual(session.fileEntries[1].detailRows.slice(1), [
+    ['2026-08-12', '88', '', 'EUR', 'A001']
+  ]);
 });
 
 test('persistent reservation grant 与 adopt-ack 前 candidate 不产生可见状态', async (t) => {
@@ -523,6 +793,180 @@ test('canonical source alias 在读文件与 resource request 前 fail closed �
   assert.equal(harness.diagnostics.some((event) => event.type === 'service-fatal'), false);
 });
 
+test('source identity对batch/跨session别名与内容重复fail closed且不误拒独立来源', async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-e09-a-source-identity-'));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const originalPath = path.join(tempDir, 'source.xlsx');
+  const hardlinkPath = path.join(tempDir, 'hardlink.xlsx');
+  const symlinkPath = path.join(tempDir, 'symlink.xlsx');
+  const aliasDir = path.join(tempDir, 'directory-alias');
+  const contentCopyPath = path.join(tempDir, 'content-copy.xlsx');
+  const sameNameDir = path.join(tempDir, 'same-name');
+  const sameNamePath = path.join(sameNameDir, 'source.xlsx');
+  const caseNameDir = path.join(tempDir, 'case-name');
+  const caseNamePath = path.join(caseNameDir, 'SOURCE.XLSX');
+  const legitimatePath = path.join(tempDir, 'legitimate.xlsx');
+  writeStatement(originalPath, [['2026-08-01', 10, '', 'USD', 'M001']]);
+  fs.linkSync(originalPath, hardlinkPath);
+  fs.symlinkSync('source.xlsx', symlinkPath, 'file');
+  fs.symlinkSync('.', aliasDir, 'dir');
+  fs.copyFileSync(originalPath, contentCopyPath);
+  fs.mkdirSync(sameNameDir);
+  fs.mkdirSync(caseNameDir);
+  writeStatement(sameNamePath, [['2026-08-02', 20, '', 'EUR', 'M002']]);
+  writeStatement(caseNamePath, [['2026-08-03', 30, '', 'JPY', 'M003']]);
+  writeStatement(legitimatePath, [['2026-08-04', 40, '', 'HKD', 'M004']]);
+  const identityProbe = (await privateSource(originalPath)).sourceIdentity;
+  assert.deepEqual(Object.keys(identityProbe), [
+    'version',
+    'canonicalPathSha256',
+    'legacyBasenameSha256',
+    'deviceId',
+    'inode',
+    'fileIdReliable',
+    'sizeBytes',
+    'contentSha256'
+  ]);
+  assert.match(identityProbe.canonicalPathSha256, /^[0-9a-f]{64}$/);
+  assert.match(identityProbe.legacyBasenameSha256, /^[0-9a-f]{64}$/);
+  assert.match(identityProbe.contentSha256, /^[0-9a-f]{64}$/);
+  assert.equal(JSON.stringify(identityProbe).includes(tempDir), false);
+  assert.equal(JSON.stringify(identityProbe).includes('source.xlsx'), false);
+  assert.equal(JSON.stringify(identityProbe).includes('M001'), false);
+  const harness = createHarness({ sourceRoot: tempDir });
+  t.after(async () => { await harness.supervisor.shutdown({ forceServices: true, timeoutMs: 5000 }); });
+  const evidence = templateEvidence();
+  const resourceId = (filePath) => path.relative(tempDir, filePath);
+
+  async function assertRejected(input, ordinal, expectedCode, expectedRevision, expectedFileCount) {
+    const request = executionRequest(input, ordinal);
+    const failed = await harness.supervisor.execute(request);
+    assert.equal(failed.outcome, 'failed', ordinal);
+    assert.equal(failed.error.code, expectedCode, ordinal);
+    const jobTrace = harness.trace.filter((message) =>
+      message.jobId === request.jobId ||
+      (message.jobRef && message.jobRef.jobId === request.jobId));
+    assert.equal(jobTrace.some((message) => message.operation === 'resource:request'), false, ordinal);
+    assert.equal(jobTrace.some((message) => message.operation === 'resource:adopted'), false, ordinal);
+    const status = await harness.supervisor.execute(executionRequest(
+      { command: 'status' },
+      `${ordinal}-status`
+    ));
+    assert.equal(status.result.summary.serviceGeneration, 1, ordinal);
+    assert.equal(status.result.summary.sessionRevision, expectedRevision, ordinal);
+    assert.equal(status.result.summary.fileCount, expectedFileCount, ordinal);
+    return failed;
+  }
+
+  await assertRejected(importPayload([
+    source(originalPath, 'direct', resourceId(originalPath)),
+    source(hardlinkPath, 'direct', resourceId(hardlinkPath))
+  ], evidence), 'batch-hardlink', 'STATEMENT_SOURCE_FILE_ID_DUPLICATE', 0, 0);
+
+  const imported = await harness.supervisor.execute(executionRequest(importPayload([
+    source(originalPath, 'direct', resourceId(originalPath))
+  ], evidence), 'identity-initial'));
+  assert.equal(imported.outcome, 'completed');
+  assert.equal(imported.result.summary.sessionRevision, 1);
+  assert.deepEqual(imported.result.session.importedEntryIds, ['statement-entry-1-1']);
+  assert.equal(imported.result.session.currentBatchId, 'statement-batch-1-1');
+
+  for (const [ordinal, filePath, expectedCode] of [
+    ['file-symlink', symlinkPath, 'STATEMENT_SOURCE_CANONICAL_DUPLICATE'],
+    ['directory-symlink', path.join(aliasDir, 'source.xlsx'), 'STATEMENT_SOURCE_CANONICAL_DUPLICATE'],
+    ['same-content-copy', contentCopyPath, 'STATEMENT_SOURCE_CONTENT_DUPLICATE'],
+    ['same-basename', sameNamePath, 'STATEMENT_SOURCE_NAME_DUPLICATE'],
+    ['case-variant', caseNamePath, 'STATEMENT_SOURCE_NAME_DUPLICATE']
+  ]) {
+    await assertRejected(importPayload([
+      source(filePath, 'direct', resourceId(filePath))
+    ], evidence), ordinal, expectedCode, 1, 1);
+  }
+
+  await assertRejected(importPayload([
+    source(originalPath, 'direct', resourceId(originalPath))
+  ], evidence, {
+    sessionOwner: sessionOwner({
+      sessionKey: 'another-session',
+      templateId: 'another-owner',
+      templateName: '另一个父会话'
+    })
+  }), 'cross-session', 'STATEMENT_SOURCE_CANONICAL_DUPLICATE', 1, 1);
+
+  writeStatement(originalPath, [['2026-08-05', 500, '', 'CNY', 'M005']]);
+  await assertRejected(importPayload([
+    source(originalPath, 'direct', resourceId(originalPath))
+  ], evidence), 'source-replacement', 'STATEMENT_SOURCE_CANONICAL_DUPLICATE', 1, 1);
+
+  const legitimate = await harness.supervisor.execute(executionRequest(importPayload([
+    source(legitimatePath, 'direct', resourceId(legitimatePath))
+  ], evidence), 'legitimate-distinct'));
+  assert.equal(legitimate.outcome, 'completed');
+  assert.equal(legitimate.result.summary.sessionRevision, 2);
+  assert.equal(legitimate.result.summary.fileCount, 2);
+  assert.equal(legitimate.result.summary.rowCount, 2);
+  assert.equal(harness.diagnostics.some((event) => event.type === 'service-fatal'), false);
+});
+
+test('四个future action在解析payload与申请resource前返回bounded unsupported且不改变已有session', async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-e09-a-wrong-action-'));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const importedPath = path.join(tempDir, 'imported.xlsx');
+  const unreadPath = path.join(tempDir, 'must-not-read.xlsx');
+  writeStatement(importedPath, [['2026-08-01', 10, '', 'USD', 'M001']]);
+  writeStatement(unreadPath, [['2026-08-02', 20, '', 'EUR', 'M002']]);
+  const harness = createHarness({ sourceRoot: tempDir });
+  t.after(async () => { await harness.supervisor.shutdown({ forceServices: true, timeoutMs: 5000 }); });
+  const evidence = templateEvidence();
+  const imported = await harness.supervisor.execute(executionRequest(importPayload([
+    source(importedPath)
+  ], evidence), 'wrong-action-initial'));
+  assert.equal(imported.outcome, 'completed');
+  assert.equal(imported.result.summary.sessionRevision, 1);
+
+  const unreadSource = source(unreadPath);
+  fs.unlinkSync(unreadPath);
+  const wrongActions = [
+    ['statement:generate-current', importPayload([unreadSource], evidence)],
+    ['statement:generate-all', { command: 'status' }],
+    ['statement:resolve-big-account', { command: 'status', extra: 'must-not-parse' }],
+    ['statement:resolve-manual-balance', {
+      ...importPayload([unreadSource], evidence),
+      extra: { rows: [['must-not-parse']] }
+    }]
+  ];
+  for (const [index, [actionKey, input]] of wrongActions.entries()) {
+    const ordinal = `wrong-action-${index}`;
+    const request = executionRequest(input, ordinal, actionKey);
+    const failed = await harness.supervisor.execute(request);
+    assert.equal(failed.outcome, 'failed', actionKey);
+    assert.equal(failed.error.code, 'STATEMENT_ACTION_UNSUPPORTED', actionKey);
+    assert.ok(Buffer.byteLength(JSON.stringify(failed.error), 'utf8') < 4096, actionKey);
+    const jobTrace = harness.trace.filter((message) =>
+      message.jobId === request.jobId ||
+      (message.jobRef && message.jobRef.jobId === request.jobId));
+    assert.deepEqual(jobTrace.map((message) => message.operation), [
+      'job:start',
+      'job:error'
+    ], actionKey);
+    assert.equal(jobTrace.some((message) => message.operation === 'resource:request'), false, actionKey);
+    assert.equal(jobTrace.some((message) => message.operation === 'resource:adopted'), false, actionKey);
+  }
+
+  const status = await harness.supervisor.execute(executionRequest(
+    { command: 'status' },
+    'wrong-action-status'
+  ));
+  assert.equal(status.outcome, 'completed');
+  assert.equal(status.result.summary.serviceGeneration, 1);
+  assert.equal(status.result.summary.sessionRevision, 1);
+  assert.equal(status.result.summary.sessionCount, 1);
+  assert.equal(status.result.summary.fileCount, 1);
+  assert.equal(status.result.summary.rowCount, 1);
+  assert.equal(harness.diagnostics.some((event) => event.type === 'service-fatal'), false);
+  assert.equal(harness.diagnostics.some((event) => event.type === 'service-job-callback-error'), false);
+});
+
 test('E09-B 大账号交互上下文保持 blocked，不创建 token/DTO/本地 Map', async (t) => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-e09-a-blocked-'));
   t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
@@ -555,12 +999,11 @@ test('新 import candidate 清空旧 revision artifact qualification 与 future 
   const state = createStatementServiceState(7);
   state.artifactQualifications.set('revision-0/artifact', { qualified: true });
   state.futureTokenContext = { revision: 0, privateValue: 'blocked-seam' };
-  const candidate = await buildStatementImportCandidate(state, {
-    command: 'import',
-    sessionKey: 'template-direct',
-    sources: [privateSource(inputPath)],
-    templateEvidence: templateEvidence()
-  });
+  const evidence = templateEvidence();
+  const candidate = await buildStatementImportCandidate(
+    state,
+    importPayload([await privateSource(inputPath)], evidence)
+  );
   assert.equal(candidate.state.sessionRevision, 1);
   assert.equal(candidate.state.artifactQualifications.size, 0);
   assert.equal(candidate.state.futureTokenContext, null);

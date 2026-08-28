@@ -8,9 +8,10 @@ const {
   normalizeSourceSnapshot
 } = require('../archive-center/source-snapshot');
 
-const IMPORT_KEYS = Object.freeze(['command', 'sessionKey', 'sources', 'templateEvidence']);
-const SOURCE_KEYS = Object.freeze(['resourceId', 'snapshot']);
-const TEMPLATE_EVIDENCE_KEYS = Object.freeze(['digest', 'snapshot']);
+const IMPORT_KEYS = Object.freeze(['command', 'sessionOwner', 'sources', 'templateCatalog']);
+const SESSION_OWNER_KEYS = Object.freeze(['sessionKey', 'templateId', 'templateName']);
+const SOURCE_KEYS = Object.freeze(['resourceId', 'snapshot', 'templateRef']);
+const TEMPLATE_CATALOG_ENTRY_KEYS = Object.freeze(['templateRef', 'digest', 'snapshot']);
 const TEMPLATE_KEYS = Object.freeze([
   'templateId',
   'templateName',
@@ -26,6 +27,7 @@ const TEMPLATE_KEYS = Object.freeze([
 ]);
 const MAX_IMPORT_INPUT_BYTES = 1024 * 1024;
 const MAX_IMPORT_SOURCES = 1024;
+const MAX_TEMPLATE_CATALOG_ENTRIES = 1024;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const FORBIDDEN_TEMPLATE_STATE_KEYS = new Set([
   'detailRows',
@@ -68,6 +70,12 @@ function boundedText(value, label, maxLength = 512) {
   return value;
 }
 
+function templateIdentity(value, label) {
+  if (typeof value === 'string') return boundedText(value, label, 128);
+  if (Number.isSafeInteger(value) && value > 0) return String(value);
+  fail('STATEMENT_IMPORT_TEMPLATE_INVALID', `${label} must be a string or positive integer`);
+}
+
 function stringArray(value, label, maxLength) {
   if (!Array.isArray(value) || value.length > maxLength ||
       value.some((item) => typeof item !== 'string' || item.length === 0 || item.length > 512)) {
@@ -108,11 +116,7 @@ function createStatementTemplateSnapshot(input) {
   const value = canonicalJsonSnapshot(input, { maxBytes: MAX_IMPORT_INPUT_BYTES });
   const record = exactRecord(value, TEMPLATE_KEYS, 'StatementTemplateSnapshot');
   assertNoRetainedBusinessState(value, 'StatementTemplateSnapshot');
-  const templateId = typeof record.templateId === 'string'
-    ? boundedText(record.templateId, 'templateId', 128)
-    : (Number.isSafeInteger(record.templateId) && record.templateId > 0
-        ? String(record.templateId)
-        : fail('STATEMENT_IMPORT_TEMPLATE_INVALID', 'templateId must be a string or positive integer'));
+  const templateId = templateIdentity(record.templateId, 'templateId');
   const templateName = boundedText(record.templateName, 'templateName', 512);
   const expectedSourceHeaders = stringArray(
     record.expectedSourceHeaders,
@@ -166,13 +170,72 @@ function createStatementTemplateEvidence(snapshot) {
   });
 }
 
+function createStatementTemplateCatalogEntry(templateRef, snapshot) {
+  const evidence = createStatementTemplateEvidence(snapshot);
+  return Object.freeze({
+    templateRef: boundedText(templateRef, 'templateRef', 128),
+    digest: evidence.digest,
+    snapshot: evidence.snapshot
+  });
+}
+
 function createStatementImportRequest(input) {
   const value = canonicalJsonSnapshot(input, { maxBytes: MAX_IMPORT_INPUT_BYTES });
   const record = exactRecord(value, IMPORT_KEYS, 'StatementImportRequest');
   if (record.command !== 'import') {
     fail('STATEMENT_IMPORT_COMMAND_INVALID', 'Statement import command must be import');
   }
-  const sessionKey = boundedText(record.sessionKey, 'sessionKey', 512);
+  const owner = exactRecord(record.sessionOwner, SESSION_OWNER_KEYS, 'StatementSessionOwner');
+  const sessionOwner = Object.freeze({
+    sessionKey: boundedText(owner.sessionKey, 'sessionOwner.sessionKey', 512),
+    templateId: templateIdentity(owner.templateId, 'sessionOwner.templateId'),
+    templateName: boundedText(owner.templateName, 'sessionOwner.templateName', 512)
+  });
+  if (!Array.isArray(record.templateCatalog) || record.templateCatalog.length === 0 ||
+      record.templateCatalog.length > MAX_TEMPLATE_CATALOG_ENTRIES) {
+    fail(
+      'STATEMENT_IMPORT_TEMPLATE_CATALOG_INVALID',
+      'templateCatalog must contain 1..1024 entries'
+    );
+  }
+  const templateRefs = new Set();
+  const templateIds = new Set();
+  const templateCatalog = record.templateCatalog.map((item, index) => {
+    const evidence = exactRecord(
+      item,
+      TEMPLATE_CATALOG_ENTRY_KEYS,
+      `templateCatalog[${index}]`
+    );
+    const templateRef = boundedText(
+      evidence.templateRef,
+      `templateCatalog[${index}].templateRef`,
+      128
+    );
+    if (templateRefs.has(templateRef)) {
+      fail('STATEMENT_IMPORT_TEMPLATE_REF_DUPLICATE', `Duplicate templateRef: ${templateRef}`);
+    }
+    const templateSnapshot = createStatementTemplateSnapshot(evidence.snapshot);
+    if (templateIds.has(templateSnapshot.templateId)) {
+      fail(
+        'STATEMENT_IMPORT_TEMPLATE_ID_DUPLICATE',
+        `Duplicate templateId in templateCatalog: ${templateSnapshot.templateId}`
+      );
+    }
+    if (!SHA256_PATTERN.test(evidence.digest) ||
+        canonicalSha256(templateSnapshot) !== evidence.digest) {
+      fail(
+        'STATEMENT_IMPORT_TEMPLATE_EVIDENCE_INVALID',
+        `Template digest does not match snapshot for ${templateRef}`
+      );
+    }
+    templateRefs.add(templateRef);
+    templateIds.add(templateSnapshot.templateId);
+    return Object.freeze({
+      templateRef,
+      digest: evidence.digest,
+      snapshot: templateSnapshot
+    });
+  });
   if (!Array.isArray(record.sources) || record.sources.length === 0 ||
       record.sources.length > MAX_IMPORT_SOURCES) {
     fail('STATEMENT_IMPORT_SOURCES_INVALID', 'sources must contain 1..1024 resources');
@@ -181,8 +244,15 @@ function createStatementImportRequest(input) {
   const sources = record.sources.map((source, index) => {
     const item = exactRecord(source, SOURCE_KEYS, `sources[${index}]`);
     const resourceId = boundedText(item.resourceId, `sources[${index}].resourceId`, 256);
+    const templateRef = boundedText(item.templateRef, `sources[${index}].templateRef`, 128);
     if (resourceIds.has(resourceId)) {
       fail('STATEMENT_IMPORT_SOURCE_DUPLICATE', `Duplicate resourceId: ${resourceId}`);
+    }
+    if (!templateRefs.has(templateRef)) {
+      fail(
+        'STATEMENT_IMPORT_TEMPLATE_REF_UNKNOWN',
+        `sources[${index}].templateRef is not in templateCatalog`
+      );
     }
     resourceIds.add(resourceId);
     const snapshot = normalizeSourceSnapshot(item.snapshot);
@@ -191,29 +261,22 @@ function createStatementImportRequest(input) {
     }
     return Object.freeze({
       resourceId,
-      snapshot: Object.freeze({ ...snapshot })
+      snapshot: Object.freeze({ ...snapshot }),
+      templateRef
     });
   });
-  const evidence = exactRecord(
-    record.templateEvidence,
-    TEMPLATE_EVIDENCE_KEYS,
-    'StatementTemplateEvidence'
-  );
-  const templateSnapshot = createStatementTemplateSnapshot(evidence.snapshot);
-  if (!SHA256_PATTERN.test(evidence.digest) || canonicalSha256(templateSnapshot) !== evidence.digest) {
-    fail('STATEMENT_IMPORT_TEMPLATE_EVIDENCE_INVALID', 'Template digest does not match snapshot');
-  }
-  if (sessionKey !== templateSnapshot.templateId) {
-    fail('STATEMENT_IMPORT_SESSION_TEMPLATE_MISMATCH', 'sessionKey must equal templateId');
+  const usedTemplateRefs = new Set(sources.map((source) => source.templateRef));
+  if (usedTemplateRefs.size !== templateCatalog.length) {
+    fail(
+      'STATEMENT_IMPORT_TEMPLATE_CATALOG_UNUSED',
+      'Every templateCatalog entry must be referenced by at least one source'
+    );
   }
   return Object.freeze({
     command: 'import',
-    sessionKey,
+    sessionOwner,
     sources: Object.freeze(sources),
-    templateEvidence: Object.freeze({
-      digest: evidence.digest,
-      snapshot: templateSnapshot
-    })
+    templateCatalog: Object.freeze(templateCatalog)
   });
 }
 
@@ -239,10 +302,12 @@ function createStatementServiceRequest(input) {
 
 module.exports = {
   MAX_IMPORT_INPUT_BYTES,
+  MAX_TEMPLATE_CATALOG_ENTRIES,
   StatementImportContractError,
   createStatementImportRequest,
   createStatementServiceRequest,
   createStatementStatusRequest,
+  createStatementTemplateCatalogEntry,
   createStatementTemplateEvidence,
   createStatementTemplateSnapshot
 };

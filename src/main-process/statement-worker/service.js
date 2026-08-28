@@ -1,7 +1,6 @@
 'use strict';
 
 const { createHash } = require('node:crypto');
-const path = require('node:path');
 
 const { createCanonicalEventEmitter } = require('../background-execution/adapters/canonical-event-emitter');
 const { toProtocolError } = require('../background-execution/error-codec');
@@ -17,6 +16,10 @@ const {
 } = require('./contracts');
 const { createStatementServiceRequest } = require('./import-contracts');
 const { estimateStatementServiceStateFootprint } = require('./state-footprint');
+const {
+  createStatementSourceIdentityGuard,
+  resolveStatementSourceIdentity
+} = require('./source-identity');
 const {
   buildStableSummary,
   buildStatementImportCandidate,
@@ -117,36 +120,40 @@ function createStatementService(options = {}) {
     throw new StatementServiceError('STATEMENT_IMPORT_CANCELLED', 'Statement import cancelled before adoption');
   }
 
-  function resolvePrivateSources(request) {
+  async function resolvePrivateSources(request, job) {
     if (typeof options.resolveSourceResource !== 'function') {
       throw new StatementServiceError(
         'STATEMENT_SOURCE_RESOURCE_UNAVAILABLE',
         'Statement source resource resolver is unavailable'
       );
     }
-    const canonicalPaths = new Set();
-    return Object.freeze(request.sources.map((source) => {
+    const sources = [];
+    const identityGuard = createStatementSourceIdentityGuard(state);
+    for (const source of request.sources) {
+      assertNotCancelled(job);
       const resolved = options.resolveSourceResource(source.resourceId);
-      if (typeof resolved !== 'string' || resolved.length === 0) {
+      const resolution = typeof resolved === 'string'
+        ? { path: resolved, legacyPath: resolved, allowedRoot: null }
+        : resolved;
+      if (!resolution || typeof resolution !== 'object' ||
+          typeof resolution.path !== 'string' || resolution.path.length === 0 ||
+          typeof resolution.legacyPath !== 'string' || resolution.legacyPath.length === 0 ||
+          (resolution.allowedRoot !== null &&
+            (typeof resolution.allowedRoot !== 'string' || resolution.allowedRoot.length === 0))) {
         throw new StatementServiceError(
           'STATEMENT_SOURCE_RESOURCE_UNAVAILABLE',
           'Statement source resource identity is unavailable'
         );
       }
-      const canonicalPath = path.resolve(resolved);
-      if (canonicalPaths.has(canonicalPath)) {
-        throw new StatementServiceError(
-          'STATEMENT_SOURCE_CANONICAL_DUPLICATE',
-          'Statement source resources must resolve to distinct canonical paths'
-        );
-      }
-      canonicalPaths.add(canonicalPath);
-      return Object.freeze({
-        resourceId: source.resourceId,
-        path: canonicalPath,
-        snapshot: source.snapshot
+      const privateSource = await resolveStatementSourceIdentity(source, resolution.path, {
+        allowedRoot: resolution.allowedRoot,
+        legacyPath: resolution.legacyPath,
+        assertNotCancelled: () => assertNotCancelled(job)
       });
-    }));
+      identityGuard.accept(privateSource);
+      sources.push(privateSource);
+    }
+    return Object.freeze(sources);
   }
 
   async function beginJob(start) {
@@ -168,6 +175,12 @@ function createStatementService(options = {}) {
     };
     activeJob = job;
     try {
+      if (start.actionKey !== 'statement:import') {
+        throw new StatementServiceError(
+          'STATEMENT_ACTION_UNSUPPORTED',
+          'E09-A Statement Service only supports statement:import'
+        );
+      }
       const request = createStatementServiceRequest(start.payload.input);
       if (request.command === 'status') {
         const summary = createStatementStatusDto({
@@ -182,7 +195,7 @@ function createStatementService(options = {}) {
       assertNotCancelled(job);
       const privateRequest = Object.freeze({
         ...request,
-        sources: resolvePrivateSources(request)
+        sources: await resolvePrivateSources(request, job)
       });
       const candidate = await buildStatementImportCandidate(state, privateRequest, {
         assertNotCancelled: () => assertNotCancelled(job)
