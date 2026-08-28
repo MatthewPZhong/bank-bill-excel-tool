@@ -30,6 +30,7 @@ class StatementTokenStoreError extends Error {
 
 const BIG_ACCOUNT_CHOICE_KEYS = Object.freeze(['mode', 'assignments']);
 const BIG_ACCOUNT_ASSIGNMENT_KEYS = Object.freeze(['rowIndex', 'merchantId', 'currency']);
+const SCOPE_GENERATION_CHOICE_KEYS = Object.freeze(['kind', 'scope', 'inputEvidenceHash']);
 
 function hasExactKeys(value, keys) {
   return value && typeof value === 'object' && !Array.isArray(value) &&
@@ -127,6 +128,29 @@ function createStatementTokenStore(options = {}) {
     return canonicalJsonSnapshot({ mode: choice.mode, assignments }, { maxBytes: 1024 * 1024 });
   }
 
+  function claimScopeGenerationChoice(input, choiceDomain) {
+    let choice;
+    try {
+      choice = canonicalJsonSnapshot(input, { maxBytes: 64 * 1024 });
+    } catch (_error) {
+      fail('STATEMENT_TOKEN_CHOICE_INVALID', 'Statement generation choice is not an exact bounded value');
+    }
+    if (!hasExactKeys(choice, SCOPE_GENERATION_CHOICE_KEYS) ||
+        !choiceDomain || typeof choiceDomain !== 'object' ||
+        choice.kind !== choiceDomain.kind ||
+        !Array.isArray(choiceDomain.scopes) || !choiceDomain.scopes.includes(choice.scope) ||
+        choice.inputEvidenceHash !== choiceDomain.inputEvidenceHash) {
+      fail('STATEMENT_TOKEN_CHOICE_INVALID', 'Statement generation choice is not allowed');
+    }
+    return choice;
+  }
+
+  function claimChoice(input, choiceDomain, purpose) {
+    if (purpose === 'big-account') return claimBigAccountChoice(input, choiceDomain);
+    if (purpose === 'scope-generation') return claimScopeGenerationChoice(input, choiceDomain);
+    fail('STATEMENT_TOKEN_CHOICE_INVALID', 'Statement token purpose has no choice authority');
+  }
+
   function insertPrivate(draft, grant) {
     if (records.has(draft.tokenId) || records.size >= maxOutstanding) {
       fail('STATEMENT_TOKEN_LIMIT_EXCEEDED', 'Statement token cannot be inserted');
@@ -190,7 +214,7 @@ function createStatementTokenStore(options = {}) {
     if (canonicalSha256(expected.choiceDomain) !== handle.allowedChoiceDigest) {
       fail('STATEMENT_TOKEN_CHOICE_DOMAIN_STALE', 'Statement token choice domain changed');
     }
-    const claimedChoice = claimBigAccountChoice(expected.choice, expected.choiceDomain);
+    const claimedChoice = claimChoice(expected.choice, expected.choiceDomain, handle.purpose);
     record.claimedChoice = claimedChoice;
     record.state = 'consuming';
     return record;

@@ -371,7 +371,12 @@ function createStatementService(options = {}) {
           purpose: 'scope-generation',
           sessionKey: request.sessionKey,
           evidence: privateEvidence,
-          choiceDomain: pendingToken.privateContext.choiceDomain
+          choiceDomain: pendingToken.privateContext.choiceDomain,
+          choice: {
+            kind: request.kind,
+            scope,
+            inputEvidenceHash: pendingToken.privateContext.choiceDomain.inputEvidenceHash
+          }
         });
         Object.assign(job, { kind: 'generation', tokenRecord });
         await new Promise((resolve) => setImmediate(resolve));

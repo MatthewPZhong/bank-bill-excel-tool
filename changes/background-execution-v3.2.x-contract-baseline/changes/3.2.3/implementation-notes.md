@@ -11,7 +11,7 @@
 ### Goal / Context / Constraints / Done when
 
 - Goal: 实现 `statement:generate-current` / `statement:generate-all` 的 dormant canonical execution。
-- Context: E09-P0/A/B 已冻结 DTO、Service session、token reservation 与 waiting-user 生命周期；当前 HEAD 是 `654393e9a24c772f51db9114888a2114382ce39d`。
+- Context: E09-P0/A/B 已冻结 DTO、Service session、token reservation 与 waiting-user 生命周期；本轮 restack exact base 是 `eaff95d6558fed0a00c07b071d3ae88863cf4d71`。
 - Constraints: 不接 live Renderer/IPC，不启用 production，不实现 E09-D manual seed settlement 或 E10；不把 detail rows/prepared batch/大 workbook 状态带回 Main；warning 与业务顺序保持 legacy。
 - Done when: 真实临时 XLSX/SQLite/worker/service 链路、current/all 与四金额/余额 golden、artifact tamper/all-or-none/crash-cleanup 等专项证据及 E09-P0/A/B/platform 回归通过。
 
@@ -22,6 +22,7 @@
 | worker 如何只写 task staging | PROBE | generation helper 的 `buildStatementOutputFilePath` 是注入依赖 | worker 绑定 staging output planner；请求不允许 final target |
 | Main all-or-none Publisher 能力 | PROBE → CLOSED | `toolbox-output-publication.js` 的 prepare/publish/dispose 与 journal fault tests | 复用既有 journal Publisher；全部 technical/business readback 先完成，Publisher 只调用一次 |
 | generation token、revision、input evidence 的绑定形态 | PROBE → CLOSED | E09-B token store、Service 私有 session、import template/source evidence | scope prompt token 私有绑定 current/all 两个 evidence hash；continuation 按实际 action scope 复核，再 single-use consume |
+| parent/child/filename 多模板 session 的 generation authority | PROBE → CLOSED | E09-A 已冻结逐 source `templateRef/templateDigest` lineage；真实 filename owner current/all mixed-template golden | `generationConfigByDigest` 是 Worker session 内唯一累积 authority；entry 必须按自己的 digest 命中，unknown/missing fail closed，不回退 owner/最近模板或建立第二 config authority |
 | manual balance prompt | BLOCK for E09-D, observable in E09-C | Spec 明确 E09-D 后续；legacy helper 以 warning 返回 prompt | E09-C 仅返回 bounded warning summary 并拒绝发布不完整 artifact set，不写 seed、不结算 prompt |
 
 ## Decisions
@@ -37,6 +38,7 @@
 | Main descriptor 以 cell-contract digest 绑定 writer 持久化语义 | Round 2 证明业务值 digest 会把非特殊字段的 string/number 归一为同值，且原 style gate 未覆盖 data font 与 header bold/color | 把 raw rows/完整 style XML 放入 descriptor，或校验 XF id/apply flags 等默认噪声 | descriptor 只增加定长 `cellCount/cellsSha256`；逐格绑定 writer 实际 t/z 和有意义 style，仍不携带 raw rows |
 | style evidence 按 workbook relationship 解析实际 worksheet part | Round 3 证明硬编码 `sheet1.xml` 与正则扫描任意 `<c>` 可被 relationship decoy、注释和属性语法旁路 | 继续硬编码 part、扩大 raw XF 摘要或引入第二套 ZIP reader | 复用现有 `sax` 结构化解析 `workbook.xml`/rels/`worksheet/sheetData/row/c`；重复坐标及显式 style 不可解析时 fail closed，只有缺失 `s` 使用 style 0 |
 | workbook 公式使用单一 sheet-wide gate | 原实现只在 data record loop 检查 `cell.f`，header 正确缓存值可旁路 | 在每类 header/data validator 分散补检查 | bounded range 确认后统一拒绝所有正式输出 cell 的 formula，再执行业务 readback |
+| mixed-template generation 按 entry digest 解析配置并按 legacy template group 串行生成 | E09-A parent/child 与 filename owner 允许同 session 多模板；live filename path 以模板首次出现顺序分组，组内保持来源顺序后再合并 workbook | 复用 owner config、最近 config、或为 generation 再建 filename fallback | 金额/币种/银行/所在地/余额使用各 child snapshot；current/all 保持 legacy 的模板分组/组内顺序，calculated/statement 余额可在同 template 的多 entry 间连续推导 |
 
 ## Assumptions
 
@@ -101,18 +103,37 @@ font 摘要只在 normalized/expected 两侧加入 legacy writer 已持久化为
 及 production=false/legacy/0 均保持不变。Round 3 没有改变用户可见行为、数据契约或验收口径，
 因此无 spec/techdoc 偏差。
 
+### E09-A/B restack adaptation
+
+新 lineage 将 import authority 冻结为 `sessionOwner + templateCatalog + source.templateRef`，并把
+source evidence 拆成带路径/内容身份的 `sourceIdentity` 与资源句柄 `sourceEvidence`。E09-C restack
+据此修正两项可达偏差：generation input evidence 的 `resourceId` 必须取
+`sourceEvidence.resourceId`；generation 前必须复核 canonical path/file identity/snapshot 与完整
+content SHA-256，不能仅比较可被同大小/时间戳替换绕过的 metadata。
+
+同一 filename parent session 可能跨 batch 使用不同 child template，故 session adoption 对
+`generationConfigByDigest` 与 `templateEvidenceByDigest` 都做累积保留；新 batch 未再次携带的旧
+digest 仍为旧 entry 的唯一 authority。真实 current/all golden 以 A-B-A 输入、A-A-B 输出证明
+legacy 的模板首次出现顺序与组内来源顺序；余额按各 child 的银行/所在地、账户、币种和余额合同
+生成。任何 entry
+digest unknown/missing 都在写 artifact 前 fail closed；没有 owner/最近模板 fallback，也没有把
+大状态返回 Main。scope-generation token 继续由同一 token store 原子校验 exact
+`kind/scope/inputEvidenceHash` choice 后 single-use consume。
+
 除上述合同澄清外无业务偏差；production policy、manual seed 与 live IPC 范围均不变。
 
 ## Evidence
 
 | 证据 | 结果 | 覆盖的行为/风险 |
 | --- | --- | --- |
-| `git merge-base HEAD 654393e9...` / reviewer rework parents | merge-base `654393e9a24c772f51db9114888a2114382ce39d`；Round 1 parent `78d9a19777e9680907413194195a00741c6037f2`；Round 2 parent `3edd474c15d40c8a1187b60760f9054cb92593df` | 精确 base/堆叠边界 |
-| E09-C 专项 `node --test ...statement-generation-e09-c.test.js ...error-codec.test.js` | 20/20 PASS | 真实 Supervisor/ServiceHost/Worker、临时 XLSX/SQLite、current/all、stale/replay/revision/evidence、Round 1/2/3 findings、tamper、all-or-none、四金额、混币余额、0 输出、partial writer、manual prompt、bounded manifest |
+| E09-C restack lineage | exact base/merge-base `eaff95d6558fed0a00c07b071d3ae88863cf4d71`；旧 E09-C 四个提交按序 cherry-pick 后适配 E09-A/B 最新 lineage | 精确 base/堆叠边界；不携带旧 base |
+| restack E09-C/A/B/P0 聚焦矩阵 | 60/60 PASS；filename parent multi-template golden 单项 PASS | current/all、child digest authority、filename owner、四金额/币种/余额、A-B-A 输入按 legacy 模板串行分组输出 A-A-B、token/revision/evidence/single-use、Publisher/cleanup |
+| E09-C 专项 `node --test ...statement-generation-e09-c.test.js` | 13/13 PASS；其中 filename parent multi-template golden 单项复跑 PASS | 真实 Supervisor/ServiceHost/Worker、临时 XLSX/SQLite、current/all、stale/replay/revision/evidence、Round 1/2/3 findings、tamper、all-or-none、四金额、混币余额、0 输出、partial writer、manual prompt、bounded manifest |
 | Round 2/3 自洽 workbook mutations | formula、type/format、font 及其四个扩展布尔、single-quote style、comment spoof、relationship decoy、duplicate coordinate、非法显式 style 全部 Publisher=0 | 实际 worksheet relationship/结构化 cell style、全 grid t/z 与 writer-owned font 摘要 readback；manifest size/hash/rowCounts 均按篡改后文件重算 |
-| E09-P0/A/B + Supervisor/ServiceHost/Governor 聚焦回归 | 228/228 PASS | 既有 token/session/取消/crash/资源生命周期、legacy golden 与 dormant policy 基线 |
+| E09-P0 platform + Supervisor/ServiceHost/Governor 聚焦回归 | 206/206 PASS | 既有 token/session/取消/crash/资源生命周期、Worker/Main bounded state 与 dormant policy 基线 |
 | `node scripts/integration/statement-generation-pipeline.js` | 45/45 PASS | legacy generation pipeline 业务等价 |
 | `npm run test:integration` | 51/51 scripts、2455/2455 PASS | 全仓集成、Publisher/cleanup 与资金相关输出回归；runner 自动清单的本地耗时刷新已回退，不纳入 change |
+| `npm run smoke` | PASS | Excel/账单 I/O、scenario engines、writer 与主业务 smoke 回归 |
 | 全量 `npm run test:unit` | 6246 PASS，2 FAIL，3 SKIP（6251 total） | 两个失败均为 `windows-build-contract.test.js` 直接读取隔离 worktree 缺失的 `node_modules/app-builder-lib/templates/nsis/multiUser.nsh`；共享安装为 26.8.1、lockfile 为 26.15.7，属于既有依赖环境漂移，未改依赖掩盖 |
 | changed JS ESLint + `node --check` + parent/overall `git diff --check` | PASS | 静态质量与 diff 完整性 |
 | `statement-legacy-golden-e09-p0.test.js` 与真实 descriptor readback | current/all、四金额、混合币种/余额、manual prompt、sheet/header/type/style/watermark/template lineage 已冻结且回归通过 | 业务等价与资金输出防冒充基线 |

@@ -40,6 +40,7 @@ const {
   createStatementFinanceSafeValueDelegate
 } = require('../../../src/main-process/statement-worker/contracts');
 const {
+  createStatementTemplateCatalogEntry,
   createStatementTemplateEvidence
 } = require('../../../src/main-process/statement-worker/import-contracts');
 const {
@@ -204,14 +205,75 @@ function generationResult({
   };
 }
 
-function source(filePath) {
+function source(filePath, templateRef = 'direct') {
   return {
     resourceId: path.basename(filePath),
-    snapshot: sourceSnapshotFromStat(fs.lstatSync(filePath, { bigint: true }))
+    snapshot: sourceSnapshotFromStat(fs.lstatSync(filePath, { bigint: true })),
+    templateRef
   };
 }
 
-function templateEvidence() {
+function generationSourceIdentity(filePath) {
+  const realPath = fs.realpathSync(filePath);
+  const stat = fs.statSync(realPath, { bigint: true });
+  const digest = (value) => crypto.createHash('sha256').update(value).digest('hex');
+  const comparablePath = realPath.normalize('NFC').replace(/\\/g, '/').toLowerCase();
+  const comparableBasename = path.basename(realPath).normalize('NFC').toLowerCase();
+  const deviceId = String(stat.dev);
+  const inode = String(stat.ino);
+  return {
+    version: 1,
+    canonicalPathSha256: digest(comparablePath),
+    legacyBasenameSha256: digest(comparableBasename),
+    deviceId,
+    inode,
+    fileIdReliable: deviceId !== '0' || inode !== '0',
+    sizeBytes: Number(stat.size),
+    contentSha256: digest(fs.readFileSync(realPath))
+  };
+}
+
+function generationEntry({
+  id,
+  filePath,
+  detailRows,
+  templateDigest = 'f'.repeat(64),
+  templateRef = 'direct'
+}) {
+  return {
+    id,
+    filePath: fs.realpathSync(filePath),
+    detailRows,
+    templateDigest,
+    templateRef,
+    sourceIdentity: generationSourceIdentity(filePath),
+    sourceEvidence: {
+      resourceId: path.basename(filePath),
+      snapshot: sourceSnapshotFromStat(fs.statSync(filePath, { bigint: true }))
+    }
+  };
+}
+
+function generationSession(config, templateDigest = 'f'.repeat(64)) {
+  return {
+    generationConfigByDigest: new Map([[templateDigest, config]])
+  };
+}
+
+function importInput(filePath, evidence) {
+  return {
+    command: 'import',
+    sessionOwner: {
+      sessionKey: 'template-e09-c',
+      templateId: 'template-e09-c',
+      templateName: '中行-上海'
+    },
+    sources: [source(filePath)],
+    templateCatalog: [createStatementTemplateCatalogEntry('direct', evidence.snapshot)]
+  };
+}
+
+function templateEvidence(overrides = {}) {
   return createStatementTemplateEvidence({
     templateId: 'template-e09-c',
     templateName: '中行-上海',
@@ -229,7 +291,8 @@ function templateEvidence() {
     amountMappingRules: { nameSourceField: '', accountSourceField: '', signedAmountSourceField: '' },
     amountSplitByField: null,
     billSplitMerge: null,
-    dateParseOrder: 'auto'
+    dateParseOrder: 'auto',
+    ...overrides
   });
 }
 
@@ -340,12 +403,11 @@ test('真实 Supervisor/ServiceHost/Worker 以token+revision+evidence生成curre
   t.after(async () => supervisor.shutdown({ forceServices: true, timeoutMs: 5000 }));
   const evidence = templateEvidence();
   for (const [index, filePath] of [first, second].entries()) {
-    const imported = await supervisor.execute(request('statement:import', {
-      command: 'import',
-      sessionKey: 'template-e09-c',
-      sources: [source(filePath)],
-      templateEvidence: evidence
-    }, index + 1));
+    const imported = await supervisor.execute(request(
+      'statement:import',
+      importInput(filePath, evidence),
+      index + 1
+    ));
     assert.equal(imported.outcome, 'completed');
   }
 
@@ -439,6 +501,155 @@ test('真实 Supervisor/ServiceHost/Worker 以token+revision+evidence生成curre
     .map((row) => ({ ...row })), [
     { scope: 'all', row_count: 2 },
     { scope: 'current', row_count: 1 }
+  ]);
+});
+
+test('filename parent session按child template digest生成混合明细与余额golden且不退化到owner配置', async (t) => {
+  const root = tempRoot(t);
+  const staging = path.join(root, 'staging');
+  const storage = path.join(root, 'storage');
+  fs.mkdirSync(staging);
+  fs.mkdirSync(storage);
+  const alphaPath = writeRows(path.join(root, 'alpha.xlsx'), [
+    ['A日期', 'A贷', 'A借', 'A币种', 'A账号', 'A余额'],
+    ['2026-08-20', 120, '', 'USD', 'A001', 1120]
+  ]);
+  const betaPath = writeRows(path.join(root, 'beta.xlsx'), [
+    ['B日期', 'B贷', 'B借', 'B币种', 'B账号', 'B余额'],
+    ['2026-08-21', '', 30, 'EUR', 'B001', 970]
+  ]);
+  const alphaSecondPath = writeRows(path.join(root, 'alpha-second.xlsx'), [
+    ['A日期', 'A贷', 'A借', 'A币种', 'A账号', 'A余额'],
+    ['2026-08-22', 80, '', 'USD', 'A001', 1200]
+  ]);
+  const orderedTargetFields = DETAIL_HEADERS.concat('Balance');
+  const alphaEvidence = templateEvidence({
+    templateId: 'template-alpha',
+    templateName: '中行-上海',
+    expectedSourceHeaders: ['A日期', 'A贷', 'A借', 'A币种', 'A账号', 'A余额'],
+    orderedTargetFields,
+    mappingByField: {
+      BillDate: 'A日期',
+      'Credit Amount': 'A贷',
+      'Debit Amount': 'A借',
+      Currency: 'A币种',
+      MerchantId: 'A账号',
+      Balance: 'A余额'
+    }
+  });
+  const betaEvidence = templateEvidence({
+    templateId: 'template-beta',
+    templateName: '汇丰-香港',
+    expectedSourceHeaders: ['B日期', 'B贷', 'B借', 'B币种', 'B账号', 'B余额'],
+    orderedTargetFields,
+    mappingByField: {
+      BillDate: 'B日期',
+      'Credit Amount': 'B贷',
+      'Debit Amount': 'B借',
+      Currency: 'B币种',
+      MerchantId: 'B账号',
+      Balance: 'B余额'
+    }
+  });
+  const supervisor = harness({
+    statementSourceRoot: root,
+    statementStagingRoot: staging,
+    statementStorageRoot: storage,
+    statementBalanceTemplatePath: BALANCE_TEMPLATE_PATH
+  });
+  t.after(async () => supervisor.shutdown({ forceServices: true, timeoutMs: 5000 }));
+  const imported = await supervisor.execute(request('statement:import', {
+    command: 'import',
+    sessionOwner: {
+      sessionKey: '__FILENAME_MAPPING__',
+      templateId: '__FILENAME_MAPPING__',
+      templateName: '按文件名映射模板'
+    },
+    sources: [source(alphaPath, 'alpha-ref'), source(betaPath, 'beta-ref')],
+    templateCatalog: [
+      createStatementTemplateCatalogEntry('alpha-ref', alphaEvidence.snapshot),
+      createStatementTemplateCatalogEntry('beta-ref', betaEvidence.snapshot)
+    ]
+  }, 101));
+  assert.equal(imported.outcome, 'completed', JSON.stringify(imported));
+  const prepared = await supervisor.execute(request('statement:generate-current', {
+    command: 'prepare-generation',
+    sessionKey: '__FILENAME_MAPPING__',
+    kind: 'both'
+  }, 102));
+  assert.equal(prepared.outcome, 'completed', JSON.stringify(prepared));
+  const generated = await supervisor.execute(request('statement:generate-current', {
+    command: 'generate',
+    token: tokenFrom(prepared.result.interaction),
+    sessionKey: '__FILENAME_MAPPING__',
+    sessionRevision: 1,
+    kind: 'both',
+    artifacts: [
+      { kind: 'detail', artifactKey: 'artifact-mixed-detail', stagingResourceId: 'mixed/detail.xlsx' },
+      { kind: 'balance', artifactKey: 'artifact-mixed-balance', stagingResourceId: 'mixed/balance.xlsx' }
+    ]
+  }, 103));
+  assert.equal(generated.outcome, 'completed', JSON.stringify(generated));
+  assert.deepEqual(outputRows(generated.result.artifacts[0].generationPath), [
+    [46254, 'A001', 'USD', 120, ''],
+    [46255, 'B001', 'EUR', '', 30]
+  ]);
+  const balanceRows = outputRows(generated.result.artifacts[1].generationPath);
+  assert.deepEqual(balanceRows.map((row) => [row[0], row[1], row[2], row[3], row[4], row[7]]), [
+    ['中行', '上海', 'USD', 'A001', 46254, 1120],
+    ['汇丰', '香港', 'EUR', 'B001', 46255, 970]
+  ]);
+  assert.deepEqual(generated.result.artifacts.map((artifact) => artifact.rowCounts), [
+    { input: 2, output: 2 },
+    { input: 2, output: 2 }
+  ]);
+
+  const importedSecond = await supervisor.execute(request('statement:import', {
+    command: 'import',
+    sessionOwner: {
+      sessionKey: '__FILENAME_MAPPING__',
+      templateId: '__FILENAME_MAPPING__',
+      templateName: '按文件名映射模板'
+    },
+    sources: [source(alphaSecondPath, 'alpha-ref')],
+    templateCatalog: [createStatementTemplateCatalogEntry('alpha-ref', alphaEvidence.snapshot)]
+  }, 104));
+  assert.equal(importedSecond.outcome, 'completed', JSON.stringify(importedSecond));
+  const preparedAll = await supervisor.execute(request('statement:generate-all', {
+    command: 'prepare-generation',
+    sessionKey: '__FILENAME_MAPPING__',
+    kind: 'both'
+  }, 105));
+  assert.equal(preparedAll.outcome, 'completed', JSON.stringify(preparedAll));
+  const generatedAll = await supervisor.execute(request('statement:generate-all', {
+    command: 'generate',
+    token: tokenFrom(preparedAll.result.interaction),
+    sessionKey: '__FILENAME_MAPPING__',
+    sessionRevision: 2,
+    kind: 'both',
+    artifacts: [
+      { kind: 'detail', artifactKey: 'artifact-all-detail', stagingResourceId: 'all-mixed/detail.xlsx' },
+      { kind: 'balance', artifactKey: 'artifact-all-balance', stagingResourceId: 'all-mixed/balance.xlsx' }
+    ]
+  }, 106));
+  assert.equal(generatedAll.outcome, 'completed', JSON.stringify(generatedAll));
+  assert.deepEqual(outputRows(generatedAll.result.artifacts[0].generationPath), [
+    [46254, 'A001', 'USD', 120, ''],
+    [46256, 'A001', 'USD', 80, ''],
+    [46255, 'B001', 'EUR', '', 30]
+  ], 'all scope保持legacy的模板首次出现顺序与模板内来源顺序');
+  assert.deepEqual(
+    outputRows(generatedAll.result.artifacts[1].generationPath)
+      .map((row) => [row[0], row[1], row[2], row[3], row[4], row[7]]),
+    [
+      ['中行', '上海', 'USD', 'A001', 46254, 1120],
+      ['中行', '上海', 'USD', 'A001', 46256, 1200],
+      ['汇丰', '香港', 'EUR', 'B001', 46255, 970]
+    ]
+  );
+  assert.deepEqual(generatedAll.result.artifacts.map((artifact) => artifact.rowCounts), [
+    { input: 3, output: 3 },
+    { input: 3, output: 3 }
   ]);
 });
 
@@ -1322,22 +1533,19 @@ test('all scope全量0输出以rowCounts+warning可观测并通过相同Publishe
   const generationPath = path.join(staging, 'zero/detail.xlsx');
   const inputEvidenceHash = '9'.repeat(64);
   const result = executeStatementGeneration({
-    session: {
-      generationConfig: {
-        template: { name: '中行-上海' },
-        mappingByTargetField: {
-          BillDate: 'Date', MerchantId: 'Account', Currency: 'Curr',
-          'Credit Amount': 'Credit', 'Debit Amount': 'Debit'
-        },
-        balanceRequested: false
-      }
-    },
-    entries: [{
+    session: generationSession({
+      template: { name: '中行-上海' },
+      mappingByTargetField: {
+        BillDate: 'Date', MerchantId: 'Account', Currency: 'Curr',
+        'Credit Amount': 'Credit', 'Debit Amount': 'Debit'
+      },
+      balanceRequested: false
+    }),
+    entries: [generationEntry({
       id: 'zero',
       filePath: inputPath,
-      detailRows,
-      sourceEvidence: { resourceId: 'zero.xlsx', snapshot: source(inputPath).snapshot }
-    }],
+      detailRows
+    })],
     request: {
       sessionRevision: 1,
       artifacts: [{
@@ -1499,19 +1707,16 @@ test('E09-C generation复用四金额mapped rows并保持warning/行序，混合
       amountSplitByField: mapping.amountSplitByField,
       billSplitMerge: mapping.billSplitMerge
     });
-    const session = {
-      generationConfig: {
-        template: { name: '中行-上海' },
-        mappingByTargetField: mapping.mappingByField,
-        balanceRequested: false
-      }
-    };
-    const entry = {
+    const session = generationSession({
+      template: { name: '中行-上海' },
+      mappingByTargetField: mapping.mappingByField,
+      balanceRequested: false
+    });
+    const entry = generationEntry({
       id: name,
       filePath: sourcePath,
-      detailRows,
-      sourceEvidence: { resourceId: path.basename(sourcePath), snapshot: source(sourcePath).snapshot }
-    };
+      detailRows
+    });
     const result = executeStatementGeneration({
       session,
       entries: [entry],
@@ -1544,12 +1749,11 @@ test('E09-C generation复用四金额mapped rows并保持warning/行序，混合
       'Credit Amount': 'Credit', 'Debit Amount': 'Debit', Balance: 'EndBalance'
     }
   });
-  const balanceEntry = {
+  const balanceEntry = generationEntry({
     id: 'balance',
     filePath: balanceSource,
-    detailRows: balanceRows,
-    sourceEvidence: { resourceId: 'mixed-balance.xlsx', snapshot: source(balanceSource).snapshot }
-  };
+    detailRows: balanceRows
+  });
   const validationTargets = path.join(root, 'validation-targets');
   fs.mkdirSync(validationTargets);
   const validationFilePlan = normalizeFilePlanV1({
@@ -1563,14 +1767,12 @@ test('E09-C generation复用四金额mapped rows并保持warning/行序，混合
     }))
   });
   const balanceResult = executeStatementGeneration({
-    session: {
-      generationConfig: {
-        template: { name: '中行-上海' },
-        mappingByTargetField: { MerchantId: 'Account', Balance: 'EndBalance' },
-        balanceRequested: true,
-        balanceMode: 'statement'
-      }
-    },
+    session: generationSession({
+      template: { name: '中行-上海' },
+      mappingByTargetField: { MerchantId: 'Account', Balance: 'EndBalance' },
+      balanceRequested: true,
+      balanceMode: 'statement'
+    }),
     entries: [balanceEntry],
     request: {
       sessionRevision: 1,
@@ -1689,20 +1891,17 @@ test('空scope、越界resource与partial writer failure均在Publisher前失败
       'Credit Amount': 'Credit', 'Debit Amount': 'Debit', Balance: 'Balance'
     }
   });
-  const entry = {
+  const entry = generationEntry({
     id: 'partial',
     filePath: inputPath,
-    detailRows,
-    sourceEvidence: { resourceId: 'input.xlsx', snapshot: source(inputPath).snapshot }
-  };
-  const session = {
-    generationConfig: {
-      template: { name: '中行-上海' },
-      mappingByTargetField: { MerchantId: 'Account', Balance: 'Balance' },
-      balanceRequested: true,
-      balanceMode: 'statement'
-    }
-  };
+    detailRows
+  });
+  const session = generationSession({
+    template: { name: '中行-上海' },
+    mappingByTargetField: { MerchantId: 'Account', Balance: 'Balance' },
+    balanceRequested: true,
+    balanceMode: 'statement'
+  });
   const common = {
     session,
     scope: 'all',
@@ -1754,12 +1953,10 @@ test('空scope、越界resource与partial writer failure均在Publisher前失败
   assert.throws(
     () => executeStatementGeneration({
       ...common,
-      session: {
-        generationConfig: {
-          ...session.generationConfig,
-          balanceMode: 'calculated'
-        }
-      },
+      session: generationSession({
+        ...session.generationConfigByDigest.get('f'.repeat(64)),
+        balanceMode: 'calculated'
+      }),
       balanceTemplatePath: path.join(ROOT, 'assets', '余额账单模版.xlsx'),
       entries: [entry],
       request: {
