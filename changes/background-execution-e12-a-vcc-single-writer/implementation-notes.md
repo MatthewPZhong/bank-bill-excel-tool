@@ -33,14 +33,14 @@
 | 证据 | 结果 | 覆盖的行为/风险 |
 | --- | --- | --- |
 | Preflight 合同/代码取证 | 无 BLOCK；4 个高影响未知进入 PROBE | ownership、authority/TOCTOU、bounded DTO、cleanup。 |
-| E12-A focused unit | 15/15 PASS | 两 action policy exact、production false、一个 Writer topology、全主体/exact-one golden、bounded DTO、task/run/archive A/B、Join 前后 TOCTOU、manual recovery preserve、forced-shutdown tmp cleanup、extension parity、cancel/crash/Publisher 0/1、shutdown clean。 |
+| E12-A focused unit | 17/17 PASS | 两 action policy exact、production false、一个 Writer topology、全主体/exact-one golden、bounded DTO、task/run/archive A/B、Join 前后 TOCTOU、manual recovery preserve、普通 cleanup 残留 recovery、forced-shutdown tmp cleanup、raw styleId tamper、extension parity、cancel/crash/Publisher 0/1、shutdown clean。 |
 | 既有 writer/service/recovery + policy/binding regression | 80/80 PASS | legacy writer、Service ownership、durable Publisher、policy registry/action binding 未回归。 |
 | Toolbox publication worker regression | 10/10 PASS | `requireValidatedArtifacts` 的发布前与 copy 后 identity 校验、transport recovery、manual preserve 跨线程传播未回归。 |
 | Supervisor + VCC archive/lineage/audit/result-write regression | 83/83 PASS | lease/transport/shutdown、archive identity、adjustment lineage、结果写 claim 未回归。 |
 | E11-C/package/task-policy regression | 46/46 PASS | 上一阶段 ReconFix export、packaged runtime、TaskPolicy inventory 未回归。 |
 | VCC integration chains | 19/19、29/29、226/226、77/77 PASS | effective result、历史模板、调整/跨月 archive、破坏性状态链。 |
 | Smoke + static checks | `npm run smoke` PASS；ESLint、`node --check`、`git diff --check` PASS | 全局 smoke 与本轮 JS/差异静态质量门禁。 |
-| E11-C restack interaction | E11-C focused cancellation/cleanup 15/15 PASS；VCC focused 15/15 PASS；既有 VCC writer/service/archive/recovery 87/87 PASS | ReconFix 与 VCC 各自保留单一 cleanup owner；取消后 staging 清零、同 staging 重试和 Publisher 0/1 不漂移。 |
+| E11-C restack interaction | E11-C focused cancellation/cleanup 15/15 PASS；E12-A focused 17/17 PASS；既有 VCC writer/service/archive/recovery 87/87 PASS | ReconFix 与 VCC 各自保留单一 cleanup owner；取消后 staging 清零、残留 recovery、同 staging 重试和 Publisher 0/1 不漂移。 |
 | Platform/Publisher affected regression | Supervisor、ResourceGovernor、policy/action binding、packaged runtime、TaskPolicy、Publisher 共 243/243 PASS | 新 VCC policy/entry 注册未覆盖 E11-C，transport/lease/journal recovery 不回归。 |
 | Recovery canary | background recovery canary 9/9、recovery control 27/27、pure-compute canary 9/9 PASS | 恢复状态、人工保留和静态 production gate 保持既有语义。 |
 
@@ -52,6 +52,14 @@
 | P1 manual recovery 被 catch 清理 | 仅当 `preserveTemporaryFiles === true` 时跳过全部 cleanup；可信 generation paths 优先与既有 `recoveryPaths` 去重合并，最多 100 项。 | Publisher 抛 manual-recovery fixture 后 generation、atomic tmp、未知 task-private 文件均保留；recoveryPaths 含 generation + journal、无重复且有界。 |
 | P2 forced shutdown 遗留 atomic tmp | 普通失败扫描 generation 同目录，只删除 exact generation path 及严格 `${generation}.<uuid>.tmp`；不递归、不删除 lookalike/未知文件；cleanup failure 仅附最多 8 条无资金内容的 error-code 诊断。 | shutdown-timeout 等价 deterministic seam 生成 partial generation、合法 UUID tmp、lookalike tmp、未知文件；前两者删除，后两者保留，Publisher=0。 |
 | P2 extension parity | canonical FilePlan 在 Worker 前按 lower-case extension 仅接受 `.xlsx`，与 legacy `assertXlsxOutputPath` 一致。 | `.XLSX` 两路径接受；`.csv` 两路径拒绝，Worker=0、Publisher=0。 |
+
+## Restack Review Round1 Findings And Fixes
+
+| Finding | Owner triage / 最小修复 | 可达证据 |
+| --- | --- | --- |
+| P2 普通 pre-Publisher cleanup 部分失败只写诊断、没有结构化残留恢复证据 | 接受。扩展现有 Main cleanup owner：删除后只对 task-private containment 内确实仍可 `lstat` 的候选设置 `preserveTemporaryFiles + recoveryPaths`；去重、有界，首错不变；不新增 cleanup/Publisher/inspector。 | 动态同时注入 staging scan `EACCES` 与第二 generation `EBUSY`：第一文件已删、第二文件确实残留，recoveryPaths 只含第二文件；原 code/message 保留；同 staging retry 在 Worker 前以 collision 拒绝；Publisher=0。 |
+| P2 普通分类单元格 style 可在重算 size/hash 后绕过 Main Join | 接受。在 canonical `validateResultSheet` 对所有未合并分类格复用模板 anchor full style 校验；Writer staged self-check 与 Main artifact readback 已共同调用该 validator，不在 Join 新建第二套 style authority。 | Writer staged validator 的普通分类 fill fault 被拒；raw XLSX XML 修改 `C3 styleId`、重新压缩并重算 artifact size/hash 后，Main Join 仍失败且 Publisher=0；正常 golden 继续通过。 |
+| blocking P3 toolbox runtime exact inventory 未同步新 E12-A policies | 接受。只把 `export-single`/`export-subjects` 及各自 exact resource vector 加入既有 inventory 断言。 | `toolbox-background-generation.test.js` 10/10 PASS；没有加入 subject query、shard planner 或 second Writer。 |
 
 ## Blindspot Pass
 

@@ -640,10 +640,11 @@ function validateResultSheet(workbook, contract, plan, renderedRows, lastRow) {
   for (const row of renderedRows) {
     const anchor = contract.anchors[row.anchorKind];
     const majorCell = sheet.getCell(row.rowNumber, 2);
+    const minorCell = sheet.getCell(row.rowNumber, 3);
     if (majorCell.text !== (row.major || '')) {
       throw exportValidationError(`结果第 ${row.rowNumber} 行大类校验失败`);
     }
-    if (!anchor.mergeMajorMinor && sheet.getCell(row.rowNumber, 3).text !== (row.minor || '')) {
+    if (!anchor.mergeMajorMinor && minorCell.text !== (row.minor || '')) {
       throw exportValidationError(`结果第 ${row.rowNumber} 行分类校验失败`);
     }
     const actualHeight = sheet.getRow(row.rowNumber).height == null
@@ -655,6 +656,9 @@ function validateResultSheet(workbook, contract, plan, renderedRows, lastRow) {
       throw exportValidationError(`结果第 ${row.rowNumber} 行行高校验失败`);
     }
     assertStyleMatches(majorCell, anchor.cells[1], `结果第 ${row.rowNumber} 行大类`);
+    if (!anchor.mergeMajorMinor) {
+      assertStyleMatches(minorCell, anchor.cells[2], `结果第 ${row.rowNumber} 行分类`);
+    }
     for (let index = 0; index < SUPPORTED_CURRENCIES.length; index++) {
       const currency = SUPPORTED_CURRENCIES[index];
       const expected = canonicalPlanAmount(row.amounts, currency, `${currency} 回读金额`);

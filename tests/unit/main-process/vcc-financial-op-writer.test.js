@@ -390,7 +390,16 @@ test('staged validator 拒绝调整目标格、M/N 结构或覆盖样式漂移',
       '../../../assets/VCC财务OP校验/VCC财务OP校验结果表_模板.xlsx'
     )
   });
+  const ordinaryClassificationRow = renderedRows.find((row) => (
+    !resultContract.anchors[row.anchorKind].mergeMajorMinor
+  ));
+  assert.ok(ordinaryClassificationRow);
   const faults = [
+    ['普通分类格 fill', (sheet) => {
+      sheet.getCell(ordinaryClassificationRow.rowNumber, 3).fill = {
+        type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFF0000' }
+      };
+    }],
     ['目标格 border', (sheet) => {
       sheet.getCell(adjustment.rowNumber, 10).border = {
         bottom: { style: 'thick', color: { argb: 'FFFF0000' } }

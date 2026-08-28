@@ -8,6 +8,7 @@ const path = require('node:path');
 const test = require('node:test');
 const { DatabaseSync } = require('node:sqlite');
 const ExcelJS = require('exceljs');
+const JSZip = require('jszip');
 
 const {
   ensureVccFinancialOpTablesSupport
@@ -228,6 +229,36 @@ async function workbookSemanticDigest(filePath) {
     pending: pendingSheetProjection(workbook.worksheets[1]),
     definedNames: workbook.definedNames.model
   })));
+}
+
+async function rewriteCellStyleId(filePath, cellReference) {
+  const zip = await JSZip.loadAsync(fs.readFileSync(filePath));
+  const worksheetEntry = zip.file('xl/worksheets/sheet1.xml');
+  const stylesEntry = zip.file('xl/styles.xml');
+  assert.ok(worksheetEntry);
+  assert.ok(stylesEntry);
+  const [worksheetXml, stylesXml] = await Promise.all([
+    worksheetEntry.async('string'),
+    stylesEntry.async('string')
+  ]);
+  const cellXfsMatch = /<cellXfs\b[^>]*\bcount="(\d+)"/.exec(stylesXml);
+  assert.ok(cellXfsMatch);
+  const styleCount = Number(cellXfsMatch[1]);
+  assert.ok(styleCount > 1);
+  const cellPattern = new RegExp(`(<c\\b[^>]*\\br="${cellReference}"[^>]*\\bs=")(\\d+)(")`);
+  const cellMatch = cellPattern.exec(worksheetXml);
+  assert.ok(cellMatch);
+  const originalStyleId = Number(cellMatch[2]);
+  const replacementStyleId = originalStyleId === 0 ? 1 : 0;
+  assert.ok(replacementStyleId < styleCount);
+  zip.file('xl/worksheets/sheet1.xml', worksheetXml.replace(
+    cellPattern,
+    `$1${replacementStyleId}$3`
+  ));
+  fs.writeFileSync(filePath, await zip.generateAsync({
+    type: 'nodebuffer',
+    compression: 'DEFLATE'
+  }));
 }
 
 async function runManaged({ harness, actionKey, selectedSubjectIndexes, suffix }) {
@@ -623,6 +654,55 @@ test('自洽伪造 size/hash 的 workbook 业务篡改仍由 Main 深度回读�
   assert.deepEqual(fs.readdirSync(stagingDirectory), []);
 });
 
+test('raw XLSX XML 自洽篡改普通分类 C3 styleId 仍由 canonical Result validator 阻断', async (t) => {
+  const harness = setup(t, ['PPHK']);
+  const plan = filePlan(harness.root, 1, 'classification-style-tamper');
+  const stagingDirectory = path.join(harness.root, 'staging-classification-style-tamper');
+  fs.mkdirSync(stagingDirectory);
+  const batch = batchContext('single');
+  let publisherCalls = 0;
+  await assert.rejects(generateValidateAndPublishVccExport({
+    actionKey: VCC_EXPORT_SINGLE_ACTION,
+    runtime: {
+      async execute(request) {
+        const result = await executeVccExportWriter({
+          ...request.input,
+          databasePath: harness.dbPath,
+          assetsDir: ASSETS_DIR
+        }, null, VCC_EXPORT_SINGLE_ACTION);
+        const generationPath = request.input.generations[0].generationPath;
+        await rewriteCellStyleId(generationPath, 'C3');
+        const contents = fs.readFileSync(generationPath);
+        return {
+          outcome: 'completed',
+          terminalSource: 'job:done',
+          result: {
+            ...result,
+            artifacts: [{
+              ...result.artifacts[0],
+              byteSize: contents.length,
+              sha256: crypto.createHash('sha256').update(contents).digest('hex')
+            }]
+          }
+        };
+      }
+    },
+    expectedAuthority: harness.snapshot.authority,
+    readCurrentSnapshot: async () => harness.snapshot,
+    readCurrentTaskAuthority: async () => ({
+      action: 'export-result', taskGeneration: 0, taskRunId: batch.taskRunId
+    }),
+    selectedSubjectIndexes: [0],
+    filePlan: plan,
+    stagingDirectory,
+    assetsDir: ASSETS_DIR,
+    batchContext: batch,
+    publishPublication: async () => { publisherCalls += 1; }
+  }), /分类|样式|校验失败/);
+  assert.equal(publisherCalls, 0);
+  assert.deepEqual(fs.readdirSync(stagingDirectory), []);
+});
+
 test('Publisher 失败不重试：调用恰一次，错误透传且 generation artifacts 清理', async (t) => {
   const harness = setup(t, ['PPHK']);
   const plan = filePlan(harness.root, 1, 'publisher-failure');
@@ -838,6 +918,104 @@ test('forced-shutdown 等价失败只清理 exact generation 与同源 UUID tmp�
   assert.equal(fs.existsSync(atomicTempPath), false);
   assert.equal(fs.existsSync(lookalikePath), true);
   assert.equal(fs.existsSync(unrelatedPath), true);
+});
+
+test('普通 pre-Publisher cleanup 部分失败只上报 task-private 实际残留并阻断碰撞重试', async (t) => {
+  const harness = setup(t);
+  const stagingDirectory = path.join(harness.root, 'ordinary-cleanup-residual');
+  fs.mkdirSync(stagingDirectory);
+  const plan = filePlan(harness.root, 2, 'ordinary-cleanup-residual');
+  const batch = batchContext('subjects');
+  const originalReadDirSync = fs.readdirSync;
+  const originalRmSync = fs.rmSync;
+  let generationPaths = [];
+  let publisherCalls = 0;
+  let workerCalls = 0;
+  let caught = null;
+  fs.readdirSync = function patchedReadDirSync(directory, options) {
+    if (path.resolve(directory) === stagingDirectory) {
+      const error = new Error('fixture scan denied');
+      error.code = 'EACCES';
+      throw error;
+    }
+    return originalReadDirSync.call(this, directory, options);
+  };
+  fs.rmSync = function patchedRmSync(filePath, options) {
+    if (generationPaths[1] && path.resolve(filePath) === generationPaths[1]) {
+      const error = new Error('fixture busy');
+      error.code = 'EBUSY';
+      throw error;
+    }
+    return originalRmSync.call(this, filePath, options);
+  };
+  try {
+    await generateValidateAndPublishVccExport({
+      actionKey: VCC_EXPORT_SUBJECTS_ACTION,
+      runtime: {
+        async execute(request) {
+          workerCalls += 1;
+          generationPaths = request.input.generations.map((item) => path.resolve(item.generationPath));
+          generationPaths.forEach((filePath) => fs.writeFileSync(filePath, 'partial'));
+          return {
+            outcome: 'failed',
+            terminalSource: 'job:error',
+            error: {
+              code: 'VCC_FIXTURE_ORDINARY_FAILURE',
+              message: 'fixture ordinary first error',
+              stage: 'execute',
+              detailLines: []
+            }
+          };
+        }
+      },
+      expectedAuthority: harness.snapshot.authority,
+      readCurrentSnapshot: async () => harness.snapshot,
+      readCurrentTaskAuthority: async () => ({
+        action: 'export-result', taskGeneration: 0, taskRunId: batch.taskRunId
+      }),
+      filePlan: plan,
+      stagingDirectory,
+      assetsDir: ASSETS_DIR,
+      batchContext: batch,
+      publishPublication: async () => { publisherCalls += 1; }
+    });
+  } catch (error) {
+    caught = error;
+  } finally {
+    fs.readdirSync = originalReadDirSync;
+    fs.rmSync = originalRmSync;
+  }
+  assert.ok(caught);
+  assert.equal(caught.code, 'VCC_FIXTURE_ORDINARY_FAILURE');
+  assert.equal(caught.message, 'fixture ordinary first error');
+  assert.equal(caught.preserveTemporaryFiles, true);
+  assert.deepEqual(caught.recoveryPaths, [generationPaths[1]]);
+  assert.equal(path.dirname(caught.recoveryPaths[0]), stagingDirectory);
+  assert.equal(new Set(caught.recoveryPaths).size, caught.recoveryPaths.length);
+  assert.match(caught.detailLines.join('\n'), /EACCES/);
+  assert.match(caught.detailLines.join('\n'), /EBUSY/);
+  assert.equal(fs.existsSync(generationPaths[0]), false);
+  assert.equal(fs.existsSync(generationPaths[1]), true);
+  assert.equal(publisherCalls, 0);
+
+  let retryWorkerCalls = 0;
+  await assert.rejects(generateValidateAndPublishVccExport({
+    actionKey: VCC_EXPORT_SUBJECTS_ACTION,
+    runtime: { async execute() { retryWorkerCalls += 1; } },
+    expectedAuthority: harness.snapshot.authority,
+    readCurrentSnapshot: async () => harness.snapshot,
+    readCurrentTaskAuthority: async () => ({
+      action: 'export-result', taskGeneration: 0, taskRunId: batch.taskRunId
+    }),
+    filePlan: plan,
+    stagingDirectory,
+    assetsDir: ASSETS_DIR,
+    batchContext: batch,
+    publishPublication: async () => { publisherCalls += 1; }
+  }), (error) => error.code === 'VCC_EXPORT_STAGING_COLLISION');
+  assert.equal(retryWorkerCalls, 0);
+  assert.equal(workerCalls, 1);
+  assert.equal(publisherCalls, 0);
 });
 
 test('runtime 拒绝 DB/assets caller override，完成后 shutdown 无 transport/lease 残留', async (t) => {

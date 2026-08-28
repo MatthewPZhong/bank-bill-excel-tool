@@ -69,7 +69,7 @@ function mergeRecoveryPaths(error, generationPaths) {
 function appendCleanupDiagnostics(error, failures) {
   if (failures.length === 0 || !error || typeof error !== 'object') return;
   const additions = [
-    `VCC task-private cleanup 未完成：${failures.length} 项`
+    `VCC task-private cleanup 遇到错误：${failures.length} 项`
   ];
   for (const failure of failures.slice(0, VCC_EXPORT_CLEANUP_DIAGNOSTIC_LIMIT)) {
     const code = failure && failure.code && /^[A-Z0-9_]+$/.test(failure.code)
@@ -77,13 +77,49 @@ function appendCleanupDiagnostics(error, failures) {
       : 'UNKNOWN';
     additions.push(`VCC task-private cleanup error：${code}`);
   }
-  error.detailLines = [
-    ...(Array.isArray(error.detailLines) ? error.detailLines : []),
-    ...additions
-  ];
+  try {
+    error.detailLines = [
+      ...(Array.isArray(error.detailLines) ? error.detailLines : []),
+      ...additions
+    ];
+  } catch (_detailError) { /* cleanup diagnostics 不能覆盖首错 */ }
 }
 
-function cleanupGenerationArtifacts(generations, error) {
+function isTaskPrivatePath(stagingRoot, candidate) {
+  const root = path.resolve(stagingRoot);
+  const resolved = path.resolve(candidate);
+  const relative = path.relative(root, resolved);
+  return relative !== '' && relative !== '..' && !relative.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(relative);
+}
+
+function publishCleanupRecovery(error, candidates, stagingRoot) {
+  if (!error || typeof error !== 'object') return;
+  const recoveryPaths = [];
+  const seen = new Set();
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string' || seen.has(candidate) ||
+        !isTaskPrivatePath(stagingRoot, candidate)) continue;
+    let exists = false;
+    try {
+      fs.lstatSync(candidate);
+      exists = true;
+    } catch (statError) {
+      if (!statError || statError.code !== 'ENOENT') continue;
+    }
+    if (!exists) continue;
+    seen.add(candidate);
+    recoveryPaths.push(candidate);
+    if (recoveryPaths.length >= VCC_EXPORT_RECOVERY_PATH_LIMIT) break;
+  }
+  if (recoveryPaths.length === 0) return;
+  try {
+    error.preserveTemporaryFiles = true;
+    error.recoveryPaths = recoveryPaths;
+  } catch (_recoveryError) { /* recovery annotation 不能覆盖首错 */ }
+}
+
+function cleanupGenerationArtifacts(generations, error, stagingRoot) {
   const cleanupPaths = new Set();
   const failures = [];
   const patternsByDirectory = new Map();
@@ -117,6 +153,7 @@ function cleanupGenerationArtifacts(generations, error) {
     }
   }
   appendCleanupDiagnostics(error, failures);
+  publishCleanupRecovery(error, cleanupPaths, stagingRoot);
 }
 
 function freezeTaskAuthority(value, batchContext) {
@@ -479,7 +516,7 @@ async function generateValidateAndPublishVccExport(options = {}) {
         generation.generations.map((item) => item.generationPath)
       );
     } else {
-      cleanupGenerationArtifacts(generation.generations, error);
+      cleanupGenerationArtifacts(generation.generations, error, generation.stagingRoot);
     }
     throw error;
   }
