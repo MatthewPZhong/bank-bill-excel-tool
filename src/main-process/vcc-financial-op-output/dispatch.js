@@ -85,46 +85,86 @@ function appendCleanupDiagnostics(error, failures) {
   } catch (_detailError) { /* cleanup diagnostics 不能覆盖首错 */ }
 }
 
-function isTaskPrivatePath(stagingRoot, candidate) {
+function isTaskPrivatePath(stagingRoot, candidate, { allowTaskDirectory = false } = {}) {
   const root = path.resolve(stagingRoot);
   const resolved = path.resolve(candidate);
   const relative = path.relative(root, resolved);
-  return relative !== '' && relative !== '..' && !relative.startsWith(`..${path.sep}`) &&
+  return (allowTaskDirectory || relative !== '') && relative !== '..' &&
+    !relative.startsWith(`..${path.sep}`) &&
     !path.isAbsolute(relative);
 }
 
-function publishCleanupRecovery(error, candidates, stagingRoot) {
-  if (!error || typeof error !== 'object') return;
+function publishCleanupRecovery(error, candidates, stagingRoot, options = {}) {
+  if (!error || typeof error !== 'object') return [];
+  const realTaskRoot = (() => {
+    try { return fs.realpathSync(stagingRoot); } catch (_error) { return null; }
+  })();
   const recoveryPaths = [];
   const seen = new Set();
   for (const candidate of candidates) {
     if (typeof candidate !== 'string' || seen.has(candidate) ||
-        !isTaskPrivatePath(stagingRoot, candidate)) continue;
-    let exists = false;
+        !isTaskPrivatePath(stagingRoot, candidate, options)) continue;
+    let stat;
     try {
-      fs.lstatSync(candidate);
-      exists = true;
+      stat = fs.lstatSync(candidate);
     } catch (statError) {
       if (!statError || statError.code !== 'ENOENT') continue;
     }
-    if (!exists) continue;
+    if (!stat) continue;
+    const resolvedCandidate = path.resolve(candidate);
+    if (resolvedCandidate === path.resolve(stagingRoot)) {
+      if (!options.allowTaskDirectory || stat.isSymbolicLink() || !stat.isDirectory() ||
+          !realTaskRoot) continue;
+    } else {
+      if (!realTaskRoot) continue;
+      let realCandidate;
+      try { realCandidate = fs.realpathSync(candidate); } catch (_error) { continue; }
+      if (!isTaskPrivatePath(realTaskRoot, realCandidate)) continue;
+    }
     seen.add(candidate);
     recoveryPaths.push(candidate);
     if (recoveryPaths.length >= VCC_EXPORT_RECOVERY_PATH_LIMIT) break;
   }
-  if (recoveryPaths.length === 0) return;
+  if (recoveryPaths.length === 0) return recoveryPaths;
   try {
     error.preserveTemporaryFiles = true;
     error.recoveryPaths = recoveryPaths;
   } catch (_recoveryError) { /* recovery annotation 不能覆盖首错 */ }
+  return recoveryPaths;
 }
 
-function cleanupGenerationArtifacts(generations, error, stagingRoot) {
+function cleanupGenerationArtifacts(generations, error, stagingRoot, expectedRealStagingRoot) {
   const cleanupPaths = new Set();
   const failures = [];
   const patternsByDirectory = new Map();
+  let scanFailed = false;
+  try {
+    const stat = fs.lstatSync(stagingRoot);
+    const currentReal = fs.realpathSync(stagingRoot);
+    if (stat.isSymbolicLink() || !stat.isDirectory() ||
+        (expectedRealStagingRoot && currentReal !== expectedRealStagingRoot)) {
+      throw dispatchError(
+        'VCC_EXPORT_STAGING_ESCAPE',
+        'VCC cleanup exact task-private staging identity 已变化'
+      );
+    }
+  } catch (identityError) {
+    failures.push(identityError);
+    appendCleanupDiagnostics(error, failures);
+    return;
+  }
   for (const item of generations) {
     const generationPath = item.generationPath;
+    if (!isTaskPrivatePath(stagingRoot, generationPath) ||
+        path.dirname(path.resolve(generationPath)) !== path.resolve(stagingRoot)) {
+      const containmentError = dispatchError(
+        'VCC_EXPORT_STAGING_ESCAPE',
+        'VCC generation cleanup path 越过 exact task-private staging'
+      );
+      failures.push(containmentError);
+      scanFailed = true;
+      continue;
+    }
     cleanupPaths.add(generationPath);
     const directory = path.dirname(generationPath);
     const patterns = patternsByDirectory.get(directory) || [];
@@ -139,6 +179,7 @@ function cleanupGenerationArtifacts(generations, error, stagingRoot) {
       entries = fs.readdirSync(directory, { withFileTypes: true });
     } catch (scanError) {
       failures.push(scanError);
+      scanFailed = true;
       continue;
     }
     for (const entry of entries) {
@@ -152,8 +193,23 @@ function cleanupGenerationArtifacts(generations, error, stagingRoot) {
       failures.push(cleanupError);
     }
   }
+  if (scanFailed) {
+    appendCleanupDiagnostics(error, failures);
+    publishCleanupRecovery(error, [stagingRoot], stagingRoot, { allowTaskDirectory: true });
+    return;
+  }
+  const knownResiduals = publishCleanupRecovery(error, cleanupPaths, stagingRoot);
+  if (knownResiduals.length === 0) {
+    try {
+      fs.rmdirSync(stagingRoot);
+    } catch (cleanupError) {
+      if (!cleanupError || cleanupError.code !== 'ENOENT') {
+        failures.push(cleanupError);
+        publishCleanupRecovery(error, [stagingRoot], stagingRoot, { allowTaskDirectory: true });
+      }
+    }
+  }
   appendCleanupDiagnostics(error, failures);
-  publishCleanupRecovery(error, cleanupPaths, stagingRoot);
 }
 
 function freezeTaskAuthority(value, batchContext) {
@@ -261,7 +317,78 @@ function assertStagingDirectory(stagingDirectory) {
   if (stat.isSymbolicLink() || !stat.isDirectory()) {
     throw dispatchError('VCC_EXPORT_STAGING_INVALID', 'VCC task-private staging 必须是真实目录');
   }
-  return resolved;
+  let real;
+  try { real = fs.realpathSync(resolved); } catch (_error) {
+    throw dispatchError('VCC_EXPORT_STAGING_INVALID', 'VCC task-private staging realpath 非法');
+  }
+  return Object.freeze({ resolved, real });
+}
+
+function taskStagingDirectoryName({
+  actionKey,
+  authority,
+  operationKey,
+  plan,
+  selectedSubjectIndexes,
+  taskAuthority
+}) {
+  if (typeof operationKey !== 'string' || !operationKey) {
+    throw dispatchError('VCC_EXPORT_STAGING_INVALID', 'VCC task-private staging 缺少 operation identity');
+  }
+  const digest = canonicalSha256({
+    contractVersion: 1,
+    sourceOperation: VCC_EXPORT_SOURCE_OPERATION,
+    actionKey,
+    operationKey,
+    task: taskAuthority,
+    authorityDigest: authority.authorityDigest,
+    selectedSubjectIndexes,
+    filePlan: plan
+  });
+  return `vcc-export-${digest.slice(0, 32)}`;
+}
+
+function prepareTaskStagingDirectory(parent, directoryName) {
+  if (!/^vcc-export-[0-9a-f]{32}$/.test(directoryName)) {
+    throw dispatchError('VCC_EXPORT_STAGING_INVALID', 'VCC task-private staging identity 非法');
+  }
+  const taskDirectory = path.join(parent.resolved, directoryName);
+  if (path.dirname(taskDirectory) !== parent.resolved ||
+      !isTaskPrivatePath(parent.resolved, taskDirectory)) {
+    throw dispatchError('VCC_EXPORT_STAGING_ESCAPE', 'VCC task-private staging 越过父 root');
+  }
+  let created = false;
+  try {
+    fs.mkdirSync(taskDirectory, { mode: 0o700 });
+    created = true;
+  } catch (error) {
+    if (!error || error.code !== 'EEXIST') {
+      throw dispatchError('VCC_EXPORT_STAGING_INVALID', 'VCC task-private staging 创建失败');
+    }
+  }
+  let stat;
+  let real;
+  try {
+    stat = fs.lstatSync(taskDirectory);
+    real = fs.realpathSync(taskDirectory);
+  } catch (_error) {
+    throw dispatchError('VCC_EXPORT_STAGING_INVALID', 'VCC task-private staging identity 无法确认');
+  }
+  const expectedReal = path.join(parent.real, directoryName);
+  if (stat.isSymbolicLink() || !stat.isDirectory() || real !== expectedReal ||
+      path.dirname(real) !== parent.real) {
+    throw dispatchError('VCC_EXPORT_STAGING_ESCAPE', 'VCC task-private staging symlink/reparse 越界');
+  }
+  if (!created) {
+    let entries;
+    try { entries = fs.readdirSync(taskDirectory); } catch (_error) {
+      throw dispatchError('VCC_EXPORT_STAGING_COLLISION', 'VCC task-private staging 无法确认为空');
+    }
+    if (entries.length > 0) {
+      throw dispatchError('VCC_EXPORT_STAGING_COLLISION', 'VCC task-private staging 已被占用');
+    }
+  }
+  return Object.freeze({ resolved: taskDirectory, real });
 }
 
 function selectedIndexesForAction(actionKey, authority, value) {
@@ -283,21 +410,27 @@ function createGenerationInput({
   actionKey,
   authority,
   filePlan,
+  operationKey,
   selectedSubjectIndexes,
   stagingDirectory,
   taskAuthority
 }) {
-  const stagingRoot = assertStagingDirectory(stagingDirectory);
   const plan = canonicalFilePlan(filePlan, selectedSubjectIndexes.length);
-  const generations = selectedSubjectIndexes.map((subjectIndex, outputIndex) => {
+  const parent = assertStagingDirectory(stagingDirectory);
+  const stagingRoot = path.join(parent.resolved, taskStagingDirectoryName({
+    actionKey,
+    authority,
+    operationKey,
+    plan,
+    selectedSubjectIndexes,
+    taskAuthority
+  }));
+  const generationDescriptors = selectedSubjectIndexes.map((subjectIndex, outputIndex) => {
     const subject = authority.subjects[subjectIndex];
     const generationPath = path.join(
       stagingRoot,
       `${String(outputIndex).padStart(3, '0')}-${subject.subjectDigest.slice(0, 16)}.xlsx`
     );
-    if (fs.existsSync(generationPath)) {
-      throw dispatchError('VCC_EXPORT_STAGING_COLLISION', 'VCC generation path 已被占用');
-    }
     for (const output of plan.outputs) {
       if (pathsAlias(fs, generationPath, output.filePath, {
         allowMissingParentLexicalFallback: true
@@ -311,6 +444,13 @@ function createGenerationInput({
       generationPath
     });
   });
+  const taskDirectory = prepareTaskStagingDirectory(parent, path.basename(stagingRoot));
+  const generations = generationDescriptors.map((descriptor) => {
+    if (fs.existsSync(descriptor.generationPath)) {
+      throw dispatchError('VCC_EXPORT_STAGING_COLLISION', 'VCC generation path 已被占用');
+    }
+    return descriptor;
+  });
   return Object.freeze({
     contractVersion: 1,
     authority,
@@ -318,7 +458,8 @@ function createGenerationInput({
     generations: Object.freeze(generations),
     actionKey,
     filePlan: plan,
-    stagingRoot
+    stagingRoot,
+    stagingRootReal: taskDirectory.real
   });
 }
 
@@ -348,7 +489,18 @@ async function validateJoin({ generation, executionResult, snapshot, assetsDir }
     throw dispatchError('VCC_EXPORT_MANIFEST_AUTHORITY_MISMATCH', 'VCC Worker manifest authority 不一致');
   }
   const validationContext = await loadValidationContext(assetsDir);
-  const realStagingRoot = fs.realpathSync(generation.stagingRoot);
+  let realStagingRoot;
+  let stagingRootStat;
+  try {
+    stagingRootStat = fs.lstatSync(generation.stagingRoot);
+    realStagingRoot = fs.realpathSync(generation.stagingRoot);
+  } catch (_error) {
+    throw dispatchError('VCC_EXPORT_ARTIFACT_IDENTITY_INVALID', 'VCC task-private staging identity 丢失');
+  }
+  if (stagingRootStat.isSymbolicLink() || !stagingRootStat.isDirectory() ||
+      realStagingRoot !== generation.stagingRootReal) {
+    throw dispatchError('VCC_EXPORT_ARTIFACT_IDENTITY_INVALID', 'VCC task-private staging identity 已变化');
+  }
   const artifacts = [];
   for (let index = 0; index < generation.generations.length; index += 1) {
     const expected = generation.generations[index];
@@ -434,6 +586,7 @@ async function generateValidateAndPublishVccExport(options = {}) {
     actionKey: options.actionKey,
     authority: snapshotA.authority,
     filePlan: options.filePlan,
+    operationKey: batchContext.operationKey,
     selectedSubjectIndexes,
     stagingDirectory: options.stagingDirectory,
     taskAuthority: taskA
@@ -516,7 +669,12 @@ async function generateValidateAndPublishVccExport(options = {}) {
         generation.generations.map((item) => item.generationPath)
       );
     } else {
-      cleanupGenerationArtifacts(generation.generations, error, generation.stagingRoot);
+      cleanupGenerationArtifacts(
+        generation.generations,
+        error,
+        generation.stagingRoot,
+        generation.stagingRootReal
+      );
     }
     throw error;
   }
@@ -525,6 +683,7 @@ async function generateValidateAndPublishVccExport(options = {}) {
 module.exports = {
   VCC_EXPORT_SOURCE_OPERATION,
   canonicalFilePlan,
+  cleanupGenerationArtifacts,
   createGenerationInput,
   freezeBatchAuthority,
   freezeTaskAuthority,

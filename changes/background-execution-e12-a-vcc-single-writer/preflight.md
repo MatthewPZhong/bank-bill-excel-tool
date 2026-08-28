@@ -26,9 +26,16 @@
 | `thread-pool` 如何在 E12-A 保证只有一个 Writer。 | topology 未知 | 高 | 容易 | Supervisor 从 topology registry + CompoundLease 取 `effectiveChildCount`，但 native adapter 仍是一个 transport。 | PROBE | runtime topology snapshot + real Worker 实例计数 | topology planner 在 E12-A 恒返回 1，一个 one-shot Worker 处理全部 subjects。 |
 | Worker 不收 raw rows 时如何保证业务等价。 | 合同未知 | 高 | 一般 | Worker 可 read-only 打开 DB；现有 writer core 可直接从 DB 构造 plan。 | PROBE | authority digest + 真 workbook 回读 golden | Main 仅传 bounded run/subject/path authority；Worker 自读 DB；Main Join 用同一读取器重建期望 plan 并深度回读 workbook。 |
 | revision/archive 在 Worker 生成期变化的 TOCTOU 如何封闭。 | 状态生命周期盲区 | 高 | 一般 | Worker read-only transaction 可得到单一 DB snapshot；Main `activeTask` 阻断同 Service mutation，但仍需防自相一致的伪造/DB 旁路。 | PROBE | A/B authority 替换、生成后改 revision/archive/fingerprint，断言 Publisher=0 | Worker 开始与结束核对 authority digest；Main generation 前和 Join 后重读 task/run authority；Publisher 前再核 FilePlan/target snapshot。 |
-| cancel/crash 后 task-private files 谁清理。 | ownership 未知 | 高 | 容易 | Supervisor 保证 transport/lease shutdown；现有 writer 只在 deferred 模式清理 partial files。 | PROBE | 中途失败、cancel、worker terminate、runtime shutdown 后扫描 staging | Worker 对已知 generation paths 做 finally 清理；Main 仍是目录 owner，Publisher committed 后由现有 wrapper 删除，失败时有界 cleanup。 |
+| cancel/crash 后 task-private files 谁清理。 | ownership 未知 | 高 | 容易 | Supervisor 保证 transport/lease shutdown；现有 writer 只在 deferred 模式清理 partial files。 | PROBE | 中途失败、cancel、worker terminate、runtime shutdown 后扫描 staging | Worker 对已知 generation paths 做 finally 清理；Main 是 exact task 子目录的唯一 cleanup/recovery owner；已知文件按路径删除，严格 UUID tmp 只在成功扫描后删除，扫描失败目录级保留。 |
 | E11-C 新增的取消后 cleanup owner 是否会与 VCC Writer/Publisher 重叠。 | restack 交互盲区 | 高 | 容易 | E11-C cleanup 绑定 ReconFix export plan；VCC 仍由其 dispatch/Writer/Publisher 私有边界负责。 | PROBE | E11-C 取消清理回归 + VCC cancel/crash/同 staging 重试 + Supervisor shutdown | 两条 action 保持不同 plan owner；各自清理一次，成功产物不被失败清理误删。 |
 | `export-single` 与 `export-subjects` 的 E12-A 范围边界。 | 范围歧义 | 高 | 容易 | 冻结 Action 范围同时列出两者。 | BLOCK（已收口） | 项目 owner 范围裁决 | E12-A 必须用同一 one-shot Writer core 覆盖两个 action；`export-single` 是 exact-one subject specialization，仍不做 SQL filter pushdown。 |
+
+## Restack Review Round2 Unknowns Closure
+
+| 补充未知 | 分类 | 证据收口 | 最终决定 |
+| --- | --- | --- | --- |
+| caller 提供的共享 staging root 是否足以作为 task-private recovery authority。 | PROBE（高） | 共享 root 可以包含 caller-owned 文件；目录扫描失败时无法证明其中所有名字属于当前 job。真实 FS `chmod 0300` 证明已知 generation 可按 exact path 删除，但 UUID atomic tmp 无法在 `readdir EACCES` 时安全发现。 | 共享 root 只作为父 authority。由 action/operation/task/run authority、subject set 与 canonical FilePlan 派生一个 exact 直属 `vcc-export-<digest>` 子目录并绑定 realpath；scan 失败只保留该子目录，不把共享父目录或猜测 tmp 暴露为 recoveryPath。 |
+| Result Sheet 是否可只校验值、merge 与少数动态样式。 | PROBE（高） | raw OOXML 可以在重算 size/hash 后独立篡改 header/body blank cell style、row/column layout；逐格补丁无法证明模板语义集合闭合。 | 保留唯一 `validateResultSheet` authority，按 header A:N、body A/B:C merge master/follower、D:L、普通/调整 M:N、动态 font/numFmt/wrap/height，以及 row/column hidden/outline/width/height 建立模板语义矩阵；Writer self-check 与 Main Join 继续复用同一 validator。 |
 
 ## BLOCK 问题
 

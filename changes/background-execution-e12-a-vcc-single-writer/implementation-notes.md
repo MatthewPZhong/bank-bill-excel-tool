@@ -43,6 +43,11 @@
 | E11-C restack interaction | E11-C focused cancellation/cleanup 15/15 PASS；E12-A focused 17/17 PASS；既有 VCC writer/service/archive/recovery 87/87 PASS | ReconFix 与 VCC 各自保留单一 cleanup owner；取消后 staging 清零、残留 recovery、同 staging 重试和 Publisher 0/1 不漂移。 |
 | Platform/Publisher affected regression | Supervisor、ResourceGovernor、policy/action binding、packaged runtime、TaskPolicy、Publisher 共 243/243 PASS | 新 VCC policy/entry 注册未覆盖 E11-C，transport/lease/journal recovery 不回归。 |
 | Recovery canary | background recovery canary 9/9、recovery control 27/27、pure-compute canary 9/9 PASS | 恢复状态、人工保留和静态 production gate 保持既有语义。 |
+| Restack Review Round2 focused | E12-A 27/27（含 7 个 raw OOXML 子案例）、writer 16/16 PASS | exact task staging/recovery、样式/布局语义矩阵、正常/调整/merge golden。 |
+| Restack Review Round2 affected VCC | archive/result/template/read/Service/Writer 共 148/148 PASS | revision/archive、调整 lineage、历史模板、durable publication 与 Main Join 未回归。 |
+| Restack Review Round2 E11-C interaction | ReconFix export 15/15 PASS | E11-C export plan closure 与 E12-A exact task directory 各自保持唯一 cleanup owner；同 staging retry、symlink/collision、Publisher 0/1 不互相覆盖。 |
+| Restack Review Round2 platform/Publisher | Supervisor/Governor/policy/binding/packaged/recovery/toolbox generation/Publisher 共 320/320 PASS | 单一 cleanup/Publisher authority、transport/lease、journal recovery 与 task inventory 未漂移。 |
+| Restack Review Round2 integration/smoke | VCC 19/19、29/29、226/226、77/77；recovery 9/9、27/27、pure 9/9；smoke PASS | 正常/历史/调整/破坏性链、recovery canary 与全局 smoke。 |
 
 ## Round1 Findings And Fixes
 
@@ -60,6 +65,13 @@
 | P2 普通 pre-Publisher cleanup 部分失败只写诊断、没有结构化残留恢复证据 | 接受。扩展现有 Main cleanup owner：删除后只对 task-private containment 内确实仍可 `lstat` 的候选设置 `preserveTemporaryFiles + recoveryPaths`；去重、有界，首错不变；不新增 cleanup/Publisher/inspector。 | 动态同时注入 staging scan `EACCES` 与第二 generation `EBUSY`：第一文件已删、第二文件确实残留，recoveryPaths 只含第二文件；原 code/message 保留；同 staging retry 在 Worker 前以 collision 拒绝；Publisher=0。 |
 | P2 普通分类单元格 style 可在重算 size/hash 后绕过 Main Join | 接受。在 canonical `validateResultSheet` 对所有未合并分类格复用模板 anchor full style 校验；Writer staged self-check 与 Main artifact readback 已共同调用该 validator，不在 Join 新建第二套 style authority。 | Writer staged validator 的普通分类 fill fault 被拒；raw XLSX XML 修改 `C3 styleId`、重新压缩并重算 artifact size/hash 后，Main Join 仍失败且 Publisher=0；正常 golden 继续通过。 |
 | blocking P3 toolbox runtime exact inventory 未同步新 E12-A policies | 接受。只把 `export-single`/`export-subjects` 及各自 exact resource vector 加入既有 inventory 断言。 | `toolbox-background-generation.test.js` 10/10 PASS；没有加入 subject query、shard planner 或 second Writer。 |
+
+## Restack Review Round2 Findings And Fixes
+
+| Finding | Owner triage / 最小修复 | 可达证据 |
+| --- | --- | --- |
+| P2 共享 staging root 在 `readdir` 失败时会被误当为当前任务的 recoveryPath，且 exact 子目录 identity 未绑定 | 接受。共享 root 仅作为父 authority；从 action、operationKey、task authority、run authorityDigest、subjectIndex set 与 canonical FilePlan 派生直属 `vcc-export-<digest>` 子目录，绑定 parent realpath 与 exact child realpath。现有 Main cleanup owner 只处理该目录中的 exact generations/严格 UUID tmp；scan 失败只返回目录级 exact task path，已知残留仍返回具体路径；Join/cleanup 都复核 root 未被 symlink/reparse 替换。不新增 scanner、cleanup、recovery 或 Publisher authority。 | 真实 FS `chmod 0300` 令 `readdir=EACCES`、已知 generation 可删、严格 UUID tmp 留存：首错保留、Publisher=0、recoveryPaths 唯一为 task dir，caller shared root 未暴露；恢复 `0700` 后同 cleanup owner 扫描并清空，retry 到达 Writer 无 collision。另覆盖 EBUSY 部分残留、parent symlink/非规范 path/exact child reparse 拒绝，以及 runtime 后 reparse 不删除外部同名文件。 |
+| P2 canonical Result validator 未形成闭合的模板样式/布局语义矩阵 | 接受。仍由唯一 `validateResultSheet` 覆盖 header A:N；body A 与 B:C merge master/follower、D:L、普通空白 M/N、调整 target/M/N；动态 font/numFmt/wrap/height 例外；全部 row/column hidden/outline/width/height。币种表头 D:L 继续按结构样式 + 动态差异 fill 分层，避免误杀合法 normal/abnormal fill；不比较 OOXML styleId，不在 Main 新建第二套样式逻辑。 | Writer self-check/Main Join 均复用该 validator。正常单/多主体 merge golden、调整/long reason golden 通过；raw OOXML 自洽篡改 C1/A2/C3/M3/N3、row hidden、column hidden 并重算 size/hash 均在 Main Join 阻断且 Publisher=0。 |
 
 ## Blindspot Pass
 

@@ -441,6 +441,48 @@ function assertStyleMatches(cell, captured, label, options) {
   }
 }
 
+function assertRowLayoutMatches(row, captured, expectedHeight, label) {
+  const actual = {
+    height: row.height == null ? null : row.height,
+    hidden: Boolean(row.hidden),
+    outlineLevel: row.outlineLevel || 0
+  };
+  const expected = {
+    height: expectedHeight == null ? null : expectedHeight,
+    hidden: Boolean(captured.hidden),
+    outlineLevel: captured.outlineLevel || 0
+  };
+  if (styleSignature(actual) !== styleSignature(expected)) {
+    throw exportValidationError(`VCC 财务OP导出${label}布局校验失败`);
+  }
+}
+
+function assertColumnLayoutMatches(column, captured, label) {
+  const actual = {
+    width: column.width == null ? null : column.width,
+    hidden: Boolean(column.hidden),
+    outlineLevel: column.outlineLevel || 0
+  };
+  const expected = {
+    width: captured.width == null ? null : captured.width,
+    hidden: Boolean(captured.hidden),
+    outlineLevel: captured.outlineLevel || 0
+  };
+  if (styleSignature(actual) !== styleSignature(expected)) {
+    throw exportValidationError(`VCC 财务OP导出${label}布局校验失败`);
+  }
+}
+
+function assertMergedFollower(sheet, masterAddress, followerAddress, label) {
+  const master = sheet.getCell(masterAddress);
+  const follower = sheet.getCell(followerAddress);
+  if (!master.isMerged || !follower.isMerged ||
+      master.master.address !== follower.master.address ||
+      master.master.address !== masterAddress) {
+    throw exportValidationError(`VCC 财务OP导出${label}合并主从校验失败`);
+  }
+}
+
 function structuralStyleFromCell(cell, { includeNumFmt = false } = {}) {
   const fill = cloneStyle(cell.fill);
   const normalizedFill = fill && fill.type === 'pattern' && fill.pattern === 'none'
@@ -612,13 +654,10 @@ function validateResultSheet(workbook, contract, plan, renderedRows, lastRow) {
     throw exportValidationError('VCC 财务OP导出冻结窗格校验失败');
   }
   contract.columns.forEach((column, index) => {
-    const actualWidth = sheet.getColumn(index + 1).width;
-    if ((column.width == null && actualWidth != null)
-        || (column.width != null && actualWidth !== column.width)) {
-      throw exportValidationError(`VCC 财务OP导出第 ${index + 1} 列列宽校验失败`);
-    }
+    assertColumnLayoutMatches(sheet.getColumn(index + 1), column, `第 ${index + 1} 列`);
   });
-  [1, 2, 13, 14].forEach((columnNumber) => {
+  assertRowLayoutMatches(sheet.getRow(1), contract.headerRow, contract.headerRow.height, '表头行');
+  [1, 2, 3, 13, 14].forEach((columnNumber) => {
     assertStyleMatches(
       sheet.getCell(1, columnNumber),
       contract.headerRow.cells[columnNumber - 1],
@@ -636,9 +675,11 @@ function validateResultSheet(workbook, contract, plan, renderedRows, lastRow) {
       throw exportValidationError(`${currency} 表头生效差异填充校验失败`);
     }
   });
+  const subjectStyle = contract.anchors[renderedRows[0].anchorKind].cells[0];
 
   for (const row of renderedRows) {
     const anchor = contract.anchors[row.anchorKind];
+    const subjectCell = sheet.getCell(row.rowNumber, 1);
     const majorCell = sheet.getCell(row.rowNumber, 2);
     const minorCell = sheet.getCell(row.rowNumber, 3);
     if (majorCell.text !== (row.major || '')) {
@@ -647,16 +688,27 @@ function validateResultSheet(workbook, contract, plan, renderedRows, lastRow) {
     if (!anchor.mergeMajorMinor && minorCell.text !== (row.minor || '')) {
       throw exportValidationError(`结果第 ${row.rowNumber} 行分类校验失败`);
     }
-    const actualHeight = sheet.getRow(row.rowNumber).height == null
-      ? null : sheet.getRow(row.rowNumber).height;
     const expectedHeight = row.rowType === 'adjustment'
       ? adjustmentReasonRowHeight(row.reason, sheet.getColumn(14).width, anchor.height)
       : anchor.height;
-    if (actualHeight !== expectedHeight) {
-      throw exportValidationError(`结果第 ${row.rowNumber} 行行高校验失败`);
-    }
+    assertRowLayoutMatches(
+      sheet.getRow(row.rowNumber),
+      anchor,
+      expectedHeight,
+      `结果第 ${row.rowNumber} 行`
+    );
+    assertMergedFollower(sheet, 'A2', `A${row.rowNumber}`, `结果第 ${row.rowNumber} 行主体列`);
+    assertStyleMatches(subjectCell, subjectStyle, `结果第 ${row.rowNumber} 行主体列`);
     assertStyleMatches(majorCell, anchor.cells[1], `结果第 ${row.rowNumber} 行大类`);
-    if (!anchor.mergeMajorMinor) {
+    if (anchor.mergeMajorMinor) {
+      assertMergedFollower(
+        sheet,
+        `B${row.rowNumber}`,
+        `C${row.rowNumber}`,
+        `结果第 ${row.rowNumber} 行大类/分类`
+      );
+      assertStyleMatches(minorCell, anchor.cells[1], `结果第 ${row.rowNumber} 行分类 follower`);
+    } else {
       assertStyleMatches(minorCell, anchor.cells[2], `结果第 ${row.rowNumber} 行分类`);
     }
     for (let index = 0; index < SUPPORTED_CURRENCIES.length; index++) {
@@ -708,8 +760,12 @@ function validateResultSheet(workbook, contract, plan, renderedRows, lastRow) {
           || styleSignature(reasonCell.font) !== styleSignature(contract.adjustmentReasonFont)) {
         throw exportValidationError(`结果第 ${row.rowNumber} 行调整样式校验失败`);
       }
-    } else if (valueCell.value != null || reasonCell.value != null) {
-      throw exportValidationError(`结果第 ${row.rowNumber} 行泄漏模板样例值`);
+    } else {
+      if (valueCell.value != null || reasonCell.value != null) {
+        throw exportValidationError(`结果第 ${row.rowNumber} 行泄漏模板样例值`);
+      }
+      assertStyleMatches(valueCell, anchor.cells[12], `结果第 ${row.rowNumber} 行普通 M 列`);
+      assertStyleMatches(reasonCell, anchor.cells[13], `结果第 ${row.rowNumber} 行普通 N 列`);
     }
   }
   assertMergeLayout(sheet, renderedRows, contract, lastRow);
