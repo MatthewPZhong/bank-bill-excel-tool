@@ -42,7 +42,23 @@ function targetPathAliasKey(fsImpl, targetPath, options = {}) {
     if (!options.allowMissingParentLexicalFallback || !error || error.code !== 'ENOENT') {
       throw error;
     }
-    realParent = path.dirname(resolvedTarget);
+    const missingSegments = [];
+    let cursor = path.dirname(resolvedTarget);
+    for (;;) {
+      try {
+        realParent = path.join(
+          realpathSyncWith(fsImpl, cursor),
+          ...missingSegments.reverse()
+        );
+        break;
+      } catch (ancestorError) {
+        if (!ancestorError || ancestorError.code !== 'ENOENT') throw ancestorError;
+        const parent = path.dirname(cursor);
+        if (parent === cursor) throw ancestorError;
+        missingSegments.push(path.basename(cursor));
+        cursor = parent;
+      }
+    }
   }
   return normalizeTargetAliasKey(
     path.join(realParent, path.basename(resolvedTarget)),
