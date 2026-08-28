@@ -23,6 +23,10 @@ const {
   DurabilityBarrierError
 } = require('../../../src/main-process/background-execution/durable-file');
 const {
+  balanceSeedRecordsEvidence,
+  materializeManualBalanceSeedPlan
+} = require('../../../src/main-process/manual-balance-seed-preflight');
+const {
   createRecoveryControlReadRepository
 } = require('../../../src/main-process/background-execution/critical/recovery-control-read-repository');
 const {
@@ -42,12 +46,16 @@ const {
   createStartupRecoveryCoordinator
 } = require('../../../src/main-process/background-execution/startup-recovery-coordinator');
 const {
+  transitionRequestKey
+} = require('../../../src/main-process/background-execution/recovery-control-contract');
+const {
   MANUAL_BALANCE_ACTION_KEY,
   MANUAL_BALANCE_INSPECTOR_KEY,
   MANUAL_BALANCE_SETTLEMENT_KEY,
   createMainSettlementIntentCoordinator,
   createManualBalanceInteractionOrdinalAllocator,
   createManualBalanceOperationIdentity,
+  createManualBalanceRecoveryPlanTransitions,
   createManualBalanceSeedInspector,
   createManualBalanceSettlementRecoveryProvider,
   createManualBalanceTargetAlias,
@@ -101,15 +109,19 @@ function createHarness(t, additions = {}) {
   const readRepository = createRecoveryControlReadRepository(db);
   const requestOwnerRepository = createRecoveryRequestOwnerRepository(db);
   const recoveryControlRepository = createRecoveryControlRepository(db);
+  const observationAttemptRepository = createRecoveryObservationAttemptRepository(db);
   const transitionWriter = createRecoveryTransitionWriter({
     requestOwnerRepository,
+    observationAttemptRepository,
     recoveryControlRepository
   });
   const resolveTargetPath = (alias) => resolveManualBalanceTargetAlias(root, alias);
   const coordinator = createMainSettlementIntentCoordinator({
     transitionWriter,
+    readRepository,
     resolveTargetPath,
     fsyncDirectory: SUPPORTED_DIRECTORY_FSYNC,
+    now: () => new Date(NOW),
     ...additions
   });
   return {
@@ -117,6 +129,7 @@ function createHarness(t, additions = {}) {
     db,
     readRepository,
     requestOwnerRepository,
+    observationAttemptRepository,
     recoveryControlRepository,
     transitionWriter,
     resolveTargetPath,
@@ -124,19 +137,69 @@ function createHarness(t, additions = {}) {
   };
 }
 
+function createStartupForHarness(h) {
+  const inspectorRegistry = createInspectorRegistry();
+  inspectorRegistry.register(MANUAL_BALANCE_INSPECTOR_KEY, createManualBalanceSeedInspector({
+    resolveTargetPath: h.resolveTargetPath,
+    readRepository: h.readRepository
+  }));
+  inspectorRegistry.freeze();
+  const providerRegistry = createSettlementRecoveryProviderRegistry();
+  providerRegistry.register(
+    MANUAL_BALANCE_SETTLEMENT_KEY,
+    createManualBalanceSettlementRecoveryProvider()
+  );
+  providerRegistry.freeze();
+  return createStartupRecoveryCoordinator({
+    readRepository: h.readRepository,
+    inspectorRegistry,
+    providerRegistry,
+    requestOwnerRepository: h.requestOwnerRepository,
+    observationAttemptRepository: h.observationAttemptRepository,
+    recoveryControlRepository: h.recoveryControlRepository,
+    resolvePolicy: (actionKey) => actionKey === MANUAL_BALANCE_ACTION_KEY
+      ? manualBalanceRecoveryPolicy()
+      : null,
+    planTransitions: createManualBalanceRecoveryPlanTransitions(h.readRepository)
+  });
+}
+
 function settlementInput(overrides = {}) {
   const taskRunId = overrides.taskRunId || 'task-manual-seed';
   const interactionOrdinal = overrides.interactionOrdinal || 1;
+  const desiredRecords = overrides.records || [record({ endBalance: 1200 + interactionOrdinal })];
+  const sourceRecords = desiredRecords.slice(0, -1).map((item) => ({ ...item }));
+  const incoming = { ...desiredRecords[desiredRecords.length - 1] };
+  delete incoming.updatedAt;
+  const existingIndex = sourceRecords.findIndex((item) => (
+    [item.merchantId, item.currency, item.billDate].join('|') ===
+    [incoming.merchantId, incoming.currency, incoming.billDate].join('|')
+  ));
   return {
     taskRunId,
     ...createManualBalanceOperationIdentity(taskRunId, interactionOrdinal),
     jobId: overrides.jobId || `job-manual-${interactionOrdinal}`,
-    targetAliasKey: overrides.targetAliasKey || createManualBalanceTargetAlias('中行'),
     tokenIdHash: overrides.tokenIdHash || createHash('sha256').update(`token-${interactionOrdinal}`).digest('hex'),
     sessionRevision: overrides.sessionRevision ?? 3,
-    records: overrides.records || [record({ endBalance: 1200 + interactionOrdinal })],
+    plan: overrides.plan || {
+      storageRoot: overrides.storageRoot || '',
+      bankName: overrides.bankName || '中行',
+      records: sourceRecords,
+      recordsEvidence: balanceSeedRecordsEvidence(sourceRecords),
+      existingIndex,
+      record: incoming
+    },
+    ...(overrides.preCommitCheck ? { preCommitCheck: overrides.preCommitCheck } : {}),
     ...(overrides.faultHooks ? { faultHooks: overrides.faultHooks } : {})
   };
+}
+
+function expectedRecords(input) {
+  return materializeManualBalanceSeedPlan(input.plan, new Date(NOW)).records;
+}
+
+function targetAlias(input, options = {}) {
+  return createManualBalanceTargetAlias(input.plan.bankName, options);
 }
 
 test('legacy与atomic共享唯一serializer，字段/排序/中文生成方式/尾换行逐字节等价', (t) => {
@@ -158,7 +221,7 @@ test('legacy与atomic共享唯一serializer，字段/排序/中文生成方式/�
   ]);
 });
 
-test('TaskRun持久ordinal：同token transport recovery复用，新token顺序分配且operationKey不复用', () => {
+test('TaskRun持久ordinal history：同token复用、新token递增、A/B/A旧token fail closed', () => {
   const db = openDb();
   const taskRunId = seedTask(db);
   const allocator = createManualBalanceInteractionOrdinalAllocator(db);
@@ -167,6 +230,9 @@ test('TaskRun持久ordinal：同token transport recovery复用，新token顺序�
   const first = allocator.allocate({ taskRunId, tokenIdHash: token1 });
   const replay = allocator.allocate({ taskRunId, tokenIdHash: token1 });
   const second = allocator.allocate({ taskRunId, tokenIdHash: token2 });
+  assert.throws(() => allocator.allocate({ taskRunId, tokenIdHash: token1 }), {
+    code: 'MANUAL_BALANCE_TOKEN_STALE'
+  });
   assert.deepEqual(first, replay);
   assert.equal(first.interactionOrdinal, 1);
   assert.equal(second.interactionOrdinal, 2);
@@ -180,6 +246,10 @@ test('TaskRun持久ordinal：同token transport recovery复用，新token顺序�
     tokenIdHash: token2,
     interactionOrdinal: 2
   });
+  assert.deepEqual(metadata.statementManualBalanceOrdinalHistory, [
+    { tokenIdHash: token1, interactionOrdinal: 1 },
+    { tokenIdHash: token2, interactionOrdinal: 2 }
+  ]);
   db.close();
 });
 
@@ -204,12 +274,35 @@ test('TaskRun ordinal metadata类型/范围漂移fail closed且事务回滚', ()
   db.close();
 });
 
+test('TaskRun ordinal history拒绝重复token/ordinal与非单调映射', () => {
+  const db = openDb();
+  const taskRunId = seedTask(db, 'task-corrupt-history');
+  const token1 = createHash('sha256').update('history-1').digest('hex');
+  const token2 = createHash('sha256').update('history-2').digest('hex');
+  db.prepare('UPDATE archive_task_runs SET metadata_json = ? WHERE task_run_id = ?').run(
+    JSON.stringify({
+      statementManualBalanceOrdinal: 2,
+      statementManualBalanceCurrent: { tokenIdHash: token2, interactionOrdinal: 2 },
+      statementManualBalanceOrdinalHistory: [
+        { tokenIdHash: token1, interactionOrdinal: 1 },
+        { tokenIdHash: token2, interactionOrdinal: 1 }
+      ]
+    }),
+    taskRunId
+  );
+  assert.throws(() => createManualBalanceInteractionOrdinalAllocator(db).allocate({
+    taskRunId,
+    tokenIdHash: createHash('sha256').update('history-3').digest('hex')
+  }), { code: 'MANUAL_BALANCE_TASK_METADATA_INVALID' });
+  db.close();
+});
+
 test('no-op在Intent/critical前返回且不产生任何control event', async (t) => {
   const h = createHarness(t);
-  const input = settlementInput();
-  const targetPath = h.resolveTargetPath(input.targetAliasKey);
+  const input = settlementInput({ storageRoot: h.root });
+  const targetPath = h.resolveTargetPath(targetAlias(input));
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-  fs.writeFileSync(targetPath, serializeBalanceSeedRecords(input.records));
+  fs.writeFileSync(targetPath, serializeBalanceSeedRecords(expectedRecords(input)));
   const result = await h.coordinator.settle(input);
   assert.equal(result.status, 'noop');
   assert.equal(result.intentId, null);
@@ -217,18 +310,66 @@ test('no-op在Intent/critical前返回且不产生任何control event', async (t
   assert.deepEqual(h.readRepository.listRecoveryEvents(input.taskRunId), []);
 });
 
+test('async preCommit stale gate与persistent prepared request conflict均在no-op前fail closed', async (t) => {
+  const h = createHarness(t);
+  const noopInput = settlementInput({
+    storageRoot: h.root,
+    preCommitCheck: async () => {
+      await Promise.resolve();
+      throw Object.assign(new Error('stale'), { code: 'ACTION_TOKEN_STALE' });
+    }
+  });
+  const noopTarget = h.resolveTargetPath(targetAlias(noopInput));
+  fs.mkdirSync(path.dirname(noopTarget), { recursive: true });
+  fs.writeFileSync(noopTarget, serializeBalanceSeedRecords(expectedRecords(noopInput)));
+  await assert.rejects(h.coordinator.settle(noopInput), { code: 'ACTION_TOKEN_STALE' });
+  assert.deepEqual(h.readRepository.listRecoveryEvents(noopInput.taskRunId), []);
+
+  fs.rmSync(noopTarget);
+  let reserveOnly = true;
+  const crashyWriter = {
+    ...h.transitionWriter,
+    write(transition, safePayload = {}) {
+      if (reserveOnly && transition.entityKind === 'critical-intent' &&
+          transition.command === 'create-prepared') {
+        reserveOnly = false;
+        h.requestOwnerRepository.reserveTransitionRequest({
+          requestKey: transitionRequestKey(transition),
+          transition,
+          safePayload
+        });
+        throw Object.assign(new Error('crash after owner reservation'), { simulatedCrash: true });
+      }
+      return h.transitionWriter.write(transition, safePayload);
+    }
+  };
+  const coordinator = createMainSettlementIntentCoordinator({
+    transitionWriter: crashyWriter,
+    readRepository: h.readRepository,
+    resolveTargetPath: h.resolveTargetPath,
+    fsyncDirectory: SUPPORTED_DIRECTORY_FSYNC,
+    now: () => new Date(NOW)
+  });
+  const input = settlementInput({ storageRoot: h.root });
+  await assert.rejects(coordinator.settle(input), { simulatedCrash: true });
+  fs.mkdirSync(path.dirname(noopTarget), { recursive: true });
+  fs.writeFileSync(noopTarget, serializeBalanceSeedRecords(expectedRecords(input)));
+  await assert.rejects(coordinator.settle(input), { code: 'RECOVERY_REQUEST_KEY_CONFLICT' });
+  assert.deepEqual(h.readRepository.listRecoveryEvents(input.taskRunId), []);
+});
+
 test('non-noop只走Main-owned prepared/acked，durable post inspection后committed/closed', async (t) => {
   const h = createHarness(t);
-  const input = settlementInput();
+  const input = settlementInput({ storageRoot: h.root });
   const result = await h.coordinator.settle(input);
   assert.equal(result.status, 'committed');
   assert.equal(result.inspection.outcome, 'committed');
   const intent = h.readRepository.getCriticalIntentById(result.intentId);
   assert.equal(intent.coordinationKind, 'main-owned-settlement');
   assert.equal(intent.state, 'closed');
-  assert.deepEqual(readBalanceSeedRecords(h.root, '中行'), input.records);
+  assert.deepEqual(readBalanceSeedRecords(h.root, '中行'), expectedRecords(input));
   const events = h.readRepository.listRecoveryEvents(input.taskRunId);
-  assert.deepEqual(events.map((item) => item.nextState), [
+  assert.deepEqual(events.filter((item) => item.nextState !== null).map((item) => item.nextState), [
     'prepared', 'acked', 'committed', 'closed'
   ]);
   assert.equal(JSON.stringify(events).includes('critical:ready'), false);
@@ -241,6 +382,7 @@ test('temp/rename前失败保持pre并以not-committed recovered关闭；可用�
   writeBalanceSeedRecords(h.root, '中行', [record({ endBalance: 10 })]);
   const original = fs.readFileSync(target);
   const input = settlementInput({
+    storageRoot: h.root,
     records: [record({ endBalance: 20 })],
     faultHooks: { beforeRename() { throw Object.assign(new Error('rename blocked'), { code: 'EIO' }); } }
   });
@@ -254,7 +396,13 @@ test('temp/rename前失败保持pre并以not-committed recovered关闭；可用�
   assert.deepEqual(fs.readFileSync(target), original);
   const firstIntent = h.readRepository.getCriticalIntentById(firstIntentId);
   assert.equal(firstIntent.state, 'closed');
+  const decidedReplay = await h.coordinator.settle(input);
+  assert.equal(decidedReplay.status, 'not-committed');
+  assert.equal(decidedReplay.replayed, true);
+  assert.equal(decidedReplay.intentId, firstIntentId);
+  assert.deepEqual(fs.readFileSync(target), original, 'recovered replay不得再次写target');
   const retry = await h.coordinator.settle(settlementInput({
+    storageRoot: h.root,
     interactionOrdinal: 2,
     records: [record({ endBalance: 20 })]
   }));
@@ -266,8 +414,8 @@ test('directory fsync unsupported保持acked Intent并建立DURABILITY_BARRIER_U
   const h = createHarness(t, {
     fsyncDirectory: () => Object.freeze({ capability: 'unsupported', errorCode: 'EPERM' })
   });
-  const input = settlementInput();
-  fs.mkdirSync(path.dirname(h.resolveTargetPath(input.targetAliasKey)), { recursive: true });
+  const input = settlementInput({ storageRoot: h.root });
+  fs.mkdirSync(path.dirname(h.resolveTargetPath(targetAlias(input))), { recursive: true });
   const result = await h.coordinator.settle(input);
   assert.equal(result.status, 'terminal-failure');
   assert.equal(result.errorCode, 'DURABILITY_BARRIER_UNAVAILABLE');
@@ -286,12 +434,12 @@ test('首次创建target目录时先持久化parent entry；unsupported不写tar
       return Object.freeze({ capability: 'unsupported', errorCode: 'EPERM' });
     }
   });
-  const input = settlementInput();
+  const input = settlementInput({ storageRoot: h.root });
   const result = await h.coordinator.settle(input);
   assert.equal(result.status, 'terminal-failure');
   assert.equal(result.errorCode, 'DURABILITY_BARRIER_UNAVAILABLE');
   assert.equal(fsyncCalls, 1);
-  assert.equal(fs.existsSync(h.resolveTargetPath(input.targetAliasKey)), false);
+  assert.equal(fs.existsSync(h.resolveTargetPath(targetAlias(input))), false);
   assert.equal(h.readRepository.getCriticalIntentById(result.intentId).state, 'acked');
   assert.equal(h.readRepository.listActiveRecoveryHolds()[0].reasonCode,
     'DURABILITY_BARRIER_UNAVAILABLE');
@@ -307,12 +455,12 @@ test('rename后的directory fsync error不能把exact post误报为durable commi
       );
     }
   });
-  const input = settlementInput();
-  fs.mkdirSync(path.dirname(h.resolveTargetPath(input.targetAliasKey)), { recursive: true });
+  const input = settlementInput({ storageRoot: h.root });
+  fs.mkdirSync(path.dirname(h.resolveTargetPath(targetAlias(input))), { recursive: true });
   let intentId;
   await assert.rejects(h.coordinator.settle(input), (error) => {
     assert.equal(error.code, 'DURABILITY_DIRECTORY_FSYNC_FAILED');
-    assert.equal(error.inspectionOutcome, 'committed');
+    assert.equal(error.inspectionOutcome, 'unknown');
     assert.equal(error.settlementOutcome, 'unknown');
     intentId = error.intentId;
     return true;
@@ -320,10 +468,10 @@ test('rename后的directory fsync error不能把exact post误报为durable commi
   assert.equal(h.readRepository.getCriticalIntentById(intentId).state, 'acked');
   assert.equal(h.readRepository.listActiveRecoveryHolds()[0].reasonCode,
     'DURABILITY_BARRIER_UNAVAILABLE');
-  assert.deepEqual(readBalanceSeedRecords(h.root, '中行'), input.records);
+  assert.deepEqual(readBalanceSeedRecords(h.root, '中行'), expectedRecords(input));
 });
 
-test('target写入前parent-directory fsync error按exact pre收口not-committed', async (t) => {
+test('target写入前parent-directory fsync error持久Hold且清理新目录，startup不得source-missing', async (t) => {
   const h = createHarness(t, {
     fsyncDirectory: () => {
       throw new DurabilityBarrierError(
@@ -333,17 +481,26 @@ test('target写入前parent-directory fsync error按exact pre收口not-committed
       );
     }
   });
-  const input = settlementInput();
+  const input = settlementInput({ storageRoot: h.root });
   let intentId;
   await assert.rejects(h.coordinator.settle(input), (error) => {
-    assert.equal(error.settlementOutcome, 'not-committed');
-    assert.equal(error.inspectionOutcome, 'not-committed');
+    assert.equal(error.settlementOutcome, 'unknown');
+    assert.equal(error.inspectionOutcome, 'unknown');
     intentId = error.intentId;
     return true;
   });
-  assert.equal(h.readRepository.getCriticalIntentById(intentId).state, 'closed');
-  assert.equal(h.readRepository.listActiveRecoveryHolds().length, 0);
-  assert.equal(fs.existsSync(h.resolveTargetPath(input.targetAliasKey)), false);
+  assert.equal(h.readRepository.getCriticalIntentById(intentId).state, 'acked');
+  assert.equal(h.readRepository.listActiveRecoveryHolds()[0].reasonCode,
+    'DURABILITY_BARRIER_UNAVAILABLE');
+  assert.equal(fs.existsSync(h.resolveTargetPath(targetAlias(input))), false);
+  assert.equal(fs.existsSync(path.dirname(h.resolveTargetPath(targetAlias(input)))), false,
+    'parent entry barrier失败不得遗留目录导致下次跳过');
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const summary = await createStartupForHarness(h).scanAndRecover();
+    assert.equal(summary.sourceCount, 1);
+    assert.equal(h.readRepository.getCriticalIntentById(intentId).state, 'acked');
+    assert.equal(h.readRepository.listActiveRecoveryHolds().length, 1);
+  }
 });
 
 test('Inspector重读target，exact post/pre/neither分别committed/not-committed/unknown且证据有界', async (t) => {
@@ -371,7 +528,10 @@ test('Inspector重读target，exact post/pre/neither分别committed/not-committe
       expectedPost: snapshotForBytes(postBytes),
       sessionRevision: 1,
       tokenIdHash: 'a'.repeat(64),
-      interactionOrdinal: 1
+      interactionOrdinal: 1,
+      planBindingHash: 'b'.repeat(64),
+      commitUpdatedAt: NOW,
+      durabilityBarrierRequired: true
     }
   };
   const inspector = createManualBalanceSeedInspector({ resolveTargetPath: h.resolveTargetPath });
@@ -381,7 +541,7 @@ test('Inspector重读target，exact post/pre/neither分别committed/not-committe
     [Buffer.from('{}'), 'unknown']
   ]) {
     fs.writeFileSync(target, bytes);
-    const result = await inspector(source);
+    const result = await inspector(source, { durabilityBarrierCompleted: outcome === 'committed' });
     assert.equal(result.outcome, outcome);
     assert.ok(Buffer.byteLength(JSON.stringify(result), 'utf8') < 4096);
   }
@@ -393,7 +553,7 @@ test('live Inspector不可用时保留acked Intent并立即建立unknown Hold', 
       throw Object.assign(new Error('target read unavailable'), { code: 'EIO' });
     }
   });
-  const input = settlementInput();
+  const input = settlementInput({ storageRoot: h.root });
   await assert.rejects(h.coordinator.settle(input), (error) => {
     assert.equal(error.code, 'EIO');
     assert.equal(error.settlementOutcome, 'unknown');
@@ -404,21 +564,22 @@ test('live Inspector不可用时保留acked Intent并立即建立unknown Hold', 
   });
 });
 
-test('COMMIT后reply前crash由startup target-post-image重验收口，seed不重复且session要求重导', async (t) => {
+test('COMMIT后reply前crash已由canonical observation+Intent同事务收口，exact replay不重复seed', async (t) => {
   const h = createHarness(t);
   const crash = Object.assign(new Error('simulated process crash'), { simulatedCrash: true });
   await assert.rejects(h.coordinator.settle(settlementInput({
-    faultHooks: { afterDirectoryFsync() { throw crash; } }
+    storageRoot: h.root,
+    faultHooks: { afterCommitBeforeReply() { throw crash; } }
   })), (error) => error === crash);
   const open = h.readRepository.listOpenCriticalIntents();
-  assert.equal(open.length, 1);
-  assert.equal(open[0].state, 'acked');
+  assert.equal(open.length, 0);
   const target = getBalanceSeedFilePath(h.root, '中行');
   const committedBytes = fs.readFileSync(target);
 
   const inspectorRegistry = createInspectorRegistry();
   inspectorRegistry.register(MANUAL_BALANCE_INSPECTOR_KEY, createManualBalanceSeedInspector({
-    resolveTargetPath: h.resolveTargetPath
+    resolveTargetPath: h.resolveTargetPath,
+    readRepository: h.readRepository
   }));
   inspectorRegistry.freeze();
   const providerRegistry = createSettlementRecoveryProviderRegistry();
@@ -432,26 +593,47 @@ test('COMMIT后reply前crash由startup target-post-image重验收口，seed不�
     inspectorRegistry,
     providerRegistry,
     requestOwnerRepository: h.requestOwnerRepository,
-    observationAttemptRepository: createRecoveryObservationAttemptRepository(h.db),
+    observationAttemptRepository: h.observationAttemptRepository,
     recoveryControlRepository: h.recoveryControlRepository,
     resolvePolicy: (actionKey) => actionKey === MANUAL_BALANCE_ACTION_KEY
       ? manualBalanceRecoveryPolicy()
-      : null
+      : null,
+    planTransitions: createManualBalanceRecoveryPlanTransitions(h.readRepository)
   });
   const summary = await startup.scanAndRecover();
-  assert.equal(summary.sourceCount, 1);
-  assert.deepEqual(summary.decisions[0].boundedResult, {
-    seedCommitted: true,
-    sessionReimportRequired: true
-  });
-  assert.equal(h.readRepository.getCriticalIntentById(open[0].intentId).state, 'closed');
+  assert.equal(summary.sourceCount, 0);
   assert.deepEqual(fs.readFileSync(target), committedBytes, 'startup不得重复写seed');
   assert.equal(h.readRepository.listActiveRecoveryHolds().length, 0);
+  const replay = await h.coordinator.settle(settlementInput({ storageRoot: h.root }));
+  assert.equal(replay.status, 'committed');
+  assert.equal(replay.replayed, true);
+  assert.deepEqual(fs.readFileSync(target), committedBytes, 'exact replay不得重复写seed');
+});
+
+test('rename/dir-fsync完成与canonical observation之间crash时startup仅unknown+Hold且可重复扫描', async (t) => {
+  const h = createHarness(t);
+  const crash = Object.assign(new Error('crash before canonical observation'), { simulatedCrash: true });
+  const input = settlementInput({
+    storageRoot: h.root,
+    faultHooks: { afterDirectoryFsync() { throw crash; } }
+  });
+  await assert.rejects(h.coordinator.settle(input), (error) => error === crash);
+  const intent = h.readRepository.listOpenCriticalIntents()[0];
+  assert.equal(intent.state, 'acked');
+  assert.deepEqual(readBalanceSeedRecords(h.root, '中行'), expectedRecords(input));
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const summary = await createStartupForHarness(h).scanAndRecover();
+    assert.equal(summary.sourceCount, 1);
+    assert.equal(summary.decisions[0].inspection.outcome, 'unknown');
+    assert.equal(h.readRepository.getCriticalIntentById(intent.intentId).state, 'acked');
+    assert.equal(h.readRepository.listActiveRecoveryHolds().length, 1);
+  }
 });
 
 test('post-image neither/rename后异常进入Hold，后续自动settlement不得覆盖未知target', async (t) => {
   const h = createHarness(t);
   const input = settlementInput({
+    storageRoot: h.root,
     faultHooks: {
       afterRename({ targetPath }) {
         fs.writeFileSync(targetPath, '{"foreign":true}\n');
@@ -475,7 +657,7 @@ test('hold与业务preCommit阻断均发生在prepared前，不留下Intent或�
     const h = createHarness(t, blocked === 'hold'
       ? { assertNoHold() { throw Object.assign(new Error('active hold'), { code: 'RECOVERY_HOLD_ACTIVE' }); } }
       : {});
-    const input = settlementInput({ taskRunId: `task-${blocked}` });
+    const input = settlementInput({ storageRoot: h.root, taskRunId: `task-${blocked}` });
     if (blocked === 'preCommit') {
       input.preCommitCheck = () => {
         throw Object.assign(new Error('token stale'), { code: 'ACTION_TOKEN_STALE' });
@@ -485,7 +667,7 @@ test('hold与业务preCommit阻断均发生在prepared前，不留下Intent或�
       ? 'RECOVERY_HOLD_ACTIVE'
       : 'ACTION_TOKEN_STALE' });
     assert.deepEqual(h.readRepository.listOpenCriticalIntents(), []);
-    assert.equal(fs.existsSync(h.resolveTargetPath(input.targetAliasKey)), false);
+    assert.equal(fs.existsSync(h.resolveTargetPath(targetAlias(input))), false);
   }
 });
 
@@ -496,7 +678,7 @@ test('settlement identity拒绝字符串化ordinal/revision与空白身份，不
     { sessionRevision: '3' },
     { jobId: ' job-manual-1' }
   ]) {
-    const input = { ...settlementInput(), ...patch };
+    const input = { ...settlementInput({ storageRoot: h.root }), ...patch };
     await assert.rejects(h.coordinator.settle(input), (error) => {
       assert.match(error.code, /^MANUAL_BALANCE_(OPERATION|SETTLEMENT)_IDENTITY_INVALID$/);
       return true;
@@ -505,26 +687,121 @@ test('settlement identity拒绝字符串化ordinal/revision与空白身份，不
   assert.deepEqual(h.readRepository.listOpenCriticalIntents(), []);
 });
 
-test('同operation exact retry由post-image no-op收口；不同post-image在mutation前deterministic conflict', async (t) => {
+test('同operation exact closed retry返回稳定已决结果；不同post-image在mutation前deterministic conflict', async (t) => {
   const h = createHarness(t);
-  const input = settlementInput();
+  const input = settlementInput({ storageRoot: h.root });
   const first = await h.coordinator.settle(input);
   assert.equal(first.status, 'committed');
   const retry = await h.coordinator.settle(input);
-  assert.equal(retry.status, 'noop');
-  assert.equal(retry.intentId, null);
+  assert.equal(retry.status, 'committed');
+  assert.equal(retry.replayed, true);
+  assert.equal(retry.intentId, first.intentId);
 
-  const target = h.resolveTargetPath(input.targetAliasKey);
+  const target = h.resolveTargetPath(targetAlias(input));
   const committedBytes = fs.readFileSync(target);
-  await assert.rejects(h.coordinator.settle({
-    ...input,
+  const conflicting = settlementInput({
+    storageRoot: h.root,
     records: [record({ endBalance: 9999 })]
-  }), (error) => {
-    assert.match(String(error.code || error.message), /RECOVERY|CONFLICT/);
-    return true;
+  });
+  await assert.rejects(h.coordinator.settle(conflicting), {
+    code: 'MANUAL_BALANCE_OPERATION_CONFLICT'
   });
   assert.deepEqual(fs.readFileSync(target), committedBytes);
   assert.equal(h.readRepository.listActiveRecoveryHolds().length, 0);
+});
+
+test('settlement只接受同一legacy plan绑定并以commit-time updatedAt生成兼容bytes', async (t) => {
+  const h = createHarness(t);
+  const input = settlementInput({ storageRoot: h.root });
+  await assert.rejects(h.coordinator.settle({ ...input, records: expectedRecords(input) }), {
+    code: 'MANUAL_BALANCE_PLAN_BINDING_REQUIRED'
+  });
+  await assert.rejects(h.coordinator.settle({
+    ...input,
+    plan: { ...input.plan, recordsEvidence: 'tampered' }
+  }), { code: 'BALANCE_SEED_PLAN_RECORDS_CHANGED' });
+  await assert.rejects(h.coordinator.settle({
+    ...input,
+    plan: {
+      ...input.plan,
+      bankName: '工行'
+    }
+  }), { code: 'BALANCE_SEED_PLAN_BINDING_INVALID' });
+  assert.deepEqual(h.readRepository.listRecoveryEvents(input.taskRunId), []);
+
+  const result = await h.coordinator.settle(input);
+  const persisted = readBalanceSeedRecords(h.root, '中行');
+  assert.equal(persisted[0].updatedAt, NOW);
+  assert.equal(
+    fs.readFileSync(h.resolveTargetPath(targetAlias(input)), 'utf8'),
+    serializeBalanceSeedRecords(expectedRecords(input)),
+    'atomic settlement必须复用legacy serializer字节合同'
+  );
+  const intent = h.readRepository.getCriticalIntentById(result.intentId);
+  assert.equal(intent.boundedEvidence.commitUpdatedAt, NOW);
+  assert.equal(intent.boundedEvidence.planBindingHash.length, 64);
+  assert.equal(JSON.stringify(intent.boundedEvidence).includes('6222'), false,
+    'intent不得持久化原始账号');
+});
+
+test('async admission期间调用方篡改plan不能改变已绑定post-image', async (t) => {
+  const h = createHarness(t);
+  const input = settlementInput({ storageRoot: h.root });
+  const expected = serializeBalanceSeedRecords(expectedRecords(input));
+  const coordinator = createMainSettlementIntentCoordinator({
+    transitionWriter: h.transitionWriter,
+    readRepository: h.readRepository,
+    resolveTargetPath: h.resolveTargetPath,
+    fsyncDirectory: SUPPORTED_DIRECTORY_FSYNC,
+    now: () => new Date(NOW),
+    async assertNoHold() {
+      await Promise.resolve();
+      input.plan.record.endBalance = 9999;
+      input.plan.record.currency = 'USD';
+    }
+  });
+  const result = await coordinator.settle(input);
+  assert.equal(result.status, 'committed');
+  assert.equal(fs.readFileSync(h.resolveTargetPath(targetAlias(input)), 'utf8'), expected);
+  assert.equal(readBalanceSeedRecords(h.root, '中行')[0].currency, 'CNY');
+  assert.equal(readBalanceSeedRecords(h.root, '中行')[0].endBalance, 1201);
+});
+
+test('Darwin/Windows target alias与conflict scope复用NFC+full case-fold权威规范化', async (t) => {
+  const composed = 'ÉBANK';
+  const decomposed = 'e\u0301bank';
+  assert.equal(
+    createManualBalanceTargetAlias(composed, { platform: 'darwin' }),
+    createManualBalanceTargetAlias(decomposed, { platform: 'darwin' })
+  );
+  assert.equal(
+    createManualBalanceTargetAlias('BANK', { platform: 'win32' }),
+    createManualBalanceTargetAlias('bank', { platform: 'win32' })
+  );
+  assert.notEqual(
+    createManualBalanceTargetAlias('BANK', { platform: 'linux' }),
+    createManualBalanceTargetAlias('bank', { platform: 'linux' })
+  );
+
+  const h = createHarness(t, { platform: 'darwin' });
+  const first = settlementInput({
+    storageRoot: h.root,
+    bankName: composed,
+    records: [record({ templateName: `${composed}-上海`, endBalance: 10 })]
+  });
+  const second = settlementInput({
+    storageRoot: h.root,
+    taskRunId: 'task-alias-second',
+    bankName: decomposed,
+    records: [record({ templateName: `${decomposed}-上海`, endBalance: 20 })]
+  });
+  const firstResult = await h.coordinator.settle(first);
+  const secondResult = await h.coordinator.settle(second);
+  const firstIntent = h.readRepository.getCriticalIntentById(firstResult.intentId);
+  const secondIntent = h.readRepository.getCriticalIntentById(secondResult.intentId);
+  assert.equal(firstIntent.conflictScopeKey, secondIntent.conflictScopeKey);
+  assert.equal(fs.readdirSync(path.join(h.root, 'balance-seeds')).length, 1,
+    '物理同target不得因case/Unicode别名创建第二文件');
 });
 
 test('startup binding不复制production policy authority且target alias不携带账号/路径', () => {

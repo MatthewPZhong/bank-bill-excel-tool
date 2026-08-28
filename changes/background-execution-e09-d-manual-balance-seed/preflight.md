@@ -28,8 +28,20 @@
 | archive task metadata CAS shape for ordinal allocation | known unknown | high | easy | TaskRun identity and metadata exist in `archive_task_runs` | PROBE | in-memory DatabaseSync concurrent/replay tests | allocate under `BEGIN IMMEDIATE` with exact TaskRun identity |
 | startup provider continuation can regenerate an in-memory Statement session | known unknown | medium | medium | spec explicitly says session is not restored | ASSUME | recovery test proves seed is not repeated and requires re-import | provider closes committed seed settlement but does not recreate session |
 | live production routing should switch in E09-D | contract question resolved by spec | high | hard | release strategy says legacy until gate and canonical policy says false/legacy/0 | ASSUME | policy/static contract test | keep new path dormant and injectable; do not change IPC routing |
-| generic startup transition planner can accept manual sources | known unknown | medium | easy | `preFundMptRecoveryPlanTransitions` returns `[]` for non-MPT actions | PROBE | exact manual startup recovery test | reuse generic immediate intent transitions; do not add a manual transition authority |
-| same operation with a different post-image can replay an old intent identity | known unknown | high | easy | transition request identity is command + intentId | PROBE | exact retry vs changed-post test | derive intentId deterministically from operationKey so request-owner hash conflict occurs before file mutation |
+| generic startup transition planner can accept manual sources | known unknown | medium | easy | `preFundMptRecoveryPlanTransitions` returns `[]` for non-MPT actions | PROBE | exact manual startup recovery test | add only the manual action binding over generic RecoverySourceV1 transitions; keep RecoveryControl as the sole authority |
+| same operation with a different post-image can replay an old intent identity | known unknown | high | easy | transition request identity is command + intentId | PROBE | exact retry vs changed-post test | inspect the deterministic operation Intent and exact binding before any target mutation; exact replay is stable, mismatch fails closed |
+
+## Reviewer Round 1 Unknowns Closure
+
+| 未知 | 结论 | 动态证据 |
+| --- | --- | --- |
+| post-image 是否足以证明跨启动 durability | 否；只接受 canonical observation 中持久的 barrier 完成事实。无事实或有 durability Hold 时保持 unknown/open | post-without-event、unsupported/error、重复 startup fault tests |
+| closed/recovered operation 是否可在无 mutation 下重放 | 是；先按 operationKey 查 Intent 并验证完整 binding，exact 返回稳定结果，different post fail closed | committed/recovered replay + conflict test |
+| no-op 是否可以跳过 request/token gate | 否；read-only request-owner conflict 与 awaited preCommit 都先执行，但 no-op 不创建 Intent | async stale/orphan request test |
+| A/B/A token 如何处理 | 持久完整 history；A(current) 可复用，B 新增 ordinal，历史 A 重放拒绝 stale；损坏/重复 metadata fail closed | ordinal history/corruption tests |
+| 跨平台同一物理文件 scope | 使用仓库 canonical target identity：sanitized basename、NFC/full case-fold、现存祖先 realpath | Darwin/Windows alias/scope test |
+| live Inspector 如何避免第二 authority | canonical attempt 可恢复；observation event 与所有 transition 在同一 RecoveryControl 事务提交，startup 重放同一状态机 | reply loss / pre-observation crash / repeated startup tests |
+| settlement 如何证明业务输入同源 | 先冻结 legacy preflight plan snapshot，再校验 bank/records/account/currency/date/balance，commit-time materialize `updatedAt` 并复用 legacy serializer | plan tamper/async mutation/bank mismatch/byte golden tests |
 
 ## 风险优先计划
 
@@ -37,7 +49,7 @@
 | --- | --- | --- | --- | --- | --- |
 | 1 | factor and golden-lock seed bytes/snapshots | business format/amount/currency/account/date | byte equality and legacy unit tests | stops all further work | revert factor only |
 | 2 | implement ordinal allocator and exact operation identity | each prompt unique; replay same token | ordinal/replay/concurrency tests | invalidates settlement identity | keep module dormant |
-| 3 | implement Inspector and atomic replace primitive | pre/post/neither and durability barrier | injected file fault matrix | blocks coordinator | module-only rollback |
+| 3 | implement Inspector and atomic replace primitive | pre/post/neither and persisted durability barrier | injected file/startup fault matrix | blocks coordinator | module-only rollback |
 | 4 | compose Main-owned Intent coordinator | single intent authority/no Worker handshake | transition trace and crash points | blocks managed path | retain legacy routing |
 | 5 | register startup inspector/provider seam | committed seed not repeated; unknown held | startup recovery tests | production remains false | omit registration until fixed |
 | 6 | run cross-version and blindspot checks | no regression/hidden bypass | E09-P0/A/B/C, C2, smoke/static | do not mark local-ready | focused fix only |

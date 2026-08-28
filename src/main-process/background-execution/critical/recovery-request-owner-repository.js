@@ -163,6 +163,42 @@ function transitionReservation(db, input, now, createEventId) {
   });
 }
 
+function inspectTransitionReservation(db, input) {
+  const owned = exactObject(
+    input,
+    ['requestKey', 'transition', 'safePayload'],
+    'inspectTransitionRequest input'
+  );
+  const transition = assertC1Transition(validateTransition(owned.transition));
+  const computedRequestKey = transitionRequestKey(transition);
+  if (owned.requestKey !== computedRequestKey) {
+    fail('RECOVERY_REQUEST_KEY_MISMATCH', 'transition requestKey 与 durable identity tuple 不一致');
+  }
+  const existing = ownerRow(db, computedRequestKey);
+  if (!existing) return null;
+  const request = validateTransitionRequest({
+    transition,
+    event: {
+      eventId: existing.event_id,
+      createdAt: existing.created_at,
+      safePayload: owned.safePayload
+    }
+  });
+  const evidence = requestEvidence('transitionWithRecoveryEvent', request);
+  verifyExistingOwner(existing, {
+    requestKey: computedRequestKey,
+    writer: 'transitionWithRecoveryEvent',
+    eventId: existing.event_id,
+    createdAt: existing.created_at,
+    ...evidence
+  });
+  return Object.freeze({
+    requestKey: computedRequestKey,
+    status: existing.status,
+    requestHash: existing.request_hash
+  });
+}
+
 const OBSERVATION_DRAFT_REQUIRED = Object.freeze([
   'eventType',
   'observationAttemptId',
@@ -410,6 +446,9 @@ function createRecoveryRequestOwnerRepository(db, options = {}) {
   }
   ensureBackgroundExecutionRecoveryControlSchema(db);
   return Object.freeze({
+    inspectTransitionRequest(input) {
+      return inspectTransitionReservation(db, input);
+    },
     reserveTransitionRequest(input) {
       return transitionReservation(db, input, now, createEventId);
     },
