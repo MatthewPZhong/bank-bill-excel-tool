@@ -6,9 +6,12 @@ const {
   canonicalizeJson,
   canonicalJsonSnapshot
 } = require('../background-execution/canonical-json-v1');
+const { normalizeTargetAliasKey } = require('../toolbox-target-identity');
 const { createStatementPublicTokenIdentity } = require('./interaction-contracts');
+const { isValidTaskStagingResourceId } = require('./staging-ownership');
 
 const MAX_ARTIFACTS = 2;
+const MAX_ARTIFACT_BYTES = 256 * 1024 * 1024;
 const MAX_INPUT_BYTES = 64 * 1024;
 const SHA256 = /^[0-9a-f]{64}$/;
 
@@ -88,6 +91,7 @@ function createStatementGenerationExecuteRequest(input) {
     fail('STATEMENT_GENERATION_ARTIFACTS_INVALID', 'Generation artifacts are invalid');
   }
   const seen = new Set();
+  const stagingAliases = new Set();
   const artifacts = record.artifacts.map((item, index) => {
     const artifact = exact(item, ['kind', 'artifactKey', 'stagingResourceId'], `artifacts[${index}]`);
     if (artifact.kind !== expectedKinds[index]) {
@@ -101,9 +105,14 @@ function createStatementGenerationExecuteRequest(input) {
       `artifacts[${index}].stagingResourceId`,
       256
     );
-    if (path.isAbsolute(stagingResourceId) || stagingResourceId.includes('\0')) {
+    if (!isValidTaskStagingResourceId(stagingResourceId)) {
       fail('STATEMENT_GENERATION_STAGING_RESOURCE_INVALID', 'stagingResourceId must be relative');
     }
+    const stagingAlias = normalizeTargetAliasKey(path.normalize(stagingResourceId));
+    if (stagingAliases.has(stagingAlias)) {
+      fail('STATEMENT_GENERATION_STAGING_RESOURCE_ALIAS', 'stagingResourceId must be unique by platform alias');
+    }
+    stagingAliases.add(stagingAlias);
     return Object.freeze({ kind: artifact.kind, artifactKey, stagingResourceId });
   });
   return Object.freeze({
@@ -154,7 +163,8 @@ function validateManifestItem(item) {
   if (!path.isAbsolute(value.generationPath) || value.generationPath.length > 4096) {
     fail('STATEMENT_GENERATION_PATH_INVALID', 'generationPath must be a bounded absolute path');
   }
-  if (!Number.isSafeInteger(value.size) || value.size < 1 || !SHA256.test(value.sha256)) {
+  if (!Number.isSafeInteger(value.size) || value.size < 1 || value.size > MAX_ARTIFACT_BYTES ||
+      !SHA256.test(value.sha256)) {
     fail('STATEMENT_GENERATION_FILE_EVIDENCE_INVALID', 'Artifact size/hash is invalid');
   }
   const rowCounts = exact(value.rowCounts, ['input', 'output'], 'rowCounts');
@@ -191,6 +201,7 @@ function validateStatementGenerationResult(value) {
 
 module.exports = {
   MAX_ARTIFACTS,
+  MAX_ARTIFACT_BYTES,
   StatementGenerationContractError,
   createStatementGenerationExecuteRequest,
   createStatementGenerationPrepareRequest,
