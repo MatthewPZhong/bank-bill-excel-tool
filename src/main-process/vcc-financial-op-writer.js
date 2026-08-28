@@ -525,11 +525,26 @@ function assertStructuralStyleMatches(cell, captured, label, options) {
   }
 }
 
+function excelColumnName(columnNumber) {
+  let remaining = columnNumber;
+  let name = '';
+  while (remaining > 0) {
+    const offset = (remaining - 1) % 26;
+    name = `${String.fromCharCode(65 + offset)}${name}`;
+    remaining = Math.floor((remaining - 1) / 26);
+  }
+  return name;
+}
+
 function mergeRangeString(range) {
   const { top, left, bottom, right } = range.model;
-  const start = `${String.fromCharCode(64 + left)}${top}`;
-  const end = `${String.fromCharCode(64 + right)}${bottom}`;
+  const start = `${excelColumnName(left)}${top}`;
+  const end = `${excelColumnName(right)}${bottom}`;
   return `${start}:${end}`;
+}
+
+function canonicalMergeRanges(sheet) {
+  return Object.values(sheet._merges || {}).map(mergeRangeString).sort();
 }
 
 function assertMergeLayout(sheet, renderedRows, contract, lastRow) {
@@ -539,7 +554,7 @@ function assertMergeLayout(sheet, renderedRows, contract, lastRow) {
       expected.add(`B${row.rowNumber}:C${row.rowNumber}`);
     }
   }
-  const actualRanges = Object.values(sheet._merges).map(mergeRangeString);
+  const actualRanges = canonicalMergeRanges(sheet);
   const actual = new Set(actualRanges);
   if (actual.size !== expected.size
       || [...expected].some((range) => !actual.has(range))) {
@@ -987,6 +1002,7 @@ module.exports = {
   buildSubjectRowPlan,
   buildResultSheet,
   buildPendingSheet,
+  canonicalMergeRanges,
   validateResultSheet,
   validateStagedWorkbook,
   assertAdjustmentLineage,

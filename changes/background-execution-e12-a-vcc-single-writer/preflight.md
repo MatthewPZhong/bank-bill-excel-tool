@@ -58,6 +58,7 @@
 | --- | --- | --- | --- |
 | post-mkdir full freeze 首次失败后是否还能从 lexical path 安全重取 cleanup authority。 | PROBE（高） | 首次 realpath/freeze 可同时发生 replacement 与 I/O error；再次 stat/realpath 会把 replacement 误认作自建目录。mkdir 不提供持久目录句柄，不能声称消除检查后的 OS 竞态。 | 紧邻 mkdir 冻结 root/parent dev+ino provisional identity；full identity 只能由 provisional + expected real path 派生，后续只验证。无法确认则零删除、Worker/Publisher=0、preserve+有界 recovery path/diagnostic，要求人工恢复；绝不自动从当前 lexical path 重新授权。 |
 | Pending writer 的完整页面 authority 是否包含 sheet visibility/properties/headerFooter。 | PROBE（高） | canonical `buildPendingSheet` 明确创建 visible worksheet并确定 page layout；expected workbook由同一 writer序列化，properties/headerFooter的默认语义稳定可比较。raw OOXML hidden/header-footer/tabColor 可独立篡改并重算 manifest。 | Pending projection纳入 state（visible）、properties、headerFooter，并保留 rows/columns/views/autoFilter/pageSetup/cell style；Main Join复用同一 projection，不新增第二 validator。 |
+| Pending canonical authority 是否包含完整 merge ranges 且不受内部插入顺序影响。 | PROBE（高） | `_merges` 的枚举顺序不是业务语义；若 projection 不含 merges，raw OOXML 可注入 `H2:I2` 并在重算 byteSize/SHA 后保持其它证据自洽。只保存 start 或 end 单点也不能证明合并矩形。 | 复用 Result/Writer 唯一 range model，从 `top/left/bottom/right` 规范化为完整 `start:end` 并排序后纳入 Pending projection；反序插入得到相同证据。真实 OOXML 注入回归必须 Main Join 拒绝且 Publisher=0。 |
 
 ## BLOCK 问题
 

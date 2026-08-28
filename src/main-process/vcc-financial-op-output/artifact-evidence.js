@@ -12,6 +12,7 @@ const {
   buildPendingSheet,
   buildResultSheet,
   buildSubjectRowPlan,
+  canonicalMergeRanges,
   validateResultSheet
 } = require('../vcc-financial-op-writer');
 const { canonicalSha256 } = require('../background-execution/canonical-json-v1');
@@ -73,6 +74,7 @@ function pendingSheetProjection(sheet) {
         outlineLevel: column.outlineLevel || 0
       };
     }),
+    merges: canonicalMergeRanges(sheet),
     rows,
     views: normalizeStyle(sheet.views),
     autoFilter: normalizeStyle(sheet.autoFilter),

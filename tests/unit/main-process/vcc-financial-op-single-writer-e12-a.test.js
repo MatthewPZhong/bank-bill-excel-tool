@@ -442,6 +442,32 @@ async function rewritePendingRowLayout(filePath, rowNumber, attribute) {
   }, 2);
 }
 
+async function injectPendingMergeRange(filePath, mergeRange) {
+  await rewriteWorksheetXml(filePath, (worksheetXml) => {
+    const escapedRange = mergeRange.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    assert.doesNotMatch(
+      worksheetXml,
+      new RegExp(`<mergeCell\\b[^>]*\\bref="${escapedRange}"`)
+    );
+    if (/<mergeCells\b[^>]*>[\s\S]*?<\/mergeCells>/.test(worksheetXml)) {
+      return worksheetXml.replace(
+        /<mergeCells\b([^>]*)>([\s\S]*?)<\/mergeCells>/,
+        (_match, attributes, children) => {
+          const existingCount = (children.match(/<mergeCell\b/g) || []).length;
+          const normalizedAttributes = attributes.replace(/\s*count="\d+"/, '');
+          return `<mergeCells${normalizedAttributes} count="${existingCount + 1}">`
+            + `${children}<mergeCell ref="${mergeRange}"/></mergeCells>`;
+        }
+      );
+    }
+    assert.match(worksheetXml, /<pageMargins\b/);
+    return worksheetXml.replace(
+      /<pageMargins\b/,
+      `<mergeCells count="1"><mergeCell ref="${mergeRange}"/></mergeCells><pageMargins`
+    );
+  }, 2);
+}
+
 function recomputeArtifactIdentity(result, generationPath) {
   const contents = fs.readFileSync(generationPath);
   return {
@@ -632,6 +658,19 @@ test('export-single 复用 one-shot core 导出 exact-one 非首主体，与 leg
     managed.result.artifacts[0].subjectDigest,
     harness.snapshot.authority.subjects[1].subjectDigest
   );
+});
+
+test('Pending canonical merge projection 保留完整范围且与插入顺序无关', () => {
+  const buildProjection = (mergeRanges) => {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet(PENDING_SHEET_NAME);
+    for (const mergeRange of mergeRanges) sheet.mergeCells(mergeRange);
+    return pendingSheetProjection(sheet);
+  };
+  const first = buildProjection(['H2:I2', 'AA10:AC12']);
+  const second = buildProjection(['AA10:AC12', 'H2:I2']);
+  assert.deepEqual(first.merges, ['AA10:AC12', 'H2:I2']);
+  assert.deepEqual(second, first);
 });
 
 test('export-subjects topology 固定一个 Writer，result DTO 有界且不含主体/资金原始行', async (t) => {
@@ -894,7 +933,8 @@ test('raw XLSX XML 自洽篡改样式与完整 Result/Pending 页面布局仍在
     ['pending row 2 outline', (filePath) => rewritePendingRowLayout(filePath, 2, 'outlineLevel')],
     ['pending workbook sheet hidden', rewritePendingSheetState],
     ['pending header footer', rewritePendingHeaderFooter],
-    ['pending sheet properties', rewritePendingSheetProperties]
+    ['pending sheet properties', rewritePendingSheetProperties],
+    ['pending injected merge H2:I2', (filePath) => injectPendingMergeRange(filePath, 'H2:I2')]
   ];
   for (const [label, tamper] of tamperCases) {
     await t.test(label, async () => {
