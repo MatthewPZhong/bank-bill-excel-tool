@@ -4,6 +4,7 @@
 
 - Goal/spec：冻结 v3.2.4 Spec §7.1/§9，TechDoc §9-§14，Platform Contract v1。
 - Initial plan：[preflight.md](./preflight.md)。
+- Restack parent：已审查 E11-C `771572ff3b7b4f623eafd2a8c44c34038f2a6b98`；旧 E12-A 两笔提交按原顺序重放，无文本冲突。
 - Done when：production-false dormant single Writer 在 task/run/archive/FilePlan exact authority 下生成 legacy-equivalent 全主体 artifacts，Main 深度 Join 后 Publisher 一次或零次。
 
 ## Decisions
@@ -39,6 +40,9 @@
 | E11-C/package/task-policy regression | 46/46 PASS | 上一阶段 ReconFix export、packaged runtime、TaskPolicy inventory 未回归。 |
 | VCC integration chains | 19/19、29/29、226/226、77/77 PASS | effective result、历史模板、调整/跨月 archive、破坏性状态链。 |
 | Smoke + static checks | `npm run smoke` PASS；ESLint、`node --check`、`git diff --check` PASS | 全局 smoke 与本轮 JS/差异静态质量门禁。 |
+| E11-C restack interaction | E11-C focused cancellation/cleanup 15/15 PASS；VCC focused 15/15 PASS；既有 VCC writer/service/archive/recovery 87/87 PASS | ReconFix 与 VCC 各自保留单一 cleanup owner；取消后 staging 清零、同 staging 重试和 Publisher 0/1 不漂移。 |
+| Platform/Publisher affected regression | Supervisor、ResourceGovernor、policy/action binding、packaged runtime、TaskPolicy、Publisher 共 243/243 PASS | 新 VCC policy/entry 注册未覆盖 E11-C，transport/lease/journal recovery 不回归。 |
+| Recovery canary | background recovery canary 9/9、recovery control 27/27、pure-compute canary 9/9 PASS | 恢复状态、人工保留和静态 production gate 保持既有语义。 |
 
 ## Round1 Findings And Fixes
 
@@ -60,6 +64,7 @@
 | 并发/幂等 | `export-subjects` compound topology 恒为 1；subjectIndex exact set/order；FilePlan fresh target snapshot；一次 journal publication。 | 不引入 shard、第二 Writer 或自动二次发布。 |
 | 可观测性 | runtime 继续用 `finance-safe-v1`；protocol error/result 受现有 maxBytes/rate-limit/validator 管控。 | 不新增 raw finance diagnostics；production enable 另行收集门禁证据。 |
 | 测试缺口 | 自动测试无法证明 Windows packaged Worker、Excel/WPS 渲染及真实资金样本人工逐项等价。 | 保留为不可绕过的人工 production gate。 |
+| Restack 交互 | E11-C 的 `activeExportPlan`/terminal cleanup 仅属于 ReconFix；VCC 的 generation cleanup 仍由 VCC Writer + Main dispatch owning catch 完成，两个 action 不共享 generation paths 或 Publisher。 | 代码边界与双 focused 回归已覆盖；未引入跨模块 cleanup fallback。 |
 
 ## Reconciliation Blindspot Pass
 

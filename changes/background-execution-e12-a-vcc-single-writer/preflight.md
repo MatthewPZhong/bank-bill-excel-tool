@@ -3,7 +3,7 @@
 ## Task Brief
 
 - Goal：将 VCC Financial OP 现有按主体顺序导出迁入 one-shot 单 Writer 新合同；同一 core 覆盖 `vcc-financial-op:export-subjects` 全主体输出和 `vcc-financial-op:export-single` exact-one subject specialization，Main Join 复核完整集合后只调用一次既有 Publisher。
-- Context：精确 parent 为已审查 E11-C `2e03bf2a39537e8b8ff7960758e227773f17900f`；现有 live `vccFinancialOp:export:result` 在 VCC Service `activeTask` 内由 Main 进程调用 `writeRunWorkbooks`，然后一次 `publishVccFinancialOpOutputs`。
+- Context：本次 restack 的精确 parent 为已审查 E11-C `771572ff3b7b4f623eafd2a8c44c34038f2a6b98`；现有 live `vccFinancialOp:export:result` 在 VCC Service `activeTask` 内由 Main 进程调用 `writeRunWorkbooks`，然后一次 `publishVccFinancialOpOutputs`。
 - Constraints：仅 E12-A 单 Writer；不做 subject SQL filter pushdown、第二 Writer/shard 或 15% benchmark；不接 live IPC/Renderer/Preload，不开启 production；不改金额、币种、差异、revision、archive 语义；复用现有 workbook writer、FilePlan 和 durable journal Publisher。
 - Done when：`production.enabled=false` 的 dormant capability 与 canonical policy 精确一致；一个 Writer 按 `subjectIndex` 顺序生成全部主体；Main 对 task/run/month/revision/fingerprint/archive/FilePlan/path/size/hash/业务 workbook 做 A/B authority 复核；任一 generation/Join/cancel/crash 失败 Publisher=0，全部成功后 Publisher=1；协议 DTO 有界且不携带 raw finance rows；shutdown/cleanup 与 legacy golden 回归通过。
 
@@ -27,6 +27,7 @@
 | Worker 不收 raw rows 时如何保证业务等价。 | 合同未知 | 高 | 一般 | Worker 可 read-only 打开 DB；现有 writer core 可直接从 DB 构造 plan。 | PROBE | authority digest + 真 workbook 回读 golden | Main 仅传 bounded run/subject/path authority；Worker 自读 DB；Main Join 用同一读取器重建期望 plan 并深度回读 workbook。 |
 | revision/archive 在 Worker 生成期变化的 TOCTOU 如何封闭。 | 状态生命周期盲区 | 高 | 一般 | Worker read-only transaction 可得到单一 DB snapshot；Main `activeTask` 阻断同 Service mutation，但仍需防自相一致的伪造/DB 旁路。 | PROBE | A/B authority 替换、生成后改 revision/archive/fingerprint，断言 Publisher=0 | Worker 开始与结束核对 authority digest；Main generation 前和 Join 后重读 task/run authority；Publisher 前再核 FilePlan/target snapshot。 |
 | cancel/crash 后 task-private files 谁清理。 | ownership 未知 | 高 | 容易 | Supervisor 保证 transport/lease shutdown；现有 writer 只在 deferred 模式清理 partial files。 | PROBE | 中途失败、cancel、worker terminate、runtime shutdown 后扫描 staging | Worker 对已知 generation paths 做 finally 清理；Main 仍是目录 owner，Publisher committed 后由现有 wrapper 删除，失败时有界 cleanup。 |
+| E11-C 新增的取消后 cleanup owner 是否会与 VCC Writer/Publisher 重叠。 | restack 交互盲区 | 高 | 容易 | E11-C cleanup 绑定 ReconFix export plan；VCC 仍由其 dispatch/Writer/Publisher 私有边界负责。 | PROBE | E11-C 取消清理回归 + VCC cancel/crash/同 staging 重试 + Supervisor shutdown | 两条 action 保持不同 plan owner；各自清理一次，成功产物不被失败清理误删。 |
 | `export-single` 与 `export-subjects` 的 E12-A 范围边界。 | 范围歧义 | 高 | 容易 | 冻结 Action 范围同时列出两者。 | BLOCK（已收口） | 项目 owner 范围裁决 | E12-A 必须用同一 one-shot Writer core 覆盖两个 action；`export-single` 是 exact-one subject specialization，仍不做 SQL filter pushdown。 |
 
 ## BLOCK 问题
@@ -47,3 +48,4 @@
 | 2 | 构建 Main-owned task/run/archive/FilePlan authority 与 task-private generations。 | activeTask/taskGeneration、runId/month/revision/fingerprint/archive、set/order/path ownership。 | stale/A-B/collision/alias/symlink/target drift 全部在 Publisher 前拒绝。 | 任一 authority 不能唯一收口则不发布。 | 保留 legacy export，managed dormant。 |
 | 3 | Writer 复用 legacy writer core 顺序生成，Main 深度回读每主体 workbook。 | 模板、金额、币种、Pending、style、lineage、subjectIndex 等价。 | 单/多主体 legacy-vs-managed semantic golden。 | 业务证据不一致则 Publisher=0。 | 共享 writer core，不改金额规则。 |
 | 4 | 全部 Join 成功后调用一次既有 Publisher，完成 fault/shutdown/cleanup 测试。 | all-or-none、单次 Publisher、失败/取消/crash 零发布。 | Publisher 计数、journal recovery、staging 残留、runtime shutdown report。 | 故障不能 fail closed 则不交付。 | production 仍 false，live legacy 不变。 |
+| 5 | 在 E11-C 新 parent 上回放 cancellation/cleanup、policy registry 与 recovery canary。 | restack 不覆盖上一阶段 runtime/cleanup authority。 | E11-C focused、Supervisor/registry、VCC recovery 与 canary 全通过。 | 任一 owner 重叠或 cleanup 漂移则停止提交。 | 撤销 E12-A 两笔重放提交，保留已审查 E11-C。 |
