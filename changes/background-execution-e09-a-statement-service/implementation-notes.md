@@ -3,7 +3,7 @@
 ## Baseline
 
 - Goal/spec：frozen v3.2.3 Spec §3、§5、§6、§8、§10～§13；TechDoc §1、§2、§5、§8、§10～§12；仅 E09-A import/session/revision。
-- Exact base：`e67fba5788996275759001c777dc8c80804d972c`。
+- Exact restack base：`c392b297f3dde5702e6b49a34787443b9ccf005a`；按序移植旧 E09-A `df22be5b14fe99524e38c8de890e0af16f5eaa35`、`04b6ca3f1e87c0ddcda4d709fbc95d4a39eba6ad`。
 - Initial plan：[preflight.md](./preflight.md)。
 - Done when：Worker-only state、真实 Service Control atomic reservation adoption、bounded Main/protocol DTO、failure/crash/cancel evidence与legacy资金characterization均满足任务要求；production/live保持false/legacy。
 
@@ -21,6 +21,7 @@
 | Worker 私有 resolver 按 resolved canonical path 判重 | 不同公开 resourceId 可解析到同一文件，重复读取会破坏单次 import 的 file identity | 只按公开 resourceId 判重；读后再去重 | `a.xlsx`/`./a.xlsx`/`sub/../a.xlsx` 在任何文件读取、candidate mutation、resource request 前 fail closed |
 | E09-A template evidence 不含 `selectedBigAccount` | 大账号选择上下文属 E09-B，不应成为公开 Job DTO | 允许 Main 传已选大账号 | 需选择的 mapping 一律返回 `STATEMENT_BIG_ACCOUNT_INTERACTION_BLOCKED`；mapper 的参数仅在 Worker 内部固定为 `null` |
 | 本轮不接 live IPC | frozen E09-A任务明确live继续legacy且production false | shadow双写或feature切换 | production path与Renderer行为零变化 |
+| restack 保留 P0 closure 为权威合同 | exact base 已含三轮 P0 闭环；`range-diff` 显示首笔仅叠加 P0 的 result validator 收紧，第二笔补丁等价 | 以旧 P0 base 重放或覆盖当前 `contracts.js` | overwrite canonical interaction union、legacy sanitize、public/wire ceiling、隐私与 golden 顺序不回退 |
 
 ## Assumptions
 
@@ -41,13 +42,16 @@
 
 | 证据 | 结果 | 覆盖的行为/风险 |
 | --- | --- | --- |
-| branch/base/worktree preflight | `codex/v3.2.3-e09-a-statement-service`；初始实现 parent 与 merge-base 为 `e67fba5788996275759001c777dc8c80804d972c`；review follow-up 从 clean HEAD `df22be5b14fe99524e38c8de890e0af16f5eaa35` 开始 | 防错误worktree、base与外部漂移 |
-| 必需文档/skills完整读取 | AGENTS、unknowns-first、implementation-notes、blindspot-pass、reconciliation checklist、frozen v3.2.3 Spec/TechDoc/sequence、E09-P0 preflight/notes | 边界、workflow与人工红线 |
-| E09-A + E09-P0 定向 Node tests | 44/44 pass，0 fail/skip | 真实 Supervisor/ServiceHost/native Worker 两次 import；跨 1024 文件 session 的 bounded result；canonical path alias 在读取/申请资源前拒绝；attached shutdown cancel 的 exact late reject/grant 两种结算时序、旧 revision 保留、lease/dependency 归零且无 generation crash；其余 template、adoption、crash、bounded/privacy 与四金额/币种/current-all golden |
+| branch/base/worktree preflight | `codex/v3.2.3-e09-a-statement-service-restacked`；隔离 worktree 初始 HEAD/merge-base 为 `c392b297f3dde5702e6b49a34787443b9ccf005a`；旧分支/head 未改写 | 防错误worktree、base与外部漂移 |
+| 顺序移植与语义比对 | 新提交 `f674ae2d`、`3767cd33`；`git range-diff` 显示 cancellation settlement 补丁等价，首笔仅保留 P0 contract 新上下文；无文本冲突 | 防漏提交、倒序、P0 closure 覆盖与 E09-B/C 越界 |
+| 必需文档/skills完整读取 | AGENTS、unknowns-first、implementation-notes、blindspot-pass、reconciliation checklist、frozen v3.2.3 Spec/TechDoc、E09-P0 closure tests、important variables 清单 | 边界、workflow与人工红线 |
+| E09-A + E09-P0 定向 Node tests | 47/47 pass，0 fail/skip | 真实 Supervisor/ServiceHost/native Worker 两次 import；P0 overwrite exact union/单 action、legacy sanitize、240/256 KiB、六 globals、privacy 与四金额/币种/current-all golden；其余 template、adoption、crash、bounded 与 cancellation settlement |
 | ServiceHost/Supervisor/Governor 定向回归 | 149/149 pass，0 fail/skip | persistent replacement、adoption timeout、service generation/crash/close 的平台不变量 |
+| Statement integration scripts | generation pipeline 45/45、universal import routing 20/20、many-to-many review sheet 33/33、hit scenario report 49/49，合计 147/147 pass | 旧 Statement 生成、导入路由、审计输出与稳定顺序不回归 |
+| `npm run smoke` | pass；全部 smoke suites 通过 | 全局业务烟测与 Statement 相关输出接缝 |
 | `node --check` | 8 个受影响 JS/test 全部 pass | ServiceHost、Worker entry、service state machine、contracts、tests 语法 |
 | 定向 ESLint | 使用主仓库 read-only `node_modules` 复跑 pass，0 warning/error | 当前隔离 worktree无本地 `node_modules`；Node tests/ESLint均以 read-only `NODE_PATH` 解析既有依赖，不安装或修改依赖 |
-| whitespace 检查 | exact base 至当前 diff 的 `git diff --check` pass | 所有 E09-A 与 reviewer follow-up 改动均纳入检查 |
+| JSON/whitespace/diff scope | package、canonical policy fixture、E09-P0 golden JSON parse pass；exact base 至当前 `git diff --check` pass；diff 仅 E09-A 文档、7 个 Statement/ServiceHost 源文件与 1 个 E09-A test | 配置可解析、无 whitespace 错误、无 E09-B/C 或发布文件混入 |
 | blindspot pass | 无 live import 接线；Main/background index 无 Statement Worker require；全 protocol trace 递归拒绝 rows/path/private keys 且不含绝对 source path | 入口旁路、所有权泄漏、局部成功冒充整体成功 |
 | reconciliation blindspot pass | 实际调用既有 `buildMappedRows`/statement-session helpers，未新增金额计算；legacy golden 覆盖四金额路径、币种 alias、current/all、balance/manual seed | 输入边界、行序/entry-batch identity、数量对账、资金语义不漂移 |
 
@@ -58,6 +62,7 @@
 - 原子性：candidate 在 `resource:request` 前建好，但只有匹配 grant 的 `resource:adopt-ack` 能一次性替换 `state`；reject、stale source、canonical alias、取消、adoption timeout 均不修改旧 revision。pending cancel tombstone 仅结算原 exact request/grant，不放宽其他 stale control。
 - 不可达状态：未为并行 job、多 pending interaction 或 E09-B/C/D 角色增加抽象；thread-single 的 busy gate 与冻结 Host 状态机为权威。
 - 资金/对账：源文件 stat 读前/后一致性、template digest、session replacement、entry/batch stable order 都在采用前封闭；四金额和币种语义仍由现有 production mapper 唯一决定。
+- P0 closure：overwrite 仍是 canonical `manual-balance` 的 `interaction-required` exact union，且只由 `statement:resolve-manual-balance` 接受；legacy mismatch 先转稳定 alias，public 240 KiB / wire 256 KiB、六 globals inventory 与 current/all golden 均由新 P0 tests 通过。
 - 关键变量：未改 legacy `statementImportSessions`、`lastFileImportContext`、amount/date/currency constants 或 `FileValidationError`；新 revision/result contract 由 exact validator 与真实 Supervisor done gate 覆盖。遵守任务要求，未运行 variables 扫描脚本。
 
 ## Remaining Unknowns

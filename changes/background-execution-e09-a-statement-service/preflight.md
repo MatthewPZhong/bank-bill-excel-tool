@@ -3,7 +3,7 @@
 ## Task Brief
 
 - Goal：仅实现 frozen v3.2.3 sequence 的 E09-A：由长驻 native `thread-single` Statement Service Worker 唯一持有 import/session/revision 大状态，并通过真实 Service Control reservation handshake 原子采用候选 session。
-- Context：精确 base 为 `e67fba5788996275759001c777dc8c80804d972c`；E09-P0 已冻结 Statement DTO、state-footprint、resource contract 与 legacy 资金 golden；live IPC 继续 legacy。
+- Context：本次 restack 精确 base 为 E09-P0 三轮闭环 `c392b297f3dde5702e6b49a34787443b9ccf005a`；旧 E09-A 的两笔独有提交从旧 P0 base 分叉，按原顺序移植；live IPC 继续 legacy。
 - Constraints：Main 不接收或解析业务行；只持 `serviceGeneration`、`sessionRevision`、bounded DTO 和 source/template resource identity。E09-B token/waiting-user、E09-C generation/Publisher、E09-D manual seed、NewAccount 与 production enable 均不做。不得复制金额算法，不运行 `release-check`、`check-vars`、`scan:vars`。
 - Done when：真实 `ServiceHost/Supervisor/Worker entry` 覆盖两次 import 的 batch/revision 稳定演进、grant/adopt-ack 前不可见、reject/adopt failure 保留旧 session、取消/替换失败/crash/bounded status；legacy live 与 production=false 静态门禁、四金额/币种/current-all characterization 不漂移；定向 unit/integration、`node --check`、ESLint、`git diff --check` 通过或如实记录环境阻断。
 
@@ -11,7 +11,8 @@
 
 | 事实 | 证据 | 对方案的约束 |
 | --- | --- | --- |
-| 当前 worktree/branch/HEAD 与精确 base 一致且初始干净 | `pwd`、`git branch --show-current`、`git rev-parse HEAD`、`git merge-base`、`git status --short --branch` | 不做 rebase/base 漂移；只提交 E09-A |
+| 隔离 worktree/branch 从 P0 exact head 创建且初始干净 | `/private/tmp/bbet-v323-e09a-restack.20260829a`；`codex/v3.2.3-e09-a-statement-service-restacked`；初始 HEAD `c392b297f3dde5702e6b49a34787443b9ccf005a` | 不改写原 E09-A 分支；只顺序移植 `df22be5b`、`04b6ca3f` 与必要兼容证据 |
+| P0 closure 新增 overwrite exact union、legacy mismatch sanitize、240/256 KiB、alias/privacy、六 globals 与 current/all golden | P0 contracts/probe/golden 三组 tests；`git range-diff` 的第一笔仅出现预期 P0 contract 叠加，第二笔补丁等价 | E09-A import/status union 不得放宽 interaction-required；overwrite 仍仅允许 `statement:resolve-manual-balance` |
 | E09-P0 已冻结 `STATEMENT_RESOURCE_CONTRACT`、strict public/status DTO、deterministic footprint 与 legacy golden | `src/main-process/statement-worker/{contracts,state-footprint,probe-state-builder}.js`；三组 E09-P0 tests | E09-A 必须直接复用，不能另造预算、DTO 或金额实现 |
 | Platform `ServiceHost` 已实现真实 `persistent-state-replace` request/grant/adopted/adopt-ack 与 governor atomic replacement | `src/main-process/background-execution/service-host.js#processResourceRequest/#processAdopted`；resource governor replacement tests | Worker 必须走 Service Control；不得直接持 governor 或本地假 ack |
 | frozen policy 的五个 `statement:*` 共用 `service.statement`、native `thread-single`、service lifetime，production 均 false/effective legacy/0 | canonical `policy-registry.v3.2.x.json`；v3.2.3 Spec §3 | entry 必须可被同一 service profile 解析；live/flag 不切换 |
@@ -37,7 +38,7 @@
 
 ## 已执行或计划执行的 PROBE
 
-1. 已核验 exact branch/base/worktree 与 canonical Statement policy。
+1. 已核验 restack exact branch/base/worktree、两笔旧提交拓扑与 canonical Statement policy。
 2. 已沿 `file:import` picker → FilePlan evidence → `buildMappedRows` → session append 数据流取证。
 3. 计划用真实 `createExecutionSupervisor`、`createServiceHost`、`createResourceGovernor` 与 native Worker entry 执行两次 import、reject/adopt failure、cancel/crash/status。
 4. 计划捕获所有 Job/Service Control envelope 与 public result，递归证明无 `detailRows`、prepared rows、private context；status 不公开路径。
