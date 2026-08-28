@@ -32,6 +32,9 @@ const RECON_FIX_CANCELLED = 'RECON_FIX_CANCELLED';
 const incomingControlSequence = createDirectionSequenceTracker();
 const incomingJobSequence = createDirectionSequenceTracker();
 const pendingRequests = new Map();
+const phaseReservations = new Map();
+const pendingReleases = new Map();
+const mainRevokeReleases = new Map();
 let serviceIdentity = null;
 let service = null;
 let controlEventSeq = 0;
@@ -122,6 +125,7 @@ function requestPersistentAdoption(job, candidate) {
   });
   return new Promise((resolve, reject) => {
     pendingRequests.set(requestId, {
+      kind: 'persistent',
       requestId,
       job,
       candidate,
@@ -152,6 +156,82 @@ function requestPersistentAdoption(job, candidate) {
   });
 }
 
+function requestPhaseExtension(job, resourcePlan) {
+  if (!resourcePlan || resourcePlan.requestKind !== 'phase-extension' ||
+      !Number.isSafeInteger(resourcePlan.memoryBytes) || resourcePlan.memoryBytes < 1) {
+    const error = new Error('ReconFix phase-extension 资源计划无效');
+    error.code = 'RECON_FIX_PHASE_PLAN_INVALID';
+    throw error;
+  }
+  const requestId = nextId('recon-phase');
+  const controlId = nextId('recon-control');
+  const owner = Object.freeze({
+    kind: 'phase',
+    ownerKeyHash: crypto.createHash('sha256')
+      .update(`${RECON_FIX_SERVICE_KEY}:${serviceIdentity.serviceGeneration}:${job.envelope.jobId}:phase`)
+      .digest('hex'),
+    candidateRevision: 1
+  });
+  return new Promise((resolve, reject) => {
+    pendingRequests.set(requestId, {
+      kind: 'phase',
+      requestId,
+      job,
+      owner,
+      stage: 'requesting',
+      grantId: null,
+      reservationId: null,
+      resolve,
+      reject
+    });
+    try {
+      emitControl('resource:request', controlId, jobRef(job), {
+        requestId,
+        requestKind: 'phase-extension',
+        requested: {
+          memoryBytes: resourcePlan.memoryBytes,
+          cpuSlots: 0,
+          ioHeavySlots: 0
+        },
+        replacesReservationId: null,
+        owner
+      });
+    } catch (error) {
+      pendingRequests.delete(requestId);
+      reject(error);
+    }
+  });
+}
+
+function releasePhaseReservation(job, phase, reason) {
+  if (!phase || phase.released) return Promise.resolve(false);
+  if (phase.job !== job || phaseReservations.get(phase.reservationId) !== phase) {
+    const error = new Error('ReconFix phase reservation 不属于当前 job');
+    error.code = 'RECON_FIX_PHASE_RELEASE_INVALID';
+    return Promise.reject(error);
+  }
+  const controlId = nextId('recon-control');
+  return new Promise((resolve, reject) => {
+    pendingReleases.set(controlId, {
+      controlId,
+      job,
+      phase,
+      reservationId: phase.reservationId,
+      resolve,
+      reject
+    });
+    try {
+      emitControl('resource:release', controlId, jobRef(job), {
+        reservationId: phase.reservationId,
+        reason
+      });
+    } catch (error) {
+      pendingReleases.delete(controlId);
+      reject(error);
+    }
+  });
+}
+
 async function adoptCandidateAtSafepoint(job, candidate) {
   await cancellationSafepoint(job);
   try {
@@ -169,13 +249,17 @@ async function adoptCandidateAtSafepoint(job, candidate) {
 function handleResourceGrant(envelope) {
   const payload = envelope.payload;
   const pending = pendingRequests.get(payload.requestId);
-  if (!pending || pending.stage !== 'requesting' || pending.job !== activeJob ||
-      payload.replacesReservationId !== service.reservationId) {
-    const error = new Error('ReconFix PersistentReservation grant 无对应候选');
+  const replacementMatches = pending && pending.kind === 'persistent'
+    ? payload.replacesReservationId === service.reservationId
+    : payload.replacesReservationId === null;
+  if (!pending || pending.stage !== 'requesting' || pending.job !== activeJob || !replacementMatches) {
+    const error = new Error('ReconFix resource grant 无对应请求');
     error.code = 'RECON_FIX_RESOURCE_GRANT_INVALID';
     throw error;
   }
-  pending.publicResult = service.adopt(pending.candidate, payload.reservationId);
+  if (pending.kind === 'persistent') {
+    pending.publicResult = service.adopt(pending.candidate, payload.reservationId);
+  }
   pending.grantId = payload.grantId;
   pending.reservationId = payload.reservationId;
   pending.stage = 'adopting';
@@ -198,24 +282,49 @@ function handleResourceAdoptAck(envelope) {
   }
   pendingRequests.delete(payload.requestId);
   pending.stage = 'adopted';
+  if (pending.kind === 'phase') {
+    const phase = {
+      job: pending.job,
+      owner: pending.owner,
+      grantId: pending.grantId,
+      reservationId: pending.reservationId,
+      released: false
+    };
+    phaseReservations.set(phase.reservationId, phase);
+    pending.resolve(phase);
+    return;
+  }
   pending.resolve(pending.publicResult);
 }
 
 function handleResourceReject(envelope) {
   const pending = pendingRequests.get(envelope.payload.requestId);
   if (!pending || pending.stage !== 'requesting') {
-    const error = new Error('ReconFix PersistentReservation reject 无对应请求');
+    const error = new Error('ReconFix resource reject 无对应请求');
     error.code = 'RECON_FIX_RESOURCE_REJECT_INVALID';
     throw error;
   }
   pendingRequests.delete(pending.requestId);
-  const error = new Error('ReconFix 状态未获资源准入，旧状态保持不变');
+  const error = new Error(pending.kind === 'phase'
+    ? 'ReconFix 临时内存未获资源准入，未开始解析或整表加载'
+    : 'ReconFix 状态未获资源准入，旧状态保持不变');
   error.code = envelope.payload.reasonCode || 'RECON_FIX_RESOURCE_REJECTED';
   pending.reject(error);
 }
 
 function handleResourceRevoke(envelope) {
   const reservationId = envelope.payload.reservationId;
+  const phase = phaseReservations.get(reservationId) || null;
+  if (phase) {
+    phase.released = true;
+    phaseReservations.delete(reservationId);
+    mainRevokeReleases.set(envelope.controlId, reservationId);
+    emitControl('resource:release', envelope.controlId, envelope.jobRef, {
+      reservationId,
+      reason: 'job-failed'
+    });
+    return;
+  }
   if (!service || service.reservationId !== reservationId) {
     const error = new Error('ReconFix Service 收到非当前 reservation revoke');
     error.code = 'RECON_FIX_RESOURCE_REVOKE_STALE';
@@ -223,15 +332,48 @@ function handleResourceRevoke(envelope) {
   }
   closeRequested = true;
   service.close();
+  mainRevokeReleases.set(envelope.controlId, reservationId);
   emitControl('resource:release', envelope.controlId, envelope.jobRef, {
     reservationId,
     reason: 'service-close'
   });
 }
 
+function handleResourceReleaseAck(envelope) {
+  const pending = pendingReleases.get(envelope.controlId);
+  if (!pending || pending.reservationId !== envelope.payload.reservationId) {
+    // Main 发起 revoke 的 release-ack 沿用原 controlId，不属于 Worker 主动 release promise。
+    if (mainRevokeReleases.get(envelope.controlId) === envelope.payload.reservationId) {
+      mainRevokeReleases.delete(envelope.controlId);
+      return;
+    }
+    const error = new Error('ReconFix resource release-ack 无对应 release');
+    error.code = 'RECON_FIX_RESOURCE_RELEASE_ACK_INVALID';
+    throw error;
+  }
+  pendingReleases.delete(envelope.controlId);
+  pending.phase.released = true;
+  phaseReservations.delete(pending.reservationId);
+  pending.resolve(true);
+}
+
 async function runJob(job) {
+  let phase = null;
+  let terminal = null;
   try {
-    const plan = service.begin(job.envelope.actionKey, job.envelope.payload.input);
+    const preparation = await service.prepare(job.envelope.actionKey, job.envelope.payload.input);
+    await cancellationSafepoint(job);
+    try {
+      phase = await requestPhaseExtension(job, preparation.resourcePlan);
+    } catch (error) {
+      if (job.cancelRequested) throw cancellationError();
+      throw error;
+    }
+    await cancellationSafepoint(job);
+    const plan = preparation.begin();
+    // XLSX parse / BOC .all() 都在 begin 内同步完成；在任何 state adoption 前
+    // 让 shutdown cancel 真实获胜，同时 phase reservation 仍保持占用。
+    await cancellationSafepoint(job);
     let result;
     if (plan.kind === 'candidate') {
       result = await adoptCandidateAtSafepoint(job, plan.candidate);
@@ -244,7 +386,7 @@ async function runJob(job) {
       const resultCandidate = plan.execute();
       result = await adoptCandidateAtSafepoint(job, resultCandidate);
     }
-    emitJobTerminal(job, 'job:done', { result });
+    terminal = { operation: 'job:done', payload: { result } };
   } catch (error) {
     if (error && error.code === RECON_FIX_CANCELLED) {
       if (!job.cancelAckEmitted) {
@@ -252,11 +394,38 @@ async function runJob(job) {
         job.emit('cancel:ack', { cancellation: { scope: 'job' } });
       }
     }
-    emitJobTerminal(job, 'job:error', {
-      error: toProtocolError(error, error && error.code || 'RECON_FIX_SERVICE_FAILED')
-    });
+    terminal = {
+      operation: 'job:error',
+      payload: { error: toProtocolError(error, error && error.code || 'RECON_FIX_SERVICE_FAILED') }
+    };
   } finally {
+    if (phase && !phase.released) {
+      try {
+        await releasePhaseReservation(job, phase, terminal && terminal.operation === 'job:done'
+          ? 'phase-complete'
+          : 'job-failed');
+      } catch (error) {
+        terminal = {
+          operation: 'job:error',
+          payload: {
+            error: toProtocolError(error, error && error.code || 'RECON_FIX_PHASE_RELEASE_FAILED')
+          }
+        };
+      }
+    }
+    if (terminal && terminal.operation === 'job:done' && job.cancelRequested) {
+      const error = cancellationError();
+      if (!job.cancelAckEmitted) {
+        job.cancelAckEmitted = true;
+        job.emit('cancel:ack', { cancellation: { scope: 'job' } });
+      }
+      terminal = {
+        operation: 'job:error',
+        payload: { error: toProtocolError(error, error.code) }
+      };
+    }
     if (service && !closeRequested) service.finish();
+    if (terminal) emitJobTerminal(job, terminal.operation, terminal.payload);
     if (activeJob === job) activeJob = null;
   }
 }
@@ -351,9 +520,10 @@ function handleControl(rawEnvelope) {
   if (envelope.operation === 'resource:adopt-ack') return handleResourceAdoptAck(envelope);
   if (envelope.operation === 'resource:reject') return handleResourceReject(envelope);
   if (envelope.operation === 'resource:revoke') return handleResourceRevoke(envelope);
-  if (envelope.operation === 'resource:release-ack') return;
+  if (envelope.operation === 'resource:release-ack') return handleResourceReleaseAck(envelope);
   if (envelope.operation === 'executor:close') {
-    if (activeJob || pendingRequests.size > 0) {
+    if (activeJob || pendingRequests.size > 0 || pendingReleases.size > 0 ||
+        phaseReservations.size > 0) {
       const error = new Error('ReconFix Service busy 时不得 close');
       error.code = 'RECON_FIX_SERVICE_CLOSE_BUSY';
       throw error;

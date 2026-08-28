@@ -33,14 +33,21 @@ const {
   createWorkerThreadAdapter
 } = require('../../../src/main-process/background-execution/adapters/worker-thread-adapter');
 const {
+  reconFixEvidenceProjection,
   reconFixEvidenceSha256
 } = require('../../../src/main-process/recon-id-fix-service/evidence-projection');
+const {
+  canonicalSha256
+} = require('../../../src/main-process/background-execution/canonical-json-v1');
 const {
   createBackgroundExecutionRuntime,
   isBackgroundExecutionProductionEnabled
 } = require('../../../src/main-process/background-execution/runtime');
 const { readReconIdFixFile } = require('../../../src/main-process/recon-id-fix-io');
 const { runReconIdFix } = require('../../../src/main-process/recon-id-fix-engine');
+const {
+  readBocFxLinkRows
+} = require('../../../src/backend/database/linked-table-repository');
 const {
   RECON_FIX_IMPORT_ACTION,
   RECON_FIX_READONLY_POLICIES,
@@ -49,8 +56,9 @@ const {
   validateReconFixServiceResult
 } = require('../../../src/main-process/recon-id-fix-service/policies');
 const {
+  MAX_PHASE_EXTENSION_BYTES,
   createReconFixService,
-  readBocEvidence
+  estimateImportPhaseBytes
 } = require('../../../src/main-process/recon-id-fix-service/service');
 
 const tmpDirs = [];
@@ -138,7 +146,8 @@ function writeGatewayWorkbook(filePath) {
     Currency: 'USD', Amount: 999, OriginBillBizId: 'OBI', ReconBillBizId: 'RBI'
   }]);
   appendSheet(workbook, CHANNEL_BILL_SHEET_NAME, CHANNEL_BILL_FIELDS, [{
-    channelName: 'BOC', reconciliationId: 'RID-A'
+    channelName: 'BOC', reconciliationId: 'RID-A', currency: 'USD',
+    receiveAmount: 999, createTime: '2026-06-10'
   }]);
   appendSheet(workbook, ORDER_REPAIR_SHEET_NAME_GATEWAY, ORDER_REPAIR_FIELDS_GATEWAY);
   XLSX.writeFile(workbook, filePath);
@@ -186,6 +195,29 @@ function bocScenario() {
   };
 }
 
+function ordinaryGatewayScenario() {
+  return {
+    id: 13,
+    category: 'gateway-recon-id-fix',
+    name: 'E11-A ordinary gateway C4',
+    priority: 0,
+    enabled: true,
+    config: {
+      matchRules: { oneToOne: true, oneToMany: false, manyToOne: false },
+      billTypes: [
+        { seq: 1, side: 'main', conditions: [{ field: 'BillType', op: '等于', value: 'BT' }] },
+        { seq: 2, side: 'opp', conditions: [{ field: 'channelName', op: '等于', value: 'BOC' }] }
+      ],
+      reconGroups: [{
+        leftTypeSeq: 1,
+        rightTypeSeq: 2,
+        fieldPairs: [{ leftField: 'Amount', rightField: 'receiveAmount', locked: true }]
+      }],
+      output: { mode: 'main', subBizType: { mode: 'manualMain', mainValue: '' } }
+    }
+  };
+}
+
 function legacyDigest(result) {
   const owned = structuredClone(result);
   return reconFixEvidenceSha256({
@@ -200,6 +232,20 @@ function adopt(service, candidate, reservationId) {
   const result = service.adopt(candidate, reservationId);
   service.finish();
   return result;
+}
+
+async function preparePlan(service, actionKey, input) {
+  const preparation = await service.prepare(actionKey, input);
+  return preparation.begin();
+}
+
+function readLegacyBocRows(dbPath) {
+  const db = new DatabaseSync(dbPath, { readOnly: true });
+  try {
+    return readBocFxLinkRows(db);
+  } finally {
+    db.close();
+  }
 }
 
 function operationContext(operationKey) {
@@ -267,10 +313,15 @@ function createActiveShutdownHarness(targetAction, trigger) {
           const startTrigger = trigger === 'job:start' && message.channel === 'job' &&
             message.direction === 'command' && message.operation === 'job:start' &&
             message.actionKey === targetAction;
-          const adoptionTrigger = trigger === 'resource:grant' &&
-            message.channel === 'service-control' && message.direction === 'command' &&
-            message.operation === 'resource:grant' && message.jobRef &&
-            message.jobRef.actionKey === targetAction;
+          const grantedRequest = message.operation === 'resource:grant' && events.find((event) =>
+              event.channel === 'service-control' && event.operation === 'resource:request' &&
+              event.payload.requestId === message.payload.requestId);
+          const adoptionTrigger = message.channel === 'service-control' &&
+            message.direction === 'command' && message.operation === 'resource:grant' &&
+            message.jobRef && message.jobRef.actionKey === targetAction && grantedRequest &&
+            ((trigger === 'resource:grant' &&
+              grantedRequest.payload.requestKind === 'persistent-state-replace') ||
+             (trigger === 'phase-grant' && grantedRequest.payload.requestKind === 'phase-extension'));
           if (armed && !interceptedJobId && (startTrigger || adoptionTrigger)) {
             interceptedJobId = startTrigger ? message.jobId : message.jobRef.jobId;
             queueMicrotask(() => {
@@ -327,6 +378,28 @@ function assertCleanCancelledShutdown(harness, control, result, report, activeSt
       event.jobId === control.jobId)
     .map((event) => event.operation);
   assert.deepEqual(operations, ['cancel:ack', 'job:error']);
+  const phaseRequest = harness.events.find((event) =>
+    event.channel === 'service-control' && event.operation === 'resource:request' &&
+    event.jobRef && event.jobRef.jobId === control.jobId &&
+    event.payload.requestKind === 'phase-extension');
+  assert.ok(phaseRequest, 'active shutdown 必须经过真实 phase-extension request');
+  const phaseGrant = harness.commands.find((message) =>
+    message.operation === 'resource:grant' &&
+    message.payload.requestId === phaseRequest.payload.requestId);
+  assert.ok(phaseGrant);
+  assert.ok(harness.events.some((event) =>
+    event.operation === 'resource:adopted' &&
+    event.payload.requestId === phaseRequest.payload.requestId));
+  assert.ok(harness.commands.some((message) =>
+    message.operation === 'resource:adopt-ack' &&
+    message.payload.requestId === phaseRequest.payload.requestId));
+  assert.ok(harness.events.some((event) =>
+    event.operation === 'resource:release' &&
+    event.payload.reservationId === phaseGrant.payload.reservationId &&
+    event.payload.reason === 'job-failed'));
+  assert.ok(harness.commands.some((message) =>
+    message.operation === 'resource:release-ack' &&
+    message.payload.reservationId === phaseGrant.payload.reservationId));
   assert.equal(harness.diagnostics.some((entry) => entry.type === 'late-message'), false);
 }
 
@@ -344,7 +417,37 @@ test('E11-A policy byte-for-byte 沿用 canonical fixture，且 production 保�
   ]);
 });
 
-test('standard Service golden 等价，revision/busy/stale/JPM 边界不越界', () => {
+test('phase-extension 预检先于 XLSX.readFile，超出 policy 上限时 fail closed', async () => {
+  const dir = tempDir('recon-fix-service-phase-preflight-');
+  const filePath = writeStandardWorkbook(path.join(dir, 'phase-preflight.xlsx'));
+  const originalReadFile = XLSX.readFile;
+  let readFileCalls = 0;
+  XLSX.readFile = function instrumentedReadFile(...args) {
+    readFileCalls += 1;
+    return originalReadFile.apply(this, args);
+  };
+  try {
+    const service = createReconFixService({ serviceGeneration: 1 });
+    const preparation = await service.prepare(RECON_FIX_IMPORT_ACTION, {
+      expectedRevision: 0, filePath, subMode: 'business'
+    });
+    assert.equal(readFileCalls, 0, '中央目录资源证据不得提前触发 SheetJS 整表解析');
+    assert.equal(preparation.resourcePlan.requestKind, 'phase-extension');
+    assert.ok(preparation.resourcePlan.memoryBytes > 0);
+    assert.ok(preparation.resourcePlan.memoryBytes <= MAX_PHASE_EXTENSION_BYTES);
+    preparation.begin();
+    assert.equal(readFileCalls, 1);
+    service.finish();
+  } finally {
+    XLSX.readFile = originalReadFile;
+  }
+  assert.throws(
+    () => estimateImportPhaseBytes(MAX_PHASE_EXTENSION_BYTES, 1, 'business'),
+    (error) => error.code === 'RECON_FIX_PHASE_EXTENSION_LIMIT'
+  );
+});
+
+test('standard Service golden 等价，revision/busy/stale/JPM 边界不越界', async () => {
   const dir = tempDir('recon-fix-service-standard-');
   const filePath = writeStandardWorkbook(path.join(dir, '6222021234567890123.xlsx'));
   const scenario = standardScenario();
@@ -353,20 +456,21 @@ test('standard Service golden 等价，revision/busy/stale/JPM 边界不越界',
   assert.equal(legacy.fixedRows.length, 1);
 
   const service = createReconFixService({ serviceGeneration: 7 });
-  let plan = service.begin(RECON_FIX_IMPORT_ACTION, {
+  const importPreparation = await service.prepare(RECON_FIX_IMPORT_ACTION, {
     expectedRevision: 0, filePath, subMode: 'business'
   });
-  assert.throws(
-    () => service.begin(RECON_FIX_IMPORT_ACTION, { expectedRevision: 0, filePath, subMode: 'business' }),
+  await assert.rejects(
+    service.prepare(RECON_FIX_IMPORT_ACTION, { expectedRevision: 0, filePath, subMode: 'business' }),
     (error) => error.code === 'RECON_FIX_SERVICE_BUSY'
   );
+  let plan = importPreparation.begin();
   const imported = adopt(service, plan.candidate, 'reservation-standard-import');
   assert.equal(imported.serviceGeneration, 7);
   assert.equal(imported.revision, 1);
   assert.equal(imported.summary.hasResult, false);
   assert.equal(imported.summary.fileName, '[redacted by finance-safe-v1]');
 
-  plan = service.begin(RECON_FIX_RUN_READONLY_ACTION, {
+  plan = await preparePlan(service, RECON_FIX_RUN_READONLY_ACTION, {
     bocDatabasePath: null, expectedRevision: 1, scenario
   });
   const result = adopt(service, plan.execute(), 'reservation-standard-result');
@@ -376,14 +480,14 @@ test('standard Service golden 等价，revision/busy/stale/JPM 边界不越界',
   assert.equal(validateReconFixServiceResult(result), true);
   assert.ok(Buffer.byteLength(JSON.stringify(result)) < 8192, '返回 Main 的 DTO 必须有界');
 
-  assert.throws(
-    () => service.begin(RECON_FIX_RUN_READONLY_ACTION, {
+  await assert.rejects(
+    service.prepare(RECON_FIX_RUN_READONLY_ACTION, {
       bocDatabasePath: null, expectedRevision: 1, scenario
     }),
     (error) => error.code === 'RECON_FIX_REVISION_STALE'
   );
-  assert.throws(
-    () => service.begin(RECON_FIX_RUN_READONLY_ACTION, {
+  await assert.rejects(
+    service.prepare(RECON_FIX_RUN_READONLY_ACTION, {
       bocDatabasePath: null,
       expectedRevision: 2,
       scenario: { ...scenario, config: { subCategory: 'jpm-dispatch-order-fix' } }
@@ -392,12 +496,20 @@ test('standard Service golden 等价，revision/busy/stale/JPM 边界不越界',
   );
 });
 
-test('unsafe integer 仅投影到 evidence，数值型长单号/大金额与 legacy golden 等价', () => {
+test('unsafe integer 仅投影到 evidence，数值型长单号/大金额与 legacy golden 等价', async () => {
   const unsafeInteger = Number.MAX_SAFE_INTEGER + 1;
   assert.equal(Number.isSafeInteger(unsafeInteger), false);
   const numericEvidenceHash = reconFixEvidenceSha256({ OrderId: unsafeInteger });
   assert.equal(numericEvidenceHash, reconFixEvidenceSha256({ OrderId: unsafeInteger }));
   assert.notEqual(numericEvidenceHash, reconFixEvidenceSha256({ OrderId: String(unsafeInteger) }));
+  const mixedEvidence = {
+    rows: [{ OrderId: unsafeInteger, Amount: 12.34, text: 'CNY' }],
+    nested: { enabled: true, empty: null }
+  };
+  assert.equal(
+    reconFixEvidenceSha256(mixedEvidence),
+    canonicalSha256(reconFixEvidenceProjection(mixedEvidence))
+  );
 
   const dir = tempDir('recon-fix-service-unsafe-integer-');
   const filePath = writeStandardWorkbook(path.join(dir, 'unsafe-integer.xlsx'), 1, {
@@ -414,7 +526,7 @@ test('unsafe integer 仅投影到 evidence，数值型长单号/大金额与 leg
   assert.equal(legacy.fixedRows.length, 1);
 
   const service = createReconFixService({ serviceGeneration: 3 });
-  let plan = service.begin(RECON_FIX_IMPORT_ACTION, {
+  let plan = await preparePlan(service, RECON_FIX_IMPORT_ACTION, {
     expectedRevision: 0, filePath, subMode: 'business'
   });
   const serviceInputRow = plan.candidate.state.session.sheets.businessBills[0];
@@ -424,7 +536,7 @@ test('unsafe integer 仅投影到 evidence，数值型长单号/大金额与 leg
   assert.equal(serviceInputRow.Amount, unsafeInteger);
   adopt(service, plan.candidate, 'reservation-unsafe-import');
 
-  plan = service.begin(RECON_FIX_RUN_READONLY_ACTION, {
+  plan = await preparePlan(service, RECON_FIX_RUN_READONLY_ACTION, {
     bocDatabasePath: null, expectedRevision: 1, scenario
   });
   const resultCandidate = plan.execute();
@@ -438,20 +550,20 @@ test('unsafe integer 仅投影到 evidence，数值型长单号/大金额与 leg
   assert.equal(result.summary.resultDigest, legacyDigest(legacy));
 });
 
-test('scenario 变化先失效旧 result，再原子 adopt 新 result', () => {
+test('scenario 变化先失效旧 result，再原子 adopt 新 result', async () => {
   const dir = tempDir('recon-fix-service-invalidation-');
   const filePath = writeStandardWorkbook(path.join(dir, 'standard.xlsx'));
   const service = createReconFixService({ serviceGeneration: 1 });
-  let plan = service.begin(RECON_FIX_IMPORT_ACTION, {
+  let plan = await preparePlan(service, RECON_FIX_IMPORT_ACTION, {
     expectedRevision: 0, filePath, subMode: 'business'
   });
   adopt(service, plan.candidate, 'reservation-import');
-  plan = service.begin(RECON_FIX_RUN_READONLY_ACTION, {
+  plan = await preparePlan(service, RECON_FIX_RUN_READONLY_ACTION, {
     bocDatabasePath: null, expectedRevision: 1, scenario: standardScenario('first')
   });
   const first = adopt(service, plan.execute(), 'reservation-first');
 
-  plan = service.begin(RECON_FIX_RUN_READONLY_ACTION, {
+  plan = await preparePlan(service, RECON_FIX_RUN_READONLY_ACTION, {
     bocDatabasePath: null, expectedRevision: 2, scenario: standardScenario('changed')
   });
   assert.equal(plan.evidenceChanged, true);
@@ -463,7 +575,7 @@ test('scenario 变化先失效旧 result，再原子 adopt 新 result', () => {
   assert.notEqual(second.resultHandle, first.resultHandle);
 });
 
-test('BOC Service 只读 golden 等价，DB evidence 变化会锁定失效旧 result', () => {
+test('BOC Service 只读 golden 等价，DB evidence 变化会锁定失效旧 result', async () => {
   const dir = tempDir('recon-fix-service-boc-');
   const filePath = writeGatewayWorkbook(path.join(dir, 'gateway.xlsx'));
   const unsafeAmount = Number.MAX_SAFE_INTEGER + 1;
@@ -471,20 +583,20 @@ test('BOC Service 只读 golden 等价，DB evidence 变化会锁定失效旧 re
   const scenario = bocScenario();
   const beforeDbHash = crypto.createHash('sha256').update(fs.readFileSync(dbPath)).digest('hex');
   const legacySession = readReconIdFixFile(filePath, 'gateway');
-  const bocEvidence = readBocEvidence(dbPath);
-  assert.equal(typeof bocEvidence.rows[0]['货币1金额'], 'number');
-  assert.equal(bocEvidence.rows[0]['货币1金额'], unsafeAmount);
-  const legacy = runReconIdFix(scenario, legacySession.sheets, { bocLinkRows: bocEvidence.rows });
+  const bocRows = readLegacyBocRows(dbPath);
+  assert.equal(typeof bocRows[0]['货币1金额'], 'number');
+  assert.equal(bocRows[0]['货币1金额'], unsafeAmount);
+  const legacy = runReconIdFix(scenario, legacySession.sheets, { bocLinkRows: bocRows });
   assert.equal(legacy.fixedRows.length, 1);
   assert.equal(typeof legacy.fixedRows[0].Amount, 'number');
   assert.equal(legacy.fixedRows[0].Amount, unsafeAmount);
 
   const service = createReconFixService({ serviceGeneration: 2 });
-  let plan = service.begin(RECON_FIX_IMPORT_ACTION, {
+  let plan = await preparePlan(service, RECON_FIX_IMPORT_ACTION, {
     expectedRevision: 0, filePath, subMode: 'gateway'
   });
   adopt(service, plan.candidate, 'reservation-boc-import');
-  plan = service.begin(RECON_FIX_RUN_READONLY_ACTION, {
+  plan = await preparePlan(service, RECON_FIX_RUN_READONLY_ACTION, {
     bocDatabasePath: dbPath, expectedRevision: 1, scenario
   });
   const first = adopt(service, plan.execute(), 'reservation-boc-first');
@@ -500,7 +612,7 @@ test('BOC Service 只读 golden 等价，DB evidence 变化会锁定失效旧 re
     .run(JSON.stringify(changed), row.id);
   writable.close();
 
-  plan = service.begin(RECON_FIX_RUN_READONLY_ACTION, {
+  plan = await preparePlan(service, RECON_FIX_RUN_READONLY_ACTION, {
     bocDatabasePath: dbPath, expectedRevision: 2, scenario
   });
   assert.equal(plan.evidenceChanged, true);
@@ -509,6 +621,100 @@ test('BOC Service 只读 golden 等价，DB evidence 变化会锁定失效旧 re
   const second = adopt(service, plan.execute(), 'reservation-boc-second');
   assert.notEqual(second.linkedEvidenceHash, first.linkedEvidenceHash);
   assert.notEqual(second.summary.resultDigest, first.summary.resultDigest);
+});
+
+test('ordinary gateway C4 managed/legacy golden 保持金额币种行数且 phase 回收', async () => {
+  const dir = tempDir('recon-fix-service-gateway-c4-');
+  const filePath = writeGatewayWorkbook(path.join(dir, 'gateway-c4.xlsx'));
+  const scenario = ordinaryGatewayScenario();
+  const legacySession = readReconIdFixFile(filePath, 'gateway');
+  const legacy = runReconIdFix(scenario, legacySession.sheets);
+  assert.equal(legacy.fixedRows.length, 1);
+  assert.equal(legacy.unmatchedRows.length, 0);
+  assert.equal(legacy.fixedRows[0].Amount, 999);
+  assert.equal(legacy.fixedRows[0].Currency, 'USD');
+
+  const service = createReconFixService({ serviceGeneration: 9 });
+  let plan = await preparePlan(service, RECON_FIX_IMPORT_ACTION, {
+    expectedRevision: 0, filePath, subMode: 'gateway'
+  });
+  adopt(service, plan.candidate, 'reservation-gateway-c4-import');
+  plan = await preparePlan(service, RECON_FIX_RUN_READONLY_ACTION, {
+    bocDatabasePath: null, expectedRevision: 1, scenario
+  });
+  const candidate = plan.execute();
+  assert.equal(candidate.state.result.fixedRows.length, 1);
+  assert.equal(candidate.state.result.fixedRows[0].Amount, legacy.fixedRows[0].Amount);
+  assert.equal(candidate.state.result.fixedRows[0].Currency, legacy.fixedRows[0].Currency);
+  const direct = adopt(service, candidate, 'reservation-gateway-c4-result');
+  assert.equal(direct.summary.resultDigest, legacyDigest(legacy));
+  assert.equal(direct.linkedEvidenceHash, null);
+
+  const runtime = createBackgroundExecutionRuntime({
+    availableParallelism: 4,
+    freeMemoryBytes: 8 * 1024 ** 3,
+    totalMemoryBytes: 16 * 1024 ** 3,
+    shutdownTimeoutMs: 10000
+  });
+  try {
+    const imported = await runtime.execute(runtimeRequest(RECON_FIX_IMPORT_ACTION, 'gateway-c4-import', {
+      expectedRevision: 0, filePath, subMode: 'gateway'
+    }));
+    assert.equal(imported.outcome, 'completed', JSON.stringify(imported));
+    assert.equal(imported.result.serviceGeneration, 1);
+    assert.equal(imported.result.revision, 1);
+    assert.equal(runtime.resourceGovernor.snapshot().activeLeases.some((lease) => lease.kind === 'phase'), false);
+
+    const managed = await runtime.execute(runtimeRequest(RECON_FIX_RUN_READONLY_ACTION, 'gateway-c4-run', {
+      bocDatabasePath: null, expectedRevision: 1, scenario
+    }));
+    assert.equal(managed.outcome, 'completed', JSON.stringify(managed));
+    assert.equal(managed.result.serviceGeneration, 1);
+    assert.equal(managed.result.revision, 2);
+    assert.equal(managed.result.summary.fixedRowCount, legacy.fixedRows.length);
+    assert.equal(managed.result.summary.unmatchedRowCount, legacy.unmatchedRows.length);
+    assert.equal(managed.result.summary.resultDigest, legacyDigest(legacy));
+    assert.equal(managed.result.linkedEvidenceHash, null);
+    const active = runtime.resourceGovernor.snapshot();
+    assert.equal(active.activeLeaseCount, 2);
+    assert.equal(active.activeLeases.some((lease) => lease.kind === 'phase'), false);
+  } finally {
+    const report = await runtime.shutdown({ timeoutMs: 10000 });
+    assert.deepEqual(report.leakedTransports, []);
+    assert.deepEqual(report.errors, []);
+    assert.equal(runtime.resourceGovernor.snapshot().activeLeaseCount, 0);
+    assert.equal(runtime.resourceGovernor.snapshot().activeDependencyCount, 0);
+  }
+});
+
+test('import parse 失败仍先获 phase 准入并在 error terminal 前回收', async () => {
+  const dir = tempDir('recon-fix-service-import-error-');
+  const filePath = path.join(dir, 'missing-sheets.xlsx');
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([['unexpected']]), 'unexpected');
+  XLSX.writeFile(workbook, filePath);
+  const runtime = createBackgroundExecutionRuntime({
+    availableParallelism: 4,
+    freeMemoryBytes: 8 * 1024 ** 3,
+    totalMemoryBytes: 16 * 1024 ** 3,
+    shutdownTimeoutMs: 10000
+  });
+  try {
+    const result = await runtime.execute(runtimeRequest(RECON_FIX_IMPORT_ACTION, 'import-error', {
+      expectedRevision: 0, filePath, subMode: 'business'
+    }));
+    assert.equal(result.outcome, 'failed', JSON.stringify(result));
+    const active = runtime.resourceGovernor.snapshot();
+    assert.equal(active.activeLeaseCount, 1, '失败后只保留 Service BaseLease');
+    assert.equal(active.activeLeases.some((lease) => lease.kind === 'phase'), false);
+    assert.equal(active.activeLeases.some((lease) => lease.kind === 'persistent'), false);
+  } finally {
+    const report = await runtime.shutdown({ timeoutMs: 10000 });
+    assert.deepEqual(report.leakedTransports, []);
+    assert.deepEqual(report.errors, []);
+    assert.equal(runtime.resourceGovernor.snapshot().activeLeaseCount, 0);
+    assert.equal(runtime.resourceGovernor.snapshot().activeDependencyCount, 0);
+  }
 });
 
 test('real ServiceHost 复用单 owner，close/crash 升 generation 并回收 lease', async () => {
@@ -591,7 +797,7 @@ test('real ServiceHost 复用单 owner，close/crash 升 generation 并回收 le
 test('active import shutdown 在 parse 后安全点取消，且无 late/double terminal 或资源泄漏', async () => {
   const dir = tempDir('recon-fix-service-cancel-import-');
   const filePath = writeStandardWorkbook(path.join(dir, 'standard.xlsx'));
-  const harness = createActiveShutdownHarness(RECON_FIX_IMPORT_ACTION, 'job:start');
+  const harness = createActiveShutdownHarness(RECON_FIX_IMPORT_ACTION, 'resource:grant');
   harness.armShutdown();
   const control = harness.runtime.start(runtimeRequest(
     RECON_FIX_IMPORT_ACTION,
@@ -600,6 +806,21 @@ test('active import shutdown 在 parse 后安全点取消，且无 late/double t
   ));
   const shutdown = await harness.shutdownResult();
   assert.equal(shutdown.jobId, control.jobId);
+  const [result, report] = await Promise.all([control.promise, shutdown.promise]);
+  assertCleanCancelledShutdown(harness, control, result, report, shutdown.observedActiveState);
+});
+
+test('phase grant/adoption-in-flight shutdown 收口后再取消且不泄漏', async () => {
+  const dir = tempDir('recon-fix-service-cancel-phase-admission-');
+  const filePath = writeStandardWorkbook(path.join(dir, 'standard.xlsx'));
+  const harness = createActiveShutdownHarness(RECON_FIX_IMPORT_ACTION, 'phase-grant');
+  harness.armShutdown();
+  const control = harness.runtime.start(runtimeRequest(
+    RECON_FIX_IMPORT_ACTION,
+    'recon-cancel-phase-admission',
+    { expectedRevision: 0, filePath, subMode: 'business' }
+  ));
+  const shutdown = await harness.shutdownResult();
   const [result, report] = await Promise.all([control.promise, shutdown.promise]);
   assertCleanCancelledShutdown(harness, control, result, report, shutdown.observedActiveState);
 });
