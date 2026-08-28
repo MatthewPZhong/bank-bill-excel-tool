@@ -3,7 +3,7 @@
 ## Task Brief
 
 - Goal：在不接 live IPC/Renderer/Preload 的前提下，为 ReconFix Service 增加 `production.enabled=false` 的 managed export capability；Worker 只从 Service 私有 exact result 生成 task-private main/unmatched staging artifacts，Main 深度复验后只调用一次既有 durable journal Publisher，实现多 artifact 全有或全无。
-- Context：exact base `225ab05f77cd74d25b9aae05dda1ab490104d5c6`；E11-A 已交付 standard/BOC Service，E11-P0/B 已交付 JPM ID-aware durable mutation、receipt-first Inspector、Recovery Hold 与 candidate adoption。冻结 v3.2.4 Spec/TechDoc 把 E11-C 限定为 ReconFix export，不包含 E12。
+- Context：当前 restack exact base `ad3a7222cbcd049266cdc66ca86d17830c08f7a0`；E11-C 原实现来自旧 base `225ab05f77cd74d25b9aae05dda1ab490104d5c6` 上按序提交 `6e0ee98f`、`c32db41e`、`2e03bf2a`。最新 E11-A 已交付 standard/BOC Service，E11-P0/B 已交付 JPM ID-aware durable mutation、receipt-first Inspector、Recovery Hold、threshold/startup recovery 与 phase admission。冻结 v3.2.4 Spec/TechDoc 把 E11-C 限定为 ReconFix export，不包含 E12。
 - Constraints：Worker 只使用 Service 返回的 exact `serviceGeneration + revision + resultHandle` 与 task-private staging；复用 legacy 命名、sheet、列、样式、watermark、row lineage；Main DTO 不携带 raw row/JPM candidate/大对象；Main Join 必须重验 generation/result/revision、scenario/linked evidence、FilePlan set/order、path containment/alias/symlink、size/hash 与业务 workbook；全部通过后单次调用既有 Publisher；任一失败 Publisher=0；Publisher uncertain/crash 只沿用现有 journal recovery；不改 E11-P0/B mutation/receipt/Inspector，不启用 managed production，不接 live IPC，不改依赖，不实现 E12。
 - Done when：standard/BOC/JPM 的 main-only、unmatched-only、main+unmatched 都生成与 legacy 等价的有序 manifest；tamper/stale/collision/alias/symlink/set/order/rowCount/业务回读失败均在 Publisher 前 fail closed；Publisher failure/uncertain/kill/restart 走既有 journal all-or-none recovery；E11-P0/A/B、legacy 与 production-false 回归通过。
 
@@ -17,6 +17,7 @@
 | 现有 FilePlan 已提供 artifactKey、target snapshot、alias/symlink 与 freshness 边界 | `archive-center/file-plan.js` | Main Join 必须消费 normalized eager FilePlan，不能信 caller/Worker 自造路径身份 |
 | 现有 durable Publisher 已提供批量 journal、target snapshot、size/hash、rollback 与 worker-exit recovery | `toolbox-output-publication*.js`；VCC wrapper | E11-C 只增加业务前置 Join 与薄适配，Publisher 实现不复制、不修改 |
 | JPM committed/noop result adoption 后与 standard/BOC 一样进入 Service current result；crash 后 result 丢失 | E11-B Service/Worker 与 notes | export 不重建 JPM candidate，不读取 receipt 猜 result；无 current exact result 即拒绝 |
+| 最新 E11-B worker 要求每个 Service operation 都先返回 `resourcePlan`，获批后才允许创建实际 plan | `worker-entry.js` phase-extension 路径；E11-B restack notes/tests | export 不得沿用旧 base 的 direct `export-plan` 返回；strict staging/linked evidence 大状态读取必须在 phase grant 后发生，且 phase 持有到 terminal |
 
 ## Unknowns Register
 
@@ -28,6 +29,7 @@
 | linked evidence 如何在 export prepare 与 Main Join 重读 | 状态生命周期盲区 | 高 | 一般 | standard=null；BOC hash 来自 read-only DB rows；JPM hash 来自 strict ADM image | PROBE | 在 generation 前后篡改 scenario/BOC/ADM，断言 Publisher=0 | Service prepare 返回 result 内 exact evidence；Main 通过注入的 authoritative reader 二次读取并 exact 比较 |
 | Publisher committed-but-reply-lost 后 E11-C 是否需新 Inspector | 恢复边界未知 | 高 | 困难 | canonical policy列 inspector/settlement key；现有 Publisher dispatcher 已 worker-exit recover committed journal | PROBE | 复用现有 crash checkpoint/dispatcher tests，确认只需薄 binding，不创建新 journal | 沿用现有 journal recovery；不依据普通异常猜成功，不自动二次 publish |
 | Worker generation 后 manifest tamper 与 Main readback 间 TOCTOU | 失败模式盲区 | 高 | 一般 | Publisher会再次校验 source size/hash并复制到其 own staging | PROBE | before-publish tamper/replace/symlink fault tests | Main readback后把 exact size/hash交现有 Publisher；Publisher再次复验，失败不发布 |
+| 旧 E11-C direct export plan 如何适配最新 E11-B phase admission | 资源/状态生命周期盲区 | 高 | 一般 | 首次 restack 定向测试 9 项报 `RECON_FIX_PHASE_PLAN_INVALID`；export strict staging/evidence 读取发生在旧 prepare 阶段 | PROBE | 将 export 改成同一 Service preparation，断言 grant 前不读 strict staging/evidence，grant 后完整执行并由 worker terminal 统一释放 | 使用一次 `estimateRunPhaseBytes(stateMemoryBytes)` phase-extension；不申请第二资源；grant 边界重验 result/authority，随后生成并持有到 terminal |
 
 ## BLOCK
 
@@ -128,3 +130,19 @@
 | 2 | export 在 current read 前取 lease，Publisher settlement 后 finally 释放 | evidence 不在 Main writer 窗口漂移 | missing/BUSY 均 evidence=0/Worker=0/Publisher=0；resolve/reject 后 writer 放行 | 阻断 E11-C | 保留 primitive，撤下 export capability |
 | 3 | table-driven 真实 output-set 回归 | artifact set/order 与真实业务可达性 | standard 三 set（含 unmatched-only）+ BOC/JPM main-only | P3 不成立 | 不改引擎，只补测试 |
 | 4 | E11/Publisher/smoke/static + 双盲区 | journal、lineage、资金与 legacy 不漂移 | 定向矩阵全 PASS，clean commit | 不得提交 | 修复或收缩 |
+
+## E11-B Restack Preflight（2026-08-29）
+
+### Task Brief
+
+- Goal：把 E11-C 三个已审提交严格移植到 E11-B exact head `ad3a7222cbcd049266cdc66ca86d17830c08f7a0`，保留最新 phase ownership、streaming evidence、exact-ID/order/same-transaction receipt、Inspector/Recovery Hold/threshold/startup recovery 合同。
+- Constraints：export 的 strict staging ownership 与 linked evidence 读取不得发生在 phase grant 前；不得重复申请第二资源或创建第二 commit/Publisher authority；unknown/partial 不自动补偿或重复发布；不提前实现 E12；production 继续 false/legacy/0。
+- Done when：三提交按序移植；E11-C export 进入最新 phase admission 并持有到 terminal；E11-A/P0/B/C、受影响 integration/smoke/static 与资金盲区证据闭合；无业务偏差则不反向修改冻结 Spec/TechDoc。
+
+### Restack Unknowns Register
+
+| 未知 | 类型 | 影响 | 处理 | 证据/决定 |
+| --- | --- | --- | --- | --- |
+| 旧 direct `export-plan` 是否仍满足新 worker phase protocol | BLOCK→PROBE | 高；可导致所有 managed export 在执行前失败 | 先跑 E11-C 专属矩阵，再对照 worker phase-extension validator | 9/14 因 `RECON_FIX_PHASE_PLAN_INVALID` 失败；确认为真实可达资源生命周期缺口，改用一次 Service preparation 后 14/14 PASS |
+| strict staging/evidence 读取应位于 phase 申请前还是获批后 | PROBE | 高；获批前大状态读取会绕过 E11-B admission | 检查 `prepare()`/`begin()` 边界与 worker finally | `prepare()` 仅计算有界资源；`begin()` 获批后才校验 task-private staging、读取 linked evidence并创建 export plan；同一 phase 由 worker finally 释放 |
+| restack 是否改变 E11-C 冻结业务合同 | ASSUME→VERIFY | 高；若改变需反向同步 Spec/TechDoc | 对照冻结 Spec/TechDoc、三原提交与全套定向测试 | 无业务合同偏离；只适配最新资源准入，Publisher、receipt/Inspector/Hold、artifact/output identity/order/path/privacy/cleanup 均保持 |
