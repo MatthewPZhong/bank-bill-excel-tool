@@ -3,6 +3,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const ExcelJS = require('exceljs');
+const JSZip = require('jszip');
+const sax = require('sax');
 const {
   SOURCE_TYPES,
   SUPPORTED_CURRENCIES
@@ -26,6 +28,12 @@ const {
 const {
   encodeExcelStXstring
 } = require('../backend/toolbox-format/excel-text');
+const {
+  SPREADSHEETML_NAMESPACES,
+  exactSaxLocalName,
+  namespaceAllowed,
+  normalizedSaxAttributes
+} = require('../backend/toolbox-format/ooxml-namespaces');
 const { writeXlsxAtomically } = require('./vcc-financial-op-output-publication');
 
 const RESULT_SHEET_NAME = RESULT_TEMPLATE_SHEET_NAME;
@@ -547,13 +555,25 @@ function canonicalMergeRanges(sheet) {
   return Object.values(sheet._merges || {}).map(mergeRangeString).sort();
 }
 
-function assertMergeLayout(sheet, renderedRows, contract, lastRow) {
-  const expected = new Set([`A2:A${lastRow}`]);
+function resultMergeModels(renderedRows, contract, lastRow) {
+  const models = [{ top: 2, left: 1, bottom: lastRow, right: 1 }];
   for (const row of renderedRows) {
     if (contract.anchors[row.anchorKind].mergeMajorMinor) {
-      expected.add(`B${row.rowNumber}:C${row.rowNumber}`);
+      models.push({
+        top: row.rowNumber,
+        left: 2,
+        bottom: row.rowNumber,
+        right: 3
+      });
     }
   }
+  return models;
+}
+
+function assertMergeLayout(sheet, renderedRows, contract, lastRow) {
+  const expected = new Set(resultMergeModels(renderedRows, contract, lastRow).map((model) => (
+    mergeRangeString({ model })
+  )));
   const actualRanges = canonicalMergeRanges(sheet);
   const actual = new Set(actualRanges);
   if (actual.size !== expected.size
@@ -588,6 +608,203 @@ function assertCanonicalCellAmount(cell, expected, label) {
 function assertPlainTextCell(cell, expected, label) {
   if (typeof cell.value !== 'string' || cell.value !== expected) {
     throw exportValidationError(`VCC 财务OP导出普通文本校验失败：${label}`);
+  }
+}
+
+function worksheetCellReference(value) {
+  const match = /^\$?([A-Z]+)\$?([1-9]\d*)$/i.exec(String(value || ''));
+  if (!match) return null;
+  let column = 0;
+  for (const character of match[1].toUpperCase()) {
+    column = (column * 26) + character.charCodeAt(0) - 64;
+  }
+  const row = Number(match[2]);
+  if (!Number.isSafeInteger(column) || column < 1 || column > 16384 ||
+      !Number.isSafeInteger(row) || row < 1 || row > 1048576) {
+    return null;
+  }
+  return Object.freeze({
+    column,
+    row,
+    reference: `${excelColumnName(column)}${row}`
+  });
+}
+
+function worksheetRange(value) {
+  const parts = String(value || '').split(':');
+  if (parts.length < 1 || parts.length > 2) return null;
+  const start = worksheetCellReference(parts[0]);
+  const end = worksheetCellReference(parts[1] || parts[0]);
+  if (!start || !end) return null;
+  return Object.freeze({
+    top: Math.min(start.row, end.row),
+    left: Math.min(start.column, end.column),
+    bottom: Math.max(start.row, end.row),
+    right: Math.max(start.column, end.column)
+  });
+}
+
+function rangeContainsCell(range, cell) {
+  return cell.row >= range.top && cell.row <= range.bottom &&
+    cell.column >= range.left && cell.column <= range.right;
+}
+
+function rangeTouchesMergeFollower(range, models) {
+  for (const model of models) {
+    const top = Math.max(range.top, model.top);
+    const left = Math.max(range.left, model.left);
+    const bottom = Math.min(range.bottom, model.bottom);
+    const right = Math.min(range.right, model.right);
+    if (top > bottom || left > right) continue;
+    const overlapSize = (bottom - top + 1) * (right - left + 1);
+    const includesMaster = model.top >= top && model.top <= bottom &&
+      model.left >= left && model.left <= right;
+    if (overlapSize > (includesMaster ? 1 : 0)) return true;
+  }
+  return false;
+}
+
+function resultPlainTextReferences(renderedRows, contract) {
+  const references = new Set(RESULT_TEMPLATE_HEADERS.map((_header, index) => (
+    `${excelColumnName(index + 1)}1`
+  )));
+  references.add('A2');
+  for (const row of renderedRows) {
+    references.add(`B${row.rowNumber}`);
+    if (!contract.anchors[row.anchorKind].mergeMajorMinor) {
+      references.add(`C${row.rowNumber}`);
+    }
+    if (row.rowType === 'adjustment') references.add(`N${row.rowNumber}`);
+  }
+  return references;
+}
+
+function rawResultPayloadError(reference, kind, plainText) {
+  return exportValidationError(plainText
+    ? `VCC 财务OP导出普通文本校验失败：${reference} 含 ${kind}`
+    : `VCC 财务OP导出合并 follower 原始 payload 校验失败：${reference} 含 ${kind}`);
+}
+
+function validateResultWorksheetRawXml(xml, contract, renderedRows, lastRow) {
+  const mergeModels = resultMergeModels(renderedRows, contract, lastRow);
+  const plainTextReferences = resultPlainTextReferences(renderedRows, contract);
+  let depth = 0;
+  let activeCell = null;
+  const parser = sax.parser(true, { trim: false, normalize: false, xmlns: true });
+  parser.onopentag = (node) => {
+    depth += 1;
+    const name = exactSaxLocalName(node);
+    const spreadsheetElement = namespaceAllowed(node.uri, SPREADSHEETML_NAMESPACES);
+    if (activeCell && depth > activeCell.depth && spreadsheetElement) {
+      if (activeCell.mergeFollower) {
+        const kind = name === 'f'
+          ? (normalizedSaxAttributes(node.attributes).t === 'shared'
+            ? 'sharedFormula' : 'formula')
+          : (name === 'v' ? 'value' : (name === 'is' ? 'inlineStr' : `payload:${name}`));
+        throw rawResultPayloadError(activeCell.reference, kind, false);
+      }
+      if (activeCell.plainText && name === 'f') {
+        const kind = normalizedSaxAttributes(node.attributes).t === 'shared'
+          ? 'sharedFormula' : 'formula';
+        throw rawResultPayloadError(activeCell.reference, kind, true);
+      }
+      if (activeCell.plainText && name === 'r') {
+        throw rawResultPayloadError(activeCell.reference, 'richText', true);
+      }
+    }
+    if (!spreadsheetElement) return;
+    const attributes = normalizedSaxAttributes(node.attributes);
+    if (name === 'c') {
+      const cell = worksheetCellReference(attributes.r);
+      const mergeFollower = cell ? rangeTouchesMergeFollower({
+        top: cell.row,
+        left: cell.column,
+        bottom: cell.row,
+        right: cell.column
+      }, mergeModels) : false;
+      const payloadAttribute = mergeFollower
+        ? Object.keys(attributes).find((attributeName) => (
+            attributeName !== 'r' && attributeName !== 's' && attributeName !== 't'
+          ))
+        : null;
+      if (payloadAttribute) {
+        throw rawResultPayloadError(
+          cell.reference,
+          `attribute:${payloadAttribute}`,
+          false
+        );
+      }
+      activeCell = cell ? {
+        depth,
+        reference: cell.reference,
+        mergeFollower,
+        plainText: plainTextReferences.has(cell.reference),
+        typed: Object.prototype.hasOwnProperty.call(attributes, 't')
+      } : null;
+      return;
+    }
+    if (name === 'hyperlink') {
+      const range = worksheetRange(attributes.ref);
+      if (!range) return;
+      if (rangeTouchesMergeFollower(range, mergeModels)) {
+        throw rawResultPayloadError(attributes.ref, 'hyperlink', false);
+      }
+      for (const reference of plainTextReferences) {
+        const cell = worksheetCellReference(reference);
+        if (rangeContainsCell(range, cell)) {
+          throw rawResultPayloadError(reference, 'hyperlink', true);
+        }
+      }
+    }
+  };
+  parser.ontext = (text) => {
+    if (activeCell && activeCell.mergeFollower && String(text).trim()) {
+      throw rawResultPayloadError(activeCell.reference, 'text', false);
+    }
+  };
+  parser.oncdata = (text) => {
+    if (activeCell && activeCell.mergeFollower && String(text)) {
+      throw rawResultPayloadError(activeCell.reference, 'cdata', false);
+    }
+  };
+  parser.onclosetag = () => {
+    if (activeCell && depth === activeCell.depth) {
+      if (activeCell.mergeFollower && activeCell.typed) {
+        throw rawResultPayloadError(activeCell.reference, 'typedValue', false);
+      }
+      activeCell = null;
+    }
+    depth -= 1;
+  };
+  try {
+    parser.write(xml).close();
+  } catch (error) {
+    if (error && error.code === 'vcc-result-export-validation-failed') throw error;
+    throw exportValidationError('VCC 财务OP导出 Result 原始 worksheet XML 校验失败');
+  }
+}
+
+async function validateResultWorksheetRawPayload({
+  workbookPath,
+  contract,
+  renderedRows,
+  lastRow
+}) {
+  try {
+    const zip = await JSZip.loadAsync(fs.readFileSync(workbookPath));
+    const worksheet = zip.file('xl/worksheets/sheet1.xml');
+    if (!worksheet) {
+      throw exportValidationError('VCC 财务OP导出缺少 Result 原始 worksheet');
+    }
+    validateResultWorksheetRawXml(
+      await worksheet.async('string'),
+      contract,
+      renderedRows,
+      lastRow
+    );
+  } catch (error) {
+    if (error && error.code === 'vcc-result-export-validation-failed') throw error;
+    throw exportValidationError('VCC 财务OP导出 Result 原始 worksheet 读取失败');
   }
 }
 
@@ -805,6 +1022,12 @@ function validateResultSheet(workbook, contract, plan, renderedRows, lastRow) {
 }
 
 async function validateStagedWorkbook({ stagedPath, resultContract, plan, renderedRows, lastRow }) {
+  await validateResultWorksheetRawPayload({
+    workbookPath: stagedPath,
+    contract: resultContract,
+    renderedRows,
+    lastRow
+  });
   const validation = new ExcelJS.Workbook();
   await validation.xlsx.readFile(stagedPath);
   const sheetNames = validation.worksheets.map((sheet) => sheet.name);
@@ -1003,6 +1226,7 @@ module.exports = {
   buildPendingSheet,
   canonicalMergeRanges,
   validateResultSheet,
+  validateResultWorksheetRawPayload,
   validateStagedWorkbook,
   assertAdjustmentLineage,
   nextAvailableOutputPath,

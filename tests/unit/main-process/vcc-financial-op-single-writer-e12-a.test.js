@@ -315,6 +315,104 @@ async function rewriteWorksheetXml(filePath, rewrite, sheetNumber = 1) {
   return rewriteZipXml(filePath, `xl/worksheets/sheet${sheetNumber}.xml`, rewrite);
 }
 
+async function zipEntryPayloads(zip) {
+  const entries = new Map();
+  for (const entryName of Object.keys(zip.files).sort()) {
+    const entry = zip.files[entryName];
+    if (!entry.dir) entries.set(entryName, await entry.async('nodebuffer'));
+  }
+  return entries;
+}
+
+async function rewriteResultWorksheetXmlOnly(
+  filePath,
+  rewrite,
+  { requireChange = true } = {}
+) {
+  const beforeZip = await JSZip.loadAsync(fs.readFileSync(filePath));
+  const beforeEntries = await zipEntryPayloads(beforeZip);
+  const worksheetPath = 'xl/worksheets/sheet1.xml';
+  const worksheetContents = beforeEntries.get(worksheetPath);
+  assert.ok(worksheetContents);
+  const originalXml = worksheetContents.toString('utf8');
+  const rewrittenXml = rewrite(originalXml);
+  if (requireChange) assert.notEqual(rewrittenXml, originalXml);
+  else assert.equal(rewrittenXml, originalXml);
+  beforeZip.file(worksheetPath, rewrittenXml);
+  fs.writeFileSync(filePath, await beforeZip.generateAsync({
+    type: 'nodebuffer',
+    compression: 'DEFLATE'
+  }));
+
+  const afterZip = await JSZip.loadAsync(fs.readFileSync(filePath));
+  const afterEntries = await zipEntryPayloads(afterZip);
+  assert.deepEqual([...afterEntries.keys()], [...beforeEntries.keys()]);
+  for (const [entryName, contents] of beforeEntries) {
+    if (entryName === worksheetPath) continue;
+    assert.deepEqual(
+      afterEntries.get(entryName),
+      contents,
+      `${entryName} entry payload 必须保持 byte-for-byte 不变`
+    );
+  }
+  assert.equal(
+    afterEntries.get(worksheetPath).toString('utf8'),
+    rewrittenXml
+  );
+}
+
+function xmlPatternEscape(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function rewriteResultCellRawXml(filePath, cellReference, buildCellXml) {
+  return rewriteResultWorksheetXmlOnly(filePath, (worksheetXml) => {
+    const escapedReference = xmlPatternEscape(cellReference);
+    const cellPattern = new RegExp(
+      `<c\\b(?=[^>]*\\br="${escapedReference}"(?:\\s|/?>))[^>]*(?:\\/>|>[\\s\\S]*?<\\/c>)`
+    );
+    const match = cellPattern.exec(worksheetXml);
+    assert.ok(match, `${cellReference} raw cell 必须存在`);
+    const attributesMatch = /^<c\b([^>]*?)(?:\/>|>)/.exec(match[0]);
+    assert.ok(attributesMatch);
+    const attributes = attributesMatch[1].replace(/\s+t="[^"]*"/g, '');
+    return worksheetXml.replace(
+      cellPattern,
+      buildCellXml(attributes)
+    );
+  });
+}
+
+function rewriteResultFormulaCell(filePath, cellReference, result, { shared = false } = {}) {
+  const formula = `="${String(result).replace(/"/g, '""')}"`;
+  return rewriteResultCellRawXml(filePath, cellReference, (attributes) => (
+    `<c${attributes} t="str"><f${shared
+      ? ` t="shared" ref="${cellReference}:${cellReference}" si="0"`
+      : ''}>${formula}</f><v>${result}</v></c>`
+  ));
+}
+
+function rewriteResultRichTextCell(filePath, cellReference) {
+  return rewriteResultCellRawXml(filePath, cellReference, (attributes) => (
+    `<c${attributes} t="inlineStr"><is><r><t>VCC_</t></r>`
+      + '<r><rPr><b/></rPr><t>discharge</t></r></is></c>'
+  ));
+}
+
+function injectResultInternalHyperlink(filePath, cellReference, display) {
+  return rewriteResultWorksheetXmlOnly(filePath, (worksheetXml) => {
+    const hyperlinkXml = `<hyperlink ref="${cellReference}" location="${cellReference}" display="${display}"/>`;
+    if (/<hyperlinks\b[^>]*>[\s\S]*?<\/hyperlinks>/.test(worksheetXml)) {
+      return worksheetXml.replace('</hyperlinks>', `${hyperlinkXml}</hyperlinks>`);
+    }
+    assert.match(worksheetXml, /<pageMargins\b/);
+    return worksheetXml.replace(
+      /<pageMargins\b/,
+      `<hyperlinks>${hyperlinkXml}</hyperlinks><pageMargins`
+    );
+  });
+}
+
 async function rewriteRowHidden(filePath, rowNumber) {
   await rewriteWorksheetXml(filePath, (worksheetXml) => {
     const pattern = new RegExp(`<row\\b([^>]*\\br="${rowNumber}"[^>]*)>`);
@@ -466,24 +564,6 @@ async function injectPendingMergeRange(filePath, mergeRange) {
       `<mergeCells count="1"><mergeCell ref="${mergeRange}"/></mergeCells><pageMargins`
     );
   }, 2);
-}
-
-async function rewriteResultCellValue(filePath, cellReference, value) {
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.readFile(filePath);
-  workbook.worksheets[0].getCell(cellReference).value = value;
-  await workbook.xlsx.writeFile(filePath);
-}
-
-async function rewriteResultCellSharedFormula(filePath, cellReference, result) {
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.readFile(filePath);
-  workbook.worksheets[0].fillFormula(
-    `${cellReference}:${cellReference}`,
-    `="${result.replace(/"/g, '""')}"`,
-    [result]
-  );
-  await workbook.xlsx.writeFile(filePath);
 }
 
 function recomputeArtifactIdentity(result, generationPath) {
@@ -933,6 +1013,62 @@ test('自洽伪造 size/hash 的 workbook 业务篡改仍由 Main 深度回读�
   assert.deepEqual(fs.readdirSync(stagingDirectory), []);
 });
 
+test('Result raw ZIP no-op 仅重打包 sheet1.xml 时保持合法且 Publisher=1', async (t) => {
+  const harness = setup(t, ['PPHK']);
+  const plan = filePlan(harness.root, 1, 'raw-xml-no-op');
+  const stagingDirectory = path.join(harness.root, 'staging-raw-xml-no-op');
+  fs.mkdirSync(stagingDirectory);
+  const batch = batchContext('raw-xml-no-op');
+  let publisherCalls = 0;
+  let publishedSourcePaths = [];
+  const result = await generateValidateAndPublishVccExport({
+    actionKey: VCC_EXPORT_SINGLE_ACTION,
+    runtime: {
+      async execute(request) {
+        const writerResult = await executeVccExportWriter({
+          ...request.input,
+          databasePath: harness.dbPath,
+          assetsDir: ASSETS_DIR
+        }, null, VCC_EXPORT_SINGLE_ACTION);
+        const generationPath = request.input.generations[0].generationPath;
+        await rewriteResultWorksheetXmlOnly(
+          generationPath,
+          (worksheetXml) => worksheetXml,
+          { requireChange: false }
+        );
+        return {
+          outcome: 'completed',
+          terminalSource: 'job:done',
+          result: recomputeArtifactIdentity(writerResult, generationPath)
+        };
+      }
+    },
+    expectedAuthority: harness.snapshot.authority,
+    readCurrentSnapshot: async () => harness.snapshot,
+    readCurrentTaskAuthority: async () => ({
+      action: 'export-result', taskGeneration: 0, taskRunId: batch.taskRunId
+    }),
+    selectedSubjectIndexes: [0],
+    filePlan: plan,
+    stagingDirectory,
+    assetsDir: ASSETS_DIR,
+    batchContext: batch,
+    publishPublication: async (payload) => {
+      publisherCalls += 1;
+      publishedSourcePaths = payload.artifacts.map((artifact) => artifact.sourcePath);
+      for (const sourcePath of publishedSourcePaths) {
+        assert.ok(fs.statSync(sourcePath).size > 0);
+      }
+      return Object.freeze({ taskId: payload.taskId, committed: true });
+    },
+    settleManifestArtifacts: async () => {}
+  });
+  assert.equal(publisherCalls, 1);
+  assert.equal(publishedSourcePaths.length, 1);
+  assert.equal(result.publication.committed, true);
+  assert.deepEqual(fs.readdirSync(stagingDirectory), []);
+});
+
 test('raw XLSX/ExcelJS 自洽篡改 Result 文本类型、样式与完整页面布局仍在 Main Join 阻断', async (t) => {
   const harness = setup(t, ['PPHK']);
   const tamperCases = [
@@ -953,20 +1089,20 @@ test('raw XLSX/ExcelJS 自洽篡改 Result 文本类型、样式与完整页面�
     ['pending header footer', rewritePendingHeaderFooter],
     ['pending sheet properties', rewritePendingSheetProperties],
     ['pending injected merge H2:I2', (filePath) => injectPendingMergeRange(filePath, 'H2:I2')],
-    ['result C1 formula cached text', (filePath) => rewriteResultCellValue(filePath, 'C1', {
-      formula: '="分类"', result: '分类'
-    })],
-    ['result A2 hyperlink text', (filePath) => rewriteResultCellValue(filePath, 'A2', {
-      text: 'PPHK', hyperlink: 'https://example.invalid/vcc-subject'
-    })],
-    ['result B3 rich text', (filePath) => rewriteResultCellValue(filePath, 'B3', {
-      richText: [{ text: 'VCC_' }, { font: { bold: true }, text: 'discharge' }]
-    })],
+    ['result C1 formula cached text', (filePath) => (
+      rewriteResultFormulaCell(filePath, 'C1', '分类')
+    ), 'VCC 财务OP导出普通文本校验失败：C1 含 formula'],
+    ['result A2 hyperlink text', (filePath) => (
+      injectResultInternalHyperlink(filePath, 'A2', 'PPHK')
+    ), 'VCC 财务OP导出普通文本校验失败：A2 含 hyperlink'],
+    ['result B3 rich text', (filePath) => (
+      rewriteResultRichTextCell(filePath, 'B3')
+    ), 'VCC 财务OP导出普通文本校验失败：B3 含 richText'],
     ['result C3 shared formula cached text', (filePath) => (
-      rewriteResultCellSharedFormula(filePath, 'C3', 'B2B')
-    )]
+      rewriteResultFormulaCell(filePath, 'C3', 'B2B', { shared: true })
+    ), 'VCC 财务OP导出普通文本校验失败：C3 含 sharedFormula']
   ];
-  for (const [label, tamper] of tamperCases) {
+  for (const [label, tamper, expectedMessage] of tamperCases) {
     await t.test(label, async () => {
       const suffix = `semantic-${label.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`;
       const plan = filePlan(harness.root, 1, suffix);
@@ -1003,8 +1139,94 @@ test('raw XLSX/ExcelJS 自洽篡改 Result 文本类型、样式与完整页面�
         assetsDir: ASSETS_DIR,
         batchContext: batch,
         publishPublication: async () => { publisherCalls += 1; }
-      }), /样式|布局|校验失败/);
+      }), (error) => {
+        if (expectedMessage) {
+          assert.equal(error.code, 'vcc-result-export-validation-failed');
+          assert.equal(error.message, expectedMessage);
+          assert.match(error.message, /普通文本校验失败/);
+        } else {
+          assert.match(error.message, /样式|布局|校验失败/);
+        }
+        return true;
+      });
       assert.equal(publisherCalls, 0);
+      assert.deepEqual(fs.readdirSync(stagingDirectory), []);
+    });
+  }
+});
+
+test('Result merge follower raw cached formula 自洽篡改仍由 Main Join 阻断且 Publisher=0', async (t) => {
+  const harness = setup(t, ['PPHK']);
+  const cases = [
+    {
+      label: 'A3 subject follower formula',
+      cellReference: 'A3',
+      result: 'PPHK',
+      shared: false,
+      expectedMessage: 'VCC 财务OP导出合并 follower 原始 payload 校验失败：A3 含 formula'
+    },
+    {
+      label: 'C2 major/minor follower shared formula',
+      cellReference: 'C2',
+      result: '上月财务OP',
+      shared: true,
+      expectedMessage: 'VCC 财务OP导出合并 follower 原始 payload 校验失败：C2 含 sharedFormula'
+    }
+  ];
+  for (const current of cases) {
+    await t.test(current.label, async () => {
+      const suffix = `raw-follower-${current.cellReference.toLowerCase()}`;
+      const plan = filePlan(harness.root, 1, suffix);
+      const stagingDirectory = path.join(harness.root, `staging-${suffix}`);
+      fs.mkdirSync(stagingDirectory);
+      const batch = batchContext(suffix);
+      let publisherCalls = 0;
+      const publishedSourcePaths = [];
+      await assert.rejects(generateValidateAndPublishVccExport({
+        actionKey: VCC_EXPORT_SINGLE_ACTION,
+        runtime: {
+          async execute(request) {
+            const writerResult = await executeVccExportWriter({
+              ...request.input,
+              databasePath: harness.dbPath,
+              assetsDir: ASSETS_DIR
+            }, null, VCC_EXPORT_SINGLE_ACTION);
+            const generationPath = request.input.generations[0].generationPath;
+            await rewriteResultFormulaCell(
+              generationPath,
+              current.cellReference,
+              current.result,
+              { shared: current.shared }
+            );
+            return {
+              outcome: 'completed',
+              terminalSource: 'job:done',
+              result: recomputeArtifactIdentity(writerResult, generationPath)
+            };
+          }
+        },
+        expectedAuthority: harness.snapshot.authority,
+        readCurrentSnapshot: async () => harness.snapshot,
+        readCurrentTaskAuthority: async () => ({
+          action: 'export-result', taskGeneration: 0, taskRunId: batch.taskRunId
+        }),
+        selectedSubjectIndexes: [0],
+        filePlan: plan,
+        stagingDirectory,
+        assetsDir: ASSETS_DIR,
+        batchContext: batch,
+        publishPublication: async (payload) => {
+          publisherCalls += 1;
+          publishedSourcePaths.push(...payload.artifacts.map((artifact) => artifact.sourcePath));
+        }
+      }), (error) => {
+        assert.equal(error.code, 'vcc-result-export-validation-failed');
+        assert.equal(error.message, current.expectedMessage);
+        return true;
+      });
+      assert.equal(publisherCalls, 0);
+      assert.deepEqual(publishedSourcePaths, []);
+      assert.equal(fs.existsSync(plan.outputs[0].filePath), false);
       assert.deepEqual(fs.readdirSync(stagingDirectory), []);
     });
   }

@@ -4,7 +4,7 @@
 
 - Goal/spec：冻结 v3.2.4 Spec §7.1/§9，TechDoc §9-§14，Platform Contract v1。
 - Initial plan：[preflight.md](./preflight.md)。
-- Restack parent：已审查 E11-C `771572ff3b7b4f623eafd2a8c44c34038f2a6b98`；旧 E12-A 两笔提交按原顺序重放，无文本冲突。
+- Restack parent：E11-C review-fix `b9bcdf700eeb0e055d91989cb15dd54a82cc08f6`；旧 E12-A 两笔提交按原顺序重放，无文本冲突。
 - Done when：production-false dormant single Writer 在 task/run/archive/FilePlan exact authority 下生成 legacy-equivalent 全主体 artifacts，Main 深度 Join 后 Publisher 一次或零次。
 
 ## Decisions
@@ -57,6 +57,7 @@
 | Independent Review Round4 integration/smoke | VCC 19/19、29/29、226/226、77/77 PASS；`npm run smoke` PASS | 正常/历史/调整/破坏性资金链及全局 smoke。 |
 | Independent Review Round4 final merge-range closure | E12-A 56/56、扩展全 VCC 742/742、platform 466/466、writer/recovery 19/19、VCC/recovery integration 19+29+226+77+27+9+9、smoke/static 全 PASS | 真实 OOXML 向 Pending 注入 `H2:I2` 并重算 manifest 后 Main Join 拒绝且 Publisher=0；完整 start:end range 由 Result/Writer 共用 helper 规范化排序，插入顺序不影响证据摘要。 |
 | Independent Review Round4 final plain-text closure | E12-A 60/60、扩展全 VCC 746/746、platform 466/466、writer/recovery 19/19、VCC/recovery integration 19+29+226+77+27+9+9、smoke/static 全 PASS | 真实 ExcelJS formula+cached text、hyperlink、richText 与 shared formula 篡改 Result 冻结文本，重算 manifest 后均由 Main Join 拒绝且 Publisher=0；合法 Unicode、空字符串、调整、merge goldens 保持通过。 |
+| Independent Review Round4 raw follower closure | E12-A 64/64、扩展全 VCC 750/750、platform/Publisher+writer/recovery 466/466、VCC/recovery integration 19+29+226+77+27+9+9、smoke/static 全 PASS | Writer staged self-check 与 Main Join 复用同一 Result raw worksheet validator。只改 `sheet1.xml` 并逐 entry 证明 Pending/其它 ZIP payload byte-for-byte 未变：C1/A2/B3/C3 四类 raw kind 均返回 exact `vcc-result-export-validation-failed` + `普通文本校验失败`；A3/C2 merge follower 注入 cached formula/shared formula、重算 manifest 后 Publisher=0；raw ZIP no-op 保持 Publisher=1。 |
 
 ## Round1 Findings And Fixes
 
@@ -105,6 +106,7 @@
 | P2 Pending canonical projection 未冻结 workbook sheet visibility，hidden sheet 可在重算 manifest 后绕过 | 接受。Pending projection 补 `sheet.state`（默认/期望 `visible`），并按 canonical writer 已确定的页面语义同时纳入 `properties/headerFooter`；既有 rows（height/hidden/outline）、columns、views、autoFilter、pageSetup、cell/style仍由同一 projection authority 比较。 | raw OOXML 将 Pending workbook sheet 改 hidden，并分别篡改 Pending header/footer 与 sheet properties；重新压缩、重算 byteSize/SHA 后 Main Join 均拒绝且 Publisher=0。正常/调整/merge goldens 与全 VCC 569/569 通过。 |
 | P2 Pending canonical projection 未冻结完整 merge ranges，额外合并区域可在重算 manifest 后绕过 | 接受。抽取 Result/Writer 既有 range model 为共用 `canonicalMergeRanges`，从 `top/left/bottom/right` 生成完整 `start:end`（支持多字母列）并排序；Pending projection 复用该 helper，不比较 `_merges` 插入顺序，也不新增第二 merge authority。 | 两个工作表以相反顺序插入 `H2:I2`、`AA10:AC12` 时完整 projection 等价且 ranges 均保留双端；raw OOXML 向 Pending 注入 `<mergeCell ref="H2:I2"/>`、重新压缩并重算 byteSize/SHA 后 Main Join 拒绝且 Publisher=0。扩展全 VCC 742/742 PASS。 |
 | P2 Result 冻结文本使用 `cell.text`，formula/hyperlink/richText/shared formula 可伪装成相同显示文本 | 接受。继续复用唯一 `validateResultSheet`，抽取共享 `assertPlainTextCell`，对 headers、A2 主体 merge master、每行大类、未合并分类及调整原因要求 raw `cell.value` 为 string 且 exact 相等；merge follower、金额、普通 M/N 各保留既有 merge/number/null authority。Pending canonical projection 已把 object raw value 规范化进证据，不另建 value-kind 逻辑。 | 分别把 Result C1 改成 formula+cached `分类`、A2 改成同文本 hyperlink、B3 改成同文本 richText、C3 改成同文本 shared formula；ExcelJS 真实序列化后重算 byteSize/SHA，四案均在 Main Join 拒绝、Publisher=0、staging 清空。E12-A 60/60、全 VCC 746/746 通过。 |
+| P2 ExcelJS merge follower 会返回 master value，无法证明 raw follower 没有隐藏 formula/value/hyperlink/richText/inlineStr；四个旧 raw-kind fixture 又会重写整本 workbook，不能排除其它 entry 变化触发的假阳性 | 接受。由 Result/Writer 既有 merge model 派生 follower 集合，在唯一 artifact validation authority 加入命名空间感知 raw worksheet SAX 检查；任何 follower cell descendant payload、typed payload 或覆盖 follower 的 hyperlink 都拒绝。Writer self-check 与 Main Join 共用同一函数，不新增 Publisher/validator。四个 plain-text fixture 改为只替换 `sheet1.xml`，helper 对其它所有 ZIP entry payload 逐字节比较。 | 合法 writer 的 A3/C2 raw follower 均为空 `<c .../>` 且正常/no-op Publisher=1；A3 formula cached `PPHK`、C2 shared formula cached `上月财务OP` 只改 `sheet1.xml`、重算 manifest 后以 exact follower 原因拒绝，Publisher=0、target 不存在、Publisher 未取得 source。四个 plain-text case 精确断言 code/message，no-op 证明 helper 不会制造旁路失败。 |
 
 ## Blindspot Pass
 

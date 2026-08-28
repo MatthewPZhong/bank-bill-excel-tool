@@ -3,7 +3,7 @@
 ## Task Brief
 
 - Goal：将 VCC Financial OP 现有按主体顺序导出迁入 one-shot 单 Writer 新合同；同一 core 覆盖 `vcc-financial-op:export-subjects` 全主体输出和 `vcc-financial-op:export-single` exact-one subject specialization，Main Join 复核完整集合后只调用一次既有 Publisher。
-- Context：本次 restack 的精确 parent 为已审查 E11-C `771572ff3b7b4f623eafd2a8c44c34038f2a6b98`；现有 live `vccFinancialOp:export:result` 在 VCC Service `activeTask` 内由 Main 进程调用 `writeRunWorkbooks`，然后一次 `publishVccFinancialOpOutputs`。
+- Context：本次 restack 的精确 parent 为 E11-C review-fix `b9bcdf700eeb0e055d91989cb15dd54a82cc08f6`；现有 live `vccFinancialOp:export:result` 在 VCC Service `activeTask` 内由 Main 进程调用 `writeRunWorkbooks`，然后一次 `publishVccFinancialOpOutputs`。
 - Constraints：仅 E12-A 单 Writer；不做 subject SQL filter pushdown、第二 Writer/shard 或 15% benchmark；不接 live IPC/Renderer/Preload，不开启 production；不改金额、币种、差异、revision、archive 语义；复用现有 workbook writer、FilePlan 和 durable journal Publisher。
 - Done when：`production.enabled=false` 的 dormant capability 与 canonical policy 精确一致；一个 Writer 按 `subjectIndex` 顺序生成全部主体；Main 对 task/run/month/revision/fingerprint/archive/FilePlan/path/size/hash/业务 workbook 做 A/B authority 复核；Main 冻结 task-root identity，Worker 入口/逐主体/atomic handoff 复核；任一 generation/Join/cancel/crash 失败 Publisher=0，全部成功后 Publisher=1；committed 后 cleanup pending 只形成有界恢复证据且不改写正式成功；协议 DTO 有界且不携带 raw finance rows；shutdown/cleanup 与 legacy golden 回归通过。
 
@@ -60,6 +60,7 @@
 | Pending writer 的完整页面 authority 是否包含 sheet visibility/properties/headerFooter。 | PROBE（高） | canonical `buildPendingSheet` 明确创建 visible worksheet并确定 page layout；expected workbook由同一 writer序列化，properties/headerFooter的默认语义稳定可比较。raw OOXML hidden/header-footer/tabColor 可独立篡改并重算 manifest。 | Pending projection纳入 state（visible）、properties、headerFooter，并保留 rows/columns/views/autoFilter/pageSetup/cell style；Main Join复用同一 projection，不新增第二 validator。 |
 | Pending canonical authority 是否包含完整 merge ranges 且不受内部插入顺序影响。 | PROBE（高） | `_merges` 的枚举顺序不是业务语义；若 projection 不含 merges，raw OOXML 可注入 `H2:I2` 并在重算 byteSize/SHA 后保持其它证据自洽。只保存 start 或 end 单点也不能证明合并矩形。 | 复用 Result/Writer 唯一 range model，从 `top/left/bottom/right` 规范化为完整 `start:end` 并排序后纳入 Pending projection；反序插入得到相同证据。真实 OOXML 注入回归必须 Main Join 拒绝且 Publisher=0。 |
 | Result 冻结文本能否只比较 ExcelJS `cell.text`。 | PROBE（高） | formula（含 shared formula）、hyperlink、richText 的 raw `cell.value` 都是对象，但可让 `cell.text`/cached result 与预期普通文本完全相同；合法 Unicode 与空字符串在 XLSX 往返后仍是 string。Pending projection 已保留 raw value kind，对象不能与期望 primitive 同摘要。 | 在唯一 `validateResultSheet` 抽取 `assertPlainTextCell`，对表头、主体 merge master、大类、未合并分类和调整原因要求 raw value 必须为 string 且 exact 相等；合并 follower 只由 merge authority 校验，金额继续要求 finite number，普通 M/N 继续要求 null，不新增第二 value validator。 |
+| ExcelJS `cell.value` 能否证明 merged follower 的原始单元格没有隐藏 payload，raw-kind fixture 是否可能因重写其它 ZIP entry 产生假阳性。 | PROBE（高） | 合法 OOXML 的 A3/C2 follower 是空 `<c .../>`，但 ExcelJS 读取后把 follower `cell.value` 归一成 merge master value；向 follower 注入 cached formula 后，Workbook 模型仍不能提供独立 raw follower authority。旧 ExcelJS rewrite 同时重写整本 ZIP，无法证明拒绝点来自 Result raw kind。 | 在 Writer/Main 共用的唯一 artifact validator 中按既有 merge model 扫描 Result raw worksheet：follower 必须无 descendant/typed/hyperlink payload。测试 helper 只重写 `sheet1.xml` 并比较所有其它 entry 的原始 payload bytes；新增 raw no-op Publisher=1 与 A3/C2 精确失败 Publisher=0，避免 helper 假阳性。 |
 
 ## BLOCK 问题
 

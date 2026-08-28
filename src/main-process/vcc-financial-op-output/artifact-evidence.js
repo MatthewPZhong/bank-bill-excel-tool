@@ -13,7 +13,8 @@ const {
   buildResultSheet,
   buildSubjectRowPlan,
   canonicalMergeRanges,
-  validateResultSheet
+  validateResultSheet,
+  validateResultWorksheetRawPayload
 } = require('../vcc-financial-op-writer');
 const { canonicalSha256 } = require('../background-execution/canonical-json-v1');
 const path = require('node:path');
@@ -122,6 +123,12 @@ async function validateVccSubjectArtifact({
     validationContext.resultContract,
     plan
   );
+  await validateResultWorksheetRawPayload({
+    workbookPath: artifactPath,
+    contract: validationContext.resultContract,
+    renderedRows,
+    lastRow
+  });
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.readFile(artifactPath);
   if (workbook.worksheets.length !== 2 ||
