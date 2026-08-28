@@ -263,7 +263,7 @@ function createGenerationHelpers(options) {
   const artifactPaths = options.artifactPaths;
   const usedKinds = new Set();
   fs.mkdirSync(storageRoot, { recursive: true });
-  return createStatementGenerationHelpers({
+  const helpers = createStatementGenerationHelpers({
     appendLog() { throw new Error('Statement generation system failure'); },
     buildDateRangeLabel,
     buildDetailExportRows,
@@ -303,6 +303,183 @@ function createGenerationHelpers(options) {
     writeBalanceWorkbook,
     writeWorkbookRows
   });
+
+  function prepareBalanceGroup(config, preparedBatch, detailExportRows) {
+    if (!preparedBatch.balanceRequested) {
+      return { requested: false, failed: false, records: [], billDates: [], warnings: [] };
+    }
+    if (!config.mappingByTargetField.MerchantId) {
+      throw new FileValidationError('FILE_READ', '当前模板启用 Balance 时必须映射 MerchantId 字段');
+    }
+    const effectiveDetailRows = Array.isArray(detailExportRows.sourceRows)
+      ? detailExportRows.sourceRows
+      : preparedBatch.detailRows;
+    let balanceSeedStatus = { missing: 0, missingIndexByKey: new Map() };
+    try {
+      if (!fs.existsSync(balanceTemplatePath)) {
+        throw new FileValidationError('FILE_READ', '未找到余额账单模板，请确认文件已放入 assets 目录');
+      }
+      const balanceTemplateFields = extractHeaders(balanceTemplatePath);
+      if (!balanceTemplateFields.length) {
+        throw new FileValidationError('FILE_READ', '余额账单模板为空或不可读，请重新确认');
+      }
+      balanceSeedStatus = scanBalanceSeedStatus({
+        detailRows: effectiveDetailRows,
+        templateName: config.template.name
+      }, storageRoot);
+      const templateBankName = splitTemplateName(config.template.name).bankName;
+      const balanceAdjustments = readBalanceAdjustments(storageRoot, templateBankName);
+      const balanceResult = deriveBalanceRecords({
+        detailRows: effectiveDetailRows,
+        templateName: config.template.name,
+        balanceTemplateFields,
+        mode: preparedBatch.balanceMode,
+        balanceAdjustments,
+        resolvePreviousEndBalance: ({ bankName, merchantId, currency, targetBillDate }) => {
+          const seedRecord = findPreviousBalanceSeed(storageRoot, {
+            bankName,
+            merchantId,
+            currency,
+            beforeBillDate: targetBillDate
+          });
+          return seedRecord ? seedRecord.endBalance : null;
+        }
+      });
+      return {
+        requested: true,
+        failed: false,
+        records: balanceResult.records,
+        billDates: balanceResult.billDates,
+        warnings: []
+      };
+    } catch (error) {
+      if (!(error instanceof FileValidationError)) throw error;
+      if (error.code !== 'BALANCE_SEED_REQUIRED') {
+        return {
+          requested: true,
+          failed: true,
+          records: [],
+          billDates: [],
+          warnings: [{ type: 'balance-generate-failed', message: error.message }]
+        };
+      }
+      const promptMerchantId = normalizeCell(error.context?.merchantId);
+      const promptCurrency = normalizeCell(error.context?.currency);
+      const promptKey = `${promptMerchantId}@@${promptCurrency}`;
+      return {
+        requested: true,
+        failed: true,
+        records: [],
+        billDates: [],
+        warnings: [{
+          type: 'balance-seed-required',
+          message: error.message,
+          prompt: {
+            templateName: config.template.name,
+            bankName: error.context?.bankName || splitTemplateName(config.template.name).bankName,
+            merchantId: promptMerchantId,
+            currency: promptCurrency,
+            targetBillDate: normalizeCell(error.context?.targetBillDate),
+            queueIndex: balanceSeedStatus.missingIndexByKey?.get(promptKey) || 1,
+            queueTotal: balanceSeedStatus.missing || 1
+          }
+        }]
+      };
+    }
+  }
+
+  function generateStatementFilesFromGroups({
+    groups,
+    scope = 'current',
+    includeDetail = true,
+    includeBalance = false
+  }) {
+    if (!Array.isArray(groups) || groups.length < 2) {
+      throw new TypeError('Grouped Statement generation requires at least two template groups');
+    }
+    const preparedGroups = groups.map(({ config, fileEntries }) => {
+      const preparedBatch = helpers.buildPreparedStatementBatchFromEntries({ config, fileEntries });
+      const detailExportRows = buildDetailExportRows(cloneRowsWithMetadata(preparedBatch.detailRows));
+      // Reuse the production helper once per template authority for amount rejection,
+      // warnings and date validation, without writing an intermediate workbook.
+      const baseline = helpers.generateStatementFiles({
+        config,
+        preparedBatch,
+        scope,
+        includeDetail: false,
+        includeBalance: false
+      });
+      const balance = includeBalance
+        ? prepareBalanceGroup(config, preparedBatch, detailExportRows)
+        : { requested: false, failed: false, records: [], billDates: [], warnings: [] };
+      return { config, preparedBatch, detailExportRows, baseline, balance };
+    });
+
+    const warnings = preparedGroups.flatMap(({ baseline, balance }) => [
+      ...(baseline.warnings || []),
+      ...balance.warnings
+    ]);
+    const result = {
+      detail: null,
+      balance: null,
+      message: '',
+      warnings,
+      balanceRequested: preparedGroups.some(({ preparedBatch }) => preparedBatch.balanceRequested),
+      unmatchedAmountSplitFiles: preparedGroups.flatMap(
+        ({ baseline }) => baseline.unmatchedAmountSplitFiles || []
+      ),
+      unmatchedBillSplitFiles: preparedGroups.flatMap(
+        ({ baseline }) => baseline.unmatchedBillSplitFiles || []
+      )
+    };
+
+    if (includeDetail) {
+      const header = preparedGroups[0].detailExportRows[0] || [];
+      if (preparedGroups.some(({ detailExportRows }) =>
+        JSON.stringify(detailExportRows[0] || []) !== JSON.stringify(header))) {
+        throw new FileValidationError(
+          'FILE_READ',
+          '按文件名匹配的模板导出字段不一致，无法生成同一明细账单'
+        );
+      }
+      const rows = [header.slice()];
+      for (const { detailExportRows } of preparedGroups) {
+        rows.push(...detailExportRows.slice(1).map((row) => row.slice()));
+      }
+      writeWorkbookRows({ rows, outputFilePath: artifactPaths.detail });
+      result.detail = {
+        filePath: artifactPaths.detail,
+        fileName: path.basename(artifactPaths.detail),
+        templateName: preparedGroups[0].config.template.name
+      };
+    }
+
+    if (includeBalance) {
+      const requestedGroups = preparedGroups.filter(({ balance }) => balance.requested);
+      if (requestedGroups.length > 0 && requestedGroups.every(({ balance }) => !balance.failed)) {
+        const records = requestedGroups.flatMap(({ balance }) => balance.records);
+        const balanceTemplateFields = extractHeaders(balanceTemplatePath);
+        writeBalanceWorkbook({
+          templateFilePath: balanceTemplatePath,
+          records,
+          templateFields: balanceTemplateFields,
+          outputFilePath: artifactPaths.balance
+        });
+        result.balance = {
+          filePath: artifactPaths.balance,
+          fileName: path.basename(artifactPaths.balance),
+          templateName: preparedGroups[0].config.template.name
+        };
+      }
+    }
+
+    if (result.detail && result.balance) result.message = '明细账单可导出，余额账单可导出';
+    else if (result.detail) result.message = '明细账单可导出';
+    else if (result.balance) result.message = '余额账单可导出';
+    return result;
+  }
+
+  return Object.freeze({ ...helpers, generateStatementFilesFromGroups });
 }
 
 module.exports = {

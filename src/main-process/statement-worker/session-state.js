@@ -128,7 +128,7 @@ function statementGenerationInputEvidence(session, scope) {
       templateEvidenceDigest: session.templateEvidenceDigest,
       entries: entries.map((entry) => ({
         id: entry.id,
-        resourceId: entry.sourceIdentity.resourceId,
+        resourceId: entry.sourceEvidence.resourceId,
         templateRef: entry.templateRef,
         templateDigest: entry.templateDigest,
         sourceIdentity: entry.sourceIdentity
@@ -433,22 +433,24 @@ async function buildStatementImportCandidate(state, request, options = {}) {
     );
   }
   candidate.sessions.set(owner.sessionKey, session);
-  session.generationConfigByDigest = new Map(
-    [...templates.values()].map((evidence) => [
+  if (!(session.generationConfigByDigest instanceof Map)) {
+    session.generationConfigByDigest = new Map();
+  }
+  for (const evidence of templates.values()) {
+    session.generationConfigByDigest.set(
       evidence.digest,
       generationConfigFromTemplate(evidence.snapshot)
-    ])
-  );
+    );
+  }
   const ownerEvidence = [...templates.values()].find(
     (evidence) => String(evidence.snapshot.templateId) === owner.templateId
   ) || [...templates.values()][0];
   session.generationConfig = ownerEvidence
     ? generationConfigFromTemplate(ownerEvidence.snapshot)
     : null;
-  session.templateEvidenceDigest = canonicalSha256(request.templateCatalog.map((evidence) => ({
-    templateRef: evidence.templateRef,
-    digest: evidence.digest
-  })));
+  session.templateEvidenceDigest = canonicalSha256(
+    [...session.templateEvidenceByDigest.keys()].sort()
+  );
 
   const mappedEntries = [];
   for (const [sourceIndex, source] of request.sources.entries()) {

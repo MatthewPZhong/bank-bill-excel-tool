@@ -5,7 +5,6 @@ const fs = require('node:fs');
 const path = require('node:path');
 const XLSX = require('xlsx');
 
-const { sourceSnapshotMatchesStat } = require('../archive-center/source-snapshot');
 const { createGenerationHelpers } = require('../statement-generation-business');
 const {
   assertDistinctTaskOwnedPaths,
@@ -13,6 +12,7 @@ const {
   validateTaskOwnedStagingPath
 } = require('./staging-ownership');
 const { MAX_ARTIFACT_BYTES } = require('./generation-contracts');
+const { assertMetadataCurrent } = require('./source-identity');
 
 class StatementGenerationError extends Error {
   constructor(code, message) {
@@ -55,23 +55,48 @@ function warningSummary(warnings) {
 
 function assertSourcesCurrent(entries) {
   for (const entry of entries) {
-    let stat;
     try {
-      stat = fs.lstatSync(entry.filePath, { bigint: true });
+      assertMetadataCurrent({
+        path: entry.filePath,
+        snapshot: entry.sourceEvidence && entry.sourceEvidence.snapshot,
+        sourceIdentity: entry.sourceIdentity
+      }, fs);
+      if (sha256File(entry.filePath) !== entry.sourceIdentity.contentSha256) {
+        throw new Error('content changed');
+      }
     } catch (_error) {
       throw new StatementGenerationError(
         'STATEMENT_GENERATION_INPUT_STALE',
         'Statement source evidence changed before generation'
       );
     }
-    if (stat.isSymbolicLink() || !stat.isFile() ||
-        !sourceSnapshotMatchesStat(entry.sourceEvidence.snapshot, stat)) {
+  }
+}
+
+function resolveGenerationGroups(session, entries) {
+  if (!(session && session.generationConfigByDigest instanceof Map)) {
+    throw new StatementGenerationError(
+      'STATEMENT_GENERATION_TEMPLATE_EVIDENCE_MISSING',
+      'Statement session has no authoritative generation template catalog'
+    );
+  }
+  const groups = new Map();
+  for (const entry of entries) {
+    const digest = entry && entry.templateDigest;
+    const config = typeof digest === 'string' ? session.generationConfigByDigest.get(digest) : null;
+    if (!config) {
       throw new StatementGenerationError(
-        'STATEMENT_GENERATION_INPUT_STALE',
-        'Statement source evidence changed before generation'
+        'STATEMENT_GENERATION_TEMPLATE_EVIDENCE_MISSING',
+        'Statement entry generation template evidence is missing'
       );
     }
+    if (!groups.has(digest)) groups.set(digest, { config, fileEntries: [] });
+    groups.get(digest).fileEntries.push(entry);
   }
+  return Object.freeze([...groups.values()].map(({ config, fileEntries }) => Object.freeze({
+    config,
+    fileEntries: Object.freeze(fileEntries.slice())
+  })));
 }
 
 function workbookOutputRows(filePath) {
@@ -144,12 +169,13 @@ function executeStatementGeneration(options) {
     balanceTemplatePath,
     assertNotCancelled = () => {}
   } = options;
-  if (!session || !session.generationConfig || entries.length === 0) {
+  if (!session || entries.length === 0) {
     throw new StatementGenerationError(
       'STATEMENT_GENERATION_EMPTY_SCOPE',
       `Statement ${scope} scope has no entries`
     );
   }
+  const generationGroups = resolveGenerationGroups(session, entries);
   assertSourcesCurrent(entries);
   assertNotCancelled();
   const artifactPlans = resolveArtifactPlans(stagingRoot, request.artifacts);
@@ -185,18 +211,25 @@ function executeStatementGeneration(options) {
   });
   const plannedPaths = Object.values(artifactPaths);
   try {
-    const preparedBatch = helpers.buildPreparedStatementBatchFromEntries({
-      config: session.generationConfig,
-      fileEntries: entries
-    });
+    const primaryGroup = generationGroups[0];
     assertNotCancelled();
-    const generated = helpers.generateStatementFiles({
-      config: session.generationConfig,
-      preparedBatch,
-      scope,
-      includeDetail: Boolean(artifactPaths.detail),
-      includeBalance: Boolean(artifactPaths.balance)
-    });
+    const generated = generationGroups.length === 1
+      ? helpers.generateStatementFiles({
+          config: primaryGroup.config,
+          preparedBatch: helpers.buildPreparedStatementBatchFromEntries({
+            config: primaryGroup.config,
+            fileEntries: primaryGroup.fileEntries
+          }),
+          scope,
+          includeDetail: Boolean(artifactPaths.detail),
+          includeBalance: Boolean(artifactPaths.balance)
+        })
+      : helpers.generateStatementFilesFromGroups({
+          groups: generationGroups,
+          scope,
+          includeDetail: Boolean(artifactPaths.detail),
+          includeBalance: Boolean(artifactPaths.balance)
+        });
     assertNotCancelled();
     const summary = warningSummary(generated.warnings);
     if (summary.manualBalanceRequired) {
@@ -206,7 +239,10 @@ function executeStatementGeneration(options) {
       );
     }
     assertSourcesCurrent(entries);
-    const inputRows = Math.max(0, preparedBatch.detailRows.length - 1);
+    const inputRows = entries.reduce(
+      (count, entry) => count + Math.max(0, (entry.detailRows || []).length - 1),
+      0
+    );
     const artifacts = request.artifacts.map((plan) => {
       const generatedFile = generated[plan.kind];
       if (!generatedFile || path.resolve(generatedFile.filePath) !== artifactPaths[plan.kind]) {
@@ -270,6 +306,7 @@ module.exports = {
   assertSourcesCurrent,
   executeStatementGeneration,
   removeArtifacts,
+  resolveGenerationGroups,
   resolveArtifactPlans,
   sha256File,
   warningSummary
