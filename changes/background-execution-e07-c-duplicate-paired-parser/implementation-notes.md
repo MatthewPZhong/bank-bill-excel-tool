@@ -57,6 +57,8 @@
 | side authority：store + result digest定向unit | 9/9 PASS | import事务、receipt-owned边界、完整result digest未回归；Main CAS/Inspector同时由Duplicate affected覆盖。 |
 | Platform adjacent：`NODE_PATH=... node --test tests/unit/main-process/background-execution/*.test.js` | 356/356 PASS | exact-control capability未知/已终态安全返回false且不改变control/runtime枚举API；topology/CompoundLease、downgrade-to-single、shutdown-only、ServiceHost generation、worker-durable receipt gate与资源收口无回归。 |
 | Duplicate integration：`node scripts/integration/duplicate-inbound-match-end-to-end.js` | 31/31 PASS | 真实Bank/Document import、匹配、side/Main、导出与行数守恒无回归。 |
+| Windows CI lifecycle诊断：run `33120245677` / job `98685048683` | 6269/6272；唯一相关失败为test after hook在仍打开keepOpen SQLite时先删除temp dir，Windows报`EBUSY`；用例主体的WAL/Inspector/byte assertions均已完成 | 根因限定为fixture teardown顺序，不是产品逻辑、Inspector结果或DB family mutation。修复只合并cleanup hook并固定`close`→`finally rm`。 |
+| Windows teardown本地回归：startup recovery专属 + E07-C paired parser + `npm run smoke` | 14/14 PASS；18/18 PASS；smoke PASS | 保留keepOpen与未checkpoint WAL取证，验证exact inspector及DB family逐字节不变；paired Parser主链与全仓smoke无回归。远端Windows rerun仍由CI/PR owner确认。 |
 | 5轮benchmark：`DUPLICATE_PAIRED_BENCH_ROWS=3000 DUPLICATE_PAIRED_BENCH_ITERATIONS=5 node scripts/benchmark-duplicate-paired-parser.js` | 本地gate PASS；single median 531.251ms，paired 317.776ms，改善40.18%；paired peak RSS 507150336 < budget 838860800 bytes | 真实OS Parser Workers，交替顺序与warmup；详见[benchmark evidence](./benchmark-evidence.md)。只证明darwin parser-only capability，不解除native/Windows/production/人工门禁。 |
 | Static | `NODE_PATH=/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules npx eslint` 对本轮3个source与E07-C test PASS；全部本轮changed/new JS `node --check` PASS；`git diff --check` PASS | 语法、lint与边界代码静态质量。 |
 | 明确未执行 | `release-check`、`check-vars`、`scan:vars` | 按冻结任务禁止；不把跳过项宣称PASS。 |
@@ -87,7 +89,7 @@
 
 - 本PR不改matching engine、金额十进制规范化、Currency/Channel分组、MPT/document candidate选择、result digest或Excel writer。
 - Parser仅复用既有reader/model生成与single相同的Bank raw与Document row；Service仍调用同一store事务。Bank BizId/raw/FundType关系、ordinal唯一递增、Document matchable/empty完整守恒均在消费端复验。
-- 证据：全部Duplicate 114/114、backend store/digest 9/9、E2E 31/31与paired/single逐字段side post-image parity。
+- 证据：全部Duplicate 116/116、backend store/digest 9/9、E2E 31/31与paired/single逐字段side post-image parity。
 - 处置：自动化PASS；金额币种、候选复用、三方血缘和真实Excel/WPS仍需人工复核，不能由benchmark解除。
 
 ### [Important] 部分失败、取消、crash与隐私

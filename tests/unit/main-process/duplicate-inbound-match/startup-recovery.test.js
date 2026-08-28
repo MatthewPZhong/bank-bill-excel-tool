@@ -627,9 +627,14 @@ test('receipt target实际行数与import metadata不守恒时import/run均判un
 
 test('exact inspector读取未checkpoint WAL中的receipt且原始DB family逐字节不变', async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'duplicate-e07-b-wal-'));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const side = createCommittedSideRun(dir, 'wal', { keepOpen: true });
-  t.after(() => side.openDb.close());
+  t.after(() => {
+    try {
+      side.openDb.close();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
   const sidePath = runDataStore.sideDbPath(
     dir, runDataStore.MODULE_DUPLICATE_INBOUND_MATCH, side.monthKey
   );
