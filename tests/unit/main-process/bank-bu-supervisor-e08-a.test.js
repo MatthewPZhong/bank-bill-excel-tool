@@ -139,6 +139,29 @@ function assertPersistedCombinedReceipt(mainDb, receipt) {
   assert.equal(receipt.main.stableHash, mirror.stable_hash);
 }
 
+function assertTransportLossCommittedLifecycle(calls) {
+  const intentIndexes = calls
+    .map((entry, index) => entry.startsWith('intent:') ? index : -1)
+    .filter((index) => index >= 0);
+  const receiptIndexes = calls
+    .map((entry, index) => entry.startsWith('receipt:') ? index : -1)
+    .filter((index) => index >= 0);
+  const closeIndexes = calls
+    .map((entry, index) => entry.startsWith('close:') ? index : -1)
+    .filter((index) => index >= 0);
+
+  assert.deepEqual(intentIndexes, [0], 'transport-loss必须先且只持久一次Intent');
+  assert.equal(receiptIndexes.length <= 1, true, 'wire receipt若可见只能持久一次');
+  assert.deepEqual(closeIndexes, [calls.length - 1], 'committed close必须最终且只发生一次');
+  assert.equal(calls[closeIndexes[0]], 'close:committed:mirror=1');
+  if (receiptIndexes.length === 1) {
+    assert.equal(receiptIndexes[0] > intentIndexes[0], true);
+    assert.equal(receiptIndexes[0] < closeIndexes[0], true);
+    assert.equal(calls[receiptIndexes[0]], 'receipt:mirror=1');
+  }
+  assert.equal(calls.includes('hold'), false);
+}
+
 function createIntentStore(mainDb, calls, isLocked, options = {}) {
   return {
     async persistCriticalIntent(evidence, metadata) {
@@ -468,7 +491,7 @@ test('真实Supervisor Main CAS后committed evidence响应丢失由Inspector幂�
   }
 });
 
-test('真实Supervisor Main CAS与mark后unit done丢失由Inspector committed收口', async () => {
+test('真实Supervisor unit done transport丢失由Inspector committed收口且receipt事件可选', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bank-bu-e08-unit-done-loss-'));
   const mainPath = path.join(dir, 'tool-data.sqlite');
   const mainDb = openMain(mainPath);
@@ -484,12 +507,42 @@ test('真实Supervisor Main CAS与mark后unit done丢失由Inspector committed�
       executionTimeoutMs: 250
     });
     assert.equal(result.outcome, 'interrupted');
-    assert.deepEqual(calls, [
-      'intent:mirror=0', 'receipt:mirror=1', 'close:committed:mirror=1'
-    ]);
+    assertTransportLossCommittedLifecycle(calls);
     assert.equal(mainDb.prepare('SELECT COUNT(*) AS count FROM e08_test_holds').get().count, 0);
-    assert.equal(mainDb.prepare('SELECT COUNT(*) AS count FROM bank_bu_recon_runs').get().count, 1);
-    assert.equal(sideRunCount(dir), 1, 'CAS后unit done丢失恢复不得新增side run');
+    const mirror = mainDb.prepare('SELECT * FROM bank_bu_recon_runs').get();
+    assert.ok(mirror);
+    assert.equal(mirror.operation_key, 'bank-bu/run/supervisor/unit-done-loss');
+    assert.equal(mirror.producer_task_run_id, 'task-unit-done-loss');
+
+    const intent = mainDb.prepare('SELECT state,receipt_json FROM e08_test_intents').get();
+    assert.equal(intent.state, 'closed');
+    const combinedReceipt = JSON.parse(intent.receipt_json);
+    assertPersistedCombinedReceipt(mainDb, combinedReceipt);
+
+    const sideDb = runDataStore.openSideDb(
+      dir, runDataStore.MODULE_BANK_BU, '2026-08'
+    );
+    try {
+      const sideRun = sideDb.prepare('SELECT * FROM bank_bu_recon_runs').get();
+      const sideReceipt = sideDb.prepare(`
+        SELECT * FROM bank_bu_operation_receipts
+        WHERE action_key='bank-bu:run'
+      `).get();
+      assert.ok(sideRun);
+      assert.ok(sideReceipt);
+      assert.equal(sideReceipt.operation_key, 'bank-bu/run/supervisor/unit-done-loss');
+      assert.equal(sideReceipt.producer_task_run_id, 'task-unit-done-loss');
+      assert.equal(Number(sideReceipt.side_run_id), Number(sideRun.id));
+      assert.equal(sideRun.operation_key, sideReceipt.operation_key);
+      assert.equal(sideRun.producer_task_run_id, sideReceipt.producer_task_run_id);
+      assert.equal(sideRun.input_evidence_hash, sideReceipt.input_evidence_hash);
+      assert.equal(combinedReceipt.side.sideRunId, Number(sideRun.id));
+      assert.equal(combinedReceipt.side.operationKey, sideReceipt.operation_key);
+      assert.equal(combinedReceipt.side.inputEvidenceHash, sideReceipt.input_evidence_hash);
+    } finally {
+      sideDb.close();
+    }
+    assert.equal(sideRunCount(dir), 1, 'transport-loss恢复不得重跑算法或新增side run');
   } finally {
     mainDb.close();
     fs.rmSync(dir, { recursive: true, force: true });

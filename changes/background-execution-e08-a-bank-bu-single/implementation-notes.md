@@ -22,6 +22,7 @@
 | exact replay仍为本次Supervisor execution重新走critical handshake | persisted side result只能免除算法与新side run，不能绕过本次registered unit的Intent/ACK/receipt/settle所有权 | replay直接在ACK前返回 | replay测试保持side run/receipt各1行，同时两次execution的critical计数为2 |
 | managed export用同一side只读事务绑定identity与完整业务读取，并在artifact后fresh复核 | WAL允许第二连接在首读后提交；分离连接会产生旧runId配新dataset Excel | 先查identity、关闭连接、再用legacy loader重算 | single/aggregate任一Main选择或side state变化即删task-private staging并以`BANK_BU_EXPORT_SNAPSHOT_STALE`失败关闭，不增加跨月锁 |
 | run算法读取Pending/Bank与dataset evidence共用一个side read snapshot，写事务再校验dataset hash | 若两个业务表分次读取，同月覆盖导入可在中间提交，形成跨dataset混合结果 | 只在算法前读一次hash | 新run在`BEGIN IMMEDIATE`内验证input evidence后才落side run/receipt；变化则零run写入失败关闭 |
+| transport-loss恢复测试不强制观察到wire `commit:receipt` callback | Worker发出事件与Supervisor关闭transport存在合法竞态；durable side receipt与Inspector恢复才是权威事实 | 为测试新增产品ACK或要求receipt事件必达 | 测试固定Intent首先、committed close最终且唯一；receipt若出现至多一次且位于两者之间，并独立核验side/Main/combined receipt身份与Hold=0 |
 
 ## Assumptions
 
@@ -33,7 +34,7 @@
 
 | 原计划 | 实际方案 | 原因 | 影响 | Spec 已同步 |
 | --- | --- | --- | --- | --- |
-| 无 | 无行为偏离 | 所有实现均落在E08-A production-false capability seam；未改权威业务合同 | 无 | 不需要 |
+| 原fault test把transport上的receipt callback当作必达事件 | 改为允许该观测事件缺失，但继续严格验证durable receipt、Inspector committed close与双身份 | Windows transport关闭可合法先于消息投递完成；产品durable/receipt事实未变化 | 只修正测试验收，不新增ACK、协议或fallback | 不需要，权威产品合同未变化 |
 
 ## Evidence
 
@@ -45,6 +46,10 @@
 | 既有side-db parity | `17/17 PASS` | 1:1/1:N/N:1/N:M数据与输出golden不漂移 |
 | 既有BankBU资金smoke | `41/41 PASS` | normalize、匹配基数、异常sheet、source row index、覆盖导入清旧run |
 | changed JS ESLint / `node --check` / `git diff --check` | PASS | 静态语法、风格、patch空白；未运行禁止的release-check/check-vars/scan:vars |
+| continuation E08-A focused + transport-loss stress | `21/21 PASS`；目标fault test连续`20/20 PASS` | 合并E07-C后BankBU singleton、side/Main identity、Inspector与可选wire receipt观测稳定 |
+| continuation E07-C + 相邻Platform/BankBU unit | `74/74 PASS`；`167/167 PASS` | paired shutdown/cleanup、startup recovery、Supervisor worker-durable、ResourceGovernor、ServiceClient与BankBU receipt回归 |
+| continuation BankBU/Duplicate integration | `21/21 PASS`；`31/31 PASS` | E08-A真实临时SQLite/XLSX与E07-C Duplicate端到端合同 |
+| continuation changed JS ESLint / `node --check` / `git diff --check` | PASS | 从E08-A原head `710c8e86`覆盖non-ff合并与测试修复后的全部changed JS；未运行禁止命令 |
 
 ## Blindspot Pass
 
@@ -62,6 +67,7 @@
 | run Pending/Bank跨dataset混读 | 算法读事务固定dataset/Pending/Bank；side写事务再次验证dataset hash | critical期间第二连接覆盖导入后`BANK_BU_RUN_DATASET_CHANGED`且side run为0 |
 | Main CAS与committed receipt次序倒置 | run receipt callback在同一locked session内先权威回读side、CAS Main并验证mirror identity，再持久`{side,main}`；settle路径不再调用CAS | mark callback实时断言mirror已存在；正常时序为intent(mirror=0)→receipt(mirror=1)→close(mirror=1)→done |
 | CAS前后丢回复造成重复算法或错误Hold | CAS前side-only由Inspector partial补mirror；CAS后mark响应或unit-done丢失均按side+Main判committed并close combined receipt | 三个真实Supervisor failure-window测试均side run=1；CAS后Hold=0，identity conflict仍Hold |
+| transport-loss时wire receipt事件可能未被Supervisor观察 | fault test只把事件当可选观测：Intent严格首先且唯一、committed close严格最终且唯一，receipt若出现至多一次且夹在两者之间；最终Main mirror、closed Intent combined receipt、side run/receipt逐字段identity一致且Hold=0 | receipt可见/不可见都由同一durable facts与Inspector收口，不放宽side COMMIT或receipt真实性 |
 
 ## Reconciliation Blindspot Pass
 
