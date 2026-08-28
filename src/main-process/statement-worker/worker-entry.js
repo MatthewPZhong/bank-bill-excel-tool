@@ -19,6 +19,12 @@ const withholdAdoptOrdinal = workerData && workerData.statementFaultInjection
 const failAfterGrantOrdinal = workerData && workerData.statementFaultInjection
   ? workerData.statementFaultInjection.failAfterGrantOrdinal
   : null;
+const generationSafepointDelayMs = workerData && workerData.statementFaultInjection &&
+  Number.isSafeInteger(workerData.statementFaultInjection.generationSafepointDelayMs) &&
+  workerData.statementFaultInjection.generationSafepointDelayMs >= 0 &&
+  workerData.statementFaultInjection.generationSafepointDelayMs <= 1000
+  ? workerData.statementFaultInjection.generationSafepointDelayMs
+  : 0;
 let statementSourceRoot = null;
 if (workerData && typeof workerData.statementSourceRoot === 'string') {
   try {
@@ -65,6 +71,12 @@ const service = createStatementService({
   stagingRoot: statementStagingRoot,
   storageRoot: statementStorageRoot,
   balanceTemplatePath: statementBalanceTemplatePath,
+  async yieldGenerationSafepoint() {
+    await new Promise((resolve) => setImmediate(resolve));
+    if (generationSafepointDelayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, generationSafepointDelayMs));
+    }
+  },
   close() {
     parentPort.close();
   },

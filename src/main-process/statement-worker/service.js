@@ -20,7 +20,10 @@ const {
 } = require('./contracts');
 const { createStatementServiceRequest } = require('./import-contracts');
 const { createStatementGenerationRequest } = require('./generation-contracts');
-const { executeStatementGeneration } = require('./generation');
+const {
+  executeStatementGenerationWithSafepoints,
+  removeArtifacts
+} = require('./generation');
 const {
   createStatementBigAccountContinuationRequest,
   createStatementCancelInteractionRequest
@@ -122,6 +125,7 @@ function createStatementService(options = {}) {
 
   function finishError(job, error, fallbackCode = 'STATEMENT_IMPORT_FAILED') {
     if (!job || job.terminal) return;
+    cleanupUnpublishedGeneration(job);
     job.terminal = true;
     if (activeJob === job) activeJob = null;
     job.emit('job:error', {
@@ -131,9 +135,25 @@ function createStatementService(options = {}) {
 
   function finishDone(job, result) {
     if (!job || job.terminal) return;
+    if (job.kind === 'generation') job.unpublishedGenerationPaths = null;
     job.terminal = true;
     if (activeJob === job) activeJob = null;
     job.emit('job:done', { result });
+  }
+
+  function cleanupUnpublishedGeneration(job) {
+    if (!job || !Array.isArray(job.unpublishedGenerationPaths) ||
+        job.unpublishedGenerationPaths.length === 0) return;
+    const paths = job.unpublishedGenerationPaths;
+    job.unpublishedGenerationPaths = null;
+    removeArtifacts(paths, { stagingRoot: options.stagingRoot });
+  }
+
+  function cancellationError() {
+    return new StatementServiceError(
+      'STATEMENT_IMPORT_CANCELLED',
+      'Statement continuation cancelled'
+    );
   }
 
   function currentSummary(activePhase = 'idle') {
@@ -427,18 +447,28 @@ function createStatementService(options = {}) {
         Object.assign(job, { kind: 'generation', tokenRecord });
         await new Promise((resolve) => setImmediate(resolve));
         assertJobActive(job);
-        const result = (options.executeGeneration || executeStatementGeneration)({
-          session,
-          entries: currentEvidence.entries,
-          request,
-          scope,
-          inputEvidenceHash: currentEvidence.hash,
-          stagingRoot: options.stagingRoot,
-          storageRoot: options.storageRoot,
-          balanceTemplatePath: options.balanceTemplatePath,
-          assertNotCancelled: () => assertJobActive(job)
-        });
+        job.generationInFlight = true;
+        let result;
+        try {
+          result = await (options.executeGeneration || executeStatementGenerationWithSafepoints)({
+            session,
+            entries: currentEvidence.entries,
+            request,
+            scope,
+            inputEvidenceHash: currentEvidence.hash,
+            stagingRoot: options.stagingRoot,
+            storageRoot: options.storageRoot,
+            balanceTemplatePath: options.balanceTemplatePath,
+            assertNotCancelled: () => assertJobActive(job),
+            yieldToEventLoop: options.yieldGenerationSafepoint
+          });
+        } finally {
+          job.generationInFlight = false;
+        }
         assertJobActive(job);
+        job.unpublishedGenerationPaths = Object.freeze(
+          result.artifacts.map((artifact) => artifact.generationPath)
+        );
         releaseToken(tokenRecord, 'token-consumed', { job, result });
         return;
       }
@@ -748,9 +778,11 @@ function createStatementService(options = {}) {
     job.candidate = null;
     job.emit('cancel:ack', { cancellation: { scope: 'job' } });
     if (job.tokenRecord) {
+      if (job.generationInFlight) return;
+      cleanupUnpublishedGeneration(job);
       releaseToken(job.tokenRecord, 'job-failed', {
         job,
-        error: new StatementServiceError('STATEMENT_IMPORT_CANCELLED', 'Statement continuation cancelled')
+        error: cancellationError()
       });
       return;
     }
@@ -921,7 +953,14 @@ function createStatementService(options = {}) {
             failedGrantTombstone = null;
           }
           if (release.completion) {
-            if (release.completion.error) {
+            if (release.completion.job && release.completion.job.cancelled) {
+              cleanupUnpublishedGeneration(release.completion.job);
+              finishError(
+                release.completion.job,
+                cancellationError(),
+                'STATEMENT_IMPORT_CANCELLED'
+              );
+            } else if (release.completion.error) {
               finishError(release.completion.job, release.completion.error);
             } else {
               finishDone(release.completion.job, release.completion.result);

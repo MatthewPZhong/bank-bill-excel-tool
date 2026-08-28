@@ -11,7 +11,7 @@
 ### Goal / Context / Constraints / Done when
 
 - Goal: 实现 `statement:generate-current` / `statement:generate-all` 的 dormant canonical execution。
-- Context: E09-P0/A/B 已冻结 DTO、Service session、token reservation 与 waiting-user 生命周期；本轮 restack exact base 是 `eaff95d6558fed0a00c07b071d3ae88863cf4d71`。
+- Context: E09-P0/A/B 已冻结 DTO、Service session、token reservation 与 waiting-user 生命周期；review fix 后的 restack exact base 是 `513620c4a20c32975e4615c968e1381fbdb421c5`。
 - Constraints: 不接 live Renderer/IPC，不启用 production，不实现 E09-D manual seed settlement 或 E10；不把 detail rows/prepared batch/大 workbook 状态带回 Main；warning 与业务顺序保持 legacy。
 - Done when: 真实临时 XLSX/SQLite/worker/service 链路、current/all 与四金额/余额 golden、artifact tamper/all-or-none/crash-cleanup 等专项证据及 E09-P0/A/B/platform 回归通过。
 
@@ -23,6 +23,7 @@
 | Main all-or-none Publisher 能力 | PROBE → CLOSED | `toolbox-output-publication.js` 的 prepare/publish/dispose 与 journal fault tests | 复用既有 journal Publisher；全部 technical/business readback 先完成，Publisher 只调用一次 |
 | generation token、revision、input evidence 的绑定形态 | PROBE → CLOSED | E09-B token store、Service 私有 session、import template/source evidence | scope prompt token 私有绑定 current/all 两个 evidence hash；continuation 按实际 action scope 复核，再 single-use consume |
 | parent/child/filename 多模板 session 的 generation authority | PROBE → CLOSED | E09-A 已冻结逐 source `templateRef/templateDigest` lineage；真实 filename owner current/all mixed-template golden | `generationConfigByDigest` 是 Worker session 内唯一累积 authority；entry 必须按自己的 digest 命中，unknown/missing fail closed，不回退 owner/最近模板或建立第二 config authority |
+| 同步 writer 完成与 shutdown cancel 谁拥有终态和未发布文件 | PROBE → CLOSED | 真实 Worker 可在 success completion 已登记、token release ack 尚未返回时收到 cancel；同步 writer 内原先没有可达 event-loop safepoint | artifact unit 间及最终 manifest handoff 前让出 event loop，并始终复用 `job.cancelled/assertJobActive`；cancel request/ack 后 success completion 不得胜出，唯一 unpublished generation owner 清理整组 staging |
 | manual balance prompt | BLOCK for E09-D, observable in E09-C | Spec 明确 E09-D 后续；legacy helper 以 warning 返回 prompt | E09-C 仅返回 bounded warning summary 并拒绝发布不完整 artifact set，不写 seed、不结算 prompt |
 
 ## Decisions
@@ -33,6 +34,7 @@
 | generation 继续调用 `createStatementGenerationHelpers`，并把 Main 原余额 helper 抽到 `statement-generation-business.js` | helper 已承载 mapped-row merge、四金额、余额、warning、writer；legacy 与 Worker 现共用同一份 balance/date/seed-scan 函数 | 在 Worker 复制业务算法 | Main/Worker 单一真相；既有 golden 改为直接加载共享 production module |
 | Worker 只接受 task staging + artifact plans | TechDoc 禁止 Worker 接 final target，且 Main 只持 FilePlan/manifest | Worker 直接写正式 exports 或 Main 传大行数据 | 维持单 Publisher 与 Main heap 边界 |
 | detail/balance 严格串行，任一缺失即删除全组 staging | legacy helper 的 warning/output 顺序是业务合同；manifest 是 all-or-none | 并行 writer 或返回 partial manifest | 保持 warning/order，partial writer/manual-seed-required 时 Publisher=0 |
+| 串行 generation 以 artifact 为最小 safepoint unit，Service 在 `job:done` 前持有 unpublished ownership | XLSX writer 同步执行，只有 artifact 边界可在不改变 legacy writer/顺序的前提下观测 shutdown cancel；token release ack 之前 Main 尚未取得 manifest/publication ownership | 修改通用 Supervisor、在线程内增加第二 cancel authority、writer 每行异步化或 cancel 后允许既有 success completion 获胜 | current/all、detail/both 均在 unit 间和最终 handoff 前可取消；cancel 统一为 `STATEMENT_IMPORT_CANCELLED`，整组 staging 清零；成功仍把文件保留给 Main validation 与单 Publisher |
 | generation Worker 不持久化 balance seed | Worker 只能写 task-private FilePlan staging，manifest 不承载 seed mutation；manual seed 属 E09-D | Worker 直接改共享 balance-seeds | dormant 路径只生成 workbook；seed settlement 继续由后续独立门禁负责 |
 | Main 对 journal manual-recovery 保留 generation | 既有 Publisher 的 `preserveTemporaryFiles=true` 是人工恢复证据 | finally 无条件删除 generation | 普通成功/失败清 staging，uncertain/manual-recovery 保留证据 |
 | Main descriptor 以 cell-contract digest 绑定 writer 持久化语义 | Round 2 证明业务值 digest 会把非特殊字段的 string/number 归一为同值，且原 style gate 未覆盖 data font 与 header bold/color | 把 raw rows/完整 style XML 放入 descriptor，或校验 XF id/apply flags 等默认噪声 | descriptor 只增加定长 `cellCount/cellsSha256`；逐格绑定 writer 实际 t/z 和有意义 style，仍不携带 raw rows |
@@ -122,18 +124,42 @@ digest unknown/missing 都在写 artifact 前 fail closed；没有 owner/最近�
 
 除上述合同澄清外无业务偏差；production policy、manual seed 与 live IPC 范围均不变。
 
+### E09-C Reviewer Round 1 cancellation closure
+
+Reviewer 的唯一 P1 是真实可达时序：同步 generation 已写完 artifacts 并把 success completion 交给
+token release 后，shutdown cancel 可以先收到 `cancel:ack`，但旧 release ack 路径仍直接
+`finishDone`；同时同步 writer 没有 event-loop safepoint，使 cancel 不能在 detail/balance unit 间被
+Worker 观测。修复不改通用 Supervisor，也不新增 cancel authority：generation wrapper 仍串行调用
+同一 production helper，每个 artifact unit 后让出一次 event loop 并复用
+`job.cancelled/assertJobActive`；Service 只在成功终态交给 Main 前保存 task-private generation paths，
+cancel/error 由该唯一 owner 删除全部已规划/已生成 staging。
+
+token reservation/release 仍是原 single-use/retry FSM。若 cancel 在 writer 执行中到达，Worker 先回
+`cancel:ack`，wrapper 在 safepoint 抛同一 `STATEMENT_IMPORT_CANCELLED` 并保留首错；若 cancel 在
+success completion 已登记、release ack 未到时到达，release ack 的同一 `job.cancelled` gate 拒绝
+success、清理 staging 并只发 `job:error`。成功 release ack 则显式把 ownership 交给 Main，文件继续
+供 bounded manifest validation 与唯一 Publisher 使用。未增加 startup 扫描/恢复、fallback、第二
+Publisher 或第二 `generationConfigByDigest` authority；production 仍 false/legacy/0。
+
+实现后 blindspot pass 还关闭一个由新 safepoint 自身引入的窄窗口：单元内部已完成的 source
+currentness 检查发生在 final yield 之前，来源可能在 handoff 窗口漂移。wrapper 因而在最终 manifest
+组装前再次复用现有 canonical path/file identity/snapshot/content SHA-256 校验；定向 mutant 在 yield
+中替换来源后稳定 `STATEMENT_GENERATION_INPUT_STALE`、manifest=0、staging=0，不新增 evidence 来源。
+
 ## Evidence
 
 | 证据 | 结果 | 覆盖的行为/风险 |
 | --- | --- | --- |
-| E09-C restack lineage | exact base/merge-base `eaff95d6558fed0a00c07b071d3ae88863cf4d71`；旧 E09-C 四个提交按序 cherry-pick 后适配 E09-A/B 最新 lineage | 精确 base/堆叠边界；不携带旧 base |
+| E09-C restack lineage | exact base/merge-base `513620c4a20c32975e4615c968e1381fbdb421c5`；旧 E09-C 四个提交按序 cherry-pick 后适配 E09-A/B 与 token replacement review fix 的最新 lineage | 精确 base/堆叠边界；不携带旧 base |
 | restack E09-C/A/B/P0 聚焦矩阵 | 60/60 PASS；filename parent multi-template golden 单项 PASS | current/all、child digest authority、filename owner、四金额/币种/余额、A-B-A 输入按 legacy 模板串行分组输出 A-A-B、token/revision/evidence/single-use、Publisher/cleanup |
 | E09-C 专项 `node --test ...statement-generation-e09-c.test.js` | 13/13 PASS；其中 filename parent multi-template golden 单项复跑 PASS | 真实 Supervisor/ServiceHost/Worker、临时 XLSX/SQLite、current/all、stale/replay/revision/evidence、Round 1/2/3 findings、tamper、all-or-none、四金额、混币余额、0 输出、partial writer、manual prompt、bounded manifest |
+| E09-C cancellation Round 1 专项 | 21/21 PASS；current/all × detail/both 四组、generation 早期 shutdown、success-completion/release-ack 精确竞态均使用真实 Supervisor/ServiceHost/Worker，并含 final-yield source drift mutant | 每组均 `cancel:ack` 先于 `job:error`、Supervisor outcome=`cancelled`、code=`STATEMENT_IMPORT_CANCELLED`、task staging=0；来源漂移 fail closed；正常 current/all/golden 同文件回归通过 |
+| Reviewer 后 E09-C/A/B/P0/error-codec 聚焦矩阵 | 98/98 PASS | cancel authority、token single-use/retry、source/template lineage、current/all、四金额/币种/余额/行序/warning、bounded DTO 与 production=false 门禁 |
+| Reviewer 后 platform Governor/ServiceHost/Supervisor/recovery/P0 聚焦矩阵 | 245/245 PASS | 未改通用 Supervisor；资源 grant/adopt/revoke/release、shutdown/crash、service generation 与 recovery 合同无回归 |
 | Round 2/3 自洽 workbook mutations | formula、type/format、font 及其四个扩展布尔、single-quote style、comment spoof、relationship decoy、duplicate coordinate、非法显式 style 全部 Publisher=0 | 实际 worksheet relationship/结构化 cell style、全 grid t/z 与 writer-owned font 摘要 readback；manifest size/hash/rowCounts 均按篡改后文件重算 |
-| E09-P0 platform + Supervisor/ServiceHost/Governor 聚焦回归 | 206/206 PASS | 既有 token/session/取消/crash/资源生命周期、Worker/Main bounded state 与 dormant policy 基线 |
-| `node scripts/integration/statement-generation-pipeline.js` | 45/45 PASS | legacy generation pipeline 业务等价 |
+| Reviewer 后 `node scripts/integration/statement-generation-pipeline.js` | 45/45 PASS | legacy generation pipeline、detail/balance/current/all 业务等价 |
 | `npm run test:integration` | 51/51 scripts、2455/2455 PASS | 全仓集成、Publisher/cleanup 与资金相关输出回归；runner 自动清单的本地耗时刷新已回退，不纳入 change |
-| `npm run smoke` | PASS | Excel/账单 I/O、scenario engines、writer 与主业务 smoke 回归 |
+| Reviewer 后 `npm run smoke` | PASS | Excel/账单 I/O、scenario engines、writer 与主业务 smoke 回归 |
 | 全量 `npm run test:unit` | 6246 PASS，2 FAIL，3 SKIP（6251 total） | 两个失败均为 `windows-build-contract.test.js` 直接读取隔离 worktree 缺失的 `node_modules/app-builder-lib/templates/nsis/multiUser.nsh`；共享安装为 26.8.1、lockfile 为 26.15.7，属于既有依赖环境漂移，未改依赖掩盖 |
 | changed JS ESLint + `node --check` + parent/overall `git diff --check` | PASS | 静态质量与 diff 完整性 |
 | `statement-legacy-golden-e09-p0.test.js` 与真实 descriptor readback | current/all、四金额、混合币种/余额、manual prompt、sheet/header/type/style/watermark/template lineage 已冻结且回归通过 | 业务等价与资金输出防冒充基线 |
