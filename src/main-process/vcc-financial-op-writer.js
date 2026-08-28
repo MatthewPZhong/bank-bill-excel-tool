@@ -585,6 +585,12 @@ function assertCanonicalCellAmount(cell, expected, label) {
   }
 }
 
+function assertPlainTextCell(cell, expected, label) {
+  if (typeof cell.value !== 'string' || cell.value !== expected) {
+    throw exportValidationError(`VCC 财务OP导出普通文本校验失败：${label}`);
+  }
+}
+
 function assertResultPageLayout(sheet, contract, lastRow) {
   const expectedPageSetup = cloneStyle(contract.pageSetup);
   expectedPageSetup.printArea = `A1:${contract.printAreaRightColumn}${lastRow}`;
@@ -667,18 +673,15 @@ function assertAdjustmentLineage(workbook, sheet, renderedRows, lastRow) {
 function validateResultSheet(workbook, contract, plan, renderedRows, lastRow) {
   const sheet = workbook.getWorksheet(RESULT_SHEET_NAME);
   if (!sheet) throw exportValidationError('VCC 财务OP导出缺少结果 sheet');
-  const headers = RESULT_TEMPLATE_HEADERS.map((_, index) => sheet.getCell(1, index + 1).text);
-  if (styleSignature(headers) !== styleSignature(RESULT_TEMPLATE_HEADERS)) {
-    throw exportValidationError('VCC 财务OP导出结果表头校验失败');
-  }
+  RESULT_TEMPLATE_HEADERS.forEach((header, index) => {
+    assertPlainTextCell(sheet.getCell(1, index + 1), header, `表头 ${index + 1}`);
+  });
   if (sheet.actualRowCount !== lastRow || sheet.actualColumnCount !== 14) {
     throw exportValidationError('VCC 财务OP导出结果区域校验失败', [
       `期望 A1:N${lastRow}，实际有效行为 ${sheet.actualRowCount}、列为 ${sheet.actualColumnCount}`
     ]);
   }
-  if (sheet.getCell('A2').text !== plan.subject) {
-    throw exportValidationError('VCC 财务OP导出主体校验失败');
-  }
+  assertPlainTextCell(sheet.getCell('A2'), plan.subject, '主体 A2');
   assertResultPageLayout(sheet, contract, lastRow);
   if (sheet.autoFilter !== `A1:${contract.printAreaRightColumn}${lastRow}`) {
     throw exportValidationError('VCC 财务OP导出筛选区域校验失败');
@@ -715,11 +718,9 @@ function validateResultSheet(workbook, contract, plan, renderedRows, lastRow) {
     const subjectCell = sheet.getCell(row.rowNumber, 1);
     const majorCell = sheet.getCell(row.rowNumber, 2);
     const minorCell = sheet.getCell(row.rowNumber, 3);
-    if (majorCell.text !== (row.major || '')) {
-      throw exportValidationError(`结果第 ${row.rowNumber} 行大类校验失败`);
-    }
-    if (!anchor.mergeMajorMinor && minorCell.text !== (row.minor || '')) {
-      throw exportValidationError(`结果第 ${row.rowNumber} 行分类校验失败`);
+    assertPlainTextCell(majorCell, row.major || '', `结果第 ${row.rowNumber} 行大类`);
+    if (!anchor.mergeMajorMinor) {
+      assertPlainTextCell(minorCell, row.minor || '', `结果第 ${row.rowNumber} 行分类`);
     }
     const expectedHeight = row.rowType === 'adjustment'
       ? adjustmentReasonRowHeight(row.reason, sheet.getColumn(14).width, anchor.height)
@@ -761,9 +762,7 @@ function validateResultSheet(workbook, contract, plan, renderedRows, lastRow) {
         canonicalizeVccAmount(row.adjustmentAmount, '调整值回读'),
         `结果第 ${row.rowNumber} 行调整值`
       );
-      if (reasonCell.value !== row.reason) {
-        throw exportValidationError(`结果第 ${row.rowNumber} 行调整原因回读失败`);
-      }
+      assertPlainTextCell(reasonCell, row.reason, `结果第 ${row.rowNumber} 行调整原因`);
       const targetCell = sheet.getCell(
         row.rowNumber,
         SUPPORTED_CURRENCIES.indexOf(row.currency) + 4

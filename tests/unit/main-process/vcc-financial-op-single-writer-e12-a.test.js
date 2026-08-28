@@ -468,6 +468,24 @@ async function injectPendingMergeRange(filePath, mergeRange) {
   }, 2);
 }
 
+async function rewriteResultCellValue(filePath, cellReference, value) {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(filePath);
+  workbook.worksheets[0].getCell(cellReference).value = value;
+  await workbook.xlsx.writeFile(filePath);
+}
+
+async function rewriteResultCellSharedFormula(filePath, cellReference, result) {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(filePath);
+  workbook.worksheets[0].fillFormula(
+    `${cellReference}:${cellReference}`,
+    `="${result.replace(/"/g, '""')}"`,
+    [result]
+  );
+  await workbook.xlsx.writeFile(filePath);
+}
+
 function recomputeArtifactIdentity(result, generationPath) {
   const contents = fs.readFileSync(generationPath);
   return {
@@ -915,7 +933,7 @@ test('自洽伪造 size/hash 的 workbook 业务篡改仍由 Main 深度回读�
   assert.deepEqual(fs.readdirSync(stagingDirectory), []);
 });
 
-test('raw XLSX XML 自洽篡改样式与完整 Result/Pending 页面布局仍在 Main Join 阻断', async (t) => {
+test('raw XLSX/ExcelJS 自洽篡改 Result 文本类型、样式与完整页面布局仍在 Main Join 阻断', async (t) => {
   const harness = setup(t, ['PPHK']);
   const tamperCases = [
     ['C1 header style', (filePath) => rewriteCellStyleId(filePath, 'C1')],
@@ -934,7 +952,19 @@ test('raw XLSX XML 自洽篡改样式与完整 Result/Pending 页面布局仍在
     ['pending workbook sheet hidden', rewritePendingSheetState],
     ['pending header footer', rewritePendingHeaderFooter],
     ['pending sheet properties', rewritePendingSheetProperties],
-    ['pending injected merge H2:I2', (filePath) => injectPendingMergeRange(filePath, 'H2:I2')]
+    ['pending injected merge H2:I2', (filePath) => injectPendingMergeRange(filePath, 'H2:I2')],
+    ['result C1 formula cached text', (filePath) => rewriteResultCellValue(filePath, 'C1', {
+      formula: '="分类"', result: '分类'
+    })],
+    ['result A2 hyperlink text', (filePath) => rewriteResultCellValue(filePath, 'A2', {
+      text: 'PPHK', hyperlink: 'https://example.invalid/vcc-subject'
+    })],
+    ['result B3 rich text', (filePath) => rewriteResultCellValue(filePath, 'B3', {
+      richText: [{ text: 'VCC_' }, { font: { bold: true }, text: 'discharge' }]
+    })],
+    ['result C3 shared formula cached text', (filePath) => (
+      rewriteResultCellSharedFormula(filePath, 'C3', 'B2B')
+    )]
   ];
   for (const [label, tamper] of tamperCases) {
     await t.test(label, async () => {

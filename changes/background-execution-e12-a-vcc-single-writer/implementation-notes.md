@@ -56,6 +56,7 @@
 | Independent Review Round4 platform/recovery | E11-C/background runtime/policy/toolbox Publisher 共 529/529 PASS；recovery control 27/27、pure 9/9、recovery canary 9/9 PASS | 单一 cleanup/Publisher authority、transport/lease/journal recovery、E11-C cleanup/runtime 交互未漂移。 |
 | Independent Review Round4 integration/smoke | VCC 19/19、29/29、226/226、77/77 PASS；`npm run smoke` PASS | 正常/历史/调整/破坏性资金链及全局 smoke。 |
 | Independent Review Round4 final merge-range closure | E12-A 56/56、扩展全 VCC 742/742、platform 466/466、writer/recovery 19/19、VCC/recovery integration 19+29+226+77+27+9+9、smoke/static 全 PASS | 真实 OOXML 向 Pending 注入 `H2:I2` 并重算 manifest 后 Main Join 拒绝且 Publisher=0；完整 start:end range 由 Result/Writer 共用 helper 规范化排序，插入顺序不影响证据摘要。 |
+| Independent Review Round4 final plain-text closure | E12-A 60/60、扩展全 VCC 746/746、platform 466/466、writer/recovery 19/19、VCC/recovery integration 19+29+226+77+27+9+9、smoke/static 全 PASS | 真实 ExcelJS formula+cached text、hyperlink、richText 与 shared formula 篡改 Result 冻结文本，重算 manifest 后均由 Main Join 拒绝且 Publisher=0；合法 Unicode、空字符串、调整、merge goldens 保持通过。 |
 
 ## Round1 Findings And Fixes
 
@@ -103,6 +104,7 @@
 | P2 首次 post-mkdir full freeze 失败后再次从当前 lexical path 建 identity，可能把 replacement 当成自建目录删除 | 接受。`mkdir` 返回后立即以最小 lstat 组合冻结 root/parent dev+ino provisional identity；full identity 仅从 provisional + Main 已确认 expected real path 派生。后续 full freeze/cleanup 只做 exact identity 验证，绝不从当前 path 重新授权。无法验证时零删除，error 置 `preserveTemporaryFiles=true`、唯一 task-root recoveryPath、bounded cause/digest diagnostics；同 operation retry collision fail closed，明确要求 operator 收口后再重试。 | full freeze 首次 realpath 时替换 task dir并抛 `EIO`：replacement sentinel/原 inode均保留、Worker=0、Publisher=0；持续 `EACCES`：task dir保留、recoveryPaths 有界且含 cause code，retry先 collision。fixture 明确模拟 operator 恢复/删除 recoveryPath 后，retry 可达 Writer，不形成静默永久 collision。一次性 EIO 且 identity 未变时，同一 owner 仍可验证 provisional identity并自动收净。 |
 | P2 Pending canonical projection 未冻结 workbook sheet visibility，hidden sheet 可在重算 manifest 后绕过 | 接受。Pending projection 补 `sheet.state`（默认/期望 `visible`），并按 canonical writer 已确定的页面语义同时纳入 `properties/headerFooter`；既有 rows（height/hidden/outline）、columns、views、autoFilter、pageSetup、cell/style仍由同一 projection authority 比较。 | raw OOXML 将 Pending workbook sheet 改 hidden，并分别篡改 Pending header/footer 与 sheet properties；重新压缩、重算 byteSize/SHA 后 Main Join 均拒绝且 Publisher=0。正常/调整/merge goldens 与全 VCC 569/569 通过。 |
 | P2 Pending canonical projection 未冻结完整 merge ranges，额外合并区域可在重算 manifest 后绕过 | 接受。抽取 Result/Writer 既有 range model 为共用 `canonicalMergeRanges`，从 `top/left/bottom/right` 生成完整 `start:end`（支持多字母列）并排序；Pending projection 复用该 helper，不比较 `_merges` 插入顺序，也不新增第二 merge authority。 | 两个工作表以相反顺序插入 `H2:I2`、`AA10:AC12` 时完整 projection 等价且 ranges 均保留双端；raw OOXML 向 Pending 注入 `<mergeCell ref="H2:I2"/>`、重新压缩并重算 byteSize/SHA 后 Main Join 拒绝且 Publisher=0。扩展全 VCC 742/742 PASS。 |
+| P2 Result 冻结文本使用 `cell.text`，formula/hyperlink/richText/shared formula 可伪装成相同显示文本 | 接受。继续复用唯一 `validateResultSheet`，抽取共享 `assertPlainTextCell`，对 headers、A2 主体 merge master、每行大类、未合并分类及调整原因要求 raw `cell.value` 为 string 且 exact 相等；merge follower、金额、普通 M/N 各保留既有 merge/number/null authority。Pending canonical projection 已把 object raw value 规范化进证据，不另建 value-kind 逻辑。 | 分别把 Result C1 改成 formula+cached `分类`、A2 改成同文本 hyperlink、B3 改成同文本 richText、C3 改成同文本 shared formula；ExcelJS 真实序列化后重算 byteSize/SHA，四案均在 Main Join 拒绝、Publisher=0、staging 清空。E12-A 60/60、全 VCC 746/746 通过。 |
 
 ## Blindspot Pass
 
@@ -122,7 +124,7 @@
 | 核对面 | 证据与结论 |
 | --- | --- |
 | 主键/血缘 | runId + targetMonth + resultRevision + inputFingerprint + archiveStateDigest + subjectIndex 构成 authority；subject/business digest 和 adjustment defined names 在 Main 回读。 |
-| 金额/币种/差异 | 未改计算规则；managed 与 legacy 使用同一 `buildSubjectRowPlan/buildPendingSheet/writeRunWorkbooks`；结果金额/币种/difference fill 与 Pending 值、样式、页面、完整 merge ranges projection 回读。 |
+| 金额/币种/差异 | 未改计算规则；managed 与 legacy 使用同一 `buildSubjectRowPlan/buildPendingSheet/writeRunWorkbooks`；结果金额/币种/difference fill、冻结文本 raw kind/exact value 与 Pending 值、样式、页面、完整 merge ranges projection 回读。 |
 | 时间边界 | 只接受 exact archived run/month，archive evidence 必须唯一且非 inconsistent；跨月 integration 226/226 PASS。 |
 | 幂等/重复 | generation 仅写冻结 identity 下的 task-private exact paths；Join identity 贯穿 wrapper 与既有 Publisher 二次校验；未清 task dir 的同 operation retry collision fail closed；Publisher 无自动重试且成功仅一次。 |
 | 行数/输出守恒 | `export-subjects` 必须 0..N-1 全覆盖，`export-single` exact-one；result/Pending row count 与 subject authority 一致，golden 保留文件/Sheet/主体顺序。 |
