@@ -532,6 +532,15 @@ const {
   prepareManualBalanceSeedSubmission,
   writeManualBalanceSeedPlan
 } = require('./main-process/manual-balance-seed-preflight');
+const {
+  MANUAL_BALANCE_ACTION_KEY,
+  MANUAL_BALANCE_INSPECTOR_KEY,
+  MANUAL_BALANCE_SETTLEMENT_KEY,
+  createManualBalanceSeedInspector,
+  createManualBalanceSettlementRecoveryProvider,
+  manualBalanceRecoveryPolicy,
+  resolveManualBalanceTargetAlias
+} = require('./main-process/manual-balance-seed-settlement');
 const { parseBankAccountExcel } = require('./backend/bank-account-import');
 const { writeOwnAccounts } = require('./backend/own-account-store');
 const {
@@ -20859,6 +20868,16 @@ async function initializeBackgroundExecutionRecovery() {
   for (const actionKey of Object.keys(PRE_FUND_MPT_STATIC_KEYS)) {
     inspectorRegistry.register(PRE_FUND_MPT_STATIC_KEYS[actionKey].inspector, inspectPreFundMpt);
   }
+  inspectorRegistry.register(MANUAL_BALANCE_INSPECTOR_KEY, createManualBalanceSeedInspector({
+    resolveTargetPath: (targetAliasKey) => resolveManualBalanceTargetAlias(
+      getStorageRoot(),
+      targetAliasKey
+    )
+  }));
+  providerRegistry.register(
+    MANUAL_BALANCE_SETTLEMENT_KEY,
+    createManualBalanceSettlementRecoveryProvider()
+  );
 
   inspectorRegistry.freeze();
   providerRegistry.freeze();
@@ -20873,8 +20892,9 @@ async function initializeBackgroundExecutionRecovery() {
     requestOwnerRepository,
     observationAttemptRepository,
     recoveryControlRepository,
-    resolvePolicy: (actionKey) => PRE_FUND_MPT_POLICIES
-      .find((policy) => policy.actionKey === actionKey) || null,
+    resolvePolicy: (actionKey) => actionKey === MANUAL_BALANCE_ACTION_KEY
+      ? manualBalanceRecoveryPolicy()
+      : PRE_FUND_MPT_POLICIES.find((policy) => policy.actionKey === actionKey) || null,
     planTransitions: preFundMptRecoveryPlanTransitions
   });
   const summary = await coordinator.scanAndRecover();

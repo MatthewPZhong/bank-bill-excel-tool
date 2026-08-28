@@ -86,11 +86,11 @@ function readBalanceSeedRecords(storageRoot, bankName) {
   }
 }
 
-function writeBalanceSeedRecords(storageRoot, bankName, records) {
-  const filePath = getBalanceSeedFilePath(storageRoot, bankName);
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-
-  const normalizedRecords = records
+function normalizeBalanceSeedRecords(records) {
+  if (!Array.isArray(records)) {
+    throw new TypeError('余额种子记录必须是数组');
+  }
+  return records
     .map((record) => ({
       merchantId: normalizeCell(record.merchantId),
       currency: normalizeCell(record.currency),
@@ -106,8 +106,17 @@ function writeBalanceSeedRecords(storageRoot, bankName, records) {
         `${right.merchantId}|${right.currency}|${right.billDate}`
       );
     });
+}
 
-  fs.writeFileSync(filePath, `${JSON.stringify(normalizedRecords, null, 2)}\n`, 'utf8');
+function serializeBalanceSeedRecords(records) {
+  return `${JSON.stringify(normalizeBalanceSeedRecords(records), null, 2)}\n`;
+}
+
+function writeBalanceSeedRecords(storageRoot, bankName, records) {
+  const filePath = getBalanceSeedFilePath(storageRoot, bankName);
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+
+  fs.writeFileSync(filePath, serializeBalanceSeedRecords(records), 'utf8');
   return filePath;
 }
 
@@ -183,7 +192,9 @@ module.exports = {
   getBalanceSeedFilePath,
   getBalanceSeedsDir,
   listBalanceSeedBankNames,
+  normalizeBalanceSeedRecords,
   readBalanceSeedRecords,
+  serializeBalanceSeedRecords,
   splitTemplateName,
   upsertBalanceSeedRecord,
   writeBalanceSeedRecords
