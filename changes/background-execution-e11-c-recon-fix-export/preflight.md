@@ -3,7 +3,7 @@
 ## Task Brief
 
 - Goal：在不接 live IPC/Renderer/Preload 的前提下，为 ReconFix Service 增加 `production.enabled=false` 的 managed export capability；Worker 只从 Service 私有 exact result 生成 task-private main/unmatched staging artifacts，Main 深度复验后只调用一次既有 durable journal Publisher，实现多 artifact 全有或全无。
-- Context：当前 restack exact base `ad3a7222cbcd049266cdc66ca86d17830c08f7a0`；E11-C 原实现来自旧 base `225ab05f77cd74d25b9aae05dda1ab490104d5c6` 上按序提交 `6e0ee98f`、`c32db41e`、`2e03bf2a`。最新 E11-A 已交付 standard/BOC Service，E11-P0/B 已交付 JPM ID-aware durable mutation、receipt-first Inspector、Recovery Hold、threshold/startup recovery 与 phase admission。冻结 v3.2.4 Spec/TechDoc 把 E11-C 限定为 ReconFix export，不包含 E12。
+- Context：当前 restack exact base `1abcae910715e3271c53ad6022d95070e8d502d3`；E11-C 原实现来自旧 base `225ab05f77cd74d25b9aae05dda1ab490104d5c6` 上按序提交 `6e0ee98f`、`c32db41e`、`2e03bf2a`。最新 E11-A 已交付 standard/BOC Service，E11-P0/B 已交付 JPM ID-aware durable mutation、receipt-first Inspector、Recovery Hold、threshold/startup recovery 与 phase admission。冻结 v3.2.4 Spec/TechDoc 把 E11-C 限定为 ReconFix export，不包含 E12。
 - Constraints：Worker 只使用 Service 返回的 exact `serviceGeneration + revision + resultHandle` 与 task-private staging；复用 legacy 命名、sheet、列、样式、watermark、row lineage；Main DTO 不携带 raw row/JPM candidate/大对象；Main Join 必须重验 generation/result/revision、scenario/linked evidence、FilePlan set/order、path containment/alias/symlink、size/hash 与业务 workbook；全部通过后单次调用既有 Publisher；任一失败 Publisher=0；Publisher uncertain/crash 只沿用现有 journal recovery；不改 E11-P0/B mutation/receipt/Inspector，不启用 managed production，不接 live IPC，不改依赖，不实现 E12。
 - Done when：standard/BOC/JPM 的 main-only、unmatched-only、main+unmatched 都生成与 legacy 等价的有序 manifest；tamper/stale/collision/alias/symlink/set/order/rowCount/业务回读失败均在 Publisher 前 fail closed；Publisher failure/uncertain/kill/restart 走既有 journal all-or-none recovery；E11-P0/A/B、legacy 与 production-false 回归通过。
 
@@ -135,7 +135,7 @@
 
 ### Task Brief
 
-- Goal：把 E11-C 三个已审提交严格移植到 E11-B exact head `ad3a7222cbcd049266cdc66ca86d17830c08f7a0`，保留最新 phase ownership、streaming evidence、exact-ID/order/same-transaction receipt、Inspector/Recovery Hold/threshold/startup recovery 合同。
+- Goal：把 E11-C 三个已审提交严格移植到 E11-B exact head `1abcae910715e3271c53ad6022d95070e8d502d3`，保留最新 phase ownership、streaming evidence、exact-ID/order/same-transaction receipt、Inspector/Recovery Hold/threshold/startup recovery 合同。
 - Constraints：export 的 strict staging ownership 与 linked evidence 读取不得发生在 phase grant 前；不得重复申请第二资源或创建第二 commit/Publisher authority；unknown/partial 不自动补偿或重复发布；不提前实现 E12；production 继续 false/legacy/0。
 - Done when：三提交按序移植；E11-C export 进入最新 phase admission 并持有到 terminal；E11-A/P0/B/C、受影响 integration/smoke/static 与资金盲区证据闭合；无业务偏差则不反向修改冻结 Spec/TechDoc。
 
@@ -146,3 +146,20 @@
 | 旧 direct `export-plan` 是否仍满足新 worker phase protocol | BLOCK→PROBE | 高；可导致所有 managed export 在执行前失败 | 先跑 E11-C 专属矩阵，再对照 worker phase-extension validator | 9/14 因 `RECON_FIX_PHASE_PLAN_INVALID` 失败；确认为真实可达资源生命周期缺口，改用一次 Service preparation 后 14/14 PASS |
 | strict staging/evidence 读取应位于 phase 申请前还是获批后 | PROBE | 高；获批前大状态读取会绕过 E11-B admission | 检查 `prepare()`/`begin()` 边界与 worker finally | `prepare()` 仅计算有界资源；`begin()` 获批后才校验 task-private staging、读取 linked evidence并创建 export plan；同一 phase 由 worker finally 释放 |
 | restack 是否改变 E11-C 冻结业务合同 | ASSUME→VERIFY | 高；若改变需反向同步 Spec/TechDoc | 对照冻结 Spec/TechDoc、三原提交与全套定向测试 | 无业务合同偏离；只适配最新资源准入，Publisher、receipt/Inspector/Hold、artifact/output identity/order/path/privacy/cleanup 均保持 |
+
+## Ultra Reviewer Round 2 Cleanup Ownership（2026-08-29）
+
+### Task Brief
+
+- Goal：闭合 export plan 成功生成 task-private xlsx 后、post-generation cancellation safepoint 命中时的孤儿文件窗口。
+- Context：Worker 原失败清理只覆盖 `plan.execute()` 内部异常；execute 成功后若 shutdown-only cancel 在下一个 safepoint 收口，Main Join/Publisher 尚未接管，而 Service preparation 已退出自身清理域。
+- Constraints：仅 export branch 扩展失败清理域；job:error/cancel 才删除 generation paths，job:done 必须保留给 Main Join/Publisher；不新增第二 cleanup/Publisher/resource/commit authority，不扩大其他 action 的取消语义；cleanup 不能掩盖首个 cancel/error。
+- Done when：真实 runtime 在 artifact generation 已开始后触发 shutdown-only cancel，terminal 为 cancelled/job:error、Publisher=0、两条 generation path 均零残留；同 staging 新 Service generation 重试无 collision；成功 job:done 在 Publisher 回调时文件仍存在。
+
+### Unknowns Register
+
+| 未知 | 类型 | 影响 | 处理 | 当前决定/证据 |
+| --- | --- | --- | --- | --- |
+| generation path 的失败清理 owner 应归 Service、Worker 还是 Main | 所有权/生命周期 | 高；错误归属会双删或遗留 | 对照 execute/terminal/Main Join 边界 | export plan closure 是唯一 generation cleanup owner；Worker 只在 export execute+post-safepoint 同一 catch 调用，job:done 不调用 |
+| cancellation 应用 user cancel 还是 shutdown-only | 公共合同 | 高；错误测试会绕过 canonical policy | 对照 canonical `recon-fix:export` cancellation capability | policy 是 `shutdown-only`；动态测试使用 runtime shutdown，在 generation 已开始后请求取消，Worker 只在 execute 后 safepoint 收口 |
+| cleanup 失败是否替换原 terminal error | 错误优先级 | 高；会破坏 cancel 终态与首错证据 | 对照现有首错/fail-closed 合同 | cleanup 为幂等 best-effort；Worker 始终重抛原 cancel/error，不以 cleanup 异常代偿或改写 terminal |

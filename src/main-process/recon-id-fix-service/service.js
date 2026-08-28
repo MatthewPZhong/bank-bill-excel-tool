@@ -756,8 +756,24 @@ function createReconFixService(options = {}) {
           }
           const artifacts = requireTaskPrivateArtifacts(input, result);
           assertCurrentLinkedEvidence(result);
+          const generatedPaths = [];
+          let cleanupComplete = false;
+          function cleanupGeneratedArtifacts() {
+            if (cleanupComplete) return false;
+            cleanupComplete = true;
+            let complete = true;
+            for (const generatedPath of generatedPaths) {
+              try {
+                fs.rmSync(generatedPath, { force: true });
+              } catch (_error) {
+                complete = false;
+              }
+            }
+            return complete;
+          }
           return Object.freeze({
             kind: 'export-plan',
+            cleanup: cleanupGeneratedArtifacts,
             async execute() {
               assertOpen();
               if (state.serviceGeneration !== input.expectedServiceGeneration ||
@@ -766,114 +782,106 @@ function createReconFixService(options = {}) {
                 fail('RECON_FIX_EXPORT_RESULT_STALE', 'ReconFix result 在生成前已变化');
               }
               assertCurrentLinkedEvidence(result);
-              const generatedPaths = [];
-              try {
-                const manifest = [];
-                for (const artifact of artifacts) {
-                  const stagingStat = fs.lstatSync(input.stagingDirectory);
-                  if (stagingStat.isSymbolicLink() || !stagingStat.isDirectory() ||
-                      fs.realpathSync(path.dirname(artifact.generationPath)) !==
-                        fs.realpathSync(input.stagingDirectory)) {
-                    fail('RECON_FIX_EXPORT_STAGING_INVALID', 'task-private staging ownership 已变化');
-                  }
-                  try {
-                    fs.lstatSync(artifact.generationPath);
-                    fail('RECON_FIX_EXPORT_STAGING_COLLISION', 'task-private generation path 已被占用');
-                  } catch (error) {
-                    if (!error || error.code !== 'ENOENT') throw error;
-                  }
-                  generatedPaths.push(artifact.generationPath);
-                  const isMain = artifact.artifactKind === 'main';
-                  const rows = isMain ? result.fixedRows : result.unmatchedRows;
-                  const outputContract = isMain
-                    ? getReconIdFixOutputContract(result.subMode)
-                    : Object.freeze({
-                        sheetName: UNMATCHED_REPORT_SHEET_NAME,
-                        headers: UNMATCHED_REPORT_HEADERS
-                      });
-                  if (isMain) {
-                    await writeReconIdFixOutput({
-                      fixedRows: rows,
-                      savePath: artifact.generationPath,
-                      subMode: result.subMode
-                    });
-                  } else {
-                    await writeUnmatchedReport({
-                      unmatchedRows: rows,
-                      savePath: artifact.generationPath
-                    });
-                  }
-                  const stat = fs.lstatSync(artifact.generationPath);
-                  if (stat.isSymbolicLink() || !stat.isFile() || stat.size <= 0) {
-                    fail('RECON_FIX_EXPORT_ARTIFACT_INVALID', '生成的 ReconFix artifact 不是普通非空文件');
-                  }
-                  const projectedRows = projectRows(rows, outputContract.headers);
-                  const business = await readReconFixArtifactEvidence(
-                    artifact.generationPath,
-                    artifact.artifactKind,
-                    result.subMode
-                  );
-                  if (business.sheetName !== outputContract.sheetName ||
-                      business.headersDigest !== reconFixEvidenceSha256(outputContract.headers) ||
-                      business.recordsDigest !== reconFixEvidenceSha256(projectedRows) ||
-                      business.rowCount !== projectedRows.length ||
-                      business.headerFontSize !== 10 || business.lastAuthor !== 'pzhong') {
-                    fail('RECON_FIX_EXPORT_ARTIFACT_INVALID', 'Worker 业务回读与 current result 不一致');
-                  }
-                  manifest.push(Object.freeze({
-                    outputIndex: artifact.outputIndex,
-                    artifactKind: artifact.artifactKind,
-                    outputArtifactKey: artifact.outputArtifactKey,
-                    byteSize: stat.size,
-                    sha256: await sha256File(artifact.generationPath),
-                    rowCount: business.rowCount,
-                    sheetName: business.sheetName,
-                    headersDigest: business.headersDigest,
-                    recordsDigest: business.recordsDigest,
-                    style: Object.freeze({
-                      headerFontSize: business.headerFontSize,
-                      lastAuthor: business.lastAuthor
-                    }),
-                    lineage: Object.freeze({
-                      exportAuthorityDigest: result.exportAuthority.authorityDigest,
-                      inputEvidenceHash: result.inputEvidenceHash,
-                      scenarioSnapshotHash: result.scenarioSnapshotHash,
-                      linkedEvidenceHash: result.linkedEvidenceHash,
-                      resultDigest: result.summary.resultDigest
-                    })
-                  }));
+              const manifest = [];
+              for (const artifact of artifacts) {
+                const stagingStat = fs.lstatSync(input.stagingDirectory);
+                if (stagingStat.isSymbolicLink() || !stagingStat.isDirectory() ||
+                    fs.realpathSync(path.dirname(artifact.generationPath)) !==
+                      fs.realpathSync(input.stagingDirectory)) {
+                  fail('RECON_FIX_EXPORT_STAGING_INVALID', 'task-private staging ownership 已变化');
                 }
-                assertCurrentLinkedEvidence(result);
-                if (state.serviceGeneration !== input.expectedServiceGeneration ||
-                    state.revision !== input.expectedRevision || state.result !== result) {
-                  fail('RECON_FIX_EXPORT_RESULT_STALE', 'ReconFix result 在生成后已变化');
+                try {
+                  fs.lstatSync(artifact.generationPath);
+                  fail('RECON_FIX_EXPORT_STAGING_COLLISION', 'task-private generation path 已被占用');
+                } catch (error) {
+                  if (!error || error.code !== 'ENOENT') throw error;
                 }
-                return Object.freeze({
-                  contractVersion: 1,
-                  exportAuthorityDigest: result.exportAuthority.authorityDigest,
-                  serviceGeneration: state.serviceGeneration,
-                  revision: state.revision,
-                  resultHandle: result.resultHandle,
-                  runKind: result.runKind,
-                  subMode: result.subMode,
-                  scenarioSnapshotHash: result.scenarioSnapshotHash,
-                  linkedEvidenceHash: result.linkedEvidenceHash,
-                  inputEvidenceHash: result.inputEvidenceHash,
-                  artifacts: Object.freeze(manifest),
-                  summary: Object.freeze({
-                    artifactCount: manifest.length,
-                    fixedRowCount: result.summary.fixedRowCount,
-                    unmatchedRowCount: result.summary.unmatchedRowCount,
-                    warningCount: result.summary.warningCount,
+                generatedPaths.push(artifact.generationPath);
+                const isMain = artifact.artifactKind === 'main';
+                const rows = isMain ? result.fixedRows : result.unmatchedRows;
+                const outputContract = isMain
+                  ? getReconIdFixOutputContract(result.subMode)
+                  : Object.freeze({
+                      sheetName: UNMATCHED_REPORT_SHEET_NAME,
+                      headers: UNMATCHED_REPORT_HEADERS
+                    });
+                if (isMain) {
+                  await writeReconIdFixOutput({
+                    fixedRows: rows,
+                    savePath: artifact.generationPath,
+                    subMode: result.subMode
+                  });
+                } else {
+                  await writeUnmatchedReport({
+                    unmatchedRows: rows,
+                    savePath: artifact.generationPath
+                  });
+                }
+                const stat = fs.lstatSync(artifact.generationPath);
+                if (stat.isSymbolicLink() || !stat.isFile() || stat.size <= 0) {
+                  fail('RECON_FIX_EXPORT_ARTIFACT_INVALID', '生成的 ReconFix artifact 不是普通非空文件');
+                }
+                const projectedRows = projectRows(rows, outputContract.headers);
+                const business = await readReconFixArtifactEvidence(
+                  artifact.generationPath,
+                  artifact.artifactKind,
+                  result.subMode
+                );
+                if (business.sheetName !== outputContract.sheetName ||
+                    business.headersDigest !== reconFixEvidenceSha256(outputContract.headers) ||
+                    business.recordsDigest !== reconFixEvidenceSha256(projectedRows) ||
+                    business.rowCount !== projectedRows.length ||
+                    business.headerFontSize !== 10 || business.lastAuthor !== 'pzhong') {
+                  fail('RECON_FIX_EXPORT_ARTIFACT_INVALID', 'Worker 业务回读与 current result 不一致');
+                }
+                manifest.push(Object.freeze({
+                  outputIndex: artifact.outputIndex,
+                  artifactKind: artifact.artifactKind,
+                  outputArtifactKey: artifact.outputArtifactKey,
+                  byteSize: stat.size,
+                  sha256: await sha256File(artifact.generationPath),
+                  rowCount: business.rowCount,
+                  sheetName: business.sheetName,
+                  headersDigest: business.headersDigest,
+                  recordsDigest: business.recordsDigest,
+                  style: Object.freeze({
+                    headerFontSize: business.headerFontSize,
+                    lastAuthor: business.lastAuthor
+                  }),
+                  lineage: Object.freeze({
+                    exportAuthorityDigest: result.exportAuthority.authorityDigest,
+                    inputEvidenceHash: result.inputEvidenceHash,
+                    scenarioSnapshotHash: result.scenarioSnapshotHash,
+                    linkedEvidenceHash: result.linkedEvidenceHash,
                     resultDigest: result.summary.resultDigest
                   })
-                });
-              } catch (error) {
-                for (const generatedPath of generatedPaths) {
-                  try { fs.rmSync(generatedPath, { force: true }); } catch (_cleanupError) { /* best effort */ }
-                }
-                throw error;
+                }));
               }
+              assertCurrentLinkedEvidence(result);
+              if (state.serviceGeneration !== input.expectedServiceGeneration ||
+                  state.revision !== input.expectedRevision || state.result !== result) {
+                fail('RECON_FIX_EXPORT_RESULT_STALE', 'ReconFix result 在生成后已变化');
+              }
+              return Object.freeze({
+                contractVersion: 1,
+                exportAuthorityDigest: result.exportAuthority.authorityDigest,
+                serviceGeneration: state.serviceGeneration,
+                revision: state.revision,
+                resultHandle: result.resultHandle,
+                runKind: result.runKind,
+                subMode: result.subMode,
+                scenarioSnapshotHash: result.scenarioSnapshotHash,
+                linkedEvidenceHash: result.linkedEvidenceHash,
+                inputEvidenceHash: result.inputEvidenceHash,
+                artifacts: Object.freeze(manifest),
+                summary: Object.freeze({
+                  artifactCount: manifest.length,
+                  fixedRowCount: result.summary.fixedRowCount,
+                  unmatchedRowCount: result.summary.unmatchedRowCount,
+                  warningCount: result.summary.warningCount,
+                  resultDigest: result.summary.resultDigest
+                })
+              });
             }
           });
         });

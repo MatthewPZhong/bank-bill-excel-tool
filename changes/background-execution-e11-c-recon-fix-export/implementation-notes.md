@@ -3,7 +3,7 @@
 ## Baseline
 
 - Goal/spec：v3.2.4 Spec §6、§8～§11；TechDoc §8、§12～§14 的 E11-C。
-- Restack exact base：`ad3a7222cbcd049266cdc66ca86d17830c08f7a0`（最新 E11-B review-ready head）。
+- Restack exact base：`1abcae910715e3271c53ad6022d95070e8d502d3`（E11-B committed-result-lost review-fix head）。
 - 原实现来源：旧 base `225ab05f77cd74d25b9aae05dda1ab490104d5c6` 上按序提交 `6e0ee98fddc0b47d669387113c7c65dea4819e2f`、`c32db41ef3a9c993a2497f5e0f455fbdfcb16db1`、`2e03bf2a39537e8b8ff7960758e227773f17900f`。
 - Initial plan：[preflight.md](./preflight.md)。
 - Done when：production-false managed export 在 Service 私有 result 上生成有界有序 manifest，Main 深度 Join 后只调用一次既有 journal Publisher，全部 fault/回归门禁闭合。
@@ -21,6 +21,7 @@
 | 全部 Join 通过后统一走 `publishToolboxPublicationAsync`，不增加第二套 receipt/retry | 既有 Publisher 已覆盖 batch journal、target snapshot、rollback、worker-exit recovery | ReconFix 自己 rename/copy；异常后再次 publish | main+unmatched 单次 all-or-none；uncertain 不猜成功、不重复发布 |
 | JPM adopted result 的 linked lineage 绑定 writeback plan/receipt 证明的 post-image hash | probe 发现 E11-B 原 pre-image hash 会让成功 mutation 后立即 stale；Inspector/receipt 已以 post-image 为提交权威 | export 绕过 stale gate；从 receipt 重建 candidate | 不改 mutation/receipt/Inspector 流程，只让 current result lineage 对应当前 ADM image |
 | restack 后 export 复用最新 E11-B Service phase-extension：prepare 只给 `resourcePlan`，grant 后才校验 strict staging/读取 linked evidence并创建 plan，phase 持有到 terminal | 新 worker 会拒绝 direct `export-plan`；首次 E11-C restack 9 项报 `RECON_FIX_PHASE_PLAN_INVALID` | 让 export 绕过 phase admission；在 grant 前读取 strict staging/evidence；为 export 申请第二资源 | 使用一次 `estimateRunPhaseBytes(stateMemoryBytes)` 资源估算；grant 边界重验 result/export authority；沿用 worker finally 统一释放，不改变 Publisher/commit authority |
+| export plan closure 持有唯一幂等 generation cleanup；Worker 仅在 `execute + post-generation safepoint` 同一失败域调用 | Ultra Reviewer 动态反例证明 execute 成功后 shutdown-only cancel 会在 Main Join/Publisher 前留下无 owner xlsx | Main/Publisher 预删；Service preparation close 无条件删；扩大所有 action cancel；新增第二 cleanup authority | job:error/cancel 删除本 plan 已登记 paths并保留首错；job:done 不删，文件继续交 Main Join/Publisher；不改变 journal/archive handoff |
 
 ## Assumptions
 
@@ -32,16 +33,17 @@
 
 ## Deviations
 
-无冻结业务合同偏离。实施中补齐两项前序缺口：JPM public bounded result 增加冻结合同要求的 generation/revision；JPM private current result 的 linked hash 改为 receipt 证明的 post-image。两项均经 E11-B 全回归，未改变 mutation/receipt/Inspector/Hold 合同。Round 2 只交付共享 primitive、runtime owner API 与 fail-closed managed export 合同；按裁决不修改 `main.js` live handler，具体 scenario/BOC/JPM writer wiring 留 E12。此次 restack 唯一实现偏差是把旧 direct export plan 适配为最新 E11-B phase preparation；这是资源准入兼容修复，不改变 export outcome、artifact/Publisher authority 或冻结 Spec/TechDoc，因此无需反向修改业务文档。
+无冻结业务合同偏离。实施中补齐两项前序缺口：JPM public bounded result 增加冻结合同要求的 generation/revision；JPM private current result 的 linked hash 改为 receipt 证明的 post-image。两项均经 E11-B 全回归，未改变 mutation/receipt/Inspector/Hold 合同。Round 2 只交付共享 primitive、runtime owner API 与 fail-closed managed export 合同；按裁决不修改 `main.js` live handler，具体 scenario/BOC/JPM writer wiring 留 E12。此次 restack 的 phase preparation 与 Reviewer Round 2 generation cleanup 都是状态/资源 ownership 兼容修复，不改变 export definitive outcome、artifact/Publisher authority、重试语义或冻结 Spec/TechDoc，因此无需反向修改业务文档。
 
 ## Evidence
 
 | 证据 | 结果 | 覆盖的行为/风险 |
 | --- | --- | --- |
 | Preflight 合同/代码检查 | 无 BLOCK；高风险项均进入 PROBE | exact base、范围、状态/文件/Publisher边界 |
-| `recon-id-fix-export-e11-c.test.js` | 14/14 PASS | canonical policy；standard/BOC；真实 table-driven main-only/unmatched-only/main+unmatched；set/order/collision/alias/symlink/tamper/stale；rowCounts；sheet/header/records/style/lineage；Service/evidence settlement reservation；missing/mismatched runtime owner；三类 writer BUSY/释放；A/B batch；reversed targets；self-consistent Worker 伪造；Publisher=0/一次真实 journal 提交/failure/uncertain/双 artifact kill 后 rollback 与 committed recovery |
+| `recon-id-fix-export-e11-c.test.js` | 15/15 PASS | canonical policy；standard/BOC；真实 table-driven main-only/unmatched-only/main+unmatched；set/order/collision/alias/symlink/tamper/stale；rowCounts；sheet/header/records/style/lineage；Service/evidence settlement reservation；post-generation shutdown cancel 双路径零残留/Publisher=0/cancel terminal/同 staging 重试；成功 job:done handoff 保留；A/B batch；reversed targets；self-consistent Worker 伪造；一次真实 journal 提交/failure/uncertain/双 artifact kill 后 rollback 与 committed recovery |
 | E11-A/P0/B/C + toolbox generation 组合定向 | 103/103 PASS | 最新 E11-B phase/streaming/Inspector/Hold/threshold/startup recovery；E11-C Publisher/evidence；E11-P0 exact ID/order/same-transaction receipt；E11-A Service ownership |
-| 受影响 unit/integration 定向 | 679/679 PASS | background execution、ReconFix engine/IO/service/export/JPM durable/writeback、C4、toolbox generation/publication |
+| 受影响 unit/integration 定向 | 680/680 PASS | background execution、ReconFix engine/IO/service/export/JPM durable/writeback、C4、toolbox generation/publication |
+| Recovery integration canary/control | 9/9 + 27/27 PASS | startup recovery、Publisher/Inspector/Hold control 仍按原 durable authority 收敛；generation cleanup 不进入 journal/archive owner 域 |
 | `npm run test:integration` | 50/51 scripts PASS；唯一失败为无代码交集的 `toolbox-large-split-multi-sheet` RSS 30/31（tier2 median 144MB，effective budget 143MB，paired margin +2MB） | 所有 ReconFix/background-execution 相关 integration 通过；环境型 RSS 波动不调阈值、不加防御，也不宣称全量 integration 全绿 |
 | `npm run smoke` | PASS（2026-08-29 restack） | ReconFix engine/IO/IPC legacy 与全应用 smoke |
 | changed source ESLint | PASS（2026-08-29 restack） | worktree 复用主 checkout 同版本依赖，不安装或修改依赖 |
@@ -55,14 +57,15 @@
 - 伪造 workbook 反例最初用 XLSX 整书重写会额外改变 style；改为仅修改 worksheet XML，保留原 style/watermark，确保失败真正来自前置业务 authority 而非测试噪声。
 - Restack 首次 E11-C 专属测试 5/14 PASS，9 项统一失败于 `RECON_FIX_PHASE_PLAN_INVALID`；根因是旧 export 直接返回 plan，绕过最新 E11-B phase-extension。改为 grant 后创建 plan 后 14/14 PASS。
 - 全量 integration 的唯一失败是全局 toolbox RSS 30/31 环境波动，与 E11-C 变更无代码交集；按项目负责 triage 不修改阈值或增加无关防御，并明确保留 50/51 事实。
+- Reviewer Round 2 动态测试首次用 user cooperative cancel，canonical policy 正确返回不接受（`recon-fix:export` 是 `shutdown-only`）；测试改为 runtime shutdown，并在首个 generation artifact 出现后请求取消，使取消只在 execute 完成后的既有 safepoint 收口。
 
 ## Blindspot Pass
 
 - 入口旁路：未修改 `src/main.js`、preload、renderer；live legacy export 与 `production.enabled=false` 保持。Round 2 的 writer admission 是 E12 可复用合同，managed export 缺失或混用 runtime owner admission 会在 evidence/Worker/Publisher 前拒绝。
 - 权限/所有权：Service 是 full result 单一 owner；Worker path 限于真实 task-private root 的直属固定文件；Main 重新 canonicalize FilePlan 并重验 role/sourceOperation/snapshot、realpath、symlink、alias、key/set/order。
-- 状态生命周期：Main 先取得 runtime-owned evidence settlement lease，再冻结/核对 current evidence；Service export 先提交唯一 `resourcePlan`，strict staging/linked evidence 大状态读取只在 phase grant 后发生，且同一 phase 持续到 terminal；Service reservation 与 evidence lease 均持续到 Publisher promise resolve/reject。active writer 阻断 settlement，settlement 阻断三类 writer；finally 有界释放。进程 crash 不保留内存锁，发布状态继续只由既有 journal recovery 收敛。
-- 失败/恢复：任一 Worker/Join/readback 失败 Publisher=0；Publisher 只调用一次；committed/unknown/crash 由已有 durable journal recovery 判定，manual recovery/hold 不绕过。
-- 兼容性：legacy writer、sheet/header/order/style/watermark 未改；E11-A/P0/B/C + toolbox generation 组合定向 103/103，受影响矩阵 679/679；Main DTO/terminal manifest 无 raw rows/path/大 candidate。
+- 状态生命周期：Main 先取得 runtime-owned evidence settlement lease，再冻结/核对 current evidence；Service export 先提交唯一 `resourcePlan`，strict staging/linked evidence 大状态读取只在 phase grant 后发生，且同一 phase 持续到 terminal；export plan closure 独占 generated-path cleanup，Worker 仅把 execute 与 post-generation safepoint 放入该失败域。Service reservation 与 evidence lease 均持续到 Publisher promise resolve/reject。active writer 阻断 settlement，settlement 阻断三类 writer；finally 有界释放。进程 crash 不保留内存锁，发布状态继续只由既有 journal recovery 收敛。
+- 失败/恢复：任一 Worker/Join/readback 失败 Publisher=0；post-generation cancel/job:error 清除本 plan 已登记的全部 task-private artifacts，重抛首错；job:done 不删并交给 Main/Publisher。Publisher 只调用一次；committed/unknown/crash 由已有 durable journal recovery 判定，manual recovery/hold 不绕过。
+- 兼容性：legacy writer、sheet/header/order/style/watermark 未改；E11-A/P0/B/C + toolbox generation 组合定向 103/103，受影响矩阵 680/680，Recovery integration 9/9 + 27/27；Main DTO/terminal manifest 无 raw rows/path/大 candidate。
 - 可观测性/测试：manifest 有 bounded ordered size/hash/rowCounts/业务/lineage evidence； hostile path、tamper、stale、Publisher 与 restart 均有证据。
 - Reviewer 反例：final evidence 后的 normal import/run 改为 reservation 期间同步 `SERVICE_BUSY`；不再依赖第三次 read；伪造 cell/新增行即使同步修改 Worker technical/business manifest 与 count summary 也必须对前置 authority 失败。
 - Round 2 反例：scenario/BOC/JPM writer 在 Publisher settlement 中均同步 `RECON_FIX_EVIDENCE_SETTLEMENT_BUSY` 且 body=0；Publisher resolve/reject 后放行；两份合法但不同 runtime admission 无法混入同一 export。

@@ -70,6 +70,12 @@ async function cancellationSafepoint(job) {
   if (job.cancelRequested) throw cancellationError();
 }
 
+async function executeExportPlanAtSafepoint(job, plan) {
+  const result = await plan.execute();
+  await cancellationSafepoint(job);
+  return result;
+}
+
 function jobRef(job, unitId = null) {
   return Object.freeze({
     actionKey: job.envelope.actionKey,
@@ -372,6 +378,7 @@ function handleResourceReleaseAck(envelope) {
 async function runJob(job) {
   let phase = null;
   let terminal = null;
+  let exportPlan = null;
   try {
     if (job.envelope.actionKey === RECON_FIX_RUN_JPM_ACTION) {
       await cancellationSafepoint(job);
@@ -443,8 +450,8 @@ async function runJob(job) {
       result = await adoptCandidateAtSafepoint(job, plan.candidate);
     } else if (plan.kind === 'export-plan') {
       await cancellationSafepoint(job);
-      result = await plan.execute();
-      await cancellationSafepoint(job);
+      exportPlan = plan;
+      result = await executeExportPlanAtSafepoint(job, plan);
     } else {
       if (plan.invalidationCandidate) {
         await adoptCandidateAtSafepoint(job, plan.invalidationCandidate);
@@ -497,6 +504,9 @@ async function runJob(job) {
         operation: 'job:error',
         payload: { error: toProtocolError(error, error.code) }
       };
+    }
+    if (exportPlan && terminal && terminal.operation !== 'job:done') {
+      try { exportPlan.cleanup(); } catch (_cleanupError) { /* preserve first export failure */ }
     }
     if (service && !closeRequested) service.finish();
     if (terminal) emitJobTerminal(job, terminal.operation, terminal.payload);

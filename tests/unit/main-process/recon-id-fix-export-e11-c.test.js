@@ -83,7 +83,7 @@ function appendSheet(workbook, name, fields, rows = []) {
   ]), name);
 }
 
-function writeStandardWorkbook(filePath, outputSet = 'main+unmatched') {
+function writeStandardWorkbook(filePath, outputSet = 'main+unmatched', unmatchedCount = 1) {
   const workbook = XLSX.utils.book_new();
   appendSheet(workbook, RECON_RESULT_SHEET_NAME, RECON_RESULT_FIELDS);
   const businessRows = [];
@@ -93,9 +93,9 @@ function writeStandardWorkbook(filePath, outputSet = 'main+unmatched') {
       Bank: '工行', Currency: 'CNY', reconId: ''
     });
   }
-  if (outputSet !== 'main-only') {
+  for (let index = 0; outputSet !== 'main-only' && index < unmatchedCount; index += 1) {
     businessRows.push({
-      OrderId: 'UNMATCHED-1', BillType: 'biz', BillDate: '2026-08-28', Amount: 200,
+      OrderId: `UNMATCHED-${index + 1}`, BillType: 'biz', BillDate: '2026-08-28', Amount: 200 + index,
       Bank: '工行', Currency: 'CNY', reconId: ''
     });
   }
@@ -262,8 +262,13 @@ function artifactBindingsFor(filePlan, result) {
 
 async function setupStandard(options = {}) {
   const outputSet = options.outputSet || 'main+unmatched';
+  const unmatchedCount = options.unmatchedCount || 1;
   const root = tempRoot();
-  const workbookPath = writeStandardWorkbook(path.join(root, 'standard.xlsx'), outputSet);
+  const workbookPath = writeStandardWorkbook(
+    path.join(root, 'standard.xlsx'),
+    outputSet,
+    unmatchedCount
+  );
   const runtime = createBackgroundExecutionRuntime({
     availableParallelism: 4,
     freeMemoryBytes: 8 * 1024 ** 3,
@@ -283,7 +288,7 @@ async function setupStandard(options = {}) {
   }));
   assert.equal(run.outcome, 'completed', JSON.stringify(run));
   assert.equal(run.result.summary.fixedRowCount, outputSet === 'unmatched-only' ? 0 : 1);
-  assert.equal(run.result.summary.unmatchedRowCount, outputSet === 'main-only' ? 0 : 1);
+  assert.equal(run.result.summary.unmatchedRowCount, outputSet === 'main-only' ? 0 : unmatchedCount);
   return { root, runtime, run: run.result, workbookPath };
 }
 
@@ -326,6 +331,72 @@ function observedRuntime(runtime, onExecute) {
         },
         release() {
           return reservation.release();
+        }
+      });
+    }
+  });
+}
+
+async function waitForCondition(predicate, label, timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.fail(`timeout waiting for ${label}`);
+}
+
+function shutdownRuntimeAfterGeneration(runtime, observation) {
+  return Object.freeze({
+    reconFixEvidenceSettlementAdmission: runtime.reconFixEvidenceSettlementAdmission,
+    reserveServiceOperation(authority) {
+      let released = false;
+      let settled = true;
+      return Object.freeze({
+        identity: Object.freeze({
+          actionKey: authority.actionKey,
+          operationKey: authority.operationKey,
+          serviceKey: 'service.recon-fix'
+        }),
+        async execute(requestValue) {
+          assert.equal(settled, true);
+          settled = false;
+          const generationPaths = requestValue.input.artifacts.map(
+            (artifact) => artifact.generationPath
+          );
+          const control = runtime.start(requestValue);
+          try {
+            await waitForCondition(
+              () => generationPaths.some((generationPath) => {
+                try {
+                  const stat = fs.lstatSync(generationPath);
+                  return stat.isFile() && stat.size > 0;
+                } catch (_error) {
+                  return false;
+                }
+              }),
+              'first ReconFix generation artifact before deferred cancellation'
+            );
+            observation.expectedGenerationPaths = generationPaths.slice();
+            observation.existingPathsAtCancellation = generationPaths.filter(
+              (generationPath) => fs.existsSync(generationPath)
+            );
+            const [execution, shutdownReport] = await Promise.all([
+              control.promise,
+              runtime.shutdown({ timeoutMs: 10000 })
+            ]);
+            observation.execution = execution;
+            observation.shutdownReport = shutdownReport;
+            return observation.execution;
+          } finally {
+            settled = true;
+          }
+        },
+        release() {
+          assert.equal(settled, true);
+          if (released) return false;
+          released = true;
+          return true;
         }
       });
     }
@@ -388,6 +459,11 @@ test('standard main+unmatched按FilePlan顺序回读并只调用一次Publisher'
       readCurrentEvidence: async () => currentEvidence(harness.run),
       publishPublication: async (payload) => {
         publisherCalls += 1;
+        assert.equal(
+          payload.artifacts.every((artifact) => fs.lstatSync(artifact.sourcePath).isFile()),
+          true,
+          'job:done 后 generation artifacts 必须保留到 Publisher 接管'
+        );
         assert.deepEqual(payload.artifacts.map((artifact) => artifact.outputId), [
           'recon-fix-main', 'recon-fix-unmatched'
         ]);
@@ -399,6 +475,97 @@ test('standard main+unmatched按FilePlan顺序回读并只调用一次Publisher'
     assert.equal(result.artifacts.length, 2);
     assert.equal(result.artifacts.every((artifact) => fs.lstatSync(artifact.generationPath).isFile()), true);
   } finally {
+    await harness.runtime.shutdown({ timeoutMs: 10000 });
+  }
+});
+
+test('export generation完成后的取消由单一cleanup owner清零且同staging可重试', async () => {
+  const harness = await setupStandard({ unmatchedCount: 500 });
+  const observation = {};
+  let publisherCalls = 0;
+  let retryRuntime = null;
+  try {
+    const filePlan = planFor(harness.root, 2);
+    const stagingDirectory = path.join(harness.root, 'staging-post-generation-cancel');
+    fs.mkdirSync(stagingDirectory);
+    const bindings = artifactBindingsFor(filePlan, harness.run);
+    const cancellingRuntime = shutdownRuntimeAfterGeneration(harness.runtime, observation);
+    await assert.rejects(
+      generateValidateAndPublishReconFixExport({
+        runtime: cancellingRuntime,
+        evidenceSettlementAdmission: harness.runtime.reconFixEvidenceSettlementAdmission,
+        result: harness.run,
+        filePlan,
+        artifactBindings: bindings,
+        stagingDirectory,
+        operationKey: 'post-generation-cancel',
+        context: operationContext('post-generation-cancel'),
+        batchContext: batchContext('post-generation-cancel'),
+        readCurrentEvidence: async () => currentEvidence(harness.run),
+        publishPublication: async () => { publisherCalls += 1; }
+      }),
+      (error) => error.code === 'RECON_FIX_CANCELLED'
+    );
+    assert.equal(observation.execution.outcome, 'cancelled', JSON.stringify(observation.execution));
+    assert.equal(observation.execution.terminalSource, 'job:error');
+    assert.equal(observation.execution.error.code, 'RECON_FIX_CANCELLED');
+    assert.deepEqual(observation.shutdownReport.cancelledJobs, [observation.execution.jobId]);
+    assert.deepEqual(observation.shutdownReport.leakedTransports, []);
+    assert.deepEqual(observation.shutdownReport.errors, []);
+    assert.equal(publisherCalls, 0);
+    assert.equal(observation.expectedGenerationPaths.length, 2);
+    assert.ok(observation.existingPathsAtCancellation.length >= 1);
+    assert.equal(
+      observation.expectedGenerationPaths.every((generationPath) => !fs.existsSync(generationPath)),
+      true,
+      'post-generation cancellation 后 task-private xlsx 必须零残留'
+    );
+
+    retryRuntime = createBackgroundExecutionRuntime({
+      availableParallelism: 4,
+      freeMemoryBytes: 8 * 1024 ** 3,
+      totalMemoryBytes: 16 * 1024 ** 3,
+      shutdownTimeoutMs: 10000
+    });
+    const retryImport = await retryRuntime.execute(request(
+      RECON_FIX_IMPORT_ACTION,
+      'post-generation-retry-import',
+      {
+        expectedRevision: 0,
+        filePath: harness.workbookPath,
+        subMode: 'business'
+      }
+    ));
+    const retryRun = await retryRuntime.execute(request(
+      RECON_FIX_RUN_READONLY_ACTION,
+      'post-generation-retry-run',
+      {
+        bocDatabasePath: null,
+        expectedRevision: retryImport.result.revision,
+        scenario: standardScenario()
+      }
+    ));
+    const retryBindings = artifactBindingsFor(filePlan, retryRun.result);
+    const retried = await generateValidateAndPublishReconFixExport({
+      runtime: retryRuntime,
+      evidenceSettlementAdmission: retryRuntime.reconFixEvidenceSettlementAdmission,
+      result: retryRun.result,
+      filePlan,
+      artifactBindings: retryBindings,
+      stagingDirectory,
+      operationKey: 'post-generation-retry',
+      context: operationContext('post-generation-retry'),
+      batchContext: batchContext('post-generation-retry'),
+      readCurrentEvidence: async () => currentEvidence(retryRun.result),
+      publishPublication: async () => {
+        publisherCalls += 1;
+        return { committed: true };
+      }
+    });
+    assert.equal(retried.artifacts.length, 2);
+    assert.equal(publisherCalls, 1, '取消窗口不得调用 Publisher，重试只调用一次');
+  } finally {
+    if (retryRuntime) await retryRuntime.shutdown({ timeoutMs: 10000 });
     await harness.runtime.shutdown({ timeoutMs: 10000 });
   }
 });
