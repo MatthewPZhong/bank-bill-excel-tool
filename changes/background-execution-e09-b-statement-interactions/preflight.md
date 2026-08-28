@@ -87,3 +87,22 @@
 | 3 | cancel-interaction 原语 | 不以关闭 generation 代偿 token cancel | duplicate/retry/base+persistent保留 | Task cancel不可信 | 保持 dormant、不接 live |
 | 4 | 零交易与 cleanup-required | 零输出可见；owner cleanup不盲重获 | repeated-header + fake owner tests | 资金/锁红线未关闭 | fail closed 保持旧 token 不采用 |
 | 5 | 全量定向验证与两类 blindspot pass | production/资金/恢复边界不漂移 | unit/integration/lint/check | 不提交 | 回退本修复轮 commit |
+
+## Restack Ultra Review Round 2 (`b7e5d726`)
+
+### Task Brief
+
+- Goal：修复两个已接受的真实 blocker：choice authorization 必须与 token single-use claim 同步原子；crash cleanup receipt 不得伪装成用户取消。
+- Context：repair parent 为 `b7e5d7262049e8f075b3868280b882d92e2c03cd`；E09-A lineage/TOCTOU、E09-B resource/token/waiting-user 其余合同已绿。
+- Constraints：token store 保持唯一消费 authority；不恢复无 ack invalidate；不接 live Main/Renderer，不实现 E09-C/D，不改变 production/资金门禁。
+- Done when：非法但结构合法 assignments 在 source resolver/I/O/resource request 前失败且 token 仍 published，合法 retry 成功；exact explicit-cancel receipt 映射 cancelled，exact crash-cleaned receipt 映射 interrupted/recovery-required，重复/错 token/forget 均有界。
+
+### Unknowns Register
+
+| 未知 | 类型 | 影响 | 可逆性 | 当前证据 | 处理 | 最便宜验证方式 | 当前决定 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| choice coverage/membership 应由谁授权并何时消耗 token | 状态/幂等/资金归属 | 高 | 一般 | `service.js` 当前 `beginConsume` 后才验 rows/options | PROBE | real Service invalid membership + resolver counter + valid retry | token store 在同一同步 claim 内依次验 identity/evidence/domain/actual choice，全部成功后才置 consuming；Service 只消费 claim 结果 |
+| crash cleanup receipt 的 Task 终态 | 恢复/公共状态 | 高 | 容易 | frozen lifecycle：app crash/quit → interrupted；当前 coordinator 两种 receipt 都写 cancelled | PROBE | exact receipt matrix + duplicate/forget | `interaction-cancelled` → cancelled/null；`interaction-crash-cleaned` → interrupted/recovery-required；两种 terminal 各自只允许专用 bounded forget seam |
+| receipt 是否允许 extra key/错 token/重复 delivery | 契约/幂等 | 中 | 容易 | 当前仅检查 status/tokenId 值 | PROBE | hostile exact-shape test | canonical bounded exact-two receipt；错 token fail closed；in-flight/terminal duplicate共用或返回同一 canonical outcome |
+
+无 BLOCK 用户问题；Reviewer 已证明触发条件且项目负责接受处置方向。资金红线仍只由既有人工复核解除。

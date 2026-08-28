@@ -5,6 +5,8 @@ const { canonicalJsonSnapshot } = require('../background-execution/canonical-jso
 const TOKEN_KEYS = Object.freeze([
   'tokenId', 'purpose', 'serviceGeneration', 'sessionRevision', 'expiresAt', 'allowedChoiceDigest'
 ]);
+const CLEANUP_RECEIPT_KEYS = Object.freeze(['status', 'tokenId']);
+const TERMINAL_FORGET_KEYS = Object.freeze(['taskRunId', 'tokenId']);
 
 class StatementWaitingUserError extends Error {
   constructor(code, message) {
@@ -35,6 +37,42 @@ function createStatementWaitingUserCoordinator() {
       fail('STATEMENT_WAITING_TOKEN_INVALID', 'Waiting-user token must be an exact bounded public handle');
     }
     return Object.freeze(token);
+  }
+
+  function exactBoundedCleanupReceipt(input) {
+    let receipt;
+    try {
+      receipt = canonicalJsonSnapshot(input, { maxBytes: 4096 });
+    } catch (_error) {
+      fail('STATEMENT_CANCEL_ACK_INVALID', 'Cancellation owner returned an invalid cleanup receipt');
+    }
+    if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt) ||
+        Object.keys(receipt).length !== CLEANUP_RECEIPT_KEYS.length ||
+        CLEANUP_RECEIPT_KEYS.some((key) => !Object.hasOwn(receipt, key)) ||
+        !['interaction-cancelled', 'interaction-crash-cleaned'].includes(receipt.status) ||
+        typeof receipt.tokenId !== 'string' || receipt.tokenId.length === 0 ||
+        receipt.tokenId.length > 256) {
+      fail('STATEMENT_CANCEL_ACK_INVALID', 'Cancellation owner did not return an exact cleanup receipt');
+    }
+    return receipt;
+  }
+
+  function exactBoundedForgetIdentity(input) {
+    let identity;
+    try {
+      identity = canonicalJsonSnapshot(input, { maxBytes: 4096 });
+    } catch (_error) {
+      fail('STATEMENT_WAITING_IDENTITY_MISMATCH', 'Terminal forget identity is invalid');
+    }
+    if (!identity || typeof identity !== 'object' || Array.isArray(identity) ||
+        Object.keys(identity).length !== TERMINAL_FORGET_KEYS.length ||
+        TERMINAL_FORGET_KEYS.some((key) => !Object.hasOwn(identity, key)) ||
+        typeof identity.taskRunId !== 'string' || identity.taskRunId.length === 0 ||
+        identity.taskRunId.length > 512 || typeof identity.tokenId !== 'string' ||
+        identity.tokenId.length === 0 || identity.tokenId.length > 256) {
+      fail('STATEMENT_WAITING_IDENTITY_MISMATCH', 'Terminal forget identity must be exact and bounded');
+    }
+    return identity;
   }
 
   function continuationIdentityMatches(record, input, token) {
@@ -203,7 +241,7 @@ function createStatementWaitingUserCoordinator() {
   function cancelInteraction(input) {
     const token = boundedToken(input.token);
     const record = tasks.get(input.taskRunId);
-    if (!record || !['waiting-user', 'cancelling-interaction', 'cancelled'].includes(record.state)) {
+    if (!record || !['waiting-user', 'cancelling-interaction', 'cancelled', 'interrupted'].includes(record.state)) {
       fail('STATEMENT_WAITING_STALE', 'Task is not waiting for this interaction');
     }
     if (record.taskKey !== input.taskKey || record.operationKey !== input.originOperationKey ||
@@ -215,7 +253,7 @@ function createStatementWaitingUserCoordinator() {
     if (record.cancelOwnerKey && record.cancelOwnerKey !== input.cancelOwnerKey) {
       fail('STATEMENT_CONTINUATION_OWNER_MISMATCH', 'Cancellation retry owner does not match');
     }
-    if (record.state === 'cancelled') return Promise.resolve(record.cancelResult);
+    if (['cancelled', 'interrupted'].includes(record.state)) return Promise.resolve(record.cancelResult);
     if (record.state === 'cancelling-interaction') return record.cancelPromise;
     if (!input.cancelOwner || typeof input.cancelOwner.cancel !== 'function') {
       fail('STATEMENT_CANCEL_OWNER_INVALID', 'Cancellation owner is unavailable');
@@ -228,16 +266,17 @@ function createStatementWaitingUserCoordinator() {
       originOperationKey: record.operationKey,
       token: record.token
     }))).then((result) => {
-      if (!result || !['interaction-cancelled', 'interaction-crash-cleaned'].includes(result.status) ||
-          result.tokenId !== record.token.tokenId) {
+      const receipt = exactBoundedCleanupReceipt(result);
+      if (receipt.tokenId !== record.token.tokenId) {
         fail('STATEMENT_CANCEL_ACK_INVALID', 'Cancellation owner did not confirm exact token cleanup');
       }
-      record.state = 'cancelled';
+      const crashed = receipt.status === 'interaction-crash-cleaned';
+      record.state = crashed ? 'interrupted' : 'cancelled';
       record.cancelPromise = null;
       record.cancelResult = Object.freeze({
         taskRunId: record.taskRunId,
-        status: 'cancelled',
-        phase: null
+        status: crashed ? 'interrupted' : 'cancelled',
+        phase: crashed ? 'recovery-required' : null
       });
       return record.cancelResult;
     }).catch((error) => {
@@ -250,12 +289,24 @@ function createStatementWaitingUserCoordinator() {
   }
 
   function forgetCancelled(input) {
-    const record = tasks.get(input.taskRunId);
+    const identity = exactBoundedForgetIdentity(input);
+    const record = tasks.get(identity.taskRunId);
     if (!record || record.state !== 'cancelled') return false;
-    if (record.token.tokenId !== input.tokenId) {
+    if (record.token.tokenId !== identity.tokenId) {
       fail('STATEMENT_WAITING_IDENTITY_MISMATCH', 'Cancelled token identity does not match');
     }
-    tasks.delete(input.taskRunId);
+    tasks.delete(identity.taskRunId);
+    return true;
+  }
+
+  function forgetInterrupted(input) {
+    const identity = exactBoundedForgetIdentity(input);
+    const record = tasks.get(identity.taskRunId);
+    if (!record || record.state !== 'interrupted') return false;
+    if (record.token.tokenId !== identity.tokenId) {
+      fail('STATEMENT_WAITING_IDENTITY_MISMATCH', 'Interrupted token identity does not match');
+    }
+    tasks.delete(identity.taskRunId);
     return true;
   }
 
@@ -264,6 +315,7 @@ function createStatementWaitingUserCoordinator() {
     cancelInteraction,
     enterWaiting,
     forgetCancelled,
+    forgetInterrupted,
     settleContinuation
   });
 }

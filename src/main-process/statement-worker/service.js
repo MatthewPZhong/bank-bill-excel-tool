@@ -309,7 +309,8 @@ function createStatementService(options = {}) {
             templateCatalog: continuation.importEvidence.templateCatalog,
             sources: continuation.importEvidence.sources
           },
-          choiceDomain: pendingToken.privateContext.choiceDomain
+          choiceDomain: pendingToken.privateContext.choiceDomain,
+          choice: continuation.choice
         });
         Object.assign(job, { kind: 'continuation', tokenRecord });
         const privateRequest = Object.freeze({
@@ -331,31 +332,10 @@ function createStatementService(options = {}) {
             'Statement source resource identity changed before continuation'
           );
         }
-        const domain = tokenRecord.privateContext.choiceDomain;
-        const expectedRows = continuation.choice.mode === 'fixed'
-          ? domain.rowsWithEmptyBlocks
-          : domain.rows;
-        if (continuation.choice.assignments.length !== expectedRows.length ||
-            new Set(continuation.choice.assignments.map((item) => item.rowIndex)).size !== expectedRows.length) {
-          throw new StatementServiceError('STATEMENT_TOKEN_CHOICE_INVALID', 'Big-account assignment rows are invalid');
-        }
-        const bigAccountAssignments = continuation.choice.assignments.slice()
-          .sort((left, right) => left.rowIndex - right.rowIndex)
-          .map((assignment, index) => {
-            if (assignment.rowIndex !== expectedRows[index] || !domain.options.some((option) =>
-              option.merchantId === assignment.merchantId && option.currency === assignment.currency)) {
-              throw new StatementServiceError('STATEMENT_TOKEN_CHOICE_INVALID', 'Big-account choice is not allowed');
-            }
-            return {
-              rowIndex: assignment.rowIndex,
-              merchantId: assignment.merchantId,
-              currency: assignment.currency
-            };
-          });
         const candidate = await buildStatementImportCandidate(state, privateRequest, {
           assertNotCancelled: () => assertJobActive(job),
-          bigAccountAssignments,
-          bigAccountChoiceMode: continuation.choice.mode,
+          bigAccountAssignments: tokenRecord.claimedChoice.assignments,
+          bigAccountChoiceMode: tokenRecord.claimedChoice.mode,
           expectedProvisionalDigest: tokenRecord.privateContext.candidateDigest
         });
         assertJobActive(job);

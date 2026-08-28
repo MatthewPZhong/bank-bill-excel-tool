@@ -70,8 +70,8 @@ function tokenDraft(overrides = {}) {
     sources: [{ resourceId: 'a.xlsx', snapshot: { sizeBytes: 1, mtimeMs: 2, ctimeMs: 3, ino: '4' } }]
   };
   const choiceDomain = {
-    mode: 'unfixed',
     rows: [0],
+    rowsWithEmptyBlocks: [0],
     options: [{ merchantId: 'M001', currency: 'USD', accountNature: 'client' }]
   };
   return {
@@ -94,6 +94,14 @@ function tokenDraft(overrides = {}) {
       fixedAssignments: []
     },
     privateContext: { evidence, choiceDomain, detailRows: [['private']] },
+    ...overrides
+  };
+}
+
+function tokenChoice(overrides = {}) {
+  return {
+    mode: 'unfixed',
+    assignments: [{ rowIndex: 0, merchantId: 'M001', currency: 'USD' }],
     ...overrides
   };
 }
@@ -362,12 +370,14 @@ test('token registry严格执行estimate→private insert→adopt ack→single-u
     purpose: 'big-account',
     sessionKey: 'template-1',
     evidence: record.privateContext.evidence,
-    choiceDomain: record.privateContext.choiceDomain
+    choiceDomain: record.privateContext.choiceDomain,
+    choice: tokenChoice()
   });
   assert.equal(consumed.state, 'consuming');
   assert.throws(() => store.beginConsume(publicToken, {
     serviceGeneration: 3, sessionRevision: 7, purpose: 'big-account', sessionKey: 'template-1',
-    evidence: record.privateContext.evidence, choiceDomain: record.privateContext.choiceDomain
+    evidence: record.privateContext.evidence, choiceDomain: record.privateContext.choiceDomain,
+    choice: tokenChoice()
   }), (error) => error.code === 'STATEMENT_TOKEN_STALE');
   store.markReleasing('token-1');
   assert.equal(store.remove('token-1').state, 'released');
@@ -387,7 +397,8 @@ test('token registry严格执行estimate→private insert→adopt ack→single-u
     allowedChoiceDigest: expiringDraft.allowedChoiceDigest
   }, {
     serviceGeneration: 3, sessionRevision: 7, purpose: 'big-account', sessionKey: 'template-1',
-    evidence: expiringDraft.privateContext.evidence, choiceDomain: expiringDraft.privateContext.choiceDomain
+    evidence: expiringDraft.privateContext.evidence, choiceDomain: expiringDraft.privateContext.choiceDomain,
+    choice: tokenChoice()
   }), (error) => error.code === 'STATEMENT_TOKEN_EXPIRED');
 });
 
@@ -406,21 +417,63 @@ test('token registry对generation/revision/purpose/choice/evidence篡改逐项fa
   for (const [key, value] of [['serviceGeneration', 4], ['sessionRevision', 8], ['purpose', 'manual-balance']]) {
     assert.throws(() => store.beginConsume({ ...base, [key]: value }, {
       serviceGeneration: 3, sessionRevision: 7, purpose: 'big-account', sessionKey: 'template-1',
-      evidence: record.privateContext.evidence, choiceDomain: record.privateContext.choiceDomain
+      evidence: record.privateContext.evidence, choiceDomain: record.privateContext.choiceDomain,
+      choice: tokenChoice()
     }), (error) => error.code === 'STATEMENT_TOKEN_TAMPERED');
   }
   assert.throws(() => store.beginConsume(base, {
     serviceGeneration: 3, sessionRevision: 7, purpose: 'big-account', sessionKey: 'template-1',
     evidence: { ...record.privateContext.evidence, templateDigest: 'b'.repeat(64) },
-    choiceDomain: record.privateContext.choiceDomain
+    choiceDomain: record.privateContext.choiceDomain,
+    choice: tokenChoice()
   }), (error) => error.code === 'STATEMENT_TOKEN_STALE');
   assert.throws(() => store.beginConsume(base, {
     serviceGeneration: 3, sessionRevision: 7, purpose: 'big-account', sessionKey: 'template-1',
     evidence: record.privateContext.evidence,
-    choiceDomain: { ...record.privateContext.choiceDomain, rows: [0, 1] }
+    choiceDomain: { ...record.privateContext.choiceDomain, rows: [0, 1] },
+    choice: tokenChoice()
   }), (error) => error.code === 'STATEMENT_TOKEN_CHOICE_DOMAIN_STALE');
   assert.equal(record.state, 'published', '失败校验不得消耗token');
   assert.equal(store.snapshot().count, 1);
+});
+
+test('token registry在同步原子claim内校验exact row coverage与option membership，非法choice不消耗token', () => {
+  const store = createStatementTokenStore({ createId: () => 'token-choice', ttlMs: 100000 });
+  const draft = store.prepare(tokenDraft());
+  const record = store.insertPrivate(draft, {
+    requestId: 'request-choice', grantId: 'grant-choice', reservationId: 'reservation-choice',
+    owner: {}, ownerJobRef: {}
+  });
+  store.markAdopted('token-choice', {
+    grantId: 'grant-choice', reservationId: 'reservation-choice'
+  });
+  const token = {
+    tokenId: 'token-choice', purpose: 'big-account', serviceGeneration: 3, sessionRevision: 7,
+    expiresAt: record.handle.expiresAt, allowedChoiceDigest: record.handle.allowedChoiceDigest
+  };
+  const expected = {
+    serviceGeneration: 3, sessionRevision: 7, purpose: 'big-account', sessionKey: 'template-1',
+    evidence: record.privateContext.evidence, choiceDomain: record.privateContext.choiceDomain
+  };
+
+  assert.throws(() => store.beginConsume(token, {
+    ...expected,
+    choice: tokenChoice({ assignments: [{ rowIndex: 1, merchantId: 'M001', currency: 'USD' }] })
+  }), (error) => error.code === 'STATEMENT_TOKEN_CHOICE_INVALID');
+  assert.equal(record.state, 'published', 'row coverage非法不得提前进入consuming');
+  assert.equal(record.claimedChoice, undefined);
+
+  assert.throws(() => store.beginConsume(token, {
+    ...expected,
+    choice: tokenChoice({ assignments: [{ rowIndex: 0, merchantId: 'M999', currency: 'USD' }] })
+  }), (error) => error.code === 'STATEMENT_TOKEN_CHOICE_INVALID');
+  assert.equal(record.state, 'published', 'option membership非法不得消耗single-use token');
+
+  const consumed = store.beginConsume(token, { ...expected, choice: tokenChoice() });
+  assert.equal(consumed.state, 'consuming');
+  assert.deepEqual(consumed.claimedChoice, tokenChoice());
+  assert.throws(() => store.beginConsume(token, { ...expected, choice: tokenChoice() }),
+    (error) => error.code === 'STATEMENT_TOKEN_STALE');
 });
 
 test('waiting-user保持同一TaskRun并exact释放/重取phase与business lock，late owner不能settle', async () => {
@@ -579,6 +632,7 @@ test('waiting-user cancel仅在exact token owner ack后终结且失败仅允许�
     'cancelInteraction',
     'enterWaiting',
     'forgetCancelled',
+    'forgetInterrupted',
     'settleContinuation'
   ], '公开facade不得暴露无exact cleanup receipt的waiting删除入口');
   const token = {
@@ -598,7 +652,11 @@ test('waiting-user cancel仅在exact token owner ack后终结且失败仅允许�
       attempts += 1;
       assert.deepEqual(input.token, token);
       if (attempts === 1) return Promise.reject(new Error('transient owner failure'));
-      if (attempts === 2) return Promise.resolve(undefined);
+      if (attempts === 2) {
+        return Promise.resolve({
+          status: 'interaction-cancelled', tokenId: token.tokenId, unexpected: true
+        });
+      }
       return new Promise((resolve) => { acknowledge = resolve; });
     }
   };
@@ -630,6 +688,64 @@ test('waiting-user cancel仅在exact token owner ack后终结且失败仅允许�
   assert.deepEqual(await first, { taskRunId: 'task-cancel', status: 'cancelled', phase: null });
   assert.equal(attempts, 3);
   assert.equal(coordinator.forgetCancelled({ taskRunId: 'task-cancel', tokenId: token.tokenId }), true);
+});
+
+test('waiting-user仅凭exact crash-cleaned receipt进入interrupted/recovery-required并受限清理终态', async () => {
+  const coordinator = createStatementWaitingUserCoordinator();
+  const token = {
+    tokenId: 'token-crash', purpose: 'big-account', serviceGeneration: 5, sessionRevision: 9,
+    expiresAt: 6000, allowedChoiceDigest: 'e'.repeat(64)
+  };
+  await coordinator.enterWaiting({
+    taskRunId: 'task-crash', taskKey: 'file:import', operationKey: 'op-crash-origin',
+    jobId: 'job-crash-origin', token,
+    phaseOwner: { async release() {} }, phaseLeaseId: 'phase-crash-origin',
+    lockOwner: { async release() {} }, lockId: 'lock-crash-origin'
+  });
+  let cleanupCalls = 0;
+  const request = {
+    taskRunId: 'task-crash', taskKey: 'file:import', originOperationKey: 'op-crash-origin',
+    token, cancelOwnerKey: 'worker-generation-5',
+    cancelOwner: {
+      async cancel(input) {
+        cleanupCalls += 1;
+        assert.equal(input.token.tokenId, token.tokenId);
+        return { status: 'interaction-crash-cleaned', tokenId: token.tokenId };
+      }
+    }
+  };
+
+  const interrupted = await coordinator.cancelInteraction(request);
+  assert.deepEqual(interrupted, {
+    taskRunId: 'task-crash', status: 'interrupted', phase: 'recovery-required'
+  });
+  assert.deepEqual(await coordinator.cancelInteraction(request), interrupted,
+    'terminal duplicate必须复用已确认的crash cleanup结果');
+  assert.equal(cleanupCalls, 1, 'terminal duplicate不得再次调用cleanup owner');
+
+  assert.throws(() => coordinator.cancelInteraction({
+    ...request,
+    token: { ...token, tokenId: 'token-other' }
+  }), (error) => error.code === 'STATEMENT_WAITING_IDENTITY_MISMATCH');
+  assert.equal(coordinator.forgetCancelled({ taskRunId: 'task-crash', tokenId: token.tokenId }), false,
+    'crash cleanup不得被降级为cancelled终态');
+  assert.throws(() => coordinator.forgetInterrupted({
+    taskRunId: 'task-crash', tokenId: token.tokenId, extra: true
+  }), (error) => error.code === 'STATEMENT_WAITING_IDENTITY_MISMATCH');
+  assert.throws(() => coordinator.forgetInterrupted({
+    taskRunId: 'x'.repeat(513), tokenId: token.tokenId
+  }), (error) => error.code === 'STATEMENT_WAITING_IDENTITY_MISMATCH');
+  assert.throws(() => coordinator.forgetInterrupted({
+    taskRunId: 'task-crash', tokenId: 'token-other'
+  }), (error) => error.code === 'STATEMENT_WAITING_IDENTITY_MISMATCH');
+  assert.equal(coordinator.forgetInterrupted({
+    taskRunId: 'task-crash', tokenId: token.tokenId
+  }), true);
+  assert.equal(coordinator.forgetInterrupted({
+    taskRunId: 'task-crash', tokenId: token.tokenId
+  }), false, 'terminal evidence删除后重复forget必须是bounded no-op');
+  assert.throws(() => coordinator.cancelInteraction(request),
+    (error) => error.code === 'STATEMENT_WAITING_STALE');
 });
 
 test('continuation重新映射的candidate digest变化时在session mutation前fail closed', async (t) => {
@@ -886,6 +1002,25 @@ test('真实Statement Service完成pending reservation adoption、同Task contin
   const interaction = refreshedDone.payload.result.interaction;
   assert.equal(interaction.prompt.rows.length, 2, '同一文件的两个header block必须分别选择');
   assert.deepEqual(interaction.prompt.rows.map((row) => row.sourceRowNumber), [2, 4]);
+
+  const invalidChoiceStart = trace.length;
+  const resolutionsBeforeInvalidChoice = sourceResolutionCount;
+  start('statement:resolve-big-account', 'same-task/statement:resolve-big-account/invalid-choice',
+    'job-invalid-choice', {
+      command: 'resolve-big-account',
+      token: publicToken(interaction),
+      choice: { mode: 'unfixed', assignments: [
+        { rowIndex: 0, merchantId: 'M999', currency: 'USD' },
+        { rowIndex: 1, merchantId: 'M001', currency: 'USD' }
+      ] },
+      importEvidence
+    });
+  const invalidChoice = await nextOperation('job:error', invalidChoiceStart);
+  assert.equal(invalidChoice.payload.error.code, 'STATEMENT_TOKEN_CHOICE_INVALID');
+  assert.equal(sourceResolutionCount, resolutionsBeforeInvalidChoice,
+    '未授权choice必须由token authority在source resolver/I/O前拒绝');
+  assert.equal(trace.slice(invalidChoiceStart).some((message) => message.operation === 'resource:request'), false,
+    '未授权choice不得申请任何资源');
 
   const tamperedEvidence = structuredClone(importEvidence);
   tamperedEvidence.sessionOwner.templateName = '篡改父模板';

@@ -28,6 +28,14 @@ class StatementTokenStoreError extends Error {
   }
 }
 
+const BIG_ACCOUNT_CHOICE_KEYS = Object.freeze(['mode', 'assignments']);
+const BIG_ACCOUNT_ASSIGNMENT_KEYS = Object.freeze(['rowIndex', 'merchantId', 'currency']);
+
+function hasExactKeys(value, keys) {
+  return value && typeof value === 'object' && !Array.isArray(value) &&
+    Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
+}
+
 function createStatementTokenStore(options = {}) {
   const now = typeof options.now === 'function' ? options.now : Date.now;
   const createId = typeof options.createId === 'function' ? options.createId : randomUUID;
@@ -78,6 +86,45 @@ function createStatementTokenStore(options = {}) {
       publicInteraction,
       footprint
     });
+  }
+
+  function claimBigAccountChoice(input, choiceDomain) {
+    let choice;
+    try {
+      choice = canonicalJsonSnapshot(input, { maxBytes: 1024 * 1024 });
+    } catch (_error) {
+      fail('STATEMENT_TOKEN_CHOICE_INVALID', 'Big-account choice is not an exact bounded value');
+    }
+    if (!hasExactKeys(choice, BIG_ACCOUNT_CHOICE_KEYS) ||
+        !['fixed', 'unfixed'].includes(choice.mode) ||
+        !Array.isArray(choice.assignments) || choice.assignments.length === 0) {
+      fail('STATEMENT_TOKEN_CHOICE_INVALID', 'Big-account choice is invalid');
+    }
+    const expectedRows = choice.mode === 'fixed'
+      ? choiceDomain && choiceDomain.rowsWithEmptyBlocks
+      : choiceDomain && choiceDomain.rows;
+    const options = choiceDomain && choiceDomain.options;
+    if (!Array.isArray(expectedRows) || !Array.isArray(options) ||
+        choice.assignments.length !== expectedRows.length) {
+      fail('STATEMENT_TOKEN_CHOICE_INVALID', 'Big-account assignment rows are invalid');
+    }
+    const assignments = choice.assignments.map((assignment) => {
+      if (!hasExactKeys(assignment, BIG_ACCOUNT_ASSIGNMENT_KEYS) ||
+          !Number.isSafeInteger(assignment.rowIndex) || assignment.rowIndex < 0 ||
+          typeof assignment.merchantId !== 'string' || assignment.merchantId.length === 0 ||
+          typeof assignment.currency !== 'string' || assignment.currency.length === 0) {
+        fail('STATEMENT_TOKEN_CHOICE_INVALID', 'Big-account assignment is invalid');
+      }
+      return assignment;
+    }).sort((left, right) => left.rowIndex - right.rowIndex);
+    const sortedExpectedRows = expectedRows.slice().sort((left, right) => left - right);
+    if (new Set(assignments.map((assignment) => assignment.rowIndex)).size !== assignments.length ||
+        assignments.some((assignment, index) => assignment.rowIndex !== sortedExpectedRows[index]) ||
+        assignments.some((assignment) => !options.some((option) =>
+          option.merchantId === assignment.merchantId && option.currency === assignment.currency))) {
+      fail('STATEMENT_TOKEN_CHOICE_INVALID', 'Big-account choice is not allowed');
+    }
+    return canonicalJsonSnapshot({ mode: choice.mode, assignments }, { maxBytes: 1024 * 1024 });
   }
 
   function insertPrivate(draft, grant) {
@@ -143,6 +190,8 @@ function createStatementTokenStore(options = {}) {
     if (canonicalSha256(expected.choiceDomain) !== handle.allowedChoiceDigest) {
       fail('STATEMENT_TOKEN_CHOICE_DOMAIN_STALE', 'Statement token choice domain changed');
     }
+    const claimedChoice = claimBigAccountChoice(expected.choice, expected.choiceDomain);
+    record.claimedChoice = claimedChoice;
     record.state = 'consuming';
     return record;
   }

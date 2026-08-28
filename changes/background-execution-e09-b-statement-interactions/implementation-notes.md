@@ -24,6 +24,8 @@
 | E09-B draft/candidate 全程使用 E09-A 的 `sessionOwner + templateCatalog + sources[].templateRef/sourceIdentity` | 新 E09-A 已冻结 parent/child/filename mapping 与 layered duplicate/TOCTOU 合同；旧单 template/sessionKey 会丢失资金血缘 | 机械保留旧 E09-B 单 template request；按 catalog 顺序猜 source template | prompt owner 与逐来源 mapper 分离；private context、digest、file entry 均保留 exact lineage，direct 与 interaction source 可在同一 parent session 共存 |
 | continuation 先消费 token authority，再做任何 source resolver/I/O | generation/revision/purpose/TTL/choice/template evidence 可在 Worker 内存权威直接判定；失败不应触碰来源或申请资源 | 先 realpath/stat/read，再发现 token stale；用 fallback 掩盖缺字段 | `beginConsume` 直接使用已验证 `continuation.importEvidence.sessionOwner`；成功后才重新解析完整 source identity，失败释放 consuming token并保留旧 state |
 | 大账号 assignment 过滤 rows 时继续携带 mapper 产生的 split/bill stats 与 sourceRows | E09-C warning/审计依赖这些数组元数据；只保留 issues/rowMetas 会静默吞掉可审计处置 | 回填后丢弃 metadata；重新计算金额或 warning | 只克隆既有 `amountSplitMatchStats`、`billSplitMatchStats`、`sourceRows`，不改变金额、行筛选或币种算法 |
+| actual big-account choice 纳入 token store 的同步原子 claim | Ultra Round 2 证明结构合法但未授权的 assignment 原先会先把 token 置为 consuming，再触发 source I/O | Service 在消费 token 后另做 rows/options 校验；失败时释放 token 或增加第二 authority | token identity/evidence/domain、exact row coverage、option membership 全部成功后才记录 frozen `claimedChoice` 并进入 consuming；Service 只消费 claim 结果，非法 choice 保持 published且可合法 retry |
+| waiting-user cleanup receipt 按 exact kind 映射两种终态 | app crash/quit 的 frozen lifecycle 是 TaskRun interrupted + Renderer recovery-required，不能伪装成用户取消 | 两种 receipt 固定写 cancelled；用无 ack invalidate 删除 waiting record | exact bounded `interaction-cancelled` → cancelled，`interaction-crash-cleaned` → interrupted/recovery-required；`forgetInterrupted` 仅清理已由 exact receipt 落盘的该 token 终态证据 |
 
 ## Assumptions
 
@@ -43,7 +45,7 @@
 
 | 证据 | 结果 | 覆盖的行为/风险 |
 | --- | --- | --- |
-| restack 后 E09-B + E09-A 定向 unit/真实 Worker probes | `37/37 PASS`（E09-B `16/16`、E09-A `21/21`） | mixed parent/child lineage、token-first evidence tamper 在 source resolver/resource request 前拒绝且合法重试可消费；双 source initial/continuation cancel、600 accounts pre-grant reject、token adoption timeout、post-grant token/persistent cleanup、显式 cancel、零交易、cleanup-required、旧 state 原子保留 |
+| restack + Ultra Round 2 后 E09-B + E09-A 定向 unit/真实 Worker probes | 串行 `39/39 PASS`（E09-B `18/18`、E09-A `21/21`） | mixed parent/child lineage、token-first evidence/choice tamper 在 source resolver/resource request 前拒绝且合法 retry；exact row coverage/options、crash interrupted receipt/duplicate/wrong-token/bounded forget；双 source cancel、600 accounts pre-grant reject、token adoption timeout、post-grant cleanup、零交易、cleanup-required、旧 state 原子保留。默认并行组合曾在本轮逻辑前出现一次不可复现 `transport-lost`，单文件与串行全绿，未据此放宽合同或增加业务防御 |
 | E09-P0 + ServiceHost/Governor/Supervisor 定向 unit | `179/179 PASS` | reservation FSM、TTL/single-use/stale/tamper、lock/phase、privacy/bounded DTO、四金额/余额/current-all golden 与 production gate |
 | `scripts/integration/statement-generation-pipeline.js` | `45/45 PASS` | 既有金额/借贷/余额生成 pipeline 未回归 |
 | `npm run smoke` | PASS | 全仓 smoke 与 Statement 外相邻模块无回归 |
@@ -51,8 +53,8 @@
 | changed JS `node --check` | PASS | 10 个 changed JS 语法检查 |
 | changed JSON parse | N/A（0 files） | 本 restack 无 JSON 改动 |
 | `git diff --check` | PASS | whitespace/patch 完整性 |
-| blindspot-pass | 已枚举 import/continuation/cancel/status/wrong-action 入口，以及 prepare/grant/private-insert/adopt-ack/published/consuming/releasing/released、replacement/stale/expiry/crash/late ack 状态 | token-first stale 无 source/resource side effect；replacement 在 old release-ack 后才申请新 reservation；candidate 仅 matching persistent adopt-ack 后替换旧 state；未发现无 ack public 旁路 |
-| reconciliation-blindspot-pass | 资金红线保持人工复核；四金额、双非零/零发生额、MerchantId/账户、币种/余额/current-all golden，mixed lineage、token duplicate/single-use/partial cleanup、split/bill warning metadata 与两 block 行数守恒均有自动证据 | E09-B 只复用 production mapper并回填 MerchantId/Currency，不实现 Publisher/generation/seed settlement，不自动声明资金正确 |
+| blindspot-pass | 已枚举 import/continuation/cancel/status/wrong-action 入口，以及 prepare/grant/private-insert/adopt-ack/published/consuming/releasing/released、replacement/stale/expiry/crash/late ack 状态 | token-first stale/invalid choice 均无 source/resource side effect；actual choice 与 single-use 同步 claim；crash receipt 不降级 cancelled；replacement 在 old release-ack 后才申请新 reservation；candidate 仅 matching persistent adopt-ack 后替换旧 state；未发现无 ack public 旁路 |
+| reconciliation-blindspot-pass | 资金红线保持人工复核；四金额、双非零/零发生额、MerchantId/账户、币种/余额/current-all golden，mixed lineage、未授权/重复 token、single-use/partial cleanup、split/bill warning metadata 与两 block 行数守恒均有自动证据 | 未授权 MerchantId/Currency 在任何来源读取前拒绝且不耗 token；E09-B 只复用 production mapper并回填，不实现 Publisher/generation/seed settlement，不自动声明资金正确 |
 
 ## Remaining Unknowns
 
