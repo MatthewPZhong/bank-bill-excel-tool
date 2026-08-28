@@ -3,7 +3,7 @@
 ## Task Brief
 
 - Goal：为 ReconFix JPM 资金写回提供专用 ID-aware ADM reader、critical 前的 exact no-op 判定，以及与未来 ADM mutation 同一 `BEGIN IMMEDIATE` 的 operation receipt schema/repository/事务原语。
-- Context：精确基线为已闭环 E11-A `0800aec86dd7081082937dfa154b1f2dd1a26b6d`；E11-A 已交付 production-false 的 import/standard/BOC Service capability，并明确阻断 JPM managed run。
+- Context：精确基线为最终 E11-A `c6c7ffa5ec195eaca366120d5617e93f558f650f`；E11-A 已交付 production-false 的 import/standard/BOC Service capability、保守 phase-extension 准入与 streaming evidence，并明确阻断 JPM managed run。E11-P0 的独有提交从旧 E11-A 基线机械移植后，需重新证明两层语义共存。
 - Constraints：不注册或启用 `recon-fix:run-jpm`；不实现 Worker durable 协调、Critical Intent/handshake、`commit:receipt` 消息、Inspector、startup recovery、Recovery Hold、export 或 VCC；live IPC/legacy JPM 路径保持不变；JPM production 保持 disabled/legacy；不运行 release-check/check-vars/scan:vars。
 - Done when：专用 reader 以 `ORDER BY id ASC` 返回 `id + raw_json + parsed`，坏 JSON hard fail 且不丢行；rowCount、ID digest、pre/post image hash 由同一 canonicalizer 生成；plan 不用数组下标绑定未验证行并能 exact 区分 noop/mutation；noop 只产出有界 handle/summary，不能进入 transaction/receipt；mutation primitive 在同一主库 `BEGIN IMMEDIATE` 内重读并校验 ID/count/order/preimage、按 exact id 更新、写 receipt，任一步失败全部 rollback；定向资金/兼容测试通过。
 
@@ -18,6 +18,7 @@
 | JPM 引擎只写三个 ADM 字段 | `jpm-dispatch-order-fix.js` 对 `admReconFundId/admChannelMatched/admGatewayMatched` 的赋值点 | plan 必须拒绝其它 ADM 字段变化，保护金额、币种、批次和行血缘 |
 | ADM 与 receipt 都属于 Main-owned 主库 | `database.js` 初始化 `linked_adm_bank_deposit`；TechDoc §5 要求 receipt 与 ADM mutation 同一主库事务 | receipt schema 加入当前主库的幂等迁移；不得跨 DB 双写 |
 | 平台已有 RFC8785/JCS canonicalizer，ReconFix 已有 legacy-safe evidence projection | `background-execution/canonical-json-v1.js`；`recon-id-fix-service/evidence-projection.js` | ID digest、行 image 与 plan hash 复用同一 canonical hash 路径，不另造普通 JSON stringify hash |
+| 最终 E11-A 将 ReconFix evidence 改为 byte-identical streaming hash，并在 Worker 大分配前申请 Governor phase extension | E11-A `evidence-projection.js`、`worker-entry.js`、`service.js` 与 14 项 Service 测试 | E11-P0 必须继续复用同一 evidence helper；不得增加第二资源 authority，也不得把尚未接线的 JPM primitive 伪装成 Worker phase |
 | Service 大结果必须私有 | v3.2.4 Spec §6.1、TechDoc §4 | E11-P0 plan API 只接收/返回 `resultHandle + boundedSummary`；不接收、存储或公开 fixed/unmatched candidate |
 
 ## Unknowns Register
@@ -29,6 +30,7 @@
 | exact no-op 如何保证早于 critical/transaction | 状态边界未知 | 高 | 容易 | E11-B 尚未交付，E11-P0 不应引入 critical 协调 | PROBE | API 形状与 spy DB 测试；noop 调用 mutation primitive 必须拒绝 | plan 先纯计算；独立 bounded noop result API；transaction primitive 只接受 mutation plan |
 | receipt replay/conflict 在 E11-P0 如何处理 | 幂等盲区 | 高 | 一般 | Inspector/recovery 属 E11-B；receipt 是 committed 权威证据 | PROBE | 同 operationKey 预置 receipt 后调用 mutation primitive | E11-P0 fail closed 并 rollback，不猜测 replay outcome；E11-B 由 Inspector 判定 |
 | invalid raw JSON 的错误证据如何可观测且不泄密 | 隐私盲区 | 中 | 容易 | raw_json 可能含账号、订单和金额；DB id 只用于内部定位 | PROBE | 错误 shape 测试禁止 raw text/parsed row，限制样本数量 | 只返回 corruption count 与最多 5 个 HMAC-free SHA-256 截断 ID token，不返回原 ID/raw_json |
+| 最终 E11-A 的 phase-extension/streaming evidence 是否要求调整 E11-P0 reader/plan/transaction | 上游传播未知 | 高 | 容易 | E11-P0 只调用 evidence helper，不注册 Worker action、Service resource 或 live route | PROBE | 在最终 E11-A 基线上机械移植独有提交，跑 E11-P0 19 项、E11-A 14 项与联合回归/benchmark | 无代码适配：streaming hash 对 P0 image/digest 保持 byte-identical；resource authority 仍唯一属于 ServiceHost/Governor |
 
 ## BLOCK
 
@@ -40,6 +42,8 @@
 2. JPM 引擎对 ADM 的唯一写集合为 `资金对账ID / 是否与渠道账单匹配 / 是否与网关账单匹配`；日期、金额、币种、批次、调拨号及其它字段必须 byte-semantically 保持。
 3. source reader 的 parsed object identity 可作为 engine 私有运行期 id 绑定，随后仍需用 rowCount/idSequenceDigest/imageHash 关闭重排、重复、外来对象和 DB TOCTOU。
 4. no-op 不需要 durable receipt；若 plan 为 noop，任何 mutation transaction API 调用都应立即失败，确保后续 E11-B 必须在 critical 前分支。
+5. E11-P0 的 reader/plan/transaction/repository 不导入或实例化 `ResourceGovernor`/`ServiceHost`，也不注册 JPM Worker action；最终 E11-A 的 phase extension 仍由既有 Service resource-control 独占管理，没有形成第二 authority。
+6. E11-P0 复用的 `reconFixEvidenceSha256()` 在最终 E11-A 中改为有界 streaming 实现但保持 canonical bytes/hash 合同；19 项 P0、14 项 A 与 107 项联合测试均通过，无需兼容补丁。
 
 ## ASSUME
 

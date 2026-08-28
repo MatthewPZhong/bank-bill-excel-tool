@@ -3,7 +3,8 @@
 ## Baseline
 
 - Goal/spec：v3.2.4 Spec §4、§6.1、§8～§11；TechDoc §3～§5、§12～§14 的 E11-P0 子集。
-- Exact base：`0800aec86dd7081082937dfa154b1f2dd1a26b6d`。
+- Exact base：最终 E11-A `c6c7ffa5ec195eaca366120d5617e93f558f650f`。
+- Restack provenance：E11-P0 原独有提交 `1d9588a7e5303e9b8a5621095c445d7a9c1c6005`（旧 parent `0800aec86dd7081082937dfa154b1f2dd1a26b6d`）机械移植为 `25b8d6daafe9f6a3cf89573f7370e2c9b9c9f2e5`，其 parent 与 merge-base 均为上述最终 E11-A。
 - Initial plan：[preflight.md](./preflight.md)。
 - Done when：ID-aware reader、exact no-op、receipt schema/repository 与同事务 mutation audit primitive 通过定向验证；JPM live/managed/production 仍关闭。
 
@@ -18,6 +19,7 @@
 | raw reader 使用平台 duplicate-aware strict parser，损坏证据只保留 count 与 5 个截断 ID token | legacy reader 会静默 drop 语法坏行并接受重复 key；raw_json 含资金与账号信息 | 修改 legacy reader；在错误中返回 raw/id | 新 reader 对所有坏行汇总后 hard fail，线上 legacy 入口行为不变 |
 | mutation 与 receipt 由一个 `BEGIN IMMEDIATE` 原语提交，并在最后故障 seam 后权威回读两者 | 只在 update 后校验会漏掉 trigger/fault 在 receipt 阶段造成的漂移；分事务会产生部分成功 | 先写 ADM 后补 receipt；依赖数组位置 | count/id/order/pre/post/receipt 任一漂移均 rollback；exact id 是唯一写入定位 |
 | 已有 receipt 一律 fail closed | committed/not-committed/unknown 的重放判定属于 E11-B Inspector | E11-P0 猜测幂等成功并继续 adopt | 不重复 mutation，不提前实现恢复状态机 |
+| Restack 不为 E11-A phase-extension 增加 JPM resource 层或适配分支 | P0 只提供尚未接 Worker 的 reader/plan/transaction/receipt primitives；E11-A Governor 仍是唯一 resource authority；streaming evidence 保持 byte-identical | 在 P0 transaction 中自行申请 lease；为旧 hash 添加 fallback/catch | 上游传播只改变基线与验证证据，不扩大 E11-P0 协议或业务合同 |
 
 ## Assumptions
 
@@ -28,14 +30,17 @@
 
 ## Deviations
 
-无。
+- 行为偏差：无。
+- 传播记录：原 E11-P0 独有提交从旧 E11-A 重叠到最终 E11-A；语义复核与回归未发现需要生产代码适配的上游冲突。
 
 ## Evidence
 
 - `NODE_PATH=<共享 node_modules> node --test tests/unit/main-process/recon-id-fix-jpm-writeback-e11-p0.test.js`：19/19 PASS。覆盖实际 JPM 引擎、真实 `DatabaseSync`、strict reader、空表/identity/ID gap、exact no-op、migration/restart、same-transaction receipt、TOCTOU、trigger、ADM/receipt fault injection、existing receipt 与 production-false 边界。
-- 新套件与 `linked-table-adm-deposit`、JPM engine、ReconFix Service/engine 定向联合：83/83 PASS；legacy ADM、standard/BOC Service golden、revision/busy/stale 与 JPM disabled 边界未回归。
+- 最终 E11-A Service suite：14/14 PASS；覆盖 phase-extension 准入/释放、streaming evidence、standard/BOC golden、revision/busy/stale/cancel/close 边界。
+- 新套件与 `linked-table-adm-deposit`、JPM seed/engine、ReconFix Service/engine/IO 定向联合：107/107 PASS；legacy ADM、standard/BOC Service golden 与 JPM disabled 边界未回归。
 - 直接集成：`bank-statement-universal-import-routing.js` 20/20 PASS；`v3.0.0-linked-streaming-import.js` 19/19 PASS；`v3.0.4-boc-dispatch-order-fix.js` 31/31 PASS。
-- ReconFix gateway smoke：20/20 PASS。
+- 完整 `npm run smoke` PASS，其中 ReconFix gateway smoke 20/20；首次未设置 `NODE_PATH` 时在加载 `xlsx` 前因隔离 worktree 无依赖失败，使用共享依赖路径重跑同一 smoke 后通过，未修改 package/lock。
+- ReconFix Service benchmark gate PASS：5k 的 peak RSS delta `218808320` bytes 小于当时持有 lease envelope `399343616`；10k 为 `367722496 < 500022640`；near-boundary（9750 rows/side、phase 利用率 91.67%）为 `349913088 < 482488408`。三例 shutdown 均无 lease leak，证明 P0 重叠未破坏最终 E11-A resource-control。
 - 受影响文件 ESLint PASS；`node --check` 与 `git diff --check` 在提交前复验。
 - 隔离 worktree 未安装依赖；测试只通过 `NODE_PATH=/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules` 复用共享依赖，未改 lock/package。
 
@@ -45,7 +50,7 @@
 - 边界条件：空表、ID 有缺口可保持 exact lineage；rowCount、同数量换 ID、重排、重复/外来对象、坏 JSON/重复 key、非 writeback 字段变化均 fail closed。
 - 失败模式：`after-updates`、`after-receipt-insert` 注入失败会同时 rollback；未计划行 trigger 与最后 seam 的 ADM 篡改被 postimage 权威回读捕获；已有 receipt 不猜 replay。
 - 状态生命周期：no-op transaction API 在读取 DB 前拒绝；receipt 只记录 bounded hashes/counts/identity，不保存 candidate 或 raw rows。Worker durable adoption、critical handshake、Inspector 与 Hold 明确保留给 E11-B。
-- 兼容性：migration 仅 `CREATE TABLE IF NOT EXISTS`，AppDatabase 两次重启可见；legacy reader/writer 未替换，标准/BOC 与 JPM legacy engine 回归通过。
+- 兼容性：migration 仅 `CREATE TABLE IF NOT EXISTS`，AppDatabase 两次重启可见；legacy reader/writer 未替换，标准/BOC 与 JPM legacy engine 回归通过。最终 E11-A streaming evidence 的 canonical digest 与原投影 byte-identical；P0 未新增 resource request/phase lifecycle，唯一 authority 仍是 ServiceHost/Governor。
 - 可观测性：损坏 raw_json 只暴露损坏行数与最多 5 个脱敏 token；事务失败使用稳定 code，receipt 不含账户、金额、完整行或结果 candidate。
 
 ## Reconciliation Blindspot Pass
