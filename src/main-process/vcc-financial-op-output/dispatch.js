@@ -28,6 +28,9 @@ const {
 } = require('./policies');
 
 const VCC_EXPORT_SOURCE_OPERATION = 'vccFinancialOp:export:result';
+const VCC_EXPORT_RECOVERY_PATH_LIMIT = 100;
+const VCC_EXPORT_CLEANUP_DIAGNOSTIC_LIMIT = 8;
+const UUID_TOKEN_PATTERN = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 
 function dispatchError(code, message) {
   const error = new Error(message);
@@ -41,6 +44,79 @@ function exactKeys(value, expected, code, label) {
     throw dispatchError(code, `${label} exact keys 非法`);
   }
   return value;
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function mergeRecoveryPaths(error, generationPaths) {
+  const merged = [];
+  const seen = new Set();
+  const candidates = [
+    ...generationPaths,
+    ...(Array.isArray(error.recoveryPaths) ? error.recoveryPaths : [])
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string' || !candidate || seen.has(candidate)) continue;
+    seen.add(candidate);
+    merged.push(candidate);
+    if (merged.length >= VCC_EXPORT_RECOVERY_PATH_LIMIT) break;
+  }
+  error.recoveryPaths = merged;
+}
+
+function appendCleanupDiagnostics(error, failures) {
+  if (failures.length === 0 || !error || typeof error !== 'object') return;
+  const additions = [
+    `VCC task-private cleanup 未完成：${failures.length} 项`
+  ];
+  for (const failure of failures.slice(0, VCC_EXPORT_CLEANUP_DIAGNOSTIC_LIMIT)) {
+    const code = failure && failure.code && /^[A-Z0-9_]+$/.test(failure.code)
+      ? failure.code
+      : 'UNKNOWN';
+    additions.push(`VCC task-private cleanup error：${code}`);
+  }
+  error.detailLines = [
+    ...(Array.isArray(error.detailLines) ? error.detailLines : []),
+    ...additions
+  ];
+}
+
+function cleanupGenerationArtifacts(generations, error) {
+  const cleanupPaths = new Set();
+  const failures = [];
+  const patternsByDirectory = new Map();
+  for (const item of generations) {
+    const generationPath = item.generationPath;
+    cleanupPaths.add(generationPath);
+    const directory = path.dirname(generationPath);
+    const patterns = patternsByDirectory.get(directory) || [];
+    patterns.push(new RegExp(
+      `^${escapeRegExp(path.basename(generationPath))}\\.${UUID_TOKEN_PATTERN}\\.tmp$`
+    ));
+    patternsByDirectory.set(directory, patterns);
+  }
+  for (const [directory, patterns] of patternsByDirectory) {
+    let entries;
+    try {
+      entries = fs.readdirSync(directory, { withFileTypes: true });
+    } catch (scanError) {
+      failures.push(scanError);
+      continue;
+    }
+    for (const entry of entries) {
+      if (patterns.some((pattern) => pattern.test(entry.name))) {
+        cleanupPaths.add(path.join(directory, entry.name));
+      }
+    }
+  }
+  for (const cleanupPath of cleanupPaths) {
+    try { fs.rmSync(cleanupPath, { force: true }); } catch (cleanupError) {
+      failures.push(cleanupError);
+    }
+  }
+  appendCleanupDiagnostics(error, failures);
 }
 
 function freezeTaskAuthority(value, batchContext) {
@@ -125,6 +201,7 @@ function canonicalFilePlan(filePlan, outputCount) {
     if (Object.keys(supplied).sort().join(',') !== expectedOutputKeys ||
         supplied.direction !== 'output' || supplied.role !== 'output' ||
         supplied.sourceOperation !== VCC_EXPORT_SOURCE_OPERATION ||
+        path.extname(output.filePath).toLowerCase() !== '.xlsx' ||
         canonicalSha256(supplied) !== canonicalSha256(output)) {
       throw dispatchError(
         'VCC_EXPORT_FILE_PLAN_INVALID',
@@ -363,6 +440,10 @@ async function generateValidateAndPublishVccExport(options = {}) {
     const publication = await publishVccFinancialOpOutputs({
       batchContext,
       generationFilePaths: artifacts.map((artifact) => artifact.generationPath),
+      expectedArtifacts: artifacts.map((artifact) => Object.freeze({
+        byteSize: artifact.byteSize,
+        sha256: artifact.sha256
+      })),
       targetFilePaths: artifacts.map((artifact) => artifact.targetPath),
       targetSnapshots: artifacts.map((artifact) => artifact.targetSnapshot),
       publishPublication: options.publishPublication,
@@ -392,8 +473,13 @@ async function generateValidateAndPublishVccExport(options = {}) {
       publication
     });
   } catch (error) {
-    for (const item of generation.generations) {
-      try { fs.rmSync(item.generationPath, { force: true }); } catch (_cleanupError) { /* staging owner retries */ }
+    if (error && error.preserveTemporaryFiles === true) {
+      mergeRecoveryPaths(
+        error,
+        generation.generations.map((item) => item.generationPath)
+      );
+    } else {
+      cleanupGenerationArtifacts(generation.generations, error);
     }
     throw error;
   }

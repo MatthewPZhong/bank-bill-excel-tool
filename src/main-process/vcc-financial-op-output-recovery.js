@@ -36,6 +36,16 @@ function normalizedTargetSnapshot(value, index) {
   return value;
 }
 
+function normalizedExpectedArtifact(value, index) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      Object.keys(value).sort().join(',') !== 'byteSize,sha256' ||
+      !Number.isSafeInteger(value.byteSize) || value.byteSize <= 0 ||
+      typeof value.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(value.sha256)) {
+    throw new TypeError(`VCC 导出第 ${index + 1} 个 Join 产物 identity 非法`);
+  }
+  return Object.freeze({ byteSize: value.byteSize, sha256: value.sha256 });
+}
+
 async function publishVccFinancialOpOutputs(options = {}) {
   const batchContext = options.batchContext;
   const generationPaths = Array.isArray(options.generationFilePaths)
@@ -52,7 +62,26 @@ async function publishVccFinancialOpOutputs(options = {}) {
     throw new TypeError('VCC 导出的正式目标与 prepare 阶段快照数量不一致');
   }
 
+  const expectedArtifacts = options.expectedArtifacts === undefined
+    ? null
+    : options.expectedArtifacts;
+  if (expectedArtifacts !== null && (!Array.isArray(expectedArtifacts) ||
+      expectedArtifacts.length !== generationPaths.length)) {
+    throw new TypeError('VCC 导出的 Join 产物 identity 与临时产物数量不一致');
+  }
+
   const inspected = await Promise.all(generationPaths.map(hashRegularFile));
+  const validatedArtifacts = inspected.map((file, index) => {
+    const expected = expectedArtifacts === null
+      ? Object.freeze({ byteSize: file.byteSize, sha256: file.sha256 })
+      : normalizedExpectedArtifact(expectedArtifacts[index], index);
+    if (file.byteSize !== expected.byteSize || file.sha256 !== expected.sha256) {
+      const error = new Error(`VCC 导出第 ${index + 1} 个临时产物在 Join 后发生变化`);
+      error.code = 'VCC_OUTPUT_GENERATION_CHANGED_AFTER_JOIN';
+      throw error;
+    }
+    return Object.freeze({ filePath: file.filePath, ...expected });
+  });
   const taskId = `vcc-output-${batchContext.taskRunId}-${crypto.randomUUID()}`;
   const publishPublication = options.publishPublication || publishToolboxPublicationAsync;
   const recoverPublications = options.recoverPublications || recoverToolboxPublicationsAsync;
@@ -60,7 +89,7 @@ async function publishVccFinancialOpOutputs(options = {}) {
     || recoverToolboxPublicationsIntoArchive;
   const publication = await publishPublication({
     taskId,
-    artifacts: inspected.map((file, index) => ({
+    artifacts: validatedArtifacts.map((file, index) => ({
       sourcePath: file.filePath,
       outputId: `vcc-output-${index + 1}`,
       fileName: path.basename(targetPaths[index]),
@@ -75,7 +104,8 @@ async function publishVccFinancialOpOutputs(options = {}) {
     userDataDir: options.userDataDir,
     batchContext,
     archiveInputFiles: [],
-    allowEmptyArchiveInputs: true
+    allowEmptyArchiveInputs: true,
+    requireValidatedArtifacts: true
   });
 
   // publication worker 已把 generation 内容复制到同目录 staging 并提交；
@@ -86,7 +116,7 @@ async function publishVccFinancialOpOutputs(options = {}) {
 
   try {
     if (typeof options.settleManifestArtifacts === 'function') {
-      await options.settleManifestArtifacts(publication, inspected);
+      await options.settleManifestArtifacts(publication, validatedArtifacts);
     } else {
       await recoverIntoArchive({
         userDataDir: options.userDataDir,

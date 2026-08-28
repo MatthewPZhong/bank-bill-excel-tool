@@ -33,6 +33,7 @@ const {
   readVccExportSnapshot
 } = require('../../../src/main-process/vcc-financial-op-output/authority');
 const {
+  canonicalFilePlan,
   createGenerationInput,
   generateValidateAndPublishVccExport
 } = require('../../../src/main-process/vcc-financial-op-output/dispatch');
@@ -53,6 +54,9 @@ const {
 const {
   writeRunWorkbooks
 } = require('../../../src/main-process/vcc-financial-op-writer');
+const {
+  assertXlsxOutputPath
+} = require('../../../src/main-process/vcc-financial-op-output-publication');
 
 const ASSETS_DIR = path.resolve(__dirname, '../../../assets');
 
@@ -254,6 +258,7 @@ async function runManaged({ harness, actionKey, selectedSubjectIndexes, suffix }
     batchContext: batch,
     publishPublication: async (payload) => {
       publisherCalls += 1;
+      assert.equal(payload.requireValidatedArtifacts, true);
       publishedDigests = await Promise.all(
         payload.artifacts.map((artifact) => workbookSemanticDigest(artifact.sourcePath))
       );
@@ -276,6 +281,54 @@ test('E12-A 两 action canonical policy byte-for-byte、production false 且 val
   assert.equal(isBackgroundExecutionProductionEnabled(VCC_EXPORT_SUBJECTS_ACTION), false);
   assert.equal(validateVccExportSingleResult({}), false);
   assert.equal(validateVccExportSubjectsResult({}), false);
+});
+
+test('canonical FilePlan 与 legacy writer 仅接受 xlsx extension，csv 在 Worker 前 fail closed', async (t) => {
+  const harness = setup(t, ['PPHK']);
+  const outputRoot = path.join(harness.root, 'extension-targets');
+  fs.mkdirSync(outputRoot);
+  const makePlan = (fileName) => normalizeFilePlanV1({
+    version: 1,
+    allocation: 'eager',
+    inputs: [],
+    outputs: [{
+      filePath: path.join(outputRoot, fileName),
+      role: 'output',
+      sourceOperation: 'vccFinancialOp:export:result'
+    }]
+  });
+  const uppercaseXlsx = makePlan('accepted.XLSX');
+  assert.equal(canonicalFilePlan(uppercaseXlsx, 1).outputs.length, 1);
+  assert.equal(assertXlsxOutputPath(path.join(outputRoot, 'legacy.XLSX')),
+    path.join(outputRoot, 'legacy.XLSX'));
+
+  const csvPath = path.join(outputRoot, 'rejected.csv');
+  const csvPlan = makePlan('rejected.csv');
+  assert.throws(() => canonicalFilePlan(csvPlan, 1), /FilePlan/);
+  assert.throws(() => assertXlsxOutputPath(csvPath), /xlsx/);
+  const stagingDirectory = path.join(harness.root, 'staging-extension');
+  fs.mkdirSync(stagingDirectory);
+  const batch = batchContext('single');
+  let workerCalls = 0;
+  let publisherCalls = 0;
+  await assert.rejects(generateValidateAndPublishVccExport({
+    actionKey: VCC_EXPORT_SINGLE_ACTION,
+    runtime: { async execute() { workerCalls += 1; } },
+    expectedAuthority: harness.snapshot.authority,
+    readCurrentSnapshot: async () => harness.snapshot,
+    readCurrentTaskAuthority: async () => ({
+      action: 'export-result', taskGeneration: 0, taskRunId: batch.taskRunId
+    }),
+    selectedSubjectIndexes: [0],
+    filePlan: csvPlan,
+    stagingDirectory,
+    assetsDir: ASSETS_DIR,
+    batchContext: batch,
+    publishPublication: async () => { publisherCalls += 1; }
+  }), /FilePlan/);
+  assert.equal(workerCalls, 0);
+  assert.equal(publisherCalls, 0);
+  assert.deepEqual(fs.readdirSync(stagingDirectory), []);
 });
 
 test('export-subjects 真单 Writer 按 subjectIndex 输出全集，与 legacy semantic golden 等价且 Publisher=1', async (t) => {
@@ -485,6 +538,41 @@ test('artifact hash/size TOCTOU 被 Main Join 阻断，Publisher=0 且 staging �
   assert.deepEqual(fs.readdirSync(stagingDirectory), []);
 });
 
+test('Main Join 后 generation 被替换时 wrapper 绑定 expected identity，Publisher=0', async (t) => {
+  const harness = setup(t, ['PPHK']);
+  const plan = filePlan(harness.root, 1, 'after-join-tamper');
+  const stagingDirectory = path.join(harness.root, 'staging-after-join-tamper');
+  fs.mkdirSync(stagingDirectory);
+  const batch = batchContext('single');
+  let snapshotReads = 0;
+  let publisherCalls = 0;
+  await assert.rejects(generateValidateAndPublishVccExport({
+    actionKey: VCC_EXPORT_SINGLE_ACTION,
+    runtime: harness.runtime,
+    expectedAuthority: harness.snapshot.authority,
+    readCurrentSnapshot: async () => {
+      snapshotReads += 1;
+      if (snapshotReads === 3) {
+        const [generationName] = fs.readdirSync(stagingDirectory);
+        fs.appendFileSync(path.join(stagingDirectory, generationName), 'after-join-tamper');
+      }
+      return harness.snapshot;
+    },
+    readCurrentTaskAuthority: async () => ({
+      action: 'export-result', taskGeneration: 0, taskRunId: batch.taskRunId
+    }),
+    selectedSubjectIndexes: [0],
+    filePlan: plan,
+    stagingDirectory,
+    assetsDir: ASSETS_DIR,
+    batchContext: batch,
+    publishPublication: async () => { publisherCalls += 1; }
+  }), (error) => error.code === 'VCC_OUTPUT_GENERATION_CHANGED_AFTER_JOIN');
+  assert.equal(snapshotReads, 3);
+  assert.equal(publisherCalls, 0);
+  assert.deepEqual(fs.readdirSync(stagingDirectory), []);
+});
+
 test('自洽伪造 size/hash 的 workbook 业务篡改仍由 Main 深度回读阻断', async (t) => {
   const harness = setup(t, ['PPHK']);
   const plan = filePlan(harness.root, 1, 'business-tamper');
@@ -562,6 +650,58 @@ test('Publisher 失败不重试：调用恰一次，错误透传且 generation a
   }), /fixture publisher failure/);
   assert.equal(publisherCalls, 1);
   assert.deepEqual(fs.readdirSync(stagingDirectory), []);
+});
+
+test('Publisher 人工恢复 preserve 保留全部 task-private 文件并合并有界 recoveryPaths', async (t) => {
+  const harness = setup(t, ['PPHK']);
+  const plan = filePlan(harness.root, 1, 'publisher-preserve');
+  const stagingDirectory = path.join(harness.root, 'staging-publisher-preserve');
+  fs.mkdirSync(stagingDirectory);
+  const batch = batchContext('single');
+  const journalPath = path.join(harness.root, 'manual-recovery-journal.json');
+  let publisherCalls = 0;
+  let preservedGenerationPath = null;
+  let preservedAtomicPath = null;
+  let caught = null;
+  try {
+    await generateValidateAndPublishVccExport({
+      actionKey: VCC_EXPORT_SINGLE_ACTION,
+      runtime: harness.runtime,
+      expectedAuthority: harness.snapshot.authority,
+      readCurrentSnapshot: async () => harness.snapshot,
+      readCurrentTaskAuthority: async () => ({
+        action: 'export-result', taskGeneration: 0, taskRunId: batch.taskRunId
+      }),
+      selectedSubjectIndexes: [0],
+      filePlan: plan,
+      stagingDirectory,
+      assetsDir: ASSETS_DIR,
+      batchContext: batch,
+      publishPublication: async (payload) => {
+        publisherCalls += 1;
+        preservedGenerationPath = payload.artifacts[0].sourcePath;
+        preservedAtomicPath = `${preservedGenerationPath}.11111111-2222-3333-4444-555555555555.tmp`;
+        fs.writeFileSync(preservedAtomicPath, 'atomic-recovery-evidence');
+        fs.writeFileSync(path.join(stagingDirectory, 'unrelated.keep'), 'keep');
+        const error = new Error('fixture manual recovery');
+        error.preserveTemporaryFiles = true;
+        error.recoveryPaths = [journalPath, journalPath];
+        throw error;
+      }
+    });
+  } catch (error) {
+    caught = error;
+  }
+  assert.match(caught.message, /manual recovery/);
+  assert.equal(caught.preserveTemporaryFiles, true);
+  assert.equal(publisherCalls, 1);
+  assert.equal(fs.existsSync(preservedGenerationPath), true);
+  assert.equal(fs.existsSync(preservedAtomicPath), true);
+  assert.equal(fs.existsSync(path.join(stagingDirectory, 'unrelated.keep')), true);
+  assert.equal(caught.recoveryPaths[0], preservedGenerationPath);
+  assert.ok(caught.recoveryPaths.includes(journalPath));
+  assert.equal(new Set(caught.recoveryPaths).size, caught.recoveryPaths.length);
+  assert.ok(caught.recoveryPaths.length <= 100);
 });
 
 test('Worker failure/cancel 及 transport crash 都保持 Publisher=0 并清理 task-private artifacts', async (t) => {
@@ -645,6 +785,59 @@ test('Worker failure/cancel 及 transport crash 都保持 Publisher=0 并清理 
   }), /fixture crash/);
   assert.equal(publisherCalls, 0);
   assert.deepEqual(fs.readdirSync(crashStaging), []);
+});
+
+test('forced-shutdown 等价失败只清理 exact generation 与同源 UUID tmp，不递归删除未知文件', async (t) => {
+  const harness = setup(t, ['PPHK']);
+  const stagingDirectory = path.join(harness.root, 'forced-shutdown-staging');
+  fs.mkdirSync(stagingDirectory);
+  const plan = filePlan(harness.root, 1, 'forced-shutdown');
+  const batch = batchContext('single');
+  let publisherCalls = 0;
+  let generationPath = null;
+  let atomicTempPath = null;
+  let lookalikePath = null;
+  const unrelatedPath = path.join(stagingDirectory, 'unrelated.keep');
+  await assert.rejects(generateValidateAndPublishVccExport({
+    actionKey: VCC_EXPORT_SINGLE_ACTION,
+    runtime: {
+      async execute(request) {
+        generationPath = request.input.generations[0].generationPath;
+        atomicTempPath = `${generationPath}.11111111-2222-3333-4444-555555555555.tmp`;
+        lookalikePath = `${generationPath}.not-a-uuid.tmp`;
+        fs.writeFileSync(generationPath, 'partial-generation');
+        fs.writeFileSync(atomicTempPath, 'partial-atomic');
+        fs.writeFileSync(lookalikePath, 'do-not-delete');
+        fs.writeFileSync(unrelatedPath, 'do-not-delete');
+        return {
+          outcome: 'failed',
+          terminalSource: 'shutdown-timeout',
+          error: {
+            code: 'BACKGROUND_EXECUTION_SHUTDOWN_TIMEOUT',
+            message: 'fixture forced shutdown',
+            stage: 'execute',
+            detailLines: []
+          }
+        };
+      }
+    },
+    expectedAuthority: harness.snapshot.authority,
+    readCurrentSnapshot: async () => harness.snapshot,
+    readCurrentTaskAuthority: async () => ({
+      action: 'export-result', taskGeneration: 0, taskRunId: batch.taskRunId
+    }),
+    selectedSubjectIndexes: [0],
+    filePlan: plan,
+    stagingDirectory,
+    assetsDir: ASSETS_DIR,
+    batchContext: batch,
+    publishPublication: async () => { publisherCalls += 1; }
+  }), /forced shutdown/);
+  assert.equal(publisherCalls, 0);
+  assert.equal(fs.existsSync(generationPath), false);
+  assert.equal(fs.existsSync(atomicTempPath), false);
+  assert.equal(fs.existsSync(lookalikePath), true);
+  assert.equal(fs.existsSync(unrelatedPath), true);
 });
 
 test('runtime 拒绝 DB/assets caller override，完成后 shutdown 无 transport/lease 残留', async (t) => {
