@@ -44,11 +44,21 @@ const {
 const {
   createReconFixEvidenceSettlementAdmission
 } = require('../recon-id-fix-service/evidence-settlement-admission');
+const {
+  VCC_EXPORT_SINGLE_ACTION,
+  VCC_EXPORT_SINGLE_POLICY,
+  VCC_EXPORT_SUBJECTS_ACTION,
+  VCC_EXPORT_SUBJECTS_POLICY,
+  validateVccExportSingleResult,
+  validateVccExportSubjectsResult
+} = require('../vcc-financial-op-output/policies');
 
 const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   ...TOOLBOX_GENERATION_POLICIES,
   ...PRE_FUND_MPT_POLICIES,
-  ...RECON_FIX_POLICIES
+  ...RECON_FIX_POLICIES,
+  VCC_EXPORT_SINGLE_POLICY,
+  VCC_EXPORT_SUBJECTS_POLICY
 ]);
 
 function isBackgroundExecutionProductionEnabled(actionKey) {
@@ -82,9 +92,23 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
     path: path.resolve(__dirname, '..', 'recon-id-fix-service', 'worker-entry.js'),
     cancellationTerminalErrorCodes: Object.freeze(['RECON_FIX_CANCELLED'])
   });
+  const vccExportSubjectsEntry = Object.freeze({
+    path: path.resolve(__dirname, '..', 'vcc-financial-op-output', 'writer-worker-entry.js'),
+    cancellationTerminalErrorCodes: Object.freeze(['VCC_EXPORT_CANCELLED'])
+  });
+  const vccExportSingleEntry = Object.freeze({
+    path: path.resolve(__dirname, '..', 'vcc-financial-op-output', 'single-writer-worker-entry.js'),
+    cancellationTerminalErrorCodes: Object.freeze(['VCC_EXPORT_CANCELLED'])
+  });
   const entryRegistry = createStaticRegistry(Object.fromEntries(
     BACKGROUND_EXECUTION_POLICIES.map((policy) => {
       if (policy.moduleId === 'recon-fix') return [policy.entryKey, reconFixEntry];
+      if (policy.actionKey === VCC_EXPORT_SUBJECTS_ACTION) {
+        return [policy.entryKey, vccExportSubjectsEntry];
+      }
+      if (policy.actionKey === VCC_EXPORT_SINGLE_ACTION) {
+        return [policy.entryKey, vccExportSingleEntry];
+      }
       return [policy.entryKey, {
         path: path.join(
           policy.moduleId === 'pre-fund'
@@ -106,19 +130,26 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
   ));
   const validatorEntries = {};
   for (const policy of BACKGROUND_EXECUTION_POLICIES) {
-    const resultValidator = policy.moduleId === 'recon-fix'
-      ? (policy.actionKey === RECON_FIX_EXPORT_ACTION
-          ? validateReconFixExportResult
-          : (policy.actionKey === RECON_FIX_RUN_JPM_ACTION
-          ? validateReconFixJpmResult
-          : validateReconFixServiceResult))
-      : (policy.moduleId === 'pre-fund'
-      ? (policy.actionKey === PRE_FUND_MPT_REPAIR_ACTION
-          ? validatePreFundMptRepairResult
-          : validatePreFundMptImportResult)
-      : (policy.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
-          ? validateToolboxMultiGenerationResult
-          : (value) => validateToolboxGenerationResult(value, policy.actionKey)));
+    let resultValidator;
+    if (policy.actionKey === VCC_EXPORT_SUBJECTS_ACTION) {
+      resultValidator = validateVccExportSubjectsResult;
+    } else if (policy.actionKey === VCC_EXPORT_SINGLE_ACTION) {
+      resultValidator = validateVccExportSingleResult;
+    } else if (policy.moduleId === 'recon-fix') {
+      resultValidator = policy.actionKey === RECON_FIX_EXPORT_ACTION
+        ? validateReconFixExportResult
+        : (policy.actionKey === RECON_FIX_RUN_JPM_ACTION
+            ? validateReconFixJpmResult
+            : validateReconFixServiceResult);
+    } else if (policy.moduleId === 'pre-fund') {
+      resultValidator = policy.actionKey === PRE_FUND_MPT_REPAIR_ACTION
+        ? validatePreFundMptRepairResult
+        : validatePreFundMptImportResult;
+    } else {
+      resultValidator = policy.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
+        ? validateToolboxMultiGenerationResult
+        : (value) => validateToolboxGenerationResult(value, policy.actionKey);
+    }
     validatorEntries[policy.result.validatorKey] = resultValidator;
     // Main explicitly executes the asynchronous technical/business validators before Publisher.
     // Registry bindings remain synchronous capability declarations for static contract coverage.
@@ -151,8 +182,14 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
     settlementKeys: BACKGROUND_EXECUTION_POLICIES.map((policy) => policy.commit.settlementKey),
     publisherKeys: BACKGROUND_EXECUTION_POLICIES.map((policy) => policy.artifacts.publisherKey),
     serviceKeys: [RECON_FIX_SERVICE_KEY],
-    plannerKeys: ['planner.pre-fund:mpt-import'],
-    reducerKeys: ['reducer.pre-fund:mpt-import']
+    plannerKeys: [
+      'planner.pre-fund:mpt-import',
+      'planner.vcc-financial-op:export-subjects'
+    ],
+    reducerKeys: [
+      'reducer.pre-fund:mpt-import',
+      'reducer.vcc-financial-op:export-subjects'
+    ]
   };
   const policyRegistry = createExecutionPolicyRegistry({
     policies: BACKGROUND_EXECUTION_POLICIES,
@@ -177,6 +214,23 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
     shutdownTimeoutMs: options.shutdownTimeoutMs || 5000,
     workerDurableCoordinator: options.workerDurableCoordinator,
     bindInputForAction({ actionKey, input }) {
+      if ([VCC_EXPORT_SINGLE_ACTION, VCC_EXPORT_SUBJECTS_ACTION].includes(actionKey)) {
+        if (!options.vccFinancialOpDatabasePath || !options.vccFinancialOpAssetsDir) {
+          const error = new Error('VCC export runtime generation 缺少 Main database/assets authority');
+          error.code = 'VCC_EXPORT_RUNTIME_AUTHORITY_UNAVAILABLE';
+          throw error;
+        }
+        if (Object.hasOwn(input, 'databasePath') || Object.hasOwn(input, 'assetsDir')) {
+          const error = new Error('VCC export database/assets authority 不接受 caller override');
+          error.code = 'VCC_EXPORT_RUNTIME_AUTHORITY_OVERRIDE_FORBIDDEN';
+          throw error;
+        }
+        return Object.freeze({
+          ...input,
+          databasePath: path.resolve(options.vccFinancialOpDatabasePath),
+          assetsDir: path.resolve(options.vccFinancialOpAssetsDir)
+        });
+      }
       if (actionKey !== RECON_FIX_RUN_JPM_ACTION) return input;
       if (!reconFixJpmDatabaseAuthority) {
         const error = new Error('ReconFix JPM runtime generation 缺少 Main database authority');

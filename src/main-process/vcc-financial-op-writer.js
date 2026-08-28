@@ -778,8 +778,18 @@ async function writeRunWorkbooks({
   outputPaths,
   assetsDir,
   publicationStagingDirectory = null,
+  abortSignal = null,
+  cleanupOnFailure = false,
+  subjectIndexes = null,
   writeSubjectWorkbookFn = writeSubjectWorkbook
 }) {
+  const throwIfAborted = () => {
+    if (!abortSignal || !abortSignal.aborted) return;
+    const error = new Error('VCC export Writer 已取消');
+    error.code = 'VCC_EXPORT_CANCELLED';
+    throw error;
+  };
+  throwIfAborted();
   const resultTemplatePath = path.join(assetsDir, 'VCC财务OP校验', RESULT_TEMPLATE_FILE_NAME);
   const pendingTemplatePath = path.join(assetsDir, 'VCC财务OP校验', '移除归档Pending发生额计算表.xlsx');
   // 两份模板必须在解析任何目标输出路径前完整读取；模板异常时不得触碰用户文件。
@@ -790,8 +800,21 @@ async function writeRunWorkbooks({
   if (!pendingTemplateSheet) throw new Error('移除归档Pending发生额计算模板缺少工作表');
 
   const data = loadEffectiveRunData(db, Number(runId));
-  const plans = data.subjects.map((subject) => buildSubjectRowPlan(data, subject));
+  const selectedIndexes = subjectIndexes === null
+    ? data.subjects.map((_subject, index) => index)
+    : subjectIndexes.map(Number);
+  if ((subjectIndexes !== null && selectedIndexes.length < 1) ||
+      new Set(selectedIndexes).size !== selectedIndexes.length ||
+      selectedIndexes.some((index) => !Number.isSafeInteger(index) || index < 0 ||
+        index >= data.subjects.length)) {
+    throw new TypeError('VCC 财务OP导出 subjectIndexes 非法');
+  }
+  const selectedSubjects = selectedIndexes.map((index) => data.subjects[index]);
+  const plans = selectedSubjects.map((subject) => buildSubjectRowPlan(data, subject));
   const destinations = outputPaths.map((filePath) => path.resolve(filePath));
+  if (destinations.length !== plans.length) {
+    throw new TypeError('VCC 财务OP导出目标与主体数量不一致');
+  }
   const deferredPublication = Boolean(publicationStagingDirectory);
   const generationPaths = [];
   if (deferredPublication) {
@@ -799,6 +822,7 @@ async function writeRunWorkbooks({
   }
   try {
     for (let index = 0; index < plans.length; index += 1) {
+      throwIfAborted();
       const plan = plans[index];
       const destination = destinations[index];
       const generationPath = deferredPublication
@@ -814,27 +838,28 @@ async function writeRunWorkbooks({
         resultContract,
         pendingTemplateSheet
       }));
+      throwIfAborted();
     }
   } catch (error) {
-    if (deferredPublication) {
+    if (deferredPublication || cleanupOnFailure) {
       for (const filePath of generationPaths) {
         try { fs.rmSync(filePath, { force: true }); } catch (_cleanupError) { /* caller also owns dir */ }
       }
     }
     error.partialResult = Object.freeze({
       status: 'error',
-      partialCommitted: deferredPublication ? false : generationPaths.length > 0,
+      partialCommitted: deferredPublication || cleanupOnFailure ? false : generationPaths.length > 0,
       runId: Number(runId),
       targetMonth: data.run.targetMonth,
-      subjects: Object.freeze(data.subjects.slice(0, generationPaths.length)),
-      filePaths: Object.freeze(deferredPublication ? [] : [...generationPaths])
+      subjects: Object.freeze(selectedSubjects.slice(0, generationPaths.length)),
+      filePaths: Object.freeze(deferredPublication || cleanupOnFailure ? [] : [...generationPaths])
     });
     throw error;
   }
   return {
     runId: Number(runId),
     targetMonth: data.run.targetMonth,
-    subjects: data.subjects,
+    subjects: selectedSubjects,
     filePaths: destinations,
     ...(deferredPublication
       ? { generationFilePaths: generationPaths.map((filePath) => path.resolve(filePath)) }
@@ -857,6 +882,7 @@ module.exports = {
   rowAnchorKind,
   buildSubjectRowPlan,
   buildResultSheet,
+  buildPendingSheet,
   validateResultSheet,
   validateStagedWorkbook,
   assertAdjustmentLineage,
