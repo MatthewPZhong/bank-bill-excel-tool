@@ -66,6 +66,7 @@
 ### Automated evidence
 
 - Focused/affected unit：140/140 PASS（Duplicate全部unit、digest/store/repository/wiring、E06 receipt fault；含side COMMIT ambiguity、pre-COMMIT cleanup、receipt-owned delete guard）。
+- Windows teardown修复：远端失败限定为keepOpen SQLite仍打开时test hook先删temp dir导致`EBUSY`；合并为`close`→`finally rm`单一hook后，startup recovery 14/14连续3轮、Duplicate affected 98/98、Supervisor 63/63 PASS，WAL与DB family逐字节断言未变。
 - Integration：`duplicate-inbound-match-end-to-end.js` 31/31 PASS；`background-execution-recovery-control.js` 27/27 PASS。
 - Full unit：6248/6253 PASS、3 SKIP；仅2项`windows-build-contract.test.js`因隔离worktree没有本地`node_modules/app-builder-lib/templates/nsis/multiUser.nsh`而ENOENT，非业务断言失败；首轮并行压力下1项无关MPT symlink用例瞬时失败，单文件复跑与第二轮全量均PASS。
 - Static：所有改动JS `node --check` PASS；ESLint 9.39.4 `src/` PASS；`git diff --check` PASS。
