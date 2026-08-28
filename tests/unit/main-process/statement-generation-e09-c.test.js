@@ -64,7 +64,8 @@ const {
 const {
   createMainExpectedArtifactDescriptor,
   createStatementArtifactLineage,
-  createStatementBusinessEvidence
+  createStatementBusinessEvidence,
+  createStatementCellContractEvidence
 } = require('../../../src/main-process/statement-worker/artifact-descriptor');
 
 const ROOT = path.join(__dirname, '..', '..', '..');
@@ -158,6 +159,12 @@ function expectedArtifact({
     headers,
     rowCounts: { input: inputRows, output: records.length },
     businessEvidence: createStatementBusinessEvidence({ kind, headers, records }),
+    cellContractEvidence: createStatementCellContractEvidence({
+      kind,
+      headers,
+      records,
+      balanceTemplatePath: BALANCE_TEMPLATE_PATH
+    }),
     warningSummary,
     sessionRevision,
     inputEvidenceHash,
@@ -917,7 +924,7 @@ test('Worker写前与Main技术校验拒绝dot/case/Unicode/hardlink artifact al
   assert.equal(fs.existsSync(balanceAliasPath), true, 'hardlink alias集合保留供审计清理');
 });
 
-test('Main-owned descriptor拒绝manifest自洽但sheet/header/kind/record/type/style/lineage错误的workbook', async (t) => {
+test('Main-owned descriptor拒绝manifest自洽但sheet/header/kind/record/formula/type/style/lineage错误的workbook', async (t) => {
   const root = tempRoot(t);
   const correctDetailRecords = [['2026-08-01', 'M001', 'USD', 10, '']];
   const correctBalanceRecords = [balanceRecord()];
@@ -937,6 +944,7 @@ test('Main-owned descriptor拒绝manifest自洽但sheet/header/kind/record/type/
     name,
     kind = 'detail',
     expectedRecords = kind === 'detail' ? correctDetailRecords : correctBalanceRecords,
+    headers = kind === 'detail' ? DETAIL_HEADERS : BALANCE_HEADERS,
     writeInvalid,
     expectedCode
   }) {
@@ -963,7 +971,8 @@ test('Main-owned descriptor拒绝manifest自洽但sheet/header/kind/record/type/
       kind,
       ordinal: 0,
       stagingResourceId,
-      records: expectedRecords
+      records: expectedRecords,
+      headers
     })];
     const result = generationResult({
       artifacts: [{
@@ -1090,6 +1099,67 @@ test('Main-owned descriptor拒绝manifest自洽但sheet/header/kind/record/type/
         xml.replace('>pzhong</cp:lastModifiedBy>', '>unexpected-author</cp:lastModifiedBy>'));
     },
     expectedCode: 'STATEMENT_GENERATION_WORKBOOK_WATERMARK_INVALID'
+  });
+  await rejectCase({
+    name: 'header-formula',
+    async writeInvalid(filePath) {
+      writeDetailArtifact(filePath, correctDetailRecords);
+      await rewriteWorkbookEntry(filePath, 'xl/worksheets/sheet1.xml', (xml) =>
+        xml.replace(
+          /(<c r="A1"[^>]*>)(<v>BillDate<\/v>)/,
+          '$1<f>WEBSERVICE(&quot;https://formula.invalid&quot;)</f>$2'
+        ));
+    },
+    expectedCode: 'STATEMENT_GENERATION_WORKBOOK_CELL_INVALID'
+  });
+  await rejectCase({
+    name: 'data-formula',
+    async writeInvalid(filePath) {
+      writeDetailArtifact(filePath, correctDetailRecords);
+      await rewriteWorkbookEntry(filePath, 'xl/worksheets/sheet1.xml', (xml) =>
+        xml.replace(
+          /(<c r="B2"[^>]*>)(<v>M001<\/v>)/,
+          '$1<f>WEBSERVICE(&quot;https://formula.invalid&quot;)</f>$2'
+        ));
+    },
+    expectedCode: 'STATEMENT_GENERATION_WORKBOOK_CELL_INVALID'
+  });
+  const narrativeHeaders = [...DETAIL_HEADERS, 'Narrative'];
+  const narrativeRecords = [['2026-08-01', 'M001', 'USD', 10, '', '1001']];
+  await rejectCase({
+    name: 'non-special-string-to-numeric',
+    headers: narrativeHeaders,
+    expectedRecords: narrativeRecords,
+    writeInvalid(filePath) {
+      writeDetailArtifact(filePath, [
+        ['2026-08-01', 'M001', 'USD', 10, '', 1001]
+      ], narrativeHeaders);
+    },
+    expectedCode: 'STATEMENT_GENERATION_WORKBOOK_CELL_CONTRACT_MISMATCH'
+  });
+  await rejectCase({
+    name: 'data-font',
+    async writeInvalid(filePath) {
+      writeDetailArtifact(filePath, correctDetailRecords);
+      await rewriteWorkbookEntry(filePath, 'xl/styles.xml', (xml) =>
+        xml.replace(
+          '<font><sz val="11"/><name val="Calibri"/></font>',
+          '<font><sz val="11"/><name val="Arial"/></font>'
+        ));
+    },
+    expectedCode: 'STATEMENT_GENERATION_WORKBOOK_CELL_CONTRACT_MISMATCH'
+  });
+  await rejectCase({
+    name: 'header-bold-color',
+    async writeInvalid(filePath) {
+      writeDetailArtifact(filePath, correctDetailRecords);
+      await rewriteWorkbookEntry(filePath, 'xl/styles.xml', (xml) =>
+        xml.replace(
+          '<font><sz val="10"/><name val="Courier New"/></font>',
+          '<font><b/><color rgb="FFFF0000"/><sz val="10"/><name val="Courier New"/></font>'
+        ));
+    },
+    expectedCode: 'STATEMENT_GENERATION_WORKBOOK_CELL_CONTRACT_MISMATCH'
   });
   await rejectCase({
     name: 'zero-balance-hidden-record',

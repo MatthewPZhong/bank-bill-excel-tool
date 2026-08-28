@@ -34,6 +34,8 @@
 | detail/balance 严格串行，任一缺失即删除全组 staging | legacy helper 的 warning/output 顺序是业务合同；manifest 是 all-or-none | 并行 writer 或返回 partial manifest | 保持 warning/order，partial writer/manual-seed-required 时 Publisher=0 |
 | generation Worker 不持久化 balance seed | Worker 只能写 task-private FilePlan staging，manifest 不承载 seed mutation；manual seed 属 E09-D | Worker 直接改共享 balance-seeds | dormant 路径只生成 workbook；seed settlement 继续由后续独立门禁负责 |
 | Main 对 journal manual-recovery 保留 generation | 既有 Publisher 的 `preserveTemporaryFiles=true` 是人工恢复证据 | finally 无条件删除 generation | 普通成功/失败清 staging，uncertain/manual-recovery 保留证据 |
+| Main descriptor 以 cell-contract digest 绑定 writer 持久化语义 | Round 2 证明业务值 digest 会把非特殊字段的 string/number 归一为同值，且原 style gate 未覆盖 data font 与 header bold/color | 把 raw rows/完整 style XML 放入 descriptor，或校验 XF id/apply flags 等默认噪声 | descriptor 只增加定长 `cellCount/cellsSha256`；逐格绑定 writer 实际 t/z 和有意义 style，仍不携带 raw rows |
+| workbook 公式使用单一 sheet-wide gate | 原实现只在 data record loop 检查 `cell.f`，header 正确缓存值可旁路 | 在每类 header/data validator 分散补检查 | bounded range 确认后统一拒绝所有正式输出 cell 的 formula，再执行业务 readback |
 
 ## Assumptions
 
@@ -67,14 +69,31 @@ Round 1 证明原实现的“Main business validator”只有单 sheet/行数回
 `checkpoint/now/randomUUID` test runtime，不允许 `publisherOptions` 覆盖 Main-owned task/artifact/target/
 validation 参数；余额 0 输出模板占位行必须为空，禁止在自洽 `rowCounts.output=0` 下夹带业务记录。
 
+### Reviewer Round 2 contract closure
+
+Round 2 的两个 finding 均由项目负责 Agent 裁决为真实可达：header 公式可用正确缓存值绕过原
+data-only formula gate；非特殊文本 string→numeric、data font、以及保持 Courier New 10 的
+header bold/color 变化均可保持 manifest/hash/业务值摘要自洽。修复沿既有 frozen spec 的
+“cell type/format/style 摘要证据”收口，不扩充 Worker manifest，也不改变业务值或 writer 输出。
+
+`MainExpectedArtifactDescriptorV1` 新增定长 `cellContractEvidence`，按正式 grid 顺序摘要每个
+header/data cell 的预期 `t/z` 与 legacy writer 真实持久化的 font 语义；header 固定 Courier New 10
+且无额外 bold/color，data 使用 writer 的 Calibri 11 默认语义，balance header 的持久 number
+format 来自受信模板。既有 header/template lineage validator 继续负责 writer 已冻结的 fill/border，
+本轮不把 data alignment/protection、raw XF id、apply flags 或未持久化对象字段升格成新合同。
+金额 cell 复用 writer 的 `buildNumericCellValue`，日期格式复用 normalizer，避免复制金额/日期格式
+分支。现有 spec/techdoc 已明确要求该摘要 readback，因此本轮无需反向改写合同文本，仅在 notes
+记录实现闭环。
+
 除上述合同澄清外无业务偏差；production policy、manual seed 与 live IPC 范围均不变。
 
 ## Evidence
 
 | 证据 | 结果 | 覆盖的行为/风险 |
 | --- | --- | --- |
-| `git merge-base HEAD 654393e9...` / Round 1 rework parent | merge-base `654393e9a24c772f51db9114888a2114382ce39d`；parent `78d9a19777e9680907413194195a00741c6037f2` | 精确 base/堆叠边界 |
-| E09-C 专项 `node --test ...statement-generation-e09-c.test.js ...error-codec.test.js` | 20/20 PASS | 真实 Supervisor/ServiceHost/Worker、临时 XLSX/SQLite、current/all、stale/replay/revision/evidence、四项 Round 1 P1、tamper、all-or-none、四金额、混币余额、0 输出、partial writer、manual prompt、bounded manifest |
+| `git merge-base HEAD 654393e9...` / reviewer rework parents | merge-base `654393e9a24c772f51db9114888a2114382ce39d`；Round 1 parent `78d9a19777e9680907413194195a00741c6037f2`；Round 2 parent `3edd474c15d40c8a1187b60760f9054cb92593df` | 精确 base/堆叠边界 |
+| E09-C 专项 `node --test ...statement-generation-e09-c.test.js ...error-codec.test.js` | 20/20 PASS | 真实 Supervisor/ServiceHost/Worker、临时 XLSX/SQLite、current/all、stale/replay/revision/evidence、Round 1/2 findings、tamper、all-or-none、四金额、混币余额、0 输出、partial writer、manual prompt、bounded manifest |
+| Round 2 自洽 workbook mutations | header/data formula、非特殊 string→numeric、data font、Courier New 10 header bold/color 全部 Publisher=0 | formula、全 grid t/z 与 writer-owned font 摘要 readback；manifest size/hash/rowCounts 均按篡改后文件重算 |
 | E09-P0/A/B + Supervisor/ServiceHost/Governor 聚焦回归 | 228/228 PASS | 既有 token/session/取消/crash/资源生命周期、legacy golden 与 dormant policy 基线 |
 | `node scripts/integration/statement-generation-pipeline.js` | 45/45 PASS | legacy generation pipeline 业务等价 |
 | `npm run test:integration` | 51/51 scripts、2455/2455 PASS | 全仓集成、Publisher/cleanup 与资金相关输出回归；runner 自动清单的本地耗时刷新已回退，不纳入 change |

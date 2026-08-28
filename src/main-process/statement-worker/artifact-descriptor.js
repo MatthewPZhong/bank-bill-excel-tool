@@ -6,7 +6,12 @@ const path = require('node:path');
 const XLSX = require('xlsx');
 
 const { normalizeCell } = require('../../backend/file-service/common');
-const { parseDateValue } = require('../../backend/file-service/normalizers');
+const {
+  inferDateCellFormat,
+  parseDateValue,
+  parseNumericValue
+} = require('../../backend/file-service/normalizers');
+const { buildNumericCellValue } = require('../../backend/file-service/writers');
 const {
   canonicalizeJson,
   canonicalJsonSnapshot
@@ -47,6 +52,15 @@ const BUSINESS_EVIDENCE_KEYS = Object.freeze([
   'currenciesSha256',
   'amountsSha256'
 ]);
+const CELL_CONTRACT_EVIDENCE_KEYS = Object.freeze(['cellCount', 'cellsSha256']);
+const DETAIL_NUMERIC_FIELDS = new Set(['Balance', 'Credit Amount', 'Debit Amount']);
+const DETAIL_DATE_FIELDS = new Set(['BillDate', 'ValueDate']);
+const DETAIL_TEXT_FIELDS = new Set(['MerchantId', 'Channel', 'Currency']);
+const BALANCE_NUMERIC_FIELDS = new Set([
+  '期初余额', '期初可用余额', '期末余额', '期末可用余额'
+]);
+const BALANCE_DATE_FIELDS = new Set(['账单日期']);
+const BALANCE_TEXT_FIELDS = new Set(['银行名称', '所在地', '币种', '银行账号']);
 
 class StatementArtifactDescriptorError extends Error {
   constructor(code, message) {
@@ -251,12 +265,10 @@ function rawSheetXml(workbook) {
   return entry && entry.content ? String(entry.content) : '';
 }
 
-function headerStyleIndexes(workbook) {
+function cellStyleIndexes(workbook) {
   const result = new Map();
   const xml = rawSheetXml(workbook);
-  const row = xml.match(/<row\b[^>]*\br="1"[^>]*>([\s\S]*?)<\/row>/);
-  if (!row) return result;
-  for (const match of row[1].matchAll(/<c\b([^>]*)>/g)) {
+  for (const match of xml.matchAll(/<c\b([^>]*)>/g)) {
     const address = match[1].match(/\br="([^"]+)"/);
     const style = match[1].match(/\bs="(\d+)"/);
     if (address) result.set(address[1], style ? Number(style[1]) : 0);
@@ -287,6 +299,173 @@ function headerFont(workbook, styleIndex) {
   return xf && Array.isArray(styles.Fonts) ? styles.Fonts[xf.fontId] : null;
 }
 
+function normalizedStyleColor(value) {
+  if (!value || typeof value !== 'object') return null;
+  const color = {
+    rgb: typeof value.rgb === 'string' ? value.rgb.toUpperCase() : null,
+    theme: Number.isInteger(Number(value.theme)) ? Number(value.theme) : null,
+    indexed: Number.isInteger(Number(value.indexed)) ? Number(value.indexed) : null,
+    auto: value.auto === true || value.auto === 1 ? true : null,
+    tint: Number.isFinite(Number(value.tint)) ? Number(value.tint) : null
+  };
+  return Object.values(color).some((item) => item !== null) ? color : null;
+}
+
+function normalizedFontStyle(font) {
+  const value = font && typeof font === 'object' ? font : {};
+  const underline = value.underline === true || value.underline === 1
+    ? 'single'
+    : typeof value.underline === 'string' ? value.underline : null;
+  return {
+    name: typeof value.name === 'string' ? value.name : null,
+    size: Number.isFinite(Number(value.sz)) ? Number(value.sz) : null,
+    bold: Boolean(value.bold),
+    italic: Boolean(value.italic),
+    underline,
+    strike: Boolean(value.strike),
+    vertAlign: typeof value.vertAlign === 'string' ? value.vertAlign : null,
+    color: normalizedStyleColor(value.color)
+  };
+}
+
+function meaningfulCellStyle(workbook, styleIndex) {
+  const styles = workbook.Styles || {};
+  const xf = Array.isArray(styles.CellXf) ? styles.CellXf[styleIndex || 0] : null;
+  if (!xf) return null;
+  return {
+    font: normalizedFontStyle(Array.isArray(styles.Fonts) ? styles.Fonts[xf.fontId] : null)
+  };
+}
+
+function expectedWriterCellStyle(header = false) {
+  return {
+    font: {
+      name: header ? 'Courier New' : 'Calibri',
+      size: header ? 10 : 11,
+      bold: false,
+      italic: false,
+      underline: null,
+      strike: false,
+      vertAlign: null,
+      color: null
+    }
+  };
+}
+
+function blankCellContract() {
+  return { type: 'blank', numberFormat: null, style: null };
+}
+
+function primitiveCellContract(value) {
+  if (value === null || value === undefined || value === '') return blankCellContract();
+  let type;
+  if (typeof value === 'string') type = 's';
+  else if (typeof value === 'number' && Number.isFinite(value)) type = 'n';
+  else if (typeof value === 'boolean') type = 'b';
+  else fail('STATEMENT_EXPECTED_ARTIFACT_CELL_CONTRACT_INVALID', 'Expected cell value type is unsupported');
+  return { type, numberFormat: 'General', style: expectedWriterCellStyle(false) };
+}
+
+function expectedDataCellContract(kind, header, value) {
+  if (value === null || value === undefined || value === '') return blankCellContract();
+  const numericFields = kind === 'detail' ? DETAIL_NUMERIC_FIELDS : BALANCE_NUMERIC_FIELDS;
+  const dateFields = kind === 'detail' ? DETAIL_DATE_FIELDS : BALANCE_DATE_FIELDS;
+  const textFields = kind === 'detail' ? DETAIL_TEXT_FIELDS : BALANCE_TEXT_FIELDS;
+  if (numericFields.has(header)) {
+    const cell = buildNumericCellValue(value, parseNumericValue);
+    return cell
+      ? { type: cell.t, numberFormat: cell.z || 'General', style: expectedWriterCellStyle(false) }
+      : primitiveCellContract(value);
+  }
+  if (dateFields.has(header) && parseDateValue(value)) {
+    return {
+      type: 'n',
+      numberFormat: inferDateCellFormat(value),
+      style: expectedWriterCellStyle(false)
+    };
+  }
+  if (textFields.has(header)) {
+    return { type: 's', numberFormat: '@', style: expectedWriterCellStyle(false) };
+  }
+  return primitiveCellContract(value);
+}
+
+function actualCellContract(workbook, styles, address, cell) {
+  if (isBlankCell(cell)) return blankCellContract();
+  return {
+    type: typeof cell.t === 'string' ? cell.t : null,
+    numberFormat: typeof cell.z === 'string' ? cell.z : 'General',
+    style: meaningfulCellStyle(workbook, styles.get(address) || 0)
+  };
+}
+
+function createCellContractAccumulator(kind) {
+  const cells = createFramedHasher(`${kind}:cell-contract:v1`);
+  let cellCount = 0;
+  return {
+    add(contract) {
+      cells.update(contract);
+      cellCount += 1;
+    },
+    finish() {
+      return Object.freeze({ cellCount, cellsSha256: cells.digest() });
+    }
+  };
+}
+
+function createStatementCellContractEvidence(input) {
+  const kind = input && input.kind;
+  const headers = input && input.headers;
+  const records = input && input.records;
+  if (!['detail', 'balance'].includes(kind) || !Array.isArray(headers) || !Array.isArray(records)) {
+    fail('STATEMENT_EXPECTED_ARTIFACT_CELL_CONTRACT_INVALID', 'Expected cell contract input is invalid');
+  }
+  fieldSets(kind, headers);
+  const accumulator = createCellContractAccumulator(kind);
+  let balanceTemplateSheet = null;
+  if (kind === 'balance') {
+    if (typeof input.balanceTemplatePath !== 'string') {
+      fail('STATEMENT_EXPECTED_ARTIFACT_CELL_CONTRACT_INVALID', 'Trusted balance template is required');
+    }
+    const workbook = readWorkbook(input.balanceTemplatePath);
+    balanceTemplateSheet = workbook.Sheets[workbook.SheetNames[0]];
+  }
+  headers.forEach((_header, column) => {
+    const templateCell = balanceTemplateSheet
+      ? balanceTemplateSheet[XLSX.utils.encode_cell({ r: 0, c: column })]
+      : null;
+    accumulator.add({
+      type: 's',
+      numberFormat: templateCell && typeof templateCell.z === 'string' ? templateCell.z : 'General',
+      style: expectedWriterCellStyle(true)
+    });
+  });
+  for (const record of records) {
+    if (!Array.isArray(record) || record.length !== headers.length) {
+      fail('STATEMENT_EXPECTED_ARTIFACT_CELL_CONTRACT_INVALID', 'Expected cell contract row width is invalid');
+    }
+    record.forEach((value, index) => {
+      accumulator.add(expectedDataCellContract(kind, headers[index], value));
+    });
+  }
+  return accumulator.finish();
+}
+
+function createActualCellContractEvidence({ workbook, worksheet, descriptor, styles }) {
+  const accumulator = createCellContractAccumulator(descriptor.kind);
+  for (let column = 0; column < descriptor.headers.length; column += 1) {
+    const address = XLSX.utils.encode_cell({ r: 0, c: column });
+    accumulator.add(actualCellContract(workbook, styles, address, worksheet[address]));
+  }
+  for (let row = 1; row <= descriptor.rowCounts.output; row += 1) {
+    for (let column = 0; column < descriptor.headers.length; column += 1) {
+      const address = XLSX.utils.encode_cell({ r: row, c: column });
+      accumulator.add(actualCellContract(workbook, styles, address, worksheet[address]));
+    }
+  }
+  return accumulator.finish();
+}
+
 function normalizedColumns(columns) {
   return Array.isArray(columns) ? Array.from({ length: columns.length }, (_unused, index) => {
     const column = columns[index];
@@ -306,7 +485,7 @@ function workbookStructure(workbook) {
   const sheet = workbook.Sheets[sheetName];
   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: true, blankrows: false });
   const headers = (rows[0] || []).map((value) => String(value));
-  const styles = headerStyleIndexes(workbook);
+  const styles = cellStyleIndexes(workbook);
   return {
     sheetName,
     headers,
@@ -372,6 +551,16 @@ function validateBusinessEvidence(input) {
   return evidence;
 }
 
+function validateCellContractEvidence(input, headers, outputRows) {
+  const evidence = exact(input, CELL_CONTRACT_EVIDENCE_KEYS, 'cellContractEvidence');
+  const expectedCellCount = headers.length * (outputRows + 1);
+  if (!Number.isSafeInteger(expectedCellCount) || evidence.cellCount !== expectedCellCount ||
+      !SHA256.test(evidence.cellsSha256)) {
+    fail('STATEMENT_EXPECTED_ARTIFACT_CELL_CONTRACT_INVALID', 'Expected cell contract evidence is invalid');
+  }
+  return evidence;
+}
+
 function validateLineage(input, kind) {
   const lineage = exact(input, [
     'writerProfile', 'watermarkAuthor', 'templateSha256', 'templateStructureSha256'
@@ -394,8 +583,8 @@ function createMainExpectedArtifactDescriptor(input) {
   const value = canonicalJsonSnapshot(input, { maxBytes: MAX_DESCRIPTOR_BYTES });
   const descriptor = exact(value, [
     'version', 'artifactKey', 'kind', 'ordinal', 'stagingResourceId', 'sheetName',
-    'headers', 'rowCounts', 'businessEvidence', 'warningSummary', 'sessionRevision',
-    'inputEvidenceHash', 'lineage'
+    'headers', 'rowCounts', 'businessEvidence', 'cellContractEvidence', 'warningSummary',
+    'sessionRevision', 'inputEvidenceHash', 'lineage'
   ], 'MainExpectedArtifactDescriptorV1');
   if (descriptor.version !== 1 || !['detail', 'balance'].includes(descriptor.kind) ||
       !Number.isSafeInteger(descriptor.ordinal) || descriptor.ordinal < 0 || descriptor.ordinal > 1) {
@@ -424,6 +613,7 @@ function createMainExpectedArtifactDescriptor(input) {
   if (evidence.recordCount !== rowCounts.output) {
     fail('STATEMENT_EXPECTED_ARTIFACT_ROW_COUNTS_INVALID', 'Expected record count is inconsistent');
   }
+  validateCellContractEvidence(descriptor.cellContractEvidence, descriptor.headers, rowCounts.output);
   const warningSummary = exact(
     descriptor.warningSummary,
     ['count', 'byType', 'manualBalanceRequired'],
@@ -493,6 +683,14 @@ function validateWorksheetBounds(worksheet, range, descriptor) {
       if (!isBlankCell(cell) || (cell && typeof cell.f === 'string')) {
         fail('STATEMENT_GENERATION_ROW_COUNTS_MISMATCH', 'Zero-output balance workbook contains a business row');
       }
+    }
+  }
+}
+
+function validateNoWorksheetFormulas(worksheet) {
+  for (const [address, cell] of Object.entries(worksheet)) {
+    if (/^[A-Z]{1,3}[1-9][0-9]*$/.test(address) && cell && typeof cell.f === 'string') {
+      fail('STATEMENT_GENERATION_WORKBOOK_CELL_INVALID', 'Statement output cells must not contain formulas');
     }
   }
 }
@@ -567,11 +765,6 @@ function validateAmountCell(cell, required, allowNegative, label) {
 
 function validateRecordCells(kind, headers, cells) {
   const index = new Map(headers.map((header, column) => [header, column]));
-  for (const cell of cells) {
-    if (cell && typeof cell.f === 'string') {
-      fail('STATEMENT_GENERATION_WORKBOOK_CELL_INVALID', 'Statement data cells must not contain formulas');
-    }
-  }
   if (kind === 'detail') {
     for (const header of headers.filter((item) => ['BillDate', 'ValueDate'].includes(item))) {
       validateDateCell(cells[index.get(header)], header === 'BillDate', header);
@@ -601,6 +794,15 @@ function validateRecordCells(kind, headers, cells) {
 function assertEvidenceMatches(actual, expected) {
   if (BUSINESS_EVIDENCE_KEYS.some((key) => actual[key] !== expected[key])) {
     fail('STATEMENT_GENERATION_BUSINESS_EVIDENCE_MISMATCH', 'Statement workbook business evidence mismatch');
+  }
+}
+
+function assertCellContractEvidenceMatches(actual, expected) {
+  if (CELL_CONTRACT_EVIDENCE_KEYS.some((key) => actual[key] !== expected[key])) {
+    fail(
+      'STATEMENT_GENERATION_WORKBOOK_CELL_CONTRACT_MISMATCH',
+      'Statement workbook cell type/format/style evidence mismatch'
+    );
   }
 }
 
@@ -644,6 +846,7 @@ function validateStatementArtifactWorkbook(options) {
     );
   }
   validateWorksheetBounds(worksheet, range, descriptor);
+  validateNoWorksheetFormulas(worksheet);
   const actualHeaders = descriptor.headers.map((_header, column) => {
     const cell = worksheet[XLSX.utils.encode_cell({ r: 0, c: column })];
     if (!cell || cell.t !== 's') return null;
@@ -655,7 +858,7 @@ function validateStatementArtifactWorkbook(options) {
   if (!workbook.Props || workbook.Props.LastAuthor !== descriptor.lineage.watermarkAuthor) {
     fail('STATEMENT_GENERATION_WORKBOOK_WATERMARK_INVALID', 'Statement workbook watermark is invalid');
   }
-  const styles = headerStyleIndexes(workbook);
+  const styles = cellStyleIndexes(workbook);
   validateHeaderFont(workbook, styles, descriptor.headers);
   if (descriptor.kind === 'detail') {
     validateDetailHeaderStyles(workbook, styles, descriptor.headers);
@@ -675,7 +878,14 @@ function validateStatementArtifactWorkbook(options) {
   }
   const evidence = accumulator.finish();
   assertEvidenceMatches(evidence, descriptor.businessEvidence);
-  return Object.freeze({ evidence });
+  const cellContractEvidence = createActualCellContractEvidence({
+    workbook,
+    worksheet,
+    descriptor,
+    styles
+  });
+  assertCellContractEvidenceMatches(cellContractEvidence, descriptor.cellContractEvidence);
+  return Object.freeze({ evidence, cellContractEvidence });
 }
 
 module.exports = {
@@ -687,6 +897,7 @@ module.exports = {
   createMainExpectedArtifactDescriptors,
   createStatementArtifactLineage,
   createStatementBusinessEvidence,
+  createStatementCellContractEvidence,
   fileSha256,
   validateStatementArtifactWorkbook,
   workbookStructure
