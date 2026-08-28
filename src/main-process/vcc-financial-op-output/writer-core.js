@@ -14,6 +14,10 @@ const {
   VCC_EXPORT_SUBJECTS_ACTION,
   VCC_EXPORT_SUBJECTS_MAX_ARTIFACTS
 } = require('./policies');
+const {
+  assertTaskStagingIdentity,
+  normalizeTaskStagingIdentity
+} = require('./staging-identity');
 
 function writerError(code, message) {
   const error = new Error(message);
@@ -30,7 +34,8 @@ function exactKeys(value, expected, label) {
 
 function normalizeWriterInput(value, actionKey) {
   exactKeys(value, [
-    'assetsDir', 'authority', 'contractVersion', 'databasePath', 'generations', 'task'
+    'assetsDir', 'authority', 'contractVersion', 'databasePath', 'generations',
+    'stagingIdentity', 'task'
   ], 'writer input');
   if (value.contractVersion !== 1 || typeof value.databasePath !== 'string' ||
       typeof value.assetsDir !== 'string') {
@@ -55,6 +60,12 @@ function normalizeWriterInput(value, actionKey) {
   }
   const keys = new Set();
   const paths = new Set();
+  let stagingIdentity;
+  try {
+    stagingIdentity = normalizeTaskStagingIdentity(value.stagingIdentity);
+  } catch (_error) {
+    throw writerError('VCC_EXPORT_WRITER_INPUT_INVALID', 'writer staging identity 非法');
+  }
   const generations = value.generations.map((item, index) => {
     exactKeys(item, ['generationPath', 'outputArtifactKey', 'subjectIndex'], `generations[${index}]`);
     if (!Number.isSafeInteger(item.subjectIndex) || item.subjectIndex < 0 ||
@@ -77,7 +88,8 @@ function normalizeWriterInput(value, actionKey) {
     authority: value.authority,
     task: Object.freeze({ ...value.task }),
     actionKey,
-    generations: Object.freeze(generations)
+    generations: Object.freeze(generations),
+    stagingIdentity
   });
 }
 
@@ -106,8 +118,15 @@ async function hashRegularFile(filePath) {
 
 async function executeVccExportWriter(rawInput, signal, actionKey = VCC_EXPORT_SUBJECTS_ACTION) {
   const input = normalizeWriterInput(rawInput, actionKey);
-  const db = openVccReadDatabase(input.databasePath);
   const generationPaths = input.generations.map((item) => item.generationPath);
+  const assertStaging = (stage, transientPaths = []) => assertTaskStagingIdentity({
+    identity: input.stagingIdentity,
+    generationPaths,
+    transientPaths,
+    stage
+  });
+  assertStaging('worker-entry');
+  const db = openVccReadDatabase(input.databasePath);
   let transactionOpen = false;
   try {
     throwIfCancelled(signal);
@@ -124,8 +143,14 @@ async function executeVccExportWriter(rawInput, signal, actionKey = VCC_EXPORT_S
       outputPaths: generationPaths,
       assetsDir: input.assetsDir,
       abortSignal: signal,
-      cleanupOnFailure: true,
-      subjectIndexes: input.generations.map((item) => item.subjectIndex)
+      cleanupOnFailure: false,
+      subjectIndexes: input.generations.map((item) => item.subjectIndex),
+      beforeSubjectWrite: ({ subjectIndex }) => {
+        assertStaging(`subject-${subjectIndex}-before-write`);
+      },
+      beforeAtomicHandoff: ({ subjectIndex, stagedPath }) => {
+        assertStaging(`subject-${subjectIndex}-before-atomic-handoff`, [stagedPath]);
+      }
     });
     const expectedSubjects = input.generations.map((item) => start.data.subjects[item.subjectIndex]);
     if (JSON.stringify(written.subjects) !== JSON.stringify(expectedSubjects) ||
@@ -173,9 +198,6 @@ async function executeVccExportWriter(rawInput, signal, actionKey = VCC_EXPORT_S
   } catch (error) {
     if (transactionOpen) {
       try { db.exec('ROLLBACK'); } catch (_rollbackError) { /* close below */ }
-    }
-    for (const filePath of generationPaths) {
-      try { fs.rmSync(filePath, { force: true }); } catch (_cleanupError) { /* Main owns directory */ }
     }
     throw error;
   } finally {

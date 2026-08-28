@@ -51,6 +51,12 @@ const {
   executeVccExportWriter
 } = require('../../../src/main-process/vcc-financial-op-output/writer-core');
 const {
+  createTaskStagingIdentity
+} = require('../../../src/main-process/vcc-financial-op-output/staging-identity');
+const {
+  toProtocolError
+} = require('../../../src/main-process/background-execution/error-codec');
+const {
   pendingSheetProjection
 } = require('../../../src/main-process/vcc-financial-op-output/artifact-evidence');
 const {
@@ -536,7 +542,8 @@ test('export-subjects topology 固定一个 Writer，result DTO 有界且不含�
       contractVersion: generation.contractVersion,
       authority: generation.authority,
       task: generation.task,
-      generations: generation.generations
+      generations: generation.generations,
+      stagingIdentity: generation.stagingIdentity
     }
   });
   await control.ready;
@@ -877,6 +884,121 @@ test('Publisher 人工恢复 preserve 保留全部 task-private 文件并合并�
   assert.ok(caught.recoveryPaths.length <= 100);
 });
 
+test('Publisher committed 后 generation/task-dir cleanup 失败保留成功并返回有界 pending evidence', async (t) => {
+  for (const fixture of [
+    { label: 'generation rm EBUSY', method: 'rmSync', code: 'EBUSY' },
+    { label: 'generation rm EPERM', method: 'rmSync', code: 'EPERM' },
+    { label: 'task dir rmdir EPERM', method: 'rmdirSync', code: 'EPERM' }
+  ]) {
+    await t.test(fixture.label, async (subtest) => {
+      const harness = setup(subtest, ['PPHK']);
+      const suffix = `committed-cleanup-${fixture.method}-${fixture.code}`;
+      const plan = filePlan(harness.root, 1, suffix);
+      const stagingDirectory = path.join(harness.root, `staging-${suffix}`);
+      fs.mkdirSync(stagingDirectory);
+      const batch = batchContext(suffix);
+      let capturedInput = null;
+      let publisherCalls = 0;
+      const original = fs[fixture.method];
+      fs[fixture.method] = function patchedCleanup(filePath, options) {
+        const candidate = path.resolve(String(filePath));
+        const taskRoot = capturedInput && capturedInput.stagingIdentity.resolvedPath;
+        const generationPath = capturedInput && capturedInput.generations[0].generationPath;
+        const shouldFail = fixture.method === 'rmSync'
+          ? candidate === generationPath
+          : taskRoot && candidate === taskRoot;
+        if (shouldFail) {
+          const error = new Error(`fixture ${fixture.code}`);
+          error.code = fixture.code;
+          throw error;
+        }
+        return original.call(this, filePath, options);
+      };
+      let result;
+      try {
+        result = await generateValidateAndPublishVccExport({
+          actionKey: VCC_EXPORT_SINGLE_ACTION,
+          runtime: {
+            async execute(request) {
+              capturedInput = request.input;
+              return harness.runtime.execute(request);
+            }
+          },
+          expectedAuthority: harness.snapshot.authority,
+          readCurrentSnapshot: async () => harness.snapshot,
+          readCurrentTaskAuthority: async () => ({
+            action: 'export-result', taskGeneration: 0, taskRunId: batch.taskRunId
+          }),
+          selectedSubjectIndexes: [0],
+          filePlan: plan,
+          stagingDirectory,
+          assetsDir: ASSETS_DIR,
+          batchContext: batch,
+          publishPublication: async (payload) => {
+            publisherCalls += 1;
+            fs.copyFileSync(payload.artifacts[0].sourcePath, payload.targets[0].targetPath);
+            return Object.freeze({ taskId: payload.taskId, committed: true });
+          },
+          settleManifestArtifacts: async () => {}
+        });
+      } finally {
+        fs[fixture.method] = original;
+      }
+      assert.equal(publisherCalls, 1);
+      assert.equal(result.publication.committed, true);
+      assert.equal(fs.existsSync(plan.outputs[0].filePath), true);
+      fs.unlinkSync(plan.outputs[0].filePath);
+      assert.deepEqual(Object.keys(result.publication.generationCleanup).sort(), [
+        'contractVersion', 'diagnosticCodes', 'preserveTemporaryFiles', 'recoveryPaths',
+        'status', 'taskRootIdentityDigest'
+      ]);
+      assert.equal(result.publication.generationCleanup.status, 'pending');
+      assert.equal(result.publication.generationCleanup.preserveTemporaryFiles, true);
+      assert.deepEqual(result.publication.generationCleanup.diagnosticCodes, [fixture.code]);
+      assert.equal(
+        result.publication.generationCleanup.taskRootIdentityDigest,
+        capturedInput.stagingIdentity.identityDigest
+      );
+      const expectedRecoveryPath = fixture.method === 'rmSync'
+        ? capturedInput.generations[0].generationPath
+        : capturedInput.stagingIdentity.resolvedPath;
+      assert.deepEqual(result.publication.generationCleanup.recoveryPaths, [expectedRecoveryPath]);
+      assert.equal(fs.existsSync(expectedRecoveryPath), true);
+
+      let retryWorkerCalls = 0;
+      await assert.rejects(generateValidateAndPublishVccExport({
+        actionKey: VCC_EXPORT_SINGLE_ACTION,
+        runtime: { async execute() { retryWorkerCalls += 1; } },
+        expectedAuthority: harness.snapshot.authority,
+        readCurrentSnapshot: async () => harness.snapshot,
+        readCurrentTaskAuthority: async () => ({
+          action: 'export-result', taskGeneration: 0, taskRunId: batch.taskRunId
+        }),
+        selectedSubjectIndexes: [0],
+        filePlan: plan,
+        stagingDirectory,
+        assetsDir: ASSETS_DIR,
+        batchContext: batch,
+        publishPublication: async () => { publisherCalls += 1; }
+      }), (error) => error.code === 'VCC_EXPORT_STAGING_COLLISION');
+      assert.equal(retryWorkerCalls, 0);
+      assert.equal(publisherCalls, 1);
+
+      const recoveryError = new Error('existing cleanup owner retry');
+      const recovered = cleanupGenerationArtifacts(
+        capturedInput.generations,
+        recoveryError,
+        capturedInput.stagingIdentity.resolvedPath,
+        capturedInput.stagingIdentity.realPath,
+        capturedInput.stagingIdentity
+      );
+      assert.equal(recovered.status, 'complete');
+      assert.deepEqual(recovered.recoveryPaths, []);
+      assert.equal(fs.existsSync(capturedInput.stagingIdentity.resolvedPath), false);
+    });
+  }
+});
+
 test('Worker failure/cancel 及 transport crash 都保持 Publisher=0 并清理 task-private artifacts', async (t) => {
   const harness = setup(t);
   const directStaging = path.join(harness.root, 'direct-cancel');
@@ -890,6 +1012,10 @@ test('Worker failure/cancel 及 transport crash 都保持 Publisher=0 并清理 
     assetsDir: ASSETS_DIR,
     authority: harness.snapshot.authority,
     task: { action: 'export-result', taskGeneration: 0, taskRunId: 'cancel-task' },
+    stagingIdentity: createTaskStagingIdentity({
+      resolvedPath: directStaging,
+      realPath: fs.realpathSync(directStaging)
+    }),
     generations: [{
       subjectIndex: 0,
       outputArtifactKey: `output-${'d'.repeat(64)}`,
@@ -1221,6 +1347,221 @@ test('runtime 后 exact task dir 被换成 reparse 时 cleanup fail closed 且�
   assert.equal(caught.preserveTemporaryFiles, undefined);
   assert.equal(fs.readFileSync(outsideGenerationPath, 'utf8'), 'external-evidence');
   assert.equal(publisherCalls, 0);
+});
+
+test('Main create 后 Worker 开始前 task-root replacement fail closed、Publisher=0 且不触碰外部文件', async (t) => {
+  const harness = setup(t, ['PPHK']);
+  const stagingDirectory = path.join(harness.root, 'identity-before-worker');
+  const outsideDirectory = path.join(harness.root, 'identity-before-worker-outside');
+  fs.mkdirSync(stagingDirectory);
+  fs.mkdirSync(outsideDirectory);
+  const plan = filePlan(harness.root, 1, 'identity-before-worker');
+  const batch = batchContext('identity-before-worker');
+  const directoryLinkType = process.platform === 'win32' ? 'junction' : 'dir';
+  let capturedInput = null;
+  let taskBackup = null;
+  let outsideGenerationPath = null;
+  let publisherCalls = 0;
+  let caught = null;
+  try {
+    await generateValidateAndPublishVccExport({
+      actionKey: VCC_EXPORT_SINGLE_ACTION,
+      runtime: {
+        async execute(request) {
+          capturedInput = request.input;
+          const taskRoot = request.input.stagingIdentity.resolvedPath;
+          taskBackup = `${taskRoot}.original`;
+          fs.renameSync(taskRoot, taskBackup);
+          fs.symlinkSync(outsideDirectory, taskRoot, directoryLinkType);
+          outsideGenerationPath = path.join(
+            outsideDirectory,
+            path.basename(request.input.generations[0].generationPath)
+          );
+          fs.writeFileSync(outsideGenerationPath, 'outside-must-survive');
+          try {
+            const result = await executeVccExportWriter({
+              ...request.input,
+              databasePath: harness.dbPath,
+              assetsDir: ASSETS_DIR
+            }, null, VCC_EXPORT_SINGLE_ACTION);
+            return { outcome: 'completed', terminalSource: 'job:done', result };
+          } catch (error) {
+            return {
+              outcome: 'failed',
+              terminalSource: 'job:error',
+              error: toProtocolError(error)
+            };
+          }
+        }
+      },
+      expectedAuthority: harness.snapshot.authority,
+      readCurrentSnapshot: async () => harness.snapshot,
+      readCurrentTaskAuthority: async () => ({
+        action: 'export-result', taskGeneration: 0, taskRunId: batch.taskRunId
+      }),
+      selectedSubjectIndexes: [0],
+      filePlan: plan,
+      stagingDirectory,
+      assetsDir: ASSETS_DIR,
+      batchContext: batch,
+      publishPublication: async () => { publisherCalls += 1; }
+    });
+  } catch (error) {
+    caught = error;
+  }
+  assert.ok(caught);
+  assert.equal(caught.code, 'VCC_EXPORT_STAGING_IDENTITY_CHANGED');
+  assert.equal(caught.stage, 'worker-entry');
+  assert.match(caught.detailLines.join('\n'), new RegExp(
+    capturedInput.stagingIdentity.identityDigest
+  ));
+  assert.equal(fs.readFileSync(outsideGenerationPath, 'utf8'), 'outside-must-survive');
+  assert.equal(fs.existsSync(plan.outputs[0].filePath), false);
+  assert.equal(publisherCalls, 0);
+
+  fs.unlinkSync(capturedInput.stagingIdentity.resolvedPath);
+  fs.renameSync(taskBackup, capturedInput.stagingIdentity.resolvedPath);
+  const recovered = cleanupGenerationArtifacts(
+    capturedInput.generations,
+    new Error('identity recovery owner'),
+    capturedInput.stagingIdentity.resolvedPath,
+    capturedInput.stagingIdentity.realPath,
+    capturedInput.stagingIdentity
+  );
+  assert.equal(recovered.status, 'complete');
+});
+
+test('atomic handoff 前 task-root replacement fail closed、Publisher=0 且不删除外部同名 tmp', async (t) => {
+  const harness = setup(t, ['PPHK']);
+  const stagingDirectory = path.join(harness.root, 'identity-before-finalize');
+  const outsideDirectory = path.join(harness.root, 'identity-before-finalize-outside');
+  fs.mkdirSync(stagingDirectory);
+  fs.mkdirSync(outsideDirectory);
+  const plan = filePlan(harness.root, 1, 'identity-before-finalize');
+  const batch = batchContext('identity-before-finalize');
+  const directoryLinkType = process.platform === 'win32' ? 'junction' : 'dir';
+  let capturedInput = null;
+  let taskBackup = null;
+  let outsideAtomicPath = null;
+  let replaced = false;
+  let publisherCalls = 0;
+  let caught = null;
+  try {
+    await generateValidateAndPublishVccExport({
+      actionKey: VCC_EXPORT_SINGLE_ACTION,
+      runtime: {
+        async execute(request) {
+          capturedInput = request.input;
+          const taskRoot = request.input.stagingIdentity.resolvedPath;
+          const parentRoot = request.input.stagingIdentity.parentResolvedPath;
+          const originalRealpathSync = fs.realpathSync;
+          fs.realpathSync = function patchedRealpathSync(filePath, options) {
+            if (!replaced && path.resolve(String(filePath)) === parentRoot &&
+                fs.existsSync(taskRoot) && !fs.lstatSync(taskRoot).isSymbolicLink()) {
+              const atomicName = fs.readdirSync(taskRoot).find((name) => (
+                /\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp$/.test(name)
+              ));
+              if (atomicName) {
+                taskBackup = `${taskRoot}.original`;
+                fs.renameSync(taskRoot, taskBackup);
+                fs.symlinkSync(outsideDirectory, taskRoot, directoryLinkType);
+                outsideAtomicPath = path.join(outsideDirectory, atomicName);
+                fs.writeFileSync(outsideAtomicPath, 'outside-atomic-must-survive');
+                replaced = true;
+              }
+            }
+            return originalRealpathSync.call(this, filePath, options);
+          };
+          try {
+            const result = await executeVccExportWriter({
+              ...request.input,
+              databasePath: harness.dbPath,
+              assetsDir: ASSETS_DIR
+            }, null, VCC_EXPORT_SINGLE_ACTION);
+            return { outcome: 'completed', terminalSource: 'job:done', result };
+          } catch (error) {
+            return {
+              outcome: 'failed',
+              terminalSource: 'job:error',
+              error: toProtocolError(error)
+            };
+          } finally {
+            fs.realpathSync = originalRealpathSync;
+          }
+        }
+      },
+      expectedAuthority: harness.snapshot.authority,
+      readCurrentSnapshot: async () => harness.snapshot,
+      readCurrentTaskAuthority: async () => ({
+        action: 'export-result', taskGeneration: 0, taskRunId: batch.taskRunId
+      }),
+      selectedSubjectIndexes: [0],
+      filePlan: plan,
+      stagingDirectory,
+      assetsDir: ASSETS_DIR,
+      batchContext: batch,
+      publishPublication: async () => { publisherCalls += 1; }
+    });
+  } catch (error) {
+    caught = error;
+  }
+  assert.equal(replaced, true);
+  assert.ok(caught);
+  assert.equal(caught.code, 'VCC_EXPORT_STAGING_IDENTITY_CHANGED');
+  assert.match(caught.stage, /before-atomic-handoff$/);
+  assert.match(caught.detailLines.join('\n'), new RegExp(
+    capturedInput.stagingIdentity.identityDigest
+  ));
+  assert.equal(fs.readFileSync(outsideAtomicPath, 'utf8'), 'outside-atomic-must-survive');
+  assert.equal(
+    fs.readdirSync(taskBackup).some((name) => name.endsWith('.tmp')),
+    true,
+    '原 task root 中的真实 staged evidence 必须保留'
+  );
+  assert.equal(fs.existsSync(plan.outputs[0].filePath), false);
+  assert.equal(publisherCalls, 0);
+
+  fs.unlinkSync(capturedInput.stagingIdentity.resolvedPath);
+  fs.renameSync(taskBackup, capturedInput.stagingIdentity.resolvedPath);
+  const recovered = cleanupGenerationArtifacts(
+    capturedInput.generations,
+    new Error('identity recovery owner'),
+    capturedInput.stagingIdentity.resolvedPath,
+    capturedInput.stagingIdentity.realPath,
+    capturedInput.stagingIdentity
+  );
+  assert.equal(recovered.status, 'complete');
+});
+
+test('冻结 task-root identity 支持普通 Windows-compatible Unicode/space 路径且成功零残留', async (t) => {
+  const harness = setup(t, ['PPHK']);
+  const stagingDirectory = path.join(harness.root, 'Windows compatible 路径 01');
+  fs.mkdirSync(stagingDirectory);
+  const plan = filePlan(harness.root, 1, 'windows-compatible-identity');
+  const batch = batchContext('windows-compatible-identity');
+  const result = await generateValidateAndPublishVccExport({
+    actionKey: VCC_EXPORT_SINGLE_ACTION,
+    runtime: harness.runtime,
+    expectedAuthority: harness.snapshot.authority,
+    readCurrentSnapshot: async () => harness.snapshot,
+    readCurrentTaskAuthority: async () => ({
+      action: 'export-result', taskGeneration: 0, taskRunId: batch.taskRunId
+    }),
+    selectedSubjectIndexes: [0],
+    filePlan: plan,
+    stagingDirectory,
+    assetsDir: ASSETS_DIR,
+    batchContext: batch,
+    publishPublication: async (payload) => Object.freeze({
+      taskId: payload.taskId,
+      committed: true
+    }),
+    settleManifestArtifacts: async () => {}
+  });
+  assert.equal(result.publication.generationCleanup.status, 'complete');
+  assert.equal(result.publication.generationCleanup.preserveTemporaryFiles, false);
+  assert.deepEqual(result.publication.generationCleanup.recoveryPaths, []);
+  assert.deepEqual(fs.readdirSync(stagingDirectory), []);
 });
 
 test('普通 pre-Publisher cleanup 部分失败只上报 exact task-private 已知残留并阻断碰撞重试', async (t) => {

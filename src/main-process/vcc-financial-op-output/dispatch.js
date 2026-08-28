@@ -17,6 +17,9 @@ const {
   assertVccExportAuthorityEqual
 } = require('./authority');
 const {
+  createTaskStagingIdentity
+} = require('./staging-identity');
+const {
   loadValidationContext,
   validateVccSubjectArtifact
 } = require('./artifact-evidence');
@@ -133,7 +136,37 @@ function publishCleanupRecovery(error, candidates, stagingRoot, options = {}) {
   return recoveryPaths;
 }
 
-function cleanupGenerationArtifacts(generations, error, stagingRoot, expectedRealStagingRoot) {
+function generationCleanupEvidence(error, failures, identityDigest = null) {
+  const recoveryPaths = Array.isArray(error && error.recoveryPaths)
+    ? error.recoveryPaths.slice(0, VCC_EXPORT_RECOVERY_PATH_LIMIT)
+    : [];
+  const diagnosticCodes = [];
+  for (const failure of failures) {
+    const code = failure && typeof failure.code === 'string' && /^[A-Z0-9_]+$/.test(failure.code)
+      ? failure.code
+      : 'UNKNOWN';
+    if (!diagnosticCodes.includes(code)) diagnosticCodes.push(code);
+    if (diagnosticCodes.length >= VCC_EXPORT_CLEANUP_DIAGNOSTIC_LIMIT) break;
+  }
+  return Object.freeze({
+    contractVersion: 1,
+    status: failures.length > 0 || recoveryPaths.length > 0 ? 'pending' : 'complete',
+    preserveTemporaryFiles: recoveryPaths.length > 0,
+    recoveryPaths: Object.freeze(recoveryPaths),
+    diagnosticCodes: Object.freeze(diagnosticCodes),
+    taskRootIdentityDigest: typeof identityDigest === 'string' && /^[a-f0-9]{64}$/.test(identityDigest)
+      ? identityDigest
+      : null
+  });
+}
+
+function cleanupGenerationArtifacts(
+  generations,
+  error,
+  stagingRoot,
+  expectedRealStagingRoot,
+  stagingIdentity = null
+) {
   const cleanupPaths = new Set();
   const failures = [];
   const patternsByDirectory = new Map();
@@ -151,7 +184,7 @@ function cleanupGenerationArtifacts(generations, error, stagingRoot, expectedRea
   } catch (identityError) {
     failures.push(identityError);
     appendCleanupDiagnostics(error, failures);
-    return;
+    return generationCleanupEvidence(error, failures, stagingIdentity && stagingIdentity.identityDigest);
   }
   for (const item of generations) {
     const generationPath = item.generationPath;
@@ -196,7 +229,7 @@ function cleanupGenerationArtifacts(generations, error, stagingRoot, expectedRea
   if (scanFailed) {
     appendCleanupDiagnostics(error, failures);
     publishCleanupRecovery(error, [stagingRoot], stagingRoot, { allowTaskDirectory: true });
-    return;
+    return generationCleanupEvidence(error, failures, stagingIdentity && stagingIdentity.identityDigest);
   }
   const knownResiduals = publishCleanupRecovery(error, cleanupPaths, stagingRoot);
   if (knownResiduals.length === 0) {
@@ -210,6 +243,7 @@ function cleanupGenerationArtifacts(generations, error, stagingRoot, expectedRea
     }
   }
   appendCleanupDiagnostics(error, failures);
+  return generationCleanupEvidence(error, failures, stagingIdentity && stagingIdentity.identityDigest);
 }
 
 function freezeTaskAuthority(value, batchContext) {
@@ -380,13 +414,10 @@ function prepareTaskStagingDirectory(parent, directoryName) {
     throw dispatchError('VCC_EXPORT_STAGING_ESCAPE', 'VCC task-private staging symlink/reparse 越界');
   }
   if (!created) {
-    let entries;
-    try { entries = fs.readdirSync(taskDirectory); } catch (_error) {
-      throw dispatchError('VCC_EXPORT_STAGING_COLLISION', 'VCC task-private staging 无法确认为空');
-    }
-    if (entries.length > 0) {
-      throw dispatchError('VCC_EXPORT_STAGING_COLLISION', 'VCC task-private staging 已被占用');
-    }
+    throw dispatchError(
+      'VCC_EXPORT_STAGING_COLLISION',
+      'VCC task-private staging 已存在，必须先由原 cleanup/recovery owner 收口'
+    );
   }
   return Object.freeze({ resolved: taskDirectory, real });
 }
@@ -445,6 +476,10 @@ function createGenerationInput({
     });
   });
   const taskDirectory = prepareTaskStagingDirectory(parent, path.basename(stagingRoot));
+  const stagingIdentity = createTaskStagingIdentity({
+    resolvedPath: taskDirectory.resolved,
+    realPath: taskDirectory.real
+  });
   const generations = generationDescriptors.map((descriptor) => {
     if (fs.existsSync(descriptor.generationPath)) {
       throw dispatchError('VCC_EXPORT_STAGING_COLLISION', 'VCC generation path 已被占用');
@@ -459,7 +494,8 @@ function createGenerationInput({
     actionKey,
     filePlan: plan,
     stagingRoot,
-    stagingRootReal: taskDirectory.real
+    stagingRootReal: taskDirectory.real,
+    stagingIdentity
   });
 }
 
@@ -601,7 +637,8 @@ async function generateValidateAndPublishVccExport(options = {}) {
         contractVersion: generation.contractVersion,
         authority: generation.authority,
         task: generation.task,
-        generations: generation.generations
+        generations: generation.generations,
+        stagingIdentity: generation.stagingIdentity
       }
     });
     if (!execution || execution.outcome !== 'completed' || execution.terminalSource !== 'job:done') {
@@ -641,8 +678,16 @@ async function generateValidateAndPublishVccExport(options = {}) {
       recoverIntoArchive: options.recoverIntoArchive,
       userDataDir: options.userDataDir,
       archiveCenter: options.archiveCenter,
-      settleManifestArtifacts: options.settleManifestArtifacts
+      settleManifestArtifacts: options.settleManifestArtifacts,
+      deferGenerationCleanup: true
     });
+    const generationCleanup = cleanupGenerationArtifacts(
+      generation.generations,
+      {},
+      generation.stagingRoot,
+      generation.stagingRootReal,
+      generation.stagingIdentity
+    );
     return Object.freeze({
       actionKey: options.actionKey,
       runId: snapshotA.authority.runId,
@@ -660,10 +705,11 @@ async function generateValidateAndPublishVccExport(options = {}) {
         byteSize: artifact.byteSize,
         sha256: artifact.sha256
       }))),
-      publication
+      publication: Object.freeze({ ...publication, generationCleanup })
     });
   } catch (error) {
-    if (error && error.preserveTemporaryFiles === true) {
+    if (error && error.preserveTemporaryFiles === true &&
+        error.code !== 'VCC_EXPORT_STAGING_IDENTITY_CHANGED') {
       mergeRecoveryPaths(
         error,
         generation.generations.map((item) => item.generationPath)
@@ -673,7 +719,8 @@ async function generateValidateAndPublishVccExport(options = {}) {
         generation.generations,
         error,
         generation.stagingRoot,
-        generation.stagingRootReal
+        generation.stagingRootReal,
+        generation.stagingIdentity
       );
     }
     throw error;

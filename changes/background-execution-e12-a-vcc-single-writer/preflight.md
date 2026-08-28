@@ -5,7 +5,7 @@
 - Goal：将 VCC Financial OP 现有按主体顺序导出迁入 one-shot 单 Writer 新合同；同一 core 覆盖 `vcc-financial-op:export-subjects` 全主体输出和 `vcc-financial-op:export-single` exact-one subject specialization，Main Join 复核完整集合后只调用一次既有 Publisher。
 - Context：本次 restack 的精确 parent 为已审查 E11-C `771572ff3b7b4f623eafd2a8c44c34038f2a6b98`；现有 live `vccFinancialOp:export:result` 在 VCC Service `activeTask` 内由 Main 进程调用 `writeRunWorkbooks`，然后一次 `publishVccFinancialOpOutputs`。
 - Constraints：仅 E12-A 单 Writer；不做 subject SQL filter pushdown、第二 Writer/shard 或 15% benchmark；不接 live IPC/Renderer/Preload，不开启 production；不改金额、币种、差异、revision、archive 语义；复用现有 workbook writer、FilePlan 和 durable journal Publisher。
-- Done when：`production.enabled=false` 的 dormant capability 与 canonical policy 精确一致；一个 Writer 按 `subjectIndex` 顺序生成全部主体；Main 对 task/run/month/revision/fingerprint/archive/FilePlan/path/size/hash/业务 workbook 做 A/B authority 复核；任一 generation/Join/cancel/crash 失败 Publisher=0，全部成功后 Publisher=1；协议 DTO 有界且不携带 raw finance rows；shutdown/cleanup 与 legacy golden 回归通过。
+- Done when：`production.enabled=false` 的 dormant capability 与 canonical policy 精确一致；一个 Writer 按 `subjectIndex` 顺序生成全部主体；Main 对 task/run/month/revision/fingerprint/archive/FilePlan/path/size/hash/业务 workbook 做 A/B authority 复核；Main 冻结 task-root identity，Worker 入口/逐主体/atomic handoff 复核；任一 generation/Join/cancel/crash 失败 Publisher=0，全部成功后 Publisher=1；committed 后 cleanup pending 只形成有界恢复证据且不改写正式成功；协议 DTO 有界且不携带 raw finance rows；shutdown/cleanup 与 legacy golden 回归通过。
 
 ## 已确认事实
 
@@ -26,7 +26,7 @@
 | `thread-pool` 如何在 E12-A 保证只有一个 Writer。 | topology 未知 | 高 | 容易 | Supervisor 从 topology registry + CompoundLease 取 `effectiveChildCount`，但 native adapter 仍是一个 transport。 | PROBE | runtime topology snapshot + real Worker 实例计数 | topology planner 在 E12-A 恒返回 1，一个 one-shot Worker 处理全部 subjects。 |
 | Worker 不收 raw rows 时如何保证业务等价。 | 合同未知 | 高 | 一般 | Worker 可 read-only 打开 DB；现有 writer core 可直接从 DB 构造 plan。 | PROBE | authority digest + 真 workbook 回读 golden | Main 仅传 bounded run/subject/path authority；Worker 自读 DB；Main Join 用同一读取器重建期望 plan 并深度回读 workbook。 |
 | revision/archive 在 Worker 生成期变化的 TOCTOU 如何封闭。 | 状态生命周期盲区 | 高 | 一般 | Worker read-only transaction 可得到单一 DB snapshot；Main `activeTask` 阻断同 Service mutation，但仍需防自相一致的伪造/DB 旁路。 | PROBE | A/B authority 替换、生成后改 revision/archive/fingerprint，断言 Publisher=0 | Worker 开始与结束核对 authority digest；Main generation 前和 Join 后重读 task/run authority；Publisher 前再核 FilePlan/target snapshot。 |
-| cancel/crash 后 task-private files 谁清理。 | ownership 未知 | 高 | 容易 | Supervisor 保证 transport/lease shutdown；现有 writer 只在 deferred 模式清理 partial files。 | PROBE | 中途失败、cancel、worker terminate、runtime shutdown 后扫描 staging | Worker 对已知 generation paths 做 finally 清理；Main 是 exact task 子目录的唯一 cleanup/recovery owner；已知文件按路径删除，严格 UUID tmp 只在成功扫描后删除，扫描失败目录级保留。 |
+| cancel/crash 或 committed 后 cleanup 失败时 task-private files 谁清理。 | ownership 未知 | 高 | 容易 | Supervisor 保证 transport/lease shutdown；atomic writer 可确定当前 UUID tmp，Main 已有 exact task-dir cleanup/recovery owner；Publisher wrapper 过去会吞 generation rm 失败。 | PROBE | generation EBUSY/EPERM、task-dir rmdir、cancel/worker terminate、同 operation retry、runtime shutdown 后扫描 staging | Main dispatch 是 generation/task-dir 的唯一 cleanup/recovery owner；atomic writer 只拥有当前 UUID tmp。普通失败与 committed success 都返回/附加有界 cleanup evidence；wrapper 在 E12-A defer 防止双删；task dir 未收口前 retry collision fail closed。 |
 | E11-C 新增的取消后 cleanup owner 是否会与 VCC Writer/Publisher 重叠。 | restack 交互盲区 | 高 | 容易 | E11-C cleanup 绑定 ReconFix export plan；VCC 仍由其 dispatch/Writer/Publisher 私有边界负责。 | PROBE | E11-C 取消清理回归 + VCC cancel/crash/同 staging 重试 + Supervisor shutdown | 两条 action 保持不同 plan owner；各自清理一次，成功产物不被失败清理误删。 |
 | `export-single` 与 `export-subjects` 的 E12-A 范围边界。 | 范围歧义 | 高 | 容易 | 冻结 Action 范围同时列出两者。 | BLOCK（已收口） | 项目 owner 范围裁决 | E12-A 必须用同一 one-shot Writer core 覆盖两个 action；`export-single` 是 exact-one subject specialization，仍不做 SQL filter pushdown。 |
 
@@ -36,6 +36,13 @@
 | --- | --- | --- | --- |
 | caller 提供的共享 staging root 是否足以作为 task-private recovery authority。 | PROBE（高） | 共享 root 可以包含 caller-owned 文件；目录扫描失败时无法证明其中所有名字属于当前 job。真实 FS `chmod 0300` 证明已知 generation 可按 exact path 删除，但 UUID atomic tmp 无法在 `readdir EACCES` 时安全发现。 | 共享 root 只作为父 authority。由 action/operation/task/run authority、subject set 与 canonical FilePlan 派生一个 exact 直属 `vcc-export-<digest>` 子目录并绑定 realpath；scan 失败只保留该子目录，不把共享父目录或猜测 tmp 暴露为 recoveryPath。 |
 | Result Sheet 是否可只校验值、merge 与少数动态样式。 | PROBE（高） | raw OOXML 可以在重算 size/hash 后独立篡改 header/body blank cell style、row/column layout；逐格补丁无法证明模板语义集合闭合。 | 保留唯一 `validateResultSheet` authority，按 header A:N、body A/B:C merge master/follower、D:L、普通/调整 M:N、动态 font/numFmt/wrap/height，以及 row/column hidden/outline/width/height 建立模板语义矩阵；Writer self-check 与 Main Join 继续复用同一 validator。 |
+
+## Independent Review Round4 Unknowns Closure
+
+| 补充未知 | 分类 | 证据收口 | 最终决定 |
+| --- | --- | --- | --- |
+| Publisher committed 后 generation 或 task dir 删除失败，是否应把业务结果改为 failed。 | PROBE（高） | 正式目标已由 durable Publisher 唯一提交，重新解释为业务失败会诱发不可安全重发；但静默吞错会丢失恢复责任。 | 保留首个 publication committed 事实与 Publisher=1；由同一 Main generation cleanup owner 返回 `complete/pending`、确知 recovery paths、有限诊断 code 与 task-root digest。cleanup pending 不自动重发；同 operation retry 在残留 task dir 上 fail closed，恢复后仍由同 owner 收口。 |
+| Main 创建 task dir 后到 Worker/atomic handoff 之间，路径字符串与一次 realpath 是否足以阻止替换。 | PROBE（高） | 可在 Worker 开始前或 staged tmp 写完后替换 task dir，旧实现会把外部同名路径当 generation/tmp；测试可稳定复现。 | Main 冻结 resolved/real、device/inode、parent path 与 canonical digest到 exact Worker input；Worker 入口、每个 subject 写前、atomic handoff 前复用一个 checker，要求 root identity 未变、generation 为直接 child/no alias、tmp 是 strict UUID direct child。已变化则 Publisher=0，且不触碰替换路径。明确不声称闭合检查后的 OS 纳秒竞态，不引入 native/openat。 |
 
 ## BLOCK 问题
 
@@ -54,5 +61,5 @@
 | 1 | 实现 canonical policy + bounded authority/input/result contract，注册 runtime 与真 Worker entry。 | production false、一个 Writer、无 raw rows DTO。 | policy byte-for-byte；protocol max bytes；topology=1；真 Worker 完成 one-shot。 | 平台合同不成立，停止后续 Join。 | 只移除 VCC policy/entry，live 路径零变化。 |
 | 2 | 构建 Main-owned task/run/archive/FilePlan authority 与 task-private generations。 | activeTask/taskGeneration、runId/month/revision/fingerprint/archive、set/order/path ownership。 | stale/A-B/collision/alias/symlink/target drift 全部在 Publisher 前拒绝。 | 任一 authority 不能唯一收口则不发布。 | 保留 legacy export，managed dormant。 |
 | 3 | Writer 复用 legacy writer core 顺序生成，Main 深度回读每主体 workbook。 | 模板、金额、币种、Pending、style、lineage、subjectIndex 等价。 | 单/多主体 legacy-vs-managed semantic golden。 | 业务证据不一致则 Publisher=0。 | 共享 writer core，不改金额规则。 |
-| 4 | 全部 Join 成功后调用一次既有 Publisher，完成 fault/shutdown/cleanup 测试。 | all-or-none、单次 Publisher、失败/取消/crash 零发布。 | Publisher 计数、journal recovery、staging 残留、runtime shutdown report。 | 故障不能 fail closed 则不交付。 | production 仍 false，live legacy 不变。 |
+| 4 | 全部 Join 成功后调用一次既有 Publisher；由 Main 单一 owner 完成 generation/task-dir cleanup，并覆盖 identity replacement、fault/shutdown/committed-cleanup 测试。 | all-or-none、单次 Publisher、失败/取消/crash 零发布；committed cleanup pending 不改写正式成功或诱发重发。 | Publisher 计数、journal recovery、bounded cleanup evidence、staging identity/retry collision、runtime shutdown report。 | 故障不能 fail closed 或 recovery responsibility 不可审计则不交付。 | production 仍 false，live legacy 不变。 |
 | 5 | 在 E11-C 新 parent 上回放 cancellation/cleanup、policy registry 与 recovery canary。 | restack 不覆盖上一阶段 runtime/cleanup authority。 | E11-C focused、Supervisor/registry、VCC recovery 与 canary 全通过。 | 任一 owner 重叠或 cleanup 漂移则停止提交。 | 撤销 E12-A 两笔重放提交，保留已审查 E11-C。 |

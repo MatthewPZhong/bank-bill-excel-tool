@@ -789,7 +789,14 @@ async function validateStagedWorkbook({ stagedPath, resultContract, plan, render
   }
 }
 
-async function writeSubjectWorkbook({ data, plan, outputPath, resultContract, pendingTemplateSheet }) {
+async function writeSubjectWorkbook({
+  data,
+  plan,
+  outputPath,
+  resultContract,
+  pendingTemplateSheet,
+  beforeAtomicHandoff = null
+}) {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = '网银账单生成小助手';
   workbook.created = new Date();
@@ -804,7 +811,8 @@ async function writeSubjectWorkbook({ data, plan, outputPath, resultContract, pe
       plan,
       renderedRows,
       lastRow
-    })
+    }),
+    beforePublish: beforeAtomicHandoff
   });
 }
 
@@ -841,6 +849,8 @@ async function writeRunWorkbooks({
   abortSignal = null,
   cleanupOnFailure = false,
   subjectIndexes = null,
+  beforeSubjectWrite = null,
+  beforeAtomicHandoff = null,
   writeSubjectWorkbookFn = writeSubjectWorkbook
 }) {
   const throwIfAborted = () => {
@@ -885,6 +895,14 @@ async function writeRunWorkbooks({
       throwIfAborted();
       const plan = plans[index];
       const destination = destinations[index];
+      if (typeof beforeSubjectWrite === 'function') {
+        // eslint-disable-next-line no-await-in-loop
+        await beforeSubjectWrite({
+          subjectIndex: selectedIndexes[index],
+          outputIndex: index,
+          outputPath: destination
+        });
+      }
       const generationPath = deferredPublication
         ? path.join(
             publicationStagingDirectory,
@@ -896,7 +914,15 @@ async function writeRunWorkbooks({
         plan,
         outputPath: generationPath,
         resultContract,
-        pendingTemplateSheet
+        pendingTemplateSheet,
+        beforeAtomicHandoff: typeof beforeAtomicHandoff === 'function'
+          ? (stagedPath) => beforeAtomicHandoff({
+              subjectIndex: selectedIndexes[index],
+              outputIndex: index,
+              outputPath: generationPath,
+              stagedPath
+            })
+          : null
       }));
       throwIfAborted();
     }

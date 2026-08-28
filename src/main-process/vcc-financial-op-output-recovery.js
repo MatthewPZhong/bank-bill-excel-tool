@@ -108,10 +108,13 @@ async function publishVccFinancialOpOutputs(options = {}) {
     requireValidatedArtifacts: true
   });
 
-  // publication worker 已把 generation 内容复制到同目录 staging 并提交；
-  // 这些应用临时产物不再是 crash recovery 的权威证据。
-  for (const filePath of generationPaths) {
-    try { await fs.promises.rm(filePath, { force: true }); } catch (_cleanupError) { /* caller retries dir */ }
+  // legacy caller 仍由本薄封装收口 generation；E12-A one-shot dispatch 明确
+  // defer 后则由 Main 已有的 task-private cleanup owner 单独收口并返回审计证据，
+  // 避免 recovery wrapper 与 dispatch 对同一批路径双删。
+  if (options.deferGenerationCleanup !== true) {
+    for (const filePath of generationPaths) {
+      try { await fs.promises.rm(filePath, { force: true }); } catch (_cleanupError) { /* legacy behavior */ }
+    }
   }
 
   try {
