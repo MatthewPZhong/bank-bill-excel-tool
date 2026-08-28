@@ -179,7 +179,10 @@ function createDuplicateManagedService(options = {}) {
         current.detachCommittedSession();
         await jobContext.awaitPreparedImport();
         result = await current.importPreparedSpools(
-          input.pairedImport, jobContext.onProgress, jobContext.operationIdentity
+          input.pairedImport,
+          jobContext.onProgress,
+          jobContext.operationIdentity,
+          jobContext.signal
         );
       } else {
         result = await current.importFiles(

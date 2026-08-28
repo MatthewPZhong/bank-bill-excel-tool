@@ -211,6 +211,14 @@ function sideCounts(dir) {
   }
 }
 
+function sideCountsOrZero(dir) {
+  const sideDir = path.join(dir, 'run-data', 'duplicate-inbound-match');
+  if (!fs.existsSync(sideDir) || !fs.readdirSync(sideDir).some((name) => name.endsWith('.sqlite'))) {
+    return Object.freeze({ imports: 0, bankRows: 0, documentRows: 0, receipts: 0 });
+  }
+  return sideCounts(dir);
+}
+
 function sideImportSnapshots(dir) {
   const db = new DatabaseSync(sideDatabasePath(dir), { readOnly: true });
   try {
@@ -303,10 +311,10 @@ async function withBlockedParserOutcomeWrites(taskStagingDir, callback, onBlocke
 }
 
 function assertNoDuplicateMutation(dir, databasePath) {
-  const sideDir = path.join(dir, 'run-data', 'duplicate-inbound-match');
-  if (fs.existsSync(sideDir)) {
-    assert.deepEqual(sideCounts(dir), { imports: 0, bankRows: 0, documentRows: 0, receipts: 0 });
-  }
+  assert.deepEqual(
+    sideCountsOrZero(dir),
+    { imports: 0, bankRows: 0, documentRows: 0, receipts: 0 }
+  );
   const db = new DatabaseSync(databasePath, { readOnly: true });
   try {
     assert.equal(Number(db.prepare(
@@ -1177,6 +1185,72 @@ test('app shutdown按shutdown-only取消等待中的paired命令并收口Parser/
   assert.equal(fs.existsSync(path.join(dir, 'run-data', 'duplicate-inbound-match')), false);
 });
 
+test('persist窗口shutdown在receipt/COMMIT前回滚且不得clean失败同时durable commit', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'duplicate-paired-persist-shutdown-'));
+  const databasePath = path.join(dir, 'tool-data.sqlite');
+  initializeMainDatabase(databasePath);
+  const bankPath = path.join(dir, 'bank.xlsx');
+  const documentPath = path.join(dir, 'document.xlsx');
+  writeWorkbook(bankPath, BANK_STATEMENT_FIELDS, '渠道对账单', [
+    bankRow({ BizId: 'PERSIST-SHUTDOWN', FundType: 'Inbound' })
+  ]);
+  writeWorkbook(
+    documentPath,
+    BILL_HEADERS,
+    '单据对账单',
+    Array.from({ length: 8000 }, (_item, index) => documentRow({
+      业务订单号: `PERSIST-${index}`,
+      用户编号: `U-${index}`,
+      账户号: `A-${index}`
+    }))
+  );
+  const runtime = createRuntime(dir, databasePath, { omitExecutionTimeout: true });
+  let shutdownComplete = false;
+  t.after(async () => {
+    try {
+      if (!shutdownComplete) await runtime.shutdown({ timeoutMs: 10000 });
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  const taskStagingDir = path.join(dir, 'persist-shutdown-staging');
+  const jobId = 'paired-persist-window-shutdown';
+  let resolvePersist;
+  const persistObserved = new Promise((resolve) => { resolvePersist = resolve; });
+  const pairedOutcome = executeManagedDuplicatePairedImport({
+    runtime,
+    workerRuntime: workerRuntime(dir, databasePath),
+    filePaths: [bankPath, documentPath],
+    taskStagingDir,
+    batchContext: batchContext('paired-persist-window-shutdown'),
+    jobId,
+    parserRunner: async (spool) => parserResult(await writeDuplicateInputSpool(spool)),
+    onProgress(progress) {
+      if (progress && progress.stage === 'persist') resolvePersist();
+    }
+  }).then(
+    (value) => Object.freeze({ value }),
+    (error) => Object.freeze({ error })
+  );
+
+  await persistObserved;
+  const sideDir = path.join(dir, 'run-data', 'duplicate-inbound-match');
+  await waitForCondition(
+    () => fs.existsSync(sideDir) && fs.readdirSync(sideDir).some((name) => name.endsWith('.sqlite')),
+    'persist-window未进入side事务'
+  );
+  const shutdownPromise = runtime.shutdown({ timeoutMs: 10000 });
+  const paired = await pairedOutcome;
+  const report = await shutdownPromise;
+  shutdownComplete = true;
+
+  assert.equal(paired.error && paired.error.code, 'DUPLICATE_SHUTDOWN');
+  assert.deepEqual(report.errors, [], 'shutdown报告可以clean，但前提是side事务已回滚');
+  assert.deepEqual(report.leakedTransports, []);
+  assertNoDuplicateMutation(dir, databasePath);
+  assert.equal(fs.existsSync(taskStagingDir), false);
+});
+
 test('真实Parser graceful shutdown等待Worker exit与dispatcher cleanup后才报告clean', async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'duplicate-paired-real-shutdown-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -1315,6 +1389,86 @@ test('真实Parser shutdown timeout进入errors/leakedTransports且最终仍清�
   const cleanupReport = await runtime.shutdown({ timeoutMs: 10000 });
   shutdown = true;
   assert.deepEqual(cleanupReport.leakedTransports, []);
+});
+
+test('真实文件系统cleanup阻塞保留owner，重复shutdown非clean且恢复后retry才clean', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'duplicate-paired-cleanup-retry-'));
+  const databasePath = path.join(dir, 'tool-data.sqlite');
+  initializeMainDatabase(databasePath);
+  const bankPath = path.join(dir, 'bank.xlsx');
+  const documentPath = path.join(dir, 'document.xlsx');
+  writeWorkbook(bankPath, BANK_STATEMENT_FIELDS, '渠道对账单', [
+    bankRow({ BizId: 'CLEANUP-RETRY', FundType: 'Inbound' })
+  ]);
+  writeWorkbook(documentPath, BILL_HEADERS, '单据对账单');
+  const runtime = createRuntime(dir, databasePath, { omitExecutionTimeout: true });
+  const taskStagingDir = path.join(dir, 'cleanup-retry-staging');
+  const jobId = 'paired-real-filesystem-cleanup-retry';
+  const blockedSlotPaths = duplicateSpoolPaths({ taskStagingDir, jobId, slotIndex: 0 });
+  const lockMarkerPath = path.join(blockedSlotPaths.slotDir, 'external-cleanup.lock');
+  let blockerInstalled = false;
+  let permissionsRestricted = false;
+  let parserCompletions = 0;
+
+  function restoreCleanupAccess() {
+    if (permissionsRestricted) {
+      fs.chmodSync(blockedSlotPaths.slotDir, 0o700);
+      permissionsRestricted = false;
+    }
+    fs.rmSync(lockMarkerPath, { force: true });
+    blockerInstalled = false;
+  }
+
+  t.after(async () => {
+    try {
+      if (blockerInstalled || permissionsRestricted) restoreCleanupAccess();
+      await runtime.shutdown({ timeoutMs: 10000 });
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  const paired = await executeManagedDuplicatePairedImport({
+    runtime,
+    workerRuntime: workerRuntime(dir, databasePath),
+    filePaths: [bankPath, documentPath],
+    taskStagingDir,
+    batchContext: batchContext('paired-real-filesystem-cleanup-retry'),
+    jobId,
+    parserRunner: async (spool) => parserResult(await writeDuplicateInputSpool(spool)),
+    onParserComplete() {
+      parserCompletions += 1;
+      if (parserCompletions !== 2) return;
+      fs.writeFileSync(lockMarkerPath, 'external filesystem owner');
+      blockerInstalled = true;
+      if (process.platform !== 'win32') {
+        fs.chmodSync(blockedSlotPaths.slotDir, 0o500);
+        permissionsRestricted = true;
+      }
+    }
+  }).then(
+    (value) => Object.freeze({ value }),
+    (error) => Object.freeze({ error })
+  );
+
+  assert.equal(paired.error && paired.error.code, 'DUPLICATE_SPOOL_CLEANUP_INCOMPLETE');
+  assert.equal(fs.existsSync(taskStagingDir), true);
+  assert.equal(fs.existsSync(lockMarkerPath), true);
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const blockedReport = await runtime.shutdown({ timeoutMs: 10000 });
+    assert.equal(blockedReport.leakedTransports.includes(jobId), true);
+    assert.equal(blockedReport.errors.some(
+      (error) => error.code === 'DUPLICATE_PAIRED_FINALIZATION_FAILED'
+    ), true);
+    assert.equal(fs.existsSync(taskStagingDir), true, '阻塞未恢复时owner不得静默消失');
+  }
+
+  restoreCleanupAccess();
+  const recoveredReport = await runtime.shutdown({ timeoutMs: 10000 });
+  assert.deepEqual(recoveredReport.errors, []);
+  assert.deepEqual(recoveredReport.leakedTransports, []);
+  assert.equal(fs.existsSync(taskStagingDir), false, '必须由retry实际删除staging后才clean');
 });
 
 test('native ResourceGovernor诚实降为single Parser且仍完成同一两侧校验/采用', async (t) => {

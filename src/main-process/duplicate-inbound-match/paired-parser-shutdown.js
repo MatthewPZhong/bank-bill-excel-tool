@@ -39,10 +39,48 @@ function observeBarrier(promise, record, phase) {
   });
 }
 
+function releaseRecord(runtime, state, record) {
+  state.records.delete(record);
+  if (state.records.size === 0) finalizersByRuntime.delete(runtime);
+}
+
+function observeFinalizationAttempt(runtime, state, record, promise) {
+  record.finalizedSettled = false;
+  record.finalizedSettledAt = null;
+  const observed = observeBarrier(promise, record, 'finalized');
+  record.finalized = observed;
+  observed.then((outcome) => {
+    if (outcome.status === 'fulfilled') releaseRecord(runtime, state, record);
+  });
+  return observed;
+}
+
+function retryRejectedFinalization(runtime, state, record) {
+  if (record.retryInFlight) return record.retryInFlight;
+  const retry = observeFinalizationAttempt(
+    runtime,
+    state,
+    record,
+    Promise.resolve().then(() => record.retryCleanup())
+  );
+  record.retryInFlight = retry;
+  retry.then(() => {
+    if (record.retryInFlight === retry) record.retryInFlight = null;
+  });
+  return retry;
+}
+
+async function finalizationBarrier(runtime, state, record) {
+  const outcome = await record.finalized;
+  if (outcome.status === 'fulfilled') return outcome;
+  return retryRejectedFinalization(runtime, state, record);
+}
+
 function registerDuplicatePairedParserFinalization(runtime, descriptor) {
   if (!descriptor || typeof descriptor !== 'object' ||
       typeof descriptor.jobId !== 'string' || !descriptor.jobId ||
       typeof descriptor.abort !== 'function' ||
+      typeof descriptor.retryCleanup !== 'function' ||
       !descriptor.workersTerminal || typeof descriptor.workersTerminal.then !== 'function' ||
       !descriptor.finalized || typeof descriptor.finalized.then !== 'function') {
     throw new TypeError('Duplicate paired Parser finalization descriptor非法');
@@ -51,6 +89,8 @@ function registerDuplicatePairedParserFinalization(runtime, descriptor) {
   const record = {
     jobId: descriptor.jobId,
     abort: descriptor.abort,
+    retryCleanup: descriptor.retryCleanup,
+    retryInFlight: null,
     workersTerminalSettled: false,
     workersTerminalSettledAt: null,
     finalizedSettled: false,
@@ -59,12 +99,8 @@ function registerDuplicatePairedParserFinalization(runtime, descriptor) {
     finalized: null
   };
   record.workersTerminal = observeBarrier(descriptor.workersTerminal, record, 'workersTerminal');
-  record.finalized = observeBarrier(descriptor.finalized, record, 'finalized');
   state.records.add(record);
-  record.finalized.then(() => {
-    state.records.delete(record);
-    if (state.records.size === 0) finalizersByRuntime.delete(runtime);
-  });
+  observeFinalizationAttempt(runtime, state, record, descriptor.finalized);
 }
 
 function beginDuplicatePairedParserShutdown(runtime) {
@@ -81,7 +117,12 @@ function beginDuplicatePairedParserShutdown(runtime) {
       ));
     }
   }
-  return Object.freeze({ records: Object.freeze(records), errors: Object.freeze(errors) });
+  return Object.freeze({
+    runtime,
+    state,
+    records: Object.freeze(records),
+    errors: Object.freeze(errors)
+  });
 }
 
 function deadlineAfter(timeoutMs) {
@@ -134,12 +175,15 @@ async function waitForDuplicatePairedParserShutdownPhase(session, phase, timeout
   if (!workerPhase && phase !== 'finalized') {
     throw new TypeError('Duplicate paired Parser shutdown phase非法');
   }
-  const promises = session.records.map((record) => record[phase]);
+  const promises = session.records.map((record) => workerPhase
+    ? record.workersTerminal
+    : finalizationBarrier(session.runtime, session.state, record));
   const deadline = deadlineAfter(timeoutMs);
   await waitUntil(promises, timeoutMs);
   const errors = [];
   const leakedTransports = [];
-  for (const record of session.records) {
+  for (let index = 0; index < session.records.length; index += 1) {
+    const record = session.records[index];
     if (!record[`${phase}Settled`] || record[`${phase}SettledAt`] > deadline) {
       leakedTransports.push(record.jobId);
       errors.push(shutdownError(
@@ -152,7 +196,7 @@ async function waitForDuplicatePairedParserShutdownPhase(session, phase, timeout
       ));
       continue;
     }
-    const outcome = await record[phase];
+    const outcome = await promises[index];
     if (outcome.status === 'rejected') {
       leakedTransports.push(record.jobId);
       errors.push(shutdownError(

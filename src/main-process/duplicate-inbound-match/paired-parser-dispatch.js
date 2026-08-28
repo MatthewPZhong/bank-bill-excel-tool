@@ -196,6 +196,22 @@ function cleanupSpools(spools, cleanup = cleanupDuplicateSpool) {
   if (failure) throw failure;
 }
 
+function createRetryableSpoolCleanup(spools, cleanup) {
+  let completed = false;
+  let inFlight = null;
+  return function retryCleanup() {
+    if (completed) return Promise.resolve();
+    if (inFlight) return inFlight;
+    inFlight = Promise.resolve().then(() => {
+      cleanupSpools(spools, cleanup);
+      completed = true;
+    }).finally(() => {
+      inFlight = null;
+    });
+    return inFlight;
+  };
+}
+
 async function executeManagedDuplicatePairedImport(rawOptions) {
   const options = normalizeOptions(rawOptions);
   const jobId = options.jobId || `duplicate-paired-${randomUUID()}`;
@@ -231,6 +247,10 @@ async function executeManagedDuplicatePairedImport(rawOptions) {
     resolveFinalized = resolve;
     rejectFinalized = reject;
   });
+  const retryCleanup = createRetryableSpoolCleanup(
+    spools,
+    options.cleanupSpool || cleanupDuplicateSpool
+  );
 
   function settleWorkersTerminal() {
     if (workersTerminalSettled) return;
@@ -242,6 +262,7 @@ async function executeManagedDuplicatePairedImport(rawOptions) {
     jobId,
     workersTerminal,
     finalized,
+    retryCleanup,
     abort() {
       shutdownRequested = true;
       if (parserController) parserController.abort();
@@ -401,7 +422,7 @@ async function executeManagedDuplicatePairedImport(rawOptions) {
   } finally {
     settleWorkersTerminal();
     try {
-      cleanupSpools(spools, options.cleanupSpool || cleanupDuplicateSpool);
+      await retryCleanup();
       resolveFinalized();
     } catch (cleanupError) {
       if (primaryError) cleanupError.cause = primaryError;

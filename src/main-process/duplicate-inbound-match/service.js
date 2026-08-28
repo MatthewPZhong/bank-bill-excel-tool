@@ -119,6 +119,14 @@ function yieldToEventLoop() {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
+function assertImportNotAborted(signal) {
+  if (!signal || signal.aborted !== true) return;
+  throw new DuplicateInboundMatchServiceError(
+    'DUPLICATE_SHUTDOWN',
+    'Duplicate Service正在关闭'
+  );
+}
+
 function toText(value) {
   return value === null || value === undefined ? '' : String(value);
 }
@@ -847,7 +855,12 @@ class DuplicateInboundMatchService {
     };
   }
 
-  async importPreparedSpools(rawPairedImport, onProgress, rawOperationIdentity = null) {
+  async importPreparedSpools(
+    rawPairedImport,
+    onProgress,
+    rawOperationIdentity = null,
+    signal = null
+  ) {
     this.assertImportAllowedByRecoveryLatch();
     const operationIdentity = normalizeOperationIdentity(rawOperationIdentity, 'duplicate:import');
     if (!operationIdentity) {
@@ -907,6 +920,7 @@ class DuplicateInboundMatchService {
       onProgress({ stage: 'persist', message: '正在单事务采用银行与单据解析结果...' });
     }
     await yieldToEventLoop();
+    assertImportNotAborted(signal);
     const imported = await this.store.createImportBundle({
       monthKey,
       bank: {
@@ -926,6 +940,9 @@ class DuplicateInboundMatchService {
           validateDuplicateInputSpool(pair.document)
         ]);
       },
+      // async权威复核完成后才检查abort；该同步guard之后，store到receipt
+      // insert与COMMIT之间不得再出现yield。
+      beforeCommitGuard: () => { assertImportNotAborted(signal); },
       operationReceipt: {
         ...operationIdentity,
         phase: 'import-side-committed',

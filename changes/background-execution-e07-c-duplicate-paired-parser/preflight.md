@@ -5,7 +5,7 @@
 - Goal：在 E07-B durable receipt/recovery 不变量之上，为 production-false Duplicate managed import 增加可选 Bank/Document paired parser；两类 Parser 各写独立 task-private spool，Service 只在两侧完整校验后采用。
 - Context：精确基线为三审 P0-P3=0 的 E07-B `1b5b77ab5829db234ae288cc24ca0f6de7bdeb7b`；冻结合同为 v3.2.2 Spec §1-§3、§6、§9-§13，TechDoc §2、§5-§6、§10-§12，implementation sequence 与 E07-A/B notes。
 - Constraints：Parser 不读写 side/Main DB，不读取或消费 MPT/candidate，不复制 matching/normalizer/parser 业务逻辑；固定顺序为 reserve Service command → CompoundLease → parse separate spools → validate both → Service mutation/adopt；reservation 全程阻断 import/run/export；不扩 E08/Publisher/live；production 固定 false/single；禁止 `release-check`、`check-vars`、`scan:vars`。
-- Done when：paired 与 single 业务结果、角色顺序、source ordinal、receipt/side post-image一致；任一 parse/validate/source-change/cancel/crash 发生在 Service mutation 前并保持零 adopt/零 DB mutation；spool ownership与cleanup exactly once；低资源/单 unit/未通过 gate 使用一个 Parser；本地五轮性能/RSS证据明确是否达到 15%，但不解除 Windows/RSS/资金人工门禁。
+- Done when：paired 与 single 业务结果、角色顺序、source ordinal、receipt/side post-image一致；任一 parse/validate/source-change/cancel/crash 发生在 Service mutation 前并保持零 adopt/零 DB mutation；spool ownership唯一，cleanup成功终态 exactly once、失败保留同一owner幂等retry；低资源/单 unit/未通过 gate 使用一个 Parser；本地五轮性能/RSS证据明确是否达到 15%，但不解除 Windows/RSS/资金人工门禁。
 
 ## 已确认事实
 
@@ -52,3 +52,33 @@
 | 3 | private terminal outcome coordinator + Worker reservation。 | 先占Service、后lease/parse；两侧clean-exit success才Service；任何failure marker/teardown都必须在全部Parser exit后才允许parent释放；shutdown-only不被普通cancel旁路；clean shutdown还必须等待dispatcher cleanup。 | completion乱序、busy冲突、normal/EACCES outcome、两类真实Worker terminal barrier、真实Worker graceful/timeout shutdown、manifest后crash零adopt/零DB。 | reservation旁路、未记账Worker、staging残留或部分采用。 | paired gate关闭，direct single保留。 |
 | 4 | Service spool consumer复用同一 store事务/receipt。 | Bank/Document顺序、行数、E07-B receipt/recovery不变量。 | single/paired side DB与receipt parity、exact replay side计数不增。 | 资金/恢复语义漂移。 | consumer停用，不改store schema。 |
 | 5 | cleanup、RSS/perf、盲区与affected验证。 | 无敏感spool泄漏，不伪造production通过。 | fault matrix、5-run报告、unit/integration/static。 | 不能交付。 | production保持false/single并记录未通过门禁。 |
+
+## Reviewer Round 1 Repair Preflight（2026-08-28）
+
+### Goal / Context / Constraints / Done when
+
+- Goal：关闭 paired Service `persist` yield 到 side COMMIT 的 shutdown 竞态，并让 cleanup rejection 保持 exact-runtime unresolved owner 直到真实重试成功。
+- Context：Round 1 为 P0=0/P1=1/P2=1/P3=0；项目负责人已确认两项均真实可达且非重复。当前 head 为 E07-B non-ff 堆叠后的 `98892c5a`。
+- Constraints：只传递现有 `jobContext.signal`；不新增 critical handshake、公共 schema、全局锁或持久化 cleanup 状态；不扩 E08/Publisher/live；production 保持 false/legacy/0。
+- Done when：persist yield 或双 spool COMMIT 前复核期间收到 shutdown 均在 receipt/COMMIT 前回滚，不能同时出现 caller `DUPLICATE_SHUTDOWN`、clean shutdown 和 durable import/receipt；cleanup 失败在重复 shutdown 中稳定 non-clean，恢复真实文件系统权限/阻塞并重试删除后才释放同一 owner、报告 clean。
+
+### 已确认事实与 Unknowns Register
+
+| 事实/未知 | 分类 | 代码证据 | 处理与当前决定 |
+| --- | --- | --- | --- |
+| paired managed import 没有把 `jobContext.signal` 传给 `importPreparedSpools`，正常 `persist` progress 后存在 `setImmediate` yield。 | P1 / PROBE | `managed-service.js#executeImport`；`service.js#importPreparedSpools`。 | 传递 exact job signal；yield 返回立即检查 abort。 |
+| side store 在 `await beforeCommit()` 后同步 insert receipt 与 COMMIT；若 abort guard 位于异步 callback 内，callback 返回仍留下一个 await 边界。 | P1 / PROBE | `duplicate-inbound-match-store.js#createImportBundle`。 | 增加 module-private 同步 `beforeCommitGuard`；权威双 spool async 复核完成后调用 guard，此后到 receipt insert/COMMIT 不再 await。 |
+| finalization observer 把 rejection 映射为 fulfilled outcome，而注册器对该 Promise 无条件删除 record。 | P2 / PROBE | `paired-parser-shutdown.js#observeBarrier/registerDuplicatePairedParserFinalization`。 | 只有 fulfilled outcome 删除 owner；rejected record 保留 `retryCleanup`，每次 shutdown 最多复用/发起一个幂等 cleanup attempt。 |
+| cleanup 重试必须证明真实 artifact 被删除，而非 fault-only shortcut。 | P2 / PROBE | `spool-filesystem.js` 只删 known files、只 rmdir 空 owner 目录。 | POSIX 使用真实目录去写权限并保留外部 lock marker；其它平台使用真实 non-empty lock marker。阻塞时重复 shutdown non-clean，恢复后 retry 必须令 staging 实际消失。 |
+| 金额、币种、matching、candidate、result digest 与恢复 schema是否需要调整。 | 边界 / ASSUME | 两 finding 都位于 cancel/commit 与 task-private cleanup 生命周期；业务行转换和 E07-B receipt schema未涉入。 | 不改这些边界；affected 与 integration 证明无回归，真实资金/恢复仍保留人工门禁。 |
+
+- BLOCK：无；accepted finding 已给出最小合同，仓库代码足以确定实现。
+- 保守假设：`beforeCommitGuard` 必须同步；返回 thenable 视为合同错误，防止未来重新引入 COMMIT 前 yield。
+
+### 风险优先计划
+
+| 顺序 | 步骤 | 保护的不变量 | 成功证据 | 失败影响 | 回滚/收缩 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | signal 血缘与同步 commit guard。 | abort 不跨越 receipt/COMMIT；双 spool 仍先完整复核。 | persist-window shutdown 形成 `DUPLICATE_SHUTDOWN`、clean report、side import/rows/receipt全0。 | 重复记账或 clean 假报告。 | paired gate关闭；不触碰 single/live。 |
+| 2 | unresolved owner + 幂等 retryCleanup。 | cleanup失败不丢owner；仅真实删除后clean。 | 阻塞下两次 shutdown均error/leak；恢复后第三次删除staging且clean。 | 敏感spool残留被静默遗漏。 | owner持续保留并报告non-clean。 |
+| 3 | affected/盲区/门禁复核。 | E07-B恢复、Supervisor资源、金额行数语义和production gate不漂移。 | E07-C、Duplicate、background/Supervisor、integration与static通过。 | 不可交付。 | 不合并未证实修复。 |

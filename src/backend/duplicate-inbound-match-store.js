@@ -204,6 +204,7 @@ class DuplicateInboundMatchStore {
     document,
     writeDocumentRows,
     beforeCommit = null,
+    beforeCommitGuard = null,
     operationReceipt = null
   }) {
     if (!bank || !Array.isArray(bank.rows)) throw new TypeError('重复入金银行 rows 必须是数组');
@@ -284,6 +285,17 @@ class DuplicateInboundMatchStore {
         if (typeof beforeCommit !== 'function') throw new TypeError('Duplicate beforeCommit必须是函数');
         await beforeCommit();
       }
+      if (beforeCommitGuard) {
+        if (typeof beforeCommitGuard !== 'function') {
+          throw new TypeError('Duplicate beforeCommitGuard必须是函数');
+        }
+        const guardResult = beforeCommitGuard();
+        if (guardResult !== undefined) {
+          throw new TypeError('Duplicate beforeCommitGuard必须同步且不返回值');
+        }
+      }
+      // beforeCommitGuard之后只允许同步receipt insert与COMMIT，避免abort在
+      // caller已失败的同时跨过durable commit边界。
       let receipt = null;
       if (operationReceipt) {
         if (!this.operationReceipts || typeof this.operationReceipts.insertOperationReceipt !== 'function') {
