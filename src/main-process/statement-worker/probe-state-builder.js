@@ -13,6 +13,8 @@ const {
   createStatementImportSession
 } = require('../statement-session');
 const {
+  createStatementBalanceSeedOverwriteContinuationDto,
+  createStatementBalanceSeedOverwritePrivateContextDto,
   createStatementTokenHandleDto
 } = require('./contracts');
 
@@ -21,6 +23,7 @@ const LEGACY_GLOBAL_KEYS = Object.freeze([
   'lastFileImportContext',
   'lastPendingBigAccountSelection',
   'lastManualBalancePrompt',
+  'lastPendingBalanceSeedConfirmation',
   'lastGeneratedExports'
 ]);
 const STATEMENT_EXPORT_KEYS = Object.freeze([
@@ -38,7 +41,7 @@ function exactLegacyGlobals(input) {
   const keys = Reflect.ownKeys(input);
   if (keys.some((key) => typeof key === 'symbol') || keys.length !== LEGACY_GLOBAL_KEYS.length ||
       LEGACY_GLOBAL_KEYS.some((key) => !keys.includes(key))) {
-    throw new TypeError('Statement legacy globals must contain exact five fields');
+    throw new TypeError('Statement legacy globals must contain exact six fields');
   }
   const result = {};
   for (const key of LEGACY_GLOBAL_KEYS) {
@@ -248,6 +251,61 @@ function buildManualBalancePrivateContext(prompt, rememberedGeneration, serviceG
   return context;
 }
 
+function buildBalanceSeedOverwritePrivateContext(
+  confirmation,
+  rememberedGeneration,
+  serviceGeneration,
+  sessionRevision
+) {
+  if (!confirmation) return null;
+  const plan = confirmation.plan || {};
+  const seedRecord = plan.record || {};
+  const confirmationSession = confirmation.session || {};
+  const generationContext = confirmation.importContext || rememberedGeneration || {};
+  const record = {
+    bankName: String(plan.bankName || ''),
+    merchantId: String(seedRecord.merchantId || ''),
+    currency: String(seedRecord.currency || ''),
+    billDate: String(seedRecord.billDate || ''),
+    endBalance: seedRecord.endBalance,
+    templateName: String(seedRecord.templateName || ''),
+    generationMethod: String(seedRecord.generationMethod || ''),
+    existingIndex: Number(plan.existingIndex)
+  };
+  const freshnessEvidence = {
+    recordsDigest: canonicalSha256(String(plan.recordsEvidence || '')),
+    inputSourcesDigest: canonicalSha256(
+      (Array.isArray(confirmation.inputFilePaths) ? confirmation.inputFilePaths : []).map(String)
+    ),
+    statementSessionKey: String(
+      confirmationSession.key || generationContext.statementSessionKey || ''
+    ),
+    currentBatchId: String(
+      confirmationSession.currentBatchId || generationContext.currentBatchId || ''
+    ),
+    scope: generationContext.scope === 'all' ? 'all' : 'current'
+  };
+  const inputSourceCount = Array.isArray(confirmation.inputFilePaths)
+    ? confirmation.inputFilePaths.length
+    : 0;
+  const allowedChoiceDigest = canonicalSha256({
+    kind: 'balance-seed-overwrite',
+    record,
+    freshnessEvidence,
+    inputSourceCount
+  });
+  return createStatementBalanceSeedOverwritePrivateContextDto({
+    kind: 'balance-seed-overwrite',
+    purpose: 'manual-balance',
+    serviceGeneration,
+    sessionRevision,
+    record,
+    freshnessEvidence,
+    inputSourceCount,
+    allowedChoiceDigest
+  });
+}
+
 function buildScopePrivateContext(scopeKind, rememberedGeneration, serviceGeneration, sessionRevision) {
   const context = {
     purpose: 'scope-generation',
@@ -303,12 +361,19 @@ function buildStatementProbeProjection(legacyInput, options = {}) {
       sessionRevision
     );
   } else if (purpose === 'manual-balance') {
-    privateContext = buildManualBalancePrivateContext(
-      legacy.lastManualBalancePrompt,
-      rememberedGeneration,
-      serviceGeneration,
-      sessionRevision
-    );
+    privateContext = legacy.lastPendingBalanceSeedConfirmation
+      ? buildBalanceSeedOverwritePrivateContext(
+        legacy.lastPendingBalanceSeedConfirmation,
+        rememberedGeneration,
+        serviceGeneration,
+        sessionRevision
+      )
+      : buildManualBalancePrivateContext(
+        legacy.lastManualBalancePrompt,
+        rememberedGeneration,
+        serviceGeneration,
+        sessionRevision
+      );
   } else if (purpose === 'scope-generation') {
     privateContext = buildScopePrivateContext(
       options.scopeKind,
@@ -401,21 +466,35 @@ function buildStatementProbeProjection(legacyInput, options = {}) {
       legacy.lastPendingBigAccountSelection.contextId
     ),
     manualBalancePromptPresent: Boolean(legacy.lastManualBalancePrompt),
+    balanceSeedConfirmationPresent: Boolean(legacy.lastPendingBalanceSeedConfirmation),
+    balanceSeedConfirmationCallbackPresent: typeof (
+      legacy.lastPendingBalanceSeedConfirmation &&
+      legacy.lastPendingBalanceSeedConfirmation.assertFresh
+    ) === 'function',
+    balanceSeedConfirmationRecordCount: Array.isArray(
+      legacy.lastPendingBalanceSeedConfirmation &&
+      legacy.lastPendingBalanceSeedConfirmation.plan &&
+      legacy.lastPendingBalanceSeedConfirmation.plan.records
+    ) ? legacy.lastPendingBalanceSeedConfirmation.plan.records.length : 0,
     generatedExportKeys: STATEMENT_EXPORT_KEYS.filter((key) => Boolean(
       legacy.lastGeneratedExports && legacy.lastGeneratedExports[key]
     )),
     excludedNonStatementExportKeys: ['newAccount', 'monthlyBalance']
   });
+  const balanceSeedOverwriteContinuation = privateContext.kind === 'balance-seed-overwrite'
+    ? createStatementBalanceSeedOverwriteContinuationDto({ token: handle })
+    : null;
   return Object.freeze({
     legacyInventory,
     serviceState,
     mainTokenHandles: Object.freeze([handle]),
     privateContexts: Object.freeze([privateContext]),
+    balanceSeedOverwriteContinuation,
     ownership: Object.freeze({
       persistent: 'sessions/all fileEntries + remembered generation + bounded artifact summary',
       mainTokenHandle: 'exact-eight identity only; tokenId replaces legacy Main contextId',
-      pendingInteraction: 'provisional fileEntries + prepared choices + serializable freshness evidence',
-      legacyCallback: 'characterized by presence only; assertSessionCurrent is not projected'
+      pendingInteraction: 'provisional fileEntries or overwrite record + serializable freshness evidence',
+      legacyCallback: 'characterized by presence only; assertSessionCurrent/assertFresh are not projected'
     })
   });
 }
@@ -447,8 +526,12 @@ function createStatementProbeLegacyGlobals({
   rows: totalRows,
   batches,
   root,
-  purpose = 'big-account'
+  purpose = 'big-account',
+  includeBalanceSeedConfirmation = false
 }) {
+  if (includeBalanceSeedConfirmation && purpose !== 'manual-balance') {
+    throw new TypeError('Balance-seed overwrite confirmation requires manual-balance purpose');
+  }
   const statementImportSessions = new Map();
   const session = createStatementImportSession({
     templateId: 17,
@@ -589,11 +672,49 @@ function createStatementProbeLegacyGlobals({
         queueTotal: 1
       }
     : null;
+  const existingRecord = {
+    merchantId: 'M000001',
+    currency: 'USD',
+    billDate: '2026-07-31',
+    endBalance: 1000,
+    templateName: session.templateName,
+    generationMethod: '人工录入',
+    updatedAt: '2026-08-26T00:00:00.000Z'
+  };
+  const overwriteRecord = {
+    merchantId: 'M000001',
+    currency: 'USD',
+    billDate: '2026-07-31',
+    endBalance: 1200,
+    templateName: session.templateName,
+    generationMethod: '人工录入'
+  };
+  const lastPendingBalanceSeedConfirmation = includeBalanceSeedConfirmation
+    ? {
+        contextId: 'legacy-balance-confirmation-1',
+        plan: {
+          storageRoot: root,
+          bankName: 'E09ProbeBank',
+          records: [existingRecord],
+          recordsEvidence: JSON.stringify([existingRecord]),
+          existingIndex: 0,
+          record: overwriteRecord
+        },
+        pendingPrompt: lastManualBalancePrompt,
+        importContext: lastFileImportContext,
+        session,
+        inputFilePaths: session.fileEntries.map((entry) => entry.filePath),
+        assertFresh() {
+          throw new Error('legacy freshness callback must never enter the projected graph');
+        }
+      }
+    : null;
   return {
     statementImportSessions,
     lastFileImportContext,
     lastPendingBigAccountSelection,
     lastManualBalancePrompt,
+    lastPendingBalanceSeedConfirmation,
     lastGeneratedExports
   };
 }

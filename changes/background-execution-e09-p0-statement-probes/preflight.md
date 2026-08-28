@@ -1,5 +1,26 @@
 # E09-P0 Statement Probes Unknowns Preflight
 
+## Reviewer Final Legacy Confirmation / Public Alias / Golden Addendum（2026-08-28）
+
+### 合同取证与决定
+
+| 未知 | 分类 | 证据 | 当前决定 |
+| --- | --- | --- | --- |
+| `lastPendingBalanceSeedConfirmation` 是否属于 Statement legacy retained state | PROBE | `src/main.js` 持有并在 manual prompt reset、首次覆盖请求、确认成功与下一次请求时替换；`manual-balance-seed-preflight.js` 的 legacy 对象同时保留完整 plan/import/session 与 `assertFresh` callback | 将其作为第六个 legacy global 纳入 inventory；只投影 bounded、可序列化的 overwrite continuation evidence，并使用独立 pending-interaction footprint，callback/records/import/session/绝对路径不进入目标 graph |
+| overwrite confirmation 如何复用冻结 token purpose | PROBE | canonical 只允许 `big-account / manual-balance / scope-generation`，现有确认是 manual-balance 补录的第二步 | 不增加 purpose；冻结 `manual-balance` token 下的 public `{status,message,tokenId}` continuation 与 private evidence，并只 characterization confirm/cancel/stale/replacement 的 release 义务，不实现 token store/live Worker |
+| legacy 文件名能否直接进入 public prompt | BLOCK（privacy） | Main 的 rows/failedFileNames 来自真实 basename，canonical finance-safe 不允许 fileName/message 获得域例外 | 构造 public DTO 时按首次出现顺序生成稳定 `来源文件 N` alias；raw filename 仅保留在 private context，不修改 finance-safe delegate |
+| mismatch message 如何同时有界且保留业务提示 | PROBE | legacy message 可拼接任意数量/长度的 raw filename；public DTO 的整体硬上限为 240 KiB，旧 1024 字段上限不应使合法输入在别名化前后随机失败 | 使用固定摘要、总数与有界 alias preview 重建 message；完整 bounded alias 列表放 `failedFileNames`，最终仍由整体 240 KiB UTF-8 ceiling fail closed |
+| current/all golden 是否锁定 merge/source 与 balance-only all | PROBE | production `buildPreparedStatementBatchFromEntries` 按 entry 顺序调用 `mergeMappedDetailRows`，并保留 `rowMetas`；`generateStatementFiles` 已有 `scope/includeDetail/includeBalance` 参数 | 直接执行同一 production seam，冻结 current/all workbook exact rows、rowMetas/inputFilePaths 顺序，并增加 `scope=all + includeDetail=false + includeBalance=true` 的真实 balance-only 输出/cache golden |
+
+### 修复边界
+
+- P0 继续 dormant：不引用到 `src/main.js` live IPC，不实现 E09-A Service、E09-B token store/waiting-user、E09-C Publisher 或 E09-D atomic seed settlement。
+- public alias 只替换 `rows[*].fileName`、`rowsWithEmptyBlocks[*].fileName` 与 `failedFileNames[*]`；不改变三类 prompt 的业务字段、选择顺序或 merchantId 展示合同。
+- overwrite continuation footprint 与主 service state 分开计费；生命周期测试执行真实 legacy preflight seam，再对 future release 义务做 characterization，不能把 callback 或重 plan 作为可序列化自证。
+- golden 仍以真实 workbook writer/reader 与 production generation seam 为真相；金额、币种、余额 seed、Windows 与真实样本继续保留人工门禁。
+
+没有新的用户选择型 BLOCK。若 production seam 证明 alias 或 confirmation ownership 与上述证据冲突，则停止扩大合同并回报，不修改 live 行为。
+
 ## Reviewer 4 Status Array / Progress Evidence Addendum（2026-08-28）
 
 ### 合同取证与决定
@@ -62,7 +83,7 @@
 | exact built-ins / binary fast-fail / budget override | BLOCK（P0合同） | production retained graph无binary需求，Buffer/TypedArray/DataView/ArrayBuffer均O(1)拒绝；Map/Set只接受exact descriptor-safe shape；override只可收紧 | 任意自定义class/Proxy iterator沙箱 |
 | purpose-specific public interaction DTO | BLOCK（P0合同） | 从现有Main→Renderer三类真实prompt取证，冻结exact bounded schema | token store、waiting-user continuation、新UI字段 |
 | Protocol envelope ceiling | BLOCK（P0合同） | 用真实envelope builder/validator证明最大合法public DTO可发送 | 修改Platform ceiling或runtime adopt顺序 |
-| 完整五globals projection | BLOCK（P0 probe） | 抽取可复用production-shape builder，明确persistent/token handle/private context唯一所有权；callback只characterize不进入目标graph | Worker state adoption/E09-A |
+| 当轮已知五globals projection（final addendum再补第六项） | BLOCK（P0 probe） | 抽取可复用production-shape builder，明确persistent/token handle/private context唯一所有权；callback只characterize不进入目标graph | Worker state adoption/E09-A |
 | production generation seam golden | BLOCK（P0 golden） | 抽取只读characterization seam，真实执行current/all、余额、warning/cache/error零artifact | Publisher/all-or-none、atomic seed settlement |
 | TMPDIR deterministic | PROBE | 去除绝对临时路径长度对exact rawBytes的影响，默认与`TMPDIR=/tmp`双跑 | 把heap/RSS动态值冻结为跨平台合同 |
 
@@ -72,7 +93,7 @@
 | --- | --- | --- | --- |
 | 三类Renderer prompt的现有真实字段与unknown-field行为 | PROBE | `src/main.js` pending builders、renderer/preload consumer、既有unit | purpose-specific constructor只接受现有展示字段；二维原始行/private path/unknown拒绝 |
 | 实际Platform command envelope的固定wrapper开销 | PROBE | background-execution protocol builder/schema/validator | 最大合法public DTO经真实builder+validator不超过256 KiB，超1 byte fail closed |
-| 五globals中同一detailRows的唯一目标所有者 | PROBE | globals lifecycle、remembered context/pending clone/session | projection inventory与测试证明persistent只持session/remembered summary，private rows只在token context一次；callback只转serializable evidence |
+| 六globals中重rows/confirmation的唯一目标所有者 | PROBE | globals lifecycle、remembered context/pending clone/session/overwrite confirmation | projection inventory与测试证明persistent只持session/remembered summary，private rows只在token context一次；confirmation只投影record/digest/ref/count，callback只characterize |
 | 可测试production generation seam的最小抽取点 | PROBE | `generateStatementFiles`与statement-generation helper依赖图 | 直接执行同一production函数，覆盖current/all、name/warning/cache/balance/error零artifact，live handler无行为变化 |
 | BigAccount展示prompt是否仍应携带legacy `contextId` | PROBE | `buildBigAccountSelectionRequiredResult`、`buildBigAccountPreviewResult`与冻结TechDoc exact-eight handle | prompt不携带第二handle；外层token的`tokenId`唯一替代legacy Main `contextId` |
 
@@ -91,7 +112,7 @@
 | --- | --- | --- |
 | exact base 无漂移，Statement 五个 canonical action 均为 service/thread-single 且 `production.enabled=false` | `git rev-parse HEAD`；canonical `policy-registry.v3.2.x.json` 的五个 `statement:*` entry | P0 不能切 live 路径或修改 production flag |
 | Platform 要求 state/token 在公开前完成 `request → grant → adopted → adopt-ack`，Main 只持 bounded DTO | Platform Contract v1 §4.6、§6、§11；v3.2.3 Spec §3～§5 | P0 只能冻结 contract/estimator，不能用本地 Map/token 绕过 reservation |
-| 现有完整 Statement state 由 Main globals 持有 | `src/main.js` 的 `statementImportSessions`、`lastFileImportContext`、`lastPendingBigAccountSelection`、`lastManualBalancePrompt`、`lastGeneratedExports` | estimator/probe 必须覆盖这些实际 graph；E09-A 才迁移所有权 |
+| 现有完整 Statement state 由 Main globals 持有 | `src/main.js` 的 `statementImportSessions`、`lastFileImportContext`、`lastPendingBigAccountSelection`、`lastManualBalancePrompt`、`lastPendingBalanceSeedConfirmation`、`lastGeneratedExports` | estimator/probe 必须覆盖这些实际 graph；E09-A 才迁移所有权 |
 | pending big-account context 会保留 `fileEntries.detailRows`、选择行、source evidence 与回调；remember context 还会再次 clone rows | `rememberPendingBigAccountSelection`、`createPendingBigAccountSelectionContext`、`rememberLastFileImportContext` | public DTO 禁止携带 rows/callback/path/private evidence；private token footprint 必须独立计费 |
 | session 的 current 是 `currentBatchId` 对应 entryIds，all 是 `fileEntries` 原顺序浅拷贝 | `src/main-process/statement-session.js#getStatementSessionEntries` | current/all golden 必须冻结成员和稳定顺序，不能靠名称推断 |
 | legacy 生成核心复用 `buildMappedRows`、`buildDetailExportRows`、session merge、balance seed store 与 workbook writer | `src/backend/file-service`、`statement-session.js`、`statement-generation.js`、`src/main.js` generation functions | characterization 必须执行真实 production modules，不复制算法或用 mock 自证 |
@@ -103,7 +124,7 @@
 | 未知 | 类型 | 影响 | 可逆性 | 当前证据 | 处理 | 最便宜验证方式 | 当前决定 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 哪些字段属于 stable service state、private token context 与 public DTO | 数据所有权/隐私 | 高 | 一般 | Spec 给所有权原则，legacy graph 可取证 | PROBE | 沿 globals、pending builder、renderer 消费字段建立字段级 inventory | 已关闭：Main handle 按 TechDoc exact-eight；public DTO 剥离 reservation/session/private rows/path；status 仅 bounded summary |
-| footprint 如何对共享引用、数组自定义 metadata 与 exact Map/Set 计费，binary是否属于支持域 | 资源/容量 | 高 | 一般 | legacy rows 用数组加 enumerable metadata；现有五globals无binary retained graph | PROBE | 构造production-shape graph与实际heap delta/structured graph交叉probe；large view必须在预算扫描前快速完成 | 已关闭：deterministic graph estimator + 50% headroom + 4 KiB rounding，shared/cycle只计一次；exact Map/Set计费；所有binary O(1) fail closed；override只可收紧canonical上限 |
+| footprint 如何对共享引用、数组自定义 metadata 与 exact Map/Set 计费，binary是否属于支持域 | 资源/容量 | 高 | 一般 | legacy rows 用数组加 enumerable metadata；现有六globals无binary retained graph | PROBE | 构造production-shape graph与实际heap delta/structured graph交叉probe；large view必须在预算扫描前快速完成 | 已关闭：deterministic graph estimator + 50% headroom + 4 KiB rounding，shared/cycle只计一次；exact Map/Set计费；所有binary O(1) fail closed；override只可收紧canonical上限 |
 | 基线规模应覆盖多少行/列/批次/token | 容量 | 高 | 容易 | canonical budget 256 MiB，但真实样本批准尚未存在 | PROBE | 用现有 Statement row shape 扩展到固定多批次规模，记录 estimator 与 child-process heap/RSS delta | 已关闭P0基线：50k行/4批次/1 token；仅为 generated production-shape evidence，不解除真实样本/Windows gate |
 | legacy import reservation 失败时旧 session 保留还是失效 | 状态生命周期 | 高 | 一般 | E09-A 尚未实现 resource adoption | PROBE（后续） | E09-A 在 candidate adoption fault injection 对照本 P0 golden | P0 不实现；冻结当前 legacy mutation/golden，E09-A 必须保持行为 |
 | token single-use/TTL/stale 的 runtime 实现细节 | 状态生命周期 | 高 | 一般 | canonical policy 已冻结规则，但 token store 属 E09-B | PROBE（后续） | E09-B token store fault/race tests | P0 只冻结 DTO/resource contract，不提前实现 store |

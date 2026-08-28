@@ -9,6 +9,8 @@ const {
   STATEMENT_ACTION_PURPOSES,
   STATEMENT_RESOURCE_CONTRACT,
   STATEMENT_RESULT_VALIDATORS,
+  createStatementBalanceSeedOverwriteContinuationDto,
+  createStatementBalanceSeedOverwritePrivateContextDto,
   createStatementInteractionRequiredResult,
   createStatementPublicInteractionDto,
   createStatementStatusDto,
@@ -383,7 +385,8 @@ test('Main token handle冻结TechDoc exact字段，Renderer DTO剥离reservation
   assert.equal(Object.isFrozen(publicDto), true);
   assert.equal(Object.hasOwn(publicDto, 'reservationId'), false);
   assert.equal(Object.hasOwn(publicDto, 'sessionKey'), false);
-  assert.equal(publicDto.prompt.rows[0].fileName, '账单.xlsx');
+  assert.equal(publicDto.prompt.rows[0].fileName, '来源文件 1');
+  assert.equal(publicDto.prompt.rowsWithEmptyBlocks[0].fileName, '来源文件 1');
 
   assert.throws(
     () => createStatementPublicInteractionDto({
@@ -406,20 +409,62 @@ test('Main token handle冻结TechDoc exact字段，Renderer DTO剥离reservation
     }),
     (error) => error.code === 'STATEMENT_PUBLIC_DTO_PRIVATE_FIELD'
   );
-  assert.throws(
-    () => createStatementPublicInteractionDto({
-      token: token(),
-      prompt: bigAccountPrompt({
-        rows: Array.from({ length: 1024 }, (_, index) => ({
-          index,
-          label: `${index + 1}.`,
-          sourceRowNumber: index + 2,
-          fileName: 'x'.repeat(512)
-        }))
-      })
-    }),
-    (error) => error.code === 'STATEMENT_PUBLIC_DTO_TOO_LARGE'
+  const rawNameHeavy = createStatementPublicInteractionDto({
+    token: token(),
+    prompt: bigAccountPrompt({
+      rows: Array.from({ length: 1024 }, (_, index) => ({
+        index,
+        label: `${index + 1}.`,
+        sourceRowNumber: index + 2,
+        fileName: `${'6'.repeat(480)}-${index}`.slice(0, 512)
+      }))
+    })
+  });
+  assert.equal(rawNameHeavy.prompt.rows[0].fileName, '来源文件 1');
+  assert.equal(rawNameHeavy.prompt.rows[1023].fileName, '来源文件 1024');
+  assert.equal(JSON.stringify(rawNameHeavy).includes('6'.repeat(32)), false);
+
+  const mismatch = createStatementPublicInteractionDto({
+    token: token(),
+    prompt: bigAccountPrompt({
+      status: 'remember-order-mismatch',
+      message: `原始文件：${'6222021234567890.xlsx、'.repeat(200)}`,
+      rows: [
+        { index: 0, label: '1.', sourceRowNumber: 2, fileName: '6222021234567890.xlsx' },
+        { index: 1, label: '2.', sourceRowNumber: 2, fileName: '客户私有目录.xlsx' }
+      ],
+      rowsWithEmptyBlocks: [
+        { index: 0, label: '1.', sourceRowNumber: 2, fileName: '6222021234567890.xlsx' },
+        { index: 1, label: '2.', sourceRowNumber: 2, fileName: '客户私有目录.xlsx' }
+      ],
+      failedFileNames: ['客户私有目录.xlsx', '6222021234567890.xlsx'],
+      forceMode: 'fixed'
+    })
+  });
+  assert.deepEqual(mismatch.prompt.rows.map((row) => row.fileName), ['来源文件 1', '来源文件 2']);
+  assert.deepEqual(mismatch.prompt.failedFileNames, ['来源文件 2', '来源文件 1']);
+  assert.equal(
+    mismatch.prompt.message,
+    '部分来源文件的账户个数或账户号无法自动匹配，请检查后重新选择（共2个：来源文件 2、来源文件 1）'
   );
+  assert.doesNotMatch(JSON.stringify(mismatch), /6222021234567890|客户私有目录/);
+
+  const boundedMismatch = createStatementPublicInteractionDto({
+    token: token(),
+    prompt: bigAccountPrompt({
+      status: 'remember-order-mismatch',
+      message: `旧实现会拼接：${'6222021234567890.xlsx、'.repeat(1024)}`,
+      failedFileNames: Array.from(
+        { length: 1024 },
+        (_, index) => `${String(index).padStart(4, '0')}-${'x'.repeat(507)}`
+      ),
+      forceMode: 'unfixed'
+    })
+  });
+  assert.equal(boundedMismatch.prompt.failedFileNames.length, 1024);
+  assert.ok(boundedMismatch.prompt.message.length < 1024);
+  assert.match(boundedMismatch.prompt.message, /共1024个/);
+  assert.ok(utf8Size(boundedMismatch) < STATEMENT_RESOURCE_CONTRACT.publicInteractionMaxBytes);
 });
 
 test('三类真实Statement prompt按purpose exact冻结并拒绝未知字段、二维原始行与purpose错配', () => {
@@ -478,6 +523,61 @@ test('三类真实Statement prompt按purpose exact冻结并拒绝未知字段、
       prompt: bigAccountPrompt()
     }),
     (error) => error.code === 'STATEMENT_DTO_KEYS_INVALID'
+  );
+});
+
+test('overwrite confirmation冻结manual-balance单token的exact private/public continuation且拒绝重对象', () => {
+  const privateContextInput = {
+    kind: 'balance-seed-overwrite',
+    purpose: 'manual-balance',
+    serviceGeneration: 3,
+    sessionRevision: 9,
+    record: {
+      bankName: '中行',
+      merchantId: '6222 0212 3456 7890',
+      currency: 'USD',
+      billDate: '2026-07-31',
+      endBalance: 1234.56,
+      templateName: '中行-上海',
+      generationMethod: '人工录入',
+      existingIndex: 0
+    },
+    freshnessEvidence: {
+      recordsDigest: 'b'.repeat(64),
+      inputSourcesDigest: 'c'.repeat(64),
+      statementSessionKey: 'template:17',
+      currentBatchId: 'batch-2',
+      scope: 'all'
+    },
+    inputSourceCount: 2,
+    allowedChoiceDigest: 'a'.repeat(64)
+  };
+  const privateContext = createStatementBalanceSeedOverwritePrivateContextDto(privateContextInput);
+  const publicContinuation = createStatementBalanceSeedOverwriteContinuationDto({
+    token: token({ purpose: 'manual-balance' })
+  });
+
+  assert.equal(Object.isFrozen(privateContext), true);
+  assert.deepEqual(publicContinuation, {
+    message: '该日期的余额已存在，确认覆盖吗？',
+    status: 'confirm-overwrite',
+    tokenId: 'opaque-token-1'
+  });
+  assert.equal(Object.hasOwn(publicContinuation, 'contextId'), false);
+  assert.doesNotMatch(
+    JSON.stringify(privateContext),
+    /storageRoot|records\"|inputFilePaths|importContext|session\"|assertFresh|contextId/
+  );
+  assert.throws(
+    () => createStatementBalanceSeedOverwritePrivateContextDto({
+      ...privateContextInput,
+      assertFresh() {}
+    }),
+    (error) => error.code === 'STATEMENT_DTO_KEYS_INVALID'
+  );
+  assert.throws(
+    () => createStatementBalanceSeedOverwriteContinuationDto({ token: token() }),
+    (error) => error.code === 'STATEMENT_TOKEN_PURPOSE_INVALID'
   );
 });
 
@@ -646,6 +746,41 @@ test('done merchantId例外对错误action/purpose/path/parent/unknown key保持
     (error) => error.code === 'PROTOCOL_PRIVACY_VIOLATION' &&
       error.path === '/payload/result/interaction/prompt/rows/0/fileName'
   );
+
+  const safeButUnaliasedFileName = structuredClone(bigInteraction);
+  safeButUnaliasedFileName.prompt.rows[0].fileName = 'customer-statement.xlsx';
+  const safeButUnaliasedMessage = structuredClone(bigInteraction);
+  safeButUnaliasedMessage.prompt.message = '临时展示消息';
+  const mismatchInteraction = createStatementPublicInteractionDto({
+    token: token(),
+    prompt: bigAccountPrompt({
+      status: 'remember-order-mismatch',
+      failedFileNames: ['statement-a.xlsx'],
+      forceMode: 'fixed'
+    })
+  });
+  const safeButUnaliasedFailedName = structuredClone(mismatchInteraction);
+  safeButUnaliasedFailedName.prompt.failedFileNames[0] = 'statement-a.xlsx';
+  for (const unaliasedInteraction of [
+    safeButUnaliasedFileName,
+    safeButUnaliasedMessage,
+    safeButUnaliasedFailedName
+  ]) {
+    const unaliasedResult = interactionResult(unaliasedInteraction);
+    assert.doesNotThrow(() => statementEventEnvelope({
+      actionKey: 'statement:import',
+      operation: 'job:done',
+      payload: { result: unaliasedResult }
+    }, policyRegistry));
+    assert.throws(
+      () => validateResultBody(
+        policyRegistry.get('statement:import'),
+        unaliasedResult,
+        policyRegistry.getBinding('statement:import', 'result.validatorKey')
+      ),
+      (error) => error.code === 'RESULT_VALIDATION_FAILED'
+    );
+  }
 
   const scopeWithMerchant = structuredClone(createStatementPublicInteractionDto({
     token: token({ purpose: 'scope-generation' }),
@@ -828,29 +963,28 @@ test('真实Supervisor让generic-safe M001/scope progress进入onProgress但不�
 });
 
 function maximalBigAccountPublicDto() {
-  const rows = Array.from({ length: 1024 }, (_, index) => ({
-    index,
-    label: `${index + 1}.`,
-    sourceRowNumber: index + 2,
-    fileName: ''
+  const bigAccounts = Array.from({ length: 1024 }, () => ({
+    merchantId: 'M',
+    currencies: ['USD'],
+    isMultiCurrency: false
   }));
-  const prompt = bigAccountPrompt({ rows });
+  const prompt = bigAccountPrompt({ bigAccounts });
   let dto = createStatementPublicInteractionDto({ token: token(), prompt });
   let remaining = STATEMENT_RESOURCE_CONTRACT.publicInteractionMaxBytes - utf8Size(dto);
-  for (const row of rows) {
-    const count = Math.min(512, remaining);
-    row.fileName = 'x'.repeat(count);
+  for (const account of bigAccounts) {
+    const count = Math.min(511, remaining);
+    account.merchantId += 'x'.repeat(count);
     remaining -= count;
     if (remaining === 0) break;
   }
-  assert.equal(remaining, 0, '合法summary rows必须能填满保守inner ceiling');
+  assert.equal(remaining, 0, '合法domain summary必须能填满保守inner ceiling');
   dto = createStatementPublicInteractionDto({ token: token(), prompt });
   assert.equal(utf8Size(dto), STATEMENT_RESOURCE_CONTRACT.publicInteractionMaxBytes);
-  return { dto, prompt, rows };
+  return { dto, prompt, bigAccounts };
 }
 
 test('最大合法public interaction经真实done route/context Protocol envelope仍可发送，+1 byte预先拒绝', () => {
-  const { dto, prompt, rows } = maximalBigAccountPublicDto();
+  const { dto, prompt, bigAccounts } = maximalBigAccountPublicDto();
   const policyRegistry = createStatementPolicyRegistry();
   const result = createStatementInteractionRequiredResult({
     status: 'interaction-required',
@@ -884,9 +1018,9 @@ test('最大合法public interaction经真实done route/context Protocol envelop
   assert.ok(wrapperBytes <= STATEMENT_RESOURCE_CONTRACT.publicInteractionWireReserveBytes);
   assert.ok(Buffer.byteLength(serialized) <= STATEMENT_RESOURCE_CONTRACT.protocolEnvelopeMaxBytes);
 
-  const expandableRow = rows.find((row) => row.fileName.length < 512);
-  assert.ok(expandableRow, '至少一行仍可在单字段上合法增加一个byte');
-  expandableRow.fileName += 'x';
+  const expandableAccount = bigAccounts.find((account) => account.merchantId.length < 512);
+  assert.ok(expandableAccount, '至少一个domain summary字段仍可合法增加一个byte');
+  expandableAccount.merchantId += 'x';
   assert.throws(
     () => createStatementPublicInteractionDto({ token: token(), prompt }),
     (error) => error.code === 'STATEMENT_PUBLIC_DTO_TOO_LARGE'

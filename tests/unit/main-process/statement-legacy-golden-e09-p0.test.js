@@ -445,26 +445,39 @@ test('production generation seam真实执行两batch current/all workbook、命�
   const session = createStatementImportSession({ templateId: 1, templateName: '中行-上海' });
   const cache = { detail: null, balance: null, allDetail: null, allBalance: null };
   for (const [fileName, detailRows] of [['batch-one.xlsx', rows1], ['batch-two.xlsx', rows2]]) {
+    const fileEntry = buildStatementFileEntry({
+      buildEntryId: () => `entry-${++entryId}`,
+      filePath: path.join(root, fileName),
+      detailRows
+    });
     appendStatementSessionImport({
       buildBatchId: () => `batch-${++batchId}`,
       lastGeneratedExports: cache,
       session,
-      fileEntries: [buildStatementFileEntry({
-        buildEntryId: () => `entry-${++entryId}`,
-        filePath: path.join(root, fileName),
-        detailRows
-      })]
+      fileEntries: [fileEntry]
     });
   }
 
+  const currentEntries = getStatementSessionEntries(session, 'current');
+  const allEntries = getStatementSessionEntries(session, 'all');
   const currentPrepared = generation.buildPreparedStatementBatchFromEntries({
     config,
-    fileEntries: getStatementSessionEntries(session, 'current')
+    fileEntries: currentEntries
   });
   const allPrepared = generation.buildPreparedStatementBatchFromEntries({
     config,
-    fileEntries: getStatementSessionEntries(session, 'all')
+    fileEntries: allEntries
   });
+  assert.deepEqual(
+    currentEntries.map((entry) => path.basename(entry.filePath)),
+    GOLDEN.generationScopes.currentEntrySourceOrder
+  );
+  assert.deepEqual(
+    allEntries.map((entry) => path.basename(entry.filePath)),
+    GOLDEN.generationScopes.allEntrySourceOrder
+  );
+  assert.deepEqual(currentPrepared.detailRows.rowMetas, GOLDEN.generationScopes.currentRowMetas);
+  assert.deepEqual(allPrepared.detailRows.rowMetas, GOLDEN.generationScopes.allRowMetas);
   const current = generation.generateStatementFiles({
     config,
     preparedBatch: currentPrepared,
@@ -476,21 +489,19 @@ test('production generation seam真实执行两batch current/all workbook、命�
     scope: 'all'
   });
 
-  assert.equal(current.detail.fileName, '中行-上海-M001-COMMON-2026-08-02.xlsx');
-  assert.equal(all.detail.fileName, '中行-上海-COMMON-2026-08-01~2026-08-02.xlsx');
-  assert.deepEqual(current.warnings, []);
-  assert.deepEqual(all.warnings, [{
-    type: 'detail-row-skipped',
-    rowNumber: 3,
-    creditAmount: '0',
-    debitAmount: '0'
-  }]);
+  assert.equal(current.detail.fileName, GOLDEN.generationScopes.currentFileName);
+  assert.equal(all.detail.fileName, GOLDEN.generationScopes.allFileName);
+  assert.deepEqual(current.warnings, GOLDEN.generationScopes.currentWarnings);
+  assert.deepEqual(all.warnings, GOLDEN.generationScopes.allWarnings);
   const workbookRows = (filePath) => {
     const workbook = XLSX.readFile(filePath, { raw: true });
     return XLSX.utils.sheet_to_json(workbook.Sheets.COMMON, { header: 1, defval: '' });
   };
-  assert.equal(workbookRows(current.detail.filePath).length, 2);
-  assert.equal(workbookRows(all.detail.filePath).length, 3);
+  assert.deepEqual(
+    workbookRows(current.detail.filePath),
+    GOLDEN.generationScopes.currentWorkbookRows
+  );
+  assert.deepEqual(workbookRows(all.detail.filePath), GOLDEN.generationScopes.allWorkbookRows);
   assert.match(path.basename(all.detail.filePath), /__all\.xlsx$/);
 
   generation.cacheCurrentStatementExports({
@@ -504,12 +515,7 @@ test('production generation seam真实执行两batch current/all workbook、命�
     all: cache.allDetail.fileName,
     statementSessionKey: cache.statementSessionKey,
     currentBatchId: cache.currentBatchId
-  }, {
-    current: current.detail.fileName,
-    all: all.detail.fileName,
-    statementSessionKey: session.key,
-    currentBatchId: session.currentBatchId
-  });
+  }, GOLDEN.generationScopes.detailCache);
 });
 
 test('production generation seam覆盖混合币种alias、statement直取与calculated余额', (t) => {
@@ -572,6 +578,31 @@ test('production generation seam覆盖混合币种alias、statement直取与calc
       ['USD', 46236, 1100]
     ]
   );
+  const allBalanceOnly = generation.generateStatementFiles({
+    config: directConfig,
+    preparedBatch: directPrepared,
+    scope: 'all',
+    includeDetail: false,
+    includeBalance: true
+  });
+  assert.equal(allBalanceOnly.detail, null);
+  assert.equal(allBalanceOnly.message, '余额账单可导出');
+  assert.equal(
+    allBalanceOnly.balance.fileName,
+    GOLDEN.generationScopes.allBalanceOnly.fileName
+  );
+  assert.deepEqual(allBalanceOnly.warnings, GOLDEN.generationScopes.allBalanceOnly.warnings);
+  assert.deepEqual(
+    balanceRows(allBalanceOnly.balance.filePath),
+    GOLDEN.generationScopes.allBalanceOnly.workbookRows
+  );
+  const allBalanceCache = { allBalance: null };
+  generation.cacheAllStatementExport(allBalanceCache, 'balance', allBalanceOnly.balance);
+  assert.deepEqual({
+    fileName: allBalanceCache.allBalance.fileName,
+    templateName: allBalanceCache.allBalance.templateName
+  }, GOLDEN.generationScopes.allBalanceOnly.cache);
+  assert.match(path.basename(allBalanceOnly.balance.filePath), /__all\.xlsx$/);
 
   const calculatedRows = buildMappedRows({
     inputFilePath: writeSourceWorkbook(root, 'calculated-balance.xlsx', [

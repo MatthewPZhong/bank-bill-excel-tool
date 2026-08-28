@@ -20,7 +20,7 @@
       "pageBytes": 4096
     },
     "legacyInventory": {
-      "globalNames": ["statementImportSessions", "lastFileImportContext", "lastPendingBigAccountSelection", "lastManualBalancePrompt", "lastGeneratedExports"],
+      "globalNames": ["statementImportSessions", "lastFileImportContext", "lastPendingBigAccountSelection", "lastManualBalancePrompt", "lastPendingBalanceSeedConfirmation", "lastGeneratedExports"],
       "sessionCount": 1,
       "sessionFileEntryCount": 4,
       "sessionRowCount": 25000,
@@ -32,11 +32,24 @@
       "assertSessionCurrentPresent": true,
       "legacyBigAccountContextIdPresent": true,
       "manualBalancePromptPresent": false,
+      "balanceSeedConfirmationPresent": false,
+      "balanceSeedConfirmationCallbackPresent": false,
+      "balanceSeedConfirmationRecordCount": 0,
       "generatedExportKeys": ["detail", "balance", "allDetail", "allBalance"],
       "excludedNonStatementExportKeys": ["newAccount", "monthlyBalance"]
     },
     "mainTokenHandleBytes": 260,
-    "publicDtoBytes": 805
+    "publicDtoBytes": 795,
+    "balanceSeedOverwrite": {
+      "kind": "pending-interaction",
+      "rawBytes": 2012,
+      "estimatedBytes": 4096,
+      "budgetBytes": 268435456,
+      "headroomNumerator": 3,
+      "headroomDenominator": 2,
+      "pageBytes": 4096
+    },
+    "balanceSeedOverwritePublicDtoBytes": 125
   },
   "amountModes": {
     "direct": {
@@ -106,6 +119,50 @@
       "all": ["entry-1", "entry-2"],
       "currentBatchId": "batch-1",
       "batches": [{"id": "batch-1", "entryIds": ["entry-1", "entry-2"]}]
+    }
+  },
+  "generationScopes": {
+    "currentEntrySourceOrder": ["batch-two.xlsx"],
+    "allEntrySourceOrder": ["batch-one.xlsx", "batch-two.xlsx"],
+    "currentRowMetas": [{"sourceRowNumber": 2}],
+    "allRowMetas": [
+      {"sourceRowNumber": 2},
+      {"sourceRowNumber": 3},
+      {"sourceRowNumber": 2}
+    ],
+    "currentFileName": "中行-上海-M001-COMMON-2026-08-02.xlsx",
+    "allFileName": "中行-上海-COMMON-2026-08-01~2026-08-02.xlsx",
+    "currentWarnings": [],
+    "allWarnings": [
+      {"type": "detail-row-skipped", "rowNumber": 3, "creditAmount": "0", "debitAmount": "0"}
+    ],
+    "currentWorkbookRows": [
+      ["BillDate", "MerchantId", "Currency", "Credit Amount", "Debit Amount"],
+      [46236, "M001", "USD", "", 40]
+    ],
+    "allWorkbookRows": [
+      ["BillDate", "MerchantId", "Currency", "Credit Amount", "Debit Amount"],
+      [46235, "M001", "USD", 100, ""],
+      [46236, "M001", "USD", "", 40]
+    ],
+    "detailCache": {
+      "current": "中行-上海-M001-COMMON-2026-08-02.xlsx",
+      "all": "中行-上海-COMMON-2026-08-01~2026-08-02.xlsx",
+      "statementSessionKey": "1",
+      "currentBatchId": "batch-2"
+    },
+    "allBalanceOnly": {
+      "fileName": "中行-上海-BALANCE-2026-08-01~2026-08-02.xlsx",
+      "warnings": [],
+      "workbookRows": [
+        ["中行", "上海", "EUR", "M001", 46236, "", "", 900, ""],
+        ["中行", "上海", "USD", "M001", 46235, "", "", 1000, ""],
+        ["中行", "上海", "USD", "M001", 46236, "", "", 1100, ""]
+      ],
+      "cache": {
+        "fileName": "中行-上海-BALANCE-2026-08-01~2026-08-02.xlsx",
+        "templateName": "中行-上海"
+      }
     }
   },
   "balance": {

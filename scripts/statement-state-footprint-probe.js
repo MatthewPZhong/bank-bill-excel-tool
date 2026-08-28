@@ -94,7 +94,23 @@ function createBaselineGraph({ rows: totalRows, batches, tokenCount }, root) {
   if (projection.mainTokenHandles.length !== tokenCount) {
     throw new Error('probe projection token count does not match requested canonical sample');
   }
-  return { before, after, projection };
+  let overwriteLegacyGlobals = createStatementProbeLegacyGlobals({
+    seed,
+    rows: 1,
+    batches: 1,
+    root,
+    purpose: 'manual-balance',
+    includeBalanceSeedConfirmation: true
+  });
+  const overwriteProjection = buildStatementProbeProjection(overwriteLegacyGlobals, {
+    purpose: 'manual-balance',
+    serviceGeneration: 1,
+    sessionRevision: 1,
+    tokenId: 'probe-overwrite-token',
+    reservationId: 'probe-overwrite-reservation'
+  });
+  overwriteLegacyGlobals = null;
+  return { before, after, projection, overwriteProjection };
 }
 
 function main() {
@@ -115,6 +131,9 @@ function main() {
     const pendingFootprints = graph.projection.privateContexts.map((context) => (
       estimateStatementPendingInteractionFootprint(context)
     ));
+    const balanceSeedOverwriteFootprint = estimateStatementPendingInteractionFootprint(
+      graph.overwriteProjection.privateContexts[0]
+    );
     const publicDto = createStatementPublicInteractionDto({
       token: graph.projection.mainTokenHandles[0],
       prompt: {
@@ -136,7 +155,7 @@ function main() {
       }
     });
     const result = {
-      probeVersion: 1,
+      probeVersion: 2,
       sampleClass: 'generated-production-shape-not-business-representative',
       inputs,
       measured: {
@@ -149,6 +168,7 @@ function main() {
       },
       stateFootprint,
       pendingFootprints,
+      balanceSeedOverwriteFootprint,
       legacyInventory: graph.projection.legacyInventory,
       ownership: graph.projection.ownership,
       mainTokenHandleBytes: Buffer.byteLength(
@@ -156,6 +176,10 @@ function main() {
         'utf8'
       ),
       publicDtoBytes: Buffer.byteLength(JSON.stringify(publicDto), 'utf8'),
+      balanceSeedOverwritePublicDtoBytes: Buffer.byteLength(
+        JSON.stringify(graph.overwriteProjection.balanceSeedOverwriteContinuation),
+        'utf8'
+      ),
       productionEnabled: false,
       caveat: 'This fixed generated graph calibrates retained state only; it is not a parser peak, Windows packaged, or real business sample approval.'
     };

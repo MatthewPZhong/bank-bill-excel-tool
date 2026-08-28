@@ -117,9 +117,45 @@ const MANUAL_BALANCE_PROMPT_KEYS = Object.freeze([
 ]);
 const SCOPE_GENERATION_PROMPT_KEYS = Object.freeze(['status', 'kind', 'options']);
 const SCOPE_OPTION_KEYS = Object.freeze(['scope', 'label']);
+const BALANCE_SEED_OVERWRITE_PRIVATE_KEYS = Object.freeze([
+  'kind',
+  'purpose',
+  'serviceGeneration',
+  'sessionRevision',
+  'record',
+  'freshnessEvidence',
+  'inputSourceCount',
+  'allowedChoiceDigest'
+]);
+const BALANCE_SEED_OVERWRITE_RECORD_KEYS = Object.freeze([
+  'bankName',
+  'merchantId',
+  'currency',
+  'billDate',
+  'endBalance',
+  'templateName',
+  'generationMethod',
+  'existingIndex'
+]);
+const BALANCE_SEED_OVERWRITE_FRESHNESS_KEYS = Object.freeze([
+  'recordsDigest',
+  'inputSourcesDigest',
+  'statementSessionKey',
+  'currentBatchId',
+  'scope'
+]);
+const BALANCE_SEED_OVERWRITE_RELEASE_INPUT_KEYS = Object.freeze([
+  'event',
+  'currentTokenId',
+  'replacementTokenId'
+]);
 const MAX_BIG_ACCOUNT_ROWS = 1024;
 const MAX_BIG_ACCOUNTS = 1024;
 const MAX_CURRENCIES_PER_ACCOUNT = 64;
+const MAX_MISMATCH_MESSAGE_ALIAS_PREVIEW = 8;
+const BIG_ACCOUNT_SELECT_MESSAGE = '请选择本次使用的大账号 / 币种';
+const BIG_ACCOUNT_MISMATCH_MESSAGE = '部分来源文件的账户个数或账户号无法自动匹配，请检查后重新选择';
+const BALANCE_SEED_OVERWRITE_MESSAGE = '该日期的余额已存在，确认覆盖吗？';
 const FORBIDDEN_PUBLIC_KEYS = new Set([
   'detailRows',
   'preparedBatch',
@@ -332,9 +368,9 @@ function createBigAccountPromptDto(input) {
   if (record.selectionMode !== 'multi-row') {
     fail('STATEMENT_PUBLIC_DTO_MODE_INVALID', 'Big-account selectionMode must be multi-row');
   }
-  const rows = boundedArray(record.rows, 'rows', MAX_BIG_ACCOUNT_ROWS)
+  const rawRows = boundedArray(record.rows, 'rows', MAX_BIG_ACCOUNT_ROWS)
     .map((row, index) => createBigAccountRowDto(row, index, 'rows'));
-  const rowsWithEmptyBlocks = boundedArray(
+  const rawRowsWithEmptyBlocks = boundedArray(
     record.rowsWithEmptyBlocks,
     'rowsWithEmptyBlocks',
     MAX_BIG_ACCOUNT_ROWS
@@ -351,9 +387,47 @@ function createBigAccountPromptDto(input) {
     'fixedAssignments',
     MAX_BIG_ACCOUNT_ROWS
   ).map(createFixedAssignmentItemDto);
+  const rawFailedFileNames = hasFailedFileNames
+    ? boundedArray(
+      record.failedFileNames,
+      'failedFileNames',
+      MAX_BIG_ACCOUNT_ROWS
+    ).map((fileName, index) => boundedOptionalText(
+      fileName,
+      `failedFileNames[${index}]`,
+      512
+    ))
+    : null;
+  // Legacy Main 提供用于展示的 basename，但其中仍可能包含完整账号或用户自定义目录名。
+  // 冻结 Worker 边界只在 private context 保留原名，对外仅暴露按首次出现顺序生成的稳定别名。
+  const sourceAliases = new Map();
+  const displayAlias = (fileName) => {
+    if (!fileName) return '';
+    if (!sourceAliases.has(fileName)) {
+      sourceAliases.set(fileName, `来源文件 ${sourceAliases.size + 1}`);
+    }
+    return sourceAliases.get(fileName);
+  };
+  const rows = rawRows.map((row) => ({ ...row, fileName: displayAlias(row.fileName) }));
+  const rowsWithEmptyBlocks = rawRowsWithEmptyBlocks
+    .map((row) => ({ ...row, fileName: displayAlias(row.fileName) }));
+  const failedFileNames = rawFailedFileNames
+    ? rawFailedFileNames.map(displayAlias)
+    : null;
+  const publicMessage = status === 'select-big-account'
+    ? BIG_ACCOUNT_SELECT_MESSAGE
+    : (() => {
+        const uniqueAliases = Array.from(new Set(failedFileNames.filter(Boolean)));
+        const preview = uniqueAliases.slice(0, MAX_MISMATCH_MESSAGE_ALIAS_PREVIEW);
+        const suffix = uniqueAliases.length > preview.length ? '等' : '';
+        const previewText = preview.length ? `：${preview.join('、')}${suffix}` : '';
+        return `${BIG_ACCOUNT_MISMATCH_MESSAGE}（共${failedFileNames.length}个${previewText}）`;
+      })();
+  // 只校验 legacy 字段类型与总量边界，不把可能含敏感文件名的原始文本复制到 public DTO。
+  boundedText(record.message, 'message', STATEMENT_RESOURCE_CONTRACT.publicInteractionMaxBytes);
   const result = {
     status,
-    message: boundedText(record.message, 'message', 1024),
+    message: publicMessage,
     selectionMode: record.selectionMode,
     templateId: templateIdentity(record.templateId),
     rows,
@@ -363,15 +437,7 @@ function createBigAccountPromptDto(input) {
     fixedAssignments
   };
   if (hasFailedFileNames) {
-    result.failedFileNames = boundedArray(
-      record.failedFileNames,
-      'failedFileNames',
-      MAX_BIG_ACCOUNT_ROWS
-    ).map((fileName, index) => boundedOptionalText(
-      fileName,
-      `failedFileNames[${index}]`,
-      512
-    ));
+    result.failedFileNames = failedFileNames;
   }
   if (hasForceMode) {
     if (!['fixed', 'unfixed'].includes(record.forceMode)) {
@@ -380,6 +446,141 @@ function createBigAccountPromptDto(input) {
     result.forceMode = record.forceMode;
   }
   return result;
+}
+
+function createStatementBalanceSeedOverwritePrivateContextDto(input) {
+  const record = ownDataRecord(
+    input,
+    BALANCE_SEED_OVERWRITE_PRIVATE_KEYS,
+    'StatementBalanceSeedOverwritePrivateContext'
+  );
+  const seedRecord = ownDataRecord(
+    record.record,
+    BALANCE_SEED_OVERWRITE_RECORD_KEYS,
+    'StatementBalanceSeedOverwritePrivateContext.record'
+  );
+  const freshness = ownDataRecord(
+    record.freshnessEvidence,
+    BALANCE_SEED_OVERWRITE_FRESHNESS_KEYS,
+    'StatementBalanceSeedOverwritePrivateContext.freshnessEvidence'
+  );
+  if (record.kind !== 'balance-seed-overwrite' || record.purpose !== 'manual-balance') {
+    fail(
+      'STATEMENT_BALANCE_SEED_OVERWRITE_KIND_INVALID',
+      'Balance-seed overwrite continuation must use the manual-balance purpose'
+    );
+  }
+  if (typeof seedRecord.endBalance !== 'number' || !Number.isFinite(seedRecord.endBalance)) {
+    fail(
+      'STATEMENT_DTO_NUMBER_INVALID',
+      'StatementBalanceSeedOverwritePrivateContext.record.endBalance must be finite'
+    );
+  }
+  const result = {
+    kind: record.kind,
+    purpose: record.purpose,
+    serviceGeneration: positiveInteger(record.serviceGeneration, 'serviceGeneration'),
+    sessionRevision: nonNegativeInteger(record.sessionRevision, 'sessionRevision'),
+    record: {
+      bankName: boundedText(seedRecord.bankName, 'record.bankName', 512),
+      merchantId: boundedText(seedRecord.merchantId, 'record.merchantId', 512),
+      currency: boundedOptionalText(seedRecord.currency, 'record.currency', 32),
+      billDate: boundedText(seedRecord.billDate, 'record.billDate', 32),
+      endBalance: seedRecord.endBalance,
+      templateName: boundedText(seedRecord.templateName, 'record.templateName', 512),
+      generationMethod: boundedText(seedRecord.generationMethod, 'record.generationMethod', 128),
+      existingIndex: nonNegativeInteger(seedRecord.existingIndex, 'record.existingIndex')
+    },
+    freshnessEvidence: {
+      recordsDigest: freshness.recordsDigest,
+      inputSourcesDigest: freshness.inputSourcesDigest,
+      statementSessionKey: boundedOptionalText(
+        freshness.statementSessionKey,
+        'freshnessEvidence.statementSessionKey',
+        512
+      ),
+      currentBatchId: boundedOptionalText(
+        freshness.currentBatchId,
+        'freshnessEvidence.currentBatchId',
+        512
+      ),
+      scope: freshness.scope
+    },
+    inputSourceCount: nonNegativeInteger(record.inputSourceCount, 'inputSourceCount'),
+    allowedChoiceDigest: record.allowedChoiceDigest
+  };
+  if (!['current', 'all'].includes(result.freshnessEvidence.scope)) {
+    fail(
+      'STATEMENT_PUBLIC_DTO_SCOPE_INVALID',
+      'Balance-seed overwrite generation scope is invalid'
+    );
+  }
+  if (!SHA256_PATTERN.test(result.freshnessEvidence.recordsDigest) ||
+      !SHA256_PATTERN.test(result.freshnessEvidence.inputSourcesDigest) ||
+      !SHA256_PATTERN.test(result.allowedChoiceDigest)) {
+    fail(
+      'STATEMENT_TOKEN_DIGEST_INVALID',
+      'Balance-seed overwrite evidence must use lowercase SHA-256 digests'
+    );
+  }
+  return canonicalJsonSnapshot(result);
+}
+
+function createStatementBalanceSeedOverwriteContinuationDto({ token }) {
+  const handle = createStatementTokenHandleDto(token);
+  if (handle.purpose !== 'manual-balance') {
+    fail(
+      'STATEMENT_TOKEN_PURPOSE_INVALID',
+      'Balance-seed overwrite continuation requires a manual-balance token'
+    );
+  }
+  return canonicalJsonSnapshot({
+    status: 'confirm-overwrite',
+    message: BALANCE_SEED_OVERWRITE_MESSAGE,
+    tokenId: handle.tokenId
+  });
+}
+
+function createStatementBalanceSeedOverwriteReleaseCharacterization(input) {
+  const record = ownDataRecord(
+    input,
+    BALANCE_SEED_OVERWRITE_RELEASE_INPUT_KEYS,
+    'StatementBalanceSeedOverwriteReleaseCharacterization'
+  );
+  const reasons = {
+    confirm: 'consumed',
+    cancel: 'cancelled',
+    stale: 'stale',
+    replacement: 'replaced'
+  };
+  if (!Object.hasOwn(reasons, record.event)) {
+    fail(
+      'STATEMENT_BALANCE_SEED_OVERWRITE_EVENT_INVALID',
+      'Balance-seed overwrite release event is invalid'
+    );
+  }
+  const currentTokenId = boundedText(record.currentTokenId, 'currentTokenId');
+  let nextTokenId = null;
+  if (record.event === 'replacement') {
+    nextTokenId = boundedText(record.replacementTokenId, 'replacementTokenId');
+    if (nextTokenId === currentTokenId) {
+      fail(
+        'STATEMENT_BALANCE_SEED_OVERWRITE_REPLACEMENT_INVALID',
+        'Replacement must use a fresh token identity'
+      );
+    }
+  } else if (record.replacementTokenId !== null) {
+    fail(
+      'STATEMENT_BALANCE_SEED_OVERWRITE_REPLACEMENT_INVALID',
+      'Only replacement may provide a replacement token identity'
+    );
+  }
+  return canonicalJsonSnapshot({
+    event: record.event,
+    releasedTokenId: currentTokenId,
+    releaseReason: reasons[record.event],
+    nextTokenId
+  });
 }
 
 function createManualBalancePromptDto(input) {
@@ -595,8 +796,8 @@ function createStatementResultValidator(actionKey) {
   const allowFinanceSafeValue = createStatementFinanceSafeValueDelegate(actionKey);
   const validator = function validateStatementInteractionRequiredResult(value) {
     try {
-      createStatementInteractionRequiredResult(value, actionKey);
-      return true;
+      const normalized = createStatementInteractionRequiredResult(value, actionKey);
+      return canonicalizeJson(normalized) === canonicalizeJson(value);
     } catch (_error) {
       return false;
     }
@@ -718,6 +919,9 @@ module.exports = {
   STATEMENT_RESOURCE_CONTRACT,
   STATEMENT_RESULT_VALIDATORS,
   StatementContractError,
+  createStatementBalanceSeedOverwriteContinuationDto,
+  createStatementBalanceSeedOverwritePrivateContextDto,
+  createStatementBalanceSeedOverwriteReleaseCharacterization,
   createStatementFinanceSafeValueDelegate,
   createStatementInteractionRequiredResult,
   createStatementPublicInteractionDto,
