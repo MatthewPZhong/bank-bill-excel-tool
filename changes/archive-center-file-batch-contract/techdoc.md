@@ -533,6 +533,15 @@ type TargetSnapshot =
   | { exists: false }
   | { exists: true; snapshot: SourceSnapshot };
 
+type TargetParentIdentity = Readonly<{
+  canonicalRealPath: string;
+  aliasKey: string;
+  deviceId: string | null;
+  inode: string | null;
+  identityReliable: boolean;
+  identityKind: 'dev-inode' | 'unsupported';
+}>;
+
 type FilePlanItemBase = Readonly<{
   artifactKey: string;
   filePath: string;
@@ -550,6 +559,7 @@ type InputFilePlanItem = Readonly<FilePlanItemBase & {
 type OutputFilePlanItem = Readonly<FilePlanItemBase & {
   direction: 'output';
   targetSnapshot: TargetSnapshot;
+  targetParentIdentity: TargetParentIdentity;
 }>;
 
 type FilePlanV1 =
@@ -588,13 +598,13 @@ type ArtifactManifestV1 = Readonly<{
 只在 `filePlan` builder/normalizer 或 deferred promotion builder 这一入口边界校验一次：
 
 - input：绝对路径；`lstat` 为普通文件且不是 symlink；使用现有 `sourceSnapshotFromStat()` 形成 snapshot；
-- output：绝对具体文件路径；父目录存在；使用现有 `captureToolboxTargetSnapshots()` 语义形成 target snapshot；
+- output：绝对具体文件路径；父目录存在且direct parent自身是非symlink ordinary directory；使用现有 `captureToolboxTargetSnapshots()` 语义形成 target snapshot，并由Main normalizer对resolved direct parent独立形成`targetParentIdentity`；raw同名字段一律不作为authority；
 - alias：复用 `toolbox-target-identity.js` 的 Unicode/case/real-parent 合同；
 - input/output 默认不得 alias；已有专项原子 publication 明确授权时才放行；
 - `artifactKey` 沿用 `direction + role + sourceOperation + aliasKey` 的 SHA-256 身份；
 - 同 batch 内 artifactKey 唯一；原始文件名、role、sourceOperation 非空；
 - eager 的 `inputs + outputs` 必须非空；deferred/none 在 normalize 阶段必须为空。
-- `InputFilePlanItem` 必须且只能有 source snapshot；`OutputFilePlanItem` 必须且只能有 target snapshot。该判别联合在 boundary 形成后，内部层不再补方向性 guard。
+- `InputFilePlanItem` 必须且只能有 source snapshot；`OutputFilePlanItem` 带target snapshot与additive target parent identity。identity只冻结direct parent的canonical realpath、平台alias、非零bigint dev/ino十进制string与reliability/kind，不保存ancestor chain；不可靠identity可保留为`unsupported`供generic plan兼容，但显式require的action必须fail closed。该判别联合在 boundary 形成后，内部层不再从调用方补authority。
 
 repository 接收已经规范化的 manifest，不再重复 stat、path shape 或 DTO 字段校验；只校验数据库身份、事务状态和唯一约束。
 

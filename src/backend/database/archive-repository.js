@@ -2602,7 +2602,12 @@ class ArchiveRepository {
             aliasKey: item.aliasKey,
             ...(item.direction === 'input'
               ? { sourceSnapshot: item.sourceSnapshot }
-              : { targetSnapshot: item.targetSnapshot })
+              : {
+                  targetSnapshot: item.targetSnapshot,
+                  ...(item.targetParentIdentity
+                    ? { targetParentIdentity: item.targetParentIdentity }
+                    : {})
+                })
           }),
           timestamp,
           timestamp

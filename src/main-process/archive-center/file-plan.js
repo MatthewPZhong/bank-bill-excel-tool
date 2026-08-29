@@ -13,6 +13,10 @@ const {
   pathsAlias,
   targetPathAliasKey
 } = require('../toolbox-target-identity');
+const {
+  assertTargetParentIdentityFresh,
+  captureTargetParentIdentity
+} = require('./target-parent-identity');
 
 const FILE_PLAN_ALLOCATIONS = new Set(['eager', 'deferred', 'none']);
 const normalizedFilePlans = new WeakSet();
@@ -77,6 +81,19 @@ function targetSnapshot(fsImpl, filePath) {
   }
 }
 
+function targetParentIdentity(fsImpl, filePath, options = {}) {
+  try {
+    return captureTargetParentIdentity(fsImpl, filePath, options);
+  } catch (error) {
+    throw planError(
+      'ARCHIVE_TARGET_PARENT_INVALID',
+      error && error.message
+        ? error.message
+        : '输出direct parent identity无法捕获'
+    );
+  }
+}
+
 function artifactKeyOf(item) {
   const identity = [
     item.direction,
@@ -120,6 +137,9 @@ function normalizeItem(raw, direction, options) {
     const freshnessFailure = normalizeFreshnessFailure(raw.freshnessFailure);
     if (freshnessFailure) base.freshnessFailure = freshnessFailure;
   } else {
+    base.targetParentIdentity = targetParentIdentity(fsImpl, filePath, {
+      platform: options.platform
+    });
     base.targetSnapshot = targetSnapshot(fsImpl, filePath);
   }
   const derivedArtifactKey = artifactKeyOf(base);
@@ -240,6 +260,21 @@ function assertFilePlanFresh(plan, options = {}) {
     }
   }
   for (const output of plan.outputs) {
+    if (output.targetParentIdentity) {
+      try {
+        assertTargetParentIdentityFresh(
+          fsImpl,
+          output.filePath,
+          output.targetParentIdentity,
+          { platform: options.platform || process.platform }
+        );
+      } catch (_error) {
+        throw planError(
+          'ARCHIVE_TARGET_PARENT_CHANGED',
+          '输出direct parent在任务确认后已变化'
+        );
+      }
+    }
     const expected = output.targetSnapshot;
     try {
       const stat = fsImpl.lstatSync(output.filePath);

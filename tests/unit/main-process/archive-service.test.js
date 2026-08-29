@@ -222,7 +222,7 @@ test('Bank Statement run TaskRun 与重启后重复 export File Batch 持久继�
   }
 });
 
-test('public list/detail 剔除 manifest、alias 与 source/target snapshot', async () => {
+test('public list/detail 剔除 manifest、alias、snapshot 与 target parent identity', async () => {
   const fixture = createFixture();
   try {
     await fixture.service.initialize();
@@ -270,10 +270,16 @@ test('public list/detail 剔除 manifest、alias 与 source/target snapshot', as
       assert.equal('aliasKey' in artifact.metadata, false);
       assert.equal('sourceSnapshot' in artifact.metadata, false);
       assert.equal('targetSnapshot' in artifact.metadata, false);
+      assert.equal('targetParentIdentity' in artifact.metadata, false);
     }
     const raw = fixture.repository.getBatchDetail(reserved.batchId);
     assert.equal(Boolean(raw.metadata._fileManifest), true);
     assert.equal(Boolean(raw.artifacts[0].metadata.aliasKey), true);
+    const rawOutput = raw.artifacts.find((artifact) => artifact.direction === 'output');
+    assert.deepEqual(
+      rawOutput.metadata.targetParentIdentity,
+      manifest.outputs[0].targetParentIdentity
+    );
     assert.equal(raw.taskRunId, task.taskRunId);
     assert.equal(raw.taskKey, task.taskKey);
     assert.equal(raw.operationKey, task.operationKey);

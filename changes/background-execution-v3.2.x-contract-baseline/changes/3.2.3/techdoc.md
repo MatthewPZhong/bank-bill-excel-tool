@@ -260,7 +260,11 @@ Core输出records并写workbook。Worker result只作为技术观察；Main tech
 
 Export copy：`fs.promises.copyFile`到task staging，校验源/副本hash，再调用既有single FIFO Publisher；这是一等`inline-async`策略，不占CPU Worker slot但占I/O lease。Publisher固定`requireArchiveHandoff=true`，journal在正式目标committed后继续作为唯一RecoverySource/Hold evidence；TaskLifecycle先settle FilePlan input/output artifacts，只有artifact durable且Task终态持久化后才用既有recovery acknowledgement清理journal。settlement失败返回committed + pending handoff，不得重新解释为可重试业务失败。
 
-E10-B只接收Main当前进程内由`normalizeFilePlanV1`冻结并brand的FilePlan authority；raw object或structured clone不具authority。E10-B不得再次normalize/resnapshot，必须在copy dispatch前、copy完成handoff前和Publisher调用前对同一原始source/target snapshot执行freshness检查。target确认时不存在但随后出现未知文件、或existing target被replacement（包括伪造相同size/mtime）都必须在Publisher=0处失败。此brand不序列化、不新增公开FilePlan字段；普通ancestor rename+ordinary replacement仍属单独未授权合同BLOCK。
+E10-B只接收Main当前进程内由`normalizeFilePlanV1`冻结并brand的FilePlan authority；raw object或structured clone不具authority。`FilePlanV1.outputs[*]` additive包含`targetParentIdentity={canonicalRealPath,aliasKey,deviceId,inode,identityReliable,identityKind}`：Main normalizer对resolved direct parent执行`lstat/realpath/stat({bigint:true})`后独立构造并冻结，调用方提供的同名字段必须忽略或拒绝，不能成为authority。direct parent必须是ordinary directory且自身不是symlink；`deviceId/inode`采用bounded十进制string，任一为0、类型/稳定性不可证明时标记`unsupported`。本合同只冻结direct parent，不持久整条ancestor chain：普通上级rename+replacement会使重新解析出的direct parent identity变化；direct parent移走后同一对象移回则identity仍匹配。
+
+E10-B不得再次normalize/resnapshot，必须在copy dispatch前、copy完成handoff前和Publisher调用前对同一原始source/target snapshot及`targetParentIdentity`执行freshness检查。E10-B要求`identityReliable=true`，否则返回稳定capability failure且Publisher=0；generic FilePlan/Publisher只有明确require或携带该evidence时才启用检查，既有action不得因Windows能力未知被误伤。target确认时不存在但随后出现未知文件、existing target被replacement（包括伪造相同size/mtime）、或direct parent被ordinary replacement都必须失败。
+
+E10-B将FilePlan中的exact identity逐字传入Publisher target `expectedTargetParentIdentity`；Publisher不得重建caller authority。Publisher在preflight、artifact staged后、进入commit前与每个backup/publish正式target mutation紧前复核；Node文件API只能把检查窗口收窄到每次mutation紧前，本合同不宣称消除检查后纳秒级竞态。journal v1 entry additive持久同一identity，新E10-B journal必填；恢复读取带字段journal时，在任何target mutation/rollback前先复核，漂移进入现有`manual-recovery`/Recovery Hold且绝不重publish。旧journal缺字段沿既有恢复语义继续处理，不做DB migration或批量取消旧prepared任务。
 
 inline transport持有实际execution promise。正常terminal、shutdown cancel和close/terminate都在policy timeout内等待execution真实结算后才释放lease；timeout沿既有Supervisor映射为cleanup failure/transport leak并保留transport与task-owned staging cleanup ownership，late success/error不能改写已冻结terminal。
 
@@ -281,6 +285,8 @@ inline transport持有实际execution promise。正常terminal、shutdown cancel
 | 额外列/styled blank/merge/dimension或formula cached/外链/超链接 | Main worksheet authority失败，Publisher=0 |
 | Main authority大批量计算期间cancel/app quit | bounded safepoint取消，不spawn Worker、不留staging |
 | target absent后被创建/existing被替换或传入unbranded plan | 原FilePlan authority freshness失败，Publisher=0 |
+| direct parent/grandparent rename后ordinary replacement | FilePlan或Publisher exact parent identity失败，Publisher=0；恢复时manual-recovery/Hold且不触碰target |
+| direct parent为symlink或dev/ino不可靠 | normalizer拒绝symlink；E10-B对unreliable返回稳定capability failure，Publisher=0 |
 | Publisher committed后回包丢失/进程退出 | 同一journal恢复handoff，禁止重copy/重publish |
 | inline copy超过shutdown deadline | interrupted/cleanup leak evidence，保留owner，不虚报lease/leak收口 |
 
@@ -294,6 +300,8 @@ inline transport持有实际execution promise。正常terminal、shutdown cancel
 - seed no-op/pre/post/unknown/crash；
 - NewAccount日期/账户/币种/模板golden；
 - artifact tamper/Publisher failure；
+- direct parent rename+ordinary replacement、grandparent replacement、same parent不变、原对象移走再移回、symlink与unreliable capability；
+- Publisher prepare/stage/pre-commit/逐target mutation、journal recovery parent drift、旧journal兼容与committed不二次publish；
 -连续十轮Service、Windows Setup/portable、app quit。
 
 ## 12. Release strategy
@@ -304,3 +312,4 @@ inline transport持有实际execution promise。正常terminal、shutdown cancel
 - active Task不切换；
 - Service rollback前先close/使generation失效；
 -已提交seed不down-migrate或猜测回滚。
+- E10-B selector关闭即回到legacy；FilePlan/journal reader接受旧记录缺少additive identity。向旧二进制回滚前必须以open Publisher journal=0作为release gate，不在本版增加迁移器。

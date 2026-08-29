@@ -15,6 +15,10 @@ const {
   normalizeSourceSnapshot,
   sourceSnapshotMatchesStat
 } = require('./archive-center/source-snapshot');
+const {
+  assertTargetParentIdentityFresh,
+  normalizeTargetParentIdentity
+} = require('./archive-center/target-parent-identity');
 
 const JOURNAL_INDEX_NAME = 'toolbox-publish-journal-index.json';
 const JOURNAL_VERSION = 1;
@@ -292,6 +296,27 @@ function validateDiscoverableIndexEntry(runtime, entry, journalPathKey, managedP
     }
     if (entry.archiveInputsRequired !== undefined
         && typeof entry.archiveInputsRequired !== 'boolean') {
+      return false;
+    }
+    if (entry.targetParentIdentityRequired !== undefined
+        && typeof entry.targetParentIdentityRequired !== 'boolean') {
+      return false;
+    }
+    if (entry.expectedTargetParentIdentities !== undefined) {
+      if (!Array.isArray(entry.expectedTargetParentIdentities)
+          || entry.expectedTargetParentIdentities.length !== entry.targetAbsolutePaths.length) {
+        return false;
+      }
+      for (const identity of entry.expectedTargetParentIdentities) {
+        if (identity === null) {
+          if (entry.targetParentIdentityRequired === true) return false;
+          continue;
+        }
+        normalizeTargetParentIdentity(identity, {
+          requireReliable: entry.targetParentIdentityRequired === true
+        });
+      }
+    } else if (entry.targetParentIdentityRequired === true) {
       return false;
     }
     if (entry.archiveHandoffRequired === true
@@ -748,6 +773,14 @@ function readJournal(runtime, journalPath, expectedTaskId = null) {
             )
           )
         )
+        || (
+          entry.expectedTargetParentIdentity !== undefined
+          && !normalizeTargetParentIdentity(entry.expectedTargetParentIdentity)
+        )
+        || (
+          journal.targetParentIdentityRequired === true
+          && entry.expectedTargetParentIdentity === undefined
+        )
         || !entry.metadata
         || typeof entry.metadata !== 'object'
         || targets.has(targetKey)
@@ -774,6 +807,10 @@ function readJournal(runtime, journalPath, expectedTaskId = null) {
     || !validStatuses.has(journal.status)
     || !batchContextValid
     || !archiveHandoffValid
+    || (
+      journal.targetParentIdentityRequired !== undefined
+      && typeof journal.targetParentIdentityRequired !== 'boolean'
+    )
     || typeof journal.userDataDir !== 'string'
     || !path.isAbsolute(journal.userDataDir)
     || !entriesValid
@@ -947,6 +984,7 @@ function normalizeInputs(artifacts, targets, options = {}) {
       options.requireValidatedArtifacts === true
     );
     let expectedTargetSnapshot;
+    let expectedTargetParentIdentity;
     if (target && typeof target === 'object'
         && target.expectedTargetSnapshot !== undefined) {
       const supplied = target.expectedTargetSnapshot;
@@ -969,11 +1007,34 @@ function normalizeInputs(artifacts, targets, options = {}) {
         expectedTargetSnapshot = { exists: false };
       }
     }
+    if (target && typeof target === 'object'
+        && target.expectedTargetParentIdentity !== undefined) {
+      try {
+        expectedTargetParentIdentity = normalizeTargetParentIdentity(
+          target.expectedTargetParentIdentity,
+          { requireReliable: options.requireTargetParentIdentity === true }
+        );
+      } catch (error) {
+        throw new ToolboxPublicationError(
+          error && error.code === 'TARGET_PARENT_IDENTITY_UNAVAILABLE'
+            ? 'TOOLBOX_PUBLICATION_TARGET_PARENT_IDENTITY_UNAVAILABLE'
+            : 'TOOLBOX_PUBLICATION_INVALID_INPUT',
+          `第 ${index + 1} 个目标的direct parent identity无效`,
+          { cause: error }
+        );
+      }
+    } else if (options.requireTargetParentIdentity === true) {
+      throw new ToolboxPublicationError(
+        'TOOLBOX_PUBLICATION_TARGET_PARENT_IDENTITY_REQUIRED',
+        `第 ${index + 1} 个目标缺少必需的direct parent identity`
+      );
+    }
     return {
       artifactPath: path.resolve(artifactPath),
       targetPath: resolvedTarget,
       ...(validatedGenerated ? { validatedGenerated } : {}),
       ...(expectedTargetSnapshot ? { expectedTargetSnapshot } : {}),
+      ...(expectedTargetParentIdentity ? { expectedTargetParentIdentity } : {}),
       metadata: publicationMetadata(artifact, target, resolvedTarget)
     };
   });
@@ -1246,7 +1307,42 @@ function markManualRecovery(runtime, journal, issues) {
   );
 }
 
+function isTargetParentIdentityFailure(error) {
+  return Boolean(error && [
+    'TOOLBOX_PUBLICATION_TARGET_PARENT_CHANGED',
+    'TOOLBOX_PUBLICATION_TARGET_PARENT_IDENTITY_REQUIRED',
+    'TOOLBOX_PUBLICATION_TARGET_PARENT_IDENTITY_UNAVAILABLE'
+  ].includes(error.code));
+}
+
+function throwTargetParentManualRecovery(journal, error) {
+  journal.status = 'manual-recovery';
+  throw new ToolboxPublicationManualRecoveryError(
+    `工具箱发布任务 ${journal.taskId} 的direct target parent evidence已漂移`,
+    {
+      detailLines: [
+        `原因：${messageOf(error)}`,
+        ...(error && Array.isArray(error.detailLines) ? error.detailLines : [])
+      ],
+      recoveryPaths: collectRecoveryPaths(journal),
+      cause: error
+    }
+  );
+}
+
+function assertJournalTargetParentsOrManual(runtime, journal) {
+  try {
+    assertJournalTargetParentIdentities(runtime, journal);
+  } catch (error) {
+    if (isTargetParentIdentityFailure(error)) {
+      throwTargetParentManualRecovery(journal, error);
+    }
+    throw error;
+  }
+}
+
 function rollbackUncommitted(runtime, journal) {
+  assertJournalTargetParentsOrManual(runtime, journal);
   const issues = [];
   journal.status = 'rolling-back';
   try {
@@ -1258,6 +1354,7 @@ function rollbackUncommitted(runtime, journal) {
 
   for (let index = journal.entries.length - 1; index >= 0; index -= 1) {
     const entry = journal.entries[index];
+    assertJournalTargetParentsOrManual(runtime, journal);
     let currentTarget;
     let currentBackup;
     try {
@@ -1281,10 +1378,12 @@ function rollbackUncommitted(runtime, journal) {
       if (entry.original.exists) {
         if (currentBackup === 'original') {
           if (currentTarget === 'generated') {
+            assertJournalTargetParentsOrManual(runtime, journal);
             removeKnownFile(runtime, entry.targetPath, entry.generated, '本任务新文件');
             currentTarget = 'missing';
           }
           if (currentTarget === 'missing') {
+            assertJournalTargetParentsOrManual(runtime, journal);
             moveFileNoReplace(runtime, entry.backupPath, entry.targetPath, {
               operationLabel: '恢复原目标',
               destinationExistsCode: 'TOOLBOX_PUBLICATION_RESTORE_TARGET_EXISTS',
@@ -1292,6 +1391,7 @@ function rollbackUncommitted(runtime, journal) {
                 `恢复原目标时正式路径被并发创建，拒绝覆盖：${entry.targetPath}`
             });
           } else if (currentTarget === 'original') {
+            assertJournalTargetParentsOrManual(runtime, journal);
             removeKnownFile(runtime, entry.backupPath, entry.original, '重复原文件备份');
           }
         } else if (currentTarget !== 'original') {
@@ -1301,23 +1401,28 @@ function rollbackUncommitted(runtime, journal) {
         if (currentBackup !== 'missing') {
           issues.push(`原目标本不存在但发现意外备份：${entry.backupPath}`);
         } else if (currentTarget === 'generated') {
+          assertJournalTargetParentsOrManual(runtime, journal);
           removeKnownFile(runtime, entry.targetPath, entry.generated, '本任务新文件');
         }
       }
     } catch (error) {
+      if (error instanceof ToolboxPublicationManualRecoveryError) throw error;
       issues.push(`回滚目标失败：${entry.targetPath}（${messageOf(error)}）`);
     }
   }
 
   for (const entry of journal.entries) {
+    assertJournalTargetParentsOrManual(runtime, journal);
     try {
       const state = stagingState(runtime, entry);
       if (state === 'generated') {
+        assertJournalTargetParentsOrManual(runtime, journal);
         removeKnownFile(runtime, entry.stagedPath, entry.generated, '本任务 staging 文件');
       } else if (state === 'unknown') {
         issues.push(`staging 文件已被外部改写，未删除：${entry.stagedPath}`);
       }
     } catch (error) {
+      if (error instanceof ToolboxPublicationManualRecoveryError) throw error;
       issues.push(`清理 staging 失败：${entry.stagedPath}（${messageOf(error)}）`);
     }
   }
@@ -1344,6 +1449,7 @@ function rollbackUncommitted(runtime, journal) {
     );
   }
   try {
+    assertJournalTargetParentsOrManual(runtime, journal);
     runtime.fsImpl.rmSync(journal.journalPath, { force: true });
     fsyncDirectory(runtime.fsImpl, path.dirname(journal.journalPath));
   } catch (error) {
@@ -1376,22 +1482,27 @@ function rollbackUncommitted(runtime, journal) {
 }
 
 function cleanupCommitted(runtime, journal) {
+  assertJournalTargetParentsOrManual(runtime, journal);
   const issues = [];
   for (const entry of journal.entries) {
+    assertJournalTargetParentsOrManual(runtime, journal);
     try {
       const backup = backupState(runtime, entry);
       if (backup === 'original') {
+        assertJournalTargetParentsOrManual(runtime, journal);
         removeKnownFile(runtime, entry.backupPath, entry.original, '已提交任务的旧文件备份');
       } else if (backup === 'unknown') {
         issues.push(`备份已被外部改写，未删除：${entry.backupPath}`);
       }
       const staged = stagingState(runtime, entry);
       if (staged === 'generated') {
+        assertJournalTargetParentsOrManual(runtime, journal);
         removeKnownFile(runtime, entry.stagedPath, entry.generated, '已提交任务的 staging 文件');
       } else if (staged === 'unknown') {
         issues.push(`staging 已被外部改写，未删除：${entry.stagedPath}`);
       }
     } catch (error) {
+      if (error instanceof ToolboxPublicationManualRecoveryError) throw error;
       issues.push(`提交后清理失败：${entry.targetPath}（${messageOf(error)}）`);
     }
   }
@@ -1415,6 +1526,7 @@ function cleanupCommitted(runtime, journal) {
     return { complete: false, warnings };
   }
   try {
+    assertJournalTargetParentsOrManual(runtime, journal);
     runtime.fsImpl.rmSync(journal.journalPath, { force: true });
     fsyncDirectory(runtime.fsImpl, path.dirname(journal.journalPath));
   } catch (error) {
@@ -1455,6 +1567,14 @@ function discoverableAnchorsMatchJournal(runtime, indexEntry, journal) {
         !== Boolean(journal.archiveHandoffRequired)) return false;
     if ((indexEntry.archiveInputsRequired !== false)
         !== (journal.archiveInputsRequired !== false)) return false;
+    if (Boolean(indexEntry.targetParentIdentityRequired)
+        !== Boolean(journal.targetParentIdentityRequired)) return false;
+    const journalParentIdentities = journal.entries.map(
+      (entry) => entry.expectedTargetParentIdentity || null
+    );
+    const hasJournalParentIdentity = journalParentIdentities.some(Boolean);
+    if (JSON.stringify(indexEntry.expectedTargetParentIdentities || [])
+        !== JSON.stringify(hasJournalParentIdentity ? journalParentIdentities : [])) return false;
     if (JSON.stringify(normalizeArchiveInputFiles(indexEntry.archiveInputFiles))
         !== JSON.stringify(normalizeArchiveInputFiles(journal.archiveInputFiles))) return false;
     if (JSON.stringify(indexEntry.outputFiles || [])
@@ -1523,10 +1643,43 @@ function throwLegacyIndexManualRecovery(runtime, indexEntry) {
   );
 }
 
+function assertIndexTargetParentsOrManual(runtime, indexEntry) {
+  const identities = indexEntry.expectedTargetParentIdentities;
+  if (!Array.isArray(identities)) return;
+  try {
+    for (let index = 0; index < identities.length; index += 1) {
+      const identity = identities[index];
+      if (!identity) continue;
+      assertTargetParentIdentityFresh(
+        runtime.fsImpl,
+        indexEntry.targetAbsolutePaths[index],
+        identity,
+        { requireReliable: indexEntry.targetParentIdentityRequired === true }
+      );
+    }
+  } catch (error) {
+    throw new ToolboxPublicationManualRecoveryError(
+      `工具箱发布任务 ${indexEntry.taskId} 的index direct-parent evidence已漂移`,
+      {
+        detailLines: [`原因：${messageOf(error)}`],
+        recoveryPaths: [
+          getIndexPath(indexEntry.userDataDir),
+          indexEntry.journalAbsolutePath,
+          ...indexEntry.targetAbsolutePaths,
+          ...indexEntry.stagedAbsolutePaths,
+          ...indexEntry.backupAbsolutePaths
+        ],
+        cause: error
+      }
+    );
+  }
+}
+
 function recoverPreparingIntent(runtime, indexEntry, options = {}) {
   const stateLabel = options.stateLabel || 'preparing';
   const recoveredAction = options.recoveredAction || 'cancelled-preparing';
   const indexPath = getIndexPath(indexEntry.userDataDir);
+  assertIndexTargetParentsOrManual(runtime, indexEntry);
   const journalStat = lstatOrNull(runtime.fsImpl, indexEntry.journalAbsolutePath);
   if (journalStat) {
     if (!journalStat.isFile()) {
@@ -1546,11 +1699,13 @@ function recoverPreparingIntent(runtime, indexEntry, options = {}) {
     if (!discoverableIntentMatchesJournal(runtime, indexEntry, journal)) {
       throwDiscoverableAnchorMismatch(runtime, indexEntry);
     }
+    assertJournalTargetParentsOrManual(runtime, journal);
   }
 
   const cleanupErrors = [];
   for (const stagedPath of indexEntry.stagedAbsolutePaths) {
     try {
+      assertIndexTargetParentsOrManual(runtime, indexEntry);
       const stat = lstatOrNull(runtime.fsImpl, stagedPath);
       if (!stat) continue;
       if (!stat.isFile()) {
@@ -1562,6 +1717,7 @@ function recoverPreparingIntent(runtime, indexEntry, options = {}) {
       runtime.fsImpl.rmSync(stagedPath, { force: true });
       fsyncDirectory(runtime.fsImpl, path.dirname(stagedPath));
     } catch (error) {
+      if (error instanceof ToolboxPublicationManualRecoveryError) throw error;
       cleanupErrors.push(`删除 staging 失败：${stagedPath}（${messageOf(error)}）`);
     }
   }
@@ -1580,6 +1736,7 @@ function recoverPreparingIntent(runtime, indexEntry, options = {}) {
   }
 
   try {
+    assertIndexTargetParentsOrManual(runtime, indexEntry);
     const stat = lstatOrNull(runtime.fsImpl, indexEntry.journalAbsolutePath);
     if (stat) {
       runtime.fsImpl.rmSync(indexEntry.journalAbsolutePath, { force: true });
@@ -1650,6 +1807,7 @@ function recoverFinalizingIntent(runtime, indexEntry, options = {}) {
     || ['committed', 'committed-cleanup-pending'];
   const recoveredAction = options.recoveredAction || 'commit-cleanup';
   const indexPath = getIndexPath(indexEntry.userDataDir);
+  assertIndexTargetParentsOrManual(runtime, indexEntry);
   const journalStat = lstatOrNull(runtime.fsImpl, indexEntry.journalAbsolutePath);
   let lineage = recoveryLineage(indexEntry);
   if (journalStat) {
@@ -1680,6 +1838,7 @@ function recoverFinalizingIntent(runtime, indexEntry, options = {}) {
     )) {
       throwDiscoverableAnchorMismatch(runtime, indexEntry);
     }
+    assertJournalTargetParentsOrManual(runtime, journal);
   }
   const recovered = {
     taskId: indexEntry.taskId,
@@ -1692,6 +1851,7 @@ function recoverFinalizingIntent(runtime, indexEntry, options = {}) {
   }
   if (journalStat) {
     try {
+      assertIndexTargetParentsOrManual(runtime, indexEntry);
       runtime.fsImpl.rmSync(indexEntry.journalAbsolutePath, { force: true });
       fsyncDirectory(runtime.fsImpl, path.dirname(indexEntry.journalAbsolutePath));
     } catch (error) {
@@ -1729,6 +1889,10 @@ function recoverOneJournal(runtime, indexEntry, options = {}) {
   if (indexEntry.discoveryState === undefined) {
     throwLegacyIndexManualRecovery(runtime, indexEntry);
   }
+  // 固定 userData index是目标目录journal之外的durable discovery root。parent被替换
+  // 时journal会随原目录移走，必须先用index evidence阻断，不能把其误判成
+  // 普通journal缺失或清理完成。
+  assertIndexTargetParentsOrManual(runtime, indexEntry);
   const discoveryState = indexEntryDiscoveryState(indexEntry);
   if (discoveryState === INDEX_DISCOVERY_PREPARING) {
     return recoverPreparingIntent(runtime, indexEntry);
@@ -1760,6 +1924,7 @@ function recoverOneJournal(runtime, indexEntry, options = {}) {
   ) {
     throwDiscoverableAnchorMismatch(runtime, indexEntry);
   }
+  assertJournalTargetParentsOrManual(runtime, journal);
   if (journal.status === 'preparing') {
     if (indexEntry.discoveryState !== undefined) {
       return recoverPreparingIntent(runtime, indexEntry);
@@ -1872,7 +2037,8 @@ function makeJournal(
   batchContext = null,
   archiveInputFiles = [],
   archiveHandoffRequired = false,
-  archiveInputsRequired = true
+  archiveInputsRequired = true,
+  targetParentIdentityRequired = false
 ) {
   const nonce = runtime.randomUUID();
   const journalDir = path.dirname(entries[0].targetPath);
@@ -1906,6 +2072,7 @@ function makeJournal(
     createdAt,
     updatedAt: createdAt,
     status: 'preparing',
+    ...(targetParentIdentityRequired ? { targetParentIdentityRequired: true } : {}),
     ...(batchContext ? { batchContext: { ...batchContext } } : {}),
     ...(archiveHandoffRequired
       ? {
@@ -1933,6 +2100,50 @@ function assertExpectedTargetSnapshot(runtime, entry) {
   }
 }
 
+function assertExpectedTargetParentIdentity(runtime, entry, options = {}) {
+  if (!entry.expectedTargetParentIdentity) {
+    if (options.requireReliable === true) {
+      throw new ToolboxPublicationError(
+        'TOOLBOX_PUBLICATION_TARGET_PARENT_IDENTITY_REQUIRED',
+        `目标缺少必需的direct parent identity：${entry.targetPath}`
+      );
+    }
+    return;
+  }
+  try {
+    assertTargetParentIdentityFresh(
+      runtime.fsImpl,
+      entry.targetPath,
+      entry.expectedTargetParentIdentity,
+      { requireReliable: options.requireReliable === true }
+    );
+  } catch (error) {
+    throw new ToolboxPublicationError(
+      error && error.code === 'TARGET_PARENT_IDENTITY_UNAVAILABLE'
+        ? 'TOOLBOX_PUBLICATION_TARGET_PARENT_IDENTITY_UNAVAILABLE'
+        : 'TOOLBOX_PUBLICATION_TARGET_PARENT_CHANGED',
+      error && error.code === 'TARGET_PARENT_IDENTITY_UNAVAILABLE'
+        ? `当前文件系统不能可靠复核目标direct parent identity：${entry.targetPath}`
+        : `目标direct parent在确认后发生变化：${entry.targetPath}`,
+      {
+        detailLines: error && Array.isArray(error.detailLines)
+          ? error.detailLines
+          : [],
+        recoveryPaths: [entry.targetPath],
+        cause: error
+      }
+    );
+  }
+}
+
+function assertJournalTargetParentIdentities(runtime, journal) {
+  for (const entry of journal.entries) {
+    assertExpectedTargetParentIdentity(runtime, entry, {
+      requireReliable: journal.targetParentIdentityRequired === true
+    });
+  }
+}
+
 function ensureTargetParent(runtime, targetPath) {
   const parent = path.dirname(targetPath);
   const stat = lstatOrNull(runtime.fsImpl, parent);
@@ -1957,6 +2168,9 @@ function pathAliasIsWithinDirectory(fileAliasKey, directoryAliasKey) {
 function preflightJournal(runtime, journal, protectedSourcePaths = []) {
   for (const entry of journal.entries) {
     ensureTargetParent(runtime, entry.targetPath);
+    assertExpectedTargetParentIdentity(runtime, entry, {
+      requireReliable: journal.targetParentIdentityRequired === true
+    });
     assertRegularFile(runtime.fsImpl, entry.artifactPath, '生成产物');
     assertExpectedTargetSnapshot(runtime, entry);
     const aliasedSource = protectedSourcePaths.find((sourcePath) => (
@@ -2072,6 +2286,15 @@ function preflightJournal(runtime, journal, protectedSourcePaths = []) {
 
 function cancelPrepared(runtime, journal, indexRegistered) {
   const cleanupErrors = [];
+  try {
+    assertJournalTargetParentIdentities(runtime, journal);
+  } catch (error) {
+    if (isTargetParentIdentityFailure(error)) {
+      cleanupErrors.push(`direct target parent evidence已漂移，未清理任务文件：${messageOf(error)}`);
+      return cleanupErrors;
+    }
+    throw error;
+  }
   if (indexRegistered) {
     try {
       // 固定恢复根必须先进入 durable cancelling，再删除任何可发现文件。
@@ -2084,19 +2307,29 @@ function cancelPrepared(runtime, journal, indexRegistered) {
   }
   for (const entry of journal.entries) {
     try {
+      assertJournalTargetParentIdentities(runtime, journal);
       // 该路径由本任务随机创建，且 cancelPrepared 只会在正式目标尚未被触碰时
       // 执行；即使 copy 中途失败或校验不一致，它也没有恢复价值。
       runtime.fsImpl.rmSync(entry.stagedPath, { force: true });
       fsyncDirectory(runtime.fsImpl, path.dirname(entry.stagedPath));
     } catch (error) {
+      if (isTargetParentIdentityFailure(error)) {
+        cleanupErrors.push(`direct target parent evidence已漂移，未清理任务文件：${messageOf(error)}`);
+        return cleanupErrors;
+      }
       cleanupErrors.push(`删除 staging 失败：${entry.stagedPath}（${messageOf(error)}）`);
     }
   }
   if (cleanupErrors.length > 0) return cleanupErrors;
   try {
+    assertJournalTargetParentIdentities(runtime, journal);
     runtime.fsImpl.rmSync(journal.journalPath, { force: true });
     fsyncDirectory(runtime.fsImpl, path.dirname(journal.journalPath));
   } catch (error) {
+    if (isTargetParentIdentityFailure(error)) {
+      cleanupErrors.push(`direct target parent evidence已漂移，未清理journal：${messageOf(error)}`);
+      return cleanupErrors;
+    }
     cleanupErrors.push(`删除 journal 失败：${journal.journalPath}（${messageOf(error)}）`);
     return cleanupErrors;
   }
@@ -2148,6 +2381,7 @@ function prepareToolboxPublication(options = {}) {
 
     const archiveHandoffRequired = options.requireArchiveHandoff === true;
     const archiveInputsRequired = options.allowEmptyArchiveInputs !== true;
+    const targetParentIdentityRequired = options.requireTargetParentIdentity === true;
     const batchContext = freezeWorkerBatchContext(options.batchContext, {
       required: archiveHandoffRequired
     });
@@ -2173,7 +2407,8 @@ function prepareToolboxPublication(options = {}) {
       }
     }
     const inputs = normalizeInputs(options.artifacts, options.targets, {
-      requireValidatedArtifacts: options.requireValidatedArtifacts === true
+      requireValidatedArtifacts: options.requireValidatedArtifacts === true,
+      requireTargetParentIdentity: targetParentIdentityRequired
     });
     const journal = makeJournal(
       runtime,
@@ -2183,7 +2418,8 @@ function prepareToolboxPublication(options = {}) {
       batchContext,
       archiveInputFiles,
       archiveHandoffRequired,
-      archiveInputsRequired
+      archiveInputsRequired,
+      targetParentIdentityRequired
     );
     preflightJournal(runtime, journal, protectedSourcePaths);
     const reservationKeys = reserveTargets(runtime, taskId, journal.entries);
@@ -2199,6 +2435,9 @@ function prepareToolboxPublication(options = {}) {
           index,
           artifactPath: entry.artifactPath,
           targetPath: entry.targetPath
+        });
+        assertExpectedTargetParentIdentity(runtime, entry, {
+          requireReliable: journal.targetParentIdentityRequired === true
         });
         const generated = inspectRegularFile(runtime.fsImpl, entry.artifactPath);
         if (
@@ -2224,6 +2463,9 @@ function prepareToolboxPublication(options = {}) {
         entry.generated = generated;
         // 覆盖确认发生在 generation 前；大产物摘要可能持续数百毫秒。目标必须在
         // 摘要完成后再次与确认快照一致，才能成为本任务可备份的 original。
+        assertExpectedTargetParentIdentity(runtime, entry, {
+          requireReliable: journal.targetParentIdentityRequired === true
+        });
         assertExpectedTargetSnapshot(runtime, entry);
         const originalStat = lstatOrNull(runtime.fsImpl, entry.targetPath);
         if (originalStat) {
@@ -2253,6 +2495,18 @@ function prepareToolboxPublication(options = {}) {
               archiveInputFiles: journal.archiveInputFiles.map((file) => cloneJsonValue(file))
             }
           : {}),
+        ...(journal.targetParentIdentityRequired
+          ? { targetParentIdentityRequired: true }
+          : {}),
+        ...(journal.entries.some((entry) => entry.expectedTargetParentIdentity)
+          ? {
+              expectedTargetParentIdentities: journal.entries.map(
+                (entry) => entry.expectedTargetParentIdentity
+                  ? cloneJsonValue(entry.expectedTargetParentIdentity)
+                  : null
+              )
+            }
+          : {}),
         outputFiles: buildPublishFiles(journal)
       });
       indexRegistered = true;
@@ -2260,15 +2514,20 @@ function prepareToolboxPublication(options = {}) {
         taskId,
         journalPath: journal.journalPath
       });
+      assertJournalTargetParentIdentities(runtime, journal);
 
       persistJournal(runtime, journal);
       callCheckpoint(runtime, 'prepare:after-preparing-journal', {
         taskId,
         journalPath: journal.journalPath
       });
+      assertJournalTargetParentIdentities(runtime, journal);
 
       for (let index = 0; index < journal.entries.length; index += 1) {
         const entry = journal.entries[index];
+        assertExpectedTargetParentIdentity(runtime, entry, {
+          requireReliable: journal.targetParentIdentityRequired === true
+        });
         runtime.fsImpl.copyFileSync(
           entry.artifactPath,
           entry.stagedPath,
@@ -2291,8 +2550,12 @@ function prepareToolboxPublication(options = {}) {
           index,
           stagedPath: entry.stagedPath
         });
+        assertExpectedTargetParentIdentity(runtime, entry, {
+          requireReliable: journal.targetParentIdentityRequired === true
+        });
       }
 
+      assertJournalTargetParentIdentities(runtime, journal);
       journal.status = 'prepared';
       persistJournal(runtime, journal);
       callCheckpoint(runtime, 'prepare:after-journal', {
@@ -2363,6 +2626,10 @@ function prepareToolboxPublication(options = {}) {
             cause: error
           }
         );
+      }
+      if (indexRegistered && isTargetParentIdentityFailure(error)) {
+        releaseReservations(taskId, reservationKeys);
+        throwTargetParentManualRecovery(journal, error);
       }
       const cleanupErrors = cancelPrepared(runtime, journal, indexRegistered);
       releaseReservations(taskId, reservationKeys);
@@ -2521,7 +2788,8 @@ function finalizeCommittedPublication(runtime, journal, extraWarnings = []) {
 
 function publishPreparedToolboxPublication(prepared) {
   return withLifecycleMutex('提交发布', () => {
-    if (!prepared || typeof prepared !== 'object' || !prepared.journalPath || !prepared.taskId) {
+    if (!prepared || typeof prepared !== 'object' || !prepared.journalPath
+        || !prepared.taskId || !prepared.userDataDir) {
       throw new ToolboxPublicationError(
         'TOOLBOX_PUBLICATION_INVALID_PREPARED',
         '发布参数不是有效的 prepared 工具箱任务'
@@ -2531,21 +2799,32 @@ function publishPreparedToolboxPublication(prepared) {
     const reservationKeys = Array.isArray(prepared.reservationKeys)
       ? prepared.reservationKeys
       : [];
-    let journal = readJournal(runtime, prepared.journalPath, prepared.taskId);
-    const { value: index } = readIndex(runtime, journal.userDataDir);
-    const journalPathKey = targetReservationKey(runtime.fsImpl, journal.journalPath);
-    const indexedEntry = index.entries.find((entry) => (
-      entry.taskId === journal.taskId
-      && targetReservationKey(runtime.fsImpl, entry.journalAbsolutePath) === journalPathKey
-    ));
-    if (!indexedEntry) {
-      releaseReservations(journal.taskId, reservationKeys);
-      throw new ToolboxPublicationManualRecoveryError(
-        `任务 ${journal.taskId} 的 journal 未登记在固定恢复索引中，拒绝触碰目标`,
-        {
-          recoveryPaths: [getIndexPath(journal.userDataDir), journal.journalPath]
-        }
-      );
+    const preparedUserDataDir = path.resolve(prepared.userDataDir);
+    const journalPathKey = targetReservationKey(runtime.fsImpl, prepared.journalPath);
+    let indexedEntry;
+    let journal;
+    try {
+      const { value: index } = readIndex(runtime, preparedUserDataDir);
+      indexedEntry = index.entries.find((entry) => (
+        entry.taskId === prepared.taskId
+        && targetReservationKey(runtime.fsImpl, entry.journalAbsolutePath) === journalPathKey
+      ));
+      if (!indexedEntry) {
+        throw new ToolboxPublicationManualRecoveryError(
+          `任务 ${prepared.taskId} 的 journal 未登记在固定恢复索引中，拒绝触碰目标`,
+          {
+            recoveryPaths: [getIndexPath(preparedUserDataDir), prepared.journalPath]
+          }
+        );
+      }
+      assertIndexTargetParentsOrManual(runtime, {
+        ...indexedEntry,
+        userDataDir: preparedUserDataDir
+      });
+      journal = readJournal(runtime, prepared.journalPath, prepared.taskId);
+    } catch (error) {
+      releaseReservations(prepared.taskId, reservationKeys);
+      throw error;
     }
     if (indexedEntry.discoveryState === undefined) {
       releaseReservations(journal.taskId, reservationKeys);
@@ -2588,9 +2867,16 @@ function publishPreparedToolboxPublication(prepared) {
             `发布 staging 缺失或校验失败：${entry.stagedPath}`
           );
         }
+        assertExpectedTargetParentIdentity(runtime, entry, {
+          requireReliable: journal.targetParentIdentityRequired === true
+        });
         assertTargetUnchangedSincePrepare(runtime, entry);
       }
     } catch (error) {
+      if (isTargetParentIdentityFailure(error)) {
+        releaseReservations(journal.taskId, reservationKeys);
+        throwTargetParentManualRecovery(journal, error);
+      }
       const cleanupErrors = cancelPrepared(runtime, journal, true);
       releaseReservations(journal.taskId, reservationKeys);
       if (cleanupErrors.length > 0) {
@@ -2610,15 +2896,22 @@ function publishPreparedToolboxPublication(prepared) {
       journal.status = 'publishing';
       persistJournal(runtime, journal);
       callCheckpoint(runtime, 'publish:before-target-mutation', { taskId: journal.taskId });
+      assertJournalTargetParentIdentities(runtime, journal);
 
       for (let index = 0; index < journal.entries.length; index += 1) {
         const entry = journal.entries[index];
         if (!entry.original.exists) continue;
+        assertExpectedTargetParentIdentity(runtime, entry, {
+          requireReliable: journal.targetParentIdentityRequired === true
+        });
         assertTargetUnchangedSincePrepare(runtime, entry);
         callCheckpoint(runtime, 'publish:before-backup', {
           taskId: journal.taskId,
           index,
           targetPath: entry.targetPath
+        });
+        assertExpectedTargetParentIdentity(runtime, entry, {
+          requireReliable: journal.targetParentIdentityRequired === true
         });
         moveFileNoReplace(runtime, entry.targetPath, entry.backupPath, {
           operationLabel: '把原目标移入任务备份',
@@ -2653,6 +2946,9 @@ function publishPreparedToolboxPublication(prepared) {
           taskId: journal.taskId,
           index,
           targetPath: entry.targetPath
+        });
+        assertExpectedTargetParentIdentity(runtime, entry, {
+          requireReliable: journal.targetParentIdentityRequired === true
         });
         // 所有原目标此时都已移入 backup；无论 prepare 时目标是否存在，
         // link 紧前先快速检查，并由 link(2) 在 syscall 边界原子拒绝已存在目标。
@@ -2693,9 +2989,16 @@ function publishPreparedToolboxPublication(prepared) {
       callCheckpoint(runtime, 'publish:before-final-target-verify', {
         taskId: journal.taskId
       });
+      assertJournalTargetParentIdentities(runtime, journal);
       // 单项 hardlink 发布后校验只能覆盖该时刻；多输出后续发布期间，先前目标仍可能
       // 被外部改写。committed 前必须重新对整批 target 做 size + SHA-256 复核。
       assertAllPublishedTargetsMatch(runtime, journal.entries);
+      callCheckpoint(runtime, 'publish:after-final-target-verify-before-commit', {
+        taskId: journal.taskId
+      });
+      // 最终内容复核可能持续一段时间；在 committed journal 落盘紧前再次
+      // 复核 direct parent。这是现有 Node 文件 API 可达的最后用户态边界。
+      assertJournalTargetParentIdentities(runtime, journal);
 
       journal.status = 'committed';
       journal.committedAt = dateIso(runtime);
@@ -2706,6 +3009,10 @@ function publishPreparedToolboxPublication(prepared) {
       if (isCrashError(error)) {
         releaseReservations(journal.taskId, reservationKeys);
         throw error;
+      }
+      if (isTargetParentIdentityFailure(error)) {
+        releaseReservations(journal.taskId, reservationKeys);
+        throwTargetParentManualRecovery(journal, error);
       }
       let committedOnDisk = false;
       try {
