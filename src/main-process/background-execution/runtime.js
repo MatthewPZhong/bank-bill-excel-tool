@@ -35,6 +35,9 @@ const {
 const {
   NEW_ACCOUNT_GENERATION_POLICY
 } = require('../new-account/policies');
+const {
+  estimateNewAccountGenerationPhaseResources
+} = require('../new-account/resource-estimator');
 
 const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   ...TOOLBOX_GENERATION_POLICIES,
@@ -108,6 +111,9 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
     validatorEntries[policy.artifacts.businessValidatorKey] = resultValidator;
   }
   const validatorRegistry = createStaticRegistry(validatorEntries);
+  const resourceProfileRegistry = createStaticRegistry({
+    [NEW_ACCOUNT_GENERATION_POLICY.resources.profile]: estimateNewAccountGenerationPhaseResources
+  });
   const preFundTopologyPlanner = createPreFundMptTopologyPlanner({ availableParallelism });
   const topologyRegistry = createStaticRegistry(Object.fromEntries(
     BACKGROUND_EXECUTION_POLICIES
@@ -119,6 +125,7 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
   ));
   entryRegistry.freeze();
   validatorRegistry.freeze();
+  resourceProfileRegistry.freeze();
   topologyRegistry.freeze();
 
   const staticKeys = {
@@ -139,6 +146,7 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
     policies: BACKGROUND_EXECUTION_POLICIES,
     entryRegistry,
     validatorRegistry,
+    resourceProfileRegistry,
     topologyRegistry,
     staticKeys,
     generatedAt: '2026-08-25T00:00:00+08:00'

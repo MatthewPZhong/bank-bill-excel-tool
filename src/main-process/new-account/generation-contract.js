@@ -87,6 +87,35 @@ function isoDayOrdinal(value, label) {
   return Math.floor(date.getTime() / 86400000);
 }
 
+function projectNewAccountGenerationRecordCount(accounts, asOfDate, options = {}) {
+  if (!Array.isArray(accounts)) {
+    fail('NEW_ACCOUNT_GENERATION_INPUT_INVALID', 'NewAccount账户数组非法');
+  }
+  const maxRecords = options.maxRecords === undefined ? MAX_RECORDS : options.maxRecords;
+  if (!Number.isSafeInteger(maxRecords) || maxRecords < 0) {
+    fail('NEW_ACCOUNT_GENERATION_RECORD_LIMIT', 'NewAccount记录数上限非法');
+  }
+  const yesterdayOrdinal = isoDayOrdinal(asOfDate, 'asOfDate') - 1;
+  let projectedRecords = 0;
+  for (let index = 0; index < accounts.length; index += 1) {
+    const account = accounts[index];
+    if (!account || !Array.isArray(account.currencies)) {
+      fail('NEW_ACCOUNT_GENERATION_INPUT_INVALID', `accounts[${index}]非法`);
+    }
+    const openingOrdinal = isoDayOrdinal(account.openingDate, `accounts[${index}].openingDate`);
+    const dayCount = yesterdayOrdinal - openingOrdinal + 1;
+    if (dayCount <= 0) continue;
+    const accountRecords = dayCount * account.currencies.length;
+    const nextProjectedRecords = projectedRecords + accountRecords;
+    if (!Number.isSafeInteger(accountRecords) || !Number.isSafeInteger(nextProjectedRecords) ||
+        nextProjectedRecords > maxRecords) {
+      fail('NEW_ACCOUNT_GENERATION_RECORD_LIMIT', 'NewAccount预计记录数超过安全上限');
+    }
+    projectedRecords = nextProjectedRecords;
+  }
+  return projectedRecords;
+}
+
 function createNewAccountGenerationInput(input) {
   const value = canonicalJsonSnapshot(input, { maxBytes: MAX_INPUT_BYTES });
   const record = exact(
@@ -126,16 +155,7 @@ function createNewAccountGenerationInput(input) {
     fail('NEW_ACCOUNT_GENERATION_PATH_INVALID', 'generationPath必须是xlsx文件');
   }
   const accounts = record.accounts.map(normalizeAccount);
-  const yesterdayOrdinal = isoDayOrdinal(record.asOfDate, 'asOfDate') - 1;
-  let projectedRecords = 0;
-  for (let index = 0; index < accounts.length; index += 1) {
-    const openingOrdinal = isoDayOrdinal(accounts[index].openingDate, `accounts[${index}].openingDate`);
-    const dayCount = yesterdayOrdinal - openingOrdinal + 1;
-    if (dayCount > 0) projectedRecords += dayCount * accounts[index].currencies.length;
-    if (!Number.isSafeInteger(projectedRecords) || projectedRecords > MAX_RECORDS) {
-      fail('NEW_ACCOUNT_GENERATION_RECORD_LIMIT', 'NewAccount预计记录数超过安全上限');
-    }
-  }
+  projectNewAccountGenerationRecordCount(accounts, record.asOfDate);
   return Object.freeze({
     schemaVersion: NEW_ACCOUNT_GENERATION_SCHEMA_VERSION,
     accounts: Object.freeze(accounts),
@@ -206,5 +226,6 @@ module.exports = {
   NEW_ACCOUNT_GENERATION_SCHEMA_VERSION,
   NewAccountGenerationContractError,
   createNewAccountGenerationInput,
+  projectNewAccountGenerationRecordCount,
   validateNewAccountGenerationResult
 };

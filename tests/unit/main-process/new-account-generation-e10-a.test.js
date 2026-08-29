@@ -24,9 +24,11 @@ const {
   MAX_RECORDS,
   NEW_ACCOUNT_GENERATION_ACTION,
   createNewAccountGenerationInput,
+  projectNewAccountGenerationRecordCount,
   validateNewAccountGenerationResult
 } = require('../../../src/main-process/new-account/generation-contract');
 const {
+  buildNewAccountBalanceRecords,
   buildNewAccountBillDates,
   buildNewAccountOutputName,
   createTemplateEvidence,
@@ -39,6 +41,15 @@ const {
   generateAndValidateNewAccount
 } = require('../../../src/main-process/new-account/worker-client');
 const {
+  FIXED_MEMORY_ENVELOPE_BYTES,
+  MAX_NEW_ACCOUNT_GENERATION_MEMORY_BYTES,
+  MIN_NEW_ACCOUNT_GENERATION_MEMORY_BYTES,
+  NEW_ACCOUNT_GENERATION_MEMORY_MODEL,
+  createNewAccountGenerationResourceEstimate,
+  estimateNewAccountGenerationMemory
+} = require('../../../src/main-process/new-account/resource-estimator');
+const {
+  GENERATION_RESOURCES,
   NEW_ACCOUNT_GENERATION_POLICY
 } = require('../../../src/main-process/new-account/policies');
 
@@ -119,6 +130,75 @@ function inputOptions(dir, overrides = {}) {
     production: false,
     ...overrides
   };
+}
+
+function isoDateBefore(asOfDate, days) {
+  const date = new Date(`${asOfDate}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() - days);
+  return date.toISOString().slice(0, 10);
+}
+
+function shapedWorkerInput(dir, shapes, overrides = {}) {
+  const asOfDate = overrides.asOfDate || '2030-01-01';
+  const accounts = shapes.map((shape, index) => {
+    const currencies = Array.from({ length: shape.currencyCount }, (_, currencyIndex) =>
+      `C${String(currencyIndex).padStart(2, '0')}`);
+    return {
+      bankName: `测试银行${index}`,
+      location: '上海',
+      bankAccount: `62220000${String(index).padStart(4, '0')}`,
+      openingDate: isoDateBefore(asOfDate, shape.dayCount),
+      isMultiCurrency: currencies.length > 1,
+      currency: currencies[0],
+      currencies
+    };
+  });
+  const options = inputOptions(dir, {
+    asOfDate,
+    payload: payload({ accounts }),
+    ...overrides
+  });
+  return createNewAccountWorkerInput(options);
+}
+
+function localDate(isoDate) {
+  const [year, month, day] = isoDate.split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function cancellableHoldingAdapter() {
+  const state = { starts: 0 };
+  return Object.freeze({
+    state,
+    adapter: Object.freeze({
+      start(startOptions) {
+        state.starts += 1;
+        let emit = null;
+        return Object.freeze({
+          ready: Promise.resolve(),
+          send(message) {
+            if (message.operation === 'job:start') {
+              emit = createCanonicalEventEmitter(message, startOptions.onMessage, startOptions.onError);
+              return;
+            }
+            if (message.operation !== 'job:cancel' || !emit) return;
+            startOptions.onCancellationTerminal();
+            emit('cancel:ack', { cancellation: { scope: 'job' } });
+            emit('job:error', {
+              error: {
+                code: 'NEW_ACCOUNT_GENERATION_CANCELLED',
+                message: '新开账户余额账单生成已取消',
+                stage: 'cancel',
+                detailLines: []
+              }
+            });
+          },
+          close() {},
+          terminate() { return Promise.resolve(0); }
+        });
+      }
+    })
+  });
 }
 
 function workbookProjection(filePath) {
@@ -215,6 +295,196 @@ test('唯一 core 锁定昨日/10年边界、币种去重、记录顺序与 lega
     (error) => error.code === 'NEW_ACCOUNT_REQUIRED' &&
       error.detailLines[0] === '1. 缺少字段：银行名称、所在地、银行账号、开户日期、币种'
   );
+});
+
+test('共享行数投影与实际 records.length 同口径，覆盖闰日和多账户/币种', () => {
+  const headers = extractHeaders(TEMPLATE_PATH);
+  const cases = [
+    { asOfDate: '2026-03-02', shapes: [{ dayCount: 1, currencyCount: 1 }] },
+    { asOfDate: '2026-03-02', shapes: [{ dayCount: 2, currencyCount: 2 }] },
+    { asOfDate: '2028-03-01', shapes: [{ dayCount: 2, currencyCount: 3 }] },
+    {
+      asOfDate: '2026-03-02',
+      shapes: [{ dayCount: 28, currencyCount: 3 }, { dayCount: 7, currencyCount: 5 }]
+    },
+    { asOfDate: '2026-03-02', shapes: [{ dayCount: 366, currencyCount: 8 }] }
+  ];
+  for (const entry of cases) {
+    const input = shapedWorkerInput(tempDir('new-account-projection-'), entry.shapes, {
+      asOfDate: entry.asOfDate
+    });
+    const projected = projectNewAccountGenerationRecordCount(input.accounts, input.asOfDate);
+    const accounts = input.accounts.map((account) => ({
+      ...account,
+      openingDateRaw: account.openingDate,
+      openingDate: localDate(account.openingDate),
+      currency: account.currencies[0],
+      isMultiCurrency: account.currencies.length > 1
+    }));
+    const generated = buildNewAccountBalanceRecords({
+      accounts,
+      balanceTemplateFields: headers,
+      today: localDate(input.asOfDate),
+      maxRecords: MAX_RECORDS
+    });
+    const expected = entry.shapes.reduce(
+      (sum, shape) => sum + shape.dayCount * shape.currencyCount,
+      0
+    );
+    assert.equal(projected, expected);
+    assert.equal(generated.records.length, projected);
+  }
+});
+
+test('动态内存 estimator 锁定最小/typical/29,192/60,416/250,000、上下界与overflow', () => {
+  assert.equal(GENERATION_RESOURCES.memoryBytes, MIN_NEW_ACCOUNT_GENERATION_MEMORY_BYTES);
+  assert.equal(estimateNewAccountGenerationMemory(0).memoryBytes, FIXED_MEMORY_ENVELOPE_BYTES);
+  const cases = [
+    { label: 'minimum', rows: 1, shapes: [{ dayCount: 1, currencyCount: 1 }] },
+    { label: 'typical', rows: 4, shapes: [{ dayCount: 2, currencyCount: 2 }] },
+    { label: '29,192', rows: 29192, shapes: [{ dayCount: 3649, currencyCount: 8 }] },
+    { label: '60,416', rows: 60416, shapes: [{ dayCount: 944, currencyCount: 64 }] },
+    {
+      label: '250,000',
+      rows: 250000,
+      shapes: [{ dayCount: 2500, currencyCount: 50 }, { dayCount: 2500, currencyCount: 50 }]
+    }
+  ];
+  const estimates = [];
+  for (const entry of cases) {
+    const input = shapedWorkerInput(tempDir('new-account-estimate-'), entry.shapes);
+    const estimate = createNewAccountGenerationResourceEstimate(input, GENERATION_RESOURCES);
+    assert.equal(estimate.projectedOutputRows, entry.rows, entry.label);
+    assert.equal(
+      estimate.resources.memoryBytes,
+      FIXED_MEMORY_ENVELOPE_BYTES + entry.rows * NEW_ACCOUNT_GENERATION_MEMORY_MODEL.perProjectedRowBytes,
+      entry.label
+    );
+    assert.equal(Number.isSafeInteger(estimate.resources.memoryBytes), true);
+    estimates.push(estimate.resources.memoryBytes);
+  }
+  assert.deepEqual([...estimates].sort((left, right) => left - right), estimates);
+  assert.ok(estimates[0] < MAX_NEW_ACCOUNT_GENERATION_MEMORY_BYTES);
+  assert.equal(estimates.at(-1), MAX_NEW_ACCOUNT_GENERATION_MEMORY_BYTES);
+  assert.ok(estimates[2] >= 467648512, '29,192行 reservation 应覆盖本机观测 envelope');
+  assert.ok(estimates[3] >= 572456960, '60,416行 reservation 应覆盖本机观测 envelope');
+  assert.throws(
+    () => estimateNewAccountGenerationMemory(Number.MAX_SAFE_INTEGER),
+    (error) => error.code === 'NEW_ACCOUNT_RESOURCE_ESTIMATE_OVERFLOW'
+  );
+  assert.throws(
+    () => estimateNewAccountGenerationMemory(MAX_RECORDS + 1),
+    (error) => error.code === 'NEW_ACCOUNT_RESOURCE_ESTIMATE_ROW_LIMIT'
+  );
+  assert.throws(
+    () => estimateNewAccountGenerationMemory(1.5),
+    (error) => error.code === 'NEW_ACCOUNT_RESOURCE_ESTIMATE_ROW_COUNT_INVALID'
+  );
+});
+
+test('低总预算在 Worker spawn 前 fail closed，小任务按实际行数而非最大值预留', async () => {
+  const dir = tempDir('new-account-low-budget-');
+  const options = inputOptions(dir);
+  const input = createNewAccountWorkerInput(options);
+  const estimate = createNewAccountGenerationResourceEstimate(input, GENERATION_RESOURCES);
+  let workerStarts = 0;
+  const runtime = createBackgroundExecutionRuntime({
+    availableParallelism: 4,
+    freeMemoryBytes: 8 * 1024 ** 3,
+    totalMemoryBytes: 16 * 1024 ** 3,
+    memoryHardCeilingBytes: estimate.resources.memoryBytes - 1,
+    systemReserveBytes: 0,
+    workerThreadAdapter: {
+      start() {
+        workerStarts += 1;
+        throw new Error('低预算不得创建 Worker');
+      }
+    }
+  });
+  const execution = await runtime.execute({
+    actionKey: NEW_ACCOUNT_GENERATION_ACTION,
+    operationKey: options.operationKey,
+    context: options.context,
+    input
+  });
+  assert.equal(execution.outcome, 'transport-lost');
+  assert.equal(execution.terminalSource, 'spawn-error');
+  assert.equal(execution.result, null);
+  assert.equal(execution.error.code, 'RESOURCE_BUDGET_UNAVAILABLE');
+  assert.equal(workerStarts, 0);
+  assert.equal(estimate.resources.memoryBytes < MAX_NEW_ACCOUNT_GENERATION_MEMORY_BYTES, true);
+  assert.equal(runtime.resourceGovernor.snapshot().activeUsage.memoryBytes, 0);
+  const report = await runtime.shutdown({ timeoutMs: 10000 });
+  assert.deepEqual(report.leakedTransports, []);
+  assert.deepEqual(report.errors, []);
+});
+
+test('并发 NewAccount admission 不超 Governor memory budget/system reserve，第二任务未创建 Worker', async () => {
+  const firstDir = tempDir('new-account-concurrent-a-');
+  const secondDir = tempDir('new-account-concurrent-b-');
+  const firstOptions = inputOptions(firstDir, {
+    operationKey: 'new-account-concurrent-a',
+    context: operationContext('new-account-concurrent-a')
+  });
+  const secondOptions = inputOptions(secondDir, {
+    operationKey: 'new-account-concurrent-b',
+    context: operationContext('new-account-concurrent-b')
+  });
+  const firstInput = createNewAccountWorkerInput(firstOptions);
+  const secondInput = createNewAccountWorkerInput(secondOptions);
+  const estimate = createNewAccountGenerationResourceEstimate(firstInput, GENERATION_RESOURCES);
+  const memoryBudget = estimate.resources.memoryBytes + 1024 * 1024;
+  const systemReserveBytes = 512 * 1024 * 1024;
+  const freeMemoryBytes = memoryBudget + systemReserveBytes;
+  const holding = cancellableHoldingAdapter();
+  const runtime = createBackgroundExecutionRuntime({
+    availableParallelism: 4,
+    freeMemoryBytes,
+    totalMemoryBytes: 8 * 1024 ** 3,
+    memoryHardCeilingBytes: memoryBudget,
+    systemReserveBytes,
+    workerThreadAdapter: holding.adapter,
+    shutdownTimeoutMs: 10000
+  });
+  const first = runtime.start({
+    actionKey: NEW_ACCOUNT_GENERATION_ACTION,
+    operationKey: firstOptions.operationKey,
+    jobId: 'new-account-concurrent-job-a',
+    context: firstOptions.context,
+    input: firstInput
+  });
+  await first.ready;
+  await waitForCondition(
+    () => runtime.inspect(first.jobId)?.state === 'running',
+    '第一个并发任务未进入 running'
+  );
+  const second = runtime.start({
+    actionKey: NEW_ACCOUNT_GENERATION_ACTION,
+    operationKey: secondOptions.operationKey,
+    jobId: 'new-account-concurrent-job-b',
+    context: secondOptions.context,
+    input: secondInput
+  });
+  await waitForCondition(
+    () => runtime.resourceGovernor.snapshot().queued.size === 1,
+    '第二个并发任务未进入资源队列'
+  );
+  const snapshot = runtime.resourceGovernor.snapshot();
+  const phaseLeases = snapshot.activeLeases.filter((lease) => lease.kind === 'phase');
+  assert.equal(holding.state.starts, 1);
+  assert.equal(phaseLeases.length, 1);
+  assert.equal(phaseLeases[0].resources.memoryBytes, estimate.resources.memoryBytes);
+  assert.ok(snapshot.activeUsage.memoryBytes <= snapshot.budgets.memoryBytes);
+  assert.ok(freeMemoryBytes - snapshot.activeUsage.memoryBytes >= systemReserveBytes);
+
+  const shutdown = runtime.shutdown({ timeoutMs: 10000 });
+  const [firstResult, secondResult, report] = await Promise.all([first.promise, second.promise, shutdown]);
+  assert.equal(firstResult.outcome, 'cancelled');
+  assert.equal(secondResult.outcome, 'cancelled');
+  assert.equal(holding.state.starts, 1);
+  assert.equal(runtime.resourceGovernor.snapshot().activeUsage.memoryBytes, 0);
+  assert.deepEqual(report.leakedTransports, []);
+  assert.deepEqual(report.errors, []);
 });
 
 test('Main contract exact/bounded，Worker不接final target且拒绝路径逃逸/任意模板/记录爆炸', async () => {
