@@ -28,10 +28,18 @@ const {
 const {
   createPreFundMptTopologyPlanner
 } = require('../pre-fund-reconciliation/mpt-import/topology');
+const {
+  NEW_ACCOUNT_GENERATION_ACTION,
+  validateNewAccountGenerationResult
+} = require('../new-account/generation-contract');
+const {
+  NEW_ACCOUNT_GENERATION_POLICY
+} = require('../new-account/policies');
 
 const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   ...TOOLBOX_GENERATION_POLICIES,
-  ...PRE_FUND_MPT_POLICIES
+  ...PRE_FUND_MPT_POLICIES,
+  NEW_ACCOUNT_GENERATION_POLICY
 ]);
 
 function isBackgroundExecutionProductionEnabled(actionKey) {
@@ -62,18 +70,24 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
       path: path.join(
         policy.moduleId === 'pre-fund'
           ? path.resolve(__dirname, '..', 'pre-fund-reconciliation', 'mpt-import')
-          : workerRoot,
+          : (policy.moduleId === 'new-account'
+              ? path.resolve(__dirname, '..', 'new-account')
+              : workerRoot),
         policy.moduleId === 'pre-fund'
           ? 'writer-worker-entry.js'
-          : (policy.actionKey === TOOLBOX_GENERATION_ACTIONS.MERGE
+          : (policy.actionKey === NEW_ACCOUNT_GENERATION_ACTION
+              ? 'worker-entry.js'
+              : (policy.actionKey === TOOLBOX_GENERATION_ACTIONS.MERGE
               ? 'merge-worker-entry.js'
               : (policy.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
                   ? 'route-scanner-worker-entry.js'
-                  : 'split-worker-entry.js'))
+                  : 'split-worker-entry.js')))
       ),
       cancellationTerminalErrorCodes: policy.moduleId === 'pre-fund'
         ? ['PREFUND_WRITER_CANCELLED']
-        : ['TOOLBOX_GENERATION_CANCELLED']
+        : (policy.moduleId === 'new-account'
+            ? ['NEW_ACCOUNT_GENERATION_CANCELLED']
+            : ['TOOLBOX_GENERATION_CANCELLED'])
     }])
   ));
   const validatorEntries = {};
@@ -82,9 +96,11 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
       ? (policy.actionKey === PRE_FUND_MPT_REPAIR_ACTION
           ? validatePreFundMptRepairResult
           : validatePreFundMptImportResult)
-      : (policy.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
+      : (policy.moduleId === 'new-account'
+          ? validateNewAccountGenerationResult
+          : (policy.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
           ? validateToolboxMultiGenerationResult
-          : (value) => validateToolboxGenerationResult(value, policy.actionKey));
+          : (value) => validateToolboxGenerationResult(value, policy.actionKey)));
     validatorEntries[policy.result.validatorKey] = resultValidator;
     // Main explicitly executes the asynchronous technical/business validators before Publisher.
     // Registry bindings remain synchronous capability declarations for static contract coverage.
