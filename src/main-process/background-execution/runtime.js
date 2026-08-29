@@ -28,15 +28,50 @@ const {
 const {
   createPreFundMptTopologyPlanner
 } = require('../pre-fund-reconciliation/mpt-import/topology');
+const {
+  FUND_RECON_POLICIES,
+  FUND_RECON_SERVICE_KEY,
+  validateFundReconExportResult,
+  validateFundReconImportResult,
+  validateFundReconRunResult
+} = require('../fund-recon-worker/policies');
 
 const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   ...TOOLBOX_GENERATION_POLICIES,
-  ...PRE_FUND_MPT_POLICIES
+  ...PRE_FUND_MPT_POLICIES,
+  ...FUND_RECON_POLICIES
 ]);
 
 function isBackgroundExecutionProductionEnabled(actionKey) {
   const policy = BACKGROUND_EXECUTION_POLICIES.find((item) => item.actionKey === actionKey);
   return Boolean(policy && policy.production.enabled === true);
+}
+
+function entryBindingForPolicy(policy, workerRoot) {
+  if (policy.moduleId === 'fund-recon') {
+    return Object.freeze({
+      path: path.resolve(__dirname, '..', 'fund-recon-worker', 'worker-entry.js'),
+      cancellationTerminalErrorCodes: Object.freeze(['FUND_RECON_SHUTDOWN'])
+    });
+  }
+  const preFund = policy.moduleId === 'pre-fund';
+  return Object.freeze({
+    path: path.join(
+      preFund
+        ? path.resolve(__dirname, '..', 'pre-fund-reconciliation', 'mpt-import')
+        : workerRoot,
+      preFund
+        ? 'writer-worker-entry.js'
+        : (policy.actionKey === TOOLBOX_GENERATION_ACTIONS.MERGE
+            ? 'merge-worker-entry.js'
+            : (policy.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
+                ? 'route-scanner-worker-entry.js'
+                : 'split-worker-entry.js'))
+    ),
+    cancellationTerminalErrorCodes: Object.freeze(preFund
+      ? ['PREFUND_WRITER_CANCELLED']
+      : ['TOOLBOX_GENERATION_CANCELLED'])
+  });
 }
 
 function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverride = null) {
@@ -58,27 +93,20 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
   });
   const workerRoot = path.resolve(__dirname, '..', 'toolbox-background');
   const entryRegistry = createStaticRegistry(Object.fromEntries(
-    BACKGROUND_EXECUTION_POLICIES.map((policy) => [policy.entryKey, {
-      path: path.join(
-        policy.moduleId === 'pre-fund'
-          ? path.resolve(__dirname, '..', 'pre-fund-reconciliation', 'mpt-import')
-          : workerRoot,
-        policy.moduleId === 'pre-fund'
-          ? 'writer-worker-entry.js'
-          : (policy.actionKey === TOOLBOX_GENERATION_ACTIONS.MERGE
-              ? 'merge-worker-entry.js'
-              : (policy.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
-                  ? 'route-scanner-worker-entry.js'
-                  : 'split-worker-entry.js'))
-      ),
-      cancellationTerminalErrorCodes: policy.moduleId === 'pre-fund'
-        ? ['PREFUND_WRITER_CANCELLED']
-        : ['TOOLBOX_GENERATION_CANCELLED']
-    }])
+    BACKGROUND_EXECUTION_POLICIES.map((policy) => [
+      policy.entryKey,
+      entryBindingForPolicy(policy, workerRoot)
+    ])
   ));
   const validatorEntries = {};
   for (const policy of BACKGROUND_EXECUTION_POLICIES) {
-    const resultValidator = policy.moduleId === 'pre-fund'
+    const resultValidator = policy.moduleId === 'fund-recon'
+      ? (policy.actionKey === 'fund-recon:import'
+          ? validateFundReconImportResult
+          : (policy.actionKey === 'fund-recon:run'
+              ? validateFundReconRunResult
+              : validateFundReconExportResult))
+      : policy.moduleId === 'pre-fund'
       ? (policy.actionKey === PRE_FUND_MPT_REPAIR_ACTION
           ? validatePreFundMptRepairResult
           : validatePreFundMptImportResult)
@@ -116,6 +144,7 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
     ),
     settlementKeys: BACKGROUND_EXECUTION_POLICIES.map((policy) => policy.commit.settlementKey),
     publisherKeys: BACKGROUND_EXECUTION_POLICIES.map((policy) => policy.artifacts.publisherKey),
+    serviceKeys: [FUND_RECON_SERVICE_KEY],
     plannerKeys: ['planner.pre-fund:mpt-import'],
     reducerKeys: ['reducer.pre-fund:mpt-import']
   };
