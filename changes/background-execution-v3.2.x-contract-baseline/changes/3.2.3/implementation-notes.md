@@ -146,6 +146,23 @@ currentness 检查发生在 final yield 之前，来源可能在 handoff 窗口�
 组装前再次复用现有 canonical path/file identity/snapshot/content SHA-256 校验；定向 mutant 在 yield
 中替换来源后稳定 `STATEMENT_GENERATION_INPUT_STALE`、manifest=0、staging=0，不新增 evidence 来源。
 
+### E09-C Review Pack remediation（2026-08-30）
+
+独立复审指出重复 `prepare-generation` 仍走 release-first：Service 先把当前已发布
+`scope-generation` token 标记 releasing，等待 release-ack 后却没有创建候选 token；这既违反 E09-B
+冻结的 candidate-first replacement，也会在 grant reject、adoption timeout/revoke 或跨 purpose
+冲突时丢失原 continuation authority。Finding 经远端 head 与冻结 token contract 复核后确认真实可达。
+
+修复只统一入口，不改变 token store/FSM：重复 `prepare-generation` 选择当前 `published` token 并调用
+既有 `requestInteractionToken(..., replacementTokenRecord)`；`prepareReplacement` 在任何旧 token release
+之前完成 purpose、current、in-flight、数量与预算校验，grant/private insert 期间旧 token 保持
+`published`，只有候选 `adopt-ack` 才由 token store 原子替换。grant reject、candidate revoke/adoption
+timeout 仅清理候选并恢复旧 token TTL；跨 purpose 直接 fail closed，旧 token 仍可继续 replacement。
+没有把 `maxOutstanding=1` 泛化为普通双 token，也没有新增 release/publish authority。
+
+该修复与现有 Spec/TechDoc 的 replacement 合同一致，无需修改冻结合同；production、live IPC、manual
+balance seed、Publisher 与资金输出边界均未变化。
+
 ## Evidence
 
 | 证据 | 结果 | 覆盖的行为/风险 |
@@ -156,6 +173,7 @@ currentness 检查发生在 final yield 之前，来源可能在 handoff 窗口�
 | E09-C cancellation Round 1 专项 | 21/21 PASS；current/all × detail/both 四组、generation 早期 shutdown、success-completion/release-ack 精确竞态均使用真实 Supervisor/ServiceHost/Worker，并含 final-yield source drift mutant | 每组均 `cancel:ack` 先于 `job:error`、Supervisor outcome=`cancelled`、code=`STATEMENT_IMPORT_CANCELLED`、task staging=0；来源漂移 fail closed；正常 current/all/golden 同文件回归通过 |
 | Reviewer 后 E09-C/A/B/P0/error-codec 聚焦矩阵 | 98/98 PASS | cancel authority、token single-use/retry、source/template lineage、current/all、四金额/币种/余额/行序/warning、bounded DTO 与 production=false 门禁 |
 | Reviewer 后 platform Governor/ServiceHost/Supervisor/recovery/P0 聚焦矩阵 | 245/245 PASS | 未改通用 Supervisor；资源 grant/adopt/revoke/release、shutdown/crash、service generation 与 recovery 合同无回归 |
+| 2026-08-30 E09-C replacement remediation | `statement-interactions-e09-b.test.js` 21/21 PASS；`statement-generation-e09-c.test.js` 21/21 PASS；E09-P0/A/B/C 六文件聚焦矩阵 93/93 PASS | duplicate `prepare-generation` candidate-first success、grant reject、adoption timeout/revoke、cross-purpose fail-closed、旧 token continuation；current/all generation 与既有 token/session/resource 合同无回归 |
 | Round 2/3 自洽 workbook mutations | formula、type/format、font 及其四个扩展布尔、single-quote style、comment spoof、relationship decoy、duplicate coordinate、非法显式 style 全部 Publisher=0 | 实际 worksheet relationship/结构化 cell style、全 grid t/z 与 writer-owned font 摘要 readback；manifest size/hash/rowCounts 均按篡改后文件重算 |
 | Reviewer 后 `node scripts/integration/statement-generation-pipeline.js` | 45/45 PASS | legacy generation pipeline、detail/balance/current/all 业务等价 |
 | `npm run test:integration` | 51/51 scripts、2455/2455 PASS | 全仓集成、Publisher/cleanup 与资金相关输出回归；runner 自动清单的本地耗时刷新已回退，不纳入 change |
