@@ -216,7 +216,9 @@ function createToolboxPublicationDispatcher(options = {}) {
           archiveInputFiles: optionsForPublish.archiveInputFiles,
           requireArchiveHandoff: optionsForPublish.requireArchiveHandoff === true,
           allowEmptyArchiveInputs: optionsForPublish.allowEmptyArchiveInputs === true,
-          requireValidatedArtifacts: optionsForPublish.requireValidatedArtifacts === true
+          requireValidatedArtifacts: optionsForPublish.requireValidatedArtifacts === true,
+          requireTargetParentIdentity:
+            optionsForPublish.requireTargetParentIdentity === true
         },
         optionsForPublish.onProgress
       );

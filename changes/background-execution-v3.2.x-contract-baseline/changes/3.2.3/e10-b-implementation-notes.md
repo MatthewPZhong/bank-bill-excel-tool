@@ -20,6 +20,9 @@
 | strict readback冻结精确Sheet set/order/count并返回验证metadata | 首Sheet名匹配不足以拒绝附加secret sheet | 只检查至少一个Sheet或Publisher硬编码sheetCount=1 | 恶意附加Sheet Publisher=0；Publisher metadata来自回读事实 |
 | inline adapter terminate/close await实际execution promise | AbortSignal不能中断正在进行的copyFile syscall；立即返回会虚报lease/leak收口 | 只closed/abort后立即返回 | 正常shutdown等copy cleanup后释放；deadline由Supervisor报transport leak并保留owner |
 | production 保持 `false/legacy/0`，不接 live IPC | Windows packaged 和真实资金人工门禁未完成 | 本轮直接切换 `new-account:export` | E10-B 仅提供已注册但 dormant 的 runtime/Main seam |
+| 用户授权additive direct-parent identity公共合同 | reviewer真实probe在copy完成后rename target parent并创建ordinary replacement，Publisher发布进replacement | 保存整条ancestor chain；只补symlink检查；重新采样target | FilePlanV1 output冻结direct parent identity并逐字传Publisher/journal；普通上级替换通过direct parent inode变化检测 |
+| 只冻结resolved direct parent，不保存ancestor chain | 已知真实repro均在重新解析后改变direct parent identity；无证据要求整条chain，过度冻结会扩大Windows/恢复合同 | 每级ancestor canonical/dev/ino链 | 边界最小且可验证；原parent object移走再移回合法 |
+| journal v1 additive且旧reader路径兼容 | 旧prepared/committed记录不能被批量取消，新字段只为显式require的E10-B必填 | 新journal版本/DB migration/第二receipt | 带字段恢复漂移转manual recovery/Hold；旧journal沿原语义；旧二进制回滚前open journal=0 |
 
 ## Assumptions
 
@@ -36,12 +39,14 @@
 | 原inline terminate立即返回 | await实际execution，由既有Supervisor bounded timeout | reviewerslow-copy app quit probe证明staging晚清理 | shutdown报告与真实lease/cleanup一致 | 是，spec/techdoc §9 |
 | 原strict scanner截断超列且Main只验证cached值 | exact worksheet bounds + authority-only dynamic-content ban | reviewer真实extra-column/formula probes均成功发布 | 合法trusted writer不变，恶意内容fail closed | 是，spec/techdoc §9 |
 | 原Main authority同步构造且E10-B重复normalize FilePlan | cooperative authority + branded plan assert | reviewer heartbeat与absent→created真实probe | Main响应性与原target evidence恢复，公开Protocol/FilePlan shape不变 | 是，spec/techdoc §9 |
+| 原ancestor identity合同BLOCK | 用户授权FilePlan/Publisher/journal additive direct-parent evidence | reviewer parent rename+ordinary replacement真实probe | E10-B fail closed；generic旧action/journal向后兼容；不实现ancestor chain/native ID | 是，v3.2.3 §9、Platform与Archive FilePlan合同 |
 
 ## Evidence
 
 | 证据 | 结果 | 覆盖的行为/风险 |
 | --- | --- | --- |
 | exact parent/merge-base | `d073ced023b40feb477cf7557801a2899b433500` | 精确 E10-A 父链 |
+| Direct-parent授权轮起始head | `b0bdb36a122fec21aba56538fcef50d2200c282c` | 公共合同增量从已复审E10-B Round2 exact head开始，不重建/改写父链 |
 | RED | 首次运行 `new-account-save-as-e10-b.test.js` 因 `artifact-copy` 不存在失败 | 证明测试先于 production 模块 |
 | reviewer finding定向 | `E10-A 20/20`、`E10-B 33/33`、adapter `22/22` PASS | 恶意自洽业务、附加Sheet、committed-reply-lost、pre/post settle/ack、slow-copy shutdown/deadline/late terminal |
 | E10-A + strict readback + policy/Publisher/Governor 聚焦 | `217/217 PASS` | generation golden、业务digest、Publisher archive handoff/recovery、TaskLifecycle与Supervisor资源合同不漂移 |
@@ -53,12 +58,15 @@
 | Round2 reviewer RED→GREEN | strict worksheet、真实E10-A/E10-B workbook/Publisher、near-max authority、FilePlan replacement probes | extra column/header/data/styled blank/merge/dimension、formula account/amount、calcChain/externalLink/hyperlink、233536行heartbeat/cancel、absent→created/existing replacement/unbranded clone |
 | Round2定向 | E10-A `25/25`、E10-B `47/47`、strict readback `18/18`；交叉聚焦 `189/189` PASS | 合法golden、大样本/cancel、archive/FilePlan/TaskLifecycle、inline runtime、E09-C seam |
 | Round2全量 | unit `6390/6394 PASS, 3 SKIP`（仅已知NSIS baseline）；integration `51/51 scripts, 2455/2455 assertions`；smoke/lint/node-check/diff-check PASS | 仓库级回归、静态卫生与已知基线隔离 |
+| Direct-parent合同RED | 核心三文件`123/138 PASS, 15 FAIL` | 必需identity缺失、parent replacement被接受、journal/index无evidence，证明测试先于production修复 |
+| Direct-parent合同GREEN | FilePlan/E10-B/Publisher `141/141 PASS`；archive/FilePlan/TaskLifecycle/E10-A/E10-B/E09-C/Publisher交叉`413/413 PASS`；repository/public DTO `151/151 PASS` | parent/grandparent replacement、same parent、原对象移回、symlink/unreliable、prepare/stage/pre-commit/逐target mutation、journal recovery/旧journal兼容 |
+| Direct-parent最终全量 | unit `6406/6410 PASS, 3 SKIP`（仅已知NSIS dependency baseline 1 FAIL）；integration `51/51 scripts, 2455/2455 assertions PASS`；smoke/lint/node-check/diff-check PASS | 仓库级回归、真实大文件、恢复、资源与静态卫生 |
 
 ## Remaining Unknowns
 
 | 未知 | 处理 | 负责人/下一步 | 合并影响 |
 | --- | --- | --- | --- |
 | Windows packaged Publisher/路径语义 | BLOCK production gate | R3.2.3 Setup/portable 人工与 fault probe | 不阻塞 dormant merge；阻止 production enable |
-| target ancestor rename+ordinary replacement | BLOCK public FilePlan/Publisher contract | 已向root提交字段/journal兼容/Windows/rollback只读方案，等待用户授权 | 当前finding未修；阻止本轮宣称全部review finding闭合 |
+| Windows target parent dev/ino可靠性 | BLOCK production gate | Setup/portable实机验证；不新增native volume file ID | E10-B capability不足即fail closed，production保持false |
 | 真实资金样本与 Excel/WPS 展示 | BLOCK production gate | 资金负责人逐项人工复核 | 自动化不能替代人工资损验收 |
 | 当前安装的 electron-builder NSIS helper 含 `System::Store` | 已知 exact-parent 依赖环境基线；本轮不改依赖/构建合同 | 发布负责人按既有 Windows 构建链校准依赖后复跑 | 不归因于 E10-B；仍阻止把本机 unit 结果表述为全绿 |
