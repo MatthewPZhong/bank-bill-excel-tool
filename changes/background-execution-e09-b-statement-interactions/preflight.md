@@ -24,7 +24,7 @@
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | token private insert 与 public publication 的最小 FSM | 状态/资源 | 高 | 一般 | TechDoc §3、Host adopted state | PROBE | 真实 Supervisor/Host trace，在 grant/adopt-ack 两点阻塞 | draft 仅 job 内；grant 后 registry private insert；adopt-ack 后 published，此前无 job:done |
 | continuation 如何证明 choice/template/mapping/source 未变 | 公共契约/资金边界 | 高 | 一般 | frozen Spec 明确逐项重验；E09-A source/template evidence | PROBE | exact continuation validator + tamper/stale matrix | token 保存 canonical evidence/digest；新 job 重新提交 bounded evidence，Worker exact 比较并重新 stat/read |
-| session mutation 与 token 同时存在时释放顺序 | 生命周期/竞态 | 高 | 一般 | maxOutstanding=1；mutation makes token stale | PROBE | delayed release-ack 与 import adoption race | 只有新 session adopt-ack 后 invalidate旧 token；新 interaction 在建 reservation 前先精确释放旧 token |
+| session mutation 与 token 同时存在时替换顺序 | 生命周期/竞态 | 高 | 一般 | maxOutstanding=1；mutation makes token stale；frozen contract 要求 candidate failure 保留 old | PROBE | candidate reject/revoke 与 delayed adopt-ack race | 新 interaction 以同 owner、递增 revision、exact old reservation 建立 tentative candidate；candidate adopt-ack 后才原子替换 old，失败只清理 candidate |
 | waiting-user business lock 由何处持有 | ownership | 高 | 容易 | Main Control Plane 独占业务锁；E09-B 不接 live Main | PROBE | 独立 coordinator 注入 owner-aware acquire/release fakes | 新建 dormant Main coordinator，严格校验 taskRunId/jobId/token identity；不把锁实例传 Worker |
 | 大账号多 block assignment 是否能复用现有金额 mapper | 资金语义 | 高 | 一般 | legacy 先用现有 mapper 产 provisional rows，再按 block 赋 Merchant/Currency | PROBE | 提取同等 block helper并做 legacy shape/row count tests | 继续唯一调用 `buildMappedRows`；只在 Worker 私有 draft 对映射后行赋账号/币种，不改金额/借贷算法 |
 
@@ -37,6 +37,7 @@
 - E09-B 只接通 `big-account` interaction；manual-balance 与 scope-generation 只保留已冻结 DTO/purpose，不提前实现 E09-C/D。
 - dormant waiting-user coordinator 以注入的 Main-owned lock/phase owner API 验证合同；live handler 接线留给 action enable PR，避免改变当前用户路径。
 - E09-A 老 template evidence 不含候选字段时继续非交互路径；只有明确 multi-big-account mapping 且携带合法维护候选时才发行 token，否则 fail closed。
+- `scope-generation` 复用 purpose-generic token replacement authority，但 E09-B 只验证共享 token-store/Host/Governor seam；不接入或提前启用 E09-C generation action。
 
 ## E09-A Restack 适配（`ddac924b`）
 
@@ -106,3 +107,24 @@
 | receipt 是否允许 extra key/错 token/重复 delivery | 契约/幂等 | 中 | 容易 | 当前仅检查 status/tokenId 值 | PROBE | hostile exact-shape test | canonical bounded exact-two receipt；错 token fail closed；in-flight/terminal duplicate共用或返回同一 canonical outcome |
 
 无 BLOCK 用户问题；Reviewer 已证明触发条件且项目负责接受处置方向。资金红线仍只由既有人工复核解除。
+
+## Token Replacement Review Repair
+
+### Task Brief
+
+- Goal：让 big-account 与后续 scope-generation 共用的 token replacement 满足“先保留新 candidate，再关闭旧 token；失败时旧 token 仍有效”。
+- Context：原实现先 release/ack old，再 request candidate；协议与 Host 又禁止 pending-interaction replacement，因此 admission/revoke 失败没有原子恢复 old authority 的路径。
+- Constraints：只扩展 `pending-interaction-create` 的 exact tentative replacement；`phase-extension-create` 继续禁止 replacement；不启用 scope-generation live action，不改变 production/资金/恢复门禁。
+- Done when：old published token 在 candidate reject/revoke/timeout 前后仍可用；只有 matching adopt-ack 才将 Governor reservation 与 Worker token authority 原子切到 candidate；无 release-first fallback。
+
+### Unknowns Register
+
+| 未知 | 类型 | 影响 | 当前证据 | 处理 | 当前决定 |
+| --- | --- | --- | --- | --- | --- |
+| pending replacement 的唯一原子提交点 | 状态/资源 | 高 | persistent replacement 已由 Host adopt-ack 驱动 Governor tentative adoption | PROBE | 复用同一 adopt-ack 原子点，并约束 old/candidate kind 都是 pending-interaction |
+| `maxOutstanding=1` 如何容纳 candidate | 预算/状态 | 高 | replacement 是同 owner authority 的候选而非第二个 published token | PROBE | token store 按替换后 count/bytes 投影校验，candidate private、old published，adopt-ack 后单次交换 |
+| platform request matrix prose 是否仍禁止 pending replacement | 公共合同 | 高 | protocol schema 已扩展，但 E00/platform prose 仍写 replaces 必须 `null` | PROBE | 同步 prose：仅同 owner、递增 revision、exact current、published old 可替换；phase-extension 仍禁止，失败保留旧 token |
+| candidate failure 时 old expiry/owner 如何保持 | 生命周期/竞态 | 高 | candidate 建立期间 old 仍是 Host current reservation | PROBE | 暂停 old expiry timer；reject/revoke/release-ack 恢复，只有 candidate adopt-ack 清除 old |
+| scope-generation 是否需本轮 live 接线 | 版本边界 | 高 | frozen sequence 将 generation 放 E09-C | ASSUME（冻结边界） | 仅以 `purpose=scope-generation` token-store replacement 测试证明共享能力，不新增 action wiring |
+
+无新的用户选择 BLOCK。真实 Windows、资金样本和 production enable 仍维持人工门禁。

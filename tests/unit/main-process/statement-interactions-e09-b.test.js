@@ -98,6 +98,29 @@ function tokenDraft(overrides = {}) {
   };
 }
 
+function tokenDraftForPurpose(purpose) {
+  if (purpose === 'big-account') return tokenDraft();
+  const base = tokenDraft();
+  const choices = [
+    { scope: 'current', label: '当前批次' },
+    { scope: 'all', label: '全部批次' }
+  ];
+  return tokenDraft({
+    purpose: 'scope-generation',
+    allowedChoices: choices,
+    prompt: {
+      status: 'select-export-scope',
+      kind: 'detail',
+      options: choices
+    },
+    privateContext: {
+      evidence: base.privateContext.evidence,
+      choiceDomain: { options: choices },
+      detailRows: [['private-scope']]
+    }
+  });
+}
+
 function tokenChoice(overrides = {}) {
   return {
     mode: 'unfixed',
@@ -400,6 +423,121 @@ test('token registry严格执行estimate→private insert→adopt ack→single-u
     evidence: expiringDraft.privateContext.evidence, choiceDomain: expiringDraft.privateContext.choiceDomain,
     choice: tokenChoice()
   }), (error) => error.code === 'STATEMENT_TOKEN_EXPIRED');
+});
+
+test('big-account与scope-generation replacement在adopt-ack前保留旧token且失败不失效', () => {
+  for (const purpose of ['big-account', 'scope-generation']) {
+    let id = 0;
+    const store = createStatementTokenStore({
+      createId: () => `${purpose}-token-${++id}`,
+      ttlMs: 100000
+    });
+    const initialDraft = store.prepare(tokenDraftForPurpose(purpose));
+    const initial = store.insertPrivate(initialDraft, {
+      requestId: `${purpose}-request-1`,
+      grantId: `${purpose}-grant-1`,
+      reservationId: `${purpose}-reservation-1`,
+      replacesReservationId: null,
+      owner: { kind: 'interaction-token', ownerKeyHash: `${purpose}-slot`, candidateRevision: 1 },
+      ownerJobRef: { actionKey: 'statement:import', operationKey: 'op-1', jobId: 'job-1', unitId: null }
+    });
+    store.markAdopted(initial.handle.tokenId, {
+      grantId: `${purpose}-grant-1`, reservationId: `${purpose}-reservation-1`
+    });
+    const otherPurpose = purpose === 'big-account' ? 'scope-generation' : 'big-account';
+    assert.throws(
+      () => store.prepareReplacement(tokenDraftForPurpose(otherPurpose), initial.handle.tokenId),
+      (error) => error.code === 'STATEMENT_TOKEN_REPLACEMENT_PURPOSE_MISMATCH'
+    );
+
+    const rejectedDraft = store.prepareReplacement(
+      tokenDraftForPurpose(purpose),
+      initial.handle.tokenId
+    );
+    const rejected = store.insertPrivate(rejectedDraft, {
+      requestId: `${purpose}-request-rejected`,
+      grantId: `${purpose}-grant-rejected`,
+      reservationId: `${purpose}-reservation-rejected`,
+      replacesReservationId: initial.handle.reservationId,
+      owner: { kind: 'interaction-token', ownerKeyHash: `${purpose}-slot`, candidateRevision: 2 },
+      ownerJobRef: { actionKey: 'statement:import', operationKey: 'op-2', jobId: 'job-2', unitId: null }
+    });
+    assert.equal(initial.state, 'published');
+    assert.deepEqual(store.listStatus(), [{ purpose, expiresAt: initial.handle.expiresAt }]);
+    store.markReleasing(rejected.handle.tokenId);
+    store.remove(rejected.handle.tokenId);
+    assert.equal(initial.state, 'published', `${purpose} replacement失败必须保留旧token`);
+
+    const replacementDraft = store.prepareReplacement(
+      tokenDraftForPurpose(purpose),
+      initial.handle.tokenId
+    );
+    const replacement = store.insertPrivate(replacementDraft, {
+      requestId: `${purpose}-request-2`,
+      grantId: `${purpose}-grant-2`,
+      reservationId: `${purpose}-reservation-2`,
+      replacesReservationId: initial.handle.reservationId,
+      owner: { kind: 'interaction-token', ownerKeyHash: `${purpose}-slot`, candidateRevision: 3 },
+      ownerJobRef: { actionKey: 'statement:import', operationKey: 'op-3', jobId: 'job-3', unitId: null }
+    });
+    assert.equal(initial.state, 'published');
+    assert.equal(replacement.state, 'inserted');
+    assert.deepEqual(store.listStatus(), [{ purpose, expiresAt: initial.handle.expiresAt }]);
+
+    store.markAdopted(replacement.handle.tokenId, {
+      grantId: `${purpose}-grant-2`, reservationId: `${purpose}-reservation-2`
+    });
+    assert.equal(initial.state, 'replaced');
+    assert.equal(store.inspect(initial.handle.tokenId), null);
+    assert.equal(store.inspect(replacement.handle.tokenId).state, 'published');
+    assert.deepEqual(store.snapshot(), { count: 1, totalBytes: replacement.bytes });
+  }
+});
+
+test('replacement candidate清理后旧token仍可执行continuation', () => {
+  let id = 0;
+  const store = createStatementTokenStore({
+    createId: () => `replacement-continuation-${++id}`,
+    ttlMs: 100000
+  });
+  const initialDraft = store.prepare(tokenDraft());
+  const initial = store.insertPrivate(initialDraft, {
+    requestId: 'continuation-request-1',
+    grantId: 'continuation-grant-1',
+    reservationId: 'continuation-reservation-1',
+    replacesReservationId: null,
+    owner: { kind: 'interaction-token', ownerKeyHash: 'continuation-slot', candidateRevision: 1 },
+    ownerJobRef: { actionKey: 'statement:import', operationKey: 'op-1', jobId: 'job-1', unitId: null }
+  });
+  store.markAdopted(initial.handle.tokenId, {
+    grantId: 'continuation-grant-1',
+    reservationId: 'continuation-reservation-1'
+  });
+
+  const candidateDraft = store.prepareReplacement(tokenDraft(), initial.handle.tokenId);
+  const candidate = store.insertPrivate(candidateDraft, {
+    requestId: 'continuation-request-2',
+    grantId: 'continuation-grant-2',
+    reservationId: 'continuation-reservation-2',
+    replacesReservationId: initial.handle.reservationId,
+    owner: { kind: 'interaction-token', ownerKeyHash: 'continuation-slot', candidateRevision: 2 },
+    ownerJobRef: { actionKey: 'statement:import', operationKey: 'op-2', jobId: 'job-2', unitId: null }
+  });
+  store.markReleasing(candidate.handle.tokenId);
+  store.remove(candidate.handle.tokenId);
+
+  const consumed = store.beginConsume(publicToken(initial.publicInteraction), {
+    serviceGeneration: initial.handle.serviceGeneration,
+    sessionRevision: initial.handle.sessionRevision,
+    purpose: initial.handle.purpose,
+    sessionKey: initial.handle.sessionKey,
+    evidence: initial.privateContext.evidence,
+    choiceDomain: initial.privateContext.choiceDomain,
+    choice: tokenChoice()
+  });
+  assert.equal(consumed.handle.tokenId, initial.handle.tokenId);
+  assert.equal(consumed.state, 'consuming');
+  assert.deepEqual(store.snapshot(), { count: 1, totalBytes: initial.bytes });
 });
 
 test('token registry对generation/revision/purpose/choice/evidence篡改逐项fail closed且预算/数量不泄漏', () => {
@@ -975,20 +1113,38 @@ test('真实Statement Service完成pending reservation adoption、同Task contin
   assert.equal(firstInteraction.prompt.rows.length, 2, '同一文件的两个header block必须分别选择');
   assert.deepEqual(firstInteraction.prompt.rows.map((row) => row.sourceRowNumber), [2, 4]);
 
-  const refreshStart = trace.length;
-  start('statement:import', 'same-task/statement:import/2', 'job-refresh', importEvidence);
-  const invalidationRelease = await nextOperation('resource:release', refreshStart);
-  assert.equal(invalidationRelease.payload.reservationId, 'reservation-token');
-  assert.equal(trace.slice(refreshStart).some((message) => message.operation === 'resource:request'), false);
-  control('resource:release-ack', invalidationRelease.controlId, invalidationRelease.jobRef, {
-    reservationId: 'reservation-token'
+  const rejectedRefreshStart = trace.length;
+  start('statement:import', 'same-task/statement:import/2', 'job-refresh-rejected', importEvidence);
+  const rejectedRefreshRequest = await nextOperation('resource:request', rejectedRefreshStart);
+  assert.equal(rejectedRefreshRequest.payload.replacesReservationId, 'reservation-token');
+  assert.equal(rejectedRefreshRequest.payload.owner.ownerKeyHash, tokenRequest.payload.owner.ownerKeyHash);
+  assert.ok(rejectedRefreshRequest.payload.owner.candidateRevision >
+    tokenRequest.payload.owner.candidateRevision);
+  assert.equal(trace.slice(rejectedRefreshStart).some((message) =>
+    message.operation === 'resource:release' &&
+    message.payload.reservationId === 'reservation-token'), false);
+  control('resource:reject', rejectedRefreshRequest.controlId, rejectedRefreshRequest.jobRef, {
+    requestId: rejectedRefreshRequest.payload.requestId,
+    reasonCode: 'RESOURCE_BUDGET_UNAVAILABLE',
+    retryable: true,
+    safeSummary: 'Resource request was not admitted'
   });
+  const rejectedRefresh = await nextOperation('job:error', rejectedRefreshStart);
+  assert.equal(rejectedRefresh.payload.error.code, 'STATEMENT_RESERVATION_REJECTED');
+
+  const refreshStart = trace.length;
+  start('statement:import', 'same-task/statement:import/3', 'job-refresh', importEvidence);
   const refreshedTokenRequest = await nextOperation('resource:request', refreshStart);
+  assert.equal(refreshedTokenRequest.payload.replacesReservationId, 'reservation-token',
+    'replacement拒绝后旧token必须仍是current reservation');
+  assert.equal(trace.slice(refreshStart).some((message) =>
+    message.operation === 'resource:release' &&
+    message.payload.reservationId === 'reservation-token'), false);
   control('resource:grant', refreshedTokenRequest.controlId, refreshedTokenRequest.jobRef, {
     requestId: refreshedTokenRequest.payload.requestId,
     grantId: 'grant-token-refresh',
     reservationId: 'reservation-token-refresh',
-    replacesReservationId: null,
+    replacesReservationId: 'reservation-token',
     granted: refreshedTokenRequest.payload.requested,
     adoptionDeadlineMs: 30000
   });
@@ -999,6 +1155,10 @@ test('真实Statement Service完成pending reservation adoption、同Task contin
     reservationId: 'reservation-token-refresh'
   });
   const refreshedDone = await nextOperation('job:done', refreshStart);
+  assert.equal(trace.slice(refreshStart).some((message) =>
+    message.operation === 'resource:release' &&
+    message.payload.reservationId === 'reservation-token'), false,
+    '旧reservation由Host/Governor原子替换，不走Worker release fallback');
   const interaction = refreshedDone.payload.result.interaction;
   assert.equal(interaction.prompt.rows.length, 2, '同一文件的两个header block必须分别选择');
   assert.deepEqual(interaction.prompt.rows.map((row) => row.sourceRowNumber), [2, 4]);

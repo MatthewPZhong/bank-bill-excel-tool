@@ -49,11 +49,16 @@ function createStatementTokenStore(options = {}) {
     throw new StatementTokenStoreError(code, message);
   }
 
-  function prepare(input) {
-    if (records.size >= maxOutstanding) fail('STATEMENT_TOKEN_LIMIT_EXCEEDED', 'Statement token limit exceeded');
+  function prepareDraft(input, replacementRecord = null) {
+    const projectedCount = records.size - (replacementRecord ? 1 : 0) + 1;
+    if (projectedCount > maxOutstanding) {
+      fail('STATEMENT_TOKEN_LIMIT_EXCEEDED', 'Statement token limit exceeded');
+    }
     const privateContext = canonicalJsonSnapshot(input.privateContext);
     const footprint = estimateStatementPendingInteractionFootprint(privateContext, { budgetBytes });
-    if (totalBytes + footprint.estimatedBytes > budgetBytes) {
+    const projectedBytes = totalBytes - (replacementRecord ? replacementRecord.bytes : 0) +
+      footprint.estimatedBytes;
+    if (projectedBytes > budgetBytes) {
       fail('STATEMENT_TOKEN_BUDGET_EXCEEDED', 'Statement pending-interaction budget exceeded');
     }
     const tokenId = createId();
@@ -84,8 +89,28 @@ function createStatementTokenStore(options = {}) {
       privateContext,
       prompt,
       publicInteraction,
-      footprint
+      footprint,
+      replacementTokenId: replacementRecord ? replacementRecord.handle.tokenId : null,
+      replacesReservationId: replacementRecord ? replacementRecord.handle.reservationId : null
     });
+  }
+
+  function prepare(input) {
+    return prepareDraft(input);
+  }
+
+  function prepareReplacement(input, currentTokenId) {
+    const current = records.get(currentTokenId);
+    if (!current || current.state !== 'published') {
+      fail('STATEMENT_TOKEN_REPLACEMENT_STALE', 'Replacement must reference the published current token');
+    }
+    if (input.purpose !== current.publicInteraction.purpose) {
+      fail('STATEMENT_TOKEN_REPLACEMENT_PURPOSE_MISMATCH', 'Replacement token purpose must remain unchanged');
+    }
+    if ([...records.values()].some((record) => record.replacementTokenId === currentTokenId)) {
+      fail('STATEMENT_TOKEN_REPLACEMENT_IN_PROGRESS', 'Statement token already has a replacement candidate');
+    }
+    return prepareDraft(input, current);
   }
 
   function claimBigAccountChoice(input, choiceDomain) {
@@ -128,8 +153,17 @@ function createStatementTokenStore(options = {}) {
   }
 
   function insertPrivate(draft, grant) {
-    if (records.has(draft.tokenId) || records.size >= maxOutstanding) {
+    const replacement = draft.replacementTokenId
+      ? records.get(draft.replacementTokenId)
+      : null;
+    if (records.has(draft.tokenId) || (!replacement && records.size >= maxOutstanding)) {
       fail('STATEMENT_TOKEN_LIMIT_EXCEEDED', 'Statement token cannot be inserted');
+    }
+    if (draft.replacementTokenId &&
+        (!replacement || replacement.state !== 'published' ||
+         replacement.handle.reservationId !== draft.replacesReservationId ||
+         grant.replacesReservationId !== draft.replacesReservationId)) {
+      fail('STATEMENT_TOKEN_REPLACEMENT_STALE', 'Replacement grant does not match the published current token');
     }
     const handle = createStatementTokenHandleDto({
       tokenId: draft.tokenId,
@@ -151,6 +185,7 @@ function createStatementTokenStore(options = {}) {
       prompt: draft.prompt,
       publicInteraction: draft.publicInteraction,
       bytes: draft.footprint.estimatedBytes,
+      replacementTokenId: draft.replacementTokenId,
       state: 'inserted'
     };
     records.set(handle.tokenId, record);
@@ -163,6 +198,15 @@ function createStatementTokenStore(options = {}) {
     if (!record || record.state !== 'inserted' || record.grantId !== identity.grantId ||
         record.handle.reservationId !== identity.reservationId) {
       fail('STATEMENT_TOKEN_ADOPT_ACK_STALE', 'Token adopt ack does not match private insert');
+    }
+    if (record.replacementTokenId) {
+      const replaced = records.get(record.replacementTokenId);
+      if (!replaced || replaced.state !== 'published') {
+        fail('STATEMENT_TOKEN_REPLACEMENT_STALE', 'Replacement token is no longer current');
+      }
+      records.delete(replaced.handle.tokenId);
+      totalBytes -= replaced.bytes;
+      replaced.state = 'replaced';
     }
     record.state = 'published';
     return record;
@@ -252,6 +296,7 @@ function createStatementTokenStore(options = {}) {
     markAdopted,
     markReleasing,
     prepare,
+    prepareReplacement,
     remove,
     snapshot: () => Object.freeze({ count: records.size, totalBytes })
   });

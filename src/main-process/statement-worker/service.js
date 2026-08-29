@@ -142,6 +142,13 @@ function createStatementService(options = {}) {
     });
   }
 
+  function clearTokenExpiry(record) {
+    if (!record) return;
+    const timer = tokenExpiryTimers.get(record.handle.tokenId);
+    if (timer) clearTimeout(timer);
+    tokenExpiryTimers.delete(record.handle.tokenId);
+  }
+
   function releaseToken(record, reason, completion = null) {
     if (!record) return;
     const existingRelease = tokenReleases.get(record.handle.reservationId);
@@ -150,9 +157,7 @@ function createStatementService(options = {}) {
       return;
     }
     tokenStore.markReleasing(record.handle.tokenId);
-    const timer = tokenExpiryTimers.get(record.handle.tokenId);
-    if (timer) clearTimeout(timer);
-    tokenExpiryTimers.delete(record.handle.tokenId);
+    clearTokenExpiry(record);
     const controlId = nextControlId('token-release');
     tokenReleases.set(record.handle.reservationId, {
       record,
@@ -164,6 +169,26 @@ function createStatementService(options = {}) {
       reservationId: record.handle.reservationId,
       reason
     });
+  }
+
+  function armTokenExpiry(record) {
+    if (!record || record.state !== 'published') return;
+    clearTokenExpiry(record);
+    const delay = Math.max(0, record.handle.expiresAt - tokenClockNow());
+    const expiryTimer = setTimeout(() => {
+      if (tokenStore.inspect(record.handle.tokenId)?.state === 'published') {
+        releaseToken(record, 'token-expired');
+      }
+    }, delay);
+    if (typeof expiryTimer.unref === 'function') expiryTimer.unref();
+    tokenExpiryTimers.set(record.handle.tokenId, expiryTimer);
+  }
+
+  function resumeReplacementToken(job) {
+    const record = job && job.replacementTokenRecord;
+    if (!record || tokenStore.inspect(record.handle.tokenId)?.state !== 'published') return;
+    job.replacementTokenRecord = null;
+    armTokenExpiry(record);
   }
 
   function publicTokenIdentity(record) {
@@ -189,33 +214,54 @@ function createStatementService(options = {}) {
     throw new StatementServiceError('STATEMENT_IMPORT_CANCELLED', 'Statement operation cancelled before adoption');
   }
 
-  function requestInteractionToken(job, interactionDraft) {
+  function requestInteractionToken(job, interactionDraft, replacementTokenRecord = null) {
     assertJobActive(job);
-    const draft = tokenStore.prepare({
+    const input = {
       ...interactionDraft,
       serviceGeneration: state.serviceGeneration
-    });
+    };
+    const draft = replacementTokenRecord
+      ? tokenStore.prepareReplacement(input, replacementTokenRecord.handle.tokenId)
+      : tokenStore.prepare(input);
     const result = createStatementInteractionRequiredResult({
       status: 'interaction-required',
       interaction: draft.publicInteraction
     }, job.start.actionKey);
     assertJobActive(job);
     const requestId = nextControlId('request');
+    const candidateRevision = ++controlOrdinal;
+    if (replacementTokenRecord &&
+        candidateRevision <= replacementTokenRecord.owner.candidateRevision) {
+      throw new StatementServiceError(
+        'STATEMENT_TOKEN_REPLACEMENT_REVISION_STALE',
+        'Replacement token owner revision did not advance'
+      );
+    }
     const owner = Object.freeze({
       kind: 'interaction-token',
-      ownerKeyHash: createHash('sha256').update(`service.statement/token/${draft.tokenId}`).digest('hex'),
-      candidateRevision: ++controlOrdinal
+      ownerKeyHash: replacementTokenRecord
+        ? replacementTokenRecord.owner.ownerKeyHash
+        : createHash('sha256').update(`service.statement/token/${draft.tokenId}`).digest('hex'),
+      candidateRevision
     });
     Object.assign(job, {
       kind: 'token', interactionDraft: draft, requestId,
-      requestControlId: nextControlId('request-control'), owner, result
+      requestControlId: nextControlId('request-control'), owner, result,
+      replacementTokenRecord,
+      replacesReservationId: draft.replacesReservationId
     });
+    if (replacementTokenRecord) clearTokenExpiry(replacementTokenRecord);
     assertJobActive(job);
-    postControl('resource:request', job.requestControlId, jobRef(job.start), {
-      requestId, requestKind: 'pending-interaction-create',
-      requested: { memoryBytes: draft.footprint.estimatedBytes, cpuSlots: 0, ioHeavySlots: 0 },
-      replacesReservationId: null, owner
-    });
+    try {
+      postControl('resource:request', job.requestControlId, jobRef(job.start), {
+        requestId, requestKind: 'pending-interaction-create',
+        requested: { memoryBytes: draft.footprint.estimatedBytes, cpuSlots: 0, ioHeavySlots: 0 },
+        replacesReservationId: draft.replacesReservationId, owner
+      });
+    } catch (error) {
+      resumeReplacementToken(job);
+      throw error;
+    }
   }
 
   async function resolvePrivateSources(request, job) {
@@ -385,12 +431,8 @@ function createStatementService(options = {}) {
       });
       assertJobActive(job);
       if (interactionDraft) {
-        const existingToken = tokenStore.listRecords()[0];
-        if (existingToken) {
-          releaseToken(existingToken, 'session-invalidated', { job, interactionDraft });
-          return;
-        }
-        requestInteractionToken(job, interactionDraft);
+        const existingToken = tokenStore.listRecords().find((record) => record.state === 'published');
+        requestInteractionToken(job, interactionDraft, existingToken || null);
         return;
       }
       const candidate = await buildStatementImportCandidate(state, privateRequest, {
@@ -436,6 +478,7 @@ function createStatementService(options = {}) {
         releaseToken(job.tokenRecord, 'job-failed', { job, error });
         return;
       }
+      resumeReplacementToken(job);
       if (error && error.code === 'STATEMENT_IMPORT_CANCELLED') {
         if (!job.terminal) job.emit('cancel:ack', { cancellation: { scope: 'job' } });
         finishError(job, error, 'STATEMENT_IMPORT_CANCELLED');
@@ -448,7 +491,9 @@ function createStatementService(options = {}) {
   function handleResourceGrant(message) {
     const job = activeJob;
     if (!job || job.terminal || (!job.candidate && job.kind !== 'token') ||
-        message.payload.requestId !== job.requestId) {
+        message.payload.requestId !== job.requestId ||
+        (job.kind === 'token' &&
+          message.payload.replacesReservationId !== job.replacesReservationId)) {
       if (matchesCancelledRequest(message)) {
         cancelledRequestTombstone = {
           ...cancelledRequestTombstone,
@@ -494,7 +539,8 @@ function createStatementService(options = {}) {
         reservationId: message.payload.reservationId,
         grantId: message.payload.grantId,
         jobRef: jobRef(job.start),
-        revokeControlId: null
+        revokeControlId: null,
+        replacementTokenRecord: job.replacementTokenRecord || null
       };
       finishError(job, error, 'STATEMENT_ADOPTION_FAILED');
     }
@@ -504,6 +550,9 @@ function createStatementService(options = {}) {
     const job = activeJob;
     if (!job || job.terminal || message.payload.requestId !== job.requestId) {
       if (matchesCancelledRequest(message)) {
+        if (cancelledRequestTombstone.replacementTokenRecord) {
+          armTokenExpiry(cancelledRequestTombstone.replacementTokenRecord);
+        }
         cancelledRequestTombstone = null;
         return;
       }
@@ -518,6 +567,7 @@ function createStatementService(options = {}) {
       releaseToken(job.tokenRecord, 'job-failed', { job, error });
       return;
     }
+    resumeReplacementToken(job);
     finishError(job, error, 'STATEMENT_RESERVATION_REJECTED');
   }
 
@@ -531,14 +581,9 @@ function createStatementService(options = {}) {
     }
     if (job.kind === 'token') {
       const record = tokenStore.markAdopted(job.tokenRecord.handle.tokenId, message.payload);
-      const delay = Math.max(0, record.handle.expiresAt - tokenClockNow());
-      const expiryTimer = setTimeout(() => {
-        if (tokenStore.inspect(record.handle.tokenId)?.state === 'published') {
-          releaseToken(record, 'token-expired');
-        }
-      }, delay);
-      if (typeof expiryTimer.unref === 'function') expiryTimer.unref();
-      tokenExpiryTimers.set(record.handle.tokenId, expiryTimer);
+      clearTokenExpiry(job.replacementTokenRecord);
+      job.replacementTokenRecord = null;
+      armTokenExpiry(record);
       finishDone(job, job.result);
       return;
     }
@@ -572,7 +617,8 @@ function createStatementService(options = {}) {
         jobRef: jobRef(job.start),
         grantId: null,
         reservationId: null,
-        revokeControlId: null
+        revokeControlId: null,
+        replacementTokenRecord: job.replacementTokenRecord || null
       };
     }
     job.cancelled = true;
@@ -584,6 +630,10 @@ function createStatementService(options = {}) {
         error: new StatementServiceError('STATEMENT_IMPORT_CANCELLED', 'Statement continuation cancelled')
       });
       return;
+    }
+    if (!cancelledRequestTombstone ||
+        !sameJobRef(cancelledRequestTombstone.jobRef, jobRef(job.start))) {
+      resumeReplacementToken(job);
     }
     finishError(
       job,
@@ -724,7 +774,13 @@ function createStatementService(options = {}) {
         const release = tokenReleases.get(message.payload.reservationId);
         if (release && release.controlIds.has(message.controlId)) {
           tokenReleases.delete(message.payload.reservationId);
+          const replacementTokenRecord = release.record.replacementTokenId
+            ? tokenStore.inspect(release.record.replacementTokenId)
+            : null;
           tokenStore.remove(release.record.handle.tokenId);
+          if (replacementTokenRecord && replacementTokenRecord.state === 'published') {
+            armTokenExpiry(replacementTokenRecord);
+          }
           releasedTokenTombstone = Object.freeze({
             kind: release.completion && release.completion.job &&
               release.completion.job.kind === 'cancel-interaction'
@@ -742,14 +798,7 @@ function createStatementService(options = {}) {
             failedGrantTombstone = null;
           }
           if (release.completion) {
-            if (release.completion.interactionDraft) {
-              if (release.completion.job.terminal || release.completion.job.cancelled) return;
-              try {
-                requestInteractionToken(release.completion.job, release.completion.interactionDraft);
-              } catch (error) {
-                finishError(release.completion.job, error);
-              }
-            } else if (release.completion.error) {
+            if (release.completion.error) {
               finishError(release.completion.job, release.completion.error);
             } else {
               finishDone(release.completion.job, release.completion.result);
@@ -762,6 +811,9 @@ function createStatementService(options = {}) {
             message.payload.reservationId === failedGrantTombstone.reservationId &&
             message.controlId === failedGrantTombstone.revokeControlId &&
             sameJobRef(message.jobRef, failedGrantTombstone.jobRef)) {
+          if (failedGrantTombstone.replacementTokenRecord) {
+            armTokenExpiry(failedGrantTombstone.replacementTokenRecord);
+          }
           failedGrantTombstone = null;
           return;
         }
@@ -775,6 +827,9 @@ function createStatementService(options = {}) {
             message.controlId === cancelledRequestTombstone.revokeControlId &&
             message.payload.reservationId === cancelledRequestTombstone.reservationId &&
             sameJobRef(message.jobRef, cancelledRequestTombstone.jobRef)) {
+          if (cancelledRequestTombstone.replacementTokenRecord) {
+            armTokenExpiry(cancelledRequestTombstone.replacementTokenRecord);
+          }
           cancelledRequestTombstone = null;
           return;
         }
