@@ -6,6 +6,12 @@ const path = require('node:path');
 const XLSX = require('xlsx');
 
 const { FileValidationError, normalizeCell } = require('../../backend/file-service/common');
+const {
+  loadSharedStrings,
+  locateSheets,
+  openZipWithEntries
+} = require('../../backend/big-table-import/zip-reader');
+const { scanSheetRows } = require('../../backend/big-table-import/row-scanner');
 const { extractHeaders } = require('../../backend/file-service/readers');
 const { parseDateValue, parseNumericValue } = require('../../backend/file-service/normalizers');
 const { writeBalanceWorkbook } = require('../../backend/file-service');
@@ -28,6 +34,9 @@ const REQUIRED_HEADERS = Object.freeze([
 const AMOUNT_HEADERS = new Set(['期初余额', '期初可用余额', '期末余额', '期末可用余额']);
 const TEMPLATE_BASENAME = '余额账单模版.xlsx';
 const NEW_ACCOUNT_EXPORT_NAME = 'NEW_BALANCE';
+const READBACK_ROW_BATCH_SIZE = 1024;
+const READBACK_EVIDENCE_BATCH_SIZE = 1024;
+const READBACK_HASH_SAFEPOINT_BYTES = 4 * 1024 * 1024;
 
 function pad(value) {
   return String(value).padStart(2, '0');
@@ -221,6 +230,27 @@ function fileSha256(filePath) {
   return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
 }
 
+async function fileSha256Cooperatively(filePath, signal, options = {}) {
+  const hash = crypto.createHash('sha256');
+  const stream = fs.createReadStream(filePath, { highWaterMark: 1024 * 1024 });
+  let bytesSinceSafePoint = 0;
+  try {
+    for await (const chunk of stream) {
+      assertNewAccountGenerationNotCancelled(signal);
+      hash.update(chunk);
+      bytesSinceSafePoint += chunk.length;
+      if (bytesSinceSafePoint >= READBACK_HASH_SAFEPOINT_BYTES) {
+        bytesSinceSafePoint = 0;
+        await runNewAccountGenerationStage(signal, options, 'readback:artifact-hash-batch');
+      }
+    }
+    await runNewAccountGenerationStage(signal, options, 'readback:artifact-hash-complete');
+    return hash.digest('hex');
+  } finally {
+    stream.destroy();
+  }
+}
+
 function assertTemplateEvidence(template, allowedTemplatePath) {
   const resolved = path.resolve(template.filePath);
   const allowed = path.resolve(allowedTemplatePath);
@@ -250,21 +280,95 @@ function canonicalBusinessValue(header, value) {
   return normalizeCell(value);
 }
 
-function businessEvidence(headers, records) {
+function canonicalBusinessScalar(value) {
+  if (typeof value === 'string') {
+    for (let index = 0; index < value.length; index += 1) {
+      const code = value.charCodeAt(index);
+      if (code >= 0xd800 && code <= 0xdbff) {
+        const next = value.charCodeAt(index + 1);
+        if (!(next >= 0xdc00 && next <= 0xdfff)) {
+          throw Object.assign(new Error('业务证据包含未配对的高位代理项'), {
+            code: 'CANONICAL_JSON_INVALID_SURROGATE'
+          });
+        }
+        index += 1;
+      } else if (code >= 0xdc00 && code <= 0xdfff) {
+        throw Object.assign(new Error('业务证据包含未配对的低位代理项'), {
+          code: 'CANONICAL_JSON_INVALID_SURROGATE'
+        });
+      }
+    }
+  } else if (typeof value === 'number') {
+    if (!Number.isFinite(value)) {
+      throw Object.assign(new Error('业务证据数字必须有限'), {
+        code: 'CANONICAL_JSON_NUMBER_INVALID'
+      });
+    }
+    if (Number.isInteger(value) && !Number.isSafeInteger(value)) {
+      throw Object.assign(new Error('业务证据整数超出安全范围'), {
+        code: 'CANONICAL_JSON_INTEGER_UNSAFE'
+      });
+    }
+  } else {
+    throw Object.assign(new Error('业务证据只允许规范化字符串或数字'), {
+      code: 'CANONICAL_JSON_VALUE_INVALID'
+    });
+  }
+  return JSON.stringify(value);
+}
+
+function createBusinessEvidenceAccumulator(headers) {
   const indexes = {
     dates: headers.map((header, index) => header === '账单日期' ? index : -1).filter((index) => index >= 0),
     accounts: headers.map((header, index) => header === '银行账号' ? index : -1).filter((index) => index >= 0),
     currencies: headers.map((header, index) => header === '币种' ? index : -1).filter((index) => index >= 0)
   };
-  const canonical = records.map((row) => row.map((value, index) => canonicalBusinessValue(headers[index], value)));
+  const streams = {
+    records: crypto.createHash('sha256'),
+    dates: crypto.createHash('sha256'),
+    accounts: crypto.createHash('sha256'),
+    currencies: crypto.createHash('sha256')
+  };
+  Object.values(streams).forEach((stream) => stream.update('['));
+  let rowCount = 0;
+  let finished = false;
+
   return Object.freeze({
-    recordsSha256: canonicalSha256(canonical),
-    datesSha256: canonicalSha256(canonical.map((row) => indexes.dates.map((index) => row[index]))),
-    accountsSha256: canonicalSha256(canonical.map((row) => indexes.accounts.map((index) => row[index]))),
-    currenciesSha256: canonicalSha256(canonical.map((row) => indexes.currencies.map((index) => row[index])))
+    add(row) {
+      if (finished || !Array.isArray(row)) {
+        throw new TypeError('NewAccount业务证据累加器状态非法');
+      }
+      const canonicalTokens = row.map((value, index) => (
+        canonicalBusinessScalar(canonicalBusinessValue(headers[index], value))
+      ));
+      const separator = rowCount === 0 ? '' : ',';
+      streams.records.update(`${separator}[${canonicalTokens.join(',')}]`);
+      for (const key of ['dates', 'accounts', 'currencies']) {
+        streams[key].update(`${separator}[${indexes[key].map((index) => canonicalTokens[index]).join(',')}]`);
+      }
+      rowCount += 1;
+    },
+    finish() {
+      if (finished) throw new TypeError('NewAccount业务证据累加器不能重复结束');
+      finished = true;
+      Object.values(streams).forEach((stream) => stream.update(']'));
+      return Object.freeze({
+        recordsSha256: streams.records.digest('hex'),
+        datesSha256: streams.dates.digest('hex'),
+        accountsSha256: streams.accounts.digest('hex'),
+        currenciesSha256: streams.currencies.digest('hex')
+      });
+    }
   });
 }
 
+function businessEvidence(headers, records) {
+  const accumulator = createBusinessEvidenceAccumulator(headers);
+  for (const row of records) accumulator.add(row);
+  return accumulator.finish();
+}
+
+// 保留给 legacy/golden 的同步对照 oracle；真实 Worker 只调用下方 cooperative stream 版本。
 function readBackAndValidate(filePath, expected) {
   const workbook = XLSX.readFile(filePath, { cellDates: false, cellNF: true, cellStyles: true, raw: true });
   if (workbook.SheetNames.length < 1 || workbook.SheetNames[0] !== expected.sheetName) {
@@ -291,6 +395,170 @@ function readBackAndValidate(filePath, expected) {
   return { headers, rowCount: actualRecords.length, businessEvidence: actualEvidence };
 }
 
+async function runNewAccountGenerationStage(signal, options, stage, details = {}) {
+  // 仅供模块内真实 Worker 阶段探针使用；stage/details 不进入 input/result/Protocol。
+  if (typeof options.readbackStageHook === 'function') {
+    await options.readbackStageHook(stage, Object.freeze({ ...details }));
+  }
+  await newAccountGenerationCancellationSafePoint(signal);
+}
+
+async function businessEvidenceInBatches(headers, records, signal, options, side) {
+  const accumulator = createBusinessEvidenceAccumulator(headers);
+  for (let index = 0; index < records.length; index += 1) {
+    accumulator.add(records[index]);
+    if ((index + 1) % READBACK_EVIDENCE_BATCH_SIZE === 0) {
+      await runNewAccountGenerationStage(signal, options, 'readback:evidence-batch', {
+        side,
+        processedRows: index + 1,
+        totalRows: records.length
+      });
+    }
+  }
+  await runNewAccountGenerationStage(signal, options, 'readback:evidence-complete', {
+    side,
+    processedRows: records.length,
+    totalRows: records.length
+  });
+  return accumulator.finish();
+}
+
+function openZipEntryStream(zip, entry) {
+  return new Promise((resolve, reject) => {
+    zip.openReadStream(entry, (error, stream) => {
+      if (error) reject(error);
+      else resolve(stream);
+    });
+  });
+}
+
+function workbookRecordMismatch() {
+  return Object.assign(new Error('NewAccount输出业务记录回读不一致'), {
+    code: 'NEW_ACCOUNT_WORKBOOK_RECORDS_MISMATCH'
+  });
+}
+
+async function readBackAndValidateCooperatively(filePath, expected, signal, options = {}) {
+  const sourceFile = path.basename(filePath);
+  let zip = null;
+  try {
+    const opened = await openZipWithEntries(sourceFile, filePath, { rejectDuplicateEntries: true });
+    zip = opened.zip;
+    await runNewAccountGenerationStage(signal, options, 'readback:workbook-opened', {
+      zipEntryCount: opened.entries.size
+    });
+
+    const sheets = await locateSheets(zip, opened.entries);
+    if (sheets.length < 1 || sheets[0].name !== expected.sheetName || !sheets[0].entryPath) {
+      throw Object.assign(new Error('NewAccount输出 Sheet 与模板不一致'), {
+        code: 'NEW_ACCOUNT_WORKBOOK_SHEET_MISMATCH'
+      });
+    }
+    const sheetEntry = opened.entries.get(sheets[0].entryPath);
+    if (!sheetEntry) {
+      throw Object.assign(new Error('NewAccount输出 Sheet 与模板不一致'), {
+        code: 'NEW_ACCOUNT_WORKBOOK_SHEET_MISMATCH'
+      });
+    }
+    await runNewAccountGenerationStage(signal, options, 'readback:sheet-located', {
+      sheetCount: sheets.length
+    });
+
+    const sharedStrings = await loadSharedStrings(
+      zip,
+      opened.entries.get('xl/sharedStrings.xml') || null
+    );
+    await runNewAccountGenerationStage(signal, options, 'readback:shared-strings-loaded', {
+      sharedStringCount: sharedStrings.length
+    });
+
+    const stream = await openZipEntryStream(zip, sheetEntry);
+    let headers = null;
+    let actualRowCount = 0;
+    let actualAccumulator = null;
+    let batchYieldPending = false;
+    let batchYieldPromise = Promise.resolve();
+
+    function scheduleRowBatchSafePoint() {
+      if (batchYieldPending) return;
+      batchYieldPending = true;
+      stream.pause();
+      batchYieldPromise = runNewAccountGenerationStage(
+        signal,
+        options,
+        'readback:row-batch',
+        { processedRows: actualRowCount, totalRows: expected.records.length }
+      ).then(() => {
+        batchYieldPending = false;
+        stream.resume();
+      }, (error) => {
+        batchYieldPending = false;
+        stream.destroy(error);
+        throw error;
+      });
+      // scanSheetRows 会从 stream error 取得同一个失败；这里先挂 rejection handler，
+      // 避免 cancellation 与 scanner reject 的先后竞态产生 unhandled rejection。
+      batchYieldPromise.catch(() => {});
+    }
+
+    await scanSheetRows({
+      stream,
+      expectedHeaders: expected.headers,
+      sharedStrings,
+      collectAllColumns: false,
+      onRow({ rowR, values, hasAnyCellText }) {
+        if (rowR === 1) {
+          headers = values.slice(0, expected.headers.length).map(normalizeCell);
+          if (canonicalSha256(headers) !== canonicalSha256(expected.headers)) {
+            throw Object.assign(new Error('NewAccount输出列顺序与模板不一致'), {
+              code: 'NEW_ACCOUNT_WORKBOOK_HEADERS_MISMATCH'
+            });
+          }
+          actualAccumulator = createBusinessEvidenceAccumulator(headers);
+          return;
+        }
+        if (!hasAnyCellText) return;
+        if (!headers || !actualAccumulator) {
+          throw Object.assign(new Error('NewAccount输出列顺序与模板不一致'), {
+            code: 'NEW_ACCOUNT_WORKBOOK_HEADERS_MISMATCH'
+          });
+        }
+        const normalized = values.slice(0, headers.length);
+        while (normalized.length < headers.length) normalized.push('');
+        actualAccumulator.add(normalized);
+        actualRowCount += 1;
+        if (actualRowCount > expected.records.length) throw workbookRecordMismatch();
+        if (actualRowCount % READBACK_ROW_BATCH_SIZE === 0) scheduleRowBatchSafePoint();
+      }
+    });
+    await batchYieldPromise;
+    await runNewAccountGenerationStage(signal, options, 'readback:row-scan-complete', {
+      processedRows: actualRowCount,
+      totalRows: expected.records.length
+    });
+    if (!headers || !actualAccumulator || actualRowCount !== expected.records.length) {
+      throw workbookRecordMismatch();
+    }
+
+    const actualEvidence = actualAccumulator.finish();
+    const expectedEvidence = await businessEvidenceInBatches(
+      headers,
+      expected.records,
+      signal,
+      options,
+      'expected'
+    );
+    if (Object.keys(expectedEvidence).some((key) => actualEvidence[key] !== expectedEvidence[key])) {
+      throw workbookRecordMismatch();
+    }
+    return { headers, rowCount: actualRowCount, businessEvidence: actualEvidence };
+  } finally {
+    if (zip) {
+      try { zip.close(); } catch (_) {}
+    }
+  }
+}
+
 function assertRequiredTemplateHeaders(headers) {
   if (new Set(headers).size !== headers.length || REQUIRED_HEADERS.some((header) => !headers.includes(header))) {
     throw new FileValidationError('BALANCE_TEMPLATE_INVALID', '余额账单模板缺少必需列或存在重复列');
@@ -306,7 +574,7 @@ function assertNewAccountGenerationNotCancelled(signal) {
 }
 
 async function newAccountGenerationCancellationSafePoint(signal) {
-  // XLSX 读写是同步重型阶段；先让出一轮 Worker 消息循环，
+  // 同步 writer 与各有界批次之间先让出一轮 Worker 消息循环，
   // shutdown-only job:cancel 才能到达 AbortController，然后再决定是否继续。
   await new Promise((resolve) => setImmediate(resolve));
   assertNewAccountGenerationNotCancelled(signal);
@@ -351,9 +619,9 @@ async function executeNewAccountGeneration(rawInput, signal, options = {}) {
   });
   await newAccountGenerationCancellationSafePoint(signal);
   assertTemplateEvidence(input.template, allowedTemplatePath);
-  const readback = readBackAndValidate(input.generation.generationPath, {
+  const readback = await readBackAndValidateCooperatively(input.generation.generationPath, {
     sheetName, headers, records: prepared.records
-  });
+  }, signal, options);
   await newAccountGenerationCancellationSafePoint(signal);
   const owned = validateTaskOwnedStagingPath({
     stagingRoot: input.generation.stagingRoot,
@@ -361,8 +629,8 @@ async function executeNewAccountGeneration(rawInput, signal, options = {}) {
     finalState: 'file'
   });
   const byteSize = Number(owned.stat.size);
-  const sha256 = fileSha256(input.generation.generationPath);
-  await newAccountGenerationCancellationSafePoint(signal);
+  const sha256 = await fileSha256Cooperatively(input.generation.generationPath, signal, options);
+  await runNewAccountGenerationStage(signal, options, 'terminal:before-result');
   return Object.freeze({
     schemaVersion: NEW_ACCOUNT_GENERATION_SCHEMA_VERSION,
     status: 'generated',

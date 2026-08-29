@@ -129,6 +129,14 @@ async function generateAndValidateNewAccount(options) {
     candidatePath: input.generation.generationPath,
     finalState: 'missing'
   });
+  const cleanupGeneration = () => {
+    const cleaned = cleanupOwnedGeneration(input);
+    // 只暴露清理完成观察点给 lifecycle 测试；调用方不能替换或跳过 Main cleanup owner。
+    if (typeof options.onOwnedGenerationCleanup === 'function') {
+      try { options.onOwnedGenerationCleanup({ cleaned }); } catch (_) {}
+    }
+    return cleaned;
+  };
   let execution;
   try {
     execution = await options.runtime.execute({
@@ -139,7 +147,7 @@ async function generateAndValidateNewAccount(options) {
       input
     });
     if (!execution || execution.outcome !== 'completed' || execution.terminalSource !== 'job:done') {
-      cleanupOwnedGeneration(input);
+      cleanupGeneration();
       return Object.freeze({ execution, generated: null });
     }
     return Object.freeze({
@@ -147,7 +155,7 @@ async function generateAndValidateNewAccount(options) {
       generated: technicalValidateNewAccountArtifact(input, execution.result)
     });
   } catch (error) {
-    cleanupOwnedGeneration(input);
+    cleanupGeneration();
     throw error;
   }
 }

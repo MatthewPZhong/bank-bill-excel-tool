@@ -2,10 +2,10 @@
 
 ## Task Brief
 
-- Goal：把 NewAccount 单工作簿生成的业务规则收敛到唯一 core，并提供 `thread-single/job` one-shot Worker 能力。
+- Goal：把 NewAccount 单工作簿生成的业务规则收敛到唯一 core，并提供 `thread-single/job` one-shot Worker 能力；readback 全阶段必须在冻结 5 秒 cooperative timeout 内真实响应 shutdown cancel。
 - Context：父链为已审查 E09-D `7beb80e8151c77dbd659d4192178b07663674009`；当前 live IPC 仍由 legacy handler 生成并直接写正式输出。
 - Constraints：只做 E10-A。Worker 只接小型账户 DTO、冻结模板 identity、日期配置和 task staging `generationPath`；不接 final target；不做 E10-B copy/Publisher，不启用 production，不做 R3.2.3。
-- Done when：legacy 与 Worker 共用日期/必填/账户/币种/记录/文件名 core；Worker 只对白名单模板工作，写一个 staging workbook 后回读验证；Main contract/technical validation 保持 bounded；crash/cancel/late message 不产生 artifact handle；focused/golden/lifecycle/recovery/integration/smoke/static 与 event-loop/RSS 证据通过。
+- Done when：legacy 与 Worker 共用日期/必填/账户/币种/记录/文件名 core；Worker 只对白名单模板工作，写一个 staging workbook 后回读验证；Main contract/technical validation 保持 bounded；250k 的 readFile 后、row/evidence batching 与 terminal 前取消均稳定 `cancelled`、Main-only cleanup；focused/golden/lifecycle/recovery/integration/smoke/static 与 event-loop/RSS 证据通过。
 
 ## 已确认事实
 
@@ -22,6 +22,8 @@
 | `resources.profile` 已是 Registry 静态引用，Supervisor 在 `adapter.start()` 前获取 PhaseLease | `execution-policy-registry.js` 的 `resourceProfileRegistry/getBinding`；`supervisor.js:start/acquireSimpleJobResources` | E10 可绑定 Main-only 同步纯 estimator，不改 Protocol/Schema；其他 action 保持静态 phase |
 | row-only `448 MiB + 4096 bytes/row` 仍低估合法业务形状 | 本机高预算真实 Worker：250,000 短文本 reservation 1,493,762,048、RSS delta 1,761,820,672；60,416 最大合法 CJK 文本 reservation 717,225,984、RSS delta 1,881,407,488 | estimator 必须从已验证 DTO 计算每行实际重复文本的 UTF-8/UTF-16、记录/单元格结构及 writer/readback 多份驻留，不得只提高统一 per-row 常量 |
 | 合法业务 digest 会被通用 full-account gate 误杀 | 250,000 短文本真实 Worker 完成 workbook 后以 `PROTOCOL_PRIVACY_VIOLATION` 收口；另有 4 行真实输入可稳定生成含 17 位数字串的 `recordsSha256` | 只能在 E10 result validator 上按 exact JSON pointer + lowercase 64hex + 冻结父 shape 最小放行；不得修改全局账号检测或通用 digest key 集合 |
+| readback 内只有整体结束后的 safepoint，250k 正常任务可越过 cooperative timeout | 第二替代 Reviewer：workbook 已写盘，shutdown 约 4997 ms 到达，最终 `cancel-timeout/transport-lost`；本机阶段 probe：`XLSX.readFile` 3197 ms、`sheet_to_json` 566 ms、row normalize 5 ms、actual/expected evidence 1758/1986 ms | 不能把 readback 当一个同步阶段；必须在不可分割段前后立即 yield/check，并把长循环拆为有界批次，保持落盘业务回读与四 digest |
+| 流式回读消除了合法边界的单段5秒假设 | 真实250k回读：workbook open后row scan约884ms、expected evidence约299ms、artifact hash约73ms；六场景/五阶段shutdown为11–16ms；最终复跑60,416最大文本正常Worker 2867ms | actual worksheet按ZIP stream读取、row/evidence各1024行一批；Supervisor 5秒、Writer、Protocol均不改 |
 
 ## Unknowns Register
 
@@ -38,6 +40,9 @@
 | 如何在不物化 records 的前提下精确描述合法文本 shape | 数据契约 | 高 | 容易 | bounded DTO 已含规范化 bankName/location/bankAccount/currencies/openingDate，输出每行另有固定 10-byte 日期和 9 cells | PROBE | 把共享行数 projector 扩为 shape projector，并与实际 records 的行数、UTF-8/UTF-16 文本总量做 property/golden 对照 | Main admission 只遍历账户/币种配置，按 `天数 × 币种` 安全整数累计实际重复文本；不构造业务 rows |
 | writer/readback 同驻留的保守倍率如何校准 | 容量 | 高 | 容易 | 250k 短文本主要暴露记录/单元格结构，60,416 最大 CJK 文本主要暴露多份字符串/XML/readback 驻留 | PROBE | 两个真实反例分别校准结构项和文本项，确定性模型再向上留固定 safety 与可解释 copies | 使用独立 record/cell overhead、writer/readback UTF-8/UTF-16 copies 和固定 safety；真实 RSS 只作方向性覆盖证据，Windows gate保留 |
 | E10 digest 最小放行是否会扩大其他 action/路径或接受 schema-invalid 结果 | 隐私/合同 | 高 | 容易 | Protocol 已从 action-specific result validator 读取 `allowFinanceSafeValue`；Statement/MPT 已有局部 delegate 范式 | PROBE | 每个 exact path、近邻 path、大小写/长度错误、同名异路径、schema invalid 与真实 Worker completed | delegate 只挂在 `validateNewAccountGenerationResult`，父对象必须通过拆出的冻结 artifact/evidence validator；最终 result validator仍独立 fail closed |
+| 单次 `XLSX.readFile` 在最大合法文本形状是否可能独自达到 5 秒 | 状态生命周期盲区 | 高 | 一般 | 已消除：60,416旧readFile为1267ms，但250k已达3197ms，不能据此外推跨平台；生产readback不再调用`XLSX.readFile` | PROBE→RESOLVED | 用既有ZIP reader定位sheet，实际worksheet XML按stream分批扫描 | 不改timeout；无单段全workbook materialize |
+| canonical businessEvidence 能否分批且与现有 `canonicalSha256(array)` byte-for-byte 一致 | 数据/审计合同 | 高 | 容易 | 已证实：0/1/2051 property及真实250k/60,416四digest均与旧canonical oracle一致 | PROBE→RESOLVED | 共享incremental canonical-array hasher；每个row仍使用相同JSON scalar、逗号、括号和顺序 | 只改变内存/编排，不改变四digest |
+| test-only stage hook 是否会扩大 public/protocol surface | 测试边界 | 中 | 容易 | 已证实：独立WorkerData MessagePort注入；contract/result/static Registry没有stage字段 | PROBE→RESOLVED | 真实Worker精确暂停；static test锁定generation contract不含hook | 端口只在测试entry options存在，不进入canonical envelope |
 
 ## 风险优先计划
 
@@ -51,6 +56,7 @@
 | 6 | 共享行数投影、动态 resource profile 与 spawn 前准入 | MAX_RECORDS 与实际业务行数不变；低内存/并发不越 system reserve | 0/typical/29,192/60,416/250,000、overflow、低 budget no-spawn、并发 lease 不超预算 | OOM/侵占 reserve 或过度预留 | 保留 production=false；estimator/profile 绑定可单独回滚 |
 | 7 | 把共享 projector 扩为 shape-aware 文本/单元格 envelope | 短文本 250k 与最大合法文本不能低估；小任务不按最大 shape 收费 | exact row/cell/UTF-8/UTF-16 projection、Unicode/边界/overflow、两个真实 RSS 反例均被 reservation 覆盖 | 继续存在 reserve 侵占/OOM 风险 | production 保持 false；模型常量可独立向上校准，不改 MAX_RECORDS/业务输出 |
 | 8 | 在 E10 result validator 增加 exact-path digest delegate | 合法 digest 不误杀，账号/普通字符串与其他 action 仍 fail closed | 5 个允许 path、近邻 path/错误值/schema invalid、含数字串 digest 的真实 Worker completed | 正常 Worker 可伪报 transport-lost或隐私边界扩大 | 只撤回 validator property；不动全局 finance-safe gate |
+| 9 | 把 readback 改为可协作取消的 async 编排 | 读取真实落盘 XLSX、sheet/header/rowCount/四 digest 不变；任一长窗口小于 5 秒并可观测 cancel | 250k/60,416阶段计时；旧同步 digest等价；readFile后/row/evidence/terminal取消；真实250k多轮shutdown | 任一合法阶段仍可触发cancel-timeout，或golden/digest漂移 | 不改Supervisor/timeout/Writer；不可分割 readFile 若不满足则收缩到可终止隔离方案 |
 
 ## Blindspot / reconciliation 直接 checklist
 
@@ -60,6 +66,7 @@
 - 资源 shape：逐账户/币种/日期累计的实际规范化 UTF-8/UTF-16 与 SheetJS XML 单元格编码是否与输出文本守恒；Unicode/控制字符、256/64 字段上限、9-cell 固定形状和 writer/readback 多份驻留是否全部计入。
 - 隐私 gate：只允许 `/payload/result/artifact/templateSha256` 与 `businessEvidence` 四个冻结 digest path；近邻路径、同名异路径、普通字符串、错误大小写/长度和 schema-invalid 仍拒绝。
 - 生命周期：collision、cancel、Worker crash、late message、shutdown、restart orphan staging 的权限边界；真实 running Worker 的 shutdown cancel 必须胜过尚未发送的 `job:done`。
+- readback 取消：`readFile`、sheet materialize、row normalize、actual/expected 四 digest 每个窗口均有界；每批 yield 后先检查 signal；取消结果不得携带 artifact/result，Main cleanup 恰好一次且 staging/final=0。
 - 数据血缘：输入账户顺序 × 日期升序 × 去重币种顺序，输出行数严格等于各账户 `天数 × 币种数` 总和。
 - 金额：只生成余额行，`期末余额=0`，其余余额为空；不引入汇率/舍入/借贷方向。
 - 日期：开户日到昨日（含首尾）；晚于昨日拒绝；总天数超过 3650 拒绝。
