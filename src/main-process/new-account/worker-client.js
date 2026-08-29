@@ -1,5 +1,8 @@
 'use strict';
 
-// E10-A Main 侧只持有 bounded DTO、FilePlan 与 staging technical evidence。
-// E10-B 会在此 client 之后接 Publisher；本文件不得接收或复制 final target。
-module.exports = require('./generation-validator');
+// Main 侧 client 仅构造 bounded DTO/FilePlan 与 staging technical evidence。
+// E10-B copy input 不含 final target；正式目标只交给 Main settlement/既有 Publisher。
+module.exports = Object.freeze({
+  ...require('./generation-validator'),
+  ...require('./artifact-copy')
+});

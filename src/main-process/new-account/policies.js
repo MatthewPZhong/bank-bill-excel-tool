@@ -1,6 +1,7 @@
 'use strict';
 
 const { NEW_ACCOUNT_GENERATION_ACTION } = require('./generation-contract');
+const { NEW_ACCOUNT_SAVE_AS_ACTION } = require('./artifact-copy');
 const { MIN_NEW_ACCOUNT_GENERATION_MEMORY_BYTES } = require('./resource-estimator');
 
 const ZERO_RESOURCES = Object.freeze({
@@ -19,6 +20,14 @@ const GENERATION_RESOURCES = Object.freeze({
   // 此值是 dynamic resource profile 失配时的保守最小 envelope；
   // 正常 runtime 会在 admission 前按预计行/单元格/重复文本 shape 提升 memoryBytes。
   memoryBytes: MIN_NEW_ACCOUNT_GENERATION_MEMORY_BYTES
+});
+
+const SAVE_AS_RESOURCES = Object.freeze({
+  cpuSlots: 0,
+  workerThreadSlots: 0,
+  utilityProcessSlots: 0,
+  ioHeavySlots: 1,
+  memoryBytes: 16 * 1024 * 1024
 });
 
 const NEW_ACCOUNT_GENERATION_POLICY = Object.freeze({
@@ -99,8 +108,88 @@ const NEW_ACCOUNT_GENERATION_POLICY = Object.freeze({
   }
 });
 
+const NEW_ACCOUNT_SAVE_AS_POLICY = Object.freeze({
+  actionKey: NEW_ACCOUNT_SAVE_AS_ACTION,
+  moduleId: 'new-account',
+  description: 'v3.2.x canonical policy fixture for new-account:save-as',
+  disposition: 'managed',
+  mode: 'inline-async',
+  adapterKind: 'native',
+  adapterKey: null,
+  entryKey: 'executor.new-account:save-as',
+  lifetime: 'job',
+  context: { kind: 'operation', validatorKey: 'exact-5' },
+  resources: {
+    profile: 'resource.new-account:save-as',
+    base: ZERO_RESOURCES,
+    phase: SAVE_AS_RESOURCES,
+    compound: null,
+    lowMemoryBehavior: 'queue',
+    admissionPriority: 'interactive'
+  },
+  cancellation: {
+    capability: 'shutdown-only',
+    safePoints: ['before-copy', 'after-copy-before-publish'],
+    cooperativeTimeoutMs: 5000,
+    terminateTimeoutMs: 5000,
+    protectedResult: 'protected/not-cancellable'
+  },
+  failure: {
+    unitBusinessError: 'fail-job',
+    unitTransportCrash: 'fail-job',
+    workerExit: 'module-inspect',
+    automaticRetry: false
+  },
+  commit: {
+    kind: 'main-settlement',
+    criticalIntent: false,
+    receiptKind: 'publisher-journal',
+    inspectorKey: 'inspector.new-account:save-as',
+    conflictScopeResolverKey: 'scope.new-account:save-as',
+    settlementKey: 'settlement.new-account:save-as'
+  },
+  result: {
+    kind: 'artifact-manifest',
+    maxBytes: 8 * 1024 * 1024,
+    maxErrorItems: 100,
+    validatorKey: 'result-validator.new-account:save-as'
+  },
+  artifacts: {
+    kind: 'single',
+    filePlanRequired: true,
+    technicalValidatorKey: 'technical-validator.new-account:save-as',
+    businessValidatorKey: 'business-validator.new-account:save-as',
+    publisherKey: 'publisher.new-account:save-as',
+    maxArtifacts: 1
+  },
+  service: null,
+  metrics: {
+    phases: ['queue', 'execute', 'settle'],
+    privacyProfile: 'finance-safe-v1',
+    progressRateLimitPerSecond: 10
+  },
+  featureFlag: 'feature.new-account:save-as',
+  legacyStrategyKey: null,
+  blocker: null,
+  production: {
+    enabled: false,
+    effectiveMode: 'legacy',
+    effectiveWorkerCount: 0,
+    recoveryStatus: 'probe',
+    evidenceStatus: 'baseline',
+    downgradeReason: 'production gate not yet passed',
+    benchmarkEvidenceId: null
+  },
+  protocolLimits: {
+    commandMaxBytes: 262144,
+    eventMaxBytes: 262144
+  }
+});
+
 module.exports = {
   GENERATION_RESOURCES,
+  NEW_ACCOUNT_SAVE_AS_POLICY,
   NEW_ACCOUNT_GENERATION_POLICY,
+  SAVE_AS_RESOURCES,
   ZERO_RESOURCES
 };

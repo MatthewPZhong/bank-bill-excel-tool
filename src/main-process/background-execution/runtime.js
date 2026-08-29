@@ -33,8 +33,14 @@ const {
   validateNewAccountGenerationResult
 } = require('../new-account/generation-contract');
 const {
-  NEW_ACCOUNT_GENERATION_POLICY
+  NEW_ACCOUNT_GENERATION_POLICY,
+  NEW_ACCOUNT_SAVE_AS_POLICY
 } = require('../new-account/policies');
+const {
+  NEW_ACCOUNT_SAVE_AS_ACTION,
+  runNewAccountArtifactCopyInline,
+  validateNewAccountSaveAsResult
+} = require('../new-account/artifact-copy');
 const {
   estimateNewAccountGenerationPhaseResources
 } = require('../new-account/resource-estimator');
@@ -42,7 +48,8 @@ const {
 const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   ...TOOLBOX_GENERATION_POLICIES,
   ...PRE_FUND_MPT_POLICIES,
-  NEW_ACCOUNT_GENERATION_POLICY
+  NEW_ACCOUNT_GENERATION_POLICY,
+  NEW_ACCOUNT_SAVE_AS_POLICY
 ]);
 
 function isBackgroundExecutionProductionEnabled(actionKey) {
@@ -69,8 +76,11 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
   });
   const workerRoot = path.resolve(__dirname, '..', 'toolbox-background');
   const entryRegistry = createStaticRegistry(Object.fromEntries(
-    BACKGROUND_EXECUTION_POLICIES.map((policy) => [policy.entryKey, {
-      path: path.join(
+    BACKGROUND_EXECUTION_POLICIES.map((policy) => [policy.entryKey,
+      policy.actionKey === NEW_ACCOUNT_SAVE_AS_ACTION
+        ? runNewAccountArtifactCopyInline
+        : {
+          path: path.join(
         policy.moduleId === 'pre-fund'
           ? path.resolve(__dirname, '..', 'pre-fund-reconciliation', 'mpt-import')
           : (policy.moduleId === 'new-account'
@@ -85,13 +95,13 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
               : (policy.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
                   ? 'route-scanner-worker-entry.js'
                   : 'split-worker-entry.js')))
-      ),
-      cancellationTerminalErrorCodes: policy.moduleId === 'pre-fund'
-        ? ['PREFUND_WRITER_CANCELLED']
-        : (policy.moduleId === 'new-account'
-            ? ['NEW_ACCOUNT_GENERATION_CANCELLED']
-            : ['TOOLBOX_GENERATION_CANCELLED'])
-    }])
+          ),
+          cancellationTerminalErrorCodes: policy.moduleId === 'pre-fund'
+            ? ['PREFUND_WRITER_CANCELLED']
+            : (policy.moduleId === 'new-account'
+                ? ['NEW_ACCOUNT_GENERATION_CANCELLED']
+                : ['TOOLBOX_GENERATION_CANCELLED'])
+        }])
   ));
   const validatorEntries = {};
   for (const policy of BACKGROUND_EXECUTION_POLICIES) {
@@ -100,7 +110,9 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
           ? validatePreFundMptRepairResult
           : validatePreFundMptImportResult)
       : (policy.moduleId === 'new-account'
-          ? validateNewAccountGenerationResult
+          ? (policy.actionKey === NEW_ACCOUNT_SAVE_AS_ACTION
+              ? validateNewAccountSaveAsResult
+              : validateNewAccountGenerationResult)
           : (policy.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
           ? validateToolboxMultiGenerationResult
           : (value) => validateToolboxGenerationResult(value, policy.actionKey)));
