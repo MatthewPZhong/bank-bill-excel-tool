@@ -194,7 +194,8 @@ test('E04-B runtime预算完整计入Scanner phase与一个Writer child，idle/s
     TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT,
     'pre-fund:mpt-import',
     'pre-fund:mpt-repair-import',
-    'new-account:generate'
+    'new-account:generate',
+    'new-account:save-as'
   ]);
   for (const policy of runtime.policyRegistry.list()) {
     assert.equal(policy.production.enabled, false);

@@ -246,6 +246,17 @@ function publishToolboxPublicationAsync(options) {
   });
 }
 
+// 非工具箱 artifact 仍复用同一个进程级 durable FIFO Publisher；该窄入口只关闭
+// archive handoff，不创建第二 dispatcher、journal 方言或 recovery/retry authority。
+function publishDurableArtifactAsync(options) {
+  return defaultDispatcher.publish({
+    ...(options || {}),
+    requireArchiveHandoff: false,
+    requireValidatedArtifacts: true,
+    allowEmptyArchiveInputs: true
+  });
+}
+
 function recoverToolboxPublicationsAsync(options) {
   return defaultDispatcher.recover(options);
 }
@@ -273,6 +284,7 @@ module.exports = {
   DEFAULT_WORKER_ENTRY,
   createToolboxPublicationDispatcher,
   createToolboxPublicationMatureBinding,
+  publishDurableArtifactAsync,
   publishToolboxPublicationAsync,
   recoverToolboxPublicationsAsync,
   runWorkerJob
