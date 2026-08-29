@@ -1,0 +1,490 @@
+{
+  "schemaVersion": 1,
+  "release": "3.2.4",
+  "exactBase": "dc2caebeda3d7b34c9d86e33c10e01bc61f73a5a",
+  "packageVersion": "3.1.14",
+  "packageVersionBumped": false,
+  "authority": {
+    "gitState": {
+      "branchName": "codex/v3.2.4-r3-release-evidence-restacked",
+      "parent": "dc2caebeda3d7b34c9d86e33c10e01bc61f73a5a",
+      "mainRefOid": "b7abc2fa00838fc61a94f812c1a14c48d5d4d40f",
+      "tagRefCount": 25,
+      "tagRefsSha256": "94a09eb7ecd816876a3b2a53c09bd689fcd76d76b56d6c9d3ea83a28e7a8983f",
+      "tagsPointingAtHead": 0,
+      "trackedEntryCount": 1913,
+      "auditRootTrackedEntryCount": 656,
+      "auditRootState": "HEAD_EXACT",
+      "indexState": "HEAD_EXACT_DEFAULT_FLAGS",
+      "worktreeTreeState": "HEAD_EXACT",
+      "untrackedState": "CLEAN",
+      "trackedState": "CLEAN",
+      "changedPaths": [
+        "changes/background-execution-r3-2-4-release-evidence/implementation-notes.md",
+        "changes/background-execution-r3-2-4-release-evidence/policy-authority.v3.2.4.json",
+        "changes/background-execution-r3-2-4-release-evidence/preflight.md",
+        "changes/background-execution-r3-2-4-release-evidence/release-evidence.json",
+        "scripts/validate-v3-2-4-release-evidence.js",
+        "tests/unit/scripts/v3-2-4-release-evidence.test.js"
+      ]
+    },
+    "runtimeRegistration": "REGISTERED",
+    "registeredActionKeys": [
+      "recon-fix:import",
+      "recon-fix:run-readonly",
+      "recon-fix:run-jpm",
+      "recon-fix:export",
+      "vcc-financial-op:export-subjects",
+      "vcc-financial-op:export-single"
+    ],
+    "policyFixtureStatus": "VERSIONED_CANONICAL_EXACT",
+    "versionedPolicyActionKey": "vcc-financial-op:export-subjects",
+    "versionedPolicyAuthority": {
+      "source": "changes/background-execution-r3-2-4-release-evidence/policy-authority.v3.2.4.json",
+      "blobOid": "372c6cf1cd7e317fb4c126fd23df68869d66310b",
+      "sha256": "2dfe9d3e8316d5d7ab1db9bfd6ae72c54d0d9852f39f8dfff291cf6d6993befb"
+    },
+    "productionEnabledCount": 0,
+    "sourceAnchors": [
+      {
+        "id": "RECON-DIRECT-POLICY",
+        "source": "src/main-process/recon-id-fix-service/policies.js",
+        "blobOid": "2060400dd2b4898f91fa05d4eac3a00d7fb5a8b8",
+        "sha256": "0488cdd3f7f420e8615e8f95775fd8107b396264712a1c748f40d2ac2242aa18"
+      },
+      {
+        "id": "VCC-DIRECT-POLICY",
+        "source": "src/main-process/vcc-financial-op-output/policies.js",
+        "blobOid": "435ca844480a45e6d5083f91960875249934d3b6",
+        "sha256": "3bf520ac9fc1ae131b4355e5a973c9f111fa6e2e0d4c36ab1f0478586b8c3b80"
+      },
+      {
+        "id": "COMMON-RUNTIME",
+        "source": "src/main-process/background-execution/runtime.js",
+        "blobOid": "32bfaca2caf418d9116c8bf96fc3a01274a59d14",
+        "sha256": "43e8b67ba287d7956ce9f3d6d926f55078895e6fdff2ad13ee230e7a710b0e03"
+      },
+      {
+        "id": "CANONICAL-POLICY-FIXTURE",
+        "source": "changes/background-execution-v3.2.x-contract-baseline/changes/background-execution/validation/fixtures/valid/policy-registry.v3.2.x.json",
+        "blobOid": "745b27a50c513c90c25c1b1125e743683439ac90",
+        "sha256": "8ab98e4b7a7b0c669892f069881c25eaaf1f8241b1e7d71e5b63eed8b2c38a22"
+      }
+    ]
+  },
+  "evidenceCatalog": [
+    {
+      "id": "V3.2.4-FROZEN-SPEC",
+      "actionKey": null,
+      "reviewedHead": "dc2caebeda3d7b34c9d86e33c10e01bc61f73a5a",
+      "source": "changes/background-execution-v3.2.x-contract-baseline/changes/3.2.4/spec.md",
+      "blobOid": "a41c8937bfd5177af38d41cabe908ab419f5fb3e",
+      "sha256": "dad81f149405281043306f7ce735f672fa20a167b4d8de751d5b254318fac2c7"
+    },
+    {
+      "id": "E11-A-RECON-IMPORT",
+      "actionKey": "recon-fix:import",
+      "reviewedHead": "c6c7ffa5ec195eaca366120d5617e93f558f650f",
+      "source": "changes/background-execution-e11-a-recon-fix-service/implementation-notes.md",
+      "blobOid": "38bcdafeccd46b5f684dcc15635df19916f0ab31",
+      "sha256": "1d6936f97d18905dcdbb4b68553238e07d8786038d5dcdff417e32dbfb37d892"
+    },
+    {
+      "id": "E11-A-RECON-READONLY",
+      "actionKey": "recon-fix:run-readonly",
+      "reviewedHead": "c6c7ffa5ec195eaca366120d5617e93f558f650f",
+      "source": "changes/background-execution-e11-a-recon-fix-service/implementation-notes.md",
+      "blobOid": "38bcdafeccd46b5f684dcc15635df19916f0ab31",
+      "sha256": "1d6936f97d18905dcdbb4b68553238e07d8786038d5dcdff417e32dbfb37d892"
+    },
+    {
+      "id": "E11-P0-JPM-PRIMITIVES",
+      "actionKey": "recon-fix:run-jpm",
+      "reviewedHead": "888688afdeea9a32b8ac0277a027533308a277bb",
+      "source": "changes/background-execution-e11-p0-jpm-id-aware-receipt/implementation-notes.md",
+      "blobOid": "9dc61d0d208282fe8627b28212ca8e6dd9dd71b4",
+      "sha256": "224be8de60bf7a4ebd8f82678be761ac7926eaeb1df8807ca00ddb164c604fa8"
+    },
+    {
+      "id": "E11-B-JPM-DURABLE",
+      "actionKey": "recon-fix:run-jpm",
+      "reviewedHead": "1afaf5db8f7a9a406ef037a685586456d106b12c",
+      "source": "changes/background-execution-e11-b-jpm-durable-inspector/implementation-notes.md",
+      "blobOid": "110b0b53e7a0195a3cdd15db96dadef1d4cb7326",
+      "sha256": "1361a789c62921a74384f138d80c499263bf6e0145c15e2d65cfb31135f86a31"
+    },
+    {
+      "id": "E11-C-RECON-EXPORT",
+      "actionKey": "recon-fix:export",
+      "reviewedHead": "50408e612d6775e33eafebd89145de4807a20d3a",
+      "source": "changes/background-execution-e11-c-recon-fix-export/implementation-notes.md",
+      "blobOid": "801037bf02ba7b548619455e8f0b837da2bb0b2f",
+      "sha256": "262bfb56ff39c9fb342cc1a6a5f013404c585ae5f9a5223257507607de425fbd"
+    },
+    {
+      "id": "E12-A-VCC-SINGLE",
+      "actionKey": "vcc-financial-op:export-single",
+      "reviewedHead": "38c319427577671e3e3708b0dd3d4df4a3aff621",
+      "source": "changes/background-execution-e12-a-vcc-single-writer/implementation-notes.md",
+      "blobOid": "735073fbdbd3c2c8e69143a6fc67bfa1b9ccbcea",
+      "sha256": "54a0f82e49b03a0d1aed5f2ef610af0184431460517029e9c2de150576b10f0d"
+    },
+    {
+      "id": "E12-B-VCC-SUBJECT-QUERY",
+      "actionKey": "vcc-financial-op:export-subjects",
+      "reviewedHead": "9c66a7f52b262c5746456667af34abb3c6c1f588",
+      "source": "changes/background-execution-e12-b-vcc-subject-query-restacked/implementation-notes.md",
+      "blobOid": "84660a522e1364e9d1a89255e1b071b7f78aba46",
+      "sha256": "c9083e09e3bda19522291fec99ed6760009cad2ec4cd83d332edd4da0ff6a9be"
+    },
+    {
+      "id": "E12-C-VCC-DUAL",
+      "actionKey": "vcc-financial-op:export-subjects",
+      "reviewedHead": "dc2caebeda3d7b34c9d86e33c10e01bc61f73a5a",
+      "source": "changes/background-execution-e12-c-vcc-dual-writer-restacked/implementation-notes.md",
+      "blobOid": "211db9f8f01413c1f2948d393259bd397190b840",
+      "sha256": "dd990e7328f64049f7d4be087e02a731a6150d5a31f03b4e1e5b0f1268524aca"
+    }
+  ],
+  "actions": [
+    {
+      "actionKey": "recon-fix:import",
+      "currentPolicy": {
+        "actionKey": "recon-fix:import",
+        "disposition": "managed",
+        "mode": "thread-single",
+        "adapterKind": "native",
+        "lifetime": "service",
+        "commitKind": "none",
+        "production": {
+          "enabled": false,
+          "effectiveMode": "legacy",
+          "effectiveWorkerCount": 0,
+          "recoveryStatus": "not-applicable",
+          "evidenceStatus": "baseline",
+          "downgradeReason": "production gate not yet passed",
+          "benchmarkEvidenceId": null
+        },
+        "topology": null
+      },
+      "runtimeOwnership": {
+        "registrationStatus": "REGISTERED",
+        "policyIdentity": "DIRECT_EQUALS_COMMON_RUNTIME",
+        "liveDisposition": "legacy-preserved",
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0
+      },
+      "decision": {
+        "kind": "KEEP_DISABLED",
+        "enabled": false,
+        "independent": true,
+        "reasonCodes": ["WINDOWS_PACKAGED_NOT_RUN", "BUSINESS_FILE_REVIEW_PENDING", "FUNDS_REVIEW_PENDING"]
+      },
+      "rollback": {
+        "strategyKey": "KEEP_LEGACY_RECON_IMPORT",
+        "preserveLegacySelector": true,
+        "preserveReceiptsAndRecoveryHolds": true,
+        "productionMutationAllowed": false
+      },
+      "evidenceRefs": ["E11-A-RECON-IMPORT"],
+      "gates": {
+        "windowsPackaged": "NOT_RUN",
+        "realProcessTermination": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_APPLICABLE",
+        "performance": "NOT_RUN"
+      }
+    },
+    {
+      "actionKey": "recon-fix:run-readonly",
+      "currentPolicy": {
+        "actionKey": "recon-fix:run-readonly",
+        "disposition": "managed",
+        "mode": "thread-single",
+        "adapterKind": "native",
+        "lifetime": "service",
+        "commitKind": "none",
+        "production": {
+          "enabled": false,
+          "effectiveMode": "legacy",
+          "effectiveWorkerCount": 0,
+          "recoveryStatus": "not-applicable",
+          "evidenceStatus": "baseline",
+          "downgradeReason": "production gate not yet passed",
+          "benchmarkEvidenceId": null
+        },
+        "topology": null
+      },
+      "runtimeOwnership": {
+        "registrationStatus": "REGISTERED",
+        "policyIdentity": "DIRECT_EQUALS_COMMON_RUNTIME",
+        "liveDisposition": "legacy-preserved",
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0
+      },
+      "decision": {
+        "kind": "KEEP_DISABLED",
+        "enabled": false,
+        "independent": true,
+        "reasonCodes": ["WINDOWS_PACKAGED_NOT_RUN", "BUSINESS_FILE_REVIEW_PENDING", "FUNDS_REVIEW_PENDING"]
+      },
+      "rollback": {
+        "strategyKey": "KEEP_LEGACY_RECON_READONLY",
+        "preserveLegacySelector": true,
+        "preserveReceiptsAndRecoveryHolds": true,
+        "productionMutationAllowed": false
+      },
+      "evidenceRefs": ["E11-A-RECON-READONLY"],
+      "gates": {
+        "windowsPackaged": "NOT_RUN",
+        "realProcessTermination": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_APPLICABLE",
+        "performance": "NOT_RUN"
+      }
+    },
+    {
+      "actionKey": "recon-fix:run-jpm",
+      "currentPolicy": {
+        "actionKey": "recon-fix:run-jpm",
+        "disposition": "managed",
+        "mode": "thread-single",
+        "adapterKind": "native",
+        "lifetime": "service",
+        "commitKind": "worker-durable",
+        "production": {
+          "enabled": false,
+          "effectiveMode": "legacy",
+          "effectiveWorkerCount": 0,
+          "recoveryStatus": "probe",
+          "evidenceStatus": "baseline",
+          "downgradeReason": "production gate not yet passed",
+          "benchmarkEvidenceId": null
+        },
+        "topology": null
+      },
+      "runtimeOwnership": {
+        "registrationStatus": "REGISTERED",
+        "policyIdentity": "DIRECT_EQUALS_COMMON_RUNTIME",
+        "liveDisposition": "legacy-preserved",
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0
+      },
+      "decision": {
+        "kind": "KEEP_DISABLED",
+        "enabled": false,
+        "independent": true,
+        "reasonCodes": ["WINDOWS_PACKAGED_NOT_RUN", "REAL_TERMINATION_NOT_RUN", "JPM_FUNDS_REVIEW_PENDING", "RECOVERY_REVIEW_PENDING"]
+      },
+      "rollback": {
+        "strategyKey": "KEEP_LEGACY_JPM_PRESERVE_RECEIPTS_HOLDS",
+        "preserveLegacySelector": true,
+        "preserveReceiptsAndRecoveryHolds": true,
+        "productionMutationAllowed": false
+      },
+      "evidenceRefs": ["E11-P0-JPM-PRIMITIVES", "E11-B-JPM-DURABLE"],
+      "gates": {
+        "windowsPackaged": "NOT_RUN",
+        "realProcessTermination": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_APPLICABLE",
+        "performance": "NOT_RUN"
+      }
+    },
+    {
+      "actionKey": "recon-fix:export",
+      "currentPolicy": {
+        "actionKey": "recon-fix:export",
+        "disposition": "managed",
+        "mode": "thread-single",
+        "adapterKind": "native",
+        "lifetime": "service",
+        "commitKind": "main-settlement",
+        "production": {
+          "enabled": false,
+          "effectiveMode": "legacy",
+          "effectiveWorkerCount": 0,
+          "recoveryStatus": "probe",
+          "evidenceStatus": "baseline",
+          "downgradeReason": "production gate not yet passed",
+          "benchmarkEvidenceId": null
+        },
+        "topology": null
+      },
+      "runtimeOwnership": {
+        "registrationStatus": "REGISTERED",
+        "policyIdentity": "DIRECT_EQUALS_COMMON_RUNTIME",
+        "liveDisposition": "legacy-preserved",
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0
+      },
+      "decision": {
+        "kind": "KEEP_DISABLED",
+        "enabled": false,
+        "independent": true,
+        "reasonCodes": ["WINDOWS_PACKAGED_NOT_RUN", "EXCEL_WPS_REVIEW_PENDING", "BUSINESS_FILE_REVIEW_PENDING", "RECOVERY_REVIEW_PENDING"]
+      },
+      "rollback": {
+        "strategyKey": "KEEP_LEGACY_RECON_EXPORT_PUBLISHER",
+        "preserveLegacySelector": true,
+        "preserveReceiptsAndRecoveryHolds": true,
+        "productionMutationAllowed": false
+      },
+      "evidenceRefs": ["E11-C-RECON-EXPORT"],
+      "gates": {
+        "windowsPackaged": "NOT_RUN",
+        "realProcessTermination": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW",
+        "excelWps": "PENDING_HUMAN_REVIEW",
+        "performance": "NOT_RUN"
+      }
+    },
+    {
+      "actionKey": "vcc-financial-op:export-subjects",
+      "currentPolicy": {
+        "actionKey": "vcc-financial-op:export-subjects",
+        "disposition": "managed",
+        "mode": "thread-pool",
+        "adapterKind": "native",
+        "lifetime": "job",
+        "commitKind": "main-settlement",
+        "production": {
+          "enabled": false,
+          "effectiveMode": "legacy",
+          "effectiveWorkerCount": 0,
+          "recoveryStatus": "probe",
+          "evidenceStatus": "baseline",
+          "downgradeReason": "production gate not yet passed",
+          "benchmarkEvidenceId": null
+        },
+        "topology": {
+          "phase": {
+            "cpuSlots": 0,
+            "workerThreadSlots": 0,
+            "utilityProcessSlots": 0,
+            "ioHeavySlots": 0,
+            "memoryBytes": 0
+          },
+          "compound": {
+            "topologyKey": "topology.vcc-financial-op:export-subjects",
+            "childrenMax": 2,
+            "childResource": {
+              "cpuSlots": 1,
+              "workerThreadSlots": 1,
+              "utilityProcessSlots": 0,
+              "ioHeavySlots": 1,
+              "memoryBytes": 268435456
+            }
+          },
+          "workUnits": {
+            "kind": "subject",
+            "ordering": "unit-index-reducer",
+            "requestedMaxWorkers": 2,
+            "minUnitsPerWorker": 2,
+            "plannerKey": "planner.vcc-financial-op:export-subjects",
+            "reducerKey": "reducer.vcc-financial-op:export-subjects"
+          }
+        }
+      },
+      "runtimeOwnership": {
+        "registrationStatus": "REGISTERED",
+        "policyIdentity": "DIRECT_EQUALS_COMMON_RUNTIME",
+        "liveDisposition": "legacy-preserved",
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0
+      },
+      "decision": {
+        "kind": "KEEP_DISABLED",
+        "enabled": false,
+        "independent": true,
+        "reasonCodes": ["WINDOWS_PACKAGED_NOT_RUN", "REAL_LARGE_SAMPLE_NOT_RUN", "RSS_WINDOWS_UNQUALIFIED", "EXCEL_WPS_REVIEW_PENDING", "FUNDS_REVIEW_PENDING"]
+      },
+      "rollback": {
+        "strategyKey": "KEEP_LEGACY_VCC_SUBJECT_EXPORT",
+        "preserveLegacySelector": true,
+        "preserveReceiptsAndRecoveryHolds": true,
+        "productionMutationAllowed": false
+      },
+      "evidenceRefs": ["E12-B-VCC-SUBJECT-QUERY", "E12-C-VCC-DUAL"],
+      "gates": {
+        "windowsPackaged": "NOT_RUN",
+        "realProcessTermination": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW",
+        "excelWps": "PENDING_HUMAN_REVIEW",
+        "performance": "LOCAL_SYNTHETIC_ONLY"
+      }
+    },
+    {
+      "actionKey": "vcc-financial-op:export-single",
+      "currentPolicy": {
+        "actionKey": "vcc-financial-op:export-single",
+        "disposition": "managed",
+        "mode": "thread-single",
+        "adapterKind": "native",
+        "lifetime": "job",
+        "commitKind": "main-settlement",
+        "production": {
+          "enabled": false,
+          "effectiveMode": "legacy",
+          "effectiveWorkerCount": 0,
+          "recoveryStatus": "probe",
+          "evidenceStatus": "baseline",
+          "downgradeReason": "production gate not yet passed",
+          "benchmarkEvidenceId": null
+        },
+        "topology": null
+      },
+      "runtimeOwnership": {
+        "registrationStatus": "REGISTERED",
+        "policyIdentity": "DIRECT_EQUALS_COMMON_RUNTIME",
+        "liveDisposition": "legacy-preserved",
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0
+      },
+      "decision": {
+        "kind": "KEEP_DISABLED",
+        "enabled": false,
+        "independent": true,
+        "reasonCodes": ["WINDOWS_PACKAGED_NOT_RUN", "EXCEL_WPS_REVIEW_PENDING", "BUSINESS_FILE_REVIEW_PENDING", "FUNDS_REVIEW_PENDING"]
+      },
+      "rollback": {
+        "strategyKey": "KEEP_LEGACY_VCC_SINGLE_EXPORT",
+        "preserveLegacySelector": true,
+        "preserveReceiptsAndRecoveryHolds": true,
+        "productionMutationAllowed": false
+      },
+      "evidenceRefs": ["E12-A-VCC-SINGLE"],
+      "gates": {
+        "windowsPackaged": "NOT_RUN",
+        "realProcessTermination": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW",
+        "excelWps": "PENDING_HUMAN_REVIEW",
+        "performance": "NOT_RUN"
+      }
+    }
+  ],
+  "globalDecision": {
+    "kind": "KEEP_ALL_DISABLED",
+    "actionIndependent": true,
+    "productionEnabledCount": 0,
+    "windowsPackagedEvidence": "NOT_RUN",
+    "realBusinessEvidence": "PENDING_HUMAN_REVIEW",
+    "fundsRecoveryEvidence": "PENDING_HUMAN_REVIEW",
+    "e12cPerformanceEvidence": "LOCAL_SYNTHETIC_ONLY",
+    "mainModified": false,
+    "tagsModified": false,
+    "productionEnablementModified": false
+  }
+}
