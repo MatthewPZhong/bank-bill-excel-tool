@@ -87,3 +87,10 @@
 | --- | --- | --- | --- |
 | Windows packaged native SQLite、真实财务样本与人工恢复复核 | BLOCK production enablement | R3.2.2/用户人工门禁 | 不阻断production=false capability合并；禁止启用 |
 | Main FilePlan technical/business validator、Publisher journal与Task settle的live接线 | 本PR明确不接live；保持capability seam | 后续production PR | 不阻断E08-A代码合并；任何live启用前必须补齐 |
+
+## Review Remediation — Deterministic Transport Loss
+
+- Windows CI 高负载下，原 fault test 依赖 `executionTimeoutMs: 250` 制造 transport loss，会在 worker 已完成 durable commit 但定时器先触发时产生调度竞态。
+- fixture 现于可选 `commit:receipt` 发出后的下一个 event-loop turn 显式退出 worker；测试恢复默认 5 秒安全超时。故障窗口仍是“side commit 已完成、`unit:done` 未送达”，但不再把机器负载当作协议行为。
+- 本修复只改变测试故障注入，不改变 receipt、Inspector、Hold、金额/币种、live route 或 production gate；资金与恢复人工门禁继续保持。
+- 验证：Supervisor 文件 `6/6 PASS`；目标 transport-loss 用例连续 `20/20 PASS`；affected ESLint、`node --check`、`git diff --check` 均 PASS。

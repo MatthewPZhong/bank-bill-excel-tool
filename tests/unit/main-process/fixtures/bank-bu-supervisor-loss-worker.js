@@ -67,6 +67,7 @@ parentPort.on('message', (raw) => {
     }).then((result) => {
       if (envelope.payload.input.failureMode === 'unit-done-loss') {
         emit('commit:receipt', { receipt: result.receipt }, envelope.unitId);
+        setImmediate(() => process.exit(91));
         return;
       }
       exitAfterSideCommit(envelope.payload.input);
