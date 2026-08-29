@@ -39,7 +39,7 @@ const NEW_ACCOUNT_GENERATION_POLICY = Object.freeze({
   },
   cancellation: {
     capability: 'shutdown-only',
-    safePoints: ['before-critical', 'between-units'],
+    safePoints: ['before-write', 'after-write', 'after-readback', 'before-terminal'],
     cooperativeTimeoutMs: 5000,
     terminateTimeoutMs: 5000,
     protectedResult: 'protected/not-cancellable'

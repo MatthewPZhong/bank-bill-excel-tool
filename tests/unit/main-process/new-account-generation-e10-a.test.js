@@ -134,6 +134,14 @@ function workbookProjection(filePath) {
   };
 }
 
+async function waitForCondition(predicate, message, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) assert.fail(message);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
 test('E10-A policy保持 thread-single/job/main-settlement 与 production=false/legacy/0', () => {
   assert.equal(NEW_ACCOUNT_GENERATION_POLICY.actionKey, NEW_ACCOUNT_GENERATION_ACTION);
   assert.equal(NEW_ACCOUNT_GENERATION_POLICY.mode, 'thread-single');
@@ -141,15 +149,23 @@ test('E10-A policy保持 thread-single/job/main-settlement 与 production=false/
   assert.equal(NEW_ACCOUNT_GENERATION_POLICY.adapterKind, 'native');
   assert.equal(NEW_ACCOUNT_GENERATION_POLICY.commit.kind, 'main-settlement');
   assert.equal(NEW_ACCOUNT_GENERATION_POLICY.artifacts.maxArtifacts, 1);
+  assert.deepEqual(NEW_ACCOUNT_GENERATION_POLICY.cancellation.safePoints, [
+    'before-write', 'after-write', 'after-readback', 'before-terminal'
+  ]);
   assert.equal(NEW_ACCOUNT_GENERATION_POLICY.production.enabled, false);
   assert.equal(NEW_ACCOUNT_GENERATION_POLICY.production.effectiveMode, 'legacy');
   assert.equal(NEW_ACCOUNT_GENERATION_POLICY.production.effectiveWorkerCount, 0);
   assert.equal(isBackgroundExecutionProductionEnabled(NEW_ACCOUNT_GENERATION_ACTION), false);
 
   const mainSource = fs.readFileSync(path.resolve(__dirname, '../../../src/main.js'), 'utf8');
+  const workerOwnedSource = [
+    '../../../src/main-process/new-account/generation-core.js',
+    '../../../src/main-process/new-account/worker-entry.js'
+  ].map((file) => fs.readFileSync(path.resolve(__dirname, file), 'utf8')).join('\n');
   assert.match(mainSource, /require\('\.\/main-process\/new-account\/generation-core'\)/);
   assert.doesNotMatch(mainSource, /isProductionEnabled\('new-account:generate'\)/);
   assert.doesNotMatch(mainSource, /generateAndValidateNewAccount\(/);
+  assert.doesNotMatch(workerOwnedSource, /fs\.(?:rm|rmSync|unlink|unlinkSync)\s*\(/);
 });
 
 test('唯一 core 锁定昨日/10年边界、币种去重、记录顺序与 legacy 文件名', () => {
@@ -315,8 +331,65 @@ test('真实 one-shot Worker 写单一 staging workbook、业务回读、Main技
   assert.deepEqual(workbookProjection(options.generationPath), workbookProjection(legacyPath));
 
   const report = await runtime.shutdown({ timeoutMs: 10000 });
+  assert.deepEqual(report.cancelledJobs, []);
   assert.deepEqual(report.leakedTransports, []);
   assert.deepEqual(report.errors, []);
+  assert.equal(result.execution.outcome, 'completed');
+  assert.equal(fs.existsSync(options.generationPath), true);
+});
+
+test('真实 running Worker 收到 shutdown 后cancel-wins，不产生handle并由Main清空staging', async () => {
+  const dir = tempDir();
+  const operationKey = 'new-account-running-shutdown';
+  const options = inputOptions(dir, {
+    operationKey,
+    context: operationContext(operationKey),
+    payload: payload({
+      accounts: [{
+        ...payload().accounts[0],
+        openingDate: '2024-01-01',
+        currencies: ['USD', 'CNY', 'EUR', 'GBP', 'JPY', 'HKD', 'AUD', 'CAD']
+      }]
+    })
+  });
+  const runtime = createBackgroundExecutionRuntime({
+    availableParallelism: 4,
+    freeMemoryBytes: 8 * 1024 ** 3,
+    totalMemoryBytes: 16 * 1024 ** 3,
+    shutdownTimeoutMs: 10000
+  });
+  let resolveControl;
+  const controlPromise = new Promise((resolve) => { resolveControl = resolve; });
+  const generation = generateAndValidateNewAccount({
+    ...options,
+    runtime: {
+      execute(request) {
+        const control = runtime.start(request);
+        resolveControl(control);
+        return control.promise;
+      }
+    }
+  });
+  const control = await controlPromise;
+  await control.ready;
+  await waitForCondition(
+    () => runtime.inspect(control.jobId)?.state === 'running',
+    '真实 Worker 未进入 running'
+  );
+
+  const shutdown = runtime.shutdown({ timeoutMs: 10000 });
+  const result = await generation;
+  const report = await shutdown;
+
+  assert.equal(result.execution.outcome, 'cancelled');
+  assert.equal(result.execution.terminalSource, 'job:error');
+  assert.equal(result.execution.result, null);
+  assert.equal(result.generated, null);
+  assert.deepEqual(report.cancelledJobs, [control.jobId]);
+  assert.deepEqual(report.leakedTransports, []);
+  assert.deepEqual(report.errors, []);
+  assert.deepEqual(fs.readdirSync(options.stagingRoot), []);
+  assert.equal(fs.existsSync(options.filePlan.outputs[0].filePath), false);
 });
 
 test('模板 TOCTOU、staging collision/symlink 与业务 tamper fail closed', async () => {

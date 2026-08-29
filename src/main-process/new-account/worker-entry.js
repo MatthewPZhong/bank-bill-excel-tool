@@ -8,7 +8,10 @@ const { toProtocolError } = require('../background-execution/error-codec');
 const { validateEnvelope } = require('../background-execution/protocol-validator');
 const { createDirectionSequenceTracker } = require('../background-execution/sequence-tracker');
 const { NEW_ACCOUNT_GENERATION_ACTION } = require('./generation-contract');
-const { executeNewAccountGeneration } = require('./generation-core');
+const {
+  executeNewAccountGeneration,
+  newAccountGenerationCancellationSafePoint
+} = require('./generation-core');
 
 if (!parentPort) throw new Error('NewAccount worker requires worker_threads parentPort');
 
@@ -35,6 +38,12 @@ parentPort.on('message', (message) => {
       emit = createCanonicalEventEmitter(startEnvelope, (event) => parentPort.postMessage(event));
       abortController = new AbortController();
       executeNewAccountGeneration(envelope.payload.input, abortController.signal, { allowedTemplatePath })
+        .then(async (result) => {
+          // Core 成功后再让出一轮，确保已投递的 shutdown cancel
+          // 优先于 job:done 被观察，不把未发布 staging 伪报为 artifact。
+          await newAccountGenerationCancellationSafePoint(abortController.signal);
+          return result;
+        })
         .then((result) => {
           if (terminal) return;
           terminal = true;

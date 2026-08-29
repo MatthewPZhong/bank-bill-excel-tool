@@ -29,10 +29,19 @@
 - 最便宜验证：非 allowlist 同名模板、错误 SHA、snapshot 变化。
 - 处置：已覆盖；固定应用内路径，Main FilePlan snapshot + SHA，Worker 写前写后复核 path/snapshot/hash。
 
-### [Important / 已覆盖] Worker crash/cancel/late done 的 staging 生命周期
+### [Important / 已覆盖] 同步 XLSX 阻塞 running Worker 的 shutdown cancel
 
-- 事实：生成是同步 XLSX 写；cooperative cancel 可能需要 Supervisor terminate 才结束。
-- 推断/未知：partial/final staging 可能已出现，迟到 done 不得恢复 handle。
+- 事实：修复前的 `executeNewAccountGeneration` 在同步写前/写后只读 `signal.aborted`；Worker 消息循环未让出，`job:cancel` 不能更新 AbortController。
+- 推断/未知：已被 Supervisor 接受的 shutdown cancel 可被 Worker 紧随的 `job:done` 覆盖。
+- 影响：取消被伪报为 `completed`，Main 生成 artifact handle，未发布 staging 残留。
+- 证据：替代 Reviewer 用例与本地修复前回放；等 `control.ready/state=running` 后 shutdown，actual 为 `completed`。
+- 最便宜验证：同一真实 runtime 用例锁定 cancellation terminal、handle 和 staging 数量；反向用例先 await 真实 completion 再 shutdown。
+- 处置：已覆盖；core 在 write 前后/readback 后/技术证据后让出消息循环，entry 发 `job:done` 前再过 cancel gate。取消终态仍由 Supervisor 认定，只有 Main/client 删 task-private staging；Worker/core 不删，不存在双清理 owner。
+
+### [Important / 已覆盖] Worker crash/late done 的 staging 生命周期
+
+- 事实：partial/final staging 可能已出现，迟到 done 不得恢复 handle。
+- 推断/未知：Worker crash 后 transport 与 Main cleanup 的终态顺序必须保持 first-terminal-wins。
 - 影响：错误发布、残留文件、transport/resource 泄漏。
 - 证据：`worker-entry.js` canonical Protocol v1；`generation-validator.js:generateAndValidateNewAccount`；focused crash/late-message test。
 - 最便宜验证：Fake transport 写 partial 后 `unexpected-exit`，随后发送合法迟到 `job:done`。
