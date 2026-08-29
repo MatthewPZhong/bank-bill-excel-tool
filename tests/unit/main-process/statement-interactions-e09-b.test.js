@@ -1247,6 +1247,209 @@ test('真实Statement Service完成pending reservation adoption、同Task contin
   assert.equal(trace.slice(staleCancelStart).some((message) => message.operation === 'resource:request'), false);
 });
 
+test('prepare-generation重复请求以candidate-first替换并在reject/revoke/跨purpose失败时保留旧token', async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-e09-c-scope-replacement-'));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const stablePath = path.join(tempDir, 'stable.xlsx');
+  const promptPath = path.join(tempDir, 'prompt.xlsx');
+  writeStatement(stablePath, [['2026-08-01', 10, '', 'USD', 'STABLE']]);
+  writeStatement(promptPath, [['2026-08-02', '', 2, 'USD', 'BANK-1']]);
+
+  const trace = [];
+  const service = createStatementService({
+    postMessage(message) { trace.push(message); },
+    resolveSourceResource(resourceId) { return path.join(tempDir, resourceId); }
+  });
+  let controlSeq = 0;
+  function control(operation, controlId, jobRef, payload) {
+    controlSeq += 1;
+    service.handleMessage(createServiceControlEnvelope({
+      direction: 'command', operation, serviceKey: 'service.statement', controlId,
+      workerInstanceId: 'worker-scope-replacement', serviceGeneration: 1,
+      seq: controlSeq, jobRef, payload
+    }, { validate: false }));
+  }
+  function start(actionKey, suffix, input) {
+    const operationKey = `scope-replacement/${suffix}`;
+    service.handleMessage(createJobEnvelope({
+      direction: 'command', operation: 'job:start', actionKey, operationKey,
+      jobId: `job-${suffix}`, workerInstanceId: 'worker-scope-replacement',
+      serviceGeneration: 1, unitId: null, seq: 1,
+      context: { kind: 'operation', value: {
+        taskRunId: 'task-scope-replacement', taskKey: 'file:import',
+        moduleId: 'statement', parentRunId: 'parent-scope-replacement', operationKey
+      } }, payload: { input }
+    }, { validate: false }));
+  }
+  async function nextMessage(from, predicate, label) {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const found = trace.slice(from).find(predicate);
+      if (found) return found;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    assert.fail(`missing ${label}: ${JSON.stringify(trace.slice(from).map((message) => ({
+      operation: message.operation,
+      error: message.payload && message.payload.error
+    })))}`);
+  }
+  const operation = (name) => (message) => message.operation === name;
+  const prepareInput = Object.freeze({
+    command: 'prepare-generation',
+    sessionKey: 'template-scope-replacement',
+    kind: 'detail'
+  });
+
+  control('executor:init', 'init-scope-replacement', null, {
+    contractVersion: 1, policyDigest: 'a'.repeat(64), baseLeaseId: 'base-scope-replacement'
+  });
+
+  const importStart = trace.length;
+  start('statement:import', 'stable-import', importInput(
+    directTemplateEvidence('template-scope-replacement'),
+    [stablePath]
+  ));
+  const stateRequest = await nextMessage(importStart, operation('resource:request'), 'state request');
+  control('resource:grant', stateRequest.controlId, stateRequest.jobRef, {
+    requestId: stateRequest.payload.requestId,
+    grantId: 'grant-state',
+    reservationId: 'reservation-state',
+    replacesReservationId: null,
+    granted: stateRequest.payload.requested,
+    adoptionDeadlineMs: 30000
+  });
+  const stateAdopted = await nextMessage(importStart, operation('resource:adopted'), 'state adopted');
+  control('resource:adopt-ack', stateAdopted.controlId, stateAdopted.jobRef, {
+    requestId: stateRequest.payload.requestId,
+    grantId: 'grant-state',
+    reservationId: 'reservation-state'
+  });
+  const imported = await nextMessage(importStart, operation('job:done'), 'stable import done');
+  assert.equal(imported.payload.result.status, 'imported');
+
+  const initialStart = trace.length;
+  start('statement:generate-current', 'scope-initial', prepareInput);
+  const initialRequest = await nextMessage(initialStart, operation('resource:request'), 'initial scope request');
+  control('resource:grant', initialRequest.controlId, initialRequest.jobRef, {
+    requestId: initialRequest.payload.requestId,
+    grantId: 'grant-scope-1',
+    reservationId: 'reservation-scope-1',
+    replacesReservationId: null,
+    granted: initialRequest.payload.requested,
+    adoptionDeadlineMs: 30000
+  });
+  const initialAdopted = await nextMessage(initialStart, operation('resource:adopted'), 'initial scope adopted');
+  control('resource:adopt-ack', initialAdopted.controlId, initialAdopted.jobRef, {
+    requestId: initialRequest.payload.requestId,
+    grantId: 'grant-scope-1',
+    reservationId: 'reservation-scope-1'
+  });
+  const initialDone = await nextMessage(initialStart, operation('job:done'), 'initial scope done');
+  assert.equal(initialDone.payload.result.interaction.purpose, 'scope-generation');
+
+  const rejectStart = trace.length;
+  start('statement:generate-current', 'scope-reject', prepareInput);
+  const rejectedRequest = await nextMessage(rejectStart, operation('resource:request'), 'replacement request');
+  assert.equal(rejectedRequest.payload.replacesReservationId, 'reservation-scope-1');
+  assert.equal(trace.slice(rejectStart).some((message) =>
+    message.operation === 'resource:release' &&
+    message.payload.reservationId === 'reservation-scope-1'), false,
+  'replacement grant前不得释放旧scope token');
+  control('resource:reject', rejectedRequest.controlId, rejectedRequest.jobRef, {
+    requestId: rejectedRequest.payload.requestId,
+    reasonCode: 'RESOURCE_BUDGET_UNAVAILABLE',
+    retryable: true,
+    safeSummary: 'replacement rejected'
+  });
+  const rejected = await nextMessage(rejectStart, operation('job:error'), 'replacement rejection');
+  assert.equal(rejected.payload.error.code, 'STATEMENT_RESERVATION_REJECTED');
+
+  const adoptedStart = trace.length;
+  start('statement:generate-current', 'scope-adopted', prepareInput);
+  const adoptedRequest = await nextMessage(adoptedStart, operation('resource:request'), 'adopted replacement request');
+  assert.equal(adoptedRequest.payload.replacesReservationId, 'reservation-scope-1',
+    'grant reject后旧scope token必须仍可作为replacement current');
+  control('resource:grant', adoptedRequest.controlId, adoptedRequest.jobRef, {
+    requestId: adoptedRequest.payload.requestId,
+    grantId: 'grant-scope-2',
+    reservationId: 'reservation-scope-2',
+    replacesReservationId: 'reservation-scope-1',
+    granted: adoptedRequest.payload.requested,
+    adoptionDeadlineMs: 30000
+  });
+  const adoptedCandidate = await nextMessage(adoptedStart, operation('resource:adopted'), 'replacement adopted');
+  assert.equal(trace.slice(adoptedStart).some((message) =>
+    message.operation === 'resource:release' &&
+    message.payload.reservationId === 'reservation-scope-1'), false);
+  control('resource:adopt-ack', adoptedCandidate.controlId, adoptedCandidate.jobRef, {
+    requestId: adoptedRequest.payload.requestId,
+    grantId: 'grant-scope-2',
+    reservationId: 'reservation-scope-2'
+  });
+  await nextMessage(adoptedStart, operation('job:done'), 'replacement done');
+
+  const timeoutStart = trace.length;
+  start('statement:generate-current', 'scope-timeout', prepareInput);
+  const timeoutRequest = await nextMessage(timeoutStart, operation('resource:request'), 'timeout replacement request');
+  assert.equal(timeoutRequest.payload.replacesReservationId, 'reservation-scope-2');
+  control('resource:grant', timeoutRequest.controlId, timeoutRequest.jobRef, {
+    requestId: timeoutRequest.payload.requestId,
+    grantId: 'grant-scope-3',
+    reservationId: 'reservation-scope-3',
+    replacesReservationId: 'reservation-scope-2',
+    granted: timeoutRequest.payload.requested,
+    adoptionDeadlineMs: 30000
+  });
+  await nextMessage(timeoutStart, operation('resource:adopted'), 'timeout candidate adopted');
+  control('resource:revoke', 'revoke-scope-3', timeoutRequest.jobRef, {
+    reservationId: 'reservation-scope-3',
+    grantId: 'grant-scope-3',
+    reasonCode: 'adoption-timeout'
+  });
+  const candidateRelease = await nextMessage(timeoutStart, (message) =>
+    message.operation === 'resource:release' &&
+    message.payload.reservationId === 'reservation-scope-3', 'timeout candidate release');
+  assert.equal(trace.slice(timeoutStart).some((message) =>
+    message.operation === 'resource:release' &&
+    message.payload.reservationId === 'reservation-scope-2'), false,
+  'adoption timeout只能清理候选，不能释放旧scope token');
+  control('resource:release-ack', candidateRelease.controlId, candidateRelease.jobRef, {
+    reservationId: 'reservation-scope-3'
+  });
+  const timedOut = await nextMessage(timeoutStart, operation('job:error'), 'timeout terminal');
+  assert.equal(timedOut.payload.error.code, 'STATEMENT_ADOPTION_TIMEOUT');
+
+  const crossPurposeStart = trace.length;
+  start('statement:import', 'cross-purpose', importInput(
+    bigAccountTemplateEvidence({ templateId: 'template-cross-purpose' }),
+    [promptPath]
+  ));
+  const crossPurpose = await nextMessage(crossPurposeStart, operation('job:error'), 'cross-purpose rejection');
+  assert.equal(crossPurpose.payload.error.code, 'STATEMENT_TOKEN_REPLACEMENT_PURPOSE_MISMATCH');
+  assert.equal(trace.slice(crossPurposeStart).some((message) =>
+    message.operation === 'resource:release' &&
+    message.payload.reservationId === 'reservation-scope-2'), false,
+  '跨purpose replacement必须在释放旧token前失败');
+  assert.equal(trace.slice(crossPurposeStart).some(operation('resource:request')), false,
+    '跨purpose replacement不得申请候选资源');
+
+  const continuationStart = trace.length;
+  start('statement:generate-current', 'scope-continuation', prepareInput);
+  const continuationRequest = await nextMessage(
+    continuationStart,
+    operation('resource:request'),
+    'post-failure continuation request'
+  );
+  assert.equal(continuationRequest.payload.replacesReservationId, 'reservation-scope-2',
+    '候选timeout与跨purpose失败后旧scope token仍必须可continuation');
+  control('resource:reject', continuationRequest.controlId, continuationRequest.jobRef, {
+    requestId: continuationRequest.payload.requestId,
+    reasonCode: 'TEST_END',
+    retryable: false,
+    safeSummary: 'test cleanup'
+  });
+  await nextMessage(continuationStart, operation('job:error'), 'test cleanup rejection');
+});
+
 test('真实Host/Worker在600个合法维护账号的最终public DTO超限时于资源申请前稳定拒绝', async (t) => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-e09-b-public-limit-'));
   t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));

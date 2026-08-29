@@ -395,12 +395,9 @@ function createStatementService(options = {}) {
               scopeEvidenceHashes
             }
           });
-          const existingToken = tokenStore.listRecords()[0];
-          if (existingToken) {
-            releaseToken(existingToken, 'session-invalidated', { job, interactionDraft });
-            return;
-          }
-          requestInteractionToken(job, interactionDraft);
+          const existingToken = tokenStore.listRecords()
+            .find((record) => record.state === 'published');
+          requestInteractionToken(job, interactionDraft, existingToken || null);
           return;
         }
         if (request.sessionRevision !== state.sessionRevision ||
