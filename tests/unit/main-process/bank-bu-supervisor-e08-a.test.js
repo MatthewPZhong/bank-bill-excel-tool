@@ -503,8 +503,7 @@ test('真实Supervisor unit done transport丢失由Inspector committed收口且r
       coordinator: createCoordinator(mainDb, dir, calls),
       userDataDir: dir,
       mainDatabasePath: mainPath,
-      failureMode: 'unit-done-loss',
-      executionTimeoutMs: 250
+      failureMode: 'unit-done-loss'
     });
     assert.equal(result.outcome, 'interrupted');
     assertTransportLossCommittedLifecycle(calls);
