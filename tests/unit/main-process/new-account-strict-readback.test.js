@@ -119,6 +119,17 @@ function replaceCell(xml, ref, replacement) {
   return xml.replace(pattern, replacement);
 }
 
+function replaceDimension(xml, replacement) {
+  const pattern = /<dimension\b[^>]*\/>/;
+  assert.match(xml, pattern, '测试workbook缺少dimension');
+  return xml.replace(pattern, replacement);
+}
+
+function workbookDimension(filePath) {
+  const workbook = XLSX.readFile(filePath, { raw: true });
+  return workbook.Sheets[workbook.SheetNames[0]]['!ref'];
+}
+
 function createFixture(dir, bankAccount) {
   const headers = extractHeaders(TEMPLATE_PATH);
   const prepared = prepareNewAccountGeneration({
@@ -198,6 +209,133 @@ test('outer row与cell ref行号错位必须fail closed', async () => {
   });
 });
 
+test('Reviewer反例：dimension A1:I1截断真实业务行时旧raw与strict均拒绝', async () => {
+  const dir = tempDir();
+  try {
+    const fixture = createFixture(dir, '00123');
+    const mutatedPath = path.join(dir, 'dimension-truncated.xlsx');
+    await mutateWorksheet(fixture.sourcePath, mutatedPath, (xml) => (
+      replaceDimension(xml, '<dimension ref="A1:I1"/>')
+    ));
+    assert.throws(
+      () => readBackAndValidate(mutatedPath, fixture.expected),
+      (error) => error.code === 'NEW_ACCOUNT_WORKBOOK_RECORDS_MISMATCH'
+    );
+    await assert.rejects(
+      readBackAndValidateCooperatively(
+        mutatedPath,
+        fixture.expected,
+        new AbortController().signal
+      ),
+      (error) => error.code === 'NEW_ACCOUNT_WORKBOOK_DIMENSION_INVALID'
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('strict dimension拒绝missing/duplicate/expanded/shifted/reversed/out-of-range/absolute/multi-area', async () => {
+  const dir = tempDir();
+  const variants = [
+    ['missing', ''],
+    ['missing-ref', '<dimension/>'],
+    ['duplicate', '<dimension ref="A1:I2"/><dimension ref="A1:I2"/>'],
+    ['truncated', '<dimension ref="A1"/>'],
+    ['expanded-column', '<dimension ref="A1:J2"/>'],
+    ['expanded-row', '<dimension ref="A1:I3"/>'],
+    ['shifted', '<dimension ref="B1:I2"/>'],
+    ['reversed', '<dimension ref="I2:A1"/>'],
+    ['column-out-of-range', '<dimension ref="A1:XFE2"/>'],
+    ['row-out-of-range', '<dimension ref="A1:I1048577"/>'],
+    ['absolute', '<dimension ref="$A$1:$I$2"/>'],
+    ['multi-area-space', '<dimension ref="A1:I2 A3:I3"/>'],
+    ['multi-area-comma', '<dimension ref="A1:I2,J1:J2"/>'],
+    ['malformed', '<dimension ref="A1:I2x"/>']
+  ];
+  try {
+    const fixture = createFixture(dir, '00123');
+    for (const [name, replacement] of variants) {
+      const mutatedPath = path.join(dir, `dimension-${name}.xlsx`);
+      await mutateWorksheet(fixture.sourcePath, mutatedPath, (xml) => (
+        replaceDimension(xml, replacement)
+      ));
+      await assert.rejects(
+        strictRows(mutatedPath, 9),
+        (error) => error.code === 'NEW_ACCOUNT_WORKBOOK_DIMENSION_INVALID',
+        name
+      );
+    }
+
+    const permissiveOldRefs = new Map([
+      ['missing', 'A1:I2'],
+      ['duplicate', 'A1:I2'],
+      ['expanded-column', 'A1:J2'],
+      ['reversed', 'A1:I2'],
+      ['absolute', 'A1:I2']
+    ]);
+    for (const [name, expectedRef] of permissiveOldRefs) {
+      assert.equal(workbookDimension(path.join(dir, `dimension-${name}.xlsx`)), expectedRef);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('strict dimension接受empty A1、冻结header-only尾随空行与真实1-row writer', async () => {
+  const dir = tempDir();
+  try {
+    const emptyPath = await writeSyntheticWorkbook(
+      dir,
+      'dimension-empty',
+      `${WORKSHEET_OPEN}<dimension ref="A1"/><sheetData/></worksheet>`
+    );
+    assert.deepEqual(await strictRows(emptyPath, 1), oldRawRows(emptyPath));
+
+    const headers = extractHeaders(TEMPLATE_PATH);
+    const headerOnlyPath = path.join(dir, 'dimension-header-only.xlsx');
+    writeBalanceWorkbook({
+      templateFilePath: TEMPLATE_PATH,
+      records: [],
+      templateFields: headers,
+      outputFilePath: headerOnlyPath
+    });
+    assert.equal(workbookDimension(headerOnlyPath), 'A1:I2');
+    assert.deepEqual(await strictRows(headerOnlyPath, headers.length), oldRawRows(headerOnlyPath));
+
+    const fixture = createFixture(dir, '00123');
+    assert.equal(workbookDimension(fixture.sourcePath), 'A1:I2');
+    assert.deepEqual(await strictRows(fixture.sourcePath, headers.length), oldRawRows(fixture.sourcePath));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('strict dimension used range计入merge、styled blank、formula cached与multi-letter trailing cell', async () => {
+  const dir = tempDir();
+  try {
+    const mergedPath = await writeSyntheticWorkbook(
+      dir,
+      'dimension-merged',
+      `${WORKSHEET_OPEN}<dimension ref="A1:C1"/><sheetData>` +
+        '<row r="1"><c r="A1" t="str"><v>merged</v></c></row></sheetData>' +
+        '<mergeCells count="1"><mergeCell ref="A1:C1"/></mergeCells></worksheet>'
+    );
+    assert.deepEqual(await strictRows(mergedPath, 3), oldRawRows(mergedPath));
+
+    const mixedPath = await writeSyntheticWorkbook(
+      dir,
+      'dimension-mixed-used-range',
+      `${WORKSHEET_OPEN}<dimension ref="A1:AA3"/><sheetData>` +
+        '<row r="1"><c r="A1" t="str"><v>start</v></c></row>' +
+        '<row r="2"><c r="K2"><f>1+1</f><v>2</v></c></row>' +
+        '<row r="3"><c r="AA3" s="1"/></row></sheetData></worksheet>'
+    );
+    assert.deepEqual(await strictRows(mixedPath, 27), oldRawRows(mixedPath));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('strict typed projection与旧SheetJS raw oracle覆盖全部合法cell type/formula cached', async () => {
   const dir = tempDir();
   try {
@@ -274,7 +412,7 @@ test('strict projection拒绝row/cell缺失、重复、乱序、错位和Excel�
       const filePath = await writeSyntheticWorkbook(
         dir,
         `invalid-coordinate-${index}`,
-        `${WORKSHEET_OPEN}<sheetData>${rowXml}</sheetData></worksheet>`
+        `${WORKSHEET_OPEN}<dimension ref="A1:B2"/><sheetData>${rowXml}</sheetData></worksheet>`
       );
       await assert.rejects(
         strictRows(filePath, 9),
@@ -308,7 +446,8 @@ test('strict projection拒绝shared越界、非法type payload、非有限/unsaf
       const filePath = await writeSyntheticWorkbook(
         dir,
         `invalid-cell-${index}`,
-        `${WORKSHEET_OPEN}<sheetData><row r="1">${cellXml}</row></sheetData></worksheet>`
+        `${WORKSHEET_OPEN}<dimension ref="A1"/><sheetData>` +
+          `<row r="1">${cellXml}</row></sheetData></worksheet>`
       );
       await assert.rejects(
         strictRows(filePath, 9),
@@ -324,13 +463,15 @@ test('strict projection拒绝shared越界、非法type payload、非有限/unsaf
 test('strict projection拒绝截断XML与未知实体', async () => {
   const dir = tempDir();
   const invalidXml = [
-    `${WORKSHEET_OPEN}<sheetData><row r="1"><c r="A1" t="str"><v>x</v></c>`,
-    `${WORKSHEET_OPEN}<sheetData><row r="1"><c r="A1" t="str"><v>&unknown;</v></c></row>` +
+    `${WORKSHEET_OPEN}<dimension ref="A1"/><sheetData>` +
+      '<row r="1"><c r="A1" t="str"><v>x</v></c>',
+    `${WORKSHEET_OPEN}<dimension ref="A1"/><sheetData>` +
+      '<row r="1"><c r="A1" t="str"><v>&unknown;</v></c></row>' +
       '</sheetData></worksheet>',
     '<notWorksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
-      '<sheetData/></notWorksheet>',
-    `${WORKSHEET_OPEN}<wrapper><sheetData/></wrapper></worksheet>`,
-    `${WORKSHEET_OPEN}<sheetData><unknown/></sheetData></worksheet>`
+      '<dimension ref="A1"/><sheetData/></notWorksheet>',
+    `${WORKSHEET_OPEN}<dimension ref="A1"/><wrapper><sheetData/></wrapper></worksheet>`,
+    `${WORKSHEET_OPEN}<dimension ref="A1"/><sheetData><unknown/></sheetData></worksheet>`
   ];
   try {
     for (const [index, sheetXml] of invalidXml.entries()) {
