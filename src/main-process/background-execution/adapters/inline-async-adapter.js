@@ -28,9 +28,10 @@ function createInlineAsyncAdapter() {
       let emit = null;
       let started = false;
       let closed = false;
+      let executionPromise = null;
 
       function run(envelope) {
-        Promise.resolve().then(() => execute({
+        executionPromise = Promise.resolve().then(() => execute({
           actionKey: envelope.actionKey,
           operationKey: envelope.operationKey,
           jobId: envelope.jobId,
@@ -56,6 +57,10 @@ function createInlineAsyncAdapter() {
             })
           });
         });
+        // transport cleanup 必须观察真实 inline execution 的结算；terminal handler
+        // 已在上方完成协议映射，这里的 catch 仅避免 cleanup owner 之外的未处理拒绝。
+        executionPromise.catch(() => undefined);
+        return executionPromise;
       }
 
       return Object.freeze({
@@ -74,12 +79,14 @@ function createInlineAsyncAdapter() {
             emit('cancel:ack', { cancellation: { scope: 'job' } });
           }
         },
-        close() {
+        async close() {
           closed = true;
+          if (executionPromise) await executionPromise.catch(() => undefined);
         },
         async terminate() {
           closed = true;
           abortController.abort();
+          if (executionPromise) await executionPromise.catch(() => undefined);
           return 0;
         }
       });

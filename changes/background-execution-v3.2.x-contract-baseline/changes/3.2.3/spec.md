@@ -223,8 +223,9 @@ Service crash后：
 - Main做payload大小/schema和FilePlan；
 - Worker复用单一generation core完成必填、日期、10年/昨日边界、账户/币种、记录和文件名；
 - Worker读取白名单模板，写一个staging workbook并回读；
-- Main发布到managed location并保存小型artifact handle；
--另存为用异步复制到staging、校验hash/size，再Publisher到用户目标；
+- Main在dispatch前只从冻结payload/asOfDate/模板证据构造bounded expected artifact；Worker result/manifest仅是untrusted observation。Main回读必须核对精确Sheet顺序/数量、列、记录数及日期/账户/币种/records digests，再发布到managed location并保存小型artifact handle；
+-另存为用异步复制到staging、校验source identity/snapshot/hash与副本identity/size/hash，再Publisher到用户目标；Publisher必须保留既有archive-handoff journal，Task artifact durable settlement完成且Task终态持久化后才ack清理。committed后丢回包/崩溃只从同一journal恢复settlement，不重复generation/copy/publish；
+- `inline-async` transport的close/terminate必须有界等待实际execution结算；deadline内未收口必须报告transport leak/cleanup evidence并保留cleanup owner，不得提前释放后宣称leak=0；
 -不建立池，不宣称多核加速。
 
 ## 10. 验收标准
