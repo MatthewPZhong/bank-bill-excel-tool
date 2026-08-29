@@ -119,6 +119,12 @@ function replaceCell(xml, ref, replacement) {
   return xml.replace(pattern, replacement);
 }
 
+function replaceCellReference(xml, from, to) {
+  const pattern = new RegExp(`(<c\\b[^>]*\\br=")${from}("[^>]*>)`);
+  assert.match(xml, pattern, `测试workbook缺少${from}`);
+  return xml.replace(pattern, (_match, prefix, suffix) => `${prefix}${to}${suffix}`);
+}
+
 function replaceDimension(xml, replacement) {
   const pattern = /<dimension\b[^>]*\/>/;
   assert.match(xml, pattern, '测试workbook缺少dimension');
@@ -209,6 +215,109 @@ test('outer row与cell ref行号错位必须fail closed', async () => {
   });
 });
 
+test('t=d原始空白不得trim成canonical日期，合法date仍与旧raw业务回读等价', async () => {
+  const dir = tempDir();
+  const validValues = ['2026-03-01', '2026-03-01T00:00:00Z'];
+  const invalidValues = [
+    ' 2026-03-01',
+    '2026-03-01 ',
+    ' 2026-03-01 ',
+    '\t2026-03-01',
+    '2026-03-01\t',
+    '\n2026-03-01',
+    '',
+    '   '
+  ];
+  try {
+    const fixture = createFixture(dir, '00123');
+    for (const [index, value] of validValues.entries()) {
+      const mutatedPath = path.join(dir, `date-valid-${index}.xlsx`);
+      await mutateWorksheet(fixture.sourcePath, mutatedPath, (xml) => (
+        replaceCell(xml, 'E2', `<c r="E2" t="d"><v>${value}</v></c>`)
+      ));
+      const oldResult = readBackAndValidate(mutatedPath, fixture.expected);
+      const strictResult = await readBackAndValidateCooperatively(
+        mutatedPath,
+        fixture.expected,
+        new AbortController().signal
+      );
+      assert.deepEqual(strictResult, oldResult);
+    }
+    for (const [index, value] of invalidValues.entries()) {
+      const mutatedPath = path.join(dir, `date-invalid-${index}.xlsx`);
+      await mutateWorksheet(fixture.sourcePath, mutatedPath, (xml) => (
+        replaceCell(xml, 'E2', `<c r="E2" t="d"><v>${value}</v></c>`)
+      ));
+      assert.throws(
+        () => readBackAndValidate(mutatedPath, fixture.expected),
+        (error) => error.code === 'NEW_ACCOUNT_WORKBOOK_RECORDS_MISMATCH'
+      );
+      await assert.rejects(
+        readBackAndValidateCooperatively(
+          mutatedPath,
+          fixture.expected,
+          new AbortController().signal
+        ),
+        (error) => error.code === 'NEW_ACCOUNT_WORKBOOK_CELL_INVALID'
+      );
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('cell ref必须canonical回编码，D02/长前导零不能冒充D2', async () => {
+  const dir = tempDir();
+  const invalidReferences = ['D02', 'D0002', `D${'0'.repeat(128)}2`];
+  try {
+    const fixture = createFixture(dir, '00123');
+    for (const [index, reference] of invalidReferences.entries()) {
+      const mutatedPath = path.join(dir, `cell-ref-leading-zero-${index}.xlsx`);
+      await mutateWorksheet(fixture.sourcePath, mutatedPath, (xml) => (
+        replaceCellReference(xml, 'D2', reference)
+      ));
+      assert.throws(
+        () => readBackAndValidate(mutatedPath, fixture.expected),
+        (error) => error.code === 'NEW_ACCOUNT_WORKBOOK_RECORDS_MISMATCH'
+      );
+      await assert.rejects(
+        readBackAndValidateCooperatively(
+          mutatedPath,
+          fixture.expected,
+          new AbortController().signal
+        ),
+        (error) => error.code === 'NEW_ACCOUNT_WORKBOOK_COORDINATE_INVALID'
+      );
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('outer row r=02按旧raw数值语义兼容，canonical cell refs仍保持业务等价', async () => {
+  const dir = tempDir();
+  try {
+    const fixture = createFixture(dir, '00123');
+    const mutatedPath = path.join(dir, 'outer-row-leading-zero.xlsx');
+    await mutateWorksheet(fixture.sourcePath, mutatedPath, (xml) => {
+      assert.match(xml, /<row\b[^>]*\br="2"/);
+      return xml.replace(
+        /(<row\b[^>]*\br=")2("[^>]*>)/,
+        (_match, prefix, suffix) => `${prefix}02${suffix}`
+      );
+    });
+    const oldResult = readBackAndValidate(mutatedPath, fixture.expected);
+    const strictResult = await readBackAndValidateCooperatively(
+      mutatedPath,
+      fixture.expected,
+      new AbortController().signal
+    );
+    assert.deepEqual(strictResult, oldResult);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('Reviewer反例：dimension A1:I1截断真实业务行时旧raw与strict均拒绝', async () => {
   const dir = tempDir();
   try {
@@ -250,7 +359,10 @@ test('strict dimension拒绝missing/duplicate/expanded/shifted/reversed/out-of-r
     ['absolute', '<dimension ref="$A$1:$I$2"/>'],
     ['multi-area-space', '<dimension ref="A1:I2 A3:I3"/>'],
     ['multi-area-comma', '<dimension ref="A1:I2,J1:J2"/>'],
-    ['malformed', '<dimension ref="A1:I2x"/>']
+    ['malformed', '<dimension ref="A1:I2x"/>'],
+    ['leading-zero-start', '<dimension ref="A01:I2"/>'],
+    ['leading-zero-end', '<dimension ref="A1:I02"/>'],
+    ['long-leading-zero', `<dimension ref="A${'0'.repeat(128)}1:I2"/>`]
   ];
   try {
     const fixture = createFixture(dir, '00123');
@@ -271,10 +383,41 @@ test('strict dimension拒绝missing/duplicate/expanded/shifted/reversed/out-of-r
       ['duplicate', 'A1:I2'],
       ['expanded-column', 'A1:J2'],
       ['reversed', 'A1:I2'],
-      ['absolute', 'A1:I2']
+      ['absolute', 'A1:I2'],
+      ['leading-zero-start', 'A1:I2'],
+      ['leading-zero-end', 'A1:I2']
     ]);
     for (const [name, expectedRef] of permissiveOldRefs) {
       assert.equal(workbookDimension(path.join(dir, `dimension-${name}.xlsx`)), expectedRef);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('merge refs必须canonical回编码并拒绝端点前导零', async () => {
+  const dir = tempDir();
+  const invalidMergeReferences = [
+    'A01:C2',
+    'A1:C02',
+    `A${'0'.repeat(128)}1:C2`,
+    `A1:C${'0'.repeat(128)}2`
+  ];
+  try {
+    for (const [index, reference] of invalidMergeReferences.entries()) {
+      const filePath = await writeSyntheticWorkbook(
+        dir,
+        `merge-leading-zero-${index}`,
+        `${WORKSHEET_OPEN}<dimension ref="A1:C2"/><sheetData>` +
+          '<row r="1"><c r="A1" t="str"><v>start</v></c></row>' +
+          '<row r="2"><c r="C2" t="str"><v>end</v></c></row></sheetData>' +
+          `<mergeCells count="1"><mergeCell ref="${reference}"/></mergeCells></worksheet>`
+      );
+      assert.doesNotThrow(() => oldRawRows(filePath));
+      await assert.rejects(
+        strictRows(filePath, 3),
+        (error) => error.code === 'NEW_ACCOUNT_WORKBOOK_DIMENSION_INVALID'
+      );
     }
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

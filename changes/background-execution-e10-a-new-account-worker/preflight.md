@@ -3,7 +3,7 @@
 ## Task Brief
 
 - Goal：把 NewAccount 单工作簿生成的业务规则收敛到唯一 core，并提供 `thread-single/job` one-shot Worker 能力；readback 全阶段必须在冻结 5 秒 cooperative timeout 内真实响应 shutdown cancel，且流式 cell 解码、坐标与worksheet dimension必须与冻结writer/旧raw oracle等价或更严格 fail closed。
-- Context：父链为已审查 E09-D `7beb80e8151c77dbd659d4192178b07663674009`；当前 live IPC 仍由 legacy handler 生成并直接写正式输出。
+- Context：父链为 review-fix 后已审查 E09-D `831455401bbf912f36efeeeb898f66d72e350125`；当前 live IPC 仍由 legacy handler 生成并直接写正式输出。
 - Constraints：只做 E10-A。Worker 只接小型账户 DTO、冻结模板 identity、日期配置和 task staging `generationPath`；不接 final target；不做 E10-B copy/Publisher，不启用 production，不做 R3.2.3。
 - Done when：legacy 与 Worker 共用日期/必填/账户/币种/记录/文件名 core；Worker 只对白名单模板工作，写一个 staging workbook 后回读验证；Main contract/technical validation 保持 bounded；typed cell、完整 row/cell 坐标、唯一dimension与实际used range不允许错误记录混入；250k 的 row/evidence batching 与 terminal 前取消均稳定 `cancelled`、Main-only cleanup；focused/golden/lifecycle/recovery/integration/smoke/static 与 event-loop/RSS 证据通过。
 
@@ -29,6 +29,8 @@
 | 冻结 Spec 要求日期/账户/币种/记录业务回读与legacy golden | frozen spec/techdoc §9/§10；资金红线明确列出NewAccount日期、账户、币种和输出记录 | 对重复/错位/非法坐标更严格拒绝是保护既有血缘，不是新增业务规则；正常writer golden与四digest必须不变 |
 | 冻结writer主动设置worksheet `!ref`且header-only有唯一结构例外 | `writeBalanceWorkbook`固定`A1:{lastColumn}{max(records+1,2)}`；真实XML probe：0 records为`A1:I2`但cells仅`A1:I1`，1 record的18个cell完整覆盖`A1:I2` | strict used-range不能机械要求cell bounds恒等dimension；仅允许空sheet `A1`、正常exact union及冻结header-only尾随空第2行 |
 | SheetJS会宽松修复或忽略异常dimension | JSZip真实probe：missing/duplicate/reversed/absolute均回算/规范化为`A1:I2`；expanded `A1:J2`仍通过旧业务回读；truncated `A1:I1`因row缺失拒绝，shifted因header拒绝 | dimension完整性必须按Reviewer合同比旧oracle更严格fail closed，不能把SheetJS宽松行为当正常writer兼容性；正常writer/golden仍须等价 |
+| `t=d` 的原始空白会改变SheetJS raw日期语义 | 真实1-row JSZip probe：canonical `2026-03-01`与Zulu值旧/新均通过；leading/trailing/tab/newline空白被旧SheetJS解析为本地日历serial并触发业务mismatch，但strict因`trim()`误接受；empty/whitespace-only两路均拒绝 | E10不得trim异常日期词法；canonical ISO保持旧raw等价，任何首尾空白fail closed |
+| cell/dimension/merge的前导零词法不能只靠数值坐标校验 | 真实probe：`D02`在旧SheetJS保留物理key且canonical `D2`缺失，旧业务mismatch而strict误接受；`A01:I02`与merge `A01:A02`被旧库规范化；outer row `r=02`配canonical cells时旧/新均通过 | cell/dimension/merge必须canonical re-encode回比；outer row保持旧oracle数值语义，不机械收紧 |
 
 ## Unknowns Register
 
@@ -53,6 +55,8 @@
 | 坐标/结构比旧SheetJS更严格是否改变正常输出合同 | 审计边界 | 高 | 容易 | writer输出row/cell ref完整递增；独立矩阵和正常250k/60,416 golden已证明严格投影不改变合法输出 | PROBE→RESOLVED | duplicate/out-of-order/missing/mismatch/multi-letter/extra column/truncated/XML entity矩阵 + normal golden | 只对OOXML结构异常更严格拒绝；合法稀疏/空行仍按旧`blankrows:false`跳过，正常digest不变 |
 | dimension应由哪些物理结构解释，避免误伤styled blank/merge/header-only | 输出血缘 | 高 | 容易 | writer XML中空业务字段仍可能产生styled blank `<c>`；header-only声明额外空第2行；OOXML merge可扩展used range | PROBE→RESOLVED | 真实JSZip差分：empty/header-only/1row、styled blank、merge、formula cached、trailing empty及multi-letter | used range取全部cell refs与merge ranges的包围盒；无ref只接受`A1`，header-only只接受`A1:{expectedLast}2`对`A1:{expectedLast}1`，其余必须exact |
 | dimension格式/边界是否可借SheetJS宽松解析绕过 | 数据契约 | 高 | 容易 | 旧库接受反转、绝对地址、缺失和重复；冻结writer只输出uppercase相对A1或单冒号range | PROBE→RESOLVED | missing/duplicate/truncated/expanded/shifted/reversed/out-of-range/absolute/multi-area矩阵 | E10专用canonical parser仅接受`A1`或`A1:END`，端点安全且有序；不修改generic scanner |
+| `t=d` 是否可先trim再按canonical ISO解析 | 数据/兼容 | 高 | 容易 | 真实probe证明带空白值的旧raw serial与trim后值不同，业务回读旧拒新收 | PROBE→RESOLVED | canonical/Zulu、leading/trailing/tab/newline、empty/whitespace-only真实1-row差分 | 不trim；直接对raw XML值执行canonical ISO gate，异常空白fail closed |
+| row/cell/range前导零是否应统一拒绝 | 坐标血缘 | 高 | 容易 | `D02`旧库保留非canonical物理key并导致mismatch；dimension/merge旧库宽松规范化；outer `r=02`不改变canonical cell key且旧业务通过 | PROBE→RESOLVED | cell/dimension/merge leading-zero与超长词法红测；outer row定向golden | 仅cell ref及dimension/merge range做encode回比；outer row继续数值化比较，避免误拒旧raw可解释输入 |
 
 ## 风险优先计划
 
@@ -69,6 +73,7 @@
 | 9 | 把 readback 改为可协作取消的 async 编排 | 读取真实落盘 XLSX、sheet/header/rowCount/四 digest 不变；任一长窗口小于 5 秒并可观测 cancel | 250k/60,416阶段计时；旧同步 digest等价；readFile后/row/evidence/terminal取消；真实250k多轮shutdown | 任一合法阶段仍可触发cancel-timeout，或golden/digest漂移 | 不改Supervisor/timeout/Writer；不可分割 readFile 若不满足则收缩到可终止隔离方案 |
 | 10 | 用E10专用strict typed/coordinate projection替换generic row scanner readback | account/date/currency/amount与旧raw oracle同值；错位/重复/非法XML不能混入业务证据 | 三个Reviewer反例红→绿；完整typed/coordinate差分矩阵；250k/60,416 digest与六阶段cancel | 账户前导零、boolean或错位cell可被错误账行接受，推翻业务回读可信度 | 不改generic scanner/Writer/Protocol；strict模块可独立回滚到前一提交供复盘但production保持false |
 | 11 | 在E10 strict projection验证唯一dimension与实际used range | 截断/扩张/偏移元数据不能隐藏或伪造账户、日期、币种、余额列与记录行 | Reviewer `A1:I1`红→绿；异常矩阵；empty/header-only/1row/merge/styled/multi-letter与250k/60,416 | `!ref`与cells冲突仍可让业务证据对错误投影自洽 | 仅改E10 parser；保留streaming/批次yield，正常writer例外由真实XML固定 |
+| 12 | 收紧raw date与canonical cell/range词法 | 日期serial和物理cell key必须与旧raw解释一致；dimension/merge不得靠前导零伪装canonical ref | whitespace date与`D02`红→绿；dimension/merge前导零/超长反例；outer `r=02`旧oracle控制 | 错误日期或非canonical坐标进入账户/日期/币种/行数digest | 仅改E10 strict decoder/parser；generic scanner、streaming/yield与同步oracle不动 |
 
 ## Blindspot / reconciliation 直接 checklist
 
@@ -79,8 +84,8 @@
 - 隐私 gate：只允许 `/payload/result/artifact/templateSha256` 与 `businessEvidence` 四个冻结 digest path；近邻路径、同名异路径、普通字符串、错误大小写/长度和 schema-invalid 仍拒绝。
 - 生命周期：collision、cancel、Worker crash、late message、shutdown、restart orphan staging 的权限边界；真实 running Worker 的 shutdown cancel 必须胜过尚未发送的 `job:done`。
 - readback 取消：ZIP entry打开、strict XML chunk/row batch、actual/expected四digest与artifact hash每个窗口均有界；每批yield后先检查signal；取消结果不得携带artifact/result，Main cleanup恰好一次且staging/final=0。
-- typed/坐标血缘：`s/inlineStr/str/n/b/d/e/formula cached`按SheetJS raw语义投影；outer row与每个cell ref必须合法、同row、严格递增唯一且在XLSX范围内；非法payload、shared越界、截断XML/未知实体fail closed。
-- dimension血缘：唯一canonical `A1`/`A1:END`必须在sheetData前出现，端点有序且在XLSX范围；全部cell refs和merge ranges used bounds须与dimension精确一致，仅冻结header-only空第2行例外；missing/duplicate/truncated/expanded/shifted/absolute/多区域均拒绝。
+- typed/坐标血缘：`s/inlineStr/str/n/b/d/e/formula cached`按SheetJS raw语义投影；`t=d`不得trim原始空白；每个cell ref必须canonical回编码、与outer row同数值行号、严格递增唯一且在XLSX范围内；outer row `r=02`按旧raw数值语义兼容；非法payload、shared越界、截断XML/未知实体fail closed。
+- dimension血缘：唯一canonical `A1`/`A1:END`必须在sheetData前出现，端点逐cell re-encode相等、有序且在XLSX范围；全部cell refs和merge ranges used bounds须与dimension精确一致，仅冻结header-only空第2行例外；missing/duplicate/truncated/expanded/shifted/absolute/多区域/前导零均拒绝。
 - 数据血缘：输入账户顺序 × 日期升序 × 去重币种顺序，输出行数严格等于各账户 `天数 × 币种数` 总和。
 - 金额：只生成余额行，`期末余额=0`，其余余额为空；不引入汇率/舍入/借贷方向。
 - 日期：开户日到昨日（含首尾）；晚于昨日拒绝；总天数超过 3650 拒绝。

@@ -65,6 +65,24 @@
 - 最便宜验证：先锁定截断红测，再覆盖missing/duplicate/expanded/shifted/reversed/out-of-range/absolute/multi-area，以及empty/header-only/1row/styled blank/merge/formula/multi-letter/大边界。
 - 处置：已覆盖；E10专用canonical dimension parser要求唯一dimension在sheetData前出现，只接受uppercase相对`A1`/`A1:END`、有序且在XLSX范围；累计全部cell refs与merge ranges used bounds并要求exact，冻结header-only尾随空第2行是唯一例外。红测10/12准确命中截断/missing，修复后oracle 12/12、focused480/480、250k/60,416 digest与取消、full integration/smoke/static均通过；不改generic scanner或同步回退。
 
+### [Important / 已覆盖] `t=d` 原始空白被trim后改变旧raw日期解释
+
+- 事实：strict decoder当前调用`sheetJsDateSerial(rawValue.trim())`；真实1-row的E2改为`<v> 2026-03-01 </v>`后，旧SheetJS产生不同serial并以records mismatch拒绝，strict trim后接受。leading/trailing/tab/newline均同方向，empty/whitespace-only两路已拒绝。
+- 推断/未知：异常日期词法可被静默修复为期望日期，使日期/记录digest对旧oracle拒绝的workbook自洽。
+- 影响：开户日期血缘与实际落盘raw值不可解释，命中时间/审计红线。
+- 证据：SheetJS `parse_ws_xml_data`的`t=d -> datenum(parseDate(p.v,1))`与真实JSZip差分probe。
+- 最便宜验证：canonical/Zulu正常控制；leading/trailing/both/tab/newline、empty/whitespace-only红绿矩阵。
+- 处置：已覆盖；移除trim，对raw XML值直接执行canonical ISO/date gate。canonical/Zulu与旧业务结果deep-equal；leading/trailing/both/tab/newline、empty/whitespace-only均fail closed；strict 16/16、focused484/484和真实大边界通过，不改变正常writer或streaming编排。
+
+### [Important / 已覆盖] cell/dimension/merge前导零绕过canonical坐标
+
+- 事实：`parseCellReference`以Number解释row digits，`D02`被strict当D2；旧SheetJS却保留物理key`D02`，canonical D2缺失并业务mismatch。dimension `A01:I02`与merge `A01:A02`也被数值化接受；outer row `r=02`配canonical cells时旧raw与strict都正常通过。
+- 推断/未知：统一收紧outer row会制造兼容误拒，但不收紧cell/range会让物理key或元数据血缘漂移。
+- 影响：账户cell可从旧oracle的D2消失但strict仍接受；dimension/merge唯一canonical合同失效。
+- 证据：真实1-row JSZip probe、SheetJS `decode_cell/encode_cell`回比与Reviewer反例。
+- 最便宜验证：D02及长前导零cell、A01/I02 dimension、merge端点红测；outer `r=02`正常控制。
+- 处置：已覆盖；只对cell ref及dimension/merge端点做canonical re-encode equality并限制row lexeme最大7位；`D02`/`D0002`/超长前导零及range两端均拒绝，outer `r=02`继续与旧业务结果deep-equal。generic scanner不改，正常250k/60,416 digest与取消保持。
+
 ### [Important / 已覆盖] Worker crash/late done 的 staging 生命周期
 
 - 事实：partial/final staging 可能已出现，迟到 done 不得恢复 handle。
@@ -103,7 +121,7 @@ payload account rows
 - 日期：本地日历沿用 legacy；开户日至昨日均包含；晚于昨日、超过 3650 天拒绝。
 - 金额：没有 Credit/Debit/汇率/舍入；每行期末余额固定数值 `0`，其余余额字段为空。
 - 文件名：单账户 `银行-地点-末四位-币种或多币种-NEW_BALANCE.xlsx`；多账户固定 `多账号-多币种`；contract 拒绝路径分隔符和非 xlsx。
-- 回读守恒：strict streaming projection只读取workbook声明顺序的首sheet，先校验唯一canonical dimension与全部cell/merge used bounds，再按SheetJS raw类型解释并校验worksheet根、outer row与每个cell完整坐标；空物理行仍按旧`blankrows:false`跳过，业务行按原序逐行进入同一canonical accumulator；250k/60,416已与旧同步oracle四digest全等。
+- 回读守恒：strict streaming projection只读取workbook声明顺序的首sheet，先校验唯一canonical dimension、cell/range re-encode与全部cell/merge used bounds，再按SheetJS raw类型解释且不trim `t=d`，并校验worksheet根、outer row与每个cell完整坐标；outer row词法按旧raw数值语义兼容，空物理行仍按旧`blankrows:false`跳过，业务行按原序逐行进入同一canonical accumulator；250k/60,416已与旧同步oracle四digest全等。
 - 取消守恒：shutdown不改变records或digest；只在未完成阶段产生`NEW_ACCOUNT_GENERATION_CANCELLED`，result/generated均为null，由Main按冻结generationPath清理一次；已completed后shutdown保持正常artifact。
 
 ## 资金红线人工复核
