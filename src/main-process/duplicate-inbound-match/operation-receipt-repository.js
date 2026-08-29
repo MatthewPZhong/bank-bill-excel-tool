@@ -143,6 +143,14 @@ function getOperationReceipt(db, actionKey, operationKey) {
   `).get(requireText(actionKey, 'actionKey'), requireText(operationKey, 'operationKey')));
 }
 
+function listOperationReceipts(db) {
+  assertDatabase(db);
+  return db.prepare(`
+    SELECT * FROM ${RECEIPTS_TABLE}
+    ORDER BY committed_at ASC, action_key ASC, operation_key ASC
+  `).all().map(mapReceipt);
+}
+
 function hasOperationReceiptTable(db) {
   assertDatabase(db);
   return Boolean(db.prepare(`
@@ -192,6 +200,7 @@ module.exports = {
   getOperationReceipt,
   hasOperationReceiptTable,
   insertOperationReceipt,
+  listOperationReceipts,
   normalizeExactOperationReceipt,
   normalizeReceiptPayload
 };

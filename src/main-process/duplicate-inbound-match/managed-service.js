@@ -163,14 +163,24 @@ function createDuplicateManagedService(options = {}) {
     stateRevision += 1;
     stableSummary = emptySummary();
     let imported = false;
+    let durableCommit = false;
     try {
-      await current.importFiles(input.filePaths, jobContext.onProgress);
+      const result = await current.importFiles(
+        input.filePaths, jobContext.onProgress, jobContext.operationIdentity
+      );
       imported = true;
+      durableCommit = Boolean(result && result.durableCommit);
       await adopt(jobContext, 'import');
       return compact('import');
     } catch (error) {
       if (imported) {
-        try { current.invalidateForNewImport(); } catch (_cleanupError) { /* 原错误优先 */ }
+        try {
+          if (durableCommit && typeof current.detachCommittedSession === 'function') {
+            current.detachCommittedSession();
+          } else {
+            current.invalidateForNewImport();
+          }
+        } catch (_cleanupError) { /* 原错误优先 */ }
       }
       throw error;
     }
@@ -181,14 +191,25 @@ function createDuplicateManagedService(options = {}) {
     stateRevision += 1;
     stableSummary = Object.freeze({ ...summaryFromService(current), canExport: false });
     let completed = false;
+    let durableCommit = false;
     try {
-      const result = await current.run({ onProgress: jobContext.onProgress });
+      const result = await current.run({
+        onProgress: jobContext.onProgress,
+        operationIdentity: jobContext.operationIdentity
+      });
       completed = true;
+      durableCommit = Boolean(result && result.durableCommit);
       await adopt(jobContext, 'run');
       return compact('run', { runId: Number(result.runId) });
     } catch (error) {
       if (completed) {
-        try { current.clearPreviousRun(); } catch (_cleanupError) { /* 原错误优先 */ }
+        try {
+          if (durableCommit && typeof current.detachCommittedRun === 'function') {
+            current.detachCommittedRun();
+          } else {
+            current.clearPreviousRun();
+          }
+        } catch (_cleanupError) { /* 原错误优先 */ }
       }
       throw error;
     }

@@ -173,6 +173,11 @@ function startDuplicateWorker(port, options = {}) {
     activeJob = record;
     Promise.resolve().then(() => service.execute(envelope.actionKey, envelope.payload.input, {
       signal: abortController.signal,
+      operationIdentity: Object.freeze({
+        actionKey: envelope.actionKey,
+        operationKey: envelope.operationKey,
+        producerTaskRunId: envelope.context.value.taskRunId
+      }),
       adoptCandidate,
       onProgress(progress) {
         if (abortController.signal.aborted) {

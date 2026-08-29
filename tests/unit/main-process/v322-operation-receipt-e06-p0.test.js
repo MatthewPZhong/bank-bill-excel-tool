@@ -13,6 +13,9 @@ const duplicateReceipts = require(
 const bankBuReceipts = require(
   '../../../src/main-process/bank-bu-worker/operation-receipt-repository'
 );
+const {
+  DuplicateInboundMatchStore
+} = require('../../../src/backend/duplicate-inbound-match-store');
 
 let tempRoot;
 
@@ -274,4 +277,94 @@ test('receipt payload验证拒绝Proxy/getter且不触发副作用', () => {
   );
   assert.equal(getterCalls, 0);
   assert.equal(proxyGets, 0);
+});
+
+test('Duplicate import/run receipt writer故障与side mutation同事务回滚', async () => {
+  const injectedReceipts = {
+    insertOperationReceipt() {
+      throw Object.assign(new Error('injected receipt failure'), {
+        code: 'INJECTED_DUPLICATE_RECEIPT_FAILURE'
+      });
+    }
+  };
+  const store = new DuplicateInboundMatchStore(tempRoot, {
+    operationReceipts: injectedReceipts
+  });
+  await assert.rejects(() => store.createImportBundle({
+    monthKey: '2026-08',
+    bank: { fileName: 'bank.xlsx', contentHash: 'a'.repeat(64), rows: [] },
+    document: { fileName: 'document.xlsx', contentHash: 'b'.repeat(64) },
+    writeDocumentRows: async () => ({
+      rowCount: 0, matchableRowCount: 0, emptyBusinessOrderCount: 0
+    }),
+    operationReceipt: duplicatePayload({ importBundleId: 1 })
+  }), (error) => error.code === 'INJECTED_DUPLICATE_RECEIPT_FAILURE');
+  const db = runDataStore.openSideDb(
+    tempRoot, runDataStore.MODULE_DUPLICATE_INBOUND_MATCH, '2026-08'
+  );
+  try {
+    assert.equal(db.prepare(
+      'SELECT COUNT(*) AS count FROM duplicate_inbound_match_imports'
+    ).get().count, 0);
+    const importId = Number(db.prepare(`
+      INSERT INTO duplicate_inbound_match_imports (
+        bank_file_name, bank_content_hash, bank_row_count,
+        document_file_name, document_content_hash, document_row_count,
+        document_matchable_row_count, document_empty_order_count
+      ) VALUES ('bank.xlsx', ?, 0, 'document.xlsx', ?, 0, 0, 0)
+    `).run('a'.repeat(64), 'b'.repeat(64)).lastInsertRowid);
+    const runId = Number(db.prepare(`
+      INSERT INTO duplicate_inbound_match_runs (
+        import_id, snapshot_json, snapshot_hash, status
+      ) VALUES (?, '{}', ?, 'running')
+    `).run(importId, 'c'.repeat(64)).lastInsertRowid);
+    db.close();
+    assert.throws(() => store.finishRun({
+      monthKey: '2026-08',
+      runId,
+      summary: {
+        mailRowCount: 1,
+        manualRowCount: 0,
+        auditGroupCount: 1,
+        finalSuccessGroupCount: 1,
+        manualGroupCount: 0
+      },
+      mailRows: [{ sourceOrdinal: 0, output: { BizId: 'sensitive' } }],
+      manualRows: [],
+      auditRows: [{
+        groupOrder: 0,
+        disposition: 'success',
+        reasonCodes: [],
+        bankLineage: [],
+        mptLineage: [],
+        documentLineage: []
+      }],
+      operationReceipt: duplicatePayload({
+        actionKey: 'duplicate:run', importBundleId: importId, sideRunId: runId
+      })
+    }), (error) => error.code === 'INJECTED_DUPLICATE_RECEIPT_FAILURE');
+    const verify = runDataStore.openExistingSideDb(runDataStore.sideDbPath(
+      tempRoot, runDataStore.MODULE_DUPLICATE_INBOUND_MATCH, '2026-08'
+    ));
+    try {
+      const rolledBackRun = verify.prepare(
+        'SELECT status, result_digest FROM duplicate_inbound_match_runs WHERE id = ?'
+      ).get(runId);
+      assert.equal(rolledBackRun.status, 'running');
+      assert.equal(rolledBackRun.result_digest, null);
+      assert.equal(verify.prepare(
+        'SELECT COUNT(*) AS count FROM duplicate_inbound_match_mail_rows WHERE run_id = ?'
+      ).get(runId).count, 0);
+      assert.equal(verify.prepare(
+        'SELECT COUNT(*) AS count FROM duplicate_inbound_match_group_audits WHERE run_id = ?'
+      ).get(runId).count, 0);
+      assert.equal(verify.prepare(
+        `SELECT COUNT(*) AS count FROM ${duplicateReceipts.RECEIPTS_TABLE}`
+      ).get().count, 0);
+    } finally {
+      verify.close();
+    }
+  } finally {
+    if (db.isOpen) db.close();
+  }
 });

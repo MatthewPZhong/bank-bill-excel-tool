@@ -11,7 +11,9 @@ const {
 const { createRecoveryHoldGate } = require('../background-execution/recovery-hold-gate');
 const {
   DUPLICATE_STARTUP_CONFLICT_SCOPE_KEY,
-  inspectSideDatabases
+  exactOperationInspection,
+  operationSource,
+  sideOperationSnapshots
 } = require('./startup-recovery');
 
 const DUPLICATE_STARTUP_GATE_CONTRACT_VERSION = 1;
@@ -68,9 +70,30 @@ function createDuplicateManagedStartupGate(rawDescriptor) {
         conflictScopeKey: DUPLICATE_STARTUP_CONFLICT_SCOPE_KEY
       });
       if (options.initializing === true) {
-        const side = inspectSideDatabases(path.resolve(runtime.userDataDir));
-        const mirrorCount = mirrorRepository.listRunMirrors(db).length;
-        if (side.count > 0 || mirrorCount > 0) {
+        const userDataDir = path.resolve(runtime.userDataDir);
+        const side = sideOperationSnapshots(userDataDir);
+        const mirrors = mirrorRepository.listRunMirrors(db);
+        const receiptKeys = new Set(side.operations.map((item) => (
+          `${item.receipt.actionKey}\0${item.receipt.operationKey}`
+        )));
+        const orphanMirror = mirrors.some((mirror) => !mirror.operationKey ||
+          !mirror.producerTaskRunId || !receiptKeys.has(`duplicate:run\0${mirror.operationKey}`));
+        const unresolvedOperation = side.operations.some((item) => {
+          const source = operationSource({
+            actionKey: item.receipt.actionKey,
+            operationKey: item.receipt.operationKey,
+            producerTaskRunId: item.receipt.producerTaskRunId
+          });
+          const inspection = exactOperationInspection({
+            userDataDir,
+            listRunMirrors: () => mirrors,
+            getRecoveryAuditBySource: (sourceRef) => (
+              mirrorRepository.getRecoveryAuditBySource(db, sourceRef)
+            )
+          }, source);
+          return !['committed', 'compensated'].includes(inspection.outcome);
+        });
+        if (side.legacyResidue || orphanMirror || unresolvedOperation) {
           throw new DuplicateManagedStartupGateError(
             'DUPLICATE_STARTUP_RESIDUE_UNRESOLVED',
             'Duplicate managed Service检测到未归因持久证据，禁止自动冷启动'
