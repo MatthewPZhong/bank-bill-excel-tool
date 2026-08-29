@@ -254,11 +254,13 @@ directory fsync 必须尝试；只有平台明确返回 unsupported 时可记录
 
 ## 9. NewAccount Worker
 
-Worker输入：小型账户数组、冻结模板路径/snapshot、日期/币种配置、generationPath。Worker不接收final target。
+Worker输入：小型账户数组、冻结模板路径/snapshot、日期/币种配置、generationPath。Worker不接收final target。Main在dispatch前从同一冻结输入独立流式计算bounded expected descriptor：artifactKey、template hash、精确Sheet names/order/count、headers、rowCount、四类业务digest与summary；该descriptor为out-of-band Main authority，不能从Worker result/manifest回填。
 
-Core输出records并写workbook。业务validator回读：Sheet、列顺序、记录数、日期、账户、币种。Main technical validator后发布到managed location。
+Core输出records并写workbook。Worker result只作为技术观察；Main technical validator复核staging identity/size/hash，再用out-of-band authority回读精确Sheet集合、列顺序、记录数、日期、账户、币种/records digest。Publisher metadata中的sheetCount/rowCount/size/hash必须来自Main验证事实，不得硬编码或采用Worker自报值。
 
-Export copy：`fs.promises.copyFile`到task staging，校验源/副本hash，再调用Publisher；这是一等`inline-async`策略，不占CPU Worker slot但占I/O lease。
+Export copy：`fs.promises.copyFile`到task staging，校验源/副本hash，再调用既有single FIFO Publisher；这是一等`inline-async`策略，不占CPU Worker slot但占I/O lease。Publisher固定`requireArchiveHandoff=true`，journal在正式目标committed后继续作为唯一RecoverySource/Hold evidence；TaskLifecycle先settle FilePlan input/output artifacts，只有artifact durable且Task终态持久化后才用既有recovery acknowledgement清理journal。settlement失败返回committed + pending handoff，不得重新解释为可重试业务失败。
+
+inline transport持有实际execution promise。正常terminal、shutdown cancel和close/terminate都在policy timeout内等待execution真实结算后才释放lease；timeout沿既有Supervisor映射为cleanup failure/transport leak并保留transport与task-owned staging cleanup ownership，late success/error不能改写已冻结terminal。
 
 ## 10. Fault matrix
 
@@ -273,6 +275,9 @@ Export copy：`fs.promises.copyFile`到task staging，校验源/副本hash，再
 | Service crash after seed | seed不重复；session需重新导入 |
 | NewAccount Worker crash | no artifact handle/publish |
 | copy source变化 | fail closed，不发布 |
+| Worker自洽伪造账户/币种digest或附加Sheet | Main authority readback失败，Publisher=0 |
+| Publisher committed后回包丢失/进程退出 | 同一journal恢复handoff，禁止重copy/重publish |
+| inline copy超过shutdown deadline | interrupted/cleanup leak evidence，保留owner，不虚报lease/leak收口 |
 
 ## 11. Tests
 

@@ -25,7 +25,8 @@ const {
   validateTaskOwnedStagingPath
 } = require('../statement-worker/staging-ownership');
 const {
-  publishDurableArtifactAsync
+  publishDurableArtifactAsync,
+  recoverToolboxPublicationsAsync
 } = require('../toolbox-output-publication-dispatch');
 const {
   validateNewAccountGenerationResult
@@ -33,6 +34,9 @@ const {
 const {
   readBackAndValidateCooperatively
 } = require('./generation-core');
+const {
+  assertNewAccountExpectedArtifactAuthority
+} = require('./generation-validator');
 
 const NEW_ACCOUNT_SAVE_AS_ACTION = 'new-account:save-as';
 const NEW_ACCOUNT_SAVE_AS_SCHEMA_VERSION = 1;
@@ -542,6 +546,15 @@ async function validateCopiedArtifact(input, result, options = {}) {
 async function validateAndPublishNewAccountSaveAs(options = {}) {
   const fsImpl = options.fsImpl || fs;
   const platform = options.platform || process.platform;
+  const expectedArtifact = assertNewAccountExpectedArtifactAuthority(
+    options.expectedArtifactAuthority
+  );
+  if (typeof options.settleArtifacts !== 'function') {
+    fail(
+      'NEW_ACCOUNT_SAVE_AS_SETTLEMENT_REQUIRED',
+      'NewAccount save-as缺少Task artifact durable settlement owner'
+    );
+  }
   const sourceGenerationResult = snapshotSourceGenerationResult(options.sourceGenerationResult);
   const filePlan = normalizeFilePlanV1(options.filePlan, {
     fsImpl,
@@ -575,18 +588,17 @@ async function validateAndPublishNewAccountSaveAs(options = {}) {
       platform,
       allowMissingFinal: filePlan.outputs[0].targetSnapshot.exists === false
     });
-    const expectedArtifact = sourceGenerationResult.artifact;
     const readback = await readBackAndValidateCooperatively(
       input.staging.filePath,
       {
-        sheetName: expectedArtifact.sheetName,
+        sheetNames: expectedArtifact.sheetNames,
         headers: expectedArtifact.headers,
         rowCount: expectedArtifact.rowCount,
         businessEvidence: expectedArtifact.businessEvidence
       },
       null
     );
-    await validateCopiedArtifact(input, execution.result, { fsImpl });
+    const validated = await validateCopiedArtifact(input, execution.result, { fsImpl });
     assertFilePlanFresh(filePlan, { fsImpl });
     assertNoSymlinkPathChain(filePlan.outputs[0].filePath, {
       fsImpl,
@@ -601,22 +613,71 @@ async function validateAndPublishNewAccountSaveAs(options = {}) {
       protectedSourcePaths: [filePlan.inputs[0].filePath],
       artifacts: [{
         sourcePath: input.staging.filePath,
-        byteSize: execution.result.artifact.byteSize,
-        sha256: execution.result.artifact.sha256,
+        byteSize: Number(validated.owned.stat.size),
+        sha256: validated.sha256,
         fileName: filePlan.outputs[0].originalName,
         dataRowCount: readback.rowCount,
-        sheetCount: 1
+        sheetCount: readback.sheetCount
       }],
       targets: [{
         targetPath: filePlan.outputs[0].filePath,
         expectedTargetSnapshot: filePlan.outputs[0].targetSnapshot,
         fileName: filePlan.outputs[0].originalName
+      }],
+      archiveInputFiles: [{
+        filePath: filePlan.inputs[0].filePath,
+        sourceOperation: filePlan.inputs[0].sourceOperation,
+        originalName: filePlan.inputs[0].originalName,
+        sourceSnapshot: filePlan.inputs[0].sourceSnapshot,
+        expectedSha256: input.source.contentSha256,
+        expectedSizeBytes: input.source.byteSize
       }]
     });
+    if (!publication || publication.committed !== true ||
+        publication.pendingArchiveHandoff !== true) {
+      fail(
+        'NEW_ACCOUNT_SAVE_AS_PUBLICATION_RECEIPT_INVALID',
+        'NewAccount Publisher未返回durable archive-handoff receipt'
+      );
+    }
+    let settlement;
+    let publicationForReturn = publication;
+    try {
+      settlement = await options.settleArtifacts({
+        files: [
+          { artifactKey: filePlan.inputs[0].artifactKey },
+          {
+            artifactKey: filePlan.outputs[0].artifactKey,
+            expectedSha256: validated.sha256,
+            expectedSizeBytes: Number(validated.owned.stat.size)
+          }
+        ]
+      });
+      if (!settlement || settlement.durable !== true) {
+        throw Object.assign(new Error('NewAccount Task artifact尚未durable'), {
+          code: 'NEW_ACCOUNT_SAVE_AS_SETTLEMENT_NOT_DURABLE'
+        });
+      }
+    } catch (error) {
+      publicationForReturn = Object.freeze({
+        ...publication,
+        pendingArchiveHandoff: true,
+        warnings: Object.freeze([
+          ...(Array.isArray(publication.warnings) ? publication.warnings : []),
+          '正式输出已提交；Task artifact durable settlement 待既有启动 recovery 接管。'
+        ])
+      });
+      settlement = Object.freeze({
+        durable: false,
+        pendingRecovery: true,
+        code: error && error.code || 'NEW_ACCOUNT_SAVE_AS_SETTLEMENT_FAILED'
+      });
+    }
     return Object.freeze({
       execution,
       copied: execution.result.artifact,
-      publication
+      publication: publicationForReturn,
+      settlement
     });
   } catch (error) {
     preserveTemporaryFiles = Boolean(error && error.preserveTemporaryFiles === true);
@@ -626,12 +687,38 @@ async function validateAndPublishNewAccountSaveAs(options = {}) {
   }
 }
 
+async function acknowledgeNewAccountSaveAsPublication(options = {}) {
+  if (options.taskTerminalPersisted !== true) {
+    fail(
+      'NEW_ACCOUNT_SAVE_AS_RECEIPT_ACK_PREMATURE',
+      'NewAccount publication receipt只能在Task终态持久化后确认'
+    );
+  }
+  const taskId = boundedText(options.taskId, 'taskId', 512);
+  const recovered = await (options.recoverPublications || recoverToolboxPublicationsAsync)({
+    userDataDir: absolutePath(options.userDataDir, 'userDataDir'),
+    deferCommittedRecovery: true,
+    acknowledgedCommittedTaskIds: [taskId]
+  });
+  const finalized = Array.isArray(recovered && recovered.recovered)
+    ? recovered.recovered.find((item) => item && String(item.taskId) === taskId)
+    : null;
+  if (!finalized || finalized.action !== 'commit-cleanup') {
+    fail(
+      'NEW_ACCOUNT_SAVE_AS_RECEIPT_ACK_FAILED',
+      'NewAccount publication receipt未完成Task终态确认清理'
+    );
+  }
+  return Object.freeze({ taskId, acknowledged: true });
+}
+
 module.exports = {
   MAX_COPY_ARTIFACT_BYTES,
   NEW_ACCOUNT_SAVE_AS_ACTION,
   NEW_ACCOUNT_SAVE_AS_SCHEMA_VERSION,
   NewAccountSaveAsError,
   assertNoSymlinkPathChain,
+  acknowledgeNewAccountSaveAsPublication,
   assertSaveAsPathsDistinct,
   assertSourceCurrent,
   cleanupOwnedCopyStaging,

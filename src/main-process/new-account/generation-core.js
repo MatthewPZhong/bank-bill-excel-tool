@@ -149,13 +149,33 @@ function buildNewAccountBalanceRecords({
   maxRecords = Number.POSITIVE_INFINITY
 }) {
   const records = [];
+  const generated = visitNewAccountBalanceRecords({
+    accounts,
+    balanceTemplateFields,
+    today,
+    maxRecords,
+    onRecord(record) {
+      records.push(record);
+    }
+  });
+  return { records, billDates: generated.billDates, currencies: generated.currencies };
+}
+
+function visitNewAccountBalanceRecords({
+  accounts = [],
+  balanceTemplateFields,
+  today = new Date(),
+  maxRecords = Number.POSITIVE_INFINITY,
+  onRecord
+}) {
   const allBillDates = new Set();
   const allCurrencies = new Set();
+  let rowCount = 0;
   accounts.forEach((account) => {
     const billDates = buildNewAccountBillDates(account.openingDate, today);
     const currencies = normalizeNewAccountCurrencyValues(account);
     if (!currencies.length) throw new FileValidationError('FILE_READ', '至少需要提供一个币种');
-    if (records.length + billDates.length * currencies.length > maxRecords) {
+    if (rowCount + billDates.length * currencies.length > maxRecords) {
       const error = new FileValidationError('NEW_ACCOUNT_RECORD_LIMIT', '新开账户余额记录数量超过安全上限');
       error.code = 'NEW_ACCOUNT_RECORD_LIMIT';
       throw error;
@@ -165,7 +185,7 @@ function buildNewAccountBalanceRecords({
       allBillDates.add(billDateLabel);
       for (const currency of currencies) {
         allCurrencies.add(currency);
-        records.push(buildBalanceTemplateRow(balanceTemplateFields, {
+        const record = buildBalanceTemplateRow(balanceTemplateFields, {
           银行名称: account.bankName,
           所在地: account.location,
           币种: currency,
@@ -175,11 +195,17 @@ function buildNewAccountBalanceRecords({
           期初可用余额: '',
           期末余额: 0,
           期末可用余额: ''
-        }));
+        });
+        onRecord(record, rowCount);
+        rowCount += 1;
       }
     }
   });
-  return { records, billDates: Array.from(allBillDates).sort(), currencies: Array.from(allCurrencies) };
+  return {
+    rowCount,
+    billDates: Array.from(allBillDates).sort(),
+    currencies: Array.from(allCurrencies)
+  };
 }
 
 function sanitizeFileName(value) {
@@ -225,6 +251,47 @@ function prepareNewAccountGeneration({
     billDates: generated.billDates,
     currencies: generated.currencies,
     ...buildNewAccountOutputName(accounts, generated.currencies)
+  });
+}
+
+function createExpectedNewAccountArtifactDescriptor({
+  input,
+  headers,
+  sheetNames
+}) {
+  const accounts = input.accounts.map((account) => ({
+    ...account,
+    currency: account.currencies[0],
+    isMultiCurrency: account.currencies.length > 1,
+    openingDateRaw: account.openingDate,
+    openingDate: parseDateValue(account.openingDate)
+  }));
+  validateNewAccountAccounts(accounts);
+  const accumulator = createBusinessEvidenceAccumulator(headers);
+  const generated = visitNewAccountBalanceRecords({
+    accounts,
+    balanceTemplateFields: headers,
+    today: parseDateValue(input.asOfDate),
+    maxRecords: MAX_RECORDS,
+    onRecord(record) {
+      accumulator.add(record);
+    }
+  });
+  const output = buildNewAccountOutputName(accounts, generated.currencies);
+  return Object.freeze({
+    artifactKey: input.generation.artifactKey,
+    fileName: output.fileName,
+    templateSha256: input.template.sha256,
+    sheetNames: Object.freeze(sheetNames.slice()),
+    headers: Object.freeze(headers.slice()),
+    rowCount: generated.rowCount,
+    businessEvidence: accumulator.finish(),
+    summary: Object.freeze({
+      accountCount: accounts.length,
+      currencyCount: accounts.reduce((sum, account) => sum + account.currencies.length, 0),
+      dateCount: generated.billDates.length,
+      rowCount: generated.rowCount
+    })
   });
 }
 
@@ -373,7 +440,10 @@ function businessEvidence(headers, records) {
 // 保留给 legacy/golden 的同步对照 oracle；真实 Worker 只调用下方 cooperative stream 版本。
 function readBackAndValidate(filePath, expected) {
   const workbook = XLSX.readFile(filePath, { cellDates: false, cellNF: true, cellStyles: true, raw: true });
-  if (workbook.SheetNames.length < 1 || workbook.SheetNames[0] !== expected.sheetName) {
+  const expectedSheetNames = Array.isArray(expected.sheetNames)
+    ? expected.sheetNames
+    : [expected.sheetName];
+  if (canonicalSha256(workbook.SheetNames) !== canonicalSha256(expectedSheetNames)) {
     throw Object.assign(new Error('NewAccount输出 Sheet 与模板不一致'), { code: 'NEW_ACCOUNT_WORKBOOK_SHEET_MISMATCH' });
   }
   const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {
@@ -394,7 +464,13 @@ function readBackAndValidate(filePath, expected) {
       Object.keys(expectedEvidence).some((key) => actualEvidence[key] !== expectedEvidence[key])) {
     throw Object.assign(new Error('NewAccount输出业务记录回读不一致'), { code: 'NEW_ACCOUNT_WORKBOOK_RECORDS_MISMATCH' });
   }
-  return { headers, rowCount: actualRecords.length, businessEvidence: actualEvidence };
+  return {
+    headers,
+    rowCount: actualRecords.length,
+    businessEvidence: actualEvidence,
+    sheetNames: workbook.SheetNames.slice(),
+    sheetCount: workbook.SheetNames.length
+  };
 }
 
 async function runNewAccountGenerationStage(signal, options, stage, details = {}) {
@@ -446,7 +522,12 @@ async function readBackAndValidateCooperatively(filePath, expected, signal, opti
     ? expectedRecords.length
     : Number(expected && expected.rowCount);
   const expectedBusinessEvidence = expectedRecords ? null : expected && expected.businessEvidence;
+  const expectedSheetNames = Array.isArray(expected && expected.sheetNames)
+    ? expected.sheetNames
+    : [expected && expected.sheetName];
   if (!Number.isSafeInteger(expectedRowCount) || expectedRowCount < 0 ||
+      expectedSheetNames.length < 1 ||
+      expectedSheetNames.some((name) => typeof name !== 'string' || name.length === 0) ||
       (!expectedRecords && (!expectedBusinessEvidence ||
         !['recordsSha256', 'datesSha256', 'accountsSha256', 'currenciesSha256'].every(
           (key) => typeof expectedBusinessEvidence[key] === 'string' &&
@@ -466,7 +547,9 @@ async function readBackAndValidateCooperatively(filePath, expected, signal, opti
     });
 
     const sheets = await locateSheets(zip, opened.entries);
-    if (sheets.length < 1 || sheets[0].name !== expected.sheetName || !sheets[0].entryPath) {
+    const actualSheetNames = sheets.map((sheet) => sheet.name);
+    if (canonicalSha256(actualSheetNames) !== canonicalSha256(expectedSheetNames) ||
+        !sheets[0].entryPath) {
       throw Object.assign(new Error('NewAccount输出 Sheet 与模板不一致'), {
         code: 'NEW_ACCOUNT_WORKBOOK_SHEET_MISMATCH'
       });
@@ -558,7 +641,13 @@ async function readBackAndValidateCooperatively(filePath, expected, signal, opti
     if (Object.keys(expectedEvidence).some((key) => actualEvidence[key] !== expectedEvidence[key])) {
       throw workbookRecordMismatch();
     }
-    return { headers, rowCount: actualRowCount, businessEvidence: actualEvidence };
+    return {
+      headers,
+      rowCount: actualRowCount,
+      businessEvidence: actualEvidence,
+      sheetNames: actualSheetNames,
+      sheetCount: actualSheetNames.length
+    };
   } finally {
     if (zip) {
       try { zip.close(); } catch (_) {}
@@ -627,7 +716,7 @@ async function executeNewAccountGeneration(rawInput, signal, options = {}) {
   await newAccountGenerationCancellationSafePoint(signal);
   assertTemplateEvidence(input.template, allowedTemplatePath);
   const readback = await readBackAndValidateCooperatively(input.generation.generationPath, {
-    sheetName, headers, records: prepared.records
+    sheetNames: workbook.SheetNames, headers, records: prepared.records
   }, signal, options);
   await newAccountGenerationCancellationSafePoint(signal);
   const owned = validateTaskOwnedStagingPath({
@@ -680,6 +769,8 @@ module.exports = {
   buildNewAccountBillDates,
   buildNewAccountOutputName,
   businessEvidence,
+  createExpectedNewAccountArtifactDescriptor,
+  createBusinessEvidenceAccumulator,
   createTemplateEvidence,
   executeNewAccountGeneration,
   fileSha256,
