@@ -228,7 +228,7 @@ Service crash后：
 - `new-account:save-as`只消费Main当前进程已brand的normalized FilePlan authority，禁止再次normalize/resnapshot；每个output由Main normalizer额外冻结resolved direct parent的`targetParentIdentity`（canonical realpath、平台alias、bigint dev/ino十进制值与reliability/kind），raw/Renderer同名输入不构成authority。direct parent必须是非symlink ordinary directory；只冻结direct parent，不保存整条ancestor chain；
 - copy前、handoff前、Publisher prepare/stage/pre-commit及每次正式target mutation紧前，均对用户确认时的同一source/target snapshot与exact direct-parent identity复核。parent rename后由ordinary replacement占位、grandparent replacement导致direct parent重建、target absent后出现未知文件或existing被替换均fail closed；原parent object移走后原样移回可继续。Node不能提供非零稳定dev/ino时，E10-B返回稳定capability failure，其他未要求该evidence的既有action不受影响；
 - Main在dispatch前只从冻结payload/asOfDate/模板证据构造bounded expected artifact；Worker result/manifest仅是untrusted observation。Main回读必须核对精确Sheet顺序/数量、列、记录数及日期/账户/币种/records digests，再发布到managed location并保存小型artifact handle；
--另存为用异步复制到staging、校验source identity/snapshot/hash与副本identity/size/hash，再Publisher到用户目标；E10-B把FilePlan中的同一`targetParentIdentity`逐字传为Publisher `expectedTargetParentIdentity`，不得由调用方重建。Publisher journal持久同一identity；带该字段的恢复在任何target mutation前漂移时进入既有manual recovery/Hold，绝不重publish。旧journal缺字段继续既有兼容恢复。Publisher必须保留既有archive-handoff journal，Task artifact durable settlement完成且Task终态持久化后才ack清理。committed后丢回包/崩溃只从同一journal恢复settlement，不重复generation/copy/publish；
+-另存为用异步复制到staging、校验source identity/snapshot/hash与副本identity/size/hash，再Publisher到用户目标；E10-B把FilePlan中的同一`targetParentIdentity`逐字传为Publisher `expectedTargetParentIdentity`，不得由调用方重建。对于明确要求该evidence的发布，Publisher必须在创建任何journal/index或执行target mutation前，以canonical realpath与平台alias复核固定recovery root和每个direct target parent；两者相等或任一方向存在祖先/后代包含关系时稳定fail closed、全批次写入为0，普通sibling/外部目录不受影响。Publisher journal持久同一identity；带该字段的恢复在任何target mutation前漂移时进入既有manual recovery/Hold，绝不重publish。旧journal缺字段继续既有兼容恢复。Publisher必须保留既有archive-handoff journal，Task artifact durable settlement完成且Task终态持久化后才ack清理。committed后丢回包/崩溃只从同一journal恢复settlement，不重复generation/copy/publish；
 - `inline-async` transport的close/terminate必须有界等待实际execution结算；deadline内未收口必须报告transport leak/cleanup evidence并保留cleanup owner，不得提前释放后宣称leak=0；
 -不建立池，不宣称多核加速。
 
@@ -242,6 +242,7 @@ Service crash后：
 - NewAccount日期/币种/命名/模板等价；
 - copy source变化时fail closed；
 - direct target parent rename/replacement、symlink与identity capability不足时Publisher=0；Publisher prepare/stage/pre-commit/recovery各检查点通过真实FS故障注入；
+- fixed Publisher recovery root与required direct target parent相等或双向包含时，在journal/index/target写入前拒绝；多target任一冲突全批次Publisher=0，sibling/外部目录及旧journal恢复不回归；
 - event-loop delay、RSS、Windows长驻Service/app quit通过。
 
 ## 11. PR 顺序

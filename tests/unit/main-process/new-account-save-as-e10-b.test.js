@@ -935,6 +935,57 @@ test('既有 singleton FIFO Publisher 实际发布一次，正式目标与 E10-A
   await runtime.shutdown({ timeoutMs: 10000 });
 });
 
+test('真实 E10-B Publisher 在target parent等于fixed recovery root时零持久写入', async () => {
+  const root = tempRoot('new-account-e10-b-recovery-root-conflict-');
+  const fixture = await generatedFixture(root);
+  const base = saveAsOptions(root, fixture, {
+    taskId: 'new-account-e10-b-recovery-root-conflict'
+  });
+  fs.mkdirSync(base.userDataDir, { recursive: true });
+  const targetPath = path.join(base.userDataDir, 'saved-as.xlsx');
+  const filePlan = normalizeFilePlanV1({
+    version: 1,
+    allocation: 'eager',
+    inputs: [{
+      filePath: fixture.sourcePath,
+      role: 'new-account-source-artifact',
+      sourceOperation: NEW_ACCOUNT_SAVE_AS_ACTION
+    }],
+    outputs: [{
+      filePath: targetPath,
+      role: 'new-account-save-as-output',
+      sourceOperation: NEW_ACCOUNT_SAVE_AS_ACTION
+    }]
+  });
+  const runtime = createBackgroundExecutionRuntime({
+    availableParallelism: 4,
+    freeMemoryBytes: 4 * 1024 ** 3,
+    totalMemoryBytes: 8 * 1024 ** 3,
+    systemReserveBytes: 0
+  });
+  let settlementCalls = 0;
+  await assert.rejects(
+    validateAndPublishNewAccountSaveAs({
+      ...base,
+      filePlan,
+      targetPath,
+      runtime,
+      async settleArtifacts() {
+        settlementCalls += 1;
+        return { durable: true };
+      }
+    }),
+    (error) => error &&
+      error.code === 'TOOLBOX_PUBLICATION_RECOVERY_ROOT_TARGET_PARENT_CONFLICT'
+  );
+  assert.equal(settlementCalls, 0);
+  assert.equal(fs.existsSync(targetPath), false);
+  assert.equal(fs.existsSync(base.stagingPath), false);
+  assert.deepEqual(fs.readdirSync(base.userDataDir), []);
+  assert.equal(sha256File(fixture.sourcePath), fixture.generationResult.artifact.sha256);
+  await runtime.shutdown({ timeoutMs: 10000 });
+});
+
 test('真实 Publisher committed-but-reply-lost 由同一 journal 恢复，settle 前 Hold、终态后 ack 且不重 copy/publish', async () => {
   const root = tempRoot('new-account-e10-b-committed-reply-lost-');
   const fixture = await generatedFixture(root);
