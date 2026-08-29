@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const JSZip = require('jszip');
 const XLSX = require('xlsx');
 
 const { normalizeFilePlanV1 } = require('../../../src/main-process/archive-center/file-plan');
@@ -227,6 +228,25 @@ function refreshSelfReportedGenerationEvidence(fixture, mutateWorkbook) {
   };
 }
 
+function refreshGenerationTechnicalEvidence(fixture) {
+  const stat = fs.statSync(fixture.sourcePath);
+  fixture.generationResult = {
+    ...fixture.generationResult,
+    artifact: {
+      ...fixture.generationResult.artifact,
+      byteSize: stat.size,
+      sha256: sha256File(fixture.sourcePath)
+    }
+  };
+}
+
+async function mutateWorkbookPackage(fixture, mutate) {
+  const zip = await JSZip.loadAsync(fs.readFileSync(fixture.sourcePath));
+  await mutate(zip);
+  fs.writeFileSync(fixture.sourcePath, await zip.generateAsync({ type: 'nodebuffer' }));
+  refreshGenerationTechnicalEvidence(fixture);
+}
+
 test('policy 为一等 inline-async：只占 I/O lease，production 保持 false/legacy/0', () => {
   const fixture = JSON.parse(fs.readFileSync(POLICY_FIXTURE_PATH, 'utf8'))
     .actions[NEW_ACCOUNT_SAVE_AS_ACTION];
@@ -294,6 +314,42 @@ test('E10-B只接受out-of-band Main authority且缺settlement owner时Publisher
   );
   assert.equal(runtimeCalls, 0);
   assert.equal(fs.existsSync(options.targetPath), false);
+});
+
+test('E10-B只消费原始Main FilePlan authority，不重采样target snapshot且拒绝伪造clone', async (t) => {
+  for (const phase of ['absent-created', 'existing-replaced-same-metadata', 'unbranded-clone']) {
+    await t.test(phase, async () => {
+      const root = tempRoot(`new-account-e10-b-plan-authority-${phase}-`);
+      const fixture = await generatedFixture(root);
+      if (phase === 'existing-replaced-same-metadata') {
+        const targetDir = path.join(root, 'target');
+        fs.mkdirSync(targetDir, { recursive: true });
+        fs.writeFileSync(path.join(targetDir, 'saved-as.xlsx'), 'original-target');
+      }
+      const options = saveAsOptions(root, fixture);
+      if (phase === 'absent-created') fs.writeFileSync(options.targetPath, 'unknown-external-file');
+      if (phase === 'existing-replaced-same-metadata') replaceSameSizeAndTimes(options.targetPath);
+      const suppliedFilePlan = phase === 'unbranded-clone'
+        ? structuredClone(options.filePlan)
+        : options.filePlan;
+      let runtimeCalls = 0;
+      let publisherCalls = 0;
+      await assert.rejects(
+        validateAndPublishNewAccountSaveAs({
+          ...options,
+          filePlan: suppliedFilePlan,
+          runtime: { async execute() { runtimeCalls += 1; } },
+          publisher: async () => { publisherCalls += 1; }
+        }),
+        (error) => phase === 'unbranded-clone'
+          ? error.code === 'NEW_ACCOUNT_SAVE_AS_FILE_PLAN_AUTHORITY_INVALID'
+          : error.code === 'NEW_ACCOUNT_SAVE_AS_FILE_PLAN_CHANGED'
+      );
+      assert.equal(runtimeCalls, 0);
+      assert.equal(publisherCalls, 0);
+      assert.equal(fs.existsSync(options.stagingPath), false);
+    });
+  }
 });
 
 test('source before/during/after copy drift 与同 size/mtime replacement 全部 fail closed', async (t) => {
@@ -430,7 +486,17 @@ test('Main technical/business validation 后 Publisher 恰好一次；source/tar
     'target-drift',
     'target-ancestor-race',
     'business',
-    'extra-sheet'
+    'extra-sheet',
+    'extra-column',
+    'extra-styled-blank',
+    'extra-row-styled-blank',
+    'extra-merge',
+    'extra-dimension',
+    'formula-account',
+    'formula-amount',
+    'calc-chain',
+    'external-link',
+    'hyperlink'
   ]) {
     await t.test(phase, async () => {
       const root = tempRoot(`new-account-e10-b-publisher-${phase}-`);
@@ -454,6 +520,126 @@ test('Main technical/business validation 后 Publisher 恰好一次；source/tar
             workbook,
             XLSX.utils.aoa_to_sheet([['secret-data'], ['unauthorized']]),
             'secret-data'
+          );
+        });
+      }
+      if (phase === 'extra-column') {
+        refreshSelfReportedGenerationEvidence(fixture, (workbook) => {
+          const sheet = workbook.Sheets[workbook.SheetNames[0]];
+          sheet.J1 = { t: 's', v: '未授权秘密列' };
+          sheet.J2 = { t: 's', v: 'secret-1' };
+          sheet['!ref'] = 'A1:J5';
+        });
+      }
+      if (phase === 'extra-styled-blank') {
+        await mutateWorkbookPackage(fixture, async (zip) => {
+          const entry = zip.file('xl/worksheets/sheet1.xml');
+          const xml = await entry.async('string');
+          zip.file('xl/worksheets/sheet1.xml', xml
+            .replace('<dimension ref="A1:I5"/>', '<dimension ref="A1:J5"/>')
+            .replace('</row><row r="3"', '<c r="J2" s="1"/></row><row r="3"'));
+        });
+      }
+      if (phase === 'extra-row-styled-blank') {
+        await mutateWorkbookPackage(fixture, async (zip) => {
+          const entry = zip.file('xl/worksheets/sheet1.xml');
+          const xml = await entry.async('string');
+          zip.file('xl/worksheets/sheet1.xml', xml
+            .replace('<dimension ref="A1:I5"/>', '<dimension ref="A1:I6"/>')
+            .replace('</sheetData>', '<row r="6"><c r="I6" s="1"/></row></sheetData>'));
+        });
+      }
+      if (phase === 'extra-merge') {
+        await mutateWorkbookPackage(fixture, async (zip) => {
+          const entry = zip.file('xl/worksheets/sheet1.xml');
+          const xml = await entry.async('string');
+          zip.file('xl/worksheets/sheet1.xml', xml
+            .replace('<dimension ref="A1:I5"/>', '<dimension ref="A1:J5"/>')
+            .replace('</worksheet>', '<mergeCells count="1"><mergeCell ref="I2:J2"/></mergeCells></worksheet>'));
+        });
+      }
+      if (phase === 'extra-dimension') {
+        await mutateWorkbookPackage(fixture, async (zip) => {
+          const entry = zip.file('xl/worksheets/sheet1.xml');
+          const xml = await entry.async('string');
+          zip.file('xl/worksheets/sheet1.xml', xml.replace(
+            '<dimension ref="A1:I5"/>',
+            '<dimension ref="A1:J5"/>'
+          ));
+        });
+      }
+      if (phase === 'formula-account') {
+        refreshSelfReportedGenerationEvidence(fixture, (workbook) => {
+          const sheet = workbook.Sheets[workbook.SheetNames[0]];
+          for (let row = 2; row <= 5; row += 1) {
+            sheet[`D${row}`] = {
+              t: 's',
+              f: '"999999999999"',
+              v: '622200001234'
+            };
+          }
+        });
+      }
+      if (phase === 'formula-amount') {
+        refreshSelfReportedGenerationEvidence(fixture, (workbook) => {
+          const sheet = workbook.Sheets[workbook.SheetNames[0]];
+          sheet.H2 = { t: 'n', f: '999999', v: 0 };
+        });
+      }
+      if (phase === 'calc-chain') {
+        await mutateWorkbookPackage(fixture, async (zip) => {
+          zip.file(
+            'xl/calcChain.xml',
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+              '<calcChain xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+              '<c r="D2" i="1"/></calcChain>'
+          );
+        });
+      }
+      if (phase === 'external-link') {
+        await mutateWorkbookPackage(fixture, async (zip) => {
+          const relsEntry = zip.file('xl/_rels/workbook.xml.rels');
+          const rels = await relsEntry.async('string');
+          zip.file('xl/_rels/workbook.xml.rels', rels.replace(
+            '</Relationships>',
+            '<Relationship Id="rIdExternal1" ' +
+              'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLink" ' +
+              'Target="externalLinks/externalLink1.xml"/></Relationships>'
+          ));
+          zip.file(
+            'xl/externalLinks/externalLink1.xml',
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+              '<externalLink xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+              '<externalBook xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ' +
+              'r:id="rId1"/></externalLink>'
+          );
+          zip.file(
+            'xl/externalLinks/_rels/externalLink1.xml.rels',
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+              '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+              '<Relationship Id="rId1" ' +
+              'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLinkPath" ' +
+              'Target="file:///tmp/secret.xlsx" TargetMode="External"/></Relationships>'
+          );
+        });
+      }
+      if (phase === 'hyperlink') {
+        await mutateWorkbookPackage(fixture, async (zip) => {
+          const sheetEntry = zip.file('xl/worksheets/sheet1.xml');
+          const sheetXml = await sheetEntry.async('string');
+          zip.file('xl/worksheets/sheet1.xml', sheetXml.replace(
+            '</worksheet>',
+            '<hyperlinks><hyperlink ref="D2" r:id="rIdHyperlink1" ' +
+              'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/>' +
+              '</hyperlinks></worksheet>'
+          ));
+          zip.file(
+            'xl/worksheets/_rels/sheet1.xml.rels',
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+              '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+              '<Relationship Id="rIdHyperlink1" ' +
+              'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" ' +
+              'Target="https://example.invalid/secret" TargetMode="External"/></Relationships>'
           );
         });
       }
@@ -517,14 +703,29 @@ test('Main technical/business validation 后 Publisher 恰好一次；source/tar
           totalMemoryBytes: 8 * 1024 ** 3,
           systemReserveBytes: 0
         });
+        let rejectedCode = null;
         await assert.rejects(
           validateAndPublishNewAccountSaveAs({
             ...options,
             runtime,
             publisher,
             onCopyCompleted
-          })
+          }),
+          (error) => {
+            rejectedCode = error.code;
+            return true;
+          }
         );
+        if (['formula-account', 'formula-amount', 'calc-chain', 'external-link', 'hyperlink']
+          .includes(phase)) {
+          assert.equal(rejectedCode, 'NEW_ACCOUNT_WORKBOOK_DYNAMIC_CONTENT_FORBIDDEN');
+        }
+        if (['extra-column', 'extra-styled-blank', 'extra-merge', 'extra-dimension'].includes(phase)) {
+          assert.equal(rejectedCode, 'NEW_ACCOUNT_WORKBOOK_COLUMN_BOUNDARY_MISMATCH');
+        }
+        if (phase === 'extra-row-styled-blank') {
+          assert.equal(rejectedCode, 'NEW_ACCOUNT_WORKBOOK_DIMENSION_INVALID');
+        }
         assert.equal(publisherCalls, 0);
         await runtime.shutdown({ timeoutMs: 10000 });
       }
@@ -1014,14 +1215,7 @@ test('Windows missing-target case/Unicode identity fail closed，source/target e
     }]
   };
   assert.throws(
-    () => createNewAccountSaveAsInput({
-      filePlan: rawPlan,
-      sourceGenerationResult: fixture.generationResult,
-      stagingRoot,
-      stagingResourceId: 'copy.xlsx',
-      stagingPath,
-      platform: 'win32'
-    }),
+    () => normalizeFilePlanV1(rawPlan, { platform: 'win32' }),
     /别名|覆盖/
   );
   const unsafePlan = {
@@ -1032,14 +1226,7 @@ test('Windows missing-target case/Unicode identity fail closed，source/target e
     }]
   };
   assert.throws(
-    () => createNewAccountSaveAsInput({
-      filePlan: unsafePlan,
-      sourceGenerationResult: fixture.generationResult,
-      stagingRoot,
-      stagingResourceId: 'copy.xlsx',
-      stagingPath,
-      platform: 'win32'
-    }),
+    () => normalizeFilePlanV1(unsafePlan, { platform: 'win32' }),
     (error) => error.code === 'TARGET_IDENTITY_WINDOWS_CASE_MAPPING_UNSAFE'
   );
 });

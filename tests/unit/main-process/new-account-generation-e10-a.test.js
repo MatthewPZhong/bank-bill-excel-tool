@@ -59,6 +59,8 @@ const {
 } = require('../../../src/main-process/new-account/generation-core');
 const {
   cleanupOwnedGeneration,
+  createNewAccountExpectedArtifactAuthority,
+  createNewAccountExpectedArtifactAuthorityCooperatively,
   createNewAccountWorkerInput,
   generateAndValidateNewAccount
 } = require('../../../src/main-process/new-account/worker-client');
@@ -1121,6 +1123,10 @@ test('真实 one-shot Worker 写单一 staging workbook、业务回读、Main技
   assert.equal(validateNewAccountGenerationResult(result.execution.result), true);
   assert.equal(result.generated.artifact.rowCount, 4);
   assert.equal(result.generated.artifact.fileName, '测试银行-上海-1234-多币种-NEW_BALANCE.xlsx');
+  assert.deepEqual(
+    result.expectedArtifactAuthority.businessEvidence,
+    result.execution.result.artifact.businessEvidence
+  );
   assert.equal(Object.hasOwn(result.execution.result.artifact, 'generationPath'), false);
   assert.equal(JSON.stringify(result.execution.result).includes('622200001234'), false);
   assert.doesNotThrow(() => assertFinanceSafeValue(result.execution.result));
@@ -1150,6 +1156,101 @@ test('真实 one-shot Worker 写单一 staging workbook、业务回读、Main技
   assert.deepEqual(report.errors, []);
   assert.equal(result.execution.outcome, 'completed');
   assert.equal(fs.existsSync(options.generationPath), true);
+});
+
+test('Main authority cooperative accumulator与同步oracle逐字节等价且冻结exact worksheet边界', async () => {
+  const dir = tempDir('new-account-authority-equivalence-');
+  const input = shapedWorkerInput(dir, [
+    { dayCount: 40, currencyCount: 4 },
+    { dayCount: 20, currencyCount: 2 }
+  ]);
+  const syncAuthority = createNewAccountExpectedArtifactAuthority(input);
+  let yields = 0;
+  const cooperativeAuthority = await createNewAccountExpectedArtifactAuthorityCooperatively(input, {
+    batchSize: 17,
+    async scheduler() {
+      yields += 1;
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+  });
+  assert.deepEqual(cooperativeAuthority, syncAuthority);
+  assert.ok(yields > 1);
+  assert.deepEqual(cooperativeAuthority.worksheetAuthority, {
+    expectedColumnCount: 9,
+    expectedUsedRange: `A1:I${cooperativeAuthority.rowCount + 1}`,
+    expectedDimensionRange: `A1:I${cooperativeAuthority.rowCount + 1}`,
+    forbidDynamicContent: true
+  });
+});
+
+test('Main authority near-max在dispatch前持续让出event loop，完成前不spawn Worker', {
+  timeout: 15000
+}, async () => {
+  const dir = tempDir('new-account-authority-near-max-');
+  const options = shapedInputOptions(
+    dir,
+    Array.from({ length: 64 }, () => ({ dayCount: 3649, currencyCount: 1 })),
+    {
+      operationKey: 'new-account-authority-near-max',
+      context: operationContext('new-account-authority-near-max')
+    }
+  );
+  let runtimeCalls = 0;
+  let progressCalls = 0;
+  let eventLoopTicks = 0;
+  const timer = setInterval(() => { eventLoopTicks += 1; }, 1);
+  const result = await generateAndValidateNewAccount({
+    ...options,
+    authorityBatchSize: 512,
+    onAuthorityProgress() {
+      progressCalls += 1;
+      assert.equal(runtimeCalls, 0);
+    },
+    runtime: {
+      async execute() {
+        runtimeCalls += 1;
+        return Object.freeze({ outcome: 'cancelled', terminalSource: 'cancel:ack' });
+      }
+    }
+  });
+  clearInterval(timer);
+  assert.equal(result.generated, null);
+  assert.equal(runtimeCalls, 1);
+  assert.ok(progressCalls > 100);
+  assert.ok(eventLoopTicks > 10, `Main authority期间event loop仅推进${eventLoopTicks}次`);
+  assert.deepEqual(fs.readdirSync(options.stagingRoot), []);
+});
+
+test('Main authority在dispatch前cancel/app-quit信号立即或中途胜出，不spawn Worker不留staging', async (t) => {
+  for (const phase of ['before', 'mid']) {
+    await t.test(phase, async () => {
+      const dir = tempDir(`new-account-authority-cancel-${phase}-`);
+      const options = shapedInputOptions(dir, [{ dayCount: 1000, currencyCount: 4 }], {
+        operationKey: `new-account-authority-cancel-${phase}`,
+        context: operationContext(`new-account-authority-cancel-${phase}`)
+      });
+      const controller = new AbortController();
+      if (phase === 'before') controller.abort();
+      let runtimeCalls = 0;
+      let progressCalls = 0;
+      await assert.rejects(
+        generateAndValidateNewAccount({
+          ...options,
+          signal: controller.signal,
+          authorityBatchSize: 64,
+          onAuthorityProgress() {
+            progressCalls += 1;
+            if (phase === 'mid' && progressCalls === 2) controller.abort();
+          },
+          runtime: { async execute() { runtimeCalls += 1; } }
+        }),
+        (error) => error.code === 'NEW_ACCOUNT_GENERATION_CANCELLED'
+      );
+      assert.equal(runtimeCalls, 0);
+      assert.deepEqual(fs.readdirSync(options.stagingRoot), []);
+      assert.equal(fs.existsSync(options.filePlan.outputs[0].filePath), false);
+    });
+  }
 });
 
 test('Main expected authority 拒绝恶意 Worker 自洽账号/币种与附加 Sheet', async (t) => {
@@ -1202,7 +1303,8 @@ test('Main expected authority 拒绝恶意 Worker 自洽账号/币种与附加 S
         generateAndValidateNewAccount({ ...options, runtime: fakeRuntime }),
         (error) => [
           'NEW_ACCOUNT_WORKBOOK_RECORDS_MISMATCH',
-          'NEW_ACCOUNT_WORKBOOK_SHEET_MISMATCH'
+          'NEW_ACCOUNT_WORKBOOK_SHEET_MISMATCH',
+          'NEW_ACCOUNT_WORKBOOK_DIMENSION_INVALID'
         ].includes(error.code)
       );
       assert.equal(fs.existsSync(options.generationPath), false);
