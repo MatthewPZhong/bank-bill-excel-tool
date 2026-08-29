@@ -785,7 +785,10 @@ test('legacy manual seed plan/write/read使用真实production store并冻结文
     new Date('2026-08-27T12:34:56.000Z')
   );
   assert.deepEqual(written.record, GOLDEN.manualSeed.record);
-  assert.equal(path.relative(storageRoot, written.filePath), GOLDEN.manualSeed.relativePath);
+  const relativeSeedPath = path.relative(storageRoot, written.filePath)
+    .split(path.sep)
+    .join('/');
+  assert.equal(relativeSeedPath, GOLDEN.manualSeed.relativePath);
   assert.equal(fs.readFileSync(written.filePath, 'utf8'), GOLDEN.manualSeed.fileText);
   assert.deepEqual(readBalanceSeedRecords(storageRoot, '中行'), [GOLDEN.manualSeed.record]);
   assert.deepEqual(findPreviousBalanceSeed(storageRoot, {
