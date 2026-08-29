@@ -223,6 +223,9 @@ Service crash后：
 - Main做payload大小/schema和FilePlan；
 - Worker复用单一generation core完成必填、日期、10年/昨日边界、账户/币种、记录和文件名；
 - Worker读取白名单模板，写一个staging workbook并回读；
+- Main在dispatch前只从冻结payload/asOf/template异步分批推导out-of-band expected authority；每个bounded batch必须让出event loop并检查Task cancel/app-quit signal，取消时不得spawn Worker或留下staging。该authority冻结精确Sheet集合、完整列schema、expected used/dimension range、rowCount与业务digests，不信任Worker result/manifest；
+- Main authority readback拒绝任何越过冻结列/range的cell（含styled blank）、merge或dimension，并在Publisher前拒绝formula cached、calcChain、external link、hyperlink等打开后可改变业务语义的动态内容；合法trusted writer纯值workbook与legacy raw oracle/golden不变；
+- `new-account:save-as`只消费Main当前进程已brand的normalized FilePlan authority，禁止再次normalize/resnapshot；copy前、handoff前、Publisher前均对用户确认时的同一source/target snapshot复核，absent后出现未知文件或existing被替换均fail closed；
 - Main在dispatch前只从冻结payload/asOfDate/模板证据构造bounded expected artifact；Worker result/manifest仅是untrusted observation。Main回读必须核对精确Sheet顺序/数量、列、记录数及日期/账户/币种/records digests，再发布到managed location并保存小型artifact handle；
 -另存为用异步复制到staging、校验source identity/snapshot/hash与副本identity/size/hash，再Publisher到用户目标；Publisher必须保留既有archive-handoff journal，Task artifact durable settlement完成且Task终态持久化后才ack清理。committed后丢回包/崩溃只从同一journal恢复settlement，不重复generation/copy/publish；
 - `inline-async` transport的close/terminate必须有界等待实际execution结算；deadline内未收口必须报告transport leak/cleanup evidence并保留cleanup owner，不得提前释放后宣称leak=0；

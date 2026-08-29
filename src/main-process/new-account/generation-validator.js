@@ -20,6 +20,7 @@ const {
 const {
   createTemplateEvidence,
   createExpectedNewAccountArtifactDescriptor,
+  createExpectedNewAccountArtifactDescriptorCooperatively,
   fileSha256,
   formatDateLabel,
   normalizeNewAccountAccounts,
@@ -111,6 +112,33 @@ function createNewAccountExpectedArtifactAuthority(input) {
   return authority;
 }
 
+async function createNewAccountExpectedArtifactAuthorityCooperatively(input, options = {}) {
+  const workbook = XLSX.readFile(input.template.filePath, {
+    bookSheets: true,
+    raw: true
+  });
+  const headers = extractHeaders(input.template.filePath);
+  const authority = await createExpectedNewAccountArtifactDescriptorCooperatively({
+    input,
+    headers,
+    sheetNames: workbook.SheetNames,
+    signal: options.signal,
+    batchSize: options.batchSize,
+    scheduler: options.scheduler,
+    onProgress: options.onProgress
+  });
+  const templateStat = fs.lstatSync(input.template.filePath, { bigint: true });
+  if (templateStat.isSymbolicLink() || !templateStat.isFile() ||
+      !sourceSnapshotMatchesStat(input.template.snapshot, templateStat) ||
+      fileSha256(input.template.filePath) !== input.template.sha256) {
+    const error = new Error('Main构造NewAccount expected artifact期间模板已变化');
+    error.code = 'NEW_ACCOUNT_TEMPLATE_CHANGED';
+    throw error;
+  }
+  expectedArtifactAuthorities.add(authority);
+  return authority;
+}
+
 function assertNewAccountExpectedArtifactAuthority(authority) {
   if (!authority || !expectedArtifactAuthorities.has(authority)) {
     const error = new Error('NewAccount expected artifact必须来自Main冻结输入');
@@ -162,7 +190,6 @@ function cleanupOwnedGeneration(input) {
 
 async function generateAndValidateNewAccount(options) {
   const input = createNewAccountWorkerInput(options);
-  const authority = createNewAccountExpectedArtifactAuthority(input);
   validateTaskOwnedStagingPath({
     stagingRoot: input.generation.stagingRoot,
     candidatePath: input.generation.generationPath,
@@ -178,6 +205,12 @@ async function generateAndValidateNewAccount(options) {
   };
   let execution;
   try {
+    const authority = await createNewAccountExpectedArtifactAuthorityCooperatively(input, {
+      signal: options.signal,
+      batchSize: options.authorityBatchSize,
+      scheduler: options.authorityScheduler,
+      onProgress: options.onAuthorityProgress
+    });
     execution = await options.runtime.execute({
       actionKey: NEW_ACCOUNT_GENERATION_ACTION,
       operationKey: options.operationKey,
@@ -224,6 +257,7 @@ module.exports = {
   cleanupOwnedGeneration,
   assertNewAccountExpectedArtifactAuthority,
   createNewAccountExpectedArtifactAuthority,
+  createNewAccountExpectedArtifactAuthorityCooperatively,
   createNewAccountFilePlan,
   createNewAccountWorkerInput,
   generateAndValidateNewAccount,

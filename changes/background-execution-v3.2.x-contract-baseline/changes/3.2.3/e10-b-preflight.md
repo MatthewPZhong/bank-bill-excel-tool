@@ -15,8 +15,11 @@
 | action binding 已冻结 canonical → legacy | `action-task-binding-registry.js`: `new-account:save-as → new-account:export` | 不改 public/legacy task identity，不切 live IPC |
 | E10-A Worker artifact 含 sheet/header/rowCount/template 与四个业务 digest，但它只是不可信观察 | reviewer真实自洽伪造probe、`new-account/generation-contract.js` | Main必须从冻结payload/asOf/template独立构造out-of-band bounded authority，不得把Worker自报值当expected |
 | E10-A cooperative strict readback 已结构化读取 worksheet | `generation-core.js#readBackAndValidateCooperatively`、`strict-worksheet-readback.js` | 扩展为 digest-only Main readback，保持现有 records golden 分支不变 |
+| strict scanner会把超出expectedColumnCount的cell计入used range后静默丢值 | reviewer真实J列秘密内容Publisher committed | 冻结exact column/used/dimension authority，任何超界cell/styled blank/merge/dimension fail closed |
+| cached formula、calcChain、外链/超链接可在打开或重算后改变业务语义 | reviewerformula cached账户真实probe | generic scanner保留oracle兼容；Main authority显式禁止动态内容 |
 | task staging 已有逐祖先 ownership/hardlink/realpath validator | `statement-worker/staging-ownership.js` | copy 前必须 missing，copy 后必须单链接普通文件；清理仅由该 ownership 授权 |
 | FilePlan 已冻结 source/target snapshot 与 alias 检查 | `archive-center/file-plan.js`、`toolbox-target-identity.js` | source 与 target 必须各一且不互为 symlink/hardlink/platform alias |
+| 重复normalize normalized FilePlan会重新采样targetSnapshot | reviewer absent→created真实覆盖probe | E10-B只消费进程内branded Main plan，原snapshot贯穿全部freshness checks |
 | 既有 Publisher 的默认 dispatcher 是进程级单 FIFO | `toolbox-output-publication-dispatch.js` 的 module singleton `defaultDispatcher` | E10-B 只新增同一 singleton 的窄 wrapper；不得实例化第二 dispatcher |
 | Publisher 自带 durable archive-handoff journal 与 crash recovery | `toolbox-output-publication.js`、`toolbox-output-publication-dispatch.js` | journal保留到Task artifact durable + Task终态ack；uncertain只沿原 recovery，E10-B不写第二receipt/retry |
 
@@ -25,6 +28,7 @@
 | 未知 | 类型 | 影响 | 可逆性 | 当前证据 | 处理 | 最便宜验证方式 | 当前决定 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | save-as source 的 Main business evidence 如何不携带 raw records 复核 | 契约边界 | 高 | 一般 | 共用row iterator可流式累计四digest | PROBE | 恶意自洽workbook与正确golden | Main authority流式生成；readback接受exact bounded evidence，原records分支不变 |
+| Main authority在dispatch前同步遍历近上限记录是否阻塞 | 响应性/取消 | 高 | 容易 | 233536行实测约521ms、timer同量延迟 | PROBE | near-max heartbeat与mid-authority abort | async bounded batch + scheduler/cancel safepoint；取消不spawn Worker |
 | Publisher committed到Task settlement崩溃窗口如何唯一恢复 | 恢复边界 | 高 | 一般 | 既有archive-handoff journal、startup recovery与ack seam | PROBE | hard-kill/回包丢失/pre-post settle/重复recovery | `requireArchiveHandoff=true`；settle后终态ack，禁止第二receipt/retry |
 | inline terminate是否代表实际copy已停止 | 生命周期 | 高 | 容易 | 原adapter只closed/abort立即返回，真实slow-copy仍运行 | PROBE | slow copy shutdown/deadline/late terminal | adapter持有executionPromise；terminate/close await，Supervisor既有timeout负责leak evidence |
 | target parent rename+ordinary replacement是否可识别 | FilePlan/Publisher合同 | 高 | 一般 | 现有targetSnapshot与symlink检查不能识别普通目录replacement | BLOCK | 需要FilePlan与Publisher传递每级ancestor identity | 未获合同授权前不改production；production仍false |
