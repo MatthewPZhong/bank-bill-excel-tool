@@ -6,7 +6,7 @@ const path = require('node:path');
 
 const {
   assertFilePlanFresh,
-  normalizeFilePlanV1
+  assertNormalizedFilePlanV1
 } = require('../archive-center/file-plan');
 const {
   normalizeSourceSnapshot,
@@ -263,7 +263,16 @@ function createNewAccountSaveAsInput(options = {}) {
   const fsImpl = options.fsImpl || fs;
   const platform = options.platform || process.platform;
   const sourceGenerationResult = snapshotSourceGenerationResult(options.sourceGenerationResult);
-  const filePlan = normalizeFilePlanV1(options.filePlan, { fsImpl, platform });
+  let filePlan;
+  try {
+    filePlan = assertNormalizedFilePlanV1(options.filePlan);
+  } catch (error) {
+    fail(
+      'NEW_ACCOUNT_SAVE_AS_FILE_PLAN_AUTHORITY_INVALID',
+      'NewAccount save-as只接受Main冻结的FilePlan authority',
+      error
+    );
+  }
   if (filePlan.allocation !== 'eager' || filePlan.inputs.length !== 1 ||
       filePlan.outputs.length !== 1 ||
       filePlan.inputs[0].sourceOperation !== NEW_ACCOUNT_SAVE_AS_ACTION ||
@@ -272,6 +281,11 @@ function createNewAccountSaveAsInput(options = {}) {
   }
   const sourcePath = filePlan.inputs[0].filePath;
   const targetPath = filePlan.outputs[0].filePath;
+  try {
+    assertFilePlanFresh(filePlan, { fsImpl });
+  } catch (error) {
+    fail('NEW_ACCOUNT_SAVE_AS_FILE_PLAN_CHANGED', 'NewAccount save-as FilePlan证据已变化', error);
+  }
   const source = sourceStat(sourcePath, fsImpl, platform);
   if (!sourceSnapshotMatchesStat(filePlan.inputs[0].sourceSnapshot, source.stat) ||
       Number(source.stat.size) !== sourceGenerationResult.artifact.byteSize) {
@@ -556,10 +570,16 @@ async function validateAndPublishNewAccountSaveAs(options = {}) {
     );
   }
   const sourceGenerationResult = snapshotSourceGenerationResult(options.sourceGenerationResult);
-  const filePlan = normalizeFilePlanV1(options.filePlan, {
-    fsImpl,
-    platform
-  });
+  let filePlan;
+  try {
+    filePlan = assertNormalizedFilePlanV1(options.filePlan);
+  } catch (error) {
+    fail(
+      'NEW_ACCOUNT_SAVE_AS_FILE_PLAN_AUTHORITY_INVALID',
+      'NewAccount save-as只接受Main冻结的FilePlan authority',
+      error
+    );
+  }
   const input = createNewAccountSaveAsInput({
     ...options,
     filePlan,
@@ -594,7 +614,8 @@ async function validateAndPublishNewAccountSaveAs(options = {}) {
         sheetNames: expectedArtifact.sheetNames,
         headers: expectedArtifact.headers,
         rowCount: expectedArtifact.rowCount,
-        businessEvidence: expectedArtifact.businessEvidence
+        businessEvidence: expectedArtifact.businessEvidence,
+        worksheetAuthority: expectedArtifact.worksheetAuthority
       },
       null
     );

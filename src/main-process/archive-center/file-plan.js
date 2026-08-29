@@ -15,6 +15,7 @@ const {
 } = require('../toolbox-target-identity');
 
 const FILE_PLAN_ALLOCATIONS = new Set(['eager', 'deferred', 'none']);
+const normalizedFilePlans = new WeakSet();
 
 function planError(code, message) {
   const error = new TypeError(message);
@@ -189,12 +190,14 @@ function normalizeFilePlanV1(value, options = {}) {
     if (rawInputs.length || rawOutputs.length) {
       throw planError('ARCHIVE_FILE_PLAN_INVALID', 'deferred/none filePlan 必须为空');
     }
-    return Object.freeze({
+    const plan = Object.freeze({
       version: 1,
       allocation,
       inputs: Object.freeze([]),
       outputs: Object.freeze([])
     });
+    normalizedFilePlans.add(plan);
+    return plan;
   }
   if (rawInputs.length + rawOutputs.length === 0) {
     throw planError('ARCHIVE_FILE_MANIFEST_EMPTY', 'eager filePlan 必须至少包含一个文件');
@@ -202,7 +205,19 @@ function normalizeFilePlanV1(value, options = {}) {
   const inputs = Object.freeze(rawInputs.map((item) => normalizeItem(item, 'input', normalizedOptions)));
   const outputs = Object.freeze(rawOutputs.map((item) => normalizeItem(item, 'output', normalizedOptions)));
   assertNoAliasConflict(inputs, outputs, normalizedOptions);
-  return Object.freeze({ version: 1, allocation, inputs, outputs });
+  const plan = Object.freeze({ version: 1, allocation, inputs, outputs });
+  normalizedFilePlans.add(plan);
+  return plan;
+}
+
+function assertNormalizedFilePlanV1(plan) {
+  if (!plan || !normalizedFilePlans.has(plan)) {
+    throw planError(
+      'ARCHIVE_FILE_PLAN_AUTHORITY_INVALID',
+      'filePlan必须是Main当前进程冻结的normalized authority'
+    );
+  }
+  return plan;
 }
 
 function assertFilePlanFresh(plan, options = {}) {
@@ -268,6 +283,7 @@ function artifactManifestFromFilePlan(plan) {
 
 module.exports = {
   assertFilePlanFresh,
+  assertNormalizedFilePlanV1,
   artifactKeyOf,
   artifactManifestFromFilePlan,
   manifestIdentityOf,

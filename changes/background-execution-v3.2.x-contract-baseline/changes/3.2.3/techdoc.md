@@ -254,11 +254,13 @@ directory fsync 必须尝试；只有平台明确返回 unsupported 时可记录
 
 ## 9. NewAccount Worker
 
-Worker输入：小型账户数组、冻结模板路径/snapshot、日期/币种配置、generationPath。Worker不接收final target。Main在dispatch前从同一冻结输入独立流式计算bounded expected descriptor：artifactKey、template hash、精确Sheet names/order/count、headers、rowCount、四类业务digest与summary；该descriptor为out-of-band Main authority，不能从Worker result/manifest回填。
+Worker输入：小型账户数组、冻结模板路径/snapshot、日期/币种配置、generationPath。Worker不接收final target。Main在dispatch前从同一冻结输入独立异步分批计算bounded expected descriptor：artifactKey、template hash、精确Sheet names/order/count、完整headers/column count、expected used range/dimension range、rowCount、四类业务digest与summary；该descriptor为out-of-band Main authority，不能从Worker result/manifest回填。生产路径每个bounded batch以`setImmediate`等scheduler让出Main event loop并检查Task cancel/app-quit signal；取消发生在authority期间时不调用runtime/不spawn Worker、不创建或遗留staging。同步构造器仅保留作小型oracle。
 
-Core输出records并写workbook。Worker result只作为技术观察；Main technical validator复核staging identity/size/hash，再用out-of-band authority回读精确Sheet集合、列顺序、记录数、日期、账户、币种/records digest。Publisher metadata中的sheetCount/rowCount/size/hash必须来自Main验证事实，不得硬编码或采用Worker自报值。
+Core输出records并写workbook。Worker result只作为技术观察；Main technical validator复核staging identity/size/hash，再用out-of-band authority回读精确Sheet集合、列顺序、记录数、日期、账户、币种/records digest。strict scanner必须拒绝任何超出expectedColumnCount/expected used range的cell（包括styled blank）、merge和dimension，不得用`slice(expectedColumnCount)`静默截断。Main Publisher前的authority模式另外要求formula count为0，并拒绝calcChain、externalLink与hyperlink；generic raw oracle仍可读取合法cached formula以维持E10-A差分边界。Publisher metadata中的sheetCount/rowCount/size/hash必须来自Main验证事实，不得硬编码或采用Worker自报值。
 
 Export copy：`fs.promises.copyFile`到task staging，校验源/副本hash，再调用既有single FIFO Publisher；这是一等`inline-async`策略，不占CPU Worker slot但占I/O lease。Publisher固定`requireArchiveHandoff=true`，journal在正式目标committed后继续作为唯一RecoverySource/Hold evidence；TaskLifecycle先settle FilePlan input/output artifacts，只有artifact durable且Task终态持久化后才用既有recovery acknowledgement清理journal。settlement失败返回committed + pending handoff，不得重新解释为可重试业务失败。
+
+E10-B只接收Main当前进程内由`normalizeFilePlanV1`冻结并brand的FilePlan authority；raw object或structured clone不具authority。E10-B不得再次normalize/resnapshot，必须在copy dispatch前、copy完成handoff前和Publisher调用前对同一原始source/target snapshot执行freshness检查。target确认时不存在但随后出现未知文件、或existing target被replacement（包括伪造相同size/mtime）都必须在Publisher=0处失败。此brand不序列化、不新增公开FilePlan字段；普通ancestor rename+ordinary replacement仍属单独未授权合同BLOCK。
 
 inline transport持有实际execution promise。正常terminal、shutdown cancel和close/terminate都在policy timeout内等待execution真实结算后才释放lease；timeout沿既有Supervisor映射为cleanup failure/transport leak并保留transport与task-owned staging cleanup ownership，late success/error不能改写已冻结terminal。
 
@@ -276,6 +278,9 @@ inline transport持有实际execution promise。正常terminal、shutdown cancel
 | NewAccount Worker crash | no artifact handle/publish |
 | copy source变化 | fail closed，不发布 |
 | Worker自洽伪造账户/币种digest或附加Sheet | Main authority readback失败，Publisher=0 |
+| 额外列/styled blank/merge/dimension或formula cached/外链/超链接 | Main worksheet authority失败，Publisher=0 |
+| Main authority大批量计算期间cancel/app quit | bounded safepoint取消，不spawn Worker、不留staging |
+| target absent后被创建/existing被替换或传入unbranded plan | 原FilePlan authority freshness失败，Publisher=0 |
 | Publisher committed后回包丢失/进程退出 | 同一journal恢复handoff，禁止重copy/重publish |
 | inline copy超过shutdown deadline | interrupted/cleanup leak evidence，保留owner，不虚报lease/leak收口 |
 
