@@ -5,10 +5,16 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { MessageChannel } = require('node:worker_threads');
 const XLSX = require('xlsx');
 
 const { writeBalanceWorkbook } = require('../../../src/backend/file-service');
+const { normalizeCell } = require('../../../src/backend/file-service/common');
 const { extractHeaders } = require('../../../src/backend/file-service/readers');
+const {
+  parseDateValue,
+  parseNumericValue
+} = require('../../../src/backend/file-service/normalizers');
 const { normalizeFilePlanV1 } = require('../../../src/main-process/archive-center/file-plan');
 const {
   createBackgroundExecutionRuntime,
@@ -18,8 +24,14 @@ const {
   createCanonicalEventEmitter
 } = require('../../../src/main-process/background-execution/adapters/canonical-event-emitter');
 const {
+  createWorkerThreadAdapter
+} = require('../../../src/main-process/background-execution/adapters/worker-thread-adapter');
+const {
   validateResultBody
 } = require('../../../src/main-process/background-execution/supervisor');
+const {
+  canonicalSha256
+} = require('../../../src/main-process/background-execution/canonical-json-v1');
 const {
   assertFinanceSafeValue
 } = require('../../../src/main-process/background-execution/error-codec');
@@ -37,9 +49,12 @@ const {
   buildNewAccountBalanceRecords,
   buildNewAccountBillDates,
   buildNewAccountOutputName,
+  businessEvidence,
   createTemplateEvidence,
   executeNewAccountGeneration,
-  prepareNewAccountGeneration
+  formatDateLabel,
+  prepareNewAccountGeneration,
+  readBackAndValidate
 } = require('../../../src/main-process/new-account/generation-core');
 const {
   cleanupOwnedGeneration,
@@ -147,7 +162,7 @@ function isoDateBefore(asOfDate, days) {
   return date.toISOString().slice(0, 10);
 }
 
-function shapedWorkerInput(dir, shapes, overrides = {}) {
+function shapedInputOptions(dir, shapes, overrides = {}) {
   const asOfDate = overrides.asOfDate || '2030-01-01';
   const accounts = shapes.map((shape, index) => {
     const currencies = Array.from({ length: shape.currencyCount }, (_, currencyIndex) =>
@@ -169,7 +184,11 @@ function shapedWorkerInput(dir, shapes, overrides = {}) {
     payload: payload({ accounts }),
     ...overrides
   });
-  return createNewAccountWorkerInput(options);
+  return options;
+}
+
+function shapedWorkerInput(dir, shapes, overrides = {}) {
+  return createNewAccountWorkerInput(shapedInputOptions(dir, shapes, overrides));
 }
 
 function localDate(isoDate) {
@@ -304,6 +323,145 @@ async function waitForCondition(predicate, message, timeoutMs = 5000) {
   }
 }
 
+function legacyBusinessEvidence(headers, records) {
+  const amountHeaders = new Set(['期初余额', '期初可用余额', '期末余额', '期末可用余额']);
+  const canonical = records.map((row) => row.map((value, index) => {
+    if (headers[index] === '账单日期') {
+      const date = parseDateValue(value);
+      return date ? formatDateLabel(date) : '';
+    }
+    if (amountHeaders.has(headers[index])) {
+      const amount = parseNumericValue(value);
+      return amount === null ? '' : amount;
+    }
+    return normalizeCell(value);
+  }));
+  const indexes = {
+    dates: headers.map((header, index) => header === '账单日期' ? index : -1).filter((index) => index >= 0),
+    accounts: headers.map((header, index) => header === '银行账号' ? index : -1).filter((index) => index >= 0),
+    currencies: headers.map((header, index) => header === '币种' ? index : -1).filter((index) => index >= 0)
+  };
+  return {
+    recordsSha256: canonicalSha256(canonical),
+    datesSha256: canonicalSha256(canonical.map((row) => indexes.dates.map((index) => row[index]))),
+    accountsSha256: canonicalSha256(canonical.map((row) => indexes.accounts.map((index) => row[index]))),
+    currenciesSha256: canonicalSha256(canonical.map((row) => indexes.currencies.map((index) => row[index])))
+  };
+}
+
+function createReadbackStageAdapter({ pauseStage, pauseOccurrence = 1 }) {
+  const nativeAdapter = createWorkerThreadAdapter();
+  let stagePort = null;
+  let resolvePaused;
+  let rejectPaused;
+  const paused = new Promise((resolve, reject) => {
+    resolvePaused = resolve;
+    rejectPaused = reject;
+  });
+  return {
+    paused,
+    close() {
+      if (stagePort) stagePort.close();
+    },
+    adapter: Object.freeze({
+      kind: 'worker-thread',
+      start(startOptions) {
+        const { port1, port2 } = new MessageChannel();
+        stagePort = port1;
+        port1.on('message', (message) => {
+          if (message && message.kind === 'new-account-readback-stage' && message.paused === true) {
+            resolvePaused(message);
+          }
+        });
+        port1.on('messageerror', rejectPaused);
+        const entry = typeof startOptions.entry === 'string'
+          ? { path: startOptions.entry }
+          : startOptions.entry;
+        return nativeAdapter.start({
+          ...startOptions,
+          entry: {
+            ...entry,
+            workerData: {
+              testReadbackStagePort: port2,
+              testReadbackPauseStage: pauseStage,
+              testReadbackPauseOccurrence: pauseOccurrence
+            },
+            transferList: [port2]
+          }
+        });
+      }
+    })
+  };
+}
+
+function highBudgetReadbackRuntime(workerThreadAdapter) {
+  return createBackgroundExecutionRuntime({
+    availableParallelism: 4,
+    freeMemoryBytes: 12 * 1024 ** 3,
+    totalMemoryBytes: 16 * 1024 ** 3,
+    memoryHardCeilingBytes: 4 * 1024 ** 3,
+    systemReserveBytes: 0,
+    workerThreadAdapter,
+    shutdownTimeoutMs: 10000
+  });
+}
+
+async function shutdownRealWorkerAtReadbackStage({
+  label,
+  pauseStage,
+  pauseOccurrence = 1,
+  shapes = [{ dayCount: 512, currencyCount: 8 }]
+}) {
+  const dir = tempDir(`new-account-readback-cancel-${label}-`);
+  const operationKey = `new-account-readback-cancel-${label}`;
+  const options = shapedInputOptions(dir, shapes, {
+    operationKey,
+    context: operationContext(operationKey)
+  });
+  const stageControl = createReadbackStageAdapter({ pauseStage, pauseOccurrence });
+  const runtime = highBudgetReadbackRuntime(stageControl.adapter);
+  let cleanupCalls = 0;
+  try {
+    const generation = generateAndValidateNewAccount({
+      ...options,
+      runtime,
+      onOwnedGenerationCleanup() { cleanupCalls += 1; }
+    });
+    let stageTimeout;
+    const stage = await Promise.race([
+      stageControl.paused,
+      new Promise((_, reject) => {
+        stageTimeout = setTimeout(() => reject(new Error(`${pauseStage} 未到达`)), 30000);
+      })
+    ]).finally(() => clearTimeout(stageTimeout));
+    assert.equal(stage.stage, pauseStage);
+    assert.equal(fs.existsSync(options.generationPath), true, `${pauseStage} 前 workbook 应已写盘`);
+    assert.ok(fs.statSync(options.generationPath).size > 0, `${pauseStage} 前 workbook 应可见`);
+
+    const cancelStartedAt = Date.now();
+    const shutdown = runtime.shutdown({ timeoutMs: 10000 });
+    const result = await generation;
+    const report = await shutdown;
+    const cancelElapsedMs = Date.now() - cancelStartedAt;
+
+    assert.ok(cancelElapsedMs < 5000, `${pauseStage} cancel耗时${cancelElapsedMs}ms超过冻结5秒`);
+    assert.equal(result.execution.outcome, 'cancelled');
+    assert.equal(result.execution.terminalSource, 'job:error');
+    assert.equal(result.execution.result, null);
+    assert.equal(result.generated, null);
+    assert.equal(cleanupCalls, 1, `${pauseStage} Main cleanup必须恰好一次`);
+    assert.deepEqual(fs.readdirSync(options.stagingRoot), []);
+    assert.equal(fs.existsSync(options.filePlan.outputs[0].filePath), false);
+    assert.equal(report.cancelledJobs.length, 1);
+    assert.deepEqual(report.leakedTransports, []);
+    assert.deepEqual(report.errors, []);
+    assert.equal(runtime.resourceGovernor.snapshot().activeUsage.memoryBytes, 0);
+    return cancelElapsedMs;
+  } finally {
+    stageControl.close();
+  }
+}
+
 test('E10-A policy保持 thread-single/job/main-settlement 与 production=false/legacy/0', () => {
   assert.equal(NEW_ACCOUNT_GENERATION_POLICY.actionKey, NEW_ACCOUNT_GENERATION_ACTION);
   assert.equal(NEW_ACCOUNT_GENERATION_POLICY.mode, 'thread-single');
@@ -328,6 +486,11 @@ test('E10-A policy保持 thread-single/job/main-settlement 与 production=false/
   assert.doesNotMatch(mainSource, /isProductionEnabled\('new-account:generate'\)/);
   assert.doesNotMatch(mainSource, /generateAndValidateNewAccount\(/);
   assert.doesNotMatch(workerOwnedSource, /fs\.(?:rm|rmSync|unlink|unlinkSync)\s*\(/);
+  const contractSource = fs.readFileSync(path.resolve(
+    __dirname,
+    '../../../src/main-process/new-account/generation-contract.js'
+  ), 'utf8');
+  assert.doesNotMatch(contractSource, /readbackStage|testReadback/);
   assert.deepEqual(extractHeaders(TEMPLATE_PATH), REQUIRED_HEADERS);
   assert.equal(REQUIRED_HEADERS.length, NEW_ACCOUNT_GENERATION_SHAPE_LIMITS.outputCellsPerRecord);
 });
@@ -474,6 +637,32 @@ test('唯一 core 锁定昨日/10年边界、币种去重、记录顺序与 lega
     () => prepareNewAccountGeneration({ payload: {}, balanceTemplateFields: headers, today }),
     (error) => error.code === 'NEW_ACCOUNT_REQUIRED' &&
       error.detailLines[0] === '1. 缺少字段：银行名称、所在地、银行账号、开户日期、币种'
+  );
+});
+
+test('分批businessEvidence与旧canonical数组语义逐字节等价', () => {
+  const headers = extractHeaders(TEMPLATE_PATH);
+  const cases = [
+    [],
+    [['银行"A', '上\\海', 'CNY', 'A0001', '2026/03/01', '', '', '0', '']],
+    Array.from({ length: 2051 }, (_, index) => [
+      `银行${index % 7}`,
+      index % 2 ? '上海' : '悉尼',
+      index % 3 ? 'CNY' : 'USD',
+      `A${String(index).padStart(6, '0')}`,
+      index % 2 ? '2026-03-01' : '2026/03/02',
+      '',
+      '',
+      index % 5 ? 0 : '0.00',
+      ''
+    ])
+  ];
+  for (const records of cases) {
+    assert.deepEqual(businessEvidence(headers, records), legacyBusinessEvidence(headers, records));
+  }
+  assert.throws(
+    () => businessEvidence(headers, [['\ud800', '', '', '', '', '', '', '', '']]),
+    (error) => error.code === 'CANONICAL_JSON_INVALID_SURROGATE'
   );
 });
 
@@ -1048,6 +1237,25 @@ test('真实 running Worker 收到 shutdown 后cancel-wins，不产生handle并�
   assert.deepEqual(report.errors, []);
   assert.deepEqual(fs.readdirSync(options.stagingRoot), []);
   assert.equal(fs.existsSync(options.filePlan.outputs[0].filePath), false);
+});
+
+test('真实 Worker 在workbook-open/row/row-scan/evidence/job:done前精确shutdown均由cancel胜出', {
+  timeout: 30000
+}, async () => {
+  const stages = [
+    'readback:workbook-opened',
+    'readback:row-batch',
+    'readback:row-scan-complete',
+    'readback:evidence-batch',
+    'worker:before-job-done'
+  ];
+  for (const [index, pauseStage] of stages.entries()) {
+    const elapsed = await shutdownRealWorkerAtReadbackStage({
+      label: `${index}-${pauseStage.replace(/[^a-z]+/g, '-')}`,
+      pauseStage
+    });
+    assert.ok(elapsed < 5000, pauseStage);
+  }
 });
 
 test('模板 TOCTOU、staging collision/symlink 与业务 tamper fail closed', async () => {

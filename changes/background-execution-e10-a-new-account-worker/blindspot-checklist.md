@@ -36,7 +36,16 @@
 - 影响：取消被伪报为 `completed`，Main 生成 artifact handle，未发布 staging 残留。
 - 证据：替代 Reviewer 用例与本地修复前回放；等 `control.ready/state=running` 后 shutdown，actual 为 `completed`。
 - 最便宜验证：同一真实 runtime 用例锁定 cancellation terminal、handle 和 staging 数量；反向用例先 await 真实 completion 再 shutdown。
-- 处置：已覆盖；core 在 write 前后/readback 后/技术证据后让出消息循环，entry 发 `job:done` 前再过 cancel gate。取消终态仍由 Supervisor 认定，只有 Main/client 删 task-private staging；Worker/core 不删，不存在双清理 owner。
+- 处置：已覆盖；core 在同步 writer 前后及readback/hash各批次让出消息循环，entry 发 `job:done` 前再过 cancel gate。取消终态仍由 Supervisor 认定，只有 Main/client 删 task-private staging；Worker/core 不删，不存在双清理 owner。
+
+### [Important / 已覆盖] 最大合法 workbook 的 readback 内部仍有超过 cooperative timeout 的连续同步窗口
+
+- 事实：上轮只在整个 `readBackAndValidate` 前后让出；250k旧链回读约7.5秒，包含 `readFile`、sheet materialize和actual/expected四digest多个连续同步阶段。
+- 推断/未知：shutdown即使在workbook写完后到达，也要等整个readback结束才可被Worker message handler观察；约4997ms到达时会触发Supervisor的正确5秒cancel-timeout。
+- 影响：正常合法任务被伪报 `transport-lost` 而非 `cancelled`；取消终态、staging恢复与可观测性失真。
+- 证据：第二替代Reviewer真实250k回放；本机分段计时；`scripts/perf/new-account-e10-a-readback-cancellation.js` 六场景/五个真实阶段反例。
+- 最便宜验证：分别在 workbook-opened、row batch、row-scan-complete（旧readFile后等价边界）、expected evidence batch、Worker发送job:done前暂停真实Worker，再调用原Supervisor shutdown；至少两轮250k workbook-opened。
+- 处置：已覆盖；实际落盘XLSX通过ZIP entry与worksheet XML流式扫描，row/evidence各1024行一批yield+signal check，artifact SHA改异步stream；四digest由共享incremental canonical数组hasher计算并与旧oracle逐字节对照。测试stage端口不进入Protocol/DTO，取消仍只有Main cleanup恰好一次。
 
 ### [Important / 已覆盖] Worker crash/late done 的 staging 生命周期
 
@@ -66,7 +75,7 @@ payload account rows
   -> template exact header projection
   -> 期末余额=0; other balance fields blank
   -> staging workbook
-  -> Worker readback (sheet/header/row count/full record digest/date/account/currency digests)
+  -> Worker streaming readback (actual sheet/header/row count/full record digest/date/account/currency digests)
   -> Main ownership + size + SHA technical validation
 ```
 
@@ -76,6 +85,8 @@ payload account rows
 - 日期：本地日历沿用 legacy；开户日至昨日均包含；晚于昨日、超过 3650 天拒绝。
 - 金额：没有 Credit/Debit/汇率/舍入；每行期末余额固定数值 `0`，其余余额字段为空。
 - 文件名：单账户 `银行-地点-末四位-币种或多币种-NEW_BALANCE.xlsx`；多账户固定 `多账号-多币种`；contract 拒绝路径分隔符和非 xlsx。
+- 回读守恒：streaming scanner只读取workbook声明顺序的首sheet，表头取冻结宽度；空物理行仍按旧`blankrows:false`跳过，业务行按原序逐行进入同一canonical accumulator；250k/60,416与旧同步oracle四digest全等。
+- 取消守恒：shutdown不改变records或digest；只在未完成阶段产生`NEW_ACCOUNT_GENERATION_CANCELLED`，result/generated均为null，由Main按冻结generationPath清理一次；已completed后shutdown保持正常artifact。
 
 ## 资金红线人工复核
 
