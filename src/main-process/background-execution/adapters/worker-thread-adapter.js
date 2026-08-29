@@ -60,6 +60,11 @@ function createWorkerThreadAdapter(options = {}) {
     kind: 'worker-thread',
     start(startOptions) {
       const normalized = normalizeWorkerEntry(startOptions.entry);
+      const existingWorkerData = normalized.options.workerData;
+      if (existingWorkerData && typeof existingWorkerData === 'object' &&
+          Object.hasOwn(existingWorkerData, ADMITTED_TOPOLOGY_WORKER_DATA_KEY)) {
+        throw new TypeError('worker-thread entry workerData contains reserved admitted topology key');
+      }
       let workerOptions = normalized.options;
       if (normalized.admittedTopologyWorkerData) {
         const topology = startOptions.topology;
@@ -68,11 +73,9 @@ function createWorkerThreadAdapter(options = {}) {
             topology.effectiveChildCount < 1) {
           throw new TypeError('worker-thread admitted topology is invalid');
         }
-        const existingWorkerData = normalized.options.workerData;
         if (existingWorkerData !== undefined &&
             (!existingWorkerData || typeof existingWorkerData !== 'object' ||
-              Array.isArray(existingWorkerData) ||
-              Object.hasOwn(existingWorkerData, ADMITTED_TOPOLOGY_WORKER_DATA_KEY))) {
+              Array.isArray(existingWorkerData))) {
           throw new TypeError('worker-thread entry workerData conflicts with admitted topology');
         }
         workerOptions = {

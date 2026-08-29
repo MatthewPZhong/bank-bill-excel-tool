@@ -26,7 +26,8 @@ const {
   createWorkerThreadAdapter
 } = require('../../../src/main-process/background-execution/adapters/worker-thread-adapter');
 const {
-  toProtocolError
+  toProtocolError,
+  validateSafeErrorV1
 } = require('../../../src/main-process/background-execution/error-codec');
 const {
   createBackgroundExecutionRuntime
@@ -554,7 +555,7 @@ test('E12-C 任一 shard crash 时 Main Publisher=0，并清理 exact task-priva
     [false, false, false, false]);
 });
 
-test('E12-C child crash/cancel/duplicate late terminal 全部 fail closed 且有界收口', async () => {
+test('E12-C child crash/cancel/duplicate late terminal/非法 SafeError 全部 fail closed 且有界收口', async () => {
   class CrashWorker extends EventEmitter {
     constructor() {
       super();
@@ -584,6 +585,41 @@ test('E12-C child crash/cancel/duplicate late terminal 全部 fail closed 且有
     code: 'VCC_EXPORT_SHARD_DUPLICATE_TERMINAL'
   });
 
+  const invalidSafeErrors = [
+    {},
+    { code: 'OVERSIZED', message: 'x'.repeat(65537), stage: 'execute', detailLines: [] },
+    { code: 'PRIVATE', message: 'accountNo=6222020202020202', stage: 'execute', detailLines: [] },
+    { code: '', message: 'invalid code', stage: 'execute', detailLines: [] }
+  ];
+  for (const errorPayload of invalidSafeErrors) {
+    class InvalidSafeErrorWorker extends EventEmitter {
+      constructor() {
+        super();
+        queueMicrotask(() => {
+          this.emit('message', {
+            contractVersion: 1,
+            ok: false,
+            result: null,
+            error: errorPayload
+          });
+          this.emit('exit', 0);
+        });
+      }
+      postMessage() {}
+      terminate() { return Promise.resolve(1); }
+    }
+    let caught = null;
+    try {
+      await runVccExportShardWorker({}, null, { WorkerClass: InvalidSafeErrorWorker });
+    } catch (error) {
+      caught = error;
+    }
+    assert.ok(caught);
+    assert.equal(caught.code, 'VCC_EXPORT_SHARD_RESULT_INVALID');
+    assert.ok(Buffer.byteLength(caught.message) < 256);
+    validateSafeErrorV1(toProtocolError(caught));
+  }
+
   let cancelMessage = null;
   let terminateCalls = 0;
   class HangingWorker extends EventEmitter {
@@ -605,7 +641,111 @@ test('E12-C child crash/cancel/duplicate late terminal 全部 fail closed 且有
   assert.equal(terminateCalls, 1);
 });
 
-test('E12-C parent group 首错取消 sibling，等待全部 child terminal 后才拒绝', async (t) => {
+test('E12-C malformed/oversized/private/invalid child SafeError 均 allSettled、cleanup 且 Publisher=0', async (t) => {
+  const harness = setup(t);
+  const cases = [
+    ['malformed', {}],
+    ['oversized', {
+      code: 'OVERSIZED', message: 'x'.repeat(65537), stage: 'execute', detailLines: []
+    }],
+    ['private', {
+      code: 'PRIVATE', message: 'accountNo=6222020202020202', stage: 'execute', detailLines: []
+    }],
+    ['invalid', {
+      code: '', message: 'invalid code', stage: 'execute', detailLines: []
+    }]
+  ];
+  let publisherCalls = 0;
+  for (let caseIndex = 0; caseIndex < cases.length; caseIndex += 1) {
+    const [label, errorPayload] = cases[caseIndex];
+    const stagingDirectory = path.join(harness.root, `safe-error-${label}-staging`);
+    fs.mkdirSync(stagingDirectory);
+    const plan = filePlan(harness.root, `safe-error-${label}-targets`, 4);
+    const taskRunId = `vcc-e12-c-safe-error-${label}`;
+    const taskAuthority = Object.freeze({
+      action: 'export-result', taskGeneration: 20 + caseIndex, taskRunId
+    });
+    const exits = [];
+    class InvalidTerminalWorker extends EventEmitter {
+      constructor(_filename, options) {
+        super();
+        this.shardIndex = options.workerData.input.shard.shardIndex;
+        this.exited = false;
+        if (this.shardIndex === 1) {
+          queueMicrotask(() => {
+            this.emit('message', {
+              contractVersion: 1,
+              ok: false,
+              result: null,
+              error: errorPayload
+            });
+            this.exit(0);
+          });
+        }
+      }
+      exit(code) {
+        if (this.exited) return;
+        this.exited = true;
+        exits.push(this.shardIndex);
+        this.emit('exit', code);
+      }
+      postMessage(message) {
+        if (message && message.operation === 'cancel') queueMicrotask(() => this.exit(1));
+      }
+      terminate() {
+        queueMicrotask(() => this.exit(1));
+        return Promise.resolve(1);
+      }
+    }
+    const runtime = {
+      async execute(request) {
+        try {
+          const result = await executeVccExportWriterGraph({
+            ...request.input,
+            databasePath: harness.dbPath,
+            assetsDir: ASSETS_DIR
+          }, null, {
+            admittedTopology: {
+              topologyKey: 'topology.vcc-financial-op:export-subjects',
+              effectiveChildCount: 2
+            },
+            WorkerClass: InvalidTerminalWorker,
+            cancelTimeoutMs: 0
+          });
+          return { outcome: 'completed', terminalSource: 'job:done', result };
+        } catch (error) {
+          return { outcome: 'failed', terminalSource: 'job:error', error: toProtocolError(error) };
+        }
+      }
+    };
+    await assert.rejects(generateValidateAndPublishVccExport({
+      actionKey: VCC_EXPORT_SUBJECTS_ACTION,
+      runtime,
+      expectedAuthority: harness.snapshot.authority,
+      readCurrentSnapshot: async () => harness.snapshot,
+      readCurrentTaskAuthority: async () => taskAuthority,
+      filePlan: plan,
+      stagingDirectory,
+      assetsDir: ASSETS_DIR,
+      batchContext: Object.freeze({
+        batchId: 400 + caseIndex,
+        batchNumber: `2026-08-29-e12-c-safe-error-${label}`,
+        taskRunId,
+        taskKey: 'vccFinancialOp:export:result',
+        moduleId: 'vcc-financial-op',
+        parentRunId: `vcc-e12-c-safe-error-parent-${label}`,
+        operationKey: `vcc-e12-c-safe-error-operation-${label}`
+      }),
+      publishPublication: async () => { publisherCalls += 1; }
+    }), { code: 'VCC_EXPORT_SHARD_RESULT_INVALID' });
+    assert.deepEqual(exits.sort(), [0, 1]);
+    assert.deepEqual(fs.readdirSync(stagingDirectory), []);
+    assert.equal(plan.outputs.some((output) => fs.existsSync(output.filePath)), false);
+  }
+  assert.equal(publisherCalls, 0);
+});
+
+test('E12-C parent group 按真实时间冻结 ROOT_FIRST，后发 teardown 不覆盖且等待全组', async (t) => {
   const harness = setup(t);
   const dual = generationFixture(harness, 'group-failure');
   const observations = [];
@@ -618,20 +758,20 @@ test('E12-C parent group 首错取消 sibling，等待全部 child terminal 后�
       const shardIndex = input.shard.shardIndex;
       observations.push(`start-${shardIndex}`);
       if (shardIndex === 1) {
-        const error = new Error('injected shard crash');
-        error.code = 'VCC_EXPORT_SHARD_TRANSPORT_CRASH';
+        const error = new Error('root failure happens first');
+        error.code = 'ROOT_FIRST';
         throw error;
       }
       await new Promise((resolve) => {
         if (signal.aborted) return resolve();
         signal.addEventListener('abort', resolve, { once: true });
       });
-      observations.push('sibling-cancelled-and-settled');
-      const error = new Error('cancelled sibling');
-      error.code = 'VCC_EXPORT_CANCELLED';
+      observations.push('sibling-teardown-after-root');
+      const error = new Error('teardown failure after abort');
+      error.code = 'TEARDOWN_AFTER_ABORT';
       throw error;
     }
-  }), { code: 'VCC_EXPORT_SHARD_TRANSPORT_CRASH' });
-  assert.deepEqual(observations, ['start-0', 'start-1', 'sibling-cancelled-and-settled']);
+  }), { code: 'ROOT_FIRST' });
+  assert.deepEqual(observations, ['start-0', 'start-1', 'sibling-teardown-after-root']);
   assert.equal(dual.generation.generations.some((item) => fs.existsSync(item.generationPath)), false);
 });

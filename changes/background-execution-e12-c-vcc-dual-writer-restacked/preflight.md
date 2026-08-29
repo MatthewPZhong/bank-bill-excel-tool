@@ -3,7 +3,7 @@
 ## Task Brief
 
 - Goal：在 E12-A one-shot single Writer 与 E12-B subject SQL query pushdown 之上，实现 dormant 的 deterministic 1/2-shard Writer graph，并由 Main 唯一 Join/Publisher。
-- Context：精确 parent 是已审查 E12-B `d19205c42409f707f63603776c774bbf9c1f9352`；冻结 Spec §7.3/§8/§9、TechDoc §9～§13 将 second Writer、shard planner、artifact join 与 15%/Windows/RSS 证据归入 E12-C。
+- Context：精确 parent 是 E12-B review-fix `fa71a2f65bd9540e8a000d4ff77e9a6ed8a812c1`；冻结 Spec §7.3/§8/§9、TechDoc §9～§13 将 second Writer、shard planner、artifact join 与 15%/Windows/RSS 证据归入 E12-C。
 - Constraints：只做 E12-C；不接 live IPC/Renderer/Preload，不开启 production，不改变 legacy；`production.enabled=false`、`effectiveMode=legacy`、`effectiveWorkerCount=0` 保持不变；Main 继续持有 full A/B/Join/Publisher authority；不改变 FilePlan、金额、币种、Pending、revision、archive、lineage 或 publisher journal 语义；不得运行 `release-check`、`check-vars`、`scan:vars`。
 - Done when：1/2 Writer 对 exact subjects 唯一覆盖且 deterministic merge 等价；每 child 仅打开 read-only DB 并查询 assigned subjects；任一 cancel/crash/timeout/stale/manifest/staging 失败均 Publisher 0；全部成功后 Publisher 恰好 1；late child message 不改变终态；cleanup/recovery 与 SafeError 有界；定向、回归、性能/RSS 探针完成，production 仍 false，并保留 Windows/资金人工门禁。
 
@@ -27,6 +27,16 @@
 | child crash/cancel/timeout/late message 的首错与清理 ownership | 状态盲区 | 高 | 一般 | 当前 worker-host 只有一个执行函数/AbortSignal | PROBE（已收口） | real/fake child crash、cancel timeout、duplicate terminal、sibling settle 注入 | parent coordinator 是 child transport 唯一 owner；首错 abort sibling，等待全组 terminal 后返回；Main 仍是 generation cleanup owner。 |
 | child result 是否能沿用现有 full result validator | 数据契约 | 中 | 容易 | validator 要求 export-subjects artifact subjectIndex 从 0 连续，无法单独验证第二 shard | PROBE | 构造 shard-local result/reducer tests | 定义 internal exact shard result contract；只在 Main-visible deterministic merge 后使用现有 canonical validator。 |
 | 15%/RSS/Windows 是否足以生产启用 | 外部门禁 | 高 | 困难 | Spec 明确要求 combined gate；本机 synthetic 5-run 已通过速度阈值并记录 RSS，但不等于真实样本/Windows | BLOCK（上线） | 真实大型样本五次中位数、small regression、Windows packaged、人工资金复核 | 本 PR 只交付 dormant capability/evidence，不改变 production；合并不代表上线。 |
+
+## Reviewer Follow-up Unknowns（2026-08-29）
+
+| reviewer finding | 分类 | 复现事实 | 收口合同 |
+| --- | --- | --- | --- |
+| non-opt-in entry 可自带 reserved topology key | BLOCK | reserved key 检查原本仅位于 opt-in merge 分支 | adapter 在任何 entry 创建 Worker 前无条件拒绝自带 reserved key；只有 opt-in 且 topology 校验后由 adapter 注入。 |
+| allSettled 后按 shardIndex 选错可能覆盖真实首错 | BLOCK | shard1 先发 root、shard0 后发 non-cancel teardown 时旧逻辑会选 shard0 | 每个 shard Promise 的第一个 catch 按事件时间冻结 `firstFailure`，随后 abort sibling；allSettled 只等待/诊断，最终抛冻结首错。 |
+| child error terminal decode 可在 EventEmitter callback 中 throw 并悬空 | BLOCK | malformed/oversized/private/invalid SafeError 会使 `fromProtocolError` 抛出 | decode 全程 catch，统一转换为有界 `VCC_EXPORT_SHARD_RESULT_INVALID` 并结算 shard Promise；group allSettled、Main cleanup、Publisher=0。 |
+
+- Reviewer 已撤回默认 execution timeout 建议；冻结合同不要求，本轮明确不增加。
 
 ## 风险优先计划
 

@@ -2,7 +2,7 @@
 
 ## Baseline
 
-- Goal/spec：冻结 v3.2.4 Spec §7.2～§11、TechDoc §9～§14；精确 parent E12-B `d19205c42409f707f63603776c774bbf9c1f9352`。
+- Goal/spec：冻结 v3.2.4 Spec §7.2～§11、TechDoc §9～§14；精确 parent E12-B review-fix `fa71a2f65bd9540e8a000d4ff77e9a6ed8a812c1`。
 - Initial plan：先冻结 exact ownership 与 1/2 shard contract，再接 admitted topology/child lifecycle，最后复用 Main full A/B/Join/Publisher 并完成故障注入、回归和性能/RSS probes。
 - Done when：见同目录 `preflight.md`；production/legacy 不变，Windows 与资金人工门禁保留。
 
@@ -16,6 +16,9 @@
 | parent coordinator 只占 policy base；phase 归零，Writer 资源只按 exact compound children 计入，childrenMax/requestedMax 收窄为 2。 | 集成 probe 证明旧 `phase Writer + N children` 在平台 CPU/IO budget 下请求 2 必然被 Governor 降级为 1；真实拓扑是 parent + N child Writer。 | 扩大全局平台预算；让 parent 自行忽略 admitted count；保留虚构 phase Writer。 | dual CompoundLease 可真实 admission；single/low-memory 仍由同一 Governor 降级；production 字段不变。 |
 | native worker-thread adapter 仅把 Supervisor admitted topology 的 exact key/count 合并进 reserved workerData。 | adapter.start 已接收 admission 后 topology；Job input 在 admission 前冻结，不能表达低内存 downgrade。 | caller input workerCount；全量 topology/资源向量传入 worker。 | child count authority 不可由业务 caller 注入，parent 看不到无关预算细节。 |
 | child shard 使用 internal exact shard contract；parent 完整校验后按 subjectIndex merge 为现有 canonical result，Main 再做业务 Join。 | 现有 public validator要求全量 0..N-1；第二 shard 不能伪装 public result。 | 放宽 public validator；让 Main 接受多个 shard DTO。 | public result/Publisher合同零变化，internal重复/遗漏/错 owner fail closed。 |
+| reserved topology key 对所有 entry 都是 adapter 私有命名空间；non-opt-in 也不得自带。 | Reviewer 发现原检查只覆盖 opt-in，non-opt-in 可预占 reserved key。 | 仅 merge 时检查；允许 entry 以同名 key 携带其它含义。 | Worker 创建前统一拒绝；正常 non-opt-in workerData 原样保留。 |
+| first shard failure 在第一个 Promise catch 时按时间冻结，后续 abort/teardown failure 不覆盖。 | Reviewer 的 shard1 `ROOT_FIRST` / shard0 后发 teardown 反例证明按 allSettled 数组顺序选择不等于因果首错。 | 按 shardIndex 选第一个 non-cancel；allSettled 后重新推断 root。 | 继续等待全部 child terminal，但用户看到真实首错。 |
+| child error terminal decode 是不可信协议边界，任何 SafeError validation throw 都转为 bounded result-invalid。 | `fromProtocolError` 会对 keys/大小/隐私/字段校验抛错；EventEmitter callback throw 会绕过 Promise settle。 | 让异常冒泡；接受部分字段再 sanitize。 | shard Promise 必然 settle，group/Main cleanup 可达，私密/超大文本不外泄。 |
 
 ## Assumptions
 
@@ -32,7 +35,7 @@
 
 | 证据 | 结果 | 覆盖的行为/风险 |
 | --- | --- | --- |
-| `git show -s d19205c4` | parent=`b2c66a9c...`，E12-B head 精确匹配 | 父链/范围。 |
+| `git show -s fa71a2f6` | parent=`962c364a...`，E12-B review-fix head 精确匹配 | 父链/范围。 |
 | branch/worktree/log/reflog/path 搜索 | 无旧 E12-C 草稿 | 不依赖未审查历史实现。 |
 | E12-C unit | 7/7 PASS | 1～64 planner、唯一覆盖/reducer 反例、真实 single/dual 语义等价、真实 CompoundLease dual、Publisher 0/1、child crash/cancel/duplicate terminal、首错等待 sibling。 |
 | E12-C + E12-A + toolbox policy | 81/81 PASS | E12-A authority/staging/cleanup/recovery 与 policy 资源合同回归。 |
@@ -43,6 +46,13 @@
 | `npm run smoke` | PASS | Excel/对账/业务 smoke 回归。 |
 | `npm run lint`、语法、`git diff --check` | PASS | 静态与格式检查。 |
 | `scripts/perf/vcc-financial-op-dual-writer-e12-c.js` | 5-run synthetic：16 subjects median 709.45ms→349.16ms（+50.78%）；4 subjects 244.84ms→230.58ms（+5.82%）；dual peak RSS 324.45 MiB / delta 197.23 MiB | 本机进程隔离 speed/RSS evidence；速度过冻结阈值，但不替代真实样本/Windows/人工门禁。 |
+| Reviewer finding 定向回归 | 27/27 PASS | non-opt-in reserved key、opt-in conflict、正常 non-opt-in；`ROOT_FIRST` 时序；四类非法 SafeError bounded settle；allSettled/cleanup/Publisher=0。 |
+| Reviewer follow-up 全 VCC | 378 tests（dot reporter）PASS | E12-A/B/C 与 VCC 金额、币种、Pending、archive、lineage、recovery 全域。 |
+| Reviewer follow-up platform/recovery | 365 tests（dot reporter）PASS | adapter、error codec、Supervisor、ResourceGovernor、recovery 与 output publication。 |
+| Reviewer follow-up `npm run test:unit`（无并发复跑） | 6352/6355 PASS，0 fail，3 Windows skip | 首轮与 integration 并发时仅 PreFund symlink snapshot 探针抖动；隔离 1/1 PASS，无并发复跑全绿。 |
+| Reviewer follow-up `npm run test:integration` | 51 scripts、2455/2455 PASS | 全仓集成；自动耗时清单恢复，未纳入无关 diff。 |
+| Reviewer follow-up `npm run smoke` / lint / syntax / diff-check | PASS | smoke、生产源 lint、改动测试 lint、语法与格式。 |
+| Reviewer follow-up performance/RSS | 5-run synthetic：16 subjects 691.75ms→345.28ms（+50.09%），dual peak/delta 322.86/198.33 MiB；4 subjects 239.93ms→224.12ms（+6.59%） | reviewer 修复未造成 success-path 性能回退；仍不替代真实样本/Windows 门禁。 |
 
 ## Blindspot Pass
 

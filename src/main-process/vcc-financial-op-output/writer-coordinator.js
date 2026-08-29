@@ -144,7 +144,18 @@ function runVccExportShardWorker(input, signal, options = {}) {
           coordinatorError('VCC_EXPORT_SHARD_RESULT_INVALID', 'VCC shard Writer terminal 非法')
         );
       }
-      if (!terminalMessage.ok) return finish(reject, fromProtocolError(terminalMessage.error));
+      if (!terminalMessage.ok) {
+        let decodedError;
+        try {
+          decodedError = fromProtocolError(terminalMessage.error);
+        } catch (_error) {
+          decodedError = coordinatorError(
+            'VCC_EXPORT_SHARD_RESULT_INVALID',
+            'VCC shard Writer error terminal 非法'
+          );
+        }
+        return finish(reject, decodedError);
+      }
       return finish(resolve, terminalMessage.result);
     });
     if (signal) {
@@ -248,9 +259,15 @@ async function executeVccExportWriterGraph(rawInput, signal, options = {}) {
     else signal.addEventListener('abort', abortFromParent, { once: true });
   }
   const runShard = options.runShard || runVccExportShardWorker;
+  let firstFailure;
+  let hasFirstFailure = false;
   const tasks = shards.map((shard) => Promise.resolve().then(() => (
     runShard(shardInput(input, shard), group.signal, options)
   )).catch((error) => {
+    if (!hasFirstFailure) {
+      hasFirstFailure = true;
+      firstFailure = error;
+    }
     group.abort(error);
     throw error;
   }));
@@ -259,10 +276,7 @@ async function executeVccExportWriterGraph(rawInput, signal, options = {}) {
   const failures = settled.map((item, shardIndex) => ({ item, shardIndex }))
     .filter(({ item }) => item.status === 'rejected');
   if (failures.length > 0) {
-    const nonCancellation = failures.find(({ item }) => (
-      !item.reason || item.reason.code !== 'VCC_EXPORT_CANCELLED'
-    ));
-    throw (nonCancellation || failures[0]).item.reason;
+    throw hasFirstFailure ? firstFailure : failures[0].item.reason;
   }
   return mergeVccExportShardResults(
     input,

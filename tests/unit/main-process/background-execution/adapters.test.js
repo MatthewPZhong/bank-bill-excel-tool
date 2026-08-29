@@ -461,7 +461,14 @@ test('worker-thread adapter 只把 Supervisor admitted topology 合并到 entry-
     },
     topology: { topologyKey: 'topology.example', effectiveChildCount: 2 },
     onMessage() {}
-  }), /conflicts with admitted topology/);
+  }), /reserved admitted topology key/);
+  assert.throws(() => createWorkerThreadAdapter({ WorkerClass: FakeWorker }).start({
+    entry: {
+      path: '/packaged/non-opted-conflict.js',
+      workerData: { [ADMITTED_TOPOLOGY_WORKER_DATA_KEY]: { caller: true } }
+    },
+    onMessage() {}
+  }), /reserved admitted topology key/);
   const unopted = createWorkerThreadAdapter({ WorkerClass: FakeWorker }).start({
     entry: { path: '/packaged/unopted.js', workerData: { entryOwned: true } },
     topology: { topologyKey: 'topology.example', effectiveChildCount: 2 },
