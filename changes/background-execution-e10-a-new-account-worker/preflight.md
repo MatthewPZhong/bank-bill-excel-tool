@@ -20,6 +20,8 @@
 | shared Supervisor 负责发 shutdown cancel 与终态收口，但同步 XLSX 阶段必须由模块主动让出 Worker 消息循环 | `src/main-process/background-execution/{supervisor.js,runtime.js}`；Reviewer P2 真实 runtime 失败回放 | 新 Worker 使用 Protocol v1 canonical host；模块在重型阶段间和 `job:done` 前提供 cancellation safepoint，不修改全局 Supervisor 语义 |
 | `MAX_RECORDS=250000` 与静态 `PhaseLease.memoryBytes=256 MiB` 不匹配 | Reviewer 真实 Worker 探针：29,192 行 RSS delta 467,648,512 bytes，60,416 行 572,456,960 bytes | 不得降低业务上限掩盖准入低估；必须在 Worker spawn 前按可验证输出行数动态申请 |
 | `resources.profile` 已是 Registry 静态引用，Supervisor 在 `adapter.start()` 前获取 PhaseLease | `execution-policy-registry.js` 的 `resourceProfileRegistry/getBinding`；`supervisor.js:start/acquireSimpleJobResources` | E10 可绑定 Main-only 同步纯 estimator，不改 Protocol/Schema；其他 action 保持静态 phase |
+| row-only `448 MiB + 4096 bytes/row` 仍低估合法业务形状 | 本机高预算真实 Worker：250,000 短文本 reservation 1,493,762,048、RSS delta 1,761,820,672；60,416 最大合法 CJK 文本 reservation 717,225,984、RSS delta 1,881,407,488 | estimator 必须从已验证 DTO 计算每行实际重复文本的 UTF-8/UTF-16、记录/单元格结构及 writer/readback 多份驻留，不得只提高统一 per-row 常量 |
+| 合法业务 digest 会被通用 full-account gate 误杀 | 250,000 短文本真实 Worker 完成 workbook 后以 `PROTOCOL_PRIVACY_VIOLATION` 收口；另有 4 行真实输入可稳定生成含 17 位数字串的 `recordsSha256` | 只能在 E10 result validator 上按 exact JSON pointer + lowercase 64hex + 冻结父 shape 最小放行；不得修改全局账号检测或通用 digest key 集合 |
 
 ## Unknowns Register
 
@@ -32,7 +34,10 @@
 | E10-A 是否应接入 live IPC | 已知未知 | 高 | 容易 | release strategy 要求独立 flag，production=false，E10-B 尚无 Publisher | PROBE | static source-selector test | 只注册 dormant policy/runtime；live IPC 继续 legacy |
 | 真实 Worker 的同步 XLSX 生成是否会阻塞 shutdown-only `job:cancel` 直到 `job:done` | 状态生命周期盲区 | 高 | 容易 | 原实现只在同步阶段间读 `signal.aborted`，但 Worker 无机会处理 cancel message | PROBE | 等 `control.ready/state=running` 后立即 shutdown 的真实 runtime 回归 | 修复前稳定得到 `completed` 且 staging 残留；改为 write 前后/readback 后/terminal 前 async safepoint，取消时仅 Main/client 清理 |
 | 准入前能否与实际 `records.length` 使用同一计数口径 | 数据契约 | 高 | 容易 | contract 已内联计算“各账户开户日至昨日天数 × 币种数”，core 以相同组合造行，但尚未共享函数 | PROBE | 提取 contract 纯函数，golden/property 对照 core 实际行数 | estimator 和 input limit 共用唯一投影；不把计数字段加入冻结 DTO |
-| 保守内存 envelope 如何既覆盖 workbook/readback 又不对小任务一律按 250,000 行预留 | 容量 | 高 | 容易 | 两个真实点显示约 3.36 KiB/行的增量，但 RSS 是平台方向性数据 | PROBE | 确定性常量/边界单测 + 29k/60k 真实 benchmark | 256 MiB executor baseline + 64 MiB workbook + 64 MiB readback + 64 MiB safety + 4096 bytes/预计行；显式 0..250,000 上下界和 safe-integer overflow fail closed |
+| 保守内存 envelope 如何既覆盖 workbook/readback 又不对小任务一律按 250,000 行预留 | 容量 | 高 | 容易 | v1 两个短文本点支持 row slope，但250k/最大文本反例证明统一 4096 bytes/row 不足 | PROBE | 确定性shape边界单测 + 250k短文本/60,416最大文本真实 benchmark | v1 row-only 已推翻；v2 按 record/cell overhead、实际 UTF-8/UTF-16 writer/readback copies 与固定 safety 估算，0..250,000/overflow fail closed |
+| 如何在不物化 records 的前提下精确描述合法文本 shape | 数据契约 | 高 | 容易 | bounded DTO 已含规范化 bankName/location/bankAccount/currencies/openingDate，输出每行另有固定 10-byte 日期和 9 cells | PROBE | 把共享行数 projector 扩为 shape projector，并与实际 records 的行数、UTF-8/UTF-16 文本总量做 property/golden 对照 | Main admission 只遍历账户/币种配置，按 `天数 × 币种` 安全整数累计实际重复文本；不构造业务 rows |
+| writer/readback 同驻留的保守倍率如何校准 | 容量 | 高 | 容易 | 250k 短文本主要暴露记录/单元格结构，60,416 最大 CJK 文本主要暴露多份字符串/XML/readback 驻留 | PROBE | 两个真实反例分别校准结构项和文本项，确定性模型再向上留固定 safety 与可解释 copies | 使用独立 record/cell overhead、writer/readback UTF-8/UTF-16 copies 和固定 safety；真实 RSS 只作方向性覆盖证据，Windows gate保留 |
+| E10 digest 最小放行是否会扩大其他 action/路径或接受 schema-invalid 结果 | 隐私/合同 | 高 | 容易 | Protocol 已从 action-specific result validator 读取 `allowFinanceSafeValue`；Statement/MPT 已有局部 delegate 范式 | PROBE | 每个 exact path、近邻 path、大小写/长度错误、同名异路径、schema invalid 与真实 Worker completed | delegate 只挂在 `validateNewAccountGenerationResult`，父对象必须通过拆出的冻结 artifact/evidence validator；最终 result validator仍独立 fail closed |
 
 ## 风险优先计划
 
@@ -44,12 +49,16 @@
 | 4 | 写 workbook 并 Worker 业务回读、Main 技术复核 | sheet/header/行数/日期/账户/币种/file hash 血缘 | Worker/legacy projection golden + tamper tests | 不返回 artifact handle | 删除受权 staging 文件并报错 |
 | 5 | 静态/集成/smoke/event-loop/RSS 与盲区复核 | legacy、平台和性能不回归 | focused/integration/smoke/node-check/diff-check | 不结案 | 收缩到最后通过的 commit |
 | 6 | 共享行数投影、动态 resource profile 与 spawn 前准入 | MAX_RECORDS 与实际业务行数不变；低内存/并发不越 system reserve | 0/typical/29,192/60,416/250,000、overflow、低 budget no-spawn、并发 lease 不超预算 | OOM/侵占 reserve 或过度预留 | 保留 production=false；estimator/profile 绑定可单独回滚 |
+| 7 | 把共享 projector 扩为 shape-aware 文本/单元格 envelope | 短文本 250k 与最大合法文本不能低估；小任务不按最大 shape 收费 | exact row/cell/UTF-8/UTF-16 projection、Unicode/边界/overflow、两个真实 RSS 反例均被 reservation 覆盖 | 继续存在 reserve 侵占/OOM 风险 | production 保持 false；模型常量可独立向上校准，不改 MAX_RECORDS/业务输出 |
+| 8 | 在 E10 result validator 增加 exact-path digest delegate | 合法 digest 不误杀，账号/普通字符串与其他 action 仍 fail closed | 5 个允许 path、近邻 path/错误值/schema invalid、含数字串 digest 的真实 Worker completed | 正常 Worker 可伪报 transport-lost或隐私边界扩大 | 只撤回 validator property；不动全局 finance-safe gate |
 
 ## Blindspot / reconciliation 直接 checklist
 
 - 入口旁路：live handler 与 dormant Worker 是否都调用唯一 core；不存在 Worker final target/Publisher/copy。
 - 数据契约：exact keys、DTO bytes、账户/币种/日期/预计记录数、结果 manifest bytes。
 - 资源准入：预计行数与实际 records 守恒；估算公式、常量、上下界和overflow可审计；无法容纳的任务不创建 Worker，并发 active usage 不超 Governor memory budget/system reserve。
+- 资源 shape：逐账户/币种/日期累计的实际规范化 UTF-8/UTF-16 与 SheetJS XML 单元格编码是否与输出文本守恒；Unicode/控制字符、256/64 字段上限、9-cell 固定形状和 writer/readback 多份驻留是否全部计入。
+- 隐私 gate：只允许 `/payload/result/artifact/templateSha256` 与 `businessEvidence` 四个冻结 digest path；近邻路径、同名异路径、普通字符串、错误大小写/长度和 schema-invalid 仍拒绝。
 - 生命周期：collision、cancel、Worker crash、late message、shutdown、restart orphan staging 的权限边界；真实 running Worker 的 shutdown cancel 必须胜过尚未发送的 `job:done`。
 - 数据血缘：输入账户顺序 × 日期升序 × 去重币种顺序，输出行数严格等于各账户 `天数 × 币种数` 总和。
 - 金额：只生成余额行，`期末余额=0`，其余余额为空；不引入汇率/舍入/借贷方向。
