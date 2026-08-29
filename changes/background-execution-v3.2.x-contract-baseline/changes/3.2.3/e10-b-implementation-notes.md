@@ -23,6 +23,7 @@
 | 用户授权additive direct-parent identity公共合同 | reviewer真实probe在copy完成后rename target parent并创建ordinary replacement，Publisher发布进replacement | 保存整条ancestor chain；只补symlink检查；重新采样target | FilePlanV1 output冻结direct parent identity并逐字传Publisher/journal；普通上级替换通过direct parent inode变化检测 |
 | 只冻结resolved direct parent，不保存ancestor chain | 已知真实repro均在重新解析后改变direct parent identity；无证据要求整条chain，过度冻结会扩大Windows/恢复合同 | 每级ancestor canonical/dev/ino链 | 边界最小且可验证；原parent object移走再移回合法 |
 | journal v1 additive且旧reader路径兼容 | 旧prepared/committed记录不能被批量取消，新字段只为显式require的E10-B必填 | 新journal版本/DB migration/第二receipt | 带字段恢复漂移转manual recovery/Hold；旧journal沿原语义；旧二进制回滚前open journal=0 |
+| required guarded batch拒绝recovery root与target parent双向包含 | reviewer证明两者重叠时rename固定userData root并ordinary replacement可使fresh process漏扫旧index/journal/receipt | 保存ancestor chain；搬迁index；为E10-B新增第二receipt；扩大到generic旧journal | 复用canonical realpath/alias与direct-parent evidence，在任何写入前整批fail closed；sibling/外部目录和旧journal recovery不变 |
 
 ## Assumptions
 
@@ -40,6 +41,7 @@
 | 原strict scanner截断超列且Main只验证cached值 | exact worksheet bounds + authority-only dynamic-content ban | reviewer真实extra-column/formula probes均成功发布 | 合法trusted writer不变，恶意内容fail closed | 是，spec/techdoc §9 |
 | 原Main authority同步构造且E10-B重复normalize FilePlan | cooperative authority + branded plan assert | reviewer heartbeat与absent→created真实probe | Main响应性与原target evidence恢复，公开Protocol/FilePlan shape不变 | 是，spec/techdoc §9 |
 | 原ancestor identity合同BLOCK | 用户授权FilePlan/Publisher/journal additive direct-parent evidence | reviewer parent rename+ordinary replacement真实probe | E10-B fail closed；generic旧action/journal向后兼容；不实现ancestor chain/native ID | 是，v3.2.3 §9、Platform与Archive FilePlan合同 |
+| direct parent evidence仍允许目标父目录与固定recovery root重叠 | 新建guarded publication增加双向containment preflight | reviewer committed+handoff pending后userData rename/replacement真实probe会丢失唯一恢复入口 | 行为仅收紧新required batch；零journal/index/target写入，旧journal recovery不变 | 是，v3.2.3 §9、Platform Publisher/Lifecycle合同 |
 
 ## Evidence
 
@@ -47,6 +49,7 @@
 | --- | --- | --- |
 | exact parent/merge-base | `d073ced023b40feb477cf7557801a2899b433500` | 精确 E10-A 父链 |
 | Direct-parent授权轮起始head | `b0bdb36a122fec21aba56538fcef50d2200c282c` | 公共合同增量从已复审E10-B Round2 exact head开始，不重建/改写父链 |
+| Round4 recovery-root overlap起始head | `6073fc0edf0f20a84de9bd5ee0c234034826fe9a` | 从direct-parent合同clean head继续，精确父链不变 |
 | RED | 首次运行 `new-account-save-as-e10-b.test.js` 因 `artifact-copy` 不存在失败 | 证明测试先于 production 模块 |
 | reviewer finding定向 | `E10-A 20/20`、`E10-B 33/33`、adapter `22/22` PASS | 恶意自洽业务、附加Sheet、committed-reply-lost、pre/post settle/ack、slow-copy shutdown/deadline/late terminal |
 | E10-A + strict readback + policy/Publisher/Governor 聚焦 | `217/217 PASS` | generation golden、业务digest、Publisher archive handoff/recovery、TaskLifecycle与Supervisor资源合同不漂移 |
@@ -61,6 +64,9 @@
 | Direct-parent合同RED | 核心三文件`123/138 PASS, 15 FAIL` | 必需identity缺失、parent replacement被接受、journal/index无evidence，证明测试先于production修复 |
 | Direct-parent合同GREEN | FilePlan/E10-B/Publisher `141/141 PASS`；archive/FilePlan/TaskLifecycle/E10-A/E10-B/E09-C/Publisher交叉`413/413 PASS`；repository/public DTO `151/151 PASS` | parent/grandparent replacement、same parent、原对象移回、symlink/unreliable、prepare/stage/pre-commit/逐target mutation、journal recovery/旧journal兼容 |
 | Direct-parent最终全量 | unit `6406/6410 PASS, 3 SKIP`（仅已知NSIS dependency baseline 1 FAIL）；integration `51/51 scripts, 2455/2455 assertions PASS`；smoke/lint/node-check/diff-check PASS | 仓库级回归、真实大文件、恢复、资源与静态卫生 |
+| Round4 recovery-root overlap RED | 新增真实FS定向`3/7 PASS, 4 FAIL` | equal/inside/ancestor与multi-target均因缺少预期exception失败；sibling、外部目录、committed-before-settle restart控制先行通过 |
+| Round4 recovery-root overlap GREEN | 新增定向`7/7 PASS`；Publisher完整`76/76 PASS`；E10-A/E10-B/FilePlan/Archive/Platform/E09-C交叉`500/500 PASS` | 三类冲突在journal/index/target零写入边界拒绝；multi-target全批0；fresh recovery handoff/ack不二次发布；旧journal兼容全绿 |
+| Round4最终回归 | 默认全unit `6413/6418 PASS, 3 SKIP, 2 FAIL`；串行全unit `6414/6418 PASS, 3 SKIP, 1 FAIL`；integration `51/51 scripts, 2455/2455 assertions PASS`；最终新场景`8/8`、smoke/lint/node-check/diff-check PASS | 唯一串行/稳定失败仍为已知NSIS dependency `System::Store`；额外archive migration错误只在默认全套并发负载出现，单用例、完整单文件`46/46`与串行全unit均通过，且本轮未改该模块 |
 
 ## Remaining Unknowns
 
@@ -69,4 +75,5 @@
 | Windows packaged Publisher/路径语义 | BLOCK production gate | R3.2.3 Setup/portable 人工与 fault probe | 不阻塞 dormant merge；阻止 production enable |
 | Windows target parent dev/ino可靠性 | BLOCK production gate | Setup/portable实机验证；不新增native volume file ID | E10-B capability不足即fail closed，production保持false |
 | 真实资金样本与 Excel/WPS 展示 | BLOCK production gate | 资金负责人逐项人工复核 | 自动化不能替代人工资损验收 |
+| 默认并发全unit中的archive migration symlink错误码时序 | PROBE后确认为负载型测试基线：连续两次默认全套出现，单用例、完整单文件`46/46`与串行全unit均通过；本轮diff未触及archive storage | 测试基础设施负责人独立收敛，不在E10-B扩大scope | 不影响E10-B定向/串行证据；禁止把默认全unit表述为全绿 |
 | 当前安装的 electron-builder NSIS helper 含 `System::Store` | 已知 exact-parent 依赖环境基线；本轮不改依赖/构建合同 | 发布负责人按既有 Windows 构建链校准依赖后复跑 | 不归因于 E10-B；仍阻止把本机 unit 结果表述为全绿 |

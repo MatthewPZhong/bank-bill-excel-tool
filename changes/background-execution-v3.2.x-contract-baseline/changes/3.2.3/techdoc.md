@@ -266,6 +266,8 @@ E10-B不得再次normalize/resnapshot，必须在copy dispatch前、copy完成ha
 
 E10-B将FilePlan中的exact identity逐字传入Publisher target `expectedTargetParentIdentity`；Publisher不得重建caller authority。Publisher在preflight、artifact staged后、进入commit前与每个backup/publish正式target mutation紧前复核；Node文件API只能把检查窗口收窄到每次mutation紧前，本合同不宣称消除检查后纳秒级竞态。journal v1 entry additive持久同一identity，新E10-B journal必填；恢复读取带字段journal时，在任何target mutation/rollback前先复核，漂移进入现有`manual-recovery`/Recovery Hold且绝不重publish。旧journal缺字段沿既有恢复语义继续处理，不做DB migration或批量取消旧prepared任务。
 
+需要`targetParentIdentity`的Publisher batch还必须在任何journal/index创建或正式target mutation前，独立捕获固定`userDataDir` recovery root的canonical realpath与平台alias，并与每个required direct target parent做separator-aware双向containment检查。相等、target parent位于recovery root内、或target parent为recovery root祖先均返回稳定`TOOLBOX_PUBLICATION_RECOVERY_ROOT_TARGET_PARENT_CONFLICT`，整个batch保持journal/index/target写入为0；普通sibling和外部目录继续合法。该门禁只约束新建required guarded publication，不改变缺少identity的旧journal reader/recovery；它保护唯一recovery index/journal/receipt的可发现性，不扩展为完整ancestor identity链，也不声称覆盖检查后的理论微秒级目录替换。
+
 inline transport持有实际execution promise。正常terminal、shutdown cancel和close/terminate都在policy timeout内等待execution真实结算后才释放lease；timeout沿既有Supervisor映射为cleanup failure/transport leak并保留transport与task-owned staging cleanup ownership，late success/error不能改写已冻结terminal。
 
 ## 10. Fault matrix
@@ -287,6 +289,7 @@ inline transport持有实际execution promise。正常terminal、shutdown cancel
 | target absent后被创建/existing被替换或传入unbranded plan | 原FilePlan authority freshness失败，Publisher=0 |
 | direct parent/grandparent rename后ordinary replacement | FilePlan或Publisher exact parent identity失败，Publisher=0；恢复时manual-recovery/Hold且不触碰target |
 | direct parent为symlink或dev/ino不可靠 | normalizer拒绝symlink；E10-B对unreliable返回稳定capability failure，Publisher=0 |
+| required target parent与fixed Publisher recovery root相等或双向包含 | preflight稳定拒绝，journal/index/target写入为0；multi-target全批失败 |
 | Publisher committed后回包丢失/进程退出 | 同一journal恢复handoff，禁止重copy/重publish |
 | inline copy超过shutdown deadline | interrupted/cleanup leak evidence，保留owner，不虚报lease/leak收口 |
 
@@ -301,6 +304,7 @@ inline transport持有实际execution promise。正常terminal、shutdown cancel
 - NewAccount日期/账户/币种/模板golden；
 - artifact tamper/Publisher failure；
 - direct parent rename+ordinary replacement、grandparent replacement、same parent不变、原对象移走再移回、symlink与unreliable capability；
+- fixed recovery root与required target parent相等/内含/外包的真实FS拒绝、sibling/外部目录控制、multi-target原子拒绝与committed-before-settle restart控制；
 - Publisher prepare/stage/pre-commit/逐target mutation、journal recovery parent drift、旧journal兼容与committed不二次publish；
 -连续十轮Service、Windows Setup/portable、app quit。
 
