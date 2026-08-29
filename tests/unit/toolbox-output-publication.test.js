@@ -16,6 +16,9 @@ const {
   publishPreparedToolboxPublication,
   recoverPendingToolboxPublications
 } = require('../../src/main-process/toolbox-output-publication');
+const {
+  normalizeFilePlanV1
+} = require('../../src/main-process/archive-center/file-plan');
 
 const tmpDirs = [];
 const BATCH_CONTEXT = Object.freeze({
@@ -96,7 +99,269 @@ function recoverInFreshProcess(userDataDir) {
   return JSON.parse(child.stdout);
 }
 
+function targetParentIdentityFor(targetPath) {
+  return normalizeFilePlanV1({
+    version: 1,
+    allocation: 'eager',
+    inputs: [],
+    outputs: [{
+      filePath: targetPath,
+      role: 'publisher-output',
+      sourceOperation: 'new-account:save-as'
+    }]
+  }).outputs[0].targetParentIdentity;
+}
+
+function replaceParentDirectory(parentPath, suffix = 'moved') {
+  const movedPath = `${parentPath}.${suffix}`;
+  fs.renameSync(parentPath, movedPath);
+  fs.mkdirSync(parentPath);
+  return movedPath;
+}
+
 test.describe('toolbox output publication', () => {
+  test('required direct-parent evidence在preflight前已漂移时不创建journal或target', () => {
+    const ctx = makeContext();
+    const source = writeFile(path.join(ctx.generationDir, 'source.xlsx'), 'generated');
+    const target = path.join(ctx.outputDir, 'target.xlsx');
+    const expectedTargetParentIdentity = targetParentIdentityFor(target);
+    replaceParentDirectory(ctx.outputDir, 'preflight-moved');
+
+    assert.throws(
+      () => prepareToolboxPublication({
+        taskId: 'parent-changed-before-preflight',
+        artifacts: [validatedArtifact(source)],
+        targets: [{ targetPath: target, expectedTargetParentIdentity }],
+        userDataDir: ctx.userDataDir,
+        requireValidatedArtifacts: true,
+        requireTargetParentIdentity: true
+      }),
+      (error) => error && error.code === 'TOOLBOX_PUBLICATION_TARGET_PARENT_CHANGED'
+    );
+    assert.equal(fs.existsSync(target), false);
+    assert.deepEqual(taskFiles(ctx), []);
+  });
+
+  for (const checkpointName of [
+    'prepare:before-generation-inspect',
+    'prepare:after-staged',
+    'publish:before-target-mutation',
+    'publish:before-publish',
+    'publish:after-final-target-verify-before-commit'
+  ]) {
+    test(`direct parent在${checkpointName}被ordinary replacement后绝不发布`, () => {
+      const ctx = makeContext();
+      const source = writeFile(path.join(ctx.generationDir, 'source.xlsx'), 'generated');
+      const target = path.join(ctx.outputDir, 'target.xlsx');
+      const expectedTargetParentIdentity = targetParentIdentityFor(target);
+      let replaced = false;
+      const options = {
+        taskId: `parent-changed-${checkpointName.replace(/[^a-z]+/g, '-')}`,
+        artifacts: [validatedArtifact(source)],
+        targets: [{ targetPath: target, expectedTargetParentIdentity }],
+        userDataDir: ctx.userDataDir,
+        requireValidatedArtifacts: true,
+        requireTargetParentIdentity: true,
+        checkpoint(name) {
+          if (!replaced && name === checkpointName) {
+            replaced = true;
+            replaceParentDirectory(ctx.outputDir, checkpointName.replace(/[^a-z]+/g, '-'));
+          }
+        }
+      };
+      if (checkpointName.startsWith('prepare:')) {
+        assert.throws(
+          () => prepareToolboxPublication(options),
+          (error) => error && [
+            'TOOLBOX_PUBLICATION_TARGET_PARENT_CHANGED',
+            'TOOLBOX_PUBLICATION_MANUAL_RECOVERY'
+          ].includes(error.code)
+        );
+      } else {
+        const prepared = prepareToolboxPublication(options);
+        assert.throws(
+          () => publishPreparedToolboxPublication(prepared),
+          (error) => error && error.code === 'TOOLBOX_PUBLICATION_MANUAL_RECOVERY'
+        );
+      }
+      assert.equal(replaced, true);
+      assert.equal(fs.existsSync(target), false);
+      if (checkpointName === 'prepare:after-staged') {
+        assert.throws(
+          () => recoverPendingToolboxPublications({ userDataDir: ctx.userDataDir }),
+          (error) => error && error.code === 'TOOLBOX_PUBLICATION_MANUAL_RECOVERY'
+        );
+        assert.equal(indexValue(ctx).entries.length, 1);
+      }
+    });
+  }
+
+  test('每个existing target backup rename紧前复核direct parent identity', () => {
+    const ctx = makeContext();
+    const source = writeFile(path.join(ctx.generationDir, 'source.xlsx'), 'generated');
+    const target = writeFile(path.join(ctx.outputDir, 'target.xlsx'), 'original');
+    const expectedTargetParentIdentity = targetParentIdentityFor(target);
+    let movedPath = null;
+    const prepared = prepareToolboxPublication({
+      taskId: 'parent-changed-before-backup',
+      artifacts: [validatedArtifact(source)],
+      targets: [{ targetPath: target, expectedTargetParentIdentity }],
+      userDataDir: ctx.userDataDir,
+      requireValidatedArtifacts: true,
+      requireTargetParentIdentity: true,
+      checkpoint(name) {
+        if (!movedPath && name === 'publish:before-backup') {
+          movedPath = replaceParentDirectory(ctx.outputDir, 'before-backup-moved');
+        }
+      }
+    });
+    assert.throws(
+      () => publishPreparedToolboxPublication(prepared),
+      (error) => error && error.code === 'TOOLBOX_PUBLICATION_MANUAL_RECOVERY'
+    );
+    assert.equal(fs.existsSync(target), false);
+    assert.equal(fs.readFileSync(path.join(movedPath, 'target.xlsx'), 'utf8'), 'original');
+  });
+
+  test('prepare返回后、publish读journal前parent replacement仍由index evidence进入Hold', () => {
+    const ctx = makeContext();
+    const source = writeFile(path.join(ctx.generationDir, 'source.xlsx'), 'generated');
+    const target = path.join(ctx.outputDir, 'target.xlsx');
+    const expectedTargetParentIdentity = targetParentIdentityFor(target);
+    const prepared = prepareToolboxPublication({
+      taskId: 'parent-changed-before-publish-journal-read',
+      artifacts: [validatedArtifact(source)],
+      targets: [{ targetPath: target, expectedTargetParentIdentity }],
+      userDataDir: ctx.userDataDir,
+      requireValidatedArtifacts: true,
+      requireTargetParentIdentity: true
+    });
+    replaceParentDirectory(ctx.outputDir, 'before-publish-journal-read');
+
+    assert.throws(
+      () => publishPreparedToolboxPublication(prepared),
+      (error) => error && error.code === 'TOOLBOX_PUBLICATION_MANUAL_RECOVERY'
+    );
+    assert.throws(
+      () => recoverPendingToolboxPublications({ userDataDir: ctx.userDataDir }),
+      (error) => error && error.code === 'TOOLBOX_PUBLICATION_MANUAL_RECOVERY'
+    );
+    assert.equal(indexValue(ctx).entries.length, 1);
+    assert.equal(fs.existsSync(target), false);
+  });
+
+  test('journal持久exact parent identity；恢复漂移进入manual且旧journal仍兼容', () => {
+    const guarded = makeContext();
+    const guardedSource = writeFile(
+      path.join(guarded.generationDir, 'source.xlsx'),
+      'generated'
+    );
+    const guardedTarget = path.join(guarded.outputDir, 'target.xlsx');
+    const expectedTargetParentIdentity = targetParentIdentityFor(guardedTarget);
+    assert.throws(() => prepareToolboxPublication({
+      taskId: 'parent-identity-recovery-guard',
+      artifacts: [validatedArtifact(guardedSource)],
+      targets: [{ targetPath: guardedTarget, expectedTargetParentIdentity }],
+      userDataDir: guarded.userDataDir,
+      requireValidatedArtifacts: true,
+      requireTargetParentIdentity: true,
+      checkpoint(name) {
+        if (name === 'prepare:after-index') throw new ToolboxPublicationCrashError(name);
+      }
+    }), ToolboxPublicationCrashError);
+    const guardedJournalPath = indexValue(guarded).entries[0].journalAbsolutePath;
+    const journal = JSON.parse(fs.readFileSync(guardedJournalPath, 'utf8'));
+    assert.deepEqual(
+      journal.entries[0].expectedTargetParentIdentity,
+      expectedTargetParentIdentity
+    );
+    const moved = replaceParentDirectory(guarded.outputDir, 'recovery-moved');
+    for (const name of fs.readdirSync(moved).filter((item) => item.startsWith('.toolbox-publish-'))) {
+      fs.copyFileSync(path.join(moved, name), path.join(guarded.outputDir, name));
+    }
+    assert.throws(
+      () => recoverPendingToolboxPublications({ userDataDir: guarded.userDataDir }),
+      (error) => error && error.code === 'TOOLBOX_PUBLICATION_MANUAL_RECOVERY'
+    );
+    assert.equal(fs.existsSync(guardedTarget), false);
+    assert.equal(indexValue(guarded).entries.length, 1);
+
+    const legacy = makeContext();
+    const legacySource = writeFile(path.join(legacy.generationDir, 'source.xlsx'), 'generated');
+    const legacyTarget = path.join(legacy.outputDir, 'target.xlsx');
+    assert.throws(() => prepareToolboxPublication({
+      taskId: 'old-journal-without-parent-identity',
+      artifacts: [validatedArtifact(legacySource)],
+      targets: [{ targetPath: legacyTarget }],
+      userDataDir: legacy.userDataDir,
+      requireValidatedArtifacts: true,
+      checkpoint(name) {
+        if (name === 'prepare:after-index') throw new ToolboxPublicationCrashError(name);
+      }
+    }), ToolboxPublicationCrashError);
+    const legacyJournalPath = indexValue(legacy).entries[0].journalAbsolutePath;
+    const legacyJournal = JSON.parse(fs.readFileSync(legacyJournalPath, 'utf8'));
+    assert.equal(Object.hasOwn(legacyJournal.entries[0], 'expectedTargetParentIdentity'), false);
+    const recovered = recoverPendingToolboxPublications({ userDataDir: legacy.userDataDir });
+    assert.deepEqual(recovered.recovered.map((item) => item.action), ['cancelled-prepared']);
+    assert.equal(fs.existsSync(legacyTarget), false);
+  });
+
+  test('direct parent原对象移走再移回后prepared recovery合法', () => {
+    const ctx = makeContext();
+    const source = writeFile(path.join(ctx.generationDir, 'source.xlsx'), 'generated');
+    const target = path.join(ctx.outputDir, 'target.xlsx');
+    const expectedTargetParentIdentity = targetParentIdentityFor(target);
+    assert.throws(() => prepareToolboxPublication({
+      taskId: 'parent-object-restored',
+      artifacts: [validatedArtifact(source)],
+      targets: [{ targetPath: target, expectedTargetParentIdentity }],
+      userDataDir: ctx.userDataDir,
+      requireValidatedArtifacts: true,
+      requireTargetParentIdentity: true,
+      checkpoint(name) {
+        if (name === 'prepare:after-index') throw new ToolboxPublicationCrashError(name);
+      }
+    }), ToolboxPublicationCrashError);
+    const moved = replaceParentDirectory(ctx.outputDir, 'temporarily-moved');
+    fs.rmdirSync(ctx.outputDir);
+    fs.renameSync(moved, ctx.outputDir);
+    const recovered = recoverPendingToolboxPublications({ userDataDir: ctx.userDataDir });
+    assert.deepEqual(recovered.recovered.map((item) => item.action), ['cancelled-prepared']);
+    assert.equal(fs.existsSync(target), false);
+  });
+
+  test('journal parent identity被删改时index anchor阻断恢复且不触碰target', () => {
+    const ctx = makeContext();
+    const source = writeFile(path.join(ctx.generationDir, 'source.xlsx'), 'generated');
+    const target = path.join(ctx.outputDir, 'target.xlsx');
+    const expectedTargetParentIdentity = targetParentIdentityFor(target);
+    assert.throws(() => prepareToolboxPublication({
+      taskId: 'tampered-parent-identity-journal',
+      artifacts: [validatedArtifact(source)],
+      targets: [{ targetPath: target, expectedTargetParentIdentity }],
+      userDataDir: ctx.userDataDir,
+      requireValidatedArtifacts: true,
+      requireTargetParentIdentity: true,
+      checkpoint(name) {
+        if (name === 'prepare:after-index') throw new ToolboxPublicationCrashError(name);
+      }
+    }), ToolboxPublicationCrashError);
+    const journalPath = indexValue(ctx).entries[0].journalAbsolutePath;
+    const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8'));
+    delete journal.entries[0].expectedTargetParentIdentity;
+    delete journal.targetParentIdentityRequired;
+    fs.writeFileSync(journalPath, JSON.stringify(journal));
+
+    assert.throws(
+      () => recoverPendingToolboxPublications({ userDataDir: ctx.userDataDir }),
+      (error) => error && error.code === 'TOOLBOX_PUBLICATION_MANUAL_RECOVERY'
+    );
+    assert.equal(fs.existsSync(target), false);
+    assert.equal(indexValue(ctx).entries.length, 1);
+    assert.ok(fs.existsSync(journalPath));
+  });
+
   test('输出目标别名输入源时在任何正式覆盖前 fail-closed', () => {
     const ctx = makeContext();
     const source = writeFile(path.join(ctx.outputDir, 'source.xlsx'), 'source');

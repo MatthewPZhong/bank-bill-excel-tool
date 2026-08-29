@@ -9,6 +9,9 @@ const {
   assertNormalizedFilePlanV1
 } = require('../archive-center/file-plan');
 const {
+  normalizeTargetParentIdentity
+} = require('../archive-center/target-parent-identity');
+const {
   normalizeSourceSnapshot,
   sourceSnapshotFromStat,
   sourceSnapshotMatchesStat
@@ -278,6 +281,17 @@ function createNewAccountSaveAsInput(options = {}) {
       filePlan.inputs[0].sourceOperation !== NEW_ACCOUNT_SAVE_AS_ACTION ||
       filePlan.outputs[0].sourceOperation !== NEW_ACCOUNT_SAVE_AS_ACTION) {
     fail('NEW_ACCOUNT_SAVE_AS_FILE_PLAN_INVALID', 'NewAccount save-as FilePlan必须精确绑定一个source和target');
+  }
+  try {
+    normalizeTargetParentIdentity(filePlan.outputs[0].targetParentIdentity, {
+      requireReliable: true
+    });
+  } catch (error) {
+    fail(
+      'NEW_ACCOUNT_SAVE_AS_TARGET_PARENT_IDENTITY_UNAVAILABLE',
+      'NewAccount save-as要求可靠的direct target parent identity',
+      error
+    );
   }
   const sourcePath = filePlan.inputs[0].filePath;
   const targetPath = filePlan.outputs[0].filePath;
@@ -643,8 +657,10 @@ async function validateAndPublishNewAccountSaveAs(options = {}) {
       targets: [{
         targetPath: filePlan.outputs[0].filePath,
         expectedTargetSnapshot: filePlan.outputs[0].targetSnapshot,
+        expectedTargetParentIdentity: filePlan.outputs[0].targetParentIdentity,
         fileName: filePlan.outputs[0].originalName
       }],
+      requireTargetParentIdentity: true,
       archiveInputFiles: [{
         filePath: filePlan.inputs[0].filePath,
         sourceOperation: filePlan.inputs[0].sourceOperation,

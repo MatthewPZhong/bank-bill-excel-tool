@@ -656,7 +656,7 @@ test('filePlan boundary 接受零字节普通文件，拒绝目录、symlink 和
   const linkedOutputDirectory = path.join(fixture.directory, 'linked-output');
   fs.mkdirSync(realOutputDirectory);
   fs.symlinkSync(realOutputDirectory, linkedOutputDirectory);
-  const linkedParentPlan = normalizeFilePlanV1({
+  assert.throws(() => normalizeFilePlanV1({
     version: 1,
     allocation: 'eager',
     inputs: [],
@@ -665,8 +665,133 @@ test('filePlan boundary 接受零字节普通文件，拒绝目录、symlink 和
       role: 'output',
       sourceOperation: 'test'
     }]
+  }), (error) => error && error.code === 'ARCHIVE_TARGET_PARENT_INVALID');
+});
+
+test('FilePlan由Main冻结direct target parent identity并拒绝rename+ordinary replacement', (t) => {
+  const fixture = createFixture(t);
+  const parent = path.join(fixture.directory, 'target-parent');
+  fs.mkdirSync(parent);
+  const target = path.join(parent, 'result.xlsx');
+  const injected = Object.freeze({
+    canonicalRealPath: '/caller/injected',
+    aliasKey: 'caller-injected',
+    deviceId: '1',
+    inode: '2',
+    identityReliable: true,
+    identityKind: 'dev-inode'
   });
-  assert.equal(linkedParentPlan.outputs.length, 1);
+  const plan = normalizeFilePlanV1({
+    version: 1,
+    allocation: 'eager',
+    inputs: [],
+    outputs: [{
+      filePath: target,
+      role: 'output',
+      sourceOperation: 'new-account:save-as',
+      targetParentIdentity: injected
+    }]
+  });
+  const identity = plan.outputs[0].targetParentIdentity;
+  assert.deepEqual(Object.keys(identity).sort(), [
+    'aliasKey',
+    'canonicalRealPath',
+    'deviceId',
+    'identityKind',
+    'identityReliable',
+    'inode'
+  ]);
+  assert.equal(Object.isFrozen(identity), true);
+  assert.equal(identity.canonicalRealPath, fs.realpathSync(parent));
+  assert.notEqual(identity.aliasKey, injected.aliasKey);
+  assert.equal(identity.identityReliable, true);
+  assert.equal(identity.identityKind, 'dev-inode');
+  assert.match(identity.deviceId, /^[1-9]\d*$/);
+  assert.match(identity.inode, /^[1-9]\d*$/);
+  assert.equal(assertFilePlanFresh(plan), plan);
+
+  const moved = `${parent}.moved`;
+  fs.renameSync(parent, moved);
+  fs.mkdirSync(parent);
+  assert.throws(
+    () => assertFilePlanFresh(plan),
+    (error) => error && error.code === 'ARCHIVE_TARGET_PARENT_CHANGED'
+  );
+});
+
+test('FilePlan direct parent identity覆盖grandparent replacement并允许原对象移回', (t) => {
+  const fixture = createFixture(t);
+  const grandparent = path.join(fixture.directory, 'grandparent');
+  const parent = path.join(grandparent, 'direct-parent');
+  fs.mkdirSync(parent, { recursive: true });
+  const plan = normalizeFilePlanV1({
+    version: 1,
+    allocation: 'eager',
+    inputs: [],
+    outputs: [{
+      filePath: path.join(parent, 'result.xlsx'),
+      role: 'output',
+      sourceOperation: 'new-account:save-as'
+    }]
+  });
+  assert.equal(assertFilePlanFresh(plan), plan);
+
+  const movedGrandparent = `${grandparent}.moved`;
+  fs.renameSync(grandparent, movedGrandparent);
+  fs.mkdirSync(parent, { recursive: true });
+  assert.throws(
+    () => assertFilePlanFresh(plan),
+    (error) => error && error.code === 'ARCHIVE_TARGET_PARENT_CHANGED'
+  );
+
+  fs.rmSync(grandparent, { recursive: true, force: true });
+  fs.renameSync(movedGrandparent, grandparent);
+  assert.equal(assertFilePlanFresh(plan), plan);
+});
+
+test('FilePlan把0 dev/ino标记unsupported，generic freshness仍兼容', (t) => {
+  const fixture = createFixture(t);
+  const parent = path.join(fixture.directory, 'unreliable-parent');
+  fs.mkdirSync(parent);
+  const unreliableParentPaths = new Set([
+    path.resolve(parent),
+    path.resolve(fs.realpathSync(parent))
+  ]);
+  const fsImpl = Object.create(fs);
+  fsImpl.statSync = (filePath, options) => {
+    const stat = fs.statSync(filePath, options);
+    if (!unreliableParentPaths.has(path.resolve(String(filePath))) ||
+        !options || options.bigint !== true) {
+      return stat;
+    }
+    return {
+      ...stat,
+      dev: 0n,
+      ino: 0n,
+      isDirectory: () => stat.isDirectory(),
+      isFile: () => stat.isFile(),
+      isSymbolicLink: () => false
+    };
+  };
+  const plan = normalizeFilePlanV1({
+    version: 1,
+    allocation: 'eager',
+    inputs: [],
+    outputs: [{
+      filePath: path.join(parent, 'result.xlsx'),
+      role: 'output',
+      sourceOperation: 'legacy:generic-output'
+    }]
+  }, { fsImpl });
+  assert.deepEqual(plan.outputs[0].targetParentIdentity, {
+    canonicalRealPath: fs.realpathSync(parent),
+    aliasKey: plan.outputs[0].targetParentIdentity.aliasKey,
+    deviceId: null,
+    inode: null,
+    identityReliable: false,
+    identityKind: 'unsupported'
+  });
+  assert.equal(assertFilePlanFresh(plan, { fsImpl }), plan);
 });
 
 test('FilePlan reserve 后 freshness 只复核冻结 input 与 target identity', (t) => {

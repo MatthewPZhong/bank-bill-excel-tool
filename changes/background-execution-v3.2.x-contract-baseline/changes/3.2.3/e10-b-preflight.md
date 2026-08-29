@@ -31,7 +31,7 @@
 | Main authority在dispatch前同步遍历近上限记录是否阻塞 | 响应性/取消 | 高 | 容易 | 233536行实测约521ms、timer同量延迟 | PROBE | near-max heartbeat与mid-authority abort | async bounded batch + scheduler/cancel safepoint；取消不spawn Worker |
 | Publisher committed到Task settlement崩溃窗口如何唯一恢复 | 恢复边界 | 高 | 一般 | 既有archive-handoff journal、startup recovery与ack seam | PROBE | hard-kill/回包丢失/pre-post settle/重复recovery | `requireArchiveHandoff=true`；settle后终态ack，禁止第二receipt/retry |
 | inline terminate是否代表实际copy已停止 | 生命周期 | 高 | 容易 | 原adapter只closed/abort立即返回，真实slow-copy仍运行 | PROBE | slow copy shutdown/deadline/late terminal | adapter持有executionPromise；terminate/close await，Supervisor既有timeout负责leak evidence |
-| target parent rename+ordinary replacement是否可识别 | FilePlan/Publisher合同 | 高 | 一般 | 现有targetSnapshot与symlink检查不能识别普通目录replacement | BLOCK | 需要FilePlan与Publisher传递每级ancestor identity | 未获合同授权前不改production；production仍false |
+| target parent rename+ordinary replacement是否可识别 | FilePlan/Publisher合同 | 高 | 一般 | 现有targetSnapshot与symlink检查不能识别普通目录replacement；用户已授权最小公共合同增量 | PROBE | direct parent identity贯穿FilePlan/Publisher/journal真实FS故障注入 | 只冻结resolved direct parent，不保存ancestor chain；E10-B require reliable，旧action/journal兼容 |
 | copy 期间 source drift 能否唯一判定 | TOCTOU | 高 | 容易 | copy 前后 identity/snapshot/hash + staging hash 可交叉验证 | PROBE | before/during/after replacement fault tests | 任一 metadata/identity/hash不一致失败；同 bytes replacement也需 identity不变 |
 | shutdown cancel 在不可中断 `copyFile` 中的边界 | 生命周期 | 中 | 容易 | inline adapter AbortSignal；copyFile 无通用 AbortSignal | PROBE | 实际slow-copy heartbeat/quit/deadline test | copy中等待syscall；transport cleanup等待实际execution，超时显式leak并保留owner |
 | Windows packaged durable publication | 发布门禁 | 高 | 困难 | 合同明确要求 R3.2.3 packaged probe | BLOCK production only | Setup/portable 人工 fault probe | 不阻塞 dormant E10-B，production 必须保持 false |
@@ -45,5 +45,6 @@
 | 2 | 实现 bounded copy contract 与 source currentness | 同 size/mtime replacement、copy partial/error | before/during/after drift 全 fail closed | 禁止进入 Main validation | 删除新模块即可回滚 |
 | 3 | 接 FilePlan、ownership、business readback | alias/symlink/hardlink/outside/tamper | Publisher=0 mutants | 禁止 Publisher | 保持 dormant seam |
 | 4 | 接 existing singleton FIFO Publisher | journal 为唯一 durable receipt/recovery | Publisher 0/1、failure/uncertain/recovery | 任务 interrupted/hold 由既有链负责 | 不新增 fallback/retry |
-| 5 | 注册 dormant policy/runtime | I/O=1、CPU/Worker=0、cancel/quit | Governor acquire/release/reject 与 heartbeat | production 不可启用 | production 保持 false/legacy/0 |
-| 6 | 全量回归与 blindspot pass | E10-A/资金/平台不漂移 | 定向、unit、integration、smoke、lint/check | 阻止交付 | 精确回退 E10-B commits |
+| 5 | direct parent identity贯穿FilePlan/Publisher/journal | parent rename+ordinary replacement与恢复target mutation | prepare/stage/pre-commit/recovery全部fail closed | manual recovery/Hold | selector关闭；旧journal reader兼容 |
+| 6 | 注册 dormant policy/runtime | I/O=1、CPU/Worker=0、cancel/quit | Governor acquire/release/reject 与 heartbeat | production 不可启用 | production 保持 false/legacy/0 |
+| 7 | 全量回归与 blindspot pass | E10-A/资金/平台不漂移 | 定向、unit、integration、smoke、lint/check | 阻止交付 | 精确回退 E10-B commits |

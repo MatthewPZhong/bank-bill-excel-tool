@@ -450,19 +450,22 @@ test('source/target symlink、hardlink、ancestor symlink 与 staging alias 全�
   const targetDirLink = path.join(root, 'target-dir-link');
   fs.mkdirSync(realTargetDir);
   fs.symlinkSync(realTargetDir, targetDirLink, 'dir');
-  const ancestorPlan = normalizeFilePlanV1({
-    version: 1,
-    allocation: 'eager',
-    inputs: [{ filePath: fixture.sourcePath, role: 'source', sourceOperation: NEW_ACCOUNT_SAVE_AS_ACTION }],
-    outputs: [{
-      filePath: path.join(targetDirLink, 'saved.xlsx'),
-      role: 'output',
-      sourceOperation: NEW_ACCOUNT_SAVE_AS_ACTION
-    }]
-  });
   assert.throws(
-    () => createNewAccountSaveAsInput({ ...base, filePlan: ancestorPlan }),
-    (error) => error.code === 'NEW_ACCOUNT_SAVE_AS_PATH_SYMLINK'
+    () => normalizeFilePlanV1({
+      version: 1,
+      allocation: 'eager',
+      inputs: [{
+        filePath: fixture.sourcePath,
+        role: 'source',
+        sourceOperation: NEW_ACCOUNT_SAVE_AS_ACTION
+      }],
+      outputs: [{
+        filePath: path.join(targetDirLink, 'saved.xlsx'),
+        role: 'output',
+        sourceOperation: NEW_ACCOUNT_SAVE_AS_ACTION
+      }]
+    }),
+    (error) => error.code === 'ARCHIVE_TARGET_PARENT_INVALID'
   );
   const refreshed = saveAsOptions(root, fixture);
   assert.throws(
@@ -485,6 +488,7 @@ test('Main technical/business validation 后 Publisher 恰好一次；source/tar
     'source-drift',
     'target-drift',
     'target-ancestor-race',
+    'target-parent-replacement',
     'business',
     'extra-sheet',
     'extra-column',
@@ -669,6 +673,11 @@ test('Main technical/business validation 后 Publisher 恰好一次；source/tar
           fs.mkdirSync(alternateTargetDir);
           fs.symlinkSync(alternateTargetDir, targetDir, 'dir');
         }
+        if (phase === 'target-parent-replacement') {
+          const targetDir = path.dirname(options.targetPath);
+          fs.renameSync(targetDir, `${targetDir}.moved`);
+          fs.mkdirSync(targetDir);
+        }
       };
       if (phase === 'success') {
         const runtime = createBackgroundExecutionRuntime({
@@ -690,6 +699,11 @@ test('Main technical/business validation 后 Publisher 恰好一次；source/tar
           publicationInput.targets[0].expectedTargetSnapshot,
           options.filePlan.outputs[0].targetSnapshot
         );
+        assert.strictEqual(
+          publicationInput.targets[0].expectedTargetParentIdentity,
+          options.filePlan.outputs[0].targetParentIdentity
+        );
+        assert.equal(publicationInput.requireTargetParentIdentity, true);
         assert.equal(publicationInput.targets[0].targetPath, options.filePlan.outputs[0].filePath);
         assert.equal(publicationInput.artifacts[0].sourcePath, options.stagingPath);
         assert.equal(publicationInput.artifacts[0].sha256, fixture.generationResult.artifact.sha256);
@@ -731,6 +745,59 @@ test('Main technical/business validation 后 Publisher 恰好一次；source/tar
       }
     });
   }
+});
+
+test('E10-B对unreliable direct parent identity稳定fail closed且Publisher=0', async () => {
+  const root = tempRoot('new-account-e10-b-parent-capability-');
+  const fixture = await generatedFixture(root);
+  const base = saveAsOptions(root, fixture);
+  const parent = path.dirname(base.targetPath);
+  const unreliableParentPaths = new Set([
+    path.resolve(parent),
+    path.resolve(fs.realpathSync(parent))
+  ]);
+  const fsImpl = Object.create(fs);
+  fsImpl.statSync = (filePath, options) => {
+    const stat = fs.statSync(filePath, options);
+    if (!unreliableParentPaths.has(path.resolve(String(filePath))) ||
+        !options || options.bigint !== true) {
+      return stat;
+    }
+    return {
+      ...stat,
+      dev: 0n,
+      ino: 0n,
+      isDirectory: () => stat.isDirectory(),
+      isFile: () => stat.isFile(),
+      isSymbolicLink: () => false
+    };
+  };
+  const filePlan = normalizeFilePlanV1({
+    version: 1,
+    allocation: 'eager',
+    inputs: [{
+      filePath: fixture.sourcePath,
+      role: 'new-account-source-artifact',
+      sourceOperation: NEW_ACCOUNT_SAVE_AS_ACTION
+    }],
+    outputs: [{
+      filePath: base.targetPath,
+      role: 'new-account-save-as-output',
+      sourceOperation: NEW_ACCOUNT_SAVE_AS_ACTION
+    }]
+  }, { fsImpl, platform: 'win32' });
+  let publisherCalls = 0;
+  await assert.rejects(
+    validateAndPublishNewAccountSaveAs({
+      ...base,
+      filePlan,
+      fsImpl,
+      platform: 'win32',
+      publisher: async () => { publisherCalls += 1; }
+    }),
+    (error) => error && error.code === 'NEW_ACCOUNT_SAVE_AS_TARGET_PARENT_IDENTITY_UNAVAILABLE'
+  );
+  assert.equal(publisherCalls, 0);
 });
 
 test('Publisher failure 清理；uncertain/manual-recovery 保留 staging 且不 blind replay', async (t) => {

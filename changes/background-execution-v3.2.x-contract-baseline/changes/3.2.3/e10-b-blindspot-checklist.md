@@ -22,7 +22,7 @@
 - [x] 同 size/mtime replacement、during-copy drift、after-copy drift 全部 Publisher=0。
 - [x] staging partial/collision/tamper/replace、copy error 全部 Publisher=0 并安全清理。
 - [x] target absent→created、existing→replacement（含相同metadata）与unbranded clone均在copy前Publisher=0。
-- [ ] BLOCK：现有FilePlan/Publisher尚未冻结普通target ancestor directory identity；rename+ordinary replacement可绕过。已提交只读合同delta，未获授权不改公开合同。
+- [x] 用户已授权最小公共合同增量：FilePlan/Publisher/journal冻结并复核resolved direct parent identity；只覆盖direct parent，不实现整条ancestor chain。
 - [x] Publisher 调用前再次复核现有FilePlan target snapshot、symlink/alias、staging ownership/identity/hash与Main-owned业务 evidence。
 - [x] Publisher failure 不 blind retry；committed保持archive-handoff journal，settlement失败/回包丢失只走既有recovery并保留RecoverySource/Hold evidence。
 - [x] cancel/quit在copy前后safepoint生效；inline terminate/close等待实际execution，deadline显式transport leak；Publisher committed不伪报cancelled。
@@ -40,14 +40,17 @@
 
 ## 最终门禁
 
+- [x] Direct-parent授权轮RED为`123/138 PASS, 15 FAIL`；核心FilePlan/E10-B/Publisher修复后`141/141 PASS`，交叉聚焦与archive repository/public DTO均全绿。
+- [x] Direct-parent最终全量：unit `6406/6410 PASS, 3 SKIP`（仅已知NSIS baseline 1 FAIL）；integration `51/51 scripts, 2455/2455 assertions`；smoke/lint/node-check/diff-check PASS。
 - [x] Round2定向：E10-A `25/25`、E10-B `47/47`、strict `18/18`，交叉聚焦 `189/189` PASS。
 - [x] Round2全量：unit `6390/6394 PASS, 3 SKIP`（仅 exact-parent 已知 NSIS baseline）；integration `51/51 scripts, 2455/2455 assertions`；smoke/lint/node-check/diff-check PASS。
 - [x] E10-A、strict readback、Publisher、Governor/recovery 聚焦回归。
 - [x] 全 integration、smoke、ESLint、node --check、git diff --check；全 unit 为 `6369/6373 PASS, 3 SKIP`，仅剩 exact-parent 可复现的 Windows NSIS 依赖模板基线失败，未豁免。
 - [ ] ⚠️ 资金红线：真实资金样本需人工复核。
 - [ ] Windows Setup/portable 与 durable restart recovery 需人工门禁。
+- [ ] 旧二进制回滚前release gate必须证明open Publisher journal=0；本轮不新增迁移器。
 
 ## 关联功能 review
 
-- `rules/important-variables.md` 未命中已登记的 Critical / Important-skeleton / Runtime-state / Risk-sensitive / Minor 符号。
+- 命中`ArchiveRepository` / `ArchiveService` Risk-sensitive审计血缘：本轮不改十四表schema/批号/状态/删除/Blob合同，只在内部artifact metadata持久FilePlan已冻结的bounded target-parent evidence；public list/detail显式剥离该路径/identity，定向真实SQLite+FS已验证raw持久与public DTO不泄露。
 - 新增的 `new-account:save-as` policy、copy contract、FilePlan authority brand 与 singleton Publisher wrapper 是跨文件 seam；本轮已按 E10-B checklist 及 archive/FilePlan/TaskLifecycle 定向回归 review，留待版本硬节点由 `/check-vars` 正式统计（本任务明确禁止运行 `check-vars` / `scan:vars`）。
