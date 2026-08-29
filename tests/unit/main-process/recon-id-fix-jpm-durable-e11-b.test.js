@@ -2306,12 +2306,18 @@ for (const legacyStage of ['task-owner', 'hold-owner', 'unbound-attempt']) {
         assert.equal(recovered.sourceCount, 1);
         assert.equal(recovered.decisions[0].inspection.outcome, definitiveOutcome);
         const finalTask = createArchiveRepository(second.database.db).getTaskRun(taskRunId);
-        assert.equal(finalTask.status, 'interrupted');
+        assert.equal(
+          finalTask.status,
+          definitiveOutcome === 'committed' ? 'interrupted' : 'failed'
+        );
         assert.equal(
           finalTask.failureCode,
           definitiveOutcome === 'committed' ? 'RESULT_LOST' : 'NOT_COMMITTED'
         );
         assert.equal(finalTask.metadata.recoveryHold, definitiveOutcome === 'committed');
+        if (definitiveOutcome === 'not-committed') {
+          assert.equal(finalTask.metadata.recoveryOutcome, 'not-committed');
+        }
         const finalHold = second.readRepository.getRecoveryHoldBySource(
           'critical-intent',
           `critical-intent:${prepared.intentId}`
@@ -2326,7 +2332,7 @@ for (const legacyStage of ['task-owner', 'hold-owner', 'unbound-attempt']) {
         assert.equal(second.readRepository.getCriticalIntentById(prepared.intentId).state, 'closed');
         const settledCounts = recoveryPersistenceCounts(second.database.db);
         assert.deepEqual(settledCounts, {
-          ownerTotal: baseline.ownerTotal + (definitiveOutcome === 'committed' ? 5 : 4),
+          ownerTotal: baseline.ownerTotal + (definitiveOutcome === 'committed' ? 5 : 6),
           ownerPrepared: 0,
           attemptTotal: baseline.attemptTotal + 1,
           attemptPrepared: 0,
@@ -3262,9 +3268,28 @@ test('critical ACK后的shutdown将JPM保持protected，transport loss不降级�
 
 test('critical前cancel即使随后持久ACK也由Inspector判定not-committed且不重跑', async () => {
   const capture = createPausedCriticalReadyCapture();
+  const controlTransactionCommands = [];
   const harness = createHarness({
     capture,
-    planTransitions: reconFixJpmRecoveryPlanTransitions
+    planTransitions: reconFixJpmRecoveryPlanTransitions,
+    wrapRecoveryControlRepository(base) {
+      return Object.freeze({
+        runInControlTransaction(work) {
+          const commands = [];
+          const result = base.runInControlTransaction((transaction) => work(Object.freeze({
+            ...transaction,
+            transitionWithRecoveryEvent(input) {
+              if (input.transition.entityKind === 'task-run') {
+                commands.push(input.transition.command);
+              }
+              return transaction.transitionWithRecoveryEvent(input);
+            }
+          })));
+          controlTransactionCommands.push(commands);
+          return result;
+        }
+      });
+    }
   });
   let shutdownCompleted = false;
   try {
@@ -3301,9 +3326,17 @@ test('critical前cancel即使随后持久ACK也由Inspector判定not-committed�
       taskRunId
     );
     assert.equal(intent.state, 'closed');
+    assert.equal(controlTransactionCommands.some((commands) =>
+      commands.length === 3 &&
+      commands[0] === 'mark-interrupted' &&
+      commands[1] === 'begin-recovery' &&
+      commands[2] === 'complete-recovery-failure'), true,
+    'direct not-committed必须在单个RecoveryControl事务内完成interrupt→recover→fail');
     const recoveredTask = archive.getTaskRun(taskRunId);
-    assert.equal(recoveredTask.status, 'interrupted');
+    assert.equal(recoveredTask.status, 'failed');
     assert.equal(recoveredTask.failureCode, 'NOT_COMMITTED');
+    assert.equal(recoveredTask.metadata.recoveryHold, false);
+    assert.equal(recoveredTask.metadata.recoveryOutcome, 'not-committed');
     assert.deepEqual(harness.readRepository.listActiveRecoveryHolds(), []);
     const criticalReady = capture.messages.find((message) =>
       message.channel === 'job' && message.actionKey === RECON_FIX_RUN_JPM_ACTION &&
