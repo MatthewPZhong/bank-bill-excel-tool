@@ -984,7 +984,7 @@ test('async admission期间调用方篡改plan不能改变已绑定post-image', 
   assert.equal(readBalanceSeedRecords(h.root, '中行')[0].endBalance, 1201);
 });
 
-test('物理target alias可逆，Darwin同物理拼写共享scope，Windows NFD/ß不改写或误合并', async (t) => {
+test('物理target alias可逆，Darwin同物理拼写共享scope，Windows名称不被identity改写', async (t) => {
   const composed = 'ÉBANK';
   const decomposed = 'e\u0301bank';
   assert.notEqual(
@@ -1042,6 +1042,31 @@ test('物理target alias可逆，Darwin同物理拼写共享scope，Windows NFD/
   assert.equal(firstIntent.conflictScopeKey, secondIntent.conflictScopeKey);
   assert.equal(fs.readdirSync(path.join(h.root, 'balance-seeds')).length, 1,
     '物理同target不得因case/Unicode别名创建第二文件');
+
+  let holdChecks = 0;
+  const unsafe = createHarness(t, {
+    platform: 'win32',
+    recoveryHoldGate: {
+      assertNoRecoveryHold() {
+        holdChecks += 1;
+        return true;
+      }
+    }
+  });
+  const input = settlementInput({
+    storageRoot: unsafe.root,
+    bankName: 'straße',
+    records: [record({ templateName: 'straße-上海', endBalance: 20 })]
+  });
+  const target = unsafe.resolveTargetPath(targetAlias(input));
+  await assert.rejects(unsafe.coordinator.settle(input), {
+    name: 'TargetIdentityError',
+    code: 'TARGET_IDENTITY_WINDOWS_CASE_MAPPING_UNSAFE'
+  });
+  assert.equal(holdChecks, 0, 'unsafe identity不得猜scope后再走Hold gate');
+  assert.equal(fs.existsSync(target), false);
+  assert.deepEqual(unsafe.readRepository.listOpenCriticalIntents(), []);
+  assert.deepEqual(unsafe.readRepository.listRecoveryEvents(input.taskRunId), []);
 });
 
 test('startup binding不复制production policy authority且target alias不携带账号/路径', () => {

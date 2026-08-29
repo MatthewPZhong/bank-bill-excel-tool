@@ -39,7 +39,7 @@
 | closed/recovered operation 是否可在无 mutation 下重放 | 是；先按 operationKey 查 Intent 并验证完整 binding，exact 返回稳定结果，different post fail closed | committed/recovered replay + conflict test |
 | no-op 是否可以跳过 request/token gate | 否；read-only request-owner conflict 与 awaited preCommit 都先执行，但 no-op 不创建 Intent | async stale/orphan request test |
 | A/B/A token 如何处理 | 持久完整 history；A(current) 可复用，B 新增 ordinal，历史 A 重放拒绝 stale；损坏/重复 metadata fail closed | ordinal history/corruption tests |
-| 跨平台同一物理文件 scope | 物理 legacy basename 可逆保存；scope 另走仓库 target identity。Darwin 由实盘 probe 支持 NFC/NFD、大小写与 expansion fold，Windows 对已存在目标取 realpath，缺失目标只作保守 ASCII case fold | Darwin physical-alias probe + Windows NFD/ß lexical identity test |
+| 跨平台同一物理文件 scope | 物理 legacy basename 可逆保存；scope 另走仓库 target identity。Darwin 由实盘 probe 支持 NFC/NFD、大小写与 expansion fold；Windows 已存在目标取 realpath，缺失 segment 逐 code point 只接受单 code-point uppercase，不做 NFC/NFD，expansion mapping fail closed | Darwin physical-alias probe + Windows É/é、NFD、ß lexical identity tests |
 | live Inspector 如何避免第二 authority | canonical attempt 可恢复；observation event 与所有 transition 在同一 RecoveryControl 事务提交，startup 重放同一状态机 | reply loss / pre-observation crash / repeated startup tests |
 | settlement 如何证明业务输入同源 | 先冻结 legacy preflight plan snapshot，再校验 bank/records/account/currency/date/balance，commit-time materialize `updatedAt` 并复用 legacy serializer | plan tamper/async mutation/bank mismatch/byte golden tests |
 
@@ -51,7 +51,15 @@
 | legacy plan 在等待期间是否仍代表当前 records | 只有 canonical freshness gate 完成 continuation 检查、target identity 校验、records evidence 重读与 target 双快照后才接受；并发新增记录使旧 plan fail closed | stale-plan record-conservation test |
 | awaited admission 后的 no-op/pre-image 是否可信 | 不直接复用旧 snapshot；重新读取 target 并与 freshness evidence 做 CAS，漂移时在 no-op/Intent 前失败 | async no-op drift test |
 | Hold reservation 与 control transaction 间崩溃如何恢复 | live/startup 共享同一 Hold request/transition/safe payload；startup 恢复原 prepared request 并原子提交 observation+Hold | reservation-crash + double-startup idempotency test |
-| Windows legacy 名称能否用 Unicode full fold 写回 | 不能；真实路径保留可逆 legacy basename。缺失 NTFS 目标没有可移植 upcase-table API，只能保守 ASCII fold，Windows packaged probe 继续作为 release gate | Windows NFD/ß distinct-path test + Darwin inode probe |
+| Windows legacy 名称能否用 Unicode full fold 写回 | 不能；真实路径保留可逆 legacy basename。缺失 NTFS 目标没有可移植 upcase-table API，只接受不扩展的 per-code-point uppercase；NFC/NFD 不归一，ß/SS 等 expansion 不猜 scope 而直接阻断 | Windows É/é same-key、NFD distinct、ß fail-closed test + Darwin inode probe |
+
+## Reviewer Round 3 Unknowns Closure
+
+| 未知 | 结论 | 动态证据 |
+| --- | --- | --- |
+| Windows 缺失目标的非 ASCII simple case 是否会漏同一 scope | 不会；É/é 与 σ/ς 逐 code point uppercase 后共享 identity，且路径分隔结构保持不变 | missing-target É/é + staging containment adjacent tests |
+| simple case 是否会误做 Unicode normalization 或 expansion fold | 不会；NFC/NFD 保持不同 identity；ß、ligature 等多 code-point uppercase 在确证 missing segment 时抛 `TARGET_IDENTITY_WINDOWS_CASE_MAPPING_UNSAFE` | NFD distinct、ß/SS fail-closed、existing-realpath authority tests |
+| unsafe identity 能否绕到 Hold/Intent 或文件写入 | 不能；scope 构造前即抛有界错误，不调用 Hold gate，不创建 RecoveryControl/Intent/target | manual settlement Hold-bypass-unreachable regression |
 | `updatedAt` 是否代表真实 commit attempt | 是；所有 awaited admission、Hold 和最终 pre-image 检查完成后才取时钟，并由同一 materialized bytes 同时绑定 Intent/post-image | delayed-clock ordering test |
 
 ## 风险优先计划

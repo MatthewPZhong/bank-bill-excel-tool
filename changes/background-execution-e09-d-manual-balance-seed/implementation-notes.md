@@ -39,7 +39,7 @@
 | 原计划 | 实际方案 | 原因 | 影响 | Spec 已同步 |
 | --- | --- | --- | --- | --- |
 | rely on the target-directory fsync after rename | first creation also fsyncs the parent directory entry | `balance-seeds` is lazily created | stronger durability; no public contract change | contract already requires durable target post-image |
-| raw bank alias | reversible sanitized legacy basename is encoded in the alias; conflict scope separately uses repository target identity (Darwin realpath/full fold, Windows existing-target realpath or conservative ASCII lexical fold) | identity keys are not safe physical filenames, and missing NTFS targets expose no portable Unicode upcase table | preserves exact legacy path while still coalescing physically proven aliases | no; implementation detail only |
+| raw bank alias | reversible sanitized legacy basename is encoded in the alias; conflict scope separately uses repository target identity (Darwin realpath/full fold; Windows existing-target realpath or strict single-code-point uppercase for missing segments) | identity keys are not safe physical filenames, and missing NTFS targets expose no portable Unicode upcase table | preserves exact legacy path, coalesces É/é, keeps NFC/NFD distinct and rejects expansion scope guesses | no; implementation detail only |
 
 ## Reviewer Round 1 Findings
 
@@ -49,7 +49,7 @@
 | closed/recovered replay could reach mutation first | operation-key lookup validates exact plan/job/scope/session/token/ordinal and returns the stable decision before any write; mismatch conflicts | committed/recovered replay and changed-post conflict test |
 | no-op could bypass persisted request/pre-commit gates | read-only request-owner inspection and awaited `preCommitCheck` precede byte no-op, while no-op still creates no Intent | async stale gate + orphan request-owner test |
 | ordinal stored only current token | strict versioned history validates complete monotonic one-to-one mappings; A/B/A fails stale | history replay/corruption tests |
-| target scope could drift by OS/path spelling | shared target identity authority resolves existing targets; Darwin uses measured full fold, while missing Windows targets retain Unicode spelling and only ASCII-fold | Darwin physical-alias + Windows NFD/ß distinct-path test |
+| target scope could drift by OS/path spelling | shared target identity authority resolves existing targets; Darwin uses measured full fold, while missing Windows segments use strict non-expanding Unicode uppercase without normalization | Darwin physical-alias + Windows É/é/NFD/ß tests |
 | live Inspector could leave split recovery state | canonical observation attempt is resumable; its event plus Intent/Hold transitions commit atomically in RecoveryControl | reply-loss, observation crash boundary and startup idempotency tests |
 | settlement accepted independently supplied alias/records | only an immutable snapshot of the validated legacy plan is accepted and hash-bound; commit-time timestamp uses the legacy materializer/serializer | plan tamper, async admission mutation, bank mismatch and byte-golden test |
 
@@ -61,8 +61,15 @@
 | stale plan could delete a concurrently added record | canonical freshness gate rebinds plan provenance, re-reads legacy records and target snapshot after continuation admission, and requires exact evidence equality | async stale-plan record-conservation test |
 | awaited admission could return a false no-op or mutate stale pre-image | target is re-read after all awaited admission and compared to canonical freshness snapshot before timestamp/no-op/Intent | async no-op drift test |
 | Hold reservation crash could diverge live/startup lifecycle | one shared Hold request builder plus exact prepared-request resume keeps requestKey/transition/payload stable; observation and Hold commit atomically | reservation-to-control crash followed by two startup scans |
-| Unicode identity could rewrite or merge distinct Windows legacy names | physical alias encodes exact sanitized legacy basename; Darwin uses measured physical folding while missing Windows targets only ASCII-fold lexical identity | Windows NFD/ß distinct paths and Darwin same-inode alias tests |
+| Unicode identity could rewrite or merge distinct Windows legacy names | physical alias encodes exact sanitized legacy basename; Darwin uses measured physical folding; missing Windows targets accept only single-code-point uppercase and reject expansion | Windows É/é same scope, NFD distinct, ß fail-closed and Darwin same-inode alias tests |
 | `updatedAt` was available before final admission | clock/materialization moved after awaited freshness, Hold and final pre-image checks; one materialization feeds Intent and post bytes | delayed-clock ordering and byte-equality test |
+
+## Reviewer Round 3 Findings
+
+| Finding | Closure | Regression evidence |
+| --- | --- | --- |
+| Windows missing-target identity missed non-ASCII simple case pairs | per-code-point uppercase accepts only exactly one mapped code point, preserving path separators and existing staging containment semantics | É/é and σ/ς identity equality plus adjacent staging tests |
+| Windows expansion mapping could be guessed or mismerged | confirmed missing segments throw a bounded path-free `TargetIdentityError`; NFC/NFD remain distinct; existing targets continue through realpath and preserve expansion code points | NFD distinct, ß/SS missing fail-closed, existing-realpath and Hold-bypass tests |
 
 ## Evidence
 
@@ -71,11 +78,12 @@
 | Reviewer Round 1 `manual-balance-seed-settlement-e09-d.test.js` baseline | 24/24 PASS | serializer golden, strict ordinal history, exact replay/conflict, no-op gate order, Main intent trace, durability persistence, canonical observation, immutable plan binding, OS target identity |
 | E09-D + E09-C/B/A/P0 + RecoveryControl/startup/preflight focused suite | 225/225 PASS | Statement service/token/session/generation/legacy plus RecoverySourceV1, Hold, target-post-image startup, FilePlan and target-identity invariants |
 | Reviewer Round 2 exact regressions | 34/34 PASS | Hold bypass, stale-plan conservation, async no-op drift, reservation crash/double startup, Windows physical names, delayed clock |
-| Round 2 E09-D + E09-C/B/A/P0 + recovery/archive/identity matrix | 227/227 PASS | manual seed end-to-end state machine, adjacent Statement authorities and startup recovery |
+| Reviewer Round 3 Windows identity regressions (folded into existing test cases) | 34/34 PASS | É/é same scope, NFC/NFD distinct, ß/SS missing fail-closed, existing realpath, no Hold/Intent/write bypass |
+| Round 3 E09-D + E09-C/B/A/P0 + recovery/archive/identity matrix | 227/227 PASS | manual seed end-to-end state machine, adjacent Statement authorities and startup recovery |
 | Additional recovery/pre-fund matrix | 113/113 PASS | request-owner resume, RecoveryControl and unchanged pre-fund recovery paths |
 | `npm run smoke` | PASS | repository-wide integration smoke |
 | `npm run test:integration` | 51/51 scripts, 2455/2455 assertions PASS | recovery control, statement generation pipeline and repository-wide integration; generated timing table restored after evidence capture |
-| `npm run test:unit` | 6290 pass / 1 unrelated failure / 3 skipped (6294 total) | all E09-D and adjacent tests pass; `windows-build-contract` rejects the installed electron-builder NSIS template's `System::Store` and has no changed-file overlap |
+| `npm run test:unit` | 6296 pass / 1 unrelated failure / 3 skipped (6300 total) | all E09-D and adjacent tests pass; `windows-build-contract` rejects the installed electron-builder NSIS template's `System::Store` and has no changed-file overlap |
 | `node --check` (all changed JS) + `git diff --check` | PASS | static syntax and patch hygiene |
 
 ## Remaining Unknowns
@@ -83,5 +91,5 @@
 | 未知 | 处理 | 负责人/下一步 | 合并影响 |
 | --- | --- | --- | --- |
 | packaged Windows directory fsync capability | PROBE | R3.2.3 Windows packaged probe + human review | production remains disabled until proven |
-| packaged Windows NTFS Unicode case identity for missing targets | PROBE | use actual packaged target volume; until then retain conservative lexical fallback | production remains disabled; no Unicode full-fold filename rewrite |
+| packaged Windows NTFS Unicode case identity for missing targets | PROBE | use actual packaged target volume; until then only single-code-point uppercase is accepted and expansion fails closed | production remains disabled; no Unicode normalization/full-fold filename rewrite |
 | funds semantics and recovery holds | BLOCK | release owner/manual review | must not enable production automatically |

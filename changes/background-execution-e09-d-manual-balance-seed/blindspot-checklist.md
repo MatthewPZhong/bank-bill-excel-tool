@@ -14,7 +14,7 @@
 - [x] Complete token history is strict, monotonic and one-to-one: current token reuses, new token increments, A/B/A historical replay fails stale, and corrupt/duplicate metadata fails closed.
 - [x] Intent identity is deterministic from operationKey and the canonical request hash binds target alias, exact pre/post, revision and token hash.
 - [x] Exact closed/recovered retry returns its stable decision before mutation; same operation with a changed post-image conflicts before mutation.
-- [x] Physical target alias reversibly preserves the sanitized legacy basename. Conflict scope separately uses repository target identity: Darwin physical aliases proven by realpath/inode and full fold share scope; existing Windows targets use realpath, while missing Windows NFD/ß names remain distinct except stable ASCII case fold.
+- [x] Physical target alias reversibly preserves the sanitized legacy basename. Conflict scope separately uses repository target identity: Darwin physical aliases proven by realpath/inode and full fold share scope; existing Windows targets use realpath; missing Windows segments use only single-code-point uppercase, preserve NFC/NFD distinction, and reject ß/SS-style expansion before scope/Hold/Intent/write.
 - [x] Persisted request-owner conflict and awaited continuation pre-commit gate run before no-op; accepted no-op then returns before Intent/critical transition and creates no control event.
 - [x] After awaited admission, the target and legacy records are re-read; target drift or records-evidence drift fails closed before no-op/Intent, preserving concurrently added records.
 
