@@ -36,6 +36,14 @@ function jobRef(envelope) {
   });
 }
 
+function sameJobRef(ref, envelope) {
+  return Boolean(ref && envelope &&
+    ref.actionKey === envelope.actionKey &&
+    ref.operationKey === envelope.operationKey &&
+    ref.jobId === envelope.jobId &&
+    ref.unitId === envelope.unitId);
+}
+
 function startDuplicateWorker(port, options = {}) {
   if (!port || typeof port.on !== 'function' || typeof port.postMessage !== 'function') {
     throw new TypeError('Duplicate Worker需要MessagePort');
@@ -48,6 +56,7 @@ function startDuplicateWorker(port, options = {}) {
   let ready = false;
   let closing = false;
   let activeJob = null;
+  let lastTerminalJobRef = null;
   let currentReservation = null;
 
   function controlIdentity() {
@@ -181,6 +190,12 @@ function startDuplicateWorker(port, options = {}) {
       terminal: false
     };
     activeJob = record;
+    function markTerminal() {
+      record.terminal = true;
+      // Supervisor可能尚未收到terminal就发送shutdown cancel；只记住最近一次精确
+      // route，使这个已由terminal收口的同job cancel成为幂等迟到消息。
+      lastTerminalJobRef = record.ref;
+    }
     Promise.resolve().then(() => service.execute(envelope.actionKey, envelope.payload.input, {
       signal: abortController.signal,
       operationIdentity: Object.freeze({
@@ -206,11 +221,11 @@ function startDuplicateWorker(port, options = {}) {
       }
     })).then((result) => {
       if (record.terminal) return;
-      record.terminal = true;
+      markTerminal();
       emitJob('job:done', { result });
     }, (error) => {
       if (record.terminal) return;
-      record.terminal = true;
+      markTerminal();
       emitJob('job:error', { error: toProtocolError(error, 'DUPLICATE_JOB_FAILED') });
     }).finally(() => {
       if (activeJob === record) activeJob = null;
@@ -292,16 +307,22 @@ function startDuplicateWorker(port, options = {}) {
         }
         return startJob(envelope);
       }
-      if (envelope.operation === 'job:cancel' && activeJob &&
-          activeJob.envelope.jobId === envelope.jobId) {
-        activeJob.abortController.abort(envelope.payload.cancel);
-        activeJob.emit('cancel:ack', { cancellation: { scope: 'job' } });
-        return;
+      if (envelope.operation === 'job:cancel') {
+        if (activeJob && sameJobRef(activeJob.ref, envelope)) {
+          // terminal已先发布时不能再发cancel:ack；terminal本身就是Supervisor将收到的
+          // authoritative completion。重复ACK既违反消息序列，也会让Worker异常退出。
+          if (activeJob.terminal) return;
+          activeJob.abortController.abort(envelope.payload.cancel);
+          activeJob.emit('cancel:ack', { cancellation: { scope: 'job' } });
+          return;
+        }
+        if (sameJobRef(lastTerminalJobRef, envelope)) return;
       }
       throw new Error(`Duplicate不支持job command：${envelope.operation}`);
     } catch (error) {
       if (activeJob && !activeJob.terminal) {
         activeJob.terminal = true;
+        lastTerminalJobRef = activeJob.ref;
         activeJob.emit('job:error', { error: toProtocolError(error, 'DUPLICATE_PROTOCOL_ERROR') });
         activeJob = null;
         return;
