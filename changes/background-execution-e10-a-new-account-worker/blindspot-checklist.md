@@ -47,6 +47,15 @@
 - 最便宜验证：分别在 workbook-opened、row batch、row-scan-complete（旧readFile后等价边界）、expected evidence batch、Worker发送job:done前暂停真实Worker，再调用原Supervisor shutdown；至少两轮250k workbook-opened。
 - 处置：已覆盖；实际落盘XLSX通过ZIP entry与worksheet XML流式扫描，row/evidence各1024行一批yield+signal check，artifact SHA改异步stream；四digest由共享incremental canonical数组hasher计算并与旧oracle逐字节对照。测试stage端口不进入Protocol/DTO，取消仍只有Main cleanup恰好一次。
 
+### [Important / 已覆盖] generic scanner 的字符串值与宽松坐标使业务回读 fail-open
+
+- 事实：修复前E10流式路径使用generic import `row-scanner`；该scanner把无type/`n`/`b`/`d`/`e`的`<v>`统一返回字符串，重复坐标后值覆盖，并按outer row发射而不校验cell ref行号；流尾未闭合行可丢弃。
+- 推断/未知：numeric `00123`可保住错误前导零、boolean `1`可冒充文本，outer `row r=2`内`cell r=D3`可被并入第2行，使streaming digest与预期自洽而旧raw oracle拒绝。
+- 影响：账号、日期、币种、金额与行位置血缘不可审计，命中资金红线。
+- 证据：Reviewer三个反例；`row-scanner.js:cellValueFromBody/parseRowInline/scanSheetRows`；一次性SheetJS raw XML probe。
+- 最便宜验证：独立oracle差分矩阵先锁定三反例红测，再覆盖所有cell type、formula cached、sparse/blank、重复/乱序/错位/截断/实体。
+- 处置：已覆盖；E10专用strict projection按SheetJS raw解码shared/inline/str/number/boolean/date/error/formula cached并排除rich text `rPh`，逐row/cell验证完整坐标、顺序/唯一/XLSX范围，截断XML/未知实体/非法payload fail closed；独立oracle矩阵8/8、focused476/476、250k/60,416四digest与六阶段cancel通过。保留ZIP streaming、1024行yield和cancel gate，不修改generic scanner消费者。
+
 ### [Important / 已覆盖] Worker crash/late done 的 staging 生命周期
 
 - 事实：partial/final staging 可能已出现，迟到 done 不得恢复 handle。
@@ -75,7 +84,7 @@ payload account rows
   -> template exact header projection
   -> 期末余额=0; other balance fields blank
   -> staging workbook
-  -> Worker streaming readback (actual sheet/header/row count/full record digest/date/account/currency digests)
+  -> Worker strict streaming readback (raw typed cells + exact coordinates -> sheet/header/row count/full record/date/account/currency digests)
   -> Main ownership + size + SHA technical validation
 ```
 
@@ -85,7 +94,7 @@ payload account rows
 - 日期：本地日历沿用 legacy；开户日至昨日均包含；晚于昨日、超过 3650 天拒绝。
 - 金额：没有 Credit/Debit/汇率/舍入；每行期末余额固定数值 `0`，其余余额字段为空。
 - 文件名：单账户 `银行-地点-末四位-币种或多币种-NEW_BALANCE.xlsx`；多账户固定 `多账号-多币种`；contract 拒绝路径分隔符和非 xlsx。
-- 回读守恒：streaming scanner只读取workbook声明顺序的首sheet，表头取冻结宽度；空物理行仍按旧`blankrows:false`跳过，业务行按原序逐行进入同一canonical accumulator；250k/60,416与旧同步oracle四digest全等。
+- 回读守恒：strict streaming projection只读取workbook声明顺序的首sheet，按SheetJS raw类型解释并校验worksheet根、outer row与每个cell完整坐标；空物理行仍按旧`blankrows:false`跳过，业务行按原序逐行进入同一canonical accumulator；250k/60,416已与旧同步oracle四digest全等。
 - 取消守恒：shutdown不改变records或digest；只在未完成阶段产生`NEW_ACCOUNT_GENERATION_CANCELLED`，result/generated均为null，由Main按冻结generationPath清理一次；已completed后shutdown保持正常artifact。
 
 ## 资金红线人工复核

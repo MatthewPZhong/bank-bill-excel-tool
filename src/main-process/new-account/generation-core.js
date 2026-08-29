@@ -7,11 +7,9 @@ const XLSX = require('xlsx');
 
 const { FileValidationError, normalizeCell } = require('../../backend/file-service/common');
 const {
-  loadSharedStrings,
   locateSheets,
   openZipWithEntries
 } = require('../../backend/big-table-import/zip-reader');
-const { scanSheetRows } = require('../../backend/big-table-import/row-scanner');
 const { extractHeaders } = require('../../backend/file-service/readers');
 const { parseDateValue, parseNumericValue } = require('../../backend/file-service/normalizers');
 const { writeBalanceWorkbook } = require('../../backend/file-service');
@@ -26,6 +24,10 @@ const {
   NEW_ACCOUNT_GENERATION_SCHEMA_VERSION,
   createNewAccountGenerationInput
 } = require('./generation-contract');
+const {
+  loadNewAccountSharedStrings,
+  scanNewAccountWorksheetRows
+} = require('./strict-worksheet-readback');
 
 const REQUIRED_HEADERS = Object.freeze([
   '银行名称', '所在地', '币种', '银行账号', '账单日期',
@@ -464,9 +466,10 @@ async function readBackAndValidateCooperatively(filePath, expected, signal, opti
       sheetCount: sheets.length
     });
 
-    const sharedStrings = await loadSharedStrings(
+    const sharedStrings = await loadNewAccountSharedStrings(
       zip,
-      opened.entries.get('xl/sharedStrings.xml') || null
+      opened.entries.get('xl/sharedStrings.xml') || null,
+      { assertNotCancelled: () => assertNewAccountGenerationNotCancelled(signal) }
     );
     await runNewAccountGenerationStage(signal, options, 'readback:shared-strings-loaded', {
       sharedStringCount: sharedStrings.length
@@ -476,38 +479,14 @@ async function readBackAndValidateCooperatively(filePath, expected, signal, opti
     let headers = null;
     let actualRowCount = 0;
     let actualAccumulator = null;
-    let batchYieldPending = false;
-    let batchYieldPromise = Promise.resolve();
-
-    function scheduleRowBatchSafePoint() {
-      if (batchYieldPending) return;
-      batchYieldPending = true;
-      stream.pause();
-      batchYieldPromise = runNewAccountGenerationStage(
-        signal,
-        options,
-        'readback:row-batch',
-        { processedRows: actualRowCount, totalRows: expected.records.length }
-      ).then(() => {
-        batchYieldPending = false;
-        stream.resume();
-      }, (error) => {
-        batchYieldPending = false;
-        stream.destroy(error);
-        throw error;
-      });
-      // scanSheetRows 会从 stream error 取得同一个失败；这里先挂 rejection handler，
-      // 避免 cancellation 与 scanner reject 的先后竞态产生 unhandled rejection。
-      batchYieldPromise.catch(() => {});
-    }
-
-    await scanSheetRows({
+    await scanNewAccountWorksheetRows({
       stream,
-      expectedHeaders: expected.headers,
+      expectedColumnCount: expected.headers.length,
       sharedStrings,
-      collectAllColumns: false,
-      onRow({ rowR, values, hasAnyCellText }) {
-        if (rowR === 1) {
+      rowBatchSize: READBACK_ROW_BATCH_SIZE,
+      assertNotCancelled: () => assertNewAccountGenerationNotCancelled(signal),
+      onRow({ rowNumber, values, hasAnyCellValue }) {
+        if (rowNumber === 1) {
           headers = values.slice(0, expected.headers.length).map(normalizeCell);
           if (canonicalSha256(headers) !== canonicalSha256(expected.headers)) {
             throw Object.assign(new Error('NewAccount输出列顺序与模板不一致'), {
@@ -517,7 +496,7 @@ async function readBackAndValidateCooperatively(filePath, expected, signal, opti
           actualAccumulator = createBusinessEvidenceAccumulator(headers);
           return;
         }
-        if (!hasAnyCellText) return;
+        if (!hasAnyCellValue) return;
         if (!headers || !actualAccumulator) {
           throw Object.assign(new Error('NewAccount输出列顺序与模板不一致'), {
             code: 'NEW_ACCOUNT_WORKBOOK_HEADERS_MISMATCH'
@@ -528,10 +507,21 @@ async function readBackAndValidateCooperatively(filePath, expected, signal, opti
         actualAccumulator.add(normalized);
         actualRowCount += 1;
         if (actualRowCount > expected.records.length) throw workbookRecordMismatch();
-        if (actualRowCount % READBACK_ROW_BATCH_SIZE === 0) scheduleRowBatchSafePoint();
+      },
+      async onRowBatch({ parsedRows, lastRowNumber }) {
+        await runNewAccountGenerationStage(
+          signal,
+          options,
+          'readback:row-batch',
+          {
+            processedRows: actualRowCount,
+            parsedRows,
+            lastRowNumber,
+            totalRows: expected.records.length
+          }
+        );
       }
     });
-    await batchYieldPromise;
     await runNewAccountGenerationStage(signal, options, 'readback:row-scan-complete', {
       processedRows: actualRowCount,
       totalRows: expected.records.length
@@ -682,5 +672,6 @@ module.exports = {
   normalizeNewAccountCurrencyValues,
   prepareNewAccountGeneration,
   readBackAndValidate,
+  readBackAndValidateCooperatively,
   validateNewAccountAccounts
 };
