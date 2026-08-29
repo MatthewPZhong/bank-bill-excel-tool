@@ -34,10 +34,42 @@ function interruptedTransition(source, failureCode, failureMessage) {
       failureCode,
       failureMessage,
       metadataPatch: {
-        recoveryHold: ['INSPECTION_UNKNOWN', 'INSPECTOR_UNAVAILABLE'].includes(failureCode)
+        recoveryHold: ['RESULT_LOST', 'INSPECTION_UNKNOWN', 'INSPECTOR_UNAVAILABLE']
+          .includes(failureCode)
       }
     },
     safePayload: { reasonCode: failureCode }
+  };
+}
+
+function resultLostHoldTransition(source, holdId) {
+  if (typeof holdId !== 'string' || !holdId) {
+    throw new TypeError('JPM RESULT_LOST recovery plan缺少Main-owned holdId');
+  }
+  const safeSummary = {
+    reasonCode: 'RESULT_LOST',
+    disposition: 'committed-result-lost'
+  };
+  return {
+    transition: {
+      entityKind: 'recovery-hold',
+      command: 'create-or-get',
+      input: {
+        contractVersion: 1,
+        holdId,
+        sourceKind: source.sourceKind,
+        sourceRef: source.sourceRef,
+        intentId: source.intentId,
+        actionKey: source.actionKey,
+        operationKey: source.operationKey,
+        taskRunId: source.taskRunId,
+        conflictScopeKey: source.conflictScopeKey,
+        reasonCode: 'RESULT_LOST',
+        safeSummary,
+        evidenceHash: canonicalSha256(safeSummary)
+      }
+    },
+    safePayload: { reasonCode: 'RESULT_LOST' }
   };
 }
 
@@ -107,7 +139,7 @@ function definitiveHeldRecoveryTransitions(source, inspection, activeHold, taskS
     sourceRef: source.sourceRef,
     recoveryAttemptId
   };
-  return [...prefix, {
+  const begin = {
     transition: {
       ...base,
       command: 'begin-recovery',
@@ -118,20 +150,27 @@ function definitiveHeldRecoveryTransitions(source, inspection, activeHold, taskS
       }
     },
     safePayload: { outcome: inspection.outcome, phase: 'begin-definitive-recovery' }
-  }, {
+  };
+  const completion = {
     transition: {
       ...base,
-      command: 'complete-recovery-failure',
+      command: inspection.outcome === 'committed'
+        ? 'interrupt-recovery'
+        : 'complete-recovery-failure',
       expectedState: 'running',
       failureCode: failure.code,
       failureMessage: failure.message,
       metadataPatch: {
-        recoveryHold: false,
+        recoveryHold: inspection.outcome === 'committed',
         recoveryOutcome: inspection.outcome
       }
     },
     safePayload: { outcome: inspection.outcome, phase: 'complete-definitive-recovery' }
-  }, {
+  };
+  if (inspection.outcome === 'committed') {
+    return [...prefix, begin, completion];
+  }
+  return [...prefix, begin, completion, {
     transition: {
       entityKind: 'recovery-hold',
       command: 'resolve',
@@ -152,6 +191,7 @@ function reconFixJpmRecoveryPlanTransitions({
   source,
   inspection,
   activeHold = null,
+  holdId = null,
   taskState = null
 }) {
   if (!source || source.actionKey !== RECON_FIX_RUN_JPM_ACTION) return [];
@@ -171,11 +211,11 @@ function reconFixJpmRecoveryPlanTransitions({
     if (activeHold) {
       return definitiveHeldRecoveryTransitions(source, inspection, activeHold, taskState);
     }
-    return [interruptedTransition(
-      source,
-      failureForOutcome(inspection.outcome).code,
-      failureForOutcome(inspection.outcome).message
-    )];
+    const failure = failureForOutcome(inspection.outcome);
+    return [
+      resultLostHoldTransition(source, holdId),
+      interruptedTransition(source, failure.code, failure.message)
+    ];
   }
   if (phase === 'inspection-result' && inspection.outcome === 'not-committed') {
     if (activeHold) {

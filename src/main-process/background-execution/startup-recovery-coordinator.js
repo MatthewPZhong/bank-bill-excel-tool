@@ -60,6 +60,19 @@ function safeSummaryFor(source, reasonCode) {
   });
 }
 
+function retainedCommittedResultLostHoldSummary(hold) {
+  if (hold.reasonCode === 'RESULT_LOST') {
+    return Object.freeze({
+      reasonCode: 'RESULT_LOST',
+      disposition: 'committed-result-lost'
+    });
+  }
+  if (['INSPECTION_UNKNOWN', 'INSPECTOR_UNAVAILABLE'].includes(hold.reasonCode)) {
+    return safeSummaryFor(hold, hold.reasonCode);
+  }
+  return null;
+}
+
 function intentSource(intent, resolvePolicy) {
   if (intent.evidenceHash !== canonicalSha256(intent.boundedEvidence)) {
     throw Object.assign(new Error('Critical Intent evidence hash 与持久 bounded evidence 不一致'), {
@@ -161,6 +174,78 @@ function createStartupRecoveryCoordinator(options = {}) {
 
   function taskStateFor(source) {
     return resolveTaskState(source);
+  }
+
+  function hasActionSpecificSourceIdentity(source, intent, taskState) {
+    const expected = taskState && taskState.retainedCommittedResultLostIdentity;
+    return Boolean(expected && intent &&
+      expected.actionKey === source.actionKey &&
+      expected.moduleId === taskState.moduleId &&
+      expected.taskKey === taskState.taskKey &&
+      expected.coordinationKind === intent.coordinationKind &&
+      expected.conflictScopeKey === source.conflictScopeKey &&
+      intent.actionKey === source.actionKey &&
+      intent.operationKey === source.operationKey &&
+      intent.taskRunId === source.taskRunId &&
+      intent.conflictScopeKey === source.conflictScopeKey &&
+      taskState.taskRunId === source.taskRunId &&
+      taskState.operationKey === source.operationKey);
+  }
+
+  function assertActiveSameSourceAuthority(source, activeHold) {
+    if (!activeHold || activeHold.sourceKind !== source.sourceKind ||
+        activeHold.sourceRef !== source.sourceRef) {
+      return;
+    }
+    const taskState = taskStateFor(source);
+    const expectedIdentity = taskState && taskState.retainedCommittedResultLostIdentity;
+    if (!expectedIdentity) return;
+    const intent = source.intentId
+      ? readRepository.getCriticalIntentById(source.intentId)
+      : null;
+    const expectedSummary = retainedCommittedResultLostHoldSummary(activeHold);
+    const exact = activeHold.status === 'active' &&
+      activeHold.holdId === holdIdFor(activeHold) && expectedSummary &&
+      canonicalSha256(activeHold.safeSummary) === canonicalSha256(expectedSummary) &&
+      activeHold.intentId === source.intentId &&
+      activeHold.actionKey === source.actionKey &&
+      activeHold.operationKey === source.operationKey &&
+      activeHold.taskRunId === source.taskRunId &&
+      activeHold.conflictScopeKey === source.conflictScopeKey &&
+      hasActionSpecificSourceIdentity(source, intent, taskState);
+    if (!exact) {
+      throw new StartupRecoveryError(
+        'STARTUP_RECOVERY_SOURCE_AUTHORITY_CONFLICT',
+        'Active same-source Hold 与 action-specific canonical authority 不兼容',
+        { holdId: activeHold.holdId }
+      );
+    }
+  }
+
+  function isRetainedCommittedResultLostHold(hold) {
+    const expectedSummary = hold && retainedCommittedResultLostHoldSummary(hold);
+    if (!hold || hold.status !== 'active' || hold.sourceKind !== 'critical-intent' ||
+        typeof hold.intentId !== 'string' || !hold.intentId ||
+        hold.sourceRef !== `critical-intent:${hold.intentId}` ||
+        hold.holdId !== holdIdFor(hold) || !expectedSummary ||
+        canonicalSha256(hold.safeSummary) !== canonicalSha256(expectedSummary)) {
+      return false;
+    }
+    const intent = readRepository.getCriticalIntentById(hold.intentId);
+    if (!intent || intent.state !== 'closed' ||
+        intent.actionKey !== hold.actionKey ||
+        intent.operationKey !== hold.operationKey ||
+        intent.taskRunId !== hold.taskRunId ||
+        intent.conflictScopeKey !== hold.conflictScopeKey) {
+      return false;
+    }
+    const taskState = taskStateFor(hold);
+    return hasActionSpecificSourceIdentity(hold, intent, taskState) &&
+      taskState.status === 'interrupted' &&
+      taskState.failureCode === 'RESULT_LOST' &&
+      taskState.recoveryHold === true &&
+      taskState.recoveryMode === false &&
+      taskState.recoveryAttemptId === null;
   }
 
   function reserveObservation(source, eventType, safePayload, lineage = {}) {
@@ -731,6 +816,7 @@ function createStartupRecoveryCoordinator(options = {}) {
   }
 
   async function recoverSource(source, activeHold = null) {
+    assertActiveSameSourceAuthority(source, activeHold);
     cleanupPreparedInspectionUnavailableLegacyGap(source, activeHold);
     activeHold = resumePreparedInspectionUnavailableBundle(source, activeHold);
     const inspected = await inspectSource(source, activeHold);
@@ -777,7 +863,13 @@ function createStartupRecoveryCoordinator(options = {}) {
     if (inspection.outcome === 'committed' && source.settlementKey) {
       return recoverWithProvider(source, inspection, activeHold);
     }
-    return Object.freeze({ source, inspection, held: false });
+    const retainedHold = readRepository.getActiveRecoveryHoldByScope(source.conflictScopeKey);
+    return Object.freeze({
+      source,
+      inspection,
+      held: Boolean(retainedHold),
+      ...(retainedHold ? { holdId: retainedHold.holdId } : {})
+    });
   }
 
   async function scanAndRecover() {
@@ -876,6 +968,7 @@ function createStartupRecoveryCoordinator(options = {}) {
     for (const hold of activeHolds) {
       if (hold.sourceKind === 'manual') continue;
       if (!deduped.has(`${hold.sourceKind}\u0000${hold.sourceRef}`)) {
+        if (isRetainedCommittedResultLostHold(hold)) continue;
         throw new StartupRecoveryError(
           'STARTUP_RECOVERY_HOLD_SOURCE_MISSING',
           'Active non-manual hold 未能从 Intent/Provider 重新取得 RecoverySourceV1',

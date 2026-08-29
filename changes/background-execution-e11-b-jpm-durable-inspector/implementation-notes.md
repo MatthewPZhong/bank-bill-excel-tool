@@ -8,6 +8,7 @@
 - 第二轮 Review remediation 起点：`74bb75468c3d1e30fe889a3ca751168ce48e8547`。
 - 第三轮 Review remediation 起点：`615cf64992917221be0890a7270518c98fe57ffd`。
 - 第四轮 Review remediation 起点：`71c1ac1066613f2009b4dfcd5e43dc1d2a735b65`。
+- 第五轮 Review remediation 起点：最终 E11-B restack `ad3a7222cbcd049266cdc66ca86d17830c08f7a0`。
 - Frozen contract：v3.2.4 Spec/TechDoc、Platform critical/recovery contract、E11-A 与 E11-P0 notes。
 - Preflight：[preflight.md](./preflight.md)。
 
@@ -24,7 +25,7 @@
 | prepared + ACK 在一个 Main control transaction 提交 | Worker 只应看到完整持久 ACK，不能留下 create-prepared 半状态 | ACK transition 故障会整体 rollback，Worker 不进入 mutation |
 | candidate adoption 由 Main receipt waiter 授权 | Worker 发出 `commit:receipt` 与 resource request 属于不同 channel，不能只依赖到达顺序 | mutation candidate 仅在 Inspector 同快照确认 authoritative receipt/current post、Intent committed 后获 grant；receipt 丢失/冲突不会采用 full candidate |
 | Inspector 先查唯一 receipt，再在同一 read transaction 读取 ADM image | receipt 与 current post 必须属于同一 WAL snapshot | exact receipt + post 才是 committed；无 receipt + pre 才是 not-committed，其余均 unknown |
-| recovery 不重建 full result | E11-B 的 full candidate 只存在 Worker Service 私有 map，crash 后不可安全复原 | 首次 definitive inspection 仍按既有 interrupted 收口；unknown 建 Hold 后，人工修复得到 committed/not-committed 时复用 Task begin/complete recovery，把 observation、Intent close、Task failed 与 Hold resolve 放入一个 control transaction，第三次 startup 零动作 |
+| committed-result-lost 只关闭已判定的 Intent，不关闭保护态 | E11-B 的 full candidate 只存在 Worker Service 私有 map，commit 可证明不代表 result 可恢复；把 committed 收敛为 ordinary failed 或 resolve Hold 会解除仍需人工处置的资金保护 | 无既有 Hold 时同事务创建 active `RESULT_LOST` Hold 并把 Task 标记 `interrupted/RESULT_LOST/recoveryHold=true`；已有 Hold 时经 `begin-recovery → interrupt-recovery` 保持同一 Task 保护态，不 resolve、不重分类既有 reason；closed Intent source 缺失只有在 Intent/Hold exact identity 与 Task 保护态完整时才可幂等保留 |
 | JPM 只在 exact fixed `unit:start` 后执行 Service plan | `job:start` send 栈内的 stale/invalid 同步终态会被 Host 当作 generation protocol failure | stale/invalid 只终结当前 job；同一 generation、同一已导入 session 可继续合法 run；不改通用 result binding 协议 |
 | Worker instance 只以 canonical digest 进入 durable/in-memory adoption identity | raw Worker UUID 既不应进入持久 evidence，也可能触发 finance-safe 账号模式 | evidence 与 receipt waiter 存储/比较同一 SHA-256 identity；同 Worker 与换 Worker replay 均拒绝，raw ID 不进入状态或错误 |
 | startup 按 requestKey exact 恢复 prepared transition owner | live `mark-committed`/`close` owner 可在独立 reserve COMMIT 后、control transaction 前崩溃；startup 重新构造的安全摘要不是首次 exact request | Main-internal owner reader严格回验 persisted JCS/hash/eventId/createdAt 后原样 replay；普通 changed-body reserve 仍 conflict，不放宽 owner 合同 |
@@ -39,7 +40,8 @@
 
 ## Assumptions
 
-- committed 后 candidate 丢失时只收口 durable DB outcome：首次 inspection 标记 interrupted；已有 unknown Hold 的人工收敛复用合法 recovery transition 终结为 `RESULT_LOST` failed；E11-B 不跨 Worker 重建 full result。
+- committed 后 candidate 丢失时只收口 durable commit fact：Intent 可 closed，但 Task 必须保持 `interrupted/RESULT_LOST/recoveryHold=true`，并由 active Hold 持续保护；已有 `INSPECTION_UNKNOWN`/`INSPECTOR_UNAVAILABLE` Hold 的 reason 是不可变审计事实，不声称被重分类为 `RESULT_LOST`。E11-B 不跨 Worker 重建 full result。
+- `recon-id-fix:run` 仍是 no-file action，`batchId=null`；committed-result-lost 不伪造 Archive Batch、BatchRecovery overlay 或文件级恢复状态。
 - production false 阶段 managed JPM 只由定向测试/显式 non-production runtime 调用；live IPC 仍走 legacy，但受同一 ADM Hold gate。
 
 ## Deviations
@@ -78,10 +80,18 @@
 | --- | --- | --- |
 | P1 threshold persistence 在完整 observation anchor 前提交 Task/Hold owner | 接受；新增单事务 `reserveObservationAnchor`，原子写 attempt + requestKey bind + observation owner；之后才按 Task→Hold normal-exact reserve；已有 Hold 的 Task transition 也使用同一顺序；对 71c1 只清理可证明 legacy gap，exact body 不兼容继续 conflict，Intent 不先关闭 | 真实临时 SQLite：anchor owner trigger 故障证明 attempt/owner 全 rollback；无 Hold 的 Task/Hold owner crash 四路与已有 Hold 的 Task owner crash 两路均二启先恢复 bundle、三启零动作；无 Hold 三种 legacy gap 六路与已有 Hold 两种 gap 四路均在 Inspector 前清零旧 gap、二启收敛、三启 owner/attempt 数量不变 |
 
+### 第五轮 Review finding
+
+| Finding | 裁决与最小修复 | 定向证据 |
+| --- | --- | --- |
+| P1 committed 但 result 不可恢复时 Task/Hold 被收敛为 ordinary failed/resolved | 接受；direct committed 创建 active `RESULT_LOST` Hold；已有 active Hold 的 committed definitive recovery 改用 `begin-recovery → interrupt-recovery`，保持 Task `interrupted/RESULT_LOST/recoveryHold=true` 且绝不 resolve Hold；既有 reason 保持原值，由 active Hold 状态保护 | direct commit-after-crash、unknown→committed、INSPECTOR_UNAVAILABLE 与 threshold/legacy/fault 矩阵均断言 Task/Hold/Intent；closed Intent 的 retained Hold 仅在 exact identity + 合法 reason/canonical safeSummary + Task 保护态成立时允许，十一类字段/相关字段漂移均 `STARTUP_RECOVERY_HOLD_SOURCE_MISSING`，重复 startup 不 inspect、不写 mutation、不新增/resolve Hold |
+| P1 correlated scope/action 漂移可让 active Hold 脱离 JPM mutation gate | 接受；JPM 私有 Task state reader 提供 canonical action/module/taskKey/worker-critical coordination/canonical ADM scope，coordinator 在 active same-source Hold 进入 cleanup/Inspector 前消费该 action-specific 权威投影，closed retained 亦复用；JPM mutation gate 同时枚举 action-owned active Hold/open Intent，不只按可漂移 scope 查询 | closed Intent 下的 action/scope 相关漂移、coordinationKind/taskKey 漂移均 fail closed；Intent 仍 open 的 `INSPECTION_UNKNOWN`/`INSPECTOR_UNAVAILABLE` 两路 correlated scope 漂移也在零 Inspector/零 control transaction 下 `STARTUP_RECOVERY_SOURCE_AUTHORITY_CONFLICT`，且 action-owned Hold 继续 `RECOVERY_HOLD_ACTIVE`；恢复原值后才允许 definitive committed |
+| P2 definitive decision 固定 `held=false` 与持久 Hold 自相矛盾 | 接受；non-settlement definitive 写后按 source canonical scope 权威回读 active Hold，只返回 bounded `held` 与可选 `holdId` | direct committed 与 existing-Hold committed 均 `held=true` 且 holdId exact；not-committed resolve 后 `held=false` 且无 holdId |
+
 ## Evidence
 
-- Restack 定向单测：E11-B 45/45 PASS，E11-P0 19/19 PASS，E11-A 14/14 PASS；E11-B 仍覆盖原子 anchor rollback、无/已有 Hold 的 Task/Hold owner crash、71c1 gap、mark-committed/close、incompatible Task body + ACKed Intent 与 global ADM gate。
-- 受影响单测合并回归 340/340 PASS：包含 E11-B、E11-P0、E11-A、RecoveryControl、Supervisor、ServiceHost、PreFund E05-B 与 linked ADM 派生/重建。
+- Restack 定向单测：E11-B 47/47 PASS，E11-P0 19/19 PASS，E11-A 14/14 PASS；E11-B 仍覆盖原子 anchor rollback、无/已有 Hold 的 Task/Hold owner crash、71c1 gap、mark-committed/close、incompatible Task body + ACKed Intent、global ADM gate，以及 committed-result-lost active Hold/canonical-correlated identity/reason/safeSummary/state 漂移、open pre-definitive gate、重复 startup 零副作用与 decision truthfulness。
+- 本轮修复后 focused 合并回归 193/193 PASS：包含 E11-B、E11-P0、E11-A、RecoveryContract/RecoveryControl 与 PreFund E05-B；原 restack 的 340/340 仍是历史基线，本轮未用它替代定向新鲜证据。
 - 定向 integration：RecoveryControl 27/27、recovery canary 9/9、linked streaming 19/19、gateway upsert 40/40、linked delete/rebuild 73/73 PASS。
 - ReconFix memory benchmark gate PASS：5k delta `207732736 < 384223040`、10k delta `386023424 < 496732512`、near-boundary delta `349028352 < 482488408`；`nearBoundaryUtilization=0.916666...`。
 - `npm run smoke` PASS；restack 全部变更 JS `node --check`、定向 ESLint、变更 JSON parse 与 `git diff --check` 通过。隔离 worktree 的 ESLint 首次缺少依赖解析环境，补用共享仓库 `NODE_PATH` 后通过，未修改 lint 规则。
@@ -95,6 +105,7 @@
 - 金额/币种/标志：JPM legacy engine 与既有 workbook/ADM 输入保持同源，E11-B 不新增金额或币种算法；定向 engine/parity 回归通过，三个 writeback 字段边界由 P0 plan 保持。
 - 可观测性/敏感边界：Worker/Main 只交换 hash、count、opaque handle 与 bounded summary；坏 JSON 只返回有限脱敏 id token，不回传 `raw_json`、full rows、文件路径或 candidate。
 - authority/并发：runtime generation 私有持有 canonical DB path；critical 只携带 DB identity digest，control DB partial UNIQUE 决定全局 ADM scope ACK 胜者；legacy 读/写边界都观察同一 Hold/open Intent 集合。
+- committed-result-lost：commit fact、result 可恢复性与 Hold 生命周期分开记录；Intent closed 不等于解除保护，Task 保持 interrupted 且 active Hold 继续阻断 JPM mutation。no-file action 不创建 Batch/overlay；任何自动测试都不把 active Hold 伪报为已人工处置。
 - 资金红线：真实 JPM 样本逐行金额、币种、匹配标志、receipt 与 crash 后 DB 复核仍要求资金负责人手工确认；本地自动测试不能替代该 gate。
 
 ## Remaining unknowns

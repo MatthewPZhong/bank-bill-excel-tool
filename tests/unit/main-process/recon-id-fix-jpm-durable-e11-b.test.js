@@ -800,6 +800,39 @@ async function establishUnknownPostWithoutReceipt(harness, operationKey) {
   return Object.freeze({ ...task, ...fixture, identity, intentId: prepared.intentId });
 }
 
+function assertHeldDefinitiveRecoveryState(
+  layer,
+  taskRunId,
+  intentId,
+  definitiveOutcome,
+  holdReason
+) {
+  const task = createArchiveRepository(layer.database.db).getTaskRun(taskRunId);
+  const hold = layer.readRepository.getRecoveryHoldBySource(
+    'critical-intent',
+    `critical-intent:${intentId}`
+  );
+  if (definitiveOutcome === 'committed') {
+    assert.equal(task.status, 'interrupted');
+    assert.equal(task.failureCode, 'RESULT_LOST');
+    assert.equal(task.metadata.recoveryHold, true);
+    assert.equal(task.metadata.recoveryOutcome, 'committed');
+    assert.equal(hold.status, 'active');
+    assert.equal(hold.reasonCode, holdReason);
+    assert.equal(hold.resolution, null);
+  } else {
+    assert.equal(task.status, 'failed');
+    assert.equal(task.failureCode, 'NOT_COMMITTED');
+    assert.equal(task.metadata.recoveryHold, false);
+    assert.equal(task.metadata.recoveryOutcome, 'not-committed');
+    assert.equal(hold.status, 'resolved');
+    assert.equal(hold.reasonCode, holdReason);
+    assert.equal(hold.resolution, 'not-committed');
+  }
+  assert.equal(layer.readRepository.getCriticalIntentById(intentId).state, 'closed');
+  return { task, hold };
+}
+
 test('JPM canonical policy保持production false，runtime固定single unit且禁止caller override', async () => {
   assert.equal(isBackgroundExecutionProductionEnabled(RECON_FIX_RUN_JPM_ACTION), false);
   const fixture = require('../../../changes/background-execution-v3.2.x-contract-baseline/changes/background-execution/validation/fixtures/valid/policy-registry.v3.2.x.json').actions;
@@ -1517,6 +1550,8 @@ test('mark-committed owner已reserve后崩溃，第二次startup exact replay收
     const task = createArchiveRepository(second.database.db).getTaskRun(taskRunId);
     assert.equal(task.status, 'interrupted');
     assert.equal(task.failureCode, 'RESULT_LOST');
+    assert.equal(task.metadata.recoveryHold, true);
+    assert.equal(second.readRepository.listActiveRecoveryHolds()[0].reasonCode, 'RESULT_LOST');
     assert.equal(second.database.db.prepare(`
       SELECT COUNT(*) AS count FROM background_execution_recovery_request_owners
       WHERE status = 'prepared'
@@ -1528,7 +1563,7 @@ test('mark-committed owner已reserve后崩溃，第二次startup exact replay收
     const beforeThird = third.controlTransactionCount();
     const replay = await third.recoveryCoordinator.scanAndRecover();
     assert.equal(replay.sourceCount, 0);
-    assert.equal(replay.activeHoldCount, 0);
+    assert.equal(replay.activeHoldCount, 1);
     assert.equal(third.controlTransactionCount(), beforeThird);
   } finally {
     if (!harnessClosed) {
@@ -1614,6 +1649,8 @@ test('close owner已reserve后崩溃，第二次startup exact replay收敛且第
     const task = createArchiveRepository(second.database.db).getTaskRun(taskRunId);
     assert.equal(task.status, 'interrupted');
     assert.equal(task.failureCode, 'RESULT_LOST');
+    assert.equal(task.metadata.recoveryHold, true);
+    assert.equal(second.readRepository.listActiveRecoveryHolds()[0].reasonCode, 'RESULT_LOST');
     assert.equal(second.database.db.prepare(`
       SELECT COUNT(*) AS count FROM background_execution_recovery_request_owners
       WHERE status = 'prepared'
@@ -1625,7 +1662,7 @@ test('close owner已reserve后崩溃，第二次startup exact replay收敛且第
     const beforeThird = third.controlTransactionCount();
     const replay = await third.recoveryCoordinator.scanAndRecover();
     assert.equal(replay.sourceCount, 0);
-    assert.equal(replay.activeHoldCount, 0);
+    assert.equal(replay.activeHoldCount, 1);
     assert.equal(third.controlTransactionCount(), beforeThird);
   } finally {
     if (!harnessClosed) {
@@ -1765,23 +1802,16 @@ for (const crashStage of ['task-owner', 'hold-owner']) {
         assert.equal(inspectorCalls, 1);
         assert.equal(recovered.sourceCount, 1);
         assert.equal(recovered.decisions[0].inspection.outcome, definitiveOutcome);
-        const finalTask = createArchiveRepository(second.database.db).getTaskRun(taskRunId);
-        assert.equal(finalTask.status, 'failed');
-        assert.equal(
-          finalTask.failureCode,
-          definitiveOutcome === 'committed' ? 'RESULT_LOST' : 'NOT_COMMITTED'
+        assertHeldDefinitiveRecoveryState(
+          second,
+          taskRunId,
+          prepared.intentId,
+          definitiveOutcome,
+          'INSPECTOR_UNAVAILABLE'
         );
-        assert.equal(finalTask.metadata.recoveryHold, false);
-        const finalHold = second.readRepository.getRecoveryHoldBySource(
-          'critical-intent',
-          `critical-intent:${prepared.intentId}`
-        );
-        assert.equal(finalHold.status, 'resolved');
-        assert.equal(finalHold.resolution, definitiveOutcome);
-        assert.equal(second.readRepository.getCriticalIntentById(prepared.intentId).state, 'closed');
         const settledCounts = recoveryPersistenceCounts(second.database.db);
         assert.deepEqual(settledCounts, {
-          ownerTotal: baseline.ownerTotal + 9,
+          ownerTotal: baseline.ownerTotal + (definitiveOutcome === 'committed' ? 8 : 9),
           ownerPrepared: 0,
           attemptTotal: baseline.attemptTotal + 2,
           attemptPrepared: 0,
@@ -1794,7 +1824,7 @@ for (const crashStage of ['task-owner', 'hold-owner']) {
         const beforeThird = third.controlTransactionCount();
         const replay = await third.recoveryCoordinator.scanAndRecover();
         assert.equal(replay.sourceCount, 0);
-        assert.equal(replay.activeHoldCount, 0);
+        assert.equal(replay.activeHoldCount, definitiveOutcome === 'committed' ? 1 : 0);
         assert.equal(third.controlTransactionCount(), beforeThird);
         assert.deepEqual(recoveryPersistenceCounts(third.database.db), settledCounts);
       } finally {
@@ -1899,22 +1929,16 @@ for (const definitiveOutcome of ['committed', 'not-committed']) {
       const recovered = await second.recoveryCoordinator.scanAndRecover();
       assert.equal(inspectorCalls, 1);
       assert.equal(recovered.decisions[0].inspection.outcome, definitiveOutcome);
-      const finalTask = createArchiveRepository(second.database.db).getTaskRun(taskRunId);
-      assert.equal(finalTask.status, 'failed');
-      assert.equal(
-        finalTask.failureCode,
-        definitiveOutcome === 'committed' ? 'RESULT_LOST' : 'NOT_COMMITTED'
+      assertHeldDefinitiveRecoveryState(
+        second,
+        taskRunId,
+        prepared.intentId,
+        definitiveOutcome,
+        'INSPECTOR_UNAVAILABLE'
       );
-      const finalHold = second.readRepository.getRecoveryHoldBySource(
-        'critical-intent',
-        `critical-intent:${prepared.intentId}`
-      );
-      assert.equal(finalHold.status, 'resolved');
-      assert.equal(finalHold.resolution, definitiveOutcome);
-      assert.equal(second.readRepository.getCriticalIntentById(prepared.intentId).state, 'closed');
       const settledCounts = recoveryPersistenceCounts(second.database.db);
       assert.deepEqual(settledCounts, {
-        ownerTotal: baseline.ownerTotal + 8,
+        ownerTotal: baseline.ownerTotal + (definitiveOutcome === 'committed' ? 7 : 8),
         ownerPrepared: 0,
         attemptTotal: baseline.attemptTotal + 2,
         attemptPrepared: 0,
@@ -1927,7 +1951,7 @@ for (const definitiveOutcome of ['committed', 'not-committed']) {
       const beforeThird = third.controlTransactionCount();
       const replay = await third.recoveryCoordinator.scanAndRecover();
       assert.equal(replay.sourceCount, 0);
-      assert.equal(replay.activeHoldCount, 0);
+      assert.equal(replay.activeHoldCount, definitiveOutcome === 'committed' ? 1 : 0);
       assert.equal(third.controlTransactionCount(), beforeThird);
       assert.deepEqual(recoveryPersistenceCounts(third.database.db), settledCounts);
     } finally {
@@ -2015,22 +2039,16 @@ for (const legacyStage of ['task-owner', 'task-unbound-attempt']) {
         const recovered = await second.recoveryCoordinator.scanAndRecover();
         assert.equal(inspectorCalls, 1);
         assert.equal(recovered.decisions[0].inspection.outcome, definitiveOutcome);
-        const finalTask = createArchiveRepository(second.database.db).getTaskRun(taskRunId);
-        assert.equal(finalTask.status, 'failed');
-        assert.equal(
-          finalTask.failureCode,
-          definitiveOutcome === 'committed' ? 'RESULT_LOST' : 'NOT_COMMITTED'
+        assertHeldDefinitiveRecoveryState(
+          second,
+          taskRunId,
+          prepared.intentId,
+          definitiveOutcome,
+          'INSPECTOR_UNAVAILABLE'
         );
-        const finalHold = second.readRepository.getRecoveryHoldBySource(
-          'critical-intent',
-          `critical-intent:${prepared.intentId}`
-        );
-        assert.equal(finalHold.status, 'resolved');
-        assert.equal(finalHold.resolution, definitiveOutcome);
-        assert.equal(second.readRepository.getCriticalIntentById(prepared.intentId).state, 'closed');
         const settledCounts = recoveryPersistenceCounts(second.database.db);
         assert.deepEqual(settledCounts, {
-          ownerTotal: baseline.ownerTotal + 7,
+          ownerTotal: baseline.ownerTotal + (definitiveOutcome === 'committed' ? 6 : 7),
           ownerPrepared: 0,
           attemptTotal: baseline.attemptTotal + 1,
           attemptPrepared: 0,
@@ -2043,7 +2061,7 @@ for (const legacyStage of ['task-owner', 'task-unbound-attempt']) {
         const beforeThird = third.controlTransactionCount();
         const replay = await third.recoveryCoordinator.scanAndRecover();
         assert.equal(replay.sourceCount, 0);
-        assert.equal(replay.activeHoldCount, 0);
+        assert.equal(replay.activeHoldCount, definitiveOutcome === 'committed' ? 1 : 0);
         assert.equal(third.controlTransactionCount(), beforeThird);
         assert.deepEqual(recoveryPersistenceCounts(third.database.db), settledCounts);
       } finally {
@@ -2121,15 +2139,22 @@ for (const legacyStage of ['task-owner', 'hold-owner', 'unbound-attempt']) {
           finalTask.failureCode,
           definitiveOutcome === 'committed' ? 'RESULT_LOST' : 'NOT_COMMITTED'
         );
-        assert.equal(finalTask.metadata.recoveryHold, false);
-        assert.equal(second.readRepository.getRecoveryHoldBySource(
+        assert.equal(finalTask.metadata.recoveryHold, definitiveOutcome === 'committed');
+        const finalHold = second.readRepository.getRecoveryHoldBySource(
           'critical-intent',
           `critical-intent:${prepared.intentId}`
-        ), null);
+        );
+        if (definitiveOutcome === 'committed') {
+          assert.equal(finalHold.status, 'active');
+          assert.equal(finalHold.reasonCode, 'RESULT_LOST');
+          assert.equal(finalHold.resolution, null);
+        } else {
+          assert.equal(finalHold, null);
+        }
         assert.equal(second.readRepository.getCriticalIntentById(prepared.intentId).state, 'closed');
         const settledCounts = recoveryPersistenceCounts(second.database.db);
         assert.deepEqual(settledCounts, {
-          ownerTotal: baseline.ownerTotal + 4,
+          ownerTotal: baseline.ownerTotal + (definitiveOutcome === 'committed' ? 5 : 4),
           ownerPrepared: 0,
           attemptTotal: baseline.attemptTotal + 1,
           attemptPrepared: 0,
@@ -2142,7 +2167,7 @@ for (const legacyStage of ['task-owner', 'hold-owner', 'unbound-attempt']) {
         const beforeThird = third.controlTransactionCount();
         const replay = await third.recoveryCoordinator.scanAndRecover();
         assert.equal(replay.sourceCount, 0);
-        assert.equal(replay.activeHoldCount, 0);
+        assert.equal(replay.activeHoldCount, definitiveOutcome === 'committed' ? 1 : 0);
         assert.equal(third.controlTransactionCount(), beforeThird);
         assert.deepEqual(recoveryPersistenceCounts(third.database.db), settledCounts);
       } finally {
@@ -2222,18 +2247,13 @@ for (const definitiveOutcome of ['committed', 'not-committed']) {
       const recovered = await second.recoveryCoordinator.scanAndRecover();
       assert.equal(recovered.sourceCount, 1);
       assert.equal(recovered.decisions[0].inspection.outcome, definitiveOutcome);
-      const task = createArchiveRepository(second.database.db).getTaskRun(taskRunId);
-      assert.equal(task.status, 'failed');
-      assert.equal(task.failureCode, definitiveOutcome === 'committed' ? 'RESULT_LOST' : 'NOT_COMMITTED');
-      assert.equal(task.metadata.recoveryHold, false);
-      const hold = second.readRepository.getRecoveryHoldBySource(
-        'critical-intent',
-        `critical-intent:${prepared.intentId}`
+      assertHeldDefinitiveRecoveryState(
+        second,
+        taskRunId,
+        prepared.intentId,
+        definitiveOutcome,
+        'INSPECTOR_UNAVAILABLE'
       );
-      assert.equal(hold.reasonCode, 'INSPECTOR_UNAVAILABLE');
-      assert.equal(hold.status, 'resolved');
-      assert.equal(hold.resolution, definitiveOutcome);
-      assert.equal(second.readRepository.getCriticalIntentById(prepared.intentId).state, 'closed');
       assert.equal(second.database.db.prepare(`
         SELECT COUNT(*) AS count
         FROM background_execution_recovery_request_owners
@@ -2262,7 +2282,7 @@ for (const definitiveOutcome of ['committed', 'not-committed']) {
       const beforeThird = third.controlTransactionCount();
       const replay = await third.recoveryCoordinator.scanAndRecover();
       assert.equal(replay.sourceCount, 0);
-      assert.equal(replay.activeHoldCount, 0);
+      assert.equal(replay.activeHoldCount, definitiveOutcome === 'committed' ? 1 : 0);
       assert.equal(third.controlTransactionCount(), beforeThird);
     } finally {
       if (!harnessClosed) {
@@ -2409,16 +2429,13 @@ for (const definitiveOutcome of ['committed', 'not-committed']) {
       const recovered = await second.recoveryCoordinator.scanAndRecover();
       assert.equal(recovered.sourceCount, 1);
       assert.equal(recovered.decisions[0].inspection.outcome, definitiveOutcome);
-      const task = createArchiveRepository(second.database.db).getTaskRun(taskRunId);
-      assert.equal(task.status, 'failed');
-      assert.equal(task.failureCode, definitiveOutcome === 'committed' ? 'RESULT_LOST' : 'NOT_COMMITTED');
-      const hold = second.readRepository.getRecoveryHoldBySource(
-        'critical-intent',
-        `critical-intent:${prepared.intentId}`
+      assertHeldDefinitiveRecoveryState(
+        second,
+        taskRunId,
+        prepared.intentId,
+        definitiveOutcome,
+        'INSPECTOR_UNAVAILABLE'
       );
-      assert.equal(hold.status, 'resolved');
-      assert.equal(hold.resolution, definitiveOutcome);
-      assert.equal(second.readRepository.getCriticalIntentById(prepared.intentId).state, 'closed');
       second.database.close();
       second = null;
 
@@ -2426,7 +2443,7 @@ for (const definitiveOutcome of ['committed', 'not-committed']) {
       const beforeThird = third.controlTransactionCount();
       const replay = await third.recoveryCoordinator.scanAndRecover();
       assert.equal(replay.sourceCount, 0);
-      assert.equal(replay.activeHoldCount, 0);
+      assert.equal(replay.activeHoldCount, definitiveOutcome === 'committed' ? 1 : 0);
       assert.equal(third.controlTransactionCount(), beforeThird);
     } finally {
       if (!harnessClosed) {
@@ -2511,7 +2528,7 @@ test('prepared与acked同一Control transaction，ACK注入失败不遗留open I
   }
 });
 
-test('COMMIT后receipt event丢失按Inspector收口为committed-lost且不重跑mutation', async () => {
+test('COMMIT后receipt event丢失保持interrupted并创建RESULT_LOST Hold且不重跑mutation', async () => {
   const capture = createCrashAfterCommitCapture();
   const harness = createHarness({
     capture,
@@ -2546,10 +2563,483 @@ test('COMMIT后receipt event丢失按Inspector收口为committed-lost且不重�
     const recoveredTask = archive.getTaskRun(taskRunId);
     assert.equal(recoveredTask.status, 'interrupted');
     assert.equal(recoveredTask.failureCode, 'RESULT_LOST');
-    assert.deepEqual(harness.readRepository.listActiveRecoveryHolds(), []);
+    assert.equal(recoveredTask.metadata.recoveryHold, true);
+    const holds = harness.readRepository.listActiveRecoveryHolds();
+    assert.equal(holds.length, 1);
+    assert.equal(holds[0].reasonCode, 'RESULT_LOST');
+    assert.equal(holds[0].taskRunId, taskRunId);
+    assert.throws(() => harness.holdGate.assertMutationAllowed(), {
+      code: 'RECOVERY_HOLD_ACTIVE'
+    });
+    assert.equal(harness.database.db.prepare(`
+      SELECT COUNT(*) AS count FROM archive_batches WHERE task_run_id = ?
+    `).get(taskRunId).count, 0);
+    assert.equal(harness.database.db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM background_execution_batch_recovery_states WHERE task_run_id = ?
+    `).get(taskRunId).count, 0);
+    const replay = await harness.recoveryCoordinator.scanAndRecover();
+    assert.equal(replay.sourceCount, 0);
+    assert.equal(replay.activeHoldCount, 1);
+    assert.equal(harness.database.db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM recon_fix_adm_operation_receipts
+      WHERE action_key = ? AND operation_key = ?
+    `).get(RECON_FIX_RUN_JPM_ACTION, operationKey).count, 1);
   } finally {
     await harness.runtime.shutdown();
     harness.database.close();
+  }
+});
+
+test('closed committed-result-lost仅在Intent/Hold exact identity与Task保护态完整时保留且重复startup零副作用', async () => {
+  let inspectorCalls = 0;
+  let controlTransactionCount = 0;
+  const harness = createHarness({
+    planTransitions: reconFixJpmRecoveryPlanTransitions,
+    wrapInspector(base) {
+      return async (source) => {
+        inspectorCalls += 1;
+        return base(source);
+      };
+    },
+    wrapRecoveryControlRepository(base) {
+      return Object.freeze({
+        runInControlTransaction(work) {
+          controlTransactionCount += 1;
+          return base.runInControlTransaction(work);
+        }
+      });
+    }
+  });
+  try {
+    const operationKey = 'jpm-result-lost-retained-exact';
+    const { taskRunId } = seedRunningReconTask(harness, operationKey);
+    const fixture = buildCriticalFixture(harness, operationKey);
+    const identity = criticalIdentity(operationKey, taskRunId, fixture.critical);
+    const prepared = await harness.durable.prepareAndAck(identity);
+    commitCriticalFixture(harness, fixture, identity);
+    const recovered = await harness.recoveryCoordinator.scanAndRecover();
+    assert.equal(recovered.sourceCount, 1);
+    assert.equal(recovered.decisions[0].inspection.outcome, 'committed');
+    const intent = harness.readRepository.getCriticalIntentByOperation(
+      RECON_FIX_RUN_JPM_ACTION,
+      operationKey,
+      taskRunId
+    );
+    assert.equal(intent.intentId, prepared.intentId);
+    assert.equal(intent.state, 'closed');
+    const hold = harness.readRepository.getRecoveryHoldBySource(
+      'critical-intent',
+      `critical-intent:${intent.intentId}`
+    );
+    assert.equal(hold.status, 'active');
+    assert.equal(hold.reasonCode, 'RESULT_LOST');
+    assert.equal(recovered.decisions[0].held, true);
+    assert.equal(recovered.decisions[0].holdId, hold.holdId);
+    const task = createArchiveRepository(harness.database.db).getTaskRun(taskRunId);
+    assert.equal(task.status, 'interrupted');
+    assert.equal(task.failureCode, 'RESULT_LOST');
+    assert.equal(task.metadata.recoveryHold, true);
+
+    const baseline = Object.freeze({
+      inspectorCalls,
+      controlTransactionCount,
+      admImageHash: readAdmRowsForWriteback(harness.database.db).imageHash,
+      receiptCount: harness.database.db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM recon_fix_adm_operation_receipts
+        WHERE action_key = ? AND operation_key = ?
+      `).get(RECON_FIX_RUN_JPM_ACTION, operationKey).count,
+      holdCount: harness.database.db.prepare(`
+        SELECT COUNT(*) AS count FROM background_execution_recovery_holds
+      `).get().count,
+      eventCount: harness.database.db.prepare(`
+        SELECT COUNT(*) AS count FROM background_execution_recovery_events
+      `).get().count
+    });
+    assert.equal(baseline.receiptCount, 1);
+    assert.equal(baseline.holdCount, 1);
+
+    function assertNoRecoverySideEffect() {
+      assert.equal(inspectorCalls, baseline.inspectorCalls);
+      assert.equal(controlTransactionCount, baseline.controlTransactionCount);
+      assert.equal(readAdmRowsForWriteback(harness.database.db).imageHash, baseline.admImageHash);
+      assert.equal(harness.database.db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM recon_fix_adm_operation_receipts
+        WHERE action_key = ? AND operation_key = ?
+      `).get(RECON_FIX_RUN_JPM_ACTION, operationKey).count, baseline.receiptCount);
+      assert.equal(harness.database.db.prepare(`
+        SELECT COUNT(*) AS count FROM background_execution_recovery_holds
+      `).get().count, baseline.holdCount);
+      assert.equal(harness.database.db.prepare(`
+        SELECT COUNT(*) AS count FROM background_execution_recovery_events
+      `).get().count, baseline.eventCount);
+      const retained = harness.database.db.prepare(`
+        SELECT status, resolution FROM background_execution_recovery_holds
+        WHERE hold_id = ?
+      `).get(hold.holdId);
+      assert.deepEqual({ ...retained }, { status: 'active', resolution: null });
+    }
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const replay = await harness.recoveryCoordinator.scanAndRecover();
+      assert.equal(replay.sourceCount, 0);
+      assert.equal(replay.activeHoldCount, 1);
+      assertNoRecoverySideEffect();
+    }
+
+    const originalTask = harness.database.db.prepare(`
+      SELECT task_key AS taskKey, status,
+             failure_code AS failureCode, metadata_json AS metadataJson
+      FROM archive_task_runs WHERE task_run_id = ?
+    `).get(taskRunId);
+    const originalHold = harness.database.db.prepare(`
+      SELECT action_key AS actionKey, conflict_scope_key AS conflictScopeKey,
+             reason_code AS reasonCode, safe_summary_json AS safeSummaryJson
+      FROM background_execution_recovery_holds WHERE hold_id = ?
+    `).get(hold.holdId);
+    const driftCases = [{
+      label: 'correlated Intent/Hold action identity',
+      apply() {
+        harness.database.db.prepare(`
+          UPDATE background_execution_critical_intents
+          SET action_key = ? WHERE intent_id = ?
+        `).run(`${RECON_FIX_RUN_JPM_ACTION}:drift`, intent.intentId);
+        harness.database.db.prepare(`
+          UPDATE background_execution_recovery_holds
+          SET action_key = ? WHERE hold_id = ?
+        `).run(`${RECON_FIX_RUN_JPM_ACTION}:drift`, hold.holdId);
+      },
+      restore() {
+        harness.database.db.prepare(`
+          UPDATE background_execution_critical_intents
+          SET action_key = ? WHERE intent_id = ?
+        `).run(RECON_FIX_RUN_JPM_ACTION, intent.intentId);
+        harness.database.db.prepare(`
+          UPDATE background_execution_recovery_holds
+          SET action_key = ? WHERE hold_id = ?
+        `).run(originalHold.actionKey, hold.holdId);
+      }
+    }, {
+      label: 'correlated Intent/Hold canonical conflict scope',
+      apply() {
+        harness.database.db.prepare(`
+          UPDATE background_execution_critical_intents
+          SET conflict_scope_key = 'recon-fix:adm-writeback:drift'
+          WHERE intent_id = ?
+        `).run(intent.intentId);
+        harness.database.db.prepare(`
+          UPDATE background_execution_recovery_holds
+          SET conflict_scope_key = 'recon-fix:adm-writeback:drift'
+          WHERE hold_id = ?
+        `).run(hold.holdId);
+      },
+      restore() {
+        harness.database.db.prepare(`
+          UPDATE background_execution_critical_intents
+          SET conflict_scope_key = ? WHERE intent_id = ?
+        `).run(intent.conflictScopeKey, intent.intentId);
+        harness.database.db.prepare(`
+          UPDATE background_execution_recovery_holds
+          SET conflict_scope_key = ? WHERE hold_id = ?
+        `).run(originalHold.conflictScopeKey, hold.holdId);
+      }
+    }, {
+      label: 'Intent coordinationKind',
+      apply() {
+        harness.database.db.prepare(`
+          UPDATE background_execution_critical_intents
+          SET coordination_kind = 'main-owned-settlement' WHERE intent_id = ?
+        `).run(intent.intentId);
+      },
+      restore() {
+        harness.database.db.prepare(`
+          UPDATE background_execution_critical_intents
+          SET coordination_kind = ? WHERE intent_id = ?
+        `).run(intent.coordinationKind, intent.intentId);
+      }
+    }, {
+      label: 'Task canonical taskKey',
+      apply() {
+        harness.database.db.prepare(`
+          UPDATE archive_task_runs SET task_key = 'recon-id-fix:drift' WHERE task_run_id = ?
+        `).run(taskRunId);
+      },
+      restore() {
+        harness.database.db.prepare(`
+          UPDATE archive_task_runs SET task_key = ? WHERE task_run_id = ?
+        `).run(originalTask.taskKey, taskRunId);
+      }
+    }, {
+      label: 'closed Intent operation identity',
+      apply() {
+        harness.database.db.prepare(`
+          UPDATE background_execution_critical_intents
+          SET operation_key = ? WHERE intent_id = ?
+        `).run(`${operationKey}-drift`, intent.intentId);
+      },
+      restore() {
+        harness.database.db.prepare(`
+          UPDATE background_execution_critical_intents
+          SET operation_key = ? WHERE intent_id = ?
+        `).run(operationKey, intent.intentId);
+      }
+    }, {
+      label: 'Hold source identity',
+      apply() {
+        harness.database.db.prepare(`
+          UPDATE background_execution_recovery_holds
+          SET source_ref = ? WHERE hold_id = ?
+        `).run(`critical-intent:${intent.intentId}:drift`, hold.holdId);
+      },
+      restore() {
+        harness.database.db.prepare(`
+          UPDATE background_execution_recovery_holds
+          SET source_ref = ? WHERE hold_id = ?
+        `).run(`critical-intent:${intent.intentId}`, hold.holdId);
+      }
+    }, {
+      label: 'Hold reason/summary correspondence',
+      apply() {
+        harness.database.db.prepare(`
+          UPDATE background_execution_recovery_holds
+          SET reason_code = 'INSPECTION_UNKNOWN' WHERE hold_id = ?
+        `).run(hold.holdId);
+      },
+      restore() {
+        harness.database.db.prepare(`
+          UPDATE background_execution_recovery_holds
+          SET reason_code = ? WHERE hold_id = ?
+        `).run(originalHold.reasonCode, hold.holdId);
+      }
+    }, {
+      label: 'Hold safeSummary',
+      apply() {
+        harness.database.db.prepare(`
+          UPDATE background_execution_recovery_holds
+          SET safe_summary_json = ? WHERE hold_id = ?
+        `).run(JSON.stringify({
+          reasonCode: 'RESULT_LOST',
+          disposition: 'committed-result-lost-drift'
+        }), hold.holdId);
+      },
+      restore() {
+        harness.database.db.prepare(`
+          UPDATE background_execution_recovery_holds
+          SET safe_summary_json = ? WHERE hold_id = ?
+        `).run(originalHold.safeSummaryJson, hold.holdId);
+      }
+    }, {
+      label: 'Task status',
+      apply() {
+        harness.database.db.prepare(`
+          UPDATE archive_task_runs SET status = 'failed' WHERE task_run_id = ?
+        `).run(taskRunId);
+      },
+      restore() {
+        harness.database.db.prepare(`
+          UPDATE archive_task_runs SET status = ? WHERE task_run_id = ?
+        `).run(originalTask.status, taskRunId);
+      }
+    }, {
+      label: 'Task failureCode',
+      apply() {
+        harness.database.db.prepare(`
+          UPDATE archive_task_runs SET failure_code = 'NOT_COMMITTED' WHERE task_run_id = ?
+        `).run(taskRunId);
+      },
+      restore() {
+        harness.database.db.prepare(`
+          UPDATE archive_task_runs SET failure_code = ? WHERE task_run_id = ?
+        `).run(originalTask.failureCode, taskRunId);
+      }
+    }, {
+      label: 'Task recoveryHold',
+      apply() {
+        const metadata = JSON.parse(originalTask.metadataJson);
+        metadata.recoveryHold = false;
+        harness.database.db.prepare(`
+          UPDATE archive_task_runs SET metadata_json = ? WHERE task_run_id = ?
+        `).run(JSON.stringify(metadata), taskRunId);
+      },
+      restore() {
+        harness.database.db.prepare(`
+          UPDATE archive_task_runs SET metadata_json = ? WHERE task_run_id = ?
+        `).run(originalTask.metadataJson, taskRunId);
+      }
+    }];
+
+    for (const drift of driftCases) {
+      drift.apply();
+      try {
+        await assert.rejects(
+          () => harness.recoveryCoordinator.scanAndRecover(),
+          { code: 'STARTUP_RECOVERY_HOLD_SOURCE_MISSING' },
+          `${drift.label} drift must fail closed`
+        );
+        assertNoRecoverySideEffect();
+      } finally {
+        drift.restore();
+      }
+      const restoredReplay = await harness.recoveryCoordinator.scanAndRecover();
+      assert.equal(restoredReplay.sourceCount, 0);
+      assert.equal(restoredReplay.activeHoldCount, 1);
+      assertNoRecoverySideEffect();
+    }
+  } finally {
+    await harness.runtime.shutdown();
+    harness.database.close();
+  }
+});
+
+test('open unknown/unavailable Hold的correlated scope漂移在Inspector前fail closed且JPM gate持续阻断', async () => {
+  for (const initialReason of ['INSPECTION_UNKNOWN', 'INSPECTOR_UNAVAILABLE']) {
+    let inspectorUnavailable = initialReason === 'INSPECTOR_UNAVAILABLE';
+    let inspectorCalls = 0;
+    let controlTransactionCount = 0;
+    const harness = createHarness({
+      planTransitions: reconFixJpmRecoveryPlanTransitions,
+      wrapInspector(base) {
+        return async (source) => {
+          inspectorCalls += 1;
+          if (inspectorUnavailable) {
+            throw Object.assign(new Error('injected transient inspector failure'), {
+              code: 'TEST_INSPECTOR_TRANSIENT'
+            });
+          }
+          return base(source);
+        };
+      },
+      wrapRecoveryControlRepository(base) {
+        return Object.freeze({
+          runInControlTransaction(work) {
+            controlTransactionCount += 1;
+            return base.runInControlTransaction(work);
+          }
+        });
+      }
+    });
+    try {
+      const operationKey = `open-correlated-scope-${initialReason.toLowerCase()}`;
+      let taskRunId;
+      let intentId;
+      if (initialReason === 'INSPECTION_UNKNOWN') {
+        const seeded = await establishUnknownPostWithoutReceipt(harness, operationKey);
+        taskRunId = seeded.taskRunId;
+        intentId = seeded.intentId;
+        harness.database.db.exec('BEGIN IMMEDIATE');
+        try {
+          receiptRepository.insertOperationReceipt(harness.database.db, {
+            actionKey: RECON_FIX_RUN_JPM_ACTION,
+            operationKey,
+            producerTaskRunId: taskRunId,
+            scenarioId: seeded.critical.scenarioId,
+            preImageHash: seeded.critical.preImageHash,
+            postImageHash: seeded.critical.postImageHash,
+            idSequenceDigest: seeded.critical.idSequenceDigest,
+            rowCount: seeded.critical.rowCount,
+            changedRowCount: seeded.critical.changedRowCount
+          });
+          harness.database.db.exec('COMMIT');
+        } catch (error) {
+          if (harness.database.db.isTransaction) harness.database.db.exec('ROLLBACK');
+          throw error;
+        }
+      } else {
+        const seeded = seedRunningReconTask(harness, operationKey);
+        taskRunId = seeded.taskRunId;
+        const fixture = buildCriticalFixture(harness, operationKey);
+        const identity = criticalIdentity(operationKey, taskRunId, fixture.critical);
+        const prepared = await harness.durable.prepareAndAck(identity);
+        intentId = prepared.intentId;
+        commitCriticalFixture(harness, fixture, identity);
+        const threshold = await harness.recoveryCoordinator.scanAndRecover();
+        assert.equal(threshold.sourceCount, 1);
+        assert.equal(threshold.activeHoldCount, 1);
+        inspectorUnavailable = false;
+      }
+
+      const intent = harness.readRepository.getCriticalIntentById(intentId);
+      const hold = harness.readRepository.getRecoveryHoldBySource(
+        'critical-intent',
+        `critical-intent:${intentId}`
+      );
+      assert.equal(intent.state, 'acked');
+      assert.equal(hold.status, 'active');
+      assert.equal(hold.reasonCode, initialReason);
+      assert.equal(createArchiveRepository(harness.database.db).getTaskRun(taskRunId).status,
+        'interrupted');
+      const baseline = Object.freeze({
+        inspectorCalls,
+        controlTransactionCount,
+        admImageHash: readAdmRowsForWriteback(harness.database.db).imageHash,
+        eventCount: harness.database.db.prepare(`
+          SELECT COUNT(*) AS count FROM background_execution_recovery_events
+        `).get().count,
+        holdCount: harness.database.db.prepare(`
+          SELECT COUNT(*) AS count FROM background_execution_recovery_holds
+        `).get().count
+      });
+
+      harness.database.db.prepare(`
+        UPDATE background_execution_critical_intents
+        SET conflict_scope_key = 'recon-fix:adm-writeback:drift'
+        WHERE intent_id = ?
+      `).run(intentId);
+      harness.database.db.prepare(`
+        UPDATE background_execution_recovery_holds
+        SET conflict_scope_key = 'recon-fix:adm-writeback:drift'
+        WHERE hold_id = ?
+      `).run(hold.holdId);
+      assert.throws(() => harness.holdGate.assertMutationAllowed(), {
+        code: 'RECOVERY_HOLD_ACTIVE'
+      });
+      await assert.rejects(
+        () => harness.recoveryCoordinator.scanAndRecover(),
+        { code: 'STARTUP_RECOVERY_SOURCE_AUTHORITY_CONFLICT' }
+      );
+      assert.equal(inspectorCalls, baseline.inspectorCalls);
+      assert.equal(controlTransactionCount, baseline.controlTransactionCount);
+      assert.equal(readAdmRowsForWriteback(harness.database.db).imageHash, baseline.admImageHash);
+      assert.equal(harness.database.db.prepare(`
+        SELECT COUNT(*) AS count FROM background_execution_recovery_events
+      `).get().count, baseline.eventCount);
+      assert.equal(harness.database.db.prepare(`
+        SELECT COUNT(*) AS count FROM background_execution_recovery_holds
+      `).get().count, baseline.holdCount);
+      assert.equal(harness.readRepository.getCriticalIntentById(intentId).state, 'acked');
+      assert.equal(harness.readRepository.getRecoveryHoldBySource(
+        'critical-intent',
+        `critical-intent:${intentId}`
+      ).status, 'active');
+
+      harness.database.db.prepare(`
+        UPDATE background_execution_critical_intents
+        SET conflict_scope_key = ? WHERE intent_id = ?
+      `).run(intent.conflictScopeKey, intentId);
+      harness.database.db.prepare(`
+        UPDATE background_execution_recovery_holds
+        SET conflict_scope_key = ? WHERE hold_id = ?
+      `).run(hold.conflictScopeKey, hold.holdId);
+      const definitive = await harness.recoveryCoordinator.scanAndRecover();
+      assert.equal(definitive.decisions[0].inspection.outcome, 'committed');
+      assert.equal(definitive.decisions[0].held, true);
+      assert.equal(definitive.decisions[0].holdId, hold.holdId);
+      const task = createArchiveRepository(harness.database.db).getTaskRun(taskRunId);
+      assert.equal(task.status, 'interrupted');
+      assert.equal(task.failureCode, 'RESULT_LOST');
+      assert.equal(task.metadata.recoveryHold, true);
+      assert.equal(harness.readRepository.getCriticalIntentById(intentId).state, 'closed');
+      assert.equal(harness.readRepository.getRecoveryHoldBySource(
+        'critical-intent',
+        `critical-intent:${intentId}`
+      ).status, 'active');
+    } finally {
+      await harness.runtime.shutdown();
+      harness.database.close();
+    }
   }
 });
 
@@ -2663,7 +3153,7 @@ test('critical前cancel即使随后持久ACK也由Inspector判定not-committed�
   }
 });
 
-test('unknown经人工补齐exact receipt后原子收敛committed并第三次startup幂等', async () => {
+test('unknown经人工补齐exact receipt后保持active Hold与interrupted RESULT_LOST', async () => {
   let controlTransactionCount = 0;
   const harness = createHarness({
     planTransitions: reconFixJpmRecoveryPlanTransitions,
@@ -2705,23 +3195,34 @@ test('unknown经人工补齐exact receipt后原子收敛committed并第三次sta
     assert.equal(controlTransactionCount - beforeDefinitive, 1);
     assert.equal(second.decisions[0].inspection.outcome, 'committed');
     const task = recovered.archive.getTaskRun(recovered.taskRunId);
-    assert.equal(task.status, 'failed');
+    assert.equal(task.status, 'interrupted');
     assert.equal(task.failureCode, 'RESULT_LOST');
-    assert.equal(task.metadata.recoveryHold, false);
+    assert.equal(task.metadata.recoveryHold, true);
     assert.equal(task.metadata.recoveryOutcome, 'committed');
     assert.equal(harness.readRepository.getCriticalIntentById(recovered.intentId).state, 'closed');
     const hold = harness.readRepository.getRecoveryHoldBySource(
       'critical-intent',
       `critical-intent:${recovered.intentId}`
     );
-    assert.equal(hold.status, 'resolved');
-    assert.equal(hold.resolution, 'committed');
-    assert.equal(harness.readRepository.listActiveRecoveryHolds().length, 0);
+    assert.equal(hold.status, 'active');
+    assert.equal(hold.reasonCode, 'INSPECTION_UNKNOWN');
+    assert.equal(hold.resolution, null);
+    assert.equal(second.decisions[0].held, true);
+    assert.equal(second.decisions[0].holdId, hold.holdId);
+    assert.equal(harness.readRepository.listActiveRecoveryHolds().length, 1);
+    assert.throws(() => harness.holdGate.assertMutationAllowed(), {
+      code: 'RECOVERY_HOLD_ACTIVE'
+    });
 
     const beforeThird = controlTransactionCount;
     const third = await harness.recoveryCoordinator.scanAndRecover();
     assert.equal(third.sourceCount, 0);
-    assert.equal(third.activeHoldCount, 0);
+    assert.equal(third.activeHoldCount, 1);
+    assert.equal(recovered.archive.getTaskRun(recovered.taskRunId).status, 'interrupted');
+    assert.equal(harness.readRepository.getRecoveryHoldBySource(
+      'critical-intent',
+      `critical-intent:${recovered.intentId}`
+    ).status, 'active');
     assert.equal(controlTransactionCount, beforeThird);
   } finally {
     await harness.runtime.shutdown();
@@ -2755,6 +3256,8 @@ test('unknown经人工恢复exact pre后原子收敛not-committed并第三次sta
     const second = await harness.recoveryCoordinator.scanAndRecover();
     assert.equal(controlTransactionCount - beforeDefinitive, 1);
     assert.equal(second.decisions[0].inspection.outcome, 'not-committed');
+    assert.equal(second.decisions[0].held, false);
+    assert.equal(Object.hasOwn(second.decisions[0], 'holdId'), false);
     const task = recovered.archive.getTaskRun(recovered.taskRunId);
     assert.equal(task.status, 'failed');
     assert.equal(task.failureCode, 'NOT_COMMITTED');
