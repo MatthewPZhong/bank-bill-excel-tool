@@ -19,6 +19,7 @@
 | reserved topology key 对所有 entry 都是 adapter 私有命名空间；non-opt-in 也不得自带。 | Reviewer 发现原检查只覆盖 opt-in，non-opt-in 可预占 reserved key。 | 仅 merge 时检查；允许 entry 以同名 key 携带其它含义。 | Worker 创建前统一拒绝；正常 non-opt-in workerData 原样保留。 |
 | first shard failure 在第一个 Promise catch 时按时间冻结，后续 abort/teardown failure 不覆盖。 | Reviewer 的 shard1 `ROOT_FIRST` / shard0 后发 teardown 反例证明按 allSettled 数组顺序选择不等于因果首错。 | 按 shardIndex 选第一个 non-cancel；allSettled 后重新推断 root。 | 继续等待全部 child terminal，但用户看到真实首错。 |
 | child error terminal decode 是不可信协议边界，任何 SafeError validation throw 都转为 bounded result-invalid。 | `fromProtocolError` 会对 keys/大小/隐私/字段校验抛错；EventEmitter callback throw 会绕过 Promise settle。 | 让异常冒泡；接受部分字段再 sanitize。 | shard Promise 必然 settle，group/Main cleanup 可达，私密/超大文本不外泄。 |
+| cancel terminate timeout 保持 event-loop 引用，直到 Worker `exit` 令 shard Promise settle。 | Windows CI 暴露 `cancelTimer.unref()` 可在 fake Worker/空闲事件循环中提前释放唯一活跃句柄，使 `node:test` 取消 pending Promise；这违反既有“有界 settle → allSettled → Main cleanup”合同。 | 保留 `unref()` 并给测试添加无业务意义的保活句柄；只修测试时序。 | 取消路径最多只在冻结的 bounded timeout 内保活，之后仍由 `terminate()`/`exit` 收口；不改变成功路径、资金语义或 Publisher 合同。 |
 
 ## Assumptions
 
@@ -53,6 +54,8 @@
 | Reviewer follow-up `npm run test:integration` | 51 scripts、2455/2455 PASS | 全仓集成；自动耗时清单恢复，未纳入无关 diff。 |
 | Reviewer follow-up `npm run smoke` / lint / syntax / diff-check | PASS | smoke、生产源 lint、改动测试 lint、语法与格式。 |
 | Reviewer follow-up performance/RSS | 5-run synthetic：16 subjects 691.75ms→345.28ms（+50.09%），dual peak/delta 322.86/198.33 MiB；4 subjects 239.93ms→224.12ms（+6.59%） | reviewer 修复未造成 success-path 性能回退；仍不替代真实样本/Windows 门禁。 |
+| Windows CI cancellation remediation | `cancelTimer` 不再 `unref()`；child cancel 回归连续 `20/20 PASS`；E12-A/B/C `81/81 PASS`；Supervisor/Governor/adapter/Publisher/recovery/E12-C `141/141 PASS` | 修复 Promise pending 但 event loop 已空导致的 `cancelledByParent`；保证 abort、terminate、exit、allSettled、cleanup 链路有界可达。 |
+| remediation 全 unit | `6352/6357 PASS`、0 cancelled、3 Windows-only skip；2 项失败均为隔离 worktree 复用的安装树仍是 `electron-builder/app-builder-lib 26.8.1`，而冻结 lock 要求 26.15.7；接入该安装树后 canary 合同已 PASS，NSIS 模板合同精确识别并拒绝旧 `System::Store` 模板 | E12-C 与其余产品 unit 无失败；依赖安装树漂移不记为产品 PASS，也不改变 CI 必须按 lock 重新安装并验证的门禁。 |
 
 ## Blindspot Pass
 

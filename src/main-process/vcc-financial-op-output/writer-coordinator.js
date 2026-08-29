@@ -102,7 +102,8 @@ function runVccExportShardWorker(input, signal, options = {}) {
       cancelTimer = setTimeout(() => {
         if (!settled) safeTerminate(worker);
       }, cancelTimeoutMs);
-      if (cancelTimer.unref) cancelTimer.unref();
+      // 取消计时器必须保持 event-loop 引用，确保 terminate 后的 exit 能让
+      // shard Promise 有界 settle，进而保证 group allSettled 与 Main cleanup 可达。
     }
 
     worker.on('message', (message) => {
