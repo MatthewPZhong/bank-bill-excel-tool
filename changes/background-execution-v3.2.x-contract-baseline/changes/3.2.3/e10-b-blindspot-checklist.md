@@ -23,6 +23,7 @@
 - [x] staging partial/collision/tamper/replace、copy error 全部 Publisher=0 并安全清理。
 - [x] target absent→created、existing→replacement（含相同metadata）与unbranded clone均在copy前Publisher=0。
 - [x] 用户已授权最小公共合同增量：FilePlan/Publisher/journal冻结并复核resolved direct parent identity；只覆盖direct parent，不实现整条ancestor chain。
+- [x] required guarded target parent与fixed Publisher recovery root相等/inside/ancestor均在任何journal/index/target写入前整批拒绝；sibling/外部目录不受影响。
 - [x] Publisher 调用前再次复核现有FilePlan target snapshot、symlink/alias、staging ownership/identity/hash与Main-owned业务 evidence。
 - [x] Publisher failure 不 blind retry；committed保持archive-handoff journal，settlement失败/回包丢失只走既有recovery并保留RecoverySource/Hold evidence。
 - [x] cancel/quit在copy前后safepoint生效；inline terminate/close等待实际execution，deadline显式transport leak；Publisher committed不伪报cancelled。
@@ -41,6 +42,8 @@
 ## 最终门禁
 
 - [x] Direct-parent授权轮RED为`123/138 PASS, 15 FAIL`；核心FilePlan/E10-B/Publisher修复后`141/141 PASS`，交叉聚焦与archive repository/public DTO均全绿。
+- [x] Round4 recovery-root overlap真实FS RED `3/7 PASS, 4 FAIL` → GREEN `7/7 PASS`；Publisher完整`76/76`、交叉`500/500`，committed-before-settle fresh recovery与旧journal兼容控制通过。
+- [x] Round4仓库回归：integration `51/51 scripts, 2455/2455 assertions`、最终新场景`8/8`、smoke/lint/node-check/diff-check PASS；默认unit `6413/6418 PASS, 3 SKIP, 2 FAIL`，串行unit `6414/6418 PASS, 3 SKIP, 1 FAIL`。稳定剩余为既知NSIS依赖；archive负载时序项经单文件`46/46`和串行全量排除本轮回归，均未豁免或伪报全绿。
 - [x] Direct-parent最终全量：unit `6406/6410 PASS, 3 SKIP`（仅已知NSIS baseline 1 FAIL）；integration `51/51 scripts, 2455/2455 assertions`；smoke/lint/node-check/diff-check PASS。
 - [x] Round2定向：E10-A `25/25`、E10-B `47/47`、strict `18/18`，交叉聚焦 `189/189` PASS。
 - [x] Round2全量：unit `6390/6394 PASS, 3 SKIP`（仅 exact-parent 已知 NSIS baseline）；integration `51/51 scripts, 2455/2455 assertions`；smoke/lint/node-check/diff-check PASS。
@@ -54,3 +57,4 @@
 
 - 命中`ArchiveRepository` / `ArchiveService` Risk-sensitive审计血缘：本轮不改十四表schema/批号/状态/删除/Blob合同，只在内部artifact metadata持久FilePlan已冻结的bounded target-parent evidence；public list/detail显式剥离该路径/identity，定向真实SQLite+FS已验证raw持久与public DTO不泄露。
 - 新增的 `new-account:save-as` policy、copy contract、FilePlan authority brand 与 singleton Publisher wrapper 是跨文件 seam；本轮已按 E10-B checklist 及 archive/FilePlan/TaskLifecycle 定向回归 review，留待版本硬节点由 `/check-vars` 正式统计（本任务明确禁止运行 `check-vars` / `scan:vars`）。
+- Round4只增加Publisher内部required-parent/recovery-root preflight，不改`freezeWorkerBatchContext`、TaskLifecycle、Archive schema/receipt或FilePlan shape；手工对照important-variables后无新增精确变量命中，Publisher/FilePlan/Archive关联链已由`500/500`交叉回归与全integration覆盖。

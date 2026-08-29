@@ -2165,6 +2165,48 @@ function pathAliasIsWithinDirectory(fileAliasKey, directoryAliasKey) {
     );
 }
 
+function directoryIdentitiesOverlap(left, right) {
+  return pathAliasIsWithinDirectory(left, right)
+    || pathAliasIsWithinDirectory(right, left);
+}
+
+function assertRecoveryRootDisjointFromRequiredTargetParents(runtime, journal) {
+  if (journal.targetParentIdentityRequired !== true) return;
+  const recoveryRootPath = path.resolve(journal.userDataDir);
+  const recoveryRootCanonicalPath = path.normalize(path.resolve(
+    runtime.fsImpl.realpathSync(recoveryRootPath)
+  ));
+  const recoveryRootAliasKey = directoryPathAliasKey(
+    runtime.fsImpl,
+    recoveryRootCanonicalPath
+  );
+  for (const entry of journal.entries) {
+    const targetParentIdentity = normalizeTargetParentIdentity(
+      entry.expectedTargetParentIdentity,
+      { requireReliable: true }
+    );
+    const overlaps = directoryIdentitiesOverlap(
+      recoveryRootCanonicalPath,
+      targetParentIdentity.canonicalRealPath
+    ) || directoryIdentitiesOverlap(
+      recoveryRootAliasKey,
+      targetParentIdentity.aliasKey
+    );
+    if (!overlaps) continue;
+    throw new ToolboxPublicationError(
+      'TOOLBOX_PUBLICATION_RECOVERY_ROOT_TARGET_PARENT_CONFLICT',
+      'Publisher恢复根目录与目标父目录存在包含关系，已取消发布',
+      {
+        detailLines: [
+          `恢复根目录：${recoveryRootCanonicalPath}`,
+          `目标父目录：${targetParentIdentity.canonicalRealPath}`,
+          `正式目标：${entry.targetPath}`
+        ]
+      }
+    );
+  }
+}
+
 function preflightJournal(runtime, journal, protectedSourcePaths = []) {
   for (const entry of journal.entries) {
     ensureTargetParent(runtime, entry.targetPath);
@@ -2186,6 +2228,8 @@ function preflightJournal(runtime, journal, protectedSourcePaths = []) {
       );
     }
   }
+
+  assertRecoveryRootDisjointFromRequiredTargetParents(runtime, journal);
 
   const managedPaths = [
     { label: '固定恢复索引', filePath: getIndexPath(journal.userDataDir) },
