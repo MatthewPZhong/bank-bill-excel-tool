@@ -52,6 +52,9 @@ const {
   validateVccExportSingleResult,
   validateVccExportSubjectsResult
 } = require('../vcc-financial-op-output/policies');
+const {
+  createVccExportTopologyPlanner
+} = require('../vcc-financial-op-output/topology');
 
 const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   ...TOOLBOX_GENERATION_POLICIES,
@@ -94,7 +97,8 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
   });
   const vccExportSubjectsEntry = Object.freeze({
     path: path.resolve(__dirname, '..', 'vcc-financial-op-output', 'writer-worker-entry.js'),
-    cancellationTerminalErrorCodes: Object.freeze(['VCC_EXPORT_CANCELLED'])
+    cancellationTerminalErrorCodes: Object.freeze(['VCC_EXPORT_CANCELLED']),
+    admittedTopologyWorkerData: true
   });
   const vccExportSingleEntry = Object.freeze({
     path: path.resolve(__dirname, '..', 'vcc-financial-op-output', 'single-writer-worker-entry.js'),
@@ -158,13 +162,16 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
   }
   const validatorRegistry = createStaticRegistry(validatorEntries);
   const preFundTopologyPlanner = createPreFundMptTopologyPlanner({ availableParallelism });
+  const vccExportTopologyPlanner = createVccExportTopologyPlanner();
   const topologyRegistry = createStaticRegistry(Object.fromEntries(
     BACKGROUND_EXECUTION_POLICIES
       .filter((policy) => policy.resources.compound)
       .map((policy) => [policy.resources.compound.topologyKey,
         policy.actionKey === PRE_FUND_MPT_IMPORT_ACTION || policy.actionKey === PRE_FUND_MPT_REPAIR_ACTION
           ? preFundTopologyPlanner
-          : () => Object.freeze({ effectiveChildCount: 1 })])
+          : (policy.actionKey === VCC_EXPORT_SUBJECTS_ACTION
+              ? vccExportTopologyPlanner
+              : () => Object.freeze({ effectiveChildCount: 1 }))])
   ));
   entryRegistry.freeze();
   validatorRegistry.freeze();

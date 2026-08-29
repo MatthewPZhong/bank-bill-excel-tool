@@ -3,6 +3,8 @@
 const { Worker } = require('node:worker_threads');
 const { types: utilTypes } = require('node:util');
 
+const ADMITTED_TOPOLOGY_WORKER_DATA_KEY = 'backgroundExecutionAdmittedTopology';
+
 function ownDataValue(value, key) {
   if (!value || typeof value !== 'object' || utilTypes.isProxy(value)) return undefined;
   const descriptor = Object.getOwnPropertyDescriptor(value, key);
@@ -21,22 +23,32 @@ function cancellationErrorCode(message) {
 
 function normalizeWorkerEntry(entry) {
   if (typeof entry === 'string') {
-    return { filename: entry, options: {}, cancellationTerminalErrorCodes: Object.freeze([]) };
+    return {
+      filename: entry,
+      options: {},
+      cancellationTerminalErrorCodes: Object.freeze([]),
+      admittedTopologyWorkerData: false
+    };
   }
   if (entry && typeof entry.path === 'string') {
     const {
       path: filename,
       cancellationTerminalErrorCodes = [],
+      admittedTopologyWorkerData = false,
       ...options
     } = entry;
     if (!Array.isArray(cancellationTerminalErrorCodes) ||
         cancellationTerminalErrorCodes.some((code) => typeof code !== 'string' || code.length === 0)) {
       throw new TypeError('worker-thread cancellationTerminalErrorCodes must be a string array');
     }
+    if (typeof admittedTopologyWorkerData !== 'boolean') {
+      throw new TypeError('worker-thread admittedTopologyWorkerData must be boolean');
+    }
     return {
       filename,
       options,
-      cancellationTerminalErrorCodes: Object.freeze([...new Set(cancellationTerminalErrorCodes)])
+      cancellationTerminalErrorCodes: Object.freeze([...new Set(cancellationTerminalErrorCodes)]),
+      admittedTopologyWorkerData
     };
   }
   throw new TypeError('worker-thread entry must be a path or { path, ...workerOptions }');
@@ -48,7 +60,33 @@ function createWorkerThreadAdapter(options = {}) {
     kind: 'worker-thread',
     start(startOptions) {
       const normalized = normalizeWorkerEntry(startOptions.entry);
-      const worker = new WorkerClass(normalized.filename, normalized.options);
+      let workerOptions = normalized.options;
+      if (normalized.admittedTopologyWorkerData) {
+        const topology = startOptions.topology;
+        if (!topology || typeof topology.topologyKey !== 'string' || !topology.topologyKey ||
+            !Number.isSafeInteger(topology.effectiveChildCount) ||
+            topology.effectiveChildCount < 1) {
+          throw new TypeError('worker-thread admitted topology is invalid');
+        }
+        const existingWorkerData = normalized.options.workerData;
+        if (existingWorkerData !== undefined &&
+            (!existingWorkerData || typeof existingWorkerData !== 'object' ||
+              Array.isArray(existingWorkerData) ||
+              Object.hasOwn(existingWorkerData, ADMITTED_TOPOLOGY_WORKER_DATA_KEY))) {
+          throw new TypeError('worker-thread entry workerData conflicts with admitted topology');
+        }
+        workerOptions = {
+          ...normalized.options,
+          workerData: {
+            ...(existingWorkerData || {}),
+            [ADMITTED_TOPOLOGY_WORKER_DATA_KEY]: Object.freeze({
+              topologyKey: topology.topologyKey,
+              effectiveChildCount: topology.effectiveChildCount
+            })
+          }
+        };
+      }
+      const worker = new WorkerClass(normalized.filename, workerOptions);
       let closed = false;
       let readySettled = false;
       let failureReported = false;
@@ -150,6 +188,7 @@ function createWorkerThreadAdapter(options = {}) {
 }
 
 module.exports = {
+  ADMITTED_TOPOLOGY_WORKER_DATA_KEY,
   createWorkerThreadAdapter,
   normalizeWorkerEntry
 };
