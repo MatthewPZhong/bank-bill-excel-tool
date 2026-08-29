@@ -17,7 +17,7 @@ const GENERATION_RESOURCES = Object.freeze({
   utilityProcessSlots: 0,
   ioHeavySlots: 1,
   // 此值是 dynamic resource profile 失配时的保守最小 envelope；
-  // 正常 runtime 会在 admission 前按预计输出行数提升 memoryBytes。
+  // 正常 runtime 会在 admission 前按预计行/单元格/重复文本 shape 提升 memoryBytes。
   memoryBytes: MIN_NEW_ACCOUNT_GENERATION_MEMORY_BYTES
 });
 

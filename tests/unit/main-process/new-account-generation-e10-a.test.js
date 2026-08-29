@@ -18,16 +18,22 @@ const {
   createCanonicalEventEmitter
 } = require('../../../src/main-process/background-execution/adapters/canonical-event-emitter');
 const {
+  validateResultBody
+} = require('../../../src/main-process/background-execution/supervisor');
+const {
   assertFinanceSafeValue
 } = require('../../../src/main-process/background-execution/error-codec');
 const {
   MAX_RECORDS,
   NEW_ACCOUNT_GENERATION_ACTION,
+  NEW_ACCOUNT_GENERATION_SHAPE_LIMITS,
   createNewAccountGenerationInput,
   projectNewAccountGenerationRecordCount,
+  projectNewAccountGenerationShape,
   validateNewAccountGenerationResult
 } = require('../../../src/main-process/new-account/generation-contract');
 const {
+  REQUIRED_HEADERS,
   buildNewAccountBalanceRecords,
   buildNewAccountBillDates,
   buildNewAccountOutputName,
@@ -43,6 +49,9 @@ const {
 const {
   FIXED_MEMORY_ENVELOPE_BYTES,
   MAX_NEW_ACCOUNT_GENERATION_MEMORY_BYTES,
+  MAX_NEW_ACCOUNT_GENERATION_SHAPE,
+  MAX_OUTPUT_CELL_ENCODED_UTF8_BYTES_PER_RECORD,
+  MAX_OUTPUT_TEXT_UTF8_BYTES_PER_RECORD,
   MIN_NEW_ACCOUNT_GENERATION_MEMORY_BYTES,
   NEW_ACCOUNT_GENERATION_MEMORY_MODEL,
   createNewAccountGenerationResourceEstimate,
@@ -142,11 +151,13 @@ function shapedWorkerInput(dir, shapes, overrides = {}) {
   const asOfDate = overrides.asOfDate || '2030-01-01';
   const accounts = shapes.map((shape, index) => {
     const currencies = Array.from({ length: shape.currencyCount }, (_, currencyIndex) =>
-      `C${String(currencyIndex).padStart(2, '0')}`);
+      typeof shape.currencyFactory === 'function'
+        ? shape.currencyFactory(currencyIndex)
+        : `C${String(currencyIndex).padStart(2, '0')}`);
     return {
-      bankName: `测试银行${index}`,
-      location: '上海',
-      bankAccount: `62220000${String(index).padStart(4, '0')}`,
+      bankName: shape.bankName || `测试银行${index}`,
+      location: shape.location || '上海',
+      bankAccount: shape.bankAccount || `62220000${String(index).padStart(4, '0')}`,
       openingDate: isoDateBefore(asOfDate, shape.dayCount),
       isMultiCurrency: currencies.length > 1,
       currency: currencies[0],
@@ -164,6 +175,53 @@ function shapedWorkerInput(dir, shapes, overrides = {}) {
 function localDate(isoDate) {
   const [year, month, day] = isoDate.split('-').map(Number);
   return new Date(year, month - 1, day);
+}
+
+function projectedShapeFromRecords(headers, records) {
+  const textIndexes = headers.map((header, index) =>
+    ['银行名称', '所在地', '币种', '银行账号', '账单日期'].includes(header) ? index : -1
+  ).filter((index) => index >= 0);
+  let repeatedTextUtf8Bytes = 0;
+  let repeatedTextUtf16Bytes = 0;
+  let repeatedCellEncodedUtf8Bytes = 0;
+  for (const row of records) {
+    for (const index of textIndexes) {
+      const value = String(row[index]);
+      repeatedTextUtf8Bytes += Buffer.byteLength(value);
+      repeatedTextUtf16Bytes += value.length * 2;
+      repeatedCellEncodedUtf8Bytes += Buffer.byteLength(value) + Array.from(value).reduce((sum, char) => {
+        const codeUnit = char.charCodeAt(0);
+        if (codeUnit === 0x26) return sum + 4;
+        if (codeUnit === 0x3c || codeUnit === 0x3e) return sum + 3;
+        if (codeUnit === 0x27 || codeUnit === 0x22) return sum + 5;
+        if (codeUnit <= 0x08 || (codeUnit >= 0x0b && codeUnit <= 0x1f)) return sum + 6;
+        return sum;
+      }, 0);
+    }
+  }
+  return {
+    projectedOutputRows: records.length,
+    projectedOutputCells: records.length * NEW_ACCOUNT_GENERATION_SHAPE_LIMITS.outputCellsPerRecord,
+    repeatedTextUtf8Bytes,
+    repeatedTextUtf16Bytes,
+    repeatedCellEncodedUtf8Bytes
+  };
+}
+
+function expectedShapeAwareMemory(shape) {
+  return FIXED_MEMORY_ENVELOPE_BYTES +
+    shape.projectedOutputRows * NEW_ACCOUNT_GENERATION_MEMORY_MODEL.perProjectedRecordBytes +
+    shape.projectedOutputCells * NEW_ACCOUNT_GENERATION_MEMORY_MODEL.perProjectedCellBytes +
+    shape.repeatedTextUtf8Bytes * (
+      NEW_ACCOUNT_GENERATION_MEMORY_MODEL.writerUtf8TextCopies +
+      NEW_ACCOUNT_GENERATION_MEMORY_MODEL.readbackUtf8TextCopies
+    ) +
+    shape.repeatedTextUtf16Bytes * (
+      NEW_ACCOUNT_GENERATION_MEMORY_MODEL.writerUtf16TextCopies +
+      NEW_ACCOUNT_GENERATION_MEMORY_MODEL.readbackUtf16TextCopies
+    ) +
+    shape.repeatedCellEncodedUtf8Bytes *
+      NEW_ACCOUNT_GENERATION_MEMORY_MODEL.writerCellEncodedUtf8Copies;
 }
 
 function cancellableHoldingAdapter() {
@@ -214,6 +272,30 @@ function workbookProjection(filePath) {
   };
 }
 
+function generatedResultWithDigest(digest) {
+  return {
+    schemaVersion: 1,
+    status: 'generated',
+    artifact: {
+      artifactKey: 'new-account-artifact',
+      fileName: '测试银行-上海-1234-CNY-NEW_BALANCE.xlsx',
+      byteSize: 1,
+      sha256: 'a'.repeat(64),
+      sheetName: 'balance',
+      headers: ['银行名称'],
+      rowCount: 1,
+      templateSha256: digest,
+      businessEvidence: {
+        recordsSha256: digest,
+        datesSha256: digest,
+        accountsSha256: digest,
+        currenciesSha256: digest
+      }
+    },
+    summary: { accountCount: 1, currencyCount: 1, dateCount: 1, rowCount: 1 }
+  };
+}
+
 async function waitForCondition(predicate, message, timeoutMs = 5000) {
   const deadline = Date.now() + timeoutMs;
   while (!predicate()) {
@@ -246,6 +328,104 @@ test('E10-A policy保持 thread-single/job/main-settlement 与 production=false/
   assert.doesNotMatch(mainSource, /isProductionEnabled\('new-account:generate'\)/);
   assert.doesNotMatch(mainSource, /generateAndValidateNewAccount\(/);
   assert.doesNotMatch(workerOwnedSource, /fs\.(?:rm|rmSync|unlink|unlinkSync)\s*\(/);
+  assert.deepEqual(extractHeaders(TEMPLATE_PATH), REQUIRED_HEADERS);
+  assert.equal(REQUIRED_HEADERS.length, NEW_ACCOUNT_GENERATION_SHAPE_LIMITS.outputCellsPerRecord);
+});
+
+test('E10 result validator仅按5个exact path放行冻结lowercase digest shape', () => {
+  const digest = 'a5d0f6d97d2154ef45f509f8d4e5cb1b11527115535555300ea88295b018e70c';
+  assert.match(digest, /\d{16}/);
+  const result = generatedResultWithDigest(digest);
+  const allowValue = validateNewAccountGenerationResult.allowFinanceSafeValue;
+  assert.equal(typeof allowValue, 'function');
+  assert.equal(validateNewAccountGenerationResult(result), true);
+  const evidence = result.artifact.businessEvidence;
+  const allowed = [
+    ['/payload/result/artifact/templateSha256', 'templateSha256', result.artifact],
+    ['/payload/result/artifact/businessEvidence/recordsSha256', 'recordsSha256', evidence],
+    ['/payload/result/artifact/businessEvidence/datesSha256', 'datesSha256', evidence],
+    ['/payload/result/artifact/businessEvidence/accountsSha256', 'accountsSha256', evidence],
+    ['/payload/result/artifact/businessEvidence/currenciesSha256', 'currenciesSha256', evidence]
+  ];
+  for (const [valuePath, key, parent] of allowed) {
+    assert.equal(allowValue({ value: digest, path: valuePath, key, parent }), true, valuePath);
+  }
+  assert.doesNotThrow(() => assertFinanceSafeValue(
+    result,
+    'finance-safe-v1',
+    '/payload/result',
+    { allowValue }
+  ));
+
+  assert.equal(allowValue({
+    value: digest,
+    path: '/payload/result/nearby/businessEvidence/recordsSha256',
+    key: 'recordsSha256',
+    parent: evidence
+  }), false);
+  assert.equal(allowValue({
+    value: digest,
+    path: '/payload/result/artifact/businessEvidence/recordsSha256',
+    key: 'recordsSha256',
+    parent: { ...evidence, nearby: digest }
+  }), false);
+  for (const invalidDigest of [digest.toUpperCase(), digest.slice(0, 63), `账号${'1'.repeat(16)}`]) {
+    assert.equal(allowValue({
+      value: invalidDigest,
+      path: '/payload/result/artifact/businessEvidence/recordsSha256',
+      key: 'recordsSha256',
+      parent: { ...evidence, recordsSha256: invalidDigest }
+    }), false);
+    const invalidResult = structuredClone(result);
+    invalidResult.artifact.templateSha256 = 'a'.repeat(64);
+    invalidResult.artifact.businessEvidence = {
+      recordsSha256: 'a'.repeat(64),
+      datesSha256: 'a'.repeat(64),
+      accountsSha256: 'a'.repeat(64),
+      currenciesSha256: 'a'.repeat(64)
+    };
+    invalidResult.artifact.businessEvidence.recordsSha256 = invalidDigest;
+    assert.throws(
+      () => assertFinanceSafeValue(
+        invalidResult,
+        'finance-safe-v1',
+        '/payload/result',
+        { allowValue }
+      ),
+      (error) => error.code === 'PRIVACY_VALUE_FORBIDDEN' &&
+        error.path === '/payload/result/artifact/businessEvidence/recordsSha256'
+    );
+  }
+  assert.throws(
+    () => assertFinanceSafeValue(
+      { recordsSha256: digest },
+      'finance-safe-v1',
+      '/payload/result',
+      { allowValue }
+    ),
+    (error) => error.code === 'PRIVACY_VALUE_FORBIDDEN' &&
+      error.path === '/payload/result/recordsSha256'
+  );
+  assert.throws(
+    () => assertFinanceSafeValue({ recordsSha256: digest }),
+    (error) => error.code === 'PRIVACY_VALUE_FORBIDDEN' && error.path === '/recordsSha256'
+  );
+  const schemaInvalidResult = { ...result, unexpected: true };
+  assert.doesNotThrow(() => assertFinanceSafeValue(
+    schemaInvalidResult,
+    'finance-safe-v1',
+    '/payload/result',
+    { allowValue }
+  ));
+  assert.equal(validateNewAccountGenerationResult(schemaInvalidResult), false);
+  assert.throws(
+    () => validateResultBody(
+      NEW_ACCOUNT_GENERATION_POLICY,
+      schemaInvalidResult,
+      validateNewAccountGenerationResult
+    ),
+    (error) => error.code === 'RESULT_VALIDATION_FAILED'
+  );
 });
 
 test('唯一 core 锁定昨日/10年边界、币种去重、记录顺序与 legacy 文件名', () => {
@@ -297,7 +477,7 @@ test('唯一 core 锁定昨日/10年边界、币种去重、记录顺序与 lega
   );
 });
 
-test('共享行数投影与实际 records.length 同口径，覆盖闰日和多账户/币种', () => {
+test('共享shape投影与实际records的行/cell/UTF-8/UTF-16/单元格编码同口径', () => {
   const headers = extractHeaders(TEMPLATE_PATH);
   const cases = [
     { asOfDate: '2026-03-02', shapes: [{ dayCount: 1, currencyCount: 1 }] },
@@ -307,13 +487,25 @@ test('共享行数投影与实际 records.length 同口径，覆盖闰日和多�
       asOfDate: '2026-03-02',
       shapes: [{ dayCount: 28, currencyCount: 3 }, { dayCount: 7, currencyCount: 5 }]
     },
-    { asOfDate: '2026-03-02', shapes: [{ dayCount: 366, currencyCount: 8 }] }
+    { asOfDate: '2026-03-02', shapes: [{ dayCount: 366, currencyCount: 8 }] },
+    {
+      asOfDate: '2026-03-02',
+      shapes: [{
+        dayCount: 1,
+        currencyCount: 1,
+        bankName: '\u0800'.repeat(256),
+        location: '\u0801'.repeat(256),
+        bankAccount: '\u0802'.repeat(256),
+        currencyFactory: () => '\u0803'.repeat(64)
+      }]
+    }
   ];
   for (const entry of cases) {
     const input = shapedWorkerInput(tempDir('new-account-projection-'), entry.shapes, {
       asOfDate: entry.asOfDate
     });
     const projected = projectNewAccountGenerationRecordCount(input.accounts, input.asOfDate);
+    const projectedShape = projectNewAccountGenerationShape(input.accounts, input.asOfDate);
     const accounts = input.accounts.map((account) => ({
       ...account,
       openingDateRaw: account.openingDate,
@@ -333,52 +525,158 @@ test('共享行数投影与实际 records.length 同口径，覆盖闰日和多�
     );
     assert.equal(projected, expected);
     assert.equal(generated.records.length, projected);
+    assert.deepEqual(
+      projectedShape,
+      projectedShapeFromRecords(headers, generated.records)
+    );
   }
 });
 
-test('动态内存 estimator 锁定最小/typical/29,192/60,416/250,000、上下界与overflow', () => {
+test('shape-aware estimator锁定0/1/typical/29,192/60,416/250,000、Unicode/XML编码与overflow', () => {
   assert.equal(GENERATION_RESOURCES.memoryBytes, MIN_NEW_ACCOUNT_GENERATION_MEMORY_BYTES);
-  assert.equal(estimateNewAccountGenerationMemory(0).memoryBytes, FIXED_MEMORY_ENVELOPE_BYTES);
+  const zeroShape = {
+    projectedOutputRows: 0,
+    projectedOutputCells: 0,
+    repeatedTextUtf8Bytes: 0,
+    repeatedTextUtf16Bytes: 0,
+    repeatedCellEncodedUtf8Bytes: 0
+  };
+  assert.equal(estimateNewAccountGenerationMemory(zeroShape).memoryBytes, FIXED_MEMORY_ENVELOPE_BYTES);
   const cases = [
     { label: 'minimum', rows: 1, shapes: [{ dayCount: 1, currencyCount: 1 }] },
     { label: 'typical', rows: 4, shapes: [{ dayCount: 2, currencyCount: 2 }] },
     { label: '29,192', rows: 29192, shapes: [{ dayCount: 3649, currencyCount: 8 }] },
     { label: '60,416', rows: 60416, shapes: [{ dayCount: 944, currencyCount: 64 }] },
     {
-      label: '250,000',
+      label: '250,000-short',
       rows: 250000,
-      shapes: [{ dayCount: 2500, currencyCount: 50 }, { dayCount: 2500, currencyCount: 50 }]
+      shapes: [
+        { dayCount: 2500, currencyCount: 50, bankName: 'B0', location: 'L', bankAccount: 'A0' },
+        { dayCount: 2500, currencyCount: 50, bankName: 'B1', location: 'L', bankAccount: 'A1' }
+      ]
     }
   ];
-  const estimates = [];
+  const estimates = new Map();
   for (const entry of cases) {
     const input = shapedWorkerInput(tempDir('new-account-estimate-'), entry.shapes);
     const estimate = createNewAccountGenerationResourceEstimate(input, GENERATION_RESOURCES);
     assert.equal(estimate.projectedOutputRows, entry.rows, entry.label);
+    assert.equal(estimate.modelVersion, 2);
+    assert.equal(estimate.projectedOutputCells, entry.rows * 9);
+    assert.equal(estimate.resources.memoryBytes, expectedShapeAwareMemory(estimate), entry.label);
     assert.equal(
-      estimate.resources.memoryBytes,
-      FIXED_MEMORY_ENVELOPE_BYTES + entry.rows * NEW_ACCOUNT_GENERATION_MEMORY_MODEL.perProjectedRowBytes,
-      entry.label
+      estimate.components.safetyMarginBytes,
+      NEW_ACCOUNT_GENERATION_MEMORY_MODEL.safetyMarginBytes
     );
     assert.equal(Number.isSafeInteger(estimate.resources.memoryBytes), true);
-    estimates.push(estimate.resources.memoryBytes);
+    estimates.set(entry.label, estimate.resources.memoryBytes);
   }
-  assert.deepEqual([...estimates].sort((left, right) => left - right), estimates);
-  assert.ok(estimates[0] < MAX_NEW_ACCOUNT_GENERATION_MEMORY_BYTES);
-  assert.equal(estimates.at(-1), MAX_NEW_ACCOUNT_GENERATION_MEMORY_BYTES);
-  assert.ok(estimates[2] >= 467648512, '29,192行 reservation 应覆盖本机观测 envelope');
-  assert.ok(estimates[3] >= 572456960, '60,416行 reservation 应覆盖本机观测 envelope');
+  assert.ok(estimates.get('minimum') < 1.5 * 1024 ** 3, '小任务不得按最大shape预留');
+  assert.ok(estimates.get('29,192') >= 467648512, '29,192行 reservation 应覆盖既有本机证据');
+  assert.ok(estimates.get('60,416') >= 572456960, '60,416行 reservation 应覆盖既有本机证据');
+
+  const maxTextInput = shapedWorkerInput(tempDir('new-account-max-text-estimate-'), [{
+    dayCount: 944,
+    currencyCount: 64,
+    bankName: '银'.repeat(256),
+    location: '地'.repeat(256),
+    bankAccount: '账'.repeat(256),
+    currencyFactory: (index) => `${'币'.repeat(62)}${String(index).padStart(2, '0')}`
+  }]);
+  const maxTextEstimate = createNewAccountGenerationResourceEstimate(maxTextInput, GENERATION_RESOURCES);
+  assert.equal(maxTextEstimate.projectedOutputRows, 60416);
+  assert.ok(maxTextEstimate.resources.memoryBytes > estimates.get('60,416'));
+  assert.ok(estimates.get('250,000-short') > 2 * 1000 ** 3);
+  assert.ok(maxTextEstimate.resources.memoryBytes > estimates.get('250,000-short'));
+
+  const worstUtf8Input = shapedWorkerInput(tempDir('new-account-worst-utf8-'), [{
+    dayCount: 1,
+    currencyCount: 1,
+    bankName: '\u0800'.repeat(256),
+    location: '\u0801'.repeat(256),
+    bankAccount: '\u0802'.repeat(256),
+    currencyFactory: () => '\u0803'.repeat(64)
+  }]);
+  const worstUtf8Shape = projectNewAccountGenerationShape(
+    worstUtf8Input.accounts,
+    worstUtf8Input.asOfDate
+  );
+  assert.equal(worstUtf8Shape.repeatedTextUtf8Bytes, MAX_OUTPUT_TEXT_UTF8_BYTES_PER_RECORD);
+  assert.equal(worstUtf8Shape.repeatedTextUtf16Bytes, 1684);
+  assert.equal(worstUtf8Shape.repeatedCellEncodedUtf8Bytes, worstUtf8Shape.repeatedTextUtf8Bytes);
+
+  const worstCellEncodingInput = shapedWorkerInput(tempDir('new-account-worst-cell-encoding-'), [{
+    dayCount: 1,
+    currencyCount: 1,
+    bankName: '\u0001'.repeat(256),
+    location: '\u0002'.repeat(256),
+    bankAccount: '\u0003'.repeat(256),
+    currencyFactory: () => '\u0004'.repeat(64)
+  }]);
+  const worstCellEncodingShape = projectNewAccountGenerationShape(
+    worstCellEncodingInput.accounts,
+    worstCellEncodingInput.asOfDate
+  );
+  assert.equal(
+    worstCellEncodingShape.repeatedCellEncodedUtf8Bytes,
+    MAX_OUTPUT_CELL_ENCODED_UTF8_BYTES_PER_RECORD
+  );
+  assert.ok(
+    worstCellEncodingShape.repeatedCellEncodedUtf8Bytes >
+      worstCellEncodingShape.repeatedTextUtf8Bytes
+  );
+  assert.equal(
+    estimateNewAccountGenerationMemory(MAX_NEW_ACCOUNT_GENERATION_SHAPE).memoryBytes,
+    MAX_NEW_ACCOUNT_GENERATION_MEMORY_BYTES
+  );
+  assert.ok(estimates.get('250,000-short') < MAX_NEW_ACCOUNT_GENERATION_MEMORY_BYTES);
+
   assert.throws(
-    () => estimateNewAccountGenerationMemory(Number.MAX_SAFE_INTEGER),
+    () => estimateNewAccountGenerationMemory({
+      ...zeroShape,
+      repeatedTextUtf8Bytes: Number.MAX_SAFE_INTEGER
+    }),
     (error) => error.code === 'NEW_ACCOUNT_RESOURCE_ESTIMATE_OVERFLOW'
   );
   assert.throws(
-    () => estimateNewAccountGenerationMemory(MAX_RECORDS + 1),
+    () => estimateNewAccountGenerationMemory({
+      ...zeroShape,
+      projectedOutputRows: MAX_RECORDS + 1,
+      projectedOutputCells: (MAX_RECORDS + 1) * 9
+    }),
     (error) => error.code === 'NEW_ACCOUNT_RESOURCE_ESTIMATE_ROW_LIMIT'
   );
   assert.throws(
     () => estimateNewAccountGenerationMemory(1.5),
-    (error) => error.code === 'NEW_ACCOUNT_RESOURCE_ESTIMATE_ROW_COUNT_INVALID'
+    (error) => error.code === 'NEW_ACCOUNT_RESOURCE_ESTIMATE_SHAPE_INVALID'
+  );
+  assert.throws(
+    () => estimateNewAccountGenerationMemory({
+      projectedOutputRows: 1,
+      projectedOutputCells: 9,
+      repeatedTextUtf8Bytes: MAX_OUTPUT_TEXT_UTF8_BYTES_PER_RECORD + 1,
+      repeatedTextUtf16Bytes: 0,
+      repeatedCellEncodedUtf8Bytes: 0
+    }),
+    (error) => error.code === 'NEW_ACCOUNT_RESOURCE_ESTIMATE_SHAPE_BOUNDS'
+  );
+  assert.throws(
+    () => estimateNewAccountGenerationMemory({
+      projectedOutputRows: 1,
+      projectedOutputCells: 9,
+      repeatedTextUtf8Bytes: 0,
+      repeatedTextUtf16Bytes: 0,
+      repeatedCellEncodedUtf8Bytes: MAX_OUTPUT_CELL_ENCODED_UTF8_BYTES_PER_RECORD + 1
+    }),
+    (error) => error.code === 'NEW_ACCOUNT_RESOURCE_ESTIMATE_SHAPE_BOUNDS'
+  );
+  assert.throws(
+    () => shapedWorkerInput(tempDir('new-account-too-long-'), [{
+      dayCount: 1,
+      currencyCount: 1,
+      bankName: '银'.repeat(257)
+    }]),
+    (error) => error.code === 'NEW_ACCOUNT_GENERATION_VALUE_INVALID'
   );
 });
 
@@ -417,6 +715,62 @@ test('低总预算在 Worker spawn 前 fail closed，小任务按实际行数而
   const report = await runtime.shutdown({ timeoutMs: 10000 });
   assert.deepEqual(report.leakedTransports, []);
   assert.deepEqual(report.errors, []);
+});
+
+test('合法250,000短文本与60,416最大文本超当前pool时均在spawn前拒绝', async () => {
+  const cases = [
+    {
+      label: '250000-short',
+      shapes: [
+        { dayCount: 2500, currencyCount: 50, bankName: 'B0', location: 'L', bankAccount: 'A0' },
+        { dayCount: 2500, currencyCount: 50, bankName: 'B1', location: 'L', bankAccount: 'A1' }
+      ]
+    },
+    {
+      label: '60416-max-text',
+      shapes: [{
+        dayCount: 944,
+        currencyCount: 64,
+        bankName: '银'.repeat(256),
+        location: '地'.repeat(256),
+        bankAccount: '账'.repeat(256),
+        currencyFactory: (index) => `${'币'.repeat(62)}${String(index).padStart(2, '0')}`
+      }]
+    }
+  ];
+  for (const entry of cases) {
+    const input = shapedWorkerInput(tempDir(`new-account-${entry.label}-`), entry.shapes);
+    const estimate = createNewAccountGenerationResourceEstimate(input, GENERATION_RESOURCES);
+    let workerStarts = 0;
+    const runtime = createBackgroundExecutionRuntime({
+      availableParallelism: 4,
+      freeMemoryBytes: 8 * 1024 ** 3,
+      totalMemoryBytes: 16 * 1024 ** 3,
+      memoryHardCeilingBytes: estimate.resources.memoryBytes - 1,
+      systemReserveBytes: 0,
+      workerThreadAdapter: {
+        start() {
+          workerStarts += 1;
+          throw new Error('超预算合法大任务不得创建 Worker');
+        }
+      }
+    });
+    const operationKey = `new-account-${entry.label}`;
+    const execution = await runtime.execute({
+      actionKey: NEW_ACCOUNT_GENERATION_ACTION,
+      operationKey,
+      context: operationContext(operationKey),
+      input
+    });
+    assert.equal(execution.outcome, 'transport-lost', entry.label);
+    assert.equal(execution.terminalSource, 'spawn-error', entry.label);
+    assert.equal(execution.error.code, 'RESOURCE_BUDGET_UNAVAILABLE', entry.label);
+    assert.equal(workerStarts, 0, entry.label);
+    assert.equal(runtime.resourceGovernor.snapshot().activeUsage.memoryBytes, 0, entry.label);
+    const report = await runtime.shutdown({ timeoutMs: 10000 });
+    assert.deepEqual(report.leakedTransports, [], entry.label);
+    assert.deepEqual(report.errors, [], entry.label);
+  }
 });
 
 test('并发 NewAccount admission 不超 Governor memory budget/system reserve，第二任务未创建 Worker', async () => {
@@ -606,6 +960,40 @@ test('真实 one-shot Worker 写单一 staging workbook、业务回读、Main技
   assert.deepEqual(report.errors, []);
   assert.equal(result.execution.outcome, 'completed');
   assert.equal(fs.existsSync(options.generationPath), true);
+});
+
+test('真实 Worker 含16位数字串的合法business digest仍以completed收口', async () => {
+  const dir = tempDir('new-account-finance-safe-digest-');
+  const options = inputOptions(dir, {
+    payload: payload({
+      accounts: [{ ...payload().accounts[0], bankName: '测试银行29' }]
+    }),
+    operationKey: 'new-account-finance-safe-digest',
+    context: operationContext('new-account-finance-safe-digest')
+  });
+  const runtime = createBackgroundExecutionRuntime({
+    availableParallelism: 4,
+    freeMemoryBytes: 8 * 1024 ** 3,
+    totalMemoryBytes: 16 * 1024 ** 3,
+    shutdownTimeoutMs: 10000
+  });
+  const result = await generateAndValidateNewAccount({ ...options, runtime });
+  const digest = result.execution.result?.artifact?.businessEvidence?.recordsSha256;
+  assert.equal(result.execution.outcome, 'completed');
+  assert.equal(result.execution.terminalSource, 'job:done');
+  assert.equal(digest, 'a5d0f6d97d2154ef45f509f8d4e5cb1b11527115535555300ea88295b018e70c');
+  assert.match(digest, /\d{16}/);
+  assert.ok(result.generated);
+  assert.doesNotThrow(() => assertFinanceSafeValue(
+    result.execution.result,
+    'finance-safe-v1',
+    '/payload/result',
+    { allowValue: validateNewAccountGenerationResult.allowFinanceSafeValue }
+  ));
+  const report = await runtime.shutdown({ timeoutMs: 10000 });
+  assert.deepEqual(report.cancelledJobs, []);
+  assert.deepEqual(report.leakedTransports, []);
+  assert.deepEqual(report.errors, []);
 });
 
 test('真实 running Worker 收到 shutdown 后cancel-wins，不产生handle并由Main清空staging', async () => {
