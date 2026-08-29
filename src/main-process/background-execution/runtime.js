@@ -32,8 +32,14 @@ const {
   validateNewAccountGenerationResult
 } = require('../new-account/generation-contract');
 const {
-  NEW_ACCOUNT_GENERATION_POLICY
+  NEW_ACCOUNT_GENERATION_POLICY,
+  NEW_ACCOUNT_SAVE_AS_POLICY
 } = require('../new-account/policies');
+const {
+  NEW_ACCOUNT_SAVE_AS_ACTION,
+  runNewAccountArtifactCopyInline,
+  validateNewAccountSaveAsResult
+} = require('../new-account/artifact-copy');
 const {
   estimateNewAccountGenerationPhaseResources
 } = require('../new-account/resource-estimator');
@@ -67,6 +73,7 @@ const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   ...TOOLBOX_GENERATION_POLICIES,
   ...PRE_FUND_MPT_POLICIES,
   NEW_ACCOUNT_GENERATION_POLICY,
+  NEW_ACCOUNT_SAVE_AS_POLICY,
   ...FUND_RECON_POLICIES,
   ...DUPLICATE_POLICIES
 ]);
@@ -104,6 +111,9 @@ function mergeShutdownReports(report, ...pairedReports) {
 }
 
 function entryBindingForPolicy(policy, workerRoot, duplicateStartupGate) {
+  if (policy.actionKey === NEW_ACCOUNT_SAVE_AS_ACTION) {
+    return runNewAccountArtifactCopyInline;
+  }
   if (policy.moduleId === 'duplicate') {
     return Object.freeze({
       path: path.resolve(__dirname, '..', 'duplicate-inbound-match', 'worker-entry.js'),
@@ -189,7 +199,9 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
           ? validatePreFundMptRepairResult
           : validatePreFundMptImportResult)
       : (policy.moduleId === 'new-account'
-          ? validateNewAccountGenerationResult
+          ? (policy.actionKey === NEW_ACCOUNT_SAVE_AS_ACTION
+              ? validateNewAccountSaveAsResult
+              : validateNewAccountGenerationResult)
           : (policy.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
           ? validateToolboxMultiGenerationResult
           : (value) => validateToolboxGenerationResult(value, policy.actionKey)));

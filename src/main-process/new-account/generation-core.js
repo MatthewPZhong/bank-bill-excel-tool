@@ -441,6 +441,21 @@ function workbookRecordMismatch() {
 }
 
 async function readBackAndValidateCooperatively(filePath, expected, signal, options = {}) {
+  const expectedRecords = Array.isArray(expected && expected.records) ? expected.records : null;
+  const expectedRowCount = expectedRecords
+    ? expectedRecords.length
+    : Number(expected && expected.rowCount);
+  const expectedBusinessEvidence = expectedRecords ? null : expected && expected.businessEvidence;
+  if (!Number.isSafeInteger(expectedRowCount) || expectedRowCount < 0 ||
+      (!expectedRecords && (!expectedBusinessEvidence ||
+        !['recordsSha256', 'datesSha256', 'accountsSha256', 'currenciesSha256'].every(
+          (key) => typeof expectedBusinessEvidence[key] === 'string' &&
+            /^[0-9a-f]{64}$/.test(expectedBusinessEvidence[key])
+        )))) {
+    throw Object.assign(new Error('NewAccount输出预期业务证据非法'), {
+      code: 'NEW_ACCOUNT_WORKBOOK_EXPECTED_EVIDENCE_INVALID'
+    });
+  }
   const sourceFile = path.basename(filePath);
   let zip = null;
   try {
@@ -506,7 +521,7 @@ async function readBackAndValidateCooperatively(filePath, expected, signal, opti
         while (normalized.length < headers.length) normalized.push('');
         actualAccumulator.add(normalized);
         actualRowCount += 1;
-        if (actualRowCount > expected.records.length) throw workbookRecordMismatch();
+        if (actualRowCount > expectedRowCount) throw workbookRecordMismatch();
       },
       async onRowBatch({ parsedRows, lastRowNumber }) {
         await runNewAccountGenerationStage(
@@ -517,27 +532,29 @@ async function readBackAndValidateCooperatively(filePath, expected, signal, opti
             processedRows: actualRowCount,
             parsedRows,
             lastRowNumber,
-            totalRows: expected.records.length
+            totalRows: expectedRowCount
           }
         );
       }
     });
     await runNewAccountGenerationStage(signal, options, 'readback:row-scan-complete', {
       processedRows: actualRowCount,
-      totalRows: expected.records.length
+      totalRows: expectedRowCount
     });
-    if (!headers || !actualAccumulator || actualRowCount !== expected.records.length) {
+    if (!headers || !actualAccumulator || actualRowCount !== expectedRowCount) {
       throw workbookRecordMismatch();
     }
 
     const actualEvidence = actualAccumulator.finish();
-    const expectedEvidence = await businessEvidenceInBatches(
-      headers,
-      expected.records,
-      signal,
-      options,
-      'expected'
-    );
+    const expectedEvidence = expectedRecords
+      ? await businessEvidenceInBatches(
+          headers,
+          expectedRecords,
+          signal,
+          options,
+          'expected'
+        )
+      : expectedBusinessEvidence;
     if (Object.keys(expectedEvidence).some((key) => actualEvidence[key] !== expectedEvidence[key])) {
       throw workbookRecordMismatch();
     }
