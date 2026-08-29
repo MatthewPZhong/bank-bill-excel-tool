@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -1149,6 +1150,65 @@ test('真实 one-shot Worker 写单一 staging workbook、业务回读、Main技
   assert.deepEqual(report.errors, []);
   assert.equal(result.execution.outcome, 'completed');
   assert.equal(fs.existsSync(options.generationPath), true);
+});
+
+test('Main expected authority 拒绝恶意 Worker 自洽账号/币种与附加 Sheet', async (t) => {
+  for (const attack of ['self-consistent-business', 'extra-sheet']) {
+    await t.test(attack, async () => {
+      const dir = tempDir(`new-account-main-authority-${attack}-`);
+      const options = inputOptions(dir);
+      const fakeRuntime = {
+        async execute(request) {
+          let workerInput = request.input;
+          if (attack === 'self-consistent-business') {
+            workerInput = createNewAccountGenerationInput({
+              ...request.input,
+              accounts: request.input.accounts.map((account) => ({
+                ...account,
+                bankAccount: '999999999999',
+                currencies: ['JPY']
+              }))
+            });
+          }
+          let workerResult = await executeNewAccountGeneration(workerInput, null, {
+            allowedTemplatePath: TEMPLATE_PATH
+          });
+          if (attack === 'extra-sheet') {
+            const workbook = XLSX.readFile(options.generationPath, { raw: true });
+            XLSX.utils.book_append_sheet(
+              workbook,
+              XLSX.utils.aoa_to_sheet([['secret-data'], ['unauthorized']]),
+              'secret-data'
+            );
+            XLSX.writeFile(workbook, options.generationPath);
+            const bytes = fs.readFileSync(options.generationPath);
+            workerResult = {
+              ...workerResult,
+              artifact: {
+                ...workerResult.artifact,
+                byteSize: bytes.length,
+                sha256: crypto.createHash('sha256').update(bytes).digest('hex')
+              }
+            };
+          }
+          return {
+            outcome: 'completed',
+            terminalSource: 'job:done',
+            result: workerResult
+          };
+        }
+      };
+      await assert.rejects(
+        generateAndValidateNewAccount({ ...options, runtime: fakeRuntime }),
+        (error) => [
+          'NEW_ACCOUNT_WORKBOOK_RECORDS_MISMATCH',
+          'NEW_ACCOUNT_WORKBOOK_SHEET_MISMATCH'
+        ].includes(error.code)
+      );
+      assert.equal(fs.existsSync(options.generationPath), false);
+      assert.equal(fs.existsSync(options.filePlan.outputs[0].filePath), false);
+    });
+  }
 });
 
 test('真实 Worker 含16位数字串的合法business digest仍以completed收口', async () => {

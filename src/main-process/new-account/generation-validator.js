@@ -2,7 +2,9 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const XLSX = require('xlsx');
 
+const { extractHeaders } = require('../../backend/file-service/readers');
 const { normalizeFilePlanV1 } = require('../archive-center/file-plan');
 const { sourceSnapshotMatchesStat } = require('../archive-center/source-snapshot');
 const { pathsAlias } = require('../toolbox-target-identity');
@@ -17,12 +19,16 @@ const {
 } = require('./generation-contract');
 const {
   createTemplateEvidence,
+  createExpectedNewAccountArtifactDescriptor,
   fileSha256,
   formatDateLabel,
   normalizeNewAccountAccounts,
   normalizeNewAccountCurrencyValues,
+  readBackAndValidateCooperatively,
   validateNewAccountAccounts
 } = require('./generation-core');
+
+const expectedArtifactAuthorities = new WeakSet();
 
 function normalizeMainAccounts(payload) {
   const normalized = validateNewAccountAccounts(normalizeNewAccountAccounts(payload));
@@ -82,6 +88,38 @@ function createNewAccountWorkerInput(options) {
   });
 }
 
+function createNewAccountExpectedArtifactAuthority(input) {
+  const workbook = XLSX.readFile(input.template.filePath, {
+    bookSheets: true,
+    raw: true
+  });
+  const headers = extractHeaders(input.template.filePath);
+  const templateStat = fs.lstatSync(input.template.filePath, { bigint: true });
+  if (templateStat.isSymbolicLink() || !templateStat.isFile() ||
+      !sourceSnapshotMatchesStat(input.template.snapshot, templateStat) ||
+      fileSha256(input.template.filePath) !== input.template.sha256) {
+    const error = new Error('Main构造NewAccount expected artifact期间模板已变化');
+    error.code = 'NEW_ACCOUNT_TEMPLATE_CHANGED';
+    throw error;
+  }
+  const authority = createExpectedNewAccountArtifactDescriptor({
+    input,
+    headers,
+    sheetNames: workbook.SheetNames
+  });
+  expectedArtifactAuthorities.add(authority);
+  return authority;
+}
+
+function assertNewAccountExpectedArtifactAuthority(authority) {
+  if (!authority || !expectedArtifactAuthorities.has(authority)) {
+    const error = new Error('NewAccount expected artifact必须来自Main冻结输入');
+    error.code = 'NEW_ACCOUNT_EXPECTED_ARTIFACT_AUTHORITY_INVALID';
+    throw error;
+  }
+  return authority;
+}
+
 function technicalValidateNewAccountArtifact(input, result) {
   if (!validateNewAccountGenerationResult(result) ||
       result.artifact.artifactKey !== input.generation.artifactKey ||
@@ -124,6 +162,7 @@ function cleanupOwnedGeneration(input) {
 
 async function generateAndValidateNewAccount(options) {
   const input = createNewAccountWorkerInput(options);
+  const authority = createNewAccountExpectedArtifactAuthority(input);
   validateTaskOwnedStagingPath({
     stagingRoot: input.generation.stagingRoot,
     candidatePath: input.generation.generationPath,
@@ -150,9 +189,30 @@ async function generateAndValidateNewAccount(options) {
       cleanupGeneration();
       return Object.freeze({ execution, generated: null });
     }
+    const technical = technicalValidateNewAccountArtifact(input, execution.result);
+    const readback = await readBackAndValidateCooperatively(
+      technical.generationPath,
+      authority,
+      null
+    );
     return Object.freeze({
       execution,
-      generated: technicalValidateNewAccountArtifact(input, execution.result)
+      expectedArtifactAuthority: authority,
+      generated: Object.freeze({
+        generationPath: technical.generationPath,
+        artifact: Object.freeze({
+          artifactKey: authority.artifactKey,
+          fileName: authority.fileName,
+          byteSize: Number(technical.artifact.byteSize),
+          sha256: technical.artifact.sha256,
+          sheetName: readback.sheetNames[0],
+          headers: Object.freeze(readback.headers),
+          rowCount: readback.rowCount,
+          templateSha256: authority.templateSha256,
+          businessEvidence: readback.businessEvidence
+        }),
+        summary: authority.summary
+      })
     });
   } catch (error) {
     cleanupGeneration();
@@ -162,6 +222,8 @@ async function generateAndValidateNewAccount(options) {
 
 module.exports = {
   cleanupOwnedGeneration,
+  assertNewAccountExpectedArtifactAuthority,
+  createNewAccountExpectedArtifactAuthority,
   createNewAccountFilePlan,
   createNewAccountWorkerInput,
   generateAndValidateNewAccount,

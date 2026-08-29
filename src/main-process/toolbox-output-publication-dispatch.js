@@ -246,14 +246,15 @@ function publishToolboxPublicationAsync(options) {
   });
 }
 
-// 非工具箱 artifact 仍复用同一个进程级 durable FIFO Publisher；该窄入口只关闭
-// archive handoff，不创建第二 dispatcher、journal 方言或 recovery/retry authority。
+// 非工具箱 artifact 仍复用同一个进程级 durable FIFO Publisher，并沿用同一
+// archive-handoff receipt/recovery authority；调用方只能在 Task artifact durable
+// 且 Task 终态持久化后通过既有 recover acknowledgement 清理 receipt。
 function publishDurableArtifactAsync(options) {
   return defaultDispatcher.publish({
     ...(options || {}),
-    requireArchiveHandoff: false,
+    requireArchiveHandoff: true,
     requireValidatedArtifacts: true,
-    allowEmptyArchiveInputs: true
+    allowEmptyArchiveInputs: options && options.allowEmptyArchiveInputs === true
   });
 }
 

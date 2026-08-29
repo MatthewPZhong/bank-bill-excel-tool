@@ -13,21 +13,23 @@
 | --- | --- | --- |
 | 冻结 policy 已给出 exact `inline-async`/16 MiB/I/O=1 形态 | `validation/fixtures/valid/policy-registry.v3.2.x.json` 的 `new-account:save-as` | production policy 逐字段对齐 fixture，不发明第五种 mode |
 | action binding 已冻结 canonical → legacy | `action-task-binding-registry.js`: `new-account:save-as → new-account:export` | 不改 public/legacy task identity，不切 live IPC |
-| E10-A artifact 含 sheet/header/rowCount/template 与四个业务 digest | `new-account/generation-contract.js` | save-as Main expected evidence 复用此 bounded descriptor，不带 raw rows |
+| E10-A Worker artifact 含 sheet/header/rowCount/template 与四个业务 digest，但它只是不可信观察 | reviewer真实自洽伪造probe、`new-account/generation-contract.js` | Main必须从冻结payload/asOf/template独立构造out-of-band bounded authority，不得把Worker自报值当expected |
 | E10-A cooperative strict readback 已结构化读取 worksheet | `generation-core.js#readBackAndValidateCooperatively`、`strict-worksheet-readback.js` | 扩展为 digest-only Main readback，保持现有 records golden 分支不变 |
 | task staging 已有逐祖先 ownership/hardlink/realpath validator | `statement-worker/staging-ownership.js` | copy 前必须 missing，copy 后必须单链接普通文件；清理仅由该 ownership 授权 |
 | FilePlan 已冻结 source/target snapshot 与 alias 检查 | `archive-center/file-plan.js`、`toolbox-target-identity.js` | source 与 target 必须各一且不互为 symlink/hardlink/platform alias |
 | 既有 Publisher 的默认 dispatcher 是进程级单 FIFO | `toolbox-output-publication-dispatch.js` 的 module singleton `defaultDispatcher` | E10-B 只新增同一 singleton 的窄 wrapper；不得实例化第二 dispatcher |
-| Publisher 自带 durable journal 与 crash recovery | `toolbox-output-publication.js`、`toolbox-output-publication-dispatch.js` | uncertain 只沿原 journal recovery；E10-B 不写 intent/receipt/retry |
+| Publisher 自带 durable archive-handoff journal 与 crash recovery | `toolbox-output-publication.js`、`toolbox-output-publication-dispatch.js` | journal保留到Task artifact durable + Task终态ack；uncertain只沿原 recovery，E10-B不写第二receipt/retry |
 
 ## Unknowns Register
 
 | 未知 | 类型 | 影响 | 可逆性 | 当前证据 | 处理 | 最便宜验证方式 | 当前决定 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| save-as source 的 Main business evidence 如何不携带 raw records 复核 | 契约边界 | 高 | 一般 | E10-A 已有四 digest + cooperative parser | PROBE | 用同一 parser 直接对 rowCount/digest 校验，跑 E10-A golden | 扩展现有 readback 接受 exact bounded evidence；原 records 分支不变 |
-| 同一 FIFO Publisher 如何支持无需 archive handoff 的 save-as | 恢复边界 | 高 | 容易 | 默认 dispatcher 私有 singleton；core 支持 `requireArchiveHandoff=false` | PROBE | 为 singleton 增加窄导出并测试 FIFO/recovery | 复用同一 `defaultDispatcher.publish`，不调用 factory |
+| save-as source 的 Main business evidence 如何不携带 raw records 复核 | 契约边界 | 高 | 一般 | 共用row iterator可流式累计四digest | PROBE | 恶意自洽workbook与正确golden | Main authority流式生成；readback接受exact bounded evidence，原records分支不变 |
+| Publisher committed到Task settlement崩溃窗口如何唯一恢复 | 恢复边界 | 高 | 一般 | 既有archive-handoff journal、startup recovery与ack seam | PROBE | hard-kill/回包丢失/pre-post settle/重复recovery | `requireArchiveHandoff=true`；settle后终态ack，禁止第二receipt/retry |
+| inline terminate是否代表实际copy已停止 | 生命周期 | 高 | 容易 | 原adapter只closed/abort立即返回，真实slow-copy仍运行 | PROBE | slow copy shutdown/deadline/late terminal | adapter持有executionPromise；terminate/close await，Supervisor既有timeout负责leak evidence |
+| target parent rename+ordinary replacement是否可识别 | FilePlan/Publisher合同 | 高 | 一般 | 现有targetSnapshot与symlink检查不能识别普通目录replacement | BLOCK | 需要FilePlan与Publisher传递每级ancestor identity | 未获合同授权前不改production；production仍false |
 | copy 期间 source drift 能否唯一判定 | TOCTOU | 高 | 容易 | copy 前后 identity/snapshot/hash + staging hash 可交叉验证 | PROBE | before/during/after replacement fault tests | 任一 metadata/identity/hash不一致失败；同 bytes replacement也需 identity不变 |
-| shutdown cancel 在不可中断 `copyFile` 中的边界 | 生命周期 | 中 | 容易 | inline adapter AbortSignal；copyFile 无通用 AbortSignal | ASSUME | 实际 heartbeat/quit test | 只在 before-copy 与 after-copy-before-publish safepoint取消；copy中等待 syscall，Publisher 尚未开始 |
+| shutdown cancel 在不可中断 `copyFile` 中的边界 | 生命周期 | 中 | 容易 | inline adapter AbortSignal；copyFile 无通用 AbortSignal | PROBE | 实际slow-copy heartbeat/quit/deadline test | copy中等待syscall；transport cleanup等待实际execution，超时显式leak并保留owner |
 | Windows packaged durable publication | 发布门禁 | 高 | 困难 | 合同明确要求 R3.2.3 packaged probe | BLOCK production only | Setup/portable 人工 fault probe | 不阻塞 dormant E10-B，production 必须保持 false |
 | 真实资金 workbook 展示与业务摘要 | 资金门禁 | 高 | 困难 | 自动化只能证明 E10-A digest 不漂移 | BLOCK production only | 财务人工逐项复核 | 自动化不替代人工；不扩大 E10-B 业务语义 |
 

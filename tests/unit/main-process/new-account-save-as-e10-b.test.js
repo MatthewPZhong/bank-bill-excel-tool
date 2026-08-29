@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const XLSX = require('xlsx');
 
 const { normalizeFilePlanV1 } = require('../../../src/main-process/archive-center/file-plan');
 const {
@@ -15,16 +16,20 @@ const {
   prepareToolboxPublication
 } = require('../../../src/main-process/toolbox-output-publication');
 const {
+  createToolboxPublicationDispatcher,
   recoverToolboxPublicationsAsync
 } = require('../../../src/main-process/toolbox-output-publication-dispatch');
 const {
+  createNewAccountExpectedArtifactAuthority,
   createNewAccountWorkerInput
 } = require('../../../src/main-process/new-account/generation-validator');
 const {
+  businessEvidence,
   executeNewAccountGeneration
 } = require('../../../src/main-process/new-account/generation-core');
 const {
   NEW_ACCOUNT_SAVE_AS_ACTION,
+  acknowledgeNewAccountSaveAsPublication,
   cleanupOwnedCopyStaging,
   createNewAccountSaveAsInput,
   executeNewAccountArtifactCopy,
@@ -40,6 +45,10 @@ const TEMPLATE_PATH = path.resolve(__dirname, '../../../assets/余额账单模�
 const POLICY_FIXTURE_PATH = path.resolve(
   __dirname,
   '../../../changes/background-execution-v3.2.x-contract-baseline/changes/background-execution/validation/fixtures/valid/policy-registry.v3.2.x.json'
+);
+const CRASH_RECOVER_PUBLISHER_WORKER = path.resolve(
+  __dirname,
+  '__fixtures__/toolbox-publication-stub-crash-recover.js'
 );
 const roots = [];
 
@@ -123,7 +132,11 @@ async function generatedFixture(root) {
   const generationResult = await executeNewAccountGeneration(generationInput, null, {
     allowedTemplatePath: TEMPLATE_PATH
   });
-  return { sourcePath, generationResult };
+  return {
+    sourcePath,
+    generationResult,
+    expectedArtifactAuthority: createNewAccountExpectedArtifactAuthority(generationInput)
+  };
 }
 
 function saveAsOptions(root, fixture, overrides = {}) {
@@ -150,6 +163,7 @@ function saveAsOptions(root, fixture, overrides = {}) {
   return {
     filePlan,
     sourceGenerationResult: fixture.generationResult,
+    expectedArtifactAuthority: fixture.expectedArtifactAuthority,
     stagingRoot,
     stagingResourceId,
     stagingPath: path.join(stagingRoot, stagingResourceId),
@@ -160,6 +174,9 @@ function saveAsOptions(root, fixture, overrides = {}) {
     taskId: 'new-account-e10-b-publish',
     userDataDir: path.join(root, 'user-data'),
     production: false,
+    async settleArtifacts() {
+      return { durable: true };
+    },
     ...overrides
   };
 }
@@ -177,6 +194,37 @@ function sha256File(filePath) {
   const hash = require('node:crypto').createHash('sha256');
   hash.update(fs.readFileSync(filePath));
   return hash.digest('hex');
+}
+
+function refreshSelfReportedGenerationEvidence(fixture, mutateWorkbook) {
+  const workbook = XLSX.readFile(fixture.sourcePath, { raw: true });
+  mutateWorkbook(workbook);
+  XLSX.writeFile(workbook, fixture.sourcePath);
+  const firstSheetName = workbook.SheetNames[0];
+  const rows = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheetName], {
+    header: 1,
+    blankrows: false,
+    defval: '',
+    raw: true
+  });
+  const headers = rows[0].slice();
+  const records = rows.slice(1);
+  const stat = fs.statSync(fixture.sourcePath);
+  fixture.generationResult = {
+    ...fixture.generationResult,
+    artifact: {
+      ...fixture.generationResult.artifact,
+      byteSize: stat.size,
+      sha256: sha256File(fixture.sourcePath),
+      headers,
+      rowCount: records.length,
+      businessEvidence: businessEvidence(headers, records)
+    },
+    summary: {
+      ...fixture.generationResult.summary,
+      rowCount: records.length
+    }
+  };
 }
 
 test('policy 为一等 inline-async：只占 I/O lease，production 保持 false/legacy/0', () => {
@@ -223,6 +271,29 @@ test('copy contract 不含 final target，copyFile 只接 task-owned staging', a
   assert.notEqual(observed.destinationPath, options.targetPath);
   assert.equal(fs.existsSync(options.targetPath), false);
   assert.deepEqual(fs.readFileSync(options.stagingPath), fs.readFileSync(fixture.sourcePath));
+});
+
+test('E10-B只接受out-of-band Main authority且缺settlement owner时Publisher=0', async () => {
+  const root = tempRoot('new-account-e10-b-authority-gate-');
+  const fixture = await generatedFixture(root);
+  const options = saveAsOptions(root, fixture);
+  let runtimeCalls = 0;
+  const runtime = { async execute() { runtimeCalls += 1; } };
+  await assert.rejects(
+    validateAndPublishNewAccountSaveAs({
+      ...options,
+      runtime,
+      expectedArtifactAuthority: structuredClone(options.expectedArtifactAuthority)
+    }),
+    (error) => error.code === 'NEW_ACCOUNT_EXPECTED_ARTIFACT_AUTHORITY_INVALID'
+  );
+  const { settleArtifacts: _settleArtifacts, ...withoutSettlement } = options;
+  await assert.rejects(
+    validateAndPublishNewAccountSaveAs({ ...withoutSettlement, runtime }),
+    (error) => error.code === 'NEW_ACCOUNT_SAVE_AS_SETTLEMENT_REQUIRED'
+  );
+  assert.equal(runtimeCalls, 0);
+  assert.equal(fs.existsSync(options.targetPath), false);
 });
 
 test('source before/during/after copy drift 与同 size/mtime replacement 全部 fail closed', async (t) => {
@@ -358,22 +429,33 @@ test('Main technical/business validation 后 Publisher 恰好一次；source/tar
     'source-drift',
     'target-drift',
     'target-ancestor-race',
-    'business'
+    'business',
+    'extra-sheet'
   ]) {
     await t.test(phase, async () => {
       const root = tempRoot(`new-account-e10-b-publisher-${phase}-`);
       const fixture = await generatedFixture(root);
       if (phase === 'business') {
-        fixture.generationResult = {
-          ...fixture.generationResult,
-          artifact: {
-            ...fixture.generationResult.artifact,
-            businessEvidence: {
-              ...fixture.generationResult.artifact.businessEvidence,
-              recordsSha256: '0'.repeat(64)
-            }
+        refreshSelfReportedGenerationEvidence(fixture, (workbook) => {
+          const sheet = workbook.Sheets[workbook.SheetNames[0]];
+          const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: true });
+          const accountIndex = rows[0].indexOf('银行账号');
+          const currencyIndex = rows[0].indexOf('币种');
+          for (let index = 1; index < rows.length; index += 1) {
+            rows[index][accountIndex] = '999999999999';
+            rows[index][currencyIndex] = 'JPY';
           }
-        };
+          workbook.Sheets[workbook.SheetNames[0]] = XLSX.utils.aoa_to_sheet(rows);
+        });
+      }
+      if (phase === 'extra-sheet') {
+        refreshSelfReportedGenerationEvidence(fixture, (workbook) => {
+          XLSX.utils.book_append_sheet(
+            workbook,
+            XLSX.utils.aoa_to_sheet([['secret-data'], ['unauthorized']]),
+            'secret-data'
+          );
+        });
       }
       const options = saveAsOptions(root, fixture);
       let publisherCalls = 0;
@@ -381,7 +463,11 @@ test('Main technical/business validation 后 Publisher 恰好一次；source/tar
       const publisher = async (input) => {
         publisherCalls += 1;
         publicationInput = input;
-        return { taskId: options.taskId, committed: true };
+        return {
+          taskId: options.taskId,
+          committed: true,
+          pendingArchiveHandoff: true
+        };
       };
       const onCopyCompleted = ({ stagingPath }) => {
         if (phase === 'tamper') fs.appendFileSync(stagingPath, 'tamper');
@@ -421,6 +507,7 @@ test('Main technical/business validation 后 Publisher 恰好一次；source/tar
         assert.equal(publicationInput.targets[0].targetPath, options.filePlan.outputs[0].filePath);
         assert.equal(publicationInput.artifacts[0].sourcePath, options.stagingPath);
         assert.equal(publicationInput.artifacts[0].sha256, fixture.generationResult.artifact.sha256);
+        assert.equal(publicationInput.artifacts[0].sheetCount, 1);
         assert.equal(fs.existsSync(options.stagingPath), false);
         await runtime.shutdown({ timeoutMs: 10000 });
       } else {
@@ -556,10 +643,143 @@ test('既有 singleton FIFO Publisher 实际发布一次，正式目标与 E10-A
   assert.equal(result.copied.sha256, fixture.generationResult.artifact.sha256);
   assert.deepEqual(fixture.generationResult.artifact.businessEvidence, expectedBusinessEvidence);
   assert.equal(fs.existsSync(options.stagingPath), false);
+  assert.equal(
+    fs.readdirSync(path.dirname(options.targetPath))
+      .filter((name) => name.startsWith('.toolbox-publish-')).length,
+    1
+  );
+  await assert.rejects(
+    acknowledgeNewAccountSaveAsPublication({
+      taskId: options.taskId,
+      userDataDir: options.userDataDir
+    }),
+    (error) => error.code === 'NEW_ACCOUNT_SAVE_AS_RECEIPT_ACK_PREMATURE'
+  );
+  await acknowledgeNewAccountSaveAsPublication({
+    taskId: options.taskId,
+    userDataDir: options.userDataDir,
+    taskTerminalPersisted: true
+  });
   assert.deepEqual(
     fs.readdirSync(path.dirname(options.targetPath)).filter((name) => name.startsWith('.toolbox-publish-')),
     []
   );
+  await runtime.shutdown({ timeoutMs: 10000 });
+});
+
+test('真实 Publisher committed-but-reply-lost 由同一 journal 恢复，settle 前 Hold、终态后 ack 且不重 copy/publish', async () => {
+  const root = tempRoot('new-account-e10-b-committed-reply-lost-');
+  const fixture = await generatedFixture(root);
+  const options = saveAsOptions(root, fixture, {
+    taskId: 'committed-crash-recover-new-account-e10-b'
+  });
+  const dispatcher = createToolboxPublicationDispatcher({
+    workerScriptPath: CRASH_RECOVER_PUBLISHER_WORKER
+  });
+  let publishCalls = 0;
+  let settleCalls = 0;
+  const runtime = createBackgroundExecutionRuntime({
+    availableParallelism: 4,
+    freeMemoryBytes: 4 * 1024 ** 3,
+    totalMemoryBytes: 8 * 1024 ** 3,
+    systemReserveBytes: 0
+  });
+  const result = await validateAndPublishNewAccountSaveAs({
+    ...options,
+    runtime,
+    publisher: async (input) => {
+      publishCalls += 1;
+      return dispatcher.publish({
+        ...input,
+        requireArchiveHandoff: true,
+        requireValidatedArtifacts: true
+      });
+    },
+    async settleArtifacts(payload) {
+      settleCalls += 1;
+      assert.deepEqual(payload.files.map((file) => file.artifactKey), [
+        options.filePlan.inputs[0].artifactKey,
+        options.filePlan.outputs[0].artifactKey
+      ]);
+      return { durable: true };
+    }
+  });
+  assert.equal(result.publication.recoveredAfterWorkerExit, true);
+  assert.equal(result.publication.pendingArchiveHandoff, true);
+  assert.equal(result.settlement.durable, true);
+  assert.equal(publishCalls, 1);
+  assert.equal(settleCalls, 1);
+  assert.equal(sha256File(options.targetPath), fixture.generationResult.artifact.sha256);
+
+  const firstRecovery = await dispatcher.recover({
+    userDataDir: options.userDataDir,
+    deferCommittedRecovery: true
+  });
+  const secondRecovery = await dispatcher.recover({
+    userDataDir: options.userDataDir,
+    deferCommittedRecovery: true
+  });
+  for (const recovery of [firstRecovery, secondRecovery]) {
+    assert.ok(recovery.recovered.some((item) => (
+      item.taskId === options.taskId && item.action === 'commit-handoff-pending'
+    )));
+  }
+  assert.equal(publishCalls, 1);
+  assert.equal(settleCalls, 1);
+  assert.equal(fs.existsSync(options.stagingPath), false);
+
+  await acknowledgeNewAccountSaveAsPublication({
+    taskId: options.taskId,
+    userDataDir: options.userDataDir,
+    taskTerminalPersisted: true,
+    recoverPublications: (request) => dispatcher.recover(request)
+  });
+  const afterAck = await dispatcher.recover({
+    userDataDir: options.userDataDir,
+    deferCommittedRecovery: true
+  });
+  assert.equal(afterAck.recovered.some((item) => item.taskId === options.taskId), false);
+  assert.equal(publishCalls, 1);
+  assert.equal(settleCalls, 1);
+  await runtime.shutdown({ timeoutMs: 10000 });
+});
+
+test('Publisher committed 后 settlement failure 不回报可重试失败并保留 RecoverySource receipt', async () => {
+  const root = tempRoot('new-account-e10-b-settlement-pending-');
+  const fixture = await generatedFixture(root);
+  const options = saveAsOptions(root, fixture, {
+    taskId: 'new-account-e10-b-settlement-pending'
+  });
+  const runtime = createBackgroundExecutionRuntime({
+    availableParallelism: 4,
+    freeMemoryBytes: 4 * 1024 ** 3,
+    totalMemoryBytes: 8 * 1024 ** 3,
+    systemReserveBytes: 0
+  });
+  const result = await validateAndPublishNewAccountSaveAs({
+    ...options,
+    runtime,
+    async settleArtifacts() {
+      throw Object.assign(new Error('archive temporarily unavailable'), {
+        code: 'ARCHIVE_TEMPORARILY_UNAVAILABLE'
+      });
+    }
+  });
+  assert.equal(result.publication.committed, true);
+  assert.equal(result.publication.pendingArchiveHandoff, true);
+  assert.deepEqual(result.settlement, {
+    durable: false,
+    pendingRecovery: true,
+    code: 'ARCHIVE_TEMPORARILY_UNAVAILABLE'
+  });
+  const pending = await recoverToolboxPublicationsAsync({
+    userDataDir: options.userDataDir,
+    deferCommittedRecovery: true
+  });
+  assert.ok(pending.recovered.some((item) => (
+    item.taskId === options.taskId && item.action === 'commit-handoff-pending'
+  )));
+  assert.equal(sha256File(options.targetPath), fixture.generationResult.artifact.sha256);
   await runtime.shutdown({ timeoutMs: 10000 });
 });
 
@@ -673,6 +893,104 @@ test('runtime app quit 对 running inline copy 返回 cancelled、释放 lease �
   assert.equal(runtime.resourceGovernor.snapshot().activeUsage.ioHeavySlots, 0);
   assert.deepEqual(report.leakedTransports, []);
   assert.deepEqual(report.errors, []);
+});
+
+test('真实慢 copy shutdown 等 execution 收口后才释放 I/O lease/报告 leak=0', async () => {
+  const root = tempRoot('new-account-e10-b-slow-copy-shutdown-');
+  const fixture = await generatedFixture(root);
+  const options = saveAsOptions(root, fixture, {
+    operationKey: 'new-account-e10-b-slow-copy-shutdown',
+    context: operationContext('new-account-e10-b-slow-copy-shutdown')
+  });
+  const input = createNewAccountSaveAsInput(options);
+  const originalCopyFile = fs.promises.copyFile;
+  let enteredCopy;
+  let releaseCopy;
+  const copyEntered = new Promise((resolve) => { enteredCopy = resolve; });
+  const copyGate = new Promise((resolve) => { releaseCopy = resolve; });
+  fs.promises.copyFile = async (...args) => {
+    enteredCopy();
+    await copyGate;
+    return originalCopyFile.call(fs.promises, ...args);
+  };
+  const runtime = createBackgroundExecutionRuntime({
+    availableParallelism: 4,
+    freeMemoryBytes: 4 * 1024 ** 3,
+    totalMemoryBytes: 8 * 1024 ** 3,
+    systemReserveBytes: 0,
+    shutdownTimeoutMs: 10000
+  });
+  try {
+    const handle = runtime.start({
+      actionKey: NEW_ACCOUNT_SAVE_AS_ACTION,
+      operationKey: options.operationKey,
+      context: options.context,
+      input
+    });
+    await handle.ready;
+    await copyEntered;
+    const shutdown = runtime.shutdown({ timeoutMs: 10000 });
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    assert.equal(runtime.resourceGovernor.snapshot().activeUsage.ioHeavySlots, 1);
+    releaseCopy();
+    const [execution, report] = await Promise.all([handle.promise, shutdown]);
+    assert.equal(execution.outcome, 'cancelled');
+    assert.deepEqual(report.leakedTransports, []);
+    assert.deepEqual(report.errors, []);
+    assert.equal(runtime.resourceGovernor.snapshot().activeUsage.ioHeavySlots, 0);
+    assert.equal(fs.existsSync(options.stagingPath), false);
+  } finally {
+    fs.promises.copyFile = originalCopyFile;
+    releaseCopy();
+  }
+});
+
+test('真实慢 copy 超过 shutdown deadline 报 transport leak 并保留 execution/staging cleanup owner', async () => {
+  const root = tempRoot('new-account-e10-b-slow-copy-timeout-');
+  const fixture = await generatedFixture(root);
+  const options = saveAsOptions(root, fixture, {
+    operationKey: 'new-account-e10-b-slow-copy-timeout',
+    context: operationContext('new-account-e10-b-slow-copy-timeout')
+  });
+  const input = createNewAccountSaveAsInput(options);
+  const originalCopyFile = fs.promises.copyFile;
+  let enteredCopy;
+  let releaseCopy;
+  const copyEntered = new Promise((resolve) => { enteredCopy = resolve; });
+  const copyGate = new Promise((resolve) => { releaseCopy = resolve; });
+  fs.promises.copyFile = async (...args) => {
+    enteredCopy();
+    await copyGate;
+    return originalCopyFile.call(fs.promises, ...args);
+  };
+  const runtime = createBackgroundExecutionRuntime({
+    availableParallelism: 4,
+    freeMemoryBytes: 4 * 1024 ** 3,
+    totalMemoryBytes: 8 * 1024 ** 3,
+    systemReserveBytes: 0,
+    shutdownTimeoutMs: 20
+  });
+  try {
+    const handle = runtime.start({
+      actionKey: NEW_ACCOUNT_SAVE_AS_ACTION,
+      operationKey: options.operationKey,
+      context: options.context,
+      input
+    });
+    await handle.ready;
+    await copyEntered;
+    const report = await runtime.shutdown({ timeoutMs: 20 });
+    assert.deepEqual(report.leakedTransports, [handle.jobId]);
+    assert.ok(report.errors.some((error) => error.code === 'SHUTDOWN_TIMEOUT'));
+    assert.equal(runtime.resourceGovernor.snapshot().activeUsage.ioHeavySlots, 1);
+    releaseCopy();
+    const execution = await handle.promise;
+    assert.notEqual(execution.outcome, 'completed');
+    assert.equal(fs.existsSync(options.stagingPath), false);
+  } finally {
+    fs.promises.copyFile = originalCopyFile;
+    releaseCopy();
+  }
 });
 
 test('Windows missing-target case/Unicode identity fail closed，source/target exact evidence不猜路径', async () => {
