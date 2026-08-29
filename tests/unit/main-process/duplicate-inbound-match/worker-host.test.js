@@ -41,6 +41,16 @@ function job(operationKey, jobId, seq) {
   });
 }
 
+function cancel(operationKey, jobId, seq) {
+  return createJobEnvelope({
+    direction: 'command', operation: 'job:cancel', actionKey: 'duplicate:import',
+    operationKey, jobId, workerInstanceId: 'duplicate-worker-1', serviceGeneration: 7,
+    unitId: null, seq, context: context(operationKey), payload: {
+      cancel: { reasonCode: 'shutdown', safeSummary: 'app shutdown' }
+    }
+  });
+}
+
 test('Worker busy不排队、不终止active job，并在adopt ACK后才完成', async () => {
   const port = new FakePort();
   let finish;
@@ -103,4 +113,40 @@ test('Worker busy不排队、不终止active job，并在adopt ACK后才完成',
   port.command(control('executor:close', 'close-1', null, {}));
   assert.equal(closed, 1);
   assert.equal(port.sent.at(-1).operation, 'executor:close-ack');
+});
+
+test('terminal先于shutdown cancel到达时精确迟到cancel幂等且不追加ACK', async () => {
+  const port = new FakePort();
+  const service = {
+    status: () => ({ active: false, stateRevision: 0, stableSummary: {} }),
+    close() {},
+    async execute() {
+      const error = new Error('Parser已按shutdown收口');
+      error.code = 'DUPLICATE_PARSER_CANCELLED';
+      throw error;
+    }
+  };
+  startDuplicateWorker(port, { service });
+  port.command(createServiceControlEnvelope({
+    direction: 'command', operation: 'executor:init', serviceKey: DUPLICATE_SERVICE_KEY,
+    controlId: 'init-terminal-race', workerInstanceId: 'duplicate-worker-1',
+    serviceGeneration: 7, seq: 1, jobRef: null,
+    payload: { contractVersion: 1, policyDigest: 'a'.repeat(64), baseLeaseId: 'base-1' }
+  }));
+  port.command(job('operation-terminal-race', 'job-terminal-race', 1));
+  await tick();
+
+  assert.equal(port.sent.some((event) => event.jobId === 'job-terminal-race' &&
+    event.operation === 'job:error'), true);
+  const sentBeforeLateCancel = port.sent.length;
+  assert.doesNotThrow(() => {
+    port.command(cancel('operation-terminal-race', 'job-terminal-race', 2));
+  });
+  assert.equal(port.sent.length, sentBeforeLateCancel, 'terminal后不得追加cancel:ack或第二个terminal');
+
+  assert.throws(
+    () => port.command(cancel('operation-unowned', 'job-unowned', 1)),
+    /Duplicate不支持job command：job:cancel/,
+    '迟到cancel豁免必须精确绑定已收口route'
+  );
 });
