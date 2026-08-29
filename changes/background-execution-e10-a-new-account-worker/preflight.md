@@ -17,7 +17,7 @@
 | legacy 模板唯一入口为应用内 `assets/余额账单模版.xlsx` | `src/main.js:getBalanceTemplatePath` | Worker 仅接受冻结 allowlist path + snapshot/hash；不接受用户模板路径 |
 | writer 保留模板首 sheet、精确 header 顺序、字段格式和 watermark | `src/backend/file-service/writers.js:writeBalanceWorkbook` | Worker 复用既有 writer，业务回读校验 sheet/header/records/date/account/currency |
 | task staging 已有 non-symlink/realpath/hardlink ownership validator | `src/main-process/statement-worker/staging-ownership.js` | E10-A 复用同一 ownership 规则，清理仅限已验证的 Main-owned staging path |
-| shared Supervisor 已覆盖 cancel/crash/late terminal transport 收口 | `src/main-process/background-execution/{supervisor.js,runtime.js}` 与 toolbox lifecycle tests | 新 Worker 使用 Protocol v1 canonical host，不新增旁路协议 |
+| shared Supervisor 负责发 shutdown cancel 与终态收口，但同步 XLSX 阶段必须由模块主动让出 Worker 消息循环 | `src/main-process/background-execution/{supervisor.js,runtime.js}`；Reviewer P2 真实 runtime 失败回放 | 新 Worker 使用 Protocol v1 canonical host；模块在重型阶段间和 `job:done` 前提供 cancellation safepoint，不修改全局 Supervisor 语义 |
 
 ## Unknowns Register
 
@@ -28,6 +28,7 @@
 | staging 路径碰撞/链接替换及失败清理权限 | 盲区 | 高 | 一般 | Statement 已有 ownership validator | PROBE | symlink/hardlink/collision/outside/crash tests | Main 先证 missing ownership；Worker 使用 exclusive create 语义；Main 仅清理验证过的 staging path |
 | 日期边界是否要改 UTC 算法 | 隐性偏好 | 高 | 一般 | legacy 是本地日历；冻结验收要求等价 | ASSUME | legacy/Worker 昨日、超过 10 年边界 golden | 保留 legacy 本地日历语义，不静默改时区口径 |
 | E10-A 是否应接入 live IPC | 已知未知 | 高 | 容易 | release strategy 要求独立 flag，production=false，E10-B 尚无 Publisher | PROBE | static source-selector test | 只注册 dormant policy/runtime；live IPC 继续 legacy |
+| 真实 Worker 的同步 XLSX 生成是否会阻塞 shutdown-only `job:cancel` 直到 `job:done` | 状态生命周期盲区 | 高 | 容易 | 原实现只在同步阶段间读 `signal.aborted`，但 Worker 无机会处理 cancel message | PROBE | 等 `control.ready/state=running` 后立即 shutdown 的真实 runtime 回归 | 修复前稳定得到 `completed` 且 staging 残留；改为 write 前后/readback 后/terminal 前 async safepoint，取消时仅 Main/client 清理 |
 
 ## 风险优先计划
 
@@ -35,7 +36,7 @@
 | --- | --- | --- | --- | --- | --- |
 | 1 | 抽取唯一 generation core 和 exact bounded contract | 日期/账户/币种/记录/文件名等价；DTO 有界 | legacy golden + contract 反例 | 推翻 Worker 输入设计 | 保持 legacy handler 调原 helper，缩回纯函数抽取 |
 | 2 | 加模板 identity 与 staging ownership guard | allowlist/TOCTOU/清理权限 | tamper/symlink/collision tests | 阻断 Worker 写入 | fail closed，不开放任意路径 |
-| 3 | 接入 Protocol v1 one-shot Worker/policy/runtime | cancel/crash/late message/资源释放 | real Worker lifecycle + shutdown/recovery tests | 不允许 runtime 注册 | 保持 policy dormant，不接 live |
+| 3 | 接入 Protocol v1 one-shot Worker/policy/runtime，在同步 XLSX 阶段间与终态前让出消息循环 | cancel/crash/late message/资源释放；shutdown cancel 不得被 `job:done` 覆盖 | real Worker lifecycle + running-shutdown cancel-wins/recovery tests | 不允许 runtime 注册或取消终态可伪报成功 | 保持 policy dormant，不接 live；不泛化 Supervisor |
 | 4 | 写 workbook 并 Worker 业务回读、Main 技术复核 | sheet/header/行数/日期/账户/币种/file hash 血缘 | Worker/legacy projection golden + tamper tests | 不返回 artifact handle | 删除受权 staging 文件并报错 |
 | 5 | 静态/集成/smoke/event-loop/RSS 与盲区复核 | legacy、平台和性能不回归 | focused/integration/smoke/node-check/diff-check | 不结案 | 收缩到最后通过的 commit |
 
@@ -43,7 +44,7 @@
 
 - 入口旁路：live handler 与 dormant Worker 是否都调用唯一 core；不存在 Worker final target/Publisher/copy。
 - 数据契约：exact keys、DTO bytes、账户/币种/日期/预计记录数、结果 manifest bytes。
-- 生命周期：collision、cancel、Worker crash、late message、shutdown、restart orphan staging 的权限边界。
+- 生命周期：collision、cancel、Worker crash、late message、shutdown、restart orphan staging 的权限边界；真实 running Worker 的 shutdown cancel 必须胜过尚未发送的 `job:done`。
 - 数据血缘：输入账户顺序 × 日期升序 × 去重币种顺序，输出行数严格等于各账户 `天数 × 币种数` 总和。
 - 金额：只生成余额行，`期末余额=0`，其余余额为空；不引入汇率/舍入/借贷方向。
 - 日期：开户日到昨日（含首尾）；晚于昨日拒绝；总天数超过 3650 拒绝。

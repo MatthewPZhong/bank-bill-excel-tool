@@ -297,17 +297,25 @@ function assertRequiredTemplateHeaders(headers) {
   }
 }
 
+function assertNewAccountGenerationNotCancelled(signal) {
+  if (signal && signal.aborted) {
+    const error = new Error('新开账户余额账单生成已取消');
+    error.code = 'NEW_ACCOUNT_GENERATION_CANCELLED';
+    throw error;
+  }
+}
+
+async function newAccountGenerationCancellationSafePoint(signal) {
+  // XLSX 读写是同步重型阶段；先让出一轮 Worker 消息循环，
+  // shutdown-only job:cancel 才能到达 AbortController，然后再决定是否继续。
+  await new Promise((resolve) => setImmediate(resolve));
+  assertNewAccountGenerationNotCancelled(signal);
+}
+
 async function executeNewAccountGeneration(rawInput, signal, options = {}) {
   const input = createNewAccountGenerationInput(rawInput);
   const allowedTemplatePath = options.allowedTemplatePath;
-  const assertNotCancelled = () => {
-    if (signal && signal.aborted) {
-      const error = new Error('新开账户余额账单生成已取消');
-      error.code = 'NEW_ACCOUNT_GENERATION_CANCELLED';
-      throw error;
-    }
-  };
-  assertNotCancelled();
+  assertNewAccountGenerationNotCancelled(signal);
   assertTemplateEvidence(input.template, allowedTemplatePath);
   validateTaskOwnedStagingPath({
     stagingRoot: input.generation.stagingRoot,
@@ -332,7 +340,7 @@ async function executeNewAccountGeneration(rawInput, signal, options = {}) {
     today,
     maxRecords: MAX_RECORDS
   });
-  assertNotCancelled();
+  await newAccountGenerationCancellationSafePoint(signal);
   const reservation = fs.openSync(input.generation.generationPath, 'wx', 0o600);
   fs.closeSync(reservation);
   writeBalanceWorkbook({
@@ -341,11 +349,12 @@ async function executeNewAccountGeneration(rawInput, signal, options = {}) {
     templateFields: headers,
     outputFilePath: input.generation.generationPath
   });
-  assertNotCancelled();
+  await newAccountGenerationCancellationSafePoint(signal);
   assertTemplateEvidence(input.template, allowedTemplatePath);
   const readback = readBackAndValidate(input.generation.generationPath, {
     sheetName, headers, records: prepared.records
   });
+  await newAccountGenerationCancellationSafePoint(signal);
   const owned = validateTaskOwnedStagingPath({
     stagingRoot: input.generation.stagingRoot,
     candidatePath: input.generation.generationPath,
@@ -353,7 +362,7 @@ async function executeNewAccountGeneration(rawInput, signal, options = {}) {
   });
   const byteSize = Number(owned.stat.size);
   const sha256 = fileSha256(input.generation.generationPath);
-  assertNotCancelled();
+  await newAccountGenerationCancellationSafePoint(signal);
   return Object.freeze({
     schemaVersion: NEW_ACCOUNT_GENERATION_SCHEMA_VERSION,
     status: 'generated',
@@ -400,6 +409,7 @@ module.exports = {
   executeNewAccountGeneration,
   fileSha256,
   formatDateLabel,
+  newAccountGenerationCancellationSafePoint,
   normalizeNewAccountAccounts,
   normalizeNewAccountCurrencyValues,
   prepareNewAccountGeneration,
