@@ -92,24 +92,43 @@ function columnNumber(letters, errorCode = 'NEW_ACCOUNT_WORKBOOK_COORDINATE_INVA
   return result;
 }
 
+function encodeColumnNumber(value) {
+  let remaining = value;
+  let result = '';
+  while (remaining > 0) {
+    remaining -= 1;
+    result = String.fromCharCode(65 + (remaining % 26)) + result;
+    remaining = Math.floor(remaining / 26);
+  }
+  return result;
+}
+
+function encodeCellReference(reference) {
+  return `${encodeColumnNumber(reference.columnNumber)}${reference.rowNumber}`;
+}
+
 function parseCellReference(value, options = {}) {
   const errorCode = options.errorCode || 'NEW_ACCOUNT_WORKBOOK_COORDINATE_INVALID';
   const label = options.label || 'NewAccount输出cell';
-  const match = typeof value === 'string' ? /^([A-Z]{1,3})(\d+)$/.exec(value) : null;
+  const match = typeof value === 'string' ? /^([A-Z]{1,3})(\d{1,7})$/.exec(value) : null;
   if (!match) {
     fail(errorCode, `${label}坐标非法`);
   }
-  return Object.freeze({
+  const reference = Object.freeze({
     columnNumber: columnNumber(match[1], errorCode),
     rowNumber: positiveInteger(match[2], XLSX_MAX_ROWS, `${label}行坐标`, errorCode)
   });
+  if (encodeCellReference(reference) !== value) {
+    fail(errorCode, `${label}坐标必须使用canonical形式`);
+  }
+  return reference;
 }
 
 function parseCanonicalRangeReference(value, options = {}) {
   const errorCode = options.errorCode || 'NEW_ACCOUNT_WORKBOOK_DIMENSION_INVALID';
   const label = options.label || 'NewAccount输出range';
   const match = typeof value === 'string'
-    ? /^([A-Z]{1,3}\d+)(?::([A-Z]{1,3}\d+))?$/.exec(value)
+    ? /^([A-Z]{1,3}\d{1,7})(?::([A-Z]{1,3}\d{1,7}))?$/.exec(value)
     : null;
   if (!match) fail(errorCode, `${label}非法`);
   const start = parseCellReference(match[1], { errorCode, label: `${label}起点` });
@@ -123,6 +142,10 @@ function parseCanonicalRangeReference(value, options = {}) {
   if (match[2] && start.columnNumber === end.columnNumber && start.rowNumber === end.rowNumber) {
     fail(errorCode, `${label}必须使用canonical单cell形式`);
   }
+  const canonical = match[2]
+    ? `${encodeCellReference(start)}:${encodeCellReference(end)}`
+    : encodeCellReference(start);
+  if (canonical !== value) fail(errorCode, `${label}必须使用canonical形式`);
   return Object.freeze({ start, end });
 }
 
@@ -250,7 +273,7 @@ function decodeCell(cell, sharedStrings) {
       if (!cell.hasValue || cell.hasInlineString) {
         fail('NEW_ACCOUNT_WORKBOOK_CELL_INVALID', 'NewAccount输出date cell payload非法');
       }
-      return Object.freeze({ present: true, meaningful: true, value: sheetJsDateSerial(rawValue.trim()) });
+      return Object.freeze({ present: true, meaningful: true, value: sheetJsDateSerial(rawValue) });
     case 'e': {
       if (!cell.hasValue || cell.hasInlineString || !Object.hasOwn(ERROR_VALUES, rawValue)) {
         fail('NEW_ACCOUNT_WORKBOOK_CELL_INVALID', 'NewAccount输出error cell payload非法');
