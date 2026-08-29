@@ -121,3 +121,10 @@
 | E09-C success artifact manifest尚未加入同一Statement result validator | PROBE | E09-C沿用本action binding扩展exact success shape，保留本delegate | P0 production=false不受影响；阻断generate-current/all production |
 | E09-D seed atomic settlement/inspector/Windows | BLOCK（后续） | E09-D + release owner | manual seed 必须保持 legacy/production false |
 | 金额/币种/seed/current-all 人工资金复核 | REVIEW | Reviewer / release owner | 自动测试不可解除；阻断 production enable |
+
+## Review Remediation — Windows Path Portability
+
+- legacy manual-seed golden 原先直接比较 `path.relative()` 与使用 `/` 冻结的跨平台相对路径，Windows checkout 会产生 `\\` 并导致纯测试失败。
+- 断言现先把平台分隔符规范化为 `/`，再与 frozen golden 比较；实际写入路径、文件 bytes、previous seed 选择和 production store 行为均未改变。
+- 本修复不修改金额、币种、seed 主键、文件格式、live route 或 production gate。
+- 验证：完整 legacy golden 文件 `8/8 PASS`；affected ESLint、`node --check`、`git diff --check` 均 PASS。
