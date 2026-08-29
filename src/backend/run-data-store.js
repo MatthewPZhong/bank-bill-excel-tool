@@ -418,10 +418,12 @@ const SIDE_DB_DDL_BIZ_OP = `
     ON biz_op_recon_diff_rows(data_date, bu_name);
 `;
 
-// ── bank-bu 3 表 DDL（byte-for-byte 平移自 database/migrations.js ensureBankBuReconTablesSupport，2410-2529）──
+// ── bank-bu 3 业务表 + v3.2.2 operation receipt DDL ──
 //   bank-bu 无 diff_rows 表（差异由 session.runReconciliation 实时算，不落库）；侧库只含
 //   pending_imports / bank_imports / runs 三表 + 5 索引。runs 业务真值在侧库（insertRun），
 //   主库另存镜像行（side_db_rel_path + summary + status，供 UI/导出读）。
+//   operation receipt 是加法 schema；E06-P0 不接 live writer，后续 E08-A 必须把它与
+//   import/run 的 side mutation 放在同一事务，并独立完成 main mirror CAS identity。
 const SIDE_DB_DDL_BANK_BU = `
   CREATE TABLE IF NOT EXISTS bank_bu_recon_pending_imports (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -526,6 +528,23 @@ const SIDE_DB_DDL_BANK_BU = `
   );
   CREATE INDEX IF NOT EXISTS idx_bbr_runs_month
     ON bank_bu_recon_runs(year_month, run_at DESC);
+
+  CREATE TABLE IF NOT EXISTS bank_bu_operation_receipts (
+    action_key TEXT NOT NULL CHECK (action_key IN ('bank-bu:import-month', 'bank-bu:run')),
+    operation_key TEXT NOT NULL,
+    producer_task_run_id TEXT NOT NULL,
+    operation_kind TEXT NOT NULL CHECK (operation_kind IN ('import', 'run')),
+    year_month TEXT NOT NULL,
+    side_run_id INTEGER,
+    input_evidence_hash TEXT NOT NULL,
+    committed_at TEXT NOT NULL,
+    PRIMARY KEY(action_key, operation_key),
+    CHECK (
+      (action_key = 'bank-bu:import-month' AND operation_kind = 'import' AND side_run_id IS NULL)
+      OR
+      (action_key = 'bank-bu:run' AND operation_kind = 'run' AND side_run_id IS NOT NULL AND side_run_id > 0)
+    )
+  );
 `;
 
 // ── 前置资金对账临时 MPT 网关账单（v3.0.14 PR2）──
@@ -831,6 +850,8 @@ function ensurePreFundRunArchiveSupport(db) {
 
 // 重复入金匹配当前会话侧库。一个导入会话对应一组银行+单据输入；每次 run 只保留最新结果。
 // 银行原始 46 列、单据身份字段和人工判定行均只存在本侧库，不进入 tool-data.sqlite。
+// v3.2.2 operation receipt 是加法 schema；E06-P0 只冻结 identity/transaction contract，
+// 不接 live mutation，也不宣称已满足 E07-A startup inspector 或 E07-B main mirror recovery。
 const SIDE_DB_DDL_DUPLICATE_INBOUND_MATCH = `
   CREATE TABLE IF NOT EXISTS duplicate_inbound_match_imports (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -926,6 +947,24 @@ const SIDE_DB_DDL_DUPLICATE_INBOUND_MATCH = `
   );
   CREATE INDEX IF NOT EXISTS idx_duplicate_inbound_audit_order
     ON duplicate_inbound_match_group_audits(run_id, group_order);
+
+  CREATE TABLE IF NOT EXISTS duplicate_inbound_match_operation_receipts (
+    action_key TEXT NOT NULL CHECK (action_key IN ('duplicate:import', 'duplicate:run')),
+    operation_key TEXT NOT NULL,
+    producer_task_run_id TEXT NOT NULL,
+    phase TEXT NOT NULL CHECK (phase IN ('import-side-committed', 'run-side-committed')),
+    month_key TEXT NOT NULL,
+    import_bundle_id INTEGER NOT NULL CHECK (import_bundle_id > 0),
+    side_run_id INTEGER,
+    input_evidence_hash TEXT NOT NULL,
+    committed_at TEXT NOT NULL,
+    PRIMARY KEY(action_key, operation_key),
+    CHECK (
+      (action_key = 'duplicate:import' AND phase = 'import-side-committed' AND side_run_id IS NULL)
+      OR
+      (action_key = 'duplicate:run' AND phase = 'run-side-committed' AND side_run_id IS NOT NULL AND side_run_id > 0)
+    )
+  );
 `;
 
 const MODULE_DDL = Object.freeze({
