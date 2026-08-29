@@ -305,32 +305,6 @@ class DuplicateInboundMatchService {
     this.bankSession = null;
     this.documentSession = null;
     this.lastRun = null;
-    this.reconcilePersistedRunMirrors();
-  }
-
-  reconcilePersistedRunMirrors() {
-    runInvalidationActions('重复入金启动回收', [
-      () => {
-        for (const mirror of this.database.listDuplicateInboundMatchRunMirrors()) {
-          let updated = true;
-          if (mirror.status === 'running') {
-            updated = this.database.markDuplicateInboundMatchRunMirrorUnavailable(
-              mirror.id,
-              'interrupted',
-              '应用已重启，上一轮重复入金匹配未完整结束'
-            );
-          } else if (mirror.status === 'success') {
-            updated = this.database.markDuplicateInboundMatchRunMirrorUnavailable(
-              mirror.id,
-              'expired',
-              '应用已重启，银行与单据导入会话和运行结果已回收'
-            );
-          }
-          if (!updated) throw new Error(`重复入金主库运行镜像启动失效写入失败：${mirror.id}`);
-        }
-      },
-      () => this.store.clearAll()
-    ]);
   }
 
   revokeSuccessfulMirrors(message) {

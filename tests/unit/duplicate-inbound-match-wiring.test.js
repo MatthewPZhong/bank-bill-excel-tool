@@ -33,7 +33,8 @@ function extractFunction(source, name) {
 
 function createMainHandlerHarness(overrides = {}) {
   const handlers = new Map();
-  const calls = { released: 0, service: [], sent: [] };
+  const calls = { dialogs: 0, released: 0, service: [], sent: [] };
+  const assertStartupAvailable = overrides.assertStartupAvailable || (() => true);
   const service = overrides.service || {
     status: () => ({ status: 'ok' }),
     importFiles: async () => ({ status: 'ok' }),
@@ -51,6 +52,7 @@ function createMainHandlerHarness(overrides = {}) {
     'ipcMain',
     'trackedIpcHandle',
     'getDuplicateInboundMatchService',
+    'assertDuplicateInboundMatchStartupAvailable',
     'tryAcquireBankStatementOpLock',
     'showImportOpenDialog',
     'releaseBankStatementOpLock',
@@ -77,9 +79,16 @@ function createMainHandlerHarness(overrides = {}) {
         );
       });
     },
-    () => service,
+    () => {
+      assertStartupAvailable();
+      return service;
+    },
+    assertStartupAvailable,
     overrides.tryAcquireBankStatementOpLock || (() => ({ acquired: true })),
-    overrides.showImportOpenDialog || (async () => ({ canceled: true, filePaths: [] })),
+    overrides.showImportOpenDialog || (async () => {
+      calls.dialogs += 1;
+      return { canceled: true, filePaths: [] };
+    }),
     () => { calls.released += 1; },
     {
       showSaveDialog: overrides.showSaveDialog || (async () => ({ canceled: true }))
@@ -187,7 +196,33 @@ test.describe('重复入金匹配 UI / preload / IPC 接线', () => {
       assert.ok(main.includes(`'${channel}'`), `main 缺少 ${channel}`);
     }
     assert.match(main, /registerDuplicateInboundMatchHandlers\(\)/);
-    assert.match(main, /scheduleDuplicateInboundMatchStartupCleanup\(\)/);
+    assert.doesNotMatch(main, /scheduleDuplicateInboundMatchStartupCleanup\(\)/);
+    assert.match(main, /await initializeBackgroundExecutionRecovery\(\)/);
+    assert.match(main, /DUPLICATE_STARTUP_RECOVERY_UNAVAILABLE/);
+    assert.match(main, /DUPLICATE_STARTUP_CONFLICT_SCOPE_KEY/);
+  });
+
+  test('startup严格先注册只读inspector并持久扫描，再允许getter构造Service', () => {
+    const recovery = extractFunction(main, 'initializeBackgroundExecutionRecovery');
+    const registerInspectorAt = recovery.indexOf(
+      'inspectorRegistry.register(DUPLICATE_STARTUP_INSPECTOR_KEY'
+    );
+    const freezeAt = recovery.indexOf('inspectorRegistry.freeze()');
+    const scanAt = recovery.indexOf('await coordinator.scanAndRecover()');
+    const readyAt = recovery.lastIndexOf('duplicateStartupRecoveryReady = true');
+    assert.ok(registerInspectorAt >= 0 && registerInspectorAt < freezeAt);
+    assert.ok(freezeAt < scanAt && scanAt < readyAt);
+
+    const getter = extractFunction(main, 'getDuplicateInboundMatchService');
+    assert.ok(
+      getter.indexOf('assertDuplicateInboundMatchStartupAvailable()') <
+        getter.indexOf('createDuplicateInboundMatchService({')
+    );
+    const initialize = extractFunction(main, 'initializeApplication');
+    assert.ok(
+      initialize.indexOf('await initializeBackgroundExecutionRecovery()') <
+        initialize.indexOf('schedulePreFundReconciliationStartupCleanup()')
+    );
   });
 
   test('main handlers 对取消、失败、进度和锁释放执行真实契约', async () => {
@@ -259,5 +294,38 @@ test.describe('重复入金匹配 UI / preload / IPC 接线', () => {
     );
     assert.equal(exportCalled, 0);
     assert.equal(exportCancelled.calls.released, 0);
+  });
+
+  test('startup未完成或active Hold时所有legacy入口fail closed且不打开文件选择器', async () => {
+    const startupError = Object.assign(new Error('重复入金启动恢复门禁尚未完成'), {
+      code: 'DUPLICATE_STARTUP_RECOVERY_UNAVAILABLE'
+    });
+    const blocked = createMainHandlerHarness({
+      assertStartupAvailable() { throw startupError; }
+    });
+    await assert.rejects(
+      () => blocked.handlers.get('duplicate-inbound-match:import-files')(blocked.event),
+      (error) => error.code === 'DUPLICATE_STARTUP_RECOVERY_UNAVAILABLE'
+    );
+    assert.equal(blocked.calls.dialogs, 0);
+    assert.deepEqual(
+      await blocked.handlers.get('duplicate-inbound-match:session-status')(blocked.event),
+      {
+        status: 'failed',
+        code: 'DUPLICATE_STARTUP_RECOVERY_UNAVAILABLE',
+        message: '重复入金启动恢复门禁尚未完成',
+        detailLines: []
+      }
+    );
+    assert.deepEqual(
+      await blocked.handlers.get('duplicate-inbound-match:run')(blocked.event),
+      {
+        status: 'failed',
+        code: 'DUPLICATE_STARTUP_RECOVERY_UNAVAILABLE',
+        message: '重复入金启动恢复门禁尚未完成',
+        detailLines: []
+      }
+    );
+    assert.equal(blocked.calls.released, 1, 'run获得业务锁后仍必须在service构造前由gate拒绝');
   });
 });
