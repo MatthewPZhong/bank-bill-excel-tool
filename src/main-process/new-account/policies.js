@@ -1,6 +1,7 @@
 'use strict';
 
 const { NEW_ACCOUNT_GENERATION_ACTION } = require('./generation-contract');
+const { MIN_NEW_ACCOUNT_GENERATION_MEMORY_BYTES } = require('./resource-estimator');
 
 const ZERO_RESOURCES = Object.freeze({
   cpuSlots: 0,
@@ -15,7 +16,9 @@ const GENERATION_RESOURCES = Object.freeze({
   workerThreadSlots: 1,
   utilityProcessSlots: 0,
   ioHeavySlots: 1,
-  memoryBytes: 268435456
+  // 此值是 dynamic resource profile 失配时的保守最小 envelope；
+  // 正常 runtime 会在 admission 前按预计输出行数提升 memoryBytes。
+  memoryBytes: MIN_NEW_ACCOUNT_GENERATION_MEMORY_BYTES
 });
 
 const NEW_ACCOUNT_GENERATION_POLICY = Object.freeze({
