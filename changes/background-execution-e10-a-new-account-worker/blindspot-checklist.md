@@ -56,6 +56,15 @@
 - 最便宜验证：独立oracle差分矩阵先锁定三反例红测，再覆盖所有cell type、formula cached、sparse/blank、重复/乱序/错位/截断/实体。
 - 处置：已覆盖；E10专用strict projection按SheetJS raw解码shared/inline/str/number/boolean/date/error/formula cached并排除rich text `rPh`，逐row/cell验证完整坐标、顺序/唯一/XLSX范围，截断XML/未知实体/非法payload fail closed；独立oracle矩阵8/8、focused476/476、250k/60,416四digest与六阶段cancel通过。保留ZIP streaming、1024行yield和cancel gate，不修改generic scanner消费者。
 
+### [Important / 已覆盖] worksheet dimension 与实际cell/merge used range冲突被忽略
+
+- 事实：修复前E10 strict scanner不读取`<dimension ref>`；把真实1-row writer的`A1:I2`截为`A1:I1`，旧SheetJS `!ref/raw`只回读header并拒绝，streaming仍扫描第2行并接受。旧库另会宽松回算missing/duplicate或规范化reversed/absolute，expanded甚至通过业务回读。
+- 推断/未知：仅校验cell自身坐标不足以证明worksheet元数据、实际物理范围和业务记录一致；扩张/偏移也可能隐藏账户、日期、币种或余额列异常。
+- 影响：Sheet/header/rowCount与四digest可对一个旧oracle会不同解释的workbook自洽，命中资金血缘红线。
+- 证据：Reviewer `A1:I1`反例；`writeBalanceWorkbook`固定`!ref`；JSZip真实XLSX probe。
+- 最便宜验证：先锁定截断红测，再覆盖missing/duplicate/expanded/shifted/reversed/out-of-range/absolute/multi-area，以及empty/header-only/1row/styled blank/merge/formula/multi-letter/大边界。
+- 处置：已覆盖；E10专用canonical dimension parser要求唯一dimension在sheetData前出现，只接受uppercase相对`A1`/`A1:END`、有序且在XLSX范围；累计全部cell refs与merge ranges used bounds并要求exact，冻结header-only尾随空第2行是唯一例外。红测10/12准确命中截断/missing，修复后oracle 12/12、focused480/480、250k/60,416 digest与取消、full integration/smoke/static均通过；不改generic scanner或同步回退。
+
 ### [Important / 已覆盖] Worker crash/late done 的 staging 生命周期
 
 - 事实：partial/final staging 可能已出现，迟到 done 不得恢复 handle。
@@ -84,7 +93,7 @@ payload account rows
   -> template exact header projection
   -> 期末余额=0; other balance fields blank
   -> staging workbook
-  -> Worker strict streaming readback (raw typed cells + exact coordinates -> sheet/header/row count/full record/date/account/currency digests)
+  -> Worker strict streaming readback (canonical dimension + physical used range + raw typed cells + exact coordinates -> sheet/header/row count/full record/date/account/currency digests)
   -> Main ownership + size + SHA technical validation
 ```
 
@@ -94,7 +103,7 @@ payload account rows
 - 日期：本地日历沿用 legacy；开户日至昨日均包含；晚于昨日、超过 3650 天拒绝。
 - 金额：没有 Credit/Debit/汇率/舍入；每行期末余额固定数值 `0`，其余余额字段为空。
 - 文件名：单账户 `银行-地点-末四位-币种或多币种-NEW_BALANCE.xlsx`；多账户固定 `多账号-多币种`；contract 拒绝路径分隔符和非 xlsx。
-- 回读守恒：strict streaming projection只读取workbook声明顺序的首sheet，按SheetJS raw类型解释并校验worksheet根、outer row与每个cell完整坐标；空物理行仍按旧`blankrows:false`跳过，业务行按原序逐行进入同一canonical accumulator；250k/60,416已与旧同步oracle四digest全等。
+- 回读守恒：strict streaming projection只读取workbook声明顺序的首sheet，先校验唯一canonical dimension与全部cell/merge used bounds，再按SheetJS raw类型解释并校验worksheet根、outer row与每个cell完整坐标；空物理行仍按旧`blankrows:false`跳过，业务行按原序逐行进入同一canonical accumulator；250k/60,416已与旧同步oracle四digest全等。
 - 取消守恒：shutdown不改变records或digest；只在未完成阶段产生`NEW_ACCOUNT_GENERATION_CANCELLED`，result/generated均为null，由Main按冻结generationPath清理一次；已completed后shutdown保持正常artifact。
 
 ## 资金红线人工复核

@@ -65,37 +65,90 @@ function assertSpreadsheetElement(node) {
   }
 }
 
-function positiveInteger(value, max, label) {
+function positiveInteger(
+  value,
+  max,
+  label,
+  errorCode = 'NEW_ACCOUNT_WORKBOOK_COORDINATE_INVALID'
+) {
   if (typeof value !== 'string' || !/^\d+$/.test(value)) {
-    fail('NEW_ACCOUNT_WORKBOOK_COORDINATE_INVALID', `${label}必须是正整数`);
+    fail(errorCode, `${label}必须是正整数`);
   }
   const number = Number(value);
   if (!Number.isSafeInteger(number) || number < 1 || number > max) {
-    fail('NEW_ACCOUNT_WORKBOOK_COORDINATE_INVALID', `${label}越界`);
+    fail(errorCode, `${label}越界`);
   }
   return number;
 }
 
-function columnNumber(letters) {
+function columnNumber(letters, errorCode = 'NEW_ACCOUNT_WORKBOOK_COORDINATE_INVALID') {
   let result = 0;
   for (let index = 0; index < letters.length; index += 1) {
     result = result * 26 + letters.charCodeAt(index) - 64;
   }
   if (result < 1 || result > XLSX_MAX_COLUMNS) {
-    fail('NEW_ACCOUNT_WORKBOOK_COORDINATE_INVALID', 'NewAccount输出cell列坐标越界');
+    fail(errorCode, 'NewAccount输出cell列坐标越界');
   }
   return result;
 }
 
-function parseCellReference(value) {
+function parseCellReference(value, options = {}) {
+  const errorCode = options.errorCode || 'NEW_ACCOUNT_WORKBOOK_COORDINATE_INVALID';
+  const label = options.label || 'NewAccount输出cell';
   const match = typeof value === 'string' ? /^([A-Z]{1,3})(\d+)$/.exec(value) : null;
   if (!match) {
-    fail('NEW_ACCOUNT_WORKBOOK_COORDINATE_INVALID', 'NewAccount输出cell坐标非法');
+    fail(errorCode, `${label}坐标非法`);
   }
   return Object.freeze({
-    columnNumber: columnNumber(match[1]),
-    rowNumber: positiveInteger(match[2], XLSX_MAX_ROWS, 'NewAccount输出cell行坐标')
+    columnNumber: columnNumber(match[1], errorCode),
+    rowNumber: positiveInteger(match[2], XLSX_MAX_ROWS, `${label}行坐标`, errorCode)
   });
+}
+
+function parseCanonicalRangeReference(value, options = {}) {
+  const errorCode = options.errorCode || 'NEW_ACCOUNT_WORKBOOK_DIMENSION_INVALID';
+  const label = options.label || 'NewAccount输出range';
+  const match = typeof value === 'string'
+    ? /^([A-Z]{1,3}\d+)(?::([A-Z]{1,3}\d+))?$/.exec(value)
+    : null;
+  if (!match) fail(errorCode, `${label}非法`);
+  const start = parseCellReference(match[1], { errorCode, label: `${label}起点` });
+  const end = parseCellReference(match[2] || match[1], { errorCode, label: `${label}终点` });
+  if (start.columnNumber > end.columnNumber || start.rowNumber > end.rowNumber) {
+    fail(errorCode, `${label}端点倒置`);
+  }
+  if (!match[2] && (start.columnNumber !== end.columnNumber || start.rowNumber !== end.rowNumber)) {
+    fail(errorCode, `${label}非法`);
+  }
+  if (match[2] && start.columnNumber === end.columnNumber && start.rowNumber === end.rowNumber) {
+    fail(errorCode, `${label}必须使用canonical单cell形式`);
+  }
+  return Object.freeze({ start, end });
+}
+
+function parseDimensionReference(value) {
+  const range = parseCanonicalRangeReference(value, {
+    errorCode: 'NEW_ACCOUNT_WORKBOOK_DIMENSION_INVALID',
+    label: 'NewAccount输出dimension'
+  });
+  if (range.start.columnNumber !== 1 || range.start.rowNumber !== 1) {
+    fail('NEW_ACCOUNT_WORKBOOK_DIMENSION_INVALID', 'NewAccount输出dimension必须从A1开始');
+  }
+  return range;
+}
+
+function rangeContains(outer, inner) {
+  return inner.start.columnNumber >= outer.start.columnNumber &&
+    inner.start.rowNumber >= outer.start.rowNumber &&
+    inner.end.columnNumber <= outer.end.columnNumber &&
+    inner.end.rowNumber <= outer.end.rowNumber;
+}
+
+function rangesEqual(left, right) {
+  return left.start.columnNumber === right.start.columnNumber &&
+    left.start.rowNumber === right.start.rowNumber &&
+    left.end.columnNumber === right.end.columnNumber &&
+    left.end.rowNumber === right.end.rowNumber;
 }
 
 // SheetJS `unescapexml` 对 `_xHHHH_` 只做一次替换；XML实体由strict SAX先解码。
@@ -360,6 +413,7 @@ async function scanNewAccountWorksheetRows(options) {
     rowBatchSize = DEFAULT_ROW_BATCH_SIZE
   } = options;
   if (!stream || !Number.isSafeInteger(expectedColumnCount) || expectedColumnCount < 1 ||
+      expectedColumnCount > XLSX_MAX_COLUMNS ||
       !Array.isArray(sharedStrings) || typeof onRow !== 'function' ||
       !Number.isSafeInteger(rowBatchSize) || rowBatchSize < 1) {
     throw new TypeError('NewAccount strict worksheet scanner参数非法');
@@ -367,6 +421,9 @@ async function scanNewAccountWorksheetRows(options) {
   const stack = [];
   let worksheetSeen = false;
   let worksheetClosed = false;
+  let dimension = null;
+  let dimensionOpen = false;
+  let dimensionClosed = false;
   let sheetDataSeen = false;
   let sheetDataClosed = false;
   let inSheetData = false;
@@ -376,6 +433,63 @@ async function scanNewAccountWorksheetRows(options) {
   let parsedRows = 0;
   let nextBatchAt = rowBatchSize;
   let batchDue = false;
+  let usedRange = null;
+  let mergeCellsSeen = false;
+  let inMergeCells = false;
+
+  function includeUsedRange(range) {
+    if (!usedRange) {
+      usedRange = {
+        start: { ...range.start },
+        end: { ...range.end }
+      };
+      return;
+    }
+    usedRange.start.columnNumber = Math.min(
+      usedRange.start.columnNumber,
+      range.start.columnNumber
+    );
+    usedRange.start.rowNumber = Math.min(usedRange.start.rowNumber, range.start.rowNumber);
+    usedRange.end.columnNumber = Math.max(usedRange.end.columnNumber, range.end.columnNumber);
+    usedRange.end.rowNumber = Math.max(usedRange.end.rowNumber, range.end.rowNumber);
+  }
+
+  function assertRangeInsideDimension(range) {
+    if (!dimension || !rangeContains(dimension, range)) {
+      fail(
+        'NEW_ACCOUNT_WORKBOOK_DIMENSION_INVALID',
+        'NewAccount输出cell或merge超出dimension'
+      );
+    }
+  }
+
+  function assertDimensionMatchesUsedRange() {
+    if (!dimension) {
+      fail('NEW_ACCOUNT_WORKBOOK_DIMENSION_INVALID', 'NewAccount输出dimension缺失');
+    }
+    if (!usedRange) {
+      const emptyRange = Object.freeze({
+        start: Object.freeze({ columnNumber: 1, rowNumber: 1 }),
+        end: Object.freeze({ columnNumber: 1, rowNumber: 1 })
+      });
+      if (rangesEqual(dimension, emptyRange)) return;
+      fail('NEW_ACCOUNT_WORKBOOK_DIMENSION_INVALID', 'NewAccount空worksheet dimension非法');
+    }
+    if (rangesEqual(dimension, usedRange)) return;
+    const headerOnlyWriterFloor = usedRange.start.columnNumber === 1 &&
+      usedRange.start.rowNumber === 1 &&
+      usedRange.end.columnNumber === expectedColumnCount &&
+      usedRange.end.rowNumber === 1 &&
+      dimension.start.columnNumber === 1 &&
+      dimension.start.rowNumber === 1 &&
+      dimension.end.columnNumber === expectedColumnCount &&
+      dimension.end.rowNumber === 2;
+    if (headerOnlyWriterFloor) return;
+    fail(
+      'NEW_ACCOUNT_WORKBOOK_DIMENSION_INVALID',
+      'NewAccount输出dimension与实际used range不一致'
+    );
+  }
 
   function startRow(node, parent) {
     if (!inSheetData || parent !== 'sheetData' || currentRow || currentCell) {
@@ -408,6 +522,9 @@ async function scanNewAccountWorksheetRows(options) {
     if (reference.columnNumber <= currentRow.previousColumnNumber) {
       fail('NEW_ACCOUNT_WORKBOOK_COORDINATE_INVALID', 'NewAccount输出cell列坐标重复或乱序');
     }
+    const cellRange = Object.freeze({ start: reference, end: reference });
+    assertRangeInsideDimension(cellRange);
+    includeUsedRange(cellRange);
     currentRow.previousColumnNumber = reference.columnNumber;
     currentCell = {
       columnNumber: reference.columnNumber,
@@ -455,7 +572,9 @@ async function scanNewAccountWorksheetRows(options) {
     onopentag(node) {
       const name = localName(node);
       const parent = stack[stack.length - 1] || null;
-      if (name === 'worksheet') {
+      if (dimensionOpen) {
+        fail('NEW_ACCOUNT_WORKBOOK_XML_INVALID', 'NewAccount输出dimension子元素非法');
+      } else if (name === 'worksheet') {
         assertSpreadsheetElement(node);
         if (worksheetSeen || parent !== null) {
           fail('NEW_ACCOUNT_WORKBOOK_XML_INVALID', 'NewAccount输出worksheet root非法');
@@ -463,8 +582,18 @@ async function scanNewAccountWorksheetRows(options) {
         worksheetSeen = true;
       } else if (parent === null) {
         fail('NEW_ACCOUNT_WORKBOOK_XML_INVALID', 'NewAccount输出worksheet root非法');
+      } else if (name === 'dimension') {
+        assertSpreadsheetElement(node);
+        if (parent !== 'worksheet' || dimension || sheetDataSeen) {
+          fail('NEW_ACCOUNT_WORKBOOK_DIMENSION_INVALID', 'NewAccount输出dimension重复或位置非法');
+        }
+        dimension = parseDimensionReference(attributeValue(node, 'ref'));
+        dimensionOpen = true;
       } else if (name === 'sheetData') {
         assertSpreadsheetElement(node);
+        if (!dimension || !dimensionClosed) {
+          fail('NEW_ACCOUNT_WORKBOOK_DIMENSION_INVALID', 'NewAccount输出dimension缺失或未闭合');
+        }
         if (parent !== 'worksheet' || sheetDataSeen || inSheetData || currentRow || currentCell) {
           fail('NEW_ACCOUNT_WORKBOOK_XML_INVALID', 'NewAccount输出sheetData结构非法');
         }
@@ -513,11 +642,33 @@ async function scanNewAccountWorksheetRows(options) {
         fail('NEW_ACCOUNT_WORKBOOK_XML_INVALID', 'NewAccount输出row子元素非法');
       } else if (inSheetData && parent === 'sheetData') {
         fail('NEW_ACCOUNT_WORKBOOK_XML_INVALID', 'NewAccount输出sheetData子元素非法');
+      } else if (name === 'mergeCells') {
+        assertSpreadsheetElement(node);
+        if (parent !== 'worksheet' || mergeCellsSeen || inMergeCells) {
+          fail('NEW_ACCOUNT_WORKBOOK_XML_INVALID', 'NewAccount输出mergeCells结构非法');
+        }
+        mergeCellsSeen = true;
+        inMergeCells = true;
+      } else if (name === 'mergeCell') {
+        assertSpreadsheetElement(node);
+        if (!inMergeCells || parent !== 'mergeCells') {
+          fail('NEW_ACCOUNT_WORKBOOK_XML_INVALID', 'NewAccount输出mergeCell结构非法');
+        }
+        const mergeRange = parseCanonicalRangeReference(attributeValue(node, 'ref'), {
+          errorCode: 'NEW_ACCOUNT_WORKBOOK_DIMENSION_INVALID',
+          label: 'NewAccount输出merge range'
+        });
+        assertRangeInsideDimension(mergeRange);
+        includeUsedRange(mergeRange);
+      } else if (inMergeCells) {
+        fail('NEW_ACCOUNT_WORKBOOK_XML_INVALID', 'NewAccount输出mergeCells子元素非法');
       }
       stack.push(name);
     },
     ontext(text) {
-      if (currentCell && currentCell.inValue) currentCell.valueText += text;
+      if ((dimensionOpen || inMergeCells) && text.trim() !== '') {
+        fail('NEW_ACCOUNT_WORKBOOK_XML_INVALID', 'NewAccount输出range结构含非法文本');
+      } else if (currentCell && currentCell.inValue) currentCell.valueText += text;
       else if (currentCell && currentCell.inInlineText && !currentCell.inInlinePhoneticRun) {
         currentCell.inlineText += text;
       }
@@ -534,7 +685,16 @@ async function scanNewAccountWorksheetRows(options) {
     },
     onclosetag(node) {
       const name = localName(node) || stack[stack.length - 1];
-      if (currentCell && name === 'v') currentCell.inValue = false;
+      if (name === 'dimension') {
+        if (!dimensionOpen) {
+          fail('NEW_ACCOUNT_WORKBOOK_DIMENSION_INVALID', 'NewAccount输出dimension闭合非法');
+        }
+        dimensionOpen = false;
+        dimensionClosed = true;
+      } else if (name === 'mergeCells') {
+        if (!inMergeCells) fail('NEW_ACCOUNT_WORKBOOK_XML_INVALID', 'NewAccount输出mergeCells闭合非法');
+        inMergeCells = false;
+      } else if (currentCell && name === 'v') currentCell.inValue = false;
       else if (currentCell && name === 'f') currentCell.inFormula = false;
       else if (currentCell && name === 't' && currentCell.inInlineString) currentCell.inInlineText = false;
       else if (currentCell && name === 'rPh' && currentCell.inInlineString) {
@@ -568,10 +728,12 @@ async function scanNewAccountWorksheetRows(options) {
   };
 
   await parseUtf8StreamStrict(stream, handlers, assertNotCancelled);
-  if (!worksheetSeen || !worksheetClosed || !sheetDataSeen || !sheetDataClosed || inSheetData ||
-      currentRow || currentCell || stack.length) {
+  if (!worksheetSeen || !worksheetClosed || !dimension || !dimensionClosed || dimensionOpen ||
+      !sheetDataSeen || !sheetDataClosed || inSheetData || inMergeCells || currentRow ||
+      currentCell || stack.length) {
     fail('NEW_ACCOUNT_WORKBOOK_XML_INVALID', 'NewAccount输出worksheet XML截断');
   }
+  assertDimensionMatchesUsedRange();
   return Object.freeze({ parsedRows, lastRowNumber });
 }
 
@@ -579,6 +741,7 @@ module.exports = {
   decodeCell,
   loadNewAccountSharedStrings,
   parseCellReference,
+  parseDimensionReference,
   scanNewAccountWorksheetRows,
   sheetJsDateSerial
 };
