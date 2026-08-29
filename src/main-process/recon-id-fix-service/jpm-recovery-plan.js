@@ -186,6 +186,56 @@ function definitiveHeldRecoveryTransitions(source, inspection, activeHold, taskS
   }];
 }
 
+function definitiveDirectNotCommittedTransitions(source, inspection) {
+  const failure = failureForOutcome(inspection.outcome);
+  const recoveryAttemptId = `recon-jpm-recovery:${canonicalSha256([
+    source.sourceKind,
+    source.sourceRef,
+    source.operationKey,
+    inspection.outcome,
+    inspection.evidenceHash
+  ])}`;
+  const base = {
+    entityKind: 'task-run',
+    actionKey: source.actionKey,
+    expectedTaskKey: 'recon-id-fix:run',
+    operationKey: source.operationKey,
+    taskRunId: source.taskRunId,
+    sourceKind: source.sourceKind,
+    sourceRef: source.sourceRef,
+    recoveryAttemptId
+  };
+  return [
+    interruptedTransition(source, failure.code, failure.message),
+    {
+      transition: {
+        ...base,
+        command: 'begin-recovery',
+        expectedState: 'interrupted',
+        metadataPatch: {
+          recoveryHold: false,
+          recoveryOutcome: inspection.outcome
+        }
+      },
+      safePayload: { outcome: inspection.outcome, phase: 'begin-definitive-recovery' }
+    },
+    {
+      transition: {
+        ...base,
+        command: 'complete-recovery-failure',
+        expectedState: 'running',
+        failureCode: failure.code,
+        failureMessage: failure.message,
+        metadataPatch: {
+          recoveryHold: false,
+          recoveryOutcome: inspection.outcome
+        }
+      },
+      safePayload: { outcome: inspection.outcome, phase: 'complete-definitive-recovery' }
+    }
+  ];
+}
+
 function reconFixJpmRecoveryPlanTransitions({
   phase,
   source,
@@ -221,11 +271,7 @@ function reconFixJpmRecoveryPlanTransitions({
     if (activeHold) {
       return definitiveHeldRecoveryTransitions(source, inspection, activeHold, taskState);
     }
-    return [interruptedTransition(
-      source,
-      failureForOutcome(inspection.outcome).code,
-      failureForOutcome(inspection.outcome).message
-    )];
+    return definitiveDirectNotCommittedTransitions(source, inspection);
   }
   return [];
 }

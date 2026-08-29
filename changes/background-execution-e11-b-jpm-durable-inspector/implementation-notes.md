@@ -88,8 +88,19 @@
 | P1 correlated scope/action 漂移可让 active Hold 脱离 JPM mutation gate | 接受；JPM 私有 Task state reader 提供 canonical action/module/taskKey/worker-critical coordination/canonical ADM scope，coordinator 在 active same-source Hold 进入 cleanup/Inspector 前消费该 action-specific 权威投影，closed retained 亦复用；JPM mutation gate 同时枚举 action-owned active Hold/open Intent，不只按可漂移 scope 查询 | closed Intent 下的 action/scope 相关漂移、coordinationKind/taskKey 漂移均 fail closed；Intent 仍 open 的 `INSPECTION_UNKNOWN`/`INSPECTOR_UNAVAILABLE` 两路 correlated scope 漂移也在零 Inspector/零 control transaction 下 `STARTUP_RECOVERY_SOURCE_AUTHORITY_CONFLICT`，且 action-owned Hold 继续 `RECOVERY_HOLD_ACTIVE`；恢复原值后才允许 definitive committed |
 | P2 definitive decision 固定 `held=false` 与持久 Hold 自相矛盾 | 接受；non-settlement definitive 写后按 source canonical scope 权威回读 active Hold，只返回 bounded `held` 与可选 `holdId` | direct committed 与 existing-Hold committed 均 `held=true` 且 holdId exact；not-committed resolve 后 `held=false` 且无 holdId |
 
+### 第六轮 Review finding（2026-08-30）
+
+| Finding | 裁决与最小修复 | 定向证据 |
+| --- | --- | --- |
+| P3 direct no-active-Hold `not-committed` 只停在 `interrupted`，未按冻结 lifecycle 收敛为 ordinary `failed` | 接受；不创建临时 Hold，不改 Inspector 判定。单个 RecoveryControl transaction 依次执行 `mark-interrupted → begin-recovery → complete-recovery-failure`，使用由 source identity、operation、outcome 与 inspection evidence 派生的确定性 `recoveryAttemptId`；最终 `failed/NOT_COMMITTED/recoveryHold=false/recoveryOutcome=not-committed` | critical 前 cancel 后持久 ACK 的真实 Inspector 路径断言三条 Task transition 位于同一 control transaction、无 active Hold、ADM image/receipt 不变且 operation replay 继续拒绝；三种 71c1 legacy gap × not-committed 同步更新为合法 failed 终态并验证第三次 startup 零动作 |
+
+修复严格对齐 Platform lifecycle mapping 的 `interrupted → running(recovery) → failed`；未把 direct
+not-committed 伪装为 Hold recovery，未改变 committed-result-lost 的 active Hold 保护，也未放宽 JPM
+写回、receipt、金额/币种或人工资金复核门禁。Spec/TechDoc 无偏差。
+
 ## Evidence
 
+- 2026-08-30 Review remediation：E11-B 47/47 PASS；E11-B/E11-P0/E11-A/RecoveryContract/RecoveryControl 五文件聚焦矩阵 154/154 PASS。direct no-Hold not-committed 已验证单事务合法生命周期、无 Hold、最终 failed 与重复 startup 幂等；production 仍 false。
 - Restack 定向单测：E11-B 47/47 PASS，E11-P0 19/19 PASS，E11-A 14/14 PASS；E11-B 仍覆盖原子 anchor rollback、无/已有 Hold 的 Task/Hold owner crash、71c1 gap、mark-committed/close、incompatible Task body + ACKed Intent、global ADM gate，以及 committed-result-lost active Hold/canonical-correlated identity/reason/safeSummary/state 漂移、open pre-definitive gate、重复 startup 零副作用与 decision truthfulness。
 - 本轮修复后 focused 合并回归 193/193 PASS：包含 E11-B、E11-P0、E11-A、RecoveryContract/RecoveryControl 与 PreFund E05-B；原 restack 的 340/340 仍是历史基线，本轮未用它替代定向新鲜证据。
 - 定向 integration：RecoveryControl 27/27、recovery canary 9/9、linked streaming 19/19、gateway upsert 40/40、linked delete/rebuild 73/73 PASS。
