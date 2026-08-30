@@ -41,6 +41,32 @@ function insertRun(db, payload) {
   return Number(result.lastInsertRowid);
 }
 
+function insertManagedRun(db, payload) {
+  const result = db.prepare(`
+    INSERT INTO ${RUNS_TABLE} (
+      year_month, status, pending_total, bank_total, matched_count, bu_diff_count,
+      pending_unmatched, bank_unmatched, anomaly_count, anomaly_report_path, export_path,
+      operation_key, producer_task_run_id, input_evidence_hash
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    payload.yearMonth,
+    payload.status,
+    payload.pendingTotal || 0,
+    payload.bankTotal || 0,
+    payload.matchedCount || 0,
+    payload.buDiffCount || 0,
+    payload.pendingUnmatched || 0,
+    payload.bankUnmatched || 0,
+    payload.anomalyCount || 0,
+    payload.anomalyReportPath || null,
+    payload.exportPath || null,
+    payload.operationKey,
+    payload.producerTaskRunId,
+    payload.inputEvidenceHash
+  );
+  return Number(result.lastInsertRowid);
+}
+
 function updateRunExportPath(db, runId, exportPath) {
   db.prepare(`UPDATE ${RUNS_TABLE} SET export_path = ? WHERE id = ?`).run(exportPath, runId);
 }
@@ -59,6 +85,7 @@ function getRun(db, runId) {
 
 module.exports = {
   insertRun,
+  insertManagedRun,
   updateRunExportPath,
   listRuns,
   getLatestRun,

@@ -10,6 +10,9 @@ const runDataStore = require('../../../src/backend/run-data-store');
 const {
   createDuplicateInboundMatchStore
 } = require('../../../src/backend/duplicate-inbound-match-store');
+const operationReceipts = require(
+  '../../../src/main-process/duplicate-inbound-match/operation-receipt-repository'
+);
 
 async function createImportBundle(store, { bankRows, documentRows = [] }) {
   return store.createImportBundle({
@@ -124,12 +127,104 @@ test('重复入金侧库保存双文件导入与结果，保持稳定顺序并�
 
     const result = store.readResult('2026-07', runId);
     assert.equal(result.run.status, 'success');
+    assert.match(result.run.resultDigest, /^[a-f0-9]{64}$/);
+    assert.equal(store.readCommittedResult('2026-07', runId).run.resultDigest, result.run.resultDigest);
     assert.deepEqual(result.mailRows, [{ BillDate: '2026-07-01' }]);
     assert.deepEqual(result.manualRows.map((row) => row.row.BizId), ['B1', 'B2']);
     assert.equal(runDataStore.listSideDbFiles(userDataDir, runDataStore.MODULE_DUPLICATE_INBOUND_MATCH).length, 1);
 
     assert.deepEqual(store.clearAll(), { deletedFiles: 1 });
     assert.equal(runDataStore.listSideDbFiles(userDataDir, runDataStore.MODULE_DUPLICATE_INBOUND_MATCH).length, 0);
+  } finally {
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  }
+});
+
+test('finishRun在事务内物化返回值且receipt-owned run拒绝cleanup删除', async () => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'duplicate-inbound-store-'));
+  try {
+    const store = createDuplicateInboundMatchStore(userDataDir, { operationReceipts });
+    const imported = await createImportBundle(store, { bankRows: [], documentRows: [] });
+    const summary = {
+      mailRowCount: 0,
+      manualRowCount: 0,
+      auditGroupCount: 0,
+      finalSuccessGroupCount: 0,
+      manualGroupCount: 0
+    };
+    const runId = store.createRun({
+      monthKey: '2026-07',
+      importId: imported.id,
+      snapshot: { batches: [] },
+      snapshotHash: 'snapshot-transaction-materialization'
+    });
+    const originalGetRun = store.getRun.bind(store);
+    let materializedInsideTransaction = false;
+    store.getRun = (monthKey, candidateRunId, openDb) => {
+      materializedInsideTransaction = Boolean(openDb && openDb.isTransaction);
+      return originalGetRun(monthKey, candidateRunId, openDb);
+    };
+    const finished = store.finishRun({
+      monthKey: '2026-07',
+      runId,
+      summary,
+      mailRows: [],
+      manualRows: [],
+      auditRows: [],
+      operationReceipt: {
+        actionKey: 'duplicate:run',
+        operationKey: 'duplicate/run/receipt-owned-delete-guard',
+        producerTaskRunId: 'task-duplicate-run-receipt-owned-delete-guard',
+        phase: 'run-side-committed',
+        importBundleId: imported.id,
+        inputEvidenceHash: 'a'.repeat(64)
+      }
+    });
+    assert.equal(materializedInsideTransaction, true);
+    assert.equal(finished.status, 'success');
+    assert.match(finished.resultDigest, /^[a-f0-9]{64}$/);
+    assert.throws(
+      () => store.deleteRun('2026-07', runId),
+      (error) => error.code === 'DUPLICATE_RECEIPT_OWNED_RUN_DELETE_FORBIDDEN'
+    );
+    assert.equal(store.readCommittedResult('2026-07', runId).run.id, runId);
+
+    const rollbackRunId = store.createRun({
+      monthKey: '2026-07',
+      importId: imported.id,
+      snapshot: { batches: [] },
+      snapshotHash: 'snapshot-map-fault'
+    });
+    store.getRun = (_monthKey, _candidateRunId, openDb) => {
+      assert.equal(openDb.isTransaction, true, '可失败map必须发生在COMMIT之前');
+      throw Object.assign(new Error('injected in-transaction map fault'), {
+        code: 'INJECTED_RUN_MAP_FAULT'
+      });
+    };
+    assert.throws(() => store.finishRun({
+      monthKey: '2026-07',
+      runId: rollbackRunId,
+      summary,
+      mailRows: [],
+      manualRows: [],
+      auditRows: [],
+      operationReceipt: {
+        actionKey: 'duplicate:run',
+        operationKey: 'duplicate/run/map-fault-before-commit',
+        producerTaskRunId: 'task-duplicate-run-map-fault-before-commit',
+        phase: 'run-side-committed',
+        importBundleId: imported.id,
+        inputEvidenceHash: 'b'.repeat(64)
+      }
+    }), (error) => error.code === 'INJECTED_RUN_MAP_FAULT');
+    store.getRun = originalGetRun;
+    const rolledBack = store.getRun('2026-07', rollbackRunId);
+    assert.equal(rolledBack.status, 'running');
+    assert.equal(rolledBack.resultDigest, null);
+    assert.equal(store.findOperationReceipt(
+      'duplicate:run', 'duplicate/run/map-fault-before-commit'
+    ), null);
+    assert.equal(store.deleteRun('2026-07', rollbackRunId), true);
   } finally {
     fs.rmSync(userDataDir, { recursive: true, force: true });
   }
@@ -211,6 +306,66 @@ test('单据流式写入中途失败时银行、单据和导入记录全部回�
         'duplicate_inbound_match_imports',
         'duplicate_inbound_match_bank_rows',
         'duplicate_inbound_match_document_rows'
+      ]) {
+        assert.equal(db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count, 0);
+      }
+    } finally {
+      db.close();
+    }
+  } finally {
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  }
+});
+
+test('beforeCommitGuard在异步复核后同步阻断receipt/COMMIT并整体回滚', async () => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'duplicate-inbound-store-'));
+  try {
+    const store = createDuplicateInboundMatchStore(userDataDir);
+    const timeline = [];
+    await assert.rejects(() => store.createImportBundle({
+      monthKey: '2026-07',
+      bank: {
+        fileName: 'bank.xlsx',
+        contentHash: 'bank-hash',
+        rows: [{
+          sourceOrdinal: 0,
+          excelRowNumber: 2,
+          bizId: 'GUARD-1',
+          fundType: 'Inbound',
+          raw: { BizId: 'GUARD-1' }
+        }]
+      },
+      document: { fileName: 'document.xlsx', contentHash: 'document-hash' },
+      writeDocumentRows: async () => ({
+        rowCount: 0,
+        matchableRowCount: 0,
+        emptyBusinessOrderCount: 0
+      }),
+      beforeCommit: async () => {
+        timeline.push('before:start');
+        await Promise.resolve();
+        timeline.push('before:end');
+      },
+      beforeCommitGuard: () => {
+        timeline.push('guard');
+        throw Object.assign(new Error('shutdown before durable commit'), {
+          code: 'DUPLICATE_SHUTDOWN'
+        });
+      }
+    }), (error) => error.code === 'DUPLICATE_SHUTDOWN');
+    assert.deepEqual(timeline, ['before:start', 'before:end', 'guard']);
+
+    const file = runDataStore.listSideDbFiles(
+      userDataDir,
+      runDataStore.MODULE_DUPLICATE_INBOUND_MATCH
+    )[0];
+    const db = runDataStore.openExistingSideDb(file.path);
+    try {
+      for (const table of [
+        'duplicate_inbound_match_imports',
+        'duplicate_inbound_match_bank_rows',
+        'duplicate_inbound_match_document_rows',
+        'duplicate_inbound_match_operation_receipts'
       ]) {
         assert.equal(db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count, 0);
       }
