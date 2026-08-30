@@ -176,6 +176,24 @@ test('R3.2.2 snapshot锁定10 action、18 base anchors与独立证据闭环', ()
   assert.equal(snapshot.baseAnchors.length, 18);
 });
 
+test('历史base anchor从冻结reviewed blob取证，不被后续版本合法改写反向失效', () => {
+  const snapshot = loadSnapshot();
+  const anchor = snapshot.baseAnchors.find(
+    (item) => item.id === 'DUPLICATE-IMPORT-STARTUP-OWNER'
+  );
+  const reviewed = inspectGitBackedFile(
+    REPOSITORY_ROOT,
+    anchor.reviewedHead,
+    anchor.source
+  );
+  const current = fs.readFileSync(path.join(REPOSITORY_ROOT, anchor.source), 'utf8');
+  assert.match(reviewed.reviewedText, /startup严格先注册只读inspector/);
+  assert.doesNotMatch(current, /startup严格先注册只读inspector/);
+  assert.match(current, /startup在freeze前同时注册manual与duplicate恢复链/);
+  const result = validateReleaseEvidence(snapshot);
+  assert.equal(result.valid, true, JSON.stringify(result.errors));
+});
+
 test('validator CLI只读并输出有界machine-readable摘要', () => {
   const before = fs.readFileSync(SNAPSHOT_PATH, 'utf8');
   const beforeMtime = fs.statSync(SNAPSHOT_PATH).mtimeMs;

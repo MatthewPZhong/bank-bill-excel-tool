@@ -5,7 +5,7 @@
 - Goal：基于 v3.2.2 当前冻结合同和 exact reviewed head，为 FundRecon、Duplicate、BankBU 共 10 个 action 建立只读、可机器校验、逐 action 独立的 release evidence；不改变任何 live 业务路径。
 - Context：E06-A、E07-A/B/C、E08-A/B 已形成 production-false capability；R3.2.2 冻结范围是 Windows、人工、策略快照和 action 独立 enable。
 - Constraints：精确 base 为 `5c9495dda46c775babdac9eb1700c459735e5c8b`；`production.enabled=false / effectiveMode=legacy / effectiveWorkerCount=0` 不变；BankBU policy 当前不在公共 `BACKGROUND_EXECUTION_POLICIES` 聚合中；本 PR 不改 `src/`、IPC/Main/renderer、runtime routing/ownership、资金算法、receipt、Inspector、Recovery 或 Publisher，不 bump package version，不运行 `release-check`、`check-vars`、`scan:vars`，不落 raw account/amount/row。
-- Done when：tracked JSON 对每个 action 独立列出 policy、runtime ownership、evidence/gates/rollback/identity/order；validator 直接核对当前代码 authority、canonical fixture以及冻结 base 的真实 Git commit/blob/ordered facts，并拒绝 policy/evidence drift、跨 action 借证、人工或 Windows 自动升级、production enable、缺失/unknown 当 PASS、rollback/identity/order 漂移及任何 raw payload；定向测试、smoke、静态检查通过。
+- Done when：tracked JSON 对每个 action 独立列出 policy、runtime ownership、evidence/gates/rollback/identity/order；validator 直接核对当前代码 policy/runtime authority、canonical fixture以及冻结 base 的真实 Git commit/blob/ordered facts；历史 base anchor 从 reviewed blob 取证，后续 evidence claim 继续按 current canonical/append-only 规则核对；并拒绝 policy/evidence drift、跨 action 借证、人工或 Windows 自动升级、production enable、缺失/unknown 当 PASS、rollback/identity/order 漂移及任何 raw payload；定向测试、smoke、静态检查通过。
 
 ## 已确认事实
 
@@ -35,6 +35,12 @@
 | 是否需要 package version bump。 | ASSUME | 低 | 容易 | 冻结文档无要求，产品行为零变化，既有 release-evidence PR 不 bump。 | validator 锁定 `3.1.14` 与 `bumped=false`。 | 本 PR 不 bump；若 release owner 后续决定正式版本迭代，三件套必须同步且另立范围。 |
 
 未发现需要改变冻结数据模型、公共合同、资金/恢复边界或 live 主流程的 `BLOCK`。Windows、真实样本和资金/恢复人工复核是明确的 production gate，不是本地 evidence PR 可自动消除的未知。
+
+### v3.2.3 跨版本复核补充
+
+- v3.2.2 base anchor 是历史 release 事实，authority 为不可变 `reviewedHead:path` Git blob；后续版本允许在同一路径合法演进，不再要求 current file 与历史 blob 全文相等。
+- current policy/runtime/canonical fixture 仍直接读取当前代码；evidence catalog 的 current canonical 与共享 sequence `VERSIONED_APPEND_ONLY` 规则不变，不能用历史 blob 代偿当前状态。
+- 已知触发项是 v3.2.3 将 Duplicate-only startup registry 断言升级为 Manual Balance + Duplicate 共同注册；没有改变 v3.2.2 snapshot、action ownership、production state 或人工 gate。
 
 ## 风险优先计划
 

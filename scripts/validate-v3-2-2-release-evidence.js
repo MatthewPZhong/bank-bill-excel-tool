@@ -649,6 +649,9 @@ function validateGitRecord(
   }
   expectEqual(recordPath + '/blobOid', record.blobOid, gitFile.blobOid);
   expectEqual(recordPath + '/sha256', record.sha256, gitFile.sha256);
+  if (options.currentTextPolicy === 'FROZEN_REVIEWED_BLOB') {
+    return Object.freeze({ ...gitFile, currentText: gitFile.reviewedText });
+  }
   const currentPath = path.join(repositoryRoot, record.source);
   let currentText;
   try {
@@ -736,7 +739,8 @@ function validateReleaseEvidence(snapshot, options = {}) {
         anchorPath,
         repositoryRoot,
         add,
-        expectEqual
+        expectEqual,
+        { currentTextPolicy: 'FROZEN_REVIEWED_BLOB' }
       );
       if (gitFile) {
         let cursor = 0;

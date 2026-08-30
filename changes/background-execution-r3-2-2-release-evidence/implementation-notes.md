@@ -26,7 +26,7 @@
 | 假设 | 依据 | 失效影响 | 验证与回滚 |
 | --- | --- | --- | --- |
 | snapshot 是 review artifact，不是动态 production config。 | 无 `src/` consumer；validator只有读取路径。 | 若未来被 runtime require，会形成双 authority。 | 当前 live source action-key scan与diff scope固定零接线；未来若改变必须新合同/新PR。 |
-| reviewed head、Git blob identity和current canonical file共同界定本地 capability范围。 | 每个 claim/anchor同时冻结 source、reviewedHead、blob OID与CRLF-canonical SHA；head必须为exact base祖先。 | commit/path不存在、非祖先、历史blob与current file分叉时可能误用旧结论。 | validator通过只读Git命令逐项核验，不再接受null/unknown reviewedHead；任何一层漂移拒绝。 |
+| reviewed head、Git blob identity界定历史 base anchor；当前 policy/runtime 与后续 evidence claim 仍读取当前 canonical file。 | 每个 claim/anchor同时冻结 source、reviewedHead、blob OID与CRLF-canonical SHA；head必须为exact base祖先。后续版本允许合法修改同一路径，不能反向抹除历史 reviewed blob。 | 若把历史 ordered facts 改为读取当前文件，v3.2.3 的合法 startup registry 合并会让 v3.2.2 evidence 自我失效；若所有 claim 都只读历史 blob，又会漏掉当前 policy/runtime 漂移。 | 18 个 base anchor 只从不可变 `reviewedHead:path` blob 取 ordered facts/action scope；current policy/runtime/canonical fixture 与 evidence catalog 继续按各自现行策略核对。 |
 | validator脚本仍由代码review维护，但action语义不再由脚本内seal或actionKey常量自证。 | required ordered facts必须实际存在于冻结base-owned source/test blob，performance action scope从该Git-backed source文本派生，policy/runtime ownership另从现有结构化模块导出。 | 若直接恶意删除validator检查，任何tracked validator都可被绕过。 | Round2完整同步retag snapshot + validator specs + refs/gates仍被base-owned `duplicate:import` 击穿；脚本不接production、不自动发布，diff仍须独立Reviewer复核。 |
 
 ## Deviations
@@ -35,6 +35,7 @@
 | --- | --- | --- | --- | --- |
 | v1 schema使用action digest及free-form ownership/rollback描述。 | Round1后升级schema v2：移除seal和free-form语义，新增Git-backed base anchors、真实reviewedHead/blob、结构化anchor IDs与recursive privacy scan。 | 原方案不能抵御snapshot+same-script constants同步篡改，也只声明不落raw数据而未检查payload。 | 仅release evidence JSON/validator/tests变化；无live、policy、runtime、资金或恢复合同变化。 | 不需要，属于validator证据强度修复，不改变冻结产品合同。 |
 | Round1 schema v2的performance anchor仅冻结benchmark payload，privacy检查仅覆盖ASCII主路。 | Round2保持schema v2，新增Git-backed `ACTION_SCOPE`绑定与NFKC/分隔符折叠；不增加snapshot自由文本字段。 | Reviewer已证明benchmark可同步retag，五类中文/全角payload可旁路。 | 仅release evidence JSON/validator/tests/notes变化；无`src/`、live、runtime、资金或恢复合同变化。 | 不需要，属于已接受Reviewer finding的证据强度修复。 |
+| base anchor 同时要求冻结 reviewed blob 与后续版本 current canonical 全文相等。 | 历史 anchor 的 ordered facts/action scope 只从 reviewed blob 读取；当前 policy/runtime 与 evidence claim 校验保持不变。 | v3.2.3 为合并 Manual Balance 与 Duplicate startup registry 合法改写同一测试，导致 v3.2.2 历史 validator 3 项失败；历史 release 事实不应被后续同路径演进反向作废。 | 只改 v3.2.2 evidence validator/test/notes；不接受 snapshot 自声明，也不放宽 current policy/runtime、production 或人工 gate。 | 不需要，属于跨版本历史证据 authority 修复。 |
 
 ## Evidence
 
@@ -105,3 +106,10 @@
 - E07-C head `2df35fd5ebf51797537de37a58b2563ae64341df` 已把最近一次 terminal 的精确 action/operation/job/unit route 作为 bounded tombstone；同 route 迟到 cancel 幂等返回且不追加 `cancel:ack`，错误 route 仍 fail closed。该修复经 E08-A head `a8e7cbdf41487ba0eca3f60e467f5413e4e8fa14` 传播到本 evidence 的 exact base `5c9495dda46c775babdac9eb1700c459735e5c8b`。
 - snapshot、validator 与 preflight 已重绑新 exact base；`E07-C-DUPLICATE-IMPORT` 的 reviewed head/blob/SHA 同步为修复后的 tracked object。validator PASS，production enabled 仍为 0，Windows 仍为 `NOT_RUN`，资金/恢复仍为 `PENDING_HUMAN_REVIEW`。
 - 新 exact base 上 release-evidence 专属 unit `27/27 PASS`、Duplicate affected `119/119 PASS`；原两条失败 shutdown 用例在修复 head 连续 3 轮均 `2/2 PASS`，E07-C 全套 `20/20 PASS`。未执行 `release-check`、`check-vars` 或 `scan:vars`。
+
+## Cross-version Stabilization — Frozen Base Anchor Authority
+
+- v3.2.3 合法把 `duplicate-inbound-match-wiring.test.js` 的单一 Duplicate startup registry 断言升级为 Manual Balance + Duplicate inspector/provider 在 freeze 前共同注册；文件因此不再与 v3.2.2 exact-base blob 逐字相等。
+- v3.2.2 的 18 个 base anchor 现在只从不可变 `reviewedHead:path` blob 验证 OID、canonical SHA、ordered facts 与 action scope；当前 policy/runtime/canonical fixture 仍从当前代码读取，evidence catalog 的 current canonical/append-only 规则不变。
+- 该分层使历史事实不会被后续版本合法改写反向失效，同时同步改 snapshot/spec/source/action scope 的既有攻击仍由 exact reviewed blob 与固定 spec 拒绝。production 仍为 0，Windows 仍 `NOT_RUN`，资金/恢复仍 `PENDING_HUMAN_REVIEW`。
+- 修复前完整 unit 的 3 个失败均指向 `/baseAnchors/4/source`；修复后 validator PASS，release-evidence 专属 unit `29/29 PASS`（包含三条原失败主路与新增跨版本反例），`node --check`、ESLint、`git diff --check` PASS；完整 unit 将在重建后的 R3.2.3 exact evidence head 再跑。未执行 `release-check`、`check-vars` 或 `scan:vars`。
