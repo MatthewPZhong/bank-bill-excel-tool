@@ -43,10 +43,18 @@
 | 原ancestor identity合同BLOCK | 用户授权FilePlan/Publisher/journal additive direct-parent evidence | reviewer parent rename+ordinary replacement真实probe | E10-B fail closed；generic旧action/journal向后兼容；不实现ancestor chain/native ID | 是，v3.2.3 §9、Platform与Archive FilePlan合同 |
 | direct parent evidence仍允许目标父目录与固定recovery root重叠 | 新建guarded publication增加双向containment preflight | reviewer committed+handoff pending后userData rename/replacement真实probe会丢失唯一恢复入口 | 行为仅收紧新required batch；零journal/index/target写入，旧journal recovery不变 | 是，v3.2.3 §9、Platform Publisher/Lifecycle合同 |
 
+## Final predecessor propagation（2026-08-30）
+
+- PR #206 旧 head `1757041a1b22b9529e7b86b2b88c32e0193990f3` 仅含旧 E10-A 基线 `d073ced023b40feb477cf7557801a2899b433500`，不包含最终 #205 head `3b9f71cf812568699b5bb303a29ce69fa0e9fec1`。
+- 为避免把两条独立 restack 的大量 add/add 文档冲突误当业务改动，先在最终 #205 上按原顺序重放六个 E10-B 提交，再用 non-destructive ancestry bridge 纳入旧 #206 head，确保后续可 fast-forward 推送且不 force-push。
+- `range-diff` 证明后五个 E10-B 补丁等价；首个补丁的唯一语义合并，是在最终 FundRecon/Duplicate runtime 聚合器中增加 `new-account:save-as` inline entry/policy，不删除任何既有 action、startup gate、shutdown 或动态资源绑定。
+- production 继续 `false/legacy/0`；不改变账户、日期、币种、金额、余额、Workbook、final target authority 或 durable Publisher 合同。
+
 ## Evidence
 
 | 证据 | 结果 | 覆盖的行为/风险 |
 | --- | --- | --- |
+| final #205 → #206 replay/restack | old #206=`1757041a1b22b9529e7b86b2b88c32e0193990f3`；final #205=`3b9f71cf812568699b5bb303a29ce69fa0e9fec1`；6/6 E10-B commits按序重放，`range-diff` 后5项等价、首项仅增加联合runtime binding；E10-A/E10-B/shared runtime 211/211 PASS；NewAccount integration 36/36 PASS；smoke、node-check、ESLint、diff-check PASS | final predecessor与E10-B Publisher同时保留；FundRecon/Duplicate/NewAccount runtime不互相覆盖；业务Workbook与资金字段回归保持；production关闭 |
 | exact parent/merge-base | `d073ced023b40feb477cf7557801a2899b433500` | 精确 E10-A 父链 |
 | Direct-parent授权轮起始head | `b0bdb36a122fec21aba56538fcef50d2200c282c` | 公共合同增量从已复审E10-B Round2 exact head开始，不重建/改写父链 |
 | Round4 recovery-root overlap起始head | `6073fc0edf0f20a84de9bd5ee0c234034826fe9a` | 从direct-parent合同clean head继续，精确父链不变 |
