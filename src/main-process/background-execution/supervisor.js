@@ -278,6 +278,10 @@ function createExecutionSupervisor(options = {}) {
       ? (policy.context.kind === 'none' ? canonicalJsonSnapshot({ kind: 'none', value: {} }) : null)
       : request.context;
     if (!context) throw new SupervisorError('CONTEXT_REQUIRED', 'Execute request requires policy context');
+    const taskRunId = ['operation', 'file-batch'].includes(context.kind)
+      ? context.value.taskRunId
+      : null;
+    const batchId = context.kind === 'file-batch' ? context.value.batchId : null;
     const jobId = request.jobId || (options.idFactory ? options.idFactory('job') : makeId('job'));
     let workerInstanceId = request.workerInstanceId ||
       (options.idFactory ? options.idFactory('worker') : makeId('worker'));
@@ -762,8 +766,8 @@ function createExecutionSupervisor(options = {}) {
         actionKey,
         parentOperationKey: operationKey,
         fileOperationKey: unit.fileOperationKey,
-        taskRunId: context.kind === 'file-batch' ? context.value.taskRunId : null,
-        batchId: context.kind === 'file-batch' ? context.value.batchId : null,
+        taskRunId,
+        batchId,
         jobId,
         workerInstanceId,
         unitId: [...record.units].find(([, candidate]) => candidate === unit)?.[0] || null,
@@ -896,8 +900,8 @@ function createExecutionSupervisor(options = {}) {
             policy,
             actionKey,
             parentOperationKey: operationKey,
-            taskRunId: context.kind === 'file-batch' ? context.value.taskRunId : null,
-            batchId: context.kind === 'file-batch' ? context.value.batchId : null,
+            taskRunId,
+            batchId,
             jobId,
             workerInstanceId,
             unitId: message.unitId,
@@ -940,8 +944,8 @@ function createExecutionSupervisor(options = {}) {
             actionKey,
             parentOperationKey: operationKey,
             fileOperationKey: unit.fileOperationKey,
-            taskRunId: context.kind === 'file-batch' ? context.value.taskRunId : null,
-            batchId: context.kind === 'file-batch' ? context.value.batchId : null,
+            taskRunId,
+            batchId,
             jobId,
             workerInstanceId,
             unitId: message.unitId,
@@ -968,8 +972,8 @@ function createExecutionSupervisor(options = {}) {
               actionKey,
               parentOperationKey: operationKey,
               fileOperationKey: unit.fileOperationKey,
-              taskRunId: context.kind === 'file-batch' ? context.value.taskRunId : null,
-              batchId: context.kind === 'file-batch' ? context.value.batchId : null,
+              taskRunId,
+              batchId,
               jobId,
               workerInstanceId,
               unitId: message.unitId,

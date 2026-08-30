@@ -127,6 +127,8 @@ module.exports = {
   listMonths,
   getMonthMeta,
   importMonthAtomic,
+  insertPendingRowsInTxn,
+  insertBankRowsInTxn,
   getPendingRows,
   getBankRows,
   PENDING_TABLE,
