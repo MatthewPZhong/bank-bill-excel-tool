@@ -388,9 +388,11 @@ test('worker-thread adapter 使用 packaged entry path 并原样传 canonical en
       this.filename = filename;
       this.options = options;
       this.sent = [];
+      this.unrefCalls = 0;
       queueMicrotask(() => this.emit('online'));
     }
     postMessage(message) { this.sent.push(message); }
+    unref() { this.unrefCalls += 1; }
     terminate() {
       this.emit('error', new Error('ignored teardown error'));
       return Promise.resolve(0);
@@ -408,11 +410,42 @@ test('worker-thread adapter 使用 packaged entry path 并原样传 canonical en
   assert.deepEqual(handle.worker.options.workerData, { probe: true });
   assert.equal(handle.worker.sent[0], message);
   handle.close();
+  handle.close();
+  assert.equal(handle.worker.unrefCalls, 1,
+    'detach 必须幂等释放 event-loop 引用，避免 terminate timeout 后残留 Worker 钉住进程');
   assert.equal(handle.worker.listenerCount('messageerror'), 0);
   assert.equal(handle.worker.listenerCount('error'), 1);
   await handle.terminate();
   assert.equal(handle.worker.listenerCount('error'), 0);
   assert.equal(handle.worker.listenerCount('messageerror'), 0);
+});
+
+test('worker-thread terminate 未settle时后续 close仍释放event-loop引用', async () => {
+  let resolveTermination;
+  class PendingWorker extends EventEmitter {
+    constructor() {
+      super();
+      this.unrefCalls = 0;
+      queueMicrotask(() => this.emit('online'));
+    }
+    postMessage() {}
+    unref() { this.unrefCalls += 1; }
+    terminate() {
+      return new Promise((resolve) => { resolveTermination = resolve; });
+    }
+  }
+  const handle = createWorkerThreadAdapter({ WorkerClass: PendingWorker }).start({
+    entry: '/packaged/src/canary-worker.js',
+    onMessage() {}
+  });
+  await handle.ready;
+  const termination = handle.terminate();
+  handle.close();
+  handle.close();
+  assert.equal(handle.worker.unrefCalls, 1,
+    'Supervisor terminate timeout后的close仍必须解除进程liveness引用');
+  resolveTermination(0);
+  await termination;
 });
 
 test('worker-thread 只依 entry-owned error code 上报私有取消终态证据', async () => {
