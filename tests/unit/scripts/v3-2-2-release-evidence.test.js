@@ -14,6 +14,7 @@ const {
   EXACT_BASE,
   SNAPSHOT_PATH,
   inspectGitBackedFile,
+  matchesReviewedCanonicalText,
   sha256File,
   validateReleaseEvidence
 } = require('../../../scripts/validate-v3-2-2-release-evidence');
@@ -93,6 +94,41 @@ test('release evidence文本hash不受Windows CRLF checkout影响', (t) => {
   fs.writeFileSync(lfPath, 'line-1\nline-2\n', 'utf8');
   fs.writeFileSync(crlfPath, 'line-1\r\nline-2\r\n', 'utf8');
   assert.equal(sha256File(crlfPath), sha256File(lfPath));
+});
+
+test('3.2.2共享sequence只允许在冻结全文后追加后续3.2.x章节', () => {
+  const reviewed = '# 顺序\n\n冻结内容\n';
+  assert.equal(matchesReviewedCanonicalText(reviewed, reviewed), true);
+  assert.equal(matchesReviewedCanonicalText(
+    reviewed + '\n## v3.2.3 后续门禁\n\n新增内容\n',
+    reviewed,
+    'VERSIONED_APPEND_ONLY'
+  ), true);
+  assert.equal(matchesReviewedCanonicalText(
+    '# 顺序\n\n篡改内容\n\n## v3.2.3 后续门禁\n',
+    reviewed,
+    'VERSIONED_APPEND_ONLY'
+  ), false);
+  assert.equal(matchesReviewedCanonicalText(
+    reviewed + '\n## v3.2.2 重复旧版章节\n',
+    reviewed,
+    'VERSIONED_APPEND_ONLY'
+  ), false);
+  assert.equal(matchesReviewedCanonicalText(
+    reviewed + '\n## v3.2.x 非法版本章节\n',
+    reviewed,
+    'VERSIONED_APPEND_ONLY'
+  ), false);
+  assert.equal(matchesReviewedCanonicalText(
+    reviewed + '\n任意尾随文本\n',
+    reviewed,
+    'VERSIONED_APPEND_ONLY'
+  ), false);
+  assert.equal(matchesReviewedCanonicalText(
+    reviewed + '\n## v3.2.3 后续门禁\n',
+    reviewed,
+    'EXACT'
+  ), false);
 });
 
 test('Git anchor只接受冻结base祖先中的真实reviewedHead:path blob', () => {
