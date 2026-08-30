@@ -49,10 +49,18 @@
 | strict `t=d` decoder在调用SheetJS等价serial helper前执行`trim()` | Reviewer真实1-row把E2改为带首尾空白的date，旧raw按本地日期词法形成不同serial并业务mismatch，strict却trim为canonical日期后接受 | 日期raw词法被静默重写，日期digest可对旧oracle拒绝的workbook自洽 | 直接验证未修改的raw date；canonical/Zulu保持等价，任何首尾空白、empty/whitespace-only fail closed | 是（preflight/checklist同步；正常writer日期不变） |
 | canonical dimension parser仍把row digits数值化，且cell/merge共用同一缺口 | Reviewer证明`A01:I02`通过；补充`D02`旧SheetJS保留物理key导致业务mismatch而strict数值化为D2接受；merge前导零也被规范化 | 非canonical坐标可改变旧oracle的物理cell可见性，或绕过dimension/merge唯一canonical验收 | cell ref与range端点统一canonical re-encode回比并限制合法词法长度；outer row `r=02`经真实oracle证明可保留数值语义 | 是（preflight/checklist同步；generic scanner与canonical正常writer不变） |
 
+## Final predecessor propagation（2026-08-30）
+
+- PR #205 旧 head `8258def9a0d062f18fd69cf808450c92be70cd22` 不包含最终 #202 head `81484cdc13feec8613822d8e93b96ccb4b0941bb`；本地 final restack 使用 no-ff merge，exact parents 为上述两个提交。
+- 冲突仅位于 background runtime 聚合器及其 policy-list 回归。解决方案在同一注册权威中同时保留 NewAccount dynamic resource profile/one-shot Worker，以及最终前序中的 FundRecon/Duplicate service policies、Duplicate startup gate 和 external parser shutdown。
+- `entryBindingForPolicy` 增加 NewAccount 的精确分支，同时保留 Duplicate startup gate 与 FundRecon/Duplicate shutdown；所有 action 的 production strategy 继续保持关闭。
+- 本次只传播平台 runtime/wiring，不改变日期、账户、币种、金额、余额、Workbook、行数、final target 或 Publisher 语义。
+
 ## Evidence
 
 | 证据 | 结果 | 覆盖的行为/风险 |
 | --- | --- | --- |
+| final #202 → #205 predecessor propagation | exact parents=`8258def9a0d062f18fd69cf808450c92be70cd22` + `81484cdc13feec8613822d8e93b96ccb4b0941bb`；combined runtime/platform 114/114 PASS；E10-A 17/17 PASS；NewAccount integration 36/36 PASS；smoke、node-check、ESLint、diff-check PASS | 防止只保留任一侧而静默丢失 NewAccount 或 FundRecon/Duplicate runtime；日期/账户/币种/余额/Workbook 回归保持；production 保持关闭 |
 | 父链 | `831455401bbf912f36efeeeb898f66d72e350125` | review-fix 后精确 restack 基线 |
 | frozen spec/techdoc/sequence 取证 | E10-A/E10-B/R3.2.3 边界确认 | 防止范围扩张 |
 | `node --test tests/unit/main-process/new-account-generation-e10-a.test.js` | 7/7 PASS | 日期/10年边界、必填、币种顺序、文件名、bounded DTO、allowlist/TOCTOU、staging alias/collision/symlink、真实 Worker golden、tamper、cancel/crash/late done、cleanup |

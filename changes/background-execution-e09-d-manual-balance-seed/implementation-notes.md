@@ -71,10 +71,25 @@
 | Windows missing-target identity missed non-ASCII simple case pairs | per-code-point uppercase accepts only exactly one mapped code point, preserving path separators and existing staging containment semantics | É/é and σ/ς identity equality plus adjacent staging tests |
 | Windows expansion mapping could be guessed or mismerged | confirmed missing segments throw a bounded path-free `TargetIdentityError`; NFC/NFD remain distinct; existing targets continue through realpath and preserve expansion code points | NFD distinct, ß/SS missing fail-closed, existing-realpath and Hold-bypass tests |
 
+## Final predecessor propagation（2026-08-30）
+
+PR #202 的旧 head `b54943c45ee898ffdac7e8dd17012e3d52e57db8` 仍以旧 #199 head
+`a913ae51772fa69e5aa6a07c3f3e2376ad2f3e3e` 为第二父，因而不包含最终 E09-C head
+`c014b9ee637c333639984418c31c468d2f88f460`。本地 final restack 使用 no-ff merge 保留
+#202 历史；exact parents 为旧 #202 head 与最终 #199 head，不复用旧 stack 的绿色 CI。
+
+唯一冲突位于 `initializeBackgroundExecutionRecovery()` 的 registry 注册段。Manual Balance 与
+Duplicate Startup 的 inspector/provider key 均不同，且二者都必须在各自 registry freeze 前注册；
+因此合并同时保留两条恢复链，而不是选择任一侧。新增 wiring 回归显式要求 manual/duplicate 两个
+inspector 与两个 provider 均先于 freeze，防止后续传播再次静默删除任一恢复 authority。此次传播不改
+金额、币种、行序、Workbook、seed serializer、operation identity、Hold 生命周期或 production policy；
+资金与恢复人工复核门禁继续保留。
+
 ## Evidence
 
 | 证据 | 结果 | 覆盖的行为/风险 |
 | --- | --- | --- |
+| final #199 → #202 propagation 与双恢复链 wiring | exact parents=`b54943c45ee898ffdac7e8dd17012e3d52e57db8 c014b9ee637c333639984418c31c468d2f88f460`；E09-D + Duplicate startup/wiring + E09-B + Recovery C2 定向矩阵 `106/106 PASS`；`node --check src/main.js` 与 `git diff --check` PASS | Manual Balance/Duplicate Startup inspector/provider 同时注册并在 freeze 前可达；Hold、幂等、candidate-first token、启动恢复与 production=false 无回归 |
 | Reviewer Round 1 `manual-balance-seed-settlement-e09-d.test.js` baseline | 24/24 PASS | serializer golden, strict ordinal history, exact replay/conflict, no-op gate order, Main intent trace, durability persistence, canonical observation, immutable plan binding, OS target identity |
 | E09-D + E09-C/B/A/P0 + RecoveryControl/startup/preflight focused suite | 225/225 PASS | Statement service/token/session/generation/legacy plus RecoverySourceV1, Hold, target-post-image startup, FilePlan and target-identity invariants |
 | Reviewer Round 2 exact regressions | 34/34 PASS | Hold bypass, stale-plan conservation, async no-op drift, reservation crash/double startup, Windows physical names, delayed clock |

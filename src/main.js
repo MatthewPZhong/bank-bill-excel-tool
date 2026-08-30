@@ -199,6 +199,17 @@ const {
 const {
   createDuplicateInboundMatchService
 } = require('./main-process/duplicate-inbound-match/service');
+const {
+  DUPLICATE_STARTUP_CONFLICT_SCOPE_KEY,
+  DUPLICATE_IMPORT_STARTUP_INSPECTOR_KEY,
+  DUPLICATE_STARTUP_INSPECTOR_KEY,
+  DUPLICATE_STARTUP_RECOVERY_KEY,
+  createDuplicateStartupOutcomeInspector,
+  createDuplicateStartupRecoveryProvider
+} = require('./main-process/duplicate-inbound-match/startup-recovery');
+const {
+  DUPLICATE_STARTUP_GATE_CONTRACT_VERSION
+} = require('./main-process/duplicate-inbound-match/startup-gate');
 // v3.1.0：平盘资金性质校验（持久化银行/链接侧库 + 严格1:1匹配 + 结果回导确认）。
 const {
   createPositionReconciliationService
@@ -676,9 +687,14 @@ let recoveryControlReadRepository = null;
 let recoveryHoldGate = null;
 let preFundMptHoldGate = null;
 let preFundMptWorkerDurableCoordinator = null;
+let duplicateStartupRecoveryReady = false;
 let archiveOperationTail = Promise.resolve();
 const backgroundExecutionRuntimeManager = createBackgroundExecutionRuntimeManager({
-  workerDurableCoordinatorProvider: () => preFundMptWorkerDurableCoordinator
+  workerDurableCoordinatorProvider: () => preFundMptWorkerDurableCoordinator,
+  duplicateStartupGateProvider: () => Object.freeze({
+    contractVersion: DUPLICATE_STARTUP_GATE_CONTRACT_VERSION,
+    startupRecoveryReady: duplicateStartupRecoveryReady
+  })
 });
 const archiveOperationContext = new AsyncLocalStorage();
 const positionReconciliationOperationContext = new AsyncLocalStorage();
@@ -17349,7 +17365,20 @@ function registerPreFundReconciliationHandlers() {
   });
 }
 
+function assertDuplicateInboundMatchStartupAvailable() {
+  if (!duplicateStartupRecoveryReady || !recoveryHoldGate) {
+    throw Object.assign(new Error('重复入金启动恢复门禁尚未完成'), {
+      code: 'DUPLICATE_STARTUP_RECOVERY_UNAVAILABLE'
+    });
+  }
+  recoveryHoldGate.assertNoRecoveryHold({
+    conflictScopeKey: DUPLICATE_STARTUP_CONFLICT_SCOPE_KEY
+  });
+  return true;
+}
+
 function getDuplicateInboundMatchService() {
+  assertDuplicateInboundMatchStartupAvailable();
   if (!database || !database.db) {
     throw new Error('数据库尚未初始化，请稍后重试');
   }
@@ -17362,23 +17391,6 @@ function getDuplicateInboundMatchService() {
     });
   }
   return duplicateInboundMatchService;
-}
-
-function scheduleDuplicateInboundMatchStartupCleanup() {
-  setImmediate(() => {
-    try {
-      getDuplicateInboundMatchService();
-    } catch (error) {
-      appendActivityLogEntry({
-        level: 'error',
-        source: 'main',
-        domain: 'duplicate-inbound-match',
-        message: '重复入金匹配启动结果回收失败',
-        details: [error && error.message ? error.message : String(error)],
-        stack: error && error.stack ? error.stack : undefined
-      });
-    }
-  });
 }
 
 function duplicateInboundMatchFailureResult(error) {
@@ -17408,6 +17420,7 @@ function registerDuplicateInboundMatchHandlers() {
 
   trackedIpcHandle('duplicate-inbound-match:import-files', '重复入金匹配', '导入文件', {
     async prepare() {
+      assertDuplicateInboundMatchStartupAvailable();
       const choice = await showImportOpenDialog('duplicate-inbound-match', {
         title: '同时选择银行对账单和单据对账单',
         properties: ['openFile', 'multiSelections'],
@@ -20683,6 +20696,7 @@ function registerAllIpcHandlers() {
 
 async function initializeBackgroundExecutionRecovery() {
   if (!database || !database.db) throw new Error('Recovery Coordinator 要求 Main control DB 已初始化');
+  duplicateStartupRecoveryReady = false;
   recoveryControlReadRepository = createRecoveryControlReadRepository(database.db);
   const inspectorRegistry = createInspectorRegistry();
   const providerRegistry = createSettlementRecoveryProviderRegistry();
@@ -20702,6 +20716,31 @@ async function initializeBackgroundExecutionRecovery() {
   providerRegistry.register(
     MANUAL_BALANCE_SETTLEMENT_KEY,
     createManualBalanceSettlementRecoveryProvider()
+  );
+  const duplicateRecoveryOptions = {
+    userDataDir: path.dirname(database.dbPath),
+    listRunMirrors: () => database.listDuplicateInboundMatchRunMirrors(),
+    getRecoveryAuditBySource: (sourceRef) => (
+      database.getDuplicateInboundMatchRecoveryAuditBySource(sourceRef)
+    )
+  };
+  const inspectDuplicateRecovery = createDuplicateStartupOutcomeInspector(
+    duplicateRecoveryOptions
+  );
+  inspectorRegistry.register(DUPLICATE_IMPORT_STARTUP_INSPECTOR_KEY, inspectDuplicateRecovery);
+  inspectorRegistry.register(DUPLICATE_STARTUP_INSPECTOR_KEY, inspectDuplicateRecovery);
+  providerRegistry.register(
+    DUPLICATE_STARTUP_RECOVERY_KEY,
+    createDuplicateStartupRecoveryProvider({
+      ...duplicateRecoveryOptions,
+      mainDatabase: database.db,
+      getRecoveryAuditByOperation: (actionKey, operationKey, taskRunId) => (
+        database.getDuplicateInboundMatchRecoveryAuditByOperation(
+          actionKey, operationKey, taskRunId
+        )
+      ),
+      inspectOperation: inspectDuplicateRecovery
+    })
   );
 
   inspectorRegistry.freeze();
@@ -20763,6 +20802,7 @@ async function initializeBackgroundExecutionRecovery() {
       `activeHolds=${summary.activeHoldCount}`
     ]
   });
+  duplicateStartupRecoveryReady = true;
   return summary;
 }
 
@@ -20844,7 +20884,6 @@ async function initializeApplication() {
     // VCC lineage/hold 只由 Archive controller 的 post-outbox hook 执行一次。
     // 结果侧库只服务上一进程的最后一次 run；即使模块默认关闭，也要在本次启动后台立即回收。
     schedulePreFundReconciliationStartupCleanup();
-    scheduleDuplicateInboundMatchStartupCleanup();
 
     // v2.0.0-beta.2 F4 / v2.1.15 W4：ui_style 收敛迁移 —— 老库存了 'General'/非法值就地迁移为 'Clear'，未写则 seed 'Clear'。
     //   General 风格已弃用，setUiStyle 写链路移除，APP_PREVIEW_STYLE 强制风格随之去除（风格恒 Clear）。
