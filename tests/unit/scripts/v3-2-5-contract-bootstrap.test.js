@@ -29,14 +29,14 @@ function replaceExactlyOnce(source, before, after, label) {
   return source.replace(before, after);
 }
 
-test('v3.2.5 顶层合同只允许已记录的 E13-B 拓扑与来源证据修订', () => {
+test('v3.2.5 顶层合同只允许已记录的 E13-B/E13-C 证据型修订', () => {
   const frozenHashes = new Map([
     ['spec.md', '13410e4e5cf64798255cab30dd2487d4da4323eddf59d44cf2a0653e950898f2'],
     ['techdoc.md', '3fb1845979823f2c39a8e26d9d5adc5d7f3e351fda90d2f4086d6c355d17e64f']
   ]);
   const currentHashes = new Map([
-    ['spec.md', '5991258849cc1071778bdb2dac3baab24e58338ee34645e5c6d2cf015011a321'],
-    ['techdoc.md', '2b58346f76f8d71008c5f2f296aaa04f0095c74930ce80fd91d9ed4772260381']
+    ['spec.md', 'ebd27dd2a18af5e745d5c17059573a98934b4cb5a1f1bfe5421566ad63579191'],
+    ['techdoc.md', 'de7fb8f4fef2764932445b2de04224149f562c3e4f9f5b4e989221a8229bf129']
   ]);
   const amendments = new Map([
     ['spec.md', (frozen) => {
@@ -52,11 +52,25 @@ test('v3.2.5 顶层合同只允许已记录的 E13-B 拓扑与来源证据修订
         '-不把 Position 现有 import utility-process/child_process dispatcher 改成 worker thread；只读 export 按 3.1 的 native thread-single action 执行；',
         'spec.md Position import non-goal'
       );
-      return replaceExactlyOnce(
+      const importAdapterAmended = replaceExactlyOnce(
         nonGoalAmended,
         '-把Position改为thread；',
         '-把 Position 现有 import utility-process/child_process dispatcher 改为 thread；',
         'spec.md Position import adapter prohibition'
+      );
+      return replaceExactlyOnce(
+        importAdapterAmended,
+        '-两个action应使用不同actionKey，避免运行时猜测策略。',
+        '-两个action应使用不同actionKey，避免运行时猜测策略。\n\n' +
+          'Current-tree 分类结论：\n\n' +
+          '- 现有 `acquiringBillCurrency:export` 只读取 `diff_file_path` 并复制既有稳定文件，唯一绑定\n' +
+          '  `acquiring:copy-existing-diff`；\n' +
+          '- `acquiring:export-diff-workbook` 对应 `acquiring-bill-currency-writer.writeDiffWorkbook()` 的\n' +
+          '  read-only regenerate capability。当前树没有单独 IPC/button，因此该 action 保持无 legacy TaskPolicy\n' +
+          '  绑定、`production.enabled=false`，不得为了凑 coverage 复用 copy handler 或新增隐式用户入口；\n' +
+          '- 后续若新增 regenerate 用户入口，必须在独立 change 中显式绑定该 action，并重新完成 run freshness、\n' +
+          '  Publisher、Windows 与人工资金/恢复复核。',
+        'spec.md Acquiring current-tree classification'
       );
     }],
     ['techdoc.md', (frozen) => {
@@ -67,12 +81,24 @@ test('v3.2.5 顶层合同只允许已记录的 E13-B 拓扑与来源证据修订
           '`position:export-run` 属于本节的模块专用 native read-only executor。仓库中没有可复用的 Position export dispatcher；第 5 节 Position utility-process adapter 仅适用于 `position:import`（E13-F），不得把 import dispatcher、虚构的 compound topology 或外层套 Worker 代替真实 export 拓扑。',
         'techdoc.md Position executor'
       );
-      return replaceExactlyOnce(
+      const sourceAuthorityAmended = replaceExactlyOnce(
         executorAmended,
         '- runId/datasetId/revision；',
         '- runId/datasetId/revision；\n' +
           '-参与 Workbook 语义的模板或受管归档文件 SHA-256/byteSize authority；Main 与 Worker 均须复核，不能只冻结路径；',
         'techdoc.md template/archive evidence'
+      );
+      return replaceExactlyOnce(
+        sourceAuthorityAmended,
+        '→ Publisher\n```\n\n## 5. Existing dispatcher adapter interface',
+        '→ Publisher\n```\n\n' +
+          'Current-tree authority：`acquiringBillCurrency:export` 的 source 是已发布 `diff_file_path`，只走\n' +
+          'copy executor；它不能在文件缺失时静默转为 regenerate。Regenerate executor 作为独立、\n' +
+          'production-disabled capability 注册，输入必须显式携带 stable completed run DB authority；当前没有\n' +
+          '独立 IPC/button，故不与任何 legacy TaskPolicy 绑定。`partial`、`in-progress`、`data-complete`、\n' +
+          'progress 缺失/破坏或 source 漂移全部 fail closed。\n\n' +
+          '## 5. Existing dispatcher adapter interface',
+        'techdoc.md Acquiring current-tree authority'
       );
     }]
   ]);

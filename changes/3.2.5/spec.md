@@ -174,6 +174,16 @@ Inventory必须依据实际代码和稳定artifact判断：
 -不能仅根据按钮文案“导出差异”分类；
 -两个action应使用不同actionKey，避免运行时猜测策略。
 
+Current-tree 分类结论：
+
+- 现有 `acquiringBillCurrency:export` 只读取 `diff_file_path` 并复制既有稳定文件，唯一绑定
+  `acquiring:copy-existing-diff`；
+- `acquiring:export-diff-workbook` 对应 `acquiring-bill-currency-writer.writeDiffWorkbook()` 的
+  read-only regenerate capability。当前树没有单独 IPC/button，因此该 action 保持无 legacy TaskPolicy
+  绑定、`production.enabled=false`，不得为了凑 coverage 复用 copy handler 或新增隐式用户入口；
+- 后续若新增 regenerate 用户入口，必须在独立 change 中显式绑定该 action，并重新完成 run freshness、
+  Publisher、Windows 与人工资金/恢复复核。
+
 ## 6. Mature adapter 合同
 
 Adapter只负责：

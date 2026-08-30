@@ -61,7 +61,7 @@ test('生产 authority 一次读取真实 TaskPolicy list 并冻结 122-key inve
   assert.equal(listCalls, 1);
   assert.equal(registry.summary.actionKeys.length, 52);
   assert.equal(registry.summary.taskPolicyInventory.length, 122);
-  assert.equal(registry.summary.pairCount, 60);
+  assert.equal(registry.summary.pairCount, 59);
   assert.equal(registry.summary.boundTaskKeyCount, 52);
   assert.equal(registry.summary.unboundTaskPolicyCount, 70);
   assert.equal(
