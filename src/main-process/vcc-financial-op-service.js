@@ -1014,6 +1014,13 @@ function createVccFinancialOpService({
     });
   }
 
+  function runManagedReadOnlyExport(action, callback) {
+    if (typeof callback !== 'function') {
+      throw new TypeError('VCC managed read-only export callback 缺失');
+    }
+    return runDirectTask(action, callback);
+  }
+
   return {
     inspectSelectedFiles,
     importSelectedFiles,
@@ -1042,6 +1049,7 @@ function createVccFinancialOpService({
     latestArchivedRun,
     exportRun,
     exportImportAudit,
+    runManagedReadOnlyExport,
     syncImportArchiveLineage,
     getRunResult: getRunReview,
     async terminate() {

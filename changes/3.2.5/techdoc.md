@@ -65,6 +65,8 @@ src/main-process/read-only-exports/
 
 每个模块目录有自己的query、writer、business-validator和worker entry；公共目录不包含业务SQL或Workbook规则。
 
+`position:export-run` 属于本节的模块专用 native read-only executor。仓库中没有可复用的 Position export dispatcher；第 5 节 Position utility-process adapter 仅适用于 `position:import`（E13-F），不得把 import dispatcher、虚构的 compound topology 或外层套 Worker 代替真实 export 拓扑。
+
 ## 2. Read-only executor contract
 
 Worker输入：
@@ -99,6 +101,7 @@ Main：technical validator、source/target snapshot、Publisher、archive和Task
 
 -可导出的持久status；
 - runId/datasetId/revision；
+-参与 Workbook 语义的模板或受管归档文件 SHA-256/byteSize authority；Main 与 Worker 均须复核，不能只冻结路径；
 - partial/interrupted/expired/stale的拒绝规则；
 - Recovery Hold conflict scope；
 - dual-source历史兼容；

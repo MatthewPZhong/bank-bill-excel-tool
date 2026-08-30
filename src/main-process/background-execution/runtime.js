@@ -105,6 +105,18 @@ const {
   BIZ_OP_READ_ONLY_POLICIES,
   validateBizOpReadOnlyExportResult
 } = require('../read-only-exports/biz-op/policies');
+const {
+  PRE_FUND_READ_ONLY_POLICIES,
+  validatePreFundReadOnlyExportResult
+} = require('../read-only-exports/pre-fund/policies');
+const {
+  POSITION_READ_ONLY_POLICY,
+  validatePositionReadOnlyExportResult
+} = require('../read-only-exports/position/policies');
+const {
+  VCC_FINANCIAL_OP_READ_ONLY_POLICY,
+  validateVccFinancialOpReadOnlyExportResult
+} = require('../read-only-exports/vcc-financial-op/policies');
 
 const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   ...TOOLBOX_GENERATION_POLICIES,
@@ -117,7 +129,10 @@ const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   VCC_EXPORT_SINGLE_POLICY,
   VCC_EXPORT_SUBJECTS_POLICY,
   ...PENDING_READ_ONLY_POLICIES,
-  ...BIZ_OP_READ_ONLY_POLICIES
+  ...BIZ_OP_READ_ONLY_POLICIES,
+  ...PRE_FUND_READ_ONLY_POLICIES,
+  POSITION_READ_ONLY_POLICY,
+  VCC_FINANCIAL_OP_READ_ONLY_POLICY
 ]);
 
 function isBackgroundExecutionProductionEnabled(actionKey) {
@@ -191,6 +206,32 @@ function entryBindingForPolicy(policy, workerRoot, duplicateStartupGate) {
     return Object.freeze({
       path: path.resolve(__dirname, '..', 'read-only-exports', 'biz-op', 'worker-entry.js'),
       cancellationTerminalErrorCodes: Object.freeze(['BIZ_OP_EXPORT_CANCELLED'])
+    });
+  }
+  if (policy.moduleId === 'pre-fund-read-only-export') {
+    return Object.freeze({
+      path: path.resolve(__dirname, '..', 'read-only-exports', 'pre-fund', 'worker-entry.js'),
+      cancellationTerminalErrorCodes: Object.freeze(['PRE_FUND_EXPORT_CANCELLED'])
+    });
+  }
+  if (policy.moduleId === 'position-read-only-export') {
+    return Object.freeze({
+      path: path.resolve(__dirname, '..', 'read-only-exports', 'position', 'worker-entry.js'),
+      cancellationTerminalErrorCodes: Object.freeze(['POSITION_EXPORT_CANCELLED'])
+    });
+  }
+  if (policy.moduleId === 'vcc-financial-op-read-only-export') {
+    return Object.freeze({
+      path: path.resolve(
+        __dirname,
+        '..',
+        'read-only-exports',
+        'vcc-financial-op',
+        'worker-entry.js'
+      ),
+      cancellationTerminalErrorCodes: Object.freeze([
+        'VCC_FINANCIAL_OP_EXPORT_CANCELLED'
+      ])
     });
   }
   if (policy.actionKey === VCC_EXPORT_SUBJECTS_ACTION) {
@@ -278,6 +319,12 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
       resultValidator = validatePendingReadOnlyExportResult;
     } else if (policy.moduleId === 'biz-op-read-only-export') {
       resultValidator = validateBizOpReadOnlyExportResult;
+    } else if (policy.moduleId === 'pre-fund-read-only-export') {
+      resultValidator = validatePreFundReadOnlyExportResult;
+    } else if (policy.moduleId === 'position-read-only-export') {
+      resultValidator = validatePositionReadOnlyExportResult;
+    } else if (policy.moduleId === 'vcc-financial-op-read-only-export') {
+      resultValidator = validateVccFinancialOpReadOnlyExportResult;
     } else if (policy.moduleId === 'recon-fix') {
       resultValidator = policy.actionKey === RECON_FIX_EXPORT_ACTION
         ? validateReconFixExportResult
