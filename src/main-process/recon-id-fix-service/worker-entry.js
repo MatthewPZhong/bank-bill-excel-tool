@@ -19,6 +19,7 @@ const {
   createDirectionSequenceTracker
 } = require('../background-execution/sequence-tracker');
 const {
+  RECON_FIX_EXPORT_ACTION,
   RECON_FIX_IMPORT_ACTION,
   RECON_FIX_JPM_UNIT_ID,
   RECON_FIX_RUN_JPM_ACTION,
@@ -30,6 +31,7 @@ const { createReconFixService } = require('./service');
 if (!parentPort) throw new Error('ReconFix Service 需要 worker_threads parentPort');
 
 const ALLOWED_ACTIONS = new Set([
+  RECON_FIX_EXPORT_ACTION,
   RECON_FIX_IMPORT_ACTION,
   RECON_FIX_RUN_READONLY_ACTION,
   RECON_FIX_RUN_JPM_ACTION
@@ -66,6 +68,12 @@ async function cancellationSafepoint(job) {
   // 使 parse 期间到达的 job:cancel 能被观测，再决定是否进入 adoption。
   await new Promise((resolve) => setImmediate(resolve));
   if (job.cancelRequested) throw cancellationError();
+}
+
+async function executeExportPlanAtSafepoint(job, plan) {
+  const result = await plan.execute();
+  await cancellationSafepoint(job);
+  return result;
 }
 
 function jobRef(job, unitId = null) {
@@ -370,6 +378,7 @@ function handleResourceReleaseAck(envelope) {
 async function runJob(job) {
   let phase = null;
   let terminal = null;
+  let exportPlan = null;
   try {
     if (job.envelope.actionKey === RECON_FIX_RUN_JPM_ACTION) {
       await cancellationSafepoint(job);
@@ -439,6 +448,10 @@ async function runJob(job) {
       job.emit('unit:done', { result }, RECON_FIX_JPM_UNIT_ID);
     } else if (plan.kind === 'candidate') {
       result = await adoptCandidateAtSafepoint(job, plan.candidate);
+    } else if (plan.kind === 'export-plan') {
+      await cancellationSafepoint(job);
+      exportPlan = plan;
+      result = await executeExportPlanAtSafepoint(job, plan);
     } else {
       if (plan.invalidationCandidate) {
         await adoptCandidateAtSafepoint(job, plan.invalidationCandidate);
@@ -491,6 +504,9 @@ async function runJob(job) {
         operation: 'job:error',
         payload: { error: toProtocolError(error, error.code) }
       };
+    }
+    if (exportPlan && terminal && terminal.operation !== 'job:done') {
+      try { exportPlan.cleanup(); } catch (_cleanupError) { /* preserve first export failure */ }
     }
     if (service && !closeRequested) service.finish();
     if (terminal) emitJobTerminal(job, terminal.operation, terminal.payload);
