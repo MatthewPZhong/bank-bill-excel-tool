@@ -91,6 +91,7 @@ function createWorkerThreadAdapter(options = {}) {
       }
       const worker = new WorkerClass(normalized.filename, workerOptions);
       let closed = false;
+      let closeCalled = false;
       let readySettled = false;
       let failureReported = false;
       let cancelDispatched = false;
@@ -172,14 +173,31 @@ function createWorkerThreadAdapter(options = {}) {
         },
         close() {
           closed = true;
+          if (closeCalled) return;
+          closeCalled = true;
           // terminate 完成前保留静默 error listener；EventEmitter 的无人监听 error
           // 会升级为未捕获异常，导致清理路径反而冲垮主进程。
           detach({ keepError: true });
+          // ServiceHost 会在 shutdown 时先 detach、再等待 terminate。Windows 上若
+          // terminate 因 native 同步调用迟迟不 settle，Host 仍会保留 timeout/leak
+          // 诊断，但这个 Worker 引用不能继续把整个进程钉死到 CI 的 6 小时上限。
+          // unref 只释放 event-loop liveness，不把 terminate timeout 改写为成功。
+          if (typeof worker.unref === 'function') worker.unref();
         },
         async terminate() {
           closed = true;
           try {
-            return await worker.terminate();
+            let termination;
+            try {
+              termination = worker.terminate();
+            } finally {
+              // Node 的 Worker.terminate() 会在等待 exit 前重新 ref()。若 Host
+              // 已先 close/unref，这个 ref 会抵消 close 的 liveness 释放，并在
+              // native terminate 不 settle 时继续钉住进程。因此必须在 terminate
+              // 调用之后再重复 unref；仍 await 原 termination，不伪造 cleanup 成功。
+              if (closeCalled && typeof worker.unref === 'function') worker.unref();
+            }
+            return await termination;
           } finally {
             detach();
           }
