@@ -17,6 +17,7 @@ const {
 } = require('../../../../src/main-process/background-execution/adapters/existing-dispatch-adapter');
 const {
   createExecutionSupervisor,
+  failExecutionTransportForCoordinator,
   validateResultBody
 } = require('../../../../src/main-process/background-execution/supervisor');
 const { createResourceGovernor } = require(
@@ -194,6 +195,29 @@ test('公共 API exact：execute 返回 Promise，transport ready 后直接 job:
   assert.equal(fake.state.sent[0].operation, 'job:start');
   assert.equal(fake.state.sent[0].direction, 'command');
   assert.equal(supervisor.inspect('supervisor-job'), null);
+});
+
+test('coordinator transport failure按exact control权威终态且不扩展control/runtime API', async () => {
+  const fake = fakeAdapter();
+  const { supervisor } = harness(fake);
+  const control = supervisor.start(request({ jobId: 'coordinator-transport-failure-job' }));
+  assert.deepEqual(Object.keys(control).sort(), [
+    'cancel', 'jobId', 'promise', 'ready', 'snapshot', 'startUnit'
+  ]);
+  assert.equal(failExecutionTransportForCoordinator({}, new Error('unknown control')), false);
+  await control.ready;
+  const failure = Object.assign(new Error('coordinator outcome transport failed'), {
+    code: 'COORDINATOR_OUTCOME_TRANSPORT_FAILED'
+  });
+  assert.equal(failExecutionTransportForCoordinator(control, failure), true);
+  assert.equal(failExecutionTransportForCoordinator(control, failure), false);
+  const result = await control.promise;
+  assert.equal(result.outcome, 'transport-lost');
+  assert.equal(result.terminalSource, 'adapter-error');
+  assert.equal(result.error.code, failure.code);
+  assert.equal(fake.state.terminateCount, 1);
+  assert.equal(fake.state.closeCount, 1);
+  assert.equal(supervisor.inspect(control.jobId), null);
 });
 
 function makeWorkerDurable(policy) {

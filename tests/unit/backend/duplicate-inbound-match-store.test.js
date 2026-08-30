@@ -317,6 +317,66 @@ test('单据流式写入中途失败时银行、单据和导入记录全部回�
   }
 });
 
+test('beforeCommitGuard在异步复核后同步阻断receipt/COMMIT并整体回滚', async () => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'duplicate-inbound-store-'));
+  try {
+    const store = createDuplicateInboundMatchStore(userDataDir);
+    const timeline = [];
+    await assert.rejects(() => store.createImportBundle({
+      monthKey: '2026-07',
+      bank: {
+        fileName: 'bank.xlsx',
+        contentHash: 'bank-hash',
+        rows: [{
+          sourceOrdinal: 0,
+          excelRowNumber: 2,
+          bizId: 'GUARD-1',
+          fundType: 'Inbound',
+          raw: { BizId: 'GUARD-1' }
+        }]
+      },
+      document: { fileName: 'document.xlsx', contentHash: 'document-hash' },
+      writeDocumentRows: async () => ({
+        rowCount: 0,
+        matchableRowCount: 0,
+        emptyBusinessOrderCount: 0
+      }),
+      beforeCommit: async () => {
+        timeline.push('before:start');
+        await Promise.resolve();
+        timeline.push('before:end');
+      },
+      beforeCommitGuard: () => {
+        timeline.push('guard');
+        throw Object.assign(new Error('shutdown before durable commit'), {
+          code: 'DUPLICATE_SHUTDOWN'
+        });
+      }
+    }), (error) => error.code === 'DUPLICATE_SHUTDOWN');
+    assert.deepEqual(timeline, ['before:start', 'before:end', 'guard']);
+
+    const file = runDataStore.listSideDbFiles(
+      userDataDir,
+      runDataStore.MODULE_DUPLICATE_INBOUND_MATCH
+    )[0];
+    const db = runDataStore.openExistingSideDb(file.path);
+    try {
+      for (const table of [
+        'duplicate_inbound_match_imports',
+        'duplicate_inbound_match_bank_rows',
+        'duplicate_inbound_match_document_rows',
+        'duplicate_inbound_match_operation_receipts'
+      ]) {
+        assert.equal(db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count, 0);
+      }
+    } finally {
+      db.close();
+    }
+  } finally {
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  }
+});
+
 test('重复入金侧库删除失败时显式阻断清理', async () => {
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'duplicate-inbound-store-'));
   const originalDeleteSideDbByPath = runDataStore.deleteSideDbByPath;

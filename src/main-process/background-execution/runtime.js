@@ -46,6 +46,13 @@ const {
 const {
   normalizeDuplicateStartupGateDescriptor
 } = require('../duplicate-inbound-match/startup-gate');
+const {
+  createDuplicatePairedTopologyPlanner
+} = require('../duplicate-inbound-match/topology');
+const {
+  beginDuplicatePairedParserShutdown,
+  waitForDuplicatePairedParserShutdownPhase
+} = require('../duplicate-inbound-match/paired-parser-shutdown');
 
 const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   ...TOOLBOX_GENERATION_POLICIES,
@@ -57,6 +64,33 @@ const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
 function isBackgroundExecutionProductionEnabled(actionKey) {
   const policy = BACKGROUND_EXECUTION_POLICIES.find((item) => item.actionKey === actionKey);
   return Boolean(policy && policy.production.enabled === true);
+}
+
+function deadlineAfter(timeoutMs) {
+  const timestamp = Date.now();
+  return timeoutMs > Number.MAX_SAFE_INTEGER - timestamp
+    ? Number.POSITIVE_INFINITY
+    : timestamp + timeoutMs;
+}
+
+function remainingTimeout(deadline) {
+  return deadline === Number.POSITIVE_INFINITY
+    ? Number.POSITIVE_INFINITY
+    : Math.max(0, deadline - Date.now());
+}
+
+function mergeShutdownReports(report, ...pairedReports) {
+  return Object.freeze({
+    ...report,
+    leakedTransports: Object.freeze([...new Set([
+      ...report.leakedTransports,
+      ...pairedReports.flatMap((item) => item.leakedTransports)
+    ])]),
+    errors: Object.freeze([
+      ...report.errors,
+      ...pairedReports.flatMap((item) => item.errors)
+    ])
+  });
 }
 
 function entryBindingForPolicy(policy, workerRoot, duplicateStartupGate) {
@@ -149,13 +183,16 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
   }
   const validatorRegistry = createStaticRegistry(validatorEntries);
   const preFundTopologyPlanner = createPreFundMptTopologyPlanner({ availableParallelism });
+  const duplicateTopologyPlanner = createDuplicatePairedTopologyPlanner({ availableParallelism });
   const topologyRegistry = createStaticRegistry(Object.fromEntries(
     BACKGROUND_EXECUTION_POLICIES
       .filter((policy) => policy.resources.compound)
       .map((policy) => [policy.resources.compound.topologyKey,
         policy.actionKey === PRE_FUND_MPT_IMPORT_ACTION || policy.actionKey === PRE_FUND_MPT_REPAIR_ACTION
           ? preFundTopologyPlanner
-          : () => Object.freeze({ effectiveChildCount: 1 })])
+          : (policy.actionKey === DUPLICATE_ACTIONS.IMPORT
+              ? duplicateTopologyPlanner
+              : () => Object.freeze({ effectiveChildCount: 1 }))])
   ));
   entryRegistry.freeze();
   validatorRegistry.freeze();
@@ -191,16 +228,18 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
     budgets: platformBudgets,
     diagnostics: options.diagnostics
   });
+  const supervisorShutdownTimeoutMs = options.shutdownTimeoutMs || 5000;
   const supervisor = createExecutionSupervisor({
     policyRegistry,
     resourceGovernor,
     diagnostics: options.diagnostics,
     executionTimeoutMs: options.executionTimeoutMs,
-    shutdownTimeoutMs: options.shutdownTimeoutMs || 5000,
+    shutdownTimeoutMs: supervisorShutdownTimeoutMs,
     workerDurableCoordinator: options.workerDurableCoordinator,
     ...(options.workerThreadAdapter ? { workerThreadAdapter: options.workerThreadAdapter } : {})
   });
-  return Object.freeze({
+  let shutdownPromise = null;
+  const runtime = Object.freeze({
     start(request) {
       if (resourceGovernorOverride) assertNonProductionGovernorRequest(request);
       return supervisor.start(request);
@@ -214,13 +253,57 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
     },
     policyRegistry,
     resourceGovernor,
-    shutdown(shutdownOptions) {
-      return supervisor.shutdown(shutdownOptions);
+    shutdown(shutdownOptions = {}) {
+      if (shutdownPromise) return shutdownPromise;
+      const fallbackTimeoutMs = Number.isFinite(supervisorShutdownTimeoutMs) &&
+        supervisorShutdownTimeoutMs >= 0
+        ? supervisorShutdownTimeoutMs
+        : 5000;
+      let timeoutMs;
+      try {
+        timeoutMs = Number.isFinite(shutdownOptions.timeoutMs) && shutdownOptions.timeoutMs >= 0
+          ? shutdownOptions.timeoutMs
+          : fallbackTimeoutMs;
+      } catch (error) {
+        return Promise.reject(error);
+      }
+      supervisor.stopAcceptingNewJobs();
+      const deadline = deadlineAfter(timeoutMs);
+      const pairedSession = beginDuplicatePairedParserShutdown(runtime);
+      shutdownPromise = Promise.resolve().then(async () => {
+        const workerReport = await waitForDuplicatePairedParserShutdownPhase(
+          pairedSession,
+          'workersTerminal',
+          remainingTimeout(deadline)
+        );
+        const supervisorReport = await supervisor.shutdown({
+          ...shutdownOptions,
+          timeoutMs: remainingTimeout(deadline)
+        });
+        const finalizationReport = await waitForDuplicatePairedParserShutdownPhase(
+          pairedSession,
+          'finalized',
+          remainingTimeout(deadline)
+        );
+        return mergeShutdownReports(
+          supervisorReport,
+          Object.freeze({
+            leakedTransports: Object.freeze([]),
+            errors: pairedSession.errors
+          }),
+          workerReport,
+          finalizationReport
+        );
+      }).finally(() => {
+        shutdownPromise = null;
+      });
+      return shutdownPromise;
     },
     stopAcceptingNewJobs() {
       supervisor.stopAcceptingNewJobs();
     }
   });
+  return runtime;
 }
 
 function assertNonProductionGovernorRequest(request) {

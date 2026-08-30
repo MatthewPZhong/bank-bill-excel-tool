@@ -30,6 +30,10 @@ const {
   serviceTransportCreatedGeneration
 } = require('./service-host');
 
+// Internal coordinator seam: exact returned control identity only; it is not exposed
+// on the public Supervisor/control/runtime facades and does not bypass cancel policy.
+const coordinatorTransportFailures = new WeakMap();
+
 class SupervisorError extends Error {
   constructor(code, message) {
     super(message);
@@ -40,6 +44,12 @@ class SupervisorError extends Error {
 
 function makeId(prefix) {
   return `${prefix}-${crypto.randomUUID()}`;
+}
+
+function failExecutionTransportForCoordinator(control, error) {
+  if (!control || (typeof control !== 'object' && typeof control !== 'function')) return false;
+  const failTransport = coordinatorTransportFailures.get(control);
+  return failTransport ? failTransport(error) : false;
 }
 
 function promiseWithTimeout(promise, timeoutMs, onTimeout) {
@@ -1608,6 +1618,18 @@ function createExecutionSupervisor(options = {}) {
         });
       }
     });
+    coordinatorTransportFailures.set(control, (error) => {
+      if (record.terminal) return false;
+      const transportError = error instanceof Error
+        ? error
+        : new SupervisorError(
+            'COORDINATOR_TRANSPORT_FAILURE',
+            'Execution coordinator reported a transport failure'
+          );
+      return finish('adapter-error', 'transport-lost', transportError, null, {
+        forceTransport: true
+      });
+    });
     record.control = control;
     return control;
   }
@@ -1844,6 +1866,7 @@ function createExecutionSupervisor(options = {}) {
 module.exports = {
   SupervisorError,
   createExecutionSupervisor,
+  failExecutionTransportForCoordinator,
   normalizeCancelReason,
   promiseWithTimeout,
   snapshotExecuteRequest,
