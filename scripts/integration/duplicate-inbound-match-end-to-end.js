@@ -209,8 +209,24 @@ async function run() {
     );
     assertEq(
       runDataStore.listSideDbFiles(root, runDataStore.MODULE_DUPLICATE_INBOUND_MATCH).length,
+      1,
+      'Service constructor保留银行、单据与运行结果侧库供startup inspector取证'
+    );
+    assertEq(
+      database.listDuplicateInboundMatchRunMirrors().at(-1).status,
+      'success',
+      'Service constructor不失效既有主库镜像'
+    );
+    restarted.invalidateForNewImport();
+    assertEq(
+      runDataStore.listSideDbFiles(root, runDataStore.MODULE_DUPLICATE_INBOUND_MATCH).length,
       0,
-      '应用重启语义物理删除银行、单据与运行结果侧库'
+      '显式新导入失效阶段仍物理回收旧side数据'
+    );
+    assertEq(
+      database.listDuplicateInboundMatchRunMirrors().at(-1).status,
+      'superseded',
+      '显式新导入失效阶段仍撤销旧主库镜像资格'
     );
     assertEq(restarted.tempStore.listBatches().length, 3, '应用重启语义不清理持久 MPT 批次');
   } catch (error) {

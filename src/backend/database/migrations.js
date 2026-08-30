@@ -1101,6 +1101,28 @@ function ensureBankBuReconRunsSideDbPath(db) {
   db.exec(`ALTER TABLE bank_bu_recon_runs ADD COLUMN side_db_rel_path TEXT`);
 }
 
+// v3.2.2 E08-A：BankBU managed run 的 side/main 共同 operation identity。
+// 历史镜像无法安全回填，因此新增列保持 nullable；managed writer 对新镜像强制完整 identity。
+function ensureBankBuReconRunIdentitySupport(db) {
+  const additions = [
+    ['side_run_id', 'INTEGER'],
+    ['operation_key', 'TEXT'],
+    ['producer_task_run_id', 'TEXT'],
+    ['input_evidence_hash', 'TEXT'],
+    ['stable_hash', 'TEXT']
+  ];
+  for (const [column, type] of additions) {
+    if (!hasColumn(db, 'bank_bu_recon_runs', column)) {
+      db.exec(`ALTER TABLE bank_bu_recon_runs ADD COLUMN ${column} ${type}`);
+    }
+  }
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_bank_bu_recon_runs_operation
+      ON bank_bu_recon_runs(operation_key)
+      WHERE operation_key IS NOT NULL;
+  `);
+}
+
 // v3.0.5 PR-4（Part B Phase 2）：给 biz_op_recon_runs 加 side_db_rel_path 列（per-月侧库元数据镜像）。
 //   值：侧库文件相对路径（run-data/biz-op-recon/month-{month(date)}.sqlite），NULL = 历史主库 run（双源过渡）。
 //   biz-op run 粒度 = (data_date, bu_name)，但侧库按对账归属月 month(date) 分片，故 rel_path 指向月侧库。
@@ -3924,6 +3946,11 @@ function ensureDuplicateInboundMatchRunMetadataSupport(db) {
       document_file_name TEXT NOT NULL DEFAULT '',
       document_file_hash TEXT NOT NULL DEFAULT '',
       side_db_rel_path TEXT NOT NULL,
+      result_digest TEXT CHECK (
+        result_digest IS NULL OR (
+          length(result_digest) = 64 AND result_digest NOT GLOB '*[^0-9a-f]*'
+        )
+      ),
       error_message TEXT,
       started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       finished_at TEXT
@@ -3939,6 +3966,58 @@ function ensureDuplicateInboundMatchRunMetadataSupport(db) {
   if (!hasColumn(db, 'duplicate_inbound_match_run_mirrors', 'document_file_hash')) {
     db.exec("ALTER TABLE duplicate_inbound_match_run_mirrors ADD COLUMN document_file_hash TEXT NOT NULL DEFAULT ''");
   }
+  // v3.2.2 E07-B：历史镜像无法安全回填 operation owner，因此列保持 nullable；
+  // managed writer 对新增行强制非空，startup inspector 对历史 NULL identity fail closed。
+  if (!hasColumn(db, 'duplicate_inbound_match_run_mirrors', 'operation_key')) {
+    db.exec('ALTER TABLE duplicate_inbound_match_run_mirrors ADD COLUMN operation_key TEXT;');
+  }
+  if (!hasColumn(db, 'duplicate_inbound_match_run_mirrors', 'producer_task_run_id')) {
+    db.exec('ALTER TABLE duplicate_inbound_match_run_mirrors ADD COLUMN producer_task_run_id TEXT;');
+  }
+  if (!hasColumn(db, 'duplicate_inbound_match_run_mirrors', 'input_evidence_hash')) {
+    db.exec('ALTER TABLE duplicate_inbound_match_run_mirrors ADD COLUMN input_evidence_hash TEXT;');
+  }
+  if (!hasColumn(db, 'duplicate_inbound_match_run_mirrors', 'result_digest')) {
+    db.exec(`
+      ALTER TABLE duplicate_inbound_match_run_mirrors
+      ADD COLUMN result_digest TEXT CHECK (
+        result_digest IS NULL OR (
+          length(result_digest) = 64 AND result_digest NOT GLOB '*[^0-9a-f]*'
+        )
+      )
+    `);
+  }
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_duplicate_inbound_run_mirrors_operation
+      ON duplicate_inbound_match_run_mirrors(operation_key)
+      WHERE operation_key IS NOT NULL;
+
+    CREATE TABLE IF NOT EXISTS duplicate_inbound_match_recovery_audits (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_ref TEXT NOT NULL UNIQUE,
+      action_key TEXT NOT NULL CHECK (action_key IN ('duplicate:import', 'duplicate:run')),
+      operation_key TEXT NOT NULL,
+      producer_task_run_id TEXT NOT NULL,
+      inspection_evidence_hash TEXT NOT NULL CHECK (
+        length(inspection_evidence_hash) = 64
+        AND inspection_evidence_hash NOT GLOB '*[^0-9a-f]*'
+      ),
+      outcome TEXT NOT NULL CHECK (outcome IN ('committed', 'compensated')),
+      recovery_action TEXT NOT NULL CHECK (
+        recovery_action IN ('observe-committed', 'complete-mirror', 'compensate', 'expire')
+      ),
+      side_run_id INTEGER,
+      mirror_id INTEGER,
+      bounded_result_json TEXT NOT NULL,
+      result_hash TEXT NOT NULL CHECK (
+        length(result_hash) = 64 AND result_hash NOT GLOB '*[^0-9a-f]*'
+      ),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(action_key, operation_key, producer_task_run_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_duplicate_inbound_recovery_audits_operation
+      ON duplicate_inbound_match_recovery_audits(action_key, operation_key);
+  `);
 }
 
 module.exports = {
@@ -3972,6 +4051,7 @@ module.exports = {
   ensureAcquiringBillCurrencyRunsSideDbPath,
   // v3.0.5 PR-4（Part B Phase 2）：bank-bu / biz-op runs 表加 side_db_rel_path 列（侧库镜像）
   ensureBankBuReconRunsSideDbPath,
+  ensureBankBuReconRunIdentitySupport,
   ensureBizOpReconRunsSideDbPath,
   // v2.1.10 N4-cont-1 T22 (Phase 4)：raw_json idle 自动清理保留窗口 settings（v0.2 单键）
   ensureAcquiringBillCurrencyRawJsonRetentionSettings,

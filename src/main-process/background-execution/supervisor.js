@@ -30,6 +30,10 @@ const {
   serviceTransportCreatedGeneration
 } = require('./service-host');
 
+// Internal coordinator seam: exact returned control identity only; it is not exposed
+// on the public Supervisor/control/runtime facades and does not bypass cancel policy.
+const coordinatorTransportFailures = new WeakMap();
+
 class SupervisorError extends Error {
   constructor(code, message) {
     super(message);
@@ -40,6 +44,12 @@ class SupervisorError extends Error {
 
 function makeId(prefix) {
   return `${prefix}-${crypto.randomUUID()}`;
+}
+
+function failExecutionTransportForCoordinator(control, error) {
+  if (!control || (typeof control !== 'object' && typeof control !== 'function')) return false;
+  const failTransport = coordinatorTransportFailures.get(control);
+  return failTransport ? failTransport(error) : false;
 }
 
 function promiseWithTimeout(promise, timeoutMs, onTimeout) {
@@ -268,6 +278,10 @@ function createExecutionSupervisor(options = {}) {
       ? (policy.context.kind === 'none' ? canonicalJsonSnapshot({ kind: 'none', value: {} }) : null)
       : request.context;
     if (!context) throw new SupervisorError('CONTEXT_REQUIRED', 'Execute request requires policy context');
+    const taskRunId = ['operation', 'file-batch'].includes(context.kind)
+      ? context.value.taskRunId
+      : null;
+    const batchId = context.kind === 'file-batch' ? context.value.batchId : null;
     const jobId = request.jobId || (options.idFactory ? options.idFactory('job') : makeId('job'));
     let workerInstanceId = request.workerInstanceId ||
       (options.idFactory ? options.idFactory('worker') : makeId('worker'));
@@ -752,8 +766,8 @@ function createExecutionSupervisor(options = {}) {
         actionKey,
         parentOperationKey: operationKey,
         fileOperationKey: unit.fileOperationKey,
-        taskRunId: context.kind === 'file-batch' ? context.value.taskRunId : null,
-        batchId: context.kind === 'file-batch' ? context.value.batchId : null,
+        taskRunId,
+        batchId,
         jobId,
         workerInstanceId,
         unitId: [...record.units].find(([, candidate]) => candidate === unit)?.[0] || null,
@@ -886,8 +900,8 @@ function createExecutionSupervisor(options = {}) {
             policy,
             actionKey,
             parentOperationKey: operationKey,
-            taskRunId: context.kind === 'file-batch' ? context.value.taskRunId : null,
-            batchId: context.kind === 'file-batch' ? context.value.batchId : null,
+            taskRunId,
+            batchId,
             jobId,
             workerInstanceId,
             unitId: message.unitId,
@@ -930,8 +944,8 @@ function createExecutionSupervisor(options = {}) {
             actionKey,
             parentOperationKey: operationKey,
             fileOperationKey: unit.fileOperationKey,
-            taskRunId: context.kind === 'file-batch' ? context.value.taskRunId : null,
-            batchId: context.kind === 'file-batch' ? context.value.batchId : null,
+            taskRunId,
+            batchId,
             jobId,
             workerInstanceId,
             unitId: message.unitId,
@@ -958,8 +972,8 @@ function createExecutionSupervisor(options = {}) {
               actionKey,
               parentOperationKey: operationKey,
               fileOperationKey: unit.fileOperationKey,
-              taskRunId: context.kind === 'file-batch' ? context.value.taskRunId : null,
-              batchId: context.kind === 'file-batch' ? context.value.batchId : null,
+              taskRunId,
+              batchId,
               jobId,
               workerInstanceId,
               unitId: message.unitId,
@@ -1608,6 +1622,18 @@ function createExecutionSupervisor(options = {}) {
         });
       }
     });
+    coordinatorTransportFailures.set(control, (error) => {
+      if (record.terminal) return false;
+      const transportError = error instanceof Error
+        ? error
+        : new SupervisorError(
+            'COORDINATOR_TRANSPORT_FAILURE',
+            'Execution coordinator reported a transport failure'
+          );
+      return finish('adapter-error', 'transport-lost', transportError, null, {
+        forceTransport: true
+      });
+    });
     record.control = control;
     return control;
   }
@@ -1844,6 +1870,7 @@ function createExecutionSupervisor(options = {}) {
 module.exports = {
   SupervisorError,
   createExecutionSupervisor,
+  failExecutionTransportForCoordinator,
   normalizeCancelReason,
   promiseWithTimeout,
   snapshotExecuteRequest,
