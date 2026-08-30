@@ -74,6 +74,14 @@ const PUBLIC_INTERACTION_KEYS = Object.freeze([
   'prompt'
 ]);
 const INTERACTION_REQUIRED_RESULT_KEYS = Object.freeze(['status', 'interaction']);
+const IMPORT_RESULT_KEYS = Object.freeze(['status', 'summary', 'session']);
+const IMPORT_SESSION_KEYS = Object.freeze([
+  'sessionKey',
+  'currentBatchId',
+  'entryCount',
+  'importedEntryIds'
+]);
+const STATUS_RESULT_KEYS = Object.freeze(['status', 'summary']);
 const STATUS_KEYS = Object.freeze([
   'serviceGeneration',
   'sessionRevision',
@@ -768,6 +776,49 @@ function createStatementInteractionRequiredResult(input, actionKey) {
   return canonicalJsonSnapshot({ status: record.status, interaction });
 }
 
+function createStatementImportResult(input) {
+  const record = ownDataRecord(input, IMPORT_RESULT_KEYS, 'StatementImportResult');
+  if (record.status !== 'imported') {
+    fail('STATEMENT_RESULT_STATUS_INVALID', 'Statement import result status must be imported');
+  }
+  const session = ownDataRecord(record.session, IMPORT_SESSION_KEYS, 'StatementImportSessionResult');
+  const entryCount = positiveInteger(session.entryCount, 'entryCount');
+  const importedEntryIds = boundedArray(
+    session.importedEntryIds,
+    'importedEntryIds',
+    MAX_BIG_ACCOUNT_ROWS
+  ).map((entryId, index) => boundedText(entryId, `importedEntryIds[${index}]`, 256));
+  if (new Set(importedEntryIds).size !== importedEntryIds.length ||
+      importedEntryIds.length === 0 ||
+      importedEntryIds.length > entryCount) {
+    fail(
+      'STATEMENT_RESULT_ENTRY_ID_INVALID',
+      'Statement importedEntryIds must be unique, non-empty, and bounded by entryCount'
+    );
+  }
+  return canonicalJsonSnapshot({
+    status: record.status,
+    summary: createStatementStatusDto(record.summary),
+    session: {
+      sessionKey: boundedText(session.sessionKey, 'sessionKey', 512),
+      currentBatchId: boundedText(session.currentBatchId, 'currentBatchId', 256),
+      entryCount,
+      importedEntryIds
+    }
+  });
+}
+
+function createStatementStatusResult(input) {
+  const record = ownDataRecord(input, STATUS_RESULT_KEYS, 'StatementStatusResult');
+  if (record.status !== 'status') {
+    fail('STATEMENT_RESULT_STATUS_INVALID', 'Statement status result status must be status');
+  }
+  return canonicalJsonSnapshot({
+    status: record.status,
+    summary: createStatementStatusDto(record.summary)
+  });
+}
+
 function merchantPathKind(path) {
   if (typeof path !== 'string') return null;
   const prefix = '/payload/result/interaction/prompt/';
@@ -824,7 +875,18 @@ function createStatementResultValidator(actionKey) {
       const normalized = createStatementInteractionRequiredResult(value, actionKey);
       return canonicalizeJson(normalized) === canonicalizeJson(value);
     } catch (_error) {
-      return false;
+      if (actionKey !== 'statement:import') return false;
+      try {
+        createStatementImportResult(value);
+        return true;
+      } catch (_importError) {
+        try {
+          createStatementStatusResult(value);
+          return true;
+        } catch (_statusError) {
+          return false;
+        }
+      }
     }
   };
   Object.defineProperty(validator, 'allowFinanceSafeValue', {
@@ -948,9 +1010,11 @@ module.exports = {
   createStatementBalanceSeedOverwritePrivateContextDto,
   createStatementBalanceSeedOverwriteReleaseCharacterization,
   createStatementFinanceSafeValueDelegate,
+  createStatementImportResult,
   createStatementInteractionRequiredResult,
   createStatementPublicInteractionDto,
   createStatementResultValidator,
   createStatementStatusDto,
+  createStatementStatusResult,
   createStatementTokenHandleDto
 };
