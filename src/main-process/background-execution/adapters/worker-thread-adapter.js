@@ -146,7 +146,17 @@ function createWorkerThreadAdapter(options = {}) {
         async terminate() {
           closed = true;
           try {
-            return await worker.terminate();
+            let termination;
+            try {
+              termination = worker.terminate();
+            } finally {
+              // Node 的 Worker.terminate() 会在等待 exit 前重新 ref()。若 Host
+              // 已先 close/unref，这个 ref 会抵消 close 的 liveness 释放，并在
+              // native terminate 不 settle 时继续钉住进程。因此必须在 terminate
+              // 调用之后再重复 unref；仍 await 原 termination，不伪造 cleanup 成功。
+              if (closeCalled && typeof worker.unref === 'function') worker.unref();
+            }
+            return await termination;
           } finally {
             detach();
           }
