@@ -566,6 +566,7 @@ test('queued grant remains owned when synchronous diagnostics closes the Governo
 
 test('package entry exports only specialized Governor/ServiceHost factories, not generic primitives', () => {
   assert.equal(backgroundExecution.createResourceGovernor, createResourceGovernor);
+  assert.equal(typeof backgroundExecution.createServiceClient, 'function');
   assert.equal(typeof backgroundExecution.createServiceHost, 'function');
   for (const privateName of ['createAdmissionQueue', 'requestLease', 'closeResourceGovernor']) {
     assert.equal(Object.hasOwn(backgroundExecution, privateName), false);
