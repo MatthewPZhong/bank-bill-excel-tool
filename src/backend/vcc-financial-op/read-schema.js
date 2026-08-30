@@ -54,7 +54,10 @@ const REQUIRED_PRIMARY_KEYS = Object.freeze({
 });
 
 const REQUIRED_INDEXES = Object.freeze({
-  idx_vcc_fin_op_effective_month_source: Object.freeze(['target_month', 'source_type'])
+  idx_vcc_fin_op_effective_month_source: Object.freeze(['target_month', 'source_type']),
+  idx_vcc_fin_op_run_rows_run_subject: Object.freeze(['run_id', 'subject']),
+  idx_vcc_fin_op_adjustments_run_subject: Object.freeze(['run_id', 'subject']),
+  idx_vcc_fin_op_pending_summary_run_subject: Object.freeze(['run_id', 'subject'])
 });
 
 function schemaNotReady(details) {
