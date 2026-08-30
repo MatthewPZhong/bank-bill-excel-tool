@@ -69,10 +69,16 @@ const {
   waitForExternalParserShutdownPhase
 } = require('./external-parser-finalization');
 const {
-  RECON_FIX_READONLY_POLICIES,
+  RECON_FIX_JPM_UNIT_ID,
+  RECON_FIX_POLICIES,
+  RECON_FIX_RUN_JPM_ACTION,
   RECON_FIX_SERVICE_KEY,
+  validateReconFixJpmResult,
   validateReconFixServiceResult
 } = require('../recon-id-fix-service/policies');
+const {
+  createReconFixJpmDatabaseAuthority
+} = require('../recon-id-fix-service/jpm-database-authority');
 
 const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   ...TOOLBOX_GENERATION_POLICIES,
@@ -81,7 +87,7 @@ const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   NEW_ACCOUNT_SAVE_AS_POLICY,
   ...FUND_RECON_POLICIES,
   ...DUPLICATE_POLICIES,
-  ...RECON_FIX_READONLY_POLICIES
+  ...RECON_FIX_POLICIES
 ]);
 
 function isBackgroundExecutionProductionEnabled(actionKey) {
@@ -166,6 +172,10 @@ function entryBindingForPolicy(policy, workerRoot, duplicateStartupGate) {
 }
 
 function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverride = null) {
+  const reconFixJpmDatabaseAuthority = options.reconFixJpmDatabasePath === undefined ||
+    options.reconFixJpmDatabasePath === null
+    ? null
+    : createReconFixJpmDatabaseAuthority(options.reconFixJpmDatabasePath);
   const availableParallelism = options.availableParallelism === undefined
     ? (typeof os.availableParallelism === 'function'
         ? os.availableParallelism()
@@ -194,31 +204,36 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
   ));
   const validatorEntries = {};
   for (const policy of BACKGROUND_EXECUTION_POLICIES) {
-    const resultValidator = policy.moduleId === 'recon-fix'
-      ? validateReconFixServiceResult
-      : policy.moduleId === 'duplicate'
-      ? (policy.actionKey === DUPLICATE_ACTIONS.IMPORT
-          ? validateDuplicateImportResult
-          : (policy.actionKey === DUPLICATE_ACTIONS.RUN
-              ? validateDuplicateRunResult
-              : validateDuplicateExportResult))
-      : policy.moduleId === 'fund-recon'
-      ? (policy.actionKey === 'fund-recon:import'
-          ? validateFundReconImportResult
-          : (policy.actionKey === 'fund-recon:run'
-              ? validateFundReconRunResult
-              : validateFundReconExportResult))
-      : policy.moduleId === 'pre-fund'
-      ? (policy.actionKey === PRE_FUND_MPT_REPAIR_ACTION
-          ? validatePreFundMptRepairResult
-          : validatePreFundMptImportResult)
-      : (policy.moduleId === 'new-account'
-          ? (policy.actionKey === NEW_ACCOUNT_SAVE_AS_ACTION
-              ? validateNewAccountSaveAsResult
-              : validateNewAccountGenerationResult)
-          : (policy.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
-          ? validateToolboxMultiGenerationResult
-          : (value) => validateToolboxGenerationResult(value, policy.actionKey)));
+    let resultValidator;
+    if (policy.moduleId === 'recon-fix') {
+      resultValidator = policy.actionKey === RECON_FIX_RUN_JPM_ACTION
+        ? validateReconFixJpmResult
+        : validateReconFixServiceResult;
+    } else if (policy.moduleId === 'duplicate') {
+      resultValidator = policy.actionKey === DUPLICATE_ACTIONS.IMPORT
+        ? validateDuplicateImportResult
+        : (policy.actionKey === DUPLICATE_ACTIONS.RUN
+            ? validateDuplicateRunResult
+            : validateDuplicateExportResult);
+    } else if (policy.moduleId === 'fund-recon') {
+      resultValidator = policy.actionKey === 'fund-recon:import'
+        ? validateFundReconImportResult
+        : (policy.actionKey === 'fund-recon:run'
+            ? validateFundReconRunResult
+            : validateFundReconExportResult);
+    } else if (policy.moduleId === 'pre-fund') {
+      resultValidator = policy.actionKey === PRE_FUND_MPT_REPAIR_ACTION
+        ? validatePreFundMptRepairResult
+        : validatePreFundMptImportResult;
+    } else if (policy.moduleId === 'new-account') {
+      resultValidator = policy.actionKey === NEW_ACCOUNT_SAVE_AS_ACTION
+        ? validateNewAccountSaveAsResult
+        : validateNewAccountGenerationResult;
+    } else {
+      resultValidator = policy.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
+        ? validateToolboxMultiGenerationResult
+        : (value) => validateToolboxGenerationResult(value, policy.actionKey);
+    }
     validatorEntries[policy.result.validatorKey] = resultValidator;
     // Main explicitly executes the asynchronous technical/business validators before Publisher.
     // Registry bindings remain synchronous capability declarations for static contract coverage.
@@ -285,6 +300,28 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
     executionTimeoutMs: options.executionTimeoutMs,
     shutdownTimeoutMs: supervisorShutdownTimeoutMs,
     workerDurableCoordinator: options.workerDurableCoordinator,
+    bindInputForAction({ actionKey, input }) {
+      if (actionKey !== RECON_FIX_RUN_JPM_ACTION) return input;
+      if (!reconFixJpmDatabaseAuthority) {
+        const error = new Error('ReconFix JPM runtime generation 缺少 Main database authority');
+        error.code = 'RECON_FIX_JPM_DATABASE_AUTHORITY_UNAVAILABLE';
+        throw error;
+      }
+      if (Object.hasOwn(input, 'databasePath') || Object.hasOwn(input, 'databaseIdentity')) {
+        const error = new Error('ReconFix JPM database authority 不接受 caller override');
+        error.code = 'RECON_FIX_JPM_DATABASE_AUTHORITY_OVERRIDE_FORBIDDEN';
+        throw error;
+      }
+      return Object.freeze({
+        ...input,
+        databasePath: reconFixJpmDatabaseAuthority.databasePath
+      });
+    },
+    defaultUnitsForAction(actionKey) {
+      return actionKey === RECON_FIX_RUN_JPM_ACTION
+        ? Object.freeze([Object.freeze({ unitId: RECON_FIX_JPM_UNIT_ID, input: Object.freeze({}) })])
+        : Object.freeze([]);
+    },
     ...(options.workerThreadAdapter ? { workerThreadAdapter: options.workerThreadAdapter } : {})
   });
   let shutdownPromise = null;
@@ -395,7 +432,10 @@ function createBackgroundExecutionRuntimeManager(options = {}) {
       duplicateStartupGate,
       workerDurableCoordinator: typeof options.workerDurableCoordinatorProvider === 'function'
         ? options.workerDurableCoordinatorProvider()
-        : options.workerDurableCoordinator
+        : options.workerDurableCoordinator,
+      reconFixJpmDatabasePath: typeof options.reconFixJpmDatabasePathProvider === 'function'
+        ? options.reconFixJpmDatabasePathProvider()
+        : options.reconFixJpmDatabasePath
     });
   });
   let runtime = null;

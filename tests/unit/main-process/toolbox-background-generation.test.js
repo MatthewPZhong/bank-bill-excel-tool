@@ -209,7 +209,8 @@ test('E04-B runtime预算完整计入Scanner phase与一个Writer child，idle/s
     DUPLICATE_ACTIONS.RUN,
     DUPLICATE_ACTIONS.EXPORT,
     'recon-fix:import',
-    'recon-fix:run-readonly'
+    'recon-fix:run-readonly',
+    'recon-fix:run-jpm'
   ]);
   for (const policy of runtime.policyRegistry.list()) {
     assert.equal(policy.production.enabled, false);

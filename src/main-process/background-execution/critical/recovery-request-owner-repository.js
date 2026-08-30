@@ -201,42 +201,90 @@ function inspectTransitionReservation(db, input) {
   });
 }
 
-function resumePreparedTransitionReservation(db, requestKey) {
-  if (typeof requestKey !== 'string' || !requestKey.startsWith('recovery-control:v1:')) {
-    throw new TypeError('requestKey 非法');
+function preparedExactRequest(db, requestKey, writer, validateRequest, requestKeyFor) {
+  if (typeof requestKey !== 'string' || !/^recovery-control:v1:[a-f0-9]{64}$/.test(requestKey)) {
+    throw new TypeError('prepared requestKey 非法');
   }
   const existing = ownerRow(db, requestKey);
   if (!existing || existing.status !== 'prepared') return null;
-  if (existing.writer !== 'transitionWithRecoveryEvent') {
-    fail('RECOVERY_REQUEST_WRITER_CONFLICT', 'prepared request 不是 transition owner');
+  if (existing.writer !== writer) {
+    fail(
+      'RECOVERY_REQUEST_KEY_CONFLICT',
+      'prepared requestKey 已绑定到不同 writer',
+      { requestKey }
+    );
   }
-  const envelope = exactObject(
-    parseStrictJson(existing.request_jcs, { maxBytes: RECOVERY_REQUEST_MAX_BYTES }),
-    ['contractVersion', 'writer', 'input'],
-    'prepared transition envelope'
+
+  let envelope;
+  try {
+    envelope = exactObject(
+      parseStrictJson(existing.request_jcs, { maxBytes: RECOVERY_REQUEST_MAX_BYTES }),
+      ['contractVersion', 'writer', 'input'],
+      'prepared transition request envelope'
+    );
+  } catch (_error) {
+    fail(
+      'RECOVERY_PREPARED_OWNER_INVALID',
+      'prepared transition owner 的 persisted exact request 非法',
+      { requestKey }
+    );
+  }
+  if (envelope.contractVersion !== 1 || envelope.writer !== writer) {
+    fail(
+      'RECOVERY_PREPARED_OWNER_INVALID',
+      'prepared owner envelope identity 非法',
+      { requestKey }
+    );
+  }
+
+  let request;
+  try {
+    request = validateRequest(envelope.input);
+  } catch (_error) {
+    fail(
+      'RECOVERY_PREPARED_OWNER_INVALID',
+      'prepared owner request schema 非法',
+      { requestKey }
+    );
+  }
+  const computedRequestKey = requestKeyFor(request);
+  const evidence = requestEvidence(writer, request);
+  if (computedRequestKey !== requestKey
+      || existing.event_id !== request.event.eventId
+      || existing.created_at !== request.event.createdAt
+      || existing.request_hash !== evidence.requestHash
+      || existing.request_jcs !== evidence.requestJcs) {
+    fail(
+      'RECOVERY_REQUEST_KEY_CONFLICT',
+      'prepared owner 与 persisted exact request 不一致',
+      { requestKey }
+    );
+  }
+  return request;
+}
+
+function preparedTransitionRequest(db, requestKey) {
+  const request = preparedExactRequest(
+    db,
+    requestKey,
+    'transitionWithRecoveryEvent',
+    validateTransitionRequest,
+    (value) => transitionRequestKey(value.transition)
   );
-  if (envelope.contractVersion !== 1 || envelope.writer !== 'transitionWithRecoveryEvent') {
-    fail('RECOVERY_REQUEST_ENVELOPE_INVALID', 'prepared transition envelope 非法');
-  }
-  const request = validateTransitionRequest(envelope.input);
-  const computedRequestKey = transitionRequestKey(request.transition);
-  if (computedRequestKey !== requestKey) {
-    fail('RECOVERY_REQUEST_KEY_MISMATCH', 'prepared transition requestKey 漂移');
-  }
-  const evidence = requestEvidence('transitionWithRecoveryEvent', request);
-  verifyExistingOwner(existing, {
+  return request
+    ? Object.freeze({ transition: request.transition, event: request.event })
+    : null;
+}
+
+function preparedObservationRequest(db, requestKey) {
+  const request = preparedExactRequest(
+    db,
     requestKey,
-    writer: 'transitionWithRecoveryEvent',
-    eventId: request.event.eventId,
-    createdAt: request.event.createdAt,
-    ...evidence
-  });
-  return Object.freeze({
-    requestKey,
-    status: 'prepared',
-    transition: request.transition,
-    safePayload: request.event.safePayload
-  });
+    'appendObservationEvent',
+    validateObservationRequest,
+    (value) => observationRequestKey(value.event)
+  );
+  return request ? request.event : null;
 }
 
 const OBSERVATION_DRAFT_REQUIRED = Object.freeze([
@@ -390,6 +438,313 @@ function normalizeScope(value) {
   });
 }
 
+function observationAnchorReservation(db, input, now, createEventId) {
+  const owned = exactObject(
+    input,
+    ['observationScopeKey', 'scope', 'safePayload'],
+    'reserveObservationAnchor input'
+  );
+  const scope = normalizeScope(owned.scope);
+  const scopeKey = observationScopeKey(scope);
+  if (owned.observationScopeKey !== scopeKey) {
+    fail('RECOVERY_OBSERVATION_SCOPE_MISMATCH', 'observation anchor scopeKey 不匹配');
+  }
+  return runImmediate(db, () => {
+    const pending = db.prepare(`
+      SELECT observation_attempt_id
+      FROM background_execution_recovery_observation_attempts
+      WHERE observation_scope_key = ? AND status = 'prepared'
+      ORDER BY observation_attempt_id
+    `).all(scopeKey);
+    if (pending.length > 0) {
+      fail(
+        'RECOVERY_OBSERVATION_ATTEMPT_PENDING',
+        'observation anchor scope 已有 prepared attempt，必须先 resume/commit'
+      );
+    }
+    const row = db.prepare(`
+      SELECT COALESCE(MAX(observation_attempt_id), 0) AS max_attempt
+      FROM background_execution_recovery_observation_attempts
+      WHERE observation_scope_key = ?
+    `).get(scopeKey);
+    const observationAttemptId = Number(row.max_attempt) + 1;
+    if (!Number.isSafeInteger(observationAttemptId) || observationAttemptId < 1) {
+      fail('RECOVERY_OBSERVATION_ATTEMPT_EXHAUSTED', 'observation attempt ordinal 已耗尽');
+    }
+    const createdAt = timestampOf(now);
+    const request = validateObservationRequest({
+      event: {
+        ...scope,
+        observationAttemptId,
+        eventId: createEventId(),
+        createdAt,
+        safePayload: owned.safePayload
+      }
+    });
+    const requestKey = observationRequestKey(request.event);
+    const evidence = requestEvidence('appendObservationEvent', request);
+    const insertedAttempt = db.prepare(`
+      INSERT INTO background_execution_recovery_observation_attempts (
+        observation_scope_key, observation_attempt_id, event_type,
+        action_key, operation_key, task_run_id, source_kind, source_ref,
+        batch_id, intent_id, hold_id, recovery_attempt_id,
+        request_key, status, prepared_at, committed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'prepared', ?, NULL)
+    `).run(
+      scopeKey,
+      observationAttemptId,
+      scope.eventType,
+      scope.actionKey,
+      scope.operationKey,
+      scope.taskRunId,
+      scope.sourceKind,
+      scope.sourceRef,
+      scope.batchId,
+      scope.intentId,
+      scope.holdId,
+      scope.recoveryAttemptId,
+      requestKey,
+      createdAt
+    );
+    if (Number(insertedAttempt.changes) !== 1) {
+      fail('RECOVERY_OBSERVATION_ATTEMPT_WRITE_CONFLICT', 'observation anchor attempt INSERT 必须等于 1');
+    }
+    insertOwner(db, {
+      requestKey,
+      writer: 'appendObservationEvent',
+      eventId: request.event.eventId,
+      createdAt,
+      ...evidence
+    });
+    return request.event;
+  });
+}
+
+const INSPECTION_UNAVAILABLE_SOURCE_KEYS = Object.freeze([
+  'actionKey',
+  'operationKey',
+  'taskRunId',
+  'sourceKind',
+  'sourceRef',
+  'intentId'
+]);
+
+function normalizeInspectionUnavailableSource(value) {
+  const source = exactObject(
+    value,
+    INSPECTION_UNAVAILABLE_SOURCE_KEYS,
+    'inspection unavailable source'
+  );
+  for (const key of ['actionKey', 'operationKey', 'taskRunId', 'sourceKind', 'sourceRef']) {
+    if (typeof source[key] !== 'string' || !source[key]) {
+      throw new TypeError(`inspection unavailable source.${key} 不能为空`);
+    }
+  }
+  if (source.intentId !== null && (typeof source.intentId !== 'string' || !source.intentId)) {
+    throw new TypeError('inspection unavailable source.intentId 非法');
+  }
+  return source;
+}
+
+function preparedInspectionUnavailableState(db, input) {
+  const owned = exactObject(
+    input,
+    ['observationScopeKey', 'source'],
+    'inspectPreparedInspectionUnavailableState input'
+  );
+  const source = normalizeInspectionUnavailableSource(owned.source);
+  if (typeof owned.observationScopeKey !== 'string' ||
+      !owned.observationScopeKey.startsWith('observation-attempt:v1:')) {
+    throw new TypeError('inspection unavailable observationScopeKey 非法');
+  }
+  const attempts = db.prepare(`
+    SELECT observation_attempt_id, request_key
+    FROM background_execution_recovery_observation_attempts
+    WHERE observation_scope_key = ? AND status = 'prepared'
+    ORDER BY observation_attempt_id
+  `).all(owned.observationScopeKey);
+  if (attempts.length > 1) {
+    fail('RECOVERY_OBSERVATION_ATTEMPT_AMBIGUOUS', 'threshold scope 存在多个 prepared attempt');
+  }
+  const taskOwnerCount = Number(db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM background_execution_recovery_request_owners
+    WHERE status = 'prepared'
+      AND writer = 'transitionWithRecoveryEvent'
+      AND json_extract(request_jcs, '$.input.transition.entityKind') = 'task-run'
+      AND json_extract(request_jcs, '$.input.transition.command') = 'mark-interrupted'
+      AND json_extract(request_jcs, '$.input.transition.actionKey') = ?
+      AND json_extract(request_jcs, '$.input.transition.operationKey') = ?
+      AND json_extract(request_jcs, '$.input.transition.taskRunId') = ?
+      AND json_extract(request_jcs, '$.input.transition.sourceKind') = ?
+      AND json_extract(request_jcs, '$.input.transition.sourceRef') = ?
+      AND json_extract(request_jcs, '$.input.transition.failureCode') = 'INSPECTOR_UNAVAILABLE'
+  `).get(
+    source.actionKey,
+    source.operationKey,
+    source.taskRunId,
+    source.sourceKind,
+    source.sourceRef
+  ).count);
+  const holdOwnerCount = Number(db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM background_execution_recovery_request_owners
+    WHERE status = 'prepared'
+      AND writer = 'transitionWithRecoveryEvent'
+      AND json_extract(request_jcs, '$.input.transition.entityKind') = 'recovery-hold'
+      AND json_extract(request_jcs, '$.input.transition.command') = 'create-or-get'
+      AND json_extract(request_jcs, '$.input.transition.input.actionKey') = ?
+      AND json_extract(request_jcs, '$.input.transition.input.operationKey') = ?
+      AND json_extract(request_jcs, '$.input.transition.input.taskRunId') = ?
+      AND json_extract(request_jcs, '$.input.transition.input.sourceKind') = ?
+      AND json_extract(request_jcs, '$.input.transition.input.sourceRef') = ?
+      AND json_extract(request_jcs, '$.input.transition.input.reasonCode') = 'INSPECTOR_UNAVAILABLE'
+  `).get(
+    source.actionKey,
+    source.operationKey,
+    source.taskRunId,
+    source.sourceKind,
+    source.sourceRef
+  ).count);
+  if (taskOwnerCount > 1 || holdOwnerCount > 1) {
+    fail('RECOVERY_PREPARED_THRESHOLD_BUNDLE_INVALID', 'threshold prepared transition owner 不唯一');
+  }
+  const attempt = attempts[0] || null;
+  const state = attempt && attempt.request_key
+    ? 'anchored'
+    : taskOwnerCount > 0 || holdOwnerCount > 0 || attempt
+      ? 'legacy-gap'
+      : 'none';
+  return Object.freeze({
+    state,
+    taskOwnerCount,
+    holdOwnerCount,
+    unboundAttemptCount: attempt && !attempt.request_key ? 1 : 0
+  });
+}
+
+function exactTransitionDraft(value, label) {
+  const draft = exactObject(value, ['requestKey', 'transition', 'safePayload'], label);
+  const transition = assertC1Transition(validateTransition(draft.transition));
+  if (draft.requestKey !== transitionRequestKey(transition)) {
+    fail('RECOVERY_REQUEST_KEY_MISMATCH', `${label} requestKey 不匹配`);
+  }
+  return Object.freeze({
+    requestKey: draft.requestKey,
+    transition,
+    safePayload: draft.safePayload
+  });
+}
+
+function assertPreparedMatchesDraft(prepared, draft, label) {
+  if (!prepared) {
+    fail('RECOVERY_PREPARED_THRESHOLD_BUNDLE_INCOMPLETE', `${label} prepared owner 缺失`);
+  }
+  const expected = validateTransitionRequest({
+    transition: draft.transition,
+    event: {
+      eventId: prepared.event.eventId,
+      createdAt: prepared.event.createdAt,
+      safePayload: draft.safePayload
+    }
+  });
+  if (requestEvidence('transitionWithRecoveryEvent', expected).requestJcs !==
+      requestEvidence('transitionWithRecoveryEvent', prepared).requestJcs) {
+    fail('RECOVERY_REQUEST_KEY_CONFLICT', `${label} prepared owner body 不兼容`);
+  }
+}
+
+function cleanupPreparedInspectionUnavailableLegacyGap(db, input) {
+  const owned = exactObject(
+    input,
+    ['holdRequest', 'observationScopeKey', 'source', 'taskRequest'],
+    'cleanupPreparedInspectionUnavailableLegacyGap input'
+  );
+  const source = normalizeInspectionUnavailableSource(owned.source);
+  const taskRequest = owned.taskRequest === null
+    ? null
+    : exactTransitionDraft(owned.taskRequest, 'legacy threshold Task request');
+  const holdRequest = owned.holdRequest === null
+    ? null
+    : exactTransitionDraft(owned.holdRequest, 'legacy threshold Hold request');
+  return runImmediate(db, () => {
+    const state = preparedInspectionUnavailableState(db, {
+      observationScopeKey: owned.observationScopeKey,
+      source
+    });
+    if (state.state !== 'legacy-gap') return state;
+    const taskPrepared = taskRequest
+      ? preparedTransitionRequest(db, taskRequest.requestKey)
+      : null;
+    const holdPrepared = holdRequest
+      ? preparedTransitionRequest(db, holdRequest.requestKey)
+      : null;
+    if (state.taskOwnerCount === 1) {
+      if (!taskRequest) {
+        fail('RECOVERY_PREPARED_THRESHOLD_BUNDLE_INCOMPLETE', 'legacy threshold Task plan 缺失');
+      }
+      assertPreparedMatchesDraft(taskPrepared, taskRequest, 'legacy threshold Task');
+    }
+    if (state.holdOwnerCount === 1) {
+      if (!holdRequest) {
+        fail('RECOVERY_PREPARED_THRESHOLD_BUNDLE_INCOMPLETE', 'legacy threshold Hold plan 缺失');
+      }
+      assertPreparedMatchesDraft(holdPrepared, holdRequest, 'legacy threshold Hold');
+    }
+    if (holdRequest && !taskPrepared) {
+      fail(
+        'RECOVERY_PREPARED_THRESHOLD_BUNDLE_INVALID',
+        '新建 Hold 前的 legacy threshold gap 缺少先前 Task owner'
+      );
+    }
+    if (holdRequest && state.unboundAttemptCount === 1 && !holdPrepared) {
+      fail(
+        'RECOVERY_PREPARED_THRESHOLD_BUNDLE_INVALID',
+        'unbound threshold attempt 缺少先前 Hold owner'
+      );
+    }
+    let deletedOwnerCount = 0;
+    if (taskPrepared) {
+      const deletedTask = db.prepare(`
+        DELETE FROM background_execution_recovery_request_owners
+        WHERE request_key = ? AND status = 'prepared'
+      `).run(taskRequest.requestKey);
+      if (Number(deletedTask.changes) !== 1) {
+        fail('RECOVERY_PREPARED_THRESHOLD_BUNDLE_INVALID', 'legacy threshold Task owner cleanup 失败');
+      }
+      deletedOwnerCount += 1;
+    }
+    if (holdPrepared) {
+      const deletedHold = db.prepare(`
+        DELETE FROM background_execution_recovery_request_owners
+        WHERE request_key = ? AND status = 'prepared'
+      `).run(holdRequest.requestKey);
+      if (Number(deletedHold.changes) !== 1) {
+        fail('RECOVERY_PREPARED_THRESHOLD_BUNDLE_INVALID', 'legacy threshold Hold owner cleanup 失败');
+      }
+      deletedOwnerCount += 1;
+    }
+    let deletedAttemptCount = 0;
+    if (state.unboundAttemptCount === 1) {
+      const deletedAttempt = db.prepare(`
+        DELETE FROM background_execution_recovery_observation_attempts
+        WHERE observation_scope_key = ?
+          AND status = 'prepared'
+          AND request_key IS NULL
+      `).run(owned.observationScopeKey);
+      if (Number(deletedAttempt.changes) !== 1) {
+        fail('RECOVERY_PREPARED_THRESHOLD_BUNDLE_INVALID', 'legacy unbound attempt cleanup 失败');
+      }
+      deletedAttemptCount = 1;
+    }
+    return Object.freeze({
+      state: 'cleaned',
+      deletedOwnerCount,
+      deletedAttemptCount
+    });
+  });
+}
+
 function createRecoveryObservationAttemptRepository(db, options = {}) {
   assertDatabase(db);
   const now = options.now || (() => new Date());
@@ -486,8 +841,20 @@ function createRecoveryRequestOwnerRepository(db, options = {}) {
   }
   ensureBackgroundExecutionRecoveryControlSchema(db);
   return Object.freeze({
+    cleanupPreparedInspectionUnavailableLegacyGap(input) {
+      return cleanupPreparedInspectionUnavailableLegacyGap(db, input);
+    },
+    inspectPreparedInspectionUnavailableState(input) {
+      return preparedInspectionUnavailableState(db, input);
+    },
+    reserveObservationAnchor(input) {
+      return observationAnchorReservation(db, input, now, createEventId);
+    },
+    resumePreparedObservationRequest(requestKey) {
+      return preparedObservationRequest(db, requestKey);
+    },
     resumePreparedTransitionRequest(requestKey) {
-      return resumePreparedTransitionReservation(db, requestKey);
+      return preparedTransitionRequest(db, requestKey);
     },
     inspectTransitionRequest(input) {
       return inspectTransitionReservation(db, input);
