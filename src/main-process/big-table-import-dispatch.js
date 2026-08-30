@@ -15,6 +15,10 @@
 
 const { Worker } = require('node:worker_threads');
 const { computeMaxParallel } = require('../backend/big-table-import/pipeline');
+const {
+  WORKER_BATCH_CONTEXT_FIELDS,
+  freezeWorkerBatchContext
+} = require('./archive-center/worker-batch-context');
 
 // 引擎薄 worker 入口（new Worker 拉起 → 内部跑 engine.importFiles → pipeline 起解析子 worker）。
 const ENGINE_WORKER_ENTRY = require.resolve('../backend/big-table-import/engine-worker-entry');
@@ -197,6 +201,59 @@ function inspectBigTableImportTopology(request = {}) {
   };
 }
 
+function adapterContextError(code, message, cause) {
+  const error = new TypeError(message);
+  error.code = code;
+  if (cause !== undefined) error.cause = cause;
+  return error;
+}
+
+function bindMatureBatchContext(request = {}) {
+  const input = request.input || {};
+  if (!request.context || request.context.kind !== 'file-batch') return input;
+
+  let authoritative;
+  try {
+    authoritative = freezeWorkerBatchContext(request.context.value, { required: true });
+  } catch (error) {
+    throw adapterContextError(
+      'BIG_TABLE_ADAPTER_CONTEXT_INVALID',
+      `big-table mature adapter context 非法：${error.message}`,
+      error
+    );
+  }
+
+  if (Object.hasOwn(input, 'batchContext')) {
+    let supplied;
+    try {
+      supplied = freezeWorkerBatchContext(input.batchContext, { required: true });
+    } catch (error) {
+      throw adapterContextError(
+        'BIG_TABLE_ADAPTER_INPUT_CONTEXT_INVALID',
+        `big-table mature adapter input.batchContext 非法：${error.message}`,
+        error
+      );
+    }
+    const mismatch = WORKER_BATCH_CONTEXT_FIELDS.some(
+      (field) => supplied[field] !== authoritative[field]
+    );
+    if (mismatch) {
+      throw adapterContextError(
+        'BIG_TABLE_ADAPTER_BATCH_CONTEXT_MISMATCH',
+        'big-table mature adapter 的 envelope context 与 input.batchContext 必须完全一致'
+      );
+    }
+  }
+
+  // Supervisor 已验证 envelope context；既有 engine 只认识 input.batchContext，
+  // 因此这里必须把同一份 Main-owned exact-7 身份送进旧 dispatcher，不能让
+  // caller 另带一套 taskRunId/batchId/operationKey 造成 receipt/recovery 分叉。
+  return Object.freeze({
+    ...input,
+    batchContext: authoritative
+  });
+}
+
 function createBigTableImportMatureBinding(options = {}) {
   const dispatch = options.dispatch || dispatchEngineImportHandle;
   const inspectTopology = options.inspectTopology || inspectBigTableImportTopology;
@@ -207,8 +264,9 @@ function createBigTableImportMatureBinding(options = {}) {
       if (!topology || !Number.isSafeInteger(topology.effectiveChildCount)) {
         throw new TypeError('big-table mature adapter requires admitted topology');
       }
+      const input = bindMatureBatchContext(request);
       return dispatch({
-        ...(request.input || {}),
+        ...input,
         topology,
         parallel: topology.effectiveChildCount,
         parallelFrozen: true,

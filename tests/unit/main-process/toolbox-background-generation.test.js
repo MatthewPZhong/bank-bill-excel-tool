@@ -60,6 +60,9 @@ const {
   ACQUIRING_EXPORT_ACTIONS
 } = require('../../../src/main-process/read-only-exports/acquiring/policies');
 const {
+  PENDING_BIZOP_ADAPTER_ACTIONS
+} = require('../../../src/main-process/background-execution/pending-bizop-adapter-policies');
+const {
   createBackgroundExecutionRuntime: createBackgroundExecutionRuntimeRaw,
   createBackgroundExecutionRuntimeManager,
   isBackgroundExecutionProductionEnabled
@@ -248,7 +251,9 @@ test('E04-B runtime预算完整计入Scanner phase与一个Writer child，idle/s
     POSITION_READ_ONLY_ACTION,
     VCC_FINANCIAL_OP_READ_ONLY_ACTION,
     ACQUIRING_EXPORT_ACTIONS.COPY,
-    ACQUIRING_EXPORT_ACTIONS.REGENERATE
+    ACQUIRING_EXPORT_ACTIONS.REGENERATE,
+    PENDING_BIZOP_ADAPTER_ACTIONS.PENDING_IMPORT,
+    PENDING_BIZOP_ADAPTER_ACTIONS.BIZ_OP_IMPORT_FLOW
   ]);
   for (const policy of runtime.policyRegistry.list()) {
     assert.equal(policy.production.enabled, false);

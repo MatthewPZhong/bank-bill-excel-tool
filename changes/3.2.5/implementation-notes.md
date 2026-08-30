@@ -26,12 +26,14 @@
 | E13-B Position 终态收口按 pending → receipt ACK 顺序组合 | 通用 lifecycle 原先会用 Position pending finalizer 覆盖 managed Publisher 自带的 `afterTerminal`，导致 durable receipt 在成功发布后未 ACK | 二选一覆盖 callback、先 ACK receipt 再收口 pending、并行执行两个终态副作用 | Main 用 fail-closed composition 先完成 Position pending 终态，再执行 managed Publisher receipt ACK；前一步失败时不得提前 ACK，测试锁定两步只执行一次及顺序。 |
 | E13-B VCCFin 一个静态 action 承载两个真实入口 variant | action binding 已把 dataset 原表/校验表和 import anomaly audit 同时绑定到 `vcc-financial-op:export-audit`；只迁审计会留下可写开库/migration 的旧 dataset worker | 新增第二个 actionKey、只迁 import audit、继续复用 generic 可写 worker | 专用 thread worker 只用 `openVccReadDatabase/query_only`；dataset stable evidence 同时冻结 inspection、持久 dataset revision 与 archive set，保留 incomplete/archive artifact 合同；audit 只接受有 `finished_at` 且非 importing、异常数大于零的终态记录，deleted audit 仍可追溯。 |
 | E13-C 按 current-tree 行为拆开 Acquiring copy/regenerate | 当前唯一 export IPC 只复制稳定 `diff_file_path`；DB→XLSX 由独立 `writeDiffWorkbook()` 提供且没有用户入口 | 继续让两个 action 复用同一 copy handler；新增隐式 regenerate IPC；运行时猜 mode | copy=inline-async 且唯一绑定现有 IPC；regenerate=unbound thread-single dormant capability；两者 production 均为 false。详见 [e13-c-preflight.md](./e13-c-preflight.md) 与 [e13-c-implementation-notes.md](./e13-c-implementation-notes.md)。 |
+| E13-D 只注册 dormant Pending/BizOP existing-dispatch capability | 真实 big-table dispatcher 已拥有 root Worker、Parser Pool、单 writer 与大事务；默认 session/IPC 仍承担业务包装和人工门禁 | 再包 native Worker；复制 pool；自动切默认入口 | Runtime 增加两条 false-gated policy/adapter/topology/validator；默认 effective strategy 仍为 legacy。详见 [e13-d-preflight.md](./e13-d-preflight.md) 与 [e13-d-implementation-notes.md](./e13-d-implementation-notes.md)。 |
+| E13-D 用 envelope exact-7 绑定旧 engine 的 batch identity | blindspot 发现 Supervisor 与 engine 原先可分别采信 `context.value` 和 caller `input.batchContext` | 假设两份值自然相同；只比较 operationKey；静默采信 caller | adapter 逐字段拒绝分叉并注入 Main-owned context，避免 receipt/recovery 主键漂移；Spec/TechDoc 已 reverse-sync。 |
 
 ## Evidence / Deviations
 
 | 项目 | 当前结果 | 影响/后续 |
 | --- | --- | --- |
-| Frozen/current document hashes | 冻结 Spec `13410e4e…98f2`、TechDoc `3fb18459…e64f`、split plan `27bbdde9…174a`；当前 Spec `ebd27dd2…9191`、TechDoc `de7fb8f4…129` | 冻结来源未修改；顶层仅含已记录且受测试约束的 E13-B/E13-C 证据型修订，不能宣称仍逐字节一致。 |
+| Frozen/current document hashes | 冻结 Spec `13410e4e…98f2`、TechDoc `3fb18459…e64f`、split plan `27bbdde9…174a`；当前 Spec `55f281aa…c0d3`、TechDoc `ae6f48b0…0b6d` | 冻结来源未修改；顶层仅含已记录且受测试约束的 E13-B/E13-C/E13-D 证据型修订，不能宣称仍逐字节一致。 |
 | Package checksum | `61/69`，8 项漂移均有提交来源 | E13-G 前不得宣称 package integrity PASS。 |
 | Published/current validation | published historical `29/29`（68 inputs）；current tree `28/29`（73 inputs，binding/AST authority 一项失败） | 旧 report 不代偿当前树；E13-G 负责真实修复。 |
 | Production/human gate | production=false；资金/恢复 `PENDING_HUMAN_REVIEW` | 本 bootstrap 不改变。 |
@@ -44,6 +46,7 @@
 | E13-B capability/full regression | E13-B 三模块定向集 `24/24 PASS`；五文件重点合同集 `37/37 PASS`；完整单测 `6808/6811 PASS`（`0 FAIL`、`3 SKIP`），日志 `logs/unit-tests/unit-20260830-215741.log`；53 个 integration 脚本 `2488/2488 PASS`；smoke PASS；全部改动 JS 通过 `node --check`，`git diff --check` PASS | 一次全量并发运行曾令既有 MPT transport 用例出现 `1 FAIL`，该精确文件连续两次 `39/39 PASS`，随后全量复跑 `0 FAIL`；未以失败快照作为绿灯。blindspot/reconciliation 已关闭模板 authority、Position 源文件 identity、Position pending/receipt 终态组合、VCC 审计 JSON、dataset 同事务 freshness、manifest 关系与 FilePlan 顺序缺口；尚需最终 diff review/候选提交。Windows、真实资金样本及资金/恢复人工复核留到 R3.2.5，production 仍为 false。 |
 | E13-C current-tree classification | 当前唯一 `acquiringBillCurrency:export` 只绑定 copy；regenerate 无 legacy TaskPolicy binding；binding pair 从 60 收紧为 59，顶层 Spec/TechDoc 已 reverse-sync，冻结基线未改 | E13-G 必须重建 current manifest/provenance/checksum，不能用旧 fixture 代偿。 |
 | E13-C capability validation | 定向 `10/10 PASS`；E13-A/B/C 扩大回归 `115/115 PASS`；Acquiring/Registry 重点回归 `60/60 PASS`；完整单测 `6819/6822 PASS`（`0 FAIL`、`3 SKIP`，日志 `unit-20260830-232228.log`）；Acquiring 集成 `252/252 PASS`；smoke、ESLint 与语法 PASS；copy 的普通文件/hash/staging/Publisher 和 main/side regenerate 的 complete-only/read-only DB/original writer/Workbook 回读均已验证；交叉输入与 Publisher failure 均 fail closed | production 仍为 false；Windows、真实大 run/RSS 与资金恢复人工门禁留到 R3.2.5。 |
+| E13-D capability/full regression | E13-D+mature adapter `16/16 PASS`；完整单测 `6824/6827 PASS`（`0 FAIL`、`3 SKIP`，日志 `unit-20260830-235725.log`）；53 个 integration 脚本 `2488/2488 PASS`（`361809 ms`）；smoke、ESLint、语法与 diff PASS；真实 Runtime/engine、CompoundLease、无 wrapper Worker、真实取消回滚、精确 result 与 exact-7 身份分叉反例均通过 | production 与默认 IPC 均未启用；Windows、真实大文件/RSS、资金/恢复人工复核留到 R3.2.5。 |
 
 ## Blindspot / Reconciliation
 
@@ -60,6 +63,8 @@
 - E13-B VCC import audit 对损坏的 `source_files_json`、`abnormal_fields_json`、`diff_fields_json` 均 fail closed，禁止把审计血缘或异常字段静默降级为空数组。
 - 通用只读 Publisher 现在严格按 FilePlan output authority 重排 artifact，并保持 target snapshot 与目标顺序一致；重复或缺失 artifact key 在发布前拒绝。
 - E13-D/E/F 必须证明不新增额外 spawn、事务边界/receipt/cancel/recovery 零漂移。
+- E13-D 已把 envelope exact-7 `context` 固定为 mature adapter 到旧 engine 的唯一 batch identity；caller 同时提供的 `input.batchContext` 只有逐字段一致才被接受，避免 Supervisor receipt 与实际 DB/recovery 身份分叉。
+- E13-D 未修改 Pending/BizOP 的 SQL、覆盖删除顺序、金额/币种、行序、side DB、事务或默认 IPC；资金/恢复人工复核仍是 production 红线。
 - E13-G 不能通过放宽 AST/provenance gate 或仅刷新 hash 关闭 finding；必须以真实生产入口重建 coverage。
 - 资金、恢复、Windows、真实样本和 production enablement 保持人工门禁。
 

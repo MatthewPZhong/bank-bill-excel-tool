@@ -133,8 +133,8 @@ existing-critical-protocol
 
 | actionKey | currentDisposition | targetDisposition | mode | lifetime | adapterKind | commit.kind | production.enabled（代码合并时） | 说明 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `pending:import` | `managed` | `managed` | `thread-pool` | `job` | `existing-dispatch` | `existing-critical-protocol` | `true` | 现有 big-table engine；不额外 spawn |
-| `biz-op:import-flow` | `managed` | `managed` | `thread-pool` | `job` | `existing-dispatch` | `existing-critical-protocol` | `true` | 现有 ordered writer |
+| `pending:import` | `managed` | `managed` | `thread-pool` | `job` | `existing-dispatch` | `existing-critical-protocol` | `false` | 现有 big-table engine；不额外 spawn；人工资金/恢复门禁前保持 legacy |
+| `biz-op:import-flow` | `managed` | `managed` | `thread-pool` | `job` | `existing-dispatch` | `existing-critical-protocol` | `false` | 现有 ordered writer；人工资金/恢复门禁前保持 legacy |
 | `acquiring:import` | `legacy-preserved` | `managed` | `thread-pool` | `job` | `existing-dispatch` | `existing-critical-protocol` | `false` | adapterKey 固化现有 import pool |
 | `acquiring:run-new-eligible` | `legacy-preserved` | `managed` | `thread-pool` | `job` | `existing-dispatch` | `existing-critical-protocol` | `false` | 仅符合既有 multiworker gate 的全新 run；adapterKey 固定 |
 | `acquiring:run-single-or-resume` | `legacy-preserved` | `managed` | `thread-single` | `job` | `existing-dispatch` | `existing-critical-protocol` | `false` | small / resume / forced-single；不得在运行中切换 |
@@ -195,6 +195,9 @@ Adapter只负责：
 - cancel/close/exit；
 - exactly-once ExecutionResult；
 -调用既有receipt/inspector并映射Lifecycle。
+- 对 `file-batch` action，以已校验的 Protocol envelope exact-7 `context` 作为唯一 Main-owned
+  任务身份；既有 dispatcher 所需的 `input.batchContext` 必须由 adapter 绑定为同一身份，caller
+  若同时提供则必须逐字段一致，不一致时在启动既有 dispatcher 前 fail closed。
 
 禁止：
 
