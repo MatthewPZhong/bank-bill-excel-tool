@@ -908,7 +908,7 @@ test('source identity对batch/跨session别名与内容重复fail closed且不�
   assert.equal(harness.diagnostics.some((event) => event.type === 'service-fatal'), false);
 });
 
-test('四个future action在解析payload与申请resource前返回bounded unsupported且不改变已有session', async (t) => {
+test('三个E09-B后续action在解析payload与申请resource前返回bounded unsupported且不改变已有session', async (t) => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-e09-a-wrong-action-'));
   t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
   const importedPath = path.join(tempDir, 'imported.xlsx');
@@ -929,7 +929,6 @@ test('四个future action在解析payload与申请resource前返回bounded unsup
   const wrongActions = [
     ['statement:generate-current', importPayload([unreadSource], evidence)],
     ['statement:generate-all', { command: 'status' }],
-    ['statement:resolve-big-account', { command: 'status', extra: 'must-not-parse' }],
     ['statement:resolve-manual-balance', {
       ...importPayload([unreadSource], evidence),
       extra: { rows: [['must-not-parse']] }
@@ -967,7 +966,7 @@ test('四个future action在解析payload与申请resource前返回bounded unsup
   assert.equal(harness.diagnostics.some((event) => event.type === 'service-job-callback-error'), false);
 });
 
-test('E09-B 大账号交互上下文保持 blocked，不创建 token/DTO/本地 Map', async (t) => {
+test('大账号模板缺少维护候选时fail closed且不创建 token/DTO/本地 Map', async (t) => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-e09-a-blocked-'));
   t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
   const inputPath = path.join(tempDir, 'blocked.xlsx');

@@ -1,6 +1,7 @@
 'use strict';
 
 const { createHash } = require('node:crypto');
+const { isDeepStrictEqual } = require('node:util');
 
 const { createCanonicalEventEmitter } = require('../background-execution/adapters/canonical-event-emitter');
 const { toProtocolError } = require('../background-execution/error-codec');
@@ -11,10 +12,16 @@ const {
 const { createDirectionSequenceTracker } = require('../background-execution/sequence-tracker');
 const {
   createStatementImportResult,
+  createStatementInteractionCancelledResult,
+  createStatementInteractionRequiredResult,
   createStatementStatusDto,
   createStatementStatusResult
 } = require('./contracts');
 const { createStatementServiceRequest } = require('./import-contracts');
+const {
+  createStatementBigAccountContinuationRequest,
+  createStatementCancelInteractionRequest
+} = require('./interaction-contracts');
 const { estimateStatementServiceStateFootprint } = require('./state-footprint');
 const {
   createStatementSourceIdentityGuard,
@@ -22,9 +29,11 @@ const {
 } = require('./source-identity');
 const {
   buildStableSummary,
+  buildBigAccountInteractionDraft,
   buildStatementImportCandidate,
   createStatementServiceState
 } = require('./session-state');
+const { createStatementTokenStore } = require('./token-store');
 
 class StatementServiceError extends Error {
   constructor(code, message) {
@@ -46,6 +55,14 @@ function createStatementService(options = {}) {
   let activeJob = null;
   let cancelledRequestTombstone = null;
   let closing = false;
+  const tokenStore = createStatementTokenStore(options.tokenStoreOptions);
+  const tokenClockNow = options.tokenStoreOptions && typeof options.tokenStoreOptions.now === 'function'
+    ? options.tokenStoreOptions.now
+    : Date.now;
+  const tokenExpiryTimers = new Map();
+  const tokenReleases = new Map();
+  let releasedTokenTombstone = null;
+  let failedGrantTombstone = null;
 
   function nextControlId(prefix) {
     controlOrdinal += 1;
@@ -115,9 +132,136 @@ function createStatementService(options = {}) {
     job.emit('job:done', { result });
   }
 
-  function assertNotCancelled(job) {
-    if (!job.cancelled) return;
-    throw new StatementServiceError('STATEMENT_IMPORT_CANCELLED', 'Statement import cancelled before adoption');
+  function currentSummary(activePhase = 'idle') {
+    const pendingInteractions = tokenStore.listStatus();
+    return createStatementStatusDto({
+      ...(state.stableSummary || buildStableSummary(state)),
+      pendingInteractionCount: pendingInteractions.length,
+      pendingInteractions,
+      activePhase
+    });
+  }
+
+  function clearTokenExpiry(record) {
+    if (!record) return;
+    const timer = tokenExpiryTimers.get(record.handle.tokenId);
+    if (timer) clearTimeout(timer);
+    tokenExpiryTimers.delete(record.handle.tokenId);
+  }
+
+  function releaseToken(record, reason, completion = null) {
+    if (!record) return;
+    const existingRelease = tokenReleases.get(record.handle.reservationId);
+    if (existingRelease) {
+      if (completion && !existingRelease.completion) existingRelease.completion = completion;
+      return;
+    }
+    tokenStore.markReleasing(record.handle.tokenId);
+    clearTokenExpiry(record);
+    const controlId = nextControlId('token-release');
+    tokenReleases.set(record.handle.reservationId, {
+      record,
+      completion,
+      controlId,
+      controlIds: new Set([controlId])
+    });
+    postControl('resource:release', controlId, record.ownerJobRef, {
+      reservationId: record.handle.reservationId,
+      reason
+    });
+  }
+
+  function armTokenExpiry(record) {
+    if (!record || record.state !== 'published') return;
+    clearTokenExpiry(record);
+    const delay = Math.max(0, record.handle.expiresAt - tokenClockNow());
+    const expiryTimer = setTimeout(() => {
+      if (tokenStore.inspect(record.handle.tokenId)?.state === 'published') {
+        releaseToken(record, 'token-expired');
+      }
+    }, delay);
+    if (typeof expiryTimer.unref === 'function') expiryTimer.unref();
+    tokenExpiryTimers.set(record.handle.tokenId, expiryTimer);
+  }
+
+  function resumeReplacementToken(job) {
+    const record = job && job.replacementTokenRecord;
+    if (!record || tokenStore.inspect(record.handle.tokenId)?.state !== 'published') return;
+    job.replacementTokenRecord = null;
+    armTokenExpiry(record);
+  }
+
+  function publicTokenIdentity(record) {
+    const interaction = record.publicInteraction;
+    return Object.freeze({
+      tokenId: interaction.tokenId,
+      purpose: interaction.purpose,
+      serviceGeneration: interaction.serviceGeneration,
+      sessionRevision: interaction.sessionRevision,
+      expiresAt: interaction.expiresAt,
+      allowedChoiceDigest: interaction.allowedChoiceDigest
+    });
+  }
+
+  function samePublicToken(left, right) {
+    return Boolean(left && right &&
+      ['tokenId', 'purpose', 'serviceGeneration', 'sessionRevision', 'expiresAt', 'allowedChoiceDigest']
+        .every((key) => left[key] === right[key]));
+  }
+
+  function assertJobActive(job) {
+    if (!job.cancelled && !job.terminal && activeJob === job) return;
+    throw new StatementServiceError('STATEMENT_IMPORT_CANCELLED', 'Statement operation cancelled before adoption');
+  }
+
+  function requestInteractionToken(job, interactionDraft, replacementTokenRecord = null) {
+    assertJobActive(job);
+    const input = {
+      ...interactionDraft,
+      serviceGeneration: state.serviceGeneration
+    };
+    const draft = replacementTokenRecord
+      ? tokenStore.prepareReplacement(input, replacementTokenRecord.handle.tokenId)
+      : tokenStore.prepare(input);
+    const result = createStatementInteractionRequiredResult({
+      status: 'interaction-required',
+      interaction: draft.publicInteraction
+    }, job.start.actionKey);
+    assertJobActive(job);
+    const requestId = nextControlId('request');
+    const candidateRevision = ++controlOrdinal;
+    if (replacementTokenRecord &&
+        candidateRevision <= replacementTokenRecord.owner.candidateRevision) {
+      throw new StatementServiceError(
+        'STATEMENT_TOKEN_REPLACEMENT_REVISION_STALE',
+        'Replacement token owner revision did not advance'
+      );
+    }
+    const owner = Object.freeze({
+      kind: 'interaction-token',
+      ownerKeyHash: replacementTokenRecord
+        ? replacementTokenRecord.owner.ownerKeyHash
+        : createHash('sha256').update(`service.statement/token/${draft.tokenId}`).digest('hex'),
+      candidateRevision
+    });
+    Object.assign(job, {
+      kind: 'token', interactionDraft: draft, requestId,
+      requestControlId: nextControlId('request-control'), owner, result,
+      replacementTokenRecord,
+      replacesReservationId: draft.replacesReservationId
+    });
+    if (replacementTokenRecord) clearTokenExpiry(replacementTokenRecord);
+    assertJobActive(job);
+    try {
+      postControl('resource:request', job.requestControlId, jobRef(job.start), {
+        requestId, requestKind: 'pending-interaction-create',
+        requested: { memoryBytes: draft.footprint.estimatedBytes, cpuSlots: 0, ioHeavySlots: 0 },
+        replacesReservationId: draft.replacesReservationId, owner
+      });
+    } catch (error) {
+      resumeReplacementToken(job);
+      throw error;
+    }
   }
 
   async function resolvePrivateSources(request, job) {
@@ -130,7 +274,7 @@ function createStatementService(options = {}) {
     const sources = [];
     const identityGuard = createStatementSourceIdentityGuard(state);
     for (const source of request.sources) {
-      assertNotCancelled(job);
+      assertJobActive(job);
       const resolved = options.resolveSourceResource(source.resourceId);
       const resolution = typeof resolved === 'string'
         ? { path: resolved, legacyPath: resolved, allowedRoot: null }
@@ -148,7 +292,7 @@ function createStatementService(options = {}) {
       const privateSource = await resolveStatementSourceIdentity(source, resolution.path, {
         allowedRoot: resolution.allowedRoot,
         legacyPath: resolution.legacyPath,
-        assertNotCancelled: () => assertNotCancelled(job)
+        assertNotCancelled: () => assertJobActive(job)
       });
       identityGuard.accept(privateSource);
       sources.push(privateSource);
@@ -175,32 +319,126 @@ function createStatementService(options = {}) {
     };
     activeJob = job;
     try {
+      if (start.actionKey === 'statement:resolve-big-account') {
+        if (start.payload.input && start.payload.input.command === 'cancel-interaction') {
+          const cancellation = createStatementCancelInteractionRequest(start.payload.input);
+          const result = createStatementInteractionCancelledResult({
+            status: 'interaction-cancelled',
+            tokenId: cancellation.token.tokenId
+          });
+          if (releasedTokenTombstone && releasedTokenTombstone.kind === 'cancel-interaction' &&
+              samePublicToken(cancellation.token, releasedTokenTombstone.token)) {
+            finishDone(job, result);
+            return;
+          }
+          const tokenRecord = tokenStore.claimCancellation(cancellation.token, {
+            serviceGeneration: state.serviceGeneration,
+            sessionRevision: state.sessionRevision,
+            purpose: 'big-account'
+          });
+          Object.assign(job, { kind: 'cancel-interaction', tokenRecord, result });
+          releaseToken(tokenRecord, 'job-failed', { job, result });
+          return;
+        }
+        const continuation = createStatementBigAccountContinuationRequest(start.payload.input);
+        const pendingToken = tokenStore.inspect(continuation.token.tokenId);
+        if (!pendingToken) {
+          throw new StatementServiceError('STATEMENT_TOKEN_STALE', 'Statement token is stale');
+        }
+        const tokenRecord = tokenStore.beginConsume(continuation.token, {
+          serviceGeneration: state.serviceGeneration,
+          sessionRevision: state.sessionRevision,
+          purpose: 'big-account',
+          sessionKey: continuation.importEvidence.sessionOwner.sessionKey,
+          evidence: {
+            sessionOwner: continuation.importEvidence.sessionOwner,
+            templateCatalog: continuation.importEvidence.templateCatalog,
+            sources: continuation.importEvidence.sources
+          },
+          choiceDomain: pendingToken.privateContext.choiceDomain,
+          choice: continuation.choice
+        });
+        Object.assign(job, { kind: 'continuation', tokenRecord });
+        const privateRequest = Object.freeze({
+          ...continuation.importEvidence,
+          sources: await resolvePrivateSources(continuation.importEvidence, job)
+        });
+        const originalSources = tokenRecord.privateContext.request.sources;
+        if (privateRequest.sources.length !== originalSources.length ||
+            privateRequest.sources.some((source, index) => {
+              const original = originalSources[index];
+              return source.resourceId !== original.resourceId ||
+                source.templateRef !== original.templateRef ||
+                source.path !== original.path ||
+                !isDeepStrictEqual(source.snapshot, original.snapshot) ||
+                !isDeepStrictEqual(source.sourceIdentity, original.sourceIdentity);
+            })) {
+          throw new StatementServiceError(
+            'STATEMENT_TOKEN_SOURCE_IDENTITY_STALE',
+            'Statement source resource identity changed before continuation'
+          );
+        }
+        const candidate = await buildStatementImportCandidate(state, privateRequest, {
+          assertNotCancelled: () => assertJobActive(job),
+          bigAccountAssignments: tokenRecord.claimedChoice.assignments,
+          bigAccountChoiceMode: tokenRecord.claimedChoice.mode,
+          expectedProvisionalDigest: tokenRecord.privateContext.candidateDigest
+        });
+        assertJobActive(job);
+        const footprint = estimateStatementServiceStateFootprint(candidate.state);
+        const result = createStatementImportResult({
+          status: 'imported', summary: candidate.state.stableSummary, session: candidate.result
+        });
+        const requestId = nextControlId('request');
+        const owner = Object.freeze({
+          kind: 'service-state',
+          ownerKeyHash: createHash('sha256').update('service.statement/session-state').digest('hex'),
+          candidateRevision: candidate.state.sessionRevision
+        });
+        Object.assign(job, {
+          kind: 'persistent-after-token', tokenRecord, requestId,
+          requestControlId: nextControlId('request-control'), owner, candidate, footprint, result
+        });
+        assertJobActive(job);
+        postControl('resource:request', job.requestControlId, jobRef(start), {
+          requestId, requestKind: 'persistent-state-replace',
+          requested: { memoryBytes: footprint.estimatedBytes, cpuSlots: 0, ioHeavySlots: 0 },
+          replacesReservationId: state.persistentReservationId, owner
+        });
+        return;
+      }
       if (start.actionKey !== 'statement:import') {
         throw new StatementServiceError(
           'STATEMENT_ACTION_UNSUPPORTED',
-          'E09-A Statement Service only supports statement:import'
+          'E09-B Statement Service only supports statement:import and statement:resolve-big-account'
         );
       }
       const request = createStatementServiceRequest(start.payload.input);
       if (request.command === 'status') {
-        const summary = createStatementStatusDto({
-          ...(state.stableSummary || buildStableSummary(state)),
-          activePhase: 'idle'
-        });
+        const summary = currentSummary(tokenStore.listStatus().length ? 'waiting-user' : 'idle');
         finishDone(job, createStatementStatusResult({ status: 'status', summary }));
         return;
       }
 
       await new Promise((resolve) => setImmediate(resolve));
-      assertNotCancelled(job);
+      assertJobActive(job);
       const privateRequest = Object.freeze({
         ...request,
         sources: await resolvePrivateSources(request, job)
       });
-      const candidate = await buildStatementImportCandidate(state, privateRequest, {
-        assertNotCancelled: () => assertNotCancelled(job)
+      const interactionDraft = await buildBigAccountInteractionDraft(state, privateRequest, {
+        assertNotCancelled: () => assertJobActive(job)
       });
-      assertNotCancelled(job);
+      assertJobActive(job);
+      if (interactionDraft) {
+        const existingToken = tokenStore.listRecords().find((record) => record.state === 'published');
+        requestInteractionToken(job, interactionDraft, existingToken || null);
+        return;
+      }
+      const candidate = await buildStatementImportCandidate(state, privateRequest, {
+        assertNotCancelled: () => assertJobActive(job)
+      });
+      assertJobActive(job);
       const footprint = estimateStatementServiceStateFootprint(candidate.state);
       const result = createStatementImportResult({
         status: 'imported',
@@ -212,6 +450,7 @@ function createStatementService(options = {}) {
           candidateRevision: candidate.state.sessionRevision
         }));
       }
+      assertJobActive(job);
       const requestId = nextControlId('request');
       const owner = Object.freeze({
         kind: 'service-state',
@@ -224,6 +463,7 @@ function createStatementService(options = {}) {
       job.candidate = candidate;
       job.footprint = footprint;
       job.result = result;
+      assertJobActive(job);
       postControl('resource:request', job.requestControlId, jobRef(start), {
         requestId,
         requestKind: 'persistent-state-replace',
@@ -232,6 +472,13 @@ function createStatementService(options = {}) {
         owner
       });
     } catch (error) {
+      if (job.terminal) return;
+      if (job.tokenRecord && tokenReleases.has(job.tokenRecord.handle.reservationId)) return;
+      if (job.tokenRecord && ['published', 'consuming', 'inserted'].includes(job.tokenRecord.state)) {
+        releaseToken(job.tokenRecord, 'job-failed', { job, error });
+        return;
+      }
+      resumeReplacementToken(job);
       if (error && error.code === 'STATEMENT_IMPORT_CANCELLED') {
         if (!job.terminal) job.emit('cancel:ack', { cancellation: { scope: 'job' } });
         finishError(job, error, 'STATEMENT_IMPORT_CANCELLED');
@@ -243,7 +490,10 @@ function createStatementService(options = {}) {
 
   function handleResourceGrant(message) {
     const job = activeJob;
-    if (!job || job.terminal || !job.candidate || message.payload.requestId !== job.requestId) {
+    if (!job || job.terminal || (!job.candidate && job.kind !== 'token') ||
+        message.payload.requestId !== job.requestId ||
+        (job.kind === 'token' &&
+          message.payload.replacesReservationId !== job.replacesReservationId)) {
       if (matchesCancelledRequest(message)) {
         cancelledRequestTombstone = {
           ...cancelledRequestTombstone,
@@ -258,27 +508,51 @@ function createStatementService(options = {}) {
     if (job.cancelled) {
       throw new StatementServiceError('STATEMENT_IMPORT_CANCELLED', 'Cancelled candidate received a resource grant');
     }
-    job.grant = message.payload;
-    job.adoptionStarted = true;
-    if (typeof options.withholdAdopt === 'function' && options.withholdAdopt(Object.freeze({
-      candidateRevision: job.owner.candidateRevision,
-      requestId: job.requestId,
-      reservationId: message.payload.reservationId
-    }))) {
-      return;
+    try {
+      job.grant = message.payload;
+      job.adoptionStarted = true;
+      if (job.kind === 'token') {
+        const record = tokenStore.insertPrivate(job.interactionDraft, {
+          ...message.payload,
+          owner: job.owner,
+          ownerJobRef: jobRef(job.start)
+        });
+        job.tokenRecord = record;
+      }
+      if (typeof options.withholdAdopt === 'function' && options.withholdAdopt(Object.freeze({
+        candidateRevision: job.owner.candidateRevision,
+        requestId: job.requestId,
+        reservationId: message.payload.reservationId
+      }))) {
+        return;
+      }
+      postControl('resource:adopted', nextControlId('adopted'), jobRef(job.start), {
+        requestId: job.requestId,
+        grantId: message.payload.grantId,
+        reservationId: message.payload.reservationId,
+        owner: job.owner
+      });
+    } catch (error) {
+      job.candidate = null;
+      failedGrantTombstone = {
+        phase: 'awaiting-revoke',
+        reservationId: message.payload.reservationId,
+        grantId: message.payload.grantId,
+        jobRef: jobRef(job.start),
+        revokeControlId: null,
+        replacementTokenRecord: job.replacementTokenRecord || null
+      };
+      finishError(job, error, 'STATEMENT_ADOPTION_FAILED');
     }
-    postControl('resource:adopted', nextControlId('adopted'), jobRef(job.start), {
-      requestId: job.requestId,
-      grantId: message.payload.grantId,
-      reservationId: message.payload.reservationId,
-      owner: job.owner
-    });
   }
 
   function handleResourceReject(message) {
     const job = activeJob;
     if (!job || job.terminal || message.payload.requestId !== job.requestId) {
       if (matchesCancelledRequest(message)) {
+        if (cancelledRequestTombstone.replacementTokenRecord) {
+          armTokenExpiry(cancelledRequestTombstone.replacementTokenRecord);
+        }
         cancelledRequestTombstone = null;
         return;
       }
@@ -289,16 +563,29 @@ function createStatementService(options = {}) {
       `Statement reservation rejected: ${message.payload.reasonCode}`
     );
     job.candidate = null;
+    if (job.tokenRecord) {
+      releaseToken(job.tokenRecord, 'job-failed', { job, error });
+      return;
+    }
+    resumeReplacementToken(job);
     finishError(job, error, 'STATEMENT_RESERVATION_REJECTED');
   }
 
   function handleAdoptAck(message) {
     const job = activeJob;
-    if (!job || job.terminal || !job.candidate || !job.result || !job.grant ||
+    if (!job || job.terminal || ((!job.candidate || !job.result) && job.kind !== 'token') || !job.grant ||
         message.payload.requestId !== job.requestId ||
         message.payload.grantId !== job.grant.grantId ||
         message.payload.reservationId !== job.grant.reservationId) {
       throw new StatementServiceError('STATEMENT_SERVICE_ADOPT_ACK_STALE', 'Adopt ack does not match active candidate');
+    }
+    if (job.kind === 'token') {
+      const record = tokenStore.markAdopted(job.tokenRecord.handle.tokenId, message.payload);
+      clearTokenExpiry(job.replacementTokenRecord);
+      job.replacementTokenRecord = null;
+      armTokenExpiry(record);
+      finishDone(job, job.result);
+      return;
     }
     const adopted = job.candidate.state;
     adopted.persistentReservationId = message.payload.reservationId;
@@ -306,7 +593,16 @@ function createStatementService(options = {}) {
     adopted.stableSummary = buildStableSummary(adopted);
     state = adopted;
     job.candidate = null;
-    finishDone(job, job.result);
+    if (job.tokenRecord) {
+      releaseToken(job.tokenRecord, 'token-consumed', { job, result: job.result });
+    } else {
+      const published = tokenStore.listRecords().find((record) => record.state === 'published');
+      if (published) {
+        releaseToken(published, 'session-invalidated', { job, result: job.result });
+        return;
+      }
+      finishDone(job, job.result);
+    }
   }
 
   function handleCancel(message) {
@@ -321,12 +617,24 @@ function createStatementService(options = {}) {
         jobRef: jobRef(job.start),
         grantId: null,
         reservationId: null,
-        revokeControlId: null
+        revokeControlId: null,
+        replacementTokenRecord: job.replacementTokenRecord || null
       };
     }
     job.cancelled = true;
     job.candidate = null;
     job.emit('cancel:ack', { cancellation: { scope: 'job' } });
+    if (job.tokenRecord) {
+      releaseToken(job.tokenRecord, 'job-failed', {
+        job,
+        error: new StatementServiceError('STATEMENT_IMPORT_CANCELLED', 'Statement continuation cancelled')
+      });
+      return;
+    }
+    if (!cancelledRequestTombstone ||
+        !sameJobRef(cancelledRequestTombstone.jobRef, jobRef(job.start))) {
+      resumeReplacementToken(job);
+    }
     finishError(
       job,
       new StatementServiceError('STATEMENT_IMPORT_CANCELLED', 'Statement import cancelled before adoption'),
@@ -336,6 +644,68 @@ function createStatementService(options = {}) {
 
   function handleResourceRevoke(message) {
     const reservationId = message.payload.reservationId;
+    const failedGrant = failedGrantTombstone &&
+      failedGrantTombstone.phase === 'awaiting-revoke' &&
+      reservationId === failedGrantTombstone.reservationId &&
+      message.payload.grantId === failedGrantTombstone.grantId &&
+      sameJobRef(message.jobRef, failedGrantTombstone.jobRef);
+    const tokenRecord = tokenStore.listRecords().find((record) =>
+      record.handle.reservationId === reservationId);
+    if (tokenRecord) {
+      const adoptionTimeoutJob = message.payload.reasonCode === 'adoption-timeout' &&
+        activeJob && !activeJob.terminal && activeJob.kind === 'token' &&
+        activeJob.tokenRecord === tokenRecord && tokenRecord.state === 'inserted' &&
+        activeJob.grant && activeJob.grant.grantId === message.payload.grantId &&
+        sameJobRef(message.jobRef, jobRef(activeJob.start));
+      const timeoutCompletion = adoptionTimeoutJob
+        ? {
+            job: activeJob,
+            error: new StatementServiceError(
+              'STATEMENT_ADOPTION_TIMEOUT',
+              'Statement token adoption timed out'
+            )
+          }
+        : null;
+      const existingRelease = tokenReleases.get(reservationId);
+      if (!existingRelease) {
+        tokenStore.markReleasing(tokenRecord.handle.tokenId);
+        tokenReleases.set(reservationId, {
+          record: tokenRecord,
+          completion: timeoutCompletion,
+          controlId: message.controlId,
+          controlIds: new Set([message.controlId])
+        });
+      } else {
+        existingRelease.controlIds.add(message.controlId);
+        if (timeoutCompletion && !existingRelease.completion) {
+          existingRelease.completion = timeoutCompletion;
+        }
+      }
+      if (failedGrant) {
+        failedGrantTombstone = {
+          ...failedGrantTombstone,
+          phase: 'awaiting-release-ack',
+          revokeControlId: message.controlId
+        };
+      }
+      postControl('resource:release', message.controlId, message.jobRef, {
+        reservationId,
+        reason: adoptionTimeoutJob || failedGrant ? 'job-failed' : 'service-close'
+      });
+      return;
+    }
+    if (failedGrant) {
+      failedGrantTombstone = {
+        ...failedGrantTombstone,
+        phase: 'awaiting-release-ack',
+        revokeControlId: message.controlId
+      };
+      postControl('resource:release', message.controlId, message.jobRef, {
+        reservationId,
+        reason: 'job-failed'
+      });
+      return;
+    }
     if (cancelledRequestTombstone &&
         cancelledRequestTombstone.phase === 'awaiting-revoke' &&
         reservationId === cancelledRequestTombstone.reservationId &&
@@ -401,11 +771,65 @@ function createStatementService(options = {}) {
       if (message.operation === 'resource:adopt-ack') return handleAdoptAck(message);
       if (message.operation === 'resource:revoke') return handleResourceRevoke(message);
       if (message.operation === 'resource:release-ack') {
+        const release = tokenReleases.get(message.payload.reservationId);
+        if (release && release.controlIds.has(message.controlId)) {
+          tokenReleases.delete(message.payload.reservationId);
+          const replacementTokenRecord = release.record.replacementTokenId
+            ? tokenStore.inspect(release.record.replacementTokenId)
+            : null;
+          tokenStore.remove(release.record.handle.tokenId);
+          if (replacementTokenRecord && replacementTokenRecord.state === 'published') {
+            armTokenExpiry(replacementTokenRecord);
+          }
+          releasedTokenTombstone = Object.freeze({
+            kind: release.completion && release.completion.job &&
+              release.completion.job.kind === 'cancel-interaction'
+              ? 'cancel-interaction'
+              : 'other-release',
+            reservationId: message.payload.reservationId,
+            controlIds: Object.freeze([...release.controlIds]),
+            token: publicTokenIdentity(release.record)
+          });
+          if (failedGrantTombstone &&
+              failedGrantTombstone.phase === 'awaiting-release-ack' &&
+              message.payload.reservationId === failedGrantTombstone.reservationId &&
+              message.controlId === failedGrantTombstone.revokeControlId &&
+              sameJobRef(message.jobRef, failedGrantTombstone.jobRef)) {
+            failedGrantTombstone = null;
+          }
+          if (release.completion) {
+            if (release.completion.error) {
+              finishError(release.completion.job, release.completion.error);
+            } else {
+              finishDone(release.completion.job, release.completion.result);
+            }
+          }
+          return;
+        }
+        if (failedGrantTombstone &&
+            failedGrantTombstone.phase === 'awaiting-release-ack' &&
+            message.payload.reservationId === failedGrantTombstone.reservationId &&
+            message.controlId === failedGrantTombstone.revokeControlId &&
+            sameJobRef(message.jobRef, failedGrantTombstone.jobRef)) {
+          if (failedGrantTombstone.replacementTokenRecord) {
+            armTokenExpiry(failedGrantTombstone.replacementTokenRecord);
+          }
+          failedGrantTombstone = null;
+          return;
+        }
+        if (releasedTokenTombstone &&
+            message.payload.reservationId === releasedTokenTombstone.reservationId &&
+            releasedTokenTombstone.controlIds.includes(message.controlId)) {
+          return;
+        }
         if (cancelledRequestTombstone &&
             cancelledRequestTombstone.phase === 'awaiting-release-ack' &&
             message.controlId === cancelledRequestTombstone.revokeControlId &&
             message.payload.reservationId === cancelledRequestTombstone.reservationId &&
             sameJobRef(message.jobRef, cancelledRequestTombstone.jobRef)) {
+          if (cancelledRequestTombstone.replacementTokenRecord) {
+            armTokenExpiry(cancelledRequestTombstone.replacementTokenRecord);
+          }
           cancelledRequestTombstone = null;
           return;
         }
@@ -414,6 +838,10 @@ function createStatementService(options = {}) {
           const job = activeJob;
           const error = job.revokedCandidateError;
           job.revokedCandidateError = null;
+          if (job.tokenRecord) {
+            releaseToken(job.tokenRecord, 'job-failed', { job, error });
+            return;
+          }
           finishError(job, error, 'STATEMENT_ADOPTION_TIMEOUT');
           return;
         }

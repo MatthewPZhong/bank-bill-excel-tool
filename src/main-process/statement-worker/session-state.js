@@ -3,6 +3,9 @@
 const fs = require('node:fs');
 
 const { buildMappedRows } = require('../../backend/file-service');
+const { normalizeCell } = require('../../backend/file-service/common');
+const { hasEffectiveAmount } = require('../../backend/file-service/normalizers');
+const { canonicalSha256 } = require('../background-execution/canonical-json-v1');
 const {
   appendStatementSessionImport,
   buildStatementFileEntry,
@@ -29,19 +32,22 @@ function sourceChanged() {
   );
 }
 
-function assertImportDoesNotRequireInteraction(template) {
+function importRequiresBigAccountInteraction(template) {
   const merchantMapping = template && template.mappingByField
     ? template.mappingByField.MerchantId
     : null;
   const mappingValues = Array.isArray(merchantMapping) ? merchantMapping : [merchantMapping];
   const requiresBigAccount = mappingValues.some((value) =>
     value === '__FIXED__:__MULTI_BIG_ACCOUNT__' || value === '自己输入');
-  if (requiresBigAccount) {
-    throw new StatementSessionError(
-      'STATEMENT_BIG_ACCOUNT_INTERACTION_BLOCKED',
-      'Big-account selection remains blocked until E09-B'
-    );
-  }
+  return requiresBigAccount;
+}
+
+function assertImportDoesNotRequireInteraction(template) {
+  if (!importRequiresBigAccountInteraction(template)) return;
+  throw new StatementSessionError(
+    'STATEMENT_BIG_ACCOUNT_INTERACTION_BLOCKED',
+    'Big-account selection remains blocked until an E09-B continuation supplies exact assignments'
+  );
 }
 
 function createStatementServiceState(serviceGeneration) {
@@ -158,12 +164,195 @@ function assertSessionOwner(session, owner) {
   }
 }
 
+function buildMappedRowsForSource(source, template, options = {}) {
+  const mapRows = options.buildMappedRows || buildMappedRows;
+  const fsImpl = options.fs || fs;
+  return mapRows({
+    inputFilePath: source.path,
+    orderedTargetFields: template.orderedTargetFields,
+    mappingByField: template.mappingByField,
+    accountMappingByBankId: template.accountMappingByBankId,
+    currencyMappings: template.currencyMappings,
+    amountMappingRules: template.amountMappingRules,
+    amountSplitByField: template.amountSplitByField,
+    billSplitMerge: template.billSplitMerge,
+    expectedSourceHeaders: template.expectedSourceHeaders,
+    selectedBigAccount: options.selectedBigAccount || null,
+    dateParseOrder: template.dateParseOrder,
+    readOptions: { readGuard: readGuardForSource(source, fsImpl) }
+  });
+}
+
+function identifyAccountBlocks(detailRows, options = {}) {
+  const { includeEmptyBlocks = false } = options;
+  const headerRow = detailRows[0] || [];
+  const dataRows = detailRows.slice(1);
+  const rowMetas = Array.isArray(detailRows.rowMetas) ? detailRows.rowMetas : [];
+  const headerBreaks = Array.isArray(detailRows.headerBreaks) ? detailRows.headerBreaks : [];
+  const creditIndex = headerRow.indexOf('Credit Amount');
+  const debitIndex = headerRow.indexOf('Debit Amount');
+  const isTransactionRow = (row) => {
+    const credit = creditIndex >= 0 && Array.isArray(row) ? row[creditIndex] : '';
+    const debit = debitIndex >= 0 && Array.isArray(row) ? row[debitIndex] : '';
+    return hasEffectiveAmount(credit) || hasEffectiveAmount(debit);
+  };
+  const trimBlock = (startIndex, initialEndIndex) => {
+    let endIndex = initialEndIndex;
+    while (endIndex >= startIndex && !isTransactionRow(dataRows[endIndex])) endIndex -= 1;
+    while (startIndex <= endIndex && !isTransactionRow(dataRows[startIndex])) startIndex += 1;
+    return { startIndex, endIndex };
+  };
+  if (!headerBreaks.length) {
+    const trimmed = trimBlock(0, dataRows.length - 1);
+    if (!includeEmptyBlocks && trimmed.startIndex > trimmed.endIndex) return [];
+    return [{
+      blockOrdinal: 0,
+      startIndex: trimmed.startIndex,
+      endIndex: trimmed.endIndex,
+      startRowNumber: rowMetas[trimmed.startIndex]?.sourceRowNumber || 2
+    }];
+  }
+  const blocks = [];
+  let blockStart = 0;
+  let previousBreak = null;
+  headerBreaks.forEach((breakRowNumber, blockOrdinal) => {
+    const splitIndex = rowMetas.findIndex((meta, index) =>
+      index >= blockStart && meta.sourceRowNumber >= breakRowNumber);
+    const effectiveSplit = splitIndex >= 0 ? splitIndex : dataRows.length;
+    const trimmed = trimBlock(blockStart, effectiveSplit > blockStart ? effectiveSplit - 1 : blockStart - 1);
+    if (includeEmptyBlocks || trimmed.startIndex <= trimmed.endIndex) {
+      blocks.push({
+        blockOrdinal,
+        startIndex: trimmed.startIndex,
+        endIndex: trimmed.endIndex,
+        startRowNumber: rowMetas[trimmed.startIndex]?.sourceRowNumber || previousBreak || blockStart + 2
+      });
+    }
+    blockStart = effectiveSplit;
+    previousBreak = breakRowNumber;
+  });
+  const lastTrimmed = trimBlock(blockStart, dataRows.length - 1);
+  if (includeEmptyBlocks || lastTrimmed.startIndex <= lastTrimmed.endIndex) {
+    blocks.push({
+      blockOrdinal: headerBreaks.length,
+      startIndex: lastTrimmed.startIndex,
+      endIndex: lastTrimmed.endIndex,
+      startRowNumber: rowMetas[lastTrimmed.startIndex]?.sourceRowNumber ||
+        headerBreaks[headerBreaks.length - 1] || blockStart + 2
+    });
+  }
+  return blocks;
+}
+
+function mappedRowsEvidence(detailRows) {
+  const evidence = {
+    rows: detailRows.map((row) => (Array.isArray(row) ? row.slice() : row)),
+    rowMetas: Array.isArray(detailRows.rowMetas) ? detailRows.rowMetas.map((meta) => ({ ...meta })) : [],
+    headerBreaks: Array.isArray(detailRows.headerBreaks) ? detailRows.headerBreaks.slice() : [],
+    issues: Array.isArray(detailRows.issues) ? detailRows.issues.map((issue) => ({ ...issue })) : [],
+    skippedRows: Array.isArray(detailRows.skippedRows)
+      ? detailRows.skippedRows.map((row) => ({ ...row }))
+      : [],
+    simultaneousRows: Array.isArray(detailRows.simultaneousRows)
+      ? detailRows.simultaneousRows.map((row) => ({ ...row }))
+      : []
+  };
+  if (detailRows.amountSplitMatchStats && typeof detailRows.amountSplitMatchStats === 'object') {
+    evidence.amountSplitMatchStats = { ...detailRows.amountSplitMatchStats };
+  }
+  if (detailRows.billSplitMatchStats && typeof detailRows.billSplitMatchStats === 'object') {
+    evidence.billSplitMatchStats = { ...detailRows.billSplitMatchStats };
+  }
+  if (Array.isArray(detailRows.sourceRows)) {
+    evidence.sourceRows = mappedRowsEvidence(detailRows.sourceRows);
+  }
+  return evidence;
+}
+
+function provisionalDigest(entries) {
+  return canonicalSha256(entries.map((entry) => ({
+    resourceId: entry.source.resourceId,
+    templateRef: entry.source.templateRef,
+    templateDigest: entry.evidence.digest,
+    sourceIdentity: entry.source.sourceIdentity,
+    detailRows: mappedRowsEvidence(entry.detailRows)
+  })));
+}
+
+function selectionRows(entries, options = {}) {
+  const rows = [];
+  for (const entry of entries) {
+    if (!entry.requiresInteraction) continue;
+    for (const block of identifyAccountBlocks(entry.detailRows, options)) {
+      rows.push({
+        index: rows.length,
+        label: `${rows.length + 1}.`,
+        sourceRowNumber: block.startRowNumber,
+        fileName: entry.source.resourceId
+      });
+    }
+  }
+  return rows;
+}
+
+function applyBigAccountAssignments(entries, assignments, options = {}) {
+  const assignmentByIndex = new Map(assignments.map((assignment) => [assignment.rowIndex, assignment]));
+  let globalBlockIndex = 0;
+  return entries.map((entry) => {
+    const nextRows = cloneRowsWithMetadata(entry.detailRows);
+    if (!entry.requiresInteraction) return nextRows;
+    const header = nextRows[0] || [];
+    const merchantIdIndex = header.indexOf('MerchantId');
+    const currencyIndex = header.indexOf('Currency');
+    const dataRows = nextRows.slice(1);
+    const keepIndices = new Set();
+    for (const block of identifyAccountBlocks(entry.detailRows, options)) {
+      const assignment = assignmentByIndex.get(globalBlockIndex);
+      for (let index = block.startIndex; index <= block.endIndex && index < dataRows.length; index += 1) {
+        keepIndices.add(index);
+        if (assignment) {
+          if (merchantIdIndex >= 0) dataRows[index][merchantIdIndex] = assignment.merchantId;
+          if (currencyIndex >= 0) dataRows[index][currencyIndex] = assignment.currency;
+        }
+      }
+      globalBlockIndex += 1;
+    }
+    const result = [nextRows[0]];
+    const rowMetas = [];
+    dataRows.forEach((row, index) => {
+      if (!keepIndices.has(index)) return;
+      result.push(row);
+      if (Array.isArray(nextRows.rowMetas) && nextRows.rowMetas[index]) {
+        rowMetas.push(nextRows.rowMetas[index]);
+      }
+    });
+    result.rowMetas = rowMetas;
+    if (Array.isArray(nextRows.issues)) result.issues = nextRows.issues;
+    if (Array.isArray(nextRows.headerBreaks)) result.headerBreaks = [];
+    if (Array.isArray(nextRows.skippedRows)) result.skippedRows = nextRows.skippedRows;
+    if (Array.isArray(nextRows.simultaneousRows)) result.simultaneousRows = nextRows.simultaneousRows;
+    if (nextRows.amountSplitMatchStats && typeof nextRows.amountSplitMatchStats === 'object') {
+      result.amountSplitMatchStats = { ...nextRows.amountSplitMatchStats };
+    }
+    if (nextRows.billSplitMatchStats && typeof nextRows.billSplitMatchStats === 'object') {
+      result.billSplitMatchStats = { ...nextRows.billSplitMatchStats };
+    }
+    if (Array.isArray(nextRows.sourceRows)) {
+      result.sourceRows = cloneRowsWithMetadata(nextRows.sourceRows);
+    }
+    return result;
+  });
+}
+
 async function buildStatementImportCandidate(state, request, options = {}) {
   const fsImpl = options.fs || fs;
-  const mapRows = options.buildMappedRows || buildMappedRows;
   const templates = templateCatalogByRef(request);
-  for (const evidence of templates.values()) {
-    assertImportDoesNotRequireInteraction(evidence.snapshot);
+  const hasAssignments = Array.isArray(options.bigAccountAssignments) ||
+    options.selectedBigAccount || Array.isArray(options.selectedBigAccounts);
+  if (!hasAssignments) {
+    for (const evidence of templates.values()) {
+      assertImportDoesNotRequireInteraction(evidence.snapshot);
+    }
   }
   const candidate = cloneStatementServiceState(state);
   candidate.sessionRevision += 1;
@@ -195,8 +384,8 @@ async function buildStatementImportCandidate(state, request, options = {}) {
   }
   candidate.sessions.set(owner.sessionKey, session);
 
-  const importedEntries = [];
-  for (const source of request.sources) {
+  const mappedEntries = [];
+  for (const [sourceIndex, source] of request.sources.entries()) {
     if (typeof options.assertNotCancelled === 'function') options.assertNotCancelled();
     const evidence = templates.get(source.templateRef);
     if (!evidence) {
@@ -206,34 +395,49 @@ async function buildStatementImportCandidate(state, request, options = {}) {
       );
     }
     const template = evidence.snapshot;
-    const detailRows = mapRows({
-      inputFilePath: source.path,
-      orderedTargetFields: template.orderedTargetFields,
-      mappingByField: template.mappingByField,
-      accountMappingByBankId: template.accountMappingByBankId,
-      currencyMappings: template.currencyMappings,
-      amountMappingRules: template.amountMappingRules,
-      amountSplitByField: template.amountSplitByField,
-      billSplitMerge: template.billSplitMerge,
-      expectedSourceHeaders: template.expectedSourceHeaders,
-      selectedBigAccount: null,
-      dateParseOrder: template.dateParseOrder,
-      readOptions: { readGuard: readGuardForSource(source, fsImpl) }
+    const detailRows = buildMappedRowsForSource(source, template, {
+      ...options,
+      selectedBigAccount: Array.isArray(options.selectedBigAccounts)
+        ? options.selectedBigAccounts[sourceIndex]
+        : (options.selectedBigAccount || null)
     });
     await assertStatementSourceIdentityCurrent(source, {
       fs: fsImpl,
       assertNotCancelled: options.assertNotCancelled
     });
+    mappedEntries.push({
+      source,
+      evidence,
+      template,
+      detailRows,
+      requiresInteraction: importRequiresBigAccountInteraction(template)
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  if (options.expectedProvisionalDigest && provisionalDigest(mappedEntries) !== options.expectedProvisionalDigest) {
+    throw new StatementSessionError(
+      'STATEMENT_TOKEN_CANDIDATE_STALE',
+      'Statement provisional candidate changed before continuation'
+    );
+  }
+  const resolvedRows = Array.isArray(options.bigAccountAssignments)
+    ? applyBigAccountAssignments(mappedEntries, options.bigAccountAssignments, {
+        includeEmptyBlocks: options.bigAccountChoiceMode === 'fixed'
+      })
+    : mappedEntries.map((entry) => entry.detailRows);
+  const importedEntries = [];
+  for (const [sourceIndex, source] of request.sources.entries()) {
+    const mapped = mappedEntries[sourceIndex];
     const entry = buildStatementFileEntry({
       buildEntryId: () => `statement-entry-${state.serviceGeneration}-${candidate.nextEntryOrdinal++}`,
-      detailRows,
+      detailRows: resolvedRows[sourceIndex],
       filePath: source.path,
-      matchedTemplateId: template.templateId
+      matchedTemplateId: mapped.template.templateId
     });
     importedEntries.push({
       ...entry,
       templateRef: source.templateRef,
-      templateDigest: evidence.digest,
+      templateDigest: mapped.evidence.digest,
       sourceIdentity: { ...source.sourceIdentity }
     });
     await new Promise((resolve) => setImmediate(resolve));
@@ -258,10 +462,144 @@ async function buildStatementImportCandidate(state, request, options = {}) {
   });
 }
 
+function normalizeBigAccountChoices(template) {
+  const choices = [];
+  for (const item of Array.isArray(template.bigAccounts) ? template.bigAccounts : []) {
+    const merchantId = normalizeCell(item && item.merchantId);
+    const currencies = Array.isArray(item && item.currencies)
+      ? [...new Set(item.currencies.map(normalizeCell).filter(Boolean))]
+      : [];
+    if (!merchantId || currencies.length === 0) continue;
+    for (const currency of currencies) {
+      choices.push({
+        merchantId,
+        currency,
+        accountNature: item.accountNature === 'own' ? 'own' : 'client'
+      });
+    }
+  }
+  return choices;
+}
+
+async function buildBigAccountInteractionDraft(state, request, options = {}) {
+  const templates = templateCatalogByRef(request);
+  const interactionTemplates = request.templateCatalog
+    .filter((entry) => importRequiresBigAccountInteraction(entry.snapshot));
+  if (interactionTemplates.length === 0) return null;
+  const choices = [];
+  const seenChoices = new Set();
+  for (const evidence of interactionTemplates) {
+    for (const choice of normalizeBigAccountChoices(evidence.snapshot)) {
+      const key = `${choice.merchantId}\u0000${choice.currency}\u0000${choice.accountNature}`;
+      if (seenChoices.has(key)) continue;
+      seenChoices.add(key);
+      choices.push(choice);
+    }
+  }
+  if (choices.length === 0) {
+    throw new StatementSessionError(
+      'STATEMENT_BIG_ACCOUNT_INTERACTION_BLOCKED',
+      'Big-account selection remains blocked without maintained choices'
+    );
+  }
+  const provisionalEntries = [];
+  for (const source of request.sources) {
+    if (typeof options.assertNotCancelled === 'function') options.assertNotCancelled();
+    const evidence = templates.get(source.templateRef);
+    if (!evidence) {
+      throw new StatementSessionError(
+        'STATEMENT_IMPORT_TEMPLATE_REF_UNKNOWN',
+        'Statement source templateRef is not in the template catalog'
+      );
+    }
+    const template = evidence.snapshot;
+    const detailRows = buildMappedRowsForSource(source, template, options);
+    await assertStatementSourceIdentityCurrent(source, {
+      fs: options.fs || fs,
+      assertNotCancelled: options.assertNotCancelled
+    });
+    provisionalEntries.push({
+      source,
+      evidence,
+      template,
+      detailRows,
+      requiresInteraction: importRequiresBigAccountInteraction(template)
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  const rows = selectionRows(provisionalEntries);
+  if (rows.length === 0) {
+    throw new StatementSessionError(
+      'NO_TRANSACTION_DATA',
+      '导入文件中没有账号存在交易数据'
+    );
+  }
+  const rowsWithEmptyBlocks = selectionRows(provisionalEntries, { includeEmptyBlocks: true });
+  const bigAccounts = [];
+  for (const choice of choices) {
+    let grouped = bigAccounts.find((item) => item.merchantId === choice.merchantId);
+    if (!grouped) {
+      grouped = { merchantId: choice.merchantId, currencies: [], isMultiCurrency: false };
+      bigAccounts.push(grouped);
+    }
+    if (!grouped.currencies.includes(choice.currency)) grouped.currencies.push(choice.currency);
+    grouped.isMultiCurrency = grouped.currencies.length > 1;
+  }
+  const choiceDomain = {
+    rows: rows.map((row) => row.index),
+    rowsWithEmptyBlocks: rowsWithEmptyBlocks.map((row) => row.index),
+    options: choices
+  };
+  const candidateDigest = provisionalDigest(provisionalEntries);
+  return Object.freeze({
+    purpose: 'big-account',
+    sessionKey: request.sessionOwner.sessionKey,
+    sessionRevision: state.sessionRevision,
+    prompt: {
+      status: 'select-big-account',
+      message: '请选择本次使用的大账号 / 币种',
+      selectionMode: 'multi-row',
+      templateId: request.sessionOwner.templateId,
+      rows,
+      rowsWithEmptyBlocks,
+      bigAccounts,
+      expandedBigAccountOptions: choices,
+      fixedAssignments: interactionTemplates.flatMap((entry) =>
+        Array.isArray(entry.snapshot.fixedAssignments) ? entry.snapshot.fixedAssignments : [])
+    },
+    allowedChoices: choiceDomain,
+    privateContext: {
+      evidence: {
+        sessionOwner: request.sessionOwner,
+        templateCatalog: request.templateCatalog,
+        sources: request.sources.map((source) => ({
+          resourceId: source.resourceId,
+          snapshot: source.snapshot,
+          templateRef: source.templateRef
+        }))
+      },
+      request,
+      choiceDomain,
+      candidateDigest,
+      provisionalFiles: provisionalEntries.map((entry) => ({
+        resourceId: entry.source.resourceId,
+        detailRows: mappedRowsEvidence(entry.detailRows)
+      })),
+      evidenceDigest: canonicalSha256({
+        sessionOwner: request.sessionOwner,
+        templateCatalog: request.templateCatalog,
+        sources: request.sources
+      })
+    }
+  });
+}
+
 module.exports = {
   StatementSessionError,
   buildStableSummary,
+  buildBigAccountInteractionDraft,
   buildStatementImportCandidate,
   cloneStatementServiceState,
-  createStatementServiceState
+  createStatementServiceState,
+  importRequiresBigAccountInteraction
 };

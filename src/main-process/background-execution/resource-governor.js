@@ -361,13 +361,14 @@ function createResourceGovernor(options = {}) {
     });
   }
 
-  function acquirePersistentReservation(request) {
+  function acquireReplaceableReservation(kind, request) {
+    const label = kind === 'persistent' ? 'Persistent' : 'Pending-interaction';
     let common;
     let resources;
     let replacesReservationId;
     let parentDependency = null;
     try {
-      common = validateRequest(request, 'persistent');
+      common = validateRequest(request, kind);
       resources = validateResourceVector(request.resources);
       replacesReservationId = request.replacesReservationId === undefined
         ? null
@@ -375,10 +376,10 @@ function createResourceGovernor(options = {}) {
       if (replacesReservationId !== null) {
         assertNonEmptyString(replacesReservationId, 'replacesReservationId');
         const old = leases.get(replacesReservationId);
-        if (!old || old.releasedAt !== null || old.kind !== 'persistent') {
+        if (!old || old.releasedAt !== null || old.kind !== kind) {
           throw new ResourceGovernorError(
             'RESOURCE_REPLACEMENT_STALE',
-            'Replacement must reference an active persistent reservation'
+            `Replacement must reference an active ${kind} reservation`
           );
         }
         assertReplacementParentIsAdopted(old);
@@ -387,17 +388,17 @@ function createResourceGovernor(options = {}) {
           .some((dependency) => dependency.active && dependency.kind === 'replacement')) {
           throw new ResourceGovernorError(
             'RESOURCE_REPLACEMENT_IN_PROGRESS',
-            'Persistent reservation already has a pending or tentative replacement'
+            `${label} reservation already has a pending or tentative replacement`
           );
         }
         parentDependency = createParentDependency(old, 'replacement');
         validateParentDependency(parentDependency, {
-          kind: 'persistent',
+          kind,
           ownerKey: common.ownerKey,
           actionKey: common.actionKey,
           operationKey: common.operationKey,
           staleCode: 'RESOURCE_REPLACEMENT_STALE',
-          staleMessage: 'Replacement must reference an active persistent reservation',
+          staleMessage: `Replacement must reference an active ${kind} reservation`,
           identityCode: 'RESOURCE_REPLACEMENT_OWNER_MISMATCH',
           identityMessage: 'Replacement reservation owner identity does not match'
         });
@@ -411,12 +412,12 @@ function createResourceGovernor(options = {}) {
       let contribution = resources;
       if (parentDependency) {
         const old = validateParentDependency(parentDependency, {
-          kind: 'persistent',
+          kind,
           ownerKey: common.ownerKey,
           actionKey: common.actionKey,
           operationKey: common.operationKey,
           staleCode: 'RESOURCE_REPLACEMENT_STALE',
-          staleMessage: 'Replacement must reference an active persistent reservation',
+          staleMessage: `Replacement must reference an active ${kind} reservation`,
           identityCode: 'RESOURCE_REPLACEMENT_OWNER_MISMATCH',
           identityMessage: 'Replacement reservation owner identity does not match'
         });
@@ -426,6 +427,14 @@ function createResourceGovernor(options = {}) {
       if (!canAdd(contribution)) return DEFER_ADMISSION;
       return grant(prepared, contribution, { replacesReservationId, parentDependency });
     }, { onRejected: () => releaseParentDependency(parentDependency) });
+  }
+
+  function acquirePersistentReservation(request) {
+    return acquireReplaceableReservation('persistent', request);
+  }
+
+  function acquirePendingInteractionReservation(request) {
+    return acquireReplaceableReservation('pending-interaction', request);
   }
 
   function validateCount(value, name, { maximum = Number.MAX_SAFE_INTEGER } = {}) {
@@ -612,15 +621,16 @@ function createResourceGovernor(options = {}) {
   function adoptTentativeReplacement(oldReservationId, tentativeReservationId) {
     const old = leases.get(oldReservationId);
     const candidate = leases.get(tentativeReservationId);
-    if (!old || old.releasedAt !== null || old.kind !== 'persistent') {
-      throw new ResourceGovernorError('RESOURCE_REPLACEMENT_STALE', 'Old persistent reservation is not active');
+    if (!old || old.releasedAt !== null ||
+        !['persistent', 'pending-interaction'].includes(old.kind)) {
+      throw new ResourceGovernorError('RESOURCE_REPLACEMENT_STALE', 'Old replaceable reservation is not active');
     }
     assertReplacementParentIsAdopted(old);
     assertParentDeliveryComplete(old, {
       code: 'RESOURCE_REPLACEMENT_PARENT_DELIVERY_PENDING',
       message: 'Old reservation cannot be replaced before its grant is delivered'
     });
-    if (!candidate || candidate.releasedAt !== null || candidate.kind !== 'persistent' ||
+    if (!candidate || candidate.releasedAt !== null || candidate.kind !== old.kind ||
         candidate.replacesReservationId !== oldReservationId) {
       throw new ResourceGovernorError(
         'RESOURCE_REPLACEMENT_CANDIDATE_INVALID',
@@ -761,7 +771,7 @@ function createResourceGovernor(options = {}) {
   const governor = Object.freeze({
     acquireBaseLease: (request) => acquireExact('base', request),
     acquirePersistentReservation,
-    acquirePendingInteractionReservation: (request) => acquireExact('pending-interaction', request),
+    acquirePendingInteractionReservation,
     acquirePhaseLease: (request) => acquireExact('phase', request),
     acquireCompoundLease,
     replaceReservationAtomically,

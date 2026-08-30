@@ -74,6 +74,7 @@ const PUBLIC_INTERACTION_KEYS = Object.freeze([
   'prompt'
 ]);
 const INTERACTION_REQUIRED_RESULT_KEYS = Object.freeze(['status', 'interaction']);
+const INTERACTION_CANCELLED_RESULT_KEYS = Object.freeze(['status', 'tokenId']);
 const IMPORT_RESULT_KEYS = Object.freeze(['status', 'summary', 'session']);
 const IMPORT_SESSION_KEYS = Object.freeze([
   'sessionKey',
@@ -651,6 +652,10 @@ function createPurposePromptDto(promptPurpose, input) {
   fail('STATEMENT_TOKEN_PURPOSE_INVALID', 'Unsupported Statement interaction purpose');
 }
 
+function createStatementInteractionPromptDto(promptPurpose, input) {
+  return canonicalJsonSnapshot(createPurposePromptDto(promptPurpose, input));
+}
+
 function createStatementTokenHandleDto(input) {
   const record = ownDataRecord(input, TOKEN_HANDLE_KEYS, 'StatementTokenHandleDto');
   const snapshot = {
@@ -776,6 +781,21 @@ function createStatementInteractionRequiredResult(input, actionKey) {
   return canonicalJsonSnapshot({ status: record.status, interaction });
 }
 
+function createStatementInteractionCancelledResult(input) {
+  const record = ownDataRecord(
+    input,
+    INTERACTION_CANCELLED_RESULT_KEYS,
+    'StatementInteractionCancelledResult'
+  );
+  if (record.status !== 'interaction-cancelled') {
+    fail('STATEMENT_RESULT_STATUS_INVALID', 'Statement interaction cancellation status is invalid');
+  }
+  return canonicalJsonSnapshot({
+    status: record.status,
+    tokenId: boundedText(record.tokenId, 'tokenId')
+  });
+}
+
 function createStatementImportResult(input) {
   const record = ownDataRecord(input, IMPORT_RESULT_KEYS, 'StatementImportResult');
   if (record.status !== 'imported') {
@@ -875,11 +895,19 @@ function createStatementResultValidator(actionKey) {
       const normalized = createStatementInteractionRequiredResult(value, actionKey);
       return canonicalizeJson(normalized) === canonicalizeJson(value);
     } catch (_error) {
-      if (actionKey !== 'statement:import') return false;
+      if (!['statement:import', 'statement:resolve-big-account'].includes(actionKey)) return false;
       try {
         createStatementImportResult(value);
         return true;
       } catch (_importError) {
+        if (actionKey === 'statement:resolve-big-account') {
+          try {
+            createStatementInteractionCancelledResult(value);
+            return true;
+          } catch (_cancelError) {
+            return false;
+          }
+        }
         try {
           createStatementStatusResult(value);
           return true;
@@ -1011,7 +1039,9 @@ module.exports = {
   createStatementBalanceSeedOverwriteReleaseCharacterization,
   createStatementFinanceSafeValueDelegate,
   createStatementImportResult,
+  createStatementInteractionCancelledResult,
   createStatementInteractionRequiredResult,
+  createStatementInteractionPromptDto,
   createStatementPublicInteractionDto,
   createStatementResultValidator,
   createStatementStatusDto,
