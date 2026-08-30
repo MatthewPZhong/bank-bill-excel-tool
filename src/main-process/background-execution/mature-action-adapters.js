@@ -9,10 +9,19 @@ const {
 const {
   createToolboxPublicationMatureBinding
 } = require('../toolbox-output-publication-dispatch');
+const {
+  ACQUIRING_ADAPTER_ACTIONS
+} = require('./acquiring-adapter-policies');
+const {
+  createAcquiringMatureBindings
+} = require('./adapters/acquiring-adapter');
 
 const MATURE_ACTION_KEYS = Object.freeze({
   pendingImport: 'pending:import',
   bizOpImportFlow: 'biz-op:import-flow',
+  acquiringImport: ACQUIRING_ADAPTER_ACTIONS.IMPORT,
+  acquiringRunNewEligible: ACQUIRING_ADAPTER_ACTIONS.RUN_NEW_ELIGIBLE,
+  acquiringRunSingleOrResume: ACQUIRING_ADAPTER_ACTIONS.RUN_SINGLE_OR_RESUME,
   toolboxSplitLarge: 'toolbox:split-large',
   toolboxPublish: 'toolbox:publish'
 });
@@ -25,9 +34,15 @@ const MATURE_ACTION_PRODUCTION = Object.freeze(Object.fromEntries(
 
 function createMatureActionAdapterBindings(options = {}) {
   const bigTableOptions = options.bigTable || {};
+  const acquiringBindings = createAcquiringMatureBindings(options.acquiring || {});
   return Object.freeze({
     [MATURE_ACTION_KEYS.pendingImport]: createBigTableImportMatureBinding(bigTableOptions.pending),
     [MATURE_ACTION_KEYS.bizOpImportFlow]: createBigTableImportMatureBinding(bigTableOptions.bizOp),
+    [MATURE_ACTION_KEYS.acquiringImport]: acquiringBindings[MATURE_ACTION_KEYS.acquiringImport],
+    [MATURE_ACTION_KEYS.acquiringRunNewEligible]:
+      acquiringBindings[MATURE_ACTION_KEYS.acquiringRunNewEligible],
+    [MATURE_ACTION_KEYS.acquiringRunSingleOrResume]:
+      acquiringBindings[MATURE_ACTION_KEYS.acquiringRunSingleOrResume],
     [MATURE_ACTION_KEYS.toolboxSplitLarge]: createToolboxLargeSplitMatureBinding(options.toolboxSplit),
     [MATURE_ACTION_KEYS.toolboxPublish]: createToolboxPublicationMatureBinding(options.toolboxPublication)
   });

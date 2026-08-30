@@ -28,12 +28,15 @@
 | E13-C 按 current-tree 行为拆开 Acquiring copy/regenerate | 当前唯一 export IPC 只复制稳定 `diff_file_path`；DB→XLSX 由独立 `writeDiffWorkbook()` 提供且没有用户入口 | 继续让两个 action 复用同一 copy handler；新增隐式 regenerate IPC；运行时猜 mode | copy=inline-async 且唯一绑定现有 IPC；regenerate=unbound thread-single dormant capability；两者 production 均为 false。详见 [e13-c-preflight.md](./e13-c-preflight.md) 与 [e13-c-implementation-notes.md](./e13-c-implementation-notes.md)。 |
 | E13-D 只注册 dormant Pending/BizOP existing-dispatch capability | 真实 big-table dispatcher 已拥有 root Worker、Parser Pool、单 writer 与大事务；默认 session/IPC 仍承担业务包装和人工门禁 | 再包 native Worker；复制 pool；自动切默认入口 | Runtime 增加两条 false-gated policy/adapter/topology/validator；默认 effective strategy 仍为 legacy。详见 [e13-d-preflight.md](./e13-d-preflight.md) 与 [e13-d-implementation-notes.md](./e13-d-implementation-notes.md)。 |
 | E13-D 用 envelope exact-7 绑定旧 engine 的 batch identity | blindspot 发现 Supervisor 与 engine 原先可分别采信 `context.value` 和 caller `input.batchContext` | 假设两份值自然相同；只比较 operationKey；静默采信 caller | adapter 逐字段拒绝分叉并注入 Main-owned context，避免 receipt/recovery 主键漂移；Spec/TechDoc 已 reverse-sync。 |
+| E13-E 按 current-tree 真实 Acquiring topology 修订历史资源声明 | 设置/Main 合法 workerCount 上限为 8；single/resume hard gate 没有 nested child；旧 fixture 分别写 4 与虚构 compound | 静默 clamp 到 4；为 single 路径申领一个虚构 child；照旧 fixture 低报/重复计费 | `run-new-eligible` childrenMax=8，`run-single-or-resume.compound=null`；冻结基线不改，E13-G 重建 current fixture。详见 [e13-e-preflight.md](./e13-e-preflight.md)。 |
+| E13-E 以 exact-5/7 共有字段锁定 run owner | Protocol policy 是 operation exact-5，但既有 chunk/recovery progress 持久化 exact-7 File Task owner | 丢弃 batch identity；让 caller 提供两套不相关 owner；由 adapter 推测 batchId | adapter 要求 Main-owned exact-7，并逐项匹配 exact-5 共有字段；分叉在 dispatcher/DB 写入前拒绝。 |
+| E13-E resume 由 Main authority 重建而非透传嵌套 plan | blindspot 发现 `resumePlan` 携带 dbPath/progress/output authority，直接透传还会丢失 legacy 的持久 chunkSize 优先规则 | 信任 caller 完整 plan；只检查 runId；把责任留给未来 route | input 只接受 `resumeRunId`；adapter 重新 prepare/freshness，绑定 persisted exact-7 owner 和 output intent，持久 chunkSize 优先。 |
 
 ## Evidence / Deviations
 
 | 项目 | 当前结果 | 影响/后续 |
 | --- | --- | --- |
-| Frozen/current document hashes | 冻结 Spec `13410e4e…98f2`、TechDoc `3fb18459…e64f`、split plan `27bbdde9…174a`；当前 Spec `55f281aa…c0d3`、TechDoc `ae6f48b0…0b6d` | 冻结来源未修改；顶层仅含已记录且受测试约束的 E13-B/E13-C/E13-D 证据型修订，不能宣称仍逐字节一致。 |
+| Frozen/current document hashes | 冻结 Spec `13410e4e…98f2`、TechDoc `3fb18459…e64f`、split plan `27bbdde9…174a`；当前 Spec `5ff09026…0180`、TechDoc `794190d2…1ea7` | 冻结来源未修改；顶层仅含已记录且受测试约束的 E13-B/E13-C/E13-D/E13-E 证据型修订，不能宣称仍逐字节一致。 |
 | Package checksum | `61/69`，8 项漂移均有提交来源 | E13-G 前不得宣称 package integrity PASS。 |
 | Published/current validation | published historical `29/29`（68 inputs）；current tree `28/29`（73 inputs，binding/AST authority 一项失败） | 旧 report 不代偿当前树；E13-G 负责真实修复。 |
 | Production/human gate | production=false；资金/恢复 `PENDING_HUMAN_REVIEW` | 本 bootstrap 不改变。 |
@@ -47,6 +50,7 @@
 | E13-C current-tree classification | 当前唯一 `acquiringBillCurrency:export` 只绑定 copy；regenerate 无 legacy TaskPolicy binding；binding pair 从 60 收紧为 59，顶层 Spec/TechDoc 已 reverse-sync，冻结基线未改 | E13-G 必须重建 current manifest/provenance/checksum，不能用旧 fixture 代偿。 |
 | E13-C capability validation | 定向 `10/10 PASS`；E13-A/B/C 扩大回归 `115/115 PASS`；Acquiring/Registry 重点回归 `60/60 PASS`；完整单测 `6819/6822 PASS`（`0 FAIL`、`3 SKIP`，日志 `unit-20260830-232228.log`）；Acquiring 集成 `252/252 PASS`；smoke、ESLint 与语法 PASS；copy 的普通文件/hash/staging/Publisher 和 main/side regenerate 的 complete-only/read-only DB/original writer/Workbook 回读均已验证；交叉输入与 Publisher failure 均 fail closed | production 仍为 false；Windows、真实大 run/RSS 与资金恢复人工门禁留到 R3.2.5。 |
 | E13-D capability/full regression | E13-D+mature adapter `16/16 PASS`；完整单测 `6824/6827 PASS`（`0 FAIL`、`3 SKIP`，日志 `unit-20260830-235725.log`）；53 个 integration 脚本 `2488/2488 PASS`（`361809 ms`）；smoke、ESLint、语法与 diff PASS；真实 Runtime/engine、CompoundLease、无 wrapper Worker、真实取消回滚、精确 result 与 exact-7 身份分叉反例均通过 | production 与默认 IPC 均未启用；Windows、真实大文件/RSS、资金/恢复人工复核留到 R3.2.5。 |
+| E13-E capability/full regression | E13-E 定向 `12/12 PASS`；mature/Acquiring/Registry/Resource/Supervisor 扩大回归 `227/227 PASS`；完整单测 `6836/6839 PASS`（`0 FAIL`、`3 SKIP`，日志 `logs/unit-tests/unit-20260831-005448.log`）；53 个 integration 脚本 `2488/2488 PASS`（`282902 ms`）；smoke、ESLint、语法与 diff PASS；真实 Parser/side DB、D31、single/resume、mirror、取消、exact-5/7 owner 与 Main-owned resume authority 均通过 | production 与默认 IPC 均未启用；Windows、30 万+真实 run/RSS、资金/恢复人工复核留到 R3.2.5。首次隔离全量运行的依赖树不符合 lockfile，改用精确 `app-builder-lib 26.15.7` 后完整复验，未把环境失败记作代码 PASS。 |
 
 ## Blindspot / Reconciliation
 
@@ -65,6 +69,9 @@
 - E13-D/E/F 必须证明不新增额外 spawn、事务边界/receipt/cancel/recovery 零漂移。
 - E13-D 已把 envelope exact-7 `context` 固定为 mature adapter 到旧 engine 的唯一 batch identity；caller 同时提供的 `input.batchContext` 只有逐字段一致才被接受，避免 Supervisor receipt 与实际 DB/recovery 身份分叉。
 - E13-D 未修改 Pending/BizOP 的 SQL、覆盖删除顺序、金额/币种、行序、side DB、事务或默认 IPC；资金/恢复人工复核仍是 production 红线。
+- E13-E 必须保留 Acquiring 三层 gate：全新 run、workerCount>1、有 dbPath，再按 30 万行与 chunk 饱和度判定；resume 永远单 worker。资源声明不得用旧 fixture 的 4 覆盖当前合法 8，也不得为 single/resume 申领不存在的 nested child。
+- E13-E 的 exact-5 Protocol identity 与 exact-7 File Task owner 必须共享同一 taskRunId/taskKey/moduleId/parentRunId/operationKey；batchId/batchNumber 只来自 Main File Task，避免 chunk receipt、恢复 owner 与 Supervisor operation 分叉。
+- E13-E resume 不采信 caller 的嵌套 DB/progress/output plan；当前 run 必须从 Main-owned DB source 重新准备并复核，persisted owner/output/FilePlan 任一分叉都在 worker/DB 写前拒绝，chunkSize 沿用持久 progress。
 - E13-G 不能通过放宽 AST/provenance gate 或仅刷新 hash 关闭 finding；必须以真实生产入口重建 coverage。
 - 资金、恢复、Windows、真实样本和 production enablement 保持人工门禁。
 

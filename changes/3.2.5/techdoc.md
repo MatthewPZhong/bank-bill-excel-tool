@@ -166,7 +166,17 @@ createExistingDispatchAdapter({
 ### Acquiring
 
 - import pool、runCheck pool、eligible multiworker、single/resume不变；
-- adapter读取现有workerCount/chunk/temp预算；
+- import root + Parser children 复用既有 big-table handle，childrenMax=4；
+- adapter读取现有workerCount/chunk/temp预算；`run-new-eligible` 只在既有 D31 gate 通过时
+  申领 nested children，current childrenMax=8（与设置 1～8 及 Main CPU/内存 clamp 一致）；
+- `run-single-or-resume` 只有长驻 pool root Worker，`resources.compound=null`，resume 永不转为 multiworker；
+- run policy 的 envelope 是 exact-5 operation context；传给旧 pool 的 exact-7 batchContext
+  必须由 Main File Task 提供，且共有五个 identity 字段逐项一致，adapter 不生成 batchId/batchNumber；
+- resume input 只携带 `resumeRunId` selector；adapter 以 Main-owned DB 路径/句柄重新准备当前
+  resume plan，并在 dispatch 前复核 persisted exact-7 owner、output intent 与 freshness；caller
+  提供的 `resumePlan/dbPath` 一律拒绝，chunkSize 继续采用持久 progress 值优先规则；
+- 普通 job close 不 shutdown 长驻 pool，只有强制 transport terminate 或 App 既有 before-quit owner
+  才关闭；side-DB main mirror 继续由 `runCheckViaSideDb`/`resumeRunCheck` 完成；
 - `unit:done`只做child metrics；parent terminal来自原dispatcher；
 - idle cleanup与DB busy保护不变。
 

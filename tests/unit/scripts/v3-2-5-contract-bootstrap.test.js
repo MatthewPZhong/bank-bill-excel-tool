@@ -29,14 +29,14 @@ function replaceExactlyOnce(source, before, after, label) {
   return source.replace(before, after);
 }
 
-test('v3.2.5 顶层合同只允许已记录的 E13-B/E13-C/E13-D 证据型修订', () => {
+test('v3.2.5 顶层合同只允许已记录的 E13-B/E13-C/E13-D/E13-E 证据型修订', () => {
   const frozenHashes = new Map([
     ['spec.md', '13410e4e5cf64798255cab30dd2487d4da4323eddf59d44cf2a0653e950898f2'],
     ['techdoc.md', '3fb1845979823f2c39a8e26d9d5adc5d7f3e351fda90d2f4086d6c355d17e64f']
   ]);
   const currentHashes = new Map([
-    ['spec.md', '55f281aae440a4d2db125c7a6ce23b65f618964d88d3e7865acea4e2b55ac0d3'],
-    ['techdoc.md', 'ae6f48b09679d06f8d6e7ee7cab0e28053acb29d8b0a6097981070bac8930b6d']
+    ['spec.md', '5ff09026a06fd8509532f4ef63eb3502cdb35f4f6cab6e40fcd798c641e60180'],
+    ['techdoc.md', '794190d2420259e87b8c639a67992c8e2b9aef9039003d7e9db9372570921ea7']
   ]);
   const amendments = new Map([
     ['spec.md', (frozen) => {
@@ -79,7 +79,7 @@ test('v3.2.5 顶层合同只允许已记录的 E13-B/E13-C/E13-D 证据型修订
           '  若同时提供则必须逐字段一致，不一致时在启动既有 dispatcher 前 fail closed。',
         'spec.md mature adapter batch identity authority'
       );
-      return replaceExactlyOnce(
+      const classificationAmended = replaceExactlyOnce(
         adapterIdentityAmended,
         '-两个action应使用不同actionKey，避免运行时猜测策略。',
         '-两个action应使用不同actionKey，避免运行时猜测策略。\n\n' +
@@ -92,6 +92,53 @@ test('v3.2.5 顶层合同只允许已记录的 E13-B/E13-C/E13-D 证据型修订
           '- 后续若新增 regenerate 用户入口，必须在独立 change 中显式绑定该 action，并重新完成 run freshness、\n' +
           '  Publisher、Windows 与人工资金/恢复复核。',
         'spec.md Acquiring current-tree classification'
+      );
+      const importTopologyAmended = replaceExactlyOnce(
+        classificationAmended,
+        '| `acquiring:import` | `legacy-preserved` | `managed` | `thread-pool` | `job` | `existing-dispatch` | `existing-critical-protocol` | `false` | adapterKey 固化现有 import pool |',
+        '| `acquiring:import` | `legacy-preserved` | `managed` | `thread-pool` | `job` | `existing-dispatch` | `existing-critical-protocol` | `false` | adapterKey 固化现有 import root + Parser Pool；childrenMax=4 |',
+        'spec.md Acquiring import topology'
+      );
+      const runNewTopologyAmended = replaceExactlyOnce(
+        importTopologyAmended,
+        '| `acquiring:run-new-eligible` | `legacy-preserved` | `managed` | `thread-pool` | `job` | `existing-dispatch` | `existing-critical-protocol` | `false` | 仅符合既有 multiworker gate 的全新 run；adapterKey 固定 |',
+        '| `acquiring:run-new-eligible` | `legacy-preserved` | `managed` | `thread-pool` | `job` | `existing-dispatch` | `existing-critical-protocol` | `false` | 仅符合既有 multiworker gate 的全新 run；current workerCount 上限=8 |',
+        'spec.md Acquiring multiworker topology'
+      );
+      const runSingleTopologyAmended = replaceExactlyOnce(
+        runNewTopologyAmended,
+        '| `acquiring:run-single-or-resume` | `legacy-preserved` | `managed` | `thread-single` | `job` | `existing-dispatch` | `existing-critical-protocol` | `false` | small / resume / forced-single；不得在运行中切换 |',
+        '| `acquiring:run-single-or-resume` | `legacy-preserved` | `managed` | `thread-single` | `job` | `existing-dispatch` | `existing-critical-protocol` | `false` | small / resume / forced-single；只有 root Worker、`compound=null`，不得在运行中切换 |',
+        'spec.md Acquiring single/resume topology'
+      );
+      const resourceAuthorityAmended = replaceExactlyOnce(
+        runSingleTopologyAmended,
+        '`adapterKey`、`entryKey`、`inspectorKey` 等必须在机器可读 Registry fixture 中给出，不能写“native 或 existing-dispatch”“模块现有映射”“job/service”等非 canonical 值。',
+        '`adapterKey`、`entryKey`、`inspectorKey` 等必须在机器可读 Registry fixture 中给出，不能写“native 或 existing-dispatch”“模块现有映射”“job/service”等非 canonical 值。\n\n' +
+          'Acquiring current-tree topology 以真实 dispatcher 为权威：import 的 root Worker 由 phase 计费，最多\n' +
+          '4 个 Parser child 由 CompoundLease 计费；`run-new-eligible` 的 root pool Worker 由 phase 计费，\n' +
+          '合法 nested child 上限必须覆盖设置与 Main CPU/内存闸允许的 8；`run-single-or-resume` 不创建\n' +
+          'nested child，不得用一个虚构 child 重复计费。冻结历史 fixture 保持不变，E13-G 必须按 current\n' +
+          'authority 重建最终 Registry/策略快照。',
+        'spec.md Acquiring resource authority'
+      );
+      return replaceExactlyOnce(
+        resourceAuthorityAmended,
+        '- 对 `file-batch` action，以已校验的 Protocol envelope exact-7 `context` 作为唯一 Main-owned\n' +
+          '  任务身份；既有 dispatcher 所需的 `input.batchContext` 必须由 adapter 绑定为同一身份，caller\n' +
+          '  若同时提供则必须逐字段一致，不一致时在启动既有 dispatcher 前 fail closed。',
+        '- 对 `file-batch` action，以已校验的 Protocol envelope exact-7 `context` 作为唯一 Main-owned\n' +
+          '  任务身份；既有 dispatcher 所需的 `input.batchContext` 必须由 adapter 绑定为同一身份，caller\n' +
+          '  若同时提供则必须逐字段一致，不一致时在启动既有 dispatcher 前 fail closed。\n' +
+          '- 对 Acquiring run 的 exact-5 `operation` action，既有 worker 仍需要 File Task exact-7\n' +
+          '  `input.batchContext` 保存 chunk/recovery owner；adapter 必须逐字段核对两者共有的\n' +
+          '  `taskRunId/taskKey/moduleId/parentRunId/operationKey`，并拒绝任何身份分叉。`batchId/batchNumber`\n' +
+          '  继续来自 Main-owned File Task，不得由 adapter 推测或生成。\n' +
+          '- Acquiring resume 的 caller 只允许提交正整数 `resumeRunId`；adapter 必须从 Main-owned\n' +
+          '  `userDataDir/mainDatabasePath/mainDb` 重新执行 `prepareRunResume()` 与 freshness 复核，拒绝嵌套\n' +
+          '  `resumePlan/dbPath` authority。持久 exact-7 owner 与当前 File Task、持久 output intent 与当前\n' +
+          '  FilePlan 必须完全一致；持久 `chunkSize` 优先于当前设置，避免 chunk offset 漂移。',
+        'spec.md Acquiring exact owner and resume authority'
       );
     }],
     ['techdoc.md', (frozen) => {
@@ -118,7 +165,7 @@ test('v3.2.5 顶层合同只允许已记录的 E13-B/E13-C/E13-D 证据型修订
           '  engine 的 `input.batchContext`，拒绝 caller-supplied 身份分叉；',
         'techdoc.md big-table batch identity authority'
       );
-      return replaceExactlyOnce(
+      const classificationAmended = replaceExactlyOnce(
         adapterIdentityAmended,
         '→ Publisher\n```\n\n## 5. Existing dispatcher adapter interface',
         '→ Publisher\n```\n\n' +
@@ -129,6 +176,26 @@ test('v3.2.5 顶层合同只允许已记录的 E13-B/E13-C/E13-D 证据型修订
           'progress 缺失/破坏或 source 漂移全部 fail closed。\n\n' +
           '## 5. Existing dispatcher adapter interface',
         'techdoc.md Acquiring current-tree authority'
+      );
+      return replaceExactlyOnce(
+        classificationAmended,
+        '### Acquiring\n\n' +
+          '- import pool、runCheck pool、eligible multiworker、single/resume不变；\n' +
+          '- adapter读取现有workerCount/chunk/temp预算；',
+        '### Acquiring\n\n' +
+          '- import pool、runCheck pool、eligible multiworker、single/resume不变；\n' +
+          '- import root + Parser children 复用既有 big-table handle，childrenMax=4；\n' +
+          '- adapter读取现有workerCount/chunk/temp预算；`run-new-eligible` 只在既有 D31 gate 通过时\n' +
+          '  申领 nested children，current childrenMax=8（与设置 1～8 及 Main CPU/内存 clamp 一致）；\n' +
+          '- `run-single-or-resume` 只有长驻 pool root Worker，`resources.compound=null`，resume 永不转为 multiworker；\n' +
+          '- run policy 的 envelope 是 exact-5 operation context；传给旧 pool 的 exact-7 batchContext\n' +
+          '  必须由 Main File Task 提供，且共有五个 identity 字段逐项一致，adapter 不生成 batchId/batchNumber；\n' +
+          '- resume input 只携带 `resumeRunId` selector；adapter 以 Main-owned DB 路径/句柄重新准备当前\n' +
+          '  resume plan，并在 dispatch 前复核 persisted exact-7 owner、output intent 与 freshness；caller\n' +
+          '  提供的 `resumePlan/dbPath` 一律拒绝，chunkSize 继续采用持久 progress 值优先规则；\n' +
+          '- 普通 job close 不 shutdown 长驻 pool，只有强制 transport terminate 或 App 既有 before-quit owner\n' +
+          '  才关闭；side-DB main mirror 继续由 `runCheckViaSideDb`/`resumeRunCheck` 完成；',
+        'techdoc.md Acquiring adapter topology and authority'
       );
     }]
   ]);
