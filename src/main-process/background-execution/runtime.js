@@ -28,15 +28,103 @@ const {
 const {
   createPreFundMptTopologyPlanner
 } = require('../pre-fund-reconciliation/mpt-import/topology');
+const {
+  FUND_RECON_POLICIES,
+  FUND_RECON_SERVICE_KEY,
+  validateFundReconExportResult,
+  validateFundReconImportResult,
+  validateFundReconRunResult
+} = require('../fund-recon-worker/policies');
+const {
+  DUPLICATE_ACTIONS,
+  DUPLICATE_POLICIES,
+  DUPLICATE_SERVICE_KEY,
+  validateDuplicateExportResult,
+  validateDuplicateImportResult,
+  validateDuplicateRunResult
+} = require('../duplicate-inbound-match/policies');
+const {
+  normalizeDuplicateStartupGateDescriptor
+} = require('../duplicate-inbound-match/startup-gate');
+const {
+  createDuplicatePairedTopologyPlanner
+} = require('../duplicate-inbound-match/topology');
+const {
+  beginExternalParserShutdown,
+  waitForExternalParserShutdownPhase
+} = require('./external-parser-finalization');
 
 const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   ...TOOLBOX_GENERATION_POLICIES,
-  ...PRE_FUND_MPT_POLICIES
+  ...PRE_FUND_MPT_POLICIES,
+  ...FUND_RECON_POLICIES,
+  ...DUPLICATE_POLICIES
 ]);
 
 function isBackgroundExecutionProductionEnabled(actionKey) {
   const policy = BACKGROUND_EXECUTION_POLICIES.find((item) => item.actionKey === actionKey);
   return Boolean(policy && policy.production.enabled === true);
+}
+
+function deadlineAfter(timeoutMs) {
+  const timestamp = Date.now();
+  return timeoutMs > Number.MAX_SAFE_INTEGER - timestamp
+    ? Number.POSITIVE_INFINITY
+    : timestamp + timeoutMs;
+}
+
+function remainingTimeout(deadline) {
+  return deadline === Number.POSITIVE_INFINITY
+    ? Number.POSITIVE_INFINITY
+    : Math.max(0, deadline - Date.now());
+}
+
+function mergeShutdownReports(report, ...pairedReports) {
+  return Object.freeze({
+    ...report,
+    leakedTransports: Object.freeze([...new Set([
+      ...report.leakedTransports,
+      ...pairedReports.flatMap((item) => item.leakedTransports)
+    ])]),
+    errors: Object.freeze([
+      ...report.errors,
+      ...pairedReports.flatMap((item) => item.errors)
+    ])
+  });
+}
+
+function entryBindingForPolicy(policy, workerRoot, duplicateStartupGate) {
+  if (policy.moduleId === 'duplicate') {
+    return Object.freeze({
+      path: path.resolve(__dirname, '..', 'duplicate-inbound-match', 'worker-entry.js'),
+      cancellationTerminalErrorCodes: Object.freeze(['DUPLICATE_SHUTDOWN']),
+      workerData: Object.freeze({ startupGate: duplicateStartupGate })
+    });
+  }
+  if (policy.moduleId === 'fund-recon') {
+    return Object.freeze({
+      path: path.resolve(__dirname, '..', 'fund-recon-worker', 'worker-entry.js'),
+      cancellationTerminalErrorCodes: Object.freeze(['FUND_RECON_SHUTDOWN'])
+    });
+  }
+  const preFund = policy.moduleId === 'pre-fund';
+  return Object.freeze({
+    path: path.join(
+      preFund
+        ? path.resolve(__dirname, '..', 'pre-fund-reconciliation', 'mpt-import')
+        : workerRoot,
+      preFund
+        ? 'writer-worker-entry.js'
+        : (policy.actionKey === TOOLBOX_GENERATION_ACTIONS.MERGE
+            ? 'merge-worker-entry.js'
+            : (policy.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
+                ? 'route-scanner-worker-entry.js'
+                : 'split-worker-entry.js'))
+    ),
+    cancellationTerminalErrorCodes: Object.freeze(preFund
+      ? ['PREFUND_WRITER_CANCELLED']
+      : ['TOOLBOX_GENERATION_CANCELLED'])
+  });
 }
 
 function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverride = null) {
@@ -57,28 +145,30 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
       : { systemReserveBytes: options.systemReserveBytes })
   });
   const workerRoot = path.resolve(__dirname, '..', 'toolbox-background');
+  const duplicateStartupGate = normalizeDuplicateStartupGateDescriptor(
+    options.duplicateStartupGate
+  );
   const entryRegistry = createStaticRegistry(Object.fromEntries(
-    BACKGROUND_EXECUTION_POLICIES.map((policy) => [policy.entryKey, {
-      path: path.join(
-        policy.moduleId === 'pre-fund'
-          ? path.resolve(__dirname, '..', 'pre-fund-reconciliation', 'mpt-import')
-          : workerRoot,
-        policy.moduleId === 'pre-fund'
-          ? 'writer-worker-entry.js'
-          : (policy.actionKey === TOOLBOX_GENERATION_ACTIONS.MERGE
-              ? 'merge-worker-entry.js'
-              : (policy.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
-                  ? 'route-scanner-worker-entry.js'
-                  : 'split-worker-entry.js'))
-      ),
-      cancellationTerminalErrorCodes: policy.moduleId === 'pre-fund'
-        ? ['PREFUND_WRITER_CANCELLED']
-        : ['TOOLBOX_GENERATION_CANCELLED']
-    }])
+    BACKGROUND_EXECUTION_POLICIES.map((policy) => [
+      policy.entryKey,
+      entryBindingForPolicy(policy, workerRoot, duplicateStartupGate)
+    ])
   ));
   const validatorEntries = {};
   for (const policy of BACKGROUND_EXECUTION_POLICIES) {
-    const resultValidator = policy.moduleId === 'pre-fund'
+    const resultValidator = policy.moduleId === 'duplicate'
+      ? (policy.actionKey === DUPLICATE_ACTIONS.IMPORT
+          ? validateDuplicateImportResult
+          : (policy.actionKey === DUPLICATE_ACTIONS.RUN
+              ? validateDuplicateRunResult
+              : validateDuplicateExportResult))
+      : policy.moduleId === 'fund-recon'
+      ? (policy.actionKey === 'fund-recon:import'
+          ? validateFundReconImportResult
+          : (policy.actionKey === 'fund-recon:run'
+              ? validateFundReconRunResult
+              : validateFundReconExportResult))
+      : policy.moduleId === 'pre-fund'
       ? (policy.actionKey === PRE_FUND_MPT_REPAIR_ACTION
           ? validatePreFundMptRepairResult
           : validatePreFundMptImportResult)
@@ -93,13 +183,16 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
   }
   const validatorRegistry = createStaticRegistry(validatorEntries);
   const preFundTopologyPlanner = createPreFundMptTopologyPlanner({ availableParallelism });
+  const duplicateTopologyPlanner = createDuplicatePairedTopologyPlanner({ availableParallelism });
   const topologyRegistry = createStaticRegistry(Object.fromEntries(
     BACKGROUND_EXECUTION_POLICIES
       .filter((policy) => policy.resources.compound)
       .map((policy) => [policy.resources.compound.topologyKey,
         policy.actionKey === PRE_FUND_MPT_IMPORT_ACTION || policy.actionKey === PRE_FUND_MPT_REPAIR_ACTION
           ? preFundTopologyPlanner
-          : () => Object.freeze({ effectiveChildCount: 1 })])
+          : (policy.actionKey === DUPLICATE_ACTIONS.IMPORT
+              ? duplicateTopologyPlanner
+              : () => Object.freeze({ effectiveChildCount: 1 }))])
   ));
   entryRegistry.freeze();
   validatorRegistry.freeze();
@@ -116,8 +209,9 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
     ),
     settlementKeys: BACKGROUND_EXECUTION_POLICIES.map((policy) => policy.commit.settlementKey),
     publisherKeys: BACKGROUND_EXECUTION_POLICIES.map((policy) => policy.artifacts.publisherKey),
-    plannerKeys: ['planner.pre-fund:mpt-import'],
-    reducerKeys: ['reducer.pre-fund:mpt-import']
+    serviceKeys: [FUND_RECON_SERVICE_KEY, DUPLICATE_SERVICE_KEY],
+    plannerKeys: ['planner.pre-fund:mpt-import', 'planner.duplicate:import'],
+    reducerKeys: ['reducer.pre-fund:mpt-import', 'reducer.duplicate:import']
   };
   const policyRegistry = createExecutionPolicyRegistry({
     policies: BACKGROUND_EXECUTION_POLICIES,
@@ -134,16 +228,18 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
     budgets: platformBudgets,
     diagnostics: options.diagnostics
   });
+  const supervisorShutdownTimeoutMs = options.shutdownTimeoutMs || 5000;
   const supervisor = createExecutionSupervisor({
     policyRegistry,
     resourceGovernor,
     diagnostics: options.diagnostics,
     executionTimeoutMs: options.executionTimeoutMs,
-    shutdownTimeoutMs: options.shutdownTimeoutMs || 5000,
+    shutdownTimeoutMs: supervisorShutdownTimeoutMs,
     workerDurableCoordinator: options.workerDurableCoordinator,
     ...(options.workerThreadAdapter ? { workerThreadAdapter: options.workerThreadAdapter } : {})
   });
-  return Object.freeze({
+  let shutdownPromise = null;
+  const runtime = Object.freeze({
     start(request) {
       if (resourceGovernorOverride) assertNonProductionGovernorRequest(request);
       return supervisor.start(request);
@@ -157,13 +253,57 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
     },
     policyRegistry,
     resourceGovernor,
-    shutdown(shutdownOptions) {
-      return supervisor.shutdown(shutdownOptions);
+    shutdown(shutdownOptions = {}) {
+      if (shutdownPromise) return shutdownPromise;
+      const fallbackTimeoutMs = Number.isFinite(supervisorShutdownTimeoutMs) &&
+        supervisorShutdownTimeoutMs >= 0
+        ? supervisorShutdownTimeoutMs
+        : 5000;
+      let timeoutMs;
+      try {
+        timeoutMs = Number.isFinite(shutdownOptions.timeoutMs) && shutdownOptions.timeoutMs >= 0
+          ? shutdownOptions.timeoutMs
+          : fallbackTimeoutMs;
+      } catch (error) {
+        return Promise.reject(error);
+      }
+      supervisor.stopAcceptingNewJobs();
+      const deadline = deadlineAfter(timeoutMs);
+      const parserSession = beginExternalParserShutdown(runtime);
+      shutdownPromise = Promise.resolve().then(async () => {
+        const workerReport = await waitForExternalParserShutdownPhase(
+          parserSession,
+          'workersTerminal',
+          remainingTimeout(deadline)
+        );
+        const supervisorReport = await supervisor.shutdown({
+          ...shutdownOptions,
+          timeoutMs: remainingTimeout(deadline)
+        });
+        const finalizationReport = await waitForExternalParserShutdownPhase(
+          parserSession,
+          'finalized',
+          remainingTimeout(deadline)
+        );
+        return mergeShutdownReports(
+          supervisorReport,
+          Object.freeze({
+            leakedTransports: Object.freeze([]),
+            errors: parserSession.errors
+          }),
+          workerReport,
+          finalizationReport
+        );
+      }).finally(() => {
+        shutdownPromise = null;
+      });
+      return shutdownPromise;
     },
     stopAcceptingNewJobs() {
       supervisor.stopAcceptingNewJobs();
     }
   });
+  return runtime;
 }
 
 function assertNonProductionGovernorRequest(request) {
@@ -194,12 +334,18 @@ function createNonProductionBackgroundExecutionRuntime(options = {}) {
 }
 
 function createBackgroundExecutionRuntimeManager(options = {}) {
-  const runtimeFactory = options.runtimeFactory || (() => createBackgroundExecutionRuntime({
-    ...options,
-    workerDurableCoordinator: typeof options.workerDurableCoordinatorProvider === 'function'
-      ? options.workerDurableCoordinatorProvider()
-      : options.workerDurableCoordinator
-  }));
+  const runtimeFactory = options.runtimeFactory || (() => {
+    const duplicateStartupGate = typeof options.duplicateStartupGateProvider === 'function'
+      ? options.duplicateStartupGateProvider()
+      : options.duplicateStartupGate;
+    return createBackgroundExecutionRuntime({
+      ...options,
+      duplicateStartupGate,
+      workerDurableCoordinator: typeof options.workerDurableCoordinatorProvider === 'function'
+        ? options.workerDurableCoordinatorProvider()
+        : options.workerDurableCoordinator
+    });
+  });
   let runtime = null;
   let shutdownOwner = null;
   let closing = false;
