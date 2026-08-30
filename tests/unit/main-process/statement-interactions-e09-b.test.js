@@ -213,7 +213,7 @@ function createManagedHarness(options = {}) {
       workerThreadAdapter,
       diagnostics: (event) => diagnostics.push(event),
       initTimeoutMs: 5000,
-      executionTimeoutMs: 15000
+      executionTimeoutMs: options.executionTimeoutMs ?? 15000
     })
   };
 }
@@ -1505,6 +1505,7 @@ test('真实Host adoption timer撤销未adopt token后等待release-ack唯一终
   const harness = createManagedHarness({
     sourceRoot: tempDir,
     workerData: { statementFaultInjection: { withholdAdoptOrdinal: 1 } },
+    executionTimeoutMs: 30000,
     policyMutation(policy) {
       policy.service.resourceControl.adoptionTimeoutMs = 20;
     }

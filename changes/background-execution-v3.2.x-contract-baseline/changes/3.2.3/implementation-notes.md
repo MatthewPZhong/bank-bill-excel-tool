@@ -11,7 +11,7 @@
 ### Goal / Context / Constraints / Done when
 
 - Goal: 实现 `statement:generate-current` / `statement:generate-all` 的 dormant canonical execution。
-- Context: E09-P0/A/B 已冻结 DTO、Service session、token reservation 与 waiting-user 生命周期；review fix 后的 restack exact base 是 `513620c4a20c32975e4615c968e1381fbdb421c5`。
+- Context: E09-P0/A/B 已冻结 DTO、Service session、token reservation 与 waiting-user 生命周期；review fix 的初始 restack exact base 是 `513620c4a20c32975e4615c968e1381fbdb421c5`，最终合并前再传播 #197 release tip `290c3a9cdbbeb7fbf424e3d940e4aa3b619a374b`。
 - Constraints: 不接 live Renderer/IPC，不启用 production，不实现 E09-D manual seed settlement 或 E10；不把 detail rows/prepared batch/大 workbook 状态带回 Main；warning 与业务顺序保持 legacy。
 - Done when: 真实临时 XLSX/SQLite/worker/service 链路、current/all 与四金额/余额 golden、artifact tamper/all-or-none/crash-cleanup 等专项证据及 E09-P0/A/B/platform 回归通过。
 
@@ -163,17 +163,33 @@ timeout 仅清理候选并恢复旧 token TTL；跨 purpose 直接 fail closed�
 该修复与现有 Spec/TechDoc 的 replacement 合同一致，无需修改冻结合同；production、live IPC、manual
 balance seed、Publisher 与资金输出边界均未变化。
 
+### Finalized E09-B release-tip propagation（2026-08-30）
+
+#199 远端旧 head `a913ae51772fa69e5aa6a07c3f3e2376ad2f3e3e` 不包含 #197 最终 head
+`290c3a9cdbbeb7fbf424e3d940e4aa3b619a374b`，旧绿色/取消 CI 因而不能替代最终叠栈验证。为保留 PR
+历史且禁止强推，传播提交 `4ffea1fda1afcd33cff2dcc16ca75543fc0ee2ef` 使用 exact 双父：第一父是
+#199 旧 head，第二父是 #197 最终 head。Git 自动合并无冲突，E09-C generation 树与 candidate-first
+replacement 保持可达，同时继承最终 v3.2.2/v3.2.3 与 #197 release lineage。
+
+首次五文件默认并发聚焦矩阵为 78/79：唯一失败是 adoption-timeout 用例在 15 秒 Supervisor 测试
+上限处被判为 `transport-lost`；同一用例隔离复跑 1/1、单并发完整矩阵 79/79 均通过。正式单测 runner
+同样使用 Node 默认文件并发，因此测试 harness 只允许该精确用例把 execution 上限提高到 30 秒，保留
+默认 15 秒给其它用例；生产 Supervisor 超时、20 ms adoption deadline、状态机及断言均未放宽。修复后
+默认并发矩阵 79/79，通过扩大后的平台与 Statement 矩阵 452/452。
+
 ## Evidence
 
 | 证据 | 结果 | 覆盖的行为/风险 |
 | --- | --- | --- |
-| E09-C restack lineage | exact base/merge-base `513620c4a20c32975e4615c968e1381fbdb421c5`；旧 E09-C 四个提交按序 cherry-pick 后适配 E09-A/B 与 token replacement review fix 的最新 lineage | 精确 base/堆叠边界；不携带旧 base |
+| E09-C initial restack lineage | 初始 exact base/merge-base `513620c4a20c32975e4615c968e1381fbdb421c5`；旧 E09-C 四个提交按序 cherry-pick 后适配 E09-A/B 与 token replacement review fix lineage | 初始 review-fix 边界；最终 predecessor 另由下方 release-tip propagation 覆盖 |
+| #197 final release-tip propagation | merge `4ffea1fda1afcd33cff2dcc16ca75543fc0ee2ef` exact parents=`a913ae51772fa69e5aa6a07c3f3e2376ad2f3e3e 290c3a9cdbbeb7fbf424e3d940e4aa3b619a374b`；两父 ancestry PASS；merge 无冲突；`git diff --check` PASS | #199 保留 E09-C 历史并完整继承最终 #197/v3.2.3，不复用旧 stack CI、不强推 |
 | restack E09-C/A/B/P0 聚焦矩阵 | 60/60 PASS；filename parent multi-template golden 单项 PASS | current/all、child digest authority、filename owner、四金额/币种/余额、A-B-A 输入按 legacy 模板串行分组输出 A-A-B、token/revision/evidence/single-use、Publisher/cleanup |
 | E09-C 专项 `node --test ...statement-generation-e09-c.test.js` | 13/13 PASS；其中 filename parent multi-template golden 单项复跑 PASS | 真实 Supervisor/ServiceHost/Worker、临时 XLSX/SQLite、current/all、stale/replay/revision/evidence、Round 1/2/3 findings、tamper、all-or-none、四金额、混币余额、0 输出、partial writer、manual prompt、bounded manifest |
 | E09-C cancellation Round 1 专项 | 21/21 PASS；current/all × detail/both 四组、generation 早期 shutdown、success-completion/release-ack 精确竞态均使用真实 Supervisor/ServiceHost/Worker，并含 final-yield source drift mutant | 每组均 `cancel:ack` 先于 `job:error`、Supervisor outcome=`cancelled`、code=`STATEMENT_IMPORT_CANCELLED`、task staging=0；来源漂移 fail closed；正常 current/all/golden 同文件回归通过 |
 | Reviewer 后 E09-C/A/B/P0/error-codec 聚焦矩阵 | 98/98 PASS | cancel authority、token single-use/retry、source/template lineage、current/all、四金额/币种/余额/行序/warning、bounded DTO 与 production=false 门禁 |
 | Reviewer 后 platform Governor/ServiceHost/Supervisor/recovery/P0 聚焦矩阵 | 245/245 PASS | 未改通用 Supervisor；资源 grant/adopt/revoke/release、shutdown/crash、service generation 与 recovery 合同无回归 |
 | 2026-08-30 E09-C replacement remediation | `statement-interactions-e09-b.test.js` 21/21 PASS；`statement-generation-e09-c.test.js` 21/21 PASS；E09-P0/A/B/C 六文件聚焦矩阵 93/93 PASS | duplicate `prepare-generation` candidate-first success、grant reject、adoption timeout/revoke、cross-purpose fail-closed、旧 token continuation；current/all generation 与既有 token/session/resource 合同无回归 |
+| final predecessor propagation 聚焦复验 | 默认并发五文件矩阵 79/79 PASS；background-execution + Statement 全链单并发 452/452 PASS；`statement-generation-pipeline.js` 45/45 PASS；`npm run smoke` PASS | 最终 v3.2.2/3.2.3 基座传播后的 Governor/ServiceHost/Supervisor/recovery、candidate-first、current/all、Workbook、金额/币种/余额、Publisher 与 legacy smoke |
 | Round 2/3 自洽 workbook mutations | formula、type/format、font 及其四个扩展布尔、single-quote style、comment spoof、relationship decoy、duplicate coordinate、非法显式 style 全部 Publisher=0 | 实际 worksheet relationship/结构化 cell style、全 grid t/z 与 writer-owned font 摘要 readback；manifest size/hash/rowCounts 均按篡改后文件重算 |
 | Reviewer 后 `node scripts/integration/statement-generation-pipeline.js` | 45/45 PASS | legacy generation pipeline、detail/balance/current/all 业务等价 |
 | `npm run test:integration` | 51/51 scripts、2455/2455 PASS | 全仓集成、Publisher/cleanup 与资金相关输出回归；runner 自动清单的本地耗时刷新已回退，不纳入 change |
