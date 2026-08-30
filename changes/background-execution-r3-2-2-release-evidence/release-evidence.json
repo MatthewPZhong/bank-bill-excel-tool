@@ -1,0 +1,1256 @@
+{
+  "schemaVersion": 2,
+  "release": "3.2.2",
+  "releaseStep": "R3.2.2",
+  "baseCommit": "5c9495dda46c775babdac9eb1700c459735e5c8b",
+  "scope": "release-evidence-only",
+  "packageVersion": {
+    "value": "3.1.14",
+    "bumped": false
+  },
+  "globalDecision": {
+    "productionEnablementAuthorized": false,
+    "actionIndependentEnablementRequired": true,
+    "policyMutationAuthorized": false,
+    "runtimeOwnershipMutationAuthorized": false,
+    "liveRoutingMutationAuthorized": false,
+    "businessSemanticsChanged": false,
+    "windowsPackagedEvidence": "NOT_RUN",
+    "fundsRecoveryManualEvidence": "PENDING_HUMAN_REVIEW"
+  },
+  "authorityLayering": {
+    "canonicalPolicyFixture": "changes/background-execution-v3.2.x-contract-baseline/changes/background-execution/validation/fixtures/valid/policy-registry.v3.2.x.json",
+    "commonRuntime": {
+      "source": "src/main-process/background-execution/runtime.js",
+      "registeredActionKeys": [
+        "fund-recon:import",
+        "fund-recon:run",
+        "fund-recon:export",
+        "duplicate:import",
+        "duplicate:run",
+        "duplicate:export"
+      ],
+      "bankBuRegistration": "ABSENT_FAIL_CLOSED"
+    },
+    "bankBuModule": {
+      "source": "src/main-process/bank-bu-worker/policies.js",
+      "actionKeys": [
+        "bank-bu:import-month",
+        "bank-bu:run",
+        "bank-bu:export-single",
+        "bank-bu:export-aggregate"
+      ],
+      "policyAuthorityStatus": "SOURCE_PRESENT_ONLY",
+      "commonRuntimeRegistration": "ABSENT_FAIL_CLOSED",
+      "liveRouteStatus": "NOT_RUN"
+    }
+  },
+  "dataMinimization": {
+    "profile": "RELEASE_EVIDENCE_METADATA_ONLY_V1",
+    "prohibitedPayloadClasses": [
+      "RAW_ACCOUNT",
+      "RAW_AMOUNT",
+      "BUSINESS_ROW"
+    ],
+    "enforcement": "RECURSIVE_KEY_VALUE_SCAN"
+  },
+  "baseAnchors": [
+    {
+      "id": "FUND-IMPORT-ADOPTION",
+      "actionKey": "fund-recon:import",
+      "categories": [
+        "IDENTITY",
+        "ORDER",
+        "OWNERSHIP"
+      ],
+      "source": "src/main-process/fund-recon-worker/service.js",
+      "reviewedHead": "5c9495dda46c775babdac9eb1700c459735e5c8b",
+      "blobOid": "682862dc7b60784be4691018a52431cc5591c865",
+      "sha256": "15370501c39fc6d34a830f63fdf7cc24cef5cd64a00ad54fa6d71939bb45f4b6"
+    },
+    {
+      "id": "FUND-RUN-SNAPSHOT-ADOPTION",
+      "actionKey": "fund-recon:run",
+      "categories": [
+        "IDENTITY",
+        "OWNERSHIP"
+      ],
+      "source": "src/main-process/fund-recon-worker/service.js",
+      "reviewedHead": "5c9495dda46c775babdac9eb1700c459735e5c8b",
+      "blobOid": "682862dc7b60784be4691018a52431cc5591c865",
+      "sha256": "15370501c39fc6d34a830f63fdf7cc24cef5cd64a00ad54fa6d71939bb45f4b6"
+    },
+    {
+      "id": "FUND-RUN-STRICT-ORDER",
+      "actionKey": "fund-recon:run",
+      "categories": [
+        "ORDER"
+      ],
+      "source": "src/main-process/reconciliation-orchestrator.js",
+      "reviewedHead": "5c9495dda46c775babdac9eb1700c459735e5c8b",
+      "blobOid": "c7a3297301a94f52016f406b6081a5f468faec60",
+      "sha256": "b4c2188ef8d2fe3e67f83453bdd4394153963a79734090655e2a29b4ef04a9e6"
+    },
+    {
+      "id": "FUND-EXPORT-SNAPSHOT-STAGING",
+      "actionKey": "fund-recon:export",
+      "categories": [
+        "IDENTITY",
+        "ORDER",
+        "OWNERSHIP"
+      ],
+      "source": "src/main-process/fund-recon-worker/service.js",
+      "reviewedHead": "5c9495dda46c775babdac9eb1700c459735e5c8b",
+      "blobOid": "682862dc7b60784be4691018a52431cc5591c865",
+      "sha256": "15370501c39fc6d34a830f63fdf7cc24cef5cd64a00ad54fa6d71939bb45f4b6"
+    },
+    {
+      "id": "DUPLICATE-IMPORT-STARTUP-OWNER",
+      "actionKey": "duplicate:import",
+      "categories": [
+        "IDENTITY",
+        "OWNERSHIP"
+      ],
+      "source": "tests/unit/duplicate-inbound-match-wiring.test.js",
+      "reviewedHead": "5c9495dda46c775babdac9eb1700c459735e5c8b",
+      "blobOid": "38d9d186da69510e3e38e0c6f840f8e95049f167",
+      "sha256": "eec16f9f0b22ca50a8b54950381e008211dca883409b1557b9a52022cddc74c5"
+    },
+    {
+      "id": "DUPLICATE-IMPORT-BANK-DOCUMENT-ORDER",
+      "actionKey": "duplicate:import",
+      "categories": [
+        "IDENTITY",
+        "ORDER"
+      ],
+      "source": "src/main-process/duplicate-inbound-match/service.js",
+      "reviewedHead": "5c9495dda46c775babdac9eb1700c459735e5c8b",
+      "blobOid": "c5ff216942ea4db166b51107ace2f5a6b06fb162",
+      "sha256": "a249ec62ccdc25eef0ad66fac3209b44fa0578c2f80ddb9da0d00a6b096e1fe4"
+    },
+    {
+      "id": "DUPLICATE-IMPORT-PAIRED-ACTION-SCOPE",
+      "actionKey": "duplicate:import",
+      "categories": [
+        "ACTION_SCOPE"
+      ],
+      "source": "src/main-process/duplicate-inbound-match/topology.js",
+      "reviewedHead": "5c9495dda46c775babdac9eb1700c459735e5c8b",
+      "blobOid": "89970769bab79b875ae41d522b530e2a20e05941",
+      "sha256": "26bb67cf9be16f9b7a68b2ea56d48c1274b314969b4e21c2f3f8c9a60e89c979"
+    },
+    {
+      "id": "DUPLICATE-IMPORT-LOCAL-PERFORMANCE",
+      "actionKey": "duplicate:import",
+      "categories": [
+        "PERFORMANCE"
+      ],
+      "source": "changes/background-execution-e07-c-duplicate-paired-parser/benchmark-evidence.json",
+      "reviewedHead": "5c9495dda46c775babdac9eb1700c459735e5c8b",
+      "blobOid": "5ead2f857da933a451bb45c7977857b1fe9a88ac",
+      "sha256": "13633ee2a6083e8a6b6c21147795c82d54187a35ae4b8b15f4505d993f0391eb"
+    },
+    {
+      "id": "DUPLICATE-RUN-SIDE-MIRROR",
+      "actionKey": "duplicate:run",
+      "categories": [
+        "IDENTITY",
+        "ORDER",
+        "OWNERSHIP"
+      ],
+      "source": "src/main-process/duplicate-inbound-match/service.js",
+      "reviewedHead": "5c9495dda46c775babdac9eb1700c459735e5c8b",
+      "blobOid": "c5ff216942ea4db166b51107ace2f5a6b06fb162",
+      "sha256": "a249ec62ccdc25eef0ad66fac3209b44fa0578c2f80ddb9da0d00a6b096e1fe4"
+    },
+    {
+      "id": "DUPLICATE-EXPORT-CURRENT-RESULT",
+      "actionKey": "duplicate:export",
+      "categories": [
+        "IDENTITY",
+        "ORDER",
+        "OWNERSHIP"
+      ],
+      "source": "src/main-process/duplicate-inbound-match/service.js",
+      "reviewedHead": "5c9495dda46c775babdac9eb1700c459735e5c8b",
+      "blobOid": "c5ff216942ea4db166b51107ace2f5a6b06fb162",
+      "sha256": "a249ec62ccdc25eef0ad66fac3209b44fa0578c2f80ddb9da0d00a6b096e1fe4"
+    },
+    {
+      "id": "BANK-BU-IMPORT-PARSER-FINALIZATION",
+      "actionKey": "bank-bu:import-month",
+      "categories": [
+        "IDENTITY",
+        "OWNERSHIP",
+        "ACTION_SCOPE"
+      ],
+      "source": "src/main-process/bank-bu-worker/dual-parser-dispatch.js",
+      "reviewedHead": "5c9495dda46c775babdac9eb1700c459735e5c8b",
+      "blobOid": "66e5bba53b2ccb1313418eb1167ea8d4b1b456f3",
+      "sha256": "206630ea73716dbfd4792d20db9094f2ae82d116e5c4ff16898130833db797fe"
+    },
+    {
+      "id": "BANK-BU-IMPORT-PENDING-BANK-ORDER",
+      "actionKey": "bank-bu:import-month",
+      "categories": [
+        "IDENTITY",
+        "ORDER"
+      ],
+      "source": "src/main-process/bank-bu-worker/spool-reader.js",
+      "reviewedHead": "5c9495dda46c775babdac9eb1700c459735e5c8b",
+      "blobOid": "87cdf6c3f8563b4cab0ab4ad7b8db362ec67c5c3",
+      "sha256": "d509faa1d24df85486e6369c5661a63031a76eef5de3079927bae2ab59482495"
+    },
+    {
+      "id": "BANK-BU-IMPORT-TRANSACTION-ORDER",
+      "actionKey": "bank-bu:import-month",
+      "categories": [
+        "IDENTITY",
+        "ORDER",
+        "OWNERSHIP"
+      ],
+      "source": "src/main-process/bank-bu-worker/side-database.js",
+      "reviewedHead": "5c9495dda46c775babdac9eb1700c459735e5c8b",
+      "blobOid": "9fa99006be230fa962fe834df63156dfeb7fd600",
+      "sha256": "fb8b22a988aa28477770558c7d63cfad07345b869810c2af7a45d226d877fc81"
+    },
+    {
+      "id": "BANK-BU-IMPORT-LOCAL-PERFORMANCE",
+      "actionKey": "bank-bu:import-month",
+      "categories": [
+        "PERFORMANCE"
+      ],
+      "source": "changes/background-execution-e08-b-bank-bu-dual-parser/implementation-notes.md",
+      "reviewedHead": "5c9495dda46c775babdac9eb1700c459735e5c8b",
+      "blobOid": "ac4c9b0d18ea2948f037b6e3d774c1948f2fded8",
+      "sha256": "e0acc456619a046b92c369bcb6f20fa8e08fc2b51fbaf86512f44742e5cdf738"
+    },
+    {
+      "id": "BANK-BU-RUN-SIDE-RECEIPT",
+      "actionKey": "bank-bu:run",
+      "categories": [
+        "IDENTITY",
+        "ORDER",
+        "OWNERSHIP"
+      ],
+      "source": "src/main-process/bank-bu-worker/side-database.js",
+      "reviewedHead": "5c9495dda46c775babdac9eb1700c459735e5c8b",
+      "blobOid": "9fa99006be230fa962fe834df63156dfeb7fd600",
+      "sha256": "fb8b22a988aa28477770558c7d63cfad07345b869810c2af7a45d226d877fc81"
+    },
+    {
+      "id": "BANK-BU-RUN-MAIN-CAS",
+      "actionKey": "bank-bu:run",
+      "categories": [
+        "IDENTITY",
+        "ORDER",
+        "OWNERSHIP"
+      ],
+      "source": "src/main-process/bank-bu-worker/main-coordinator.js",
+      "reviewedHead": "5c9495dda46c775babdac9eb1700c459735e5c8b",
+      "blobOid": "125a3b738388d8804cb530a2d5ecfcc90119046c",
+      "sha256": "9ea4876717face23a7abb4d0b74260bfb013078d3507dbf19ec5e67d25894061"
+    },
+    {
+      "id": "BANK-BU-EXPORT-SINGLE-SNAPSHOT",
+      "actionKey": "bank-bu:export-single",
+      "categories": [
+        "IDENTITY",
+        "ORDER",
+        "OWNERSHIP"
+      ],
+      "source": "src/main-process/bank-bu-worker/export-operation.js",
+      "reviewedHead": "5c9495dda46c775babdac9eb1700c459735e5c8b",
+      "blobOid": "3cdf47553262fa481ae2846fe68a5fe00ea75bad",
+      "sha256": "714e425e1549659a1b36797f0919bc6c11335395897825dea454823e87edee01"
+    },
+    {
+      "id": "BANK-BU-EXPORT-AGGREGATE-ORDER",
+      "actionKey": "bank-bu:export-aggregate",
+      "categories": [
+        "IDENTITY",
+        "ORDER",
+        "OWNERSHIP"
+      ],
+      "source": "src/main-process/bank-bu-worker/export-operation.js",
+      "reviewedHead": "5c9495dda46c775babdac9eb1700c459735e5c8b",
+      "blobOid": "3cdf47553262fa481ae2846fe68a5fe00ea75bad",
+      "sha256": "714e425e1549659a1b36797f0919bc6c11335395897825dea454823e87edee01"
+    }
+  ],
+  "evidenceCatalog": [
+    {
+      "id": "CONTRACT-SPEC-3.2.2",
+      "actionKey": null,
+      "kind": "SHARED_CONTRACT",
+      "source": "changes/background-execution-v3.2.x-contract-baseline/changes/3.2.2/spec.md",
+      "reviewedHead": "5c9495dda46c775babdac9eb1700c459735e5c8b",
+      "blobOid": "40b521f18fcc6b73b09dfb0d1dcf4504cbdc78f4",
+      "sha256": "0cdf28e5310733355fb51d92818dde8fd837ee06b521a4694c0c9cc43300d47f",
+      "anchorRefs": []
+    },
+    {
+      "id": "CONTRACT-TECHDOC-3.2.2",
+      "actionKey": null,
+      "kind": "SHARED_CONTRACT",
+      "source": "changes/background-execution-v3.2.x-contract-baseline/changes/3.2.2/techdoc.md",
+      "reviewedHead": "5c9495dda46c775babdac9eb1700c459735e5c8b",
+      "blobOid": "b0f39ee8715cd4ec27d67c3d04390bd56438050b",
+      "sha256": "9fd15a46b482e6801616554978dff67a02676b437b9759e18d15fce29dcff209",
+      "anchorRefs": []
+    },
+    {
+      "id": "CONTRACT-SEQUENCE-3.2.2",
+      "actionKey": null,
+      "kind": "SHARED_CONTRACT",
+      "source": "changes/background-execution-v3.2.x-contract-baseline/implementation-sequence.md",
+      "reviewedHead": "5c9495dda46c775babdac9eb1700c459735e5c8b",
+      "blobOid": "d526d2a69a1e1d4afebcc878669d8bcfc9bedb2e",
+      "sha256": "a3aee173d0597fa0a84af87034f571992dbe89ca75401b73aabf0cd49cf5d4fd",
+      "anchorRefs": []
+    },
+    {
+      "id": "POLICY-CANONICAL-V3.2.X",
+      "actionKey": null,
+      "kind": "SHARED_POLICY",
+      "source": "changes/background-execution-v3.2.x-contract-baseline/changes/background-execution/validation/fixtures/valid/policy-registry.v3.2.x.json",
+      "reviewedHead": "5c9495dda46c775babdac9eb1700c459735e5c8b",
+      "blobOid": "745b27a50c513c90c25c1b1125e743683439ac90",
+      "sha256": "8ab98e4b7a7b0c669892f069881c25eaaf1f8241b1e7d71e5b63eed8b2c38a22",
+      "anchorRefs": []
+    },
+    {
+      "id": "E06-A-FUND-IMPORT",
+      "actionKey": "fund-recon:import",
+      "kind": "ACTION_CLAIM",
+      "source": "changes/background-execution-e06-a-fund-recon-service/implementation-notes.md",
+      "reviewedHead": "ce099b5446b6d18fa41ccf660bd6d55d32f595d4",
+      "blobOid": "b0b8a72f784b98330cca9b32bbf951adb05c6d4a",
+      "sha256": "eea4fad0a9755fb59641c988381a783281f746e58dac914779c1214a7610827f",
+      "anchorRefs": [
+        "FUND-IMPORT-ADOPTION"
+      ]
+    },
+    {
+      "id": "E06-A-FUND-RUN",
+      "actionKey": "fund-recon:run",
+      "kind": "ACTION_CLAIM",
+      "source": "changes/background-execution-e06-a-fund-recon-service/implementation-notes.md",
+      "reviewedHead": "ce099b5446b6d18fa41ccf660bd6d55d32f595d4",
+      "blobOid": "b0b8a72f784b98330cca9b32bbf951adb05c6d4a",
+      "sha256": "eea4fad0a9755fb59641c988381a783281f746e58dac914779c1214a7610827f",
+      "anchorRefs": [
+        "FUND-RUN-SNAPSHOT-ADOPTION",
+        "FUND-RUN-STRICT-ORDER"
+      ]
+    },
+    {
+      "id": "E06-A-FUND-EXPORT",
+      "actionKey": "fund-recon:export",
+      "kind": "ACTION_CLAIM",
+      "source": "changes/background-execution-e06-a-fund-recon-service/implementation-notes.md",
+      "reviewedHead": "ce099b5446b6d18fa41ccf660bd6d55d32f595d4",
+      "blobOid": "b0b8a72f784b98330cca9b32bbf951adb05c6d4a",
+      "sha256": "eea4fad0a9755fb59641c988381a783281f746e58dac914779c1214a7610827f",
+      "anchorRefs": [
+        "FUND-EXPORT-SNAPSHOT-STAGING"
+      ]
+    },
+    {
+      "id": "E07-A-DUPLICATE-IMPORT",
+      "actionKey": "duplicate:import",
+      "kind": "ACTION_CLAIM",
+      "source": "changes/background-execution-e07-a-duplicate-startup-service/implementation-notes.md",
+      "reviewedHead": "e36dfe33a22d6d821fa3792a70a2580de7af45af",
+      "blobOid": "c96e23424e0bac3faaf5ba51109f4dd9114c634b",
+      "sha256": "669d39f22e0da76b8a2f38220303b174f28d19bd05fb30db89b7fa0ef68636f3",
+      "anchorRefs": [
+        "DUPLICATE-IMPORT-STARTUP-OWNER"
+      ]
+    },
+    {
+      "id": "E07-B-DUPLICATE-IMPORT",
+      "actionKey": "duplicate:import",
+      "kind": "ACTION_CLAIM",
+      "source": "changes/background-execution-e07-b-duplicate-recovery/implementation-notes.md",
+      "reviewedHead": "c60e9d204e45e3bc39d61a3fc224c0bc0eef7d70",
+      "blobOid": "10adb70dc503b2b65e45e7b77d962daae37ea04d",
+      "sha256": "a79d1ee1e842959573ce6d52e35084bd5b776ca5fca82fa10f7330d83d29fb42",
+      "anchorRefs": [
+        "DUPLICATE-IMPORT-BANK-DOCUMENT-ORDER"
+      ]
+    },
+    {
+      "id": "E07-C-DUPLICATE-IMPORT",
+      "actionKey": "duplicate:import",
+      "kind": "ACTION_CLAIM",
+      "source": "changes/background-execution-e07-c-duplicate-paired-parser/implementation-notes.md",
+      "reviewedHead": "2df35fd5ebf51797537de37a58b2563ae64341df",
+      "blobOid": "d0251846824d58790ff6e67076ad8b1992c2702f",
+      "sha256": "f56827d56150995c6e94b65438ec50269638cd2cf317bff234d804b9517cd28e",
+      "anchorRefs": [
+        "DUPLICATE-IMPORT-BANK-DOCUMENT-ORDER"
+      ]
+    },
+    {
+      "id": "E07-C-DUPLICATE-IMPORT-BENCHMARK",
+      "actionKey": "duplicate:import",
+      "kind": "ACTION_PERFORMANCE",
+      "source": "changes/background-execution-e07-c-duplicate-paired-parser/benchmark-evidence.json",
+      "reviewedHead": "2df35fd5ebf51797537de37a58b2563ae64341df",
+      "blobOid": "5ead2f857da933a451bb45c7977857b1fe9a88ac",
+      "sha256": "13633ee2a6083e8a6b6c21147795c82d54187a35ae4b8b15f4505d993f0391eb",
+      "anchorRefs": [
+        "DUPLICATE-IMPORT-PAIRED-ACTION-SCOPE",
+        "DUPLICATE-IMPORT-LOCAL-PERFORMANCE"
+      ]
+    },
+    {
+      "id": "E07-A-DUPLICATE-RUN",
+      "actionKey": "duplicate:run",
+      "kind": "ACTION_CLAIM",
+      "source": "changes/background-execution-e07-a-duplicate-startup-service/implementation-notes.md",
+      "reviewedHead": "e36dfe33a22d6d821fa3792a70a2580de7af45af",
+      "blobOid": "c96e23424e0bac3faaf5ba51109f4dd9114c634b",
+      "sha256": "669d39f22e0da76b8a2f38220303b174f28d19bd05fb30db89b7fa0ef68636f3",
+      "anchorRefs": [
+        "DUPLICATE-RUN-SIDE-MIRROR"
+      ]
+    },
+    {
+      "id": "E07-B-DUPLICATE-RUN",
+      "actionKey": "duplicate:run",
+      "kind": "ACTION_CLAIM",
+      "source": "changes/background-execution-e07-b-duplicate-recovery/implementation-notes.md",
+      "reviewedHead": "c60e9d204e45e3bc39d61a3fc224c0bc0eef7d70",
+      "blobOid": "10adb70dc503b2b65e45e7b77d962daae37ea04d",
+      "sha256": "a79d1ee1e842959573ce6d52e35084bd5b776ca5fca82fa10f7330d83d29fb42",
+      "anchorRefs": [
+        "DUPLICATE-RUN-SIDE-MIRROR"
+      ]
+    },
+    {
+      "id": "E07-A-DUPLICATE-EXPORT",
+      "actionKey": "duplicate:export",
+      "kind": "ACTION_CLAIM",
+      "source": "changes/background-execution-e07-a-duplicate-startup-service/implementation-notes.md",
+      "reviewedHead": "e36dfe33a22d6d821fa3792a70a2580de7af45af",
+      "blobOid": "c96e23424e0bac3faaf5ba51109f4dd9114c634b",
+      "sha256": "669d39f22e0da76b8a2f38220303b174f28d19bd05fb30db89b7fa0ef68636f3",
+      "anchorRefs": [
+        "DUPLICATE-EXPORT-CURRENT-RESULT"
+      ]
+    },
+    {
+      "id": "E08-A-BANK-BU-IMPORT",
+      "actionKey": "bank-bu:import-month",
+      "kind": "ACTION_CLAIM",
+      "source": "changes/background-execution-e08-a-bank-bu-single/implementation-notes.md",
+      "reviewedHead": "a8e7cbdf41487ba0eca3f60e467f5413e4e8fa14",
+      "blobOid": "afb92a5069c17ea649923c78a66336165a968bb7",
+      "sha256": "262baf734ad6c4e1601e2f27eaf24edb8eda03082815b7cb33e4f2c341c41fe6",
+      "anchorRefs": [
+        "BANK-BU-IMPORT-TRANSACTION-ORDER"
+      ]
+    },
+    {
+      "id": "E08-B-BANK-BU-IMPORT",
+      "actionKey": "bank-bu:import-month",
+      "kind": "ACTION_CLAIM",
+      "source": "changes/background-execution-e08-b-bank-bu-dual-parser/implementation-notes.md",
+      "reviewedHead": "5c9495dda46c775babdac9eb1700c459735e5c8b",
+      "blobOid": "ac4c9b0d18ea2948f037b6e3d774c1948f2fded8",
+      "sha256": "e0acc456619a046b92c369bcb6f20fa8e08fc2b51fbaf86512f44742e5cdf738",
+      "anchorRefs": [
+        "BANK-BU-IMPORT-PARSER-FINALIZATION",
+        "BANK-BU-IMPORT-PENDING-BANK-ORDER"
+      ]
+    },
+    {
+      "id": "E08-B-BANK-BU-IMPORT-PERFORMANCE",
+      "actionKey": "bank-bu:import-month",
+      "kind": "ACTION_PERFORMANCE",
+      "source": "changes/background-execution-e08-b-bank-bu-dual-parser/implementation-notes.md",
+      "reviewedHead": "5c9495dda46c775babdac9eb1700c459735e5c8b",
+      "blobOid": "ac4c9b0d18ea2948f037b6e3d774c1948f2fded8",
+      "sha256": "e0acc456619a046b92c369bcb6f20fa8e08fc2b51fbaf86512f44742e5cdf738",
+      "anchorRefs": [
+        "BANK-BU-IMPORT-PARSER-FINALIZATION",
+        "BANK-BU-IMPORT-LOCAL-PERFORMANCE"
+      ]
+    },
+    {
+      "id": "E08-A-BANK-BU-RUN",
+      "actionKey": "bank-bu:run",
+      "kind": "ACTION_CLAIM",
+      "source": "changes/background-execution-e08-a-bank-bu-single/implementation-notes.md",
+      "reviewedHead": "a8e7cbdf41487ba0eca3f60e467f5413e4e8fa14",
+      "blobOid": "afb92a5069c17ea649923c78a66336165a968bb7",
+      "sha256": "262baf734ad6c4e1601e2f27eaf24edb8eda03082815b7cb33e4f2c341c41fe6",
+      "anchorRefs": [
+        "BANK-BU-RUN-SIDE-RECEIPT",
+        "BANK-BU-RUN-MAIN-CAS"
+      ]
+    },
+    {
+      "id": "E08-A-BANK-BU-EXPORT-SINGLE",
+      "actionKey": "bank-bu:export-single",
+      "kind": "ACTION_CLAIM",
+      "source": "changes/background-execution-e08-a-bank-bu-single/implementation-notes.md",
+      "reviewedHead": "a8e7cbdf41487ba0eca3f60e467f5413e4e8fa14",
+      "blobOid": "afb92a5069c17ea649923c78a66336165a968bb7",
+      "sha256": "262baf734ad6c4e1601e2f27eaf24edb8eda03082815b7cb33e4f2c341c41fe6",
+      "anchorRefs": [
+        "BANK-BU-EXPORT-SINGLE-SNAPSHOT"
+      ]
+    },
+    {
+      "id": "E08-A-BANK-BU-EXPORT-AGGREGATE",
+      "actionKey": "bank-bu:export-aggregate",
+      "kind": "ACTION_CLAIM",
+      "source": "changes/background-execution-e08-a-bank-bu-single/implementation-notes.md",
+      "reviewedHead": "a8e7cbdf41487ba0eca3f60e467f5413e4e8fa14",
+      "blobOid": "afb92a5069c17ea649923c78a66336165a968bb7",
+      "sha256": "262baf734ad6c4e1601e2f27eaf24edb8eda03082815b7cb33e4f2c341c41fe6",
+      "anchorRefs": [
+        "BANK-BU-EXPORT-AGGREGATE-ORDER"
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "actionKey": "fund-recon:import",
+      "policyAuthority": "common-runtime",
+      "currentPolicy": {
+        "disposition": "managed",
+        "mode": "thread-single",
+        "lifetime": "service",
+        "adapterKind": "native",
+        "commitKind": "none",
+        "criticalIntent": false,
+        "receiptKind": null,
+        "production": {
+          "enabled": false,
+          "effectiveMode": "legacy",
+          "effectiveWorkerCount": 0,
+          "recoveryStatus": "not-applicable",
+          "evidenceStatus": "baseline",
+          "downgradeReason": "production gate not yet passed",
+          "benchmarkEvidenceId": null
+        }
+      },
+      "runtimeOwnership": {
+        "policyLayer": "COMMON_BACKGROUND_RUNTIME",
+        "registrationStatus": "REGISTERED",
+        "lifetime": "service",
+        "serviceKey": "service.fund-recon",
+        "commitKind": "none",
+        "inspectorKey": null,
+        "settlementKey": null,
+        "legacyStrategyKey": "legacy.fund-recon:import",
+        "anchorIds": [
+          "FUND-IMPORT-ADOPTION"
+        ]
+      },
+      "live": {
+        "disposition": "legacy-preserved",
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "strategyKey": "legacy.fund-recon:import"
+      },
+      "decision": {
+        "kind": "KEEP_DISABLED",
+        "enabled": false,
+        "independent": true
+      },
+      "evidenceRefs": [
+        "CONTRACT-SPEC-3.2.2",
+        "CONTRACT-TECHDOC-3.2.2",
+        "CONTRACT-SEQUENCE-3.2.2",
+        "POLICY-CANONICAL-V3.2.X",
+        "E06-A-FUND-IMPORT"
+      ],
+      "gates": {
+        "windowsPackaged": "NOT_RUN",
+        "windowsNativeSqlite": "NOT_RUN",
+        "realProcessTermination": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW",
+        "liveWiring": "NOT_RUN",
+        "performance": "NOT_RUN"
+      },
+      "rollback": {
+        "strategyKey": "legacy.fund-recon:import",
+        "identityAnchorIds": [
+          "FUND-IMPORT-ADOPTION"
+        ],
+        "orderAnchorIds": [
+          "FUND-IMPORT-ADOPTION"
+        ]
+      }
+    },
+    {
+      "actionKey": "fund-recon:run",
+      "policyAuthority": "common-runtime",
+      "currentPolicy": {
+        "disposition": "managed",
+        "mode": "thread-single",
+        "lifetime": "service",
+        "adapterKind": "native",
+        "commitKind": "none",
+        "criticalIntent": false,
+        "receiptKind": null,
+        "production": {
+          "enabled": false,
+          "effectiveMode": "legacy",
+          "effectiveWorkerCount": 0,
+          "recoveryStatus": "not-applicable",
+          "evidenceStatus": "baseline",
+          "downgradeReason": "production gate not yet passed",
+          "benchmarkEvidenceId": null
+        }
+      },
+      "runtimeOwnership": {
+        "policyLayer": "COMMON_BACKGROUND_RUNTIME",
+        "registrationStatus": "REGISTERED",
+        "lifetime": "service",
+        "serviceKey": "service.fund-recon",
+        "commitKind": "none",
+        "inspectorKey": null,
+        "settlementKey": null,
+        "legacyStrategyKey": "legacy.fund-recon:run",
+        "anchorIds": [
+          "FUND-RUN-SNAPSHOT-ADOPTION"
+        ]
+      },
+      "live": {
+        "disposition": "legacy-preserved",
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "strategyKey": "legacy.fund-recon:run"
+      },
+      "decision": {
+        "kind": "KEEP_DISABLED",
+        "enabled": false,
+        "independent": true
+      },
+      "evidenceRefs": [
+        "CONTRACT-SPEC-3.2.2",
+        "CONTRACT-TECHDOC-3.2.2",
+        "CONTRACT-SEQUENCE-3.2.2",
+        "POLICY-CANONICAL-V3.2.X",
+        "E06-A-FUND-RUN"
+      ],
+      "gates": {
+        "windowsPackaged": "NOT_RUN",
+        "windowsNativeSqlite": "NOT_RUN",
+        "realProcessTermination": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW",
+        "liveWiring": "NOT_RUN",
+        "performance": "NOT_RUN"
+      },
+      "rollback": {
+        "strategyKey": "legacy.fund-recon:run",
+        "identityAnchorIds": [
+          "FUND-RUN-SNAPSHOT-ADOPTION"
+        ],
+        "orderAnchorIds": [
+          "FUND-RUN-STRICT-ORDER"
+        ]
+      }
+    },
+    {
+      "actionKey": "fund-recon:export",
+      "policyAuthority": "common-runtime",
+      "currentPolicy": {
+        "disposition": "managed",
+        "mode": "thread-single",
+        "lifetime": "service",
+        "adapterKind": "native",
+        "commitKind": "main-settlement",
+        "criticalIntent": false,
+        "receiptKind": "publisher-journal",
+        "production": {
+          "enabled": false,
+          "effectiveMode": "legacy",
+          "effectiveWorkerCount": 0,
+          "recoveryStatus": "probe",
+          "evidenceStatus": "baseline",
+          "downgradeReason": "production gate not yet passed",
+          "benchmarkEvidenceId": null
+        }
+      },
+      "runtimeOwnership": {
+        "policyLayer": "COMMON_BACKGROUND_RUNTIME",
+        "registrationStatus": "REGISTERED",
+        "lifetime": "service",
+        "serviceKey": "service.fund-recon",
+        "commitKind": "main-settlement",
+        "inspectorKey": "inspector.fund-recon:export",
+        "settlementKey": "settlement.fund-recon:export",
+        "legacyStrategyKey": "legacy.fund-recon:export",
+        "anchorIds": [
+          "FUND-EXPORT-SNAPSHOT-STAGING"
+        ]
+      },
+      "live": {
+        "disposition": "legacy-preserved",
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "strategyKey": "legacy.fund-recon:export"
+      },
+      "decision": {
+        "kind": "KEEP_DISABLED",
+        "enabled": false,
+        "independent": true
+      },
+      "evidenceRefs": [
+        "CONTRACT-SPEC-3.2.2",
+        "CONTRACT-TECHDOC-3.2.2",
+        "CONTRACT-SEQUENCE-3.2.2",
+        "POLICY-CANONICAL-V3.2.X",
+        "E06-A-FUND-EXPORT"
+      ],
+      "gates": {
+        "windowsPackaged": "NOT_RUN",
+        "windowsNativeSqlite": "NOT_RUN",
+        "realProcessTermination": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW",
+        "liveWiring": "NOT_RUN",
+        "performance": "NOT_RUN"
+      },
+      "rollback": {
+        "strategyKey": "legacy.fund-recon:export",
+        "identityAnchorIds": [
+          "FUND-EXPORT-SNAPSHOT-STAGING"
+        ],
+        "orderAnchorIds": [
+          "FUND-EXPORT-SNAPSHOT-STAGING"
+        ]
+      }
+    },
+    {
+      "actionKey": "duplicate:import",
+      "policyAuthority": "common-runtime",
+      "currentPolicy": {
+        "disposition": "managed",
+        "mode": "thread-pool",
+        "lifetime": "service",
+        "adapterKind": "native",
+        "commitKind": "worker-durable",
+        "criticalIntent": true,
+        "receiptKind": "module-local",
+        "production": {
+          "enabled": false,
+          "effectiveMode": "legacy",
+          "effectiveWorkerCount": 0,
+          "recoveryStatus": "probe",
+          "evidenceStatus": "baseline",
+          "downgradeReason": "production gate not yet passed",
+          "benchmarkEvidenceId": null
+        }
+      },
+      "runtimeOwnership": {
+        "policyLayer": "COMMON_BACKGROUND_RUNTIME",
+        "registrationStatus": "REGISTERED",
+        "lifetime": "service",
+        "serviceKey": "service.duplicate",
+        "commitKind": "worker-durable",
+        "inspectorKey": "inspector.duplicate:import",
+        "settlementKey": null,
+        "legacyStrategyKey": "legacy.duplicate:import",
+        "anchorIds": [
+          "DUPLICATE-IMPORT-STARTUP-OWNER"
+        ]
+      },
+      "live": {
+        "disposition": "legacy-preserved",
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "strategyKey": "legacy.duplicate:import"
+      },
+      "decision": {
+        "kind": "KEEP_DISABLED",
+        "enabled": false,
+        "independent": true
+      },
+      "evidenceRefs": [
+        "CONTRACT-SPEC-3.2.2",
+        "CONTRACT-TECHDOC-3.2.2",
+        "CONTRACT-SEQUENCE-3.2.2",
+        "POLICY-CANONICAL-V3.2.X",
+        "E07-A-DUPLICATE-IMPORT",
+        "E07-B-DUPLICATE-IMPORT",
+        "E07-C-DUPLICATE-IMPORT",
+        "E07-C-DUPLICATE-IMPORT-BENCHMARK"
+      ],
+      "gates": {
+        "windowsPackaged": "NOT_RUN",
+        "windowsNativeSqlite": "NOT_RUN",
+        "realProcessTermination": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW",
+        "liveWiring": "NOT_RUN",
+        "performance": "LOCAL_CAPABILITY_ONLY"
+      },
+      "rollback": {
+        "strategyKey": "legacy.duplicate:import",
+        "identityAnchorIds": [
+          "DUPLICATE-IMPORT-STARTUP-OWNER",
+          "DUPLICATE-IMPORT-BANK-DOCUMENT-ORDER"
+        ],
+        "orderAnchorIds": [
+          "DUPLICATE-IMPORT-BANK-DOCUMENT-ORDER"
+        ]
+      }
+    },
+    {
+      "actionKey": "duplicate:run",
+      "policyAuthority": "common-runtime",
+      "currentPolicy": {
+        "disposition": "managed",
+        "mode": "thread-single",
+        "lifetime": "service",
+        "adapterKind": "native",
+        "commitKind": "worker-durable",
+        "criticalIntent": true,
+        "receiptKind": "module-local",
+        "production": {
+          "enabled": false,
+          "effectiveMode": "legacy",
+          "effectiveWorkerCount": 0,
+          "recoveryStatus": "probe",
+          "evidenceStatus": "baseline",
+          "downgradeReason": "production gate not yet passed",
+          "benchmarkEvidenceId": null
+        }
+      },
+      "runtimeOwnership": {
+        "policyLayer": "COMMON_BACKGROUND_RUNTIME",
+        "registrationStatus": "REGISTERED",
+        "lifetime": "service",
+        "serviceKey": "service.duplicate",
+        "commitKind": "worker-durable",
+        "inspectorKey": "inspector.duplicate:run",
+        "settlementKey": null,
+        "legacyStrategyKey": "legacy.duplicate:run",
+        "anchorIds": [
+          "DUPLICATE-RUN-SIDE-MIRROR"
+        ]
+      },
+      "live": {
+        "disposition": "legacy-preserved",
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "strategyKey": "legacy.duplicate:run"
+      },
+      "decision": {
+        "kind": "KEEP_DISABLED",
+        "enabled": false,
+        "independent": true
+      },
+      "evidenceRefs": [
+        "CONTRACT-SPEC-3.2.2",
+        "CONTRACT-TECHDOC-3.2.2",
+        "CONTRACT-SEQUENCE-3.2.2",
+        "POLICY-CANONICAL-V3.2.X",
+        "E07-A-DUPLICATE-RUN",
+        "E07-B-DUPLICATE-RUN"
+      ],
+      "gates": {
+        "windowsPackaged": "NOT_RUN",
+        "windowsNativeSqlite": "NOT_RUN",
+        "realProcessTermination": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW",
+        "liveWiring": "NOT_RUN",
+        "performance": "NOT_RUN"
+      },
+      "rollback": {
+        "strategyKey": "legacy.duplicate:run",
+        "identityAnchorIds": [
+          "DUPLICATE-RUN-SIDE-MIRROR"
+        ],
+        "orderAnchorIds": [
+          "DUPLICATE-RUN-SIDE-MIRROR"
+        ]
+      }
+    },
+    {
+      "actionKey": "duplicate:export",
+      "policyAuthority": "common-runtime",
+      "currentPolicy": {
+        "disposition": "managed",
+        "mode": "thread-single",
+        "lifetime": "service",
+        "adapterKind": "native",
+        "commitKind": "main-settlement",
+        "criticalIntent": false,
+        "receiptKind": "publisher-journal",
+        "production": {
+          "enabled": false,
+          "effectiveMode": "legacy",
+          "effectiveWorkerCount": 0,
+          "recoveryStatus": "probe",
+          "evidenceStatus": "baseline",
+          "downgradeReason": "production gate not yet passed",
+          "benchmarkEvidenceId": null
+        }
+      },
+      "runtimeOwnership": {
+        "policyLayer": "COMMON_BACKGROUND_RUNTIME",
+        "registrationStatus": "REGISTERED",
+        "lifetime": "service",
+        "serviceKey": "service.duplicate",
+        "commitKind": "main-settlement",
+        "inspectorKey": "inspector.duplicate:export",
+        "settlementKey": "settlement.duplicate:export",
+        "legacyStrategyKey": "legacy.duplicate:export",
+        "anchorIds": [
+          "DUPLICATE-EXPORT-CURRENT-RESULT"
+        ]
+      },
+      "live": {
+        "disposition": "legacy-preserved",
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "strategyKey": "legacy.duplicate:export"
+      },
+      "decision": {
+        "kind": "KEEP_DISABLED",
+        "enabled": false,
+        "independent": true
+      },
+      "evidenceRefs": [
+        "CONTRACT-SPEC-3.2.2",
+        "CONTRACT-TECHDOC-3.2.2",
+        "CONTRACT-SEQUENCE-3.2.2",
+        "POLICY-CANONICAL-V3.2.X",
+        "E07-A-DUPLICATE-EXPORT"
+      ],
+      "gates": {
+        "windowsPackaged": "NOT_RUN",
+        "windowsNativeSqlite": "NOT_RUN",
+        "realProcessTermination": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW",
+        "liveWiring": "NOT_RUN",
+        "performance": "NOT_RUN"
+      },
+      "rollback": {
+        "strategyKey": "legacy.duplicate:export",
+        "identityAnchorIds": [
+          "DUPLICATE-EXPORT-CURRENT-RESULT"
+        ],
+        "orderAnchorIds": [
+          "DUPLICATE-EXPORT-CURRENT-RESULT"
+        ]
+      }
+    },
+    {
+      "actionKey": "bank-bu:import-month",
+      "policyAuthority": "module-policy-only",
+      "currentPolicy": {
+        "disposition": "managed",
+        "mode": "thread-pool",
+        "lifetime": "job",
+        "adapterKind": "native",
+        "commitKind": "worker-durable",
+        "criticalIntent": true,
+        "receiptKind": "module-local",
+        "production": {
+          "enabled": false,
+          "effectiveMode": "legacy",
+          "effectiveWorkerCount": 0,
+          "recoveryStatus": "probe",
+          "evidenceStatus": "baseline",
+          "downgradeReason": "production gate not yet passed",
+          "benchmarkEvidenceId": null
+        }
+      },
+      "runtimeOwnership": {
+        "policyLayer": "MODULE_LOCAL_ONLY",
+        "registrationStatus": "ABSENT_FAIL_CLOSED",
+        "lifetime": "job",
+        "serviceKey": null,
+        "commitKind": "worker-durable",
+        "inspectorKey": "inspector.bank-bu:import-month",
+        "settlementKey": null,
+        "legacyStrategyKey": "legacy.bank-bu:import-month",
+        "anchorIds": [
+          "BANK-BU-IMPORT-PARSER-FINALIZATION",
+          "BANK-BU-IMPORT-TRANSACTION-ORDER"
+        ]
+      },
+      "live": {
+        "disposition": "legacy-preserved",
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "strategyKey": "legacy.bank-bu:import-month"
+      },
+      "decision": {
+        "kind": "KEEP_DISABLED",
+        "enabled": false,
+        "independent": true
+      },
+      "evidenceRefs": [
+        "CONTRACT-SPEC-3.2.2",
+        "CONTRACT-TECHDOC-3.2.2",
+        "CONTRACT-SEQUENCE-3.2.2",
+        "POLICY-CANONICAL-V3.2.X",
+        "E08-A-BANK-BU-IMPORT",
+        "E08-B-BANK-BU-IMPORT",
+        "E08-B-BANK-BU-IMPORT-PERFORMANCE"
+      ],
+      "gates": {
+        "windowsPackaged": "NOT_RUN",
+        "windowsNativeSqlite": "NOT_RUN",
+        "realProcessTermination": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW",
+        "liveWiring": "NOT_RUN",
+        "performance": "LOCAL_CAPABILITY_ONLY"
+      },
+      "rollback": {
+        "strategyKey": "legacy.bank-bu:import-month",
+        "identityAnchorIds": [
+          "BANK-BU-IMPORT-PARSER-FINALIZATION",
+          "BANK-BU-IMPORT-PENDING-BANK-ORDER",
+          "BANK-BU-IMPORT-TRANSACTION-ORDER"
+        ],
+        "orderAnchorIds": [
+          "BANK-BU-IMPORT-PENDING-BANK-ORDER",
+          "BANK-BU-IMPORT-TRANSACTION-ORDER"
+        ]
+      }
+    },
+    {
+      "actionKey": "bank-bu:run",
+      "policyAuthority": "module-policy-only",
+      "currentPolicy": {
+        "disposition": "managed",
+        "mode": "thread-single",
+        "lifetime": "job",
+        "adapterKind": "native",
+        "commitKind": "worker-durable",
+        "criticalIntent": true,
+        "receiptKind": "module-local",
+        "production": {
+          "enabled": false,
+          "effectiveMode": "legacy",
+          "effectiveWorkerCount": 0,
+          "recoveryStatus": "probe",
+          "evidenceStatus": "baseline",
+          "downgradeReason": "production gate not yet passed",
+          "benchmarkEvidenceId": null
+        }
+      },
+      "runtimeOwnership": {
+        "policyLayer": "MODULE_LOCAL_ONLY",
+        "registrationStatus": "ABSENT_FAIL_CLOSED",
+        "lifetime": "job",
+        "serviceKey": null,
+        "commitKind": "worker-durable",
+        "inspectorKey": "inspector.bank-bu:run",
+        "settlementKey": null,
+        "legacyStrategyKey": "legacy.bank-bu:run",
+        "anchorIds": [
+          "BANK-BU-RUN-SIDE-RECEIPT",
+          "BANK-BU-RUN-MAIN-CAS"
+        ]
+      },
+      "live": {
+        "disposition": "legacy-preserved",
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "strategyKey": "legacy.bank-bu:run"
+      },
+      "decision": {
+        "kind": "KEEP_DISABLED",
+        "enabled": false,
+        "independent": true
+      },
+      "evidenceRefs": [
+        "CONTRACT-SPEC-3.2.2",
+        "CONTRACT-TECHDOC-3.2.2",
+        "CONTRACT-SEQUENCE-3.2.2",
+        "POLICY-CANONICAL-V3.2.X",
+        "E08-A-BANK-BU-RUN"
+      ],
+      "gates": {
+        "windowsPackaged": "NOT_RUN",
+        "windowsNativeSqlite": "NOT_RUN",
+        "realProcessTermination": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW",
+        "liveWiring": "NOT_RUN",
+        "performance": "NOT_RUN"
+      },
+      "rollback": {
+        "strategyKey": "legacy.bank-bu:run",
+        "identityAnchorIds": [
+          "BANK-BU-RUN-SIDE-RECEIPT",
+          "BANK-BU-RUN-MAIN-CAS"
+        ],
+        "orderAnchorIds": [
+          "BANK-BU-RUN-SIDE-RECEIPT",
+          "BANK-BU-RUN-MAIN-CAS"
+        ]
+      }
+    },
+    {
+      "actionKey": "bank-bu:export-single",
+      "policyAuthority": "module-policy-only",
+      "currentPolicy": {
+        "disposition": "managed",
+        "mode": "thread-single",
+        "lifetime": "job",
+        "adapterKind": "native",
+        "commitKind": "main-settlement",
+        "criticalIntent": false,
+        "receiptKind": "publisher-journal",
+        "production": {
+          "enabled": false,
+          "effectiveMode": "legacy",
+          "effectiveWorkerCount": 0,
+          "recoveryStatus": "probe",
+          "evidenceStatus": "baseline",
+          "downgradeReason": "production gate not yet passed",
+          "benchmarkEvidenceId": null
+        }
+      },
+      "runtimeOwnership": {
+        "policyLayer": "MODULE_LOCAL_ONLY",
+        "registrationStatus": "ABSENT_FAIL_CLOSED",
+        "lifetime": "job",
+        "serviceKey": null,
+        "commitKind": "main-settlement",
+        "inspectorKey": "inspector.bank-bu:export-single",
+        "settlementKey": "settlement.bank-bu:export-single",
+        "legacyStrategyKey": "legacy.bank-bu:export-single",
+        "anchorIds": [
+          "BANK-BU-EXPORT-SINGLE-SNAPSHOT"
+        ]
+      },
+      "live": {
+        "disposition": "legacy-preserved",
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "strategyKey": "legacy.bank-bu:export-single"
+      },
+      "decision": {
+        "kind": "KEEP_DISABLED",
+        "enabled": false,
+        "independent": true
+      },
+      "evidenceRefs": [
+        "CONTRACT-SPEC-3.2.2",
+        "CONTRACT-TECHDOC-3.2.2",
+        "CONTRACT-SEQUENCE-3.2.2",
+        "POLICY-CANONICAL-V3.2.X",
+        "E08-A-BANK-BU-EXPORT-SINGLE"
+      ],
+      "gates": {
+        "windowsPackaged": "NOT_RUN",
+        "windowsNativeSqlite": "NOT_RUN",
+        "realProcessTermination": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW",
+        "liveWiring": "NOT_RUN",
+        "performance": "NOT_RUN"
+      },
+      "rollback": {
+        "strategyKey": "legacy.bank-bu:export-single",
+        "identityAnchorIds": [
+          "BANK-BU-EXPORT-SINGLE-SNAPSHOT"
+        ],
+        "orderAnchorIds": [
+          "BANK-BU-EXPORT-SINGLE-SNAPSHOT"
+        ]
+      }
+    },
+    {
+      "actionKey": "bank-bu:export-aggregate",
+      "policyAuthority": "module-policy-only",
+      "currentPolicy": {
+        "disposition": "managed",
+        "mode": "thread-single",
+        "lifetime": "job",
+        "adapterKind": "native",
+        "commitKind": "main-settlement",
+        "criticalIntent": false,
+        "receiptKind": "publisher-journal",
+        "production": {
+          "enabled": false,
+          "effectiveMode": "legacy",
+          "effectiveWorkerCount": 0,
+          "recoveryStatus": "probe",
+          "evidenceStatus": "baseline",
+          "downgradeReason": "production gate not yet passed",
+          "benchmarkEvidenceId": null
+        }
+      },
+      "runtimeOwnership": {
+        "policyLayer": "MODULE_LOCAL_ONLY",
+        "registrationStatus": "ABSENT_FAIL_CLOSED",
+        "lifetime": "job",
+        "serviceKey": null,
+        "commitKind": "main-settlement",
+        "inspectorKey": "inspector.bank-bu:export-aggregate",
+        "settlementKey": "settlement.bank-bu:export-aggregate",
+        "legacyStrategyKey": "legacy.bank-bu:export-aggregate",
+        "anchorIds": [
+          "BANK-BU-EXPORT-AGGREGATE-ORDER"
+        ]
+      },
+      "live": {
+        "disposition": "legacy-preserved",
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "strategyKey": "legacy.bank-bu:export-aggregate"
+      },
+      "decision": {
+        "kind": "KEEP_DISABLED",
+        "enabled": false,
+        "independent": true
+      },
+      "evidenceRefs": [
+        "CONTRACT-SPEC-3.2.2",
+        "CONTRACT-TECHDOC-3.2.2",
+        "CONTRACT-SEQUENCE-3.2.2",
+        "POLICY-CANONICAL-V3.2.X",
+        "E08-A-BANK-BU-EXPORT-AGGREGATE"
+      ],
+      "gates": {
+        "windowsPackaged": "NOT_RUN",
+        "windowsNativeSqlite": "NOT_RUN",
+        "realProcessTermination": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW",
+        "liveWiring": "NOT_RUN",
+        "performance": "NOT_RUN"
+      },
+      "rollback": {
+        "strategyKey": "legacy.bank-bu:export-aggregate",
+        "identityAnchorIds": [
+          "BANK-BU-EXPORT-AGGREGATE-ORDER"
+        ],
+        "orderAnchorIds": [
+          "BANK-BU-EXPORT-AGGREGATE-ORDER"
+        ]
+      }
+    }
+  ]
+}
