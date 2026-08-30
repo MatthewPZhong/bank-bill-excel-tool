@@ -177,6 +177,20 @@ replacement 保持可达，同时继承最终 v3.2.2/v3.2.3 与 #197 release lin
 默认 15 秒给其它用例；生产 Supervisor 超时、20 ms adoption deadline、状态机及断言均未放宽。修复后
 默认并发矩阵 79/79，通过扩大后的平台与 Statement 矩阵 452/452。
 
+### Windows Worker shutdown liveness closure（2026-08-30）
+
+#199 在最终 v3.2.3 base 上的 automatic run `33299808535` 没有出现断言失败：lint 与 smoke 已完成，
+Windows 单测输出停在第 2387 项，排序上的下一文件为 `statement-generation-e09-c.test.js`；随后进程持续
+存活并在 GitHub 六小时上限被取消，build 因而 skipped。本地同一 E09-C 文件 21/21 PASS，结合真实
+ServiceHost/Worker 生命周期复核，定位到关闭路径的 event-loop liveness，而不是业务断言或工作簿输出漂移。
+
+ServiceHost 仍按原合同先 `close()` 再等待 `terminate()`，且 terminate 不 settle 时继续返回
+`SERVICE_SHUTDOWN_TIMEOUT` 并保留 leak diagnostics；Worker adapter 的 `close()` 只新增幂等 `unref()`，
+释放已关闭 Worker 对 Node 进程的引用。该动作不终止 Worker、不伪造 cleanup success、不缩短资源 revoke/
+release 流程，也不改变 Supervisor 的 timeout、取消或资金输出语义。专门回归覆盖 `terminate()` 已启动但
+永不 settle 时，后续 `close()` 仍 exactly-once unref；正常 close/terminate、error listener 与资源释放合同
+继续由平台矩阵覆盖。
+
 ## Evidence
 
 | 证据 | 结果 | 覆盖的行为/风险 |
@@ -190,6 +204,7 @@ replacement 保持可达，同时继承最终 v3.2.2/v3.2.3 与 #197 release lin
 | Reviewer 后 platform Governor/ServiceHost/Supervisor/recovery/P0 聚焦矩阵 | 245/245 PASS | 未改通用 Supervisor；资源 grant/adopt/revoke/release、shutdown/crash、service generation 与 recovery 合同无回归 |
 | 2026-08-30 E09-C replacement remediation | `statement-interactions-e09-b.test.js` 21/21 PASS；`statement-generation-e09-c.test.js` 21/21 PASS；E09-P0/A/B/C 六文件聚焦矩阵 93/93 PASS | duplicate `prepare-generation` candidate-first success、grant reject、adoption timeout/revoke、cross-purpose fail-closed、旧 token continuation；current/all generation 与既有 token/session/resource 合同无回归 |
 | final predecessor propagation 聚焦复验 | 默认并发五文件矩阵 79/79 PASS；background-execution + Statement 全链单并发 452/452 PASS；`statement-generation-pipeline.js` 45/45 PASS；`npm run smoke` PASS | 最终 v3.2.2/3.2.3 基座传播后的 Governor/ServiceHost/Supervisor/recovery、candidate-first、current/all、Workbook、金额/币种/余额、Publisher 与 legacy smoke |
+| #199 Windows shutdown liveness remediation | automatic run `33299808535`：lint/smoke 完成，Windows 单测输出停在 E09-C 文件前并于 6h 被取消；adapter + ServiceHost + E09-C 92/92 PASS；完整 background-execution + E09-B/C 矩阵 402/402 PASS | `close()` exactly-once unref，terminate pending 不再钉住进程；shutdown timeout/leak 仍为失败证据，不用旧 run 代偿新 head CI |
 | Round 2/3 自洽 workbook mutations | formula、type/format、font 及其四个扩展布尔、single-quote style、comment spoof、relationship decoy、duplicate coordinate、非法显式 style 全部 Publisher=0 | 实际 worksheet relationship/结构化 cell style、全 grid t/z 与 writer-owned font 摘要 readback；manifest size/hash/rowCounts 均按篡改后文件重算 |
 | Reviewer 后 `node scripts/integration/statement-generation-pipeline.js` | 45/45 PASS | legacy generation pipeline、detail/balance/current/all 业务等价 |
 | `npm run test:integration` | 51/51 scripts、2455/2455 PASS | 全仓集成、Publisher/cleanup 与资金相关输出回归；runner 自动清单的本地耗时刷新已回退，不纳入 change |
