@@ -183,10 +183,24 @@ createExistingDispatchAdapter({
 ### Position
 
 - mode=`utility-process`；
-- adapter映射现有prepare/apply/grant/critical/commit/cancel；
+- adapter 映射现有 prepare/apply/grant/critical/commit/cancel，不在外层再 spawn process；
 - utilityProcess不可用时的child_process fallback仍由原dispatcher决定；
-- protected committing不映射cancelled；
-- journal/ledger是`existing-critical-protocol`证据。
+- bank prepare 与 bank/account confirmed apply 任一时刻只有 root process；source root 等待 durable
+  grant 时，Main authorizer 最多并发一个 schema-migration process，因此
+  `childrenMax=1`、intent 级 `effectiveChildCount=0/1`；
+- Protocol exact-5 operation context 与 File Task exact-7 batch context 的共有五字段逐项一致；
+  mutation operation token 必须精确等于 `taskRunId`，caller 不能覆盖 userData/side DB/checkpoint；
+- confirmed selector 由 Main 解析并在 mutation 前验证完整 preflight manifest 与 bank/account kind；
+  source grant 只允许 operation token、manifest hash、schema fingerprint、base checkpoint、batch owner
+  六项字段，provider 的额外字段不跨 grant boundary；
+- raw dispatcher 的 `cancel()` true 只表示消息已投递；adapter 等待真实 CANCEL_ACK 或可识别的
+  `position-import-cancelled` terminal。protected committing 的 `accepted=false` 不映射 cancelled，
+  但 job-level cancel 在 schema 完成后的下一安全点仍阻止 apply；等待 authorizer 时已接受取消则
+  禁止继续发 grant；
+- checkpoint/manifest/result 投影采用 compact allowlist；非法、互相冲突或缺失的提交证据 fail closed，
+  不得降级为 preflight success；
+- journal/ledger 是 `existing-critical-protocol` 证据。E13-F 不替换默认 IPC/FilePlan/pending 编排，
+  实际 route authority、Windows 与资金/恢复人工门禁完成前 production snapshot 保持 legacy。
 
 ## 6. Action Manifest / AST gate
 

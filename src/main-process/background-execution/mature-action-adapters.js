@@ -15,6 +15,12 @@ const {
 const {
   createAcquiringMatureBindings
 } = require('./adapters/acquiring-adapter');
+const {
+  createPositionImportMatureBinding
+} = require('./adapters/position-import-adapter');
+const {
+  POSITION_IMPORT_ADAPTER_ACTION
+} = require('./position-import-adapter-policy');
 
 const MATURE_ACTION_KEYS = Object.freeze({
   pendingImport: 'pending:import',
@@ -22,6 +28,7 @@ const MATURE_ACTION_KEYS = Object.freeze({
   acquiringImport: ACQUIRING_ADAPTER_ACTIONS.IMPORT,
   acquiringRunNewEligible: ACQUIRING_ADAPTER_ACTIONS.RUN_NEW_ELIGIBLE,
   acquiringRunSingleOrResume: ACQUIRING_ADAPTER_ACTIONS.RUN_SINGLE_OR_RESUME,
+  positionImport: POSITION_IMPORT_ADAPTER_ACTION,
   toolboxSplitLarge: 'toolbox:split-large',
   toolboxPublish: 'toolbox:publish'
 });
@@ -43,6 +50,9 @@ function createMatureActionAdapterBindings(options = {}) {
       acquiringBindings[MATURE_ACTION_KEYS.acquiringRunNewEligible],
     [MATURE_ACTION_KEYS.acquiringRunSingleOrResume]:
       acquiringBindings[MATURE_ACTION_KEYS.acquiringRunSingleOrResume],
+    [MATURE_ACTION_KEYS.positionImport]: createPositionImportMatureBinding(
+      options.position || {}
+    ),
     [MATURE_ACTION_KEYS.toolboxSplitLarge]: createToolboxLargeSplitMatureBinding(options.toolboxSplit),
     [MATURE_ACTION_KEYS.toolboxPublish]: createToolboxPublicationMatureBinding(options.toolboxPublication)
   });

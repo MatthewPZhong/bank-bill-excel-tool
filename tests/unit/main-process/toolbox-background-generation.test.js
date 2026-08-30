@@ -66,6 +66,9 @@ const {
   ACQUIRING_ADAPTER_ACTIONS
 } = require('../../../src/main-process/background-execution/acquiring-adapter-policies');
 const {
+  POSITION_IMPORT_ADAPTER_ACTION
+} = require('../../../src/main-process/background-execution/position-import-adapter-policy');
+const {
   createBackgroundExecutionRuntime: createBackgroundExecutionRuntimeRaw,
   createBackgroundExecutionRuntimeManager,
   isBackgroundExecutionProductionEnabled
@@ -259,7 +262,8 @@ test('E04-B runtime预算完整计入Scanner phase与一个Writer child，idle/s
     PENDING_BIZOP_ADAPTER_ACTIONS.BIZ_OP_IMPORT_FLOW,
     ACQUIRING_ADAPTER_ACTIONS.IMPORT,
     ACQUIRING_ADAPTER_ACTIONS.RUN_NEW_ELIGIBLE,
-    ACQUIRING_ADAPTER_ACTIONS.RUN_SINGLE_OR_RESUME
+    ACQUIRING_ADAPTER_ACTIONS.RUN_SINGLE_OR_RESUME,
+    POSITION_IMPORT_ADAPTER_ACTION
   ]);
   for (const policy of runtime.policyRegistry.list()) {
     assert.equal(policy.production.enabled, false);

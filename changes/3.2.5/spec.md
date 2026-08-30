@@ -138,7 +138,7 @@ existing-critical-protocol
 | `acquiring:import` | `legacy-preserved` | `managed` | `thread-pool` | `job` | `existing-dispatch` | `existing-critical-protocol` | `false` | adapterKey 固化现有 import root + Parser Pool；childrenMax=4 |
 | `acquiring:run-new-eligible` | `legacy-preserved` | `managed` | `thread-pool` | `job` | `existing-dispatch` | `existing-critical-protocol` | `false` | 仅符合既有 multiworker gate 的全新 run；current workerCount 上限=8 |
 | `acquiring:run-single-or-resume` | `legacy-preserved` | `managed` | `thread-single` | `job` | `existing-dispatch` | `existing-critical-protocol` | `false` | small / resume / forced-single；只有 root Worker、`compound=null`，不得在运行中切换 |
-| `position:import` | `legacy-preserved` | `managed` | `utility-process` | `job` | `existing-dispatch` | `existing-critical-protocol` | `false` | 保留 prepare/grant/apply/recovery |
+| `position:import` | `legacy-preserved` | `managed` | `utility-process` | `job` | `existing-dispatch` | `existing-critical-protocol` | `false` | 保留 prepare/grant/apply/recovery；root phase + 最多 1 个 schema child |
 
 `adapterKey`、`entryKey`、`inspectorKey` 等必须在机器可读 Registry fixture 中给出，不能写“native 或 existing-dispatch”“模块现有映射”“job/service”等非 canonical 值。
 
@@ -147,6 +147,13 @@ Acquiring current-tree topology 以真实 dispatcher 为权威：import 的 root
 合法 nested child 上限必须覆盖设置与 Main CPU/内存闸允许的 8；`run-single-or-resume` 不创建
 nested child，不得用一个虚构 child 重复计费。冻结历史 fixture 保持不变，E13-G 必须按 current
 authority 重建最终 Registry/策略快照。
+
+Position current-tree topology 同样以真实 dispatcher 为权威：bank prepare、bank/account confirmed
+apply 均只在任一时刻运行 1 个 root utility process；source prepare-and-apply 的 root 在等待 Main
+durable grant 时，authorizer 最多并发 1 个 schema-migration utility process。因此
+`position:import` 的 `childrenMax=1`，各 intent 的 `effectiveChildCount` 只能为 `0/1`，不得沿用
+冻结历史 fixture 的 4。Protocol exact-5 operation context 与既有 File Task exact-7 batch owner
+共享的五个 identity 字段必须一致，mutation operation token 必须等于 `taskRunId`。
 
 ## 4. Read-only export 合同
 
@@ -212,6 +219,16 @@ Adapter只负责：
   `userDataDir/mainDatabasePath/mainDb` 重新执行 `prepareRunResume()` 与 freshness 复核，拒绝嵌套
   `resumePlan/dbPath` authority。持久 exact-7 owner 与当前 File Task、持久 output intent 与当前
   FilePlan 必须完全一致；持久 `chunkSize` 优先于当前设置，避免 chunk offset 漂移。
+- Position bank prepare 只接受绝对输入路径；confirmed apply 只接受 Main-owned prepared selector
+  与 exact-7 batch owner。selector 必须解析为完整 preflight manifest，bank/account kind、当前
+  checkpoint 与 operation token 必须在启动 schema/apply 前 fail closed。
+- Position source durable grant 必须匹配 preflight manifest、schema fingerprint、base checkpoint
+  与 exact-7 owner；adapter 只向既有 dispatcher 返回这组 allowlist 字段，不能透传 provider 的
+  额外数据。取消在等待 grant 或 schema protected 阶段发生时必须保留为 job-level 请求，并在下一
+  安全点停止；`accepted=false` 本身不得伪装成 cancelled。
+- E13-F 合并时默认 IPC、FilePlan staging、pending/receipt 与人工确认编排仍走 legacy TaskPolicy。
+  capability 注册不等于生产切路；未完成 Windows、真实样本、资金/恢复人工复核与 route authority
+  注入前，Effective Production Strategy 必须保持 `legacy/PENDING_HUMAN_REVIEW`。
 
 禁止：
 

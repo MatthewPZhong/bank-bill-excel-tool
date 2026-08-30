@@ -29,14 +29,14 @@ function replaceExactlyOnce(source, before, after, label) {
   return source.replace(before, after);
 }
 
-test('v3.2.5 顶层合同只允许已记录的 E13-B/E13-C/E13-D/E13-E 证据型修订', () => {
+test('v3.2.5 顶层合同只允许已记录的 E13-B/E13-C/E13-D/E13-E/E13-F 证据型修订', () => {
   const frozenHashes = new Map([
     ['spec.md', '13410e4e5cf64798255cab30dd2487d4da4323eddf59d44cf2a0653e950898f2'],
     ['techdoc.md', '3fb1845979823f2c39a8e26d9d5adc5d7f3e351fda90d2f4086d6c355d17e64f']
   ]);
   const currentHashes = new Map([
-    ['spec.md', '5ff09026a06fd8509532f4ef63eb3502cdb35f4f6cab6e40fcd798c641e60180'],
-    ['techdoc.md', '794190d2420259e87b8c639a67992c8e2b9aef9039003d7e9db9372570921ea7']
+    ['spec.md', 'd5b58458c0a2316f742b8ba6c23552004c7b1094a587731714ca469ac343b6a2'],
+    ['techdoc.md', '5ee46941f93a2548fbb1b4d8e444deb9ba97417f8651f9062ee1e453c31aa7a2']
   ]);
   const amendments = new Map([
     ['spec.md', (frozen) => {
@@ -111,15 +111,27 @@ test('v3.2.5 顶层合同只允许已记录的 E13-B/E13-C/E13-D/E13-E 证据型
         '| `acquiring:run-single-or-resume` | `legacy-preserved` | `managed` | `thread-single` | `job` | `existing-dispatch` | `existing-critical-protocol` | `false` | small / resume / forced-single；只有 root Worker、`compound=null`，不得在运行中切换 |',
         'spec.md Acquiring single/resume topology'
       );
-      const resourceAuthorityAmended = replaceExactlyOnce(
+      const positionTopologyAmended = replaceExactlyOnce(
         runSingleTopologyAmended,
+        '| `position:import` | `legacy-preserved` | `managed` | `utility-process` | `job` | `existing-dispatch` | `existing-critical-protocol` | `false` | 保留 prepare/grant/apply/recovery |',
+        '| `position:import` | `legacy-preserved` | `managed` | `utility-process` | `job` | `existing-dispatch` | `existing-critical-protocol` | `false` | 保留 prepare/grant/apply/recovery；root phase + 最多 1 个 schema child |',
+        'spec.md Position import topology'
+      );
+      const resourceAuthorityAmended = replaceExactlyOnce(
+        positionTopologyAmended,
         '`adapterKey`、`entryKey`、`inspectorKey` 等必须在机器可读 Registry fixture 中给出，不能写“native 或 existing-dispatch”“模块现有映射”“job/service”等非 canonical 值。',
         '`adapterKey`、`entryKey`、`inspectorKey` 等必须在机器可读 Registry fixture 中给出，不能写“native 或 existing-dispatch”“模块现有映射”“job/service”等非 canonical 值。\n\n' +
           'Acquiring current-tree topology 以真实 dispatcher 为权威：import 的 root Worker 由 phase 计费，最多\n' +
           '4 个 Parser child 由 CompoundLease 计费；`run-new-eligible` 的 root pool Worker 由 phase 计费，\n' +
           '合法 nested child 上限必须覆盖设置与 Main CPU/内存闸允许的 8；`run-single-or-resume` 不创建\n' +
           'nested child，不得用一个虚构 child 重复计费。冻结历史 fixture 保持不变，E13-G 必须按 current\n' +
-          'authority 重建最终 Registry/策略快照。',
+          'authority 重建最终 Registry/策略快照。\n\n' +
+          'Position current-tree topology 同样以真实 dispatcher 为权威：bank prepare、bank/account confirmed\n' +
+          'apply 均只在任一时刻运行 1 个 root utility process；source prepare-and-apply 的 root 在等待 Main\n' +
+          'durable grant 时，authorizer 最多并发 1 个 schema-migration utility process。因此\n' +
+          '`position:import` 的 `childrenMax=1`，各 intent 的 `effectiveChildCount` 只能为 `0/1`，不得沿用\n' +
+          '冻结历史 fixture 的 4。Protocol exact-5 operation context 与既有 File Task exact-7 batch owner\n' +
+          '共享的五个 identity 字段必须一致，mutation operation token 必须等于 `taskRunId`。',
         'spec.md Acquiring resource authority'
       );
       return replaceExactlyOnce(
@@ -137,7 +149,17 @@ test('v3.2.5 顶层合同只允许已记录的 E13-B/E13-C/E13-D/E13-E 证据型
           '- Acquiring resume 的 caller 只允许提交正整数 `resumeRunId`；adapter 必须从 Main-owned\n' +
           '  `userDataDir/mainDatabasePath/mainDb` 重新执行 `prepareRunResume()` 与 freshness 复核，拒绝嵌套\n' +
           '  `resumePlan/dbPath` authority。持久 exact-7 owner 与当前 File Task、持久 output intent 与当前\n' +
-          '  FilePlan 必须完全一致；持久 `chunkSize` 优先于当前设置，避免 chunk offset 漂移。',
+          '  FilePlan 必须完全一致；持久 `chunkSize` 优先于当前设置，避免 chunk offset 漂移。\n' +
+          '- Position bank prepare 只接受绝对输入路径；confirmed apply 只接受 Main-owned prepared selector\n' +
+          '  与 exact-7 batch owner。selector 必须解析为完整 preflight manifest，bank/account kind、当前\n' +
+          '  checkpoint 与 operation token 必须在启动 schema/apply 前 fail closed。\n' +
+          '- Position source durable grant 必须匹配 preflight manifest、schema fingerprint、base checkpoint\n' +
+          '  与 exact-7 owner；adapter 只向既有 dispatcher 返回这组 allowlist 字段，不能透传 provider 的\n' +
+          '  额外数据。取消在等待 grant 或 schema protected 阶段发生时必须保留为 job-level 请求，并在下一\n' +
+          '  安全点停止；`accepted=false` 本身不得伪装成 cancelled。\n' +
+          '- E13-F 合并时默认 IPC、FilePlan staging、pending/receipt 与人工确认编排仍走 legacy TaskPolicy。\n' +
+          '  capability 注册不等于生产切路；未完成 Windows、真实样本、资金/恢复人工复核与 route authority\n' +
+          '  注入前，Effective Production Strategy 必须保持 `legacy/PENDING_HUMAN_REVIEW`。',
         'spec.md Acquiring exact owner and resume authority'
       );
     }],
@@ -177,7 +199,7 @@ test('v3.2.5 顶层合同只允许已记录的 E13-B/E13-C/E13-D/E13-E 证据型
           '## 5. Existing dispatcher adapter interface',
         'techdoc.md Acquiring current-tree authority'
       );
-      return replaceExactlyOnce(
+      const acquiringAdapterAmended = replaceExactlyOnce(
         classificationAmended,
         '### Acquiring\n\n' +
           '- import pool、runCheck pool、eligible multiworker、single/resume不变；\n' +
@@ -196,6 +218,36 @@ test('v3.2.5 顶层合同只允许已记录的 E13-B/E13-C/E13-D/E13-E 证据型
           '- 普通 job close 不 shutdown 长驻 pool，只有强制 transport terminate 或 App 既有 before-quit owner\n' +
           '  才关闭；side-DB main mirror 继续由 `runCheckViaSideDb`/`resumeRunCheck` 完成；',
         'techdoc.md Acquiring adapter topology and authority'
+      );
+      return replaceExactlyOnce(
+        acquiringAdapterAmended,
+        '### Position\n\n' +
+          '- mode=`utility-process`；\n' +
+          '- adapter映射现有prepare/apply/grant/critical/commit/cancel；\n' +
+          '- utilityProcess不可用时的child_process fallback仍由原dispatcher决定；\n' +
+          '- protected committing不映射cancelled；\n' +
+          '- journal/ledger是`existing-critical-protocol`证据。',
+        '### Position\n\n' +
+          '- mode=`utility-process`；\n' +
+          '- adapter 映射现有 prepare/apply/grant/critical/commit/cancel，不在外层再 spawn process；\n' +
+          '- utilityProcess不可用时的child_process fallback仍由原dispatcher决定；\n' +
+          '- bank prepare 与 bank/account confirmed apply 任一时刻只有 root process；source root 等待 durable\n' +
+          '  grant 时，Main authorizer 最多并发一个 schema-migration process，因此\n' +
+          '  `childrenMax=1`、intent 级 `effectiveChildCount=0/1`；\n' +
+          '- Protocol exact-5 operation context 与 File Task exact-7 batch context 的共有五字段逐项一致；\n' +
+          '  mutation operation token 必须精确等于 `taskRunId`，caller 不能覆盖 userData/side DB/checkpoint；\n' +
+          '- confirmed selector 由 Main 解析并在 mutation 前验证完整 preflight manifest 与 bank/account kind；\n' +
+          '  source grant 只允许 operation token、manifest hash、schema fingerprint、base checkpoint、batch owner\n' +
+          '  六项字段，provider 的额外字段不跨 grant boundary；\n' +
+          '- raw dispatcher 的 `cancel()` true 只表示消息已投递；adapter 等待真实 CANCEL_ACK 或可识别的\n' +
+          '  `position-import-cancelled` terminal。protected committing 的 `accepted=false` 不映射 cancelled，\n' +
+          '  但 job-level cancel 在 schema 完成后的下一安全点仍阻止 apply；等待 authorizer 时已接受取消则\n' +
+          '  禁止继续发 grant；\n' +
+          '- checkpoint/manifest/result 投影采用 compact allowlist；非法、互相冲突或缺失的提交证据 fail closed，\n' +
+          '  不得降级为 preflight success；\n' +
+          '- journal/ledger 是 `existing-critical-protocol` 证据。E13-F 不替换默认 IPC/FilePlan/pending 编排，\n' +
+          '  实际 route authority、Windows 与资金/恢复人工门禁完成前 production snapshot 保持 legacy。',
+        'techdoc.md Position adapter topology and authority'
       );
     }]
   ]);
