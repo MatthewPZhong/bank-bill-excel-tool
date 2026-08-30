@@ -836,8 +836,8 @@
     "contractAuthority": {
       "path": "changes/background-execution/recovery-contract-authority.v1.json",
       "contractVersion": 1,
-      "revision": 1,
-      "genesis": true,
+      "revision": 2,
+      "genesis": false,
       "approvalStatus": "PENDING_HUMAN_REVIEW",
       "gitGenesisRequiresVerifiedPreviousAbsence": true
     },

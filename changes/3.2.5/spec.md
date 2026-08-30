@@ -140,6 +140,17 @@ existing-critical-protocol
 | `acquiring:run-single-or-resume` | `legacy-preserved` | `managed` | `thread-single` | `job` | `existing-dispatch` | `existing-critical-protocol` | `false` | small / resume / forced-single；只有 root Worker、`compound=null`，不得在运行中切换 |
 | `position:import` | `legacy-preserved` | `managed` | `utility-process` | `job` | `existing-dispatch` | `existing-critical-protocol` | `false` | 保留 prepare/grant/apply/recovery；root phase + 最多 1 个 schema child |
 
+### 3.3 E13-G 显式保留的 deferred legacy 入口
+
+| actionKey | currentDisposition | targetDisposition | mode | lifetime | adapterKind | commit.kind | production.enabled（代码合并时） | 说明 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `pre-fund:bank-import` | `legacy-preserved` | `legacy-preserved` | `inline-async` | `job` | `existing-dispatch` | `none` | `false` | 保留 Main/TaskPolicy 原入口；没有 Runtime capability，不由 MPT import 代偿 |
+| `pre-fund:run` | `legacy-preserved` | `legacy-preserved` | `inline-async` | `job` | `existing-dispatch` | `none` | `false` | 保留 Main/TaskPolicy 原入口；没有 Runtime capability，不由 export action 代偿 |
+
+这里的 `commit.kind=none` 只表示 background-execution 平台不接管这两个 deferred action 的
+提交/恢复协议，不表示旧业务路径无数据库写入。其 Effective Production Strategy 必须保持
+`legacy`、worker count=0，资金与恢复门禁不能由其他 PreFund action 的绿色证据替代。
+
 `adapterKey`、`entryKey`、`inspectorKey` 等必须在机器可读 Registry fixture 中给出，不能写“native 或 existing-dispatch”“模块现有映射”“job/service”等非 canonical 值。
 
 Acquiring current-tree topology 以真实 dispatcher 为权威：import 的 root Worker 由 phase 计费，最多

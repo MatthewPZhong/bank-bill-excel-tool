@@ -204,6 +204,14 @@ createExistingDispatchAdapter({
 
 ## 6. Action Manifest / AST gate
 
+E13-G 必须把 `pre-fund:bank-import` 与 `pre-fund:run` 作为两个独立 canonical action 纳入
+Action Manifest、legacy pair、Registry coverage surface、Capability Inventory 与 Effective
+Strategy。两者当前只
+绑定真实 Main/TaskPolicy 入口：`runtimeRegistered=false`、`handlerRoute=legacy-main`、
+`effectiveMode=legacy`、worker count=0，并且不得写入冻结 Runtime Policy Registry。Manifest
+中的 `legacy-only` 只表示平台未接管旧 mutation/恢复协议；不得据此省略业务资金/恢复人工
+复核，也不得用 MPT/export capability 伪造 coverage。
+
 推荐每个注册点：
 
 ```javascript

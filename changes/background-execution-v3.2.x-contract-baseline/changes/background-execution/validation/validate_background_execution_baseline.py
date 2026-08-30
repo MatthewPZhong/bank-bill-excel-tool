@@ -216,6 +216,11 @@ CANONICAL_MODES = {"inline-async", "thread-single", "thread-pool", "utility-proc
 CANONICAL_LIFETIMES = {"job", "service"}
 CANONICAL_ADAPTERS = {"native", "existing-dispatch"}
 CANONICAL_COMMITS = {"none", "main-settlement", "worker-durable", "existing-critical-protocol"}
+EXPECTED_LEGACY_ONLY_BINDINGS = {
+    "pre-fund:bank-import": ("pre-fund-reconciliation:import-bank",),
+    "pre-fund:run": ("pre-fund-reconciliation:run",),
+}
+EXPECTED_LEGACY_ONLY_BINDING_ACTIONS = frozenset(EXPECTED_LEGACY_ONLY_BINDINGS)
 FORBIDDEN_COMPOSITES = {
     "managed capability",
     "blocked → managed",
@@ -5736,17 +5741,38 @@ def documented_action_keys() -> set[str]:
     return keys
 
 
+def binding_action_set_errors(
+    candidate_actions: set[str],
+    registry_actions: set[str],
+    label: str,
+) -> list[str]:
+    """Keep two explicit legacy routes visible without mutating Runtime Policy Registry."""
+    errors: list[str] = []
+    registry_overlap = registry_actions & EXPECTED_LEGACY_ONLY_BINDING_ACTIONS
+    if registry_overlap:
+        errors.append(
+            "legacy-only binding actions must remain absent from Runtime Policy Registry: "
+            f"{sorted(registry_overlap)}"
+        )
+    expected_actions = registry_actions | EXPECTED_LEGACY_ONLY_BINDING_ACTIONS
+    if candidate_actions != expected_actions:
+        errors.append(
+            f"{label} mismatch: missing={sorted(expected_actions - candidate_actions)}, "
+            f"extra={sorted(candidate_actions - expected_actions)}"
+        )
+    return errors
+
+
 def action_manifest_errors(registry: dict[str, Any]) -> list[str]:
     manifest = load_json(ACTION_MANIFEST_PATH)
     registry_actions = set(registry.get("actions", {}))
     manifest_actions = set(manifest.get("actions", []))
     documented_actions = documented_action_keys()
-    errors: list[str] = []
-    if registry_actions != manifest_actions:
-        errors.append(
-            f"action manifest mismatch: missing={sorted(registry_actions - manifest_actions)}, "
-            f"extra={sorted(manifest_actions - registry_actions)}"
-        )
+    errors = binding_action_set_errors(
+        manifest_actions,
+        registry_actions,
+        "action manifest",
+    )
     if registry_actions != documented_actions:
         errors.append(
             f"version Spec action coverage mismatch: registryMissing={sorted(documented_actions - registry_actions)}, "
@@ -6092,6 +6118,37 @@ const mainStartupAstErrors = (source) => {
     && member(node.callee, 'app', 'whenReady')).length !== 1) {
     errors.push('unique-top-level-app-when-ready-success-callback');
   }
+  // packaged canary 是与普通应用启动互斥的隔离路径。只允许 callback 第一条语句为
+  // exact packagedRuntimeModeSelected guard，并且必须以直接 app.exit(...) + return 收口；
+  // 不能把这个例外泛化成普通 startup 前任意 early return。
+  const packagedRuntimeGuards = successCallback?.body?.body?.filter((statement) => (
+    statement.type === 'IfStatement'
+    && identifier(statement.test, 'packagedRuntimeModeSelected')
+  )) || [];
+  const packagedRuntimeGuard = packagedRuntimeGuards.length === 1
+    ? packagedRuntimeGuards[0]
+    : null;
+  const packagedRuntimeBody = packagedRuntimeGuard?.consequent?.type === 'BlockStatement'
+    ? packagedRuntimeGuard.consequent
+    : null;
+  const packagedRuntimeDirectReturns = packagedRuntimeBody
+    ? packagedRuntimeBody.body.filter((statement) => statement.type === 'ReturnStatement')
+    : [];
+  const packagedRuntimeExitCalls = packagedRuntimeBody
+    ? nodes.filter((node) => node.type === 'CallExpression'
+      && member(node.callee, 'app', 'exit')
+      && node.range[0] > packagedRuntimeBody.range[0]
+      && node.range[1] < packagedRuntimeBody.range[1])
+    : [];
+  if (!packagedRuntimeGuard
+      || successCallback.body.body[0] !== packagedRuntimeGuard
+      || packagedRuntimeBody?.body?.at(-1)?.type !== 'ReturnStatement'
+      || packagedRuntimeDirectReturns.length !== 1
+      || packagedRuntimeExitCalls.length !== 1
+      || packagedRuntimeExitCalls[0].arguments.length !== 1
+      || !identifier(packagedRuntimeExitCalls[0].arguments[0], 'exitCode')) {
+    errors.push('packaged-runtime-isolated-early-return-exact');
+  }
   const runCall = runCalls.length === 1 ? runCalls[0] : null;
   const runAwait = runCall ? parents.get(runCall) : null;
   const runStatement = runAwait ? parents.get(runAwait) : null;
@@ -6119,9 +6176,16 @@ const mainStartupAstErrors = (source) => {
     ].includes(current.type)) current = parents.get(current);
     return current;
   };
+  const insidePackagedRuntimeGuard = (node) => packagedRuntimeBody
+    && node.range[0] > packagedRuntimeBody.range[0]
+    && node.range[1] < packagedRuntimeBody.range[1];
   if (runCall && successCallback && nodes.some((node) => node.type === 'ReturnStatement'
     && node.range[0] < runCall.range[0]
-    && nearestFunction(node) === successCallback)) errors.push('startup-run-follows-early-return');
+    && nearestFunction(node) === successCallback
+    && !insidePackagedRuntimeGuard(node))) errors.push('startup-run-follows-early-return');
+  if (runCall && packagedRuntimeGuard && packagedRuntimeGuard.range[1] >= runCall.range[0]) {
+    errors.push('packaged-runtime-guard-before-startup-run');
+  }
   const databases = nodes.filter((node) => node.type === 'NewExpression'
     && identifier(node.callee, 'AppDatabase'));
   if (databases.length !== 1 || calls('registerAllIpcHandlers').length !== 0) {
@@ -6575,8 +6639,39 @@ def action_binding_contract_errors(
             f"missing={sorted(set(actions) - set(bindings))}, "
             f"extra={sorted(set(bindings) - set(actions))}"
         )
-    if set(actions) != set(registry.get("actions", {})):
-        errors.append("binding map action set does not equal Policy Registry")
+    registry_actions = set(registry.get("actions", {}))
+    errors.extend(binding_action_set_errors(
+        set(actions),
+        registry_actions,
+        "binding map action set",
+    ))
+    for action_key, expected_task_keys in EXPECTED_LEGACY_ONLY_BINDINGS.items():
+        if bindings.get(action_key) != list(expected_task_keys):
+            errors.append(
+                f"legacy-only binding {action_key} must equal {list(expected_task_keys)!r}"
+            )
+
+    expected_action_set = registry_actions | EXPECTED_LEGACY_ONLY_BINDING_ACTIONS
+    legacy_only_binding_mutations = {
+        "missing-required-legacy-action": bool(binding_action_set_errors(
+            expected_action_set - {"pre-fund:bank-import"},
+            registry_actions,
+            "mutant",
+        )),
+        "arbitrary-binding-only-action": bool(binding_action_set_errors(
+            expected_action_set | {"unauthorized:legacy-only"},
+            registry_actions,
+            "mutant",
+        )),
+        "legacy-action-in-runtime-registry": bool(binding_action_set_errors(
+            expected_action_set,
+            registry_actions | {"pre-fund:bank-import"},
+            "mutant",
+        )),
+    }
+    for name, rejected in legacy_only_binding_mutations.items():
+        if not rejected:
+            errors.append(f"legacy-only binding action mutation passed: {name}")
 
     inventory_set = set(actual_inventory)
     map_pairs: set[tuple[str, str]] = set()
@@ -6601,7 +6696,7 @@ def action_binding_contract_errors(
         key: value for key, value in bindings.items()
         if isinstance(value, list) and len(value) > 1
     }
-    if len(actual_one_to_many) != 9:
+    if len(actual_one_to_many) != 8:
         errors.append("production source all one-to-many binding inventory drift")
     if production_summary.get("actionKeys") != actions:
         errors.append("production startup summary action inventory drift")
@@ -6833,6 +6928,8 @@ def action_binding_contract_errors(
         "reverseIndexSource": "pairProvenance",
         "reverseBoundTaskKeyCount": len(reverse_index),
         "authorityMutationResults": authority_mutations,
+        "legacyOnlyBindingActions": sorted(EXPECTED_LEGACY_ONLY_BINDING_ACTIONS),
+        "legacyOnlyBindingMutationResults": legacy_only_binding_mutations,
         "adapterMutationResults": adapter_mutations,
         "hostileApiResults": hostile_api_results,
         "startupBootstrapProof": startup_bootstrap_proof,
@@ -7042,7 +7139,7 @@ def contract_authority_anchor_errors(
         str(binding.get("bindingMapSha256")),
         str(binding.get("taskPolicyInventorySha256")),
         str(result.get("knownAnswerSha256")),
-        "genesis=true",
+        f"genesis={'true' if anchor.get('genesis') else 'false'}",
         "PENDING_HUMAN_REVIEW",
         "complete normalized authority provenance",
         "canonical generation command",
@@ -7287,7 +7384,7 @@ def contract_authority_anchor_errors(
         first_authority_path = first_introduction_root / CONTRACT_AUTHORITY_REPOSITORY_PATH
         first_authority_path.parent.mkdir(parents=True, exist_ok=True)
         first_authority_path.write_text(
-            json.dumps(anchor, ensure_ascii=False, indent=2) + "\n",
+            json.dumps(external_previous_v1, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
         for command in (("add", CONTRACT_AUTHORITY_REPOSITORY_PATH),
@@ -7311,7 +7408,7 @@ def contract_authority_anchor_errors(
             explicit_genesis=False,
         )
         first_errors, _ = evaluate_authority_transition(
-            anchor,
+            external_previous_v1,
             first_context.get("authority"),
         )
 

@@ -1,0 +1,2288 @@
+{
+  "manifestVersion": 1,
+  "actions": [
+    {
+      "actionKey": "acquiring:copy-existing-diff",
+      "capabilityStatus": "runtime-policy",
+      "legacyTaskKeys": [
+        "acquiringBillCurrency:export"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "acquiring:export-diff-workbook",
+      "capabilityStatus": "runtime-policy",
+      "legacyTaskKeys": [],
+      "handlerRoute": "none",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "acquiring:import",
+      "capabilityStatus": "runtime-policy",
+      "legacyTaskKeys": [
+        "acquiringBillCurrency:importBill",
+        "acquiringBillCurrency:importFlow"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "acquiring:run-new-eligible",
+      "capabilityStatus": "runtime-policy",
+      "legacyTaskKeys": [
+        "acquiringBillCurrency:run"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "acquiring:run-single-or-resume",
+      "capabilityStatus": "runtime-policy",
+      "legacyTaskKeys": [
+        "acquiringBillCurrency:run",
+        "acquiringBillCurrency:run:resume"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "background-execution:canary",
+      "capabilityStatus": "platform-canary",
+      "legacyTaskKeys": [],
+      "handlerRoute": "none",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "background-execution:pure-compute-canary",
+      "capabilityStatus": "platform-canary",
+      "legacyTaskKeys": [],
+      "handlerRoute": "none",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "bank-bu:export-aggregate",
+      "capabilityStatus": "legacy-only",
+      "legacyTaskKeys": [
+        "bankBuRecon:export:aggregate"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "bank-bu:export-single",
+      "capabilityStatus": "legacy-only",
+      "legacyTaskKeys": [
+        "bankBuRecon:export:single"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "bank-bu:import-month",
+      "capabilityStatus": "legacy-only",
+      "legacyTaskKeys": [
+        "bankBuRecon:import:run"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "bank-bu:run",
+      "capabilityStatus": "legacy-only",
+      "legacyTaskKeys": [
+        "bankBuRecon:run"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "biz-op:export-day",
+      "capabilityStatus": "runtime-policy",
+      "legacyTaskKeys": [
+        "bizOpRecon:export:date"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "biz-op:export-range",
+      "capabilityStatus": "runtime-policy",
+      "legacyTaskKeys": [
+        "bizOpRecon:export:date-range"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "biz-op:import-flow",
+      "capabilityStatus": "runtime-policy",
+      "legacyTaskKeys": [
+        "bizOpRecon:import:run-flow"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "duplicate:export",
+      "capabilityStatus": "runtime-policy",
+      "legacyTaskKeys": [
+        "duplicate-inbound-match:export"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "duplicate:import",
+      "capabilityStatus": "runtime-policy",
+      "legacyTaskKeys": [
+        "duplicate-inbound-match:import-files"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "duplicate:run",
+      "capabilityStatus": "runtime-policy",
+      "legacyTaskKeys": [
+        "duplicate-inbound-match:run"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "fund-recon:export",
+      "capabilityStatus": "runtime-policy",
+      "legacyTaskKeys": [
+        "bank-statement:export"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "fund-recon:import",
+      "capabilityStatus": "runtime-policy",
+      "legacyTaskKeys": [
+        "bank-statement:batch-import",
+        "bank-statement:import"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "fund-recon:run",
+      "capabilityStatus": "runtime-policy",
+      "legacyTaskKeys": [
+        "bank-statement:run"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "new-account:generate",
+      "capabilityStatus": "runtime-policy",
+      "legacyTaskKeys": [
+        "new-account:generate"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "new-account:save-as",
+      "capabilityStatus": "runtime-policy",
+      "legacyTaskKeys": [
+        "new-account:export"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "pending:export-diff",
+      "capabilityStatus": "runtime-policy",
+      "legacyTaskKeys": [
+        "pending:diff:export-single"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "pending:export-errors",
+      "capabilityStatus": "runtime-policy",
+      "legacyTaskKeys": [
+        "pending:error:export-report"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "pending:export-summary",
+      "capabilityStatus": "runtime-policy",
+      "legacyTaskKeys": [
+        "pending:diff:export-aggregate"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "pending:import",
+      "capabilityStatus": "runtime-policy",
+      "legacyTaskKeys": [
+        "pending:import:start"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "position:export-run",
+      "capabilityStatus": "runtime-policy",
+      "legacyTaskKeys": [
+        "position-reconciliation:run:export",
+        "position-reconciliation:run:export-filtered"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "position:import",
+      "capabilityStatus": "runtime-policy",
+      "legacyTaskKeys": [
+        "position-reconciliation:bank:apply-import",
+        "position-reconciliation:run:import-result",
+        "position-reconciliation:source:apply-import",
+        "position-reconciliation:source:prepare-import"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "pre-fund:bank-import",
+      "capabilityStatus": "legacy-only",
+      "legacyTaskKeys": [
+        "pre-fund-reconciliation:import-bank"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "pre-fund:export-audit",
+      "capabilityStatus": "runtime-policy",
+      "legacyTaskKeys": [
+        "pre-fund-reconciliation:export"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "pre-fund:export-channel",
+      "capabilityStatus": "runtime-policy",
+      "legacyTaskKeys": [
+        "pre-fund-reconciliation:export"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "pre-fund:mpt-import",
+      "capabilityStatus": "runtime-policy",
+      "legacyTaskKeys": [
+        "pre-fund-reconciliation:import-mpt"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "pre-fund:mpt-repair-import",
+      "capabilityStatus": "runtime-policy",
+      "legacyTaskKeys": [
+        "pre-fund-reconciliation:mpt-errors:repair"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "pre-fund:run",
+      "capabilityStatus": "legacy-only",
+      "legacyTaskKeys": [
+        "pre-fund-reconciliation:run"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "recon-fix:export",
+      "capabilityStatus": "runtime-policy",
+      "legacyTaskKeys": [
+        "recon-id-fix:export"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "recon-fix:import",
+      "capabilityStatus": "runtime-policy",
+      "legacyTaskKeys": [
+        "recon-id-fix:import"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "recon-fix:run-jpm",
+      "capabilityStatus": "runtime-policy",
+      "legacyTaskKeys": [
+        "recon-id-fix:run"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "recon-fix:run-readonly",
+      "capabilityStatus": "runtime-policy",
+      "legacyTaskKeys": [
+        "recon-id-fix:run"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "statement:generate-all",
+      "capabilityStatus": "legacy-only",
+      "legacyTaskKeys": [
+        "monthly-balance:assemble",
+        "monthly-balance:export"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "statement:generate-current",
+      "capabilityStatus": "legacy-only",
+      "legacyTaskKeys": [
+        "file:export-balance",
+        "file:export-detail"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "statement:import",
+      "capabilityStatus": "legacy-only",
+      "legacyTaskKeys": [
+        "file:import"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "statement:resolve-big-account",
+      "capabilityStatus": "legacy-only",
+      "legacyTaskKeys": [
+        "file:complete-big-account-selection"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "statement:resolve-manual-balance",
+      "capabilityStatus": "legacy-only",
+      "legacyTaskKeys": [
+        "file:save-balance-seed"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "toolbox:merge",
+      "capabilityStatus": "runtime-policy",
+      "legacyTaskKeys": [
+        "toolbox:merge"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "toolbox:publish",
+      "capabilityStatus": "legacy-only",
+      "legacyTaskKeys": [
+        "toolbox:split:export"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "toolbox:split-large",
+      "capabilityStatus": "legacy-only",
+      "legacyTaskKeys": [
+        "toolbox:split:export"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "toolbox:split-multi-output",
+      "capabilityStatus": "runtime-policy",
+      "legacyTaskKeys": [
+        "toolbox:split:export"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "toolbox:split-single",
+      "capabilityStatus": "runtime-policy",
+      "legacyTaskKeys": [
+        "toolbox:split:export"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "vcc-financial-op:export-audit",
+      "capabilityStatus": "runtime-policy",
+      "legacyTaskKeys": [
+        "vccFinancialOp:data-manager:export",
+        "vccFinancialOp:export:import-audit"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "vcc-financial-op:export-single",
+      "capabilityStatus": "runtime-policy",
+      "legacyTaskKeys": [
+        "vccFinancialOp:export:result"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "vcc-financial-op:export-subjects",
+      "capabilityStatus": "runtime-policy",
+      "legacyTaskKeys": [
+        "vccFinancialOp:export:result"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "vcc-op:compute-amounts",
+      "capabilityStatus": "legacy-only",
+      "legacyTaskKeys": [
+        "vccOpCalc:run:compute-amounts"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "vcc-op:save-run",
+      "capabilityStatus": "legacy-only",
+      "legacyTaskKeys": [
+        "vccOpCalc:run:save"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    },
+    {
+      "actionKey": "vcc-op:scan-and-compute",
+      "capabilityStatus": "legacy-only",
+      "legacyTaskKeys": [
+        "vccOpCalc:import:scan"
+      ],
+      "handlerRoute": "legacy-main",
+      "runtimeRouteEnabled": false
+    }
+  ],
+  "handlerRoutes": [
+    {
+      "actionKey": "acquiring:copy-existing-diff",
+      "legacyTaskKey": "acquiringBillCurrency:export",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "acquiring:import",
+      "legacyTaskKey": "acquiringBillCurrency:importBill",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "acquiring:import",
+      "legacyTaskKey": "acquiringBillCurrency:importFlow",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "acquiring:run-new-eligible",
+      "legacyTaskKey": "acquiringBillCurrency:run",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "acquiring:run-single-or-resume",
+      "legacyTaskKey": "acquiringBillCurrency:run",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "acquiring:run-single-or-resume",
+      "legacyTaskKey": "acquiringBillCurrency:run:resume",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "bank-bu:export-aggregate",
+      "legacyTaskKey": "bankBuRecon:export:aggregate",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "bank-bu:export-single",
+      "legacyTaskKey": "bankBuRecon:export:single",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "bank-bu:import-month",
+      "legacyTaskKey": "bankBuRecon:import:run",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "bank-bu:run",
+      "legacyTaskKey": "bankBuRecon:run",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "biz-op:export-day",
+      "legacyTaskKey": "bizOpRecon:export:date",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "biz-op:export-range",
+      "legacyTaskKey": "bizOpRecon:export:date-range",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "biz-op:import-flow",
+      "legacyTaskKey": "bizOpRecon:import:run-flow",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "duplicate:export",
+      "legacyTaskKey": "duplicate-inbound-match:export",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "duplicate:import",
+      "legacyTaskKey": "duplicate-inbound-match:import-files",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "duplicate:run",
+      "legacyTaskKey": "duplicate-inbound-match:run",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "fund-recon:export",
+      "legacyTaskKey": "bank-statement:export",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "fund-recon:import",
+      "legacyTaskKey": "bank-statement:batch-import",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "fund-recon:import",
+      "legacyTaskKey": "bank-statement:import",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "fund-recon:run",
+      "legacyTaskKey": "bank-statement:run",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "new-account:generate",
+      "legacyTaskKey": "new-account:generate",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "new-account:save-as",
+      "legacyTaskKey": "new-account:export",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "pending:export-diff",
+      "legacyTaskKey": "pending:diff:export-single",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "pending:export-errors",
+      "legacyTaskKey": "pending:error:export-report",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "pending:export-summary",
+      "legacyTaskKey": "pending:diff:export-aggregate",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "pending:import",
+      "legacyTaskKey": "pending:import:start",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "position:export-run",
+      "legacyTaskKey": "position-reconciliation:run:export",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "position:export-run",
+      "legacyTaskKey": "position-reconciliation:run:export-filtered",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "position:import",
+      "legacyTaskKey": "position-reconciliation:bank:apply-import",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "position:import",
+      "legacyTaskKey": "position-reconciliation:run:import-result",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "position:import",
+      "legacyTaskKey": "position-reconciliation:source:apply-import",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "position:import",
+      "legacyTaskKey": "position-reconciliation:source:prepare-import",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "pre-fund:bank-import",
+      "legacyTaskKey": "pre-fund-reconciliation:import-bank",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "pre-fund:export-audit",
+      "legacyTaskKey": "pre-fund-reconciliation:export",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "pre-fund:export-channel",
+      "legacyTaskKey": "pre-fund-reconciliation:export",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "pre-fund:mpt-import",
+      "legacyTaskKey": "pre-fund-reconciliation:import-mpt",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "pre-fund:mpt-repair-import",
+      "legacyTaskKey": "pre-fund-reconciliation:mpt-errors:repair",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "pre-fund:run",
+      "legacyTaskKey": "pre-fund-reconciliation:run",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "recon-fix:export",
+      "legacyTaskKey": "recon-id-fix:export",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "recon-fix:import",
+      "legacyTaskKey": "recon-id-fix:import",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "recon-fix:run-jpm",
+      "legacyTaskKey": "recon-id-fix:run",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "recon-fix:run-readonly",
+      "legacyTaskKey": "recon-id-fix:run",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "statement:generate-all",
+      "legacyTaskKey": "monthly-balance:assemble",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "statement:generate-all",
+      "legacyTaskKey": "monthly-balance:export",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "statement:generate-current",
+      "legacyTaskKey": "file:export-balance",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "statement:generate-current",
+      "legacyTaskKey": "file:export-detail",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "statement:import",
+      "legacyTaskKey": "file:import",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "statement:resolve-big-account",
+      "legacyTaskKey": "file:complete-big-account-selection",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "statement:resolve-manual-balance",
+      "legacyTaskKey": "file:save-balance-seed",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "toolbox:merge",
+      "legacyTaskKey": "toolbox:merge",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "toolbox:publish",
+      "legacyTaskKey": "toolbox:split:export",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "toolbox:split-large",
+      "legacyTaskKey": "toolbox:split:export",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "toolbox:split-multi-output",
+      "legacyTaskKey": "toolbox:split:export",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "toolbox:split-single",
+      "legacyTaskKey": "toolbox:split:export",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "vcc-financial-op:export-audit",
+      "legacyTaskKey": "vccFinancialOp:data-manager:export",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "vcc-financial-op:export-audit",
+      "legacyTaskKey": "vccFinancialOp:export:import-audit",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "vcc-financial-op:export-single",
+      "legacyTaskKey": "vccFinancialOp:export:result",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "vcc-financial-op:export-subjects",
+      "legacyTaskKey": "vccFinancialOp:export:result",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "vcc-op:compute-amounts",
+      "legacyTaskKey": "vccOpCalc:run:compute-amounts",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "vcc-op:save-run",
+      "legacyTaskKey": "vccOpCalc:run:save",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    },
+    {
+      "actionKey": "vcc-op:scan-and-compute",
+      "legacyTaskKey": "vccOpCalc:import:scan",
+      "routeKind": "legacy-main",
+      "managedCapabilityRoute": false
+    }
+  ],
+  "surfaces": {
+    "handlers": [
+      {
+        "actionKey": "acquiring:copy-existing-diff",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "acquiring:export-diff-workbook",
+        "evidence": "runtime-policy-capability-only"
+      },
+      {
+        "actionKey": "acquiring:import",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "acquiring:run-new-eligible",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "acquiring:run-single-or-resume",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "background-execution:canary",
+        "evidence": "platform-canary-contract"
+      },
+      {
+        "actionKey": "background-execution:pure-compute-canary",
+        "evidence": "platform-canary-contract"
+      },
+      {
+        "actionKey": "bank-bu:export-aggregate",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "bank-bu:export-single",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "bank-bu:import-month",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "bank-bu:run",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "biz-op:export-day",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "biz-op:export-range",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "biz-op:import-flow",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "duplicate:export",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "duplicate:import",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "duplicate:run",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "fund-recon:export",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "fund-recon:import",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "fund-recon:run",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "new-account:generate",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "new-account:save-as",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "pending:export-diff",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "pending:export-errors",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "pending:export-summary",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "pending:import",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "position:export-run",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "position:import",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "pre-fund:bank-import",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "pre-fund:export-audit",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "pre-fund:export-channel",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "pre-fund:mpt-import",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "pre-fund:mpt-repair-import",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "pre-fund:run",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "recon-fix:export",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "recon-fix:import",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "recon-fix:run-jpm",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "recon-fix:run-readonly",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "statement:generate-all",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "statement:generate-current",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "statement:import",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "statement:resolve-big-account",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "statement:resolve-manual-balance",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "toolbox:merge",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "toolbox:publish",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "toolbox:split-large",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "toolbox:split-multi-output",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "toolbox:split-single",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "vcc-financial-op:export-audit",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "vcc-financial-op:export-single",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "vcc-financial-op:export-subjects",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "vcc-op:compute-amounts",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "vcc-op:save-run",
+        "evidence": "legacy-task-policy-registration"
+      },
+      {
+        "actionKey": "vcc-op:scan-and-compute",
+        "evidence": "legacy-task-policy-registration"
+      }
+    ],
+    "filePlans": [
+      {
+        "actionKey": "acquiring:copy-existing-diff",
+        "authority": "runtime-policy-required"
+      },
+      {
+        "actionKey": "acquiring:export-diff-workbook",
+        "authority": "runtime-policy-required"
+      },
+      {
+        "actionKey": "acquiring:import",
+        "authority": "legacy-task-policy"
+      },
+      {
+        "actionKey": "acquiring:run-new-eligible",
+        "authority": "legacy-task-policy"
+      },
+      {
+        "actionKey": "acquiring:run-single-or-resume",
+        "authority": "legacy-task-policy"
+      },
+      {
+        "actionKey": "background-execution:canary",
+        "authority": "not-applicable"
+      },
+      {
+        "actionKey": "background-execution:pure-compute-canary",
+        "authority": "not-applicable"
+      },
+      {
+        "actionKey": "bank-bu:export-aggregate",
+        "authority": "legacy-task-policy"
+      },
+      {
+        "actionKey": "bank-bu:export-single",
+        "authority": "legacy-task-policy"
+      },
+      {
+        "actionKey": "bank-bu:import-month",
+        "authority": "legacy-task-policy"
+      },
+      {
+        "actionKey": "bank-bu:run",
+        "authority": "legacy-task-policy"
+      },
+      {
+        "actionKey": "biz-op:export-day",
+        "authority": "runtime-policy-required"
+      },
+      {
+        "actionKey": "biz-op:export-range",
+        "authority": "runtime-policy-required"
+      },
+      {
+        "actionKey": "biz-op:import-flow",
+        "authority": "legacy-task-policy"
+      },
+      {
+        "actionKey": "duplicate:export",
+        "authority": "runtime-policy-required"
+      },
+      {
+        "actionKey": "duplicate:import",
+        "authority": "legacy-task-policy"
+      },
+      {
+        "actionKey": "duplicate:run",
+        "authority": "legacy-task-policy"
+      },
+      {
+        "actionKey": "fund-recon:export",
+        "authority": "runtime-policy-required"
+      },
+      {
+        "actionKey": "fund-recon:import",
+        "authority": "legacy-task-policy"
+      },
+      {
+        "actionKey": "fund-recon:run",
+        "authority": "legacy-task-policy"
+      },
+      {
+        "actionKey": "new-account:generate",
+        "authority": "runtime-policy-required"
+      },
+      {
+        "actionKey": "new-account:save-as",
+        "authority": "runtime-policy-required"
+      },
+      {
+        "actionKey": "pending:export-diff",
+        "authority": "runtime-policy-required"
+      },
+      {
+        "actionKey": "pending:export-errors",
+        "authority": "runtime-policy-required"
+      },
+      {
+        "actionKey": "pending:export-summary",
+        "authority": "runtime-policy-required"
+      },
+      {
+        "actionKey": "pending:import",
+        "authority": "legacy-task-policy"
+      },
+      {
+        "actionKey": "position:export-run",
+        "authority": "runtime-policy-required"
+      },
+      {
+        "actionKey": "position:import",
+        "authority": "legacy-task-policy"
+      },
+      {
+        "actionKey": "pre-fund:bank-import",
+        "authority": "legacy-task-policy"
+      },
+      {
+        "actionKey": "pre-fund:export-audit",
+        "authority": "runtime-policy-required"
+      },
+      {
+        "actionKey": "pre-fund:export-channel",
+        "authority": "runtime-policy-required"
+      },
+      {
+        "actionKey": "pre-fund:mpt-import",
+        "authority": "legacy-task-policy"
+      },
+      {
+        "actionKey": "pre-fund:mpt-repair-import",
+        "authority": "legacy-task-policy"
+      },
+      {
+        "actionKey": "pre-fund:run",
+        "authority": "legacy-task-policy"
+      },
+      {
+        "actionKey": "recon-fix:export",
+        "authority": "runtime-policy-required"
+      },
+      {
+        "actionKey": "recon-fix:import",
+        "authority": "legacy-task-policy"
+      },
+      {
+        "actionKey": "recon-fix:run-jpm",
+        "authority": "legacy-task-policy"
+      },
+      {
+        "actionKey": "recon-fix:run-readonly",
+        "authority": "legacy-task-policy"
+      },
+      {
+        "actionKey": "statement:generate-all",
+        "authority": "legacy-task-policy"
+      },
+      {
+        "actionKey": "statement:generate-current",
+        "authority": "legacy-task-policy"
+      },
+      {
+        "actionKey": "statement:import",
+        "authority": "legacy-task-policy"
+      },
+      {
+        "actionKey": "statement:resolve-big-account",
+        "authority": "legacy-task-policy"
+      },
+      {
+        "actionKey": "statement:resolve-manual-balance",
+        "authority": "legacy-task-policy"
+      },
+      {
+        "actionKey": "toolbox:merge",
+        "authority": "runtime-policy-required"
+      },
+      {
+        "actionKey": "toolbox:publish",
+        "authority": "legacy-task-policy"
+      },
+      {
+        "actionKey": "toolbox:split-large",
+        "authority": "legacy-task-policy"
+      },
+      {
+        "actionKey": "toolbox:split-multi-output",
+        "authority": "runtime-policy-required"
+      },
+      {
+        "actionKey": "toolbox:split-single",
+        "authority": "runtime-policy-required"
+      },
+      {
+        "actionKey": "vcc-financial-op:export-audit",
+        "authority": "runtime-policy-required"
+      },
+      {
+        "actionKey": "vcc-financial-op:export-single",
+        "authority": "runtime-policy-required"
+      },
+      {
+        "actionKey": "vcc-financial-op:export-subjects",
+        "authority": "runtime-policy-required"
+      },
+      {
+        "actionKey": "vcc-op:compute-amounts",
+        "authority": "legacy-task-policy"
+      },
+      {
+        "actionKey": "vcc-op:save-run",
+        "authority": "legacy-task-policy"
+      },
+      {
+        "actionKey": "vcc-op:scan-and-compute",
+        "authority": "legacy-task-policy"
+      }
+    ],
+    "inventory": [
+      {
+        "actionKey": "acquiring:copy-existing-diff",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "acquiring:export-diff-workbook",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "acquiring:import",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "acquiring:run-new-eligible",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "acquiring:run-single-or-resume",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "background-execution:canary",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "background-execution:pure-compute-canary",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "bank-bu:export-aggregate",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "bank-bu:export-single",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "bank-bu:import-month",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "bank-bu:run",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "biz-op:export-day",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "biz-op:export-range",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "biz-op:import-flow",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "duplicate:export",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "duplicate:import",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "duplicate:run",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "fund-recon:export",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "fund-recon:import",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "fund-recon:run",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "new-account:generate",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "new-account:save-as",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "pending:export-diff",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "pending:export-errors",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "pending:export-summary",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "pending:import",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "position:export-run",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "position:import",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "pre-fund:bank-import",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "pre-fund:export-audit",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "pre-fund:export-channel",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "pre-fund:mpt-import",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "pre-fund:mpt-repair-import",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "pre-fund:run",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "recon-fix:export",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "recon-fix:import",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "recon-fix:run-jpm",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "recon-fix:run-readonly",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "statement:generate-all",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "statement:generate-current",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "statement:import",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "statement:resolve-big-account",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "statement:resolve-manual-balance",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "toolbox:merge",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "toolbox:publish",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "toolbox:split-large",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "toolbox:split-multi-output",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "toolbox:split-single",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "vcc-financial-op:export-audit",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "vcc-financial-op:export-single",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "vcc-financial-op:export-subjects",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "vcc-op:compute-amounts",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "vcc-op:save-run",
+        "owner": "canonical-action-inventory-v1"
+      },
+      {
+        "actionKey": "vcc-op:scan-and-compute",
+        "owner": "canonical-action-inventory-v1"
+      }
+    ],
+    "registry": [
+      {
+        "actionKey": "acquiring:copy-existing-diff",
+        "registration": "runtime-policy"
+      },
+      {
+        "actionKey": "acquiring:export-diff-workbook",
+        "registration": "runtime-policy"
+      },
+      {
+        "actionKey": "acquiring:import",
+        "registration": "runtime-policy"
+      },
+      {
+        "actionKey": "acquiring:run-new-eligible",
+        "registration": "runtime-policy"
+      },
+      {
+        "actionKey": "acquiring:run-single-or-resume",
+        "registration": "runtime-policy"
+      },
+      {
+        "actionKey": "background-execution:canary",
+        "registration": "platform-canary"
+      },
+      {
+        "actionKey": "background-execution:pure-compute-canary",
+        "registration": "platform-canary"
+      },
+      {
+        "actionKey": "bank-bu:export-aggregate",
+        "registration": "legacy-only"
+      },
+      {
+        "actionKey": "bank-bu:export-single",
+        "registration": "legacy-only"
+      },
+      {
+        "actionKey": "bank-bu:import-month",
+        "registration": "legacy-only"
+      },
+      {
+        "actionKey": "bank-bu:run",
+        "registration": "legacy-only"
+      },
+      {
+        "actionKey": "biz-op:export-day",
+        "registration": "runtime-policy"
+      },
+      {
+        "actionKey": "biz-op:export-range",
+        "registration": "runtime-policy"
+      },
+      {
+        "actionKey": "biz-op:import-flow",
+        "registration": "runtime-policy"
+      },
+      {
+        "actionKey": "duplicate:export",
+        "registration": "runtime-policy"
+      },
+      {
+        "actionKey": "duplicate:import",
+        "registration": "runtime-policy"
+      },
+      {
+        "actionKey": "duplicate:run",
+        "registration": "runtime-policy"
+      },
+      {
+        "actionKey": "fund-recon:export",
+        "registration": "runtime-policy"
+      },
+      {
+        "actionKey": "fund-recon:import",
+        "registration": "runtime-policy"
+      },
+      {
+        "actionKey": "fund-recon:run",
+        "registration": "runtime-policy"
+      },
+      {
+        "actionKey": "new-account:generate",
+        "registration": "runtime-policy"
+      },
+      {
+        "actionKey": "new-account:save-as",
+        "registration": "runtime-policy"
+      },
+      {
+        "actionKey": "pending:export-diff",
+        "registration": "runtime-policy"
+      },
+      {
+        "actionKey": "pending:export-errors",
+        "registration": "runtime-policy"
+      },
+      {
+        "actionKey": "pending:export-summary",
+        "registration": "runtime-policy"
+      },
+      {
+        "actionKey": "pending:import",
+        "registration": "runtime-policy"
+      },
+      {
+        "actionKey": "position:export-run",
+        "registration": "runtime-policy"
+      },
+      {
+        "actionKey": "position:import",
+        "registration": "runtime-policy"
+      },
+      {
+        "actionKey": "pre-fund:bank-import",
+        "registration": "legacy-only"
+      },
+      {
+        "actionKey": "pre-fund:export-audit",
+        "registration": "runtime-policy"
+      },
+      {
+        "actionKey": "pre-fund:export-channel",
+        "registration": "runtime-policy"
+      },
+      {
+        "actionKey": "pre-fund:mpt-import",
+        "registration": "runtime-policy"
+      },
+      {
+        "actionKey": "pre-fund:mpt-repair-import",
+        "registration": "runtime-policy"
+      },
+      {
+        "actionKey": "pre-fund:run",
+        "registration": "legacy-only"
+      },
+      {
+        "actionKey": "recon-fix:export",
+        "registration": "runtime-policy"
+      },
+      {
+        "actionKey": "recon-fix:import",
+        "registration": "runtime-policy"
+      },
+      {
+        "actionKey": "recon-fix:run-jpm",
+        "registration": "runtime-policy"
+      },
+      {
+        "actionKey": "recon-fix:run-readonly",
+        "registration": "runtime-policy"
+      },
+      {
+        "actionKey": "statement:generate-all",
+        "registration": "legacy-only"
+      },
+      {
+        "actionKey": "statement:generate-current",
+        "registration": "legacy-only"
+      },
+      {
+        "actionKey": "statement:import",
+        "registration": "legacy-only"
+      },
+      {
+        "actionKey": "statement:resolve-big-account",
+        "registration": "legacy-only"
+      },
+      {
+        "actionKey": "statement:resolve-manual-balance",
+        "registration": "legacy-only"
+      },
+      {
+        "actionKey": "toolbox:merge",
+        "registration": "runtime-policy"
+      },
+      {
+        "actionKey": "toolbox:publish",
+        "registration": "legacy-only"
+      },
+      {
+        "actionKey": "toolbox:split-large",
+        "registration": "legacy-only"
+      },
+      {
+        "actionKey": "toolbox:split-multi-output",
+        "registration": "runtime-policy"
+      },
+      {
+        "actionKey": "toolbox:split-single",
+        "registration": "runtime-policy"
+      },
+      {
+        "actionKey": "vcc-financial-op:export-audit",
+        "registration": "runtime-policy"
+      },
+      {
+        "actionKey": "vcc-financial-op:export-single",
+        "registration": "runtime-policy"
+      },
+      {
+        "actionKey": "vcc-financial-op:export-subjects",
+        "registration": "runtime-policy"
+      },
+      {
+        "actionKey": "vcc-op:compute-amounts",
+        "registration": "legacy-only"
+      },
+      {
+        "actionKey": "vcc-op:save-run",
+        "registration": "legacy-only"
+      },
+      {
+        "actionKey": "vcc-op:scan-and-compute",
+        "registration": "legacy-only"
+      }
+    ],
+    "inspectors": [
+      {
+        "actionKey": "acquiring:copy-existing-diff",
+        "inspectorKey": "inspector.acquiring:copy-existing-diff",
+        "fallback": null
+      },
+      {
+        "actionKey": "acquiring:export-diff-workbook",
+        "inspectorKey": "inspector.acquiring:export-diff-workbook",
+        "fallback": null
+      },
+      {
+        "actionKey": "acquiring:import",
+        "inspectorKey": "inspector.acquiring:import",
+        "fallback": null
+      },
+      {
+        "actionKey": "acquiring:run-new-eligible",
+        "inspectorKey": "inspector.acquiring:run-new-eligible",
+        "fallback": null
+      },
+      {
+        "actionKey": "acquiring:run-single-or-resume",
+        "inspectorKey": "inspector.acquiring:run-single-or-resume",
+        "fallback": null
+      },
+      {
+        "actionKey": "background-execution:canary",
+        "inspectorKey": null,
+        "fallback": null
+      },
+      {
+        "actionKey": "background-execution:pure-compute-canary",
+        "inspectorKey": null,
+        "fallback": null
+      },
+      {
+        "actionKey": "bank-bu:export-aggregate",
+        "inspectorKey": null,
+        "fallback": "legacy-task-policy"
+      },
+      {
+        "actionKey": "bank-bu:export-single",
+        "inspectorKey": null,
+        "fallback": "legacy-task-policy"
+      },
+      {
+        "actionKey": "bank-bu:import-month",
+        "inspectorKey": null,
+        "fallback": "legacy-task-policy"
+      },
+      {
+        "actionKey": "bank-bu:run",
+        "inspectorKey": null,
+        "fallback": "legacy-task-policy"
+      },
+      {
+        "actionKey": "biz-op:export-day",
+        "inspectorKey": "inspector.biz-op:export-day",
+        "fallback": null
+      },
+      {
+        "actionKey": "biz-op:export-range",
+        "inspectorKey": "inspector.biz-op:export-range",
+        "fallback": null
+      },
+      {
+        "actionKey": "biz-op:import-flow",
+        "inspectorKey": "inspector.biz-op:import-flow",
+        "fallback": null
+      },
+      {
+        "actionKey": "duplicate:export",
+        "inspectorKey": "inspector.duplicate:export",
+        "fallback": null
+      },
+      {
+        "actionKey": "duplicate:import",
+        "inspectorKey": "inspector.duplicate:import",
+        "fallback": null
+      },
+      {
+        "actionKey": "duplicate:run",
+        "inspectorKey": "inspector.duplicate:run",
+        "fallback": null
+      },
+      {
+        "actionKey": "fund-recon:export",
+        "inspectorKey": "inspector.fund-recon:export",
+        "fallback": null
+      },
+      {
+        "actionKey": "fund-recon:import",
+        "inspectorKey": null,
+        "fallback": null
+      },
+      {
+        "actionKey": "fund-recon:run",
+        "inspectorKey": null,
+        "fallback": null
+      },
+      {
+        "actionKey": "new-account:generate",
+        "inspectorKey": "inspector.new-account:generate",
+        "fallback": null
+      },
+      {
+        "actionKey": "new-account:save-as",
+        "inspectorKey": "inspector.new-account:save-as",
+        "fallback": null
+      },
+      {
+        "actionKey": "pending:export-diff",
+        "inspectorKey": "inspector.pending:export-diff",
+        "fallback": null
+      },
+      {
+        "actionKey": "pending:export-errors",
+        "inspectorKey": "inspector.pending:export-errors",
+        "fallback": null
+      },
+      {
+        "actionKey": "pending:export-summary",
+        "inspectorKey": "inspector.pending:export-summary",
+        "fallback": null
+      },
+      {
+        "actionKey": "pending:import",
+        "inspectorKey": "inspector.pending:import",
+        "fallback": null
+      },
+      {
+        "actionKey": "position:export-run",
+        "inspectorKey": "inspector.position:export-run",
+        "fallback": null
+      },
+      {
+        "actionKey": "position:import",
+        "inspectorKey": "inspector.position:import",
+        "fallback": null
+      },
+      {
+        "actionKey": "pre-fund:bank-import",
+        "inspectorKey": null,
+        "fallback": "legacy-task-policy"
+      },
+      {
+        "actionKey": "pre-fund:export-audit",
+        "inspectorKey": "inspector.pre-fund:export-audit",
+        "fallback": null
+      },
+      {
+        "actionKey": "pre-fund:export-channel",
+        "inspectorKey": "inspector.pre-fund:export-channel",
+        "fallback": null
+      },
+      {
+        "actionKey": "pre-fund:mpt-import",
+        "inspectorKey": "inspector.pre-fund:mpt-import",
+        "fallback": null
+      },
+      {
+        "actionKey": "pre-fund:mpt-repair-import",
+        "inspectorKey": "inspector.pre-fund:mpt-repair-import",
+        "fallback": null
+      },
+      {
+        "actionKey": "pre-fund:run",
+        "inspectorKey": null,
+        "fallback": "legacy-task-policy"
+      },
+      {
+        "actionKey": "recon-fix:export",
+        "inspectorKey": "inspector.recon-fix:export",
+        "fallback": null
+      },
+      {
+        "actionKey": "recon-fix:import",
+        "inspectorKey": null,
+        "fallback": null
+      },
+      {
+        "actionKey": "recon-fix:run-jpm",
+        "inspectorKey": "inspector.recon-fix:run-jpm",
+        "fallback": null
+      },
+      {
+        "actionKey": "recon-fix:run-readonly",
+        "inspectorKey": null,
+        "fallback": null
+      },
+      {
+        "actionKey": "statement:generate-all",
+        "inspectorKey": null,
+        "fallback": "legacy-task-policy"
+      },
+      {
+        "actionKey": "statement:generate-current",
+        "inspectorKey": null,
+        "fallback": "legacy-task-policy"
+      },
+      {
+        "actionKey": "statement:import",
+        "inspectorKey": null,
+        "fallback": "legacy-task-policy"
+      },
+      {
+        "actionKey": "statement:resolve-big-account",
+        "inspectorKey": null,
+        "fallback": "legacy-task-policy"
+      },
+      {
+        "actionKey": "statement:resolve-manual-balance",
+        "inspectorKey": null,
+        "fallback": "legacy-task-policy"
+      },
+      {
+        "actionKey": "toolbox:merge",
+        "inspectorKey": "inspector.toolbox:merge",
+        "fallback": null
+      },
+      {
+        "actionKey": "toolbox:publish",
+        "inspectorKey": null,
+        "fallback": "legacy-task-policy"
+      },
+      {
+        "actionKey": "toolbox:split-large",
+        "inspectorKey": null,
+        "fallback": "legacy-task-policy"
+      },
+      {
+        "actionKey": "toolbox:split-multi-output",
+        "inspectorKey": "inspector.toolbox:split-multi-output",
+        "fallback": null
+      },
+      {
+        "actionKey": "toolbox:split-single",
+        "inspectorKey": "inspector.toolbox:split-single",
+        "fallback": null
+      },
+      {
+        "actionKey": "vcc-financial-op:export-audit",
+        "inspectorKey": "inspector.vcc-financial-op:export-audit",
+        "fallback": null
+      },
+      {
+        "actionKey": "vcc-financial-op:export-single",
+        "inspectorKey": "inspector.vcc-financial-op:export-single",
+        "fallback": null
+      },
+      {
+        "actionKey": "vcc-financial-op:export-subjects",
+        "inspectorKey": "inspector.vcc-financial-op:export-subjects",
+        "fallback": null
+      },
+      {
+        "actionKey": "vcc-op:compute-amounts",
+        "inspectorKey": null,
+        "fallback": "legacy-task-policy"
+      },
+      {
+        "actionKey": "vcc-op:save-run",
+        "inspectorKey": null,
+        "fallback": "legacy-task-policy"
+      },
+      {
+        "actionKey": "vcc-op:scan-and-compute",
+        "inspectorKey": null,
+        "fallback": "legacy-task-policy"
+      }
+    ],
+    "publishers": [
+      {
+        "actionKey": "acquiring:copy-existing-diff",
+        "publisherKey": "publisher.acquiring:copy-existing-diff",
+        "fallback": null
+      },
+      {
+        "actionKey": "acquiring:export-diff-workbook",
+        "publisherKey": "publisher.acquiring:export-diff-workbook",
+        "fallback": null
+      },
+      {
+        "actionKey": "acquiring:import",
+        "publisherKey": null,
+        "fallback": null
+      },
+      {
+        "actionKey": "acquiring:run-new-eligible",
+        "publisherKey": null,
+        "fallback": null
+      },
+      {
+        "actionKey": "acquiring:run-single-or-resume",
+        "publisherKey": null,
+        "fallback": null
+      },
+      {
+        "actionKey": "background-execution:canary",
+        "publisherKey": null,
+        "fallback": null
+      },
+      {
+        "actionKey": "background-execution:pure-compute-canary",
+        "publisherKey": null,
+        "fallback": null
+      },
+      {
+        "actionKey": "bank-bu:export-aggregate",
+        "publisherKey": null,
+        "fallback": "legacy-task-policy"
+      },
+      {
+        "actionKey": "bank-bu:export-single",
+        "publisherKey": null,
+        "fallback": "legacy-task-policy"
+      },
+      {
+        "actionKey": "bank-bu:import-month",
+        "publisherKey": null,
+        "fallback": "legacy-task-policy"
+      },
+      {
+        "actionKey": "bank-bu:run",
+        "publisherKey": null,
+        "fallback": "legacy-task-policy"
+      },
+      {
+        "actionKey": "biz-op:export-day",
+        "publisherKey": "publisher.biz-op:export-day",
+        "fallback": null
+      },
+      {
+        "actionKey": "biz-op:export-range",
+        "publisherKey": "publisher.biz-op:export-range",
+        "fallback": null
+      },
+      {
+        "actionKey": "biz-op:import-flow",
+        "publisherKey": null,
+        "fallback": null
+      },
+      {
+        "actionKey": "duplicate:export",
+        "publisherKey": "publisher.duplicate:export",
+        "fallback": null
+      },
+      {
+        "actionKey": "duplicate:import",
+        "publisherKey": null,
+        "fallback": null
+      },
+      {
+        "actionKey": "duplicate:run",
+        "publisherKey": null,
+        "fallback": null
+      },
+      {
+        "actionKey": "fund-recon:export",
+        "publisherKey": "publisher.fund-recon:export",
+        "fallback": null
+      },
+      {
+        "actionKey": "fund-recon:import",
+        "publisherKey": null,
+        "fallback": null
+      },
+      {
+        "actionKey": "fund-recon:run",
+        "publisherKey": null,
+        "fallback": null
+      },
+      {
+        "actionKey": "new-account:generate",
+        "publisherKey": "publisher.new-account:generate",
+        "fallback": null
+      },
+      {
+        "actionKey": "new-account:save-as",
+        "publisherKey": "publisher.new-account:save-as",
+        "fallback": null
+      },
+      {
+        "actionKey": "pending:export-diff",
+        "publisherKey": "publisher.pending:export-diff",
+        "fallback": null
+      },
+      {
+        "actionKey": "pending:export-errors",
+        "publisherKey": "publisher.pending:export-errors",
+        "fallback": null
+      },
+      {
+        "actionKey": "pending:export-summary",
+        "publisherKey": "publisher.pending:export-summary",
+        "fallback": null
+      },
+      {
+        "actionKey": "pending:import",
+        "publisherKey": null,
+        "fallback": null
+      },
+      {
+        "actionKey": "position:export-run",
+        "publisherKey": "publisher.position:export-run",
+        "fallback": null
+      },
+      {
+        "actionKey": "position:import",
+        "publisherKey": null,
+        "fallback": null
+      },
+      {
+        "actionKey": "pre-fund:bank-import",
+        "publisherKey": null,
+        "fallback": "legacy-task-policy"
+      },
+      {
+        "actionKey": "pre-fund:export-audit",
+        "publisherKey": "publisher.pre-fund:export-audit",
+        "fallback": null
+      },
+      {
+        "actionKey": "pre-fund:export-channel",
+        "publisherKey": "publisher.pre-fund:export-channel",
+        "fallback": null
+      },
+      {
+        "actionKey": "pre-fund:mpt-import",
+        "publisherKey": null,
+        "fallback": null
+      },
+      {
+        "actionKey": "pre-fund:mpt-repair-import",
+        "publisherKey": null,
+        "fallback": null
+      },
+      {
+        "actionKey": "pre-fund:run",
+        "publisherKey": null,
+        "fallback": "legacy-task-policy"
+      },
+      {
+        "actionKey": "recon-fix:export",
+        "publisherKey": "publisher.recon-fix:export",
+        "fallback": null
+      },
+      {
+        "actionKey": "recon-fix:import",
+        "publisherKey": null,
+        "fallback": null
+      },
+      {
+        "actionKey": "recon-fix:run-jpm",
+        "publisherKey": null,
+        "fallback": null
+      },
+      {
+        "actionKey": "recon-fix:run-readonly",
+        "publisherKey": null,
+        "fallback": null
+      },
+      {
+        "actionKey": "statement:generate-all",
+        "publisherKey": null,
+        "fallback": "legacy-task-policy"
+      },
+      {
+        "actionKey": "statement:generate-current",
+        "publisherKey": null,
+        "fallback": "legacy-task-policy"
+      },
+      {
+        "actionKey": "statement:import",
+        "publisherKey": null,
+        "fallback": "legacy-task-policy"
+      },
+      {
+        "actionKey": "statement:resolve-big-account",
+        "publisherKey": null,
+        "fallback": "legacy-task-policy"
+      },
+      {
+        "actionKey": "statement:resolve-manual-balance",
+        "publisherKey": null,
+        "fallback": "legacy-task-policy"
+      },
+      {
+        "actionKey": "toolbox:merge",
+        "publisherKey": "publisher.toolbox:merge",
+        "fallback": null
+      },
+      {
+        "actionKey": "toolbox:publish",
+        "publisherKey": null,
+        "fallback": "legacy-task-policy"
+      },
+      {
+        "actionKey": "toolbox:split-large",
+        "publisherKey": null,
+        "fallback": "legacy-task-policy"
+      },
+      {
+        "actionKey": "toolbox:split-multi-output",
+        "publisherKey": "publisher.toolbox:split-multi-output",
+        "fallback": null
+      },
+      {
+        "actionKey": "toolbox:split-single",
+        "publisherKey": "publisher.toolbox:split-single",
+        "fallback": null
+      },
+      {
+        "actionKey": "vcc-financial-op:export-audit",
+        "publisherKey": "publisher.vcc-financial-op:export-audit",
+        "fallback": null
+      },
+      {
+        "actionKey": "vcc-financial-op:export-single",
+        "publisherKey": "publisher.vcc-financial-op:export-single",
+        "fallback": null
+      },
+      {
+        "actionKey": "vcc-financial-op:export-subjects",
+        "publisherKey": "publisher.vcc-financial-op:export-subjects",
+        "fallback": null
+      },
+      {
+        "actionKey": "vcc-op:compute-amounts",
+        "publisherKey": null,
+        "fallback": "legacy-task-policy"
+      },
+      {
+        "actionKey": "vcc-op:save-run",
+        "publisherKey": null,
+        "fallback": "legacy-task-policy"
+      },
+      {
+        "actionKey": "vcc-op:scan-and-compute",
+        "publisherKey": null,
+        "fallback": "legacy-task-policy"
+      }
+    ]
+  },
+  "counts": {
+    "actionCount": 54,
+    "legacyPairCount": 61,
+    "runtimePolicyCount": 36,
+    "legacyOnlyCount": 16,
+    "platformCanaryCount": 2
+  }
+}
