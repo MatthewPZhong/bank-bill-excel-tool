@@ -1,10 +1,10 @@
 # 清结算小助手使用手册
 
-版本：`v3.2.4`
+版本：`v3.2.5`
 
-> 版本说明：v3.2.4 当前是版本分支技术收口，尚未合并 `main`、创建 tag 或发布 production。对账单修复 ReconFix 的普通/BOC 只读运行、JPM durable mutation 和多文件发布，以及 VCC 财务 OP 的单 Writer、主体查询下推和最多双 Writer 输出，已经具备资源治理、幂等 receipt、Inspector 与崩溃恢复保护的后台执行 capability；effective production strategy 仍关闭，日常用户流程和 Excel 结果继续保持既有行为。
+> 版本说明：v3.2.5 当前是版本分支技术收口，尚未合并 `main`、创建 tag 或发布 production。Pending、BizOP、PreFund、Position、VCC Financial OP 与 Acquiring 的剩余只读导出，以及 Pending/BizOP/Acquiring/Position 的成熟执行器 adapter，已经纳入统一资源、receipt、取消与恢复审计。Action Manifest 当前覆盖 54 个 action，但 effective production strategy 对全部 action 仍保持 legacy/0，production 未启用，日常用户入口和 Excel 结果继续走既有行为。
 
-> 使用提醒：本版不会自动解除 Recovery Hold，也不会在 unknown、partial 或 committed-result-lost 状态下自动重跑。Windows packaged/Setup/portable、真实 JPM/VCC 文件、金额/币种/输出、Excel/WPS、进程终止和恢复处置仍需 release owner 与资金负责人人工复核；遇到恢复要求时应先核对持久 intent、receipt、journal、Hold 与真实输出。
+> 使用提醒：本版不会自动解除 Recovery Hold，也不会在 unknown、partial 或 committed-result-lost 状态下自动重跑。Windows packaged 为 `NOT_RUN`；真实业务文件、金额/币种/输出和资金/恢复处置仍为 `PENDING_HUMAN_REVIEW`，Excel/WPS、RSS 与稳定观察窗口也尚未运行。遇到恢复要求时应先核对持久 intent、receipt、journal、Hold 与真实输出，不能用自动测试代替人工复核。
 
 ---
 

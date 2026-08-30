@@ -1,0 +1,3919 @@
+{
+  "schemaVersion": 1,
+  "release": "3.2.5",
+  "evidenceDate": "2026-08-31",
+  "exactBase": "0a07cca0261baebe6c664f51e2271126fd639d8a",
+  "packageVersion": "3.2.5",
+  "authority": {
+    "actionManifest": {
+      "path": "changes/3.2.5/e13-g-action-manifest.json",
+      "sha256": "14106dd53b82640db9a5101f52ceeef99534f2b1b522250209d9f2906686890a",
+      "actionCount": 54,
+      "legacyPairCount": 61,
+      "runtimePolicyCount": 36,
+      "legacyOnlyCount": 16,
+      "platformCanaryCount": 2
+    },
+    "capabilityInventory": {
+      "path": "changes/3.2.5/e13-g-capability-inventory.json",
+      "sha256": "c0f0c73cfb6c237fd4a1ad3570f246167d73a8103aaa13e889885add2a61da8d",
+      "actionCount": 54,
+      "implementedCount": 36,
+      "legacyOnlyCount": 16,
+      "platformCanaryCount": 2
+    },
+    "productionStrategy": {
+      "path": "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+      "sha256": "744aa1905a2daa4b0493bd3a32b380391d7d1608759ae34bafca38db47523a5d",
+      "actionCount": 54,
+      "productionEnabledCount": 0,
+      "legacyEffectiveCount": 54
+    },
+    "coverage": {
+      "path": "changes/3.2.5/e13-g-coverage-report.json",
+      "sha256": "5d1e2df304f82a449f84413602b1c24787a4103853e0898487a4cfa0289e19c4",
+      "coveredActionSurfaceCount": 324,
+      "expectedActionSurfaceCount": 324,
+      "coveragePercent": 100,
+      "productionEnablementAllowed": false,
+      "humanRedlineReviewStatus": "PENDING_HUMAN_REVIEW"
+    }
+  },
+  "validationEvidence": {
+    "contractPackage": {
+      "path": "changes/background-execution-v3.2.x-contract-baseline/validation-report.json",
+      "status": "PASS",
+      "passed": 29,
+      "total": 29,
+      "inputCount": 73
+    },
+    "packageChecksums": {
+      "path": "changes/background-execution-v3.2.x-contract-baseline/PACKAGE-SHA256SUMS.txt",
+      "status": "PASS",
+      "passed": 69,
+      "total": 69
+    },
+    "localTests": {
+      "e13GBase": {
+        "targeted": "27/27 PASS",
+        "unit": "6857/6860 PASS; 0 FAIL; 3 SKIP",
+        "integration": "53 scripts; 2488/2488 PASS",
+        "smoke": "PASS"
+      },
+      "r3Closeout": {
+        "lint": "PASS",
+        "targeted": "113/113 PASS",
+        "unit": "6877/6880 PASS; 0 FAIL; 3 SKIP",
+        "integration": "53 scripts; 2488/2488 PASS",
+        "smoke": "PASS"
+      }
+    },
+    "externalAndHuman": {
+      "windowsPackaged": "NOT_RUN",
+      "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+      "excelWps": "NOT_RUN",
+      "rssObservation": "NOT_RUN",
+      "stabilityWindow": "NOT_STARTED",
+      "funds": "PENDING_HUMAN_REVIEW",
+      "recovery": "PENDING_HUMAN_REVIEW"
+    },
+    "explicitlySkippedByUserInstruction": {
+      "releaseCheck": "SKIPPED_USER_INSTRUCTION",
+      "checkVars": "SKIPPED_USER_INSTRUCTION",
+      "scanVars": "SKIPPED_USER_INSTRUCTION"
+    }
+  },
+  "globalDecision": {
+    "kind": "MERGE_DORMANT_CAPABILITY_KEEP_LEGACY",
+    "productionEnabledCount": 0,
+    "legacyEffectiveCount": 54,
+    "legacySeamPreserved": true,
+    "mainMergeAuthorized": false,
+    "tagCreationAuthorized": false,
+    "productionPublishAuthorized": false
+  },
+  "actions": [
+    {
+      "actionKey": "acquiring:copy-existing-diff",
+      "baselineFixtureId": "E13-C:acquiring:copy-existing-diff",
+      "evidenceKind": "v3.2.5-implementation",
+      "workItem": "E13-C",
+      "capability": {
+        "status": "implemented",
+        "disposition": "managed",
+        "mode": "inline-async",
+        "adapterKind": "native",
+        "commitKind": "main-settlement",
+        "artifactKind": "single",
+        "runtimeRegistered": true,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "production gate not yet passed",
+        "recoveryStatus": "probe",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "sourceAuthority": "runtime-policy"
+      },
+      "workbookComparison": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "artifactKind": "single"
+      },
+      "faultInjection": {
+        "status": "LOCAL_AUTOMATED_PASS"
+      },
+      "resourceMetrics": {
+        "status": "LOCAL_POLICY_TOPOLOGY_PASS",
+        "profile": "resource.acquiring:copy-existing-diff"
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_RUN",
+        "rssObservation": "NOT_RUN",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/3.2.5/e13-c-implementation-notes.md",
+        "tests/unit/main-process/acquiring-read-only-export-e13-c.test.js",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "acquiring:export-diff-workbook",
+      "baselineFixtureId": "E13-C:acquiring:export-diff-workbook",
+      "evidenceKind": "v3.2.5-implementation",
+      "workItem": "E13-C",
+      "capability": {
+        "status": "implemented",
+        "disposition": "managed",
+        "mode": "thread-single",
+        "adapterKind": "native",
+        "commitKind": "main-settlement",
+        "artifactKind": "single",
+        "runtimeRegistered": true,
+        "handlerRoute": "none"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "production gate not yet passed",
+        "recoveryStatus": "probe",
+        "legacyAvailable": false
+      },
+      "semanticComparison": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "sourceAuthority": "runtime-policy"
+      },
+      "workbookComparison": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "artifactKind": "single"
+      },
+      "faultInjection": {
+        "status": "LOCAL_AUTOMATED_PASS"
+      },
+      "resourceMetrics": {
+        "status": "LOCAL_POLICY_TOPOLOGY_PASS",
+        "profile": "resource.acquiring:export-diff-workbook"
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_RUN",
+        "rssObservation": "NOT_RUN",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/3.2.5/e13-c-implementation-notes.md",
+        "tests/unit/main-process/acquiring-read-only-export-e13-c.test.js",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "acquiring:import",
+      "baselineFixtureId": "E13-E:acquiring:import",
+      "evidenceKind": "v3.2.5-implementation",
+      "workItem": "E13-E",
+      "capability": {
+        "status": "implemented",
+        "disposition": "managed",
+        "mode": "thread-pool",
+        "adapterKind": "existing-dispatch",
+        "commitKind": "existing-critical-protocol",
+        "artifactKind": "none",
+        "runtimeRegistered": true,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "PENDING_HUMAN_REVIEW",
+        "recoveryStatus": "probe",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "sourceAuthority": "runtime-policy"
+      },
+      "workbookComparison": {
+        "status": "NOT_APPLICABLE_NO_WORKBOOK",
+        "artifactKind": "none"
+      },
+      "faultInjection": {
+        "status": "LOCAL_AUTOMATED_PASS"
+      },
+      "resourceMetrics": {
+        "status": "LOCAL_POLICY_TOPOLOGY_PASS",
+        "profile": "resource.acquiring:import"
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_APPLICABLE",
+        "rssObservation": "NOT_RUN",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/3.2.5/e13-e-implementation-notes.md",
+        "tests/unit/main-process/background-execution/acquiring-adapters-e13-e.test.js",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "acquiring:run-new-eligible",
+      "baselineFixtureId": "E13-E:acquiring:run-new-eligible",
+      "evidenceKind": "v3.2.5-implementation",
+      "workItem": "E13-E",
+      "capability": {
+        "status": "implemented",
+        "disposition": "managed",
+        "mode": "thread-pool",
+        "adapterKind": "existing-dispatch",
+        "commitKind": "existing-critical-protocol",
+        "artifactKind": "none",
+        "runtimeRegistered": true,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "PENDING_HUMAN_REVIEW",
+        "recoveryStatus": "probe",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "sourceAuthority": "runtime-policy"
+      },
+      "workbookComparison": {
+        "status": "NOT_APPLICABLE_NO_WORKBOOK",
+        "artifactKind": "none"
+      },
+      "faultInjection": {
+        "status": "LOCAL_AUTOMATED_PASS"
+      },
+      "resourceMetrics": {
+        "status": "LOCAL_POLICY_TOPOLOGY_PASS",
+        "profile": "resource.acquiring:run-new-eligible"
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_APPLICABLE",
+        "rssObservation": "NOT_RUN",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/3.2.5/e13-e-implementation-notes.md",
+        "tests/unit/main-process/background-execution/acquiring-adapters-e13-e.test.js",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "acquiring:run-single-or-resume",
+      "baselineFixtureId": "E13-E:acquiring:run-single-or-resume",
+      "evidenceKind": "v3.2.5-implementation",
+      "workItem": "E13-E",
+      "capability": {
+        "status": "implemented",
+        "disposition": "managed",
+        "mode": "thread-single",
+        "adapterKind": "existing-dispatch",
+        "commitKind": "existing-critical-protocol",
+        "artifactKind": "none",
+        "runtimeRegistered": true,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "PENDING_HUMAN_REVIEW",
+        "recoveryStatus": "probe",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "sourceAuthority": "runtime-policy"
+      },
+      "workbookComparison": {
+        "status": "NOT_APPLICABLE_NO_WORKBOOK",
+        "artifactKind": "none"
+      },
+      "faultInjection": {
+        "status": "LOCAL_AUTOMATED_PASS"
+      },
+      "resourceMetrics": {
+        "status": "LOCAL_POLICY_TOPOLOGY_PASS",
+        "profile": "resource.acquiring:run-single-or-resume"
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_APPLICABLE",
+        "rssObservation": "NOT_RUN",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/3.2.5/e13-e-implementation-notes.md",
+        "tests/unit/main-process/background-execution/acquiring-adapters-e13-e.test.js",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "background-execution:canary",
+      "baselineFixtureId": "PLATFORM-CANARY:background-execution:canary",
+      "evidenceKind": "platform-canary",
+      "workItem": "PLATFORM-CANARY",
+      "capability": {
+        "status": "platform-canary",
+        "disposition": "blocked",
+        "mode": "platform-canary",
+        "adapterKind": "native",
+        "commitKind": "not-registered",
+        "artifactKind": "not-registered",
+        "runtimeRegistered": false,
+        "handlerRoute": "none"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "platform-canary-not-in-app-runtime",
+        "recoveryStatus": "not-applicable",
+        "legacyAvailable": false
+      },
+      "semanticComparison": {
+        "status": "NOT_APPLICABLE_PLATFORM_CANARY",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "NOT_APPLICABLE_PLATFORM_CANARY",
+        "sourceAuthority": "platform-canary"
+      },
+      "workbookComparison": {
+        "status": "NOT_APPLICABLE_PLATFORM_CANARY",
+        "artifactKind": "not-registered"
+      },
+      "faultInjection": {
+        "status": "NOT_APPLICABLE_PLATFORM_CANARY"
+      },
+      "resourceMetrics": {
+        "status": "BLOCKED_CANARY",
+        "profile": null
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_APPLICABLE",
+        "rssObservation": "NOT_APPLICABLE",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/background-execution-v3.2.x-contract-baseline/changes/background-execution/platform-contract-v1.md",
+        "changes/3.2.5/e13-g-implementation-notes.md",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "background-execution:pure-compute-canary",
+      "baselineFixtureId": "PLATFORM-CANARY:background-execution:pure-compute-canary",
+      "evidenceKind": "platform-canary",
+      "workItem": "PLATFORM-CANARY",
+      "capability": {
+        "status": "platform-canary",
+        "disposition": "blocked",
+        "mode": "platform-canary",
+        "adapterKind": "native",
+        "commitKind": "not-registered",
+        "artifactKind": "not-registered",
+        "runtimeRegistered": false,
+        "handlerRoute": "none"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "platform-canary-not-in-app-runtime",
+        "recoveryStatus": "not-applicable",
+        "legacyAvailable": false
+      },
+      "semanticComparison": {
+        "status": "NOT_APPLICABLE_PLATFORM_CANARY",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "NOT_APPLICABLE_PLATFORM_CANARY",
+        "sourceAuthority": "platform-canary"
+      },
+      "workbookComparison": {
+        "status": "NOT_APPLICABLE_PLATFORM_CANARY",
+        "artifactKind": "not-registered"
+      },
+      "faultInjection": {
+        "status": "NOT_APPLICABLE_PLATFORM_CANARY"
+      },
+      "resourceMetrics": {
+        "status": "BLOCKED_CANARY",
+        "profile": null
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_APPLICABLE",
+        "rssObservation": "NOT_APPLICABLE",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/background-execution-v3.2.x-contract-baseline/changes/background-execution/platform-contract-v1.md",
+        "changes/3.2.5/e13-g-implementation-notes.md",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "bank-bu:export-aggregate",
+      "baselineFixtureId": "R3.2.2:bank-bu:export-aggregate",
+      "evidenceKind": "historical-release-evidence",
+      "workItem": "R3.2.2",
+      "capability": {
+        "status": "legacy-only",
+        "disposition": "legacy-preserved",
+        "mode": "legacy",
+        "adapterKind": "legacy-main",
+        "commitKind": "legacy-task-policy",
+        "artifactKind": "legacy-task-policy",
+        "runtimeRegistered": false,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "no-runtime-policy",
+        "recoveryStatus": "not-applicable",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "LEGACY_UNCHANGED",
+        "sourceAuthority": "legacy-only"
+      },
+      "workbookComparison": {
+        "status": "LEGACY_UNCHANGED",
+        "artifactKind": "legacy-task-policy"
+      },
+      "faultInjection": {
+        "status": "NOT_APPLICABLE_NO_NEW_CAPABILITY"
+      },
+      "resourceMetrics": {
+        "status": "LEGACY_NO_MANAGED_RESOURCE",
+        "profile": null
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_APPLICABLE",
+        "rssObservation": "NOT_APPLICABLE",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/background-execution-r3-2-2-release-evidence/release-evidence.json",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "bank-bu:export-single",
+      "baselineFixtureId": "R3.2.2:bank-bu:export-single",
+      "evidenceKind": "historical-release-evidence",
+      "workItem": "R3.2.2",
+      "capability": {
+        "status": "legacy-only",
+        "disposition": "legacy-preserved",
+        "mode": "legacy",
+        "adapterKind": "legacy-main",
+        "commitKind": "legacy-task-policy",
+        "artifactKind": "legacy-task-policy",
+        "runtimeRegistered": false,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "no-runtime-policy",
+        "recoveryStatus": "not-applicable",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "LEGACY_UNCHANGED",
+        "sourceAuthority": "legacy-only"
+      },
+      "workbookComparison": {
+        "status": "LEGACY_UNCHANGED",
+        "artifactKind": "legacy-task-policy"
+      },
+      "faultInjection": {
+        "status": "NOT_APPLICABLE_NO_NEW_CAPABILITY"
+      },
+      "resourceMetrics": {
+        "status": "LEGACY_NO_MANAGED_RESOURCE",
+        "profile": null
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_APPLICABLE",
+        "rssObservation": "NOT_APPLICABLE",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/background-execution-r3-2-2-release-evidence/release-evidence.json",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "bank-bu:import-month",
+      "baselineFixtureId": "R3.2.2:bank-bu:import-month",
+      "evidenceKind": "historical-release-evidence",
+      "workItem": "R3.2.2",
+      "capability": {
+        "status": "legacy-only",
+        "disposition": "legacy-preserved",
+        "mode": "legacy",
+        "adapterKind": "legacy-main",
+        "commitKind": "legacy-task-policy",
+        "artifactKind": "legacy-task-policy",
+        "runtimeRegistered": false,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "no-runtime-policy",
+        "recoveryStatus": "not-applicable",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "LEGACY_UNCHANGED",
+        "sourceAuthority": "legacy-only"
+      },
+      "workbookComparison": {
+        "status": "LEGACY_UNCHANGED",
+        "artifactKind": "legacy-task-policy"
+      },
+      "faultInjection": {
+        "status": "NOT_APPLICABLE_NO_NEW_CAPABILITY"
+      },
+      "resourceMetrics": {
+        "status": "LEGACY_NO_MANAGED_RESOURCE",
+        "profile": null
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_APPLICABLE",
+        "rssObservation": "NOT_APPLICABLE",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/background-execution-r3-2-2-release-evidence/release-evidence.json",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "bank-bu:run",
+      "baselineFixtureId": "R3.2.2:bank-bu:run",
+      "evidenceKind": "historical-release-evidence",
+      "workItem": "R3.2.2",
+      "capability": {
+        "status": "legacy-only",
+        "disposition": "legacy-preserved",
+        "mode": "legacy",
+        "adapterKind": "legacy-main",
+        "commitKind": "legacy-task-policy",
+        "artifactKind": "legacy-task-policy",
+        "runtimeRegistered": false,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "no-runtime-policy",
+        "recoveryStatus": "not-applicable",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "LEGACY_UNCHANGED",
+        "sourceAuthority": "legacy-only"
+      },
+      "workbookComparison": {
+        "status": "LEGACY_UNCHANGED",
+        "artifactKind": "legacy-task-policy"
+      },
+      "faultInjection": {
+        "status": "NOT_APPLICABLE_NO_NEW_CAPABILITY"
+      },
+      "resourceMetrics": {
+        "status": "LEGACY_NO_MANAGED_RESOURCE",
+        "profile": null
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_APPLICABLE",
+        "rssObservation": "NOT_APPLICABLE",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/background-execution-r3-2-2-release-evidence/release-evidence.json",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "biz-op:export-day",
+      "baselineFixtureId": "E13-A:biz-op:export-day",
+      "evidenceKind": "v3.2.5-implementation",
+      "workItem": "E13-A",
+      "capability": {
+        "status": "implemented",
+        "disposition": "managed",
+        "mode": "thread-single",
+        "adapterKind": "native",
+        "commitKind": "main-settlement",
+        "artifactKind": "single",
+        "runtimeRegistered": true,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "production gate not yet passed",
+        "recoveryStatus": "probe",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "sourceAuthority": "runtime-policy"
+      },
+      "workbookComparison": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "artifactKind": "single"
+      },
+      "faultInjection": {
+        "status": "LOCAL_AUTOMATED_PASS"
+      },
+      "resourceMetrics": {
+        "status": "LOCAL_POLICY_TOPOLOGY_PASS",
+        "profile": "resource.biz-op:export-day"
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_RUN",
+        "rssObservation": "NOT_RUN",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/3.2.5/e13-a-implementation-notes.md",
+        "tests/unit/main-process/pending-read-only-export-e13-a.test.js",
+        "tests/unit/main-process/biz-op-read-only-export-e13-a.test.js",
+        "tests/unit/main-process/read-only-export-main-settlement-e13-a.test.js",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "biz-op:export-range",
+      "baselineFixtureId": "E13-A:biz-op:export-range",
+      "evidenceKind": "v3.2.5-implementation",
+      "workItem": "E13-A",
+      "capability": {
+        "status": "implemented",
+        "disposition": "managed",
+        "mode": "thread-single",
+        "adapterKind": "native",
+        "commitKind": "main-settlement",
+        "artifactKind": "single",
+        "runtimeRegistered": true,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "production gate not yet passed",
+        "recoveryStatus": "probe",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "sourceAuthority": "runtime-policy"
+      },
+      "workbookComparison": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "artifactKind": "single"
+      },
+      "faultInjection": {
+        "status": "LOCAL_AUTOMATED_PASS"
+      },
+      "resourceMetrics": {
+        "status": "LOCAL_POLICY_TOPOLOGY_PASS",
+        "profile": "resource.biz-op:export-range"
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_RUN",
+        "rssObservation": "NOT_RUN",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/3.2.5/e13-a-implementation-notes.md",
+        "tests/unit/main-process/pending-read-only-export-e13-a.test.js",
+        "tests/unit/main-process/biz-op-read-only-export-e13-a.test.js",
+        "tests/unit/main-process/read-only-export-main-settlement-e13-a.test.js",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "biz-op:import-flow",
+      "baselineFixtureId": "E13-D:biz-op:import-flow",
+      "evidenceKind": "v3.2.5-implementation",
+      "workItem": "E13-D",
+      "capability": {
+        "status": "implemented",
+        "disposition": "managed",
+        "mode": "thread-pool",
+        "adapterKind": "existing-dispatch",
+        "commitKind": "existing-critical-protocol",
+        "artifactKind": "none",
+        "runtimeRegistered": true,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "PENDING_HUMAN_REVIEW",
+        "recoveryStatus": "probe",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "sourceAuthority": "runtime-policy"
+      },
+      "workbookComparison": {
+        "status": "NOT_APPLICABLE_NO_WORKBOOK",
+        "artifactKind": "none"
+      },
+      "faultInjection": {
+        "status": "LOCAL_AUTOMATED_PASS"
+      },
+      "resourceMetrics": {
+        "status": "LOCAL_POLICY_TOPOLOGY_PASS",
+        "profile": "resource.biz-op:import-flow"
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_APPLICABLE",
+        "rssObservation": "NOT_RUN",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/3.2.5/e13-d-implementation-notes.md",
+        "tests/unit/main-process/background-execution/pending-bizop-adapters-e13-d.test.js",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "duplicate:export",
+      "baselineFixtureId": "R3.2.2:duplicate:export",
+      "evidenceKind": "historical-release-evidence",
+      "workItem": "R3.2.2",
+      "capability": {
+        "status": "implemented",
+        "disposition": "managed",
+        "mode": "thread-single",
+        "adapterKind": "native",
+        "commitKind": "main-settlement",
+        "artifactKind": "single",
+        "runtimeRegistered": true,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "production gate not yet passed",
+        "recoveryStatus": "probe",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "sourceAuthority": "runtime-policy"
+      },
+      "workbookComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "artifactKind": "single"
+      },
+      "faultInjection": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE"
+      },
+      "resourceMetrics": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "profile": "resource.duplicate:export"
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_RUN",
+        "rssObservation": "NOT_RUN",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/background-execution-r3-2-2-release-evidence/release-evidence.json",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "duplicate:import",
+      "baselineFixtureId": "R3.2.2:duplicate:import",
+      "evidenceKind": "historical-release-evidence",
+      "workItem": "R3.2.2",
+      "capability": {
+        "status": "implemented",
+        "disposition": "managed",
+        "mode": "thread-pool",
+        "adapterKind": "native",
+        "commitKind": "worker-durable",
+        "artifactKind": "none",
+        "runtimeRegistered": true,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "production gate not yet passed",
+        "recoveryStatus": "probe",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "sourceAuthority": "runtime-policy"
+      },
+      "workbookComparison": {
+        "status": "NOT_APPLICABLE_NO_WORKBOOK",
+        "artifactKind": "none"
+      },
+      "faultInjection": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE"
+      },
+      "resourceMetrics": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "profile": "resource.duplicate:import"
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_APPLICABLE",
+        "rssObservation": "NOT_RUN",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/background-execution-r3-2-2-release-evidence/release-evidence.json",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "duplicate:run",
+      "baselineFixtureId": "R3.2.2:duplicate:run",
+      "evidenceKind": "historical-release-evidence",
+      "workItem": "R3.2.2",
+      "capability": {
+        "status": "implemented",
+        "disposition": "managed",
+        "mode": "thread-single",
+        "adapterKind": "native",
+        "commitKind": "worker-durable",
+        "artifactKind": "none",
+        "runtimeRegistered": true,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "production gate not yet passed",
+        "recoveryStatus": "probe",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "sourceAuthority": "runtime-policy"
+      },
+      "workbookComparison": {
+        "status": "NOT_APPLICABLE_NO_WORKBOOK",
+        "artifactKind": "none"
+      },
+      "faultInjection": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE"
+      },
+      "resourceMetrics": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "profile": "resource.duplicate:run"
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_APPLICABLE",
+        "rssObservation": "NOT_RUN",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/background-execution-r3-2-2-release-evidence/release-evidence.json",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "fund-recon:export",
+      "baselineFixtureId": "R3.2.2:fund-recon:export",
+      "evidenceKind": "historical-release-evidence",
+      "workItem": "R3.2.2",
+      "capability": {
+        "status": "implemented",
+        "disposition": "managed",
+        "mode": "thread-single",
+        "adapterKind": "native",
+        "commitKind": "main-settlement",
+        "artifactKind": "single",
+        "runtimeRegistered": true,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "production gate not yet passed",
+        "recoveryStatus": "probe",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "sourceAuthority": "runtime-policy"
+      },
+      "workbookComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "artifactKind": "single"
+      },
+      "faultInjection": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE"
+      },
+      "resourceMetrics": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "profile": "resource.fund-recon:export"
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_RUN",
+        "rssObservation": "NOT_RUN",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/background-execution-r3-2-2-release-evidence/release-evidence.json",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "fund-recon:import",
+      "baselineFixtureId": "R3.2.2:fund-recon:import",
+      "evidenceKind": "historical-release-evidence",
+      "workItem": "R3.2.2",
+      "capability": {
+        "status": "implemented",
+        "disposition": "managed",
+        "mode": "thread-single",
+        "adapterKind": "native",
+        "commitKind": "none",
+        "artifactKind": "none",
+        "runtimeRegistered": true,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "production gate not yet passed",
+        "recoveryStatus": "not-applicable",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "sourceAuthority": "runtime-policy"
+      },
+      "workbookComparison": {
+        "status": "NOT_APPLICABLE_NO_WORKBOOK",
+        "artifactKind": "none"
+      },
+      "faultInjection": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE"
+      },
+      "resourceMetrics": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "profile": "resource.fund-recon:import"
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_APPLICABLE",
+        "rssObservation": "NOT_RUN",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/background-execution-r3-2-2-release-evidence/release-evidence.json",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "fund-recon:run",
+      "baselineFixtureId": "R3.2.2:fund-recon:run",
+      "evidenceKind": "historical-release-evidence",
+      "workItem": "R3.2.2",
+      "capability": {
+        "status": "implemented",
+        "disposition": "managed",
+        "mode": "thread-single",
+        "adapterKind": "native",
+        "commitKind": "none",
+        "artifactKind": "none",
+        "runtimeRegistered": true,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "production gate not yet passed",
+        "recoveryStatus": "not-applicable",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "sourceAuthority": "runtime-policy"
+      },
+      "workbookComparison": {
+        "status": "NOT_APPLICABLE_NO_WORKBOOK",
+        "artifactKind": "none"
+      },
+      "faultInjection": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE"
+      },
+      "resourceMetrics": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "profile": "resource.fund-recon:run"
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_APPLICABLE",
+        "rssObservation": "NOT_RUN",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/background-execution-r3-2-2-release-evidence/release-evidence.json",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "new-account:generate",
+      "baselineFixtureId": "R3.2.3:new-account:generate",
+      "evidenceKind": "historical-release-evidence",
+      "workItem": "R3.2.3",
+      "capability": {
+        "status": "implemented",
+        "disposition": "managed",
+        "mode": "thread-single",
+        "adapterKind": "native",
+        "commitKind": "main-settlement",
+        "artifactKind": "single",
+        "runtimeRegistered": true,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "E10-B Publisher and R3.2.3 Windows/manual gates not yet passed",
+        "recoveryStatus": "probe",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "sourceAuthority": "runtime-policy"
+      },
+      "workbookComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "artifactKind": "single"
+      },
+      "faultInjection": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE"
+      },
+      "resourceMetrics": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "profile": "resource.new-account:generate"
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_RUN",
+        "rssObservation": "NOT_RUN",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/background-execution-r3-2-3-release-evidence/release-evidence.json",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "new-account:save-as",
+      "baselineFixtureId": "R3.2.3:new-account:save-as",
+      "evidenceKind": "historical-release-evidence",
+      "workItem": "R3.2.3",
+      "capability": {
+        "status": "implemented",
+        "disposition": "managed",
+        "mode": "inline-async",
+        "adapterKind": "native",
+        "commitKind": "main-settlement",
+        "artifactKind": "single",
+        "runtimeRegistered": true,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "production gate not yet passed",
+        "recoveryStatus": "probe",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "sourceAuthority": "runtime-policy"
+      },
+      "workbookComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "artifactKind": "single"
+      },
+      "faultInjection": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE"
+      },
+      "resourceMetrics": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "profile": "resource.new-account:save-as"
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_RUN",
+        "rssObservation": "NOT_RUN",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/background-execution-r3-2-3-release-evidence/release-evidence.json",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "pending:export-diff",
+      "baselineFixtureId": "E13-A:pending:export-diff",
+      "evidenceKind": "v3.2.5-implementation",
+      "workItem": "E13-A",
+      "capability": {
+        "status": "implemented",
+        "disposition": "managed",
+        "mode": "thread-single",
+        "adapterKind": "native",
+        "commitKind": "main-settlement",
+        "artifactKind": "single",
+        "runtimeRegistered": true,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "production gate not yet passed",
+        "recoveryStatus": "probe",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "sourceAuthority": "runtime-policy"
+      },
+      "workbookComparison": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "artifactKind": "single"
+      },
+      "faultInjection": {
+        "status": "LOCAL_AUTOMATED_PASS"
+      },
+      "resourceMetrics": {
+        "status": "LOCAL_POLICY_TOPOLOGY_PASS",
+        "profile": "resource.pending:export-diff"
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_RUN",
+        "rssObservation": "NOT_RUN",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/3.2.5/e13-a-implementation-notes.md",
+        "tests/unit/main-process/pending-read-only-export-e13-a.test.js",
+        "tests/unit/main-process/biz-op-read-only-export-e13-a.test.js",
+        "tests/unit/main-process/read-only-export-main-settlement-e13-a.test.js",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "pending:export-errors",
+      "baselineFixtureId": "E13-A:pending:export-errors",
+      "evidenceKind": "v3.2.5-implementation",
+      "workItem": "E13-A",
+      "capability": {
+        "status": "implemented",
+        "disposition": "managed",
+        "mode": "thread-single",
+        "adapterKind": "native",
+        "commitKind": "main-settlement",
+        "artifactKind": "single",
+        "runtimeRegistered": true,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "production gate not yet passed",
+        "recoveryStatus": "probe",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "sourceAuthority": "runtime-policy"
+      },
+      "workbookComparison": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "artifactKind": "single"
+      },
+      "faultInjection": {
+        "status": "LOCAL_AUTOMATED_PASS"
+      },
+      "resourceMetrics": {
+        "status": "LOCAL_POLICY_TOPOLOGY_PASS",
+        "profile": "resource.pending:export-errors"
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_RUN",
+        "rssObservation": "NOT_RUN",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/3.2.5/e13-a-implementation-notes.md",
+        "tests/unit/main-process/pending-read-only-export-e13-a.test.js",
+        "tests/unit/main-process/biz-op-read-only-export-e13-a.test.js",
+        "tests/unit/main-process/read-only-export-main-settlement-e13-a.test.js",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "pending:export-summary",
+      "baselineFixtureId": "E13-A:pending:export-summary",
+      "evidenceKind": "v3.2.5-implementation",
+      "workItem": "E13-A",
+      "capability": {
+        "status": "implemented",
+        "disposition": "managed",
+        "mode": "thread-single",
+        "adapterKind": "native",
+        "commitKind": "main-settlement",
+        "artifactKind": "single",
+        "runtimeRegistered": true,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "production gate not yet passed",
+        "recoveryStatus": "probe",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "sourceAuthority": "runtime-policy"
+      },
+      "workbookComparison": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "artifactKind": "single"
+      },
+      "faultInjection": {
+        "status": "LOCAL_AUTOMATED_PASS"
+      },
+      "resourceMetrics": {
+        "status": "LOCAL_POLICY_TOPOLOGY_PASS",
+        "profile": "resource.pending:export-summary"
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_RUN",
+        "rssObservation": "NOT_RUN",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/3.2.5/e13-a-implementation-notes.md",
+        "tests/unit/main-process/pending-read-only-export-e13-a.test.js",
+        "tests/unit/main-process/biz-op-read-only-export-e13-a.test.js",
+        "tests/unit/main-process/read-only-export-main-settlement-e13-a.test.js",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "pending:import",
+      "baselineFixtureId": "E13-D:pending:import",
+      "evidenceKind": "v3.2.5-implementation",
+      "workItem": "E13-D",
+      "capability": {
+        "status": "implemented",
+        "disposition": "managed",
+        "mode": "thread-pool",
+        "adapterKind": "existing-dispatch",
+        "commitKind": "existing-critical-protocol",
+        "artifactKind": "none",
+        "runtimeRegistered": true,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "PENDING_HUMAN_REVIEW",
+        "recoveryStatus": "probe",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "sourceAuthority": "runtime-policy"
+      },
+      "workbookComparison": {
+        "status": "NOT_APPLICABLE_NO_WORKBOOK",
+        "artifactKind": "none"
+      },
+      "faultInjection": {
+        "status": "LOCAL_AUTOMATED_PASS"
+      },
+      "resourceMetrics": {
+        "status": "LOCAL_POLICY_TOPOLOGY_PASS",
+        "profile": "resource.pending:import"
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_APPLICABLE",
+        "rssObservation": "NOT_RUN",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/3.2.5/e13-d-implementation-notes.md",
+        "tests/unit/main-process/background-execution/pending-bizop-adapters-e13-d.test.js",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "position:export-run",
+      "baselineFixtureId": "E13-B:position:export-run",
+      "evidenceKind": "v3.2.5-implementation",
+      "workItem": "E13-B",
+      "capability": {
+        "status": "implemented",
+        "disposition": "managed",
+        "mode": "thread-single",
+        "adapterKind": "native",
+        "commitKind": "main-settlement",
+        "artifactKind": "single",
+        "runtimeRegistered": true,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "production gate not yet passed",
+        "recoveryStatus": "probe",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "sourceAuthority": "runtime-policy"
+      },
+      "workbookComparison": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "artifactKind": "single"
+      },
+      "faultInjection": {
+        "status": "LOCAL_AUTOMATED_PASS"
+      },
+      "resourceMetrics": {
+        "status": "LOCAL_POLICY_TOPOLOGY_PASS",
+        "profile": "resource.position:export-run"
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_RUN",
+        "rssObservation": "NOT_RUN",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/3.2.5/implementation-notes.md",
+        "tests/unit/main-process/pre-fund-read-only-export-e13-b.test.js",
+        "tests/unit/main-process/position-read-only-export-e13-b.test.js",
+        "tests/unit/main-process/vcc-financial-op-read-only-export-e13-b.test.js",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "position:import",
+      "baselineFixtureId": "E13-F:position:import",
+      "evidenceKind": "v3.2.5-implementation",
+      "workItem": "E13-F",
+      "capability": {
+        "status": "implemented",
+        "disposition": "managed",
+        "mode": "utility-process",
+        "adapterKind": "existing-dispatch",
+        "commitKind": "existing-critical-protocol",
+        "artifactKind": "none",
+        "runtimeRegistered": true,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "PENDING_HUMAN_REVIEW",
+        "recoveryStatus": "probe",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "sourceAuthority": "runtime-policy"
+      },
+      "workbookComparison": {
+        "status": "NOT_APPLICABLE_NO_WORKBOOK",
+        "artifactKind": "none"
+      },
+      "faultInjection": {
+        "status": "LOCAL_AUTOMATED_PASS"
+      },
+      "resourceMetrics": {
+        "status": "LOCAL_POLICY_TOPOLOGY_PASS",
+        "profile": "resource.position:import"
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_APPLICABLE",
+        "rssObservation": "NOT_RUN",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/3.2.5/e13-f-implementation-notes.md",
+        "tests/unit/main-process/background-execution/position-import-adapter-e13-f.test.js",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "pre-fund:bank-import",
+      "baselineFixtureId": "LEGACY-BASELINE:pre-fund:bank-import",
+      "evidenceKind": "legacy-unchanged",
+      "workItem": "LEGACY-BASELINE",
+      "capability": {
+        "status": "legacy-only",
+        "disposition": "legacy-preserved",
+        "mode": "legacy",
+        "adapterKind": "legacy-main",
+        "commitKind": "legacy-task-policy",
+        "artifactKind": "legacy-task-policy",
+        "runtimeRegistered": false,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "no-runtime-policy",
+        "recoveryStatus": "not-applicable",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "LEGACY_UNCHANGED",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "LEGACY_UNCHANGED",
+        "sourceAuthority": "legacy-only"
+      },
+      "workbookComparison": {
+        "status": "LEGACY_UNCHANGED",
+        "artifactKind": "legacy-task-policy"
+      },
+      "faultInjection": {
+        "status": "NOT_APPLICABLE_NO_NEW_CAPABILITY"
+      },
+      "resourceMetrics": {
+        "status": "LEGACY_NO_MANAGED_RESOURCE",
+        "profile": null
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_APPLICABLE",
+        "rssObservation": "NOT_APPLICABLE",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/background-execution-v3.2.x-contract-baseline/changes/background-execution/validation/fixtures/valid/action-manifest.v3.2.x.json",
+        "changes/3.2.5/e13-g-implementation-notes.md",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "pre-fund:export-audit",
+      "baselineFixtureId": "E13-B:pre-fund:export-audit",
+      "evidenceKind": "v3.2.5-implementation",
+      "workItem": "E13-B",
+      "capability": {
+        "status": "implemented",
+        "disposition": "managed",
+        "mode": "thread-single",
+        "adapterKind": "native",
+        "commitKind": "main-settlement",
+        "artifactKind": "single",
+        "runtimeRegistered": true,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "production gate not yet passed",
+        "recoveryStatus": "probe",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "sourceAuthority": "runtime-policy"
+      },
+      "workbookComparison": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "artifactKind": "single"
+      },
+      "faultInjection": {
+        "status": "LOCAL_AUTOMATED_PASS"
+      },
+      "resourceMetrics": {
+        "status": "LOCAL_POLICY_TOPOLOGY_PASS",
+        "profile": "resource.pre-fund:export-audit"
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_RUN",
+        "rssObservation": "NOT_RUN",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/3.2.5/implementation-notes.md",
+        "tests/unit/main-process/pre-fund-read-only-export-e13-b.test.js",
+        "tests/unit/main-process/position-read-only-export-e13-b.test.js",
+        "tests/unit/main-process/vcc-financial-op-read-only-export-e13-b.test.js",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "pre-fund:export-channel",
+      "baselineFixtureId": "E13-B:pre-fund:export-channel",
+      "evidenceKind": "v3.2.5-implementation",
+      "workItem": "E13-B",
+      "capability": {
+        "status": "implemented",
+        "disposition": "managed",
+        "mode": "thread-single",
+        "adapterKind": "native",
+        "commitKind": "main-settlement",
+        "artifactKind": "single",
+        "runtimeRegistered": true,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "production gate not yet passed",
+        "recoveryStatus": "probe",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "sourceAuthority": "runtime-policy"
+      },
+      "workbookComparison": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "artifactKind": "single"
+      },
+      "faultInjection": {
+        "status": "LOCAL_AUTOMATED_PASS"
+      },
+      "resourceMetrics": {
+        "status": "LOCAL_POLICY_TOPOLOGY_PASS",
+        "profile": "resource.pre-fund:export-channel"
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_RUN",
+        "rssObservation": "NOT_RUN",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/3.2.5/implementation-notes.md",
+        "tests/unit/main-process/pre-fund-read-only-export-e13-b.test.js",
+        "tests/unit/main-process/position-read-only-export-e13-b.test.js",
+        "tests/unit/main-process/vcc-financial-op-read-only-export-e13-b.test.js",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "pre-fund:mpt-import",
+      "baselineFixtureId": "R3.2.1:pre-fund:mpt-import",
+      "evidenceKind": "historical-release-evidence",
+      "workItem": "R3.2.1",
+      "capability": {
+        "status": "implemented",
+        "disposition": "managed",
+        "mode": "thread-pool",
+        "adapterKind": "native",
+        "commitKind": "worker-durable",
+        "artifactKind": "none",
+        "runtimeRegistered": true,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "production gate not yet passed",
+        "recoveryStatus": "probe",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "sourceAuthority": "runtime-policy"
+      },
+      "workbookComparison": {
+        "status": "NOT_APPLICABLE_NO_WORKBOOK",
+        "artifactKind": "none"
+      },
+      "faultInjection": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE"
+      },
+      "resourceMetrics": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "profile": "resource.pre-fund:mpt-import"
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_APPLICABLE",
+        "rssObservation": "NOT_RUN",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/background-execution-r3-2-1-release-evidence/release-evidence.json",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "pre-fund:mpt-repair-import",
+      "baselineFixtureId": "R3.2.1:pre-fund:mpt-repair-import",
+      "evidenceKind": "historical-release-evidence",
+      "workItem": "R3.2.1",
+      "capability": {
+        "status": "implemented",
+        "disposition": "managed",
+        "mode": "thread-single",
+        "adapterKind": "native",
+        "commitKind": "worker-durable",
+        "artifactKind": "none",
+        "runtimeRegistered": true,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "production gate not yet passed",
+        "recoveryStatus": "probe",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "sourceAuthority": "runtime-policy"
+      },
+      "workbookComparison": {
+        "status": "NOT_APPLICABLE_NO_WORKBOOK",
+        "artifactKind": "none"
+      },
+      "faultInjection": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE"
+      },
+      "resourceMetrics": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "profile": "resource.pre-fund:mpt-repair-import"
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_APPLICABLE",
+        "rssObservation": "NOT_RUN",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/background-execution-r3-2-1-release-evidence/release-evidence.json",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "pre-fund:run",
+      "baselineFixtureId": "LEGACY-BASELINE:pre-fund:run",
+      "evidenceKind": "legacy-unchanged",
+      "workItem": "LEGACY-BASELINE",
+      "capability": {
+        "status": "legacy-only",
+        "disposition": "legacy-preserved",
+        "mode": "legacy",
+        "adapterKind": "legacy-main",
+        "commitKind": "legacy-task-policy",
+        "artifactKind": "legacy-task-policy",
+        "runtimeRegistered": false,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "no-runtime-policy",
+        "recoveryStatus": "not-applicable",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "LEGACY_UNCHANGED",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "LEGACY_UNCHANGED",
+        "sourceAuthority": "legacy-only"
+      },
+      "workbookComparison": {
+        "status": "LEGACY_UNCHANGED",
+        "artifactKind": "legacy-task-policy"
+      },
+      "faultInjection": {
+        "status": "NOT_APPLICABLE_NO_NEW_CAPABILITY"
+      },
+      "resourceMetrics": {
+        "status": "LEGACY_NO_MANAGED_RESOURCE",
+        "profile": null
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_APPLICABLE",
+        "rssObservation": "NOT_APPLICABLE",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/background-execution-v3.2.x-contract-baseline/changes/background-execution/validation/fixtures/valid/action-manifest.v3.2.x.json",
+        "changes/3.2.5/e13-g-implementation-notes.md",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "recon-fix:export",
+      "baselineFixtureId": "R3.2.4:recon-fix:export",
+      "evidenceKind": "historical-release-evidence",
+      "workItem": "R3.2.4",
+      "capability": {
+        "status": "implemented",
+        "disposition": "managed",
+        "mode": "thread-single",
+        "adapterKind": "native",
+        "commitKind": "main-settlement",
+        "artifactKind": "all-or-none",
+        "runtimeRegistered": true,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "production gate not yet passed",
+        "recoveryStatus": "probe",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "sourceAuthority": "runtime-policy"
+      },
+      "workbookComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "artifactKind": "all-or-none"
+      },
+      "faultInjection": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE"
+      },
+      "resourceMetrics": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "profile": "resource.recon-fix:export"
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_RUN",
+        "rssObservation": "NOT_RUN",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/background-execution-r3-2-4-release-evidence/release-evidence.json",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "recon-fix:import",
+      "baselineFixtureId": "R3.2.4:recon-fix:import",
+      "evidenceKind": "historical-release-evidence",
+      "workItem": "R3.2.4",
+      "capability": {
+        "status": "implemented",
+        "disposition": "managed",
+        "mode": "thread-single",
+        "adapterKind": "native",
+        "commitKind": "none",
+        "artifactKind": "none",
+        "runtimeRegistered": true,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "production gate not yet passed",
+        "recoveryStatus": "not-applicable",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "sourceAuthority": "runtime-policy"
+      },
+      "workbookComparison": {
+        "status": "NOT_APPLICABLE_NO_WORKBOOK",
+        "artifactKind": "none"
+      },
+      "faultInjection": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE"
+      },
+      "resourceMetrics": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "profile": "resource.recon-fix:import"
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_APPLICABLE",
+        "rssObservation": "NOT_RUN",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/background-execution-r3-2-4-release-evidence/release-evidence.json",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "recon-fix:run-jpm",
+      "baselineFixtureId": "R3.2.4:recon-fix:run-jpm",
+      "evidenceKind": "historical-release-evidence",
+      "workItem": "R3.2.4",
+      "capability": {
+        "status": "implemented",
+        "disposition": "managed",
+        "mode": "thread-single",
+        "adapterKind": "native",
+        "commitKind": "worker-durable",
+        "artifactKind": "none",
+        "runtimeRegistered": true,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "production gate not yet passed",
+        "recoveryStatus": "probe",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "sourceAuthority": "runtime-policy"
+      },
+      "workbookComparison": {
+        "status": "NOT_APPLICABLE_NO_WORKBOOK",
+        "artifactKind": "none"
+      },
+      "faultInjection": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE"
+      },
+      "resourceMetrics": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "profile": "resource.recon-fix:run-jpm"
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_APPLICABLE",
+        "rssObservation": "NOT_RUN",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/background-execution-r3-2-4-release-evidence/release-evidence.json",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "recon-fix:run-readonly",
+      "baselineFixtureId": "R3.2.4:recon-fix:run-readonly",
+      "evidenceKind": "historical-release-evidence",
+      "workItem": "R3.2.4",
+      "capability": {
+        "status": "implemented",
+        "disposition": "managed",
+        "mode": "thread-single",
+        "adapterKind": "native",
+        "commitKind": "none",
+        "artifactKind": "none",
+        "runtimeRegistered": true,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "production gate not yet passed",
+        "recoveryStatus": "not-applicable",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "sourceAuthority": "runtime-policy"
+      },
+      "workbookComparison": {
+        "status": "NOT_APPLICABLE_NO_WORKBOOK",
+        "artifactKind": "none"
+      },
+      "faultInjection": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE"
+      },
+      "resourceMetrics": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "profile": "resource.recon-fix:run-readonly"
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_APPLICABLE",
+        "rssObservation": "NOT_RUN",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/background-execution-r3-2-4-release-evidence/release-evidence.json",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "statement:generate-all",
+      "baselineFixtureId": "R3.2.3:statement:generate-all",
+      "evidenceKind": "historical-release-evidence",
+      "workItem": "R3.2.3",
+      "capability": {
+        "status": "legacy-only",
+        "disposition": "legacy-preserved",
+        "mode": "legacy",
+        "adapterKind": "legacy-main",
+        "commitKind": "legacy-task-policy",
+        "artifactKind": "legacy-task-policy",
+        "runtimeRegistered": false,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "no-runtime-policy",
+        "recoveryStatus": "not-applicable",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "LEGACY_UNCHANGED",
+        "sourceAuthority": "legacy-only"
+      },
+      "workbookComparison": {
+        "status": "LEGACY_UNCHANGED",
+        "artifactKind": "legacy-task-policy"
+      },
+      "faultInjection": {
+        "status": "NOT_APPLICABLE_NO_NEW_CAPABILITY"
+      },
+      "resourceMetrics": {
+        "status": "LEGACY_NO_MANAGED_RESOURCE",
+        "profile": null
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_APPLICABLE",
+        "rssObservation": "NOT_APPLICABLE",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/background-execution-r3-2-3-release-evidence/release-evidence.json",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "statement:generate-current",
+      "baselineFixtureId": "R3.2.3:statement:generate-current",
+      "evidenceKind": "historical-release-evidence",
+      "workItem": "R3.2.3",
+      "capability": {
+        "status": "legacy-only",
+        "disposition": "legacy-preserved",
+        "mode": "legacy",
+        "adapterKind": "legacy-main",
+        "commitKind": "legacy-task-policy",
+        "artifactKind": "legacy-task-policy",
+        "runtimeRegistered": false,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "no-runtime-policy",
+        "recoveryStatus": "not-applicable",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "LEGACY_UNCHANGED",
+        "sourceAuthority": "legacy-only"
+      },
+      "workbookComparison": {
+        "status": "LEGACY_UNCHANGED",
+        "artifactKind": "legacy-task-policy"
+      },
+      "faultInjection": {
+        "status": "NOT_APPLICABLE_NO_NEW_CAPABILITY"
+      },
+      "resourceMetrics": {
+        "status": "LEGACY_NO_MANAGED_RESOURCE",
+        "profile": null
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_APPLICABLE",
+        "rssObservation": "NOT_APPLICABLE",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/background-execution-r3-2-3-release-evidence/release-evidence.json",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "statement:import",
+      "baselineFixtureId": "R3.2.3:statement:import",
+      "evidenceKind": "historical-release-evidence",
+      "workItem": "R3.2.3",
+      "capability": {
+        "status": "legacy-only",
+        "disposition": "legacy-preserved",
+        "mode": "legacy",
+        "adapterKind": "legacy-main",
+        "commitKind": "legacy-task-policy",
+        "artifactKind": "legacy-task-policy",
+        "runtimeRegistered": false,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "no-runtime-policy",
+        "recoveryStatus": "not-applicable",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "LEGACY_UNCHANGED",
+        "sourceAuthority": "legacy-only"
+      },
+      "workbookComparison": {
+        "status": "LEGACY_UNCHANGED",
+        "artifactKind": "legacy-task-policy"
+      },
+      "faultInjection": {
+        "status": "NOT_APPLICABLE_NO_NEW_CAPABILITY"
+      },
+      "resourceMetrics": {
+        "status": "LEGACY_NO_MANAGED_RESOURCE",
+        "profile": null
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_APPLICABLE",
+        "rssObservation": "NOT_APPLICABLE",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/background-execution-r3-2-3-release-evidence/release-evidence.json",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "statement:resolve-big-account",
+      "baselineFixtureId": "R3.2.3:statement:resolve-big-account",
+      "evidenceKind": "historical-release-evidence",
+      "workItem": "R3.2.3",
+      "capability": {
+        "status": "legacy-only",
+        "disposition": "legacy-preserved",
+        "mode": "legacy",
+        "adapterKind": "legacy-main",
+        "commitKind": "legacy-task-policy",
+        "artifactKind": "legacy-task-policy",
+        "runtimeRegistered": false,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "no-runtime-policy",
+        "recoveryStatus": "not-applicable",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "LEGACY_UNCHANGED",
+        "sourceAuthority": "legacy-only"
+      },
+      "workbookComparison": {
+        "status": "LEGACY_UNCHANGED",
+        "artifactKind": "legacy-task-policy"
+      },
+      "faultInjection": {
+        "status": "NOT_APPLICABLE_NO_NEW_CAPABILITY"
+      },
+      "resourceMetrics": {
+        "status": "LEGACY_NO_MANAGED_RESOURCE",
+        "profile": null
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_APPLICABLE",
+        "rssObservation": "NOT_APPLICABLE",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/background-execution-r3-2-3-release-evidence/release-evidence.json",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "statement:resolve-manual-balance",
+      "baselineFixtureId": "R3.2.3:statement:resolve-manual-balance",
+      "evidenceKind": "historical-release-evidence",
+      "workItem": "R3.2.3",
+      "capability": {
+        "status": "legacy-only",
+        "disposition": "legacy-preserved",
+        "mode": "legacy",
+        "adapterKind": "legacy-main",
+        "commitKind": "legacy-task-policy",
+        "artifactKind": "legacy-task-policy",
+        "runtimeRegistered": false,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "no-runtime-policy",
+        "recoveryStatus": "not-applicable",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "LEGACY_UNCHANGED",
+        "sourceAuthority": "legacy-only"
+      },
+      "workbookComparison": {
+        "status": "LEGACY_UNCHANGED",
+        "artifactKind": "legacy-task-policy"
+      },
+      "faultInjection": {
+        "status": "NOT_APPLICABLE_NO_NEW_CAPABILITY"
+      },
+      "resourceMetrics": {
+        "status": "LEGACY_NO_MANAGED_RESOURCE",
+        "profile": null
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_APPLICABLE",
+        "rssObservation": "NOT_APPLICABLE",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/background-execution-r3-2-3-release-evidence/release-evidence.json",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "toolbox:merge",
+      "baselineFixtureId": "R3.2.1:toolbox:merge",
+      "evidenceKind": "historical-release-evidence",
+      "workItem": "R3.2.1",
+      "capability": {
+        "status": "implemented",
+        "disposition": "managed",
+        "mode": "thread-single",
+        "adapterKind": "native",
+        "commitKind": "main-settlement",
+        "artifactKind": "single",
+        "runtimeRegistered": true,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "production gate not yet passed",
+        "recoveryStatus": "probe",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "sourceAuthority": "runtime-policy"
+      },
+      "workbookComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "artifactKind": "single"
+      },
+      "faultInjection": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE"
+      },
+      "resourceMetrics": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "profile": "resource.toolbox:merge"
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_RUN",
+        "rssObservation": "NOT_RUN",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/background-execution-r3-2-1-release-evidence/release-evidence.json",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "toolbox:publish",
+      "baselineFixtureId": "R3.2.1:toolbox:publish",
+      "evidenceKind": "historical-release-evidence",
+      "workItem": "R3.2.1",
+      "capability": {
+        "status": "legacy-only",
+        "disposition": "legacy-preserved",
+        "mode": "legacy",
+        "adapterKind": "legacy-main",
+        "commitKind": "legacy-task-policy",
+        "artifactKind": "legacy-task-policy",
+        "runtimeRegistered": false,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "no-runtime-policy",
+        "recoveryStatus": "not-applicable",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "LEGACY_UNCHANGED",
+        "sourceAuthority": "legacy-only"
+      },
+      "workbookComparison": {
+        "status": "LEGACY_UNCHANGED",
+        "artifactKind": "legacy-task-policy"
+      },
+      "faultInjection": {
+        "status": "NOT_APPLICABLE_NO_NEW_CAPABILITY"
+      },
+      "resourceMetrics": {
+        "status": "LEGACY_NO_MANAGED_RESOURCE",
+        "profile": null
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_APPLICABLE",
+        "rssObservation": "NOT_APPLICABLE",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/background-execution-r3-2-1-release-evidence/release-evidence.json",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "toolbox:split-large",
+      "baselineFixtureId": "R3.2.1:toolbox:split-large",
+      "evidenceKind": "historical-release-evidence",
+      "workItem": "R3.2.1",
+      "capability": {
+        "status": "legacy-only",
+        "disposition": "legacy-preserved",
+        "mode": "legacy",
+        "adapterKind": "legacy-main",
+        "commitKind": "legacy-task-policy",
+        "artifactKind": "legacy-task-policy",
+        "runtimeRegistered": false,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "no-runtime-policy",
+        "recoveryStatus": "not-applicable",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "LEGACY_UNCHANGED",
+        "sourceAuthority": "legacy-only"
+      },
+      "workbookComparison": {
+        "status": "LEGACY_UNCHANGED",
+        "artifactKind": "legacy-task-policy"
+      },
+      "faultInjection": {
+        "status": "NOT_APPLICABLE_NO_NEW_CAPABILITY"
+      },
+      "resourceMetrics": {
+        "status": "LEGACY_NO_MANAGED_RESOURCE",
+        "profile": null
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_APPLICABLE",
+        "rssObservation": "NOT_APPLICABLE",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/background-execution-r3-2-1-release-evidence/release-evidence.json",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "toolbox:split-multi-output",
+      "baselineFixtureId": "R3.2.1:toolbox:split-multi-output",
+      "evidenceKind": "historical-release-evidence",
+      "workItem": "R3.2.1",
+      "capability": {
+        "status": "implemented",
+        "disposition": "managed",
+        "mode": "thread-pool",
+        "adapterKind": "native",
+        "commitKind": "main-settlement",
+        "artifactKind": "all-or-none",
+        "runtimeRegistered": true,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "Windows durability and production performance gates not yet passed",
+        "recoveryStatus": "probe",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "sourceAuthority": "runtime-policy"
+      },
+      "workbookComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "artifactKind": "all-or-none"
+      },
+      "faultInjection": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE"
+      },
+      "resourceMetrics": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "profile": "resource.toolbox:split-multi-output"
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_RUN",
+        "rssObservation": "NOT_RUN",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/background-execution-r3-2-1-release-evidence/release-evidence.json",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "toolbox:split-single",
+      "baselineFixtureId": "R3.2.1:toolbox:split-single",
+      "evidenceKind": "historical-release-evidence",
+      "workItem": "R3.2.1",
+      "capability": {
+        "status": "implemented",
+        "disposition": "managed",
+        "mode": "thread-single",
+        "adapterKind": "native",
+        "commitKind": "main-settlement",
+        "artifactKind": "all-or-none",
+        "runtimeRegistered": true,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "production gate not yet passed",
+        "recoveryStatus": "probe",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "sourceAuthority": "runtime-policy"
+      },
+      "workbookComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "artifactKind": "all-or-none"
+      },
+      "faultInjection": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE"
+      },
+      "resourceMetrics": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "profile": "resource.toolbox:split-single"
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_RUN",
+        "rssObservation": "NOT_RUN",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/background-execution-r3-2-1-release-evidence/release-evidence.json",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "vcc-financial-op:export-audit",
+      "baselineFixtureId": "E13-B:vcc-financial-op:export-audit",
+      "evidenceKind": "v3.2.5-implementation",
+      "workItem": "E13-B",
+      "capability": {
+        "status": "implemented",
+        "disposition": "managed",
+        "mode": "thread-single",
+        "adapterKind": "native",
+        "commitKind": "main-settlement",
+        "artifactKind": "single",
+        "runtimeRegistered": true,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "production gate not yet passed",
+        "recoveryStatus": "probe",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "sourceAuthority": "runtime-policy"
+      },
+      "workbookComparison": {
+        "status": "LOCAL_AUTOMATED_PASS",
+        "artifactKind": "single"
+      },
+      "faultInjection": {
+        "status": "LOCAL_AUTOMATED_PASS"
+      },
+      "resourceMetrics": {
+        "status": "LOCAL_POLICY_TOPOLOGY_PASS",
+        "profile": "resource.vcc-financial-op:export-audit"
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_RUN",
+        "rssObservation": "NOT_RUN",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/3.2.5/implementation-notes.md",
+        "tests/unit/main-process/pre-fund-read-only-export-e13-b.test.js",
+        "tests/unit/main-process/position-read-only-export-e13-b.test.js",
+        "tests/unit/main-process/vcc-financial-op-read-only-export-e13-b.test.js",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "vcc-financial-op:export-single",
+      "baselineFixtureId": "R3.2.4:vcc-financial-op:export-single",
+      "evidenceKind": "historical-release-evidence",
+      "workItem": "R3.2.4",
+      "capability": {
+        "status": "implemented",
+        "disposition": "managed",
+        "mode": "thread-single",
+        "adapterKind": "native",
+        "commitKind": "main-settlement",
+        "artifactKind": "single",
+        "runtimeRegistered": true,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "production gate not yet passed",
+        "recoveryStatus": "probe",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "sourceAuthority": "runtime-policy"
+      },
+      "workbookComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "artifactKind": "single"
+      },
+      "faultInjection": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE"
+      },
+      "resourceMetrics": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "profile": "resource.vcc-financial-op:export-single"
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_RUN",
+        "rssObservation": "NOT_RUN",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/background-execution-r3-2-4-release-evidence/release-evidence.json",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "vcc-financial-op:export-subjects",
+      "baselineFixtureId": "R3.2.4:vcc-financial-op:export-subjects",
+      "evidenceKind": "historical-release-evidence",
+      "workItem": "R3.2.4",
+      "capability": {
+        "status": "implemented",
+        "disposition": "managed",
+        "mode": "thread-pool",
+        "adapterKind": "native",
+        "commitKind": "main-settlement",
+        "artifactKind": "all-or-none",
+        "runtimeRegistered": true,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "production gate not yet passed",
+        "recoveryStatus": "probe",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "sourceAuthority": "runtime-policy"
+      },
+      "workbookComparison": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "artifactKind": "all-or-none"
+      },
+      "faultInjection": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE"
+      },
+      "resourceMetrics": {
+        "status": "HISTORICAL_RELEASE_EVIDENCE",
+        "profile": "resource.vcc-financial-op:export-subjects"
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_RUN",
+        "rssObservation": "NOT_RUN",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/background-execution-r3-2-4-release-evidence/release-evidence.json",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "vcc-op:compute-amounts",
+      "baselineFixtureId": "LEGACY-BASELINE:vcc-op:compute-amounts",
+      "evidenceKind": "legacy-unchanged",
+      "workItem": "LEGACY-BASELINE",
+      "capability": {
+        "status": "legacy-only",
+        "disposition": "legacy-preserved",
+        "mode": "legacy",
+        "adapterKind": "legacy-main",
+        "commitKind": "legacy-task-policy",
+        "artifactKind": "legacy-task-policy",
+        "runtimeRegistered": false,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "no-runtime-policy",
+        "recoveryStatus": "not-applicable",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "LEGACY_UNCHANGED",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "LEGACY_UNCHANGED",
+        "sourceAuthority": "legacy-only"
+      },
+      "workbookComparison": {
+        "status": "LEGACY_UNCHANGED",
+        "artifactKind": "legacy-task-policy"
+      },
+      "faultInjection": {
+        "status": "NOT_APPLICABLE_NO_NEW_CAPABILITY"
+      },
+      "resourceMetrics": {
+        "status": "LEGACY_NO_MANAGED_RESOURCE",
+        "profile": null
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_APPLICABLE",
+        "rssObservation": "NOT_APPLICABLE",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/background-execution-v3.2.x-contract-baseline/changes/background-execution/validation/fixtures/valid/action-manifest.v3.2.x.json",
+        "changes/3.2.5/e13-g-implementation-notes.md",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "vcc-op:save-run",
+      "baselineFixtureId": "LEGACY-BASELINE:vcc-op:save-run",
+      "evidenceKind": "legacy-unchanged",
+      "workItem": "LEGACY-BASELINE",
+      "capability": {
+        "status": "legacy-only",
+        "disposition": "legacy-preserved",
+        "mode": "legacy",
+        "adapterKind": "legacy-main",
+        "commitKind": "legacy-task-policy",
+        "artifactKind": "legacy-task-policy",
+        "runtimeRegistered": false,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "no-runtime-policy",
+        "recoveryStatus": "not-applicable",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "LEGACY_UNCHANGED",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "LEGACY_UNCHANGED",
+        "sourceAuthority": "legacy-only"
+      },
+      "workbookComparison": {
+        "status": "LEGACY_UNCHANGED",
+        "artifactKind": "legacy-task-policy"
+      },
+      "faultInjection": {
+        "status": "NOT_APPLICABLE_NO_NEW_CAPABILITY"
+      },
+      "resourceMetrics": {
+        "status": "LEGACY_NO_MANAGED_RESOURCE",
+        "profile": null
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_APPLICABLE",
+        "rssObservation": "NOT_APPLICABLE",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/background-execution-v3.2.x-contract-baseline/changes/background-execution/validation/fixtures/valid/action-manifest.v3.2.x.json",
+        "changes/3.2.5/e13-g-implementation-notes.md",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    },
+    {
+      "actionKey": "vcc-op:scan-and-compute",
+      "baselineFixtureId": "LEGACY-BASELINE:vcc-op:scan-and-compute",
+      "evidenceKind": "legacy-unchanged",
+      "workItem": "LEGACY-BASELINE",
+      "capability": {
+        "status": "legacy-only",
+        "disposition": "legacy-preserved",
+        "mode": "legacy",
+        "adapterKind": "legacy-main",
+        "commitKind": "legacy-task-policy",
+        "artifactKind": "legacy-task-policy",
+        "runtimeRegistered": false,
+        "handlerRoute": "legacy-main"
+      },
+      "effectiveStrategy": {
+        "mode": "legacy",
+        "workerCount": 0,
+        "featureFlag": false,
+        "downgradeReason": "no-runtime-policy",
+        "recoveryStatus": "not-applicable",
+        "legacyAvailable": true
+      },
+      "semanticComparison": {
+        "status": "LEGACY_UNCHANGED",
+        "authority": "ACTION_SPECIFIC_EVIDENCE_REFS"
+      },
+      "dbReadEvidence": {
+        "status": "LEGACY_UNCHANGED",
+        "sourceAuthority": "legacy-only"
+      },
+      "workbookComparison": {
+        "status": "LEGACY_UNCHANGED",
+        "artifactKind": "legacy-task-policy"
+      },
+      "faultInjection": {
+        "status": "NOT_APPLICABLE_NO_NEW_CAPABILITY"
+      },
+      "resourceMetrics": {
+        "status": "LEGACY_NO_MANAGED_RESOURCE",
+        "profile": null
+      },
+      "externalGates": {
+        "windowsPackaged": "NOT_RUN",
+        "realBusinessSamples": "PENDING_HUMAN_REVIEW",
+        "excelWps": "NOT_APPLICABLE",
+        "rssObservation": "NOT_APPLICABLE",
+        "stabilityWindow": "NOT_STARTED",
+        "funds": "PENDING_HUMAN_REVIEW",
+        "recovery": "PENDING_HUMAN_REVIEW"
+      },
+      "productionDecision": {
+        "kind": "KEEP_LEGACY",
+        "enabled": false,
+        "reasonCodes": [
+          "WINDOWS_PACKAGED_NOT_RUN",
+          "REAL_BUSINESS_SAMPLE_REVIEW_PENDING",
+          "FUNDS_REVIEW_PENDING",
+          "RECOVERY_REVIEW_PENDING",
+          "STABILITY_WINDOW_NOT_STARTED"
+        ]
+      },
+      "evidenceRefs": [
+        "changes/background-execution-v3.2.x-contract-baseline/changes/background-execution/validation/fixtures/valid/action-manifest.v3.2.x.json",
+        "changes/3.2.5/e13-g-implementation-notes.md",
+        "changes/3.2.5/e13-g-action-manifest.json",
+        "changes/3.2.5/e13-g-capability-inventory.json",
+        "changes/3.2.5/e13-g-production-strategy-snapshot.json",
+        "changes/3.2.5/e13-g-coverage-report.json"
+      ]
+    }
+  ]
+}
