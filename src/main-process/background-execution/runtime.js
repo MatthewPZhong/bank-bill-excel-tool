@@ -50,9 +50,9 @@ const {
   createDuplicatePairedTopologyPlanner
 } = require('../duplicate-inbound-match/topology');
 const {
-  beginDuplicatePairedParserShutdown,
-  waitForDuplicatePairedParserShutdownPhase
-} = require('../duplicate-inbound-match/paired-parser-shutdown');
+  beginExternalParserShutdown,
+  waitForExternalParserShutdownPhase
+} = require('./external-parser-finalization');
 
 const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   ...TOOLBOX_GENERATION_POLICIES,
@@ -269,10 +269,10 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
       }
       supervisor.stopAcceptingNewJobs();
       const deadline = deadlineAfter(timeoutMs);
-      const pairedSession = beginDuplicatePairedParserShutdown(runtime);
+      const parserSession = beginExternalParserShutdown(runtime);
       shutdownPromise = Promise.resolve().then(async () => {
-        const workerReport = await waitForDuplicatePairedParserShutdownPhase(
-          pairedSession,
+        const workerReport = await waitForExternalParserShutdownPhase(
+          parserSession,
           'workersTerminal',
           remainingTimeout(deadline)
         );
@@ -280,8 +280,8 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
           ...shutdownOptions,
           timeoutMs: remainingTimeout(deadline)
         });
-        const finalizationReport = await waitForDuplicatePairedParserShutdownPhase(
-          pairedSession,
+        const finalizationReport = await waitForExternalParserShutdownPhase(
+          parserSession,
           'finalized',
           remainingTimeout(deadline)
         );
@@ -289,7 +289,7 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
           supervisorReport,
           Object.freeze({
             leakedTransports: Object.freeze([]),
-            errors: pairedSession.errors
+            errors: parserSession.errors
           }),
           workerReport,
           finalizationReport
