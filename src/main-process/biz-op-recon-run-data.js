@@ -696,7 +696,14 @@ function buildRangeExportDb({ userDataDir, mainDb, buName, startDate, endDate })
   return memDb;
 }
 
-function buildFrozenRangeExportDb({ userDataDir, mainDb, runLocators }) {
+function buildFrozenRangeExportDb({
+  userDataDir,
+  mainDb,
+  runLocators,
+  openSourceDb = runDataStore.openExistingSideDb,
+  beforeCopyGroup = null,
+  mainSnapshotActive = false
+}) {
   const { DatabaseSync } = require('node:sqlite');
   const memDb = new DatabaseSync(':memory:');
   memDb.exec(runDataStore.SIDE_DB_DDL_BIZ_OP);
@@ -710,12 +717,16 @@ function buildFrozenRangeExportDb({ userDataDir, mainDb, runLocators }) {
     for (const [sourceKey, selections] of groups) {
       const sideDb = sourceKey === '<main>'
         ? null
-        : runDataStore.openExistingSideDb(
+        : openSourceDb(
             runDataStore.resolveFromRel(userDataDir, sourceKey)
           );
       const srcDb = sideDb || mainDb;
+      const ownsTransaction = sideDb !== null || mainSnapshotActive !== true;
       try {
-        srcDb.exec('BEGIN');
+        if (ownsTransaction) srcDb.exec('BEGIN');
+        if (typeof beforeCopyGroup === 'function') {
+          beforeCopyGroup({ sourceKey, srcDb, selections });
+        }
         for (const { locator, sourceIndex } of selections) {
           copyRunIntoMemDb(srcDb, memDb, locator.date, locator.buName, {
             runIdOffset: sourceIndex * RANGE_RUN_ID_STRIDE,
@@ -724,9 +735,11 @@ function buildFrozenRangeExportDb({ userDataDir, mainDb, runLocators }) {
             expectedArchiveTaskRunId: locator.archiveTaskRunId
           });
         }
-        srcDb.exec('COMMIT');
+        if (ownsTransaction) srcDb.exec('COMMIT');
       } catch (error) {
-        try { srcDb.exec('ROLLBACK'); } catch (_e) { /* swallow */ }
+        if (ownsTransaction) {
+          try { srcDb.exec('ROLLBACK'); } catch (_e) { /* swallow */ }
+        }
         throw error;
       } finally {
         if (sideDb) { try { sideDb.close(); } catch (_e) { /* swallow */ } }

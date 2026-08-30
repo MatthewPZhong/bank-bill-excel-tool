@@ -17,6 +17,7 @@
 | 文档 bootstrap 不新增功能 PR | 冻结 Spec 已明确 8 PR 序列 | 增加第 9 个纯文档 PR | bootstrap 作为 v3.2.5 base/E13-A 祖先。 |
 | Capability 与 Effective Production Strategy 分开 | 所有 action 初始 production disabled，人工/观察门禁未关闭 | 用实现完成自动启用 production | 每 action 可独立保持 legacy/blocked。 |
 | 不运行用户禁止的三个聚合/变量命令 | 用户明确禁止 `release-check`、`check-vars`、`scan:vars` | 把未运行项写为 PASS | 用允许的 unit/integration/smoke/定向验证逐项记录，禁止虚报。 |
+| E13-A 先以真实入口冻结 action 与 source authority | Pending summary 当前绑定错误、错误报告是 Main 内存状态、BizOP 为 side/legacy 双源 | 直接照 action 名猜 worker 输入 | 详细决策和证据见 [e13-a-preflight.md](./e13-a-preflight.md) 与 [e13-a-implementation-notes.md](./e13-a-implementation-notes.md)。 |
 
 ## Evidence / Deviations
 
@@ -26,10 +27,12 @@
 | Package checksum | `61/69`，8 项漂移均有提交来源 | E13-G 前不得宣称 package integrity PASS。 |
 | Published/current validation | published historical `29/29`（68 inputs）；current tree `28/29`（73 inputs，binding/AST authority 一项失败） | 旧 report 不代偿当前树；E13-G 负责真实修复。 |
 | Production/human gate | production=false；资金/恢复 `PENDING_HUMAN_REVIEW` | 本 bootstrap 不改变。 |
+| E13-A unknowns-first | summary=aggregate；Pending errors 需 managed source；Pending/BizOP stable gate 必须在 Worker read snapshot 内复核 | 进入模块专用 worker 实施；不改 legacy effective strategy。 |
+| E13-A capability validation | 定向 `18/18 PASS`；重点既有回归 `181/181 PASS`；完整单测 `6784/6787 PASS`（`0 FAIL`、`3 SKIP`）；相关集成 `179/179 PASS`；smoke PASS；Main freeze 为紧凑 run/dataset/revision 证据，Pending 大错误源采用版本 authority + 异步流式 staging | 本地 capability 已收口；production 仍为 false，Windows/真实样本/资金恢复人工门禁留到 R3.2.5。 |
 
 ## Blindspot / Reconciliation
 
-- 当前仅增加文档/测试，不改 `src`、SQL、金额币种、行序、Workbook 或持久化。
+- E13-A 已增加 dormant `src` capability，但 production 仍关闭；复用既有 SQL、排序、金额币种、Workbook 与 Publisher，不改变业务结果或持久化语义。
 - E13-A/B/C 必须先建立入口到输入 authority、SQL、排序、Workbook、Publisher 的数据血缘，再实施。
 - E13-D/E/F 必须证明不新增额外 spawn、事务边界/receipt/cancel/recovery 零漂移。
 - E13-G 不能通过放宽 AST/provenance gate 或仅刷新 hash 关闭 finding；必须以真实生产入口重建 coverage。
