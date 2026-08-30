@@ -68,6 +68,11 @@ const {
   beginExternalParserShutdown,
   waitForExternalParserShutdownPhase
 } = require('./external-parser-finalization');
+const {
+  RECON_FIX_READONLY_POLICIES,
+  RECON_FIX_SERVICE_KEY,
+  validateReconFixServiceResult
+} = require('../recon-id-fix-service/policies');
 
 const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   ...TOOLBOX_GENERATION_POLICIES,
@@ -75,7 +80,8 @@ const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   NEW_ACCOUNT_GENERATION_POLICY,
   NEW_ACCOUNT_SAVE_AS_POLICY,
   ...FUND_RECON_POLICIES,
-  ...DUPLICATE_POLICIES
+  ...DUPLICATE_POLICIES,
+  ...RECON_FIX_READONLY_POLICIES
 ]);
 
 function isBackgroundExecutionProductionEnabled(actionKey) {
@@ -133,6 +139,12 @@ function entryBindingForPolicy(policy, workerRoot, duplicateStartupGate) {
       cancellationTerminalErrorCodes: Object.freeze(['NEW_ACCOUNT_GENERATION_CANCELLED'])
     });
   }
+  if (policy.moduleId === 'recon-fix') {
+    return Object.freeze({
+      path: path.resolve(__dirname, '..', 'recon-id-fix-service', 'worker-entry.js'),
+      cancellationTerminalErrorCodes: Object.freeze(['RECON_FIX_CANCELLED'])
+    });
+  }
   const preFund = policy.moduleId === 'pre-fund';
   return Object.freeze({
     path: path.join(
@@ -182,7 +194,9 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
   ));
   const validatorEntries = {};
   for (const policy of BACKGROUND_EXECUTION_POLICIES) {
-    const resultValidator = policy.moduleId === 'duplicate'
+    const resultValidator = policy.moduleId === 'recon-fix'
+      ? validateReconFixServiceResult
+      : policy.moduleId === 'duplicate'
       ? (policy.actionKey === DUPLICATE_ACTIONS.IMPORT
           ? validateDuplicateImportResult
           : (policy.actionKey === DUPLICATE_ACTIONS.RUN
@@ -243,7 +257,7 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
     ),
     settlementKeys: BACKGROUND_EXECUTION_POLICIES.map((policy) => policy.commit.settlementKey),
     publisherKeys: BACKGROUND_EXECUTION_POLICIES.map((policy) => policy.artifacts.publisherKey),
-    serviceKeys: [FUND_RECON_SERVICE_KEY, DUPLICATE_SERVICE_KEY],
+    serviceKeys: [FUND_RECON_SERVICE_KEY, DUPLICATE_SERVICE_KEY, RECON_FIX_SERVICE_KEY],
     plannerKeys: ['planner.pre-fund:mpt-import', 'planner.duplicate:import'],
     reducerKeys: ['reducer.pre-fund:mpt-import', 'reducer.duplicate:import']
   };
@@ -285,6 +299,9 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
     },
     inspect(jobId) {
       return supervisor.inspect(jobId);
+    },
+    closeService(serviceKey) {
+      return supervisor.closeService(serviceKey);
     },
     policyRegistry,
     resourceGovernor,

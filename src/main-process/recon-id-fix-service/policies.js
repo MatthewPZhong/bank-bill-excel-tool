@@ -1,0 +1,232 @@
+'use strict';
+
+const {
+  financeSafeTextViolation
+} = require('../background-execution/error-codec');
+
+const RECON_FIX_IMPORT_ACTION = 'recon-fix:import';
+const RECON_FIX_RUN_READONLY_ACTION = 'recon-fix:run-readonly';
+const RECON_FIX_SERVICE_KEY = 'service.recon-fix';
+const RECON_FIX_ENTRY_KEYS = Object.freeze({
+  [RECON_FIX_IMPORT_ACTION]: 'executor.recon-fix:import',
+  [RECON_FIX_RUN_READONLY_ACTION]: 'executor.recon-fix:run-readonly'
+});
+const RECON_FIX_RESULT_VALIDATOR_KEYS = Object.freeze({
+  [RECON_FIX_IMPORT_ACTION]: 'result-validator.recon-fix:import',
+  [RECON_FIX_RUN_READONLY_ACTION]: 'result-validator.recon-fix:run-readonly'
+});
+
+const BASE_RESOURCES = Object.freeze({
+  cpuSlots: 0,
+  workerThreadSlots: 1,
+  utilityProcessSlots: 0,
+  ioHeavySlots: 0,
+  memoryBytes: 67108864
+});
+const PHASE_RESOURCES = Object.freeze({
+  cpuSlots: 1,
+  workerThreadSlots: 0,
+  utilityProcessSlots: 0,
+  ioHeavySlots: 1,
+  memoryBytes: 201326592
+});
+const PERSISTENT_STATE_RESOURCES = Object.freeze({
+  cpuSlots: 0,
+  workerThreadSlots: 0,
+  utilityProcessSlots: 0,
+  ioHeavySlots: 0,
+  memoryBytes: 268435456
+});
+const ZERO_RESOURCES = Object.freeze({
+  cpuSlots: 0,
+  workerThreadSlots: 0,
+  utilityProcessSlots: 0,
+  ioHeavySlots: 0,
+  memoryBytes: 0
+});
+
+const SERVICE_POLICY = Object.freeze({
+  generationRequired: true,
+  busyPolicy: 'reject',
+  closePolicy: 'cooperative',
+  statusMaxBytes: 1048576,
+  stateFootprintEstimatorKey: 'footprint.recon-fix',
+  tokenPolicy: Object.freeze({
+    enabled: false,
+    maxOutstanding: 0,
+    ttlMs: 0,
+    singleUse: true
+  }),
+  startupRecoveryKey: 'startup-recovery.recon-fix',
+  serviceKey: RECON_FIX_SERVICE_KEY,
+  controlProtocol: 'service-control-v1',
+  resourceControl: Object.freeze({
+    protocol: 'service-control-v1',
+    allowedRequestKinds: Object.freeze(['persistent-state-replace', 'phase-extension']),
+    maxPendingRequests: 8,
+    grantTimeoutMs: 30000,
+    adoptionTimeoutMs: 30000,
+    grantIdentityRequired: true,
+    releaseAckRequired: true
+  }),
+  stateAdoption: Object.freeze({
+    grantIdentityRequired: true,
+    atomicReplaceRequired: true,
+    adoptAckRequired: true
+  })
+});
+
+function reconFixReadonlyPolicy(actionKey) {
+  if (![RECON_FIX_IMPORT_ACTION, RECON_FIX_RUN_READONLY_ACTION].includes(actionKey)) {
+    throw new TypeError(`E11-A 不支持 action：${String(actionKey)}`);
+  }
+  return Object.freeze({
+    actionKey,
+    moduleId: 'recon-fix',
+    description: `v3.2.x canonical policy fixture for ${actionKey}`,
+    disposition: 'managed',
+    mode: 'thread-single',
+    adapterKind: 'native',
+    adapterKey: null,
+    entryKey: RECON_FIX_ENTRY_KEYS[actionKey],
+    lifetime: 'service',
+    context: Object.freeze({ kind: 'operation', validatorKey: 'exact-5' }),
+    resources: Object.freeze({
+      profile: `resource.${actionKey}`,
+      base: BASE_RESOURCES,
+      phase: PHASE_RESOURCES,
+      compound: null,
+      lowMemoryBehavior: 'queue',
+      admissionPriority: 'normal',
+      persistentState: PERSISTENT_STATE_RESOURCES,
+      pendingInteraction: ZERO_RESOURCES
+    }),
+    cancellation: Object.freeze({
+      capability: 'shutdown-only',
+      safePoints: Object.freeze(['before-critical', 'between-units']),
+      cooperativeTimeoutMs: 5000,
+      terminateTimeoutMs: 5000,
+      protectedResult: 'protected/not-cancellable'
+    }),
+    failure: Object.freeze({
+      unitBusinessError: 'fail-job',
+      unitTransportCrash: 'fail-job',
+      workerExit: 'fail-job',
+      automaticRetry: false
+    }),
+    commit: Object.freeze({
+      kind: 'none',
+      criticalIntent: false,
+      receiptKind: null,
+      inspectorKey: null,
+      conflictScopeResolverKey: null,
+      settlementKey: null
+    }),
+    result: Object.freeze({
+      kind: 'compact-json',
+      maxBytes: 8388608,
+      maxErrorItems: 100,
+      validatorKey: RECON_FIX_RESULT_VALIDATOR_KEYS[actionKey]
+    }),
+    artifacts: Object.freeze({
+      kind: 'none',
+      filePlanRequired: false,
+      technicalValidatorKey: null,
+      businessValidatorKey: null,
+      publisherKey: null,
+      maxArtifacts: 0
+    }),
+    service: SERVICE_POLICY,
+    metrics: Object.freeze({
+      phases: Object.freeze(['queue', 'execute', 'settle']),
+      privacyProfile: 'finance-safe-v1',
+      progressRateLimitPerSecond: 10
+    }),
+    featureFlag: `feature.${actionKey}`,
+    legacyStrategyKey: `legacy.${actionKey}`,
+    blocker: null,
+    production: Object.freeze({
+      enabled: false,
+      effectiveMode: 'legacy',
+      effectiveWorkerCount: 0,
+      recoveryStatus: 'not-applicable',
+      evidenceStatus: 'baseline',
+      downgradeReason: 'production gate not yet passed',
+      benchmarkEvidenceId: null
+    }),
+    protocolLimits: Object.freeze({
+      commandMaxBytes: 262144,
+      eventMaxBytes: 262144
+    })
+  });
+}
+
+function exactKeys(value, expected) {
+  return value && typeof value === 'object' && !Array.isArray(value) &&
+    Object.keys(value).sort().join(',') === [...expected].sort().join(',');
+}
+
+function safeCount(value) {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+function safeHash(value) {
+  return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+}
+
+function allowReconFixFinanceSafeValue({ value, key }) {
+  return [
+    'stateDigest',
+    'resultHandle',
+    'scenarioSnapshotHash',
+    'linkedEvidenceHash',
+    'resultDigest'
+  ].includes(key) && safeHash(value);
+}
+
+function validateReconFixServiceResult(value) {
+  if (!exactKeys(value, value && value.kind === 'imported'
+    ? ['kind', 'revision', 'serviceGeneration', 'stateDigest', 'summary']
+    : ['kind', 'linkedEvidenceHash', 'resultHandle', 'revision', 'scenarioSnapshotHash',
+        'serviceGeneration', 'stateDigest', 'summary'])) return false;
+  if (!safeCount(value.revision) || value.revision < 1 ||
+      !safeCount(value.serviceGeneration) || value.serviceGeneration < 1 ||
+      !safeHash(value.stateDigest)) return false;
+  if (value.kind === 'imported') {
+    const summary = value.summary;
+    return exactKeys(summary, ['fileName', 'hasResult', 'sheetCounts', 'subMode']) &&
+      typeof summary.fileName === 'string' && summary.fileName.length <= 1024 &&
+      financeSafeTextViolation(summary.fileName) === null &&
+      summary.hasResult === false && ['business', 'gateway'].includes(summary.subMode) &&
+      exactKeys(summary.sheetCounts, ['business', 'opponent', 'recon']) &&
+      Object.values(summary.sheetCounts).every(safeCount);
+  }
+  if (value.kind !== 'readonly-result' || !safeHash(value.resultHandle) ||
+      !safeHash(value.scenarioSnapshotHash) ||
+      !(value.linkedEvidenceHash === null || safeHash(value.linkedEvidenceHash))) return false;
+  const summary = value.summary;
+  return exactKeys(summary, ['fixedRowCount', 'resultDigest', 'runKind', 'unmatchedRowCount', 'warningCount']) &&
+    ['standard', 'boc'].includes(summary.runKind) && safeHash(summary.resultDigest) &&
+    safeCount(summary.fixedRowCount) && safeCount(summary.unmatchedRowCount) &&
+    safeCount(summary.warningCount);
+}
+
+Object.defineProperty(validateReconFixServiceResult, 'allowFinanceSafeValue', {
+  value: allowReconFixFinanceSafeValue
+});
+
+const RECON_FIX_READONLY_POLICIES = Object.freeze([
+  reconFixReadonlyPolicy(RECON_FIX_IMPORT_ACTION),
+  reconFixReadonlyPolicy(RECON_FIX_RUN_READONLY_ACTION)
+]);
+
+module.exports = {
+  RECON_FIX_ENTRY_KEYS,
+  RECON_FIX_IMPORT_ACTION,
+  RECON_FIX_READONLY_POLICIES,
+  RECON_FIX_RESULT_VALIDATOR_KEYS,
+  RECON_FIX_RUN_READONLY_ACTION,
+  RECON_FIX_SERVICE_KEY,
+  reconFixReadonlyPolicy,
+  validateReconFixServiceResult
+};
