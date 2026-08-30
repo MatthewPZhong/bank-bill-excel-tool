@@ -660,9 +660,14 @@ function runLoggingScenario(context) {
   const startupFailureLogContent = fs.readFileSync(_sfErrorLog, 'utf8');
   assert(startupFailureLogContent.includes('应用启动失败'));
 
-  const mainSource = fs.readFileSync(`${context.projectRoot}/src/main.js`, 'utf8');
+  const statementGenerationSource = fs.readFileSync(
+    `${context.projectRoot}/src/main-process/statement-generation.js`,
+    'utf8'
+  );
   assert(
-    /let balanceSeedStatus = \{\s*missing: 0,\s*missingIndexByKey: new Map\(\)\s*\};/.test(mainSource),
+    /let balanceSeedStatus = \{\s*missing: 0,\s*missingIndexByKey: new Map\(\)\s*\};/.test(
+      statementGenerationSource
+    ),
     '余额补录链路应在 try 外预置 balanceSeedStatus，避免 BALANCE_SEED_REQUIRED 时触发 ReferenceError'
   );
 }

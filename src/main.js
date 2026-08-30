@@ -9529,6 +9529,7 @@ const statementGenerationHelpers = createStatementGenerationHelpers({
   buildImportWarningDetailLines,
   buildImportWarningMessage,
   buildManualBalanceRequiredResult,
+  buildDetailExportRows,
   buildMappedRowsForFile,
   buildStatementGenerationConfig,
   buildStatementOutputFilePath,
@@ -9540,7 +9541,6 @@ const statementGenerationHelpers = createStatementGenerationHelpers({
   extractHeaders,
   FileValidationError,
   findPreviousBalanceSeed,
-  generateStatementFiles,
   getBalanceTemplatePath,
   getStatementSessionEntries,
   mergeMappedDetailRows,
@@ -9548,6 +9548,8 @@ const statementGenerationHelpers = createStatementGenerationHelpers({
   normalizeInputFilePaths,
   parseRequiredBillDates,
   resolveSinglePreparedFieldValue,
+  scanBalanceSeedStatus,
+  readBalanceAdjustments,
   splitTemplateName,
   storeGeneratedBalanceSeeds,
   writeBalanceWorkbook,
@@ -9562,209 +9564,8 @@ function buildPreparedStatementBatchFromFilePaths({ config, inputFilePaths = [] 
   return statementGenerationHelpers.buildPreparedStatementBatchFromFilePaths({ config, inputFilePaths });
 }
 
-function generateStatementFiles({
-  config,
-  preparedBatch,
-  scope = 'current',
-  includeDetail = true,
-  includeBalance = null
-}) {
-  const warnings = Array.isArray(preparedBatch.warnings) ? preparedBatch.warnings.slice() : [];
-  const detailRows = cloneRowsWithMetadata(preparedBatch.detailRows);
-  const detailExportRows = buildDetailExportRows(detailRows);
-  const effectiveDetailRows = Array.isArray(detailExportRows.sourceRows) ? detailExportRows.sourceRows : detailRows;
-  const skippedDetailRows = Array.isArray(detailExportRows.skippedRows) ? detailExportRows.skippedRows : [];
-  const simultaneousAmountRows = Array.isArray(detailExportRows.simultaneousRows)
-    ? detailExportRows.simultaneousRows
-    : [];
-
-  if (simultaneousAmountRows.length) {
-    throw new FileValidationError(
-      'FILE_READ',
-      `存在${simultaneousAmountRows.length}条明细的 Credit Amount 与 Debit Amount 同时有值`,
-      {
-        detailLines: simultaneousAmountRows.map((row) => {
-          return `第${row.sourceRowNumber}行，Credit Amount="${row.creditAmount || '(空)'}"，Debit Amount="${row.debitAmount || '(空)'}"`;
-        }),
-        context: {
-          inputFilePath: preparedBatch.inputFilePaths.join(';'),
-          templateName: config.template.name
-        }
-      }
-    );
-  }
-
-  skippedDetailRows.forEach((row) => {
-    warnings.push({
-      type: 'detail-row-skipped',
-      rowNumber: row.sourceRowNumber,
-      creditAmount: row.creditAmount,
-      debitAmount: row.debitAmount
-    });
-  });
-
-  const billDates = detailExportRows.length > 1
-    ? parseRequiredBillDates(detailExportRows)
-    : parseRequiredBillDates(detailRows);
-  const dateRangeLabel = buildDateRangeLabel(billDates);
-  const internalSuffix = scope === 'all' ? 'all' : '';
-  const outputMerchantId = scope === 'all' ? '' : preparedBatch.selectedMerchantId;
-
-  const result = {
-    detail: null,
-    balance: null,
-    message: includeDetail && includeBalance !== true ? '明细账单可导出' : '',
-    warnings,
-    balanceRequested: Boolean(preparedBatch.balanceRequested),
-    unmatchedAmountSplitFiles: Array.isArray(preparedBatch.unmatchedAmountSplitFiles)
-      ? preparedBatch.unmatchedAmountSplitFiles.slice()
-      : [],
-    // v1.4.9 PR #16 review P1 Fix C: 平行于 unmatchedAmountSplitFiles 的 bill-split 版本
-    unmatchedBillSplitFiles: Array.isArray(preparedBatch.unmatchedBillSplitFiles)
-      ? preparedBatch.unmatchedBillSplitFiles.slice()
-      : []
-  };
-
-  if (includeDetail) {
-    const detailOutput = buildStatementOutputFilePath({
-      kind: 'detail',
-      templateName: config.template.name,
-      merchantId: outputMerchantId,
-      outputTag: 'COMMON',
-      dateRangeLabel,
-      internalSuffix
-    });
-
-    writeWorkbookRows({
-      rows: detailExportRows,
-      outputFilePath: detailOutput.outputFilePath
-    });
-
-    result.detail = {
-      filePath: detailOutput.outputFilePath,
-      fileName: detailOutput.outputFileName,
-      templateName: config.template.name
-    };
-  }
-
-  const shouldGenerateBalance = includeBalance === null
-    ? Boolean(preparedBatch.balanceRequested)
-    : Boolean(includeBalance) && Boolean(preparedBatch.balanceRequested);
-
-  if (shouldGenerateBalance) {
-    if (!config.mappingByTargetField.MerchantId) {
-      throw new FileValidationError('FILE_READ', '当前模板启用 Balance 时必须映射 MerchantId 字段');
-    }
-
-    let balanceSeedStatus = {
-      missing: 0,
-      missingIndexByKey: new Map()
-    };
-
-    try {
-      const balanceTemplatePath = getBalanceTemplatePath();
-
-      if (!fs.existsSync(balanceTemplatePath)) {
-        throw new FileValidationError('FILE_READ', '未找到余额账单模板，请确认文件已放入 assets 目录');
-      }
-
-      const balanceTemplateFields = extractHeaders(balanceTemplatePath);
-
-      if (!balanceTemplateFields.length) {
-        throw new FileValidationError('FILE_READ', '余额账单模板为空或不可读，请重新确认');
-      }
-
-      balanceSeedStatus = scanBalanceSeedStatus({
-        detailRows: effectiveDetailRows,
-        templateName: config.template.name
-      });
-
-      const templateBankName = splitTemplateName(config.template.name).bankName;
-      const balanceAdjustments = readBalanceAdjustments(ensureStorageRoot(), templateBankName);
-
-      const balanceResult = deriveBalanceRecords({
-        detailRows: effectiveDetailRows,
-        templateName: config.template.name,
-        balanceTemplateFields,
-        mode: preparedBatch.balanceMode,
-        balanceAdjustments,
-        resolvePreviousEndBalance: ({ bankName, merchantId, currency, targetBillDate }) => {
-          const seedRecord = findPreviousBalanceSeed(ensureStorageRoot(), {
-            bankName,
-            merchantId,
-            currency,
-            beforeBillDate: targetBillDate
-          });
-
-          return seedRecord ? seedRecord.endBalance : null;
-        }
-      });
-      const balanceOutput = buildStatementOutputFilePath({
-        kind: 'balance',
-        templateName: config.template.name,
-        merchantId: outputMerchantId,
-        outputTag: 'BALANCE',
-        dateRangeLabel: buildDateRangeLabel(balanceResult.billDates),
-        internalSuffix
-      });
-
-      writeBalanceWorkbook({
-        templateFilePath: balanceTemplatePath,
-        records: balanceResult.records,
-        templateFields: balanceTemplateFields,
-        outputFilePath: balanceOutput.outputFilePath
-      });
-      storeGeneratedBalanceSeeds({
-        templateName: config.template.name,
-        seedRecords: balanceResult.seedRecords
-      });
-
-      result.balance = {
-        filePath: balanceOutput.outputFilePath,
-        fileName: balanceOutput.outputFileName,
-        templateName: config.template.name
-      };
-      result.message = includeDetail ? '明细账单可导出，余额账单可导出' : '余额账单可导出';
-    } catch (error) {
-      if (error instanceof FileValidationError) {
-        if (error.code === 'BALANCE_SEED_REQUIRED') {
-          const promptMerchantId = normalizeCell(error.context?.merchantId);
-          const promptCurrency = normalizeCell(error.context?.currency);
-          const promptKey = `${promptMerchantId}@@${promptCurrency}`;
-          const queueIndex = balanceSeedStatus.missingIndexByKey?.get(promptKey) || 1;
-          const queueTotal = balanceSeedStatus.missing || 1;
-
-          warnings.push({
-            type: 'balance-seed-required',
-            message: error.message,
-            prompt: {
-              templateName: config.template.name,
-              bankName: error.context?.bankName || splitTemplateName(config.template.name).bankName,
-              merchantId: promptMerchantId,
-              currency: promptCurrency,
-              targetBillDate: normalizeCell(error.context?.targetBillDate),
-              queueIndex,
-              queueTotal
-            }
-          });
-        } else {
-          warnings.push({
-            type: 'balance-generate-failed',
-            message: error.message
-          });
-        }
-      } else {
-        const logPath = appendLog(ensureStorageRoot(), error);
-        warnings.push({
-          type: 'balance-generate-failed',
-          message: '余额账单生成失败，系统异常已写入日志文件',
-          logPath
-        });
-      }
-    }
-  }
-
-  return result;
+function generateStatementFiles(options) {
+  return statementGenerationHelpers.generateStatementFiles(options);
 }
 
 // v1.5.2 #9 修复：按文件名映射模板导入多个文件匹配不同模板时，按 matchedTemplateId 分组，
