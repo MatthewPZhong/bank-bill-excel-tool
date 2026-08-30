@@ -209,12 +209,23 @@ test('v3.1.14 正式文档锁定 VCC 修复、实际发布证据与人工边界'
   const implementationNotes = read('changes/3.1.14/implementation-notes.md');
   const runbook = read('docs/WINDOWS_RELEASE_RUNBOOK.md');
 
-  assert.equal(packageJson.version, '3.1.14');
-  assert.equal(packageLock.version, '3.1.14');
-  assert.equal(packageLock.packages[''].version, '3.1.14');
+  const currentVersion = packageJson.version;
+  const currentParts = currentVersion.split('.').map(Number);
+  assert.match(currentVersion, /^\d+\.\d+\.\d+$/);
+  assert.ok(
+    currentParts[0] > 3 ||
+      (currentParts[0] === 3 && currentParts[1] > 1) ||
+      (currentParts[0] === 3 && currentParts[1] === 1 && currentParts[2] >= 14),
+    '当前稳定版本不得倒退到 v3.1.14 之前'
+  );
+  assert.equal(packageLock.version, currentVersion);
+  assert.equal(packageLock.packages[''].version, currentVersion);
   assert.match(changelog, /^## 3\.1\.14 - 2026-08-21$/m);
   assert.match(history, /^## v3\.1\.14（2026-08-21）$/m);
-  assert.match(guide, /^版本：`v3\.1\.14`$/m);
+  assert.match(
+    guide,
+    new RegExp('^版本：`v' + currentVersion.replaceAll('.', '\\.') + '`$', 'm')
+  );
 
   const currentChangelog = markdownSection(changelog, '## 3.1.14 - 2026-08-21');
   const currentHistory = markdownSection(history, '## v3.1.14（2026-08-21）');
@@ -234,7 +245,6 @@ test('v3.1.14 正式文档锁定 VCC 修复、实际发布证据与人工边界'
   const v314CurrentSections = [
     ['CHANGELOG v3.1.14', currentChangelog],
     ['VERSION_FEATURE_HISTORY v3.1.14', currentHistory],
-    ['USER_GUIDE 顶部', currentGuide],
     ['USER_GUIDE v3.1.14 详细条目', currentGuideDetail],
     ['USER_GUIDE v3.1.14 发布边界', guideReleaseBoundary],
     ['preflight', preflight],
