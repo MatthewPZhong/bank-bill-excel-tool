@@ -19,6 +19,7 @@ const {
   assertTaskStagingIdentity,
   normalizeTaskStagingIdentity
 } = require('./staging-identity');
+const { normalizeVccExportShard } = require('./shard-planner');
 
 function writerError(code, message) {
   const error = new Error(message);
@@ -33,10 +34,11 @@ function exactKeys(value, expected, label) {
   }
 }
 
-function normalizeWriterInput(value, actionKey) {
+function normalizeWriterInput(value, actionKey, options = {}) {
+  const allowShard = options.allowShard === true;
   exactKeys(value, [
     'assetsDir', 'authority', 'contractVersion', 'databasePath', 'generations',
-    'stagingIdentity', 'task'
+    ...(allowShard ? ['shard'] : []), 'stagingIdentity', 'task'
   ], 'writer input');
   if (value.contractVersion !== 1 || typeof value.databasePath !== 'string' ||
       typeof value.assetsDir !== 'string') {
@@ -56,7 +58,8 @@ function normalizeWriterInput(value, actionKey) {
       subjects.length < 1 || subjects.length > VCC_EXPORT_SUBJECTS_MAX_ARTIFACTS ||
       value.generations.length < 1 ||
       (actionKey === VCC_EXPORT_SINGLE_ACTION && value.generations.length !== 1) ||
-      (actionKey === VCC_EXPORT_SUBJECTS_ACTION && value.generations.length !== subjects.length)) {
+      (actionKey === VCC_EXPORT_SUBJECTS_ACTION && !allowShard &&
+        value.generations.length !== subjects.length)) {
     throw writerError('VCC_EXPORT_WRITER_INPUT_INVALID', 'writer subject/generation set 非法');
   }
   const keys = new Set();
@@ -71,7 +74,7 @@ function normalizeWriterInput(value, actionKey) {
     exactKeys(item, ['generationPath', 'outputArtifactKey', 'subjectIndex'], `generations[${index}]`);
     if (!Number.isSafeInteger(item.subjectIndex) || item.subjectIndex < 0 ||
         item.subjectIndex >= subjects.length ||
-        (actionKey === VCC_EXPORT_SUBJECTS_ACTION && item.subjectIndex !== index) ||
+        (actionKey === VCC_EXPORT_SUBJECTS_ACTION && !allowShard && item.subjectIndex !== index) ||
         typeof item.outputArtifactKey !== 'string' ||
         !/^output-[a-f0-9]{64}$/.test(item.outputArtifactKey) ||
         keys.has(item.outputArtifactKey) || typeof item.generationPath !== 'string' ||
@@ -82,6 +85,10 @@ function normalizeWriterInput(value, actionKey) {
     paths.add(item.generationPath);
     return Object.freeze({ ...item });
   });
+  const shard = allowShard ? normalizeVccExportShard(value.shard, generations) : null;
+  if (allowShard && actionKey !== VCC_EXPORT_SUBJECTS_ACTION) {
+    throw writerError('VCC_EXPORT_WRITER_INPUT_INVALID', 'export-single 不接受 shard input');
+  }
   return Object.freeze({
     contractVersion: 1,
     databasePath: value.databasePath,
@@ -90,7 +97,8 @@ function normalizeWriterInput(value, actionKey) {
     task: Object.freeze({ ...value.task }),
     actionKey,
     generations: Object.freeze(generations),
-    stagingIdentity
+    stagingIdentity,
+    shard
   });
 }
 
@@ -117,8 +125,13 @@ async function hashRegularFile(filePath) {
   return Object.freeze({ byteSize: Number(stat.size), sha256: hash.digest('hex') });
 }
 
-async function executeVccExportWriter(rawInput, signal, actionKey = VCC_EXPORT_SUBJECTS_ACTION) {
-  const input = normalizeWriterInput(rawInput, actionKey);
+async function executeVccExportWriter(
+  rawInput,
+  signal,
+  actionKey = VCC_EXPORT_SUBJECTS_ACTION,
+  options = {}
+) {
+  const input = normalizeWriterInput(rawInput, actionKey, options);
   const generationPaths = input.generations.map((item) => item.generationPath);
   const assertStaging = (stage, transientPaths = []) => assertTaskStagingIdentity({
     identity: input.stagingIdentity,
@@ -201,6 +214,7 @@ async function executeVccExportWriter(rawInput, signal, actionKey = VCC_EXPORT_S
       archiveStateDigest: input.authority.archiveStateDigest,
       authorityDigest: input.authority.authorityDigest,
       task: input.task,
+      ...(input.shard ? { shard: input.shard } : {}),
       artifacts: Object.freeze(artifacts),
       summary: Object.freeze({ subjectCount: artifacts.length, artifactCount: artifacts.length })
     });

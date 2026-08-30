@@ -676,10 +676,31 @@ async function runSingleCreationProbe({
   });
 }
 
-test('E12-A 两 action canonical policy byte-for-byte、production false 且 validator 隔离', () => {
+test('E12-A 两 action canonical policy + E12-C exact dual topology、production false 且 validator 隔离', () => {
   const fixture = require('../../../changes/background-execution-v3.2.x-contract-baseline/changes/background-execution/validation/fixtures/valid/policy-registry.v3.2.x.json').actions;
   assert.deepEqual(VCC_EXPORT_SINGLE_POLICY, fixture[VCC_EXPORT_SINGLE_ACTION]);
-  assert.deepEqual(VCC_EXPORT_SUBJECTS_POLICY, fixture[VCC_EXPORT_SUBJECTS_ACTION]);
+  const expectedSubjects = fixture[VCC_EXPORT_SUBJECTS_ACTION];
+  assert.deepEqual(VCC_EXPORT_SUBJECTS_POLICY, {
+    ...expectedSubjects,
+    resources: {
+      ...expectedSubjects.resources,
+      phase: {
+        cpuSlots: 0,
+        workerThreadSlots: 0,
+        utilityProcessSlots: 0,
+        ioHeavySlots: 0,
+        memoryBytes: 0
+      },
+      compound: {
+        ...expectedSubjects.resources.compound,
+        childrenMax: 2
+      }
+    },
+    workUnits: {
+      ...expectedSubjects.workUnits,
+      requestedMaxWorkers: 2
+    }
+  });
   assert.equal(isBackgroundExecutionProductionEnabled(VCC_EXPORT_SINGLE_ACTION), false);
   assert.equal(isBackgroundExecutionProductionEnabled(VCC_EXPORT_SUBJECTS_ACTION), false);
   assert.equal(validateVccExportSingleResult({}), false);

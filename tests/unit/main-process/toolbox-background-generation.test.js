@@ -265,12 +265,12 @@ test('E04-B runtime预算完整计入Scanner phase与一个Writer child，idle/s
       ioHeavySlots: 0, memoryBytes: 33554432
     },
     phase: {
-      cpuSlots: 1, workerThreadSlots: 1, utilityProcessSlots: 0,
-      ioHeavySlots: 1, memoryBytes: 268435456
+      cpuSlots: 0, workerThreadSlots: 0, utilityProcessSlots: 0,
+      ioHeavySlots: 0, memoryBytes: 0
     },
     compound: {
       topologyKey: 'topology.vcc-financial-op:export-subjects',
-      childrenMax: 4,
+      childrenMax: 2,
       childResource: {
         cpuSlots: 1, workerThreadSlots: 1, utilityProcessSlots: 0,
         ioHeavySlots: 1, memoryBytes: 268435456

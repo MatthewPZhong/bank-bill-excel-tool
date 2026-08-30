@@ -92,6 +92,9 @@ const {
   validateVccExportSingleResult,
   validateVccExportSubjectsResult
 } = require('../vcc-financial-op-output/policies');
+const {
+  createVccExportTopologyPlanner
+} = require('../vcc-financial-op-output/topology');
 
 const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   ...TOOLBOX_GENERATION_POLICIES,
@@ -174,7 +177,8 @@ function entryBindingForPolicy(policy, workerRoot, duplicateStartupGate) {
         'vcc-financial-op-output',
         'writer-worker-entry.js'
       ),
-      cancellationTerminalErrorCodes: Object.freeze(['VCC_EXPORT_CANCELLED'])
+      cancellationTerminalErrorCodes: Object.freeze(['VCC_EXPORT_CANCELLED']),
+      admittedTopologyWorkerData: true
     });
   }
   if (policy.actionKey === VCC_EXPORT_SINGLE_ACTION) {
@@ -289,6 +293,7 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
   });
   const preFundTopologyPlanner = createPreFundMptTopologyPlanner({ availableParallelism });
   const duplicateTopologyPlanner = createDuplicatePairedTopologyPlanner({ availableParallelism });
+  const vccExportTopologyPlanner = createVccExportTopologyPlanner();
   const topologyRegistry = createStaticRegistry(Object.fromEntries(
     BACKGROUND_EXECUTION_POLICIES
       .filter((policy) => policy.resources.compound)
@@ -297,7 +302,9 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
           ? preFundTopologyPlanner
           : (policy.actionKey === DUPLICATE_ACTIONS.IMPORT
               ? duplicateTopologyPlanner
-              : () => Object.freeze({ effectiveChildCount: 1 }))])
+              : (policy.actionKey === VCC_EXPORT_SUBJECTS_ACTION
+                  ? vccExportTopologyPlanner
+                  : () => Object.freeze({ effectiveChildCount: 1 })))])
   ));
   entryRegistry.freeze();
   validatorRegistry.freeze();
