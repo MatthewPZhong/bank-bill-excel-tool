@@ -436,6 +436,11 @@ function parseJsonFile(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
 }
 
+function isSupportedCurrentPackageVersion(value) {
+  const match = /^3\.2\.(\d+)$/.exec(String(value || ''));
+  return Boolean(match && Number(match[1]) >= 2);
+}
+
 function canonicalText(value) {
   return String(value).replace(/\r\n/g, '\n');
 }
@@ -710,7 +715,19 @@ function validateReleaseEvidence(snapshot, options = {}) {
   expectEqual('/dataMinimization', snapshot.dataMinimization, EXPECTED_DATA_MINIMIZATION);
 
   const packageJson = parseJsonFile(path.join(repositoryRoot, 'package.json'));
-  expectEqual('/authority/packageVersion', packageJson.version, '3.1.14');
+  const packageLock = parseJsonFile(path.join(repositoryRoot, 'package-lock.json'));
+  if (!isSupportedCurrentPackageVersion(packageJson.version)) {
+    add(
+      '/authority/packageVersion',
+      'current package version must be a stable v3.2.x closeout version at or after 3.2.2'
+    );
+  }
+  expectEqual('/authority/packageLockVersion', packageLock.version, packageJson.version);
+  expectEqual(
+    '/authority/packageLockRootVersion',
+    packageLock.packages && packageLock.packages[''] && packageLock.packages[''].version,
+    packageJson.version
+  );
 
   const anchorById = new Map();
   const baseOwnedActionScopeById = new Map();
@@ -1054,6 +1071,7 @@ module.exports = {
   expectedGates,
   expectedRuntimeOwnership,
   inspectGitBackedFile,
+  isSupportedCurrentPackageVersion,
   matchesReviewedCanonicalText,
   sha256File,
   validateReleaseEvidence

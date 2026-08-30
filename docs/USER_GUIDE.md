@@ -1,8 +1,10 @@
 # 清结算小助手使用手册
 
-版本：`v3.1.14`
+版本：`v3.2.3`
 
-> 版本说明：v3.1.14 已于 2026-08-21 完成正式技术发布并成为 latest stable Release。本版修复 VCC 财务 OP 大批量明细读取完成后的数据库收尾卡顿，并在读取结束后显示“正在校验并写入”。公开版本、下载资产和发布时间以 [GitHub Releases](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.1.14) 为准。Windows packaged VCC 交互、Windows 10/11 Setup/portable、SmartScreen、`v3.1.13 -> v3.1.14` 离线覆盖及 `production/latest` canary 仍为 `MANUAL / NOT RUN`；技术 Release 完成不表示这些人工项已验证或 PASS。
+> 版本说明：v3.2.3 当前是版本分支技术收口，尚未合并 `main`、创建 tag 或发布 production。网银账单 Statement 的导入、交互 continuation、current/all 生成与手工余额 seed，以及新开银行账户 NewAccount 的生成和另存为，已经具备资源治理、幂等 receipt 与崩溃恢复保护的后台执行 capability；effective production strategy 仍关闭，日常用户流程和 Excel 结果继续保持既有行为。
+
+> 使用提醒：本版不会自动解除 Recovery Hold，也不会在 unknown、partial 或 committed-result-lost 状态下自动重跑。Windows packaged/Setup/portable、真实 Statement/NewAccount 文件、金额/币种/余额和 Excel/WPS 展示仍需 release owner 与资金负责人人工复核；遇到恢复要求时应先核对持久 receipt、journal 与真实输出。
 
 ---
 
@@ -47,6 +49,8 @@
 > **v3.1.9 全局批次与存档中心正式发布**：实际处理、写入、导出和删除任务统一使用跨模块连续的 `YYYY-MM-DD-NNN` 批次号；失败和取消也保留号码，关联任务可跨重启查看。VCC财务OP校验和工具箱已真实接入存档，运行文件按年/月/日/批次目录展示，并支持存储位置迁移、修复、保留期清理和新的统计/列表/设置界面。VCC 大库信息改为后台读取，标准 v3.1.7 旧归档可以受控查看、导出和解归档；VCC 人民币代码统一为 CNY，异常明细/异常主体快照会被过滤而正常数据继续落库。v3.1.9 已于 2026-08-13 正式发布，仍待人工验证的环境与资金边界见 §1.11.9。
 
 > **v3.1.10 VCC 存储瘦身正式发布**：v3.1.10 已于 2026-08-17 正式发布。有效数据只保留计算、校验、幂等和最小血缘字段；原始输入由存档 artifact 保存，只有真正异常进入紧凑审计。数据管理改为六列【导出明细】，校验原表按当前有效行从已验证原件重建；历史血缘缺口可明确标记后部分导出，实体损坏则整次停止。【优化存储】通过维护模式 copy-on-write 重建数据库。三项发布门禁已明确确认 PASS，正式 tag、Release 与四项公开资产已完成回读。
+
+> **v3.2.3 Statement / NewAccount 后台执行基础**：Statement 大状态由长驻 Service 单一持有，大账号和手工余额 continuation 使用有界单次 token；current/all 生成只读 staging 并由唯一 Publisher 发布，manual balance seed 受 durable receipt/inspector/Recovery Hold 保护。NewAccount 生成使用 one-shot Worker，另存为在校验来源、目标和父目录 identity 后经 durable Publisher 提交。四金额模式、借贷方向、币种、余额、Workbook、日期、账户和命名不变，production enablement 仍关闭；Windows、真实文件与资金/恢复口径仍须人工复核。
 
 > **v3.1.14 VCC 财务 OP 大批量导入修复**：导入 VCC 充值清退、费用换汇、通道或移除归档 Pending 明细时，工作簿读取阶段继续显示“正在导入”；该类明细全部文件读取并校验完成后，状态框会切换为“正在校验并写入”，不再停留在最后一条读取行数。充值清退和 Pending 同批时会分别显示自己的阶段。点击取消后，状态框保持“正在取消导入并回滚本次未完成数据…”，不会被晚到进度覆盖。金额、币种、幂等、异常和最终结果口径均未改变。v3.1.14 已于 2026-08-21 通过 Windows Release workflow 完成正式技术发布，Setup、portable、blockmap 与 `latest.yml` 四项公开资产已独立回读；Windows packaged VCC、Windows 10/11 Setup/portable、SmartScreen、`v3.1.13 -> v3.1.14` 离线覆盖及 `production/latest` canary 仍为 `MANUAL / NOT RUN`，技术 Release 完成不是人工 PASS。
 

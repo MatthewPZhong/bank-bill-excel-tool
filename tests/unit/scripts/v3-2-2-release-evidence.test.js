@@ -14,6 +14,7 @@ const {
   EXACT_BASE,
   SNAPSHOT_PATH,
   inspectGitBackedFile,
+  isSupportedCurrentPackageVersion,
   matchesReviewedCanonicalText,
   sha256File,
   validateReleaseEvidence
@@ -192,6 +193,19 @@ test('历史base anchor从冻结reviewed blob取证，不被后续版本合法�
   assert.match(current, /startup在freeze前同时注册manual与duplicate恢复链/);
   const result = validateReleaseEvidence(snapshot);
   assert.equal(result.valid, true, JSON.stringify(result.errors));
+});
+
+test('历史snapshot保持3.1.14事实，当前authority只接受3.2.2及后续v3.2.x稳定版本', () => {
+  const snapshot = loadSnapshot();
+  assert.deepEqual(snapshot.packageVersion, { value: '3.1.14', bumped: false });
+  for (const version of ['3.2.2', '3.2.3', '3.2.4', '3.2.5', '3.2.99']) {
+    assert.equal(isSupportedCurrentPackageVersion(version), true, version);
+  }
+  for (const version of [
+    '3.1.14', '3.2.0', '3.2.1', '3.2.2-beta.1', '3.3.0', 'v3.2.2', '', null
+  ]) {
+    assert.equal(isSupportedCurrentPackageVersion(version), false, String(version));
+  }
 });
 
 test('validator CLI只读并输出有界machine-readable摘要', () => {

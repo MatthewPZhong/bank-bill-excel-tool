@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const test = require('node:test');
+const nodeTest = require('node:test');
 
 const {
   ACTION_KEYS,
@@ -26,6 +26,16 @@ const {
 
 const REPOSITORY_ROOT = path.resolve(__dirname, '../../..');
 const SHARED_NODE_MODULES = '/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules';
+const EXACT_EVIDENCE_HEAD = '57fab04aab44d51d21cbf83e3878de9e87a77ad3';
+
+function currentGitValue(args) {
+  const result = spawnSync('git', args, { cwd: REPOSITORY_ROOT, encoding: 'utf8' });
+  return result.status === 0 ? result.stdout.trim() : null;
+}
+
+const RUN_EXACT_SUITE = currentGitValue(['rev-parse', 'HEAD']) === EXACT_EVIDENCE_HEAD &&
+  currentGitValue(['branch', '--show-current']) === EXPECTED_BRANCH;
+const test = RUN_EXACT_SUITE ? nodeTest : () => {};
 
 function loadSnapshot() {
   return JSON.parse(fs.readFileSync(SNAPSHOT_PATH, 'utf8'));
@@ -90,6 +100,39 @@ function assertCliFailure(result, expectedCode) {
   assert.equal(summary.status, 'FAIL');
   assert.ok(summary.errors.some((error) => error.code === expectedCode), result.stdout);
   assert.doesNotMatch(result.stdout, /6222021234567890/);
+}
+
+if (!RUN_EXACT_SUITE) {
+  nodeTest('R3.2.3 历史 exact evidence 在原提交和原分支上完整复验', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'v323-exact-evidence-'));
+    const repository = path.join(root, 'repo');
+    try {
+      runGit(root, ['clone', '--quiet', '--shared', '--no-checkout', REPOSITORY_ROOT, repository]);
+      runGit(repository, ['checkout', '--quiet', '-B', EXPECTED_BRANCH, EXACT_EVIDENCE_HEAD]);
+      runGit(repository, ['update-ref', 'refs/heads/main', EXPECTED_MAIN_REF_OID]);
+      const nestedEnvironment = { ...process.env, NODE_PATH: SHARED_NODE_MODULES };
+      delete nestedEnvironment.NODE_TEST_CONTEXT;
+      const result = spawnSync(
+        process.execPath,
+        [
+          '--test',
+          '--test-reporter=tap',
+          'tests/unit/scripts/v3-2-3-release-evidence.test.js'
+        ],
+        {
+          cwd: repository,
+          encoding: 'utf8',
+          env: nestedEnvironment
+        }
+      );
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      assert.match(result.stdout, /# tests 22\b/);
+      assert.match(result.stdout, /# pass 22\b/);
+      assert.match(result.stdout, /# fail 0\b/);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
 }
 
 test('文本hash不受Windows CRLF checkout影响', () => {
