@@ -1,0 +1,132 @@
+{
+  "schemaVersion": 1,
+  "release": "3.2.4",
+  "authorityKind": "versioned-action-policy",
+  "actionKey": "vcc-financial-op:export-subjects",
+  "baseFixture": {
+    "source": "changes/background-execution-v3.2.x-contract-baseline/changes/background-execution/validation/fixtures/valid/policy-registry.v3.2.x.json",
+    "sha256": "8ab98e4b7a7b0c669892f069881c25eaaf1f8241b1e7d71e5b63eed8b2c38a22"
+  },
+  "frozenSpec": {
+    "source": "changes/background-execution-v3.2.x-contract-baseline/changes/3.2.4/spec.md",
+    "reviewedHead": "d5c6242d9e3a11591a998cf02fe11c27fb01d8d1",
+    "sha256": "dad81f149405281043306f7ce735f672fa20a167b4d8de751d5b254318fac2c7"
+  },
+  "policy": {
+    "actionKey": "vcc-financial-op:export-subjects",
+    "moduleId": "vcc-financial-op",
+    "description": "v3.2.x canonical policy fixture for vcc-financial-op:export-subjects",
+    "disposition": "managed",
+    "mode": "thread-pool",
+    "adapterKind": "native",
+    "adapterKey": null,
+    "entryKey": "executor.vcc-financial-op:export-subjects",
+    "lifetime": "job",
+    "context": {
+      "kind": "operation",
+      "validatorKey": "exact-5"
+    },
+    "resources": {
+      "profile": "resource.vcc-financial-op:export-subjects",
+      "base": {
+        "cpuSlots": 0,
+        "workerThreadSlots": 1,
+        "utilityProcessSlots": 0,
+        "ioHeavySlots": 0,
+        "memoryBytes": 33554432
+      },
+      "phase": {
+        "cpuSlots": 0,
+        "workerThreadSlots": 0,
+        "utilityProcessSlots": 0,
+        "ioHeavySlots": 0,
+        "memoryBytes": 0
+      },
+      "compound": {
+        "topologyKey": "topology.vcc-financial-op:export-subjects",
+        "childrenMax": 2,
+        "childResource": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 268435456
+        }
+      },
+      "lowMemoryBehavior": "downgrade-to-single",
+      "admissionPriority": "normal"
+    },
+    "cancellation": {
+      "capability": "shutdown-only",
+      "safePoints": [
+        "before-critical",
+        "between-units"
+      ],
+      "cooperativeTimeoutMs": 5000,
+      "terminateTimeoutMs": 5000,
+      "protectedResult": "protected/not-cancellable"
+    },
+    "failure": {
+      "unitBusinessError": "fail-job",
+      "unitTransportCrash": "fail-job",
+      "workerExit": "module-inspect",
+      "automaticRetry": false
+    },
+    "commit": {
+      "kind": "main-settlement",
+      "criticalIntent": false,
+      "receiptKind": "publisher-journal",
+      "inspectorKey": "inspector.vcc-financial-op:export-subjects",
+      "conflictScopeResolverKey": "scope.vcc-financial-op:export-subjects",
+      "settlementKey": "settlement.vcc-financial-op:export-subjects"
+    },
+    "result": {
+      "kind": "artifact-manifest",
+      "maxBytes": 8388608,
+      "maxErrorItems": 100,
+      "validatorKey": "result-validator.vcc-financial-op:export-subjects"
+    },
+    "artifacts": {
+      "kind": "all-or-none",
+      "filePlanRequired": true,
+      "technicalValidatorKey": "technical-validator.vcc-financial-op:export-subjects",
+      "businessValidatorKey": "business-validator.vcc-financial-op:export-subjects",
+      "publisherKey": "publisher.vcc-financial-op:export-subjects",
+      "maxArtifacts": 64
+    },
+    "service": null,
+    "metrics": {
+      "phases": [
+        "queue",
+        "execute",
+        "settle"
+      ],
+      "privacyProfile": "finance-safe-v1",
+      "progressRateLimitPerSecond": 10
+    },
+    "featureFlag": "feature.vcc-financial-op:export-subjects",
+    "legacyStrategyKey": "legacy.vcc-financial-op:export-subjects",
+    "blocker": null,
+    "production": {
+      "enabled": false,
+      "effectiveMode": "legacy",
+      "effectiveWorkerCount": 0,
+      "recoveryStatus": "probe",
+      "evidenceStatus": "baseline",
+      "downgradeReason": "production gate not yet passed",
+      "benchmarkEvidenceId": null
+    },
+    "workUnits": {
+      "kind": "subject",
+      "ordering": "unit-index-reducer",
+      "requestedMaxWorkers": 2,
+      "minUnitsPerWorker": 2,
+      "plannerKey": "planner.vcc-financial-op:export-subjects",
+      "reducerKey": "reducer.vcc-financial-op:export-subjects"
+    },
+    "protocolLimits": {
+      "commandMaxBytes": 262144,
+      "eventMaxBytes": 262144
+    }
+  }
+}
