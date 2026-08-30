@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const test = require('node:test');
+const nodeTest = require('node:test');
 
 const {
   ACTION_KEYS,
@@ -28,6 +28,16 @@ const {
 } = require('../../../scripts/validate-v3-2-4-release-evidence');
 
 const REPOSITORY_ROOT = path.resolve(__dirname, '../../..');
+const EXACT_EVIDENCE_HEAD = '5f9ee049fc4a4daf7089fa99d98b769b3d69540f';
+
+function currentGitValue(args) {
+  const result = spawnSync('git', args, { cwd: REPOSITORY_ROOT, encoding: 'utf8' });
+  return result.status === 0 ? result.stdout.trim() : null;
+}
+
+const RUN_EXACT_SUITE = currentGitValue(['rev-parse', 'HEAD']) === EXACT_EVIDENCE_HEAD &&
+  currentGitValue(['branch', '--show-current']) === EXPECTED_BRANCH;
+const test = RUN_EXACT_SUITE ? nodeTest : () => {};
 
 function loadSnapshot() {
   return JSON.parse(fs.readFileSync(SNAPSHOT_PATH, 'utf8'));
@@ -116,6 +126,50 @@ function assertCliFailure(result, expectedCode) {
     assert.match(error.path, /^\/[A-Za-z0-9/_-]{0,95}$/);
   }
   return summary;
+}
+
+if (!RUN_EXACT_SUITE) {
+  nodeTest('R3.2.4 历史 exact evidence 在原提交和 PR 分支上完整复验', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'v324-exact-evidence-'));
+    const repository = path.join(root, 'repo');
+    try {
+      runGit(root, ['clone', '--quiet', '--shared', '--no-checkout', REPOSITORY_ROOT, repository]);
+      runGit(repository, ['checkout', '--quiet', '-B', EXPECTED_BRANCH, EXACT_EVIDENCE_HEAD]);
+      runGit(repository, ['update-ref', 'refs/heads/main', EXPECTED_MAIN_REF_OID]);
+      // 历史 checkout 只包含 tracked tree；原 exact suite 的 nested candidate
+      // 会从该 checkout 的 root node_modules 读取安装依赖。只挂载依赖目录，
+      // relative source module 仍由每个候选自己的受审计 HEAD 解析。
+      fs.symlinkSync(
+        path.join(REPOSITORY_ROOT, 'node_modules'),
+        path.join(repository, 'node_modules'),
+        process.platform === 'win32' ? 'junction' : 'dir'
+      );
+      const nestedEnvironment = {
+        ...process.env,
+        NODE_PATH: path.join(REPOSITORY_ROOT, 'node_modules')
+      };
+      delete nestedEnvironment.NODE_TEST_CONTEXT;
+      const result = spawnSync(
+        process.execPath,
+        [
+          '--test',
+          '--test-reporter=tap',
+          'tests/unit/scripts/v3-2-4-release-evidence.test.js'
+        ],
+        {
+          cwd: repository,
+          encoding: 'utf8',
+          env: nestedEnvironment
+        }
+      );
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      assert.match(result.stdout, /# tests 62\b/);
+      assert.match(result.stdout, /# pass 62\b/);
+      assert.match(result.stdout, /# fail 0\b/);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
 }
 
 test('release evidence文本hash不受Windows CRLF checkout影响', () => {

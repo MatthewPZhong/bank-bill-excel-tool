@@ -1,10 +1,10 @@
 # 清结算小助手使用手册
 
-版本：`v3.2.3`
+版本：`v3.2.4`
 
-> 版本说明：v3.2.3 当前是版本分支技术收口，尚未合并 `main`、创建 tag 或发布 production。网银账单 Statement 的导入、交互 continuation、current/all 生成与手工余额 seed，以及新开银行账户 NewAccount 的生成和另存为，已经具备资源治理、幂等 receipt 与崩溃恢复保护的后台执行 capability；effective production strategy 仍关闭，日常用户流程和 Excel 结果继续保持既有行为。
+> 版本说明：v3.2.4 当前是版本分支技术收口，尚未合并 `main`、创建 tag 或发布 production。对账单修复 ReconFix 的普通/BOC 只读运行、JPM durable mutation 和多文件发布，以及 VCC 财务 OP 的单 Writer、主体查询下推和最多双 Writer 输出，已经具备资源治理、幂等 receipt、Inspector 与崩溃恢复保护的后台执行 capability；effective production strategy 仍关闭，日常用户流程和 Excel 结果继续保持既有行为。
 
-> 使用提醒：本版不会自动解除 Recovery Hold，也不会在 unknown、partial 或 committed-result-lost 状态下自动重跑。Windows packaged/Setup/portable、真实 Statement/NewAccount 文件、金额/币种/余额和 Excel/WPS 展示仍需 release owner 与资金负责人人工复核；遇到恢复要求时应先核对持久 receipt、journal 与真实输出。
+> 使用提醒：本版不会自动解除 Recovery Hold，也不会在 unknown、partial 或 committed-result-lost 状态下自动重跑。Windows packaged/Setup/portable、真实 JPM/VCC 文件、金额/币种/输出、Excel/WPS、进程终止和恢复处置仍需 release owner 与资金负责人人工复核；遇到恢复要求时应先核对持久 intent、receipt、journal、Hold 与真实输出。
 
 ---
 
@@ -49,6 +49,8 @@
 > **v3.1.9 全局批次与存档中心正式发布**：实际处理、写入、导出和删除任务统一使用跨模块连续的 `YYYY-MM-DD-NNN` 批次号；失败和取消也保留号码，关联任务可跨重启查看。VCC财务OP校验和工具箱已真实接入存档，运行文件按年/月/日/批次目录展示，并支持存储位置迁移、修复、保留期清理和新的统计/列表/设置界面。VCC 大库信息改为后台读取，标准 v3.1.7 旧归档可以受控查看、导出和解归档；VCC 人民币代码统一为 CNY，异常明细/异常主体快照会被过滤而正常数据继续落库。v3.1.9 已于 2026-08-13 正式发布，仍待人工验证的环境与资金边界见 §1.11.9。
 
 > **v3.1.10 VCC 存储瘦身正式发布**：v3.1.10 已于 2026-08-17 正式发布。有效数据只保留计算、校验、幂等和最小血缘字段；原始输入由存档 artifact 保存，只有真正异常进入紧凑审计。数据管理改为六列【导出明细】，校验原表按当前有效行从已验证原件重建；历史血缘缺口可明确标记后部分导出，实体损坏则整次停止。【优化存储】通过维护模式 copy-on-write 重建数据库。三项发布门禁已明确确认 PASS，正式 tag、Release 与四项公开资产已完成回读。
+
+> **v3.2.4 ReconFix / VCC Financial OP 后台执行基础**：对账单修复的导入状态和运行结果由长驻 Service 单一持有；普通/BOC 只读运行和 JPM 写回分别受 source/revision、Critical Intent、同事务 receipt、Inspector 与 Recovery Hold 保护，多份结果经 Main 深度回读后由唯一 Publisher 整批发布。VCC 财务 OP 单主体/全主体输出使用冻结 authority、主体查询下推和最多两个只读 Writer，所有 Writer 完成后仍只发布一次。金额、币种、方向、匹配、Workbook、样式和行序不变，production enablement 仍关闭；Windows、真实文件、Excel/WPS、RSS 及资金/恢复口径仍须人工复核。
 
 > **v3.2.3 Statement / NewAccount 后台执行基础**：Statement 大状态由长驻 Service 单一持有，大账号和手工余额 continuation 使用有界单次 token；current/all 生成只读 staging 并由唯一 Publisher 发布，manual balance seed 受 durable receipt/inspector/Recovery Hold 保护。NewAccount 生成使用 one-shot Worker，另存为在校验来源、目标和父目录 identity 后经 durable Publisher 提交。四金额模式、借贷方向、币种、余额、Workbook、日期、账户和命名不变，production enablement 仍关闭；Windows、真实文件与资金/恢复口径仍须人工复核。
 
