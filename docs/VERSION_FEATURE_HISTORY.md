@@ -9,6 +9,28 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## v3.2.0（2026-08-31，版本分支技术收口，未发布）
+
+v3.2.0 完成公共后台执行 Supervisor、协议/恢复控制底座与 VCC OP 多文件 parser pipeline；production enablement 保持关闭，既有金额、币种、月份、Workbook、事务、幂等和用户操作合同不变。
+
+### 新增
+
+- 固定入口白名单、冻结 context、单次 settle、取消/超时/退出竞态保护与有界 DTO 的公共后台执行 Supervisor。
+- grant/reservation、operation receipt、inspector、Recovery Hold、artifact authority 与策略快照等恢复和审计基础。
+- VCC OP 多文件 parser pipeline，只并行独立文件读取并准备 spool。
+
+### 变更
+
+- 主进程继续作为 IPC、TaskLifecycle、业务锁和正式文件发布的唯一控制面，不再要求长任务在事件循环中完成全部 CPU/读取工作。
+- VCC OP 的完成顺序不参与业务顺序；月份归约、金额/币种处理、缓存切换、单一 writer、事务和 Publisher 仍串行收口。
+- package 元数据更新为 `3.2.0`，顶层 Spec/TechDoc 同步自冻结基线。
+
+### 兼容与人工边界
+
+- capability 与 effective production strategy 分离，legacy seam 保留，生产仍关闭；本版不新增用户开关。
+- Windows packaged/退出/fsync、VCC OP 真实样本与资金/恢复人工复核仍未由自动测试代偿；本节点未合并 `main`、未创建 tag、未发布 production。
+- `release-check`、`check-vars`、`scan:vars` 按用户要求跳过，不能声明为 PASS。
+
 ## v3.1.14（2026-08-21）
 
 v3.1.14 修复 VCC 财务 OP 大批量明细在工作簿读取完成后的数据库收尾退化，并增加真实阶段反馈。本版已于 2026-08-21 通过受控 Windows Release workflow 正式发布为 latest stable Release。
