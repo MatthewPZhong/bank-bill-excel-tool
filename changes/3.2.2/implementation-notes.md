@@ -18,6 +18,7 @@
 - 功能 PR 合并时未同步 package 元数据与三份发布文档，因此增加独立 metadata closeout 节点。
 - 审计进一步发现 v3.2.0/v3.2.1 同样保留 `3.1.14`；原独立 v3.2.2 收口提交 `399c92aaac05bc8f105b9458ae5e3c4f7251d8af` 因缺少前两版最终收口祖先而不能直接作为最终节点。本分支先合入 v3.2.1 最终收口，再合入该 v3.2.2 收口内容并重新验证。
 - #210 原计划仅做 metadata/docs 收口；精确 Windows CI 暴露专用真实进程探针在约一小时 release checks 后有一次 CIM snapshot 达到 15 秒硬上限。旧日志没有标注具体 snapshot 阶段，因此不把“首次调用”当作已证实事实。为避免重跑代偿或放宽生产安全上限，本节点追加测试夹具级有界预热、阶段证据和合同断言，不修改产品 adapter、业务代码或资金/恢复合同。
+- 合并后盲区复核发现真实 Windows 用例把 `adapter` 声明在 `try` 的块作用域内，却在失败清理的 `finally` 中引用；成功路径不受影响，但中途失败会以 `ReferenceError` 覆盖原始阶段错误并可能漏清理子进程。follow-up 将 adapter 生命周期提升到整个用例作用域，并在清理前显式验证实例存在，不改变任何生产逻辑。
 
 ## Evidence
 
@@ -31,6 +32,7 @@
 - 干净合并提交上的 `npm run check:packaged-inputs`：PASS；`build.files` 9 条覆盖范围与 HEAD 一致。后续只追加本证据说明，不改 package、业务代码或打包输入。
 - #210 run `33368091206` / job `99412884782`：完整 `release-check` SUCCESS；专用 `WINDOWS_STARTUP_PROCESS_ADAPTER_REAL_TEST=1` 步骤中前 14 个 adapter 用例 PASS，唯一真实 PowerShell 用例在 `15008ms` 以 `PROCESS_SNAPSHOT_TIMEOUT` 失败，build 按门禁 SKIPPED。既有 v3.1.12/v3.1.13 证据证明该 hosted-runner CIM 冷启动抖动曾发生，且继续放宽生产 15 秒上限不是允许的修复。
 - 测试夹具修复后，本地 `node --test tests/unit/scripts/startup-process-adapter.test.js tests/unit/windows-build-contract.test.js` 为 `19 PASS / 0 FAIL / 3 Windows-only SKIP`；`node --check tests/unit/scripts/startup-process-adapter.test.js` 与 `git diff --check` 均通过。真实 PowerShell 分支仍必须由 #210 精确新 head 的 Windows CI 闭合，不能用本机 skip 或旧 run 代偿。
+- follow-up 作用域修复后，专用 adapter/Windows 合同测试为 `19 PASS / 0 FAIL / 3 Windows-only SKIP`，完整 unit 为 `6337/6340 PASS / 0 FAIL / 3 SKIP`（日志 `logs/unit-tests/unit-20260831-190906.log`）；单文件 ESLint、Node 语法、packaged-inputs 和 `git diff --check` 均通过。精确新 head 的 Windows CI 仍是失败清理链和真实 PowerShell 语义的最终机器证据。
 
 ## Remaining Unknowns
 
