@@ -4,12 +4,14 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const test = require('node:test');
 const {
+  DEFAULT_EXTERNAL_TIMEOUT_MS,
   createProcessAdapter,
   windowsProcessSnapshot
 } = require('../../../scripts/startup-process-adapter');
 
 const TEST_NONCE = 'test-nonce-123456';
 const TEST_NONCE_ARG = `--startup-measure-nonce=${TEST_NONCE}`;
+const WINDOWS_REAL_PROBE_WARMUP_TIMEOUT_MS = 30000;
 function createWindowsAdapter(options) {
   const originalSnapshot = options.windowsProcessSnapshot;
   return createProcessAdapter({
@@ -472,6 +474,7 @@ test('graceful wait 对 root 退出后 late suspicious child fail closed，不�
 });
 
 test('PowerShell CreationDate 使用显式 invariant ticks，action 持有 Handle 并二次 exact CIM', () => {
+  assert.equal(DEFAULT_EXTERNAL_TIMEOUT_MS, 15000, '生产 adapter 必须保留 15 秒 fail-closed 上限');
   const source = require('node:fs').readFileSync(
     require('node:path').join(__dirname, '../../../scripts/startup-process-adapter.js'), 'utf8'
   );
@@ -488,10 +491,15 @@ test('Windows CI 真实 PowerShell snapshot→token cleanup 语义', {
     || process.env.WINDOWS_STARTUP_PROCESS_ADAPTER_REAL_TEST !== '1',
   timeout: 120000
 }, async () => {
-  const adapter = createProcessAdapter({ platform: 'win32' });
+  // GitHub hosted Windows 在长时间 release-check 后偶发唤醒 CIM 超过生产 15 秒上限。
+  // 预热只作用于专用 CI probe；随后 adapter 仍使用生产默认 15 秒完成整条语义验证。
+  let phase = 'bounded CIM warmup';
   let handle = null;
   let cleanupVerified = false;
   try {
+    await windowsProcessSnapshot({ timeoutMs: WINDOWS_REAL_PROBE_WARMUP_TIMEOUT_MS });
+    const adapter = createProcessAdapter({ platform: 'win32' });
+    phase = 'adapter launch baseline snapshot';
     handle = await adapter.launch({
       executable: process.execPath,
       cwd: '.',
@@ -500,20 +508,27 @@ test('Windows CI 真实 PowerShell snapshot→token cleanup 语义', {
     });
     assert.equal(handle.child.exitCode, null, 'nonce 必须位于 -- 后，不能作为 unknown Node runtime option 令 child exit 9');
     assert.equal(handle.child.signalCode, null);
+    phase = 'independent live-root snapshot';
     const rows = await windowsProcessSnapshot();
     const root = rows.find((item) => item.pid === handle.rootPid);
     assert.ok(root, '仍存活的 Node child 必须出现在真实 snapshot');
     assert.match(root.creationDate, /^\d+$/);
     assert.match(root.commandLine, new RegExp(handle.nonce));
+    phase = 'graceful-close receipt';
     await assert.rejects(adapter.gracefulClose(handle),
       (error) => error.code === 'PROCESS_TREE_CLOSE_NOT_ACCEPTED',
       'console Node 没有主窗口，但 held-handle graceful action 必须安全返回无 receipt');
     assert.equal(handle.child.exitCode, null, '无主窗 graceful action 不得误杀 child');
+    phase = 'force-cleanup receipt';
     const cleanup = await adapter.forceCleanup(handle);
     assert.equal(cleanup.verifiedEmpty, true);
     assert.ok(cleanup.attemptedPids.includes(handle.rootPid));
     assert.ok(cleanup.stoppedPids.includes(handle.rootPid), 'held-handle force action 必须形成 root receipt');
     cleanupVerified = true;
+  } catch (error) {
+    error.message = `[${phase}] ${error.message}`;
+    error.evidence = { ...(error.evidence || {}), testPhase: phase };
+    throw error;
   } finally {
     if (handle && !cleanupVerified
         && handle.child.exitCode === null && handle.child.signalCode === null) {
