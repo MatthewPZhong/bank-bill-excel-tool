@@ -3,6 +3,7 @@
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const test = require('node:test');
+const { Worker } = require('node:worker_threads');
 
 const {
   createExistingDispatchAdapter,
@@ -389,16 +390,18 @@ test('worker-thread adapter 使用 packaged entry path 并原样传 canonical en
       this.options = options;
       this.sent = [];
       this.unrefCalls = 0;
+      this.terminateCalls = 0;
       queueMicrotask(() => this.emit('online'));
     }
     postMessage(message) { this.sent.push(message); }
     unref() { this.unrefCalls += 1; }
     terminate() {
+      this.terminateCalls += 1;
       this.emit('error', new Error('ignored teardown error'));
       return Promise.resolve(0);
     }
   }
-  const adapter = createWorkerThreadAdapter({ WorkerClass: FakeWorker });
+  const adapter = createWorkerThreadAdapter({ WorkerClass: FakeWorker, naturalExitGraceMs: 5000 });
   const handle = adapter.start({
     entry: { path: '/packaged/src/canary-worker.js', workerData: { probe: true } },
     onMessage() {}
@@ -415,14 +418,29 @@ test('worker-thread adapter 使用 packaged entry path 并原样传 canonical en
     'detach 必须幂等释放 event-loop 引用，避免 terminate timeout 后残留 Worker 钉住进程');
   assert.equal(handle.worker.listenerCount('messageerror'), 0);
   assert.equal(handle.worker.listenerCount('error'), 1);
-  await handle.terminate();
-  assert.equal(handle.worker.unrefCalls, 2,
-    'terminate 内部重新 ref 后必须再次 unref，保持 close 已声明的 liveness 释放');
+  const termination = handle.terminate();
+  assert.equal(handle.worker.terminateCalls, 1,
+    '未观测到close-ack的普通Worker不得进入service自然退出等待');
+  await termination;
+  assert.equal(handle.worker.unrefCalls, 1,
+    '强制terminate必须保持其内部引用直到真实settle，不能让清理Promise悬空');
   assert.equal(handle.worker.listenerCount('error'), 0);
   assert.equal(handle.worker.listenerCount('messageerror'), 0);
 });
 
-test('worker-thread close 后 terminate 重新ref时会再次解除event-loop引用', async () => {
+test('worker-thread naturalExitGraceMs只接受0..5000整数', () => {
+  class FakeWorker extends EventEmitter {}
+  for (const value of [-1, 0.5, 5001, Number.NaN, '250']) {
+    assert.throws(
+      () => createWorkerThreadAdapter({ WorkerClass: FakeWorker, naturalExitGraceMs: value }),
+      /naturalExitGraceMs must be an integer between 0 and 5000/
+    );
+  }
+  assert.doesNotThrow(() => createWorkerThreadAdapter({ WorkerClass: FakeWorker, naturalExitGraceMs: 0 }));
+  assert.doesNotThrow(() => createWorkerThreadAdapter({ WorkerClass: FakeWorker, naturalExitGraceMs: 5000 }));
+});
+
+test('worker-thread 强制terminate重新ref后保持引用直到真实settle', async () => {
   let resolveTermination;
   class RefOnTerminateWorker extends EventEmitter {
     constructor() {
@@ -442,7 +460,10 @@ test('worker-thread close 后 terminate 重新ref时会再次解除event-loop引
       return new Promise((resolve) => { resolveTermination = resolve; });
     }
   }
-  const handle = createWorkerThreadAdapter({ WorkerClass: RefOnTerminateWorker }).start({
+  const handle = createWorkerThreadAdapter({
+    WorkerClass: RefOnTerminateWorker,
+    naturalExitGraceMs: 0
+  }).start({
     entry: '/packaged/src/canary-worker.js',
     onMessage() {}
   });
@@ -452,12 +473,116 @@ test('worker-thread close 后 terminate 重新ref时会再次解除event-loop引
   assert.equal(handle.worker.unrefCalls, 1);
 
   const termination = handle.terminate();
-  assert.equal(handle.worker.referenced, false,
-    'terminate 的内部 ref 不能撤销已经 close 的进程 liveness 释放');
-  assert.equal(handle.worker.unrefCalls, 2);
+  assert.equal(handle.worker.referenced, true,
+    '强制terminate必须保持event-loop引用，直到真实exit完成清理Promise');
+  assert.equal(handle.worker.unrefCalls, 1);
 
   resolveTermination(0);
   await termination;
+});
+
+test('worker-thread graceful close优先等待自然exit而不进入强制terminate', async () => {
+  class GracefulExitWorker extends EventEmitter {
+    constructor() {
+      super();
+      this.terminateCalls = 0;
+      this.unrefCalls = 0;
+      queueMicrotask(() => this.emit('online'));
+    }
+    postMessage() {}
+    unref() { this.unrefCalls += 1; }
+    terminate() {
+      this.terminateCalls += 1;
+      return Promise.resolve(99);
+    }
+  }
+  const handle = createWorkerThreadAdapter({
+    WorkerClass: GracefulExitWorker,
+    naturalExitGraceMs: 100
+  }).start({
+    entry: '/packaged/src/canary-worker.js',
+    onMessage() {}
+  });
+  await handle.ready;
+  handle.worker.emit('message', { operation: 'executor:close-ack' });
+  handle.close();
+  const termination = handle.terminate();
+  setTimeout(() => handle.worker.emit('exit', 0), 10);
+
+  assert.equal(await termination, 0);
+  assert.equal(handle.worker.terminateCalls, 0,
+    'close-ack后的自然退出不得再次进入可能同步阻塞的Worker.terminate');
+  assert.equal(handle.worker.unrefCalls, 1);
+  assert.equal(handle.worker.listenerCount('exit'), 0);
+  assert.equal(handle.worker.listenerCount('error'), 0);
+});
+
+test('真实Worker关闭parentPort后在grace窗口内自然exit且不调用强制terminate', async () => {
+  let terminateCalls = 0;
+  class CountingWorker extends Worker {
+    terminate() {
+      terminateCalls += 1;
+      return super.terminate();
+    }
+  }
+  let resolveClosing;
+  const closing = new Promise((resolve) => { resolveClosing = resolve; });
+  const handle = createWorkerThreadAdapter({
+    WorkerClass: CountingWorker,
+    naturalExitGraceMs: 1000
+  }).start({
+    entry: {
+      path: `
+        const { parentPort } = require('node:worker_threads');
+        parentPort.once('message', () => {
+          parentPort.postMessage({ operation: 'executor:close-ack' });
+          queueMicrotask(() => parentPort.close());
+        });
+      `,
+      eval: true
+    },
+    onMessage(message) {
+      if (message && message.operation === 'executor:close-ack') resolveClosing();
+    }
+  });
+  await handle.ready;
+  handle.send('close');
+  await closing;
+  handle.close();
+
+  assert.equal(await handle.terminate(), 0);
+  assert.equal(terminateCalls, 0,
+    '已按协议关闭parentPort的真实Worker不得再次进入强制terminate');
+});
+
+test('worker-thread close-ack后未自然exit仍在grace耗尽后强制terminate', async () => {
+  class AckWithoutExitWorker extends EventEmitter {
+    constructor() {
+      super();
+      this.terminateCalls = 0;
+      queueMicrotask(() => this.emit('online'));
+    }
+    postMessage() {}
+    unref() {}
+    terminate() {
+      this.terminateCalls += 1;
+      return Promise.resolve(0);
+    }
+  }
+  const handle = createWorkerThreadAdapter({
+    WorkerClass: AckWithoutExitWorker,
+    naturalExitGraceMs: 5
+  }).start({
+    entry: '/packaged/src/service-worker.js',
+    onMessage() {}
+  });
+  await handle.ready;
+  handle.worker.emit('message', { operation: 'executor:close-ack' });
+  handle.close();
+
+  assert.equal(await handle.terminate(), 0);
+  assert.equal(handle.worker.terminateCalls, 1,
+    'close-ack不能把未退出Worker误报为已清理');
 });
 
 test('worker-thread terminate 未settle时后续 close仍释放event-loop引用', async () => {
