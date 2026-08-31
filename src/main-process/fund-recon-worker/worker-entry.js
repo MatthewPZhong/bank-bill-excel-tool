@@ -6,4 +6,8 @@ const { startFundReconWorker } = require('./worker-host');
 
 if (!parentPort) throw new Error('FundRecon Worker需要worker_threads parentPort');
 
-startFundReconWorker(parentPort);
+startFundReconWorker(parentPort, {
+  close() {
+    parentPort.close();
+  }
+});

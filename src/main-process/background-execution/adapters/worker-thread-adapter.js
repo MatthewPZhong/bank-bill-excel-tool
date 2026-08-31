@@ -56,6 +56,12 @@ function normalizeWorkerEntry(entry) {
 
 function createWorkerThreadAdapter(options = {}) {
   const WorkerClass = options.WorkerClass || Worker;
+  const naturalExitGraceMs = options.naturalExitGraceMs === undefined
+    ? 250
+    : options.naturalExitGraceMs;
+  if (!Number.isInteger(naturalExitGraceMs) || naturalExitGraceMs < 0 || naturalExitGraceMs > 5000) {
+    throw new TypeError('worker-thread naturalExitGraceMs must be an integer between 0 and 5000');
+  }
   return Object.freeze({
     kind: 'worker-thread',
     start(startOptions) {
@@ -95,12 +101,17 @@ function createWorkerThreadAdapter(options = {}) {
       let readySettled = false;
       let failureReported = false;
       let cancelDispatched = false;
+      let closeAckObserved = false;
+      let exitSettled = false;
+      let exitCode = null;
       let resolveReady;
       let rejectReady;
+      let resolveExit;
       const ready = new Promise((resolve, reject) => {
         resolveReady = resolve;
         rejectReady = reject;
       });
+      const exited = new Promise((resolve) => { resolveExit = resolve; });
 
       function onOnline() {
         readySettled = true;
@@ -108,6 +119,9 @@ function createWorkerThreadAdapter(options = {}) {
       }
       function onMessage(message) {
         if (closed) return;
+        if (ownDataValue(message, 'operation') === 'executor:close-ack') {
+          closeAckObserved = true;
+        }
         if (cancelDispatched && normalized.cancellationTerminalErrorCodes.includes(cancellationErrorCode(message)) &&
             typeof startOptions.onCancellationTerminal === 'function') {
           startOptions.onCancellationTerminal();
@@ -133,6 +147,11 @@ function createWorkerThreadAdapter(options = {}) {
         reportTransportError(normalized);
       }
       function onExit(code) {
+        if (!exitSettled) {
+          exitSettled = true;
+          exitCode = code;
+          resolveExit(code);
+        }
         if (!readySettled) {
           readySettled = true;
           failureReported = true;
@@ -150,13 +169,29 @@ function createWorkerThreadAdapter(options = {}) {
       worker.on('error', onError);
       worker.on('exit', onExit);
 
-      function detach({ keepError = false } = {}) {
+      function detach({ keepError = false, keepExit = false } = {}) {
         if (typeof worker.off !== 'function') return;
         worker.off('online', onOnline);
         worker.off('message', onMessage);
         worker.off('messageerror', onMessageError);
         if (!keepError) worker.off('error', onError);
-        worker.off('exit', onExit);
+        if (!keepExit) worker.off('exit', onExit);
+      }
+
+      async function waitForNaturalExit() {
+        if (exitSettled) return true;
+        if (naturalExitGraceMs === 0) return false;
+        let timer = null;
+        try {
+          return await Promise.race([
+            exited.then(() => true),
+            new Promise((resolve) => {
+              timer = setTimeout(() => resolve(false), naturalExitGraceMs);
+            })
+          ]);
+        } finally {
+          if (timer !== null) clearTimeout(timer);
+        }
       }
 
       return Object.freeze({
@@ -177,7 +212,7 @@ function createWorkerThreadAdapter(options = {}) {
           closeCalled = true;
           // terminate 完成前保留静默 error listener；EventEmitter 的无人监听 error
           // 会升级为未捕获异常，导致清理路径反而冲垮主进程。
-          detach({ keepError: true });
+          detach({ keepError: true, keepExit: true });
           // ServiceHost 会在 shutdown 时先 detach、再等待 terminate。Windows 上若
           // terminate 因 native 同步调用迟迟不 settle，Host 仍会保留 timeout/leak
           // 诊断，但这个 Worker 引用不能继续把整个进程钉死到 CI 的 6 小时上限。
@@ -187,17 +222,20 @@ function createWorkerThreadAdapter(options = {}) {
         async terminate() {
           closed = true;
           try {
-            let termination;
-            try {
-              termination = worker.terminate();
-            } finally {
-              // Node 的 Worker.terminate() 会在等待 exit 前重新 ref()。若 Host
-              // 已先 close/unref，这个 ref 会抵消 close 的 liveness 释放，并在
-              // native terminate 不 settle 时继续钉住进程。因此必须在 terminate
-              // 调用之后再重复 unref；仍 await 原 termination，不伪造 cleanup 成功。
-              if (closeCalled && typeof worker.unref === 'function') worker.unref();
-            }
-            return await termination;
+            // service worker 已回 executor:close-ack 后会在 Worker 内 queueMicrotask
+            // 关闭 parentPort。先给该已验证的 graceful path 一个短而有界的自然退出
+            // 窗口，可避免 Windows 在 Worker.terminate() 内部 ref()+stopThread()
+            // 同步停顿时把测试/应用线程钉死。未自然退出仍走原强制 terminate，
+            // 所以异常 worker 的 timeout/leak 诊断不会被改写为成功。
+            if (closeCalled && closeAckObserved && naturalExitGraceMs > 0 &&
+                await waitForNaturalExit()) return exitCode;
+            if (exitSettled) return exitCode;
+            // 强制终止路径必须保持 Worker 引用直到真实 exit/termination settle。
+            // 若在 Worker.terminate() 重新 ref 后立即 unref，Node 22 会在清理
+            // Promise 仍 pending 时提前耗尽 event loop，node:test 将其判为 cancelled；
+            // 应用侧也会失去“资源确已回收”的可审计完成点。正常 Service 已通过
+            // close-ack + parentPort.close() 走上面的有界自然退出路径，不会进入这里。
+            return await worker.terminate();
           } finally {
             detach();
           }
