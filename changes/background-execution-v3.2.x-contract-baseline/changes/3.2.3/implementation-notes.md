@@ -213,6 +213,25 @@ release 流程或改变 Supervisor 的 timeout、取消及资金输出语义。�
 该候选当前只保存在隔离 worktree，未推送。必须等待当前 exact Windows run 终态与日志；
 只有日志继续证明 Worker 关闭活性卡滞时才能取代远端快照，不用本地推断代偿 Windows CI。
 
+### Node 22 cleanup truth follow-up（2026-08-31）
+
+扩大到官方 Node 22.18 的 ServiceHost/Worker 矩阵后，首版候选暴露两个此前 161 项聚焦集未覆盖的
+生命周期盲区。其一，FundRecon、Duplicate 等既有 service worker 会回 `executor:close-ack`，但不关闭
+自己的 `parentPort`；Adapter 因而在 250 ms 后仍进入强制 terminate。其二，旧的 post-terminate
+`unref()` 会撤销 Node `Worker.terminate()` 为等待真实 exit 建立的引用，使 Node 22 在 cleanup Promise
+仍 pending 时耗尽 event loop，`node:test` 以 cancelled 收口；这不是可审计的 cleanup success。
+
+候选现统一 close-ack 的传输语义：Statement、FundRecon、Duplicate 都先同步投递 ack，再在
+`queueMicrotask` 关闭各自 `parentPort`；正常 Service 因此在有界 grace 内以真实 exit 完成，不调用
+强制 terminate。没有 ack、ack 后未退出或 forced/crash 路径仍调用原 `Worker.terminate()`，但不再在
+termination Promise settle 前重复 `unref()`；只有真实 exit 才能完成 cleanup。Supervisor 的 timeout、
+leak/error 诊断和资源 revoke/release 次序未放宽，production/资金输出/恢复合同均未改变。
+
+该扩面仍是首版候选的 shutdown-liveness 收口，不改变 E09-C Spec 的业务输入、输出、token、Workbook、
+Publisher 或状态机合同；无需反向修改冻结 Spec/TechDoc。v3.2.4 后续新增的 ReconFix Service 也必须在
+其 own tranche 采用相同 ack-then-close 语义，并以 Node 22 真实 ServiceHost 测试证明，不能仅靠传播
+通用 Adapter 后复用本轮结果。
+
 ## Evidence
 
 | 证据 | 结果 | 覆盖的行为/风险 |
@@ -228,7 +247,7 @@ release 流程或改变 Supervisor 的 timeout、取消及资金输出语义。�
 | final predecessor propagation 聚焦复验 | 默认并发五文件矩阵 79/79 PASS；background-execution + Statement 全链单并发 452/452 PASS；`statement-generation-pipeline.js` 45/45 PASS；`npm run smoke` PASS | 最终 v3.2.2/3.2.3 基座传播后的 Governor/ServiceHost/Supervisor/recovery、candidate-first、current/all、Workbook、金额/币种/余额、Publisher 与 legacy smoke |
 | #199 Windows shutdown liveness remediation | automatic run `33299808535`：lint/smoke 完成，Windows 单测输出停在 E09-C 文件前并于 6h 被取消；Node 内置实现证明 `Worker.terminate()` 会先 `ref()`；adapter 回归覆盖 close-before-terminate 与 terminate-before-close 两种时序；修复后完整矩阵见本节后续 evidence | close 已发生时 terminate 内部 ref 会被随后 unref 中和；shutdown timeout/leak 仍为失败证据，不用旧 run 代偿新 head CI |
 | #199 post-terminate unref local validation | adapter + ServiceHost + E09-C 93/93 PASS；完整 background-execution + E09-B/C 单并发矩阵 403/403 PASS；`npm run smoke` PASS；变更 JS ESLint、`node --check`、`git diff --check` PASS | 两种 close/terminate 时序、资源 grant/adopt/revoke/release、token replacement、取消、恢复、Workbook 与 legacy smoke 无回归；`check-vars`、`scan:vars`、`release-check` 按用户要求跳过，不声称 PASS |
-| #199 protocol-ack natural-exit local candidate | system Node 与 Electron 36/Node 22.19 聚焦矩阵均 161/161 PASS；完整单测 6434/6437 PASS、0 fail、3 expected skip；`npm run smoke` PASS；变更 JS ESLint、`node --check`、`git diff --check` PASS | 真实 Worker `parentPort.close()` 自然 exit 不调用强制 terminate；无 close-ack 立即强制 terminate；ack 后不 exit 有界 fallback；真实 Windows 证据仍待 exact run 终态/日志，候选未推送 |
+| #199 protocol-ack natural-exit local candidate | 首版 system Node 与 Electron 36/Node 22.19 聚焦矩阵 161/161 PASS；Node 22 扩面 probe 捕获 pending-cleanup 盲区后，官方 Node 22.18 完整单测 6435/6438 PASS、0 fail、3 expected skip；双 Node 适配器/ServiceHost/Supervisor/FundRecon/Duplicate/E09-C 矩阵均 PASS；Node 22 `npm run smoke` PASS；变更 JS ESLint、`node --check`、`git diff --check` PASS | 正常 Service 先 close-ack 再关闭 `parentPort`，真实自然 exit 不调用强制 terminate；无 ack/未退出仍强制 terminate且保持引用直至真实 settle；不以 event-loop 提前退出伪造 cleanup；真实 Windows 证据仍待 exact run 终态/日志，候选未推送 |
 | Round 2/3 自洽 workbook mutations | formula、type/format、font 及其四个扩展布尔、single-quote style、comment spoof、relationship decoy、duplicate coordinate、非法显式 style 全部 Publisher=0 | 实际 worksheet relationship/结构化 cell style、全 grid t/z 与 writer-owned font 摘要 readback；manifest size/hash/rowCounts 均按篡改后文件重算 |
 | Reviewer 后 `node scripts/integration/statement-generation-pipeline.js` | 45/45 PASS | legacy generation pipeline、detail/balance/current/all 业务等价 |
 | `npm run test:integration` | 51/51 scripts、2455/2455 PASS | 全仓集成、Publisher/cleanup 与资金相关输出回归；runner 自动清单的本地耗时刷新已回退，不纳入 change |
@@ -244,4 +263,4 @@ release 流程或改变 Supervisor 的 timeout、取消及资金输出语义。�
 | 真实脱敏资金样本的逐行金额方向、币种、余额与 Excel/WPS 展示 | BLOCK production/release gate | 资金负责人按 current/all、四金额、混合币种、0 输出和余额提示逐项人工复核 | 自动化业务等价不替代人工资损验收；不阻塞 dormant E09-C，阻止 production 启用 |
 | Windows packaged durable publication | BLOCK release gate | R3.2.3 人工/packaged 门禁 | 不阻塞 dormant E09-C 合并，production 必须保持 false |
 | balance seed durable settlement（含自动派生 seed 的最终 owner） | BLOCK production gate | E09-D/后续合同按 Main-owned settlement 闭环 | E09-C 不允许 Worker 修改共享 seed；不阻塞 dormant 合并，阻止 production 启用 |
-| #199 exact Windows natural-exit 证据 | PROBE | 等待 run `33335790483` 终态；若失败/取消，下一独立查询轮下载 exact job log 定位最后输出，再裁决是否推送候选 | 当前远端 check pending，不合并、不推送候选；不用旧 head 或本地结果代偿 |
+| #199 exact Windows natural-exit 证据 | PROBE | 2026-08-31 10:51:56 +08:00 查询仍为 exact head `7a16a9dd5cce388747fb5706d65ab8cd032f0fc5`、run `33335790483` `IN_PROGRESS`；等待终态，若失败/取消则下一独立查询轮下载 exact job log定位最后输出，再裁决是否推送候选 | 当前远端 check pending，不合并、不推送候选；不用旧 head 或本地结果代偿 |

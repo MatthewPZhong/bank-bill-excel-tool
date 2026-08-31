@@ -422,8 +422,8 @@ test('worker-thread adapter 使用 packaged entry path 并原样传 canonical en
   assert.equal(handle.worker.terminateCalls, 1,
     '未观测到close-ack的普通Worker不得进入service自然退出等待');
   await termination;
-  assert.equal(handle.worker.unrefCalls, 2,
-    'terminate 内部重新 ref 后必须再次 unref，保持 close 已声明的 liveness 释放');
+  assert.equal(handle.worker.unrefCalls, 1,
+    '强制terminate必须保持其内部引用直到真实settle，不能让清理Promise悬空');
   assert.equal(handle.worker.listenerCount('error'), 0);
   assert.equal(handle.worker.listenerCount('messageerror'), 0);
 });
@@ -440,7 +440,7 @@ test('worker-thread naturalExitGraceMs只接受0..5000整数', () => {
   assert.doesNotThrow(() => createWorkerThreadAdapter({ WorkerClass: FakeWorker, naturalExitGraceMs: 5000 }));
 });
 
-test('worker-thread close 后 terminate 重新ref时会再次解除event-loop引用', async () => {
+test('worker-thread 强制terminate重新ref后保持引用直到真实settle', async () => {
   let resolveTermination;
   class RefOnTerminateWorker extends EventEmitter {
     constructor() {
@@ -473,9 +473,9 @@ test('worker-thread close 后 terminate 重新ref时会再次解除event-loop引
   assert.equal(handle.worker.unrefCalls, 1);
 
   const termination = handle.terminate();
-  assert.equal(handle.worker.referenced, false,
-    'terminate 的内部 ref 不能撤销已经 close 的进程 liveness 释放');
-  assert.equal(handle.worker.unrefCalls, 2);
+  assert.equal(handle.worker.referenced, true,
+    '强制terminate必须保持event-loop引用，直到真实exit完成清理Promise');
+  assert.equal(handle.worker.unrefCalls, 1);
 
   resolveTermination(0);
   await termination;

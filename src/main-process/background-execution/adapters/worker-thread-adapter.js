@@ -189,17 +189,12 @@ function createWorkerThreadAdapter(options = {}) {
             if (closeCalled && closeAckObserved && naturalExitGraceMs > 0 &&
                 await waitForNaturalExit()) return exitCode;
             if (exitSettled) return exitCode;
-            let termination;
-            try {
-              termination = worker.terminate();
-            } finally {
-              // Node 的 Worker.terminate() 会在等待 exit 前重新 ref()。若 Host
-              // 已先 close/unref，这个 ref 会抵消 close 的 liveness 释放，并在
-              // native terminate 不 settle 时继续钉住进程。因此必须在 terminate
-              // 调用之后再重复 unref；仍 await 原 termination，不伪造 cleanup 成功。
-              if (closeCalled && typeof worker.unref === 'function') worker.unref();
-            }
-            return await termination;
+            // 强制终止路径必须保持 Worker 引用直到真实 exit/termination settle。
+            // 若在 Worker.terminate() 重新 ref 后立即 unref，Node 22 会在清理
+            // Promise 仍 pending 时提前耗尽 event loop，node:test 将其判为 cancelled；
+            // 应用侧也会失去“资源确已回收”的可审计完成点。正常 Service 已通过
+            // close-ack + parentPort.close() 走上面的有界自然退出路径，不会进入这里。
+            return await worker.terminate();
           } finally {
             detach();
           }
