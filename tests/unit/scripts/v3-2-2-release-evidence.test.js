@@ -14,6 +14,7 @@ const {
   EXACT_BASE,
   SNAPSHOT_PATH,
   inspectGitBackedFile,
+  isSupportedCurrentPackageVersion,
   sha256File,
   validateReleaseEvidence
 } = require('../../../scripts/validate-v3-2-2-release-evidence');
@@ -138,6 +139,19 @@ test('R3.2.2 snapshot锁定10 action、18 base anchors与独立证据闭环', ()
   assert.equal(result.commonRuntimeActionCount, 6);
   assert.equal(result.bankBuCommonRuntimeActionCount, 0);
   assert.equal(snapshot.baseAnchors.length, 18);
+});
+
+test('历史snapshot保持3.1.14事实，当前authority只接受3.2.2及后续v3.2.x稳定版本', () => {
+  const snapshot = loadSnapshot();
+  assert.deepEqual(snapshot.packageVersion, { value: '3.1.14', bumped: false });
+  for (const version of ['3.2.2', '3.2.3', '3.2.4', '3.2.5', '3.2.99']) {
+    assert.equal(isSupportedCurrentPackageVersion(version), true, version);
+  }
+  for (const version of [
+    '3.1.14', '3.2.0', '3.2.1', '3.2.2-beta.1', '3.3.0', 'v3.2.2', '', null
+  ]) {
+    assert.equal(isSupportedCurrentPackageVersion(version), false, String(version));
+  }
 });
 
 test('validator CLI只读并输出有界machine-readable摘要', () => {
