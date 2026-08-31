@@ -25,12 +25,13 @@
 - v3.2.0～v3.2.2 metadata、R3.2.2 release evidence 与 v3.1.14 历史发布文档定向组合：`45/45 PASS`。
 - 干净 `npm ci` 后完整 unit：`6337/6340 PASS`、`0 FAIL`、`3 SKIP`；日志 `logs/unit-tests/unit-20260831-141208.log`。
 - v3.2.0～v3.2.2 Spec/TechDoc 冻结字节、package JSON、ESLint、Node 语法、`git diff --check` 与最终 v3.2.0/v3.2.1 功能祖先检查：PASS。
+- 合并提交 `d449b2230645b679de54e06db2e7b0101b80c65d` 的两个父精确为 `f6166c660e6b782e08caff8b859b2cbf83fff707` 与 `399c92aaac05bc8f105b9458ae5e3c4f7251d8af`；最终 v3.2.0/v3.2.1 收口、v3.2.2 功能基线和原 v3.2.2 收口均通过 `git merge-base --is-ancestor`。
+- 干净合并提交上的 `npm run check:packaged-inputs`：PASS；`build.files` 9 条覆盖范围与 HEAD 一致。后续只追加本证据说明，不改 package、业务代码或打包输入。
 
 ## Remaining Unknowns
 
 - `BLOCK / 人工复核`：Windows packaged 行为及资金/恢复样本仍由 release owner 人工确认。
 - `BLOCK / production gate`：本节点不得启用 production。
-- `PROBE / 当前节点`：提交合并头后运行 packaged inputs，并再次核对双父与完整祖先链。
 - `PROBE / 最终发布审计`：`npm ci` 报告现有依赖树有 `2 moderate / 9 high` advisory；本节点未改变依赖图且不自动执行破坏性 `npm audit fix`，需在 v3.2.5 最终发布审计中独立评估。
 
 按用户明确要求，不运行 `release-check`、`check-vars` 或 `scan:vars`；这些项目不得记录为 PASS。
