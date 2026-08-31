@@ -258,6 +258,7 @@ function startFundReconWorker(port, options = {}) {
       closing = true;
       ready = false;
       emitControl('executor:close-ack', envelope.controlId, null, {});
+      if (typeof options.close === 'function') queueMicrotask(options.close);
       return;
     }
     throw new Error(`FundRecon不支持service control：${envelope.operation}`);
