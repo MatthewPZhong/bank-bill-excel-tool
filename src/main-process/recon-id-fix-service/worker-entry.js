@@ -664,6 +664,7 @@ function handleControl(rawEnvelope) {
     closeRequested = true;
     if (service) service.close();
     emitControl('executor:close-ack', envelope.controlId, null, {});
+    queueMicrotask(() => parentPort.close());
     return;
   }
   const error = new Error(`ReconFix Service 不支持 control operation：${envelope.operation}`);
