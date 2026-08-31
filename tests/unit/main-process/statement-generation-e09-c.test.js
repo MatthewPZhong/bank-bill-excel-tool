@@ -438,7 +438,20 @@ function outputRows(filePath) {
 }
 
 test('真实 Supervisor/ServiceHost/Worker 以token+revision+evidence生成current/all并写SQLite审计回读', async (t) => {
-  const root = tempRoot(t);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-e09-c-'));
+  let supervisor = null;
+  let database = null;
+  t.after(async () => {
+    try {
+      if (database) database.close();
+    } finally {
+      try {
+        if (supervisor) await supervisor.shutdown({ timeoutMs: 5000 });
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    }
+  });
   const staging = path.join(root, 'staging');
   const storage = path.join(root, 'storage');
   fs.mkdirSync(staging);
@@ -447,13 +460,12 @@ test('真实 Supervisor/ServiceHost/Worker 以token+revision+evidence生成curre
   const second = path.join(root, 'second.xlsx');
   writeStatement(first, [['2026-08-01', 10, '', 'USD', 'M001']]);
   writeStatement(second, [['2026-08-02', '', 3, 'EUR', 'M002']]);
-  const supervisor = harness({
+  supervisor = harness({
     statementSourceRoot: root,
     statementStagingRoot: staging,
     statementStorageRoot: storage,
     statementBalanceTemplatePath: path.join(ROOT, 'assets', '余额账单模版.xlsx')
   });
-  t.after(async () => supervisor.shutdown({ forceServices: true, timeoutMs: 5000 }));
   const evidence = templateEvidence();
   for (const [index, filePath] of [first, second].entries()) {
     const imported = await supervisor.execute(request(
@@ -544,8 +556,7 @@ test('真实 Supervisor/ServiceHost/Worker 以token+revision+evidence生成curre
   assert.equal(changed.error.code, 'STATEMENT_GENERATION_INPUT_STALE');
   assert.equal(fs.existsSync(path.join(staging, 'changed/detail.xlsx')), false);
 
-  const database = new DatabaseSync(path.join(root, 'audit.sqlite'));
-  t.after(() => database.close());
+  database = new DatabaseSync(path.join(root, 'audit.sqlite'));
   database.exec('CREATE TABLE artifacts(scope TEXT PRIMARY KEY, size INTEGER, sha256 TEXT, row_count INTEGER)');
   const insert = database.prepare('INSERT INTO artifacts VALUES (?, ?, ?, ?)');
   insert.run('current', current.size, current.sha256, current.rowCounts.output);
