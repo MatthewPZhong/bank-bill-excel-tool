@@ -9,6 +9,28 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## v3.2.1（2026-08-31，版本分支技术收口，未发布）
+
+v3.2.1 完成 Toolbox 单 Writer后台生成与 PreFund MPT parser spool、durable receipt、单 Writer和受限 parser pool capability；production enablement 保持关闭，既有文件顺序、金额、币种、Workbook、事务、幂等和用户操作合同不变。
+
+### 新增
+
+- Toolbox one-shot generation Worker 与密封 route DB；输出准备可隔离执行，正式文件仍由单一 FIFO Publisher 收口。
+- PreFund MPT 任务私有 spool、file-level durable receipt、inspector/Recovery Hold 与单一有序 DB Writer。
+- 普通 import 的受限 parser pool capability；repair 保持 exact-one，完成顺序不参与业务顺序。
+
+### 变更
+
+- dispatch/cleanup ownership、critical intent、receipt 和恢复判定进入冻结后台执行合同；unknown/partial/committed-result-lost 不会自动重跑或伪装成普通失败。
+- E04-C 第二 Writer gate 明确 rejected；Toolbox 写入拓扑和正式 Publisher 没有被并行化。
+- package 元数据更新为 `3.2.1`，顶层 Spec/TechDoc 同步自冻结基线，并包含最终 v3.2.0 收口祖先。
+
+### 兼容与人工边界
+
+- E04-C/E05-C 未满足 gate 继续阻止 production 切路，legacy seam 保留；本版不新增用户开关。
+- Windows packaged/退出、PreFund 真实资金样本和金额/币种/文件顺序/恢复人工复核仍未由自动测试代偿；本节点未合并 `main`、未创建 tag、未发布 production。
+- `release-check`、`check-vars`、`scan:vars` 按用户要求跳过，不能声明为 PASS。
+
 ## v3.2.0（2026-08-31，版本分支技术收口，未发布）
 
 v3.2.0 完成公共后台执行 Supervisor、协议/恢复控制底座与 VCC OP 多文件 parser pipeline；production enablement 保持关闭，既有金额、币种、月份、Workbook、事务、幂等和用户操作合同不变。

@@ -1,5 +1,23 @@
 # Changelog
 
+## 3.2.1 - 2026-08-31（版本分支技术收口，未发布）
+
+> v3.2.1 在 v3.2.0 公共后台执行底座上完成 Toolbox 受管生成 Worker/密封 route DB，以及 PreFund MPT parser spool、durable receipt、单 Writer和受限 parser pool capability；文件顺序、金额/币种、事务、Workbook、幂等和正式发布合同保持不变。代码合并时 production enablement 仍为关闭，本条不表示已经发布到 `main`、创建 tag 或启用生产策略。
+
+### Toolbox 与 PreFund 受控后台执行
+
+- **Toolbox 单 Writer 拓扑**：拆分输出可由受管 one-shot Worker 准备，密封 route DB 固定输出路由；最终仍由单一 Writer/FIFO Publisher 验证并发布。E04-C 第二 Writer gate 已明确拒绝，不在收口阶段扩写入拓扑。
+- **PreFund parser spool 与 durable receipt**：每个输入文件先生成任务私有 spool，单一有序 DB Writer 按 `fileIndex` 串行处理；operation receipt、inspector、Recovery Hold 和 cleanup authority 保护 committed/unknown/partial 边界。
+- **受限 parser pool**：普通 import 具备有界 parser pool capability，repair 继续 exact-one；完成顺序不参与业务顺序，资源/性能/Windows/真实资金 gate 未通过时 effective production strategy 保持 legacy/false。
+- **崩溃与取消边界**：grant、dispatch ownership、critical intent、receipt 与 Publisher 采用冻结合同；已开始任务不跨实现自动重放，结果不确定时转人工恢复。
+
+### 收口边界
+
+- **版本与规范**：`package.json`、`package-lock.json` 收口为 `3.2.1`；顶层 Spec/TechDoc 与冻结基线逐字节一致，最终 v3.2.0 收口为真实祖先。
+- **生产仍关闭**：E04-C/E05-C 的拒绝或未满足 gate 保持有效，capability 不等于生产切路，也不新增用户开关。
+- **人工门禁未代偿**：Windows packaged/退出、PreFund 真实资金样本、金额/币种/文件顺序和恢复处置仍需 release owner/资金负责人复核。自动测试不能把这些项目声明为 PASS。
+- **未执行正式发布动作**：本收口不合并 `main`、不创建 tag、不发布或启用 production；`release-check`、`check-vars`、`scan:vars` 按用户要求跳过，不能记录为 PASS。
+
 ## 3.2.0 - 2026-08-31（版本分支技术收口，未发布）
 
 > v3.2.0 建立公共后台执行 Supervisor、冻结协议与恢复控制底座，并让 VCC 财务 OP 多文件读取进入受资源治理的 parser pipeline；金额、币种、月份、事务、Workbook、幂等和正式文件发布合同保持不变。代码合并时 production enablement 仍为关闭，本条不表示已经发布到 `main`、创建 tag 或启用生产策略。
