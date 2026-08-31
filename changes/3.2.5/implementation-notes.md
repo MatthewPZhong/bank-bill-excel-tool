@@ -15,6 +15,7 @@
 | 顶层 Spec/TechDoc bootstrap 逐字节同步冻结来源；实施期只接受精确记录且受测试约束的合同修订 | 防止按老 changes 副本或编号猜范围，同时不能让已证伪的 Position export/import、Acquiring 资源拓扑或 Main authority 继续充当 current authority | 任意润色顶层副本、静默修改冻结基线、维持已证伪的 topology/authority | 冻结来源保持原 hash；E13-B～F 的每一处 current-tree delta 均由 exact-once transformer 与当前 hash 锁定，其他漂移一律失败；E13-G 以 current authority 重建最终证据。 |
 | 旧 `29/29` 与 `69/69` 只作历史证据 | 当前独立复验为 checksum `61/69`、validation `28/29` | 重算 checksum 伪造一致 | E13-G 必须修真实 binding/AST authority 后再生成最终证据。 |
 | checksum 必须枚举包目录并精确覆盖全部普通文件 | R3.2.5 复核发现旧校验器把 `69/69` 写死，且实际漏列 5 个已存在文档；漏项时仍会声明 PASS | 继续沿用固定计数；只用 `shasum -c` 验证已列条目 | 最终口径为 checksum 自身以外 `74/74`；校验器精确比较目录文件集合、顺序与逐文件 SHA-256，并拒绝重复、逃逸和非普通文件。 |
+| Document Source 区分 bootstrap bytes 与最终 current authority | 完成审计发现 `DOCUMENT-SOURCE.md` 仍写顶层文档必须永久逐字节等于冻结副本，但同文件记录的冻结 hash 已与最终 current hash 分离，且 E13-B～G 的受控 reverse-sync 已在本表逐项记录 | 回滚已验证的 current-tree 合同；改写冻结包；继续保留自相矛盾的来源说明 | bootstrap 提交 `5913a596…64ea` 证明初始逐字节同步；冻结来源保持不变，顶层最终 hash 与已记录 delta 构成 current authority；未记录漂移继续 fail closed。 |
 | E13-A～R3.2.5 全链重新叠到最终 v3.2.4 | 原 v3.2.5 本地链基于旧 v3.2.4 候选，不能用旧测试代替最终前序传播 | 只改 PR base；复用旧绿色证据 | 八段链均保留原实现为第一父、最终前序为第二父；R3.2.5 exact base 更新为最终 E13-G `7f964492…a3f1d`，需在精确新 head 重跑验证。 |
 | 文档 bootstrap 不新增功能 PR | 冻结 Spec 已明确 8 PR 序列 | 增加第 9 个纯文档 PR | bootstrap 作为 v3.2.5 base/E13-A 祖先。 |
 | Capability 与 Effective Production Strategy 分开 | 所有 action 初始 production disabled，人工/观察门禁未关闭 | 用实现完成自动启用 production | 每 action 可独立保持 legacy/blocked。 |
