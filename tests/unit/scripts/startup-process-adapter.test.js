@@ -494,11 +494,12 @@ test('Windows CI 真实 PowerShell snapshot→token cleanup 语义', {
   // GitHub hosted Windows 在长时间 release-check 后偶发唤醒 CIM 超过生产 15 秒上限。
   // 预热只作用于专用 CI probe；随后 adapter 仍使用生产默认 15 秒完成整条语义验证。
   let phase = 'bounded CIM warmup';
+  let adapter = null;
   let handle = null;
   let cleanupVerified = false;
   try {
     await windowsProcessSnapshot({ timeoutMs: WINDOWS_REAL_PROBE_WARMUP_TIMEOUT_MS });
-    const adapter = createProcessAdapter({ platform: 'win32' });
+    adapter = createProcessAdapter({ platform: 'win32' });
     phase = 'adapter launch baseline snapshot';
     handle = await adapter.launch({
       executable: process.execPath,
@@ -530,7 +531,7 @@ test('Windows CI 真实 PowerShell snapshot→token cleanup 语义', {
     error.evidence = { ...(error.evidence || {}), testPhase: phase };
     throw error;
   } finally {
-    if (handle && !cleanupVerified
+    if (adapter && handle && !cleanupVerified
         && handle.child.exitCode === null && handle.child.signalCode === null) {
       try {
         await adapter.forceCleanup(handle);
