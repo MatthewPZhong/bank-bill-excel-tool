@@ -52,6 +52,12 @@
 
 > **v3.2.3 Statement / NewAccount 后台执行基础**：Statement 大状态由长驻 Service 单一持有，大账号和手工余额 continuation 使用有界单次 token；current/all 生成只读 staging 并由唯一 Publisher 发布，manual balance seed 受 durable receipt/inspector/Recovery Hold 保护。NewAccount 生成使用 one-shot Worker，另存为在校验来源、目标和父目录 identity 后经 durable Publisher 提交。四金额模式、借贷方向、币种、余额、Workbook、日期、账户和命名不变，production enablement 仍关闭；Windows、真实文件与资金/恢复口径仍须人工复核。
 
+> **v3.2.2 FundRecon / Duplicate / BankBU 后台执行基础**：资金对账、重复入金匹配和月度银行对账单 BU 回填校验已具备受资源治理的 Service/Worker、operation receipt、inspector 与 Recovery Hold capability。业务顺序、金额/币种、Excel 与既有用户操作保持不变，production enablement 仍关闭；Windows packaged/WAL/app quit 和真实资金样本仍需人工复核，遇到恢复要求不得自行重复执行。
+
+> **v3.2.1 Toolbox / PreFund 受控后台执行**：Toolbox 可用受管 one-shot Worker 准备拆分输出，正式文件仍由单一 Writer/FIFO Publisher 收口，第二 Writer gate 已明确拒绝；PreFund MPT 可先生成任务私有 spool，再由单一有序 DB Writer 按文件顺序处理，普通 import 具备受限 parser pool capability，repair 仍为 exact-one。金额、币种、文件顺序和 Excel/Workbook 结果不变，production enablement 仍关闭；Windows packaged/退出、真实资金样本和恢复处置仍需人工复核。
+
+> **v3.2.0 公共后台执行底座与 VCC OP Pipeline**：系统已具备受资源治理的 Supervisor、冻结消息/context、operation receipt、inspector、Recovery Hold 与 artifact authority capability；VCC 财务 OP 多文件读取可并行准备 spool，但月份归约、金额/币种处理、单一 writer、事务、Excel/Workbook 结果和正式文件发布仍按既有顺序收口。production enablement 仍关闭；Windows packaged/退出/fsync、真实 VCC OP 样本和资金/恢复处置仍需人工复核，遇到不确定结果不得自行重复执行。
+
 > **v3.1.14 VCC 财务 OP 大批量导入修复**：导入 VCC 充值清退、费用换汇、通道或移除归档 Pending 明细时，工作簿读取阶段继续显示“正在导入”；该类明细全部文件读取并校验完成后，状态框会切换为“正在校验并写入”，不再停留在最后一条读取行数。充值清退和 Pending 同批时会分别显示自己的阶段。点击取消后，状态框保持“正在取消导入并回滚本次未完成数据…”，不会被晚到进度覆盖。金额、币种、幂等、异常和最终结果口径均未改变。v3.1.14 已于 2026-08-21 通过 Windows Release workflow 完成正式技术发布，Setup、portable、blockmap 与 `latest.yml` 四项公开资产已独立回读；Windows packaged VCC、Windows 10/11 Setup/portable、SmartScreen、`v3.1.13 -> v3.1.14` 离线覆盖及 `production/latest` canary 仍为 `MANUAL / NOT RUN`，技术 Release 完成不是人工 PASS。
 
 > **v3.1.13 工具箱、存档中心与状态框调整**：🧰工具箱在“合并表格 / 拆分表格”左侧新增状态框，显示等待、运行、完成、失败或取消；运行期间右上角关闭按钮会隐藏，两枚【导入文件】也会暂时禁用。多文件拆分遇到同名目标文件时，确认框改为【返回 / 覆盖全部】；返回不会创建或覆盖文件。存档中心的日期默认留空并直接展示全部日期的可见批次，设置齿轮移到“存档中心”标题右侧；设置页【变更】紧邻“存档位置”，并移除“存储统计”、文件总大小、运行次数和最新批次。后台维护不再向顶部提示栏显示过程或结果文本。平盘对账数据处理和对账单修复首次成功加载时状态框保持“欢迎使用小助手”，真实 session 与按钮仍会同步，读取失败仍显示错误。所有状态框的星星 SVG 同步移除，只保留状态文字。v3.1.13 已于 2026-08-21 完成正式技术发布并正式发布为 latest stable Release，Setup、portable、blockmap 与 `latest.yml` 四项资产已完成无凭据回读；Windows 原生确认框、packaged 长任务、安装升级和在线 canary 仍未人工验证，不能把技术 Release 表述为这些项目已通过。
