@@ -284,6 +284,7 @@ function startDuplicateWorker(port, options = {}) {
       closing = true;
       ready = false;
       emitControl('executor:close-ack', envelope.controlId, null, {});
+      if (typeof options.close === 'function') queueMicrotask(options.close);
       return;
     }
     throw new Error(`Duplicate不支持service control：${envelope.operation}`);
