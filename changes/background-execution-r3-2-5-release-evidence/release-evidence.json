@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "release": "3.2.5",
   "evidenceDate": "2026-08-31",
-  "exactBase": "0a07cca0261baebe6c664f51e2271126fd639d8a",
+  "exactBase": "7f9644922fde2f521c8e09fb3f856046ff9a3f1d",
   "packageVersion": "3.2.5",
   "authority": {
     "actionManifest": {
@@ -50,8 +50,8 @@
     "packageChecksums": {
       "path": "changes/background-execution-v3.2.x-contract-baseline/PACKAGE-SHA256SUMS.txt",
       "status": "PASS",
-      "passed": 69,
-      "total": 69
+      "passed": 74,
+      "total": 74
     },
     "localTests": {
       "e13GBase": {
@@ -62,8 +62,8 @@
       },
       "r3Closeout": {
         "lint": "PASS",
-        "targeted": "113/113 PASS",
-        "unit": "6877/6880 PASS; 0 FAIL; 3 SKIP",
+        "targeted": "118/118 PASS",
+        "unit": "6887/6890 PASS; 0 FAIL; 3 SKIP",
         "integration": "53 scripts; 2488/2488 PASS",
         "smoke": "PASS"
       }

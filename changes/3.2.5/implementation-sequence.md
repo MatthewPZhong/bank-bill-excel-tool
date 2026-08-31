@@ -17,7 +17,7 @@
 | 4 | E13-D | Pending/BizOP adapters | 无额外 spawn，事务、幂等、取消、恢复零漂移 | 不重写现有模块池。 |
 | 5 | E13-E | Acquiring adapter | pool/gate/resume、artifact/receipt 与 legacy 行为等价 | 不泛化为万能 adapter。 |
 | 6 | E13-F | Position utility adapter | grant/critical/cancel 映射与 utility process 拓扑等价 | 不改变 position 业务计算。 |
-| 7 | E13-G | Manifest/AST coverage 与策略快照 | current-tree validation 29/29、package checksum 69/69、静态 coverage 100%，Capability 与 Effective Production Strategy 分离 | 不自动启用 action，不删除 legacy seam。 |
+| 7 | E13-G | Manifest/AST coverage 与策略快照 | current-tree validation 29/29、package checksum 精确覆盖 checksum 自身外全部 74 个普通文件、静态 coverage 100%，Capability 与 Effective Production Strategy 分离 | 不自动启用 action，不删除 legacy seam。 |
 | 8 | R3.2.5 | 全系列 release evidence、版本元数据与三份发布文档 | 适当完整测试、Windows/观察/人工状态可审计，package/version/docs 一致 | 不合并 main、不创建 tag、不发布 production。 |
 
 ## Propagation Rule

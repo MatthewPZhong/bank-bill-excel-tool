@@ -7,10 +7,11 @@ const path = require('node:path');
 const REPOSITORY_ROOT = path.resolve(__dirname, '..');
 const RELEASE = '3.2.5';
 const EVIDENCE_DATE = '2026-08-31';
-const EXACT_BASE = '0a07cca0261baebe6c664f51e2271126fd639d8a';
+const EXACT_BASE = '7f9644922fde2f521c8e09fb3f856046ff9a3f1d';
 const EVIDENCE_DIRECTORY = 'changes/background-execution-r3-2-5-release-evidence';
 const SNAPSHOT_RELATIVE_PATH = `${EVIDENCE_DIRECTORY}/release-evidence.json`;
 const SNAPSHOT_PATH = path.join(REPOSITORY_ROOT, SNAPSHOT_RELATIVE_PATH);
+const PACKAGE_ROOT_RELATIVE_PATH = 'changes/background-execution-v3.2.x-contract-baseline';
 
 const AUTHORITY_PATHS = Object.freeze({
   actionManifest: 'changes/3.2.5/e13-g-action-manifest.json',
@@ -131,6 +132,175 @@ function readJson(relativePath) {
 
 function sha256(relativePath) {
   return crypto.createHash('sha256').update(fs.readFileSync(absolute(relativePath))).digest('hex');
+}
+
+class PackageChecksumError extends Error {
+  constructor(code, detail) {
+    super(`${code}: ${detail}`);
+    this.name = 'PackageChecksumError';
+    this.code = code;
+    this.detail = detail;
+  }
+}
+
+function failPackageChecksum(code, detail) {
+  throw new PackageChecksumError(code, detail);
+}
+
+function compareCanonicalPaths(left, right) {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
+}
+
+function packageChecksumContext(options = {}) {
+  const packageRoot = path.resolve(
+    options.packageRoot || absolute(PACKAGE_ROOT_RELATIVE_PATH)
+  );
+  const checksumPath = path.resolve(
+    options.checksumPath || absolute(AUTHORITY_PATHS.packageChecksums)
+  );
+  const checksumRelativePath = path.relative(packageRoot, checksumPath).split(path.sep).join('/');
+  if (
+    checksumRelativePath === '' ||
+    checksumRelativePath === '..' ||
+    checksumRelativePath.startsWith('../') ||
+    path.posix.isAbsolute(checksumRelativePath)
+  ) {
+    failPackageChecksum(
+      'PACKAGE_CHECKSUM_PATH_OUTSIDE_ROOT',
+      `${checksumPath} is outside ${packageRoot}`
+    );
+  }
+  return { packageRoot, checksumPath, checksumRelativePath };
+}
+
+function collectPackageFiles(packageRoot, checksumRelativePath) {
+  const files = [];
+
+  function visit(directory, prefix = '') {
+    const entries = fs.readdirSync(directory, { withFileTypes: true })
+      .sort((left, right) => compareCanonicalPaths(left.name, right.name));
+    for (const entry of entries) {
+      const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
+      const absolutePath = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        visit(absolutePath, relativePath);
+      } else if (entry.isFile()) {
+        if (relativePath !== checksumRelativePath) files.push(relativePath);
+      } else {
+        failPackageChecksum(
+          'PACKAGE_ENTRY_UNSUPPORTED',
+          `${relativePath} is not a regular file or directory`
+        );
+      }
+    }
+  }
+
+  visit(packageRoot);
+  return files.sort(compareCanonicalPaths);
+}
+
+function generatePackageChecksumContent(options = {}) {
+  const { packageRoot, checksumRelativePath } = packageChecksumContext(options);
+  return collectPackageFiles(packageRoot, checksumRelativePath)
+    .map((relativePath) => {
+      const digest = crypto.createHash('sha256')
+        .update(fs.readFileSync(path.join(packageRoot, ...relativePath.split('/'))))
+        .digest('hex');
+      return `${digest}  ./${relativePath}`;
+    })
+    .join('\n') + '\n';
+}
+
+function verifyPackageChecksums(options = {}) {
+  const { packageRoot, checksumPath, checksumRelativePath } = packageChecksumContext(options);
+  const content = fs.readFileSync(checksumPath, 'utf8');
+  if (content.includes('\r') || !content.endsWith('\n')) {
+    failPackageChecksum(
+      'PACKAGE_CHECKSUM_FORMAT_INVALID',
+      'checksum file must use LF line endings and end with exactly one newline'
+    );
+  }
+  const lines = content.slice(0, -1).split('\n');
+  if (lines.length === 0 || lines.some((line) => line.length === 0)) {
+    failPackageChecksum('PACKAGE_CHECKSUM_FORMAT_INVALID', 'blank checksum entry');
+  }
+
+  const entries = [];
+  const seen = new Set();
+  for (const [index, line] of lines.entries()) {
+    const match = /^([0-9a-f]{64})  \.\/(.+)$/.exec(line);
+    if (!match) {
+      failPackageChecksum(
+        'PACKAGE_CHECKSUM_FORMAT_INVALID',
+        `line ${index + 1} is not canonical SHA-256 syntax`
+      );
+    }
+    const relativePath = match[2];
+    if (
+      relativePath.includes('\\') ||
+      relativePath === '.' ||
+      relativePath.startsWith('/') ||
+      relativePath.startsWith('../') ||
+      path.posix.normalize(relativePath) !== relativePath
+    ) {
+      failPackageChecksum(
+        'PACKAGE_CHECKSUM_PATH_INVALID',
+        `line ${index + 1} contains unsafe or non-canonical path ${relativePath}`
+      );
+    }
+    if (seen.has(relativePath)) {
+      failPackageChecksum('PACKAGE_CHECKSUM_ENTRY_DUPLICATE', relativePath);
+    }
+    seen.add(relativePath);
+    entries.push({ digest: match[1], relativePath });
+  }
+
+  const listedPaths = entries.map((entry) => entry.relativePath);
+  const sortedListedPaths = [...listedPaths].sort(compareCanonicalPaths);
+  if (listedPaths.some((relativePath, index) => relativePath !== sortedListedPaths[index])) {
+    failPackageChecksum(
+      'PACKAGE_CHECKSUM_ORDER_INVALID',
+      'entries must use deterministic ascending path order'
+    );
+  }
+
+  const actualPaths = collectPackageFiles(packageRoot, checksumRelativePath);
+  const actualSet = new Set(actualPaths);
+  for (const relativePath of listedPaths) {
+    if (!actualSet.has(relativePath)) {
+      failPackageChecksum('PACKAGE_CHECKSUM_ENTRY_UNEXPECTED', relativePath);
+    }
+  }
+  for (const relativePath of actualPaths) {
+    if (!seen.has(relativePath)) {
+      failPackageChecksum('PACKAGE_CHECKSUM_ENTRY_MISSING', relativePath);
+    }
+  }
+
+  for (const entry of entries) {
+    const actualDigest = crypto.createHash('sha256')
+      .update(fs.readFileSync(path.join(packageRoot, ...entry.relativePath.split('/'))))
+      .digest('hex');
+    if (actualDigest !== entry.digest) {
+      failPackageChecksum(
+        'PACKAGE_CHECKSUM_HASH_MISMATCH',
+        `${entry.relativePath}: expected ${entry.digest}, got ${actualDigest}`
+      );
+    }
+  }
+
+  return {
+    status: 'PASS',
+    passed: entries.length,
+    total: actualPaths.length
+  };
+}
+
+function writePackageChecksums(options = {}) {
+  const { checksumPath } = packageChecksumContext(options);
+  fs.writeFileSync(checksumPath, generatePackageChecksumContent(options));
 }
 
 function indexByAction(actions, label) {
@@ -282,6 +452,7 @@ function buildExpectedReleaseEvidence() {
   const strategy = readJson(AUTHORITY_PATHS.productionStrategy);
   const coverage = readJson(AUTHORITY_PATHS.coverageReport);
   const contractValidation = readJson(AUTHORITY_PATHS.contractValidation);
+  const packageChecksums = verifyPackageChecksums();
   const manifestIndex = indexByAction(manifest.actions, 'action manifest');
   const inventoryIndex = indexByAction(inventory.actions, 'capability inventory');
   const strategyIndex = indexByAction(strategy.actions, 'production strategy');
@@ -356,9 +527,9 @@ function buildExpectedReleaseEvidence() {
       },
       packageChecksums: {
         path: AUTHORITY_PATHS.packageChecksums,
-        status: 'PASS',
-        passed: 69,
-        total: 69
+        status: packageChecksums.status,
+        passed: packageChecksums.passed,
+        total: packageChecksums.total
       },
       localTests: {
         e13GBase: {
@@ -369,8 +540,8 @@ function buildExpectedReleaseEvidence() {
         },
         r3Closeout: {
           lint: 'PASS',
-          targeted: '113/113 PASS',
-          unit: '6877/6880 PASS; 0 FAIL; 3 SKIP',
+          targeted: '118/118 PASS',
+          unit: '6887/6890 PASS; 0 FAIL; 3 SKIP',
           integration: '53 scripts; 2488/2488 PASS',
           smoke: 'PASS'
         }
@@ -424,7 +595,12 @@ function validateReleaseEvidence(candidate, options = {}) {
   try {
     expected = buildExpectedReleaseEvidence();
   } catch (error) {
-    addError(errors, 'AUTHORITY_BUILD_FAILED', '/authority', error.message);
+    addError(
+      errors,
+      error instanceof PackageChecksumError ? 'PACKAGE_CHECKSUM_INVALID' : 'AUTHORITY_BUILD_FAILED',
+      error instanceof PackageChecksumError ? '/validationEvidence/packageChecksums' : '/authority',
+      error.message
+    );
     return { valid: false, errors, facts: {} };
   }
 
@@ -516,6 +692,7 @@ function writeSnapshot() {
 }
 
 function main() {
+  if (process.argv.includes('--write-package-checksums')) writePackageChecksums();
   if (process.argv.includes('--write')) writeSnapshot();
   const candidate = readJson(SNAPSHOT_RELATIVE_PATH);
   const result = validateReleaseEvidence(candidate);
@@ -532,13 +709,18 @@ module.exports = {
   EVIDENCE_DIRECTORY,
   EXACT_BASE,
   HISTORICAL_RELEASES,
+  PACKAGE_ROOT_RELATIVE_PATH,
+  PackageChecksumError,
   RELEASE,
   SNAPSHOT_PATH,
   SNAPSHOT_RELATIVE_PATH,
   WORK_ITEM_ACTIONS,
   buildExpectedReleaseEvidence,
   deepClone,
-  validateReleaseEvidence
+  generatePackageChecksumContent,
+  validateReleaseEvidence,
+  verifyPackageChecksums,
+  writePackageChecksums
 };
 
 if (require.main === module) main();

@@ -3,7 +3,7 @@
 ## Baseline
 
 - Goal：完成 v3.2.5 E13-A～G、R3.2.5、版本元数据/发布文档与最终审计收口。
-- Exact local parent：v3.2.4 最终本地候选 `dd412ea8141e0786132b31868a3006adde62f9d4`。
+- Exact local parent：v3.2.4 最终本地候选 `c5c21f9a34566c6509257e31a05d2dcbdbf06805`。
 - Authority：[spec.md](./spec.md)、[techdoc.md](./techdoc.md)、[implementation-sequence.md](./implementation-sequence.md)。
 - Preflight：[preflight.md](./preflight.md)、[preflight-baseline-validation.json](./preflight-baseline-validation.json)。
 - Done when：8 PR 严格顺序实施/传播/合并到 v3.2.5；当前树 validation/checksum、版本/三份发布文档、适当完整测试与人工状态均可审计；main/tag/production 不修改。
@@ -14,6 +14,8 @@
 | --- | --- | --- | --- |
 | 顶层 Spec/TechDoc bootstrap 逐字节同步冻结来源；实施期只接受精确记录且受测试约束的合同修订 | 防止按老 changes 副本或编号猜范围，同时不能让已证伪的 Position export/import、Acquiring 资源拓扑或 Main authority 继续充当 current authority | 任意润色顶层副本、静默修改冻结基线、维持已证伪的 topology/authority | 冻结来源保持原 hash；E13-B～F 的每一处 current-tree delta 均由 exact-once transformer 与当前 hash 锁定，其他漂移一律失败；E13-G 以 current authority 重建最终证据。 |
 | 旧 `29/29` 与 `69/69` 只作历史证据 | 当前独立复验为 checksum `61/69`、validation `28/29` | 重算 checksum 伪造一致 | E13-G 必须修真实 binding/AST authority 后再生成最终证据。 |
+| checksum 必须枚举包目录并精确覆盖全部普通文件 | R3.2.5 复核发现旧校验器把 `69/69` 写死，且实际漏列 5 个已存在文档；漏项时仍会声明 PASS | 继续沿用固定计数；只用 `shasum -c` 验证已列条目 | 最终口径为 checksum 自身以外 `74/74`；校验器精确比较目录文件集合、顺序与逐文件 SHA-256，并拒绝重复、逃逸和非普通文件。 |
+| E13-A～R3.2.5 全链重新叠到最终 v3.2.4 | 原 v3.2.5 本地链基于旧 v3.2.4 候选，不能用旧测试代替最终前序传播 | 只改 PR base；复用旧绿色证据 | 八段链均保留原实现为第一父、最终前序为第二父；R3.2.5 exact base 更新为最终 E13-G `7f964492…a3f1d`，需在精确新 head 重跑验证。 |
 | 文档 bootstrap 不新增功能 PR | 冻结 Spec 已明确 8 PR 序列 | 增加第 9 个纯文档 PR | bootstrap 作为 v3.2.5 base/E13-A 祖先。 |
 | Capability 与 Effective Production Strategy 分开 | 所有 action 初始 production disabled，人工/观察门禁未关闭 | 用实现完成自动启用 production | 每 action 可独立保持 legacy/blocked。 |
 | 不运行用户禁止的三个聚合/变量命令 | 用户明确禁止 `release-check`、`check-vars`、`scan:vars` | 把未运行项写为 PASS | 用允许的 unit/integration/smoke/定向验证逐项记录，禁止虚报。 |
@@ -41,7 +43,7 @@
 | 项目 | 当前结果 | 影响/后续 |
 | --- | --- | --- |
 | Frozen/current document hashes | 冻结 Spec `13410e4e…98f2`、TechDoc `3fb18459…e64f`、split plan `27bbdde9…174a`；当前 Spec `d223b7ad…244f`、TechDoc `f63e1220…9933` | 冻结来源未修改；顶层含已记录且受测试约束的 E13-B～G current-tree 修订，不能宣称仍逐字节一致。 |
-| Package checksum | `69/69 PASS`，在 current-tree validator 29/29 与最终 report 落盘后重算并逐项复验 | checksum 只证明最终 bytes 完整；本结果未被解释为额外语义授权。 |
+| Package checksum | 旧 `69/69` 已证伪为漏列 5 文件；最终 current-tree validator `29/29 PASS`、checksum `74/74 PASS`，并由目录集合驱动的校验器与缺失/额外/重复/乱序/逃逸/非普通文件/byte tamper 负向测试复验 | checksum 只证明最终 bytes 完整；本结果不被解释为额外语义授权。 |
 | Published/current validation | current tree `29/29 PASS`、0 error、73 inputs；Runtime Registry 52 actions、Spec table 59 rows；Manifest/Binding 54 actions、61 pairs | 旧历史 report 未作代偿；精确 legacy-only 例外及三类 mutant 已由当前 validator 复验。 |
 | Production/human gate | production=false；资金/恢复 `PENDING_HUMAN_REVIEW` | 本 bootstrap 不改变。 |
 | E13-A unknowns-first | summary=aggregate；Pending errors 需 managed source；Pending/BizOP stable gate 必须在 Worker read snapshot 内复核 | 进入模块专用 worker 实施；不改 legacy effective strategy。 |
@@ -57,6 +59,7 @@
 | E13-E capability/full regression | E13-E 定向 `12/12 PASS`；mature/Acquiring/Registry/Resource/Supervisor 扩大回归 `227/227 PASS`；完整单测 `6836/6839 PASS`（`0 FAIL`、`3 SKIP`，日志 `logs/unit-tests/unit-20260831-005448.log`）；53 个 integration 脚本 `2488/2488 PASS`（`282902 ms`）；smoke、ESLint、语法与 diff PASS；真实 Parser/side DB、D31、single/resume、mirror、取消、exact-5/7 owner 与 Main-owned resume authority 均通过 | production 与默认 IPC 均未启用；Windows、30 万+真实 run/RSS、资金/恢复人工复核留到 R3.2.5。首次隔离全量运行的依赖树不符合 lockfile，改用精确 `app-builder-lib 26.15.7` 后完整复验，未把环境失败记作代码 PASS。 |
 | E13-F capability/full regression | current Spec/TechDoc hashes `d5b58458…b6a2` / `5ee46941…a7a2`；E13-F 核心 `12/12 PASS`，E13-F/mature/runtime/合同最终组合 `36/36 PASS`；完整单测 `6848/6851 PASS`（`0 FAIL`、`3 SKIP`，日志 `logs/unit-tests/unit-20260831-020452.log`）；53 个 integration 脚本 `2488/2488 PASS`（`264007 ms`）；smoke、完整 ESLint、语法与 diff PASS；R3.2.4 历史 exact evidence PASS；Windows contract `6/8 PASS`、`2 SKIP` | 0/1 topology、Main-owned absolute paths/owner/selector/grant、privacy result、protected schema、等待 authorizer 取消、同 job exact ACK、矛盾/非法 count evidence 反例已锁定。首次全量单测仅发现测试 registry 期望漏列新 action（`1 FAIL`），修复后精确 `10/10 PASS` 且最终全量 `0 FAIL`；未用失败快照代偿。Windows 两个真实 packaged canary 只可在专用环境运行，production 与默认 IPC 仍为 legacy/false，资金/恢复人工门禁未解除。 |
 | E13-G manifest/full regression | 入口盲区复核将中间 52 actions / 59 pairs 修正为最终 Manifest/Binding 54 actions / 61 pairs：补入 PreFund bank import/run 两个真实 legacy-only 入口，同时保持冻结 Runtime Registry 52 actions / 59 Spec rows；36 runtime policies、16 legacy-only、2 platform canary；6 surfaces `324/324`、production enabled=0；validator `29/29 PASS`、73 inputs；最终定向 `27/27 PASS`；unit `6857/6860 PASS`（0 FAIL、3 SKIP，`unit-20260831-032421.log`）；integration 53 scripts、`2488/2488 PASS`（349045 ms）；smoke PASS | 首次完整 unit 的 Windows NSIS 失败归因于复用旧 `app-builder-lib 26.8.1`；隔离安装 lockfile 精确 `26.15.7` 后精确 Windows contract与完整 unit均0 FAIL。随后错误把两 legacy action 写入冻结 Registry 导致 7 个历史 evidence FAIL，分层修复后历史/当前测试恢复 0 FAIL。Capability/route/production 三者保持分离，54/54 effective legacy、worker count=0；人工资金/恢复 redline 仍 PENDING，production 仍关闭。 |
+| R3.2.5 final restack validation | E13-A～G + R3 定向 `118/118 PASS`；完整单测 `6887/6890 PASS`（`0 FAIL`、`3 SKIP`，`logs/unit-tests/unit-20260831-120210.log`）；53 个 integration 脚本 `2488/2488 PASS`（315093 ms）；smoke、完整 `src/` ESLint、修改 JS 语法与 diff PASS；deterministic validator 54 actions / 29 contract checks / 74 checksums PASS | 首次全量 unit 仅暴露 E13-E 测试依赖宿主瞬时可用内存而把合法 admitted topology 从 2 降为 1；测试注入既定 admitted topology 后，E13-E `12/12`、生产资源 gate `19/19`、最终全量 0 FAIL。未改生产资源治理，production 仍关闭；Windows/真实样本/资金恢复人工门禁仍未完成。 |
 
 ## Blindspot / Reconciliation
 

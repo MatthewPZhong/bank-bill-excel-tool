@@ -14,8 +14,8 @@
 ### 54-action 清单与发布证据
 
 - **能力与生产策略分离**：Capability Inventory 为 36 个 implemented、16 个 legacy-only、2 个 platform canary；Effective Production Strategy 对全部 54 个 action 均保持 `legacy`、worker count 0、feature flag false，production 启用数为 0。
-- **静态覆盖与合同**：Action Manifest 覆盖 61 个 legacy pair、54 × 6 = 324 个 action surface；冻结合同 validator 为 29/29 PASS、73 个输入，package checksum 为 69/69 PASS。R3.2.5 evidence 逐 action 记录 baseline fixture、语义/DB/Workbook/故障/资源证据、Windows、人工复核与 production decision，不以模块汇总代替单 action 状态。
-- **本地回归**：E13-G 收口点定向测试 27/27 PASS；最终 R3.2.5 对 E13-A～G、证据 validator 与版本元数据完成定向 113/113 PASS，完整单测 6877/6880（0 FAIL、3 SKIP），53 个 integration 脚本 2488/2488 PASS，smoke PASS。
+- **静态覆盖与合同**：Action Manifest 覆盖 61 个 legacy pair、54 × 6 = 324 个 action surface；冻结合同 validator 为 29/29 PASS、73 个输入，package checksum 精确覆盖 checksum 自身外全部 74 个普通文件并 74/74 PASS。R3.2.5 evidence 逐 action 记录 baseline fixture、语义/DB/Workbook/故障/资源证据、Windows、人工复核与 production decision，不以模块汇总代替单 action 状态。
+- **本地回归**：E13-G 收口点定向测试 27/27 PASS；最终 R3.2.5 对 E13-A～G、证据 validator 与版本元数据完成定向 118/118 PASS，完整单测 6887/6890（0 FAIL、3 SKIP），53 个 integration 脚本 2488/2488 PASS，smoke PASS。
 
 ### 收口边界
 

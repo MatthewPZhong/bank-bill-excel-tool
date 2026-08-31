@@ -34,7 +34,7 @@
 | 1 | 同步权威文档与机器 preflight | 防止按旧副本实施 | exact hashes、bootstrap unit | 不进入源码实现。 |
 | 2 | E13-A/B/C 先做只读输出与分类 | SQL/排序/金额币种/Workbook/输入 authority 零漂移 | legacy-vs-managed golden、DB/Workbook 等价 | action 保持 legacy。 |
 | 3 | E13-D/E/F 逐 adapter 接入 | spawn/事务/幂等/取消/恢复零漂移 | topology、cancel/recovery、receipt 定向门禁 | 只回退单 action，不泛化 transport。 |
-| 4 | E13-G 重建 manifest/AST authority | 关闭本 preflight 的唯一 29 项机器失败 | current-tree 29/29、checksum 69/69、coverage 100% | 不进入 R3.2.5。 |
+| 4 | E13-G 重建 manifest/AST authority | 关闭本 preflight 的唯一 29 项机器失败 | current-tree 29/29、checksum 全目录 74/74、coverage 100% | 不进入 R3.2.5。 |
 | 5 | R3.2.5 最终证据与版本收口 | capability/effective strategy 分离，保留人工门禁 | 适当完整 unit/integration/smoke、Windows/观察/人工状态如实记录 | 不声明正式 production。 |
 
 `release-check`、`check-vars` 与 `scan:vars` 按用户明确要求跳过，不能记录为 PASS；应分别运行允许的组成门禁并逐项记录结果。

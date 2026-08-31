@@ -2,15 +2,19 @@
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
 const {
   HISTORICAL_RELEASES,
+  PackageChecksumError,
   SNAPSHOT_PATH,
   WORK_ITEM_ACTIONS,
   buildExpectedReleaseEvidence,
   deepClone,
+  generatePackageChecksumContent,
+  verifyPackageChecksums,
   validateReleaseEvidence
 } = require('../../../scripts/validate-v3-2-5-release-evidence');
 
@@ -30,6 +34,31 @@ function validateMutant(mutator, options) {
   return validateReleaseEvidence(candidate, options);
 }
 
+function withChecksumFixture(callback) {
+  const packageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'v325-checksum-'));
+  const checksumPath = path.join(packageRoot, 'PACKAGE-SHA256SUMS.txt');
+  try {
+    fs.mkdirSync(path.join(packageRoot, 'nested'));
+    fs.writeFileSync(path.join(packageRoot, 'alpha.md'), 'alpha\n');
+    fs.writeFileSync(path.join(packageRoot, 'nested', 'beta.json'), '{"beta":true}\n');
+    fs.writeFileSync(
+      checksumPath,
+      generatePackageChecksumContent({ packageRoot, checksumPath })
+    );
+    callback({ packageRoot, checksumPath });
+  } finally {
+    fs.rmSync(packageRoot, { recursive: true, force: true });
+  }
+}
+
+function assertChecksumError(code, callback) {
+  assert.throws(callback, (error) => {
+    assert.equal(error instanceof PackageChecksumError, true);
+    assert.equal(error.code, code);
+    return true;
+  });
+}
+
 test('R3.2.5 canonical release evidence 与 deterministic authority model 一致', () => {
   const snapshot = loadSnapshot();
   assert.deepEqual(snapshot, buildExpectedReleaseEvidence());
@@ -39,7 +68,83 @@ test('R3.2.5 canonical release evidence 与 deterministic authority model 一致
   assert.equal(result.facts.productionEnabledCount, 0);
   assert.equal(result.facts.legacyEffectiveCount, 54);
   assert.equal(result.facts.contractChecks, 29);
-  assert.equal(result.facts.checksumEntries, 69);
+  assert.equal(result.facts.checksumEntries, 74);
+});
+
+test('contract package checksum 精确覆盖除 checksum 自身外的 74 个普通文件', () => {
+  assert.deepEqual(verifyPackageChecksums(), {
+    status: 'PASS',
+    passed: 74,
+    total: 74
+  });
+});
+
+test('package 新增或漏列普通文件时 checksum fail closed', () => {
+  withChecksumFixture(({ packageRoot, checksumPath }) => {
+    fs.writeFileSync(path.join(packageRoot, 'unlisted.md'), 'unlisted\n');
+    assertChecksumError(
+      'PACKAGE_CHECKSUM_ENTRY_MISSING',
+      () => verifyPackageChecksums({ packageRoot, checksumPath })
+    );
+  });
+});
+
+test('package 文件 bytes 漂移时 checksum fail closed', () => {
+  withChecksumFixture(({ packageRoot, checksumPath }) => {
+    fs.writeFileSync(path.join(packageRoot, 'alpha.md'), 'tampered\n');
+    assertChecksumError(
+      'PACKAGE_CHECKSUM_HASH_MISMATCH',
+      () => verifyPackageChecksums({ packageRoot, checksumPath })
+    );
+  });
+});
+
+test('checksum 伪造目录中不存在的额外文件时 fail closed', () => {
+  withChecksumFixture(({ packageRoot, checksumPath }) => {
+    const canonical = fs.readFileSync(checksumPath, 'utf8').trimEnd();
+    fs.writeFileSync(
+      checksumPath,
+      `${canonical}\n${'0'.repeat(64)}  ./zzzz-forged.md\n`
+    );
+    assertChecksumError(
+      'PACKAGE_CHECKSUM_ENTRY_UNEXPECTED',
+      () => verifyPackageChecksums({ packageRoot, checksumPath })
+    );
+  });
+});
+
+test('checksum 重复、乱序、目录逃逸或非普通文件均 fail closed', () => {
+  withChecksumFixture(({ packageRoot, checksumPath }) => {
+    const canonical = fs.readFileSync(checksumPath, 'utf8').trimEnd().split('\n');
+
+    fs.writeFileSync(checksumPath, `${canonical[0]}\n${canonical[0]}\n${canonical[1]}\n`);
+    assertChecksumError(
+      'PACKAGE_CHECKSUM_ENTRY_DUPLICATE',
+      () => verifyPackageChecksums({ packageRoot, checksumPath })
+    );
+
+    fs.writeFileSync(checksumPath, `${canonical[1]}\n${canonical[0]}\n`);
+    assertChecksumError(
+      'PACKAGE_CHECKSUM_ORDER_INVALID',
+      () => verifyPackageChecksums({ packageRoot, checksumPath })
+    );
+
+    const digest = canonical[0].slice(0, 64);
+    fs.writeFileSync(checksumPath, `${digest}  ./../escape.md\n`);
+    assertChecksumError(
+      'PACKAGE_CHECKSUM_PATH_INVALID',
+      () => verifyPackageChecksums({ packageRoot, checksumPath })
+    );
+
+    if (process.platform !== 'win32') {
+      fs.writeFileSync(checksumPath, `${canonical.join('\n')}\n`);
+      fs.symlinkSync('alpha.md', path.join(packageRoot, 'linked-alpha.md'));
+      assertChecksumError(
+        'PACKAGE_ENTRY_UNSUPPORTED',
+        () => verifyPackageChecksums({ packageRoot, checksumPath })
+      );
+    }
+  });
 });
 
 test('54 actions 精确分成 36 implemented、16 legacy-only、2 platform canary', () => {
