@@ -52,6 +52,7 @@ function context(operationKey) {
 test('Worker等待grant+adopt-ack后才job:done，并在close前完成release ACK', async () => {
   const port = new FakePort();
   const state = { published: false };
+  let transportClosed = 0;
   const service = {
     status: () => ({ active: false, stateRevision: state.published ? 1 : 0, stableSummary: {} }),
     async execute(_actionKey, _input, jobContext) {
@@ -70,7 +71,10 @@ test('Worker等待grant+adopt-ack后才job:done，并在close前完成release AC
       };
     }
   };
-  startFundReconWorker(port, { service });
+  startFundReconWorker(port, {
+    service,
+    close() { transportClosed += 1; }
+  });
   let mainSeq = 0;
   const control = (operation, controlId, jobRef, payload) => createServiceControlEnvelope({
     direction: 'command',
@@ -148,4 +152,7 @@ test('Worker等待grant+adopt-ack后才job:done，并在close前完成release AC
   await nextTick();
   port.command(control('executor:close', 'close-1', null, {}));
   assert.equal(port.sent.at(-1).operation, 'executor:close-ack');
+  assert.equal(transportClosed, 0, '必须先投递close-ack再关闭MessagePort');
+  await nextTick();
+  assert.equal(transportClosed, 1);
 });
