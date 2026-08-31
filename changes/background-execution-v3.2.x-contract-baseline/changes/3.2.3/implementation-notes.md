@@ -232,6 +232,20 @@ Publisher 或状态机合同；无需反向修改冻结 Spec/TechDoc。v3.2.4 �
 其 own tranche 采用相同 ack-then-close 语义，并以 Node 22 真实 ServiceHost 测试证明，不能仅靠传播
 通用 Adapter 后复用本轮结果。
 
+### Final worker-exit propagation evidence（2026-08-31）
+
+最终候选 `773f5f66550e26b42805241699e8addd3ff9dde3` 已按业务链逐张传播：#202 merge
+`a5a2c8c158275efb958b6c3556fa574c37713d12`、#205 merge
+`18c484b0a1235909f8e4700707d5d9637b7cbc87`、#206 merge
+`ffa6789015a4b08889717794b9e0d66603eff46a`、#207 merge
+`e3c8628b26eb794a9bbfacc9f0c54a9fb66d2200`。每张传播提交均以对应旧 PR head 为第一父、最终前序
+head 为第二父，保留原 PR 历史且不复用旧 stack CI。
+
+官方 Node 22.18 在 #207 传播 head 上完成全量单测：6591 total、6586 pass、2 fail、3 expected skip，
+且没有 lifecycle cancellation。两个失败都来自既有 PreFund 默认文件并发用例；对应两个完整测试文件改为
+单并发隔离后 56/56 PASS，因此记录为既有 harness 竞态证据，不修改业务并发、writer 拓扑或资金合同来
+掩盖。该结果不宣称全量 PASS；后续精确远端 head 仍必须取得独立 Windows CI。
+
 ## Evidence
 
 | 证据 | 结果 | 覆盖的行为/风险 |
@@ -248,6 +262,7 @@ Publisher 或状态机合同；无需反向修改冻结 Spec/TechDoc。v3.2.4 �
 | #199 Windows shutdown liveness remediation | automatic run `33299808535`：lint/smoke 完成，Windows 单测输出停在 E09-C 文件前并于 6h 被取消；Node 内置实现证明 `Worker.terminate()` 会先 `ref()`；adapter 回归覆盖 close-before-terminate 与 terminate-before-close 两种时序；修复后完整矩阵见本节后续 evidence | close 已发生时 terminate 内部 ref 会被随后 unref 中和；shutdown timeout/leak 仍为失败证据，不用旧 run 代偿新 head CI |
 | #199 post-terminate unref local validation | adapter + ServiceHost + E09-C 93/93 PASS；完整 background-execution + E09-B/C 单并发矩阵 403/403 PASS；`npm run smoke` PASS；变更 JS ESLint、`node --check`、`git diff --check` PASS | 两种 close/terminate 时序、资源 grant/adopt/revoke/release、token replacement、取消、恢复、Workbook 与 legacy smoke 无回归；`check-vars`、`scan:vars`、`release-check` 按用户要求跳过，不声称 PASS |
 | #199 protocol-ack natural-exit local candidate | 首版 system Node 与 Electron 36/Node 22.19 聚焦矩阵 161/161 PASS；Node 22 扩面 probe 捕获 pending-cleanup 盲区后，官方 Node 22.18 完整单测 6435/6438 PASS、0 fail、3 expected skip；双 Node 适配器/ServiceHost/Supervisor/FundRecon/Duplicate/E09-C 矩阵均 PASS；Node 22 `npm run smoke` PASS；变更 JS ESLint、`node --check`、`git diff --check` PASS | 正常 Service 先 close-ack 再关闭 `parentPort`，真实自然 exit 不调用强制 terminate；无 ack/未退出仍强制 terminate且保持引用直至真实 settle；不以 event-loop 提前退出伪造 cleanup；真实 Windows 证据仍待 exact run 终态/日志，候选未推送 |
+| v3.2.3 final worker-exit propagation | #202 `a5a2c8c` → #205 `18c484b0` → #206 `ffa67890` → #207 `e3c8628b`；官方 Node 22.18 全量单测 6586/6591 PASS、2 fail、3 expected skip；两项既有 PreFund 默认文件并发失败对应完整文件单并发隔离 56/56 PASS；无 lifecycle cancellation | 最终候选逐张包含于 E10-A/B/C 与 R3.2.3；不把旧绿色 CI或窄测试代偿最终传播 head，两个既有并发失败如实保留而未通过业务改动掩盖 |
 | Round 2/3 自洽 workbook mutations | formula、type/format、font 及其四个扩展布尔、single-quote style、comment spoof、relationship decoy、duplicate coordinate、非法显式 style 全部 Publisher=0 | 实际 worksheet relationship/结构化 cell style、全 grid t/z 与 writer-owned font 摘要 readback；manifest size/hash/rowCounts 均按篡改后文件重算 |
 | Reviewer 后 `node scripts/integration/statement-generation-pipeline.js` | 45/45 PASS | legacy generation pipeline、detail/balance/current/all 业务等价 |
 | `npm run test:integration` | 51/51 scripts、2455/2455 PASS | 全仓集成、Publisher/cleanup 与资金相关输出回归；runner 自动清单的本地耗时刷新已回退，不纳入 change |
