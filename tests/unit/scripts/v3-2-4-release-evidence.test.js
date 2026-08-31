@@ -146,7 +146,15 @@ if (!RUN_EXACT_SUITE) {
       );
       const nestedEnvironment = {
         ...process.env,
-        NODE_PATH: path.join(REPOSITORY_ROOT, 'node_modules')
+        NODE_PATH: path.join(REPOSITORY_ROOT, 'node_modules'),
+        // Node 22 对 node:sqlite 的 runtime load 会向 stderr 写 ExperimentalWarning，
+        // 但历史 exact suite 冻结了 validator failure 的 stderr 必须为空。只在这次
+        // immutable historical replay 子进程禁用该 warning 类别；普通 warning、
+        // validator stderr 与真实失败仍保持可见，不能用 NODE_NO_WARNINGS 全局掩盖。
+        NODE_OPTIONS: [
+          process.env.NODE_OPTIONS,
+          '--disable-warning=ExperimentalWarning'
+        ].filter(Boolean).join(' ')
       };
       delete nestedEnvironment.NODE_TEST_CONTEXT;
       const result = spawnSync(
