@@ -9,6 +9,29 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## v3.2.2（2026-08-31，版本分支技术收口，未发布）
+
+v3.2.2 完成 FundRecon、Duplicate 与 BankBU 的后台执行 capability 和恢复审计基础；production enablement 保持关闭，既有金额、币种、匹配顺序、Workbook 与用户操作合同不变。
+
+### 新增
+
+- FundRecon 长驻单 Service，统一持有银行、网关、退款会话与运行结果，并继续按 R1→R5/M2M 顺序执行。
+- Duplicate 长驻 Service、启动前 inspector/Recovery Hold、worker-durable receipt，以及只负责准备 spool 的可选 paired parser。
+- BankBU one-shot Worker、side/main 同一 operation identity、恢复 inspector，以及只负责读取两个输入的可选 dual parser。
+
+### 变更
+
+- 主进程不再作为这些模块完整可变状态的第二所有者；只保留有界 DTO、资源 grant/reservation、TaskLifecycle 和 artifact authority。
+- 崩溃、超时、部分提交和结果丢失按持久 receipt/inspector 收口；未知状态不会自动重跑或伪装为普通失败。
+- package 元数据更新为 `3.2.2`，顶层 Spec/TechDoc 同步自冻结基线。
+
+### 兼容与人工边界
+
+- 业务 SQL、匹配顺序、候选消费、金额/币种、Workbook、事务和幂等语义不变；capability 与 effective production strategy 分离，生产仍关闭。
+- Windows packaged/WAL/app quit 和真实资金样本仍需人工复核；本节点未合并 `main`、未创建 tag、未发布 production。
+- `release-check`、`check-vars`、`scan:vars` 按用户要求跳过，不能声明为 PASS。
+
+
 ## v3.2.1（2026-08-31，版本分支技术收口，未发布）
 
 v3.2.1 完成 Toolbox 单 Writer后台生成与 PreFund MPT parser spool、durable receipt、单 Writer和受限 parser pool capability；production enablement 保持关闭，既有文件顺序、金额、币种、Workbook、事务、幂等和用户操作合同不变。

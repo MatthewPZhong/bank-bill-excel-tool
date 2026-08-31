@@ -1,5 +1,24 @@
 # Changelog
 
+## 3.2.2 - 2026-08-31（版本分支技术收口，未发布）
+
+> v3.2.2 把资金对账、重复入金匹配与月度银行对账单 BU 回填校验的重状态和长任务迁入受资源治理的后台执行基础设施；业务顺序、金额/币种、Workbook、幂等和既有用户操作合同保持不变。代码合并时 production enablement 仍为关闭，本条不表示已经发布到 `main`、创建 tag 或启用生产策略。
+
+### FundRecon / Duplicate / BankBU 后台执行
+
+- **资金对账长驻 Service**：银行、网关、退款和运行结果由单一 Service 持有，R1→R5/M2M 继续严格串行；主进程只保留有界 DTO、资源与任务生命周期证据。
+- **重复入金恢复与可选 paired parser**：启动时先做独立 inspector 和 Recovery Hold，再构造 Service；解析池只准备 spool，业务写入、候选消费、side/main mirror 与 receipt 仍由单一 writer 串行完成。
+- **BankBU one-shot Worker 与可选 dual parser**：导入、运行和导出采用独立 job；双 parser 只负责两个输入，月库事务、匹配顺序、side/main mirror 和 committed receipt 不变。
+- **资源、幂等与崩溃边界**：Service generation、reservation、busy/close、operationKey、receipt、inspector、Recovery Hold 和文件发布均采用冻结合同；unknown/partial/committed-result-lost 不会静默降级为普通失败或自动重跑。
+
+### 收口边界
+
+- **版本与规范**：`package.json`、`package-lock.json` 收口为 `3.2.2`；顶层 Spec/TechDoc 与冻结基线逐字节一致。
+- **生产仍关闭**：本版只完成 capability 与审计证据，不启用新的 effective production strategy；现有用户路径继续走既有安全策略。
+- **人工门禁未代偿**：Windows packaged/WAL/退出边界、真实资金样本、金额/币种/匹配结果及恢复处置仍需 release owner 人工复核。自动测试不能把这些项目声明为 PASS。
+- **未执行正式发布动作**：本收口不合并 `main`、不创建 tag、不发布或启用 production；`release-check`、`check-vars`、`scan:vars` 按用户要求跳过，不能记录为 PASS。
+
+
 ## 3.2.1 - 2026-08-31（版本分支技术收口，未发布）
 
 > v3.2.1 在 v3.2.0 公共后台执行底座上完成 Toolbox 受管生成 Worker/密封 route DB，以及 PreFund MPT parser spool、durable receipt、单 Writer和受限 parser pool capability；文件顺序、金额/币种、事务、Workbook、幂等和正式发布合同保持不变。代码合并时 production enablement 仍为关闭，本条不表示已经发布到 `main`、创建 tag 或启用生产策略。
