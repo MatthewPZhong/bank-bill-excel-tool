@@ -55,6 +55,32 @@ node --test --test-concurrency=1 tests/unit/scripts/v3-2-4-release-evidence.test
 
 最终 clean single-parent candidate 按上述固定命令实跑 `241/241 PASS`、`0 fail / 0 skip`；旧 parent 的 `240/240` 与并发波动不作为本次最终 head 的代偿证据。测试临时 clone 只复制 tracked tree，因此 harness 显式传入仓库 `node_modules` 的 `NODE_PATH`，不会放宽任何被审计的相对源码解析。E12-A 已加入全数字 digest 的确定性回归，避免随机 SHA-256 被 finance-safe 账号模式误分类。
 
+## Final Worker-Exit Propagation Validation (2026-08-31)
+
+本节记录 v3.2.3 最终 worker natural-exit 修复完整传播到 v3.2.4 后、R3.2.4 行为快照 `d8a3f40330c14c8b267a2f63390be0a322b52685` 的精确验证。此前 Evidence 表中的计数属于各自历史 candidate，继续保留用于审计，但不得替代本节对最终传播快照的验证。
+
+| PR | 最终本地传播 head | 传播/修复摘要 |
+| --- | --- | --- |
+| #194 | `3b3b5ce93fe8ac0cb3f8818e9a681c4b78e1f660` | 合入最终 v3.2.3 父链；ReconFix worker 在精确 `close-ack` 后关闭 parent port。 |
+| #195 | `93b6085c2428a6c5c71abcaa5cba509fbb740b2a` | 在最终 #194 上传播 E11-A 后续合同。 |
+| #196 | `1899f999715dbb08b7da51b7618dbadf372ec2c4` | 在最终 #195 上传播 E11-B recovery/hold 合同。 |
+| #198 | `fb26405d6a5bb38ec9aad88f4abf8ba5d93daae6` | 在最终 #196 上传播 E11-C export 合同。 |
+| #200 | `7774cba6c6437a91be39af111cb5ce8823bf841d` | 在最终 #198 上传播 E12-A。 |
+| #201 | `44913e7cc3759621b46fabb625e0185679a9c162` | 在最终 #200 上传播 E12-B。 |
+| #203 | `42c7174461fa987df410693f8fd53b85d8a98c90` | 在最终 #201 上传播 E12-C，并保留 topology 与 worker-exit 两组合同测试。 |
+| #204 | `d8a3f40330c14c8b267a2f63390be0a322b52685` | R3.2.4 行为快照；historical exact replay 仅在嵌套进程屏蔽 Node 22 `ExperimentalWarning` 类别。 |
+
+最终快照验证结果：
+
+- 官方 Node `22.18` 全量单测：`6769/6772 PASS`、`0 fail / 3 expected skip`（421 files、831 suites）；日志 `logs/unit-tests/unit-20260831-111419.log`。
+- 全量集成：53 个脚本全部通过，`2488/2488 PASS`、`0 fail`；自动同步后的清单见 `rules/integration-test-policy.md`。
+- smoke：PASS；包含 ReconFix、gateway、I/O、IPC、E2E 及既有银行/业务场景。
+- R3.2.4 固定八文件矩阵：外层 `180/180 PASS`、`0 fail / 0 cancelled / 0 skip`，其中 immutable historical exact 子进程独立 `62/62 PASS`，保持原 241 项逻辑覆盖。
+- ReconFix/adapter/ServiceHost/Supervisor 精确矩阵：`158/158 PASS`；最终 adapter 合同：`29/29 PASS`。
+- changed JS ESLint、`node --check`、JSON parse 与 `git diff --check`：PASS；未出现 worker 生命周期 cancellation。
+- `release-check`、`check-vars`、`scan:vars` 均按用户明确要求跳过，不能声明为 PASS。
+- Windows packaged、真实样本、资金与恢复人工复核仍是 production gate；本地及 CI 自动化不得据此开启 production。
+
 ## Evidence
 
 | 证据 | 结果 | 覆盖的行为/风险 |
