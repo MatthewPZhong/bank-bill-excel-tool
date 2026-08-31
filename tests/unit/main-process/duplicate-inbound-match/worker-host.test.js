@@ -55,6 +55,7 @@ test('Worker busy不排队、不终止active job，并在adopt ACK后才完成',
   const port = new FakePort();
   let finish;
   let closed = 0;
+  let transportClosed = 0;
   const service = {
     status: () => ({ active: true, stateRevision: 0, stableSummary: {} }),
     close() { closed += 1; },
@@ -69,7 +70,10 @@ test('Worker busy不排队、不终止active job，并在adopt ACK后才完成',
       };
     }
   };
-  startDuplicateWorker(port, { service });
+  startDuplicateWorker(port, {
+    service,
+    close() { transportClosed += 1; }
+  });
   let mainSeq = 0;
   const control = (operation, controlId, jobRef, payload) => createServiceControlEnvelope({
     direction: 'command', operation, serviceKey: DUPLICATE_SERVICE_KEY, controlId,
@@ -113,6 +117,9 @@ test('Worker busy不排队、不终止active job，并在adopt ACK后才完成',
   port.command(control('executor:close', 'close-1', null, {}));
   assert.equal(closed, 1);
   assert.equal(port.sent.at(-1).operation, 'executor:close-ack');
+  assert.equal(transportClosed, 0, '必须先投递close-ack再关闭MessagePort');
+  await tick();
+  assert.equal(transportClosed, 1);
 });
 
 test('terminal先于shutdown cancel到达时精确迟到cancel幂等且不追加ACK', async () => {
