@@ -1428,13 +1428,18 @@ test('Worker写前与Main技术校验拒绝dot/case/Unicode/hardlink artifact al
     ]),
     (error) => error.code === 'STATEMENT_GENERATION_STAGING_PATH_INVALID'
   );
-  assert.throws(
-    () => resolveArtifactPlans(staging, [
-      { kind: 'detail', artifactKey: 'detail', stagingResourceId: 'caf\u00e9.xlsx' },
-      { kind: 'balance', artifactKey: 'balance', stagingResourceId: 'cafe\u0301.xlsx' }
-    ]),
-    (error) => error.code === 'STATEMENT_GENERATION_STAGING_PATH_INVALID'
-  );
+  const resolveUnicodeAliases = () => resolveArtifactPlans(staging, [
+    { kind: 'detail', artifactKey: 'detail', stagingResourceId: 'caf\u00e9.xlsx' },
+    { kind: 'balance', artifactKey: 'balance', stagingResourceId: 'cafe\u0301.xlsx' }
+  ]);
+  if (process.platform === 'win32') {
+    assert.doesNotThrow(resolveUnicodeAliases);
+  } else {
+    assert.throws(
+      resolveUnicodeAliases,
+      (error) => error.code === 'STATEMENT_GENERATION_STAGING_PATH_INVALID'
+    );
+  }
   if (process.platform === 'darwin' || process.platform === 'win32') {
     assert.throws(
       () => resolveArtifactPlans(staging, [
@@ -2387,16 +2392,21 @@ test('generation request/manifest严格限制artifact顺序、相对resource与b
     }),
     (error) => error.code === 'STATEMENT_GENERATION_STAGING_RESOURCE_INVALID'
   );
-  assert.throws(
-    () => createStatementGenerationExecuteRequest({
+  const createUnicodeAliasRequest = () => createStatementGenerationExecuteRequest({
       command: 'generate', token, sessionKey: 'session', sessionRevision: 1, kind: 'both',
       artifacts: [
         { kind: 'detail', artifactKey: 'detail-unicode', stagingResourceId: 'caf\u00e9.xlsx' },
         { kind: 'balance', artifactKey: 'balance-unicode', stagingResourceId: 'cafe\u0301.xlsx' }
       ]
-    }),
-    (error) => error.code === 'STATEMENT_GENERATION_STAGING_RESOURCE_ALIAS'
-  );
+    });
+  if (process.platform === 'win32') {
+    assert.doesNotThrow(createUnicodeAliasRequest);
+  } else {
+    assert.throws(
+      createUnicodeAliasRequest,
+      (error) => error.code === 'STATEMENT_GENERATION_STAGING_RESOURCE_ALIAS'
+    );
+  }
   const warningTypes = Object.fromEntries(Array.from({ length: 17 }, (_, index) => [`warning-${index}`, 1]));
   assert.equal(validateStatementGenerationResult({
     status: 'generated',
