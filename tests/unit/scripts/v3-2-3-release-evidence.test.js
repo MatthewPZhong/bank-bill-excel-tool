@@ -240,7 +240,8 @@ function assertHistoricalGitLineEndingContract(root) {
   runGit(root, ['-c', 'core.autocrlf=true', 'clone', '--quiet', source, crlfClone]);
   assert.equal(fs.readFileSync(path.join(crlfClone, 'probe.txt')).includes(Buffer.from('\r\n')),
     true);
-  assert.notEqual(runGit(crlfClone, ['hash-object', '--', 'probe.txt']), reviewedOid);
+  assert.notEqual(runGit(crlfClone,
+    ['hash-object', '--no-filters', '--', 'probe.txt']), reviewedOid);
 
   runGit(root, ['clone', '--quiet', '--no-checkout', source, lfClone]);
   runGit(lfClone, ['config', '--local', 'core.autocrlf', 'false']);
@@ -248,7 +249,8 @@ function assertHistoricalGitLineEndingContract(root) {
   runGit(lfClone, ['checkout', '--quiet', '--detach', 'HEAD']);
   assert.equal(fs.readFileSync(path.join(lfClone, 'probe.txt')).includes(Buffer.from('\r\n')),
     false);
-  assert.equal(runGit(lfClone, ['hash-object', '--', 'probe.txt']), reviewedOid);
+  assert.equal(runGit(lfClone,
+    ['hash-object', '--no-filters', '--', 'probe.txt']), reviewedOid);
 }
 
 function assertHistoricalGitPathContract(repository) {
