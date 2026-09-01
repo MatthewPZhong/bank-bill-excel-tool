@@ -29,6 +29,7 @@
 - [x] cancel/quit在copy前后safepoint生效；inline terminate/close等待实际execution，deadline显式transport leak；Publisher committed不伪报cancelled。
 - [x] I/O lease acquire/release/reject 可证明；CPU slot/Worker slot 均为 0。
 - [x] Windows长`stagingSnapshot.ino`只在精确`/payload/result/artifact/stagingSnapshot/ino`、合法四字段snapshot与canonical uint64边界放行；附近路径、额外字段、非canonical/负数/小数/越界值及其他12～32位数字仍由finance-safe拒绝。
+- [x] 共享sequence仅对`CONTRACT-SEQUENCE-3.2.2`启用`VERSIONED_APPEND_ONLY`：冻结reviewed全文必须保持精确前缀，首个新增章节必须为`v3.2.N (N>2)`；前缀改写、旧版/非法header、NUL、任意尾随文本以及其他catalog记录继续fail closed。
 
 ## 资金与业务不变量
 
@@ -48,12 +49,14 @@
 - [x] Direct-parent最终全量：unit `6406/6410 PASS, 3 SKIP`（仅已知NSIS baseline 1 FAIL）；integration `51/51 scripts, 2455/2455 assertions`；smoke/lint/node-check/diff-check PASS。
 - [x] Round2定向：E10-A `25/25`、E10-B `47/47`、strict `18/18`，交叉聚焦 `189/189` PASS。
 - [x] Round2全量：unit `6390/6394 PASS, 3 SKIP`（仅 exact-parent 已知 NSIS baseline）；integration `51/51 scripts, 2455/2455 assertions`；smoke/lint/node-check/diff-check PASS。
+- [x] #206 append-only证据前移本地验收：定向`284/284`、只读validator CLI PASS、完整unit `6590/6593 PASS, 3 Windows-only SKIP`、packaged-inputs/lint/node-check/diff-check PASS；临时依赖链接已精确解除，E05-B未改时序项隔离`5/5`。
 - [x] E10-A、strict readback、Publisher、Governor/recovery 聚焦回归。
 - [x] 全 integration、smoke、ESLint、node --check、git diff --check；全 unit 为 `6369/6373 PASS, 3 SKIP`，仅剩 exact-parent 可复现的 Windows NSIS 依赖模板基线失败，未豁免。
 - [ ] ⚠️ 资金红线：真实资金样本需人工复核。
 - [ ] Windows Setup/portable 与 durable restart recovery 需人工门禁。
 - [ ] 旧二进制回滚前release gate必须证明open Publisher journal=0；本轮不新增迁移器。
 - [ ] 新exact Windows CI需证明E10-B unit与首次到达的integration均通过；旧job `99731507623` 未打印实际inode值，不能把本地构造值当作已观测Windows值。
+- [ ] 新exact Windows CI需证明#206的四项R3.2.2 evidence回归与integration通过；旧job `99742536070`只到unit且旧`EXACT`策略失败，不能用#207下游能力或本地绿代偿。
 
 ## 关联功能 review
 
