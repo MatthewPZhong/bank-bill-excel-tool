@@ -85,11 +85,28 @@ inspector 与两个 provider 均先于 freeze，防止后续传播再次静默�
 金额、币种、行序、Workbook、seed serializer、operation identity、Hold 生命周期或 production policy；
 资金与恢复人工复核门禁继续保留。
 
+## Exact Windows CI portability closure（2026-09-01）
+
+最终 v3.2.2 祖先传播后的 #202 exact job `99548182180` checkout head 为
+`62c96c2276b23108dab98ef8a20e41e124f9f5f9`。日志确认 lint/smoke 完成，unit 明确暴露三类
+#202-owned 测试可移植性错误：wiring source probe 用 LF 字面量匹配 Windows CRLF；Darwin physical
+alias 用例在 Windows 文件系统上伪装 `platform: 'darwin'`；legacy path 期望硬编码 POSIX 分隔符。
+这些失败都发生在测试证据层，不支持修改 production recovery、identity、serializer 或资金门禁。
+
+修复只统一 source probe 的行尾、只在真实 Darwin 执行 physical alias 回放，并用 `path.join` 构造
+host path 期望。纯函数层的 Darwin/Windows identity 断言、Windows unsafe expansion fail-closed、
+Hold/Intent/write 零副作用继续在所有主机执行。#202 引入的 target identity 明确是 Darwin/Linux NFC、
+Windows 不做 NFC/NFD；因此继承的 E09-C Unicode alias 测试只在 Windows 期待 distinct，不能按初始
+自动化假设把 Linux 也改为 distinct。#199 的 deterministic cleanup 先以 no-ff merge 传播，当前修复
+不改 `src`、workflow timeout 或 production policy。
+
 ## Evidence
 
 | 证据 | 结果 | 覆盖的行为/风险 |
 | --- | --- | --- |
 | final #199 → #202 propagation 与双恢复链 wiring | exact parents=`b54943c45ee898ffdac7e8dd17012e3d52e57db8 c014b9ee637c333639984418c31c468d2f88f460`；E09-D + Duplicate startup/wiring + E09-B + Recovery C2 定向矩阵 `106/106 PASS`；`node --check src/main.js` 与 `git diff --check` PASS | Manual Balance/Duplicate Startup inspector/provider 同时注册并在 freeze 前可达；Hold、幂等、candidate-first token、启动恢复与 production=false 无回归 |
+| exact #202 Windows cancelled job | job `99548182180`：lint/smoke 完成，unit 至少六项失败且 integration 未启动；#202-owned failures 精确落在 CRLF source probe、Darwin physical alias 回放、host path literal，以及该 PR 新 identity 合同下继承的两项 E09-C Unicode 断言 | 修复保持 production bytes、target identity、恢复与资金合同不变；新 exact Windows CI 仍必须完整验证 test 2440 后续范围 |
+| 2026-09-01 #199 cleanup propagation 与 #202 portability 本地验证 | cleanup merge exact parents=`62c96c2276b23108dab98ef8a20e41e124f9f5f9 85de7a25514bdf419481ba05190c570a41b19c69`；Electron 36 / Node 22.19 的 wiring + E09-D + E09-C + target identity 矩阵 61/61 PASS；内存 CRLF structural probe 2/2、Win32 Unicode distinct probe 2/2、Win32 host path probe 1/1 PASS；三个变更测试文件 `node --check` 与 `git diff --check` PASS | 旧 #199 为祖先；平台测试修正不改 src/bytes/identity/恢复门禁；伪平台探针不替代真实 Windows CI |
 | Reviewer Round 1 `manual-balance-seed-settlement-e09-d.test.js` baseline | 24/24 PASS | serializer golden, strict ordinal history, exact replay/conflict, no-op gate order, Main intent trace, durability persistence, canonical observation, immutable plan binding, OS target identity |
 | E09-D + E09-C/B/A/P0 + RecoveryControl/startup/preflight focused suite | 225/225 PASS | Statement service/token/session/generation/legacy plus RecoverySourceV1, Hold, target-post-image startup, FilePlan and target-identity invariants |
 | Reviewer Round 2 exact regressions | 34/34 PASS | Hold bypass, stale-plan conservation, async no-op drift, reservation crash/double startup, Windows physical names, delayed clock |
@@ -107,4 +124,5 @@ inspector 与两个 provider 均先于 freeze，防止后续传播再次静默�
 | --- | --- | --- | --- |
 | packaged Windows directory fsync capability | PROBE | R3.2.3 Windows packaged probe + human review | production remains disabled until proven |
 | packaged Windows NTFS Unicode case identity for missing targets | PROBE | use actual packaged target volume; until then only single-code-point uppercase is accepted and expansion fails closed | production remains disabled; no Unicode normalization/full-fold filename rewrite |
+| exact Windows unit after portability corrections | PROBE | 先完成 #202 本地定向与下游传播，再等待新 exact Windows CI；继续观察旧日志 test 2440 之后可能尚未执行的失败 | 新 exact CI 全绿前不合并，不以本地或旧绿色代偿 |
 | funds semantics and recovery holds | BLOCK | release owner/manual review | must not enable production automatically |
