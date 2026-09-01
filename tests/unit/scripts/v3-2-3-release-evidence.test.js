@@ -35,6 +35,20 @@ const HISTORICAL_EXACT_BASE = 'd54f97cecddef992069d867eedc227681ed562d4';
 const HISTORICAL_EXPECTED_BRANCH = 'codex/v3.2.3-r3-final-evidence-chain-20260830';
 const HISTORICAL_EXPECTED_MAIN_REF_OID = 'b7abc2fa00838fc61a94f812c1a14c48d5d4d40f';
 const HISTORICAL_EXPECTED_TRACKED_ENTRY_COUNT = 2018;
+const HISTORICAL_CANDIDATE_ROOT_PREFIX = 'v323-release-evidence-';
+const HISTORICAL_OUTER_ROOT_PREFIX = 'r3-';
+const HISTORICAL_PREVIOUS_OUTER_ROOT_PREFIX = 'v323-exact-evidence-';
+const HISTORICAL_MKDTEMP_SUFFIX_SAMPLE = 'ABCDEF';
+const HISTORICAL_WINDOWS_TEMP_ROOT = 'C:\\Users\\runneradmin\\AppData\\Local\\Temp';
+const WINDOWS_CLASSIC_MAX_PATH_CHARACTERS = 259;
+const HISTORICAL_LONGEST_TRACKED_PATHS = Object.freeze([
+  'changes/background-execution-v3.2.x-contract-baseline/changes/' +
+    'background-execution/validation/fixtures/invalid/' +
+    'policy-publisher-journal-with-critical-intent.json',
+  'changes/background-execution-v3.2.x-contract-baseline/changes/' +
+    'background-execution/validation/fixtures/invalid/' +
+    'policy-target-post-image-without-main-intent.json'
+]);
 const HISTORICAL_RELEASE_EVIDENCE_PATHS = Object.freeze([
   'changes/background-execution-r3-2-3-release-evidence/implementation-notes.md',
   'changes/background-execution-r3-2-3-release-evidence/preflight.md',
@@ -353,7 +367,7 @@ function limitCandidateDiagnosticPaths(relativePaths) {
 function assertHistoricalCandidateGitBaseline(root, repository, environment) {
   let candidateRoot = null;
   try {
-    candidateRoot = fs.mkdtempSync(path.join(root, 'candidate-baseline-'));
+    candidateRoot = fs.mkdtempSync(path.join(root, HISTORICAL_CANDIDATE_ROOT_PREFIX));
     const candidateRepository = path.join(candidateRoot, 'repo');
     runControlledCandidateGit(candidateRoot, [
       'clone', '--quiet', '--shared', '--no-checkout', repository, candidateRepository
@@ -568,6 +582,46 @@ function assertHistoricalGitLineEndingContract(root) {
     ['hash-object', '--no-filters', '--', 'probe.txt']), reviewedOid);
 }
 
+function historicalCandidatePathLengths(outerPrefix) {
+  return HISTORICAL_LONGEST_TRACKED_PATHS.map((relativePath) => path.win32.join(
+    HISTORICAL_WINDOWS_TEMP_ROOT,
+    `${outerPrefix}${HISTORICAL_MKDTEMP_SUFFIX_SAMPLE}`,
+    `${HISTORICAL_CANDIDATE_ROOT_PREFIX}${HISTORICAL_MKDTEMP_SUFFIX_SAMPLE}`,
+    'repo',
+    relativePath
+  ).length);
+}
+
+function assertHistoricalCandidatePathBudget(repository, historicalTestSource) {
+  const exactCandidateConstruction =
+    "fs.mkdtempSync(path.join(os.tmpdir(), 'v323-release-evidence-'))";
+  assert.equal(historicalTestSource.split(exactCandidateConstruction).length - 1, 1);
+
+  for (const reference of [HISTORICAL_EXACT_BASE, EXACT_EVIDENCE_HEAD]) {
+    const tree = parseCandidateGitTree(readGit(repository, [
+      'ls-tree', '-rz', '--full-tree', reference
+    ]));
+    const longestPaths = [...tree.keys()]
+      .sort((left, right) => right.length - left.length || left.localeCompare(right))
+      .slice(0, HISTORICAL_LONGEST_TRACKED_PATHS.length);
+    assert.deepEqual(longestPaths, HISTORICAL_LONGEST_TRACKED_PATHS);
+    for (const relativePath of HISTORICAL_LONGEST_TRACKED_PATHS) {
+      assert.equal(tree.get(relativePath)?.type, 'blob');
+    }
+  }
+
+  const previousLengths = historicalCandidatePathLengths(
+    HISTORICAL_PREVIOUS_OUTER_ROOT_PREFIX
+  );
+  const currentLengths = historicalCandidatePathLengths(HISTORICAL_OUTER_ROOT_PREFIX);
+  assert.deepEqual(previousLengths, [262, 261]);
+  assert.deepEqual(currentLengths, [245, 244]);
+  assert.equal(previousLengths.every((length) =>
+    length > WINDOWS_CLASSIC_MAX_PATH_CHARACTERS), true);
+  assert.equal(currentLengths.every((length) =>
+    length <= WINDOWS_CLASSIC_MAX_PATH_CHARACTERS), true);
+}
+
 function assertHistoricalGitPathContract(repository) {
   assert.equal(EXACT_BASE, HISTORICAL_EXACT_BASE);
   assert.equal(EXPECTED_BRANCH, HISTORICAL_EXPECTED_BRANCH);
@@ -597,6 +651,7 @@ function assertHistoricalGitPathContract(repository) {
     /const expectedPermissions = entry\.mode === '100755' \? 0o755 : 0o644;/);
   assert.match(testSource,
     /env: \{ \.\.\.process\.env, NODE_PATH: SHARED_NODE_MODULES \}/);
+  assertHistoricalCandidatePathBudget(repository, testSource);
   const exactModes = parseHistoricalGitTreeModes(readGit(repository, [
     'ls-tree', '-rz', '--full-tree', EXACT_EVIDENCE_HEAD
   ]));
@@ -815,7 +870,7 @@ function assertCliFailure(result, expectedCode) {
 
 if (!RUN_EXACT_SUITE) {
   nodeTest('R3.2.3 历史 exact evidence 在原提交和原分支上完整复验', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'v323-exact-evidence-'));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), HISTORICAL_OUTER_ROOT_PREFIX));
     try {
       const canonicalTempRoot = fs.realpathSync.native(root);
       const repository = path.join(canonicalTempRoot, 'repo');
