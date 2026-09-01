@@ -28,6 +28,7 @@
 - [x] Publisher failure 不 blind retry；committed保持archive-handoff journal，settlement失败/回包丢失只走既有recovery并保留RecoverySource/Hold evidence。
 - [x] cancel/quit在copy前后safepoint生效；inline terminate/close等待实际execution，deadline显式transport leak；Publisher committed不伪报cancelled。
 - [x] I/O lease acquire/release/reject 可证明；CPU slot/Worker slot 均为 0。
+- [x] Windows长`stagingSnapshot.ino`只在精确`/payload/result/artifact/stagingSnapshot/ino`、合法四字段snapshot与canonical uint64边界放行；附近路径、额外字段、非canonical/负数/小数/越界值及其他12～32位数字仍由finance-safe拒绝。
 
 ## 资金与业务不变量
 
@@ -52,9 +53,11 @@
 - [ ] ⚠️ 资金红线：真实资金样本需人工复核。
 - [ ] Windows Setup/portable 与 durable restart recovery 需人工门禁。
 - [ ] 旧二进制回滚前release gate必须证明open Publisher journal=0；本轮不新增迁移器。
+- [ ] 新exact Windows CI需证明E10-B unit与首次到达的integration均通过；旧job `99731507623` 未打印实际inode值，不能把本地构造值当作已观测Windows值。
 
 ## 关联功能 review
 
 - 命中`ArchiveRepository` / `ArchiveService` Risk-sensitive审计血缘：本轮不改十四表schema/批号/状态/删除/Blob合同，只在内部artifact metadata持久FilePlan已冻结的bounded target-parent evidence；public list/detail显式剥离该路径/identity，定向真实SQLite+FS已验证raw持久与public DTO不泄露。
 - 新增的 `new-account:save-as` policy、copy contract、FilePlan authority brand 与 singleton Publisher wrapper 是跨文件 seam；本轮已按 E10-B checklist 及 archive/FilePlan/TaskLifecycle 定向回归 review，留待版本硬节点由 `/check-vars` 正式统计（本任务明确禁止运行 `check-vars` / `scan:vars`）。
 - Round4只增加Publisher内部required-parent/recovery-root preflight，不改`freezeWorkerBatchContext`、TaskLifecycle、Archive schema/receipt或FilePlan shape；手工对照important-variables后无新增精确变量命中，Publisher/FilePlan/Archive关联链已由`500/500`交叉回归与全integration覆盖。
+- Windows inode修复只触及`new-account:save-as` result validator的finance-safe delegate，不改全局`FULL_ACCOUNT_PATTERN`、protocol schema、source identity、Publisher/恢复/资金合同或production flag；关联链需复核inline adapter→protocol privacy→Supervisor terminal→Publisher恰好一次。

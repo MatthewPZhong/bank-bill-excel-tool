@@ -38,6 +38,7 @@
 | shutdown cancel 在不可中断 `copyFile` 中的边界 | 生命周期 | 中 | 容易 | inline adapter AbortSignal；copyFile 无通用 AbortSignal | PROBE | 实际slow-copy heartbeat/quit/deadline test | copy中等待syscall；transport cleanup等待实际execution，超时显式leak并保留owner |
 | Windows packaged durable publication | 发布门禁 | 高 | 困难 | 合同明确要求 R3.2.3 packaged probe | BLOCK production only | Setup/portable 人工 fault probe | 不阻塞 dormant E10-B，production 必须保持 false |
 | 真实资金 workbook 展示与业务摘要 | 资金门禁 | 高 | 困难 | 自动化只能证明 E10-A digest 不漂移 | BLOCK production only | 财务人工逐项复核 | 自动化不替代人工；不扩大 E10-B 业务语义 |
+| Windows长inode是否被通用finance-safe误判为完整账号 | 协议/隐私边界 | 高 | 容易 | exact job `99731507623`与真实runtime envelope probe定位到`/payload/result/artifact/stagingSnapshot/ino` | PROBE | canonical uint64正例+附近路径/坏shape/越界负例 | 只为精确合法staging snapshot inode增加domain delegate；不改全局隐私规则、不丢弃inode |
 
 ## 风险优先计划
 
@@ -51,3 +52,4 @@
 | 5a | recovery root/direct-parent overlap preflight | 唯一index/journal/receipt可发现性 | equal/inside/ancestor与multi-target均在零写入边界拒绝 | 禁止Publisher batch | 只撤销新guard；不改旧journal reader |
 | 6 | 注册 dormant policy/runtime | I/O=1、CPU/Worker=0、cancel/quit | Governor acquire/release/reject 与 heartbeat | production 不可启用 | production 保持 false/legacy/0 |
 | 7 | 全量回归与 blindspot pass | E10-A/资金/平台不漂移 | 定向、unit、integration、smoke、lint/check | 阻止交付 | 精确回退 E10-B commits |
+| 8 | exact Windows protocol回归 | 长inode证据穿过runtime policy且隐私边界不扩张 | E10-B protocol正负矩阵、完整unit及新CI unit/integration | 保持production关闭并阻止合并 | 仅回退精确delegate/test/docs，不改全局finance-safe |

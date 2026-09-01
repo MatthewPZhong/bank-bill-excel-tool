@@ -14,6 +14,9 @@ const {
   isBackgroundExecutionProductionEnabled
 } = require('../../../src/main-process/background-execution/runtime');
 const {
+  createJobEnvelope
+} = require('../../../src/main-process/background-execution/protocol');
+const {
   prepareToolboxPublication
 } = require('../../../src/main-process/toolbox-output-publication');
 const {
@@ -100,6 +103,22 @@ function batchContext(operationKey = 'new-account-e10-b-operation') {
     parentRunId: 'new-account-e10-b-parent',
     operationKey
   });
+}
+
+function saveAsDoneEnvelope(runtime, result, operationKey = 'new-account-e10-b-inode-evidence') {
+  return createJobEnvelope({
+    direction: 'event',
+    operation: 'job:done',
+    actionKey: NEW_ACCOUNT_SAVE_AS_ACTION,
+    operationKey,
+    jobId: 'new-account-e10-b-inode-job',
+    workerInstanceId: 'new-account-e10-b-inline-worker',
+    serviceGeneration: null,
+    unitId: null,
+    seq: 1,
+    context: operationContext(operationKey),
+    payload: { result }
+  }, { policyRegistry: runtime.policyRegistry });
 }
 
 async function generatedFixture(root) {
@@ -291,6 +310,73 @@ test('copy contract 不含 final target，copyFile 只接 task-owned staging', a
   assert.notEqual(observed.destinationPath, options.targetPath);
   assert.equal(fs.existsSync(options.targetPath), false);
   assert.deepEqual(fs.readFileSync(options.stagingPath), fs.readFileSync(fixture.sourcePath));
+});
+
+test('Windows长inode仅在精确stagingSnapshot证据路径通过finance-safe协议', async () => {
+  const runtime = createBackgroundExecutionRuntime({
+    availableParallelism: 4,
+    freeMemoryBytes: 4 * 1024 ** 3,
+    totalMemoryBytes: 8 * 1024 ** 3,
+    systemReserveBytes: 0
+  });
+  const longInode = '1234567890123456';
+  const result = {
+    schemaVersion: 1,
+    status: 'copied',
+    artifact: {
+      artifactKey: `output-${'a'.repeat(64)}`,
+      byteSize: 4096,
+      sha256: 'b'.repeat(64),
+      sourceIdentitySha256: 'c'.repeat(64),
+      stagingSnapshot: {
+        sizeBytes: 4096,
+        mtimeMs: 1788192000123.5,
+        ctimeMs: 1788192000456.75,
+        ino: longInode
+      }
+    }
+  };
+  try {
+    assert.equal(validateNewAccountSaveAsResult(result), true);
+    const envelope = saveAsDoneEnvelope(runtime, result);
+    assert.equal(envelope.payload.result.artifact.stagingSnapshot.ino, longInode);
+
+    const invalidResults = [];
+    const nearbyPath = structuredClone(result);
+    nearbyPath.artifact.stagingSnapshot.ino = '7';
+    nearbyPath.artifact.nearby = { ino: longInode };
+    invalidResults.push(nearbyPath);
+
+    const extraSnapshotField = structuredClone(result);
+    extraSnapshotField.artifact.stagingSnapshot.extra = true;
+    invalidResults.push(extraSnapshotField);
+
+    const wrongSnapshotShape = structuredClone(result);
+    wrongSnapshotShape.artifact.stagingSnapshot.sizeBytes = '4096';
+    invalidResults.push(wrongSnapshotShape);
+
+    const nonCanonicalInode = structuredClone(result);
+    nonCanonicalInode.artifact.stagingSnapshot.ino = `0${longInode}`;
+    invalidResults.push(nonCanonicalInode);
+
+    const overflowInode = structuredClone(result);
+    overflowInode.artifact.stagingSnapshot.ino = '18446744073709551616';
+    invalidResults.push(overflowInode);
+
+    const unrelatedIdentity = structuredClone(result);
+    unrelatedIdentity.artifact.stagingSnapshot.ino = '7';
+    unrelatedIdentity.artifact.source = { inode: longInode };
+    invalidResults.push(unrelatedIdentity);
+
+    for (const invalid of invalidResults) {
+      assert.throws(
+        () => saveAsDoneEnvelope(runtime, invalid),
+        (error) => error.code === 'PROTOCOL_PRIVACY_VIOLATION'
+      );
+    }
+  } finally {
+    await runtime.shutdown({ timeoutMs: 10000 });
+  }
 });
 
 test('E10-B只接受out-of-band Main authority且缺settlement owner时Publisher=0', async () => {
