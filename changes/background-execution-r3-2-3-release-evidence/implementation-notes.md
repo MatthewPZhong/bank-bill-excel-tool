@@ -65,6 +65,7 @@ node --test --test-concurrency=1 tests/unit/main-process/statement-state-footpri
 | isolated dependency environment | worktree 增加 ignored `node_modules` symlink 指向主仓已安装依赖；未安装、未修改、未提交依赖 | 使 validator 的真实 NewAccount runtime authority 可加载；链接不属于证据 commit。 |
 | Windows historical exact失败 | job `99731507623` checkout `d0379600271e04156736468d2f67ddd7a6a0f055`；外层unit `6562/6594`、30 fail/2 skip；nested `57fab04a` suite为4 pass/18 fail，首错`GIT_REPOSITORY_IDENTITY_INVALID`，authority随后`AUTHORITY_MODULE_PATH_INVALID` | 失败由短路径lexical identity污染harness；不得把未到目标断言的18项归因于证据内容漂移。 |
 | canonical historical wrapper回归 | 官方Node22.18；正常temp与精确mktemp内`RUNNER~1` symlink alias temp各运行一次当前外层wrapper，二者均成功复验nested historical `22/22`（外层`1/1`），临时alias资源按精确路径清理 | canonical clone cwd与TMP/TEMP/TMPDIR足以隔离alias；真实Windows仍是权威PROBE，未把macOS本地结果升级为Windows通过。 |
+| Windows protocol/path修复联合验收 | 官方Node22.18；E10-B/R3.2.3/protocol/privacy/Supervisor/inline adapter及既有跨模块17文件矩阵`436/436`；完整unit `6592/6595`、0 fail/3 Windows-only skip/0 cancelled，日志`logs/unit-tests/unit-20260901-124639.log`；`check:packaged-inputs` PASS、lint exit0、changed JS node-check与diff-check通过 | 长inode精确allowlist、Publisher/cleanup、historical 22/22、R3 tamper/privacy/action-scope及前序业务合同同树验证；未运行被禁release-check/check-vars/scan:vars。 |
 
 ## Reconciliation Blindspot
 
@@ -80,5 +81,6 @@ node --test --test-concurrency=1 tests/unit/main-process/statement-state-footpri
 | Windows packaged、RSS、dev/ino、directory fsync、app quit | BLOCK production | release owner / Windows 实机 | 不阻止 evidence-only merge；阻止 production enable。 |
 | 真实资金样本、Excel/WPS 与 durable recovery | BLOCK production | 资金/恢复人工复核 | 不阻止 evidence-only merge；阻止 production enable。 |
 | 当前macOS alias probe能否等价模拟Windows `RUNNER~1` | PROBE；仅验证wrapper把nested repo/temp转换为真实路径，不作为Windows通过证据 | 临时symlink alias与正常环境各跑historical suite；最终仍由新exact Windows CI权威验证unit/integration | 本地probe失败若源于宿主差异不放宽Git identity；旧CI/本地绿不代偿。 |
+| 新exact Windows unit与首次到达的integration | PROBE；旧job在unit阶段退出，不能由本地完整unit代偿 | 推送严格新head后等待全部exact smoke/build成功；失败仅按新日志隔离 | 阻止合并直至精确新CI全部成功。 |
 
 未运行 `release-check`、`check-vars`、`scan:vars`，符合本任务明确禁令。
