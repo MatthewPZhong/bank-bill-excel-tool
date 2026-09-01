@@ -546,9 +546,11 @@ function inspectGitBackedFile(repositoryRoot, reviewedHead, source) {
   if (blob.status !== 0 || !Buffer.isBuffer(blob.stdout)) {
     return Object.freeze({ error: 'Git blob cannot be read' });
   }
+  const reviewedText = canonicalText(blob.stdout.toString('utf8'));
   return Object.freeze({
     blobOid,
-    sha256: sha256Text(blob.stdout.toString('utf8'))
+    sha256: sha256Text(reviewedText),
+    reviewedText
   });
 }
 
@@ -625,7 +627,14 @@ function scanPrivacy(value, add, fieldPath = '', key = null) {
   }
 }
 
-function validateGitRecord(record, recordPath, repositoryRoot, add, expectEqual) {
+function validateGitRecord(
+  record,
+  recordPath,
+  repositoryRoot,
+  add,
+  expectEqual,
+  options = {}
+) {
   const gitFile = inspectGitBackedFile(repositoryRoot, record.reviewedHead, record.source);
   if (gitFile.error) {
     add(recordPath + '/reviewedHead', gitFile.error);
@@ -633,6 +642,9 @@ function validateGitRecord(record, recordPath, repositoryRoot, add, expectEqual)
   }
   expectEqual(recordPath + '/blobOid', record.blobOid, gitFile.blobOid);
   expectEqual(recordPath + '/sha256', record.sha256, gitFile.sha256);
+  if (options.currentTextPolicy === 'FROZEN_REVIEWED_BLOB') {
+    return Object.freeze({ ...gitFile, currentText: gitFile.reviewedText });
+  }
   const currentPath = path.join(repositoryRoot, record.source);
   let currentText;
   try {
@@ -728,7 +740,8 @@ function validateReleaseEvidence(snapshot, options = {}) {
         anchorPath,
         repositoryRoot,
         add,
-        expectEqual
+        expectEqual,
+        { currentTextPolicy: 'FROZEN_REVIEWED_BLOB' }
       );
       if (gitFile) {
         let cursor = 0;

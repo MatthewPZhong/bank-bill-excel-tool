@@ -141,6 +141,24 @@ test('R3.2.2 snapshot锁定10 action、18 base anchors与独立证据闭环', ()
   assert.equal(snapshot.baseAnchors.length, 18);
 });
 
+test('历史base anchor从冻结reviewed blob取证，不被后续版本合法改写反向失效', () => {
+  const snapshot = loadSnapshot();
+  const anchor = snapshot.baseAnchors.find(
+    (item) => item.id === 'DUPLICATE-IMPORT-STARTUP-OWNER'
+  );
+  const reviewed = inspectGitBackedFile(
+    REPOSITORY_ROOT,
+    anchor.reviewedHead,
+    anchor.source
+  );
+  const current = fs.readFileSync(path.join(REPOSITORY_ROOT, anchor.source), 'utf8');
+  assert.match(reviewed.reviewedText, /startup严格先注册只读inspector/);
+  assert.doesNotMatch(current, /startup严格先注册只读inspector/);
+  assert.match(current, /startup在freeze前同时注册manual与duplicate恢复链/);
+  const result = validateReleaseEvidence(snapshot);
+  assert.equal(result.valid, true, JSON.stringify(result.errors));
+});
+
 test('历史snapshot保持3.1.14事实，当前authority只接受3.2.2及后续v3.2.x稳定版本', () => {
   const snapshot = loadSnapshot();
   assert.deepEqual(snapshot.packageVersion, { value: '3.1.14', bumped: false });
