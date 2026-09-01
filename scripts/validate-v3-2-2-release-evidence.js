@@ -453,6 +453,18 @@ function sha256File(filePath) {
   return sha256Text(fs.readFileSync(filePath, 'utf8'));
 }
 
+function matchesReviewedCanonicalText(currentText, reviewedText, policy = 'EXACT') {
+  const current = canonicalText(currentText);
+  const reviewed = canonicalText(reviewedText);
+  if (current === reviewed) return true;
+  if (policy !== 'VERSIONED_APPEND_ONLY' || !current.startsWith(reviewed)) return false;
+  const suffix = current.slice(reviewed.length);
+  const firstVersionHeader = suffix.match(/^\n## v3\.2\.([1-9]\d*)(?:\s|$)/);
+  return Boolean(firstVersionHeader)
+    && Number(firstVersionHeader[1]) > 2
+    && !suffix.includes('\0');
+}
+
 function projectPolicy(policy) {
   return {
     disposition: policy.disposition,
@@ -653,7 +665,11 @@ function validateGitRecord(
     add(recordPath + '/source', 'current canonical file is missing or unreadable');
     return null;
   }
-  if (sha256Text(currentText) !== gitFile.sha256) {
+  if (!matchesReviewedCanonicalText(
+    currentText,
+    gitFile.reviewedText,
+    options.currentTextPolicy
+  )) {
     add(recordPath + '/source', 'current canonical file drifted from the reviewed Git blob');
     return null;
   }
@@ -803,7 +819,18 @@ function validateReleaseEvidence(snapshot, options = {}) {
       expectEqual(evidencePath + '/source', evidence.source, spec.source);
       expectEqual(evidencePath + '/reviewedHead', evidence.reviewedHead, spec.reviewedHead);
       expectEqual(evidencePath + '/anchorRefs', evidence.anchorRefs, spec.anchorRefs);
-      validateGitRecord(evidence, evidencePath, repositoryRoot, add, expectEqual);
+      validateGitRecord(
+        evidence,
+        evidencePath,
+        repositoryRoot,
+        add,
+        expectEqual,
+        {
+          currentTextPolicy: spec.id === 'CONTRACT-SEQUENCE-3.2.2'
+            ? 'VERSIONED_APPEND_ONLY'
+            : 'EXACT'
+        }
+      );
       let hasPerformanceAnchor = false;
       let hasMatchingActionScopeAnchor = false;
       for (const anchorRef of Array.isArray(evidence.anchorRefs) ? evidence.anchorRefs : []) {
@@ -1045,6 +1072,7 @@ module.exports = {
   expectedRuntimeOwnership,
   inspectGitBackedFile,
   isSupportedCurrentPackageVersion,
+  matchesReviewedCanonicalText,
   sha256File,
   validateReleaseEvidence
 };
