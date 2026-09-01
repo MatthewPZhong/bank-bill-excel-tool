@@ -19,6 +19,7 @@
 | 复用 R3.2.4 已证实的 exact Git/raw JSON/audit-root guard，audit root 覆盖整个 `src`，删除 E12 topology 专属逻辑。 | checkout/duplicate/number/ignored shim 是已有真实反例；本版真实 require graph 会进入 `src/backend`；E12 topology 不属于本版。 | 只审计 `src/main-process`、照搬全部 R3.2.4 版本逻辑或重新发明防御。 | ignored backend extensionless shim 不能执行非 HEAD 字节；保持本版必要最小范围。 |
 | 本地 merge-ready 与 production-ready 分离。 | Windows/真实资金/恢复人工门禁仍未完成。 | 自动测试升级人工 gate。 | global decision 固定 `localMergeReady=true / productionReady=false`。 |
 | 历史 exact suite的外层wrapper规范化clone cwd与三类temp环境变量。 | exact Windows job `99731507623` 中nested suite因`C:\Users\RUNNER~1\...`与Git/realpath长路径身份不一致，先报`GIT_REPOSITORY_IDENTITY_INVALID`，后续authority/tamper门禁未到目标断言。 | 修改`57fab04a`历史提交或历史/current validator；放宽Git identity；重签snapshot。 | 仅当前测试harness消除短路径别名；historical bytes、22-test期望、Git/tamper/privacy/action-scope/current-file strict合同不变。 |
+| 历史 exact suite 仅在真实 Windows 通过受控 preload 适配 Git tree 路径分隔符，并把 nested/candidate 临时仓库限定在同一可丢弃 canonical root。 | exact Windows job `99753294084` 已关闭 `RUNNER~1`，但历史 validator 唯一一处 `path.relative()` 对嵌套路径返回反斜杠，与 Git `ls-tree` 的 `/` 逐字比较，导致 13 项前置级联失败；历史 candidate CLI 还把 `NODE_PATH` 固定为 macOS 路径。 | 修改历史/current validator、跳过 historical suite、全局改写 path/Git 输出，或在 clone/audit root 内放置依赖。 | 当前 tracked wrapper 锁定两个 historical blob 与调用点数量；preload 只包装 `node:path.relative` 的 cwd 内 contained 结果，临时 `node_modules` 链接只复用当前锁定依赖且位于 clone 外，随精确 root 清理。 |
 
 ## Assumptions
 
@@ -37,6 +38,10 @@ Reviewer blocking P2 证明原 `src/main-process` audit root 不包含真实依�
 2026-08-30 复审发现 E09-C 重复 `prepare-generation` 入口仍走 release-first，已改为复用 E09-B candidate-first replacement，并通过显式 merge commit 传播至 E09-D、E10-A、E10-B。最终证据在最终 v3.2.2 基础上再次重建到单父 `259b3cf6bf5a4414dc81bbc40f859b8b30b3e430`，不接受旧 E09-C head、旧下游 head 或双父 merge 结果代偿。
 
 同日远端 Windows CI 证明 E09-P0 manual-seed golden 直接比较 `path.relative()` 与 `/` frozen path，属于平台分隔符测试旁路。修复只在断言前规范化分隔符，并已按 `#192 → #193 → #197 → #199 → #202 → #205 → #206` 在最终 v3.2.2 上显式传播。当前 reviewed heads 依次为 `03d1cfcb`、`d386fba1`、`2b2b616d`、`733aa0aa`、`ff48ae4a`、`1f568bd8`、`259b3cf6`；旧失败快照与旧下游 head 不得代偿。
+
+2026-09-01 的第二个 exact Windows historical 日志推翻了“只规范短路径即可跨平台复验”的完整性判断。canonical long path 已生效，剩余首错是历史 validator 把 Git POSIX 路径与 Windows `path.relative()` 反斜杠结果逐字比较；13 项 tamper/privacy/action-scope 失败均被这一前置错误遮蔽。实际方案因此补充为当前外层 test-only preload，并把历史测试所需的当前锁定依赖放在可丢弃 root 的 `node_modules` 链接上，供 nested 与 candidate 仓库按正常祖先解析；历史/current validator、snapshot、Git identity 与所有负例字节不变。
+
+separator harness 增加最终临时根清理断言后的首次全量 unit 在未改 E05-C 用例 `mpt-import-e05-c.test.js:704` 上出现一次并发时序失败（日志 `unit-20260901-145523.log`）；该文件相对旧 #207 零变化，单文件连续复验 `5/5`，随后最终全量 `6592/6595`、0 fail。未修改 E05-C 或扩大本次 R3 test-only 范围；失败与隔离结果均保留为验收偏差证据。
 
 最终全量 unit 又暴露两个跨版本收尾问题：归档 source root 被 symlink 替换时，后台 ArchiveService 与 StorageRootManager 会竞态返回不同错误码；v3.2.2 evidence validator 把共享 implementation sequence 的合法 v3.2.3 只追加章节误判为冻结内容漂移。两项均在独立单父 `b180ca0e` 中以 fail-closed 方式修复并完成全量 unit/integration/smoke；R3.2.3 因而从该稳定化节点重新生成，仍保持 5 文件纯证据提交。E09/E10 reviewed heads 不变，稳定化节点不得伪装成 E10-B 的 reviewed head。
 
@@ -65,6 +70,9 @@ node --test --test-concurrency=1 tests/unit/main-process/statement-state-footpri
 | isolated dependency environment | worktree 增加 ignored `node_modules` symlink 指向主仓已安装依赖；未安装、未修改、未提交依赖 | 使 validator 的真实 NewAccount runtime authority 可加载；链接不属于证据 commit。 |
 | Windows historical exact失败 | job `99731507623` checkout `d0379600271e04156736468d2f67ddd7a6a0f055`；外层unit `6562/6594`、30 fail/2 skip；nested `57fab04a` suite为4 pass/18 fail，首错`GIT_REPOSITORY_IDENTITY_INVALID`，authority随后`AUTHORITY_MODULE_PATH_INVALID` | 失败由短路径lexical identity污染harness；不得把未到目标断言的18项归因于证据内容漂移。 |
 | canonical historical wrapper回归 | 官方Node22.18；正常temp与精确mktemp内`RUNNER~1` symlink alias temp各运行一次当前外层wrapper，二者均成功复验nested historical `22/22`（外层`1/1`），临时alias资源按精确路径清理 | canonical clone cwd与TMP/TEMP/TMPDIR足以隔离alias；真实Windows仍是权威PROBE，未把macOS本地结果升级为Windows通过。 |
+| Windows Git separator exact失败 | job `99753294084` checkout `75d7ff89cd87579b2b9831ca9a82bbbaf6216030`；lint/smoke成功，unit `6592/6595`、1 fail/2 skip，integration未启动；nested `57fab04a` 为9 pass/13 fail，根错误为`GIT_HEAD_ENTRY_PATH_INVALID`、`GIT_AUDIT_ROOT_EXTRA_ENTRY`与`AUTHORITY_MODULE_PATH_INVALID` | canonical long path 已关闭旧 alias identity；historical validator 唯一 `path.relative()` 在Windows生成反斜杠，其余13项是前置级联，不是独立证据漂移。 |
+| 受控 preload 与依赖 root 本地机制回归 | 官方Node22.18；固定 preload 文件名含空格，exclusive regular file 写入后由父/子 Node 经唯一 `NODE_OPTIONS --require` 继承；`path.win32` 覆盖嵌套转换、顶层不变、`..`/跨drive/off-cwd不变、非Windows no-op；正常temp与精确 `RUNNER~1` alias均外层`1/1`且nested historical `22/22` | 证明 adapter 源码/作用域/继承/清理机制及全部历史负例在本地未被遮蔽；真实 win32 分支与integration仍只由新exact Windows CI确认。 |
+| separator harness最终本地验收 | 官方Node22.18；v3.2.2 evidence `30/30`；R3/E10-B/protocol/privacy及前序17文件矩阵`436/436`；未改E05-C时序用例隔离`5/5`；最终完整unit `6592/6595`、0 fail/3 Windows-only skip/0 cancelled，日志`logs/unit-tests/unit-20260901-145840.log`；`check:packaged-inputs` PASS、lint exit0、changed JS node-check与diff-check通过 | historical 22项、tamper/privacy/action-scope、Publisher/cleanup、protocol/Supervisor及前序业务合同同树验证；本地结果不代偿新exact Windows unit/integration。 |
 | Windows protocol/path修复联合验收 | 官方Node22.18；E10-B/R3.2.3/protocol/privacy/Supervisor/inline adapter及既有跨模块17文件矩阵`436/436`；完整unit `6592/6595`、0 fail/3 Windows-only skip/0 cancelled，日志`logs/unit-tests/unit-20260901-124639.log`；`check:packaged-inputs` PASS、lint exit0、changed JS node-check与diff-check通过 | 长inode精确allowlist、Publisher/cleanup、historical 22/22、R3 tamper/privacy/action-scope及前序业务合同同树验证；未运行被禁release-check/check-vars/scan:vars。 |
 
 ## Reconciliation Blindspot
@@ -81,6 +89,7 @@ node --test --test-concurrency=1 tests/unit/main-process/statement-state-footpri
 | Windows packaged、RSS、dev/ino、directory fsync、app quit | BLOCK production | release owner / Windows 实机 | 不阻止 evidence-only merge；阻止 production enable。 |
 | 真实资金样本、Excel/WPS 与 durable recovery | BLOCK production | 资金/恢复人工复核 | 不阻止 evidence-only merge；阻止 production enable。 |
 | 当前macOS alias probe能否等价模拟Windows `RUNNER~1` | PROBE；仅验证wrapper把nested repo/temp转换为真实路径，不作为Windows通过证据 | 临时symlink alias与正常环境各跑historical suite；最终仍由新exact Windows CI权威验证unit/integration | 本地probe失败若源于宿主差异不放宽Git identity；旧CI/本地绿不代偿。 |
+| 受控 separator preload 与临时依赖 root 在真实 Windows 的行为 | PROBE；本地只证明 `path.win32` 纯机制、含空格 `NODE_OPTIONS`、父子继承和22项完整负例，不能宣称win32分支PASS | 推送严格新head后等待exact Windows unit；核对nested 22/22、candidate CLI及root清理 | 阻止合并；失败不得扩成修改historical/current validator、snapshot或全局module/path旁路。 |
 | 新exact Windows unit与首次到达的integration | PROBE；旧job在unit阶段退出，不能由本地完整unit代偿 | 推送严格新head后等待全部exact smoke/build成功；失败仅按新日志隔离 | 阻止合并直至精确新CI全部成功。 |
 
 未运行 `release-check`、`check-vars`、`scan:vars`，符合本任务明确禁令。

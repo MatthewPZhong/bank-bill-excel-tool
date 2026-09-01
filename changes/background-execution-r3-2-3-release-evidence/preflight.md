@@ -16,6 +16,7 @@
 | NewAccount 两项 direct policy 已进入公共 runtime，仍是 false/legacy/0；冻结 Spec 的 currentDisposition 仅 save-as 为 `inline-excluded`，generate 与 Statement 六项为 `legacy-preserved`。 | v3.2.3 Spec §3；`new-account/policies.js`；`background-execution/runtime.js`。 | direct policy 必须与 common runtime 同一对象，registration 与 production enablement 分开；liveDisposition 必须按 actionKey exact 映射。 |
 | E09/E10 notes 已记录自动测试、RSS、cancel、recovery，但 Windows/真实资金/Excel-WPS gate 未关闭。 | 各 reviewed implementation notes 的 Evidence/Remaining Unknowns。 | 本地证据只能标 merge-ready，不能标 production-ready。 |
 | R3.2.4 已证明 Git checkout、duplicate-key、number-token 与 ignored audit-root 旁路真实可达；本版真实 require graph 还会进入 `src/backend`。 | exact commit `a805de8b...` validator/tests；`src/backend` extensionless `require()` 路径。 | audit root 必须覆盖整个 `src`，否则 ignored backend shim 可执行非 HEAD 字节。 |
+| canonical long path 仍不能让 historical exact suite 在 Windows 通过。 | exact job `99753294084` checkout `75d7ff89...`；nested `57fab04a` 9 pass/13 fail；历史 validator 唯一 `path.relative()` 对嵌套路径返回 `src\\...`，Git tree固定返回 `src/...`；historical test 的 candidate `NODE_PATH` 仍是macOS绝对路径。 | 只能在当前外层 test harness 提供可审计 separator adapter 与可丢弃依赖 root；不得改历史/current validator、snapshot或跳过负例。 |
 
 ## Unknowns Register
 
@@ -27,6 +28,7 @@
 | local RSS 是否可作为 Windows production evidence。 | platform | 高 | 困难 | macOS/本地 probe 只具方向性。 | BLOCK production only | Setup/portable 实机 + 真实代表样本。 | `LOCAL_DIRECTIONAL_ONLY`；productionReady=false。 |
 | package/release 三件套是否要更新。 | release scope | 低 | 容易 | package 仍 3.1.14，PR 无用户可见 live change。 | ASSUME | 查冻结 sequence/package。 | evidence-only 不 bump；正式发布另立 owner 决策。 |
 | Windows短路径alias是否会让historical exact suite误判仓库身份。 | harness/platform | 高 | 容易 | exact job `99731507623` 先报`GIT_REPOSITORY_IDENTITY_INVALID`，路径含`RUNNER~1`；Git/realpath返回规范长路径。 | PROBE | 外层wrapper规范clone cwd和TMP/TEMP/TMPDIR；正常与symlink alias本地复验 | 只改当前外层harness；历史/current validator、snapshot和Git gates不变。 |
+| Windows Git/Node路径分隔符与historical candidate依赖解析是否会继续遮蔽22项证据。 | harness/platform | 高 | 容易 | exact job `99753294084` 已用长路径但仍报三类路径前置错误；历史唯一 `path.relative()` 与硬编码macOS `NODE_PATH` 已由blob锁定和require图证实。 | PROBE | 当前wrapper创建受控win32-only preload、父子继承probe及clone外临时依赖root；正常/alias复验22/22；最终新exact Windows CI。 | 只转换cwd内contained native relative的分隔符；越界/off-cwd/非Windows保持原生，依赖链接随本轮root清理。 |
 
 ## BLOCK
 
@@ -46,3 +48,4 @@
 6. 运行定向 unit、相关 E09/E10/platform unit、integration/smoke/lint/static；如实记录平台依赖基线。
 7. 执行 reconciliation blindspot、自查 diff、提交并确认 clean。
 8. 在正常temp与可丢弃symlink alias temp下各运行historical exact wrapper；真实Windows CI继续作为路径身份与integration权威。
+9. 锁定historical validator/test blob与唯一调用点，以当前tracked固定preload做win32-only Git分隔符适配；验证父子继承、越界不变、临时依赖root清理和完整22项负例，再等待新exact Windows unit/integration。

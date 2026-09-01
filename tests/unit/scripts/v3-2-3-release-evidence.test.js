@@ -25,8 +25,154 @@ const {
 } = require('../../../scripts/validate-v3-2-3-release-evidence');
 
 const REPOSITORY_ROOT = path.resolve(__dirname, '../../..');
-const SHARED_NODE_MODULES = '/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules';
+const SHARED_NODE_MODULES = path.join(REPOSITORY_ROOT, 'node_modules');
 const EXACT_EVIDENCE_HEAD = '57fab04aab44d51d21cbf83e3878de9e87a77ad3';
+const HISTORICAL_VALIDATOR_PATH = 'scripts/validate-v3-2-3-release-evidence.js';
+const HISTORICAL_TEST_PATH = 'tests/unit/scripts/v3-2-3-release-evidence.test.js';
+const HISTORICAL_VALIDATOR_BLOB = '591d6397253edc5878c53e1a735622a98578c507';
+const HISTORICAL_TEST_BLOB = '820916a79370dfe26c7fd25893d6bb53c39c50dd';
+
+function normalizeHistoricalGitRelativePath(platform, from, cwd, nativeRelative) {
+  if (platform !== 'win32') return nativeRelative;
+  const resolvedFrom = path.win32.resolve(from).toLowerCase();
+  const resolvedCwd = path.win32.resolve(cwd).toLowerCase();
+  if (resolvedFrom !== resolvedCwd || nativeRelative === '..' ||
+      nativeRelative.startsWith('..\\') || nativeRelative.startsWith('../') ||
+      path.win32.isAbsolute(nativeRelative)) {
+    return nativeRelative;
+  }
+  return nativeRelative.split('\\').join('/');
+}
+
+function historicalGitPathPreloadSource() {
+  return [
+    "'use strict';",
+    "const path = require('node:path');",
+    normalizeHistoricalGitRelativePath.toString(),
+    "if (process.platform === 'win32') {",
+    "  const descriptor = Object.getOwnPropertyDescriptor(path, 'relative');",
+    "  if (!descriptor || descriptor.writable !== true || descriptor.configurable !== true) {",
+    "    throw new Error('HISTORICAL_GIT_PATH_ADAPTER_UNAVAILABLE');",
+    "  }",
+    "  const nativeRelative = path.relative.bind(path);",
+    "  Object.defineProperty(path, 'relative', {",
+    "    ...descriptor,",
+    "    value(from, to) {",
+    "      return normalizeHistoricalGitRelativePath(",
+    "        process.platform, from, process.cwd(), nativeRelative(from, to)",
+    "      );",
+    "    }",
+    "  });",
+    "}",
+    ""
+  ].join('\n');
+}
+
+function createControlledNodeOptions(preloadPath) {
+  assert.doesNotMatch(preloadPath, /[\0\r\n]/);
+  return `--require ${JSON.stringify(preloadPath)}`;
+}
+
+function createHistoricalGitPathPreload(root, canonicalRepository) {
+  const source = historicalGitPathPreloadSource();
+  const preloadPath = path.join(root, 'historical git path adapter.cjs');
+  const descriptor = fs.openSync(preloadPath, 'wx', 0o600);
+  try {
+    fs.writeFileSync(descriptor, source, 'utf8');
+  } finally {
+    fs.closeSync(descriptor);
+  }
+  const stat = fs.lstatSync(preloadPath);
+  assert.equal(stat.isFile(), true);
+  assert.equal(stat.isSymbolicLink(), false);
+  assert.equal(fs.readFileSync(preloadPath, 'utf8'), source);
+  const canonicalPreloadPath = fs.realpathSync.native(preloadPath);
+  const relativeToRepository = path.relative(canonicalRepository, canonicalPreloadPath);
+  assert.ok(relativeToRepository === '..' || relativeToRepository.startsWith('..' + path.sep),
+    relativeToRepository);
+  return canonicalPreloadPath;
+}
+
+function readGit(repository, args) {
+  const result = spawnSync('git', args, { cwd: repository, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  return result.stdout;
+}
+
+function assertHistoricalGitPathContract(repository) {
+  assert.equal(runGit(repository, [
+    'rev-parse', `${EXACT_EVIDENCE_HEAD}:${HISTORICAL_VALIDATOR_PATH}`
+  ]), HISTORICAL_VALIDATOR_BLOB);
+  assert.equal(runGit(repository, [
+    'rev-parse', `${EXACT_EVIDENCE_HEAD}:${HISTORICAL_TEST_PATH}`
+  ]), HISTORICAL_TEST_BLOB);
+  const validatorSource = readGit(repository, [
+    'show', `${EXACT_EVIDENCE_HEAD}:${HISTORICAL_VALIDATOR_PATH}`
+  ]);
+  const testSource = readGit(repository, [
+    'show', `${EXACT_EVIDENCE_HEAD}:${HISTORICAL_TEST_PATH}`
+  ]);
+  assert.equal((validatorSource.match(/\bpath\.relative\s*\(/g) || []).length, 1);
+  assert.equal((testSource.match(/\bpath\.relative\s*\(/g) || []).length, 0);
+  assert.match(validatorSource,
+    /const relative = path\.relative\(REPOSITORY_ROOT, absolutePath\);/);
+  assert.match(validatorSource, /relative !== relativePath/);
+  assert.match(testSource,
+    /env: \{ \.\.\.process\.env, NODE_PATH: SHARED_NODE_MODULES \}/);
+}
+
+function assertHistoricalGitPathAdapterContract() {
+  const cwd = 'C:\\Users\\runneradmin\\AppData\\Local\\Temp\\exact\\repo';
+  const nested = path.win32.join(cwd, 'src', 'main-process', 'runtime.js');
+  const nestedNative = path.win32.relative(cwd, nested);
+  assert.equal(nestedNative, 'src\\main-process\\runtime.js');
+  assert.equal(normalizeHistoricalGitRelativePath('win32', cwd, cwd, nestedNative),
+    'src/main-process/runtime.js');
+
+  const topLevelNative = path.win32.relative(cwd, path.win32.join(cwd, 'package.json'));
+  assert.equal(normalizeHistoricalGitRelativePath('win32', cwd, cwd, topLevelNative),
+    'package.json');
+
+  const outsideNative = path.win32.relative(cwd, path.win32.join(cwd, '..', 'outside'));
+  assert.equal(normalizeHistoricalGitRelativePath('win32', cwd, cwd, outsideNative),
+    outsideNative);
+  assert.equal(normalizeHistoricalGitRelativePath('win32', cwd, cwd, 'D:\\outside'),
+    'D:\\outside');
+
+  const offCwd = path.win32.join(cwd, 'nested');
+  assert.equal(normalizeHistoricalGitRelativePath('win32', offCwd, cwd, nestedNative),
+    nestedNative);
+  assert.equal(normalizeHistoricalGitRelativePath('darwin', cwd, cwd, nestedNative),
+    nestedNative);
+}
+
+function assertControlledPreloadInheritance(environment, cwd, preloadPath) {
+  const cacheProbeSource = [
+    "'use strict';",
+    "const assert = require('node:assert/strict');",
+    "const preload = process.env.V323_HISTORICAL_PRELOAD_PATH;",
+    "assert.ok(require.cache[require.resolve(preload)]);"
+  ].join('\n');
+  const parentProbeSource = [
+    cacheProbeSource,
+    "const { spawnSync } = require('node:child_process');",
+    `const childSource = ${JSON.stringify(cacheProbeSource)};`,
+    "const child = spawnSync(process.execPath, ['-e', childSource], {",
+    "  encoding: 'utf8',",
+    "  env: { ...process.env }",
+    "});",
+    "assert.equal(child.status, 0, child.stderr || child.stdout);"
+  ].join('\n');
+  const result = spawnSync(process.execPath, ['-e', parentProbeSource], {
+    cwd,
+    encoding: 'utf8',
+    env: {
+      ...environment,
+      V323_HISTORICAL_PRELOAD_PATH: preloadPath
+    }
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+}
 
 function currentGitValue(args) {
   const result = spawnSync('git', args, { cwd: REPOSITORY_ROOT, encoding: 'utf8' });
@@ -105,21 +251,41 @@ function assertCliFailure(result, expectedCode) {
 if (!RUN_EXACT_SUITE) {
   nodeTest('R3.2.3 历史 exact evidence 在原提交和原分支上完整复验', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'v323-exact-evidence-'));
-    const repository = path.join(root, 'repo');
     try {
-      runGit(root, ['clone', '--quiet', '--shared', '--no-checkout', REPOSITORY_ROOT, repository]);
+      const canonicalTempRoot = fs.realpathSync.native(root);
+      const repository = path.join(canonicalTempRoot, 'repo');
+      const sharedNodeModules = fs.realpathSync.native(SHARED_NODE_MODULES);
+      assert.equal(fs.statSync(sharedNodeModules).isDirectory(), true);
+      const nestedNodeModules = path.join(canonicalTempRoot, 'node_modules');
+      fs.symlinkSync(sharedNodeModules, nestedNodeModules,
+        process.platform === 'win32' ? 'junction' : 'dir');
+      assert.equal(fs.lstatSync(nestedNodeModules).isSymbolicLink(), true);
+      assert.equal(fs.realpathSync.native(nestedNodeModules), sharedNodeModules);
+
+      runGit(canonicalTempRoot,
+        ['clone', '--quiet', '--shared', '--no-checkout', REPOSITORY_ROOT, repository]);
       const canonicalRepository = fs.realpathSync.native(repository);
-      const canonicalTempRoot = fs.realpathSync.native(os.tmpdir());
       runGit(canonicalRepository, ['checkout', '--quiet', '-B', EXPECTED_BRANCH, EXACT_EVIDENCE_HEAD]);
       runGit(canonicalRepository, ['update-ref', 'refs/heads/main', EXPECTED_MAIN_REF_OID]);
+      assertHistoricalGitPathContract(canonicalRepository);
+      assertHistoricalGitPathAdapterContract();
+      const preloadPath = createHistoricalGitPathPreload(
+        canonicalTempRoot, canonicalRepository
+      );
+      const controlledNodeOptions = createControlledNodeOptions(preloadPath);
       const nestedEnvironment = {
         ...process.env,
-        NODE_PATH: SHARED_NODE_MODULES,
+        NODE_OPTIONS: controlledNodeOptions,
+        NODE_PATH: sharedNodeModules,
         TMP: canonicalTempRoot,
         TEMP: canonicalTempRoot,
         TMPDIR: canonicalTempRoot
       };
       delete nestedEnvironment.NODE_TEST_CONTEXT;
+      assert.equal(nestedEnvironment.NODE_OPTIONS, controlledNodeOptions);
+      assertControlledPreloadInheritance(
+        nestedEnvironment, canonicalRepository, preloadPath
+      );
       const result = spawnSync(
         process.execPath,
         [
@@ -139,6 +305,8 @@ if (!RUN_EXACT_SUITE) {
       assert.match(result.stdout, /# fail 0\b/);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
+      assert.equal(fs.existsSync(root), false);
+      assert.equal(fs.statSync(SHARED_NODE_MODULES).isDirectory(), true);
     }
   });
 }
