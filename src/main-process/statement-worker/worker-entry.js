@@ -16,6 +16,15 @@ const failBeforeAdoptOrdinal = workerData && workerData.statementFaultInjection
 const withholdAdoptOrdinal = workerData && workerData.statementFaultInjection
   ? workerData.statementFaultInjection.withholdAdoptOrdinal
   : null;
+const failAfterGrantOrdinal = workerData && workerData.statementFaultInjection
+  ? workerData.statementFaultInjection.failAfterGrantOrdinal
+  : null;
+const generationSafepointDelayMs = workerData && workerData.statementFaultInjection &&
+  Number.isSafeInteger(workerData.statementFaultInjection.generationSafepointDelayMs) &&
+  workerData.statementFaultInjection.generationSafepointDelayMs >= 0 &&
+  workerData.statementFaultInjection.generationSafepointDelayMs <= 1000
+  ? workerData.statementFaultInjection.generationSafepointDelayMs
+  : 0;
 let statementSourceRoot = null;
 if (workerData && typeof workerData.statementSourceRoot === 'string') {
   try {
@@ -24,6 +33,15 @@ if (workerData && typeof workerData.statementSourceRoot === 'string') {
     statementSourceRoot = null;
   }
 }
+const statementStagingRoot = workerData && typeof workerData.statementStagingRoot === 'string'
+  ? path.resolve(workerData.statementStagingRoot)
+  : null;
+const statementStorageRoot = workerData && typeof workerData.statementStorageRoot === 'string'
+  ? path.resolve(workerData.statementStorageRoot)
+  : null;
+const statementBalanceTemplatePath = workerData && typeof workerData.statementBalanceTemplatePath === 'string'
+  ? path.resolve(workerData.statementBalanceTemplatePath)
+  : null;
 
 function resolveSourceResource(resourceId) {
   if (!statementSourceRoot || typeof resourceId !== 'string') return null;
@@ -50,6 +68,15 @@ const service = createStatementService({
     parentPort.postMessage(message);
   },
   resolveSourceResource,
+  stagingRoot: statementStagingRoot,
+  storageRoot: statementStorageRoot,
+  balanceTemplatePath: statementBalanceTemplatePath,
+  async yieldGenerationSafepoint() {
+    await new Promise((resolve) => setImmediate(resolve));
+    if (generationSafepointDelayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, generationSafepointDelayMs));
+    }
+  },
   close() {
     parentPort.close();
   },
@@ -63,6 +90,12 @@ const service = createStatementService({
   },
   withholdAdopt() {
     adoptionGrantOrdinal += 1;
+    if (Number.isSafeInteger(failAfterGrantOrdinal) &&
+        adoptionGrantOrdinal === failAfterGrantOrdinal) {
+      const error = new Error('Injected Statement post-grant adoption failure');
+      error.code = 'STATEMENT_POST_GRANT_ADOPTION_FAILED';
+      throw error;
+    }
     return Number.isSafeInteger(withholdAdoptOrdinal) &&
       adoptionGrantOrdinal === withholdAdoptOrdinal;
   }

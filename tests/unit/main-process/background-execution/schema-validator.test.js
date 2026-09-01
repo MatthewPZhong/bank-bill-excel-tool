@@ -42,7 +42,7 @@ function canonicalGitTextBytes(buffer) {
 test('运行时 bundled Schema 与最终合同逐字节一致且 canonical Git hash 跨 EOL 稳定', () => {
   const expected = {
     'platform-contract-v1.schema.json': 'e5a584903d8c88b1f6cce00cbe5e308796bed331ca476458833eb9c448f99ae8',
-    'platform-protocol-v1.schema.json': 'd3f38eab7f0f5793fccc6d6f042199172c071887e386349d2559435565a99a43'
+    'platform-protocol-v1.schema.json': 'afcd372e783a827be44f39ca46128e3e762ff7c3b77a34b52f9fdc2d59aca93a'
   };
   for (const [name, digest] of Object.entries(expected)) {
     const contractBytes = fs.readFileSync(path.join(CONTRACT_DIR, name));

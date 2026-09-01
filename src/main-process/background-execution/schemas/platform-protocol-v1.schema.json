@@ -664,8 +664,7 @@
               "owner": {
                 "properties": { "kind": { "const": "interaction-token" } },
                 "required": ["kind"]
-              },
-              "replacesReservationId": { "type": "null" }
+              }
             }
           }
         },

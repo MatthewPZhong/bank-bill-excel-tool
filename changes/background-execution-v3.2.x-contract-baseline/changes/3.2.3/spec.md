@@ -203,6 +203,14 @@ Policy 固定为 `main-settlement + target-post-image + criticalIntent=true`。�
 
 Worker根据token/revision选取entries，顺序生成所需detail/balance artifacts。全部业务校验通过后返回manifest；Main做technical validation和Publisher。多artifact全有或全不发布。
 
+Main publication 必须另持有 bounded expected artifact descriptor，按冻结顺序把
+artifactKey/kind/task staging resource 与 FilePlan 绑定，并回读核对 sheet、精确 headers、
+行守恒、有序记录以及日期/账户/币种/金额、cell type/format/style、watermark/template lineage
+的摘要证据。该 descriptor 不由 Worker manifest 自报，也不得包含 raw rows/prepared batch。
+task staging root、每级现存祖先和最终文件必须通过非 symlink、realpath/inode/平台 alias
+归属验证；technical validation、默认 Publisher 前复核和 restart cleanup 使用同一规则。
+未通过归属验证的 manifest 路径不得驱动清理。
+
 Service crash后：
 
 -内存session/token清空；

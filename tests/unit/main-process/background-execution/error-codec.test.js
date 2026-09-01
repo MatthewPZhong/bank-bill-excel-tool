@@ -22,6 +22,23 @@ test('canonical SHA-256 evidence fields不被随机数字串误判为完整账�
   }), null);
 });
 
+test('Statement generation strict digest/UUID字段放行真实协议值且拒绝伪装账号', () => {
+  assert.equal(privacyViolation({
+    ownerKeyHash: '1'.repeat(64),
+    inputEvidenceHash: '2'.repeat(64),
+    allowedChoiceDigest: '3'.repeat(64),
+    tokenId: 'd61a5b74-241d-4bd0-a848-592ca6c3bdf8'
+  }), null);
+  assert.deepEqual(privacyViolation({ tokenId: '6222021234567890' }), {
+    path: '/tokenId',
+    kind: 'full-account'
+  });
+  assert.deepEqual(privacyViolation({ inputEvidenceHash: '1'.repeat(32) }), {
+    path: '/inputEvidenceHash',
+    kind: 'full-account'
+  });
+});
+
 test('统一 error codec 只输出冻结 SafeErrorV1 exact shape，不泄露 stack/cause/context', () => {
   const source = new Error('worker failed');
   source.code = 'WORKER_FAILED';

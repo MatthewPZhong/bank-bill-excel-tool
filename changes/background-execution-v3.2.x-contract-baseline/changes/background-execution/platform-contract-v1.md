@@ -559,9 +559,10 @@ Worker 构造候选但不公开
 `requestKind / owner.kind / replacesReservationId` 是封闭矩阵：
 
 - `persistent-state-replace` 仅允许 `service-state`；同一 owner 首次请求允许 `null`，已有 adopted reservation 后必须精确引用当前 reservation；
-- `pending-interaction-create` 仅允许 `interaction-token`，且 replaces 必须为 `null`；
+- `pending-interaction-create` 仅允许 `interaction-token`；首次请求的 replaces 必须为 `null`，替换已发布 token 时必须使用同 owner、递增 revision，并精确引用当前 adopted reservation；
 - `phase-extension` 仅允许 `phase`，且 replaces 必须为 `null`；
-- stale、非当前或跨 owner 的 replacement 一律 protocol-error。
+- pending-interaction replacement 的旧 token 必须仍为 published；candidate 在 adopt-ack 前不得公开，reject、revoke、adoption timeout 或 stale current 均保留旧 token；
+- stale、非当前、跨 owner 或跨 purpose 的 replacement 一律 protocol-error。
 
 Worker dynamic resourceVector 只含 memoryBytes/cpuSlots/ioHeavySlots；Main 扩展为五维时固定 workerThreadSlots=0、utilityProcessSlots=0，OS 载体已由 spawn 前 BaseLease 计入。
 

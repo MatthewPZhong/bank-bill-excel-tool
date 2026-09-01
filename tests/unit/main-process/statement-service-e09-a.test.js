@@ -908,7 +908,7 @@ test('source identity对batch/跨session别名与内容重复fail closed且不�
   assert.equal(harness.diagnostics.some((event) => event.type === 'service-fatal'), false);
 });
 
-test('四个future action在解析payload与申请resource前返回bounded unsupported且不改变已有session', async (t) => {
+test('E09-C generation错误payload与未实现后续action在申请resource前有界拒绝且不改变已有session', async (t) => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-e09-a-wrong-action-'));
   t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
   const importedPath = path.join(tempDir, 'imported.xlsx');
@@ -927,20 +927,19 @@ test('四个future action在解析payload与申请resource前返回bounded unsup
   const unreadSource = source(unreadPath);
   fs.unlinkSync(unreadPath);
   const wrongActions = [
-    ['statement:generate-current', importPayload([unreadSource], evidence)],
-    ['statement:generate-all', { command: 'status' }],
-    ['statement:resolve-big-account', { command: 'status', extra: 'must-not-parse' }],
+    ['statement:generate-current', importPayload([unreadSource], evidence), 'STATEMENT_GENERATION_SHAPE_INVALID'],
+    ['statement:generate-all', { command: 'status' }, 'STATEMENT_GENERATION_SHAPE_INVALID'],
     ['statement:resolve-manual-balance', {
       ...importPayload([unreadSource], evidence),
       extra: { rows: [['must-not-parse']] }
-    }]
+    }, 'STATEMENT_ACTION_UNSUPPORTED']
   ];
-  for (const [index, [actionKey, input]] of wrongActions.entries()) {
+  for (const [index, [actionKey, input, expectedCode]] of wrongActions.entries()) {
     const ordinal = `wrong-action-${index}`;
     const request = executionRequest(input, ordinal, actionKey);
     const failed = await harness.supervisor.execute(request);
     assert.equal(failed.outcome, 'failed', actionKey);
-    assert.equal(failed.error.code, 'STATEMENT_ACTION_UNSUPPORTED', actionKey);
+    assert.equal(failed.error.code, expectedCode, actionKey);
     assert.ok(Buffer.byteLength(JSON.stringify(failed.error), 'utf8') < 4096, actionKey);
     const jobTrace = harness.trace.filter((message) =>
       message.jobId === request.jobId ||
@@ -967,7 +966,7 @@ test('四个future action在解析payload与申请resource前返回bounded unsup
   assert.equal(harness.diagnostics.some((event) => event.type === 'service-job-callback-error'), false);
 });
 
-test('E09-B 大账号交互上下文保持 blocked，不创建 token/DTO/本地 Map', async (t) => {
+test('大账号模板缺少维护候选时fail closed且不创建 token/DTO/本地 Map', async (t) => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-e09-a-blocked-'));
   t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
   const inputPath = path.join(tempDir, 'blocked.xlsx');

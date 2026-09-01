@@ -173,6 +173,20 @@ return bounded summary
 Service内部调用现有单一真相函数：mapped rows merge、amount/bill split、balance、warning、template writer。Worker不并行detail/balance，避免改变warning/输出顺序。
 
 Artifact manifest含：artifactKey、generationPath、size、sha256、rowCounts、warning summary、sessionRevision、inputEvidenceHash。Main重新验证FilePlan和业务validator后Publisher。
+单 artifact size 以 `256 MiB` 为 dormant validation hard bound，Worker 与 manifest validator 同源拒绝超限，避免 Main readback 接受无界 workbook。
+
+Worker manifest 字段保持冻结且不声明 artifact kind。Main 另持有
+`MainExpectedArtifactDescriptorV1[]`，每项以 artifactKey 绑定 kind、ordinal、
+stagingResourceId、sheetName、精确 headers、input/output rowCounts、业务 evidence digests
+（有序 records/date/account/currency/amount direction）、warning summary、sessionRevision、
+inputEvidenceHash 与 writer/style/watermark/template lineage。descriptor 只含 bounded 摘要，不含 raw rows/prepared batch；Main 按 descriptor
+顺序同时绑定 FilePlan output 与 manifest，禁止信任 Worker 自报 kind 或仅凭相同 rowCounts。
+
+staging ownership 是 technical validator、journal Publisher prepare 前和 restart cleanup
+的共享前置条件：staging root 与 root 下每级现存祖先均须为非 symlink 目录，最终 artifact
+须为非 symlink 普通单链接文件，realpath 必须留在 root realpath 内；artifact 集合还须按
+平台 case/Unicode key 与 inode 做非 alias 校验。finally/cleanup 只能使用 Main-owned
+descriptor 中且已通过该归属验证的路径；schema/hash/outside manifest 不能提供删除权限。
 
 ## 7. Balance seed atomic writer
 

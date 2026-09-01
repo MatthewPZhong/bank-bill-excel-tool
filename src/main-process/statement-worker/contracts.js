@@ -9,6 +9,10 @@ const {
 const {
   financeSafeTextViolation
 } = require('../background-execution/error-codec');
+const {
+  validateManifestItem,
+  validateStatementGenerationResult
+} = require('./generation-contracts');
 
 const MEBIBYTE = 1024 ** 2;
 const STATEMENT_PURPOSES = Object.freeze([
@@ -74,6 +78,7 @@ const PUBLIC_INTERACTION_KEYS = Object.freeze([
   'prompt'
 ]);
 const INTERACTION_REQUIRED_RESULT_KEYS = Object.freeze(['status', 'interaction']);
+const INTERACTION_CANCELLED_RESULT_KEYS = Object.freeze(['status', 'tokenId']);
 const IMPORT_RESULT_KEYS = Object.freeze(['status', 'summary', 'session']);
 const IMPORT_SESSION_KEYS = Object.freeze([
   'sessionKey',
@@ -651,6 +656,10 @@ function createPurposePromptDto(promptPurpose, input) {
   fail('STATEMENT_TOKEN_PURPOSE_INVALID', 'Unsupported Statement interaction purpose');
 }
 
+function createStatementInteractionPromptDto(promptPurpose, input) {
+  return canonicalJsonSnapshot(createPurposePromptDto(promptPurpose, input));
+}
+
 function createStatementTokenHandleDto(input) {
   const record = ownDataRecord(input, TOKEN_HANDLE_KEYS, 'StatementTokenHandleDto');
   const snapshot = {
@@ -776,6 +785,21 @@ function createStatementInteractionRequiredResult(input, actionKey) {
   return canonicalJsonSnapshot({ status: record.status, interaction });
 }
 
+function createStatementInteractionCancelledResult(input) {
+  const record = ownDataRecord(
+    input,
+    INTERACTION_CANCELLED_RESULT_KEYS,
+    'StatementInteractionCancelledResult'
+  );
+  if (record.status !== 'interaction-cancelled') {
+    fail('STATEMENT_RESULT_STATUS_INVALID', 'Statement interaction cancellation status is invalid');
+  }
+  return canonicalJsonSnapshot({
+    status: record.status,
+    tokenId: boundedText(record.tokenId, 'tokenId')
+  });
+}
+
 function createStatementImportResult(input) {
   const record = ownDataRecord(input, IMPORT_RESULT_KEYS, 'StatementImportResult');
   if (record.status !== 'imported') {
@@ -854,8 +878,23 @@ function createStatementFinanceSafeValueDelegate(actionKey) {
   return function allowStatementFinanceSafeValue(input = {}) {
     if (!input || typeof input !== 'object') return false;
     const { value, path, parent, key } = input;
-    if (key !== 'merchantId' || typeof value !== 'string' ||
-        financeSafeTextViolation(value) !== 'full-account') return false;
+    if (typeof value !== 'string') return false;
+    const violation = financeSafeTextViolation(value);
+    if (['statement:generate-current', 'statement:generate-all'].includes(actionKey)) {
+      try {
+        if (/^\/payload\/result\/artifacts\/(0|1)\/(artifactKey|generationPath|sha256|inputEvidenceHash)$/.test(path) &&
+            ['artifactKey', 'generationPath', 'sha256', 'inputEvidenceHash'].includes(key) &&
+            parent && parent[key] === value && validateManifestItem(parent)) {
+          return true;
+        }
+        if (path === '/payload/result/inputEvidenceHash' && key === 'inputEvidenceHash' &&
+            parent && parent[key] === value && validateStatementGenerationResult(parent)) {
+          return true;
+        }
+      } catch (_generationError) {}
+    }
+    if (violation !== 'full-account') return false;
+    if (key !== 'merchantId') return false;
     const pathKind = merchantPathKind(path);
     if (!pathKind) return false;
     const impliedPurpose = pathKind.kind === 'manual-balance' ? 'manual-balance' : 'big-account';
@@ -875,11 +914,22 @@ function createStatementResultValidator(actionKey) {
       const normalized = createStatementInteractionRequiredResult(value, actionKey);
       return canonicalizeJson(normalized) === canonicalizeJson(value);
     } catch (_error) {
-      if (actionKey !== 'statement:import') return false;
+      if (['statement:generate-current', 'statement:generate-all'].includes(actionKey)) {
+        return validateStatementGenerationResult(value);
+      }
+      if (!['statement:import', 'statement:resolve-big-account'].includes(actionKey)) return false;
       try {
         createStatementImportResult(value);
         return true;
       } catch (_importError) {
+        if (actionKey === 'statement:resolve-big-account') {
+          try {
+            createStatementInteractionCancelledResult(value);
+            return true;
+          } catch (_cancelError) {
+            return false;
+          }
+        }
         try {
           createStatementStatusResult(value);
           return true;
@@ -1011,7 +1061,9 @@ module.exports = {
   createStatementBalanceSeedOverwriteReleaseCharacterization,
   createStatementFinanceSafeValueDelegate,
   createStatementImportResult,
+  createStatementInteractionCancelledResult,
   createStatementInteractionRequiredResult,
+  createStatementInteractionPromptDto,
   createStatementPublicInteractionDto,
   createStatementResultValidator,
   createStatementStatusDto,
