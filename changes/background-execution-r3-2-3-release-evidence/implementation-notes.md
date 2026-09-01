@@ -18,6 +18,7 @@
 | 自动 coverage 明列 E09-P0/A/B/C/D、E10-A/B、RSS/CANCEL/RECOVERY。 | 最终门禁需要把专项证据与行动项可审计关联。 | 只写一段“相关测试通过”。 | coverage 缺项或代换 fail closed。 |
 | 复用 R3.2.4 已证实的 exact Git/raw JSON/audit-root guard，audit root 覆盖整个 `src`，删除 E12 topology 专属逻辑。 | checkout/duplicate/number/ignored shim 是已有真实反例；本版真实 require graph 会进入 `src/backend`；E12 topology 不属于本版。 | 只审计 `src/main-process`、照搬全部 R3.2.4 版本逻辑或重新发明防御。 | ignored backend extensionless shim 不能执行非 HEAD 字节；保持本版必要最小范围。 |
 | 本地 merge-ready 与 production-ready 分离。 | Windows/真实资金/恢复人工门禁仍未完成。 | 自动测试升级人工 gate。 | global decision 固定 `localMergeReady=true / productionReady=false`。 |
+| 历史 exact suite的外层wrapper规范化clone cwd与三类temp环境变量。 | exact Windows job `99731507623` 中nested suite因`C:\Users\RUNNER~1\...`与Git/realpath长路径身份不一致，先报`GIT_REPOSITORY_IDENTITY_INVALID`，后续authority/tamper门禁未到目标断言。 | 修改`57fab04a`历史提交或历史/current validator；放宽Git identity；重签snapshot。 | 仅当前测试harness消除短路径别名；historical bytes、22-test期望、Git/tamper/privacy/action-scope/current-file strict合同不变。 |
 
 ## Assumptions
 
@@ -62,6 +63,8 @@ node --test --test-concurrency=1 tests/unit/main-process/statement-state-footpri
 | final-chain NewAccount integration + smoke | `36/36 PASS`；smoke PASS | 最终 #205/#206 联合 runtime、NewAccount Workbook/账户/日期/币种/余额与应用级路径回归；本证据提交仍只改 5 个证据文件。 |
 | changed JS ESLint + `node --check` + `git diff --check` | PASS | validator/test 静态质量、语法与 patch 卫生。 |
 | isolated dependency environment | worktree 增加 ignored `node_modules` symlink 指向主仓已安装依赖；未安装、未修改、未提交依赖 | 使 validator 的真实 NewAccount runtime authority 可加载；链接不属于证据 commit。 |
+| Windows historical exact失败 | job `99731507623` checkout `d0379600271e04156736468d2f67ddd7a6a0f055`；外层unit `6562/6594`、30 fail/2 skip；nested `57fab04a` suite为4 pass/18 fail，首错`GIT_REPOSITORY_IDENTITY_INVALID`，authority随后`AUTHORITY_MODULE_PATH_INVALID` | 失败由短路径lexical identity污染harness；不得把未到目标断言的18项归因于证据内容漂移。 |
+| canonical historical wrapper回归 | 官方Node22.18；正常temp与精确mktemp内`RUNNER~1` symlink alias temp各运行一次当前外层wrapper，二者均成功复验nested historical `22/22`（外层`1/1`），临时alias资源按精确路径清理 | canonical clone cwd与TMP/TEMP/TMPDIR足以隔离alias；真实Windows仍是权威PROBE，未把macOS本地结果升级为Windows通过。 |
 
 ## Reconciliation Blindspot
 
@@ -76,5 +79,6 @@ node --test --test-concurrency=1 tests/unit/main-process/statement-state-footpri
 | --- | --- | --- | --- |
 | Windows packaged、RSS、dev/ino、directory fsync、app quit | BLOCK production | release owner / Windows 实机 | 不阻止 evidence-only merge；阻止 production enable。 |
 | 真实资金样本、Excel/WPS 与 durable recovery | BLOCK production | 资金/恢复人工复核 | 不阻止 evidence-only merge；阻止 production enable。 |
+| 当前macOS alias probe能否等价模拟Windows `RUNNER~1` | PROBE；仅验证wrapper把nested repo/temp转换为真实路径，不作为Windows通过证据 | 临时symlink alias与正常环境各跑historical suite；最终仍由新exact Windows CI权威验证unit/integration | 本地probe失败若源于宿主差异不放宽Git identity；旧CI/本地绿不代偿。 |
 
 未运行 `release-check`、`check-vars`、`scan:vars`，符合本任务明确禁令。

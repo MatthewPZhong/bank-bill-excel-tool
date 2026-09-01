@@ -26,6 +26,7 @@
 | review evidence 是否可跨 action 借用。 | audit scope | 高 | 容易 | P0/B/C 是共享阶段证据；A/D/E10 是 action-specific。 | PROBE | catalog actionKey + action evidenceRefs mutation。 | null 只代表明确共享阶段；非 null 只能供 exact action。 |
 | local RSS 是否可作为 Windows production evidence。 | platform | 高 | 困难 | macOS/本地 probe 只具方向性。 | BLOCK production only | Setup/portable 实机 + 真实代表样本。 | `LOCAL_DIRECTIONAL_ONLY`；productionReady=false。 |
 | package/release 三件套是否要更新。 | release scope | 低 | 容易 | package 仍 3.1.14，PR 无用户可见 live change。 | ASSUME | 查冻结 sequence/package。 | evidence-only 不 bump；正式发布另立 owner 决策。 |
+| Windows短路径alias是否会让historical exact suite误判仓库身份。 | harness/platform | 高 | 容易 | exact job `99731507623` 先报`GIT_REPOSITORY_IDENTITY_INVALID`，路径含`RUNNER~1`；Git/realpath返回规范长路径。 | PROBE | 外层wrapper规范clone cwd和TMP/TEMP/TMPDIR；正常与symlink alias本地复验 | 只改当前外层harness；历史/current validator、snapshot和Git gates不变。 |
 
 ## BLOCK
 
@@ -44,3 +45,4 @@
 5. mutation 测试拒绝 production/live upgrade、跨 action 借证和人工 gate 自动 PASS。
 6. 运行定向 unit、相关 E09/E10/platform unit、integration/smoke/lint/static；如实记录平台依赖基线。
 7. 执行 reconciliation blindspot、自查 diff、提交并确认 clean。
+8. 在正常temp与可丢弃symlink alias temp下各运行historical exact wrapper；真实Windows CI继续作为路径身份与integration权威。

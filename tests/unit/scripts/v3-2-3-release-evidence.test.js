@@ -108,9 +108,17 @@ if (!RUN_EXACT_SUITE) {
     const repository = path.join(root, 'repo');
     try {
       runGit(root, ['clone', '--quiet', '--shared', '--no-checkout', REPOSITORY_ROOT, repository]);
-      runGit(repository, ['checkout', '--quiet', '-B', EXPECTED_BRANCH, EXACT_EVIDENCE_HEAD]);
-      runGit(repository, ['update-ref', 'refs/heads/main', EXPECTED_MAIN_REF_OID]);
-      const nestedEnvironment = { ...process.env, NODE_PATH: SHARED_NODE_MODULES };
+      const canonicalRepository = fs.realpathSync.native(repository);
+      const canonicalTempRoot = fs.realpathSync.native(os.tmpdir());
+      runGit(canonicalRepository, ['checkout', '--quiet', '-B', EXPECTED_BRANCH, EXACT_EVIDENCE_HEAD]);
+      runGit(canonicalRepository, ['update-ref', 'refs/heads/main', EXPECTED_MAIN_REF_OID]);
+      const nestedEnvironment = {
+        ...process.env,
+        NODE_PATH: SHARED_NODE_MODULES,
+        TMP: canonicalTempRoot,
+        TEMP: canonicalTempRoot,
+        TMPDIR: canonicalTempRoot
+      };
       delete nestedEnvironment.NODE_TEST_CONTEXT;
       const result = spawnSync(
         process.execPath,
@@ -120,7 +128,7 @@ if (!RUN_EXACT_SUITE) {
           'tests/unit/scripts/v3-2-3-release-evidence.test.js'
         ],
         {
-          cwd: repository,
+          cwd: canonicalRepository,
           encoding: 'utf8',
           env: nestedEnvironment
         }
