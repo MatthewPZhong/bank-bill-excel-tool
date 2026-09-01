@@ -215,10 +215,10 @@ test('outer row与cell ref行号错位必须fail closed', async () => {
   });
 });
 
-test('t=d原始空白不得trim成canonical日期，合法date仍与旧raw业务回读等价', async () => {
+test('strict t=d原始空白必须fail closed，canonical/Zulu仍与legacy raw业务回读等价', async () => {
   const dir = tempDir();
   const validValues = ['2026-03-01', '2026-03-01T00:00:00Z'];
-  const invalidValues = [
+  const strictInvalidValues = [
     ' 2026-03-01',
     '2026-03-01 ',
     ' 2026-03-01 ',
@@ -228,6 +228,8 @@ test('t=d原始空白不得trim成canonical日期，合法date仍与旧raw业务
     '',
     '   '
   ];
+  // SheetJS legacy oracle 对带空白 t=d 的解释依赖宿主时区；仅空值两类稳定拒绝。
+  const legacyStableRejectValues = new Set(['', '   ']);
   try {
     const fixture = createFixture(dir, '00123');
     for (const [index, value] of validValues.entries()) {
@@ -243,15 +245,17 @@ test('t=d原始空白不得trim成canonical日期，合法date仍与旧raw业务
       );
       assert.deepEqual(strictResult, oldResult);
     }
-    for (const [index, value] of invalidValues.entries()) {
+    for (const [index, value] of strictInvalidValues.entries()) {
       const mutatedPath = path.join(dir, `date-invalid-${index}.xlsx`);
       await mutateWorksheet(fixture.sourcePath, mutatedPath, (xml) => (
         replaceCell(xml, 'E2', `<c r="E2" t="d"><v>${value}</v></c>`)
       ));
-      assert.throws(
-        () => readBackAndValidate(mutatedPath, fixture.expected),
-        (error) => error.code === 'NEW_ACCOUNT_WORKBOOK_RECORDS_MISMATCH'
-      );
+      if (legacyStableRejectValues.has(value)) {
+        assert.throws(
+          () => readBackAndValidate(mutatedPath, fixture.expected),
+          (error) => error.code === 'NEW_ACCOUNT_WORKBOOK_RECORDS_MISMATCH'
+        );
+      }
       await assert.rejects(
         readBackAndValidateCooperatively(
           mutatedPath,
