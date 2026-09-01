@@ -24,6 +24,7 @@
 | 只冻结resolved direct parent，不保存ancestor chain | 已知真实repro均在重新解析后改变direct parent identity；无证据要求整条chain，过度冻结会扩大Windows/恢复合同 | 每级ancestor canonical/dev/ino链 | 边界最小且可验证；原parent object移走再移回合法 |
 | journal v1 additive且旧reader路径兼容 | 旧prepared/committed记录不能被批量取消，新字段只为显式require的E10-B必填 | 新journal版本/DB migration/第二receipt | 带字段恢复漂移转manual recovery/Hold；旧journal沿原语义；旧二进制回滚前open journal=0 |
 | required guarded batch拒绝recovery root与target parent双向包含 | reviewer证明两者重叠时rename固定userData root并ordinary replacement可使fresh process漏扫旧index/journal/receipt | 保存ancestor chain；搬迁index；为E10-B新增第二receipt；扩大到generic旧journal | 复用canonical realpath/alias与direct-parent evidence，在任何写入前整批fail closed；sibling/外部目录和旧journal recovery不变 |
+| finance-safe只豁免精确staging snapshot inode证据 | exact Windows job `99731507623` 的E10-B execution在Publisher前收口为`protocol-error/transport-lost`；真实protocol probe把16位canonical inode定位到`/payload/result/artifact/stagingSnapshot/ino`的`PROTOCOL_PRIVACY_VIOLATION` | 删除inode证据；改测试期待transport-lost；全局放宽12～32位数字隐私规则 | 仅精确result路径、`ino`键、合法四字段snapshot和canonical uint64可通过；digest既有例外不变，附近字段/账户/金额/路径仍fail closed |
 
 ## Assumptions
 
@@ -58,6 +59,8 @@
 | exact parent/merge-base | `d073ced023b40feb477cf7557801a2899b433500` | 精确 E10-A 父链 |
 | Direct-parent授权轮起始head | `b0bdb36a122fec21aba56538fcef50d2200c282c` | 公共合同增量从已复审E10-B Round2 exact head开始，不重建/改写父链 |
 | Round4 recovery-root overlap起始head | `6073fc0edf0f20a84de9bd5ee0c234034826fe9a` | 从direct-parent合同clean head继续，精确父链不变 |
+| Windows exact protocol failure | job `99731507623` checkout `d0379600271e04156736468d2f67ddd7a6a0f055`；lint/smoke成功，unit `6562/6594`、30 fail/2 skip，integration未启动；E10-B 29个外层失败由长inode触发的privacy violation机制闭环 | Windows staging inode evidence必须保留且能穿过真实runtime policy envelope；日志未打印实际inode值，因此数值本身仍为未观测事实 |
+| Windows inode本地协议回归 | 官方Node22.18；E10-B `51/51`，protocol-validator/error-codec/Supervisor/inline adapter/ServiceHost/E10-A矩阵 `214/214`，均0 fail/skip/cancelled；依赖与最终#207锁定版本逐项一致 | 精确长inode正例穿过真实runtime policy envelope；附近路径、坏shape、前导零、uint64越界与其他identity长数字仍`PROTOCOL_PRIVACY_VIOLATION`；Publisher/lifecycle/production gate未漂移 |
 | RED | 首次运行 `new-account-save-as-e10-b.test.js` 因 `artifact-copy` 不存在失败 | 证明测试先于 production 模块 |
 | reviewer finding定向 | `E10-A 20/20`、`E10-B 33/33`、adapter `22/22` PASS | 恶意自洽业务、附加Sheet、committed-reply-lost、pre/post settle/ack、slow-copy shutdown/deadline/late terminal |
 | E10-A + strict readback + policy/Publisher/Governor 聚焦 | `217/217 PASS` | generation golden、业务digest、Publisher archive handoff/recovery、TaskLifecycle与Supervisor资源合同不漂移 |
@@ -85,3 +88,4 @@
 | 真实资金样本与 Excel/WPS 展示 | BLOCK production gate | 资金负责人逐项人工复核 | 自动化不能替代人工资损验收 |
 | 默认并发全unit中的archive migration symlink错误码时序 | PROBE后确认为负载型测试基线：连续两次默认全套出现，单用例、完整单文件`46/46`与串行全unit均通过；本轮diff未触及archive storage | 测试基础设施负责人独立收敛，不在E10-B扩大scope | 不影响E10-B定向/串行证据；禁止把默认全unit表述为全绿 |
 | 当前安装的 electron-builder NSIS helper 含 `System::Store` | 已知 exact-parent 依赖环境基线；本轮不改依赖/构建合同 | 发布负责人按既有 Windows 构建链校准依赖后复跑 | 不归因于 E10-B；仍阻止把本机 unit 结果表述为全绿 |
+| Windows exact job未打印实际`stagingSnapshot.ino`，且旧job在unit阶段退出 | 机制由16位canonical inode的validator+真实runtime envelope probe闭环；实际Windows值与integration尚未观测 | 新exact Windows CI验证unit与integration；保留生产`false/legacy/0` | 阻止用本地绿或旧CI代偿；不要求扩大privacy allowlist |
