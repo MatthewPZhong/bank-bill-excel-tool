@@ -44,22 +44,123 @@ function normalizeHistoricalGitRelativePath(platform, from, cwd, nativeRelative)
   return nativeRelative.split('\\').join('/');
 }
 
+function parseHistoricalGitTreeModes(rawTree) {
+  const text = Buffer.isBuffer(rawTree) ? rawTree.toString('utf8') : String(rawTree);
+  if (text === '' || !text.endsWith('\0')) {
+    throw new Error('HISTORICAL_GIT_MODE_TREE_INVALID');
+  }
+  const modes = new Map();
+  for (const record of text.slice(0, -1).split('\0')) {
+    const match = /^(100644|100755|120000) blob ([a-f0-9]{40})\t([\s\S]+)$/.exec(record);
+    if (!match) throw new Error('HISTORICAL_GIT_MODE_TREE_INVALID');
+    const relativePath = match[3];
+    const components = relativePath.split('/');
+    if (relativePath.startsWith('/') || relativePath.includes('\\') ||
+        /[\r\n]/.test(relativePath) || components.some((part) =>
+          part === '' || part === '.' || part === '..') || modes.has(relativePath)) {
+      throw new Error('HISTORICAL_GIT_MODE_TREE_INVALID');
+    }
+    modes.set(relativePath, match[1]);
+  }
+  if (modes.size === 0) throw new Error('HISTORICAL_GIT_MODE_TREE_INVALID');
+  return modes;
+}
+
+function readHistoricalGitTreeModes(repositoryRoot) {
+  const canonicalRoot = fs.realpathSync.native(repositoryRoot);
+  const topLevel = spawnSync('git', ['rev-parse', '--show-toplevel'], {
+    cwd: canonicalRoot,
+    encoding: 'utf8'
+  });
+  if (topLevel.status !== 0 || topLevel.stderr !== '' ||
+      fs.realpathSync.native(topLevel.stdout.trim()) !== canonicalRoot) {
+    throw new Error('HISTORICAL_GIT_MODE_REPOSITORY_INVALID');
+  }
+  const tree = spawnSync('git', ['ls-tree', '-rz', '--full-tree', 'HEAD'], {
+    cwd: canonicalRoot,
+    encoding: 'utf8',
+    maxBuffer: 16 * 1024 * 1024
+  });
+  if (tree.status !== 0 || tree.stderr !== '') {
+    throw new Error('HISTORICAL_GIT_MODE_TREE_INVALID');
+  }
+  return parseHistoricalGitTreeModes(tree.stdout);
+}
+
+function projectHistoricalGitWorktreeMode(
+  platform,
+  requestedPath,
+  canonicalRequestedPath,
+  cwd,
+  modeByPath,
+  stat
+) {
+  if (platform !== 'win32' || typeof requestedPath !== 'string' ||
+      canonicalRequestedPath !== requestedPath ||
+      !path.win32.isAbsolute(requestedPath) || path.win32.resolve(requestedPath) !== requestedPath ||
+      !stat || typeof stat.mode !== 'number' || !stat.isFile() || stat.isSymbolicLink() ||
+      (stat.mode & 0o222) === 0) {
+    return stat;
+  }
+  const relative = path.win32.relative(path.win32.resolve(cwd), requestedPath);
+  if (relative === '' || relative === '..' || relative.startsWith('..\\') ||
+      path.win32.isAbsolute(relative)) {
+    return stat;
+  }
+  const gitRelative = relative.split('\\').join('/');
+  const gitMode = modeByPath.get(gitRelative);
+  if (gitMode !== '100644' && gitMode !== '100755') return stat;
+  const descriptors = Object.getOwnPropertyDescriptors(stat);
+  descriptors.mode = {
+    ...descriptors.mode,
+    value: (stat.mode & ~0o777) | (gitMode === '100755' ? 0o755 : 0o644)
+  };
+  return Object.create(Object.getPrototypeOf(stat), descriptors);
+}
+
 function historicalGitPathPreloadSource() {
   return [
     "'use strict';",
+    "const fs = require('node:fs');",
     "const path = require('node:path');",
+    "const { spawnSync } = require('node:child_process');",
     normalizeHistoricalGitRelativePath.toString(),
+    parseHistoricalGitTreeModes.toString(),
+    readHistoricalGitTreeModes.toString(),
+    projectHistoricalGitWorktreeMode.toString(),
     "if (process.platform === 'win32') {",
-    "  const descriptor = Object.getOwnPropertyDescriptor(path, 'relative');",
-    "  if (!descriptor || descriptor.writable !== true || descriptor.configurable !== true) {",
-    "    throw new Error('HISTORICAL_GIT_PATH_ADAPTER_UNAVAILABLE');",
+    "  const relativeDescriptor = Object.getOwnPropertyDescriptor(path, 'relative');",
+    "  const lstatDescriptor = Object.getOwnPropertyDescriptor(fs, 'lstatSync');",
+    "  if (!relativeDescriptor || relativeDescriptor.writable !== true ||",
+    "      relativeDescriptor.configurable !== true || !lstatDescriptor ||",
+    "      lstatDescriptor.writable !== true || lstatDescriptor.configurable !== true) {",
+    "    throw new Error('HISTORICAL_GIT_WORKTREE_ADAPTER_UNAVAILABLE');",
     "  }",
     "  const nativeRelative = path.relative.bind(path);",
+    "  const nativeLstatSync = fs.lstatSync.bind(fs);",
+    "  const canonicalRoot = fs.realpathSync.native(process.cwd());",
+    "  const modeByPath = readHistoricalGitTreeModes(canonicalRoot);",
     "  Object.defineProperty(path, 'relative', {",
-    "    ...descriptor,",
+    "    ...relativeDescriptor,",
     "    value(from, to) {",
     "      return normalizeHistoricalGitRelativePath(",
     "        process.platform, from, process.cwd(), nativeRelative(from, to)",
+    "      );",
+    "    }",
+    "  });",
+    "  Object.defineProperty(fs, 'lstatSync', {",
+    "    ...lstatDescriptor,",
+    "    value(requestedPath, ...args) {",
+    "      const stat = nativeLstatSync(requestedPath, ...args);",
+    "      let canonicalRequestedPath;",
+    "      try {",
+    "        canonicalRequestedPath = fs.realpathSync.native(requestedPath);",
+    "      } catch {",
+    "        return stat;",
+    "      }",
+    "      return projectHistoricalGitWorktreeMode(",
+    "        process.platform, requestedPath, canonicalRequestedPath,",
+    "        canonicalRoot, modeByPath, stat",
     "      );",
     "    }",
     "  });",
@@ -71,6 +172,30 @@ function historicalGitPathPreloadSource() {
 function createControlledNodeOptions(preloadPath) {
   assert.doesNotMatch(preloadPath, /[\0\r\n]/);
   return `--require ${JSON.stringify(preloadPath)}`;
+}
+
+function createControlledHistoricalEnvironment(baseEnvironment, options) {
+  const environment = { ...baseEnvironment };
+  for (const key of Object.keys(environment)) {
+    const normalizedKey = key.toUpperCase();
+    if (['NODE_OPTIONS', 'NODE_PATH', 'TMP', 'TEMP', 'TMPDIR'].includes(normalizedKey) ||
+        normalizedKey === 'GIT_CONFIG_COUNT' || normalizedKey === 'GIT_CONFIG_PARAMETERS' ||
+        /^GIT_CONFIG_(KEY|VALUE)_\d+$/.test(normalizedKey)) {
+      delete environment[key];
+    }
+  }
+  Object.assign(environment, {
+    NODE_OPTIONS: options.nodeOptions,
+    NODE_PATH: options.nodePath,
+    TMP: options.tempRoot,
+    TEMP: options.tempRoot,
+    TMPDIR: options.tempRoot,
+    GIT_CONFIG_COUNT: '1',
+    GIT_CONFIG_KEY_0: 'core.autocrlf',
+    GIT_CONFIG_VALUE_0: 'false'
+  });
+  delete environment.NODE_TEST_CONTEXT;
+  return environment;
 }
 
 function createHistoricalGitPathPreload(root, canonicalRepository) {
@@ -99,6 +224,33 @@ function readGit(repository, args) {
   return result.stdout;
 }
 
+function assertHistoricalGitLineEndingContract(root) {
+  const source = path.join(root, 'line-ending-source');
+  const crlfClone = path.join(root, 'line-ending-crlf');
+  const lfClone = path.join(root, 'line-ending-lf');
+  fs.mkdirSync(source);
+  runGit(source, ['init', '--quiet']);
+  runGit(source, ['config', 'user.name', 'R3.2.3 Line Ending Probe']);
+  runGit(source, ['config', 'user.email', 'r323-eol@example.invalid']);
+  fs.writeFileSync(path.join(source, 'probe.txt'), 'alpha\nbeta\n', 'utf8');
+  runGit(source, ['add', 'probe.txt']);
+  runGit(source, ['commit', '--quiet', '-m', 'test: line ending probe']);
+  const reviewedOid = runGit(source, ['rev-parse', 'HEAD:probe.txt']);
+
+  runGit(root, ['-c', 'core.autocrlf=true', 'clone', '--quiet', source, crlfClone]);
+  assert.equal(fs.readFileSync(path.join(crlfClone, 'probe.txt')).includes(Buffer.from('\r\n')),
+    true);
+  assert.notEqual(runGit(crlfClone, ['hash-object', '--', 'probe.txt']), reviewedOid);
+
+  runGit(root, ['clone', '--quiet', '--no-checkout', source, lfClone]);
+  runGit(lfClone, ['config', '--local', 'core.autocrlf', 'false']);
+  assert.equal(runGit(lfClone, ['config', '--local', '--get', 'core.autocrlf']), 'false');
+  runGit(lfClone, ['checkout', '--quiet', '--detach', 'HEAD']);
+  assert.equal(fs.readFileSync(path.join(lfClone, 'probe.txt')).includes(Buffer.from('\r\n')),
+    false);
+  assert.equal(runGit(lfClone, ['hash-object', '--', 'probe.txt']), reviewedOid);
+}
+
 function assertHistoricalGitPathContract(repository) {
   assert.equal(runGit(repository, [
     'rev-parse', `${EXACT_EVIDENCE_HEAD}:${HISTORICAL_VALIDATOR_PATH}`
@@ -113,12 +265,26 @@ function assertHistoricalGitPathContract(repository) {
     'show', `${EXACT_EVIDENCE_HEAD}:${HISTORICAL_TEST_PATH}`
   ]);
   assert.equal((validatorSource.match(/\bpath\.relative\s*\(/g) || []).length, 1);
+  assert.equal((validatorSource.match(/\bfs\.lstatSync\s*\(/g) || []).length, 3);
+  assert.equal((validatorSource.match(/\(stat\.mode & 0o777\) !== expectedPermissions/g) || [])
+    .length, 1);
   assert.equal((testSource.match(/\bpath\.relative\s*\(/g) || []).length, 0);
   assert.match(validatorSource,
     /const relative = path\.relative\(REPOSITORY_ROOT, absolutePath\);/);
   assert.match(validatorSource, /relative !== relativePath/);
+  assert.match(validatorSource,
+    /const expectedPermissions = entry\.mode === '100755' \? 0o755 : 0o644;/);
   assert.match(testSource,
     /env: \{ \.\.\.process\.env, NODE_PATH: SHARED_NODE_MODULES \}/);
+  const exactModes = parseHistoricalGitTreeModes(readGit(repository, [
+    'ls-tree', '-rz', '--full-tree', EXACT_EVIDENCE_HEAD
+  ]));
+  assert.deepEqual([...readHistoricalGitTreeModes(repository).entries()],
+    [...exactModes.entries()]);
+  assert.equal(exactModes.size, 2018);
+  assert.equal([...exactModes.values()].filter((mode) => mode === '100644').length, 2016);
+  assert.equal([...exactModes.values()].filter((mode) => mode === '100755').length, 2);
+  assert.equal([...exactModes.values()].filter((mode) => mode === '120000').length, 0);
 }
 
 function assertHistoricalGitPathAdapterContract() {
@@ -144,6 +310,79 @@ function assertHistoricalGitPathAdapterContract() {
     nestedNative);
   assert.equal(normalizeHistoricalGitRelativePath('darwin', cwd, cwd, nestedNative),
     nestedNative);
+
+  const oid = 'a'.repeat(40);
+  const executablePath =
+    'changes/background-execution-v3.2.x-contract-baseline/changes/' +
+    'background-execution/validation/run-validation.sh';
+  const rawTree = [
+    `100644 blob ${oid}\tsrc/main-process/runtime.js`,
+    `100755 blob ${oid}\t${executablePath}`,
+    `120000 blob ${oid}\tlinked-entry`,
+    ''
+  ].join('\0');
+  const modeByPath = parseHistoricalGitTreeModes(rawTree);
+  assert.deepEqual([...modeByPath.entries()], [
+    ['src/main-process/runtime.js', '100644'],
+    [executablePath, '100755'],
+    ['linked-entry', '120000']
+  ]);
+  for (const invalidTree of [
+    rawTree.slice(0, -1),
+    `100664 blob ${oid}\tsrc/a.js\0`,
+    `040000 tree ${oid}\tsrc\0`,
+    [
+      `100644 blob ${oid}\tsrc/a.js`,
+      `100644 blob ${oid}\tsrc/a.js`,
+      ''
+    ].join('\0'),
+    `100644 blob ${oid}\t../outside\0`,
+    `100644 blob ${oid}\tsrc\\a.js\0`,
+    `100644 blob ${oid}\tsrc/a\n.js\0`
+  ]) {
+    assert.throws(() => parseHistoricalGitTreeModes(invalidTree),
+      /HISTORICAL_GIT_MODE_TREE_INVALID/);
+  }
+
+  const makeStat = (mode, kind = 'file') => ({
+    mode,
+    isFile: () => kind === 'file',
+    isSymbolicLink: () => kind === 'symlink',
+    isDirectory: () => kind === 'directory'
+  });
+  const nativeFile = makeStat(0o100666);
+  const tracked = path.win32.join(cwd, 'src', 'main-process', 'runtime.js');
+  const projectedFile = projectHistoricalGitWorktreeMode(
+    'win32', tracked, tracked, cwd, modeByPath, nativeFile
+  );
+  assert.notEqual(projectedFile, nativeFile);
+  assert.equal(projectedFile.mode & 0o170000, nativeFile.mode & 0o170000);
+  assert.equal(projectedFile.mode & 0o777, 0o644);
+  const executable = path.win32.join(cwd, ...executablePath.split('/'));
+  assert.equal(projectHistoricalGitWorktreeMode(
+    'win32', executable, executable, cwd, modeByPath, nativeFile
+  ).mode & 0o777, 0o755);
+
+  const noOpCases = [
+    ['darwin', tracked, tracked, cwd, nativeFile],
+    ['win32', tracked, path.win32.join(cwd, 'SRC', 'main-process', 'runtime.js'), cwd,
+      nativeFile],
+    ['win32', 'src\\main-process\\runtime.js', 'src\\main-process\\runtime.js', cwd,
+      nativeFile],
+    ['win32', path.win32.join(cwd, 'untracked.js'), path.win32.join(cwd, 'untracked.js'),
+      cwd, nativeFile],
+    ['win32', path.win32.join(cwd, '..', 'outside.js'),
+      path.win32.join(cwd, '..', 'outside.js'), cwd, nativeFile],
+    ['win32', 'D:\\outside.js', 'D:\\outside.js', cwd, nativeFile],
+    ['win32', tracked, tracked, cwd, makeStat(0o100444)],
+    ['win32', tracked, tracked, cwd, makeStat(0o040777, 'directory')],
+    ['win32', tracked, tracked, cwd, makeStat(0o120777, 'symlink')]
+  ];
+  for (const [platform, requestedPath, canonicalRequestedPath, root, stat] of noOpCases) {
+    assert.equal(projectHistoricalGitWorktreeMode(
+      platform, requestedPath, canonicalRequestedPath, root, modeByPath, stat
+    ), stat);
+  }
 }
 
 function assertControlledPreloadInheritance(environment, cwd, preloadPath) {
@@ -151,11 +390,16 @@ function assertControlledPreloadInheritance(environment, cwd, preloadPath) {
     "'use strict';",
     "const assert = require('node:assert/strict');",
     "const preload = process.env.V323_HISTORICAL_PRELOAD_PATH;",
-    "assert.ok(require.cache[require.resolve(preload)]);"
+    "assert.ok(require.cache[require.resolve(preload)]);",
+    "const { spawnSync } = require('node:child_process');",
+    "const gitConfig = spawnSync('git', ['config', '--get', 'core.autocrlf'], {",
+    "  encoding: 'utf8'",
+    "});",
+    "assert.equal(gitConfig.status, 0, gitConfig.stderr || gitConfig.stdout);",
+    "assert.equal(gitConfig.stdout.trim(), 'false');"
   ].join('\n');
   const parentProbeSource = [
     cacheProbeSource,
-    "const { spawnSync } = require('node:child_process');",
     `const childSource = ${JSON.stringify(cacheProbeSource)};`,
     "const child = spawnSync(process.execPath, ['-e', childSource], {",
     "  encoding: 'utf8',",
@@ -261,10 +505,15 @@ if (!RUN_EXACT_SUITE) {
         process.platform === 'win32' ? 'junction' : 'dir');
       assert.equal(fs.lstatSync(nestedNodeModules).isSymbolicLink(), true);
       assert.equal(fs.realpathSync.native(nestedNodeModules), sharedNodeModules);
+      assertHistoricalGitLineEndingContract(canonicalTempRoot);
 
       runGit(canonicalTempRoot,
         ['clone', '--quiet', '--shared', '--no-checkout', REPOSITORY_ROOT, repository]);
       const canonicalRepository = fs.realpathSync.native(repository);
+      runGit(canonicalRepository, ['config', '--local', 'core.autocrlf', 'false']);
+      assert.equal(runGit(canonicalRepository, [
+        'config', '--local', '--get', 'core.autocrlf'
+      ]), 'false');
       runGit(canonicalRepository, ['checkout', '--quiet', '-B', EXPECTED_BRANCH, EXACT_EVIDENCE_HEAD]);
       runGit(canonicalRepository, ['update-ref', 'refs/heads/main', EXPECTED_MAIN_REF_OID]);
       assertHistoricalGitPathContract(canonicalRepository);
@@ -273,16 +522,29 @@ if (!RUN_EXACT_SUITE) {
         canonicalTempRoot, canonicalRepository
       );
       const controlledNodeOptions = createControlledNodeOptions(preloadPath);
-      const nestedEnvironment = {
+      const nestedEnvironment = createControlledHistoricalEnvironment({
         ...process.env,
-        NODE_OPTIONS: controlledNodeOptions,
-        NODE_PATH: sharedNodeModules,
-        TMP: canonicalTempRoot,
-        TEMP: canonicalTempRoot,
-        TMPDIR: canonicalTempRoot
-      };
-      delete nestedEnvironment.NODE_TEST_CONTEXT;
+        NODE_OPTIONS: '--require ambient-forbidden.cjs',
+        node_options: '--require ambient-case-forbidden.cjs',
+        GIT_CONFIG_COUNT: '2',
+        GIT_CONFIG_KEY_0: 'core.autocrlf',
+        GIT_CONFIG_VALUE_0: 'true',
+        GIT_CONFIG_KEY_1: 'core.filemode',
+        GIT_CONFIG_VALUE_1: 'true',
+        GIT_CONFIG_PARAMETERS: "'core.autocrlf'='true'"
+      }, {
+        nodeOptions: controlledNodeOptions,
+        nodePath: sharedNodeModules,
+        tempRoot: canonicalTempRoot
+      });
       assert.equal(nestedEnvironment.NODE_OPTIONS, controlledNodeOptions);
+      assert.equal(nestedEnvironment.node_options, undefined);
+      assert.equal(nestedEnvironment.GIT_CONFIG_COUNT, '1');
+      assert.equal(nestedEnvironment.GIT_CONFIG_KEY_0, 'core.autocrlf');
+      assert.equal(nestedEnvironment.GIT_CONFIG_VALUE_0, 'false');
+      assert.equal(nestedEnvironment.GIT_CONFIG_KEY_1, undefined);
+      assert.equal(nestedEnvironment.GIT_CONFIG_VALUE_1, undefined);
+      assert.equal(nestedEnvironment.GIT_CONFIG_PARAMETERS, undefined);
       assertControlledPreloadInheritance(
         nestedEnvironment, canonicalRepository, preloadPath
       );

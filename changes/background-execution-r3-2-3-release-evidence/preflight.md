@@ -17,6 +17,7 @@
 | E09/E10 notes 已记录自动测试、RSS、cancel、recovery，但 Windows/真实资金/Excel-WPS gate 未关闭。 | 各 reviewed implementation notes 的 Evidence/Remaining Unknowns。 | 本地证据只能标 merge-ready，不能标 production-ready。 |
 | R3.2.4 已证明 Git checkout、duplicate-key、number-token 与 ignored audit-root 旁路真实可达；本版真实 require graph 还会进入 `src/backend`。 | exact commit `a805de8b...` validator/tests；`src/backend` extensionless `require()` 路径。 | audit root 必须覆盖整个 `src`，否则 ignored backend shim 可执行非 HEAD 字节。 |
 | canonical long path 仍不能让 historical exact suite 在 Windows 通过。 | exact job `99753294084` checkout `75d7ff89...`；nested `57fab04a` 9 pass/13 fail；历史 validator 唯一 `path.relative()` 对嵌套路径返回 `src\\...`，Git tree固定返回 `src/...`；historical test 的 candidate `NODE_PATH` 仍是macOS绝对路径。 | 只能在当前外层 test harness 提供可审计 separator adapter 与可丢弃依赖 root；不得改历史/current validator、snapshot或跳过负例。 |
+| separator 与 candidate 依赖适配后，historical exact suite 在 Windows 仍被 worktree POSIX mode 门阻断。 | exact job `99769281418` checkout `4084b632...`；nested `57fab04a` 10 pass/12 fail；authority modules、reviewed evidence与4个真实Git反例均PASS，唯一前置错误为`GIT_WORKTREE_TREE_INVALID`。历史树精确为`2016x100644+2x100755`，validator唯一 permission 比较要求`0644/0755`；Windows Node不能原生表达。 | 只能在当前外层 win32 preload 按当前cwd/HEAD投影tracked regular file低permission bits，保留HEAD/index/type/realpath/hash/status/audit门；runner原始`core.autocrlf`未观测，但必须显式固定LF以保护后续原始blob hash。 |
 
 ## Unknowns Register
 
@@ -29,6 +30,7 @@
 | package/release 三件套是否要更新。 | release scope | 低 | 容易 | package 仍 3.1.14，PR 无用户可见 live change。 | ASSUME | 查冻结 sequence/package。 | evidence-only 不 bump；正式发布另立 owner 决策。 |
 | Windows短路径alias是否会让historical exact suite误判仓库身份。 | harness/platform | 高 | 容易 | exact job `99731507623` 先报`GIT_REPOSITORY_IDENTITY_INVALID`，路径含`RUNNER~1`；Git/realpath返回规范长路径。 | PROBE | 外层wrapper规范clone cwd和TMP/TEMP/TMPDIR；正常与symlink alias本地复验 | 只改当前外层harness；历史/current validator、snapshot和Git gates不变。 |
 | Windows Git/Node路径分隔符与historical candidate依赖解析是否会继续遮蔽22项证据。 | harness/platform | 高 | 容易 | exact job `99753294084` 已用长路径但仍报三类路径前置错误；历史唯一 `path.relative()` 与硬编码macOS `NODE_PATH` 已由blob锁定和require图证实。 | PROBE | 当前wrapper创建受控win32-only preload、父子继承probe及clone外临时依赖root；正常/alias复验22/22；最终新exact Windows CI。 | 只转换cwd内contained native relative的分隔符；越界/off-cwd/非Windows保持原生，依赖链接随本轮root清理。 |
+| Windows worktree POSIX mode与潜在CRLF checkout是否继续遮蔽historical 22项。 | harness/platform | 高 | 容易 | exact job `99769281418` 只剩`GIT_WORKTREE_TREE_INVALID`；历史 permission/hash调用点与mode分布已锁定。runner原始`core.autocrlf`无日志，但可丢弃probe证明true会使raw worktree blob OID漂移。 | PROBE | 当前wrapper按每进程cwd/HEAD严格解析mode map，只投影tracked writable regular files；outer local config与nested Git env固定`core.autocrlf=false`；forced probe+22/22后等待真实Windows。 | mode projection不得影响readonly/dir/symlink/untracked/off-root；LF只控制checkout，不改Git hash/filters或历史字节。 |
 
 ## BLOCK
 
@@ -49,3 +51,11 @@
 7. 执行 reconciliation blindspot、自查 diff、提交并确认 clean。
 8. 在正常temp与可丢弃symlink alias temp下各运行historical exact wrapper；真实Windows CI继续作为路径身份与integration权威。
 9. 锁定historical validator/test blob与唯一调用点，以当前tracked固定preload做win32-only Git分隔符适配；验证父子继承、越界不变、临时依赖root清理和完整22项负例，再等待新exact Windows unit/integration。
+10. 在同一受控preload内仅对每进程当前HEAD中的tracked writable regular file投影Windows不可表达的POSIX permission bits，并以唯一`core.autocrlf=false`控制outer/candidate checkout；保留type/realpath/blob/index/status/audit门，最终仍等待新exact Windows unit/integration。
+
+## 本轮验证证据
+
+- 官方Node22.18在正常temp与精确`RUNNER~1` symlink alias下各运行当前R3 wrapper，均为外层`1/1`且复验nested historical `22/22`；v3.2.2 evidence为`30/30`。
+- R3/E10-B/protocol/privacy及前序17文件跨模块矩阵为`436/436`；完整unit为`6592/6595`、0 fail/3 Windows-only skip/0 cancelled，日志为`logs/unit-tests/unit-20260901-161510.log`。
+- `check:packaged-inputs` PASS、lint exit0、changed JS node-check与diff-check通过；未运行被禁的`release-check`、`check-vars`或`scan:vars`。
+- macOS forced win32/mode/EOL probe仅证明受控机制及负例边界，不构成真实Windows PASS；真实win32 nested `22/22`与首次可达integration仍由新exact Windows CI权威验证。
