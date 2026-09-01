@@ -31,6 +31,20 @@ const HISTORICAL_VALIDATOR_PATH = 'scripts/validate-v3-2-3-release-evidence.js';
 const HISTORICAL_TEST_PATH = 'tests/unit/scripts/v3-2-3-release-evidence.test.js';
 const HISTORICAL_VALIDATOR_BLOB = '591d6397253edc5878c53e1a735622a98578c507';
 const HISTORICAL_TEST_BLOB = '820916a79370dfe26c7fd25893d6bb53c39c50dd';
+const HISTORICAL_EXACT_BASE = 'd54f97cecddef992069d867eedc227681ed562d4';
+const HISTORICAL_EXPECTED_BRANCH = 'codex/v3.2.3-r3-final-evidence-chain-20260830';
+const HISTORICAL_EXPECTED_MAIN_REF_OID = 'b7abc2fa00838fc61a94f812c1a14c48d5d4d40f';
+const HISTORICAL_EXPECTED_TRACKED_ENTRY_COUNT = 2018;
+const HISTORICAL_RELEASE_EVIDENCE_PATHS = Object.freeze([
+  'changes/background-execution-r3-2-3-release-evidence/implementation-notes.md',
+  'changes/background-execution-r3-2-3-release-evidence/preflight.md',
+  'changes/background-execution-r3-2-3-release-evidence/release-evidence.json',
+  'scripts/validate-v3-2-3-release-evidence.js',
+  'tests/unit/scripts/v3-2-3-release-evidence.test.js'
+]);
+const HISTORICAL_RAW_DUPLICATE_SNAPSHOT =
+  '{"ACCOUNT_6222021234567890":1,"\\u0041CCOUNT_6222021234567890":2}';
+const CANDIDATE_DIAGNOSTIC_ITEM_LIMIT = 20;
 
 function normalizeHistoricalGitRelativePath(platform, from, cwd, nativeRelative) {
   if (platform !== 'win32') return nativeRelative;
@@ -224,6 +238,307 @@ function readGit(repository, args) {
   return result.stdout;
 }
 
+function assertCanonicalGitRelativePath(relativePath, errorCode) {
+  const components = relativePath.split('/');
+  if (relativePath === '' || relativePath.startsWith('/') || relativePath.includes('\\') ||
+      relativePath.includes('\0') || /[\r\n]/.test(relativePath) ||
+      components.some((component) => component === '' || component === '.' || component === '..')) {
+    throw new Error(errorCode);
+  }
+}
+
+function parseCandidateGitTree(rawTree) {
+  const text = Buffer.isBuffer(rawTree) ? rawTree.toString('utf8') : String(rawTree);
+  if (text === '' || !text.endsWith('\0')) {
+    throw new Error('HISTORICAL_CANDIDATE_TREE_INVALID');
+  }
+  const entries = new Map();
+  for (const record of text.slice(0, -1).split('\0')) {
+    const match = /^([0-7]{6}) (blob|commit) ([a-f0-9]{40})\t([\s\S]+)$/.exec(record);
+    if (!match) throw new Error('HISTORICAL_CANDIDATE_TREE_INVALID');
+    const relativePath = match[4];
+    assertCanonicalGitRelativePath(relativePath, 'HISTORICAL_CANDIDATE_TREE_INVALID');
+    if (entries.has(relativePath)) throw new Error('HISTORICAL_CANDIDATE_TREE_INVALID');
+    entries.set(relativePath, {
+      mode: match[1],
+      type: match[2],
+      oid: match[3]
+    });
+  }
+  return entries;
+}
+
+function parseCandidateRawDiff(rawDiff) {
+  const text = Buffer.isBuffer(rawDiff) ? rawDiff.toString('utf8') : String(rawDiff);
+  if (text === '') return [];
+  if (!text.endsWith('\0')) throw new Error('HISTORICAL_CANDIDATE_DIFF_INVALID');
+  const parts = text.slice(0, -1).split('\0');
+  if (parts.length % 2 !== 0) throw new Error('HISTORICAL_CANDIDATE_DIFF_INVALID');
+  const records = [];
+  for (let index = 0; index < parts.length; index += 2) {
+    const match = /^:([0-7]{6}) ([0-7]{6}) ([a-f0-9]{40}) ([a-f0-9]{40}) ([A-Z])$/.exec(
+      parts[index]
+    );
+    if (!match) throw new Error('HISTORICAL_CANDIDATE_DIFF_INVALID');
+    const relativePath = parts[index + 1];
+    assertCanonicalGitRelativePath(relativePath, 'HISTORICAL_CANDIDATE_DIFF_INVALID');
+    records.push({
+      oldMode: match[1],
+      newMode: match[2],
+      oldOid: match[3],
+      newOid: match[4],
+      status: match[5],
+      relativePath
+    });
+  }
+  return records;
+}
+
+function parseCandidateIndex(rawIndex) {
+  const text = Buffer.isBuffer(rawIndex) ? rawIndex.toString('utf8') : String(rawIndex);
+  if (text === '' || !text.endsWith('\0')) {
+    throw new Error('HISTORICAL_CANDIDATE_INDEX_INVALID');
+  }
+  return text.slice(0, -1).split('\0').map((record) => {
+    const match = /^([A-Za-z]) ([0-7]{6}) ([a-f0-9]{40}) ([0-3])\t([\s\S]+)$/.exec(record);
+    if (!match) throw new Error('HISTORICAL_CANDIDATE_INDEX_INVALID');
+    const relativePath = match[5];
+    assertCanonicalGitRelativePath(relativePath, 'HISTORICAL_CANDIDATE_INDEX_INVALID');
+    return {
+      tag: match[1],
+      mode: match[2],
+      oid: match[3],
+      stage: Number(match[4]),
+      relativePath
+    };
+  });
+}
+
+function runControlledCandidateGit(repository, args, environment, label) {
+  const result = spawnSync('git', args, {
+    cwd: repository,
+    encoding: 'utf8',
+    env: environment,
+    maxBuffer: 16 * 1024 * 1024
+  });
+  assert.equal(result.status, 0, `HISTORICAL_CANDIDATE_GIT_${label}_FAILED`);
+  return result.stdout;
+}
+
+function readCandidateLocalGitConfig(repository, key, environment) {
+  const result = spawnSync('git', ['config', '--local', '--get', key], {
+    cwd: repository,
+    encoding: 'utf8',
+    env: environment
+  });
+  if (result.status === 1 && result.stdout === '' && result.stderr === '') return null;
+  assert.equal(result.status, 0, 'HISTORICAL_CANDIDATE_GIT_CONFIG_FAILED');
+  const value = result.stdout.trim();
+  assert.match(value, /^[A-Za-z0-9._-]{1,32}$/);
+  return value;
+}
+
+function sanitizeCandidateDiagnosticPath(relativePath) {
+  const safe = relativePath.length <= 240 &&
+    /^[A-Za-z0-9._@+/-]+$/.test(relativePath) &&
+    !/\d{12,24}/.test(relativePath);
+  return safe ? relativePath : `sha256:${sha256(relativePath)}`;
+}
+
+function limitCandidateDiagnosticPaths(relativePaths) {
+  return relativePaths.slice(0, CANDIDATE_DIAGNOSTIC_ITEM_LIMIT)
+    .map(sanitizeCandidateDiagnosticPath);
+}
+
+function assertHistoricalCandidateGitBaseline(root, repository, environment) {
+  let candidateRoot = null;
+  try {
+    candidateRoot = fs.mkdtempSync(path.join(root, 'candidate-baseline-'));
+    const candidateRepository = path.join(candidateRoot, 'repo');
+    runControlledCandidateGit(candidateRoot, [
+      'clone', '--quiet', '--shared', '--no-checkout', repository, candidateRepository
+    ], environment, 'CLONE');
+    const canonicalCandidateRepository = fs.realpathSync.native(candidateRepository);
+    runControlledCandidateGit(canonicalCandidateRepository, [
+      'checkout', '--quiet', '-B', HISTORICAL_EXPECTED_BRANCH, HISTORICAL_EXACT_BASE
+    ], environment, 'CHECKOUT');
+    runControlledCandidateGit(canonicalCandidateRepository, [
+      'update-ref', 'refs/heads/main', HISTORICAL_EXPECTED_MAIN_REF_OID
+    ], environment, 'MAIN_REF');
+    for (const relativePath of HISTORICAL_RELEASE_EVIDENCE_PATHS) {
+      const destination = path.join(canonicalCandidateRepository, relativePath);
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      fs.copyFileSync(path.join(repository, relativePath), destination);
+    }
+    fs.writeFileSync(path.join(
+      canonicalCandidateRepository,
+      'changes/background-execution-r3-2-3-release-evidence/release-evidence.json'
+    ), HISTORICAL_RAW_DUPLICATE_SNAPSHOT);
+    runControlledCandidateGit(canonicalCandidateRepository, ['add', '-A'], environment, 'ADD');
+    runControlledCandidateGit(canonicalCandidateRepository, [
+      '-c', 'user.name=R3.2.3 Test', '-c', 'user.email=r323@example.invalid',
+      'commit', '--quiet', '-m', 'test: candidate release evidence'
+    ], environment, 'COMMIT');
+
+    const expectedTree = parseCandidateGitTree(runControlledCandidateGit(repository, [
+      'ls-tree', '-rz', '--full-tree', EXACT_EVIDENCE_HEAD
+    ], environment, 'EXPECTED_TREE'));
+    assert.equal(expectedTree.size, HISTORICAL_EXPECTED_TRACKED_ENTRY_COUNT);
+    const candidateTree = parseCandidateGitTree(runControlledCandidateGit(
+      canonicalCandidateRepository,
+      ['ls-tree', '-rz', '--full-tree', 'HEAD'],
+      environment,
+      'HEAD_TREE'
+    ));
+    const missingPaths = [...expectedTree.keys()].filter((relativePath) =>
+      !candidateTree.has(relativePath));
+    const extraPaths = [...candidateTree.keys()].filter((relativePath) =>
+      !expectedTree.has(relativePath));
+    const modeMismatches = [...expectedTree.entries()].flatMap(([relativePath, expected]) => {
+      const actual = candidateTree.get(relativePath);
+      return actual && actual.mode !== expected.mode
+        ? [{ relativePath, expectedMode: expected.mode, actualMode: actual.mode }]
+        : [];
+    });
+    const typeMismatches = [...expectedTree.entries()].flatMap(([relativePath, expected]) => {
+      const actual = candidateTree.get(relativePath);
+      return actual && actual.type !== expected.type
+        ? [{ relativePath, expectedType: expected.type, actualType: actual.type }]
+        : [];
+    });
+
+    const parents = runControlledCandidateGit(canonicalCandidateRepository, [
+      'rev-list', '--parents', '-n', '1', 'HEAD'
+    ], environment, 'PARENTS').trim().split(/\s+/).slice(1);
+    const branch = runControlledCandidateGit(canonicalCandidateRepository, [
+      'branch', '--show-current'
+    ], environment, 'BRANCH').trim();
+    const mainRef = runControlledCandidateGit(canonicalCandidateRepository, [
+      'rev-parse', '--verify', 'refs/heads/main^{commit}'
+    ], environment, 'MAIN_REF_READ').trim();
+    const diffRecords = parseCandidateRawDiff(runControlledCandidateGit(
+      canonicalCandidateRepository,
+      [
+        'diff-tree', '--no-commit-id', '--raw', '-r', '-z', '--no-renames', '--no-abbrev',
+        HISTORICAL_EXACT_BASE, 'HEAD'
+      ],
+      environment,
+      'RAW_DIFF'
+    ));
+    const zeroOid = '0'.repeat(40);
+    const diffExact = diffRecords.length === HISTORICAL_RELEASE_EVIDENCE_PATHS.length &&
+      diffRecords.every((record, index) =>
+        record.status === 'A' && record.oldMode === '000000' &&
+        record.newMode === '100644' && record.oldOid === zeroOid &&
+        record.relativePath === HISTORICAL_RELEASE_EVIDENCE_PATHS[index]);
+    const indexEntries = parseCandidateIndex(runControlledCandidateGit(
+      canonicalCandidateRepository,
+      ['ls-files', '--stage', '-v', '-f', '-z'],
+      environment,
+      'INDEX'
+    ));
+    const nonDefaultIndexFlagCount = indexEntries.filter((entry) => entry.tag !== 'H').length;
+    const nonZeroIndexStageCount = indexEntries.filter((entry) => entry.stage !== 0).length;
+    const status = runControlledCandidateGit(canonicalCandidateRepository, [
+      'status', '--porcelain=v2', '-z', '--untracked-files=all'
+    ], environment, 'STATUS');
+    const statusRecordCount = status === '' ? 0 : status.split('\0').filter(Boolean).length;
+    const worktreeDiff = spawnSync('git', ['diff', '--quiet', '--exit-code'], {
+      cwd: canonicalCandidateRepository,
+      env: environment
+    });
+    const indexDiff = spawnSync('git', ['diff', '--cached', '--quiet', '--exit-code', 'HEAD'], {
+      cwd: canonicalCandidateRepository,
+      env: environment
+    });
+    assert.ok([0, 1].includes(worktreeDiff.status), 'HISTORICAL_CANDIDATE_WORKTREE_DIFF_FAILED');
+    assert.ok([0, 1].includes(indexDiff.status), 'HISTORICAL_CANDIDATE_INDEX_DIFF_FAILED');
+
+    const baselineExact = parents.length === 1 && parents[0] === HISTORICAL_EXACT_BASE &&
+      branch === HISTORICAL_EXPECTED_BRANCH && mainRef === HISTORICAL_EXPECTED_MAIN_REF_OID &&
+      candidateTree.size === HISTORICAL_EXPECTED_TRACKED_ENTRY_COUNT &&
+      missingPaths.length === 0 && extraPaths.length === 0 && modeMismatches.length === 0 &&
+      typeMismatches.length === 0 && diffExact &&
+      indexEntries.length === HISTORICAL_EXPECTED_TRACKED_ENTRY_COUNT &&
+      nonDefaultIndexFlagCount === 0 && nonZeroIndexStageCount === 0 &&
+      statusRecordCount === 0 && worktreeDiff.status === 0 && indexDiff.status === 0;
+    if (!baselineExact) {
+      const diagnostic = {
+        kind: 'candidate-baseline',
+        parentExact: parents.length === 1 && parents[0] === HISTORICAL_EXACT_BASE,
+        parentOids: parents.slice(0, 3),
+        branchExact: branch === HISTORICAL_EXPECTED_BRANCH,
+        mainRefExact: mainRef === HISTORICAL_EXPECTED_MAIN_REF_OID,
+        trackedEntryCount: candidateTree.size,
+        expectedTrackedEntryCount: HISTORICAL_EXPECTED_TRACKED_ENTRY_COUNT,
+        missingPathCount: missingPaths.length,
+        missingPaths: limitCandidateDiagnosticPaths(missingPaths),
+        extraPathCount: extraPaths.length,
+        extraPaths: limitCandidateDiagnosticPaths(extraPaths),
+        modeMismatchCount: modeMismatches.length,
+        modeMismatches: modeMismatches.slice(0, CANDIDATE_DIAGNOSTIC_ITEM_LIMIT).map((item) => ({
+          path: sanitizeCandidateDiagnosticPath(item.relativePath),
+          expectedMode: item.expectedMode,
+          actualMode: item.actualMode
+        })),
+        typeMismatchCount: typeMismatches.length,
+        typeMismatches: typeMismatches.slice(0, CANDIDATE_DIAGNOSTIC_ITEM_LIMIT).map((item) => ({
+          path: sanitizeCandidateDiagnosticPath(item.relativePath),
+          expectedType: item.expectedType,
+          actualType: item.actualType
+        })),
+        diffRecordCount: diffRecords.length,
+        diffRecords: diffRecords.slice(0, CANDIDATE_DIAGNOSTIC_ITEM_LIMIT).map((record) => ({
+          path: sanitizeCandidateDiagnosticPath(record.relativePath),
+          status: record.status,
+          oldMode: record.oldMode,
+          newMode: record.newMode
+        })),
+        indexEntryCount: indexEntries.length,
+        nonDefaultIndexFlagCount,
+        nonZeroIndexStageCount,
+        statusRecordCount,
+        worktreeDiffClean: worktreeDiff.status === 0,
+        indexDiffClean: indexDiff.status === 0,
+        localGitConfig: {
+          autocrlf: readCandidateLocalGitConfig(
+            canonicalCandidateRepository, 'core.autocrlf', environment
+          ),
+          filemode: readCandidateLocalGitConfig(
+            canonicalCandidateRepository, 'core.filemode', environment
+          ),
+          ignorecase: readCandidateLocalGitConfig(
+            canonicalCandidateRepository, 'core.ignorecase', environment
+          )
+        }
+      };
+      assert.fail(JSON.stringify(diagnostic));
+    }
+
+    const cli = spawnSync(process.execPath, [
+      'scripts/validate-v3-2-3-release-evidence.js'
+    ], {
+      cwd: canonicalCandidateRepository,
+      encoding: 'utf8',
+      env: environment,
+      maxBuffer: 16 * 1024 * 1024
+    });
+    assert.doesNotMatch(`${cli.stdout || ''}${cli.stderr || ''}`, /6222021234567890/);
+    assert.equal(cli.status, 1, 'HISTORICAL_CANDIDATE_CLI_STATUS_INVALID');
+    assert.equal(cli.stderr, '', 'HISTORICAL_CANDIDATE_CLI_STDERR_INVALID');
+    const summary = JSON.parse(cli.stdout);
+    assert.equal(summary.status, 'FAIL');
+    assert.deepEqual(summary.errors.map((error) => error.code), ['RAW_JSON_DUPLICATE_KEY']);
+    assert.equal(summary.errors.length, 1);
+    assert.match(summary.errors[0].path, /^\/json\/offset\/\d{1,6}$/);
+  } finally {
+    if (candidateRoot !== null) {
+      fs.rmSync(candidateRoot, { recursive: true, force: true });
+      assert.equal(fs.existsSync(candidateRoot), false);
+    }
+  }
+}
+
 function assertHistoricalGitLineEndingContract(root) {
   const source = path.join(root, 'line-ending-source');
   const crlfClone = path.join(root, 'line-ending-crlf');
@@ -254,6 +569,10 @@ function assertHistoricalGitLineEndingContract(root) {
 }
 
 function assertHistoricalGitPathContract(repository) {
+  assert.equal(EXACT_BASE, HISTORICAL_EXACT_BASE);
+  assert.equal(EXPECTED_BRANCH, HISTORICAL_EXPECTED_BRANCH);
+  assert.equal(EXPECTED_MAIN_REF_OID, HISTORICAL_EXPECTED_MAIN_REF_OID);
+  assert.deepEqual(RELEASE_EVIDENCE_PATHS, HISTORICAL_RELEASE_EVIDENCE_PATHS);
   assert.equal(runGit(repository, [
     'rev-parse', `${EXACT_EVIDENCE_HEAD}:${HISTORICAL_VALIDATOR_PATH}`
   ]), HISTORICAL_VALIDATOR_BLOB);
@@ -549,6 +868,9 @@ if (!RUN_EXACT_SUITE) {
       assert.equal(nestedEnvironment.GIT_CONFIG_PARAMETERS, undefined);
       assertControlledPreloadInheritance(
         nestedEnvironment, canonicalRepository, preloadPath
+      );
+      assertHistoricalCandidateGitBaseline(
+        canonicalTempRoot, canonicalRepository, nestedEnvironment
       );
       const result = spawnSync(
         process.execPath,

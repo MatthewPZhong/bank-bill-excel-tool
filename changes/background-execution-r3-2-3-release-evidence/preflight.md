@@ -19,6 +19,7 @@
 | canonical long path 仍不能让 historical exact suite 在 Windows 通过。 | exact job `99753294084` checkout `75d7ff89...`；nested `57fab04a` 9 pass/13 fail；历史 validator 唯一 `path.relative()` 对嵌套路径返回 `src\\...`，Git tree固定返回 `src/...`；historical test 的 candidate `NODE_PATH` 仍是macOS绝对路径。 | 只能在当前外层 test harness 提供可审计 separator adapter 与可丢弃依赖 root；不得改历史/current validator、snapshot或跳过负例。 |
 | separator 与 candidate 依赖适配后，historical exact suite 在 Windows 仍被 worktree POSIX mode 门阻断。 | exact job `99769281418` checkout `4084b632...`；nested `57fab04a` 10 pass/12 fail；authority modules、reviewed evidence与4个真实Git反例均PASS，唯一前置错误为`GIT_WORKTREE_TREE_INVALID`。历史树精确为`2016x100644+2x100755`，validator唯一 permission 比较要求`0644/0755`；Windows Node不能原生表达。 | 只能在当前外层 win32 preload 按当前cwd/HEAD投影tracked regular file低permission bits，保留HEAD/index/type/realpath/hash/status/audit门；runner原始`core.autocrlf`未观测，但必须显式固定LF以保护后续原始blob hash。 |
 | 当前 EOL probe 的 plain `git hash-object` 不是跨宿主 raw-byte oracle。 | exact job `99788627297` checkout `21388ff8...`；raw CRLF断言已PASS，但Windows clean规范化使plain hash仍等于reviewed LF OID；unit仅此1 fail，historical clone/preload/nested22与integration均未启动。 | 只把current disposable probe的两处raw OID核对改为`--no-filters`；不得修改historical/current validator或据此宣称mode/candidate/nested Windows已通过。 |
+| 主 historical repo 的 Windows 兼容链已通过到21/22，剩余失败只在 raw parser 前的candidate Git baseline。 | exact job `99803981567` checkout `1f1d5fda...`；lint/smoke成功，unit `6592/6595`、1 fail/2 skip；nested 21 pass/1 fail，duplicate-key candidate只返回`GIT_HEAD_TREE_INVALID + GIT_CHANGED_PATHS_INVALID`，integration未启动。 | path/mode/LF/preload、authority及21项正负证据不能再被算作失败；但安全CLI没有实际tree/diff facts，必须先做有界test-only PROBE，不能猜修复或放宽Git guard。 |
 
 ## Unknowns Register
 
@@ -32,6 +33,7 @@
 | Windows短路径alias是否会让historical exact suite误判仓库身份。 | harness/platform | 高 | 容易 | exact job `99731507623` 先报`GIT_REPOSITORY_IDENTITY_INVALID`，路径含`RUNNER~1`；Git/realpath返回规范长路径。 | PROBE | 外层wrapper规范clone cwd和TMP/TEMP/TMPDIR；正常与symlink alias本地复验 | 只改当前外层harness；历史/current validator、snapshot和Git gates不变。 |
 | Windows Git/Node路径分隔符与historical candidate依赖解析是否会继续遮蔽22项证据。 | harness/platform | 高 | 容易 | exact job `99753294084` 已用长路径但仍报三类路径前置错误；历史唯一 `path.relative()` 与硬编码macOS `NODE_PATH` 已由blob锁定和require图证实。 | PROBE | 当前wrapper创建受控win32-only preload、父子继承probe及clone外临时依赖root；正常/alias复验22/22；最终新exact Windows CI。 | 只转换cwd内contained native relative的分隔符；越界/off-cwd/非Windows保持原生，依赖链接随本轮root清理。 |
 | Windows worktree POSIX mode与受控LF checkout是否继续遮蔽historical 22项。 | harness/platform | 高 | 容易 | exact job `99769281418` 锁定mode根因；最新job `99788627297` 在current raw-EOL probe先退出，证明plain hash受clean filter影响，未评价preload/candidate/nested。 | PROBE | current probe用`--no-filters`核对raw bytes；wrapper仍按每进程cwd/HEAD严格解析mode map，outer local config与nested Git env固定`core.autocrlf=false`，再等待真实Windows。 | mode projection不得影响readonly/dir/symlink/untracked/off-root；不得修改historical hash/content门；nested22仍是合并门。 |
+| Windows historical candidate 的实际tracked tree/diff/index/status为何偏离canonical baseline。 | harness/observability | 高 | 容易 | job `99803981567` 只给两个Git code；candidate在finally删除，未观测actual count、missing/extra path、mode/status或local core config。 | PROBE | current wrapper复刻同语义candidate并在nested前输出bounded metadata；本地只验成功路径，真实差异由下一exact Windows日志权威取证。 | 只允许test/docs诊断；事实出现前不选择ignorecase/filemode/path等互斥修复，不改historical/current validator。 |
 
 ## BLOCK
 
@@ -54,6 +56,7 @@
 9. 锁定historical validator/test blob与唯一调用点，以当前tracked固定preload做win32-only Git分隔符适配；验证父子继承、越界不变、临时依赖root清理和完整22项负例，再等待新exact Windows unit/integration。
 10. 在同一受控preload内仅对每进程当前HEAD中的tracked writable regular file投影Windows不可表达的POSIX permission bits，并以唯一`core.autocrlf=false`控制outer/candidate checkout；保留type/realpath/blob/index/status/audit门，最终仍等待新exact Windows unit/integration。
 11. disposable EOL probe只以`git hash-object --no-filters`核对raw CRLF/LF，避免host/config clean filter把raw字节差异规范化；不改变historical validator自身hash命令。
+12. 在nested suite前复刻historical raw duplicate-key candidate，严格核对single parent、2018 tree、五个100644 additions、index/status/worktree；失败仅输出有界脱敏Git metadata，baseline精确后仍要求CLI唯一raw code。
 
 ## 本轮验证证据
 
@@ -62,5 +65,8 @@
 - `check:packaged-inputs` PASS、lint exit0、changed JS node-check与diff-check通过；未运行被禁的`release-check`、`check-vars`或`scan:vars`。
 - macOS forced win32/mode/EOL probe仅证明受控机制及负例边界，不构成真实Windows PASS；真实win32 nested `22/22`与首次可达integration仍由新exact Windows CI权威验证。
 - exact Windows job `99788627297` checkout `21388ff8...`：lint/smoke成功，unit `6592/6595`、1 fail/2 skip/0 cancelled，integration未启动；唯一失败是current EOL probe在确认raw CRLF后用plain filtered hash得到reviewed LF OID，historical clone/preload/nested22均未到达。
+- exact Windows job `99803981567` checkout `1f1d5fda...`：lint/smoke成功，unit `6592/6595`、1 fail/2 skip/0 cancelled，integration未启动；nested historical `21/22`，唯一duplicate-key candidate在raw parser前收到`GIT_HEAD_TREE_INVALID + GIT_CHANGED_PATHS_INVALID`。现有CLI未暴露actual tree/diff事实，具体Windows差异仍未知。
+- bounded candidate baseline probe本地复验：官方Node22.18下current outer wrapper外层`1/1`、nested historical `22/22`；candidate exact parent/tree/diff/index/status与唯一`RAW_JSON_DUPLICATE_KEY`均通过，临时root清理。该结果只证明成功路径与诊断隐私边界，不代偿真实Windows。
+- bounded candidate baseline probe最终本地验收：正常temp与精确`RUNNER~1` alias均outer `1/1`且nested historical `22/22`，v3.2.2 evidence `30/30`，17文件矩阵`436/436`；完整unit `6592/6595`、0 fail/3 Windows-only skip/0 cancelled（`logs/unit-tests/unit-20260901-181354.log`）；`check:packaged-inputs` PASS、lint exit0、changed JS node-check与diff-check通过。真实Windows candidate拓扑与首次可达integration仍为PROBE。
 - filter-safe probe 本地复验：正常temp与精确`RUNNER~1` alias均outer `1/1`且nested `22/22`，v3.2.2 evidence `30/30`，17文件矩阵`436/436`；首次完整unit在未改E05-C用例出现1项时序失败（`unit-20260901-170750.log`），该文件相对旧head零变化且隔离`17/17`，第二次完整unit `6592/6595`、0 fail/3 Windows-only skip（`unit-20260901-170952.log`）。
 - `check:packaged-inputs` PASS、lint exit0、changed JS node-check与diff-check通过；未运行被禁的`release-check`、`check-vars`或`scan:vars`。真实Windows mode/EOL/candidate继承、historical nested `22/22`与integration仍为PROBE。
