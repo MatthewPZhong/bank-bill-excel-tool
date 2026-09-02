@@ -1,5 +1,28 @@
 # Changelog
 
+## 3.2.4 - 2026-08-30（版本分支技术收口，未发布）
+
+> v3.2.4 把对账单修复 ReconFix 的长驻状态、JPM 资金写回与多文件发布，以及 VCC 财务 OP 的只读单 Writer、主体查询下推和最多双 Writer 输出图，收口到具备资源治理、幂等 receipt、Inspector 与崩溃恢复保护的后台执行 capability。金额、币种、方向、匹配、Workbook、样式、行序和既有用户流程保持不变；production enablement 仍为关闭。
+
+### ReconFix 后台执行与 JPM 恢复保护
+
+- **长驻 Service 与只读路径**：导入状态、revision、source evidence 和运行结果由单一 Service 持有；普通场景与 BOC 场景使用冻结 authority 运行，来源或 identity 漂移时在发布前 fail closed。
+- **JPM durable mutation**：ID-aware ADM reader、精确 no-op、pre/post image、Critical Intent、同事务 marker/receipt 与 receipt-first Inspector 共同判断 committed、not-committed 或 unknown。committed-result-lost 保持 `interrupted + RESULT_LOST + active Recovery Hold`，不得降级为普通失败或自动解除 Hold。
+- **多 artifact 全有或全不发布**：Worker 只写 task-private staging；Main 深度回读业务内容、样式、manifest 和 authority 后，由唯一 Publisher 一次提交 main/unmatched 等完整 artifact set。失败、取消、篡改或提交不确定时不猜成功、不自动重发。
+
+### VCC Financial OP 只读输出图
+
+- **单 Writer 与主体查询下推**：单主体和全主体输出沿用冻结 run/revision/fingerprint/archive authority；Worker 只读取目标主体所需事实，金额、币种、Pending 投影、样式和顺序与 legacy 结果等价。
+- **最多两个主体 Writer**：按 deterministic shard 分配并等待全部 Writer 收口，Main 完整 Join 后仍只调用一次 Publisher；任一 child crash、取消、非法 SafeError、重复/遗漏主体或 staging 漂移均 Publisher=0，并由同一 cleanup owner 有界清理。
+- **性能只作本地观察**：16 主体 synthetic 5-run 中位数改善 53.96%，证明双 Writer capability 有价值，但不能替代 Windows packaged、真实大样本、RSS、Excel/WPS 与资金人工门禁。
+
+### 收口边界
+
+- **版本与规范**：`package.json`、`package-lock.json` 收口为 `3.2.4`；顶层 Spec/TechDoc 与冻结基线逐字节一致。
+- **生产仍关闭**：6 个 ReconFix/VCC action 已注册且可独立审计，但 effective production strategy 仍为 legacy/0；不新增用户开关，也不切换现有生产路径。
+- **人工门禁未代偿**：Windows packaged/Setup/portable、真实 JPM/VCC 文件、金额/币种/输出、Excel/WPS、进程终止和资金/恢复处置仍需 release owner 与资金负责人人工复核。自动测试不能把这些项目声明为 PASS。
+- **未执行正式发布动作**：本收口不合并 `main`、不创建 tag、不发布或启用 production；`release-check`、`check-vars`、`scan:vars` 按用户要求跳过，不能记录为 PASS。
+
 ## 3.2.3 - 2026-08-30（版本分支技术收口，未发布）
 
 > v3.2.3 把网银账单 Statement 的大状态导入、交互式 continuation、current/all 生成与 manual balance seed，以及新开银行账户 NewAccount 的生成和另存为发布，收口到具备资源治理、幂等 receipt 与崩溃恢复保护的后台执行 capability。金额/币种、借贷方向、余额、Workbook、行序、命名和既有用户流程保持不变；production enablement 仍为关闭。

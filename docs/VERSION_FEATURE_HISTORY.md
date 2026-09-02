@@ -9,6 +9,29 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## v3.2.4（2026-08-30，版本分支技术收口，未发布）
+
+v3.2.4 完成 ReconFix 长驻 Service、JPM durable mutation/Inspector、多 artifact 原子发布，以及 VCC Financial OP 单 Writer、主体查询下推和最多双 Writer 的后台执行 capability；production enablement 保持关闭，既有金额、币种、方向、匹配、Workbook、样式、行序和用户流程不变。
+
+### 新增
+
+- ReconFix 长驻 Service，统一持有导入状态、revision、source evidence 与运行结果；普通/BOC 只读 action 和 JPM mutation action 使用独立策略与证据门禁。
+- JPM ID-aware ADM reader、精确 no-op、pre/post image、Critical Intent、同事务 marker/receipt、receipt-first Inspector 与 Recovery Hold。
+- ReconFix 多 artifact task-private staging、Main 深度回读和唯一 Publisher，全有或全不发布。
+- VCC Financial OP 单 Writer、subject filter pushdown、deterministic 1/2 Writer 分片、全组 Join、单一 Publisher 与有界 SafeError/cleanup。
+
+### 变更
+
+- committed-result-lost 固定保持 `interrupted + RESULT_LOST + active Recovery Hold`；not-committed 才按确定性失败收口并解除对应 Hold，unknown 不自动猜测或重跑。
+- VCC 双 Writer 只在相同冻结 authority 下并行读取不同主体；任何缺失、重复、错 owner、篡改、取消或 child crash 都在 Publisher 前 fail closed。
+- package 元数据更新为 `3.2.4`，顶层 Spec/TechDoc 同步自冻结基线；R3 evidence 保留为独立 exact Git head 复验。
+
+### 兼容与人工边界
+
+- ReconFix/VCC 的金额、币种、方向、业务键、匹配、Workbook、样式、Pending 投影、行序、命名与 legacy 用户流程不变。
+- capability 与 effective production strategy 分离，6 个 action 的 production 均关闭、effective worker count 为 0；Windows packaged、真实 JPM/VCC 样本、Excel/WPS、RSS、资金和恢复处置仍需人工复核。
+- 本节点未合并 `main`、未创建 tag、未发布 production；`release-check`、`check-vars`、`scan:vars` 按用户要求跳过，不能声明为 PASS。
+
 ## v3.2.3（2026-08-30，版本分支技术收口，未发布）
 
 v3.2.3 完成 Statement 交互式大状态 Service、原子 balance seed 与 NewAccount Worker/Publisher 的后台执行 capability；production enablement 保持关闭，既有金额、币种、借贷方向、余额、Workbook、命名和用户流程不变。
