@@ -1,6 +1,7 @@
 'use strict';
 
 const fs = require('node:fs');
+const crypto = require('node:crypto');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 const yauzl = require('yauzl');
@@ -12,10 +13,19 @@ const {
 } = require('../../backend/database/linked-table-writeback-reader');
 const { canonicalSha256 } = require('../background-execution/canonical-json-v1');
 const { sanitizeFinanceSafeValue } = require('../background-execution/error-codec');
-const { readReconIdFixFile } = require('../recon-id-fix-io');
+const {
+  getReconIdFixOutputContract,
+  readReconIdFixFile,
+  UNMATCHED_REPORT_HEADERS,
+  UNMATCHED_REPORT_SHEET_NAME,
+  writeReconIdFixOutput,
+  writeUnmatchedReport
+} = require('../recon-id-fix-io');
 const { runReconIdFix } = require('../recon-id-fix-engine');
 const { reconFixEvidenceSha256 } = require('./evidence-projection');
+const { readReconFixArtifactEvidence } = require('./artifact-evidence');
 const {
+  RECON_FIX_EXPORT_ACTION,
   RECON_FIX_IMPORT_ACTION,
   RECON_FIX_POLICIES,
   RECON_FIX_RUN_JPM_ACTION,
@@ -364,6 +374,11 @@ function prepareBocReadSnapshot(dbPath) {
   }
 }
 
+function readBocEvidence(dbPath) {
+  const snapshot = prepareBocReadSnapshot(dbPath);
+  return snapshot.read();
+}
+
 function prepareAdmReadSnapshot(dbPath) {
   const resolved = requireDatabasePath(dbPath, 'JPM databasePath');
   let db;
@@ -439,6 +454,7 @@ function publicResult(state) {
     revision: state.revision,
     stateDigest: digest,
     resultHandle: state.result.resultHandle,
+    exportAuthority: state.result.exportAuthority,
     scenarioSnapshotHash: state.result.scenarioSnapshotHash,
     linkedEvidenceHash: state.result.linkedEvidenceHash,
     summary: state.result.summary
@@ -473,6 +489,149 @@ function requireDatabasePath(value, label) {
 
 function jpmPendingKey(serviceGeneration, operationKey, resultHandle) {
   return canonicalSha256({ serviceGeneration, operationKey, resultHandle });
+}
+
+function sha256File(filePath) {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('sha256');
+    const input = fs.createReadStream(filePath);
+    input.on('data', (chunk) => hash.update(chunk));
+    input.once('error', reject);
+    input.once('end', () => resolve(hash.digest('hex')));
+  });
+}
+
+function projectRows(rows, headers) {
+  return rows.map((row) => {
+    const projected = {};
+    for (const header of headers) {
+      const value = row && row[header];
+      projected[header] = value === null || value === undefined ? '' : value;
+    }
+    return projected;
+  });
+}
+
+function buildReconFixExportAuthority(result) {
+  const artifacts = [];
+  if (result.fixedRows.length > 0) {
+    const contract = getReconIdFixOutputContract(result.subMode);
+    artifacts.push(Object.freeze({
+      artifactKind: 'main',
+      sheetName: contract.sheetName,
+      headersDigest: reconFixEvidenceSha256(contract.headers),
+      recordsDigest: reconFixEvidenceSha256(projectRows(result.fixedRows, contract.headers)),
+      rowCount: result.fixedRows.length
+    }));
+  }
+  if (result.unmatchedRows.length > 0) {
+    artifacts.push(Object.freeze({
+      artifactKind: 'unmatched',
+      sheetName: UNMATCHED_REPORT_SHEET_NAME,
+      headersDigest: reconFixEvidenceSha256(UNMATCHED_REPORT_HEADERS),
+      recordsDigest: reconFixEvidenceSha256(projectRows(
+        result.unmatchedRows,
+        UNMATCHED_REPORT_HEADERS
+      )),
+      rowCount: result.unmatchedRows.length
+    }));
+  }
+  const bounded = Object.freeze({
+    contractVersion: 1,
+    resultHandle: result.resultHandle,
+    runKind: result.runKind,
+    subMode: result.subMode,
+    inputEvidenceHash: result.inputEvidenceHash,
+    scenarioSnapshotHash: result.scenarioSnapshotHash,
+    linkedEvidenceHash: result.linkedEvidenceHash,
+    resultDigest: result.summary.resultDigest,
+    fixedRowCount: result.summary.fixedRowCount,
+    unmatchedRowCount: result.summary.unmatchedRowCount,
+    warningCount: result.summary.warningCount,
+    artifacts: Object.freeze(artifacts)
+  });
+  return Object.freeze({
+    ...bounded,
+    authorityDigest: reconFixEvidenceSha256(bounded)
+  });
+}
+
+function assertCurrentLinkedEvidence(result) {
+  let currentHash = null;
+  if (result.runKind === 'boc') {
+    currentHash = readBocEvidence(result.linkedDatabasePath).hash;
+  } else if (result.runKind === 'jpm') {
+    let db;
+    try {
+      db = new DatabaseSync(result.linkedDatabasePath, { readOnly: true });
+      db.exec('PRAGMA query_only = ON');
+      currentHash = readAdmRowsForWriteback(db).imageHash;
+    } finally {
+      if (db) db.close();
+    }
+  }
+  if (currentHash !== result.linkedEvidenceHash) {
+    fail('RECON_FIX_EXPORT_LINKED_EVIDENCE_STALE', 'ReconFix linked evidence 已变化，请重新运行后导出');
+  }
+  return currentHash;
+}
+
+function requireTaskPrivateArtifacts(input, result) {
+  if (typeof input.stagingDirectory !== 'string' || !path.isAbsolute(input.stagingDirectory) ||
+      path.resolve(input.stagingDirectory) !== input.stagingDirectory) {
+    fail('RECON_FIX_EXPORT_STAGING_INVALID', 'stagingDirectory 必须是规范绝对路径');
+  }
+  let directoryStat;
+  try {
+    directoryStat = fs.lstatSync(input.stagingDirectory);
+  } catch (_error) {
+    fail('RECON_FIX_EXPORT_STAGING_INVALID', 'task-private staging 目录不存在');
+  }
+  if (directoryStat.isSymbolicLink() || !directoryStat.isDirectory()) {
+    fail('RECON_FIX_EXPORT_STAGING_INVALID', 'task-private staging 必须是真实普通目录');
+  }
+  const expectedKinds = [];
+  if (result.fixedRows.length > 0) expectedKinds.push('main');
+  if (result.unmatchedRows.length > 0) expectedKinds.push('unmatched');
+  if (expectedKinds.length === 0) {
+    fail('RECON_FIX_EXPORT_EMPTY', '当前 ReconFix result 没有可导出记录');
+  }
+  if (!Array.isArray(input.artifacts) || input.artifacts.length !== expectedKinds.length) {
+    fail('RECON_FIX_EXPORT_ARTIFACT_SET_INVALID', 'artifact 数量与 current result 不一致');
+  }
+  const paths = new Set();
+  const keys = new Set();
+  return Object.freeze(input.artifacts.map((artifact, index) => {
+    assertExactKeys(
+      artifact,
+      ['artifactKind', 'generationPath', 'outputArtifactKey', 'outputIndex'],
+      `artifacts[${index}]`
+    );
+    const generationPath = artifact.generationPath;
+    if (artifact.outputIndex !== index || artifact.artifactKind !== expectedKinds[index] ||
+        typeof artifact.outputArtifactKey !== 'string' || !artifact.outputArtifactKey ||
+        typeof generationPath !== 'string' || !path.isAbsolute(generationPath) ||
+        path.resolve(generationPath) !== generationPath ||
+        path.dirname(generationPath) !== input.stagingDirectory ||
+        path.extname(generationPath).toLowerCase() !== '.xlsx' ||
+        paths.has(generationPath) || keys.has(artifact.outputArtifactKey)) {
+      fail('RECON_FIX_EXPORT_ARTIFACT_SET_INVALID', 'artifact set/order/path/key 不符合 current result');
+    }
+    try {
+      fs.lstatSync(generationPath);
+      fail('RECON_FIX_EXPORT_STAGING_COLLISION', 'task-private generation path 已存在');
+    } catch (error) {
+      if (!error || error.code !== 'ENOENT') throw error;
+    }
+    paths.add(generationPath);
+    keys.add(artifact.outputArtifactKey);
+    return Object.freeze({
+      outputIndex: index,
+      artifactKind: artifact.artifactKind,
+      outputArtifactKey: artifact.outputArtifactKey,
+      generationPath
+    });
+  }));
 }
 
 function createReconFixService(options = {}) {
@@ -528,7 +687,8 @@ function createReconFixService(options = {}) {
   async function prepare(actionKey, input, identity = {}) {
     assertOpen();
     if (active) fail('RECON_FIX_SERVICE_BUSY', 'ReconFix Service 同时只允许一个 command');
-    if (![RECON_FIX_IMPORT_ACTION, RECON_FIX_RUN_READONLY_ACTION, RECON_FIX_RUN_JPM_ACTION]
+    if (![RECON_FIX_EXPORT_ACTION, RECON_FIX_IMPORT_ACTION,
+      RECON_FIX_RUN_READONLY_ACTION, RECON_FIX_RUN_JPM_ACTION]
       .includes(actionKey)) {
       fail('RECON_FIX_ACTION_UNSUPPORTED', `ReconFix Service 不支持 action：${String(actionKey)}`);
     }
@@ -564,6 +724,165 @@ function createReconFixService(options = {}) {
             kind: 'candidate',
             actionKey,
             candidate: createCandidate(serviceApi, { session, result: null })
+          });
+        });
+      }
+
+      if (actionKey === RECON_FIX_EXPORT_ACTION) {
+        assertExactKeys(input, [
+          'artifacts', 'expectedExportAuthorityDigest', 'expectedRevision',
+          'expectedServiceGeneration', 'resultHandle', 'stagingDirectory'
+        ], 'export input');
+        if (input.expectedServiceGeneration !== state.serviceGeneration) {
+          fail('RECON_FIX_EXPORT_GENERATION_STALE', 'ReconFix Service generation 已变化');
+        }
+        assertExpectedRevision(input.expectedRevision, state.revision);
+        if (!state.result || input.resultHandle !== state.result.resultHandle) {
+          fail('RECON_FIX_EXPORT_RESULT_STALE', 'ReconFix result handle 不存在或已变化');
+        }
+        const result = state.result;
+        if (!result.exportAuthority ||
+            input.expectedExportAuthorityDigest !== result.exportAuthority.authorityDigest) {
+          fail('RECON_FIX_EXPORT_AUTHORITY_STALE', 'ReconFix export authority 与 current result 不一致');
+        }
+        const phaseExtensionMemoryBytes = estimateRunPhaseBytes(stateMemoryBytes);
+        return createPreparation(phaseExtensionMemoryBytes, () => {
+          if (state.serviceGeneration !== input.expectedServiceGeneration ||
+              state.revision !== input.expectedRevision || state.result !== result ||
+              state.result.resultHandle !== input.resultHandle ||
+              !state.result.exportAuthority ||
+              state.result.exportAuthority.authorityDigest !== input.expectedExportAuthorityDigest) {
+            fail('RECON_FIX_EXPORT_RESULT_STALE', 'ReconFix result 在资源准入前已变化');
+          }
+          const artifacts = requireTaskPrivateArtifacts(input, result);
+          assertCurrentLinkedEvidence(result);
+          const generatedPaths = [];
+          let cleanupComplete = false;
+          function cleanupGeneratedArtifacts() {
+            if (cleanupComplete) return false;
+            cleanupComplete = true;
+            let complete = true;
+            for (const generatedPath of generatedPaths) {
+              try {
+                fs.rmSync(generatedPath, { force: true });
+              } catch (_error) {
+                complete = false;
+              }
+            }
+            return complete;
+          }
+          return Object.freeze({
+            kind: 'export-plan',
+            cleanup: cleanupGeneratedArtifacts,
+            async execute() {
+              assertOpen();
+              if (state.serviceGeneration !== input.expectedServiceGeneration ||
+                  state.revision !== input.expectedRevision || state.result !== result ||
+                  state.result.resultHandle !== input.resultHandle) {
+                fail('RECON_FIX_EXPORT_RESULT_STALE', 'ReconFix result 在生成前已变化');
+              }
+              assertCurrentLinkedEvidence(result);
+              const manifest = [];
+              for (const artifact of artifacts) {
+                const stagingStat = fs.lstatSync(input.stagingDirectory);
+                if (stagingStat.isSymbolicLink() || !stagingStat.isDirectory() ||
+                    fs.realpathSync(path.dirname(artifact.generationPath)) !==
+                      fs.realpathSync(input.stagingDirectory)) {
+                  fail('RECON_FIX_EXPORT_STAGING_INVALID', 'task-private staging ownership 已变化');
+                }
+                try {
+                  fs.lstatSync(artifact.generationPath);
+                  fail('RECON_FIX_EXPORT_STAGING_COLLISION', 'task-private generation path 已被占用');
+                } catch (error) {
+                  if (!error || error.code !== 'ENOENT') throw error;
+                }
+                generatedPaths.push(artifact.generationPath);
+                const isMain = artifact.artifactKind === 'main';
+                const rows = isMain ? result.fixedRows : result.unmatchedRows;
+                const outputContract = isMain
+                  ? getReconIdFixOutputContract(result.subMode)
+                  : Object.freeze({
+                      sheetName: UNMATCHED_REPORT_SHEET_NAME,
+                      headers: UNMATCHED_REPORT_HEADERS
+                    });
+                if (isMain) {
+                  await writeReconIdFixOutput({
+                    fixedRows: rows,
+                    savePath: artifact.generationPath,
+                    subMode: result.subMode
+                  });
+                } else {
+                  await writeUnmatchedReport({
+                    unmatchedRows: rows,
+                    savePath: artifact.generationPath
+                  });
+                }
+                const stat = fs.lstatSync(artifact.generationPath);
+                if (stat.isSymbolicLink() || !stat.isFile() || stat.size <= 0) {
+                  fail('RECON_FIX_EXPORT_ARTIFACT_INVALID', '生成的 ReconFix artifact 不是普通非空文件');
+                }
+                const projectedRows = projectRows(rows, outputContract.headers);
+                const business = await readReconFixArtifactEvidence(
+                  artifact.generationPath,
+                  artifact.artifactKind,
+                  result.subMode
+                );
+                if (business.sheetName !== outputContract.sheetName ||
+                    business.headersDigest !== reconFixEvidenceSha256(outputContract.headers) ||
+                    business.recordsDigest !== reconFixEvidenceSha256(projectedRows) ||
+                    business.rowCount !== projectedRows.length ||
+                    business.headerFontSize !== 10 || business.lastAuthor !== 'pzhong') {
+                  fail('RECON_FIX_EXPORT_ARTIFACT_INVALID', 'Worker 业务回读与 current result 不一致');
+                }
+                manifest.push(Object.freeze({
+                  outputIndex: artifact.outputIndex,
+                  artifactKind: artifact.artifactKind,
+                  outputArtifactKey: artifact.outputArtifactKey,
+                  byteSize: stat.size,
+                  sha256: await sha256File(artifact.generationPath),
+                  rowCount: business.rowCount,
+                  sheetName: business.sheetName,
+                  headersDigest: business.headersDigest,
+                  recordsDigest: business.recordsDigest,
+                  style: Object.freeze({
+                    headerFontSize: business.headerFontSize,
+                    lastAuthor: business.lastAuthor
+                  }),
+                  lineage: Object.freeze({
+                    exportAuthorityDigest: result.exportAuthority.authorityDigest,
+                    inputEvidenceHash: result.inputEvidenceHash,
+                    scenarioSnapshotHash: result.scenarioSnapshotHash,
+                    linkedEvidenceHash: result.linkedEvidenceHash,
+                    resultDigest: result.summary.resultDigest
+                  })
+                }));
+              }
+              assertCurrentLinkedEvidence(result);
+              if (state.serviceGeneration !== input.expectedServiceGeneration ||
+                  state.revision !== input.expectedRevision || state.result !== result) {
+                fail('RECON_FIX_EXPORT_RESULT_STALE', 'ReconFix result 在生成后已变化');
+              }
+              return Object.freeze({
+                contractVersion: 1,
+                exportAuthorityDigest: result.exportAuthority.authorityDigest,
+                serviceGeneration: state.serviceGeneration,
+                revision: state.revision,
+                resultHandle: result.resultHandle,
+                runKind: result.runKind,
+                subMode: result.subMode,
+                scenarioSnapshotHash: result.scenarioSnapshotHash,
+                linkedEvidenceHash: result.linkedEvidenceHash,
+                inputEvidenceHash: result.inputEvidenceHash,
+                artifacts: Object.freeze(manifest),
+                summary: Object.freeze({
+                  artifactCount: manifest.length,
+                  fixedRowCount: result.summary.fixedRowCount,
+                  unmatchedRowCount: result.summary.unmatchedRowCount,
+                  warningCount: result.summary.warningCount,
+                  resultDigest: result.summary.resultDigest
+                })
+              });
+            }
           });
         });
       }
@@ -609,9 +928,11 @@ function createReconFixService(options = {}) {
         const ownedResult = structuredClone(engineResult);
         const privateResult = {
           runKind: 'jpm',
+          subMode: 'gateway',
+          linkedDatabasePath: databasePath,
           scenarioSnapshot: snapshot.value,
           scenarioSnapshotHash: snapshot.hash,
-          linkedEvidenceHash: source.imageHash,
+          linkedEvidenceHash: null,
           inputEvidenceHash: state.session.inputEvidenceHash,
           fixedRows: ownedResult.fixedRows,
           warnings: ownedResult.warnings,
@@ -623,6 +944,13 @@ function createReconFixService(options = {}) {
           warnings: privateResult.warnings,
           unmatchedRows: privateResult.unmatchedRows,
           stats: privateResult.stats
+        });
+        privateResult.summary = Object.freeze({
+          runKind: 'jpm',
+          fixedRowCount: privateResult.fixedRows.length,
+          warningCount: privateResult.warnings.length,
+          unmatchedRowCount: privateResult.unmatchedRows.length,
+          resultDigest
         });
         const evidenceChanged = Boolean(state.result && (
           state.result.runKind !== 'jpm' ||
@@ -637,13 +965,6 @@ function createReconFixService(options = {}) {
           scenarioSnapshotHash: snapshot.hash,
           linkedEvidenceHash: source.imageHash
         });
-        privateResult.summary = Object.freeze({
-          runKind: 'jpm',
-          fixedRowCount: privateResult.fixedRows.length,
-          warningCount: privateResult.warnings.length,
-          unmatchedRowCount: privateResult.unmatchedRows.length,
-          resultDigest
-        });
         const writebackPlan = buildJpmWritebackPlan({
           operationKey: identity.operationKey,
           sourceEvidence: source,
@@ -651,6 +972,8 @@ function createReconFixService(options = {}) {
           resultHandle: privateResult.resultHandle,
           boundedSummary: privateResult.summary
         });
+        privateResult.linkedEvidenceHash = writebackPlan.expectedPostImageHash;
+        privateResult.exportAuthority = buildReconFixExportAuthority(privateResult);
         const invalidationCandidate = evidenceChanged
           ? createCandidate(serviceApi, { session: state.session, result: null })
           : null;
@@ -671,6 +994,7 @@ function createReconFixService(options = {}) {
           scenarioId: String(snapshot.value.id),
           resultHandle: privateResult.resultHandle,
           boundedSummary: privateResult.summary,
+          exportAuthority: privateResult.exportAuthority,
           writebackPlan,
           candidate,
           invalidationCandidate,
@@ -765,6 +1089,8 @@ function createReconFixService(options = {}) {
             const ownedResult = structuredClone(result);
             const privateResult = {
               runKind: isBoc ? 'boc' : 'standard',
+              subMode: state.session.subMode,
+              linkedDatabasePath: isBoc ? input.bocDatabasePath : null,
               scenarioSnapshot: snapshot.value,
               scenarioSnapshotHash: snapshot.hash,
               linkedEvidenceHash,
@@ -794,6 +1120,7 @@ function createReconFixService(options = {}) {
               unmatchedRowCount: privateResult.unmatchedRows.length,
               resultDigest
             });
+            privateResult.exportAuthority = buildReconFixExportAuthority(privateResult);
             return createCandidate(serviceApi, { session: state.session, result: privateResult });
           }
         });
@@ -873,12 +1200,15 @@ function createReconFixService(options = {}) {
     } else if (boundedReceipt !== null || pending.committedReceipt !== null) {
       fail('RECON_FIX_JPM_NOOP_RECEIPT_FORBIDDEN', 'JPM noop 不得携带 receipt');
     }
-    adopt(pending.candidate, nextReservationId);
+    const adopted = adopt(pending.candidate, nextReservationId);
     pendingJpmResults.delete(pending.pendingKey);
     return Object.freeze({
       resultKind: pending.writebackPlan.outcome === 'noop' ? 'noop' : 'committed',
+      serviceGeneration: adopted.serviceGeneration,
+      revision: adopted.revision,
       resultHandle: pending.resultHandle,
-      boundedSummary: pending.boundedSummary
+      boundedSummary: pending.boundedSummary,
+      exportAuthority: pending.exportAuthority
     });
   }
 
