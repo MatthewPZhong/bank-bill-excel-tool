@@ -46,6 +46,10 @@ const NEW_ACCOUNT_SAVE_AS_SCHEMA_VERSION = 1;
 const MAX_COPY_CONTRACT_BYTES = 256 * 1024;
 const MAX_COPY_ARTIFACT_BYTES = 256 * 1024 * 1024;
 const SHA256 = /^[0-9a-f]{64}$/;
+const CANONICAL_UINT64_DECIMAL = /^(?:0|[1-9]\d{0,19})$/;
+const UINT64_MAX = 18446744073709551615n;
+const STAGING_SNAPSHOT_INODE_PATH = '/payload/result/artifact/stagingSnapshot/ino';
+const STAGING_SNAPSHOT_KEYS = Object.freeze(['sizeBytes', 'mtimeMs', 'ctimeMs', 'ino']);
 
 class NewAccountSaveAsError extends Error {
   constructor(code, message, cause = null) {
@@ -431,6 +435,45 @@ function snapshotMatches(left, right) {
   return sourceSnapshotMatchesStat(normalized, right);
 }
 
+function canonicalUint64Decimal(value) {
+  if (typeof value !== 'string' || !CANONICAL_UINT64_DECIMAL.test(value)) return false;
+  try {
+    return BigInt(value) <= UINT64_MAX;
+  } catch (_error) {
+    return false;
+  }
+}
+
+function exactStagingSnapshotWithInode(parent, inode) {
+  if (!parent || typeof parent !== 'object' || Array.isArray(parent) ||
+      ![Object.prototype, null].includes(Object.getPrototypeOf(parent))) {
+    return false;
+  }
+  const keys = Reflect.ownKeys(parent);
+  if (keys.length !== STAGING_SNAPSHOT_KEYS.length ||
+      STAGING_SNAPSHOT_KEYS.some((key) => !keys.includes(key))) {
+    return false;
+  }
+  for (const key of STAGING_SNAPSHOT_KEYS) {
+    const descriptor = Object.getOwnPropertyDescriptor(parent, key);
+    if (!descriptor || descriptor.enumerable !== true ||
+        !Object.hasOwn(descriptor, 'value')) {
+      return false;
+    }
+  }
+  if (!Number.isSafeInteger(parent.sizeBytes) || parent.sizeBytes < 0 ||
+      typeof parent.mtimeMs !== 'number' || !Number.isFinite(parent.mtimeMs) || parent.mtimeMs < 0 ||
+      typeof parent.ctimeMs !== 'number' || !Number.isFinite(parent.ctimeMs) || parent.ctimeMs < 0 ||
+      parent.ino !== inode || !canonicalUint64Decimal(inode)) {
+    return false;
+  }
+  const normalized = normalizeSourceSnapshot(parent);
+  return Boolean(normalized && normalized.ino === inode &&
+    normalized.sizeBytes === parent.sizeBytes &&
+    normalized.mtimeMs === parent.mtimeMs &&
+    normalized.ctimeMs === parent.ctimeMs);
+}
+
 function validateNewAccountSaveAsResult(value) {
   try {
     const result = exactObject(value, ['schemaVersion', 'status', 'artifact'], 'result');
@@ -450,10 +493,13 @@ function validateNewAccountSaveAsResult(value) {
 }
 
 Object.defineProperty(validateNewAccountSaveAsResult, 'allowFinanceSafeValue', {
-  value({ value, key, parent }) {
-    return ['sha256', 'sourceIdentitySha256'].includes(key) &&
+  value({ value, path: valuePath, key, parent }) {
+    const digestAllowed = ['sha256', 'sourceIdentitySha256'].includes(key) &&
       typeof value === 'string' && SHA256.test(value) &&
       parent && typeof parent === 'object' && parent[key] === value;
+    if (digestAllowed) return true;
+    return valuePath === STAGING_SNAPSHOT_INODE_PATH && key === 'ino' &&
+      exactStagingSnapshotWithInode(parent, value);
   }
 });
 

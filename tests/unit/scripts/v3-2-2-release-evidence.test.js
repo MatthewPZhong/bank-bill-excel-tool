@@ -194,6 +194,7 @@ test('历史base anchor从冻结reviewed blob取证，不被后续版本合法�
   const result = validateReleaseEvidence(snapshot);
   assert.equal(result.valid, true, JSON.stringify(result.errors));
 });
+
 test('历史snapshot保持3.1.14事实，当前authority只接受3.2.2及后续v3.2.x稳定版本', () => {
   const snapshot = loadSnapshot();
   assert.deepEqual(snapshot.packageVersion, { value: '3.1.14', bumped: false });
