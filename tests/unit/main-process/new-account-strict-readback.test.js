@@ -73,7 +73,7 @@ function openZipEntryStream(zip, entry) {
   });
 }
 
-async function strictRows(filePath, expectedColumnCount) {
+async function strictRows(filePath, expectedColumnCount, options = {}) {
   const opened = await openZipWithEntries(path.basename(filePath), filePath, {
     rejectDuplicateEntries: true
   });
@@ -89,6 +89,9 @@ async function strictRows(filePath, expectedColumnCount) {
     await scanNewAccountWorksheetRows({
       stream,
       expectedColumnCount,
+      expectedUsedRange: options.expectedUsedRange,
+      expectedDimensionRange: options.expectedDimensionRange,
+      forbidDynamicContent: options.forbidDynamicContent,
       sharedStrings,
       onRow(row) { rows.push(row); }
     });
@@ -377,7 +380,8 @@ test('strict dimension拒绝missing/duplicate/expanded/shifted/reversed/out-of-r
       ));
       await assert.rejects(
         strictRows(mutatedPath, 9),
-        (error) => error.code === 'NEW_ACCOUNT_WORKBOOK_DIMENSION_INVALID',
+        (error) => ['NEW_ACCOUNT_WORKBOOK_DIMENSION_INVALID',
+          'NEW_ACCOUNT_WORKBOOK_COLUMN_BOUNDARY_MISMATCH'].includes(error.code),
         name
       );
     }
@@ -478,6 +482,123 @@ test('strict dimension used range计入merge、styled blank、formula cached与m
         '<row r="3"><c r="AA3" s="1"/></row></sheetData></worksheet>'
     );
     assert.deepEqual(await strictRows(mixedPath, 27), oldRawRows(mixedPath));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Main authority边界拒绝超列cell、styled blank、merge与dimension，exact列和header-only保持兼容', async () => {
+  const dir = tempDir();
+  const variants = [
+    ['extra-header', '<row r="1"><c r="A1" t="str"><v>H</v></c><c r="J1" t="str"><v>secret</v></c></row>', 'A1:J1'],
+    ['extra-data', '<row r="1"><c r="A1" t="str"><v>H</v></c></row><row r="2"><c r="J2" t="str"><v>secret</v></c></row>', 'A1:J2'],
+    ['extra-styled-blank', '<row r="1"><c r="A1" t="str"><v>H</v></c></row><row r="2"><c r="J2" s="1"/></row>', 'A1:J2']
+  ];
+  try {
+    for (const [name, rows, dimension] of variants) {
+      const filePath = await writeSyntheticWorkbook(
+        dir,
+        name,
+        `${WORKSHEET_OPEN}<dimension ref="${dimension}"/><sheetData>${rows}</sheetData></worksheet>`
+      );
+      await assert.rejects(
+        strictRows(filePath, 9),
+        (error) => error.code === 'NEW_ACCOUNT_WORKBOOK_COLUMN_BOUNDARY_MISMATCH',
+        name
+      );
+    }
+
+    const mergePath = await writeSyntheticWorkbook(
+      dir,
+      'extra-merge',
+      `${WORKSHEET_OPEN}<dimension ref="A1:J1"/><sheetData>` +
+        '<row r="1"><c r="A1" t="str"><v>H</v></c></row></sheetData>' +
+        '<mergeCells count="1"><mergeCell ref="A1:J1"/></mergeCells></worksheet>'
+    );
+    await assert.rejects(
+      strictRows(mergePath, 9),
+      (error) => error.code === 'NEW_ACCOUNT_WORKBOOK_COLUMN_BOUNDARY_MISMATCH'
+    );
+
+    const dimensionPath = await writeSyntheticWorkbook(
+      dir,
+      'extra-dimension-only',
+      `${WORKSHEET_OPEN}<dimension ref="A1:J2"/><sheetData>` +
+        '<row r="1"><c r="A1" t="str"><v>H</v></c><c r="I1" t="str"><v>I</v></c></row>' +
+        '<row r="2"><c r="A2" t="str"><v>row</v></c><c r="I2" t="str"><v>end</v></c></row>' +
+        '</sheetData></worksheet>'
+    );
+    await assert.rejects(
+      strictRows(dimensionPath, 9),
+      (error) => error.code === 'NEW_ACCOUNT_WORKBOOK_COLUMN_BOUNDARY_MISMATCH'
+    );
+
+    const exactPath = await writeSyntheticWorkbook(
+      dir,
+      'authority-exact-range',
+      `${WORKSHEET_OPEN}<dimension ref="A1:I2"/><sheetData>` +
+        '<row r="1"><c r="A1" t="str"><v>H</v></c><c r="I1" t="str"><v>I</v></c></row>' +
+        '<row r="2"><c r="A2" t="str"><v>row</v></c><c r="I2" t="str"><v>end</v></c></row>' +
+        '</sheetData></worksheet>'
+    );
+    assert.deepEqual(
+      await strictRows(exactPath, 9, {
+        expectedUsedRange: 'A1:I2',
+        expectedDimensionRange: 'A1:I2'
+      }),
+      oldRawRows(exactPath)
+    );
+
+    const expandedUsedRangePath = await writeSyntheticWorkbook(
+      dir,
+      'authority-expanded-used-range',
+      `${WORKSHEET_OPEN}<dimension ref="A1:I3"/><sheetData>` +
+        '<row r="1"><c r="A1" t="str"><v>H</v></c><c r="I1" t="str"><v>I</v></c></row>' +
+        '<row r="2"><c r="A2" t="str"><v>row</v></c><c r="I2" t="str"><v>end</v></c></row>' +
+        '<row r="3"><c r="I3" s="1"/></row></sheetData></worksheet>'
+    );
+    await assert.rejects(
+      strictRows(expandedUsedRangePath, 9, {
+        expectedUsedRange: 'A1:I2',
+        expectedDimensionRange: 'A1:I2'
+      }),
+      (error) => error.code === 'NEW_ACCOUNT_WORKBOOK_DIMENSION_INVALID'
+    );
+
+    const headerOnlyPath = await writeSyntheticWorkbook(
+      dir,
+      'authority-header-only',
+      `${WORKSHEET_OPEN}<dimension ref="A1:I2"/><sheetData>` +
+        '<row r="1"><c r="A1" t="str"><v>H</v></c><c r="I1" t="str"><v>I</v></c></row>' +
+        '</sheetData></worksheet>'
+    );
+    assert.deepEqual(
+      await strictRows(headerOnlyPath, 9, {
+        expectedUsedRange: 'A1:I1',
+        expectedDimensionRange: 'A1:I2'
+      }),
+      oldRawRows(headerOnlyPath)
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Main authority动态内容禁令拒绝formula cached，generic raw oracle继续兼容', async () => {
+  const dir = tempDir();
+  try {
+    const formulaPath = await writeSyntheticWorkbook(
+      dir,
+      'authority-formula-cached',
+      `${WORKSHEET_OPEN}<dimension ref="A1"/><sheetData>` +
+        '<row r="1"><c r="A1" t="str"><f>&quot;changed-after-open&quot;</f><v>cached</v></c></row>' +
+        '</sheetData></worksheet>'
+    );
+    assert.deepEqual(await strictRows(formulaPath, 1), oldRawRows(formulaPath));
+    await assert.rejects(
+      strictRows(formulaPath, 1, { forbidDynamicContent: true }),
+      (error) => error.code === 'NEW_ACCOUNT_WORKBOOK_DYNAMIC_CONTENT_FORBIDDEN'
+    );
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

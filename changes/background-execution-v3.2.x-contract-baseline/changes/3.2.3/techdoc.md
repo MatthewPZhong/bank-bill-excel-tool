@@ -254,11 +254,21 @@ directory fsync 必须尝试；只有平台明确返回 unsupported 时可记录
 
 ## 9. NewAccount Worker
 
-Worker输入：小型账户数组、冻结模板路径/snapshot、日期/币种配置、generationPath。Worker不接收final target。
+Worker输入：小型账户数组、冻结模板路径/snapshot、日期/币种配置、generationPath。Worker不接收final target。Main在dispatch前从同一冻结输入独立异步分批计算bounded expected descriptor：artifactKey、template hash、精确Sheet names/order/count、完整headers/column count、expected used range/dimension range、rowCount、四类业务digest与summary；该descriptor为out-of-band Main authority，不能从Worker result/manifest回填。生产路径每个bounded batch以`setImmediate`等scheduler让出Main event loop并检查Task cancel/app-quit signal；取消发生在authority期间时不调用runtime/不spawn Worker、不创建或遗留staging。同步构造器仅保留作小型oracle。
 
-Core输出records并写workbook。业务validator回读：Sheet、列顺序、记录数、日期、账户、币种。Main technical validator后发布到managed location。
+Core输出records并写workbook。Worker result只作为技术观察；Main technical validator复核staging identity/size/hash，再用out-of-band authority回读精确Sheet集合、列顺序、记录数、日期、账户、币种/records digest。strict scanner必须拒绝任何超出expectedColumnCount/expected used range的cell（包括styled blank）、merge和dimension，不得用`slice(expectedColumnCount)`静默截断。Main Publisher前的authority模式另外要求formula count为0，并拒绝calcChain、externalLink与hyperlink；generic raw oracle仍可读取合法cached formula以维持E10-A差分边界。Publisher metadata中的sheetCount/rowCount/size/hash必须来自Main验证事实，不得硬编码或采用Worker自报值。
 
-Export copy：`fs.promises.copyFile`到task staging，校验源/副本hash，再调用Publisher；这是一等`inline-async`策略，不占CPU Worker slot但占I/O lease。
+Export copy：`fs.promises.copyFile`到task staging，校验源/副本hash，再调用既有single FIFO Publisher；这是一等`inline-async`策略，不占CPU Worker slot但占I/O lease。Publisher固定`requireArchiveHandoff=true`，journal在正式目标committed后继续作为唯一RecoverySource/Hold evidence；TaskLifecycle先settle FilePlan input/output artifacts，只有artifact durable且Task终态持久化后才用既有recovery acknowledgement清理journal。settlement失败返回committed + pending handoff，不得重新解释为可重试业务失败。
+
+E10-B只接收Main当前进程内由`normalizeFilePlanV1`冻结并brand的FilePlan authority；raw object或structured clone不具authority。`FilePlanV1.outputs[*]` additive包含`targetParentIdentity={canonicalRealPath,aliasKey,deviceId,inode,identityReliable,identityKind}`：Main normalizer对resolved direct parent执行`lstat/realpath/stat({bigint:true})`后独立构造并冻结，调用方提供的同名字段必须忽略或拒绝，不能成为authority。direct parent必须是ordinary directory且自身不是symlink；`deviceId/inode`采用bounded十进制string，任一为0、类型/稳定性不可证明时标记`unsupported`。本合同只冻结direct parent，不持久整条ancestor chain：普通上级rename+replacement会使重新解析出的direct parent identity变化；direct parent移走后同一对象移回则identity仍匹配。
+
+E10-B不得再次normalize/resnapshot，必须在copy dispatch前、copy完成handoff前和Publisher调用前对同一原始source/target snapshot及`targetParentIdentity`执行freshness检查。E10-B要求`identityReliable=true`，否则返回稳定capability failure且Publisher=0；generic FilePlan/Publisher只有明确require或携带该evidence时才启用检查，既有action不得因Windows能力未知被误伤。target确认时不存在但随后出现未知文件、existing target被replacement（包括伪造相同size/mtime）、或direct parent被ordinary replacement都必须失败。
+
+E10-B将FilePlan中的exact identity逐字传入Publisher target `expectedTargetParentIdentity`；Publisher不得重建caller authority。Publisher在preflight、artifact staged后、进入commit前与每个backup/publish正式target mutation紧前复核；Node文件API只能把检查窗口收窄到每次mutation紧前，本合同不宣称消除检查后纳秒级竞态。journal v1 entry additive持久同一identity，新E10-B journal必填；恢复读取带字段journal时，在任何target mutation/rollback前先复核，漂移进入现有`manual-recovery`/Recovery Hold且绝不重publish。旧journal缺字段沿既有恢复语义继续处理，不做DB migration或批量取消旧prepared任务。
+
+需要`targetParentIdentity`的Publisher batch还必须在任何journal/index创建或正式target mutation前，独立捕获固定`userDataDir` recovery root的canonical realpath与平台alias，并与每个required direct target parent做separator-aware双向containment检查。相等、target parent位于recovery root内、或target parent为recovery root祖先均返回稳定`TOOLBOX_PUBLICATION_RECOVERY_ROOT_TARGET_PARENT_CONFLICT`，整个batch保持journal/index/target写入为0；普通sibling和外部目录继续合法。该门禁只约束新建required guarded publication，不改变缺少identity的旧journal reader/recovery；它保护唯一recovery index/journal/receipt的可发现性，不扩展为完整ancestor identity链，也不声称覆盖检查后的理论微秒级目录替换。
+
+inline transport持有实际execution promise。正常terminal、shutdown cancel和close/terminate都在policy timeout内等待execution真实结算后才释放lease；timeout沿既有Supervisor映射为cleanup failure/transport leak并保留transport与task-owned staging cleanup ownership，late success/error不能改写已冻结terminal。
 
 ## 10. Fault matrix
 
@@ -273,6 +283,15 @@ Export copy：`fs.promises.copyFile`到task staging，校验源/副本hash，再
 | Service crash after seed | seed不重复；session需重新导入 |
 | NewAccount Worker crash | no artifact handle/publish |
 | copy source变化 | fail closed，不发布 |
+| Worker自洽伪造账户/币种digest或附加Sheet | Main authority readback失败，Publisher=0 |
+| 额外列/styled blank/merge/dimension或formula cached/外链/超链接 | Main worksheet authority失败，Publisher=0 |
+| Main authority大批量计算期间cancel/app quit | bounded safepoint取消，不spawn Worker、不留staging |
+| target absent后被创建/existing被替换或传入unbranded plan | 原FilePlan authority freshness失败，Publisher=0 |
+| direct parent/grandparent rename后ordinary replacement | FilePlan或Publisher exact parent identity失败，Publisher=0；恢复时manual-recovery/Hold且不触碰target |
+| direct parent为symlink或dev/ino不可靠 | normalizer拒绝symlink；E10-B对unreliable返回稳定capability failure，Publisher=0 |
+| required target parent与fixed Publisher recovery root相等或双向包含 | preflight稳定拒绝，journal/index/target写入为0；multi-target全批失败 |
+| Publisher committed后回包丢失/进程退出 | 同一journal恢复handoff，禁止重copy/重publish |
+| inline copy超过shutdown deadline | interrupted/cleanup leak evidence，保留owner，不虚报lease/leak收口 |
 
 ## 11. Tests
 
@@ -284,6 +303,9 @@ Export copy：`fs.promises.copyFile`到task staging，校验源/副本hash，再
 - seed no-op/pre/post/unknown/crash；
 - NewAccount日期/账户/币种/模板golden；
 - artifact tamper/Publisher failure；
+- direct parent rename+ordinary replacement、grandparent replacement、same parent不变、原对象移走再移回、symlink与unreliable capability；
+- fixed recovery root与required target parent相等/内含/外包的真实FS拒绝、sibling/外部目录控制、multi-target原子拒绝与committed-before-settle restart控制；
+- Publisher prepare/stage/pre-commit/逐target mutation、journal recovery parent drift、旧journal兼容与committed不二次publish；
 -连续十轮Service、Windows Setup/portable、app quit。
 
 ## 12. Release strategy
@@ -294,3 +316,4 @@ Export copy：`fs.promises.copyFile`到task staging，校验源/副本hash，再
 - active Task不切换；
 - Service rollback前先close/使generation失效；
 -已提交seed不down-migrate或猜测回滚。
+- E10-B selector关闭即回到legacy；FilePlan/journal reader接受旧记录缺少additive identity。向旧二进制回滚前必须以open Publisher journal=0作为release gate，不在本版增加迁移器。

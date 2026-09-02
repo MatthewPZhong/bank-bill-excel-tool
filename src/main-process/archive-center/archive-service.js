@@ -197,6 +197,7 @@ function publicArtifact(artifact) {
     'aliasKey',
     'sourceSnapshot',
     'targetSnapshot',
+    'targetParentIdentity',
     'expectedSha256',
     'expectedSizeBytes'
   ]);

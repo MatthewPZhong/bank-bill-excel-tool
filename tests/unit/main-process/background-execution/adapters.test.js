@@ -54,6 +54,54 @@ test('inline-async adapter 直接产出 canonical progress/done envelope', async
   assert.deepEqual(messages[1].payload, { result: { doubled: 8 } });
 });
 
+test('inline-async terminate/close 持有真实 execution promise，late success/error 后才完成 cleanup', async (t) => {
+  for (const terminal of ['success', 'error']) {
+    await t.test(terminal, async () => {
+      let finishExecution;
+      const executionGate = new Promise((resolve, reject) => {
+        finishExecution = terminal === 'success' ? resolve : reject;
+      });
+      let observedAbort = false;
+      const handle = createInlineAsyncAdapter().start({
+        entry: async ({ signal }) => {
+          signal.addEventListener('abort', () => { observedAbort = true; }, { once: true });
+          return executionGate;
+        },
+        onMessage() {}
+      });
+      handle.send(startEnvelope());
+      await new Promise((resolve) => setImmediate(resolve));
+      let terminateSettled = false;
+      const termination = handle.terminate().then(() => { terminateSettled = true; });
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(observedAbort, true);
+      assert.equal(terminateSettled, false);
+      if (terminal === 'success') finishExecution({ late: true });
+      else finishExecution(Object.assign(new Error('late failure'), { code: 'LATE_INLINE_ERROR' }));
+      await termination;
+      assert.equal(terminateSettled, true);
+      await handle.close();
+    });
+  }
+});
+
+test('inline-async close 在正常完成前不虚报 transport 已收口', async () => {
+  let finishExecution;
+  const handle = createInlineAsyncAdapter().start({
+    entry: () => new Promise((resolve) => { finishExecution = resolve; }),
+    onMessage() {}
+  });
+  handle.send(startEnvelope());
+  await new Promise((resolve) => setImmediate(resolve));
+  let closeSettled = false;
+  const closing = handle.close().then(() => { closeSettled = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(closeSettled, false);
+  finishExecution({ ok: true });
+  await closing;
+  assert.equal(closeSettled, true);
+});
+
 test('existing-dispatch adapter 兼容 Promise 与 {promise,cancel,terminate}，不生成内部 terminal truth', async () => {
   const messages = [];
   let cancelled = 0;

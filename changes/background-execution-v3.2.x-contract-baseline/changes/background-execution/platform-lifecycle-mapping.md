@@ -118,6 +118,8 @@ Batch 列表示 **effective batch status**。现有基础列继续保持兼容�
 | 任意 | compensation=`unknown` | 任意 | `interrupted` | `interrupted` | 需要恢复 | 保持 hold，禁止新 mutation |
 | `completed` | `committed` | generation 完成、Publisher 未开始 | `running` 直到 settlement | 基础状态不提前终结 | 正在发布/结算 | 不允许 Renderer提前显示成功 |
 | `completed` | `committed` | Publisher journal=`prepared/unknown` | `interrupted` | `interrupted` | 发布恢复中/需人工处理 | 以 publisher-journal source 建 hold；只运行 Publisher recovery |
+| 任意 | `unknown` | Publisher journal带target-parent evidence且当前direct parent漂移/不可可靠验证 | `interrupted` | `interrupted` | 需要人工恢复 | target mutation前停止，保留journal并创建Hold；禁止重publish |
+| `failed` | `not-started` | required target parent与fixed Publisher recovery root相等或双向包含 | `failed` | `failed` | 发布前拒绝 | journal/index/target写入为0；无RecoverySource/Hold，修正目标后用新operationKey |
 
 
 ## 4. 规范性判定顺序
@@ -449,6 +451,7 @@ recovery-required
 - compensation 结果未知；
 - 持久证据冲突或损坏；
 - Publisher journal 无法证明 committed 或 rolled back。
+- Publisher journal携带的direct target parent identity在任何恢复mutation前漂移或不可可靠验证。
 
 Hold 至少包含：
 
@@ -505,6 +508,9 @@ open Intent 与 Provider 枚举结果统一转换为 `RecoverySourceV1`，按 `s
 | critical acked / protected | 不声称取消；等待有限时间，超时写 interrupted 并保留 intent/hold |
 | commit receipt 已存在、settlement 未完成 | 写 interrupted，启动时恢复 settlement |
 | Publisher journal prepared/committed | 由 Publisher recovery 判定，不重新 generation |
+| Publisher journal带`expectedTargetParentIdentity` | 先复核resolved direct parent；漂移则manual recovery/Hold，任何target mutation与重publish均为0 |
+| 旧Publisher journal缺parent identity | 按既有reader/recovery兼容语义处理，不批量取消prepared，不做DB migration |
+| 新required publication的target parent与fixed recovery root双向包含 | 在journal/index/target写入前按`not-started`拒绝；旧journal recovery不应用此新建门禁 |
 
 ## 13. 故障注入最低矩阵
 
@@ -520,7 +526,8 @@ open Intent 与 Provider 枚举结果统一转换为 `RecoverySourceV1`，按 `s
 8. `job:done` 后、TaskLifecycle settle 前；
 9. Publisher prepared 后；
 10. 正式目标替换后、Publisher committed 回包前；
-11. archive handoff 后、Task success 前。
+11. direct target parent在prepare/stage/pre-commit/恢复前被rename并由ordinary directory replacement；
+12. archive handoff 后、Task success 前。
 
 每个窗口必须给出：
 

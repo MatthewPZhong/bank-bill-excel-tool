@@ -947,6 +947,7 @@ request hash envelope exact 为：transition writer 使用 `{ contractVersion: 1
 - stat/size/hash 与 manifest 一致；
 - 输出全集、唯一性和顺序完整；
 - source/target snapshot 未变化；
+- FilePlanV1 output additive冻结resolved direct target parent identity：Main normalizer独立捕获canonical realpath、平台alias与bigint dev/ino reliability；raw/Renderer同名字段不得成为authority。此证据只覆盖direct parent，不保存整条ancestor chain；
 - part/ready/sealed 状态合法；
 - 清理失败有可恢复路径。
 
@@ -959,7 +960,7 @@ request hash envelope exact 为：transition writer 使用 `{ contractVersion: 1
 - 业务行数守恒；
 - 模板和 lineage。
 
-正式目标 MUST 由单一 Publisher 或 action 明确登记的 existing Publisher落位。
+正式目标 MUST 由单一 Publisher 或 action 明确登记的 existing Publisher落位。需要direct-parent evidence的action必须把FilePlan中的exact `targetParentIdentity`逐字传为Publisher `expectedTargetParentIdentity`，不得重建。generic Publisher仅在调用方明确require或提供该evidence时校验，并在preflight、artifact staged后、pre-commit及每个正式target mutation紧前复核。对required guarded publication，Publisher还必须在创建任何journal/index或target mutation前，用canonical realpath与平台alias拒绝固定recovery root和任一direct target parent相等或任一方向祖先/后代包含；任一冲突使全batch写入为0，sibling/外部目录保持合法。journal entry additive持久同一identity；恢复时带字段journal必须在任何target mutation前复核，漂移进入manual recovery/Recovery Hold，不重publish。旧journal缺字段保持原兼容语义，且不因该新建batch门禁改变恢复路径。
 
 ## 10. Cancellation Contract
 
@@ -1069,6 +1070,8 @@ worker-durable
 existing-critical-protocol
 ```
 
+`FilePlanV1.outputs[*].targetParentIdentity`与Publisher journal entry中的`expectedTargetParentIdentity`属于v1 additive evidence：reader必须接受旧plan/journal缺字段；只有显式require的action缺失或unreliable时fail closed。它不改变Protocol/Policy/Recovery DTO，因此`platform-contract-v1.schema.json`无字段增量。旧二进制回滚前必须证明open Publisher journal为0，避免旧reader在未理解新evidence时继续mutation；不为本增量新增迁移器。
+
 ## 14. 生产启用总门禁
 
 一个 action 只有满足全部条件才可从 legacy/blocked 切到 managed production：
@@ -1082,9 +1085,10 @@ existing-critical-protocol
 7. mutation action 已按其 commit policy 满足恢复门禁：仅 `worker-durable` 与 `main-settlement + target-post-image` 使用平台 Critical Intent；`publisher-journal` 与 `existing-critical-protocol` 不创建平台 Intent，并分别以 durable journal / existing protocol evidence 完成 receipt、Inspector、Lifecycle Mapping 与故障注入；
 8. “COMMIT 后、回包前”故障注入通过；
 9. artifact action 的 staging、Publisher、部分发布恢复通过；
-10. Windows packaged 通过；
-11. action 要求的人工资金/审计复核完成；
-12. 性能门禁满足，或明确生产固定 single/legacy。
+10. 要求target-parent evidence的artifact action已通过direct parent identity capability、rename/replacement、fixed recovery root双向containment拒绝与journal recovery fault injection；
+11. Windows packaged 通过；
+12. action 要求的人工资金/审计复核完成；
+13. 性能门禁满足，或明确生产固定 single/legacy。
 
 ## 15. Canonical 术语迁移表
 

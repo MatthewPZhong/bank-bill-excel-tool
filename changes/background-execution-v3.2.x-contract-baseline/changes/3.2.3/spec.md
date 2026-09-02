@@ -223,8 +223,13 @@ Service crash后：
 - Main做payload大小/schema和FilePlan；
 - Worker复用单一generation core完成必填、日期、10年/昨日边界、账户/币种、记录和文件名；
 - Worker读取白名单模板，写一个staging workbook并回读；
-- Main发布到managed location并保存小型artifact handle；
--另存为用异步复制到staging、校验hash/size，再Publisher到用户目标；
+- Main在dispatch前只从冻结payload/asOf/template异步分批推导out-of-band expected authority；每个bounded batch必须让出event loop并检查Task cancel/app-quit signal，取消时不得spawn Worker或留下staging。该authority冻结精确Sheet集合、完整列schema、expected used/dimension range、rowCount与业务digests，不信任Worker result/manifest；
+- Main authority readback拒绝任何越过冻结列/range的cell（含styled blank）、merge或dimension，并在Publisher前拒绝formula cached、calcChain、external link、hyperlink等打开后可改变业务语义的动态内容；合法trusted writer纯值workbook与legacy raw oracle/golden不变；
+- `new-account:save-as`只消费Main当前进程已brand的normalized FilePlan authority，禁止再次normalize/resnapshot；每个output由Main normalizer额外冻结resolved direct parent的`targetParentIdentity`（canonical realpath、平台alias、bigint dev/ino十进制值与reliability/kind），raw/Renderer同名输入不构成authority。direct parent必须是非symlink ordinary directory；只冻结direct parent，不保存整条ancestor chain；
+- copy前、handoff前、Publisher prepare/stage/pre-commit及每次正式target mutation紧前，均对用户确认时的同一source/target snapshot与exact direct-parent identity复核。parent rename后由ordinary replacement占位、grandparent replacement导致direct parent重建、target absent后出现未知文件或existing被替换均fail closed；原parent object移走后原样移回可继续。Node不能提供非零稳定dev/ino时，E10-B返回稳定capability failure，其他未要求该evidence的既有action不受影响；
+- Main在dispatch前只从冻结payload/asOfDate/模板证据构造bounded expected artifact；Worker result/manifest仅是untrusted observation。Main回读必须核对精确Sheet顺序/数量、列、记录数及日期/账户/币种/records digests，再发布到managed location并保存小型artifact handle；
+-另存为用异步复制到staging、校验source identity/snapshot/hash与副本identity/size/hash，再Publisher到用户目标；E10-B把FilePlan中的同一`targetParentIdentity`逐字传为Publisher `expectedTargetParentIdentity`，不得由调用方重建。对于明确要求该evidence的发布，Publisher必须在创建任何journal/index或执行target mutation前，以canonical realpath与平台alias复核固定recovery root和每个direct target parent；两者相等或任一方向存在祖先/后代包含关系时稳定fail closed、全批次写入为0，普通sibling/外部目录不受影响。Publisher journal持久同一identity；带该字段的恢复在任何target mutation前漂移时进入既有manual recovery/Hold，绝不重publish。旧journal缺字段继续既有兼容恢复。Publisher必须保留既有archive-handoff journal，Task artifact durable settlement完成且Task终态持久化后才ack清理。committed后丢回包/崩溃只从同一journal恢复settlement，不重复generation/copy/publish；
+- `inline-async` transport的close/terminate必须有界等待实际execution结算；deadline内未收口必须报告transport leak/cleanup evidence并保留cleanup owner，不得提前释放后宣称leak=0；
 -不建立池，不宣称多核加速。
 
 ## 10. 验收标准
@@ -236,6 +241,8 @@ Service crash后：
 - seed no-op、COMMIT后回包前crash、pre/post/unknown；
 - NewAccount日期/币种/命名/模板等价；
 - copy source变化时fail closed；
+- direct target parent rename/replacement、symlink与identity capability不足时Publisher=0；Publisher prepare/stage/pre-commit/recovery各检查点通过真实FS故障注入；
+- fixed Publisher recovery root与required direct target parent相等或双向包含时，在journal/index/target写入前拒绝；多target任一冲突全批次Publisher=0，sibling/外部目录及旧journal恢复不回归；
 - event-loop delay、RSS、Windows长驻Service/app quit通过。
 
 ## 11. PR 顺序
@@ -261,3 +268,8 @@ Service crash后：
 ## 13. 资金红线
 
 ⚠️ Statement金额模式、借贷方向、余额seed、币种和current/all；NewAccount日期、账户、币种和输出记录必须人工复核。seed状态unknown时不得自动覆盖或继续生成。
+
+## 14. 回滚兼容
+
+- E10-B回滚只关闭dormant selector；新FilePlan/journal字段reader向后兼容。
+- 回滚到不识别该字段的旧二进制前，release gate必须证明open Publisher journal为0；本版不新增迁移器。
