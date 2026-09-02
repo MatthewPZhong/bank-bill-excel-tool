@@ -1020,28 +1020,30 @@ test('物理target alias可逆，Darwin同物理拼写共享scope，Windows名�
     'straße.json'
   );
 
-  const h = createHarness(t, { platform: 'darwin' });
-  const first = settlementInput({
-    storageRoot: h.root,
-    bankName: composed,
-    records: [record({ templateName: `${composed}-上海`, endBalance: 10 })]
-  });
-  const second = settlementInput({
-    storageRoot: h.root,
-    taskRunId: 'task-alias-second',
-    bankName: decomposed,
-    records: [
-      record({ templateName: `${composed}-上海`, endBalance: 10 }),
-      record({ templateName: `${decomposed}-上海`, endBalance: 20 })
-    ]
-  });
-  const firstResult = await h.coordinator.settle(first);
-  const secondResult = await h.coordinator.settle(second);
-  const firstIntent = h.readRepository.getCriticalIntentById(firstResult.intentId);
-  const secondIntent = h.readRepository.getCriticalIntentById(secondResult.intentId);
-  assert.equal(firstIntent.conflictScopeKey, secondIntent.conflictScopeKey);
-  assert.equal(fs.readdirSync(path.join(h.root, 'balance-seeds')).length, 1,
-    '物理同target不得因case/Unicode别名创建第二文件');
+  if (process.platform === 'darwin') {
+    const h = createHarness(t, { platform: 'darwin' });
+    const first = settlementInput({
+      storageRoot: h.root,
+      bankName: composed,
+      records: [record({ templateName: `${composed}-上海`, endBalance: 10 })]
+    });
+    const second = settlementInput({
+      storageRoot: h.root,
+      taskRunId: 'task-alias-second',
+      bankName: decomposed,
+      records: [
+        record({ templateName: `${composed}-上海`, endBalance: 10 }),
+        record({ templateName: `${decomposed}-上海`, endBalance: 20 })
+      ]
+    });
+    const firstResult = await h.coordinator.settle(first);
+    const secondResult = await h.coordinator.settle(second);
+    const firstIntent = h.readRepository.getCriticalIntentById(firstResult.intentId);
+    const secondIntent = h.readRepository.getCriticalIntentById(secondResult.intentId);
+    assert.equal(firstIntent.conflictScopeKey, secondIntent.conflictScopeKey);
+    assert.equal(fs.readdirSync(path.join(h.root, 'balance-seeds')).length, 1,
+      '物理同target不得因case/Unicode别名创建第二文件');
+  }
 
   let holdChecks = 0;
   const unsafe = createHarness(t, {
@@ -1076,7 +1078,10 @@ test('startup binding不复制production policy authority且target alias不携�
   const alias = createManualBalanceTargetAlias('中行');
   assert.equal(alias.includes('/'), false);
   assert.equal(alias.includes('6222'), false);
-  assert.equal(resolveManualBalanceTargetAlias('/storage', alias), '/storage/balance-seeds/中行.json');
+  assert.equal(
+    resolveManualBalanceTargetAlias('/storage', alias),
+    path.join('/storage', 'balance-seeds', '中行.json')
+  );
   assert.equal(
     createManualBalanceTargetAlias('A/B'),
     createManualBalanceTargetAlias('A-B'),

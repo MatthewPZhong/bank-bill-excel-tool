@@ -22,6 +22,7 @@
 | 隐私拒绝路径也是输出契约。 | Reviewer 证明原 raw key 可被拼进 error path 并流入 CI stdout。 | error 仅使用固定 code + opaque/index path；错误数、单项长度与 CLI 总输出全部有上限。 |
 | raw JSON number 的词法是 privacy authority 的一部分。 | `6222021234567890e-999` 在 `JSON.parse` 后下溢为 `0`，会丢失账号样式原 token 并绕过 parse 后隐私扫描。 | raw lexer 保留每个 number lexeme；账号长 significand、指数/下溢、`-0`、非 canonical/不安全与超长 token 均在 `JSON.parse` 前以固定脱敏 code 拒绝。 |
 | CommonJS 解析候选必须属于 HEAD authority。 | ignored 无扩展 `runtime` 会优先于 tracked `runtime.js`；nested extensionless require 同样可被 ignored shim 截获。 | 顶层 repo modules 使用 exact `.js` 并核对 `require.resolve` absolute path/HEAD target；递归枚举 `src/`、`scripts/`、R3 evidence 实际集合（含 ignore/info-exclude 隐藏项）与 HEAD 精确一致，加载后重跑同一 guard；根级 node_modules/logs 不扫描。 |
+| 新 exact #204 的两条 Windows workflow 都在 historical repository identity 前置门产生同型级联失败。 | jobs `100204040344`、`100204045056` 均精确 checkout `3dc720f805ee36e95483048f9e05a9b8dca1cdf4`；lint/smoke 通过，unit 各 `6772/6776`、1 fail/3 skip，integration 未启动；nested `5f9ee049…` suite 均为 `10/62`，统一出现 `GIT_REPOSITORY_IDENTITY_INVALID`。日志 cwd 使用 `C:\Users\RUNNER~1\…`，历史 validator 则直接比较 Git top-level 与 Node lexical root。 | 52 项不得当作独立业务失败；只在 current wrapper 规范 temp/repo identity并提供有界 win32 path/mode 适配，不修改历史 validator/test/snapshot或业务代码。 |
 
 ## Unknowns Register
 
@@ -37,6 +38,7 @@
 | index flag 是否能隐藏实际 tracked runtime 漂移。 | PROBE（已闭合） | 高 | 临时 clone 中分别构造 assume-unchanged、skip-worktree、blob/mode/symlink drift、staged+hidden。 | 不信任 index/status 的 clean 结论；从 HEAD tree 枚举 2088 tracked entries，index 和实际 worktree各自对 HEAD 闭合。 |
 | number token 是否可在 parse 时发生信息丢失。 | PROBE（已闭合） | 高 | 文件/CLI 测试敏感指数下溢、负数、小数、指数、超长和 nested array。 | 仅允许有界、finite、safe且 `JSON.stringify(value)===lexeme` 的非指数 canonical number；canonical 负数/小数由下游 schema 再裁决。 |
 | ignored/CommonJS shim 与加载期 TOCTOU 是否可逃过 Git authority。 | PROBE（已闭合） | 高 | 临时 clone 注入 ignored 顶层无扩展、`.js/.json` 邻居、nested shim；hook 在 runtime load 后改 tracked 文件。 | 三个审计根实际集合=HEAD 748 entries；exact module resolution；pre/post-load guard 任一失败都阻止 PASS。 |
+| current wrapper 的 canonical temp、separator/mode preload 与历史 `chmod` 负例在真实 Windows 是否同时成立。 | PROBE | 高 | 两条 exact 失败日志已锁定 identity 首错；本地用正常 temp、精确 `RUNNER~1` symlink alias、forced `path.win32` 纯函数与完整 historical `62/62` 复验机制，最终以新 exact Windows unit/integration 为准。 | wrapper 固定短 outer prefix `r4-`、canonical cwd、`TMP/TEMP/TMPDIR`、`core.autocrlf=false`；preload 仅覆盖 cwd 内 tracked writable regular file，`chmod` 请求最多记录 20 项且仍由历史 validator 判 mode drift。不得拦截 Git、改 validator或把本地结果升级为 Windows 通过。 |
 
 没有需要改变冻结数据模型、资金/恢复边界或主要用户流程的实施 `BLOCK`。Windows、真实业务样本、资金与恢复人工复核仍是 production gate，只能由 release owner/人工证据关闭。
 
@@ -57,3 +59,24 @@ node --test --test-concurrency=1 tests/unit/scripts/v3-2-4-release-evidence.test
 ```
 
 最终 clean single-parent candidate 按上述固定命令实跑 `241/241 PASS`、`0 fail / 0 skip`；旧 parent 的 `240/240` 和并发波动不作为最终 head 的代偿证据。测试临时 clone 只复制 tracked tree，harness 仅通过 `NODE_PATH` 复用仓库已安装依赖，不改变 relative source shim 的 Git/filesystem authority 审计。E12-A 已加入全数字 digest 的确定性回归，避免随机 SHA-256 被 finance-safe 账号模式误分类。
+
+## 2026-09-02 Final v3.2.3 Ancestry Preflight
+
+- Goal：把最终 v3.2.3 exact head `d12abe7ca781305aaf3eef77d8b86018261741ff` 以 natural merge 传播到 #194→#204，同时保持八段 v3.2.4 effective patch 不变。
+- Constraints：只在新隔离 worktree 工作；不 force/rebase/cherry-pick，不改写旧 ready 历史；不改变金额、币种、主键、receipt/Inspector/Publisher、恢复或 production gate；主工作区只读。
+- Done when：八个新 head 形成严格祖先链，`d12abe7c…` 为全部 head 祖先；每个传播提交双亲精确；新旧逐段 `name-status` 与 full-index binary patch 相同；完整本地验证及新 exact Windows CI 均完成后才允许 ready/merge。
+
+| 未知 | 处理 | 当前证据与决定 |
+| --- | --- | --- |
+| #194 `CONFLICTING` 是否需要新的业务取舍 | PROBE（已闭合） | 精确冲突仅两处公共 runtime registry/test；旧 ready merge 已保留两边语义，且相关 v3.2.3 blob 从 `07ef9efa…` 到 `d12abe7c…` 未变。沿旧 ready 继续 natural merge，无需手改业务代码。 |
+| 最终基线传播是否改变任一 E11/E12 patch | PROBE（已闭合） | 八段新旧 `git diff --name-status` 与 `git diff --full-index --binary` 全部相同，路径数仍为 `11/9/26/14/17/11/16/19`。 |
+| 新组合在完整本地与 Windows CI 是否稳定 | PROBE（本地已闭合，远端待闭合） | 锁文件依赖树上 focused 外层 `180/180`（historical exact `62/62`）、完整 unit `6773/6776`（0 fail、3 Windows-only skip）、integration `2488/2488`、smoke、packaged-inputs、lint/static 全部通过；普通 push 后仍只信新 exact CI。 |
+| Windows packaged、真实样本、资金/恢复人工证据 | BLOCK（production） | 继续阻止 production enable；不阻止本次 evidence/祖先传播。 |
+
+风险优先顺序：先验证八段父链、scope 与 worktree cleanliness，再运行 ReconFix/VCC/公共 runtime focused 测试和 reconciliation 盲区检查，随后执行完整回归；任何资金语义变化、scope 偏移、失败或清理残留都停止传播，不以旧 CI 代偿。
+
+本地最终门禁已在 detached 隔离 worktree 通过 `npm ci` 锁定 `electron-builder/app-builder-lib 26.15.7` 后完成；共享旧依赖树 `26.8.1` 产生的单一 NSIS 模板失败已明确作废。integration runner 对 `rules/integration-test-policy.md` 的本机耗时刷新已恢复到 HEAD，不进入本次 scope。盲区复核未发现新的入口旁路、状态生命周期、幂等、金额/币种或恢复合同变化；新 exact Windows CI 与既有人工 production gates 仍不可由本地结果代偿。
+
+新 exact #204 的两条失败日志进一步收敛了 Windows PROBE：两条 workflow 都在 unit 的同一 current outer test 内启动 immutable `5f9ee049…` replay，nested 都是 `10/62`，52 项统一受 `GIT_REPOSITORY_IDENTITY_INVALID` 前置错误遮蔽；integration 因 unit exit 1 均未启动。当前最小修复只修改外层 test harness：锁定 historical validator/test blobs、候选 prefix 和 `2088=2086×100644+2×100755` tree；把 outer prefix 从 `v324-exact-evidence-` 缩短为 `r4-`，在已观测 GitHub Windows temp root下将两条最长 tracked candidate path 的预算从 `258/257` 降为 `241/240`；规范实际 cwd 和三类 temp 变量，并在 win32-only preload 中保持 Git path separator/POSIX mode 语义。历史 mode-drift `chmod` 负例仍通过有界继承映射返回原 `GIT_WORKTREE_TREE_INVALID`，Git tree/index/status/content/type/audit 门没有放宽。真实 Windows `62/62`、完整 unit 与首次可达 integration 仍由新 exact CI 权威验证。
+
+当前 test-only candidate 的本地验收使用官方 Node `22.18.0` 与隔离 exact-lock 依赖：正常 temp 与精确 `RUNNER~1` symlink alias 下外层各 `1/1`、nested historical 各 `62/62`；固定八文件矩阵 `180/180`；最终完整 unit `6773/6776`、0 fail/3 Windows-only skip（`logs/unit-tests/unit-20260902-185607.log`）；完整 integration 53 scripts=`2488/2488`；smoke、`check:packaged-inputs`、lint、changed JS syntax 与 `git diff --check` 均通过。integration runner 的耗时表副作用已恢复到 HEAD，所有临时 root 与依赖链接在最终审计前清理。上述本地证据只证明兼容层未遮蔽历史负例，不代偿新 exact Windows CI。
