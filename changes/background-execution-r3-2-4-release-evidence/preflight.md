@@ -57,3 +57,18 @@ node --test --test-concurrency=1 tests/unit/scripts/v3-2-4-release-evidence.test
 ```
 
 最终 clean single-parent candidate 按上述固定命令实跑 `241/241 PASS`、`0 fail / 0 skip`；旧 parent 的 `240/240` 和并发波动不作为最终 head 的代偿证据。测试临时 clone 只复制 tracked tree，harness 仅通过 `NODE_PATH` 复用仓库已安装依赖，不改变 relative source shim 的 Git/filesystem authority 审计。E12-A 已加入全数字 digest 的确定性回归，避免随机 SHA-256 被 finance-safe 账号模式误分类。
+
+## 2026-09-02 Final v3.2.3 Ancestry Preflight
+
+- Goal：把最终 v3.2.3 exact head `d12abe7ca781305aaf3eef77d8b86018261741ff` 以 natural merge 传播到 #194→#204，同时保持八段 v3.2.4 effective patch 不变。
+- Constraints：只在新隔离 worktree 工作；不 force/rebase/cherry-pick，不改写旧 ready 历史；不改变金额、币种、主键、receipt/Inspector/Publisher、恢复或 production gate；主工作区只读。
+- Done when：八个新 head 形成严格祖先链，`d12abe7c…` 为全部 head 祖先；每个传播提交双亲精确；新旧逐段 `name-status` 与 full-index binary patch 相同；完整本地验证及新 exact Windows CI 均完成后才允许 ready/merge。
+
+| 未知 | 处理 | 当前证据与决定 |
+| --- | --- | --- |
+| #194 `CONFLICTING` 是否需要新的业务取舍 | PROBE（已闭合） | 精确冲突仅两处公共 runtime registry/test；旧 ready merge 已保留两边语义，且相关 v3.2.3 blob 从 `07ef9efa…` 到 `d12abe7c…` 未变。沿旧 ready 继续 natural merge，无需手改业务代码。 |
+| 最终基线传播是否改变任一 E11/E12 patch | PROBE（已闭合） | 八段新旧 `git diff --name-status` 与 `git diff --full-index --binary` 全部相同，路径数仍为 `11/9/26/14/17/11/16/19`。 |
+| 新组合在完整本地与 Windows CI 是否稳定 | PROBE（待闭合） | 先跑 frozen focused 与跨模块矩阵，再跑完整 unit/integration/smoke/static；普通 push 后只信新 exact CI。 |
+| Windows packaged、真实样本、资金/恢复人工证据 | BLOCK（production） | 继续阻止 production enable；不阻止本次 evidence/祖先传播。 |
+
+风险优先顺序：先验证八段父链、scope 与 worktree cleanliness，再运行 ReconFix/VCC/公共 runtime focused 测试和 reconciliation 盲区检查，随后执行完整回归；任何资金语义变化、scope 偏移、失败或清理残留都停止传播，不以旧 CI 代偿。

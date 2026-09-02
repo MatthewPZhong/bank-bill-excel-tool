@@ -81,6 +81,30 @@ node --test --test-concurrency=1 tests/unit/scripts/v3-2-4-release-evidence.test
 - `release-check`、`check-vars`、`scan:vars` 均按用户明确要求跳过，不能声明为 PASS。
 - Windows packaged、真实样本、资金与恢复人工复核仍是 production gate；本地及 CI 自动化不得据此开启 production。
 
+## Final v3.2.3 Exact Ancestry Propagation (2026-09-02)
+
+GitHub 上 #194 原先仍以 `v3.2.2` 为 base；在用户确认版本链应继承最终 v3.2.3 后，base 已改为 `codex/v3.2.3-r3-release-evidence-restacked`（`d12abe7ca781305aaf3eef77d8b86018261741ff`）。远端原始 #194 head `c6c7ffa5ec195eaca366120d5617e93f558f650f` 随后被 GitHub 判定为 `CONFLICTING`，冲突精确落在：
+
+- `src/main-process/background-execution/runtime.js`
+- `tests/unit/main-process/toolbox-background-generation.test.js`
+
+隔离诊断证明共同祖先是 `7577d5ae2f627619ba3f22597505c587be9867b6`。冲突来自 v3.2.3 注册 FundRecon/Duplicate/NewAccount 等公共 runtime policy，与 E11-A 注册 ReconFix policy/service 的并行改动；不涉及账号归属、金额、币种、借贷方向、幂等键或 recovery 状态迁移。旧 ready #194 `bb5592189f4cc5daaa955c157ada30e3bacac5e8` 已在其既有 merge 中保留完整 ReconFix 注册与测试期望；两处冲突文件在旧 v3.2.3 父 `07ef9efaa4434b7c729805d4a6e17bdbc273aec7` 到最终 `d12abe7c…` 之间 blob OID 完全未变。因此选择从旧 ready 链继续做 natural merge，不重新手工解释或改写业务代码。
+
+| PR | 新传播 merge head | 精确双亲 |
+| --- | --- | --- |
+| #194 | `830ed159d19d093839c3df004dc93dbc7e0f3203` | `bb559218…` + `d12abe7c…` |
+| #195 | `5746b939a3929ecdb86d0f9445d3b8b267f09cd5` | `9c2e7783…` + `830ed159…` |
+| #196 | `54f82cf9c9546e2ff49896253ecc965eb0073508` | `5ab46af9…` + `5746b939…` |
+| #198 | `4e987bd47de2774065d37dbe8c122f344db3553c` | `f8515e6f…` + `54f82cf9…` |
+| #200 | `42387341cfbe04da13e52f38e110a6bc3e62ec41` | `dc8d2115…` + `4e987bd4…` |
+| #201 | `87100f71feff13e6b5bb63c11e0aefbd49e27a9f` | `8343ae0a…` + `42387341…` |
+| #203 | `79ad7d23358ff98324787367bf51676afab2f0c0` | `eb96688d…` + `87100f71…` |
+| #204 | `724e7f7091b552462f4a2927950e9b03ad98543f` | `7d033a7f…` + `79ad7d23…` |
+
+传播后的八段 effective PR diff 与传播前逐段 diff 经 `git diff --name-status` 及 `git diff --full-index --binary` 逐字比较完全一致；路径数依次仍为 `11 / 9 / 26 / 14 / 17 / 11 / 16 / 19`。这证明传播只补入最终 v3.2.3 祖先，没有改变任一 E11/E12/R3.2.4 业务 patch。八个隔离 worktree 在 merge 后均 clean、无 `MERGE_HEAD`；本节记录提交之后仍需重新执行 focused、完整 unit、integration、smoke、packaged-inputs、lint/static 以及新 exact Windows CI，旧 CI 不作代偿。
+
+Reconciliation 复核结论：逐段 binary patch 相同，因此 ReconID/VCC 主键血缘、金额/币种/方向、single-writer/dual-writer、receipt/Inspector/Publisher、幂等与失败恢复语义均未变化；production、Windows、真实样本、资金及恢复人工 gate 继续保持原状态。未触发新的资金红线，但既有真实资金/恢复人工复核仍不能由本次传播关闭。
+
 ## Evidence
 
 | 证据 | 结果 | 覆盖的行为/风险 |
