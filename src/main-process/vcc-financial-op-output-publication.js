@@ -35,7 +35,7 @@ async function writeXlsxAtomically({ outputPath, writeStaged, validateStaged, be
     }
     return destination;
   } catch (error) {
-    if (fs.existsSync(stagedPath)) {
+    if (error.preserveTemporaryFiles !== true && fs.existsSync(stagedPath)) {
       try { fs.unlinkSync(stagedPath); } catch (_cleanupError) { /* restore below */ }
     }
     if (backedUp && fs.existsSync(backupPath) && !fs.existsSync(destination)) {

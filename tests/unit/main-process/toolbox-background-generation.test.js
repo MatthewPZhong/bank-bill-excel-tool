@@ -36,6 +36,12 @@ const {
   DUPLICATE_ACTIONS
 } = require('../../../src/main-process/duplicate-inbound-match/policies');
 const {
+  VCC_EXPORT_SINGLE_ACTION,
+  VCC_EXPORT_SINGLE_POLICY,
+  VCC_EXPORT_SUBJECTS_ACTION,
+  VCC_EXPORT_SUBJECTS_POLICY
+} = require('../../../src/main-process/vcc-financial-op-output/policies');
+const {
   createBackgroundExecutionRuntime: createBackgroundExecutionRuntimeRaw,
   createBackgroundExecutionRuntimeManager,
   isBackgroundExecutionProductionEnabled
@@ -211,7 +217,9 @@ test('E04-B runtime预算完整计入Scanner phase与一个Writer child，idle/s
     'recon-fix:import',
     'recon-fix:run-readonly',
     'recon-fix:run-jpm',
-    'recon-fix:export'
+    'recon-fix:export',
+    VCC_EXPORT_SINGLE_ACTION,
+    VCC_EXPORT_SUBJECTS_ACTION
   ]);
   for (const policy of runtime.policyRegistry.list()) {
     assert.equal(policy.production.enabled, false);
@@ -235,6 +243,41 @@ test('E04-B runtime预算完整计入Scanner phase与一个Writer child，idle/s
   assert.deepEqual(multiPolicy.resources.compound.childResource, {
     cpuSlots: 1, workerThreadSlots: 1, utilityProcessSlots: 0,
     ioHeavySlots: 1, memoryBytes: 201326592
+  });
+  assert.deepEqual(VCC_EXPORT_SINGLE_POLICY.resources, {
+    profile: 'resource.vcc-financial-op:export-single',
+    base: {
+      cpuSlots: 0, workerThreadSlots: 0, utilityProcessSlots: 0,
+      ioHeavySlots: 0, memoryBytes: 0
+    },
+    phase: {
+      cpuSlots: 1, workerThreadSlots: 1, utilityProcessSlots: 0,
+      ioHeavySlots: 1, memoryBytes: 201326592
+    },
+    compound: null,
+    lowMemoryBehavior: 'queue',
+    admissionPriority: 'normal'
+  });
+  assert.deepEqual(VCC_EXPORT_SUBJECTS_POLICY.resources, {
+    profile: 'resource.vcc-financial-op:export-subjects',
+    base: {
+      cpuSlots: 0, workerThreadSlots: 1, utilityProcessSlots: 0,
+      ioHeavySlots: 0, memoryBytes: 33554432
+    },
+    phase: {
+      cpuSlots: 1, workerThreadSlots: 1, utilityProcessSlots: 0,
+      ioHeavySlots: 1, memoryBytes: 268435456
+    },
+    compound: {
+      topologyKey: 'topology.vcc-financial-op:export-subjects',
+      childrenMax: 4,
+      childResource: {
+        cpuSlots: 1, workerThreadSlots: 1, utilityProcessSlots: 0,
+        ioHeavySlots: 1, memoryBytes: 268435456
+      }
+    },
+    lowMemoryBehavior: 'downgrade-to-single',
+    admissionPriority: 'normal'
   });
   assert.deepEqual(snapshot.activeUsage, {
     cpuSlots: 0,

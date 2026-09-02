@@ -84,6 +84,14 @@ const {
 const {
   createReconFixEvidenceSettlementAdmission
 } = require('../recon-id-fix-service/evidence-settlement-admission');
+const {
+  VCC_EXPORT_SINGLE_ACTION,
+  VCC_EXPORT_SINGLE_POLICY,
+  VCC_EXPORT_SUBJECTS_ACTION,
+  VCC_EXPORT_SUBJECTS_POLICY,
+  validateVccExportSingleResult,
+  validateVccExportSubjectsResult
+} = require('../vcc-financial-op-output/policies');
 
 const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   ...TOOLBOX_GENERATION_POLICIES,
@@ -92,7 +100,9 @@ const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   NEW_ACCOUNT_SAVE_AS_POLICY,
   ...FUND_RECON_POLICIES,
   ...DUPLICATE_POLICIES,
-  ...RECON_FIX_POLICIES
+  ...RECON_FIX_POLICIES,
+  VCC_EXPORT_SINGLE_POLICY,
+  VCC_EXPORT_SUBJECTS_POLICY
 ]);
 
 function isBackgroundExecutionProductionEnabled(actionKey) {
@@ -156,6 +166,28 @@ function entryBindingForPolicy(policy, workerRoot, duplicateStartupGate) {
       cancellationTerminalErrorCodes: Object.freeze(['RECON_FIX_CANCELLED'])
     });
   }
+  if (policy.actionKey === VCC_EXPORT_SUBJECTS_ACTION) {
+    return Object.freeze({
+      path: path.resolve(
+        __dirname,
+        '..',
+        'vcc-financial-op-output',
+        'writer-worker-entry.js'
+      ),
+      cancellationTerminalErrorCodes: Object.freeze(['VCC_EXPORT_CANCELLED'])
+    });
+  }
+  if (policy.actionKey === VCC_EXPORT_SINGLE_ACTION) {
+    return Object.freeze({
+      path: path.resolve(
+        __dirname,
+        '..',
+        'vcc-financial-op-output',
+        'single-writer-worker-entry.js'
+      ),
+      cancellationTerminalErrorCodes: Object.freeze(['VCC_EXPORT_CANCELLED'])
+    });
+  }
   const preFund = policy.moduleId === 'pre-fund';
   return Object.freeze({
     path: path.join(
@@ -210,7 +242,11 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
   const validatorEntries = {};
   for (const policy of BACKGROUND_EXECUTION_POLICIES) {
     let resultValidator;
-    if (policy.moduleId === 'recon-fix') {
+    if (policy.actionKey === VCC_EXPORT_SUBJECTS_ACTION) {
+      resultValidator = validateVccExportSubjectsResult;
+    } else if (policy.actionKey === VCC_EXPORT_SINGLE_ACTION) {
+      resultValidator = validateVccExportSingleResult;
+    } else if (policy.moduleId === 'recon-fix') {
       resultValidator = policy.actionKey === RECON_FIX_EXPORT_ACTION
         ? validateReconFixExportResult
         : (policy.actionKey === RECON_FIX_RUN_JPM_ACTION
@@ -280,8 +316,16 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
     settlementKeys: BACKGROUND_EXECUTION_POLICIES.map((policy) => policy.commit.settlementKey),
     publisherKeys: BACKGROUND_EXECUTION_POLICIES.map((policy) => policy.artifacts.publisherKey),
     serviceKeys: [FUND_RECON_SERVICE_KEY, DUPLICATE_SERVICE_KEY, RECON_FIX_SERVICE_KEY],
-    plannerKeys: ['planner.pre-fund:mpt-import', 'planner.duplicate:import'],
-    reducerKeys: ['reducer.pre-fund:mpt-import', 'reducer.duplicate:import']
+    plannerKeys: [
+      'planner.pre-fund:mpt-import',
+      'planner.duplicate:import',
+      'planner.vcc-financial-op:export-subjects'
+    ],
+    reducerKeys: [
+      'reducer.pre-fund:mpt-import',
+      'reducer.duplicate:import',
+      'reducer.vcc-financial-op:export-subjects'
+    ]
   };
   const policyRegistry = createExecutionPolicyRegistry({
     policies: BACKGROUND_EXECUTION_POLICIES,
@@ -308,6 +352,23 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
     shutdownTimeoutMs: supervisorShutdownTimeoutMs,
     workerDurableCoordinator: options.workerDurableCoordinator,
     bindInputForAction({ actionKey, input }) {
+      if ([VCC_EXPORT_SINGLE_ACTION, VCC_EXPORT_SUBJECTS_ACTION].includes(actionKey)) {
+        if (!options.vccFinancialOpDatabasePath || !options.vccFinancialOpAssetsDir) {
+          const error = new Error('VCC export runtime generation 缺少 Main database/assets authority');
+          error.code = 'VCC_EXPORT_RUNTIME_AUTHORITY_UNAVAILABLE';
+          throw error;
+        }
+        if (Object.hasOwn(input, 'databasePath') || Object.hasOwn(input, 'assetsDir')) {
+          const error = new Error('VCC export database/assets authority 不接受 caller override');
+          error.code = 'VCC_EXPORT_RUNTIME_AUTHORITY_OVERRIDE_FORBIDDEN';
+          throw error;
+        }
+        return Object.freeze({
+          ...input,
+          databasePath: path.resolve(options.vccFinancialOpDatabasePath),
+          assetsDir: path.resolve(options.vccFinancialOpAssetsDir)
+        });
+      }
       if (actionKey !== RECON_FIX_RUN_JPM_ACTION) return input;
       if (!reconFixJpmDatabaseAuthority) {
         const error = new Error('ReconFix JPM runtime generation 缺少 Main database authority');
