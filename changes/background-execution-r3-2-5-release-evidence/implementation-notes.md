@@ -2,7 +2,7 @@
 
 ## Baseline
 
-- Exact base：最终传播后的 E13-G `7f9644922fde2f521c8e09fb3f856046ff9a3f1d`。
+- Exact base：最终传播后的 E13-G `6971f460f8ddf342789091135a7ccade005417be`。
 - Authority：[v3.2.5 Spec](../3.2.5/spec.md) §9～§12、[TechDoc](../3.2.5/techdoc.md) §9～§11、[implementation sequence](../3.2.5/implementation-sequence.md)。
 - Preflight：[preflight.md](./preflight.md)。
 - Done when：54-action 逐项 evidence、版本元数据、三份发布文档、允许的本地回归和安全边界全部可审计；production/main/tag 保持不变。
@@ -17,6 +17,7 @@
 | 所有 action 保持 KEEP_LEGACY | Windows、真实样本、RSS、观察窗口和资金/恢复人工门禁未关闭 | 因 36 capability implemented 或本地测试绿色就启用 production | 54/54 effective legacy、worker=0、featureFlag=false；legacy seam 保留。 |
 | 被禁止聚合命令只记 skipped | 用户明确禁止 `release-check`、`check-vars`、`scan:vars` | 偷跑或把未运行写 PASS | 允许的 lint/unit/integration/smoke 与专用 validator 分别取证。 |
 | checksum 由目录实际文件集合驱动 | 复核发现旧 validator 写死 `69/69`，而包中除 checksum 自身外已有 74 个普通文件；5 个既存 notes/checklist 未被列入仍可 PASS | 固定计数；只验证清单中已有路径 | 校验器现在拒绝漏列、额外、重复、乱序、逃逸路径、非普通文件和 hash 漂移；snapshot 计数来自真实验证结果。 |
+| 最终祖先传播后先复验语义，再刷新 provenance 与 checksum | 最终 v3.2.3/v3.2.4 祖先为合同包带来 4 个 append-only 审计文档 hash 变化；首次定向测试由 checksum 门精确拒绝 | 直接重算 hash；放宽 checksum；沿用旧报告 | 先以包外 report 证明 current tree 仍为 29/29，再重建 canonical report 与 74 项 checksum；validator、authority、生产和资金门不改。 |
 
 ## Evidence
 
@@ -25,13 +26,16 @@
 | E13-G current-tree authority | 29/29 contract validation、74/74 checksum、324/324 surfaces、54 actions、61 pairs、production enabled=0 | Registry/Manifest/Inventory/Strategy 与冻结 package 完整性；旧 69 条清单因漏项作废。 |
 | E13-G 最终回归 | 定向 27/27；unit 6857/6860（0 FAIL、3 SKIP）；integration 53 scripts / 2488/2488；smoke PASS | R3 开始前的精确 base 回归。 |
 | R3.2.5 deterministic validator | 最终 restack 精确 head：54 actions、production enabled=0、legacy effective=54、29/29 contract checks、74/74 checksum entries；checksum 漏列、额外、重复、乱序、逃逸、非普通文件与 byte tamper 负向用例均 fail closed | action assignment、metadata/docs、安全 gate、checksum 全目录覆盖与 mutants。 |
-| R3.2.5 最终本地回归 | lint PASS；E13-A～G + R3 定向 118/118 PASS；unit 6887/6890（0 FAIL、3 SKIP，`logs/unit-tests/unit-20260831-120210.log`）；integration 53 scripts / 2488/2488（315093 ms）；smoke、语法、diff PASS | 新 validator/tests、历史 evidence 复验和版本收口后的允许门禁。首次全量 unit 受宿主低内存影响，把 E13-E 测试的资源 gate 合法降为 1 child，导致测试期望 2 的 `1 FAIL`；测试改为注入其正在验证的 admitted topology 后，E13-E 精确 12/12、生产资源 gate 19/19、最终全量 0 FAIL，未改 production gate。 |
+| R3.2.5 旧基线本地回归 | lint PASS；E13-A～G + R3 定向 118/118 PASS；unit 6887/6890（0 FAIL、3 SKIP，`logs/unit-tests/unit-20260831-120210.log`）；integration 53 scripts / 2488/2488（315093 ms）；smoke、语法、diff PASS | 保留最终 v3.2.4 传播前的历史证据，不用于代偿新 candidate。首次全量 unit 受宿主低内存影响，把 E13-E 测试的资源 gate 合法降为 1 child，导致测试期望 2 的 `1 FAIL`；测试改为注入其正在验证的 admitted topology 后，E13-E 精确 12/12、生产资源 gate 19/19、最终全量 0 FAIL，未改 production gate。 |
+| 最终 v3.2.4 传播后的 checksum 诊断 | E13-A～G/R3.2.5 首轮定向 105/118、13 FAIL；首个根错误为 `PACKAGE_CHECKSUM_HASH_MISMATCH`，逐项比较确认 74 个条目中仅 4 个 v3.2.3 append-only notes/checklist hash 变化；包外 current-tree validation 29/29，canonical validation 29/29，重建后 deterministic validator 为 54 actions / 29 checks / 74 checksums PASS | 失败证据未作绿灯；4 个输入只含审计记录增量，不触及 runtime、SQL、金额/币种、幂等、Workbook、生产或恢复合同。新 candidate 的完整本地回归已完成，远端 exact CI 仍待新 head 推送后验证。 |
+| 最终 v3.2.4 传播后的完整本地回归 | official Node 22.18.0 + exact lock：E13-A～G/R3 定向 118/118；unit 6891/6894（0 FAIL、3 Windows-only SKIP，`logs/unit-tests/unit-20260902-203434.log`）；integration 53 scripts / 2488/2488（311127 ms）；smoke、packaged-inputs、lint、90 个变更 JS `node --check`、15 个变更 JSON parse、diff-check 全部 PASS | 覆盖最终 ancestry、刷新后的 deterministic evidence、全部 unit/integration 与允许的静态门禁；未运行用户禁止的聚合命令，远端 current exact smoke/build 不得由本地结果代偿。 |
 
 ## Deviations
 
 | 原计划 | 实际方案 | 原因 | 影响 | Spec 已同步 |
 | --- | --- | --- | --- | --- |
 | R3.2.5 门禁原文包含 `release-check` 与 Windows/人工通过 | 按用户永久约束跳过聚合命令；Windows/人工以 `NOT_RUN` / `PENDING_HUMAN_REVIEW` 入证据并保持 production 关闭 | 当前无授权和环境，且用户明确禁止命令 | dormant capability 可审计合并；不得声称 production-ready 或人工 PASS | 不改冻结合同；implementation sequence 已记录命令约束和状态语义。 |
+| 历史 R3.2.5 checksum/report 锚定旧 v3.2.4 祖先 | 最终 v3.2.4 `e1c31c42` 以 natural merge 传播后，按 current tree 重建 validation provenance 与 package checksum | 复用旧 29/29、74/74；仅修改测试期待；改写 validator | 只刷新机器证据文件和本记录；冻结合同与用户可见行为不变 | 不需要；这是祖先收口后的证据刷新，不改变 Spec。 |
 
 ## Remaining Unknowns
 

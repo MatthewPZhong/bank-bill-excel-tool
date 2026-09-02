@@ -1,6 +1,6 @@
 {
   "reportVersion": 17,
-  "generatedAt": "2026-08-31T03:56:05.096815+00:00",
+  "generatedAt": "2026-09-02T12:32:07.164728+00:00",
   "status": "PASS",
   "command": "PYTHON_BIN=<python3> changes/background-execution/validation/run-validation.sh --authority-mode repo --base-ref origin/v3.2.0",
   "pythonVersion": "3.14.3",
@@ -9,7 +9,7 @@
     "expectedVersion": "10.4.0",
     "version": "10.4.0",
     "resolutionMode": "repository-node-modules",
-    "modulePath": "/private/tmp/bbet-v325-e13g.20260831.TQR8RK/worktree/node_modules/espree/dist/espree.cjs"
+    "modulePath": "node_modules/espree/dist/espree.cjs"
   },
   "packageRoot": ".",
   "contractAuthority": {
@@ -37,15 +37,15 @@
       "mergeBase": "9b9887c152dd7ff1a784a5a5ba31d6d485dffd04",
       "gitWorkspaceIdentity": {
         "expected": {
-          "topLevel": "/private/tmp/bbet-v325-final-restack.xk9jxc",
-          "gitDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git/worktrees/bbet-v325-final-restack.xk9jxc",
+          "topLevel": "/private/tmp/bbet-v325-final-v324-propagate.zt4nf1/pr-r325",
+          "gitDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git/worktrees/pr-r325",
           "commonDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git",
-          "headOid": "33a0bb454cbfd80b1b6c864d55d2958409411458"
+          "headOid": "5a838cbab470df8c610f2bb001996c0cdbccafa1"
         },
-        "topLevel": "/private/tmp/bbet-v325-final-restack.xk9jxc",
-        "gitDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git/worktrees/bbet-v325-final-restack.xk9jxc",
+        "topLevel": "/private/tmp/bbet-v325-final-v324-propagate.zt4nf1/pr-r325",
+        "gitDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git/worktrees/pr-r325",
         "commonDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git",
-        "headOid": "33a0bb454cbfd80b1b6c864d55d2958409411458",
+        "headOid": "5a838cbab470df8c610f2bb001996c0cdbccafa1",
         "identityMatched": true,
         "environmentPolicy": {
           "ambientGitVariables": "remove-all-GIT_*",
@@ -95,7 +95,7 @@
         "expectedEspreeVersion": "10.4.0",
         "actualEspreeVersion": "10.4.0",
         "espreeResolutionMode": "repository-node-modules",
-        "espreeModulePath": "/private/tmp/bbet-v325-e13g.20260831.TQR8RK/worktree/node_modules/espree/dist/espree.cjs",
+        "espreeModulePath": "node_modules/espree/dist/espree.cjs",
         "errors": []
       }
     },
@@ -263,7 +263,7 @@
           "loadedRequests": [
             "./main-process/background-execution/action-task-binding-registry"
           ],
-          "resolvedTargetPath": "/private/tmp/bbet-v325-final-restack.xk9jxc/src/main-process/background-execution/action-task-binding-registry.js",
+          "resolvedTargetPath": "/private/tmp/bbet-v325-final-v324-propagate.zt4nf1/pr-r325/src/main-process/background-execution/action-task-binding-registry.js",
           "freshModuleLoaded": true,
           "exportIdentityMatched": true,
           "passed": true
@@ -9186,15 +9186,15 @@
             "mergeBase": "9b9887c152dd7ff1a784a5a5ba31d6d485dffd04",
             "gitWorkspaceIdentity": {
               "expected": {
-                "topLevel": "/private/tmp/bbet-v325-final-restack.xk9jxc",
-                "gitDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git/worktrees/bbet-v325-final-restack.xk9jxc",
+                "topLevel": "/private/tmp/bbet-v325-final-v324-propagate.zt4nf1/pr-r325",
+                "gitDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git/worktrees/pr-r325",
                 "commonDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git",
-                "headOid": "33a0bb454cbfd80b1b6c864d55d2958409411458"
+                "headOid": "5a838cbab470df8c610f2bb001996c0cdbccafa1"
               },
-              "topLevel": "/private/tmp/bbet-v325-final-restack.xk9jxc",
-              "gitDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git/worktrees/bbet-v325-final-restack.xk9jxc",
+              "topLevel": "/private/tmp/bbet-v325-final-v324-propagate.zt4nf1/pr-r325",
+              "gitDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git/worktrees/pr-r325",
               "commonDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git",
-              "headOid": "33a0bb454cbfd80b1b6c864d55d2958409411458",
+              "headOid": "5a838cbab470df8c610f2bb001996c0cdbccafa1",
               "identityMatched": true,
               "environmentPolicy": {
                 "ambientGitVariables": "remove-all-GIT_*",
@@ -9256,15 +9256,15 @@
           "mergeBase": "9b9887c152dd7ff1a784a5a5ba31d6d485dffd04",
           "gitWorkspaceIdentity": {
             "expected": {
-              "topLevel": "/private/tmp/bbet-v325-final-restack.xk9jxc",
-              "gitDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git/worktrees/bbet-v325-final-restack.xk9jxc",
+              "topLevel": "/private/tmp/bbet-v325-final-v324-propagate.zt4nf1/pr-r325",
+              "gitDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git/worktrees/pr-r325",
               "commonDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git",
-              "headOid": "33a0bb454cbfd80b1b6c864d55d2958409411458"
+              "headOid": "5a838cbab470df8c610f2bb001996c0cdbccafa1"
             },
-            "topLevel": "/private/tmp/bbet-v325-final-restack.xk9jxc",
-            "gitDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git/worktrees/bbet-v325-final-restack.xk9jxc",
+            "topLevel": "/private/tmp/bbet-v325-final-v324-propagate.zt4nf1/pr-r325",
+            "gitDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git/worktrees/pr-r325",
             "commonDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git",
-            "headOid": "33a0bb454cbfd80b1b6c864d55d2958409411458",
+            "headOid": "5a838cbab470df8c610f2bb001996c0cdbccafa1",
             "identityMatched": true,
             "environmentPolicy": {
               "ambientGitVariables": "remove-all-GIT_*",
@@ -9829,10 +9829,10 @@
     "changes/3.2.1/techdoc.md": "613b40fd1b4a202af07d0629fcc400e5ac47c0bd141b16062d55ec0dd1139147",
     "changes/3.2.2/spec.md": "0cdf28e5310733355fb51d92818dde8fd837ee06b521a4694c0c9cc43300d47f",
     "changes/3.2.2/techdoc.md": "9fd15a46b482e6801616554978dff67a02676b437b9759e18d15fce29dcff209",
-    "changes/3.2.3/e10-b-blindspot-checklist.md": "3a9eda730d290b84267b0d8a4713c55f33f0cd671448b75073268abb88fbbcc7",
-    "changes/3.2.3/e10-b-implementation-notes.md": "5ce01f65eb09ac8e983796603c990940bb1fe3fcd724ab0386f107eef40b9f17",
-    "changes/3.2.3/e10-b-preflight.md": "eb049151a699610ec3a2df6283d4e27a27a3ca5d6546f9d0756a248b765a01ad",
-    "changes/3.2.3/implementation-notes.md": "ab91bb12668222552a3d5fbb709ff1a4d91d4c781b2119a0b4e8d70e5075e4d3",
+    "changes/3.2.3/e10-b-blindspot-checklist.md": "6b699167d4c2301d3eb14a037fdb2287e73a9c979143204a91ed964bd4f0ba12",
+    "changes/3.2.3/e10-b-implementation-notes.md": "a8ccaedc8299cbcb297b3bb66d077fe9272c6b5c75ccec3b6570923841c0806f",
+    "changes/3.2.3/e10-b-preflight.md": "5af0f20b4e2cdaab035eba64ac6c9ba8d9c740ac636fcbcad91441982db6f858",
+    "changes/3.2.3/implementation-notes.md": "79465538cff65483e7c2c2574deff1e69f7bcb0213013f12411d25289aa8b100",
     "changes/3.2.3/spec.md": "533684fe718d333456088c2511a17135ec4f479e592e94ba1dc15e7ff6a68851",
     "changes/3.2.3/techdoc.md": "b10687d5e26f85b477eeece913c46078404a4eea175702454be9bd8b5dcda4d4",
     "changes/3.2.4/spec.md": "dad81f149405281043306f7ce735f672fa20a167b4d8de751d5b254318fac2c7",
