@@ -9,6 +9,7 @@ const VCC_EXPORT_SUBJECTS_RESULT_VALIDATOR_KEY =
 const VCC_EXPORT_SINGLE_RESULT_VALIDATOR_KEY =
   'result-validator.vcc-financial-op:export-single';
 const VCC_EXPORT_SUBJECTS_MAX_ARTIFACTS = 64;
+const VCC_EXPORT_SUBJECTS_MAX_WRITERS = 2;
 
 const ZERO_RESOURCES = Object.freeze({
   cpuSlots: 0,
@@ -40,10 +41,10 @@ const VCC_EXPORT_SUBJECTS_POLICY = Object.freeze({
   resources: Object.freeze({
     profile: 'resource.vcc-financial-op:export-subjects',
     base: Object.freeze({ ...ZERO_RESOURCES, workerThreadSlots: 1, memoryBytes: 33554432 }),
-    phase: WRITER_RESOURCES,
+    phase: ZERO_RESOURCES,
     compound: Object.freeze({
       topologyKey: 'topology.vcc-financial-op:export-subjects',
-      childrenMax: 4,
+      childrenMax: VCC_EXPORT_SUBJECTS_MAX_WRITERS,
       childResource: WRITER_RESOURCES
     }),
     lowMemoryBehavior: 'downgrade-to-single',
@@ -105,7 +106,7 @@ const VCC_EXPORT_SUBJECTS_POLICY = Object.freeze({
   workUnits: Object.freeze({
     kind: 'subject',
     ordering: 'unit-index-reducer',
-    requestedMaxWorkers: 4,
+    requestedMaxWorkers: VCC_EXPORT_SUBJECTS_MAX_WRITERS,
     minUnitsPerWorker: 2,
     plannerKey: 'planner.vcc-financial-op:export-subjects',
     reducerKey: 'reducer.vcc-financial-op:export-subjects'
@@ -282,6 +283,7 @@ module.exports = {
   VCC_EXPORT_SUBJECTS_ACTION,
   VCC_EXPORT_SUBJECTS_ENTRY_KEY,
   VCC_EXPORT_SUBJECTS_MAX_ARTIFACTS,
+  VCC_EXPORT_SUBJECTS_MAX_WRITERS,
   VCC_EXPORT_SUBJECTS_POLICY,
   VCC_EXPORT_SUBJECTS_RESULT_VALIDATOR_KEY,
   validateVccExportSingleResult,

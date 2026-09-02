@@ -11,7 +11,10 @@ const {
 } = require('../../../../src/main-process/background-execution/adapters/existing-dispatch-adapter');
 const { createInlineAsyncAdapter } = require('../../../../src/main-process/background-execution/adapters/inline-async-adapter');
 const { createUtilityProcessAdapter } = require('../../../../src/main-process/background-execution/adapters/utility-process-adapter');
-const { createWorkerThreadAdapter } = require('../../../../src/main-process/background-execution/adapters/worker-thread-adapter');
+const {
+  ADMITTED_TOPOLOGY_WORKER_DATA_KEY,
+  createWorkerThreadAdapter
+} = require('../../../../src/main-process/background-execution/adapters/worker-thread-adapter');
 const { createJobEnvelope } = require('../../../../src/main-process/background-execution/protocol');
 
 function startEnvelope(operation = 'job:start', seq = 1, payload = { input: { value: 4 } }) {
@@ -474,6 +477,68 @@ test('worker-thread adapter 使用 packaged entry path 并原样传 canonical en
     '强制terminate必须保持其内部引用直到真实settle，不能让清理Promise悬空');
   assert.equal(handle.worker.listenerCount('error'), 0);
   assert.equal(handle.worker.listenerCount('messageerror'), 0);
+});
+
+test('worker-thread adapter 只把 Supervisor admitted topology 合并到 entry-owned workerData', async () => {
+  class FakeWorker extends EventEmitter {
+    constructor(filename, options) {
+      super();
+      this.filename = filename;
+      this.options = options;
+      queueMicrotask(() => this.emit('online'));
+    }
+    postMessage() {}
+    terminate() { return Promise.resolve(0); }
+  }
+  const handle = createWorkerThreadAdapter({ WorkerClass: FakeWorker }).start({
+    entry: {
+      path: '/packaged/parent-worker.js',
+      workerData: { entryOwned: true },
+      admittedTopologyWorkerData: true
+    },
+    topology: {
+      topologyKey: 'topology.example',
+      childrenMax: 4,
+      childResource: {},
+      effectiveChildCount: 2,
+      downgraded: true,
+      downgradeReason: 'memory'
+    },
+    onMessage() {}
+  });
+  await handle.ready;
+  assert.deepEqual(handle.worker.options.workerData, {
+    entryOwned: true,
+    [ADMITTED_TOPOLOGY_WORKER_DATA_KEY]: {
+      topologyKey: 'topology.example',
+      effectiveChildCount: 2
+    }
+  });
+  assert.throws(() => createWorkerThreadAdapter({ WorkerClass: FakeWorker }).start({
+    entry: {
+      path: '/packaged/conflict.js',
+      admittedTopologyWorkerData: true,
+      workerData: { [ADMITTED_TOPOLOGY_WORKER_DATA_KEY]: { caller: true } }
+    },
+    topology: { topologyKey: 'topology.example', effectiveChildCount: 2 },
+    onMessage() {}
+  }), /reserved admitted topology key/);
+  assert.throws(() => createWorkerThreadAdapter({ WorkerClass: FakeWorker }).start({
+    entry: {
+      path: '/packaged/non-opted-conflict.js',
+      workerData: { [ADMITTED_TOPOLOGY_WORKER_DATA_KEY]: { caller: true } }
+    },
+    onMessage() {}
+  }), /reserved admitted topology key/);
+  const unopted = createWorkerThreadAdapter({ WorkerClass: FakeWorker }).start({
+    entry: { path: '/packaged/unopted.js', workerData: { entryOwned: true } },
+    topology: { topologyKey: 'topology.example', effectiveChildCount: 2 },
+    onMessage() {}
+  });
+  await unopted.ready;
+  assert.deepEqual(unopted.worker.options.workerData, { entryOwned: true });
+  await unopted.terminate();
+  await handle.terminate();
 });
 
 test('worker-thread naturalExitGraceMs只接受0..5000整数', () => {
