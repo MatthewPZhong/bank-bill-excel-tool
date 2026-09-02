@@ -543,6 +543,16 @@ const {
   prepareManualBalanceSeedSubmission,
   writeManualBalanceSeedPlan
 } = require('./main-process/manual-balance-seed-preflight');
+const {
+  MANUAL_BALANCE_ACTION_KEY,
+  MANUAL_BALANCE_INSPECTOR_KEY,
+  MANUAL_BALANCE_SETTLEMENT_KEY,
+  createManualBalanceRecoveryPlanTransitions,
+  createManualBalanceSeedInspector,
+  createManualBalanceSettlementRecoveryProvider,
+  manualBalanceRecoveryPolicy,
+  resolveManualBalanceTargetAlias
+} = require('./main-process/manual-balance-seed-settlement');
 const { parseBankAccountExcel } = require('./backend/bank-account-import');
 const { writeOwnAccounts } = require('./backend/own-account-store');
 const {
@@ -20873,6 +20883,17 @@ async function initializeBackgroundExecutionRecovery() {
   for (const actionKey of Object.keys(PRE_FUND_MPT_STATIC_KEYS)) {
     inspectorRegistry.register(PRE_FUND_MPT_STATIC_KEYS[actionKey].inspector, inspectPreFundMpt);
   }
+  inspectorRegistry.register(MANUAL_BALANCE_INSPECTOR_KEY, createManualBalanceSeedInspector({
+    resolveTargetPath: (targetAliasKey) => resolveManualBalanceTargetAlias(
+      getStorageRoot(),
+      targetAliasKey
+    ),
+    readRepository: recoveryControlReadRepository
+  }));
+  providerRegistry.register(
+    MANUAL_BALANCE_SETTLEMENT_KEY,
+    createManualBalanceSettlementRecoveryProvider()
+  );
   const duplicateRecoveryOptions = {
     userDataDir: path.dirname(database.dbPath),
     listRunMirrors: () => database.listDuplicateInboundMatchRunMirrors(),
@@ -20905,6 +20926,9 @@ async function initializeBackgroundExecutionRecovery() {
   const requestOwnerRepository = createRecoveryRequestOwnerRepository(database.db);
   const observationAttemptRepository = createRecoveryObservationAttemptRepository(database.db);
   const recoveryControlRepository = createRecoveryControlRepository(database.db);
+  const manualBalancePlanTransitions = createManualBalanceRecoveryPlanTransitions(
+    recoveryControlReadRepository
+  );
   const coordinator = createStartupRecoveryCoordinator({
     readRepository: recoveryControlReadRepository,
     inspectorRegistry,
@@ -20912,9 +20936,13 @@ async function initializeBackgroundExecutionRecovery() {
     requestOwnerRepository,
     observationAttemptRepository,
     recoveryControlRepository,
-    resolvePolicy: (actionKey) => PRE_FUND_MPT_POLICIES
-      .find((policy) => policy.actionKey === actionKey) || null,
-    planTransitions: preFundMptRecoveryPlanTransitions
+    resolvePolicy: (actionKey) => actionKey === MANUAL_BALANCE_ACTION_KEY
+      ? manualBalanceRecoveryPolicy()
+      : PRE_FUND_MPT_POLICIES.find((policy) => policy.actionKey === actionKey) || null,
+    planTransitions: (context) => context && context.source &&
+      context.source.actionKey === MANUAL_BALANCE_ACTION_KEY
+      ? manualBalancePlanTransitions(context)
+      : preFundMptRecoveryPlanTransitions(context)
   });
   const summary = await coordinator.scanAndRecover();
   for (const hold of recoveryControlReadRepository.listActiveRecoveryHolds()) {

@@ -908,35 +908,46 @@ test.describe('toolbox output publication', () => {
     );
   });
 
-  test('Unicode NFC 与 NFD 等价目标在 prepare 触碰任何目标前被拒绝', () => {
+  test('Unicode NFC 与 NFD 目标按当前平台身份规则 prepare 与发布', () => {
     const ctx = makeContext();
     const sourceA = writeFile(path.join(ctx.generationDir, 'source-a.xlsx'), 'new-a');
     const sourceB = writeFile(path.join(ctx.generationDir, 'source-b.xlsx'), 'new-b');
     const targetNfc = writeFile(path.join(ctx.outputDir, '\u00e9.xlsx'), 'old-target');
     const targetNfd = path.join(ctx.outputDir, 'e\u0301.xlsx');
 
-    assert.throws(
-      () => prepareToolboxPublication({
-        taskId: 'unicode-target-alias',
-        artifacts: [sourceA, sourceB],
-        targets: [targetNfc, targetNfd],
-        userDataDir: ctx.userDataDir
-      }),
-      (error) => {
-        assert.equal(error.code, 'TOOLBOX_PUBLICATION_DUPLICATE_TARGET');
-        return true;
-      }
-    );
+    const prepare = () => prepareToolboxPublication({
+      taskId: 'unicode-target-alias',
+      artifacts: [sourceA, sourceB],
+      targets: [targetNfc, targetNfd],
+      userDataDir: ctx.userDataDir
+    });
 
-    assert.equal(fs.readFileSync(targetNfc, 'utf8'), 'old-target');
-    assert.equal(fs.readFileSync(sourceA, 'utf8'), 'new-a');
-    assert.equal(fs.readFileSync(sourceB, 'utf8'), 'new-b');
-    assert.deepEqual(taskFiles(ctx), []);
-    assert.equal(
-      fs.existsSync(path.join(ctx.userDataDir, JOURNAL_INDEX_NAME)),
-      false,
-      '重复目标必须在 journal/index 创建前失败'
-    );
+    if (process.platform === 'win32') {
+      const prepared = prepare();
+      assert.equal(indexValue(ctx).entries.length, 1);
+      publishPreparedToolboxPublication(prepared);
+      assert.equal(fs.readFileSync(targetNfc, 'utf8'), 'new-a');
+      assert.equal(fs.readFileSync(targetNfd, 'utf8'), 'new-b');
+      assert.deepEqual(taskFiles(ctx), []);
+      assert.deepEqual(indexValue(ctx).entries, []);
+    } else {
+      assert.throws(
+        prepare,
+        (error) => {
+          assert.equal(error.code, 'TOOLBOX_PUBLICATION_DUPLICATE_TARGET');
+          return true;
+        }
+      );
+      assert.equal(fs.readFileSync(targetNfc, 'utf8'), 'old-target');
+      assert.equal(fs.readFileSync(sourceA, 'utf8'), 'new-a');
+      assert.equal(fs.readFileSync(sourceB, 'utf8'), 'new-b');
+      assert.deepEqual(taskFiles(ctx), []);
+      assert.equal(
+        fs.existsSync(path.join(ctx.userDataDir, JOURNAL_INDEX_NAME)),
+        false,
+        '重复目标必须在 journal/index 创建前失败'
+      );
+    }
   });
 
   test('macOS 完整 case-fold 等价目标在 prepare 前被拒绝', {
@@ -2102,7 +2113,7 @@ test.describe('toolbox output publication', () => {
     assert.equal(fs.readFileSync(target, 'utf8'), 'a');
   });
 
-  test('进程内 reservation 会阻止 NFC/NFD 目标别名被另一任务占用', () => {
+  test('进程内 reservation 按当前平台区分 NFC/NFD 目标', () => {
     const ctx = makeContext();
     const sourceA = writeFile(path.join(ctx.generationDir, 'unicode-a.xlsx'), 'a');
     const sourceB = writeFile(path.join(ctx.generationDir, 'unicode-b.xlsx'), 'b');
@@ -2115,21 +2126,35 @@ test.describe('toolbox output publication', () => {
       userDataDir: ctx.userDataDir
     });
 
-    assert.throws(
-      () => prepareToolboxPublication({
-        taskId: 'unicode-reservation-b',
-        artifacts: [sourceB],
-        targets: [targetNfd],
-        userDataDir: ctx.userDataDir
-      }),
-      (error) => {
-        assert.equal(error.code, 'TOOLBOX_PUBLICATION_TARGET_RESERVED');
-        return true;
-      }
-    );
+    const prepareSecond = () => prepareToolboxPublication({
+      taskId: 'unicode-reservation-b',
+      artifacts: [sourceB],
+      targets: [targetNfd],
+      userDataDir: ctx.userDataDir
+    });
 
-    publishPreparedToolboxPublication(prepared);
-    assert.equal(fs.readFileSync(targetNfc, 'utf8'), 'a');
+    if (process.platform === 'win32') {
+      const preparedSecond = prepareSecond();
+      assert.equal(indexValue(ctx).entries.length, 2);
+      publishPreparedToolboxPublication(prepared);
+      publishPreparedToolboxPublication(preparedSecond);
+      assert.equal(fs.readFileSync(targetNfc, 'utf8'), 'a');
+      assert.equal(fs.readFileSync(targetNfd, 'utf8'), 'b');
+      assert.deepEqual(taskFiles(ctx), []);
+      assert.deepEqual(indexValue(ctx).entries, []);
+    } else {
+      assert.throws(
+        prepareSecond,
+        (error) => {
+          assert.equal(error.code, 'TOOLBOX_PUBLICATION_TARGET_RESERVED');
+          return true;
+        }
+      );
+      publishPreparedToolboxPublication(prepared);
+      assert.equal(fs.readFileSync(targetNfc, 'utf8'), 'a');
+      assert.deepEqual(taskFiles(ctx), []);
+      assert.deepEqual(indexValue(ctx).entries, []);
+    }
   });
 
   test('下一次 prepare 自动恢复上次崩溃任务，再准备新目标', () => {

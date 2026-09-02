@@ -8,17 +8,26 @@ const path = require('node:path');
 
 const {
   normalizeTargetAliasKey,
-  pathsAlias
+  pathsAlias,
+  targetPathAliasKey
 } = require('../../../src/main-process/toolbox-target-identity');
 
 test.describe('toolbox target identity', () => {
-  test('所有平台统一 NFC，阻止预组合与组合字符目标别名', () => {
-    for (const platform of ['darwin', 'win32', 'linux']) {
+  test('Darwin/Linux沿用NFC；Windows lexical fallback保留NFC/NFD不同legacy名称', () => {
+    for (const platform of ['darwin', 'linux']) {
       assert.equal(
         normalizeTargetAliasKey('\u00e9.xlsx', { platform }),
         normalizeTargetAliasKey('e\u0301.xlsx', { platform })
       );
     }
+    assert.notEqual(
+      normalizeTargetAliasKey('\u00e9.xlsx', { platform: 'win32' }),
+      normalizeTargetAliasKey('e\u0301.xlsx', { platform: 'win32' })
+    );
+    assert.equal(
+      normalizeTargetAliasKey('\u00c9.xlsx', { platform: 'win32' }),
+      normalizeTargetAliasKey('\u00e9.xlsx', { platform: 'win32' })
+    );
   });
 
   test('macOS/Windows 折叠大小写，Linux 保留大小写差异', () => {
@@ -36,8 +45,8 @@ test.describe('toolbox target identity', () => {
     );
   });
 
-  test('macOS/Windows 完整折叠 ß/SS、sigma/final-sigma 与 ligature', () => {
-    for (const platform of ['darwin', 'win32']) {
+  test('macOS按实机inode证据完整折叠；Windows missing path只接受单code-point uppercase', (t) => {
+    for (const platform of ['darwin']) {
       assert.equal(
         normalizeTargetAliasKey('straße.xlsx', { platform }),
         normalizeTargetAliasKey('STRASSE.xlsx', { platform })
@@ -51,6 +60,73 @@ test.describe('toolbox target identity', () => {
         normalizeTargetAliasKey('OFFICE.xlsx', { platform })
       );
     }
+    assert.equal(
+      normalizeTargetAliasKey('οσ.xlsx', { platform: 'win32' }),
+      normalizeTargetAliasKey('ος.xlsx', { platform: 'win32' })
+    );
+    for (const [left, right] of [
+      ['straße.xlsx', 'STRASSE.xlsx'],
+      ['oﬃce.xlsx', 'OFFICE.xlsx']
+    ]) {
+      assert.notEqual(
+        normalizeTargetAliasKey(left, { platform: 'win32' }),
+        normalizeTargetAliasKey(right, { platform: 'win32' }),
+        '未证明missing path时保留expansion字符，不能误并'
+      );
+    }
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-win-path-identity-'));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const options = { platform: 'win32' };
+    assert.equal(
+      targetPathAliasKey(fs, path.join(root, 'É.json'), options),
+      targetPathAliasKey(fs, path.join(root, 'é.json'), options),
+      'missing basename 的 É/é 必须共享 scope identity'
+    );
+    assert.notEqual(
+      targetPathAliasKey(fs, path.join(root, 'é.json'), options),
+      targetPathAliasKey(fs, path.join(root, 'e\u0301.json'), options)
+    );
+    assert.throws(
+      () => targetPathAliasKey(fs, path.join(root, 'straße.json'), options),
+      {
+        name: 'TargetIdentityError',
+        code: 'TARGET_IDENTITY_WINDOWS_CASE_MAPPING_UNSAFE',
+        message: 'Windows 缺失目标包含无法可靠表达的大小写映射',
+        details: { platform: 'win32', reason: 'expanding-case-mapping' }
+      }
+    );
+    assert.doesNotThrow(
+      () => targetPathAliasKey(fs, path.join(root, 'STRASSE.json'), options)
+    );
+    const missingParentOptions = {
+      ...options,
+      allowMissingParentLexicalFallback: true
+    };
+    assert.equal(
+      targetPathAliasKey(fs, path.join(root, 'É', 'seed.json'), missingParentOptions),
+      targetPathAliasKey(fs, path.join(root, 'é', 'seed.json'), missingParentOptions),
+      'missing parent segment 的 É/é 必须共享 scope identity'
+    );
+    assert.throws(
+      () => targetPathAliasKey(
+        fs,
+        path.join(root, 'straße', 'seed.json'),
+        missingParentOptions
+      ),
+      {
+        name: 'TargetIdentityError',
+        code: 'TARGET_IDENTITY_WINDOWS_CASE_MAPPING_UNSAFE',
+        details: { platform: 'win32', reason: 'expanding-case-mapping' }
+      }
+    );
+
+    const canonicalExisting = 'C:\\canonical\\straße.json';
+    const existingFs = { realpathSync: () => canonicalExisting };
+    assert.equal(
+      targetPathAliasKey(existingFs, 'C:\\alias\\straße.json', options),
+      targetPathAliasKey(existingFs, 'C:\\alias\\STRASSE.json', options),
+      'existing target必须以同一realpath作为物理authority'
+    );
   });
 
   test('真实 symlink 与 hardlink 均识别为源文件别名', (t) => {
