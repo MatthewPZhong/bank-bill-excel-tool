@@ -51,14 +51,19 @@ test.describe('toolbox multi split validation', () => {
     }
   });
 
-  test('Unicode NFC 与 NFD 等价文件名在生成前被判为重复', () => {
-    assert.throws(
-      () => normalizeMultiSplitGroups([
-        { fileName: '\u00e9', field: 'Channel', values: ['A'] },
-        { fileName: 'e\u0301.xlsx', field: 'Channel', values: ['B'] }
-      ]),
-      /文件名重复/
-    );
+  test('Unicode NFC 与 NFD 文件名按当前平台身份规则处理', () => {
+    const groups = [
+      { fileName: '\u00e9', field: 'Channel', values: ['A'] },
+      { fileName: 'e\u0301.xlsx', field: 'Channel', values: ['B'] }
+    ];
+    if (process.platform === 'win32') {
+      assert.deepEqual(
+        normalizeMultiSplitGroups(groups).map((group) => group.fileName),
+        ['\u00e9.xlsx', 'e\u0301.xlsx']
+      );
+    } else {
+      assert.throws(() => normalizeMultiSplitGroups(groups), /文件名重复/);
+    }
   });
 
   test('过滤器允许不同字段和重叠命中', () => {
@@ -151,7 +156,7 @@ test.describe('toolbox multi split atomic publish', () => {
     assert.equal(fs.lstatSync(targetPath).isDirectory(), true);
   });
 
-  test('Unicode NFC 与 NFD 等价目标在移动任何文件前拒绝发布', () => {
+  test('Unicode NFC 与 NFD 目标按当前平台身份规则发布', () => {
     const temp1 = path.join(root, '.tmp-unicode-1');
     const temp2 = path.join(root, '.tmp-unicode-2');
     const targetNfc = path.join(root, '\u00e9.xlsx');
@@ -160,16 +165,27 @@ test.describe('toolbox multi split atomic publish', () => {
     fs.writeFileSync(temp2, 'new-b');
     fs.writeFileSync(targetNfc, 'old-target');
 
-    assert.throws(
-      () => publishPreparedSplitFiles([
-        { temporaryPath: temp1, targetPath: targetNfc, fileName: '\u00e9.xlsx' },
-        { temporaryPath: temp2, targetPath: targetNfd, fileName: 'e\u0301.xlsx' }
-      ]),
-      /目标路径重复/
-    );
-    assert.equal(fs.readFileSync(targetNfc, 'utf8'), 'old-target');
-    assert.equal(fs.readFileSync(temp1, 'utf8'), 'new-a');
-    assert.equal(fs.readFileSync(temp2, 'utf8'), 'new-b');
+    const plans = [
+      { temporaryPath: temp1, targetPath: targetNfc, fileName: '\u00e9.xlsx' },
+      { temporaryPath: temp2, targetPath: targetNfd, fileName: 'e\u0301.xlsx' }
+    ];
+    if (process.platform === 'win32') {
+      const files = publishPreparedSplitFiles(plans);
+      assert.deepEqual(files.map((file) => file.fileName), ['\u00e9.xlsx', 'e\u0301.xlsx']);
+      assert.equal(fs.readFileSync(targetNfc, 'utf8'), 'new-a');
+      assert.equal(fs.readFileSync(targetNfd, 'utf8'), 'new-b');
+      assert.equal(fs.existsSync(temp1), false);
+      assert.equal(fs.existsSync(temp2), false);
+      assert.deepEqual(
+        fs.readdirSync(root).filter((name) => name.includes('.existing-')),
+        []
+      );
+    } else {
+      assert.throws(() => publishPreparedSplitFiles(plans), /目标路径重复/);
+      assert.equal(fs.readFileSync(targetNfc, 'utf8'), 'old-target');
+      assert.equal(fs.readFileSync(temp1, 'utf8'), 'new-a');
+      assert.equal(fs.readFileSync(temp2, 'utf8'), 'new-b');
+    }
   });
 
   test('原文件恢复失败时保留备份并显式要求上层保留临时目录', () => {
