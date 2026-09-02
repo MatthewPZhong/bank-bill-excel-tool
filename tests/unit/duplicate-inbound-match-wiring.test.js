@@ -203,7 +203,8 @@ test.describe('重复入金匹配 UI / preload / IPC 接线', () => {
   });
 
   test('startup在freeze前同时注册manual与duplicate恢复链，再允许getter构造Service', () => {
-    const recovery = extractFunction(main, 'initializeBackgroundExecutionRecovery');
+    const recovery = extractFunction(main, 'initializeBackgroundExecutionRecovery')
+      .replace(/\r\n?/g, '\n');
     const registerManualInspectorAt = recovery.indexOf(
       'inspectorRegistry.register(MANUAL_BALANCE_INSPECTOR_KEY'
     );
