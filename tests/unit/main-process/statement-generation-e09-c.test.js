@@ -438,7 +438,20 @@ function outputRows(filePath) {
 }
 
 test('真实 Supervisor/ServiceHost/Worker 以token+revision+evidence生成current/all并写SQLite审计回读', async (t) => {
-  const root = tempRoot(t);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-e09-c-'));
+  let supervisor = null;
+  let database = null;
+  t.after(async () => {
+    try {
+      if (database) database.close();
+    } finally {
+      try {
+        if (supervisor) await supervisor.shutdown({ timeoutMs: 5000 });
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    }
+  });
   const staging = path.join(root, 'staging');
   const storage = path.join(root, 'storage');
   fs.mkdirSync(staging);
@@ -447,13 +460,12 @@ test('真实 Supervisor/ServiceHost/Worker 以token+revision+evidence生成curre
   const second = path.join(root, 'second.xlsx');
   writeStatement(first, [['2026-08-01', 10, '', 'USD', 'M001']]);
   writeStatement(second, [['2026-08-02', '', 3, 'EUR', 'M002']]);
-  const supervisor = harness({
+  supervisor = harness({
     statementSourceRoot: root,
     statementStagingRoot: staging,
     statementStorageRoot: storage,
     statementBalanceTemplatePath: path.join(ROOT, 'assets', '余额账单模版.xlsx')
   });
-  t.after(async () => supervisor.shutdown({ forceServices: true, timeoutMs: 5000 }));
   const evidence = templateEvidence();
   for (const [index, filePath] of [first, second].entries()) {
     const imported = await supervisor.execute(request(
@@ -544,8 +556,7 @@ test('真实 Supervisor/ServiceHost/Worker 以token+revision+evidence生成curre
   assert.equal(changed.error.code, 'STATEMENT_GENERATION_INPUT_STALE');
   assert.equal(fs.existsSync(path.join(staging, 'changed/detail.xlsx')), false);
 
-  const database = new DatabaseSync(path.join(root, 'audit.sqlite'));
-  t.after(() => database.close());
+  database = new DatabaseSync(path.join(root, 'audit.sqlite'));
   database.exec('CREATE TABLE artifacts(scope TEXT PRIMARY KEY, size INTEGER, sha256 TEXT, row_count INTEGER)');
   const insert = database.prepare('INSERT INTO artifacts VALUES (?, ?, ?, ?)');
   insert.run('current', current.size, current.sha256, current.rowCounts.output);
@@ -1417,13 +1428,18 @@ test('Worker写前与Main技术校验拒绝dot/case/Unicode/hardlink artifact al
     ]),
     (error) => error.code === 'STATEMENT_GENERATION_STAGING_PATH_INVALID'
   );
-  assert.throws(
-    () => resolveArtifactPlans(staging, [
-      { kind: 'detail', artifactKey: 'detail', stagingResourceId: 'caf\u00e9.xlsx' },
-      { kind: 'balance', artifactKey: 'balance', stagingResourceId: 'cafe\u0301.xlsx' }
-    ]),
-    (error) => error.code === 'STATEMENT_GENERATION_STAGING_PATH_INVALID'
-  );
+  const resolveUnicodeAliases = () => resolveArtifactPlans(staging, [
+    { kind: 'detail', artifactKey: 'detail', stagingResourceId: 'caf\u00e9.xlsx' },
+    { kind: 'balance', artifactKey: 'balance', stagingResourceId: 'cafe\u0301.xlsx' }
+  ]);
+  if (process.platform === 'win32') {
+    assert.doesNotThrow(resolveUnicodeAliases);
+  } else {
+    assert.throws(
+      resolveUnicodeAliases,
+      (error) => error.code === 'STATEMENT_GENERATION_STAGING_PATH_INVALID'
+    );
+  }
   if (process.platform === 'darwin' || process.platform === 'win32') {
     assert.throws(
       () => resolveArtifactPlans(staging, [
@@ -2376,16 +2392,21 @@ test('generation request/manifest严格限制artifact顺序、相对resource与b
     }),
     (error) => error.code === 'STATEMENT_GENERATION_STAGING_RESOURCE_INVALID'
   );
-  assert.throws(
-    () => createStatementGenerationExecuteRequest({
+  const createUnicodeAliasRequest = () => createStatementGenerationExecuteRequest({
       command: 'generate', token, sessionKey: 'session', sessionRevision: 1, kind: 'both',
       artifacts: [
         { kind: 'detail', artifactKey: 'detail-unicode', stagingResourceId: 'caf\u00e9.xlsx' },
         { kind: 'balance', artifactKey: 'balance-unicode', stagingResourceId: 'cafe\u0301.xlsx' }
       ]
-    }),
-    (error) => error.code === 'STATEMENT_GENERATION_STAGING_RESOURCE_ALIAS'
-  );
+    });
+  if (process.platform === 'win32') {
+    assert.doesNotThrow(createUnicodeAliasRequest);
+  } else {
+    assert.throws(
+      createUnicodeAliasRequest,
+      (error) => error.code === 'STATEMENT_GENERATION_STAGING_RESOURCE_ALIAS'
+    );
+  }
   const warningTypes = Object.fromEntries(Array.from({ length: 17 }, (_, index) => [`warning-${index}`, 1]));
   assert.equal(validateStatementGenerationResult({
     status: 'generated',

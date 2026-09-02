@@ -29,7 +29,7 @@
 | 冻结 Spec 要求日期/账户/币种/记录业务回读与legacy golden | frozen spec/techdoc §9/§10；资金红线明确列出NewAccount日期、账户、币种和输出记录 | 对重复/错位/非法坐标更严格拒绝是保护既有血缘，不是新增业务规则；正常writer golden与四digest必须不变 |
 | 冻结writer主动设置worksheet `!ref`且header-only有唯一结构例外 | `writeBalanceWorkbook`固定`A1:{lastColumn}{max(records+1,2)}`；真实XML probe：0 records为`A1:I2`但cells仅`A1:I1`，1 record的18个cell完整覆盖`A1:I2` | strict used-range不能机械要求cell bounds恒等dimension；仅允许空sheet `A1`、正常exact union及冻结header-only尾随空第2行 |
 | SheetJS会宽松修复或忽略异常dimension | JSZip真实probe：missing/duplicate/reversed/absolute均回算/规范化为`A1:I2`；expanded `A1:J2`仍通过旧业务回读；truncated `A1:I1`因row缺失拒绝，shifted因header拒绝 | dimension完整性必须按Reviewer合同比旧oracle更严格fail closed，不能把SheetJS宽松行为当正常writer兼容性；正常writer/golden仍须等价 |
-| `t=d` 的原始空白会改变SheetJS raw日期语义 | 真实1-row JSZip probe：canonical `2026-03-01`与Zulu值旧/新均通过；leading/trailing/tab/newline空白被旧SheetJS解析为本地日历serial并触发业务mismatch，但strict因`trim()`误接受；empty/whitespace-only两路均拒绝 | E10不得trim异常日期词法；canonical ISO保持旧raw等价，任何首尾空白fail closed |
+| `t=d` 的原始空白不能经过预规范化 | 真实1-row JSZip probe：canonical `2026-03-01`与Zulu值legacy/strict均通过；带空白值的legacy结果依宿主时区，上海产生不同serial并mismatch，Windows UTC可接受为期望serial；trim后的strict曾错误接受。empty/whitespace-only两路稳定拒绝 | E10不得trim异常日期词法；canonical ISO/Zulu保持legacy等价，strict对任何首尾/tab/newline/empty空白无条件fail closed，不能依赖legacy跨宿主拒绝 |
 | cell/dimension/merge的前导零词法不能只靠数值坐标校验 | 真实probe：`D02`在旧SheetJS保留物理key且canonical `D2`缺失，旧业务mismatch而strict误接受；`A01:I02`与merge `A01:A02`被旧库规范化；outer row `r=02`配canonical cells时旧/新均通过 | cell/dimension/merge必须canonical re-encode回比；outer row保持旧oracle数值语义，不机械收紧 |
 
 ## Unknowns Register
@@ -55,7 +55,7 @@
 | 坐标/结构比旧SheetJS更严格是否改变正常输出合同 | 审计边界 | 高 | 容易 | writer输出row/cell ref完整递增；独立矩阵和正常250k/60,416 golden已证明严格投影不改变合法输出 | PROBE→RESOLVED | duplicate/out-of-order/missing/mismatch/multi-letter/extra column/truncated/XML entity矩阵 + normal golden | 只对OOXML结构异常更严格拒绝；合法稀疏/空行仍按旧`blankrows:false`跳过，正常digest不变 |
 | dimension应由哪些物理结构解释，避免误伤styled blank/merge/header-only | 输出血缘 | 高 | 容易 | writer XML中空业务字段仍可能产生styled blank `<c>`；header-only声明额外空第2行；OOXML merge可扩展used range | PROBE→RESOLVED | 真实JSZip差分：empty/header-only/1row、styled blank、merge、formula cached、trailing empty及multi-letter | used range取全部cell refs与merge ranges的包围盒；无ref只接受`A1`，header-only只接受`A1:{expectedLast}2`对`A1:{expectedLast}1`，其余必须exact |
 | dimension格式/边界是否可借SheetJS宽松解析绕过 | 数据契约 | 高 | 容易 | 旧库接受反转、绝对地址、缺失和重复；冻结writer只输出uppercase相对A1或单冒号range | PROBE→RESOLVED | missing/duplicate/truncated/expanded/shifted/reversed/out-of-range/absolute/multi-area矩阵 | E10专用canonical parser仅接受`A1`或`A1:END`，端点安全且有序；不修改generic scanner |
-| `t=d` 是否可先trim再按canonical ISO解析 | 数据/兼容 | 高 | 容易 | 真实probe证明带空白值的旧raw serial与trim后值不同，业务回读旧拒新收 | PROBE→RESOLVED | canonical/Zulu、leading/trailing/tab/newline、empty/whitespace-only真实1-row差分 | 不trim；直接对raw XML值执行canonical ISO gate，异常空白fail closed |
+| `t=d` 是否可先trim再按canonical ISO解析 | 数据/兼容 | 高 | 容易 | 非UTC probe证明带空白legacy serial可变化；exact Windows UTC又证明legacy可接受同一词法。两种宿主下strict raw gate都能稳定识别异常 | PROBE→RESOLVED | canonical/Zulu与legacy等价；上海/UTC分别覆盖leading/trailing/tab/newline、empty/whitespace-only真实1-row差分 | 不trim；直接对raw XML值执行canonical ISO gate，异常空白由strict无条件fail closed；legacy只作合法值golden |
 | row/cell/range前导零是否应统一拒绝 | 坐标血缘 | 高 | 容易 | `D02`旧库保留非canonical物理key并导致mismatch；dimension/merge旧库宽松规范化；outer `r=02`不改变canonical cell key且旧业务通过 | PROBE→RESOLVED | cell/dimension/merge leading-zero与超长词法红测；outer row定向golden | 仅cell ref及dimension/merge range做encode回比；outer row继续数值化比较，避免误拒旧raw可解释输入 |
 
 ## 风险优先计划

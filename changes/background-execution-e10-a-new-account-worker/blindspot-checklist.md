@@ -67,12 +67,12 @@
 
 ### [Important / 已覆盖] `t=d` 原始空白被trim后改变旧raw日期解释
 
-- 事实：strict decoder当前调用`sheetJsDateSerial(rawValue.trim())`；真实1-row的E2改为`<v> 2026-03-01 </v>`后，旧SheetJS产生不同serial并以records mismatch拒绝，strict trim后接受。leading/trailing/tab/newline均同方向，empty/whitespace-only两路已拒绝。
-- 推断/未知：异常日期词法可被静默修复为期望日期，使日期/记录digest对旧oracle拒绝的workbook自洽。
-- 影响：开户日期血缘与实际落盘raw值不可解释，命中时间/审计红线。
-- 证据：SheetJS `parse_ws_xml_data`的`t=d -> datenum(parseDate(p.v,1))`与真实JSZip差分probe。
-- 最便宜验证：canonical/Zulu正常控制；leading/trailing/both/tab/newline、empty/whitespace-only红绿矩阵。
-- 处置：已覆盖；移除trim，对raw XML值直接执行canonical ISO/date gate。canonical/Zulu与旧业务结果deep-equal；leading/trailing/both/tab/newline、empty/whitespace-only均fail closed；strict 16/16、focused484/484和真实大边界通过，不改变正常writer或streaming编排。
+- 事实：strict decoder曾调用`sheetJsDateSerial(rawValue.trim())`；非UTC真实1-row中带空白`t=d`被legacy解析为不同serial而mismatch，trim后的strict却接受。2026-09-01 exact Windows UTC job `99720940244`进一步证明legacy会接受6种带首尾/tab/newline空白的ISO日期；当前strict对这6种及empty/whitespace-only仍全部返回`NEW_ACCOUNT_WORKBOOK_CELL_INVALID`。
+- 推断/未知：异常日期词法可被trim静默修复；同时把legacy拒绝写成跨宿主断言会制造与生产门禁无关的时区失败。#206/#207同因仍是基于相同测试块的推断，integration尚未执行。
+- 影响：生产若trim会破坏开户日期raw血缘；测试若依赖legacy宿主结果会阻断Windows CI并掩盖真正的strict合同状态。
+- 证据：SheetJS `parse_ws_xml_data`的`t=d -> datenum(parseDate(p.v,1))`、真实JSZip差分probe、#205上海时区16/16与`TZ=UTC` 15/16、UTC逐值probe。
+- 最便宜验证：canonical/Zulu对legacy与strict保持等价；上海与UTC分别覆盖leading/trailing/both/tab/newline、empty/whitespace-only，安全断言只绑定strict raw gate。
+- 处置：已覆盖；production strict直接验证未修改raw值且无legacy旁路。回归仅要求strict对8种异常词法fail closed，empty/whitespace-only另保持legacy双拒绝；不修改src、正常writer或streaming编排。
 
 ### [Important / 已覆盖] cell/dimension/merge前导零绕过canonical坐标
 
@@ -133,6 +133,7 @@ payload account rows
 1. E10-B 才实现 Publisher、async copy、source/target evidence 与正式 artifact handle；E10-A 没有发布路径。
 2. 完整应用进程崩溃后的持久 task-staging 扫描/Publisher journal 由 E10-B/R3.2.3 接线；E10-A 已覆盖进程存活时 Worker crash/cancel cleanup，且 production=false。
 3. Windows Setup/portable 的 Worker assets 路径、RSS、app quit 与文件系统能力必须在 R3.2.3 人工/packaged gate 验证。
+4. #205 raw-date测试修复后仍须等待新exact Windows unit/integration；#206/#207因相同测试块而同因仅为推断，不能用旧绿或本地绿代偿。
 
 ## 已反证候选
 
