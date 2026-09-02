@@ -626,6 +626,12 @@ const {
   normalizeMaintainedBigAccounts,
   resolveRecognizedBigAccount
 } = require('./main-process/big-account-recognition');
+const {
+  NEW_ACCOUNT_EXPORT_NAME,
+  normalizeNewAccountAccounts,
+  prepareNewAccountGeneration,
+  validateNewAccountAccounts
+} = require('./main-process/new-account/generation-core');
 
 if (!packagedRuntimeModeSelected && process.env.APP_USER_DATA_DIR) {
   app.setPath('userData', process.env.APP_USER_DATA_DIR);
@@ -1084,7 +1090,6 @@ const BILL_SPLIT_GROUP_FIELDS = [
   BILL_SPLIT_MERGE_MAPPING_FIELD,
   REUSE_MODULE_MAPPING_FIELD
 ];
-const NEW_ACCOUNT_EXPORT_NAME = 'NEW_BALANCE';
 const BACKGROUND_IMAGE_LIMITS = Object.freeze({
   maxSizeBytes: 5 * 1024 * 1024,
   minWidth: 1200,
@@ -3563,17 +3568,6 @@ function buildFieldIndexMap(headerRow) {
   return fieldIndexMap;
 }
 
-function buildBalanceTemplateRow(balanceTemplateFields, valuesByField) {
-  const normalizedValues = new Map(
-    Object.entries(valuesByField).map(([fieldName, value]) => [normalizeCell(fieldName), value])
-  );
-
-  return balanceTemplateFields.map((fieldName) => {
-    const normalizedField = normalizeCell(fieldName);
-    return normalizedValues.has(normalizedField) ? normalizedValues.get(normalizedField) : '';
-  });
-}
-
 function storeGeneratedBalanceSeeds({ templateName, seedRecords = [] }) {
   if (!Array.isArray(seedRecords) || !seedRecords.length) {
     return;
@@ -3596,118 +3590,6 @@ function storeGeneratedBalanceSeeds({ templateName, seedRecords = [] }) {
 
 function scanBalanceSeedStatus({ detailRows, templateName }) {
   return scanStatementBalanceSeedStatus({ detailRows, templateName }, ensureStorageRoot());
-}
-
-function normalizeDateOnly(date) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
-}
-
-function buildNewAccountBillDates(openDate, today = new Date()) {
-  const normalizedOpenDate = normalizeDateOnly(openDate);
-  const normalizedToday = normalizeDateOnly(today);
-  const yesterday = new Date(normalizedToday.getTime());
-  yesterday.setDate(yesterday.getDate() - 1);
-
-  if (normalizedOpenDate.getTime() > yesterday.getTime()) {
-    throw new FileValidationError('FILE_READ', '开户日期不能晚于昨日');
-  }
-
-  const totalDays = Math.round(
-    (yesterday.getTime() - normalizedOpenDate.getTime()) / (24 * 60 * 60 * 1000)
-  ) + 1;
-
-  if (totalDays > 3650) {
-    throw new FileValidationError('FILE_READ', '开户日期距今超过 10 年，不支持生成');
-  }
-
-  const dates = [];
-  let cursor = new Date(normalizedOpenDate.getTime());
-
-  while (cursor.getTime() <= yesterday.getTime()) {
-    dates.push(normalizeDateOnly(new Date(cursor.getTime())));
-    cursor.setDate(cursor.getDate() + 1);
-  }
-
-  return dates;
-}
-
-function normalizeNewAccountCurrencyValues({ currency, currencies = [], isMultiCurrency = false }) {
-  return Array.from(
-    new Set(
-      ((isMultiCurrency && Array.isArray(currencies) && currencies.length) ? currencies : [currency])
-        .map((value) => normalizeCell(value))
-        .filter((value) => value !== '')
-    )
-  );
-}
-
-function normalizeNewAccountAccounts(payload = {}) {
-  const rawAccounts = Array.isArray(payload.accounts) && payload.accounts.length
-    ? payload.accounts
-    : [{
-        bankName: payload.bankName,
-        location: payload.location,
-        currency: payload.currency,
-        currencies: payload.currencies,
-        bankAccount: payload.bankAccount,
-        openingDate: payload.openingDate,
-        isMultiCurrency: payload.isMultiCurrency
-      }];
-
-  return rawAccounts.map((item) => ({
-    bankName: normalizeCell(item.bankName),
-    location: normalizeCell(item.location),
-    currency: normalizeCell(item.currency),
-    currencies: Array.isArray(item.currencies) ? item.currencies.map((value) => normalizeCell(value)) : [],
-    bankAccount: normalizeCell(item.bankAccount),
-    openingDateRaw: normalizeCell(item.openingDate),
-    openingDate: parseDateValue(item.openingDate),
-    isMultiCurrency: Boolean(item.isMultiCurrency)
-  }));
-}
-
-function buildNewAccountBalanceRecords({
-  accounts = [],
-  balanceTemplateFields
-}) {
-  const records = [];
-  const allBillDates = new Set();
-  const allCurrencies = new Set();
-
-  accounts.forEach((account) => {
-    const billDates = buildNewAccountBillDates(account.openingDate);
-    const currencyValues = normalizeNewAccountCurrencyValues(account);
-
-    if (!currencyValues.length) {
-      throw new FileValidationError('FILE_READ', '至少需要提供一个币种');
-    }
-
-    billDates.forEach((billDate) => {
-      const billDateLabel = formatDateLabel(billDate);
-      allBillDates.add(billDateLabel);
-
-      currencyValues.forEach((currencyValue) => {
-        allCurrencies.add(currencyValue);
-        records.push(buildBalanceTemplateRow(balanceTemplateFields, {
-          银行名称: account.bankName,
-          所在地: account.location,
-          币种: currencyValue,
-          银行账号: account.bankAccount,
-          账单日期: billDateLabel,
-          期初余额: '',
-          期初可用余额: '',
-          期末余额: 0,
-          期末可用余额: ''
-        }));
-      });
-    });
-  });
-
-  return {
-    records,
-    billDates: Array.from(allBillDates).sort(),
-    currencies: Array.from(allCurrencies)
-  };
 }
 
 function templateFileDialogFilters() {
@@ -12919,60 +12801,21 @@ function registerNewAccountHandlers() {
     const payload = prepared.payload;
     const accounts = normalizeNewAccountAccounts(payload);
 
-    if (!accounts.length) {
-      return createErrorResult({
-        step: '生成新开账户余额账单',
-        message: '请完整填写所有必填项',
-        errorCode: 'NEW_ACCOUNT_REQUIRED',
-        templateName: NEW_ACCOUNT_EXPORT_NAME,
-        context: {
-          moduleName: NEW_ACCOUNT_EXPORT_NAME
-        }
-      });
-    }
-
-    const missingDetails = [];
-
-    accounts.forEach((account, index) => {
-      const missingFields = [
-        ['银行名称', account.bankName],
-        ['所在地', account.location],
-        ['银行账号', account.bankAccount],
-        ['开户日期', account.openingDateRaw]
-      ].filter(([, value]) => !value);
-
-      if (!account.isMultiCurrency && !account.currency) {
-        missingFields.push(['币种', '']);
+    try {
+      validateNewAccountAccounts(accounts);
+    } catch (error) {
+      if (error instanceof FileValidationError) {
+        return createErrorResult({
+          step: '生成新开账户余额账单',
+          message: error.message,
+          errorCode: error.code,
+          detailLines: error.detailLines,
+          originalError: error,
+          templateName: NEW_ACCOUNT_EXPORT_NAME,
+          context: { moduleName: NEW_ACCOUNT_EXPORT_NAME }
+        });
       }
-
-      if (missingFields.length) {
-        missingDetails.push(`${index + 1}. 缺少字段：${missingFields.map(([label]) => label).join('、')}`);
-        return;
-      }
-
-      const selectedCurrencies = normalizeNewAccountCurrencyValues(account);
-
-      if (account.isMultiCurrency && selectedCurrencies.length === 0) {
-        missingDetails.push(`${index + 1}. 多币种账户至少需要勾选一个币种`);
-        return;
-      }
-
-      if (!account.openingDate) {
-        missingDetails.push(`${index + 1}. 开户日期不是有效日期`);
-      }
-    });
-
-    if (missingDetails.length) {
-      return createErrorResult({
-        step: '生成新开账户余额账单',
-        message: '请完整填写所有必填项',
-        errorCode: 'NEW_ACCOUNT_REQUIRED',
-        detailLines: missingDetails,
-        templateName: NEW_ACCOUNT_EXPORT_NAME,
-        context: {
-          moduleName: NEW_ACCOUNT_EXPORT_NAME
-        }
-      });
+      throw error;
     }
 
     try {
@@ -13004,35 +12847,14 @@ function registerNewAccountHandlers() {
         });
       }
 
-      const generated = buildNewAccountBalanceRecords({
+      const generated = prepareNewAccountGeneration({
         accounts,
         balanceTemplateFields
       });
-      const primaryAccount = accounts[0];
-
-      let accountSegment;
-      let currencySegment;
-
-      if (accounts.length === 1) {
-        const bankAccount = String(primaryAccount.bankAccount || '').trim();
-        accountSegment = bankAccount.length > 4 ? bankAccount.slice(-4) : bankAccount;
-        currencySegment = generated.currencies.length > 1 ? '多币种' : (generated.currencies[0] || '');
-      } else {
-        accountSegment = '多账号';
-        currencySegment = '多币种';
-      }
-
-      const nameParts = [
-        primaryAccount.bankName,
-        primaryAccount.location,
-        accountSegment,
-        currencySegment,
-        NEW_ACCOUNT_EXPORT_NAME
-      ].filter((part) => part !== '');
 
       const output = buildOutputFilePath({
         kind: 'new-account',
-        outputFileName: `${nameParts.join('-')}.xlsx`
+        outputFileName: generated.fileName
       });
       const promotionManifest = buildStatementDeferredOutputManifest(
         output.outputFilePath,
@@ -13066,7 +12888,7 @@ function registerNewAccountHandlers() {
         message: '生成新开账户余额账单成功',
         details: [
           `导出文件：${output.outputFileName}`,
-          `币种：${currencySegment}`,
+          `币种：${generated.currencySegment}`,
           `账单日期数量：${generated.billDates.length}`,
           `账号行数：${accounts.length}`
         ]
@@ -13089,6 +12911,7 @@ function registerNewAccountHandlers() {
           step: '生成新开账户余额账单',
           message: error.message,
           errorCode: error.code,
+          detailLines: error.detailLines,
           originalError: error,
           context: {
             accounts: accounts.map((account) => ({

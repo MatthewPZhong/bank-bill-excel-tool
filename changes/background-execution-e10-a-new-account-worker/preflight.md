@@ -1,0 +1,94 @@
+# E10-A NewAccount generation core / one-shot Worker Preflight
+
+## Task Brief
+
+- Goal：把 NewAccount 单工作簿生成的业务规则收敛到唯一 core，并提供 `thread-single/job` one-shot Worker 能力；readback 全阶段必须在冻结 5 秒 cooperative timeout 内真实响应 shutdown cancel，且流式 cell 解码、坐标与worksheet dimension必须与冻结writer/旧raw oracle等价或更严格 fail closed。
+- Context：父链为 review-fix 后已审查 E09-D `831455401bbf912f36efeeeb898f66d72e350125`；当前 live IPC 仍由 legacy handler 生成并直接写正式输出。
+- Constraints：只做 E10-A。Worker 只接小型账户 DTO、冻结模板 identity、日期配置和 task staging `generationPath`；不接 final target；不做 E10-B copy/Publisher，不启用 production，不做 R3.2.3。
+- Done when：legacy 与 Worker 共用日期/必填/账户/币种/记录/文件名 core；Worker 只对白名单模板工作，写一个 staging workbook 后回读验证；Main contract/technical validation 保持 bounded；typed cell、完整 row/cell 坐标、唯一dimension与实际used range不允许错误记录混入；250k 的 row/evidence batching 与 terminal 前取消均稳定 `cancelled`、Main-only cleanup；focused/golden/lifecycle/recovery/integration/smoke/static 与 event-loop/RSS 证据通过。
+
+## 已确认事实
+
+| 事实 | 证据 | 对方案的约束 |
+| --- | --- | --- |
+| E10-A 只含 generation core/Worker，E10-B 才含 async copy/Publisher | frozen `changes/background-execution-v3.2.x-contract-baseline/changes/3.2.3/{spec.md,techdoc.md}` §9/§11 | 本 PR 不发布、不复制、不改变 `lastGeneratedExports` 的 managed 语义 |
+| `new-account:generate` 冻结为 `thread-single/job/native/main-settlement/production=false` | frozen spec §3 | policy 必须保持 `effectiveMode=legacy/effectiveWorkerCount=0` |
+| legacy 业务规则集中在 `src/main.js` 的 `buildNewAccountBillDates`、currency/account normalization、record/name 构造 | `src/main.js:3589-3679,12895-13037` | 平移后 main/Worker 必须引用同一实现，不能复制算法 |
+| legacy 模板唯一入口为应用内 `assets/余额账单模版.xlsx` | `src/main.js:getBalanceTemplatePath` | Worker 仅接受冻结 allowlist path + snapshot/hash；不接受用户模板路径 |
+| writer 保留模板首 sheet、精确 header 顺序、字段格式和 watermark | `src/backend/file-service/writers.js:writeBalanceWorkbook` | Worker 复用既有 writer，业务回读校验 sheet/header/records/date/account/currency |
+| task staging 已有 non-symlink/realpath/hardlink ownership validator | `src/main-process/statement-worker/staging-ownership.js` | E10-A 复用同一 ownership 规则，清理仅限已验证的 Main-owned staging path |
+| shared Supervisor 负责发 shutdown cancel 与终态收口，但同步 XLSX 阶段必须由模块主动让出 Worker 消息循环 | `src/main-process/background-execution/{supervisor.js,runtime.js}`；Reviewer P2 真实 runtime 失败回放 | 新 Worker 使用 Protocol v1 canonical host；模块在重型阶段间和 `job:done` 前提供 cancellation safepoint，不修改全局 Supervisor 语义 |
+| `MAX_RECORDS=250000` 与静态 `PhaseLease.memoryBytes=256 MiB` 不匹配 | Reviewer 真实 Worker 探针：29,192 行 RSS delta 467,648,512 bytes，60,416 行 572,456,960 bytes | 不得降低业务上限掩盖准入低估；必须在 Worker spawn 前按可验证输出行数动态申请 |
+| `resources.profile` 已是 Registry 静态引用，Supervisor 在 `adapter.start()` 前获取 PhaseLease | `execution-policy-registry.js` 的 `resourceProfileRegistry/getBinding`；`supervisor.js:start/acquireSimpleJobResources` | E10 可绑定 Main-only 同步纯 estimator，不改 Protocol/Schema；其他 action 保持静态 phase |
+| row-only `448 MiB + 4096 bytes/row` 仍低估合法业务形状 | 本机高预算真实 Worker：250,000 短文本 reservation 1,493,762,048、RSS delta 1,761,820,672；60,416 最大合法 CJK 文本 reservation 717,225,984、RSS delta 1,881,407,488 | estimator 必须从已验证 DTO 计算每行实际重复文本的 UTF-8/UTF-16、记录/单元格结构及 writer/readback 多份驻留，不得只提高统一 per-row 常量 |
+| 合法业务 digest 会被通用 full-account gate 误杀 | 250,000 短文本真实 Worker 完成 workbook 后以 `PROTOCOL_PRIVACY_VIOLATION` 收口；另有 4 行真实输入可稳定生成含 17 位数字串的 `recordsSha256` | 只能在 E10 result validator 上按 exact JSON pointer + lowercase 64hex + 冻结父 shape 最小放行；不得修改全局账号检测或通用 digest key 集合 |
+| readback 内只有整体结束后的 safepoint，250k 正常任务可越过 cooperative timeout | 第二替代 Reviewer：workbook 已写盘，shutdown 约 4997 ms 到达，最终 `cancel-timeout/transport-lost`；本机阶段 probe：`XLSX.readFile` 3197 ms、`sheet_to_json` 566 ms、row normalize 5 ms、actual/expected evidence 1758/1986 ms | 不能把 readback 当一个同步阶段；必须在不可分割段前后立即 yield/check，并把长循环拆为有界批次，保持落盘业务回读与四 digest |
+| strict流式回读消除了合法边界的单段5秒假设 | 最终真实250k/60,416 Worker分别11,607/5,045ms，但六阶段shutdown均11–15ms；四digest与旧同步oracle精确一致 | actual worksheet按ZIP stream读取并按raw type/完整坐标投影，row/evidence各1024行一批；Supervisor 5秒、Writer、Protocol均不改 |
+| generic `row-scanner` 的导入契约不是 SheetJS raw 回读契约 | `cellValueFromBody` 对无type/`n`/`b`/`d`/`e`均返回XML字符串；重复同列最后覆盖；缺失/错位坐标被跳过或并入outer row；截断行可在流尾丢弃 | E10不能仅打开`cellTypes`补丁；必须验证完整row/cell ref并按旧`XLSX.readFile(raw:true,cellDates:false)+sheet_to_json`语义投影 |
+| 旧 raw oracle 的 typed 值已由一次性 XML probe 固化 | 无type/`n` `00123`→number123，`b` 1/0→boolean，`d`→Excel serial，`str`/`inlineStr`/`s`→string，formula取cached value，error在`sheet_to_json(defval:'')`中为空 | strict parser对合法类型输出同类JS值；NaN/Infinity/unsafe、shared越界、非法bool/date/error/type与XML结构异常fail closed |
+| 冻结 Spec 要求日期/账户/币种/记录业务回读与legacy golden | frozen spec/techdoc §9/§10；资金红线明确列出NewAccount日期、账户、币种和输出记录 | 对重复/错位/非法坐标更严格拒绝是保护既有血缘，不是新增业务规则；正常writer golden与四digest必须不变 |
+| 冻结writer主动设置worksheet `!ref`且header-only有唯一结构例外 | `writeBalanceWorkbook`固定`A1:{lastColumn}{max(records+1,2)}`；真实XML probe：0 records为`A1:I2`但cells仅`A1:I1`，1 record的18个cell完整覆盖`A1:I2` | strict used-range不能机械要求cell bounds恒等dimension；仅允许空sheet `A1`、正常exact union及冻结header-only尾随空第2行 |
+| SheetJS会宽松修复或忽略异常dimension | JSZip真实probe：missing/duplicate/reversed/absolute均回算/规范化为`A1:I2`；expanded `A1:J2`仍通过旧业务回读；truncated `A1:I1`因row缺失拒绝，shifted因header拒绝 | dimension完整性必须按Reviewer合同比旧oracle更严格fail closed，不能把SheetJS宽松行为当正常writer兼容性；正常writer/golden仍须等价 |
+| `t=d` 的原始空白不能经过预规范化 | 真实1-row JSZip probe：canonical `2026-03-01`与Zulu值legacy/strict均通过；带空白值的legacy结果依宿主时区，上海产生不同serial并mismatch，Windows UTC可接受为期望serial；trim后的strict曾错误接受。empty/whitespace-only两路稳定拒绝 | E10不得trim异常日期词法；canonical ISO/Zulu保持legacy等价，strict对任何首尾/tab/newline/empty空白无条件fail closed，不能依赖legacy跨宿主拒绝 |
+| cell/dimension/merge的前导零词法不能只靠数值坐标校验 | 真实probe：`D02`在旧SheetJS保留物理key且canonical `D2`缺失，旧业务mismatch而strict误接受；`A01:I02`与merge `A01:A02`被旧库规范化；outer row `r=02`配canonical cells时旧/新均通过 | cell/dimension/merge必须canonical re-encode回比；outer row保持旧oracle数值语义，不机械收紧 |
+
+## Unknowns Register
+
+| 未知 | 类型 | 影响 | 可逆性 | 当前证据 | 处理 | 最便宜验证方式 | 当前决定 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Worker DTO/结果是否会因账户或日期跨度无界膨胀 | 盲区 | 高 | 容易 | legacy 无显式数量上限 | PROBE | 构造边界 DTO 与 10 年记录数测试 | contract 限制 DTO 字节、账户/币种/预计记录数；legacy live 不新增限制 |
+| 模板在 Main 快照后、Worker 读取期间被替换 | 已知未知 | 高 | 一般 | frozen spec 要求 path/snapshot；仅 metadata 快照不足以抵抗同 metadata 内容替换 | PROBE | before/after stat + sha256/tamper 测试 | Worker 校验 allowlist canonical path、snapshot、hash，并在写后复核 |
+| staging 路径碰撞/链接替换及失败清理权限 | 盲区 | 高 | 一般 | Statement 已有 ownership validator | PROBE | symlink/hardlink/collision/outside/crash tests | Main 先证 missing ownership；Worker 使用 exclusive create 语义；Main 仅清理验证过的 staging path |
+| 日期边界是否要改 UTC 算法 | 隐性偏好 | 高 | 一般 | legacy 是本地日历；冻结验收要求等价 | ASSUME | legacy/Worker 昨日、超过 10 年边界 golden | 保留 legacy 本地日历语义，不静默改时区口径 |
+| E10-A 是否应接入 live IPC | 已知未知 | 高 | 容易 | release strategy 要求独立 flag，production=false，E10-B 尚无 Publisher | PROBE | static source-selector test | 只注册 dormant policy/runtime；live IPC 继续 legacy |
+| 真实 Worker 的同步 XLSX 生成是否会阻塞 shutdown-only `job:cancel` 直到 `job:done` | 状态生命周期盲区 | 高 | 容易 | 原实现只在同步阶段间读 `signal.aborted`，但 Worker 无机会处理 cancel message | PROBE | 等 `control.ready/state=running` 后立即 shutdown 的真实 runtime 回归 | 修复前稳定得到 `completed` 且 staging 残留；改为 write 前后/readback 后/terminal 前 async safepoint，取消时仅 Main/client 清理 |
+| 准入前能否与实际 `records.length` 使用同一计数口径 | 数据契约 | 高 | 容易 | contract 已内联计算“各账户开户日至昨日天数 × 币种数”，core 以相同组合造行，但尚未共享函数 | PROBE | 提取 contract 纯函数，golden/property 对照 core 实际行数 | estimator 和 input limit 共用唯一投影；不把计数字段加入冻结 DTO |
+| 保守内存 envelope 如何既覆盖 workbook/readback 又不对小任务一律按 250,000 行预留 | 容量 | 高 | 容易 | v1 两个短文本点支持 row slope，但250k/最大文本反例证明统一 4096 bytes/row 不足 | PROBE | 确定性shape边界单测 + 250k短文本/60,416最大文本真实 benchmark | v1 row-only 已推翻；v2 按 record/cell overhead、实际 UTF-8/UTF-16 writer/readback copies 与固定 safety 估算，0..250,000/overflow fail closed |
+| 如何在不物化 records 的前提下精确描述合法文本 shape | 数据契约 | 高 | 容易 | bounded DTO 已含规范化 bankName/location/bankAccount/currencies/openingDate，输出每行另有固定 10-byte 日期和 9 cells | PROBE | 把共享行数 projector 扩为 shape projector，并与实际 records 的行数、UTF-8/UTF-16 文本总量做 property/golden 对照 | Main admission 只遍历账户/币种配置，按 `天数 × 币种` 安全整数累计实际重复文本；不构造业务 rows |
+| writer/readback 同驻留的保守倍率如何校准 | 容量 | 高 | 容易 | 250k 短文本主要暴露记录/单元格结构，60,416 最大 CJK 文本主要暴露多份字符串/XML/readback 驻留 | PROBE | 两个真实反例分别校准结构项和文本项，确定性模型再向上留固定 safety 与可解释 copies | 使用独立 record/cell overhead、writer/readback UTF-8/UTF-16 copies 和固定 safety；真实 RSS 只作方向性覆盖证据，Windows gate保留 |
+| E10 digest 最小放行是否会扩大其他 action/路径或接受 schema-invalid 结果 | 隐私/合同 | 高 | 容易 | Protocol 已从 action-specific result validator 读取 `allowFinanceSafeValue`；Statement/MPT 已有局部 delegate 范式 | PROBE | 每个 exact path、近邻 path、大小写/长度错误、同名异路径、schema invalid 与真实 Worker completed | delegate 只挂在 `validateNewAccountGenerationResult`，父对象必须通过拆出的冻结 artifact/evidence validator；最终 result validator仍独立 fail closed |
+| 单次 `XLSX.readFile` 在最大合法文本形状是否可能独自达到 5 秒 | 状态生命周期盲区 | 高 | 一般 | 已消除：60,416旧readFile为1267ms，但250k已达3197ms，不能据此外推跨平台；生产readback不再调用`XLSX.readFile` | PROBE→RESOLVED | 用既有ZIP reader定位sheet，实际worksheet XML按stream分批扫描 | 不改timeout；无单段全workbook materialize |
+| canonical businessEvidence 能否分批且与现有 `canonicalSha256(array)` byte-for-byte 一致 | 数据/审计合同 | 高 | 容易 | 已证实：0/1/2051 property及真实250k/60,416四digest均与旧canonical oracle一致 | PROBE→RESOLVED | 共享incremental canonical-array hasher；每个row仍使用相同JSON scalar、逗号、括号和顺序 | 只改变内存/编排，不改变四digest |
+| test-only stage hook 是否会扩大 public/protocol surface | 测试边界 | 中 | 容易 | 已证实：独立WorkerData MessagePort注入；contract/result/static Registry没有stage字段 | PROBE→RESOLVED | 真实Worker精确暂停；static test锁定generation contract不含hook | 端口只在测试entry options存在，不进入canonical envelope |
+| 是否能只复用generic scanner的`cellTypes`完成raw等价 | 解析契约 | 高 | 容易 | 不能：scanner只按列可选返回type，value仍为字符串，且不暴露完整cell ref/重复/乱序/截断结构 | PROBE→RESOLVED | numeric leading-zero、boolean与outer/cell row mismatch三反例 | 新建E10专用strict worksheet projection；不改变generic import语义或其消费者 |
+| typed cell 的合法payload和旧raw值边界 | 数据/兼容 | 高 | 容易 | SheetJS源码、一次性XML probe与独立oracle矩阵已覆盖n/b/d/e/s/inlineStr/str、formula cached、rich text/rPh；非法/unsafe旧库可能宽松或产生非JSON值 | PROBE→RESOLVED | 8/8差分矩阵含0/负数/小数/scientific/date/boolean/shared/inline/formula/error及非法近邻 | 合法值与旧oracle一致；非法、非有限、unsafe或不确定差异fail closed并给稳定错误码 |
+| 坐标/结构比旧SheetJS更严格是否改变正常输出合同 | 审计边界 | 高 | 容易 | writer输出row/cell ref完整递增；独立矩阵和正常250k/60,416 golden已证明严格投影不改变合法输出 | PROBE→RESOLVED | duplicate/out-of-order/missing/mismatch/multi-letter/extra column/truncated/XML entity矩阵 + normal golden | 只对OOXML结构异常更严格拒绝；合法稀疏/空行仍按旧`blankrows:false`跳过，正常digest不变 |
+| dimension应由哪些物理结构解释，避免误伤styled blank/merge/header-only | 输出血缘 | 高 | 容易 | writer XML中空业务字段仍可能产生styled blank `<c>`；header-only声明额外空第2行；OOXML merge可扩展used range | PROBE→RESOLVED | 真实JSZip差分：empty/header-only/1row、styled blank、merge、formula cached、trailing empty及multi-letter | used range取全部cell refs与merge ranges的包围盒；无ref只接受`A1`，header-only只接受`A1:{expectedLast}2`对`A1:{expectedLast}1`，其余必须exact |
+| dimension格式/边界是否可借SheetJS宽松解析绕过 | 数据契约 | 高 | 容易 | 旧库接受反转、绝对地址、缺失和重复；冻结writer只输出uppercase相对A1或单冒号range | PROBE→RESOLVED | missing/duplicate/truncated/expanded/shifted/reversed/out-of-range/absolute/multi-area矩阵 | E10专用canonical parser仅接受`A1`或`A1:END`，端点安全且有序；不修改generic scanner |
+| `t=d` 是否可先trim再按canonical ISO解析 | 数据/兼容 | 高 | 容易 | 非UTC probe证明带空白legacy serial可变化；exact Windows UTC又证明legacy可接受同一词法。两种宿主下strict raw gate都能稳定识别异常 | PROBE→RESOLVED | canonical/Zulu与legacy等价；上海/UTC分别覆盖leading/trailing/tab/newline、empty/whitespace-only真实1-row差分 | 不trim；直接对raw XML值执行canonical ISO gate，异常空白由strict无条件fail closed；legacy只作合法值golden |
+| row/cell/range前导零是否应统一拒绝 | 坐标血缘 | 高 | 容易 | `D02`旧库保留非canonical物理key并导致mismatch；dimension/merge旧库宽松规范化；outer `r=02`不改变canonical cell key且旧业务通过 | PROBE→RESOLVED | cell/dimension/merge leading-zero与超长词法红测；outer row定向golden | 仅cell ref及dimension/merge range做encode回比；outer row继续数值化比较，避免误拒旧raw可解释输入 |
+
+## 风险优先计划
+
+| 顺序 | 步骤 | 消除的未知/保护的不变量 | 成功证据 | 失败影响 | 回滚/收缩 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 抽取唯一 generation core 和 exact bounded contract | 日期/账户/币种/记录/文件名等价；DTO 有界 | legacy golden + contract 反例 | 推翻 Worker 输入设计 | 保持 legacy handler 调原 helper，缩回纯函数抽取 |
+| 2 | 加模板 identity 与 staging ownership guard | allowlist/TOCTOU/清理权限 | tamper/symlink/collision tests | 阻断 Worker 写入 | fail closed，不开放任意路径 |
+| 3 | 接入 Protocol v1 one-shot Worker/policy/runtime，在同步 XLSX 阶段间与终态前让出消息循环 | cancel/crash/late message/资源释放；shutdown cancel 不得被 `job:done` 覆盖 | real Worker lifecycle + running-shutdown cancel-wins/recovery tests | 不允许 runtime 注册或取消终态可伪报成功 | 保持 policy dormant，不接 live；不泛化 Supervisor |
+| 4 | 写 workbook 并 Worker 业务回读、Main 技术复核 | sheet/header/行数/日期/账户/币种/file hash 血缘 | Worker/legacy projection golden + tamper tests | 不返回 artifact handle | 删除受权 staging 文件并报错 |
+| 5 | 静态/集成/smoke/event-loop/RSS 与盲区复核 | legacy、平台和性能不回归 | focused/integration/smoke/node-check/diff-check | 不结案 | 收缩到最后通过的 commit |
+| 6 | 共享行数投影、动态 resource profile 与 spawn 前准入 | MAX_RECORDS 与实际业务行数不变；低内存/并发不越 system reserve | 0/typical/29,192/60,416/250,000、overflow、低 budget no-spawn、并发 lease 不超预算 | OOM/侵占 reserve 或过度预留 | 保留 production=false；estimator/profile 绑定可单独回滚 |
+| 7 | 把共享 projector 扩为 shape-aware 文本/单元格 envelope | 短文本 250k 与最大合法文本不能低估；小任务不按最大 shape 收费 | exact row/cell/UTF-8/UTF-16 projection、Unicode/边界/overflow、两个真实 RSS 反例均被 reservation 覆盖 | 继续存在 reserve 侵占/OOM 风险 | production 保持 false；模型常量可独立向上校准，不改 MAX_RECORDS/业务输出 |
+| 8 | 在 E10 result validator 增加 exact-path digest delegate | 合法 digest 不误杀，账号/普通字符串与其他 action 仍 fail closed | 5 个允许 path、近邻 path/错误值/schema invalid、含数字串 digest 的真实 Worker completed | 正常 Worker 可伪报 transport-lost或隐私边界扩大 | 只撤回 validator property；不动全局 finance-safe gate |
+| 9 | 把 readback 改为可协作取消的 async 编排 | 读取真实落盘 XLSX、sheet/header/rowCount/四 digest 不变；任一长窗口小于 5 秒并可观测 cancel | 250k/60,416阶段计时；旧同步 digest等价；readFile后/row/evidence/terminal取消；真实250k多轮shutdown | 任一合法阶段仍可触发cancel-timeout，或golden/digest漂移 | 不改Supervisor/timeout/Writer；不可分割 readFile 若不满足则收缩到可终止隔离方案 |
+| 10 | 用E10专用strict typed/coordinate projection替换generic row scanner readback | account/date/currency/amount与旧raw oracle同值；错位/重复/非法XML不能混入业务证据 | 三个Reviewer反例红→绿；完整typed/coordinate差分矩阵；250k/60,416 digest与六阶段cancel | 账户前导零、boolean或错位cell可被错误账行接受，推翻业务回读可信度 | 不改generic scanner/Writer/Protocol；strict模块可独立回滚到前一提交供复盘但production保持false |
+| 11 | 在E10 strict projection验证唯一dimension与实际used range | 截断/扩张/偏移元数据不能隐藏或伪造账户、日期、币种、余额列与记录行 | Reviewer `A1:I1`红→绿；异常矩阵；empty/header-only/1row/merge/styled/multi-letter与250k/60,416 | `!ref`与cells冲突仍可让业务证据对错误投影自洽 | 仅改E10 parser；保留streaming/批次yield，正常writer例外由真实XML固定 |
+| 12 | 收紧raw date与canonical cell/range词法 | 日期serial和物理cell key必须与旧raw解释一致；dimension/merge不得靠前导零伪装canonical ref | whitespace date与`D02`红→绿；dimension/merge前导零/超长反例；outer `r=02`旧oracle控制 | 错误日期或非canonical坐标进入账户/日期/币种/行数digest | 仅改E10 strict decoder/parser；generic scanner、streaming/yield与同步oracle不动 |
+
+## Blindspot / reconciliation 直接 checklist
+
+- 入口旁路：live handler 与 dormant Worker 是否都调用唯一 core；不存在 Worker final target/Publisher/copy。
+- 数据契约：exact keys、DTO bytes、账户/币种/日期/预计记录数、结果 manifest bytes。
+- 资源准入：预计行数与实际 records 守恒；估算公式、常量、上下界和overflow可审计；无法容纳的任务不创建 Worker，并发 active usage 不超 Governor memory budget/system reserve。
+- 资源 shape：逐账户/币种/日期累计的实际规范化 UTF-8/UTF-16 与 SheetJS XML 单元格编码是否与输出文本守恒；Unicode/控制字符、256/64 字段上限、9-cell 固定形状和 writer/readback 多份驻留是否全部计入。
+- 隐私 gate：只允许 `/payload/result/artifact/templateSha256` 与 `businessEvidence` 四个冻结 digest path；近邻路径、同名异路径、普通字符串、错误大小写/长度和 schema-invalid 仍拒绝。
+- 生命周期：collision、cancel、Worker crash、late message、shutdown、restart orphan staging 的权限边界；真实 running Worker 的 shutdown cancel 必须胜过尚未发送的 `job:done`。
+- readback 取消：ZIP entry打开、strict XML chunk/row batch、actual/expected四digest与artifact hash每个窗口均有界；每批yield后先检查signal；取消结果不得携带artifact/result，Main cleanup恰好一次且staging/final=0。
+- typed/坐标血缘：`s/inlineStr/str/n/b/d/e/formula cached`按SheetJS raw语义投影；`t=d`不得trim原始空白；每个cell ref必须canonical回编码、与outer row同数值行号、严格递增唯一且在XLSX范围内；outer row `r=02`按旧raw数值语义兼容；非法payload、shared越界、截断XML/未知实体fail closed。
+- dimension血缘：唯一canonical `A1`/`A1:END`必须在sheetData前出现，端点逐cell re-encode相等、有序且在XLSX范围；全部cell refs和merge ranges used bounds须与dimension精确一致，仅冻结header-only空第2行例外；missing/duplicate/truncated/expanded/shifted/absolute/多区域/前导零均拒绝。
+- 数据血缘：输入账户顺序 × 日期升序 × 去重币种顺序，输出行数严格等于各账户 `天数 × 币种数` 总和。
+- 金额：只生成余额行，`期末余额=0`，其余余额为空；不引入汇率/舍入/借贷方向。
+- 日期：开户日到昨日（含首尾）；晚于昨日拒绝；总天数超过 3650 拒绝。
+- 币种/账户：不 fallback、不跨账户归并；多账户文件名仍为 `多账号-多币种`；单账户只暴露末四位。
+- 输出：首 sheet、精确列序、记录数、有序日期/账户/币种 digest、文件名、模板 hash 可解释。
+- 人工门禁：NewAccount 日期、账户、币种和输出记录属于冻结资金红线，自动化不能替代人工复核；Windows packaged 仍留 R3.2.3。

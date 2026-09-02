@@ -1604,7 +1604,8 @@ test('两个 deferred action 仅在非空结果确定具体 output 后 promote�
   const accountEnd = mainSource.indexOf("trackedIpcHandle('new-account:export'", accountStart);
   const account = mainSource.slice(accountStart, accountEnd);
   assert.match(account, /allocation:\s*'deferred'/);
-  assert.ok(account.indexOf('buildNewAccountBalanceRecords({') < account.indexOf('buildStatementDeferredOutputManifest('));
+  assert.ok(account.indexOf('prepareNewAccountGeneration({') >= 0);
+  assert.ok(account.indexOf('prepareNewAccountGeneration({') < account.indexOf('buildStatementDeferredOutputManifest('));
   assert.ok(account.indexOf('await taskContext.ensureFileBatch(promotionManifest)') < account.indexOf('writeBalanceWorkbook({'));
   assert.match(account, /filePath:\s*promotedOutputPath/);
   assert.doesNotMatch(account, /filePath:\s*output\.outputFilePath/);
