@@ -17,8 +17,9 @@
 //   · processingResult=null：留导入 caller，不进共享函数。
 //   · 进组步（scanFxGroups + upsertBocFxLink + getMaxBocFxOrigGroupNo）：导入专属，留 caller；
 //     删除场景 BOC 行已被 T6a 联动删、无新行进组 → rebuildFxBocDerivation 从「读全库行重匹配」起。
-//   · 各函数内部保留现有 try/catch 隔离语义：派生任一步抛错记 created:false（含 error 文案），【不向外抛】，
-//     不阻断导入/删除本身（数据已落库/删除成功）。
+//   · 各函数内部保留现有 try/catch 隔离语义：普通派生错误记 created:false（含 error 文案），【不向外抛】，
+//     不阻断导入/删除本身（数据已落库/删除成功）。E11-B 唯一例外是 ADM Recovery Hold/open Intent gate：
+//     它是资金写边界，必须向 caller 传播，禁止被兼容 catch 降级成导入/删除成功。
 //
 // deps 注入清单（均为 main.js 现有 require/函数，原样透传）：
 //   { database, buildAdmRows, buildBocBankRows, backfillBocReconLinkIds, rematchAllBocGroups, appendActivityLogEntry }
@@ -44,8 +45,10 @@
 //   成功 → { created:true, total, matched, unmatched:[{code,batchNo,customerRef,billDate,channelOrderNo,conflict?}], midEmpty }
 //   失败 → { created:false, error }
 function rebuildAdmDerivation(deps) {
-  const { database, buildAdmRows } = deps;
+  const { database, buildAdmRows, admMutationBoundary } = deps;
   let admDerive;
+  let admBoundaryEntered = false;
+  let admReplaceStarted = false;
   try {
     const midRows = database.readLinkedTableRows('mid-allocation');
     // v3.0.0 块 B / PR-3（R-3/O-3）：只读 Channel=ADM 候选子集（json_extract 下推过滤），
@@ -53,7 +56,15 @@ function rebuildAdmDerivation(deps) {
     //   过滤仍为最终权威（SQL 仅过滤 Channel='ADM' 超集，绝不更窄 → 不漏 ADM 行）。
     const bankAdmCandidates = database.readBankDepositAdmCandidates();
     const { admRows, unmatched, midEmpty } = buildAdmRows(bankAdmCandidates, midRows);
-    database.replaceAdmBankDeposit(admRows);
+    if (typeof admMutationBoundary === 'function') {
+      admBoundaryEntered = true;
+      admMutationBoundary(() => {
+        admReplaceStarted = true;
+        return database.replaceAdmBankDeposit(admRows);
+      });
+    } else {
+      database.replaceAdmBankDeposit(admRows);
+    }
     admDerive = {
       created: true,
       total: admRows.length,
@@ -71,6 +82,9 @@ function rebuildAdmDerivation(deps) {
       midEmpty
     };
   } catch (admErr) {
+    // E11-B：Recovery Hold/open Intent gate 是资金写边界，不属于历史“派生失败可隔离”分支；
+    // 若吞掉会让 caller 把受阻的 source mutation 误报成成功。
+    if (admBoundaryEntered && !admReplaceStarted) throw admErr;
     // ADM 派生失败不阻断银行对账单表导入本身（已落库成功）；记 admDerive.error 供前端提示。
     admDerive = {
       created: false,

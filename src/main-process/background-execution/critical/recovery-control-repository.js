@@ -419,32 +419,49 @@ function applyIntentTransition(db, transition, timestamp) {
     if (intentRow(db, input.intentId)) {
       fail('RECOVERY_INTENT_ALREADY_EXISTS', 'Critical Intent 已存在，非 exact replay 不得同态写入');
     }
-    assertOne(db.prepare(`
-      INSERT INTO background_execution_critical_intents (
-        contract_version, intent_id, action_key, operation_key, task_run_id,
-        job_id, coordination_kind, state, conflict_scope_key, inspector_key,
-        evidence_version, evidence_json, evidence_sha256,
-        receipt_ref_json, result_json, created_at, updated_at,
-        closed_at, retention_until
-      ) VALUES (
-        1, ?, ?, ?, ?, ?, ?, 'prepared', ?, ?, ?, ?, ?,
-        NULL, NULL, ?, ?, NULL, NULL
-      )
-    `).run(
-      input.intentId,
-      input.actionKey,
-      input.operationKey,
-      input.taskRunId,
-      input.jobId,
-      input.coordinationKind,
-      input.conflictScopeKey,
-      input.inspectorKey,
-      input.evidenceVersion,
-      canonicalizeJson(input.boundedEvidence, { maxBytes: 16384 }),
-      input.evidenceHash,
-      timestamp,
-      timestamp
-    ), 'RECOVERY_INTENT_CAS_CONFLICT', 'Critical Intent INSERT changes() 必须等于 1');
+    try {
+      assertOne(db.prepare(`
+        INSERT INTO background_execution_critical_intents (
+          contract_version, intent_id, action_key, operation_key, task_run_id,
+          job_id, coordination_kind, state, conflict_scope_key, inspector_key,
+          evidence_version, evidence_json, evidence_sha256,
+          receipt_ref_json, result_json, created_at, updated_at,
+          closed_at, retention_until
+        ) VALUES (
+          1, ?, ?, ?, ?, ?, ?, 'prepared', ?, ?, ?, ?, ?,
+          NULL, NULL, ?, ?, NULL, NULL
+        )
+      `).run(
+        input.intentId,
+        input.actionKey,
+        input.operationKey,
+        input.taskRunId,
+        input.jobId,
+        input.coordinationKind,
+        input.conflictScopeKey,
+        input.inspectorKey,
+        input.evidenceVersion,
+        canonicalizeJson(input.boundedEvidence, { maxBytes: 16384 }),
+        input.evidenceHash,
+        timestamp,
+        timestamp
+      ), 'RECOVERY_INTENT_CAS_CONFLICT', 'Critical Intent INSERT changes() 必须等于 1');
+    } catch (error) {
+      if (error instanceof RecoveryControlError) throw error;
+      const scopeOwner = db.prepare(`
+        SELECT intent_id
+        FROM background_execution_critical_intents
+        WHERE action_key = ? AND conflict_scope_key = ? AND state <> 'closed'
+        LIMIT 1
+      `).get(input.actionKey, input.conflictScopeKey);
+      if (scopeOwner && scopeOwner.intent_id !== input.intentId) {
+        fail(
+          'RECOVERY_INTENT_SCOPE_CONFLICT',
+          'conflict scope 已由另一个 open Critical Intent 持有'
+        );
+      }
+      throw error;
+    }
     return Object.freeze({
       actionKey: input.actionKey,
       operationKey: input.operationKey,

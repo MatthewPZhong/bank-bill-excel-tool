@@ -20,6 +20,8 @@ const {
 } = require('../background-execution/sequence-tracker');
 const {
   RECON_FIX_IMPORT_ACTION,
+  RECON_FIX_JPM_UNIT_ID,
+  RECON_FIX_RUN_JPM_ACTION,
   RECON_FIX_RUN_READONLY_ACTION,
   RECON_FIX_SERVICE_KEY
 } = require('./policies');
@@ -27,7 +29,11 @@ const { createReconFixService } = require('./service');
 
 if (!parentPort) throw new Error('ReconFix Service 需要 worker_threads parentPort');
 
-const ALLOWED_ACTIONS = new Set([RECON_FIX_IMPORT_ACTION, RECON_FIX_RUN_READONLY_ACTION]);
+const ALLOWED_ACTIONS = new Set([
+  RECON_FIX_IMPORT_ACTION,
+  RECON_FIX_RUN_READONLY_ACTION,
+  RECON_FIX_RUN_JPM_ACTION
+]);
 const RECON_FIX_CANCELLED = 'RECON_FIX_CANCELLED';
 const incomingControlSequence = createDirectionSequenceTracker();
 const incomingJobSequence = createDirectionSequenceTracker();
@@ -62,12 +68,12 @@ async function cancellationSafepoint(job) {
   if (job.cancelRequested) throw cancellationError();
 }
 
-function jobRef(job) {
+function jobRef(job, unitId = null) {
   return Object.freeze({
     actionKey: job.envelope.actionKey,
     operationKey: job.envelope.operationKey,
     jobId: job.envelope.jobId,
-    unitId: null
+    unitId
   });
 }
 
@@ -115,7 +121,7 @@ function assertJobIdentity(envelope) {
   }
 }
 
-function requestPersistentAdoption(job, candidate) {
+function requestPersistentAdoption(job, candidate, options = {}) {
   const requestId = nextId('recon-state');
   const controlId = nextId('recon-control');
   const owner = Object.freeze({
@@ -129,6 +135,10 @@ function requestPersistentAdoption(job, candidate) {
       requestId,
       job,
       candidate,
+      adopt: typeof options.adopt === 'function'
+        ? options.adopt
+        : (reservationId) => service.adopt(candidate, reservationId),
+      unitId: options.unitId || null,
       owner,
       stage: 'requesting',
       publicResult: null,
@@ -138,7 +148,7 @@ function requestPersistentAdoption(job, candidate) {
       reject
     });
     try {
-      emitControl('resource:request', controlId, jobRef(job), {
+      emitControl('resource:request', controlId, jobRef(job, options.unitId || null), {
         requestId,
         requestKind: 'persistent-state-replace',
         requested: {
@@ -232,16 +242,16 @@ function releasePhaseReservation(job, phase, reason) {
   });
 }
 
-async function adoptCandidateAtSafepoint(job, candidate) {
-  await cancellationSafepoint(job);
+async function adoptCandidateAtSafepoint(job, candidate, options = {}) {
+  if (options.protectedPhase !== true) await cancellationSafepoint(job);
   try {
-    const result = await requestPersistentAdoption(job, candidate);
+    const result = await requestPersistentAdoption(job, candidate, options);
     // resource request 一旦发出就不伪造平台 cancel 方言；等待
     // grant/reject/adopt-ack 真实收口后，再在下一安全点终止 job。
-    await cancellationSafepoint(job);
+    if (options.protectedPhase !== true) await cancellationSafepoint(job);
     return result;
   } catch (error) {
-    if (job.cancelRequested) throw cancellationError();
+    if (job.cancelRequested && options.protectedPhase !== true) throw cancellationError();
     throw error;
   }
 }
@@ -258,12 +268,12 @@ function handleResourceGrant(envelope) {
     throw error;
   }
   if (pending.kind === 'persistent') {
-    pending.publicResult = service.adopt(pending.candidate, payload.reservationId);
+    pending.publicResult = pending.adopt(payload.reservationId);
   }
   pending.grantId = payload.grantId;
   pending.reservationId = payload.reservationId;
   pending.stage = 'adopting';
-  emitControl('resource:adopted', nextId('recon-control'), jobRef(pending.job), {
+  emitControl('resource:adopted', nextId('recon-control'), jobRef(pending.job, pending.unitId), {
     requestId: pending.requestId,
     grantId: pending.grantId,
     reservationId: pending.reservationId,
@@ -361,7 +371,14 @@ async function runJob(job) {
   let phase = null;
   let terminal = null;
   try {
-    const preparation = await service.prepare(job.envelope.actionKey, job.envelope.payload.input);
+    if (job.envelope.actionKey === RECON_FIX_RUN_JPM_ACTION) {
+      await cancellationSafepoint(job);
+    }
+    const preparation = await service.prepare(
+      job.envelope.actionKey,
+      job.envelope.payload.input,
+      { operationKey: job.envelope.operationKey }
+    );
     await cancellationSafepoint(job);
     try {
       phase = await requestPhaseExtension(job, preparation.resourcePlan);
@@ -375,7 +392,52 @@ async function runJob(job) {
     // 让 shutdown cancel 真实获胜，同时 phase reservation 仍保持占用。
     await cancellationSafepoint(job);
     let result;
-    if (plan.kind === 'candidate') {
+    if (plan.kind === 'jpm-run-plan') {
+      if (plan.invalidation) {
+        await adoptCandidateAtSafepoint(job, {
+          revision: plan.invalidation.candidateRevision,
+          memoryBytes: plan.invalidation.candidateMemoryBytes
+        }, {
+          unitId: RECON_FIX_JPM_UNIT_ID,
+          adopt: (reservationId) => service.adoptJpmInvalidation(plan, reservationId)
+        });
+      }
+      if (plan.outcome === 'noop') {
+        result = await adoptCandidateAtSafepoint(job, {
+          revision: plan.candidateRevision,
+          memoryBytes: plan.candidateMemoryBytes
+        }, {
+          unitId: RECON_FIX_JPM_UNIT_ID,
+          adopt: (reservationId) => service.adoptJpmPending(plan, reservationId, null)
+        });
+      } else {
+        await cancellationSafepoint(job);
+        const ack = new Promise((resolve, reject) => {
+          job.resolveCriticalAck = resolve;
+          job.rejectCriticalAck = reject;
+        });
+        job.emit('critical:ready', { critical: plan.critical }, RECON_FIX_JPM_UNIT_ID);
+        await ack;
+        job.resolveCriticalAck = null;
+        job.rejectCriticalAck = null;
+        if (job.cancelRequested) throw cancellationError();
+        job.protected = true;
+        const receipt = service.commitJpmPending(plan, {
+          producerTaskRunId: job.envelope.context.value.taskRunId
+        });
+        job.emit('commit:receipt', { receipt }, RECON_FIX_JPM_UNIT_ID);
+        result = await adoptCandidateAtSafepoint(job, {
+          revision: plan.candidateRevision,
+          memoryBytes: plan.candidateMemoryBytes
+        }, {
+          protectedPhase: true,
+          unitId: RECON_FIX_JPM_UNIT_ID,
+          adopt: (reservationId) => service.adoptJpmPending(plan, reservationId, receipt)
+        });
+      }
+      job.unitTerminal = true;
+      job.emit('unit:done', { result }, RECON_FIX_JPM_UNIT_ID);
+    } else if (plan.kind === 'candidate') {
       result = await adoptCandidateAtSafepoint(job, plan.candidate);
     } else {
       if (plan.invalidationCandidate) {
@@ -393,6 +455,12 @@ async function runJob(job) {
         job.cancelAckEmitted = true;
         job.emit('cancel:ack', { cancellation: { scope: 'job' } });
       }
+    }
+    if (job.envelope.actionKey === RECON_FIX_RUN_JPM_ACTION && !job.unitTerminal) {
+      job.unitTerminal = true;
+      job.emit('unit:error', {
+        error: toProtocolError(error, error && error.code || 'RECON_FIX_JPM_FAILED')
+      }, RECON_FIX_JPM_UNIT_ID);
     }
     terminal = {
       operation: 'job:error',
@@ -457,11 +525,53 @@ function handleJob(rawEnvelope) {
       error.code = 'RECON_FIX_CANCEL_INVALID';
       throw error;
     }
-    activeJob.cancelRequested = true;
+    if (!activeJob.protected) activeJob.cancelRequested = true;
+    return;
+  }
+  if (envelope.operation === 'unit:start') {
+    if (!activeJob || activeJob.envelope.jobId !== envelope.jobId ||
+        envelope.actionKey !== RECON_FIX_RUN_JPM_ACTION ||
+        envelope.unitId !== RECON_FIX_JPM_UNIT_ID ||
+        Object.keys(envelope.payload.input || {}).length !== 0 || activeJob.unitStarted) {
+      const error = new Error('ReconFix JPM unit:start identity 无效或重复');
+      error.code = 'RECON_FIX_JPM_UNIT_START_INVALID';
+      throw error;
+    }
+    activeJob.unitStarted = true;
+    void runJob(activeJob);
+    return;
+  }
+  if (envelope.operation === 'critical:ack') {
+    const critical = envelope.payload.critical;
+    if (!activeJob || activeJob.envelope.jobId !== envelope.jobId ||
+        envelope.actionKey !== RECON_FIX_RUN_JPM_ACTION ||
+        envelope.unitId !== RECON_FIX_JPM_UNIT_ID || !activeJob.resolveCriticalAck ||
+        !critical || critical.fileOperationKey !== envelope.operationKey ||
+        typeof critical.intentId !== 'string' || !critical.intentId) {
+      const error = new Error('ReconFix JPM critical ACK identity 无效');
+      error.code = 'RECON_FIX_JPM_CRITICAL_ACK_INVALID';
+      throw error;
+    }
+    const resolve = activeJob.resolveCriticalAck;
+    activeJob.resolveCriticalAck = null;
+    resolve(critical);
+    return;
+  }
+  if (envelope.operation === 'critical:reject') {
+    if (!activeJob || !activeJob.rejectCriticalAck || envelope.unitId !== RECON_FIX_JPM_UNIT_ID) {
+      const error = new Error('ReconFix JPM critical reject identity 无效');
+      error.code = 'RECON_FIX_JPM_CRITICAL_REJECT_INVALID';
+      throw error;
+    }
+    const reject = activeJob.rejectCriticalAck;
+    activeJob.rejectCriticalAck = null;
+    const error = new Error('ReconFix JPM critical intent 未获 Main 持久准入');
+    error.code = 'RECON_FIX_JPM_CRITICAL_REJECTED';
+    reject(error);
     return;
   }
   if (envelope.operation !== 'job:start') {
-    const error = new Error(`ReconFix E11-A 不支持 job operation：${envelope.operation}`);
+    const error = new Error(`ReconFix Service 不支持 job operation：${envelope.operation}`);
     error.code = 'RECON_FIX_JOB_OPERATION_UNSUPPORTED';
     throw error;
   }
@@ -476,10 +586,17 @@ function handleJob(rawEnvelope) {
     envelope,
     emit: createCanonicalEventEmitter(envelope, (event) => parentPort.postMessage(event)),
     cancelRequested: false,
-    cancelAckEmitted: false
+    cancelAckEmitted: false,
+    protected: false,
+    unitStarted: false,
+    unitTerminal: false,
+    resolveCriticalAck: null,
+    rejectCriticalAck: null
   };
   activeJob = job;
-  void runJob(job);
+  if (envelope.actionKey !== RECON_FIX_RUN_JPM_ACTION) {
+    void runJob(job);
+  }
 }
 
 function handleControl(rawEnvelope) {
@@ -511,7 +628,7 @@ function handleControl(rawEnvelope) {
     service = createReconFixService({ serviceGeneration: envelope.serviceGeneration });
     emitControl('executor:ready', nextId('recon-control'), null, {
       contractVersion: 1,
-      capabilities: ['resource-control-v1', 'recon-fix-readonly-v1']
+      capabilities: ['resource-control-v1', 'recon-fix-readonly-v1', 'recon-fix-jpm-durable-v1']
     });
     return;
   }

@@ -5,14 +5,18 @@ const {
 } = require('../background-execution/error-codec');
 
 const RECON_FIX_IMPORT_ACTION = 'recon-fix:import';
+const RECON_FIX_RUN_JPM_ACTION = 'recon-fix:run-jpm';
 const RECON_FIX_RUN_READONLY_ACTION = 'recon-fix:run-readonly';
 const RECON_FIX_SERVICE_KEY = 'service.recon-fix';
+const RECON_FIX_JPM_UNIT_ID = 'operation:000001';
 const RECON_FIX_ENTRY_KEYS = Object.freeze({
   [RECON_FIX_IMPORT_ACTION]: 'executor.recon-fix:import',
+  [RECON_FIX_RUN_JPM_ACTION]: 'executor.recon-fix:run-jpm',
   [RECON_FIX_RUN_READONLY_ACTION]: 'executor.recon-fix:run-readonly'
 });
 const RECON_FIX_RESULT_VALIDATOR_KEYS = Object.freeze({
   [RECON_FIX_IMPORT_ACTION]: 'result-validator.recon-fix:import',
+  [RECON_FIX_RUN_JPM_ACTION]: 'result-validator.recon-fix:run-jpm',
   [RECON_FIX_RUN_READONLY_ACTION]: 'result-validator.recon-fix:run-readonly'
 });
 
@@ -161,6 +165,42 @@ function reconFixReadonlyPolicy(actionKey) {
   });
 }
 
+function reconFixJpmPolicy() {
+  const readonly = reconFixReadonlyPolicy(RECON_FIX_RUN_READONLY_ACTION);
+  return Object.freeze({
+    ...readonly,
+    actionKey: RECON_FIX_RUN_JPM_ACTION,
+    description: `v3.2.x canonical policy fixture for ${RECON_FIX_RUN_JPM_ACTION}`,
+    entryKey: RECON_FIX_ENTRY_KEYS[RECON_FIX_RUN_JPM_ACTION],
+    resources: Object.freeze({
+      ...readonly.resources,
+      profile: `resource.${RECON_FIX_RUN_JPM_ACTION}`
+    }),
+    failure: Object.freeze({
+      ...readonly.failure,
+      workerExit: 'module-inspect'
+    }),
+    commit: Object.freeze({
+      kind: 'worker-durable',
+      criticalIntent: true,
+      receiptKind: 'module-local',
+      inspectorKey: 'inspector.recon-fix:run-jpm',
+      conflictScopeResolverKey: 'scope.recon-fix:run-jpm',
+      settlementKey: null
+    }),
+    result: Object.freeze({
+      ...readonly.result,
+      validatorKey: RECON_FIX_RESULT_VALIDATOR_KEYS[RECON_FIX_RUN_JPM_ACTION]
+    }),
+    featureFlag: `feature.${RECON_FIX_RUN_JPM_ACTION}`,
+    legacyStrategyKey: `legacy.${RECON_FIX_RUN_JPM_ACTION}`,
+    production: Object.freeze({
+      ...readonly.production,
+      recoveryStatus: 'probe'
+    })
+  });
+}
+
 function exactKeys(value, expected) {
   return value && typeof value === 'object' && !Array.isArray(value) &&
     Object.keys(value).sort().join(',') === [...expected].sort().join(',');
@@ -180,7 +220,13 @@ function allowReconFixFinanceSafeValue({ value, key }) {
     'resultHandle',
     'scenarioSnapshotHash',
     'linkedEvidenceHash',
-    'resultDigest'
+    'resultDigest',
+    'preImageHash',
+    'postImageHash',
+    'idSequenceDigest',
+    'databaseIdentity',
+    'workerInstanceIdentity',
+    'receiptDigest'
   ].includes(key) && safeHash(value);
 }
 
@@ -211,7 +257,23 @@ function validateReconFixServiceResult(value) {
     safeCount(summary.warningCount);
 }
 
+function validateReconFixJpmResult(value) {
+  if (!exactKeys(value, ['boundedSummary', 'resultHandle', 'resultKind']) ||
+      !['noop', 'committed'].includes(value.resultKind) || !safeHash(value.resultHandle)) {
+    return false;
+  }
+  const summary = value.boundedSummary;
+  return exactKeys(summary, [
+    'fixedRowCount', 'resultDigest', 'runKind', 'unmatchedRowCount', 'warningCount'
+  ]) && summary.runKind === 'jpm' && safeHash(summary.resultDigest) &&
+    safeCount(summary.fixedRowCount) && safeCount(summary.unmatchedRowCount) &&
+    safeCount(summary.warningCount);
+}
+
 Object.defineProperty(validateReconFixServiceResult, 'allowFinanceSafeValue', {
+  value: allowReconFixFinanceSafeValue
+});
+Object.defineProperty(validateReconFixJpmResult, 'allowFinanceSafeValue', {
   value: allowReconFixFinanceSafeValue
 });
 
@@ -219,14 +281,25 @@ const RECON_FIX_READONLY_POLICIES = Object.freeze([
   reconFixReadonlyPolicy(RECON_FIX_IMPORT_ACTION),
   reconFixReadonlyPolicy(RECON_FIX_RUN_READONLY_ACTION)
 ]);
+const RECON_FIX_JPM_POLICY = reconFixJpmPolicy();
+const RECON_FIX_POLICIES = Object.freeze([
+  ...RECON_FIX_READONLY_POLICIES,
+  RECON_FIX_JPM_POLICY
+]);
 
 module.exports = {
   RECON_FIX_ENTRY_KEYS,
   RECON_FIX_IMPORT_ACTION,
+  RECON_FIX_JPM_POLICY,
+  RECON_FIX_JPM_UNIT_ID,
+  RECON_FIX_POLICIES,
   RECON_FIX_READONLY_POLICIES,
   RECON_FIX_RESULT_VALIDATOR_KEYS,
+  RECON_FIX_RUN_JPM_ACTION,
   RECON_FIX_RUN_READONLY_ACTION,
   RECON_FIX_SERVICE_KEY,
+  reconFixJpmPolicy,
   reconFixReadonlyPolicy,
+  validateReconFixJpmResult,
   validateReconFixServiceResult
 };

@@ -6,6 +6,10 @@ const { DatabaseSync } = require('node:sqlite');
 const yauzl = require('yauzl');
 
 const { readBocFxLinkRows } = require('../../backend/database/linked-table-repository');
+const {
+  ADM_TABLE,
+  readAdmRowsForWriteback
+} = require('../../backend/database/linked-table-writeback-reader');
 const { canonicalSha256 } = require('../background-execution/canonical-json-v1');
 const { sanitizeFinanceSafeValue } = require('../background-execution/error-codec');
 const { readReconIdFixFile } = require('../recon-id-fix-io');
@@ -13,13 +17,26 @@ const { runReconIdFix } = require('../recon-id-fix-engine');
 const { reconFixEvidenceSha256 } = require('./evidence-projection');
 const {
   RECON_FIX_IMPORT_ACTION,
-  RECON_FIX_READONLY_POLICIES,
+  RECON_FIX_POLICIES,
+  RECON_FIX_RUN_JPM_ACTION,
   RECON_FIX_RUN_READONLY_ACTION
 } = require('./policies');
+const {
+  buildJpmWritebackPlan
+} = require('./jpm-writeback-plan');
+const {
+  commitJpmAdmMutationWithReceipt
+} = require('./jpm-writeback-transaction');
+const {
+  boundedJpmReceiptFromExact
+} = require('./jpm-receipt-evidence');
+const {
+  deriveReconFixJpmDatabaseIdentity
+} = require('./jpm-database-authority');
 
 const MAX_PERSISTENT_STATE_BYTES = 268435456;
 const MEMORY_OVERHEAD_MULTIPLIER = 4;
-const MAX_PHASE_EXTENSION_BYTES = Math.min(...RECON_FIX_READONLY_POLICIES.map(
+const MAX_PHASE_EXTENSION_BYTES = Math.min(...RECON_FIX_POLICIES.map(
   (policy) => policy.resources.phase.memoryBytes
 ));
 const PHASE_EXTENSION_GRANULARITY_BYTES = 16 * 1024 * 1024;
@@ -262,7 +279,7 @@ function stateDigest(state) {
   });
 }
 
-function buildScenarioSnapshot(scenario) {
+function buildScenarioSnapshot(scenario, actionKey = RECON_FIX_RUN_READONLY_ACTION) {
   if (!scenario || typeof scenario !== 'object' || Array.isArray(scenario)) {
     fail('RECON_FIX_SCENARIO_INVALID', 'scenario 必须是对象');
   }
@@ -270,8 +287,14 @@ function buildScenarioSnapshot(scenario) {
   if (!['recon-id-fix', 'gateway-recon-id-fix'].includes(category)) {
     fail('RECON_FIX_SCENARIO_INVALID', 'scenario.category 不是 ReconFix 类别');
   }
-  if (scenario.config && scenario.config.subCategory === 'jpm-dispatch-order-fix') {
+  const hasJpmTag = scenario.config &&
+    scenario.config.subCategory === 'jpm-dispatch-order-fix';
+  const isJpm = scenario.category === 'gateway-recon-id-fix' && hasJpmTag;
+  if (hasJpmTag && actionKey !== RECON_FIX_RUN_JPM_ACTION) {
     fail('RECON_FIX_JPM_REQUIRES_E11_P0', 'JPM managed run 尚未交付，必须继续使用 legacy 路径');
+  }
+  if (actionKey === RECON_FIX_RUN_JPM_ACTION && !isJpm) {
+    fail('RECON_FIX_JPM_SCENARIO_REQUIRED', 'run-jpm 只接受 JPM 调拨订单修复场景');
   }
   let owned;
   try {
@@ -341,6 +364,59 @@ function prepareBocReadSnapshot(dbPath) {
   }
 }
 
+function prepareAdmReadSnapshot(dbPath) {
+  const resolved = requireDatabasePath(dbPath, 'JPM databasePath');
+  let db;
+  let transactionOpen = false;
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    if (db) {
+      if (transactionOpen) {
+        try { db.exec('ROLLBACK'); } catch (_rollbackError) {}
+        transactionOpen = false;
+      }
+      db.close();
+    }
+  };
+  try {
+    db = new DatabaseSync(resolved, { readOnly: true });
+    db.exec('PRAGMA query_only = ON; BEGIN DEFERRED');
+    transactionOpen = true;
+    const aggregate = db.prepare(`
+      SELECT COUNT(*) AS row_count,
+             COALESCE(SUM(LENGTH(CAST(raw_json AS BLOB))), 0) AS raw_json_bytes
+      FROM ${ADM_TABLE}
+    `).get();
+    const rowCount = Number(aggregate && aggregate.row_count);
+    const rawJsonBytes = Number(aggregate && aggregate.raw_json_bytes);
+    if (!Number.isSafeInteger(rowCount) || rowCount < 0 ||
+        !Number.isSafeInteger(rawJsonBytes) || rawJsonBytes < 0) {
+      fail('RECON_FIX_JPM_EVIDENCE_INVALID', 'JPM ADM 只读快照的行数或字节数无效');
+    }
+    let consumed = false;
+    return Object.freeze({
+      databasePath: resolved,
+      rowCount,
+      rawJsonBytes,
+      read() {
+        if (closed || consumed) fail('RECON_FIX_JPM_EVIDENCE_STALE', 'JPM ADM 只读快照已关闭或已消费');
+        consumed = true;
+        try {
+          return readAdmRowsForWriteback(db);
+        } finally {
+          close();
+        }
+      },
+      close
+    });
+  } catch (error) {
+    close();
+    throw error;
+  }
+}
+
 function publicResult(state) {
   const digest = stateDigest(state);
   if (!state.result) {
@@ -369,19 +445,34 @@ function publicResult(state) {
   });
 }
 
-function createCandidate(service, fields) {
+function createCandidateAtRevision(service, baseRevision, fields) {
   const state = {
     serviceGeneration: service.serviceGeneration,
-    revision: service.revision + 1,
+    revision: baseRevision + 1,
     session: fields.session,
     result: fields.result
   };
   return Object.freeze({
-    baseRevision: service.revision,
+    baseRevision,
     revision: state.revision,
     state,
     memoryBytes: assertPersistentStateFits(state)
   });
+}
+
+function createCandidate(service, fields) {
+  return createCandidateAtRevision(service, service.revision, fields);
+}
+
+function requireDatabasePath(value, label) {
+  if (typeof value !== 'string' || !path.isAbsolute(value) || path.resolve(value) !== value) {
+    fail('RECON_FIX_JPM_DB_PATH_INVALID', `${label} 必须是规范绝对路径`);
+  }
+  return value;
+}
+
+function jpmPendingKey(serviceGeneration, operationKey, resultHandle) {
+  return canonicalSha256({ serviceGeneration, operationKey, resultHandle });
 }
 
 function createReconFixService(options = {}) {
@@ -399,6 +490,9 @@ function createReconFixService(options = {}) {
   let closed = false;
   let active = false;
   let activePreparation = null;
+  // Full JPM candidate/plan/databasePath never leave this Service closure. The
+  // Worker protocol only sees the opaque pendingKey plus bounded evidence.
+  const pendingJpmResults = new Map();
 
   function assertOpen() {
     if (closed) fail('RECON_FIX_SERVICE_CLOSED', 'ReconFix Service 已关闭');
@@ -431,11 +525,12 @@ function createReconFixService(options = {}) {
     return preparation;
   }
 
-  async function prepare(actionKey, input) {
+  async function prepare(actionKey, input, identity = {}) {
     assertOpen();
     if (active) fail('RECON_FIX_SERVICE_BUSY', 'ReconFix Service 同时只允许一个 command');
-    if (![RECON_FIX_IMPORT_ACTION, RECON_FIX_RUN_READONLY_ACTION].includes(actionKey)) {
-      fail('RECON_FIX_ACTION_UNSUPPORTED', `E11-A 不支持 action：${String(actionKey)}`);
+    if (![RECON_FIX_IMPORT_ACTION, RECON_FIX_RUN_READONLY_ACTION, RECON_FIX_RUN_JPM_ACTION]
+      .includes(actionKey)) {
+      fail('RECON_FIX_ACTION_UNSUPPORTED', `ReconFix Service 不支持 action：${String(actionKey)}`);
     }
     active = true;
     try {
@@ -473,10 +568,150 @@ function createReconFixService(options = {}) {
         });
       }
 
+      if (actionKey === RECON_FIX_RUN_JPM_ACTION) {
+        assertExactKeys(input, ['databasePath', 'expectedRevision', 'scenario'], 'JPM run input');
+        assertExpectedRevision(input.expectedRevision, state.revision);
+        if (!state.session) fail('RECON_FIX_SESSION_REQUIRED', '请先导入 ReconFix 文件');
+        if (state.session.subMode !== 'gateway') {
+          fail('RECON_FIX_SUB_MODE_MISMATCH', 'JPM run 只接受已导入的网关对账单');
+        }
+        if (typeof identity.operationKey !== 'string' || !identity.operationKey) {
+          fail('RECON_FIX_JPM_OPERATION_KEY_REQUIRED', 'JPM run 缺少 operationKey identity');
+        }
+        const snapshot = buildScenarioSnapshot(input.scenario, actionKey);
+        if (snapshot.value.id === null || snapshot.value.id === undefined) {
+          fail('RECON_FIX_JPM_SCENARIO_ID_REQUIRED', 'JPM scenario.id 不能为空');
+        }
+        const jpmSnapshot = prepareAdmReadSnapshot(input.databasePath);
+        const databasePath = jpmSnapshot.databasePath;
+        const databaseIdentity = deriveReconFixJpmDatabaseIdentity(databasePath);
+        let phaseExtensionMemoryBytes;
+        try {
+          phaseExtensionMemoryBytes = estimateRunPhaseBytes(stateMemoryBytes, {
+            rowCount: jpmSnapshot.rowCount,
+            rawJsonBytes: jpmSnapshot.rawJsonBytes
+          });
+        } catch (error) {
+          jpmSnapshot.close();
+          throw error;
+        }
+        return createPreparation(phaseExtensionMemoryBytes, () => {
+          const source = jpmSnapshot.read();
+          const clonedSheets = {
+          reconResult: structuredClone(state.session.sheets.reconResult),
+          businessBills: structuredClone(state.session.sheets.businessBills),
+          opponentBills: structuredClone(state.session.sheets.opponentBills),
+          fixTemplate: state.session.sheets.fixTemplate
+        };
+        const engineResult = runReconIdFix(snapshot.value, clonedSheets, {
+          admRows: source.rows.map((row) => row.parsed)
+        });
+        const ownedResult = structuredClone(engineResult);
+        const privateResult = {
+          runKind: 'jpm',
+          scenarioSnapshot: snapshot.value,
+          scenarioSnapshotHash: snapshot.hash,
+          linkedEvidenceHash: source.imageHash,
+          inputEvidenceHash: state.session.inputEvidenceHash,
+          fixedRows: ownedResult.fixedRows,
+          warnings: ownedResult.warnings,
+          unmatchedRows: ownedResult.unmatchedRows || [],
+          stats: ownedResult.stats
+        };
+        const resultDigest = reconFixEvidenceSha256({
+          fixedRows: privateResult.fixedRows,
+          warnings: privateResult.warnings,
+          unmatchedRows: privateResult.unmatchedRows,
+          stats: privateResult.stats
+        });
+        const evidenceChanged = Boolean(state.result && (
+          state.result.runKind !== 'jpm' ||
+          state.result.scenarioSnapshotHash !== snapshot.hash ||
+          state.result.linkedEvidenceHash !== source.imageHash
+        ));
+        privateResult.resultHandle = canonicalSha256({
+          serviceGeneration: state.serviceGeneration,
+          revision: state.revision + (evidenceChanged ? 2 : 1),
+          operationKey: identity.operationKey,
+          resultDigest,
+          scenarioSnapshotHash: snapshot.hash,
+          linkedEvidenceHash: source.imageHash
+        });
+        privateResult.summary = Object.freeze({
+          runKind: 'jpm',
+          fixedRowCount: privateResult.fixedRows.length,
+          warningCount: privateResult.warnings.length,
+          unmatchedRowCount: privateResult.unmatchedRows.length,
+          resultDigest
+        });
+        const writebackPlan = buildJpmWritebackPlan({
+          operationKey: identity.operationKey,
+          sourceEvidence: source,
+          admUpdates: engineResult.admUpdates,
+          resultHandle: privateResult.resultHandle,
+          boundedSummary: privateResult.summary
+        });
+        const invalidationCandidate = evidenceChanged
+          ? createCandidate(serviceApi, { session: state.session, result: null })
+          : null;
+        const finalBaseRevision = state.revision + (invalidationCandidate ? 1 : 0);
+        const candidate = createCandidateAtRevision(serviceApi, finalBaseRevision, {
+          session: state.session,
+          result: privateResult
+        });
+        const pendingKey = jpmPendingKey(
+          state.serviceGeneration,
+          identity.operationKey,
+          privateResult.resultHandle
+        );
+        pendingJpmResults.set(pendingKey, {
+          pendingKey,
+          operationKey: identity.operationKey,
+          databasePath,
+          scenarioId: String(snapshot.value.id),
+          resultHandle: privateResult.resultHandle,
+          boundedSummary: privateResult.summary,
+          writebackPlan,
+          candidate,
+          invalidationCandidate,
+          invalidationAdopted: !invalidationCandidate,
+          committedReceipt: null
+        });
+          return Object.freeze({
+          kind: 'jpm-run-plan',
+          pendingKey,
+          operationKey: identity.operationKey,
+          outcome: writebackPlan.outcome,
+          resultHandle: privateResult.resultHandle,
+          boundedSummary: privateResult.summary,
+          candidateRevision: candidate.revision,
+          candidateMemoryBytes: candidate.memoryBytes,
+          invalidation: invalidationCandidate
+            ? Object.freeze({
+                candidateRevision: invalidationCandidate.revision,
+                candidateMemoryBytes: invalidationCandidate.memoryBytes
+              })
+            : null,
+          critical: Object.freeze({
+            contractVersion: 1,
+            databaseIdentity,
+            scenarioId: String(snapshot.value.id),
+            preImageHash: writebackPlan.preImageHash,
+            postImageHash: writebackPlan.expectedPostImageHash,
+            idSequenceDigest: writebackPlan.idSequenceDigest,
+            rowCount: writebackPlan.rowCount,
+            changedRowCount: writebackPlan.changedRowCount,
+            resultHandle: writebackPlan.resultHandle,
+            boundedSummary: writebackPlan.boundedSummary
+          })
+          });
+        }, jpmSnapshot.close);
+      }
+
       assertExactKeys(input, ['bocDatabasePath', 'expectedRevision', 'scenario'], 'run input');
       assertExpectedRevision(input.expectedRevision, state.revision);
       if (!state.session) fail('RECON_FIX_SESSION_REQUIRED', '请先导入 ReconFix 文件');
-      const snapshot = buildScenarioSnapshot(input.scenario);
+      const snapshot = buildScenarioSnapshot(input.scenario, actionKey);
       const expectedSubMode = snapshot.value.category === 'gateway-recon-id-fix' ? 'gateway' : 'business';
       if (expectedSubMode !== state.session.subMode) {
         fail('RECON_FIX_SUB_MODE_MISMATCH', '场景类别与已导入文件类别不一致');
@@ -575,6 +810,78 @@ function createReconFixService(options = {}) {
     }
   }
 
+  function requirePending(descriptor) {
+    if (!descriptor || typeof descriptor.pendingKey !== 'string') {
+      fail('RECON_FIX_JPM_PENDING_INVALID', 'JPM pending descriptor 非法');
+    }
+    const pending = pendingJpmResults.get(descriptor.pendingKey);
+    if (!pending || pending.operationKey !== descriptor.operationKey ||
+        pending.resultHandle !== descriptor.resultHandle) {
+      fail('RECON_FIX_JPM_PENDING_STALE', 'JPM private pending candidate 不存在或已失效');
+    }
+    return pending;
+  }
+
+  function adoptJpmInvalidation(descriptor, nextReservationId) {
+    const pending = requirePending(descriptor);
+    if (!pending.invalidationCandidate || pending.invalidationAdopted) {
+      fail('RECON_FIX_JPM_INVALIDATION_STATE_INVALID', 'JPM invalidation candidate 状态非法');
+    }
+    const result = adopt(pending.invalidationCandidate, nextReservationId);
+    pending.invalidationAdopted = true;
+    return result;
+  }
+
+  function commitJpmPending(descriptor, options = {}) {
+    const pending = requirePending(descriptor);
+    if (!pending.invalidationAdopted) {
+      fail('RECON_FIX_JPM_INVALIDATION_REQUIRED', '旧结果尚未失效，不得进入 JPM critical mutation');
+    }
+    if (pending.writebackPlan.outcome !== 'mutation-required') {
+      fail('RECON_FIX_JPM_NOOP_TRANSACTION_FORBIDDEN', 'JPM noop 不得进入 transaction');
+    }
+    if (pending.committedReceipt) {
+      fail('RECON_FIX_JPM_MUTATION_REPLAY_FORBIDDEN', 'JPM pending mutation 不得重复提交');
+    }
+    let writeDb;
+    try {
+      writeDb = new DatabaseSync(pending.databasePath);
+      const receipt = commitJpmAdmMutationWithReceipt({
+        db: writeDb,
+        plan: pending.writebackPlan,
+        producerTaskRunId: options.producerTaskRunId,
+        scenarioId: pending.scenarioId,
+        ...(typeof options.injectFault === 'function' ? { injectFault: options.injectFault } : {})
+      });
+      pending.committedReceipt = boundedJpmReceiptFromExact(receipt);
+      return pending.committedReceipt;
+    } finally {
+      if (writeDb) writeDb.close();
+    }
+  }
+
+  function adoptJpmPending(descriptor, nextReservationId, boundedReceipt = null) {
+    const pending = requirePending(descriptor);
+    if (!pending.invalidationAdopted) {
+      fail('RECON_FIX_JPM_INVALIDATION_REQUIRED', '旧结果尚未失效，不得采用 JPM result');
+    }
+    if (pending.writebackPlan.outcome === 'mutation-required') {
+      if (!pending.committedReceipt || !boundedReceipt ||
+          canonicalSha256(pending.committedReceipt) !== canonicalSha256(boundedReceipt)) {
+        fail('RECON_FIX_JPM_RECEIPT_NOT_MATCHED', 'JPM result 只能在 exact receipt 返回后采用');
+      }
+    } else if (boundedReceipt !== null || pending.committedReceipt !== null) {
+      fail('RECON_FIX_JPM_NOOP_RECEIPT_FORBIDDEN', 'JPM noop 不得携带 receipt');
+    }
+    adopt(pending.candidate, nextReservationId);
+    pendingJpmResults.delete(pending.pendingKey);
+    return Object.freeze({
+      resultKind: pending.writebackPlan.outcome === 'noop' ? 'noop' : 'committed',
+      resultHandle: pending.resultHandle,
+      boundedSummary: pending.boundedSummary
+    });
+  }
+
   function adopt(candidate, nextReservationId) {
     assertOpen();
     if (!active || !candidate || candidate.baseRevision !== state.revision ||
@@ -594,6 +901,7 @@ function createReconFixService(options = {}) {
     if (activePreparation) activePreparation.close();
     activePreparation = null;
     active = false;
+    pendingJpmResults.clear();
   }
 
   function close() {
@@ -610,6 +918,7 @@ function createReconFixService(options = {}) {
     activePreparation = null;
     active = false;
     closed = true;
+    pendingJpmResults.clear();
     return priorReservationId;
   }
 
@@ -620,6 +929,9 @@ function createReconFixService(options = {}) {
     get active() { return active; },
     prepare,
     adopt,
+    adoptJpmInvalidation,
+    adoptJpmPending,
+    commitJpmPending,
     finish,
     close,
     boundedStatus() {
