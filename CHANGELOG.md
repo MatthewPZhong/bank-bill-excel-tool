@@ -1,5 +1,23 @@
 # Changelog
 
+## 3.2.3 - 2026-08-30（版本分支技术收口，未发布）
+
+> v3.2.3 把网银账单 Statement 的大状态导入、交互式 continuation、current/all 生成与 manual balance seed，以及新开银行账户 NewAccount 的生成和另存为发布，收口到具备资源治理、幂等 receipt 与崩溃恢复保护的后台执行 capability。金额/币种、借贷方向、余额、Workbook、行序、命名和既有用户流程保持不变；production enablement 仍为关闭。
+
+### Statement / NewAccount 后台执行
+
+- **Statement 长驻 Service 与有界交互 token**：大量映射行、批次、revision 和生成上下文由单一 Service 持有；主进程只接收有界 DTO。大账号与手工余额交互使用 opaque、单次消费、受 TTL 和资源 reservation 约束的 token，candidate replacement 失败时仍保留旧 token continuation。
+- **current/all 只读生成与原子发布**：Worker 只读取冻结 session/template/source authority 并写 staging，Main 校验完整 manifest 后由唯一 Publisher 整批发布；current/all、四金额模式、混合币种、余额和告警语义不变，取消、来源漂移或输出篡改时 fail closed。
+- **manual balance seed 原子结算**：seed intent、临时文件、目录耐久性、receipt、inspector 与 Recovery Hold 共同保护崩溃恢复；状态 unknown、partial 或 committed-result-lost 时不得自动覆盖、重算或解除 Hold。
+- **NewAccount one-shot Worker 与 durable save-as**：生成使用单工作簿 Worker；另存为异步复制到 staging 后复核来源、目标和 direct-parent identity，再由 Publisher 提交。journal 恢复不会重复 generation、copy 或 publish。
+
+### 收口边界
+
+- **版本与规范**：`package.json`、`package-lock.json` 收口为 `3.2.3`；顶层 Spec/TechDoc 与冻结基线逐字节一致。
+- **生产仍关闭**：能力、策略和 release evidence 已具备审计基础，但 effective production strategy 仍为 legacy/0；不新增用户开关，也不切换现有生产路径。
+- **人工门禁未代偿**：Windows packaged/Setup/portable、真实 Statement/NewAccount 文件、金额/币种/余额、Excel/WPS 展示以及恢复处置仍需 release owner 与资金负责人人工复核。自动测试不能把这些项目声明为 PASS。
+- **未执行正式发布动作**：本收口不合并 `main`、不创建 tag、不发布或启用 production；`release-check`、`check-vars`、`scan:vars` 按用户要求跳过，不能记录为 PASS。
+
 ## 3.2.2 - 2026-08-31（版本分支技术收口，未发布）
 
 > v3.2.2 把资金对账、重复入金匹配与月度银行对账单 BU 回填校验的重状态和长任务迁入受资源治理的后台执行基础设施；业务顺序、金额/币种、Workbook、幂等和既有用户操作合同保持不变。代码合并时 production enablement 仍为关闭，本条不表示已经发布到 `main`、创建 tag 或启用生产策略。

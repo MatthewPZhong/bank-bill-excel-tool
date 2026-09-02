@@ -1230,26 +1230,32 @@ test('event-loop heartbeat 持续；copyFile 中 shutdown cancel 在 post-copy s
   const options = saveAsOptions(root, fixture);
   const input = createNewAccountSaveAsInput(options);
   const controller = new AbortController();
-  let ticks = 0;
-  const timer = setInterval(() => { ticks += 1; }, 5);
+  let markCopyStarted;
+  let releaseCopy;
+  const copyStarted = new Promise((resolve) => { markCopyStarted = resolve; });
+  const copyGate = new Promise((resolve) => { releaseCopy = resolve; });
+  let heartbeatObserved = false;
   const copy = executeNewAccountArtifactCopy(input, controller.signal, {
     fsPromises: {
       async copyFile(sourcePath, destinationPath, flags) {
-        await new Promise((resolve) => setTimeout(resolve, 60));
+        markCopyStarted();
+        await copyGate;
         return fs.promises.copyFile(sourcePath, destinationPath, flags);
       }
     }
   });
-  setTimeout(() => controller.abort({ reason: 'app-quit' }), 10);
-  try {
-    await assert.rejects(
-      copy,
-      (error) => error.code === 'NEW_ACCOUNT_SAVE_AS_CANCELLED'
-    );
-  } finally {
-    clearInterval(timer);
-  }
-  assert.ok(ticks >= 5, `heartbeat ticks=${ticks}`);
+  await copyStarted;
+  await new Promise((resolve) => setTimeout(() => {
+    heartbeatObserved = true;
+    resolve();
+  }, 0));
+  controller.abort({ reason: 'app-quit' });
+  releaseCopy();
+  await assert.rejects(
+    copy,
+    (error) => error.code === 'NEW_ACCOUNT_SAVE_AS_CANCELLED'
+  );
+  assert.equal(heartbeatObserved, true);
   assert.equal(fs.existsSync(options.stagingPath), false);
   assert.equal(fs.existsSync(options.targetPath), false);
 });
