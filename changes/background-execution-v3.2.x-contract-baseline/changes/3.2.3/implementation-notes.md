@@ -246,6 +246,22 @@ head 为第二父，保留原 PR 历史且不复用旧 stack CI。
 单并发隔离后 56/56 PASS，因此记录为既有 harness 竞态证据，不修改业务并发、writer 拓扑或资金合同来
 掩盖。该结果不宣称全量 PASS；后续精确远端 head 仍必须取得独立 Windows CI。
 
+### Exact Windows CI teardown closure（2026-09-01）
+
+最终 v3.2.2 祖先传播后的 #199/#202 exact Windows jobs 均在 `release-check` 约六小时后被取消。
+#202 重复 job `99548182180` 的完整日志确认 checkout head 为
+`62c96c2276b23108dab98ef8a20e41e124f9f5f9`，且 lint、smoke 已完成，unit 至少明确出现六个失败，
+integration 尚未启动。其中可归属 #199 的 E09-C 证据是：真实 Supervisor 用例先注册 temp root 删除，
+后注册 shutdown 与 SQLite close，Windows 因仍打开的 `audit.sqlite` 报 `EBUSY`。同一日志中的两个
+Unicode alias 失败来自 #202 随后引入的 Windows target identity 合同；#199 当前树仍要求所有平台 NFC，
+因此不能把下游 utility 行为倒灌进本 PR，相关断言只在 #202 合并新 #199 后按其平台合同修正。
+
+修复保持 production identity 与 Worker lifecycle 不变，只校正测试 cleanup。真实 Supervisor 用例改为
+最早注册唯一组合 cleanup，并严格按 SQLite close、空闲 Service graceful shutdown、temp root 删除的
+顺序执行；不吞 cleanup 错误，也不把强制 terminate 当成功。放弃在 #199 改 Unicode identity、捕获并
+忽略 `EBUSY`、缩短 workflow timeout 与放宽 forced-shutdown 语义，因为这些方案会跨越 PR 所有权、
+改变已冻结的平台合同或掩盖真实 cleanup 状态。
+
 ## Evidence
 
 | 证据 | 结果 | 覆盖的行为/风险 |
@@ -263,6 +279,8 @@ head 为第二父，保留原 PR 历史且不复用旧 stack CI。
 | #199 post-terminate unref local validation | adapter + ServiceHost + E09-C 93/93 PASS；完整 background-execution + E09-B/C 单并发矩阵 403/403 PASS；`npm run smoke` PASS；变更 JS ESLint、`node --check`、`git diff --check` PASS | 两种 close/terminate 时序、资源 grant/adopt/revoke/release、token replacement、取消、恢复、Workbook 与 legacy smoke 无回归；`check-vars`、`scan:vars`、`release-check` 按用户要求跳过，不声称 PASS |
 | #199 protocol-ack natural-exit local candidate | 首版 system Node 与 Electron 36/Node 22.19 聚焦矩阵 161/161 PASS；Node 22 扩面 probe 捕获 pending-cleanup 盲区后，官方 Node 22.18 完整单测 6435/6438 PASS、0 fail、3 expected skip；双 Node 适配器/ServiceHost/Supervisor/FundRecon/Duplicate/E09-C 矩阵均 PASS；Node 22 `npm run smoke` PASS；变更 JS ESLint、`node --check`、`git diff --check` PASS | 正常 Service 先 close-ack 再关闭 `parentPort`，真实自然 exit 不调用强制 terminate；无 ack/未退出仍强制 terminate且保持引用直至真实 settle；不以 event-loop 提前退出伪造 cleanup；真实 Windows 证据仍待 exact run 终态/日志，候选未推送 |
 | v3.2.3 final worker-exit propagation | #202 `a5a2c8c` → #205 `18c484b0` → #206 `ffa67890` → #207 `e3c8628b`；官方 Node 22.18 全量单测 6586/6591 PASS、2 fail、3 expected skip；两项既有 PreFund 默认文件并发失败对应完整文件单并发隔离 56/56 PASS；无 lifecycle cancellation | 最终候选逐张包含于 E10-A/B/C 与 R3.2.3；不把旧绿色 CI或窄测试代偿最终传播 head，两个既有并发失败如实保留而未通过业务改动掩盖 |
+| #199/#202 exact Windows cancelled jobs | #199 run `33410379289` 的 release-check step 运行 5:59:21 后 CANCELLED；#202 job `99548182180` exact 日志确认 lint/smoke 完成、unit 至少六项失败、integration 未启动，最后断言输出后进程保持存活至取消；本地 tree diff 进一步把 E09-C `EBUSY` 归属 #199、Unicode identity 断言归属 #202 | #199 只修 deterministic cleanup；#202 在继承该修复后处理自己的平台合同，再由各自新 exact Windows CI 验证并继续发现后续失败 |
+| #199 deterministic cleanup local validation | Electron 36 / Node 22.19：E09-C 21/21 PASS；target identity + adapter + ServiceHost + FundRecon/Duplicate worker-host 83/83 PASS；变更 JS `node --check` 与 `git diff --check` PASS | SQLite close → graceful Service shutdown → temp delete 顺序可完成；既有 natural-exit、forced terminate、resource cleanup、case/Unicode/hardlink 合同无本地回归 |
 | Round 2/3 自洽 workbook mutations | formula、type/format、font 及其四个扩展布尔、single-quote style、comment spoof、relationship decoy、duplicate coordinate、非法显式 style 全部 Publisher=0 | 实际 worksheet relationship/结构化 cell style、全 grid t/z 与 writer-owned font 摘要 readback；manifest size/hash/rowCounts 均按篡改后文件重算 |
 | Reviewer 后 `node scripts/integration/statement-generation-pipeline.js` | 45/45 PASS | legacy generation pipeline、detail/balance/current/all 业务等价 |
 | `npm run test:integration` | 51/51 scripts、2455/2455 PASS | 全仓集成、Publisher/cleanup 与资金相关输出回归；runner 自动清单的本地耗时刷新已回退，不纳入 change |
@@ -278,4 +296,4 @@ head 为第二父，保留原 PR 历史且不复用旧 stack CI。
 | 真实脱敏资金样本的逐行金额方向、币种、余额与 Excel/WPS 展示 | BLOCK production/release gate | 资金负责人按 current/all、四金额、混合币种、0 输出和余额提示逐项人工复核 | 自动化业务等价不替代人工资损验收；不阻塞 dormant E09-C，阻止 production 启用 |
 | Windows packaged durable publication | BLOCK release gate | R3.2.3 人工/packaged 门禁 | 不阻塞 dormant E09-C 合并，production 必须保持 false |
 | balance seed durable settlement（含自动派生 seed 的最终 owner） | BLOCK production gate | E09-D/后续合同按 Main-owned settlement 闭环 | E09-C 不允许 Worker 修改共享 seed；不阻塞 dormant 合并，阻止 production 启用 |
-| #199 exact Windows natural-exit 证据 | PROBE | 2026-08-31 10:51:56 +08:00 查询仍为 exact head `7a16a9dd5cce388747fb5706d65ab8cd032f0fc5`、run `33335790483` `IN_PROGRESS`；等待终态，若失败/取消则下一独立查询轮下载 exact job log定位最后输出，再裁决是否推送候选 | 当前远端 check pending，不合并、不推送候选；不用旧 head 或本地结果代偿 |
+| #199 exact Windows teardown/lifecycle 证据 | PROBE | #199/#202 新 exact jobs 已取消；重复 #202 日志证明继承的 E09-C 用例存在 `EBUSY` cleanup。修复后等待新 exact Windows CI，确认 deterministic graceful teardown 能真实退出；下游平台断言另由 #202 所有 | 新 exact CI 全绿前不合并；不用旧绿或本地结果代偿 |
