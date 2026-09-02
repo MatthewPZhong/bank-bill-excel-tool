@@ -23,6 +23,7 @@
 | raw number lexeme 在 `JSON.parse` 前必须保留并验证。 | Reviewer P1 指出账号样式指数下溢可在 parse 后变成 `0`，使 privacy/schema 失去原 token 证据。 | 仅验证 JSON number 语法；或 parse 后再看 `Number`值。 | token 最长 64；账号长 significand 返固定脱敏 code；指数、下溢、`-0`、不安全/非canonical 表示拒绝；canonical finite 负数/小数不在 lexer 误伤，由冻结 schema 继续 fail closed。 |
 | CommonJS authority 使用 exact `.js` 路径，并把实际审计根闭包纳入加载前后双 guard。 | 替代 Reviewer P1 证明 ignored 无扩展 `runtime` 会优先于 tracked `runtime.js`，而普通 Git status/tree 不枚举 ignored shim。 | 只补顶层扩展名；全盘扫描 node_modules/logs；只在加载前校验。 | 顶层 repo module 的 `require.resolve` 必须等于 HEAD tracked 绝对路径；`src/`、`scripts/` 与 R3 evidence 根实际集合（含 ignored）必须与 HEAD 集合一致；加载完成后同一 guard 再验一次，nested shim 与 TOCTOU 均不能形成 PASS。 |
 | Node 22 历史 exact replay 只在嵌套子进程禁用 `ExperimentalWarning` 类别。 | immutable exact suite 的 failure contract 冻结 `stderr=''`，Node 22 加载 `node:sqlite` 会在 validator 已正确返回前写入无业务内容的 runtime warning，使 5 个反例假失败。 | `NODE_NO_WARNINGS` 全局静默；修改历史 exact commit；放宽为忽略任意 stderr。 | 当前 wrapper 仅给 historical replay 子进程追加 `--disable-warning=ExperimentalWarning`；普通 warning、validator stderr、敏感回显与真实 exit code 仍由原断言捕获。 |
+| Windows 历史 exact replay 只在当前 test wrapper 内规范化临时根、Git LF checkout 与不可移植的路径/mode 观测。 | 新 exact #204 的两个独立 smoke job 均在 unit 阶段复现：outer wrapper 启动成功，但 immutable `5f9ee049…` suite 都是 `10/62`，统一前置错误为 `GIT_REPOSITORY_IDENTITY_INVALID`；日志中的 cwd 使用 `RUNNER~1`，而历史 validator 把 Git 的规范长路径与 Node lexical root 直接比较。 | 修改历史 validator/test/snapshot；放宽 Git identity/tree/index/status/content/type 门；设置全局 Git 配置；跳过 52 个级联失败。 | 当前 wrapper 使用短且可丢弃的 canonical root，控制 `TMP/TEMP/TMPDIR` 与 `core.autocrlf=false`；win32-only preload 仅转换 cwd 内 `path.relative` 分隔符并按当前 HEAD 投影 tracked writable regular file 的 POSIX mode。历史 `chmod` mode-drift 负例通过最多 20 项的进程内受控映射继续产生原错误码；不拦截 Git/child_process，不改变业务或 production gate。 |
 
 ## Assumptions
 
@@ -46,6 +47,7 @@
 | P3：E11-B direct no-active-Hold `not-committed` 只停在 `interrupted`。 | reviewed head `b91743a5073a8f66a3df38f63fc0f58126297d11` 在同一 RecoveryControl 写入执行 `mark-interrupted → begin-recovery → complete-recovery-failure`，再以显式 merge commit 传播至 E11-C、E12-A/B/C。 | E11-B `47/47 PASS`；E11/RecoveryControl 五文件矩阵 `154/154 PASS`；最终证据重建在 `d5c6242d9e3a11591a998cf02fe11c27fb01d8d1`。 | 修复 direct no-Hold 的确定性失败收口；不新增 Hold、不改变资金、receipt、Inspector、Publisher 或 production selector。 | 功能合同未变；notes/preflight/evidence catalog 已同步新 head 与人工门禁。 |
 | Windows CI：E12-C cancel timeout 被 `unref()` 后，空闲事件循环可在 shard Promise settle 前结束。 | exact E12-C head `d5c6242d…` 保持 bounded cancel timer 引用；child cancel 连续 `20/20`、E12-A/B/C 最终矩阵 `566/566`、平台/adapter/toolbox `374/374`。 | 不以测试保活句柄掩盖产品生命周期缺口；不 rerun 旧失败快照。 | `abort → terminate → exit → allSettled → Main cleanup` 必然有界可达；成功路径、资金/币种与 production selector 不变。 | 既有生命周期合同未变；E12-C notes 与 evidence catalog 已同步。 |
 | Node 22：历史 exact R3 suite 57/62，5 个失败均为 SQLite `ExperimentalWarning` 占用冻结空 stderr。 | 复现日志确认 62 项业务断言中仅 negative/decimal/privacy/topology mutation 的 CLI stderr 比较失败；wrapper 对 immutable historical replay 子进程禁用精确 warning 类别后重跑。 | 不改 validator、snapshot 或历史 commit；不忽略任意 stderr。 | 只消除 Node 版本产生的非业务噪音，机器错误码、隐私、Git authority 与 production gate 断言不变。 | 不涉及功能 Spec；本 notes 记录测试环境兼容决定。 |
+| Windows exact #204 在两条重复 workflow 中均出现 historical Git repository identity 级联失败。 | jobs `100204040344` 与 `100204045056` 均 checkout `3dc720f805ee36e95483048f9e05a9b8dca1cdf4`；lint/smoke 成功，unit 各为 `6772/6776`、1 fail/3 skip，integration 未启动；nested immutable suite 各为 `10/62`，52 项都由 repository identity 前置错误派生。 | 当前 #204 wrapper 规范化真实 temp/repo root并向全部后代固定三类 temp 变量；静态锁定历史 validator/test blobs、唯一 identity/path/mode 调用点、`2086×100644 + 2×100755` tree 与历史 candidate prefix。 | 只改当前测试层与本 notes/preflight；历史 evidence、validator、snapshot、E11/E12 runtime、金额/币种/恢复及 production selector 不变。 | 不涉及功能 Spec；真实 Windows nested `62/62` 与后续 integration 仍须由新 exact CI 闭合。 |
 
 ## Reproducible Focused Validation
 
@@ -81,6 +83,40 @@ node --test --test-concurrency=1 tests/unit/scripts/v3-2-4-release-evidence.test
 - `release-check`、`check-vars`、`scan:vars` 均按用户明确要求跳过，不能声明为 PASS。
 - Windows packaged、真实样本、资金与恢复人工复核仍是 production gate；本地及 CI 自动化不得据此开启 production。
 
+## Final v3.2.3 Exact Ancestry Propagation (2026-09-02)
+
+GitHub 上 #194 原先仍以 `v3.2.2` 为 base；在用户确认版本链应继承最终 v3.2.3 后，base 已改为 `codex/v3.2.3-r3-release-evidence-restacked`（`d12abe7ca781305aaf3eef77d8b86018261741ff`）。远端原始 #194 head `c6c7ffa5ec195eaca366120d5617e93f558f650f` 随后被 GitHub 判定为 `CONFLICTING`，冲突精确落在：
+
+- `src/main-process/background-execution/runtime.js`
+- `tests/unit/main-process/toolbox-background-generation.test.js`
+
+隔离诊断证明共同祖先是 `7577d5ae2f627619ba3f22597505c587be9867b6`。冲突来自 v3.2.3 注册 FundRecon/Duplicate/NewAccount 等公共 runtime policy，与 E11-A 注册 ReconFix policy/service 的并行改动；不涉及账号归属、金额、币种、借贷方向、幂等键或 recovery 状态迁移。旧 ready #194 `bb5592189f4cc5daaa955c157ada30e3bacac5e8` 已在其既有 merge 中保留完整 ReconFix 注册与测试期望；两处冲突文件在旧 v3.2.3 父 `07ef9efaa4434b7c729805d4a6e17bdbc273aec7` 到最终 `d12abe7c…` 之间 blob OID 完全未变。因此选择从旧 ready 链继续做 natural merge，不重新手工解释或改写业务代码。
+
+| PR | 新传播 merge head | 精确双亲 |
+| --- | --- | --- |
+| #194 | `830ed159d19d093839c3df004dc93dbc7e0f3203` | `bb559218…` + `d12abe7c…` |
+| #195 | `5746b939a3929ecdb86d0f9445d3b8b267f09cd5` | `9c2e7783…` + `830ed159…` |
+| #196 | `54f82cf9c9546e2ff49896253ecc965eb0073508` | `5ab46af9…` + `5746b939…` |
+| #198 | `4e987bd47de2774065d37dbe8c122f344db3553c` | `f8515e6f…` + `54f82cf9…` |
+| #200 | `42387341cfbe04da13e52f38e110a6bc3e62ec41` | `dc8d2115…` + `4e987bd4…` |
+| #201 | `87100f71feff13e6b5bb63c11e0aefbd49e27a9f` | `8343ae0a…` + `42387341…` |
+| #203 | `79ad7d23358ff98324787367bf51676afab2f0c0` | `eb96688d…` + `87100f71…` |
+| #204 | `724e7f7091b552462f4a2927950e9b03ad98543f` | `7d033a7f…` + `79ad7d23…` |
+
+传播 merge 完成时，八段 effective PR diff 与传播前逐段 diff 经 `git diff --name-status` 及 `git diff --full-index --binary` 逐字比较完全一致；路径数依次仍为 `11 / 9 / 26 / 14 / 17 / 11 / 16 / 19`。这证明传播 merge 只补入最终 v3.2.3 祖先，没有改变任一 E11/E12/R3.2.4 业务 patch。随后只在 #204 已有 scope 内的本文件与 `preflight.md` 追加传播/验证记录，未增加路径；八个隔离 worktree 在 merge 后均 clean、无 `MERGE_HEAD`。
+
+Reconciliation 复核结论：逐段 binary patch 相同，因此 ReconID/VCC 主键血缘、金额/币种/方向、single-writer/dual-writer、receipt/Inspector/Publisher、幂等与失败恢复语义均未变化；production、Windows、真实样本、资金及恢复人工 gate 继续保持原状态。未触发新的资金红线，但既有真实资金/恢复人工复核仍不能由本次传播关闭。
+
+最终本地验证使用官方 Node `22.18.0`，并在 detached 隔离 worktree 依照当前 `package-lock.json` 执行 `npm ci`；实际安装的 `electron-builder` 与 `app-builder-lib` 均为 `26.15.7`。共享安装树的旧 `26.8.1` 曾使 Windows NSIS 模板合同产生唯一环境假失败，该轮已作废且不计入证据。精确依赖树上的结果为：
+
+- 固定八文件串行矩阵：外层 `180/180 PASS`、`0 fail / 0 cancelled / 0 skip`；其中 immutable historical exact replay 独立 `62/62 PASS`。
+- 完整 unit：`6773/6776 PASS`、`0 fail / 3 Windows-only skip`（424 files、831 suites）；日志 `logs/unit-tests/unit-20260902-174201.log`。
+- 完整 integration：53 个脚本全部通过，`2488/2488 PASS`；runner 自动刷新的耗时表已恢复到 HEAD，未把本机时间数据纳入 PR scope。
+- smoke：PASS；`npm run check:packaged-inputs`、`npm run lint`、70 个变更 JavaScript 的 `node --check`、4 个变更 JSON 的 parse 与 `git diff --check` 均通过。
+- `release-check`、`check-vars`、`scan:vars` 按用户明确要求未运行，不能声明为 PASS。新 exact Windows CI 仍是合并前 PROBE；旧 #204 head 的失败不得代偿或外推。
+
+Blindspot pass 未发现会改变传播方案的存活问题：入口/旁路由逐段父链与 effective patch 锁定；失败/重试由普通 non-force push 的拒绝语义与 exact-head CI 审计收口；integration 的 tracked 报表副作用已被发现并恢复；production 仍为 `false/legacy/0`。剩余边界仅为新 exact CI，以及 Windows packaged、真实业务样本、资金/恢复人工门禁，后者继续阻止 production enable。
+
 ## Evidence
 
 | 证据 | 结果 | 覆盖的行为/风险 |
@@ -88,6 +124,7 @@ node --test --test-concurrency=1 tests/unit/scripts/v3-2-4-release-evidence.test
 | `node scripts/validate-v3-2-4-release-evidence.js` | 隔离 exact candidate PASS：6 actions、0 production enabled、1 个 versioned canonical authority；Windows `NOT_RUN`，资金/恢复 `PENDING_HUMAN_REVIEW`。 | snapshot、source anchors、runtime/direct/versioned policy exact equality、Git ancestor/blob/hash 与 gate 状态。 |
 | `node --test tests/unit/scripts/v3-2-4-release-evidence.test.js` | 已纳入下述固定 8 文件串行命令，整体 `241/241 PASS`、`0 fail / 0 skip`。 | production/live 回退、旧 4 Writer topology、versioned authority/action/evidence/source drift、gate 自动升级、rollback/privacy/read-only；真实 Git clone 覆盖 assume/skip、hidden blob/mode/symlink、staged+hidden、index/untracked/ignored CommonJS shim；双 guard TOCTOU、raw duplicate/malformed/oversized/depth/number canonical/privacy 与 CLI 不泄露/有界输出。 |
 | Node 22 historical exact replay compatibility | 修复前 57/62、5 fail 均为 `node:sqlite` ExperimentalWarning 与冻结空 stderr 冲突；wrapper 只在 nested immutable replay 进程禁用该 warning 类别后，官方 Node 22.18 historical exact 62/62 PASS，外层 replay 1/1 PASS。 | 不修改历史 evidence，也不隐藏普通 warning/validator stderr；确保 Node 22 可继续审计 exact 62-test suite。 |
+| 新 exact #204 Windows identity 修复本地验收 | 两个失败 job 的 exact checkout 均为 `3dc720f8…`；本地 current wrapper 在正常 temp 与精确 `RUNNER~1` symlink alias 下各外层 `1/1`、nested historical `62/62`。固定八文件矩阵 `180/180`；最终完整 unit `6773/6776`、0 fail/3 Windows-only skip（`logs/unit-tests/unit-20260902-185607.log`）；integration 53 scripts=`2488/2488`；smoke、packaged-inputs、lint、syntax、diff-check通过。 | 静态锁定 identity/separator/mode/candidate 路径合同；历史 `chmod`/symlink/blob/index/status/privacy/action-scope 负例随原 62 项完整执行。真实 Windows nested `62/62`、完整 unit 与首次可达 integration 仍只由新 exact CI 确认，本地结果不代偿。 |
 | 最终 v3.2.3 worker-exit 传播后的 v3.2.4 固定矩阵 | 官方 Node 22.18 固定 8 文件串行命令外层 180/180 PASS、0 fail/cancel/skip；其中 historical exact replay 子进程独立断言 62/62 PASS，合计保持原 241 项逻辑覆盖。 | 最终 E11/E12/R3 组合同时证明 ReconFix 正常退出、资金/恢复 fail-closed、VCC Writer/Publisher 与 evidence authority；人工资金/恢复门禁仍未由自动测试关闭。 |
 | 上述固定 8 文件 focused command | `241/241 PASS`、`0 fail / 0 skip`。 | ReconFix import/JPM/export、VCC single/query/dual Writer、公共 runtime、Git/filesystem authority 与 raw lexer hardening 回归。 |
 | `npm run test:unit` | `6823/6826 PASS`、`0 fail / 3 skip`（仅 Windows/当前环境显式跳过；420 files、831 suites）；`release-check`、`check-vars` 与 `scan:vars` 按用户要求均未运行。 | 最终父链全量 unit。 |
@@ -122,3 +159,4 @@ node --test --test-concurrency=1 tests/unit/scripts/v3-2-4-release-evidence.test
 | 未知 | 处理 | 负责人/下一步 | 合并影响 |
 | --- | --- | --- | --- |
 | Windows packaged/Excel-WPS、真实大型VCC样本/RSS、ReconFix真实JPM资金与恢复人工复核 | BLOCK（上线） | release owner / Windows与资金人工门禁 | 不阻止 evidence-only commit，阻止 production enable。 |
+| 新 #204 exact Windows historical replay、完整 unit 与首次可达 integration | PROBE；两条旧 exact job 已锁定 `RUNNER~1` identity 首错，本地兼容机制与完整 62 项负例均通过 | 普通 non-force push 后核对新 exact smoke/build；失败只读取新 exact job 日志继续隔离 | 阻止 #204 ready/merge；不得修改 historical validator/test/snapshot 或放宽 Git/production/资金门。 |
