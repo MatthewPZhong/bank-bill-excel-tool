@@ -68,7 +68,9 @@ node --test --test-concurrency=1 tests/unit/scripts/v3-2-4-release-evidence.test
 | --- | --- | --- |
 | #194 `CONFLICTING` 是否需要新的业务取舍 | PROBE（已闭合） | 精确冲突仅两处公共 runtime registry/test；旧 ready merge 已保留两边语义，且相关 v3.2.3 blob 从 `07ef9efa…` 到 `d12abe7c…` 未变。沿旧 ready 继续 natural merge，无需手改业务代码。 |
 | 最终基线传播是否改变任一 E11/E12 patch | PROBE（已闭合） | 八段新旧 `git diff --name-status` 与 `git diff --full-index --binary` 全部相同，路径数仍为 `11/9/26/14/17/11/16/19`。 |
-| 新组合在完整本地与 Windows CI 是否稳定 | PROBE（待闭合） | 先跑 frozen focused 与跨模块矩阵，再跑完整 unit/integration/smoke/static；普通 push 后只信新 exact CI。 |
+| 新组合在完整本地与 Windows CI 是否稳定 | PROBE（本地已闭合，远端待闭合） | 锁文件依赖树上 focused 外层 `180/180`（historical exact `62/62`）、完整 unit `6773/6776`（0 fail、3 Windows-only skip）、integration `2488/2488`、smoke、packaged-inputs、lint/static 全部通过；普通 push 后仍只信新 exact CI。 |
 | Windows packaged、真实样本、资金/恢复人工证据 | BLOCK（production） | 继续阻止 production enable；不阻止本次 evidence/祖先传播。 |
 
 风险优先顺序：先验证八段父链、scope 与 worktree cleanliness，再运行 ReconFix/VCC/公共 runtime focused 测试和 reconciliation 盲区检查，随后执行完整回归；任何资金语义变化、scope 偏移、失败或清理残留都停止传播，不以旧 CI 代偿。
+
+本地最终门禁已在 detached 隔离 worktree 通过 `npm ci` 锁定 `electron-builder/app-builder-lib 26.15.7` 后完成；共享旧依赖树 `26.8.1` 产生的单一 NSIS 模板失败已明确作废。integration runner 对 `rules/integration-test-policy.md` 的本机耗时刷新已恢复到 HEAD，不进入本次 scope。盲区复核未发现新的入口旁路、状态生命周期、幂等、金额/币种或恢复合同变化；新 exact Windows CI 与既有人工 production gates 仍不可由本地结果代偿。

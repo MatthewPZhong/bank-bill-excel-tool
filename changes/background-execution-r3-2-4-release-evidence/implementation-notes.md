@@ -101,9 +101,19 @@ GitHub 上 #194 原先仍以 `v3.2.2` 为 base；在用户确认版本链应继�
 | #203 | `79ad7d23358ff98324787367bf51676afab2f0c0` | `eb96688d…` + `87100f71…` |
 | #204 | `724e7f7091b552462f4a2927950e9b03ad98543f` | `7d033a7f…` + `79ad7d23…` |
 
-传播后的八段 effective PR diff 与传播前逐段 diff 经 `git diff --name-status` 及 `git diff --full-index --binary` 逐字比较完全一致；路径数依次仍为 `11 / 9 / 26 / 14 / 17 / 11 / 16 / 19`。这证明传播只补入最终 v3.2.3 祖先，没有改变任一 E11/E12/R3.2.4 业务 patch。八个隔离 worktree 在 merge 后均 clean、无 `MERGE_HEAD`；本节记录提交之后仍需重新执行 focused、完整 unit、integration、smoke、packaged-inputs、lint/static 以及新 exact Windows CI，旧 CI 不作代偿。
+传播 merge 完成时，八段 effective PR diff 与传播前逐段 diff 经 `git diff --name-status` 及 `git diff --full-index --binary` 逐字比较完全一致；路径数依次仍为 `11 / 9 / 26 / 14 / 17 / 11 / 16 / 19`。这证明传播 merge 只补入最终 v3.2.3 祖先，没有改变任一 E11/E12/R3.2.4 业务 patch。随后只在 #204 已有 scope 内的本文件与 `preflight.md` 追加传播/验证记录，未增加路径；八个隔离 worktree 在 merge 后均 clean、无 `MERGE_HEAD`。
 
 Reconciliation 复核结论：逐段 binary patch 相同，因此 ReconID/VCC 主键血缘、金额/币种/方向、single-writer/dual-writer、receipt/Inspector/Publisher、幂等与失败恢复语义均未变化；production、Windows、真实样本、资金及恢复人工 gate 继续保持原状态。未触发新的资金红线，但既有真实资金/恢复人工复核仍不能由本次传播关闭。
+
+最终本地验证使用官方 Node `22.18.0`，并在 detached 隔离 worktree 依照当前 `package-lock.json` 执行 `npm ci`；实际安装的 `electron-builder` 与 `app-builder-lib` 均为 `26.15.7`。共享安装树的旧 `26.8.1` 曾使 Windows NSIS 模板合同产生唯一环境假失败，该轮已作废且不计入证据。精确依赖树上的结果为：
+
+- 固定八文件串行矩阵：外层 `180/180 PASS`、`0 fail / 0 cancelled / 0 skip`；其中 immutable historical exact replay 独立 `62/62 PASS`。
+- 完整 unit：`6773/6776 PASS`、`0 fail / 3 Windows-only skip`（424 files、831 suites）；日志 `logs/unit-tests/unit-20260902-174201.log`。
+- 完整 integration：53 个脚本全部通过，`2488/2488 PASS`；runner 自动刷新的耗时表已恢复到 HEAD，未把本机时间数据纳入 PR scope。
+- smoke：PASS；`npm run check:packaged-inputs`、`npm run lint`、70 个变更 JavaScript 的 `node --check`、4 个变更 JSON 的 parse 与 `git diff --check` 均通过。
+- `release-check`、`check-vars`、`scan:vars` 按用户明确要求未运行，不能声明为 PASS。新 exact Windows CI 仍是合并前 PROBE；旧 #204 head 的失败不得代偿或外推。
+
+Blindspot pass 未发现会改变传播方案的存活问题：入口/旁路由逐段父链与 effective patch 锁定；失败/重试由普通 non-force push 的拒绝语义与 exact-head CI 审计收口；integration 的 tracked 报表副作用已被发现并恢复；production 仍为 `false/legacy/0`。剩余边界仅为新 exact CI，以及 Windows packaged、真实业务样本、资金/恢复人工门禁，后者继续阻止 production enable。
 
 ## Evidence
 
