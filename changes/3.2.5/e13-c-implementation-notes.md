@@ -17,6 +17,7 @@
 | Regenerate 只接受 `success + chunk_progress.complete` | modern run 的 durable output publication 在 complete 时收口；partial/data-complete/unknown 都不是可导出的稳定状态 | 只看 `runs.status=success`；允许 progress 缺失的兼容降级 | legacy unknown run 不进入 regenerate；copy 仍按原稳定文件合同兼容。 |
 | Regenerate 复用原 writer 且只读打开 DB | 资金 SQL、排序、金额/币种与 Workbook 都已在现有 writer 固化 | 重写查询/Workbook；把业务行经 Protocol 传入 Worker | Worker 在同一 read transaction 内复核 run/flow/bill/diff 摘要并调用原 writer。 |
 | Copy artifact 的业务证据定义为 source byte hash | copy 不解析/重建 workbook；对其声称 sheet/row 语义会制造虚假证据 | 为 copy 再读 XLSX；把 0/0 误报为 workbook 验证 | `businessDigest=sha256`、`sheetCount=0`、`dataRowCount=0`；Publisher 仍取得真实技术证据。 |
+| privacy allowlist 显式识别 orchestration 生成的 canonical UUID comparisonId | 随机 UUID 尾段若恰为 12 位数字会被账号型数字启发式误拒；current Windows CI 已命中该低概率分支 | 放宽所有长数字；删掉账号型数字拦截；重试碰运气 | 只豁免 `comparisonId` 键上的 canonical UUID；裸长账号、路径和敏感字段仍 fail closed。 |
 
 ## Deviations
 
@@ -37,6 +38,7 @@
 | 完整 integration | `2488/2488 PASS`（53 scripts，`379705 ms`） | 全量 integration runner 通过，并按 runner 合同自动同步 `rules/integration-test-policy.md` 的清单时间与实测耗时；未改测试集合或业务 policy。 |
 | ESLint/语法 | `npm run lint` PASS；新增/修改模块 `node --check` PASS | 源码装载与项目 lint。 |
 | Production/human gate | 两 action `production.enabled=false`；资金/恢复人工复核未关闭 | capability 完成不能被表述为 production enabled。 |
+| Windows privacy UUID 回归 | canonical UUID `00000000-0000-4000-8000-000000000000` 可发布；裸 `6222020202020202` 仍被拒绝 | 锁定随机 comparisonId 不再触发账号误报，同时保持隐私红线。 |
 
 ## Blindspot / Reconciliation
 
