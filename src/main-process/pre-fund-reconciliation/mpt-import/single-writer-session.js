@@ -113,7 +113,10 @@ function createSingleWriterSession(options) {
     if (!unit.spool || cleanupAttempted.has(unit.fileIndex)) return;
     cleanupAttempted.add(unit.fileIndex);
     cleanupMptFileSpool(unit.spool);
-    cleanupMptSpoolParents(unit.spool);
+    // Parser 可以并发生成后续 file spool；中间 unit 只删除自己的目录，避免把尚在
+    // createDirectoryLayer 的 Parser 共用 job/mpt 父目录移走。Writer 严格按
+    // fileIndex 消费，所以最后一个 unit 开始时所有 Parser outcome 都已发布。
+    if (unit.fileIndex === job.fileCount - 1) cleanupMptSpoolParents(unit.spool);
   }
 
   function finishIfComplete() {

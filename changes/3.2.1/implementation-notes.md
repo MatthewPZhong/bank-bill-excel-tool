@@ -170,3 +170,38 @@
 - `PROBE / new exact CI`：完成本地证据和普通 non-force push 后，新 exact head 必须真实执行 release-check 与后续三个 Windows contract 步骤，且 smoke/build 全部成功；本次失败永久保留，不作代偿。
 - `BLOCK / review`：三条线程只能在代码、完整回归和新 exact head 建立后以逐项证据回复并 resolve，随后重新查询确认无阻断 review。
 - `BLOCK / production`：application production 继续 disabled/legacy；本轮不授权启用 production，也不改变金额、币种、业务主键或 Workbook 内容。
+
+## 2026-09-04 main exact forward-fix
+
+### Decisions
+
+- 从失败的 exact `main@95bfe89670eeb14f51cac1e0269ee5b9fd4a7d56` 新建 `codex/release-v3.2.1-main-forward-fix-20260904`，只走前向 PR；不改写/回退 main，不 rerun 旧 run，也不 dispatch workflow。
+- Single Writer 继续在每个 unit 结束时立即删除该 file 的 spool；共享 `job/mpt/task-staging` 父目录只由严格有序的最后一个 file unit 尝试删除。中间 parser-error 不再删除仍可能被后续并发 Parser 创建/使用的父目录。
+- Main 对取消、transport interruption 和未转移 ownership 文件的清理屏障保持原样；金额、币种、业务主键、row disposition、receipt/Hold、Workbook 与 production gate 均不改变。
+
+### Assumptions
+
+- `createSingleWriterSession` 已用连续 `fileIndex` 强制单 Writer 有序消费；最后一个 unit 可开始意味着所有输入位置的 parser outcome 已发布，因此此时再删除共享父目录不会与未来 Parser 建目录并发。
+
+### Deviations
+
+- PR #223 exact tree 与 merge commit tree 完全相同，但 main exact run 的 `valid+symlink+valid` 第三个有效文件失败。现有 CI 断言只输出状态、没有第三项安全错误码；不能把该差异归类为测试抖动。
+- 确定性生命周期探针证明：旧实现处理完中间 parser-error 后会删除空的共享 job 目录，为尚未执行 `createDirectoryLayer` 的后续 Parser 打开删除/重建竞态。本次因此增加一个 Writer 层回归，并最小调整父目录 cleanup 时机。
+
+### Evidence
+
+- 远端 `main` 精确为 `95bfe89670eeb14f51cac1e0269ee5b9fd4a7d56`；其 tree 与 PR exact head `2318799f69f5ba0debf1ee84f18241121dbd96d9` 均为 `17d259c17af5614e93b94345ab4e0e70a2577f8b`，排除内容漂移。
+- main exact run `33787243083` / smoke job `100754871168` 唯一失败为 `mpt-import-e05-c.test.js:706`，完整日志 `/private/tmp/bbet-v321-main-smoke-failure-33787243083-100754871168-20260904-021358.log` 为 `4259002` bytes / SHA-256 `277af34fedcce7e426ec2d682d53d8222931d4cb270200adc2b5f593d07a6bb3`。
+- 新回归在产品修复前稳定以 `jobDir false !== true` 失败；将共享父目录 cleanup 延后到最后 file 后，新回归与原 `valid+symlink+valid` 用例定向组合为 `2/2 PASS`（official Node.js `22.18.0`）。
+- MPT e05-a/b/c 组合为 `103/103 PASS`；完整 unit 为 `6190/6193 PASS`、`0 FAIL`、`3 Windows-only SKIP`，日志 `/private/tmp/bbet-v321-main-forward-fix.EKUyil/worktree/logs/unit-tests/unit-20260904-034221.log`。
+- 完整 integration 为 `51 scripts / 2455/2455 PASS`，`npm run smoke`、`npm run lint`、changed-JS `node --check`/ESLint 与 `git diff --check` 均通过；integration policy 已恢复原 SHA-256 `65716ba574d1139d72a1ca96f45ebaa4f85efa1f8ebf3f3bc81e8f0ce1edb74e`。
+- 最小修复提交为 `abcd71dafc236a31823506f2d01ce7b9eb8c08a4`，直接父为失败的 exact `main@95bfe89670eeb14f51cac1e0269ee5b9fd4a7d56`；该提交后的 clean-HEAD `npm run check:packaged-inputs` 通过。
+- `check-vars` 只读扫描命中 `PreFundReconciliationService` / MPT risk-sensitive 范围：本差异不改 source snapshot、金额、币种、匹配键、row disposition、receipt/Hold、side DB 数据或 Workbook，仅收紧中间失败与后续有效文件之间的 spool 生命周期隔离。
+- 资金盲区复核：`fileIndex`/结果顺序与等长守恒不变；单文件失败继续 fail-closed，后续有效文件不再受共享目录提前清理污染；per-file cleanup、取消/中断后的 Main-owned cleanup 与审计错误结果均保留。
+
+### Remaining Unknowns
+
+- `CLOSED / root cause`：共享父目录被中间错误 unit 提前删除的生命周期窗口已有确定性 red/green 证据；CI 旧日志缺少第三项错误码不再阻止最小前向修复。
+- `CLOSED / full local`：MPT 组合、完整 unit/integration/smoke/lint、changed-JS 语法/ESLint、diff 与 clean-HEAD packaged-inputs 均已通过。
+- `PROBE / remote`：新 PR 的 exact smoke/build 和关键 Windows steps、合并后 main exact 均必须成功；旧 PR/main 绿灯或本地绿灯不代偿。
+- `BLOCK / production`：application production 继续 disabled/legacy；本修复不授权 production，也不得改变资金口径或恢复红线。
