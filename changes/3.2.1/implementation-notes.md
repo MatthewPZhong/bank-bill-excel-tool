@@ -66,10 +66,11 @@
 - production 冻结回读覆盖 `4` 个 mature action gates、`5` 个 v3.2.1 runtime policies 与 `2` 个 canary policies：`11/11 enabled=false`、`11/11 effectiveMode=legacy`，runtime/canary effective worker 均为 `0`；未修改 feature flag 或生产选择器。
 - 资金/恢复盲区复核：本次组合不触及金额、币种、业务主键、Workbook 或正式文件发布；同源 Hold 只在确定性 committed/not-committed/compensated 或 Provider completed 终态解除，unknown/partial/Provider incomplete/失败继续 fail-closed；Intent 终态、inspection observation 与 Hold resolution 共用一次 `writeAtomic`，定向测试同时核对持久状态和唯一 `hold-resolved` 事件。
 - 提交前 `npm run check:packaged-inputs` 按合同拒绝尚未成为 HEAD 的两个 tracked dirty 打包输入（`docs/USER_GUIDE.md`、startup recovery coordinator）；该结果不记 PASS，必须在 merge commit 后以干净 HEAD 重跑并通过。
+- natural merge commit `6930f1791c94b7baa1bf07db698af2fa48955649` 的双亲精确为 `[ea60a5c7bdaaeeb5117d1c20be1f3df2ed4b0e38, 92380fd84471b061b7a84842be7da001aa82db87]`；提交后干净 HEAD 的 `npm run check:packaged-inputs` 已通过，`build.files` `9` 条覆盖范围与 HEAD 一致。
 
 ### Remaining Unknowns
 
-- `PROBE / merge validation`：冲突组合后的 recovery/topology/metadata 定向回归、完整 unit/integration/smoke、lint 与 diff review已通过；merge commit 后仍须以干净 HEAD 重跑 packaged inputs，旧版本绿灯不代偿。
+- `CLOSED / merge validation`：冲突组合后的 recovery/topology/metadata 定向回归、完整 unit/integration/smoke、lint、diff review 与 merge commit 后干净 HEAD packaged inputs 均已通过；旧版本绿灯未用于代偿。
 - `PROBE / exact CI`：推送后必须由新 exact head 的 `smoke-test` 与 `build` 全部完成且成功，并闭合 review threads。
 - `PROBE / tag 后`：最终 Windows Release 四项资产、公开下载、摘要与更新元数据只能在 immutable annotated tag workflow 产生后回读。
 - `BLOCK / production`：本版不启用 application production；后续若需启用，必须另行提交、验证和授权。
