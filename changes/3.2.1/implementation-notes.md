@@ -195,12 +195,13 @@
 - 新回归在产品修复前稳定以 `jobDir false !== true` 失败；将共享父目录 cleanup 延后到最后 file 后，新回归与原 `valid+symlink+valid` 用例定向组合为 `2/2 PASS`（official Node.js `22.18.0`）。
 - MPT e05-a/b/c 组合为 `103/103 PASS`；完整 unit 为 `6190/6193 PASS`、`0 FAIL`、`3 Windows-only SKIP`，日志 `/private/tmp/bbet-v321-main-forward-fix.EKUyil/worktree/logs/unit-tests/unit-20260904-034221.log`。
 - 完整 integration 为 `51 scripts / 2455/2455 PASS`，`npm run smoke`、`npm run lint`、changed-JS `node --check`/ESLint 与 `git diff --check` 均通过；integration policy 已恢复原 SHA-256 `65716ba574d1139d72a1ca96f45ebaa4f85efa1f8ebf3f3bc81e8f0ce1edb74e`。
+- 最小修复提交为 `abcd71dafc236a31823506f2d01ce7b9eb8c08a4`，直接父为失败的 exact `main@95bfe89670eeb14f51cac1e0269ee5b9fd4a7d56`；该提交后的 clean-HEAD `npm run check:packaged-inputs` 通过。
 - `check-vars` 只读扫描命中 `PreFundReconciliationService` / MPT risk-sensitive 范围：本差异不改 source snapshot、金额、币种、匹配键、row disposition、receipt/Hold、side DB 数据或 Workbook，仅收紧中间失败与后续有效文件之间的 spool 生命周期隔离。
 - 资金盲区复核：`fileIndex`/结果顺序与等长守恒不变；单文件失败继续 fail-closed，后续有效文件不再受共享目录提前清理污染；per-file cleanup、取消/中断后的 Main-owned cleanup 与审计错误结果均保留。
 
 ### Remaining Unknowns
 
 - `CLOSED / root cause`：共享父目录被中间错误 unit 提前删除的生命周期窗口已有确定性 red/green 证据；CI 旧日志缺少第三项错误码不再阻止最小前向修复。
-- `CLOSED / full local`：MPT 组合、完整 unit/integration/smoke/lint、changed-JS 语法/ESLint 与 diff 已通过；提交后仍须以 clean HEAD 完成 packaged-inputs，结果不得提前记为 PASS。
+- `CLOSED / full local`：MPT 组合、完整 unit/integration/smoke/lint、changed-JS 语法/ESLint、diff 与 clean-HEAD packaged-inputs 均已通过。
 - `PROBE / remote`：新 PR 的 exact smoke/build 和关键 Windows steps、合并后 main exact 均必须成功；旧 PR/main 绿灯或本地绿灯不代偿。
 - `BLOCK / production`：application production 继续 disabled/legacy；本修复不授权 production，也不得改变资金口径或恢复红线。
