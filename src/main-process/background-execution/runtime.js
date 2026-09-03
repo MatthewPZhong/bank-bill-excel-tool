@@ -126,6 +126,14 @@ const {
 const {
   runAcquiringExistingDiffCopyInline
 } = require('../read-only-exports/acquiring/executor');
+const {
+  PENDING_BIZOP_ADAPTER_ACTION_SET,
+  PENDING_BIZOP_ADAPTER_POLICIES,
+  validatePendingBizOpAdapterResult
+} = require('./pending-bizop-adapter-policies');
+const {
+  createMatureActionAdapterBindings
+} = require('./mature-action-adapters');
 
 const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   ...TOOLBOX_GENERATION_POLICIES,
@@ -142,7 +150,8 @@ const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   ...PRE_FUND_READ_ONLY_POLICIES,
   POSITION_READ_ONLY_POLICY,
   VCC_FINANCIAL_OP_READ_ONLY_POLICY,
-  ...ACQUIRING_EXPORT_POLICIES
+  ...ACQUIRING_EXPORT_POLICIES,
+  ...PENDING_BIZOP_ADAPTER_POLICIES
 ]);
 
 function isBackgroundExecutionProductionEnabled(actionKey) {
@@ -327,16 +336,25 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
   const duplicateStartupGate = normalizeDuplicateStartupGateDescriptor(
     options.duplicateStartupGate
   );
+  const matureActionBindings = createMatureActionAdapterBindings();
   const entryRegistry = createStaticRegistry(Object.fromEntries(
-    BACKGROUND_EXECUTION_POLICIES.map((policy) => [
+    BACKGROUND_EXECUTION_POLICIES.filter((policy) => policy.entryKey !== null).map((policy) => [
       policy.entryKey,
       entryBindingForPolicy(policy, workerRoot, duplicateStartupGate)
+    ])
+  ));
+  const adapterRegistry = createStaticRegistry(Object.fromEntries(
+    PENDING_BIZOP_ADAPTER_POLICIES.map((policy) => [
+      policy.adapterKey,
+      matureActionBindings[policy.actionKey]
     ])
   ));
   const validatorEntries = {};
   for (const policy of BACKGROUND_EXECUTION_POLICIES) {
     let resultValidator;
-    if (policy.actionKey === VCC_EXPORT_SUBJECTS_ACTION) {
+    if (PENDING_BIZOP_ADAPTER_ACTION_SET.has(policy.actionKey)) {
+      resultValidator = validatePendingBizOpAdapterResult;
+    } else if (policy.actionKey === VCC_EXPORT_SUBJECTS_ACTION) {
       resultValidator = validateVccExportSubjectsResult;
     } else if (policy.actionKey === VCC_EXPORT_SINGLE_ACTION) {
       resultValidator = validateVccExportSingleResult;
@@ -386,8 +404,12 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
     validatorEntries[policy.result.validatorKey] = resultValidator;
     // Main explicitly executes the asynchronous technical/business validators before Publisher.
     // Registry bindings remain synchronous capability declarations for static contract coverage.
-    validatorEntries[policy.artifacts.technicalValidatorKey] = resultValidator;
-    validatorEntries[policy.artifacts.businessValidatorKey] = resultValidator;
+    if (policy.artifacts.technicalValidatorKey !== null) {
+      validatorEntries[policy.artifacts.technicalValidatorKey] = resultValidator;
+    }
+    if (policy.artifacts.businessValidatorKey !== null) {
+      validatorEntries[policy.artifacts.businessValidatorKey] = resultValidator;
+    }
   }
   const validatorRegistry = createStaticRegistry(validatorEntries);
   const resourceProfileRegistry = createStaticRegistry({
@@ -406,9 +428,12 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
               ? duplicateTopologyPlanner
               : (policy.actionKey === VCC_EXPORT_SUBJECTS_ACTION
                   ? vccExportTopologyPlanner
-                  : () => Object.freeze({ effectiveChildCount: 1 })))])
+                  : (PENDING_BIZOP_ADAPTER_ACTION_SET.has(policy.actionKey)
+                      ? matureActionBindings[policy.actionKey].inspectTopology
+                      : () => Object.freeze({ effectiveChildCount: 1 }))))])
   ));
   entryRegistry.freeze();
+  adapterRegistry.freeze();
   validatorRegistry.freeze();
   resourceProfileRegistry.freeze();
   topologyRegistry.freeze();
@@ -428,17 +453,20 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
     plannerKeys: [
       'planner.pre-fund:mpt-import',
       'planner.duplicate:import',
-      'planner.vcc-financial-op:export-subjects'
+      'planner.vcc-financial-op:export-subjects',
+      ...PENDING_BIZOP_ADAPTER_POLICIES.map((policy) => policy.workUnits.plannerKey)
     ],
     reducerKeys: [
       'reducer.pre-fund:mpt-import',
       'reducer.duplicate:import',
-      'reducer.vcc-financial-op:export-subjects'
+      'reducer.vcc-financial-op:export-subjects',
+      ...PENDING_BIZOP_ADAPTER_POLICIES.map((policy) => policy.workUnits.reducerKey)
     ]
   };
   const policyRegistry = createExecutionPolicyRegistry({
     policies: BACKGROUND_EXECUTION_POLICIES,
     entryRegistry,
+    adapterRegistry,
     validatorRegistry,
     resourceProfileRegistry,
     topologyRegistry,

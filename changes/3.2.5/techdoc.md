@@ -158,6 +158,8 @@ createExistingDispatchAdapter({
 
 - root engine Worker + N parser children；
 -保留fileIndex reducer/单Writer/大事务；
+- Protocol envelope exact-7 `context` 是任务身份 authority；adapter 将同一 context 绑定给既有
+  engine 的 `input.batchContext`，拒绝 caller-supplied 身份分叉；
 - existing cancellation边界映射cancel:ack；
 -事务不确定调用模块inspector。
 

@@ -29,14 +29,14 @@ function replaceExactlyOnce(source, before, after, label) {
   return source.replace(before, after);
 }
 
-test('v3.2.5 顶层合同只允许已记录的 E13-B/E13-C 证据型修订', () => {
+test('v3.2.5 顶层合同只允许已记录的 E13-B/E13-C/E13-D 证据型修订', () => {
   const frozenHashes = new Map([
     ['spec.md', '13410e4e5cf64798255cab30dd2487d4da4323eddf59d44cf2a0653e950898f2'],
     ['techdoc.md', '3fb1845979823f2c39a8e26d9d5adc5d7f3e351fda90d2f4086d6c355d17e64f']
   ]);
   const currentHashes = new Map([
-    ['spec.md', 'ebd27dd2a18af5e745d5c17059573a98934b4cb5a1f1bfe5421566ad63579191'],
-    ['techdoc.md', 'de7fb8f4fef2764932445b2de04224149f562c3e4f9f5b4e989221a8229bf129']
+    ['spec.md', '55f281aae440a4d2db125c7a6ce23b65f618964d88d3e7865acea4e2b55ac0d3'],
+    ['techdoc.md', 'ae6f48b09679d06f8d6e7ee7cab0e28053acb29d8b0a6097981070bac8930b6d']
   ]);
   const amendments = new Map([
     ['spec.md', (frozen) => {
@@ -58,8 +58,29 @@ test('v3.2.5 顶层合同只允许已记录的 E13-B/E13-C 证据型修订', () 
         '-把 Position 现有 import utility-process/child_process dispatcher 改为 thread；',
         'spec.md Position import adapter prohibition'
       );
-      return replaceExactlyOnce(
+      const pendingAdapterAmended = replaceExactlyOnce(
         importAdapterAmended,
+        '| `pending:import` | `managed` | `managed` | `thread-pool` | `job` | `existing-dispatch` | `existing-critical-protocol` | `true` | 现有 big-table engine；不额外 spawn |',
+        '| `pending:import` | `managed` | `managed` | `thread-pool` | `job` | `existing-dispatch` | `existing-critical-protocol` | `false` | 现有 big-table engine；不额外 spawn；人工资金/恢复门禁前保持 legacy |',
+        'spec.md Pending adapter production gate'
+      );
+      const bizOpAdapterAmended = replaceExactlyOnce(
+        pendingAdapterAmended,
+        '| `biz-op:import-flow` | `managed` | `managed` | `thread-pool` | `job` | `existing-dispatch` | `existing-critical-protocol` | `true` | 现有 ordered writer |',
+        '| `biz-op:import-flow` | `managed` | `managed` | `thread-pool` | `job` | `existing-dispatch` | `existing-critical-protocol` | `false` | 现有 ordered writer；人工资金/恢复门禁前保持 legacy |',
+        'spec.md BizOP adapter production gate'
+      );
+      const adapterIdentityAmended = replaceExactlyOnce(
+        bizOpAdapterAmended,
+        '-调用既有receipt/inspector并映射Lifecycle。',
+        '-调用既有receipt/inspector并映射Lifecycle。\n' +
+          '- 对 `file-batch` action，以已校验的 Protocol envelope exact-7 `context` 作为唯一 Main-owned\n' +
+          '  任务身份；既有 dispatcher 所需的 `input.batchContext` 必须由 adapter 绑定为同一身份，caller\n' +
+          '  若同时提供则必须逐字段一致，不一致时在启动既有 dispatcher 前 fail closed。',
+        'spec.md mature adapter batch identity authority'
+      );
+      return replaceExactlyOnce(
+        adapterIdentityAmended,
         '-两个action应使用不同actionKey，避免运行时猜测策略。',
         '-两个action应使用不同actionKey，避免运行时猜测策略。\n\n' +
           'Current-tree 分类结论：\n\n' +
@@ -88,8 +109,17 @@ test('v3.2.5 顶层合同只允许已记录的 E13-B/E13-C 证据型修订', () 
           '-参与 Workbook 语义的模板或受管归档文件 SHA-256/byteSize authority；Main 与 Worker 均须复核，不能只冻结路径；',
         'techdoc.md template/archive evidence'
       );
-      return replaceExactlyOnce(
+      const adapterIdentityAmended = replaceExactlyOnce(
         sourceAuthorityAmended,
+        '- root engine Worker + N parser children；\n-保留fileIndex reducer/单Writer/大事务；',
+        '- root engine Worker + N parser children；\n' +
+          '-保留fileIndex reducer/单Writer/大事务；\n' +
+          '- Protocol envelope exact-7 `context` 是任务身份 authority；adapter 将同一 context 绑定给既有\n' +
+          '  engine 的 `input.batchContext`，拒绝 caller-supplied 身份分叉；',
+        'techdoc.md big-table batch identity authority'
+      );
+      return replaceExactlyOnce(
+        adapterIdentityAmended,
         '→ Publisher\n```\n\n## 5. Existing dispatcher adapter interface',
         '→ Publisher\n```\n\n' +
           'Current-tree authority：`acquiringBillCurrency:export` 的 source 是已发布 `diff_file_path`，只走\n' +
