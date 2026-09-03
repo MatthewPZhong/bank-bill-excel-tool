@@ -597,8 +597,8 @@ test('E13-E resume 永远调用既有 resume wrapper 且不携带 multiworker wo
   const result = await bindings.runSingle.dispatch(request).promise;
   assert.equal(validateAcquiringRunAdapterResult(result), true);
   assert.equal(preparedCalls.length, 1);
-  assert.equal(preparedCalls[0].userDataDir, '/tmp/e13-e-user-data');
-  assert.equal(preparedCalls[0].mainDbPath, '/tmp/e13-e-main.sqlite');
+  assert.equal(preparedCalls[0].userDataDir, path.resolve('/tmp/e13-e-user-data'));
+  assert.equal(preparedCalls[0].mainDbPath, path.resolve('/tmp/e13-e-main.sqlite'));
   assert.equal(preparedCalls[0].runId, 17);
   assert.equal(freshnessCalls.length, 1);
   assert.equal(freshnessCalls[0].prepared, authoritativePlan);

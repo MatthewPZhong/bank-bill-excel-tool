@@ -1370,6 +1370,10 @@ test('privacy allowlist 拒绝绝对路径、raw/log/userData/Documents 字段�
     }
   };
   assert.doesNotThrow(() => assertPrivacyAllowlist(minimalReport));
+  assert.doesNotThrow(() => assertPrivacyAllowlist({
+    ...minimalReport,
+    comparisonId: '00000000-0000-4000-8000-000000000000'
+  }));
   for (const comparisonId of ['/Volumes/private/golden.sqlite', 'relative/evidence.json']) {
     assert.throws(() => assertPrivacyAllowlist({ ...minimalReport, comparisonId }), /path|隐私/i);
   }
