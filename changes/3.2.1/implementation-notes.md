@@ -161,11 +161,12 @@
 - official Node.js `22.18.0` exact-lock 完整 unit 为 `6189/6192 PASS`、`0 FAIL`、`3 Windows-only SKIP`；日志 `/private/tmp/bbet-v321-release-gated.wcheyK/worktree/logs/unit-tests/unit-20260904-005925.log`。
 - official Node.js `22.18.0` exact-lock 完整 integration 为 `51 scripts / 2455/2455 PASS`；其中 `toolbox-large-file-stream=50/50`、`toolbox-large-split-multi-sheet=31/31`、`pre-fund-reconciliation-side-db-parity=69/69`。runner 的耗时表机械改写已用 `apply_patch` 恢复，`rules/integration-test-policy.md` 精确回到 SHA-256 `65716ba574d1139d72a1ca96f45ebaa4f85efa1f8ebf3f3bc81e8f0ce1edb74e`。
 - `npm run smoke`、`npm run lint`、本轮 `8` 个 changed JavaScript 文件的 Node.js `22.18.0` `node --check` 与定向 ESLint、`git diff --check` 均通过。
+- 修复提交 `7b1a25241f289077819fd734a242fad888b6658a` 创建后，干净 HEAD 的 `npm run check:packaged-inputs` 通过，`build.files` `9` 条覆盖范围与 HEAD 一致。
 - `/check-vars` 只读清单命中 `PreFundReconciliationService` / MPT parser 风险敏感资金范围，以及 position import 进度真实性和 toolbox 行级输出完整性。复核口径为：raw source 派生保持现有金额/币种/fingerprint 单一真值；超预算只 fail closed 且不留 spool；每条 split-single 数据行保持单一输出去向；production 继续 false/legacy。未执行本地 `npm run check:vars` 或 `npm run scan:vars`。
 
 ### Remaining Unknowns
 
-- `PROBE / clean HEAD`：changed-JS 语法/ESLint、完整 unit/integration/smoke/lint 与策略文件恢复均已完成；仍需在提交后由 clean HEAD 执行 packaged-inputs，避免以 dirty 打包输入冒充最终证据。
+- `CLOSED / local`：changed-JS 语法/ESLint、完整 unit/integration/smoke/lint、策略文件恢复与修复提交后 clean-HEAD packaged-inputs 均已完成。
 - `PROBE / new exact CI`：完成本地证据和普通 non-force push 后，新 exact head 必须真实执行 release-check 与后续三个 Windows contract 步骤，且 smoke/build 全部成功；本次失败永久保留，不作代偿。
 - `BLOCK / review`：三条线程只能在代码、完整回归和新 exact head 建立后以逐项证据回复并 resolve，随后重新查询确认无阻断 review。
 - `BLOCK / production`：application production 继续 disabled/legacy；本轮不授权启用 production，也不改变金额、币种、业务主键或 Workbook 内容。
