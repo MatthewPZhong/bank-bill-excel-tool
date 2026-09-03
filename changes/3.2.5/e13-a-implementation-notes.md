@@ -18,7 +18,7 @@
 | BizOP 继续复用 frozen locator + range copy 算法 | 现有实现已锁定 side/legacy 双源与跨月 id 重映射 | 重写 SQL 或传大结果数组 | Worker 只移动执行位置，不改业务 query/writer。 |
 | Main 只冻结 run/dataset/revision 摘要，不扫描业务明细 | 初版证据会在 Main 同步读取并 hash 全量 Pending/BizOP 行，仍会阻塞 Electron；冻结合同只要求 run/dataset/revision/FilePlan | 在 Main hash 全量行；把全量行塞进 Protocol | Main 仅做点查并传固定大小 digest，Worker 在同一只读事务复核 revision 后读取业务行；v1 dataset head 失效时 fail closed。 |
 | production=false，Main 保留 legacy 分支 | Windows/真实大样本/人工资金门禁未关闭 | 合并即切 production | capability 与 effective strategy 分离。 |
-| 受审计合同包与 E13-G source-hash authority 在 Git checkout 中固定为 LF | Windows `core.autocrlf=true` 把冻结 `spec.md` 从预期 `13410e4e...` 转成 `9046fef7...`，并令 R3 checksum 与 9 个 source hash 失真；临时 fresh checkout 精确复现 | 在测试中忽略 CRLF；重算 Windows 专用 checksum；全仓禁用 `autocrlf` | 只固定已做 byte-level 审计的路径，不改变合同、业务代码或 production gate；fresh Windows checkout 与 canonical Git bytes 一致。 |
+| 受审计合同包、runtime bundled Schema 与 E13-G source-hash authority 在 Git checkout 中固定为 LF | Windows `core.autocrlf=true` 把冻结 `spec.md` 从预期 `13410e4e...` 转成 `9046fef7...`，并令 R3 checksum、runtime Schema byte equality 与 9 个 source hash 失真；两轮 exact Windows 日志及 fresh checkout 精确复现 | 在测试中忽略 CRLF；重算 Windows 专用 checksum；全仓禁用 `autocrlf` | 只固定已做 byte-level 审计的路径，不改变 Schema 内容、合同、业务代码或 production gate；fresh Windows checkout 与 canonical Git bytes 一致。 |
 
 ## Assumptions
 
@@ -47,6 +47,7 @@
 | E13-A 相关集成 | Pending data `33/33`、Pending migration `57/57`、BizOP side parity `16/16`、BizOP flow migration `73/73`，合计 `179/179 PASS` | 旧 SQL、侧库/主库双源、迁移与对账链回归。 |
 | Smoke 与语法 | `npm run smoke` PASS；全部新增/修改 JS `node --check` PASS | 应用级关键路径及代码装载语法。 |
 | Windows exact CI 换行 probe | `core.autocrlf=true` fresh checkout 将冻结 `spec.md` 精确变为失败日志中的 `9046fef7...`；新增路径级 `.gitattributes` 后必须在 fresh checkout 复验 canonical hashes | 证明失败来自 checkout 表示层而非合同内容漂移；禁止用平台专用 checksum 代偿。 |
+| Windows runtime Schema byte probe | 修复后 exact CI 的 9 个已完成 job 均只失败两项 runtime-vs-authority byte equality；actual buffer 比 authority 每行多 `0x0D`。runtime schema 目录共 4 个 JSON，统一 `eol=lf` 后需 fresh `core.autocrlf=true` checkout 复验 | 闭环首轮路径清单遗漏；目录边界只覆盖 bundled JSON Schema，不扩大到业务源码。 |
 
 ## Remaining Unknowns
 
