@@ -1037,6 +1037,7 @@ async function writeDatasetWorkbook({
   outputPath,
   archiveSources = [],
   expectedInspection = null,
+  assertSourceFresh = null,
   onProgress,
   maxDataRowsPerSheet = MAX_DATA_ROWS_PER_SHEET
 }) {
@@ -1049,6 +1050,7 @@ async function writeDatasetWorkbook({
   db.exec('BEGIN');
   transactionOpen = true;
   try {
+    if (typeof assertSourceFresh === 'function') await assertSourceFresh();
     const inspection = inspectDatasetExport(db, targetMonth, sourceType, targetKind);
     if (!inspection.exportable) throw exportError(inspection.code, inspection.message);
     assertExportInspectionEvidence(inspection, expectedInspection);

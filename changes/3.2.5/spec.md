@@ -106,7 +106,7 @@ existing-critical-protocol
 
 - 不新增匹配/对账算法；
 -不重写成熟池；
--不把Position改成worker thread；
+-不把 Position 现有 import utility-process/child_process dispatcher 改成 worker thread；只读 export 按 3.1 的 native thread-single action 执行；
 -不删除所有legacy seam；
 -不因“全量收口”强行启用并行；
 -不允许只读action解除mutation Recovery Hold。
@@ -124,7 +124,7 @@ existing-critical-protocol
 | `biz-op:export-range` | `legacy-preserved` | `managed` | `thread-single` | `job` | `native` | `main-settlement` | `false` | 区间单 workbook 串行 |
 | `pre-fund:export-channel` | `legacy-preserved` | `managed` | `thread-single` | `job` | `native` | `main-settlement` | `false` | 共享候选已提交结果只读 |
 | `pre-fund:export-audit` | `legacy-preserved` | `managed` | `thread-single` | `job` | `native` | `main-settlement` | `false` | 审计顺序/血缘不变 |
-| `position:export-run` | `legacy-preserved` | `managed` | `thread-single` | `job` | `existing-dispatch` | `main-settlement` | `false` | 具体 adapterKey 在 inventory 固化 |
+| `position:export-run` | `legacy-preserved` | `managed` | `thread-single` | `job` | `native` | `main-settlement` | `false` | 模块专用只读 Worker；不得复用 position import dispatcher |
 | `vcc-financial-op:export-audit` | `legacy-preserved` | `managed` | `thread-single` | `job` | `native` | `main-settlement` | `false` | 非主体类输出 |
 | `acquiring:copy-existing-diff` | `inline-excluded` | `managed` | `inline-async` | `job` | `native` | `main-settlement` | `false` | 已有稳定文件时只异步复制 |
 | `acquiring:export-diff-workbook` | `legacy-preserved` | `managed` | `thread-single` | `job` | `native` | `main-settlement` | `false` | 需要查询/重建时使用 |
@@ -191,7 +191,7 @@ Adapter只负责：
 -外层再spawn一个Worker；
 -复制内部Parser Pool；
 -改变nextWriteIndex/chunk merge/eligibility gate；
--把Position改为thread；
+-把 Position 现有 import utility-process/child_process dispatcher 改为 thread；
 -让旧dispatcher和Supervisor各settle一次；
 -在unknown时自动fallback。
 
