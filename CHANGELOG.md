@@ -1,8 +1,8 @@
 # Changelog
 
-## 3.2.0 - 2026-08-31（版本分支技术收口，未发布）
+## 3.2.0 - 2026-09-03（正式发布候选）
 
-> v3.2.0 建立公共后台执行 Supervisor、冻结协议与恢复控制底座，并让 VCC 财务 OP 多文件读取进入受资源治理的 parser pipeline；金额、币种、月份、事务、Workbook、幂等和正式文件发布合同保持不变。代码合并时 production enablement 仍为关闭，本条不表示已经发布到 `main`、创建 tag 或启用生产策略。
+> v3.2.0 建立公共后台执行 Supervisor、冻结协议与恢复控制底座，并让 VCC 财务 OP 多文件读取进入受资源治理的 parser pipeline；金额、币种、月份、事务、Workbook、幂等和正式文件发布合同保持不变。发布负责人已授权本版按受保护 PR、annotated tag 和 Windows Release workflow 进入正式技术发布；application production enablement 始终保持关闭。
 
 ### 公共后台执行底座与 VCC OP Pipeline
 
@@ -15,8 +15,8 @@
 
 - **版本与规范**：`package.json`、`package-lock.json` 收口为 `3.2.0`；顶层 Spec/TechDoc 与冻结基线逐字节一致。
 - **生产仍关闭**：本版只完成 capability 与审计证据，不启用新的 effective production strategy；现有用户路径继续走既有安全策略。
-- **人工门禁未代偿**：Windows packaged/退出与目录 fsync、VCC OP 真实样本、金额/币种/月份结果及资金/恢复处置仍需 release owner/业务负责人复核。自动测试不能把这些项目声明为 PASS。
-- **未执行正式发布动作**：本收口不合并 `main`、不创建 tag、不发布或启用 production；`release-check`、`check-vars`、`scan:vars` 按用户要求跳过，不能记录为 PASS。
+- **人工验收与发布后边界**：发布负责人 `MatthewPZhong` 于 2026-09-03 明确确认资金、恢复、真实业务样本及稳定窗口人工验收通过；该签字不由自动测试代替，也不泛化到未来数据。最终 GitHub Release 资产生成前无法完成的 Windows 10/11 Setup/portable、SmartScreen、离线覆盖安装与 `production/latest` canary 按 Issue #220 的发布前豁免在发布后逐项补做。
+- **发布授权与生产边界**：Issue #220 已稳定记录实际批准人、完整范围、失败规则和补测计划；本版只允许技术 Release，production strategy、feature flag 与全部 effective worker 继续 disabled/legacy。PR 与 tag workflow 必须分别通过 `smoke-test`、`build` 和内置 `release-check`；本地 `scan:vars` / `check:vars` 未运行且不得记录为 PASS，合并前改用 `check-vars` skill 对实际 diff 做只读扫描。
 
 ## 3.1.14 - 2026-08-21
 

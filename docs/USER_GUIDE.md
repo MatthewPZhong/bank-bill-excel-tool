@@ -2,7 +2,7 @@
 
 版本：`v3.2.0`
 
-> 版本说明：v3.2.0 当前是版本分支技术收口，尚未合并 `main`、创建 tag 或发布 production。公共后台执行 Supervisor、冻结协议/恢复控制与 VCC 财务 OP 多文件 parser pipeline 已具备 capability，但 effective production strategy 仍关闭，因此日常用户流程、金额/币种、月份、事务和 Excel 结果继续保持既有行为。Windows packaged/退出/fsync 与真实 VCC OP 样本仍需人工复核；自动测试不能替代这些门禁。
+> 版本说明：v3.2.0 已由发布负责人授权进入正式技术发布流程，将通过受保护 PR、唯一 annotated tag 与 Windows Release workflow 发布；application production strategy 仍关闭，因此日常用户流程、金额/币种、月份、事务和 Excel 结果继续保持既有行为。发布负责人已确认资金、恢复、真实业务样本及稳定窗口人工验收通过；最终发布资产的 Windows Setup/portable、SmartScreen、离线覆盖安装和在线更新 canary 按 Issue #220 在发布后逐项补做。
 
 > 使用提醒：v3.2.0 不新增用户开关。若出现 Recovery Hold、结果不确定或发布状态不明，应停止重跑并交由 release owner/业务负责人核对持久 receipt、任务状态和真实输出。
 
@@ -50,7 +50,7 @@
 
 > **v3.1.10 VCC 存储瘦身正式发布**：v3.1.10 已于 2026-08-17 正式发布。有效数据只保留计算、校验、幂等和最小血缘字段；原始输入由存档 artifact 保存，只有真正异常进入紧凑审计。数据管理改为六列【导出明细】，校验原表按当前有效行从已验证原件重建；历史血缘缺口可明确标记后部分导出，实体损坏则整次停止。【优化存储】通过维护模式 copy-on-write 重建数据库。三项发布门禁已明确确认 PASS，正式 tag、Release 与四项公开资产已完成回读。
 
-> **v3.2.0 公共后台执行底座与 VCC OP Pipeline**：系统已具备受资源治理的 Supervisor、冻结消息/context、operation receipt、inspector、Recovery Hold 与 artifact authority capability；VCC 财务 OP 多文件读取可并行准备 spool，但月份归约、金额/币种处理、单一 writer、事务、Excel/Workbook 结果和正式文件发布仍按既有顺序收口。production enablement 仍关闭；Windows packaged/退出/fsync、真实 VCC OP 样本和资金/恢复处置仍需人工复核，遇到不确定结果不得自行重复执行。
+> **v3.2.0 公共后台执行底座与 VCC OP Pipeline**：系统已具备受资源治理的 Supervisor、冻结消息/context、operation receipt、inspector、Recovery Hold 与 artifact authority capability；VCC 财务 OP 多文件读取可并行准备 spool，但月份归约、金额/币种处理、单一 writer、事务、Excel/Workbook 结果和正式文件发布仍按既有顺序收口。Issue #220 已授权正式技术发布，发布负责人确认本次资金、恢复、真实样本及稳定窗口人工验收通过；production enablement 继续关闭，最终 Windows Release 资产与在线更新仍按发布后计划逐项复核，遇到不确定结果不得自行重复执行。
 
 > **v3.1.14 VCC 财务 OP 大批量导入修复**：导入 VCC 充值清退、费用换汇、通道或移除归档 Pending 明细时，工作簿读取阶段继续显示“正在导入”；该类明细全部文件读取并校验完成后，状态框会切换为“正在校验并写入”，不再停留在最后一条读取行数。充值清退和 Pending 同批时会分别显示自己的阶段。点击取消后，状态框保持“正在取消导入并回滚本次未完成数据…”，不会被晚到进度覆盖。金额、币种、幂等、异常和最终结果口径均未改变。v3.1.14 已于 2026-08-21 通过 Windows Release workflow 完成正式技术发布，Setup、portable、blockmap 与 `latest.yml` 四项公开资产已独立回读；Windows packaged VCC、Windows 10/11 Setup/portable、SmartScreen、`v3.1.13 -> v3.1.14` 离线覆盖及 `production/latest` canary 仍为 `MANUAL / NOT RUN`，技术 Release 完成不是人工 PASS。
 
