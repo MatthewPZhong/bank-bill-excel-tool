@@ -1183,6 +1183,105 @@ test('Single Writer只消费validated spool、fileIndex递增且ACK后protected�
   assert.equal(fs.existsSync(mptSpoolPaths(input).manifestReady), false);
 });
 
+test('Single Writer在中间parser失败后保留共享job目录，直到末file完成再清理父目录', async () => {
+  const parentOperationKey = 'writer-parent-lifetime';
+  const firstPath = writeFile('704', [inboundRow({ reconId: 'PARENT-LIFETIME-1' })]);
+  const thirdBatch = 'MPT_INBOUND_20260708_PARENT_LIFETIME_3';
+  const thirdPath = writeFile('706', [
+    inboundRow({ batchNo: thirdBatch, reconId: 'PARENT-LIFETIME-3' })
+  ], thirdBatch);
+  const firstInput = spoolInput(firstPath, parentOperationKey, 0);
+  const middleInput = {
+    ...firstInput,
+    fileIndex: 1,
+    source: {
+      filePath: path.join(tempRoot, 'MPT_INBOUND_GATEWAY_20260708_705.txt'),
+      sourceSnapshot: null
+    }
+  };
+  const thirdInput = spoolInput(thirdPath, parentOperationKey, 2);
+  await writeMptFileSpool(firstInput);
+  writeParserOutcome(firstInput, { kind: 'spool' });
+  writeParserOutcome(middleInput, {
+    kind: 'parser-error',
+    fileResult: {
+      status: 'failed',
+      fileName: path.basename(middleInput.source.filePath),
+      code: 'PREFUND_SPOOL_CONTRACT_INVALID',
+      message: 'source.sourceSnapshot非法',
+      detailLines: []
+    }
+  });
+
+  const events = [];
+  let session;
+  session = createSingleWriterSession({
+    actionKey: 'pre-fund:mpt-import',
+    jobInput: {
+      fileCount: 3,
+      parentOperationKey,
+      producerTaskRunId: 'writer-parent-lifetime-task'
+    },
+    store: {
+      async importValidatedSpool(_spool, options) {
+        const filePath = options.fileIndex === 0 ? firstPath : thirdPath;
+        return {
+          status: 'imported',
+          batch: {
+            sourceFileName: path.basename(filePath),
+            sourceType: 'MPT_INBOUND_GATEWAY',
+            rowCount: 1,
+            excludedRowCount: 0
+          },
+          receipt: {
+            id: options.fileIndex + 1,
+            actionKey: 'pre-fund:mpt-import',
+            operationKey: options.operationKey,
+            producerTaskRunId: 'writer-parent-lifetime-task',
+            batchId: options.fileIndex + 1,
+            outcomeKind: 'inserted'
+          }
+        };
+      }
+    },
+    emit(operation, payload, unitId) {
+      events.push({ operation, payload, unitId });
+      if (operation === 'critical:ready') {
+        queueMicrotask(() => session.acknowledge(unitId, {
+          intentId: `parent-lifetime-intent-${unitId}`,
+          fileOperationKey: payload.critical.fileOperationKey
+        }));
+      }
+    }
+  });
+
+  await session.startUnit({
+    kind: 'parser-outcome', fileIndex: 0, ...deriveFileIdentity(parentOperationKey, 0),
+    spool: firstInput, datasetId: 'writer-parent-lifetime-dataset-1'
+  }, 'file:000000');
+  await session.startUnit({
+    kind: 'parser-outcome', fileIndex: 1, ...deriveFileIdentity(parentOperationKey, 1),
+    spool: middleInput, datasetId: 'writer-parent-lifetime-dataset-2'
+  }, 'file:000001');
+
+  assert.equal(
+    fs.existsSync(mptSpoolPaths(firstInput).jobDir),
+    true,
+    '中间file清理不得删除尚有后续Parser会使用的共享job目录'
+  );
+
+  await writeMptFileSpool(thirdInput);
+  writeParserOutcome(thirdInput, { kind: 'spool' });
+  await session.startUnit({
+    kind: 'parser-outcome', fileIndex: 2, ...deriveFileIdentity(parentOperationKey, 2),
+    spool: thirdInput, datasetId: 'writer-parent-lifetime-dataset-3'
+  }, 'file:000002');
+
+  const parentResult = events.find((event) => event.operation === 'job:done').payload.result;
+  assert.deepEqual(parentResult.results.map((item) => item.status), ['ok', 'failed', 'ok']);
+  assert.equal(fs.existsSync(firstInput.taskStagingDir), false);
+});
+
 test('Single Writer active pre-critical安全点接受shutdown cancel并清理，未进入store', async () => {
   const filePath = writeFile('711', [inboundRow({ reconId: 'WRITER-CANCEL' })]);
   const input = spoolInput(filePath, 'writer-cancel-parent');
