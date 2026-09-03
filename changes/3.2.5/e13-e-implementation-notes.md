@@ -20,6 +20,7 @@
 | resume 只接受 runId selector，并从 Main authority 重新准备当前 plan | blindspot 发现 caller-supplied `resumePlan.dbPath/progress/outputIntent` 可绕过 DB source、owner freshness 与持久 chunkSize 规则 | 直接透传嵌套 plan；只校验 runId；依赖未来 route 自觉 | adapter 重新执行 prepare/freshness，要求 persisted exact-7 owner 和 output intent 与当前任务一致，持久 chunkSize 优先。 |
 | 普通 terminal close 不关闭 singleton pool，force terminate 才 shutdown | pool 跨 run 复用，App before-quit/idle cleanup 是既有 owner | 每 job terminal shutdown；adapter 永不支持 hard stop | 保留 warm pool/idle 行为；超时仍可强制终止。 |
 | 三条 capability production 保持 false | Windows、真实大样本、资金/恢复人工门禁未关闭 | 以 capability 绿色自动接管 IPC | 默认 handler、op lock、File Task 与用户行为不变。 |
+| resume authority 测试按宿主 `path.resolve` 比较 canonical 路径 | adapter 合同本来就把 `userDataDir/mainDbPath` 规范为绝对路径；Windows 将 `/tmp/...` 表示为当前盘符根路径 | 把 Windows 路径硬编码进测试；取消 canonical path 断言 | 只修正跨平台预期，仍精确断言 Main-owned authority，未改变生产路径解析。 |
 
 ## Deviations
 
@@ -42,6 +43,7 @@
 | Smoke | `npm run smoke` PASS | Acquiring `203/203`、progress `34/34`、pragma `27/27`，以及其余场景/存储/渲染 smoke 全绿。 |
 | 静态复核 | 全部变更 JS `node --check` PASS；focused ESLint PASS；`git diff --check` PASS | 无语法、lint 或 whitespace 阻断；最终提交前再复核 staged diff。 |
 | Blindspot / reconciliation final pass | dormant implementation 无未关闭 BLOCK；修复 caller resume authority 透传、exact-5/7 owner 分叉、output intent/chunkSize 漂移与结果路径 privacy allowlist | 新增查询仅为 bill 行数只读 gate；匹配、金额/币种、行序、事务、side→Main mirror、cancel/recovery 与默认入口零漂移；资金/恢复人工门禁保持。 |
+| Windows resume canonical-path 回归 | current exact CI 的唯一 E13-E 断言差异为 `D:\\tmp\\...` 对 `/tmp/...`；改用 `path.resolve` 后定向测试仍完整验证 userData/main DB authority | 不触及 workerCount、resume wrapper、持久 progress/output intent 或 production gate。 |
 
 ## Remaining Unknowns
 
