@@ -29,14 +29,14 @@ function replaceExactlyOnce(source, before, after, label) {
   return source.replace(before, after);
 }
 
-test('v3.2.5 顶层合同只允许已记录的 E13-B/E13-C/E13-D/E13-E/E13-F 证据型修订', () => {
+test('v3.2.5 顶层合同只允许已记录的 E13-B/E13-C/E13-D/E13-E/E13-F/E13-G 证据型修订', () => {
   const frozenHashes = new Map([
     ['spec.md', '13410e4e5cf64798255cab30dd2487d4da4323eddf59d44cf2a0653e950898f2'],
     ['techdoc.md', '3fb1845979823f2c39a8e26d9d5adc5d7f3e351fda90d2f4086d6c355d17e64f']
   ]);
   const currentHashes = new Map([
-    ['spec.md', 'd5b58458c0a2316f742b8ba6c23552004c7b1094a587731714ca469ac343b6a2'],
-    ['techdoc.md', '5ee46941f93a2548fbb1b4d8e444deb9ba97417f8651f9062ee1e453c31aa7a2']
+    ['spec.md', 'd223b7ad422b904e2af573f99ae35f2a169c2a27cdc8dbbf8cc2431227c1244f'],
+    ['techdoc.md', 'f63e12205e67c3a483c20d4d85940b2bc494113c730d96cbd3ac749ca8c19933']
   ]);
   const amendments = new Map([
     ['spec.md', (frozen) => {
@@ -117,8 +117,24 @@ test('v3.2.5 顶层合同只允许已记录的 E13-B/E13-C/E13-D/E13-E/E13-F 证
         '| `position:import` | `legacy-preserved` | `managed` | `utility-process` | `job` | `existing-dispatch` | `existing-critical-protocol` | `false` | 保留 prepare/grant/apply/recovery；root phase + 最多 1 个 schema child |',
         'spec.md Position import topology'
       );
-      const resourceAuthorityAmended = replaceExactlyOnce(
+      const deferredLegacyAmended = replaceExactlyOnce(
         positionTopologyAmended,
+        '| `position:import` | `legacy-preserved` | `managed` | `utility-process` | `job` | `existing-dispatch` | `existing-critical-protocol` | `false` | 保留 prepare/grant/apply/recovery；root phase + 最多 1 个 schema child |\n\n' +
+          '`adapterKey`、`entryKey`、`inspectorKey` 等必须在机器可读 Registry fixture 中给出，不能写“native 或 existing-dispatch”“模块现有映射”“job/service”等非 canonical 值。',
+        '| `position:import` | `legacy-preserved` | `managed` | `utility-process` | `job` | `existing-dispatch` | `existing-critical-protocol` | `false` | 保留 prepare/grant/apply/recovery；root phase + 最多 1 个 schema child |\n\n' +
+          '### 3.3 E13-G 显式保留的 deferred legacy 入口\n\n' +
+          '| actionKey | currentDisposition | targetDisposition | mode | lifetime | adapterKind | commit.kind | production.enabled（代码合并时） | 说明 |\n' +
+          '| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n' +
+          '| `pre-fund:bank-import` | `legacy-preserved` | `legacy-preserved` | `inline-async` | `job` | `existing-dispatch` | `none` | `false` | 保留 Main/TaskPolicy 原入口；没有 Runtime capability，不由 MPT import 代偿 |\n' +
+          '| `pre-fund:run` | `legacy-preserved` | `legacy-preserved` | `inline-async` | `job` | `existing-dispatch` | `none` | `false` | 保留 Main/TaskPolicy 原入口；没有 Runtime capability，不由 export action 代偿 |\n\n' +
+          '这里的 `commit.kind=none` 只表示 background-execution 平台不接管这两个 deferred action 的\n' +
+          '提交/恢复协议，不表示旧业务路径无数据库写入。其 Effective Production Strategy 必须保持\n' +
+          '`legacy`、worker count=0，资金与恢复门禁不能由其他 PreFund action 的绿色证据替代。\n\n' +
+          '`adapterKey`、`entryKey`、`inspectorKey` 等必须在机器可读 Registry fixture 中给出，不能写“native 或 existing-dispatch”“模块现有映射”“job/service”等非 canonical 值。',
+        'spec.md E13-G deferred legacy actions'
+      );
+      const resourceAuthorityAmended = replaceExactlyOnce(
+        deferredLegacyAmended,
         '`adapterKey`、`entryKey`、`inspectorKey` 等必须在机器可读 Registry fixture 中给出，不能写“native 或 existing-dispatch”“模块现有映射”“job/service”等非 canonical 值。',
         '`adapterKey`、`entryKey`、`inspectorKey` 等必须在机器可读 Registry fixture 中给出，不能写“native 或 existing-dispatch”“模块现有映射”“job/service”等非 canonical 值。\n\n' +
           'Acquiring current-tree topology 以真实 dispatcher 为权威：import 的 root Worker 由 phase 计费，最多\n' +
@@ -219,7 +235,7 @@ test('v3.2.5 顶层合同只允许已记录的 E13-B/E13-C/E13-D/E13-E/E13-F 证
           '  才关闭；side-DB main mirror 继续由 `runCheckViaSideDb`/`resumeRunCheck` 完成；',
         'techdoc.md Acquiring adapter topology and authority'
       );
-      return replaceExactlyOnce(
+      const positionAdapterAmended = replaceExactlyOnce(
         acquiringAdapterAmended,
         '### Position\n\n' +
           '- mode=`utility-process`；\n' +
@@ -248,6 +264,20 @@ test('v3.2.5 顶层合同只允许已记录的 E13-B/E13-C/E13-D/E13-E/E13-F 证
           '- journal/ledger 是 `existing-critical-protocol` 证据。E13-F 不替换默认 IPC/FilePlan/pending 编排，\n' +
           '  实际 route authority、Windows 与资金/恢复人工门禁完成前 production snapshot 保持 legacy。',
         'techdoc.md Position adapter topology and authority'
+      );
+      return replaceExactlyOnce(
+        positionAdapterAmended,
+        '## 6. Action Manifest / AST gate\n\n推荐每个注册点：',
+        '## 6. Action Manifest / AST gate\n\n' +
+          'E13-G 必须把 `pre-fund:bank-import` 与 `pre-fund:run` 作为两个独立 canonical action 纳入\n' +
+          'Action Manifest、legacy pair、Registry coverage surface、Capability Inventory 与 Effective\n' +
+          'Strategy。两者当前只\n' +
+          '绑定真实 Main/TaskPolicy 入口：`runtimeRegistered=false`、`handlerRoute=legacy-main`、\n' +
+          '`effectiveMode=legacy`、worker count=0，并且不得写入冻结 Runtime Policy Registry。Manifest\n' +
+          '中的 `legacy-only` 只表示平台未接管旧 mutation/恢复协议；不得据此省略业务资金/恢复人工\n' +
+          '复核，也不得用 MPT/export capability 伪造 coverage。\n\n' +
+          '推荐每个注册点：',
+        'techdoc.md E13-G deferred legacy coverage'
       );
     }]
   ]);

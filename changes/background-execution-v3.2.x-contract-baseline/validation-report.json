@@ -1,6 +1,6 @@
 {
   "reportVersion": 17,
-  "generatedAt": "2026-08-24T15:44:29.955317+00:00",
+  "generatedAt": "2026-08-30T19:38:58.208065+00:00",
   "status": "PASS",
   "command": "PYTHON_BIN=<python3> changes/background-execution/validation/run-validation.sh --authority-mode repo --base-ref origin/v3.2.0",
   "pythonVersion": "3.14.3",
@@ -15,11 +15,11 @@
   "contractAuthority": {
     "path": "changes/background-execution/recovery-contract-authority.v1.json",
     "contractVersion": 1,
-    "revision": 1,
-    "genesis": true,
+    "revision": 2,
+    "genesis": false,
     "approvalStatus": "PENDING_HUMAN_REVIEW",
     "gitGenesisRequiresVerifiedPreviousAbsence": true,
-    "bindingMapSha256": "c217253cea4ccc377f030ff5119191a98e8e9c965853c9d9419fdedef9eef0ba",
+    "bindingMapSha256": "5c9ee53437d487a94ddb0f0d236dec7b07d4545452c9ebe3c6e98593de209ff2",
     "taskPolicyInventorySha256": "9538102480f1a714f3839547f294fbe6fd1c19384734addd89dc0ca6e1dbb368",
     "resultKnownAnswerSha256": "1ced39a559f93c787da4d520e37dc0a4513c27dd9b60a4c229509e741b5ec039",
     "humanRedlineReviewStatus": "PENDING_HUMAN_REVIEW",
@@ -27,25 +27,25 @@
   },
   "authorityTrust": {
     "source": {
-      "mode": "repo-merge-base-genesis",
+      "mode": "repo-merge-base-previous",
       "requestedAuthorityMode": "repo",
-      "evidenceClass": "merge-base-verified-previous-absent",
+      "evidenceClass": "merge-base-previous",
       "mergeEvidence": true,
-      "previousAbsenceVerified": true,
-      "source": "f7c4d5aadc93ed44f8d1b7cf48be7050a826e6e9:changes/background-execution-v3.2.x-contract-baseline/changes/background-execution/recovery-contract-authority.v1.json",
+      "previousAbsenceVerified": false,
+      "source": "9b9887c152dd7ff1a784a5a5ba31d6d485dffd04:changes/background-execution-v3.2.x-contract-baseline/changes/background-execution/recovery-contract-authority.v1.json",
       "baseRef": "origin/v3.2.0",
-      "mergeBase": "f7c4d5aadc93ed44f8d1b7cf48be7050a826e6e9",
+      "mergeBase": "9b9887c152dd7ff1a784a5a5ba31d6d485dffd04",
       "gitWorkspaceIdentity": {
         "expected": {
-          "topLevel": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool",
-          "gitDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git",
+          "topLevel": "/private/tmp/bbet-v325-e13g.20260831.TQR8RK/worktree",
+          "gitDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git/worktrees/worktree5",
           "commonDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git",
-          "headOid": "f7c4d5aadc93ed44f8d1b7cf48be7050a826e6e9"
+          "headOid": "0791560239398323760972fb9fe2b9cb1d409de0"
         },
-        "topLevel": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool",
-        "gitDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git",
+        "topLevel": "/private/tmp/bbet-v325-e13g.20260831.TQR8RK/worktree",
+        "gitDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git/worktrees/worktree5",
         "commonDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git",
-        "headOid": "f7c4d5aadc93ed44f8d1b7cf48be7050a826e6e9",
+        "headOid": "0791560239398323760972fb9fe2b9cb1d409de0",
         "identityMatched": true,
         "environmentPolicy": {
           "ambientGitVariables": "remove-all-GIT_*",
@@ -61,20 +61,22 @@
         "systemConfig": "disabled",
         "globalConfig": "os.devnull",
         "terminalPrompt": "disabled"
-      }
+      },
+      "byteSize": 1301,
+      "sha256": "776e3a3a37c035a4bbee1d8f1d8e2fae76e6245d4f21e950151c146fd604759f"
     },
-    "genesis": true,
+    "genesis": false,
     "approvalStatus": "PENDING_HUMAN_REVIEW",
-    "previousPresent": false,
-    "semanticPayloadChanged": null,
-    "revisionRule": "genesis-revision-1",
+    "previousPresent": true,
+    "semanticPayloadChanged": true,
+    "revisionRule": "v1-controlled-change-requires-exact-next-revision",
     "humanReviewGate": "PENDING",
     "mergeReady": false,
     "productionEnablementAllowed": false,
     "requestedAuthorityMode": "repo",
-    "evidenceClass": "merge-base-verified-previous-absent",
+    "evidenceClass": "merge-base-previous",
     "mergeEvidence": true,
-    "previousAbsenceVerified": true
+    "previousAbsenceVerified": false
   },
   "checks": [
     {
@@ -147,33 +149,33 @@
       "passed": true,
       "details": {
         "authority": "src/main-process/background-execution/action-task-binding-registry.js",
-        "authoritySourceSha256": "da9bd0d97cd8b7cb17565d8382cce00002a0ea62ee6386a533176452789fe8c5",
+        "authoritySourceSha256": "12a3024adad79df33581d192b9fb66494a6c6a72fd9c127b3fe4adc6f8455713",
         "packageSnapshot": "changes/background-execution/validation/fixtures/valid/action-manifest.v3.2.x.json",
         "productionInventorySource": "src/main-process/archive-center/task-policy-registry.js",
-        "productionInventorySha256": "ee5299dfb46d8d580f745d4761fdacef21bed72ddc84436ddb7086486c3a08de",
+        "productionInventorySha256": "5107edd2d2d76ca1284b304143b9852770676916bfdc6a0450b53ae488ed961f",
         "callSiteSource": "src/main.js",
-        "callSiteSourceSha256": "361d8acfe5a272ffa32e09e3a90b81e9f2bb6168a245423d7efcfbd1b8a8aea0",
-        "bindingMapJcsSha256": "c217253cea4ccc377f030ff5119191a98e8e9c965853c9d9419fdedef9eef0ba",
+        "callSiteSourceSha256": "760c972a6ff6a566ceb44f6f0a88fd104f3c0650e3c8402293019a9cf7a7bb28",
+        "bindingMapJcsSha256": "5c9ee53437d487a94ddb0f0d236dec7b07d4545452c9ebe3c6e98593de209ff2",
         "taskPolicyInventoryJcsSha256": "9538102480f1a714f3839547f294fbe6fd1c19384734addd89dc0ca6e1dbb368",
         "sourceContract": {
           "version": 1,
           "canonicalization": "RFC8785-JCS",
-          "sha256": "c217253cea4ccc377f030ff5119191a98e8e9c965853c9d9419fdedef9eef0ba",
-          "actionCount": 52,
+          "sha256": "5c9ee53437d487a94ddb0f0d236dec7b07d4545452c9ebe3c6e98593de209ff2",
+          "actionCount": 54,
           "taskPolicyInventoryCount": 122,
           "taskPolicyInventoryCanonicalization": "RFC8785-JCS",
           "taskPolicyInventorySha256": "9538102480f1a714f3839547f294fbe6fd1c19384734addd89dc0ca6e1dbb368",
-          "pairCount": 60,
-          "boundTaskKeyCount": 52,
-          "unboundTaskPolicyCount": 70
+          "pairCount": 61,
+          "boundTaskKeyCount": 54,
+          "unboundTaskPolicyCount": 68
         },
         "hardCounts": {
-          "expectedActionCount": 52,
+          "expectedActionCount": 54,
           "expectedTaskPolicyInventoryCount": 122,
-          "expectedPairCount": 60,
-          "expectedForwardBoundTaskKeyCount": 52,
-          "expectedUnboundTaskPolicyCount": 70,
-          "expectedProvenanceCount": 60
+          "expectedPairCount": 61,
+          "expectedForwardBoundTaskKeyCount": 54,
+          "expectedUnboundTaskPolicyCount": 68,
+          "expectedProvenanceCount": 61
         },
         "oneToManyBindings": {
           "acquiring:import": [
@@ -187,10 +189,6 @@
           "fund-recon:import": [
             "bank-statement:batch-import",
             "bank-statement:import"
-          ],
-          "pending:export-diff": [
-            "pending:diff:export-aggregate",
-            "pending:diff:export-single"
           ],
           "position:export-run": [
             "position-reconciliation:run:export",
@@ -216,10 +214,19 @@
           ]
         },
         "reverseIndexSource": "pairProvenance",
-        "reverseBoundTaskKeyCount": 52,
+        "reverseBoundTaskKeyCount": 54,
         "authorityMutationResults": {
           "swap-bank-bu-export-pair": true,
           "delete-acquiring-second-pair": true
+        },
+        "legacyOnlyBindingActions": [
+          "pre-fund:bank-import",
+          "pre-fund:run"
+        ],
+        "legacyOnlyBindingMutationResults": {
+          "missing-required-legacy-action": true,
+          "arbitrary-binding-only-action": true,
+          "legacy-action-in-runtime-registry": true
         },
         "adapterMutationResults": {
           "missing-action": true,
@@ -256,7 +263,7 @@
           "loadedRequests": [
             "./main-process/background-execution/action-task-binding-registry"
           ],
-          "resolvedTargetPath": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/main-process/background-execution/action-task-binding-registry.js",
+          "resolvedTargetPath": "/private/tmp/bbet-v325-e13g.20260831.TQR8RK/worktree/src/main-process/background-execution/action-task-binding-registry.js",
           "freshModuleLoaded": true,
           "exportIdentityMatched": true,
           "passed": true
@@ -9097,20 +9104,20 @@
         "authorityPath": "changes/background-execution/recovery-contract-authority.v1.json",
         "authorityKind": "background-execution-recovery-contract-authority",
         "contractVersion": 1,
-        "revision": 1,
-        "genesis": true,
+        "revision": 2,
+        "genesis": false,
         "approvalStatus": "PENDING_HUMAN_REVIEW",
         "canonicalization": "RFC8785-JCS",
         "actionTaskBinding": {
           "sourceContractVersion": 1,
-          "bindingMapSha256": "c217253cea4ccc377f030ff5119191a98e8e9c965853c9d9419fdedef9eef0ba",
+          "bindingMapSha256": "5c9ee53437d487a94ddb0f0d236dec7b07d4545452c9ebe3c6e98593de209ff2",
           "taskPolicyInventorySha256": "9538102480f1a714f3839547f294fbe6fd1c19384734addd89dc0ca6e1dbb368",
-          "expectedActionCount": 52,
+          "expectedActionCount": 54,
           "expectedTaskPolicyInventoryCount": 122,
-          "expectedPairCount": 60,
-          "expectedForwardBoundTaskKeyCount": 52,
-          "expectedUnboundTaskPolicyCount": 70,
-          "expectedProvenanceCount": 60
+          "expectedPairCount": 61,
+          "expectedForwardBoundTaskKeyCount": 54,
+          "expectedUnboundTaskPolicyCount": 68,
+          "expectedProvenanceCount": 61
         },
         "recoveryResultProjection": {
           "sourceContractVersion": 1,
@@ -9125,12 +9132,12 @@
         "schemaProjection": {
           "path": "changes/background-execution/recovery-contract-authority.v1.json",
           "contractVersion": 1,
-          "revision": 1,
-          "genesis": true,
+          "revision": 2,
+          "genesis": false,
           "approvalStatus": "PENDING_HUMAN_REVIEW",
           "gitGenesisRequiresVerifiedPreviousAbsence": true,
           "bindingSourceContractVersion": 1,
-          "bindingMapSha256": "c217253cea4ccc377f030ff5119191a98e8e9c965853c9d9419fdedef9eef0ba",
+          "bindingMapSha256": "5c9ee53437d487a94ddb0f0d236dec7b07d4545452c9ebe3c6e98593de209ff2",
           "taskPolicyInventorySha256": "9538102480f1a714f3839547f294fbe6fd1c19384734addd89dc0ca6e1dbb368",
           "resultSourceContractVersion": 1,
           "resultKnownAnswerSha256": "1ced39a559f93c787da4d520e37dc0a4513c27dd9b60a4c229509e741b5ec039"
@@ -9138,11 +9145,11 @@
         "manifestProjection": {
           "path": "changes/background-execution/recovery-contract-authority.v1.json",
           "contractVersion": 1,
-          "revision": 1,
-          "genesis": true,
+          "revision": 2,
+          "genesis": false,
           "approvalStatus": "PENDING_HUMAN_REVIEW",
           "gitGenesisRequiresVerifiedPreviousAbsence": true,
-          "bindingMapSha256": "c217253cea4ccc377f030ff5119191a98e8e9c965853c9d9419fdedef9eef0ba",
+          "bindingMapSha256": "5c9ee53437d487a94ddb0f0d236dec7b07d4545452c9ebe3c6e98593de209ff2",
           "taskPolicyInventorySha256": "9538102480f1a714f3839547f294fbe6fd1c19384734addd89dc0ca6e1dbb368",
           "resultKnownAnswerSha256": "1ced39a559f93c787da4d520e37dc0a4513c27dd9b60a4c229509e741b5ec039",
           "humanRedlineReviewStatus": "PENDING_HUMAN_REVIEW"
@@ -9150,18 +9157,18 @@
         "reportProjection": {
           "path": "changes/background-execution/recovery-contract-authority.v1.json",
           "contractVersion": 1,
-          "revision": 1,
-          "genesis": true,
+          "revision": 2,
+          "genesis": false,
           "approvalStatus": "PENDING_HUMAN_REVIEW",
           "gitGenesisRequiresVerifiedPreviousAbsence": true,
-          "bindingMapSha256": "c217253cea4ccc377f030ff5119191a98e8e9c965853c9d9419fdedef9eef0ba",
+          "bindingMapSha256": "5c9ee53437d487a94ddb0f0d236dec7b07d4545452c9ebe3c6e98593de209ff2",
           "taskPolicyInventorySha256": "9538102480f1a714f3839547f294fbe6fd1c19384734addd89dc0ca6e1dbb368",
           "resultKnownAnswerSha256": "1ced39a559f93c787da4d520e37dc0a4513c27dd9b60a4c229509e741b5ec039",
           "humanRedlineReviewStatus": "PENDING_HUMAN_REVIEW",
           "authorityKind": "background-execution-recovery-contract-authority"
         },
         "reportDispositionProjection": {
-          "genesis": true,
+          "genesis": false,
           "approvalStatus": "PENDING_HUMAN_REVIEW",
           "humanReviewGate": "PENDING",
           "mergeReady": false,
@@ -9169,25 +9176,25 @@
         },
         "reportProvenanceProjection": {
           "source": {
-            "mode": "repo-merge-base-genesis",
+            "mode": "repo-merge-base-previous",
             "requestedAuthorityMode": "repo",
-            "evidenceClass": "merge-base-verified-previous-absent",
+            "evidenceClass": "merge-base-previous",
             "mergeEvidence": true,
-            "previousAbsenceVerified": true,
-            "source": "f7c4d5aadc93ed44f8d1b7cf48be7050a826e6e9:changes/background-execution-v3.2.x-contract-baseline/changes/background-execution/recovery-contract-authority.v1.json",
+            "previousAbsenceVerified": false,
+            "source": "9b9887c152dd7ff1a784a5a5ba31d6d485dffd04:changes/background-execution-v3.2.x-contract-baseline/changes/background-execution/recovery-contract-authority.v1.json",
             "baseRef": "origin/v3.2.0",
-            "mergeBase": "f7c4d5aadc93ed44f8d1b7cf48be7050a826e6e9",
+            "mergeBase": "9b9887c152dd7ff1a784a5a5ba31d6d485dffd04",
             "gitWorkspaceIdentity": {
               "expected": {
-                "topLevel": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool",
-                "gitDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git",
+                "topLevel": "/private/tmp/bbet-v325-e13g.20260831.TQR8RK/worktree",
+                "gitDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git/worktrees/worktree5",
                 "commonDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git",
-                "headOid": "f7c4d5aadc93ed44f8d1b7cf48be7050a826e6e9"
+                "headOid": "0791560239398323760972fb9fe2b9cb1d409de0"
               },
-              "topLevel": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool",
-              "gitDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git",
+              "topLevel": "/private/tmp/bbet-v325-e13g.20260831.TQR8RK/worktree",
+              "gitDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git/worktrees/worktree5",
               "commonDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git",
-              "headOid": "f7c4d5aadc93ed44f8d1b7cf48be7050a826e6e9",
+              "headOid": "0791560239398323760972fb9fe2b9cb1d409de0",
               "identityMatched": true,
               "environmentPolicy": {
                 "ambientGitVariables": "remove-all-GIT_*",
@@ -9203,20 +9210,22 @@
               "systemConfig": "disabled",
               "globalConfig": "os.devnull",
               "terminalPrompt": "disabled"
-            }
+            },
+            "byteSize": 1301,
+            "sha256": "776e3a3a37c035a4bbee1d8f1d8e2fae76e6245d4f21e950151c146fd604759f"
           },
-          "genesis": true,
+          "genesis": false,
           "approvalStatus": "PENDING_HUMAN_REVIEW",
-          "previousPresent": false,
-          "semanticPayloadChanged": null,
-          "revisionRule": "genesis-revision-1",
+          "previousPresent": true,
+          "semanticPayloadChanged": true,
+          "revisionRule": "v1-controlled-change-requires-exact-next-revision",
           "humanReviewGate": "PENDING",
           "mergeReady": false,
           "productionEnablementAllowed": false,
           "requestedAuthorityMode": "repo",
-          "evidenceClass": "merge-base-verified-previous-absent",
+          "evidenceClass": "merge-base-previous",
           "mergeEvidence": true,
-          "previousAbsenceVerified": true
+          "previousAbsenceVerified": false
         },
         "reportCanonicalCommand": "PYTHON_BIN=<python3> changes/background-execution/validation/run-validation.sh --authority-mode repo --base-ref origin/v3.2.0",
         "reportBootstrapAllowed": true,
@@ -9237,25 +9246,25 @@
           "P0-recovery-control-redline-human-review-checklist.md": true
         },
         "previousAuthoritySource": {
-          "mode": "repo-merge-base-genesis",
+          "mode": "repo-merge-base-previous",
           "requestedAuthorityMode": "repo",
-          "evidenceClass": "merge-base-verified-previous-absent",
+          "evidenceClass": "merge-base-previous",
           "mergeEvidence": true,
-          "previousAbsenceVerified": true,
-          "source": "f7c4d5aadc93ed44f8d1b7cf48be7050a826e6e9:changes/background-execution-v3.2.x-contract-baseline/changes/background-execution/recovery-contract-authority.v1.json",
+          "previousAbsenceVerified": false,
+          "source": "9b9887c152dd7ff1a784a5a5ba31d6d485dffd04:changes/background-execution-v3.2.x-contract-baseline/changes/background-execution/recovery-contract-authority.v1.json",
           "baseRef": "origin/v3.2.0",
-          "mergeBase": "f7c4d5aadc93ed44f8d1b7cf48be7050a826e6e9",
+          "mergeBase": "9b9887c152dd7ff1a784a5a5ba31d6d485dffd04",
           "gitWorkspaceIdentity": {
             "expected": {
-              "topLevel": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool",
-              "gitDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git",
+              "topLevel": "/private/tmp/bbet-v325-e13g.20260831.TQR8RK/worktree",
+              "gitDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git/worktrees/worktree5",
               "commonDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git",
-              "headOid": "f7c4d5aadc93ed44f8d1b7cf48be7050a826e6e9"
+              "headOid": "0791560239398323760972fb9fe2b9cb1d409de0"
             },
-            "topLevel": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool",
-            "gitDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git",
+            "topLevel": "/private/tmp/bbet-v325-e13g.20260831.TQR8RK/worktree",
+            "gitDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git/worktrees/worktree5",
             "commonDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git",
-            "headOid": "f7c4d5aadc93ed44f8d1b7cf48be7050a826e6e9",
+            "headOid": "0791560239398323760972fb9fe2b9cb1d409de0",
             "identityMatched": true,
             "environmentPolicy": {
               "ambientGitVariables": "remove-all-GIT_*",
@@ -9271,21 +9280,23 @@
             "systemConfig": "disabled",
             "globalConfig": "os.devnull",
             "terminalPrompt": "disabled"
-          }
+          },
+          "byteSize": 1301,
+          "sha256": "776e3a3a37c035a4bbee1d8f1d8e2fae76e6245d4f21e950151c146fd604759f"
         },
         "trustModel": {
-          "genesis": true,
+          "genesis": false,
           "approvalStatus": "PENDING_HUMAN_REVIEW",
-          "previousPresent": false,
-          "semanticPayloadChanged": null,
-          "revisionRule": "genesis-revision-1",
+          "previousPresent": true,
+          "semanticPayloadChanged": true,
+          "revisionRule": "v1-controlled-change-requires-exact-next-revision",
           "humanReviewGate": "PENDING",
           "mergeReady": false,
           "productionEnablementAllowed": false,
           "requestedAuthorityMode": "repo",
-          "evidenceClass": "merge-base-verified-previous-absent",
+          "evidenceClass": "merge-base-previous",
           "mergeEvidence": true,
-          "previousAbsenceVerified": true
+          "previousAbsenceVerified": false
         },
         "futureRevisionMutationResults": {
           "full-authority-post-merge-unchanged-genesis-rev1-passes": true,
@@ -9326,7 +9337,7 @@
           "branch-mapper-kat-local-manifest-report-synchronized-anchor-unchanged": true
         },
         "coordinatedMutationDigests": {
-          "binding": "89d7371116be0628b559c15a5f515383baf3c84630cdad8a4513ae89610f3a51",
+          "binding": "bede8d282842fb056f1fa9ac0483ee5e5904a024a4ca95e1eda729e26a58f731",
           "result": "0cc5f3b60d6ea36864db2d1d391a4b9dc2134d093d12025d0e8436bdffcce826"
         },
         "errors": []
@@ -9462,7 +9473,7 @@
             "rejectionLayer": "schema"
           },
           {
-            "fixture": "nonpersistent-request-illegal-replaces",
+            "fixture": "phase-extension-illegal-replaces",
             "rejected": true,
             "schemaErrors": 1,
             "semanticErrors": 0,
@@ -9696,7 +9707,7 @@
       "name": "validation-input-hash-coverage",
       "passed": true,
       "details": {
-        "inputCount": 68,
+        "inputCount": 73,
         "expectedCheckCount": 29,
         "manifestExpectedCheckCount": 29,
         "validationReadmeEnumeratedGateCount": 29,
@@ -9720,8 +9731,8 @@
     "validRecoverySourceCount": 5,
     "validRecoveryTransitionBranchCount": 16,
     "validRecoveryObservationBranchCount": 4,
-    "hashedInputFileCount": 68,
-    "validationReadInputCount": 68
+    "hashedInputFileCount": 73,
+    "validationReadInputCount": 73
   },
   "validationReadInputs": [
     "CODEX-SPEC.md",
@@ -9738,10 +9749,15 @@
     "README.md",
     "changes/3.2.0/spec.md",
     "changes/3.2.0/techdoc.md",
+    "changes/3.2.1/implementation-notes.md",
     "changes/3.2.1/spec.md",
     "changes/3.2.1/techdoc.md",
     "changes/3.2.2/spec.md",
     "changes/3.2.2/techdoc.md",
+    "changes/3.2.3/e10-b-blindspot-checklist.md",
+    "changes/3.2.3/e10-b-implementation-notes.md",
+    "changes/3.2.3/e10-b-preflight.md",
+    "changes/3.2.3/implementation-notes.md",
     "changes/3.2.3/spec.md",
     "changes/3.2.3/techdoc.md",
     "changes/3.2.4/spec.md",
@@ -9794,42 +9810,47 @@
     "targeted-revision-manifest.json"
   ],
   "inputHashes": {
-    "CODEX-SPEC.md": "559081558891692b4b149ff6d7795690bca207fff95cab350677a46fd11e5d59",
-    "CODEX-TECHDOC.md": "41907e1384a639d7ef99fde2ca947e574f3428ac9d12921a906ab11d59fca227",
+    "CODEX-SPEC.md": "2b4954bba8c82a5125f42410827c4da45bafe6425a929731e69741b172f57c06",
+    "CODEX-TECHDOC.md": "b826d68c9908c7bca2c303a0cf1d74e6ce2f0f9ad73ade837df4aa24fc787e4e",
     "E00-F-migration-matrix.md": "271777b3072be15bc48f0f8151a19e6f6e879fa0d98e2f57930d86d37b537731",
     "P0-codex-entry-contract-final-closure-report.md": "4ba2033795afcd17aba3d843d3bff7e4dbab9aa5764f444615f8fa907c73d804",
     "P0-final-recovery-contract-closure-report.md": "92b7a5de21d15b82d144ea1608cf2c332d00ef8b28d321893551efd5fa363aa7",
     "P0-recovery-audit-atomicity-final-closure-report.md": "bb985f1adabecd4ef792815bea632c6a8a889ee95d2c720a9ff4bf28a29955f2",
-    "P0-recovery-control-identity-replay-contract-errata-report.md": "560cbcf1ae493a2b6ed8caa0bacb2414511b9a66150657451c3cfa50413e95fc",
-    "P0-recovery-control-redline-human-review-checklist.md": "00ac0d7117307d0158fe7bdef733172ce9da8bdf1508d4197bd6241486dcc90e",
+    "P0-recovery-control-identity-replay-contract-errata-report.md": "91caa1a54b575f50de48aebbd1b3cb5271593123d5c30c42ce449b75a98a6f21",
+    "P0-recovery-control-redline-human-review-checklist.md": "09ad383354df92056564780be8289e3d2f585df0dfc8068d922eefb1a502e211",
     "P0-recovery-control-transaction-observation-final-closure-report.md": "e073f7e1ceb683c2587b671d37eee2c3fd43cf3ba2d7fc7b6a5f7eb68888762d",
     "P0-recovery-source-contract-final-alignment-report.md": "22f7d8d28a5878a9dc022b74fcbb0b839931265afe6c80a27e293f0fcbc24ce4",
     "P0-targeted-closure-report.md": "90b1d31e8be3a0ef23489c48b99a4af50133590a6eb427ba9412e05d6e86b814",
-    "README.md": "7acb1d2906292cd896d990fa907e99ec84378288d049776789672eab0370124a",
+    "README.md": "7acfe2ea7297015d9b02dbdce5c51fc16e61bc12391fb70709e7ddc705fb9f73",
     "changes/3.2.0/spec.md": "d863f63a831b495d5e63d63fece1608afe9f39e8cc608f9d6ed0f39e77328a9f",
     "changes/3.2.0/techdoc.md": "c3810217c91d474a1dedc248619d441e661039bba3378da73313cdd5997f466b",
+    "changes/3.2.1/implementation-notes.md": "be132fe2d901631559531d0ba44a2141bd7304f7acd4a8a49d67022c07dbfbe6",
     "changes/3.2.1/spec.md": "79aa57ad49904c395bb7669354336d81500ff31fa3c1daf2f459ced3ac505151",
     "changes/3.2.1/techdoc.md": "613b40fd1b4a202af07d0629fcc400e5ac47c0bd141b16062d55ec0dd1139147",
     "changes/3.2.2/spec.md": "0cdf28e5310733355fb51d92818dde8fd837ee06b521a4694c0c9cc43300d47f",
     "changes/3.2.2/techdoc.md": "9fd15a46b482e6801616554978dff67a02676b437b9759e18d15fce29dcff209",
-    "changes/3.2.3/spec.md": "d7e47fa033e05b97800e07819c0128e6c5bd55e5804b5e859c3e320f95f4f9e5",
-    "changes/3.2.3/techdoc.md": "ff099865cfc6f4d935b8142eb1e48b13942b5a96a818137775bde1d7f4d5159f",
+    "changes/3.2.3/e10-b-blindspot-checklist.md": "3a9eda730d290b84267b0d8a4713c55f33f0cd671448b75073268abb88fbbcc7",
+    "changes/3.2.3/e10-b-implementation-notes.md": "5ce01f65eb09ac8e983796603c990940bb1fe3fcd724ab0386f107eef40b9f17",
+    "changes/3.2.3/e10-b-preflight.md": "eb049151a699610ec3a2df6283d4e27a27a3ca5d6546f9d0756a248b765a01ad",
+    "changes/3.2.3/implementation-notes.md": "7093b2796e7d047fa044d34cb47cc91b2dde4616cd3c59c44fe641227bdd3c76",
+    "changes/3.2.3/spec.md": "533684fe718d333456088c2511a17135ec4f479e592e94ba1dc15e7ff6a68851",
+    "changes/3.2.3/techdoc.md": "b10687d5e26f85b477eeece913c46078404a4eea175702454be9bd8b5dcda4d4",
     "changes/3.2.4/spec.md": "dad81f149405281043306f7ce735f672fa20a167b4d8de751d5b254318fac2c7",
     "changes/3.2.4/techdoc.md": "0933775b673c0023e1c273be692dbaa3e3b1aa3fab3c77192ed06be430a55829",
     "changes/3.2.5/spec.md": "13410e4e5cf64798255cab30dd2487d4da4323eddf59d44cf2a0653e950898f2",
     "changes/3.2.5/techdoc.md": "3fb1845979823f2c39a8e26d9d5adc5d7f3e351fda90d2f4086d6c355d17e64f",
-    "changes/background-execution/E00-platform-contract-v1-spec.md": "fe90b654f56614886232326f0f77a32e0bb9923d813d2748d55a2ba1a5aa0394",
-    "changes/background-execution/E00-platform-contract-v1-techdoc.md": "9d2f464a93998329a486df33ee4773671ea0daacd771eacead55af046dd32047",
-    "changes/background-execution/README.md": "2d36fcee462c9e7fafb89026a16d9acac7f15ec0010840d6ba230c703ac3d26b",
-    "changes/background-execution/platform-contract-v1.md": "003243d92fb1fb9d9706920385204ab1755596931b80866e67b408ea466cb092",
+    "changes/background-execution/E00-platform-contract-v1-spec.md": "89ebd04c1e6e0797930ea16a268a27c9dad813432cef96642090bd8ae2656fc8",
+    "changes/background-execution/E00-platform-contract-v1-techdoc.md": "39b52043cc34c58263090e7db21b36dae42af5e04c2a98ddd18fd9d7d734b2a7",
+    "changes/background-execution/README.md": "1658a1113ac765f250ee87f0029beae4d8a87b16732ee4ed53312d1ad65529af",
+    "changes/background-execution/platform-contract-v1.md": "2f3bd6501f067fd3c8886346a1faf6e1397b265ec68690a58c0e0b38b8e88917",
     "changes/background-execution/platform-contract-v1.schema.json": "e5a584903d8c88b1f6cce00cbe5e308796bed331ca476458833eb9c448f99ae8",
-    "changes/background-execution/platform-lifecycle-mapping.md": "b94db9f4ab2c7f5e960fa10a3bc1f03f86d606d8f779cd1c27eb5c1260edc811",
-    "changes/background-execution/platform-protocol-v1.schema.json": "d3f38eab7f0f5793fccc6d6f042199172c071887e386349d2559435565a99a43",
-    "changes/background-execution/platform-recovery-control-v1.schema.json": "4e51048e23dbca26043fc66575b17a5a1fc0f9b20053d2de7f82627e71f0b298",
+    "changes/background-execution/platform-lifecycle-mapping.md": "e9bf8b0160fe896a6de0fc8cb7c9528cab873a7a20a767a98eca687ea5acebfa",
+    "changes/background-execution/platform-protocol-v1.schema.json": "afcd372e783a827be44f39ca46128e3e762ff7c3b77a34b52f9fdc2d59aca93a",
+    "changes/background-execution/platform-recovery-control-v1.schema.json": "f9642fdf08a0fc6d1dfe69f7454d560e5dd680d45dcf3d2aee0997c1885018ec",
     "changes/background-execution/platform-recovery-source-v1.schema.json": "64927ed240e43f5a3d596319e95afd27eb0250856ddafdda4f7e0ff02919a9c6",
-    "changes/background-execution/recovery-contract-authority.v1.json": "776e3a3a37c035a4bbee1d8f1d8e2fae76e6245d4f21e950151c146fd604759f",
+    "changes/background-execution/recovery-contract-authority.v1.json": "2b8a1c6cea35a693f8f5b4c454ccf8422862e5c8a6b0186a620e260895be4242",
     "changes/background-execution/v3.2.x-version-split-plan.md": "27bbdde9beca98a6abbdc9902016e319c98e52775b46c3727014d628ba6f174a",
-    "changes/background-execution/validation/README.md": "e3272c929b42f85662dd657db1217c4af35fa7033dda949ab5375305e6bc3dc3",
+    "changes/background-execution/validation/README.md": "a969c60bfb4b47a347689abff04c430a364527cf9e085a4420e514804b721f7d",
     "changes/background-execution/validation/canonicalize-jcs.js": "df2cf0ca19ab982bf1466f1f475d9a295087f4f2cf9e9852b7a55d064228f824",
     "changes/background-execution/validation/fixtures/invalid/policy-action-key-mismatch.json": "03c6c5863cf94b69e1ecc865e9c42a5cff5667fb4d40e7a912ecbe80b5f6a79b",
     "changes/background-execution/validation/fixtures/invalid/policy-artifact-without-publisher.json": "a9b82ed743bf1769479ecc1259548362f82e1c746aac9069332602265c1cdaca",
@@ -9840,27 +9861,27 @@
     "changes/background-execution/validation/fixtures/invalid/policy-target-post-image-without-intent.json": "8fce013067272149b6228ddc72e5470df99f3f1b4a6351fdc25970ff3a5a4897",
     "changes/background-execution/validation/fixtures/invalid/policy-target-post-image-without-main-intent.json": "f56edd07a469fc20f5d5baec3ae073878d646909b8a2d284e91eda5a53752f78",
     "changes/background-execution/validation/fixtures/invalid/policy-worker-durable-without-recovery.json": "92e01d683d7ad57b1279c81d26401f7179afdc746b5cbd3b4b079e5f3e3e98b6",
-    "changes/background-execution/validation/fixtures/invalid/protocol-messages.invalid.v1.json": "dc5bfac78e96d54bd36e534576aaa34325438b12892bc99c9b46256e7d68ddbb",
+    "changes/background-execution/validation/fixtures/invalid/protocol-messages.invalid.v1.json": "5fec7d1a3bcdf16576e34e27998a633938d1423d2646b1ccfcb36e63ea6f4f09",
     "changes/background-execution/validation/fixtures/invalid/protocol-sequences.invalid.v1.json": "849d77eaf1ff488ed2a6398bdbb482e877342ce95aa3e412af757da61b5d900c",
     "changes/background-execution/validation/fixtures/invalid/recovery-control-requests.invalid.v1.json": "3a5f81d8a539a153e0616781f154b01ff1561222cdcd9d1d5032f109566eb91c",
     "changes/background-execution/validation/fixtures/invalid/recovery-results.invalid.v1.json": "b0f2034989df7b0a1bd007c4c6b2cf61233b5ca169a292274c7028e8b8a44856",
     "changes/background-execution/validation/fixtures/invalid/recovery-sources.invalid.v1.json": "e90cf102c3a7b59aec8b5f52cc83f571804723351571528754ee489e0e0501b7",
-    "changes/background-execution/validation/fixtures/valid/action-manifest.v3.2.x.json": "8f4c58b314b3ff739893ddf89c4a406d526228177dc8f6bde460679819bd9f56",
+    "changes/background-execution/validation/fixtures/valid/action-manifest.v3.2.x.json": "ad5e183188452cc913c0351598ae028a85400914633d32f31de2912e548fa5b6",
     "changes/background-execution/validation/fixtures/valid/canonical-json-jcs-v1.json": "ac318dda380cee1172554259894c2e850c083cac59d184d48106f68b99049f48",
     "changes/background-execution/validation/fixtures/valid/policy-registry.v3.2.x.json": "8ab98e4b7a7b0c669892f069881c25eaaf1f8241b1e7d71e5b63eed8b2c38a22",
     "changes/background-execution/validation/fixtures/valid/protocol-messages.v1.json": "ce251eff3e6d23970c95adf56796a7e617802cc5e5653c10b79bba0c406558f7",
     "changes/background-execution/validation/fixtures/valid/protocol-sequences.v1.json": "02513f28b9d0f38d1ec5a28c81f8df5f40e5332cb66e5950683e955da9f74335",
-    "changes/background-execution/validation/fixtures/valid/recovery-control-requests.v1.json": "10a6ed1413457e0bbe8f13e6fa5069728d77ed705cc712a295018c57c7ae6c1d",
+    "changes/background-execution/validation/fixtures/valid/recovery-control-requests.v1.json": "1c04863dd9af4d1e3db45691780739545e34a721d2790791854ff4d0a1dd5a6d",
     "changes/background-execution/validation/fixtures/valid/recovery-results.v1.json": "889d0701829d15abd9dd91d458cb6bb3ea49ca9b87afbb128855243a880d0c07",
     "changes/background-execution/validation/fixtures/valid/recovery-sources.v1.json": "9d27ef3f94e049c5a4602da86bb336a69e875899383b43700fde87ab48cd504b",
     "changes/background-execution/validation/fixtures/valid/static-key-manifest.v3.2.x.json": "eb95c5f3f9c83ec12abc726f95f45b47a783215ccf1c4c273417a79558dcd9fb",
     "changes/background-execution/validation/requirements-validation.txt": "756cc9e506ae4ee1a6f6c0507088b5cfc0dc8ba350fb2d2d46f1ffa72033adb6",
     "changes/background-execution/validation/run-validation.sh": "a88d936a832d3488535b88e92b58ace586693a487d1ddce529d4d24df665548c",
-    "changes/background-execution/validation/validate_background_execution_baseline.py": "96dd42066a2e71565fc1ecc56841d648a5b8f8049693d55ecfdca0c24ddc7fe7",
-    "codex-ready-revision-manifest.json": "d4bbb82a1c7fb01b71b699aceb4a87437dce2f057c905b1398e416d312a44a5a",
+    "changes/background-execution/validation/validate_background_execution_baseline.py": "288820beb6a809c3aa89548d88e87dac51b787310e8cbcd61cbdb72147012b0b",
+    "codex-ready-revision-manifest.json": "58ad76fc88fc3ad23c2d3622576bfc50d392992d3ec894dd6dc572dd4c2453c9",
     "final-recovery-contract-revision-manifest.json": "9605d3c4e225a8ded13924cd6bd8c2924ac1848b935202625706db2425f03e8f",
     "implementation-notes.md": "935ce0e32b05c21fa0a73856b318a97c28fb50b181e651833412abe60c93f794",
-    "implementation-sequence.md": "a3aee173d0597fa0a84af87034f571992dbe89ca75401b73aabf0cd49cf5d4fd",
+    "implementation-sequence.md": "191a1f7fd74955aa751e387812a3fed068c9cfd62fa22a94421f05e5b61f1cef",
     "targeted-revision-manifest.json": "0033114e3f80ffbf05a79b17314fb90971cb0bad1a113dd8b88fb5417899ac38"
   },
   "errors": []

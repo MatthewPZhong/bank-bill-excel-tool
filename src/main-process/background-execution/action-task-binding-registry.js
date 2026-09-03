@@ -6,14 +6,14 @@ const { types: { isProxy } } = require('node:util');
 const ACTION_TASK_BINDING_CONTRACT = Object.freeze({
   version: 1,
   canonicalization: 'RFC8785-JCS',
-  sha256: 'f51c0951e4c72b95fc047b0bbc364e03537d94db2728ad8412a51ab1da7deb33',
-  actionCount: 52,
+  sha256: '5c9ee53437d487a94ddb0f0d236dec7b07d4545452c9ebe3c6e98593de209ff2',
+  actionCount: 54,
   taskPolicyInventoryCount: 122,
   taskPolicyInventoryCanonicalization: 'RFC8785-JCS',
   taskPolicyInventorySha256: '9538102480f1a714f3839547f294fbe6fd1c19384734addd89dc0ca6e1dbb368',
-  pairCount: 59,
-  boundTaskKeyCount: 52,
-  unboundTaskPolicyCount: 70
+  pairCount: 61,
+  boundTaskKeyCount: 54,
+  unboundTaskPolicyCount: 68
 });
 
 // 模块内私有 literal 是 action → legacy TaskPolicy 的唯一 authority。
@@ -52,10 +52,12 @@ const ACTION_TASK_BINDINGS = Object.freeze({
     'position-reconciliation:source:apply-import',
     'position-reconciliation:source:prepare-import'
   ]),
+  'pre-fund:bank-import': Object.freeze(['pre-fund-reconciliation:import-bank']),
   'pre-fund:export-audit': Object.freeze(['pre-fund-reconciliation:export']),
   'pre-fund:export-channel': Object.freeze(['pre-fund-reconciliation:export']),
   'pre-fund:mpt-import': Object.freeze(['pre-fund-reconciliation:import-mpt']),
   'pre-fund:mpt-repair-import': Object.freeze(['pre-fund-reconciliation:mpt-errors:repair']),
+  'pre-fund:run': Object.freeze(['pre-fund-reconciliation:run']),
   'recon-fix:export': Object.freeze(['recon-id-fix:export']),
   'recon-fix:import': Object.freeze(['recon-id-fix:import']),
   'recon-fix:run-jpm': Object.freeze(['recon-id-fix:run']),

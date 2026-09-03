@@ -34,14 +34,15 @@
 | E13-F 按真实 Position import 0/1 子进程拓扑修订冻结资源声明 | bank prepare 与 confirmed apply 只运行 root 或顺序 schema→apply；source root 等待 durable grant 时最多并发一个 Main schema process | 沿用冻结 childrenMax=4；所有 intent 固定申领 1；禁止 zero-child compound | current childrenMax=1、intent child=0/1；Supervisor 允许合法 0 child 但继续拒绝负数/超上限。详见 [e13-f-preflight.md](./e13-f-preflight.md)。 |
 | E13-F 以 Main-owned selector/grant/checkpoint/owner 绑定原 dispatcher | prepared preflight 与 durable grant 都是持久 mutation 权限；caller 透传会绕过 kind/freshness/身份边界 | 直接透传 preflight/sideDb/checkpoint/token；原样返回 provider grant | exact-5/7 共有五字段一致，operation token=`taskRunId`；prepared selector 完整验证，source grant 精确 allowlist。 |
 | E13-F 取消以真实 ACK/terminal 与下一安全点为准 | raw `cancel()` true 只证明消息投递；protected schema 可拒绝即时取消，Main authorizer 可能在取消后返回 | posted 即 cancelled；schema 结束后继续 apply；authorizer 返回后继续发 grant | accepted=false 不伪造 cancelled，但已记录 job cancel 会在 schema/grant 后阻止后续 mutation。 |
+| E13-G 将 Runtime capability 与真实 legacy-only binding 面严格分层 | 盲区复核发现 PreFund bank import/run 是真实 Main/TaskPolicy 入口，但没有 Runtime capability；把它们塞入冻结 Registry 会破坏 v3.2.1/v3.2.2 authority 和历史证据 | Manifest 继续漏列；任意允许 Registry 外 action；为两个旧入口伪造 Runtime policy | Runtime Registry/冻结 Spec 保持 52 actions/59 rows；Manifest/Binding 精确为 54 actions/61 pairs，仅允许两条 exact legacy-only action，三类负向 mutant fail closed。 |
 
 ## Evidence / Deviations
 
 | 项目 | 当前结果 | 影响/后续 |
 | --- | --- | --- |
-| Frozen/current document hashes | 冻结 Spec `13410e4e…98f2`、TechDoc `3fb18459…e64f`、split plan `27bbdde9…174a`；当前 Spec `d5b58458…b6a2`、TechDoc `5ee46941…a7a2` | 冻结来源未修改；顶层仅含已记录且受 exact-once transformer 约束的 E13-B～F 证据型修订，不能宣称仍逐字节一致。 |
-| Package checksum | `61/69`，8 项漂移均有提交来源 | E13-G 前不得宣称 package integrity PASS。 |
-| Published/current validation | published historical `29/29`（68 inputs）；current tree `28/29`（73 inputs，binding/AST authority 一项失败） | 旧 report 不代偿当前树；E13-G 负责真实修复。 |
+| Frozen/current document hashes | 冻结 Spec `13410e4e…98f2`、TechDoc `3fb18459…e64f`、split plan `27bbdde9…174a`；当前 Spec `d223b7ad…244f`、TechDoc `f63e1220…9933` | 冻结来源未修改；顶层含已记录且受测试约束的 E13-B～G current-tree 修订，不能宣称仍逐字节一致。 |
+| Package checksum | `69/69 PASS`，在 current-tree validator 29/29 与最终 report 落盘后重算并逐项复验 | checksum 只证明最终 bytes 完整；本结果未被解释为额外语义授权。 |
+| Published/current validation | current tree `29/29 PASS`、0 error、73 inputs；Runtime Registry 52 actions、Spec table 59 rows；Manifest/Binding 54 actions、61 pairs | 旧历史 report 未作代偿；精确 legacy-only 例外及三类 mutant 已由当前 validator 复验。 |
 | Production/human gate | production=false；资金/恢复 `PENDING_HUMAN_REVIEW` | 本 bootstrap 不改变。 |
 | E13-A unknowns-first | summary=aggregate；Pending errors 需 managed source；Pending/BizOP stable gate 必须在 Worker read snapshot 内复核 | 进入模块专用 worker 实施；不改 legacy effective strategy。 |
 | E13-A capability validation | 定向 `18/18 PASS`；重点既有回归 `181/181 PASS`；完整单测 `6784/6787 PASS`（`0 FAIL`、`3 SKIP`）；相关集成 `179/179 PASS`；smoke PASS；Main freeze 为紧凑 run/dataset/revision 证据，Pending 大错误源采用版本 authority + 异步流式 staging | 本地 capability 已收口；production 仍为 false，Windows/真实样本/资金恢复人工门禁留到 R3.2.5。 |
@@ -56,6 +57,7 @@
 | E13-D capability/full regression | E13-D+mature adapter `16/16 PASS`；完整单测 `6824/6827 PASS`（`0 FAIL`、`3 SKIP`，日志 `unit-20260830-235725.log`）；53 个 integration 脚本 `2488/2488 PASS`（`361809 ms`）；smoke、ESLint、语法与 diff PASS；真实 Runtime/engine、CompoundLease、无 wrapper Worker、真实取消回滚、精确 result 与 exact-7 身份分叉反例均通过 | production 与默认 IPC 均未启用；Windows、真实大文件/RSS、资金/恢复人工复核留到 R3.2.5。 |
 | E13-E capability/full regression | E13-E 定向 `12/12 PASS`；mature/Acquiring/Registry/Resource/Supervisor 扩大回归 `227/227 PASS`；完整单测 `6836/6839 PASS`（`0 FAIL`、`3 SKIP`，日志 `logs/unit-tests/unit-20260831-005448.log`）；53 个 integration 脚本 `2488/2488 PASS`（`282902 ms`）；smoke、ESLint、语法与 diff PASS；真实 Parser/side DB、D31、single/resume、mirror、取消、exact-5/7 owner 与 Main-owned resume authority 均通过 | production 与默认 IPC 均未启用；Windows、30 万+真实 run/RSS、资金/恢复人工复核留到 R3.2.5。首次隔离全量运行的依赖树不符合 lockfile，改用精确 `app-builder-lib 26.15.7` 后完整复验，未把环境失败记作代码 PASS。 |
 | E13-F capability/full regression | current Spec/TechDoc hashes `d5b58458…b6a2` / `5ee46941…a7a2`；E13-F 核心 `12/12 PASS`，E13-F/mature/runtime/合同最终组合 `36/36 PASS`；完整单测 `6848/6851 PASS`（`0 FAIL`、`3 SKIP`，日志 `logs/unit-tests/unit-20260831-020452.log`）；53 个 integration 脚本 `2488/2488 PASS`（`264007 ms`）；smoke、完整 ESLint、语法与 diff PASS；R3.2.4 历史 exact evidence PASS；Windows contract `6/8 PASS`、`2 SKIP` | 0/1 topology、Main-owned absolute paths/owner/selector/grant、privacy result、protected schema、等待 authorizer 取消、同 job exact ACK、矛盾/非法 count evidence 反例已锁定。首次全量单测仅发现测试 registry 期望漏列新 action（`1 FAIL`），修复后精确 `10/10 PASS` 且最终全量 `0 FAIL`；未用失败快照代偿。Windows 两个真实 packaged canary 只可在专用环境运行，production 与默认 IPC 仍为 legacy/false，资金/恢复人工门禁未解除。 |
+| E13-G manifest/full regression | 入口盲区复核将中间 52 actions / 59 pairs 修正为最终 Manifest/Binding 54 actions / 61 pairs：补入 PreFund bank import/run 两个真实 legacy-only 入口，同时保持冻结 Runtime Registry 52 actions / 59 Spec rows；36 runtime policies、16 legacy-only、2 platform canary；6 surfaces `324/324`、production enabled=0；validator `29/29 PASS`、73 inputs；最终定向 `27/27 PASS`；unit `6857/6860 PASS`（0 FAIL、3 SKIP，`unit-20260831-032421.log`）；integration 53 scripts、`2488/2488 PASS`（349045 ms）；smoke PASS | 首次完整 unit 的 Windows NSIS 失败归因于复用旧 `app-builder-lib 26.8.1`；隔离安装 lockfile 精确 `26.15.7` 后精确 Windows contract与完整 unit均0 FAIL。随后错误把两 legacy action 写入冻结 Registry 导致 7 个历史 evidence FAIL，分层修复后历史/当前测试恢复 0 FAIL。Capability/route/production 三者保持分离，54/54 effective legacy、worker count=0；人工资金/恢复 redline 仍 PENDING，production 仍关闭。 |
 
 ## Blindspot / Reconciliation
 
@@ -84,15 +86,31 @@
 - E13-F 当前只注册 dormant capability；默认 Position IPC 仍负责 FilePlan、pending、receipt 与人工确认。Runtime 尚未注入生产 route authority，不能把 capability 测试绿色解释为 production 可启用。
 - `position-reconciliation:run:import-result` 虽被静态映射到 `position:import`，当前真实 handler 不经 Position import dispatcher；E13-G 必须如实重建 AST/provenance，不得用 E13-F 适配器覆盖关系伪造执行证据。
 - E13-G 不能通过放宽 AST/provenance gate 或仅刷新 hash 关闭 finding；必须以真实生产入口重建 coverage。
+- E13-G blindspot 已发现中间清单漏列 `pre-fund:bank-import` / `pre-fund:run`；两者必须以
+  独立 legacy-only action 进入 61-pair authority，不能由 MPT/export 的绿色结果代偿，也不能写入
+  仅描述 Runtime capability 的冻结 Registry。validator 只允许这两个 exact 例外，任意扩张 fail closed。
 - 资金、恢复、Windows、真实样本和 production enablement 保持人工门禁。
 
 ## Remaining Unknowns
 
 | 未知 | 处理 | 负责人/下一步 | 合并影响 |
 | --- | --- | --- | --- |
-| 最终 v3.2.4 远端 ancestry/CI | PROBE | 完成 #199～#207 与 #194～#204 顺序合并后建立 v3.2.5 | 未完成前不推 v3.2.5。 |
-| 真实 action/task inventory 与 provenance 差异 | PROBE | E13-G 重建 manifest/AST snapshot 和 mutants | 未 29/29、69/69 前不进 R3.2.5。 |
+| 最终 v3.2.4 远端 ancestry/CI | RESOLVED | v3.2.5 已从最终 v3.2.4 候选建立并完成 E13-A～F 精确父链 | 不再阻塞本地 v3.2.5。 |
+| 真实 action/task inventory 与 provenance 差异 | RESOLVED | E13-G 已重建 54-action/61-pair manifest、逐 pair provenance、AST/source hashes 与 mutants，current validator 29/29 | checksum 最终复验后进入 R3.2.5。 |
 | Position managed route authority 与 FilePlan/pending/receipt 全链路 | BLOCK（production） | 后续 route enablement + R3.2.5 Windows/真实样本/人工复核 | 不阻止 dormant E13-F；阻止 production。 |
 | Windows、真实文件、Excel/WPS、RSS、资金/恢复人工复核 | BLOCK（production） | release owner / Windows / 资金负责人 | 阻止 production/正式发布声明，不阻止 dormant implementation。 |
+
+## E13-G Current-tree Evidence
+
+- 初始 locked validator 已复跑为 `26/29 PASS`；3 个失败项分别是
+  `canonical-action-legacy-task-binding`、`contract-authority-anchor` 与
+  `validation-input-hash-coverage`，共同根因是历史 60-pair authority/provenance/report 未同步 E13-C
+  已记录的当前 59-pair production binding，而非其余 26 项合同失效。
+- Contract Authority transition 代码已确认：同一 v1 有意语义变化必须相对 merge-base previous 精确
+  `revision +1` 且 `genesis=false`；因此 E13-G 使用 revision 2，并保持
+  `approvalStatus=PENDING_HUMAN_REVIEW`、`mergeReady=false`、
+  `productionEnablementAllowed=false`。
+- 详细 Unknowns/决策/后续证据见 [e13-g-preflight.md](./e13-g-preflight.md) 与
+  [e13-g-implementation-notes.md](./e13-g-implementation-notes.md)。
 
 按用户明确要求，不运行 `release-check`、`check-vars` 或 `scan:vars`；这些项目不得记录为 PASS。

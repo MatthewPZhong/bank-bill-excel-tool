@@ -65,6 +65,10 @@ const {
 } = require('./recovery-hold-gate');
 const durableFile = require('./durable-file');
 const matureActionAdapters = require('./mature-action-adapters');
+const actionManifest = require('./action-manifest');
+const actionCoverage = require('./coverage-check');
+const capabilityInventory = require('./capability-inventory');
+const productionStrategySnapshot = require('./production-strategy-snapshot');
 
 module.exports = {
   ...protocol,
@@ -74,6 +78,10 @@ module.exports = {
   ...durableCanary,
   ...durableFile,
   ...matureActionAdapters,
+  ...actionManifest,
+  ...actionCoverage,
+  ...capabilityInventory,
+  ...productionStrategySnapshot,
   ...recoverySource,
   ACTION_TASK_BINDING_CONTRACT,
   ActionTaskBindingRegistryError,
