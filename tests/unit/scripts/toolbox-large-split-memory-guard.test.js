@@ -38,6 +38,16 @@ test('RSS 多样本仅对独立中位组合应用 MB 取整传播容差，paired
   const latestWindowsRunner = assessScanMemorySamples([48, 49, 49], [93, 96, 96], 3);
   const rankInversionJitter = assessScanMemorySamples([48, 49, 48], [96, 97, 97], 3);
   const stableRankInversionOverflow = assessScanMemorySamples([48, 48, 48], [97, 97, 97], 3);
+  const fiveSampleBoundaryJitter = assessScanMemorySamples(
+    [48, 47, 47, 48, 48],
+    [95, 96, 97, 96, 96],
+    3
+  );
+  const stableFiveSampleOverflow = assessScanMemorySamples(
+    [48, 48, 48, 48, 48],
+    [97, 97, 97, 97, 97],
+    3
+  );
 
   assert.equal(stable.valid, true);
   assert.equal(stable.sampleCount, 3);
@@ -95,9 +105,18 @@ test('RSS 多样本仅对独立中位组合应用 MB 取整传播容差，paired
   assert.equal(stableRankInversionOverflow.budgetMarginMedianMB, 1);
   assert.equal(stableRankInversionOverflow.linearMarginMedianMB, -47);
   assert.equal(stableRankInversionOverflow.sublinearWithinBudget, false);
+  assert.equal(fiveSampleBoundaryJitter.sampleCount, 5);
+  assert.deepEqual(fiveSampleBoundaryJitter.budgetMarginsMB, [-1, 1.5, 2.5, 0, 0]);
+  assert.equal(fiveSampleBoundaryJitter.budgetMarginMedianMB, 0);
+  assert.equal(fiveSampleBoundaryJitter.linearMarginMedianMB, -48);
+  assert.equal(fiveSampleBoundaryJitter.sublinearWithinBudget, true);
+  assert.equal(stableFiveSampleOverflow.sampleCount, 5);
+  assert.equal(stableFiveSampleOverflow.budgetMarginMedianMB, 1);
+  assert.equal(stableFiveSampleOverflow.linearMarginMedianMB, -47);
+  assert.equal(stableFiveSampleOverflow.sublinearWithinBudget, false);
 });
 
-test('RSS 对 16MB tier1 保护区与可测预算边界两侧对称追加两轮成对采样', () => {
+test('RSS 对低信号保留三组，并对可测预算边界两侧对称扩展到五组成对采样', () => {
   for (const scenario of [
     { initial: [9, 26], extra: [8, 24, 8, 23] },
     { initial: [16, 31], extra: [15, 30, 16, 31] }
@@ -122,8 +141,8 @@ test('RSS 对 16MB tier1 保护区与可测预算边界两侧对称追加两轮�
   }
 
   for (const scenario of [
-    { initial: [50, 91], extra: [51, 92, 49, 90] },
-    { initial: [50, 107], extra: [51, 108, 49, 106] }
+    { initial: [50, 91], extra: [51, 92, 49, 90, 50, 91, 50, 91] },
+    { initial: [50, 107], extra: [51, 108, 49, 106, 50, 107, 50, 107] }
   ]) {
     const calls = [];
     const results = scenario.extra.slice();
@@ -139,9 +158,16 @@ test('RSS 对 16MB tier1 保护区与可测预算边界两侧对称追加两轮�
       },
       () => {}
     );
-    assert.deepEqual(calls, ['tier1.xlsx', 'tier2.xlsx', 'tier1.xlsx', 'tier2.xlsx']);
-    assert.deepEqual(samples.tier1Samples, [scenario.initial[0], scenario.extra[0], scenario.extra[2]]);
-    assert.deepEqual(samples.tier2Samples, [scenario.initial[1], scenario.extra[1], scenario.extra[3]]);
+    assert.deepEqual(calls, [
+      'tier1.xlsx', 'tier2.xlsx', 'tier1.xlsx', 'tier2.xlsx',
+      'tier1.xlsx', 'tier2.xlsx', 'tier1.xlsx', 'tier2.xlsx'
+    ]);
+    assert.deepEqual(samples.tier1Samples, [
+      scenario.initial[0], scenario.extra[0], scenario.extra[2], scenario.extra[4], scenario.extra[6]
+    ]);
+    assert.deepEqual(samples.tier2Samples, [
+      scenario.initial[1], scenario.extra[1], scenario.extra[3], scenario.extra[5], scenario.extra[7]
+    ]);
   }
 
   const logs = [];
@@ -154,8 +180,8 @@ test('RSS 对 16MB tier1 保护区与可测预算边界两侧对称追加两轮�
     (filePath) => ({ deltaMB: filePath === 'tier1.xlsx' ? 49 : 94 }),
     (message) => logs.push(message)
   );
-  assert.deepEqual(stableWindowsSamples.tier1Samples, [49, 49, 49]);
-  assert.deepEqual(stableWindowsSamples.tier2Samples, [94, 94, 94]);
+  assert.deepEqual(stableWindowsSamples.tier1Samples, [49, 49, 49, 49, 49]);
+  assert.deepEqual(stableWindowsSamples.tier2Samples, [94, 94, 94, 94, 94]);
   assert.match(logs[0], /tier2=94MB，relative预算=97\.5MB，absolute预算=106MB，effective预算=97\.5MB/);
   const stableWindowsAssessment = assessScanMemorySamples(
     stableWindowsSamples.tier1Samples,
