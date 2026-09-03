@@ -167,6 +167,13 @@ function parseMptFileName(filePath) {
   );
 }
 
+function isMptSourceBatch(sourceType, value) {
+  if (typeof value !== 'string') return false;
+  if (sourceType === SOURCE_TYPE_INBOUND) return /^MPT_INBOUND_[0-9]{8}[A-Za-z0-9_-]*$/.test(value);
+  if (sourceType === SOURCE_TYPE_OUTBOUND) return /^MPT_OUTBOUND_[0-9]{8}[A-Za-z0-9_-]*$/.test(value);
+  return false;
+}
+
 function identifyMptHeader(fields, fileMetadata) {
   const values = fields.map(normalizeText);
   if (values.length !== 3) {
@@ -177,15 +184,12 @@ function identifyMptHeader(fields, fileMetadata) {
   }
 
   const schema = MPT_SCHEMAS[fileMetadata.sourceType];
-  const batchPattern = fileMetadata.sourceType === SOURCE_TYPE_INBOUND
-    ? /^MPT_INBOUND_[0-9]{8}[A-Za-z0-9_-]*$/
-    : /^MPT_OUTBOUND_[0-9]{8}[A-Za-z0-9_-]*$/;
   const dateCandidates = [];
   const batchCandidates = [];
   for (let index = 0; index < values.length; index += 1) {
     const value = values[index];
     if (normalizeDate(value) === fileMetadata.sourceDate) dateCandidates.push(index);
-    if (batchPattern.test(value) && value.startsWith(schema.batchPrefix)) {
+    if (isMptSourceBatch(fileMetadata.sourceType, value) && value.startsWith(schema.batchPrefix)) {
       const embedded = value.slice(schema.batchPrefix.length, schema.batchPrefix.length + 8);
       if (/^[0-9]{8}$/.test(embedded) && value.length >= schema.batchPrefix.length + 8) {
         batchCandidates.push(index);
@@ -410,6 +414,7 @@ module.exports = {
   buildGatewayFingerprint,
   compareFileSequences,
   identifyMptHeader,
+  isMptSourceBatch,
   isValidDateTime,
   normalizeDate,
   normalizeDecimalString,

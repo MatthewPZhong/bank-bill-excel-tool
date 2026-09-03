@@ -208,3 +208,115 @@
 | exact silent `/D` 修复后的真实 Windows Setup/installed/portable/uninstall 结果 | PROBE | 新 head 的 GitHub-hosted Windows packaged canary | 不得把非零或缺失身份/卸载审计当成成功；全部 PASS 前不合并 |
 | RSS 取整组合修复后的 Windows 结果 | PROBE | 新 head 的 GitHub-hosted Windows CI；必须先通过完整 smoke/release-check 才进入 packaged build | 阻断 Ready/merge，不阻断本地修复提交 |
 | 真实 Windows Setup/portable packaged canary 与资金红线签字 | BLOCK | 既有 R3 人工/Windows gate | 本 PR 不改变其 `PENDING_HUMAN_REVIEW` 状态，仍阻塞 production enablement |
+
+## PR #183 一次性 Repair Synchronize Attempt #4（2026-08-27，未触发）
+
+### Decision
+
+| 决策 | 原因与证据 | 放弃方案 | 影响 |
+| --- | --- | --- | --- |
+| 将 #182 test-only isolation commit cherry-pick 到 #183 | 原 opened CI 取消且旧 #183 head 不含最新测试宿主隔离；本地 diff 仍不触 `src/` | 用 #182 旧结果替代 #183；直接改生产 durability barrier | final head 可在 Windows 验证完整 3.2.1，生产 fail-closed 与资金/恢复合同不变 |
+| 仅为本次 synchronize 开一个单次 waiver | release owner 明确授权一次精确修复后 final gate | 放宽所有 synchronize、reopened、rerun 或 workflow_dispatch | 必须同时满足 PR #183、same-repo、R4→R3、action synchronize、attempt 1、PR commits 4 |
+| checkout 后增加旧 head 血缘屏障 | 自引用 commit SHA 无法预先写入同一 workflow；仅 commit count 不足以证明从 reviewed old head 演进 | 依赖未文档化的 event previous-head 字段 | exact event head、`962e4ae1` ancestor、`962e4ae1..HEAD == 2` 在依赖安装与 release-check 前验证 |
+
+### Evidence
+
+| 检查 | 结果 | 证明/边界 |
+| --- | --- | --- |
+| #183 原始 Actions run `32953558996` | smoke-test `CANCELLED`；build `SKIPPED` | attempt #3 不闭合 hard gate，不授权 merge 或 production |
+| #182 isolation cherry-pick | #183 本地新增 `d6d2ecf3`，相对旧 #183 head 恰好 1 个提交；相对最新 R3 base 的 PR commits 当前为 3 | 门禁合同作为唯一下一提交后，event commits 必须精确为 4，旧 head 后新增提交必须精确为 2 |
+| isolation 定向测试 | E05-A `42/42`、E05-B `38/38`、E05-C `17/17`、mixed lifecycle `5/5`、Toolbox generation `10/10`、Route DB `8/8`、mature adapters `11/11`、release evidence `11/11`；Windows contract `5 PASS / 2 SKIP` | 测试宿主能力隔离、Worker 生命周期、资金 receipt 与现有 gate 静态合同通过；不是 final release-check |
+| 全量 unit component | `6173/6176 PASS`，0 fail、3 skip | 不运行本地 `release-check` 的前提下验证跨文件收口；当时计划由远端 attempt #4 提供最终证据，后因冲突未启动并由 attempt #5 supersede |
+
+### Remaining Unknowns
+
+| 未知 | 处理 | 合并影响 |
+| --- | --- | --- |
+| 一次性 synchronize 的 Windows full gate 与 packaged build 结果 | attempt #4 因 PR conflict 未启动；该项由下方明确授权的 attempt #5 supersede | attempt #4 不满足 hard gate，不能授权 merge #183 |
+| #182 先合并后 #183 改 base 产生的新 checks | 严格顺序处理并等待自然 CI | 新 base checks 未成功前不得 merge #183 |
+
+## PR #183 Conflict-Resolution Synchronize Attempt #5（2026-08-27）
+
+### Decision
+
+| 决策 | 原因与证据 | 放弃方案 | 影响 |
+| --- | --- | --- | --- |
+| 将 #182 exact head `d7d96938` 作为第二父合入 #183 | attempt #4 head `ce599e20` 在 GitHub 显示 `CONFLICTING`，`pull_request` workflow 因冲突未启动；仅 cherry-pick 内容不能消除 PR 拓扑冲突 | 重推等价 cherry-pick；把 #182 旧 CI 当作 final；修改 product source | 新提交明确承认 #182 血缘；冲突只涉及两份 evidence docs，E05-C tests 自动合并，`src/` 无冲突 |
+| 将单次 final gate 收紧到 PR commits=5 与 exact 双父 | release owner 只授权这一个冲突消解 merge commit 和一次 push | 继续使用 attempt #4 的 commits=4/ancestor 规则；放宽任意 synchronize | workflow 在依赖安装前验证 `HEAD^1=ce599e20`、`HEAD^2=d7d96938`；后续 push、reopened、rerun、dispatch 均失败关闭 |
+| 保留 hard gate 与资金/恢复人工红线 open | 本地组件验证不等于远端 Windows full gate，也不替代真实业务/恢复人工复核 | 将冲突消解或 unit PASS 记为 release PASS | native production disabled；main/tag/production enablement均未授权 |
+
+### Deviations
+
+| 原计划 | 实际 | 原因 | 影响 |
+| --- | --- | --- | --- |
+| attempt #4 在 `ce599e20` 上自动运行 | `NOT_STARTED / PULL_REQUEST_MERGE_CONFLICT` | PR 与 #182 exact head 存在堆叠冲突，GitHub 未创建该 workflow run | 不消耗或满足 hard gate；经用户明确授权后改为唯一一次 attempt #5 |
+
+### Evidence
+
+| 检查 | 结果 | 证明/边界 |
+| --- | --- | --- |
+| merge conflict audit | 仅 `changes/background-execution-r3-2-1-release-evidence/{implementation-notes,preflight}.md` 两个文本冲突；E05-C tests 自动合并；无 `src/` 冲突 | 冲突消解不改变金额、币种、sequence、receipt、Recovery Hold、Worker production topology 或 policy |
+| lineage contract | PR #183、same-repo、R4→R3、synchronize、run attempt 1、PR commits 5；exact event head；exact first/second parent | 任一 tuple 或 parent 漂移在 `npm ci` 与 `release-check` 前失败 |
+| conflict-resolution定向矩阵 | `149 tests / 147 pass / 0 fail / 2 Windows-only skip` | E05-A/B/C、mixed lifecycle、Toolbox generation/Route DB、mature adapters、Windows与release evidence静态合同均保持 |
+| affected static checks | ESLint、`node --check`、validator、Windows contract `5 pass / 2 skip`、release evidence `11/11`、`git diff --check` PASS | workflow、machine snapshot和tamper合同一致；不是远端Windows full gate |
+| conflict-resolution全量unit组件 | `6173/6176 PASS`、0 fail、3 skip、377 unit files、25514ms；log `logs/unit-tests/unit-20260827-013456.log` | 跨文件收口正常；未运行本地`release-check`，不替代attempt #5 |
+
+### Blindspot / Reconciliation Review
+
+- 入口旁路：final branch 的未授权 PR/dispatch 在 checkout 前失败；授权路径在依赖安装前验证 event head 与 exact 双父，后续 push、错误 base、reopened、rerun、fork 或 dispatch 均不能进入 `release-check`。
+- 状态生命周期：attempt #3=`CANCELLED`、attempt #4=`NOT_STARTED`、attempt #5=`PENDING_REMOTE_REQUIRED_CI` 独立记录；本地 component PASS 不升级 hard gate。#182/#183 仍严格顺序处理，改 base 后若产生新 pending/failed check，必须等待或暂停。
+- 兼容与资金边界：合并相对 #183 原 head 无 `src/` 或 E05-C test tree 变化；金额、币种、主键、sequence、receipt、幂等、Recovery Hold 与 production policy 不变。真实业务文件、资金与恢复人工复核继续作为 production gate，⚠️ 资金红线仍需人工确认。
+
+### Remaining Unknowns
+
+| 未知 | 处理 | 合并影响 |
+| --- | --- | --- |
+| attempt #5 Windows full gate 与 packaged build | 只等待这次 normal push 的自动 Actions；不 rerun、不 dispatch、不再 push | 任一失败/取消均停止，不能合并 #183 |
+| #182 先合并后 #183 改 base 产生的新 checks | 严格顺序处理并等待自然 CI | 新 base checks 未成功前不得 merge #183 |
+| 真实业务文件、资金与恢复人工复核 | 保持 `PENDING_HUMAN_REVIEW` | 不阻断 evidence PR；持续阻断 production enablement |
+
+## PR #183 Windows Unit Repair Synchronize Attempt #6（2026-08-27）
+
+### Decisions
+
+| 决定 | 原因与证据 | 放弃方案 | 影响 |
+| --- | --- | --- | --- |
+| 把 attempt #5 记为独立 FAILURE，不把 job 名 `smoke-test` 当成 smoke phase 失败 | run `32995472567` 已执行到 full unit；因此 lint 与 smoke 已完成，unit 汇总为 20 fail | rerun attempt #5；只看 job 名反复修改 smoke script | 失败证据可审计，attempt #5 永不满足 hard gate |
+| Parser outcome sidecar采用显式可注入 directory barrier，managed B/C 测试统一注入 supported | 13 个 leaf failure均是 Main sidecar publication调用真实 Windows directory fsync；Worker preload只覆盖 Parser Worker | 在 Windows 跳过测试；把 production Windows unsupported 当 supported；全局 monkey-patch | normal product call不传 seam，继续真实 fsync/fail closed；测试只隔离宿主能力，不改 receipt 或业务结果 |
+| Route DB manifest原子写复用 seal 已选择的同一个 barrier | 4 个 leaf failure证明 direct Route DB barrier已注入，但 `writeFileAtomicDurable` 默认闭包仍是真实 barrier | 删除 manifest durability；在 Windows 特判成功 | DB 与 manifest共享能力结论；任一 unsupported继续拒绝 sealed result |
+| 文本 static/hash合同 canonicalize line ending | Renderer marker硬编码 LF；10 个 evidence source hash在 Windows CRLF同时漂移 | 更新 10 个 Windows-only hash；修改业务源码排版；依赖 runner git config | 同一 repository文本在 LF/CRLF checkout下结论一致，真实内容变化仍失败 |
+| attempt #6 绑定单一修复提交 | release owner已授权修复；attempt #5 head是唯一审查父 | 放宽任意 synchronize；rerun/dispatch/admin bypass | commits=6，`HEAD^1=f87f2b29`，并复核 `f87^1=ce599e20`、`f87^2=d7d96938`；未来 push稳定失败 |
+
+### Deviations
+
+| 原计划 | 实际 | 原因 | 影响 | Spec 已同步 |
+| --- | --- | --- | --- | --- |
+| attempt #5 完成后直接进入 #182/#183 顺序合并 | attempt #5 在 full unit 失败，build skipped；新增一次明确授权的 attempt #6 | Windows runner首次同时暴露 Main/test barrier seam 与 CRLF checkout差异 | 不合并失败快照；修复范围限定为平台测试隔离、文本 canonicalization 与 gate evidence | 是，见同目录 preflight attempt #6 |
+
+### Evidence
+
+| 检查 | 结果 | 证明/边界 |
+| --- | --- | --- |
+| GitHub run `32995472567` | smoke-test job `FAILURE`、build `SKIPPED`；unit `6154/6176 PASS`、20 fail、2 skip | attempt #5 不满足 hard gate；失败发生在 unit phase，不是 `npm run smoke` phase |
+| 精确 `not ok` 聚类 | MPT 13；Toolbox 4；Renderer CRLF leaf 1（另有 suite aggregate）；release evidence CRLF 2 | 20 个 leaf failure均被四个根因完整覆盖，无未归因失败 |
+| 修复定向矩阵 | `85/85 PASS`、0 fail、0 skip | 覆盖 E05-B/C managed与direct sidecar、Toolbox DB/manifest、Renderer CRLF marker、evidence CRLF hash |
+| deterministic durability probes | parser outcome unsupported抛 `PREFUND_SPOOL_DURABILITY_UNAVAILABLE`；Route manifest unsupported抛 `TOOLBOX_ROUTE_DURABILITY_UNAVAILABLE` | 测试 seam未把真实生产 fail-closed改成伪成功 |
+| final combined targeted matrix | `90/92 PASS`、0 fail、2 Windows-only skip；其中core四组修复先独立 `85/85 PASS` | barrier、CRLF、release evidence与Windows gate合同共同收口 |
+| full unit component | `6176/6179 PASS`、0 fail、3 skip、377 files、24910ms；log `logs/unit-tests/unit-20260827-031902.log` | 全仓组件回归；未运行本地 `release-check`，不替代远端 attempt #6 |
+| gate/validator static matrix | validator PASS；affected ESLint、`node --check`、`git diff --check` PASS | attempt #6 tuple、lineage、failure history和machine snapshot一致 |
+
+### Blindspot / Reconciliation Review
+
+- 入口旁路：direct parser outcome、managed B/C、Parser Worker、Route DB与manifest五个入口均有覆盖；没有以 platform skip、environment flag 或 production selector 绕过真实 durability。
+- 状态生命周期：attempt #5固定为 FAILURE；attempt #6保持 PENDING，只有远端 success 才能关闭 hard gate。build skipped不能被解释为 PASS，未来第 7 个 commit、rerun、reopened、dispatch或错误base均在 checkout 前拒绝。
+- 兼容性：CRLF canonicalization仅用于 repository文本证据；不应用于业务输入文件、MPT内容hash、数据库receipt或输出文件hash。
+- 资金/恢复：金额、币种、source identity、fileIndex、sequence、row conservation、receipt、幂等、Recovery Hold与cleanup ownership均未改。生产默认 barrier仍是真实能力并fail closed；native production继续 disabled。
+- 资金红线人工复核：本次没有新增金额/方向/主键/幂等变更；既有真实业务文件、资金与恢复 `PENDING_HUMAN_REVIEW` 仍阻断 production enablement，不由自动 CI 改写。
+
+### Remaining Unknowns
+
+| 未知 | 处理 | 合并影响 |
+| --- | --- | --- |
+| attempt #6 在 GitHub-hosted Windows 的 full gate 与 packaged build | 只允许修复提交的自然 synchronize；不 rerun、dispatch或追加push | 任一失败/取消均暂停，#183不得 merge |
+| #182 合并与 #183 改 base 后的自然 checks | 继续按 #182→#183 严格顺序处理 | 新 base pending/failed 时等待或暂停，不用旧结果替代 |
+| 真实业务文件、资金与恢复人工复核 | 保持 `PENDING_HUMAN_REVIEW` | 持续阻断 production enablement；不由本修复声明 PASS |

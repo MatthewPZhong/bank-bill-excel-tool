@@ -1262,13 +1262,15 @@ test('Recovery Hold gate 读取 Main control DB；真实 Archive 入口在 prepa
   const start = source.indexOf('async function runArchiveAwareOperation(');
   const end = source.indexOf('function runRegisteredBusinessOperation(', start);
   const body = source.slice(start, end);
-  const firstGate = body.indexOf('assertTaskPolicyNotHeld(policy)');
+  const firstGate = body.indexOf('assertTaskPolicyNotHeld(policy, null)');
   const prepare = body.indexOf('prepareIpcTaskInvocation(');
-  const secondGate = body.indexOf('assertTaskPolicyNotHeld(policy)', firstGate + 1);
+  const secondGate = body.indexOf('assertTaskPolicyNotHeld(policy, prepared)', firstGate + 1);
   const archiveAdmission = body.indexOf('archiveTaskLifecycle.run');
   assert.ok(firstGate >= 0 && firstGate < prepare);
   assert.ok(prepare < secondGate && secondGate < archiveAdmission);
-  assert.ok(body.match(/assertTaskPolicyNotHeld\(policy\)/g).length >= 4);
+  assert.ok(body.match(/assertTaskPolicyNotHeld\(policy, (?:null|prepared)\)/g).length >= 4);
+  assert.match(source, /PRE_FUND_SCOPED_HOLD_TASK_KEYS[\s\S]*?prepared === null\) return true/);
+  assert.match(source, /PREFUND_RECOVERY_SCOPE_UNAVAILABLE/);
   assert.match(source, /RECOVERY_HOLD_ACTION_UNBOUND/);
   assert.match(source, /allowedTaskKeys\(hold\.actionKey\)/);
 });

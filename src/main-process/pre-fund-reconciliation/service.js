@@ -295,7 +295,7 @@ class PreFundReconciliationService {
     };
   }
 
-  async importMptFiles(filePaths, { onProgress, producerTaskRunId } = {}) {
+  async importMptFiles(filePaths, { onProgress, producerTaskRunId, identityGate } = {}) {
     const paths = filePaths;
     this.mptImportFailures.clear();
     const results = [];
@@ -304,6 +304,7 @@ class PreFundReconciliationService {
       if (onProgress) onProgress({ stage: 'mpt-import', current: index + 1, total: paths.length, fileName: path.basename(filePath) });
       try {
         const imported = await this.tempStore.importFile(filePath, {
+          identityGate,
           datasetSeed: {
             datasetId: crypto.randomUUID(),
             producerTaskRunId
@@ -382,6 +383,70 @@ class PreFundReconciliationService {
     return failures;
   }
 
+  adoptManagedMptImportResults(filePaths, managedResults) {
+    if (!Array.isArray(filePaths) || !Array.isArray(managedResults) ||
+        filePaths.length !== managedResults.length) {
+      throw new TypeError('managed MPT结果必须与输入文件等长同序');
+    }
+    return managedResults.map((item, index) => {
+      if (!item || item.status !== 'failed' || !item.managedRepairEvidence) return item;
+      const evidence = item.managedRepairEvidence;
+      if (typeof evidence.sourceType !== 'string' || !evidence.sourceType ||
+          typeof evidence.sourceBatch !== 'string' || !evidence.sourceBatch ||
+          !/^[a-f0-9]{64}$/.test(evidence.contentHash || '') ||
+          !Number.isSafeInteger(evidence.rowErrorCount) || evidence.rowErrorCount < 1) {
+        throw new TypeError('managed MPT repair evidence非法');
+      }
+      const repairToken = crypto.randomUUID();
+      this.mptImportFailures.set(repairToken, {
+        failureId: repairToken,
+        filePath: path.resolve(filePaths[index]),
+        sourceType: evidence.sourceType,
+        sourceBatch: evidence.sourceBatch,
+        contentHash: evidence.contentHash,
+        rowErrorCount: evidence.rowErrorCount
+      });
+      const { managedRepairEvidence: _internalEvidence, ...publicResult } = item;
+      return {
+        ...publicResult,
+        canRepair: true,
+        repairToken,
+        sourceType: evidence.sourceType,
+        rowErrorCount: evidence.rowErrorCount
+      };
+    });
+  }
+
+  beginManagedMptImport() {
+    this.mptImportFailures.clear();
+  }
+
+  adoptManagedMptRepairResults(failures, managedResults) {
+    if (!Array.isArray(failures) || !Array.isArray(managedResults) ||
+        failures.length !== managedResults.length) {
+      throw new TypeError('managed MPT repair结果必须与failure等长同序');
+    }
+    return managedResults.map((item, index) => {
+      const failure = failures[index];
+      if (item && item.status === 'ok') {
+        this.mptImportFailures.delete(failure.failureId);
+        return item;
+      }
+      const terminalFailure = TERMINAL_MPT_REPAIR_CODES.has(item && item.code);
+      if (terminalFailure) {
+        this.mptImportFailures.delete(failure.failureId);
+        return item;
+      }
+      return {
+        ...item,
+        canRepair: true,
+        repairToken: failure.failureId,
+        sourceType: failure.sourceType,
+        rowErrorCount: failure.rowErrorCount
+      };
+    });
+  }
+
   async exportMptErrorData(repairTokens, outputPath) {
     const failures = this.resolveMptImportFailures(repairTokens);
     const result = await writeMptErrorReport({ failureRecords: failures, outputPath });
@@ -390,7 +455,7 @@ class PreFundReconciliationService {
 
   async retryMptImportFailures(
     repairTokens,
-    { filePaths, onProgress, producerTaskRunId } = {}
+    { filePaths, onProgress, producerTaskRunId, identityGate } = {}
   ) {
     const failures = this.resolveMptImportFailures(repairTokens);
     const results = [];
@@ -407,6 +472,7 @@ class PreFundReconciliationService {
       }
       try {
         const imported = await this.tempStore.importFile(filePath, {
+          identityGate,
           skipInvalidRows: true,
           expectedContentHash: failure.contentHash,
           datasetSeed: {
@@ -468,14 +534,32 @@ class PreFundReconciliationService {
     return result;
   }
 
-  countTempByDateRange(payload = {}) {
+  normalizeTempDateRange(payload = {}) {
     const sourceType = requireManagedMptSourceType(payload.sourceType);
-    return this.tempStore.countByDateRange(payload.start, payload.end, { sourceType });
+    const range = this.tempStore.normalizeDateRange(payload.start, payload.end);
+    return Object.freeze({ sourceType, start: range.start, end: range.end });
+  }
+
+  inspectTempDateRange(payload = {}) {
+    const range = this.normalizeTempDateRange(payload);
+    const identities = this.listTempBatches()
+      .filter((batch) => batch.sourceType === range.sourceType &&
+        batch.sourceDate >= range.start && batch.sourceDate <= range.end)
+      .map((batch) => Object.freeze({
+        sourceType: batch.sourceType,
+        sourceBatch: batch.sourceBatch
+      }));
+    return Object.freeze({ range, identities: Object.freeze(identities) });
+  }
+
+  countTempByDateRange(payload = {}) {
+    const range = this.normalizeTempDateRange(payload);
+    return this.tempStore.countByDateRange(range.start, range.end, { sourceType: range.sourceType });
   }
 
   async deleteTempByDateRange(payload = {}) {
-    const sourceType = requireManagedMptSourceType(payload.sourceType);
-    return this.tempStore.deleteByDateRange(payload.start, payload.end, { sourceType });
+    const range = this.normalizeTempDateRange(payload);
+    return this.tempStore.deleteByDateRange(range.start, range.end, { sourceType: range.sourceType });
   }
 
   async clearTemp() {

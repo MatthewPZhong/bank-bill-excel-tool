@@ -7,10 +7,20 @@ const {
   REDACTED_TEXT,
   assertFinanceSafeValue,
   fromProtocolError,
+  privacyViolation,
   sanitizeFinanceSafeValue,
   toProtocolError,
   validateSafeErrorV1
 } = require('../../../../src/main-process/background-execution/error-codec');
+
+test('canonical SHA-256 evidence fields不被随机数字串误判为完整账号', () => {
+  assert.equal(privacyViolation({
+    sourceSha256: '1'.repeat(64),
+    contentHash: '2'.repeat(64),
+    expectedContentHash: '3'.repeat(64),
+    evidenceHash: '4'.repeat(64)
+  }), null);
+});
 
 test('统一 error codec 只输出冻结 SafeErrorV1 exact shape，不泄露 stack/cause/context', () => {
   const source = new Error('worker failed');

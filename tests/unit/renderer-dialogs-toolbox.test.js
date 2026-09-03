@@ -300,10 +300,13 @@ describe('v3.0.19 合并 handler 多 Sheet 编排与临时资源生命周期', (
   });
 
   test('用户目标文件通过统一可恢复发布 helper 落盘，不直接复制覆盖', () => {
+    assert.match(mergeHandler, /const publishMergeArtifacts = async \(artifacts\) => \{/);
     assert.match(
       mergeHandler,
-      /\bconst\s+publishResult\s*=\s*await\s+publishToolboxArtifacts\(\s*'merge'\s*,/
+      /const publication = await publishToolboxArtifacts\(\s*'merge'\s*,\s*artifacts,/
     );
+    assert.match(mergeHandler, /publishResult = await publishMergeArtifacts\(\[\{/);
+    assert.match(mergeHandler, /publisher: \(artifacts\) => publishMergeArtifacts\(/);
     assert.ok(!mergeHandler.includes('fs.copyFileSync(tempPath, saveResult.filePath)'));
   });
 

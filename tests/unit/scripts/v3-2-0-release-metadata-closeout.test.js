@@ -61,11 +61,11 @@ test('v3.2.0 closeout同步当前版本、冻结文档与三份发布说明', ()
 
   const currentChangelog = section(
     changelog,
-    '## 3.2.0 - 2026-09-03（正式发布候选）'
+    '## 3.2.0 - 2026-09-03（正式发布）'
   );
   const currentHistory = section(
     history,
-    '## v3.2.0（2026-09-03，正式发布候选）'
+    '## v3.2.0（2026-09-03，正式发布）'
   );
   const historicalGuide = paragraph(
     guide,

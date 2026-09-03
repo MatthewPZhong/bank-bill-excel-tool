@@ -251,11 +251,11 @@ function plainBody(value, operation, wrapper) {
   return value;
 }
 
-function validatePrivacy(value, policy, path) {
+function validatePrivacy(value, policy, path, allowValue = null) {
   const privacyProfile = policy && policy.metrics && policy.metrics.privacyProfile;
   if (!privacyProfile) return;
   try {
-    assertFinanceSafeValue(value, privacyProfile, path);
+    assertFinanceSafeValue(value, privacyProfile, path, { allowValue });
   } catch (error) {
     if (error instanceof SafeErrorValidationError) {
       throw new ProtocolValidationError(
@@ -268,12 +268,12 @@ function validatePrivacy(value, policy, path) {
   }
 }
 
-function validateOperationBody(envelope, policy, envelopeLimit) {
+function validateOperationBody(envelope, policy, envelopeLimit, allowValue = null) {
   if (envelope.channel !== 'job') return;
   const operation = envelope.operation;
   if (operation === 'job:progress' || operation === 'unit:progress') {
     const progress = plainBody(envelope.payload.progress, operation, 'progress');
-    validatePrivacy(progress, policy, '/payload/progress');
+    validatePrivacy(progress, policy, '/payload/progress', allowValue);
     return;
   }
   if (operation === 'job:error' || operation === 'unit:error') {
@@ -310,7 +310,12 @@ function validateOperationBody(envelope, policy, envelopeLimit) {
     return;
   }
   if (operation === 'job:cancel' || operation === 'unit:cancel') {
-    validatePrivacy(plainBody(envelope.payload.cancel, operation, 'cancel'), policy, '/payload/cancel');
+    validatePrivacy(
+      plainBody(envelope.payload.cancel, operation, 'cancel'),
+      policy,
+      '/payload/cancel',
+      allowValue
+    );
     return;
   }
   if (operation === 'job:done' || operation === 'unit:done') {
@@ -322,16 +327,37 @@ function validateOperationBody(envelope, policy, envelopeLimit) {
         '/payload/result'
       );
     }
-    validatePrivacy(result, policy, '/payload/result');
+    validatePrivacy(result, policy, '/payload/result', allowValue);
     return;
   }
   if (operation === 'commit:receipt') {
-    validatePrivacy(plainBody(envelope.payload.receipt, operation, 'receipt'), policy, '/payload/receipt');
+    validatePrivacy(
+      plainBody(envelope.payload.receipt, operation, 'receipt'),
+      policy,
+      '/payload/receipt',
+      allowValue
+    );
     return;
   }
   if (operation === 'critical:ready' || operation === 'critical:ack' || operation === 'critical:reject') {
-    validatePrivacy(plainBody(envelope.payload.critical, operation, 'critical'), policy, '/payload/critical');
+    validatePrivacy(
+      plainBody(envelope.payload.critical, operation, 'critical'),
+      policy,
+      '/payload/critical',
+      allowValue
+    );
   }
+}
+
+function financeSafeValueDelegate(policyRegistry, actionKey) {
+  if (!policyRegistry || typeof policyRegistry.getBinding !== 'function' || !actionKey) return null;
+  let binding;
+  try { binding = policyRegistry.getBinding(actionKey, 'result.validatorKey'); } catch (_error) {
+    return null;
+  }
+  return binding && typeof binding.allowFinanceSafeValue === 'function'
+    ? binding.allowFinanceSafeValue
+    : null;
 }
 
 function validateEnvelope(envelope, options = {}) {
@@ -372,7 +398,12 @@ function validateEnvelope(envelope, options = {}) {
   }
 
   validateContext(ownedEnvelope, policy);
-  validateOperationBody(ownedEnvelope, policy, limit);
+  validateOperationBody(
+    ownedEnvelope,
+    policy,
+    limit,
+    financeSafeValueDelegate(options.policyRegistry, actionKey)
+  );
   return ownedEnvelope;
 }
 

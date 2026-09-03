@@ -16,10 +16,60 @@ jobs:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
+      - name: Reject unauthorized v3.2.1 final-gate invocation
+        if: >-
+          (
+            (
+              github.event_name == 'pull_request' &&
+              (
+                github.head_ref == 'codex/v3.2.1-r3-release-evidence' ||
+                github.head_ref == 'codex/v3.2.1-r4-review-hardening'
+              )
+            ) ||
+            (
+              github.event_name == 'workflow_dispatch' &&
+              (
+                github.ref_name == 'codex/v3.2.1-r3-release-evidence' ||
+                github.ref_name == 'codex/v3.2.1-r4-review-hardening'
+              )
+            )
+          ) &&
+          !(
+            github.event_name == 'pull_request' &&
+            github.event.pull_request.number == 183 &&
+            github.head_ref == 'codex/v3.2.1-r4-review-hardening' &&
+            github.base_ref == 'codex/v3.2.1-r3-release-evidence' &&
+            github.event.pull_request.head.repo.full_name == github.repository &&
+            github.event.action == 'synchronize' &&
+            github.event.pull_request.commits == 6 &&
+            github.run_attempt == 1
+          )
+        run: |
+          echo "Unauthorized v3.2.1 final release-gate invocation"
+          exit 1
+
       - name: Checkout
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify authorized v3.2.1 repair lineage
+        if: >-
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.number == 183 &&
+          github.head_ref == 'codex/v3.2.1-r4-review-hardening' &&
+          github.base_ref == 'codex/v3.2.1-r3-release-evidence' &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.event.action == 'synchronize' &&
+          github.event.pull_request.commits == 6 &&
+          github.run_attempt == 1
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          test "$(git rev-parse HEAD^1)" = "f87f2b2994e86b75d350f64eec53252fe24a67b6"
+          test "$(git rev-parse HEAD^1^1)" = "ce599e206894f3683b748254068dd750479ffc74"
+          test "$(git rev-parse HEAD^1^2)" = "d7d96938196a61a36892c40721cdba56992a14a8"
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -30,6 +80,26 @@ jobs:
         run: npm ci
 
       - name: Run release checks
+        if: >-
+          (
+            github.event_name == 'pull_request' &&
+            github.event.pull_request.number == 183 &&
+            github.head_ref == 'codex/v3.2.1-r4-review-hardening' &&
+            github.base_ref == 'codex/v3.2.1-r3-release-evidence' &&
+            github.event.pull_request.head.repo.full_name == github.repository &&
+            github.event.action == 'synchronize' &&
+            github.event.pull_request.commits == 6 &&
+            github.run_attempt == 1
+          ) ||
+          (
+            (github.event_name != 'pull_request' ||
+             github.head_ref != 'codex/v3.2.1-r4-review-hardening') &&
+            (github.event_name != 'workflow_dispatch' ||
+             github.ref_name != 'codex/v3.2.1-r4-review-hardening') &&
+            (github.event_name != 'pull_request' ||
+             github.event.pull_request.head.repo.full_name != github.repository ||
+             !startsWith(github.head_ref, 'codex/v3.2.1-'))
+          )
         run: npm run release-check
 
       - name: Verify Windows startup process adapter semantics
@@ -52,6 +122,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v6

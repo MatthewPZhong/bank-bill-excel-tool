@@ -190,13 +190,17 @@ test.describe('toolbox:split:export 多文件 IPC 接线', () => {
     assert.ok(!prepareSource.includes("buttons: ['取消', '覆盖全部']"));
   });
 
-  test('大文件和普通文件均走统一格式保真 facade，最后统一可恢复发布', () => {
+  test('大文件、普通文件和production-false Route DB能力均保持格式保真与单次可恢复发布', () => {
     const workerIndex = handlerSource.indexOf("op: 'exportMultiFilters'");
     const ordinaryIndex = handlerSource.indexOf('exportToolboxMultiFilters({');
-    const publishIndex = handlerSource.indexOf("publishToolboxArtifacts(\n            'split-multi'");
+    const managedIndex = handlerSource.indexOf('generateValidateAndPublishMultiOutput({');
+    const legacyPublishGuardIndex = handlerSource.indexOf('if (!publishResult)', ordinaryIndex);
+    const publishIndex = handlerSource.indexOf('publishToolboxArtifacts(', legacyPublishGuardIndex);
     assert.ok(workerIndex >= 0);
     assert.ok(ordinaryIndex >= 0);
-    assert.ok(publishIndex > workerIndex && publishIndex > ordinaryIndex);
+    assert.ok(managedIndex > workerIndex && managedIndex < ordinaryIndex);
+    assert.ok(legacyPublishGuardIndex > ordinaryIndex);
+    assert.ok(publishIndex > legacyPublishGuardIndex);
   });
 
   test('按 outputId 关联产物并返回 warning 契约，finally 清理本批临时目录', () => {

@@ -19,6 +19,37 @@ const DEFAULT_BATCH_SIZE = 1000;
 const DEFAULT_ROW_ERROR_SAMPLE_LIMIT = 20;
 const MAX_LINE_LENGTH = 4 * 1024 * 1024;
 
+function createMptRowAggregateError(parsed) {
+  const samples = Array.isArray(parsed.rowErrorSamples) ? parsed.rowErrorSamples : [];
+  const detailLines = samples.map((issue) => (
+    `第${issue.sourceRowNumber}行：${issue.message}`
+  ));
+  if (Number(parsed.rowErrorCount) > samples.length) {
+    detailLines.push(`另有 ${Number(parsed.rowErrorCount) - samples.length} 条错误未在页面展开`);
+  }
+  const error = new FileValidationError(
+    'MPT_ROW_ERRORS',
+    `MPT 文件包含 ${Number(parsed.rowErrorCount) || 0} 条可定位明细错误，严格导入已整文件回滚`,
+    {
+      context: {
+        fileName: parsed.sourceFileName,
+        sourceType: parsed.sourceType,
+        sourceBatch: parsed.sourceBatch,
+        rowErrorCount: parsed.rowErrorCount,
+        contentHash: parsed.contentHash
+      },
+      detailLines
+    }
+  );
+  error.canRepair = true;
+  error.rowErrorCount = Number(parsed.rowErrorCount) || 0;
+  error.rowErrorSamples = samples;
+  error.contentHash = parsed.contentHash;
+  error.sourceType = parsed.sourceType;
+  error.sourceBatch = parsed.sourceBatch;
+  return error;
+}
+
 function createHashingTransform(hash) {
   return new Transform({
     transform(chunk, _encoding, callback) {
@@ -28,14 +59,24 @@ function createHashingTransform(hash) {
   });
 }
 
+function forwardPipedStreamError(source, target) {
+  source.on('error', (error) => {
+    // stream.pipe() 不会自动把 source error 转发给 destination。把错误沿当前
+    // 读取链传到最终 async iterator，确保调用方只收到一次可归一化的失败。
+    if (!target.destroyed) target.destroy(error);
+  });
+}
+
 async function* iterateUtf8Lines(filePath, fileMetadata, hash) {
   const rawStream = fs.createReadStream(filePath);
   const hashingStream = createHashingTransform(hash);
   const streams = [rawStream, hashingStream];
+  forwardPipedStreamError(rawStream, hashingStream);
   let contentStream = rawStream.pipe(hashingStream);
   if (fileMetadata.extension === 'gz') {
     const gunzip = zlib.createGunzip();
     streams.push(gunzip);
+    forwardPipedStreamError(hashingStream, gunzip);
     contentStream = contentStream.pipe(gunzip);
   }
 
@@ -140,6 +181,28 @@ function mapStreamError(error, fileMetadata) {
 }
 
 /**
+ * 只读取并验证真实源文件的首行 metadata。
+ * 与完整 parser 共用 filename、gzip、UTF-8、BOM、单行上限和错误映射规则，
+ * 但在首行完成后立即关闭 stream，不解析明细。
+ */
+async function readMptHeader(filePath) {
+  const fileMetadata = parseMptFileName(filePath);
+  const hash = crypto.createHash('sha256');
+  try {
+    for await (let line of iterateUtf8Lines(filePath, fileMetadata, hash)) {
+      if (line.charCodeAt(0) === 0xFEFF) line = line.slice(1);
+      return identifyMptHeader(line.split(MPT_DELIMITER), fileMetadata);
+    }
+    throw validationError('MPT_HEADER_MISSING', 'MPT 文件为空或缺少有效首行', {
+      fileName: fileMetadata.sourceFileName,
+      rowNumber: 1,
+    });
+  } catch (error) {
+    throw mapStreamError(error, fileMetadata);
+  }
+}
+
+/**
  * 流式解析一个 MPT 文件。
  *
  * options.onHeader(metadata)：首行完成强校验后调用一次。
@@ -230,8 +293,10 @@ async function parseMptFile(filePath, options = {}) {
 }
 
 module.exports = {
+  createMptRowAggregateError,
   DEFAULT_BATCH_SIZE,
   DEFAULT_ROW_ERROR_SAMPLE_LIMIT,
   MAX_LINE_LENGTH,
   parseMptFile,
+  readMptHeader,
 };
