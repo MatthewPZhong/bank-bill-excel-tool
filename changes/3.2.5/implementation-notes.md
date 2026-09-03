@@ -12,7 +12,7 @@
 
 | 决定 | 原因与证据 | 放弃的方案 | 影响 |
 | --- | --- | --- | --- |
-| 顶层 Spec/TechDoc bootstrap 逐字节同步冻结来源；实施期只接受精确记录且受测试约束的合同修订 | 防止按老 changes 副本或编号猜范围，同时不能让已证伪的 Position export 拓扑、泛化的 import 禁令或只冻结路径的来源证据继续充当 current authority | 任意润色顶层副本、静默修改冻结基线、维持已证伪的 `existing-dispatch` | 冻结来源保持原 hash；E13-B 仅允许 Position export policy、两处 import-scope 禁令澄清、TechDoc executor 说明和模板/归档 hash authority 五处精确 delta，其他漂移一律失败；E13-G 以 current authority 重建最终证据。 |
+| 顶层 Spec/TechDoc bootstrap 逐字节同步冻结来源；实施期只接受精确记录且受测试约束的合同修订 | 防止按老 changes 副本或编号猜范围，同时不能让已证伪的 Position export/import、Acquiring 资源拓扑或 Main authority 继续充当 current authority | 任意润色顶层副本、静默修改冻结基线、维持已证伪的 topology/authority | 冻结来源保持原 hash；E13-B～F 的每一处 current-tree delta 均由 exact-once transformer 与当前 hash 锁定，其他漂移一律失败；E13-G 以 current authority 重建最终证据。 |
 | 旧 `29/29` 与 `69/69` 只作历史证据 | 当前独立复验为 checksum `61/69`、validation `28/29` | 重算 checksum 伪造一致 | E13-G 必须修真实 binding/AST authority 后再生成最终证据。 |
 | 文档 bootstrap 不新增功能 PR | 冻结 Spec 已明确 8 PR 序列 | 增加第 9 个纯文档 PR | bootstrap 作为 v3.2.5 base/E13-A 祖先。 |
 | Capability 与 Effective Production Strategy 分开 | 所有 action 初始 production disabled，人工/观察门禁未关闭 | 用实现完成自动启用 production | 每 action 可独立保持 legacy/blocked。 |
@@ -31,12 +31,15 @@
 | E13-E 按 current-tree 真实 Acquiring topology 修订历史资源声明 | 设置/Main 合法 workerCount 上限为 8；single/resume hard gate 没有 nested child；旧 fixture 分别写 4 与虚构 compound | 静默 clamp 到 4；为 single 路径申领一个虚构 child；照旧 fixture 低报/重复计费 | `run-new-eligible` childrenMax=8，`run-single-or-resume.compound=null`；冻结基线不改，E13-G 重建 current fixture。详见 [e13-e-preflight.md](./e13-e-preflight.md)。 |
 | E13-E 以 exact-5/7 共有字段锁定 run owner | Protocol policy 是 operation exact-5，但既有 chunk/recovery progress 持久化 exact-7 File Task owner | 丢弃 batch identity；让 caller 提供两套不相关 owner；由 adapter 推测 batchId | adapter 要求 Main-owned exact-7，并逐项匹配 exact-5 共有字段；分叉在 dispatcher/DB 写入前拒绝。 |
 | E13-E resume 由 Main authority 重建而非透传嵌套 plan | blindspot 发现 `resumePlan` 携带 dbPath/progress/output authority，直接透传还会丢失 legacy 的持久 chunkSize 优先规则 | 信任 caller 完整 plan；只检查 runId；把责任留给未来 route | input 只接受 `resumeRunId`；adapter 重新 prepare/freshness，绑定 persisted exact-7 owner 和 output intent，持久 chunkSize 优先。 |
+| E13-F 按真实 Position import 0/1 子进程拓扑修订冻结资源声明 | bank prepare 与 confirmed apply 只运行 root 或顺序 schema→apply；source root 等待 durable grant 时最多并发一个 Main schema process | 沿用冻结 childrenMax=4；所有 intent 固定申领 1；禁止 zero-child compound | current childrenMax=1、intent child=0/1；Supervisor 允许合法 0 child 但继续拒绝负数/超上限。详见 [e13-f-preflight.md](./e13-f-preflight.md)。 |
+| E13-F 以 Main-owned selector/grant/checkpoint/owner 绑定原 dispatcher | prepared preflight 与 durable grant 都是持久 mutation 权限；caller 透传会绕过 kind/freshness/身份边界 | 直接透传 preflight/sideDb/checkpoint/token；原样返回 provider grant | exact-5/7 共有五字段一致，operation token=`taskRunId`；prepared selector 完整验证，source grant 精确 allowlist。 |
+| E13-F 取消以真实 ACK/terminal 与下一安全点为准 | raw `cancel()` true 只证明消息投递；protected schema 可拒绝即时取消，Main authorizer 可能在取消后返回 | posted 即 cancelled；schema 结束后继续 apply；authorizer 返回后继续发 grant | accepted=false 不伪造 cancelled，但已记录 job cancel 会在 schema/grant 后阻止后续 mutation。 |
 
 ## Evidence / Deviations
 
 | 项目 | 当前结果 | 影响/后续 |
 | --- | --- | --- |
-| Frozen/current document hashes | 冻结 Spec `13410e4e…98f2`、TechDoc `3fb18459…e64f`、split plan `27bbdde9…174a`；当前 Spec `5ff09026…0180`、TechDoc `794190d2…1ea7` | 冻结来源未修改；顶层仅含已记录且受测试约束的 E13-B/E13-C/E13-D/E13-E 证据型修订，不能宣称仍逐字节一致。 |
+| Frozen/current document hashes | 冻结 Spec `13410e4e…98f2`、TechDoc `3fb18459…e64f`、split plan `27bbdde9…174a`；当前 Spec `d5b58458…b6a2`、TechDoc `5ee46941…a7a2` | 冻结来源未修改；顶层仅含已记录且受 exact-once transformer 约束的 E13-B～F 证据型修订，不能宣称仍逐字节一致。 |
 | Package checksum | `61/69`，8 项漂移均有提交来源 | E13-G 前不得宣称 package integrity PASS。 |
 | Published/current validation | published historical `29/29`（68 inputs）；current tree `28/29`（73 inputs，binding/AST authority 一项失败） | 旧 report 不代偿当前树；E13-G 负责真实修复。 |
 | Production/human gate | production=false；资金/恢复 `PENDING_HUMAN_REVIEW` | 本 bootstrap 不改变。 |
@@ -52,6 +55,7 @@
 | E13-C capability validation | 定向 `10/10 PASS`；E13-A/B/C 扩大回归 `115/115 PASS`；Acquiring/Registry 重点回归 `60/60 PASS`；完整单测 `6819/6822 PASS`（`0 FAIL`、`3 SKIP`，日志 `unit-20260830-232228.log`）；Acquiring 集成 `252/252 PASS`；smoke、ESLint 与语法 PASS；copy 的普通文件/hash/staging/Publisher 和 main/side regenerate 的 complete-only/read-only DB/original writer/Workbook 回读均已验证；交叉输入与 Publisher failure 均 fail closed | production 仍为 false；Windows、真实大 run/RSS 与资金恢复人工门禁留到 R3.2.5。 |
 | E13-D capability/full regression | E13-D+mature adapter `16/16 PASS`；完整单测 `6824/6827 PASS`（`0 FAIL`、`3 SKIP`，日志 `unit-20260830-235725.log`）；53 个 integration 脚本 `2488/2488 PASS`（`361809 ms`）；smoke、ESLint、语法与 diff PASS；真实 Runtime/engine、CompoundLease、无 wrapper Worker、真实取消回滚、精确 result 与 exact-7 身份分叉反例均通过 | production 与默认 IPC 均未启用；Windows、真实大文件/RSS、资金/恢复人工复核留到 R3.2.5。 |
 | E13-E capability/full regression | E13-E 定向 `12/12 PASS`；mature/Acquiring/Registry/Resource/Supervisor 扩大回归 `227/227 PASS`；完整单测 `6836/6839 PASS`（`0 FAIL`、`3 SKIP`，日志 `logs/unit-tests/unit-20260831-005448.log`）；53 个 integration 脚本 `2488/2488 PASS`（`282902 ms`）；smoke、ESLint、语法与 diff PASS；真实 Parser/side DB、D31、single/resume、mirror、取消、exact-5/7 owner 与 Main-owned resume authority 均通过 | production 与默认 IPC 均未启用；Windows、30 万+真实 run/RSS、资金/恢复人工复核留到 R3.2.5。首次隔离全量运行的依赖树不符合 lockfile，改用精确 `app-builder-lib 26.15.7` 后完整复验，未把环境失败记作代码 PASS。 |
+| E13-F capability/full regression | current Spec/TechDoc hashes `d5b58458…b6a2` / `5ee46941…a7a2`；E13-F 核心 `12/12 PASS`，E13-F/mature/runtime/合同最终组合 `36/36 PASS`；完整单测 `6848/6851 PASS`（`0 FAIL`、`3 SKIP`，日志 `logs/unit-tests/unit-20260831-020452.log`）；53 个 integration 脚本 `2488/2488 PASS`（`264007 ms`）；smoke、完整 ESLint、语法与 diff PASS；R3.2.4 历史 exact evidence PASS；Windows contract `6/8 PASS`、`2 SKIP` | 0/1 topology、Main-owned absolute paths/owner/selector/grant、privacy result、protected schema、等待 authorizer 取消、同 job exact ACK、矛盾/非法 count evidence 反例已锁定。首次全量单测仅发现测试 registry 期望漏列新 action（`1 FAIL`），修复后精确 `10/10 PASS` 且最终全量 `0 FAIL`；未用失败快照代偿。Windows 两个真实 packaged canary 只可在专用环境运行，production 与默认 IPC 仍为 legacy/false，资金/恢复人工门禁未解除。 |
 
 ## Blindspot / Reconciliation
 
@@ -73,6 +77,12 @@
 - E13-E 必须保留 Acquiring 三层 gate：全新 run、workerCount>1、有 dbPath，再按 30 万行与 chunk 饱和度判定；resume 永远单 worker。资源声明不得用旧 fixture 的 4 覆盖当前合法 8，也不得为 single/resume 申领不存在的 nested child。
 - E13-E 的 exact-5 Protocol identity 与 exact-7 File Task owner 必须共享同一 taskRunId/taskKey/moduleId/parentRunId/operationKey；batchId/batchNumber 只来自 Main File Task，避免 chunk receipt、恢复 owner 与 Supervisor operation 分叉。
 - E13-E resume 不采信 caller 的嵌套 DB/progress/output plan；当前 run 必须从 Main-owned DB source 重新准备并复核，persisted owner/output/FilePlan 任一分叉都在 worker/DB 写前拒绝，chunkSize 沿用持久 progress。
+- E13-F 的顺序 schema→apply 不形成 nested child；只有 source root 等待 Main grant 时的 schema process 形成一个并发 child。Supervisor 接受 zero-child compound 是为表达真实 topology，不得被其他 adapter 用作缺省或绕过 inspector。
+- E13-F prepared selector 必须先通过完整 preflight manifest/kind 证据，再解析 checkpoint/token；source authorizer 返回后必须重新检查 cancel，且只返回精确 grant allowlist，避免取消后继续授权持久 mutation或泄露 provider 附加字段。
+- E13-F 对 dispatcher 显式返回的 row/failed/confirmation/success/committed count 以及 recovery/cancel 布尔证据均 fail closed；非法计数不得归零后伪装成正常 compact result。
+- E13-F 手工对照重要变量清单命中 Critical `freezeWorkerBatchContext` 消费链与 Risk-sensitive Position import/checkpoint 合同；未修改 exact-seven 字段/冻结器，也未修改 Position SQL、side-DB mutation、金额币种、行序或事务。按用户要求未运行 `check-vars`/`scan:vars`，资金/恢复人工复核仍阻止 production。
+- E13-F 当前只注册 dormant capability；默认 Position IPC 仍负责 FilePlan、pending、receipt 与人工确认。Runtime 尚未注入生产 route authority，不能把 capability 测试绿色解释为 production 可启用。
+- `position-reconciliation:run:import-result` 虽被静态映射到 `position:import`，当前真实 handler 不经 Position import dispatcher；E13-G 必须如实重建 AST/provenance，不得用 E13-F 适配器覆盖关系伪造执行证据。
 - E13-G 不能通过放宽 AST/provenance gate 或仅刷新 hash 关闭 finding；必须以真实生产入口重建 coverage。
 - 资金、恢复、Windows、真实样本和 production enablement 保持人工门禁。
 
@@ -82,6 +92,7 @@
 | --- | --- | --- | --- |
 | 最终 v3.2.4 远端 ancestry/CI | PROBE | 完成 #199～#207 与 #194～#204 顺序合并后建立 v3.2.5 | 未完成前不推 v3.2.5。 |
 | 真实 action/task inventory 与 provenance 差异 | PROBE | E13-G 重建 manifest/AST snapshot 和 mutants | 未 29/29、69/69 前不进 R3.2.5。 |
+| Position managed route authority 与 FilePlan/pending/receipt 全链路 | BLOCK（production） | 后续 route enablement + R3.2.5 Windows/真实样本/人工复核 | 不阻止 dormant E13-F；阻止 production。 |
 | Windows、真实文件、Excel/WPS、RSS、资金/恢复人工复核 | BLOCK（production） | release owner / Windows / 资金负责人 | 阻止 production/正式发布声明，不阻止 dormant implementation。 |
 
 按用户明确要求，不运行 `release-check`、`check-vars` 或 `scan:vars`；这些项目不得记录为 PASS。

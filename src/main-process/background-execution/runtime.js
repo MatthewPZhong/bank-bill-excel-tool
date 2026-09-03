@@ -139,6 +139,11 @@ const {
   validateAcquiringRunAdapterResult
 } = require('./acquiring-adapter-policies');
 const {
+  POSITION_IMPORT_ADAPTER_ACTION,
+  POSITION_IMPORT_ADAPTER_POLICY,
+  validatePositionImportAdapterResult
+} = require('./position-import-adapter-policy');
+const {
   createMatureActionAdapterBindings
 } = require('./mature-action-adapters');
 
@@ -159,7 +164,8 @@ const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   VCC_FINANCIAL_OP_READ_ONLY_POLICY,
   ...ACQUIRING_EXPORT_POLICIES,
   ...PENDING_BIZOP_ADAPTER_POLICIES,
-  ...ACQUIRING_ADAPTER_POLICIES
+  ...ACQUIRING_ADAPTER_POLICIES,
+  POSITION_IMPORT_ADAPTER_POLICY
 ]);
 
 function isBackgroundExecutionProductionEnabled(actionKey) {
@@ -351,7 +357,8 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
       mainDbProvider: options.acquiringMainDbProvider,
       mainDatabasePath: options.mainDatabasePath,
       onLog: options.acquiringLog
-    }
+    },
+    position: options.positionImport || {}
   });
   const entryRegistry = createStaticRegistry(Object.fromEntries(
     BACKGROUND_EXECUTION_POLICIES.filter((policy) => policy.entryKey !== null).map((policy) => [
@@ -360,7 +367,11 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
     ])
   ));
   const adapterRegistry = createStaticRegistry(Object.fromEntries(
-    [...PENDING_BIZOP_ADAPTER_POLICIES, ...ACQUIRING_ADAPTER_POLICIES].map((policy) => [
+    [
+      ...PENDING_BIZOP_ADAPTER_POLICIES,
+      ...ACQUIRING_ADAPTER_POLICIES,
+      POSITION_IMPORT_ADAPTER_POLICY
+    ].map((policy) => [
       policy.adapterKey,
       matureActionBindings[policy.actionKey]
     ])
@@ -368,7 +379,9 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
   const validatorEntries = {};
   for (const policy of BACKGROUND_EXECUTION_POLICIES) {
     let resultValidator;
-    if (PENDING_BIZOP_ADAPTER_ACTION_SET.has(policy.actionKey)) {
+    if (policy.actionKey === POSITION_IMPORT_ADAPTER_ACTION) {
+      resultValidator = validatePositionImportAdapterResult;
+    } else if (PENDING_BIZOP_ADAPTER_ACTION_SET.has(policy.actionKey)) {
       resultValidator = validatePendingBizOpAdapterResult;
     } else if (ACQUIRING_ADAPTER_ACTION_SET.has(policy.actionKey)) {
       resultValidator = policy.actionKey === ACQUIRING_ADAPTER_ACTIONS.IMPORT
@@ -449,7 +462,8 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
               : (policy.actionKey === VCC_EXPORT_SUBJECTS_ACTION
                   ? vccExportTopologyPlanner
                   : (PENDING_BIZOP_ADAPTER_ACTION_SET.has(policy.actionKey) ||
-                      ACQUIRING_ADAPTER_ACTION_SET.has(policy.actionKey)
+                      ACQUIRING_ADAPTER_ACTION_SET.has(policy.actionKey) ||
+                      policy.actionKey === POSITION_IMPORT_ADAPTER_ACTION
                       ? matureActionBindings[policy.actionKey].inspectTopology
                       : () => Object.freeze({ effectiveChildCount: 1 }))))])
   ));
@@ -475,7 +489,11 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
       'planner.pre-fund:mpt-import',
       'planner.duplicate:import',
       'planner.vcc-financial-op:export-subjects',
-      ...[...PENDING_BIZOP_ADAPTER_POLICIES, ...ACQUIRING_ADAPTER_POLICIES]
+      ...[
+        ...PENDING_BIZOP_ADAPTER_POLICIES,
+        ...ACQUIRING_ADAPTER_POLICIES,
+        POSITION_IMPORT_ADAPTER_POLICY
+      ]
         .filter((policy) => policy.workUnits)
         .map((policy) => policy.workUnits.plannerKey)
     ],
@@ -483,7 +501,11 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
       'reducer.pre-fund:mpt-import',
       'reducer.duplicate:import',
       'reducer.vcc-financial-op:export-subjects',
-      ...[...PENDING_BIZOP_ADAPTER_POLICIES, ...ACQUIRING_ADAPTER_POLICIES]
+      ...[
+        ...PENDING_BIZOP_ADAPTER_POLICIES,
+        ...ACQUIRING_ADAPTER_POLICIES,
+        POSITION_IMPORT_ADAPTER_POLICY
+      ]
         .filter((policy) => policy.workUnits)
         .map((policy) => policy.workUnits.reducerKey)
     ]
