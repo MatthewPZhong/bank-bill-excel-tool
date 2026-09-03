@@ -1,0 +1,15 @@
+# Deterministic release-evidence bytes across Git checkouts.
+changes/3.2.5/** text eol=lf
+changes/background-execution-v3.2.x-contract-baseline/** text eol=lf
+src/main-process/background-execution/schemas/** text eol=lf
+
+# E13-G records byte hashes for these JavaScript authorities.
+scripts/check-background-execution-manifest.js text eol=lf
+src/main.js text eol=lf
+src/main-process/archive-center/task-policy-registry.js text eol=lf
+src/main-process/background-execution/action-manifest.js text eol=lf
+src/main-process/background-execution/action-task-binding-registry.js text eol=lf
+src/main-process/background-execution/capability-inventory.js text eol=lf
+src/main-process/background-execution/coverage-check.js text eol=lf
+src/main-process/background-execution/production-strategy-snapshot.js text eol=lf
+src/main-process/background-execution/runtime.js text eol=lf

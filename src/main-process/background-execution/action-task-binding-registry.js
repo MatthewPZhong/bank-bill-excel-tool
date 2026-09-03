@@ -6,7 +6,7 @@ const { types: { isProxy } } = require('node:util');
 const ACTION_TASK_BINDING_CONTRACT = Object.freeze({
   version: 1,
   canonicalization: 'RFC8785-JCS',
-  sha256: 'c217253cea4ccc377f030ff5119191a98e8e9c965853c9d9419fdedef9eef0ba',
+  sha256: '6f9cf21fc6e4280ec617f54a0fcce137c21d185bf08e379195a986872d4b593f',
   actionCount: 52,
   taskPolicyInventoryCount: 122,
   taskPolicyInventoryCanonicalization: 'RFC8785-JCS',
@@ -41,9 +41,9 @@ const ACTION_TASK_BINDINGS = Object.freeze({
   'fund-recon:run': Object.freeze(['bank-statement:run']),
   'new-account:generate': Object.freeze(['new-account:generate']),
   'new-account:save-as': Object.freeze(['new-account:export']),
-  'pending:export-diff': Object.freeze(['pending:diff:export-aggregate', 'pending:diff:export-single']),
+  'pending:export-diff': Object.freeze(['pending:diff:export-single']),
   'pending:export-errors': Object.freeze(['pending:error:export-report']),
-  'pending:export-summary': Object.freeze([]),
+  'pending:export-summary': Object.freeze(['pending:diff:export-aggregate']),
   'pending:import': Object.freeze(['pending:import:start']),
   'position:export-run': Object.freeze(['position-reconciliation:run:export', 'position-reconciliation:run:export-filtered']),
   'position:import': Object.freeze([

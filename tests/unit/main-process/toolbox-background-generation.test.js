@@ -42,6 +42,12 @@ const {
   VCC_EXPORT_SUBJECTS_POLICY
 } = require('../../../src/main-process/vcc-financial-op-output/policies');
 const {
+  PENDING_READ_ONLY_ACTIONS
+} = require('../../../src/main-process/read-only-exports/pending/policies');
+const {
+  BIZ_OP_READ_ONLY_ACTIONS
+} = require('../../../src/main-process/read-only-exports/biz-op/policies');
+const {
   createBackgroundExecutionRuntime: createBackgroundExecutionRuntimeRaw,
   createBackgroundExecutionRuntimeManager,
   isBackgroundExecutionProductionEnabled
@@ -182,7 +188,7 @@ test('E04-A/B policy 与 Main source selector 保持 production false，真实�
   assert.equal(multiPolicy.resources.compound.childResource.workerThreadSlots, 1);
 
   const mainSource = fs.readFileSync(path.resolve(__dirname, '../../../src/main.js'), 'utf8');
-  assert.equal((mainSource.match(/backgroundExecutionRuntimeManager\.get\(\)/g) || []).length, 5);
+  assert.equal((mainSource.match(/backgroundExecutionRuntimeManager\.get\(\)/g) || []).length, 10);
   assert.equal((mainSource.match(/generateValidateAndPublishToolboxArtifact\(\{/g) || []).length, 2);
   assert.equal((mainSource.match(/generateValidateAndPublishMultiOutput\(\{/g) || []).length, 1);
   assert.equal((mainSource.match(/production:\s*true/g) || []).length >= 3, true);
@@ -219,7 +225,12 @@ test('E04-B runtime预算完整计入Scanner phase与一个Writer child，idle/s
     'recon-fix:run-jpm',
     'recon-fix:export',
     VCC_EXPORT_SINGLE_ACTION,
-    VCC_EXPORT_SUBJECTS_ACTION
+    VCC_EXPORT_SUBJECTS_ACTION,
+    PENDING_READ_ONLY_ACTIONS.DIFF,
+    PENDING_READ_ONLY_ACTIONS.SUMMARY,
+    PENDING_READ_ONLY_ACTIONS.ERRORS,
+    BIZ_OP_READ_ONLY_ACTIONS.DAY,
+    BIZ_OP_READ_ONLY_ACTIONS.RANGE
   ]);
   for (const policy of runtime.policyRegistry.list()) {
     assert.equal(policy.production.enabled, false);

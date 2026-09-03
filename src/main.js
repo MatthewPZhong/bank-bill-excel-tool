@@ -496,6 +496,28 @@ const {
   createBackgroundExecutionRuntimeManager
 } = require('./main-process/background-execution/runtime');
 const {
+  PENDING_READ_ONLY_ACTIONS
+} = require('./main-process/read-only-exports/pending/policies');
+const {
+  assertPendingRunEvidence,
+  freezePendingRunEvidence,
+  withReadSnapshot: withPendingReadSnapshot
+} = require('./main-process/read-only-exports/pending/query');
+const {
+  generateValidateAndPublishPendingExport,
+  writePendingManagedErrorSource
+} = require('./main-process/read-only-exports/pending/managed-export');
+const {
+  BIZ_OP_READ_ONLY_ACTIONS
+} = require('./main-process/read-only-exports/biz-op/policies');
+const {
+  assertBizOpSourceSnapshot,
+  freezeBizOpSourceSnapshot
+} = require('./main-process/read-only-exports/biz-op/query');
+const {
+  generateValidateAndPublishBizOpExport
+} = require('./main-process/read-only-exports/biz-op/managed-export');
+const {
   TOOLBOX_GENERATION_ACTIONS
 } = require('./main-process/toolbox-background/generation-contract');
 const {
@@ -741,11 +763,117 @@ let archiveOperationTail = Promise.resolve();
 const backgroundExecutionRuntimeManager = createBackgroundExecutionRuntimeManager({
   workerDurableCoordinatorProvider: () => backgroundWorkerDurableCoordinator,
   reconFixJpmDatabasePathProvider: () => database && database.dbPath,
+  pendingDatabasePathProvider: () => (
+    app.isReady() ? path.join(app.getPath('userData'), PENDING_DB_FILENAME) : null
+  ),
+  mainDatabasePathProvider: () => database && database.dbPath,
+  userDataDirProvider: () => database && database.dbPath
+    ? path.dirname(database.dbPath)
+    : null,
   duplicateStartupGateProvider: () => Object.freeze({
     contractVersion: DUPLICATE_STARTUP_GATE_CONTRACT_VERSION,
     startupRecoveryReady: duplicateStartupRecoveryReady
   })
 });
+
+function createReadOnlyExportStagingDirectory(batchContext, moduleKey) {
+  const root = path.join(
+    app.getPath('userData'),
+    'run-data',
+    'read-only-exports',
+    String(moduleKey).replace(/[^a-zA-Z0-9._-]+/g, '-')
+  );
+  fs.mkdirSync(root, { recursive: true });
+  const taskRunId = String(batchContext && batchContext.taskRunId || 'task')
+    .replace(/[^a-zA-Z0-9._-]+/g, '-');
+  return fs.mkdtempSync(path.join(root, `${taskRunId}-`));
+}
+
+function createReadOnlyExportGenerationPlan(stagingRoot, taskContext, actionKey) {
+  const output = taskContext && taskContext.fileEvidence &&
+    taskContext.fileEvidence.filePlan.outputs[0];
+  if (!output || !output.artifactKey) throw new Error('只读导出缺少 output artifact authority');
+  const stagingResourceId = `${String(actionKey).replace(/[^a-zA-Z0-9._-]+/g, '-')}.xlsx`;
+  return Object.freeze({
+    stagingRoot,
+    stagingResourceId,
+    generationPath: path.join(stagingRoot, stagingResourceId),
+    outputArtifactKey: output.artifactKey
+  });
+}
+
+function cleanupReadOnlyExportStagingDirectory(directoryPath) {
+  if (!directoryPath) return;
+  try {
+    fs.rmSync(directoryPath, { recursive: true, force: true });
+  } catch (error) {
+    appendActivityLogEntry({
+      level: 'warning',
+      source: 'main',
+      domain: 'read-only-export',
+      message: '只读导出临时目录清理失败',
+      details: [
+        `临时目录：${directoryPath}`,
+        `原因：${error && error.message ? error.message : String(error)}`
+      ]
+    });
+  }
+}
+
+function publishReadOnlyExportArtifacts(kind, artifacts, taskContext) {
+  const output = taskContext.fileEvidence.filePlan.outputs[0];
+  return publishToolboxArtifacts(
+    `read-only-${kind}`,
+    artifacts.map((artifact) => ({
+      sourcePath: artifact.generationPath,
+      outputId: artifact.outputArtifactKey,
+      fileName: path.basename(output.filePath),
+      byteSize: artifact.byteSize,
+      sha256: artifact.sha256,
+      dataRowCount: artifact.dataRowCount,
+      sheetCount: artifact.sheetCount,
+      warningSummary: EMPTY_TOOLBOX_WARNING_SUMMARY,
+      styleStats: null
+    })),
+    [{ targetPath: output.filePath }],
+    taskContext.batchContext,
+    {
+      targetSnapshots: taskContext.fileEvidence.targetSnapshots,
+      archiveInputFiles: taskContext.fileEvidence.inputFiles,
+      settleManifestArtifacts: taskContext.settleArtifacts,
+      fileEvidence: taskContext.fileEvidence,
+      allowEmptyArchiveInputs: true
+    }
+  );
+}
+
+function attachReadOnlyExportReceiptAcknowledgement(prepared) {
+  prepared.afterTerminal = ({ terminalStatus }) => terminalStatus === 'succeeded'
+    ? acknowledgeToolboxPublicationReceipts(prepared.readOnlyExportPublicationTaskIds || [])
+    : null;
+  return prepared;
+}
+
+function assertPendingEvidenceFresh(expected) {
+  return withPendingReadSnapshot(pendingDb, () => assertPendingRunEvidence(pendingDb, expected));
+}
+
+function assertPendingErrorAuthorityFresh(authority) {
+  if (!pendingSession.isErrorReportSnapshotCurrent(authority)) {
+    const error = new Error('Pending 错误报告已变化，请重新导出');
+    error.code = 'PENDING_EXPORT_SOURCE_STALE';
+    throw error;
+  }
+}
+
+function assertBizOpEvidenceFresh(expected, selector) {
+  const current = freezeBizOpSourceSnapshot({
+    userDataDir: path.dirname(database.dbPath),
+    mainDb: database.db,
+    selector
+  });
+  return assertBizOpSourceSnapshot(current, expected);
+}
 const archiveOperationContext = new AsyncLocalStorage();
 const positionReconciliationOperationContext = new AsyncLocalStorage();
 const statementSourceReadContext = new AsyncLocalStorage();
@@ -13169,6 +13297,9 @@ function registerNewAccountHandlers() {
       if (!pendingSession.hasPendingErrorReport()) {
         return { proceed: false, result: { status: 'error', message: '无错误报告' } };
       }
+      const useManagedExport = backgroundExecutionRuntimeManager.isProductionEnabled(
+        PENDING_READ_ONLY_ACTIONS.ERRORS
+      );
       const result = await dialog.showSaveDialog({
         title: '保存 Pending 导入报错文件',
         defaultPath: `pending-import-errors-${Date.now()}.xlsx`,
@@ -13177,8 +13308,11 @@ function registerNewAccountHandlers() {
       if (result.canceled || !result.filePath) {
         return { proceed: false, result: { status: 'cancelled' } };
       }
-      return {
+      const errorAuthority = useManagedExport ? pendingSession.captureErrorReport() : null;
+      const prepared = {
         proceed: true,
+        useManagedExport,
+        errorAuthority,
         filePlan: {
           version: 1,
           allocation: 'eager',
@@ -13193,11 +13327,67 @@ function registerNewAccountHandlers() {
           if (!pendingSession.hasPendingErrorReport()) {
             throw new Error('Pending 错误报告已变化，请重新导出');
           }
+          if (useManagedExport) assertPendingErrorAuthorityFresh(errorAuthority);
         }
       };
+      return useManagedExport
+        ? attachReadOnlyExportReceiptAcknowledgement(prepared)
+        : prepared;
     },
     async execute(_event, prepared, taskContext) {
     try {
+      if (prepared.useManagedExport) {
+        const stagingRoot = createReadOnlyExportStagingDirectory(
+          taskContext.batchContext,
+          'pending'
+        );
+        let preserveStaging = false;
+        try {
+          assertPendingErrorAuthorityFresh(prepared.errorAuthority);
+          const source = await writePendingManagedErrorSource({
+            snapshot: prepared.errorAuthority.snapshot,
+            stagingRoot
+          });
+          assertPendingErrorAuthorityFresh(prepared.errorAuthority);
+          const generationPlan = createReadOnlyExportGenerationPlan(
+            stagingRoot,
+            taskContext,
+            PENDING_READ_ONLY_ACTIONS.ERRORS
+          );
+          const assertSourceFresh = () => assertPendingErrorAuthorityFresh(
+            prepared.errorAuthority
+          );
+          const generated = await generateValidateAndPublishPendingExport({
+            runtime: backgroundExecutionRuntimeManager.get(),
+            actionKey: PENDING_READ_ONLY_ACTIONS.ERRORS,
+            operationKey: taskContext.batchContext.operationKey,
+            taskRunId: taskContext.batchContext.taskRunId,
+            batchContext: taskContext.batchContext,
+            stableRunEvidence: source.evidence,
+            dbPathOrManagedSource: source.source,
+            generationPlan,
+            context: source.context,
+            production: true,
+            assertSourceFresh,
+            publisher: (artifacts) => publishReadOnlyExportArtifacts(
+              'pending-errors', artifacts, taskContext
+            )
+          });
+          prepared.readOnlyExportPublicationTaskIds = [generated.publication.taskId];
+          const published = generated.publication.files[0];
+          return {
+            status: 'success',
+            path: published.filePath,
+            filePath: published.filePath,
+            errorCount: generated.summary.errorCount
+          };
+        } catch (error) {
+          preserveStaging = shouldPreserveToolboxTemporaryFiles(error);
+          throw error;
+        } finally {
+          if (!preserveStaging) cleanupReadOnlyExportStagingDirectory(stagingRoot);
+        }
+      }
       const exported = pendingSession.exportErrorReport(
         taskContext.fileEvidence.filePlan.outputs[0].filePath
       );
@@ -13334,9 +13524,21 @@ function registerNewAccountHandlers() {
       if (saveResult.canceled || !saveResult.filePath) {
         return { proceed: false, result: { status: 'cancelled' } };
       }
-      return {
+      const useManagedExport = backgroundExecutionRuntimeManager.isProductionEnabled(
+        PENDING_READ_ONLY_ACTIONS.DIFF
+      );
+      const stableRunEvidence = useManagedExport
+        ? freezePendingRunEvidence(pendingDb, [runId])
+        : null;
+      const prepared = {
         proceed: true,
         runId,
+        runMetadata: useManagedExport ? Object.freeze({
+          upperMonth: run.upperMonth,
+          lowerMonth: run.lowerMonth
+        }) : null,
+        useManagedExport,
+        stableRunEvidence,
         lineageIntents: [runOutputLineageIntent(run)],
         filePlan: {
           version: 1,
@@ -13347,11 +13549,62 @@ function registerNewAccountHandlers() {
             role: 'output',
             sourceOperation: 'pending:diff:export-single'
           }]
+        },
+        beforeStart() {
+          if (useManagedExport) assertPendingEvidenceFresh(stableRunEvidence);
         }
       };
+      return useManagedExport
+        ? attachReadOnlyExportReceiptAcknowledgement(prepared)
+        : prepared;
     },
     async execute(_event, prepared, taskContext) {
     try {
+      if (prepared.useManagedExport) {
+        const stagingRoot = createReadOnlyExportStagingDirectory(
+          taskContext.batchContext,
+          'pending'
+        );
+        let preserveStaging = false;
+        try {
+          const generationPlan = createReadOnlyExportGenerationPlan(
+            stagingRoot,
+            taskContext,
+            PENDING_READ_ONLY_ACTIONS.DIFF
+          );
+          const generated = await generateValidateAndPublishPendingExport({
+            runtime: backgroundExecutionRuntimeManager.get(),
+            actionKey: PENDING_READ_ONLY_ACTIONS.DIFF,
+            operationKey: taskContext.batchContext.operationKey,
+            taskRunId: taskContext.batchContext.taskRunId,
+            batchContext: taskContext.batchContext,
+            stableRunEvidence: prepared.stableRunEvidence,
+            generationPlan,
+            context: Object.freeze({ kind: 'pending-diff', runIds: [prepared.runId] }),
+            production: true,
+            assertSourceFresh: () => assertPendingEvidenceFresh(prepared.stableRunEvidence),
+            publisher: (artifacts) => publishReadOnlyExportArtifacts(
+              'pending-diff', artifacts, taskContext
+            )
+          });
+          prepared.readOnlyExportPublicationTaskIds = [generated.publication.taskId];
+          const published = generated.publication.files[0];
+          return {
+            status: 'success',
+            path: published.filePath,
+            filePath: published.filePath,
+            runId: prepared.runId,
+            upperMonth: prepared.runMetadata.upperMonth,
+            lowerMonth: prepared.runMetadata.lowerMonth,
+            ...generated.summary
+          };
+        } catch (error) {
+          preserveStaging = shouldPreserveToolboxTemporaryFiles(error);
+          throw error;
+        } finally {
+          if (!preserveStaging) cleanupReadOnlyExportStagingDirectory(stagingRoot);
+        }
+      }
       const result = pendingExportWriter.exportSingleRun(
         pendingDb,
         prepared.runId,
@@ -13385,9 +13638,17 @@ function registerNewAccountHandlers() {
       if (saveResult.canceled || !saveResult.filePath) {
         return { proceed: false, result: { status: 'cancelled' } };
       }
-      return {
+      const useManagedExport = backgroundExecutionRuntimeManager.isProductionEnabled(
+        PENDING_READ_ONLY_ACTIONS.SUMMARY
+      );
+      const stableRunEvidence = useManagedExport
+        ? freezePendingRunEvidence(pendingDb, selection.runIds)
+        : null;
+      const prepared = {
         proceed: true,
         runIds: selection.runIds,
+        useManagedExport,
+        stableRunEvidence,
         lineageIntents: selection.lineageIntents,
         filePlan: {
           version: 1,
@@ -13398,11 +13659,62 @@ function registerNewAccountHandlers() {
             role: 'output',
             sourceOperation: 'pending:diff:export-aggregate'
           }]
+        },
+        beforeStart() {
+          if (useManagedExport) assertPendingEvidenceFresh(stableRunEvidence);
         }
       };
+      return useManagedExport
+        ? attachReadOnlyExportReceiptAcknowledgement(prepared)
+        : prepared;
     },
     async execute(_event, prepared, taskContext) {
     try {
+      if (prepared.useManagedExport) {
+        const stagingRoot = createReadOnlyExportStagingDirectory(
+          taskContext.batchContext,
+          'pending'
+        );
+        let preserveStaging = false;
+        try {
+          const generationPlan = createReadOnlyExportGenerationPlan(
+            stagingRoot,
+            taskContext,
+            PENDING_READ_ONLY_ACTIONS.SUMMARY
+          );
+          const generated = await generateValidateAndPublishPendingExport({
+            runtime: backgroundExecutionRuntimeManager.get(),
+            actionKey: PENDING_READ_ONLY_ACTIONS.SUMMARY,
+            operationKey: taskContext.batchContext.operationKey,
+            taskRunId: taskContext.batchContext.taskRunId,
+            batchContext: taskContext.batchContext,
+            stableRunEvidence: prepared.stableRunEvidence,
+            generationPlan,
+            context: Object.freeze({
+              kind: 'pending-summary',
+              runIds: prepared.runIds.slice()
+            }),
+            production: true,
+            assertSourceFresh: () => assertPendingEvidenceFresh(prepared.stableRunEvidence),
+            publisher: (artifacts) => publishReadOnlyExportArtifacts(
+              'pending-summary', artifacts, taskContext
+            )
+          });
+          prepared.readOnlyExportPublicationTaskIds = [generated.publication.taskId];
+          const published = generated.publication.files[0];
+          return {
+            status: 'success',
+            path: published.filePath,
+            filePath: published.filePath,
+            ...generated.summary
+          };
+        } catch (error) {
+          preserveStaging = shouldPreserveToolboxTemporaryFiles(error);
+          throw error;
+        } finally {
+          if (!preserveStaging) cleanupReadOnlyExportStagingDirectory(stagingRoot);
+        }
+      }
       const result = pendingExportWriter.exportAggregateRuns(
         pendingDb,
         prepared.runIds,
@@ -14151,21 +14463,109 @@ function registerNewAccountHandlers() {
         mainDb: database.db,
         runId
       });
-      return {
+      const useManagedExport = backgroundExecutionRuntimeManager.isProductionEnabled(
+        BIZ_OP_READ_ONLY_ACTIONS.DAY
+      );
+      const selector = Object.freeze({
+        kind: 'biz-op-day',
+        mirrorRunId: runLocator.mirrorRunId
+      });
+      const stableSnapshot = useManagedExport
+        ? freezeBizOpSourceSnapshot({
+            userDataDir: path.dirname(database.dbPath),
+            mainDb: database.db,
+            selector
+          })
+        : null;
+      if (useManagedExport && JSON.stringify(stableSnapshot.runLocators) !==
+          JSON.stringify([runLocator])) {
+        throw new Error('BizOP 单日导出来源在准备期间发生变化，请重新导出');
+      }
+      const prepared = {
         proceed: true,
         runLocator,
+        useManagedExport,
+        selector,
+        stableRunEvidence: stableSnapshot && stableSnapshot.evidence,
         lineageIntents: [bizOpRunOutputIntent(runLocator)],
         filePlan: {
           version: 1,
           allocation: 'eager',
           inputs: [],
           outputs: [{ filePath: savePath, role: 'output', sourceOperation: 'bizOpRecon:export:date' }]
+        },
+        beforeStart() {
+          if (useManagedExport) assertBizOpEvidenceFresh(stableSnapshot.evidence, selector);
         }
       };
+      return useManagedExport
+        ? attachReadOnlyExportReceiptAcknowledgement(prepared)
+        : prepared;
     },
     async execute(_event, prepared, taskContext) {
     const { runLocator } = prepared;
     const savePath = taskContext.fileEvidence.filePlan.outputs[0].filePath;
+    if (prepared.useManagedExport) {
+      const stagingRoot = createReadOnlyExportStagingDirectory(
+        taskContext.batchContext,
+        'biz-op'
+      );
+      let preserveStaging = false;
+      try {
+        const generationPlan = createReadOnlyExportGenerationPlan(
+          stagingRoot,
+          taskContext,
+          BIZ_OP_READ_ONLY_ACTIONS.DAY
+        );
+        const generated = await generateValidateAndPublishBizOpExport({
+          runtime: backgroundExecutionRuntimeManager.get(),
+          actionKey: BIZ_OP_READ_ONLY_ACTIONS.DAY,
+          operationKey: taskContext.batchContext.operationKey,
+          taskRunId: taskContext.batchContext.taskRunId,
+          batchContext: taskContext.batchContext,
+          stableRunEvidence: prepared.stableRunEvidence,
+          generationPlan,
+          context: prepared.selector,
+          production: true,
+          assertSourceFresh: () => assertBizOpEvidenceFresh(
+            prepared.stableRunEvidence,
+            prepared.selector
+          ),
+          publisher: (artifacts) => publishReadOnlyExportArtifacts(
+            'biz-op-day', artifacts, taskContext
+          )
+        });
+        prepared.readOnlyExportPublicationTaskIds = [generated.publication.taskId];
+        const published = generated.publication.files[0];
+        try {
+          bizOpReconRunData.recordExportPath({
+            mainDb: database.db,
+            runId: runLocator.mirrorRunId,
+            exportPath: published.filePath
+          });
+        } catch (metadataError) {
+          appendActivityLogEntry({
+            level: 'warning',
+            source: 'main',
+            domain: 'biz-op-read-only-export',
+            message: 'BizOP 单日导出已发布，但 export_path 元数据更新失败',
+            details: [metadataError && metadataError.message
+              ? metadataError.message
+              : String(metadataError)]
+          });
+        }
+        return {
+          status: 'success',
+          filePath: published.filePath,
+          rowCount: generated.summary.rowCount
+        };
+      } catch (error) {
+        preserveStaging = shouldPreserveToolboxTemporaryFiles(error);
+        return { status: 'error', message: error && error.message ? error.message : String(error) };
+      } finally {
+        if (!preserveStaging) cleanupReadOnlyExportStagingDirectory(stagingRoot);
+      }
+    }
     // v3.0.5 PR-4：导出走侧库——主库镜像拿 (date,BU)+side_db_rel_path → open 该月侧库给 writer
     //   （writer 读 diff_rows + getRowById(imports) 全在侧库；月初跨月 T-2 行由冗余副本在库 → byte-for-byte）。
     const userDataDir = path.dirname(database.dbPath);
@@ -14217,24 +14617,98 @@ function registerNewAccountHandlers() {
         startDate,
         endDate
       });
-      return {
+      const useManagedExport = backgroundExecutionRuntimeManager.isProductionEnabled(
+        BIZ_OP_READ_ONLY_ACTIONS.RANGE
+      );
+      const selector = Object.freeze({
+        kind: 'biz-op-range',
+        buName,
+        startDate,
+        endDate
+      });
+      const stableSnapshot = useManagedExport
+        ? freezeBizOpSourceSnapshot({
+            userDataDir: path.dirname(database.dbPath),
+            mainDb: database.db,
+            selector
+          })
+        : null;
+      if (useManagedExport && JSON.stringify(stableSnapshot.runLocators) !==
+          JSON.stringify(selection.runLocators)) {
+        throw new Error('BizOP 区间导出来源在准备期间发生变化，请重新导出');
+      }
+      const prepared = {
         proceed: true,
         buName,
         startDate,
         endDate,
         runLocators: selection.runLocators,
+        useManagedExport,
+        selector,
+        stableRunEvidence: stableSnapshot && stableSnapshot.evidence,
         lineageIntents: selection.lineageIntents,
         filePlan: {
           version: 1,
           allocation: 'eager',
           inputs: [],
           outputs: [{ filePath: savePath, role: 'output', sourceOperation: 'bizOpRecon:export:date-range' }]
+        },
+        beforeStart() {
+          if (useManagedExport) assertBizOpEvidenceFresh(stableSnapshot.evidence, selector);
         }
       };
+      return useManagedExport
+        ? attachReadOnlyExportReceiptAcknowledgement(prepared)
+        : prepared;
     },
     async execute(_event, prepared, taskContext) {
     const { buName, startDate, endDate } = prepared;
     const savePath = taskContext.fileEvidence.filePlan.outputs[0].filePath;
+    if (prepared.useManagedExport) {
+      const stagingRoot = createReadOnlyExportStagingDirectory(
+        taskContext.batchContext,
+        'biz-op'
+      );
+      let preserveStaging = false;
+      try {
+        const generationPlan = createReadOnlyExportGenerationPlan(
+          stagingRoot,
+          taskContext,
+          BIZ_OP_READ_ONLY_ACTIONS.RANGE
+        );
+        const generated = await generateValidateAndPublishBizOpExport({
+          runtime: backgroundExecutionRuntimeManager.get(),
+          actionKey: BIZ_OP_READ_ONLY_ACTIONS.RANGE,
+          operationKey: taskContext.batchContext.operationKey,
+          taskRunId: taskContext.batchContext.taskRunId,
+          batchContext: taskContext.batchContext,
+          stableRunEvidence: prepared.stableRunEvidence,
+          generationPlan,
+          context: prepared.selector,
+          production: true,
+          assertSourceFresh: () => assertBizOpEvidenceFresh(
+            prepared.stableRunEvidence,
+            prepared.selector
+          ),
+          publisher: (artifacts) => publishReadOnlyExportArtifacts(
+            'biz-op-range', artifacts, taskContext
+          )
+        });
+        prepared.readOnlyExportPublicationTaskIds = [generated.publication.taskId];
+        const published = generated.publication.files[0];
+        return {
+          status: 'success',
+          filePath: published.filePath,
+          sheetCount: generated.summary.sheetCount,
+          skippedDates: generated.summary.skippedDates
+        };
+      } catch (error) {
+        preserveStaging = shouldPreserveToolboxTemporaryFiles(error);
+        return { status: 'error', message: error && error.message ? error.message : String(error) };
+      } finally {
+        if (!preserveStaging) cleanupReadOnlyExportStagingDirectory(stagingRoot);
+      }
+    }
     // v3.0.5 PR-4：区间导出跨多日多月——构造临时内存合并 db（把区间内 success run 的 runs/diff_rows/imports
     //   从各月侧库 + 主库历史合并进内存 db，保 id/source_row_id 映射），writer 在合并 db 上跑（writer 零改动）。
     let memDb = null;
@@ -19191,7 +19665,8 @@ async function publishToolboxArtifacts(
     protectedSourcePaths: options.protectedSourcePaths,
     userDataDir: app.getPath('userData'),
     batchContext,
-    archiveInputFiles: options.archiveInputFiles
+    archiveInputFiles: options.archiveInputFiles,
+    allowEmptyArchiveInputs: options.allowEmptyArchiveInputs === true
   });
   try {
     if (typeof options.settleManifestArtifacts === 'function') {
