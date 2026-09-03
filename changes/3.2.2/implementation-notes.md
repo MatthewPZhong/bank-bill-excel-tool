@@ -73,10 +73,11 @@
 - R3.2.2 只读 validator 输出 `10` actions、`productionEnabledCount=0`、`commonRuntimeActionCount=6`、BankBU common-runtime registration `ABSENT_FAIL_CLOSED`。当前 policy 模块直接回读进一步确认全部 10 项均为 `enabled=false / effectiveMode=legacy / effectiveWorkerCount=0`；审计 `/private/tmp/bbet-v322-production-policy-readback-20260904-071438.json` 为 `4511` bytes / SHA-256 `4fc33ab601d859f214595db7f657952e1dbc4172eb1e6807024d526684358870`。
 - `blindspot-pass` 与 `reconciliation-blindspot-pass` 沿真实入口、状态、receipt/inspector、部分提交、并发 cleanup、守恒和产物发布链复核，未发现改变方案的存活盲区或新增资金红线；审计 `/private/tmp/bbet-v322-prepr-blindspot-reconciliation-20260904-071640.json` 为 `2405` bytes / SHA-256 `8fe9f1e1af70b32fb2564a569d8fc8cc97a85a095302bd02c06362a8c9a17eca`。冻结 R3 snapshot 的历史人工字段保持原事实，不回写；当前发布授权来自发布负责人后续明确验收，Issue #220 项目仍是发布后补测。
 - `check-vars` skill 以 `main@c547097c` 为基准只读扫描真实 PR `src` diff（65 个 JS），未运行 `npm run check:vars` 或 `scan:vars`。定义文件宽口径命中 `Critical 15 / Important-skeleton 4 / Runtime-state 11 / Risk-sensitive 13 / Minor 0`；直接语义命中集中在 Duplicate/FundRecon/BankBU 的服务、侧库、守恒与状态接线，逐项由上述 focused/unit/integration/smoke、冻结 R3 authority 和人工资金验收覆盖。审计 `/private/tmp/bbet-v322-check-vars-readonly-v2-20260904-071556.json` 为 `45667` bytes / SHA-256 `217eb6465c54af89b4bf723ff846514f74d7edb9567a6139806936f9671259ec`。
+- 证据收口提交 `a0969ce499d2ccc518f28ced5ebda2d4073ad412` 的 clean HEAD `npm run check:packaged-inputs` PASS；日志 `/private/tmp/bbet-v322-clean-head-packaged-inputs-20260904-071803.log` 为 `187` bytes / SHA-256 `3f05eba40765133e8640510e85a88cdc64f41b355dde76e3d86faeb86cf64a97`，`build.files` 9 条覆盖范围与 HEAD 一致。
 
 ### Remaining Unknowns
 
-- `CLOSED / local`：本次双亲组合后的 metadata、R3 authority、资金/恢复、Windows 合同、完整 unit/integration/smoke/lint 与静态检查均已在 official Node 22.18 exact-lock 上通过；提交发布准备证据后仍须在 clean HEAD 运行 packaged-inputs。
+- `CLOSED / local`：本次双亲组合后的 metadata、R3 authority、资金/恢复、Windows 合同、完整 unit/integration/smoke/lint、静态检查与 clean-HEAD packaged-inputs 均已在 official Node 22.18 exact-lock 上通过。
 - `PROBE / exact CI`：普通非 force push 后必须由新 exact head 的 `smoke-test`、`build` 和关键步骤全部实际成功，并闭合 review threads；旧 CI 不代偿。
 - `PROBE / tag 后`：最终 Windows Release 四项资产、公开下载、摘要与更新元数据只能在 immutable annotated tag workflow 产生后回读。
 - `BLOCK / production`：application production 继续 disabled/legacy；本版不改变金额、币种、主键、Workbook、正式文件发布或恢复终态红线。
