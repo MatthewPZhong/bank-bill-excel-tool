@@ -1,6 +1,6 @@
 {
   "reportVersion": 17,
-  "generatedAt": "2026-08-30T19:38:58.208065+00:00",
+  "generatedAt": "2026-09-02T12:32:07.164728+00:00",
   "status": "PASS",
   "command": "PYTHON_BIN=<python3> changes/background-execution/validation/run-validation.sh --authority-mode repo --base-ref origin/v3.2.0",
   "pythonVersion": "3.14.3",
@@ -37,15 +37,15 @@
       "mergeBase": "9b9887c152dd7ff1a784a5a5ba31d6d485dffd04",
       "gitWorkspaceIdentity": {
         "expected": {
-          "topLevel": "/private/tmp/bbet-v325-e13g.20260831.TQR8RK/worktree",
-          "gitDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git/worktrees/worktree5",
+          "topLevel": "/private/tmp/bbet-v325-final-v324-propagate.zt4nf1/pr-r325",
+          "gitDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git/worktrees/pr-r325",
           "commonDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git",
-          "headOid": "0791560239398323760972fb9fe2b9cb1d409de0"
+          "headOid": "5a838cbab470df8c610f2bb001996c0cdbccafa1"
         },
-        "topLevel": "/private/tmp/bbet-v325-e13g.20260831.TQR8RK/worktree",
-        "gitDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git/worktrees/worktree5",
+        "topLevel": "/private/tmp/bbet-v325-final-v324-propagate.zt4nf1/pr-r325",
+        "gitDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git/worktrees/pr-r325",
         "commonDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git",
-        "headOid": "0791560239398323760972fb9fe2b9cb1d409de0",
+        "headOid": "5a838cbab470df8c610f2bb001996c0cdbccafa1",
         "identityMatched": true,
         "environmentPolicy": {
           "ambientGitVariables": "remove-all-GIT_*",
@@ -263,7 +263,7 @@
           "loadedRequests": [
             "./main-process/background-execution/action-task-binding-registry"
           ],
-          "resolvedTargetPath": "/private/tmp/bbet-v325-e13g.20260831.TQR8RK/worktree/src/main-process/background-execution/action-task-binding-registry.js",
+          "resolvedTargetPath": "/private/tmp/bbet-v325-final-v324-propagate.zt4nf1/pr-r325/src/main-process/background-execution/action-task-binding-registry.js",
           "freshModuleLoaded": true,
           "exportIdentityMatched": true,
           "passed": true
@@ -9186,15 +9186,15 @@
             "mergeBase": "9b9887c152dd7ff1a784a5a5ba31d6d485dffd04",
             "gitWorkspaceIdentity": {
               "expected": {
-                "topLevel": "/private/tmp/bbet-v325-e13g.20260831.TQR8RK/worktree",
-                "gitDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git/worktrees/worktree5",
+                "topLevel": "/private/tmp/bbet-v325-final-v324-propagate.zt4nf1/pr-r325",
+                "gitDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git/worktrees/pr-r325",
                 "commonDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git",
-                "headOid": "0791560239398323760972fb9fe2b9cb1d409de0"
+                "headOid": "5a838cbab470df8c610f2bb001996c0cdbccafa1"
               },
-              "topLevel": "/private/tmp/bbet-v325-e13g.20260831.TQR8RK/worktree",
-              "gitDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git/worktrees/worktree5",
+              "topLevel": "/private/tmp/bbet-v325-final-v324-propagate.zt4nf1/pr-r325",
+              "gitDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git/worktrees/pr-r325",
               "commonDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git",
-              "headOid": "0791560239398323760972fb9fe2b9cb1d409de0",
+              "headOid": "5a838cbab470df8c610f2bb001996c0cdbccafa1",
               "identityMatched": true,
               "environmentPolicy": {
                 "ambientGitVariables": "remove-all-GIT_*",
@@ -9256,15 +9256,15 @@
           "mergeBase": "9b9887c152dd7ff1a784a5a5ba31d6d485dffd04",
           "gitWorkspaceIdentity": {
             "expected": {
-              "topLevel": "/private/tmp/bbet-v325-e13g.20260831.TQR8RK/worktree",
-              "gitDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git/worktrees/worktree5",
+              "topLevel": "/private/tmp/bbet-v325-final-v324-propagate.zt4nf1/pr-r325",
+              "gitDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git/worktrees/pr-r325",
               "commonDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git",
-              "headOid": "0791560239398323760972fb9fe2b9cb1d409de0"
+              "headOid": "5a838cbab470df8c610f2bb001996c0cdbccafa1"
             },
-            "topLevel": "/private/tmp/bbet-v325-e13g.20260831.TQR8RK/worktree",
-            "gitDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git/worktrees/worktree5",
+            "topLevel": "/private/tmp/bbet-v325-final-v324-propagate.zt4nf1/pr-r325",
+            "gitDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git/worktrees/pr-r325",
             "commonDir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.git",
-            "headOid": "0791560239398323760972fb9fe2b9cb1d409de0",
+            "headOid": "5a838cbab470df8c610f2bb001996c0cdbccafa1",
             "identityMatched": true,
             "environmentPolicy": {
               "ambientGitVariables": "remove-all-GIT_*",
@@ -9671,7 +9671,7 @@
       "name": "document-contract-paths",
       "passed": true,
       "details": {
-        "referenceCount": 91,
+        "referenceCount": 92,
         "errors": []
       }
     },
@@ -9727,7 +9727,7 @@
     "validProtocolMessageCount": 23,
     "validProtocolSequenceCount": 5,
     "actionTableRowCount": 59,
-    "documentContractReferenceCount": 91,
+    "documentContractReferenceCount": 92,
     "validRecoverySourceCount": 5,
     "validRecoveryTransitionBranchCount": 16,
     "validRecoveryObservationBranchCount": 4,
@@ -9829,10 +9829,10 @@
     "changes/3.2.1/techdoc.md": "613b40fd1b4a202af07d0629fcc400e5ac47c0bd141b16062d55ec0dd1139147",
     "changes/3.2.2/spec.md": "0cdf28e5310733355fb51d92818dde8fd837ee06b521a4694c0c9cc43300d47f",
     "changes/3.2.2/techdoc.md": "9fd15a46b482e6801616554978dff67a02676b437b9759e18d15fce29dcff209",
-    "changes/3.2.3/e10-b-blindspot-checklist.md": "3a9eda730d290b84267b0d8a4713c55f33f0cd671448b75073268abb88fbbcc7",
-    "changes/3.2.3/e10-b-implementation-notes.md": "5ce01f65eb09ac8e983796603c990940bb1fe3fcd724ab0386f107eef40b9f17",
-    "changes/3.2.3/e10-b-preflight.md": "eb049151a699610ec3a2df6283d4e27a27a3ca5d6546f9d0756a248b765a01ad",
-    "changes/3.2.3/implementation-notes.md": "7093b2796e7d047fa044d34cb47cc91b2dde4616cd3c59c44fe641227bdd3c76",
+    "changes/3.2.3/e10-b-blindspot-checklist.md": "6b699167d4c2301d3eb14a037fdb2287e73a9c979143204a91ed964bd4f0ba12",
+    "changes/3.2.3/e10-b-implementation-notes.md": "a8ccaedc8299cbcb297b3bb66d077fe9272c6b5c75ccec3b6570923841c0806f",
+    "changes/3.2.3/e10-b-preflight.md": "5af0f20b4e2cdaab035eba64ac6c9ba8d9c740ac636fcbcad91441982db6f858",
+    "changes/3.2.3/implementation-notes.md": "79465538cff65483e7c2c2574deff1e69f7bcb0213013f12411d25289aa8b100",
     "changes/3.2.3/spec.md": "533684fe718d333456088c2511a17135ec4f479e592e94ba1dc15e7ff6a68851",
     "changes/3.2.3/techdoc.md": "b10687d5e26f85b477eeece913c46078404a4eea175702454be9bd8b5dcda4d4",
     "changes/3.2.4/spec.md": "dad81f149405281043306f7ce735f672fa20a167b4d8de751d5b254318fac2c7",
@@ -9880,7 +9880,7 @@
     "changes/background-execution/validation/validate_background_execution_baseline.py": "288820beb6a809c3aa89548d88e87dac51b787310e8cbcd61cbdb72147012b0b",
     "codex-ready-revision-manifest.json": "58ad76fc88fc3ad23c2d3622576bfc50d392992d3ec894dd6dc572dd4c2453c9",
     "final-recovery-contract-revision-manifest.json": "9605d3c4e225a8ded13924cd6bd8c2924ac1848b935202625706db2425f03e8f",
-    "implementation-notes.md": "935ce0e32b05c21fa0a73856b318a97c28fb50b181e651833412abe60c93f794",
+    "implementation-notes.md": "b12124a1139f3ad2373c8b285ced55bbf4200b84adf3da638b091d40cf3d6fc6",
     "implementation-sequence.md": "191a1f7fd74955aa751e387812a3fed068c9cfd62fa22a94421f05e5b61f1cef",
     "targeted-revision-manifest.json": "0033114e3f80ffbf05a79b17314fb90971cb0bad1a113dd8b88fb5417899ac38"
   },

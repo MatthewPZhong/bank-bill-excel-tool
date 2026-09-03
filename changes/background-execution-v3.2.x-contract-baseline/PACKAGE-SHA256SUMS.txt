@@ -12,10 +12,15 @@ e073f7e1ceb683c2587b671d37eee2c3fd43cf3ba2d7fc7b6a5f7eb68888762d  ./P0-recovery-
 7acfe2ea7297015d9b02dbdce5c51fc16e61bc12391fb70709e7ddc705fb9f73  ./README.md
 d863f63a831b495d5e63d63fece1608afe9f39e8cc608f9d6ed0f39e77328a9f  ./changes/3.2.0/spec.md
 c3810217c91d474a1dedc248619d441e661039bba3378da73313cdd5997f466b  ./changes/3.2.0/techdoc.md
+be132fe2d901631559531d0ba44a2141bd7304f7acd4a8a49d67022c07dbfbe6  ./changes/3.2.1/implementation-notes.md
 79aa57ad49904c395bb7669354336d81500ff31fa3c1daf2f459ced3ac505151  ./changes/3.2.1/spec.md
 613b40fd1b4a202af07d0629fcc400e5ac47c0bd141b16062d55ec0dd1139147  ./changes/3.2.1/techdoc.md
 0cdf28e5310733355fb51d92818dde8fd837ee06b521a4694c0c9cc43300d47f  ./changes/3.2.2/spec.md
 9fd15a46b482e6801616554978dff67a02676b437b9759e18d15fce29dcff209  ./changes/3.2.2/techdoc.md
+6b699167d4c2301d3eb14a037fdb2287e73a9c979143204a91ed964bd4f0ba12  ./changes/3.2.3/e10-b-blindspot-checklist.md
+a8ccaedc8299cbcb297b3bb66d077fe9272c6b5c75ccec3b6570923841c0806f  ./changes/3.2.3/e10-b-implementation-notes.md
+5af0f20b4e2cdaab035eba64ac6c9ba8d9c740ac636fcbcad91441982db6f858  ./changes/3.2.3/e10-b-preflight.md
+79465538cff65483e7c2c2574deff1e69f7bcb0213013f12411d25289aa8b100  ./changes/3.2.3/implementation-notes.md
 533684fe718d333456088c2511a17135ec4f479e592e94ba1dc15e7ff6a68851  ./changes/3.2.3/spec.md
 b10687d5e26f85b477eeece913c46078404a4eea175702454be9bd8b5dcda4d4  ./changes/3.2.3/techdoc.md
 dad81f149405281043306f7ce735f672fa20a167b4d8de751d5b254318fac2c7  ./changes/3.2.4/spec.md
@@ -63,7 +68,7 @@ a88d936a832d3488535b88e92b58ace586693a487d1ddce529d4d24df665548c  ./changes/back
 288820beb6a809c3aa89548d88e87dac51b787310e8cbcd61cbdb72147012b0b  ./changes/background-execution/validation/validate_background_execution_baseline.py
 58ad76fc88fc3ad23c2d3622576bfc50d392992d3ec894dd6dc572dd4c2453c9  ./codex-ready-revision-manifest.json
 9605d3c4e225a8ded13924cd6bd8c2924ac1848b935202625706db2425f03e8f  ./final-recovery-contract-revision-manifest.json
-935ce0e32b05c21fa0a73856b318a97c28fb50b181e651833412abe60c93f794  ./implementation-notes.md
+b12124a1139f3ad2373c8b285ced55bbf4200b84adf3da638b091d40cf3d6fc6  ./implementation-notes.md
 191a1f7fd74955aa751e387812a3fed068c9cfd62fa22a94421f05e5b61f1cef  ./implementation-sequence.md
 0033114e3f80ffbf05a79b17314fb90971cb0bad1a113dd8b88fb5417899ac38  ./targeted-revision-manifest.json
-b585b44da45fcedaa5025ecd31af00a17eb31adff195d10010f23293bf2575cd  ./validation-report.json
+d07aa133e9fd964fda3b1aedd55676899230e3573ade6ee05621d870f95cd047  ./validation-report.json

@@ -9,6 +9,28 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## v3.2.5（2026-08-31，版本分支技术收口，未发布）
+
+v3.2.5 完成 Pending、BizOP、PreFund、Position、VCC Financial OP 与 Acquiring 剩余只读导出和成熟执行器 adapter，并以 54 个 action 的 Manifest、Capability Inventory、Effective Production Strategy 与逐 action release evidence 收口后台执行平台外围能力；production enablement 保持关闭。
+
+### 新增
+
+- Pending/BizOP 五条只读导出、PreFund/Position/VCC Financial OP 四条只读导出和 Acquiring copy/regenerate 两条静态分类 capability；所有输出继续使用模块原有 SQL、排序、金额/币种、Workbook 与 Publisher 语义。
+- Pending/BizOP big-table、Acquiring import/run/resume 与 Position utility-process adapter；adapter 不在旧 dispatcher 外额外 spawn，也不改变事务、chunk、Critical Intent、receipt、取消或恢复拓扑。
+- 54-action Action Manifest、Capability Inventory、Effective Production Strategy Snapshot 和 324/324 surface coverage；16 个 legacy-only action 与 2 个 platform canary 不伪装成 runtime capability。
+- R3.2.5 逐 action evidence，分别记录 baseline fixture、语义/DB/Workbook/故障/资源、Windows、人工复核和 production decision。
+
+### 变更
+
+- package 元数据更新为 `3.2.5`；顶层 Spec/TechDoc 继续记录冻结来源，并以受测试约束的 current-tree 修订纠正 Position export、Acquiring topology、Position identity 和 deferred PreFund action 的真实 authority。
+- capability 与 effective strategy 完全分开：36 个 implemented capability 可审计，但全部 54 个 action 的 effective mode 仍为 legacy、worker count 为 0，生产启用数为 0。
+
+### 兼容与人工边界
+
+- 业务 SQL、稳定排序、金额、币种、Workbook、事务、幂等、取消、恢复、进程拓扑和 legacy 用户入口不变；legacy seam 不自动删除。
+- Windows packaged 为 `NOT_RUN`；真实样本、资金和恢复为 `PENDING_HUMAN_REVIEW`；Excel/WPS、RSS 与稳定观察窗口未运行。自动测试不能代替人工复核或授权 production。
+- 本节点未合并 `main`、未创建 tag、未发布 production；`release-check`、`check-vars`、`scan:vars` 按用户要求跳过，不能声明为 PASS。
+
 ## v3.2.4（2026-08-30，版本分支技术收口，未发布）
 
 v3.2.4 完成 ReconFix 长驻 Service、JPM durable mutation/Inspector、多 artifact 原子发布，以及 VCC Financial OP 单 Writer、主体查询下推和最多双 Writer 的后台执行 capability；production enablement 保持关闭，既有金额、币种、方向、匹配、Workbook、样式、行序和用户流程不变。

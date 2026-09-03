@@ -154,6 +154,7 @@
 | Main loader proof 采用首语句结构约束与完整源码前缀执行 | Round8 从第 71 行抽取单条 statement，无法证明之前的 module side effect/helper 没有重绑 loader | 继续枚举有限 assignment/cache 黑名单，或加载完整 Electron Main | exact require 是首个 non-directive statement；probe 从 byte 0 执行至其结尾、清缓存 fresh-load target并比对真实 export，不新增 production seam |
 | Git authority resolver 绑定物理 workspace，而非仅信 subprocess | inherited `GIT_DIR`/object/alternate/config 可让相同 cwd 读取另一个 repository；symbolic HEAD 也可能在多次命令之间漂移 | 只传 `git -C`、只检查 toplevel，或把任意 Git 失败降级为 genesis | 单一 clean-env helper；filesystem marker/ref 给出 expected identity，单次 rev-parse同时返回 toplevel/gitDir/commonDir/HEAD并 exact 比较，merge-base使用已捕获 OID；linked worktree保留 distinct dirs |
 | published report 与 invocation provenance 采用 selected-target exact binding | 同一 authority 内容并不等于同一审计来源；旧 trust projection 丢失 mode/base/head/external identity，`--no-write-report` 可复用错误报告 | 只比较 genesis/PENDING disposition，或规范化时删除绝对路径、digest、mode | report v17 完整保留并规范化 source/transition 字段；canonical command 去除复验专用 no-write flag但保留 mode/base/external path/digest/custom report；package report repo-only，所有 custom report target 强制位于包外 |
+| R3.2.5 package checksum 以实际目录集合为权威 | 旧 69 条清单只会验证已列路径，后续新增的 5 个 notes/checklist 未入清单仍可 `shasum -c` 通过 | 继续写死 69；只比较 checksum 文件行数 | 枚举 checksum 自身外全部普通文件，精确拒绝漏列/额外/重复/乱序/逃逸/非普通文件，并逐项校验 SHA-256；当前完整集合为 74 条。 |
 
 ## Assumptions
 
@@ -190,6 +191,7 @@
 | Round7 AST 只锁 imported/run identifiers，explicit genesis 直接跳过 previous 解析 | Round8 将 Main import 前 CommonJS loader/cache/module 设为不可变 bootstrap region并执行真实 import statement；Git explicit genesis 复用 repo merge-base解析，detached 单独标为 non-merge-evidence | reviewer 可先重绑 `require` 后保持 exact import 形状；post-merge 可显式声明 genesis 绕过 same-revision change-control | 18 个 startup mutants、18 个 hostile API cases与6个 genesis CLI/Git KAT；production Main/API/DB/IPC不变，authority仍 genesis/PENDING | 是 |
 | Round8 loader proof 只执行第 71 行抽出的 import，Git 调用继承 process environment | Round9 把 exact require 移为 Main 首个 non-directive statement并执行 byte-0完整前缀；所有 Git 调用统一 clean env并与物理 repo identity相互校验 | 单条 statement proof不覆盖前置执行；cwd 不能阻止 ambient Git repository/object/config重定向 | startup mutants 18→21、Git/genesis KAT 6→12；新增 linked-worktree positive KAT，普通与 linked report均保留 exact gitDir/commonDir；产品 API/IPC/DB 不变 | 是 |
 | Round9 no-write 只核 authority disposition/部分 source trust，且 external positive 直接复用 published repo report | Round10 把 selected report target 的完整 provenance、canonical generation command、reportVersion 与 input hashes 设为 exact gate；published report 只允许 repo/default 写入 | identical authority bytes 仍可能来自不同 mode/base/head/physical repo/path，部分 projection 无法证明报告属于本次 invocation | 原始 external-identical 29/29 旁路改为预期 FAIL；external/detached positive 改用包外临时 report，report v16→v17，不改变 authority payload或产品合同 | 是 |
+| 既有 package hygiene 以 69 条 checksum 作为“全目录”证据 | R3.2.5 收尾 probe 枚举出 checksum 自身外 74 个普通文件，并稳定报首个漏项 `changes/3.2.1/implementation-notes.md` | 保留历史轮次当时的 69/69 记录，但撤销其 current-tree 全目录结论 | 不改变合同语义；最终 R3.2.5 重新生成 74 条清单并加入集合/hash 反例测试 | 是（implementation notes / R3 evidence） |
 
 ## Evidence
 

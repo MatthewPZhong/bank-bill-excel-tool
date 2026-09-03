@@ -222,6 +222,11 @@ test('E13-E import 复用 admitted Parser topology、Main DB authority 并保留
   const binding = createAcquiringImportMatureBinding({
     userDataDir: '/tmp/e13-e-user-data',
     nowIso: () => '2026-08-31T00:00:00.000Z',
+    // 本用例只验证 Supervisor admission 后的 topology 是否原样进入旧 engine；
+    // host freemem/CPU 降级由 pipeline-unit 与 mature-action-adapters 独立锁定。
+    inspectTopology() {
+      return Object.freeze({ effectiveChildCount: 2 });
+    },
     openSideDb() {
       openCount += 1;
       return { close() {} };

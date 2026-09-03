@@ -13,7 +13,7 @@
   `PENDING_HUMAN_REVIEW`；不运行 `release-check`、`check-vars` 或 `scan:vars`。
 - Done when：当前 54 个 canonical action 和 61 个 legacy pair 均有独立静态证据；Runtime 的 36 个
   capability、16 个 legacy-only action 与 2 个 platform canary action 全量入表；coverage=100%；策略快照逐 action 如实显示
-  legacy/0 worker；负向 mutant fail closed；current-tree validation 29/29、package checksum 69/69。
+  legacy/0 worker；负向 mutant fail closed；current-tree validation 29/29、package checksum 精确覆盖 checksum 自身外全部 74 个普通文件。
 
 ## 已确认事实
 
@@ -47,6 +47,6 @@
 | 2 | 生成 Capability 与 Effective Strategy 两份快照 | 阻断 capability=production 的错误推导 | 字段/集合/production mismatch fail closed。 |
 | 3 | 加入 handler/FilePlan/Registry/Inspector/Publisher 负向 mutants | 验证六个 surface 100% 且关键恢复/发布引用完整 | mutant 未失败则不进入 authority 更新。 |
 | 4 | 受控更新 rev2 authority、provenance、文档与报告 | 让 current tree 29/29，而非伪造 checksum | transition/文档/hash 任一失败则停止。 |
-| 5 | 最后重建 package checksum | 只对已通过语义 gate 的最终 bytes 做完整性证明 | 69/69 前不进入 R3.2.5。 |
+| 5 | 最后重建 package checksum | 只对已通过语义 gate 的最终 bytes 做完整性证明 | 全目录 74/74 前不进入 R3.2.5；旧 69 条清单因漏列 5 个既存文档而作废。 |
 
 按用户要求不运行 `release-check`、`check-vars` 或 `scan:vars`；这些项目不得记录为 PASS。

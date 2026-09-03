@@ -21,7 +21,7 @@
 | Contract Authority v1 走 revision 1→2 受控变化 | current 变化由移除 1 条 stale Acquiring pair、补入 2 条遗漏 PreFund pair 构成，60→61；validator 明确要求 exact +1 revision | 保持 rev1 同步改派生证据；另造不受 previous 约束的新 authority | `genesis=false`、人工 redline PENDING、mergeReady/production enablement 仍 false。 |
 | PreFund bank import/run 使用独立 legacy-only action，但不写入冻结 Runtime Policy Registry | current 顶层 E13-G authority 明确不能以已后台化的 MPT/export 宣称覆盖完整 PreFund；真实 Main 与 TaskPolicy 各有独立入口，而冻结 package Spec/Registry 只定义 Runtime capability | 继续沿用 52-action 中间清单；把两者并入 MPT/export；或伪造两条 Runtime policy | 两入口只进入 Manifest/Binding/Capability/Strategy：保持 legacy-main、runtimeRegistered=false、effective legacy、worker=0、feature flag=false；Registry 仍为 52。 |
 | validator 只允许两个精确 legacy-only binding action | Manifest 必须覆盖真实入口，但不能把任意 binding-only action 泛化为合法例外 | 继续要求 Manifest=Registry；或允许任意 Registry 外 action | exact set 为 Registry ∪ `{pre-fund:bank-import, pre-fund:run}`，并锁定各自唯一 TaskPolicy；缺一、多一或塞回 Runtime Registry 的 mutant 均失败。 |
-| checksum 最后生成 | checksum 只证明 bytes 完整，不证明语义正确 | 先重算 69/69 再处理 validator | 必须先通过 coverage、mutants 与 29/29。 |
+| checksum 最后生成且必须覆盖目录实际文件集合 | checksum 只证明 bytes 完整，不证明语义正确；后续复核发现旧固定 69 条清单漏列 5 个既存文档 | 先重算旧 69 条再处理 validator；只验证已列条目 | 必须先通过 coverage、mutants 与 29/29，再枚举 checksum 自身外全部 74 个普通文件并逐项验证。 |
 
 ## Evidence
 
@@ -32,7 +32,7 @@
 | 当前 capability | 36 policies、16 legacy-only、2 platform canary | 全部 production disabled；Snapshot 必须保持 legacy/0。 |
 | Contract Authority v1 revision 2 | `29/29 PASS`、0 error、73 inputs；52 Registry actions、59 Spec rows | 相对 merge-base revision 1 精确 +1；`genesis=false`、人工 redline 仍 PENDING；validator 对缺失/额外/错误入 Registry 的 legacy-only mutant 全部拒绝。 |
 | E13-G 独立清单 gate | `324/324` surfaces、61 pairs、0 production enabled | 四份已发布 JSON 已由 `npm run check:background-execution-manifest` 对当前模块导出和 source hashes 复验；中间 312/312 结果不作最终绿灯。 |
-| package checksum | `69/69 PASS` | 在 semantic validator 29/29 和最终 report 落盘后重算，随后逐文件 `shasum -a 256 -c` 复验；不以 checksum 代替语义 gate。 |
+| package checksum | 旧 `69/69` 已作废；最终 `74/74 PASS` | 在 semantic validator 29/29 和最终 report/文档落盘后重算；新 R3.2.5 validator 同时检查目录精确集合、规范顺序与每个 SHA-256，不以 checksum 代替语义 gate。 |
 | 完整本地回归 | 最终 E13-G/binding/bootstrap 定向 `27/27 PASS`；unit `6857/6860 PASS`（0 FAIL、3 SKIP，日志 `logs/unit-tests/unit-20260831-032421.log`）；integration 53/53 scripts、`2488/2488 PASS`（349045 ms）；smoke PASS | lint、E13-G 脚本/测试 ESLint、语法与 `git diff --check` 均 PASS；未运行被禁止的聚合命令。 |
 | 依赖环境复验 | `electron-builder/app-builder-lib 26.15.7` 与 lockfile 精确一致；Windows contract `5 PASS`、`2 SKIP` | 首次全量 unit 的唯一失败来自主工作区旧 `node_modules` 26.8.1；隔离安装 lockfile 精确依赖后精确用例与完整 unit 均 0 FAIL，未把旧依赖失败快照当绿灯。 |
 

@@ -36,10 +36,19 @@ test('v3.2.4 closeout 同步当前版本、冻结文档、历史 evidence 与三
     'changes/background-execution-r3-2-4-release-evidence/release-evidence.json'
   ));
 
-  assert.equal(packageJson.version, '3.2.4');
+  assert.match(packageJson.version, /^\d+\.\d+\.\d+$/);
+  const [major, minor, patch] = packageJson.version.split('.').map(Number);
+  assert.ok(
+    major > 3 || (major === 3 && minor > 2) ||
+      (major === 3 && minor === 2 && patch >= 4),
+    '当前稳定版本不得倒退到 v3.2.4 之前'
+  );
   assert.equal(packageLock.version, packageJson.version);
   assert.equal(packageLock.packages[''].version, packageJson.version);
-  assert.match(guide, /^版本：`v3\.2\.4`$/m);
+  assert.match(
+    guide,
+    new RegExp('^版本：`v' + packageJson.version.replace(/\./g, '\\.') + '`$', 'm')
+  );
 
   assert.equal(historicalSnapshot.release, '3.2.4');
   assert.equal(historicalSnapshot.packageVersion, '3.2.3');
