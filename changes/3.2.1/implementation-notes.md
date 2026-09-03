@@ -74,3 +74,35 @@
 - `PROBE / exact CI`：推送后必须由新 exact head 的 `smoke-test` 与 `build` 全部完成且成功，并闭合 review threads。
 - `PROBE / tag 后`：最终 Windows Release 四项资产、公开下载、摘要与更新元数据只能在 immutable annotated tag workflow 产生后回读。
 - `BLOCK / production`：本版不启用 application production；后续若需启用，必须另行提交、验证和授权。
+
+## 2026-09-03 exact CI 与 review 收口
+
+### Decisions
+
+- 保留 `scripts/startup-process-adapter.js` 的生产默认 `15000ms` fail-closed 上限；只在 Windows 专用真实语义测试中先用 `30000ms` 完成一次有界 CIM 预热，随后仍由默认生产 adapter 验证 launch、token、graceful 与 force-cleanup 全链路。
+- Hold 入口预检只为成功读取且 header identity 有效的 MPT 文件推导 exact batch scope；无法识别的文件继续进入既有逐文件 import/repair 路径形成失败，不再提前中断同批有效文件。
+- 可识别 identity 的 Hold 仍在 prepare/beforeStart 检查；legacy 写入前 `identityGate` 与 managed Writer 持久 ACK 前 scope gate 均保持不变，未知 identity 不获得写入旁路。
+
+### Deviations
+
+- 首次 exact Windows CI 暴露 hosted runner 的 CIM 首次唤醒可恰好超过生产 15 秒边界；该失败只修复专用测试夹具，不放宽生产超时或 cleanup 证明。
+- PR review 发现 Hold scope 预计算会把单文件 filename/header/read 失败升级为整批 prepare 失败，偏离 Spec 已冻结的 mixed-result/per-file failure 语义；因此在原计划的测试夹具修复外增加最小 Hold 预检修复与回归测试。
+- 首轮新增回归确认 `readMptHeader()` 虽可被调用方捕获，`stream.pipe()` 不会自动传播 raw source 的 `ENOENT`，仍产生额外 `uncaughtException`；增加只把 source error 沿 hashing/gunzip 链转交最终 async iterator 的归一化，不改变 parser 成功路径、hash、行解析或业务校验。
+
+### Evidence
+
+- PR #222 首次 exact CI run `33753987239`：`smoke-test` job `100643862345` 为 FAILURE，`build` job `100644374079` 按门禁 SKIPPED；完整日志 `/private/tmp/bbet-v321-pr222-exact-smoke-failure-33753987239-100643862345-20260903-2018.log` 为 `66950` bytes / SHA-256 `38a254101a0d036def576bc5a770b0ef9c74cbf0fe299729b783b1621437d0d4`。唯一失败为 Windows 真实 snapshot 在约 `15009ms` 触发 `PROCESS_SNAPSHOT_TIMEOUT`，不得由本地绿灯代偿。
+- 修复前远端复核确认 `main=92380fd84471b061b7a84842be7da001aa82db87`、PR head `b250ad2544bef0f8cf66a814911d1fa2ffd22a37`、OPEN/non-draft/MERGEABLE；review thread `PRRT_kwDORiHOzM6e6Quj` 未解。审计 `/private/tmp/bbet-v321-pr-remediation-preflight-audit-20260903-203302.json` 为 `2198` bytes / SHA-256 `f308c967041a11083aa2b06fdb0d15502d53925d3c35ccc6bc94a1797d40d8ac`。
+- 首轮定向回归为 `58 pass / 2 fail / 3 skip`；两项失败均是新增 missing-source 用例捕获到同一个底层 raw stream `ENOENT` 仍以 `uncaughtException` 外溢。该轮只作定位证据，不记 PASS。
+- 修正 raw source error 传递后，Windows adapter/contract 与 MPT mixed import/repair 定向组合为 `60 pass / 0 fail / 3 Windows-only skip`；完整 MPT parser/import/receipt/mixed-file 组合为 `134/134 PASS`。
+- official Node.js `22.18.0` exact-lock 完整 unit 为 `6187/6190 PASS`、`0 FAIL`、`3 Windows-only SKIP`；日志 `/private/tmp/bbet-v321-release-prep.lLgHBo/worktree/logs/unit-tests/unit-20260903-204509.log`。
+- official Node.js `22.18.0` exact-lock 完整 integration 为 `51 scripts / 2455/2455 PASS`；其中 `toolbox-large-file-stream=50/50`、`toolbox-large-split-multi-sheet=31/31`。runner 机械改写已用 `apply_patch` 恢复，`rules/integration-test-policy.md` 精确回到 SHA-256 `65716ba574d1139d72a1ca96f45ebaa4f85efa1f8ebf3f3bc81e8f0ce1edb74e`。
+- `npm run smoke`、`npm run lint`、本轮 `4` 个 changed JavaScript 文件的 `node --check` 与定向 ESLint、`git diff --check`、版本三处 `3.2.1`、冲突标记扫描和 `package.json` / `package-lock.json` / workflow / 生产 adapter 冻结检查均通过。
+- 资金/恢复盲区复核：本轮不改变业务主键、金额、币种、行序、Workbook 或正式文件发布；不可识别文件只跳过只读 scope 预计算，仍形成逐文件失败且不获得 mutation 权限；可识别文件写入前继续经过 actual-header identity gate。repair 缺失源 token 保留，可读成功 token 仅在成功终态删除；回归同时证明同批有效文件继续、identity mismatch 仍拒绝、无跨 scope 写入。
+
+### Remaining Unknowns
+
+- `CLOSED / local`：新增 mixed import/repair token 生命周期、Windows adapter/contract、完整 unit/integration/smoke/lint、语法/ESLint、版本/冻结/diff 检查均已通过；提交后尚须以干净 HEAD 执行 packaged-inputs。
+- `PROBE / exact CI`：普通非 force push 后必须由新 exact head 的 `smoke-test` 与 `build` 全部成功，首次失败永不视为被重复或本地成功代偿。
+- `BLOCK / review`：review thread 在代码、回归证据和新 exact head 建立前不得回复或 resolve。
+- `BLOCK / production`：application production 继续 disabled/legacy；本轮不改变资金主键、金额、币种、Workbook 输出或恢复终态红线。

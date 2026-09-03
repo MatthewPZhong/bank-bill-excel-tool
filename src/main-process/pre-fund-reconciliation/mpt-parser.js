@@ -59,14 +59,24 @@ function createHashingTransform(hash) {
   });
 }
 
+function forwardPipedStreamError(source, target) {
+  source.on('error', (error) => {
+    // stream.pipe() 不会自动把 source error 转发给 destination。把错误沿当前
+    // 读取链传到最终 async iterator，确保调用方只收到一次可归一化的失败。
+    if (!target.destroyed) target.destroy(error);
+  });
+}
+
 async function* iterateUtf8Lines(filePath, fileMetadata, hash) {
   const rawStream = fs.createReadStream(filePath);
   const hashingStream = createHashingTransform(hash);
   const streams = [rawStream, hashingStream];
+  forwardPipedStreamError(rawStream, hashingStream);
   let contentStream = rawStream.pipe(hashingStream);
   if (fileMetadata.extension === 'gz') {
     const gunzip = zlib.createGunzip();
     streams.push(gunzip);
+    forwardPipedStreamError(hashingStream, gunzip);
     contentStream = contentStream.pipe(gunzip);
   }
 
