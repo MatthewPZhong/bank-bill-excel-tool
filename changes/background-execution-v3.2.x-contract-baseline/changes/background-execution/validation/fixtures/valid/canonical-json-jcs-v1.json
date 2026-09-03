@@ -1,0 +1,180 @@
+{
+  "contractVersion": 1,
+  "algorithm": "RFC8785-JCS",
+  "canonicalCases": [
+    {
+      "name": "utf16-property-order-u10000-before-ue000",
+      "inputJson": "{\"\\ue000\":\"bmp\",\"\\ud800\\udc00\":\"supplementary\"}",
+      "expectedCanonical": "{\"\ud800\udc00\":\"supplementary\",\"\ue000\":\"bmp\"}",
+      "expectedSha256": "54e85161e2d6b6cf9d28fe69dc97632a62f8b83e650fe54959e2f504f3dd5d41"
+    },
+    {
+      "name": "ecmascript-number-rendering",
+      "inputJson": "{\"numbers\":[1.0,-0,1e-7,1e15,333333333.33333329,4.50,2e-3,1e-27]}",
+      "expectedCanonical": "{\"numbers\":[1,0,1e-7,1000000000000000,333333333.3333333,4.5,0.002,1e-27]}",
+      "expectedSha256": "4ea6ff4641234964079ea48a4720ae174cb391a03567b3775842cd524635190a"
+    },
+    {
+      "name": "ecmascript-string-escaping",
+      "inputJson": "{\"value\":\"quote:\\\" slash:\\\\ controls:\\b\\t\\n\\f\\r\\u000f line:\\u2028\"}",
+      "expectedCanonical": "{\"value\":\"quote:\\\" slash:\\\\ controls:\\b\\t\\n\\f\\r\\u000f line:\u2028\"}",
+      "expectedSha256": "5552ef611529b828d90a14552f1b25a48fcfa66e6c67c022e87b8b4079cf387e"
+    },
+    {
+      "name": "transition-full-envelope",
+      "inputJson": "{\"contractVersion\":1,\"writer\":\"transitionWithRecoveryEvent\",\"input\":{\"transition\":{\"entityKind\":\"batch-overlay\",\"command\":\"resolve-success\",\"actionKey\":\"statement:generate-all\",\"expectedTaskKey\":\"monthly-balance:export\",\"operationKey\":\"operation-1\",\"batchId\":7,\"taskRunId\":\"task-run-1\",\"expectedState\":\"recovering\",\"recoveryAttemptId\":\"attempt-1\",\"finalOutcome\":\"succeeded\",\"sourceKind\":\"module-recovery\",\"sourceRef\":\"source-1\"},\"event\":{\"eventId\":\"event-1\",\"createdAt\":\"2026-08-23T00:00:00.000Z\",\"safePayload\":{\"number\":1.0,\"negativeZero\":-0,\"evidence\":\"committed\"}}}}",
+      "expectedCanonical": "{\"contractVersion\":1,\"input\":{\"event\":{\"createdAt\":\"2026-08-23T00:00:00.000Z\",\"eventId\":\"event-1\",\"safePayload\":{\"evidence\":\"committed\",\"negativeZero\":0,\"number\":1}},\"transition\":{\"actionKey\":\"statement:generate-all\",\"batchId\":7,\"command\":\"resolve-success\",\"entityKind\":\"batch-overlay\",\"expectedState\":\"recovering\",\"expectedTaskKey\":\"monthly-balance:export\",\"finalOutcome\":\"succeeded\",\"operationKey\":\"operation-1\",\"recoveryAttemptId\":\"attempt-1\",\"sourceKind\":\"module-recovery\",\"sourceRef\":\"source-1\",\"taskRunId\":\"task-run-1\"}},\"writer\":\"transitionWithRecoveryEvent\"}",
+      "expectedSha256": "788e3b7c8b8434a9cdc76b732424642795621764d6cfd288facc26b1d435ddaf"
+    },
+    {
+      "name": "observation-full-envelope",
+      "inputJson": "{\"contractVersion\":1,\"writer\":\"appendObservationEvent\",\"input\":{\"event\":{\"eventId\":\"observation-event-1\",\"eventType\":\"inspection-completed\",\"observationAttemptId\":1,\"actionKey\":\"statement:generate-all\",\"operationKey\":\"operation-1\",\"taskRunId\":\"task-run-1\",\"sourceKind\":\"module-recovery\",\"sourceRef\":\"source-1\",\"batchId\":7,\"intentId\":\"intent-1\",\"holdId\":\"hold-1\",\"recoveryAttemptId\":\"attempt-1\",\"createdAt\":\"2026-08-23T00:00:00.000Z\",\"safePayload\":{\"inspection\":\"committed\"}}}}",
+      "expectedCanonical": "{\"contractVersion\":1,\"input\":{\"event\":{\"actionKey\":\"statement:generate-all\",\"batchId\":7,\"createdAt\":\"2026-08-23T00:00:00.000Z\",\"eventId\":\"observation-event-1\",\"eventType\":\"inspection-completed\",\"holdId\":\"hold-1\",\"intentId\":\"intent-1\",\"observationAttemptId\":1,\"operationKey\":\"operation-1\",\"recoveryAttemptId\":\"attempt-1\",\"safePayload\":{\"inspection\":\"committed\"},\"sourceKind\":\"module-recovery\",\"sourceRef\":\"source-1\",\"taskRunId\":\"task-run-1\"}},\"writer\":\"appendObservationEvent\"}",
+      "expectedSha256": "428aeb87263bdd86dff2c5c225a7f57822f64b5744a6f72eecf34c68a19eed9d"
+    }
+  ],
+  "rejectionCases": [
+    {
+      "name": "invalid-high-surrogate",
+      "kind": "invalid-surrogate",
+      "inputJson": "{\"value\":\"\\ud800\"}",
+      "expectedCode": "JCS_INVALID_SURROGATE"
+    },
+    {
+      "name": "invalid-low-surrogate",
+      "kind": "invalid-surrogate",
+      "inputJson": "{\"value\":\"\\udc00\"}",
+      "expectedCode": "JCS_INVALID_SURROGATE"
+    },
+    {
+      "name": "sparse-array",
+      "kind": "sparse-array",
+      "expectedCode": "JCS_ARRAY_SHAPE_INVALID"
+    },
+    {
+      "name": "array-extra-property",
+      "kind": "array-extra-property",
+      "expectedCode": "JCS_ARRAY_SHAPE_INVALID"
+    },
+    {
+      "name": "accessor-object",
+      "kind": "accessor-object",
+      "expectedCode": "JCS_ACCESSOR_FORBIDDEN"
+    },
+    {
+      "name": "to-json",
+      "kind": "to-json",
+      "expectedCode": "JCS_TO_JSON_FORBIDDEN"
+    },
+    {
+      "name": "non-plain-object",
+      "kind": "non-plain-object",
+      "expectedCode": "JCS_TO_JSON_FORBIDDEN"
+    },
+    {
+      "name": "cycle",
+      "kind": "cycle",
+      "expectedCode": "JCS_CYCLE_FORBIDDEN"
+    },
+    {
+      "name": "undefined",
+      "kind": "undefined",
+      "expectedCode": "JCS_UNSUPPORTED_TYPE"
+    },
+    {
+      "name": "non-finite",
+      "kind": "non-finite",
+      "expectedCode": "JCS_NON_FINITE_NUMBER"
+    },
+    {
+      "name": "bigint",
+      "kind": "bigint",
+      "expectedCode": "JCS_UNSUPPORTED_TYPE"
+    },
+    {
+      "name": "symbol-key",
+      "kind": "symbol-key",
+      "expectedCode": "JCS_SYMBOL_KEY_FORBIDDEN"
+    },
+    {
+      "name": "non-enumerable",
+      "kind": "non-enumerable",
+      "expectedCode": "JCS_NON_ENUMERABLE_FORBIDDEN"
+    },
+    {
+      "name": "function",
+      "kind": "function",
+      "expectedCode": "JCS_UNSUPPORTED_TYPE"
+    },
+    {
+      "name": "proxy",
+      "kind": "proxy",
+      "expectedCode": "JCS_PROXY_FORBIDDEN"
+    }
+  ],
+  "rawInputCases": [
+    {
+      "name": "safe-positive-integer-boundary",
+      "inputJson": "{\"n\":9007199254740991}",
+      "expectedCode": null,
+      "expectedCanonical": "{\"n\":9007199254740991}",
+      "expectedSha256": "e1da48c6a6089f06ecb4e0a2259e658e3786b2420f52baccdf929ec6460d7b41"
+    },
+    {
+      "name": "safe-negative-integer-boundary",
+      "inputJson": "{\"n\":-9007199254740991}",
+      "expectedCode": null,
+      "expectedCanonical": "{\"n\":-9007199254740991}",
+      "expectedSha256": "d49d713821fc149f81ef6ca8054beeba696f5da052f0ab3e2d773808c5a9d625"
+    },
+    {
+      "name": "unsafe-positive-integer-boundary",
+      "inputJson": "{\"n\":9007199254740992}",
+      "expectedCode": "JCS_UNSAFE_INTEGER",
+      "expectedCanonical": null,
+      "expectedSha256": null
+    },
+    {
+      "name": "unsafe-distinct-integer-must-not-converge",
+      "inputJson": "{\"n\":9007199254740993}",
+      "expectedCode": "JCS_UNSAFE_INTEGER",
+      "expectedCanonical": null,
+      "expectedSha256": null
+    },
+    {
+      "name": "unsafe-negative-integer-boundary",
+      "inputJson": "{\"n\":-9007199254740992}",
+      "expectedCode": "JCS_UNSAFE_INTEGER",
+      "expectedCanonical": null,
+      "expectedSha256": null
+    },
+    {
+      "name": "unsafe-negative-distinct-integer-must-not-converge",
+      "inputJson": "{\"n\":-9007199254740993}",
+      "expectedCode": "JCS_UNSAFE_INTEGER",
+      "expectedCanonical": null,
+      "expectedSha256": null
+    },
+    {
+      "name": "top-level-duplicate-key",
+      "inputJson": "{\"a\":1,\"a\":2}",
+      "expectedCode": "JCS_DUPLICATE_KEY",
+      "expectedCanonical": null,
+      "expectedSha256": null
+    },
+    {
+      "name": "nested-duplicate-key",
+      "inputJson": "{\"outer\":{\"a\":1,\"a\":2}}",
+      "expectedCode": "JCS_DUPLICATE_KEY",
+      "expectedCanonical": null,
+      "expectedSha256": null
+    },
+    {
+      "name": "escaped-equivalent-duplicate-key",
+      "inputJson": "{\"\\u0061\":1,\"a\":2}",
+      "expectedCode": "JCS_DUPLICATE_KEY",
+      "expectedCanonical": null,
+      "expectedSha256": null
+    }
+  ]
+}

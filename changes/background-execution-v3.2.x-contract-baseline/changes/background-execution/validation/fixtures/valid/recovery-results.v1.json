@@ -1,0 +1,53 @@
+[
+  {
+    "name": "publisher-journal-completed",
+    "source": {
+      "contractVersion": 1,
+      "sourceKind": "publisher-journal",
+      "sourceRef": "publisher-journal:fixture",
+      "actionKey": "background-execution:canary",
+      "operationKey": "task-001/background-execution:canary/1",
+      "taskRunId": "task-001",
+      "conflictScopeKey": "scope:background-execution:canary",
+      "inspectorKey": "inspector.background-execution:canary",
+      "settlementKey": "settlement.background-execution:canary",
+      "intentId": null,
+      "evidenceVersion": 1,
+      "boundedEvidence": {
+        "marker": "fixture"
+      }
+    },
+    "inspection": {
+      "contractVersion": 1,
+      "sourceKind": "publisher-journal",
+      "sourceRef": "publisher-journal:fixture",
+      "actionKey": "background-execution:canary",
+      "operationKey": "task-001/background-execution:canary/1",
+      "taskRunId": "task-001",
+      "outcome": "committed",
+      "evidenceVersion": 1,
+      "evidenceHash": "e1918b9b0f66c56e59b85d85b91f0c9e8d0400369611f3f17f82a24a861820f8",
+      "boundedEvidence": {
+        "marker": "fixture"
+      }
+    },
+    "settlement": {
+      "contractVersion": 1,
+      "sourceKind": "publisher-journal",
+      "sourceRef": "publisher-journal:fixture",
+      "actionKey": "background-execution:canary",
+      "operationKey": "task-001/background-execution:canary/1",
+      "taskRunId": "task-001",
+      "settlementKey": "settlement.background-execution:canary",
+      "inspectionEvidenceHash": "e1918b9b0f66c56e59b85d85b91f0c9e8d0400369611f3f17f82a24a861820f8",
+      "outcome": "completed",
+      "resultVersion": 1,
+      "resultHash": "21fa0343a665141231e9450d76f53c338bc6c52f3dac970597eeed7b2d2309a1",
+      "boundedResult": {
+        "receipt": "receipt-001"
+      },
+      "safeError": null,
+      "retryAfterMs": null
+    }
+  }
+]

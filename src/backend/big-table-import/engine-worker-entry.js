@@ -10,7 +10,7 @@
 // Message 协议：
 //   主 → worker：
 //     { type:'run', jobId, payload:{ dbPath, files, contractModulePath, contractOptions, mode,
-//       monthKey, parallel, useWhitelist } }
+//       monthKey, parallel, parallelFrozen, useWhitelist } }
 //     { type:'cancel', jobId }   — 置 cancelToken.cancelled（engine/pipeline 在文件边界 ROLLBACK + CancelError）
 //     { type:'close' }           — process.exit(0)
 //   worker → 主：
@@ -90,6 +90,7 @@ if (!isMainThread && parentPort) {
         mode: payload.mode || 'append',
         monthKey: payload.monthKey,
         parallel: payload.parallel,
+        parallelFrozen: payload.parallelFrozen === true,
         useWhitelist: payload.useWhitelist,
         batchContext,
         onProgress: (ev) => {

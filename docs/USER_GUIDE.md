@@ -1,8 +1,10 @@
 # 清结算小助手使用手册
 
-版本：`v3.1.14`
+版本：`v3.2.0`
 
-> 版本说明：v3.1.14 已于 2026-08-21 完成正式技术发布并成为 latest stable Release。本版修复 VCC 财务 OP 大批量明细读取完成后的数据库收尾卡顿，并在读取结束后显示“正在校验并写入”。公开版本、下载资产和发布时间以 [GitHub Releases](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.1.14) 为准。Windows packaged VCC 交互、Windows 10/11 Setup/portable、SmartScreen、`v3.1.13 -> v3.1.14` 离线覆盖及 `production/latest` canary 仍为 `MANUAL / NOT RUN`；技术 Release 完成不表示这些人工项已验证或 PASS。
+> 版本说明：v3.2.0 已由发布负责人授权进入正式技术发布流程，将通过受保护 PR、唯一 annotated tag 与 Windows Release workflow 发布；application production strategy 仍关闭，因此日常用户流程、金额/币种、月份、事务和 Excel 结果继续保持既有行为。发布负责人已确认资金、恢复、真实业务样本及稳定窗口人工验收通过；最终发布资产的 Windows Setup/portable、SmartScreen、离线覆盖安装和在线更新 canary 按 Issue #220 在发布后逐项补做。
+
+> 使用提醒：v3.2.0 不新增用户开关。若出现 Recovery Hold、结果不确定或发布状态不明，应停止重跑并交由 release owner/业务负责人核对持久 receipt、任务状态和真实输出。
 
 ---
 
@@ -47,6 +49,8 @@
 > **v3.1.9 全局批次与存档中心正式发布**：实际处理、写入、导出和删除任务统一使用跨模块连续的 `YYYY-MM-DD-NNN` 批次号；失败和取消也保留号码，关联任务可跨重启查看。VCC财务OP校验和工具箱已真实接入存档，运行文件按年/月/日/批次目录展示，并支持存储位置迁移、修复、保留期清理和新的统计/列表/设置界面。VCC 大库信息改为后台读取，标准 v3.1.7 旧归档可以受控查看、导出和解归档；VCC 人民币代码统一为 CNY，异常明细/异常主体快照会被过滤而正常数据继续落库。v3.1.9 已于 2026-08-13 正式发布，仍待人工验证的环境与资金边界见 §1.11.9。
 
 > **v3.1.10 VCC 存储瘦身正式发布**：v3.1.10 已于 2026-08-17 正式发布。有效数据只保留计算、校验、幂等和最小血缘字段；原始输入由存档 artifact 保存，只有真正异常进入紧凑审计。数据管理改为六列【导出明细】，校验原表按当前有效行从已验证原件重建；历史血缘缺口可明确标记后部分导出，实体损坏则整次停止。【优化存储】通过维护模式 copy-on-write 重建数据库。三项发布门禁已明确确认 PASS，正式 tag、Release 与四项公开资产已完成回读。
+
+> **v3.2.0 公共后台执行底座与 VCC OP Pipeline**：系统已具备受资源治理的 Supervisor、冻结消息/context、operation receipt、inspector、Recovery Hold 与 artifact authority capability；VCC 财务 OP 多文件读取可并行准备 spool，但月份归约、金额/币种处理、单一 writer、事务、Excel/Workbook 结果和正式文件发布仍按既有顺序收口。Issue #220 已授权正式技术发布，发布负责人确认本次资金、恢复、真实样本及稳定窗口人工验收通过；production enablement 继续关闭，最终 Windows Release 资产与在线更新仍按发布后计划逐项复核，遇到不确定结果不得自行重复执行。
 
 > **v3.1.14 VCC 财务 OP 大批量导入修复**：导入 VCC 充值清退、费用换汇、通道或移除归档 Pending 明细时，工作簿读取阶段继续显示“正在导入”；该类明细全部文件读取并校验完成后，状态框会切换为“正在校验并写入”，不再停留在最后一条读取行数。充值清退和 Pending 同批时会分别显示自己的阶段。点击取消后，状态框保持“正在取消导入并回滚本次未完成数据…”，不会被晚到进度覆盖。金额、币种、幂等、异常和最终结果口径均未改变。v3.1.14 已于 2026-08-21 通过 Windows Release workflow 完成正式技术发布，Setup、portable、blockmap 与 `latest.yml` 四项公开资产已独立回读；Windows packaged VCC、Windows 10/11 Setup/portable、SmartScreen、`v3.1.13 -> v3.1.14` 离线覆盖及 `production/latest` canary 仍为 `MANUAL / NOT RUN`，技术 Release 完成不是人工 PASS。
 

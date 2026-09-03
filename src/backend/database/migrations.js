@@ -3104,10 +3104,12 @@ function ensureBankBuReconTablesSupport(db) {
   }
 }
 
-// v2.1.12 需求1 T-vcc-1 — VCC业务OP计算模块（vcc-op-calc）2 张表 + 2 索引
+// v2.1.12 需求1 T-vcc-1 — VCC业务OP计算模块（vcc-op-calc）运行表；
+// v3.2.0 E03-B — 同库新增 saveRun operation receipt。
 // 复用 v2.1.2 bankBuRecon 范式（ensureBankBuReconTablesSupport），主 DB（tool-data.sqlite）
 //   - vcc_op_calc_runs：按月一行 = 一次计算汇总（month / 发生额出入总额 / 期初OP / 期末OP / 币种）
 //   - vcc_op_calc_run_files：每次运行的逐文件发生额明细（file_name / row_count / out / in / amount）
+//   - vcc_op_operation_receipts：save Task operation identity 与业务 run 的同事务提交证据
 // 资金红线 🔴：所有金额列一律 TEXT 存储（防 JS Number 浮点漂移；session 用整数分计算后传字符串）。
 // 幂等：CREATE TABLE / INDEX IF NOT EXISTS，多次启动 no-op。
 // 与现有 5 模块表完全隔离（零改动），调用顺序无依赖。
@@ -3153,6 +3155,29 @@ function ensureVccOpCalcTablesSupport(db) {
     db.exec(`
       CREATE INDEX IF NOT EXISTS idx_vcc_files_run
         ON vcc_op_calc_run_files(run_id);
+    `);
+
+    // E03-B：独立 receipt 不改旧 run/files 口径。当前产品物理 run 表为
+    // vcc_op_calc_runs，因此 FK 必须指向该唯一真相，不能另建 vcc_op_runs 别名表。
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS vcc_op_operation_receipts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        action_key TEXT NOT NULL,
+        operation_key TEXT NOT NULL,
+        producer_task_run_id TEXT NOT NULL,
+        run_id INTEGER NOT NULL,
+        year_month TEXT NOT NULL,
+        compute_snapshot_hash TEXT NOT NULL,
+        input_file_count INTEGER NOT NULL,
+        committed_at TEXT NOT NULL,
+        UNIQUE(action_key, operation_key),
+        FOREIGN KEY (run_id) REFERENCES vcc_op_calc_runs(id)
+      );
+    `);
+
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_vcc_op_operation_receipts_run_id
+        ON vcc_op_operation_receipts(run_id);
     `);
 
     db.exec('COMMIT');

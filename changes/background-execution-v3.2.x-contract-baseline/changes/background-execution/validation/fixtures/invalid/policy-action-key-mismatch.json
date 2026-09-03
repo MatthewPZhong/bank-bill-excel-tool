@@ -1,0 +1,124 @@
+{
+  "contractVersion": 1,
+  "generatedAt": "2026-08-21T00:00:00Z",
+  "baselineRef": "background-execution-v3.2.x-implementation-ready",
+  "actions": {
+    "vcc-op:wrong-static-key": {
+      "actionKey": "vcc-op:scan-and-compute",
+      "moduleId": "vcc-op",
+      "description": "v3.2.x canonical policy fixture for vcc-op:scan-and-compute",
+      "disposition": "managed",
+      "mode": "thread-pool",
+      "adapterKind": "native",
+      "adapterKey": null,
+      "entryKey": "executor.vcc-op:scan-and-compute",
+      "lifetime": "job",
+      "context": {
+        "kind": "file-batch",
+        "validatorKey": "exact-7"
+      },
+      "resources": {
+        "profile": "resource.vcc-op:scan-and-compute",
+        "base": {
+          "cpuSlots": 0,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 0,
+          "memoryBytes": 33554432
+        },
+        "phase": {
+          "cpuSlots": 1,
+          "workerThreadSlots": 1,
+          "utilityProcessSlots": 0,
+          "ioHeavySlots": 1,
+          "memoryBytes": 268435456
+        },
+        "compound": {
+          "topologyKey": "topology.vcc-op:scan-and-compute",
+          "childrenMax": 4,
+          "childResource": {
+            "cpuSlots": 1,
+            "workerThreadSlots": 1,
+            "utilityProcessSlots": 0,
+            "ioHeavySlots": 1,
+            "memoryBytes": 268435456
+          }
+        },
+        "lowMemoryBehavior": "downgrade-to-single",
+        "admissionPriority": "normal"
+      },
+      "cancellation": {
+        "capability": "shutdown-only",
+        "safePoints": [
+          "before-critical",
+          "between-units"
+        ],
+        "cooperativeTimeoutMs": 5000,
+        "terminateTimeoutMs": 5000,
+        "protectedResult": "protected/not-cancellable"
+      },
+      "failure": {
+        "unitBusinessError": "fail-job",
+        "unitTransportCrash": "fail-job",
+        "workerExit": "fail-job",
+        "automaticRetry": false
+      },
+      "commit": {
+        "kind": "none",
+        "criticalIntent": false,
+        "receiptKind": null,
+        "inspectorKey": null,
+        "conflictScopeResolverKey": null,
+        "settlementKey": null
+      },
+      "result": {
+        "kind": "spool-manifest",
+        "maxBytes": 8388608,
+        "maxErrorItems": 100,
+        "validatorKey": "result-validator.vcc-op:scan-and-compute"
+      },
+      "artifacts": {
+        "kind": "none",
+        "filePlanRequired": false,
+        "technicalValidatorKey": null,
+        "businessValidatorKey": null,
+        "publisherKey": null,
+        "maxArtifacts": 0
+      },
+      "service": null,
+      "metrics": {
+        "phases": [
+          "queue",
+          "execute",
+          "settle"
+        ],
+        "privacyProfile": "finance-safe-v1",
+        "progressRateLimitPerSecond": 10
+      },
+      "featureFlag": "feature.vcc-op:scan-and-compute",
+      "legacyStrategyKey": "legacy.vcc-op:scan-and-compute",
+      "blocker": null,
+      "production": {
+        "enabled": false,
+        "effectiveMode": "legacy",
+        "effectiveWorkerCount": 0,
+        "recoveryStatus": "not-applicable",
+        "evidenceStatus": "baseline",
+        "downgradeReason": "production gate not yet passed",
+        "benchmarkEvidenceId": null
+      },
+      "workUnits": {
+        "kind": "file",
+        "ordering": "input-index-reducer",
+        "requestedMaxWorkers": 4,
+        "minUnitsPerWorker": 2,
+        "plannerKey": "planner.vcc-op:scan-and-compute",
+        "reducerKey": "reducer.vcc-op:scan-and-compute"
+      },
+      "protocolLimits": {
+        "commandMaxBytes": 262144,
+        "eventMaxBytes": 262144
+      }
+    }
+  }
+}

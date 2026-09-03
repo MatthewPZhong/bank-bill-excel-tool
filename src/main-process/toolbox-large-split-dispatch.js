@@ -151,7 +151,20 @@ function __test_only_set_worker_script__(scriptPath) {
   workerScriptPath = scriptPath || DEFAULT_WORKER_ENTRY;
 }
 
+function createToolboxLargeSplitMatureBinding(options = {}) {
+  const dispatch = options.dispatch || dispatchLargeSplit;
+  return Object.freeze({
+    dispatch(request = {}) {
+      return dispatch({
+        ...(request.input || {}),
+        onProgress: request.onProgress
+      });
+    }
+  });
+}
+
 module.exports = {
+  createToolboxLargeSplitMatureBinding,
   dispatchLargeSplit,
   DEFAULT_WORKER_ENTRY,
   WORKER_MAX_OLD_GEN_MB,

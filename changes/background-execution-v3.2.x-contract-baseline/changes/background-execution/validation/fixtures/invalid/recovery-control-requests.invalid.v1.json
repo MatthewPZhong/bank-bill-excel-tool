@@ -1,0 +1,21 @@
+[
+  {"name": "transition-event-missing-event-id", "mutation": "transition-event-delete-eventId"},
+  {"name": "transition-event-caller-request-hash", "mutation": "transition-event-add-requestHash"},
+  {"name": "transition-event-sql-request-hash-alias", "mutation": "transition-event-add-request_hash"},
+  {"name": "transition-event-caller-event-type", "mutation": "transition-event-add-eventType"},
+  {"name": "observation-event-missing-event-id", "mutation": "observation-event-delete-eventId"},
+  {"name": "observation-event-missing-observation-attempt-id", "mutation": "observation-event-delete-observationAttemptId"},
+  {"name": "observation-event-caller-request-hash", "mutation": "observation-event-add-requestHash"},
+  {"name": "observation-event-sql-request-hash-alias", "mutation": "observation-event-add-request_hash"},
+  {"name": "observation-event-caller-state", "mutation": "observation-event-add-state"},
+  {"name": "observation-event-caller-previous-state", "mutation": "observation-event-add-previousState"},
+  {"name": "observation-event-extra-identity", "mutation": "observation-event-add-expectedTaskKey"},
+  {"name": "each-transition-branch-extra-state", "mutation": "each-transition-add-state"},
+  {"name": "each-transition-branch-extra-event-type", "mutation": "each-transition-add-eventType"},
+  {"name": "each-transition-branch-caller-request-hash", "mutation": "each-transition-add-requestHash"},
+  {"name": "each-transition-branch-sql-request-hash-alias", "mutation": "each-transition-add-request_hash"},
+  {"name": "each-transition-branch-missing-required-leaf", "mutation": "each-transition-delete-required-leaf"},
+  {"name": "result-extra-replayed", "mutation": "result-add-replayed"},
+  {"name": "result-extra-current-state", "mutation": "result-add-currentState"},
+  {"name": "result-uppercase-request-hash", "mutation": "result-uppercase-requestHash"}
+]

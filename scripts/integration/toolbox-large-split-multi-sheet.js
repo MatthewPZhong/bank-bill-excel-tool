@@ -101,13 +101,15 @@ function mb(bytes) {
 //     20.5/21/22.5/22.5MB 相对噪声；57MB 锁定既有 82→139MB PASS / 82→140MB FAIL 边界。
 // 采样策略与增长分类独立：首次 tier1 <= 16MB 时均位于 RSS 重采保护区；此外，首对样本属于
 // measurable-growth 且 tier2 距亚线性预算边界两侧不超过 8MB 时，也追加两轮独立成对采样。
-// 多样本先保留 tier1 / tier2 独立中位样本的既有裁决，再对每一对计算预算 margin / 线性 margin
-// 并分别取中位数作为附加必要条件；paired margin 只能新增拒绝，不能把历史 FAIL 翻为 PASS。
+// 多样本保留 tier1 / tier2 独立中位样本裁决，但独立中位会丢失成对关系；其预算 margin 只允许
+// 落在 Math.round(MB) 的理论传播误差内。每一对的预算 margin / 线性 margin 仍严格取中位数作为
+// 必要条件，因此稳定预算越界不能借独立中位取整容差翻为 PASS。
 // 任何原始样本仍须逐个通过 150MB 绝对上限。
 // 禁止同时抬高 tier1、压低 tier2；那会把 rowsRatio=3 的 13→39MB 精确线性增长误判为通过。
 // 两档仍在独立 --expose-gc 子进程采样，绝对 150MB 上限保持独立门禁。
 const SCAN_DELTA_CEILING_MB = 150;
 const RSS_MEASUREMENT_NOISE_MB = 8;
+const RSS_MB_ROUNDING_ERROR_MB = 0.5;
 const LOW_SIGNAL_TIER1_MAX_MB = RSS_MEASUREMENT_NOISE_MB;
 const LOW_SIGNAL_TIER2_CEILING_MB = RSS_MEASUREMENT_NOISE_MB * 4;
 const MEASURABLE_GROWTH_RELATIVE_NOISE_MB = RSS_MEASUREMENT_NOISE_MB * 3;
@@ -163,6 +165,23 @@ function assessScanMemoryGrowth(tier1DeltaMB, tier2DeltaMB, rowsRatio) {
   };
 }
 
+function getIndependentMedianBudgetRoundingToleranceMB(assessment, rowsRatio) {
+  if (!assessment.valid) return 0;
+  if (assessment.classification === 'bounded-low-signal') {
+    return RSS_MB_ROUNDING_ERROR_MB;
+  }
+  const relativeToleranceMB = RSS_MB_ROUNDING_ERROR_MB
+    * (1 + rowsRatio * SUBLINEAR_FRACTION_OF_LINEAR);
+  const absoluteToleranceMB = RSS_MB_ROUNDING_ERROR_MB * 2;
+  if (assessment.relativeBudgetMB < assessment.absoluteGrowthBudgetMB) {
+    return relativeToleranceMB;
+  }
+  if (assessment.absoluteGrowthBudgetMB < assessment.relativeBudgetMB) {
+    return absoluteToleranceMB;
+  }
+  return Math.max(relativeToleranceMB, absoluteToleranceMB);
+}
+
 function assessScanMemorySamples(tier1Samples, tier2Samples, rowsRatio) {
   const validSamples = Array.isArray(tier1Samples)
     && Array.isArray(tier2Samples)
@@ -183,7 +202,9 @@ function assessScanMemorySamples(tier1Samples, tier2Samples, rowsRatio) {
       budgetMarginsMB: [],
       linearMarginsMB: [],
       budgetMarginMedianMB: null,
-      linearMarginMedianMB: null
+      linearMarginMedianMB: null,
+      independentBudgetMarginMB: null,
+      independentBudgetRoundingToleranceMB: null
     };
   }
 
@@ -220,7 +241,9 @@ function assessScanMemorySamples(tier1Samples, tier2Samples, rowsRatio) {
       budgetMarginsMB: [],
       linearMarginsMB: [],
       budgetMarginMedianMB: null,
-      linearMarginMedianMB: null
+      linearMarginMedianMB: null,
+      independentBudgetMarginMB: null,
+      independentBudgetRoundingToleranceMB: null
     };
   }
   const tier1DeltaMB = median(tier1Samples);
@@ -230,12 +253,19 @@ function assessScanMemorySamples(tier1Samples, tier2Samples, rowsRatio) {
   const linearMarginsMB = pairedSamples.map((sample) => sample.linearMarginMB);
   const budgetMarginMedianMB = median(budgetMarginsMB);
   const linearMarginMedianMB = median(linearMarginsMB);
+  const independentBudgetMarginMB = tier2DeltaMB - assessment.effectiveBudgetMB;
+  const independentBudgetRoundingToleranceMB = getIndependentMedianBudgetRoundingToleranceMB(
+    assessment,
+    rowsRatio
+  );
   return {
     ...assessment,
-    // 既有独立中位样本判据仍是必要条件；paired margin 只新增拒绝，避免错配造成假 PASS。
+    // 独立中位样本只吸收 Math.round(MB) 的理论传播误差；paired margin 仍严格执行原预算，
+    // 避免稳定越界或错配样本借取整容差造成假 PASS。
     // 绝对硬上限检查每一个原始样本，不能被中位数隐藏。
     sublinearWithinBudget: assessment.valid
-      && assessment.sublinearWithinBudget
+      && assessment.strictlyBelowLinear
+      && independentBudgetMarginMB <= independentBudgetRoundingToleranceMB
       && budgetMarginMedianMB <= 0
       && linearMarginMedianMB < 0,
     strictlyBelowLinear: assessment.valid
@@ -254,7 +284,9 @@ function assessScanMemorySamples(tier1Samples, tier2Samples, rowsRatio) {
     budgetMarginsMB,
     linearMarginsMB,
     budgetMarginMedianMB,
-    linearMarginMedianMB
+    linearMarginMedianMB,
+    independentBudgetMarginMB,
+    independentBudgetRoundingToleranceMB
   };
 }
 
@@ -284,6 +316,8 @@ function verifyMemoryGuardModel() {
   const hiddenTier1HardLimitSpike = assessScanMemorySamples([49, 150, 49], [94, 94, 93], 3);
   const stableWindowsSamples = assessScanMemorySamples([49, 49, 49], [94, 94, 94], 3);
   const latestWindowsRunnerSamples = assessScanMemorySamples([48, 49, 49], [93, 96, 96], 3);
+  const rankInversionJitter = assessScanMemorySamples([48, 49, 48], [96, 97, 97], 3);
+  const stableRankInversionOverflow = assessScanMemorySamples([48, 48, 48], [97, 97, 97], 3);
   const pairedMismatchRegression = assessScanMemorySamples([20, 40, 100], [60, 120, 20], 3);
   const invalidSamples = assessScanMemorySamples([7, 8], [17, 22], 3);
   const valid = lowSignalSublinear.valid
@@ -348,6 +382,14 @@ function verifyMemoryGuardModel() {
     && latestWindowsRunnerSamples.budgetMarginMedianMB === -1.5
     && latestWindowsRunnerSamples.linearMarginMedianMB === -51
     && latestWindowsRunnerSamples.sublinearWithinBudget
+    && rankInversionJitter.independentBudgetMarginMB === 1
+    && rankInversionJitter.independentBudgetRoundingToleranceMB === 1.25
+    && rankInversionJitter.budgetMarginMedianMB === 0
+    && rankInversionJitter.linearMarginMedianMB === -48
+    && rankInversionJitter.sublinearWithinBudget
+    && stableRankInversionOverflow.independentBudgetMarginMB === 1
+    && stableRankInversionOverflow.budgetMarginMedianMB === 1
+    && !stableRankInversionOverflow.sublinearWithinBudget
     && pairedMismatchRegression.tier1DeltaMB === 40
     && pairedMismatchRegression.tier2DeltaMB === 60
     && assessScanMemoryGrowth(40, 60, 3).sublinearWithinBudget
@@ -521,7 +563,7 @@ async function run() {
 
   // 判据本身先做确定性自校验，防止为消除 CI 波动而把门禁放宽成恒通过。
   verifyMemoryGuardModel();
-  console.log('内存门禁自校验：8→23MB 通过、8→24MB 拒绝；9→26MB 通过、9→27MB 与 13→39MB 严格线性拒绝；32→72MB 通过、32→73/96MB 拒绝；49→97MB 通过、49→98/147MB 拒绝；82→139MB 通过、82→140MB 拒绝；150MB 任一样本绝对上限独立拒绝。\n');
+  console.log('内存门禁自校验：8→23MB 通过、8→24MB 拒绝；9→26MB 通过、9→27MB 与 13→39MB 严格线性拒绝；32→72MB 通过、32→73/96MB 拒绝；49→97MB 通过、49→98/147MB 拒绝；交错 [48,49,48]→[96,97,97] 通过、稳定 48→97MB 拒绝；82→139MB 通过、82→140MB 拒绝；150MB 任一样本绝对上限独立拒绝。\n');
 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-large-split-t7-'));
 
@@ -620,11 +662,15 @@ async function run() {
       + `（样本数=${memoryAssessment.sampleCount}，tier1=[${memoryAssessment.tier1Samples.join(', ')}]MB，tier2=[${memoryAssessment.tier2Samples.join(', ')}]MB）`
       + `（${memoryAssessment.classification}，relative预算=${formatMemoryMB(memoryAssessment.relativeBudgetMB)}MB，`
       + `absolute预算=${formatMemoryMB(memoryAssessment.absoluteGrowthBudgetMB)}MB，effective预算=${formatMemoryMB(memoryAssessment.effectiveBudgetMB)}MB，`
+      + `独立中位预算 margin=${formatSignedMemoryMB(memoryAssessment.independentBudgetMarginMB)}MB`
+      + `/取整容差≤${formatMemoryMB(memoryAssessment.independentBudgetRoundingToleranceMB)}MB，`
       + `paired effective预算 margin 中位数=${formatSignedMemoryMB(memoryAssessment.budgetMarginMedianMB)}MB，`
       + `paired 线性 margin 中位数=${formatSignedMemoryMB(memoryAssessment.linearMarginMedianMB)}MB）`);
     assertTrue(
       memoryAssessment.valid && memoryAssessment.sublinearWithinBudget,
       `A 内存恒定·亚线性：${memoryAssessment.classification} 的 tier2 RSS 中位增量 ${memoryAssessment.tier2DeltaMB}MB`
+        + `；独立中位预算 margin ${formatSignedMemoryMB(memoryAssessment.independentBudgetMarginMB)}MB`
+        + ` ≤ 取整容差 ${formatMemoryMB(memoryAssessment.independentBudgetRoundingToleranceMB)}MB`
         + `；paired effective预算 margin 中位数 ${formatSignedMemoryMB(memoryAssessment.budgetMarginMedianMB)}MB ≤ 0MB`
         + `，paired 线性 margin 中位数 ${formatSignedMemoryMB(memoryAssessment.linearMarginMedianMB)}MB < 0MB`
         + `（relative预算 ${formatMemoryMB(memoryAssessment.relativeBudgetMB)}MB，absolute预算 ${formatMemoryMB(memoryAssessment.absoluteGrowthBudgetMB)}MB，`

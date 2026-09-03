@@ -1,3 +1,26 @@
+const { initializeActionTaskBindingStartup } = require('./main-process/background-execution/action-task-binding-registry');
+const {
+  createRecoveryControlRepository
+} = require('./main-process/background-execution/critical/recovery-control-repository');
+const {
+  createRecoveryControlReadRepository
+} = require('./main-process/background-execution/critical/recovery-control-read-repository');
+const {
+  createRecoveryObservationAttemptRepository,
+  createRecoveryRequestOwnerRepository
+} = require('./main-process/background-execution/critical/recovery-request-owner-repository');
+const {
+  createInspectorRegistry
+} = require('./main-process/background-execution/inspector-registry');
+const {
+  createSettlementRecoveryProviderRegistry
+} = require('./main-process/background-execution/settlement-recovery-provider-registry');
+const {
+  createStartupRecoveryCoordinator
+} = require('./main-process/background-execution/startup-recovery-coordinator');
+const {
+  createRecoveryHoldGate
+} = require('./main-process/background-execution/recovery-hold-gate');
 const { createHash, randomUUID } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -6,6 +29,24 @@ const { AsyncLocalStorage } = require('node:async_hooks');
 const XLSX = require('xlsx');
 const { performance } = require('node:perf_hooks');
 const { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, shell } = require('electron');
+const {
+  parsePackagedRuntimeRequest
+} = require('./main-process/background-execution/canary/packaged-runtime-request');
+
+let packagedRuntimeRequest = null;
+let packagedRuntimeRequestError = null;
+try {
+  packagedRuntimeRequest = parsePackagedRuntimeRequest(process.env);
+} catch (error) {
+  packagedRuntimeRequestError = error;
+}
+// Env 非法也属于显式 canary 请求，必须走隔离失败退出，不能回落到普通应用启动。
+const packagedRuntimeModeSelected = packagedRuntimeRequest !== null || packagedRuntimeRequestError !== null;
+function packagedRuntimeStartupErrorCode(error) {
+  return error && typeof error.code === 'string' && /^[A-Z0-9_:-]{1,64}$/.test(error.code)
+    ? error.code
+    : 'PACKAGED_CANARY_STARTUP_FAILED';
+}
 const { AppDatabase } = require('./backend/database');
 const { runStartupPhase, startStartupPhase } = require('./backend/startup-phase');
 const {
@@ -68,9 +109,7 @@ const {
   createBankStatementRunFlowIdentity,
   createTaskPolicyRegistry
 } = require('./main-process/archive-center/task-policy-registry');
-const {
-  createBusinessFlowResolver
-} = require('./main-process/archive-center/business-flow-resolver');
+const { createBusinessFlowResolver } = require('./main-process/archive-center/business-flow-resolver');
 const {
   createTaskLifecycle
 } = require('./main-process/archive-center/task-lifecycle');
@@ -300,6 +339,10 @@ const {
 } = require('./backend/biz-op-recon-import/reader');
 // v2.1.12 需求1：VCC业务OP计算模块（仅流水文件 → 按月聚合发生额出/入 → 算期末OP，资金红线 🔴）
 const { createVccOpCalcSession } = require('./main-process/vcc-op-calc-session');
+const {
+  interruptVccOpSaveRunTask,
+  isVccOpSaveRunRecoveryRequired
+} = require('./main-process/vcc-op-calc/save-run-lifecycle');
 // v3.1.6：VCC财务OP校验（四类明细幂等、逐币种计算、系统OP比较与归档）。
 const { createVccFinancialOpService } = require('./main-process/vcc-financial-op-service');
 const {
@@ -523,15 +566,15 @@ const {
   resolveRecognizedBigAccount
 } = require('./main-process/big-account-recognition');
 
-if (process.env.APP_USER_DATA_DIR) {
+if (!packagedRuntimeModeSelected && process.env.APP_USER_DATA_DIR) {
   app.setPath('userData', process.env.APP_USER_DATA_DIR);
 }
 
-if (process.env.APP_DOCUMENTS_DIR) {
+if (!packagedRuntimeModeSelected && process.env.APP_DOCUMENTS_DIR) {
   app.setPath('documents', process.env.APP_DOCUMENTS_DIR);
 }
 
-if (process.platform === 'win32') {
+if (!packagedRuntimeModeSelected && process.platform === 'win32') {
   app.setAppUserModelId('com.openai.bankbillexceltool');
 }
 
@@ -543,10 +586,12 @@ let initialStartupWebContentsId = null;
 // preview/startup:measure 使用隔离临时目录，允许并行启动，避免开发工具争抢正式实例锁。
 const requireSingleInstanceLock = !process.env.APP_CAPTURE_PATH
   && process.env.APP_STARTUP_MEASURE_AUTO_QUIT !== '1';
-const hasSingleInstanceLock = !requireSingleInstanceLock || app.requestSingleInstanceLock();
+const hasSingleInstanceLock = packagedRuntimeModeSelected
+  || !requireSingleInstanceLock
+  || app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
   app.quit();
-} else if (requireSingleInstanceLock) {
+} else if (requireSingleInstanceLock && !packagedRuntimeModeSelected) {
   app.on('second-instance', () => {
     if (!applicationStartupComplete || !mainWindowReady) return;
     if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -571,6 +616,8 @@ let archiveCenterInitializationPromise = null;
 let toolboxStartupRecoveryError = null;
 let archiveOperationTracker = null;
 let archiveTaskLifecycle = null;
+let recoveryControlReadRepository = null;
+let recoveryHoldGate = null;
 let archiveOperationTail = Promise.resolve();
 const archiveOperationContext = new AsyncLocalStorage();
 const positionReconciliationOperationContext = new AsyncLocalStorage();
@@ -578,6 +625,12 @@ const statementSourceReadContext = new AsyncLocalStorage();
 let positionReconciliationOperationActive = null;
 const businessOperationRegistry = createBusinessOperationRegistry();
 const taskPolicyRegistry = createTaskPolicyRegistry();
+// Recovery adapter 只能消费这个启动期 frozen exact host。先一次性冻结 binding authority，
+// 再允许 initializeApplication 建 DB，之后才注册 IPC；任一 authority 漂移在基础设施前失败。
+const taskPolicyBindingHost = Object.freeze({
+  list: taskPolicyRegistry.list.bind(taskPolicyRegistry)
+});
+const { actionTaskBindingRegistry, run: runActionTaskBindingStartup } = initializeActionTaskBindingStartup(taskPolicyBindingHost, Object.freeze({ initializeDatabase: initializeApplication, registerIpc: registerAllIpcHandlers }));
 const supportActionChannels = new Set(SUPPORT_ACTION_POLICIES.map((policy) => policy.channel));
 const scenarioImportContextStore = createScenarioImportContextStore();
 const pendingSession = createPendingSession({
@@ -14986,7 +15039,11 @@ function registerNewAccountHandlers() {
     if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
     const { beginOp } = payload || {};
     try {
-      const saved = vccOpCalcSession.saveRun({ beginOp });
+      const saved = vccOpCalcSession.saveRun({
+        beginOp,
+        // operation identity 只取 Main TaskLifecycle owner；Renderer payload 无法注入或覆盖。
+        operationOwner: taskContext.operationContext
+      });
       appendActivityLogEntry({
         level: 'info',
         source: 'main',
@@ -14996,6 +15053,13 @@ function registerNewAccountHandlers() {
       });
       return { status: 'success', ...saved };
     } catch (err) {
+      if (isVccOpSaveRunRecoveryRequired(err)) {
+        return interruptVccOpSaveRunTask({
+          archiveService: archiveCenterService && archiveCenterService.service,
+          operationOwner: taskContext.operationContext,
+          error: err
+        });
+      }
       return { status: 'error', message: err && err.message ? err.message : String(err) };
     }
     }
@@ -20783,6 +20847,19 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
   const contract = normalizeIpcTaskHandler(handler);
   const dialogContext = { dialogSelections: [], batchContext: null, phase: 'prepare' };
   return archiveOperationContext.run(dialogContext, async () => {
+    const policy = taskPolicyRegistry.get(meta.channel);
+    if (!policy) {
+      throw new Error(`未登记 task policy：${meta.channel}`);
+    }
+    if (policy.batchPolicy === 'exclude') {
+      throw new Error(`受控业务 helper 不得执行 exclude policy：${meta.channel}`);
+    }
+    if (!['reserve', 'no-file'].includes(policy.batchPolicy)) {
+      throw new Error(`不支持的 task batch policy：${meta.channel}`);
+    }
+    // 第一次 gate 在 picker/preview/preparation 前执行，避免已知 Hold 下仍进入
+    // 任何可能持有资源的业务准备流程。
+    assertTaskPolicyNotHeld(policy);
     // picker / preview / danger confirmation 必须全部在 BOR.begin 和 reserve 之前完成。
     const prepared = await prepareIpcTaskInvocation(contract, event, args);
     dialogContext.phase = 'execute';
@@ -20800,16 +20877,8 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
         taskContext
       )
     );
-    const policy = taskPolicyRegistry.get(meta.channel);
-    if (!policy) {
-      throw new Error(`未登记 task policy：${meta.channel}`);
-    }
-    if (policy.batchPolicy === 'exclude') {
-      throw new Error(`受控业务 helper 不得执行 exclude policy：${meta.channel}`);
-    }
-    if (!['reserve', 'no-file'].includes(policy.batchPolicy)) {
-      throw new Error(`不支持的 task batch policy：${meta.channel}`);
-    }
+    // 第二次 gate 关闭 preparation 期间新建 Hold 的窗口。
+    assertTaskPolicyNotHeld(policy);
 
     const center = archiveCenterService || initializeArchiveCenter();
     if (!center || !archiveTaskLifecycle) {
@@ -20861,9 +20930,12 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
           afterTerminalIntent: isPositionOperation
             ? { route: 'position-reconciliation', operationToken: positionOperationToken }
             : (prepared.afterTerminalIntent || null),
-          beforeStart: typeof prepared.beforeStart === 'function'
-            ? async (operationContext) => prepared.beforeStart(operationContext)
-            : null,
+          beforeStart: async (operationContext) => {
+            assertTaskPolicyNotHeld(policy);
+            return typeof prepared.beforeStart === 'function'
+              ? prepared.beforeStart(operationContext)
+              : null;
+          },
           execute: async (operationContext, controls) => {
             const taskContext = createIpcTaskContext(operationContext, controls);
             return executeAfterPositionAdmission({
@@ -20940,6 +21012,8 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
         ? { route: 'position-reconciliation', operationToken: positionOperationToken }
         : (prepared.afterTerminalIntent || null),
       beforeStart: async (batchContext, filePlanEvidence) => {
+        // lifecycle admission 后、任何模块 beforeStart 副作用前最终复核。
+        assertTaskPolicyNotHeld(policy);
         const preparedEvidence = typeof prepared.beforeStart === 'function'
           ? await prepared.beforeStart(batchContext, filePlanEvidence)
           : null;
@@ -21156,6 +21230,70 @@ function registerAllIpcHandlers() {
   markStartupMetric(STARTUP_METRIC_MARKS.handlersReady);
 }
 
+async function initializeBackgroundExecutionRecovery() {
+  if (!database || !database.db) throw new Error('Recovery Coordinator 要求 Main control DB 已初始化');
+  recoveryControlReadRepository = createRecoveryControlReadRepository(database.db);
+  const inspectorRegistry = createInspectorRegistry();
+  const providerRegistry = createSettlementRecoveryProviderRegistry();
+
+  // E02-C2 只注册平台合同能力；真实业务 action 的 Inspector/Provider 由后续版本逐项接入。
+  // canonical durable canary 只允许测试/private DB，不能在产品 userData 中注册或枚举。
+  inspectorRegistry.freeze();
+  providerRegistry.freeze();
+
+  const coordinator = createStartupRecoveryCoordinator({
+    readRepository: recoveryControlReadRepository,
+    inspectorRegistry,
+    providerRegistry,
+    requestOwnerRepository: createRecoveryRequestOwnerRepository(database.db),
+    observationAttemptRepository: createRecoveryObservationAttemptRepository(database.db),
+    recoveryControlRepository: createRecoveryControlRepository(database.db),
+    // 当前 E02-C2 不迁移任何真实业务 Action。若用户库意外存在 open Intent，
+    // coordinator 会创建/保留 Hold 并 fail closed，不从 legacy TaskPolicy 猜 settlementKey。
+    resolvePolicy: () => null
+  });
+  const summary = await coordinator.scanAndRecover();
+  for (const hold of recoveryControlReadRepository.listActiveRecoveryHolds()) {
+    const taskKeys = actionTaskBindingRegistry.allowedTaskKeys(hold.actionKey);
+    if (!Array.isArray(taskKeys) || taskKeys.length === 0) {
+      throw Object.assign(new Error(`Recovery Hold action 无法映射到生产 TaskPolicy：${hold.actionKey}`), {
+        code: 'RECOVERY_HOLD_ACTION_UNBOUND'
+      });
+    }
+  }
+  recoveryHoldGate = createRecoveryHoldGate(recoveryControlReadRepository);
+  appendActivityLogEntry({
+    level: 'info',
+    source: 'main',
+    domain: 'background-execution-recovery',
+    message: '启动恢复扫描完成',
+    details: [
+      `sources=${summary.sourceCount}`,
+      `activeHolds=${summary.activeHoldCount}`
+    ]
+  });
+  return summary;
+}
+
+function assertTaskPolicyNotHeld(policy) {
+  if (!recoveryHoldGate || !recoveryControlReadRepository) {
+    throw Object.assign(new Error('Recovery Hold gate 尚未初始化'), {
+      code: 'RECOVERY_HOLD_GATE_UNAVAILABLE'
+    });
+  }
+  for (const hold of recoveryControlReadRepository.listActiveRecoveryHolds()) {
+    const taskKeys = actionTaskBindingRegistry.allowedTaskKeys(hold.actionKey);
+    if (!Array.isArray(taskKeys) || taskKeys.length === 0) {
+      throw Object.assign(new Error(`Recovery Hold action 无法映射到生产 TaskPolicy：${hold.actionKey}`), {
+        code: 'RECOVERY_HOLD_ACTION_UNBOUND'
+      });
+    }
+    if (taskKeys.includes(policy.taskKey)) {
+      recoveryHoldGate.assertNoRecoveryHold({ conflictScopeKey: hold.conflictScopeKey });
+    }
+  }
+}
+
 async function initializeApplication() {
     const dataPath = path.join(app.getPath('userData'), 'tool-data.sqlite');
     // v3.1.10：VCC copy-on-write 迁移恢复必须先于任何数据库连接。
@@ -21164,6 +21302,9 @@ async function initializeApplication() {
     database = new AppDatabase(dataPath);
     database.init({ onStartupPhase: recordStartupPhase });
     markStartupMetric(STARTUP_METRIC_MARKS.databaseReady);
+    // Recovery Contract startup boundary：任何 Archive owner recovery、cleanup 或业务 IPC
+    // 之前，先完成 registry freeze 与 open Intent/source/Hold 扫描。失败沿启动链 fail closed。
+    await initializeBackgroundExecutionRecovery();
     initializeAppUpdaterService();
     try {
       pendingDb = openPendingDb(app.getPath('userData'));
@@ -21239,6 +21380,31 @@ async function initializeApplication() {
 
 if (hasSingleInstanceLock) app.whenReady()
   .then(async () => {
+    if (packagedRuntimeModeSelected) {
+      let exitCode = 1;
+      let errorCode = packagedRuntimeRequestError
+        ? packagedRuntimeStartupErrorCode(packagedRuntimeRequestError)
+        : null;
+      try {
+        if (packagedRuntimeRequestError) throw packagedRuntimeRequestError;
+        const {
+          runPackagedRuntimeCanary
+        } = require('./main-process/background-execution/canary/packaged-runtime-runner');
+        const result = await runPackagedRuntimeCanary({
+          app,
+          request: packagedRuntimeRequest
+        });
+        exitCode = result.exitCode;
+        errorCode = result.errorCode;
+      } catch (error) {
+        errorCode = packagedRuntimeStartupErrorCode(error);
+      }
+      if (errorCode) {
+        process.stderr.write(`BACKGROUND_EXECUTION_PACKAGED_CANARY_ERROR=${errorCode}\n`);
+      }
+      app.exit(exitCode);
+      return;
+    }
     let finishStartupTotal = null;
     try {
       finishStartupTotal = startStartupPhase('startup-total', recordStartupPhase);
@@ -21268,8 +21434,7 @@ if (hasSingleInstanceLock) app.whenReady()
         }
         usageStats = usageStatsModule.defaultStats();
       }
-      await initializeApplication();
-      registerAllIpcHandlers();
+      await runActionTaskBindingStartup();
       await createWindow({ instrumentation: 'initial' });
       applicationStartupComplete = true;
       scheduleAppUpdaterStartupCheck();
@@ -21284,6 +21449,17 @@ if (hasSingleInstanceLock) app.whenReady()
     }
   })
   .catch((error) => {
+    if (packagedRuntimeModeSelected) {
+      try {
+        process.stderr.write(
+          `BACKGROUND_EXECUTION_PACKAGED_CANARY_ERROR=${packagedRuntimeStartupErrorCode(error)}\n`
+        );
+      } catch (_stderrError) {
+        // 专用 canary 失败不得转入普通 startup failure/log/window 路径。
+      }
+      app.exit(1);
+      return;
+    }
     handleStartupFailure(error);
   });
 
@@ -22096,41 +22272,43 @@ function resumeApplicationAfterFailedRestart() {
   if (!idleCleanupTimer && database && database.db) setupIdleCleanupTimer();
 }
 
-app.on('before-quit', (event) => {
-  if (businessOperationRegistry.isInstallTransitionActive() && !quitPreparationComplete) {
+if (!packagedRuntimeModeSelected) {
+  app.on('before-quit', (event) => {
+    if (businessOperationRegistry.isInstallTransitionActive() && !quitPreparationComplete) {
+      event.preventDefault();
+      return;
+    }
+    if (normalQuitContinuation || quitPreparationComplete) return;
     event.preventDefault();
-    return;
-  }
-  if (normalQuitContinuation || quitPreparationComplete) return;
-  event.preventDefault();
-  if (normalQuitInProgress) return;
-  normalQuitInProgress = true;
+    if (normalQuitInProgress) return;
+    normalQuitInProgress = true;
 
-  prepareApplicationForQuit()
-    .catch((error) => {
-      // 普通退出维持历史容错语义；升级重启由调用方直接 await 并阻断安装。
-      appendActivityLogEntry({
-        level: 'error',
-        source: 'main',
-        domain: 'app-quit',
-        message: '退出清理未全部完成，普通退出继续执行',
-        details: [error && error.message ? error.message : String(error)]
+    prepareApplicationForQuit()
+      .catch((error) => {
+        // 普通退出维持历史容错语义；升级重启由调用方直接 await 并阻断安装。
+        appendActivityLogEntry({
+          level: 'error',
+          source: 'main',
+          domain: 'app-quit',
+          message: '退出清理未全部完成，普通退出继续执行',
+          details: [error && error.message ? error.message : String(error)]
+        });
+      })
+      .finally(() => {
+        normalQuitContinuation = true;
+        app.quit();
       });
-    })
-    .finally(() => {
-      normalQuitContinuation = true;
+  });
+
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') {
       app.quit();
-    });
-});
+    }
+  });
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
-});
-
-app.on('activate', () => {
-  if (applicationStartupComplete && BrowserWindow.getAllWindows().length === 0) {
-    createWindow({ instrumentation: 'supplemental' }).catch(handleStartupFailure);
-  }
-});
+  app.on('activate', () => {
+    if (applicationStartupComplete && BrowserWindow.getAllWindows().length === 0) {
+      createWindow({ instrumentation: 'supplemental' }).catch(handleStartupFailure);
+    }
+  });
+}

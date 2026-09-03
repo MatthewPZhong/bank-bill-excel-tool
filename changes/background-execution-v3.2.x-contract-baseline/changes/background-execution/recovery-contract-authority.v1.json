@@ -1,0 +1,34 @@
+{
+  "authorityKind": "background-execution-recovery-contract-authority",
+  "contractVersion": 1,
+  "revision": 1,
+  "genesis": true,
+  "approvalStatus": "PENDING_HUMAN_REVIEW",
+  "canonicalization": "RFC8785-JCS",
+  "changeControl": {
+    "authorityValueChangeRequiresExactNextRevisionWithinV1": true,
+    "gitGenesisRequiresVerifiedPreviousAbsence": true,
+    "humanRedlineReviewRequired": true,
+    "humanRedlineReviewStatus": "PENDING_HUMAN_REVIEW"
+  },
+  "actionTaskBinding": {
+    "sourceContractVersion": 1,
+    "bindingMapSha256": "c217253cea4ccc377f030ff5119191a98e8e9c965853c9d9419fdedef9eef0ba",
+    "taskPolicyInventorySha256": "9538102480f1a714f3839547f294fbe6fd1c19384734addd89dc0ca6e1dbb368",
+    "expectedActionCount": 52,
+    "expectedTaskPolicyInventoryCount": 122,
+    "expectedPairCount": 60,
+    "expectedForwardBoundTaskKeyCount": 52,
+    "expectedUnboundTaskPolicyCount": 70,
+    "expectedProvenanceCount": 60
+  },
+  "recoveryResultProjection": {
+    "sourceContractVersion": 1,
+    "knownAnswerPreimage": "JCS(resultProjectionKnownAnswers)",
+    "knownAnswerSha256": "1ced39a559f93c787da4d520e37dc0a4513c27dd9b60a4c229509e741b5ec039",
+    "expectedKnownAnswerCount": 20,
+    "expectedProjectionFieldCount": 20,
+    "expectedRequestCount": 20,
+    "expectedWriterCount": 2
+  }
+}

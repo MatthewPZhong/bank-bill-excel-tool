@@ -9,7 +9,7 @@ const {
   ensureAcquiringBillCurrencyIndexSlimV2,
   ensureAmountSplitRulesSupport,
   ensureBankBuReconTablesSupport,
-  // v2.1.12 需求1 T-vcc-1：VCC业务OP计算模块 2 张表 + 2 索引
+  // v2.1.12/E03-B：VCC业务OP计算 run/files + save operation receipt
   ensureVccOpCalcTablesSupport,
   ensureBillSplitMergeSupport,
   ensureBillSplitTargetSeqSupport,
@@ -424,7 +424,7 @@ class AppDatabase {
     // v3.0.5 PR-4（Part B Phase 2）：bank_bu_recon_runs 加 side_db_rel_path 列（侧库镜像；NULL=历史主库 run）
     //   必须在 ensureBankBuReconTablesSupport 之后（依赖 runs 表已存在）；轻量加列幂等
     this.ensureBankBuReconRunsSideDbPath();
-    // v2.1.12 需求1 T-vcc-1：VCC业务OP计算模块 2 张表 + 2 索引（与现有 5 模块表完全隔离，调用顺序无依赖）
+    // v2.1.12/E03-B：VCC业务OP计算 run/files + save operation receipt（加法迁移）
     this.ensureVccOpCalcTablesSupport();
     // v3.1.6：VCC财务OP校验独立持久化空间（导入审计、有效事实、快照、运行及归档）。
     this.ensureVccFinancialOpTablesSupport();
@@ -743,7 +743,7 @@ class AppDatabase {
     return ensureBankBuReconRunsSideDbPath(this.db);
   }
 
-  // v2.1.12 需求1 T-vcc-1：VCC业务OP计算模块 2 张表（runs / run_files）+ 2 索引
+  // v2.1.12/E03-B：VCC业务OP计算 run/files + save operation receipt
   ensureVccOpCalcTablesSupport() {
     return ensureVccOpCalcTablesSupport(this.db);
   }

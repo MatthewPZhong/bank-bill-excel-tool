@@ -62,6 +62,13 @@ const REQUIRED_FILES = [
   '/COMMON枚举.xlsx',
   '/src/main.js',
   '/src/build-info.js',
+  '/src/main-process/background-execution/canary/packaged-runtime-runner.js',
+  '/src/main-process/background-execution/canary/packaged-runtime-request.js',
+  '/src/main-process/background-execution/canary/durable-worker.js',
+  '/src/main-process/background-execution/canary/pure-compute-worker.js',
+  '/src/main-process/background-execution/canary/canary-schema.js',
+  '/src/main-process/background-execution/canary/pure-compute-policy.json',
+  '/src/main-process/background-execution/canary/durable-policy.json',
 ];
 
 function formatMB(bytes) {

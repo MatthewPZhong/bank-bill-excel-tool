@@ -14,6 +14,7 @@
 'use strict';
 
 const { Worker } = require('node:worker_threads');
+const { computeMaxParallel } = require('../backend/big-table-import/pipeline');
 
 // 引擎薄 worker 入口（new Worker 拉起 → 内部跑 engine.importFiles → pipeline 起解析子 worker）。
 const ENGINE_WORKER_ENTRY = require.resolve('../backend/big-table-import/engine-worker-entry');
@@ -27,11 +28,12 @@ const ENGINE_WORKER_ENTRY = require.resolve('../backend/big-table-import/engine-
 //     mode                — 'append' | 'overwrite'
 //     monthKey            — 期望月份（跨月校验基准）；pending monthKeyOf=null ⇒ 传 undefined（旁路）
 //     resourceLimits      — { maxOldGenerationSizeMb, ... } 透传 new Worker（R-5；缺省 = worker 默认堆）
+//     parallel/frozen     — 仅 mature adapter 使用的已获批 Parser childCount；legacy wrapper 强制不冻结
 //     onEngineProgress    — ({ sourceFile, importedCount }) 引擎每 1w 行节流上报
 //     onLog               — ({ level, message, details? }) 日志条目透传（调用方落库）
 //   返回引擎 result：{ monthKey, fileCount, totalImported, deletedCount, maxParallel }。
 //   错误：worker postMessage 'error' → 用 deserializeError 还原（保 name/message/detailLines/structuredImportErrors）→ reject。
-function dispatchEngineImport({
+function dispatchEngineImportHandle({
   dbPath,
   files,
   contractModulePath,
@@ -39,29 +41,47 @@ function dispatchEngineImport({
   mode,
   monthKey,
   batchContext,
+  parallel,
+  parallelFrozen,
   resourceLimits,
   onEngineProgress,
-  onLog
+  onLog,
+  WorkerClass = Worker
 }) {
-  return new Promise((resolve, reject) => {
-    let worker;
+  let worker = null;
+  let jobId = null;
+  let settled = false;
+  let cancelMessagePosted = false;
+  let terminationPromise = null;
+
+  function ensureTermination() {
+    if (!worker) return Promise.resolve(0);
+    if (!terminationPromise) {
+      terminationPromise = Promise.resolve().then(() => worker.terminate());
+      // legacy 调用方只消费业务 promise；先挂 observer 避免 rejected termination
+      // 在 Supervisor close barrier 接手前形成 unhandled rejection。原 Promise 仍保留拒绝态。
+      void terminationPromise.catch(() => {});
+    }
+    return terminationPromise;
+  }
+
+  const promise = new Promise((resolve, reject) => {
     try {
       // resourceLimits 仅在显式传入时透传（不传 = worker 默认堆，行为与收单 dispatch 一致）。
       const workerOptions = (resourceLimits && typeof resourceLimits === 'object')
         ? { resourceLimits }
         : undefined;
-      worker = new Worker(ENGINE_WORKER_ENTRY, workerOptions);
+      worker = new WorkerClass(ENGINE_WORKER_ENTRY, workerOptions);
     } catch (spawnErr) {
       reject(spawnErr);
       return;
     }
-    const jobId = `btie-dispatch-${Date.now()}-${Math.floor(Math.random() * 1e6).toString(36)}`;
-    let settled = false;
+    jobId = `btie-dispatch-${Date.now()}-${Math.floor(Math.random() * 1e6).toString(36)}`;
     const finish = (fn, arg) => {
       if (settled) return;
       settled = true;
       try { worker.postMessage({ type: 'close' }); } catch (_e) { /* swallow */ }
-      try { worker.terminate(); } catch (_e) { /* swallow */ }
+      void ensureTermination();
       fn(arg);
     };
 
@@ -121,14 +141,87 @@ function dispatchEngineImport({
         contractOptions: contractOptions || {},
         mode: mode || 'append',
         monthKey,
-        batchContext
-        // parallel / useWhitelist 用引擎默认（min(4,cpus-2) + 内存闸；契约白名单）。
+        batchContext,
+        // mature adapter 在 admission 前用 pipeline 同一纯函数冻结完整 Parser Pool
+        // topology；这里只透传获批 childCount，禁止 engine 再按旧上限自行扩容。
+        parallel,
+        parallelFrozen: parallelFrozen === true
       }
     });
+  });
+
+  return {
+    promise,
+    cancel() {
+      if (!worker || settled || !jobId) return { acknowledged: false };
+      try {
+        worker.postMessage({ type: 'cancel', jobId });
+        cancelMessagePosted = true;
+        // 这里只证明请求已投递，不能伪造 Worker ACK 或取消终态。
+        return { acknowledged: false };
+      } catch (_error) {
+        return { acknowledged: false };
+      }
+    },
+    // existing-dispatch 私有握手：必须同时有本 handle 成功投递的 cancel，且
+    // Worker 真实返回 CancelError，才允许 Supervisor 建立取消终态因果。
+    isCancellationTerminalError(error) {
+      return cancelMessagePosted && Boolean(error && error.name === 'CancelError');
+    },
+    close() {
+      return ensureTermination();
+    },
+    terminate() {
+      return ensureTermination();
+    }
+  };
+}
+
+function dispatchEngineImport(options) {
+  // 现有 Pending/BizOP 默认入口始终保留 engine 自己的并行度/内存闸；
+  // 只有经过 CompoundLease admission 的 mature binding 才能设置 parallelFrozen。
+  return dispatchEngineImportHandle({ ...(options || {}), parallelFrozen: false }).promise;
+}
+
+function inspectBigTableImportTopology(request = {}) {
+  const input = request.input || {};
+  const files = Array.isArray(input.files) ? input.files : [];
+  if (files.length === 0) {
+    throw new TypeError('big-table mature adapter requires non-empty input.files');
+  }
+  return {
+    effectiveChildCount: computeMaxParallel({
+      requested: input.parallel,
+      fileCount: files.length
+    })
+  };
+}
+
+function createBigTableImportMatureBinding(options = {}) {
+  const dispatch = options.dispatch || dispatchEngineImportHandle;
+  const inspectTopology = options.inspectTopology || inspectBigTableImportTopology;
+  return Object.freeze({
+    inspectTopology,
+    dispatch(request = {}) {
+      const topology = request.topology;
+      if (!topology || !Number.isSafeInteger(topology.effectiveChildCount)) {
+        throw new TypeError('big-table mature adapter requires admitted topology');
+      }
+      return dispatch({
+        ...(request.input || {}),
+        topology,
+        parallel: topology.effectiveChildCount,
+        parallelFrozen: true,
+        onEngineProgress: request.onProgress
+      });
+    }
   });
 }
 
 module.exports = {
+  createBigTableImportMatureBinding,
   dispatchEngineImport,
+  dispatchEngineImportHandle,
+  inspectBigTableImportTopology,
   ENGINE_WORKER_ENTRY
 };

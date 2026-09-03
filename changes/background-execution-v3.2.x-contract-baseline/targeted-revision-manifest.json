@@ -1,0 +1,296 @@
+{
+  "manifestVersion": 2,
+  "baseline": "background-execution-v3.2.x-implementation-baseline",
+  "target": "background-execution-v3.2.x-implementation-ready",
+  "scope": "documentation, schemas, fixtures and validators only; no business source code",
+  "historicalSnapshot": true,
+  "currentReviewRevision": {
+    "target": "background-execution-v3.2.x-contract-baseline",
+    "sourceFrozenFileCount": 60,
+    "targetFileCount": 62,
+    "validationCheckCount": 24,
+    "actionPolicyCount": 52,
+    "actionTableRowCount": 59,
+    "hashedInputCount": 60,
+    "note": "Review-driven target-only revision; per-file hashes below describe the historical targeted revision and are non-normative. PACKAGE-SHA256SUMS.txt is the current package authority."
+  },
+  "validationStatus": "PASS",
+  "changedFileCount": 38,
+  "added": 16,
+  "modified": 22,
+  "deleted": 0,
+  "files": [
+    {
+      "path": "P0-targeted-closure-report.md",
+      "status": "added",
+      "sizeBytes": 12277,
+      "sha256": "a25e061a3671b8c6cf291268cc3ffeb7a82031cc1ff1750b4cce8eaa8f6fe55b"
+    },
+    {
+      "path": "README.md",
+      "status": "modified",
+      "sizeBytes": 1772,
+      "sha256": "d194f4c91caf4751a4c72ea9e8b83bb596f9d3d15eba5245f97b1f233dcb2dcd",
+      "baselineSizeBytes": 1228,
+      "baselineSha256": "41114375a642bd7f04dc8c021333d6138454d3fdc785de1a30f8264f1f826bef"
+    },
+    {
+      "path": "changes/3.2.0/spec.md",
+      "status": "modified",
+      "sizeBytes": 15041,
+      "sha256": "1b7df052a131decc2384fab0f852d8e0ce02db42894f26038b41aa5f2d3baee7",
+      "baselineSizeBytes": 12987,
+      "baselineSha256": "a106371e3ccbe9bf1844dbf609227573e124ee17a2608940a3f9a102df78bc7c"
+    },
+    {
+      "path": "changes/3.2.0/techdoc.md",
+      "status": "modified",
+      "sizeBytes": 12396,
+      "sha256": "4bd6a7d3d00deeba4536bc4ed920caee84b58a553f4bdbff8dcaf3019a50c5d4",
+      "baselineSizeBytes": 11418,
+      "baselineSha256": "6b97d908e054e659f703e2df3dc9231cb9cc42513fe4e19a4c019982cc7e75bf"
+    },
+    {
+      "path": "changes/3.2.1/spec.md",
+      "status": "modified",
+      "sizeBytes": 11738,
+      "sha256": "79aa57ad49904c395bb7669354336d81500ff31fa3c1daf2f459ced3ac505151",
+      "baselineSizeBytes": 11214,
+      "baselineSha256": "66e6475082a48b948a838bc095e9ce284d4f440efa4465395bdc1081738d8dfe"
+    },
+    {
+      "path": "changes/3.2.1/techdoc.md",
+      "status": "modified",
+      "sizeBytes": 10846,
+      "sha256": "613b40fd1b4a202af07d0629fcc400e5ac47c0bd141b16062d55ec0dd1139147",
+      "baselineSizeBytes": 10849,
+      "baselineSha256": "b9f3a48456fdf298fd0af440a130bce625a6f583c95b34f62df78306c23a811f"
+    },
+    {
+      "path": "changes/3.2.2/spec.md",
+      "status": "modified",
+      "sizeBytes": 13386,
+      "sha256": "0cdf28e5310733355fb51d92818dde8fd837ee06b521a4694c0c9cc43300d47f",
+      "baselineSizeBytes": 11971,
+      "baselineSha256": "06dd1b8f040a3c788c44846c145fac7f54820d15839a9ae49145f718e8998443"
+    },
+    {
+      "path": "changes/3.2.2/techdoc.md",
+      "status": "modified",
+      "sizeBytes": 10164,
+      "sha256": "9fd15a46b482e6801616554978dff67a02676b437b9759e18d15fce29dcff209",
+      "baselineSizeBytes": 8331,
+      "baselineSha256": "06cdfc06d299dab179876e4e0911c5980185955b34b93d7a6a4271b0fb121835"
+    },
+    {
+      "path": "changes/3.2.3/spec.md",
+      "status": "modified",
+      "sizeBytes": 10799,
+      "sha256": "cc68423997d2b931926eee5b806161511b5a4cfa53e6a901d213517e56d45b16",
+      "baselineSizeBytes": 9882,
+      "baselineSha256": "124397ff2ad10a7d54a67b77fae2ee4b081feccc77d8a2ba8f7ed783b8b4438d"
+    },
+    {
+      "path": "changes/3.2.3/techdoc.md",
+      "status": "modified",
+      "sizeBytes": 9764,
+      "sha256": "620d7818e45bd6370a5dfc7b50f3e28f7274f432483211dadb9496db2e041956",
+      "baselineSizeBytes": 8201,
+      "baselineSha256": "59d4d6d1d0d16cfa744f6f7a3d4f0bdd2165572a0acb81b148bdc13c2ccee08f"
+    },
+    {
+      "path": "changes/3.2.4/spec.md",
+      "status": "modified",
+      "sizeBytes": 9553,
+      "sha256": "dad81f149405281043306f7ce735f672fa20a167b4d8de751d5b254318fac2c7",
+      "baselineSizeBytes": 8702,
+      "baselineSha256": "4f59a794ac2b6a72596ceb5cb6838a8bece2803a4d37ab6e127ab675252caaf2"
+    },
+    {
+      "path": "changes/3.2.4/techdoc.md",
+      "status": "modified",
+      "sizeBytes": 8034,
+      "sha256": "0933775b673c0023e1c273be692dbaa3e3b1aa3fab3c77192ed06be430a55829",
+      "baselineSizeBytes": 7485,
+      "baselineSha256": "39b84722af7150ac911e5003f2775832f7188761af13c9807d1edcf621deb9b2"
+    },
+    {
+      "path": "changes/3.2.5/spec.md",
+      "status": "modified",
+      "sizeBytes": 12922,
+      "sha256": "8c9369ed2059eca857d988386be9106253b1978812569c896e99fbc7e3d311fb",
+      "baselineSizeBytes": 10535,
+      "baselineSha256": "cedc98a4f6edcce02023cd5eae3b7ab3218d2d846aebc72d0cfcd1e5e1bbc312"
+    },
+    {
+      "path": "changes/3.2.5/techdoc.md",
+      "status": "modified",
+      "sizeBytes": 7238,
+      "sha256": "3fb1845979823f2c39a8e26d9d5adc5d7f3e351fda90d2f4086d6c355d17e64f",
+      "baselineSizeBytes": 7270,
+      "baselineSha256": "cbb21e0836793162867636cb1a27a3235e31fac0eba4d40625319ba92b674842"
+    },
+    {
+      "path": "changes/background-execution/E00-platform-contract-v1-spec.md",
+      "status": "modified",
+      "sizeBytes": 23325,
+      "sha256": "a7dfd7b1ce56db336e70f10b411d352591c875f32ad776d260ad46492cfb1c46",
+      "baselineSizeBytes": 21672,
+      "baselineSha256": "25841719e6f1c990e5c344a349b64a23c467a2233b6e5eed127f4bed4453f87c"
+    },
+    {
+      "path": "changes/background-execution/E00-platform-contract-v1-techdoc.md",
+      "status": "modified",
+      "sizeBytes": 40100,
+      "sha256": "945cf5e76bf10d8efdd9724d26ba5ede9c15af1ae51157088e0b484c86d91db2",
+      "baselineSizeBytes": 34612,
+      "baselineSha256": "370a8cd446e7820578cd2df94f406d5136cd0eaca0c9fd7101df35b60fec711f"
+    },
+    {
+      "path": "changes/background-execution/README.md",
+      "status": "modified",
+      "sizeBytes": 1815,
+      "sha256": "20c248649a5e3c6824b44b2c9e583b4c57b67189391e0d463cadee1597199da1",
+      "baselineSizeBytes": 1368,
+      "baselineSha256": "23d71989ff6096863f8cf8248704e581a30d02fd5713a8a0d0a4026f8a441709"
+    },
+    {
+      "path": "changes/background-execution/platform-contract-v1.md",
+      "status": "modified",
+      "sizeBytes": 29063,
+      "sha256": "fc30059b030de9571e82f4131eb38f601eb45d1ba5bd69e0b15012166f3938cb",
+      "baselineSizeBytes": 18241,
+      "baselineSha256": "fcb90e3fe545914596bb073c136bf417ae9b811472f52ad8c004dd2490a7b2bc"
+    },
+    {
+      "path": "changes/background-execution/platform-contract-v1.schema.json",
+      "status": "modified",
+      "sizeBytes": 34910,
+      "sha256": "242c6a6f1128ff20573417a1d45a34df5a73caa768815cb50c114bcbcfc3483f",
+      "baselineSizeBytes": 22517,
+      "baselineSha256": "e6ef3e47f2e8299a07b6770bf6474247367fd84d402195ba23f4b4d09da68943"
+    },
+    {
+      "path": "changes/background-execution/platform-lifecycle-mapping.md",
+      "status": "modified",
+      "sizeBytes": 15567,
+      "sha256": "10725d1af632eabf06c18f0b6d3d493610c988bedfe4fe1018ddb15ffd55e59f",
+      "baselineSizeBytes": 13535,
+      "baselineSha256": "c7c81d720f707b1eadfca3836ff21d771327b9b699d35e1322429cc908443503"
+    },
+    {
+      "path": "changes/background-execution/platform-protocol-v1.schema.json",
+      "status": "added",
+      "sizeBytes": 20290,
+      "sha256": "52b57c0faafd983595d0c35dd178636c4213ffd69848e8302d3a5ce921afe856"
+    },
+    {
+      "path": "changes/background-execution/v3.2.x-version-split-plan.md",
+      "status": "modified",
+      "sizeBytes": 10125,
+      "sha256": "27bbdde9beca98a6abbdc9902016e319c98e52775b46c3727014d628ba6f174a",
+      "baselineSizeBytes": 10099,
+      "baselineSha256": "e83d1c4f611c7edfb082007a573211d07502b1a88e31809cd113a1aa7f1c8e1a"
+    },
+    {
+      "path": "changes/background-execution/validation/README.md",
+      "status": "added",
+      "sizeBytes": 1979,
+      "sha256": "aa2eee9c02bfe5d839811deb73a4ccccf822426c0a29e72ae2a91ce74a9a9857"
+    },
+    {
+      "path": "changes/background-execution/validation/fixtures/invalid/policy-action-key-mismatch.json",
+      "status": "added",
+      "sizeBytes": 3566,
+      "sha256": "7892e5a2ef01c635abf111d9121a52c68292baf786e63df4f8717331729089ed"
+    },
+    {
+      "path": "changes/background-execution/validation/fixtures/invalid/policy-artifact-without-publisher.json",
+      "status": "added",
+      "sizeBytes": 3033,
+      "sha256": "5d1135931169f7665d47f1b95f6f5617f6fe4a4fea91f3197785aefcea3b6b14"
+    },
+    {
+      "path": "changes/background-execution/validation/fixtures/invalid/policy-missing-static-reference.json",
+      "status": "added",
+      "sizeBytes": 2966,
+      "sha256": "2a09177b436d476667545120c37cf051bb575e343de67b22a9bd006f6d8cfaf6"
+    },
+    {
+      "path": "changes/background-execution/validation/fixtures/invalid/policy-service-without-resource-control.json",
+      "status": "added",
+      "sizeBytes": 3833,
+      "sha256": "b28aa45b64a99f068d9ba8ed0921956a085e6f8916bd8766a6783b23d87f1e97"
+    },
+    {
+      "path": "changes/background-execution/validation/fixtures/invalid/policy-worker-durable-without-recovery.json",
+      "status": "added",
+      "sizeBytes": 2934,
+      "sha256": "4b5871987c260d57d5867a2a27549e9c537052cb0a87768f78b79f5cc0f705fa"
+    },
+    {
+      "path": "changes/background-execution/validation/fixtures/invalid/protocol-messages.invalid.v1.json",
+      "status": "added",
+      "sizeBytes": 1793,
+      "sha256": "e44cf89208a2a333ed4da25bb371ffcae5577bd478bc7dc4723d02a2759c42fe"
+    },
+    {
+      "path": "changes/background-execution/validation/fixtures/valid/action-manifest.v3.2.x.json",
+      "status": "added",
+      "sizeBytes": 1512,
+      "sha256": "766bc5d5fc0796ae608ef1b6cb7d6b6d0127a23a566e48f672e6d650dcf6ca8e"
+    },
+    {
+      "path": "changes/background-execution/validation/fixtures/valid/policy-registry.v3.2.x.json",
+      "status": "added",
+      "sizeBytes": 179461,
+      "sha256": "a26c310278371960f3d9ec3f797727eb0243686a0ca713e8002a39f65b915503"
+    },
+    {
+      "path": "changes/background-execution/validation/fixtures/valid/protocol-messages.v1.json",
+      "status": "added",
+      "sizeBytes": 4468,
+      "sha256": "930bb60238adc79de599a101cce4acb41a7db1e6db3fa37b9ff26d934e473cbd"
+    },
+    {
+      "path": "changes/background-execution/validation/fixtures/valid/static-key-manifest.v3.2.x.json",
+      "status": "added",
+      "sizeBytes": 16407,
+      "sha256": "214c099e16385dda3a6239c2e1087d84a952995d7754f0ca71152f2083772714"
+    },
+    {
+      "path": "changes/background-execution/validation/requirements-validation.txt",
+      "status": "added",
+      "sizeBytes": 20,
+      "sha256": "117bb7857e2106917057761be56b51e26df4b9c0e3ebdbcf48a992e94534c6ac"
+    },
+    {
+      "path": "changes/background-execution/validation/run-validation.sh",
+      "status": "added",
+      "sizeBytes": 205,
+      "sha256": "3bc694881cc33641c0de897915d12817d4ad13f55fea26feb93d08e178108aa5"
+    },
+    {
+      "path": "changes/background-execution/validation/validate_background_execution_baseline.py",
+      "status": "added",
+      "sizeBytes": 24335,
+      "sha256": "bf170ea8bd78f3293fd0c927bc8acbdf6554b09e74c561f04c484c59731294aa"
+    },
+    {
+      "path": "implementation-sequence.md",
+      "status": "modified",
+      "sizeBytes": 1694,
+      "sha256": "b2227b62eb2f0f0cc1c2719b470e1cc0ea0a6f0c203f0a4a4460de063ea34a29",
+      "baselineSizeBytes": 785,
+      "baselineSha256": "65a5a8641300cda1fcbd6534a82d9d8bc24c4ec8eef4e91da2f51deecd8800d4"
+    },
+    {
+      "path": "validation-report.json",
+      "status": "modified",
+      "sizeBytes": 4927,
+      "sha256": "e87080b8d9038185483869cbb3e749efc274e309720b5476bded46b7528b5ddf",
+      "baselineSizeBytes": 728,
+      "baselineSha256": "db00662d1541a924ab0ba710dd04896aa4ac4ac530967e99a2557577db185b9f"
+    }
+  ]
+}

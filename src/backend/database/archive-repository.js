@@ -2,6 +2,9 @@
 
 const crypto = require('node:crypto');
 const path = require('node:path');
+const {
+  ensureBackgroundExecutionRecoveryControlSchema
+} = require('./background-execution-schema');
 
 // 存档中心只在主库保存轻量元数据：
 //   archive_batches   一次业务操作对应的本地日期流水批次；
@@ -694,6 +697,10 @@ function ensureArchiveMetadataSupport(db) {
       CREATE INDEX IF NOT EXISTS idx_archive_maintenance_audits_batch
         ON archive_maintenance_audits(batch_id, created_at);
     `);
+
+    // RecoveryControl v1 与 Archive TaskRun/Batch 共用 Main control DB 事务域。
+    // 这里只建立 additive C1 控制表，不启用恢复编排或业务 action。
+    ensureBackgroundExecutionRecoveryControlSchema(db);
   });
 }
 
@@ -4071,6 +4078,28 @@ class ArchiveRepository {
           releasedBlobs: []
         };
       }
+      const recoveryOverlay = this.db.prepare(`
+        SELECT state, final_outcome, recovery_attempt_id,
+               source_kind, source_ref, updated_at, resolved_at
+        FROM background_execution_batch_recovery_states
+        WHERE batch_id = ? AND task_run_id = ?
+      `).get(id, batch.taskRunId);
+      if (recoveryOverlay && ['interrupted', 'recovering'].includes(recoveryOverlay.state)) {
+        return {
+          status: 'recovery-active',
+          batch,
+          recoveryState: {
+            state: recoveryOverlay.state,
+            finalOutcome: recoveryOverlay.final_outcome || null,
+            recoveryAttemptId: recoveryOverlay.recovery_attempt_id || null,
+            sourceKind: recoveryOverlay.source_kind,
+            sourceRef: recoveryOverlay.source_ref,
+            updatedAt: recoveryOverlay.updated_at,
+            resolvedAt: recoveryOverlay.resolved_at || null
+          },
+          releasedBlobs: []
+        };
+      }
       if (batch.operationKey) {
         this.db.prepare(`
           UPDATE archive_operation_issuances
@@ -4102,6 +4131,15 @@ class ArchiveRepository {
       `).all(id).map((row) => String(row.storage_relative_path));
 
       this.db.prepare('DELETE FROM archive_artifacts WHERE batch_id = ?').run(id);
+      if (recoveryOverlay && recoveryOverlay.state === 'resolved') {
+        const removedOverlay = this.db.prepare(`
+          DELETE FROM background_execution_batch_recovery_states
+          WHERE batch_id = ? AND task_run_id = ? AND state = 'resolved'
+        `).run(id, batch.taskRunId);
+        if (Number(removedOverlay.changes) !== 1) {
+          throw new Error(`resolved recovery overlay 删除冲突：${id}`);
+        }
+      }
       this.db.prepare('DELETE FROM archive_batches WHERE id = ?').run(id);
 
       const releasedBlobs = [];

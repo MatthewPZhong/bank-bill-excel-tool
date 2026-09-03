@@ -1,0 +1,99 @@
+{
+  "actionKey": "background-execution:pure-compute-canary",
+  "moduleId": "background-execution",
+  "description": "v3.2.x pure-compute protocol canary without business context or durable commit",
+  "disposition": "managed",
+  "mode": "thread-single",
+  "adapterKind": "native",
+  "adapterKey": null,
+  "entryKey": "executor.background-execution:pure-compute-canary",
+  "lifetime": "job",
+  "context": {
+    "kind": "none",
+    "validatorKey": "platform-none"
+  },
+  "resources": {
+    "profile": "resource.background-execution:pure-compute-canary",
+    "base": {
+      "cpuSlots": 0,
+      "workerThreadSlots": 0,
+      "utilityProcessSlots": 0,
+      "ioHeavySlots": 0,
+      "memoryBytes": 0
+    },
+    "phase": {
+      "cpuSlots": 1,
+      "workerThreadSlots": 1,
+      "utilityProcessSlots": 0,
+      "ioHeavySlots": 1,
+      "memoryBytes": 201326592
+    },
+    "compound": null,
+    "lowMemoryBehavior": "queue",
+    "admissionPriority": "normal"
+  },
+  "cancellation": {
+    "capability": "shutdown-only",
+    "safePoints": [
+      "before-critical",
+      "between-units"
+    ],
+    "cooperativeTimeoutMs": 5000,
+    "terminateTimeoutMs": 5000,
+    "protectedResult": "protected/not-cancellable"
+  },
+  "failure": {
+    "unitBusinessError": "fail-job",
+    "unitTransportCrash": "fail-job",
+    "workerExit": "module-inspect",
+    "automaticRetry": false
+  },
+  "commit": {
+    "kind": "none",
+    "criticalIntent": false,
+    "receiptKind": null,
+    "inspectorKey": null,
+    "conflictScopeResolverKey": null,
+    "settlementKey": null
+  },
+  "result": {
+    "kind": "compact-json",
+    "maxBytes": 8388608,
+    "maxErrorItems": 100,
+    "validatorKey": "result-validator.background-execution:pure-compute-canary"
+  },
+  "artifacts": {
+    "kind": "none",
+    "filePlanRequired": false,
+    "technicalValidatorKey": null,
+    "businessValidatorKey": null,
+    "publisherKey": null,
+    "maxArtifacts": 0
+  },
+  "service": null,
+  "metrics": {
+    "phases": [
+      "queue",
+      "execute",
+      "settle"
+    ],
+    "privacyProfile": "finance-safe-v1",
+    "progressRateLimitPerSecond": 10
+  },
+  "featureFlag": "feature.background-execution:pure-compute-canary",
+  "legacyStrategyKey": null,
+  "blocker": null,
+  "production": {
+    "enabled": false,
+    "effectiveMode": "legacy",
+    "effectiveWorkerCount": 0,
+    "recoveryStatus": "not-applicable",
+    "evidenceStatus": "baseline",
+    "downgradeReason": "production gate not yet passed",
+    "benchmarkEvidenceId": null
+  },
+  "protocolLimits": {
+    "commandMaxBytes": 262144,
+    "eventMaxBytes": 262144
+  }
+}

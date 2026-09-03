@@ -136,6 +136,32 @@ test.describe('pipeline 按文件序单写（真实 worker 拓扑，乱序完成
     assert.deepEqual(importedPerFile, [5, 2000, 5], '各文件行数正确');
     assert.equal(result.totalImported, 2010, 'totalImported 累计');
   });
+
+  test('admission 已冻结的 parallel 不再触发 engine 内第二次内存降级', async () => {
+    const dir = fx.mkTmpDir('btie-pl-frozen-');
+    const contractModulePath = writeTestContractModule(dir);
+    const files = [
+      await fx.writeFixtureExcelJS({ rows: [['日期', '主键', '金额'], ['2026-03-01', 'F0', '10']] }),
+      await fx.writeFixtureExcelJS({ rows: [['日期', '主键', '金额'], ['2026-03-01', 'F1', '20']] })
+    ];
+    const originalFreemem = os.freemem;
+    os.freemem = () => 1024 * 1024 * 1024;
+    try {
+      const controller = pipeline.runPipeline({
+        files,
+        contractModulePath,
+        contractOptions: {},
+        useWhitelist: false,
+        parallel: 2,
+        parallelFrozen: true,
+        writeBatch: () => {}
+      });
+      const result = await controller.promise;
+      assert.equal(result.maxParallel, 2, '获批 2 个 Parser children 后不在 engine 内再降为 1');
+    } finally {
+      os.freemem = originalFreemem;
+    }
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────

@@ -28,7 +28,7 @@ test('RSS 低信号同时要求固定包络与严格低于线性外推', () => {
   }
 });
 
-test('RSS 多样本保留独立中位裁决并以 paired margin 只新增拒绝，任一样本硬上限独立失败', () => {
+test('RSS 多样本仅对独立中位组合应用 MB 取整传播容差，paired margin 与硬上限保持严格', () => {
   const stable = assessScanMemorySamples([7, 8, 8], [17, 23, 22], 3);
   const boundaryJitter = assessScanMemorySamples([9, 8, 8], [26, 24, 23], 3);
   const pairedMismatch = assessScanMemorySamples([20, 40, 100], [60, 120, 20], 3);
@@ -36,6 +36,8 @@ test('RSS 多样本保留独立中位裁决并以 paired margin 只新增拒绝�
   const measurableSpike = assessScanMemorySamples([49, 49, 49], [94, 150, 93], 3);
   const tier1Spike = assessScanMemorySamples([49, 150, 49], [94, 94, 93], 3);
   const latestWindowsRunner = assessScanMemorySamples([48, 49, 49], [93, 96, 96], 3);
+  const rankInversionJitter = assessScanMemorySamples([48, 49, 48], [96, 97, 97], 3);
+  const stableRankInversionOverflow = assessScanMemorySamples([48, 48, 48], [97, 97, 97], 3);
 
   assert.equal(stable.valid, true);
   assert.equal(stable.sampleCount, 3);
@@ -78,6 +80,21 @@ test('RSS 多样本保留独立中位裁决并以 paired margin 只新增拒绝�
   assert.equal(latestWindowsRunner.budgetMarginMedianMB, -1.5);
   assert.equal(latestWindowsRunner.linearMarginMedianMB, -51);
   assert.equal(latestWindowsRunner.sublinearWithinBudget, true);
+  assert.equal(rankInversionJitter.tier1DeltaMB, 48);
+  assert.equal(rankInversionJitter.tier2DeltaMB, 97);
+  assert.equal(rankInversionJitter.effectiveBudgetMB, 96);
+  assert.equal(rankInversionJitter.independentBudgetMarginMB, 1);
+  assert.equal(rankInversionJitter.independentBudgetRoundingToleranceMB, 1.25);
+  assert.deepEqual(rankInversionJitter.budgetMarginsMB, [0, -0.5, 1]);
+  assert.deepEqual(rankInversionJitter.linearMarginsMB, [-48, -50, -47]);
+  assert.equal(rankInversionJitter.budgetMarginMedianMB, 0);
+  assert.equal(rankInversionJitter.linearMarginMedianMB, -48);
+  assert.equal(rankInversionJitter.sublinearWithinBudget, true);
+  assert.equal(stableRankInversionOverflow.independentBudgetMarginMB, 1);
+  assert.equal(stableRankInversionOverflow.independentBudgetRoundingToleranceMB, 1.25);
+  assert.equal(stableRankInversionOverflow.budgetMarginMedianMB, 1);
+  assert.equal(stableRankInversionOverflow.linearMarginMedianMB, -47);
+  assert.equal(stableRankInversionOverflow.sublinearWithinBudget, false);
 });
 
 test('RSS 对 16MB tier1 保护区与可测预算边界两侧对称追加两轮成对采样', () => {
