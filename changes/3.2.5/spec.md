@@ -135,12 +135,18 @@ existing-critical-protocol
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `pending:import` | `managed` | `managed` | `thread-pool` | `job` | `existing-dispatch` | `existing-critical-protocol` | `false` | 现有 big-table engine；不额外 spawn；人工资金/恢复门禁前保持 legacy |
 | `biz-op:import-flow` | `managed` | `managed` | `thread-pool` | `job` | `existing-dispatch` | `existing-critical-protocol` | `false` | 现有 ordered writer；人工资金/恢复门禁前保持 legacy |
-| `acquiring:import` | `legacy-preserved` | `managed` | `thread-pool` | `job` | `existing-dispatch` | `existing-critical-protocol` | `false` | adapterKey 固化现有 import pool |
-| `acquiring:run-new-eligible` | `legacy-preserved` | `managed` | `thread-pool` | `job` | `existing-dispatch` | `existing-critical-protocol` | `false` | 仅符合既有 multiworker gate 的全新 run；adapterKey 固定 |
-| `acquiring:run-single-or-resume` | `legacy-preserved` | `managed` | `thread-single` | `job` | `existing-dispatch` | `existing-critical-protocol` | `false` | small / resume / forced-single；不得在运行中切换 |
+| `acquiring:import` | `legacy-preserved` | `managed` | `thread-pool` | `job` | `existing-dispatch` | `existing-critical-protocol` | `false` | adapterKey 固化现有 import root + Parser Pool；childrenMax=4 |
+| `acquiring:run-new-eligible` | `legacy-preserved` | `managed` | `thread-pool` | `job` | `existing-dispatch` | `existing-critical-protocol` | `false` | 仅符合既有 multiworker gate 的全新 run；current workerCount 上限=8 |
+| `acquiring:run-single-or-resume` | `legacy-preserved` | `managed` | `thread-single` | `job` | `existing-dispatch` | `existing-critical-protocol` | `false` | small / resume / forced-single；只有 root Worker、`compound=null`，不得在运行中切换 |
 | `position:import` | `legacy-preserved` | `managed` | `utility-process` | `job` | `existing-dispatch` | `existing-critical-protocol` | `false` | 保留 prepare/grant/apply/recovery |
 
 `adapterKey`、`entryKey`、`inspectorKey` 等必须在机器可读 Registry fixture 中给出，不能写“native 或 existing-dispatch”“模块现有映射”“job/service”等非 canonical 值。
+
+Acquiring current-tree topology 以真实 dispatcher 为权威：import 的 root Worker 由 phase 计费，最多
+4 个 Parser child 由 CompoundLease 计费；`run-new-eligible` 的 root pool Worker 由 phase 计费，
+合法 nested child 上限必须覆盖设置与 Main CPU/内存闸允许的 8；`run-single-or-resume` 不创建
+nested child，不得用一个虚构 child 重复计费。冻结历史 fixture 保持不变，E13-G 必须按 current
+authority 重建最终 Registry/策略快照。
 
 ## 4. Read-only export 合同
 
@@ -198,6 +204,14 @@ Adapter只负责：
 - 对 `file-batch` action，以已校验的 Protocol envelope exact-7 `context` 作为唯一 Main-owned
   任务身份；既有 dispatcher 所需的 `input.batchContext` 必须由 adapter 绑定为同一身份，caller
   若同时提供则必须逐字段一致，不一致时在启动既有 dispatcher 前 fail closed。
+- 对 Acquiring run 的 exact-5 `operation` action，既有 worker 仍需要 File Task exact-7
+  `input.batchContext` 保存 chunk/recovery owner；adapter 必须逐字段核对两者共有的
+  `taskRunId/taskKey/moduleId/parentRunId/operationKey`，并拒绝任何身份分叉。`batchId/batchNumber`
+  继续来自 Main-owned File Task，不得由 adapter 推测或生成。
+- Acquiring resume 的 caller 只允许提交正整数 `resumeRunId`；adapter 必须从 Main-owned
+  `userDataDir/mainDatabasePath/mainDb` 重新执行 `prepareRunResume()` 与 freshness 复核，拒绝嵌套
+  `resumePlan/dbPath` authority。持久 exact-7 owner 与当前 File Task、持久 output intent 与当前
+  FilePlan 必须完全一致；持久 `chunkSize` 优先于当前设置，避免 chunk offset 漂移。
 
 禁止：
 

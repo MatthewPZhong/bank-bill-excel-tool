@@ -812,6 +812,10 @@ const backgroundExecutionRuntimeManager = createBackgroundExecutionRuntimeManage
     app.isReady() ? path.join(app.getPath('userData'), PENDING_DB_FILENAME) : null
   ),
   mainDatabasePathProvider: () => database && database.dbPath,
+  acquiringMainDbProvider: () => database && database.db,
+  acquiringLog: (entry) => {
+    try { appendActivityLogEntry(entry || {}); } catch (_error) {}
+  },
   userDataDirProvider: () => database && database.dbPath
     ? path.dirname(database.dbPath)
     : null,
