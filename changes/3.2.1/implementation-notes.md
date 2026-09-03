@@ -98,11 +98,12 @@
 - official Node.js `22.18.0` exact-lock 完整 unit 为 `6187/6190 PASS`、`0 FAIL`、`3 Windows-only SKIP`；日志 `/private/tmp/bbet-v321-release-prep.lLgHBo/worktree/logs/unit-tests/unit-20260903-204509.log`。
 - official Node.js `22.18.0` exact-lock 完整 integration 为 `51 scripts / 2455/2455 PASS`；其中 `toolbox-large-file-stream=50/50`、`toolbox-large-split-multi-sheet=31/31`。runner 机械改写已用 `apply_patch` 恢复，`rules/integration-test-policy.md` 精确回到 SHA-256 `65716ba574d1139d72a1ca96f45ebaa4f85efa1f8ebf3f3bc81e8f0ce1edb74e`。
 - `npm run smoke`、`npm run lint`、本轮 `4` 个 changed JavaScript 文件的 `node --check` 与定向 ESLint、`git diff --check`、版本三处 `3.2.1`、冲突标记扫描和 `package.json` / `package-lock.json` / workflow / 生产 adapter 冻结检查均通过。
+- 修复提交 `c44bc81c6e084379f63e0b3da4e7390c3f64ec7a` 创建后，干净 HEAD 的 `npm run check:packaged-inputs` 通过，`build.files` `9` 条覆盖范围与 HEAD 一致。
 - 资金/恢复盲区复核：本轮不改变业务主键、金额、币种、行序、Workbook 或正式文件发布；不可识别文件只跳过只读 scope 预计算，仍形成逐文件失败且不获得 mutation 权限；可识别文件写入前继续经过 actual-header identity gate。repair 缺失源 token 保留，可读成功 token 仅在成功终态删除；回归同时证明同批有效文件继续、identity mismatch 仍拒绝、无跨 scope 写入。
 
 ### Remaining Unknowns
 
-- `CLOSED / local`：新增 mixed import/repair token 生命周期、Windows adapter/contract、完整 unit/integration/smoke/lint、语法/ESLint、版本/冻结/diff 检查均已通过；提交后尚须以干净 HEAD 执行 packaged-inputs。
+- `CLOSED / local`：新增 mixed import/repair token 生命周期、Windows adapter/contract、完整 unit/integration/smoke/lint、语法/ESLint、版本/冻结/diff 与提交后干净 HEAD packaged-inputs 均已通过。
 - `PROBE / exact CI`：普通非 force push 后必须由新 exact head 的 `smoke-test` 与 `build` 全部成功，首次失败永不视为被重复或本地成功代偿。
 - `BLOCK / review`：review thread 在代码、回归证据和新 exact head 建立前不得回复或 resolve。
 - `BLOCK / production`：application production 继续 disabled/legacy；本轮不改变资金主键、金额、币种、Workbook 输出或恢复终态红线。
