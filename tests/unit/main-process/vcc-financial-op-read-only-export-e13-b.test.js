@@ -383,7 +383,6 @@ test('E13-B VCC dataset 的来源重验与 legacy writer 共用一个 read trans
   const transactionEvents = [];
   const readDb = new DatabaseSync(fixture.dbPath, { readOnly: true });
   readDb.exec('PRAGMA query_only = ON; PRAGMA busy_timeout = 30000;');
-  t.after(() => readDb.close());
   const instrumentedDb = new Proxy(readDb, {
     get(target, property) {
       if (property === 'exec') {
@@ -397,7 +396,14 @@ test('E13-B VCC dataset 的来源重验与 legacy writer 共用一个 read trans
     }
   });
 
-  const written = await writeDataset(input, instrumentedDb, null);
+  let written;
+  try {
+    written = await writeDataset(input, instrumentedDb, null);
+  } finally {
+    // Windows 不允许 fixture cleanup 在只读句柄仍打开时 unlink SQLite 文件。
+    // 显式关闭本测试拥有的句柄，不能依赖多个 t.after hook 的注册顺序。
+    readDb.close();
+  }
 
   assert.equal(written.result.dataCount, 1);
   assert.deepEqual(transactionEvents, ['BEGIN', 'COMMIT']);
