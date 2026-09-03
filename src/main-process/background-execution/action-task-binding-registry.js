@@ -6,12 +6,12 @@ const { types: { isProxy } } = require('node:util');
 const ACTION_TASK_BINDING_CONTRACT = Object.freeze({
   version: 1,
   canonicalization: 'RFC8785-JCS',
-  sha256: '6f9cf21fc6e4280ec617f54a0fcce137c21d185bf08e379195a986872d4b593f',
+  sha256: 'f51c0951e4c72b95fc047b0bbc364e03537d94db2728ad8412a51ab1da7deb33',
   actionCount: 52,
   taskPolicyInventoryCount: 122,
   taskPolicyInventoryCanonicalization: 'RFC8785-JCS',
   taskPolicyInventorySha256: '9538102480f1a714f3839547f294fbe6fd1c19384734addd89dc0ca6e1dbb368',
-  pairCount: 60,
+  pairCount: 59,
   boundTaskKeyCount: 52,
   unboundTaskPolicyCount: 70
 });
@@ -20,7 +20,7 @@ const ACTION_TASK_BINDING_CONTRACT = Object.freeze({
 // caller 不能注入、替换或取得其中任何内部数组。
 const ACTION_TASK_BINDINGS = Object.freeze({
   'acquiring:copy-existing-diff': Object.freeze(['acquiringBillCurrency:export']),
-  'acquiring:export-diff-workbook': Object.freeze(['acquiringBillCurrency:export']),
+  'acquiring:export-diff-workbook': Object.freeze([]),
   'acquiring:import': Object.freeze(['acquiringBillCurrency:importBill', 'acquiringBillCurrency:importFlow']),
   'acquiring:run-new-eligible': Object.freeze(['acquiringBillCurrency:run']),
   'acquiring:run-single-or-resume': Object.freeze(['acquiringBillCurrency:run', 'acquiringBillCurrency:run:resume']),

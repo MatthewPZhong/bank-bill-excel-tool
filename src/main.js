@@ -553,6 +553,16 @@ const {
   generateValidateAndPublishVccFinancialOpExport
 } = require('./main-process/read-only-exports/vcc-financial-op/managed-export');
 const {
+  ACQUIRING_EXPORT_ACTIONS
+} = require('./main-process/read-only-exports/acquiring/policies');
+const {
+  assertAcquiringCopySourceFresh,
+  freezeAcquiringCopySource
+} = require('./main-process/read-only-exports/acquiring/query');
+const {
+  generateValidateAndPublishAcquiringExport
+} = require('./main-process/read-only-exports/acquiring/managed-export');
+const {
   TOOLBOX_GENERATION_ACTIONS
 } = require('./main-process/toolbox-background/generation-contract');
 const {
@@ -970,6 +980,62 @@ async function assertPositionEvidenceFresh(service, expected, context) {
     reportFiles: context.reportFiles
   });
   return assertPositionSourceSnapshot(current, expected);
+}
+
+async function assertAcquiringCopyEvidenceFresh(expected) {
+  return assertAcquiringCopySourceFresh(expected, {
+    userDataDir: path.dirname(database.dbPath),
+    mainDb: database.db
+  });
+}
+
+async function executeManagedAcquiringCopyExport(prepared, taskContext) {
+  const stagingRoot = createReadOnlyExportStagingDirectory(
+    taskContext.batchContext,
+    'acquiring-copy'
+  );
+  let preserveStaging = false;
+  try {
+    const generationPlan = createReadOnlyExportGenerationPlan(
+      stagingRoot,
+      taskContext,
+      ACQUIRING_EXPORT_ACTIONS.COPY
+    );
+    const assertSourceFresh = () => assertAcquiringCopyEvidenceFresh(
+      prepared.acquiringReadOnlyExportSource
+    );
+    const generated = await generateValidateAndPublishAcquiringExport({
+      runtime: backgroundExecutionRuntimeManager.get(),
+      actionKey: ACQUIRING_EXPORT_ACTIONS.COPY,
+      operationKey: taskContext.batchContext.operationKey,
+      taskRunId: taskContext.batchContext.taskRunId,
+      batchContext: taskContext.batchContext,
+      stableRunEvidence: prepared.acquiringReadOnlyExportSource.stableRunEvidence,
+      dbPathOrManagedSource: prepared.acquiringReadOnlyExportSource.dbPathOrManagedSource,
+      generationPlan,
+      context: prepared.acquiringReadOnlyExportSource.context,
+      production: true,
+      assertSourceFresh,
+      publisher: (artifacts) => publishReadOnlyExportArtifacts(
+        'acquiring-copy', artifacts, taskContext
+      )
+    });
+    prepared.readOnlyExportPublicationTaskIds = [generated.publication.taskId];
+    const published = generated.publication.files[0];
+    return {
+      status: 'success',
+      runId: generated.summary.runId,
+      source: prepared.exportPlan.source,
+      monthKey: generated.summary.monthKey,
+      savedPath: published.filePath,
+      sourceDiffPath: prepared.exportPlan.diffFilePath
+    };
+  } catch (error) {
+    preserveStaging = shouldPreserveToolboxTemporaryFiles(error);
+    throw error;
+  } finally {
+    if (!preserveStaging) cleanupReadOnlyExportStagingDirectory(stagingRoot);
+  }
 }
 
 async function executeManagedPositionReadOnlyExport(service, prepared, taskContext) {
@@ -17704,10 +17770,23 @@ function registerNewAccountHandlers() {
       if (res.canceled || !res.filePath) {
         return { proceed: false, result: { status: 'cancelled' } };
       }
-      return {
+      const useManagedExport = backgroundExecutionRuntimeManager.isProductionEnabled(
+        ACQUIRING_EXPORT_ACTIONS.COPY
+      );
+      const acquiringReadOnlyExportSource = useManagedExport
+        ? await freezeAcquiringCopySource({
+            userDataDir: path.dirname(database.dbPath),
+            mainDb: database.db,
+            monthKey,
+            exportPlan
+          })
+        : null;
+      const prepared = {
         proceed: true,
         monthKey,
         exportPlan,
+        useManagedExport,
+        acquiringReadOnlyExportSource,
         flowPlan: exportPlan.flowPlan,
         filePlan: {
           version: 1,
@@ -17719,14 +17798,20 @@ function registerNewAccountHandlers() {
             sourceOperation: 'acquiringBillCurrency:export'
           }]
         },
-        beforeStart() {
+        async beforeStart() {
           acquiringRunData.assertRunExportFresh({
             userDataDir: path.dirname(database.dbPath),
             mainDb: database.db,
             prepared: exportPlan
           });
+          if (useManagedExport) {
+            await assertAcquiringCopyEvidenceFresh(acquiringReadOnlyExportSource);
+          }
         }
       };
+      return useManagedExport
+        ? attachReadOnlyExportReceiptAcknowledgement(prepared)
+        : prepared;
     },
     async execute(_event, prepared, taskContext) {
     const { monthKey, exportPlan } = prepared;
@@ -17734,6 +17819,9 @@ function registerNewAccountHandlers() {
     const lock = tryAcquireOpLock('export', monthKey);
     if (!lock.acquired) return { status: 'error', message: lock.message };
     try {
+      if (prepared.useManagedExport) {
+        return await executeManagedAcquiringCopyExport(prepared, taskContext);
+      }
       fs.copyFileSync(exportPlan.diffFilePath, output.filePath);
       await taskContext.settleArtifacts({ files: [{ artifactKey: output.artifactKey }] });
       return {

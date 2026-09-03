@@ -117,6 +117,15 @@ const {
   VCC_FINANCIAL_OP_READ_ONLY_POLICY,
   validateVccFinancialOpReadOnlyExportResult
 } = require('../read-only-exports/vcc-financial-op/policies');
+const {
+  ACQUIRING_EXPORT_ACTIONS,
+  ACQUIRING_EXPORT_ACTION_SET,
+  ACQUIRING_EXPORT_POLICIES,
+  validateAcquiringExportResult
+} = require('../read-only-exports/acquiring/policies');
+const {
+  runAcquiringExistingDiffCopyInline
+} = require('../read-only-exports/acquiring/executor');
 
 const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   ...TOOLBOX_GENERATION_POLICIES,
@@ -132,7 +141,8 @@ const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   ...BIZ_OP_READ_ONLY_POLICIES,
   ...PRE_FUND_READ_ONLY_POLICIES,
   POSITION_READ_ONLY_POLICY,
-  VCC_FINANCIAL_OP_READ_ONLY_POLICY
+  VCC_FINANCIAL_OP_READ_ONLY_POLICY,
+  ...ACQUIRING_EXPORT_POLICIES
 ]);
 
 function isBackgroundExecutionProductionEnabled(actionKey) {
@@ -170,6 +180,21 @@ function mergeShutdownReports(report, ...pairedReports) {
 function entryBindingForPolicy(policy, workerRoot, duplicateStartupGate) {
   if (policy.actionKey === NEW_ACCOUNT_SAVE_AS_ACTION) {
     return runNewAccountArtifactCopyInline;
+  }
+  if (policy.actionKey === ACQUIRING_EXPORT_ACTIONS.COPY) {
+    return runAcquiringExistingDiffCopyInline;
+  }
+  if (policy.actionKey === ACQUIRING_EXPORT_ACTIONS.REGENERATE) {
+    return Object.freeze({
+      path: path.resolve(
+        __dirname,
+        '..',
+        'read-only-exports',
+        'acquiring',
+        'worker-entry.js'
+      ),
+      cancellationTerminalErrorCodes: Object.freeze(['ACQUIRING_EXPORT_CANCELLED'])
+    });
   }
   if (policy.moduleId === 'duplicate') {
     return Object.freeze({
@@ -315,6 +340,8 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
       resultValidator = validateVccExportSubjectsResult;
     } else if (policy.actionKey === VCC_EXPORT_SINGLE_ACTION) {
       resultValidator = validateVccExportSingleResult;
+    } else if (ACQUIRING_EXPORT_ACTION_SET.has(policy.actionKey)) {
+      resultValidator = validateAcquiringExportResult;
     } else if (policy.moduleId === 'pending-read-only-export') {
       resultValidator = validatePendingReadOnlyExportResult;
     } else if (policy.moduleId === 'biz-op-read-only-export') {

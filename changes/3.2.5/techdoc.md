@@ -132,6 +132,12 @@ read stable run DB
 → Publisher
 ```
 
+Current-tree authority：`acquiringBillCurrency:export` 的 source 是已发布 `diff_file_path`，只走
+copy executor；它不能在文件缺失时静默转为 regenerate。Regenerate executor 作为独立、
+production-disabled capability 注册，输入必须显式携带 stable completed run DB authority；当前没有
+独立 IPC/button，故不与任何 legacy TaskPolicy 绑定。`partial`、`in-progress`、`data-complete`、
+progress 缺失/破坏或 source 漂移全部 fail closed。
+
 ## 5. Existing dispatcher adapter interface
 
 ```javascript
