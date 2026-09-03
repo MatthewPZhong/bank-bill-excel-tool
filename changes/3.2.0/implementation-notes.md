@@ -52,3 +52,35 @@
 
 - `PROBE / tag 后`：最终 Windows Release 四项资产、公开下载、摘要及更新元数据只能在 tag workflow 产生资产后回读。
 - `BLOCK / production`：本发布不启用 application production；若后续需要启用，必须另行提交、验证和授权。
+
+## 2026-09-03 PR #221 合并前审查收口
+
+### Decisions
+
+- 接受“确定性恢复完成后同源 active Hold 未解除”的审查意见。默认恢复链现在只在终态已同事务落库时解除同源 Hold：`not-committed` / `compensated` 与 Intent recovered→closed 同事务；无 settlement 的 `committed` 与 Intent close 同事务；有 settlement 的 source 只在 Provider 返回 `completed` 时与 Intent close 同事务。`incomplete`、瞬态失败、终止失败、未知或部分提交均继续保留 Hold。
+- 自定义 `planTransitions` 仍拥有动作级 Hold 生命周期，通用 coordinator 不替动作 planner 自动解除，避免后续版本对资金/恢复动作的专用 transition 产生重复或提前解锁。
+- “按 Action→legacy Task 保守阻断而非通用精确 scope 匹配”是 v3.2.0 的既定版本边界，不在本次审查中发明未来业务 scope 合同。v3.2.0 没有注册真实 production Inspector/Provider，所有相关 action 仍 `production.enabled=false`；本发布不宣称逐 scope production 闭环，该项继续作为未来 production enablement 的显式阻断条件。
+- “首次 scan 早于建表”的审查意见不成立：对象参数按序构造 request-owner、observation-attempt 与 control 写仓库时会同步执行 schema ensure，之后才调用 `scanAndRecover()`。增加 fresh in-memory DB 回归测试固定这一真实构造顺序。
+
+### Deviations
+
+- 正式发布准备原计划仅改发布文档；PR 审查发现默认恢复链真实生命周期缺陷后，范围扩展为 coordinator 与同文件合同测试的最小修复。未修改业务 `src` 调用方、资金策略、production strategy、package/lock、冻结 schema/validator/snapshot 或 canonical R3 evidence。
+- 首轮完整 unit 暴露既有 topology 测试直接依赖运行瞬间 `os.freemem()`：全套测试并发占用使可用内存短暂低于既有 2GB 闸值时，生产算法按合同从 2 降为 1，而测试仍硬编码期望 2。只在测试中固定 8GB 可用内存输入；生产内存闸、并行度算法及资金单写合同均未修改。
+
+### Evidence
+
+- `node --check` 覆盖 coordinator 与新增测试：PASS。
+- `node --test tests/unit/main-process/background-execution/recovery-contract-c2.test.js`：`42/42 PASS`；新增 fresh DB 建表顺序以及 active same-source Hold 的五个确定性/非确定性分支。
+- fresh DB 测试不调用产品 archive migration 或 canary schema helper，直接以空 `DatabaseSync(':memory:')` 构造 coordinator 并完成零 source scan，回读四张 recovery control 表。
+- Hold 回归覆盖 critical Intent 的 `committed`、`not-committed`、`compensated`，以及 Provider 的 `completed` 与 `incomplete`；仅前三个 Intent 终态和 Provider `completed` 解除 Hold，`incomplete` 保持 active。
+- 首轮完整 unit 为 `6025/6029`、`1 FAIL`、`3 SKIP`，失败仅为上述动态内存断言，不能记为 PASS；定向固定输入后该 topology 用例通过，仍须重跑完整 unit 才能形成有效全绿证据。
+- 固定 topology 测试输入后，official Node `22.18.0` 与 exact lock 的完整 unit 为 `6026/6029 PASS`、`0 FAIL`、`3 Windows-only SKIP`；日志 `logs/unit-tests/unit-20260903-151055.log`。首轮失败日志 `logs/unit-tests/unit-20260903-150754.log` 仅保留为缺陷定位证据，不作通过证据。
+- recovery contract 与 repository 组合回归 `81/81 PASS`；`background-execution-recovery-control` integration `27/27 PASS`，`background-execution-recovery-canary` integration `9/9 PASS`。
+- 完整 integration 为 `51 scripts / 2455/2455 PASS`，完整 smoke 与 lint 通过；integration 对 `rules/integration-test-policy.md` 的机械更新已用 patch 恢复，最终 SHA-256 为 `b5238d88ed1c0b6e8bf4f6c98d9ff24daaa8e3cd573b2e951ea2486f5ac0b5d5`。
+- 本次四文件修复 delta 对 `rules/important-variables.md` 做人工只读扫描，未直接命中 Critical/Important 命名变量；但 coordinator 属于恢复生命周期敏感路径，仍按资金/恢复高风险复核同源身份、expected state、同事务原子性、失败保留 Hold 与可观测事件。topology 变更仅固定测试输入，不改变生产内存闸。
+- `git diff --check`、修改 JavaScript 的 `node --check` 与最终四文件 scope review 通过。依赖审计仍为已知 `2 moderate / 9 high`，未执行 `audit fix`。
+
+### Remaining Unknowns
+
+- `PROBE / exact CI`：本修复提交后必须由 PR #221 新 exact head 的 `smoke-test` 与 `build` 全部完成且成功；旧 exact CI 不代偿。
+- `BLOCK / production`：通用精确 conflict-scope resolver 仍未建立；production 继续 disabled，不得把本次 Hold 生命周期修复解释为启用许可。

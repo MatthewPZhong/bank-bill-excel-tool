@@ -97,7 +97,8 @@ function createStartupRecoveryCoordinator(options = {}) {
   const attemptRepository = requireDependency(options.observationAttemptRepository, 'allocateNextObservationAttempt', 'observationAttemptRepository');
   const controlRepository = requireDependency(options.recoveryControlRepository, 'runInControlTransaction', 'recoveryControlRepository');
   const resolvePolicy = typeof options.resolvePolicy === 'function' ? options.resolvePolicy : (() => null);
-  const planTransitions = typeof options.planTransitions === 'function'
+  const usesDefaultTransitionPlan = typeof options.planTransitions !== 'function';
+  const planTransitions = !usesDefaultTransitionPlan
     ? options.planTransitions
     : (() => []);
   const sleep = typeof options.sleep === 'function'
@@ -172,6 +173,25 @@ function createStartupRecoveryCoordinator(options = {}) {
         evidenceHash: canonicalSha256(summary)
       }
     };
+  }
+
+  function defaultHoldResolutionRequest(source, activeHold, resolution, evidence) {
+    if (!usesDefaultTransitionPlan || !activeHold) return null;
+    if (activeHold.sourceKind !== source.sourceKind || activeHold.sourceRef !== source.sourceRef) {
+      throw new StartupRecoveryError(
+        'STARTUP_RECOVERY_HOLD_SOURCE_MISMATCH',
+        'Recovery Hold 只能由同一持久 source 的确定性结果解除',
+        { holdId: activeHold.holdId, sourceKind: source.sourceKind, sourceRef: source.sourceRef }
+      );
+    }
+    return reserveTransition({
+      entityKind: 'recovery-hold',
+      command: 'resolve',
+      holdId: activeHold.holdId,
+      expectedState: 'active',
+      resolution,
+      evidence
+    }, { resolution });
   }
 
   function normalizePlannedTransitions(value) {
@@ -458,6 +478,21 @@ function createStartupRecoveryCoordinator(options = {}) {
           }, { outcome: 'completed' }));
         }
       }
+      if (result.outcome === 'completed') {
+        const intent = source.intentId
+          ? readRepository.getCriticalIntentById(source.intentId)
+          : null;
+        const intentIsClosedByThisWrite = !source.intentId
+          || (intent && ['committed', 'closed'].includes(intent.state));
+        const resolution = intentIsClosedByThisWrite
+          ? defaultHoldResolutionRequest(source, activeHold, 'committed', {
+            inspectionEvidenceHash: inspection.evidenceHash,
+            resultHash: result.resultHash,
+            outcome: result.outcome
+          })
+          : null;
+        if (resolution) planned.push(resolution);
+      }
       writeAtomic(null, planned);
       return result;
     }
@@ -494,6 +529,21 @@ function createStartupRecoveryCoordinator(options = {}) {
       ...immediateItems.map((item) => reserveTransition(item.transition, item.safePayload)),
       ...normalizePlannedTransitions(planTransitions({ phase: 'inspection-result', source, inspection }))
     ];
+    const inspectionClosesIntent = !source.intentId || immediateItems.some((item) => (
+      item.transition.entityKind === 'critical-intent' && item.transition.command === 'close'
+    ));
+    const resolvesAtInspection = ['not-committed', 'compensated'].includes(inspection.outcome)
+      ? inspectionClosesIntent
+      : inspection.outcome === 'committed' && !source.settlementKey && !source.intentId;
+    if (resolvesAtInspection) {
+      const resolution = defaultHoldResolutionRequest(
+        source,
+        activeHold,
+        inspection.outcome,
+        { inspectionEvidenceHash: inspection.evidenceHash, outcome: inspection.outcome }
+      );
+      if (resolution) immediate.push(resolution);
+    }
     writeAtomic(inspected.observation, immediate);
     if (inspection.outcome === 'committed' && source.settlementKey) {
       return recoverWithProvider(source, inspection, activeHold);
@@ -501,13 +551,19 @@ function createStartupRecoveryCoordinator(options = {}) {
     if (inspection.outcome === 'committed' && source.intentId) {
       const intent = readRepository.getCriticalIntentById(source.intentId);
       if (intent && intent.state === 'committed') {
-        writeAtomic(null, [reserveTransition({
+        const finalTransitions = [reserveTransition({
           entityKind: 'critical-intent',
           command: 'close',
           intentId: intent.intentId,
           expectedState: 'committed',
           result: { outcome: 'completed' }
-        }, { outcome: 'completed' })]);
+        }, { outcome: 'completed' })];
+        const resolution = defaultHoldResolutionRequest(source, activeHold, 'committed', {
+          inspectionEvidenceHash: inspection.evidenceHash,
+          outcome: inspection.outcome
+        });
+        if (resolution) finalTransitions.push(resolution);
+        writeAtomic(null, finalTransitions);
       }
     }
     return Object.freeze({ source, inspection, held: false });
