@@ -24,21 +24,28 @@ function checkedSafeNumber(value, code, message) {
   return Number(value);
 }
 
+function estimateMptFileSpoolBytes(sourceSize) {
+  if (!Number.isSafeInteger(sourceSize) || sourceSize < 0) {
+    throw admissionError('PREFUND_SPOOL_ESTIMATE_INVALID', 'spool source size必须是非负安全整数');
+  }
+  const estimate = BigInt(sourceSize) * BigInt(SPOOL_EXPANSION_NUMERATOR) /
+    BigInt(SPOOL_EXPANSION_DENOMINATOR) + BigInt(PER_FILE_SAFETY_BYTES);
+  return checkedSafeNumber(
+    estimate,
+    'PREFUND_SPOOL_ESTIMATE_OVERFLOW',
+    'spool磁盘估算超出安全整数范围'
+  );
+}
+
 function estimateMptSpoolBytes(sourceSizes) {
   if (!Array.isArray(sourceSizes) || sourceSizes.length < 1) {
     throw new TypeError('spool估算需要非空sourceSizes');
   }
-  let sourceBytes = 0n;
+  let spoolBytes = 0n;
   for (const size of sourceSizes) {
-    if (!Number.isSafeInteger(size) || size < 0) {
-      throw admissionError('PREFUND_SPOOL_ESTIMATE_INVALID', 'spool source size必须是非负安全整数');
-    }
-    sourceBytes += BigInt(size);
+    spoolBytes += BigInt(estimateMptFileSpoolBytes(size));
   }
-  const expanded = sourceBytes * BigInt(SPOOL_EXPANSION_NUMERATOR) /
-    BigInt(SPOOL_EXPANSION_DENOMINATOR);
-  const estimate = expanded + BigInt(FIXED_SAFETY_BYTES) +
-    BigInt(sourceSizes.length) * BigInt(PER_FILE_SAFETY_BYTES);
+  const estimate = spoolBytes + BigInt(FIXED_SAFETY_BYTES);
   return checkedSafeNumber(
     estimate,
     'PREFUND_SPOOL_ESTIMATE_OVERFLOW',
@@ -109,6 +116,7 @@ module.exports = {
   PER_FILE_SAFETY_BYTES,
   SPOOL_EXPANSION_NUMERATOR,
   assertMptSpoolDiskCapacity,
+  estimateMptFileSpoolBytes,
   estimateMptSpoolBytes,
   getAvailableDiskBytes
 };

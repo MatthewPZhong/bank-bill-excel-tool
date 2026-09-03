@@ -9,6 +9,7 @@ const {
 } = require('../../archive-center/source-snapshot');
 const { fsyncDirectory } = require('../../background-execution/durable-file');
 const { parseMptCandidates } = require('./parser-core');
+const { estimateMptFileSpoolBytes } = require('./spool-admission');
 const {
   MPT_SPOOL_FILE_NAMES,
   MPT_SPOOL_SCHEMA_VERSION,
@@ -190,10 +191,17 @@ function openPart(filePath) {
   return fs.openSync(filePath, 'wx', 0o600);
 }
 
-function writeNdjson(fd, hash, value) {
+function writeNdjson(fd, hash, value, budget) {
   const bytes = Buffer.from(`${JSON.stringify(value)}\n`, 'utf8');
+  if (budget && bytes.length > budget.remainingBytes) {
+    throw spoolError(
+      'PREFUND_SPOOL_DISK_BUDGET_EXCEEDED',
+      'MPT spool写入超过已批准磁盘预算'
+    );
+  }
   fs.writeFileSync(fd, bytes);
   hash.update(bytes);
+  if (budget) budget.remainingBytes -= bytes.length;
   return bytes.length;
 }
 
@@ -244,6 +252,9 @@ async function writeMptFileSpool(input, options = {}) {
   const signal = options.signal || null;
   const rows = { fd: null, hash: crypto.createHash('sha256'), byteSize: 0, count: 0 };
   const issues = { fd: null, hash: crypto.createHash('sha256'), byteSize: 0, count: 0 };
+  const budget = {
+    remainingBytes: estimateMptFileSpoolBytes(normalized.source.sourceSnapshot.sizeBytes)
+  };
   let manifestFd = null;
   let ownsFiles = false;
 
@@ -262,7 +273,7 @@ async function writeMptFileSpool(input, options = {}) {
       signal,
       async onCandidate(candidate) {
         const target = candidate.kind === 'valid' ? rows : issues;
-        target.byteSize += writeNdjson(target.fd, target.hash, candidate);
+        target.byteSize += writeNdjson(target.fd, target.hash, candidate, budget);
         target.count += 1;
         if (typeof options.onCandidateWritten === 'function') {
           await options.onCandidateWritten(candidate);

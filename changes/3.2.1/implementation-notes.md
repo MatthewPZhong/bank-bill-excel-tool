@@ -134,3 +134,38 @@
 - `PROBE / replacement exact CI`：替代 PR 创建后，新 exact smoke job 必须显示 `Run release checks`、Windows adapter、SQLite teardown 与 panel alignment 全部实际成功，且下游 build 成功；聚合绿灯、旧 exact head 或本地绿灯均不代偿。
 - `PROBE / remote closeout`：替代 PR 建立并核对 lineage 后，#222 应以证据说明关闭且保留远端分支；不得误合并两个候选。
 - `BLOCK / production`：application production 继续 disabled/legacy；本次 CI 证据收口不授权启用 production。
+
+## 2026-09-04 replacement exact CI 与 review 收口
+
+### Decisions
+
+- replacement PR 仍保持冻结的 Windows workflow 与 R3 release authority 不变；本轮只修复 exact CI 暴露的测试时序缺陷，以及 review 指出的三处来源证据、磁盘预算和单文件拆分发布守恒缺口。
+- position import dispatcher 的生产心跳实现、`750ms` 默认间隔和真实计数不变；测试在观察到两个不虚增心跳后才发 COMPLETE，并保留 `2s` 有界失败兜底，避免 hosted Windows 负载把固定 `45ms` 测试终止误判为产品失败。
+- MPT spool reader 必须从 `rawJson` 的精确 33 字段和 manifest header 重新调用权威 `normalizeMptRow`，再与持久 normalized row 全量比较；不能只允许攻击者同步改 amount/fingerprint/descriptor 后通过。
+- admission 的 `5×source + 1MiB/file` 预算拆为可复用的单文件额度；writer 在每次写入前按实际 UTF-8 NDJSON bytes 扣减，超过已批准额度立即 fail closed 并沿既有 cleanup 路径清除当前文件 spool。批次固定 `64MiB` 余量仍保留，未降低预检要求。
+- `split-single` 结果必须满足 `matchedCount === dataRowCount`；header-only workbook 不能用非零 matched count 绕过 Main publisher 的业务回读。merge action 的多输入/输出计数语义不变。
+
+### Deviations
+
+- replacement exact run `33779057290` 确认 `Run release checks` 实际执行，但 Windows 单元测试在约 `54ms` 的同步提交窗口内只观察到不足两个 `10ms` 测试心跳；该结果证明原固定延迟断言受 runner 调度影响，不是 production dispatcher 计数或提交语义失败。
+- review thread `PRRT_kwDORiHOzM6e_4rP` 证明原 spool reader 虽校验 normalized fingerprint，却未把 normalized 财务字段重新绑定到同 envelope 的 raw source；增加权威派生比较，不新增替代金额或币种口径。
+- review thread `PRRT_kwDORiHOzM6e_4rY` 证明 gzip 压缩文件可让以 compressed source size 估算的 NDJSON spool 超出已批准磁盘预算；writer 改为强制执行 admission 已批准的逐文件上限，不接受无界解压放大。
+- review thread `PRRT_kwDORiHOzM6e_4rf` 证明 `split-single` 可声明 `dataRowCount=0, matchedCount=1` 并通过原 contract；增加相等守恒，不改变 writer 生成格式或正式文件发布流程。
+
+### Evidence
+
+- replacement exact 失败集中审计 `/private/tmp/bbet-v321-pr223-exact-ci-audit-20260904-004702.json` 为 `9915` bytes / SHA-256 `77dbf0a5f9dc7c039bbee82f4790330943d49f7f4b0a728424b74c56cef04f56`；#223 当时仍为 OPEN/non-draft、base `92380fd84471b061b7a84842be7da001aa82db87`、head `9817e40817c45ad9e7fca8bd026c4b15cec0a519`、MERGEABLE，三条 review thread 未解。
+- exact smoke job `100727939644` 完整日志 `/private/tmp/bbet-v321-pr223-exact-smoke-failure-33779057290-100727939644-20260904-004719.log` 为 `4258736` bytes / SHA-256 `24ffb8d4d0903731ce80ac7fbcf85fb9afed15a15a77e2af6e8dbc19a74b467c`；唯一失败为 `dispatcher 在 worker 同步提交期间发送不虚增计数的进度心跳`，后续关键步骤与 build 按门禁跳过，不能由旧 CI 或本地绿灯代偿。
+- official Node.js `22.18.0` 定向回归：心跳新时序 `1/1 PASS`；raw/normalized 联动篡改、gzip spool budget、per-file estimator 与 split-single 守恒 `20/20 PASS`。
+- official Node.js `22.18.0` 完整相关文件组合覆盖 position preflight、MPT E05-A/B/C 与 toolbox generation，共 `161/161 PASS`；包含真实 parser worker、single writer、receipt/hold/recovery、逐文件 cleanup、Main publisher、native generation worker 与 shutdown 生命周期。
+- official Node.js `22.18.0` exact-lock 完整 unit 为 `6189/6192 PASS`、`0 FAIL`、`3 Windows-only SKIP`；日志 `/private/tmp/bbet-v321-release-gated.wcheyK/worktree/logs/unit-tests/unit-20260904-005925.log`。
+- official Node.js `22.18.0` exact-lock 完整 integration 为 `51 scripts / 2455/2455 PASS`；其中 `toolbox-large-file-stream=50/50`、`toolbox-large-split-multi-sheet=31/31`、`pre-fund-reconciliation-side-db-parity=69/69`。runner 的耗时表机械改写已用 `apply_patch` 恢复，`rules/integration-test-policy.md` 精确回到 SHA-256 `65716ba574d1139d72a1ca96f45ebaa4f85efa1f8ebf3f3bc81e8f0ce1edb74e`。
+- `npm run smoke`、`npm run lint`、本轮 `8` 个 changed JavaScript 文件的 Node.js `22.18.0` `node --check` 与定向 ESLint、`git diff --check` 均通过。
+- `/check-vars` 只读清单命中 `PreFundReconciliationService` / MPT parser 风险敏感资金范围，以及 position import 进度真实性和 toolbox 行级输出完整性。复核口径为：raw source 派生保持现有金额/币种/fingerprint 单一真值；超预算只 fail closed 且不留 spool；每条 split-single 数据行保持单一输出去向；production 继续 false/legacy。未执行本地 `npm run check:vars` 或 `npm run scan:vars`。
+
+### Remaining Unknowns
+
+- `PROBE / clean HEAD`：changed-JS 语法/ESLint、完整 unit/integration/smoke/lint 与策略文件恢复均已完成；仍需在提交后由 clean HEAD 执行 packaged-inputs，避免以 dirty 打包输入冒充最终证据。
+- `PROBE / new exact CI`：完成本地证据和普通 non-force push 后，新 exact head 必须真实执行 release-check 与后续三个 Windows contract 步骤，且 smoke/build 全部成功；本次失败永久保留，不作代偿。
+- `BLOCK / review`：三条线程只能在代码、完整回归和新 exact head 建立后以逐项证据回复并 resolve，随后重新查询确认无阻断 review。
+- `BLOCK / production`：application production 继续 disabled/legacy；本轮不授权启用 production，也不改变金额、币种、业务主键或 Workbook 内容。
