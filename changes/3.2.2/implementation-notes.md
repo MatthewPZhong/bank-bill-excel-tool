@@ -38,4 +38,45 @@
 - `BLOCK / production gate`：本节点不得启用 production。
 - `PROBE / 最终发布审计`：`npm ci` 报告现有依赖树有 `2 moderate / 9 high` advisory；本节点未改变依赖图且不自动执行破坏性 `npm audit fix`，需在 v3.2.5 最终发布审计中独立评估。
 
-按用户明确要求，不运行 `release-check`、`check-vars` 或 `scan:vars`；这些项目不得记录为 PASS。
+按用户明确要求，不运行本地 `release-check`、`npm run check:vars` 或 `npm run scan:vars`；提 PR 前仅按 `check-vars` skill 对真实 diff 做只读扫描，不把该扫描记作 npm 脚本 PASS。
+
+## 2026-09-04 正式发布准备
+
+### Decisions
+
+- 严格按 v3.2.0 → v3.2.5 顺序发布；v3.2.1 的最终 main、annotated tag、Release workflow、四项资产与 production disabled/legacy 终审全部闭合后，才从冻结 v3.2.2 候选继续。
+- 在新 isolated worktree 从 `a5af61ea186e3a13a34bf6d70491de673dfc6915` 发起 natural merge，把正式发布的 `main@c547097c8829c1c39437fe9047b5accbf5f1e388` 作为第二父纳入真实祖先链；不 rebase、cherry-pick 或改写既有提交。
+- 三份长发布文档同时保留 v3.2.2 capability、v3.2.1 已正式发布事实和 Issue #220 的发布后补测边界；不把 capability 或人工签字写成 production enabled。
+- Windows 专用真实探针保留候选的 30 秒有界 CIM 预热，同时采用 v3.2.1 已验证的外层 `adapter` 作用域，确保 launch 失败后的 `finally` cleanup 不引用块内变量；产品 adapter 的默认 15 秒 fail-closed 上限不变。
+
+### Assumptions
+
+- 冻结 R3.2.2 snapshot 与 #184～#191 仍是候选功能基线的权威证据；本次传播不改 snapshot authority，但其旧 CI 不代偿新 exact head 的验证。
+- `c547097c` 与 `a5af61ea` 的远端 refs 在推送、建 PR、合并和 tag 前保持不变；每个有副作用节点前重新读取远端事实。
+
+### Deviations
+
+- 原 closeout 文档记录的“人工门禁未通过、不得合并 main/tag”已被发布负责人后续明确验收与串行发布授权取代；自动测试仍不得代签人工结论，Windows 10/11、SmartScreen、离线覆盖和 `production/latest` canary 继续作为发布后补测。
+- v3.2.1 最终发布不再等同原候选 `ea60a5c7`：PR #223 后的 main exact CI 暴露 MPT 共享 spool 父目录 cleanup 竞态，safe forward-fix PR #224 将最终 main 收口为 `c547097c`。本版必须传播该最终节点，不能沿用旧 `f6166c66` ancestry 叙述作为当前事实。
+- natural merge 产生 4 个内容冲突：`CHANGELOG.md`、`docs/USER_GUIDE.md`、`docs/VERSION_FEATURE_HISTORY.md` 与 Windows startup adapter 测试。冲突均逐项组合；没有用整文件 ours/theirs 覆盖，也没有产品代码内容冲突。
+
+### Evidence
+
+- 远端冻结审计 `/private/tmp/bbet-v322-preflight-audit-20260904-064828.json` 为 `5284` bytes / SHA-256 `e53881609ecebca6d2295ca0e322d831968cf640a1b0433781209244f16964fd`：`main=c547097c`、candidate ref 精确指向 `a5af61ea`、package version `3.2.2`、共同祖先 `ea60a5c7`，且无开放 PR、`v3.2.2` tag 或 Release。
+- natural merge commit `33f27a0b23c55759a12a44a46a1150350c449aaa` 的双亲精确为 `[a5af61ea186e3a13a34bf6d70491de673dfc6915, c547097c8829c1c39437fe9047b5accbf5f1e388]`；合并后的 `CHANGELOG.md / VERSION_FEATURE_HISTORY.md / USER_GUIDE.md` 行数分别为 `3128 / 2615 / 4069`，无冲突 marker 或截断提示。
+- v3.2.1 MPT/恢复/Toolbox 修复相关源文件与 Windows adapter 测试在 merge commit 中逐字节等于 `c547097c` 对应版本；候选的 FundRecon、Duplicate、BankBU 功能树未因冲突处理改写。
+- 使用 `/usr/local/bin/node` 的 official Node `v22.18.0` 与 exact lock 完成干净 `npm ci`；安装 `492` 个 package，依赖审计维持既有 `2 moderate / 9 high`，未执行 `npm audit fix`。此前误取 Desktop bundled Node 24 的准备尝试已中止，不作为任何验证证据。
+- 最终聚焦组合（v3.2.0～v3.2.2 metadata、R3.2.2 authority、Windows startup adapter、v3.2.1 MPT/恢复/Toolbox 交集）为 `205 PASS / 0 FAIL / 3 Windows-only SKIP`；日志 `/private/tmp/bbet-v322-focused-final-20260904-070105.log` 为 `51388` bytes / SHA-256 `7c37bd494354244e0e6e52f41810e71339c74332688b3385d6ff0643c7038aaa`。
+- 完整 unit 为 `6349/6352 PASS`、`0 FAIL`、`3 Windows-only SKIP`；官方日志 `logs/unit-tests/unit-20260904-070210.log`，wrapper stdout `/private/tmp/bbet-v322-unit-stdout-20260904-070210.log` 为 `1648588` bytes / SHA-256 `ed1897ffac41fada0fe71cd0cc664e01b1fcd148f296dbe2e2ab2d6ebc434a08`。
+- 完整 integration 为 `53 scripts / 2488/2488 PASS`；stdout `/private/tmp/bbet-v322-integration-stdout-20260904-070332.log` 为 `10342` bytes / SHA-256 `04d7e2cd5f2596b9e636e7c936ce641d053138951590401a1c866679915eb2c7`。runner 的机械策略文档改写已用 `apply_patch` 恢复，`rules/integration-test-policy.md` SHA-256 仍为 `65716ba574d1139d72a1ca96f45ebaa4f85efa1f8ebf3f3bc81e8f0ce1edb74e` 且相对 HEAD 无 diff。
+- `npm run smoke`、`npm run lint`、19 个候选变更 JS 的 `node --check` 与显式 ESLint、`git diff --check`、package/release-evidence JSON、三版冻结 Spec/TechDoc 字节、冲突/截断 marker、版本与双亲祖先检查均 PASS。smoke 日志 `/private/tmp/bbet-v322-smoke-20260904-070946.log` 为 `10328` bytes / SHA-256 `98d8559eaa142dae4a47ae094230fbd1c8305ee03b94bbaa07c011f3e264ab38`。
+- R3.2.2 只读 validator 输出 `10` actions、`productionEnabledCount=0`、`commonRuntimeActionCount=6`、BankBU common-runtime registration `ABSENT_FAIL_CLOSED`。当前 policy 模块直接回读进一步确认全部 10 项均为 `enabled=false / effectiveMode=legacy / effectiveWorkerCount=0`；审计 `/private/tmp/bbet-v322-production-policy-readback-20260904-071438.json` 为 `4511` bytes / SHA-256 `4fc33ab601d859f214595db7f657952e1dbc4172eb1e6807024d526684358870`。
+- `blindspot-pass` 与 `reconciliation-blindspot-pass` 沿真实入口、状态、receipt/inspector、部分提交、并发 cleanup、守恒和产物发布链复核，未发现改变方案的存活盲区或新增资金红线；审计 `/private/tmp/bbet-v322-prepr-blindspot-reconciliation-20260904-071640.json` 为 `2405` bytes / SHA-256 `8fe9f1e1af70b32fb2564a569d8fc8cc97a85a095302bd02c06362a8c9a17eca`。冻结 R3 snapshot 的历史人工字段保持原事实，不回写；当前发布授权来自发布负责人后续明确验收，Issue #220 项目仍是发布后补测。
+- `check-vars` skill 以 `main@c547097c` 为基准只读扫描真实 PR `src` diff（65 个 JS），未运行 `npm run check:vars` 或 `scan:vars`。定义文件宽口径命中 `Critical 15 / Important-skeleton 4 / Runtime-state 11 / Risk-sensitive 13 / Minor 0`；直接语义命中集中在 Duplicate/FundRecon/BankBU 的服务、侧库、守恒与状态接线，逐项由上述 focused/unit/integration/smoke、冻结 R3 authority 和人工资金验收覆盖。审计 `/private/tmp/bbet-v322-check-vars-readonly-v2-20260904-071556.json` 为 `45667` bytes / SHA-256 `217eb6465c54af89b4bf723ff846514f74d7edb9567a6139806936f9671259ec`。
+
+### Remaining Unknowns
+
+- `CLOSED / local`：本次双亲组合后的 metadata、R3 authority、资金/恢复、Windows 合同、完整 unit/integration/smoke/lint 与静态检查均已在 official Node 22.18 exact-lock 上通过；提交发布准备证据后仍须在 clean HEAD 运行 packaged-inputs。
+- `PROBE / exact CI`：普通非 force push 后必须由新 exact head 的 `smoke-test`、`build` 和关键步骤全部实际成功，并闭合 review threads；旧 CI 不代偿。
+- `PROBE / tag 后`：最终 Windows Release 四项资产、公开下载、摘要与更新元数据只能在 immutable annotated tag workflow 产生后回读。
+- `BLOCK / production`：application production 继续 disabled/legacy；本版不改变金额、币种、主键、Workbook、正式文件发布或恢复终态红线。

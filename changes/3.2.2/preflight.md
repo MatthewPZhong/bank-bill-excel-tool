@@ -24,3 +24,20 @@
 3. 同步三份发布文档并保留三代历史，不把 dormant capability 表述为 production enabled。
 4. 做祖先、字节、JSON、diff、文档交叉与适当完整验证；保留人工门禁。
 5. 对 #210 Windows 真实进程探针失败做测试夹具级修复；保持生产 15 秒 fail-closed 上限，并以精确新 head CI 重新闭合 Windows 证据。
+
+## 2026-09-04 Release Preflight Addendum
+
+- Goal：在不改变金额、币种、业务主键、Workbook、事务、幂等、恢复或 production strategy 的前提下，把冻结 v3.2.2 候选自然传播到已正式发布 v3.2.1 的最终 `main` 之上，并通过受保护 PR、annotated tag 与 Windows Release workflow 发布技术 stable Release。
+- Context：v3.2.1 经 PR #223 与 safe forward-fix PR #224 完成正式发布；最终 `main` 为 `c547097c8829c1c39437fe9047b5accbf5f1e388`，annotated `v3.2.1` 和四项 Release 资产均已独立回读。冻结 v3.2.2 候选仍为 `a5af61ea186e3a13a34bf6d70491de673dfc6915`，两者共同祖先是冻结 v3.2.1 候选 `ea60a5c7bdaaeeb5117d1c20be1f3df2ed4b0e38`，不能用快进、rebase 或旧 CI 代替自然传播。
+- Authorization：发布负责人 `MatthewPZhong` 已批准 v3.2.0 → v3.2.5 严格串行发布，并确认本次资金、恢复、真实业务样本及稳定窗口人工验收通过；Windows 最终资产出现后才能执行的项目继续按 Issue #220 发布后补测。
+- Constraints：仅使用 isolated worktree；不 force、rebase、cherry-pick、删除远端分支、admin/auto merge、rerun 或 dispatch。本地不运行 `release-check`、`check:vars` 或 `scan:vars`；application production 始终 disabled/legacy。
+- Done when：发布准备 PR 的 exact `smoke-test`/`build` 与关键步骤实际成功且 review 无阻断，以普通双亲 merge 合入未漂移的 `main`；合并后 main exact CI 同样成功；唯一 annotated `v3.2.2` 精确指向最终 merge commit；Release workflow 与四项资产独立回读成功；随后才能开始 v3.2.3。
+
+### 2026-09-04 Unknowns Register
+
+| 未知 | 处理 | 当前决定 |
+| --- | --- | --- |
+| v3.2.1 最终修复与 v3.2.2 候选是否存在语义冲突 | PROBE | natural merge 暴露 4 个内容冲突；产品代码无内容冲突，三份长文档按版本顺序组合，Windows 探针保留外层 adapter cleanup 作用域。定向与完整验证仍必须重新执行。 |
+| 冻结 R3.2.2 evidence 能否由旧分支绿灯代偿本次传播 | BLOCK | 不能；冻结 evidence 只证明候选功能基线，新双亲 merge、PR exact CI 与 main exact CI 均须重新闭合。 |
+| 人工验收是否意味着可以启用 production | BLOCK | 不能；人工签字只授权技术 Release，所有 effective production strategy、feature flag 与 worker 继续 disabled/legacy。 |
+| v3.2.2 最终 Windows 资产是否已可人工补测 | PROBE | tag/Release 前不存在；仅在四资产生成并完成摘要回读后，按 Issue #220 进入发布后补测。 |

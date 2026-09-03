@@ -1,8 +1,8 @@
 # Changelog
 
-## 3.2.2 - 2026-08-31（版本分支技术收口，未发布）
+## 3.2.2 - 2026-09-04（正式发布候选）
 
-> v3.2.2 把资金对账、重复入金匹配与月度银行对账单 BU 回填校验的重状态和长任务迁入受资源治理的后台执行基础设施；业务顺序、金额/币种、Workbook、幂等和既有用户操作合同保持不变。代码合并时 production enablement 仍为关闭，本条不表示已经发布到 `main`、创建 tag 或启用生产策略。
+> v3.2.2 把资金对账、重复入金匹配与月度银行对账单 BU 回填校验的重状态和长任务迁入受资源治理的后台执行基础设施；业务顺序、金额/币种、Workbook、幂等和既有用户操作合同保持不变。发布负责人已授权本版在 v3.2.1 完成正式技术发布后，经受保护 PR、唯一 annotated tag 与 Windows Release workflow 串行发布；application production enablement 始终保持关闭。
 
 ### FundRecon / Duplicate / BankBU 后台执行
 
@@ -15,11 +15,11 @@
 
 - **版本与规范**：`package.json`、`package-lock.json` 收口为 `3.2.2`；顶层 Spec/TechDoc 与冻结基线逐字节一致。
 - **生产仍关闭**：本版只完成 capability 与审计证据，不启用新的 effective production strategy；现有用户路径继续走既有安全策略。
-- **人工门禁未代偿**：Windows packaged/WAL/退出边界、真实资金样本、金额/币种/匹配结果及恢复处置仍需 release owner 人工复核。自动测试不能把这些项目声明为 PASS。
-- **未执行正式发布动作**：本收口不合并 `main`、不创建 tag、不发布或启用 production；`release-check`、`check-vars`、`scan:vars` 按用户要求跳过，不能记录为 PASS。
+- **人工验收与发布后边界**：发布负责人 `MatthewPZhong` 于 2026-09-04 明确确认资金、恢复、真实业务样本及稳定窗口人工验收通过；该签字只覆盖本次发布。最终 v3.2.2 资产产生后才能完成的 Windows 10/11 Setup/portable、SmartScreen、离线覆盖安装与 `production/latest` canary 按 Issue #220 在发布后逐项补做。
+- **发布授权与生产边界**：Issue #220 授权本版经受保护 PR、annotated tag 与 Windows Release workflow 发布技术 stable Release；production strategy、feature flag 与 effective worker 继续 disabled/legacy。PR 与 tag workflow 必须分别通过 `smoke-test`、`build` 和内置 `release-check`；本地 `scan:vars` / `check:vars` 未运行且不得记录为 PASS。
 
 
-## 3.2.1 - 2026-09-03（正式发布候选）
+## 3.2.1 - 2026-09-03（正式发布）
 
 > v3.2.1 在 v3.2.0 公共后台执行底座上完成 Toolbox 受管生成 Worker/密封 route DB，以及 PreFund MPT parser spool、durable receipt、单 Writer和受限 parser pool capability；文件顺序、金额/币种、事务、Workbook、幂等和正式发布合同保持不变。发布负责人已授权本版在 v3.2.0 完成正式技术发布后，经受保护 PR、唯一 annotated tag 与 Windows Release workflow 串行发布；application production enablement 始终保持关闭。
 
@@ -36,6 +36,12 @@
 - **生产仍关闭**：E04-C/E05-C 的拒绝或未满足 gate 保持有效，capability 不等于生产切路，也不新增用户开关。
 - **人工验收与发布后边界**：发布负责人 `MatthewPZhong` 于 2026-09-03 明确确认资金、恢复、真实业务样本及稳定窗口人工验收通过；该签字只覆盖本次发布。最终 v3.2.1 资产产生后才能完成的 Windows 10/11 Setup/portable、SmartScreen、离线覆盖安装与 `production/latest` canary 按 Issue #220 在发布后逐项补做。
 - **发布授权与生产边界**：Issue #220 授权本版经受保护 PR、annotated tag 与 Windows Release workflow 发布技术 stable Release；production strategy、feature flag 与 effective worker 继续 disabled/legacy。PR 与 tag workflow 必须分别通过 `smoke-test`、`build` 和内置 `release-check`；本地 `scan:vars` / `check:vars` 未运行且不得记录为 PASS。
+
+### 正式发布结论
+
+- **受保护合并与不可变 tag**：PR #223 与 safe forward-fix PR #224 均以普通 merge 合入；最终 `main` 为 `c547097c8829c1c39437fe9047b5accbf5f1e388`。annotated tag `v3.2.1`（tag object `1e3cee87d874d349725a6e39acdde3e51b8e503a`）peeled 后精确指向该提交。
+- **Release 与资产回读**：Windows Release workflow run `33807861470` 全部步骤成功，并创建公开、非 draft、非 prerelease 的 latest Release。Setup、portable、blockmap 与 `latest.yml` 四项资产已完整下载；大小、GitHub SHA-256、Setup SHA-512 及更新元数据全部一致。
+- **生产与补测边界**：application production 仍为 disabled/legacy；技术 Release 不代替 Issue #220 中 Windows 10/11、SmartScreen、离线覆盖和 `production/latest` canary 的发布后人工补测。
 
 ## 3.2.0 - 2026-09-03（正式发布）
 
