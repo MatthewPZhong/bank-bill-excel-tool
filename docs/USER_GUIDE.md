@@ -52,9 +52,9 @@
 
 > **v3.2.2 FundRecon / Duplicate / BankBU 后台执行基础**：资金对账、重复入金匹配和月度银行对账单 BU 回填校验已具备受资源治理的 Service/Worker、operation receipt、inspector 与 Recovery Hold capability。业务顺序、金额/币种、Excel 与既有用户操作保持不变，production enablement 仍关闭；Windows packaged/WAL/app quit 和真实资金样本仍需人工复核，遇到恢复要求不得自行重复执行。
 
-> **v3.2.1 Toolbox / PreFund 受控后台执行**：Toolbox 可用受管 one-shot Worker 准备拆分输出，正式文件仍由单一 Writer/FIFO Publisher 收口，第二 Writer gate 已明确拒绝；PreFund MPT 可先生成任务私有 spool，再由单一有序 DB Writer 按文件顺序处理，普通 import 具备受限 parser pool capability，repair 仍为 exact-one。金额、币种、文件顺序和 Excel/Workbook 结果不变，production enablement 仍关闭；Windows packaged/退出、真实资金样本和恢复处置仍需人工复核。
+> **v3.2.1 Toolbox / PreFund 受控后台执行**：Toolbox 可用受管 one-shot Worker 准备拆分输出，正式文件仍由单一 Writer/FIFO Publisher 收口，第二 Writer gate 已明确拒绝；PreFund MPT 可先生成任务私有 spool，再由单一有序 DB Writer 按文件顺序处理，普通 import 具备受限 parser pool capability，repair 仍为 exact-one。金额、币种、文件顺序和 Excel/Workbook 结果不变，production enablement 仍关闭。Issue #220 已授权正式技术发布，发布负责人确认本次资金、恢复、真实样本及稳定窗口人工验收通过；最终 Windows Release 资产、SmartScreen、离线覆盖与在线更新仍按发布后计划逐项复核。
 
-> **v3.2.0 公共后台执行底座与 VCC OP Pipeline**：系统已具备受资源治理的 Supervisor、冻结消息/context、operation receipt、inspector、Recovery Hold 与 artifact authority capability；VCC 财务 OP 多文件读取可并行准备 spool，但月份归约、金额/币种处理、单一 writer、事务、Excel/Workbook 结果和正式文件发布仍按既有顺序收口。production enablement 仍关闭；Windows packaged/退出/fsync、真实 VCC OP 样本和资金/恢复处置仍需人工复核，遇到不确定结果不得自行重复执行。
+> **v3.2.0 公共后台执行底座与 VCC OP Pipeline**：系统已具备受资源治理的 Supervisor、冻结消息/context、operation receipt、inspector、Recovery Hold 与 artifact authority capability；VCC 财务 OP 多文件读取可并行准备 spool，但月份归约、金额/币种处理、单一 writer、事务、Excel/Workbook 结果和正式文件发布仍按既有顺序收口。v3.2.0 已通过受保护 PR、annotated tag 与 Windows Release workflow 完成正式技术发布，发布负责人确认资金、恢复、真实样本及稳定窗口人工验收通过，四项公开资产及更新元数据已独立回读一致；production enablement 继续关闭，Issue #220 中 Windows 10/11、SmartScreen、离线覆盖和在线更新 canary 仍按发布后计划逐项复核，遇到不确定结果不得自行重复执行。
 
 > **v3.1.14 VCC 财务 OP 大批量导入修复**：导入 VCC 充值清退、费用换汇、通道或移除归档 Pending 明细时，工作簿读取阶段继续显示“正在导入”；该类明细全部文件读取并校验完成后，状态框会切换为“正在校验并写入”，不再停留在最后一条读取行数。充值清退和 Pending 同批时会分别显示自己的阶段。点击取消后，状态框保持“正在取消导入并回滚本次未完成数据…”，不会被晚到进度覆盖。金额、币种、幂等、异常和最终结果口径均未改变。v3.1.14 已于 2026-08-21 通过 Windows Release workflow 完成正式技术发布，Setup、portable、blockmap 与 `latest.yml` 四项公开资产已独立回读；Windows packaged VCC、Windows 10/11 Setup/portable、SmartScreen、`v3.1.13 -> v3.1.14` 离线覆盖及 `production/latest` canary 仍为 `MANUAL / NOT RUN`，技术 Release 完成不是人工 PASS。
 

@@ -32,7 +32,7 @@ v3.2.2 完成 FundRecon、Duplicate 与 BankBU 的后台执行 capability 和恢
 - `release-check`、`check-vars`、`scan:vars` 按用户要求跳过，不能声明为 PASS。
 
 
-## v3.2.1（2026-08-31，版本分支技术收口，未发布）
+## v3.2.1（2026-09-03，正式发布候选）
 
 v3.2.1 完成 Toolbox 单 Writer后台生成与 PreFund MPT parser spool、durable receipt、单 Writer和受限 parser pool capability；production enablement 保持关闭，既有文件顺序、金额、币种、Workbook、事务、幂等和用户操作合同不变。
 
@@ -46,15 +46,15 @@ v3.2.1 完成 Toolbox 单 Writer后台生成与 PreFund MPT parser spool、durab
 
 - dispatch/cleanup ownership、critical intent、receipt 和恢复判定进入冻结后台执行合同；unknown/partial/committed-result-lost 不会自动重跑或伪装成普通失败。
 - E04-C 第二 Writer gate 明确 rejected；Toolbox 写入拓扑和正式 Publisher 没有被并行化。
-- package 元数据更新为 `3.2.1`，顶层 Spec/TechDoc 同步自冻结基线，并包含最终 v3.2.0 收口祖先。
+- package 元数据更新为 `3.2.1`，顶层 Spec/TechDoc 同步自冻结基线，并通过 natural merge 包含正式发布的 v3.2.0 最终 `main` 合并提交。
 
 ### 兼容与人工边界
 
 - E04-C/E05-C 未满足 gate 继续阻止 production 切路，legacy seam 保留；本版不新增用户开关。
-- Windows packaged/退出、PreFund 真实资金样本和金额/币种/文件顺序/恢复人工复核仍未由自动测试代偿；本节点未合并 `main`、未创建 tag、未发布 production。
-- `release-check`、`check-vars`、`scan:vars` 按用户要求跳过，不能声明为 PASS。
+- 发布负责人 `MatthewPZhong` 于 2026-09-03 明确确认资金、恢复、真实业务样本及稳定窗口人工验收通过；该签字只覆盖本次发布。最终 v3.2.1 资产产生后才能完成的 Windows 10/11 Setup/portable、SmartScreen、离线覆盖安装和 `production/latest` canary 依据 Issue #220 在发布后逐项补做。
+- Issue #220 授权本版通过受保护 PR、唯一 annotated tag 与 Windows Release workflow 发布技术 stable Release；production strategy、feature flag 和 effective worker 继续 disabled/legacy。workflow 内置 `release-check` 获授权，本地 `scan:vars` / `check:vars` 未运行且不得声明为 PASS。
 
-## v3.2.0（2026-08-31，版本分支技术收口，未发布）
+## v3.2.0（2026-09-03，正式发布）
 
 v3.2.0 完成公共后台执行 Supervisor、协议/恢复控制底座与 VCC OP 多文件 parser pipeline；production enablement 保持关闭，既有金额、币种、月份、Workbook、事务、幂等和用户操作合同不变。
 
@@ -73,8 +73,9 @@ v3.2.0 完成公共后台执行 Supervisor、协议/恢复控制底座与 VCC OP
 ### 兼容与人工边界
 
 - capability 与 effective production strategy 分离，legacy seam 保留，生产仍关闭；本版不新增用户开关。
-- Windows packaged/退出/fsync、VCC OP 真实样本与资金/恢复人工复核仍未由自动测试代偿；本节点未合并 `main`、未创建 tag、未发布 production。
-- `release-check`、`check-vars`、`scan:vars` 按用户要求跳过，不能声明为 PASS。
+- 发布负责人 `MatthewPZhong` 于 2026-09-03 明确确认资金、恢复、真实业务样本及稳定窗口人工验收通过；该签字只覆盖本次验收。最终发布资产的 Windows 10/11 Setup/portable、SmartScreen、离线覆盖安装和 `production/latest` canary 依据 Issue #220 在发布后逐项补做。
+- Issue #220 已授权本版通过受保护 PR、唯一 annotated tag 与 Windows Release workflow 发布技术 stable Release；production strategy、feature flag 和 effective worker 继续 disabled/legacy。PR/tag workflow 的自动检查不得替代人工结论；本地 `scan:vars` / `check:vars` 未运行且不得声明为 PASS。
+- PR #221 已以 merge commit `92380fd84471b061b7a84842be7da001aa82db87` 合入 `main`；annotated `v3.2.0` 精确指向该提交。Release run `33731833335` 的 attempt 2 全部成功，四项公开资产的大小、SHA-256 与 `latest.yml` 中 Setup SHA-512 已独立回读一致；application production 仍为 disabled/legacy。
 
 ## v3.1.14（2026-08-21）
 

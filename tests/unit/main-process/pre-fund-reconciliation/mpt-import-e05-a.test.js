@@ -8,6 +8,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { Worker } = require('node:worker_threads');
+const zlib = require('node:zlib');
 
 const {
   sourceSnapshotFromStat
@@ -21,7 +22,8 @@ const {
 const {
   INBOUND_FIELDS,
   MPT_DELIMITER,
-  OUTBOUND_FIELDS
+  OUTBOUND_FIELDS,
+  buildGatewayFingerprint
 } = require('../../../../src/main-process/pre-fund-reconciliation/mpt-schema');
 const {
   INVALID_ROW_DISPOSITIONS,
@@ -109,6 +111,17 @@ function writeInboundFile(fileName, rows, declaredCount = rows.length) {
     `${[header, ...rows].map((row) => row.join(MPT_DELIMITER)).join('\n')}\n`,
     'utf8'
   );
+  return filePath;
+}
+
+function writeInboundGzip(fileName, rows, declaredCount = rows.length) {
+  const filePath = path.join(tempRoot, fileName);
+  const header = ['20260708', 'MPT_INBOUND_20260708', String(declaredCount)];
+  const bytes = Buffer.from(
+    `${[header, ...rows].map((row) => row.join(MPT_DELIMITER)).join('\n')}\n`,
+    'utf8'
+  );
+  fs.writeFileSync(filePath, zlib.gzipSync(bytes));
   return filePath;
 }
 
@@ -629,6 +642,37 @@ test('Reader tamper matrix：manifest/path/symlink/hash/count/header/source全�
       (error) => error.code === 'PREFUND_SPOOL_ROW_SCHEMA_INVALID'
     );
   });
+
+  await t.test('normalized金额与fingerprint联动篡改仍被rawJson来源证据拒绝', async () => {
+    const item = await fixture('209');
+    const envelope = JSON.parse(fs.readFileSync(item.paths.rowsReady, 'utf8'));
+    envelope.row.amount = '999999';
+    envelope.row.fingerprint = buildGatewayFingerprint(envelope.row);
+    const bytes = Buffer.from(`${JSON.stringify(envelope)}\n`, 'utf8');
+    fs.writeFileSync(item.paths.rowsReady, bytes);
+    rewriteManifest(item.input, (manifest) => {
+      manifest.files.rows.byteSize = bytes.length;
+      manifest.files.rows.sha256 = crypto.createHash('sha256').update(bytes).digest('hex');
+    });
+    let callbacks = 0;
+    await assert.rejects(
+      () => readAndValidateMptFileSpool(item.input, { onRow() { callbacks += 1; } }),
+      (error) => error.code === 'PREFUND_SPOOL_ROW_SCHEMA_INVALID'
+    );
+    assert.equal(callbacks, 0);
+  });
+});
+
+test('gzip解压后的spool超过已批准单文件预算时fail closed并清理', async () => {
+  const rows = Array.from({ length: 2500 }, () => inboundRow());
+  const filePath = writeInboundGzip('MPT_INBOUND_GATEWAY_20260708_210.gz', rows);
+  const input = spoolInput(filePath, { jobId: 'job-gzip-spool-budget' });
+  await assert.rejects(
+    () => writeMptFileSpool(input),
+    (error) => error.code === 'PREFUND_SPOOL_DISK_BUDGET_EXCEEDED' &&
+      !/prefund-e05-a|private|tmp/i.test(error.message)
+  );
+  assert.equal(fs.existsSync(mptSpoolPaths(input).fileDir), false);
 });
 
 test('cleanup只移除当前file已知spool文件，不跨job或跨file', async () => {
