@@ -107,3 +107,30 @@
 - `PROBE / exact CI`：普通非 force push 后必须由新 exact head 的 `smoke-test` 与 `build` 全部成功，首次失败永不视为被重复或本地成功代偿。
 - `BLOCK / review`：review thread 在代码、回归证据和新 exact head 建立前不得回复或 resolve。
 - `BLOCK / production`：application production 继续 disabled/legacy；本轮不改变资金主键、金额、币种、Workbook 输出或恢复终态红线。
+
+## 2026-09-04 正式发布 exact CI 证据收口
+
+### Decisions
+
+- 不接受 `smoke-test` job 的聚合 SUCCESS 代替关键步骤证据；合并前必须确认新 exact head 的 `Run release checks` 步骤实际为 `COMPLETED/SUCCESS`。
+- 保持冻结的 `.github/workflows/build-windows.yml`、R3 authority snapshot 与 validator 原样不动。替代发布准备分支使用 `codex/release-v3.2.1-prep-20260904`，不进入历史保留前缀 `codex/v3.2.1-*`，从而由既有默认门禁真实执行 release-check。
+- 替代分支从 PR #222 的已验证 exact head `d1f2677571c04166354ad7b0c8b5d0fcb548447f` 直接派生，只增加本证据记录；#222 不再作为可合并候选，待替代 PR 建立并核对同一 lineage 后再作远端收口。
+
+### Deviations
+
+- 第二轮 exact CI run `33758293767` 的 smoke job `100657983879` 与 build 均显示 SUCCESS，但步骤级 API 证明 `Run release checks` 为 `COMPLETED/SKIPPED`。历史同仓库 `codex/v3.2.1-*` 前缀规则把新的正式发布准备分支误归类为中间分支，旧绿灯不能用于合并。
+- 曾以未提交试改验证为 #222 增加精确 workflow allowlist；R3 release-evidence 定向回归立即拒绝 `unauthorizedFinalGuard` 与 `releaseCheckCondition` 漂移。该试改已用 `apply_patch` 完整撤销，不进入任何 commit 或远端 ref。
+- 改用替代分支/PR 是为同时满足“真实执行 release-check”和“冻结 release authority 不变”；不修改产品代码、生产 adapter、资金/恢复合同、版本元数据或 application production 状态。
+
+### Evidence
+
+- 合并前集中 GraphQL 审计 `/private/tmp/bbet-v321-pr-exact-ci-audit-20260903-210157.json` 为 `5906` bytes / SHA-256 `72e85503a6f18ea4a7488685fdd2a9709f4df86971a43ca7601359344426f32b`；PR #222 当时仍为 OPEN/non-draft、base `92380fd84471b061b7a84842be7da001aa82db87`、head `d1f2677571c04166354ad7b0c8b5d0fcb548447f`、MERGEABLE、无未解阻断 review。
+- `GET /actions/jobs/100657983879` 回读确认 exact head 与 run 精确，但 `Run release checks` 步骤结论为 `skipped`；后续 Windows adapter、SQLite teardown、panel alignment 与 build 成功均不代偿该缺口。
+- 未提交 workflow allowlist 试验的 Windows 合同测试正反例通过，但与冻结 R3 authority 的组合定向回归出现 `2` 个预期失败；撤销后必须重新证明 release-evidence、Windows workflow contract 与 metadata closeout 全绿。
+- 替代分支创建时 HEAD 精确为 `d1f2677571c04166354ad7b0c8b5d0fcb548447f`，原 #222 worktree 已恢复 clean，冻结 workflow 与合同测试相对该 HEAD 无差异。
+
+### Remaining Unknowns
+
+- `PROBE / replacement exact CI`：替代 PR 创建后，新 exact smoke job 必须显示 `Run release checks`、Windows adapter、SQLite teardown 与 panel alignment 全部实际成功，且下游 build 成功；聚合绿灯、旧 exact head 或本地绿灯均不代偿。
+- `PROBE / remote closeout`：替代 PR 建立并核对 lineage 后，#222 应以证据说明关闭且保留远端分支；不得误合并两个候选。
+- `BLOCK / production`：application production 继续 disabled/legacy；本次 CI 证据收口不授权启用 production。
