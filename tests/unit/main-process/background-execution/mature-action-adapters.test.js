@@ -258,7 +258,7 @@ function executeRollbackImport(supervisor, policy, fixture, jobId) {
 test.after(() => bigTableFixtures.cleanupTmpDirs());
 
 test('生产 topology inspector 同步复用 engine 并行度算法并拒绝空文件批次', (t) => {
-  t.mock.method(os, 'freemem', () => 8 * 1024 ** 3);
+  t.mock.method(os, 'freemem', () => 8 * 1024 * 1024 * 1024);
   const inspected = inspectBigTableImportTopology({
     input: { files: ['1.xlsx', '2.xlsx'], parallel: 4 }
   });

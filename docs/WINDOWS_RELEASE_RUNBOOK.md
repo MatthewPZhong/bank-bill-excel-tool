@@ -7,7 +7,7 @@
 
 由仓库管理员在 GitHub 完成，仓库文件不能替代这些服务端保护：
 
-1. 创建名为 `production-release` 的 GitHub Environment，只允许受保护 tag 部署，并限制可审批人员。
+1. 创建名为 `production-release` 的 GitHub Environment，只允许匹配 `v*.*.*` 的 tag 部署，并限制可审批人员。
 2. 保护 `main`：禁止 force push 和删除，要求 PR 与必需检查通过后才能合并。
 3. 建立 `v*` tag protection / repository ruleset：禁止非发布负责人创建、更新或删除发布 tag。
 4. 确认 Actions 的 `GITHUB_TOKEN` 对 Release 具有 `contents: write`，除此之外不配置 PAT 或客户端凭据。
@@ -63,6 +63,24 @@ workflow 直接创建 published、non-draft、non-prerelease Release。仅当 Re
 2. 用上一 stable NSIS 从生产 `latest` 做一次 canary，确认版本升级和用户数据保留。
 3. canary 通过后再公告；失败时停止公告，不删除或替换同版本资产，修复后发布更高版本。
 4. 保存 workflow URL、资产名和哈希、升级前后版本截图、数据保留证据和复核人。
+
+## v3.2.0～v3.2.5 串行发布授权
+
+- 稳定授权记录：[Issue #220](https://github.com/MatthewPZhong/bank-bill-excel-tool/issues/220)。发布负责人 `MatthewPZhong` 于 2026-09-03 授权六版按 v3.2.0 → v3.2.5 严格串行合入、annotated tag、Windows workflow 与资产回读，并明确要求 application production 始终 disabled/legacy。
+- 发布负责人同时确认资金、恢复、真实业务样本及稳定窗口人工验收通过；该用户签字不由自动测试代签。最终发布资产生成前无法完成的 Windows 10/11 Setup/portable、SmartScreen、逐版离线覆盖和 `production/latest` canary 作为发布前豁免，按 Issue #220 在每版发布后补做。
+- 服务端保护已启用：`main` 必须通过 PR 与严格 `smoke-test`/`build`，管理员同样受约束且禁止 force/delete；ruleset `22169539` 限制 `v*` 创建者，ruleset `22169542` 禁止更新/删除；`production-release` environment 的唯一 custom deployment policy 为 tag `v*.*.*`，并要求 `MatthewPZhong` 审批。
+- 仓库维护者此前要求不运行本地 `npm run scan:vars` / `npm run check:vars`，本轮用 `check-vars` skill 对实际 diff 做只读扫描且不把两个 npm 命令记为 PASS。tag workflow 内置 `npm run release-check` 已获明确授权。
+- 每版从 tag 前最后一次 `main`/PR/check 回读到 `Verify tag and main` 成功期间冻结 `main`。任何漂移、阻断 review 或失败立即停止；不可变 tag/资产不得删除、替换或重传。
+
+## v3.2.0 发布记录
+
+- Release：[v3.2.0](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.2.0)。PR #221 以 merge commit `92380fd84471b061b7a84842be7da001aa82db87` 合入 `main`；annotated tag object `8d7c85fdb73542c9c0564c2783e319fb7b8718db` peeled 后精确指向该提交。
+- Windows workflow [33731833335](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/33731833335) 首次因旧 environment policy 不允许 tag 而在 runner 分配前停止，未执行代码或构建步骤、未创建 Release。将 environment 收紧为仅允许 `v*.*.*` tag 后，使用用户明确授予的一次 failed-jobs rerun；attempt 2 经 `MatthewPZhong` 正常审批，全部步骤成功，期间未改写 tag、代码或资产。
+- Setup `bank-bill-excel-tool-setup-3.2.0.exe`：`106193824` bytes / SHA-256 `b9b2e6d45da6df1aa7d385614097f803415713994af3424686f231c779d195cd`。
+- portable `bank-bill-excel-tool-portable-3.2.0.exe`：`105696954` bytes / SHA-256 `7f388175ab89770edb7667e0e7779b4e5c19ac7f4145b3e11da9e8b4611fdc82`。
+- blockmap `bank-bill-excel-tool-setup-3.2.0.exe.blockmap`：`110594` bytes / SHA-256 `05c7c20bc1eed49c90cf31652fe9d308c70e24946eadfe32061b5920f7ea0256`；`latest.yml`：`369` bytes / SHA-256 `64411df9b960f6c450520ad24bbaeb1b9c35a35c74cceae01ed14949a27ca847`。
+- `latest.yml` 的 version/path/size 与 Setup 一致，Setup SHA-512 为 `ulzP60RKJRoYtFRTpySdpeMKjYRVUtlc3esJedYpXeMY4hNiC/1kmZCjc1yJcM1oQ4Sfxx5cYSdofk+eLDdd1g==`；Release 为公开、非 draft、非 prerelease 且是当时 latest stable。四项资产已独立完整下载，实际大小和 SHA-256 与 GitHub digest 一致。
+- application production 仍为 disabled/legacy。Windows 10/11 Setup/portable、SmartScreen、`v3.1.14 -> v3.2.0` 离线覆盖和 `production/latest` canary 继续按 Issue #220 标记为发布后人工补测；技术 Release 完成不是这些项目 PASS。
 
 ## v3.0.18 发布记录
 
