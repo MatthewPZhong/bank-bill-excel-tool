@@ -99,8 +99,9 @@ function mb(bytes) {
 //     （tier1 + 57MB），取两者较小值；tier2 还必须严格低于按行数比得到的线性外推。
 //     24MB 是既有 8MB 噪声单位的 3 倍，覆盖两台 Windows runner 四组成对样本所需的
 //     20.5/21/22.5/22.5MB 相对噪声；57MB 锁定既有 82→139MB PASS / 82→140MB FAIL 边界。
-// 采样策略与增长分类独立：首次 tier1 <= 16MB 时均位于 RSS 重采保护区；此外，首对样本属于
-// measurable-growth 且 tier2 距亚线性预算边界两侧不超过 8MB 时，也追加两轮独立成对采样。
+// 采样策略与增长分类独立：首次 tier1 <= 16MB 时均位于 RSS 重采保护区，保留三组成对样本；
+// 此外，首对样本属于 measurable-growth 且 tier2 距亚线性预算边界两侧不超过 8MB 时，
+// 扩展到五组成对样本，降低单个 Windows runner 量化/allocator 抖动对边界裁决的影响。
 // 多样本保留 tier1 / tier2 独立中位样本裁决，但独立中位会丢失成对关系；其预算 margin 只允许
 // 落在 Math.round(MB) 的理论传播误差内。每一对的预算 margin / 线性 margin 仍严格取中位数作为
 // 必要条件，因此稳定预算越界不能借独立中位取整容差翻为 PASS。
@@ -116,7 +117,8 @@ const MEASURABLE_GROWTH_RELATIVE_NOISE_MB = RSS_MEASUREMENT_NOISE_MB * 3;
 const MEASURABLE_GROWTH_ABSOLUTE_BUDGET_DELTA_MB = 57;
 const RSS_RESAMPLE_PROTECTION_MAX_MB = RSS_MEASUREMENT_NOISE_MB * 2;
 const RSS_BUDGET_BOUNDARY_RESAMPLE_MB = RSS_MEASUREMENT_NOISE_MB;
-const RSS_RESAMPLE_SAMPLE_COUNT = 3;
+const RSS_LOW_SIGNAL_SAMPLE_COUNT = 3;
+const RSS_BUDGET_BOUNDARY_SAMPLE_COUNT = 5;
 const SUBLINEAR_FRACTION_OF_LINEAR = 0.5;
 const SCAN_MEMORY_PROBE_MODE = '--scan-memory-probe';
 const SCAN_MEMORY_RESULT_PREFIX = '__TBX_SCAN_MEMORY__';
@@ -366,7 +368,7 @@ function verifyMemoryGuardModel() {
     && !nonFiniteDelta.valid
     && !nonFiniteDelta.sublinearWithinBudget
     && medianLowSignal.valid
-    && medianLowSignal.sampleCount === RSS_RESAMPLE_SAMPLE_COUNT
+    && medianLowSignal.sampleCount === RSS_LOW_SIGNAL_SAMPLE_COUNT
     && medianLowSignal.tier1DeltaMB === 8
     && medianLowSignal.tier2DeltaMB === 22
     && medianLowSignal.sublinearWithinBudget
@@ -539,16 +541,21 @@ function collectMemorySamples(
     : Number.POSITIVE_INFINITY;
   const inBudgetBoundaryProtection = budgetBoundaryDistanceMB <= RSS_BUDGET_BOUNDARY_RESAMPLE_MB;
   if (inTier1Protection || inBudgetBoundaryProtection) {
+    const targetSampleCount = inBudgetBoundaryProtection
+      ? RSS_BUDGET_BOUNDARY_SAMPLE_COUNT
+      : RSS_LOW_SIGNAL_SAMPLE_COUNT;
+    const additionalSampleRounds = targetSampleCount - 1;
     if (inTier1Protection) {
-      log(`   tier1 首次增量 ${scan1.deltaMB}MB 位于 RSS 重采保护区（≤${RSS_RESAMPLE_PROTECTION_MAX_MB}MB），追加两轮成对隔离采样并取 paired margin 中位数...`);
+      log(`   tier1 首次增量 ${scan1.deltaMB}MB 位于 RSS 重采保护区（≤${RSS_RESAMPLE_PROTECTION_MAX_MB}MB），`
+        + `追加${additionalSampleRounds}轮成对隔离采样并取 paired margin 中位数...`);
     } else {
       log(`   首对可测样本距 effective 预算边界 ${formatMemoryMB(budgetBoundaryDistanceMB)}MB`
         + `（tier2=${formatMemoryMB(scan2.deltaMB)}MB，relative预算=${formatMemoryMB(firstAssessment.relativeBudgetMB)}MB，`
         + `absolute预算=${formatMemoryMB(firstAssessment.absoluteGrowthBudgetMB)}MB，effective预算=${formatMemoryMB(firstAssessment.effectiveBudgetMB)}MB，`
         + `保护带±${RSS_BUDGET_BOUNDARY_RESAMPLE_MB}MB），`
-        + '追加两轮成对隔离采样并取 paired margin 中位数...');
+        + `追加${additionalSampleRounds}轮成对隔离采样并取 paired margin 中位数...`);
     }
-    while (tier1Samples.length < RSS_RESAMPLE_SAMPLE_COUNT) {
+    while (tier1Samples.length < targetSampleCount) {
       tier1Samples.push(runIsolatedScan(fileT1).deltaMB);
       tier2Samples.push(runIsolatedScan(fileT2).deltaMB);
     }
@@ -654,10 +661,10 @@ async function run() {
       memoryAssessment.valid && memoryAssessment.tier2WithinCeiling,
       `A 内存恒定·绝对上限：tier2 所有 RSS 增量 [${memoryAssessment.tier2Samples.join(', ')}]MB < ${SCAN_DELTA_CEILING_MB}MB`
     );
-    // (2) 亚线性：两档由独立子进程成对采样。首次 tier1 在 16MB RSS 重采保护区，或首对
-    //     measurable-growth 样本距预算边界两侧不超过 8MB 时，追加两轮；每对先算预算/线性
-    //     margin，再取 margin 中位数。增长分类、32MB 低信号包络与 16MB tier1 重采保护不变；
-    //     可测档使用 relative/absolute 双预算的较小值。
+    // (2) 亚线性：两档由独立子进程成对采样。首次 tier1 在 16MB RSS 重采保护区时保留三组；
+    //     首对 measurable-growth 样本距预算边界两侧不超过 8MB 时扩展到五组。每对先算
+    //     预算/线性 margin，再取 margin 中位数。增长分类、32MB 低信号包络、预算本身与
+    //     16MB tier1 重采保护不变；可测档继续使用 relative/absolute 双预算的较小值。
     console.log(`   内存恒定对比：行数 ×${rowsRatio.toFixed(1)}；RSS 中位增量 tier1=${memoryAssessment.tier1DeltaMB}MB → tier2=${memoryAssessment.tier2DeltaMB}MB`
       + `（样本数=${memoryAssessment.sampleCount}，tier1=[${memoryAssessment.tier1Samples.join(', ')}]MB，tier2=[${memoryAssessment.tier2Samples.join(', ')}]MB）`
       + `（${memoryAssessment.classification}，relative预算=${formatMemoryMB(memoryAssessment.relativeBudgetMB)}MB，`
