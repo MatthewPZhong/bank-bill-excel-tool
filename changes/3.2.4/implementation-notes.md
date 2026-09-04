@@ -17,12 +17,14 @@
 | 三份发布文档冲突 | v3.2.4 置于 v3.2.3 之前并改为 2026-09-04 正式发布候选；历史 R3 evidence 与当前人工授权分层记录 | 不改写 PENDING/NOT_RUN 历史快照，不把生产 capability 表述为 production enabled。 |
 | 第一轮定向验证 | Node 25 静态语法检查及 metadata/recovery/JPM durable 定向集合 `43/43 PASS` | 只作为冲突消解的快速反馈；正式证据必须使用 Node 22.18 exact-lock 重跑。 |
 | 历史 R3 tag authority 回放 | 首次 Node 22.18 回放因隔离 clone 带入发布后新增的 `v3.2.0`～`v3.2.3` refs，以 `GIT_TAG_REFS_INVALID` fail closed；测试 harness 随后只在临时 clone 中删除匹配 `refs/tags/v3.2.*` 的发布后 refs，并核对恢复后的 25 refs 数量及冻结 SHA-256，原 exact validator/test blob、历史快照和真实仓库 refs 均不修改；重跑 historical exact suite `62/62 PASS` | 修复只重建历史测试时点的 ref 环境，不放宽 Git authority guard，也不改变 tag 或生产代码。 |
+| Node 22.18 exact 定向验证 | closeout、历史 evidence、恢复协调器、JPM/VCC durable 与 Windows adapter 定向集合共 `223/223 PASS`，其中历史 exact suite `62/62 PASS` | 证明冲突消解和历史 ref 隔离在正式 Node 版本下同时成立。 |
+| Node 22.18 exact 全量验证 | unit `6790/6793 PASS`、`0 fail / 3 Windows-only skip`（424 files / 831 suites，日志 `logs/unit-tests/unit-20260904-211735.log`，SHA-256 `c8c3662cf6201b308ad5fe61c6148db2c5e6cafc19605d20b341f2db0a979060`）；integration 53 scripts、`2488/2488 PASS`；smoke、全量 `src/` lint、全部 changed JS `node --check`/ESLint、diff/版本/冲突/冻结文档、clean-HEAD packaged inputs 全部 PASS | 当前 exact tree 的业务、恢复、资金输出和打包输入门禁均已本地验证；本地仍未运行被禁止的 `release-check`、`check-vars`、`scan:vars`。 |
+| production readback | 6 个 v3.2.4 action 均为 `enabled=false`、`effectiveMode=legacy`、`effectiveWorkerCount=0` | capability 保持 dormant，正式发布不等于启用 production。 |
 
 ### Current Remaining Unknowns
 
-- Node 22.18 exact-lock 的定向与全量测试尚未完成。
 - 提 PR 前 blindspot-pass、check-vars 只读扫描与 reconciliation-blindspot-pass 尚待基于最终 exact diff 重跑。
-- PR exact CI/review、main exact CI、tag/Release/四资产与 production readback 尚未发生；任何一步不得由旧证据代偿。
+- PR exact CI/review、main exact CI、tag/Release/四资产与远端 post-release production readback 尚未发生；任何一步不得由旧证据代偿。
 
 ## Baseline
 
