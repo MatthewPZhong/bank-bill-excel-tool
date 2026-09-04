@@ -24,6 +24,10 @@ const REQUEST_MATRIX = Object.freeze({
   'pending-interaction-create': Object.freeze({ ownerKind: 'interaction-token', leaseMethod: 'acquirePendingInteractionReservation', resourceKey: 'pendingInteraction' }),
   'phase-extension': Object.freeze({ ownerKind: 'phase', leaseMethod: 'acquirePhaseLease', resourceKey: 'phase' })
 });
+const REPLACEABLE_REQUEST_KINDS = Object.freeze([
+  'persistent-state-replace',
+  'pending-interaction-create'
+]);
 const serviceTransportOwnership = new WeakMap();
 
 class ServiceHostError extends Error {
@@ -166,10 +170,15 @@ function createServiceHost(options = {}) {
         `ServiceHost does not implement busyPolicy for ${serviceKey}: ${matches[0].service.busyPolicy}`
       );
     }
+    const cancellationTerminalErrorCodes = entry && typeof entry === 'object' &&
+      Array.isArray(entry.cancellationTerminalErrorCodes)
+      ? Object.freeze([...new Set(entry.cancellationTerminalErrorCodes)])
+      : Object.freeze([]);
     return Object.freeze({
       policies: Object.freeze(matches),
       carrier,
       entry,
+      cancellationTerminalErrorCodes,
       base: componentMax(matches.map((policy) => policy.resources.base)),
       policyDigest: digest(matches.map((policy) => policy.actionKey).sort().map((actionKey) =>
         matches.find((policy) => policy.actionKey === actionKey)))
@@ -1055,18 +1064,19 @@ function createServiceHost(options = {}) {
     }
     const ownerKey = JSON.stringify([payload.owner.kind, payload.owner.ownerKeyHash]);
     const current = record.currentByOwner.get(ownerKey) || null;
-    if (payload.requestKind === 'persistent-state-replace') {
+    const replacementAllowed = REPLACEABLE_REQUEST_KINDS.includes(payload.requestKind);
+    if (replacementAllowed) {
       if ((current && payload.replacesReservationId !== current.reservationId) ||
           (!current && payload.replacesReservationId !== null)) {
         throw new ServiceHostProtocolError(
           'SERVICE_REPLACEMENT_STALE',
-          'Persistent request must reference the current reservation'
+          'Replaceable request must reference the current reservation'
         );
       }
     } else if (payload.replacesReservationId !== null) {
       throw new ServiceHostProtocolError(
         'SERVICE_REPLACEMENT_FORBIDDEN',
-        'Only persistent state may replace a reservation'
+        'This resource kind may not replace a reservation'
       );
     }
     if (current && payload.owner.candidateRevision <= current.owner.candidateRevision) {
@@ -1075,7 +1085,7 @@ function createServiceHost(options = {}) {
         'Candidate revision must advance the owner revision'
       );
     }
-    if (current && payload.requestKind !== 'persistent-state-replace') {
+    if (current && !replacementAllowed) {
       throw new ServiceHostProtocolError(
         'SERVICE_OWNER_DUPLICATE',
         'Owner identity already has an adopted reservation'
@@ -1269,6 +1279,13 @@ function createServiceHost(options = {}) {
           'Adoption replacement is no longer current'
         );
       }
+      if (current && current.requestKind === 'pending-interaction-create' &&
+          current.tokenPublicationState !== 'published') {
+        throw new ServiceHostProtocolError(
+          'SERVICE_REPLACEMENT_STALE',
+          'Pending-interaction replacement requires a published current token'
+        );
+      }
       tentative.adopting = true;
       let adoptedLease = tentative.lease;
       if (current) {
@@ -1384,7 +1401,6 @@ function createServiceHost(options = {}) {
       }
       if (adopted) {
         const livePendingReplacement = [...record.pendingRequests.values()].some((pending) =>
-          pending.requestKind === 'persistent-state-replace' &&
           pending.ownerKey === adopted.ownerKey &&
           pending.replacesReservationId === adopted.reservationId);
         const liveTentativeReplacement = [...record.tentativeGrants.values()].some((tentative) =>
@@ -1429,6 +1445,15 @@ function createServiceHost(options = {}) {
       direction: 'event'
     }, { policyRegistry });
     record.jobSequences.observe(message);
+    if (!job.detaching && job.terminalOperation === null &&
+        message.operation === 'job:error' && !job.cancellationTerminalForwarded &&
+        (job.cancelCommandState === 'dispatching' || job.cancelCommandState === 'sent') &&
+        record.profile.cancellationTerminalErrorCodes.includes(
+          message.payload && message.payload.error && message.payload.error.code
+        )) {
+      job.cancellationTerminalForwarded = true;
+      if (typeof job.onCancellationTerminal === 'function') job.onCancellationTerminal();
+    }
     if (!job.detaching && job.terminalOperation === null &&
         (message.operation === 'job:done' || message.operation === 'job:error')) {
       job.terminalOperation = message.operation;
@@ -1705,8 +1730,11 @@ function createServiceHost(options = {}) {
       jobId: request.jobId,
       policy,
       onMessage: request.onMessage,
+      onCancellationTerminal: request.onCancellationTerminal,
       onError: request.onError,
       onExit: request.onExit,
+      cancelCommandState: 'not-dispatched',
+      cancellationTerminalForwarded: false,
       detaching: false,
       detached: false,
       detachPromise: null,
@@ -1791,7 +1819,15 @@ function createServiceHost(options = {}) {
           direction: 'command'
         }, { policyRegistry });
         record.jobSequences.observe(owned);
-        record.rawTransport.send(owned, transferList);
+        const dispatchingCancel = owned.operation === 'job:cancel';
+        if (dispatchingCancel) job.cancelCommandState = 'dispatching';
+        try {
+          record.rawTransport.send(owned, transferList);
+        } catch (error) {
+          if (dispatchingCancel) job.cancelCommandState = 'not-dispatched';
+          throw error;
+        }
+        if (dispatchingCancel) job.cancelCommandState = 'sent';
       },
       close() {
         return detach('job-terminal');

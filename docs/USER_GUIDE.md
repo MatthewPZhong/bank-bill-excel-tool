@@ -1,10 +1,10 @@
 # 清结算小助手使用手册
 
-版本：`v3.2.2`
+版本：`v3.2.3`
 
-> 版本说明：v3.2.2 已由发布负责人授权在 v3.2.1 完成正式技术发布后，经受保护 PR、唯一 annotated tag 与 Windows Release workflow 串行发布。资金对账、重复入金匹配和月度银行对账单 BU 回填校验已经具备受资源治理、receipt 与崩溃恢复保护的后台执行 capability，但 application production strategy 仍关闭，因此日常用户流程、金额/币种、匹配顺序和 Excel/Workbook 结果继续保持既有行为。发布负责人已确认资金、恢复、真实业务样本及稳定窗口人工验收通过；最终 v3.2.2 资产产生后的 Windows Setup/portable、SmartScreen、离线覆盖安装和在线更新 canary 按 Issue #220 逐项补做。
+> 版本说明：v3.2.3 已由发布负责人授权在 v3.2.2 完成正式技术发布后，经受保护 PR、唯一 annotated tag 与 Windows Release workflow 串行发布。网银账单 Statement 的导入、交互 continuation、current/all 生成与手工余额 seed，以及新开银行账户 NewAccount 的生成和另存为，已经具备资源治理、幂等 receipt 与崩溃恢复保护的后台执行 capability；application production strategy 仍关闭，日常用户流程、金额/币种、借贷方向、余额和 Excel/Workbook 结果继续保持既有行为。发布负责人已确认本次资金、恢复、真实业务样本及稳定窗口人工验收通过；最终 v3.2.3 资产产生后的 Windows Setup/portable、SmartScreen、离线覆盖安装和在线更新 canary 按 Issue #220 逐项补做。
 
-> 使用提醒：v3.2.2 的后台执行改造不新增用户开关，也不允许绕过现有资金核对。遇到恢复要求、Recovery Hold 或结果不确定提示时，应停止重跑并交由 release owner/资金负责人核对持久 receipt 与真实输出。
+> 使用提醒：本版不会自动解除 Recovery Hold，也不会在 unknown、partial 或 committed-result-lost 状态下自动重跑。Windows packaged/Setup/portable、真实 Statement/NewAccount 文件、金额/币种/余额和 Excel/WPS 展示仍需 release owner 与资金负责人人工复核；遇到恢复要求时应先核对持久 receipt、journal 与真实输出。
 
 > 网银账单修复：模板管理中的重命名不再因空的任务 evidence 提前失败；人工补录上一账单日余额时，`0` 是合法余额。补录提交失败会显示错误并保留已填日期和余额，重新确认前不会重复提交；若原账单源文件已经不可用，软件会要求重新导入后再补录。
 
@@ -52,7 +52,9 @@
 
 > **v3.1.10 VCC 存储瘦身正式发布**：v3.1.10 已于 2026-08-17 正式发布。有效数据只保留计算、校验、幂等和最小血缘字段；原始输入由存档 artifact 保存，只有真正异常进入紧凑审计。数据管理改为六列【导出明细】，校验原表按当前有效行从已验证原件重建；历史血缘缺口可明确标记后部分导出，实体损坏则整次停止。【优化存储】通过维护模式 copy-on-write 重建数据库。三项发布门禁已明确确认 PASS，正式 tag、Release 与四项公开资产已完成回读。
 
-> **v3.2.2 FundRecon / Duplicate / BankBU 后台执行基础**：资金对账、重复入金匹配和月度银行对账单 BU 回填校验已具备受资源治理的 Service/Worker、operation receipt、inspector 与 Recovery Hold capability；同版修复模板重命名的空 evidence 错误，以及内存账单会话人工余额补录的空 FilePlan、余额 `0` 和提交失败无反馈问题。业务顺序、金额/币种、Excel/Workbook 与既有覆盖确认保持不变，production enablement 仍关闭。Issue #220 已授权正式技术发布，发布负责人确认本次资金、恢复、真实样本及稳定窗口人工验收通过；最终 Windows Release 资产、SmartScreen、离线覆盖与在线更新仍按发布后计划逐项复核，遇到恢复要求不得自行重复执行。
+> **v3.2.3 Statement / NewAccount 后台执行基础**：Statement 大状态由长驻 Service 单一持有，大账号和手工余额 continuation 使用有界单次 token；current/all 生成只读 staging 并由唯一 Publisher 发布，manual balance seed 受 durable receipt/inspector/Recovery Hold 保护。NewAccount 生成使用 one-shot Worker，另存为在校验来源、目标和父目录 identity 后经 durable Publisher 提交。四金额模式、借贷方向、币种、余额、Workbook、日期、账户和命名不变，production enablement 仍关闭。Issue #220 已授权正式技术发布，发布负责人确认本次资金、恢复、真实样本及稳定窗口人工验收通过；最终 Windows Release 资产、SmartScreen、离线覆盖与在线更新仍按发布后计划逐项复核，遇到恢复要求不得自行重复执行。
+
+> **v3.2.2 FundRecon / Duplicate / BankBU 后台执行基础**：资金对账、重复入金匹配和月度银行对账单 BU 回填校验已具备受资源治理的 Service/Worker、operation receipt、inspector 与 Recovery Hold capability；同版修复模板重命名的空 evidence 错误，以及内存账单会话人工余额补录的空 FilePlan、余额 `0` 和提交失败无反馈问题。业务顺序、金额/币种、Excel/Workbook 与既有覆盖确认保持不变，production enablement 仍关闭。发布负责人确认本次资金、恢复、真实样本及稳定窗口人工验收通过；v3.2.2 已通过 PR #225、annotated tag 与 Windows Release workflow 完成正式技术发布，四项公开资产及更新元数据已独立回读一致；Issue #220 中 Windows Release 资产实机、SmartScreen、离线覆盖与在线更新仍按发布后计划逐项复核，遇到恢复要求不得自行重复执行。
 
 > **v3.2.1 Toolbox / PreFund 受控后台执行**：Toolbox 可用受管 one-shot Worker 准备拆分输出，正式文件仍由单一 Writer/FIFO Publisher 收口，第二 Writer gate 已明确拒绝；PreFund MPT 可先生成任务私有 spool，再由单一有序 DB Writer 按文件顺序处理，普通 import 具备受限 parser pool capability，repair 仍为 exact-one。金额、币种、文件顺序和 Excel/Workbook 结果不变，production enablement 仍关闭。发布负责人确认本次资金、恢复、真实样本及稳定窗口人工验收通过；v3.2.1 已通过 PR #223、safe forward-fix PR #224、annotated tag 与 Windows Release workflow 完成正式技术发布，四项公开资产及更新元数据已独立回读一致；Issue #220 中 Windows Release 资产实机、SmartScreen、离线覆盖与在线更新仍按发布后计划逐项复核。
 

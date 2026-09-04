@@ -2,9 +2,11 @@
 
 const { randomUUID } = require('node:crypto');
 const {
-  canonicalJsonSnapshot
+  canonicalJsonSnapshot,
+  parseStrictJson
 } = require('../canonical-json-v1');
 const {
+  RECOVERY_REQUEST_MAX_BYTES,
   assertC1Transition,
   observationRequestKey,
   observationScopeKey,
@@ -160,6 +162,80 @@ function transitionReservation(db, input, now, createEventId) {
       insertOwner(db, expected);
     }
     return Object.freeze({ transition: request.transition, event: request.event });
+  });
+}
+
+function inspectTransitionReservation(db, input) {
+  const owned = exactObject(
+    input,
+    ['requestKey', 'transition', 'safePayload'],
+    'inspectTransitionRequest input'
+  );
+  const transition = assertC1Transition(validateTransition(owned.transition));
+  const computedRequestKey = transitionRequestKey(transition);
+  if (owned.requestKey !== computedRequestKey) {
+    fail('RECOVERY_REQUEST_KEY_MISMATCH', 'transition requestKey 与 durable identity tuple 不一致');
+  }
+  const existing = ownerRow(db, computedRequestKey);
+  if (!existing) return null;
+  const request = validateTransitionRequest({
+    transition,
+    event: {
+      eventId: existing.event_id,
+      createdAt: existing.created_at,
+      safePayload: owned.safePayload
+    }
+  });
+  const evidence = requestEvidence('transitionWithRecoveryEvent', request);
+  verifyExistingOwner(existing, {
+    requestKey: computedRequestKey,
+    writer: 'transitionWithRecoveryEvent',
+    eventId: existing.event_id,
+    createdAt: existing.created_at,
+    ...evidence
+  });
+  return Object.freeze({
+    requestKey: computedRequestKey,
+    status: existing.status,
+    requestHash: existing.request_hash
+  });
+}
+
+function resumePreparedTransitionReservation(db, requestKey) {
+  if (typeof requestKey !== 'string' || !requestKey.startsWith('recovery-control:v1:')) {
+    throw new TypeError('requestKey 非法');
+  }
+  const existing = ownerRow(db, requestKey);
+  if (!existing || existing.status !== 'prepared') return null;
+  if (existing.writer !== 'transitionWithRecoveryEvent') {
+    fail('RECOVERY_REQUEST_WRITER_CONFLICT', 'prepared request 不是 transition owner');
+  }
+  const envelope = exactObject(
+    parseStrictJson(existing.request_jcs, { maxBytes: RECOVERY_REQUEST_MAX_BYTES }),
+    ['contractVersion', 'writer', 'input'],
+    'prepared transition envelope'
+  );
+  if (envelope.contractVersion !== 1 || envelope.writer !== 'transitionWithRecoveryEvent') {
+    fail('RECOVERY_REQUEST_ENVELOPE_INVALID', 'prepared transition envelope 非法');
+  }
+  const request = validateTransitionRequest(envelope.input);
+  const computedRequestKey = transitionRequestKey(request.transition);
+  if (computedRequestKey !== requestKey) {
+    fail('RECOVERY_REQUEST_KEY_MISMATCH', 'prepared transition requestKey 漂移');
+  }
+  const evidence = requestEvidence('transitionWithRecoveryEvent', request);
+  verifyExistingOwner(existing, {
+    requestKey,
+    writer: 'transitionWithRecoveryEvent',
+    eventId: request.event.eventId,
+    createdAt: request.event.createdAt,
+    ...evidence
+  });
+  return Object.freeze({
+    requestKey,
+    status: 'prepared',
+    transition: request.transition,
+    safePayload: request.event.safePayload
   });
 }
 
@@ -410,6 +486,12 @@ function createRecoveryRequestOwnerRepository(db, options = {}) {
   }
   ensureBackgroundExecutionRecoveryControlSchema(db);
   return Object.freeze({
+    resumePreparedTransitionRequest(requestKey) {
+      return resumePreparedTransitionReservation(db, requestKey);
+    },
+    inspectTransitionRequest(input) {
+      return inspectTransitionReservation(db, input);
+    },
     reserveTransitionRequest(input) {
       return transitionReservation(db, input, now, createEventId);
     },

@@ -216,7 +216,9 @@ function createToolboxPublicationDispatcher(options = {}) {
           archiveInputFiles: optionsForPublish.archiveInputFiles,
           requireArchiveHandoff: optionsForPublish.requireArchiveHandoff === true,
           allowEmptyArchiveInputs: optionsForPublish.allowEmptyArchiveInputs === true,
-          requireValidatedArtifacts: optionsForPublish.requireValidatedArtifacts === true
+          requireValidatedArtifacts: optionsForPublish.requireValidatedArtifacts === true,
+          requireTargetParentIdentity:
+            optionsForPublish.requireTargetParentIdentity === true
         },
         optionsForPublish.onProgress
       );
@@ -238,6 +240,18 @@ function createToolboxPublicationDispatcher(options = {}) {
 const defaultDispatcher = createToolboxPublicationDispatcher();
 
 function publishToolboxPublicationAsync(options) {
+  return defaultDispatcher.publish({
+    ...(options || {}),
+    requireArchiveHandoff: true,
+    requireValidatedArtifacts: true,
+    allowEmptyArchiveInputs: options && options.allowEmptyArchiveInputs === true
+  });
+}
+
+// 非工具箱 artifact 仍复用同一个进程级 durable FIFO Publisher，并沿用同一
+// archive-handoff receipt/recovery authority；调用方只能在 Task artifact durable
+// 且 Task 终态持久化后通过既有 recover acknowledgement 清理 receipt。
+function publishDurableArtifactAsync(options) {
   return defaultDispatcher.publish({
     ...(options || {}),
     requireArchiveHandoff: true,
@@ -273,6 +287,7 @@ module.exports = {
   DEFAULT_WORKER_ENTRY,
   createToolboxPublicationDispatcher,
   createToolboxPublicationMatureBinding,
+  publishDurableArtifactAsync,
   publishToolboxPublicationAsync,
   recoverToolboxPublicationsAsync,
   runWorkerJob

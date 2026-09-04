@@ -1087,6 +1087,7 @@ class ArchiveStorageRootManager {
           message: '上一次存档位置变更尚未收口，请重启软件恢复后再试'
         };
       }
+      await this._assertRootDirectory(this.currentService.rootDir);
       targetRoot = await this._selectTarget();
       if (!targetRoot) return { status: 'cancelled' };
       const realTarget = await this._existingRoot(targetRoot, true);

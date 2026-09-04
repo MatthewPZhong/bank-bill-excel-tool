@@ -272,7 +272,8 @@ batchContext = {
     version: 1,
     allocation: 'eager' | 'deferred' | 'none',
     inputs: [{ artifactKey, filePath, originalName, role, sourceOperation, sourceSnapshot }],
-    outputs: [{ artifactKey, filePath, originalName, role, sourceOperation, targetSnapshot }]
+    outputs: [{ artifactKey, filePath, originalName, role, sourceOperation,
+                targetSnapshot, targetParentIdentity }]
   }
 }
 ```
@@ -284,12 +285,13 @@ batchContext = {
 - manifest 的 `inputs + outputs` 对 eager 分配必须非空；
 - 每个 `artifactKey` 在 batch 内唯一且由方向、角色、source operation、规范化路径稳定派生；
 - input 必须是绝对路径、存在、为普通文件，并带初始 `sourceSnapshot`；目录和非普通文件在发号前拒绝；
-- output 必须是绝对具体文件路径，不能只给父目录；覆盖目标需带用户确认时的 target snapshot；
+- output 必须是绝对具体文件路径，不能只给父目录；覆盖目标需带用户确认时的 target snapshot；Main normalizer同时为resolved direct parent冻结additive `targetParentIdentity`，调用方/raw/Renderer提供的同名字段不作为authority；
 - 原始文件名、方向、role、source operation 均不能为空；
 - 零字节普通文件仍是文件 evidence，不能用全局 `size > 0` 规则隐藏；具体业务可按自身格式合同拒绝空文件。symbolic link、directory 和其他非普通文件沿用 fail-closed 拒绝；
 - input/output 路径使用平台一致的 alias identity 做去重和冲突检查；同一任务默认禁止 output 覆盖/别名指向 input，只有已有专项原子发布合同的入口可以显式放行；
 - descriptor 校验在序号事务前完成；非法 manifest 不占号；
 - 发号后、业务开始前再次检查 input freshness 和 target freshness；变化时批次保留为有文件 evidence 的失败批次。
+- `targetParentIdentity`存在时freshness还必须重新解析同一direct parent path并比较canonical realpath、平台alias与可靠dev/ino；不保存整条ancestor chain。identity不可靠只阻止显式require该evidence的action，不能误伤旧action。
 
 ### 5.3 原子创建
 

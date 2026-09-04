@@ -29,6 +29,21 @@ const {
   createPreFundMptTopologyPlanner
 } = require('../pre-fund-reconciliation/mpt-import/topology');
 const {
+  validateNewAccountGenerationResult
+} = require('../new-account/generation-contract');
+const {
+  NEW_ACCOUNT_GENERATION_POLICY,
+  NEW_ACCOUNT_SAVE_AS_POLICY
+} = require('../new-account/policies');
+const {
+  NEW_ACCOUNT_SAVE_AS_ACTION,
+  runNewAccountArtifactCopyInline,
+  validateNewAccountSaveAsResult
+} = require('../new-account/artifact-copy');
+const {
+  estimateNewAccountGenerationPhaseResources
+} = require('../new-account/resource-estimator');
+const {
   FUND_RECON_POLICIES,
   FUND_RECON_SERVICE_KEY,
   validateFundReconExportResult,
@@ -57,6 +72,8 @@ const {
 const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   ...TOOLBOX_GENERATION_POLICIES,
   ...PRE_FUND_MPT_POLICIES,
+  NEW_ACCOUNT_GENERATION_POLICY,
+  NEW_ACCOUNT_SAVE_AS_POLICY,
   ...FUND_RECON_POLICIES,
   ...DUPLICATE_POLICIES
 ]);
@@ -94,6 +111,9 @@ function mergeShutdownReports(report, ...pairedReports) {
 }
 
 function entryBindingForPolicy(policy, workerRoot, duplicateStartupGate) {
+  if (policy.actionKey === NEW_ACCOUNT_SAVE_AS_ACTION) {
+    return runNewAccountArtifactCopyInline;
+  }
   if (policy.moduleId === 'duplicate') {
     return Object.freeze({
       path: path.resolve(__dirname, '..', 'duplicate-inbound-match', 'worker-entry.js'),
@@ -105,6 +125,12 @@ function entryBindingForPolicy(policy, workerRoot, duplicateStartupGate) {
     return Object.freeze({
       path: path.resolve(__dirname, '..', 'fund-recon-worker', 'worker-entry.js'),
       cancellationTerminalErrorCodes: Object.freeze(['FUND_RECON_SHUTDOWN'])
+    });
+  }
+  if (policy.moduleId === 'new-account') {
+    return Object.freeze({
+      path: path.resolve(__dirname, '..', 'new-account', 'worker-entry.js'),
+      cancellationTerminalErrorCodes: Object.freeze(['NEW_ACCOUNT_GENERATION_CANCELLED'])
     });
   }
   const preFund = policy.moduleId === 'pre-fund';
@@ -172,9 +198,13 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
       ? (policy.actionKey === PRE_FUND_MPT_REPAIR_ACTION
           ? validatePreFundMptRepairResult
           : validatePreFundMptImportResult)
-      : (policy.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
+      : (policy.moduleId === 'new-account'
+          ? (policy.actionKey === NEW_ACCOUNT_SAVE_AS_ACTION
+              ? validateNewAccountSaveAsResult
+              : validateNewAccountGenerationResult)
+          : (policy.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
           ? validateToolboxMultiGenerationResult
-          : (value) => validateToolboxGenerationResult(value, policy.actionKey));
+          : (value) => validateToolboxGenerationResult(value, policy.actionKey)));
     validatorEntries[policy.result.validatorKey] = resultValidator;
     // Main explicitly executes the asynchronous technical/business validators before Publisher.
     // Registry bindings remain synchronous capability declarations for static contract coverage.
@@ -182,6 +212,9 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
     validatorEntries[policy.artifacts.businessValidatorKey] = resultValidator;
   }
   const validatorRegistry = createStaticRegistry(validatorEntries);
+  const resourceProfileRegistry = createStaticRegistry({
+    [NEW_ACCOUNT_GENERATION_POLICY.resources.profile]: estimateNewAccountGenerationPhaseResources
+  });
   const preFundTopologyPlanner = createPreFundMptTopologyPlanner({ availableParallelism });
   const duplicateTopologyPlanner = createDuplicatePairedTopologyPlanner({ availableParallelism });
   const topologyRegistry = createStaticRegistry(Object.fromEntries(
@@ -196,6 +229,7 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
   ));
   entryRegistry.freeze();
   validatorRegistry.freeze();
+  resourceProfileRegistry.freeze();
   topologyRegistry.freeze();
 
   const staticKeys = {
@@ -217,6 +251,7 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
     policies: BACKGROUND_EXECUTION_POLICIES,
     entryRegistry,
     validatorRegistry,
+    resourceProfileRegistry,
     topologyRegistry,
     staticKeys,
     generatedAt: '2026-08-25T00:00:00+08:00'

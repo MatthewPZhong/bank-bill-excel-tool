@@ -280,7 +280,7 @@
     }
   },
   {
-    "name": "nonpersistent-request-illegal-replaces",
+    "name": "phase-extension-illegal-replaces",
     "message": {
       "protocolVersion": 1,
       "channel": "service-control",
@@ -299,7 +299,7 @@
       },
       "payload": {
         "requestId": "state-1",
-        "requestKind": "pending-interaction-create",
+        "requestKind": "phase-extension",
         "requested": {
           "memoryBytes": 1048576,
           "cpuSlots": 0,
@@ -307,7 +307,7 @@
         },
         "replacesReservationId": "reservation-old",
         "owner": {
-          "kind": "interaction-token",
+          "kind": "phase",
           "ownerKeyHash": "statement-state",
           "candidateRevision": 1
         }

@@ -19,6 +19,7 @@ function runPublicationOperation(op, payload = {}, onCheckpoint = null) {
       targets: payload.targets,
       userDataDir: payload.userDataDir,
       requireValidatedArtifacts: payload.requireValidatedArtifacts === true,
+      requireTargetParentIdentity: payload.requireTargetParentIdentity === true,
       protectedSourcePaths: payload.protectedSourcePaths,
       batchContext,
       archiveInputFiles: payload.archiveInputFiles,

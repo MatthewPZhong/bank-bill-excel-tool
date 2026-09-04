@@ -611,7 +611,7 @@ Map<serviceKey, {
 6. 返回 `resource:adopt-ack`；
 7. adoption 超时、Worker exit、旧 generation 消息时回收 tentative grant。
 
-请求矩阵机器冻结：`persistent-state-replace ↔ service-state`，首次 replaces 可为 `null`，已有 adopted reservation 后必须精确引用当前 reservation；`pending-interaction-create ↔ interaction-token` 与 `phase-extension ↔ phase` 的 replaces 必须为 `null`。错 kind、stale/current mismatch 或跨 owner replacement 均 protocol-error。
+请求矩阵机器冻结：`persistent-state-replace ↔ service-state`，首次 replaces 可为 `null`，已有 adopted reservation 后必须精确引用当前 reservation；`pending-interaction-create ↔ interaction-token` 首次 replaces 必须为 `null`，替换时只允许同 owner、递增 revision、精确引用当前 adopted reservation 且旧 token 已 published，candidate 必须到 adopt-ack 才公开，reject/revoke/adoption timeout 保留旧 token；`phase-extension ↔ phase` 的 replaces 必须为 `null`。错 kind、stale/current mismatch、跨 owner 或跨 purpose replacement 均 protocol-error。
 
 Worker dynamic resourceVector 只含 memoryBytes/cpuSlots/ioHeavySlots；Main 扩展为五维时固定 workerThreadSlots=0、utilityProcessSlots=0，OS 载体已由 spawn 前 BaseLease 计入。
 

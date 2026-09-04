@@ -320,6 +320,38 @@ test('direct atomic replacement releases the old reservation only after the new 
   assert.deepEqual(governor.snapshot().activeUsage, vector({ memoryBytes: 4 }));
 });
 
+test('pending-interaction replacement keeps old grant until exact atomic adoption', async () => {
+  const governor = createGovernor({ budgets: vector({ memoryBytes: 10 }) });
+  const old = await governor.acquirePendingInteractionReservation(request(vector({ memoryBytes: 7 }), {
+    ownerKey: 'statement-token-slot'
+  }));
+  const candidate = await governor.acquirePendingInteractionReservation(request(vector({ memoryBytes: 9 }), {
+    ownerKey: 'statement-token-slot',
+    replacesReservationId: old.leaseId
+  }));
+
+  assert.equal(old.state, 'granted');
+  assert.equal(candidate.state, 'granted');
+  assert.deepEqual(governor.snapshot().activeUsage, vector({ memoryBytes: 9 }));
+
+  candidate.release('candidate-rejected');
+  assert.equal(old.state, 'granted');
+  assert.deepEqual(governor.snapshot().activeUsage, vector({ memoryBytes: 7 }));
+  const acceptedCandidate = await governor.acquirePendingInteractionReservation(request(
+    vector({ memoryBytes: 9 }),
+    { ownerKey: 'statement-token-slot', replacesReservationId: old.leaseId }
+  ));
+
+  const adopted = await governor.replaceReservationAtomically({
+    oldReservationId: old.leaseId,
+    nextRequest: { tentativeReservationId: acceptedCandidate.leaseId }
+  });
+  assert.equal(old.state, 'released');
+  assert.equal(adopted.kind, 'pending-interaction');
+  assert.deepEqual(governor.snapshot().activeUsage, vector({ memoryBytes: 9 }));
+  adopted.release('token-consumed');
+});
+
 test('compound identity and count violations fail before mutating accounting', async () => {
   const governor = createGovernor();
   const base = await governor.acquireBaseLease(request(vector({ workerThreadSlots: 1 }), {

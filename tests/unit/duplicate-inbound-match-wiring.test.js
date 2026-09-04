@@ -202,16 +202,30 @@ test.describe('重复入金匹配 UI / preload / IPC 接线', () => {
     assert.match(main, /DUPLICATE_STARTUP_CONFLICT_SCOPE_KEY/);
   });
 
-  test('startup严格先注册只读inspector并持久扫描，再允许getter构造Service', () => {
-    const recovery = extractFunction(main, 'initializeBackgroundExecutionRecovery');
-    const registerInspectorAt = recovery.indexOf(
+  test('startup在freeze前同时注册manual与duplicate恢复链，再允许getter构造Service', () => {
+    const recovery = extractFunction(main, 'initializeBackgroundExecutionRecovery')
+      .replace(/\r\n?/g, '\n');
+    const registerManualInspectorAt = recovery.indexOf(
+      'inspectorRegistry.register(MANUAL_BALANCE_INSPECTOR_KEY'
+    );
+    const registerDuplicateInspectorAt = recovery.indexOf(
       'inspectorRegistry.register(DUPLICATE_STARTUP_INSPECTOR_KEY'
     );
-    const freezeAt = recovery.indexOf('inspectorRegistry.freeze()');
+    const registerManualProviderAt = recovery.indexOf(
+      'providerRegistry.register(\n    MANUAL_BALANCE_SETTLEMENT_KEY'
+    );
+    const registerDuplicateProviderAt = recovery.indexOf(
+      'providerRegistry.register(\n    DUPLICATE_STARTUP_RECOVERY_KEY'
+    );
+    const inspectorFreezeAt = recovery.indexOf('inspectorRegistry.freeze()');
+    const providerFreezeAt = recovery.indexOf('providerRegistry.freeze()');
     const scanAt = recovery.indexOf('await coordinator.scanAndRecover()');
     const readyAt = recovery.lastIndexOf('duplicateStartupRecoveryReady = true');
-    assert.ok(registerInspectorAt >= 0 && registerInspectorAt < freezeAt);
-    assert.ok(freezeAt < scanAt && scanAt < readyAt);
+    assert.ok(registerManualInspectorAt >= 0 && registerManualInspectorAt < inspectorFreezeAt);
+    assert.ok(registerDuplicateInspectorAt >= 0 && registerDuplicateInspectorAt < inspectorFreezeAt);
+    assert.ok(registerManualProviderAt >= 0 && registerManualProviderAt < providerFreezeAt);
+    assert.ok(registerDuplicateProviderAt >= 0 && registerDuplicateProviderAt < providerFreezeAt);
+    assert.ok(inspectorFreezeAt < scanAt && providerFreezeAt < scanAt && scanAt < readyAt);
 
     const getter = extractFunction(main, 'getDuplicateInboundMatchService');
     assert.ok(

@@ -15,6 +15,7 @@ const {
   SNAPSHOT_PATH,
   inspectGitBackedFile,
   isSupportedCurrentPackageVersion,
+  matchesReviewedCanonicalText,
   sha256File,
   validateReleaseEvidence
 } = require('../../../scripts/validate-v3-2-2-release-evidence');
@@ -96,6 +97,41 @@ test('release evidence文本hash不受Windows CRLF checkout影响', (t) => {
   assert.equal(sha256File(crlfPath), sha256File(lfPath));
 });
 
+test('3.2.2共享sequence只允许在冻结全文后追加后续3.2.x章节', () => {
+  const reviewed = '# 顺序\n\n冻结内容\n';
+  assert.equal(matchesReviewedCanonicalText(reviewed, reviewed), true);
+  assert.equal(matchesReviewedCanonicalText(
+    reviewed + '\n## v3.2.3 后续门禁\n\n新增内容\n',
+    reviewed,
+    'VERSIONED_APPEND_ONLY'
+  ), true);
+  assert.equal(matchesReviewedCanonicalText(
+    '# 顺序\n\n篡改内容\n\n## v3.2.3 后续门禁\n',
+    reviewed,
+    'VERSIONED_APPEND_ONLY'
+  ), false);
+  assert.equal(matchesReviewedCanonicalText(
+    reviewed + '\n## v3.2.2 重复旧版章节\n',
+    reviewed,
+    'VERSIONED_APPEND_ONLY'
+  ), false);
+  assert.equal(matchesReviewedCanonicalText(
+    reviewed + '\n## v3.2.x 非法版本章节\n',
+    reviewed,
+    'VERSIONED_APPEND_ONLY'
+  ), false);
+  assert.equal(matchesReviewedCanonicalText(
+    reviewed + '\n任意尾随文本\n',
+    reviewed,
+    'VERSIONED_APPEND_ONLY'
+  ), false);
+  assert.equal(matchesReviewedCanonicalText(
+    reviewed + '\n## v3.2.3 后续门禁\n',
+    reviewed,
+    'EXACT'
+  ), false);
+});
+
 test('Git anchor只接受冻结base祖先中的真实reviewedHead:path blob', () => {
   const valid = inspectGitBackedFile(
     REPOSITORY_ROOT,
@@ -139,6 +175,24 @@ test('R3.2.2 snapshot锁定10 action、18 base anchors与独立证据闭环', ()
   assert.equal(result.commonRuntimeActionCount, 6);
   assert.equal(result.bankBuCommonRuntimeActionCount, 0);
   assert.equal(snapshot.baseAnchors.length, 18);
+});
+
+test('历史base anchor从冻结reviewed blob取证，不被后续版本合法改写反向失效', () => {
+  const snapshot = loadSnapshot();
+  const anchor = snapshot.baseAnchors.find(
+    (item) => item.id === 'DUPLICATE-IMPORT-STARTUP-OWNER'
+  );
+  const reviewed = inspectGitBackedFile(
+    REPOSITORY_ROOT,
+    anchor.reviewedHead,
+    anchor.source
+  );
+  const current = fs.readFileSync(path.join(REPOSITORY_ROOT, anchor.source), 'utf8');
+  assert.match(reviewed.reviewedText, /startup严格先注册只读inspector/);
+  assert.doesNotMatch(current, /startup严格先注册只读inspector/);
+  assert.match(current, /startup在freeze前同时注册manual与duplicate恢复链/);
+  const result = validateReleaseEvidence(snapshot);
+  assert.equal(result.valid, true, JSON.stringify(result.errors));
 });
 
 test('历史snapshot保持3.1.14事实，当前authority只接受3.2.2及后续v3.2.x稳定版本', () => {

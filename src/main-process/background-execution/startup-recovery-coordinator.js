@@ -11,6 +11,12 @@ const {
   normalizeRecoverySource,
   normalizeSettlementRecoveryResult
 } = require('./recovery-source');
+const {
+  createRecoveryHoldRequest,
+  inspectionObservationSafePayload,
+  recoveryHoldIdFor,
+  recoveryHoldReasonForInspection
+} = require('./recovery-hold-request');
 
 const DEFAULT_TRANSIENT_ATTEMPTS = 3;
 const DEFAULT_BACKOFF_BASE_MS = 25;
@@ -48,18 +54,6 @@ function sameOwner(left, right) {
     && left.taskRunId === right.taskRunId;
 }
 
-function holdIdFor(source) {
-  return `hold:v1:${canonicalSha256([source.sourceKind, source.sourceRef])}`;
-}
-
-function safeSummaryFor(source, reasonCode) {
-  return Object.freeze({
-    reasonCode,
-    sourceKind: source.sourceKind,
-    sourceRef: source.sourceRef
-  });
-}
-
 function intentSource(intent, resolvePolicy) {
   if (intent.evidenceHash !== canonicalSha256(intent.boundedEvidence)) {
     throw Object.assign(new Error('Critical Intent evidence hash 与持久 bounded evidence 不一致'), {
@@ -94,6 +88,11 @@ function createStartupRecoveryCoordinator(options = {}) {
   const inspectorRegistry = requireDependency(options.inspectorRegistry, 'get', 'inspectorRegistry');
   const providerRegistry = requireDependency(options.providerRegistry, 'list', 'providerRegistry');
   const ownerRepository = requireDependency(options.requestOwnerRepository, 'reserveTransitionRequest', 'requestOwnerRepository');
+  requireDependency(
+    ownerRepository,
+    'resumePreparedTransitionRequest',
+    'requestOwnerRepository'
+  );
   const attemptRepository = requireDependency(options.observationAttemptRepository, 'allocateNextObservationAttempt', 'observationAttemptRepository');
   const controlRepository = requireDependency(options.recoveryControlRepository, 'runInControlTransaction', 'recoveryControlRepository');
   const resolvePolicy = typeof options.resolvePolicy === 'function' ? options.resolvePolicy : (() => null);
@@ -153,26 +152,30 @@ function createStartupRecoveryCoordinator(options = {}) {
     });
   }
 
-  function holdTransition(source, reasonCode) {
-    const summary = safeSummaryFor(source, reasonCode);
-    return {
-      entityKind: 'recovery-hold',
-      command: 'create-or-get',
-      input: {
-        contractVersion: 1,
-        holdId: holdIdFor(source),
-        sourceKind: source.sourceKind,
-        sourceRef: source.sourceRef,
-        intentId: source.intentId ?? null,
-        actionKey: source.actionKey,
-        operationKey: source.operationKey,
-        taskRunId: source.taskRunId,
-        conflictScopeKey: source.conflictScopeKey,
-        reasonCode,
-        safeSummary: summary,
-        evidenceHash: canonicalSha256(summary)
-      }
-    };
+  function preparedHoldFor(source) {
+    const probe = createRecoveryHoldRequest(source, 'INSPECTION_UNKNOWN');
+    const prepared = ownerRepository.resumePreparedTransitionRequest(probe.requestKey);
+    if (!prepared) return null;
+    const transition = prepared.transition;
+    if (transition.entityKind !== 'recovery-hold' || transition.command !== 'create-or-get' ||
+        transition.input.sourceKind !== source.sourceKind ||
+        transition.input.sourceRef !== source.sourceRef) {
+      throw new StartupRecoveryError(
+        'STARTUP_RECOVERY_PREPARED_HOLD_INVALID',
+        'prepared recovery Hold 与 RecoverySource 不一致',
+        { sourceKind: source.sourceKind, sourceRef: source.sourceRef }
+      );
+    }
+    const canonical = createRecoveryHoldRequest(source, transition.input.reasonCode);
+    if (canonicalSha256(canonical.transition) !== canonicalSha256(transition) ||
+        canonicalSha256(canonical.safePayload) !== canonicalSha256(prepared.safePayload)) {
+      throw new StartupRecoveryError(
+        'STARTUP_RECOVERY_PREPARED_HOLD_CONFLICT',
+        'prepared recovery Hold 不是 canonical request',
+        { sourceKind: source.sourceKind, sourceRef: source.sourceRef }
+      );
+    }
+    return canonical;
   }
 
   function defaultHoldResolutionRequest(source, activeHold, resolution, evidence) {
@@ -213,10 +216,10 @@ function createStartupRecoveryCoordinator(options = {}) {
   }
 
   function createHoldWithObservation(source, eventType, safePayload, reasonCode, extraTransitions = []) {
-    const hold = holdTransition(source, reasonCode);
-    const holdRequest = reserveTransition(hold, { reasonCode });
+    const hold = createRecoveryHoldRequest(source, reasonCode);
+    const holdRequest = reserveTransition(hold.transition, hold.safePayload);
     const observation = reserveObservation(source, eventType, safePayload, {
-      holdId: hold.input.holdId
+      holdId: hold.holdId
     });
     return writeAtomic(observation, [holdRequest, ...extraTransitions]);
   }
@@ -251,7 +254,7 @@ function createStartupRecoveryCoordinator(options = {}) {
     if (ms > 0) await sleep(ms);
   }
 
-  async function inspectSource(source, activeHold) {
+  async function inspectSource(source, activeHold, preparedHold = null) {
     const blockedByOtherHold = activeHold
       && (activeHold.sourceKind !== source.sourceKind || activeHold.sourceRef !== source.sourceRef);
     let inspector;
@@ -271,12 +274,24 @@ function createStartupRecoveryCoordinator(options = {}) {
 
     for (let attempt = 1; attempt <= transientAttempts; attempt += 1) {
       try {
-        const inspection = normalizeRecoveryInspectionResult(source, await inspector(source));
+        const forcePreparedHold = Boolean(preparedHold);
+        const durabilityBlocked = (activeHold &&
+          activeHold.reasonCode === 'DURABILITY_BARRIER_UNAVAILABLE') ||
+          (preparedHold && preparedHold.reasonCode === 'DURABILITY_BARRIER_UNAVAILABLE');
+        const inspection = normalizeRecoveryInspectionResult(source, await inspector(source, {
+          forceDurabilityIncomplete: forcePreparedHold || durabilityBlocked,
+          durabilityFailure: durabilityBlocked
+        }));
         const safePayload = blockedByOtherHold
           ? { outcome: inspection.outcome, disposition: 'blocked-by-active-scope-hold' }
-          : { outcome: inspection.outcome, evidenceHash: inspection.evidenceHash };
+          : inspectionObservationSafePayload(inspection);
+        const prospectiveHoldId = activeHold ? activeHold.holdId
+          : preparedHold ? preparedHold.holdId
+            : ['partially-committed', 'unknown'].includes(inspection.outcome)
+              ? recoveryHoldIdFor(source)
+              : null;
         const observation = reserveObservation(source, 'inspection-completed', safePayload, {
-          holdId: activeHold ? activeHold.holdId : null
+          holdId: prospectiveHoldId
         });
         if (blockedByOtherHold) {
           writeAtomic(observation, []);
@@ -288,7 +303,7 @@ function createStartupRecoveryCoordinator(options = {}) {
           holdOrLinkObservation(source, activeHold, 'inspection-failed-transient', {
             errorCode: error.code,
             thresholdReached: true
-          }, 'INSPECTOR_UNAVAILABLE');
+          }, preparedHold ? preparedHold.reasonCode : 'INSPECTOR_UNAVAILABLE');
           throw new StartupRecoveryError(
             'STARTUP_RECOVERY_INSPECTION_INVALID',
             'Inspector 返回不符合 RecoveryInspectionResultV1 的结果',
@@ -306,7 +321,7 @@ function createStartupRecoveryCoordinator(options = {}) {
             activeHold,
             'inspection-failed-transient',
             safePayload,
-            'INSPECTOR_UNAVAILABLE'
+            preparedHold ? preparedHold.reasonCode : 'INSPECTOR_UNAVAILABLE'
           );
           return Object.freeze({ source, inspection: null, blocked: true, hold: activeHold });
         }
@@ -316,7 +331,7 @@ function createStartupRecoveryCoordinator(options = {}) {
             activeHold,
             'inspection-failed-transient',
             safePayload,
-            'INSPECTOR_UNAVAILABLE'
+            preparedHold ? preparedHold.reasonCode : 'INSPECTOR_UNAVAILABLE'
           );
           return Object.freeze({ source, inspection: null, blocked: true, transientFailure: true });
         }
@@ -515,7 +530,8 @@ function createStartupRecoveryCoordinator(options = {}) {
   }
 
   async function recoverSource(source, activeHold = null) {
-    const inspected = await inspectSource(source, activeHold);
+    const preparedHold = activeHold ? null : preparedHoldFor(source);
+    const inspected = await inspectSource(source, activeHold, preparedHold);
     if (inspected.blocked || !inspected.inspection) return inspected;
     const inspection = inspected.inspection;
     const immediateItems = immediateIntentTransitions(source, inspection);
@@ -525,16 +541,18 @@ function createStartupRecoveryCoordinator(options = {}) {
           phase: 'inspection-hold',
           source,
           inspection,
-          holdId: activeHold ? activeHold.holdId : holdIdFor(source)
+          holdId: activeHold ? activeHold.holdId
+            : preparedHold ? preparedHold.holdId : recoveryHoldIdFor(source)
         }))
       ];
-      let holdId = activeHold ? activeHold.holdId : null;
+      let holdId = activeHold ? activeHold.holdId : preparedHold ? preparedHold.holdId : null;
       if (!activeHold) {
-        const hold = holdTransition(source, inspection.outcome === 'unknown'
-          ? 'INSPECTION_UNKNOWN'
-          : 'PARTIALLY_COMMITTED');
-        transitions.unshift(reserveTransition(hold, { outcome: inspection.outcome }));
-        holdId = hold.input.holdId;
+        const hold = preparedHold || createRecoveryHoldRequest(
+          source,
+          recoveryHoldReasonForInspection(inspection)
+        );
+        transitions.unshift(reserveTransition(hold.transition, hold.safePayload));
+        holdId = hold.holdId;
       }
       writeAtomic(inspected.observation, transitions);
       return Object.freeze({ source, inspection, held: true, holdId });
@@ -546,7 +564,8 @@ function createStartupRecoveryCoordinator(options = {}) {
         phase: 'inspection-result',
         source,
         inspection,
-        holdId: activeHold ? activeHold.holdId : holdIdFor(source)
+        holdId: activeHold ? activeHold.holdId
+          : preparedHold ? preparedHold.holdId : recoveryHoldIdFor(source)
       }))
     ];
     const inspectionClosesIntent = !source.intentId || immediateItems.some((item) => (
@@ -591,13 +610,13 @@ function createStartupRecoveryCoordinator(options = {}) {
           taskRunId: intent.taskRunId,
           conflictScopeKey: intent.conflictScopeKey
         };
-        const hold = holdTransition(
+        const hold = createRecoveryHoldRequest(
           rawSource,
           error && error.code === 'RECOVERY_INTENT_EVIDENCE_HASH_MISMATCH'
             ? 'INSPECTION_UNKNOWN'
             : 'SETTLEMENT_PROVIDER_UNAVAILABLE'
         );
-        writeAtomic(null, [reserveTransition(hold, { errorCode: errorCode(error, 'RECOVERY_SOURCE_INVALID') })]);
+        writeAtomic(null, [reserveTransition(hold.transition, hold.safePayload)]);
         throw new StartupRecoveryError(
           'STARTUP_RECOVERY_INTENT_SOURCE_INVALID',
           'Open Critical Intent 无法转换为 RecoverySourceV1',
@@ -650,13 +669,8 @@ function createStartupRecoveryCoordinator(options = {}) {
       const left = collision.source;
       const existingHold = activeByScope.get(left.conflictScopeKey);
       if (!existingHold) {
-        const hold = holdTransition(left, collision.reasonCode);
-        writeAtomic(null, [reserveTransition(hold, {
-          outcome: 'unknown',
-          disposition: collision.reasonCode === 'RECOVERY_SOURCE_OWNER_CONFLICT'
-            ? 'owner-conflict'
-            : 'source-identity-conflict'
-        })]);
+        const hold = createRecoveryHoldRequest(left, collision.reasonCode);
+        writeAtomic(null, [reserveTransition(hold.transition, hold.safePayload)]);
         activeByScope.set(left.conflictScopeKey, readRepository.getRecoveryHoldBySource(
           left.sourceKind,
           left.sourceRef

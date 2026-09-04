@@ -544,6 +544,16 @@ const {
   resolveManualBalanceSeedFilePlanInputPaths,
   writeManualBalanceSeedPlan
 } = require('./main-process/manual-balance-seed-preflight');
+const {
+  MANUAL_BALANCE_ACTION_KEY,
+  MANUAL_BALANCE_INSPECTOR_KEY,
+  MANUAL_BALANCE_SETTLEMENT_KEY,
+  createManualBalanceRecoveryPlanTransitions,
+  createManualBalanceSeedInspector,
+  createManualBalanceSettlementRecoveryProvider,
+  manualBalanceRecoveryPolicy,
+  resolveManualBalanceTargetAlias
+} = require('./main-process/manual-balance-seed-settlement');
 const { parseBankAccountExcel } = require('./backend/bank-account-import');
 const { writeOwnAccounts } = require('./backend/own-account-store');
 const {
@@ -599,6 +609,12 @@ const {
   createStatementGenerationHelpers
 } = require('./main-process/statement-generation');
 const {
+  buildDateRangeLabel,
+  deriveBalanceRecords,
+  parseRequiredBillDates,
+  scanBalanceSeedStatus: scanStatementBalanceSeedStatus
+} = require('./main-process/statement-generation-business');
+const {
   ALL_BANKS_TEMPLATE_SCOPE,
   assembleMonthlyBalance,
   toBalanceRows
@@ -611,6 +627,12 @@ const {
   normalizeMaintainedBigAccounts,
   resolveRecognizedBigAccount
 } = require('./main-process/big-account-recognition');
+const {
+  NEW_ACCOUNT_EXPORT_NAME,
+  normalizeNewAccountAccounts,
+  prepareNewAccountGeneration,
+  validateNewAccountAccounts
+} = require('./main-process/new-account/generation-core');
 
 if (!packagedRuntimeModeSelected && process.env.APP_USER_DATA_DIR) {
   app.setPath('userData', process.env.APP_USER_DATA_DIR);
@@ -1069,7 +1091,6 @@ const BILL_SPLIT_GROUP_FIELDS = [
   BILL_SPLIT_MERGE_MAPPING_FIELD,
   REUSE_MODULE_MAPPING_FIELD
 ];
-const NEW_ACCOUNT_EXPORT_NAME = 'NEW_BALANCE';
 const BACKGROUND_IMAGE_LIMITS = Object.freeze({
   maxSizeBytes: 5 * 1024 * 1024,
   minWidth: 1200,
@@ -3467,20 +3488,6 @@ function getTemplateMappingConfig(templateId) {
   };
 }
 
-function buildDateRangeLabel(billDates) {
-  const sortedDates = Array.from(new Set(billDates)).sort();
-
-  if (sortedDates.length === 0) {
-    return '';
-  }
-
-  if (sortedDates.length === 1) {
-    return sortedDates[0];
-  }
-
-  return `${sortedDates[0]}~${sortedDates[sortedDates.length - 1]}`;
-}
-
 function buildOutputFilePath({ kind, outputFileName }) {
   const date = getToday();
   const outputFolder = path.join(ensureStorageRoot(), 'exports', date, kind);
@@ -3562,84 +3569,6 @@ function buildFieldIndexMap(headerRow) {
   return fieldIndexMap;
 }
 
-function getMappedFieldValue(row, fieldIndexMap, fieldName) {
-  const fieldIndex = fieldIndexMap.get(fieldName);
-  return fieldIndex === undefined ? '' : row[fieldIndex];
-}
-
-function parseRequiredBillDates(detailRows) {
-  const fieldIndexMap = buildFieldIndexMap(detailRows[0] || []);
-  const billDateIndex = fieldIndexMap.get('BillDate');
-
-  if (billDateIndex === undefined) {
-    throw new FileValidationError('FILE_READ', '当前模板必须映射 BillDate 字段');
-  }
-
-  const billDates = [];
-
-  detailRows.slice(1).forEach((row) => {
-    const rawValue = row[billDateIndex];
-    const normalizedValue = normalizeCell(rawValue);
-
-    if (!normalizedValue) {
-      return;
-    }
-
-    const parsedDate = parseDateValue(rawValue);
-
-    if (!parsedDate) {
-      throw new FileValidationError('FILE_READ', `账单日期存在无效值：${normalizedValue}`);
-    }
-
-    billDates.push(formatDateLabel(parsedDate));
-  });
-
-  if (!billDates.length) {
-    throw new FileValidationError('FILE_READ', '导入文件中未找到有效的 BillDate');
-  }
-
-  return billDates;
-}
-
-function ensureNumericValue(rawValue, { fieldName, dateLabel, allowBlank = false }) {
-  const normalizedValue = normalizeCell(rawValue);
-
-  if (!normalizedValue) {
-    return allowBlank ? null : 0;
-  }
-
-  const parsedValue = parseNumericValue(rawValue);
-
-  if (parsedValue === null) {
-    throw new FileValidationError('FILE_READ', `${dateLabel} 的 ${fieldName} 不是有效数字`);
-  }
-
-  return parsedValue;
-}
-
-function buildBalanceTemplateRow(balanceTemplateFields, valuesByField) {
-  const normalizedValues = new Map(
-    Object.entries(valuesByField).map(([fieldName, value]) => [normalizeCell(fieldName), value])
-  );
-
-  return balanceTemplateFields.map((fieldName) => {
-    const normalizedField = normalizeCell(fieldName);
-    return normalizedValues.has(normalizedField) ? normalizedValues.get(normalizedField) : '';
-  });
-}
-
-function hasMultipleEndingBalances(entries) {
-  const uniqueBalances = Array.from(
-    new Set(
-      entries
-        .filter((entry) => entry.balanceValue !== null)
-        .map((entry) => Number(Number(entry.balanceValue).toFixed(2)))
-    )
-  );
-
-  return uniqueBalances.length > 1;
-}
-
 function storeGeneratedBalanceSeeds({ templateName, seedRecords = [] }) {
   if (!Array.isArray(seedRecords) || !seedRecords.length) {
     return;
@@ -3661,451 +3590,7 @@ function storeGeneratedBalanceSeeds({ templateName, seedRecords = [] }) {
 }
 
 function scanBalanceSeedStatus({ detailRows, templateName }) {
-  const fieldIndexMap = buildFieldIndexMap(detailRows[0] || []);
-  const merchantIdIndex = fieldIndexMap.get('MerchantId');
-  const currencyIndex = fieldIndexMap.get('Currency');
-  const billDateIndex = fieldIndexMap.get('BillDate');
-
-  if (merchantIdIndex === undefined || billDateIndex === undefined) {
-    return { total: 0, missing: 0 };
-  }
-
-  const bankNameParts = splitTemplateName(templateName);
-  const accountEarliestDates = new Map();
-
-  detailRows.slice(1).forEach((row) => {
-    const merchantId = normalizeCell(row[merchantIdIndex]);
-    const currency = currencyIndex !== undefined ? normalizeCell(row[currencyIndex]) : '';
-    const billDate = normalizeCell(row[billDateIndex]);
-    if (!merchantId || !billDate) return;
-
-    const parsedDate = parseDateValue(billDate);
-    if (!parsedDate) return;
-
-    const dateLabel = formatDateLabel(parsedDate);
-    const key = `${merchantId}@@${currency}`;
-    const existing = accountEarliestDates.get(key);
-
-    if (!existing || dateLabel < existing.dateLabel) {
-      accountEarliestDates.set(key, { merchantId, currency, dateLabel });
-    }
-  });
-
-  const accountKeys = new Map();
-  accountEarliestDates.forEach((account, key) => {
-    const seedRecord = findPreviousBalanceSeed(ensureStorageRoot(), {
-      bankName: bankNameParts.bankName,
-      merchantId: account.merchantId,
-      currency: account.currency,
-      beforeBillDate: account.dateLabel
-    });
-
-    accountKeys.set(key, { merchantId: account.merchantId, currency: account.currency, hasSeed: seedRecord !== null });
-  });
-
-  const total = accountKeys.size;
-  const missing = Array.from(accountKeys.values()).filter((a) => !a.hasSeed).length;
-  let missingIndex = 0;
-  const missingIndexByKey = new Map();
-  accountKeys.forEach((account, key) => {
-    if (!account.hasSeed) {
-      missingIndex++;
-      missingIndexByKey.set(key, missingIndex);
-    }
-  });
-
-  return { total, missing, missingIndexByKey };
-}
-
-function buildBalanceSeedPrompt({ templateName, bankName, merchantId, currency, targetBillDate }) {
-  return {
-    templateName,
-    bankName,
-    merchantId: normalizeCell(merchantId),
-    currency: normalizeCell(currency),
-    targetBillDate: normalizeCell(targetBillDate)
-  };
-}
-
-function resolveSeededPreviousEndBalance({
-  previousEndBalance,
-  resolvePreviousEndBalance,
-  promptContext,
-  shouldPrompt
-}) {
-  if (previousEndBalance !== null) {
-    return previousEndBalance;
-  }
-
-  const seededBalance = typeof resolvePreviousEndBalance === 'function'
-    ? resolvePreviousEndBalance(promptContext)
-    : null;
-
-  if (seededBalance !== null && seededBalance !== undefined) {
-    return seededBalance;
-  }
-
-  if (shouldPrompt) {
-    throw new FileValidationError(
-      'BALANCE_SEED_REQUIRED',
-      '因首次导入余额，请导入上一个账单日余额用于余额校验',
-      {
-        context: promptContext
-      }
-    );
-  }
-
-  return null;
-}
-
-function deriveBalanceRecords({
-  detailRows,
-  templateName,
-  balanceTemplateFields,
-  mode = 'statement',
-  resolvePreviousEndBalance = null,
-  balanceAdjustments = []
-}) {
-  const fieldIndexMap = buildFieldIndexMap(detailRows[0] || []);
-  const balanceIndex = fieldIndexMap.get('Balance');
-  const billDateIndex = fieldIndexMap.get('BillDate');
-  const merchantIdIndex = fieldIndexMap.get('MerchantId');
-  const rowMetas = Array.isArray(detailRows.rowMetas) ? detailRows.rowMetas : [];
-
-  if (mode === 'statement' && balanceIndex === undefined) {
-    throw new FileValidationError('FILE_READ', '当前模板未配置 Balance 字段，无法生成余额账单');
-  }
-
-  if (billDateIndex === undefined) {
-    throw new FileValidationError('FILE_READ', '当前模板必须映射 BillDate 字段');
-  }
-
-  if (merchantIdIndex === undefined) {
-    throw new FileValidationError('FILE_READ', '当前模板启用 Balance 时必须映射 MerchantId 字段');
-  }
-
-  const groupedRows = new Map();
-  const bankNameParts = splitTemplateName(templateName);
-  const missingMerchantIdRows = [];
-
-  detailRows.slice(1).forEach((row, rowIndex) => {
-    const billDateRaw = row[billDateIndex];
-    const normalizedBillDate = normalizeCell(billDateRaw);
-
-    if (!normalizedBillDate) {
-      return;
-    }
-
-    const parsedDate = parseDateValue(billDateRaw);
-
-    if (!parsedDate) {
-      throw new FileValidationError('FILE_READ', `账单日期存在无效值：${normalizedBillDate}`);
-    }
-
-    const dateLabel = formatDateLabel(parsedDate);
-    const balanceValue = mode === 'statement'
-      ? ensureNumericValue(row[balanceIndex], {
-          fieldName: 'Balance',
-          dateLabel,
-          allowBlank: true
-        })
-      : null;
-    const creditAmount = ensureNumericValue(getMappedFieldValue(row, fieldIndexMap, 'Credit Amount'), {
-      fieldName: 'Credit Amount',
-      dateLabel,
-      allowBlank: false
-    });
-    const debitAmount = ensureNumericValue(getMappedFieldValue(row, fieldIndexMap, 'Debit Amount'), {
-      fieldName: 'Debit Amount',
-      dateLabel,
-      allowBlank: false
-    });
-    const currency = normalizeCell(getMappedFieldValue(row, fieldIndexMap, 'Currency'));
-    const bankAccount = normalizeCell(getMappedFieldValue(row, fieldIndexMap, 'MerchantId'));
-
-    if (!bankAccount) {
-      missingMerchantIdRows.push({
-        sourceRowNumber: rowMetas[rowIndex]?.sourceRowNumber || rowIndex + 2,
-        dateLabel
-      });
-      return;
-    }
-
-    const groupKey = `${bankAccount}@@${currency}`;
-
-    if (!groupedRows.has(groupKey)) {
-      groupedRows.set(groupKey, {
-        merchantId: bankAccount,
-        currency,
-        dateMap: new Map()
-      });
-    }
-
-    const targetGroup = groupedRows.get(groupKey);
-
-    if (!targetGroup.dateMap.has(dateLabel)) {
-      targetGroup.dateMap.set(dateLabel, []);
-    }
-
-    targetGroup.dateMap.get(dateLabel).push({
-      balanceValue,
-      creditAmount,
-      debitAmount
-    });
-  });
-
-  if (missingMerchantIdRows.length) {
-    throw new FileValidationError(
-      'FILE_READ',
-      '当前模板启用 Balance 时，导入文件中的 MerchantId 不能为空',
-      {
-        detailLines: missingMerchantIdRows.map((row) => `第${row.sourceRowNumber}行，账单日期：${row.dateLabel}`),
-        context: {
-          templateName
-        }
-      }
-    );
-  }
-
-  const groupedEntries = Array.from(groupedRows.values()).sort((left, right) => {
-    const merchantCompare = left.merchantId.localeCompare(right.merchantId, 'zh-Hans-CN');
-
-    if (merchantCompare !== 0) {
-      return merchantCompare;
-    }
-
-    return left.currency.localeCompare(right.currency, 'zh-Hans-CN');
-  });
-
-  if (!groupedEntries.length) {
-    throw new FileValidationError('FILE_READ', '导入文件中未找到可用于余额账单的账单日期');
-  }
-
-  const records = [];
-  const seedRecords = [];
-  const allBillDates = new Set();
-
-  groupedEntries.forEach((group) => {
-    const dateKeys = Array.from(group.dateMap.keys()).sort();
-    let previousEndBalance = null;
-    let lastCumulativeAdjustment = 0;
-
-    dateKeys.forEach((dateLabel) => {
-      const entries = group.dateMap.get(dateLabel);
-      const promptContext = buildBalanceSeedPrompt({
-        templateName,
-        bankName: bankNameParts.bankName,
-        merchantId: group.merchantId,
-        currency: group.currency,
-        targetBillDate: dateLabel
-      });
-      let endBalance = null;
-
-      if (mode === 'calculated') {
-        const effectivePreviousEndBalance = resolveSeededPreviousEndBalance({
-          previousEndBalance,
-          resolvePreviousEndBalance,
-          promptContext,
-          shouldPrompt: true
-        });
-        endBalance = calculateEndingBalanceFromAmounts({
-          previousEndBalance: effectivePreviousEndBalance,
-          entries
-        });
-      } else {
-        const isFirstImportedDate = previousEndBalance === null;
-        const needsSeedDisambiguation = hasMultipleEndingBalances(entries);
-        let effectivePreviousEndBalance = previousEndBalance;
-
-        if (isFirstImportedDate && needsSeedDisambiguation) {
-          effectivePreviousEndBalance = resolveSeededPreviousEndBalance({
-            previousEndBalance,
-            resolvePreviousEndBalance,
-            promptContext,
-            shouldPrompt: true
-          });
-        }
-
-        try {
-          endBalance = inferEndingBalance({
-            previousEndBalance: effectivePreviousEndBalance,
-            entries,
-            dateLabel
-          });
-        } catch (error) {
-          const needsRefreshedSeed = error instanceof FileValidationError
-            && error.code === 'FILE_READ'
-            && isFirstImportedDate
-            && needsSeedDisambiguation
-            && effectivePreviousEndBalance !== null;
-
-          if (needsRefreshedSeed) {
-            throw new FileValidationError(
-              'BALANCE_SEED_REQUIRED',
-              '因首次导入余额，请导入上一个账单日余额用于余额校验',
-              {
-                context: promptContext
-              }
-            );
-          }
-
-          throw error;
-        }
-      }
-
-      const cumulativeAdjustment = resolveBalanceAdjustment(balanceAdjustments, {
-        merchantId: group.merchantId,
-        currency: group.currency,
-        dateLabel
-      });
-      const incrementalAdjustment = Math.round((cumulativeAdjustment - lastCumulativeAdjustment) * 100) / 100;
-      if (incrementalAdjustment && endBalance !== null) {
-        endBalance = Math.round((endBalance + incrementalAdjustment) * 100) / 100;
-      }
-      lastCumulativeAdjustment = cumulativeAdjustment;
-
-      previousEndBalance = endBalance;
-      allBillDates.add(dateLabel);
-      records.push(buildBalanceTemplateRow(balanceTemplateFields, {
-        银行名称: bankNameParts.bankName,
-        所在地: bankNameParts.location,
-        币种: group.currency,
-        银行账号: group.merchantId,
-        账单日期: dateLabel,
-        期初余额: '',
-        期初可用余额: '',
-        期末余额: endBalance,
-        期末可用余额: ''
-      }));
-      seedRecords.push({
-        merchantId: group.merchantId,
-        currency: group.currency,
-        billDate: dateLabel,
-        endBalance,
-        generationMethod: mode === 'calculated'
-          ? BALANCE_SEED_GENERATION_METHODS.calculated
-          : BALANCE_SEED_GENERATION_METHODS.statement
-      });
-    });
-  });
-
-  return {
-    records,
-    billDates: Array.from(allBillDates).sort(),
-    seedRecords
-  };
-}
-
-function normalizeDateOnly(date) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
-}
-
-function buildNewAccountBillDates(openDate, today = new Date()) {
-  const normalizedOpenDate = normalizeDateOnly(openDate);
-  const normalizedToday = normalizeDateOnly(today);
-  const yesterday = new Date(normalizedToday.getTime());
-  yesterday.setDate(yesterday.getDate() - 1);
-
-  if (normalizedOpenDate.getTime() > yesterday.getTime()) {
-    throw new FileValidationError('FILE_READ', '开户日期不能晚于昨日');
-  }
-
-  const totalDays = Math.round(
-    (yesterday.getTime() - normalizedOpenDate.getTime()) / (24 * 60 * 60 * 1000)
-  ) + 1;
-
-  if (totalDays > 3650) {
-    throw new FileValidationError('FILE_READ', '开户日期距今超过 10 年，不支持生成');
-  }
-
-  const dates = [];
-  let cursor = new Date(normalizedOpenDate.getTime());
-
-  while (cursor.getTime() <= yesterday.getTime()) {
-    dates.push(normalizeDateOnly(new Date(cursor.getTime())));
-    cursor.setDate(cursor.getDate() + 1);
-  }
-
-  return dates;
-}
-
-function normalizeNewAccountCurrencyValues({ currency, currencies = [], isMultiCurrency = false }) {
-  return Array.from(
-    new Set(
-      ((isMultiCurrency && Array.isArray(currencies) && currencies.length) ? currencies : [currency])
-        .map((value) => normalizeCell(value))
-        .filter((value) => value !== '')
-    )
-  );
-}
-
-function normalizeNewAccountAccounts(payload = {}) {
-  const rawAccounts = Array.isArray(payload.accounts) && payload.accounts.length
-    ? payload.accounts
-    : [{
-        bankName: payload.bankName,
-        location: payload.location,
-        currency: payload.currency,
-        currencies: payload.currencies,
-        bankAccount: payload.bankAccount,
-        openingDate: payload.openingDate,
-        isMultiCurrency: payload.isMultiCurrency
-      }];
-
-  return rawAccounts.map((item) => ({
-    bankName: normalizeCell(item.bankName),
-    location: normalizeCell(item.location),
-    currency: normalizeCell(item.currency),
-    currencies: Array.isArray(item.currencies) ? item.currencies.map((value) => normalizeCell(value)) : [],
-    bankAccount: normalizeCell(item.bankAccount),
-    openingDateRaw: normalizeCell(item.openingDate),
-    openingDate: parseDateValue(item.openingDate),
-    isMultiCurrency: Boolean(item.isMultiCurrency)
-  }));
-}
-
-function buildNewAccountBalanceRecords({
-  accounts = [],
-  balanceTemplateFields
-}) {
-  const records = [];
-  const allBillDates = new Set();
-  const allCurrencies = new Set();
-
-  accounts.forEach((account) => {
-    const billDates = buildNewAccountBillDates(account.openingDate);
-    const currencyValues = normalizeNewAccountCurrencyValues(account);
-
-    if (!currencyValues.length) {
-      throw new FileValidationError('FILE_READ', '至少需要提供一个币种');
-    }
-
-    billDates.forEach((billDate) => {
-      const billDateLabel = formatDateLabel(billDate);
-      allBillDates.add(billDateLabel);
-
-      currencyValues.forEach((currencyValue) => {
-        allCurrencies.add(currencyValue);
-        records.push(buildBalanceTemplateRow(balanceTemplateFields, {
-          银行名称: account.bankName,
-          所在地: account.location,
-          币种: currencyValue,
-          银行账号: account.bankAccount,
-          账单日期: billDateLabel,
-          期初余额: '',
-          期初可用余额: '',
-          期末余额: 0,
-          期末可用余额: ''
-        }));
-      });
-    });
-  });
-
-  return {
-    records,
-    billDates: Array.from(allBillDates).sort(),
-    currencies: Array.from(allCurrencies)
-  };
+  return scanStatementBalanceSeedStatus({ detailRows, templateName }, ensureStorageRoot());
 }
 
 function templateFileDialogFilters() {
@@ -9530,6 +9015,7 @@ const statementGenerationHelpers = createStatementGenerationHelpers({
   buildImportWarningDetailLines,
   buildImportWarningMessage,
   buildManualBalanceRequiredResult,
+  buildDetailExportRows,
   buildMappedRowsForFile,
   buildStatementGenerationConfig,
   buildStatementOutputFilePath,
@@ -9541,7 +9027,6 @@ const statementGenerationHelpers = createStatementGenerationHelpers({
   extractHeaders,
   FileValidationError,
   findPreviousBalanceSeed,
-  generateStatementFiles,
   getBalanceTemplatePath,
   getStatementSessionEntries,
   mergeMappedDetailRows,
@@ -9549,6 +9034,8 @@ const statementGenerationHelpers = createStatementGenerationHelpers({
   normalizeInputFilePaths,
   parseRequiredBillDates,
   resolveSinglePreparedFieldValue,
+  scanBalanceSeedStatus,
+  readBalanceAdjustments,
   splitTemplateName,
   storeGeneratedBalanceSeeds,
   writeBalanceWorkbook,
@@ -9563,209 +9050,8 @@ function buildPreparedStatementBatchFromFilePaths({ config, inputFilePaths = [] 
   return statementGenerationHelpers.buildPreparedStatementBatchFromFilePaths({ config, inputFilePaths });
 }
 
-function generateStatementFiles({
-  config,
-  preparedBatch,
-  scope = 'current',
-  includeDetail = true,
-  includeBalance = null
-}) {
-  const warnings = Array.isArray(preparedBatch.warnings) ? preparedBatch.warnings.slice() : [];
-  const detailRows = cloneRowsWithMetadata(preparedBatch.detailRows);
-  const detailExportRows = buildDetailExportRows(detailRows);
-  const effectiveDetailRows = Array.isArray(detailExportRows.sourceRows) ? detailExportRows.sourceRows : detailRows;
-  const skippedDetailRows = Array.isArray(detailExportRows.skippedRows) ? detailExportRows.skippedRows : [];
-  const simultaneousAmountRows = Array.isArray(detailExportRows.simultaneousRows)
-    ? detailExportRows.simultaneousRows
-    : [];
-
-  if (simultaneousAmountRows.length) {
-    throw new FileValidationError(
-      'FILE_READ',
-      `存在${simultaneousAmountRows.length}条明细的 Credit Amount 与 Debit Amount 同时有值`,
-      {
-        detailLines: simultaneousAmountRows.map((row) => {
-          return `第${row.sourceRowNumber}行，Credit Amount="${row.creditAmount || '(空)'}"，Debit Amount="${row.debitAmount || '(空)'}"`;
-        }),
-        context: {
-          inputFilePath: preparedBatch.inputFilePaths.join(';'),
-          templateName: config.template.name
-        }
-      }
-    );
-  }
-
-  skippedDetailRows.forEach((row) => {
-    warnings.push({
-      type: 'detail-row-skipped',
-      rowNumber: row.sourceRowNumber,
-      creditAmount: row.creditAmount,
-      debitAmount: row.debitAmount
-    });
-  });
-
-  const billDates = detailExportRows.length > 1
-    ? parseRequiredBillDates(detailExportRows)
-    : parseRequiredBillDates(detailRows);
-  const dateRangeLabel = buildDateRangeLabel(billDates);
-  const internalSuffix = scope === 'all' ? 'all' : '';
-  const outputMerchantId = scope === 'all' ? '' : preparedBatch.selectedMerchantId;
-
-  const result = {
-    detail: null,
-    balance: null,
-    message: includeDetail && includeBalance !== true ? '明细账单可导出' : '',
-    warnings,
-    balanceRequested: Boolean(preparedBatch.balanceRequested),
-    unmatchedAmountSplitFiles: Array.isArray(preparedBatch.unmatchedAmountSplitFiles)
-      ? preparedBatch.unmatchedAmountSplitFiles.slice()
-      : [],
-    // v1.4.9 PR #16 review P1 Fix C: 平行于 unmatchedAmountSplitFiles 的 bill-split 版本
-    unmatchedBillSplitFiles: Array.isArray(preparedBatch.unmatchedBillSplitFiles)
-      ? preparedBatch.unmatchedBillSplitFiles.slice()
-      : []
-  };
-
-  if (includeDetail) {
-    const detailOutput = buildStatementOutputFilePath({
-      kind: 'detail',
-      templateName: config.template.name,
-      merchantId: outputMerchantId,
-      outputTag: 'COMMON',
-      dateRangeLabel,
-      internalSuffix
-    });
-
-    writeWorkbookRows({
-      rows: detailExportRows,
-      outputFilePath: detailOutput.outputFilePath
-    });
-
-    result.detail = {
-      filePath: detailOutput.outputFilePath,
-      fileName: detailOutput.outputFileName,
-      templateName: config.template.name
-    };
-  }
-
-  const shouldGenerateBalance = includeBalance === null
-    ? Boolean(preparedBatch.balanceRequested)
-    : Boolean(includeBalance) && Boolean(preparedBatch.balanceRequested);
-
-  if (shouldGenerateBalance) {
-    if (!config.mappingByTargetField.MerchantId) {
-      throw new FileValidationError('FILE_READ', '当前模板启用 Balance 时必须映射 MerchantId 字段');
-    }
-
-    let balanceSeedStatus = {
-      missing: 0,
-      missingIndexByKey: new Map()
-    };
-
-    try {
-      const balanceTemplatePath = getBalanceTemplatePath();
-
-      if (!fs.existsSync(balanceTemplatePath)) {
-        throw new FileValidationError('FILE_READ', '未找到余额账单模板，请确认文件已放入 assets 目录');
-      }
-
-      const balanceTemplateFields = extractHeaders(balanceTemplatePath);
-
-      if (!balanceTemplateFields.length) {
-        throw new FileValidationError('FILE_READ', '余额账单模板为空或不可读，请重新确认');
-      }
-
-      balanceSeedStatus = scanBalanceSeedStatus({
-        detailRows: effectiveDetailRows,
-        templateName: config.template.name
-      });
-
-      const templateBankName = splitTemplateName(config.template.name).bankName;
-      const balanceAdjustments = readBalanceAdjustments(ensureStorageRoot(), templateBankName);
-
-      const balanceResult = deriveBalanceRecords({
-        detailRows: effectiveDetailRows,
-        templateName: config.template.name,
-        balanceTemplateFields,
-        mode: preparedBatch.balanceMode,
-        balanceAdjustments,
-        resolvePreviousEndBalance: ({ bankName, merchantId, currency, targetBillDate }) => {
-          const seedRecord = findPreviousBalanceSeed(ensureStorageRoot(), {
-            bankName,
-            merchantId,
-            currency,
-            beforeBillDate: targetBillDate
-          });
-
-          return seedRecord ? seedRecord.endBalance : null;
-        }
-      });
-      const balanceOutput = buildStatementOutputFilePath({
-        kind: 'balance',
-        templateName: config.template.name,
-        merchantId: outputMerchantId,
-        outputTag: 'BALANCE',
-        dateRangeLabel: buildDateRangeLabel(balanceResult.billDates),
-        internalSuffix
-      });
-
-      writeBalanceWorkbook({
-        templateFilePath: balanceTemplatePath,
-        records: balanceResult.records,
-        templateFields: balanceTemplateFields,
-        outputFilePath: balanceOutput.outputFilePath
-      });
-      storeGeneratedBalanceSeeds({
-        templateName: config.template.name,
-        seedRecords: balanceResult.seedRecords
-      });
-
-      result.balance = {
-        filePath: balanceOutput.outputFilePath,
-        fileName: balanceOutput.outputFileName,
-        templateName: config.template.name
-      };
-      result.message = includeDetail ? '明细账单可导出，余额账单可导出' : '余额账单可导出';
-    } catch (error) {
-      if (error instanceof FileValidationError) {
-        if (error.code === 'BALANCE_SEED_REQUIRED') {
-          const promptMerchantId = normalizeCell(error.context?.merchantId);
-          const promptCurrency = normalizeCell(error.context?.currency);
-          const promptKey = `${promptMerchantId}@@${promptCurrency}`;
-          const queueIndex = balanceSeedStatus.missingIndexByKey?.get(promptKey) || 1;
-          const queueTotal = balanceSeedStatus.missing || 1;
-
-          warnings.push({
-            type: 'balance-seed-required',
-            message: error.message,
-            prompt: {
-              templateName: config.template.name,
-              bankName: error.context?.bankName || splitTemplateName(config.template.name).bankName,
-              merchantId: promptMerchantId,
-              currency: promptCurrency,
-              targetBillDate: normalizeCell(error.context?.targetBillDate),
-              queueIndex,
-              queueTotal
-            }
-          });
-        } else {
-          warnings.push({
-            type: 'balance-generate-failed',
-            message: error.message
-          });
-        }
-      } else {
-        const logPath = appendLog(ensureStorageRoot(), error);
-        warnings.push({
-          type: 'balance-generate-failed',
-          message: '余额账单生成失败，系统异常已写入日志文件',
-          logPath
-        });
-      }
-    }
-  }
-
-  return result;
+function generateStatementFiles(options) {
+  return statementGenerationHelpers.generateStatementFiles(options);
 }
 
 // v1.5.2 #9 修复：按文件名映射模板导入多个文件匹配不同模板时，按 matchedTemplateId 分组，
@@ -13530,60 +12816,21 @@ function registerNewAccountHandlers() {
     const payload = prepared.payload;
     const accounts = normalizeNewAccountAccounts(payload);
 
-    if (!accounts.length) {
-      return createErrorResult({
-        step: '生成新开账户余额账单',
-        message: '请完整填写所有必填项',
-        errorCode: 'NEW_ACCOUNT_REQUIRED',
-        templateName: NEW_ACCOUNT_EXPORT_NAME,
-        context: {
-          moduleName: NEW_ACCOUNT_EXPORT_NAME
-        }
-      });
-    }
-
-    const missingDetails = [];
-
-    accounts.forEach((account, index) => {
-      const missingFields = [
-        ['银行名称', account.bankName],
-        ['所在地', account.location],
-        ['银行账号', account.bankAccount],
-        ['开户日期', account.openingDateRaw]
-      ].filter(([, value]) => !value);
-
-      if (!account.isMultiCurrency && !account.currency) {
-        missingFields.push(['币种', '']);
+    try {
+      validateNewAccountAccounts(accounts);
+    } catch (error) {
+      if (error instanceof FileValidationError) {
+        return createErrorResult({
+          step: '生成新开账户余额账单',
+          message: error.message,
+          errorCode: error.code,
+          detailLines: error.detailLines,
+          originalError: error,
+          templateName: NEW_ACCOUNT_EXPORT_NAME,
+          context: { moduleName: NEW_ACCOUNT_EXPORT_NAME }
+        });
       }
-
-      if (missingFields.length) {
-        missingDetails.push(`${index + 1}. 缺少字段：${missingFields.map(([label]) => label).join('、')}`);
-        return;
-      }
-
-      const selectedCurrencies = normalizeNewAccountCurrencyValues(account);
-
-      if (account.isMultiCurrency && selectedCurrencies.length === 0) {
-        missingDetails.push(`${index + 1}. 多币种账户至少需要勾选一个币种`);
-        return;
-      }
-
-      if (!account.openingDate) {
-        missingDetails.push(`${index + 1}. 开户日期不是有效日期`);
-      }
-    });
-
-    if (missingDetails.length) {
-      return createErrorResult({
-        step: '生成新开账户余额账单',
-        message: '请完整填写所有必填项',
-        errorCode: 'NEW_ACCOUNT_REQUIRED',
-        detailLines: missingDetails,
-        templateName: NEW_ACCOUNT_EXPORT_NAME,
-        context: {
-          moduleName: NEW_ACCOUNT_EXPORT_NAME
-        }
-      });
+      throw error;
     }
 
     try {
@@ -13615,35 +12862,14 @@ function registerNewAccountHandlers() {
         });
       }
 
-      const generated = buildNewAccountBalanceRecords({
+      const generated = prepareNewAccountGeneration({
         accounts,
         balanceTemplateFields
       });
-      const primaryAccount = accounts[0];
-
-      let accountSegment;
-      let currencySegment;
-
-      if (accounts.length === 1) {
-        const bankAccount = String(primaryAccount.bankAccount || '').trim();
-        accountSegment = bankAccount.length > 4 ? bankAccount.slice(-4) : bankAccount;
-        currencySegment = generated.currencies.length > 1 ? '多币种' : (generated.currencies[0] || '');
-      } else {
-        accountSegment = '多账号';
-        currencySegment = '多币种';
-      }
-
-      const nameParts = [
-        primaryAccount.bankName,
-        primaryAccount.location,
-        accountSegment,
-        currencySegment,
-        NEW_ACCOUNT_EXPORT_NAME
-      ].filter((part) => part !== '');
 
       const output = buildOutputFilePath({
         kind: 'new-account',
-        outputFileName: `${nameParts.join('-')}.xlsx`
+        outputFileName: generated.fileName
       });
       const promotionManifest = buildStatementDeferredOutputManifest(
         output.outputFilePath,
@@ -13677,7 +12903,7 @@ function registerNewAccountHandlers() {
         message: '生成新开账户余额账单成功',
         details: [
           `导出文件：${output.outputFileName}`,
-          `币种：${currencySegment}`,
+          `币种：${generated.currencySegment}`,
           `账单日期数量：${generated.billDates.length}`,
           `账号行数：${accounts.length}`
         ]
@@ -13700,6 +12926,7 @@ function registerNewAccountHandlers() {
           step: '生成新开账户余额账单',
           message: error.message,
           errorCode: error.code,
+          detailLines: error.detailLines,
           originalError: error,
           context: {
             accounts: accounts.map((account) => ({
@@ -21495,6 +20722,17 @@ async function initializeBackgroundExecutionRecovery() {
   for (const actionKey of Object.keys(PRE_FUND_MPT_STATIC_KEYS)) {
     inspectorRegistry.register(PRE_FUND_MPT_STATIC_KEYS[actionKey].inspector, inspectPreFundMpt);
   }
+  inspectorRegistry.register(MANUAL_BALANCE_INSPECTOR_KEY, createManualBalanceSeedInspector({
+    resolveTargetPath: (targetAliasKey) => resolveManualBalanceTargetAlias(
+      getStorageRoot(),
+      targetAliasKey
+    ),
+    readRepository: recoveryControlReadRepository
+  }));
+  providerRegistry.register(
+    MANUAL_BALANCE_SETTLEMENT_KEY,
+    createManualBalanceSettlementRecoveryProvider()
+  );
   const duplicateRecoveryOptions = {
     userDataDir: path.dirname(database.dbPath),
     listRunMirrors: () => database.listDuplicateInboundMatchRunMirrors(),
@@ -21527,6 +20765,9 @@ async function initializeBackgroundExecutionRecovery() {
   const requestOwnerRepository = createRecoveryRequestOwnerRepository(database.db);
   const observationAttemptRepository = createRecoveryObservationAttemptRepository(database.db);
   const recoveryControlRepository = createRecoveryControlRepository(database.db);
+  const manualBalancePlanTransitions = createManualBalanceRecoveryPlanTransitions(
+    recoveryControlReadRepository
+  );
   const coordinator = createStartupRecoveryCoordinator({
     readRepository: recoveryControlReadRepository,
     inspectorRegistry,
@@ -21534,9 +20775,13 @@ async function initializeBackgroundExecutionRecovery() {
     requestOwnerRepository,
     observationAttemptRepository,
     recoveryControlRepository,
-    resolvePolicy: (actionKey) => PRE_FUND_MPT_POLICIES
-      .find((policy) => policy.actionKey === actionKey) || null,
-    planTransitions: preFundMptRecoveryPlanTransitions
+    resolvePolicy: (actionKey) => actionKey === MANUAL_BALANCE_ACTION_KEY
+      ? manualBalanceRecoveryPolicy()
+      : PRE_FUND_MPT_POLICIES.find((policy) => policy.actionKey === actionKey) || null,
+    planTransitions: (context) => context && context.source &&
+      context.source.actionKey === MANUAL_BALANCE_ACTION_KEY
+      ? manualBalancePlanTransitions(context)
+      : preFundMptRecoveryPlanTransitions(context)
   });
   const summary = await coordinator.scanAndRecover();
   for (const hold of recoveryControlReadRepository.listActiveRecoveryHolds()) {

@@ -789,6 +789,77 @@ test('persistent replacement keeps old state until adopted then atomically switc
   assert.equal(harness.governor.snapshot().activeUsage.memoryBytes, 67108864 + 1500);
 });
 
+test('published pending-interaction is replaced atomically from a later job without old release', async () => {
+  const harness = createHarness();
+  const first = await openStatementJob(harness);
+  const tokenOwner = owner('interaction-token', 'statement-token-slot', 1);
+  const initial = await adoptServiceResource(harness, {
+    requestId: 'pending-token-initial',
+    requestOwner: tokenOwner
+  });
+  harness.fake.emit(jobEvent(first.transport, 'job:done', 1, {
+    result: { status: 'interaction-required', token: 'opaque-token-1' }
+  }));
+  assert.equal(await first.transport.close(), true);
+
+  const secondRef = jobRef({
+    actionKey: 'statement:resolve-big-account',
+    operationKey: 'task-1/statement:resolve-big-account/2',
+    jobId: 'job-2'
+  });
+  const second = await openStatementJob(harness, secondRef);
+  harness.fake.emit(harness.fake.event('resource:request', {
+    controlId: 'pending-token-replacement-control',
+    jobRef: secondRef,
+    payload: {
+      requestId: 'pending-token-replacement',
+      requestKind: 'pending-interaction-create',
+      requested: { memoryBytes: 2, cpuSlots: 0, ioHeavySlots: 0 },
+      replacesReservationId: initial.payload.reservationId,
+      owner: owner('interaction-token', 'statement-token-slot', 2)
+    }
+  }));
+  await new Promise((resolve) => setImmediate(resolve));
+  const replacementGrant = harness.fake.sent.find((message) =>
+    message.operation === 'resource:grant' &&
+    message.payload.requestId === 'pending-token-replacement');
+  assert.ok(replacementGrant);
+  assert.equal(replacementGrant.payload.replacesReservationId, initial.payload.reservationId);
+  assert.equal(harness.host.snapshot().services[0].adoptedReservationCount, 1);
+  assert.equal(harness.host.snapshot().services[0].tentativeGrantCount, 1);
+  assert.equal(harness.fake.sent.some((message) =>
+    message.operation === 'resource:release' &&
+    message.payload.reservationId === initial.payload.reservationId), false);
+
+  harness.fake.emit(harness.fake.event('resource:adopted', {
+    controlId: 'pending-token-replacement-adopt',
+    jobRef: secondRef,
+    payload: {
+      requestId: 'pending-token-replacement',
+      grantId: replacementGrant.payload.grantId,
+      reservationId: replacementGrant.payload.reservationId,
+      owner: owner('interaction-token', 'statement-token-slot', 2)
+    }
+  }));
+  await new Promise((resolve) => setImmediate(resolve));
+  const replacementAck = harness.fake.sent.find((message) =>
+    message.operation === 'resource:adopt-ack' &&
+    message.payload.reservationId === replacementGrant.payload.reservationId);
+  assert.ok(replacementAck);
+  assert.equal(harness.host.snapshot().services[0].adoptedReservationCount, 1);
+  assert.equal(harness.host.snapshot().services[0].tentativeGrantCount, 0);
+  assert.equal(harness.governor.snapshot().activeLeases.some((lease) =>
+    lease.leaseId === initial.payload.reservationId), false);
+  assert.equal(harness.governor.snapshot().activeLeases.some((lease) =>
+    lease.leaseId === replacementGrant.payload.reservationId), true);
+  assert.equal(harness.fake.sent.some((message) =>
+    message.operation === 'resource:release' &&
+    message.payload.reservationId === initial.payload.reservationId), false);
+
+  await second.transport.terminate();
+  assert.equal(harness.governor.snapshot().activeLeaseCount, 0);
+});
+
 test('adoption timeout revokes the tentative grant and returns usage to service baseline', async () => {
   const clock = createFakeClock();
   const harness = createHarness(clock);

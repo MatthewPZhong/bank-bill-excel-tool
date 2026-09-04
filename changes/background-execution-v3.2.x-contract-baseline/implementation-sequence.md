@@ -39,3 +39,12 @@ E02-C1/C2 的平台控制表固定落在 Main-owned 主控制数据库；E02-C2 
 ## 当前不新增v3.2.6
 
 只有Statement需跨重启Session Artifact、JPM需要复杂人工修复UI、成熟adapter必须重写引擎，或v3.2.5 action数量超出可验证范围时重新评估。
+
+## v3.2.3 E10-B direct-parent evidence门禁
+
+- FilePlanV1 output由Main normalizer additive冻结resolved direct target parent identity；只冻结direct parent，不保存ancestor chain。
+- E10-B必须把同一identity逐字交给既有single FIFO Publisher；Publisher在prepare、stage、pre-commit、每个target mutation及恢复前复核并持久journal evidence。
+- required guarded publication必须在任何journal/index/target写入前，拒绝fixed Publisher recovery root与任一direct target parent相等或双向祖先/后代包含；multi-target任一冲突全批次为0，sibling/外部目录与旧journal恢复不变。
+- parent rename+ordinary replacement或恢复期identity漂移必须在任何target mutation前进入manual recovery/Hold；旧journal缺字段保持兼容。
+- Windows capability不可靠时E10-B fail closed且production保持`false/legacy/0`；Setup/portable仍是人工门禁。
+- 回滚到旧二进制前必须证明open Publisher journal为0；不新增迁移器、第二receipt/retry或Publisher。

@@ -21,7 +21,7 @@ const {
   validateJobEnvelope
 } = require('./protocol-validator');
 const { createDirectionSequenceTracker } = require('./sequence-tracker');
-const { checkedAdd } = require('./resource-lease');
+const { checkedAdd, fitsWithin, validateResourceVector } = require('./resource-lease');
 const { MAX_TIMER_DELAY_MS } = require('./admission-queue');
 const { closeResourceGovernor } = require('./resource-governor');
 const {
@@ -377,6 +377,8 @@ function createExecutionSupervisor(options = {}) {
       resultValidator: options.policyRegistry.getBinding(actionKey, 'result.validatorKey'),
       entry: options.policyRegistry.getBinding(actionKey, 'entryKey'),
       adapterBinding: options.policyRegistry.getBinding(actionKey, 'adapterKey'),
+      resourceProfileBinding: options.policyRegistry.getBinding(actionKey, 'resources.profile'),
+      phaseResources: policy.resources.phase,
       onProgress,
       state: 'queued',
       transport: null,
@@ -1312,6 +1314,51 @@ function createExecutionSupervisor(options = {}) {
       };
     }
 
+    function resolveSimplePhaseResources() {
+      const estimator = record.resourceProfileBinding;
+      if (typeof estimator !== 'function') return policy.resources.phase;
+      const estimated = estimator(canonicalJsonSnapshot({
+        actionKey,
+        operationKey,
+        jobId,
+        context,
+        input: request.input || {},
+        staticPhase: policy.resources.phase
+      }));
+      if (estimated && typeof estimated.then === 'function') {
+        Promise.resolve(estimated).catch(() => {});
+        throw new SupervisorError(
+          'RESOURCE_PROFILE_ESTIMATOR_ASYNC_UNSUPPORTED',
+          `Resource profile estimator must be synchronous: ${policy.resources.profile}`
+        );
+      }
+      const resources = validateResourceVector(estimated, 'estimatedPhaseResources');
+      if (resources.workerThreadSlots !== policy.resources.phase.workerThreadSlots ||
+          resources.utilityProcessSlots !== policy.resources.phase.utilityProcessSlots) {
+        throw new SupervisorError(
+          'RESOURCE_PROFILE_TOPOLOGY_INVALID',
+          'Resource profile estimator must not change execution carrier slots'
+        );
+      }
+      return resources;
+    }
+
+    function assertSimpleResourcesFitTotalBudget({ includeBase }) {
+      if (typeof record.resourceProfileBinding !== 'function') return;
+      if (!resourceGovernor || typeof resourceGovernor.snapshot !== 'function') return;
+      const governorSnapshot = resourceGovernor.snapshot();
+      if (!governorSnapshot || !governorSnapshot.budgets) return;
+      const required = includeBase
+        ? checkedAdd(policy.resources.base, record.phaseResources, 'simple admission resources')
+        : record.phaseResources;
+      if (!fitsWithin(required, governorSnapshot.budgets)) {
+        throw new SupervisorError(
+          'RESOURCE_BUDGET_UNAVAILABLE',
+          `Resource budget cannot admit ${policy.resources.profile}`
+        );
+      }
+    }
+
     function freezeTopology(inspectTopology) {
       if (!policy.resources.compound) return null;
       const topologyBinding = options.policyRegistry.getBinding(
@@ -1369,11 +1416,12 @@ function createExecutionSupervisor(options = {}) {
 
     async function acquireSimpleJobResources({ includeBase }) {
       if (!resourceGovernor) return true;
+      assertSimpleResourcesFitTotalBudget({ includeBase });
       if (includeBase) {
         const baseLease = await resourceGovernor.acquireBaseLease(admissionRequest(policy.resources.base));
         if (!retainGrantedLease(baseLease)) return false;
       }
-      const phaseLease = await resourceGovernor.acquirePhaseLease(admissionRequest(policy.resources.phase));
+      const phaseLease = await resourceGovernor.acquirePhaseLease(admissionRequest(record.phaseResources));
       return retainGrantedLease(phaseLease);
     }
 
@@ -1414,6 +1462,7 @@ function createExecutionSupervisor(options = {}) {
         let resolved = null;
         if (policy.lifetime === 'job') resolved = resolveAdapter();
         record.topology = freezeTopology(resolved && resolved.inspectTopology);
+        if (!record.topology) record.phaseResources = resolveSimplePhaseResources();
         if (policy.lifetime === 'job') {
           const admitted = record.topology
             ? await acquireCompoundResources()
