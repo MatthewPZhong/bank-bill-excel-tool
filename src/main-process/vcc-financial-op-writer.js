@@ -3,12 +3,17 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const ExcelJS = require('exceljs');
+const JSZip = require('jszip');
+const sax = require('sax');
 const {
   SOURCE_TYPES,
   SUPPORTED_CURRENCIES
 } = require('../backend/vcc-financial-op/definitions');
 const { canonicalizeVccAmount } = require('../backend/vcc-financial-op/amount-rules');
-const { getEffectiveRunResult } = require('../backend/vcc-financial-op/result-adjustments');
+const {
+  getEffectiveRunResult,
+  getEffectiveRunResultForSubject
+} = require('../backend/vcc-financial-op/result-adjustments');
 const {
   RESULT_TEMPLATE_FILE_NAME,
   RESULT_TEMPLATE_SHEET_NAME,
@@ -26,7 +31,17 @@ const {
 const {
   encodeExcelStXstring
 } = require('../backend/toolbox-format/excel-text');
+const {
+  SPREADSHEETML_NAMESPACES,
+  exactSaxLocalName,
+  namespaceAllowed,
+  normalizedSaxAttributes
+} = require('../backend/toolbox-format/ooxml-namespaces');
 const { writeXlsxAtomically } = require('./vcc-financial-op-output-publication');
+const {
+  buildVccSubjectAuthority,
+  compareVccSubjects
+} = require('./vcc-financial-op-output/subject-evidence');
 
 const RESULT_SHEET_NAME = RESULT_TEMPLATE_SHEET_NAME;
 const PENDING_SHEET_NAME = '移除归档Pending发生额计算表';
@@ -87,11 +102,84 @@ function loadEffectiveRunData(db, runId) {
     SELECT * FROM vcc_fin_op_pending_currency_totals
     WHERE run_id = ? ORDER BY subject, currency
   `).all(effective.run.runId);
-  const subjects = effective.review.subjects.map((row) => row.subject).sort((left, right) => (
-    left < right ? -1 : (left > right ? 1 : 0)
-  ));
+  const subjects = effective.review.subjects.map((row) => row.subject).sort(compareVccSubjects);
   if (subjects.length === 0) throw new Error('财务OP校验结果没有主体数据');
   return { effective, run: effective.run, pendingSummary, pendingTotals, subjects };
+}
+
+function loadEffectiveRunDataForSubject(db, runId, subject) {
+  const effective = getEffectiveRunResultForSubject(db, runId, subject);
+  if (!effective) throw new Error(`财务OP校验结果不存在：${runId}`);
+  const pendingSummary = db.prepare(`
+    SELECT * FROM vcc_fin_op_pending_summary_rows
+    WHERE run_id = ? AND subject = ?
+    ORDER BY channel_name, currency_mismatch, flow_currency, pending_currency, recon_type
+  `).all(effective.run.runId, subject);
+  const pendingTotals = db.prepare(`
+    SELECT * FROM vcc_fin_op_pending_currency_totals
+    WHERE run_id = ? AND subject = ?
+    ORDER BY currency
+  `).all(effective.run.runId, subject);
+  if (effective.review.subjects.length !== 1 ||
+      effective.review.subjects[0].subject !== subject) {
+    throw new Error(`财务OP校验结果缺少主体：${subject}`);
+  }
+  return Object.freeze({
+    effective,
+    run: effective.run,
+    pendingSummary: Object.freeze(pendingSummary),
+    pendingTotals: Object.freeze(pendingTotals),
+    subjects: Object.freeze([subject]),
+    readCounts: Object.freeze({
+      baseRows: effective.baseRows.length,
+      adjustments: effective.adjustments.length,
+      effectiveRows: effective.effectiveRows.length,
+      balances: effective.balances.length,
+      pendingSummary: pendingSummary.length,
+      pendingTotals: pendingTotals.length
+    })
+  });
+}
+
+function loadEffectiveRunMetadata(db, runId) {
+  const normalizedRunId = Number(runId);
+  if (!Number.isSafeInteger(normalizedRunId) || normalizedRunId < 1) {
+    throw new TypeError(`财务OP run id 无效：${runId}`);
+  }
+  const run = db.prepare(`
+    SELECT id, target_month, status, input_revisions_json, result_revision,
+           input_fingerprint, created_at, updated_at, archived_at
+    FROM vcc_fin_op_runs WHERE id = ?
+  `).get(normalizedRunId);
+  if (!run) throw new Error(`财务OP校验结果不存在：${runId}`);
+  return Object.freeze({
+    runId: Number(run.id),
+    targetMonth: run.target_month,
+    status: run.status,
+    inputRevisionsJson: run.input_revisions_json,
+    resultRevision: Number(run.result_revision),
+    inputFingerprint: run.input_fingerprint,
+    createdAt: run.created_at,
+    updatedAt: run.updated_at,
+    archivedAt: run.archived_at
+  });
+}
+
+function loadEffectiveRunSubjectIndex(db, runId) {
+  const run = loadEffectiveRunMetadata(db, runId);
+  const subjects = db.prepare(`
+    SELECT subject
+    FROM vcc_fin_op_run_balances
+    WHERE run_id = ?
+    GROUP BY subject
+  `).all(run.runId).map((row) => String(row.subject)).sort(compareVccSubjects);
+  if (subjects.length === 0 || subjects.some((subject) => !subject)) {
+    throw new Error('财务OP校验结果没有主体数据');
+  }
+  return Object.freeze({
+    run,
+    subjects: Object.freeze(subjects)
+  });
 }
 
 function rowAnchorKind(row) {
@@ -441,6 +529,48 @@ function assertStyleMatches(cell, captured, label, options) {
   }
 }
 
+function assertRowLayoutMatches(row, captured, expectedHeight, label) {
+  const actual = {
+    height: row.height == null ? null : row.height,
+    hidden: Boolean(row.hidden),
+    outlineLevel: row.outlineLevel || 0
+  };
+  const expected = {
+    height: expectedHeight == null ? null : expectedHeight,
+    hidden: Boolean(captured.hidden),
+    outlineLevel: captured.outlineLevel || 0
+  };
+  if (styleSignature(actual) !== styleSignature(expected)) {
+    throw exportValidationError(`VCC 财务OP导出${label}布局校验失败`);
+  }
+}
+
+function assertColumnLayoutMatches(column, captured, label) {
+  const actual = {
+    width: column.width == null ? null : column.width,
+    hidden: Boolean(column.hidden),
+    outlineLevel: column.outlineLevel || 0
+  };
+  const expected = {
+    width: captured.width == null ? null : captured.width,
+    hidden: Boolean(captured.hidden),
+    outlineLevel: captured.outlineLevel || 0
+  };
+  if (styleSignature(actual) !== styleSignature(expected)) {
+    throw exportValidationError(`VCC 财务OP导出${label}布局校验失败`);
+  }
+}
+
+function assertMergedFollower(sheet, masterAddress, followerAddress, label) {
+  const master = sheet.getCell(masterAddress);
+  const follower = sheet.getCell(followerAddress);
+  if (!master.isMerged || !follower.isMerged ||
+      master.master.address !== follower.master.address ||
+      master.master.address !== masterAddress) {
+    throw exportValidationError(`VCC 财务OP导出${label}合并主从校验失败`);
+  }
+}
+
 function structuralStyleFromCell(cell, { includeNumFmt = false } = {}) {
   const fill = cloneStyle(cell.fill);
   const normalizedFill = fill && fill.type === 'pattern' && fill.pattern === 'none'
@@ -483,21 +613,48 @@ function assertStructuralStyleMatches(cell, captured, label, options) {
   }
 }
 
+function excelColumnName(columnNumber) {
+  let remaining = columnNumber;
+  let name = '';
+  while (remaining > 0) {
+    const offset = (remaining - 1) % 26;
+    name = `${String.fromCharCode(65 + offset)}${name}`;
+    remaining = Math.floor((remaining - 1) / 26);
+  }
+  return name;
+}
+
 function mergeRangeString(range) {
   const { top, left, bottom, right } = range.model;
-  const start = `${String.fromCharCode(64 + left)}${top}`;
-  const end = `${String.fromCharCode(64 + right)}${bottom}`;
+  const start = `${excelColumnName(left)}${top}`;
+  const end = `${excelColumnName(right)}${bottom}`;
   return `${start}:${end}`;
 }
 
-function assertMergeLayout(sheet, renderedRows, contract, lastRow) {
-  const expected = new Set([`A2:A${lastRow}`]);
+function canonicalMergeRanges(sheet) {
+  return Object.values(sheet._merges || {}).map(mergeRangeString).sort();
+}
+
+function resultMergeModels(renderedRows, contract, lastRow) {
+  const models = [{ top: 2, left: 1, bottom: lastRow, right: 1 }];
   for (const row of renderedRows) {
     if (contract.anchors[row.anchorKind].mergeMajorMinor) {
-      expected.add(`B${row.rowNumber}:C${row.rowNumber}`);
+      models.push({
+        top: row.rowNumber,
+        left: 2,
+        bottom: row.rowNumber,
+        right: 3
+      });
     }
   }
-  const actualRanges = Object.values(sheet._merges).map(mergeRangeString);
+  return models;
+}
+
+function assertMergeLayout(sheet, renderedRows, contract, lastRow) {
+  const expected = new Set(resultMergeModels(renderedRows, contract, lastRow).map((model) => (
+    mergeRangeString({ model })
+  )));
+  const actualRanges = canonicalMergeRanges(sheet);
   const actual = new Set(actualRanges);
   if (actual.size !== expected.size
       || [...expected].some((range) => !actual.has(range))) {
@@ -525,6 +682,229 @@ function assertCanonicalCellAmount(cell, expected, label) {
   const actual = canonicalizeVccAmount(cell.value, label);
   if (actual !== expected) {
     throw exportValidationError(`${label}回读不一致`, [`期望 ${expected}，实际 ${actual}`]);
+  }
+}
+
+function assertPlainTextCell(cell, expected, label) {
+  if (typeof cell.value !== 'string' || cell.value !== expected) {
+    throw exportValidationError(`VCC 财务OP导出普通文本校验失败：${label}`);
+  }
+}
+
+function worksheetCellReference(value) {
+  const match = /^\$?([A-Z]+)\$?([1-9]\d*)$/i.exec(String(value || ''));
+  if (!match) return null;
+  let column = 0;
+  for (const character of match[1].toUpperCase()) {
+    column = (column * 26) + character.charCodeAt(0) - 64;
+  }
+  const row = Number(match[2]);
+  if (!Number.isSafeInteger(column) || column < 1 || column > 16384 ||
+      !Number.isSafeInteger(row) || row < 1 || row > 1048576) {
+    return null;
+  }
+  return Object.freeze({
+    column,
+    row,
+    reference: `${excelColumnName(column)}${row}`
+  });
+}
+
+function worksheetRange(value) {
+  const parts = String(value || '').split(':');
+  if (parts.length < 1 || parts.length > 2) return null;
+  const start = worksheetCellReference(parts[0]);
+  const end = worksheetCellReference(parts[1] || parts[0]);
+  if (!start || !end) return null;
+  return Object.freeze({
+    top: Math.min(start.row, end.row),
+    left: Math.min(start.column, end.column),
+    bottom: Math.max(start.row, end.row),
+    right: Math.max(start.column, end.column)
+  });
+}
+
+function rangeContainsCell(range, cell) {
+  return cell.row >= range.top && cell.row <= range.bottom &&
+    cell.column >= range.left && cell.column <= range.right;
+}
+
+function rangeTouchesMergeFollower(range, models) {
+  for (const model of models) {
+    const top = Math.max(range.top, model.top);
+    const left = Math.max(range.left, model.left);
+    const bottom = Math.min(range.bottom, model.bottom);
+    const right = Math.min(range.right, model.right);
+    if (top > bottom || left > right) continue;
+    const overlapSize = (bottom - top + 1) * (right - left + 1);
+    const includesMaster = model.top >= top && model.top <= bottom &&
+      model.left >= left && model.left <= right;
+    if (overlapSize > (includesMaster ? 1 : 0)) return true;
+  }
+  return false;
+}
+
+function resultPlainTextReferences(renderedRows, contract) {
+  const references = new Set(RESULT_TEMPLATE_HEADERS.map((_header, index) => (
+    `${excelColumnName(index + 1)}1`
+  )));
+  references.add('A2');
+  for (const row of renderedRows) {
+    references.add(`B${row.rowNumber}`);
+    if (!contract.anchors[row.anchorKind].mergeMajorMinor) {
+      references.add(`C${row.rowNumber}`);
+    }
+    if (row.rowType === 'adjustment') references.add(`N${row.rowNumber}`);
+  }
+  return references;
+}
+
+function rawResultPayloadError(reference, kind, plainText) {
+  return exportValidationError(plainText
+    ? `VCC 财务OP导出普通文本校验失败：${reference} 含 ${kind}`
+    : `VCC 财务OP导出合并 follower 原始 payload 校验失败：${reference} 含 ${kind}`);
+}
+
+function validateResultWorksheetRawXml(xml, contract, renderedRows, lastRow) {
+  const mergeModels = resultMergeModels(renderedRows, contract, lastRow);
+  const plainTextReferences = resultPlainTextReferences(renderedRows, contract);
+  let depth = 0;
+  let activeCell = null;
+  const parser = sax.parser(true, { trim: false, normalize: false, xmlns: true });
+  parser.onopentag = (node) => {
+    depth += 1;
+    const name = exactSaxLocalName(node);
+    const spreadsheetElement = namespaceAllowed(node.uri, SPREADSHEETML_NAMESPACES);
+    if (activeCell && depth > activeCell.depth && spreadsheetElement) {
+      if (activeCell.mergeFollower) {
+        const kind = name === 'f'
+          ? (normalizedSaxAttributes(node.attributes).t === 'shared'
+            ? 'sharedFormula' : 'formula')
+          : (name === 'v' ? 'value' : (name === 'is' ? 'inlineStr' : `payload:${name}`));
+        throw rawResultPayloadError(activeCell.reference, kind, false);
+      }
+      if (activeCell.plainText && name === 'f') {
+        const kind = normalizedSaxAttributes(node.attributes).t === 'shared'
+          ? 'sharedFormula' : 'formula';
+        throw rawResultPayloadError(activeCell.reference, kind, true);
+      }
+      if (activeCell.plainText && name === 'r') {
+        throw rawResultPayloadError(activeCell.reference, 'richText', true);
+      }
+    }
+    if (!spreadsheetElement) return;
+    const attributes = normalizedSaxAttributes(node.attributes);
+    if (name === 'c') {
+      const cell = worksheetCellReference(attributes.r);
+      const mergeFollower = cell ? rangeTouchesMergeFollower({
+        top: cell.row,
+        left: cell.column,
+        bottom: cell.row,
+        right: cell.column
+      }, mergeModels) : false;
+      const payloadAttribute = mergeFollower
+        ? Object.keys(attributes).find((attributeName) => (
+            attributeName !== 'r' && attributeName !== 's' && attributeName !== 't'
+          ))
+        : null;
+      if (payloadAttribute) {
+        throw rawResultPayloadError(
+          cell.reference,
+          `attribute:${payloadAttribute}`,
+          false
+        );
+      }
+      activeCell = cell ? {
+        depth,
+        reference: cell.reference,
+        mergeFollower,
+        plainText: plainTextReferences.has(cell.reference),
+        typed: Object.prototype.hasOwnProperty.call(attributes, 't')
+      } : null;
+      return;
+    }
+    if (name === 'hyperlink') {
+      const range = worksheetRange(attributes.ref);
+      if (!range) return;
+      if (rangeTouchesMergeFollower(range, mergeModels)) {
+        throw rawResultPayloadError(attributes.ref, 'hyperlink', false);
+      }
+      for (const reference of plainTextReferences) {
+        const cell = worksheetCellReference(reference);
+        if (rangeContainsCell(range, cell)) {
+          throw rawResultPayloadError(reference, 'hyperlink', true);
+        }
+      }
+    }
+  };
+  parser.ontext = (text) => {
+    if (activeCell && activeCell.mergeFollower && String(text).trim()) {
+      throw rawResultPayloadError(activeCell.reference, 'text', false);
+    }
+  };
+  parser.oncdata = (text) => {
+    if (activeCell && activeCell.mergeFollower && String(text)) {
+      throw rawResultPayloadError(activeCell.reference, 'cdata', false);
+    }
+  };
+  parser.onclosetag = () => {
+    if (activeCell && depth === activeCell.depth) {
+      if (activeCell.mergeFollower && activeCell.typed) {
+        throw rawResultPayloadError(activeCell.reference, 'typedValue', false);
+      }
+      activeCell = null;
+    }
+    depth -= 1;
+  };
+  try {
+    parser.write(xml).close();
+  } catch (error) {
+    if (error && error.code === 'vcc-result-export-validation-failed') throw error;
+    throw exportValidationError('VCC 财务OP导出 Result 原始 worksheet XML 校验失败');
+  }
+}
+
+async function validateResultWorksheetRawPayload({
+  workbookPath,
+  contract,
+  renderedRows,
+  lastRow
+}) {
+  try {
+    const zip = await JSZip.loadAsync(fs.readFileSync(workbookPath));
+    const worksheet = zip.file('xl/worksheets/sheet1.xml');
+    if (!worksheet) {
+      throw exportValidationError('VCC 财务OP导出缺少 Result 原始 worksheet');
+    }
+    validateResultWorksheetRawXml(
+      await worksheet.async('string'),
+      contract,
+      renderedRows,
+      lastRow
+    );
+  } catch (error) {
+    if (error && error.code === 'vcc-result-export-validation-failed') throw error;
+    throw exportValidationError('VCC 财务OP导出 Result 原始 worksheet 读取失败');
+  }
+}
+
+function assertResultPageLayout(sheet, contract, lastRow) {
+  const expectedPageSetup = cloneStyle(contract.pageSetup);
+  expectedPageSetup.printArea = `A1:${contract.printAreaRightColumn}${lastRow}`;
+  const actual = {
+    state: sheet.state,
+    properties: cloneStyle(sheet.properties || {}),
+    pageSetup: cloneStyle(sheet.pageSetup || {}),
+    headerFooter: cloneStyle(sheet.headerFooter || {})
+  };
+  const expected = {
+    state: contract.state,
+    properties: cloneStyle(contract.properties || {}),
+    pageSetup: expectedPageSetup,
+    headerFooter: cloneStyle(contract.headerFooter || {})
+  };
+  if (styleSignature(actual) !== styleSignature(expected)) {
+    throw exportValidationError('VCC 财务OP导出完整页面布局语义校验失败');
   }
 }
 
@@ -590,21 +970,16 @@ function assertAdjustmentLineage(workbook, sheet, renderedRows, lastRow) {
 function validateResultSheet(workbook, contract, plan, renderedRows, lastRow) {
   const sheet = workbook.getWorksheet(RESULT_SHEET_NAME);
   if (!sheet) throw exportValidationError('VCC 财务OP导出缺少结果 sheet');
-  const headers = RESULT_TEMPLATE_HEADERS.map((_, index) => sheet.getCell(1, index + 1).text);
-  if (styleSignature(headers) !== styleSignature(RESULT_TEMPLATE_HEADERS)) {
-    throw exportValidationError('VCC 财务OP导出结果表头校验失败');
-  }
+  RESULT_TEMPLATE_HEADERS.forEach((header, index) => {
+    assertPlainTextCell(sheet.getCell(1, index + 1), header, `表头 ${index + 1}`);
+  });
   if (sheet.actualRowCount !== lastRow || sheet.actualColumnCount !== 14) {
     throw exportValidationError('VCC 财务OP导出结果区域校验失败', [
       `期望 A1:N${lastRow}，实际有效行为 ${sheet.actualRowCount}、列为 ${sheet.actualColumnCount}`
     ]);
   }
-  if (sheet.getCell('A2').text !== plan.subject) {
-    throw exportValidationError('VCC 财务OP导出主体校验失败');
-  }
-  if (sheet.pageSetup.printArea !== `A1:${contract.printAreaRightColumn}${lastRow}`) {
-    throw exportValidationError('VCC 财务OP导出打印区域校验失败');
-  }
+  assertPlainTextCell(sheet.getCell('A2'), plan.subject, '主体 A2');
+  assertResultPageLayout(sheet, contract, lastRow);
   if (sheet.autoFilter !== `A1:${contract.printAreaRightColumn}${lastRow}`) {
     throw exportValidationError('VCC 财务OP导出筛选区域校验失败');
   }
@@ -612,13 +987,10 @@ function validateResultSheet(workbook, contract, plan, renderedRows, lastRow) {
     throw exportValidationError('VCC 财务OP导出冻结窗格校验失败');
   }
   contract.columns.forEach((column, index) => {
-    const actualWidth = sheet.getColumn(index + 1).width;
-    if ((column.width == null && actualWidth != null)
-        || (column.width != null && actualWidth !== column.width)) {
-      throw exportValidationError(`VCC 财务OP导出第 ${index + 1} 列列宽校验失败`);
-    }
+    assertColumnLayoutMatches(sheet.getColumn(index + 1), column, `第 ${index + 1} 列`);
   });
-  [1, 2, 13, 14].forEach((columnNumber) => {
+  assertRowLayoutMatches(sheet.getRow(1), contract.headerRow, contract.headerRow.height, '表头行');
+  [1, 2, 3, 13, 14].forEach((columnNumber) => {
     assertStyleMatches(
       sheet.getCell(1, columnNumber),
       contract.headerRow.cells[columnNumber - 1],
@@ -636,25 +1008,40 @@ function validateResultSheet(workbook, contract, plan, renderedRows, lastRow) {
       throw exportValidationError(`${currency} 表头生效差异填充校验失败`);
     }
   });
+  const subjectStyle = contract.anchors[renderedRows[0].anchorKind].cells[0];
 
   for (const row of renderedRows) {
     const anchor = contract.anchors[row.anchorKind];
+    const subjectCell = sheet.getCell(row.rowNumber, 1);
     const majorCell = sheet.getCell(row.rowNumber, 2);
-    if (majorCell.text !== (row.major || '')) {
-      throw exportValidationError(`结果第 ${row.rowNumber} 行大类校验失败`);
+    const minorCell = sheet.getCell(row.rowNumber, 3);
+    assertPlainTextCell(majorCell, row.major || '', `结果第 ${row.rowNumber} 行大类`);
+    if (!anchor.mergeMajorMinor) {
+      assertPlainTextCell(minorCell, row.minor || '', `结果第 ${row.rowNumber} 行分类`);
     }
-    if (!anchor.mergeMajorMinor && sheet.getCell(row.rowNumber, 3).text !== (row.minor || '')) {
-      throw exportValidationError(`结果第 ${row.rowNumber} 行分类校验失败`);
-    }
-    const actualHeight = sheet.getRow(row.rowNumber).height == null
-      ? null : sheet.getRow(row.rowNumber).height;
     const expectedHeight = row.rowType === 'adjustment'
       ? adjustmentReasonRowHeight(row.reason, sheet.getColumn(14).width, anchor.height)
       : anchor.height;
-    if (actualHeight !== expectedHeight) {
-      throw exportValidationError(`结果第 ${row.rowNumber} 行行高校验失败`);
-    }
+    assertRowLayoutMatches(
+      sheet.getRow(row.rowNumber),
+      anchor,
+      expectedHeight,
+      `结果第 ${row.rowNumber} 行`
+    );
+    assertMergedFollower(sheet, 'A2', `A${row.rowNumber}`, `结果第 ${row.rowNumber} 行主体列`);
+    assertStyleMatches(subjectCell, subjectStyle, `结果第 ${row.rowNumber} 行主体列`);
     assertStyleMatches(majorCell, anchor.cells[1], `结果第 ${row.rowNumber} 行大类`);
+    if (anchor.mergeMajorMinor) {
+      assertMergedFollower(
+        sheet,
+        `B${row.rowNumber}`,
+        `C${row.rowNumber}`,
+        `结果第 ${row.rowNumber} 行大类/分类`
+      );
+      assertStyleMatches(minorCell, anchor.cells[1], `结果第 ${row.rowNumber} 行分类 follower`);
+    } else {
+      assertStyleMatches(minorCell, anchor.cells[2], `结果第 ${row.rowNumber} 行分类`);
+    }
     for (let index = 0; index < SUPPORTED_CURRENCIES.length; index++) {
       const currency = SUPPORTED_CURRENCIES[index];
       const expected = canonicalPlanAmount(row.amounts, currency, `${currency} 回读金额`);
@@ -672,9 +1059,7 @@ function validateResultSheet(workbook, contract, plan, renderedRows, lastRow) {
         canonicalizeVccAmount(row.adjustmentAmount, '调整值回读'),
         `结果第 ${row.rowNumber} 行调整值`
       );
-      if (reasonCell.value !== row.reason) {
-        throw exportValidationError(`结果第 ${row.rowNumber} 行调整原因回读失败`);
-      }
+      assertPlainTextCell(reasonCell, row.reason, `结果第 ${row.rowNumber} 行调整原因`);
       const targetCell = sheet.getCell(
         row.rowNumber,
         SUPPORTED_CURRENCIES.indexOf(row.currency) + 4
@@ -704,8 +1089,12 @@ function validateResultSheet(workbook, contract, plan, renderedRows, lastRow) {
           || styleSignature(reasonCell.font) !== styleSignature(contract.adjustmentReasonFont)) {
         throw exportValidationError(`结果第 ${row.rowNumber} 行调整样式校验失败`);
       }
-    } else if (valueCell.value != null || reasonCell.value != null) {
-      throw exportValidationError(`结果第 ${row.rowNumber} 行泄漏模板样例值`);
+    } else {
+      if (valueCell.value != null || reasonCell.value != null) {
+        throw exportValidationError(`结果第 ${row.rowNumber} 行泄漏模板样例值`);
+      }
+      assertStyleMatches(valueCell, anchor.cells[12], `结果第 ${row.rowNumber} 行普通 M 列`);
+      assertStyleMatches(reasonCell, anchor.cells[13], `结果第 ${row.rowNumber} 行普通 N 列`);
     }
   }
   assertMergeLayout(sheet, renderedRows, contract, lastRow);
@@ -713,6 +1102,12 @@ function validateResultSheet(workbook, contract, plan, renderedRows, lastRow) {
 }
 
 async function validateStagedWorkbook({ stagedPath, resultContract, plan, renderedRows, lastRow }) {
+  await validateResultWorksheetRawPayload({
+    workbookPath: stagedPath,
+    contract: resultContract,
+    renderedRows,
+    lastRow
+  });
   const validation = new ExcelJS.Workbook();
   await validation.xlsx.readFile(stagedPath);
   const sheetNames = validation.worksheets.map((sheet) => sheet.name);
@@ -729,7 +1124,14 @@ async function validateStagedWorkbook({ stagedPath, resultContract, plan, render
   }
 }
 
-async function writeSubjectWorkbook({ data, plan, outputPath, resultContract, pendingTemplateSheet }) {
+async function writeSubjectWorkbook({
+  data,
+  plan,
+  outputPath,
+  resultContract,
+  pendingTemplateSheet,
+  beforeAtomicHandoff = null
+}) {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = '网银账单生成小助手';
   workbook.created = new Date();
@@ -744,7 +1146,8 @@ async function writeSubjectWorkbook({ data, plan, outputPath, resultContract, pe
       plan,
       renderedRows,
       lastRow
-    })
+    }),
+    beforePublish: beforeAtomicHandoff
   });
 }
 
@@ -778,8 +1181,23 @@ async function writeRunWorkbooks({
   outputPaths,
   assetsDir,
   publicationStagingDirectory = null,
+  abortSignal = null,
+  cleanupOnFailure = false,
+  subjectIndexes = null,
+  beforeSubjectWrite = null,
+  beforeAtomicHandoff = null,
+  subjectQueryPushdown = false,
+  subjectNames = null,
+  subjectCount = null,
   writeSubjectWorkbookFn = writeSubjectWorkbook
 }) {
+  const throwIfAborted = () => {
+    if (!abortSignal || !abortSignal.aborted) return;
+    const error = new Error('VCC export Writer 已取消');
+    error.code = 'VCC_EXPORT_CANCELLED';
+    throw error;
+  };
+  throwIfAborted();
   const resultTemplatePath = path.join(assetsDir, 'VCC财务OP校验', RESULT_TEMPLATE_FILE_NAME);
   const pendingTemplatePath = path.join(assetsDir, 'VCC财务OP校验', '移除归档Pending发生额计算表.xlsx');
   // 两份模板必须在解析任何目标输出路径前完整读取；模板异常时不得触碰用户文件。
@@ -789,18 +1207,70 @@ async function writeRunWorkbooks({
   const pendingTemplateSheet = pendingTemplate.worksheets[0];
   if (!pendingTemplateSheet) throw new Error('移除归档Pending发生额计算模板缺少工作表');
 
-  const data = loadEffectiveRunData(db, Number(runId));
-  const plans = data.subjects.map((subject) => buildSubjectRowPlan(data, subject));
+  const boundSubjectNames = Array.isArray(subjectNames)
+    ? subjectNames.map((subject) => String(subject))
+    : null;
+  const usesBoundSubjects = subjectQueryPushdown && boundSubjectNames !== null;
+  const fullData = subjectQueryPushdown ? null : loadEffectiveRunData(db, Number(runId));
+  const subjectIndex = subjectQueryPushdown
+    ? (usesBoundSubjects
+        ? { run: loadEffectiveRunMetadata(db, Number(runId)), subjects: null }
+        : loadEffectiveRunSubjectIndex(db, Number(runId)))
+    : { run: fullData.run, subjects: fullData.subjects };
+  const selectedIndexes = subjectIndexes === null
+    ? (subjectIndex.subjects || []).map((_subject, index) => index)
+    : subjectIndexes.map(Number);
+  const availableSubjectCount = usesBoundSubjects ? Number(subjectCount) : subjectIndex.subjects.length;
+  if ((subjectIndexes !== null && selectedIndexes.length < 1) ||
+      new Set(selectedIndexes).size !== selectedIndexes.length ||
+      selectedIndexes.some((index) => !Number.isSafeInteger(index) || index < 0 ||
+        index >= availableSubjectCount) ||
+      (usesBoundSubjects &&
+        (!Number.isSafeInteger(availableSubjectCount) || availableSubjectCount < 1 ||
+         boundSubjectNames.length !== selectedIndexes.length ||
+         boundSubjectNames.some((subject) => !subject)))) {
+    throw new TypeError('VCC 财务OP导出 subjectIndexes 非法');
+  }
+  const selectedSubjects = usesBoundSubjects
+    ? boundSubjectNames
+    : selectedIndexes.map((index) => subjectIndex.subjects[index]);
   const destinations = outputPaths.map((filePath) => path.resolve(filePath));
+  if (destinations.length !== selectedSubjects.length) {
+    throw new TypeError('VCC 财务OP导出目标与主体数量不一致');
+  }
   const deferredPublication = Boolean(publicationStagingDirectory);
   const generationPaths = [];
   if (deferredPublication) {
     fs.mkdirSync(publicationStagingDirectory, { recursive: true });
   }
+  const subjectEvidence = [];
+  const subjectReadCounts = [];
   try {
-    for (let index = 0; index < plans.length; index += 1) {
-      const plan = plans[index];
+    for (let index = 0; index < selectedSubjects.length; index += 1) {
+      throwIfAborted();
+      const subject = selectedSubjects[index];
+      const data = subjectQueryPushdown
+        ? loadEffectiveRunDataForSubject(db, Number(runId), subject)
+        : fullData;
+      const plan = buildSubjectRowPlan(data, subject);
+      if (subjectQueryPushdown) {
+        subjectEvidence.push(buildVccSubjectAuthority({
+          data,
+          plan,
+          subject,
+          subjectIndex: selectedIndexes[index]
+        }));
+        subjectReadCounts.push(data.readCounts);
+      }
       const destination = destinations[index];
+      if (typeof beforeSubjectWrite === 'function') {
+        // eslint-disable-next-line no-await-in-loop
+        await beforeSubjectWrite({
+          subjectIndex: selectedIndexes[index],
+          outputIndex: index,
+          outputPath: destination
+        });
+      }
       const generationPath = deferredPublication
         ? path.join(
             publicationStagingDirectory,
@@ -812,30 +1282,45 @@ async function writeRunWorkbooks({
         plan,
         outputPath: generationPath,
         resultContract,
-        pendingTemplateSheet
+        pendingTemplateSheet,
+        beforeAtomicHandoff: typeof beforeAtomicHandoff === 'function'
+          ? (stagedPath) => beforeAtomicHandoff({
+              subjectIndex: selectedIndexes[index],
+              outputIndex: index,
+              outputPath: generationPath,
+              stagedPath
+            })
+          : null
       }));
+      throwIfAborted();
     }
   } catch (error) {
-    if (deferredPublication) {
+    if (deferredPublication || cleanupOnFailure) {
       for (const filePath of generationPaths) {
         try { fs.rmSync(filePath, { force: true }); } catch (_cleanupError) { /* caller also owns dir */ }
       }
     }
     error.partialResult = Object.freeze({
       status: 'error',
-      partialCommitted: deferredPublication ? false : generationPaths.length > 0,
+      partialCommitted: deferredPublication || cleanupOnFailure ? false : generationPaths.length > 0,
       runId: Number(runId),
-      targetMonth: data.run.targetMonth,
-      subjects: Object.freeze(data.subjects.slice(0, generationPaths.length)),
-      filePaths: Object.freeze(deferredPublication ? [] : [...generationPaths])
+      targetMonth: subjectIndex.run.targetMonth,
+      subjects: Object.freeze(selectedSubjects.slice(0, generationPaths.length)),
+      filePaths: Object.freeze(deferredPublication || cleanupOnFailure ? [] : [...generationPaths])
     });
     throw error;
   }
   return {
     runId: Number(runId),
-    targetMonth: data.run.targetMonth,
-    subjects: data.subjects,
+    targetMonth: subjectIndex.run.targetMonth,
+    subjects: selectedSubjects,
     filePaths: destinations,
+    ...(subjectQueryPushdown
+      ? {
+          subjectEvidence: Object.freeze(subjectEvidence),
+          subjectReadCounts: Object.freeze(subjectReadCounts)
+        }
+      : {}),
     ...(deferredPublication
       ? { generationFilePaths: generationPaths.map((filePath) => path.resolve(filePath)) }
       : {})
@@ -854,10 +1339,16 @@ module.exports = {
   configurePrintLayout,
   sanitizeFilePart,
   loadEffectiveRunData,
+  loadEffectiveRunDataForSubject,
+  loadEffectiveRunMetadata,
+  loadEffectiveRunSubjectIndex,
   rowAnchorKind,
   buildSubjectRowPlan,
   buildResultSheet,
+  buildPendingSheet,
+  canonicalMergeRanges,
   validateResultSheet,
+  validateResultWorksheetRawPayload,
   validateStagedWorkbook,
   assertAdjustmentLineage,
   nextAvailableOutputPath,

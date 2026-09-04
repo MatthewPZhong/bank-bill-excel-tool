@@ -103,6 +103,9 @@ function createServiceHost(options = {}) {
   const setTimer = options.setTimer || setTimeout;
   const clearTimer = options.clearTimer || clearTimeout;
   const diagnostics = options.diagnostics || (() => {});
+  const persistentStateAdoptionGate = typeof options.persistentStateAdoptionGate === 'function'
+    ? options.persistentStateAdoptionGate
+    : null;
   const adapters = Object.freeze({
     'worker-thread': options.workerThreadAdapter || createWorkerThreadAdapter(),
     'utility-process': options.utilityProcessAdapter || createUtilityProcessAdapter()
@@ -1130,6 +1133,17 @@ function createServiceHost(options = {}) {
     try {
       let lease;
       try {
+        if (payload.requestKind === 'persistent-state-replace' && persistentStateAdoptionGate) {
+          await persistentStateAdoptionGate(Object.freeze({
+            actionKey: job.actionKey,
+            operationKey: job.operationKey,
+            jobId: job.jobId,
+            unitId: message.jobRef.unitId,
+            workerInstanceId: record.workerInstanceId,
+            serviceGeneration: record.serviceGeneration,
+            signal: pending.abortController.signal
+          }));
+        }
         const reservationIdentity = stableReservationIdentity(record, ownerKey);
         lease = await governor[matrix.leaseMethod]({
           ...reservationIdentity,
@@ -1477,6 +1491,15 @@ function createServiceHost(options = {}) {
     job.onMessage(message);
   }
 
+  function routeCancellationTerminal(record) {
+    // WorkerThreadAdapter 已按 entry 白名单确认 cancellation terminal code；
+    // ServiceHost 只把这份现有私有因果证据转交给当前唯一 job。
+    const job = record.jobs.values().next().value;
+    if (job && typeof job.onCancellationTerminal === 'function') {
+      job.onCancellationTerminal();
+    }
+  }
+
   function handleMessage(record, rawMessage) {
     if (record.closed) return;
     try {
@@ -1635,6 +1658,7 @@ function createServiceHost(options = {}) {
         entry: profile.entry,
         policy,
         onMessage: (message) => handleMessage(record, message),
+        onCancellationTerminal: () => routeCancellationTerminal(record),
         onError: (error) => { void fatal(record, error); },
         onExit: (code, signal) => { void fatalExit(record, code, signal); }
       });

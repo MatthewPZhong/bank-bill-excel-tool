@@ -1,0 +1,70 @@
+# v3.2.4 Release Metadata Closeout — Implementation Notes
+
+## 2026-09-04 正式发布准备记录
+
+### Current Baseline
+
+- 冻结候选：`e1c31c4229ce68b18b82eca84cacb75f1e1dc889`。
+- 已发布前序 main：`5574a0e63aaa530db6669809b645f6d8397082d5`。
+- 隔离 worktree：`/private/tmp/bbet-v324-release-prep.KnYUSE/worktree`；分支：`codex/release-v3.2.4-prep-20260904`。
+- 合并策略：候选为第一父、最终 v3.2.3 main 为第二父的 `git merge --no-ff`；不得重写历史。
+
+### Current Decisions / Evidence
+
+| 项目 | 决定与证据 | 行为影响 |
+| --- | --- | --- |
+| 启动恢复协调器冲突 | 保留 v3.2.4 的 `resolveTaskState`、action-specific authority 与 `reserveObservationAnchor`，同时保留 v3.2.3 的 `usesDefaultTransitionPlan` 与 `defaultHoldResolutionRequest` | 自定义 action plan 仍负责 JPM committed-result-lost 语义；默认恢复链只在确定性 completed/not-committed/compensated 结果下解除同源 Hold。 |
+| 三份发布文档冲突 | v3.2.4 置于 v3.2.3 之前并改为 2026-09-04 正式发布候选；历史 R3 evidence 与当前人工授权分层记录 | 不改写 PENDING/NOT_RUN 历史快照，不把生产 capability 表述为 production enabled。 |
+| 第一轮定向验证 | Node 25 静态语法检查及 metadata/recovery/JPM durable 定向集合 `43/43 PASS` | 只作为冲突消解的快速反馈；正式证据必须使用 Node 22.18 exact-lock 重跑。 |
+| 历史 R3 tag authority 回放 | 首次 Node 22.18 回放因隔离 clone 带入发布后新增的 `v3.2.0`～`v3.2.3` refs，以 `GIT_TAG_REFS_INVALID` fail closed；测试 harness 随后只在临时 clone 中删除匹配 `refs/tags/v3.2.*` 的发布后 refs，并核对恢复后的 25 refs 数量及冻结 SHA-256，原 exact validator/test blob、历史快照和真实仓库 refs 均不修改；重跑 historical exact suite `62/62 PASS` | 修复只重建历史测试时点的 ref 环境，不放宽 Git authority guard，也不改变 tag 或生产代码。 |
+| Node 22.18 exact 定向验证 | closeout、历史 evidence、恢复协调器、JPM/VCC durable 与 Windows adapter 定向集合共 `223/223 PASS`，其中历史 exact suite `62/62 PASS` | 证明冲突消解和历史 ref 隔离在正式 Node 版本下同时成立。 |
+| Node 22.18 exact 全量验证 | unit `6790/6793 PASS`、`0 fail / 3 Windows-only skip`（424 files / 831 suites，日志 `logs/unit-tests/unit-20260904-211735.log`，SHA-256 `c8c3662cf6201b308ad5fe61c6148db2c5e6cafc19605d20b341f2db0a979060`）；integration 53 scripts、`2488/2488 PASS`；smoke、全量 `src/` lint、全部 changed JS `node --check`/ESLint、diff/版本/冲突/冻结文档、clean-HEAD packaged inputs 全部 PASS | 当前 exact tree 的业务、恢复、资金输出和打包输入门禁均已本地验证；本地仍未运行被禁止的 `release-check`、`check-vars`、`scan:vars`。 |
+| production readback | 6 个 v3.2.4 action 均为 `enabled=false`、`effectiveMode=legacy`、`effectiveWorkerCount=0` | capability 保持 dormant，正式发布不等于启用 production。 |
+| check-vars 只读复核 | 基于 `5574a0e63aaa530db6669809b645f6d8397082d5...d65cb890f14f4fab030340deeb87c33ff36ca892` exact diff 手工按 skill 扫描；实际命中 Critical `freezeWorkerBatchContext`、`unmatchedRows`，Important-skeleton `parentRunId`、`archiveCenter`、`AppDatabase/AppDatabase.init`，Risk-sensitive 数据库迁移；逐项入口/血缘/恢复/测试证据通过。审计 `/private/tmp/bbet-v324-prepr-check-vars-audit-20260904-133844.json`，4778 bytes，SHA-256 `a74d74032f31e137f445700049e744deea0630ee74297bc53e844c2acf005d65` | `state`、`app` 等纯词法命中已排除；PR 必须携带关联功能 review，远端 exact CI/review 不得由本地证据代偿。 |
+| blindspot / reconciliation 终轮复核 | ADM 真写入口、启动恢复、Hold 重检、exact-seven authority、ReconFix fixed/unmatched 守恒、VCC subject query 金额/币种/整批 golden、迁移/receipt/Publisher/cleanup 均有本地证据；未发现新增方案级阻断。审计 `/private/tmp/bbet-v324-prepr-blindspot-reconciliation-audit-20260904-133844.json`，5726 bytes，SHA-256 `cdff09818ce0d82f51b6d403d248491701d0352b159293434a656fd39caaf570` | 命中 JPM ADM 与 VCC 输出资金红线；正式 authority 来自 MatthewPZhong 已明确的资金/恢复/真实样本/稳定性人工验收，历史 R3 `PENDING_HUMAN_REVIEW/NOT_RUN` 仍保持不可篡改；production 继续 disabled/legacy。 |
+
+### Current Remaining Unknowns
+
+- PR exact CI/review、main exact CI、tag/Release/四资产与远端 post-release production readback 尚未发生；任何一步不得由旧证据代偿。
+
+以下 `Baseline`、`Decisions`、`Deviations / Evidence`、`Blindspot / Reconciliation` 与 `Remaining Unknowns` 保留冻结候选形成时的历史记录；本次 natural merge 后的当前事实以上述 `Current ...` 各节为准，不得用下方旧的 metadata-only 描述覆盖当前跨模块 diff。
+
+## Baseline
+
+- Goal/spec：顶层 `changes/3.2.4/spec.md`、`techdoc.md` 逐字节同步冻结 v3.2.4 合同，并在最终版本分支收口元数据与发布文档。
+- Exact local parent：R3.2.4 evidence `5f9ee049fc4a4daf7089fa99d98b769b3d69540f`。
+- Initial plan：[preflight.md](./preflight.md)。
+- Done when：版本、文档、历史 evidence、当前测试与人工边界均有可审计证据，且 main/tag/production 未修改。
+
+## Decisions
+
+| 决定 | 原因与证据 | 放弃的方案 | 影响 |
+| --- | --- | --- | --- |
+| 版本元数据只在最终 v3.2.4 分支收口为 `3.2.4` | 各版本必须保留自己的真实版本号 | 提前把 v3.2.2～v3.2.5 统一写成同一版本 | 后续 v3.2.5 独立 bump。 |
+| 顶层 Spec/TechDoc 逐字节同步冻结来源 | 防止 metadata 节点静默改写资金、恢复或生产合同 | 在顶层副本润色或复用旧文档 | 合同 hash 可独立复验。 |
+| R3.2.4 exact evidence 与当前 metadata authority 分层 | 原 evidence validator 锁定 exact parent/branch/worktree/package 事实 | 放宽旧 validator让任意后续 commit 伪装为原证据 | 历史 head 原样复验；当前版本由独立 closeout 测试证明。 |
+| 文档只声明 capability，不声明 production ready | snapshot 明确 6 action 全部 production=false、legacy/0，Windows/资金/恢复仍 PENDING/NOT_RUN | 用自动测试或 synthetic benchmark 代偿人工门禁 | production enablement 继续关闭。 |
+
+## Deviations / Evidence
+
+| 项目 | 结果 | 影响 |
+| --- | --- | --- |
+| R3 branch authority 更正 | 本地临时 branch 名改为 PR #204 真实 head branch；exact `5f9ee049…` 在同名隔离 clone validator PASS、固定 8 文件 `241/241 PASS`、R3 suite `62/62 PASS` | 只修证据身份，不改业务或 gate。 |
+| R3 全量 unit / integration / smoke | branch 身份更正前的同业务树为 unit `6823/6826 PASS`、`0 fail / 3 skip`，integration 53 脚本 `2488/2488 PASS`、smoke PASS；更正的两处 branch metadata 由 exact focused/validator 覆盖 | 不把 Windows skip 或人工项写成 PASS。 |
+| 当前 closeout 定向与完整验证 | closeout/R3 历史隔离定向集 `17/17 PASS`；完整 unit `6763/6766 PASS`、`0 fail / 3 Windows-only skip`（421 files / 831 suites，日志 `logs/unit-tests/unit-20260830-181403.log`）；smoke PASS；`check:packaged-inputs` PASS | metadata/docs/tests-only closeout 未重跑父级完整 integration；沿用 exact R3 业务树 `2488/2488 PASS`，并由当前完整 unit/smoke 与定向 closeout 测试覆盖收口差异。 |
+
+## Blindspot / Reconciliation
+
+- 入口与状态：metadata commit 不接 runtime，不更改 selector；历史 R3 suite 只在 exact head/branch clone 中执行，后续 commit 不能自证为原 evidence。
+- 金额/币种/行数：未修改业务源码、SQL、金额币种、方向、匹配、Workbook、样式或输出 disposition；三份文档只陈述 capability 与兼容边界。
+- 幂等与恢复：JPM intent/receipt/Inspector/Recovery Hold、ReconFix/VCC Publisher 与 cleanup 合同不变；committed-result-lost 继续保留 interrupted/Hold。
+- 人工红线：Windows packaged、真实 JPM/VCC 样本、Excel/WPS、RSS、资金与恢复处置仍为 `NOT_RUN/PENDING_HUMAN_REVIEW`，自动化不得关闭。
+
+## Remaining Unknowns
+
+| 未知 | 处理 | 负责人/下一步 | 合并影响 |
+| --- | --- | --- | --- |
+| 最终远端 v3.2.4 tip/ancestry | PROBE | 业务 PR 完成后重放并核对 | 未完成前不得推 metadata tip。 |
+| Windows packaged/Setup/portable、Excel/WPS、真实 JPM/VCC 文件与资金/恢复处置 | BLOCK（production） | release owner / Windows与资金人工门禁 | 不阻止 dormant capability，阻止 production/正式发布声明。 |
+
+按用户明确要求，不运行 `release-check`、`check-vars` 或 `scan:vars`；这些项目不得记录为 PASS。

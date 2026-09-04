@@ -68,6 +68,33 @@ const {
   beginExternalParserShutdown,
   waitForExternalParserShutdownPhase
 } = require('./external-parser-finalization');
+const {
+  RECON_FIX_EXPORT_ACTION,
+  RECON_FIX_JPM_UNIT_ID,
+  RECON_FIX_POLICIES,
+  RECON_FIX_RUN_JPM_ACTION,
+  RECON_FIX_SERVICE_KEY,
+  validateReconFixExportResult,
+  validateReconFixJpmResult,
+  validateReconFixServiceResult
+} = require('../recon-id-fix-service/policies');
+const {
+  createReconFixJpmDatabaseAuthority
+} = require('../recon-id-fix-service/jpm-database-authority');
+const {
+  createReconFixEvidenceSettlementAdmission
+} = require('../recon-id-fix-service/evidence-settlement-admission');
+const {
+  VCC_EXPORT_SINGLE_ACTION,
+  VCC_EXPORT_SINGLE_POLICY,
+  VCC_EXPORT_SUBJECTS_ACTION,
+  VCC_EXPORT_SUBJECTS_POLICY,
+  validateVccExportSingleResult,
+  validateVccExportSubjectsResult
+} = require('../vcc-financial-op-output/policies');
+const {
+  createVccExportTopologyPlanner
+} = require('../vcc-financial-op-output/topology');
 
 const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   ...TOOLBOX_GENERATION_POLICIES,
@@ -75,7 +102,10 @@ const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   NEW_ACCOUNT_GENERATION_POLICY,
   NEW_ACCOUNT_SAVE_AS_POLICY,
   ...FUND_RECON_POLICIES,
-  ...DUPLICATE_POLICIES
+  ...DUPLICATE_POLICIES,
+  ...RECON_FIX_POLICIES,
+  VCC_EXPORT_SINGLE_POLICY,
+  VCC_EXPORT_SUBJECTS_POLICY
 ]);
 
 function isBackgroundExecutionProductionEnabled(actionKey) {
@@ -133,6 +163,35 @@ function entryBindingForPolicy(policy, workerRoot, duplicateStartupGate) {
       cancellationTerminalErrorCodes: Object.freeze(['NEW_ACCOUNT_GENERATION_CANCELLED'])
     });
   }
+  if (policy.moduleId === 'recon-fix') {
+    return Object.freeze({
+      path: path.resolve(__dirname, '..', 'recon-id-fix-service', 'worker-entry.js'),
+      cancellationTerminalErrorCodes: Object.freeze(['RECON_FIX_CANCELLED'])
+    });
+  }
+  if (policy.actionKey === VCC_EXPORT_SUBJECTS_ACTION) {
+    return Object.freeze({
+      path: path.resolve(
+        __dirname,
+        '..',
+        'vcc-financial-op-output',
+        'writer-worker-entry.js'
+      ),
+      cancellationTerminalErrorCodes: Object.freeze(['VCC_EXPORT_CANCELLED']),
+      admittedTopologyWorkerData: true
+    });
+  }
+  if (policy.actionKey === VCC_EXPORT_SINGLE_ACTION) {
+    return Object.freeze({
+      path: path.resolve(
+        __dirname,
+        '..',
+        'vcc-financial-op-output',
+        'single-writer-worker-entry.js'
+      ),
+      cancellationTerminalErrorCodes: Object.freeze(['VCC_EXPORT_CANCELLED'])
+    });
+  }
   const preFund = policy.moduleId === 'pre-fund';
   return Object.freeze({
     path: path.join(
@@ -154,6 +213,10 @@ function entryBindingForPolicy(policy, workerRoot, duplicateStartupGate) {
 }
 
 function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverride = null) {
+  const reconFixJpmDatabaseAuthority = options.reconFixJpmDatabasePath === undefined ||
+    options.reconFixJpmDatabasePath === null
+    ? null
+    : createReconFixJpmDatabaseAuthority(options.reconFixJpmDatabasePath);
   const availableParallelism = options.availableParallelism === undefined
     ? (typeof os.availableParallelism === 'function'
         ? os.availableParallelism()
@@ -182,29 +245,42 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
   ));
   const validatorEntries = {};
   for (const policy of BACKGROUND_EXECUTION_POLICIES) {
-    const resultValidator = policy.moduleId === 'duplicate'
-      ? (policy.actionKey === DUPLICATE_ACTIONS.IMPORT
-          ? validateDuplicateImportResult
-          : (policy.actionKey === DUPLICATE_ACTIONS.RUN
-              ? validateDuplicateRunResult
-              : validateDuplicateExportResult))
-      : policy.moduleId === 'fund-recon'
-      ? (policy.actionKey === 'fund-recon:import'
-          ? validateFundReconImportResult
-          : (policy.actionKey === 'fund-recon:run'
-              ? validateFundReconRunResult
-              : validateFundReconExportResult))
-      : policy.moduleId === 'pre-fund'
-      ? (policy.actionKey === PRE_FUND_MPT_REPAIR_ACTION
-          ? validatePreFundMptRepairResult
-          : validatePreFundMptImportResult)
-      : (policy.moduleId === 'new-account'
-          ? (policy.actionKey === NEW_ACCOUNT_SAVE_AS_ACTION
-              ? validateNewAccountSaveAsResult
-              : validateNewAccountGenerationResult)
-          : (policy.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
-          ? validateToolboxMultiGenerationResult
-          : (value) => validateToolboxGenerationResult(value, policy.actionKey)));
+    let resultValidator;
+    if (policy.actionKey === VCC_EXPORT_SUBJECTS_ACTION) {
+      resultValidator = validateVccExportSubjectsResult;
+    } else if (policy.actionKey === VCC_EXPORT_SINGLE_ACTION) {
+      resultValidator = validateVccExportSingleResult;
+    } else if (policy.moduleId === 'recon-fix') {
+      resultValidator = policy.actionKey === RECON_FIX_EXPORT_ACTION
+        ? validateReconFixExportResult
+        : (policy.actionKey === RECON_FIX_RUN_JPM_ACTION
+            ? validateReconFixJpmResult
+            : validateReconFixServiceResult);
+    } else if (policy.moduleId === 'duplicate') {
+      resultValidator = policy.actionKey === DUPLICATE_ACTIONS.IMPORT
+        ? validateDuplicateImportResult
+        : (policy.actionKey === DUPLICATE_ACTIONS.RUN
+            ? validateDuplicateRunResult
+            : validateDuplicateExportResult);
+    } else if (policy.moduleId === 'fund-recon') {
+      resultValidator = policy.actionKey === 'fund-recon:import'
+        ? validateFundReconImportResult
+        : (policy.actionKey === 'fund-recon:run'
+            ? validateFundReconRunResult
+            : validateFundReconExportResult);
+    } else if (policy.moduleId === 'pre-fund') {
+      resultValidator = policy.actionKey === PRE_FUND_MPT_REPAIR_ACTION
+        ? validatePreFundMptRepairResult
+        : validatePreFundMptImportResult;
+    } else if (policy.moduleId === 'new-account') {
+      resultValidator = policy.actionKey === NEW_ACCOUNT_SAVE_AS_ACTION
+        ? validateNewAccountSaveAsResult
+        : validateNewAccountGenerationResult;
+    } else {
+      resultValidator = policy.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
+        ? validateToolboxMultiGenerationResult
+        : (value) => validateToolboxGenerationResult(value, policy.actionKey);
+    }
     validatorEntries[policy.result.validatorKey] = resultValidator;
     // Main explicitly executes the asynchronous technical/business validators before Publisher.
     // Registry bindings remain synchronous capability declarations for static contract coverage.
@@ -217,6 +293,7 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
   });
   const preFundTopologyPlanner = createPreFundMptTopologyPlanner({ availableParallelism });
   const duplicateTopologyPlanner = createDuplicatePairedTopologyPlanner({ availableParallelism });
+  const vccExportTopologyPlanner = createVccExportTopologyPlanner();
   const topologyRegistry = createStaticRegistry(Object.fromEntries(
     BACKGROUND_EXECUTION_POLICIES
       .filter((policy) => policy.resources.compound)
@@ -225,7 +302,9 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
           ? preFundTopologyPlanner
           : (policy.actionKey === DUPLICATE_ACTIONS.IMPORT
               ? duplicateTopologyPlanner
-              : () => Object.freeze({ effectiveChildCount: 1 }))])
+              : (policy.actionKey === VCC_EXPORT_SUBJECTS_ACTION
+                  ? vccExportTopologyPlanner
+                  : () => Object.freeze({ effectiveChildCount: 1 })))])
   ));
   entryRegistry.freeze();
   validatorRegistry.freeze();
@@ -243,9 +322,17 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
     ),
     settlementKeys: BACKGROUND_EXECUTION_POLICIES.map((policy) => policy.commit.settlementKey),
     publisherKeys: BACKGROUND_EXECUTION_POLICIES.map((policy) => policy.artifacts.publisherKey),
-    serviceKeys: [FUND_RECON_SERVICE_KEY, DUPLICATE_SERVICE_KEY],
-    plannerKeys: ['planner.pre-fund:mpt-import', 'planner.duplicate:import'],
-    reducerKeys: ['reducer.pre-fund:mpt-import', 'reducer.duplicate:import']
+    serviceKeys: [FUND_RECON_SERVICE_KEY, DUPLICATE_SERVICE_KEY, RECON_FIX_SERVICE_KEY],
+    plannerKeys: [
+      'planner.pre-fund:mpt-import',
+      'planner.duplicate:import',
+      'planner.vcc-financial-op:export-subjects'
+    ],
+    reducerKeys: [
+      'reducer.pre-fund:mpt-import',
+      'reducer.duplicate:import',
+      'reducer.vcc-financial-op:export-subjects'
+    ]
   };
   const policyRegistry = createExecutionPolicyRegistry({
     policies: BACKGROUND_EXECUTION_POLICIES,
@@ -271,23 +358,219 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
     executionTimeoutMs: options.executionTimeoutMs,
     shutdownTimeoutMs: supervisorShutdownTimeoutMs,
     workerDurableCoordinator: options.workerDurableCoordinator,
+    bindInputForAction({ actionKey, input }) {
+      if ([VCC_EXPORT_SINGLE_ACTION, VCC_EXPORT_SUBJECTS_ACTION].includes(actionKey)) {
+        if (!options.vccFinancialOpDatabasePath || !options.vccFinancialOpAssetsDir) {
+          const error = new Error('VCC export runtime generation 缺少 Main database/assets authority');
+          error.code = 'VCC_EXPORT_RUNTIME_AUTHORITY_UNAVAILABLE';
+          throw error;
+        }
+        if (Object.hasOwn(input, 'databasePath') || Object.hasOwn(input, 'assetsDir')) {
+          const error = new Error('VCC export database/assets authority 不接受 caller override');
+          error.code = 'VCC_EXPORT_RUNTIME_AUTHORITY_OVERRIDE_FORBIDDEN';
+          throw error;
+        }
+        return Object.freeze({
+          ...input,
+          databasePath: path.resolve(options.vccFinancialOpDatabasePath),
+          assetsDir: path.resolve(options.vccFinancialOpAssetsDir)
+        });
+      }
+      if (actionKey !== RECON_FIX_RUN_JPM_ACTION) return input;
+      if (!reconFixJpmDatabaseAuthority) {
+        const error = new Error('ReconFix JPM runtime generation 缺少 Main database authority');
+        error.code = 'RECON_FIX_JPM_DATABASE_AUTHORITY_UNAVAILABLE';
+        throw error;
+      }
+      if (Object.hasOwn(input, 'databasePath') || Object.hasOwn(input, 'databaseIdentity')) {
+        const error = new Error('ReconFix JPM database authority 不接受 caller override');
+        error.code = 'RECON_FIX_JPM_DATABASE_AUTHORITY_OVERRIDE_FORBIDDEN';
+        throw error;
+      }
+      return Object.freeze({
+        ...input,
+        databasePath: reconFixJpmDatabaseAuthority.databasePath
+      });
+    },
+    defaultUnitsForAction(actionKey) {
+      return actionKey === RECON_FIX_RUN_JPM_ACTION
+        ? Object.freeze([Object.freeze({ unitId: RECON_FIX_JPM_UNIT_ID, input: Object.freeze({}) })])
+        : Object.freeze([]);
+    },
     ...(options.workerThreadAdapter ? { workerThreadAdapter: options.workerThreadAdapter } : {})
   });
+  const activeServiceOperations = new Map();
+  const serviceOperationReservations = new Map();
+  const reconFixEvidenceSettlementAdmission = createReconFixEvidenceSettlementAdmission();
+
+  function serviceOperationError(code, message) {
+    const error = new Error(message);
+    error.code = code;
+    return error;
+  }
+
+  function serviceKeyForAction(actionKey) {
+    const policy = policyRegistry.get(actionKey);
+    return policy && policy.lifetime === 'service' && policy.service
+      ? policy.service.serviceKey
+      : null;
+  }
+
+  function enterUnreservedServiceOperation(request) {
+    const serviceKey = serviceKeyForAction(request && request.actionKey);
+    if (!serviceKey) return () => {};
+    if (serviceOperationReservations.has(serviceKey)) {
+      throw serviceOperationError(
+        'SERVICE_BUSY',
+        `Service operation 已被 Main settlement reservation 占用：${serviceKey}`
+      );
+    }
+    activeServiceOperations.set(serviceKey, (activeServiceOperations.get(serviceKey) || 0) + 1);
+    let released = false;
+    return () => {
+      if (released) return false;
+      released = true;
+      const next = (activeServiceOperations.get(serviceKey) || 1) - 1;
+      if (next > 0) activeServiceOperations.set(serviceKey, next);
+      else activeServiceOperations.delete(serviceKey);
+      return true;
+    };
+  }
+
+  function executeUnreserved(request) {
+    const leave = enterUnreservedServiceOperation(request);
+    try {
+      return Promise.resolve(supervisor.execute(request)).finally(leave);
+    } catch (error) {
+      leave();
+      throw error;
+    }
+  }
+
+  function startUnreserved(request) {
+    const leave = enterUnreservedServiceOperation(request);
+    try {
+      const control = supervisor.start(request);
+      Promise.resolve(control.promise).finally(leave).catch(() => undefined);
+      return control;
+    } catch (error) {
+      leave();
+      throw error;
+    }
+  }
+
+  function reserveServiceOperation(authority) {
+    if (!authority || typeof authority !== 'object' || Array.isArray(authority) ||
+        Object.keys(authority).sort().join(',') !== 'actionKey,operationKey' ||
+        typeof authority.actionKey !== 'string' || !authority.actionKey ||
+        typeof authority.operationKey !== 'string' || !authority.operationKey) {
+      throw serviceOperationError(
+        'SERVICE_OPERATION_RESERVATION_INVALID',
+        'Service operation reservation authority 必须是 exact actionKey/operationKey'
+      );
+    }
+    const policy = policyRegistry.get(authority.actionKey);
+    const serviceKey = serviceKeyForAction(authority.actionKey);
+    if (!policy || !serviceKey) {
+      throw serviceOperationError(
+        'SERVICE_OPERATION_RESERVATION_INVALID',
+        'Service operation reservation 只接受已注册 service action'
+      );
+    }
+    if (serviceOperationReservations.has(serviceKey) ||
+        (activeServiceOperations.get(serviceKey) || 0) > 0) {
+      throw serviceOperationError('SERVICE_BUSY', `Service 已有 active operation/reservation：${serviceKey}`);
+    }
+    const identity = Object.freeze({
+      actionKey: authority.actionKey,
+      operationKey: authority.operationKey,
+      serviceKey
+    });
+    const token = Object.freeze({});
+    serviceOperationReservations.set(serviceKey, token);
+    let executionStarted = false;
+    let executionSettled = true;
+    let released = false;
+    return Object.freeze({
+      identity,
+      execute(request) {
+        if (released || serviceOperationReservations.get(serviceKey) !== token) {
+          throw serviceOperationError(
+            'SERVICE_OPERATION_RESERVATION_STALE',
+            'Service operation reservation 已释放或失效'
+          );
+        }
+        if (executionStarted) {
+          throw serviceOperationError(
+            'SERVICE_OPERATION_RESERVATION_REUSED',
+            'Service operation reservation 只能执行一次'
+          );
+        }
+        if (!request || request.actionKey !== identity.actionKey ||
+            request.operationKey !== identity.operationKey) {
+          throw serviceOperationError(
+            'SERVICE_OPERATION_RESERVATION_IDENTITY_MISMATCH',
+            'Service operation request 与 reservation identity 不一致'
+          );
+        }
+        if (resourceGovernorOverride) assertNonProductionGovernorRequest(request);
+        executionStarted = true;
+        executionSettled = false;
+        try {
+          return Promise.resolve(supervisor.execute(request)).finally(() => {
+            executionSettled = true;
+          });
+        } catch (error) {
+          executionSettled = true;
+          throw error;
+        }
+      },
+      release() {
+        if (released) return false;
+        if (!executionSettled) {
+          throw serviceOperationError(
+            'SERVICE_OPERATION_RESERVATION_ACTIVE',
+            'Service operation execution 未结算，不能提前释放 reservation'
+          );
+        }
+        if (serviceOperationReservations.get(serviceKey) !== token) {
+          throw serviceOperationError(
+            'SERVICE_OPERATION_RESERVATION_STALE',
+            'Service operation reservation owner 已变化'
+          );
+        }
+        released = true;
+        serviceOperationReservations.delete(serviceKey);
+        return true;
+      }
+    });
+  }
   let shutdownPromise = null;
   const runtime = Object.freeze({
     start(request) {
       if (resourceGovernorOverride) assertNonProductionGovernorRequest(request);
-      return supervisor.start(request);
+      return startUnreserved(request);
     },
     execute(request) {
       if (resourceGovernorOverride) assertNonProductionGovernorRequest(request);
-      return supervisor.execute(request);
+      return executeUnreserved(request);
     },
     inspect(jobId) {
       return supervisor.inspect(jobId);
     },
+    closeService(serviceKey) {
+      if (serviceOperationReservations.has(serviceKey)) {
+        throw serviceOperationError(
+          'SERVICE_BUSY',
+          `Service settlement reservation 尚未释放：${serviceKey}`
+        );
+      }
+      return supervisor.closeService(serviceKey);
+    },
     policyRegistry,
+    reconFixEvidenceSettlementAdmission,
     resourceGovernor,
+    reserveServiceOperation,
     shutdown(shutdownOptions = {}) {
       if (shutdownPromise) return shutdownPromise;
       const fallbackTimeoutMs = Number.isFinite(supervisorShutdownTimeoutMs) &&
@@ -378,7 +661,10 @@ function createBackgroundExecutionRuntimeManager(options = {}) {
       duplicateStartupGate,
       workerDurableCoordinator: typeof options.workerDurableCoordinatorProvider === 'function'
         ? options.workerDurableCoordinatorProvider()
-        : options.workerDurableCoordinator
+        : options.workerDurableCoordinator,
+      reconFixJpmDatabasePath: typeof options.reconFixJpmDatabasePathProvider === 'function'
+        ? options.reconFixJpmDatabasePathProvider()
+        : options.reconFixJpmDatabasePath
     });
   });
   let runtime = null;
