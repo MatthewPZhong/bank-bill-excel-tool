@@ -16,6 +16,7 @@
 | 启动恢复协调器冲突 | 保留 v3.2.4 的 `resolveTaskState`、action-specific authority 与 `reserveObservationAnchor`，同时保留 v3.2.3 的 `usesDefaultTransitionPlan` 与 `defaultHoldResolutionRequest` | 自定义 action plan 仍负责 JPM committed-result-lost 语义；默认恢复链只在确定性 completed/not-committed/compensated 结果下解除同源 Hold。 |
 | 三份发布文档冲突 | v3.2.4 置于 v3.2.3 之前并改为 2026-09-04 正式发布候选；历史 R3 evidence 与当前人工授权分层记录 | 不改写 PENDING/NOT_RUN 历史快照，不把生产 capability 表述为 production enabled。 |
 | 第一轮定向验证 | Node 25 静态语法检查及 metadata/recovery/JPM durable 定向集合 `43/43 PASS` | 只作为冲突消解的快速反馈；正式证据必须使用 Node 22.18 exact-lock 重跑。 |
+| 历史 R3 tag authority 回放 | 首次 Node 22.18 回放因隔离 clone 带入发布后新增的 `v3.2.0`～`v3.2.3` refs，以 `GIT_TAG_REFS_INVALID` fail closed；测试 harness 随后只在临时 clone 中删除匹配 `refs/tags/v3.2.*` 的发布后 refs，并核对恢复后的 25 refs 数量及冻结 SHA-256，原 exact validator/test blob、历史快照和真实仓库 refs 均不修改；重跑 historical exact suite `62/62 PASS` | 修复只重建历史测试时点的 ref 环境，不放宽 Git authority guard，也不改变 tag 或生产代码。 |
 
 ### Current Remaining Unknowns
 

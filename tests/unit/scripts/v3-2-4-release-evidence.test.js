@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -38,6 +39,10 @@ const HISTORICAL_EXACT_BASE = 'd5c6242d9e3a11591a998cf02fe11c27fb01d8d1';
 const HISTORICAL_EXPECTED_BRANCH = 'codex/v3.2.4-r3-release-evidence-restacked';
 const HISTORICAL_EXPECTED_MAIN_REF_OID = 'b7abc2fa00838fc61a94f812c1a14c48d5d4d40f';
 const HISTORICAL_EXPECTED_TRACKED_ENTRY_COUNT = 2088;
+const HISTORICAL_EXPECTED_TAG_REF_COUNT = 25;
+const HISTORICAL_EXPECTED_TAG_REFS_SHA256 =
+  '94a09eb7ecd816876a3b2a53c09bd689fcd76d76b56d6c9d3ea83a28e7a8983f';
+const POST_EVIDENCE_TAG_REF_PATTERN = /^refs\/tags\/v3\.2\.\d+$/;
 const HISTORICAL_CANDIDATE_ROOT_PREFIX = 'v324-evidence-git-';
 const HISTORICAL_OUTER_ROOT_PREFIX = 'r4-';
 const HISTORICAL_PREVIOUS_OUTER_ROOT_PREFIX = 'v324-exact-evidence-';
@@ -654,6 +659,37 @@ function runGit(repository, args) {
   return result.stdout.trim();
 }
 
+function restoreHistoricalTagSnapshot(repository) {
+  const before = spawnSync('git', [
+    'for-each-ref', '--sort=refname', '--format=%(refname)%00%(objectname)', 'refs/tags'
+  ], { cwd: repository });
+  assert.equal(before.status, 0, before.stderr?.toString('utf8') || 'TAG_REF_READ_FAILED');
+  const postEvidenceRefs = before.stdout.toString('utf8').split('\n').filter(Boolean)
+    .map((record) => record.split('\0')[0])
+    .filter((refName) => POST_EVIDENCE_TAG_REF_PATTERN.test(refName));
+  for (const refName of [
+    'refs/tags/v3.2.0',
+    'refs/tags/v3.2.1',
+    'refs/tags/v3.2.2',
+    'refs/tags/v3.2.3'
+  ]) {
+    assert.ok(postEvidenceRefs.includes(refName));
+  }
+  for (const refName of postEvidenceRefs) {
+    runGit(repository, ['update-ref', '-d', refName]);
+  }
+
+  const restored = spawnSync('git', [
+    'for-each-ref', '--sort=refname', '--format=%(refname)%00%(objectname)', 'refs/tags'
+  ], { cwd: repository });
+  assert.equal(restored.status, 0,
+    restored.stderr?.toString('utf8') || 'HISTORICAL_TAG_REF_READ_FAILED');
+  assert.equal(restored.stdout.toString('utf8').split('\n').filter(Boolean).length,
+    HISTORICAL_EXPECTED_TAG_REF_COUNT);
+  assert.equal(crypto.createHash('sha256').update(restored.stdout).digest('hex'),
+    HISTORICAL_EXPECTED_TAG_REFS_SHA256);
+}
+
 function copyReleaseEvidenceFiles(repository, skippedPaths = []) {
   for (const relativePath of RELEASE_EVIDENCE_PATHS) {
     if (skippedPaths.includes(relativePath)) continue;
@@ -746,6 +782,7 @@ if (!RUN_EXACT_SUITE) {
       runGit(canonicalRepository,
         ['checkout', '--quiet', '-B', EXPECTED_BRANCH, EXACT_EVIDENCE_HEAD]);
       runGit(canonicalRepository, ['update-ref', 'refs/heads/main', EXPECTED_MAIN_REF_OID]);
+      restoreHistoricalTagSnapshot(canonicalRepository);
       assertHistoricalGitPathContract(canonicalRepository);
       assertHistoricalGitPathAdapterContract();
       const preloadPath = createHistoricalGitPathPreload(
