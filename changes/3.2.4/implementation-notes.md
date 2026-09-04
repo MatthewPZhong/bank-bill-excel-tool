@@ -20,11 +20,14 @@
 | Node 22.18 exact 定向验证 | closeout、历史 evidence、恢复协调器、JPM/VCC durable 与 Windows adapter 定向集合共 `223/223 PASS`，其中历史 exact suite `62/62 PASS` | 证明冲突消解和历史 ref 隔离在正式 Node 版本下同时成立。 |
 | Node 22.18 exact 全量验证 | unit `6790/6793 PASS`、`0 fail / 3 Windows-only skip`（424 files / 831 suites，日志 `logs/unit-tests/unit-20260904-211735.log`，SHA-256 `c8c3662cf6201b308ad5fe61c6148db2c5e6cafc19605d20b341f2db0a979060`）；integration 53 scripts、`2488/2488 PASS`；smoke、全量 `src/` lint、全部 changed JS `node --check`/ESLint、diff/版本/冲突/冻结文档、clean-HEAD packaged inputs 全部 PASS | 当前 exact tree 的业务、恢复、资金输出和打包输入门禁均已本地验证；本地仍未运行被禁止的 `release-check`、`check-vars`、`scan:vars`。 |
 | production readback | 6 个 v3.2.4 action 均为 `enabled=false`、`effectiveMode=legacy`、`effectiveWorkerCount=0` | capability 保持 dormant，正式发布不等于启用 production。 |
+| check-vars 只读复核 | 基于 `5574a0e63aaa530db6669809b645f6d8397082d5...d65cb890f14f4fab030340deeb87c33ff36ca892` exact diff 手工按 skill 扫描；实际命中 Critical `freezeWorkerBatchContext`、`unmatchedRows`，Important-skeleton `parentRunId`、`archiveCenter`、`AppDatabase/AppDatabase.init`，Risk-sensitive 数据库迁移；逐项入口/血缘/恢复/测试证据通过。审计 `/private/tmp/bbet-v324-prepr-check-vars-audit-20260904-133844.json`，4778 bytes，SHA-256 `a74d74032f31e137f445700049e744deea0630ee74297bc53e844c2acf005d65` | `state`、`app` 等纯词法命中已排除；PR 必须携带关联功能 review，远端 exact CI/review 不得由本地证据代偿。 |
+| blindspot / reconciliation 终轮复核 | ADM 真写入口、启动恢复、Hold 重检、exact-seven authority、ReconFix fixed/unmatched 守恒、VCC subject query 金额/币种/整批 golden、迁移/receipt/Publisher/cleanup 均有本地证据；未发现新增方案级阻断。审计 `/private/tmp/bbet-v324-prepr-blindspot-reconciliation-audit-20260904-133844.json`，5726 bytes，SHA-256 `cdff09818ce0d82f51b6d403d248491701d0352b159293434a656fd39caaf570` | 命中 JPM ADM 与 VCC 输出资金红线；正式 authority 来自 MatthewPZhong 已明确的资金/恢复/真实样本/稳定性人工验收，历史 R3 `PENDING_HUMAN_REVIEW/NOT_RUN` 仍保持不可篡改；production 继续 disabled/legacy。 |
 
 ### Current Remaining Unknowns
 
-- 提 PR 前 blindspot-pass、check-vars 只读扫描与 reconciliation-blindspot-pass 尚待基于最终 exact diff 重跑。
 - PR exact CI/review、main exact CI、tag/Release/四资产与远端 post-release production readback 尚未发生；任何一步不得由旧证据代偿。
+
+以下 `Baseline`、`Decisions`、`Deviations / Evidence`、`Blindspot / Reconciliation` 与 `Remaining Unknowns` 保留冻结候选形成时的历史记录；本次 natural merge 后的当前事实以上述 `Current ...` 各节为准，不得用下方旧的 metadata-only 描述覆盖当前跨模块 diff。
 
 ## Baseline
 
