@@ -19,6 +19,7 @@
 | 三份发布文档冲突按版本链语义合并 | 产品代码无内容冲突；文档需同时保留 v3.2.3 capability、v3.2.2 已发布事实和当前技术发布授权 | 选择 ours/theirs 整体覆盖 | 不回退 v3.2.2 修复与 Release 历史，也不把 v3.2.3 提前写成已发布。 |
 | 历史 exact evidence 的临时克隆恢复冻结 tag refs 快照 | 当前真实仓库在历史 evidence 之后新增了 v3.2.0～v3.2.2 annotated tags；继承这些 refs 会先触发 `GIT_TAG_REFS_INVALID`，掩盖原始 duplicate-key 反例 | 放宽 validator 的 25 refs/hash、删除真实仓库 tags 或改写历史 snapshot | 仅在测试私有临时 clone 删除后续 `v3.2.x` refs，并强制回读 25 refs 与冻结 SHA-256 `94a09eb7…`；validator、历史提交与真实 refs 不变。 |
 | v3.2.2 closeout 回归锁定正式发布事实 | v3.2.2 已由 PR #225、annotated tag 与 Release run 完整终审，后续版本测试不能继续要求“正式发布候选”标题 | 把已发布文档改回候选或删除前序测试 | 测试改为验证正式发布标题、main/tag/run 与四资产类别；资金与 production 断言保持不变。 |
+| 重要变量只读扫描不直接改清单 | 用户永久边界禁止本地 `check:vars`/`scan:vars`；skill 规定新升格条目需人工审批 | 绕过边界运行脚本，或未经审批改写 `rules/important-variables.md` | 逐行读完清单并以 exact diff 手工扫描；现有命中逐项复核，新增跨层 authority 仅列为升格候选。 |
 
 ## Assumptions
 
@@ -60,6 +61,12 @@
 | v3.2.3 相关 11 文件定向组合（修复后） | `201/201 PASS`、`0 FAIL`、`0 SKIP`，official Node `22.18.0` | Statement/NewAccount、metadata closeout 与历史 R3 evidence 同时成立。 |
 | 首轮完整 unit | `6607/6612 PASS`、`2 FAIL`、`3 SKIP`；日志 `logs/unit-tests/unit-20260904-142311.log`。失败精确为 v3.2.2 测试仍要求候选标题，以及共享依赖树 `26.8.1` 不满足 lock `26.15.7` 的 NSIS 修复合同 | 保留真实失败；没有以 focused 绿灯代偿。 |
 | v3.2.2 closeout + Windows build contract 定向复核 | exact-lock electron-builder/app-builder-lib 均为 `26.15.7`；`6 PASS`、`0 FAIL`、`2 Windows-only SKIP` | 前序正式发布证据与 NSIS access-violation 修复合同均恢复为真实通过。 |
+| exact-lock 最终完整 unit | `6609/6612 PASS`、`0 FAIL`、`3 Windows-only SKIP`；日志 `logs/unit-tests/unit-20260904-142713.log`；official Node `22.18.0`、npm `10.9.3`、electron-builder/app-builder-lib `26.15.7` | 当前 exact 业务、恢复、资金、发布证据与 Windows 合同全仓回归。 |
+| exact-lock 最终完整 integration | `53/53` scripts、`2488/2488 PASS`；runner 刷新的纯时序统计已用 `apply_patch` 恢复，policy SHA-256 仍为 `65716ba5…` | Statement/NewAccount/后台执行/恢复与其余模块跨层合同；不把测试运行时噪声带入提交。 |
+| 最终 smoke / lint / changed-JS 静态检查 | `npm run smoke` PASS；`npm run lint` PASS；相对已发布 v3.2.2 的 90 个 changed JS 均通过 `node --check` 与 ESLint；`git diff --check` PASS | 主流程、代码语法、风格和冲突残留。 |
+| clean-HEAD packaged inputs | `npm run check:packaged-inputs` PASS，`build.files` 9 条 include rules；执行时 worktree clean | 确认当前 exact HEAD 新增 Worker/Service/contract 文件进入 Windows 包；不是本地 `release-check`。 |
+| check-vars 只读扫描 | 56 个 changed `src/**/*.js`；Critical 命中 `FileValidationError`，Important-skeleton 命中 normalize/parse/read/write 门面，Runtime-state 命中三个 Statement legacy globals，Risk-sensitive 命中余额、行过滤、合并/固定字段与 `splitTemplateName`。所有权威实现或 legacy 生命周期均未改；`state` 为非 renderer 的局部同名假阳性 | 按清单原 review 要点复核签名、行序、金额/币种、current/all 与 session 生命周期；`targetParentIdentity`、Statement Service/NewAccount policies 仅列升格候选。 |
+| blindspot-pass + reconciliation-blindspot-pass 终审 | PASS；无入口旁路、未决状态生命周期、部分发布、不可见清理失败或新增资金红线。审计 `/private/tmp/bbet-v323-check-vars-blindspot-reconciliation-20260904-144901.json`，5536 bytes，SHA-256 `da4237de…`，`allChecksPass=true` | Main 仍持独立 artifact authority；金额/币种/匹配语义和 legacy IPC 未改；所有 v3.2.3 production action 保持 absent 或 false/legacy/0。 |
 
 ## Remaining Unknowns
 
