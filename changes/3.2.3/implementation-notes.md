@@ -18,6 +18,7 @@
 | 最终版本链只用 natural merge 传播 | 冻结 candidate 与已发布 v3.2.2 共同祖先为 `a5af61ea…`；candidate-first/main-second 能同时保留候选血缘和已发布修复 | rebase、cherry-pick、历史改写或反向父序 | merge commit 必须保持 parents=`[d12abe7c…,c2d23f59…]`。 |
 | 三份发布文档冲突按版本链语义合并 | 产品代码无内容冲突；文档需同时保留 v3.2.3 capability、v3.2.2 已发布事实和当前技术发布授权 | 选择 ours/theirs 整体覆盖 | 不回退 v3.2.2 修复与 Release 历史，也不把 v3.2.3 提前写成已发布。 |
 | 历史 exact evidence 的临时克隆恢复冻结 tag refs 快照 | 当前真实仓库在历史 evidence 之后新增了 v3.2.0～v3.2.2 annotated tags；继承这些 refs 会先触发 `GIT_TAG_REFS_INVALID`，掩盖原始 duplicate-key 反例 | 放宽 validator 的 25 refs/hash、删除真实仓库 tags 或改写历史 snapshot | 仅在测试私有临时 clone 删除后续 `v3.2.x` refs，并强制回读 25 refs 与冻结 SHA-256 `94a09eb7…`；validator、历史提交与真实 refs 不变。 |
+| v3.2.2 closeout 回归锁定正式发布事实 | v3.2.2 已由 PR #225、annotated tag 与 Release run 完整终审，后续版本测试不能继续要求“正式发布候选”标题 | 把已发布文档改回候选或删除前序测试 | 测试改为验证正式发布标题、main/tag/run 与四资产类别；资金与 production 断言保持不变。 |
 
 ## Assumptions
 
@@ -31,6 +32,7 @@
 | 完整 unit 只需重跑验证 metadata | 首轮全量暴露 NewAccount heartbeat 墙钟计数竞态，改成可控 async gate 后重跑 | 高并发下 `60ms` 延迟不保证产生至少 5 个 `5ms` interval tick | 仅稳定测试 harness，不改变 copy/cancel/Publisher 合同 | 不适用；业务 Spec 未变 |
 | 等待旧叠栈 tip 后重放纯 metadata | 以冻结 `d12abe7c…` 为第一父，自然合并已发布 `main=c2d23f59…` | v3.2.2 正式发布包含候选分叉后完成的必要修复与发布文档事实 | 产品代码由 Git 自动合并；仅三份发布文档需语义解冲突 | 不适用；冻结 Spec/TechDoc hash 未变 |
 | 历史 exact suite 直接复用当前仓库全部 tags | wrapper 在临时 clone 内先恢复历史 25-tag authority 快照再执行 exact suite | v3.2.0～v3.2.2 正式发布后，当前 28-tag refs 与冻结历史 hash 必然不同 | 防止后续合法 release refs 污染历史 fixture；仍以 exact count/hash fail closed | 不适用；历史 validator 与 snapshot 未变 |
+| 首轮全量复用主工作区 `node_modules` symlink | 删除仅属于 isolated worktree 的 symlink，并按当前 `package-lock.json` 执行 official Node 22 `npm ci` | 共享树实际 electron-builder/app-builder-lib 为 `26.8.1`，不等于 lock 的 `26.15.7`，导致 NSIS 合同假失败 | 主工作区依赖未改；isolated worktree 以 exact lock 独立验证 | 不适用；依赖声明与 lock 未变 |
 
 ## Evidence
 
@@ -56,6 +58,8 @@
 | v3.2.3 相关 11 文件定向组合（首次） | `200/201 PASS`；唯一失败为历史 exact wrapper 继承新增 v3.2.0～v3.2.2 tag refs，先报 `GIT_TAG_REFS_INVALID` | 保留真实失败与根因，不用旧成功或单项测试代偿。 |
 | 历史 tag 快照隔离回归 | 单文件历史 exact wrapper `1/1 PASS`；临时 clone 恢复后精确为 25 refs、冻结 SHA-256 `94a09eb7…`，原 exact child suite `22/22 PASS` | 后续 release tag 不再污染历史 fixture，duplicate-key 原反例仍是唯一预期错误。 |
 | v3.2.3 相关 11 文件定向组合（修复后） | `201/201 PASS`、`0 FAIL`、`0 SKIP`，official Node `22.18.0` | Statement/NewAccount、metadata closeout 与历史 R3 evidence 同时成立。 |
+| 首轮完整 unit | `6607/6612 PASS`、`2 FAIL`、`3 SKIP`；日志 `logs/unit-tests/unit-20260904-142311.log`。失败精确为 v3.2.2 测试仍要求候选标题，以及共享依赖树 `26.8.1` 不满足 lock `26.15.7` 的 NSIS 修复合同 | 保留真实失败；没有以 focused 绿灯代偿。 |
+| v3.2.2 closeout + Windows build contract 定向复核 | exact-lock electron-builder/app-builder-lib 均为 `26.15.7`；`6 PASS`、`0 FAIL`、`2 Windows-only SKIP` | 前序正式发布证据与 NSIS access-violation 修复合同均恢复为真实通过。 |
 
 ## Remaining Unknowns
 

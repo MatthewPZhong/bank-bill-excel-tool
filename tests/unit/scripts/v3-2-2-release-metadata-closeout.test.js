@@ -63,8 +63,8 @@ test('v3.2.2 closeout同步当前版本、冻结文档与三份发布说明', ()
     );
   }
 
-  const currentChangelog = section(changelog, '## 3.2.2 - 2026-09-04（正式发布候选）');
-  const currentHistory = section(history, '## v3.2.2（2026-09-04，正式发布候选）');
+  const currentChangelog = section(changelog, '## 3.2.2 - 2026-09-04（正式发布）');
+  const currentHistory = section(history, '## v3.2.2（2026-09-04，正式发布）');
   const historicalGuide = paragraph(
     guide,
     '> **v3.2.2 FundRecon / Duplicate / BankBU 后台执行基础**'
@@ -93,6 +93,17 @@ test('v3.2.2 closeout同步当前版本、冻结文档与三份发布说明', ()
   assert.match(currentChangelog, /annotated tag/);
   assert.match(currentChangelog, /内置 `release-check`/);
   assert.match(currentChangelog, /`scan:vars` \/ `check:vars` 未运行/);
+  assert.match(currentChangelog, /### 正式发布结论/);
+  assert.match(currentChangelog, /PR #225/);
+  assert.match(currentChangelog, /c2d23f5981b1b2218b0988cf13e7e048e02ced46/);
+  assert.match(currentChangelog, /9be1783cec1e3629d2ba3d8faa2d49d0cf999c04/);
+  assert.match(currentChangelog, /run `33835873671`/);
+  for (const document of [currentChangelog, currentHistory]) {
+    assert.match(document, /Setup/);
+    assert.match(document, /portable/);
+    assert.match(document, /blockmap/);
+    assert.match(document, /latest\.yml/);
+  }
   assert.match(changelog, /^## 3\.2\.1 - 2026-09-03（正式发布）$/m);
   assert.match(history, /^## v3\.2\.1（2026-09-03，正式发布）$/m);
   assert.match(changelog, /run `33807861470`/);
