@@ -17,6 +17,7 @@
 | NewAccount heartbeat 测试改用可控 copy gate + 一次真实 timer turn | 全量并发运行时固定 `60ms/5ms/≥5 ticks` 只观察到 2 ticks；该断言混入机器调度吞吐，不能稳定证明“copy await 不阻塞 event loop” | 放宽 tick 数或把偶发失败当作环境噪声 | 保留真实 timer heartbeat、post-copy cancel 与 staging 清理断言，同时移除墙钟吞吐假设；生产代码零变化。 |
 | 最终版本链只用 natural merge 传播 | 冻结 candidate 与已发布 v3.2.2 共同祖先为 `a5af61ea…`；candidate-first/main-second 能同时保留候选血缘和已发布修复 | rebase、cherry-pick、历史改写或反向父序 | merge commit 必须保持 parents=`[d12abe7c…,c2d23f59…]`。 |
 | 三份发布文档冲突按版本链语义合并 | 产品代码无内容冲突；文档需同时保留 v3.2.3 capability、v3.2.2 已发布事实和当前技术发布授权 | 选择 ours/theirs 整体覆盖 | 不回退 v3.2.2 修复与 Release 历史，也不把 v3.2.3 提前写成已发布。 |
+| 历史 exact evidence 的临时克隆恢复冻结 tag refs 快照 | 当前真实仓库在历史 evidence 之后新增了 v3.2.0～v3.2.2 annotated tags；继承这些 refs 会先触发 `GIT_TAG_REFS_INVALID`，掩盖原始 duplicate-key 反例 | 放宽 validator 的 25 refs/hash、删除真实仓库 tags 或改写历史 snapshot | 仅在测试私有临时 clone 删除后续 `v3.2.x` refs，并强制回读 25 refs 与冻结 SHA-256 `94a09eb7…`；validator、历史提交与真实 refs 不变。 |
 
 ## Assumptions
 
@@ -29,6 +30,7 @@
 | 业务 PR 合并时同步版本元数据 | 增加独立 metadata closeout 节点 | 业务分支仍保留历史 `3.1.14`，三份发布文档未收口 | 不改业务行为，只补版本 authority | 不适用；冻结 Spec 未变 |
 | 完整 unit 只需重跑验证 metadata | 首轮全量暴露 NewAccount heartbeat 墙钟计数竞态，改成可控 async gate 后重跑 | 高并发下 `60ms` 延迟不保证产生至少 5 个 `5ms` interval tick | 仅稳定测试 harness，不改变 copy/cancel/Publisher 合同 | 不适用；业务 Spec 未变 |
 | 等待旧叠栈 tip 后重放纯 metadata | 以冻结 `d12abe7c…` 为第一父，自然合并已发布 `main=c2d23f59…` | v3.2.2 正式发布包含候选分叉后完成的必要修复与发布文档事实 | 产品代码由 Git 自动合并；仅三份发布文档需语义解冲突 | 不适用；冻结 Spec/TechDoc hash 未变 |
+| 历史 exact suite 直接复用当前仓库全部 tags | wrapper 在临时 clone 内先恢复历史 25-tag authority 快照再执行 exact suite | v3.2.0～v3.2.2 正式发布后，当前 28-tag refs 与冻结历史 hash 必然不同 | 防止后续合法 release refs 污染历史 fixture；仍以 exact count/hash fail closed | 不适用；历史 validator 与 snapshot 未变 |
 
 ## Evidence
 
@@ -48,13 +50,18 @@
 | `git diff --check`、`npm run check:packaged-inputs` | PASS；`build.files` 9 条覆盖范围与精确 HEAD 一致 | 静态质量与打包输入。 |
 | 2026-09-04 远端/候选预检 | main=`c2d23f59…`；candidate=`d12abe7c…` 且 package=`3.2.3`；v3.2.0～v3.2.2 tag/Release 链无漂移；审计 `/private/tmp/bbet-v323-initial-remote-preflight-20260904-055159.json`，SHA-256 `b9c79bd6…` | 冻结对象、祖先、版本序列和发布起点。 |
 | natural merge 冲突复核 | 产品代码零内容冲突；仅 `CHANGELOG.md`、`docs/VERSION_FEATURE_HISTORY.md`、`docs/USER_GUIDE.md` 三处文档冲突，逐项语义合并；无冲突标记，`git diff --check` PASS | 避免整体 ours/theirs 覆盖造成历史 Release 或当前版本说明回退。 |
+| natural merge 提交回读 | commit `15bffc58471701542d3f828cad18866b79933b47`；parents 精确为 `[d12abe7ca781305aaf3eef77d8b86018261741ff,c2d23f5981b1b2218b0988cf13e7e048e02ced46]`；tree `86b4145a1801a3f2248d551863c5be76732fb6a7` | 冻结 candidate-first / released-main-second 血缘成立。 |
 | 冻结文档与版本回读 | package/package-lock 三处均为 `3.2.3`；Spec `533684fe…`、TechDoc `b10687d5…` | natural merge 未改写冻结合同或版本 authority。 |
+| production policy 只读回读 | 13 项 live policy 全部 `enabled=false/effectiveMode=legacy/effectiveWorkerCount=0`；v3.2.3 的 7 项中 Statement 5 项未注册、NewAccount 2 项注册但关闭；审计 `/private/tmp/bbet-v323-production-policy-readback-20260904-141333.json`，SHA-256 `9f6c9e4b…`，`allChecksPass=true` | application production 未启用，历史 PENDING/NOT_RUN snapshot 未改写。 |
+| v3.2.3 相关 11 文件定向组合（首次） | `200/201 PASS`；唯一失败为历史 exact wrapper 继承新增 v3.2.0～v3.2.2 tag refs，先报 `GIT_TAG_REFS_INVALID` | 保留真实失败与根因，不用旧成功或单项测试代偿。 |
+| 历史 tag 快照隔离回归 | 单文件历史 exact wrapper `1/1 PASS`；临时 clone 恢复后精确为 25 refs、冻结 SHA-256 `94a09eb7…`，原 exact child suite `22/22 PASS` | 后续 release tag 不再污染历史 fixture，duplicate-key 原反例仍是唯一预期错误。 |
+| v3.2.3 相关 11 文件定向组合（修复后） | `201/201 PASS`、`0 FAIL`、`0 SKIP`，official Node `22.18.0` | Statement/NewAccount、metadata closeout 与历史 R3 evidence 同时成立。 |
 
 ## Remaining Unknowns
 
 | 未知 | 处理 | 负责人/下一步 | 合并影响 |
 | --- | --- | --- | --- |
-| natural merge 最终提交与双亲 | PROBE | 生成提交后精确回读 parents/tree | 双亲或树不符不得推送。 |
+| natural merge 最终提交与双亲 | CLOSED | `15bffc58…` 已精确回读 parents=`[d12abe7c…,c2d23f59…]`、tree=`86b4145a…` | 已满足；后续提交只能为该 merge 的线性后继。 |
 | PR exact 与合并后 main exact CI | PROBE | 自然触发 workflow，核对 smoke/build 及 release-check/Windows adapter/SQLite teardown/panel alignment 实际步骤 | 任一失败即停止，不 rerun/dispatch。 |
 | annotated tag、Release 与四资产 | PROBE | main exact 通过后唯一建 tag；正常 required-reviewer 审批并完整下载核验 | 未完成前不得声明 v3.2.3 正式发布。 |
 | Windows 10/11、SmartScreen、离线覆盖与 online canary | 发布后人工补测 | Issue #220 | 不阻塞本次技术 Release，不得据此启用 production。 |
