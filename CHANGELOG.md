@@ -11,6 +11,12 @@
 - **BankBU one-shot Worker 与可选 dual parser**：导入、运行和导出采用独立 job；双 parser 只负责两个输入，月库事务、匹配顺序、side/main mirror 和 committed receipt 不变。
 - **资源、幂等与崩溃边界**：Service generation、reservation、busy/close、operationKey、receipt、inspector、Recovery Hold 和文件发布均采用冻结合同；unknown/partial/committed-result-lost 不会静默降级为普通失败或自动重跑。
 
+### 网银账单稳定性修复
+
+- **模板重命名恢复**：普通 no-file 配置任务在没有模块自定义 evidence 时使用合法空对象，同时保留最终 Hold 复核；模板重命名不再在业务执行前报“beforeStart evidence 必须是对象”。
+- **人工余额补录 FilePlan**：内存账单会话沿用真实导入源文件建立 eager FilePlan；所有来源都缺失时在写盘前明确要求重新导入，不再生成空 FilePlan。
+- **余额 0 与失败反馈**：余额 `0` 继续按合法数值保存；补录 IPC 失败会显示错误、保留日期和余额草稿，并阻止重复提交，覆盖确认仍只使用 opaque context。
+
 ### 收口边界
 
 - **版本与规范**：`package.json`、`package-lock.json` 收口为 `3.2.2`；顶层 Spec/TechDoc 与冻结基线逐字节一致。

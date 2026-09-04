@@ -81,3 +81,81 @@
 - `PROBE / exact CI`：普通非 force push 后必须由新 exact head 的 `smoke-test`、`build` 和关键步骤全部实际成功，并闭合 review threads；旧 CI 不代偿。
 - `PROBE / tag 后`：最终 Windows Release 四项资产、公开下载、摘要与更新元数据只能在 immutable annotated tag workflow 产生后回读。
 - `BLOCK / production`：application production 继续 disabled/legacy；本版不改变金额、币种、主键、Workbook、正式文件发布或恢复终态红线。
+
+## 2026-09-04 P2 Review Remediation
+
+### Decisions
+
+- 对 `PRRT_kwDORiHOzM6fHT10` 不新增 coordinator dispatcher：只读调用链确认 Duplicate Worker 从不发布 Platform `critical:ready`/`commit:receipt`，零 business-unit Service command 的持久事实由既有 E07-B side receipt、Main mirror与startup inspector闭环；真实 native runtime 回归改为显式断言四个 coordinator hook 调用数均为 0。
+- 对 `PRRT_kwDORiHOzM6fHT15` 修复真实 FilePlan 缺口：managed export拒绝顶层正式 `savePath`，只接受 version 1 task-private `stagingPlan` 的单一 `{ artifactKey, stagingPath }` 输出，并把同一 `artifactKey` 原样写入 artifact manifest。
+- 写入前同时验证绝对路径、lexical containment、由 Main 预先分配且已存在的普通非符号链接 staging root/父目录、physical parent realpath containment与target absence；Worker不递归创建目录，既有普通文件、符号链接和 dangling symlink 均不能被覆盖，拒绝中间符号链接时也不会在外部产生目录副作用。
+- Writer 或 hash 失败只删除已验证的 staging leaf，不递归删除 Main-owned task root；cleanup失败以 `DUPLICATE_EXPORT_STAGING_CLEANUP_FAILED` 报告并保留原错误 cause。
+
+### Deviations
+
+- 评审最初建议按 action/module 增加公共 coordinator dispatch；真实事件流证明该失败前提不可达，且冻结 E07-B 使用模块内 receipt/recovery。为避免无证据扩成公共协议重构，本次只增加显式零调用回归与评审证据说明。
+- 原 managed artifact 固定使用 `duplicate-result`；task-private FilePlan 接入后改为透传 plan 的唯一 `artifactKey`，从而允许 Main 按冻结 output identity 精确 join，输出内容与 Workbook 语义不变。
+
+### Evidence
+
+- 授权后远端防漂移审计 `/private/tmp/bbet-v322-pr225-authorized-preedit-audit-20260904-011455.json`：`3023` bytes / SHA-256 `4eb6634cb6e2e047ceeb763c7c38bc1f0952f00c6773e90271ea5aa69f4b05c7`；main/base/head、两条未解决 review、成功的两项 exact contexts 与缺失 tag/Release 均无漂移。
+- 首轮 focused：`managed-service.test.js` + `runtime.test.js` 为 `12/12 PASS`；覆盖 task-private 成功输出、正式路径/lexical escape/既有target拒绝、physical symlink escape、失败清理与cleanup双重错误，以及真实 native Worker 的 coordinator hooks 零调用。
+- 完整 Duplicate 邻接 unit（模块全部测试 + UI/preload/IPC wiring）为 `128/128 PASS`；覆盖真实 XLSX staging 输出、artifact hash失败清理、paired parser、side receipt/Main mirror/startup inspector、service generation/crash/close 与原金额/币种/匹配/行数守恒合同。
+
+### Remaining Unknowns
+
+- `PROBE / local`：仍需完成 Duplicate/Platform 邻接、完整 unit/integration/smoke/lint、changed JS、diff与clean-HEAD packaged-inputs。
+- `PROBE / exact CI`：补丁 ordinary non-force push 后必须取得新 exact smoke/build与关键步骤成功；旧 `b05e4bce` 绿灯不代偿。
+- `BLOCK / review`：两条 thread 在逐项证据回复并 resolved 前继续禁止 merge/tag/Release。
+- `BLOCK / production`：application production 继续 disabled/legacy；本补丁不接 live managed export、Publisher 或用户正式目标。
+
+## 2026-09-04 指定会话修复纳入 v3.2.2
+
+### Decisions
+
+- 会话 `01a06168-1d95-7cf3-9be1-63d1513956ff` 的修复当时存在于工作区但没有形成当前分支可传播的提交；本次依据原始操作记录逐项复核当前调用链后，在 PR #225 同一隔离分支重新实现并测试。
+- 普通 no-file task 没有模块 `beforeStart` 时返回 `{}`，同时保留最终 `assertTaskPolicyNotHeld(policy, prepared)`；不放宽 TaskLifecycle 对非法 evidence 的拒绝。
+- `file:save-balance-seed` 继续是 eager File Task。FilePlan 输入依次使用 freshness 路径、`importContext.inputFilePaths`、当前 statement session entry；全部缺失时在 execute/写盘前返回 `BALANCE_SEED_SOURCE_MISSING`。
+- active 与 legacy 余额弹窗都在局部包装 IPC：异常或非法返回会显示错误、保留日期/余额草稿，提交期间禁用完成按钮；覆盖确认继续只提交 opaque `contextId + confirmOverwrite`。
+
+### Evidence
+
+- 原始会话 summary 与 JSONL 操作记录确认两项根因、实际修改文件和测试边界；当前 head 的源码核验确认修复尚未完整进入 ancestry，因而不是文档性声明。
+- 纳入后首轮 official Node 22.18 聚焦组合（TaskLifecycle/policy、interactive preflight、Duplicate managed/runtime）为 `104/104 PASS`；包含 no-file evidence、内存 session source fallback、余额字符串 `0` 写盘、opaque confirmation 和两个 renderer 失败反馈合同。
+- 纳入前的 official Node 22.18 完整 unit 基线为 `6352/6355 PASS`、`0 FAIL`、`3 Windows-only SKIP`，日志 `logs/unit-tests/unit-20260904-092611.log`；由于指定会话代码随后加入，该结果只作基线，不能代偿最终完整验证。
+
+### Remaining Unknowns
+
+- `PROBE / local`：指定会话修复加入后必须重新跑完整 unit/integration/smoke/lint 和发布文档/变量/资金盲区检查。
+- `PROBE / live`：真实 Electron 窗口需在发布后重启，再由用户自行用账单文件验证模板重命名与余额补录；本次不代写真实余额。
+- `BLOCK / production`：上述修复不改变 v3.2.2 application production disabled/legacy 边界。
+
+## 2026-09-04 最终本地收口
+
+### Decisions
+
+- 盲区复核发现原 staging 实现会在 physical containment 校验前递归创建父目录；若中间路径是指向外部的符号链接，拒绝前可能产生越界目录。最终实现改为只接受 Main 已预先分配且存在的普通 staging root/父目录，Worker 不创建目录，只创建 FilePlan 叶子文件。
+- `prepareDuplicateExportStaging` 在构造或采用业务 Service 前完成路径验证；非法 FilePlan 不触发 Service 初始化。新增“符号链接后接缺失目录”的回归，证明外部目录零创建。
+
+### Deviations
+
+- 首次完整 unit 因把 `docs/USER_GUIDE.md` 的冻结发布段落直接改写而触发 1 个 metadata closeout 失败（`6353/6357`，日志 `unit-20260904-093311.log`）。该偏差不是产品失败；发布段落已恢复逐字冻结，仅在其前新增修复说明，定向 metadata 测试随后通过。最终全量结果以下方新日志为准，失败轮次不作绿灯代偿。
+- 一次 changed-JS shell 检查在 zsh 中把多行文件名拼成一个参数而失败；源码全量 lint 已在该命令前通过。随后改为逐行读取，9 个改动 JavaScript 的 `node --check` 全部通过，ESLint 为 0 error；`renderer.js` 与 `renderer-dialogs.js` 仅因仓库既有 ignore 规则各产生 1 个 warning。
+
+### Evidence
+
+- 最终 official Node `v22.18.0` unit：`6354/6357 PASS`、`0 FAIL`、`3 Windows-only SKIP`；日志 `logs/unit-tests/unit-20260904-095151.log` 为 `1649976` bytes / SHA-256 `343f0b811583e4efb457d6f264943621c213627038114f4df72d7928894784cf`。
+- 最终 integration：`53/53` scripts、`2488/2488` assertions、`0 FAIL`；包含 `duplicate-inbound-match-end-to-end` `31/31`。runner 临时同步后已用 `apply_patch` 恢复冻结 `rules/integration-test-policy.md`，SHA-256 精确为 `65716ba574d1139d72a1ca96f45ebaa4f85efa1f8ebf3f3bc81e8f0ce1edb74e` 且相对 HEAD 无 diff。
+- `npm run smoke`、`npm run lint`、9 个 changed JS `node --check`、逐文件 ESLint 和 `git diff --check` 均通过。
+- 本地验证审计 `/private/tmp/bbet-v322-final-local-verification-20260904-100002.json`：`1837` bytes / SHA-256 `459079360702ae63605c8f5c9d111324a1debee5307aa875176926e13760b6a7`。
+- check-vars 只读审计 `/private/tmp/bbet-v322-check-vars-readonly-final-20260904-100002.json`：`2270` bytes / SHA-256 `1d5bb9f190343cbe0d6897b4d6607f6b4095af1c1c413447db84674824f75781`；命中 Important-skeleton `TaskLifecycle`、Runtime-state `statementImportSessions/lastFileImportContext`、Risk-sensitive `normalizeInputFilePaths` 与 Duplicate Service 邻接、Minor `getStatementSessionEntries`，均已逐项复核。
+- blindspot/reconciliation 审计 `/private/tmp/bbet-v322-blindspot-reconciliation-final-20260904-100002.json`：`2534` bytes / SHA-256 `ea1bde227a1499f4dc2cb79ca11c85bfea3dc0abfe661dc5db2a09f91d3768c8`；金额、币种、借贷方向、匹配键、行数/去向与正式发布门均未变化，`fundLossRedLine=false`。
+- 本地严格未运行 `npm run release-check`、`npm run check:vars` 或 `npm run scan:vars`。
+
+### Remaining Unknowns
+
+- `CLOSED / local`：最终 unit/integration/smoke/lint、changed JS、diff、重要变量与资金盲区均已闭合。
+- `PROBE / clean HEAD`：提交后仍须运行 `npm run check:packaged-inputs`，证明发布输入来自干净 HEAD。
+- `PROBE / remote`：ordinary non-force push 后必须由新 exact head 的 PR smoke/build、四个关键步骤与 review threads 全部闭合；合并后 main exact 也必须重新成功。
+- `PROBE / live`：真实 Electron 模板重命名与余额 `0` 补录由用户在安装 v3.2.2 并重启后验证；Windows 补测继续由 Issue #220 跟踪。
+- `BLOCK / production`：application production 保持 disabled/legacy，不因本地或 CI 绿灯启用。

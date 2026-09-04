@@ -10,6 +10,9 @@ const { DUPLICATE_ACTIONS } = require('./policies');
 const { createDuplicateManagedStartupGate } = require('./startup-gate');
 const { estimateDuplicateStateFootprint } = require('./state-footprint');
 
+const DUPLICATE_EXPORT_STAGING_PLAN_VERSION = 1;
+const FILE_PLAN_OUTPUT_ARTIFACT_KEY_PATTERN = /^output-[a-f0-9]{64}$/;
+
 class DuplicateManagedServiceError extends Error {
   constructor(code, message) {
     super(message);
@@ -63,18 +66,168 @@ function sameRuntime(left, right) {
   return left && Object.keys(left).every((key) => left[key] === right[key]);
 }
 
-function artifactFor(filePath) {
+function exportPlanObject(value, label) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      ![Object.prototype, null].includes(Object.getPrototypeOf(value))) {
+    throw new DuplicateManagedServiceError(
+      'DUPLICATE_EXPORT_FILE_PLAN_INVALID',
+      `${label}必须是plain object`
+    );
+  }
+  return value;
+}
+
+function isPathInside(rootPath, candidatePath) {
+  const relative = path.relative(rootPath, candidatePath);
+  return Boolean(relative && relative !== '..' &&
+    !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+}
+
+function normalizeDuplicateExportStagingPlan(rawPlan) {
+  const plan = exportPlanObject(rawPlan, 'stagingPlan');
+  if (plan.version !== DUPLICATE_EXPORT_STAGING_PLAN_VERSION ||
+      typeof plan.stagingRoot !== 'string' || !path.isAbsolute(plan.stagingRoot)) {
+    throw new DuplicateManagedServiceError(
+      'DUPLICATE_EXPORT_FILE_PLAN_INVALID',
+      'Duplicate export stagingPlan version/stagingRoot非法'
+    );
+  }
+  if (!Array.isArray(plan.outputs) || plan.outputs.length !== 1) {
+    throw new DuplicateManagedServiceError(
+      'DUPLICATE_EXPORT_FILE_PLAN_INVALID',
+      'Duplicate export stagingPlan必须且只能包含一个输出'
+    );
+  }
+  const output = exportPlanObject(plan.outputs[0], 'stagingPlan.outputs[0]');
+  if (typeof output.artifactKey !== 'string' ||
+      !FILE_PLAN_OUTPUT_ARTIFACT_KEY_PATTERN.test(output.artifactKey) ||
+      typeof output.stagingPath !== 'string' || !path.isAbsolute(output.stagingPath)) {
+    throw new DuplicateManagedServiceError(
+      'DUPLICATE_EXPORT_FILE_PLAN_INVALID',
+      'Duplicate export输出缺少规范FilePlan artifactKey或绝对stagingPath'
+    );
+  }
+  const stagingRoot = path.resolve(plan.stagingRoot);
+  const stagingPath = path.resolve(output.stagingPath);
+  if (!isPathInside(stagingRoot, stagingPath)) {
+    throw new DuplicateManagedServiceError(
+      'DUPLICATE_EXPORT_STAGING_ESCAPE',
+      'Duplicate export stagingPath必须位于task-private stagingRoot内'
+    );
+  }
+  return Object.freeze({
+    version: DUPLICATE_EXPORT_STAGING_PLAN_VERSION,
+    stagingRoot,
+    output: Object.freeze({ artifactKey: output.artifactKey, stagingPath })
+  });
+}
+
+function prepareDuplicateExportStaging(plan, fsImpl) {
+  let rootStat;
+  try {
+    rootStat = fsImpl.lstatSync(plan.stagingRoot);
+  } catch (error) {
+    if (error && error.code === 'ENOENT') {
+      throw new DuplicateManagedServiceError(
+        'DUPLICATE_EXPORT_STAGING_ROOT_INVALID',
+        'Duplicate export stagingRoot必须由Main预先分配且已存在'
+      );
+    }
+    throw error;
+  }
+  if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
+    throw new DuplicateManagedServiceError(
+      'DUPLICATE_EXPORT_STAGING_ROOT_INVALID',
+      'Duplicate export stagingRoot必须是普通目录且不能是符号链接'
+    );
+  }
+  const targetPath = plan.output.stagingPath;
+  const targetParent = path.dirname(targetPath);
+  let parentStat;
+  try {
+    parentStat = fsImpl.lstatSync(targetParent);
+  } catch (error) {
+    if (error && error.code === 'ENOENT') {
+      throw new DuplicateManagedServiceError(
+        'DUPLICATE_EXPORT_STAGING_PARENT_INVALID',
+        'Duplicate export stagingPath父目录必须由Main预先分配且已存在'
+      );
+    }
+    throw error;
+  }
+  if (parentStat.isSymbolicLink()) {
+    throw new DuplicateManagedServiceError(
+      'DUPLICATE_EXPORT_STAGING_SYMLINK_ESCAPE',
+      'Duplicate export stagingPath父目录不能是符号链接'
+    );
+  }
+  if (!parentStat.isDirectory()) {
+    throw new DuplicateManagedServiceError(
+      'DUPLICATE_EXPORT_STAGING_PARENT_INVALID',
+      'Duplicate export stagingPath父目录必须是普通目录'
+    );
+  }
+  const physicalRoot = fsImpl.realpathSync(plan.stagingRoot);
+  const physicalParent = fsImpl.realpathSync(targetParent);
+  if (physicalParent !== physicalRoot && !isPathInside(physicalRoot, physicalParent)) {
+    throw new DuplicateManagedServiceError(
+      'DUPLICATE_EXPORT_STAGING_SYMLINK_ESCAPE',
+      'Duplicate export stagingPath物理父目录越过task-private stagingRoot'
+    );
+  }
+  try {
+    fsImpl.lstatSync(targetPath);
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return targetPath;
+    throw error;
+  }
+  throw new DuplicateManagedServiceError(
+    'DUPLICATE_EXPORT_STAGING_TARGET_EXISTS',
+    'Duplicate export staging target必须不存在'
+  );
+}
+
+function cleanupDuplicateExportStaging(fsImpl, stagingPath, primaryError) {
+  try {
+    fsImpl.rmSync(stagingPath, { force: true });
+  } catch (cleanupError) {
+    const error = new DuplicateManagedServiceError(
+      'DUPLICATE_EXPORT_STAGING_CLEANUP_FAILED',
+      'Duplicate export失败且task-private staging清理失败'
+    );
+    error.cause = primaryError;
+    error.cleanupError = cleanupError;
+    throw error;
+  }
+}
+
+function artifactFor(filePath, artifactKey, fsImpl) {
+  const stat = fsImpl.lstatSync(filePath);
+  if (stat.isSymbolicLink() || !stat.isFile()) {
+    throw new DuplicateManagedServiceError(
+      'DUPLICATE_EXPORT_STAGING_OUTPUT_INVALID',
+      'Duplicate export staging输出必须是普通文件且不能是符号链接'
+    );
+  }
   return new Promise((resolve, reject) => {
     const hash = crypto.createHash('sha256');
     let byteSize = 0;
-    const stream = fs.createReadStream(filePath);
+    const stream = fsImpl.createReadStream(filePath);
     stream.on('error', reject);
     stream.on('data', (chunk) => {
-      byteSize += chunk.length;
+      const nextSize = byteSize + chunk.length;
+      if (!Number.isSafeInteger(nextSize)) {
+        stream.destroy(new DuplicateManagedServiceError(
+          'DUPLICATE_EXPORT_ARTIFACT_TOO_LARGE',
+          'Duplicate export staging输出超过安全整数范围'
+        ));
+        return;
+      }
+      byteSize = nextSize;
       hash.update(chunk);
     });
     stream.on('end', () => resolve(Object.freeze({
-      artifactKey: 'duplicate-result',
+      artifactKey,
       stagingPath: path.resolve(filePath),
       byteSize,
       sha256: hash.digest('hex')
@@ -83,6 +236,7 @@ function artifactFor(filePath) {
 }
 
 function createDuplicateManagedService(options = {}) {
+  const fsImpl = options.fsImpl || fs;
   const createMirrorDatabase = options.createMirrorDatabase || createDuplicateMirrorDatabase;
   const createLegacyService = options.createLegacyService || createDuplicateInboundMatchService;
   const estimateFootprint = options.estimateFootprint || estimateDuplicateStateFootprint;
@@ -237,15 +391,23 @@ function createDuplicateManagedService(options = {}) {
   }
 
   async function executeExport(input, jobContext) {
-    const current = ensureService(input);
-    const savePath = typeof input.savePath === 'string' && input.savePath.length > 0
-      ? path.resolve(input.savePath)
-      : null;
-    if (!savePath) {
-      throw new DuplicateManagedServiceError('DUPLICATE_EXPORT_PATH_REQUIRED', 'Duplicate export需要savePath');
+    if (Object.hasOwn(input, 'savePath')) {
+      throw new DuplicateManagedServiceError(
+        'DUPLICATE_EXPORT_FILE_PLAN_INVALID',
+        'Duplicate managed export不得接收正式savePath'
+      );
     }
-    await current.export({ savePath, onProgress: jobContext.onProgress });
-    return compact('export', { artifacts: Object.freeze([await artifactFor(savePath)]) });
+    const plan = normalizeDuplicateExportStagingPlan(input.stagingPlan);
+    const stagingPath = prepareDuplicateExportStaging(plan, fsImpl);
+    const current = ensureService(input);
+    try {
+      await current.export({ savePath: stagingPath, onProgress: jobContext.onProgress });
+      const artifact = await artifactFor(stagingPath, plan.output.artifactKey, fsImpl);
+      return compact('export', { artifacts: Object.freeze([artifact]) });
+    } catch (error) {
+      cleanupDuplicateExportStaging(fsImpl, stagingPath, error);
+      throw error;
+    }
   }
 
   async function execute(actionKey, rawInput, jobContext = {}) {
@@ -296,6 +458,8 @@ module.exports = {
   DuplicateManagedServiceError,
   createDuplicateManagedService,
   emptySummary,
+  normalizeDuplicateExportStagingPlan,
+  prepareDuplicateExportStaging,
   runtimeIdentity,
   summaryFromService
 };

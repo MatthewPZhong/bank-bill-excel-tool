@@ -23,6 +23,8 @@ v3.2.2 完成 FundRecon、Duplicate 与 BankBU 的后台执行 capability 和恢
 
 - 主进程不再作为这些模块完整可变状态的第二所有者；只保留有界 DTO、资源 grant/reservation、TaskLifecycle 和 artifact authority。
 - 崩溃、超时、部分提交和结果丢失按持久 receipt/inspector 收口；未知状态不会自动重跑或伪装为普通失败。
+- 修复普通 no-file 配置任务的空 evidence 合同，模板重命名不再在执行前被 TaskLifecycle 拒绝，最终 Hold gate 保持不变。
+- 人工余额补录从 freshness、导入上下文或当前 statement session 恢复真实源文件 FilePlan；余额 `0` 可正常保存，无来源或 IPC 失败时给出可见反馈并保留草稿。
 - package 元数据更新为 `3.2.2`，顶层 Spec/TechDoc 同步自冻结基线。
 
 ### 兼容与人工边界

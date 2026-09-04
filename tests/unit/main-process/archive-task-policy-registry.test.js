@@ -605,6 +605,30 @@ test('no-file policy 经受控 helper 进入 operation-only lifecycle', () => {
   assert.match(source, /archiveFlowIdentity:\s*prepared\.flowPlan\.flowIdentity/);
 });
 
+test('no-file 最终 Hold gate 在无模块 evidence 时返回合法空对象', () => {
+  const source = fs.readFileSync(MAIN_PATH, 'utf8');
+  const operationStart = source.indexOf('async function runArchiveAwareOperation');
+  const fileBranchStart = source.indexOf(
+    'const useLegacyExistingBatchRecovery',
+    operationStart
+  );
+  const noFileFlow = source.slice(operationStart, fileBranchStart);
+  const beforeStartStart = noFileFlow.indexOf(
+    'beforeStart: async (operationContext) => {'
+  );
+  const beforeStartEnd = noFileFlow.indexOf('\n          execute:', beforeStartStart);
+  const beforeStartFlow = noFileFlow.slice(beforeStartStart, beforeStartEnd);
+
+  assert.ok(beforeStartStart >= 0, 'no-file lifecycle 必须保留最终 beforeStart gate');
+  assert.ok(beforeStartEnd > beforeStartStart, '应能提取 no-file beforeStart 包装');
+  assert.match(beforeStartFlow, /assertTaskPolicyNotHeld\(policy, prepared\)/);
+  assert.match(
+    beforeStartFlow,
+    /return typeof prepared\.beforeStart === 'function'[\s\S]*:\s*\{\};/
+  );
+  assert.doesNotMatch(beforeStartFlow, /:\s*null;/);
+});
+
 test('首批 simple eager file action 逐项接入 literal FilePlan 与显式 settle', () => {
   const source = fs.readFileSync(MAIN_PATH, 'utf8');
   const pendingPreflightSource = fs.readFileSync(
