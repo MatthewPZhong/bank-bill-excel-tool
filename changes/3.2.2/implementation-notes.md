@@ -151,11 +151,12 @@
 - check-vars 只读审计 `/private/tmp/bbet-v322-check-vars-readonly-final-20260904-100002.json`：`2270` bytes / SHA-256 `1d5bb9f190343cbe0d6897b4d6607f6b4095af1c1c413447db84674824f75781`；命中 Important-skeleton `TaskLifecycle`、Runtime-state `statementImportSessions/lastFileImportContext`、Risk-sensitive `normalizeInputFilePaths` 与 Duplicate Service 邻接、Minor `getStatementSessionEntries`，均已逐项复核。
 - blindspot/reconciliation 审计 `/private/tmp/bbet-v322-blindspot-reconciliation-final-20260904-100002.json`：`2534` bytes / SHA-256 `ea1bde227a1499f4dc2cb79ca11c85bfea3dc0abfe661dc5db2a09f91d3768c8`；金额、币种、借贷方向、匹配键、行数/去向与正式发布门均未变化，`fundLossRedLine=false`。
 - 本地严格未运行 `npm run release-check`、`npm run check:vars` 或 `npm run scan:vars`。
+- 产品/测试/发布文档提交 `ee77d27a702c92dc4ec5a5e2114b2bfee9c652e5`，直接父为 PR #225 旧 exact head `b05e4bcea3ab7cf7ab0508a1666059ca861579d2`；commit message 不含 AI 标记。该提交的 clean HEAD `npm run check:packaged-inputs` 通过。
 
 ### Remaining Unknowns
 
 - `CLOSED / local`：最终 unit/integration/smoke/lint、changed JS、diff、重要变量与资金盲区均已闭合。
-- `PROBE / clean HEAD`：提交后仍须运行 `npm run check:packaged-inputs`，证明发布输入来自干净 HEAD。
+- `CLOSED / clean HEAD`：产品/测试/文档提交后的 `npm run check:packaged-inputs` 已通过；本 evidence follow-up 提交后将再次运行，确保最终 exact HEAD 同样干净且被 build.files 覆盖。
 - `PROBE / remote`：ordinary non-force push 后必须由新 exact head 的 PR smoke/build、四个关键步骤与 review threads 全部闭合；合并后 main exact 也必须重新成功。
 - `PROBE / live`：真实 Electron 模板重命名与余额 `0` 补录由用户在安装 v3.2.2 并重启后验证；Windows 补测继续由 Issue #220 跟踪。
 - `BLOCK / production`：application production 保持 disabled/legacy，不因本地或 CI 绿灯启用。
