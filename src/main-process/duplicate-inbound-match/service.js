@@ -3,11 +3,9 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
-const XLSX = require('xlsx');
+const { isDeepStrictEqual } = require('node:util');
 
-const { readBankStatement, BANK_STATEMENT_SHEET_NAME } = require('../bank-statement-io');
-const { BANK_STATEMENT_FIELDS } = require('../../constants/bank-statement-fields');
-const { FileValidationError } = require('../../backend/file-service/common');
+const { readBankStatement } = require('../bank-statement-io');
 const {
   createDuplicateInboundMatchStore,
   MODULE
@@ -20,15 +18,30 @@ const {
 } = require('../pre-fund-reconciliation/mpt-schema');
 const runDataStore = require('../../backend/run-data-store');
 const {
+  duplicateSideDbRelPath,
+  sameDuplicateSideDbRelPath
+} = require('../../backend/duplicate-inbound-match-side-db-identity');
+const operationReceipts = require('./operation-receipt-repository');
+const {
   FUND_TYPES,
   buildDuplicateInboundGroups,
   resolveDuplicateInboundMptMatches,
   resolveDuplicateInboundDocumentMatches
 } = require('./matching-engine');
 const {
-  readXlsxSheetNames,
   streamDocumentStatement
 } = require('./document-statement-reader');
+const { identifyInputFiles } = require('./input-classifier');
+const {
+  pickBankFields,
+  prepareStoredBankRows,
+  validateBizIds
+} = require('./import-model');
+const {
+  consumeDuplicateInputSpool,
+  validateDuplicateInputSpool,
+  validateDuplicateSpoolPair
+} = require('./spool-reader');
 const {
   buildDefaultFileName,
   writeDuplicateInboundWorkbook
@@ -55,6 +68,43 @@ function stableHash(value) {
   return crypto.createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex');
 }
 
+function normalizeOperationIdentity(raw, actionKey) {
+  if (raw == null) return null;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw) ||
+      raw.actionKey !== actionKey || typeof raw.operationKey !== 'string' ||
+      !raw.operationKey || raw.operationKey.trim() !== raw.operationKey ||
+      typeof raw.producerTaskRunId !== 'string' || !raw.producerTaskRunId ||
+      raw.producerTaskRunId.trim() !== raw.producerTaskRunId) {
+    throw new DuplicateInboundMatchServiceError(
+      'duplicate-inbound-operation-identity-invalid',
+      `重复入金 ${actionKey} operation identity非法`
+    );
+  }
+  return Object.freeze({
+    actionKey,
+    operationKey: raw.operationKey,
+    producerTaskRunId: raw.producerTaskRunId
+  });
+}
+
+function importEvidenceHash(bankFileHash, documentFileHash) {
+  return stableHash({
+    evidenceVersion: 1,
+    bankFileHash: String(bankFileHash || ''),
+    documentFileHash: String(documentFileHash || '')
+  });
+}
+
+function runEvidenceHash(importId, bankFileHash, documentFileHash, snapshotHash) {
+  return stableHash({
+    evidenceVersion: 1,
+    importBundleId: Number(importId),
+    bankFileHash: String(bankFileHash || ''),
+    documentFileHash: String(documentFileHash || ''),
+    snapshotHash: String(snapshotHash || '')
+  });
+}
+
 function hashFile(filePath) {
   return new Promise((resolve, reject) => {
     const hash = crypto.createHash('sha256');
@@ -65,64 +115,16 @@ function hashFile(filePath) {
   });
 }
 
-async function inspectSheetNames(filePath) {
-  if (path.extname(filePath).toLowerCase() === '.xlsx') {
-    return readXlsxSheetNames(filePath);
-  }
-  const workbook = XLSX.readFile(filePath, { bookSheets: true });
-  return Array.isArray(workbook.SheetNames) ? workbook.SheetNames.slice() : [];
-}
-
-async function identifyInputFiles(filePaths) {
-  if (!Array.isArray(filePaths) || filePaths.length !== 2) {
-    throw new FileValidationError(
-      'duplicate-inbound-input-file-count',
-      '请一次选择 1 份银行对账单和 1 份单据对账单（共 2 个文件）'
-    );
-  }
-  const inspected = await Promise.all(filePaths.map(async (filePath) => {
-    if (!filePath || !fs.existsSync(filePath)) {
-      throw new FileValidationError('file-not-found', `文件不存在：${filePath}`);
-    }
-    let sheetNames;
-    try {
-      sheetNames = await inspectSheetNames(filePath);
-    } catch (error) {
-      if (error instanceof FileValidationError) throw error;
-      throw new FileValidationError(
-        'duplicate-inbound-input-unreadable',
-        `文件无法读取：${path.basename(filePath)}`,
-        { detailLines: [error && error.message ? error.message : String(error)] }
-      );
-    }
-    return {
-      filePath,
-      fileName: path.basename(filePath),
-      sheetNames,
-      isBank: sheetNames.includes(BANK_STATEMENT_SHEET_NAME)
-    };
-  }));
-  const bankFiles = inspected.filter((file) => file.isBank);
-  if (bankFiles.length !== 1) {
-    throw new FileValidationError(
-      'duplicate-inbound-input-type-ambiguous',
-      '无法唯一识别银行对账单：两份文件中必须且只能有一份包含 sheet“渠道对账单”',
-      { detailLines: inspected.map((file) => `${file.fileName}：${file.sheetNames.join(' / ') || '无工作表'}`) }
-    );
-  }
-  const bank = bankFiles[0];
-  const document = inspected.find((file) => file !== bank);
-  if (path.extname(document.filePath).toLowerCase() !== '.xlsx') {
-    throw new FileValidationError(
-      'duplicate-inbound-document-extension',
-      '单据对账单只支持 .xlsx 文件'
-    );
-  }
-  return { bank, document };
-}
-
 function yieldToEventLoop() {
   return new Promise((resolve) => setImmediate(resolve));
+}
+
+function assertImportNotAborted(signal) {
+  if (!signal || signal.aborted !== true) return;
+  throw new DuplicateInboundMatchServiceError(
+    'DUPLICATE_SHUTDOWN',
+    'Duplicate Service正在关闭'
+  );
 }
 
 function toText(value) {
@@ -131,10 +133,6 @@ function toText(value) {
 
 function trimText(value) {
   return toText(value).trim();
-}
-
-function pickBankFields(row) {
-  return Object.fromEntries(BANK_STATEMENT_FIELDS.map((field) => [field, row[field] ?? '']));
 }
 
 function countFundTypes(rows) {
@@ -146,33 +144,6 @@ function countFundTypes(rows) {
     if (fundType === FUND_TYPES.INBOUND) inboundCount += 1;
   }
   return { reversalCount, inboundCount };
-}
-
-function validateBizIds(rows) {
-  const firstRowByBizId = new Map();
-  const detailLines = [];
-  for (let index = 0; index < rows.length; index += 1) {
-    const excelRowNumber = index + 2;
-    const bizId = trimText(rows[index].BizId);
-    if (bizId === '') {
-      detailLines.push(`第 ${excelRowNumber} 行：BizId 为空`);
-      continue;
-    }
-    if (firstRowByBizId.has(bizId)) {
-      detailLines.push(
-        `第 ${excelRowNumber} 行：BizId「${bizId}」与第 ${firstRowByBizId.get(bizId)} 行重复`
-      );
-      continue;
-    }
-    firstRowByBizId.set(bizId, excelRowNumber);
-  }
-  if (detailLines.length > 0) {
-    throw new FileValidationError(
-      'duplicate-inbound-invalid-biz-id',
-      `BizId 必须非空且全文件唯一（发现 ${detailLines.length} 处异常）`,
-      { detailLines }
-    );
-  }
 }
 
 function batchSnapshotEntry(batch) {
@@ -215,6 +186,62 @@ function countManualReversals(groups) {
     (sum, group) => sum + group.relatedRows.filter((record) => record.fundType === FUND_TYPES.REVERSAL).length,
     0
   );
+}
+
+function recoveryRequiredError() {
+  return new DuplicateInboundMatchServiceError(
+    'duplicate-inbound-recovery-required',
+    '重复入金存在已提交但未完成确认的运行，请先完成持久恢复'
+  );
+}
+
+function frozenJsonCopy(value) {
+  if (value == null) return value;
+  const copied = JSON.parse(JSON.stringify(value));
+  const freeze = (item) => {
+    if (item && typeof item === 'object' && !Object.isFrozen(item)) {
+      for (const child of Object.values(item)) freeze(child);
+      Object.freeze(item);
+    }
+    return item;
+  };
+  return freeze(copied);
+}
+
+function exactManagedMirror(mirror, expected) {
+  return Boolean(mirror && mirror.status === 'success' &&
+    mirror.operationKey === expected.operationKey &&
+    mirror.producerTaskRunId === expected.producerTaskRunId &&
+    mirror.inputEvidenceHash === expected.inputEvidenceHash &&
+    mirror.monthKey === expected.monthKey &&
+    mirror.sideRunId === expected.sideRunId &&
+    mirror.snapshotHash === expected.snapshotHash &&
+    mirror.resultDigest === expected.resultDigest &&
+    mirror.bankFileName === expected.bankFileName &&
+    mirror.bankFileHash === expected.bankFileHash &&
+    mirror.documentFileName === expected.documentFileName &&
+    mirror.documentFileHash === expected.documentFileHash &&
+    sameDuplicateSideDbRelPath(mirror.sideDbRelPath, expected.sideDbRelPath) &&
+    isDeepStrictEqual(mirror.summary, expected.summary));
+}
+
+function exactRecoveryLatchPostImage(latch, expected) {
+  return Boolean(latch &&
+    latch.actionKey === expected.actionKey &&
+    latch.operationKey === expected.operationKey &&
+    latch.producerTaskRunId === expected.producerTaskRunId &&
+    latch.inputEvidenceHash === expected.inputEvidenceHash &&
+    latch.monthKey === expected.monthKey &&
+    latch.importBundleId === expected.importBundleId &&
+    (latch.sideRunId == null || latch.sideRunId === expected.sideRunId) &&
+    latch.snapshotHash === expected.snapshotHash &&
+    latch.bankFileName === expected.bankFileName &&
+    latch.bankFileHash === expected.bankFileHash &&
+    latch.documentFileName === expected.documentFileName &&
+    latch.documentFileHash === expected.documentFileHash &&
+    sameDuplicateSideDbRelPath(latch.sideDbRelPath, expected.sideDbRelPath) &&
+    (latch.resultDigest == null || latch.resultDigest === expected.resultDigest) &&
+    (latch.summary == null || isDeepStrictEqual(latch.summary, expected.summary)));
 }
 
 function runInvalidationActions(label, actions) {
@@ -300,37 +327,174 @@ class DuplicateInboundMatchService {
     this.fileHasher = fileHasher;
     this.bankReader = bankReader;
     this.now = now;
-    this.store = createDuplicateInboundMatchStore(this.userDataDir);
+    this.store = createDuplicateInboundMatchStore(this.userDataDir, { operationReceipts });
     this.tempStore = createPreFundReconciliationStore(this.userDataDir);
     this.bankSession = null;
     this.documentSession = null;
     this.lastRun = null;
-    this.reconcilePersistedRunMirrors();
+    this.recoveryLatch = null;
   }
 
-  reconcilePersistedRunMirrors() {
-    runInvalidationActions('重复入金启动回收', [
-      () => {
-        for (const mirror of this.database.listDuplicateInboundMatchRunMirrors()) {
-          let updated = true;
-          if (mirror.status === 'running') {
-            updated = this.database.markDuplicateInboundMatchRunMirrorUnavailable(
-              mirror.id,
-              'interrupted',
-              '应用已重启，上一轮重复入金匹配未完整结束'
-            );
-          } else if (mirror.status === 'success') {
-            updated = this.database.markDuplicateInboundMatchRunMirrorUnavailable(
-              mirror.id,
-              'expired',
-              '应用已重启，银行与单据导入会话和运行结果已回收'
-            );
-          }
-          if (!updated) throw new Error(`重复入金主库运行镜像启动失效写入失败：${mirror.id}`);
-        }
-      },
-      () => this.store.clearAll()
-    ]);
+  assertImportAllowedByRecoveryLatch() {
+    if (this.recoveryLatch) throw recoveryRequiredError();
+  }
+
+  assertRunAllowedByRecoveryLatch(operationIdentity, inputEvidenceHash) {
+    const latch = this.recoveryLatch;
+    if (!latch) return;
+    const exact = operationIdentity && operationIdentity.actionKey === latch.actionKey &&
+      operationIdentity.operationKey === latch.operationKey &&
+      operationIdentity.producerTaskRunId === latch.producerTaskRunId &&
+      inputEvidenceHash === latch.inputEvidenceHash && this.bankSession &&
+      this.bankSession.monthKey === latch.monthKey &&
+      this.bankSession.importId === latch.importBundleId;
+    if (!exact) throw recoveryRequiredError();
+  }
+
+  latchRecovery(expected, outcome) {
+    if (outcome === 'committed') {
+      this.recoveryLatch = null;
+      return;
+    }
+    this.recoveryLatch = Object.freeze({
+      ...expected,
+      summary: frozenJsonCopy(expected.summary),
+      outcome: outcome === 'partially-committed' ? outcome : 'unknown'
+    });
+    this.lastRun = null;
+  }
+
+  observeManagedRunCommit(expected) {
+    try {
+      const receipt = this.store.findOperationReceipt(expected.actionKey, expected.operationKey);
+      const mirrors = this.database.listDuplicateInboundMatchRunMirrors()
+        .filter((mirror) => mirror.operationKey === expected.operationKey);
+      if (!receipt) {
+        const pendingRun = this.store.getRun(expected.monthKey, expected.sideRunId);
+        const exactRunningPlaceholder = pendingRun && pendingRun.status === 'running' &&
+          pendingRun.id === expected.sideRunId && pendingRun.importId === expected.importBundleId &&
+          pendingRun.monthKey === expected.monthKey &&
+          pendingRun.snapshotHash === expected.snapshotHash && pendingRun.resultDigest === null;
+        const notCommitted = mirrors.length === 0 && (!pendingRun || exactRunningPlaceholder);
+        return Object.freeze({
+          outcome: notCommitted ? 'not-committed' : 'unknown',
+          receipt: null,
+          result: null,
+          mirror: null,
+          expected
+        });
+      }
+      const result = this.store.readCommittedResult(receipt.monthKey, receipt.sideRunId);
+      const receiptMatches = receipt && receipt.actionKey === expected.actionKey &&
+        receipt.operationKey === expected.operationKey &&
+        receipt.producerTaskRunId === expected.producerTaskRunId &&
+        receipt.phase === 'run-side-committed' && receipt.monthKey === expected.monthKey &&
+        receipt.importBundleId === expected.importBundleId &&
+        receipt.sideRunId === expected.sideRunId &&
+        receipt.inputEvidenceHash === expected.inputEvidenceHash;
+      const run = result && result.run;
+      const resultMatches = receiptMatches && run && run.status === 'success' &&
+        run.id === expected.sideRunId && run.importId === expected.importBundleId &&
+        run.monthKey === expected.monthKey && run.snapshotHash === expected.snapshotHash &&
+        (expected.resultDigest == null || run.resultDigest === expected.resultDigest) &&
+        (expected.summary == null || isDeepStrictEqual(run.summary, expected.summary));
+      if (!resultMatches) {
+        return Object.freeze({ outcome: 'unknown', receipt, result, mirror: null, expected });
+      }
+      const authoritativeExpected = Object.freeze({
+        ...expected,
+        resultDigest: run.resultDigest,
+        summary: run.summary
+      });
+      if (mirrors.length === 0) {
+        return Object.freeze({
+          outcome: 'partially-committed',
+          receipt,
+          result,
+          mirror: null,
+          expected: authoritativeExpected
+        });
+      }
+      if (mirrors.length === 1 && exactManagedMirror(mirrors[0], authoritativeExpected)) {
+        return Object.freeze({
+          outcome: 'committed',
+          receipt,
+          result,
+          mirror: mirrors[0],
+          expected: authoritativeExpected
+        });
+      }
+      return Object.freeze({
+        outcome: 'unknown', receipt, result, mirror: null, expected: authoritativeExpected
+      });
+    } catch (_error) {
+      return Object.freeze({
+        outcome: 'unknown', receipt: null, result: null, mirror: null, expected
+      });
+    }
+  }
+
+  reconcileManagedRunFailure(expected) {
+    const observed = this.observeManagedRunCommit(expected);
+    if (observed.outcome !== 'not-committed') {
+      this.latchRecovery(observed.expected || expected, observed.outcome);
+      return observed;
+    }
+    try {
+      const deleted = this.store.deleteRun(expected.monthKey, expected.sideRunId);
+      if (deleted) return observed;
+      const after = this.observeManagedRunCommit(expected);
+      if (after.outcome === 'not-committed') return after;
+      this.latchRecovery(after.expected || expected, after.outcome);
+      return after;
+    } catch (_cleanupError) {
+      // cleanup与receipt写入由同一side DB BEGIN IMMEDIATE互斥；任何拒绝或异常都要
+      // 再读authoritative状态并poison generation，不能继续猜测“仍未提交”。
+      const after = this.observeManagedRunCommit(expected);
+      this.latchRecovery(after.expected || expected,
+        after.outcome === 'not-committed' ? 'unknown' : after.outcome);
+      return after;
+    }
+  }
+
+  completeManagedMirror(expected) {
+    const before = this.observeManagedRunCommit(expected);
+    if (before.outcome === 'committed') {
+      this.latchRecovery(expected, 'committed');
+      return before;
+    }
+    if (before.outcome !== 'partially-committed') {
+      this.latchRecovery(before.expected || expected, 'unknown');
+      throw recoveryRequiredError();
+    }
+    let writerError = null;
+    try {
+      this.database.createCommittedDuplicateInboundMatchRunMirror({
+        monthKey: expected.monthKey,
+        sideRunId: expected.sideRunId,
+        snapshotHash: expected.snapshotHash,
+        resultDigest: expected.resultDigest,
+        bankFileName: expected.bankFileName,
+        bankFileHash: expected.bankFileHash,
+        documentFileName: expected.documentFileName,
+        documentFileHash: expected.documentFileHash,
+        sideDbRelPath: expected.sideDbRelPath,
+        summary: expected.summary,
+        actionKey: expected.actionKey,
+        operationKey: expected.operationKey,
+        producerTaskRunId: expected.producerTaskRunId,
+        inputEvidenceHash: expected.inputEvidenceHash
+      });
+    } catch (error) {
+      writerError = error;
+    }
+    // Writer 抛错可能发生在 Main commit 之后；必须重读 side receipt/result 与 Main mirror
+    // 才能决定成功、partial 或 unknown，禁止凭异常类型猜测持久状态。
+    const after = this.observeManagedRunCommit(expected);
+    this.latchRecovery(after.expected || expected, after.outcome);
+    if (after.outcome === 'committed') return after;
+    if (writerError) throw writerError;
+    throw recoveryRequiredError();
   }
 
   revokeSuccessfulMirrors(message) {
@@ -413,7 +577,8 @@ class DuplicateInboundMatchService {
         '重复入金运行结果不可读，请重新导入并运行'
       );
     }
-    if (!run || run.status !== 'success') {
+    if (!run || run.status !== 'success' ||
+        (this.lastRun.resultDigest && run.resultDigest !== this.lastRun.resultDigest)) {
       return this.unavailableLastRun(
         'invalid-side-db',
         '重复入金运行结果记录缺失或状态非法',
@@ -432,7 +597,9 @@ class DuplicateInboundMatchService {
   }
 
   status() {
-    const availability = this.inspectLastRun();
+    const availability = this.recoveryLatch
+      ? { available: false, unavailable: true, stale: false, message: '' }
+      : this.inspectLastRun();
     const run = this.lastRun
       ? {
         id: this.lastRun.mirrorRunId,
@@ -466,21 +633,105 @@ class DuplicateInboundMatchService {
         }
         : null,
       run,
-      canRun: Boolean(this.bankSession && this.documentSession),
-      canExport: Boolean(this.lastRun && availability.available && resultCount > 0)
+      canRun: Boolean(!this.recoveryLatch && this.bankSession && this.documentSession),
+      canExport: Boolean(!this.recoveryLatch && this.lastRun && availability.available && resultCount > 0)
     };
   }
 
-  async importFiles(filePaths, onProgress) {
-    this.invalidateForNewImport();
+  detachCommittedSession() {
+    this.bankSession = null;
+    this.documentSession = null;
+    this.lastRun = null;
+  }
+
+  detachCommittedRun() {
+    this.lastRun = null;
+  }
+
+  restoreImportReceipt(receipt) {
+    const imported = this.store.getImport(receipt.monthKey, receipt.importBundleId);
+    if (!imported) {
+      throw new DuplicateInboundMatchServiceError(
+        'duplicate-inbound-import-receipt-target-missing',
+        'Duplicate import receipt对应side bundle不存在'
+      );
+    }
+    const rows = this.store.readBankRows(receipt.monthKey, receipt.importBundleId);
+    const counts = countFundTypes(rows);
+    this.bankSession = {
+      monthKey: receipt.monthKey,
+      importId: imported.id,
+      fileName: imported.bank.fileName,
+      fileHash: imported.bank.contentHash,
+      rowCount: imported.bank.rowCount,
+      reversalCount: counts.reversalCount,
+      inboundCount: counts.inboundCount,
+      importedAt: imported.importedAt
+    };
+    this.documentSession = {
+      monthKey: receipt.monthKey,
+      importId: imported.id,
+      fileName: imported.document.fileName,
+      fileHash: imported.document.contentHash,
+      rowCount: imported.document.rowCount,
+      matchableRowCount: imported.document.matchableRowCount,
+      emptyBusinessOrderCount: imported.document.emptyBusinessOrderCount,
+      importedAt: imported.importedAt
+    };
+    this.lastRun = null;
+    return imported;
+  }
+
+  async importFiles(filePaths, onProgress, rawOperationIdentity = null) {
+    this.assertImportAllowedByRecoveryLatch();
+    const operationIdentity = normalizeOperationIdentity(rawOperationIdentity, 'duplicate:import');
+    if (operationIdentity) {
+      const receipt = this.store.findOperationReceipt(
+        operationIdentity.actionKey, operationIdentity.operationKey
+      );
+      if (receipt) {
+        const inputs = await identifyInputFiles(filePaths);
+        const [bankFileHash, documentFileHash] = await Promise.all([
+          this.fileHasher(inputs.bank.filePath),
+          this.fileHasher(inputs.document.filePath)
+        ]);
+        if (receipt.producerTaskRunId !== operationIdentity.producerTaskRunId ||
+            receipt.inputEvidenceHash !== importEvidenceHash(bankFileHash, documentFileHash)) {
+          throw new DuplicateInboundMatchServiceError(
+            'duplicate-inbound-operation-identity-conflict',
+            '同一Duplicate import operationKey的owner或输入证据冲突'
+          );
+        }
+        const imported = this.restoreImportReceipt(receipt);
+        return {
+          status: 'ok',
+          replayed: true,
+          durableCommit: true,
+          bank: {
+            fileName: imported.bank.fileName,
+            rowCount: imported.bank.rowCount,
+            reversalCount: this.bankSession.reversalCount,
+            inboundCount: this.bankSession.inboundCount
+          },
+          document: {
+            fileName: imported.document.fileName,
+            rowCount: imported.document.rowCount,
+            matchableRowCount: imported.document.matchableRowCount,
+            emptyBusinessOrderCount: imported.document.emptyBusinessOrderCount
+          }
+        };
+      }
+    }
+    if (operationIdentity) this.detachCommittedSession();
+    else this.invalidateForNewImport();
     try {
-      return await this.importFilesAfterInvalidation(filePaths, onProgress);
+      return await this.importFilesAfterInvalidation(filePaths, onProgress, operationIdentity);
     } catch (error) {
       this.bankSession = null;
       this.documentSession = null;
       this.lastRun = null;
       try {
-        this.store.clearAll();
+        if (!operationIdentity) this.store.clearAll();
       } catch (cleanupError) {
         throw new DuplicateInboundMatchServiceError(
           'duplicate-inbound-import-rollback-failed',
@@ -492,7 +743,7 @@ class DuplicateInboundMatchService {
     }
   }
 
-  async importFilesAfterInvalidation(filePaths, onProgress) {
+  async importFilesAfterInvalidation(filePaths, onProgress, operationIdentity = null) {
     if (onProgress) onProgress({ stage: 'classify', message: '正在识别银行对账单和单据对账单...' });
     await yieldToEventLoop();
 
@@ -504,7 +755,7 @@ class DuplicateInboundMatchService {
       this.fileHasher(inputs.document.filePath)
     ]);
     const parsed = this.bankReader(inputs.bank.filePath);
-    validateBizIds(parsed.rows);
+    const storedRows = prepareStoredBankRows(parsed.rows);
     const bankHashAfterRead = await this.fileHasher(inputs.bank.filePath);
     if (bankHashAfterRead !== bankFileHash) {
       throw new DuplicateInboundMatchServiceError(
@@ -514,13 +765,7 @@ class DuplicateInboundMatchService {
     }
     const { reversalCount, inboundCount } = countFundTypes(parsed.rows);
     const monthKey = localMonthKey(this.now());
-    const storedRows = parsed.rows.map((row, index) => ({
-      sourceOrdinal: index,
-      excelRowNumber: index + 2,
-      bizId: trimText(row.BizId),
-      fundType: trimText(row.FundType),
-      raw: pickBankFields(row)
-    }));
+    const inputEvidenceHash = importEvidenceHash(bankFileHash, documentFileHash);
     if (onProgress) onProgress({ stage: 'persist', message: '正在保存银行与单据导入会话...' });
     await yieldToEventLoop();
     const imported = await this.store.createImportBundle({
@@ -534,6 +779,23 @@ class DuplicateInboundMatchService {
         fileName: inputs.document.fileName,
         contentHash: documentFileHash
       },
+      beforeCommit: operationIdentity ? async () => {
+        const [bankHashAfter, documentHashAfter] = await Promise.all([
+          this.fileHasher(inputs.bank.filePath),
+          this.fileHasher(inputs.document.filePath)
+        ]);
+        if (bankHashAfter !== bankFileHash || documentHashAfter !== documentFileHash) {
+          throw new DuplicateInboundMatchServiceError(
+            'duplicate-inbound-input-changed-during-import',
+            '导入期间输入文件发生变化，请重新选择文件'
+          );
+        }
+      } : null,
+      operationReceipt: operationIdentity ? {
+        ...operationIdentity,
+        phase: 'import-side-committed',
+        inputEvidenceHash
+      } : null,
       writeDocumentRows: (insertRow) => streamDocumentStatement(inputs.document.filePath, {
         onRow: insertRow,
         onProgress: (progress) => {
@@ -541,15 +803,17 @@ class DuplicateInboundMatchService {
         }
       })
     });
-    const [bankHashAfter, documentHashAfter] = await Promise.all([
-      this.fileHasher(inputs.bank.filePath),
-      this.fileHasher(inputs.document.filePath)
-    ]);
-    if (bankHashAfter !== bankFileHash || documentHashAfter !== documentFileHash) {
-      throw new DuplicateInboundMatchServiceError(
-        'duplicate-inbound-input-changed-during-import',
-        '导入期间输入文件发生变化，请重新选择文件'
-      );
+    if (!operationIdentity) {
+      const [bankHashAfter, documentHashAfter] = await Promise.all([
+        this.fileHasher(inputs.bank.filePath),
+        this.fileHasher(inputs.document.filePath)
+      ]);
+      if (bankHashAfter !== bankFileHash || documentHashAfter !== documentFileHash) {
+        throw new DuplicateInboundMatchServiceError(
+          'duplicate-inbound-input-changed-during-import',
+          '导入期间输入文件发生变化，请重新选择文件'
+        );
+      }
     }
     const importedAt = this.now().toISOString();
     this.bankSession = {
@@ -575,9 +839,148 @@ class DuplicateInboundMatchService {
     if (onProgress) onProgress({ stage: 'done', message: '银行对账单和单据对账单导入完成' });
     return {
       status: 'ok',
+      durableCommit: Boolean(operationIdentity),
       bank: {
         fileName: parsed.fileName,
         rowCount: parsed.rows.length,
+        reversalCount,
+        inboundCount
+      },
+      document: {
+        fileName: imported.document.fileName,
+        rowCount: imported.document.rowCount,
+        matchableRowCount: imported.document.matchableRowCount,
+        emptyBusinessOrderCount: imported.document.emptyBusinessOrderCount
+      }
+    };
+  }
+
+  async importPreparedSpools(
+    rawPairedImport,
+    onProgress,
+    rawOperationIdentity = null,
+    signal = null
+  ) {
+    this.assertImportAllowedByRecoveryLatch();
+    const operationIdentity = normalizeOperationIdentity(rawOperationIdentity, 'duplicate:import');
+    if (!operationIdentity) {
+      throw new DuplicateInboundMatchServiceError(
+        'duplicate-inbound-operation-identity-invalid',
+        'Duplicate paired import必须绑定managed operation identity'
+      );
+    }
+    if (onProgress) {
+      onProgress({ stage: 'validate-spools', message: '正在完整校验银行与单据解析结果...' });
+    }
+    await yieldToEventLoop();
+    // 两份spool、role/source/job/op/owner identity与完整行守恒全部通过前，
+    // 禁止进入side事务或Main reservation adoption。
+    const pair = await validateDuplicateSpoolPair(rawPairedImport);
+    const bankFileHash = pair.bank.source.sha256;
+    const documentFileHash = pair.document.source.sha256;
+    const inputEvidenceHash = importEvidenceHash(bankFileHash, documentFileHash);
+    const receipt = this.store.findOperationReceipt(
+      operationIdentity.actionKey, operationIdentity.operationKey
+    );
+    if (receipt) {
+      if (receipt.producerTaskRunId !== operationIdentity.producerTaskRunId ||
+          receipt.inputEvidenceHash !== inputEvidenceHash) {
+        throw new DuplicateInboundMatchServiceError(
+          'duplicate-inbound-operation-identity-conflict',
+          '同一Duplicate import operationKey的owner或输入证据冲突'
+        );
+      }
+      const imported = this.restoreImportReceipt(receipt);
+      return {
+        status: 'ok',
+        replayed: true,
+        durableCommit: true,
+        bank: {
+          fileName: imported.bank.fileName,
+          rowCount: imported.bank.rowCount,
+          reversalCount: this.bankSession.reversalCount,
+          inboundCount: this.bankSession.inboundCount
+        },
+        document: {
+          fileName: imported.document.fileName,
+          rowCount: imported.document.rowCount,
+          matchableRowCount: imported.document.matchableRowCount,
+          emptyBusinessOrderCount: imported.document.emptyBusinessOrderCount
+        }
+      };
+    }
+
+    const bankRows = [];
+    await consumeDuplicateInputSpool(pair.bank, (row) => { bankRows.push(row); });
+    const { reversalCount, inboundCount } = countFundTypes(
+      bankRows.map((row) => row.raw)
+    );
+    const monthKey = localMonthKey(this.now());
+    if (onProgress) {
+      onProgress({ stage: 'persist', message: '正在单事务采用银行与单据解析结果...' });
+    }
+    await yieldToEventLoop();
+    assertImportNotAborted(signal);
+    const imported = await this.store.createImportBundle({
+      monthKey,
+      bank: {
+        fileName: pair.bank.source.fileName,
+        contentHash: bankFileHash,
+        rows: bankRows
+      },
+      document: {
+        fileName: pair.document.source.fileName,
+        contentHash: documentFileHash
+      },
+      // COMMIT前再次完整读取两个task-private artifact与源文件identity，关闭
+      // validate/consume之间及consume/commit之间的TOCTOU窗口。
+      beforeCommit: async () => {
+        await Promise.all([
+          validateDuplicateInputSpool(pair.bank),
+          validateDuplicateInputSpool(pair.document)
+        ]);
+      },
+      // async权威复核完成后才检查abort；该同步guard之后，store到receipt
+      // insert与COMMIT之间不得再出现yield。
+      beforeCommitGuard: () => { assertImportNotAborted(signal); },
+      operationReceipt: {
+        ...operationIdentity,
+        phase: 'import-side-committed',
+        inputEvidenceHash
+      },
+      writeDocumentRows: (insertRow) => consumeDuplicateInputSpool(pair.document, insertRow)
+    });
+    const importedAt = this.now().toISOString();
+    this.bankSession = {
+      monthKey,
+      importId: imported.id,
+      fileName: pair.bank.source.fileName,
+      fileHash: bankFileHash,
+      rowCount: pair.bank.counts.rowCount,
+      reversalCount,
+      inboundCount,
+      importedAt
+    };
+    this.documentSession = {
+      monthKey,
+      importId: imported.id,
+      fileName: pair.document.source.fileName,
+      fileHash: documentFileHash,
+      rowCount: imported.document.rowCount,
+      matchableRowCount: imported.document.matchableRowCount,
+      emptyBusinessOrderCount: imported.document.emptyBusinessOrderCount,
+      importedAt
+    };
+    this.lastRun = null;
+    if (onProgress) {
+      onProgress({ stage: 'done', message: '银行对账单和单据对账单导入完成' });
+    }
+    return {
+      status: 'ok',
+      durableCommit: true,
+      bank: {
+        fileName: pair.bank.source.fileName,
+        rowCount: pair.bank.counts.rowCount,
         reversalCount,
         inboundCount
       },
@@ -695,17 +1098,147 @@ class DuplicateInboundMatchService {
     });
   }
 
-  async run({ onProgress } = {}) {
+  async run({ onProgress, operationIdentity: rawOperationIdentity = null } = {}) {
     if (!this.bankSession || !this.documentSession) {
       throw new DuplicateInboundMatchServiceError(
         'duplicate-inbound-input-missing',
         '请先同时导入银行对账单和单据对账单'
       );
     }
-    this.clearPreviousRun();
+    const operationIdentity = normalizeOperationIdentity(rawOperationIdentity, 'duplicate:run');
+    const before = this.currentMptSnapshot();
+    const inputEvidenceHash = runEvidenceHash(
+      this.bankSession.importId,
+      this.bankSession.fileHash,
+      this.documentSession.fileHash,
+      before.snapshotHash
+    );
+    this.assertRunAllowedByRecoveryLatch(operationIdentity, inputEvidenceHash);
+    if (!operationIdentity) this.clearPreviousRun();
+    if (operationIdentity) {
+      let receipt;
+      try {
+        receipt = this.store.findOperationReceipt(
+          operationIdentity.actionKey, operationIdentity.operationKey
+        );
+      } catch (error) {
+        this.latchRecovery(this.recoveryLatch || {
+          ...operationIdentity,
+          inputEvidenceHash,
+          monthKey: this.bankSession.monthKey,
+          sideRunId: null,
+          importBundleId: this.bankSession.importId,
+          snapshotHash: before.snapshotHash,
+          resultDigest: null,
+          bankFileName: this.bankSession.fileName,
+          bankFileHash: this.bankSession.fileHash,
+          documentFileName: this.documentSession.fileName,
+          documentFileHash: this.documentSession.fileHash,
+          sideDbRelPath: duplicateSideDbRelPath(this.bankSession.monthKey),
+          summary: null
+        }, 'unknown');
+        throw new DuplicateInboundMatchServiceError(
+          'duplicate-inbound-run-receipt-unreadable',
+          'Duplicate run receipt不可唯一读取',
+          { cause: error }
+        );
+      }
+      if (receipt) {
+        const receiptExpected = {
+          actionKey: receipt.actionKey,
+          operationKey: receipt.operationKey,
+          producerTaskRunId: receipt.producerTaskRunId,
+          inputEvidenceHash: receipt.inputEvidenceHash,
+          monthKey: receipt.monthKey,
+          sideRunId: receipt.sideRunId,
+          importBundleId: receipt.importBundleId,
+          snapshotHash: before.snapshotHash,
+          resultDigest: null,
+          bankFileName: this.bankSession.fileName,
+          bankFileHash: this.bankSession.fileHash,
+          documentFileName: this.documentSession.fileName,
+          documentFileHash: this.documentSession.fileHash,
+          sideDbRelPath: duplicateSideDbRelPath(receipt.monthKey),
+          summary: null
+        };
+        if (receipt.producerTaskRunId !== operationIdentity.producerTaskRunId ||
+            receipt.monthKey !== this.bankSession.monthKey ||
+            receipt.importBundleId !== this.bankSession.importId ||
+            receipt.inputEvidenceHash !== inputEvidenceHash) {
+          this.latchRecovery(receiptExpected, 'unknown');
+          throw new DuplicateInboundMatchServiceError(
+            'duplicate-inbound-operation-identity-conflict',
+            '同一Duplicate run operationKey的owner或输入证据冲突'
+          );
+        }
+        let result;
+        try {
+          result = this.store.readCommittedResult(receipt.monthKey, receipt.sideRunId);
+        } catch (error) {
+          this.latchRecovery(receiptExpected, 'unknown');
+          throw new DuplicateInboundMatchServiceError(
+            'duplicate-inbound-run-receipt-target-unreadable',
+            'Duplicate run receipt对应committed side结果不可读',
+            { cause: error }
+          );
+        }
+        const committedRun = result && result.run;
+        if (!committedRun || committedRun.status !== 'success') {
+          this.latchRecovery(receiptExpected, 'unknown');
+          throw new DuplicateInboundMatchServiceError(
+            'duplicate-inbound-run-receipt-target-missing',
+            'Duplicate run receipt对应committed side结果不存在'
+          );
+        }
+        const expected = {
+          actionKey: operationIdentity.actionKey,
+          operationKey: operationIdentity.operationKey,
+          producerTaskRunId: operationIdentity.producerTaskRunId,
+          inputEvidenceHash,
+          monthKey: receipt.monthKey,
+          sideRunId: receipt.sideRunId,
+          importBundleId: receipt.importBundleId,
+          snapshotHash: committedRun.snapshotHash,
+          resultDigest: committedRun.resultDigest,
+          bankFileName: this.bankSession.fileName,
+          bankFileHash: this.bankSession.fileHash,
+          documentFileName: this.documentSession.fileName,
+          documentFileHash: this.documentSession.fileHash,
+          sideDbRelPath: duplicateSideDbRelPath(receipt.monthKey),
+          summary: committedRun.summary
+        };
+        if (this.recoveryLatch && !exactRecoveryLatchPostImage(this.recoveryLatch, expected)) {
+          this.latchRecovery(this.recoveryLatch, 'unknown');
+          throw recoveryRequiredError();
+        }
+        const completed = this.completeManagedMirror(expected);
+        this.lastRun = {
+          monthKey: receipt.monthKey,
+          sideRunId: receipt.sideRunId,
+          mirrorRunId: completed.mirror.id,
+          snapshotHash: committedRun.snapshotHash,
+          resultDigest: committedRun.resultDigest,
+          summary: committedRun.summary
+        };
+        return {
+          status: 'success',
+          runId: completed.mirror.id,
+          summary: { ...committedRun.summary },
+          replayed: true,
+          durableCommit: true
+        };
+      }
+    }
+    if (this.recoveryLatch) {
+      this.latchRecovery(this.recoveryLatch, 'unknown');
+      throw recoveryRequiredError();
+    }
+    if (operationIdentity) this.detachCommittedRun();
     let sideRunId = null;
     let mirrorRunId = null;
-    const before = this.currentMptSnapshot();
+    let sideCommitted = false;
+    let managedMirrorCommitted = false;
+    let managedExpected = null;
     try {
       sideRunId = this.store.createRun({
         monthKey: this.bankSession.monthKey,
@@ -713,16 +1246,37 @@ class DuplicateInboundMatchService {
         snapshot: before.snapshot,
         snapshotHash: before.snapshotHash
       });
-      mirrorRunId = this.database.createDuplicateInboundMatchRunMirror({
-        monthKey: this.bankSession.monthKey,
-        sideRunId,
-        snapshotHash: before.snapshotHash,
-        bankFileName: this.bankSession.fileName,
-        bankFileHash: this.bankSession.fileHash,
-        documentFileName: this.documentSession.fileName,
-        documentFileHash: this.documentSession.fileHash,
-        sideDbRelPath: runDataStore.sideDbRelPath(MODULE, this.bankSession.monthKey)
-      });
+      if (operationIdentity) {
+        managedExpected = {
+          actionKey: operationIdentity.actionKey,
+          operationKey: operationIdentity.operationKey,
+          producerTaskRunId: operationIdentity.producerTaskRunId,
+          inputEvidenceHash,
+          monthKey: this.bankSession.monthKey,
+          sideRunId,
+          snapshotHash: before.snapshotHash,
+          resultDigest: null,
+          importBundleId: this.bankSession.importId,
+          bankFileName: this.bankSession.fileName,
+          bankFileHash: this.bankSession.fileHash,
+          documentFileName: this.documentSession.fileName,
+          documentFileHash: this.documentSession.fileHash,
+          sideDbRelPath: duplicateSideDbRelPath(this.bankSession.monthKey),
+          summary: null
+        };
+      }
+      if (!operationIdentity) {
+        mirrorRunId = this.database.createDuplicateInboundMatchRunMirror({
+          monthKey: this.bankSession.monthKey,
+          sideRunId,
+          snapshotHash: before.snapshotHash,
+          bankFileName: this.bankSession.fileName,
+          bankFileHash: this.bankSession.fileHash,
+          documentFileName: this.documentSession.fileName,
+          documentFileHash: this.documentSession.fileHash,
+          sideDbRelPath: runDataStore.sideDbRelPath(MODULE, this.bankSession.monthKey)
+        });
+      }
 
       if (onProgress) onProgress({ stage: 'bank-group', message: '正在分组银行 Reversal 与 Inbound...' });
       await yieldToEventLoop();
@@ -810,29 +1364,64 @@ class DuplicateInboundMatchService {
         }
       };
 
-      this.store.finishRun({
+      if (managedExpected) managedExpected = { ...managedExpected, summary };
+      const finishedRun = this.store.finishRun({
         monthKey: this.bankSession.monthKey,
         runId: sideRunId,
         summary,
         mailRows,
         manualRows,
-        auditRows
+        auditRows,
+        operationReceipt: operationIdentity ? {
+          ...operationIdentity,
+          phase: 'run-side-committed',
+          importBundleId: this.bankSession.importId,
+          inputEvidenceHash
+        } : null
       });
-      this.database.finishDuplicateInboundMatchRunMirror(mirrorRunId, summary);
+      sideCommitted = true;
+      if (operationIdentity) {
+        managedExpected = {
+          ...managedExpected,
+          resultDigest: finishedRun.resultDigest,
+        };
+        const completed = this.completeManagedMirror(managedExpected);
+        mirrorRunId = completed.mirror.id;
+        managedMirrorCommitted = true;
+      } else {
+        this.database.finishDuplicateInboundMatchRunMirror(mirrorRunId, summary);
+      }
       this.lastRun = {
         monthKey: this.bankSession.monthKey,
         sideRunId,
         mirrorRunId,
         snapshotHash: before.snapshotHash,
+        resultDigest: finishedRun.resultDigest,
         summary
       };
       if (onProgress) onProgress({ stage: 'done', message: '重复入金匹配完成' });
-      return { status: 'success', runId: mirrorRunId, summary: { ...summary } };
+      return {
+        status: 'success',
+        runId: mirrorRunId,
+        summary: { ...summary },
+        durableCommit: Boolean(operationIdentity)
+      };
     } catch (error) {
-      if (sideRunId !== null) {
-        try { this.store.failRun(this.bankSession.monthKey, sideRunId, error); } catch (_sideError) { /* 原错误优先 */ }
+      if (sideRunId !== null && !sideCommitted) {
+        if (operationIdentity && managedExpected) {
+          try {
+            this.reconcileManagedRunFailure(managedExpected);
+          } catch (_sideError) {
+            // 观察本身异常时也绝不能回退到delete；保留完整identity poison本generation。
+            this.latchRecovery(managedExpected, 'unknown');
+          }
+        } else {
+          try {
+            this.store.failRun(this.bankSession.monthKey, sideRunId, error);
+          } catch (_sideError) { /* 原错误优先 */ }
+        }
       }
-      if (mirrorRunId !== null) {
+      if (mirrorRunId !== null && !(operationIdentity && managedMirrorCommitted)) {
         try {
           this.database.failDuplicateInboundMatchRunMirror(mirrorRunId, mirrorSafeError(error));
         } catch (_mirrorError) { /* 原错误优先 */ }
@@ -843,6 +1432,7 @@ class DuplicateInboundMatchService {
   }
 
   async export({ savePath, onProgress } = {}) {
+    if (this.recoveryLatch) throw recoveryRequiredError();
     if (!this.lastRun) {
       throw new DuplicateInboundMatchServiceError(
         'duplicate-inbound-run-missing',

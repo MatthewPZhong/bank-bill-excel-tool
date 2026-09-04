@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-27T19:35:15Z",
+  "environment": {
+    "platform": "darwin",
+    "architecture": "arm64",
+    "nodeVersion": "v25.8.0",
+    "cpuModel": "Apple M4 Pro"
+  },
+  "config": {
+    "rowCountPerRole": 3000,
+    "iterations": 5,
+    "runOrder": "alternating-single-paired-by-iteration",
+    "scope": "Parser-only; two real OS Parser Workers versus the same workers sequentially"
+  },
+  "samples": {
+    "single": [
+      { "elapsedMs": 524.054666, "peakRssBytes": 382009344 },
+      { "elapsedMs": 534.2938329999997, "peakRssBytes": 408649728 },
+      { "elapsedMs": 529.837, "peakRssBytes": 408862720 },
+      { "elapsedMs": 532.3686669999997, "peakRssBytes": 471482368 },
+      { "elapsedMs": 531.2505840000003, "peakRssBytes": 481001472 }
+    ],
+    "paired": [
+      { "elapsedMs": 317.7760410000001, "peakRssBytes": 424132608 },
+      { "elapsedMs": 313.08341700000005, "peakRssBytes": 434307072 },
+      { "elapsedMs": 318.6384170000001, "peakRssBytes": 468189184 },
+      { "elapsedMs": 324.22474999999986, "peakRssBytes": 490766336 },
+      { "elapsedMs": 314.9273750000002, "peakRssBytes": 507150336 }
+    ]
+  },
+  "summary": {
+    "singleMedianMs": 531.2505840000003,
+    "pairedMedianMs": 317.7760410000001,
+    "improvementRatio": 0.4018339921486093,
+    "pairedPeakRssBytes": 507150336,
+    "rssBudgetBytes": 838860800,
+    "localGatePassed": true
+  },
+  "productionEnabled": false,
+  "manualGates": [
+    "Windows native连续十轮/RSS",
+    "ResourceGovernor production预算",
+    "人工资金与行数守恒复核"
+  ]
+}

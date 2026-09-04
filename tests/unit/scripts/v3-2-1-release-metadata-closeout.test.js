@@ -62,11 +62,11 @@ test('v3.2.1 closeout同步当前版本、冻结文档、前序收口与三份�
 
   const currentChangelog = section(
     changelog,
-    '## 3.2.1 - 2026-09-03（正式发布候选）'
+    '## 3.2.1 - 2026-09-03（正式发布）'
   );
   const currentHistory = section(
     history,
-    '## v3.2.1（2026-09-03，正式发布候选）'
+    '## v3.2.1（2026-09-03，正式发布）'
   );
   const historicalGuide = paragraph(
     guide,
@@ -94,6 +94,7 @@ test('v3.2.1 closeout同步当前版本、冻结文档、前序收口与三份�
   assert.match(currentChangelog, /annotated tag/);
   assert.match(currentChangelog, /内置 `release-check`/);
   assert.match(currentChangelog, /`scan:vars` \/ `check:vars` 未运行/);
+  assert.match(currentChangelog, /run `33807861470`/);
   assert.match(changelog, /^## 3\.2\.0 - 2026-09-03（正式发布）$/m);
   assert.match(history, /^## v3\.2\.0（2026-09-03，正式发布）$/m);
 });

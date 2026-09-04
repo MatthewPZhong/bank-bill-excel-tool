@@ -9,7 +9,32 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
-## v3.2.1（2026-09-03，正式发布候选）
+## v3.2.2（2026-09-04，正式发布候选）
+
+v3.2.2 完成 FundRecon、Duplicate 与 BankBU 的后台执行 capability 和恢复审计基础；production enablement 保持关闭，既有金额、币种、匹配顺序、Workbook 与用户操作合同不变。
+
+### 新增
+
+- FundRecon 长驻单 Service，统一持有银行、网关、退款会话与运行结果，并继续按 R1→R5/M2M 顺序执行。
+- Duplicate 长驻 Service、启动前 inspector/Recovery Hold、worker-durable receipt，以及只负责准备 spool 的可选 paired parser。
+- BankBU one-shot Worker、side/main 同一 operation identity、恢复 inspector，以及只负责读取两个输入的可选 dual parser。
+
+### 变更
+
+- 主进程不再作为这些模块完整可变状态的第二所有者；只保留有界 DTO、资源 grant/reservation、TaskLifecycle 和 artifact authority。
+- 崩溃、超时、部分提交和结果丢失按持久 receipt/inspector 收口；未知状态不会自动重跑或伪装为普通失败。
+- 修复普通 no-file 配置任务的空 evidence 合同，模板重命名不再在执行前被 TaskLifecycle 拒绝，最终 Hold gate 保持不变。
+- 人工余额补录从 freshness、导入上下文或当前 statement session 恢复真实源文件 FilePlan；余额 `0` 可正常保存，无来源或 IPC 失败时给出可见反馈并保留草稿。
+- package 元数据更新为 `3.2.2`，顶层 Spec/TechDoc 同步自冻结基线。
+
+### 兼容与人工边界
+
+- 业务 SQL、匹配顺序、候选消费、金额/币种、Workbook、事务和幂等语义不变；capability 与 effective production strategy 分离，生产仍关闭。
+- 发布负责人 `MatthewPZhong` 于 2026-09-04 明确确认资金、恢复、真实业务样本及稳定窗口人工验收通过；最终 Windows 10/11 Setup/portable、SmartScreen、离线覆盖安装与 `production/latest` canary 依据 Issue #220 在发布后逐项补做。
+- Issue #220 授权本版通过受保护 PR、唯一 annotated tag 与 Windows Release workflow 发布技术 stable Release；production strategy、feature flag 和 effective worker 继续 disabled/legacy。workflow 内置 `release-check` 获授权，本地 `scan:vars` / `check:vars` 未运行且不得声明为 PASS。
+
+
+## v3.2.1（2026-09-03，正式发布）
 
 v3.2.1 完成 Toolbox 单 Writer后台生成与 PreFund MPT parser spool、durable receipt、单 Writer和受限 parser pool capability；production enablement 保持关闭，既有文件顺序、金额、币种、Workbook、事务、幂等和用户操作合同不变。
 
@@ -30,6 +55,7 @@ v3.2.1 完成 Toolbox 单 Writer后台生成与 PreFund MPT parser spool、durab
 - E04-C/E05-C 未满足 gate 继续阻止 production 切路，legacy seam 保留；本版不新增用户开关。
 - 发布负责人 `MatthewPZhong` 于 2026-09-03 明确确认资金、恢复、真实业务样本及稳定窗口人工验收通过；该签字只覆盖本次发布。最终 v3.2.1 资产产生后才能完成的 Windows 10/11 Setup/portable、SmartScreen、离线覆盖安装和 `production/latest` canary 依据 Issue #220 在发布后逐项补做。
 - Issue #220 授权本版通过受保护 PR、唯一 annotated tag 与 Windows Release workflow 发布技术 stable Release；production strategy、feature flag 和 effective worker 继续 disabled/legacy。workflow 内置 `release-check` 获授权，本地 `scan:vars` / `check:vars` 未运行且不得声明为 PASS。
+- PR #223 与 safe forward-fix PR #224 已普通合并，最终 `main=c547097c8829c1c39437fe9047b5accbf5f1e388`；annotated `v3.2.1` 精确指向该提交，Release run `33807861470` 与 Setup、portable、blockmap、`latest.yml` 四项资产均完成独立回读。
 
 ## v3.2.0（2026-09-03，正式发布）
 

@@ -15,6 +15,7 @@ const {
 const {
   balanceSeedRecordsEvidence,
   prepareManualBalanceSeedSubmission,
+  resolveManualBalanceSeedFilePlanInputPaths,
   writeManualBalanceSeedPlan
 } = require('../../../src/main-process/manual-balance-seed-preflight');
 const {
@@ -254,6 +255,86 @@ test('manual balance 无效输入在 prepare 停止：0 BOR/reserve/execute/写�
   assert.deepEqual(harness.calls, []);
   assert.equal(executeCount, 0);
   assert.equal(fs.existsSync(storageRoot), false);
+});
+
+test('manual balance 内存会话沿用账单源文件，余额 0 可进入 FilePlan 并写盘', async (t) => {
+  const storageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'manual-balance-zero-'));
+  const inputPath = path.join(storageRoot, 'BC-GB-2608.xlsx');
+  fs.writeFileSync(inputPath, 'statement-source');
+  t.after(() => fs.rmSync(storageRoot, { recursive: true, force: true }));
+
+  const importContext = {
+    template: { name: 'ICBC-境内' },
+    inputFilePaths: [inputPath],
+    preparedDetailRows: [['BillDate'], ['2026-08-10']],
+    scope: 'current'
+  };
+  const resolution = prepareManualBalanceSeedSubmission(manualBalanceArgs(storageRoot, {
+    payload: { billDate: '2026-08-09', endBalance: '0' },
+    importContext,
+    createFreshnessGuard: () => ({
+      inputFilePaths: [],
+      assertFresh() {}
+    })
+  }));
+  assert.equal(resolution.prepared.proceed, true);
+  assert.equal(resolution.prepared.plan.record.endBalance, 0);
+
+  const filePlanInputPaths = resolveManualBalanceSeedFilePlanInputPaths({
+    prepared: resolution.prepared,
+    importContext,
+    session: null
+  });
+  assert.deepEqual(filePlanInputPaths, [inputPath]);
+  assert.deepEqual(resolveManualBalanceSeedFilePlanInputPaths({
+    prepared: { inputFilePaths: [] },
+    importContext: { scope: 'current' },
+    session: {
+      currentBatchId: 'batch-1',
+      fileEntries: [{ id: 'entry-1', filePath: inputPath }],
+      batches: [{ id: 'batch-1', entryIds: ['entry-1'] }]
+    }
+  }), [inputPath]);
+  assert.deepEqual(resolveManualBalanceSeedFilePlanInputPaths({
+    prepared: { inputFilePaths: [] },
+    importContext: {},
+    session: null
+  }), []);
+
+  const saveHandlerStart = mainSource.indexOf(
+    "businessIpcHandle('file:save-balance-seed'"
+  );
+  const saveHandlerEnd = mainSource.indexOf(
+    'const prepareStatementExport',
+    saveHandlerStart
+  );
+  const saveHandlerSource = mainSource.slice(saveHandlerStart, saveHandlerEnd);
+  assert.match(saveHandlerSource, /resolveManualBalanceSeedFilePlanInputPaths\(\{/);
+  assert.match(saveHandlerSource, /inputs:\s*filePlanInputPaths\.map/);
+  assert.match(saveHandlerSource, /BALANCE_SEED_SOURCE_MISSING/);
+
+  const prepared = {
+    ...resolution.prepared,
+    filePlan: {
+      version: 1,
+      allocation: 'eager',
+      inputs: filePlanInputPaths.map((filePath) => ({
+        filePath,
+        role: 'input',
+        sourceOperation: 'file:save-balance-seed'
+      })),
+      outputs: []
+    }
+  };
+  const harness = createLifecycleHarness();
+  const result = await invokePrepared(harness, prepared, async (normalized) => {
+    writeManualBalanceSeedPlan(normalized.plan, new Date('2026-08-10T00:00:00.000Z'));
+    return { status: 'success' };
+  });
+
+  assert.equal(result.status, 'success');
+  assert.equal(harness.calls.filter((name) => name === 'reserve-file').length, 1);
+  assert.equal(readBalanceSeedRecords(storageRoot, 'ICBC')[0].endBalance, 0);
 });
 
 test('manual balance 覆盖首调与取消不入批次，确认后只 reserve/写入一次', async (t) => {
@@ -665,9 +746,15 @@ test('renderer 确认请求只生成 contextId + confirm flag', () => {
   });
   assert.match(
     dialogsSource,
-    /saveBalanceSeed\(\s*buildBalanceSeedConfirmationRequest\(result\.contextId\)\s*\)/,
+    /saveBalanceSeedWithFeedback\(\s*buildBalanceSeedConfirmationRequest\(result\.contextId\)\s*\)/,
     'active manual balance dialog 必须只提交 opaque context builder 的结果'
   );
+  assert.match(
+    dialogsSource,
+    /async function saveBalanceSeedWithFeedback[\s\S]*?try\s*\{[\s\S]*?desktopApi\.files\.saveBalanceSeed[\s\S]*?catch\s*\(error\)/,
+    'active manual balance dialog 必须把 IPC rejection 转成可见反馈'
+  );
+  assert.match(dialogsSource, /余额补录失败：/);
 
   const rendererSource = fs.readFileSync(
     path.join(__dirname, '..', '..', '..', 'src', 'renderer.js'),
@@ -675,7 +762,12 @@ test('renderer 确认请求只生成 contextId + confirm flag', () => {
   );
   assert.match(
     rendererSource,
-    /saveBalanceSeed\(\s*window\.__rendererDialogs\.buildBalanceSeedConfirmationRequest\(result\.contextId\)\s*\)/,
+    /saveBalanceSeedWithFeedback\(\s*window\.__rendererDialogs\.buildBalanceSeedConfirmationRequest\(result\.contextId\)\s*\)/,
     'legacy active manual balance dialog 也必须只提交 opaque context builder 的结果'
+  );
+  assert.match(
+    rendererSource,
+    /async function saveBalanceSeedWithFeedback[\s\S]*?try\s*\{[\s\S]*?window\.desktopApi\.files\.saveBalanceSeed[\s\S]*?catch\s*\(error\)/,
+    'legacy manual balance dialog 必须把 IPC rejection 转成可见反馈'
   );
 });

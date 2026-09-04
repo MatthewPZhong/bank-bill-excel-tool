@@ -32,6 +32,7 @@ const {
   ensureAcquiringBillCurrencyRunsSideDbPath,
   // v3.0.5 PR-4（Part B Phase 2）：bank-bu / biz-op runs 表加 side_db_rel_path 列（侧库镜像）
   ensureBankBuReconRunsSideDbPath,
+  ensureBankBuReconRunIdentitySupport,
   ensureBizOpReconRunsSideDbPath,
   // v2.1.10 N4-cont-1 T22 (Phase 4)：raw_json idle 自动清理保留窗口 settings
   ensureAcquiringBillCurrencyRawJsonRetentionSettings,
@@ -424,6 +425,7 @@ class AppDatabase {
     // v3.0.5 PR-4（Part B Phase 2）：bank_bu_recon_runs 加 side_db_rel_path 列（侧库镜像；NULL=历史主库 run）
     //   必须在 ensureBankBuReconTablesSupport 之后（依赖 runs 表已存在）；轻量加列幂等
     this.ensureBankBuReconRunsSideDbPath();
+    this.ensureBankBuReconRunIdentitySupport();
     // v2.1.12/E03-B：VCC业务OP计算 run/files + save operation receipt（加法迁移）
     this.ensureVccOpCalcTablesSupport();
     // v3.1.6：VCC财务OP校验独立持久化空间（导入审计、有效事实、快照、运行及归档）。
@@ -741,6 +743,10 @@ class AppDatabase {
   // v3.0.5 PR-4（Part B Phase 2）：bank_bu_recon_runs 加 side_db_rel_path 列（侧库镜像）
   ensureBankBuReconRunsSideDbPath() {
     return ensureBankBuReconRunsSideDbPath(this.db);
+  }
+
+  ensureBankBuReconRunIdentitySupport() {
+    return ensureBankBuReconRunIdentitySupport(this.db);
   }
 
   // v2.1.12/E03-B：VCC业务OP计算 run/files + save operation receipt
@@ -1605,6 +1611,10 @@ class AppDatabase {
     return duplicateInboundMatchRunRepository.createRunMirror(this.db, payload);
   }
 
+  createCommittedDuplicateInboundMatchRunMirror(payload) {
+    return duplicateInboundMatchRunRepository.createCommittedRunMirror(this.db, payload);
+  }
+
   finishDuplicateInboundMatchRunMirror(mirrorId, summary) {
     return duplicateInboundMatchRunRepository.finishRunMirror(this.db, mirrorId, summary);
   }
@@ -1628,6 +1638,16 @@ class AppDatabase {
 
   listDuplicateInboundMatchRunMirrors() {
     return duplicateInboundMatchRunRepository.listRunMirrors(this.db);
+  }
+
+  getDuplicateInboundMatchRecoveryAuditByOperation(actionKey, operationKey, taskRunId) {
+    return duplicateInboundMatchRunRepository.getRecoveryAuditByOperation(
+      this.db, actionKey, operationKey, taskRunId
+    );
+  }
+
+  getDuplicateInboundMatchRecoveryAuditBySource(sourceRef) {
+    return duplicateInboundMatchRunRepository.getRecoveryAuditBySource(this.db, sourceRef);
   }
 
   listFundTransferAccountMappings() {
