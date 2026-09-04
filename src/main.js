@@ -569,6 +569,7 @@ const {
 const {
   balanceSeedRecordsEvidence,
   prepareManualBalanceSeedSubmission,
+  resolveManualBalanceSeedFilePlanInputPaths,
   writeManualBalanceSeedPlan
 } = require('./main-process/manual-balance-seed-preflight');
 const {
@@ -12378,12 +12379,26 @@ function registerFileHandlers() {
         });
         lastPendingBalanceSeedConfirmation = resolution.nextConfirmation;
         if (!resolution.prepared.proceed) return resolution.prepared;
+        const filePlanInputPaths = resolveManualBalanceSeedFilePlanInputPaths({
+          prepared: resolution.prepared,
+          importContext,
+          session
+        });
+        if (!filePlanInputPaths.length) {
+          return {
+            proceed: false,
+            result: createPreflightErrorResult({
+              message: '当前账单会话缺少源文件，请重新导入后再补录余额',
+              errorCode: 'BALANCE_SEED_SOURCE_MISSING'
+            })
+          };
+        }
         return {
           ...resolution.prepared,
           filePlan: {
             version: 1,
             allocation: 'eager',
-            inputs: resolution.prepared.inputFilePaths.map((filePath) => ({
+            inputs: filePlanInputPaths.map((filePath) => ({
               filePath,
               role: 'input',
               sourceOperation: 'file:save-balance-seed'
@@ -20472,9 +20487,10 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
             : (prepared.afterTerminalIntent || null),
           beforeStart: async (operationContext) => {
             assertTaskPolicyNotHeld(policy, prepared);
+            // 无模块 evidence 时仍需返回生命周期可合并的对象，不能用 null。
             return typeof prepared.beforeStart === 'function'
               ? prepared.beforeStart(operationContext)
-              : null;
+              : {};
           },
           execute: async (operationContext, controls) => {
             const taskContext = createIpcTaskContext(operationContext, controls);

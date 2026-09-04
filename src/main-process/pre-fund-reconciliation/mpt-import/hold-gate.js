@@ -40,7 +40,15 @@ function createPreFundMptHoldGate(options) {
   async function inspectFiles(filePaths, expectedFailures = null) {
     const identities = [];
     for (let index = 0; index < filePaths.length; index += 1) {
-      const header = await readMptHeader(filePaths[index]);
+      let header;
+      try {
+        header = await readMptHeader(filePaths[index]);
+      } catch (_error) {
+        // 这里只为可识别 batch 推导 exact Hold scope。缺失、文件名/header 非法等
+        // 仍交给 import/repair 的逐文件执行路径形成原有失败结果；任何可写 identity
+        // 会在真正 mutation 前由 identityGate 再次按实际 header fail closed。
+        continue;
+      }
       const identity = identityFromHeader(header);
       const expected = expectedFailures && expectedFailures[index];
       if (expected && (expected.sourceType !== identity.sourceType ||

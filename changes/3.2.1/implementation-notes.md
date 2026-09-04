@@ -31,3 +31,177 @@
 - `BLOCK / production gate`：本节点不得启用 production，E04-C/E05-C 拒绝结论不被文档收口覆盖。
 
 按用户明确要求，不运行 `release-check`、`check-vars` 或 `scan:vars`；这些项目不得记录为 PASS。
+
+## 2026-09-03 正式发布准备
+
+### Decisions
+
+- 严格按 Issue #220 的 v3.2.0 → v3.2.5 顺序发布；v3.2.0 的 PR、annotated tag、Release workflow 与四项资产终审全部闭合后，才从冻结 v3.2.1 候选继续。
+- 在新 isolated worktree 从 `ea60a5c7bdaaeeb5117d1c20be1f3df2ed4b0e38` 发起 natural merge，把正式发布的 `main@92380fd84471b061b7a84842be7da001aa82db87` 纳入真实祖先链；不 rebase、cherry-pick 或改写既有提交。
+- 合并冲突按语义组合：三份发布文档保留 v3.2.1 capability，并同步 v3.2.0 已发布事实与 v3.2.1 发布授权；coordinator 完整保留 #221 已验证的确定性终态同事务关闭 Intent/解除同源 Hold 修复；topology 测试继续固定 8GB `os.freemem()`，不改生产内存算法。
+- `docs/WINDOWS_RELEASE_RUNBOOK.md` 将 environment 条件纠正为唯一 custom tag policy `v*.*.*`，并记录 v3.2.0 首次 environment 拒绝、一次授权 rerun、最终成功与四资产摘要；该文档修正不改变 workflow 或服务端保护。
+- application production 继续 disabled/legacy；E04-C 第二 Writer rejected 与 E05-C 未满足 gate 不因人工发布授权而解除。
+
+### Assumptions
+
+- `92380fd8` 与冻结候选的 Git 对象和远端 refs 在本轮预检后保持不变；推送、PR ready、合并和 tag 前均重新读取，不以本地状态代替远端事实。
+
+### Deviations
+
+- 原 metadata closeout 记录的“人工门禁未通过、不得合并 main/tag”已被发布负责人后续显式验收与 Issue #220 串行发布授权取代；自动测试仍不得代签人工结论，Windows 最终资产相关项目只转为发布后补测。
+- natural merge 产生 5 个内容冲突：`CHANGELOG.md`、`docs/USER_GUIDE.md`、`docs/VERSION_FEATURE_HISTORY.md`、startup recovery coordinator 与 mature adapter topology 测试。冲突来自 v3.2.1 后续能力和 v3.2.0 发布准备在共同基线上同时演进，不通过选整侧丢弃任一版本语义。
+- 首轮合并后定向回归发现 v3.2.1 已把无 settlement 的 committed Intent close 前移到 inspection 原子 transition，而 #221 补丁仍在第一次事务之后回读 `committed` 再 close/resolve；组合后 Intent 已是 `closed`，导致同源 active Hold 未解除。将默认 Hold resolution 与 v3.2.1 的即时 Intent close 放入同一 `writeAtomic` transition 列表，并移除已被前移语义覆盖的第二次 committed close。Provider settlement 与自定义 planner 路径不变。
+
+### Evidence
+
+- v3.2.0 PR #221 exact head `1f9168a083a85e1eeab07225eb453af5a9810587` 以双父 merge commit `92380fd84471b061b7a84842be7da001aa82db87` 合入；annotated tag object `8d7c85fdb73542c9c0564c2783e319fb7b8718db` peeled 后精确指向该 commit。
+- Release run `33731833335` attempt 2 的全部步骤成功；最终远端审计 `/private/tmp/bbet-v320-release-final-remote-audit-20260903-193406.json` 为 `50655` bytes / SHA-256 `b27f2a732b6fad72d878e58775b7a463d2e7718c46aae7b4b43d1ccea8deeeb0`。
+- 四项资产独立下载、大小/SHA-256、`latest.yml` version/path/size 与 Setup SHA-512 全部一致；本地资产审计 `/private/tmp/bbet-v320-release-asset-final-audit-20260903-194246.json` 为 `4551` bytes / SHA-256 `ce7062934b823d9af35a8320cd4c76ddfaaa17970f441f330aade27b26e8bb00`。
+- v3.2.1 远端预检确认 `main=92380fd8`、候选远端 ref 精确、版本 `3.2.1`、无 `v3.2.1` tag/Release、无以 `main` 为 base 的开放 PR；审计 `/private/tmp/bbet-v321-release-preflight-audit-20260903-194442.json` 为 `777` bytes / SHA-256 `d83b9622423981299ff1d77c39ccf401675c02e2558a1cafa8c6ebcc3e4aa1c3`。
+- 首轮五文件定向组合回归为 `66 pass / 3 fail`（Node 汇总把失败子测与父测同时计数）：真实缺陷仅 `critical intent committed` 留存 active Hold，另有 v3.2.0 USER_GUIDE 历史段缺“人工验收”合同词；该轮只作定位证据，不记 PASS。
+- 修正后 recovery、mature adapter topology、v3.2.0/v3.2.1 metadata 与既有发布文档五文件组合回归为 `69/69 PASS`；其中 active same-source Hold 的 committed/not-committed/compensated、Provider completed/incomplete 分支全部通过。
+- official Node.js `22.18.0` exact-lock 完整 unit 为 `6185/6188 PASS`、`0 FAIL`、`3 Windows-only SKIP`；日志 `/private/tmp/bbet-v321-release-prep.lLgHBo/worktree/logs/unit-tests/unit-20260903-195605.log`。
+- official Node.js `22.18.0` exact-lock 完整 integration 为 `51 scripts / 2455/2455 PASS`；其中大文件真实链 `toolbox-large-file-stream=50/50`、`toolbox-large-split-multi-sheet=31/31`。runner 的耗时表机械改写已用 `apply_patch` 恢复，`rules/integration-test-policy.md` 回到原 SHA-256 `65716ba574d1139d72a1ca96f45ebaa4f85efa1f8ebf3f3bc81e8f0ce1edb74e`。
+- `npm run smoke`、`npm run lint`、相对冻结候选的 `5` 个 changed JavaScript 文件 `node --check` 与定向 ESLint、版本三处 `3.2.1` 一致性、JSON/diff/conflict-marker 检查均通过；相对候选没有 changed JSON。
+- production 冻结回读覆盖 `4` 个 mature action gates、`5` 个 v3.2.1 runtime policies 与 `2` 个 canary policies：`11/11 enabled=false`、`11/11 effectiveMode=legacy`，runtime/canary effective worker 均为 `0`；未修改 feature flag 或生产选择器。
+- 资金/恢复盲区复核：本次组合不触及金额、币种、业务主键、Workbook 或正式文件发布；同源 Hold 只在确定性 committed/not-committed/compensated 或 Provider completed 终态解除，unknown/partial/Provider incomplete/失败继续 fail-closed；Intent 终态、inspection observation 与 Hold resolution 共用一次 `writeAtomic`，定向测试同时核对持久状态和唯一 `hold-resolved` 事件。
+- 提交前 `npm run check:packaged-inputs` 按合同拒绝尚未成为 HEAD 的两个 tracked dirty 打包输入（`docs/USER_GUIDE.md`、startup recovery coordinator）；该结果不记 PASS，必须在 merge commit 后以干净 HEAD 重跑并通过。
+- natural merge commit `6930f1791c94b7baa1bf07db698af2fa48955649` 的双亲精确为 `[ea60a5c7bdaaeeb5117d1c20be1f3df2ed4b0e38, 92380fd84471b061b7a84842be7da001aa82db87]`；提交后干净 HEAD 的 `npm run check:packaged-inputs` 已通过，`build.files` `9` 条覆盖范围与 HEAD 一致。
+
+### Remaining Unknowns
+
+- `CLOSED / merge validation`：冲突组合后的 recovery/topology/metadata 定向回归、完整 unit/integration/smoke、lint、diff review 与 merge commit 后干净 HEAD packaged inputs 均已通过；旧版本绿灯未用于代偿。
+- `PROBE / exact CI`：推送后必须由新 exact head 的 `smoke-test` 与 `build` 全部完成且成功，并闭合 review threads。
+- `PROBE / tag 后`：最终 Windows Release 四项资产、公开下载、摘要与更新元数据只能在 immutable annotated tag workflow 产生后回读。
+- `BLOCK / production`：本版不启用 application production；后续若需启用，必须另行提交、验证和授权。
+
+## 2026-09-03 exact CI 与 review 收口
+
+### Decisions
+
+- 保留 `scripts/startup-process-adapter.js` 的生产默认 `15000ms` fail-closed 上限；只在 Windows 专用真实语义测试中先用 `30000ms` 完成一次有界 CIM 预热，随后仍由默认生产 adapter 验证 launch、token、graceful 与 force-cleanup 全链路。
+- Hold 入口预检只为成功读取且 header identity 有效的 MPT 文件推导 exact batch scope；无法识别的文件继续进入既有逐文件 import/repair 路径形成失败，不再提前中断同批有效文件。
+- 可识别 identity 的 Hold 仍在 prepare/beforeStart 检查；legacy 写入前 `identityGate` 与 managed Writer 持久 ACK 前 scope gate 均保持不变，未知 identity 不获得写入旁路。
+
+### Deviations
+
+- 首次 exact Windows CI 暴露 hosted runner 的 CIM 首次唤醒可恰好超过生产 15 秒边界；该失败只修复专用测试夹具，不放宽生产超时或 cleanup 证明。
+- PR review 发现 Hold scope 预计算会把单文件 filename/header/read 失败升级为整批 prepare 失败，偏离 Spec 已冻结的 mixed-result/per-file failure 语义；因此在原计划的测试夹具修复外增加最小 Hold 预检修复与回归测试。
+- 首轮新增回归确认 `readMptHeader()` 虽可被调用方捕获，`stream.pipe()` 不会自动传播 raw source 的 `ENOENT`，仍产生额外 `uncaughtException`；增加只把 source error 沿 hashing/gunzip 链转交最终 async iterator 的归一化，不改变 parser 成功路径、hash、行解析或业务校验。
+
+### Evidence
+
+- PR #222 首次 exact CI run `33753987239`：`smoke-test` job `100643862345` 为 FAILURE，`build` job `100644374079` 按门禁 SKIPPED；完整日志 `/private/tmp/bbet-v321-pr222-exact-smoke-failure-33753987239-100643862345-20260903-2018.log` 为 `66950` bytes / SHA-256 `38a254101a0d036def576bc5a770b0ef9c74cbf0fe299729b783b1621437d0d4`。唯一失败为 Windows 真实 snapshot 在约 `15009ms` 触发 `PROCESS_SNAPSHOT_TIMEOUT`，不得由本地绿灯代偿。
+- 修复前远端复核确认 `main=92380fd84471b061b7a84842be7da001aa82db87`、PR head `b250ad2544bef0f8cf66a814911d1fa2ffd22a37`、OPEN/non-draft/MERGEABLE；review thread `PRRT_kwDORiHOzM6e6Quj` 未解。审计 `/private/tmp/bbet-v321-pr-remediation-preflight-audit-20260903-203302.json` 为 `2198` bytes / SHA-256 `f308c967041a11083aa2b06fdb0d15502d53925d3c35ccc6bc94a1797d40d8ac`。
+- 首轮定向回归为 `58 pass / 2 fail / 3 skip`；两项失败均是新增 missing-source 用例捕获到同一个底层 raw stream `ENOENT` 仍以 `uncaughtException` 外溢。该轮只作定位证据，不记 PASS。
+- 修正 raw source error 传递后，Windows adapter/contract 与 MPT mixed import/repair 定向组合为 `60 pass / 0 fail / 3 Windows-only skip`；完整 MPT parser/import/receipt/mixed-file 组合为 `134/134 PASS`。
+- official Node.js `22.18.0` exact-lock 完整 unit 为 `6187/6190 PASS`、`0 FAIL`、`3 Windows-only SKIP`；日志 `/private/tmp/bbet-v321-release-prep.lLgHBo/worktree/logs/unit-tests/unit-20260903-204509.log`。
+- official Node.js `22.18.0` exact-lock 完整 integration 为 `51 scripts / 2455/2455 PASS`；其中 `toolbox-large-file-stream=50/50`、`toolbox-large-split-multi-sheet=31/31`。runner 机械改写已用 `apply_patch` 恢复，`rules/integration-test-policy.md` 精确回到 SHA-256 `65716ba574d1139d72a1ca96f45ebaa4f85efa1f8ebf3f3bc81e8f0ce1edb74e`。
+- `npm run smoke`、`npm run lint`、本轮 `4` 个 changed JavaScript 文件的 `node --check` 与定向 ESLint、`git diff --check`、版本三处 `3.2.1`、冲突标记扫描和 `package.json` / `package-lock.json` / workflow / 生产 adapter 冻结检查均通过。
+- 修复提交 `c44bc81c6e084379f63e0b3da4e7390c3f64ec7a` 创建后，干净 HEAD 的 `npm run check:packaged-inputs` 通过，`build.files` `9` 条覆盖范围与 HEAD 一致。
+- 资金/恢复盲区复核：本轮不改变业务主键、金额、币种、行序、Workbook 或正式文件发布；不可识别文件只跳过只读 scope 预计算，仍形成逐文件失败且不获得 mutation 权限；可识别文件写入前继续经过 actual-header identity gate。repair 缺失源 token 保留，可读成功 token 仅在成功终态删除；回归同时证明同批有效文件继续、identity mismatch 仍拒绝、无跨 scope 写入。
+
+### Remaining Unknowns
+
+- `CLOSED / local`：新增 mixed import/repair token 生命周期、Windows adapter/contract、完整 unit/integration/smoke/lint、语法/ESLint、版本/冻结/diff 与提交后干净 HEAD packaged-inputs 均已通过。
+- `PROBE / exact CI`：普通非 force push 后必须由新 exact head 的 `smoke-test` 与 `build` 全部成功，首次失败永不视为被重复或本地成功代偿。
+- `BLOCK / review`：review thread 在代码、回归证据和新 exact head 建立前不得回复或 resolve。
+- `BLOCK / production`：application production 继续 disabled/legacy；本轮不改变资金主键、金额、币种、Workbook 输出或恢复终态红线。
+
+## 2026-09-04 正式发布 exact CI 证据收口
+
+### Decisions
+
+- 不接受 `smoke-test` job 的聚合 SUCCESS 代替关键步骤证据；合并前必须确认新 exact head 的 `Run release checks` 步骤实际为 `COMPLETED/SUCCESS`。
+- 保持冻结的 `.github/workflows/build-windows.yml`、R3 authority snapshot 与 validator 原样不动。替代发布准备分支使用 `codex/release-v3.2.1-prep-20260904`，不进入历史保留前缀 `codex/v3.2.1-*`，从而由既有默认门禁真实执行 release-check。
+- 替代分支从 PR #222 的已验证 exact head `d1f2677571c04166354ad7b0c8b5d0fcb548447f` 直接派生，只增加本证据记录；#222 不再作为可合并候选，待替代 PR 建立并核对同一 lineage 后再作远端收口。
+
+### Deviations
+
+- 第二轮 exact CI run `33758293767` 的 smoke job `100657983879` 与 build 均显示 SUCCESS，但步骤级 API 证明 `Run release checks` 为 `COMPLETED/SKIPPED`。历史同仓库 `codex/v3.2.1-*` 前缀规则把新的正式发布准备分支误归类为中间分支，旧绿灯不能用于合并。
+- 曾以未提交试改验证为 #222 增加精确 workflow allowlist；R3 release-evidence 定向回归立即拒绝 `unauthorizedFinalGuard` 与 `releaseCheckCondition` 漂移。该试改已用 `apply_patch` 完整撤销，不进入任何 commit 或远端 ref。
+- 改用替代分支/PR 是为同时满足“真实执行 release-check”和“冻结 release authority 不变”；不修改产品代码、生产 adapter、资金/恢复合同、版本元数据或 application production 状态。
+
+### Evidence
+
+- 合并前集中 GraphQL 审计 `/private/tmp/bbet-v321-pr-exact-ci-audit-20260903-210157.json` 为 `5906` bytes / SHA-256 `72e85503a6f18ea4a7488685fdd2a9709f4df86971a43ca7601359344426f32b`；PR #222 当时仍为 OPEN/non-draft、base `92380fd84471b061b7a84842be7da001aa82db87`、head `d1f2677571c04166354ad7b0c8b5d0fcb548447f`、MERGEABLE、无未解阻断 review。
+- `GET /actions/jobs/100657983879` 回读确认 exact head 与 run 精确，但 `Run release checks` 步骤结论为 `skipped`；后续 Windows adapter、SQLite teardown、panel alignment 与 build 成功均不代偿该缺口。
+- 未提交 workflow allowlist 试验的 Windows 合同测试正反例通过，但与冻结 R3 authority 的组合定向回归出现 `2` 个预期失败；撤销后必须重新证明 release-evidence、Windows workflow contract 与 metadata closeout 全绿。
+- 替代分支创建时 HEAD 精确为 `d1f2677571c04166354ad7b0c8b5d0fcb548447f`，原 #222 worktree 已恢复 clean，冻结 workflow 与合同测试相对该 HEAD 无差异。
+
+### Remaining Unknowns
+
+- `PROBE / replacement exact CI`：替代 PR 创建后，新 exact smoke job 必须显示 `Run release checks`、Windows adapter、SQLite teardown 与 panel alignment 全部实际成功，且下游 build 成功；聚合绿灯、旧 exact head 或本地绿灯均不代偿。
+- `PROBE / remote closeout`：替代 PR 建立并核对 lineage 后，#222 应以证据说明关闭且保留远端分支；不得误合并两个候选。
+- `BLOCK / production`：application production 继续 disabled/legacy；本次 CI 证据收口不授权启用 production。
+
+## 2026-09-04 replacement exact CI 与 review 收口
+
+### Decisions
+
+- replacement PR 仍保持冻结的 Windows workflow 与 R3 release authority 不变；本轮只修复 exact CI 暴露的测试时序缺陷，以及 review 指出的三处来源证据、磁盘预算和单文件拆分发布守恒缺口。
+- position import dispatcher 的生产心跳实现、`750ms` 默认间隔和真实计数不变；测试在观察到两个不虚增心跳后才发 COMPLETE，并保留 `2s` 有界失败兜底，避免 hosted Windows 负载把固定 `45ms` 测试终止误判为产品失败。
+- MPT spool reader 必须从 `rawJson` 的精确 33 字段和 manifest header 重新调用权威 `normalizeMptRow`，再与持久 normalized row 全量比较；不能只允许攻击者同步改 amount/fingerprint/descriptor 后通过。
+- admission 的 `5×source + 1MiB/file` 预算拆为可复用的单文件额度；writer 在每次写入前按实际 UTF-8 NDJSON bytes 扣减，超过已批准额度立即 fail closed 并沿既有 cleanup 路径清除当前文件 spool。批次固定 `64MiB` 余量仍保留，未降低预检要求。
+- `split-single` 结果必须满足 `matchedCount === dataRowCount`；header-only workbook 不能用非零 matched count 绕过 Main publisher 的业务回读。merge action 的多输入/输出计数语义不变。
+
+### Deviations
+
+- replacement exact run `33779057290` 确认 `Run release checks` 实际执行，但 Windows 单元测试在约 `54ms` 的同步提交窗口内只观察到不足两个 `10ms` 测试心跳；该结果证明原固定延迟断言受 runner 调度影响，不是 production dispatcher 计数或提交语义失败。
+- review thread `PRRT_kwDORiHOzM6e_4rP` 证明原 spool reader 虽校验 normalized fingerprint，却未把 normalized 财务字段重新绑定到同 envelope 的 raw source；增加权威派生比较，不新增替代金额或币种口径。
+- review thread `PRRT_kwDORiHOzM6e_4rY` 证明 gzip 压缩文件可让以 compressed source size 估算的 NDJSON spool 超出已批准磁盘预算；writer 改为强制执行 admission 已批准的逐文件上限，不接受无界解压放大。
+- review thread `PRRT_kwDORiHOzM6e_4rf` 证明 `split-single` 可声明 `dataRowCount=0, matchedCount=1` 并通过原 contract；增加相等守恒，不改变 writer 生成格式或正式文件发布流程。
+
+### Evidence
+
+- replacement exact 失败集中审计 `/private/tmp/bbet-v321-pr223-exact-ci-audit-20260904-004702.json` 为 `9915` bytes / SHA-256 `77dbf0a5f9dc7c039bbee82f4790330943d49f7f4b0a728424b74c56cef04f56`；#223 当时仍为 OPEN/non-draft、base `92380fd84471b061b7a84842be7da001aa82db87`、head `9817e40817c45ad9e7fca8bd026c4b15cec0a519`、MERGEABLE，三条 review thread 未解。
+- exact smoke job `100727939644` 完整日志 `/private/tmp/bbet-v321-pr223-exact-smoke-failure-33779057290-100727939644-20260904-004719.log` 为 `4258736` bytes / SHA-256 `24ffb8d4d0903731ce80ac7fbcf85fb9afed15a15a77e2af6e8dbc19a74b467c`；唯一失败为 `dispatcher 在 worker 同步提交期间发送不虚增计数的进度心跳`，后续关键步骤与 build 按门禁跳过，不能由旧 CI 或本地绿灯代偿。
+- official Node.js `22.18.0` 定向回归：心跳新时序 `1/1 PASS`；raw/normalized 联动篡改、gzip spool budget、per-file estimator 与 split-single 守恒 `20/20 PASS`。
+- official Node.js `22.18.0` 完整相关文件组合覆盖 position preflight、MPT E05-A/B/C 与 toolbox generation，共 `161/161 PASS`；包含真实 parser worker、single writer、receipt/hold/recovery、逐文件 cleanup、Main publisher、native generation worker 与 shutdown 生命周期。
+- official Node.js `22.18.0` exact-lock 完整 unit 为 `6189/6192 PASS`、`0 FAIL`、`3 Windows-only SKIP`；日志 `/private/tmp/bbet-v321-release-gated.wcheyK/worktree/logs/unit-tests/unit-20260904-005925.log`。
+- official Node.js `22.18.0` exact-lock 完整 integration 为 `51 scripts / 2455/2455 PASS`；其中 `toolbox-large-file-stream=50/50`、`toolbox-large-split-multi-sheet=31/31`、`pre-fund-reconciliation-side-db-parity=69/69`。runner 的耗时表机械改写已用 `apply_patch` 恢复，`rules/integration-test-policy.md` 精确回到 SHA-256 `65716ba574d1139d72a1ca96f45ebaa4f85efa1f8ebf3f3bc81e8f0ce1edb74e`。
+- `npm run smoke`、`npm run lint`、本轮 `8` 个 changed JavaScript 文件的 Node.js `22.18.0` `node --check` 与定向 ESLint、`git diff --check` 均通过。
+- 修复提交 `7b1a25241f289077819fd734a242fad888b6658a` 创建后，干净 HEAD 的 `npm run check:packaged-inputs` 通过，`build.files` `9` 条覆盖范围与 HEAD 一致。
+- `/check-vars` 只读清单命中 `PreFundReconciliationService` / MPT parser 风险敏感资金范围，以及 position import 进度真实性和 toolbox 行级输出完整性。复核口径为：raw source 派生保持现有金额/币种/fingerprint 单一真值；超预算只 fail closed 且不留 spool；每条 split-single 数据行保持单一输出去向；production 继续 false/legacy。未执行本地 `npm run check:vars` 或 `npm run scan:vars`。
+
+### Remaining Unknowns
+
+- `CLOSED / local`：changed-JS 语法/ESLint、完整 unit/integration/smoke/lint、策略文件恢复与修复提交后 clean-HEAD packaged-inputs 均已完成。
+- `PROBE / new exact CI`：完成本地证据和普通 non-force push 后，新 exact head 必须真实执行 release-check 与后续三个 Windows contract 步骤，且 smoke/build 全部成功；本次失败永久保留，不作代偿。
+- `BLOCK / review`：三条线程只能在代码、完整回归和新 exact head 建立后以逐项证据回复并 resolve，随后重新查询确认无阻断 review。
+- `BLOCK / production`：application production 继续 disabled/legacy；本轮不授权启用 production，也不改变金额、币种、业务主键或 Workbook 内容。
+
+## 2026-09-04 main exact forward-fix
+
+### Decisions
+
+- 从失败的 exact `main@95bfe89670eeb14f51cac1e0269ee5b9fd4a7d56` 新建 `codex/release-v3.2.1-main-forward-fix-20260904`，只走前向 PR；不改写/回退 main，不 rerun 旧 run，也不 dispatch workflow。
+- Single Writer 继续在每个 unit 结束时立即删除该 file 的 spool；共享 `job/mpt/task-staging` 父目录只由严格有序的最后一个 file unit 尝试删除。中间 parser-error 不再删除仍可能被后续并发 Parser 创建/使用的父目录。
+- Main 对取消、transport interruption 和未转移 ownership 文件的清理屏障保持原样；金额、币种、业务主键、row disposition、receipt/Hold、Workbook 与 production gate 均不改变。
+
+### Assumptions
+
+- `createSingleWriterSession` 已用连续 `fileIndex` 强制单 Writer 有序消费；最后一个 unit 可开始意味着所有输入位置的 parser outcome 已发布，因此此时再删除共享父目录不会与未来 Parser 建目录并发。
+
+### Deviations
+
+- PR #223 exact tree 与 merge commit tree 完全相同，但 main exact run 的 `valid+symlink+valid` 第三个有效文件失败。现有 CI 断言只输出状态、没有第三项安全错误码；不能把该差异归类为测试抖动。
+- 确定性生命周期探针证明：旧实现处理完中间 parser-error 后会删除空的共享 job 目录，为尚未执行 `createDirectoryLayer` 的后续 Parser 打开删除/重建竞态。本次因此增加一个 Writer 层回归，并最小调整父目录 cleanup 时机。
+
+### Evidence
+
+- 远端 `main` 精确为 `95bfe89670eeb14f51cac1e0269ee5b9fd4a7d56`；其 tree 与 PR exact head `2318799f69f5ba0debf1ee84f18241121dbd96d9` 均为 `17d259c17af5614e93b94345ab4e0e70a2577f8b`，排除内容漂移。
+- main exact run `33787243083` / smoke job `100754871168` 唯一失败为 `mpt-import-e05-c.test.js:706`，完整日志 `/private/tmp/bbet-v321-main-smoke-failure-33787243083-100754871168-20260904-021358.log` 为 `4259002` bytes / SHA-256 `277af34fedcce7e426ec2d682d53d8222931d4cb270200adc2b5f593d07a6bb3`。
+- 新回归在产品修复前稳定以 `jobDir false !== true` 失败；将共享父目录 cleanup 延后到最后 file 后，新回归与原 `valid+symlink+valid` 用例定向组合为 `2/2 PASS`（official Node.js `22.18.0`）。
+- MPT e05-a/b/c 组合为 `103/103 PASS`；完整 unit 为 `6190/6193 PASS`、`0 FAIL`、`3 Windows-only SKIP`，日志 `/private/tmp/bbet-v321-main-forward-fix.EKUyil/worktree/logs/unit-tests/unit-20260904-034221.log`。
+- 完整 integration 为 `51 scripts / 2455/2455 PASS`，`npm run smoke`、`npm run lint`、changed-JS `node --check`/ESLint 与 `git diff --check` 均通过；integration policy 已恢复原 SHA-256 `65716ba574d1139d72a1ca96f45ebaa4f85efa1f8ebf3f3bc81e8f0ce1edb74e`。
+- 最小修复提交为 `abcd71dafc236a31823506f2d01ce7b9eb8c08a4`，直接父为失败的 exact `main@95bfe89670eeb14f51cac1e0269ee5b9fd4a7d56`；该提交后的 clean-HEAD `npm run check:packaged-inputs` 通过。
+- `check-vars` 只读扫描命中 `PreFundReconciliationService` / MPT risk-sensitive 范围：本差异不改 source snapshot、金额、币种、匹配键、row disposition、receipt/Hold、side DB 数据或 Workbook，仅收紧中间失败与后续有效文件之间的 spool 生命周期隔离。
+- 资金盲区复核：`fileIndex`/结果顺序与等长守恒不变；单文件失败继续 fail-closed，后续有效文件不再受共享目录提前清理污染；per-file cleanup、取消/中断后的 Main-owned cleanup 与审计错误结果均保留。
+
+### Remaining Unknowns
+
+- `CLOSED / root cause`：共享父目录被中间错误 unit 提前删除的生命周期窗口已有确定性 red/green 证据；CI 旧日志缺少第三项错误码不再阻止最小前向修复。
+- `CLOSED / full local`：MPT 组合、完整 unit/integration/smoke/lint、changed-JS 语法/ESLint、diff 与 clean-HEAD packaged-inputs 均已通过。
+- `PROBE / remote`：新 PR 的 exact smoke/build 和关键 Windows steps、合并后 main exact 均必须成功；旧 PR/main 绿灯或本地绿灯不代偿。
+- `BLOCK / production`：application production 继续 disabled/legacy；本修复不授权 production，也不得改变资金口径或恢复红线。

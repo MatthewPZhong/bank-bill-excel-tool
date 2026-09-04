@@ -1,5 +1,20 @@
 # v3.2.4 Release Metadata Closeout — Preflight
 
+## 2026-09-04 正式发布准备更新
+
+- Goal：把冻结候选 `e1c31c4229ce68b18b82eca84cacb75f1e1dc889` 与已完成正式发布的 v3.2.3 main `5574a0e63aaa530db6669809b645f6d8397082d5` 通过自然 merge 汇合，在不改写历史证据的前提下形成唯一 v3.2.4 发布候选。
+- Context：v3.2.0～v3.2.3 已逐版经受保护 PR、annotated tag、Windows Release workflow 与四资产回读完成正式技术发布；`MatthewPZhong` 已另行确认本次资金、恢复、真实业务样本及稳定窗口人工验收通过。
+- Constraints：候选必须是双亲自然 merge，禁止 rebase/cherry-pick/force；生产策略继续 disabled/legacy；金额、币种、方向、匹配、receipt、Hold、Workbook 与发布 owner 不变；冻结 R3.2.4 evidence 的 `PENDING_HUMAN_REVIEW` / `NOT_RUN` 保持原样；本地不运行 `release-check`、`check:vars` 或 `scan:vars`。
+- Done when：自然 merge 冲突逐项解释并验证；package/三份发布文档/冻结 Spec 与 TechDoc 一致；Node 22.18 exact-lock 定向、完整 unit/integration/smoke/lint 与静态检查通过；只读盲区/重要变量/资金复核无红线；随后才允许普通 push、PR、exact CI、review、精确普通 merge、main CI、唯一 annotated tag 与 Release 审计。
+
+### 当前关键未知
+
+| 未知 | 类型 | 当前证据 | 决定 |
+| --- | --- | --- | --- |
+| v3.2.4 与最终 v3.2.3 在启动恢复协调器上的并行演进能否组合 | PROBE | 冲突一侧增加 action-specific task authority/observation anchor，另一侧增加默认确定性 Hold resolution | 同时保留两组能力，以恢复合同定向测试和全量测试判定；失败即停止。 |
+| 三份发布文档如何同时保留历史 R3 快照与当前人工授权 | PROBE | 历史 JSON 固定为 PENDING/NOT_RUN；当前用户授权是后续独立事实 | 历史快照不修改；发布候选文档明确分层，不把自动测试写成人工 PASS。 |
+| production 是否随版本发布启用 | BLOCK | 6 个 v3.2.4 action 的冻结策略均为 false/legacy/0 | 不启用；任何漂移立即停止。 |
+
 ## Task Brief
 
 - Goal：让最终 v3.2.4 分支携带正确的 package 元数据、权威 Spec/TechDoc 与三份同步发布文档。

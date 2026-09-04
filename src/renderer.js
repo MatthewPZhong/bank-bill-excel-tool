@@ -3954,13 +3954,49 @@ function legacyCreateManualBalanceSeedDialog(prompt, draft = {}) {
       dateInput.type = 'text';
     }
   });
+  const doneBtn = dialog.querySelector('[data-action="done"]');
+  let saveInProgress = false;
+
+  function currentDraft() {
+    return { billDate: dateInput.value, endBalance: amountInput.value };
+  }
+
+  function showBalanceSeedSaveFailure(error) {
+    const message = escapeHtml(error?.message || String(error || '未知错误'));
+    const preservedDraft = currentDraft();
+    closeModal();
+    openModal(createAlertDialog(`余额补录失败：${message}`, {
+      onConfirm: () => openModal(legacyCreateManualBalanceSeedDialog(prompt, preservedDraft))
+    }));
+  }
+
+  async function saveBalanceSeedWithFeedback(request) {
+    if (saveInProgress) return null;
+    saveInProgress = true;
+    doneBtn.disabled = true;
+    try {
+      const result = await window.desktopApi.files.saveBalanceSeed(request);
+      if (!result || typeof result !== 'object') {
+        throw new Error('余额补录未返回有效结果');
+      }
+      return result;
+    } catch (error) {
+      showBalanceSeedSaveFailure(error);
+      return null;
+    } finally {
+      saveInProgress = false;
+      doneBtn.disabled = false;
+    }
+  }
+
   dialog.querySelector('.icon-close').addEventListener('click', closeModal);
-  dialog.querySelector('[data-action="done"]').addEventListener('click', async () => {
+  doneBtn.addEventListener('click', async () => {
     const payload = {
       billDate: dateInput.value,
       endBalance: amountInput.value
     };
-    const result = await window.desktopApi.files.saveBalanceSeed(payload);
+    const result = await saveBalanceSeedWithFeedback(payload);
+    if (!result) return;
 
     if (result.status === 'confirm-overwrite') {
       openModal(
@@ -3969,11 +4005,16 @@ function legacyCreateManualBalanceSeedDialog(prompt, draft = {}) {
           confirmText: '确认覆盖',
           cancelText: '取消',
           onConfirm: async () => {
-            const overwriteResult = await window.desktopApi.files.saveBalanceSeed(
+            const overwriteResult = await saveBalanceSeedWithFeedback(
               window.__rendererDialogs.buildBalanceSeedConfirmationRequest(result.contextId)
             );
+            if (!overwriteResult) return;
             closeModal();
             applyStatementResult(overwriteResult);
+            if (['error', 'failed'].includes(overwriteResult.status)
+                && !overwriteResult.manualBalancePromptReady) {
+              openModal(createAlertDialog(overwriteResult.message || '余额补录失败'));
+            }
           }
         })
       );
@@ -3983,8 +4024,8 @@ function legacyCreateManualBalanceSeedDialog(prompt, draft = {}) {
     closeModal();
     applyStatementResult(result);
 
-    if (result.status === 'error' && !result.manualBalancePromptReady) {
-      openModal(createAlertDialog(result.message));
+    if (['error', 'failed'].includes(result.status) && !result.manualBalancePromptReady) {
+      openModal(createAlertDialog(result.message || '余额补录失败'));
     }
   });
 

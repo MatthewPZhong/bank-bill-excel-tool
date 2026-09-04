@@ -62,11 +62,11 @@ test('v3.2.1 closeout同步当前版本、冻结文档、前序收口与三份�
 
   const currentChangelog = section(
     changelog,
-    '## 3.2.1 - 2026-08-31（版本分支技术收口，未发布）'
+    '## 3.2.1 - 2026-09-03（正式发布）'
   );
   const currentHistory = section(
     history,
-    '## v3.2.1（2026-08-31，版本分支技术收口，未发布）'
+    '## v3.2.1（2026-09-03，正式发布）'
   );
   const historicalGuide = paragraph(
     guide,
@@ -82,16 +82,19 @@ test('v3.2.1 closeout同步当前版本、冻结文档、前序收口与三份�
     assert.match(document, /Workbook|Excel/);
     assert.match(document, /production.*关闭|生产仍关闭/s);
     assert.match(document, /Windows/);
-    assert.match(document, /人工复核|人工门禁/);
+    assert.match(document, /人工验收|人工复核|人工门禁/);
+    assert.match(document, /Issue #220|发布负责人/);
     assert.doesNotMatch(
       document,
-      /production(?:\s|`)已启用|资金[^\n]{0,40}(?:已经|已)通过人工复核|资金[^\n]{0,40}(?:人工复核|门禁)：?\s*PASS/
+      /production(?:\s|`)已启用|production enablement 已启用|effective worker 已启用/
     );
   }
 
-  assert.match(currentChangelog, /不合并 `main`/);
-  assert.match(currentChangelog, /不创建 tag/);
-  assert.match(currentChangelog, /`release-check`、`check-vars`、`scan:vars`.*跳过/s);
-  assert.match(changelog, /^## 3\.2\.0 - 2026-08-31（版本分支技术收口，未发布）$/m);
-  assert.match(history, /^## v3\.2\.0（2026-08-31，版本分支技术收口，未发布）$/m);
+  assert.match(currentChangelog, /受保护 PR/);
+  assert.match(currentChangelog, /annotated tag/);
+  assert.match(currentChangelog, /内置 `release-check`/);
+  assert.match(currentChangelog, /`scan:vars` \/ `check:vars` 未运行/);
+  assert.match(currentChangelog, /run `33807861470`/);
+  assert.match(changelog, /^## 3\.2\.0 - 2026-09-03（正式发布）$/m);
+  assert.match(history, /^## v3\.2\.0（2026-09-03，正式发布）$/m);
 });

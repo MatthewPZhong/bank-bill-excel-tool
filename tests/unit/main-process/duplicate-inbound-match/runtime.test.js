@@ -68,12 +68,16 @@ function startupGateDescriptor() {
   return { contractVersion: 1, startupRecoveryReady: true };
 }
 
-function requiredWorkerDurableCoordinator() {
+function requiredWorkerDurableCoordinator(calls = null) {
+  const record = (name) => { if (calls) calls.push(name); };
   return Object.freeze({
-    prepareAndAck() { throw new Error('E07-A service command不发布E07-B live receipt'); },
-    observeReceipt() { throw new Error('unexpected'); },
-    settleCommitted() { throw new Error('unexpected'); },
-    resolveUncertain() { throw new Error('unexpected'); }
+    prepareAndAck() {
+      record('prepareAndAck');
+      throw new Error('Duplicate service command不发布Platform critical:ready');
+    },
+    observeReceipt() { record('observeReceipt'); throw new Error('unexpected'); },
+    settleCommitted() { record('settleCommitted'); throw new Error('unexpected'); },
+    resolveUncertain() { record('resolveUncertain'); throw new Error('unexpected'); }
   });
 }
 
@@ -98,7 +102,8 @@ test('真实native Worker跨两条import复用单Service、crash后exact receipt
   const row = (bizId) => BANK_STATEMENT_FIELDS.map((field) => field === 'BizId' ? bizId : '');
   writeWorkbook(bankOne, BANK_STATEMENT_FIELDS, '渠道对账单', [row('BIZ-1')]);
   writeWorkbook(bankTwo, BANK_STATEMENT_FIELDS, '渠道对账单', [row('BIZ-2'), row('BIZ-3')]);
-  const coordinator = requiredWorkerDurableCoordinator();
+  const coordinatorCalls = [];
+  const coordinator = requiredWorkerDurableCoordinator(coordinatorCalls);
   const nativeWorkerAdapter = createWorkerThreadAdapter();
   const workerHandles = [];
   const capturingWorkerAdapter = Object.freeze({
@@ -165,6 +170,8 @@ test('真实native Worker跨两条import复用单Service、crash后exact receipt
   assert.deepEqual(fs.readdirSync(sideDirectory).sort(), beforeRetry,
     'crash后新generation保留旧receipt/side证据并追加新bundle');
   assert.equal(workerHandles.length, 2, 'crash后必须cold-start新Worker generation');
+  assert.deepEqual(coordinatorCalls, [],
+    'Duplicate零business-unit Service命令只使用模块内receipt/recovery，不进入Platform critical coordinator');
   const report = await runtime.shutdown({ timeoutMs: 10000 });
   shutdown = true;
   assert.deepEqual(report.leakedTransports, []);

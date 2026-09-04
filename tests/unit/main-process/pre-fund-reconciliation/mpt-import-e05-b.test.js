@@ -754,6 +754,107 @@ test('exact Hold gate：同batch import/repair/delete阻断，同月不同batch�
   assert.throws(() => gate.assertAnyMutationAllowed(), { code: 'RECOVERY_HOLD_ACTIVE' });
 });
 
+test('Hold scope预检跳过不可识别文件，mixed import仍逐文件失败并继续有效文件', async () => {
+  const missingPath = path.join(tempRoot, 'MPT_INBOUND_GATEWAY_20260708_604.txt');
+  const invalidPath = writeFile('605', [inboundRow()]);
+  fs.writeFileSync(invalidPath, 'invalid-header\n', 'utf8');
+  const validBatch = 'MPT_INBOUND_20260708_SCOPE_VALID';
+  const validPath = writeFile('606', [
+    inboundRow({ batchNo: validBatch, reconId: 'SCOPE-VALID' })
+  ], validBatch);
+  const checkedScopes = [];
+  const gate = createPreFundMptHoldGate({
+    readRepository: { listActiveRecoveryHolds: () => [] },
+    recoveryHoldGate: {
+      assertNoRecoveryHold({ conflictScopeKey }) { checkedScopes.push(conflictScopeKey); }
+    }
+  });
+
+  const inspected = await gate.inspectFiles([missingPath, invalidPath, validPath]);
+  assert.deepEqual(inspected.identities, [{
+    sourceType: 'MPT_INBOUND_GATEWAY',
+    sourceBatch: validBatch
+  }]);
+  assert.deepEqual(inspected.conflictScopeKeys, [derivePreFundMptConflictScopeKey({
+    sourceType: 'MPT_INBOUND_GATEWAY',
+    sourceBatch: validBatch
+  })]);
+  assert.deepEqual(checkedScopes, inspected.conflictScopeKeys);
+
+  const service = createPreFundReconciliationService({
+    userDataDir,
+    database: mirrorDatabase(),
+    templatePath: 'unused.xlsx'
+  });
+  const result = await service.importMptFiles([missingPath, invalidPath, validPath], {
+    producerTaskRunId: 'mixed-hold-preflight-task',
+    identityGate: (identity) => gate.assertIdentities([identity])
+  });
+  assert.deepEqual(result.results.map((item) => item.status), ['failed', 'failed', 'ok']);
+  assert.deepEqual(result.results.map((item) => item.code || ''), [
+    'MPT_FILE_READ_FAILED',
+    'MPT_HEADER_FIELD_COUNT',
+    ''
+  ]);
+  assert.equal(result.successCount, 1);
+  assert.equal(result.failedCount, 2);
+  assert.equal(service.listTempBatches()[0].sourceBatch, validBatch);
+});
+
+test('repair Hold预检跳过缺失源，保留其token并让同批可读repair完成终态删除', async () => {
+  const missingBatch = 'MPT_INBOUND_20260708_REPAIR_MISSING';
+  const repairedBatch = 'MPT_INBOUND_20260708_REPAIR_VALID';
+  const missingPath = writeFile('607', [
+    inboundRow({ batchNo: missingBatch, reconId: 'MISSING-VALID-ROW' }),
+    inboundRow({ batchNo: missingBatch, reconId: 'MISSING-BAD-ROW', amount: 'bad' })
+  ], missingBatch);
+  const repairedPath = writeFile('608', [
+    inboundRow({ batchNo: repairedBatch, reconId: 'REPAIRED-VALID-ROW' }),
+    inboundRow({ batchNo: repairedBatch, reconId: 'REPAIRED-BAD-ROW', amount: 'bad' })
+  ], repairedBatch);
+  const service = createPreFundReconciliationService({
+    userDataDir,
+    database: mirrorDatabase(),
+    templatePath: 'unused.xlsx'
+  });
+  const initial = await service.importMptFiles([missingPath, repairedPath], {
+    producerTaskRunId: 'repair-hold-seed-task'
+  });
+  assert.deepEqual(initial.results.map((item) => item.code), ['MPT_ROW_ERRORS', 'MPT_ROW_ERRORS']);
+  const repairTokens = initial.results.map((item) => item.repairToken);
+  const failures = service.resolveMptImportFailures(repairTokens);
+  fs.rmSync(missingPath);
+
+  const gate = createPreFundMptHoldGate({
+    readRepository: { listActiveRecoveryHolds: () => [] },
+    recoveryHoldGate: { assertNoRecoveryHold() {} }
+  });
+  const inspected = await gate.inspectFiles([missingPath, repairedPath], failures);
+  assert.deepEqual(inspected.identities, [{
+    sourceType: 'MPT_INBOUND_GATEWAY',
+    sourceBatch: repairedBatch
+  }]);
+  await assert.rejects(() => gate.inspectFiles([repairedPath], [{
+    sourceType: 'MPT_INBOUND_GATEWAY',
+    sourceBatch: 'MPT_INBOUND_20260708_DIFFERENT'
+  }]), { code: 'PREFUND_REPAIR_SCOPE_IDENTITY_MISMATCH' });
+
+  const result = await service.retryMptImportFailures(repairTokens, {
+    filePaths: [missingPath, repairedPath],
+    producerTaskRunId: 'repair-hold-retry-task',
+    identityGate: (identity) => gate.assertIdentities([identity])
+  });
+  assert.deepEqual(result.results.map((item) => item.status), ['failed', 'ok']);
+  assert.equal(result.results[0].code, 'MPT_FILE_READ_FAILED');
+  assert.equal(result.results[0].repairToken, repairTokens[0]);
+  assert.equal(Object.hasOwn(result.results[1], 'repairToken'), false);
+  assert.equal(service.resolveMptImportFailures([repairTokens[0]]).length, 1);
+  assert.throws(() => service.resolveMptImportFailures([repairTokens[1]]), {
+    code: 'pre-fund-mpt-failure-token-expired'
+  });
+  assert.equal(service.listTempBatches()[0].sourceBatch, repairedBatch);
+});
+
 test('date-range Hold gate与legacy删除共享trim后的权威range，held batch不可被空白payload绕过', async () => {
   const service = createPreFundReconciliationService({
     userDataDir,
@@ -1080,6 +1181,105 @@ test('Single Writer只消费validated spool、fileIndex递增且ACK后protected�
     'critical:ready', 'commit:receipt', 'unit:done', 'job:done'
   ]);
   assert.equal(fs.existsSync(mptSpoolPaths(input).manifestReady), false);
+});
+
+test('Single Writer在中间parser失败后保留共享job目录，直到末file完成再清理父目录', async () => {
+  const parentOperationKey = 'writer-parent-lifetime';
+  const firstPath = writeFile('704', [inboundRow({ reconId: 'PARENT-LIFETIME-1' })]);
+  const thirdBatch = 'MPT_INBOUND_20260708_PARENT_LIFETIME_3';
+  const thirdPath = writeFile('706', [
+    inboundRow({ batchNo: thirdBatch, reconId: 'PARENT-LIFETIME-3' })
+  ], thirdBatch);
+  const firstInput = spoolInput(firstPath, parentOperationKey, 0);
+  const middleInput = {
+    ...firstInput,
+    fileIndex: 1,
+    source: {
+      filePath: path.join(tempRoot, 'MPT_INBOUND_GATEWAY_20260708_705.txt'),
+      sourceSnapshot: null
+    }
+  };
+  const thirdInput = spoolInput(thirdPath, parentOperationKey, 2);
+  await writeMptFileSpool(firstInput);
+  writeParserOutcome(firstInput, { kind: 'spool' });
+  writeParserOutcome(middleInput, {
+    kind: 'parser-error',
+    fileResult: {
+      status: 'failed',
+      fileName: path.basename(middleInput.source.filePath),
+      code: 'PREFUND_SPOOL_CONTRACT_INVALID',
+      message: 'source.sourceSnapshot非法',
+      detailLines: []
+    }
+  });
+
+  const events = [];
+  let session;
+  session = createSingleWriterSession({
+    actionKey: 'pre-fund:mpt-import',
+    jobInput: {
+      fileCount: 3,
+      parentOperationKey,
+      producerTaskRunId: 'writer-parent-lifetime-task'
+    },
+    store: {
+      async importValidatedSpool(_spool, options) {
+        const filePath = options.fileIndex === 0 ? firstPath : thirdPath;
+        return {
+          status: 'imported',
+          batch: {
+            sourceFileName: path.basename(filePath),
+            sourceType: 'MPT_INBOUND_GATEWAY',
+            rowCount: 1,
+            excludedRowCount: 0
+          },
+          receipt: {
+            id: options.fileIndex + 1,
+            actionKey: 'pre-fund:mpt-import',
+            operationKey: options.operationKey,
+            producerTaskRunId: 'writer-parent-lifetime-task',
+            batchId: options.fileIndex + 1,
+            outcomeKind: 'inserted'
+          }
+        };
+      }
+    },
+    emit(operation, payload, unitId) {
+      events.push({ operation, payload, unitId });
+      if (operation === 'critical:ready') {
+        queueMicrotask(() => session.acknowledge(unitId, {
+          intentId: `parent-lifetime-intent-${unitId}`,
+          fileOperationKey: payload.critical.fileOperationKey
+        }));
+      }
+    }
+  });
+
+  await session.startUnit({
+    kind: 'parser-outcome', fileIndex: 0, ...deriveFileIdentity(parentOperationKey, 0),
+    spool: firstInput, datasetId: 'writer-parent-lifetime-dataset-1'
+  }, 'file:000000');
+  await session.startUnit({
+    kind: 'parser-outcome', fileIndex: 1, ...deriveFileIdentity(parentOperationKey, 1),
+    spool: middleInput, datasetId: 'writer-parent-lifetime-dataset-2'
+  }, 'file:000001');
+
+  assert.equal(
+    fs.existsSync(mptSpoolPaths(firstInput).jobDir),
+    true,
+    '中间file清理不得删除尚有后续Parser会使用的共享job目录'
+  );
+
+  await writeMptFileSpool(thirdInput);
+  writeParserOutcome(thirdInput, { kind: 'spool' });
+  await session.startUnit({
+    kind: 'parser-outcome', fileIndex: 2, ...deriveFileIdentity(parentOperationKey, 2),
+    spool: thirdInput, datasetId: 'writer-parent-lifetime-dataset-3'
+  }, 'file:000002');
+
+  const parentResult = events.find((event) => event.operation === 'job:done').payload.result;
+  assert.deepEqual(parentResult.results.map((item) => item.status), ['ok', 'failed', 'ok']);
+  assert.equal(fs.existsSync(firstInput.taskStagingDir), false);
 });
 
 test('Single Writer active pre-critical安全点接受shutdown cancel并清理，未进入store', async () => {

@@ -1,5 +1,28 @@
 # v3.2.4 Release Metadata Closeout — Implementation Notes
 
+## 2026-09-04 正式发布准备记录
+
+### Current Baseline
+
+- 冻结候选：`e1c31c4229ce68b18b82eca84cacb75f1e1dc889`。
+- 已发布前序 main：`5574a0e63aaa530db6669809b645f6d8397082d5`。
+- 隔离 worktree：`/private/tmp/bbet-v324-release-prep.KnYUSE/worktree`；分支：`codex/release-v3.2.4-prep-20260904`。
+- 合并策略：候选为第一父、最终 v3.2.3 main 为第二父的 `git merge --no-ff`；不得重写历史。
+
+### Current Decisions / Evidence
+
+| 项目 | 决定与证据 | 行为影响 |
+| --- | --- | --- |
+| 启动恢复协调器冲突 | 保留 v3.2.4 的 `resolveTaskState`、action-specific authority 与 `reserveObservationAnchor`，同时保留 v3.2.3 的 `usesDefaultTransitionPlan` 与 `defaultHoldResolutionRequest` | 自定义 action plan 仍负责 JPM committed-result-lost 语义；默认恢复链只在确定性 completed/not-committed/compensated 结果下解除同源 Hold。 |
+| 三份发布文档冲突 | v3.2.4 置于 v3.2.3 之前并改为 2026-09-04 正式发布候选；历史 R3 evidence 与当前人工授权分层记录 | 不改写 PENDING/NOT_RUN 历史快照，不把生产 capability 表述为 production enabled。 |
+| 第一轮定向验证 | Node 25 静态语法检查及 metadata/recovery/JPM durable 定向集合 `43/43 PASS` | 只作为冲突消解的快速反馈；正式证据必须使用 Node 22.18 exact-lock 重跑。 |
+
+### Current Remaining Unknowns
+
+- Node 22.18 exact-lock 的定向与全量测试尚未完成。
+- 提 PR 前 blindspot-pass、check-vars 只读扫描与 reconciliation-blindspot-pass 尚待基于最终 exact diff 重跑。
+- PR exact CI/review、main exact CI、tag/Release/四资产与 production readback 尚未发生；任何一步不得由旧证据代偿。
+
 ## Baseline
 
 - Goal/spec：顶层 `changes/3.2.4/spec.md`、`techdoc.md` 逐字节同步冻结 v3.2.4 合同，并在最终版本分支收口元数据与发布文档。

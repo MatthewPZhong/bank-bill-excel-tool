@@ -3,8 +3,8 @@
 ## Baseline
 
 - Goal/spec：顶层 `changes/3.2.3/spec.md`、`techdoc.md` 逐字节同步冻结 v3.2.3 合同，并在最终版本分支收口元数据与发布文档。
-- Initial plan：在最终本地 R3.2.3 evidence 候选上重放纯 metadata 提交；远端业务 PR 完成后再核对精确 ancestry，未满足前保持仅本地。
-- Done when：版本、文档、历史 evidence、当前测试与人工边界均有可审计证据，且 main/tag/production 未修改。
+- Initial plan：以冻结 candidate `d12abe7c…` 为第一父，仅通过 natural merge 把已正式发布的 v3.2.2 最终 `main=c2d23f59…` 作为第二父传播，再经受保护 PR、main exact CI、唯一 annotated tag 与 Windows Release workflow 串行发布。
+- Done when：版本、文档、历史 evidence、当前测试与人工边界均有可审计证据；PR exact 与合并后 main exact 门禁通过；tag/Release/四资产完成独立回读；application production 始终 disabled/legacy。
 
 ## Decisions
 
@@ -13,12 +13,17 @@
 | 版本元数据只在最终 v3.2.3 分支收口为 `3.2.3` | 各版本必须保留自己的真实版本号 | 提前把 v3.2.2～v3.2.5 统一写成同一版本 | 后续版本各自独立 bump。 |
 | 顶层 Spec/TechDoc 逐字节同步冻结来源 | 防止 metadata 节点静默改写资金、恢复或生产合同 | 在顶层副本润色或合并旧文档 | 合同 hash 可独立复验。 |
 | R3.2.3 exact evidence 与当前 metadata authority 分层 | 原 evidence validator 锁定 exact parent/branch/worktree/package 事实 | 放宽旧 validator 让任意后续 commit 伪装为原证据 | 历史 head 原样复验；当前版本由独立 closeout 测试证明。 |
-| 文档只声明 capability，不声明 production ready | snapshot 明确 production legacy/0，Windows/资金/恢复仍 PENDING/NOT_RUN | 用自动测试代偿人工门禁 | production enablement 继续 false。 |
+| 文档只声明 capability，不声明 production ready | 历史 snapshot 明确 production legacy/0，且其 PENDING/NOT_RUN 事实不可篡改；当前技术 Release authority 来自发布负责人后续明确人工验收与授权 | 用自动测试改写历史 snapshot 或启用 production | 允许本次技术 Release，但 production enablement 继续 false。 |
 | NewAccount heartbeat 测试改用可控 copy gate + 一次真实 timer turn | 全量并发运行时固定 `60ms/5ms/≥5 ticks` 只观察到 2 ticks；该断言混入机器调度吞吐，不能稳定证明“copy await 不阻塞 event loop” | 放宽 tick 数或把偶发失败当作环境噪声 | 保留真实 timer heartbeat、post-copy cancel 与 staging 清理断言，同时移除墙钟吞吐假设；生产代码零变化。 |
+| 最终版本链只用 natural merge 传播 | 冻结 candidate 与已发布 v3.2.2 共同祖先为 `a5af61ea…`；candidate-first/main-second 能同时保留候选血缘和已发布修复 | rebase、cherry-pick、历史改写或反向父序 | merge commit 必须保持 parents=`[d12abe7c…,c2d23f59…]`。 |
+| 三份发布文档冲突按版本链语义合并 | 产品代码无内容冲突；文档需同时保留 v3.2.3 capability、v3.2.2 已发布事实和当前技术发布授权 | 选择 ours/theirs 整体覆盖 | 不回退 v3.2.2 修复与 Release 历史，也不把 v3.2.3 提前写成已发布。 |
+| 历史 exact evidence 的临时克隆恢复冻结 tag refs 快照 | 当前真实仓库在历史 evidence 之后新增了 v3.2.0～v3.2.2 annotated tags；继承这些 refs 会先触发 `GIT_TAG_REFS_INVALID`，掩盖原始 duplicate-key 反例 | 放宽 validator 的 25 refs/hash、删除真实仓库 tags 或改写历史 snapshot | 仅在测试私有临时 clone 删除后续 `v3.2.x` refs，并强制回读 25 refs 与冻结 SHA-256 `94a09eb7…`；validator、历史提交与真实 refs 不变。 |
+| v3.2.2 closeout 回归锁定正式发布事实 | v3.2.2 已由 PR #225、annotated tag 与 Release run 完整终审，后续版本测试不能继续要求“正式发布候选”标题 | 把已发布文档改回候选或删除前序测试 | 测试改为验证正式发布标题、main/tag/run 与四资产类别；资金与 production 断言保持不变。 |
+| 重要变量只读扫描不直接改清单 | 用户永久边界禁止本地 `check:vars`/`scan:vars`；skill 规定新升格条目需人工审批 | 绕过边界运行脚本，或未经审批改写 `rules/important-variables.md` | 逐行读完清单并以 exact diff 手工扫描；现有命中逐项复核，新增跨层 authority 仅列为升格候选。 |
 
 ## Assumptions
 
-无。远端 PR 的 CI、最终 tip 与 ancestry 均不作假设，继续作为 `PROBE` 项现场核对。
+无。远端 PR/main exact CI、最终 tip、tag 与 Release 资产均不作假设，继续作为 `PROBE` 项现场核对。
 
 ## Deviations
 
@@ -26,6 +31,9 @@
 | --- | --- | --- | --- | --- |
 | 业务 PR 合并时同步版本元数据 | 增加独立 metadata closeout 节点 | 业务分支仍保留历史 `3.1.14`，三份发布文档未收口 | 不改业务行为，只补版本 authority | 不适用；冻结 Spec 未变 |
 | 完整 unit 只需重跑验证 metadata | 首轮全量暴露 NewAccount heartbeat 墙钟计数竞态，改成可控 async gate 后重跑 | 高并发下 `60ms` 延迟不保证产生至少 5 个 `5ms` interval tick | 仅稳定测试 harness，不改变 copy/cancel/Publisher 合同 | 不适用；业务 Spec 未变 |
+| 等待旧叠栈 tip 后重放纯 metadata | 以冻结 `d12abe7c…` 为第一父，自然合并已发布 `main=c2d23f59…` | v3.2.2 正式发布包含候选分叉后完成的必要修复与发布文档事实 | 产品代码由 Git 自动合并；仅三份发布文档需语义解冲突 | 不适用；冻结 Spec/TechDoc hash 未变 |
+| 历史 exact suite 直接复用当前仓库全部 tags | wrapper 在临时 clone 内先恢复历史 25-tag authority 快照再执行 exact suite | v3.2.0～v3.2.2 正式发布后，当前 28-tag refs 与冻结历史 hash 必然不同 | 防止后续合法 release refs 污染历史 fixture；仍以 exact count/hash fail closed | 不适用；历史 validator 与 snapshot 未变 |
+| 首轮全量复用主工作区 `node_modules` symlink | 删除仅属于 isolated worktree 的 symlink，并按当前 `package-lock.json` 执行 official Node 22 `npm ci` | 共享树实际 electron-builder/app-builder-lib 为 `26.8.1`，不等于 lock 的 `26.15.7`，导致 NSIS 合同假失败 | 主工作区依赖未改；isolated worktree 以 exact lock 独立验证 | 不适用；依赖声明与 lock 未变 |
 
 ## Evidence
 
@@ -43,13 +51,30 @@
 | 完整 integration runner | `53/53` 个脚本通过、`2488/2488 PASS` | 后台执行、恢复、statement generation、NewAccount 与其他跨模块集成合同。runner 自动刷新了 `rules/integration-test-policy.md` 的运行时间统计；该纯时序噪声已恢复，未纳入提交。 |
 | 完整 smoke | PASS；包含 scenario engines `45/45`、scenario repository `7/7`、migrations `19/19`、IPC `11/11`、recon-id engine `45/45`、gateway `20/20`、IO `14/14`、handlers `21/21`、end-to-end `6/6` | Electron 主流程、打包前关键模块与端到端冒烟。 |
 | `git diff --check`、`npm run check:packaged-inputs` | PASS；`build.files` 9 条覆盖范围与精确 HEAD 一致 | 静态质量与打包输入。 |
+| 2026-09-04 远端/候选预检 | main=`c2d23f59…`；candidate=`d12abe7c…` 且 package=`3.2.3`；v3.2.0～v3.2.2 tag/Release 链无漂移；审计 `/private/tmp/bbet-v323-initial-remote-preflight-20260904-055159.json`，SHA-256 `b9c79bd6…` | 冻结对象、祖先、版本序列和发布起点。 |
+| natural merge 冲突复核 | 产品代码零内容冲突；仅 `CHANGELOG.md`、`docs/VERSION_FEATURE_HISTORY.md`、`docs/USER_GUIDE.md` 三处文档冲突，逐项语义合并；无冲突标记，`git diff --check` PASS | 避免整体 ours/theirs 覆盖造成历史 Release 或当前版本说明回退。 |
+| natural merge 提交回读 | commit `15bffc58471701542d3f828cad18866b79933b47`；parents 精确为 `[d12abe7ca781305aaf3eef77d8b86018261741ff,c2d23f5981b1b2218b0988cf13e7e048e02ced46]`；tree `86b4145a1801a3f2248d551863c5be76732fb6a7` | 冻结 candidate-first / released-main-second 血缘成立。 |
+| 冻结文档与版本回读 | package/package-lock 三处均为 `3.2.3`；Spec `533684fe…`、TechDoc `b10687d5…` | natural merge 未改写冻结合同或版本 authority。 |
+| production policy 只读回读 | 13 项 live policy 全部 `enabled=false/effectiveMode=legacy/effectiveWorkerCount=0`；v3.2.3 的 7 项中 Statement 5 项未注册、NewAccount 2 项注册但关闭；审计 `/private/tmp/bbet-v323-production-policy-readback-20260904-141333.json`，SHA-256 `9f6c9e4b…`，`allChecksPass=true` | application production 未启用，历史 PENDING/NOT_RUN snapshot 未改写。 |
+| v3.2.3 相关 11 文件定向组合（首次） | `200/201 PASS`；唯一失败为历史 exact wrapper 继承新增 v3.2.0～v3.2.2 tag refs，先报 `GIT_TAG_REFS_INVALID` | 保留真实失败与根因，不用旧成功或单项测试代偿。 |
+| 历史 tag 快照隔离回归 | 单文件历史 exact wrapper `1/1 PASS`；临时 clone 恢复后精确为 25 refs、冻结 SHA-256 `94a09eb7…`，原 exact child suite `22/22 PASS` | 后续 release tag 不再污染历史 fixture，duplicate-key 原反例仍是唯一预期错误。 |
+| v3.2.3 相关 11 文件定向组合（修复后） | `201/201 PASS`、`0 FAIL`、`0 SKIP`，official Node `22.18.0` | Statement/NewAccount、metadata closeout 与历史 R3 evidence 同时成立。 |
+| 首轮完整 unit | `6607/6612 PASS`、`2 FAIL`、`3 SKIP`；日志 `logs/unit-tests/unit-20260904-142311.log`。失败精确为 v3.2.2 测试仍要求候选标题，以及共享依赖树 `26.8.1` 不满足 lock `26.15.7` 的 NSIS 修复合同 | 保留真实失败；没有以 focused 绿灯代偿。 |
+| v3.2.2 closeout + Windows build contract 定向复核 | exact-lock electron-builder/app-builder-lib 均为 `26.15.7`；`6 PASS`、`0 FAIL`、`2 Windows-only SKIP` | 前序正式发布证据与 NSIS access-violation 修复合同均恢复为真实通过。 |
+| exact-lock 最终完整 unit | `6609/6612 PASS`、`0 FAIL`、`3 Windows-only SKIP`；日志 `logs/unit-tests/unit-20260904-142713.log`；official Node `22.18.0`、npm `10.9.3`、electron-builder/app-builder-lib `26.15.7` | 当前 exact 业务、恢复、资金、发布证据与 Windows 合同全仓回归。 |
+| exact-lock 最终完整 integration | `53/53` scripts、`2488/2488 PASS`；runner 刷新的纯时序统计已用 `apply_patch` 恢复，policy SHA-256 仍为 `65716ba5…` | Statement/NewAccount/后台执行/恢复与其余模块跨层合同；不把测试运行时噪声带入提交。 |
+| 最终 smoke / lint / changed-JS 静态检查 | `npm run smoke` PASS；`npm run lint` PASS；相对已发布 v3.2.2 的 90 个 changed JS 均通过 `node --check` 与 ESLint；`git diff --check` PASS | 主流程、代码语法、风格和冲突残留。 |
+| clean-HEAD packaged inputs | `npm run check:packaged-inputs` PASS，`build.files` 9 条 include rules；执行时 worktree clean | 确认当前 exact HEAD 新增 Worker/Service/contract 文件进入 Windows 包；不是本地 `release-check`。 |
+| check-vars 只读扫描 | 56 个 changed `src/**/*.js`；Critical 命中 `FileValidationError`，Important-skeleton 命中 normalize/parse/read/write 门面，Runtime-state 命中三个 Statement legacy globals，Risk-sensitive 命中余额、行过滤、合并/固定字段与 `splitTemplateName`。所有权威实现或 legacy 生命周期均未改；`state` 为非 renderer 的局部同名假阳性 | 按清单原 review 要点复核签名、行序、金额/币种、current/all 与 session 生命周期；`targetParentIdentity`、Statement Service/NewAccount policies 仅列升格候选。 |
+| blindspot-pass + reconciliation-blindspot-pass 终审 | PASS；无入口旁路、未决状态生命周期、部分发布、不可见清理失败或新增资金红线。审计 `/private/tmp/bbet-v323-check-vars-blindspot-reconciliation-20260904-144901.json`，5536 bytes，SHA-256 `da4237de…`，`allChecksPass=true` | Main 仍持独立 artifact authority；金额/币种/匹配语义和 legacy IPC 未改；所有 v3.2.3 production action 保持 absent 或 false/legacy/0。 |
 
 ## Remaining Unknowns
 
 | 未知 | 处理 | 负责人/下一步 | 合并影响 |
 | --- | --- | --- | --- |
-| 最终远端 v3.2.3 tip/ancestry | PROBE | 业务 PR 与 v3.2.2 metadata 合并后重放并核对 | 未完成前不得推 metadata PR。 |
-| Windows packaged/Setup/portable 与 Excel/WPS | BLOCK / 人工复核 | release owner | 不阻塞 dormant capability，阻止 production/正式发布声明。 |
-| Statement/NewAccount 真实资金文件、金额/币种/余额和恢复处置 | BLOCK / 人工复核 | 资金与恢复负责人 | 自动测试不得代偿，production 保持关闭。 |
+| natural merge 最终提交与双亲 | CLOSED | `15bffc58…` 已精确回读 parents=`[d12abe7c…,c2d23f59…]`、tree=`86b4145a…` | 已满足；后续提交只能为该 merge 的线性后继。 |
+| PR exact 与合并后 main exact CI | PROBE | 自然触发 workflow，核对 smoke/build 及 release-check/Windows adapter/SQLite teardown/panel alignment 实际步骤 | 任一失败即停止，不 rerun/dispatch。 |
+| annotated tag、Release 与四资产 | PROBE | main exact 通过后唯一建 tag；正常 required-reviewer 审批并完整下载核验 | 未完成前不得声明 v3.2.3 正式发布。 |
+| Windows 10/11、SmartScreen、离线覆盖与 online canary | 发布后人工补测 | Issue #220 | 不阻塞本次技术 Release，不得据此启用 production。 |
 
-按用户明确要求，不运行 `release-check`、`check-vars` 或 `scan:vars`；这些项目不得记录为 PASS。
+按用户明确要求，本地不运行 `release-check`、`check-vars` 或 `scan:vars`；`check-vars` 仅按 skill 做只读扫描，这些本地命令不得记录为 PASS。Release workflow 可运行内置 `release-check`。
