@@ -63,8 +63,8 @@ test('v3.2.2 closeout同步当前版本、冻结文档与三份发布说明', ()
     );
   }
 
-  const currentChangelog = section(changelog, '## 3.2.2 - 2026-08-31（版本分支技术收口，未发布）');
-  const currentHistory = section(history, '## v3.2.2（2026-08-31，版本分支技术收口，未发布）');
+  const currentChangelog = section(changelog, '## 3.2.2 - 2026-09-04（正式发布候选）');
+  const currentHistory = section(history, '## v3.2.2（2026-09-04，正式发布候选）');
   const historicalGuide = paragraph(
     guide,
     '> **v3.2.2 FundRecon / Duplicate / BankBU 后台执行基础**'
@@ -76,10 +76,11 @@ test('v3.2.2 closeout同步当前版本、冻结文档与三份发布说明', ()
     assert.match(document, /BankBU|月度银行对账单 BU/);
     assert.match(document, /production.*关闭|生产仍关闭/s);
     assert.match(document, /Windows/);
-    assert.match(document, /人工复核/);
+    assert.match(document, /人工验收|人工复核|人工门禁/);
+    assert.match(document, /Issue #220|发布负责人/);
     assert.doesNotMatch(
       document,
-      /production(?:\s|`)已启用|资金[^\n]{0,40}(?:已经|已)通过人工复核|资金[^\n]{0,40}(?:人工复核|门禁)：?\s*PASS/
+      /production(?:\s|`)已启用|production enablement 已启用|effective worker 已启用/
     );
   }
 
@@ -88,13 +89,17 @@ test('v3.2.2 closeout同步当前版本、冻结文档与三份发布说明', ()
     assert.match(document, /Workbook|Excel/);
   }
 
-  assert.match(currentChangelog, /不合并 `main`/);
-  assert.match(currentChangelog, /不创建 tag/);
-  assert.match(currentChangelog, /`release-check`、`check-vars`、`scan:vars`.*跳过/s);
+  assert.match(currentChangelog, /受保护 PR/);
+  assert.match(currentChangelog, /annotated tag/);
+  assert.match(currentChangelog, /内置 `release-check`/);
+  assert.match(currentChangelog, /`scan:vars` \/ `check:vars` 未运行/);
+  assert.match(changelog, /^## 3\.2\.1 - 2026-09-03（正式发布）$/m);
+  assert.match(history, /^## v3\.2\.1（2026-09-03，正式发布）$/m);
+  assert.match(changelog, /run `33807861470`/);
 
   for (const [document, headings] of [
-    [changelog, ['## 3.2.2 - 2026-08-31', '## 3.2.1 - 2026-08-31', '## 3.2.0 - 2026-08-31', '## 3.1.14 - 2026-08-21']],
-    [history, ['## v3.2.2（2026-08-31', '## v3.2.1（2026-08-31', '## v3.2.0（2026-08-31', '## v3.1.14（2026-08-21']]
+    [changelog, ['## 3.2.2 - 2026-09-04', '## 3.2.1 - 2026-09-03', '## 3.2.0 - 2026-09-03', '## 3.1.14 - 2026-08-21']],
+    [history, ['## v3.2.2（2026-09-04', '## v3.2.1（2026-09-03', '## v3.2.0（2026-09-03', '## v3.1.14（2026-08-21']]
   ]) {
     for (let index = 1; index < headings.length; index += 1) {
       assertBefore(document, headings[index - 1], headings[index]);

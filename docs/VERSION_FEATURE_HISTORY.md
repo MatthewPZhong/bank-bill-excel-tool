@@ -9,7 +9,7 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
-## v3.2.3（2026-08-30，版本分支技术收口，未发布）
+## v3.2.3（2026-09-04，正式发布候选）
 
 v3.2.3 完成 Statement 交互式大状态 Service、原子 balance seed 与 NewAccount Worker/Publisher 的后台执行 capability；production enablement 保持关闭，既有金额、币种、借贷方向、余额、Workbook、命名和用户流程不变。
 
@@ -29,10 +29,10 @@ v3.2.3 完成 Statement 交互式大状态 Service、原子 balance seed 与 New
 ### 兼容与人工边界
 
 - Statement 的四金额模式、借贷方向、币种、余额、current/all 行序和 Workbook，以及 NewAccount 的日期、账户、币种、命名和模板语义不变。
-- capability 与 effective production strategy 分离，production 仍关闭；Windows packaged/Setup/portable、Excel/WPS、真实资金文件与恢复处置仍需人工复核。
-- 本节点未合并 `main`、未创建 tag、未发布 production；`release-check`、`check-vars`、`scan:vars` 按用户要求跳过，不能声明为 PASS。
+- capability 与 effective production strategy 分离，production 仍关闭；发布负责人 `MatthewPZhong` 于 2026-09-04 明确确认资金、恢复、真实业务样本及稳定窗口人工验收通过，该签字只覆盖本次发布。
+- Issue #220 授权本版通过受保护 PR、唯一 annotated tag 与 Windows Release workflow 发布技术 stable Release；Windows 10/11 Setup/portable、SmartScreen、离线覆盖安装与 `production/latest` canary 在发布后逐项补做。workflow 内置 `release-check` 获授权，本地 `release-check` / `scan:vars` / `check:vars` 未运行且不得声明为 PASS。
 
-## v3.2.2（2026-08-31，版本分支技术收口，未发布）
+## v3.2.2（2026-09-04，正式发布）
 
 v3.2.2 完成 FundRecon、Duplicate 与 BankBU 的后台执行 capability 和恢复审计基础；production enablement 保持关闭，既有金额、币种、匹配顺序、Workbook 与用户操作合同不变。
 
@@ -46,16 +46,19 @@ v3.2.2 完成 FundRecon、Duplicate 与 BankBU 的后台执行 capability 和恢
 
 - 主进程不再作为这些模块完整可变状态的第二所有者；只保留有界 DTO、资源 grant/reservation、TaskLifecycle 和 artifact authority。
 - 崩溃、超时、部分提交和结果丢失按持久 receipt/inspector 收口；未知状态不会自动重跑或伪装为普通失败。
+- 修复普通 no-file 配置任务的空 evidence 合同，模板重命名不再在执行前被 TaskLifecycle 拒绝，最终 Hold gate 保持不变。
+- 人工余额补录从 freshness、导入上下文或当前 statement session 恢复真实源文件 FilePlan；余额 `0` 可正常保存，无来源或 IPC 失败时给出可见反馈并保留草稿。
 - package 元数据更新为 `3.2.2`，顶层 Spec/TechDoc 同步自冻结基线。
 
 ### 兼容与人工边界
 
 - 业务 SQL、匹配顺序、候选消费、金额/币种、Workbook、事务和幂等语义不变；capability 与 effective production strategy 分离，生产仍关闭。
-- Windows packaged/WAL/app quit 和真实资金样本仍需人工复核；本节点未合并 `main`、未创建 tag、未发布 production。
-- `release-check`、`check-vars`、`scan:vars` 按用户要求跳过，不能声明为 PASS。
+- 发布负责人 `MatthewPZhong` 于 2026-09-04 明确确认资金、恢复、真实业务样本及稳定窗口人工验收通过；最终 Windows 10/11 Setup/portable、SmartScreen、离线覆盖安装与 `production/latest` canary 依据 Issue #220 在发布后逐项补做。
+- Issue #220 授权本版通过受保护 PR、唯一 annotated tag 与 Windows Release workflow 发布技术 stable Release；production strategy、feature flag 和 effective worker 继续 disabled/legacy。workflow 内置 `release-check` 获授权，本地 `scan:vars` / `check:vars` 未运行且不得声明为 PASS。
+- PR #225 已普通合并，最终 `main=c2d23f5981b1b2218b0988cf13e7e048e02ced46`；annotated `v3.2.2`（tag object `9be1783cec1e3629d2ba3d8faa2d49d0cf999c04`）精确指向该提交，Release run `33835873671` 与 Setup、portable、blockmap、`latest.yml` 四项资产均完成独立回读。
 
 
-## v3.2.1（2026-08-31，版本分支技术收口，未发布）
+## v3.2.1（2026-09-03，正式发布）
 
 v3.2.1 完成 Toolbox 单 Writer后台生成与 PreFund MPT parser spool、durable receipt、单 Writer和受限 parser pool capability；production enablement 保持关闭，既有文件顺序、金额、币种、Workbook、事务、幂等和用户操作合同不变。
 
@@ -69,15 +72,16 @@ v3.2.1 完成 Toolbox 单 Writer后台生成与 PreFund MPT parser spool、durab
 
 - dispatch/cleanup ownership、critical intent、receipt 和恢复判定进入冻结后台执行合同；unknown/partial/committed-result-lost 不会自动重跑或伪装成普通失败。
 - E04-C 第二 Writer gate 明确 rejected；Toolbox 写入拓扑和正式 Publisher 没有被并行化。
-- package 元数据更新为 `3.2.1`，顶层 Spec/TechDoc 同步自冻结基线，并包含最终 v3.2.0 收口祖先。
+- package 元数据更新为 `3.2.1`，顶层 Spec/TechDoc 同步自冻结基线，并通过 natural merge 包含正式发布的 v3.2.0 最终 `main` 合并提交。
 
 ### 兼容与人工边界
 
 - E04-C/E05-C 未满足 gate 继续阻止 production 切路，legacy seam 保留；本版不新增用户开关。
-- Windows packaged/退出、PreFund 真实资金样本和金额/币种/文件顺序/恢复人工复核仍未由自动测试代偿；本节点未合并 `main`、未创建 tag、未发布 production。
-- `release-check`、`check-vars`、`scan:vars` 按用户要求跳过，不能声明为 PASS。
+- 发布负责人 `MatthewPZhong` 于 2026-09-03 明确确认资金、恢复、真实业务样本及稳定窗口人工验收通过；该签字只覆盖本次发布。最终 v3.2.1 资产产生后才能完成的 Windows 10/11 Setup/portable、SmartScreen、离线覆盖安装和 `production/latest` canary 依据 Issue #220 在发布后逐项补做。
+- Issue #220 授权本版通过受保护 PR、唯一 annotated tag 与 Windows Release workflow 发布技术 stable Release；production strategy、feature flag 和 effective worker 继续 disabled/legacy。workflow 内置 `release-check` 获授权，本地 `scan:vars` / `check:vars` 未运行且不得声明为 PASS。
+- PR #223 与 safe forward-fix PR #224 已普通合并，最终 `main=c547097c8829c1c39437fe9047b5accbf5f1e388`；annotated `v3.2.1` 精确指向该提交，Release run `33807861470` 与 Setup、portable、blockmap、`latest.yml` 四项资产均完成独立回读。
 
-## v3.2.0（2026-08-31，版本分支技术收口，未发布）
+## v3.2.0（2026-09-03，正式发布）
 
 v3.2.0 完成公共后台执行 Supervisor、协议/恢复控制底座与 VCC OP 多文件 parser pipeline；production enablement 保持关闭，既有金额、币种、月份、Workbook、事务、幂等和用户操作合同不变。
 
@@ -96,8 +100,9 @@ v3.2.0 完成公共后台执行 Supervisor、协议/恢复控制底座与 VCC OP
 ### 兼容与人工边界
 
 - capability 与 effective production strategy 分离，legacy seam 保留，生产仍关闭；本版不新增用户开关。
-- Windows packaged/退出/fsync、VCC OP 真实样本与资金/恢复人工复核仍未由自动测试代偿；本节点未合并 `main`、未创建 tag、未发布 production。
-- `release-check`、`check-vars`、`scan:vars` 按用户要求跳过，不能声明为 PASS。
+- 发布负责人 `MatthewPZhong` 于 2026-09-03 明确确认资金、恢复、真实业务样本及稳定窗口人工验收通过；该签字只覆盖本次验收。最终发布资产的 Windows 10/11 Setup/portable、SmartScreen、离线覆盖安装和 `production/latest` canary 依据 Issue #220 在发布后逐项补做。
+- Issue #220 已授权本版通过受保护 PR、唯一 annotated tag 与 Windows Release workflow 发布技术 stable Release；production strategy、feature flag 和 effective worker 继续 disabled/legacy。PR/tag workflow 的自动检查不得替代人工结论；本地 `scan:vars` / `check:vars` 未运行且不得声明为 PASS。
+- PR #221 已以 merge commit `92380fd84471b061b7a84842be7da001aa82db87` 合入 `main`；annotated `v3.2.0` 精确指向该提交。Release run `33731833335` 的 attempt 2 全部成功，四项公开资产的大小、SHA-256 与 `latest.yml` 中 Setup SHA-512 已独立回读一致；application production 仍为 disabled/legacy。
 
 ## v3.1.14（2026-08-21）
 

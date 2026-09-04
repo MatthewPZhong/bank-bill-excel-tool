@@ -295,6 +295,8 @@ function validateToolboxGenerationResult(value, expectedActionKey = null) {
         !Number.isSafeInteger(artifact.dataRowCount) || artifact.dataRowCount < 0 ||
         !Number.isSafeInteger(artifact.sheetCount) || artifact.sheetCount < 1 ||
         !Number.isSafeInteger(artifact.matchedCount) || artifact.matchedCount < 0 ||
+        (value.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_SINGLE &&
+          artifact.matchedCount !== artifact.dataRowCount) ||
         !Number.isSafeInteger(artifact.warningCount) || artifact.warningCount < 0 ||
         !artifact.evidenceArtifact || typeof artifact.evidenceArtifact !== 'object' ||
         Array.isArray(artifact.evidenceArtifact)) {

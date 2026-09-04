@@ -690,6 +690,43 @@
         }
       });
       const doneBtn = dialog.querySelector('[data-action="done"]');
+      let saveInProgress = false;
+
+      function currentDraft() {
+        return { billDate: dateInput.value, endBalance: amountInput.value };
+      }
+
+      function showBalanceSeedSaveFailure(error) {
+        const message = escapeHtml(error?.message || String(error || '未知错误'));
+        const preservedDraft = currentDraft();
+        closeModal();
+        openModal(createAlertDialog(`余额补录失败：${message}`, {
+          onConfirm: () => openModal(createManualBalanceSeedDialog(
+            prompt,
+            preservedDraft,
+            currentQueue
+          ))
+        }));
+      }
+
+      async function saveBalanceSeedWithFeedback(request) {
+        if (saveInProgress) return null;
+        saveInProgress = true;
+        doneBtn.disabled = true;
+        try {
+          const result = await desktopApi.files.saveBalanceSeed(request);
+          if (!result || typeof result !== 'object') {
+            throw new Error('余额补录未返回有效结果');
+          }
+          return result;
+        } catch (error) {
+          showBalanceSeedSaveFailure(error);
+          return null;
+        } finally {
+          saveInProgress = false;
+          doneBtn.disabled = false;
+        }
+      }
 
       function handleSaveResult(result) {
         if (result.status === 'manual-balance-invalid') {
@@ -715,8 +752,8 @@
 
         closeModal();
 
-        if (result.status === 'error' && !result.manualBalancePromptReady) {
-          openModal(createAlertDialog(result.message));
+        if (['error', 'failed'].includes(result.status) && !result.manualBalancePromptReady) {
+          openModal(createAlertDialog(result.message || '余额补录失败'));
         }
       }
 
@@ -726,7 +763,8 @@
           billDate: dateInput.value,
           endBalance: amountInput.value
         };
-        const result = await desktopApi.files.saveBalanceSeed(payload);
+        const result = await saveBalanceSeedWithFeedback(payload);
+        if (!result) return;
 
         if (result.status === 'confirm-overwrite') {
           openModal(
@@ -735,9 +773,10 @@
               confirmText: '确认覆盖',
               cancelText: '取消',
               onConfirm: async () => {
-                const overwriteResult = await desktopApi.files.saveBalanceSeed(
+                const overwriteResult = await saveBalanceSeedWithFeedback(
                   buildBalanceSeedConfirmationRequest(result.contextId)
                 );
+                if (!overwriteResult) return;
                 handleSaveResult(overwriteResult);
               }
             })

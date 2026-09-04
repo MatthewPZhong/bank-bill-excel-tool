@@ -22,3 +22,11 @@
 2. 核对 #176～#183 功能/R3/R4 证据及 E04-C 拒绝边界。
 3. 同步 package 元数据、权威 Spec/TechDoc 与三份发布文档。
 4. 运行字节、JSON、diff、文档交叉校验和适当完整单测；保留人工门禁。
+
+## 2026-09-03 Release Preflight Addendum
+
+- Goal：在不改变金额、币种、Workbook、事务、幂等、恢复或 production strategy 的前提下，把冻结 v3.2.1 候选自然传播到已正式发布 v3.2.0 的最终 `main` 之上，并通过受保护 PR、annotated tag 与 Windows Release workflow 发布技术 stable Release。
+- Authorization：发布负责人 `MatthewPZhong` 已在当前任务明确批准 v3.2.0 → v3.2.5 严格串行发布，并确认资金、恢复、真实业务样本及稳定窗口人工验收通过；稳定记录为 Issue #220。
+- Frozen inputs：v3.2.1 候选为 `ea60a5c7bdaaeeb5117d1c20be1f3df2ed4b0e38`；前序发布 `main` 为 `92380fd84471b061b7a84842be7da001aa82db87`，annotated `v3.2.0` 与四项 Release 资产已完成独立回读。
+- Constraints：只用 isolated worktree 与 natural merge 传播前序最终 `main`；不 force、rebase、cherry-pick、删除远端分支或绕过保护。最终 v3.2.1 资产出现前无法完成的 Windows 10/11、SmartScreen、离线覆盖和 `production/latest` canary 按 Issue #220 发布后补做；application production 始终 disabled/legacy。
+- Done when：发布准备 PR 的 exact `smoke-test`/`build` 全绿且 review 无阻断，以普通 merge commit 合入未漂移的 `main`；唯一 annotated `v3.2.1` 精确指向该 merge commit；Release workflow 和四项资产独立回读成功；随后才能开始 v3.2.2。

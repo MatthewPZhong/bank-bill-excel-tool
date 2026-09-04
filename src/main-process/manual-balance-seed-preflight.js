@@ -11,6 +11,10 @@ const {
   splitTemplateName,
   writeBalanceSeedRecords
 } = require('../backend/balance-seed-store');
+const {
+  getStatementSessionEntries,
+  normalizeInputFilePaths
+} = require('./statement-session');
 
 function pad(value) {
   return String(value).padStart(2, '0');
@@ -50,6 +54,25 @@ function balanceSeedRecordsEvidence(records = []) {
     generationMethod: normalizeCell(record.generationMethod || record['生成方式']),
     updatedAt: normalizeCell(record.updatedAt)
   })));
+}
+
+function resolveManualBalanceSeedFilePlanInputPaths({
+  prepared = {},
+  importContext = {},
+  session = null
+} = {}) {
+  const freshnessInputPaths = normalizeInputFilePaths(prepared && prepared.inputFilePaths);
+  if (freshnessInputPaths.length) return freshnessInputPaths;
+
+  // 内存账单会话不会为余额补录重读源文件，但 File Task 仍必须登记真实来源。
+  const rememberedInputPaths = normalizeInputFilePaths(
+    importContext && importContext.inputFilePaths
+  );
+  if (rememberedInputPaths.length) return rememberedInputPaths;
+
+  const scope = normalizeCell(importContext && importContext.scope) || 'current';
+  const sessionEntries = getStatementSessionEntries(session, scope);
+  return normalizeInputFilePaths(sessionEntries.map((entry) => entry && entry.filePath));
 }
 
 function buildManualBalanceSeedPlan({
@@ -340,5 +363,6 @@ module.exports = {
   buildManualBalanceSeedPlan,
   materializeManualBalanceSeedPlan,
   prepareManualBalanceSeedSubmission,
+  resolveManualBalanceSeedFilePlanInputPaths,
   writeManualBalanceSeedPlan
 };

@@ -958,6 +958,17 @@ test.describe('v3.1.3 position streaming preflight', () => {
 
   test('dispatcher 在 worker 同步提交期间发送不虚增计数的进度心跳', async () => {
     const worker = new EventEmitter();
+    let completionTimer = null;
+    let completionSent = false;
+    const emitComplete = (jobId) => {
+      if (completionSent) return;
+      completionSent = true;
+      worker.emit('message', {
+        type: POSITION_IMPORT_MESSAGE_TYPES.COMPLETE,
+        jobId,
+        result: { status: 'ok' }
+      });
+    };
     worker.postMessage = (message) => {
       if (message.type !== POSITION_IMPORT_MESSAGE_TYPES.START_JOB) return;
       setImmediate(() => worker.emit('message', {
@@ -969,11 +980,7 @@ test.describe('v3.1.3 position streaming preflight', () => {
         committedRows: 3000000,
         elapsedMs: 100
       }));
-      setTimeout(() => worker.emit('message', {
-        type: POSITION_IMPORT_MESSAGE_TYPES.COMPLETE,
-        jobId: message.jobId,
-        result: { status: 'ok' }
-      }), 45);
+      completionTimer = setTimeout(() => emitComplete(message.jobId), 2000);
     };
     worker.kill = () => true;
     const progress = [];
@@ -986,9 +993,16 @@ test.describe('v3.1.3 position streaming preflight', () => {
       sideDbPath: '',
       utilityProcess: { fork: () => worker },
       progressHeartbeatMs: 10,
-      onProgress: (event) => progress.push(event)
+      onProgress: (event) => {
+        progress.push(event);
+        if (progress.filter((item) => item.heartbeat === true).length === 2) {
+          clearTimeout(completionTimer);
+          emitComplete(event.jobId);
+        }
+      }
     });
     const result = await job.promise;
+    clearTimeout(completionTimer);
     assert.equal(result.status, 'ok');
     assert.equal(progress[0].heartbeat, false);
     const heartbeats = progress.filter((event) => event.heartbeat === true);

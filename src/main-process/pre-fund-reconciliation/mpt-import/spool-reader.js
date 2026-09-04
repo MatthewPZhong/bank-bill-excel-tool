@@ -16,7 +16,8 @@ const {
   MPT_SCHEMAS,
   buildGatewayFingerprint,
   normalizeDate,
-  normalizeDecimalString
+  normalizeDecimalString,
+  normalizeMptRow
 } = require('../mpt-schema');
 const {
   MPT_SPOOL_FILE_NAMES,
@@ -307,6 +308,19 @@ function validateRowEnvelope(envelope, manifest) {
     if (typeof value !== 'string') {
       throw spoolError('PREFUND_SPOOL_ROW_SCHEMA_INVALID', 'normalized row rawJson字段必须是字符串');
     }
+  }
+  let sourceDerivedRow;
+  try {
+    sourceDerivedRow = normalizeMptRow(
+      schema.fields.map((field) => raw[field]),
+      manifest.header,
+      row.sourceRowNumber
+    );
+  } catch (_error) {
+    throw spoolError('PREFUND_SPOOL_ROW_SCHEMA_INVALID', 'normalized row rawJson无法派生有效来源行');
+  }
+  if (stableJson(sourceDerivedRow) !== stableJson(row)) {
+    throw spoolError('PREFUND_SPOOL_ROW_SCHEMA_INVALID', 'normalized row与rawJson派生结果不一致');
   }
   return row;
 }
