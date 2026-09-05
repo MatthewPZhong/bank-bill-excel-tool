@@ -14,9 +14,9 @@
 //      命中判定：该类型 conditions.every(c => evaluateCondition(row, c))（AND 全满足）
 //   2. 行 4 reconFields：
 //      - **v2.1.7 衍生方案 A**：reconFields = 0 时不走配对，凡命中 markValue.type 的行直接写赋值
-//      - reconFields ≥ 1 时定义对账字段：{seq, leftType, leftField, rightType, rightField}
+//      - reconFields ≥ 1 时定义对账字段：{seq, leftType, leftField, op, rightType, rightField}
 //   3. 笛卡尔配对（reconFields ≥ 1 时）：leftType 类型的所有行 × rightType 类型的所有行
-//      AND 比对所有 reconFields 是否相等
+//      AND 比对所有 reconFields；每条按自身类型取值，op 缺省等于，包含按左侧包含右侧执行
 //   4. 配对成功后：
 //      - 一对一：给 rightType 那行的 markValue.field 写 markValue.value
 //      - 一对多（一个 leftRow 匹配多个 rightRow）→ 报错 + 终止该 leftRow（其它 leftRow 继续）
@@ -97,9 +97,24 @@ function isNumericFieldName(fieldName) {
 }
 
 function pairsMatch(leftRow, rightRow, reconFields) {
+  // 候选行的角色由第一条确定；每条字段独立选择来源，允许同一类型对反向配置。
+  const primary = reconFields[0] || {};
   return reconFields.every((rf) => {
+    const fieldLeftRow = rf.leftType === primary.leftType ? leftRow
+      : rf.leftType === primary.rightType ? rightRow : null;
+    const fieldRightRow = rf.rightType === primary.rightType ? rightRow
+      : rf.rightType === primary.leftType ? leftRow : null;
+    // 同类型优先保留左右候选的位置；不存在于当前配对的类型不能借用其他行。
+    if (!fieldLeftRow || !fieldRightRow) return false;
+    const op = rf.op === undefined ? '等于' : rf.op;
+    if (op === '包含') {
+      const left = normalizeCellValue(fieldLeftRow[rf.leftField]);
+      const right = normalizeCellValue(fieldRightRow[rf.rightField]);
+      return left !== '' && right !== '' && left.includes(right);
+    }
+    if (op !== '等于') return false;
     const numeric = isNumericFieldName(rf.leftField) || isNumericFieldName(rf.rightField);
-    return valuesEqual(leftRow[rf.leftField], rightRow[rf.rightField], { numeric });
+    return valuesEqual(fieldLeftRow[rf.leftField], fieldRightRow[rf.rightField], { numeric });
   });
 }
 
@@ -112,6 +127,16 @@ function runC2Scenario(scenario, bankRows) {
   const billTypes = normalizeBillTypes(config.billTypes || []);
   const reconFields = config.reconFields || [];
   const markValue = config.markValue || {};
+
+  // 在分类和锁定前拒绝非法操作符，避免旧调用方绕过保存校验后误赋值。
+  if (reconFields.some((rf) => rf && rf.op !== undefined && !['等于', '包含'].includes(rf.op))) {
+    warningCollector.push({ rowId: null, code: 'invalid-config', message: '对账字段操作符只能为“等于”或“包含”' });
+    return {
+      lockedRowIds: modCollector.listLockedRowIds(),
+      modifications: modCollector.listModifications(),
+      warnings: warningCollector.list()
+    };
+  }
 
   // v2.1.7 F4：billTypes 校验从 < 2 改 < 1（dialog 校验放宽同步）
   if (billTypes.length < 1) {
@@ -166,8 +191,7 @@ function runC2Scenario(scenario, bankRows) {
     };
   }
 
-  // reconFields 中所有的 leftType / rightType 应一致（PRD 自带场景所有 reconFields 都是 1 vs 2）
-  // 我们以第一条 reconFields 的 leftType / rightType 为准（PRD 没明确多对类型混合）
+  // 第一条确定候选配对的类型，后续字段的取值方向由 pairsMatch 按各自类型解析。
   const primaryReconField = reconFields[0];
   const leftType = primaryReconField.leftType;
   const rightType = primaryReconField.rightType;
@@ -175,7 +199,7 @@ function runC2Scenario(scenario, bankRows) {
   const leftRows = bankRows.filter((r) => Array.isArray(r._c2Types) && r._c2Types.includes(leftType));
   const rightRows = bankRows.filter((r) => Array.isArray(r._c2Types) && r._c2Types.includes(rightType));
 
-  // 反向索引：rightRow → 已被哪些 leftRow 匹配（用于多对一检测）
+  // 反向索引：rightRow → 全部命中它的 leftRow 数量（包括一对多左行，用于多对一检测）
   const rightRowMatchCount = new Map();
   // 实际配对结果：rightRow → leftRow
   const successfulPairs = [];
@@ -183,6 +207,10 @@ function runC2Scenario(scenario, bankRows) {
   for (const leftRow of leftRows) {
     const matched = rightRows.filter((rightRow) => pairsMatch(leftRow, rightRow, reconFields));
     if (matched.length === 0) continue;
+    // 先统计完整候选关系；一对多左行被跳过后，其命中仍构成右行的歧义。
+    matched.forEach((rightRow) => {
+      rightRowMatchCount.set(rightRow._rowId, (rightRowMatchCount.get(rightRow._rowId) || 0) + 1);
+    });
     if (matched.length > 1) {
       warningCollector.push({
         rowId: leftRow._rowId,
@@ -195,7 +223,6 @@ function runC2Scenario(scenario, bankRows) {
 
     const rightRow = matched[0];
     successfulPairs.push({ leftRow, rightRow });
-    rightRowMatchCount.set(rightRow._rowId, (rightRowMatchCount.get(rightRow._rowId) || 0) + 1);
   }
 
   // 多对一检测（rightRow 被多个 leftRow 匹配）

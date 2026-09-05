@@ -46,6 +46,7 @@
 
     // 条件操作枚举（C1 行 3 + C2 行 3 共用）
     const SCENARIO_CONDITION_OPS = ['等于', '不等于', '包含', '不包含', '空值', '非空值', '开头为'];
+    const C2_RECON_OPS = ['等于', '包含'];
 
     // 操作 op 是否需要值输入框（'空值' / '非空值' 不需要）
     function opNeedsValue(op) {
@@ -1142,6 +1143,67 @@
       const multiModeCheckbox = dialog.querySelector('.ba-multi-mode-checkbox');
       const multiToggleBtn = dialog.querySelector('.ba-multi-toggle-btn');
 
+      let selectionBusy = false;
+      let selectionTerminating = false;
+      let selectionClosed = false;
+      function syncSelectionActionButtons() {
+        const blocked = selectionBusy || selectionTerminating || selectionClosed;
+        extractOrderBtn.disabled = blocked;
+        doneBtn.disabled = blocked;
+        dialog.inert = blocked;
+      }
+
+      function showUnmaintainedBigAccountAlert(result, cancellationError = '') {
+        selectionTerminating = true;
+        syncSelectionActionButtons();
+        const groups = new Map();
+        (result.unmaintainedAccounts || []).forEach((account) => {
+          if (!groups.has(account.merchantId)) groups.set(account.merchantId, []);
+          groups.get(account.merchantId).push(account);
+        });
+        const lines = [...groups].map(([merchantId, accounts]) => {
+          const locations = accounts.map((account) => (
+            `文件 ${Number(account.fileOrdinal) + 1}：${escapeHtml(account.fileName)}，分段 ${Number(account.blockOrdinal) + 1}（定位行 ${Number(account.sourceRowNumber)}）`
+          )).join('<br/>');
+          return `大账号「${escapeHtml(merchantId)}」未维护，请先维护后重新导入。<br/>${locations}`;
+        }).join('<br/><br/>');
+        const message = (cancellationError ? `取消失败：${escapeHtml(cancellationError)}。请重试取消。<br/><br/>` : '')
+          + `点击【${cancellationError ? '重试取消' : '确认'}】后将结束本次整批导入。<br/><br/>${lines || escapeHtml(result.message)}`;
+        const alertOverlay = createAlertDialog(message, {
+          confirmText: cancellationError ? '重试取消' : '确认',
+          onConfirm: () => cancelUnmaintainedImport(result)
+        });
+        alertOverlay.querySelector('.alert-card').classList.add('big-account-unmaintained-alert');
+        openModal(alertOverlay);
+      }
+
+      async function cancelUnmaintainedImport(result) {
+        if (selectionBusy || selectionClosed) return;
+        selectionBusy = true;
+        syncSelectionActionButtons();
+        const progressOverlay = createAlertDialog('正在取消本次导入…', { skipLogReport: true });
+        progressOverlay.querySelector('button').disabled = true;
+        openModal(progressOverlay);
+        try {
+          const cancelled = await desktopApi.files.cancelBigAccountSelection(payload.contextId);
+          if (!cancelled || !['success', 'not-active'].includes(cancelled.status)) {
+            throw new Error(cancelled?.message || '取消导入失败');
+          }
+          selectionClosed = true;
+          if (elements.modalRoot.contains(progressOverlay)) {
+            closeModal();
+            setStatus('本次整批导入已终止：存在未维护大账号，请维护后重新导入。', 'error');
+          }
+        } catch (error) {
+          if (elements.modalRoot.contains(progressOverlay)) {
+            showUnmaintainedBigAccountAlert(result, error?.message || '取消导入失败');
+          }
+        } finally {
+          selectionBusy = false;
+          syncSelectionActionButtons();
+        }
+      }
+
       // v1.5.2 需求 2（决策 ①B）：多对一状态机
       //   - multiMode：是否启用"单个账号匹多个文件"；默认 false（不勾选）
       //   - multiEditing：是否处于编辑态；默认 false
@@ -1857,6 +1919,10 @@
       });
 
       extractOrderBtn.addEventListener('click', async () => {
+        if (selectionBusy || selectionTerminating || selectionClosed) return;
+        selectionBusy = true;
+        syncSelectionActionButtons();
+        try {
         // v1.5.2：已被"单个账号匹多个文件"映射的 block 不参与提取
         const extractableRows = multiMode
           ? currentFileRows.filter((row, i) => {
@@ -1872,11 +1938,16 @@
           ))
         });
 
+        if (result.errorCode === 'BIG_ACCOUNT_NOT_MAINTAINED') {
+          showUnmaintainedBigAccountAlert(result);
+          return;
+        }
+
         if (result.status === 'error') {
           const failedLines = (result.failedRows || [])
             .map((r) => `第 ${r.index + 1} 行（${escapeHtml(r.fileName || '')}）提取不到大账号信息`)
             .join('<br/>');
-          openModal(createAlertDialog(failedLines || '提取大账号信息失败', {
+          openModal(createAlertDialog(failedLines || escapeHtml(result.message || '提取大账号信息失败'), {
             onConfirm: () => { openModal(overlay); }
           }));
           return;
@@ -2066,13 +2137,24 @@
         } else {
           showExtractDialog();
         }
+        } catch (error) {
+          openModal(createAlertDialog(escapeHtml(error?.message || '提取大账号信息失败，请重试'), {
+            onConfirm: () => { openModal(overlay); }
+          }));
+        } finally {
+          selectionBusy = false;
+          syncSelectionActionButtons();
+        }
       });
 
       dialog.querySelector('.icon-close').addEventListener('click', () => {
+        if (selectionBusy || selectionTerminating || selectionClosed) return;
+        selectionClosed = true;
         desktopApi.files.cancelBigAccountSelection(payload.contextId);
         closeModal();
       });
       doneBtn.addEventListener('click', async () => {
+        if (selectionBusy || selectionTerminating || selectionClosed) return;
         // v1.5.2 需求 2（决策 ①B）：按 block 粒度展开 assignments
         //   - multiMode 下：
         //     1) 若处于编辑态（用户未点"完成"组闭合按钮），尝试闭合最后一组；这样单组用户直接点主完成也能生效
@@ -2131,6 +2213,9 @@
           return;
         }
 
+        selectionBusy = true;
+        syncSelectionActionButtons();
+        try {
         const result = await desktopApi.files.completeBigAccountSelection({
           contextId: payload.contextId,
           assignments: finalAssignments,
@@ -2143,14 +2228,22 @@
             setStatus(result.message || '选择大账号失败，请重新设定', 'error');
             return;
           }
+          selectionClosed = true;
           closeModal();
           applyStatementResult(result);
           openModal(createAlertDialog(result.message));
           return;
         }
 
+        selectionClosed = true;
         closeModal();
         applyStatementResult(result);
+        } catch (error) {
+          setStatus(error?.message || '选择大账号失败，请重试', 'error');
+        } finally {
+          selectionBusy = false;
+          syncSelectionActionButtons();
+        }
       });
 
       initializeState();
@@ -9072,6 +9165,9 @@
         if (Array.isArray(c.reconFields) && c.reconFields.some((r) => !r.leftField || !r.rightField)) {
           errors.push('对账字段每行两端的字段都不能为空（如不需要对账请删除该行）');
         }
+        if (Array.isArray(c.reconFields) && c.reconFields.some((r) => r.op !== undefined && !C2_RECON_OPS.includes(r.op))) {
+          errors.push('对账字段操作符只能为“等于”或“包含”');
+        }
         const mv = c.markValue || {};
         const billTypeSeqs = (c.billTypes || []).map((b) => b.seq);
         if (!billTypeSeqs.includes(Number(mv.type))) errors.push('赋值的"账单类型"必须存在于上方账单类型列表中');
@@ -10080,6 +10176,9 @@
       if (!Array.isArray(config.reconFields)) {
         config.reconFields = [];
       }
+      config.reconFields = config.reconFields.map((rf) => ({
+        ...rf, op: rf.op === undefined ? '等于' : rf.op
+      }));
       if (!config.markValue) config.markValue = { type: null, field: '', value: '' };
 
       const overlay = createOverlay();
@@ -10189,7 +10288,9 @@
               <option value="">请选择字段</option>
               ${renderScenarioOptions(BANK_STATEMENT_FIELDS, rf.leftField)}
             </select>
-            <span class="scenario-config-vs-arrow">vs</span>
+            <select class="scenario-config-input scenario-config-input-narrow" data-multi-field="op" aria-label="对账字段操作符" ${isReadonly ? 'disabled' : ''}>
+              ${renderScenarioOptions(C2_RECON_OPS, rf.op)}
+            </select>
             <select class="scenario-config-input scenario-config-input-narrow" data-multi-field="rightType" ${isReadonly ? 'disabled' : ''}>
               ${renderScenarioOptions(billTypeSeqs.map(String), String(rf.rightType))}
             </select>
@@ -10369,7 +10470,7 @@
       dialog.querySelector('[data-action="add-recon-field"]')?.addEventListener('click', () => {
         if (isReadonly) return;
         const seqs = config.billTypes.map((b) => b.seq);
-        config.reconFields.push({ seq: config.reconFields.length + 1, leftType: seqs[0] || 1, leftField: '', rightType: seqs[1] || seqs[0] || 1, rightField: '' });
+        config.reconFields.push({ seq: config.reconFields.length + 1, leftType: seqs[0] || 1, leftField: '', op: '等于', rightType: seqs[1] || seqs[0] || 1, rightField: '' });
         renderReconFields();
       });
 
@@ -11304,7 +11405,7 @@
           const condsHtml = conds.map((cd) => `${escapeHtml(cd.field)} ${escapeHtml(cd.op)}${opNeedsValue(cd.op) ? ' ' + escapeHtml(String(cd.value || '')) : ''}`).join(' AND ');
           return `<li>#${bt.seq}：${condsHtml}</li>`;
         }).join('')}</ul></div>`;
-        html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">对账字段：</span><ul>${(c.reconFields || []).map((r) => `<li>类型#${r.leftType} ${escapeHtml(r.leftField)} = 类型#${r.rightType} ${escapeHtml(r.rightField)}</li>`).join('')}</ul></div>`;
+        html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">对账字段：</span><ul>${(c.reconFields || []).map((r) => `<li>类型#${r.leftType} ${escapeHtml(r.leftField)} ${escapeHtml(r.op === undefined ? '等于' : r.op)} 类型#${r.rightType} ${escapeHtml(r.rightField)}</li>`).join('')}</ul></div>`;
         const mv = c.markValue || {};
         html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">赋值：</span>类型#${mv.type} 的 ${escapeHtml(mv.field || '')} 写入 "${escapeHtml(String(mv.value || ''))}"</div>`;
       } else if (draft.category === 'gateway-recon-join') {

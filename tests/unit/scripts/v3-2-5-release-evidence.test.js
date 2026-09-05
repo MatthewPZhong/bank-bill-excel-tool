@@ -15,10 +15,19 @@ const {
   deepClone,
   generatePackageChecksumContent,
   verifyPackageChecksums,
-  validateReleaseEvidence
+  validateReleaseEvidence: validateReleaseEvidenceWithMetadata
 } = require('../../../scripts/validate-v3-2-5-release-evidence');
 
 const REPOSITORY_ROOT = path.resolve(__dirname, '../../..');
+
+// 冻结 R3.2.5 的测试使用该版元数据，后续迭代不得重写快照或放宽历史发布校验。
+function validateReleaseEvidence(snapshot, options = {}) {
+  return validateReleaseEvidenceWithMetadata(snapshot, {
+    packageJson: { version: '3.2.5' },
+    packageLock: { version: '3.2.5', packages: { '': { version: '3.2.5' } } },
+    ...options
+  });
+}
 
 function loadSnapshot() {
   return JSON.parse(fs.readFileSync(SNAPSHOT_PATH, 'utf8'));
@@ -326,6 +335,15 @@ test('package 或 lock 不是 3.2.5 时 fail closed', () => {
   const packageLock = JSON.parse(fs.readFileSync(path.join(REPOSITORY_ROOT, 'package-lock.json')));
   packageJson.version = '3.2.4';
   const result = validateReleaseEvidence(loadSnapshot(), { packageJson, packageLock });
+  assert.equal(result.valid, false);
+  assert.ok(codes(result).includes('PACKAGE_VERSION_MISMATCH'));
+});
+
+test('后续 3.2.6 版本不能冒充 R3.2.5 的发布证据', () => {
+  const result = validateReleaseEvidence(loadSnapshot(), {
+    packageJson: { version: '3.2.6' },
+    packageLock: { version: '3.2.6', packages: { '': { version: '3.2.6' } } }
+  });
   assert.equal(result.valid, false);
   assert.ok(codes(result).includes('PACKAGE_VERSION_MISMATCH'));
 });

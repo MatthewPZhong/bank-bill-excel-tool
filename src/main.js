@@ -10915,6 +10915,31 @@ function buildBigAccountOrderEvidence(pendingContext) {
       basis: recognitionBasis,
       allMerchantIds
     });
+    // 维护检查覆盖整份文件，独立于待提取行和已匹配的 accountKey。
+    // 桥接值必须在查询维护列表之前保留，未维护不能退化为“未识别”。
+    const maintenanceChecks = [];
+    if (entry.selfInputMerchant) {
+      const clearingIds = Array.isArray(recognitionBasis?.bridgeClearingIdsByBlock)
+        ? recognitionBasis.bridgeClearingIdsByBlock : [];
+      const windows = Array.isArray(recognitionBasis?.headerWindows)
+        ? recognitionBasis.headerWindows : [];
+      const blockOrdinals = new Set([
+        ...fileRows.map((row) => Number(row.fileBlockOrdinal)),
+        ...windows.map((_window, index) => index),
+        ...clearingIds.map((_id, index) => index)
+      ]);
+      [...blockOrdinals].filter((ordinal) => Number.isInteger(ordinal) && ordinal >= 0)
+        .sort((left, right) => left - right).forEach((blockOrdinal) => {
+          const previewRow = fileRows.find((row) => Number(row.fileBlockOrdinal) === blockOrdinal);
+          maintenanceChecks.push(Object.freeze({
+            blockOrdinal,
+            // 空段的预览行可能指向下一段交易，维护提示优先定位本段冻结表头。
+            sourceRowNumber: Number(windows[blockOrdinal]?.headerRowNumber || previewRow?.sourceRowNumber || 0),
+            extractedMerchantId: normalizeCell(clearingIds[blockOrdinal])
+              || normalizeCell(recognition.matches[blockOrdinal]?.merchantId)
+          }));
+        });
+    }
     const rows = fileRows.map((previewRow) => {
       const blockOrdinal = Number(previewRow.fileBlockOrdinal);
       const sourceRow = Number(previewRow.sourceRowNumber || 0);
@@ -10955,6 +10980,7 @@ function buildBigAccountOrderEvidence(pendingContext) {
       resolvedPath,
       fileName: path.basename(resolvedPath),
       rows: Object.freeze(rows),
+      maintenanceChecks: Object.freeze(maintenanceChecks),
       orderedAccountKeys: Object.freeze(
         rows.map((row) => row.accountKey).filter((accountKey) => accountKey !== '')
       )
@@ -10969,13 +10995,41 @@ function buildBigAccountOrderEvidence(pendingContext) {
 }
 
 function extractBigAccountOrderFromEvidence(pendingContext, mode, rowIndexes) {
-  const selectedRows = selectPendingBigAccountRows(pendingContext, mode, rowIndexes);
-  if (selectedRows.length === 0) {
-    return { status: 'error', failedRows: [], message: '请选择需要提取的大账号预览行' };
-  }
   const evidence = pendingContext.bigAccountOrderEvidence;
   if (!evidence || evidence.sessionId !== pendingContext.statementSelectionSessionId) {
     return { status: 'error', failedRows: [], message: '大账号选择预览已失效，请重新导入文件' };
+  }
+  const maintainedIds = new Set((pendingContext.bigAccounts || [])
+    .map((account) => normalizeCell(account.merchantId)).filter(Boolean));
+  const unmaintainedAccounts = [];
+  for (const file of evidence.files) {
+    const seen = new Set();
+    for (const check of (file.maintenanceChecks || [])) {
+      const merchantId = normalizeCell(check.extractedMerchantId);
+      const key = `${check.blockOrdinal}\u0000${merchantId}`;
+      if (!merchantId || maintainedIds.has(merchantId) || seen.has(key)) continue;
+      seen.add(key);
+      unmaintainedAccounts.push({
+        merchantId,
+        fileName: file.fileName,
+        fileOrdinal: file.fileOrdinal,
+        blockOrdinal: check.blockOrdinal,
+        sourceRowNumber: check.sourceRowNumber
+      });
+    }
+  }
+  if (unmaintainedAccounts.length) {
+    return {
+      status: 'error',
+      errorCode: 'BIG_ACCOUNT_NOT_MAINTAINED',
+      message: '存在未维护大账号，本次导入将终止。',
+      failedRows: [],
+      unmaintainedAccounts
+    };
+  }
+  const selectedRows = selectPendingBigAccountRows(pendingContext, mode, rowIndexes);
+  if (selectedRows.length === 0) {
+    return { status: 'error', failedRows: [], message: '请选择需要提取的大账号预览行' };
   }
   const accounts = [];
   const failedRows = [];

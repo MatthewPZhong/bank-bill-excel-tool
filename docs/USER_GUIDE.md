@@ -1,14 +1,38 @@
 # 清结算小助手使用手册
 
-版本：`v3.2.5`
+版本：`v3.2.6`
 
-> 版本说明：v3.2.5 已由发布负责人授权在 v3.2.4 完成正式技术发布后，经受保护 PR、唯一 annotated tag 与 Windows Release workflow 串行发布。Pending、BizOP、PreFund、Position、VCC Financial OP 与 Acquiring 的剩余只读导出，以及 Pending/BizOP/Acquiring/Position 的成熟执行器 adapter，已经纳入统一资源、receipt、取消与恢复审计；Action Manifest 覆盖 54 个 action。application effective production strategy 对全部 action 仍保持 legacy/0，production 继续关闭，日常用户入口、金额/币种和 Excel/Workbook 结果保持既有行为。
+> v3.2.6：银行对账单赋值自身支持“等于 / 包含”；提取大账号顺序时，明确识别出未维护账号会提示来源，确认后结束本次整批导入。首次使用请用脱敏样本核对匹配和账号归属。
 
-> 使用提醒：本版不会自动解除 Recovery Hold，也不会在 unknown、partial 或 committed-result-lost 状态下自动重跑。冻结 R3.2.5 evidence 中 Windows packaged 仍为 `NOT_RUN`，真实业务样本及资金/恢复仍为 `PENDING_HUMAN_REVIEW`，Excel/WPS、RSS 与稳定观察窗口也保持历史未执行状态；发布负责人已另行确认本次资金、恢复、真实业务样本及稳定窗口人工验收通过，但该签字不改写冻结快照，也不启用 production。最终 Windows Release 资产、SmartScreen、离线覆盖和在线更新仍按 Issue #220 发布后复核。遇到新的恢复要求时应先核对持久 intent、receipt、journal、Hold 与真实输出。
+> v3.2.5 历史版本说明：v3.2.5 已由发布负责人授权在 v3.2.4 完成正式技术发布后，经受保护 PR、唯一 annotated tag 与 Windows Release workflow 串行发布。Pending、BizOP、PreFund、Position、VCC Financial OP 与 Acquiring 的剩余只读导出，以及 Pending/BizOP/Acquiring/Position 的成熟执行器 adapter，已经纳入统一资源、receipt、取消与恢复审计；Action Manifest 覆盖 54 个 action。application effective production strategy 对全部 action 仍保持 legacy/0，production 继续关闭，日常用户入口、金额/币种和 Excel/Workbook 结果保持既有行为。
+
+> v3.2.5 历史验收说明：该版本不会自动解除 Recovery Hold，也不会在 unknown、partial 或 committed-result-lost 状态下自动重跑。冻结 R3.2.5 evidence 中 Windows packaged 仍为 `NOT_RUN`，真实业务样本及资金/恢复仍为 `PENDING_HUMAN_REVIEW`，Excel/WPS、RSS 与稳定观察窗口也保持历史未执行状态；发布负责人已另行确认本次资金、恢复、真实业务样本及稳定窗口人工验收通过，但该签字不改写冻结快照，也不启用 production。最终 Windows Release 资产、SmartScreen、离线覆盖和在线更新仍按 Issue #220 发布后复核。遇到新的恢复要求时应先核对持久 intent、receipt、journal、Hold 与真实输出。
 
 > 网银账单修复：模板管理中的重命名不再因空的任务 evidence 提前失败；人工补录上一账单日余额时，`0` 是合法余额。补录提交失败会显示错误并保留已填日期和余额，重新确认前不会重复提交；若原账单源文件已经不可用，软件会要求重新导入后再补录。
 
 ---
+
+## v3.2.6 操作更新
+
+### 银行对账单赋值自身：选择对账方式
+
+在【资金对账数据处理 → 场景管理 → 银行对账单赋值自身】中，每条对账字段可单选“等于”或“包含”，新增行与旧场景默认“等于”。“等于”保留原有比较方式；“包含”表示**左侧字段值包含右侧字段值**，两侧去除首尾空白后比较，区分大小写，任一侧为空不命中，数值 `0` 可以参与匹配。多条对账字段须全部满足。
+
+每条条件按自己选择的左右账单类型取值。例如第一条选择“类型 1 的币种等于类型 2 的币种”，第二条仍可选择“类型 2 的附言包含类型 1 的附言”；第二条按类型 2 包含类型 1 执行，不受第一条方向影响。
+
+只有配对双方都各自唯一时才会赋值并锁定。某行能匹配多行，或被多行匹配时，会报告对应歧义；交叉关系中的候选也会完整计入检查。相关配对不赋值、不锁定，其他独立合法配对继续处理。已有“等于”条件若使用反向类型且两端字段名不同，本版会修正取值来源，命中结果可能改变，请纳入验收核对。
+
+例如：左侧 `ABC123`、右侧 `123`，选择“包含”可以命中；交换左右后不命中。保存、编辑、复制、确认详情和场景导入导出都会保留选择。使用“包含”后如需降回旧版，先停用相关场景或改回“等于”。
+
+### 网银账单：未维护大账号的提醒
+
+导入 `MerchantId=自己输入` 的模板文件后，在大账号选择窗口点击【提取大账号顺序】，软件检查整批文件中明确识别出的所有账号，含已手动绑定、未参与提取以及保留的空交易分段。若有账号未维护，提醒会列出账号原值、文件和分段位置；长列表可滚动查看。
+
+定位行优先指向该账号分段的表头。即使首段、中间段或末尾分段没有交易，也可以按本段表头查找；没有表头位置信息时才使用预览行号。
+
+点击提醒里的【确认】会关闭大账号选择并结束**本次整批导入**，本批不生成明细和余额，也不保存本批账号顺序；以前成功导入的批次及结果保留。请先补充维护账号，再重新导入文件。取消失败时点击【重试取消】。
+
+完全提取不到账号时，可以确认提示后返回手动选择；账号已维护但存在多个币种时，继续按原提示选择币种。提取和完成请求处理中，请等待结果后再操作。
 
 ## 一、模块
 
