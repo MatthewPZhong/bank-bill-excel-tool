@@ -102,7 +102,7 @@
 | 最终 v3.2.4 远端 ancestry/CI | RESOLVED | v3.2.5 已从最终 v3.2.4 候选建立并完成 E13-A～F 精确父链 | 不再阻塞本地 v3.2.5。 |
 | 真实 action/task inventory 与 provenance 差异 | RESOLVED | E13-G 已重建 54-action/61-pair manifest、逐 pair provenance、AST/source hashes 与 mutants，current validator 29/29 | checksum 最终复验后进入 R3.2.5。 |
 | Position managed route authority 与 FilePlan/pending/receipt 全链路 | BLOCK（production） | 后续 route enablement + R3.2.5 Windows/真实样本/人工复核 | 不阻止 dormant E13-F；阻止 production。 |
-| Windows、真实文件、Excel/WPS、RSS、资金/恢复人工复核 | BLOCK（production） | release owner / Windows / 资金负责人 | 阻止 production/正式发布声明，不阻止 dormant implementation。 |
+| Windows、真实文件、Excel/WPS、RSS、资金/恢复人工复核 | RESOLVED（本次正式技术发布）/ BLOCK（production） | `MatthewPZhong` 已确认本次资金、恢复、真实业务样本及稳定窗口人工验收；Windows 资产实机项按 Issue #220 发布后补做 | 不再阻止本次正式技术发布；继续阻止 production enablement，冻结 R3 快照不改写。 |
 
 ## E13-G Current-tree Evidence
 
@@ -118,3 +118,49 @@
   [e13-g-implementation-notes.md](./e13-g-implementation-notes.md)。
 
 按用户明确要求，不运行 `release-check`、`check-vars` 或 `scan:vars`；这些项目不得记录为 PASS。
+
+## 2026-09-05 正式发布传播
+
+### Goal / Context / Constraints / Done when
+
+- Goal：把冻结候选 `138c5b43e345ff4c19f3bcf243bcb1f119c7c105` 通过自然合并传播到 v3.2.4 最终 `main=8e6d65a007cd04681e44cad6a391d2e7a3c50249` 之上，并完成 v3.2.5 正式技术发布。
+- Context：自然 `--no-ff` 合并只在三份发布文档产生冲突；代码与测试均已自动合并。冲突来自 v3.2.5 历史“技术收口、未发布”文案与 v3.2.4 最终发布事实同时修改文档顶部。
+- Constraints：候选必须为第一父、v3.2.4 最终 main 必须为第二父；不 rebase/cherry-pick/force，不改变金额、币种、匹配、Workbook、事务、receipt、恢复或 production strategy；冻结 R3 evidence 不改写；本地不运行 `release-check`、`check-vars`、`scan:vars`。
+- Done when：冲突按完整并集解决，发布文档和元数据测试一致；本地允许项通过；PR exact CI、review/thread、普通 merge、main exact CI、唯一 annotated tag、required-reviewer Release、四资产及最终版本链审计全部通过，且 production 保持 disabled/legacy。
+
+### Decisions / Evidence / Unknowns
+
+| 项目 | 分类/决定 | 证据与处理 |
+| --- | --- | --- |
+| 三份发布文档的事实合并 | PROBE → RESOLVED | 保留 v3.2.5 全部技术内容，采用 v3.2.4 最终 main 中的正式发布事实；v3.2.5 标题改为 2026-09-05 正式发布候选，不提前写正式发布结论。 |
+| 冻结 evidence 与当前人工授权 | DECISION | R3.2.5 的 `NOT_RUN` / `PENDING_HUMAN_REVIEW` 保持历史快照；`MatthewPZhong` 的当前人工验收和发布授权单独记录，不反写 evidence，也不授权 production。 |
+| 发布元数据回归 | PROBE → RESOLVED | `v3-2-5-release-metadata-closeout.test.js` 改为验证候选文案、版本不倒退、版本顺序、受保护 PR/唯一 tag/workflow 门禁及 production 关闭，避免把历史“未发布”断言当成当前合同。 |
+| 自动合并代码是否出现资金语义漂移 | PROBE → RESOLVED | 手工只读对照重要变量清单并完成 blindspot/reconciliation 复核：v3.2.4 传播只补入已发布的余额来源、lifecycle evidence、task-private duplicate staging 与 MPT 边界修复；v3.2.5 候选只新增 false-gated capability/只读 export 与结果证据，不改金额、币种、匹配键、Workbook 业务语义或正式目标写入顺序。 |
+| E13-G 历史 source hash 与传播后的 current tree 分离 | PROBE → RESOLVED | 官方 Node 22.18 定向集首次 `85/86 PASS`，唯一失败是历史 coverage report 的 `src/main.js` hash 与 v3.2.4 传播修复后的 current hash 不同；保持历史 JSON 不变，将该独立 gate 固定在冻结候选 `138c5b43…c105` 的临时只读 clone 中复验，随后相关测试 `10/10 PASS`。 |
+| 合并后扩展改动回归 | PROBE → RESOLVED | 使用官方 Node `v22.18.0`、精确 lockfile 依赖，对当前合并结果涉及的全部 `*.test.js` 逐文件串行复验，最终 `278/278 PASS`、`0 FAIL`；覆盖 v3.2.3/v3.2.4 历史 exact evidence。首次 harness 调用仅因 zsh 未拆分换行参数而未执行测试，改用 NUL 分隔后完成有效运行，未把空跑记为 PASS。 |
+| 远端 main/candidate/tag/Release/PR 漂移 | PROBE | 合并前已核对 main 和 candidate 精确 SHA，v3.2.5 tag/Release/开放 PR/远端 prep 分支均不存在；后续每个不可逆节点前再次精确核对。 |
+| 低影响格式选择 | ASSUME | 沿用 v3.2.3/v3.2.4 正式发布候选结构与措辞，保持三份发布文档同步。 |
+
+### 手工 check-vars（只读）
+
+- Critical `freezeWorkerBatchContext`：Acquiring/Position adapter 只消费 Main-owned exact-7，并逐字段绑定 exact-5 共有 owner；缺失或分叉均在 dispatcher/DB 写前 fail closed，未修改冻结器或字段集合。
+- Critical `unmatchedRows`：只新增 Acquiring adapter compact result 校验，强制 `matchedRows + unmatchedRows = totalBillRows` 且 `mismatchRows <= matchedRows`；未触及现有资金匹配或导出行选择。
+- Important-skeleton `parentRunId`：继续来自 batch/operation authority，不猜测、不改写；taskRunId/taskKey/moduleId/parentRunId/operationKey 的共有身份由 adapter 拒绝分叉。
+- Important-skeleton `normalizeBu`：复用既有 `String(v).trim().toLowerCase()` 仅作 BU 相等性比较，原始字面值、账户资金 key 与持久字段不改写。
+- Risk-sensitive Position store/checkpoint：只读 export 使用固定侧库普通文件、`DatabaseSync(..., { readOnly: true })`、`PRAGMA query_only=ON` 与 checkpoint freshness；不运行 migration。普通 run 仅在文件发布成功后补记 `exported_at`，失败显式 warning，不撤销或伪造文件结果。
+- Runtime-state/Minor：未发现改变用户会话默认路由或展示语义的命中。54 项 production strategy 均 `enabled=false`、`effectiveMode=legacy`、`effectiveWorkerCount=0`；Main 入口先查 `isProductionEnabled(action)`，false 时继续原 legacy Main 路径。
+
+### ⚠️ 关联功能 review（PR body）
+
+- Acquiring：复核 exact-5/7 owner、resume 持久 owner/output intent、D31 topology 以及 `matched + unmatched = total` 行数守恒。
+- BizOP：复核 BU 仅 trim/lower 比较、side/main source locator 与 dataset-head freshness；不改原始 BU 或账户 key。
+- Position：复核只读侧库/checkpoint、source file identity、schema→apply 安全点与发布后 `exported_at` 告警边界。
+- 通用 File Task/Publisher：复核 task-private staging、FilePlan 顺序、artifact hash/size、三次 freshness、单次 Publisher 与 terminal receipt ACK。
+- Production：复核所有 action 仍 false/legacy/0，外部 feature flag 无法绕过 policy disabled。
+
+### Blindspot / Reconciliation 结论
+
+- 来源 authority 覆盖 main/side DB locator、普通文件 identity、模板 hash、run/dataset revision 与 exact File Task owner；确认后任一漂移均 fail closed。
+- 输出只写 task-private staging，技术/业务回读通过后才按 FilePlan 单次发布；部分 unit、artifact tamper、Publisher/cleanup/metadata 失败均不会伪装完整成功。
+- 行数证据分别覆盖 Acquiring matched/unmatched 守恒、Position rowCount、PreFund 分渠道计数、VCC total/exportable/missing 守恒；零行/缺失来源按各原合同显式处理。
+- 本次传播没有改变金额正负、币种归一、资金匹配主键、SQL 业务筛选、Workbook 列/排序或账务持久化；未发现新增资损红线。人工验收仅解除本次技术发布门禁，不解除 production enablement。

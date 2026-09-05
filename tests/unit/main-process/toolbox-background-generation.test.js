@@ -481,6 +481,11 @@ test('Main 在 Publisher 前完成 ownership/stat/size/hash/业务回读，失�
     result.artifacts[0].outputArtifactKey = `output-${'b'.repeat(64)}`;
     return result;
   }, { errorCode: 'TOOLBOX_GENERATION_OWNERSHIP_MISMATCH' });
+  await runCase('split-count-mismatch', (result) => {
+    result.artifacts[0].dataRowCount = 0;
+    result.artifacts[0].matchedCount = 1;
+    return result;
+  }, { errorCode: 'TOOLBOX_GENERATION_MANIFEST_INVALID' });
   await runCase('missing', (result, generationPath) => {
     fs.rmSync(generationPath, { force: true });
     return result;

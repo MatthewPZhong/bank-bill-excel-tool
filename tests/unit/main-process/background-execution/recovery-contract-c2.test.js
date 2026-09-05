@@ -126,6 +126,52 @@ function createIntent(db, additions = {}) {
   return input;
 }
 
+function recoverySourceForIntent(intent) {
+  return normalizeRecoverySource({
+    contractVersion: 1,
+    sourceKind: intent.coordinationKind === 'main-owned-settlement'
+      ? 'target-post-image'
+      : 'critical-intent',
+    sourceRef: `${intent.coordinationKind === 'main-owned-settlement'
+      ? 'target-post-image'
+      : 'critical-intent'}:${intent.intentId}`,
+    actionKey: intent.actionKey,
+    operationKey: intent.operationKey,
+    taskRunId: intent.taskRunId,
+    conflictScopeKey: intent.conflictScopeKey,
+    inspectorKey: intent.inspectorKey,
+    settlementKey: null,
+    intentId: intent.intentId,
+    evidenceVersion: intent.evidenceVersion,
+    boundedEvidence: intent.boundedEvidence
+  });
+}
+
+function createActiveHold(db, source, additions = {}) {
+  const reasonCode = additions.reasonCode || 'INSPECTION_UNKNOWN';
+  const safeSummary = additions.safeSummary || { reasonCode };
+  const holdId = additions.holdId || `hold-test:${source.sourceRef}`;
+  writeTransition(db, {
+    entityKind: 'recovery-hold',
+    command: 'create-or-get',
+    input: {
+      contractVersion: 1,
+      holdId,
+      sourceKind: source.sourceKind,
+      sourceRef: source.sourceRef,
+      intentId: source.intentId,
+      actionKey: source.actionKey,
+      operationKey: source.operationKey,
+      taskRunId: source.taskRunId,
+      conflictScopeKey: source.conflictScopeKey,
+      reasonCode,
+      safeSummary,
+      evidenceHash: canonicalSha256(safeSummary)
+    }
+  }, { reasonCode });
+  return holdId;
+}
+
 function coordinatorFor(db, options = {}) {
   return createStartupRecoveryCoordinator({
     readRepository: createRecoveryControlReadRepository(db),
@@ -290,6 +336,32 @@ test('normal startup 空 control DB + frozen 空 registries 可完成零 source/
   const summary = await coordinatorFor(db, { inspectorRegistry, providerRegistry }).scanAndRecover();
   assert.deepEqual(summary, { sourceCount: 0, activeHoldCount: 0, decisions: [] });
   db.close();
+});
+
+test('fresh DB 在首次 scan 前由写仓库构造同步创建 recovery control schema', async () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec('PRAGMA foreign_keys = ON');
+  const inspectorRegistry = createInspectorRegistry();
+  inspectorRegistry.freeze();
+  const providerRegistry = createSettlementRecoveryProviderRegistry();
+  providerRegistry.freeze();
+  try {
+    const summary = await coordinatorFor(db, { inspectorRegistry, providerRegistry }).scanAndRecover();
+    assert.deepEqual(summary, { sourceCount: 0, activeHoldCount: 0, decisions: [] });
+    const tables = db.prepare(`
+      SELECT name FROM sqlite_master
+      WHERE type = 'table' AND name LIKE 'background_execution_recovery_%'
+      ORDER BY name
+    `).all().map((row) => row.name);
+    assert.deepEqual(tables, [
+      'background_execution_recovery_events',
+      'background_execution_recovery_holds',
+      'background_execution_recovery_observation_attempts',
+      'background_execution_recovery_request_owners'
+    ]);
+  } finally {
+    db.close();
+  }
 });
 
 test('worker-durable canary 在 COMMIT 后回包前 crash，重启 inspector 以同事务 receipt 收口 Intent', async () => {
@@ -707,6 +779,74 @@ test('active same-source Hold 下 Inspector/Provider failure 关联 primary hold
   }
   await t.test('inspector', () => runScenario('inspector'));
   await t.test('provider', () => runScenario('provider'));
+});
+
+test('active same-source Hold 仅在默认恢复链确定性完成后与终态原子解除', async (t) => {
+  for (const outcome of ['committed', 'not-committed', 'compensated']) {
+    await t.test(`critical intent ${outcome}`, async () => {
+      const db = openDb();
+      const intent = createIntent(db, {
+        intentId: `intent-held-${outcome}`,
+        operationKey: `operation-held-${outcome}`,
+        taskRunId: `task-held-${outcome}`,
+        conflictScopeKey: `scope:held-${outcome}`
+      });
+      const source = recoverySourceForIntent(intent);
+      createActiveHold(db, source);
+      const inspectorRegistry = createInspectorRegistry();
+      inspectorRegistry.register(intent.inspectorKey, async (value) => inspectionFor(value, outcome));
+      inspectorRegistry.freeze();
+      const providerRegistry = createSettlementRecoveryProviderRegistry();
+      providerRegistry.freeze();
+
+      const summary = await coordinatorFor(db, { inspectorRegistry, providerRegistry }).scanAndRecover();
+      const readRepository = createRecoveryControlReadRepository(db);
+      const persistedIntent = readRepository.getCriticalIntentById(intent.intentId);
+      const persistedHold = readRepository.getRecoveryHoldBySource(source.sourceKind, source.sourceRef);
+      assert.equal(summary.activeHoldCount, 0);
+      assert.equal(persistedIntent.state, 'closed');
+      assert.equal(persistedHold.status, 'resolved');
+      assert.equal(persistedHold.resolution, outcome);
+      assert.equal(
+        readRepository.listRecoveryEvents(source.taskRunId)
+          .filter((event) => event.eventType === 'hold-resolved').length,
+        1
+      );
+      db.close();
+    });
+  }
+
+  for (const outcome of ['completed', 'incomplete']) {
+    await t.test(`provider ${outcome}`, async () => {
+      const db = openDb();
+      const source = {
+        ...VALID_SOURCES[1],
+        sourceRef: `publisher-journal:held-${outcome}`,
+        operationKey: `operation-provider-held-${outcome}`,
+        taskRunId: `task-provider-held-${outcome}`,
+        conflictScopeKey: `scope:provider-held-${outcome}`
+      };
+      createActiveHold(db, source);
+      const inspection = inspectionFor(source, 'committed');
+      const inspectorRegistry = createInspectorRegistry();
+      inspectorRegistry.register(source.inspectorKey, async () => inspection);
+      inspectorRegistry.freeze();
+      const providerRegistry = createSettlementRecoveryProviderRegistry();
+      providerRegistry.register(source.settlementKey, {
+        listOpenSources: async () => [source],
+        recover: async () => settlementFor(source, inspection, outcome)
+      });
+      providerRegistry.freeze();
+
+      const summary = await coordinatorFor(db, { inspectorRegistry, providerRegistry }).scanAndRecover();
+      const persistedHold = createRecoveryControlReadRepository(db)
+        .getRecoveryHoldBySource(source.sourceKind, source.sourceRef);
+      assert.equal(summary.activeHoldCount, outcome === 'completed' ? 0 : 1);
+      assert.equal(persistedHold.status, outcome === 'completed' ? 'resolved' : 'active');
+      assert.equal(persistedHold.resolution, outcome === 'completed' ? 'committed' : null);
+      db.close();
+    });
+  }
 });
 
 test('inspection partial/compensated 与 Provider incomplete 按冻结结果语义收口', async (t) => {

@@ -43,6 +43,7 @@ const {
   FIXED_SAFETY_BYTES,
   PER_FILE_SAFETY_BYTES,
   assertMptSpoolDiskCapacity,
+  estimateMptFileSpoolBytes,
   estimateMptSpoolBytes
 } = require('../../../../src/main-process/pre-fund-reconciliation/mpt-import/spool-admission');
 const {
@@ -497,6 +498,7 @@ test('fatal/cancel原子拒绝permit与legacy observer，已提交和in-flight p
 });
 
 test('spool估算覆盖source放大与余量，溢出/不足fail closed且错误不泄露路径', async () => {
+  assert.equal(estimateMptFileSpoolBytes(100), 500 + PER_FILE_SAFETY_BYTES);
   assert.equal(
     estimateMptSpoolBytes([100]),
     500 + FIXED_SAFETY_BYTES + PER_FILE_SAFETY_BYTES

@@ -1,9 +1,13 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
 const { spawnSync } = require('node:child_process');
 const path = require('node:path');
 const test = require('node:test');
+
+const HISTORICAL_E13_G_REF = '138c5b43e345ff4c19f3bcf243bcb1f119c7c105';
 
 const {
   bindingSnapshot
@@ -251,13 +255,37 @@ test('重复 policy、durable 缺 inspector、artifact 缺 Publisher、service �
 
 test('已发布 E13-G 清单和策略快照由独立 gate 对当前模块导出复验', () => {
   const repositoryRoot = path.resolve(__dirname, '../../../..');
-  const result = spawnSync(
-    process.execPath,
-    [path.join(repositoryRoot, 'scripts/check-background-execution-manifest.js')],
-    { cwd: repositoryRoot, encoding: 'utf8' }
-  );
-  assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /E13-G manifest gate PASS: 324\/324 surfaces, 61 legacy pairs, 0 production enabled/);
+  const historicalRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'e13-g-history-'));
+  try {
+    const clone = spawnSync(
+      'git',
+      ['clone', '--quiet', '--no-checkout', repositoryRoot, historicalRoot],
+      { encoding: 'utf8' }
+    );
+    assert.equal(clone.status, 0, clone.stderr || clone.stdout);
+    const checkout = spawnSync(
+      'git',
+      ['checkout', '--quiet', '--detach', HISTORICAL_E13_G_REF],
+      { cwd: historicalRoot, encoding: 'utf8' }
+    );
+    assert.equal(checkout.status, 0, checkout.stderr || checkout.stdout);
+    const result = spawnSync(
+      process.execPath,
+      [path.join(historicalRoot, 'scripts/check-background-execution-manifest.js')],
+      {
+        cwd: historicalRoot,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          NODE_PATH: path.join(repositoryRoot, 'node_modules')
+        }
+      }
+    );
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /E13-G manifest gate PASS: 324\/324 surfaces, 61 legacy pairs, 0 production enabled/);
+  } finally {
+    fs.rmSync(historicalRoot, { recursive: true, force: true });
+  }
 });
 
 test('外部 feature flag 不能绕过 policy disabled，策略快照 drift 与未知 action 均被拒绝', () => {

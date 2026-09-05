@@ -1,6 +1,6 @@
 # Changelog
 
-## 3.2.5 - 2026-08-31（版本分支技术收口，未发布）
+## 3.2.5 - 2026-09-05（正式发布候选）
 
 > v3.2.5 完成后台执行平台的外围收口：Pending、BizOP、PreFund、Position、VCC Financial OP 与 Acquiring 的剩余只读导出获得模块专用执行器，Pending、BizOP、Acquiring 与 Position 的成熟执行器获得不额外 spawn 的 adapter；最终 Action Manifest 对 54 个 action 实现 324/324 surface coverage。业务 SQL、稳定排序、金额/币种、Workbook、事务、幂等、取消、恢复和进程拓扑保持既有语义；production enablement 仍为关闭。
 
@@ -20,10 +20,11 @@
 ### 收口边界
 
 - **版本元数据**：`package.json`、`package-lock.json` 与三份发布文档收口为 `3.2.5`；顶层 Spec/TechDoc 保留冻结来源 hash，并显式记录 current-tree 的 E13-B～G 证据型修订。
-- **生产仍关闭**：legacy seam 全部保留；Windows packaged 为 `NOT_RUN`，真实业务样本和资金/恢复为 `PENDING_HUMAN_REVIEW`，Excel/WPS、RSS 与稳定观察窗口尚未执行。自动测试不能代替这些人工门禁，也不能据此启用 production。
-- **未执行正式发布动作**：本收口不合并 `main`、不创建 tag、不发布或启用 production；`release-check`、`check-vars`、`scan:vars` 按用户要求跳过，不能记录为 PASS。
+- **生产仍关闭**：legacy seam 全部保留；冻结 R3.2.5 evidence 中 Windows packaged 的 `NOT_RUN`，真实业务样本和资金/恢复的 `PENDING_HUMAN_REVIEW`，以及 Excel/WPS、RSS 与稳定观察窗口的未执行状态保持不可篡改。自动测试和本次发布授权都不能据此启用 production。
+- **历史证据与当前授权分层**：发布负责人 `MatthewPZhong` 于 2026-09-05 另行确认本次资金、恢复、真实业务样本及稳定窗口人工验收通过；该签字只覆盖本次正式技术发布，不改写冻结 R3 快照，也不授权 production。
+- **发布授权与生产边界**：本版已获授权经受保护 PR、唯一 annotated tag 与 Windows Release workflow 发布技术 stable Release；workflow 内置 `release-check` 获授权，application production strategy、feature flag 与 effective worker 继续 disabled/legacy。最终 v3.2.5 资产产生后的 Windows 10/11 Setup/portable、SmartScreen、离线覆盖安装与 `production/latest` canary 按 Issue #220 在发布后逐项补做；本地 `release-check` / `check-vars` / `scan:vars` 未运行且不得记录为 PASS。
 
-## 3.2.4 - 2026-08-30（版本分支技术收口，未发布）
+## 3.2.4 - 2026-09-04（正式发布候选）
 
 > v3.2.4 把对账单修复 ReconFix 的长驻状态、JPM 资金写回与多文件发布，以及 VCC 财务 OP 的只读单 Writer、主体查询下推和最多双 Writer 输出图，收口到具备资源治理、幂等 receipt、Inspector 与崩溃恢复保护的后台执行 capability。金额、币种、方向、匹配、Workbook、样式、行序和既有用户流程保持不变；production enablement 仍为关闭。
 
@@ -43,10 +44,10 @@
 
 - **版本与规范**：`package.json`、`package-lock.json` 收口为 `3.2.4`；顶层 Spec/TechDoc 与冻结基线逐字节一致。
 - **生产仍关闭**：6 个 ReconFix/VCC action 已注册且可独立审计，但 effective production strategy 仍为 legacy/0；不新增用户开关，也不切换现有生产路径。
-- **人工门禁未代偿**：Windows packaged/Setup/portable、真实 JPM/VCC 文件、金额/币种/输出、Excel/WPS、进程终止和资金/恢复处置仍需 release owner 与资金负责人人工复核。自动测试不能把这些项目声明为 PASS。
-- **未执行正式发布动作**：本收口不合并 `main`、不创建 tag、不发布或启用 production；`release-check`、`check-vars`、`scan:vars` 按用户要求跳过，不能记录为 PASS。
+- **历史证据与当前授权分层**：冻结 R3.2.4 evidence 中的 `PENDING_HUMAN_REVIEW` / `NOT_RUN` 保持不可篡改，不能由自动测试代偿；发布负责人 `MatthewPZhong` 于 2026-09-04 另行确认本次资金、恢复、真实业务样本及稳定窗口人工验收通过，该签字只覆盖本次发布。
+- **发布授权与生产边界**：Issue #220 授权本版经受保护 PR、唯一 annotated tag 与 Windows Release workflow 发布技术 stable Release；production strategy、feature flag 与 effective worker 继续 disabled/legacy。PR 与 tag workflow 必须分别通过 `smoke-test`、`build` 和内置 `release-check`；最终 v3.2.4 资产产生后的 Windows 10/11 Setup/portable、SmartScreen、离线覆盖安装与 `production/latest` canary 按 Issue #220 在发布后逐项补做。本地 `scan:vars` / `check:vars` / `release-check` 未运行且不得记录为 PASS。
 
-## 3.2.3 - 2026-08-30（版本分支技术收口，未发布）
+## 3.2.3 - 2026-09-04（正式发布候选）
 
 > v3.2.3 把网银账单 Statement 的大状态导入、交互式 continuation、current/all 生成与 manual balance seed，以及新开银行账户 NewAccount 的生成和另存为发布，收口到具备资源治理、幂等 receipt 与崩溃恢复保护的后台执行 capability。金额/币种、借贷方向、余额、Workbook、行序、命名和既有用户流程保持不变；production enablement 仍为关闭。
 
@@ -61,12 +62,12 @@
 
 - **版本与规范**：`package.json`、`package-lock.json` 收口为 `3.2.3`；顶层 Spec/TechDoc 与冻结基线逐字节一致。
 - **生产仍关闭**：能力、策略和 release evidence 已具备审计基础，但 effective production strategy 仍为 legacy/0；不新增用户开关，也不切换现有生产路径。
-- **人工门禁未代偿**：Windows packaged/Setup/portable、真实 Statement/NewAccount 文件、金额/币种/余额、Excel/WPS 展示以及恢复处置仍需 release owner 与资金负责人人工复核。自动测试不能把这些项目声明为 PASS。
-- **未执行正式发布动作**：本收口不合并 `main`、不创建 tag、不发布或启用 production；`release-check`、`check-vars`、`scan:vars` 按用户要求跳过，不能记录为 PASS。
+- **人工验收与发布后边界**：发布负责人 `MatthewPZhong` 于 2026-09-04 明确确认资金、恢复、真实业务样本及稳定窗口人工验收通过；该签字只覆盖本次发布。最终 v3.2.3 资产产生后才能完成的 Windows 10/11 Setup/portable、SmartScreen、离线覆盖安装与 `production/latest` canary 按 Issue #220 在发布后逐项补做。
+- **发布授权与生产边界**：Issue #220 授权本版经受保护 PR、唯一 annotated tag 与 Windows Release workflow 发布技术 stable Release；production strategy、feature flag 与 effective worker 继续 disabled/legacy。PR 与 tag workflow 必须分别通过 `smoke-test`、`build` 和内置 `release-check`；本地 `scan:vars` / `check:vars` / `release-check` 未运行且不得记录为 PASS。
 
-## 3.2.2 - 2026-08-31（版本分支技术收口，未发布）
+## 3.2.2 - 2026-09-04（正式发布）
 
-> v3.2.2 把资金对账、重复入金匹配与月度银行对账单 BU 回填校验的重状态和长任务迁入受资源治理的后台执行基础设施；业务顺序、金额/币种、Workbook、幂等和既有用户操作合同保持不变。代码合并时 production enablement 仍为关闭，本条不表示已经发布到 `main`、创建 tag 或启用生产策略。
+> v3.2.2 把资金对账、重复入金匹配与月度银行对账单 BU 回填校验的重状态和长任务迁入受资源治理的后台执行基础设施；业务顺序、金额/币种、Workbook、幂等和既有用户操作合同保持不变。发布负责人已授权本版在 v3.2.1 完成正式技术发布后，经受保护 PR、唯一 annotated tag 与 Windows Release workflow 串行发布；application production enablement 始终保持关闭。
 
 ### FundRecon / Duplicate / BankBU 后台执行
 
@@ -75,17 +76,29 @@
 - **BankBU one-shot Worker 与可选 dual parser**：导入、运行和导出采用独立 job；双 parser 只负责两个输入，月库事务、匹配顺序、side/main mirror 和 committed receipt 不变。
 - **资源、幂等与崩溃边界**：Service generation、reservation、busy/close、operationKey、receipt、inspector、Recovery Hold 和文件发布均采用冻结合同；unknown/partial/committed-result-lost 不会静默降级为普通失败或自动重跑。
 
+### 网银账单稳定性修复
+
+- **模板重命名恢复**：普通 no-file 配置任务在没有模块自定义 evidence 时使用合法空对象，同时保留最终 Hold 复核；模板重命名不再在业务执行前报“beforeStart evidence 必须是对象”。
+- **人工余额补录 FilePlan**：内存账单会话沿用真实导入源文件建立 eager FilePlan；所有来源都缺失时在写盘前明确要求重新导入，不再生成空 FilePlan。
+- **余额 0 与失败反馈**：余额 `0` 继续按合法数值保存；补录 IPC 失败会显示错误、保留日期和余额草稿，并阻止重复提交，覆盖确认仍只使用 opaque context。
+
 ### 收口边界
 
 - **版本与规范**：`package.json`、`package-lock.json` 收口为 `3.2.2`；顶层 Spec/TechDoc 与冻结基线逐字节一致。
 - **生产仍关闭**：本版只完成 capability 与审计证据，不启用新的 effective production strategy；现有用户路径继续走既有安全策略。
-- **人工门禁未代偿**：Windows packaged/WAL/退出边界、真实资金样本、金额/币种/匹配结果及恢复处置仍需 release owner 人工复核。自动测试不能把这些项目声明为 PASS。
-- **未执行正式发布动作**：本收口不合并 `main`、不创建 tag、不发布或启用 production；`release-check`、`check-vars`、`scan:vars` 按用户要求跳过，不能记录为 PASS。
+- **人工验收与发布后边界**：发布负责人 `MatthewPZhong` 于 2026-09-04 明确确认资金、恢复、真实业务样本及稳定窗口人工验收通过；该签字只覆盖本次发布。最终 v3.2.2 资产产生后才能完成的 Windows 10/11 Setup/portable、SmartScreen、离线覆盖安装与 `production/latest` canary 按 Issue #220 在发布后逐项补做。
+- **发布授权与生产边界**：Issue #220 授权本版经受保护 PR、annotated tag 与 Windows Release workflow 发布技术 stable Release；production strategy、feature flag 与 effective worker 继续 disabled/legacy。PR 与 tag workflow 必须分别通过 `smoke-test`、`build` 和内置 `release-check`；本地 `scan:vars` / `check:vars` 未运行且不得记录为 PASS。
+
+### 正式发布结论
+
+- **受保护合并与不可变 tag**：PR #225 以普通 merge 合入；最终 `main` 为 `c2d23f5981b1b2218b0988cf13e7e048e02ced46`。annotated tag `v3.2.2`（tag object `9be1783cec1e3629d2ba3d8faa2d49d0cf999c04`）peeled 后精确指向该提交。
+- **Release 与资产回读**：Windows Release workflow run `33835873671` 全部步骤成功，并创建公开、非 draft、非 prerelease 的 latest Release。Setup、portable、blockmap 与 `latest.yml` 四项资产已完整下载；大小、GitHub SHA-256、Setup SHA-512 及更新元数据全部一致。
+- **生产与补测边界**：application production 仍为 disabled/legacy；技术 Release 不代替 Issue #220 中 Windows 10/11、SmartScreen、离线覆盖和 `production/latest` canary 的发布后人工补测。
 
 
-## 3.2.1 - 2026-08-31（版本分支技术收口，未发布）
+## 3.2.1 - 2026-09-03（正式发布）
 
-> v3.2.1 在 v3.2.0 公共后台执行底座上完成 Toolbox 受管生成 Worker/密封 route DB，以及 PreFund MPT parser spool、durable receipt、单 Writer和受限 parser pool capability；文件顺序、金额/币种、事务、Workbook、幂等和正式发布合同保持不变。代码合并时 production enablement 仍为关闭，本条不表示已经发布到 `main`、创建 tag 或启用生产策略。
+> v3.2.1 在 v3.2.0 公共后台执行底座上完成 Toolbox 受管生成 Worker/密封 route DB，以及 PreFund MPT parser spool、durable receipt、单 Writer和受限 parser pool capability；文件顺序、金额/币种、事务、Workbook、幂等和正式发布合同保持不变。发布负责人已授权本版在 v3.2.0 完成正式技术发布后，经受保护 PR、唯一 annotated tag 与 Windows Release workflow 串行发布；application production enablement 始终保持关闭。
 
 ### Toolbox 与 PreFund 受控后台执行
 
@@ -96,14 +109,20 @@
 
 ### 收口边界
 
-- **版本与规范**：`package.json`、`package-lock.json` 收口为 `3.2.1`；顶层 Spec/TechDoc 与冻结基线逐字节一致，最终 v3.2.0 收口为真实祖先。
+- **版本与规范**：`package.json`、`package-lock.json` 收口为 `3.2.1`；顶层 Spec/TechDoc 与冻结基线逐字节一致，正式发布的 v3.2.0 最终 `main` 合并提交通过 natural merge 成为真实祖先。
 - **生产仍关闭**：E04-C/E05-C 的拒绝或未满足 gate 保持有效，capability 不等于生产切路，也不新增用户开关。
-- **人工门禁未代偿**：Windows packaged/退出、PreFund 真实资金样本、金额/币种/文件顺序和恢复处置仍需 release owner/资金负责人复核。自动测试不能把这些项目声明为 PASS。
-- **未执行正式发布动作**：本收口不合并 `main`、不创建 tag、不发布或启用 production；`release-check`、`check-vars`、`scan:vars` 按用户要求跳过，不能记录为 PASS。
+- **人工验收与发布后边界**：发布负责人 `MatthewPZhong` 于 2026-09-03 明确确认资金、恢复、真实业务样本及稳定窗口人工验收通过；该签字只覆盖本次发布。最终 v3.2.1 资产产生后才能完成的 Windows 10/11 Setup/portable、SmartScreen、离线覆盖安装与 `production/latest` canary 按 Issue #220 在发布后逐项补做。
+- **发布授权与生产边界**：Issue #220 授权本版经受保护 PR、annotated tag 与 Windows Release workflow 发布技术 stable Release；production strategy、feature flag 与 effective worker 继续 disabled/legacy。PR 与 tag workflow 必须分别通过 `smoke-test`、`build` 和内置 `release-check`；本地 `scan:vars` / `check:vars` 未运行且不得记录为 PASS。
 
-## 3.2.0 - 2026-08-31（版本分支技术收口，未发布）
+### 正式发布结论
 
-> v3.2.0 建立公共后台执行 Supervisor、冻结协议与恢复控制底座，并让 VCC 财务 OP 多文件读取进入受资源治理的 parser pipeline；金额、币种、月份、事务、Workbook、幂等和正式文件发布合同保持不变。代码合并时 production enablement 仍为关闭，本条不表示已经发布到 `main`、创建 tag 或启用生产策略。
+- **受保护合并与不可变 tag**：PR #223 与 safe forward-fix PR #224 均以普通 merge 合入；最终 `main` 为 `c547097c8829c1c39437fe9047b5accbf5f1e388`。annotated tag `v3.2.1`（tag object `1e3cee87d874d349725a6e39acdde3e51b8e503a`）peeled 后精确指向该提交。
+- **Release 与资产回读**：Windows Release workflow run `33807861470` 全部步骤成功，并创建公开、非 draft、非 prerelease 的 latest Release。Setup、portable、blockmap 与 `latest.yml` 四项资产已完整下载；大小、GitHub SHA-256、Setup SHA-512 及更新元数据全部一致。
+- **生产与补测边界**：application production 仍为 disabled/legacy；技术 Release 不代替 Issue #220 中 Windows 10/11、SmartScreen、离线覆盖和 `production/latest` canary 的发布后人工补测。
+
+## 3.2.0 - 2026-09-03（正式发布）
+
+> v3.2.0 建立公共后台执行 Supervisor、冻结协议与恢复控制底座，并让 VCC 财务 OP 多文件读取进入受资源治理的 parser pipeline；金额、币种、月份、事务、Workbook、幂等和正式文件发布合同保持不变。本版已通过受保护 PR、annotated tag 和 Windows Release workflow 完成正式技术发布；application production enablement 始终保持关闭。
 
 ### 公共后台执行底座与 VCC OP Pipeline
 
@@ -116,8 +135,14 @@
 
 - **版本与规范**：`package.json`、`package-lock.json` 收口为 `3.2.0`；顶层 Spec/TechDoc 与冻结基线逐字节一致。
 - **生产仍关闭**：本版只完成 capability 与审计证据，不启用新的 effective production strategy；现有用户路径继续走既有安全策略。
-- **人工门禁未代偿**：Windows packaged/退出与目录 fsync、VCC OP 真实样本、金额/币种/月份结果及资金/恢复处置仍需 release owner/业务负责人复核。自动测试不能把这些项目声明为 PASS。
-- **未执行正式发布动作**：本收口不合并 `main`、不创建 tag、不发布或启用 production；`release-check`、`check-vars`、`scan:vars` 按用户要求跳过，不能记录为 PASS。
+- **人工验收与发布后边界**：发布负责人 `MatthewPZhong` 于 2026-09-03 明确确认资金、恢复、真实业务样本及稳定窗口人工验收通过；该签字不由自动测试代替，也不泛化到未来数据。Windows 10/11 Setup/portable、SmartScreen、离线覆盖安装与 `production/latest` canary 按 Issue #220 的发布前豁免在发布后逐项补做。
+- **发布授权与生产边界**：Issue #220 已稳定记录实际批准人、完整范围、失败规则和补测计划；本版只允许技术 Release，production strategy、feature flag 与全部 effective worker 继续 disabled/legacy。PR 与 tag workflow 必须分别通过 `smoke-test`、`build` 和内置 `release-check`；本地 `scan:vars` / `check:vars` 未运行且不得记录为 PASS，合并前改用 `check-vars` skill 对实际 diff 做只读扫描。
+
+### 正式发布结论
+
+- **受保护合并与不可变 tag**：PR #221 以 merge commit `92380fd84471b061b7a84842be7da001aa82db87` 合入 `main`；annotated tag `v3.2.0`（tag object `8d7c85fdb73542c9c0564c2783e319fb7b8718db`）peeled 后精确指向该提交。
+- **Release 与资产回读**：Windows Release workflow run `33731833335` 的受控 attempt 2 全部步骤成功，并创建公开、非 draft、非 prerelease 的 latest Release。Setup、portable、blockmap 与 `latest.yml` 四项资产已独立下载；大小、GitHub SHA-256、Setup SHA-512 及更新元数据全部一致。首次 attempt 在 runner 前因旧 environment ref policy 拒绝 tag；策略修正为仅允许 `v*.*.*` tag 后使用一次明确授权的 failed-jobs rerun，期间未改写 tag、代码或资产。
+- **生产与补测边界**：application production 仍为 disabled/legacy；技术 Release 不代替 Issue #220 中 Windows 10/11、SmartScreen、离线覆盖和 `production/latest` canary 的发布后人工补测。
 
 ## 3.1.14 - 2026-08-21
 

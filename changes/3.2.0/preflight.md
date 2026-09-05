@@ -23,3 +23,10 @@
 3. 同步三份发布文档，不把 dormant capability 表述为 production enabled。
 4. 修正仅针对“当前版本”的旧测试锁定，同时保留 v3.1.14 历史发布证据。
 5. 做字节、JSON、diff、文档交叉校验和适当完整单测；保留人工门禁。
+
+## 2026-09-03 Release Preflight Addendum
+
+- Goal：在不改变业务实现或 production strategy 的前提下，把已冻结 v3.2.0 候选作为六版本串行发布的第一版合入受保护 `main` 并创建技术 stable Release。
+- Authorization：发布负责人 `MatthewPZhong` 已在当前任务明确批准，稳定记录为 Issue #220；资金、恢复、真实样本和稳定窗口由发布负责人确认人工验收通过。
+- Constraints：最终 Windows Release 资产尚未产生的 Setup/portable、SmartScreen、离线覆盖与 `production/latest` canary 采用 Issue #220 的发布前豁免，发布后逐项补做；production 始终 disabled/legacy。
+- Done when：发布准备 PR exact checks 全绿并以普通 merge commit 合入；annotated `v3.2.0` 精确指向发布时 `main`；Release workflow 和四项资产独立回读成功；随后才能开始 v3.2.1。

@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { Readable } = require('node:stream');
 const test = require('node:test');
 const XLSX = require('xlsx');
 const { DatabaseSync } = require('node:sqlite');
@@ -45,6 +46,17 @@ function runtime() {
 
 function allowStartupGate() {
   return Object.freeze({ assertOperationAllowed() { return true; } });
+}
+
+function exportStagingPlan(stagingRoot, options = {}) {
+  return {
+    version: 1,
+    stagingRoot,
+    outputs: [{
+      artifactKey: options.artifactKey || `output-${'a'.repeat(64)}`,
+      stagingPath: options.stagingPath || path.join(stagingRoot, 'result.xlsx')
+    }]
+  };
 }
 
 function withStatus(legacy) {
@@ -239,7 +251,9 @@ test('legacy导入或运行自身失败时不重复执行destructive cleanup', a
 test('import/run/export复用同一Service并返回有界状态与真实artifact', async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'duplicate-managed-lifecycle-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const savePath = path.join(dir, 'result.xlsx');
+  const stagingRoot = path.join(dir, 'task-private');
+  const savePath = path.join(stagingRoot, 'result.xlsx');
+  fs.mkdirSync(stagingRoot, { recursive: true });
   let constructed = 0;
   const adopted = [];
   const legacy = withStatus({
@@ -278,7 +292,9 @@ test('import/run/export复用同一Service并返回有界状态与真实artifact
   }, jobContext);
   const ran = await service.execute('duplicate:run', { runtime: runtime() }, jobContext);
   const exported = await service.execute('duplicate:export', {
-    runtime: runtime(), savePath
+    runtime: runtime(), stagingPlan: exportStagingPlan(stagingRoot, {
+      artifactKey: `output-${'b'.repeat(64)}`
+    })
   }, {});
   assert.equal(constructed, 1);
   assert.deepEqual(adopted.map((entry) => entry.adoption.candidateRevision), [2, 4]);
@@ -287,12 +303,199 @@ test('import/run/export复用同一Service并返回有界状态与真实artifact
   assert.equal(ran.runId, 12);
   assert.equal(exported.stateRevision, 4);
   assert.equal(exported.artifacts.length, 1);
+  assert.equal(exported.artifacts[0].artifactKey, `output-${'b'.repeat(64)}`);
   assert.equal(exported.artifacts[0].stagingPath, savePath);
   assert.equal(exported.artifacts[0].byteSize, Buffer.byteLength('real-export-bytes'));
   assert.match(exported.artifacts[0].sha256, /^[a-f0-9]{64}$/);
   assert.deepEqual(Object.keys(service.status()).sort(), [
     'active', 'closed', 'stableSummary', 'stateRevision'
   ]);
+});
+
+test('managed export只接受task-private stagingPlan并拒绝覆盖既有target', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'duplicate-managed-plan-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const stagingRoot = path.join(dir, 'task-private');
+  const outsidePath = path.join(dir, 'formal-output.xlsx');
+  let exportCalls = 0;
+  const legacy = withStatus({
+    bankSession: { rowCount: 1 },
+    documentSession: { rowCount: 1 },
+    lastRun: { summary: { mailRowCount: 1, manualRowCount: 0 } },
+    async export({ savePath }) {
+      exportCalls += 1;
+      fs.writeFileSync(savePath, 'unexpected');
+    }
+  });
+  const service = createDuplicateManagedService({
+    startupGate: allowStartupGate(),
+    createMirrorDatabase: () => ({ close() {} }),
+    createLegacyService: () => legacy
+  });
+
+  await assert.rejects(
+    () => service.execute('duplicate:export', { runtime: runtime(), savePath: outsidePath }),
+    (error) => error.code === 'DUPLICATE_EXPORT_FILE_PLAN_INVALID'
+  );
+  await assert.rejects(
+    () => service.execute('duplicate:export', {
+      runtime: runtime(),
+      stagingPlan: exportStagingPlan(stagingRoot, { artifactKey: 'not-a-file-plan-key' })
+    }),
+    (error) => error.code === 'DUPLICATE_EXPORT_FILE_PLAN_INVALID'
+  );
+  await assert.rejects(
+    () => service.execute('duplicate:export', {
+      runtime: runtime(),
+      stagingPlan: exportStagingPlan(stagingRoot, { stagingPath: outsidePath })
+    }),
+    (error) => error.code === 'DUPLICATE_EXPORT_STAGING_ESCAPE'
+  );
+  fs.mkdirSync(stagingRoot, { recursive: true });
+  const existingPath = path.join(stagingRoot, 'existing.xlsx');
+  fs.writeFileSync(existingPath, 'do-not-overwrite');
+  await assert.rejects(
+    () => service.execute('duplicate:export', {
+      runtime: runtime(),
+      stagingPlan: exportStagingPlan(stagingRoot, { stagingPath: existingPath })
+    }),
+    (error) => error.code === 'DUPLICATE_EXPORT_STAGING_TARGET_EXISTS'
+  );
+  assert.equal(fs.readFileSync(existingPath, 'utf8'), 'do-not-overwrite');
+  assert.equal(fs.existsSync(outsidePath), false);
+  assert.equal(exportCalls, 0);
+});
+
+test('managed export拒绝task-private目录的物理符号链接逃逸', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'duplicate-managed-symlink-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const stagingRoot = path.join(dir, 'task-private');
+  const outsideDir = path.join(dir, 'outside');
+  const linkedParent = path.join(stagingRoot, 'linked-parent');
+  fs.mkdirSync(stagingRoot, { recursive: true });
+  fs.mkdirSync(outsideDir, { recursive: true });
+  fs.symlinkSync(outsideDir, linkedParent, process.platform === 'win32' ? 'junction' : 'dir');
+  let exportCalls = 0;
+  const service = createDuplicateManagedService({
+    startupGate: allowStartupGate(),
+    createMirrorDatabase: () => ({ close() {} }),
+    createLegacyService: () => withStatus({
+      bankSession: { rowCount: 1 },
+      documentSession: { rowCount: 1 },
+      lastRun: { summary: { mailRowCount: 1, manualRowCount: 0 } },
+      async export() { exportCalls += 1; }
+    })
+  });
+  await assert.rejects(
+    () => service.execute('duplicate:export', {
+      runtime: runtime(),
+      stagingPlan: exportStagingPlan(stagingRoot, {
+        stagingPath: path.join(linkedParent, 'result.xlsx')
+      })
+    }),
+    (error) => error.code === 'DUPLICATE_EXPORT_STAGING_SYMLINK_ESCAPE'
+  );
+  assert.equal(exportCalls, 0);
+  assert.equal(fs.existsSync(path.join(outsideDir, 'result.xlsx')), false);
+
+  const nestedOutsideDir = path.join(outsideDir, 'must-not-be-created');
+  await assert.rejects(
+    () => service.execute('duplicate:export', {
+      runtime: runtime(),
+      stagingPlan: exportStagingPlan(stagingRoot, {
+        stagingPath: path.join(linkedParent, 'must-not-be-created', 'result.xlsx')
+      })
+    }),
+    (error) => error.code === 'DUPLICATE_EXPORT_STAGING_PARENT_INVALID'
+  );
+  assert.equal(exportCalls, 0);
+  assert.equal(fs.existsSync(nestedOutsideDir), false);
+});
+
+test('managed export失败清理已生成staging，清理失败保留双重错误', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'duplicate-managed-cleanup-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const firstRoot = path.join(dir, 'first-task');
+  const firstPath = path.join(firstRoot, 'result.xlsx');
+  fs.mkdirSync(firstRoot, { recursive: true });
+  const firstFailure = Object.assign(new Error('writer failed after output'), { code: 'WRITER_FAILED' });
+  const firstService = createDuplicateManagedService({
+    startupGate: allowStartupGate(),
+    createMirrorDatabase: () => ({ close() {} }),
+    createLegacyService: () => withStatus({
+      bankSession: { rowCount: 1 },
+      documentSession: { rowCount: 1 },
+      lastRun: { summary: { mailRowCount: 1, manualRowCount: 0 } },
+      async export({ savePath }) {
+        fs.writeFileSync(savePath, 'partial');
+        throw firstFailure;
+      }
+    })
+  });
+  await assert.rejects(
+    () => firstService.execute('duplicate:export', {
+      runtime: runtime(), stagingPlan: exportStagingPlan(firstRoot)
+    }),
+    (error) => error === firstFailure
+  );
+  assert.equal(fs.existsSync(firstPath), false);
+
+  const hashFailure = Object.assign(new Error('hash stream failed'), { code: 'HASH_FAILED' });
+  const hashFs = Object.create(fs);
+  hashFs.createReadStream = () => new Readable({
+    read() { this.destroy(hashFailure); }
+  });
+  const hashRoot = path.join(dir, 'hash-task');
+  const hashPath = path.join(hashRoot, 'result.xlsx');
+  fs.mkdirSync(hashRoot, { recursive: true });
+  const hashService = createDuplicateManagedService({
+    fsImpl: hashFs,
+    startupGate: allowStartupGate(),
+    createMirrorDatabase: () => ({ close() {} }),
+    createLegacyService: () => withStatus({
+      bankSession: { rowCount: 1 },
+      documentSession: { rowCount: 1 },
+      lastRun: { summary: { mailRowCount: 1, manualRowCount: 0 } },
+      async export({ savePath }) { fs.writeFileSync(savePath, 'complete-before-hash'); }
+    })
+  });
+  await assert.rejects(
+    () => hashService.execute('duplicate:export', {
+      runtime: runtime(), stagingPlan: exportStagingPlan(hashRoot)
+    }),
+    (error) => error === hashFailure
+  );
+  assert.equal(fs.existsSync(hashPath), false);
+
+  const cleanupFailure = Object.assign(new Error('cleanup denied'), { code: 'EACCES' });
+  const fsImpl = Object.create(fs);
+  fsImpl.rmSync = () => { throw cleanupFailure; };
+  const secondRoot = path.join(dir, 'second-task');
+  const secondPath = path.join(secondRoot, 'result.xlsx');
+  fs.mkdirSync(secondRoot, { recursive: true });
+  const secondFailure = Object.assign(new Error('writer failed again'), { code: 'WRITER_FAILED' });
+  const secondService = createDuplicateManagedService({
+    fsImpl,
+    startupGate: allowStartupGate(),
+    createMirrorDatabase: () => ({ close() {} }),
+    createLegacyService: () => withStatus({
+      bankSession: { rowCount: 1 },
+      documentSession: { rowCount: 1 },
+      lastRun: { summary: { mailRowCount: 1, manualRowCount: 0 } },
+      async export({ savePath }) {
+        fs.writeFileSync(savePath, 'partial');
+        throw secondFailure;
+      }
+    })
+  });
+  await assert.rejects(
+    () => secondService.execute('duplicate:export', {
+      runtime: runtime(), stagingPlan: exportStagingPlan(secondRoot)
+    }),
+    (error) => error.code === 'DUPLICATE_EXPORT_STAGING_CLEANUP_FAILED' &&
+      error.cause === secondFailure && error.cleanupError === cleanupFailure
+  );
+  assert.equal(fs.readFileSync(secondPath, 'utf8'), 'partial');
 });
 
 test('真实managed status对纯Inbound、MPT stale与side unavailable保持canExport单一真值', async (t) => {
@@ -347,6 +550,17 @@ test('真实managed status对纯Inbound、MPT stale与side unavailable保持canE
     runtime: workerRuntime
   }, jobContext);
   assert.equal(exportable.summary.canExport, true);
+  const exportRoot = path.join(dir, 'real-export-task');
+  const exportPath = path.join(exportRoot, 'result.xlsx');
+  fs.mkdirSync(exportRoot, { recursive: true });
+  const exported = await service.execute('duplicate:export', {
+    runtime: workerRuntime,
+    stagingPlan: exportStagingPlan(exportRoot, { artifactKey: `output-${'c'.repeat(64)}` })
+  });
+  assert.equal(exported.artifacts[0].artifactKey, `output-${'c'.repeat(64)}`);
+  assert.equal(exported.artifacts[0].stagingPath, exportPath);
+  assert.equal(exported.artifacts[0].byteSize, fs.statSync(exportPath).size);
+  assert.equal(fs.lstatSync(exportPath).isFile(), true);
 
   const mptPath = path.join(dir, 'MPT_INBOUND_GATEWAY_20260715001.txt');
   writeMptChange(mptPath);

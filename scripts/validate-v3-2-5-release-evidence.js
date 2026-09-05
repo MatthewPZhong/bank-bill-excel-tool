@@ -648,11 +648,11 @@ function validateReleaseEvidence(candidate, options = {}) {
   const documents = options.documents || {
     changelog: releaseSection(
       readText('CHANGELOG.md'),
-      '## 3.2.5 - 2026-08-31（版本分支技术收口，未发布）'
+      '## 3.2.5 - 2026-09-05（正式发布候选）'
     ),
     history: releaseSection(
       readText('docs/VERSION_FEATURE_HISTORY.md'),
-      '## v3.2.5（2026-08-31，版本分支技术收口，未发布）'
+      '## v3.2.5（2026-09-05，正式发布候选）'
     ),
     guide: readText('docs/USER_GUIDE.md').split('\n---', 1)[0]
   };
