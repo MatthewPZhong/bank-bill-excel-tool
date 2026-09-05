@@ -41,8 +41,8 @@ test.describe('normalizeC2Config — 纯函数', () => {
     assert.equal(out.billTypes[0].field, undefined);
     assert.equal(out.billTypes[0].op, undefined);
     assert.equal(out.billTypes[0].value, undefined);
-    // 其它字段不动
-    assert.deepEqual(out.reconFields, cfg.reconFields);
+    // 对账操作符缺省等于，字段引用及赋值不变。
+    assert.deepEqual(out.reconFields, cfg.reconFields.map((rf) => ({ ...rf, op: '等于' })));
     assert.deepEqual(out.markValue, cfg.markValue);
   });
 

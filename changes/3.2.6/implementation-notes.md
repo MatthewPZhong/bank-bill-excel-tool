@@ -1,0 +1,73 @@
+# v3.2.6 Implementation Notes
+
+## Baseline
+
+- 用户批准本目录 Spec / TechDoc 对应方案；基线 main e5047831，3.2.5。
+- 定向基线：C2 引擎、C2 仓储、账号预览测试 68/68 PASS。
+- 本次只修改代码、文档及合成测试数据；不写入真实账单或运行中用户数据库。
+
+## Decisions
+
+| 决定 | 依据及影响 |
+| --- | --- |
+| 包含是左包含右，大小写敏感、空不命中 | 用户确认方向；保留等于旧语义。 |
+| 仅提取按钮触发全批检查，确认后结束整批 | 用户确认；手动流程及未知账号原失败流程保留。 |
+| 检查全部分段，含已绑定及空段 | 用户确认；校验范围独立于提取 rowIndexes。 |
+| 提取只读、取消用已有接口 | 已有 preview-only / cancel-active-task 策略；不变更后台执行模式。 |
+
+## Unknowns Register
+
+| 项目 | 分类 | 证据／处理 |
+| --- | --- | --- |
+| C2 多候选、锁定及金额等于语义 | PROBE 已确认 | c2-offset-bill-mark / engine-utils 及既有测试。 |
+| 未维护账号原值丢失 | PROBE 已确认 | bridgeClearingIdsByBlock=M002，维护表仅 M001 时 findSelfInputBigAccountBridge 返回 null。 |
+| 未识别是否等价于未维护 | 已决策 | 仅明确识别值检查；未知继续原提醒和手选。 |
+| 脱敏样本资金归属、包含命中、现场取消 | 人工验收待执行 | 代码与合成测试完成后单列结果，不宣称现场已验证。 |
+
+## Deviations
+
+业务合同无偏离。实施补充如下：
+
+- 全批维护检查按文件嵌套存放 `maintenanceChecks`，复用父级 fileOrdinal/fileName，输出专用错误时展开。检查对象与全量范围不变。
+- 实际预览发现新下拉框挤出删除按钮，增加 C2 专用宽度约束；未维护长列表增加滚动，并将“确认结束整批”放在列表之前，确保后果和按钮可见。
+- 仓储默认 op 导致既有 smoke 的读取期望需要更新；同时追加数据库 config_json 原文不变的断言，确保没有隐式批量迁移。
+- 历史 R3.2.5 release-evidence 单测固定对应版本元数据，避免随当前 package 版本漂移。历史 validator 和冻结快照不变，并增加 3.2.6 不能冒充 3.2.5 发布证据的断言。
+
+## Evidence
+
+最终 `npm run release-check` **退出码 0 / PASS**（2026-09-05，macOS + Node 24.13.0），提交中的验证结论及本地日志位置见 [验证记录](verification.md)。
+
+| 检查 | 最终结果 |
+| --- | --- |
+| lint | PASS |
+| smoke | PASS，含 C2、仓储迁移、场景派发及文件读写链 |
+| unit | 441 个文件，6926 PASS / 3 SKIP / 0 FAIL，共 6929 项；3 项为既有 Windows 专用探针，本机未运行 |
+| integration | 53 个脚本全部 PASS，2488/2488 断言；包括网银生成、多币种、多文件、拆分和审计输出 |
+| 隔离 Electron DOM / 布局 | PASS，合成数据和 stub IPC，1080×760 |
+| scan:vars | PASS；版本调整前及 3.2.6 收尾均已执行，刷新两份统计报告 |
+| check:vars | 已执行并复核，退出码 2 = 变量命中；见 [验证记录](verification.md) 及 [review](check-vars.md) |
+| 脱敏真实样本 / 运行中应用 | 未执行，待人工复核；不能将前述合成测试记为该项通过 |
+
+- 新行为先补失败用例：旧引擎忽略包含、桥接未维护值丢失均复现，实施后通过。
+- 相关引擎、仓储和账号预览回归：78/78 PASS；交互事件、真实取消函数及 bundle 导入回滚：37/37 PASS（两组存在重叠，不相加当作总数）。
+- `node scripts/verify-v3-2-6-dialogs.js`：1080×760 隔离 Electron DOM 验证 PASS；实际下拉 change 写回配置、无横向溢出、18 个未维护账号全量展示和滚动、确认按钮可见、确认只调用当前 context 的取消。
+- `npm run scan:vars`、`npm run check:vars` 已在版本号调整前执行，扫描报告已刷新。check-vars 返回 2 表示命中需 review 的变量，完整说明见 [关联功能 review](check-vars.md)。
+- 已目视核对 [C2 包含配置](../../docs/previews/v3.2.6/c2-contains-min-window.png) 和 [未维护账号列表](../../docs/previews/v3.2.6/unmaintained-accounts-min-window.png) 的隔离界面截图；不等同于运行中用户数据验收。
+- `package.json` 与 lockfile 的根版本统一为 3.2.6；三份发布文档同步，集成策略中的结果表由全通过的 runner 自动刷新。没有更改冻结的后台执行合同或生产开关。
+
+## Reconciliation blindspot pass
+
+| 边界 | 证据与结论 |
+| --- | --- |
+| 账号血缘和作用域 | 提取不重读文件，session 身份先检查；未过滤桥接原值按文件/分段冻结，空 rowIndexes 和手选子集不缩小检查范围。 |
+| 金额、币种和空值 | 等于保留原 numeric 行为；包含只做字面匹配，0 不为空；维护判定只看账号精确集合，多币种继续原流程。 |
+| 多候选、锁定及行数 | AND、多候选告警和无对账字段分支继续既有执行逻辑；非法操作符在分类前返回，修改与锁定集合为空。 |
+| 部分成功和重复提交 | 未维护错误不返回部分 accounts；前端提取/完成互斥，提醒确认后取消，旧 context 在 prepare/beforeStart/execute 均不可继续。 |
+| 历史结果和顺序 | 提取只读，取消仅清当前 pending；历史会话/结果保留。账号顺序仍由既有成功生成后路径保存。 |
+| 入口旁路 | 只新增按钮检查，普通手动流程继续可用；这是用户明确批准的范围，不能将其描述为所有导入入口强校验。 |
+
+⚠️ 资金红线，请人工复核：脱敏真实银行账单的包含命中、多候选处置、MerchantId 归属与分段定位，以及确认后整批取消；本次不以自动测试代替人工验收。
+
+## Remaining Unknowns
+
+- 脱敏真实样本与运行中 Electron 人工验收未执行。

@@ -14,9 +14,9 @@
 //      命中判定：该类型 conditions.every(c => evaluateCondition(row, c))（AND 全满足）
 //   2. 行 4 reconFields：
 //      - **v2.1.7 衍生方案 A**：reconFields = 0 时不走配对，凡命中 markValue.type 的行直接写赋值
-//      - reconFields ≥ 1 时定义对账字段：{seq, leftType, leftField, rightType, rightField}
+//      - reconFields ≥ 1 时定义对账字段：{seq, leftType, leftField, op, rightType, rightField}
 //   3. 笛卡尔配对（reconFields ≥ 1 时）：leftType 类型的所有行 × rightType 类型的所有行
-//      AND 比对所有 reconFields 是否相等
+//      AND 比对所有 reconFields；op 缺省等于，包含按左侧包含右侧执行
 //   4. 配对成功后：
 //      - 一对一：给 rightType 那行的 markValue.field 写 markValue.value
 //      - 一对多（一个 leftRow 匹配多个 rightRow）→ 报错 + 终止该 leftRow（其它 leftRow 继续）
@@ -98,6 +98,13 @@ function isNumericFieldName(fieldName) {
 
 function pairsMatch(leftRow, rightRow, reconFields) {
   return reconFields.every((rf) => {
+    const op = rf.op === undefined ? '等于' : rf.op;
+    if (op === '包含') {
+      const left = normalizeCellValue(leftRow[rf.leftField]);
+      const right = normalizeCellValue(rightRow[rf.rightField]);
+      return left !== '' && right !== '' && left.includes(right);
+    }
+    if (op !== '等于') return false;
     const numeric = isNumericFieldName(rf.leftField) || isNumericFieldName(rf.rightField);
     return valuesEqual(leftRow[rf.leftField], rightRow[rf.rightField], { numeric });
   });
@@ -112,6 +119,16 @@ function runC2Scenario(scenario, bankRows) {
   const billTypes = normalizeBillTypes(config.billTypes || []);
   const reconFields = config.reconFields || [];
   const markValue = config.markValue || {};
+
+  // 在分类和锁定前拒绝非法操作符，避免旧调用方绕过保存校验后误赋值。
+  if (reconFields.some((rf) => rf && rf.op !== undefined && !['等于', '包含'].includes(rf.op))) {
+    warningCollector.push({ rowId: null, code: 'invalid-config', message: '对账字段操作符只能为“等于”或“包含”' });
+    return {
+      lockedRowIds: modCollector.listLockedRowIds(),
+      modifications: modCollector.listModifications(),
+      warnings: warningCollector.list()
+    };
+  }
 
   // v2.1.7 F4：billTypes 校验从 < 2 改 < 1（dialog 校验放宽同步）
   if (billTypes.length < 1) {

@@ -30,6 +30,21 @@
 .balance-addon-card { width: min(100%, 1120px); }
 .alert-card { width: min(100%, 420px); }
 
+.big-account-unmaintained-alert {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 56px);
+}
+
+.big-account-unmaintained-alert .alert-body {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.big-account-unmaintained-alert .dialog-actions {
+  flex-shrink: 0;
+}
+
 /* Dialog header */
 .dialog-header {
   display: flex; align-items: center;
@@ -3681,6 +3696,21 @@ select.mapping-text-input {
 .scenario-config-input-narrow {
   flex: 0 0 100px;
   width: 100px;
+}
+
+/* C2 对账字段加入操作符后，保留字段名称和删除按钮的可见空间。 */
+.scenario-config-c2 .scenario-config-multi-wrap {
+  min-width: 0;
+}
+
+.scenario-config-c2 [data-multi="reconFields"] .scenario-config-input-narrow {
+  flex-basis: 68px;
+  width: 68px;
+}
+
+.scenario-config-c2 [data-multi="reconFields"] [data-multi-field="op"] {
+  flex-basis: 76px;
+  width: 76px;
 }
 
 /* v2.1.14 第4条：场景配置标题「— 类别名」后缀不加粗（modeLabel 保持） */

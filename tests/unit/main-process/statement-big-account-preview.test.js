@@ -793,6 +793,11 @@ test('首次 workbook raw rows 派生最小 recognition basis，标准/bridge/�
   assert.equal(Object.isFrozen(evidence), true);
   const extractionContext = {
     statementSelectionSessionId: 'session-basis',
+    bigAccounts: [
+      { merchantId: 'M001', currencies: ['USD'] },
+      { merchantId: 'M002', currencies: ['EUR'] },
+      { merchantId: 'M003', currencies: ['CNY'] }
+    ],
     rows: [
       { index: 0, filePath: childPath, fileName: 'child.xlsx', fileBlockOrdinal: 0, sourceRowNumber: 3 },
       { index: 1, filePath: childPath, fileName: 'child.xlsx', fileBlockOrdinal: 1, sourceRowNumber: 6 }

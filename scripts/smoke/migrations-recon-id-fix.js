@@ -496,13 +496,14 @@ function runMigrationsReconIdFixSmokeTests() {
     const after = getScenario(db, 1);
     // v2.1.11 T3：C2 读取经 normalizeC2Config 惰性迁移 billTypes 单条件 {field,op,value}
     //   → {conditions:[{field,op,value}]}（spec §4.2）。本用例验证 C4 migration 不动 C2 的
-    //   reconFields/markValue —— billTypes 结构变化来自 T3 读取侧迁移，非 C4 migration 所为。
+    //   reconFields/markValue —— billTypes 和 v3.2.6 op 默认值来自读取归一化，数据库原文不变。
     const c2cfgAfterMigration = {
       billTypes: [{ seq: 1, conditions: [{ field: 'OrderId', op: '等于', value: 'X' }] }],
-      reconFields: [{ seq: 1, leftType: 1, leftField: 'Amount', rightType: 2, rightField: 'Amount' }],
+      reconFields: [{ seq: 1, leftType: 1, leftField: 'Amount', op: '等于', rightType: 2, rightField: 'Amount' }],
       markValue: { type: 1, field: 'Type', value: 1 }
     };
     assert.deepStrictEqual(after.config, c2cfgAfterMigration, 'H4 C2 reconFields/markValue 不被 C4 migration 改动（billTypes 经 T3 惰性迁移为 conditions）');
+    assert.equal(db.prepare('SELECT config_json FROM scenarios WHERE id = 1').get().config_json, JSON.stringify(c2cfg));
   }
 
   // ===== H5（v2.1.0-beta.3 PR #39 self-review P1-1）：migrateGatewayReconIdFixFieldPairs 主路径 =====

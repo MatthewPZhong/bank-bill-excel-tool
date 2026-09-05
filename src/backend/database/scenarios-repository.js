@@ -148,6 +148,13 @@ function parseConfig(configJson) {
 //   🔴 资金红线：C2 是赋值引擎，分类错会赋错值/漏赋值；老场景必须能正常打开 + 分类正确
 function normalizeC2Config(config) {
   if (!config || typeof config !== 'object') return config;
+  if (Array.isArray(config.reconFields)) {
+    config = {
+      ...config,
+      reconFields: config.reconFields.map((rf) => rf && typeof rf === 'object'
+        ? { ...rf, op: rf.op === undefined ? '等于' : rf.op } : rf)
+    };
+  }
   if (!Array.isArray(config.billTypes)) return config;
   const billTypes = config.billTypes.map((bt) => {
     if (!bt || typeof bt !== 'object') return bt;
@@ -172,6 +179,17 @@ function normalizeC2Config(config) {
     };
   });
   return { ...config, billTypes };
+}
+
+function prepareScenarioConfig(category, config) {
+  if (category !== 'offset-bill-mark') return config;
+  const normalized = normalizeC2Config(config);
+  if (Array.isArray(normalized?.reconFields) && normalized.reconFields.some(
+    (rf) => rf && !['等于', '包含'].includes(rf.op)
+  )) {
+    throw new Error('对账字段操作符只能为“等于”或“包含”');
+  }
+  return normalized;
 }
 
 function rowToListItem(row) {
@@ -403,7 +421,7 @@ function createScenario(db, payload) {
   const name = validateName(payload.name);
   const priority = validatePriority(payload.priority);
   const enabled = validateEnabled(payload.enabled);
-  const configJson = serializeConfig(payload.config);
+  const configJson = serializeConfig(prepareScenarioConfig(category, payload.config));
   // public create 永远只能创建普通场景；可信内置 seed/修复迁移直接走 migrations.js 内部 SQL。
   const isBuiltin = 0;
   const now = new Date().toISOString();
@@ -476,7 +494,7 @@ function updateScenario(db, id, fields) {
     params.push(enabled);
   }
   if (fields.config !== undefined) {
-    const configJson = serializeConfig(fields.config);
+    const configJson = serializeConfig(prepareScenarioConfig(existing.category, fields.config));
     sets.push('config_json = ?');
     params.push(configJson);
   }

@@ -202,6 +202,30 @@ test.afterEach(() => {
 // scenarios:export-bundle
 // ============================================================================
 
+test('C2 bundle 导入保留包含；非法操作符导致整批事务回滚', () => {
+  const general = database.getBuiltinGeneralChannel();
+  const makeBundle = (operators) => ({
+    channels: [{
+      name: general.name, ownerLocation: general.ownerLocation, isBuiltin: 1,
+      scenarios: operators.map((op, index) => ({
+        category: 'offset-bill-mark', name: `C2操作符导入-${index}`, sortOrder: 1, enabled: 1,
+        configJson: {
+          billTypes: [{ seq: 1, field: 'FundType', op: '等于', value: 'Inbound' }],
+          reconFields: [{ seq: 1, leftType: 1, leftField: 'CustomerRef', op, rightType: 1, rightField: 'ReconciliationId' }],
+          markValue: { type: 1, field: 'FundType', value: 'Inbound' }
+        }
+      }))
+    }]
+  });
+  const before = database.db.prepare('SELECT count(*) AS n FROM scenarios').get().n;
+  assert.throws(() => applyScenarioBundleImport(makeBundle(['包含', '非法']), {}, makeImportDeps(database)), /操作符/);
+  assert.equal(database.db.prepare('SELECT count(*) AS n FROM scenarios').get().n, before);
+  const imported = applyScenarioBundleImport(makeBundle(['包含']), {}, makeImportDeps(database));
+  assert.equal(imported.importedCount, 1);
+  const saved = database.findScenarioByChannelAndName(general.id, 'C2操作符导入-0');
+  assert.equal(database.getScenario(saved.id).config.reconFields[0].op, '包含');
+});
+
 test.describe('scenarios:export-bundle handler', () => {
   test('正常导出 — 含通用渠道', () => {
     // 基线：database.init 内置了 N 个 builtin 场景（all 落在通用 id=1）
