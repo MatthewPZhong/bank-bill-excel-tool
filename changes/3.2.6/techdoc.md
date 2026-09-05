@@ -24,6 +24,8 @@ UI 新增行写入等于，编辑旧配置补默认，`data-multi-field=op` 使�
 
 比较：包含使用 `normalizeCellValue(left/right)`，两端非空且 `left.includes(right)`；等于继续按既有字段名判断 numeric 并调用 valuesEqual。多个 reconFields 用 every，保留 reconFields=[]、多候选、锁定和实际修改语义。bundle 保持透传，无表结构迁移。
 
+`pairsMatch` 以第一条字段的类型确定传入候选行的角色，再按每条 `rf.leftType` / `rf.rightType` 分别解析取值行，等于与包含共用该绑定。同一类型对反向配置时交换来源；不得对包含做双向判断，也不得通过行的多类型分类结果随意选择来源。后续条件引用配对内同一个类型时，两端读取该类型的行；引用配对之外的类型时返回不匹配，避免借用错误行。第一条两侧同类型时保留左右候选的位置；不带类型的直接 helper 调用保持按入参位置比较。多候选检测与赋值目标选择仍走原流程。
+
 ## 3. 大账号证据与接口
 
 冻结顺序证据中增加独立的全量维护检查证据。实际存储于 `bigAccountOrderEvidence.files[].maintenanceChecks[]`，各条含 blockOrdinal、sourceRowNumber、extractedMerchantId，fileOrdinal、fileName 复用父级文件证据，返回错误时合并成完整来源。序号内部从 0 开始；sourceRowNumber 是分段定位行；以 statementSelectionSessionId 绑定。证据遍历全部文件与分段，不依赖 renderer 的 rowIndexes 或 orderedAccountKeys。
@@ -63,7 +65,7 @@ UI 新增行写入等于，编辑旧配置补默认，`data-multi-field=op` 使�
 
 实施顺序：失败用例 → 原值证据／全量检查 → UI 提醒取消 → C2 配置持久化与执行 → 定向测试／界面预览／release-check → 版本文档收尾。版本调整前执行 scan:vars 和 check:vars，输出关联功能 review。
 
-基线定向测试 68/68 PASS，仅代表 3.2.5。本次 release-check 退出码 0：lint、smoke 通过，单测 6926/6929（3 SKIP、0 FAIL），集成 53 个脚本全部通过、2488/2488 断言通过。隔离 Electron 界面验证通过。数据库无迁移；降版前停用或转换包含场景。脱敏样本人工核对匹配和账号归属仍待执行，自动测试不替代人工验收。
+基线定向测试 68/68 PASS，仅代表 3.2.5。PR #229 方向修复后 release-check 退出码 0：lint、smoke 通过，单测 6936/6939（3 SKIP、0 FAIL），集成 53 个脚本全部通过、2488/2488 断言通过。方向、C2 与 dispatcher 定向回归 104/104 PASS；此前 f8ae6a4 的隔离 Electron 界面验证通过，本次未改 UI，未重复执行。数据库无迁移；降版前停用或转换包含场景。脱敏样本人工核对匹配和账号归属仍待执行，自动测试不替代人工验收。
 
 复验命令：
 

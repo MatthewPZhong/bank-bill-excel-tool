@@ -2,7 +2,7 @@
 
 检查范围：本分支相对基线的 `src/` 改动。版本号调整前已执行 `npm run scan:vars`、`npm run check:vars`；结论及本地原始日志位置见 [验证记录](verification.md)。check-vars 的退出码 2 表示命中需复核的变量，不表示业务测试失败。
 
-3.2.6 最终状态已重跑 scan:vars 和 check:vars，提 PR 前再次执行 check:vars，命中范围一致。release-check 的 lint、smoke、单测和全部集成脚本均已通过。
+3.2.6 最终状态及 PR #229 方向修复后均重跑 scan:vars 和 check:vars，更新 PR 前命中范围一致。方向修复后的 release-check 退出码 0：lint、smoke、6936 项单测和全部 53 个集成脚本通过；3 项 Windows 专用单测在 macOS 跳过。
 
 ## 自动命中
 
@@ -19,7 +19,7 @@
 
 | 层级／变量 | 清单要求 | 本次复核 |
 | --- | --- | --- |
-| Risk-sensitive：runC2Scenario | “reconFields = 0 时无条件赋值”；必跑 smoke C2 全套及真实银行账单 C2 端到端（:992） | 保留单 billType、无对账字段分支；包含匹配、多候选、非法枚举无修改/锁定有测试。脱敏真实账单人工端到端待执行。 |
+| Risk-sensitive：runC2Scenario | “reconFields = 0 时无条件赋值”；必跑 smoke C2 全套及真实银行账单 C2 端到端（:992） | 保留单 billType、无对账字段分支；包含匹配、多候选、非法枚举无修改/锁定有测试。PR #229 追加逐条类型绑定、反向命中/不命中、条件换序、同类型候选及未命中行进入后续场景回归，C2 与 dispatcher 定向 104/104 PASS。脱敏真实账单人工端到端待执行。 |
 | Risk-sensitive：config.billTypes / config.conditions | 字段结构变更必须同步引擎、dialog、bundle、默认值；必跑 smoke 与旧结构 bundle 升级（:1003） | 此次只为 reconFields 增加 op，旧 billTypes 迁移继续保留；旧结构读取、保存、bundle 导入及失败事务回滚已纳入回归。 |
 | Runtime-state：lastGeneratedExports / statementImportSessions / lastFileImportContext | 导出生命周期与 session key 不能漂移（:622） | 新阻断调用既有当前 context 取消；真实函数测试验证旧 context 拒绝、历史会话和结果不被清除。 |
 
