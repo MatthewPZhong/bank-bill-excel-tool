@@ -186,3 +186,8 @@
   `2488/2488`，没有清单增删或语义变化。
 - 按用户要求，本地未运行 `release-check`、`check-vars` 或 `scan:vars`；依赖审计仍为
   `2 moderate / 9 high`，未运行 `audit fix`。
+- clean HEAD 的 `check:packaged-inputs` PASS（9 条 `build.files` 包含规则与 HEAD 一致）。
+  2026-09-05T00:20:52Z push 前集中复核：远端 `main` 仍为
+  `8e6d65a007cd04681e44cad6a391d2e7a3c50249`，冻结 candidate ref 仍为
+  `138c5b43e345ff4c19f3bcf243bcb1f119c7c105`，远端 prep 分支、v3.2.5 tag、Release
+  与开放 PR 均不存在；54 项 production snapshot 没有 enabled/non-legacy/non-zero worker 漂移。
