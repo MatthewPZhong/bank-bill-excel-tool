@@ -199,7 +199,7 @@ function runC2Scenario(scenario, bankRows) {
   const leftRows = bankRows.filter((r) => Array.isArray(r._c2Types) && r._c2Types.includes(leftType));
   const rightRows = bankRows.filter((r) => Array.isArray(r._c2Types) && r._c2Types.includes(rightType));
 
-  // 反向索引：rightRow → 已被哪些 leftRow 匹配（用于多对一检测）
+  // 反向索引：rightRow → 全部命中它的 leftRow 数量（包括一对多左行，用于多对一检测）
   const rightRowMatchCount = new Map();
   // 实际配对结果：rightRow → leftRow
   const successfulPairs = [];
@@ -207,6 +207,10 @@ function runC2Scenario(scenario, bankRows) {
   for (const leftRow of leftRows) {
     const matched = rightRows.filter((rightRow) => pairsMatch(leftRow, rightRow, reconFields));
     if (matched.length === 0) continue;
+    // 先统计完整候选关系；一对多左行被跳过后，其命中仍构成右行的歧义。
+    matched.forEach((rightRow) => {
+      rightRowMatchCount.set(rightRow._rowId, (rightRowMatchCount.get(rightRow._rowId) || 0) + 1);
+    });
     if (matched.length > 1) {
       warningCollector.push({
         rowId: leftRow._rowId,
@@ -219,7 +223,6 @@ function runC2Scenario(scenario, bankRows) {
 
     const rightRow = matched[0];
     successfulPairs.push({ leftRow, rightRow });
-    rightRowMatchCount.set(rightRow._rowId, (rightRowMatchCount.get(rightRow._rowId) || 0) + 1);
   }
 
   // 多对一检测（rightRow 被多个 leftRow 匹配）
