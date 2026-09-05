@@ -1,10 +1,10 @@
 # 清结算小助手使用手册
 
-版本：`v3.2.4`
+版本：`v3.2.5`
 
-> 版本说明：v3.2.4 已由发布负责人授权在 v3.2.3 完成正式技术发布后，经受保护 PR、唯一 annotated tag 与 Windows Release workflow 串行发布。对账单修复 ReconFix 的普通/BOC 只读运行、JPM durable mutation 和多文件发布，以及 VCC 财务 OP 的单 Writer、主体查询下推和最多双 Writer 输出，已经具备资源治理、幂等 receipt、Inspector 与崩溃恢复保护的后台执行 capability；application production strategy 仍关闭，日常用户流程、金额/币种、方向、匹配和 Excel/Workbook 结果继续保持既有行为。发布负责人已确认本次资金、恢复、真实业务样本及稳定窗口人工验收通过；最终 v3.2.4 资产产生后的 Windows Setup/portable、SmartScreen、离线覆盖安装和在线更新 canary 按 Issue #220 逐项补做。
+> 版本说明：v3.2.5 已由发布负责人授权在 v3.2.4 完成正式技术发布后，经受保护 PR、唯一 annotated tag 与 Windows Release workflow 串行发布。Pending、BizOP、PreFund、Position、VCC Financial OP 与 Acquiring 的剩余只读导出，以及 Pending/BizOP/Acquiring/Position 的成熟执行器 adapter，已经纳入统一资源、receipt、取消与恢复审计；Action Manifest 覆盖 54 个 action。application effective production strategy 对全部 action 仍保持 legacy/0，production 继续关闭，日常用户入口、金额/币种和 Excel/Workbook 结果保持既有行为。
 
-> 使用提醒：本版不会在 unknown、partial 或 committed-result-lost 状态下自动重跑，也不会在缺少确定性证据时自动解除 Recovery Hold。当前发布的资金、恢复、真实 JPM/VCC 样本和稳定窗口已由发布负责人确认验收；最终 Windows Release 资产、SmartScreen、离线覆盖和在线更新仍按 Issue #220 发布后复核。遇到新的恢复要求时仍应先核对持久 intent、receipt、journal、Hold 与真实输出。
+> 使用提醒：本版不会自动解除 Recovery Hold，也不会在 unknown、partial 或 committed-result-lost 状态下自动重跑。冻结 R3.2.5 evidence 中 Windows packaged 仍为 `NOT_RUN`，真实业务样本及资金/恢复仍为 `PENDING_HUMAN_REVIEW`，Excel/WPS、RSS 与稳定观察窗口也保持历史未执行状态；发布负责人已另行确认本次资金、恢复、真实业务样本及稳定窗口人工验收通过，但该签字不改写冻结快照，也不启用 production。最终 Windows Release 资产、SmartScreen、离线覆盖和在线更新仍按 Issue #220 发布后复核。遇到新的恢复要求时应先核对持久 intent、receipt、journal、Hold 与真实输出。
 
 > 网银账单修复：模板管理中的重命名不再因空的任务 evidence 提前失败；人工补录上一账单日余额时，`0` 是合法余额。补录提交失败会显示错误并保留已填日期和余额，重新确认前不会重复提交；若原账单源文件已经不可用，软件会要求重新导入后再补录。
 

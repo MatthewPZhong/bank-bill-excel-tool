@@ -4,32 +4,15 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
-// v2.0.0 GA：切到 xlsx-js-style 以支持表头字号样式（与其他 writer 一致）
 const XLSX = require('xlsx-js-style');
-const { applyWatermark } = require('./workbook-watermark');
 
 const PENDING_COLUMNS = require('../backend/pending-db/columns');
 const monthRepo = require('../backend/pending-db/month-repository');
-// v2.0.0-beta.4：error-report 加「可能原因」列
-const { errorCodeToCause } = require('../backend/file-service/error-causes');
-
-// v2.0.0 GA：表头字号统一 10pt（与其他 writer 一致）
-function applyHeaderRowFont(worksheet, headerRowIndex = 0) {
-  if (!worksheet || !worksheet['!ref']) return;
-  const range = XLSX.utils.decode_range(worksheet['!ref']);
-  if (headerRowIndex < range.s.r || headerRowIndex > range.e.r) return;
-  for (let c = range.s.c; c <= range.e.c; c += 1) {
-    const addr = XLSX.utils.encode_cell({ r: headerRowIndex, c });
-    const cell = worksheet[addr];
-    if (!cell) continue;
-    const existingStyle = cell.s || {};
-    const existingFont = existingStyle.font || {};
-    cell.s = {
-      ...existingStyle,
-      font: { ...existingFont, sz: 10 }
-    };
-  }
-}
+const {
+  applyHeaderRowFont,
+  writePendingErrorReport
+} = require('../backend/pending-export/error-report-writer');
+const { applyWatermark } = require('./workbook-watermark');
 
 const WORKER_SCRIPT = path.resolve(__dirname, '../backend/pending-import/worker.js');
 const ARCHIVE_WORKER_SCRIPT = path.resolve(__dirname, './pending-archive-worker.js');
@@ -137,6 +120,12 @@ function formatTimestamp(date = new Date()) {
 
 function createPendingSession({ getPendingDb, getStorageRoot }) {
   let lastImportErrors = null; // { errors, yearMonth, files }
+  let lastImportErrorsRevision = 0;
+
+  function replaceLastImportErrors(value) {
+    lastImportErrors = value;
+    lastImportErrorsRevision += 1;
+  }
 
   function getArchiveDir(yearMonth) {
     const dir = path.join(getStorageRoot(), 'pending-archives', yearMonth);
@@ -276,7 +265,7 @@ function createPendingSession({ getPendingDb, getStorageRoot }) {
         }
       });
       // 成功：清错误缓存 + 还原旧链路 success 形态。sourceFiles = 文件名数组（引擎 finalizeForCommit 用同款 basename）。
-      lastImportErrors = null;
+      replaceLastImportErrors(null);
       return {
         status: 'success',
         yearMonth,
@@ -287,13 +276,13 @@ function createPendingSession({ getPendingDb, getStorageRoot }) {
     } catch (err) {
       // 引擎错误 → 还原 lastImportErrors 形态（severity/file/sheetRow/message/cells + 计数/截断标志）。
       const restored = restoreEngineErrors(err);
-      lastImportErrors = {
+      replaceLastImportErrors({
         errors: restored.errors,
         yearMonth,
         files: files.slice(),
         rowErrorTotal: restored.rowErrorTotal,
         rowErrorTruncated: restored.rowErrorTruncated
-      };
+      });
       return { status: 'error', errors: restored.errors };
     }
   }
@@ -387,7 +376,7 @@ function createPendingSession({ getPendingDb, getStorageRoot }) {
         if (code === 0) {
           const complete = events.find((e) => e.type === 'complete');
           if (complete) {
-            lastImportErrors = null;
+            replaceLastImportErrors(null);
             resolve({
               status: 'success',
               yearMonth,
@@ -404,7 +393,7 @@ function createPendingSession({ getPendingDb, getStorageRoot }) {
         const errors = errorEv
           ? errorEv.errors
           : [{ severity: 'fatal', message: `worker 异常退出（code=${code}）\nstderr=${stderrBuf.trim()}` }];
-        lastImportErrors = { errors, yearMonth, files: files.slice() };
+        replaceLastImportErrors({ errors, yearMonth, files: files.slice() });
         resolve({ status: 'error', errors });
       }
 
@@ -442,41 +431,34 @@ function createPendingSession({ getPendingDb, getStorageRoot }) {
 
   function exportErrorReport(savePath) {
     if (!lastImportErrors) return { status: 'error', message: '无错误报告' };
-    // v2.0.0-beta.4：第 5 列「可能原因」（基于 err.code 或 severity 兜底）
-    const headers = ['source_file', 'sheet_row', 'severity', 'message', '可能原因', ...PENDING_COLUMNS];
-    const rows = [headers];
-    for (const err of lastImportErrors.errors) {
-      const cells = Array.isArray(err.cells) ? err.cells : PENDING_COLUMNS.map(() => '');
-      rows.push([
-        err.file || '',
-        err.sheetRow != null ? err.sheetRow : '',
-        err.severity || '',
-        err.message || '',
-        errorCodeToCause(err.code || err.severity),
-        ...cells
-      ]);
-    }
-    const ws = XLSX.utils.aoa_to_sheet(rows);
-    applyHeaderRowFont(ws);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, '错误报告');
-    applyWatermark(wb);
-    XLSX.writeFile(wb, savePath);
-    return {
-      status: 'success',
-      path: savePath,
-      filePath: savePath,
-      errorCount: lastImportErrors.errors.length
-    };
+    return writePendingErrorReport(lastImportErrors, savePath);
+  }
+
+  function captureErrorReport() {
+    if (!lastImportErrors) return null;
+    return Object.freeze({
+      revision: lastImportErrorsRevision,
+      snapshot: lastImportErrors
+    });
+  }
+
+  function isErrorReportSnapshotCurrent(authority) {
+    return Boolean(
+      authority &&
+      authority.revision === lastImportErrorsRevision &&
+      authority.snapshot === lastImportErrors
+    );
   }
 
   function hasPendingErrorReport() { return lastImportErrors !== null; }
 
-  function clearLastImportErrors() { lastImportErrors = null; }
+  function clearLastImportErrors() { replaceLastImportErrors(null); }
 
   return {
     runImport,
     exportErrorReport,
+    captureErrorReport,
+    isErrorReportSnapshotCurrent,
     hasPendingErrorReport,
     clearLastImportErrors,
     archiveExistingMonth

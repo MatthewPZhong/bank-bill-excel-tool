@@ -1457,7 +1457,7 @@ function createExecutionSupervisor(options = {}) {
         // E05-C PreFund runtime始终提供冻结planner，不经过此保守分支。
         effectiveChildCount = 1;
       }
-      if (!Number.isSafeInteger(effectiveChildCount) || effectiveChildCount < 1 ||
+      if (!Number.isSafeInteger(effectiveChildCount) || effectiveChildCount < 0 ||
           effectiveChildCount > policy.resources.compound.childrenMax) {
         throw new SupervisorError(
           'TOPOLOGY_CHILD_COUNT_INVALID',

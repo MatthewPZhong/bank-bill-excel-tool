@@ -3348,9 +3348,67 @@ function createPositionReconciliationStore(userDataDir, options) {
   return new PositionReconciliationStore(userDataDir, options);
 }
 
+function openPositionReconciliationStoreReadOnly(userDataDir, {
+  expectedCheckpoint = null
+} = {}) {
+  const resolvedUserDataDir = path.resolve(userDataDir);
+  const dbPath = path.join(resolvedUserDataDir, POSITION_DB_RELATIVE_PATH);
+  let stat;
+  try {
+    stat = fs.lstatSync(dbPath);
+  } catch (error) {
+    throw new PositionReconciliationError(
+      'position-side-db-missing',
+      '平盘对账侧库缺失，无法执行只读导出',
+      [error && error.message ? error.message : String(error)]
+    );
+  }
+  if (stat.isSymbolicLink() || !stat.isFile()) {
+    throw new PositionReconciliationError(
+      'position-side-db-mismatch',
+      '平盘对账只读导出要求固定位置的普通侧库文件'
+    );
+  }
+  let db = null;
+  try {
+    db = new DatabaseSync(dbPath, { readOnly: true });
+    db.exec('PRAGMA query_only = ON; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 30000;');
+    const actualCheckpoint = readPositionDatabaseCheckpoint(db);
+    if (!actualCheckpoint) {
+      throw new PositionReconciliationError(
+        'position-side-db-mismatch',
+        '平盘对账侧库 checkpoint 缺失'
+      );
+    }
+    assertCurrentPositionCheckpointHistory(db, actualCheckpoint);
+    const expected = normalizePositionCheckpoint(expectedCheckpoint, '只读导出 checkpoint');
+    if (expected && !positionCheckpointsEqual(actualCheckpoint, expected)) {
+      checkpointMismatch(actualCheckpoint, expected, '只读导出 checkpoint 已变化');
+    }
+    const store = Object.create(PositionReconciliationStore.prototype);
+    store.userDataDir = resolvedUserDataDir;
+    store.dbPath = dbPath;
+    store.db = db;
+    store.initializationMode = POSITION_DB_INITIALIZATION_MODES.EXISTING;
+    store.operationTokenProvider = null;
+    return store;
+  } catch (error) {
+    if (db) {
+      try { db.close(); } catch (_closeError) { /* preserve original */ }
+    }
+    if (error instanceof PositionReconciliationError) throw error;
+    throw new PositionReconciliationError(
+      'position-side-data-invalid',
+      '平盘对账侧库无法以只读模式打开或校验失败',
+      [error && error.message ? error.message : String(error)]
+    );
+  }
+}
+
 module.exports = {
   PositionReconciliationStore,
   createPositionReconciliationStore,
+  openPositionReconciliationStoreReadOnly,
   POSITION_DB_INITIALIZATION_MODES,
   scopeKey,
   decodeScopeKey,

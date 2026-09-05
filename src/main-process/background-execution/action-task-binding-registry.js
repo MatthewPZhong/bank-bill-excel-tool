@@ -6,21 +6,21 @@ const { types: { isProxy } } = require('node:util');
 const ACTION_TASK_BINDING_CONTRACT = Object.freeze({
   version: 1,
   canonicalization: 'RFC8785-JCS',
-  sha256: 'c217253cea4ccc377f030ff5119191a98e8e9c965853c9d9419fdedef9eef0ba',
-  actionCount: 52,
+  sha256: '5c9ee53437d487a94ddb0f0d236dec7b07d4545452c9ebe3c6e98593de209ff2',
+  actionCount: 54,
   taskPolicyInventoryCount: 122,
   taskPolicyInventoryCanonicalization: 'RFC8785-JCS',
   taskPolicyInventorySha256: '9538102480f1a714f3839547f294fbe6fd1c19384734addd89dc0ca6e1dbb368',
-  pairCount: 60,
-  boundTaskKeyCount: 52,
-  unboundTaskPolicyCount: 70
+  pairCount: 61,
+  boundTaskKeyCount: 54,
+  unboundTaskPolicyCount: 68
 });
 
 // 模块内私有 literal 是 action → legacy TaskPolicy 的唯一 authority。
 // caller 不能注入、替换或取得其中任何内部数组。
 const ACTION_TASK_BINDINGS = Object.freeze({
   'acquiring:copy-existing-diff': Object.freeze(['acquiringBillCurrency:export']),
-  'acquiring:export-diff-workbook': Object.freeze(['acquiringBillCurrency:export']),
+  'acquiring:export-diff-workbook': Object.freeze([]),
   'acquiring:import': Object.freeze(['acquiringBillCurrency:importBill', 'acquiringBillCurrency:importFlow']),
   'acquiring:run-new-eligible': Object.freeze(['acquiringBillCurrency:run']),
   'acquiring:run-single-or-resume': Object.freeze(['acquiringBillCurrency:run', 'acquiringBillCurrency:run:resume']),
@@ -41,9 +41,9 @@ const ACTION_TASK_BINDINGS = Object.freeze({
   'fund-recon:run': Object.freeze(['bank-statement:run']),
   'new-account:generate': Object.freeze(['new-account:generate']),
   'new-account:save-as': Object.freeze(['new-account:export']),
-  'pending:export-diff': Object.freeze(['pending:diff:export-aggregate', 'pending:diff:export-single']),
+  'pending:export-diff': Object.freeze(['pending:diff:export-single']),
   'pending:export-errors': Object.freeze(['pending:error:export-report']),
-  'pending:export-summary': Object.freeze([]),
+  'pending:export-summary': Object.freeze(['pending:diff:export-aggregate']),
   'pending:import': Object.freeze(['pending:import:start']),
   'position:export-run': Object.freeze(['position-reconciliation:run:export', 'position-reconciliation:run:export-filtered']),
   'position:import': Object.freeze([
@@ -52,10 +52,12 @@ const ACTION_TASK_BINDINGS = Object.freeze({
     'position-reconciliation:source:apply-import',
     'position-reconciliation:source:prepare-import'
   ]),
+  'pre-fund:bank-import': Object.freeze(['pre-fund-reconciliation:import-bank']),
   'pre-fund:export-audit': Object.freeze(['pre-fund-reconciliation:export']),
   'pre-fund:export-channel': Object.freeze(['pre-fund-reconciliation:export']),
   'pre-fund:mpt-import': Object.freeze(['pre-fund-reconciliation:import-mpt']),
   'pre-fund:mpt-repair-import': Object.freeze(['pre-fund-reconciliation:mpt-errors:repair']),
+  'pre-fund:run': Object.freeze(['pre-fund-reconciliation:run']),
   'recon-fix:export': Object.freeze(['recon-id-fix:export']),
   'recon-fix:import': Object.freeze(['recon-id-fix:import']),
   'recon-fix:run-jpm': Object.freeze(['recon-id-fix:run']),

@@ -2577,9 +2577,12 @@ function assertPrivacyAllowlist(report) {
         throw codedError('PRIVACY_GUID_INVALID', 'privacy allowlist 仅接受 canonical lowercase power plan GUID');
       }
       const normalized = value.toLowerCase().replace(/[_-]+/g, ' ');
+      const canonicalComparisonId = key === 'comparisonId'
+        && POWER_PLAN_GUID_PATTERN.test(value);
       if (/(customer\s*account|account\s*(number|id)?|账户|账号|卡号|金额|余额|\bsql\b|\bselect\b|\binsert\b|\bupdate\b|\bdelete\s+from\b|\braw\s*logs?\b)/i.test(normalized)
           || (!SHA256_PATTERN.test(value)
             && !(key === 'guid' && POWER_PLAN_GUID_PATTERN.test(value))
+            && !canonicalComparisonId
             && !/^\d{4}-\d{2}-\d{2}T/.test(value) && /\d{12,}/.test(value))) {
         throw codedError('PRIVACY_STRING_REJECTED', 'privacy allowlist 拒绝敏感自由字符串或长账号型数字');
       }

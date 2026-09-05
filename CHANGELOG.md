@@ -1,5 +1,29 @@
 # Changelog
 
+## 3.2.5 - 2026-09-05（正式发布候选）
+
+> v3.2.5 完成后台执行平台的外围收口：Pending、BizOP、PreFund、Position、VCC Financial OP 与 Acquiring 的剩余只读导出获得模块专用执行器，Pending、BizOP、Acquiring 与 Position 的成熟执行器获得不额外 spawn 的 adapter；最终 Action Manifest 对 54 个 action 实现 324/324 surface coverage。业务 SQL、稳定排序、金额/币种、Workbook、事务、幂等、取消、恢复和进程拓扑保持既有语义；production enablement 仍为关闭。
+
+### 剩余只读导出与成熟执行器 Adapter
+
+- **Pending / BizOP 导出**：差异、汇总、错误、单日和区间工作簿在模块专用只读 Worker 中生成，Main 只冻结紧凑 authority 并在回读后调用唯一 Publisher；stale、取消、篡改和发布失败均 fail closed。
+- **PreFund / Position / VCC Financial OP 导出**：PreFund 渠道与审计工作簿整批发布，Position run/filtered 结果在同一 source identity 下读取，VCC dataset/audit 以 revision、archive 和异常血缘作为只读 authority；partial/stale run 不产生正式 artifact。
+- **Acquiring copy / regenerate 静态分离**：已有差异文件只做受校验的异步复制；需要查询并重建 Workbook 的能力使用独立 action，当前没有用户入口，不以文件名、按钮文案或失败 fallback 猜测模式。
+- **成熟执行器 Adapter**：Pending/BizOP big-table engine、Acquiring import/run/resume 与 Position utility process 只接入 Protocol、ResourceGovernor、取消和结果投影，不在外层新增 Worker/process，不修改旧 dispatcher 的事务、chunk、grant、receipt 或恢复边界。
+
+### 54-action 清单与发布证据
+
+- **能力与生产策略分离**：Capability Inventory 为 36 个 implemented、16 个 legacy-only、2 个 platform canary；Effective Production Strategy 对全部 54 个 action 均保持 `legacy`、worker count 0、feature flag false，production 启用数为 0。
+- **静态覆盖与合同**：Action Manifest 覆盖 61 个 legacy pair、54 × 6 = 324 个 action surface；冻结合同 validator 为 29/29 PASS、73 个输入，package checksum 精确覆盖 checksum 自身外全部 74 个普通文件并 74/74 PASS。R3.2.5 evidence 逐 action 记录 baseline fixture、语义/DB/Workbook/故障/资源证据、Windows、人工复核与 production decision，不以模块汇总代替单 action 状态。
+- **本地回归**：E13-G 收口点定向测试 27/27 PASS；最终 R3.2.5 对 E13-A～G、证据 validator 与版本元数据完成定向 118/118 PASS，完整单测 6887/6890（0 FAIL、3 SKIP），53 个 integration 脚本 2488/2488 PASS，smoke PASS。
+
+### 收口边界
+
+- **版本元数据**：`package.json`、`package-lock.json` 与三份发布文档收口为 `3.2.5`；顶层 Spec/TechDoc 保留冻结来源 hash，并显式记录 current-tree 的 E13-B～G 证据型修订。
+- **生产仍关闭**：legacy seam 全部保留；冻结 R3.2.5 evidence 中 Windows packaged 的 `NOT_RUN`，真实业务样本和资金/恢复的 `PENDING_HUMAN_REVIEW`，以及 Excel/WPS、RSS 与稳定观察窗口的未执行状态保持不可篡改。自动测试和本次发布授权都不能据此启用 production。
+- **历史证据与当前授权分层**：发布负责人 `MatthewPZhong` 于 2026-09-05 另行确认本次资金、恢复、真实业务样本及稳定窗口人工验收通过；该签字只覆盖本次正式技术发布，不改写冻结 R3 快照，也不授权 production。
+- **发布授权与生产边界**：本版已获授权经受保护 PR、唯一 annotated tag 与 Windows Release workflow 发布技术 stable Release；workflow 内置 `release-check` 获授权，application production strategy、feature flag 与 effective worker 继续 disabled/legacy。最终 v3.2.5 资产产生后的 Windows 10/11 Setup/portable、SmartScreen、离线覆盖安装与 `production/latest` canary 按 Issue #220 在发布后逐项补做；本地 `release-check` / `check-vars` / `scan:vars` 未运行且不得记录为 PASS。
+
 ## 3.2.4 - 2026-09-04（正式发布候选）
 
 > v3.2.4 把对账单修复 ReconFix 的长驻状态、JPM 资金写回与多文件发布，以及 VCC 财务 OP 的只读单 Writer、主体查询下推和最多双 Writer 输出图，收口到具备资源治理、幂等 receipt、Inspector 与崩溃恢复保护的后台执行 capability。金额、币种、方向、匹配、Workbook、样式、行序和既有用户流程保持不变；production enablement 仍为关闭。

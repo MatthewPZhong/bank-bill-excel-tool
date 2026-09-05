@@ -95,6 +95,57 @@ const {
 const {
   createVccExportTopologyPlanner
 } = require('../vcc-financial-op-output/topology');
+const {
+  PENDING_READ_ONLY_ACTIONS,
+  PENDING_READ_ONLY_POLICIES,
+  validatePendingReadOnlyExportResult
+} = require('../read-only-exports/pending/policies');
+const {
+  BIZ_OP_READ_ONLY_ACTION_SET,
+  BIZ_OP_READ_ONLY_POLICIES,
+  validateBizOpReadOnlyExportResult
+} = require('../read-only-exports/biz-op/policies');
+const {
+  PRE_FUND_READ_ONLY_POLICIES,
+  validatePreFundReadOnlyExportResult
+} = require('../read-only-exports/pre-fund/policies');
+const {
+  POSITION_READ_ONLY_POLICY,
+  validatePositionReadOnlyExportResult
+} = require('../read-only-exports/position/policies');
+const {
+  VCC_FINANCIAL_OP_READ_ONLY_POLICY,
+  validateVccFinancialOpReadOnlyExportResult
+} = require('../read-only-exports/vcc-financial-op/policies');
+const {
+  ACQUIRING_EXPORT_ACTIONS,
+  ACQUIRING_EXPORT_ACTION_SET,
+  ACQUIRING_EXPORT_POLICIES,
+  validateAcquiringExportResult
+} = require('../read-only-exports/acquiring/policies');
+const {
+  runAcquiringExistingDiffCopyInline
+} = require('../read-only-exports/acquiring/executor');
+const {
+  PENDING_BIZOP_ADAPTER_ACTION_SET,
+  PENDING_BIZOP_ADAPTER_POLICIES,
+  validatePendingBizOpAdapterResult
+} = require('./pending-bizop-adapter-policies');
+const {
+  ACQUIRING_ADAPTER_ACTIONS,
+  ACQUIRING_ADAPTER_ACTION_SET,
+  ACQUIRING_ADAPTER_POLICIES,
+  validateAcquiringImportAdapterResult,
+  validateAcquiringRunAdapterResult
+} = require('./acquiring-adapter-policies');
+const {
+  POSITION_IMPORT_ADAPTER_ACTION,
+  POSITION_IMPORT_ADAPTER_POLICY,
+  validatePositionImportAdapterResult
+} = require('./position-import-adapter-policy');
+const {
+  createMatureActionAdapterBindings
+} = require('./mature-action-adapters');
 
 const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   ...TOOLBOX_GENERATION_POLICIES,
@@ -105,7 +156,16 @@ const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   ...DUPLICATE_POLICIES,
   ...RECON_FIX_POLICIES,
   VCC_EXPORT_SINGLE_POLICY,
-  VCC_EXPORT_SUBJECTS_POLICY
+  VCC_EXPORT_SUBJECTS_POLICY,
+  ...PENDING_READ_ONLY_POLICIES,
+  ...BIZ_OP_READ_ONLY_POLICIES,
+  ...PRE_FUND_READ_ONLY_POLICIES,
+  POSITION_READ_ONLY_POLICY,
+  VCC_FINANCIAL_OP_READ_ONLY_POLICY,
+  ...ACQUIRING_EXPORT_POLICIES,
+  ...PENDING_BIZOP_ADAPTER_POLICIES,
+  ...ACQUIRING_ADAPTER_POLICIES,
+  POSITION_IMPORT_ADAPTER_POLICY
 ]);
 
 function isBackgroundExecutionProductionEnabled(actionKey) {
@@ -144,6 +204,21 @@ function entryBindingForPolicy(policy, workerRoot, duplicateStartupGate) {
   if (policy.actionKey === NEW_ACCOUNT_SAVE_AS_ACTION) {
     return runNewAccountArtifactCopyInline;
   }
+  if (policy.actionKey === ACQUIRING_EXPORT_ACTIONS.COPY) {
+    return runAcquiringExistingDiffCopyInline;
+  }
+  if (policy.actionKey === ACQUIRING_EXPORT_ACTIONS.REGENERATE) {
+    return Object.freeze({
+      path: path.resolve(
+        __dirname,
+        '..',
+        'read-only-exports',
+        'acquiring',
+        'worker-entry.js'
+      ),
+      cancellationTerminalErrorCodes: Object.freeze(['ACQUIRING_EXPORT_CANCELLED'])
+    });
+  }
   if (policy.moduleId === 'duplicate') {
     return Object.freeze({
       path: path.resolve(__dirname, '..', 'duplicate-inbound-match', 'worker-entry.js'),
@@ -167,6 +242,44 @@ function entryBindingForPolicy(policy, workerRoot, duplicateStartupGate) {
     return Object.freeze({
       path: path.resolve(__dirname, '..', 'recon-id-fix-service', 'worker-entry.js'),
       cancellationTerminalErrorCodes: Object.freeze(['RECON_FIX_CANCELLED'])
+    });
+  }
+  if (policy.moduleId === 'pending-read-only-export') {
+    return Object.freeze({
+      path: path.resolve(__dirname, '..', 'read-only-exports', 'pending', 'worker-entry.js'),
+      cancellationTerminalErrorCodes: Object.freeze(['PENDING_EXPORT_CANCELLED'])
+    });
+  }
+  if (policy.moduleId === 'biz-op-read-only-export') {
+    return Object.freeze({
+      path: path.resolve(__dirname, '..', 'read-only-exports', 'biz-op', 'worker-entry.js'),
+      cancellationTerminalErrorCodes: Object.freeze(['BIZ_OP_EXPORT_CANCELLED'])
+    });
+  }
+  if (policy.moduleId === 'pre-fund-read-only-export') {
+    return Object.freeze({
+      path: path.resolve(__dirname, '..', 'read-only-exports', 'pre-fund', 'worker-entry.js'),
+      cancellationTerminalErrorCodes: Object.freeze(['PRE_FUND_EXPORT_CANCELLED'])
+    });
+  }
+  if (policy.moduleId === 'position-read-only-export') {
+    return Object.freeze({
+      path: path.resolve(__dirname, '..', 'read-only-exports', 'position', 'worker-entry.js'),
+      cancellationTerminalErrorCodes: Object.freeze(['POSITION_EXPORT_CANCELLED'])
+    });
+  }
+  if (policy.moduleId === 'vcc-financial-op-read-only-export') {
+    return Object.freeze({
+      path: path.resolve(
+        __dirname,
+        '..',
+        'read-only-exports',
+        'vcc-financial-op',
+        'worker-entry.js'
+      ),
+      cancellationTerminalErrorCodes: Object.freeze([
+        'VCC_FINANCIAL_OP_EXPORT_CANCELLED'
+      ])
     });
   }
   if (policy.actionKey === VCC_EXPORT_SUBJECTS_ACTION) {
@@ -237,19 +350,59 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
   const duplicateStartupGate = normalizeDuplicateStartupGateDescriptor(
     options.duplicateStartupGate
   );
+  const matureActionBindings = createMatureActionAdapterBindings({
+    acquiring: {
+      userDataDir: options.userDataDir,
+      mainDb: options.acquiringMainDb,
+      mainDbProvider: options.acquiringMainDbProvider,
+      mainDatabasePath: options.mainDatabasePath,
+      onLog: options.acquiringLog
+    },
+    position: options.positionImport || {}
+  });
   const entryRegistry = createStaticRegistry(Object.fromEntries(
-    BACKGROUND_EXECUTION_POLICIES.map((policy) => [
+    BACKGROUND_EXECUTION_POLICIES.filter((policy) => policy.entryKey !== null).map((policy) => [
       policy.entryKey,
       entryBindingForPolicy(policy, workerRoot, duplicateStartupGate)
+    ])
+  ));
+  const adapterRegistry = createStaticRegistry(Object.fromEntries(
+    [
+      ...PENDING_BIZOP_ADAPTER_POLICIES,
+      ...ACQUIRING_ADAPTER_POLICIES,
+      POSITION_IMPORT_ADAPTER_POLICY
+    ].map((policy) => [
+      policy.adapterKey,
+      matureActionBindings[policy.actionKey]
     ])
   ));
   const validatorEntries = {};
   for (const policy of BACKGROUND_EXECUTION_POLICIES) {
     let resultValidator;
-    if (policy.actionKey === VCC_EXPORT_SUBJECTS_ACTION) {
+    if (policy.actionKey === POSITION_IMPORT_ADAPTER_ACTION) {
+      resultValidator = validatePositionImportAdapterResult;
+    } else if (PENDING_BIZOP_ADAPTER_ACTION_SET.has(policy.actionKey)) {
+      resultValidator = validatePendingBizOpAdapterResult;
+    } else if (ACQUIRING_ADAPTER_ACTION_SET.has(policy.actionKey)) {
+      resultValidator = policy.actionKey === ACQUIRING_ADAPTER_ACTIONS.IMPORT
+        ? validateAcquiringImportAdapterResult
+        : validateAcquiringRunAdapterResult;
+    } else if (policy.actionKey === VCC_EXPORT_SUBJECTS_ACTION) {
       resultValidator = validateVccExportSubjectsResult;
     } else if (policy.actionKey === VCC_EXPORT_SINGLE_ACTION) {
       resultValidator = validateVccExportSingleResult;
+    } else if (ACQUIRING_EXPORT_ACTION_SET.has(policy.actionKey)) {
+      resultValidator = validateAcquiringExportResult;
+    } else if (policy.moduleId === 'pending-read-only-export') {
+      resultValidator = validatePendingReadOnlyExportResult;
+    } else if (policy.moduleId === 'biz-op-read-only-export') {
+      resultValidator = validateBizOpReadOnlyExportResult;
+    } else if (policy.moduleId === 'pre-fund-read-only-export') {
+      resultValidator = validatePreFundReadOnlyExportResult;
+    } else if (policy.moduleId === 'position-read-only-export') {
+      resultValidator = validatePositionReadOnlyExportResult;
+    } else if (policy.moduleId === 'vcc-financial-op-read-only-export') {
+      resultValidator = validateVccFinancialOpReadOnlyExportResult;
     } else if (policy.moduleId === 'recon-fix') {
       resultValidator = policy.actionKey === RECON_FIX_EXPORT_ACTION
         ? validateReconFixExportResult
@@ -284,8 +437,12 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
     validatorEntries[policy.result.validatorKey] = resultValidator;
     // Main explicitly executes the asynchronous technical/business validators before Publisher.
     // Registry bindings remain synchronous capability declarations for static contract coverage.
-    validatorEntries[policy.artifacts.technicalValidatorKey] = resultValidator;
-    validatorEntries[policy.artifacts.businessValidatorKey] = resultValidator;
+    if (policy.artifacts.technicalValidatorKey !== null) {
+      validatorEntries[policy.artifacts.technicalValidatorKey] = resultValidator;
+    }
+    if (policy.artifacts.businessValidatorKey !== null) {
+      validatorEntries[policy.artifacts.businessValidatorKey] = resultValidator;
+    }
   }
   const validatorRegistry = createStaticRegistry(validatorEntries);
   const resourceProfileRegistry = createStaticRegistry({
@@ -304,9 +461,14 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
               ? duplicateTopologyPlanner
               : (policy.actionKey === VCC_EXPORT_SUBJECTS_ACTION
                   ? vccExportTopologyPlanner
-                  : () => Object.freeze({ effectiveChildCount: 1 })))])
+                  : (PENDING_BIZOP_ADAPTER_ACTION_SET.has(policy.actionKey) ||
+                      ACQUIRING_ADAPTER_ACTION_SET.has(policy.actionKey) ||
+                      policy.actionKey === POSITION_IMPORT_ADAPTER_ACTION
+                      ? matureActionBindings[policy.actionKey].inspectTopology
+                      : () => Object.freeze({ effectiveChildCount: 1 }))))])
   ));
   entryRegistry.freeze();
+  adapterRegistry.freeze();
   validatorRegistry.freeze();
   resourceProfileRegistry.freeze();
   topologyRegistry.freeze();
@@ -326,17 +488,32 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
     plannerKeys: [
       'planner.pre-fund:mpt-import',
       'planner.duplicate:import',
-      'planner.vcc-financial-op:export-subjects'
+      'planner.vcc-financial-op:export-subjects',
+      ...[
+        ...PENDING_BIZOP_ADAPTER_POLICIES,
+        ...ACQUIRING_ADAPTER_POLICIES,
+        POSITION_IMPORT_ADAPTER_POLICY
+      ]
+        .filter((policy) => policy.workUnits)
+        .map((policy) => policy.workUnits.plannerKey)
     ],
     reducerKeys: [
       'reducer.pre-fund:mpt-import',
       'reducer.duplicate:import',
-      'reducer.vcc-financial-op:export-subjects'
+      'reducer.vcc-financial-op:export-subjects',
+      ...[
+        ...PENDING_BIZOP_ADAPTER_POLICIES,
+        ...ACQUIRING_ADAPTER_POLICIES,
+        POSITION_IMPORT_ADAPTER_POLICY
+      ]
+        .filter((policy) => policy.workUnits)
+        .map((policy) => policy.workUnits.reducerKey)
     ]
   };
   const policyRegistry = createExecutionPolicyRegistry({
     policies: BACKGROUND_EXECUTION_POLICIES,
     entryRegistry,
+    adapterRegistry,
     validatorRegistry,
     resourceProfileRegistry,
     topologyRegistry,
@@ -359,6 +536,46 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
     shutdownTimeoutMs: supervisorShutdownTimeoutMs,
     workerDurableCoordinator: options.workerDurableCoordinator,
     bindInputForAction({ actionKey, input }) {
+      if ([PENDING_READ_ONLY_ACTIONS.DIFF, PENDING_READ_ONLY_ACTIONS.SUMMARY]
+        .includes(actionKey)) {
+        if (!options.pendingDatabasePath) {
+          const error = new Error('Pending export runtime 缺少 Main database authority');
+          error.code = 'PENDING_EXPORT_RUNTIME_AUTHORITY_UNAVAILABLE';
+          throw error;
+        }
+        if (Object.hasOwn(input, 'dbPathOrManagedSource')) {
+          const error = new Error('Pending export database authority 不接受 caller override');
+          error.code = 'PENDING_EXPORT_RUNTIME_AUTHORITY_OVERRIDE_FORBIDDEN';
+          throw error;
+        }
+        return Object.freeze({
+          ...input,
+          dbPathOrManagedSource: Object.freeze({
+            kind: 'sqlite',
+            databasePath: path.resolve(options.pendingDatabasePath)
+          })
+        });
+      }
+      if (BIZ_OP_READ_ONLY_ACTION_SET.has(actionKey)) {
+        if (!options.mainDatabasePath || !options.userDataDir) {
+          const error = new Error('BizOP export runtime 缺少 Main database/userData authority');
+          error.code = 'BIZ_OP_EXPORT_RUNTIME_AUTHORITY_UNAVAILABLE';
+          throw error;
+        }
+        if (Object.hasOwn(input, 'dbPathOrManagedSource')) {
+          const error = new Error('BizOP export database authority 不接受 caller override');
+          error.code = 'BIZ_OP_EXPORT_RUNTIME_AUTHORITY_OVERRIDE_FORBIDDEN';
+          throw error;
+        }
+        return Object.freeze({
+          ...input,
+          dbPathOrManagedSource: Object.freeze({
+            kind: 'biz-op-sqlite',
+            mainDatabasePath: path.resolve(options.mainDatabasePath),
+            userDataDir: path.resolve(options.userDataDir)
+          })
+        });
+      }
       if ([VCC_EXPORT_SINGLE_ACTION, VCC_EXPORT_SUBJECTS_ACTION].includes(actionKey)) {
         if (!options.vccFinancialOpDatabasePath || !options.vccFinancialOpAssetsDir) {
           const error = new Error('VCC export runtime generation 缺少 Main database/assets authority');
@@ -664,7 +881,16 @@ function createBackgroundExecutionRuntimeManager(options = {}) {
         : options.workerDurableCoordinator,
       reconFixJpmDatabasePath: typeof options.reconFixJpmDatabasePathProvider === 'function'
         ? options.reconFixJpmDatabasePathProvider()
-        : options.reconFixJpmDatabasePath
+        : options.reconFixJpmDatabasePath,
+      pendingDatabasePath: typeof options.pendingDatabasePathProvider === 'function'
+        ? options.pendingDatabasePathProvider()
+        : options.pendingDatabasePath,
+      mainDatabasePath: typeof options.mainDatabasePathProvider === 'function'
+        ? options.mainDatabasePathProvider()
+        : options.mainDatabasePath,
+      userDataDir: typeof options.userDataDirProvider === 'function'
+        ? options.userDataDirProvider()
+        : options.userDataDir
     });
   });
   let runtime = null;

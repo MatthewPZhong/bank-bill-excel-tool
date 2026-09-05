@@ -328,9 +328,10 @@ function appendRemovalReconcileSheets(wb, db, run, runId, compareFields) {
 
 // ========== 单月（by runId）==========
 
-function buildPendingExportReadSnapshot(db, build) {
+function buildPendingExportReadSnapshot(db, build, beforeBuild) {
   db.exec('BEGIN');
   try {
+    if (typeof beforeBuild === 'function') beforeBuild(db);
     const snapshot = build();
     db.exec('COMMIT');
     return snapshot;
@@ -340,7 +341,7 @@ function buildPendingExportReadSnapshot(db, build) {
   }
 }
 
-function exportSingleRun(db, runId, savePath) {
+function exportSingleRun(db, runId, savePath, options = {}) {
   const built = buildPendingExportReadSnapshot(db, () => {
   const run = diffRepo.getRunById(db, runId);
   if (!run) throw new Error(`run #${runId} 不存在`);
@@ -409,14 +410,14 @@ function exportSingleRun(db, runId, savePath) {
     missingReconRowCount: removalReconcile.missingReconRowCount,
     removalOnlyRowCount: removalReconcile.removalOnlyRowCount
   } };
-  });
+  }, options.beforeBuild);
   XLSX.writeFile(built.wb, savePath);
   return built.result;
 }
 
 // ========== 汇总（每月对取最新 run）==========
 
-function exportAggregateRuns(db, runIds, savePath) {
+function exportAggregateRuns(db, runIds, savePath, options = {}) {
   const built = buildPendingExportReadSnapshot(db, () => {
   const sortedLatest = runIds.map((runId) => {
     const run = diffRepo.getRunById(db, runId);
@@ -513,7 +514,7 @@ function exportAggregateRuns(db, runIds, savePath) {
     // 聚合导出省略了移除核对 sheet 且确有移除数据 → renderer 据此追加提示
     removalDataOmitted
   } };
-  });
+  }, options.beforeBuild);
   if (built.wb) XLSX.writeFile(built.wb, savePath);
   return built.result;
 }
@@ -547,6 +548,7 @@ module.exports = {
     computeChangedFields,
     computeAmountDiff,
     appendRemovalReconcileSheets,
-    resolveRemovalStatus
+    resolveRemovalStatus,
+    buildPendingExportReadSnapshot
   }
 };

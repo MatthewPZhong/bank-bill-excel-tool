@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "evaluatedHead": "dd412ea8141e0786132b31868a3006adde62f9d4",
+  "evaluatedAt": "2026-08-30",
+  "sourcePackage": "changes/background-execution-v3.2.x-contract-baseline",
+  "sourceDocuments": {
+    "specSha256": "13410e4e5cf64798255cab30dd2487d4da4323eddf59d44cf2a0653e950898f2",
+    "techdocSha256": "3fb1845979823f2c39a8e26d9d5adc5d7f3e351fda90d2f4086d6c355d17e64f",
+    "splitPlanSha256": "27bbdde9beca98a6abbdc9902016e319c98e52775b46c3727014d628ba6f174a"
+  },
+  "packageChecksum": {
+    "status": "FAIL",
+    "expectedFileCount": 69,
+    "passedFileCount": 61,
+    "failedFileCount": 8,
+    "failedPaths": [
+      "changes/3.2.3/spec.md",
+      "changes/3.2.3/techdoc.md",
+      "changes/background-execution/E00-platform-contract-v1-techdoc.md",
+      "changes/background-execution/platform-contract-v1.md",
+      "changes/background-execution/platform-lifecycle-mapping.md",
+      "changes/background-execution/platform-protocol-v1.schema.json",
+      "changes/background-execution/validation/fixtures/invalid/protocol-messages.invalid.v1.json",
+      "implementation-sequence.md"
+    ]
+  },
+  "publishedValidationReport": {
+    "status": "PASS",
+    "checkCount": 29,
+    "passed": 29,
+    "failed": 0,
+    "hashedInputFileCount": 68,
+    "generatedAt": "2026-08-24T15:44:29.955317+00:00",
+    "classification": "historical-only"
+  },
+  "currentTreeValidation": {
+    "status": "FAIL",
+    "checkCount": 29,
+    "passed": 28,
+    "failed": 1,
+    "errorCount": 122,
+    "hashedInputFileCount": 73,
+    "failedChecks": [
+      "canonical-action-legacy-task-binding"
+    ],
+    "diagnosticReportSha256": "a0b52c5afe142bbd752e4dd3e6c851b2e4d42bb5f44a263c1ad3c8a7b4252e9b",
+    "classification": "E13-G-preflight-finding"
+  },
+  "productionEnabled": false,
+  "humanReviewStatus": "PENDING_HUMAN_REVIEW",
+  "resolutionOwner": "E13-G"
+}

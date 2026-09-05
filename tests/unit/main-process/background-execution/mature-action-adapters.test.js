@@ -537,7 +537,7 @@ test('Toolbox generation/publisher/recovery 严格分层，recover 不触发 gen
   assert.deepEqual(calls, { generation: 0, publish: 0, recover: 1 });
 });
 
-test('4 个 mature action 机器可证 production=false，默认 IPC 仍直达既有 dispatcher', () => {
+test('全部 mature action 机器可证 production=false，默认 IPC 仍直达既有 dispatcher', () => {
   assert.deepEqual(Object.keys(MATURE_ACTION_PRODUCTION).sort(), Object.values(MATURE_ACTION_KEYS).sort());
   for (const actionKey of Object.values(MATURE_ACTION_KEYS)) {
     assert.equal(MATURE_ACTION_PRODUCTION[actionKey], false);
@@ -548,6 +548,12 @@ test('4 个 mature action 机器可证 production=false，默认 IPC 仍直达�
   assert.deepEqual(taskBindings[MATURE_ACTION_KEYS.bizOpImportFlow], ['bizOpRecon:import:run-flow']);
   assert.deepEqual(taskBindings[MATURE_ACTION_KEYS.toolboxSplitLarge], ['toolbox:split:export']);
   assert.deepEqual(taskBindings[MATURE_ACTION_KEYS.toolboxPublish], ['toolbox:split:export']);
+  assert.deepEqual(taskBindings[MATURE_ACTION_KEYS.positionImport], [
+    'position-reconciliation:bank:apply-import',
+    'position-reconciliation:run:import-result',
+    'position-reconciliation:source:apply-import',
+    'position-reconciliation:source:prepare-import'
+  ]);
   const projectRoot = path.resolve(__dirname, '../../../..');
   const pendingSource = fs.readFileSync(path.join(projectRoot, 'src/main-process/pending-session.js'), 'utf8');
   const bizOpSource = fs.readFileSync(path.join(projectRoot, 'src/main-process/biz-op-recon-session.js'), 'utf8');
