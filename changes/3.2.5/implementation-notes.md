@@ -164,3 +164,25 @@
 - 输出只写 task-private staging，技术/业务回读通过后才按 FilePlan 单次发布；部分 unit、artifact tamper、Publisher/cleanup/metadata 失败均不会伪装完整成功。
 - 行数证据分别覆盖 Acquiring matched/unmatched 守恒、Position rowCount、PreFund 分渠道计数、VCC total/exportable/missing 守恒；零行/缺失来源按各原合同显式处理。
 - 本次传播没有改变金额正负、币种归一、资金匹配主键、SQL 业务筛选、Workbook 列/排序或账务持久化；未发现新增资损红线。人工验收仅解除本次技术发布门禁，不解除 production enablement。
+
+### 自然合并后的完整验证
+
+- 自然合并提交：`94a9673109965f0c317fc7d664a2c95e5f9bc12c`；父提交精确为
+  `[138c5b43e345ff4c19f3bcf243bcb1f119c7c105, 8e6d65a007cd04681e44cad6a391d2e7a3c50249]`。
+- 官方 Node `v22.18.0`、npm `10.9.3`、精确 lockfile：完整 unit
+  `6908/6911 PASS`（`0 FAIL`、`3` 个 Windows-only skip），日志
+  `logs/unit-tests/unit-20260905-081155.log`；53 个 integration 脚本
+  `2488/2488 PASS`（`290260 ms`）；smoke PASS；完整 `src/` ESLint PASS；相对
+  v3.2.4 final main 的 93 个改动 JavaScript 均通过 `node --check`。
+- deterministic current-tree validator：54 actions、29 contract checks、74 checksums
+  全部 PASS，production enabled=0、54/54 effective legacy；package、lockfile root 与
+  lockfile package metadata 均为 `3.2.5`，`git diff --check` PASS。
+- `check-background-execution-manifest.js` 是 E13-G 冻结 source-hash gate；直接对传播后
+  current tree 运行会按设计拒绝 v3.2.4 合法修复形成的 `src/main.js` 新 hash。全量 unit 已在
+  临时只读 clone 的冻结 candidate `138c5b43…c105` 上运行该 CLI 并 PASS；未改写历史 report，
+  current tree 则由上述 v3.2.5 deterministic validator 取证。
+- integration runner 在全部脚本通过后按项目约定刷新
+  `rules/integration-test-policy.md` 的自动生成时间与本轮耗时；断言总数仍为
+  `2488/2488`，没有清单增删或语义变化。
+- 按用户要求，本地未运行 `release-check`、`check-vars` 或 `scan:vars`；依赖审计仍为
+  `2 moderate / 9 high`，未运行 `audit fix`。
