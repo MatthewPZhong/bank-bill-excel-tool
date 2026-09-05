@@ -1,6 +1,6 @@
 # v3.2.6 TechDoc — 对账操作符与大账号维护检查
 
-目标版本 3.2.6；基线 3.2.5 / e5047831；2026-09-05；状态：实现完成，自动化通过，待脱敏真实样本人工验收。
+目标版本 3.2.6；基线 3.2.5 / e5047831；2026-09-05；状态：实现完成，本轮定向检查通过，完整回归与人工验收状态见实施记录。
 产品合同见 [Spec](spec.md)，决策与验收见 [实施记录](implementation-notes.md)。
 
 ## 1. 基线调用链与修改边界
@@ -32,6 +32,8 @@ UI 新增行写入等于，编辑旧配置补默认，`data-multi-field=op` 使�
 
 冻结顺序证据中增加独立的全量维护检查证据。实际存储于 `bigAccountOrderEvidence.files[].maintenanceChecks[]`，各条含 blockOrdinal、sourceRowNumber、extractedMerchantId，fileOrdinal、fileName 复用父级文件证据，返回错误时合并成完整来源。序号内部从 0 开始；sourceRowNumber 是分段定位行；以 statementSelectionSessionId 绑定。证据遍历全部文件与分段，不依赖 renderer 的 rowIndexes 或 orderedAccountKeys。
 
+维护证据的 `sourceRowNumber` 按 `headerWindows[blockOrdinal].headerRowNumber → previewRow.sourceRowNumber → 0` 取值。有冻结表头时统一指向本段表头：空段的 `startIndex` 可能已经落在下一分段的交易行，不能让预览行优先覆盖本段证据。仅调整维护提示位置；正常顺序证据的 sourceRow、账号识别、交易分段和取消流程沿用原实现。
+
 桥接路径直接保留未过滤的 bridgeClearingIdsByBlock；不得用匹配后的 maintained merchantId 替换识别原值。没有明确识别结果保留空，不从任意数字猜账号。不跨文件、分段借用证据；正常顺序证据与币种提示保留。
 
 提取顺序：验证上下文／证据身份 → 建立本次维护列表 MerchantId 的 trim 精确集合 → 全量检查非空识别值 → 未维护直接返回专用错误 → 全部通过后才按 mode + rowIndexes 执行既有提取。rowIndexes=[] 仍先检查维护情况。按钮不重新读文件；生成仍走既有新鲜度验证。
@@ -46,7 +48,7 @@ UI 新增行写入等于，编辑旧配置补默认，`data-multi-field=op` 使�
   failedRows: [],
   unmaintainedAccounts: [{
     merchantId: 'M002', fileName: '账单.xlsx',
-    fileOrdinal: 0, blockOrdinal: 1, sourceRowNumber: 8
+    fileOrdinal: 0, blockOrdinal: 1, sourceRowNumber: 5
   }]
 }
 ```
@@ -67,11 +69,16 @@ UI 新增行写入等于，编辑旧配置补默认，`data-multi-field=op` 使�
 
 实施顺序：失败用例 → 原值证据／全量检查 → UI 提醒取消 → C2 配置持久化与执行 → 定向测试／界面预览／release-check → 版本文档收尾。版本调整前执行 scan:vars 和 check:vars，输出关联功能 review。
 
-基线定向测试 68/68 PASS，仅代表 3.2.5。PR #229 交叉候选修复后 release-check 退出码 0：lint、smoke 通过，单测 6942/6945（3 SKIP、0 FAIL），集成 53 个脚本全部通过、2488/2488 断言通过。方向、交叉候选、C2 与 dispatcher 定向回归 110/110 PASS，其中含 512 种候选关系的条件／行换序与左右赋值穷举；此前 f8ae6a4 的隔离 Electron 界面验证通过，本次未改 UI，未重复执行。数据库无迁移；降版前停用或转换包含场景。脱敏样本人工核对匹配和账号归属仍待执行，自动测试不替代人工验收。
+基线定向测试 68/68 PASS，仅代表 3.2.5。本轮空分段定位的 5 项新增回归由 3 PASS / 2 FAIL 变为 5/5 PASS；其中三项使用实际临时 XLSX，走 reader、映射、账号识别及分段后生成冻结证据，覆盖首／中／尾空段，另外两项覆盖无表头和无行号回退。账号链路与 C2 定向合计 154/154 PASS，lint、smoke 通过。
+
+完整 release-check 最近一次在交叉候选修复提交 1b3363b 执行，退出码 0：单测 6942/6945（3 SKIP、0 FAIL），53 个集成脚本全部通过、2488/2488 断言通过。本轮只改维护提示定位，未重复完整回归或此前 f8ae6a4 的隔离 Electron 界面验证。数据库无迁移；降版前停用或转换包含场景。脱敏样本人工核对匹配和账号归属仍待执行，自动测试不替代人工验收。
 
 复验命令：
 
 ```bash
+node --test tests/unit/main-process/statement-big-account-maintenance.test.js tests/unit/main-process/statement-big-account-preview.test.js tests/unit/main-process/big-account-recognition.test.js tests/unit/main-process/scenario-engines/c2-offset-bill-mark.test.js tests/unit/main-process/scenario-engines/c2-recon-operators.test.js tests/unit/main-process/scenario-engines/c2-recon-field-direction.test.js tests/unit/main-process/scenario-engines/c2-candidate-conflicts.test.js tests/unit/main-process/scenario-dispatcher.test.js
+npm run lint
+npm run smoke
 npm run release-check
 node scripts/verify-v3-2-6-dialogs.js
 npm run scan:vars

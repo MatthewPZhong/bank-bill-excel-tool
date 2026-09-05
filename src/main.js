@@ -10933,7 +10933,8 @@ function buildBigAccountOrderEvidence(pendingContext) {
           const previewRow = fileRows.find((row) => Number(row.fileBlockOrdinal) === blockOrdinal);
           maintenanceChecks.push(Object.freeze({
             blockOrdinal,
-            sourceRowNumber: Number(previewRow?.sourceRowNumber || windows[blockOrdinal]?.headerRowNumber || 0),
+            // 空段的预览行可能指向下一段交易，维护提示优先定位本段冻结表头。
+            sourceRowNumber: Number(windows[blockOrdinal]?.headerRowNumber || previewRow?.sourceRowNumber || 0),
             extractedMerchantId: normalizeCell(clearingIds[blockOrdinal])
               || normalizeCell(recognition.matches[blockOrdinal]?.merchantId)
           }));

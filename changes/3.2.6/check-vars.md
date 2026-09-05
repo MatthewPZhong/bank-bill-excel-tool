@@ -2,7 +2,9 @@
 
 检查范围：本分支相对基线的 `src/` 改动。版本号调整前已执行 `npm run scan:vars`、`npm run check:vars`；结论及本地原始日志位置见 [验证记录](verification.md)。check-vars 的退出码 2 表示命中需复核的变量，不表示业务测试失败。
 
-3.2.6 最终状态及 PR #229 两次修复后均重跑 scan:vars 和 check:vars，更新 PR 前命中范围一致。交叉候选修复后的 release-check 退出码 0：lint、smoke、6942 项单测和全部 53 个集成脚本通过；3 项 Windows 专用单测在 macOS 跳过。
+3.2.6 收尾及 PR #229 两次 P2 修复后均重跑 scan:vars 和 check:vars。本轮 P3 提示定位修复重新执行 check:vars，退出码 2，命中范围一致；没有版本调整或合并，未重复 scan:vars。账号链路及 C2 定向 154/154 PASS，lint、smoke 通过。
+
+完整 release-check 最近一次属于上一提交 1b3363b：lint、smoke、6942 项单测和全部 53 个集成脚本通过，3 项 Windows 专用单测在 macOS 跳过。本轮未重复完整回归，不将历史结果记为当前 head 通过。
 
 ## 自动命中
 
@@ -21,7 +23,7 @@
 | --- | --- | --- |
 | Risk-sensitive：runC2Scenario | “reconFields = 0 时无条件赋值”；必跑 smoke C2 全套及真实银行账单 C2 端到端（:992） | 保留单 billType、无对账字段分支；包含匹配、非法枚举、逐条方向均有测试。交叉候选修复后 C2 与 dispatcher 定向 110/110 PASS，含 512 种候选图、反向 AND 换序、独立合法及 no-op 配对、歧义行进入后续场景与审计归属。脱敏真实账单人工端到端待执行。 |
 | Risk-sensitive：config.billTypes / config.conditions | 字段结构变更必须同步引擎、dialog、bundle、默认值；必跑 smoke 与旧结构 bundle 升级（:1003） | 此次只为 reconFields 增加 op，旧 billTypes 迁移继续保留；旧结构读取、保存、bundle 导入及失败事务回滚已纳入回归。 |
-| Runtime-state：lastGeneratedExports / statementImportSessions / lastFileImportContext | 导出生命周期与 session key 不能漂移（:622） | 新阻断调用既有当前 context 取消；真实函数测试验证旧 context 拒绝、历史会话和结果不被清除。 |
+| Runtime-state：lastGeneratedExports / statementImportSessions / lastFileImportContext | 导出生命周期与 session key 不能漂移（:622） | 新阻断调用既有当前 context 取消；真实函数测试验证旧 context 拒绝、历史会话和结果不被清除。本轮只改维护提示行号，实际 XLSX 测试确认提取仍只读，原值与分段不漂移；取消和历史状态回归继续通过。 |
 
 ## ⚠️ 关联功能 review
 

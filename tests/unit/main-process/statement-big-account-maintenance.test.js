@@ -3,8 +3,11 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const acorn = require('acorn');
+const XLSX = require('xlsx');
+const { buildMappedRows } = require('../../../src/backend/file-service');
 const { normalizeCell } = require('../../../src/backend/file-service/common');
 const { matchMerchantIds, normalizeMaintainedBigAccounts } = require('../../../src/main-process/big-account-recognition');
 const source = fs.readFileSync(path.join(__dirname, '../../../src/main.js'), 'utf8');
@@ -16,7 +19,9 @@ function load(name) {
   return Function(...Object.keys(deps), `return (${source.slice(node.start, node.end)});`)(...Object.values(deps));
 }
 for (const name of ['findBigAccountMatchInRows', 'identifyAccountsFromRecognitionBasis',
-  'findSelfInputBigAccountBridge', 'selectPendingBigAccountRows']) deps[name] = load(name);
+  'findSelfInputBigAccountBridge', 'selectPendingBigAccountRows', 'identifyAccountBlocks',
+  'findHeaderRowNumbersInRawRows', 'buildBigAccountRecognitionBasis',
+  'finalizeBigAccountRecognitionBasis', 'buildBigAccountSelectionRows']) deps[name] = load(name);
 const build = load('buildBigAccountOrderEvidence');
 const extract = load('extractBigAccountOrderFromEvidence');
 
@@ -40,13 +45,102 @@ function fixture(ids = ['M001', 'M002'], options = {}) {
   return context;
 }
 
+for (const [emptyBlockOrdinal, label] of ['首段', '中间段', '末尾段'].entries()) {
+  test(`空分段定位：实际 XLSX ${label}为空时使用本段冻结表头`, (t) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-maintenance-location-'));
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const filePath = path.join(dir, '空分段.xlsx');
+    const headers = ['Credit Amount', 'Debit Amount', 'Currency'];
+    const accountIds = ['CLEAR1001', 'CLEAR2002', 'CLEAR3003'];
+    const accountMappingByBankId = {};
+    const workbookRows = [];
+    const headerRowNumbers = [];
+    const transactionRowNumbers = [];
+    accountIds.forEach((merchantId, blockOrdinal) => {
+      const bankId = `BANK${blockOrdinal + 1}001`;
+      accountMappingByBankId[bankId] = { clearingAccountId: merchantId };
+      // 账号说明在 A 列，交易表在 B:D；reader 应跳过交易列范围全空的说明行。
+      workbookRows.push([bankId]);
+      workbookRows.push(['', ...headers]);
+      headerRowNumbers.push(workbookRows.length);
+      if (blockOrdinal !== emptyBlockOrdinal) {
+        workbookRows.push(['', 10, '', 'USD']);
+        transactionRowNumbers.push(workbookRows.length);
+      }
+    });
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(workbookRows), '账单');
+    XLSX.writeFile(workbook, filePath);
+    let recognitionBasis;
+    const detailRows = buildMappedRows({
+      inputFilePath: filePath,
+      orderedTargetFields: headers,
+      mappingByField: Object.fromEntries(headers.map((header) => [header, header])),
+      expectedSourceHeaders: headers,
+      readOptions: {
+        onWorkbookRows: (rawRows) => {
+          recognitionBasis = deps.buildBigAccountRecognitionBasis({
+            rawRows, expectedSourceHeaders: headers, accountMappingByBankId
+          });
+        }
+      }
+    });
+    detailRows.bigAccountRecognitionBasis = deps.finalizeBigAccountRecognitionBasis(recognitionBasis, detailRows);
+    assert.deepEqual(detailRows.headerBreaks, headerRowNumbers.slice(1));
+    assert.deepEqual(detailRows.rowMetas.map((row) => row.sourceRowNumber), transactionRowNumbers);
+    assert.deepEqual(detailRows.bigAccountRecognitionBasis.bridgeClearingIdsByBlock, accountIds);
+    const fileEntries = [{ filePath, detailRows, selfInputMerchant: true, skipDirectMerchantLookup: true }];
+    const context = {
+      statementSelectionSessionId: `empty-block-${emptyBlockOrdinal}`,
+      bigAccounts: accountIds.filter((_id, index) => index !== emptyBlockOrdinal)
+        .map((merchantId) => ({ merchantId, currencies: ['USD'] })),
+      fileEntries,
+      rows: deps.buildBigAccountSelectionRows(fileEntries),
+      rowsWithEmptyBlocks: deps.buildBigAccountSelectionRows(fileEntries, { includeEmptyBlocks: true })
+    };
+    const emptyRow = context.rowsWithEmptyBlocks[emptyBlockOrdinal];
+    assert.ok(emptyRow.blockStartIndex > emptyRow.blockEndIndex, '实际分段必须为空');
+    assert.equal(context.rows.length, 2);
+    assert.equal(context.rowsWithEmptyBlocks.length, 3);
+    context.bigAccountOrderEvidence = build(context);
+    assert.ok(Object.isFrozen(context.bigAccountOrderEvidence.files[0].maintenanceChecks[emptyBlockOrdinal]));
+    // 提取只消费冻结证据；删除本测试的源文件后仍应能定位，不发生二次读取。
+    fs.unlinkSync(filePath);
+    const before = JSON.stringify(context);
+    const result = extract(context, 'unfixed', []);
+    assert.equal(result.errorCode, 'BIG_ACCOUNT_NOT_MAINTAINED');
+    assert.deepEqual(result.unmaintainedAccounts, [{
+      merchantId: accountIds[emptyBlockOrdinal], fileName: '空分段.xlsx', fileOrdinal: 0,
+      blockOrdinal: emptyBlockOrdinal, sourceRowNumber: headerRowNumbers[emptyBlockOrdinal]
+    }]);
+    assert.equal(result.accounts, undefined);
+    assert.equal(JSON.stringify(context), before, '定位提示不得修改导入上下文');
+  });
+}
+
+test('空分段定位：缺少冻结表头时保留预览行回退', () => {
+  const context = fixture(['M002']);
+  delete context.fileEntries[0].detailRows.bigAccountRecognitionBasis.headerWindows[0].headerRowNumber;
+  context.rowsWithEmptyBlocks[0].sourceRowNumber = 23;
+  context.bigAccountOrderEvidence = build(context);
+  assert.equal(extract(context, 'unfixed', []).unmaintainedAccounts[0].sourceRowNumber, 23);
+});
+
+test('空分段定位：冻结表头和预览行号均缺失时保留零值', () => {
+  const context = fixture(['M002']);
+  delete context.fileEntries[0].detailRows.bigAccountRecognitionBasis.headerWindows[0].headerRowNumber;
+  delete context.rowsWithEmptyBlocks[0].sourceRowNumber;
+  context.bigAccountOrderEvidence = build(context);
+  assert.equal(extract(context, 'unfixed', []).unmaintainedAccounts[0].sourceRowNumber, 0);
+});
+
 test('全批检查不受选中行、已手动绑定和空 rowIndexes 限制，保留未维护原值', () => {
   const context = fixture();
   for (const rowIndexes of [[0], [], [0, 1]]) {
     const result = extract(context, 'unfixed', rowIndexes);
     assert.equal(result.errorCode, 'BIG_ACCOUNT_NOT_MAINTAINED');
     assert.deepEqual(result.unmaintainedAccounts, [{
-      merchantId: 'M002', fileName: '账单.xlsx', fileOrdinal: 0, blockOrdinal: 1, sourceRowNumber: 7
+      merchantId: 'M002', fileName: '账单.xlsx', fileOrdinal: 0, blockOrdinal: 1, sourceRowNumber: 6
     }]);
     assert.equal(result.accounts, undefined);
   }
