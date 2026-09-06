@@ -1,5 +1,11 @@
 # PR4 实施记录
 
+## 第二轮终态发布恢复回归
+
+- 继承 PR231 的终态保护/anchor 精确重放及关闭时序修复，新增真实 OP_CHECK 发布成功但 ACK 写回失败的 6 个组合：无/有同 Task Hold、同进程恢复、anchor 后退出、RecoveryControl 提交前真实退出。
+- 每组另起进程恢复并重复检查；原 succeeded Task、不可变 publication receipt、输入版本/当前 head、源文件与输出文件 SHA-256 均保持，ACK/cleanup_completed 最终为 1，读 pin 清零后才开门。与 PR2 共用故障夹具，但成功分支只在 Publisher 已实现的 PR4 执行。
+- Electron 新增 6 项及既有 export-main 13 项，共 19 PASS/0 FAIL（23.1 秒）。生产源码在本 PR 中没有额外扩大；Windows 目录耐久与人工发布门禁保持。
+
 ## Unknowns Register
 
 | 项 | 分类 | 验证安排 |

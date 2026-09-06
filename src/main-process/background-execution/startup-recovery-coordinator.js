@@ -458,7 +458,15 @@ function createStartupRecoveryCoordinator(options = {}) {
       holdId: activeHold ? activeHold.holdId : holdIdFor(source),
       taskState
     });
-    if (Array.isArray(planned) && planned.length === 0 && (activeHold || !taskState)) {
+    // 终态不可再中断，但其来源仍需恢复保护。仅对权威读取的同一 Task 允许
+    // Hold-only 重放；anchor、观察和 Hold 仍经过原有身份校验及原子事务。
+    const terminalTask = taskState
+      && taskState.taskRunId === source.taskRunId
+      && taskState.operationKey === source.operationKey
+      && ['succeeded', 'failed', 'cancelled'].includes(taskState.status)
+      && taskState.recoveryMode !== true && !taskState.recoveryAttemptId
+      && taskState.metadata?.recoveryMode !== true && !taskState.metadata?.recoveryAttemptId;
+    if (Array.isArray(planned) && planned.length === 0 && (activeHold || !taskState || terminalTask)) {
       return planned;
     }
     if (!Array.isArray(planned) || planned.length !== 1

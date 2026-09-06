@@ -1,5 +1,12 @@
 # PR2 实施记录
 
+## 第二轮终态恢复回归
+
+- 继承 PR231 R1 的终态保护/anchor 精确重放修复及 ServiceHost 正常退出时序修复；共享合同以 PR1b 的 terminal-recovery-remediation.md 为准。
+- 新增真实 XLSX 失败与取消来源的 12 个组合：无/有同 Task Hold，同进程故障消除、anchor 落盘后进程退出、RecoveryControl 已写入但未 COMMIT 时进程退出。每组另起进程回读磁盘库，保留原 Task/错误/receipt/版本/输入哈希，完成读 pin 与收尾义务后才开门，并再次恢复验证幂等。
+- 测试宿主仅增加 Inspector/持久化故障钩子；不在生产代码加入测试分支。Inspector 内只记录观察，断言在恢复调用外执行，避免被平台作为临时异常重试后吞掉。
+- Electron 专项：新增 12 项与既有 import-main 8 项，共 20 PASS/0 FAIL。测试数据为临时合成文件；Windows 目录耐久、目标规模和人工门禁保持。
+
 ## Decisions
 
 - E01—E03 已获用户明确批准，不再作为未决门禁。

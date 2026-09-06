@@ -17,6 +17,8 @@
 
 ## Deviations
 
+- 第二轮 R1 证实真实终态 Task 的未决来源无法重放 unavailable anchor。本轮将“共享 Coordinator 无改动”收窄为保留接口/协议/调度，只扩展精确重放对同一来源合法终态的空 Task 计划支持。用户已在该评审结论后授权修复；spec 已先同步，决策及验证见 terminal-recovery-remediation.md。
+
 - E5 草图的 native-thread-job 在生产 DDL 映射为 PR1a 的权威 thread-single，身份字段完整保留；增加真实 owner PID/退出证据与共享回收授权摘要。
 - Archive 的 READY 回调在既有 repository 同连接事务内执行，失败整体回滚；没有创建新的事务框架。
 - 内部增加 UNUSED_CANDIDATE 回收类型，避免指纹复用留下无人跟踪的封存目录。授权来自原业务 receipt，不放宽 ABORTED_STAGE 的无提交收据条件，详见 spec 的宿主与清理合同。
