@@ -70,6 +70,7 @@ function createBizOpComputeCoordinator({ userDataDir, catalog, payloadStore, pro
                 || hash(info.originalDigests) !== hash(frozen.originalDigests) || info.inputFingerprint !== frozen.inputFingerprint
                 || info.resultSchemaVersion !== RESULT_SCHEMA_VERSION || info.cellContractVersion !== CELL_CONTRACT_VERSION
                 || info.ruleVersion !== RULE_VERSION) fail('BIZOP_COMPUTE_RESULT_MISMATCH');
+            if (signal?.aborted) return { status: 'cancelled' };
             const receipt = catalog.commitRun({ taskRunId, intentDigest: op.intent_digest, candidate });
             if (afterCommit) await afterCommit(receipt);
             return { status: 'ok', receipt, runId: receipt.outcome.runId, version: receipt.outcome.version,
