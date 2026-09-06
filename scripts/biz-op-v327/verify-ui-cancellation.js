@@ -48,7 +48,9 @@ const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     await js('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
     fs.writeFileSync(path.join(output, `${name}.png`), (await win.webContents.capturePage()).toPNG());
   }
-  for (const scenario of ['import', 'run-mouse', 'run-keyboard', 'result-export', 'raw-export', 'manager-export', 'delete', 'keep-delete', 'publish-protected', 'late-cancel']) {
+  for (const scenario of ['import', 'import-keyboard', 'run-mouse', 'run-keyboard', 'result-export', 'raw-export', 'manager-export', 'delete', 'keep-delete', 'publish-protected', 'late-cancel']) {
+    const importing = scenario.startsWith('import') || scenario === 'late-cancel';
+    const cancelLabel = importing ? '取消导入' : '取消当前操作';
     await win.loadFile(html);
     await js(`(async()=>{
       window.fixture={cancelCalls:[],requests:[],finish:null,cancelFinish:null};
@@ -63,11 +65,15 @@ const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
         async deletePreview(){return {previewId:'preview-1',selection:{runIds:[],datasetIds:['input-1']},datasets:[input],runs:[{...run,originals:input.originals}],references:{protectedAfterKeep:1,protectedAfterDelete:0,userLockedOriginals:0,sharedBlobOriginals:0}}},deleteData:pending,
         async cancel(value){fixture.cancelCalls.push(value);return new Promise(resolve=>fixture.cancelFinish=resolve)}};
       window.controller=createBizOpV327Controller({api,panel:document.querySelector('#panel'),legacyPanel:document.querySelector('#legacy'),restoreLegacy(){}});
-      window.target=(text)=>[...document.querySelectorAll('button')].filter(b=>b.textContent===text).at(-1);
+      window.target=(text)=>[...document.querySelectorAll('button')].filter(b=>!b.hidden&&b.textContent===text).at(-1);
       window.waitUntil=async(fn)=>{for(let n=0;n<300;n++){if(fn())return;await new Promise(resolve=>setTimeout(resolve,10));}throw new Error('页面条件未收敛');};
       await controller.setSelected(true);
     })()`);
-    if (['import', 'late-cancel'].includes(scenario)) await click('导入文件');
+    let importRect;
+    if (importing) {
+      importRect = await js("(()=>{const r=target('导入文件').getBoundingClientRect();return [r.x,r.y,r.width,r.height]})()");
+      await click('导入文件');
+    }
     if (scenario.startsWith('run-')) {
       await click('开始运行');
       await js("document.querySelectorAll('dialog input')[0].value='2026-09-01';document.querySelectorAll('dialog input')[1].value='2026-09-03'");
@@ -85,43 +91,48 @@ const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       await click('数据管理'); await until("document.querySelector('dialog td')");
       if (scenario === 'manager-export') await click('导出原表');
       else {
-        await click('选取');
+        await click('删除');
         const point = await js("(()=>{const r=document.querySelector('input[type=checkbox]').getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()");
         await mouse(point); await click('删除'); await until("document.querySelectorAll('dialog[open]').length===2");
         await click(scenario === 'keep-delete' ? '删除但保留结果表' : '删除');
       }
     }
     await until('Boolean(fixture.finish)&&controller.busy');
-    const before = await js(`(()=>{const b=target('取消当前操作'),r=b.getBoundingClientRect(),d=[...document.querySelectorAll('dialog[open]')].at(-1);return {
+    const before = await js(`(()=>{const b=target(${JSON.stringify(cancelLabel)}),r=b.getBoundingClientRect(),d=[...document.querySelectorAll('dialog[open]')].at(-1);return {
       dialogs:document.querySelectorAll('dialog[open]').length,inside:d?d.contains(b):document.querySelector('#panel').contains(b),
       hit:document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)===b,focused:document.activeElement===b,
-      x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()`);
+      rect:[r.x,r.y,r.width,r.height],x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()`);
     assert.equal(before.inside, true, scenario); assert.equal(before.hit, true, scenario); assert.equal(before.focused, true, scenario);
-    if (['run-mouse', 'delete'].includes(scenario)) await screenshot(scenario);
-    if (scenario === 'run-keyboard') await key('Enter'); else await click('取消当前操作');
+    if (importing) {
+      assert.deepEqual(before.rect, importRect, '取消导入精确替换原按钮位置和尺寸');
+      assert.equal(await js("document.querySelector('.bizop-secondary').hidden"), true);
+    }
+    if (scenario === 'manager-export') assert.equal(await js("document.querySelector('dialog .bizop-feedback').checkVisibility()"), false);
+    if (['import', 'run-mouse', 'delete', 'manager-export'].includes(scenario)) await screenshot(scenario);
+    if (scenario.endsWith('keyboard')) await key('Enter'); else await click(cancelLabel);
     await until('fixture.cancelCalls.length===1');
     // 第二次真实鼠标/键盘输入在取消响应尚未返回时也不能重复提交。
     await mouse({ x: before.x, y: before.y }); await key('Enter'); await key('Escape');
-    const held = await js(`({calls:fixture.cancelCalls,requests:fixture.requests,busy:controller.busy,disabled:target('取消当前操作').disabled,dialogs:document.querySelectorAll('dialog[open]').length})`);
+    const held = await js(`({calls:fixture.cancelCalls,requests:fixture.requests,busy:controller.busy,disabled:target(${JSON.stringify(cancelLabel)}).disabled,dialogs:document.querySelectorAll('dialog[open]').length})`);
     assert.equal(held.calls.length, 1); assert.equal(held.calls[0].requestId, held.requests[0].requestId);
     assert.equal(held.busy, true); assert.equal(held.disabled, true); assert.equal(held.dialogs, before.dialogs);
     if (scenario === 'late-cancel') {
       await js("fixture.finish({status:'cancelled'});fixture.oldCancelFinish=fixture.cancelFinish;void 0"); await until('!controller.busy');
       await click('导入文件'); await until('fixture.requests.length===2&&controller.busy');
       await js("fixture.oldCancelFinish({status:'cancelling',message:'旧请求的晚到消息'})"); await pause(40);
-      assert.equal(await js("!document.querySelector('.bizop-status').textContent.includes('旧请求')&&!target('取消当前操作').disabled&&controller.busy"), true);
+      assert.equal(await js("!document.querySelector('.bizop-status').textContent.includes('旧请求')&&!target('取消导入').disabled&&controller.busy"), true);
     } else {
       const protectedPublish = scenario === 'publish-protected';
       const text = protectedPublish ? '文件正在发布与归档，请等待实际完成' : '已请求取消，正在等待后台任务退出';
       await js(`fixture.cancelFinish(${JSON.stringify({ status: protectedPublish ? 'protected' : 'cancelling', message: text })})`);
       await until(`document.querySelector('.bizop-status').textContent===${JSON.stringify(text)}`);
       assert.equal(await js('controller.busy'), true);
-      if (before.dialogs) assert.equal(await js(`[...document.querySelectorAll('dialog[open]')].at(-1).querySelector('.bizop-feedback').textContent`), text);
+      if (before.dialogs) assert.equal(await js(`[...document.querySelectorAll('dialog[open]')].at(-1).querySelector('.bizop-feedback').textContent`), scenario === 'manager-export' ? '' : text);
       if (protectedPublish) await screenshot(scenario);
     }
     await js(`fixture.finish({status:${JSON.stringify(scenario === 'publish-protected' ? 'ok' : 'cancelled')}})`); await until('!controller.busy');
     await js("[...document.querySelectorAll('dialog')].reverse().forEach(dialog=>dialog.close())"); await pause(40);
-    assert.equal(await js("document.querySelector('#panel').contains(target('取消当前操作'))&&target('取消当前操作').hidden&&!target('导入文件').disabled"), true);
+    assert.equal(await js("[...document.querySelectorAll('#panel button')].some(b=>b.textContent==='取消当前操作'&&b.hidden)&&!target('导入文件').disabled"), true);
     checks.push(scenario);
   }
   fs.writeFileSync(path.join(output, 'validation.json'), JSON.stringify({ pass: checks.length, fail: 0, checks,

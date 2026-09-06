@@ -44,10 +44,10 @@ function rawCell(source, normalized, kind, index, onPrecision) {
   return text(normalized);
 }
 function evidenceIdentity({ outputKind, columnSchemaVersion = 1, objectId, manifestDigest, maxRowsPerSheet }) {
-  schemaFor(outputKind, columnSchemaVersion);
-  return { evidenceVersion: registry.evidenceVersion, evidenceSchemaRevision: registry.evidenceSchemaRevision,
+  const schema = schemaFor(outputKind, columnSchemaVersion);
+  return { evidenceVersion: registry.evidenceVersion, evidenceSchemaRevision: schema.evidenceSchemaRevision ?? registry.evidenceSchemaRevision,
     outputKind, columnSchemaVersion, cellContractVersion: CELL_CONTRACT_VERSION, ownerId: objectId,
-    manifestDigest, maxRowsPerSheet, notesSchemaVersion: 1 };
+    manifestDigest, maxRowsPerSheet, notesSchemaVersion: schema.notesSchema === null ? null : 1 };
 }
 function outputName(kind, metadata) {
   schemaFor(kind);

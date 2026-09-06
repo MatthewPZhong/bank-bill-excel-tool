@@ -18,6 +18,7 @@ function createEvidence(identity) {
 function createExportSpool({ filename, source, maxRowsPerSheet = 1048575, safePoint = () => {} }) {
   if (!Number.isSafeInteger(maxRowsPerSheet) || maxRowsPerSheet < 1 || maxRowsPerSheet > 1048575) fail('BIZOP_OUTPUT_PAGE_LIMIT');
   const schema = schemaFor(source.outputKind, source.columnSchemaVersion);
+  const includeNotes = schema.notesSchema !== null;
   const db = new DatabaseSync(filename); configure(db);
   db.exec('CREATE TABLE export_rows(section TEXT NOT NULL,ordinal INTEGER NOT NULL,cells TEXT NOT NULL,PRIMARY KEY(section,ordinal)) WITHOUT ROWID');
   const writer = createSynchronousCandidateWriter({ db, insertSql: 'INSERT INTO export_rows VALUES (?,?,?)' });
@@ -33,6 +34,7 @@ function createExportSpool({ filename, source, maxRowsPerSheet = 1048575, safePo
   }
   function location(ordinal) { return { sheet_name: sheetName(source.outputKind, Math.floor((ordinal - 1) / maxRowsPerSheet) + 1, source), sheet_row: (ordinal - 1) % maxRowsPerSheet + 2 }; }
   function note(record, preserveParts = false) {
+    if (!includeNotes) { safePoint(); return; }
     const value = record.value_part == null ? null : String(record.value_part);
     const chunks = [];
     if (preserveParts || !value) chunks.push(value);
@@ -57,7 +59,7 @@ function createExportSpool({ filename, source, maxRowsPerSheet = 1048575, safePo
       field_key: schema.columns[column].header, value_type: 'DECIMAL_TEXT', value_part: JSON.stringify({ value, reason }) });
   }
   function pages() {
-    return ['DATA', 'NOTES'].flatMap((section) => {
+    return (includeNotes ? ['DATA', 'NOTES'] : ['DATA']).flatMap((section) => {
       const headers = (section === 'DATA' ? schema.columns : registry.notesSchema.columns).map((column) => column.header);
       return Array.from({ length: Math.max(1, Math.ceil(counts[section] / maxRowsPerSheet)) }, (_, index) => ({
         section, page: index + 1, name: sheetName(section === 'DATA' ? source.outputKind : 'NOTES', index + 1, source),

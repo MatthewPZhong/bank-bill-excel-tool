@@ -68,7 +68,9 @@ function createBizOpExportCoordinator({ userDataDir, catalog, payloadStore, prot
               || evidence.intentDigest !== op.intent_digest || evidence.sourceDigest !== hash(frozen)
               || hash(evidence.identity) !== hash(expectedIdentity) || !/^[a-f0-9]{64}$/.test(evidence.expectedDigest)
               || evidence.expectedDigest !== evidence.actualDigest || evidence.dataRowCount !== count(outcome.result.rowCount)
-              || count(evidence.sheetCount) < 2 || count(evidence.byteSize) < 1 || !/^[a-f0-9]{64}$/.test(evidence.sha256)) fail('BIZOP_EXPORT_RESULT_MISMATCH');
+              || count(evidence.sheetCount) < (expectedIdentity.notesSchemaVersion === null ? 1 : 2)
+              || expectedIdentity.notesSchemaVersion === null && count(evidence.noteRowCount) !== 0
+              || count(evidence.byteSize) < 1 || !/^[a-f0-9]{64}$/.test(evidence.sha256)) fail('BIZOP_EXPORT_RESULT_MISMATCH');
           const stat = fs.lstatSync(payloadStore.resolve(`staging/${taskRunId}/${candidateRef}/output.xlsx`));
           if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.size !== evidence.byteSize
               || ['dev', 'ino', 'size', 'mtimeMs', 'ctimeMs'].some((key) => stat[key] !== evidence.fileIdentity[key])) fail('BIZOP_EXPORT_FILE_CHANGED');

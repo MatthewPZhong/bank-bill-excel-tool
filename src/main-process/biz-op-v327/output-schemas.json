@@ -863,8 +863,9 @@
       "formulaAllowed": false,
       "formulaPolicyStatus": "E02_APPROVED",
       "rowOrder": "rowOrdinal (RESULT_DIFF filters isDifference without renumbering source ordinal)",
-      "notesSchema": "BIZOP_NOTES_V1",
-      "emptyOutputPolicy": "header-and-notes"
+      "notesSchema": null,
+      "emptyOutputPolicy": "header-only",
+      "evidenceSchemaRevision": 3
     }
   },
   "notesSchema": {

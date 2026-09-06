@@ -114,7 +114,11 @@ async function buildExportSource({ payloadStore, source, spool, tempDirectory, c
             if (row.row_ordinal !== ++seen) fail('BIZOP_EXPORT_ROW_ORDER');
             if (source.outputKind === 'RESULT_DIFF' && row.is_difference !== 1) continue;
             const fields = isResult ? RESULT_COLUMNS : kind === 'OP' ? OP_COLUMNS : FLOW_COLUMNS;
-            append(fields.map((name) => row[name]), { result_row_ordinal: isResult ? row.row_ordinal : null,
+            const values = fields.map((name) => row[name]);
+            if (source.outputKind === 'RESULT_DIFF' && typeof values[18] === 'string') {
+              values[18] = values[18].replace(/；详见核对说明:(\d+)$/u, '；完整说明见导出原表，定位:$1');
+            }
+            append(values, { result_row_ordinal: isResult ? row.row_ordinal : null,
               key_bu: row.key_bu, key_account: row.key_account, key_currency: row.key_currency,
               source_dataset_id: isResult ? null : source.objectId, source_artifact_id: row.source_artifact_id ?? null,
               source_sheet: row.source_sheet ?? null, source_row: row.source_row ?? null });
