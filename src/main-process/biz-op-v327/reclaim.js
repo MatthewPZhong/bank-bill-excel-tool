@@ -5,7 +5,7 @@ const path = require('node:path');
 const { fsyncDirectory } = require('../background-execution/durable-file');
 const { fail, hash } = require('./contracts');
 
-function createBizOpReclaimer({ catalog, payloadStore, protection, admission }) {
+function createBizOpReclaimer({ catalog, payloadStore, protection, admission, beforeReclaim = async () => {} }) {
   const { db } = catalog;
   const queueDigest = (queue) => hash([queue.reclaim_id, queue.owner_task_run_id, queue.payload_kind,
     queue.object_id, queue.manifest_digest, queue.plan_rel_path, queue.receipt_task_run_id]);
@@ -49,6 +49,7 @@ function createBizOpReclaimer({ catalog, payloadStore, protection, admission }) 
     if (!queue || queue.owner_task_run_id !== source.taskRunId) fail('BIZOP_RECLAIM_OWNER_CHANGED');
     if (queue.state === 'DONE') return false;
     if (!['PENDING', 'RECLAIMING'].includes(queue.state)) fail('BIZOP_RECLAIM_HELD');
+    await beforeReclaim(queue.receipt_task_run_id, { admit });
     authorize(queue);
     const authorizationRef = `operations/${source.taskRunId}/reclaim-plan.json`;
     let authorization;

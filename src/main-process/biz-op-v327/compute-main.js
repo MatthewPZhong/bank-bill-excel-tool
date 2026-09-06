@@ -10,9 +10,10 @@ const { fail, hash, count } = require('./contracts');
 
 function createBizOpComputeCoordinator({ userDataDir, catalog, payloadStore, protection, admission, sources,
   prepareOperation, prepareDispatch, forgetDispatch, getArchiveService }) {
-  async function runCompute({ taskLifecycle, runtime, startDate, endDate, signal, onControl, afterWorker, afterCommit, options = {} }) {
+  async function runCompute({ taskLifecycle, runtime, startDate, endDate, expectedGeneration, signal, onControl, afterWorker, afterCommit, options = {} }) {
     return admission.exclusive(async () => {
       if (signal?.aborted) return { status: 'cancelled' };
+      if (expectedGeneration !== undefined && expectedGeneration !== catalog.control().generation) fail('BIZOP_GENERATION_CHANGED', '输入已变化，请重新检查运行区间');
       const frozen = collectInputs({ catalog, payloadStore, startDate, endDate });
       const existing = catalog.db.prepare("SELECT * FROM biz_op_v327_runs WHERE input_fingerprint=? AND state='PUBLISHED'").get(frozen.inputFingerprint);
       if (existing) {
@@ -70,6 +71,7 @@ function createBizOpComputeCoordinator({ userDataDir, catalog, payloadStore, pro
                 || hash(info.originalDigests) !== hash(frozen.originalDigests) || info.inputFingerprint !== frozen.inputFingerprint
                 || info.resultSchemaVersion !== RESULT_SCHEMA_VERSION || info.cellContractVersion !== CELL_CONTRACT_VERSION
                 || info.ruleVersion !== RULE_VERSION) fail('BIZOP_COMPUTE_RESULT_MISMATCH');
+            if (signal?.aborted) return { status: 'cancelled' };
             const receipt = catalog.commitRun({ taskRunId, intentDigest: op.intent_digest, candidate });
             if (afterCommit) await afterCommit(receipt);
             return { status: 'ok', receipt, runId: receipt.outcome.runId, version: receipt.outcome.version,

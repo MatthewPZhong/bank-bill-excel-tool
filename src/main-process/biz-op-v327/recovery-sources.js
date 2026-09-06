@@ -8,6 +8,7 @@ function createBizOpRecoverySources({ catalog, protection, payloadStore, readRep
   let frozenSources = null;
   let budget = null;
   let beforeFinalize = async () => {};
+  let beforeCommitted = async () => {};
   let publication = null;
   function installBudget(value) { budget = value; }
   function makeSource(op, category, extra = {}, reference = op.source_ref) {
@@ -145,6 +146,7 @@ function createBizOpRecoverySources({ catalog, protection, payloadStore, readRep
     budget.charge('provider');
     const current = facts(source);
     if (inspection.outcome !== 'committed' || current.outcome !== 'committed') fail('BIZOP_PROVIDER_COMMITTED_ONLY');
+    await beforeCommitted(source.taskRunId, { admit: budget.admit });
     let completed = false;
     if (source.boundedEvidence.category === 'RECLAIM') completed = true;
     else if (current.op.action === 'EXPORT' && current.evidence.closed) completed = await publication.settle(source.taskRunId);
@@ -275,6 +277,7 @@ function createBizOpRecoverySources({ catalog, protection, payloadStore, readRep
       await publication.acknowledge(source.taskRunId);
     },
     setBeforeFinalize(handler) { beforeFinalize = handler; },
+    setBeforeCommitted(handler) { beforeCommitted = handler; },
     operationSource(taskRunId) { return makeSource(catalog.operation(taskRunId), 'OPERATION'); },
     setReclaimHandler(handler) { reclaimHandler = handler; },
     current: () => frozenSources, clear() { frozenSources = null; budget = null; } });

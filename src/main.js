@@ -21999,7 +21999,9 @@ function flushUsageStats() {
 
 // 完整初始化成功后才注册 IPC 并创建业务窗口。
 function registerAllIpcHandlers() {
-  registerBizOpV327Handlers({ ipcMain, getModule: () => bizOpV327Module, businessOperationRegistry });
+  registerBizOpV327Handlers({ ipcMain, getModule: () => bizOpV327Module, businessOperationRegistry,
+    getTaskLifecycle: () => archiveTaskLifecycle, getRuntime: () => backgroundExecutionRuntimeManager.get(),
+    dialog, getWindow: () => mainWindow });
   registerWindowHandlers();
   registerAppHandlers();
   registerAppUpdateHandlers();

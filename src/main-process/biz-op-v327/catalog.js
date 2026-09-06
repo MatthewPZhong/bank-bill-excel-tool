@@ -305,15 +305,17 @@ function createBizOpCatalog(db, { assertCommitReady }) {
       return addReceipt(op, control().generation + 1, { runId: sealed.objectId, version: number, reused: false });
     });
   }
-  function deleteIntent({ datasetIds, runIds = [], deleteMode, expectedGeneration }) {
+  function deleteIntent({ datasetIds, runIds = [], deleteMode, expectedGeneration, previewBinding }) {
     if (!Array.isArray(datasetIds) || !Array.isArray(runIds)) fail('BIZOP_DELETE_SELECTION_INVALID');
     const selectedDatasets = [...new Set(datasetIds.map((id) => opaque(id)))].sort();
     const selectedRuns = [...new Set(runIds.map((id) => opaque(id)))].sort();
     if ((!selectedDatasets.length && !selectedRuns.length) || selectedDatasets.length + selectedRuns.length > 4096
         || !['KEEP_RESULTS', 'DELETE_ASSOCIATED'].includes(deleteMode)
         || deleteMode === 'KEEP_RESULTS' && selectedRuns.length) fail('BIZOP_DELETE_SELECTION_INVALID');
+    if (previewBinding && Object.keys(previewBinding).sort().join(',') !== 'closureDigest,previewId') fail('BIZOP_DELETE_PREVIEW_CHANGED');
     return snapshot({ action: 'DELETE', datasetIds: selectedDatasets, runIds: selectedRuns, deleteMode,
-      expectedGeneration: count(expectedGeneration) });
+      expectedGeneration: count(expectedGeneration), ...(previewBinding ? { previewBinding: {
+        previewId: opaque(previewBinding.previewId), closureDigest: digest(previewBinding.closureDigest) } } : {}) });
   }
   function commitDelete({ taskRunId, intentDigest, intent }) {
     const saved = committed(taskRunId, intentDigest, 'DELETE');
@@ -329,6 +331,12 @@ function createBizOpCatalog(db, { assertCommitReady }) {
       assertCommitReady(op);
       if (control().generation !== selected.expectedGeneration || op.expected_generation !== selected.expectedGeneration) {
         fail('BIZOP_GENERATION_CHANGED');
+      }
+      if (selected.previewBinding) {
+        const preview = db.prepare('SELECT * FROM biz_op_v327_delete_previews WHERE preview_id=?').get(selected.previewBinding.previewId);
+        if (!preview || preview.confirmed_task_id !== taskRunId || preview.confirmed_mode !== selected.deleteMode
+            || preview.closure_digest !== selected.previewBinding.closureDigest || hash(JSON.parse(preview.closure_json)) !== preview.closure_digest
+            || preview.generation !== selected.expectedGeneration || preview.expires_at <= now()) fail('BIZOP_DELETE_PREVIEW_CHANGED');
       }
       const selectedRuns = new Set(selected.runIds);
       if (selected.deleteMode === 'DELETE_ASSOCIATED') {

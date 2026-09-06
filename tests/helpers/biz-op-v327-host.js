@@ -42,7 +42,7 @@ async function createHost(t, options = {}) {
   const lifecycle = createTaskLifecycle({ archiveService: service, businessOperationRegistry: createBusinessOperationRegistry(),
     flowResolver: createBusinessFlowResolver({ archiveService: service }), operationTracker: { async appendOperationFiles() { return { archiveFailed: false }; } } });
   t.after(async () => { await runtime.shutdown({ timeoutMs: 5000 }); db.close(); if (!options.keep) fs.rmSync(root, { recursive: true, force: true }); });
-  const bootstrap = await module.recovery.run(); assert.equal(bootstrap.ready, true, JSON.stringify(bootstrap));
+  const bootstrap = await module.recovery.run(); assert.equal(bootstrap.ready, options.expectReady !== false, JSON.stringify(bootstrap));
   return { root, db, module, service, runtime, lifecycle, bootstrap,
     run(files, extra = {}) { return module.runImport({ taskLifecycle: lifecycle, runtime,
       filePlan: normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs: files.map((filePath) => ({ filePath,

@@ -572,7 +572,7 @@ durableDirectoryTest('真实 IPC 注册的十个新区间动作保持禁用，�
   registerBizOpV327Handlers({ ipcMain: { handle(key, handler) {
     assert.equal(handlers.has(key), false); handlers.set(key, handler);
   } }, getModule: () => f.module, businessOperationRegistry: createBusinessOperationRegistry() });
-  assert.equal(handlers.size, 12);
+  assert.equal(handlers.size, 20);
   for (const [key, handler] of handlers) {
     if (key.endsWith(':status') || key.endsWith(':retry')) continue;
     assert.throws(() => handler(), { code: 'BIZOP_V327_NOT_ENABLED' });

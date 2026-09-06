@@ -14,6 +14,10 @@ const { createBizOpImportCoordinator } = require('./import-main');
 const { createBizOpComputeCoordinator } = require('./compute-main');
 const { createBizOpPublication } = require('./export-publication');
 const { createBizOpExportCoordinator } = require('./export-main');
+const { createBizOpMetadata } = require('./metadata');
+const { createBizOpDeletePreview } = require('./delete-preview');
+const { createBizOpDeleteCoordinator } = require('./delete-main');
+const { createDeletePreservation } = require('./delete-preservation');
 const { ACTIONS, fail, hash } = require('./contracts');
 
 function createBizOpV327Module({ db, userDataDir, readRepository, getArchiveService, getRuntime, budgetOptions }) {
@@ -35,7 +39,9 @@ function createBizOpV327Module({ db, userDataDir, readRepository, getArchiveServ
   const sources = createBizOpRecoverySources({ catalog, protection, payloadStore, readRepository, getArchiveService });
   const recovery = createBizOpRecoveryDriver({ catalog, sources, admission, readRepository, budgetOptions });
   const plan = createBizOpRecoveryPlan({ catalog });
-  sources.setReclaimHandler(createBizOpReclaimer({ catalog, payloadStore, protection, admission }));
+  const preservation = createDeletePreservation({ catalog, payloadStore, getArchiveService, getRuntime });
+  sources.setReclaimHandler(createBizOpReclaimer({ catalog, payloadStore, protection, admission, beforeReclaim: preservation.committed }));
+  sources.setBeforeCommitted(preservation.committed);
   const dispatchPlans = new Map();
   const dispatchPlansByJob = new Map();
   function prepareOperation({ taskRunId, actionKey, operationKey, intent }) {
@@ -86,6 +92,9 @@ function createBizOpV327Module({ db, userDataDir, readRepository, getArchiveServ
     prepareOperation, prepareDispatch, getArchiveService, forgetDispatch };
   const publication = createBizOpPublication({ ...mainBindings, getRuntime });
   const exports = createBizOpExportCoordinator({ ...mainBindings, publication });
+  const metadata = createBizOpMetadata({ catalog, admission });
+  const previews = createBizOpDeletePreview({ catalog, admission });
+  const deletion = createBizOpDeleteCoordinator({ ...mainBindings, previews, preservation });
   sources.setPublication(publication);
   const imports = createBizOpImportCoordinator(mainBindings);
   const compute = createBizOpComputeCoordinator(mainBindings);
@@ -157,7 +166,7 @@ function createBizOpV327Module({ db, userDataDir, readRepository, getArchiveServ
   }
   return Object.freeze({ catalog, payloadStore, admission, protection, sources, recovery, plan, runtimeBindings,
     prepareOperation, prepareDispatch, runCandidateValidation, runImport: imports.runImport, runCompute: compute.runCompute,
-    runExport: exports.runExport, publication, protectedTasks,
+    runExport: exports.runExport, runDelete: deletion.runDelete, metadata, previews, publication, protectedTasks,
     readyHold: catalog.readyHold,
     assertBusinessEnabled() { fail('BIZOP_V327_NOT_ENABLED', '业务 OP 新区间功能尚未启用'); },
     getStatus: () => ({ mode: catalog.control().mode, recoveryReady: admission.snapshot().recoveryReady }) });

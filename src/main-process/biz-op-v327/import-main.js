@@ -130,6 +130,7 @@ function createBizOpImportCoordinator({ userDataDir, catalog, payloadStore, prot
                 || imported.files.reduce((sum, file) => sum + count(file.acceptedRows), 0) !== sealedRows) fail('BIZOP_ROW_COUNT_MISMATCH');
             payloadStore.writeDocument(`operations/${taskRunId}/import-commit.json`, { taskRunId, intentDigest: op.intent_digest,
               expectedGeneration: op.expected_generation, importResultDigest: outcome.result.sha256, candidates: imported.references });
+            if (signal?.aborted) return { status: 'cancelled', reportRef, summary };
             const receipt = catalog.commitImport({ taskRunId, intentDigest: op.intent_digest, candidates });
             if (afterCommit) await afterCommit(receipt);
             return { status: 'ok', receipt, summary };

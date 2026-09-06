@@ -211,7 +211,9 @@ test('E04-A/B policy 与 Main source selector 保持 production false，真实�
   const mainSource = fs.readFileSync(path.resolve(__dirname, '../../../src/main.js'), 'utf8');
   const bizOpBinding = mainSource.match(/bizOpV327Module = createBizOpV327Module\(\{[\s\S]*?\}\);/)[0];
   assert.equal((bizOpBinding.match(/backgroundExecutionRuntimeManager\.get\(\)/g) || []).length, 1);
-  const legacySource = mainSource.replace(bizOpBinding, '');
+  const bizOpIpcBinding = mainSource.match(/registerBizOpV327Handlers\(\{[\s\S]*?\}\);/)[0];
+  assert.equal((bizOpIpcBinding.match(/backgroundExecutionRuntimeManager\.get\(\)/g) || []).length, 1);
+  const legacySource = mainSource.replace(bizOpBinding, '').replace(bizOpIpcBinding, '');
   assert.equal((legacySource.match(/backgroundExecutionRuntimeManager\.get\(\)/g) || []).length, 14);
   assert.equal((mainSource.match(/generateValidateAndPublishToolboxArtifact\(\{/g) || []).length, 2);
   assert.equal((mainSource.match(/generateValidateAndPublishMultiOutput\(\{/g) || []).length, 1);
