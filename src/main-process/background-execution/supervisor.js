@@ -10,6 +10,7 @@ const {
 const { createInlineAsyncAdapter } = require('./adapters/inline-async-adapter');
 const { createUtilityProcessAdapter } = require('./adapters/utility-process-adapter');
 const { createWorkerThreadAdapter } = require('./adapters/worker-thread-adapter');
+const { createCarrierIdentity, createCarrierObservation } = require('./carrier-observation');
 const { sanitizeFinanceSafeValue, toProtocolError } = require('./error-codec');
 const { createExecutionResult } = require('./execution-result');
 const { createJobEnvelope } = require('./protocol');
@@ -204,6 +205,15 @@ function createExecutionSupervisor(options = {}) {
     throw new TypeError('ExecutionSupervisor requires a frozen policy registry binding snapshot');
   }
   const resourceGovernor = options.resourceGovernor || null;
+  const closureKeys = options.carrierClosureActionKeys || [];
+  if (!Array.isArray(closureKeys) || closureKeys.some((key) => typeof key !== 'string' || !key)) {
+    throw new TypeError('carrierClosureActionKeys 必须是 Main action 白名单');
+  }
+  if (options.beforeCarrierDispatch !== undefined && typeof options.beforeCarrierDispatch !== 'function') {
+    throw new TypeError('beforeCarrierDispatch 必须是 Main 函数');
+  }
+  const carrierClosureActions = new Set(closureKeys);
+  const runtimeInstanceId = makeId('runtime');
   const now = options.now || Date.now;
   const diagnostics = options.diagnostics || (() => {});
   const workerThreadAdapter = options.workerThreadAdapter || createWorkerThreadAdapter();
@@ -301,6 +311,18 @@ function createExecutionSupervisor(options = {}) {
       ? (policy.context.kind === 'none' ? canonicalJsonSnapshot({ kind: 'none', value: {} }) : null)
       : request.context;
     if (!context) throw new SupervisorError('CONTEXT_REQUIRED', 'Execute request requires policy context');
+    const observeCarrierClosure = carrierClosureActions.has(actionKey);
+    if (observeCarrierClosure && (policy.adapterKind !== 'native' || policy.mode !== 'thread-single' ||
+        policy.lifetime !== 'job' || policy.resources.compound || !resourceGovernor)) {
+      throw new SupervisorError('CARRIER_OBSERVATION_UNSUPPORTED', '关闭观察仅支持受 Governor 管理的独立 native thread job');
+    }
+    if (observeCarrierClosure && (!['operation', 'file-batch'].includes(context.kind) ||
+        !context.value || context.value.operationKey !== operationKey)) {
+      throw new SupervisorError('CARRIER_TASK_IDENTITY_REQUIRED', '关闭观察要求匹配的真实任务上下文');
+    }
+    if (observeCarrierClosure && request.production === true && !options.beforeCarrierDispatch) {
+      throw new SupervisorError('CARRIER_DISPATCH_BINDING_REQUIRED', '生产关闭观察要求 Main 派发前持久绑定');
+    }
     const taskRunId = ['operation', 'file-batch'].includes(context.kind)
       ? context.value.taskRunId
       : null;
@@ -458,7 +480,57 @@ function createExecutionSupervisor(options = {}) {
       resolvePromise,
       settlePromise: null
     };
+    record.carrierCreationAttempted = false;
+    record.carrierExitObserved = false;
+    record.carrierExitCode = null;
+    record.carrierReconcileScheduled = false;
+    const carrierIdentity = observeCarrierClosure ? createCarrierIdentity({
+      context, actionKey, operationKey, jobId, workerInstanceId, runtimeInstanceId
+    }) : null;
+    const carrierObservation = observeCarrierClosure ? createCarrierObservation(carrierIdentity, () => {
+      const neverCreated = record.terminal && record.transportAssignmentSettled && !record.carrierCreationAttempted;
+      const exited = (record.carrierExitObserved || record.terminateSettled) && record.closeSettled;
+      const codes = [...record.transportCleanupErrors, ...record.resourceCleanupErrors]
+        .map(({ error }) => typeof error.code === 'string' && /^[A-Z][A-Z0-9_]{0,127}$/.test(error.code)
+          ? error.code : 'CARRIER_CLEANUP_FAILED');
+      return {
+        disposition: neverCreated ? 'NOT_CREATED' : exited ? 'EXITED' : record.terminal ? 'UNKNOWN' : 'PENDING',
+        exitObserved: record.carrierExitObserved,
+        exitCode: record.carrierExitCode,
+        terminateSettled: record.terminateSettled,
+        closeSettled: record.closeSettled,
+        noUndeclaredChildren: true,
+        resourceDisposition: record.resourceCleanupErrors.length ? 'UNKNOWN'
+          : record.resourceLeases.length ? 'RETAINED' : 'RELEASED',
+        safeFailureCodes: [...new Set(codes)].sort()
+      };
+    }, now) : null;
     jobs.set(jobId, record);
+
+    function refreshCarrierObservation() {
+      if (carrierObservation) carrierObservation.refresh();
+    }
+
+    function scheduleCarrierReconciliation() {
+      if (!observeCarrierClosure || !record.terminal || record.carrierReconcileScheduled) return;
+      record.carrierReconcileScheduled = true;
+      queueMicrotask(async () => {
+        try {
+          // 已返回的业务结果不可被稍后关闭事实改写，也不与首次清理并发释放租约。
+          if (record.settlePromise) await record.settlePromise;
+          if (!record.carrierExitObserved && !record.terminateSettled) return;
+          await cleanupTransport({ force: true, retry: true });
+          cleanupResources('carrier-closed');
+        } catch (_error) {
+          // 具体清理失败已由原 cleanup 仓储和诊断记录持有，shutdown 可继续重试。
+        } finally {
+          record.carrierReconcileScheduled = false;
+          refreshCarrierObservation();
+        }
+      });
+    }
+
+    record.carrierObservation = carrierObservation;
 
     function finishTransportAssignment() {
       if (record.transportAssignmentSettled) return;
@@ -515,14 +587,32 @@ function createExecutionSupervisor(options = {}) {
       record.transportCleanupErrors = [...record.transportCleanupErrorByPhase.values()];
     }
 
+    const carrierCleanupCalls = new Map();
+
     async function boundedCleanupPhase(phase, callback) {
       const timeoutMs = policy.cancellation.terminateTimeoutMs;
       try {
-        let cleanup;
-        try {
-          cleanup = callback();
-        } catch (error) {
-          cleanup = Promise.reject(error);
+        let cleanup = carrierCleanupCalls.get(phase);
+        if (!cleanup) {
+          try {
+            cleanup = callback();
+          } catch (error) {
+            cleanup = Promise.reject(error);
+          }
+          if (observeCarrierClosure) {
+            cleanup = Promise.resolve(cleanup).then((value) => {
+              // 超时只结束本次等待；底层稍后完成仍更新原记录。
+              if (phase === 'terminate') record.terminateSettled = true;
+              if (phase === 'close') record.closeSettled = true;
+              clearCleanupError(phase);
+              scheduleCarrierReconciliation();
+              return value;
+            });
+            // shutdown 重试仍等待原调用，不能让有副作用的清理并发执行。
+            carrierCleanupCalls.set(phase, cleanup);
+            const releaseCall = () => carrierCleanupCalls.delete(phase);
+            cleanup.then(releaseCall, releaseCall);
+          }
         }
         await promiseWithTimeout(
           cleanup,
@@ -556,25 +646,29 @@ function createExecutionSupervisor(options = {}) {
         }
         const terminateRequired = force ||
           (policy.lifetime !== 'service' && policy.adapterKind !== 'existing-dispatch');
-        if (terminateRequired && !record.terminateSettled) {
+        if (observeCarrierClosure && record.carrierExitObserved) clearCleanupError('terminate');
+        if (terminateRequired && !record.terminateSettled && !(observeCarrierClosure && record.carrierExitObserved)) {
           record.terminateCalled = true;
-          record.terminateSettled = await boundedCleanupPhase('terminate', () => {
+          const terminated = await boundedCleanupPhase('terminate', () => {
             if (typeof record.transport.terminate !== 'function') {
               throw new SupervisorError('TRANSPORT_TERMINATE_MISSING', 'Transport has no terminate() API');
             }
             return record.transport.terminate();
           });
+          record.terminateSettled = record.terminateSettled || terminated;
         }
         if (!record.closeSettled) {
           record.closeCalled = true;
-          record.closeSettled = await boundedCleanupPhase('close', () => {
+          const closed = await boundedCleanupPhase('close', () => {
             if (typeof record.transport.close !== 'function') {
               throw new SupervisorError('TRANSPORT_CLOSE_MISSING', 'Transport has no close() API');
             }
             return record.transport.close();
           });
+          record.closeSettled = record.closeSettled || closed;
         }
-        record.transportCleanupSettled = (!terminateRequired || record.terminateSettled) &&
+        record.transportCleanupSettled = (!terminateRequired || record.terminateSettled ||
+          (observeCarrierClosure && record.carrierExitObserved)) &&
           record.closeSettled;
       }).finally(() => {
         pendingTransportCleanups.delete(jobId);
@@ -583,6 +677,7 @@ function createExecutionSupervisor(options = {}) {
         } else {
           failedTransportCleanups.set(jobId, record);
         }
+        refreshCarrierObservation();
       });
       pendingTransportCleanups.set(jobId, record);
       return record.transportCleanup;
@@ -590,6 +685,13 @@ function createExecutionSupervisor(options = {}) {
 
     function cleanupResources(reason = 'job-terminal') {
       if (record.resourceCleanupSettled) return;
+      if (observeCarrierClosure && record.carrierCreationAttempted &&
+          !((record.carrierExitObserved || record.terminateSettled) && record.closeSettled)) {
+        // 原 Supervisor 继续拥有容量，结果返回不代表载体停止占用资源。
+        failedResourceCleanups.set(jobId, record);
+        refreshCarrierObservation();
+        return;
+      }
       const failedLeases = [];
       const cleanupErrors = [];
       for (const lease of record.resourceLeases.slice().reverse()) {
@@ -616,6 +718,7 @@ function createExecutionSupervisor(options = {}) {
       record.resourceCleanupSettled = failedLeases.length === 0;
       if (record.resourceCleanupSettled) failedResourceCleanups.delete(jobId);
       else failedResourceCleanups.set(jobId, record);
+      refreshCarrierObservation();
     }
 
     function retainGrantedLease(lease, reason = 'late-admission-grant') {
@@ -1516,6 +1619,10 @@ function createExecutionSupervisor(options = {}) {
       let candidate = null;
       try {
         if (record.terminal) return;
+        if (observeCarrierClosure && options.beforeCarrierDispatch) {
+          await options.beforeCarrierDispatch(carrierIdentity);
+          if (record.terminal) return;
+        }
         record.state = 'admitting';
         let resolved = null;
         if (policy.lifetime === 'job') resolved = resolveAdapter();
@@ -1533,6 +1640,15 @@ function createExecutionSupervisor(options = {}) {
         record.state = 'spawning';
         const callbacks = {
           onMessage,
+          ...(observeCarrierClosure ? {
+            observeCarrierClosure: true,
+            onCarrierExit(code) {
+              if (record.carrierExitObserved) return;
+              record.carrierExitObserved = true;
+              record.carrierExitCode = Number.isSafeInteger(code) ? code : null;
+              scheduleCarrierReconciliation();
+            }
+          } : {}),
           onCancellationTerminal() {
             if (!record.terminal && record.cancelRequested &&
                 (record.cancelCommandState === 'dispatching' || record.cancelCommandState === 'sent')) {
@@ -1586,6 +1702,7 @@ function createExecutionSupervisor(options = {}) {
             })) return;
           }
         } else {
+          record.carrierCreationAttempted = true;
           candidate = resolved.adapter.start({
             entry: record.entry,
             policy,
@@ -1594,6 +1711,9 @@ function createExecutionSupervisor(options = {}) {
           });
         }
         record.transport = candidate;
+        if (observeCarrierClosure && (!candidate || candidate.carrierKind !== 'thread-single')) {
+          throw new SupervisorError('CARRIER_OBSERVATION_UNSUPPORTED', '载体未提供 native thread 关闭观察');
+        }
         if (!candidate || typeof candidate !== 'object' ||
             !candidate.ready || typeof candidate.ready.then !== 'function' ||
             typeof candidate.send !== 'function' || typeof candidate.close !== 'function' ||
@@ -1661,6 +1781,11 @@ function createExecutionSupervisor(options = {}) {
       jobId,
       promise,
       ready: dispatchReady,
+      ...(carrierObservation ? {
+        carrierIdentity,
+        getCarrierObservation: carrierObservation.getCarrierObservation,
+        waitForCarrierClosure: carrierObservation.waitForCarrierClosure
+      } : {}),
       cancel(reason = { reason: 'cancelled' }) {
         return requestCancellation(reason, 'user');
       },
@@ -1904,6 +2029,14 @@ function createExecutionSupervisor(options = {}) {
 
       const leakedTransports = [];
       for (const record of cleanupRecords) {
+        if (record.carrierObservation &&
+            !['EXITED', 'NOT_CREATED'].includes(record.carrierObservation.getCarrierObservation().disposition)) {
+          leakedTransports.push(record.jobId);
+          reportErrors.push(toProtocolError(
+            new SupervisorError('CARRIER_CLOSURE_UNKNOWN', '原载体的关闭仍未确定'),
+            'CARRIER_CLOSURE_UNKNOWN', { stage: 'shutdown' }
+          ));
+        }
         if (record.transport && (!record.transportCleanupSettled || record.transportCleanupErrors.length)) {
           leakedTransports.push(record.jobId);
           if (!record.transportCleanupSettled) {

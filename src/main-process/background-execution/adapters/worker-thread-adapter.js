@@ -151,6 +151,9 @@ function createWorkerThreadAdapter(options = {}) {
           exitSettled = true;
           exitCode = code;
           resolveExit(code);
+          if (startOptions.observeCarrierClosure === true && typeof startOptions.onCarrierExit === 'function') {
+            startOptions.onCarrierExit(code);
+          }
         }
         if (!readySettled) {
           readySettled = true;
@@ -161,6 +164,7 @@ function createWorkerThreadAdapter(options = {}) {
           return;
         }
         if (!closed && !failureReported && typeof startOptions.onExit === 'function') startOptions.onExit(code, null);
+        if (closed && startOptions.observeCarrierClosure === true) detach();
       }
 
       worker.once('online', onOnline);
@@ -195,6 +199,7 @@ function createWorkerThreadAdapter(options = {}) {
       }
 
       return Object.freeze({
+        ...(startOptions.observeCarrierClosure === true ? { carrierKind: 'thread-single' } : {}),
         ready,
         send(message, transferList) {
           const isCancel = ownDataValue(message, 'operation') === 'job:cancel';
@@ -221,6 +226,7 @@ function createWorkerThreadAdapter(options = {}) {
         },
         async terminate() {
           closed = true;
+          let terminated = false;
           try {
             // service worker 已回 executor:close-ack 后会在 Worker 内 queueMicrotask
             // 关闭 parentPort。先给该已验证的 graceful path 一个短而有界的自然退出
@@ -235,9 +241,12 @@ function createWorkerThreadAdapter(options = {}) {
             // Promise 仍 pending 时提前耗尽 event loop，node:test 将其判为 cancelled；
             // 应用侧也会失去“资源确已回收”的可审计完成点。正常 Service 已通过
             // close-ack + parentPort.close() 走上面的有界自然退出路径，不会进入这里。
-            return await worker.terminate();
+            const code = await worker.terminate();
+            terminated = true;
+            return code;
           } finally {
-            detach();
+            const keepObservation = startOptions.observeCarrierClosure === true && !exitSettled && !terminated;
+            detach({ keepError: keepObservation, keepExit: keepObservation });
           }
         },
         worker

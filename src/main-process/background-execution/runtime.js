@@ -535,6 +535,8 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
     executionTimeoutMs: options.executionTimeoutMs,
     shutdownTimeoutMs: supervisorShutdownTimeoutMs,
     workerDurableCoordinator: options.workerDurableCoordinator,
+    carrierClosureActionKeys: options.carrierClosureActionKeys,
+    beforeCarrierDispatch: options.beforeCarrierDispatch,
     bindInputForAction({ actionKey, input }) {
       if ([PENDING_READ_ONLY_ACTIONS.DIFF, PENDING_READ_ONLY_ACTIONS.SUMMARY]
         .includes(actionKey)) {
