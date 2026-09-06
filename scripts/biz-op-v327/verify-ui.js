@@ -35,6 +35,9 @@ const checks = [];
     const input = {objectId:'input-1',rowKey:'input-1:0',kind:'OP',dataDate:'2026-09-01',version:3,tableName:'OP校验表_2026-09-01_v3',updatedAt:'2026-09-06T08:00:00.000Z',originalName:'<img src=x onerror=alert(1)>.xlsx'};
     const api = {
       async status(){return {mode:state.mode,recoveryReady:true};}, async months(){return {months:['2026-09'],nextBefore:null};},
+      async runCalendar(value={}){state.calls.push(['calendar',value]);if(state.holdCalendar)return new Promise(resolve=>state.pendingCalendar=resolve);
+        if(state.emptyCalendar)return {month:null,dates:[]};
+        const month=value.month||'2026-07';return {month,dates:month==='2026-07'?['2026-07-15']:['2026-09-01','2026-09-03'],previousMonth:month==='2026-07'?null:'2026-07',nextMonth:month==='2026-07'?'2026-09':null};},
       async list(value){state.calls.push(['list',value]);
         if(state.holdList) return new Promise(resolve=>state.pendingList=resolve);
         if(value.generation!==undefined&&value.generation!==state.generation)return {status:'error',code:'BIZOP_GENERATION_CHANGED',message:'数据已变化，请刷新列表'};
@@ -131,6 +134,40 @@ const checks = [];
   await check('删除先完整跨月份预览，精确三个按钮', `(async()=>{button('删除').click();await waitUntil(()=>document.querySelectorAll('dialog').length===2);const d=[...document.querySelectorAll('dialog')].at(-1);return d.textContent.includes('2026-08')&&[...d.querySelectorAll('footer button,.bizop-modal-footer button')].map(x=>x.textContent).join('|')==='删除但保留结果表|删除|取消'&&!fixture.calls.some(x=>x[0]==='delete');})()`);
   await shot('03-delete-impact');
   await check('保留结果选择按 mode 提交，成功后刷新', `(async()=>{button('删除但保留结果表').click();await waitUntil(()=>fixture.calls.some(x=>x[0]==='delete'));await waitUntil(()=>!controller.busy);return fixture.calls.find(x=>x[0]==='delete')[1].mode==='KEEP_RESULTS';})()`);
+  await js('closeDialogs()');
+  await check('运行标题对齐分割线、日期框为原宽 2/3，检查按钮位于左下角且不显示旧说明', `(()=>{
+    controller.openRun();const d=document.querySelector('dialog'),fields=d.querySelector('.bizop-run-fields'),inputs=[...fields.querySelectorAll('input')];
+    const expected=(fields.getBoundingClientRect().width-18)/2*2/3,footer=d.querySelector('.bizop-modal-footer'),check=button('检查所需数据');
+    return inputs.every(x=>x.readOnly&&Math.abs(x.getBoundingClientRect().width-expected)<1)&&Math.abs(textLeft(d.querySelector('.dialog-title'))-d.querySelector('.dialog-header').getBoundingClientRect().left)<1
+      &&footer.contains(check)&&check.getBoundingClientRect().left<footer.getBoundingClientRect().left+30&&!d.textContent.includes('OP 需要起始、终止两日');
+  })()`);
+  await shot('07-run');
+  await check('月历默认最近导入月份，缺数据日期禁用，前后月份只跳到有数据月份', `(async()=>{
+    document.querySelector('dialog input').click();await waitUntil(()=>document.querySelector('.bizop-calendar-grid'));
+    const picker=document.querySelector('.bizop-calendar-dialog');
+    if(picker.querySelector('strong').textContent!=='2026 年 7 月'||!picker.querySelector('[data-date="2026-07-14"]').disabled)return false;
+    picker.querySelector('[data-date="2026-07-14"]').click();if(document.querySelector('.bizop-run-dialog input').value)return false;
+    picker.querySelector('[aria-label="下个有数据月份"]').click();await waitUntil(()=>picker.querySelector('strong')?.textContent==='2026 年 9 月');
+    return [...picker.querySelectorAll('[data-date]:not(:disabled)')].map(x=>x.dataset.date).join('|')==='2026-09-01|2026-09-03';
+  })()`);
+  await shot('08-run-calendar');
+  await check('只选择可用日期并回填原字段，已有字段再次打开仍定位最新导入月份', `(async()=>{
+    document.querySelector('[data-date="2026-09-01"]').click();await waitUntil(()=>document.querySelectorAll('dialog').length===1);
+    const input=document.querySelector('dialog input');if(input.value!=='2026-09-01')return false;
+    input.click();await waitUntil(()=>document.querySelector('.bizop-calendar-grid'));return document.querySelector('.bizop-calendar-dialog strong').textContent==='2026 年 7 月';
+  })()`);
+  await js('closeDialogs()');
+  await check('关闭月历后晚到日期响应不复活窗口或回填字段', `(async()=>{
+    fixture.holdCalendar=true;controller.openRun();document.querySelector('dialog input').click();await waitUntil(()=>fixture.pendingCalendar);
+    document.querySelector('.bizop-calendar-dialog').close();await waitUntil(()=>document.querySelectorAll('dialog').length===1);
+    fixture.pendingCalendar({month:'2026-07',dates:['2026-07-15']});await new Promise(r=>setTimeout(r,20));fixture.holdCalendar=false;
+    return !document.querySelector('.bizop-calendar-dialog')&&document.querySelector('dialog input').value==='';
+  })()`);
+  await js('closeDialogs()');
+  await check('无可用 OP 时月历显示空态且没有可选日期', `(async()=>{
+    fixture.emptyCalendar=true;controller.openRun();document.querySelector('dialog input').click();await waitUntil(()=>document.querySelector('.bizop-calendar-dialog')?.textContent.includes('暂无可用 OP'));
+    fixture.emptyCalendar=false;return !document.querySelector('.bizop-calendar-dialog [data-date]');
+  })()`);
   await js('closeDialogs()');
   await check('运行缺失输入可见，保留日期且不执行', `(async()=>{controller.openRun();const dates=document.querySelectorAll('dialog input[type=date]');dates[0].value='2026-09-01';dates[1].value='2026-09-03';fixture.preflightMode='missing';button('检查所需数据').click();await waitUntil(()=>document.querySelector('.bizop-feedback').textContent.includes('2026-09-02'));return dates[0].value==='2026-09-01'&&dates[1].value==='2026-09-03'&&button('确认运行').disabled&&!fixture.calls.some(x=>x[0]==='run');})()`);
   await shot('04-run-missing');

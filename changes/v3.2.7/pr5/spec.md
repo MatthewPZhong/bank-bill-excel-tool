@@ -11,3 +11,7 @@ Constraints：renderer 只传对象 ID 和 Main 发出的不透明引用；不�
 Done when：实际 IPC 到原 Task/worker/catalog/Publisher 的导入、运行、导出、取消、错误反馈通过；元数据页最多 200 条且 IPC 完整包不超 256 KiB；跨操作月份影响完整显示；过期/generation/闭包变化重新预览；两种删除、结果直接删除、崩溃恢复、共享原件和用户锁有证据；页面选择/双击/失败/取消可用，实际截图检查；回归并提草稿 PR。
 
 删除预览只查询受界限的目录元数据，不读业务 payload；保留既有不可变控制文档 64 KiB 的完整快照预算，超过则明确拒绝并提示缩小选取，不返回截断影响。Main 持久化预览 ID、generation、完整闭包摘要和到期时间；确认后同一 Task 绑定所选 mode 和预览身份。delete-plan 原生阶段验证冻结计划并返回小引用，Main 重新核验当前闭包后按 PR1b 目录事务提交。Task 成功重试优先原 receipt，不因旧 generation 或预览到期重新删。
+
+2026-09-07 运行页面补充：标题左侧对齐分割线，两枚日期框宽度为原来的 2/3，移除日期区间说明；【检查所需数据】在左下角，运行和关闭在右侧。日期框只读，鼠标或键盘打开月历，每次默认展示最近成功导入的当前 OP 数据账期月份，同批次并列取最新账期。只有当前 OP head 对应 ACTIVE dataset 的日期可选，FLOW-only 日期不作为起止端点；可跳转到前后有 OP 数据的月份，无 OP 时显示空态。
+
+只读 IPC `bizOpReconV327:metadata:run-calendar` 接受可选 `month: YYYY-MM`，返回 `month/latestMonth/dates/previousMonth/nextMonth/generation`；仅查询目录，每次最多 31 个日期，不传业务明细、任意路径或创建 Task。Main、preload 和只读策略清单同时注册。月历关闭后拒绝晚到响应；日期变化使原预检失效。可选日期不代替原预检，执行前仍须核验两端 OP、区间每日流水和 generation。具体实现及验证见 [布局纠偏记录](layout-correction.md)。

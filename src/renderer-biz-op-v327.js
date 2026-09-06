@@ -41,7 +41,7 @@
           actionPair.insertBefore(cancelButton, importButton);
         } else {
           // showModal 会让弹窗外的控件失去交互能力；取消必须在当前最上层弹窗中。
-          (taskDialog?.footer || footer).append(cancelButton);
+          (taskDialog?.footer.querySelector('.bizop-modal-actions') || taskDialog?.footer || footer).append(cancelButton);
         }
       }
       for (const element of [panel, ...dialogs].flatMap((scope) => [...scope.querySelectorAll('button,input,select')])) {
@@ -109,8 +109,53 @@
       });
     }
     function openRun() {
-      const dialog = modal('开始运行'); const start = dateField(); const end = dateField();
-      const fields = node('div', undefined, 'bizop-field-row'); fields.append(field('起始日期', start), field('终止日期', end));
+      const dialog = modal('开始运行', 'bizop-run-dialog'); const start = dateField(); const end = dateField();
+      const fields = node('div', undefined, 'bizop-run-fields'); fields.append(field('起始日期', start), field('终止日期', end));
+      async function openCalendar(input, label) {
+        const picker = modal(`选择${label}`, 'bizop-calendar-dialog'); picker.footer.firstChild.textContent = '取消';
+        let version = 0;
+        async function load(selectedMonth) {
+          const ownVersion = ++version; picker.body.replaceChildren(node('p', '正在读取可选日期…'));
+          try {
+            const data = checked(await api.runCalendar(selectedMonth ? { month: selectedMonth } : {}));
+            if (!picker.open || version !== ownVersion) return;
+            picker.feedback.textContent = '';
+            if (!data.month) { picker.body.replaceChildren(node('p', '暂无可用 OP 数据，请先导入文件。')); return; }
+            const [year, month] = data.month.split('-').map(Number);
+            const caption = node('strong', `${year} 年 ${month} 月`); const nav = node('div', undefined, 'bizop-calendar-nav');
+            const previous = button('‹', () => load(data.previousMonth)); previous.setAttribute('aria-label', '上个有数据月份'); previous.disabled = !data.previousMonth;
+            const next = button('›', () => load(data.nextMonth)); next.setAttribute('aria-label', '下个有数据月份'); next.disabled = !data.nextMonth;
+            nav.append(previous, caption, next);
+            const grid = node('div', undefined, 'bizop-calendar-grid'); grid.setAttribute('role', 'group'); grid.setAttribute('aria-label', caption.textContent);
+            for (const weekday of ['日', '一', '二', '三', '四', '五', '六']) grid.append(node('span', weekday, 'bizop-calendar-weekday'));
+            const first = new Date(`${data.month}-01T00:00:00Z`); const last = new Date(first); last.setUTCMonth(last.getUTCMonth() + 1); last.setUTCDate(0);
+            for (let offset = 0; offset < first.getUTCDay(); offset += 1) grid.append(node('span'));
+            const allowed = new Set(data.dates);
+            for (let day = 1; day <= last.getUTCDate(); day += 1) {
+              const date = `${data.month}-${String(day).padStart(2, '0')}`;
+              const choose = button(String(day), () => {
+                if (!allowed.has(date)) return;
+                input.value = date; input.dispatchEvent(new root.Event('change')); picker.close(); input.focus();
+              }, 'bizop-calendar-day');
+              choose.dataset.date = date; choose.setAttribute('aria-label', date); choose.setAttribute('aria-pressed', String(input.value === date));
+              choose.disabled = !allowed.has(date); grid.append(choose);
+            }
+            picker.body.replaceChildren(nav, grid);
+            grid.querySelector('button[aria-pressed="true"]:not(:disabled),button:not(:disabled)')?.focus();
+          } catch (error) {
+            if (!picker.open || version !== ownVersion) return;
+            picker.body.replaceChildren(button('重新读取日期', () => load(selectedMonth))); showError(error);
+          }
+        }
+        await load();
+      }
+      for (const [input, label] of [[start, '起始日期'], [end, '终止日期']]) {
+        input.readOnly = true; input.setAttribute('aria-label', label); input.setAttribute('aria-haspopup', 'dialog');
+        input.addEventListener('click', () => { if (!busy) openCalendar(input, label).catch(showError); });
+        input.addEventListener('keydown', (event) => {
+          if (['Enter', ' ', 'ArrowDown'].includes(event.key) && !busy) { event.preventDefault(); openCalendar(input, label).catch(showError); }
+        });
+      }
       const details = node('div'); const run = button('确认运行', async () => {
         const result = await perform('区间核对', (requestId) => api.run({ requestId, selectionRef: preflight.selectionRef }));
         if (result?.status === 'ok') dialog.close(); else { preflight = null; run.disabled = true; }
@@ -125,7 +170,9 @@
         } finally { precheck.disabled = false; }
       });
       for (const item of [start, end]) item.addEventListener('change', () => { preflightVersion += 1; preflight = null; run.disabled = true; details.replaceChildren(); });
-      dialog.body.append(node('p', 'OP 需要起始、终止两日；流水需要起始日之后至终止日的每一天。'), fields, precheck, details); dialog.footer.prepend(run);
+      dialog.body.append(fields, details);
+      const actions = node('div', undefined, 'bizop-modal-actions'); actions.append(run, dialog.footer.firstChild);
+      dialog.footer.replaceChildren(precheck, actions);
     }
     async function latestMonth() { const result = checked(await api.months({ limit: 1 })); return result.months[0] || new Date().toISOString().slice(0, 7); }
     async function openResults() {

@@ -16,9 +16,22 @@
 .bizop-field { display: flex; flex-direction: column; gap: 8px; margin-bottom: 18px; flex: 1; min-width: 170px; }
 .bizop-field input, .bizop-field select { width: 100%; box-sizing: border-box; font: inherit; }
 .bizop-results-dialog { width: min(100%, 620px); }
-.bizop-results-dialog .dialog-header { padding-left: 0; padding-right: 0; }
+.bizop-results-dialog .dialog-header, .bizop-run-dialog .dialog-header, .bizop-calendar-dialog .dialog-header { padding-left: 0; padding-right: 0; }
 .bizop-result-fields { display: grid; grid-template-columns: 190px minmax(0, 360px); gap: 18px; }
 .bizop-result-fields .bizop-field { min-width: 0; }
+.bizop-run-fields { display: grid; grid-template-columns: repeat(2, calc((100% - 18px) / 3)); gap: 18px; }
+.bizop-run-fields .bizop-field { min-width: 0; }
+.bizop-run-fields input { cursor: pointer; }
+.bizop-run-dialog .bizop-modal-footer { justify-content: space-between; }
+.bizop-modal-actions { display: flex; align-items: center; gap: 12px; }
+.bizop-calendar-dialog { width: min(100%, 380px); }
+.bizop-calendar-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.bizop-calendar-nav button { min-width: 38px; padding: 0; }
+.bizop-calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.bizop-calendar-weekday { text-align: center; font-size: 13px; color: #68717d; padding: 6px 0; }
+.bizop-calendar-day { border: 0; border-radius: 5px; background: transparent; color: #185ba9; padding: 0; font: inherit; cursor: pointer; }
+.bizop-calendar-day:not(:disabled):hover, .bizop-calendar-day[aria-pressed="true"] { background: #e7f0ff; }
+.bizop-calendar-day:disabled { color: #68717d; }
 .bizop-feedback { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
 .bizop-feedback:empty { display: none; }
 .bizop-feedback[data-tone="error"] { color: #a12b20; }

@@ -58,6 +58,7 @@ const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       const input={objectId:'input-1',kind:'OP',dataDate:'2026-09-01',version:1,originals:[{originalName:'OP_20260901.xlsx'}]};
       const pending=(value)=>{fixture.requests.push(value);return new Promise(resolve=>fixture.finish=resolve);};
       const api={async status(){return {mode:'ACTIVE',recoveryReady:true}},async months(){return {months:['2026-09']}},async list(){return {generation:1,rows:[run],nextCursor:null}},
+        async runCalendar(){return {month:'2026-09',dates:['2026-09-01','2026-09-03'],previousMonth:null,nextMonth:null}},
         async preflight(){return {status:'ok',selectionRef:'selection-run',inputs:[]}},run:pending,
         async pickFiles(){return {status:'ok',selectionRef:'selection-import'}},importFiles:pending,
         async pickExport(){return {status:'ok',selectionRef:'selection-export'}},exportWorkbook(kind,value){return pending(value)},
@@ -76,7 +77,20 @@ const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     }
     if (scenario.startsWith('run-')) {
       await click('开始运行');
-      await js("document.querySelectorAll('dialog input')[0].value='2026-09-01';document.querySelectorAll('dialog input')[1].value='2026-09-03'");
+      for (const [index, day] of [[0, '1'], [1, '3']]) {
+        if (scenario === 'run-keyboard') {
+          await js(`document.querySelectorAll('.bizop-run-dialog input')[${index}].focus()`); await key('Enter');
+        } else {
+          const point = await js(`(()=>{const r=document.querySelectorAll('.bizop-run-dialog input')[${index}].getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()`);
+          await mouse(point);
+        }
+        await until("Boolean(document.querySelector('.bizop-calendar-grid'))");
+        assert.equal(await js("document.querySelector('[data-date=\"2026-09-02\"]').disabled"), true);
+        if (scenario === 'run-keyboard') { if (index === 1) await key('Tab'); await key('Enter'); }
+        else await click(day);
+        await until("document.querySelectorAll('dialog').length===1");
+      }
+      assert.deepEqual(await js("[...document.querySelectorAll('.bizop-run-dialog input')].map(x=>x.value)"), ['2026-09-01', '2026-09-03']);
       await click('检查所需数据'); await until("!target('确认运行').disabled"); await click('确认运行');
     }
     if (['result-export', 'publish-protected'].includes(scenario)) {

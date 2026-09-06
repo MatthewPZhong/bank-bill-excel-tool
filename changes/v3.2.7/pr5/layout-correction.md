@@ -4,7 +4,7 @@
 
 - Goal：落实 E5 Spec §6 已确认的 VCC 财务 OP 页面布局，修复业务 OP 主页面额外出现“导出数据”的偏差。
 - Context：当前启用提交 `9c1784d2`；E5 压缩包根目录 spec.md §6.1—6.4 与确认版要求一致。参考现有 `index.html` 的 `vccFinancialOpModulePanel` 及 `renderer-vcc-financial-op.js` 的 `openDataManager`。
-- Constraints：修正前端结构、样式与入口位置，并按用户追加要求去掉差异文件的说明页；Main 仅配套接受差异单页和零说明行。IPC、Task、输入版本、导出目标、删除范围及取消协议保留，不用真实数据做删除验证。
+- Constraints：修正前端结构、样式与入口位置，并按用户追加要求去掉差异文件的说明页、限制运行可选日期。Main 配套接受差异单页和零说明行，并新增只读运行月历接口；Task、输入版本、导出目标、删除范围及取消协议保留，不用真实数据做删除验证。
 - Done when：主面板与 VCC 的两行位置及尺寸一致；“导出数据”只能从数据管理进入；数据管理恢复左侧分类、右侧表格、底部操作；实际 Electron 布局及取消/删除预览回归通过。
 
 ## Unknowns Register
@@ -19,6 +19,11 @@
 ## Decisions / Deviations
 
 ### 本轮明确的界面细节
+
+- 运行窗口追加要求：日期框宽度为原来的 2/3；标题对齐分割线，预检按钮置左下角，移除原业务区间说明。
+- PROBE：原生日期框只能限定连续 min/max，无法禁用月份中间缺少 OP 的日期；旧日期 factory 只有自由三下拉或全部日期单选，不提供逐月日历。采用轻量原生模态月历，日期框只读，允许鼠标或键盘打开，禁用未返回的日期。
+- 新增只读 `metadata:run-calendar`：查询当前 OP head 与 ACTIVE dataset，默认按最近成功导入时间取账期月份；同批次并列按账期倒序取值。每次只返回一月最多 31 个日期及前后有数据月份，不扫描业务明细、不创建 Task。导出与管理的“操作月份”接口保持原义。
+- 月历可选日期不承诺流水完整；原预检继续验证两端 OP、逐日流水及 generation。月历的晚到响应与关闭窗口不回写选定日期，选定日期变化仍使旧预检失效。
 
 - 后续用户追加：导出原表期间去掉管理页左下角进度状态框（取消仍可用，失败仍提示）；“导出数据”的账期和目标也横排缩窄并对齐标题；删除选取阶段不显示整版本处理注释，影响确认页保留原删除范围说明。
 - 用户要求差异文件不带“核对说明”工作表，输出合同同步到 [PR4 Spec](../pr4/spec.md)。保留 19 列，导出阶段把末列定位提示指向完整原表，不修改已封存数据或计算规则。
@@ -37,16 +42,19 @@
 
 ## Evidence
 
-- `verify-ui.js`：28 PASS。实际 VCC 主面板在 1200×900、1080×760 两档与 BizOP 几何对照；两类导出弹窗横排/标题对齐、实际 VCC 预览入口和 BizOP 的文字按钮对齐；401 条三页完整可达、generation 变化重载、晚到页拒绝，以及四类导出、删除影响、草稿与旧路由。
-- `verify-ui-cancellation.js`：11 PASS，真实 Electron 鼠标/键盘输入。导入取消坐标与尺寸完全等于原按钮，鼠标/Enter、重复取消、晚到响应及双层模态都保持；导出原表的进度框不可见，但取消仍有正确焦点、requestId 和等待行为。
-- `biz-op-v327-export.test.js` + `biz-op-v327-export-main.test.js`：真实 Electron Node、SQLite、XLSX 和 Task/Publisher/Archive 21 PASS / 0 SKIP / 0 FAIL，包含零差异单页、完整原表说明保留、19 列对照、封存数据不变及六类共 72 个损坏反例。差异说明政策已体现在 schema/expected/actual/Main 的同一身份中。
+- 最新 `verify-ui.js`：33 PASS。实际 VCC 主面板在 1200×900、1080×760 两档与 BizOP 几何对照；两类导出弹窗横排/标题对齐、实际 VCC 预览入口和 BizOP 的文字按钮对齐；401 条三页完整可达、generation 变化重载、晚到页拒绝，以及四类导出、删除影响、草稿与旧路由。新增运行窗口标题/宽度/左下角按钮测量、默认最近导入月份、跨月导航、禁用缺失日期、重复打开、关闭后晚到响应与无 OP 空态。
+- 最新 `verify-ui-cancellation.js`：11 PASS，真实 Electron 鼠标/键盘输入。运行场景实际通过月历选择起止日期后预检、运行和取消，分别验证鼠标与 Enter/Tab，并断言无数据日期禁用。导入取消坐标与尺寸完全等于原按钮，重复取消、晚到响应及双层模态都保持；导出原表的进度框不可见，但取消仍有正确焦点、requestId 和等待行为。
+- 最新 IPC/注册合同：`biz-op-v327-ipc.test.js`、`archive-task-policy-registry.test.js`、`archive-ipc-task-contract.test.js` 合计 36 PASS / 0 SKIP / 0 FAIL。实际临时文件、SQLite 和导入/删除链验证 OP 日期、FLOW-only 排除、较早账期后导入成为默认月、前后月份、删除后更新、参数拒绝、小响应和读取不创建 Task。Main/preload 字面量集合继续精确相等，新入口显式登记为只读排除项。
+- 前一提交 `f6a6355a` 的 `biz-op-v327-export.test.js` + `biz-op-v327-export-main.test.js`：真实 Electron Node、SQLite、XLSX 和 Task/Publisher/Archive 21 PASS / 0 SKIP / 0 FAIL，包含零差异单页、完整原表说明保留、19 列对照、封存数据不变及六类共 72 个损坏反例。差异说明政策已体现在 schema/expected/actual/Main 的同一身份中；运行月历修改没有再次修改或复跑该输出链。
 - 本轮探针时序修正：明确等待原生 close 事件移除旧窗口，导出任务实际完成，且新分类列表可操作后再点击删除；不能用旧表相同的首格日期作为新列表就绪证据。首次差异页名称篡改未匹配 XLSX 属性顺序，补上“确实修改 XML”的断言后复验通过；没有放松产品行为或拒绝条件。
-- 前轮 `b32d265c` 的 19/10 项结果为历史记录，不与本轮 28/11 项重复相加；前轮主页面先展开再聚焦的修复保留。
-- VCC 前端、预览及文档回归：58 PASS / 0 FAIL；lint、git diff --check 通过。
-- `check-vars` 词法命中 renderer 局部 `dialog`；按 important-variables.md 的显式判定说明，它不是 Main 的 Electron dialog，未修改原生文件选择接口。用户取消分支已由上述真实输入专项验证。
+- 前轮 `b32d265c` 的 19/10 项和 `f6a6355a` 的 28/11 项结果为历史记录，不与最新 33/11 项重复相加；前轮主页面先展开再聚焦的修复保留。
+- `f6a6355a` 的 VCC 前端、预览及文档回归：58 PASS / 0 FAIL；当前 lint、git diff --check 通过。未为运行月历重跑完整 release-check。
+- 首次 IPC 回归有两项旧精确清单数量断言失败；新增只读 channel 使总数 264→265、V327 20→21、exclude 128→129。同步数量后 36 项通过，集合相等断言保留，71 个 file 和 63 个 no-file mutation 数量不变。
+- `check-vars` 命中 Important-skeleton 的 `ipcRenderer`：新增 channel 已同步 Main handler、preload 和只读策略登记，真实 IPC 及字面量精确集合检查通过。另有 renderer 局部 `dialog` 和 SQL 的 `d.state` 词法命中；按 important-variables.md 的定义，它们不是 Main 的 Electron dialog 或 renderer 全局 state，未修改原生文件选择和该全局状态。用户取消分支已由上述真实输入专项验证。
 - 页面及数据保护复核：分类切换仍清空选择并用 loadVersion 拒绝晚到列表；四类输入导出继续查询当前对象并传 Main selectionRef；删除只在完整预览后提交原 mode，来源名仍使用 textContent。未修改金额、币种、主键、版本、目录或恢复行为，未新增资金红线项。
-- 截图见 [主面板](screenshots/layout-main.png)、[原位取消](screenshots/layout-import-cancel.png)、[数据管理](screenshots/layout-manager.png)、[输入导出](screenshots/layout-input-export.png)、[结果导出](screenshots/layout-result-export.png)、[VCC 操作列](screenshots/layout-vcc-manager.png)、[导出原表期间](screenshots/layout-manager-exporting.png)。截图来自隔离 Electron 中的实际组件与样式，业务 API 为夹具；未把这些检查写成真实资金或目标规模验收。
+- 截图见 [主面板](screenshots/layout-main.png)、[原位取消](screenshots/layout-import-cancel.png)、[数据管理](screenshots/layout-manager.png)、[输入导出](screenshots/layout-input-export.png)、[结果导出](screenshots/layout-result-export.png)、[VCC 操作列](screenshots/layout-vcc-manager.png)、[导出原表期间](screenshots/layout-manager-exporting.png)、[开始运行](screenshots/layout-run.png)、[运行月历](screenshots/layout-run-calendar.png)。截图来自隔离 Electron 中的实际组件与样式，业务 API 为夹具；未把这些检查写成真实资金或目标规模验收。
 
 ## Remaining Unknowns
 
 - 当前产品固定 Clear 样式，General 已退役；上述两种窗口及模态操作已验证。真实业务数据处理和原有 Windows/规模/人工验收门禁仍分别记录，不在布局修正中重新宣称通过。
+- 运行月历新增 Main IPC；人工验证前需完整重启开发版，仅刷新 renderer 不会注册新接口。本轮未启动真实数据应用或修改用户业务数据。
