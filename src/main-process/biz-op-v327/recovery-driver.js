@@ -85,6 +85,7 @@ function createBizOpRecoveryDriver({ catalog, sources, admission, readRepository
               if (done.has(sourceKey(source))) continue;
               if (hold && owner && done.has(sourceKey(owner))) { blockedScopes.add(scope); break; }
               const before = progress(source);
+              if (sources.prepareSource) await sources.prepareSource(source);
               const current = await platform.recoverSource(source, hold);
               if (current.blocked || current.inspection && ['unknown', 'partially-committed'].includes(current.inspection.outcome)
                   || current.outcome && current.outcome !== 'completed') {
@@ -98,6 +99,7 @@ function createBizOpRecoveryDriver({ catalog, sources, admission, readRepository
                 if (final.blocked || final.held || final.inspection && ['unknown', 'partially-committed'].includes(final.inspection.outcome)
                     || final.outcome && final.outcome !== 'completed') { blockedScopes.add(scope); break; }
               }
+              if (sources.afterSource) await sources.afterSource(source);
               const aligned = sources.syncCompletion(source);
               if (aligned || progress(source) !== before) { madeProgress = true; completedSources += 1; }
               done.add(sourceKey(source));

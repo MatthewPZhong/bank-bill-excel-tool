@@ -29,7 +29,9 @@ function createBizOpRecoveryPlan({ catalog }) {
     const batches = db.prepare('SELECT id,task_status FROM archive_batches WHERE task_run_id=? ORDER BY id').all(task.taskRunId);
     const overlays = new Map(db.prepare('SELECT * FROM background_execution_batch_recovery_states WHERE task_run_id=?')
       .all(task.taskRunId).map((item) => [item.batch_id, item]));
-    if ((complete && primary || unknown) && ['prepared', 'running'].includes(task.status) && !task.recoveryMode) {
+    // READ/CARRIER 只收敛自己的 Hold。Task 和 Batch overlay 始终由主操作来源拥有，
+    // 避免先观察读者后，主来源无法通过平台的 source identity CAS。
+    if (primary && (complete || unknown) && ['prepared', 'running'].includes(task.status) && !task.recoveryMode) {
       transitions.push(wrap({ ...common, entityKind: 'task-run', command: 'mark-interrupted', expectedState: task.status,
         failureCode: 'BIZOP_RECOVERY_PENDING', failureMessage: '业务 OP 正在核验持久结果和载体关闭', metadataPatch: { recoveryHold: true } }));
       for (const batch of batches) {

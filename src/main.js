@@ -20634,7 +20634,7 @@ async function recoverToolboxPublicationsAtStartup() {
     const result = await recoverToolboxPublicationsIntoArchive({
       userDataDir: app.getPath('userData'),
       archiveCenter: archiveCenterService,
-      recoverPublications: recoverToolboxPublicationsAsync
+      recoverPublications: (options) => bizOpV327Module.publication.recoverOtherOwners(options)
     });
     const recovered = Array.isArray(result.recovered) ? result.recovered : [];
     if (recovered.length > 0) {
@@ -22029,6 +22029,7 @@ async function initializeBackgroundExecutionRecovery() {
   const providerRegistry = createSettlementRecoveryProviderRegistry();
   bizOpV327Module = createBizOpV327Module({ db: database.db, userDataDir: path.dirname(database.dbPath),
     readRepository: recoveryControlReadRepository,
+    getRuntime: () => backgroundExecutionRuntimeManager.get(),
     getArchiveService: () => archiveCenterService && archiveCenterService.service });
   bizOpV327Module.sources.register(inspectorRegistry, providerRegistry);
   const inspectPreFundMpt = createPreFundMptOutcomeInspector({

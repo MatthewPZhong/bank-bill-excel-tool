@@ -8,6 +8,7 @@ function createBizOpRecoverySources({ catalog, protection, payloadStore, readRep
   let frozenSources = null;
   let budget = null;
   let beforeFinalize = async () => {};
+  let publication = null;
   function installBudget(value) { budget = value; }
   function makeSource(op, category, extra = {}, reference = op.source_ref) {
     return { contractVersion: 1, sourceKind: category === 'OPERATION' ? op.source_kind : 'module-recovery',
@@ -99,9 +100,10 @@ function createBizOpRecoverySources({ catalog, protection, payloadStore, readRep
     if (!op || op.intent_digest !== source.boundedEvidence.intentDigest || op.action_key !== source.actionKey
         || op.operation_key !== source.operationKey) fail('BIZOP_RECOVERY_IDENTITY_CHANGED');
     catalog.assertTask(op);
-    const receipt = catalog.receipt(source.taskRunId, op.intent_digest);
+    const publisherFact = op.action === 'EXPORT' && publication ? publication.fact(source.taskRunId) : null;
+    const receipt = publisherFact?.receipt || catalog.receipt(source.taskRunId, op.intent_digest);
     const abort = finalization(source);
-    const closed = protection.closed(source.taskRunId);
+    const closed = protection.closed(source.taskRunId) && (op.action !== 'EXPORT' || publication?.closed(source.taskRunId));
     const category = source.boundedEvidence.category;
     let outcome = 'unknown';
     let reason = 'CARRIER_OR_INPUT_OBLIGATION_PENDING';
@@ -116,11 +118,11 @@ function createBizOpRecoverySources({ catalog, protection, payloadStore, readRep
     } else if (abort) {
       if (receipt && category === 'OPERATION' || abort.intent_digest !== op.intent_digest) fail('BIZOP_TERMINAL_FACT_CONFLICT');
       outcome = 'compensated'; reason = 'FINALIZATION_RECORDED';
-    } else if (receipt && category === 'OPERATION') {
+    } else if (receipt && (category === 'OPERATION' || op.action === 'EXPORT')) {
       outcome = 'committed'; reason = 'BUSINESS_RECEIPT';
     } else if (op.action === 'UPGRADE') {
       reason = 'ACTIVATION_AUTHORITY_REQUIRED';
-    } else if (closed && (op.action !== 'EXPORT' || op.input_obligation === 'COMPLETE')) {
+    } else if (closed && (op.action !== 'EXPORT' || publisherFact?.state === 'NOT_COMMITTED' || op.input_obligation === 'COMPLETE')) {
       outcome = 'not-committed'; reason = 'MAIN_FINALIZATION_REQUIRED';
     }
     return { op, receipt, abort, outcome, evidence: { category, reason, closed,
@@ -145,6 +147,7 @@ function createBizOpRecoverySources({ catalog, protection, payloadStore, readRep
     if (inspection.outcome !== 'committed' || current.outcome !== 'committed') fail('BIZOP_PROVIDER_COMMITTED_ONLY');
     let completed = false;
     if (source.boundedEvidence.category === 'RECLAIM') completed = true;
+    else if (current.op.action === 'EXPORT' && current.evidence.closed) completed = await publication.settle(source.taskRunId);
     else if (current.op.action !== 'EXPORT' && current.evidence.closed && getArchiveService()) {
       const service = getArchiveService();
       const batches = db.prepare('SELECT id FROM archive_batches WHERE task_run_id=? ORDER BY id').all(source.taskRunId);
@@ -194,6 +197,7 @@ function createBizOpRecoverySources({ catalog, protection, payloadStore, readRep
       const latest = facts(source);
       if (latest.outcome !== 'not-committed' || hash(latest.evidence) !== inspection.evidenceHash) fail('BIZOP_RECOVERY_FACTS_CHANGED');
       if (latest.op.action !== 'EXPORT') protection.completeInputObligation(source.taskRunId);
+      else publication.completeInput(source.taskRunId);
       protection.releasePins(source.taskRunId);
       if (source.boundedEvidence.category === 'OPERATION') catalog.releaseOwnedHolds('v327-prepare', source.taskRunId);
       const ref = `finalization-${hash(sourceKey(source))}`;
@@ -227,6 +231,8 @@ function createBizOpRecoverySources({ catalog, protection, payloadStore, readRep
     if (hold && sameSource(source, hold) || !task || !['succeeded', 'failed', 'cancelled'].includes(task.status)) return false;
     const current = facts(source);
     if (!['compensated', 'committed'].includes(current.outcome) || !protection.closed(source.taskRunId)) return false;
+    if (current.op.action === 'EXPORT' && (!publication.closed(source.taskRunId)
+        || current.outcome === 'committed' && !publication.record(source.taskRunId)?.cleanup_completed)) return false;
     if (db.prepare('SELECT 1 FROM biz_op_v327_read_pins WHERE task_run_id=? LIMIT 1').get(source.taskRunId)) return false;
     return catalog.transaction(() => {
       let changes = db.prepare(`UPDATE biz_op_v327_recovery_followups SET state='COMPLETE',updated_at=?
@@ -254,6 +260,20 @@ function createBizOpRecoverySources({ catalog, protection, payloadStore, readRep
     }
   }
   return Object.freeze({ collect, register, installBudget, inspect, facts, finalize, syncCompletion,
+    setPublication(value) { publication = value; },
+    async prepareSource(source) {
+      if (catalog.operation(source.taskRunId).action !== 'EXPORT' || !publication) return;
+      budget.charge('main'); assertCurrentHold(source);
+      protection.refresh(source.taskRunId);
+      const op = catalog.operation(source.taskRunId);
+      if (hash(payloadStore.readDocument(op.intent_rel_path).value) !== op.intent_digest) fail('BIZOP_INTENT_FILE_CHANGED');
+      await publication.reconcile(source.taskRunId);
+    },
+    async afterSource(source) {
+      if (catalog.operation(source.taskRunId).action !== 'EXPORT' || !publication) return;
+      budget.charge('main'); assertCurrentHold(source);
+      await publication.acknowledge(source.taskRunId);
+    },
     setBeforeFinalize(handler) { beforeFinalize = handler; },
     operationSource(taskRunId) { return makeSource(catalog.operation(taskRunId), 'OPERATION'); },
     setReclaimHandler(handler) { reclaimHandler = handler; },

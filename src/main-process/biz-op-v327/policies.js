@@ -33,6 +33,7 @@ Object.defineProperty(validateBizOpCandidateResult, 'allowFinanceSafeValue', {
       || key === 'candidateRef' && typeof value === 'string' && /^candidate-[a-f0-9-]{36}$/.test(value);
   }
 });
-function rejectUnimplementedExport() { return false; }
+// 导出只返回候选证据引用；实际有界证据仍由 Main 按原 plan 和 FilePlan 核对。
+const validateBizOpExportResult = validateBizOpCandidateResult;
 
-module.exports = { BIZ_OP_V327_POLICIES, validateBizOpCandidateResult, rejectUnimplementedExport };
+module.exports = { BIZ_OP_V327_POLICIES, validateBizOpCandidateResult, validateBizOpExportResult };

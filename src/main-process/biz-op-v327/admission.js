@@ -38,14 +38,19 @@ function createBizOpAdmission({ canReleaseRead = () => false } = {}) {
   async function readTask(taskRunId, work) {
     if (owner || !recoveryReady) fail('BIZOP_RECOVERY_REQUIRED');
     readers += 1;
-    const token = Object.freeze({ readTaskRunId: taskRunId });
+    // FilePlan Task 的 ID 在 lifecycle 创建后才可得；整个 lifecycle 共用一次读准入，
+    // 只允许把未绑定 scope 绑定一次，不能在 beforeStart/execute 之间提前释放。
+    const token = { readTaskRunId: taskRunId };
     activeReads.add(token);
-    try { return await ownership.run(token, work); }
+    try { return await ownership.run(token, () => work(Object.freeze({ bindTask(id) {
+      if (!id || token.readTaskRunId !== null && token.readTaskRunId !== id) fail('BIZOP_READ_TASK_REBIND');
+      token.readTaskRunId = id;
+    } }))); }
     finally {
       readers -= 1;
       activeReads.delete(token);
       // 活动 JS 调用已经结束；未决载体/发布义务由持久 pin 继续保护，写入口只能经恢复重开。
-      if (!canReleaseRead(taskRunId)) recoveryReady = false;
+      if (token.readTaskRunId !== null && !canReleaseRead(token.readTaskRunId)) recoveryReady = false;
     }
   }
   return Object.freeze({ exclusive, read, readTask, assertExclusive, assertTaskAccess,
