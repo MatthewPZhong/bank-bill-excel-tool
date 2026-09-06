@@ -496,6 +496,33 @@ contextBridge.exposeInMainWorld('desktopApi', {
     listSuccessMonths: () => ipcRenderer.invoke('bankBuRecon:run:list-success-months')
   },
   // v2.1.3：业务OP数据核对模块
+  bizOpReconV327: {
+    status: () => ipcRenderer.invoke('bizOpReconV327:status'),
+    pickFiles: () => ipcRenderer.invoke('bizOpReconV327:files:pick'),
+    importFiles: (payload) => ipcRenderer.invoke('bizOpReconV327:import', payload),
+    preflight: (payload) => ipcRenderer.invoke('bizOpReconV327:run:preflight', payload),
+    run: (payload) => ipcRenderer.invoke('bizOpReconV327:run', payload),
+    months: (payload) => ipcRenderer.invoke('bizOpReconV327:metadata:months', payload),
+    list: (payload) => ipcRenderer.invoke('bizOpReconV327:metadata:list', payload),
+    currentInput: (payload) => ipcRenderer.invoke('bizOpReconV327:metadata:input', payload),
+    deletePreview: (payload) => ipcRenderer.invoke('bizOpReconV327:delete:preview', payload),
+    deleteData: (payload) => ipcRenderer.invoke('bizOpReconV327:delete', payload),
+    pickExport: (payload) => ipcRenderer.invoke('bizOpReconV327:export:pick', payload),
+    exportWorkbook: (kind, payload) => {
+      switch (kind) {
+        case 'OP_RAW': return ipcRenderer.invoke('bizOpReconV327:export:op-raw', payload);
+        case 'FLOW_RAW': return ipcRenderer.invoke('bizOpReconV327:export:flow-raw', payload);
+        case 'OP_CHECK': return ipcRenderer.invoke('bizOpReconV327:export:op-check', payload);
+        case 'FLOW_CHECK': return ipcRenderer.invoke('bizOpReconV327:export:flow-check', payload);
+        case 'RESULT_FULL': return ipcRenderer.invoke('bizOpReconV327:export:result-full', payload);
+        case 'RESULT_DIFF': return ipcRenderer.invoke('bizOpReconV327:export:result-diff', payload);
+        case 'ERRORS': return ipcRenderer.invoke('bizOpReconV327:export:errors', payload);
+        default: return Promise.reject(new Error('导出类别非法'));
+      }
+    },
+    cancel: (payload) => ipcRenderer.invoke('bizOpReconV327:task:cancel', payload),
+    retryRecovery: () => ipcRenderer.invoke('bizOpReconV327:recovery:retry')
+  },
   bizOpRecon: {
     status: () => ipcRenderer.invoke('bizOpRecon:status'),
     listBu: () => ipcRenderer.invoke('bizOpRecon:bu:list'),

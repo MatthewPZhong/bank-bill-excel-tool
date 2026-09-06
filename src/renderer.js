@@ -1,3 +1,4 @@
+let bizOpV327Controller = null;
 const DEFAULT_BACKGROUND_SETTINGS = Object.freeze({
   colorHex: '#efe8da',
   imageDataUrl: '',
@@ -1644,10 +1645,15 @@ function setCurrentModule(moduleId, { persist = true } = {}) {
   }
   // v2.1.3：业务OP数据核对模块面板隐藏控制
   if (elements.bizOpReconModulePanel) {
-    elements.bizOpReconModulePanel.hidden = moduleId !== MODULES.bizOpRecon.id;
-    if (moduleId === MODULES.bizOpRecon.id) {
-      restoreBizOpReconPanelState();
+    const selected = moduleId === MODULES.bizOpRecon.id;
+    elements.bizOpReconModulePanel.hidden = !selected;
+    if (!bizOpV327Controller && typeof window.createBizOpV327Controller === 'function') {
+      bizOpV327Controller = window.createBizOpV327Controller({ api: window.desktopApi?.bizOpReconV327,
+        panel: document.getElementById('bizOpV327ModulePanel'), legacyPanel: elements.bizOpReconModulePanel,
+        restoreLegacy: restoreBizOpReconPanelState });
     }
+    if (bizOpV327Controller) bizOpV327Controller.setSelected(selected);
+    else if (selected) restoreBizOpReconPanelState();
   }
   // v2.1.6 Module B：收单单据币种校验模块面板隐藏控制
   if (elements.acquiringBillCurrencyModulePanel) {

@@ -297,6 +297,9 @@ const RESERVE_CHANNELS_BY_SCOPE = Object.freeze({
 const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
   'read-only-query': Object.freeze([
     'bizOpReconV327:status',
+    'bizOpReconV327:metadata:months',
+    'bizOpReconV327:metadata:list',
+    'bizOpReconV327:metadata:input',
     'account-mapping:check-migration-pending',
     'account-mapping:get-migration-data',
     'account-mapping:list',
@@ -370,6 +373,8 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'vccFinancialOp:run:latest-archived'
   ]),
   'file-picker-only': Object.freeze([
+    'bizOpReconV327:files:pick',
+    'bizOpReconV327:export:pick',
     'background:select-file',
     'bankBuRecon:export:pick-save-path',
     'bankBuRecon:import:pick-bank-file',
@@ -388,6 +393,8 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'position-reconciliation:bank:prepare-import'
   ]),
   'preview-only': Object.freeze([
+    'bizOpReconV327:run:preflight',
+    'bizOpReconV327:delete:preview',
     'file:extract-big-account-order',
     'template:preview-delete-bill-split-row',
     'toolbox:split:read',
@@ -397,6 +404,7 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'vccFinancialOp:run:unarchive-preview'
   ]),
   'cancel-active-task': Object.freeze([
+    'bizOpReconV327:task:cancel',
     'acquiringBillCurrency:run:cancel',
     'file:cancel-big-account-selection',
     'position-reconciliation:bank:cancel-import',

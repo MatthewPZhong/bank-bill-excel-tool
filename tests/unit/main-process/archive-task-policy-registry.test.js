@@ -113,20 +113,20 @@ test('main 与独立 V327 注册器的 IPC 加内部任务，与 policy/support 
   assert.equal(new Set(actual).size, actual.length, 'main 不应重复注册 literal IPC');
   assert.equal(new Set(expected).size, expected.length, 'policy/support 不应重复登记');
   assert.deepEqual(expected, actual);
-  assert.equal(actual.length, 256);
-  assert.equal(v327IpcInventory().length, 12);
+  assert.equal(actual.length, 264);
+  assert.equal(v327IpcInventory().length, 20);
   assert.equal(registry.channels('reserve').length, 71);
   assert.equal(registry.channels('no-file').length, 63);
-  assert.equal(registry.channels('exclude').length, 120);
+  assert.equal(registry.channels('exclude').length, 128);
   assert.equal(SUPPORT_ACTION_POLICIES.length, 2);
 });
 
-test('既有 preload 与 main literal inventory 精确相等，V327 新业务入口待 PR5 接入', () => {
+test('preload 与 main 及独立 V327 注册器精确相等，新增 20 个业务和只读入口完整接通', () => {
   assert.deepEqual(
     [...new Set(literalInvocations(PRELOAD_PATH, 'ipcRenderer', 'invoke'))].sort(),
-    [...new Set(mainIpcInventory().map((item) => item.channel))].sort()
+    [...new Set([...mainIpcInventory().map((item) => item.channel), ...v327IpcInventory()])].sort()
   );
-  assert.equal(literalInvocations(PRELOAD_PATH, 'ipcRenderer', 'invoke').some((channel) => channel.startsWith('bizOpReconV327:')), false);
+  assert.deepEqual(literalInvocations(PRELOAD_PATH, 'ipcRenderer', 'invoke').filter((channel) => channel.startsWith('bizOpReconV327:')), v327IpcInventory().sort());
 });
 
 test('非 literal direct ipcMain.handle 只存在于已知受控 helper 定义', () => {
@@ -234,15 +234,15 @@ test('71 file 与 63 no-file mutation 逐项显式分类且精确闭合', () => 
   const excludeChannels = new Set(excludeInventory);
   assert.equal(fileChannels.size, 71);
   assert.equal(noFileChannels.size, 63);
-  assert.equal(excludeInventory.length, 120);
-  assert.equal(excludeChannels.size, 120);
+  assert.equal(excludeInventory.length, 128);
+  assert.equal(excludeChannels.size, 128);
   assert.deepEqual([...fileChannels].filter((channel) => noFileChannels.has(channel)), []);
   assert.deepEqual([...fileChannels].filter((channel) => excludeChannels.has(channel)), []);
   assert.deepEqual([...noFileChannels].filter((channel) => excludeChannels.has(channel)), []);
   assert.deepEqual(new Set(registry.channels('reserve')), fileChannels);
   assert.deepEqual(new Set(registry.channels('no-file')), noFileChannels);
-  assert.equal(registry.channels('exclude').length, 120);
-  assert.equal(registry.list().length, 71 + 63 + 120);
+  assert.equal(registry.channels('exclude').length, 128);
+  assert.equal(registry.list().length, 71 + 63 + 128);
 });
 
 test('dialog selection 显式区分 file/directory，正常 file policy 不再消费 selection 路径', () => {

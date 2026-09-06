@@ -98,6 +98,22 @@ CREATE UNIQUE INDEX IF NOT EXISTS biz_op_v327_run_version_unique
 ON biz_op_v327_runs(start_date,end_date,result_version) WHERE result_version IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS biz_op_v327_run_fingerprint_live_unique
 ON biz_op_v327_runs(input_fingerprint) WHERE state = 'PUBLISHED';
+CREATE INDEX IF NOT EXISTS biz_op_v327_dataset_list
+ON biz_op_v327_datasets(kind,substr(activated_at,1,7),activated_at DESC,dataset_id) WHERE state='ACTIVE';
+CREATE INDEX IF NOT EXISTS biz_op_v327_run_list
+ON biz_op_v327_runs(operation_month,published_at DESC,run_id) WHERE state='PUBLISHED';
+
+CREATE TABLE IF NOT EXISTS biz_op_v327_delete_previews (
+ preview_id TEXT PRIMARY KEY,
+ generation INTEGER NOT NULL,
+ closure_json TEXT NOT NULL,
+ closure_digest TEXT NOT NULL,
+ created_at TEXT NOT NULL,
+ expires_at TEXT NOT NULL,
+ confirmed_task_id TEXT REFERENCES archive_task_runs(task_run_id) ON DELETE RESTRICT,
+ confirmed_mode TEXT CHECK(confirmed_mode IN ('KEEP_RESULTS','DELETE_ASSOCIATED')),
+ CHECK((confirmed_task_id IS NULL)=(confirmed_mode IS NULL))
+);
 
 CREATE TABLE IF NOT EXISTS biz_op_v327_run_inputs (
   run_id TEXT NOT NULL REFERENCES biz_op_v327_runs(run_id) ON DELETE RESTRICT,
