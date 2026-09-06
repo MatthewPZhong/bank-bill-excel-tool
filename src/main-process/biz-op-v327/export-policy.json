@@ -1,0 +1,100 @@
+{
+  "actionKey": "biz-op-v327:export-op-raw",
+  "moduleId": "biz-op-v327",
+  "description": "业务 OP v3.2.7 分期实现，生产入口未启用",
+  "disposition": "managed",
+  "mode": "thread-single",
+  "adapterKind": "native",
+  "adapterKey": null,
+  "entryKey": "executor.biz-op-v327:export-op-raw",
+  "lifetime": "job",
+  "context": {
+    "kind": "operation",
+    "validatorKey": "exact-5"
+  },
+  "resources": {
+    "profile": "resource.biz-op-v327:export-op-raw",
+    "base": {
+      "cpuSlots": 0,
+      "workerThreadSlots": 0,
+      "utilityProcessSlots": 0,
+      "ioHeavySlots": 0,
+      "memoryBytes": 0
+    },
+    "phase": {
+      "cpuSlots": 1,
+      "workerThreadSlots": 1,
+      "utilityProcessSlots": 0,
+      "ioHeavySlots": 1,
+      "memoryBytes": 1073741824
+    },
+    "compound": null,
+    "lowMemoryBehavior": "queue",
+    "admissionPriority": "normal"
+  },
+  "cancellation": {
+    "capability": "user-cooperative",
+    "safePoints": [
+      "between-rows",
+      "between-candidate-transactions",
+      "before-module-commit"
+    ],
+    "cooperativeTimeoutMs": 5000,
+    "terminateTimeoutMs": 5000,
+    "protectedResult": "protected/not-cancellable"
+  },
+  "failure": {
+    "unitBusinessError": "fail-job",
+    "unitTransportCrash": "fail-job",
+    "workerExit": "module-inspect",
+    "automaticRetry": false
+  },
+  "commit": {
+    "kind": "main-settlement",
+    "criticalIntent": false,
+    "receiptKind": "publisher-journal",
+    "inspectorKey": "inspector.biz-op-v327:publication",
+    "conflictScopeResolverKey": "scope.biz-op-v327:publication",
+    "settlementKey": "settlement.biz-op-v327:publication"
+  },
+  "result": {
+    "kind": "artifact-manifest",
+    "maxBytes": 65536,
+    "maxErrorItems": 0,
+    "validatorKey": "result-validator.biz-op-v327:export-op-raw"
+  },
+  "artifacts": {
+    "kind": "single",
+    "filePlanRequired": true,
+    "technicalValidatorKey": "technical-validator.biz-op-v327:export-op-raw",
+    "businessValidatorKey": "business-validator.biz-op-v327:export-op-raw",
+    "publisherKey": "publisher.biz-op-v327:export-op-raw",
+    "maxArtifacts": 1
+  },
+  "service": null,
+  "metrics": {
+    "phases": [
+      "queue",
+      "execute",
+      "settle"
+    ],
+    "privacyProfile": "finance-safe-v1",
+    "progressRateLimitPerSecond": 10
+  },
+  "featureFlag": "feature.biz-op-v327:export-op-raw",
+  "legacyStrategyKey": null,
+  "blocker": null,
+  "production": {
+    "enabled": false,
+    "effectiveMode": "legacy",
+    "effectiveWorkerCount": 0,
+    "recoveryStatus": "probe",
+    "evidenceStatus": "none",
+    "downgradeReason": "等待 v3.2.7 分期验收与显式启用",
+    "benchmarkEvidenceId": null
+  },
+  "protocolLimits": {
+    "commandMaxBytes": 262144,
+    "eventMaxBytes": 262144
+  }
+}

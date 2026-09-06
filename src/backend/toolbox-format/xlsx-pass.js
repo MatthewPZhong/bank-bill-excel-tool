@@ -1209,5 +1209,6 @@ module.exports = {
   openToolboxXlsxPass,
   parseWorkbookRelationships,
   parseWorkbookXml,
+  relationshipTypeAllowed,
   readToolboxMetadataEntryAsString
 };

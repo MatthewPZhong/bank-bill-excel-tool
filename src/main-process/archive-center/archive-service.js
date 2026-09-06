@@ -304,6 +304,10 @@ class ArchiveService {
     if (options.onSourceReleased !== undefined && typeof options.onSourceReleased !== 'function') {
       throw new TypeError('ArchiveService onSourceReleased 必须是函数');
     }
+    if (options.onArtifactReady !== undefined && (typeof options.onArtifactReady !== 'function'
+        || options.onArtifactReady.constructor.name === 'AsyncFunction')) {
+      throw new TypeError('ArchiveService onArtifactReady 必须是同步完成适配');
+    }
     if (options.repository === undefined && !database) {
       throw new TypeError('ArchiveService 需要调用方注入 DatabaseSync 或 repository');
     }
@@ -333,6 +337,7 @@ class ArchiveService {
     this.fs = options.fsImpl || fs;
     this.opener = options.opener || null;
     this.onSourceReleased = options.onSourceReleased || null;
+    this.onArtifactReady = options.onArtifactReady || null;
     this.defaultRetentionDays = defaultRetentionDays;
     this.startupMaterializationBatchSize = startupMaterializationBatchSize;
     this.verifyHashesOnStartup = options.verifyHashesOnStartup === true;
@@ -2270,7 +2275,7 @@ class ArchiveService {
         sizeBytes: published.fingerprint.sizeBytes,
         relativePath: published.relativePath,
         fingerprint: published.fingerprint
-      });
+      }, this.onArtifactReady);
       await this._releaseSourcePaths([previouslyRegisteredSourcePath, archivedSourcePath]);
       const materialized = await this._materializeArtifactUnlocked(completed.artifact.id);
       return {

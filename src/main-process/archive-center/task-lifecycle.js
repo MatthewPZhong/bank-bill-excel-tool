@@ -473,6 +473,11 @@ class TaskLifecycle {
           businessError = error;
         }
       }
+      // Main owner 可在任何自动 artifact/终态写入前核对外部提交事实。
+      // 拒绝时保留原 running Task，由已登记的恢复 owner 继续观察；不推测失败。
+      if (typeof payload.beforeTerminalSettlement === 'function') {
+        await payload.beforeTerminalSettlement({ context, businessResult, businessError });
+      }
       const settled = await settleArtifacts({
         files: filePlan.inputs.map((item) => ({ artifactKey: item.artifactKey }))
       });
@@ -1436,6 +1441,10 @@ class TaskLifecycle {
         } catch (error) {
           businessError = error;
         }
+      }
+      // 无文件任务与 File Task 使用同一提交观察合同；拒绝时保留原任务给恢复 owner。
+      if (typeof payload.beforeTerminalSettlement === 'function') {
+        await payload.beforeTerminalSettlement({ context, businessResult, businessError });
       }
       let settled = { handled: false };
       if (batchContext) {

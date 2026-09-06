@@ -47,26 +47,26 @@ function actionByKey(collection, actionKey) {
   return collection.actions.find((action) => action.actionKey === actionKey);
 }
 
-test('E13-G current manifest 以独立 54 action / 61 pair authority 达到六面 100% coverage', () => {
+test('E13-G current manifest 以独立 66 action / 73 pair authority 达到六面 100% coverage', () => {
   const current = harness();
   const result = validateActionCoverage(current.manifest, current);
-  assert.equal(CANONICAL_ACTION_KEYS.length, 54);
-  assert.equal(LEGACY_HANDLER_PAIRS.length, 61);
+  assert.equal(CANONICAL_ACTION_KEYS.length, 66);
+  assert.equal(LEGACY_HANDLER_PAIRS.length, 73);
   assert.deepEqual(current.manifest.counts, {
-    actionCount: 54,
-    legacyPairCount: 61,
-    runtimePolicyCount: 36,
+    actionCount: 66,
+    legacyPairCount: 73,
+    runtimePolicyCount: 48,
     legacyOnlyCount: 16,
     platformCanaryCount: 2
   });
   assert.deepEqual(result, {
     valid: true,
-    actionCount: 54,
-    legacyPairCount: 61,
-    runtimePolicyCount: 36,
+    actionCount: 66,
+    legacyPairCount: 73,
+    runtimePolicyCount: 48,
     surfaceCount: 6,
-    coveredActionSurfaceCount: 324,
-    expectedActionSurfaceCount: 324,
+    coveredActionSurfaceCount: 396,
+    expectedActionSurfaceCount: 396,
     coveragePercent: 100
   });
   assert.equal(Object.isFrozen(current.manifest), true);
@@ -77,15 +77,15 @@ test('Capability Inventory 与 Effective Production Strategy 分离，全部 cap
   const current = harness();
   const snapshot = createEffectiveProductionStrategySnapshot(current);
   assert.deepEqual(current.capabilityInventory.counts, {
-    actionCount: 54,
-    implementedCount: 36,
+    actionCount: 66,
+    implementedCount: 48,
     legacyOnlyCount: 16,
     platformCanaryCount: 2
   });
   assert.deepEqual(snapshot.counts, {
-    actionCount: 54,
+    actionCount: 66,
     productionEnabledCount: 0,
-    legacyEffectiveCount: 54
+    legacyEffectiveCount: 66
   });
 
   const acquiring = actionByKey(current.capabilityInventory, 'acquiring:run-new-eligible');
@@ -107,14 +107,14 @@ test('Capability Inventory 与 Effective Production Strategy 分离，全部 cap
   const validation = validateEffectiveProductionStrategySnapshot(snapshot, current);
   assert.deepEqual(validation, {
     valid: true,
-    actionCount: 54,
+    actionCount: 66,
     productionEnabledCount: 0,
-    legacyEffectiveCount: 54
+    legacyEffectiveCount: 66
   });
   assert.deepEqual(validateCapabilityInventory(current.capabilityInventory, current), {
     valid: true,
-    actionCount: 54,
-    implementedCount: 36,
+    actionCount: 66,
+    implementedCount: 48,
     legacyOnlyCount: 16,
     platformCanaryCount: 2
   });

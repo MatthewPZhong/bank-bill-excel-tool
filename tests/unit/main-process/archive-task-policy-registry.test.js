@@ -24,6 +24,13 @@ const {
 
 const MAIN_PATH = path.join(__dirname, '..', '..', '..', 'src', 'main.js');
 const PRELOAD_PATH = path.join(__dirname, '..', '..', '..', 'src', 'preload.js');
+const { registerBizOpV327Handlers } = require('../../../src/main-process/biz-op-v327/ipc');
+const V327_INTERNAL_TASKS = new Set(['bizOpReconV327:maintenance:upgrade', 'bizOpReconV327:maintenance:reclaim']);
+function v327IpcInventory() {
+  const channels = [];
+  registerBizOpV327Handlers({ ipcMain: { handle(channel) { channels.push(channel); } }, getModule: () => null });
+  return channels;
+}
 const CONTROLLED_HELPERS = new Set([
   'trackedIpcHandle',
   'businessIpcHandle',
@@ -95,10 +102,10 @@ function literalInvocations(filePath, objectName, methodName) {
   return channels.sort();
 }
 
-test('main literal IPC 与 policy/support 精确相等', () => {
+test('main 与独立 V327 注册器的 IPC 加内部任务，与 policy/support 精确相等', () => {
   const inventory = mainIpcInventory();
   const registry = createTaskPolicyRegistry();
-  const actual = inventory.map((item) => item.channel).sort();
+  const actual = [...inventory.map((item) => item.channel), ...v327IpcInventory(), ...V327_INTERNAL_TASKS].sort();
   const expected = [
     ...registry.channels(),
     ...SUPPORT_ACTION_POLICIES.map((policy) => policy.channel)
@@ -106,18 +113,20 @@ test('main literal IPC 与 policy/support 精确相等', () => {
   assert.equal(new Set(actual).size, actual.length, 'main 不应重复注册 literal IPC');
   assert.equal(new Set(expected).size, expected.length, 'policy/support 不应重复登记');
   assert.deepEqual(expected, actual);
-  assert.equal(actual.length, 242);
-  assert.equal(registry.channels('reserve').length, 63);
-  assert.equal(registry.channels('no-file').length, 59);
-  assert.equal(registry.channels('exclude').length, 118);
+  assert.equal(actual.length, 264);
+  assert.equal(v327IpcInventory().length, 20);
+  assert.equal(registry.channels('reserve').length, 71);
+  assert.equal(registry.channels('no-file').length, 63);
+  assert.equal(registry.channels('exclude').length, 128);
   assert.equal(SUPPORT_ACTION_POLICIES.length, 2);
 });
 
-test('preload 暴露集合与 main literal inventory 精确相等', () => {
+test('preload 与 main 及独立 V327 注册器精确相等，新增 20 个业务和只读入口完整接通', () => {
   assert.deepEqual(
     [...new Set(literalInvocations(PRELOAD_PATH, 'ipcRenderer', 'invoke'))].sort(),
-    [...new Set(mainIpcInventory().map((item) => item.channel))].sort()
+    [...new Set([...mainIpcInventory().map((item) => item.channel), ...v327IpcInventory()])].sort()
   );
+  assert.deepEqual(literalInvocations(PRELOAD_PATH, 'ipcRenderer', 'invoke').filter((channel) => channel.startsWith('bizOpReconV327:')), v327IpcInventory().sort());
 });
 
 test('非 literal direct ipcMain.handle 只存在于已知受控 helper 定义', () => {
@@ -217,23 +226,23 @@ test('exclude 只允许有限原因，所有 policy 都是 literal 且无 wildca
   }
 });
 
-test('63 file 与 59 no-file mutation 逐项显式分类且精确闭合', () => {
+test('71 file 与 63 no-file mutation 逐项显式分类且精确闭合', () => {
   const registry = createTaskPolicyRegistry();
   const fileChannels = new Set(FILE_ACTION_CHANNELS);
   const noFileChannels = new Set(NO_FILE_ACTION_CHANNELS);
   const excludeInventory = Object.values(EXCLUDED_CHANNELS_BY_REASON).flat();
   const excludeChannels = new Set(excludeInventory);
-  assert.equal(fileChannels.size, 63);
-  assert.equal(noFileChannels.size, 59);
-  assert.equal(excludeInventory.length, 118);
-  assert.equal(excludeChannels.size, 118);
+  assert.equal(fileChannels.size, 71);
+  assert.equal(noFileChannels.size, 63);
+  assert.equal(excludeInventory.length, 128);
+  assert.equal(excludeChannels.size, 128);
   assert.deepEqual([...fileChannels].filter((channel) => noFileChannels.has(channel)), []);
   assert.deepEqual([...fileChannels].filter((channel) => excludeChannels.has(channel)), []);
   assert.deepEqual([...noFileChannels].filter((channel) => excludeChannels.has(channel)), []);
   assert.deepEqual(new Set(registry.channels('reserve')), fileChannels);
   assert.deepEqual(new Set(registry.channels('no-file')), noFileChannels);
-  assert.equal(registry.channels('exclude').length, 118);
-  assert.equal(registry.list().length, 63 + 59 + 118);
+  assert.equal(registry.channels('exclude').length, 128);
+  assert.equal(registry.list().length, 71 + 63 + 128);
 });
 
 test('dialog selection 显式区分 file/directory，正常 file policy 不再消费 selection 路径', () => {
@@ -561,7 +570,7 @@ test('无文件运行/配置使用 Task Run 但不占批次号，银行对账 ex
       .filter((policy) => policy.batchPolicy === 'no-file')
       .map((policy) => policy.channel)
       .length,
-    59
+    63
   );
   const first = createBankStatementRunFlowIdentity(() => 'ephemeral-run-1');
   const rerun = createBankStatementRunFlowIdentity(() => 'ephemeral-run-2');

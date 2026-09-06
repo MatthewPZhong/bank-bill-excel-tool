@@ -6,19 +6,32 @@ const { types: { isProxy } } = require('node:util');
 const ACTION_TASK_BINDING_CONTRACT = Object.freeze({
   version: 1,
   canonicalization: 'RFC8785-JCS',
-  sha256: '5c9ee53437d487a94ddb0f0d236dec7b07d4545452c9ebe3c6e98593de209ff2',
-  actionCount: 54,
-  taskPolicyInventoryCount: 122,
+  sha256: 'fc343385b2c99a27d5f26fce5789da405f0fdea523a9541bb7a16dd100b37fca',
+  actionCount: 66,
+  taskPolicyInventoryCount: 134,
   taskPolicyInventoryCanonicalization: 'RFC8785-JCS',
-  taskPolicyInventorySha256: '9538102480f1a714f3839547f294fbe6fd1c19384734addd89dc0ca6e1dbb368',
-  pairCount: 61,
-  boundTaskKeyCount: 54,
+  taskPolicyInventorySha256: '6912c045c82d260fbe554732e886f4da9fafe01e4f3e64f8dc3b0c870055a773',
+  pairCount: 73,
+  boundTaskKeyCount: 66,
   unboundTaskPolicyCount: 68
 });
 
 // 模块内私有 literal 是 action → legacy TaskPolicy 的唯一 authority。
 // caller 不能注入、替换或取得其中任何内部数组。
 const ACTION_TASK_BINDINGS = Object.freeze({
+  'biz-op-v327:import-candidate': Object.freeze(['bizOpReconV327:import']),
+  'biz-op-v327:run-candidate': Object.freeze(['bizOpReconV327:run']),
+  'biz-op-v327:delete-plan': Object.freeze(['bizOpReconV327:delete']),
+  'biz-op-v327:upgrade-preflight': Object.freeze(['bizOpReconV327:maintenance:upgrade']),
+  'biz-op-v327:reclaim': Object.freeze(['bizOpReconV327:maintenance:reclaim']),
+  'biz-op-v327:export-op-raw': Object.freeze(['bizOpReconV327:export:op-raw']),
+  'biz-op-v327:export-flow-raw': Object.freeze(['bizOpReconV327:export:flow-raw']),
+  'biz-op-v327:export-op-check': Object.freeze(['bizOpReconV327:export:op-check']),
+  'biz-op-v327:export-flow-check': Object.freeze(['bizOpReconV327:export:flow-check']),
+  'biz-op-v327:export-result-full': Object.freeze(['bizOpReconV327:export:result-full']),
+  'biz-op-v327:export-result-diff': Object.freeze(['bizOpReconV327:export:result-diff']),
+  'biz-op-v327:export-errors': Object.freeze(['bizOpReconV327:export:errors']),
+
   'acquiring:copy-existing-diff': Object.freeze(['acquiringBillCurrency:export']),
   'acquiring:export-diff-workbook': Object.freeze([]),
   'acquiring:import': Object.freeze(['acquiringBillCurrency:importBill', 'acquiringBillCurrency:importFlow']),

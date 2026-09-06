@@ -1,0 +1,100 @@
+{
+  "actionKey": "biz-op-v327:import-candidate",
+  "moduleId": "biz-op-v327",
+  "description": "业务 OP v3.2.7 分期实现，生产入口未启用",
+  "disposition": "managed",
+  "mode": "thread-single",
+  "adapterKind": "native",
+  "adapterKey": null,
+  "entryKey": "executor.biz-op-v327:import-candidate",
+  "lifetime": "job",
+  "context": {
+    "kind": "operation",
+    "validatorKey": "exact-5"
+  },
+  "resources": {
+    "profile": "resource.biz-op-v327:import-candidate",
+    "base": {
+      "cpuSlots": 0,
+      "workerThreadSlots": 0,
+      "utilityProcessSlots": 0,
+      "ioHeavySlots": 0,
+      "memoryBytes": 0
+    },
+    "phase": {
+      "cpuSlots": 1,
+      "workerThreadSlots": 1,
+      "utilityProcessSlots": 0,
+      "ioHeavySlots": 1,
+      "memoryBytes": 1073741824
+    },
+    "compound": null,
+    "lowMemoryBehavior": "queue",
+    "admissionPriority": "normal"
+  },
+  "cancellation": {
+    "capability": "user-cooperative",
+    "safePoints": [
+      "between-rows",
+      "between-candidate-transactions",
+      "before-module-commit"
+    ],
+    "cooperativeTimeoutMs": 5000,
+    "terminateTimeoutMs": 5000,
+    "protectedResult": "protected/not-cancellable"
+  },
+  "failure": {
+    "unitBusinessError": "fail-job",
+    "unitTransportCrash": "fail-job",
+    "workerExit": "module-inspect",
+    "automaticRetry": false
+  },
+  "commit": {
+    "kind": "none",
+    "criticalIntent": false,
+    "receiptKind": null,
+    "inspectorKey": null,
+    "conflictScopeResolverKey": null,
+    "settlementKey": null
+  },
+  "result": {
+    "kind": "spool-manifest",
+    "maxBytes": 65536,
+    "maxErrorItems": 0,
+    "validatorKey": "result-validator.biz-op-v327:import-candidate"
+  },
+  "artifacts": {
+    "kind": "none",
+    "filePlanRequired": false,
+    "technicalValidatorKey": null,
+    "businessValidatorKey": null,
+    "publisherKey": null,
+    "maxArtifacts": 0
+  },
+  "service": null,
+  "metrics": {
+    "phases": [
+      "queue",
+      "execute",
+      "settle"
+    ],
+    "privacyProfile": "finance-safe-v1",
+    "progressRateLimitPerSecond": 10
+  },
+  "featureFlag": "feature.biz-op-v327:import-candidate",
+  "legacyStrategyKey": null,
+  "blocker": null,
+  "production": {
+    "enabled": false,
+    "effectiveMode": "legacy",
+    "effectiveWorkerCount": 0,
+    "recoveryStatus": "probe",
+    "evidenceStatus": "none",
+    "downgradeReason": "等待 v3.2.7 分期验收与显式启用",
+    "benchmarkEvidenceId": null
+  },
+  "protocolLimits": {
+    "commandMaxBytes": 262144,
+    "eventMaxBytes": 262144
+  }
+}

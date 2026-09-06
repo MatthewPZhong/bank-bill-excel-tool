@@ -1,0 +1,1206 @@
+{
+  "formatVersion": 1,
+  "status": "E01—E03 已获用户明确批准；E5 合同合成样例，测试运行结果单独记录",
+  "columns": [
+    "业务方",
+    "主体",
+    "客户编号",
+    "账户号",
+    "账户类型",
+    "币种",
+    "起始日期",
+    "起始期末余额",
+    "终止日期",
+    "终止期末余额",
+    "流水入账合计",
+    "流水出账合计",
+    "合计流水发生额",
+    "终止期末＋合计流水",
+    "核对差额",
+    "账户之于起始/终止日期",
+    "同账户号多个OP",
+    "核对结论",
+    "异常说明"
+  ],
+  "nullMeaning": "空单元格，不等于0或字符串null",
+  "decimalEncoding": "金额使用精确十进制字符串；实际Excel单元格类型按获批E02",
+  "completenessNote": "完整集成数据需保证(S,E]逐日FLOW均存在；单账户无流水是合法情况，不能误认为整日缺流水。OP测试对象是投影域输入，未提供原始23列双重校验文件。",
+  "cases": [
+    {
+      "caseId": "C01",
+      "title": "正常反推相等",
+      "scope": "单业务键计算合同；不是完整XLSX输入批次",
+      "displayContractStatus": "E03 用户已确认",
+      "requiresNarrowDecision": false,
+      "businessKey": [
+        "bu-a",
+        "000123",
+        "USD"
+      ],
+      "startDate": "2026-08-08",
+      "endDate": "2026-08-10",
+      "startOpRows": [
+        {
+          "balance": "1000",
+          "entity": "主体A",
+          "customer": "C001",
+          "accountType": "客资"
+        }
+      ],
+      "endOpRows": [
+        {
+          "balance": "1100",
+          "entity": "主体A",
+          "customer": "C001",
+          "accountType": "客资"
+        }
+      ],
+      "flowRows": [
+        {
+          "date": "2026-08-09",
+          "direction": "入",
+          "amount": "200"
+        },
+        {
+          "date": "2026-08-10",
+          "direction": "出",
+          "amount": "100"
+        }
+      ],
+      "expected19Values": [
+        "BU-A",
+        "主体A",
+        "C001",
+        "000123",
+        "客资",
+        "USD",
+        "2026-08-08",
+        "1000",
+        "2026-08-10",
+        "1100",
+        "200",
+        "100",
+        "-100",
+        "1000",
+        "0",
+        null,
+        "否",
+        "金额相等",
+        null
+      ],
+      "expectedReasonCodes": [],
+      "expectedInDifference": false,
+      "descriptionSourceRole": "END",
+      "expectedAmountStatus": "金额相等"
+    },
+    {
+      "caseId": "C02",
+      "title": "终止余额高10",
+      "scope": "单业务键计算合同；不是完整XLSX输入批次",
+      "displayContractStatus": "E03 用户已确认",
+      "requiresNarrowDecision": false,
+      "businessKey": [
+        "bu-a",
+        "000123",
+        "USD"
+      ],
+      "startDate": "2026-08-08",
+      "endDate": "2026-08-10",
+      "startOpRows": [
+        {
+          "balance": "1000",
+          "entity": "主体A",
+          "customer": "C001",
+          "accountType": "客资"
+        }
+      ],
+      "endOpRows": [
+        {
+          "balance": "1110",
+          "entity": "主体A",
+          "customer": "C001",
+          "accountType": "客资"
+        }
+      ],
+      "flowRows": [
+        {
+          "date": "2026-08-09",
+          "direction": "入",
+          "amount": "200"
+        },
+        {
+          "date": "2026-08-10",
+          "direction": "出",
+          "amount": "100"
+        }
+      ],
+      "expected19Values": [
+        "BU-A",
+        "主体A",
+        "C001",
+        "000123",
+        "客资",
+        "USD",
+        "2026-08-08",
+        "1000",
+        "2026-08-10",
+        "1110",
+        "200",
+        "100",
+        "-100",
+        "1010",
+        "-10",
+        null,
+        "否",
+        "金额不平",
+        "金额不平；详见核对说明:C02"
+      ],
+      "expectedReasonCodes": [
+        "AMOUNT_MISMATCH"
+      ],
+      "expectedInDifference": true,
+      "descriptionSourceRole": "END",
+      "expectedAmountStatus": "金额不平"
+    },
+    {
+      "caseId": "C03",
+      "title": "缺起始但可算反推值",
+      "scope": "单业务键计算合同；不是完整XLSX输入批次",
+      "displayContractStatus": "E03 用户已确认",
+      "requiresNarrowDecision": false,
+      "businessKey": [
+        "bu-a",
+        "000123",
+        "USD"
+      ],
+      "startDate": "2026-08-08",
+      "endDate": "2026-08-10",
+      "startOpRows": [],
+      "endOpRows": [
+        {
+          "balance": "300",
+          "entity": "主体A",
+          "customer": "C001",
+          "accountType": "客资"
+        }
+      ],
+      "flowRows": [
+        {
+          "date": "2026-08-09",
+          "direction": "入",
+          "amount": "100"
+        }
+      ],
+      "expected19Values": [
+        "BU-A",
+        "主体A",
+        "C001",
+        "000123",
+        "客资",
+        "USD",
+        "2026-08-08",
+        null,
+        "2026-08-10",
+        "300",
+        "100",
+        "0",
+        "-100",
+        "200",
+        null,
+        "2026-08-08无，2026-08-10有",
+        "否",
+        "无法计算；缺起始OP",
+        "缺起始OP；详见核对说明:C03"
+      ],
+      "expectedReasonCodes": [
+        "MISSING_START_OP"
+      ],
+      "expectedInDifference": true,
+      "descriptionSourceRole": "END",
+      "expectedAmountStatus": "无法计算"
+    },
+    {
+      "caseId": "C04",
+      "title": "缺终止",
+      "scope": "单业务键计算合同；不是完整XLSX输入批次",
+      "displayContractStatus": "E03 用户已确认",
+      "requiresNarrowDecision": false,
+      "businessKey": [
+        "bu-a",
+        "000123",
+        "USD"
+      ],
+      "startDate": "2026-08-08",
+      "endDate": "2026-08-10",
+      "startOpRows": [
+        {
+          "balance": "100",
+          "entity": "主体A",
+          "customer": "C001",
+          "accountType": "客资"
+        }
+      ],
+      "endOpRows": [],
+      "flowRows": [
+        {
+          "date": "2026-08-09",
+          "direction": "出",
+          "amount": "50"
+        }
+      ],
+      "expected19Values": [
+        "BU-A",
+        "主体A",
+        "C001",
+        "000123",
+        "客资",
+        "USD",
+        "2026-08-08",
+        "100",
+        "2026-08-10",
+        null,
+        "0",
+        "50",
+        "50",
+        null,
+        null,
+        "2026-08-08有，2026-08-10无",
+        "否",
+        "无法计算；缺终止OP",
+        "缺终止OP；详见核对说明:C04"
+      ],
+      "expectedReasonCodes": [
+        "MISSING_END_OP"
+      ],
+      "expectedInDifference": true,
+      "descriptionSourceRole": "START",
+      "expectedAmountStatus": "无法计算"
+    },
+    {
+      "caseId": "C05",
+      "title": "两端缺OP仅流水",
+      "scope": "单业务键计算合同；不是完整XLSX输入批次",
+      "displayContractStatus": "E03 用户已确认",
+      "requiresNarrowDecision": false,
+      "businessKey": [
+        "bu-a",
+        "000123",
+        "USD"
+      ],
+      "startDate": "2026-08-08",
+      "endDate": "2026-08-10",
+      "startOpRows": [],
+      "endOpRows": [],
+      "flowRows": [
+        {
+          "date": "2026-08-09",
+          "direction": "入",
+          "amount": "80"
+        },
+        {
+          "date": "2026-08-09",
+          "direction": "出",
+          "amount": "20"
+        }
+      ],
+      "expected19Values": [
+        "BU-A",
+        null,
+        null,
+        "000123",
+        null,
+        "USD",
+        "2026-08-08",
+        null,
+        "2026-08-10",
+        null,
+        "80",
+        "20",
+        "-60",
+        null,
+        null,
+        null,
+        "否",
+        "无法计算；两端缺OP",
+        "两端缺OP；详见核对说明:C05"
+      ],
+      "expectedReasonCodes": [
+        "MISSING_BOTH_OP"
+      ],
+      "expectedInDifference": true,
+      "descriptionSourceRole": "NONE",
+      "expectedAmountStatus": "无法计算"
+    },
+    {
+      "caseId": "C06",
+      "title": "起始重复同余额",
+      "scope": "单业务键计算合同；不是完整XLSX输入批次",
+      "displayContractStatus": "E03 用户已确认",
+      "requiresNarrowDecision": false,
+      "businessKey": [
+        "bu-a",
+        "000123",
+        "USD"
+      ],
+      "startDate": "2026-08-08",
+      "endDate": "2026-08-10",
+      "startOpRows": [
+        {
+          "balance": "1000",
+          "entity": "主体A",
+          "customer": "C001",
+          "accountType": "客资"
+        },
+        {
+          "balance": "1000.00",
+          "entity": "主体A",
+          "customer": "C001",
+          "accountType": "客资"
+        }
+      ],
+      "endOpRows": [
+        {
+          "balance": "1100",
+          "entity": "主体A",
+          "customer": "C001",
+          "accountType": "客资"
+        }
+      ],
+      "flowRows": [
+        {
+          "date": "2026-08-09",
+          "direction": "入",
+          "amount": "200"
+        },
+        {
+          "date": "2026-08-10",
+          "direction": "出",
+          "amount": "100"
+        }
+      ],
+      "expected19Values": [
+        "BU-A",
+        "主体A",
+        "C001",
+        "000123",
+        "客资",
+        "USD",
+        "2026-08-08",
+        "1000",
+        "2026-08-10",
+        "1100",
+        "200",
+        "100",
+        "-100",
+        "1000",
+        "0",
+        null,
+        "是",
+        "金额相等；多个OP",
+        "多个OP；详见核对说明:C06"
+      ],
+      "expectedReasonCodes": [
+        "MULTIPLE_OP"
+      ],
+      "expectedInDifference": true,
+      "descriptionSourceRole": "END",
+      "expectedAmountStatus": "金额相等"
+    },
+    {
+      "caseId": "C07",
+      "title": "终止余额冲突",
+      "scope": "单业务键计算合同；不是完整XLSX输入批次",
+      "displayContractStatus": "E03 用户已确认",
+      "requiresNarrowDecision": false,
+      "businessKey": [
+        "bu-a",
+        "000123",
+        "USD"
+      ],
+      "startDate": "2026-08-08",
+      "endDate": "2026-08-10",
+      "startOpRows": [
+        {
+          "balance": "1000",
+          "entity": "主体A",
+          "customer": "C001",
+          "accountType": "客资"
+        }
+      ],
+      "endOpRows": [
+        {
+          "balance": "1100",
+          "entity": "主体A",
+          "customer": "C001",
+          "accountType": "客资"
+        },
+        {
+          "balance": "1150",
+          "entity": "主体A",
+          "customer": "C001",
+          "accountType": "客资"
+        }
+      ],
+      "flowRows": [
+        {
+          "date": "2026-08-09",
+          "direction": "入",
+          "amount": "200"
+        },
+        {
+          "date": "2026-08-10",
+          "direction": "出",
+          "amount": "100"
+        }
+      ],
+      "expected19Values": [
+        "BU-A",
+        "主体A",
+        "C001",
+        "000123",
+        "客资",
+        "USD",
+        "2026-08-08",
+        "1000",
+        "2026-08-10",
+        null,
+        "200",
+        "100",
+        "-100",
+        null,
+        null,
+        null,
+        "是",
+        "无法计算；终止余额冲突；多个OP",
+        "终止余额冲突；多个OP；详见核对说明:C07"
+      ],
+      "expectedReasonCodes": [
+        "END_BALANCE_CONFLICT",
+        "MULTIPLE_OP"
+      ],
+      "expectedInDifference": true,
+      "descriptionSourceRole": "END",
+      "expectedAmountStatus": "无法计算"
+    },
+    {
+      "caseId": "C08",
+      "title": "起始余额冲突但终止确定",
+      "scope": "单业务键计算合同；不是完整XLSX输入批次",
+      "displayContractStatus": "E03 用户已确认",
+      "requiresNarrowDecision": false,
+      "businessKey": [
+        "bu-a",
+        "000123",
+        "USD"
+      ],
+      "startDate": "2026-08-08",
+      "endDate": "2026-08-10",
+      "startOpRows": [
+        {
+          "balance": "1000",
+          "entity": "主体A",
+          "customer": "C001",
+          "accountType": "客资"
+        },
+        {
+          "balance": "1020",
+          "entity": "主体A",
+          "customer": "C001",
+          "accountType": "客资"
+        }
+      ],
+      "endOpRows": [
+        {
+          "balance": "1100",
+          "entity": "主体A",
+          "customer": "C001",
+          "accountType": "客资"
+        }
+      ],
+      "flowRows": [
+        {
+          "date": "2026-08-09",
+          "direction": "入",
+          "amount": "200"
+        },
+        {
+          "date": "2026-08-10",
+          "direction": "出",
+          "amount": "100"
+        }
+      ],
+      "expected19Values": [
+        "BU-A",
+        "主体A",
+        "C001",
+        "000123",
+        "客资",
+        "USD",
+        "2026-08-08",
+        null,
+        "2026-08-10",
+        "1100",
+        "200",
+        "100",
+        "-100",
+        "1000",
+        null,
+        null,
+        "是",
+        "无法计算；起始余额冲突；多个OP",
+        "起始余额冲突；多个OP；详见核对说明:C08"
+      ],
+      "expectedReasonCodes": [
+        "START_BALANCE_CONFLICT",
+        "MULTIPLE_OP"
+      ],
+      "expectedInDifference": true,
+      "descriptionSourceRole": "END",
+      "expectedAmountStatus": "无法计算"
+    },
+    {
+      "caseId": "C09",
+      "title": "描述变化金额相等",
+      "scope": "单业务键计算合同；不是完整XLSX输入批次",
+      "displayContractStatus": "E03 用户已确认",
+      "requiresNarrowDecision": false,
+      "businessKey": [
+        "bu-a",
+        "000123",
+        "USD"
+      ],
+      "startDate": "2026-08-08",
+      "endDate": "2026-08-10",
+      "startOpRows": [
+        {
+          "balance": "1000",
+          "entity": "主体A",
+          "customer": "C001",
+          "accountType": "客资"
+        }
+      ],
+      "endOpRows": [
+        {
+          "balance": "1100",
+          "entity": "主体B",
+          "customer": "C001",
+          "accountType": "客资"
+        }
+      ],
+      "flowRows": [
+        {
+          "date": "2026-08-09",
+          "direction": "入",
+          "amount": "200"
+        },
+        {
+          "date": "2026-08-10",
+          "direction": "出",
+          "amount": "100"
+        }
+      ],
+      "expected19Values": [
+        "BU-A",
+        "主体B",
+        "C001",
+        "000123",
+        "客资",
+        "USD",
+        "2026-08-08",
+        "1000",
+        "2026-08-10",
+        "1100",
+        "200",
+        "100",
+        "-100",
+        "1000",
+        "0",
+        null,
+        "否",
+        "金额相等；描述字段变化",
+        "描述字段变化；详见核对说明:C09"
+      ],
+      "expectedReasonCodes": [
+        "DESCRIPTION_CHANGED"
+      ],
+      "expectedInDifference": true,
+      "descriptionSourceRole": "END",
+      "expectedAmountStatus": "金额相等"
+    },
+    {
+      "caseId": "C10",
+      "title": "终止同端描述冲突",
+      "scope": "单业务键计算合同；不是完整XLSX输入批次",
+      "displayContractStatus": "E03 用户已确认",
+      "requiresNarrowDecision": false,
+      "businessKey": [
+        "bu-a",
+        "000123",
+        "USD"
+      ],
+      "startDate": "2026-08-08",
+      "endDate": "2026-08-10",
+      "startOpRows": [
+        {
+          "balance": "1000",
+          "entity": "主体A",
+          "customer": "C001",
+          "accountType": "客资"
+        }
+      ],
+      "endOpRows": [
+        {
+          "balance": "1100",
+          "entity": "主体B",
+          "customer": "C001",
+          "accountType": "客资"
+        },
+        {
+          "balance": "1100",
+          "entity": "主体C",
+          "customer": "C001",
+          "accountType": "客资"
+        }
+      ],
+      "flowRows": [
+        {
+          "date": "2026-08-09",
+          "direction": "入",
+          "amount": "200"
+        },
+        {
+          "date": "2026-08-10",
+          "direction": "出",
+          "amount": "100"
+        }
+      ],
+      "expected19Values": [
+        "BU-A",
+        null,
+        "C001",
+        "000123",
+        "客资",
+        "USD",
+        "2026-08-08",
+        "1000",
+        "2026-08-10",
+        "1100",
+        "200",
+        "100",
+        "-100",
+        "1000",
+        "0",
+        null,
+        "是",
+        "金额相等；多个OP；描述字段变化；终止描述冲突",
+        "多个OP；描述字段变化；终止描述冲突；详见核对说明:C10"
+      ],
+      "expectedReasonCodes": [
+        "MULTIPLE_OP",
+        "DESCRIPTION_CHANGED",
+        "END_DESCRIPTION_CONFLICT"
+      ],
+      "expectedInDifference": true,
+      "descriptionSourceRole": "END",
+      "expectedAmountStatus": "金额相等"
+    },
+    {
+      "caseId": "C11",
+      "title": "多OP描述变化金额不平",
+      "scope": "单业务键计算合同；不是完整XLSX输入批次",
+      "displayContractStatus": "E03 用户已确认",
+      "requiresNarrowDecision": false,
+      "businessKey": [
+        "bu-a",
+        "000123",
+        "USD"
+      ],
+      "startDate": "2026-08-08",
+      "endDate": "2026-08-10",
+      "startOpRows": [
+        {
+          "balance": "1000",
+          "entity": "主体A",
+          "customer": "C001",
+          "accountType": "客资"
+        },
+        {
+          "balance": "1000",
+          "entity": "主体A",
+          "customer": "C001",
+          "accountType": "客资"
+        }
+      ],
+      "endOpRows": [
+        {
+          "balance": "1110",
+          "entity": "主体B",
+          "customer": "C001",
+          "accountType": "客资"
+        }
+      ],
+      "flowRows": [
+        {
+          "date": "2026-08-09",
+          "direction": "入",
+          "amount": "200"
+        },
+        {
+          "date": "2026-08-10",
+          "direction": "出",
+          "amount": "100"
+        }
+      ],
+      "expected19Values": [
+        "BU-A",
+        "主体B",
+        "C001",
+        "000123",
+        "客资",
+        "USD",
+        "2026-08-08",
+        "1000",
+        "2026-08-10",
+        "1110",
+        "200",
+        "100",
+        "-100",
+        "1010",
+        "-10",
+        null,
+        "是",
+        "金额不平；多个OP；描述字段变化",
+        "金额不平；多个OP；描述字段变化；详见核对说明:C11"
+      ],
+      "expectedReasonCodes": [
+        "AMOUNT_MISMATCH",
+        "MULTIPLE_OP",
+        "DESCRIPTION_CHANGED"
+      ],
+      "expectedInDifference": true,
+      "descriptionSourceRole": "END",
+      "expectedAmountStatus": "金额不平"
+    },
+    {
+      "caseId": "C12",
+      "title": "负数入账冲正",
+      "scope": "单业务键计算合同；不是完整XLSX输入批次",
+      "displayContractStatus": "E03 用户已确认",
+      "requiresNarrowDecision": false,
+      "businessKey": [
+        "bu-a",
+        "000123",
+        "USD"
+      ],
+      "startDate": "2026-08-08",
+      "endDate": "2026-08-10",
+      "startOpRows": [
+        {
+          "balance": "1000",
+          "entity": "主体A",
+          "customer": "C001",
+          "accountType": "客资"
+        }
+      ],
+      "endOpRows": [
+        {
+          "balance": "980",
+          "entity": "主体A",
+          "customer": "C001",
+          "accountType": "客资"
+        }
+      ],
+      "flowRows": [
+        {
+          "date": "2026-08-09",
+          "direction": "入",
+          "amount": "-20"
+        }
+      ],
+      "expected19Values": [
+        "BU-A",
+        "主体A",
+        "C001",
+        "000123",
+        "客资",
+        "USD",
+        "2026-08-08",
+        "1000",
+        "2026-08-10",
+        "980",
+        "-20",
+        "0",
+        "20",
+        "1000",
+        "0",
+        null,
+        "否",
+        "金额相等",
+        null
+      ],
+      "expectedReasonCodes": [],
+      "expectedInDifference": false,
+      "descriptionSourceRole": "END",
+      "expectedAmountStatus": "金额相等"
+    },
+    {
+      "caseId": "C13",
+      "title": "本账户区间无流水",
+      "scope": "单业务键计算合同；不是完整XLSX输入批次",
+      "displayContractStatus": "E03 用户已确认",
+      "requiresNarrowDecision": false,
+      "businessKey": [
+        "bu-a",
+        "000123",
+        "USD"
+      ],
+      "startDate": "2026-08-08",
+      "endDate": "2026-08-10",
+      "startOpRows": [
+        {
+          "balance": "1000",
+          "entity": "主体A",
+          "customer": "C001",
+          "accountType": "客资"
+        }
+      ],
+      "endOpRows": [
+        {
+          "balance": "1000",
+          "entity": "主体A",
+          "customer": "C001",
+          "accountType": "客资"
+        }
+      ],
+      "flowRows": [],
+      "expected19Values": [
+        "BU-A",
+        "主体A",
+        "C001",
+        "000123",
+        "客资",
+        "USD",
+        "2026-08-08",
+        "1000",
+        "2026-08-10",
+        "1000",
+        "0",
+        "0",
+        "0",
+        "1000",
+        "0",
+        null,
+        "否",
+        "金额相等",
+        null
+      ],
+      "expectedReasonCodes": [],
+      "expectedInDifference": false,
+      "descriptionSourceRole": "END",
+      "expectedAmountStatus": "金额相等"
+    },
+    {
+      "caseId": "C14",
+      "title": "差额恰好负0.01仍相等",
+      "scope": "单业务键计算合同；不是完整XLSX输入批次",
+      "displayContractStatus": "E03 用户已确认",
+      "requiresNarrowDecision": false,
+      "businessKey": [
+        "bu-a",
+        "000123",
+        "USD"
+      ],
+      "startDate": "2026-08-08",
+      "endDate": "2026-08-10",
+      "startOpRows": [
+        {
+          "balance": "1000",
+          "entity": "主体A",
+          "customer": "C001",
+          "accountType": "客资"
+        }
+      ],
+      "endOpRows": [
+        {
+          "balance": "1100.01",
+          "entity": "主体A",
+          "customer": "C001",
+          "accountType": "客资"
+        }
+      ],
+      "flowRows": [
+        {
+          "date": "2026-08-09",
+          "direction": "入",
+          "amount": "200"
+        },
+        {
+          "date": "2026-08-10",
+          "direction": "出",
+          "amount": "100"
+        }
+      ],
+      "expected19Values": [
+        "BU-A",
+        "主体A",
+        "C001",
+        "000123",
+        "客资",
+        "USD",
+        "2026-08-08",
+        "1000",
+        "2026-08-10",
+        "1100.01",
+        "200",
+        "100",
+        "-100",
+        "1000.01",
+        "-0.01",
+        null,
+        "否",
+        "金额相等",
+        null
+      ],
+      "expectedReasonCodes": [],
+      "expectedInDifference": false,
+      "descriptionSourceRole": "END",
+      "expectedAmountStatus": "金额相等"
+    },
+    {
+      "caseId": "C15",
+      "title": "差额负0.0101不相等",
+      "scope": "单业务键计算合同；不是完整XLSX输入批次",
+      "displayContractStatus": "E03 用户已确认",
+      "requiresNarrowDecision": false,
+      "businessKey": [
+        "bu-a",
+        "000123",
+        "USD"
+      ],
+      "startDate": "2026-08-08",
+      "endDate": "2026-08-10",
+      "startOpRows": [
+        {
+          "balance": "1000",
+          "entity": "主体A",
+          "customer": "C001",
+          "accountType": "客资"
+        }
+      ],
+      "endOpRows": [
+        {
+          "balance": "1100.0101",
+          "entity": "主体A",
+          "customer": "C001",
+          "accountType": "客资"
+        }
+      ],
+      "flowRows": [
+        {
+          "date": "2026-08-09",
+          "direction": "入",
+          "amount": "200"
+        },
+        {
+          "date": "2026-08-10",
+          "direction": "出",
+          "amount": "100"
+        }
+      ],
+      "expected19Values": [
+        "BU-A",
+        "主体A",
+        "C001",
+        "000123",
+        "客资",
+        "USD",
+        "2026-08-08",
+        "1000",
+        "2026-08-10",
+        "1100.0101",
+        "200",
+        "100",
+        "-100",
+        "1000.0101",
+        "-0.0101",
+        null,
+        "否",
+        "金额不平",
+        "金额不平；详见核对说明:C15"
+      ],
+      "expectedReasonCodes": [
+        "AMOUNT_MISMATCH"
+      ],
+      "expectedInDifference": true,
+      "descriptionSourceRole": "END",
+      "expectedAmountStatus": "金额不平"
+    },
+    {
+      "caseId": "C16",
+      "title": "起始日与终止日外的流水不计",
+      "scope": "单业务键计算合同；不是完整XLSX输入批次",
+      "displayContractStatus": "E03 用户已确认",
+      "requiresNarrowDecision": false,
+      "businessKey": [
+        "bu-a",
+        "000123",
+        "USD"
+      ],
+      "startDate": "2026-08-08",
+      "endDate": "2026-08-10",
+      "startOpRows": [
+        {
+          "balance": "1000",
+          "entity": "主体A",
+          "customer": "C001",
+          "accountType": "客资"
+        }
+      ],
+      "endOpRows": [
+        {
+          "balance": "1100",
+          "entity": "主体A",
+          "customer": "C001",
+          "accountType": "客资"
+        }
+      ],
+      "flowRows": [
+        {
+          "date": "2026-08-09",
+          "direction": "入",
+          "amount": "200"
+        },
+        {
+          "date": "2026-08-10",
+          "direction": "出",
+          "amount": "100"
+        },
+        {
+          "date": "2026-08-08",
+          "direction": "入",
+          "amount": "999"
+        },
+        {
+          "date": "2026-08-11",
+          "direction": "出",
+          "amount": "888"
+        }
+      ],
+      "expected19Values": [
+        "BU-A",
+        "主体A",
+        "C001",
+        "000123",
+        "客资",
+        "USD",
+        "2026-08-08",
+        "1000",
+        "2026-08-10",
+        "1100",
+        "200",
+        "100",
+        "-100",
+        "1000",
+        "0",
+        null,
+        "否",
+        "金额相等",
+        null
+      ],
+      "expectedReasonCodes": [],
+      "expectedInDifference": false,
+      "descriptionSourceRole": "END",
+      "expectedAmountStatus": "金额相等"
+    },
+    {
+      "caseId": "C17",
+      "title": "两端余额都冲突",
+      "scope": "单业务键计算合同；不是完整XLSX输入批次",
+      "displayContractStatus": "E03 用户已确认",
+      "requiresNarrowDecision": false,
+      "businessKey": [
+        "bu-a",
+        "000123",
+        "USD"
+      ],
+      "startDate": "2026-08-08",
+      "endDate": "2026-08-10",
+      "startOpRows": [
+        {
+          "balance": "1000",
+          "entity": "主体A",
+          "customer": "C001",
+          "accountType": "客资"
+        },
+        {
+          "balance": "1020",
+          "entity": "主体A",
+          "customer": "C001",
+          "accountType": "客资"
+        }
+      ],
+      "endOpRows": [
+        {
+          "balance": "1100",
+          "entity": "主体A",
+          "customer": "C001",
+          "accountType": "客资"
+        },
+        {
+          "balance": "1150",
+          "entity": "主体A",
+          "customer": "C001",
+          "accountType": "客资"
+        }
+      ],
+      "flowRows": [
+        {
+          "date": "2026-08-09",
+          "direction": "入",
+          "amount": "200"
+        },
+        {
+          "date": "2026-08-10",
+          "direction": "出",
+          "amount": "100"
+        }
+      ],
+      "expected19Values": [
+        "BU-A",
+        "主体A",
+        "C001",
+        "000123",
+        "客资",
+        "USD",
+        "2026-08-08",
+        null,
+        "2026-08-10",
+        null,
+        "200",
+        "100",
+        "-100",
+        null,
+        null,
+        null,
+        "是",
+        "无法计算；起始余额冲突；终止余额冲突；多个OP",
+        "起始余额冲突；终止余额冲突；多个OP；详见核对说明:C17"
+      ],
+      "expectedReasonCodes": [
+        "START_BALANCE_CONFLICT",
+        "END_BALANCE_CONFLICT",
+        "MULTIPLE_OP"
+      ],
+      "expectedInDifference": true,
+      "descriptionSourceRole": "END",
+      "expectedAmountStatus": "无法计算"
+    }
+  ],
+  "additionalIntegrationCases": [
+    "同账户不同币种输出不同键",
+    "同账户同币种不同BU输出不同键",
+    "文本000123与123不合并",
+    "金额相等但仅终止重复也入差异",
+    "重复金额1与1.00数学相同，1与1.01属于余额冲突，不借用核对容差折叠"
+  ]
+}

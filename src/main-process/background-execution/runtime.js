@@ -146,8 +146,10 @@ const {
 const {
   createMatureActionAdapterBindings
 } = require('./mature-action-adapters');
+const { BIZ_OP_V327_POLICIES, validateBizOpCandidateResult, validateBizOpExportResult } = require('../biz-op-v327/policies');
 
 const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
+  ...BIZ_OP_V327_POLICIES,
   ...TOOLBOX_GENERATION_POLICIES,
   ...PRE_FUND_MPT_POLICIES,
   NEW_ACCOUNT_GENERATION_POLICY,
@@ -201,6 +203,7 @@ function mergeShutdownReports(report, ...pairedReports) {
 }
 
 function entryBindingForPolicy(policy, workerRoot, duplicateStartupGate) {
+  if (policy.moduleId === 'biz-op-v327') return path.resolve(__dirname, '..', 'biz-op-v327', 'worker-entry.js');
   if (policy.actionKey === NEW_ACCOUNT_SAVE_AS_ACTION) {
     return runNewAccountArtifactCopyInline;
   }
@@ -379,7 +382,9 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
   const validatorEntries = {};
   for (const policy of BACKGROUND_EXECUTION_POLICIES) {
     let resultValidator;
-    if (policy.actionKey === POSITION_IMPORT_ADAPTER_ACTION) {
+    if (policy.moduleId === 'biz-op-v327') {
+      resultValidator = policy.commit.kind === 'none' ? validateBizOpCandidateResult : validateBizOpExportResult;
+    } else if (policy.actionKey === POSITION_IMPORT_ADAPTER_ACTION) {
       resultValidator = validatePositionImportAdapterResult;
     } else if (PENDING_BIZOP_ADAPTER_ACTION_SET.has(policy.actionKey)) {
       resultValidator = validatePendingBizOpAdapterResult;
@@ -535,9 +540,23 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
     executionTimeoutMs: options.executionTimeoutMs,
     shutdownTimeoutMs: supervisorShutdownTimeoutMs,
     workerDurableCoordinator: options.workerDurableCoordinator,
-    carrierClosureActionKeys: options.carrierClosureActionKeys,
-    beforeCarrierDispatch: options.beforeCarrierDispatch,
-    bindInputForAction({ actionKey, input }) {
+    carrierClosureActionKeys: [...new Set([...(options.carrierClosureActionKeys || []),
+      ...(options.bizOpV327 ? options.bizOpV327.actionKeys : [])])],
+    beforeCarrierDispatch: options.bizOpV327 || options.beforeCarrierDispatch ? function beforeCarrierDispatch(identity) {
+      if (identity.actionKey.startsWith('biz-op-v327:')) {
+        if (!options.bizOpV327) throw Object.assign(new Error('业务 OP 缺少 Main 运行授权'), { code: 'BIZOP_RUNTIME_AUTHORITY_REQUIRED' });
+        return options.bizOpV327.beforeDispatch(identity);
+      }
+      if (!options.beforeCarrierDispatch) {
+        throw Object.assign(new Error('关闭观察缺少该模块自己的 Main 派发绑定'), { code: 'CARRIER_DISPATCH_BINDING_REQUIRED' });
+      }
+      return options.beforeCarrierDispatch(identity);
+    } : undefined,
+    bindInputForAction({ actionKey, operationKey, input }) {
+      if (actionKey.startsWith('biz-op-v327:')) {
+        if (!options.bizOpV327) throw Object.assign(new Error('业务 OP 缺少 Main 输入授权'), { code: 'BIZOP_RUNTIME_AUTHORITY_REQUIRED' });
+        return options.bizOpV327.bindInput({ actionKey, operationKey, input });
+      }
       if ([PENDING_READ_ONLY_ACTIONS.DIFF, PENDING_READ_ONLY_ACTIONS.SUMMARY]
         .includes(actionKey)) {
         if (!options.pendingDatabasePath) {
@@ -877,6 +896,7 @@ function createBackgroundExecutionRuntimeManager(options = {}) {
       : options.duplicateStartupGate;
     return createBackgroundExecutionRuntime({
       ...options,
+      bizOpV327: typeof options.bizOpV327Provider === 'function' ? options.bizOpV327Provider() : options.bizOpV327,
       duplicateStartupGate,
       workerDurableCoordinator: typeof options.workerDurableCoordinatorProvider === 'function'
         ? options.workerDurableCoordinatorProvider()

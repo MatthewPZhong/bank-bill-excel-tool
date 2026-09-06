@@ -1,3 +1,4 @@
+const { legacyMode } = require('./biz-op-legacy-guard');
 const fs = require('node:fs');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
@@ -434,10 +435,12 @@ class AppDatabase {
     this.ensureVccFinancialOpTablesSupport();
     // v2.1.3 T1：业务OP数据核对模块 4 张表（imports / flow_imports / runs / diff_rows）
     // 与 v2.1.2 bank_bu_recon_* 完全独立，调用顺序无依赖
+    if (legacyMode(this.db) === 'DISABLED') {
     this.ensureBizOpReconTablesSupport();
     // v3.0.5 PR-4（Part B Phase 2）：biz_op_recon_runs 加 side_db_rel_path 列（侧库镜像；NULL=历史主库 run）
     //   必须在 ensureBizOpReconTablesSupport 之后（依赖 runs 表已存在）；轻量加列幂等
     this.ensureBizOpReconRunsSideDbPath();
+    }
     // v2.1.6 T4：收单单据币种校验模块 4 张表（flow_imports / bill_imports / runs / diff_rows）
     // 与 v2.1.2/v2.1.3 完全独立，调用顺序无依赖
     this.ensureAcquiringBillCurrencyTablesSupport();

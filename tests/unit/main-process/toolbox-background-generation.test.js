@@ -209,7 +209,17 @@ test('E04-A/B policy 与 Main source selector 保持 production false，真实�
   assert.equal(multiPolicy.resources.compound.childResource.workerThreadSlots, 1);
 
   const mainSource = fs.readFileSync(path.resolve(__dirname, '../../../src/main.js'), 'utf8');
-  assert.equal((mainSource.match(/backgroundExecutionRuntimeManager\.get\(\)/g) || []).length, 14);
+  const bizOpBinding = mainSource.match(/bizOpV327Module = createBizOpV327Module\(\{[\s\S]*?\}\);/)[0];
+  assert.equal((bizOpBinding.match(/backgroundExecutionRuntimeManager\.get\(\)/g) || []).length, 1);
+  const bizOpIpcBinding = mainSource.match(/registerBizOpV327Handlers\(\{[\s\S]*?\}\);/)[0];
+  assert.equal((bizOpIpcBinding.match(/backgroundExecutionRuntimeManager\.get\(\)/g) || []).length, 1);
+  const activationStart = mainSource.indexOf('bizOpV327Module.activation.bindHost({');
+  const activationEnd = mainSource.indexOf('archiveCenterInitializationPromise = archiveCenterService.initialize()', activationStart);
+  assert.ok(activationStart > 0 && activationEnd > activationStart);
+  const activationBinding = mainSource.slice(activationStart, activationEnd);
+  assert.equal((activationBinding.match(/backgroundExecutionRuntimeManager\.get\(\)/g) || []).length, 1);
+  const legacySource = mainSource.replace(bizOpBinding, '').replace(bizOpIpcBinding, '').replace(activationBinding, '');
+  assert.equal((legacySource.match(/backgroundExecutionRuntimeManager\.get\(\)/g) || []).length, 14);
   assert.equal((mainSource.match(/generateValidateAndPublishToolboxArtifact\(\{/g) || []).length, 2);
   assert.equal((mainSource.match(/generateValidateAndPublishMultiOutput\(\{/g) || []).length, 1);
   assert.equal((mainSource.match(/production:\s*true/g) || []).length >= 3, true);
@@ -228,6 +238,18 @@ test('E04-B runtime预算完整计入Scanner phase与一个Writer child，idle/s
   });
   const snapshot = runtime.resourceGovernor.snapshot();
   assert.deepEqual(runtime.policyRegistry.list().map((policy) => policy.actionKey), [
+    'biz-op-v327:import-candidate',
+    'biz-op-v327:run-candidate',
+    'biz-op-v327:delete-plan',
+    'biz-op-v327:upgrade-preflight',
+    'biz-op-v327:reclaim',
+    'biz-op-v327:export-op-raw',
+    'biz-op-v327:export-flow-raw',
+    'biz-op-v327:export-op-check',
+    'biz-op-v327:export-flow-check',
+    'biz-op-v327:export-result-full',
+    'biz-op-v327:export-result-diff',
+    'biz-op-v327:export-errors',
     TOOLBOX_GENERATION_ACTIONS.MERGE,
     TOOLBOX_GENERATION_ACTIONS.SPLIT_SINGLE,
     TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT,

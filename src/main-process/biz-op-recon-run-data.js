@@ -29,6 +29,8 @@
 
 'use strict';
 
+const { assertLegacyDb } = require('../backend/biz-op-legacy-guard');
+
 const fs = require('node:fs');
 const { randomUUID } = require('node:crypto');
 
@@ -1094,6 +1096,7 @@ function ensureSideDbExists(userDataDir, monthKey) {
 
 // 删整月侧库文件 + 主库该月所有 (date,BU) 镜像行。
 function deleteMonthSideDb({ userDataDir, mainDb, monthKey }) {
+  assertLegacyDb(mainDb);
   const r = runDataStore.deleteSideDb(userDataDir, MODULE, monthKey);
   try {
     // 删该月所有 date 的镜像行（data_date LIKE 'YYYY-MM%'）。
@@ -1106,6 +1109,7 @@ function deleteMonthSideDb({ userDataDir, mainDb, monthKey }) {
 
 // 孤儿双向兜底（B.6）：① 有文件无 imports 无镜像（空壳/损坏）→ 删文件；② 有镜像无文件 → 标失效。
 function reconcileOrphans({ userDataDir, mainDb }) {
+  assertLegacyDb(mainDb);
   const stats = { deletedOrphanFiles: [], invalidatedRuns: [] };
 
   let mirrorRows = [];
