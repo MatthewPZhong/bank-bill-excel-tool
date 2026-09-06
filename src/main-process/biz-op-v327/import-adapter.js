@@ -124,7 +124,8 @@ function createImportAdapter(kind) {
         if (compareCanonicalDecimals(d1, '0.01') > 0) errors.push(`发生额不等于入减出，差额 ${d1}`);
         if (compareCanonicalDecimals(d2, '0.01') > 0) errors.push(`期末不等于期初加发生额，差额 ${d2}`);
       }
-      return { kind, dataDate, bu, values: kind === 'OP' ? values.slice(0, 12) : FLOW_PROJECTION.map((index) => values[index]),
+      return { kind, dataDate, bu, originalValues: values,
+        values: kind === 'OP' ? values.slice(0, 12) : FLOW_PROJECTION.map((index) => values[index]),
         key: [bu, values[accountIndex], values[currencyIndex]], sourceRow: row.rowIndex, errors };
     }
   });

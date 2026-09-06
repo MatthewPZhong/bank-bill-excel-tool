@@ -12,9 +12,11 @@ const { createBizOpRecoveryPlan } = require('./recovery-plan');
 const { createBizOpReclaimer } = require('./reclaim');
 const { createBizOpImportCoordinator } = require('./import-main');
 const { createBizOpComputeCoordinator } = require('./compute-main');
+const { createBizOpPublication } = require('./export-publication');
+const { createBizOpExportCoordinator } = require('./export-main');
 const { ACTIONS, fail, hash } = require('./contracts');
 
-function createBizOpV327Module({ db, userDataDir, readRepository, getArchiveService, budgetOptions }) {
+function createBizOpV327Module({ db, userDataDir, readRepository, getArchiveService, getRuntime, budgetOptions }) {
   const catalog = createBizOpCatalog(db, { assertCommitReady(op) {
     admission.assertExclusive();
     protection.refresh(op.task_run_id);
@@ -26,7 +28,10 @@ function createBizOpV327Module({ db, userDataDir, readRepository, getArchiveServ
   const payloadStore = createBizOpPayloadStore({ userDataDir });
   payloadStore.initialize();
   const protection = createBizOpReadProtection({ catalog, payloadStore });
-  const admission = createBizOpAdmission({ canReleaseRead: protection.canRelease });
+  const admission = createBizOpAdmission({ canReleaseRead(id) {
+    return protection.canRelease(id) && (catalog.operation(id)?.action !== 'EXPORT'
+      || publication.closed(id) && publication.record(id)?.cleanup_completed === 1);
+  } });
   const sources = createBizOpRecoverySources({ catalog, protection, payloadStore, readRepository, getArchiveService,
     requireRecovery: admission.requireRecovery });
   const recovery = createBizOpRecoveryDriver({ catalog, sources, admission, readRepository, budgetOptions });
@@ -80,6 +85,9 @@ function createBizOpV327Module({ db, userDataDir, readRepository, getArchiveServ
   }
   const mainBindings = { userDataDir, catalog, payloadStore, protection, admission, sources,
     prepareOperation, prepareDispatch, getArchiveService, forgetDispatch };
+  const publication = createBizOpPublication({ ...mainBindings, getRuntime });
+  const exports = createBizOpExportCoordinator({ ...mainBindings, publication });
+  sources.setPublication(publication);
   const imports = createBizOpImportCoordinator(mainBindings);
   const compute = createBizOpComputeCoordinator(mainBindings);
   sources.setBeforeFinalize((taskRunId) => imports.restoreDiagnostic(taskRunId));
@@ -149,7 +157,8 @@ function createBizOpV327Module({ db, userDataDir, readRepository, getArchiveServ
     return { taskRunIds, batchIds };
   }
   return Object.freeze({ catalog, payloadStore, admission, protection, sources, recovery, plan, runtimeBindings,
-    prepareOperation, prepareDispatch, runCandidateValidation, runImport: imports.runImport, runCompute: compute.runCompute, protectedTasks,
+    prepareOperation, prepareDispatch, runCandidateValidation, runImport: imports.runImport, runCompute: compute.runCompute,
+    runExport: exports.runExport, publication, protectedTasks,
     readyHold: catalog.readyHold,
     assertBusinessEnabled() { fail('BIZOP_V327_NOT_ENABLED', '业务 OP 新区间功能尚未启用'); },
     getStatus: () => ({ mode: catalog.control().mode, recoveryReady: admission.snapshot().recoveryReady }) });

@@ -209,7 +209,10 @@ test('E04-A/B policy 与 Main source selector 保持 production false，真实�
   assert.equal(multiPolicy.resources.compound.childResource.workerThreadSlots, 1);
 
   const mainSource = fs.readFileSync(path.resolve(__dirname, '../../../src/main.js'), 'utf8');
-  assert.equal((mainSource.match(/backgroundExecutionRuntimeManager\.get\(\)/g) || []).length, 14);
+  const bizOpBinding = mainSource.match(/bizOpV327Module = createBizOpV327Module\(\{[\s\S]*?\}\);/)[0];
+  assert.equal((bizOpBinding.match(/backgroundExecutionRuntimeManager\.get\(\)/g) || []).length, 1);
+  const legacySource = mainSource.replace(bizOpBinding, '');
+  assert.equal((legacySource.match(/backgroundExecutionRuntimeManager\.get\(\)/g) || []).length, 14);
   assert.equal((mainSource.match(/generateValidateAndPublishToolboxArtifact\(\{/g) || []).length, 2);
   assert.equal((mainSource.match(/generateValidateAndPublishMultiOutput\(\{/g) || []).length, 1);
   assert.equal((mainSource.match(/production:\s*true/g) || []).length >= 3, true);

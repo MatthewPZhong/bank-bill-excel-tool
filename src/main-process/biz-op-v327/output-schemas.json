@@ -1,0 +1,1021 @@
+{
+  "registryVersion": 1,
+  "status": "E01/E02/E03 approved; PR4 implementation baseline",
+  "evidenceVersion": "bizop-v327-stream-v1",
+  "requireExplicitOutputKind": true,
+  "requireExplicitColumnSchemaVersion": true,
+  "nullAndEmptyStringAreDistinct": true,
+  "outputKinds": {
+    "OP_RAW": {
+      "outputKind": "OP_RAW",
+      "columnSchemaVersion": 1,
+      "columnCount": 23,
+      "columns": [
+        {
+          "index": 1,
+          "header": "Billdate",
+          "domain": "date-text",
+          "cellPolicy": "date-text",
+          "nullable": false
+        },
+        {
+          "index": 2,
+          "header": "业务方",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": false
+        },
+        {
+          "index": 3,
+          "header": "客户编号",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": true
+        },
+        {
+          "index": 4,
+          "header": "主体",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": true
+        },
+        {
+          "index": 5,
+          "header": "账户号",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": false
+        },
+        {
+          "index": 6,
+          "header": "账户类型",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": true
+        },
+        {
+          "index": 7,
+          "header": "币种",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": false
+        },
+        {
+          "index": 8,
+          "header": "期初余额",
+          "domain": "decimal",
+          "cellPolicy": "EXACT_DECIMAL_E02",
+          "nullable": false
+        },
+        {
+          "index": 9,
+          "header": "发生额",
+          "domain": "decimal",
+          "cellPolicy": "EXACT_DECIMAL_E02",
+          "nullable": false
+        },
+        {
+          "index": 10,
+          "header": "发生额（入）",
+          "domain": "decimal",
+          "cellPolicy": "EXACT_DECIMAL_E02",
+          "nullable": false
+        },
+        {
+          "index": 11,
+          "header": "发生额（出）",
+          "domain": "decimal",
+          "cellPolicy": "EXACT_DECIMAL_E02",
+          "nullable": false
+        },
+        {
+          "index": 12,
+          "header": "期末余额",
+          "domain": "decimal",
+          "cellPolicy": "EXACT_DECIMAL_E02",
+          "nullable": false
+        },
+        {
+          "index": 13,
+          "header": "期末可用余额",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": true
+        },
+        {
+          "index": 14,
+          "header": "期末冻结余额",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": true
+        },
+        {
+          "index": 15,
+          "header": "最近更新时间",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": true
+        },
+        {
+          "index": 16,
+          "header": "通道",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": true
+        },
+        {
+          "index": 17,
+          "header": "ppCardId",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": true
+        },
+        {
+          "index": 18,
+          "header": "银行卡号",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": true
+        },
+        {
+          "index": 19,
+          "header": "扩展信息",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": true
+        },
+        {
+          "index": 20,
+          "header": "账户状态",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": true
+        },
+        {
+          "index": 21,
+          "header": "BizId",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": true
+        },
+        {
+          "index": 22,
+          "header": "清结算系统创建时间",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": true
+        },
+        {
+          "index": 23,
+          "header": "清结算系统更新时间",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": true
+        }
+      ],
+      "headerRow": 1,
+      "firstDataRow": 2,
+      "allowExtraExplicitCells": false,
+      "formulaAllowed": false,
+      "formulaPolicyStatus": "E02_APPROVED",
+      "rowOrder": "sourceFileOrder,sourceSheet,sourceRow",
+      "notesSchema": "BIZOP_NOTES_V1",
+      "emptyOutputPolicy": "follow-fixed-object-manifest"
+    },
+    "FLOW_RAW": {
+      "outputKind": "FLOW_RAW",
+      "columnSchemaVersion": 1,
+      "columnCount": 28,
+      "columns": [
+        {
+          "index": 1,
+          "header": "BizId",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": true
+        },
+        {
+          "index": 2,
+          "header": "账单日期",
+          "domain": "date-text",
+          "cellPolicy": "date-text",
+          "nullable": false
+        },
+        {
+          "index": 3,
+          "header": "originBizId",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": true
+        },
+        {
+          "index": 4,
+          "header": "主体大账号",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": true
+        },
+        {
+          "index": 5,
+          "header": "公司主体",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": true
+        },
+        {
+          "index": 6,
+          "header": "流水类型",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": true
+        },
+        {
+          "index": 7,
+          "header": "业务部门",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": false
+        },
+        {
+          "index": 8,
+          "header": "对账主Id",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": true
+        },
+        {
+          "index": 9,
+          "header": "出入方向",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": false
+        },
+        {
+          "index": 10,
+          "header": "流水单号",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": true
+        },
+        {
+          "index": 11,
+          "header": "用户编号",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": true
+        },
+        {
+          "index": 12,
+          "header": "账户编号",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": false
+        },
+        {
+          "index": 13,
+          "header": "拆分类型",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": true
+        },
+        {
+          "index": 14,
+          "header": "对账金额",
+          "domain": "decimal",
+          "cellPolicy": "EXACT_DECIMAL_E02",
+          "nullable": false
+        },
+        {
+          "index": 15,
+          "header": "币种",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": false
+        },
+        {
+          "index": 16,
+          "header": "账户类型",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": true
+        },
+        {
+          "index": 17,
+          "header": "流水开始时间",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": true
+        },
+        {
+          "index": 18,
+          "header": "流水完成时间",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": true
+        },
+        {
+          "index": 19,
+          "header": "渠道",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": true
+        },
+        {
+          "index": 20,
+          "header": "MerchantId",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": true
+        },
+        {
+          "index": 21,
+          "header": "valueDate",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": true
+        },
+        {
+          "index": 22,
+          "header": "BankRef",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": true
+        },
+        {
+          "index": 23,
+          "header": "Pending标识",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": true
+        },
+        {
+          "index": 24,
+          "header": "流水BizId",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": true
+        },
+        {
+          "index": 25,
+          "header": "穿透ID",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": true
+        },
+        {
+          "index": 26,
+          "header": "操作人",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": true
+        },
+        {
+          "index": 27,
+          "header": "系统创建时间",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": true
+        },
+        {
+          "index": 28,
+          "header": "系统修改时间",
+          "domain": "source-cell",
+          "cellPolicy": "CELL_CONTRACT_E01_E02",
+          "nullable": true
+        }
+      ],
+      "headerRow": 1,
+      "firstDataRow": 2,
+      "allowExtraExplicitCells": false,
+      "formulaAllowed": false,
+      "formulaPolicyStatus": "E02_APPROVED",
+      "rowOrder": "sourceFileOrder,sourceSheet,sourceRow",
+      "notesSchema": "BIZOP_NOTES_V1",
+      "emptyOutputPolicy": "follow-fixed-object-manifest"
+    },
+    "OP_CHECK": {
+      "outputKind": "OP_CHECK",
+      "columnSchemaVersion": 1,
+      "columnCount": 12,
+      "columns": [
+        {
+          "index": 1,
+          "header": "Billdate",
+          "domain": "date-text",
+          "cellPolicy": "date-text",
+          "nullable": false
+        },
+        {
+          "index": 2,
+          "header": "业务方",
+          "domain": "text",
+          "cellPolicy": "text",
+          "nullable": false
+        },
+        {
+          "index": 3,
+          "header": "客户编号",
+          "domain": "text",
+          "cellPolicy": "text",
+          "nullable": true
+        },
+        {
+          "index": 4,
+          "header": "主体",
+          "domain": "text",
+          "cellPolicy": "text",
+          "nullable": true
+        },
+        {
+          "index": 5,
+          "header": "账户号",
+          "domain": "text",
+          "cellPolicy": "text",
+          "nullable": false
+        },
+        {
+          "index": 6,
+          "header": "账户类型",
+          "domain": "text",
+          "cellPolicy": "text",
+          "nullable": true
+        },
+        {
+          "index": 7,
+          "header": "币种",
+          "domain": "text",
+          "cellPolicy": "text",
+          "nullable": false
+        },
+        {
+          "index": 8,
+          "header": "期初余额",
+          "domain": "decimal",
+          "cellPolicy": "EXACT_DECIMAL_E02",
+          "nullable": false
+        },
+        {
+          "index": 9,
+          "header": "发生额",
+          "domain": "decimal",
+          "cellPolicy": "EXACT_DECIMAL_E02",
+          "nullable": false
+        },
+        {
+          "index": 10,
+          "header": "发生额（入）",
+          "domain": "decimal",
+          "cellPolicy": "EXACT_DECIMAL_E02",
+          "nullable": false
+        },
+        {
+          "index": 11,
+          "header": "发生额（出）",
+          "domain": "decimal",
+          "cellPolicy": "EXACT_DECIMAL_E02",
+          "nullable": false
+        },
+        {
+          "index": 12,
+          "header": "期末余额",
+          "domain": "decimal",
+          "cellPolicy": "EXACT_DECIMAL_E02",
+          "nullable": false
+        }
+      ],
+      "headerRow": 1,
+      "firstDataRow": 2,
+      "allowExtraExplicitCells": false,
+      "formulaAllowed": false,
+      "formulaPolicyStatus": "E02_APPROVED",
+      "rowOrder": "dataset rowOrdinal",
+      "notesSchema": "BIZOP_NOTES_V1",
+      "emptyOutputPolicy": "follow-fixed-object-manifest"
+    },
+    "FLOW_CHECK": {
+      "outputKind": "FLOW_CHECK",
+      "columnSchemaVersion": 1,
+      "columnCount": 9,
+      "columns": [
+        {
+          "index": 1,
+          "header": "账单日期",
+          "domain": "date-text",
+          "cellPolicy": "date-text",
+          "nullable": false
+        },
+        {
+          "index": 2,
+          "header": "业务部门",
+          "domain": "text",
+          "cellPolicy": "text",
+          "nullable": false
+        },
+        {
+          "index": 3,
+          "header": "公司主体",
+          "domain": "text",
+          "cellPolicy": "text",
+          "nullable": true
+        },
+        {
+          "index": 4,
+          "header": "账户编号",
+          "domain": "text",
+          "cellPolicy": "text",
+          "nullable": false
+        },
+        {
+          "index": 5,
+          "header": "账户类型",
+          "domain": "text",
+          "cellPolicy": "text",
+          "nullable": true
+        },
+        {
+          "index": 6,
+          "header": "币种",
+          "domain": "text",
+          "cellPolicy": "text",
+          "nullable": false
+        },
+        {
+          "index": 7,
+          "header": "出入方向",
+          "domain": "text",
+          "cellPolicy": "text",
+          "nullable": false
+        },
+        {
+          "index": 8,
+          "header": "对账金额",
+          "domain": "decimal",
+          "cellPolicy": "EXACT_DECIMAL_E02",
+          "nullable": false
+        },
+        {
+          "index": 9,
+          "header": "流水单号",
+          "domain": "text",
+          "cellPolicy": "text",
+          "nullable": true
+        }
+      ],
+      "headerRow": 1,
+      "firstDataRow": 2,
+      "allowExtraExplicitCells": false,
+      "formulaAllowed": false,
+      "formulaPolicyStatus": "E02_APPROVED",
+      "rowOrder": "dataset rowOrdinal",
+      "notesSchema": "BIZOP_NOTES_V1",
+      "emptyOutputPolicy": "follow-fixed-object-manifest"
+    },
+    "RESULT_FULL": {
+      "outputKind": "RESULT_FULL",
+      "columnSchemaVersion": 1,
+      "columnCount": 19,
+      "columns": [
+        {
+          "index": 1,
+          "header": "业务方",
+          "domain": "text",
+          "cellPolicy": "text",
+          "nullable": false
+        },
+        {
+          "index": 2,
+          "header": "主体",
+          "domain": "text",
+          "cellPolicy": "text",
+          "nullable": true
+        },
+        {
+          "index": 3,
+          "header": "客户编号",
+          "domain": "text",
+          "cellPolicy": "text",
+          "nullable": true
+        },
+        {
+          "index": 4,
+          "header": "账户号",
+          "domain": "text",
+          "cellPolicy": "text",
+          "nullable": false
+        },
+        {
+          "index": 5,
+          "header": "账户类型",
+          "domain": "text",
+          "cellPolicy": "text",
+          "nullable": true
+        },
+        {
+          "index": 6,
+          "header": "币种",
+          "domain": "text",
+          "cellPolicy": "text",
+          "nullable": false
+        },
+        {
+          "index": 7,
+          "header": "起始日期",
+          "domain": "date-text",
+          "cellPolicy": "date-text",
+          "nullable": false
+        },
+        {
+          "index": 8,
+          "header": "起始期末余额",
+          "domain": "decimal",
+          "cellPolicy": "EXACT_DECIMAL_E02",
+          "nullable": true
+        },
+        {
+          "index": 9,
+          "header": "终止日期",
+          "domain": "date-text",
+          "cellPolicy": "date-text",
+          "nullable": false
+        },
+        {
+          "index": 10,
+          "header": "终止期末余额",
+          "domain": "decimal",
+          "cellPolicy": "EXACT_DECIMAL_E02",
+          "nullable": true
+        },
+        {
+          "index": 11,
+          "header": "流水入账合计",
+          "domain": "decimal",
+          "cellPolicy": "EXACT_DECIMAL_E02",
+          "nullable": false
+        },
+        {
+          "index": 12,
+          "header": "流水出账合计",
+          "domain": "decimal",
+          "cellPolicy": "EXACT_DECIMAL_E02",
+          "nullable": false
+        },
+        {
+          "index": 13,
+          "header": "合计流水发生额",
+          "domain": "decimal",
+          "cellPolicy": "EXACT_DECIMAL_E02",
+          "nullable": false
+        },
+        {
+          "index": 14,
+          "header": "终止期末＋合计流水",
+          "domain": "decimal",
+          "cellPolicy": "EXACT_DECIMAL_E02",
+          "nullable": true
+        },
+        {
+          "index": 15,
+          "header": "核对差额",
+          "domain": "decimal",
+          "cellPolicy": "EXACT_DECIMAL_E02",
+          "nullable": true
+        },
+        {
+          "index": 16,
+          "header": "账户之于起始/终止日期",
+          "domain": "text",
+          "cellPolicy": "text",
+          "nullable": true
+        },
+        {
+          "index": 17,
+          "header": "同账户号多个OP",
+          "domain": "text",
+          "cellPolicy": "text",
+          "nullable": false
+        },
+        {
+          "index": 18,
+          "header": "核对结论",
+          "domain": "text",
+          "cellPolicy": "text",
+          "nullable": false
+        },
+        {
+          "index": 19,
+          "header": "异常说明",
+          "domain": "text",
+          "cellPolicy": "text",
+          "nullable": true
+        }
+      ],
+      "headerRow": 1,
+      "firstDataRow": 2,
+      "allowExtraExplicitCells": false,
+      "formulaAllowed": false,
+      "formulaPolicyStatus": "E02_APPROVED",
+      "rowOrder": "rowOrdinal (RESULT_DIFF filters isDifference without renumbering source ordinal)",
+      "notesSchema": "BIZOP_NOTES_V1",
+      "emptyOutputPolicy": "follow-fixed-object-manifest"
+    },
+    "RESULT_DIFF": {
+      "outputKind": "RESULT_DIFF",
+      "columnSchemaVersion": 1,
+      "columnCount": 19,
+      "columns": [
+        {
+          "index": 1,
+          "header": "业务方",
+          "domain": "text",
+          "cellPolicy": "text",
+          "nullable": false
+        },
+        {
+          "index": 2,
+          "header": "主体",
+          "domain": "text",
+          "cellPolicy": "text",
+          "nullable": true
+        },
+        {
+          "index": 3,
+          "header": "客户编号",
+          "domain": "text",
+          "cellPolicy": "text",
+          "nullable": true
+        },
+        {
+          "index": 4,
+          "header": "账户号",
+          "domain": "text",
+          "cellPolicy": "text",
+          "nullable": false
+        },
+        {
+          "index": 5,
+          "header": "账户类型",
+          "domain": "text",
+          "cellPolicy": "text",
+          "nullable": true
+        },
+        {
+          "index": 6,
+          "header": "币种",
+          "domain": "text",
+          "cellPolicy": "text",
+          "nullable": false
+        },
+        {
+          "index": 7,
+          "header": "起始日期",
+          "domain": "date-text",
+          "cellPolicy": "date-text",
+          "nullable": false
+        },
+        {
+          "index": 8,
+          "header": "起始期末余额",
+          "domain": "decimal",
+          "cellPolicy": "EXACT_DECIMAL_E02",
+          "nullable": true
+        },
+        {
+          "index": 9,
+          "header": "终止日期",
+          "domain": "date-text",
+          "cellPolicy": "date-text",
+          "nullable": false
+        },
+        {
+          "index": 10,
+          "header": "终止期末余额",
+          "domain": "decimal",
+          "cellPolicy": "EXACT_DECIMAL_E02",
+          "nullable": true
+        },
+        {
+          "index": 11,
+          "header": "流水入账合计",
+          "domain": "decimal",
+          "cellPolicy": "EXACT_DECIMAL_E02",
+          "nullable": false
+        },
+        {
+          "index": 12,
+          "header": "流水出账合计",
+          "domain": "decimal",
+          "cellPolicy": "EXACT_DECIMAL_E02",
+          "nullable": false
+        },
+        {
+          "index": 13,
+          "header": "合计流水发生额",
+          "domain": "decimal",
+          "cellPolicy": "EXACT_DECIMAL_E02",
+          "nullable": false
+        },
+        {
+          "index": 14,
+          "header": "终止期末＋合计流水",
+          "domain": "decimal",
+          "cellPolicy": "EXACT_DECIMAL_E02",
+          "nullable": true
+        },
+        {
+          "index": 15,
+          "header": "核对差额",
+          "domain": "decimal",
+          "cellPolicy": "EXACT_DECIMAL_E02",
+          "nullable": true
+        },
+        {
+          "index": 16,
+          "header": "账户之于起始/终止日期",
+          "domain": "text",
+          "cellPolicy": "text",
+          "nullable": true
+        },
+        {
+          "index": 17,
+          "header": "同账户号多个OP",
+          "domain": "text",
+          "cellPolicy": "text",
+          "nullable": false
+        },
+        {
+          "index": 18,
+          "header": "核对结论",
+          "domain": "text",
+          "cellPolicy": "text",
+          "nullable": false
+        },
+        {
+          "index": 19,
+          "header": "异常说明",
+          "domain": "text",
+          "cellPolicy": "text",
+          "nullable": true
+        }
+      ],
+      "headerRow": 1,
+      "firstDataRow": 2,
+      "allowExtraExplicitCells": false,
+      "formulaAllowed": false,
+      "formulaPolicyStatus": "E02_APPROVED",
+      "rowOrder": "rowOrdinal (RESULT_DIFF filters isDifference without renumbering source ordinal)",
+      "notesSchema": "BIZOP_NOTES_V1",
+      "emptyOutputPolicy": "header-and-notes"
+    }
+  },
+  "notesSchema": {
+    "name": "BIZOP_NOTES_V1",
+    "version": 1,
+    "columnCount": 22,
+    "columns": [
+      {
+        "index": 1,
+        "key": "noteOrdinal",
+        "header": "说明序号",
+        "domain": "integer"
+      },
+      {
+        "index": 2,
+        "key": "recordType",
+        "header": "记录类别",
+        "domain": "text"
+      },
+      {
+        "index": 3,
+        "key": "ownerId",
+        "header": "所属对象",
+        "domain": "text"
+      },
+      {
+        "index": 4,
+        "key": "outputKind",
+        "header": "输出类别",
+        "domain": "text"
+      },
+      {
+        "index": 5,
+        "key": "sheetName",
+        "header": "输出工作表",
+        "domain": "text"
+      },
+      {
+        "index": 6,
+        "key": "sheetRow",
+        "header": "输出行号",
+        "domain": "integer"
+      },
+      {
+        "index": 7,
+        "key": "resultRowOrdinal",
+        "header": "结果序号",
+        "domain": "integer"
+      },
+      {
+        "index": 8,
+        "key": "normalizedBu",
+        "header": "业务方规范值",
+        "domain": "text"
+      },
+      {
+        "index": 9,
+        "key": "accountNo",
+        "header": "账户号",
+        "domain": "text"
+      },
+      {
+        "index": 10,
+        "key": "currency",
+        "header": "币种",
+        "domain": "text"
+      },
+      {
+        "index": 11,
+        "key": "sourceRole",
+        "header": "来源端",
+        "domain": "text"
+      },
+      {
+        "index": 12,
+        "key": "fieldKey",
+        "header": "字段标识",
+        "domain": "text"
+      },
+      {
+        "index": 13,
+        "key": "sourceArtifactId",
+        "header": "来源原件ID",
+        "domain": "text"
+      },
+      {
+        "index": 14,
+        "key": "sourceDatasetId",
+        "header": "来源数据版本ID",
+        "domain": "text"
+      },
+      {
+        "index": 15,
+        "key": "sourceDate",
+        "header": "来源账期",
+        "domain": "date-text"
+      },
+      {
+        "index": 16,
+        "key": "sourceVersion",
+        "header": "来源版本",
+        "domain": "integer"
+      },
+      {
+        "index": 17,
+        "key": "sourceSheet",
+        "header": "来源工作表",
+        "domain": "text"
+      },
+      {
+        "index": 18,
+        "key": "sourceRow",
+        "header": "来源行号",
+        "domain": "integer"
+      },
+      {
+        "index": 19,
+        "key": "valueType",
+        "header": "值类型",
+        "domain": "text"
+      },
+      {
+        "index": 20,
+        "key": "valuePart",
+        "header": "值片段",
+        "domain": "text"
+      },
+      {
+        "index": 21,
+        "key": "partIndex",
+        "header": "片段序号",
+        "domain": "integer"
+      },
+      {
+        "index": 22,
+        "key": "partCount",
+        "header": "片段总数",
+        "domain": "integer"
+      }
+    ],
+    "recordTypes": [
+      "RUN_META",
+      "INPUT_VERSION",
+      "DESCRIPTION_SOURCE",
+      "CONFLICT_VALUE",
+      "ROW_SOURCE",
+      "OUTPUT_ROW_MAP",
+      "PRECISION_NOTE"
+    ],
+    "partTextMaxUtf16Units": 8000,
+    "status": "E5 engineering layout retained; business rules approved"
+  },
+  "evidenceSchemaRevision": 2
+}

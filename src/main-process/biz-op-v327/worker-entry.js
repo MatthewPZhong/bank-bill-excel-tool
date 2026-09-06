@@ -13,6 +13,7 @@ const { ACTIONS, fail } = require('./contracts');
 const { createBizOpPayloadStore } = require('./payload-store');
 const { runImportPipeline } = require('./import-pipeline');
 const { runComputePipeline } = require('./compute-pipeline');
+const { runExportPipeline } = require('./export-pipeline');
 
 let emit;
 let terminal = false;
@@ -41,6 +42,14 @@ async function validateCandidate(input, envelope) {
     const result = await runComputePipeline({ payloadStore, taskRunId: plan.taskRunId, intentDigest: plan.intentDigest,
       candidateRef: plan.candidateRef, inputReference: plan.inputReference, options: plan.options,
       cancelToken: { get cancelled() { return cancelled; } } });
+    return { ...result, planDigest: input.planDigest };
+  }
+  if (plan.phase === 'export-workbook-v1' && ACTIONS[envelope.actionKey].kind === 'EXPORT') {
+    const source = createBizOpPayloadStore({ userDataDir: plan.userDataDir }).readDocument(plan.sourceRef.relativePath, plan.sourceRef.digest).value;
+    if (envelope.actionKey !== `biz-op-v327:export-${source.outputKind.toLowerCase().replace('_', '-')}`) fail('BIZOP_EXPORT_KIND_MISMATCH');
+    const result = await runExportPipeline({ payloadStore: createBizOpPayloadStore({ userDataDir: plan.userDataDir }),
+      taskRunId: plan.taskRunId, intentDigest: plan.intentDigest, candidateRef: plan.candidateRef, source,
+      options: plan.options, cancelToken: { get cancelled() { return cancelled; } } });
     return { ...result, planDigest: input.planDigest };
   }
   // 保留 PR1b 的最小候选验证入口，独立覆盖目录提交/进程崩溃合同。

@@ -318,4 +318,26 @@ CREATE TRIGGER IF NOT EXISTS biz_op_v327_finalization_delete_guard
 BEFORE DELETE ON biz_op_v327_abort_finalizations
 BEGIN SELECT RAISE(ABORT,'abort finalization must be retained'); END;
 CREATE INDEX IF NOT EXISTS biz_op_v327_receipt_task ON biz_op_v327_receipts(task_run_id,action);
+
+-- 这里只保存现有 Publisher 的绑定和关闭/恢复观察，提交事实仍来自其 journal。
+CREATE TABLE IF NOT EXISTS biz_op_v327_publications (
+ task_run_id TEXT PRIMARY KEY REFERENCES biz_op_v327_prepared_ops(task_run_id) ON DELETE RESTRICT,
+ binding_rel_path TEXT NOT NULL,
+ binding_digest TEXT NOT NULL,
+ state TEXT NOT NULL CHECK(state IN ('NOT_STARTED','STARTED','CLOSED_UNKNOWN','COMMITTED','NOT_COMMITTED')),
+ attempt_nonce TEXT,
+ owner_pid INTEGER,
+ owner_instance TEXT,
+ closure_json TEXT,
+ closure_digest TEXT,
+ outcome_json TEXT,
+ outcome_digest TEXT,
+ commit_proof_json TEXT,
+ commit_proof_digest TEXT,
+ input_consumed INTEGER NOT NULL DEFAULT 0 CHECK(input_consumed IN (0,1)),
+ archive_settled INTEGER NOT NULL DEFAULT 0 CHECK(archive_settled IN (0,1)),
+ acknowledged INTEGER NOT NULL DEFAULT 0 CHECK(acknowledged IN (0,1)),
+ cleanup_completed INTEGER NOT NULL DEFAULT 0 CHECK(cleanup_completed IN (0,1)),
+ updated_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS biz_op_v327_prepared_phase ON biz_op_v327_prepared_ops(phase,task_run_id);

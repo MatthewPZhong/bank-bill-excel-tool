@@ -23,9 +23,9 @@ async function createHost(t, options = {}) {
   const root = options.root || fs.mkdtempSync(path.join(os.tmpdir(), 'bizop-import-host-'));
   const db = new DatabaseSync(path.join(root, 'main.sqlite'));
   db.exec('PRAGMA foreign_keys=ON');
-  let service;
+  let service; let runtime;
   const readRepository = createRecoveryControlReadRepository(db);
-  const module = createBizOpV327Module({ db, userDataDir: root, readRepository, getArchiveService: () => service });
+  const module = createBizOpV327Module({ db, userDataDir: root, readRepository, getArchiveService: () => service, getRuntime: () => runtime });
   const inspectors = createInspectorRegistry(); const providers = createSettlementRecoveryProviderRegistry();
   module.sources.register(options.wrapInspector ? { register(key, inspect) { inspectors.register(key, options.wrapInspector(inspect)); } } : inspectors,
     providers); inspectors.freeze(); providers.freeze();
@@ -40,7 +40,7 @@ async function createHost(t, options = {}) {
   service = createArchiveService({ database: db, rootDir: path.join(root, 'archive'),
     onArtifactReady: (artifact, repository) => module.readyHold(artifact, repository) });
   await service.initialize({ deferStartupRecovery: true });
-  const runtime = createNonProductionBackgroundExecutionRuntime({ bizOpV327: module.runtimeBindings,
+  runtime = createNonProductionBackgroundExecutionRuntime({ bizOpV327: module.runtimeBindings,
     resourceGovernor: createResourceGovernor({ budgets: { cpuSlots: 2, workerThreadSlots: 2, utilityProcessSlots: 0,
       ioHeavySlots: 2, memoryBytes: 2 * 1024 * 1024 * 1024 } }) });
   const lifecycle = createTaskLifecycle({ archiveService: service, businessOperationRegistry: createBusinessOperationRegistry(),

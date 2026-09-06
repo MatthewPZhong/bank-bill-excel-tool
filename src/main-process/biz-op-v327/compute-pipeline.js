@@ -234,4 +234,4 @@ async function runComputePipeline({ payloadStore, taskRunId, intentDigest, candi
   }
 }
 
-module.exports = { runComputePipeline, openReadonly };
+module.exports = { runComputePipeline, openReadonly, verifyOriginal };

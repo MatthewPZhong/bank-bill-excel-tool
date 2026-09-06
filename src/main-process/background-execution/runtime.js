@@ -146,7 +146,7 @@ const {
 const {
   createMatureActionAdapterBindings
 } = require('./mature-action-adapters');
-const { BIZ_OP_V327_POLICIES, validateBizOpCandidateResult, rejectUnimplementedExport } = require('../biz-op-v327/policies');
+const { BIZ_OP_V327_POLICIES, validateBizOpCandidateResult, validateBizOpExportResult } = require('../biz-op-v327/policies');
 
 const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   ...BIZ_OP_V327_POLICIES,
@@ -383,7 +383,7 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
   for (const policy of BACKGROUND_EXECUTION_POLICIES) {
     let resultValidator;
     if (policy.moduleId === 'biz-op-v327') {
-      resultValidator = policy.commit.kind === 'none' ? validateBizOpCandidateResult : rejectUnimplementedExport;
+      resultValidator = policy.commit.kind === 'none' ? validateBizOpCandidateResult : validateBizOpExportResult;
     } else if (policy.actionKey === POSITION_IMPORT_ADAPTER_ACTION) {
       resultValidator = validatePositionImportAdapterResult;
     } else if (PENDING_BIZOP_ADAPTER_ACTION_SET.has(policy.actionKey)) {

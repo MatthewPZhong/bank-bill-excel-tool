@@ -41,6 +41,8 @@ function createBizOpRecoveryPlan({ catalog }) {
     const batches = db.prepare('SELECT id,task_status FROM archive_batches WHERE task_run_id=? ORDER BY id').all(task.taskRunId);
     const overlays = new Map(db.prepare('SELECT * FROM background_execution_batch_recovery_states WHERE task_run_id=?')
       .all(task.taskRunId).map((item) => [item.batch_id, item]));
+    // READ/CARRIER 只收敛自己的 Hold。Task 和 Batch overlay 始终由主操作来源拥有，
+    // 避免先观察读者后，主来源无法通过平台的 source identity CAS。
     if (complete && primary && taskAlignment(catalog, source, finalization ? 'compensated' : 'committed').conflict) {
       fail('BIZOP_RECOVERY_TERMINAL_CONFLICT');
     }
