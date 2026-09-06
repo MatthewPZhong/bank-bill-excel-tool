@@ -69,7 +69,8 @@ function createBizOpPayloadStore({ userDataDir }) {
     if (fs.existsSync(target)) {
       const previous = readDocument(relative);
       if (hash(previous.value) !== hash(value)) fail('BIZOP_DOCUMENT_IMMUTABLE');
-      const fd = fs.openSync(target, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+      // Windows FlushFileBuffers 要求可写句柄；只重新同步自有文档，不修改已核对的字节。
+      const fd = fs.openSync(target, fs.constants.O_RDWR | (fs.constants.O_NOFOLLOW || 0));
       try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
       syncDocumentParents(target);
       return { relativePath: relative, digest: previous.digest, byteSize: previous.byteSize };
