@@ -345,6 +345,7 @@ class ArchiveCenterController {
       throw error;
     }
     let protectedRecoveryBatchIds = [];
+    let protectedRecoveryTaskRunIds = [];
     let interruptedSweepSafe = true;
     if (this.getProtectedInterruptedTaskBatchIds) {
       try {
@@ -362,6 +363,7 @@ class ArchiveCenterController {
           protectedRecoveryBatchIds = Array.isArray(protection.batchIds)
             ? protection.batchIds
             : [];
+          protectedRecoveryTaskRunIds = Array.isArray(protection.taskRunIds) ? protection.taskRunIds : [];
         } else {
           throw new TypeError('模块恢复批次保护证据格式非法');
         }
@@ -417,7 +419,7 @@ class ArchiveCenterController {
               : [])
           ].map(Number).filter((batchId) => Number.isSafeInteger(batchId) && batchId > 0))
         ],
-        excludeTaskRunIds: pendingTerminalTaskRunIds
+        excludeTaskRunIds: [...new Set([...pendingTerminalTaskRunIds, ...protectedRecoveryTaskRunIds])]
       });
       if (interrupted && interrupted.ok === false) {
         this._warn('存档中心异常任务扫尾未完成', interrupted.message || interrupted.code);

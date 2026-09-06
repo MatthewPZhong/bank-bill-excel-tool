@@ -51,7 +51,7 @@ function replacePolicyIdentity(policies, from, to) {
   policy.taskKey = to;
 }
 
-test('生产 authority 一次读取真实 TaskPolicy list 并冻结 54-action inventory digest', () => {
+test('生产 authority 一次读取真实 TaskPolicy list 并冻结 66-action inventory digest', () => {
   let listCalls = 0;
   const policies = mutableTaskPolicies();
   const registry = createActionTaskBindingRegistry({
@@ -59,10 +59,10 @@ test('生产 authority 一次读取真实 TaskPolicy list 并冻结 54-action in
   });
 
   assert.equal(listCalls, 1);
-  assert.equal(registry.summary.actionKeys.length, 54);
-  assert.equal(registry.summary.taskPolicyInventory.length, 122);
-  assert.equal(registry.summary.pairCount, 61);
-  assert.equal(registry.summary.boundTaskKeyCount, 54);
+  assert.equal(registry.summary.actionKeys.length, 66);
+  assert.equal(registry.summary.taskPolicyInventory.length, 134);
+  assert.equal(registry.summary.pairCount, 73);
+  assert.equal(registry.summary.boundTaskKeyCount, 66);
   assert.equal(registry.summary.unboundTaskPolicyCount, 68);
   assert.equal(
     registry.summary.taskPolicyInventory.filter(
@@ -72,7 +72,7 @@ test('生产 authority 一次读取真实 TaskPolicy list 并冻结 54-action in
   );
   assert.equal(
     registry.summary.taskPolicyInventorySha256,
-    '9538102480f1a714f3839547f294fbe6fd1c19384734addd89dc0ca6e1dbb368'
+    '6912c045c82d260fbe554732e886f4da9fafe01e4f3e64f8dc3b0c870055a773'
   );
   assert.equal(registry.summary.sha256, ACTION_TASK_BINDING_CONTRACT.sha256);
   assert.equal(Object.isFrozen(registry.summary), true);
@@ -337,7 +337,7 @@ test('真实 inventory taskKey/channel mismatch 与 duplicate 均给稳定结构
   );
 });
 
-test('等数量 unbound substitution 由冻结122-key digest拒绝', () => {
+test('等数量 unbound substitution 由冻结134-key digest拒绝', () => {
   const policies = mutableTaskPolicies();
   replacePolicyIdentity(
     policies,
@@ -346,7 +346,7 @@ test('等数量 unbound substitution 由冻结122-key digest拒绝', () => {
   );
   assert.equal(
     policies.filter((policy) => ['reserve', 'no-file'].includes(policy.batchPolicy)).length,
-    122
+    134
   );
   assert.throws(
     () => initializeActionTaskBindingRegistry(fakeTaskPolicyRegistry(policies)),

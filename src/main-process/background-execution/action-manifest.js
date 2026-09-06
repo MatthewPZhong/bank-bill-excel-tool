@@ -7,6 +7,19 @@ const ACTION_MANIFEST_VERSION = 1;
 // 该 inventory 与生产 binding 是两份独立证据；coverage gate 必须双向比较，
 // 禁止从 bindingSnapshot() 反向生成自己的期望集合。
 const CANONICAL_ACTION_KEYS = Object.freeze([
+  'biz-op-v327:import-candidate',
+  'biz-op-v327:run-candidate',
+  'biz-op-v327:delete-plan',
+  'biz-op-v327:upgrade-preflight',
+  'biz-op-v327:reclaim',
+  'biz-op-v327:export-op-raw',
+  'biz-op-v327:export-flow-raw',
+  'biz-op-v327:export-op-check',
+  'biz-op-v327:export-flow-check',
+  'biz-op-v327:export-result-full',
+  'biz-op-v327:export-result-diff',
+  'biz-op-v327:export-errors',
+
   'acquiring:copy-existing-diff',
   'acquiring:export-diff-workbook',
   'acquiring:import',
@@ -61,9 +74,22 @@ const CANONICAL_ACTION_KEYS = Object.freeze([
   'vcc-op:compute-amounts',
   'vcc-op:save-run',
   'vcc-op:scan-and-compute'
-]);
+].sort());
 
 const LEGACY_HANDLER_PAIRS = Object.freeze([
+  Object.freeze(['biz-op-v327:import-candidate', 'bizOpReconV327:import']),
+  Object.freeze(['biz-op-v327:run-candidate', 'bizOpReconV327:run']),
+  Object.freeze(['biz-op-v327:delete-plan', 'bizOpReconV327:delete']),
+  Object.freeze(['biz-op-v327:upgrade-preflight', 'bizOpReconV327:maintenance:upgrade']),
+  Object.freeze(['biz-op-v327:reclaim', 'bizOpReconV327:maintenance:reclaim']),
+  Object.freeze(['biz-op-v327:export-op-raw', 'bizOpReconV327:export:op-raw']),
+  Object.freeze(['biz-op-v327:export-flow-raw', 'bizOpReconV327:export:flow-raw']),
+  Object.freeze(['biz-op-v327:export-op-check', 'bizOpReconV327:export:op-check']),
+  Object.freeze(['biz-op-v327:export-flow-check', 'bizOpReconV327:export:flow-check']),
+  Object.freeze(['biz-op-v327:export-result-full', 'bizOpReconV327:export:result-full']),
+  Object.freeze(['biz-op-v327:export-result-diff', 'bizOpReconV327:export:result-diff']),
+  Object.freeze(['biz-op-v327:export-errors', 'bizOpReconV327:export:errors']),
+
   Object.freeze(['acquiring:copy-existing-diff', 'acquiringBillCurrency:export']),
   Object.freeze(['acquiring:import', 'acquiringBillCurrency:importBill']),
   Object.freeze(['acquiring:import', 'acquiringBillCurrency:importFlow']),

@@ -3437,7 +3437,11 @@ class ArchiveRepository {
     });
   }
 
-  completeArtifact(artifactId, blobPayload = {}) {
+  completeArtifact(artifactId, blobPayload = {}, onReady = null) {
+    if (onReady !== null && (typeof onReady !== 'function'
+        || onReady.constructor.name === 'AsyncFunction')) {
+      throw new TypeError('artifact READY 完成适配必须是同步函数');
+    }
     const id = Number(artifactId);
     const sha256 = normalizeSha256(blobPayload.sha256);
     const sizeBytes = normalizeSize(blobPayload.sizeBytes);
@@ -3489,12 +3493,20 @@ class ArchiveRepository {
       `).run(Number(blob.id), timestamp, timestamp, id);
       if (update.changes !== 1) throw new Error(`存档 artifact 完成状态竞争：${id}`);
       this._refreshBatchStatus(Number(artifact.batch_id), timestamp);
-      return {
+      const completed = {
         artifact: this.getArtifact(id),
         batch: this.getBatch(Number(artifact.batch_id)),
         blob: mapBlob({ ...blob, reference_count: 0 }),
         deduplicated: inserted.changes === 0
       };
+      // 文件复制已完成；仅在同一连接的短事务内移交持久保护。
+      if (onReady) {
+        const result = onReady(completed, this);
+        if (result && typeof result.then === 'function') {
+          throw new TypeError('artifact READY 完成适配不得返回 Promise');
+        }
+      }
+      return completed;
     });
   }
 
@@ -4303,5 +4315,6 @@ module.exports = {
   ensureArchiveMetadataSupport,
   formatBatchNumber,
   formatGlobalBatchNumber,
-  normalizeLocalDate
+  normalizeLocalDate,
+  withWriteTransaction
 };

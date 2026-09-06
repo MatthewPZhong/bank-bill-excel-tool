@@ -228,6 +228,18 @@ test('E04-B runtime预算完整计入Scanner phase与一个Writer child，idle/s
   });
   const snapshot = runtime.resourceGovernor.snapshot();
   assert.deepEqual(runtime.policyRegistry.list().map((policy) => policy.actionKey), [
+    'biz-op-v327:import-candidate',
+    'biz-op-v327:run-candidate',
+    'biz-op-v327:delete-plan',
+    'biz-op-v327:upgrade-preflight',
+    'biz-op-v327:reclaim',
+    'biz-op-v327:export-op-raw',
+    'biz-op-v327:export-flow-raw',
+    'biz-op-v327:export-op-check',
+    'biz-op-v327:export-flow-check',
+    'biz-op-v327:export-result-full',
+    'biz-op-v327:export-result-diff',
+    'biz-op-v327:export-errors',
     TOOLBOX_GENERATION_ACTIONS.MERGE,
     TOOLBOX_GENERATION_ACTIONS.SPLIT_SINGLE,
     TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT,
