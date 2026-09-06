@@ -13,6 +13,8 @@
 
 ## Decisions / Deviations / Evidence
 
+- PR234 评审修复：保留既有 SST provider 的自动清理，将两个读取入口改为唯一子目录。7 项新增 Electron 回归全部通过：OP_RAW / FLOW_RAW 各两份真实溢出原件，经 native worker、Task、Publisher、Archive 发布；RAW 扫描取消/失败；actual 回读成功/取消/摘要不匹配。每份大文件 600 个 30006 UTF-16 字符字符串，超过真实 32 MiB 缓存预算；实际观察 `sst.bin` 清理并验证父目录、spool、输出不被删除。actual 测试仅在临时输出中注入合法共享字符串表及引用，不改变预期内容或校验强度。未修改公共 provider 或 StartupRecoveryCoordinator。
+
 - 原 E5 设计包只读，输出 registry 引入本期代码并注明 E01—E03 已批准。
 - expected 临时 SQLite 保存固定有类型值及位置，增加一次顺序磁盘读写，避免整表内存及 reader 同步回调积累异步队列。
 - 实施中持续更新，最终验证见 validation.md。

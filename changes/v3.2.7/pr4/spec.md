@@ -1,5 +1,7 @@
 # PR4 六类导出、诊断读取与唯一 Publisher
 
+PR234 评审补充：每份 RAW 原件读取及最终输出的 actual 回读分别使用候选目录下唯一的 SST 子目录。该子目录的创建与关闭清理由既有 provider 拥有；候选目录、SQLite spool 和输出 XLSX 仍由导出 owner 拥有。内存模式不预建空目录；磁盘模式成功、取消或失败均不能递归清理父目录，连续读取不同原件也不共享 SST 所有权。
+
 Goal：六类固定对象和诊断报告经同一 Task 导出；expected → writer → 独立 actual 在一次 1 GiB 原生线程租约内顺序完成，Main 小证据核对后交给既有 Publisher，发布阶段独立计费。
 
 Context：基线 PR3 be71707b；E5 和用户批准 E01—E03。生产关闭、版本不变、所有测试临时数据。提交后直接创建基于 PR3 的远端草稿 PR。
