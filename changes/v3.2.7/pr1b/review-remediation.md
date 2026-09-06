@@ -1,5 +1,7 @@
 # PR231—235 评论修复
 
+本文件记录第一轮修复范围。第二轮 R1 对共享恢复器精确重放的限定扩展及独立关闭 CI 修复，以 `spec.md` 和 `terminal-recovery-remediation.md` 为准。
+
 ## Goal / Context / Constraints / Done when
 
 - Goal：修复已核验的恢复、取消、SST 所有权与模态取消问题，并更新现有 PR231—236。
