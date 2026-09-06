@@ -54,7 +54,9 @@ class AdaptiveSharedStringsProvider {
     tempRoot,
     memoryBudgetBytes = POSITION_SST_MEMORY_BUDGET_BYTES,
     lruMaxEntries = POSITION_SST_LRU_MAX_ENTRIES,
-    preserveOnClose = false
+    preserveOnClose = false,
+    cacheMaxBytes,
+    strictClose = false
   } = {}) {
     const budget = Number(memoryBudgetBytes);
     const lruSize = Number(lruMaxEntries);
@@ -64,10 +66,21 @@ class AdaptiveSharedStringsProvider {
     if (!Number.isSafeInteger(lruSize) || lruSize < 1) {
       throw new TypeError('SST LRU 上限必须是正安全整数');
     }
+    if (cacheMaxBytes !== undefined && (!Number.isSafeInteger(cacheMaxBytes) || cacheMaxBytes < 1)) {
+      throw new TypeError('SST 字节缓存上限必须是正安全整数');
+    }
     this.tempRoot = path.resolve(String(tempRoot || ''));
     this.memoryBudgetBytes = budget;
     this.lruMaxEntries = lruSize;
     this.preserveOnClose = preserveOnClose === true;
+    this.cacheMaxBytes = cacheMaxBytes;
+    this.strictClose = strictClose === true;
+    this.cacheBytes = 0;
+    this.peakCacheBytes = 0;
+    this.peakMemoryBytes = 0;
+    this.cacheHits = 0;
+    this.cacheMisses = 0;
+    this.closeError = null;
     this.mode = 'memory';
     this.count = 0;
     this.estimatedMemoryBytes = 0;
@@ -139,7 +152,8 @@ class AdaptiveSharedStringsProvider {
       this._appendDisk(normalized);
       return;
     }
-    const estimate = Buffer.byteLength(normalized, 'utf8') + 16;
+    const estimate = this.cacheMaxBytes === undefined
+      ? Buffer.byteLength(normalized, 'utf8') + 16 : this._charge(normalized);
     if (this.estimatedMemoryBytes + estimate > this.memoryBudgetBytes) {
       this._openDiskMode();
       this._appendDisk(normalized);
@@ -147,16 +161,31 @@ class AdaptiveSharedStringsProvider {
     }
     this.values.push(normalized);
     this.estimatedMemoryBytes += estimate;
+    this.peakMemoryBytes = Math.max(this.peakMemoryBytes, this.estimatedMemoryBytes);
     this.count = this.values.length;
   }
 
+  _charge(value) {
+    return Math.max(Buffer.byteLength(value, 'utf8'), value.length * 2) + 64;
+  }
+
+  _forget(index) {
+    if (!this.cache.has(index)) return;
+    if (this.cacheMaxBytes !== undefined) this.cacheBytes -= this._charge(this.cache.get(index));
+    this.cache.delete(index);
+  }
+
   _remember(index, value) {
-    if (this.cache.has(index)) this.cache.delete(index);
+    this._forget(index);
+    const chargedBytes = this.cacheMaxBytes === undefined ? 0 : this._charge(value);
+    if (this.cacheMaxBytes !== undefined && chargedBytes > this.cacheMaxBytes) return;
     this.cache.set(index, value);
-    while (this.cache.size > this.lruMaxEntries) {
+    this.cacheBytes += chargedBytes;
+    while (this.cache.size > this.lruMaxEntries || (this.cacheMaxBytes !== undefined && this.cacheBytes > this.cacheMaxBytes)) {
       const oldest = this.cache.keys().next().value;
-      this.cache.delete(oldest);
+      this._forget(oldest);
     }
+    this.peakCacheBytes = Math.max(this.peakCacheBytes, this.cacheBytes);
   }
 
   _writeExact(fd, buffer, position, label) {
@@ -198,10 +227,12 @@ class AdaptiveSharedStringsProvider {
     if (!Number.isSafeInteger(index) || index < 0 || index >= this.count) return undefined;
     if (this.mode === 'memory') return this.values[index];
     if (this.cache.has(index)) {
+      this.cacheHits += 1;
       const cached = this.cache.get(index);
       this._remember(index, cached);
       return cached;
     }
+    this.cacheMisses += 1;
 
     const record = Buffer.allocUnsafe(INDEX_RECORD_BYTES);
     this._readExact(this.idxFd, record, index * INDEX_RECORD_BYTES, 'sst.idx');
@@ -239,18 +270,26 @@ class AdaptiveSharedStringsProvider {
   }
 
   async close() {
+    if (this.closeError) throw this.closeError;
     if (this.closed) return;
     this.closed = true;
+    const errors = [];
     if (this.binFd !== null) {
-      try { fs.closeSync(this.binFd); } catch (_error) {}
+      try { fs.closeSync(this.binFd); } catch (error) { errors.push(error); }
       this.binFd = null;
     }
     if (this.idxFd !== null) {
-      try { fs.closeSync(this.idxFd); } catch (_error) {}
+      try { fs.closeSync(this.idxFd); } catch (error) { errors.push(error); }
       this.idxFd = null;
     }
     this.values.length = 0;
     this.cache.clear();
+    this.cacheBytes = 0;
+    this.estimatedMemoryBytes = 0;
+    if (errors.length && this.strictClose) {
+      this.closeError = new AggregateError(errors, 'SST 文件关闭未确认，保留临时文件');
+      throw this.closeError;
+    }
     if (this.mode === 'disk' && !this.preserveOnClose && this.tempRoot) {
       await fs.promises.rm(this.tempRoot, { recursive: true, force: true });
     }
@@ -274,7 +313,11 @@ async function loadSharedStringsProvider(zip, entry, options = {}) {
     });
     return provider;
   } catch (error) {
-    await provider.close();
+    try { await provider.close(); }
+    catch (closeError) {
+      if (options.strictClose === true) throw new AggregateError([error, closeError], 'SST 读取失败且关闭未确认', { cause: error });
+      throw closeError;
+    }
     throw error;
   }
 }

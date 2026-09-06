@@ -100,9 +100,26 @@ function createBizOpPayloadStore({ userDataDir }) {
     fs.mkdirSync(directory, { recursive: true });
     return Object.freeze({ directory: resolve(relativePath), relativePath });
   }
-  function abortInventory(taskRunId, candidateRefs = []) {
+  function abortInventory(taskRunId, candidateRefs = [], intentDigest) {
     const directories = [];
     const files = [];
+    const references = new Set(candidateRefs);
+    const operationDirectory = resolve(`operations/${opaque(taskRunId)}`, { mustExist: false });
+    if (intentDigest && fs.existsSync(operationDirectory)) {
+      const directory = fs.opendirSync(operationDirectory);
+      let examined = 0;
+      try {
+        let entry;
+        while ((entry = directory.readSync()) !== null) {
+          if (++examined > 4096) fail('BIZOP_CLEANUP_INVENTORY_LIMIT');
+          if (!/^allocated-candidate-[a-f0-9-]{36}\.json$/.test(entry.name)) continue;
+          const allocation = readDocument(`operations/${taskRunId}/${entry.name}`).value;
+          if (allocation.taskRunId !== taskRunId || allocation.intentDigest !== intentDigest
+              || entry.name !== `allocated-${allocation.objectId}.json`) fail('BIZOP_CLEANUP_OWNER_MISMATCH');
+          references.add(opaque(allocation.objectId));
+        }
+      } finally { directory.closeSync(); }
+    }
     function visit(relative) {
       const directory = resolve(relative, { mustExist: false });
       if (!fs.existsSync(directory)) return;
@@ -117,13 +134,14 @@ function createBizOpPayloadStore({ userDataDir }) {
       directories.push(relative);
     }
     visit(`staging/${opaque(taskRunId)}`);
-    for (const ref of candidateRefs) {
+    for (const ref of references) {
       opaque(ref);
       for (const folder of ['inputs', 'results']) {
         const relative = `${folder}/${ref}/manifest.json`;
         if (!fs.existsSync(resolve(relative, { mustExist: false }))) continue;
         const manifest = readDocument(relative).value;
-        if (manifest.taskRunId !== taskRunId || manifest.objectId !== ref) fail('BIZOP_CLEANUP_OWNER_MISMATCH');
+        if (manifest.taskRunId !== taskRunId || manifest.objectId !== ref
+            || (intentDigest && manifest.intentDigest !== intentDigest)) fail('BIZOP_CLEANUP_OWNER_MISMATCH');
         visit(`${folder}/${ref}`);
       }
     }
@@ -141,7 +159,7 @@ function createBizOpPayloadStore({ userDataDir }) {
       return { sha256: hasher.digest('hex'), byteSize: before.size };
     } finally { await handle.close(); }
   }
-  async function verifyManifest(relative, expectedDigest) {
+  async function verifyManifest(relative, expectedDigest, closedWorkerMetadata = false) {
     const read = readDocument(relative, expectedDigest);
     const manifest = read.value;
     const folder = OBJECT_FOLDERS[manifest.objectKind];
@@ -154,8 +172,15 @@ function createBizOpPayloadStore({ userDataDir }) {
     for (const part of manifest.parts) {
       if (!/^part-\d{6}\.(sqlite|jsonl)$/.test(part.name) || expected.has(part.name)) fail('BIZOP_PART_INVALID');
       expected.add(part.name);
-      const actual = await fileHash(`${directory}/${part.name}`);
-      if (actual.sha256 !== digest(part.sha256) || actual.byteSize !== count(part.byteSize)) fail('BIZOP_PART_MISMATCH');
+      digest(part.sha256); count(part.byteSize);
+      if (closedWorkerMetadata) {
+        const stat = fs.statSync(resolve(`${directory}/${part.name}`));
+        if (!stat.isFile() || stat.size !== part.byteSize || !part.sealedFileIdentity
+            || fileIdentity(stat) !== part.sealedFileIdentity) fail('BIZOP_PART_MISMATCH');
+      } else {
+        const actual = await fileHash(`${directory}/${part.name}`);
+        if (actual.sha256 !== part.sha256 || actual.byteSize !== part.byteSize) fail('BIZOP_PART_MISMATCH');
+      }
       rows += count(part.rowCount);
     }
     const actualNames = await fs.promises.readdir(resolve(directory));
@@ -176,7 +201,8 @@ function createBizOpPayloadStore({ userDataDir }) {
       const actual = await fileHash(`${staging}/${part.name}`);
       const handle = await fs.promises.open(resolve(`${staging}/${part.name}`), 'r');
       try { await handle.sync(); } finally { await handle.close(); }
-      measured.push({ name: part.name, ...actual, rowCount: count(part.rowCount) });
+      const sealedFileIdentity = fileIdentity(await fs.promises.stat(resolve(`${staging}/${part.name}`)));
+      measured.push({ name: part.name, ...actual, rowCount: count(part.rowCount), sealedFileIdentity });
     }
     const names = await fs.promises.readdir(resolve(staging));
     if (names.length !== measured.length || names.some((name) => !measured.some((part) => part.name === name))) {
@@ -193,7 +219,9 @@ function createBizOpPayloadStore({ userDataDir }) {
     return verifyManifest(`${destination}/manifest.json`, document.digest);
   }
   return Object.freeze({ root, initialize, resolve, writeDocument, readDocument, prepareCandidate,
-    verifyManifest, sealCandidate, fileHash, abortInventory });
+    verifyManifest, sealCandidate, fileHash, abortInventory,
+    // 仅用于 Main 已证实原 worker 关闭后的交接；哈希/SQLite 全量核验在受准入 worker 中完成。
+    verifyClosedWorkerManifest: (relative, expectedDigest) => verifyManifest(relative, expectedDigest, true) });
 }
 
 module.exports = { createBizOpPayloadStore, readVerifiedManifest, MAX_MANIFEST_BYTES };

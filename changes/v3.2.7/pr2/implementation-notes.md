@@ -1,0 +1,47 @@
+# PR2 实施记录
+
+## 第二轮终态恢复回归
+
+- 继承 PR231 R1 的终态保护/anchor 精确重放修复及 ServiceHost 正常退出时序修复；共享合同以 PR1b 的 terminal-recovery-remediation.md 为准。
+- 新增真实 XLSX 失败与取消来源的 12 个组合：无/有同 Task Hold，同进程故障消除、anchor 落盘后进程退出、RecoveryControl 已写入但未 COMMIT 时进程退出。每组另起进程回读磁盘库，保留原 Task/错误/receipt/版本/输入哈希，完成读 pin 与收尾义务后才开门，并再次恢复验证幂等。
+- 测试宿主仅增加 Inspector/持久化故障钩子；不在生产代码加入测试分支。Inspector 内只记录观察，断言在恢复调用外执行，避免被平台作为临时异常重试后吞掉。
+- Electron 专项：新增 12 项与既有 import-main 8 项，共 20 PASS/0 FAIL。测试数据为临时合成文件；Windows 目录耐久、目标规模和人工门禁保持。
+
+## Decisions
+
+- E01—E03 已获用户明确批准，不再作为未决门禁。
+- 公共 writer 只管理自己成功 BEGIN 的候选事务；调用方拥有连接和文件，worker 完成不替代真实载体关闭事实。
+- 新 SST 字节限额是可选参数；未传时保持旧调用者条目数 LRU 语义。
+- T01 已冻结为临时 SQLite 工作库 + BINARY 有序游标 + JS 精确分组，依据见 `t01-decision.md`；不以单次速度排名作为依据。
+- 单批相同原件按 SHA-256 保留首项，源行不按流水单号去重；来源集合指纹忽略选择顺序。15 位数值限制仅应用到账户键，流水单号保持原始词元用于定位。
+
+## Unknowns Register
+
+| 项 | 分类 | 验证 / 处置 |
+| --- | --- | --- |
+| 富类型单元格身份、日期、公式是否保真 | CLOSED | 8205 行真实 reader，SST 身份/数值格式、日期系统、金额原词元与尾列公式测试通过 |
+| 单连接路由与高频日期切换成本 | CLOSED for PR2 | 100 行交错日期 / 16 分片 / 100 次连接与事务，原始行号守恒；10万/100万规模有实测，目标规模另保留 |
+| worker 封存与 Main 有界核验 | CLOSED | 真实 Archive/Task/原生 worker、退出后篡改拒绝、动态三账期封存后进程崩溃恢复均通过 |
+| T01 计算路线 | CLOSED | 1万/10万行两路线精确结果摘要一致，冻结临时 SQLite 路线 |
+| Windows | OPEN | PR1b 远端已证明目录 fsync unsupported；生产仍拒绝，PR6 启用前必须解决。支持宿主的完整成功路径另由 Ubuntu CI 验证 |
+| 400万+400万+1400万/人工验收 | OPEN | 未运行，不将 100 万样本或代码批准记为目标规模/人工 PASS |
+
+## Evidence / Deviations
+
+- PR232 评论修复：Main 最终 signal 检查前移至本 PR；独立拒绝 cancelled 文档；router 最后封存后增加安全点，最终报告/清理 await 后重新观察取消。旧 heads、计数器和成功 receipt 保持，未提交候选由原恢复链回收。
+- Electron 36.9.5 / Node 22.19：导入及 Main 专项 21 PASS / 0 FAIL（6955 ms），随后新增协议守卫 1 PASS / 0 FAIL（492 ms），共 22 个不同用例；包括 7 个新取消边界回归。check-vars 未命中，git diff --check 通过。
+
+- PR1b 已提交并推送，远端草稿 PR #231 以 PR1a 为基线；PR2 已前移至修正后的 `6fdde8c2`，原有 PR2 差异逐项比对保持完整。
+- 初轮聚焦 110 PASS；新增模块 20 PASS；Electron 专项 44 PASS。随后补充 COMMIT 不确定错误不被 close 覆盖的修正及测试，系统 Node 导入 10/10、最终 Electron PR2 全模块 21/21 通过。计数不叠加重复运行。
+- 完整 release-check exit 0：单元 7009 PASS / 3 既有 SKIP / 0 FAIL，53 集成脚本 / 2488 检查全部通过，lint/smoke 通过。上述后补故障测试不假报为已计入先前单元阶段。
+- 10万 Node 25.8.0 合成导入：21.571秒 / 569327616 B 进程采样峰值；100万 Electron/Node 22.19.0：192.009秒 / 377782272 B；两者都只有一个活跃候选写连接。不同运行时/样本不直接做倍率或目标规模推断。
+
+## 已记录的实施细化
+
+- 新增 task/intent 绑定的 `allocated-*.json` 记录动态账期候选，补上 Main 事先不知道全部账期时的孤儿发现路径。Main 恢复仍使用 E5 driver，未改共享恢复核心。
+- Main 交接以受准入 worker 完成的全量 SQLite/哈希封存为前提，之后核验小文档摘要、全体来源计数与文件身份；受控 part 变化时拒绝。至多 8 MiB 的诊断独立做实际哈希核验并绑定 producer。
+- 元数据路由/来源项/part 合计 4096 是有界缓存初值，超限失败且扫描不完整；不是截断数组或按业务行数过滤。64 KiB manifest 上限继续保留，数量极端时可能先触发该限制。
+- 追加 opt-in `strictClose`，用于 BizOP 保留 SST 关闭错误与文件；旧调用者默认关闭行为保持。不以 writer.finish 或 report producer 业务失败替代 PR1a 的实际载体退出事实。
+- PR1b 的真实 Windows 结果及同名文件重试持久化修复已纳入基线；原 E5 包未改写，没有生成 E6。
+
+- PR3 交叉复核发现日期接受矩阵遗漏：普通 General 数字曾被当作日期序号，八位 YYYYMMDD 文本尚未接受。已按获批 E02 修正，复用已有 number-format 分类器；新增真实 XLSX 的两种日期系统/格式及八位日期、非法日期拒绝验证。Electron 导入全模块最终 15 PASS / 0 FAIL（含新增 1 项），旧输出和解析核心未改。

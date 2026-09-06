@@ -8,6 +8,7 @@ function createBizOpRecoverySources({ catalog, protection, payloadStore, readRep
   const { db, now } = catalog;
   let frozenSources = null;
   let budget = null;
+  let beforeFinalize = async () => {};
   function installBudget(value) { budget = value; }
   function makeSource(op, category, extra = {}, reference = op.source_ref) {
     return { contractVersion: 1, sourceKind: category === 'OPERATION' ? op.source_kind : 'module-recovery',
@@ -178,12 +179,13 @@ function createBizOpRecoverySources({ catalog, protection, payloadStore, readRep
     budget.charge('main');
     assertCurrentHold(source);
     if (inspection.outcome !== 'not-committed') fail('BIZOP_FRESH_INSPECTION_REQUIRED');
+    await beforeFinalize(source.taskRunId);
     const current = facts(source);
     if (current.outcome !== 'not-committed' || hash(current.evidence) !== inspection.evidenceHash) fail('BIZOP_RECOVERY_FACTS_CHANGED');
     if (source.boundedEvidence.category === 'RECLAIM') return reconcileReclaim(source);
     const intent = payloadStore.readDocument(current.op.intent_rel_path).value;
     const inventory = source.boundedEvidence.category === 'OPERATION'
-      ? payloadStore.abortInventory(source.taskRunId, intent.candidateRefs || (intent.candidateRef ? [intent.candidateRef] : []))
+      ? payloadStore.abortInventory(source.taskRunId, intent.candidateRefs || (intent.candidateRef ? [intent.candidateRef] : []), current.op.intent_digest)
       : { files: [], directories: [] };
     const cleanup = { schemaVersion: 1, taskRunId: source.taskRunId, sourceRef: source.sourceRef,
       intentDigest: current.op.intent_digest, ...inventory };
@@ -276,6 +278,7 @@ function createBizOpRecoverySources({ catalog, protection, payloadStore, readRep
     }
   }
   return Object.freeze({ collect, register, installBudget, inspect, facts, finalize, syncCompletion, recordConflict,
+    setBeforeFinalize(handler) { beforeFinalize = handler; },
     operationSource(taskRunId) { return makeSource(catalog.operation(taskRunId), 'OPERATION'); },
     setReclaimHandler(handler) { reclaimHandler = handler; },
     current: () => frozenSources, clear() { frozenSources = null; budget = null; } });

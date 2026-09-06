@@ -10,6 +10,7 @@ const { createBizOpRecoverySources } = require('./recovery-sources');
 const { createBizOpRecoveryDriver } = require('./recovery-driver');
 const { createBizOpRecoveryPlan } = require('./recovery-plan');
 const { createBizOpReclaimer } = require('./reclaim');
+const { createBizOpImportCoordinator } = require('./import-main');
 const { ACTIONS, fail, hash } = require('./contracts');
 
 function createBizOpV327Module({ db, userDataDir, readRepository, getArchiveService, budgetOptions }) {
@@ -73,6 +74,11 @@ function createBizOpV327Module({ db, userDataDir, readRepository, getArchiveServ
       protection.beforeDispatch(identity, entry.digest, entry.reads);
     }
   });
+  const imports = createBizOpImportCoordinator({ userDataDir, catalog, payloadStore, protection, admission, sources,
+    prepareOperation, prepareDispatch, getArchiveService, forgetDispatch(request) {
+      dispatchPlans.delete(request.input.planRef); dispatchPlansByJob.delete(request.jobId);
+    } });
+  sources.setBeforeFinalize((taskRunId) => imports.restoreDiagnostic(taskRunId));
   async function executeCandidateValidation({ runtime, taskContext, artifactId, candidateRef }) {
     admission.assertExclusive();
     const original = catalog.original(artifactId, taskContext.taskRunId);
@@ -139,7 +145,7 @@ function createBizOpV327Module({ db, userDataDir, readRepository, getArchiveServ
     return { taskRunIds, batchIds };
   }
   return Object.freeze({ catalog, payloadStore, admission, protection, sources, recovery, plan, runtimeBindings,
-    prepareOperation, prepareDispatch, runCandidateValidation, protectedTasks,
+    prepareOperation, prepareDispatch, runCandidateValidation, runImport: imports.runImport, protectedTasks,
     readyHold: catalog.readyHold,
     assertBusinessEnabled() { fail('BIZOP_V327_NOT_ENABLED', '业务 OP 新区间功能尚未启用'); },
     getStatus: () => ({ mode: catalog.control().mode, recoveryReady: admission.snapshot().recoveryReady }) });
