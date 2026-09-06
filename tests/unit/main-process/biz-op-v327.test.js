@@ -459,8 +459,8 @@ durableDirectoryTest('真实 Main 进程在提交后退出，重启恢复原 Tas
   assert.equal(f.db.prepare('SELECT final_outcome FROM background_execution_batch_recovery_states').get().final_outcome, 'succeeded');
 });
 
-async function importFixture(f, date, content = 'value') {
-  const original = path.join(f.root, `source-${date}.sqlite`);
+async function importFixture(f, date, content = 'value', kind = 'OP') {
+  const original = path.join(f.root, `source-${kind}-${date}.sqlite`);
   if (!fs.existsSync(original)) {
     const input = new DatabaseSync(original);
     input.exec('CREATE TABLE candidate_rows(value TEXT)');
@@ -470,18 +470,19 @@ async function importFixture(f, date, content = 'value') {
   const filePlan = normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs: [{ filePath: original,
     role: 'input', sourceOperation: 'bizOpReconV327:import' }], outputs: [] });
   return f.module.runCandidateValidation({ taskLifecycle: f.lifecycle, runtime: f.runtime, filePlan,
-    dataset: { kind: 'OP', dataDate: date, bu: 'test' } });
+    dataset: { kind, dataDate: date, bu: 'test' } });
 }
 
 async function runFixture(f) {
   const start = await importFixture(f, '2026-09-01');
   const end = await importFixture(f, '2026-09-02');
+  const flow = await importFixture(f, '2026-09-02', 'flow', 'FLOW');
   const id = await prepareUncommitted(f, 'run', 'biz-op-v327:run-candidate');
   const op = f.module.catalog.operation(id);
-  const inputs = [start, end].map((result, index) => {
+  const inputs = [start, end, flow].map((result, index) => {
     const entry = result.receipt.outcome.datasets[0];
     const source = f.db.prepare('SELECT * FROM biz_op_v327_datasets WHERE dataset_id=?').get(entry.datasetId);
-    return { role: index ? 'END_OP' : 'START_OP', dataDate: entry.dataDate, datasetId: entry.datasetId,
+    return { role: ['START_OP', 'END_OP', 'FLOW'][index], dataDate: entry.dataDate, datasetId: entry.datasetId,
       inputVersion: entry.version, sourceManifestDigest: source.source_manifest_digest };
   });
   const stage = f.module.payloadStore.prepareCandidate(id, 'result-protected');
@@ -517,8 +518,8 @@ durableDirectoryTest('保留历史结果删除输入：只释放 INPUT，RESULT 
   await f.module.admission.exclusive(() => f.module.catalog.commitDelete(selected));
   assert.equal((await f.module.recovery.run()).ready, true);
   assert.equal(f.db.prepare('SELECT state FROM biz_op_v327_runs').get().state, 'PUBLISHED');
-  assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM archive_artifact_holds WHERE owner_type='v327-result'").get().n, 2);
-  assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM archive_artifact_holds WHERE owner_type='v327-input'").get().n, 1);
+  assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM archive_artifact_holds WHERE owner_type='v327-result'").get().n, 3);
+  assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM archive_artifact_holds WHERE owner_type='v327-input'").get().n, 2);
   assert.equal(fs.existsSync(f.module.payloadStore.resolve(`inputs/${datasetId}`, { mustExist: false })), false);
   assert.equal(fs.existsSync(f.module.payloadStore.resolve('results/result-protected/part-000001.sqlite')), true);
   const originalReceipt = data.start.receipt;
