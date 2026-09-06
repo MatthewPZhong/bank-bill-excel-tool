@@ -64,6 +64,38 @@ for (const stage of ['anchor', 'hold']) {
   });
 }
 
+durableDirectoryTest('真实候选校验失败后的 unavailable Hold 可重试收尾，原失败和版本不变', async (t) => {
+  let unavailable = false;
+  const f = await fixture(t, { wrapInspector(inspect) { return (source) => {
+    if (unavailable) throw Object.assign(new Error('临时读取失败'), { code: 'TEST_TRANSIENT' });
+    return inspect(source);
+  }; } });
+  const original = path.join(f.root, 'invalid-candidate.sqlite');
+  const input = new DatabaseSync(original); input.exec('CREATE TABLE wrong_table(value TEXT)'); input.close();
+  const originalHash = hash(fs.readFileSync(original).toString('base64'));
+  await assert.rejects(f.module.runCandidateValidation({ taskLifecycle: f.lifecycle, runtime: f.runtime,
+    filePlan: normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs: [{ filePath: original,
+      role: 'input', sourceOperation: 'bizOpReconV327:import' }], outputs: [] }),
+    dataset: { kind: 'OP', dataDate: '2026-09-01', bu: 'terminal-failure' } }));
+  const task = f.db.prepare("SELECT task_run_id,status,failure_code FROM archive_task_runs WHERE task_key='bizOpReconV327:import'").get();
+  assert.equal(task.status, 'failed'); assert.equal(f.module.recovery.openObligations(), true);
+  unavailable = true;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    assert.equal((await f.module.recovery.run()).ready, false);
+    assert.equal(f.module.catalog.task(task.task_run_id).status, 'failed');
+    assert.equal(f.readRepository.listActiveRecoveryHolds().length, 1);
+    assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM background_execution_recovery_observation_attempts WHERE status='prepared'").get().n, 0);
+  }
+  unavailable = false;
+  const recovered = await f.module.recovery.run(); assert.equal(recovered.ready, true, JSON.stringify(recovered));
+  assert.equal(f.module.catalog.task(task.task_run_id).status, 'failed');
+  assert.equal(f.module.catalog.task(task.task_run_id).failureCode, task.failure_code);
+  assert.equal(f.module.catalog.receipt(task.task_run_id), null);
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM biz_op_v327_input_heads').get().n, 0);
+  assert.equal(hash(fs.readFileSync(original).toString('base64')), originalHash);
+  assert.equal((await f.module.recovery.run()).ready, true);
+});
+
 durableDirectoryTest('已有 unavailable Hold 和 interrupted Task 重试检查失败不重写终态，恢复可继续', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bizop-unavailable-retry-'));
   const child = spawnSync(process.execPath, [path.resolve(__dirname, '../../fixtures/biz-op-v327-crash.cjs'), root, 'hold'],

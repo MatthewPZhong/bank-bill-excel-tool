@@ -228,6 +228,99 @@ function settlementFor(source, inspection, outcome, additions = {}) {
   };
 }
 
+// 真实持久 Task/RecoveryControl；计划为显式空计划，专门验证共享重放的准入边界。
+function terminalThresholdFixture(t, status, withHold, crashStage, taskPatch = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'c2-terminal-threshold-'));
+  const file = path.join(dir, 'control.sqlite');
+  let db = openDb(file);
+  t.after(() => { db.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  const { createArchiveRepository } = require('../../../../src/backend/database/archive-repository');
+  const source = VALID_SOURCES[4];
+  const archive = createArchiveRepository(db);
+  archive.beginTaskRun({ taskRunId: source.taskRunId, operationKey: source.operationKey,
+    moduleId: 'background-execution', taskKey: source.actionKey, parentRunId: 'terminal-threshold-parent' });
+  archive.transitionTaskRun(source.taskRunId, 'running', { expectedStatuses: ['prepared'] });
+  if (status !== 'running') archive.transitionTaskRun(source.taskRunId, status, { expectedStatuses: ['running'] });
+  if (withHold) createActiveHold(db, source);
+  const before = archive.getTaskRun(source.taskRunId);
+  let healthy = false; let inspectorCalls = 0;
+  function layer(crash) {
+    const owner = createRecoveryRequestOwnerRepository(db);
+    const control = createRecoveryControlRepository(db);
+    const read = createRecoveryControlReadRepository(db);
+    const inspectors = createInspectorRegistry(); const providers = createSettlementRecoveryProviderRegistry();
+    inspectors.register(source.inspectorKey, () => {
+      inspectorCalls += 1;
+      if (!healthy) throw Object.assign(new Error('临时检查失败'), { code: 'TEST_TRANSIENT' });
+      assert.equal(read.getRecoveryHoldBySource(source.sourceKind, source.sourceRef).status, 'active');
+      return inspectionFor(source, 'unknown');
+    });
+    inspectors.freeze(); providers.freeze();
+    const fault = () => { throw Object.assign(new Error('持久化窗口中断'), { code: 'TEST_THRESHOLD_CRASH' }); };
+    return createStartupRecoveryCoordinator({ readRepository: read, inspectorRegistry: inspectors, providerRegistry: providers,
+      requestOwnerRepository: { ...owner, reserveObservationAnchor(input) {
+        const result = owner.reserveObservationAnchor(input);
+        if (crash && crashStage === 'anchor') fault();
+        return result;
+      } }, observationAttemptRepository: createRecoveryObservationAttemptRepository(db),
+      recoveryControlRepository: { runInControlTransaction(work) {
+        return control.runInControlTransaction((tx) => {
+          const result = work(tx);
+          if (crash && crashStage === 'bundle') fault();
+          return result;
+        });
+      } }, resolveTaskState: () => ({ ...createArchiveRepository(db).getTaskRun(source.taskRunId), ...taskPatch }),
+      planTransitions: () => [], transientAttempts: 1, sleep: async () => {} });
+  }
+  return { source, before, layer,
+    hold: () => createRecoveryControlReadRepository(db).getRecoveryHoldBySource(source.sourceKind, source.sourceRef),
+    prepared: () => db.prepare("SELECT COUNT(*) AS n FROM background_execution_recovery_observation_attempts WHERE status='prepared'").get().n,
+    task: () => createArchiveRepository(db).getTaskRun(source.taskRunId),
+    calls: () => inspectorCalls,
+    reopen() { db.close(); db = openDb(file); healthy = true; inspectorCalls = 0; } };
+}
+
+for (const status of ['succeeded', 'failed', 'cancelled']) {
+  for (const withHold of [false, true]) {
+    for (const stage of ['anchor', 'bundle']) {
+      test(`终态 ${status} / Hold=${withHold} / ${stage} 中断后原子重放保护并重新检查`, async (t) => {
+        const f = terminalThresholdFixture(t, status, withHold, stage);
+        await assert.rejects(f.layer(true).recoverSource(f.source, f.hold()), { code: 'TEST_THRESHOLD_CRASH' });
+        assert.equal(f.prepared(), 1);
+        assert.equal(Boolean(f.hold()), withHold, 'bundle 写入后故障也必须整体回滚');
+        assert.deepEqual(f.task(), f.before);
+        f.reopen();
+        await f.layer(false).recoverSource(f.source, f.hold());
+        assert.equal(f.calls(), 1); assert.equal(f.prepared(), 0);
+        const holdId = f.hold().holdId;
+        assert.deepEqual(f.task(), f.before);
+        await f.layer(false).recoverSource(f.source, f.hold());
+        assert.equal(f.calls(), 2); assert.equal(f.hold().holdId, holdId);
+        assert.equal(f.prepared(), 0); assert.deepEqual(f.task(), f.before);
+      });
+    }
+  }
+}
+
+for (const [label, status, patch] of [
+  ['仍在运行', 'running', {}],
+  ['其他 Task', 'failed', { taskRunId: 'different-task' }],
+  ['其他操作', 'failed', { operationKey: 'different-operation' }],
+  ['恢复模式', 'failed', { recoveryMode: true }],
+  ['恢复 attempt', 'failed', { recoveryAttemptId: 'pending-attempt' }],
+  ['持久恢复模式', 'failed', { metadata: { recoveryMode: true } }],
+  ['持久恢复 attempt', 'failed', { metadata: { recoveryAttemptId: 'pending-attempt' } }]
+]) {
+  test(`无 Hold 空计划不能绕过 ${label} 的 exact 重放拒绝`, async (t) => {
+    const f = terminalThresholdFixture(t, status, false, 'anchor', patch);
+    await assert.rejects(f.layer(true).recoverSource(f.source), { code: 'TEST_THRESHOLD_CRASH' });
+    f.reopen();
+    await assert.rejects(f.layer(false).recoverSource(f.source), { code: 'STARTUP_RECOVERY_PREPARED_THRESHOLD_BUNDLE_INVALID' });
+    assert.equal(f.calls(), 0); assert.equal(f.prepared(), 1); assert.equal(f.hold(), null);
+    assert.deepEqual(f.task(), f.before);
+  });
+}
+
 test('RecoverySource runtime schema 与 authority 语义等价，五类 source/result exact identity/hash fail closed', () => {
   const authority = JSON.parse(fs.readFileSync(path.join(
     AUTHORITY_DIR,
