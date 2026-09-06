@@ -107,6 +107,14 @@ jobs:
           WINDOWS_STARTUP_PROCESS_ADAPTER_REAL_TEST: '1'
         run: node --test tests/unit/scripts/startup-process-adapter.test.js
 
+      - name: Verify carrier closure in Windows Electron
+        shell: pwsh
+        env:
+          ELECTRON_RUN_AS_NODE: '1'
+        run: |
+          & .\node_modules\electron\dist\electron.exe --test tests/unit/main-process/background-execution/carrier-observation.test.js tests/unit/main-process/toolbox-background-generation.test.js
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Run Windows SQLite teardown regression
         run: node --test tests/unit/main-process/position-reconciliation-filtered-source-report.test.js
 

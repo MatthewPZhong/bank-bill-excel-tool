@@ -683,6 +683,47 @@ test('真实 native Worker 保持 merge 内容/格式等价、main-settlement �
   assert.deepEqual(report.errors, []);
 });
 
+test('Main runtime 显式启用关闭观察，实际生成文件后独立收敛载体与容量', async () => {
+  const dir = makeTempDir('toolbox-background-closure-');
+  const sourcePath = await writeWorkbook(path.join(dir, 'source.xlsx'), [['Value'], ['test-value']]);
+  const finalPath = path.join(dir, 'final.xlsx');
+  const generationPath = path.join(dir, 'generation.xlsx');
+  const actionKey = TOOLBOX_GENERATION_ACTIONS.MERGE;
+  const filePlan = createFilePlan([sourcePath], finalPath, actionKey);
+  const input = createGenerationInput({ actionKey, filePlan, generationPath,
+    operationConfig: { sheetBaseName: 'COMMON' } });
+  let boundIdentity;
+  const runtime = createBackgroundExecutionRuntime({
+    shutdownTimeoutMs: 10000,
+    carrierClosureActionKeys: [actionKey],
+    beforeCarrierDispatch(identity) {
+      boundIdentity = identity;
+      assert.equal(fs.existsSync(generationPath), false);
+    }
+  });
+  try {
+    const control = runtime.start({ actionKey, operationKey: 'closure-generation', production: false,
+      context: { kind: 'operation', value: {
+        taskRunId: 'closure-task', taskKey: 'task.toolbox:merge', moduleId: 'toolbox',
+        parentRunId: 'closure-parent', operationKey: 'closure-generation'
+      } }, input });
+    const execution = await control.promise;
+    assert.equal(execution.outcome, 'completed');
+    assert.equal(boundIdentity, control.carrierIdentity);
+    assert.equal((await control.waitForCarrierClosure()).disposition, 'EXITED');
+    assert.equal(control.getCarrierObservation().resourceDisposition, 'RELEASED');
+    assert.equal(runtime.resourceGovernor.snapshot().activeLeaseCount, 0);
+    assert.equal(fs.existsSync(generationPath), true);
+    assert.equal(fs.existsSync(finalPath), false);
+    assert.equal(execution.receiptHint, null);
+    assert.equal(JSON.stringify(control.getCarrierObservation()).includes(dir), false);
+  } finally {
+    const report = await runtime.shutdown({ timeoutMs: 10000 });
+    assert.deepEqual(report.leakedTransports, []);
+    assert.deepEqual(report.errors, []);
+  }
+});
+
 test('quit shutdown 会取消在途 one-shot generation 并收净 transport/资源', async () => {
   const dir = makeTempDir('toolbox-background-cancel-');
   const rows = [['Group', 'Value']];
