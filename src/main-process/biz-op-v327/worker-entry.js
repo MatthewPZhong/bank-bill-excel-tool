@@ -12,6 +12,7 @@ const { createDirectionSequenceTracker } = require('../background-execution/sequ
 const { ACTIONS, fail } = require('./contracts');
 const { createBizOpPayloadStore } = require('./payload-store');
 const { runImportPipeline } = require('./import-pipeline');
+const { runComputePipeline } = require('./compute-pipeline');
 
 let emit;
 let terminal = false;
@@ -33,6 +34,13 @@ async function validateCandidate(input, envelope) {
     const result = await runImportPipeline({ payloadStore, taskRunId: plan.taskRunId, intentDigest: plan.intentDigest,
       candidateRef: plan.candidateRef, reportRef: plan.reportRef, files: plan.files,
       options: plan.options, planDigest: input.planDigest, cancelToken: { get cancelled() { return cancelled; } } });
+    return { ...result, planDigest: input.planDigest };
+  }
+  if (plan.phase === 'interval-compute-v1' && envelope.actionKey === 'biz-op-v327:run-candidate') {
+    const payloadStore = createBizOpPayloadStore({ userDataDir: plan.userDataDir });
+    const result = await runComputePipeline({ payloadStore, taskRunId: plan.taskRunId, intentDigest: plan.intentDigest,
+      candidateRef: plan.candidateRef, inputReference: plan.inputReference, options: plan.options,
+      cancelToken: { get cancelled() { return cancelled; } } });
     return { ...result, planDigest: input.planDigest };
   }
   // 保留 PR1b 的最小候选验证入口，独立覆盖目录提交/进程崩溃合同。

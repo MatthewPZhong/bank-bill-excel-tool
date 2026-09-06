@@ -6,6 +6,7 @@ const { randomUUID } = require('node:crypto');
 const { createArchiveRepository, withWriteTransaction } = require('../../backend/database/archive-repository');
 const { ACTIONS, MODULE_ID, fail, opaque, digest, count, hash, snapshot } = require('./contracts');
 const { readVerifiedManifest } = require('./payload-store');
+const { intervalInputs } = require('./compute-inputs');
 
 function createBizOpCatalog(db, { assertCommitReady }) {
   const archive = createArchiveRepository(db);
@@ -261,6 +262,9 @@ function createBizOpCatalog(db, { assertCommitReady }) {
           || count(info.diffRowCount) > info.fullRowCount || !/^\d{4}-\d{2}-\d{2}$/.test(info.startDate)
           || !/^\d{4}-\d{2}-\d{2}$/.test(info.endDate) || info.startDate >= info.endDate
           || new Set(info.inputs.map((item) => `${item.role}/${item.dataDate}`)).size !== info.inputs.length) fail('BIZOP_RUN_INPUTS_INVALID');
+      const required = intervalInputs(info.startDate, info.endDate);
+      if (required.length !== info.inputs.length || required.some((entry) => !info.inputs.some((item) =>
+        item.role === entry.role && item.dataDate === entry.dataDate))) fail('BIZOP_RUN_INPUT_MISSING');
       const heldArtifacts = new Set();
       const inputs = info.inputs.map((item) => {
         if (item.role === 'START_OP' ? item.dataDate !== info.startDate

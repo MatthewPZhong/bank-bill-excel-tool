@@ -181,11 +181,18 @@ function createBizOpPayloadStore({ userDataDir }) {
         const actual = await fileHash(`${directory}/${part.name}`);
         if (actual.sha256 !== part.sha256 || actual.byteSize !== part.byteSize) fail('BIZOP_PART_MISMATCH');
       }
-      rows += count(part.rowCount);
+      if (part.partKind !== undefined && (manifest.objectKind !== 'RESULT' || !['RESULT', 'NOTES'].includes(part.partKind))) fail('BIZOP_PART_INVALID');
+      if (part.partKind !== 'NOTES') rows += count(part.rowCount);
+      else count(part.rowCount);
     }
     const actualNames = await fs.promises.readdir(resolve(directory));
     if (actualNames.length !== expected.size || actualNames.some((name) => !expected.has(name))) fail('BIZOP_UNSEALED_FILES');
     if (count(manifest.rowCount) !== rows) fail('BIZOP_ROW_COUNT_MISMATCH');
+    if (manifest.parts.some((part) => part.partKind !== undefined)) {
+      if (manifest.parts.some((part) => !part.partKind) || !manifest.parts.some((part) => part.partKind === 'RESULT')
+          || count(manifest.catalog.noteRowCount) !== manifest.parts.filter((part) => part.partKind === 'NOTES')
+            .reduce((sum, part) => sum + part.rowCount, 0)) fail('BIZOP_ROW_COUNT_MISMATCH');
+    }
     const token = Object.freeze({ ref: manifest.objectId, sha256: read.digest });
     verifiedManifests.set(token, snapshot({ ...manifest, relativePath: relative, digest: read.digest }));
     return token;
@@ -202,14 +209,15 @@ function createBizOpPayloadStore({ userDataDir }) {
       const handle = await fs.promises.open(resolve(`${staging}/${part.name}`), 'r');
       try { await handle.sync(); } finally { await handle.close(); }
       const sealedFileIdentity = fileIdentity(await fs.promises.stat(resolve(`${staging}/${part.name}`)));
-      measured.push({ name: part.name, ...actual, rowCount: count(part.rowCount), sealedFileIdentity });
+      measured.push({ name: part.name, ...actual, rowCount: count(part.rowCount), sealedFileIdentity,
+        ...(part.partKind === undefined ? {} : { partKind: part.partKind }) });
     }
     const names = await fs.promises.readdir(resolve(staging));
     if (names.length !== measured.length || names.some((name) => !measured.some((part) => part.name === name))) {
       fail('BIZOP_UNSEALED_FILES');
     }
     const manifest = { schemaVersion: 1, taskRunId, objectId, objectKind, intentDigest: digest(intentDigest),
-      rowCount: measured.reduce((sum, part) => sum + part.rowCount, 0), catalog, parts: measured };
+      rowCount: measured.reduce((sum, part) => sum + (part.partKind === 'NOTES' ? 0 : part.rowCount), 0), catalog, parts: measured };
     const document = writeDocument(`${staging}/manifest.json`, manifest);
     const target = resolve(destination, { mustExist: false });
     if (fs.existsSync(target)) fail('BIZOP_DESTINATION_EXISTS');
