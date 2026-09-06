@@ -23,6 +23,9 @@
 
 ## Evidence
 
+- PR231 评论修复：独立 unavailable Task 计划；批次 overlay 在主操作确定恢复时补齐；Task/批次终态矛盾不再写 COMPLETE，已错误完成的旧缓存也会重新枚举并写入有界冲突诊断，详见 review-remediation.md。
+- 修复后 Electron 36.9.5 / Node 22.19 的完整 BizOP 恢复专项 34 PASS / 0 FAIL / 0 SKIP（46562 ms），含 6 个新增故障回归；共享 Coordinator 生产文件无改动。
+
 - 远端 Windows run 34011443931 明确返回目录 fsync unsupported。新增同名文件重试也必须重新确认文件/父目录屏障的修复及拒绝测试；Windows 新功能仍未获启用依据。24 项需要该能力的测试按实际宿主能力标 SKIP，Ubuntu CI 必须先证明目录屏障 supported 再跑完整成功路径；不是放宽生产持久化语义。
 
 - PR1b worktree：`codex/v3.2.7-pr1b`，基于 `98976f6e`，生产编辑前工作区干净。
