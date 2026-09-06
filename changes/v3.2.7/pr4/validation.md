@@ -8,7 +8,8 @@
 | 真实 Main/Publisher/Archive | 12 项：全部 7 个导出 action；发布前/提交未观察/归档前进程退出；文件篡改；目标变化；实际写出取消；归档失败；ACK 后本地写入失败；旧 owner 隔离；诊断退休保护 |
 | 最终 Electron 专项 | 77 PASS / 0 FAIL / 0 SKIP，62075 ms；包含新增导出与既有 Archive TaskLifecycle |
 | 首次 release-check | lint / smoke PASS；7059 PASS / 3 既有 SKIP / 1 FAIL，共 7063 项，452 文件；失败是旧测试对 Main runtime.get 的固定调用次数 |
-| 固定次数测试修订 | 明确核验新增 BizOP 装配恰好 1 处，排除后仍验证原有 14 处；Toolbox 专项 11 PASS / 0 FAIL；完整 release-check 正在复跑，最终结果将补记 |
+| 固定次数测试修订 | 明确核验新增 BizOP 装配恰好 1 处，排除后仍验证原有 14 处；Toolbox 专项 11 PASS / 0 FAIL；最终完整 release-check 结果见下行 |
+| 最终完整 release-check | exit 0；lint / smoke PASS；7060 PASS / 3 既有 SKIP / 0 FAIL，共 7063 项、452 文件；53/53 集成脚本，2488/2488 PASS，470439 ms |
 | check-vars | `freezeWorkerBatchContext` Critical、局部 `state`；关联复核见 review.md；smoke 已通过 |
 | git diff --check | 通过 |
 
@@ -40,3 +41,5 @@ node scripts/check-vars.js
 ```
 
 日志在本 worktree `outputs/pr4-validation/`。Windows 新模块成功链、2200 万输入/最大结果并集及高基数说明、Excel/WPS 实际打开、真实资金人工样例没有执行，仍是 PR6 生产启用的门禁。本机未修改用户业务数据库、原件或外部结果副本。
+
+最终完整检查与提交 cb97cddf 的源码一致。单元阶段 163883 ms，旧固定次数断言已修正并包含在全量中；所有集成脚本通过。自动同步的集成耗时文档留在本地证据目录，恢复仓库中的旧时间值，不提交无行为变化的耗时差异。
