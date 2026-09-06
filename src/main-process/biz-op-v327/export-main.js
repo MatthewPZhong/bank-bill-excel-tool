@@ -72,7 +72,12 @@ function createBizOpExportCoordinator({ userDataDir, catalog, payloadStore, prot
           const stat = fs.lstatSync(payloadStore.resolve(`staging/${taskRunId}/${candidateRef}/output.xlsx`));
           if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.size !== evidence.byteSize
               || ['dev', 'ino', 'size', 'mtimeMs', 'ctimeMs'].some((key) => stat[key] !== evidence.fileIdentity[key])) fail('BIZOP_EXPORT_FILE_CHANGED');
-          const published = await publication.publish(taskRunId, evidence, runtime, onPublishProgress);
+          let published;
+          try { published = await publication.publish(taskRunId, evidence, runtime, onPublishProgress, signal); }
+          catch (error) {
+            if (signal?.aborted && error.code === 'BIZOP_CANCELLED' && publication.record(taskRunId).state === 'NOT_STARTED') return { status: 'cancelled' };
+            throw error;
+          }
           if (afterPublish) await afterPublish({ taskRunId, published });
           const settled = await publication.settle(taskRunId, settleArtifacts, runtime);
           return { status: 'ok', taskRunId, outputKind, objectId, filePath: published.files[0].filePath,

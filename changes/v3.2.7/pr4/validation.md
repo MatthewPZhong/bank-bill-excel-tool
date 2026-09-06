@@ -43,3 +43,5 @@ node scripts/check-vars.js
 日志在本 worktree `outputs/pr4-validation/`。Windows 新模块成功链、2200 万输入/最大结果并集及高基数说明、Excel/WPS 实际打开、真实资金人工样例没有执行，仍是 PR6 生产启用的门禁。本机未修改用户业务数据库、原件或外部结果副本。
 
 最终完整检查与提交 cb97cddf 的源码一致。单元阶段 163883 ms，旧固定次数断言已修正并包含在全量中；所有集成脚本通过。自动同步的集成耗时文档留在本地证据目录，恢复仓库中的旧时间值，不提交无行为变化的耗时差异。
+
+PR5 接线时补充了 Publisher 等待容量期间的取消边界：取得容量后、记录 STARTED 和调用 Publisher 前再次检查取消。原 worker 已退出但 Publisher 尚未开始时，返回 cancelled，保留 NOT_STARTED 事实供恢复清理；已经开始的 Publisher 仍等待真实关闭和权威结果。专项真实 Main 测试现为 13 PASS / 0 FAIL（26192 ms），新增测试实际占满容量后取消并验证旧目标未改变、Task cancelled、恢复 ready、租约归零。本次小修未重复完整 release-check；上表完整结果对应修复前基线。

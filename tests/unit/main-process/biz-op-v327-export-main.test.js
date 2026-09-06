@@ -198,3 +198,22 @@ test('诊断生产者已失败，清理仍等待新导出 Task 的 Publisher 消
   assert.equal(f.db.prepare('SELECT state FROM biz_op_v327_diagnostic_reports WHERE report_ref=?').get(report.report_ref).state, 'DELETED');
   assert.equal(f.module.catalog.task(report.task_run_id).status, 'failed');
 });
+
+test('原 worker 已退出、Publisher 等待容量期间取消，准入后不触碰用户目标', async (t) => {
+  const f = await createHost(t); await seed(f); const run = await compute(f);
+  const controller = new AbortController(); let taskId;
+  const targetPath = path.join(f.outputRoot, 'queued-cancel.xlsx'); fs.writeFileSync(targetPath, '旧目标');
+  const result = await request(f, 'RESULT_FULL', run.runId, { signal: controller.signal, targetPath,
+    async afterWorker({ taskRunId }) {
+      taskId = taskRunId;
+      const lease = await f.runtime.resourceGovernor.acquirePhaseLease({ ownerKey: 'capacity-fixture', actionKey: 'fixture', operationKey: 'fixture',
+        resources: { cpuSlots: 2, workerThreadSlots: 2, utilityProcessSlots: 0, ioHeavySlots: 2, memoryBytes: 2147483648 }, lowMemoryBehavior: 'queue' });
+      setTimeout(() => { controller.abort(); lease.release('fixture-completed'); }, 25);
+    } });
+  assert.equal(result.status, 'cancelled', JSON.stringify(result));
+  assert.equal(f.module.publication.record(taskId).state, 'NOT_STARTED');
+  assert.equal(f.module.catalog.task(taskId).status, 'cancelled');
+  assert.equal(fs.readFileSync(targetPath, 'utf8'), '旧目标');
+  assert.equal((await f.module.recovery.run()).ready, true);
+  assert.equal(f.runtime.resourceGovernor.snapshot().activeLeaseCount, 0);
+});

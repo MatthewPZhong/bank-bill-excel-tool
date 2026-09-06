@@ -49,7 +49,7 @@ function createBizOpPublication({ userDataDir, catalog, payloadStore, protection
     if (row.owner_pid === process.pid) return false;
     try { process.kill(row.owner_pid, 0); return false; } catch (error) { return error.code === 'ESRCH'; }
   }
-  async function io(id, kind, work, runtime = getRuntime()) {
+  async function io(id, kind, work, runtime = getRuntime(), signal) {
     const bound = binding(id);
     if (!bound || !closed(id) || !protection.closed(id)) fail('BIZOP_PUBLICATION_CLOSURE_PENDING');
     const lease = await runtime.resourceGovernor.acquirePhaseLease({ ownerKey: `biz-op-v327:publisher:${id}`,
@@ -57,6 +57,8 @@ function createBizOpPublication({ userDataDir, catalog, payloadStore, protection
     const nonce = randomUUID(); const active = { closed: false }; live.set(nonce, active);
     let started = false;
     try {
+      // 排队等容量时仍接受取消；准入后先复查，再登记或调用 Publisher。
+      if (signal?.aborted) fail('BIZOP_CANCELLED');
       db.prepare(`UPDATE biz_op_v327_publications SET state='STARTED',attempt_nonce=?,owner_pid=?,owner_instance=?,
         closure_json=NULL,closure_digest=NULL,updated_at=? WHERE task_run_id=?`).run(nonce, process.pid, instance, now(), id);
       started = true;
@@ -103,7 +105,7 @@ function createBizOpPublication({ userDataDir, catalog, payloadStore, protection
     db.prepare(`UPDATE biz_op_v327_publications SET state=?,outcome_json=?,outcome_digest=?,input_consumed=1,updated_at=?
       WHERE task_run_id=?`).run(state, JSON.stringify(value), hash(value), now(), id);
   }
-  async function publish(id, evidence, runtime, onProgress) {
+  async function publish(id, evidence, runtime, onProgress, signal) {
     const bound = binding(id);
     if (record(id).state !== 'NOT_STARTED') fail('BIZOP_PUBLICATION_RETRY_REQUIRES_RECOVERY');
     const result = await io(id, 'publish', () => publishDurableArtifactAsync({ userDataDir,
@@ -114,7 +116,7 @@ function createBizOpPublication({ userDataDir, catalog, payloadStore, protection
         dataRowCount: evidence.dataRowCount, sheetCount: evidence.sheetCount }],
       targets: [{ targetPath: bound.output.filePath, expectedTargetSnapshot: bound.targetSnapshot,
         expectedTargetParentIdentity: bound.output.targetParentIdentity }],
-      requireTargetParentIdentity: true, onProgress }), runtime);
+      requireTargetParentIdentity: true, onProgress }), runtime, signal);
     const outcome = committedOutcome(id, result); saveOutcome(id, 'COMMITTED', outcome); return outcome;
   }
   function fact(id) {
