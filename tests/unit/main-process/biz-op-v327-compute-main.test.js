@@ -13,6 +13,39 @@ const { cases } = require('../../fixtures/biz-op-v327-acceptance-cases.json');
 
 const { seed, compute, readResult } = require('../../helpers/biz-op-v327-compute');
 
+for (const stage of ['manifest', 'afterCommit']) test(`计算 ${stage} 取消保护已有结果，按目录提交事实结算`, async (t) => {
+  const f = await createHost(t); await seed(f);
+  const original = await compute(f); assert.equal(original.status, 'ok');
+  const changed = path.join(f.root, 'changed-for-cancel.xlsx');
+  await writeXlsx(changed, { rowCount: 1, row: () => flowRow({ amount: '20' }) });
+  assert.equal((await f.run([changed])).status, 'ok');
+  const runs = f.db.prepare('SELECT * FROM biz_op_v327_runs').all();
+  const counters = f.db.prepare('SELECT * FROM biz_op_v327_version_counters').all();
+  const abort = new AbortController(); const readDir = fs.promises.readdir;
+  let armed = false; let injected = false; let taskRunId;
+  fs.promises.readdir = async function (directory, ...args) {
+    const result = await readDir.call(this, directory, ...args);
+    if (stage === 'manifest' && armed && !injected && String(directory).includes('/results/')) { injected = true; abort.abort(); }
+    return result;
+  };
+  let result;
+  try { result = await compute(f, { signal: abort.signal, afterWorker(value) { armed = true; taskRunId = value.taskRunId; },
+    afterCommit() { if (stage === 'afterCommit') { injected = true; abort.abort(); } } });
+  } finally { fs.promises.readdir = readDir; }
+  assert.equal(injected, true); assert.equal(f.module.protection.closed(taskRunId), true);
+  assert.deepEqual(f.module.catalog.receipt(original.receipt.taskRunId), original.receipt);
+  if (stage === 'afterCommit') {
+    assert.equal(result.status, 'ok'); assert.equal(result.version, 2);
+    assert.equal(f.module.catalog.task(taskRunId).status, 'succeeded'); return;
+  }
+  assert.equal(result.status, 'cancelled'); assert.equal(f.module.catalog.task(taskRunId).status, 'cancelled');
+  assert.equal(f.module.catalog.receipt(taskRunId), null);
+  assert.deepEqual(f.db.prepare('SELECT * FROM biz_op_v327_runs').all(), runs);
+  assert.deepEqual(f.db.prepare('SELECT * FROM biz_op_v327_version_counters').all(), counters);
+  assert.equal((await f.module.recovery.run()).ready, true);
+  assert.deepEqual(f.db.prepare('SELECT * FROM biz_op_v327_runs').all(), runs);
+});
+
 test('真实 XLSX 到 no-file Task/worker/RESULT：负向差额、独立说明、同输入重复不占版本', async (t) => {
   const f = await createHost(t); await seed(f, { end: '120', count: 2 });
   const result = await compute(f, { options: { partTargetRows: 3 } });

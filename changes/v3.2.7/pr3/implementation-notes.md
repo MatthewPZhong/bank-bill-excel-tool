@@ -19,6 +19,8 @@
 
 ## Evidence / Deviations
 
+- PR233 评审修复：将计算的最后一次取消检查落实在 PR3 的 `commitRun` 前；通过真实 Archive、TaskLifecycle、native worker 和候选 manifest 核验，验证异步核验期间取消不提交、提交后取消保留成功。Electron 两个计算测试文件共 32 PASS / 0 FAIL / 0 SKIP，包含新增的两个提交边界测试。后台平台恢复接口未修改。
+
 实施中持续记录；原 E5 包不改动。所有资源、测试与未执行项在 validation.md 记录，不沿用历史成绩。
 
 - 实际 17 个样例已通过完整 XLSX → 公共 writer → 固定输入 → 临时 SQLite → 19 列比对。首轮发现缺端原因英文代码与批准样例命名不同，已对齐；金额和 19 列显示不变。

@@ -1,5 +1,7 @@
 # PR3 验证记录
 
+2026-09-06 PR233 评论修复：合入 PR1b / PR2 修复后，使用 Electron 36.9.5 / Node 22.19.0 重跑两个计算测试文件，32 PASS / 0 FAIL / 0 SKIP，20674 ms。新增 manifest 异步核验期间取消和提交成功后取消两项，分别检查原结果、版本计数及 receipt 不变和新结果成功保留。日志 `/tmp/bizop-pr233-review-tests.log`；以下原完整验证数据仍是历史基线，本轮完整 release-check 在串行 PR 汇总后另记。
+
 基线 PR2 `bf196156`。macOS arm64；临时 userData、合成 XLSX、真实 Archive / TaskLifecycle / native worker / Main 目录提交。应用仍为 3.2.6，生产功能开关关闭。
 
 | 检查 | 实际结果 |

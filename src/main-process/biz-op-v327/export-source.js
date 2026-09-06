@@ -2,6 +2,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { randomUUID } = require('node:crypto');
 const readline = require('node:readline');
 const { setImmediate: yieldMessages } = require('node:timers/promises');
 const { openSingleSheetRichWorkbook } = require('../../backend/xlsx-rich-reader');
@@ -50,7 +51,8 @@ async function buildExportSource({ payloadStore, source, spool, tempDirectory, c
       safePoint();
       await verifyOriginal(original, safePoint);
       const before = await fs.promises.stat(original.filePath);
-      const workbook = await openSingleSheetRichWorkbook(original.filePath, { sstTempRoot: tempDirectory,
+      // 读取器拥有并递归删除 SST 目录；每份原件只交付独立子目录的所有权。
+      const workbook = await openSingleSheetRichWorkbook(original.filePath, { sstTempRoot: path.join(tempDirectory, `sst-raw-${randomUUID()}`),
         memoryBudgetBytes: 32 * 1024 * 1024, cacheMaxBytes: 32 * 1024 * 1024, cancelToken });
       let selected = 0; const adapter = createImportAdapter(kind);
       try {

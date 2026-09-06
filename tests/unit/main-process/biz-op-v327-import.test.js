@@ -31,6 +31,33 @@ async function run(f, definitions, options) {
   const result = f.store.readDocument(`operations/${f.taskRunId}/${f.candidateRef}.json`, output.sha256).value;
   return { output, result };
 }
+
+for (const stage of ['DATASET', 'DIAGNOSTIC', 'CLEANUP']) durableDirectoryTest(`最后 ${stage} 封存/清理期间取消，最终文档独立标记拒绝并保留诊断`, async (t) => {
+  const f = fixture(t); const cancelToken = { cancelled: false }; let injected = false;
+  const filePath = path.join(f.root, 'late-cancel.xlsx');
+  await writeXlsx(filePath, { rowCount: 1, row: () => flowRow() });
+  const wrapped = { ...f.store, async sealCandidate(options) {
+    const value = await f.store.sealCandidate(options);
+    if (options.objectKind === stage) { injected = true; cancelToken.cancelled = true; }
+    return value;
+  } };
+  const remove = fs.promises.rmdir;
+  fs.promises.rmdir = async function (...args) {
+    const result = await remove.apply(this, args);
+    if (stage === 'CLEANUP') { injected = true; cancelToken.cancelled = true; }
+    return result;
+  };
+  let output;
+  try { output = await runImportPipeline({ ...f, payloadStore: wrapped, cancelToken,
+    files: [{ filePath, artifactId: 1, order: 0, sha256: createHash('sha256').update(fs.readFileSync(filePath)).digest('hex') }] });
+  } finally { fs.promises.rmdir = remove; }
+  const result = f.store.readDocument(`operations/${f.taskRunId}/${f.candidateRef}.json`, output.sha256).value;
+  assert.equal(injected, true); assert.equal(result.cancelled, true); assert.equal(result.batchRejected, true);
+  assert.equal(result.acceptedRows, 1);
+  const report = await f.store.verifyManifest(`diagnostics/${f.reportRef}/manifest.json`, result.reportManifestDigest);
+  assert.equal(readVerifiedManifest(report).catalog.scanComplete, result.scanComplete);
+  assert.equal(readVerifiedManifest(report).catalog.collectedSamples, result.collectedSamples);
+});
 durableDirectoryTest('真实富类型 reader → adapter → 单连接 router → 公共 writer 处理 8205 行及 OP/FLOW 混批', async (t) => {
   const f = fixture(t);
   const { output, result } = await run(f, [

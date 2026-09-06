@@ -110,7 +110,7 @@ function createBizOpImportCoordinator({ userDataDir, catalog, payloadStore, prot
             const registeredReport = catalog.db.prepare('SELECT manifest_digest FROM biz_op_v327_diagnostic_reports WHERE report_ref=?').get(reportRef);
             if (!registeredReport || registeredReport.manifest_digest !== imported.reportManifestDigest) fail('BIZOP_REPORT_SUMMARY_MISMATCH');
             const summary = summaryOf(imported);
-            if (imported.batchRejected || !imported.scanComplete || !imported.errorCountExact || imported.rowErrorCount || imported.fileErrorCount) {
+            if (imported.cancelled || imported.batchRejected || !imported.scanComplete || !imported.errorCountExact || imported.rowErrorCount || imported.fileErrorCount) {
               return { status: imported.cancelled ? 'cancelled' : 'error', code: 'BIZOP_IMPORT_REJECTED', reportRef, summary };
             }
             const candidates = [];

@@ -36,7 +36,8 @@ function createBizOpV327Module({ db, userDataDir, readRepository, getArchiveServ
     return protection.canRelease(id) && (catalog.operation(id)?.action !== 'EXPORT'
       || publication.closed(id) && publication.record(id)?.cleanup_completed === 1);
   } });
-  const sources = createBizOpRecoverySources({ catalog, protection, payloadStore, readRepository, getArchiveService });
+  const sources = createBizOpRecoverySources({ catalog, protection, payloadStore, readRepository, getArchiveService,
+    requireRecovery: admission.requireRecovery });
   const recovery = createBizOpRecoveryDriver({ catalog, sources, admission, readRepository, budgetOptions });
   const plan = createBizOpRecoveryPlan({ catalog });
   const preservation = createDeletePreservation({ catalog, payloadStore, getArchiveService, getRuntime });

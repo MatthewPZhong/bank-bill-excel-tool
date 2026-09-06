@@ -164,6 +164,7 @@ function createCandidateRouter({ payloadStore, taskRunId, intentDigest, safePoin
         references.push({ objectId: token.ref, digest: token.sha256 });
         metrics.sealMs += Date.now() - started;
         await yieldToMessages();
+        safePoint();
       }
       stopped = true;
       return references;
