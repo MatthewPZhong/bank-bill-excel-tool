@@ -2325,6 +2325,28 @@ test('executor close synchronous exit settles its preinstalled waiter as non-gra
   assert.equal(harness.governor.snapshot().activeLeaseCount, 0);
 });
 
+for (const [code, signal, graceful] of [[0, null, true], [1, null, false], [0, 'SIGTERM', false]]) {
+  test(`关闭 ACK 后同轮 exit(${code}, ${signal}) 只接受无信号的正常退出`, async () => {
+    const clock = createFakeClock();
+    const harness = createHarness({ ...clock, adapterOptions: { autoCloseAck: false,
+      onSend(message, callbacks, eventFrom) {
+        if (message.operation !== 'executor:close') return;
+        callbacks.onMessage(eventFrom(message, 'executor:close-ack', { controlId: message.controlId }));
+        callbacks.onExit(code, signal);
+      }
+    } });
+    const { transport } = await openStatementJob(harness);
+    await transport.close();
+    const closing = harness.host.closeService('service.statement', { timeoutMs: 50 });
+    if (graceful) assert.equal(await closing, true);
+    else await assert.rejects(closing, { code: 'SERVICE_UNEXPECTED_EXIT' });
+    assert.equal(clock.timerCount, 0);
+    assert.equal(harness.fake.closeCount, 1); assert.equal(harness.fake.terminateCount, 1);
+    assert.equal(harness.host.snapshot().services.length, 0);
+    assert.equal(harness.governor.snapshot().activeLeaseCount, 0);
+  });
+}
+
 test('schema-valid unknown reservation is exposed as an explicit Host protocol error', async () => {
   const harness = createHarness();
   const { errors } = await openStatementJob(harness);

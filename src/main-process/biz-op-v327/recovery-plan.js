@@ -22,7 +22,9 @@ function createBizOpRecoveryPlan({ catalog }) {
     const wrap = (transition) => ({ transition, safePayload: { phase, outcome: inspection ? inspection.outcome : 'unknown' } });
     if (phase === 'inspection-unavailable-hold') {
       if (activeHold && !sameSource(source, activeHold)) return [];
-      if (task.status === 'interrupted' && !task.recoveryMode && !task.recoveryAttemptId) return [];
+      // 业务结束后仍可能有候选、读者或发布确认待恢复；只保留 Hold，不重写原终态。
+      if ((task.status === 'interrupted' || TERMINAL.has(task.status))
+          && !task.recoveryMode && !task.recoveryAttemptId) return [];
       if (!['prepared', 'running'].includes(task.status) || task.recoveryMode || task.recoveryAttemptId) {
         fail('BIZOP_INSPECTION_UNAVAILABLE_TASK_CONFLICT');
       }

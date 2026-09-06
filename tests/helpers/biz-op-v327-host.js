@@ -27,11 +27,15 @@ async function createHost(t, options = {}) {
   const readRepository = createRecoveryControlReadRepository(db);
   const module = createBizOpV327Module({ db, userDataDir: root, readRepository, getArchiveService: () => service, getRuntime: () => runtime });
   const inspectors = createInspectorRegistry(); const providers = createSettlementRecoveryProviderRegistry();
-  module.sources.register(inspectors, providers); inspectors.freeze(); providers.freeze();
+  module.sources.register(options.wrapInspector ? { register(key, inspect) { inspectors.register(key, options.wrapInspector(inspect)); } } : inspectors,
+    providers); inspectors.freeze(); providers.freeze();
+  const owner = createRecoveryRequestOwnerRepository(db); const control = createRecoveryControlRepository(db);
   const platform = createStartupRecoveryCoordinator({ readRepository, inspectorRegistry: inspectors, providerRegistry: providers,
-    requestOwnerRepository: createRecoveryRequestOwnerRepository(db), observationAttemptRepository: createRecoveryObservationAttemptRepository(db),
-    recoveryControlRepository: createRecoveryControlRepository(db), resolveTaskState: module.plan.taskState, planTransitions: module.plan.plan,
-    transientAttempts: 1, sleep: async () => {} });
+    requestOwnerRepository: options.wrapRecoveryOwner ? options.wrapRecoveryOwner(owner) : owner,
+    observationAttemptRepository: createRecoveryObservationAttemptRepository(db),
+    recoveryControlRepository: options.wrapRecoveryControl ? options.wrapRecoveryControl(control) : control,
+    resolveTaskState: module.plan.taskState, planTransitions: module.plan.plan,
+    transientAttempts: options.transientAttempts ?? 1, sleep: async () => {} });
   module.recovery.bindPlatform(platform);
   service = createArchiveService({ database: db, rootDir: path.join(root, 'archive'),
     onArtifactReady: (artifact, repository) => module.readyHold(artifact, repository) });
@@ -42,6 +46,7 @@ async function createHost(t, options = {}) {
   const lifecycle = createTaskLifecycle({ archiveService: service, businessOperationRegistry: createBusinessOperationRegistry(),
     flowResolver: createBusinessFlowResolver({ archiveService: service }), operationTracker: { async appendOperationFiles() { return { archiveFailed: false }; } } });
   t.after(async () => { await runtime.shutdown({ timeoutMs: 5000 }); db.close(); if (!options.keep) fs.rmSync(root, { recursive: true, force: true }); });
+  if (options.beforeBootstrap) options.beforeBootstrap({ module, db, service });
   const bootstrap = await module.recovery.run(); assert.equal(bootstrap.ready, options.expectReady !== false, JSON.stringify(bootstrap));
   return { root, db, module, service, runtime, lifecycle, bootstrap,
     run(files, extra = {}) { return module.runImport({ taskLifecycle: lifecycle, runtime,
