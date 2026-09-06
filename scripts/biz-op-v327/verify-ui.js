@@ -11,12 +11,15 @@ const output = path.resolve(process.argv[2] || 'outputs/pr5-validation/ui');
 fs.mkdirSync(output, { recursive: true });
 const source = path.resolve(__dirname, '../../src');
 const link = (name) => pathToFileURL(path.join(source, name)).href;
+const index = fs.readFileSync(path.resolve(source, '../index.html'), 'utf8');
+const vccPanel = index.match(/<section id="vccFinancialOpModulePanel"[\s\S]*?<\/section>/)?.[0];
+if (!vccPanel) throw new Error('缺少 VCC 财务 OP 主面板参考');
 const html = path.join(temp, 'preview.html');
 fs.writeFileSync(html, `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>业务 OP 页面验证</title>
 <link rel="stylesheet" href="${link('fonts.css')}"><link rel="stylesheet" href="${link('styles-gemini.css')}">
-<link rel="stylesheet" href="${link('styles-gemini-extra.css')}"><link rel="stylesheet" href="${link('styles-biz-op-v327.css')}">
-<style>body{margin:0;padding:44px;background:#f3f5ee}h1{font-size:24px;margin-bottom:28px}.control-board{display:block;width:100%;box-sizing:border-box;background:#fff;padding:26px;border-radius:14px}</style>
-<h1>业务 OP 数据核对</h1><section id="legacy" hidden>旧版页面</section><section id="modern" class="control-board" hidden></section>
+<link rel="stylesheet" href="${link('styles-gemini-extra.css')}"><link rel="stylesheet" href="${link('styles-vcc-financial-op.css')}"><link rel="stylesheet" href="${link('styles-biz-op-v327.css')}">
+<style>body{margin:0;padding:44px;background:#f8f9fa}h1{font-size:24px;margin-bottom:28px}.control-board{width:100%;box-sizing:border-box}</style>
+<h1>业务 OP 数据核对</h1><section id="legacy" hidden>旧版页面</section><section id="modern" class="control-board module-panel" hidden></section>${vccPanel}
 <script src="${link('renderer-biz-op-v327.js')}"></script></html>`);
 const checks = [];
 (async () => {
@@ -50,13 +53,32 @@ const checks = [];
     window.button=(name)=>[...document.querySelectorAll('dialog[open] button')].filter(x=>x.textContent===name).at(-1)||[...document.querySelectorAll('#modern button')].find(x=>x.textContent===name);
     window.closeDialogs=()=>[...document.querySelectorAll('dialog')].reverse().forEach(x=>x.close());
     window.waitUntil=async(fn)=>{for(let i=0;i<200;i++){if(fn())return;await new Promise(r=>setTimeout(r,10));}throw new Error('页面条件未收敛');};
+    window.panelMetrics=(panel)=>{const outer=panel.getBoundingClientRect();return {
+      height:outer.height,items:[...panel.querySelectorAll('.control-row button'),panel.querySelector('.status-box')].map(item=>{
+        const r=item.getBoundingClientRect();return [r.x-outer.x,r.y-outer.y,r.width,r.height];})};};
   })()`);
   async function check(name, code) { const result = await js(code); if (result !== true) throw new Error(`${name}: ${JSON.stringify(result)}`); checks.push(name); }
   async function shot(name) { await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))'); fs.writeFileSync(path.join(output, name + '.png'), (await win.webContents.capturePage()).toPNG()); }
   await check('Main mode 路由，ACTIVE 隐藏旧页面', `(async()=>{await controller.setSelected(true);return !document.querySelector('#modern').hidden&&document.querySelector('#legacy').hidden;})()`);
+  await check('主面板只保留 VCC 两行四个动作，输入导出不在主页面', `(()=>{const p=document.querySelector('#modern');return [...p.querySelectorAll('.control-row')].map(row=>[...row.querySelectorAll('button')].map(b=>b.textContent).join('|')).join('/')==='导入文件|开始运行|导出校验结果表/数据管理'&&p.querySelectorAll('.control-row')[1].querySelector('.cell.left .status-box')!==null&&!p.textContent.includes('导出数据')&&p.querySelector('.bizop-secondary').hidden;})()`);
+  for (const [width, height] of [[1200, 900], [1080, 760]]) {
+    win.setSize(width, height);
+    await js(`document.querySelector('#modern').hidden=true;document.querySelector('#vccFinancialOpModulePanel').hidden=false`);
+    await shot(`00-vcc-reference-${width}`);
+    await js(`window.referenceMetrics=panelMetrics(document.querySelector('#vccFinancialOpModulePanel'));document.querySelector('#vccFinancialOpModulePanel').hidden=true;document.querySelector('#modern').hidden=false`);
+    await shot(`01-main-${width}`);
+    await check(`${width} 窗口与实际 VCC 主面板的按钮及状态框位置尺寸一致`, `(()=>{const actual=panelMetrics(document.querySelector('#modern'));const a=[actual.height,...actual.items.flat()],b=[referenceMetrics.height,...referenceMetrics.items.flat()];return a.length===b.length&&a.every((n,i)=>Math.abs(n-b[i])<1)||{actual,referenceMetrics};})()`);
+  }
+  win.setSize(1200, 900);
   await shot('01-main');
-  await check('数据管理列顺序，主结果导出为全量原表', `(async()=>{await controller.openManager();button('导出原表').click();await waitUntil(()=>fixture.calls.some(x=>x[0]==='export'));return fixture.calls.find(x=>x[0]==='export')[1]==='RESULT_FULL'&&[...document.querySelectorAll('th')].map(x=>x.textContent).join('|')==='起始日期|终止日期|表名|结果版本|更新时间|操作';})()`);
-  await check('原表文件名作为文本，选取阶段不删除', `(async()=>{const s=document.querySelectorAll('dialog select')[0];s.value='RAW';s.dispatchEvent(new Event('change'));await waitUntil(()=>document.querySelector('td')?.textContent==='2026-09-01');button('选取').click();await waitUntil(()=>document.querySelector('input[type=checkbox]'));const c=document.querySelector('input[type=checkbox]');c.checked=true;c.dispatchEvent(new Event('change'));return !document.querySelector('dialog img')&&document.querySelector('dialog').textContent.includes('<img src=x onerror=alert(1)>.xlsx')&&!fixture.calls.some(x=>x[0]==='delete');})()`);
+  await check('数据管理沿用左导航右列表，导出数据位于底部操作区', `(async()=>{await controller.openManager();const d=document.querySelector('dialog');const nav=d.querySelector('nav');const pane=d.querySelector('.position-manager-pane');return [...nav.querySelectorAll('button')].map(b=>b.textContent).join('|')==='结果表|校验表|校验原表'&&nav.getBoundingClientRect().right<=pane.getBoundingClientRect().left+1&&d.querySelector('.vcc-fin-op-manager-footer-right').textContent.includes('导出')&&d.querySelector('.vcc-fin-op-manager-toolbar').textContent.includes('操作月份')&&!d.textContent.includes('解归档');})()`);
+  await shot('02-manager');
+  for (const outputKind of ['OP_RAW', 'OP_CHECK', 'FLOW_RAW', 'FLOW_CHECK']) {
+    await check(`管理内 ${outputKind} 导出保留对应输入类型和账期`, `(async()=>{button('导出').click();await waitUntil(()=>document.querySelectorAll('dialog').length===2);const d=[...document.querySelectorAll('dialog')].at(-1);d.querySelector('select').value=${JSON.stringify(outputKind)};d.querySelector('input[type=date]').value='2026-09-01';button('选择位置并导出').click();await waitUntil(()=>!controller.busy&&fixture.calls.some(x=>x[0]==='export'&&x[1]===${JSON.stringify(outputKind)}));await waitUntil(()=>document.querySelectorAll('dialog').length===1);const current=fixture.calls.filter(x=>x[0]==='currentInput').at(-1);return current[1].kind===${JSON.stringify(outputKind.split('_')[0])}&&current[1].dataDate==='2026-09-01';})()`);
+  }
+  await js('closeDialogs()');
+  await check('数据管理列顺序，主结果导出为全量原表', `(async()=>{await controller.openManager();button('导出原表').click();await waitUntil(()=>fixture.calls.some(x=>x[0]==='export'&&x[1]==='RESULT_FULL'));return [...document.querySelectorAll('th')].map(x=>x.textContent).join('|')==='起始日期|终止日期|表名|结果版本|更新时间|操作';})()`);
+  await check('原表文件名作为文本，选取阶段不删除', `(async()=>{button('校验原表').click();await waitUntil(()=>document.querySelector('td')?.textContent==='2026-09-01');button('选取').click();await waitUntil(()=>document.querySelector('input[type=checkbox]'));const c=document.querySelector('input[type=checkbox]');c.checked=true;c.dispatchEvent(new Event('change'));return !document.querySelector('dialog img')&&document.querySelector('dialog').textContent.includes('<img src=x onerror=alert(1)>.xlsx')&&!fixture.calls.some(x=>x[0]==='delete');})()`);
   await shot('02-manager-select');
   await check('删除先完整跨月份预览，精确三个按钮', `(async()=>{button('删除').click();await waitUntil(()=>document.querySelectorAll('dialog').length===2);const d=[...document.querySelectorAll('dialog')].at(-1);return d.textContent.includes('2026-08')&&[...d.querySelectorAll('footer button,.bizop-modal-footer button')].map(x=>x.textContent).join('|')==='删除但保留结果表|删除|取消'&&!fixture.calls.some(x=>x[0]==='delete');})()`);
   await shot('03-delete-impact');

@@ -11,12 +11,13 @@
     function button(text, work, className = 'secondary-btn') { const item = node('button', text, className); item.type = 'button';
       item.addEventListener('click', () => { if (busy && item !== cancelButton) return; Promise.resolve().then(work).catch(showError); }); return item; }
     function field(label, control) { const wrap = node('label', undefined, 'bizop-field'); wrap.append(node('span', label), control); return wrap; }
-    function select(options) { const item = node('select'); for (const [value, text] of options) { const option = node('option', text); option.value = value; item.append(option); } return item; }
-    function dateField() { const item = node('input'); item.type = 'date'; return item; }
+    function select(options) { const item = node('select', undefined, 'vcc-fin-op-input'); for (const [value, text] of options) { const option = node('option', text); option.value = value; item.append(option); } return item; }
+    function dateField() { const item = node('input', undefined, 'vcc-fin-op-input'); item.type = 'date'; return item; }
     function message(text, tone = 'info') {
-      status.textContent = text; status.dataset.tone = tone;
+      statusText.textContent = text; status.dataset.tone = tone;
       if (taskDialog) { taskDialog.feedback.textContent = text; taskDialog.feedback.dataset.tone = tone; }
     }
+    function updateFooter() { footer.hidden = ![...footer.children].some((item) => !item.hidden); }
     function checked(result) {
       if (!result || ['error', 'busy', 'blocked'].includes(result.status) || result.accepted === false) {
         const detail = result?.missing?.map((item) => `${item.kind === 'OP' ? 'OP 校验表' : '流水校验表'} ${item.dataDate}`).join('、');
@@ -43,12 +44,13 @@
         else if (oldDisabled.has(element)) { element.disabled = oldDisabled.get(element); oldDisabled.delete(element); }
       }
       cancelButton.hidden = !value; cancelButton.disabled = false;
-      if (value) cancelButton.focus();
+      if (value) { updateFooter(); cancelButton.focus(); }
       else {
         footer.append(cancelButton); taskDialog = null;
         if (taskFocus?.isConnected && !taskFocus.disabled) taskFocus.focus();
         taskFocus = null;
       }
+      updateFooter();
     }
     async function perform(label, work) {
       if (busy) return null;
@@ -66,17 +68,20 @@
         showError(error); return null;
       } finally { activeRequest = null; setBusy(false); await refreshStatus(false); }
     }
-    function modal(title) {
-      const dialog = node('dialog', undefined, 'bizop-v327-dialog'); const heading = node('h2', title);
-      const body = node('div', undefined, 'bizop-modal-body'); const feedback = node('p', '', 'bizop-feedback'); feedback.setAttribute('role', 'status');
-      const footer = node('div', undefined, 'bizop-modal-footer'); const close = button('关闭', () => dialog.close());
-      footer.append(close); dialog.append(heading, body, feedback, footer); dialog.feedback = feedback; dialog.body = body; dialog.footer = footer;
+    function modal(title, className = '') {
+      const dialog = node('dialog', undefined, `bizop-v327-dialog vcc-fin-op-dialog ${className}`.trim());
+      dialog.setAttribute('aria-label', title);
+      const header = node('div', undefined, 'dialog-header'); const heading = node('h2', title, 'dialog-title');
+      const dismiss = button('×', () => dialog.close(), 'icon-close'); dismiss.setAttribute('aria-label', '关闭'); header.append(heading, dismiss);
+      const body = node('div', undefined, 'bizop-modal-body vcc-fin-op-dialog-body'); const feedback = node('p', '', 'bizop-feedback'); feedback.setAttribute('role', 'status');
+      const footer = node('div', undefined, 'bizop-modal-footer dialog-actions right'); const close = button('关闭', () => dialog.close());
+      footer.append(close); dialog.append(header, body, feedback, footer); dialog.feedback = feedback; dialog.body = body; dialog.footer = footer;
       dialog.addEventListener('cancel', (event) => { if (busy) event.preventDefault(); });
       dialog.addEventListener('close', () => { dialogs.delete(dialog); dialog.remove(); }); dialogs.add(dialog);
       doc.body.append(dialog); dialog.showModal(); return dialog;
     }
     function table(headers, rows) {
-      const scroll = node('div', undefined, 'bizop-table-scroll'); const table = node('table'); const thead = node('thead'); const tr = node('tr');
+      const scroll = node('div', undefined, 'bizop-table-scroll vcc-fin-op-table-wrap'); const table = node('table', undefined, 'vcc-fin-op-table'); const thead = node('thead'); const tr = node('tr');
       headers.forEach((name) => tr.append(node('th', name))); thead.append(tr); const tbody = node('tbody');
       for (const values of rows) { const row = node('tr'); for (const value of values) { const cell = node('td'); cell.append(value?.nodeType ? value : node('span', value ?? '')); row.append(cell); } tbody.append(row); }
       if (!rows.length) { const row = node('tr'); const cell = node('td', '该操作月份没有可用数据'); cell.colSpan = headers.length; row.append(cell); tbody.append(row); }
@@ -134,8 +139,9 @@
       month.addEventListener('change', () => load().catch(showError));
       dialog.body.append(field('操作月份', month), field('结果表表名', choice), next); dialog.footer.prepend(exportBtn); await load();
     }
-    function openInputExport() {
-      const dialog = modal('导出数据'); const kind = select([['OP_RAW', 'OP 原表'], ['OP_CHECK', 'OP 校验表'], ['FLOW_RAW', '流水原表'], ['FLOW_CHECK', '流水校验表']]);
+    function openInputExport({ initialKind = 'OP_RAW' } = {}) {
+      const dialog = modal('导出数据', 'vcc-fin-op-export-dialog'); const kind = select([['OP_RAW', 'OP 原表'], ['OP_CHECK', 'OP 校验表'], ['FLOW_RAW', '流水原表'], ['FLOW_CHECK', '流水校验表']]);
+      kind.value = initialKind;
       const date = dateField(); const target = field('导出目标', kind); target.classList.add('bizop-half');
       dialog.body.append(target, field('账期', date), node('p', '只导出该类型、该账期当前可用的版本。'));
       dialog.footer.prepend(button('选择位置并导出', async () => {
@@ -164,16 +170,36 @@
       dialog.footer.append(button('删除', () => confirm('DELETE_ASSOCIATED'), 'primary-btn bizop-danger'), button('取消', () => dialog.close()));
     }
     async function openManager() {
-      const dialog = modal('数据管理'); const month = node('input'); month.type = 'month'; month.value = await latestMonth();
-      const view = select([['RESULT', '结果表'], ['CHECK', '校验表'], ['RAW', '校验原表']]); const kind = select([['OP', 'OP'], ['FLOW', '流水']]);
-      const controls = node('div', undefined, 'bizop-field-row'); controls.append(field('操作月份', month), field('数据页', view), field('输入类型', kind));
+      const dialog = modal('数据管理', 'vcc-fin-op-manager-dialog bizop-manager-dialog');
+      const month = node('input', undefined, 'vcc-fin-op-input'); month.type = 'month'; month.value = await latestMonth();
+      let view = 'RESULT'; const titles = { RESULT: '结果表', CHECK: '校验表', RAW: '校验原表' };
+      const kind = select([['OP', 'OP'], ['FLOW', '流水']]);
+      const layout = node('div', undefined, 'position-manager-layout vcc-fin-op-manager-layout');
+      const nav = node('nav', undefined, 'position-manager-nav vcc-fin-op-manager-nav'); nav.setAttribute('aria-label', '数据分类');
+      const pane = node('section', undefined, 'position-manager-pane vcc-fin-op-manager-pane');
+      const toolbar = node('div', undefined, 'vcc-fin-op-manager-toolbar'); const title = node('h3', titles[view]);
+      const filters = node('div', undefined, 'bizop-manager-filters');
+      const monthField = node('label'); monthField.append(node('span', '操作月份'), month);
+      const kindField = node('label'); kindField.append(node('span', '输入类型'), kind);
+      filters.append(kindField, monthField); toolbar.append(title, filters);
       let rows = []; let cursor = null; let generation; let loadVersion = 0; let selecting = false; const selection = new Set(); const content = node('div');
-      const choose = button('选取', () => { selecting = !selecting; choose.textContent = selecting ? '结束选取' : '选取'; selection.clear(); render(); });
-      const next = button('下一页', () => load(cursor)); const first = button('第一页 / 刷新', () => load());
+      content.className = 'vcc-fin-op-manager-content';
+      const selectionHint = node('p', '选取任一来源文件，会处理该类型、账期的整个当前输入版本及其配对原表、校验表。', 'bizop-selection-hint');
+      const choose = button('选取', () => { selecting = !selecting; choose.textContent = selecting ? '结束选取' : '选取'; selection.clear(); render(); }, 'secondary-btn small');
+      const next = button('下一页', () => load(cursor), 'secondary-btn small'); const first = button('刷新', () => load(), 'secondary-btn small');
       const del = button('删除', () => { if (!selection.size) throw new Error('请先选取要删除的数据'); return showDelete(
-        view.value === 'RESULT' ? { runIds: [...selection] } : { datasetIds: [...selection] }, () => load()); }, 'primary-btn bizop-danger');
+        view === 'RESULT' ? { runIds: [...selection] } : { datasetIds: [...selection] }, () => load()); }, 'primary-btn small bizop-danger');
+      for (const [value, label] of Object.entries(titles)) {
+        const item = button(label, () => {
+          if (view === value) return;
+          view = value; selecting = false; choose.textContent = '选取'; return load();
+        }, 'position-nav-item'); item.dataset.view = value; nav.append(item);
+      }
       function render() {
-        const isResult = view.value === 'RESULT'; const raw = view.value === 'RAW'; kind.disabled = isResult; del.hidden = !selecting;
+        const isResult = view === 'RESULT'; const raw = view === 'RAW'; kind.disabled = isResult; kindField.hidden = isResult; del.hidden = !selecting;
+        selectionHint.hidden = !selecting || isResult;
+        title.textContent = titles[view];
+        for (const item of nav.children) { const active = item.dataset.view === view; item.classList.toggle('active', active); item.setAttribute('aria-current', active ? 'page' : 'false'); }
         const headers = isResult ? ['起始日期', '终止日期', '表名', '结果版本', '更新时间', '操作'] : raw ? ['账期', '原表类型', '来源文件', '导入时间', '版本'] : ['账期', '表名', '版本', '生成时间'];
         const cells = rows.map((row) => {
           const values = isResult ? [row.startDate, row.endDate, row.tableName, `v${row.version}`, row.updatedAt.replace('T', ' ').replace('Z', ' UTC'), button('导出原表', () => exportObject('RESULT_FULL', row.objectId))]
@@ -189,18 +215,24 @@
       async function load(after = null) {
         const version = ++loadVersion;
         rows = []; selection.clear(); cursor = null; render();
-        const data = checked(await api.list({ view: view.value, kind: kind.value, operationMonth: month.value, limit: 200,
+        const data = checked(await api.list({ view, kind: kind.value, operationMonth: month.value, limit: 200,
           ...(after ? { cursor: after, generation } : {}) }));
         if (version !== loadVersion) return;
         rows = data.rows; cursor = data.nextCursor; generation = data.generation; selection.clear(); render();
       }
-      for (const item of [month, view, kind]) item.addEventListener('change', () => load().catch(showError));
-      dialog.body.append(controls, node('p', '每页最多 200 条。选取原表中的任一来源文件，将处理该类型、账期的整个当前版本及其配对校验表。'), content);
-      dialog.footer.prepend(first, next, choose, del); await load();
+      for (const item of [month, kind]) item.addEventListener('change', () => load().catch(showError));
+      pane.append(toolbar, selectionHint, content); layout.append(nav, pane); dialog.body.append(layout);
+      const paging = node('div', undefined, 'vcc-fin-op-manager-footer-left'); paging.append(first, next);
+      const actions = node('div', undefined, 'vcc-fin-op-manager-footer-right');
+      actions.append(choose, del, button('导出', () => openInputExport({ initialKind: view === 'RESULT' ? 'OP_RAW' : `${kind.value}_${view}` }), 'secondary-btn small'), button('返回', () => dialog.close(), 'secondary-btn small'));
+      dialog.footer.classList.add('vcc-fin-op-manager-footer'); dialog.footer.replaceChildren(paging, actions);
+      await load();
     }
-    const toolbar = node('div', undefined, 'bizop-toolbar'); const status = node('div', '正在读取模块状态…', 'status-box bizop-status'); status.setAttribute('role', 'status');
-    const importButton = button('导入文件', importFiles, 'primary-btn'); const runButton = button('开始运行', openRun, 'primary-btn');
-    const resultButton = button('导出校验结果表', openResults); const inputButton = button('导出数据', openInputExport); const managerButton = button('数据管理', openManager);
+    panel.classList.remove('pending-board'); panel.classList.add('acquiring-bill-currency-board', 'bizop-v327-board');
+    const status = node('div', undefined, 'status-box bizop-status'); status.setAttribute('role', 'status');
+    const statusContent = node('span', undefined, 'status-box-content'); const statusText = node('span', '正在读取模块状态…', 'status-box-text'); statusContent.append(statusText); status.append(statusContent);
+    const importButton = button('导入文件', importFiles); const runButton = button('开始运行', openRun, 'primary-btn');
+    const resultButton = button('导出校验结果表', openResults); const managerButton = button('数据管理', openManager);
     const reportButton = button('导出错误报告', () => exportObject('ERRORS', reportRef)); reportButton.hidden = true;
     const retry = button('重试恢复', async () => {
       const result = await perform('恢复检查', async () => { const state = await api.retryRecovery(); return { status: state.ready ? 'ok' : 'error', message: state.ready ? '恢复已完成' : '仍有未决任务或文件，请查看任务详情后重试' }; });
@@ -218,20 +250,25 @@
         cancelRequested = false; cancelButton.disabled = false; throw error;
       }
     }); cancelButton.hidden = true;
-    toolbar.append(importButton, runButton, resultButton, inputButton, managerButton);
+    const actionPair = node('div', undefined, 'pending-action-pair'); actionPair.append(importButton, runButton);
+    for (const [left, right] of [[actionPair, resultButton], [status, managerButton]]) {
+      const row = node('div', undefined, 'control-row'); const leftCell = node('div', undefined, 'cell left'); const rightCell = node('div', undefined, 'cell right');
+      leftCell.append(left); rightCell.append(right); row.append(leftCell, rightCell); panel.append(row);
+    }
     const footer = node('div', undefined, 'bizop-toolbar bizop-secondary'); footer.append(reportButton, retry, cancelButton);
-    panel.append(toolbar, status, footer);
+    panel.append(footer);
     async function refreshStatus(show = true) {
       if (!api) return;
       try {
         const info = await api.status(); enabled = info.mode === 'ACTIVE'; recoveryReady = info.recoveryReady === true;
-        if (!busy) for (const btn of [importButton, runButton, resultButton, inputButton, managerButton, reportButton]) btn.disabled = !enabled || !recoveryReady;
+        if (!busy) for (const btn of [importButton, runButton, resultButton, managerButton, reportButton]) btn.disabled = !enabled || !recoveryReady;
         retry.hidden = recoveryReady; retry.disabled = !enabled || busy;
+        updateFooter();
         if (show && !enabled) message('新区间功能正在准备，完成恢复与升级后开放入口', 'warning');
         else if (show && !recoveryReady) message('存在未决任务或文件，完成恢复后可继续操作', 'warning');
         else if (show) message('已就绪：导入文件后选择起止日期，核对全部 BU。');
         return info;
-      } catch (error) { enabled = false; for (const btn of [importButton, runButton, resultButton, inputButton, managerButton, reportButton]) btn.disabled = true; showError(error); return null; }
+      } catch (error) { enabled = false; for (const btn of [importButton, runButton, resultButton, managerButton, reportButton]) btn.disabled = true; showError(error); return null; }
     }
     async function setSelected(value) {
       selected = value; const version = ++routeVersion; panel.hidden = true;

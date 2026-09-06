@@ -1,5 +1,7 @@
 # PR5 实施记录
 
+2026-09-07 页面布局纠偏：此前单排主工具栏及主页面“导出数据”不符合 E5 §6 的 VCC 财务 OP 布局要求，数据管理分类下拉也偏离参考结构。修正范围、依据与验证见 [layout-correction.md](layout-correction.md)，保留原功能和恢复合同。
+
 ## Unknowns Register
 
 | 项目 | 分类 | 证据与处置 |

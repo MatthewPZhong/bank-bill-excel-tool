@@ -14,7 +14,7 @@ const source = path.resolve(__dirname, '../../src');
 const link = (file) => pathToFileURL(path.join(source, file)).href;
 const html = path.join(temp, 'fixture.html');
 fs.writeFileSync(html, `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>业务 OP 取消操作验证</title>
-${['fonts.css', 'styles-gemini.css', 'styles-gemini-extra.css', 'styles-biz-op-v327.css'].map((file) => `<link rel="stylesheet" href="${link(file)}">`).join('')}
+${['fonts.css', 'styles-gemini.css', 'styles-gemini-extra.css', 'styles-vcc-financial-op.css', 'styles-biz-op-v327.css'].map((file) => `<link rel="stylesheet" href="${link(file)}">`).join('')}
 <style>body{padding:40px;background:#f3f5ee}.control-board{display:block;width:100%;box-sizing:border-box;background:white;padding:24px}</style>
 <h1>业务 OP 数据核对</h1><section id="legacy"></section><section id="panel" class="control-board"></section>
 <script src="${link('renderer-biz-op-v327.js')}"></script></html>`);
@@ -78,7 +78,8 @@ const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       await js("document.querySelector('dialog select').value='run-1'"); await click('另存为差异结果');
     }
     if (scenario === 'raw-export') {
-      await click('导出数据'); await js("document.querySelector('dialog input').value='2026-09-01'"); await click('选择位置并导出');
+      await click('数据管理'); await until("Boolean(target('导出'))"); await click('导出');
+      await js("[...document.querySelectorAll('dialog')].at(-1).querySelector('input[type=date]').value='2026-09-01'"); await click('选择位置并导出');
     }
     if (['manager-export', 'delete', 'keep-delete'].includes(scenario)) {
       await click('数据管理'); await until("document.querySelector('dialog td')");
