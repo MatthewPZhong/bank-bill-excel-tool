@@ -1551,6 +1551,7 @@ function createServiceHost(options = {}) {
             'executor close acknowledgement'
           );
         }
+        record.closeAcknowledged = true;
         settleCloseWaiter(record, 'ack');
       } else if (message.operation === 'resource:request') {
         if (record.state !== 'ready') {
@@ -1618,6 +1619,7 @@ function createServiceHost(options = {}) {
       readyDeadlineAt: null,
       closeTimer: null,
       closeControlId: null,
+      closeAcknowledged: false,
       closeDeadlineAt: null,
       closeTimeoutMs: null,
       closePromise: null,
@@ -1660,7 +1662,13 @@ function createServiceHost(options = {}) {
         onMessage: (message) => handleMessage(record, message),
         onCancellationTerminal: () => routeCancellationTerminal(record),
         onError: (error) => { void fatal(record, error); },
-        onExit: (code, signal) => { void fatalExit(record, code, signal); }
+        onExit: (code, signal) => {
+          // 合法 ACK 与正常 exit 可以先于 closePromise 的继续执行到达。
+          // 原关闭流程仍负责等待载体及释放资源；无 ACK/异常退出保持失败。
+          if (record.state === 'closing' && record.closeAcknowledged
+              && code === 0 && (signal === null || signal === undefined)) return;
+          void fatalExit(record, code, signal);
+        }
       });
       if (!record.rawTransport || typeof record.rawTransport !== 'object' ||
           !record.rawTransport.ready || typeof record.rawTransport.ready.then !== 'function' ||

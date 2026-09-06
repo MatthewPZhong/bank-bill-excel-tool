@@ -105,6 +105,15 @@ function deferred(sourceKind) {
 // 每个 action 都是 literal inventory；sourceKind 是 prepare 接线/测试的审计标签，
 // 不参与运行时路径猜测。
 const TASK_FILE_PLAN_DEFINITIONS = Object.freeze({
+  'bizOpReconV327:import': eager('prepare-selected-inputs', 'operation'),
+  'bizOpReconV327:export:op-raw': eager('prepare-export-plan', 'operation'),
+  'bizOpReconV327:export:flow-raw': eager('prepare-export-plan', 'operation'),
+  'bizOpReconV327:export:op-check': eager('prepare-export-plan', 'operation'),
+  'bizOpReconV327:export:flow-check': eager('prepare-export-plan', 'operation'),
+  'bizOpReconV327:export:result-full': eager('prepare-export-plan', 'operation'),
+  'bizOpReconV327:export:result-diff': eager('prepare-export-plan', 'operation'),
+  'bizOpReconV327:export:errors': eager('prepare-export-plan', 'operation'),
+
   'acquiringBillCurrency:importBill': eager('prepare-selected-inputs', 'batch'),
   'acquiringBillCurrency:importFlow': eager('prepare-selected-inputs', 'batch'),
   'acquiringBillCurrency:run': eager('pre-worker-deterministic-outputs', 'batch'),

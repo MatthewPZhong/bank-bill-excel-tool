@@ -219,8 +219,8 @@ test.describe('重复入金匹配 UI / preload / IPC 接线', () => {
     );
     const inspectorFreezeAt = recovery.indexOf('inspectorRegistry.freeze()');
     const providerFreezeAt = recovery.indexOf('providerRegistry.freeze()');
-    const scanAt = recovery.indexOf('await coordinator.scanAndRecover()');
-    const readyAt = recovery.lastIndexOf('duplicateStartupRecoveryReady = true');
+    const scanAt = recovery.indexOf('await bizOpV327Module.recovery.run({ initialPlatformOnly: true })');
+    const readyAt = recovery.lastIndexOf('duplicateStartupRecoveryReady = bizOpV327Module.recovery.hasCompletedPlatformScan()');
     assert.ok(registerManualInspectorAt >= 0 && registerManualInspectorAt < inspectorFreezeAt);
     assert.ok(registerDuplicateInspectorAt >= 0 && registerDuplicateInspectorAt < inspectorFreezeAt);
     assert.ok(registerManualProviderAt >= 0 && registerManualProviderAt < providerFreezeAt);
@@ -233,6 +233,8 @@ test.describe('重复入金匹配 UI / preload / IPC 接线', () => {
         getter.indexOf('createDuplicateInboundMatchService({')
     );
     const initialize = extractFunction(main, 'initializeApplication');
+    assert.match(initialize, /await archiveCenterInitializationPromise;[\s\S]*?hasCompletedPlatformScan\(\)[\s\S]*?BACKGROUND_RECOVERY_SCAN_PENDING/);
+    assert.match(extractFunction(main, 'initializeArchiveCenter'), /ownerName: 'biz-op-v327'[\s\S]*?await bizOpV327Module.recovery.run\(\)[\s\S]*?duplicateStartupRecoveryReady = bizOpV327Module.recovery.hasCompletedPlatformScan\(\)/);
     assert.ok(
       initialize.indexOf('await initializeBackgroundExecutionRecovery()') <
         initialize.indexOf('schedulePreFundReconciliationStartupCleanup()')
