@@ -1,5 +1,7 @@
 # PR6 验证记录
 
+2026-09-06 PR230—235 评论修复汇总：代码基线 `b5f8a9d5`，完整 `npm run release-check` 退出码 0，lint / smoke PASS；7131 PASS / 3 既有 SKIP / 0 FAIL（7134 项、456 文件），53 个集成脚本全部通过、2488/2488。Electron 合并后升级另跑 30 PASS / 0 FAIL / 0 SKIP。各修复专项、真实 UI 输入与原始证据位置见 [本轮修复记录](review-remediation.md)。以下为初始 PR6 历史验证，本轮没有重开生产门禁或改动共享恢复核心。
+
 宿主：macOS arm64。仅操作隔离 temp 主库/Archive、合成旧月库及新 XLSX；生产配置 disabled，package.version 保持 3.2.6。
 
 | 检查 | 实际结果 |
