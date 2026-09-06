@@ -121,7 +121,7 @@ function createBizOpRecoverySources({ catalog, protection, payloadStore, readRep
       outcome = 'compensated'; reason = 'FINALIZATION_RECORDED';
     } else if (receipt && (category === 'OPERATION' || op.action === 'EXPORT')) {
       outcome = 'committed'; reason = 'BUSINESS_RECEIPT';
-    } else if (op.action === 'UPGRADE') {
+    } else if (op.action === 'UPGRADE' && category === 'OPERATION') {
       reason = 'ACTIVATION_AUTHORITY_REQUIRED';
     } else if (closed && (op.action !== 'EXPORT' || publisherFact?.state === 'NOT_COMMITTED' || op.input_obligation === 'COMPLETE')) {
       outcome = 'not-committed'; reason = 'MAIN_FINALIZATION_REQUIRED';

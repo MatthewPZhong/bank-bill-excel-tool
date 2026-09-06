@@ -157,7 +157,7 @@ function registerBizOpV327Handlers({ ipcMain, getModule, businessOperationRegist
     if (getWindow) sender(event);
     const operation = businessOperationRegistry.begin({ channel: PREFIX + 'recovery:retry', moduleKey: '业务OP数据核对', functionKey: '重试恢复' });
     if (!operation.accepted) return operation;
-    try { return await getModule().recovery.run(); }
+    try { return await getModule().retryRecovery(); }
     finally { businessOperationRegistry.end(operation.token); }
   });
 }

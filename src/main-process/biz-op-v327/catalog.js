@@ -370,9 +370,23 @@ function createBizOpCatalog(db, { assertCommitReady }) {
       return addReceipt(op, control().generation + 1, { datasetIds: selected.datasetIds, runIds: selected.runIds, deleteMode: selected.deleteMode });
     });
   }
+  function commitActivation({ taskRunId, intentDigest }) {
+    const saved = committed(taskRunId, intentDigest, 'UPGRADE');
+    if (saved) return saved;
+    return transaction(() => {
+      const op = operation(taskRunId); assertTask(op); assertCommitReady(op);
+      const activation = db.prepare('SELECT * FROM biz_op_v327_activation WHERE singleton=1').get();
+      if (!activation || activation.task_run_id !== taskRunId || activation.intent_digest !== intentDigest
+          || activation.phase !== 'ACTIVE' || control().mode !== 'MIGRATING'
+          || db.prepare('SELECT 1 FROM biz_op_v327_activation_files WHERE reclaimed=0 LIMIT 1').get()) fail('BIZOP_ACTIVATION_INCOMPLETE');
+      const receipt = addReceipt(op, control().generation + 1, { activated: true, inventoryDigest: activation.inventory_digest });
+      db.prepare("UPDATE biz_op_v327_control SET mode='ACTIVE',cleanup_completed_at=?,activated_at=? WHERE singleton=1").run(now(), now());
+      return receipt;
+    });
+  }
   return Object.freeze({ db, archive, transaction, now, control, operation, task, assertTask, prepare,
     receipt, receiptState, readyHold, original, releaseOwnedHolds, version, enqueueReclaim, commitImport,
-    commitRun, deleteIntent, commitDelete });
+    commitRun, deleteIntent, commitDelete, commitActivation });
 }
 
 module.exports = { createBizOpCatalog };

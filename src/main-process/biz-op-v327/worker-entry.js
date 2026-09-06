@@ -15,6 +15,7 @@ const { runImportPipeline } = require('./import-pipeline');
 const { runComputePipeline } = require('./compute-pipeline');
 const { runExportPipeline } = require('./export-pipeline');
 const { runDeletePipeline } = require('./delete-pipeline');
+const { runUpgradePipeline } = require('./upgrade-pipeline');
 
 let emit;
 let terminal = false;
@@ -57,6 +58,11 @@ async function validateCandidate(input, envelope) {
     const result = await runDeletePipeline({ payloadStore: createBizOpPayloadStore({ userDataDir: plan.userDataDir }),
       taskRunId: plan.taskRunId, candidateRef: plan.candidateRef, intentDigest: plan.intentDigest,
       sourceRef: plan.sourceRef, cancelToken: { get cancelled() { return cancelled; } } });
+    return { ...result, planDigest: input.planDigest };
+  }
+  if (plan.phase === 'upgrade-legacy-v1' && envelope.actionKey === 'biz-op-v327:upgrade-preflight') {
+    const result = await runUpgradePipeline({ payloadStore: createBizOpPayloadStore({ userDataDir: plan.userDataDir }),
+      plan, cancelToken: { get cancelled() { return cancelled; } } });
     return { ...result, planDigest: input.planDigest };
   }
   // 保留 PR1b 的最小候选验证入口，独立覆盖目录提交/进程崩溃合同。

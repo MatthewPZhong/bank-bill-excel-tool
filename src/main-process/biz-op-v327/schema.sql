@@ -357,3 +357,29 @@ CREATE TABLE IF NOT EXISTS biz_op_v327_publications (
  updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS biz_op_v327_prepared_phase ON biz_op_v327_prepared_ops(phase,task_run_id);
+
+-- 清旧阶段收据与最终业务收据分开；仅 ACTIVE 写入普通 UPGRADE 收据。
+CREATE TABLE IF NOT EXISTS biz_op_v327_activation (
+ singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+ task_run_id TEXT NOT NULL UNIQUE REFERENCES archive_task_runs(task_run_id) ON DELETE RESTRICT,
+ intent_digest TEXT NOT NULL,
+ gates_digest TEXT NOT NULL,
+ phase TEXT NOT NULL CHECK(phase IN ('MIGRATING','LEGACY_QUIESCED','LEGACY_DB_CLEARED','LEGACY_FILES_RECLAIMED','ACTIVE')),
+ inventory_digest TEXT,
+ updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS biz_op_v327_activation_stages (
+ task_run_id TEXT NOT NULL REFERENCES biz_op_v327_activation(task_run_id) ON DELETE RESTRICT,
+ phase TEXT NOT NULL,
+ evidence_digest TEXT NOT NULL,
+ completed_at TEXT NOT NULL,
+ PRIMARY KEY(task_run_id,phase)
+);
+CREATE TABLE IF NOT EXISTS biz_op_v327_activation_files (
+ task_run_id TEXT NOT NULL REFERENCES biz_op_v327_activation(task_run_id) ON DELETE RESTRICT,
+ file_name TEXT NOT NULL,
+ identity_json TEXT NOT NULL,
+ sha256 TEXT NOT NULL,
+ reclaimed INTEGER NOT NULL DEFAULT 0 CHECK(reclaimed IN (0,1)),
+ PRIMARY KEY(task_run_id,file_name)
+);

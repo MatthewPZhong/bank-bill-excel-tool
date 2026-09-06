@@ -556,14 +556,14 @@ test('Biz main seam 冻结三源/export locator，run 与月末 copy owner 排�
   const ownerEnd = mainSource.indexOf('postOutboxStartupHooks:', ownerStart);
   const owners = mainSource.slice(ownerStart, ownerEnd);
   assert.ok(owners.indexOf("ownerName: 'Pending runs'") < owners.indexOf("ownerName: 'Biz OP runs'"));
-  const bizOwnerStart = mainSource.indexOf('function recoverBizOpRunsBeforeInterruptedSweep()');
+  const bizOwnerStart = mainSource.indexOf('function recoverBizOpRunsBeforeInterruptedSweep(');
   const bizOwnerEnd = mainSource.indexOf('function recoverPreFundRunsBeforeInterruptedSweep()', bizOwnerStart);
   const bizOwner = mainSource.slice(bizOwnerStart, bizOwnerEnd);
   assert.ok(
     bizOwner.indexOf('recoverRunReceipts') < bizOwner.indexOf('recoverMonthEndCopyIntents'),
     '先恢复 Biz run receipt，再恢复月末 copy intent'
   );
-  assert.match(mainSource, /return bizOpReconRunData\.finalizeRunTerminalIntent\(/);
+  assert.match(mainSource, /withLegacyRecovery\([\s\S]*?bizOpReconRunData\.finalizeRunTerminalIntent\(/);
   const runHandlerStart = mainSource.indexOf("trackedIpcHandle('bizOpRecon:run'");
   const runHandlerEnd = mainSource.indexOf("ipcMain.handle('bizOpRecon:export:list-success-dates'", runHandlerStart);
   assert.doesNotMatch(mainSource.slice(runHandlerStart, runHandlerEnd), /runLocator\s*}/);

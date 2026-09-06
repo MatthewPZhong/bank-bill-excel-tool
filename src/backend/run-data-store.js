@@ -23,6 +23,8 @@
 
 'use strict';
 
+const { assertLegacyPath, trackLegacyConnection } = require('./biz-op-legacy-guard');
+
 const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
@@ -1039,10 +1041,12 @@ const MODULE_DDL = Object.freeze({
 function openSideDb(userDataDir, module, monthKey) {
   assertModule(module);
   assertMonthKey(monthKey);
+  if (module === MODULE_BIZ_OP) assertLegacyPath(userDataDir);
   const dir = moduleDir(userDataDir, module);
   fs.mkdirSync(dir, { recursive: true });
   const filePath = sideDbPath(userDataDir, module, monthKey);
   const db = new DatabaseSync(filePath);
+  if (module === MODULE_BIZ_OP) trackLegacyConnection(userDataDir, db);
   for (const sql of SIDE_DB_PRAGMA_STATEMENTS) db.exec(sql);
   if (module === MODULE_BIZ_OP) {
     ensureBizOpReconTablesSupport(db);
@@ -1068,7 +1072,9 @@ function openExistingSideDb(filePath) {
   if (!fs.existsSync(filePath)) {
     throw new Error(`run-data-store：侧库文件不存在「${filePath}」`);
   }
+  if (path.basename(path.dirname(filePath)) === MODULE_BIZ_OP) assertLegacyPath(path.dirname(path.dirname(path.dirname(filePath))));
   const db = new DatabaseSync(filePath);
+  if (path.basename(path.dirname(filePath)) === MODULE_BIZ_OP) trackLegacyConnection(path.dirname(path.dirname(path.dirname(filePath))), db);
   for (const sql of SIDE_DB_PRAGMA_STATEMENTS) db.exec(sql);
   return db;
 }
@@ -1092,6 +1098,7 @@ function deleteSideDb(userDataDir, module, monthKey) {
 
 // 按绝对路径删侧库文件（孤儿扫描用：扫到的文件名直接删）。
 function deleteSideDbByPath(filePath) {
+  if (path.basename(path.dirname(filePath)) === MODULE_BIZ_OP) assertLegacyPath(path.dirname(path.dirname(path.dirname(filePath))));
   let deleted = false;
   for (const suffix of ['', '-wal', '-shm']) {
     const p = filePath + suffix;

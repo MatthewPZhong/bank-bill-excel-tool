@@ -18,13 +18,17 @@ const { createBizOpMetadata } = require('./metadata');
 const { createBizOpDeletePreview } = require('./delete-preview');
 const { createBizOpDeleteCoordinator } = require('./delete-main');
 const { createDeletePreservation } = require('./delete-preservation');
+const { createBizOpUpgrade } = require('./upgrade-main');
+const { RELEASE_GATES, evaluateReleaseGates } = require('./release-gates');
 const { ACTIONS, fail, hash } = require('./contracts');
 
-function createBizOpV327Module({ db, userDataDir, readRepository, getArchiveService, getRuntime, budgetOptions }) {
+function createBizOpV327Module({ db, userDataDir, readRepository, getArchiveService, getRuntime, budgetOptions, releaseGates = RELEASE_GATES, productionRequests = false }) {
+  releaseGates = structuredClone(releaseGates);
+  const releaseDecision = evaluateReleaseGates(releaseGates);
   const catalog = createBizOpCatalog(db, { assertCommitReady(op) {
     admission.assertExclusive();
     protection.refresh(op.task_run_id);
-    if (!['PREPARING', 'SEALED'].includes(op.phase) || catalog.task(op.task_run_id).status !== 'running'
+    if (!['PREPARING', 'SEALED'].includes(op.phase) || !(op.action === 'UPGRADE' ? ['running', 'interrupted'] : ['running']).includes(catalog.task(op.task_run_id).status)
         || !protection.closed(op.task_run_id)) {
       fail('BIZOP_COMMIT_CLOSURE_REQUIRED');
     }
@@ -53,6 +57,8 @@ function createBizOpV327Module({ db, userDataDir, readRepository, getArchiveServ
       expectedGeneration: catalog.control().generation });
   }
   function prepareDispatch({ taskContext, actionKey, plan: input, reads = [] }) {
+    if (productionRequests && (!releaseDecision.ready || (ACTIONS[actionKey]?.kind === 'UPGRADE'
+      ? catalog.control().mode !== 'MIGRATING' : catalog.control().mode !== 'ACTIVE'))) fail('BIZOP_V327_NOT_ENABLED');
     if (ACTIONS[actionKey]?.kind === 'EXPORT') admission.assertTaskAccess(taskContext.taskRunId);
     else admission.assertExclusive();
     const jobId = `bizop-job-${randomUUID()}`;
@@ -64,7 +70,7 @@ function createBizOpV327Module({ db, userDataDir, readRepository, getArchiveServ
       path: payloadStore.resolve(relative), digest: document.digest, reads };
     dispatchPlans.set(ref, dispatchPlan);
     dispatchPlansByJob.set(jobId, dispatchPlan);
-    return { actionKey, operationKey: taskContext.operationKey, jobId, workerInstanceId: `bizop-worker-${randomUUID()}`,
+    return { ...(productionRequests ? { production: true } : {}), actionKey, operationKey: taskContext.operationKey, jobId, workerInstanceId: `bizop-worker-${randomUUID()}`,
       input: { planRef: ref }, context: { kind: 'operation', value: Object.fromEntries(
         ['taskRunId', 'taskKey', 'moduleId', 'parentRunId', 'operationKey'].map((key) => [key, taskContext[key]])) } };
   }
@@ -96,6 +102,7 @@ function createBizOpV327Module({ db, userDataDir, readRepository, getArchiveServ
   const previews = createBizOpDeletePreview({ catalog, admission });
   const deletion = createBizOpDeleteCoordinator({ ...mainBindings, previews, preservation });
   sources.setPublication(publication);
+  const activation = createBizOpUpgrade({ ...mainBindings, readRepository, releaseGates });
   const imports = createBizOpImportCoordinator(mainBindings);
   const compute = createBizOpComputeCoordinator(mainBindings);
   sources.setBeforeFinalize((taskRunId) => imports.restoreDiagnostic(taskRunId));
@@ -162,14 +169,27 @@ function createBizOpV327Module({ db, userDataDir, readRepository, getArchiveServ
       taskRunIds.push(row.task_run_id);
       for (const batch of db.prepare('SELECT id FROM archive_batches WHERE task_run_id=?').iterate(row.task_run_id)) batchIds.push(batch.id);
     }
+    if (catalog.control().mode !== 'DISABLED') {
+      for (const row of db.prepare(`SELECT task_run_id FROM archive_task_runs WHERE module_id='biz-op-recon'
+        AND task_key GLOB 'bizOpRecon:*' AND status NOT IN ('succeeded','failed','cancelled')`).iterate()) {
+        if (taskRunIds.length >= 4096) fail('BIZOP_PROTECTED_TASK_INVENTORY_LIMIT');
+        taskRunIds.push(row.task_run_id);
+        for (const batch of db.prepare('SELECT id FROM archive_batches WHERE task_run_id=?').iterate(row.task_run_id)) batchIds.push(batch.id);
+      }
+    }
     return { taskRunIds, batchIds };
   }
   return Object.freeze({ catalog, payloadStore, admission, protection, sources, recovery, plan, runtimeBindings,
     prepareOperation, prepareDispatch, runCandidateValidation, runImport: imports.runImport, runCompute: compute.runCompute,
-    runExport: exports.runExport, runDelete: deletion.runDelete, metadata, previews, publication, protectedTasks,
+    runExport: exports.runExport, runDelete: deletion.runDelete, metadata, previews, publication, protectedTasks, activation,
+    async retryRecovery() { if (activation.needed()) await activation.run(); return recovery.run(); },
     readyHold: catalog.readyHold,
-    assertBusinessEnabled() { fail('BIZOP_V327_NOT_ENABLED', '业务 OP 新区间功能尚未启用'); },
-    getStatus: () => ({ mode: catalog.control().mode, recoveryReady: admission.snapshot().recoveryReady }) });
+    assertBusinessEnabled() {
+      if (!releaseDecision.ready || catalog.control().mode !== 'ACTIVE') fail('BIZOP_V327_NOT_ENABLED', '业务 OP 新区间功能尚未启用');
+      activation.verifyActive();
+      if (!admission.snapshot().recoveryReady) fail('BIZOP_RECOVERY_REQUIRED');
+    },
+    getStatus: () => ({ mode: catalog.control().mode, recoveryReady: admission.snapshot().recoveryReady, activation: activation.status() }) });
 }
 
 module.exports = { createBizOpV327Module };

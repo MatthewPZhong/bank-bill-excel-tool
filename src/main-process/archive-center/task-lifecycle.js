@@ -1442,6 +1442,10 @@ class TaskLifecycle {
           businessError = error;
         }
       }
+      // 无文件任务与 File Task 使用同一提交观察合同；拒绝时保留原任务给恢复 owner。
+      if (typeof payload.beforeTerminalSettlement === 'function') {
+        await payload.beforeTerminalSettlement({ context, businessResult, businessError });
+      }
       let settled = { handled: false };
       if (batchContext) {
         settled = await settleArtifacts({

@@ -1,4 +1,6 @@
 const { initializeActionTaskBindingStartup } = require('./main-process/background-execution/action-task-binding-registry');
+const { legacyMode, withLegacyRecovery, retiredError } = require('./backend/biz-op-legacy-guard');
+const { registerWithLegacyGuard } = require('./main-process/biz-op-v327/legacy-ipc');
 const { createBizOpV327Module } = require('./main-process/biz-op-v327/module');
 const { registerBizOpV327Handlers } = require('./main-process/biz-op-v327/ipc');
 const { ACTIONS: BIZ_OP_V327_ACTIONS } = require('./main-process/biz-op-v327/contracts');
@@ -4781,7 +4783,8 @@ function recoverPendingRunsBeforeInterruptedSweep() {
   });
 }
 
-function recoverBizOpRunsBeforeInterruptedSweep() {
+function recoverBizOpRunsBeforeInterruptedSweep({ activationOwner = false } = {}) {
+  if (!activationOwner && database?.db && legacyMode(database.db) !== 'DISABLED') return Promise.resolve({ retired: true });
   if (!database || !database.db || !archiveCenterService) {
     throw new Error('Biz OP run Archive 恢复依赖尚未就绪');
   }
@@ -4942,7 +4945,8 @@ function initializeArchiveCenter() {
       {
         ownerName: 'biz-op-v327',
         async recover() {
-          if (bizOpV327Module && bizOpV327Module.recovery.openObligations()) {
+          if (bizOpV327Module?.activation.needed()) await bizOpV327Module.activation.run({ quiesceOnly: true });
+          if (bizOpV327Module && !bizOpV327Module.activation.needed() && bizOpV327Module.recovery.openObligations()) {
             const result = await bizOpV327Module.recovery.run();
             duplicateStartupRecoveryReady = bizOpV327Module.recovery.hasCompletedPlatformScan();
             appendActivityLogEntry({ level: result.ready ? 'info' : 'warning', source: 'main',
@@ -4980,6 +4984,9 @@ function initializeArchiveCenter() {
       }
     ],
     postOutboxStartupHooks: [{
+      hookName: 'BizOP activation and recovery',
+      async run() { if (bizOpV327Module?.activation.needed()) return bizOpV327Module.retryRecovery(); }
+    }, {
       hookName: 'VCC import lineage/hold reconcile',
       run: reconcileVccImportArchiveBeforeRetentionCleanup
     }],
@@ -5016,6 +5023,23 @@ function initializeArchiveCenter() {
     operationTracker: archiveOperationTracker,
     persistTerminalIntent: (payload) => archiveCenterService.persistTaskTerminalIntent(payload),
     onArchiveWarning: reportArchiveFailure
+  });
+  bizOpV327Module.activation.bindHost({
+    assertStartAllowed() {
+      if (mainWindow || businessOperationRegistry.listActive().length > 0 || !app.hasSingleInstanceLock()) {
+        throw Object.assign(new Error('激活必须在持有单实例锁且业务窗口尚未开放的启动阶段执行'), { code: 'BIZOP_ACTIVATION_STARTUP_REQUIRED' });
+      }
+    },
+    getTaskLifecycle: () => archiveTaskLifecycle,
+    getRuntime: () => backgroundExecutionRuntimeManager.get(),
+    getArchiveService: () => archiveCenterService.service,
+    recoverLegacy: () => recoverBizOpRunsBeforeInterruptedSweep({ activationOwner: true }),
+    async flushLegacyOutbox() {
+      const result = await archiveCenterService.flushOutbox();
+      if (!result || result.remaining !== 0) throw Object.assign(new Error('旧任务 outbox 未完成'), { code: 'BIZOP_LEGACY_OUTBOX_PENDING' });
+      await archiveCenterService.service.replayFlowBindIntents();
+      await archiveCenterService.service.replayTaskFlowBindIntents();
+    }
   });
   archiveCenterInitializationPromise = archiveCenterService.initialize().catch((error) => {
     appendActivityLogEntry({
@@ -19366,11 +19390,13 @@ async function finalizeArchiveTerminalIntent(payload) {
     });
   }
   if (payload && payload.route && payload.route.route === 'biz-op-run') {
-    return bizOpReconRunData.finalizeRunTerminalIntent({
+    const mode = legacyMode(database.db);
+    if (mode === 'ACTIVE' || ['LEGACY_DB_CLEARED', 'LEGACY_FILES_RECLAIMED'].includes(bizOpV327Module?.activation.status().phase)) throw retiredError();
+    return withLegacyRecovery(path.dirname(database.dbPath), () => bizOpReconRunData.finalizeRunTerminalIntent({
       ...payload,
       userDataDir: path.dirname(database.dbPath),
       mainDb: database.db
-    });
+    }));
   }
   if (payload && payload.route && payload.route.route === 'pre-fund-run') {
     return finalizePreFundTerminalIntent({
@@ -22014,7 +22040,7 @@ function registerAllIpcHandlers() {
   registerTemplateHandlers();
   registerBigAccountHandlers();
   registerBigAccountOrderHandlers();
-  registerFileHandlers();
+  registerWithLegacyGuard(ipcMain, () => database?.db, registerFileHandlers);
   registerNewAccountHandlers();
   registerPreFundReconciliationHandlers();
   registerDuplicateInboundMatchHandlers();
@@ -22030,7 +22056,7 @@ async function initializeBackgroundExecutionRecovery() {
   const inspectorRegistry = createInspectorRegistry();
   const providerRegistry = createSettlementRecoveryProviderRegistry();
   bizOpV327Module = createBizOpV327Module({ db: database.db, userDataDir: path.dirname(database.dbPath),
-    readRepository: recoveryControlReadRepository,
+    readRepository: recoveryControlReadRepository, productionRequests: true,
     getRuntime: () => backgroundExecutionRuntimeManager.get(),
     getArchiveService: () => archiveCenterService && archiveCenterService.service });
   bizOpV327Module.sources.register(inspectorRegistry, providerRegistry);
@@ -22493,6 +22519,7 @@ function runStartupPostSetup() {
       if (!database || !database.db) return;
       const userDataDir = path.dirname(database.dbPath);
       for (const [domain, runData] of [['biz-op-recon', bizOpReconRunData], ['bank-bu-recon', bankBuReconRunData]]) {
+        if (domain === 'biz-op-recon' && legacyMode(database.db) !== 'DISABLED') continue;
         try {
           const stats = runData.reconcileOrphans({ userDataDir, mainDb: database.db });
           if (stats && (stats.deletedOrphanFiles.length > 0 || stats.invalidatedRuns.length > 0)) {

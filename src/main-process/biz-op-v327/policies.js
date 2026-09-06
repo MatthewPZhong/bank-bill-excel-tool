@@ -3,8 +3,11 @@
 const { ACTIONS, snapshot } = require('./contracts');
 const candidate = require('./candidate-policy.json');
 const exported = require('./export-policy.json');
+const { RELEASE_GATES, evaluateReleaseGates } = require('./release-gates');
 
-const BIZ_OP_V327_POLICIES = Object.freeze(Object.entries(ACTIONS).map(([actionKey, action]) => {
+function buildBizOpPolicies(gates = RELEASE_GATES) {
+const decision = evaluateReleaseGates(gates);
+return Object.freeze(Object.entries(ACTIONS).map(([actionKey, action]) => {
   const policy = structuredClone(action.kind === 'EXPORT' ? exported : candidate);
   policy.actionKey = actionKey;
   policy.entryKey = `executor.${actionKey}`;
@@ -16,8 +19,12 @@ const BIZ_OP_V327_POLICIES = Object.freeze(Object.entries(ACTIONS).map(([actionK
     policy.artifacts.businessValidatorKey = `business-validator.${actionKey}`;
     policy.artifacts.publisherKey = `publisher.${actionKey}`;
   }
+  if (decision.ready) policy.production = { enabled: true, effectiveMode: 'thread-single', effectiveWorkerCount: 1,
+    recoveryStatus: 'proven', evidenceStatus: 'release-pass', downgradeReason: null, benchmarkEvidenceId: gates.actions[actionKey].reference };
   return snapshot(policy);
 }));
+}
+const BIZ_OP_V327_POLICIES = buildBizOpPolicies();
 
 function validateBizOpCandidateResult(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
@@ -36,4 +43,4 @@ Object.defineProperty(validateBizOpCandidateResult, 'allowFinanceSafeValue', {
 // 导出只返回候选证据引用；实际有界证据仍由 Main 按原 plan 和 FilePlan 核对。
 const validateBizOpExportResult = validateBizOpCandidateResult;
 
-module.exports = { BIZ_OP_V327_POLICIES, validateBizOpCandidateResult, validateBizOpExportResult };
+module.exports = { buildBizOpPolicies, BIZ_OP_V327_POLICIES, validateBizOpCandidateResult, validateBizOpExportResult };

@@ -213,7 +213,12 @@ test('E04-A/B policy 与 Main source selector 保持 production false，真实�
   assert.equal((bizOpBinding.match(/backgroundExecutionRuntimeManager\.get\(\)/g) || []).length, 1);
   const bizOpIpcBinding = mainSource.match(/registerBizOpV327Handlers\(\{[\s\S]*?\}\);/)[0];
   assert.equal((bizOpIpcBinding.match(/backgroundExecutionRuntimeManager\.get\(\)/g) || []).length, 1);
-  const legacySource = mainSource.replace(bizOpBinding, '').replace(bizOpIpcBinding, '');
+  const activationStart = mainSource.indexOf('bizOpV327Module.activation.bindHost({');
+  const activationEnd = mainSource.indexOf('archiveCenterInitializationPromise = archiveCenterService.initialize()', activationStart);
+  assert.ok(activationStart > 0 && activationEnd > activationStart);
+  const activationBinding = mainSource.slice(activationStart, activationEnd);
+  assert.equal((activationBinding.match(/backgroundExecutionRuntimeManager\.get\(\)/g) || []).length, 1);
+  const legacySource = mainSource.replace(bizOpBinding, '').replace(bizOpIpcBinding, '').replace(activationBinding, '');
   assert.equal((legacySource.match(/backgroundExecutionRuntimeManager\.get\(\)/g) || []).length, 14);
   assert.equal((mainSource.match(/generateValidateAndPublishToolboxArtifact\(\{/g) || []).length, 2);
   assert.equal((mainSource.match(/generateValidateAndPublishMultiOutput\(\{/g) || []).length, 1);

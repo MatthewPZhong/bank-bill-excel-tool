@@ -21,11 +21,11 @@ const { createRecoveryControlRepository } = require('../../src/main-process/back
 
 async function createHost(t, options = {}) {
   const root = options.root || fs.mkdtempSync(path.join(os.tmpdir(), 'bizop-import-host-'));
-  const db = new DatabaseSync(path.join(root, 'main.sqlite'));
+  const db = new DatabaseSync(path.join(root, options.dbFileName || 'main.sqlite'));
   db.exec('PRAGMA foreign_keys=ON');
   let service; let runtime;
   const readRepository = createRecoveryControlReadRepository(db);
-  const module = createBizOpV327Module({ db, userDataDir: root, readRepository, getArchiveService: () => service, getRuntime: () => runtime });
+  const module = createBizOpV327Module({ ...options.moduleOptions, db, userDataDir: root, readRepository, getArchiveService: () => service, getRuntime: () => runtime });
   const inspectors = createInspectorRegistry(); const providers = createSettlementRecoveryProviderRegistry();
   module.sources.register(inspectors, providers); inspectors.freeze(); providers.freeze();
   const platform = createStartupRecoveryCoordinator({ readRepository, inspectorRegistry: inspectors, providerRegistry: providers,
