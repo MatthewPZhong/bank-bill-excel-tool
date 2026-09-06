@@ -10,7 +10,7 @@ macOS arm64，真实合成 XLSX、临时主库/Archive/后台 worker/Publisher�
 | 实际页面组件 | 11 PASS / 0 FAIL，独立 Electron 窗口、合成 API；4 张截图逐张检查；无真实用户数据 |
 | 第一次完整 release-check | lint/smoke PASS；7076 PASS / 3 既有 SKIP / 3 FAIL，7082 项、454 文件，301599 ms；失败为原 IPC 清单固定数量/尚未暴露 V327 的旧断言，未进入集成层 |
 | 清单修订专项 | 35 PASS / 0 FAIL；Main+preload+V327 注册器精确集合，71 file/63 no-file 不变，128 exclude；Toolbox 原 14 处装配检查保持 |
-| 完整 release-check 重跑 | RUNNING，结果补充到本记录；不能把第一次或专项成绩写成全量 PASS |
+| 完整 release-check 重跑 | PASS，退出码 0；lint/smoke PASS；7079 PASS / 3 既有 SKIP / 0 FAIL，7082 项、454 文件，177412 ms；53 个集成脚本全部通过，2488/2488，466927 ms |
 | check-vars | ipcRenderer、MODULES、dialog、elements、state；关联检查见 review.md |
 | git diff --check | PASS |
 
