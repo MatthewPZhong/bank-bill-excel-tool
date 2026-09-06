@@ -33,3 +33,5 @@
 - 元数据路由/来源项/part 合计 4096 是有界缓存初值，超限失败且扫描不完整；不是截断数组或按业务行数过滤。64 KiB manifest 上限继续保留，数量极端时可能先触发该限制。
 - 追加 opt-in `strictClose`，用于 BizOP 保留 SST 关闭错误与文件；旧调用者默认关闭行为保持。不以 writer.finish 或 report producer 业务失败替代 PR1a 的实际载体退出事实。
 - PR1b 的真实 Windows 结果及同名文件重试持久化修复已纳入基线；原 E5 包未改写，没有生成 E6。
+
+- PR3 交叉复核发现日期接受矩阵遗漏：普通 General 数字曾被当作日期序号，八位 YYYYMMDD 文本尚未接受。已按获批 E02 修正，复用已有 number-format 分类器；新增真实 XLSX 的两种日期系统/格式及八位日期、非法日期拒绝验证。Electron 导入全模块最终 15 PASS / 0 FAIL（含新增 1 项），旧输出和解析核心未改。

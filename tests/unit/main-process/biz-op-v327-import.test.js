@@ -96,13 +96,33 @@ test('E01 数值身份与 E02 日期系统不使用本机时区或丢失前导�
   assert.equal(accountText({ cellType: 'text', decodedSemanticValue: ' 00012345678901234567890 ' }), '00012345678901234567890');
   for (const raw of ['-1', '1.2', '1234567890123456']) assert.throws(() => accountText(number(raw)));
   assert.throws(() => accountText(number('123', '0.00')));
-  assert.equal(dateText({ ...number('1'), sourceDateSystem: 1900 }), '1900-01-01');
-  assert.equal(dateText({ ...number('0.5'), sourceDateSystem: 1904 }), '1904-01-01');
-  assert.throws(() => dateText({ ...number('60'), sourceDateSystem: 1900 }));
+  assert.equal(dateText({ ...number('1', 'yyyy-mm-dd'), sourceDateSystem: 1900 }), '1900-01-01');
+  assert.equal(dateText({ ...number('0.5', 'yyyy-mm-dd'), sourceDateSystem: 1904 }), '1904-01-01');
+  assert.throws(() => dateText({ ...number('60', 'yyyy-mm-dd'), sourceDateSystem: 1900 }));
+  assert.throws(() => dateText({ ...number('46242'), sourceDateSystem: 1900 }));
+  assert.equal(dateText({ cellType: 'text', decodedSemanticValue: '20260808' }), '2026-08-08');
   for (const token of ['09/06/2026', '2026-02-30', '2026-09-06T00:00:00Z', '2026-09-06T00:00:00+08:00']) {
     assert.throws(() => dateText({ cellType: 'text', decodedSemanticValue: token }));
   }
   assert.equal(dateText({ cellType: 'date', rawLexicalValue: '2026-09-06T23:12:00', decodedSemanticValue: {} }), '2026-09-06');
+});
+
+durableDirectoryTest('真实 XLSX 日期序号须具备日期格式，1900/1904 与八位日期文本均按批准 E02 解析', async (t) => {
+  const accepted = fixture(t);
+  const good = await run(accepted, [
+    { rowCount: 1, row: () => flowRow({ date: { t: 'n', v: '46242', s: 2 } }) },
+    { date1904: true, rowCount: 1, row: () => flowRow({ date: { t: 'n', v: '44780.5', s: 2 } }) },
+    { rowCount: 1, row: () => flowRow({ date: '20260808' }) }
+  ]);
+  assert.equal(good.result.batchRejected, false, JSON.stringify(good.result));
+  assert.equal(good.result.acceptedRows, 3); assert.equal(good.result.references.length, 1);
+  const manifest = readVerifiedManifest(await accepted.store.verifyManifest(`inputs/${good.result.references[0].objectId}/manifest.json`, good.result.references[0].digest));
+  assert.equal(manifest.catalog.dataDate, '2026-08-08');
+  const rejected = fixture(t);
+  const bad = await run(rejected, [{ rowCount: 3, row: (i) => flowRow({ date: i === 0 ? { t: 'n', v: '46242' }
+    : i === 1 ? '20260230' : { t: 'n', v: '60', s: 2 } }) }]);
+  assert.equal(bad.result.batchRejected, true); assert.equal(bad.result.rowErrorCount, 3);
+  assert.equal(bad.result.references.length, 0);
 });
 test('SST 中文/emoji 字节与条目双限、超大单条不缓存、命中不重复收费，旧默认保持', async (t) => {
   const f = fixture(t);

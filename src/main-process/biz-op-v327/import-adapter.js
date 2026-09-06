@@ -1,6 +1,7 @@
 'use strict';
 
 const { BIZ_OP_HEADERS, FLOW_HEADERS } = require('../../backend/biz-op-recon-db/columns');
+const { classifyExcelNumberFormat } = require('../../backend/toolbox-format/number-date');
 const { canonicalizeDecimal, addCanonicalDecimals, subtractCanonicalDecimals,
   compareCanonicalDecimals, absoluteDecimal } = require('../financial-decimal');
 
@@ -38,6 +39,7 @@ function amountText(cell) {
 function dateText(cell) {
   if (!cell) reject('账期不能为空');
   if (cell.cellType === 'number') {
+    if (!classifyExcelNumberFormat(cell.sourceFormat || 'General').isDateLike) reject('数值账期必须有明确日期格式，不能猜测普通数字');
     const token = canonicalizeDecimal(cell.rawLexicalValue);
     if (!/^\d{1,7}(?:\.\d+)?$/.test(token)) reject('Excel 日期序号无效');
     const day = Number(token.split('.')[0]);
@@ -49,7 +51,8 @@ function dateText(cell) {
       + (day - (!date1904 && day > 60 ? 1 : 0)) * 86400000).toISOString().slice(0, 10);
   }
   if (!['text', 'date'].includes(cell.cellType)) reject('账期类型无效');
-  const token = cellText(cell);
+  const text = cellText(cell);
+  const token = /^\d{8}$/.test(text) ? `${text.slice(0, 4)}-${text.slice(4, 6)}-${text.slice(6, 8)}` : text;
   const match = /^(\d{4})([-/])(\d{1,2})\2(\d{1,2})(?:[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,9})?)?)?$/.exec(token);
   if (!match) reject('日期须为年在前的明确日期，不接受歧义日期或时区');
   const year = Number(match[1]); const month = Number(match[3]); const day = Number(match[4]);
