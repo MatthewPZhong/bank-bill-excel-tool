@@ -1,5 +1,7 @@
 # PR5 验证记录
 
+2026-09-06 PR235 修复：在合入 PR1b—PR4 评论修复后，Electron IPC / 删除两个文件 18 PASS / 0 FAIL / 0 SKIP，20074 ms；原页面检查 11 PASS，新真实鼠标/键盘取消检查 10 PASS。两组 UI 使用实际 renderer / 样式 / Electron 模态，但 API 是可控夹具；后台组使用真实临时 Task、SQLite、worker、Publisher 和 Archive，不将两者写成完整生产人工操作。运行、双层删除及发布保护截图已检查。eslint 和 git diff --check 通过，check-vars 仅局部 dialog 同名命中。日志 `/tmp/bizop-pr235-backend-regression.log`、`/tmp/bizop-pr235-ui-regression.log`、`/tmp/bizop-pr235-ui-cancellation.log`。以下原 release-check 数字保留为历史基线，本轮完整汇总另记。
+
 macOS arm64，真实合成 XLSX、临时主库/Archive/后台 worker/Publisher。应用版本保持 3.2.6，生产新业务禁用。
 
 | 检查 | 当前实际结果 |
@@ -18,6 +20,7 @@ macOS arm64，真实合成 XLSX、临时主库/Archive/后台 worker/Publisher�
 npm run release-check
 ELECTRON_RUN_AS_NODE=1 node_modules/electron/dist/Electron.app/Contents/MacOS/Electron --test tests/unit/main-process/biz-op-v327-delete-main.test.js tests/unit/main-process/biz-op-v327-ipc.test.js
 env -u ELECTRON_RUN_AS_NODE node_modules/electron/dist/Electron.app/Contents/MacOS/Electron scripts/biz-op-v327/verify-ui.js
+env -u ELECTRON_RUN_AS_NODE node_modules/electron/dist/Electron.app/Contents/MacOS/Electron scripts/biz-op-v327/verify-ui-cancellation.js
 node scripts/check-vars.js
 ```
 

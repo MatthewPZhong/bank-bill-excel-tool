@@ -14,6 +14,10 @@
 
 ## Decisions / Evidence / Deviations
 
+- PR235 修复：同一个取消按钮随操作移入当前模态弹窗，保留 busy、Escape 阻断和关闭保护；同步禁用防重复取消，响应按原 requestId 核对后才更新提示。10 项真实 Electron 鼠标/键盘输入场景通过，包含两层删除弹窗、保留结果删除、原表/结果导出、发布保护及取消响应晚到。另跑原 UI 11 PASS 和真实 IPC/删除 18 PASS；查看了运行、删除、发布保护三张实际截图。
+- 新 UI 探针初次只发 keyDown/keyUp，没有完整 Enter 字符事件；随后补上真实 char 事件。另修探针把函数返回给 Electron 导致的不可克隆返回值。以上为验证脚本问题，未通过更改产品键盘行为绕过。最终测试无 `element.click()` 激活取消控件。
+- check-vars 仅命中 renderer 局部 `dialog`，按 important-variables.md 判定不属于 Main 的 Electron 全局 dialog；原生文件选择与用户取消分支沿用，真实 IPC 取消回归通过。导入/计算最后取消屏障现分别由 PR2 / PR3 自身提供，不依赖 PR5。
+
 实施中持续更新；最终 review 和 validation 随本 PR 提交。
 
 - 月份沿用现有 run 目录的 UTC 成功时间口径；输入由固定 activated_at 派生，增加表达式索引，不新增可与时间戳漂移的冗余字段。页面显示相同存储口径，不因本机显示时区变化改操作月份。
