@@ -59,3 +59,7 @@ PR #231 首轮 run `34011443931` 的 Windows 单元阶段失败，新增成功�
 需要真实目录屏障的 24 项测试在不支持宿主上明确标 SKIP，保留 3 项无此依赖的测试及新增拒绝测试。增加 Ubuntu / Node 22 CI 执行完整 BizOP 成功和故障路径，执行前必须探明屏障 supported。Windows 的 SKIP 不计为功能 PASS，也不替代 PR6 的能力门禁。
 
 修正后本地 PR1b 专项：28 PASS / 0 FAIL / 0 SKIP（46.0 秒）；Windows workflow 契约：5 PASS / 2 个既有平台 SKIP / 0 FAIL；eslint 与 diff check 通过。该次未重复完整 release-check；远端修正运行待完成。
+
+第二轮 run `34013070475`：Ubuntu 实际目录屏障及 BizOP 合同 job 成功；Windows 单元 6964 PASS / 27 SKIP / 1 FAIL。唯一失败来自同名文档重试用只读句柄 fsync，Windows 返回 EPERM，尚未到目录屏障拒绝断言。现改为用可写句柄重新同步自有不可变文档，字节不修改；候选原件只读副本和实际目录屏障要求保持。补充句柄权限断言，在 macOS 上也能捕获该 Windows 调用前提。
+
+最终修正本地 PR1b 全文件 28 PASS / 0 FAIL / 0 SKIP（48.0 秒），eslint/diff check 通过。远端 Windows 需要对最新提交重新验证，不能将 Ubuntu 成功写成整个 workflow 成功。

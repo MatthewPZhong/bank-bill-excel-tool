@@ -74,8 +74,16 @@ async function fixture(t, options = {}) {
 test('目录屏障不可用时首次及同名文件重试均拒绝，不建立业务提交收据', async (t) => {
   const f = await fixture(t);
   const originalFsync = fs.fsyncSync;
+  const originalOpen = fs.openSync;
+  const opened = new Map();
+  t.mock.method(fs, 'openSync', (...args) => {
+    const fd = originalOpen(...args); opened.set(fd, args[1]); return fd;
+  });
   t.mock.method(fs, 'fsyncSync', (fd) => {
     if (fs.fstatSync(fd).isDirectory()) throw Object.assign(new Error('目录屏障不支持'), { code: 'ENOTSUP' });
+    const flags = opened.get(fd);
+    assert.ok(typeof flags === 'number' ? flags & (fs.constants.O_RDWR | fs.constants.O_WRONLY)
+      : typeof flags === 'string' && /[wa+]/.test(flags), '文件同步使用可写句柄，覆盖 Windows 要求');
     return originalFsync(fd);
   });
   const relative = 'operations/unsupported-task/intent.json';
