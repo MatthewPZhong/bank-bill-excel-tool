@@ -11,6 +11,7 @@
 // 用法：
 //   node scripts/run-unit-tests.js            # 跑全部 unit
 //   node scripts/run-unit-tests.js --coverage # 加 --experimental-test-coverage
+//   UNIT_TEST_CONCURRENCY=2 npm run release-check # 仅限制测试文件并发，默认保持 Node 原值
 //
 // 退出码：透传 node --test 的退出码（0=全 PASS / 非 0=有 FAIL）
 
@@ -36,8 +37,12 @@ function findTestFiles(dir) {
   return out.sort();
 }
 
-function buildNodeTestArgs(files, { coverage = false } = {}) {
+function buildNodeTestArgs(files, { coverage = false, concurrency } = {}) {
   const args = ['--test'];
+  if (concurrency !== undefined) {
+    if (!Number.isSafeInteger(concurrency) || concurrency < 1) throw new TypeError('测试并发数必须是正整数');
+    args.push(`--test-concurrency=${concurrency}`);
+  }
   if (coverage) args.push('--experimental-test-coverage');
   args.push(...files.map((file) => path.relative(REPO_ROOT, file)));
   return args;
@@ -109,7 +114,9 @@ function main() {
   }
 
   const coverage = process.argv.includes('--coverage');
-  const args = buildNodeTestArgs(files, { coverage });
+  const configuredConcurrency = process.env.UNIT_TEST_CONCURRENCY;
+  const args = buildNodeTestArgs(files, { coverage,
+    concurrency: configuredConcurrency === undefined ? undefined : Number(configuredConcurrency) });
 
   const startedAt = new Date();
   const start = Date.now();

@@ -170,6 +170,7 @@ async function fixture(t, options = {}) {
   let service = null;
   const readRepository = createRecoveryControlReadRepository(db);
   const module = createBizOpV327Module({ db, userDataDir: root, readRepository,
+    releaseGates: { schemaVersion: 1, version: '3.2.7', enabled: false },
     getArchiveService: () => service, budgetOptions: options.budgetOptions });
   const inspectors = createInspectorRegistry();
   const providers = createSettlementRecoveryProviderRegistry();

@@ -288,7 +288,7 @@ test('E04-B runtime预算完整计入Scanner phase与一个Writer child，idle/s
     POSITION_IMPORT_ADAPTER_ACTION
   ]);
   for (const policy of runtime.policyRegistry.list()) {
-    assert.equal(policy.production.enabled, false);
+    assert.equal(policy.production.enabled, policy.actionKey.startsWith('biz-op-v327:'));
   }
   assert.equal(snapshot.budgets.cpuSlots, 2);
   assert.equal(snapshot.budgets.workerThreadSlots, 3);
