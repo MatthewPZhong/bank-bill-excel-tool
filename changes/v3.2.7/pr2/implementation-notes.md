@@ -21,6 +21,9 @@
 
 ## Evidence / Deviations
 
+- PR232 评论修复：Main 最终 signal 检查前移至本 PR；独立拒绝 cancelled 文档；router 最后封存后增加安全点，最终报告/清理 await 后重新观察取消。旧 heads、计数器和成功 receipt 保持，未提交候选由原恢复链回收。
+- Electron 36.9.5 / Node 22.19：导入及 Main 专项 21 PASS / 0 FAIL（6955 ms），随后新增协议守卫 1 PASS / 0 FAIL（492 ms），共 22 个不同用例；包括 7 个新取消边界回归。check-vars 未命中，git diff --check 通过。
+
 - PR1b 已提交并推送，远端草稿 PR #231 以 PR1a 为基线；PR2 已前移至修正后的 `6fdde8c2`，原有 PR2 差异逐项比对保持完整。
 - 初轮聚焦 110 PASS；新增模块 20 PASS；Electron 专项 44 PASS。随后补充 COMMIT 不确定错误不被 close 覆盖的修正及测试，系统 Node 导入 10/10、最终 Electron PR2 全模块 21/21 通过。计数不叠加重复运行。
 - 完整 release-check exit 0：单元 7009 PASS / 3 既有 SKIP / 0 FAIL，53 集成脚本 / 2488 检查全部通过，lint/smoke 通过。上述后补故障测试不假报为已计入先前单元阶段。

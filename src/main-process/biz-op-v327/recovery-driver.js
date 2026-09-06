@@ -3,6 +3,7 @@
 const { setImmediate: yieldMain } = require('node:timers/promises');
 const { createRecoveryBudget } = require('./recovery-budget');
 const { ACTIONS, sourceKey, sameSource, fail, hash } = require('./contracts');
+const { NEEDS_RECOVERY_SQL } = require('./recovery-alignment');
 
 function createBizOpRecoveryDriver({ catalog, sources, admission, readRepository, budgetOptions }) {
   let platform = null;
@@ -13,7 +14,7 @@ function createBizOpRecoveryDriver({ catalog, sources, admission, readRepository
     const db = catalog.db;
     return Boolean(db.prepare(`SELECT 1 FROM biz_op_v327_prepared_ops p
       JOIN biz_op_v327_settlement_progress s USING(task_run_id) JOIN archive_task_runs t USING(task_run_id)
-      WHERE p.phase!='CLOSED' OR s.state!='COMPLETE' OR t.status NOT IN ('succeeded','failed','cancelled') LIMIT 1`).get()
+      WHERE ${NEEDS_RECOVERY_SQL} LIMIT 1`).get()
       || db.prepare('SELECT 1 FROM biz_op_v327_read_pins LIMIT 1').get()
       || db.prepare("SELECT 1 FROM biz_op_v327_dispatches WHERE state!='CLOSED' AND process_exit_evidence_json IS NULL LIMIT 1").get()
       || db.prepare("SELECT 1 FROM biz_op_v327_reclaim_queue WHERE state!='DONE' LIMIT 1").get()
@@ -89,6 +90,7 @@ function createBizOpRecoveryDriver({ catalog, sources, admission, readRepository
               const current = await platform.recoverSource(source, hold);
               if (current.blocked || current.inspection && ['unknown', 'partially-committed'].includes(current.inspection.outcome)
                   || current.outcome && current.outcome !== 'completed') {
+                sources.recordConflict(source, current.inspection);
                 blockedScopes.add(scope); break;
               }
               if (current.inspection && current.inspection.outcome === 'not-committed') {
