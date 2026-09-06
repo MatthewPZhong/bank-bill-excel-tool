@@ -13,6 +13,12 @@ const { normalizeFilePlanV1 } = source('archive-center/file-plan');
 const { createNonProductionBackgroundExecutionRuntime } = source('background-execution/runtime');
 const { createResourceGovernor } = source('background-execution/resource-governor');
 const { createRecoveryControlReadRepository } = source('background-execution/critical/recovery-control-read-repository');
+const { createRecoveryRequestOwnerRepository, createRecoveryObservationAttemptRepository } = source('background-execution/critical/recovery-request-owner-repository');
+const { createRecoveryControlRepository } = source('background-execution/critical/recovery-control-repository');
+const { createStartupRecoveryCoordinator } = source('background-execution/startup-recovery-coordinator');
+const { createInspectorRegistry } = source('background-execution/inspector-registry');
+const { createSettlementRecoveryProviderRegistry } = source('background-execution/settlement-recovery-provider-registry');
+const { createRecoveryBudget } = source('biz-op-v327/recovery-budget');
 
 (async () => {
   const root = process.argv[2];
@@ -38,8 +44,26 @@ const { createRecoveryControlReadRepository } = source('background-execution/cri
   const filePlan = normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs: [{ filePath: original,
     role: 'input', sourceOperation: 'bizOpReconV327:import' }], outputs: [] });
   await module.runCandidateValidation({ taskLifecycle: lifecycle, runtime, filePlan,
-    dataset: { kind: 'OP', dataDate: '2026-09-01', bu: 'crash-test' }, afterCommit(receipt) {
+    dataset: { kind: 'OP', dataDate: '2026-09-01', bu: 'crash-test' }, async afterCommit(receipt) {
       fs.writeFileSync(path.join(root, 'receipt-evidence.json'), JSON.stringify(receipt));
+      if (['anchor', 'hold'].includes(process.argv[3])) {
+        const inspectors = createInspectorRegistry(); const providers = createSettlementRecoveryProviderRegistry();
+        module.sources.register({ register(key) { inspectors.register(key, async () => { throw Object.assign(new Error('检查器暂不可用'), { code: 'TEST_INSPECTOR_UNAVAILABLE' }); }); } }, providers);
+        inspectors.freeze(); providers.freeze();
+        const owner = createRecoveryRequestOwnerRepository(db);
+        const coordinator = createStartupRecoveryCoordinator({
+          readRepository: createRecoveryControlReadRepository(db), inspectorRegistry: inspectors, providerRegistry: providers,
+          requestOwnerRepository: { ...owner, reserveObservationAnchor(...args) {
+            const result = owner.reserveObservationAnchor(...args);
+            if (process.argv[3] === 'anchor') process.exit(75);
+            return result;
+          } }, observationAttemptRepository: createRecoveryObservationAttemptRepository(db),
+          recoveryControlRepository: createRecoveryControlRepository(db), resolveTaskState: module.plan.taskState,
+          planTransitions: module.plan.plan, transientAttempts: 1, sleep: async () => {} });
+        module.sources.installBudget(createRecoveryBudget()); module.sources.collect();
+        await coordinator.scanAndRecover();
+        process.exit(76);
+      }
       // Main COMMIT 后进程消失，TaskLifecycle 没有机会执行成功/失败终态。
       process.exit(73);
     } });

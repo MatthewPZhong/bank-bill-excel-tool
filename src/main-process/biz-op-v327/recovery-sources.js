@@ -2,8 +2,9 @@
 
 const { normalizeRecoverySource } = require('../background-execution/recovery-source');
 const { ACTIONS, CATALOG_SCOPE, identity, sameSource, sourceKey, registryKeys, fail, hash, snapshot } = require('./contracts');
+const { NEEDS_RECOVERY_SQL, taskAlignment } = require('./recovery-alignment');
 
-function createBizOpRecoverySources({ catalog, protection, payloadStore, readRepository, getArchiveService }) {
+function createBizOpRecoverySources({ catalog, protection, payloadStore, readRepository, getArchiveService, requireRecovery }) {
   const { db, now } = catalog;
   let frozenSources = null;
   let budget = null;
@@ -41,8 +42,7 @@ function createBizOpRecoverySources({ catalog, protection, payloadStore, readRep
     for (const row of db.prepare(`SELECT p.task_run_id FROM biz_op_v327_prepared_ops p
       JOIN biz_op_v327_settlement_progress s USING(task_run_id)
       JOIN archive_task_runs t USING(task_run_id)
-      WHERE p.action!='RECLAIM' AND (p.phase!='CLOSED' OR s.state!='COMPLETE'
-        OR t.status NOT IN ('succeeded','failed','cancelled')) ORDER BY p.task_run_id`).iterate()) {
+      WHERE p.action!='RECLAIM' AND (${NEEDS_RECOVERY_SQL}) ORDER BY p.task_run_id`).iterate()) {
       add(makeSource(catalog.operation(row.task_run_id), 'OPERATION'));
     }
     for (const row of db.prepare('SELECT * FROM biz_op_v327_read_pins ORDER BY task_run_id,session_id,object_kind,object_id').iterate()) {
@@ -58,7 +58,7 @@ function createBizOpRecoverySources({ catalog, protection, payloadStore, readRep
     }
     for (const row of db.prepare(`SELECT q.* FROM biz_op_v327_reclaim_queue q
       JOIN archive_task_runs t ON t.task_run_id=q.owner_task_run_id
-      WHERE q.state!='DONE' OR t.status NOT IN ('succeeded','failed','cancelled') ORDER BY q.reclaim_id`).iterate()) {
+      WHERE q.state!='DONE' OR t.status!='succeeded' ORDER BY q.reclaim_id`).iterate()) {
       add(makeSource(catalog.operation(row.owner_task_run_id), 'RECLAIM', { reclaimId: row.reclaim_id }));
     }
     for (const row of db.prepare("SELECT source_json FROM biz_op_v327_recovery_followups WHERE state!='COMPLETE'").iterate()) {
@@ -122,7 +122,9 @@ function createBizOpRecoverySources({ catalog, protection, payloadStore, readRep
     } else if (closed && (op.action !== 'EXPORT' || op.input_obligation === 'COMPLETE')) {
       outcome = 'not-committed'; reason = 'MAIN_FINALIZATION_REQUIRED';
     }
-    return { op, receipt, abort, outcome, evidence: { category, reason, closed,
+    const alignment = taskAlignment(catalog, source, outcome);
+    if (alignment.conflict) { outcome = 'unknown'; reason = alignment.conflict; }
+    return { op, receipt, abort, outcome, evidence: { category, reason, closed, alignment,
       closureDigest: protection.closureDigest(source.taskRunId), inputObligation: op.input_obligation,
       intentDigest: op.intent_digest, receiptPresent: Boolean(receipt), terminalPresent: Boolean(abort) } };
   }
@@ -219,12 +221,34 @@ function createBizOpRecoverySources({ catalog, protection, payloadStore, readRep
     return reclaimHandler(source, { admit: budget.admit });
   }
   let reclaimHandler = null;
+  function recordConflict(source, inspection) {
+    if (!inspection?.boundedEvidence.alignment?.conflict) return;
+    if (budget) budget.charge('main');
+    const current = facts(source);
+    if (!current.evidence.alignment.conflict) return;
+    requireRecovery();
+    const evidence = { schemaVersion: 1, ...identity(source), intentDigest: current.op.intent_digest,
+      receiptDigest: current.receipt ? hash(current.receipt) : null, ...current.evidence };
+    payloadStore.writeDocument(`operations/${source.taskRunId}/terminal-conflict-${hash(evidence)}.json`, evidence);
+    catalog.transaction(() => {
+      db.prepare("UPDATE biz_op_v327_prepared_ops SET phase='HOLD',updated_at=? WHERE task_run_id=? AND phase!='HOLD'")
+        .run(now(), source.taskRunId);
+      db.prepare(`UPDATE biz_op_v327_settlement_progress SET state='RECOVERY_BLOCKED',
+        task_terminal_observed_at=NULL,archive_terminal_observed_at=NULL,updated_at=? WHERE task_run_id=? AND state!='RECOVERY_BLOCKED'`)
+        .run(now(), source.taskRunId);
+    });
+  }
   function syncCompletion(source) {
     const task = catalog.task(source.taskRunId);
     const hold = readRepository.getActiveRecoveryHoldByScope(source.conflictScopeKey);
     if (hold && sameSource(source, hold) || !task || !['succeeded', 'failed', 'cancelled'].includes(task.status)) return false;
     const current = facts(source);
+    if (current.evidence.alignment.conflict) {
+      recordConflict(source, { boundedEvidence: current.evidence });
+      return false;
+    }
     if (!['compensated', 'committed'].includes(current.outcome) || !protection.closed(source.taskRunId)) return false;
+    if (!taskAlignment(catalog, source, current.outcome).complete) return false;
     if (db.prepare('SELECT 1 FROM biz_op_v327_read_pins WHERE task_run_id=? LIMIT 1').get(source.taskRunId)) return false;
     return catalog.transaction(() => {
       let changes = db.prepare(`UPDATE biz_op_v327_recovery_followups SET state='COMPLETE',updated_at=?
@@ -251,7 +275,7 @@ function createBizOpRecoverySources({ catalog, protection, payloadStore, readRep
       });
     }
   }
-  return Object.freeze({ collect, register, installBudget, inspect, facts, finalize, syncCompletion,
+  return Object.freeze({ collect, register, installBudget, inspect, facts, finalize, syncCompletion, recordConflict,
     operationSource(taskRunId) { return makeSource(catalog.operation(taskRunId), 'OPERATION'); },
     setReclaimHandler(handler) { reclaimHandler = handler; },
     current: () => frozenSources, clear() { frozenSources = null; budget = null; } });

@@ -25,7 +25,8 @@ function createBizOpV327Module({ db, userDataDir, readRepository, getArchiveServ
   payloadStore.initialize();
   const protection = createBizOpReadProtection({ catalog, payloadStore });
   const admission = createBizOpAdmission({ canReleaseRead: protection.canRelease });
-  const sources = createBizOpRecoverySources({ catalog, protection, payloadStore, readRepository, getArchiveService });
+  const sources = createBizOpRecoverySources({ catalog, protection, payloadStore, readRepository, getArchiveService,
+    requireRecovery: admission.requireRecovery });
   const recovery = createBizOpRecoveryDriver({ catalog, sources, admission, readRepository, budgetOptions });
   const plan = createBizOpRecoveryPlan({ catalog });
   sources.setReclaimHandler(createBizOpReclaimer({ catalog, payloadStore, protection, admission }));

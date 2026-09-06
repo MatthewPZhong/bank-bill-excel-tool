@@ -35,6 +35,93 @@ const { BIZ_OP_V327_POLICIES } = require('../../../src/main-process/biz-op-v327/
 const { createRecoveryBudget } = require('../../../src/main-process/biz-op-v327/recovery-budget');
 const { hash } = require('../../../src/main-process/biz-op-v327/contracts');
 
+for (const stage of ['anchor', 'hold']) {
+  durableDirectoryTest(`Inspector unavailable ${stage} 后真实进程退出，原 Task/批次/receipt 重启收敛`, async (t) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bizop-unavailable-crash-'));
+    const child = spawnSync(process.execPath, [path.resolve(__dirname, '../../fixtures/biz-op-v327-crash.cjs'), root, stage],
+      { encoding: 'utf8', timeout: 30000, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } });
+    assert.equal(child.status, stage === 'anchor' ? 75 : 76, child.stderr + child.stdout);
+    const receipt = JSON.parse(fs.readFileSync(path.join(root, 'receipt-evidence.json')));
+    let context; let first = true;
+    const f = await fixture(t, { root, beforeBootstrap(value) { context = value; }, wrapInspector(inspect) {
+      return (source) => {
+        if (first) {
+          first = false;
+          assert.equal(context.module.catalog.task(receipt.taskRunId).status, 'interrupted');
+          assert.equal(context.module.catalog.task(receipt.taskRunId).failureCode, 'INSPECTOR_UNAVAILABLE');
+          assert.equal(context.db.prepare("SELECT COUNT(*) AS n FROM background_execution_recovery_holds WHERE status='active'").get().n, 1);
+          assert.equal(context.db.prepare('SELECT COUNT(*) AS n FROM background_execution_batch_recovery_states').get().n, 0);
+        }
+        return inspect(source);
+      };
+    } });
+    assert.equal(first, false);
+    assert.equal(f.module.catalog.task(receipt.taskRunId).status, 'succeeded');
+    assert.deepEqual(f.module.catalog.receipt(receipt.taskRunId), receipt);
+    assert.equal(f.db.prepare('SELECT state FROM background_execution_batch_recovery_states').get().state, 'resolved');
+    assert.equal(f.db.prepare('SELECT final_outcome FROM background_execution_batch_recovery_states').get().final_outcome, 'succeeded');
+    assert.equal((await f.module.recovery.run()).ready, true);
+  });
+}
+
+durableDirectoryTest('已有 unavailable Hold 和 interrupted Task 重试检查失败不重写终态，恢复可继续', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bizop-unavailable-retry-'));
+  const child = spawnSync(process.execPath, [path.resolve(__dirname, '../../fixtures/biz-op-v327-crash.cjs'), root, 'hold'],
+    { encoding: 'utf8', timeout: 30000, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } });
+  assert.equal(child.status, 76, child.stderr + child.stdout);
+  let unavailable = true;
+  const f = await fixture(t, { root, expectReady: false, wrapInspector(inspect) { return (source) => {
+    if (unavailable) throw Object.assign(new Error('检查器仍不可用'), { code: 'TEST_INSPECTOR_UNAVAILABLE' });
+    return inspect(source);
+  }; } });
+  const task = f.db.prepare("SELECT * FROM archive_task_runs WHERE task_key='bizOpReconV327:import'").get();
+  assert.equal(task.status, 'interrupted'); assert.equal(task.failure_code, 'INSPECTOR_UNAVAILABLE');
+  assert.equal((await f.module.recovery.run()).ready, false);
+  assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM background_execution_recovery_holds WHERE status='active'").get().n, 1);
+  unavailable = false;
+  assert.equal((await f.module.recovery.run()).ready, true);
+  assert.equal(f.module.catalog.task(task.task_run_id).status, 'succeeded');
+});
+
+for (const terminal of ['failed', 'cancelled']) durableDirectoryTest(`成功 receipt 与 ${terminal} Task 的冲突保留来源，旧 COMPLETE 缓存和重复恢复不能隐藏`, async (t) => {
+  const f = await fixture(t); const original = path.join(f.root, 'conflict.sqlite');
+  const input = new DatabaseSync(original); input.exec("CREATE TABLE candidate_rows(value TEXT); INSERT INTO candidate_rows VALUES ('one');"); input.close();
+  const filePlan = normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs: [{ filePath: original, role: 'input', sourceOperation: 'bizOpReconV327:import' }], outputs: [] });
+  let receipt;
+  const taskLifecycle = terminal === 'failed' ? f.lifecycle : { runFileTask(payload) {
+    return f.lifecycle.runFileTask({ ...payload, execute: async (...args) => {
+      const result = await payload.execute(...args); receipt = result.receipt;
+      // 注入成功提交后返回取消的历史错误；终态仍由真实 TaskLifecycle 写入。
+      return { ...result, status: 'cancelled' };
+    } });
+  } };
+  const run = f.module.runCandidateValidation({ taskLifecycle, runtime: f.runtime, filePlan,
+    dataset: { kind: 'OP', dataDate: '2026-09-01', bu: 'conflict' },
+    ...(terminal === 'failed' ? { afterCommit(value) { receipt = value; throw new Error('提交后反馈丢失'); } } : {}) });
+  if (terminal === 'failed') await assert.rejects(run, /提交后反馈丢失/); else assert.equal((await run).status, 'cancelled');
+  assert.equal(f.module.catalog.task(receipt.taskRunId).status, terminal);
+  assert.equal(f.module.admission.snapshot().recoveryReady, false);
+  const heads = f.db.prepare('SELECT * FROM biz_op_v327_input_heads').all();
+  const counters = f.db.prepare('SELECT * FROM biz_op_v327_version_counters').all();
+  // 模拟旧 syncCompletion 已写入的错误缓存，验证枚举按持久事实重查。
+  f.db.prepare("UPDATE biz_op_v327_prepared_ops SET phase='CLOSED' WHERE task_run_id=?").run(receipt.taskRunId);
+  f.db.prepare("UPDATE biz_op_v327_settlement_progress SET state='COMPLETE' WHERE task_run_id=?").run(receipt.taskRunId);
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const recovery = await f.module.recovery.run(); assert.equal(recovery.ready, false, JSON.stringify(recovery));
+    assert.equal(f.module.catalog.task(receipt.taskRunId).status, terminal);
+    assert.equal(f.module.catalog.operation(receipt.taskRunId).phase, 'HOLD');
+    assert.equal(f.module.catalog.operation(receipt.taskRunId).settlement_state, 'RECOVERY_BLOCKED');
+    assert.equal(f.module.recovery.openObligations(), true);
+    assert.deepEqual(f.module.catalog.receipt(receipt.taskRunId), receipt);
+    assert.deepEqual(f.db.prepare('SELECT * FROM biz_op_v327_input_heads').all(), heads);
+    assert.deepEqual(f.db.prepare('SELECT * FROM biz_op_v327_version_counters').all(), counters);
+  }
+  const directory = f.module.payloadStore.resolve(`operations/${receipt.taskRunId}`);
+  const evidence = fs.readdirSync(directory).filter(name => name.startsWith('terminal-conflict-'));
+  assert.equal(evidence.length, 1);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(directory, evidence[0]))).reason, 'TASK_RESULT_CONFLICT');
+});
+
 async function fixture(t, options = {}) {
   const root = options.root || fs.mkdtempSync(path.join(os.tmpdir(), 'bizop-v327-'));
   const db = new DatabaseSync(path.join(root, 'main.sqlite'));
@@ -45,7 +132,7 @@ async function fixture(t, options = {}) {
     getArchiveService: () => service, budgetOptions: options.budgetOptions });
   const inspectors = createInspectorRegistry();
   const providers = createSettlementRecoveryProviderRegistry();
-  module.sources.register(inspectors, providers);
+  module.sources.register(options.wrapInspector ? { register(key, inspect) { inspectors.register(key, options.wrapInspector(inspect)); } } : inspectors, providers);
   inspectors.freeze(); providers.freeze();
   const platform = createStartupRecoveryCoordinator({ readRepository, inspectorRegistry: inspectors, providerRegistry: providers,
     requestOwnerRepository: createRecoveryRequestOwnerRepository(db),
@@ -67,7 +154,7 @@ async function fixture(t, options = {}) {
   t.after(async () => { await runtime.shutdown({ timeoutMs: 5000 }); db.close(); fs.rmSync(root, { recursive: true, force: true }); });
   if (options.beforeBootstrap) await options.beforeBootstrap({ module, db, service });
   const bootstrap = await module.recovery.run();
-  assert.equal(bootstrap.ready, true, JSON.stringify(bootstrap));
+  assert.equal(bootstrap.ready, options.expectReady !== false, JSON.stringify(bootstrap));
   return { root, db, module, service, runtime, lifecycle, platform, readRepository, bootstrap };
 }
 
@@ -128,6 +215,26 @@ async function prepareUncommitted(f, index, actionKey = 'biz-op-v327:import-cand
     intent: { index } }));
   return taskRunId;
 }
+
+durableDirectoryTest('Task 成功但批次失败的旧 COMPLETE 状态不能开放入口或改写原提交', async (t) => {
+  const f = await fixture(t); const original = path.join(f.root, 'batch-conflict.sqlite');
+  const input = new DatabaseSync(original); input.exec("CREATE TABLE candidate_rows(value TEXT); INSERT INTO candidate_rows VALUES ('one');"); input.close();
+  const filePlan = normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs: [{ filePath: original,
+    role: 'input', sourceOperation: 'bizOpReconV327:import' }], outputs: [] });
+  const result = await f.module.runCandidateValidation({ taskLifecycle: f.lifecycle, runtime: f.runtime, filePlan,
+    dataset: { kind: 'OP', dataDate: '2026-09-01', bu: 'batch-conflict' } });
+  const taskId = result.receipt.taskRunId;
+  // 仅在临时库模拟旧批次结果与 Task 不一致，不把直接 SQL 当生产修复接口。
+  f.db.prepare("UPDATE archive_batches SET task_status='failed' WHERE task_run_id=?").run(taskId);
+  assert.equal(f.module.recovery.openObligations(), true);
+  assert.equal((await f.module.recovery.run()).ready, false);
+  assert.equal(f.module.catalog.task(taskId).status, 'succeeded');
+  assert.equal(f.module.catalog.operation(taskId).settlement_state, 'RECOVERY_BLOCKED');
+  assert.deepEqual(f.module.catalog.receipt(taskId), result.receipt);
+  const names = fs.readdirSync(f.module.payloadStore.resolve(`operations/${taskId}`)).filter(name => name.startsWith('terminal-conflict-'));
+  assert.equal(names.length, 1);
+  assert.equal(f.module.payloadStore.readDocument(`operations/${taskId}/${names[0]}`).value.reason, 'BATCH_RESULT_CONFLICT');
+});
 
 durableDirectoryTest('未提交链只经 Main 后处理和真实控制转换，原 Task 失败且终止收据幂等', async (t) => {
   const f = await fixture(t);
