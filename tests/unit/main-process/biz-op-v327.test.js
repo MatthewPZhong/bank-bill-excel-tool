@@ -116,7 +116,11 @@ durableDirectoryTest('已有 unavailable Hold 和 interrupted Task 重试检查�
 });
 
 for (const terminal of ['failed', 'cancelled']) durableDirectoryTest(`成功 receipt 与 ${terminal} Task 的冲突保留来源，旧 COMPLETE 缓存和重复恢复不能隐藏`, async (t) => {
-  const f = await fixture(t); const original = path.join(f.root, 'conflict.sqlite');
+  let unavailable = false;
+  const f = await fixture(t, { wrapInspector(inspect) { return (source) => {
+    if (unavailable) throw Object.assign(new Error('临时读取失败'), { code: 'TEST_TRANSIENT' });
+    return inspect(source);
+  }; } }); const original = path.join(f.root, 'conflict.sqlite');
   const input = new DatabaseSync(original); input.exec("CREATE TABLE candidate_rows(value TEXT); INSERT INTO candidate_rows VALUES ('one');"); input.close();
   const filePlan = normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs: [{ filePath: original, role: 'input', sourceOperation: 'bizOpReconV327:import' }], outputs: [] });
   let receipt;
@@ -135,6 +139,11 @@ for (const terminal of ['failed', 'cancelled']) durableDirectoryTest(`成功 rec
   assert.equal(f.module.admission.snapshot().recoveryReady, false);
   const heads = f.db.prepare('SELECT * FROM biz_op_v327_input_heads').all();
   const counters = f.db.prepare('SELECT * FROM biz_op_v327_version_counters').all();
+  unavailable = true;
+  assert.equal((await f.module.recovery.run()).ready, false);
+  assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM background_execution_recovery_observation_attempts WHERE status='prepared'").get().n, 0);
+  assert.equal(f.readRepository.listActiveRecoveryHolds().length, 1);
+  unavailable = false;
   // 模拟旧 syncCompletion 已写入的错误缓存，验证枚举按持久事实重查。
   f.db.prepare("UPDATE biz_op_v327_prepared_ops SET phase='CLOSED' WHERE task_run_id=?").run(receipt.taskRunId);
   f.db.prepare("UPDATE biz_op_v327_settlement_progress SET state='COMPLETE' WHERE task_run_id=?").run(receipt.taskRunId);

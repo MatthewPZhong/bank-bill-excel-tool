@@ -35,6 +35,7 @@
 - 修复前复现记录：PR6 outputs/pr230-236-second-review-20260906；三个真实终态流程在同进程重试和新进程启动均失败。该记录为缺陷证据，非功能 PASS。
 - 共享 C2/RecoveryControl/JPM E11-B：148 PASS/0 FAIL；BizOP 恢复专项：35 PASS/0 FAIL。新增共享 19 项包含真实持久 Task、12 个终态/Hold/中断窗口组合和 7 个拒绝反例；BizOP 新增真实失败候选的重复不可用及最终收敛。
 - 测试宿主初版缺少 parentRunId，19 个新增检查在进入恢复前失败；补齐既有 Task 创建合同后上述检查通过，没有修改生产 Task 创建要求。
+- 最终 C2 与 BizOP 组合 96 PASS/0 FAIL（48.6 秒）；追加验证 unavailable 恢复后真实 Task/receipt 冲突仍然阻断，并在 Inspector 回调外检查结果，防止回调断言异常被重试语义吞掉。
 
 ## Windows 关闭 CI 的独立修复合同
 

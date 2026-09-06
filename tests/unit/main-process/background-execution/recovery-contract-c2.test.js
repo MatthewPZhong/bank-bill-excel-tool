@@ -290,11 +290,13 @@ for (const status of ['succeeded', 'failed', 'cancelled']) {
         assert.equal(Boolean(f.hold()), withHold, 'bundle 写入后故障也必须整体回滚');
         assert.deepEqual(f.task(), f.before);
         f.reopen();
-        await f.layer(false).recoverSource(f.source, f.hold());
+        const resumed = await f.layer(false).recoverSource(f.source, f.hold());
+        assert.equal(resumed.inspection?.outcome, 'unknown', 'Inspector 内部断言不得作为临时故障被吞掉');
         assert.equal(f.calls(), 1); assert.equal(f.prepared(), 0);
         const holdId = f.hold().holdId;
         assert.deepEqual(f.task(), f.before);
-        await f.layer(false).recoverSource(f.source, f.hold());
+        const repeated = await f.layer(false).recoverSource(f.source, f.hold());
+        assert.equal(repeated.inspection?.outcome, 'unknown');
         assert.equal(f.calls(), 2); assert.equal(f.hold().holdId, holdId);
         assert.equal(f.prepared(), 0); assert.deepEqual(f.task(), f.before);
       });
