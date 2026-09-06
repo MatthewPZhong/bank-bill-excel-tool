@@ -7,6 +7,70 @@ const os = require('node:os');
 const { spawnSync } = require('node:child_process');
 const { createHost } = require('../../helpers/biz-op-v327-host');
 const { writeXlsx, flowRow, opRow } = require('../../helpers/biz-op-v327-xlsx');
+const { hash, snapshot } = require('../../../src/main-process/biz-op-v327/contracts');
+
+test('Main 独立拒绝 cancelled 文档，即使运行器交付 completed 且没有操作级 signal', async (t) => {
+  const f = await createHost(t); const file = path.join(f.root, 'cancelled-document.xlsx');
+  await writeXlsx(file, { rowCount: 1, row: () => flowRow() });
+  let taskRunId;
+  const runtime = { ...f.runtime, start(request) {
+    const control = f.runtime.start(request);
+    return { ...control, promise: control.promise.then(async (outcome) => {
+      assert.equal(outcome.outcome, 'completed'); await control.waitForCarrierClosure({ timeoutMs: 5000 });
+      taskRunId = request.context.value.taskRunId;
+      const relative = `operations/${taskRunId}/${outcome.result.candidateRef}.json`;
+      const document = f.module.payloadStore.readDocument(relative).value;
+      // 模拟旧 worker 末段产生的协议组合；候选、关闭、Archive 和 TaskLifecycle 均为真实实现。
+      const cancelled = { ...document, cancelled: true, scanComplete: true, batchRejected: false };
+      fs.writeFileSync(f.module.payloadStore.resolve(relative), JSON.stringify(snapshot(cancelled)));
+      return { ...outcome, result: { ...outcome.result, sha256: hash(cancelled) } };
+    }) };
+  } };
+  const result = await f.run([file], { runtime });
+  assert.equal(result.status, 'cancelled', JSON.stringify(result));
+  assert.equal(f.module.catalog.task(taskRunId).status, 'cancelled');
+  assert.equal(f.module.catalog.receipt(taskRunId), null);
+  assert.equal(f.db.prepare('SELECT count(*) AS n FROM biz_op_v327_input_heads').get().n, 0);
+  assert.equal((await f.module.recovery.run()).ready, true);
+  assert.equal(fs.readdirSync(f.module.payloadStore.resolve('inputs')).length, 0);
+});
+
+for (const stage of ['afterWorker', 'manifest', 'afterCommit']) test(`Main ${stage} 取消以实际目录提交为边界，原 heads/receipt 保持可解释`, async (t) => {
+  const f = await createHost(t); const old = path.join(f.root, 'old.xlsx'); const next = path.join(f.root, 'next.xlsx');
+  await writeXlsx(old, { rowCount: 1, row: () => flowRow({ amount: '1' }) });
+  await writeXlsx(next, { rowCount: 1, row: () => flowRow({ amount: '2' }) });
+  const first = await f.run([old]); assert.equal(first.status, 'ok');
+  const heads = f.db.prepare('SELECT * FROM biz_op_v327_input_heads').all();
+  const counters = f.db.prepare('SELECT * FROM biz_op_v327_version_counters').all();
+  const receiptCount = f.db.prepare('SELECT count(*) AS n FROM biz_op_v327_receipts').get().n;
+  const abort = new AbortController(); let armed = false; let injected = false; let taskRunId;
+  const readDir = fs.promises.readdir;
+  fs.promises.readdir = async function (directory, ...args) {
+    const result = await readDir.call(this, directory, ...args);
+    if (stage === 'manifest' && armed && !injected && String(directory).includes('/inputs/')) { injected = true; abort.abort(); }
+    return result;
+  };
+  let result;
+  try { result = await f.run([next], { signal: abort.signal,
+    afterWorker(value) { taskRunId = value.taskRunId; armed = true; if (stage === 'afterWorker') { injected = true; abort.abort(); } },
+    afterCommit() { if (stage === 'afterCommit') { injected = true; abort.abort(); } }
+  }); } finally { fs.promises.readdir = readDir; }
+  assert.equal(injected, true);
+  assert.equal(f.module.protection.closed(taskRunId), true);
+  assert.deepEqual(f.module.catalog.receipt(first.receipt.taskRunId), first.receipt);
+  if (stage === 'afterCommit') {
+    assert.equal(result.status, 'ok'); assert.equal(f.module.catalog.task(taskRunId).status, 'succeeded');
+    assert.equal(result.receipt.outcome.datasets[0].version, 2); return;
+  }
+  assert.equal(result.status, 'cancelled'); assert.equal(f.module.catalog.task(taskRunId).status, 'cancelled');
+  assert.equal(f.module.catalog.receipt(taskRunId), null);
+  assert.deepEqual(f.db.prepare('SELECT * FROM biz_op_v327_input_heads').all(), heads);
+  assert.deepEqual(f.db.prepare('SELECT * FROM biz_op_v327_version_counters').all(), counters);
+  assert.equal(f.db.prepare('SELECT count(*) AS n FROM biz_op_v327_receipts').get().n, receiptCount);
+  assert.equal((await f.module.recovery.run()).ready, true);
+  assert.equal(f.db.prepare('SELECT state FROM biz_op_v327_diagnostic_reports WHERE report_ref=?').get(result.reportRef).state, 'READY');
+  assert.deepEqual(f.db.prepare('SELECT * FROM biz_op_v327_input_heads').all(), heads);
+});
 
 test('真实平台混批 A+B → 逆序复用 → A+B′，重复原件只读一份，坏批不替换旧 heads', async (t) => {
   const f = await createHost(t);

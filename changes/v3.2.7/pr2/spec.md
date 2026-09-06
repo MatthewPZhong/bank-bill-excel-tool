@@ -1,5 +1,7 @@
 # PR2 公共候选 writer 与混批导入
 
+PR232 评论补齐：worker 关闭不构成不可取消提交边界；最终 manifest await 后、同步目录事务之前检查操作级 signal。Main 独立拒绝 worker 文档的 cancelled 标志。最后 DATASET、DIAGNOSTIC 封存与空目录清理期间到达的取消必须写入最终拒绝文档，保留诊断和候选恢复责任；已成功提交后的取消保留原 receipt，不回滚公开版本。
+
 Goal：按 E5 接通真实 XLSX → 富类型适配 → 单活跃连接的分片候选 → worker 封存 → Main 一次目录提交。基线为 PR1b `6fdde8c2`，原 E5 包保持只读，生产开关保持关闭。
 
 Context：复用 `scanXlsxSheet`、workbook/rels/style 解析、磁盘 SST、financial-decimal 和既有原生线程平台。新增公共同步 SQLite writer，BizOP 为首个调用者，不改造旧 parser pool 或要求其他模块迁入。

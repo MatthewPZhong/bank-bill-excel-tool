@@ -110,7 +110,7 @@ function createBizOpImportCoordinator({ userDataDir, catalog, payloadStore, prot
             const registeredReport = catalog.db.prepare('SELECT manifest_digest FROM biz_op_v327_diagnostic_reports WHERE report_ref=?').get(reportRef);
             if (!registeredReport || registeredReport.manifest_digest !== imported.reportManifestDigest) fail('BIZOP_REPORT_SUMMARY_MISMATCH');
             const summary = summaryOf(imported);
-            if (imported.batchRejected || !imported.scanComplete || !imported.errorCountExact || imported.rowErrorCount || imported.fileErrorCount) {
+            if (imported.cancelled || imported.batchRejected || !imported.scanComplete || !imported.errorCountExact || imported.rowErrorCount || imported.fileErrorCount) {
               return { status: imported.cancelled ? 'cancelled' : 'error', code: 'BIZOP_IMPORT_REJECTED', reportRef, summary };
             }
             const candidates = [];
@@ -130,6 +130,7 @@ function createBizOpImportCoordinator({ userDataDir, catalog, payloadStore, prot
                 || imported.files.reduce((sum, file) => sum + count(file.acceptedRows), 0) !== sealedRows) fail('BIZOP_ROW_COUNT_MISMATCH');
             payloadStore.writeDocument(`operations/${taskRunId}/import-commit.json`, { taskRunId, intentDigest: op.intent_digest,
               expectedGeneration: op.expected_generation, importResultDigest: outcome.result.sha256, candidates: imported.references });
+            if (signal?.aborted) return { status: 'cancelled', reportRef, summary };
             const receipt = catalog.commitImport({ taskRunId, intentDigest: op.intent_digest, candidates });
             if (afterCommit) await afterCommit(receipt);
             return { status: 'ok', receipt, summary };
