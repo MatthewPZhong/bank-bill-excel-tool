@@ -1,6 +1,7 @@
 'use strict';
 
 const test = require('node:test');
+const { durableDirectoryTest } = require('../../helpers/durable-directory-tests');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -70,7 +71,22 @@ async function fixture(t, options = {}) {
   return { root, db, module, service, runtime, lifecycle, platform, readRepository, bootstrap };
 }
 
-test('主库增量建表默认禁用，真实 Task/Archive/worker 候选原件受保护并提交一个版本', async (t) => {
+test('目录屏障不可用时首次及同名文件重试均拒绝，不建立业务提交收据', async (t) => {
+  const f = await fixture(t);
+  const originalFsync = fs.fsyncSync;
+  t.mock.method(fs, 'fsyncSync', (fd) => {
+    if (fs.fstatSync(fd).isDirectory()) throw Object.assign(new Error('目录屏障不支持'), { code: 'ENOTSUP' });
+    return originalFsync(fd);
+  });
+  const relative = 'operations/unsupported-task/intent.json';
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    assert.throws(() => f.module.payloadStore.writeDocument(relative, { phase: 'PREPARING' }), { code: 'DURABILITY_BARRIER_UNAVAILABLE' });
+  }
+  assert.equal(f.db.prepare('SELECT count(*) AS n FROM biz_op_v327_receipts').get().n, 0);
+  assert.equal(f.db.prepare('SELECT count(*) AS n FROM biz_op_v327_input_heads').get().n, 0);
+});
+
+durableDirectoryTest('主库增量建表默认禁用，真实 Task/Archive/worker 候选原件受保护并提交一个版本', async (t) => {
   const f = await fixture(t);
   assert.equal(f.module.catalog.control().mode, 'DISABLED');
   const original = path.join(f.root, 'source.sqlite');
@@ -105,7 +121,7 @@ async function prepareUncommitted(f, index, actionKey = 'biz-op-v327:import-cand
   return taskRunId;
 }
 
-test('未提交链只经 Main 后处理和真实控制转换，原 Task 失败且终止收据幂等', async (t) => {
+durableDirectoryTest('未提交链只经 Main 后处理和真实控制转换，原 Task 失败且终止收据幂等', async (t) => {
   const f = await fixture(t);
   const taskId = await prepareUncommitted(f, 1);
   const result = await f.module.recovery.run();
@@ -121,7 +137,7 @@ test('未提交链只经 Main 后处理和真实控制转换，原 Task 失败�
   assert.equal(f.module.catalog.control().generation, 0);
 });
 
-test('来源数量超限在首次平台扫描前退出，所有 Task 与记录继续保留', async (t) => {
+durableDirectoryTest('来源数量超限在首次平台扫描前退出，所有 Task 与记录继续保留', async (t) => {
   const f = await fixture(t, { budgetOptions: { limits: { ...RECOVERY_LIMITS, sources: 1 } } });
   const first = await prepareUncommitted(f, 1);
   await prepareUncommitted(f, 2);
@@ -135,7 +151,7 @@ test('来源数量超限在首次平台扫描前退出，所有 Task 与记录�
 });
 
 for (const size of [32, 128, 1024]) {
-  test(`${size} 个真实 Task 来源使用两次全量扫描及 3N 次 Inspector`, async (t) => {
+  durableDirectoryTest(`${size} 个真实 Task 来源使用两次全量扫描及 3N 次 Inspector`, async (t) => {
     // 复杂度合同不把 CI 负载当作准入时钟；60 秒在真实在途调用测试中独立验证。
     const f = await fixture(t, { budgetOptions: { monotonicNow: () => 0 } });
     for (let index = 0; index < size; index += 1) await prepareUncommitted(f, index);
@@ -160,7 +176,7 @@ for (const size of [32, 128, 1024]) {
   });
 }
 
-test('READY 完成钩子失败时真实文件归档不会留下无保护的 READY', async (t) => {
+durableDirectoryTest('READY 完成钩子失败时真实文件归档不会留下无保护的 READY', async (t) => {
   const f = await fixture(t, { afterReady() { throw new Error('故障注入：READY 后同事务失败'); } });
   const source = path.join(f.root, 'input.sqlite');
   fs.writeFileSync(source, '真实归档输入');
@@ -175,7 +191,7 @@ test('READY 完成钩子失败时真实文件归档不会留下无保护的 READ
   assert.equal(fs.readFileSync(source, 'utf8'), '真实归档输入');
 });
 
-test('未提交封存目录经真实维护 Task 回收，诊断目录独立保留', async (t) => {
+durableDirectoryTest('未提交封存目录经真实维护 Task 回收，诊断目录独立保留', async (t) => {
   const f = await fixture(t);
   const taskId = await prepareUncommitted(f, 'cleanup');
   const stage = f.module.payloadStore.prepareCandidate(taskId, 'candidate-unused');
@@ -235,7 +251,7 @@ async function pendingCarrier(t, f, taskId, actionKey = 'biz-op-v327:import-cand
   } };
 }
 
-test('真实终止失败时阻断后处理；晚到退出后原 Task/同 scope 来源收敛', async (t) => {
+durableDirectoryTest('真实终止失败时阻断后处理；晚到退出后原 Task/同 scope 来源收敛', async (t) => {
   const f = await fixture(t);
   const taskId = await prepareUncommitted(f, 'late-exit');
   const pending = await pendingCarrier(t, f, taskId);
@@ -267,7 +283,7 @@ test('累计费用在拒绝后不会重置，截止时间只禁止启动下一�
   assert.equal(timed.snapshot().fullScans, 0);
 });
 
-test('真实 Main 进程在提交后退出，重启恢复原 Task、原 receipt 和原版本', async (t) => {
+durableDirectoryTest('真实 Main 进程在提交后退出，重启恢复原 Task、原 receipt 和原版本', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bizop-v327-crash-'));
   const child = spawnSync(process.execPath, [path.resolve(__dirname, '../../fixtures/biz-op-v327-crash.cjs'), root], {
     encoding: 'utf8', timeout: 30000, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
@@ -337,7 +353,7 @@ async function prepareDelete(f, index, values) {
   return { taskRunId, intentDigest: op.intent_digest, intent };
 }
 
-test('保留历史结果删除输入：只释放 INPUT，RESULT 原件引用和结果 payload 独立保留', async (t) => {
+durableDirectoryTest('保留历史结果删除输入：只释放 INPUT，RESULT 原件引用和结果 payload 独立保留', async (t) => {
   const f = await fixture(t);
   const data = await runFixture(f);
   const datasetId = data.start.receipt.outcome.datasets[0].datasetId;
@@ -356,7 +372,7 @@ test('保留历史结果删除输入：只释放 INPUT，RESULT 原件引用和�
   assert.equal(f.module.catalog.receipt(data.receipt.taskRunId).outcome.version, 1);
 });
 
-test('关联删除必须完整预览；嵌套 SAVEPOINT 故障不留下新收据、任务、回收或少掉的 holds', async (t) => {
+durableDirectoryTest('关联删除必须完整预览；嵌套 SAVEPOINT 故障不留下新收据、任务、回收或少掉的 holds', async (t) => {
   const f = await fixture(t);
   const data = await runFixture(f);
   const datasetId = data.start.receipt.outcome.datasets[0].datasetId;
@@ -382,7 +398,7 @@ test('关联删除必须完整预览；嵌套 SAVEPOINT 故障不留下新收据
   assert.equal(f.module.catalog.receiptState(data.receipt.taskRunId).currentObjects[0].availability, 'deleted');
 });
 
-test('指纹复用不分配新公开版本，弃用候选由业务 receipt 授权回收', async (t) => {
+durableDirectoryTest('指纹复用不分配新公开版本，弃用候选由业务 receipt 授权回收', async (t) => {
   const f = await fixture(t);
   const first = await importFixture(f, '2026-09-01');
   const second = await importFixture(f, '2026-09-01');
@@ -397,7 +413,7 @@ test('指纹复用不分配新公开版本，弃用候选由业务 receipt 授�
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM biz_op_v327_abort_finalizations').get().n, 0);
 });
 
-test('失败报告的两个真实 reader 独立持 pin，producer 失败与 reader 已退出都不能越过发布义务', async (t) => {
+durableDirectoryTest('失败报告的两个真实 reader 独立持 pin，producer 失败与 reader 已退出都不能越过发布义务', async (t) => {
   const f = await fixture(t);
   const producerId = await prepareUncommitted(f, 'report-producer');
   const producer = await pendingCarrier(t, f, producerId);
@@ -433,7 +449,7 @@ test('失败报告的两个真实 reader 独立持 pin，producer 失败与 read
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM biz_op_v327_read_pins').get().n, 2);
 });
 
-test('启动预检与 Archive owner 延续同一累计预算，全量扫描总计两次', async (t) => {
+durableDirectoryTest('启动预检与 Archive owner 延续同一累计预算，全量扫描总计两次', async (t) => {
   const f = await fixture(t, { async beforeBootstrap({ module, service }) {
     const taskRunId = 'startup-deferred-task';
     await service.beginTaskRun({ taskRunId, operationKey: 'startup-operation', moduleId: 'biz-op-recon',
@@ -454,7 +470,7 @@ test('启动预检与 Archive owner 延续同一累计预算，全量扫描总�
   assert.equal(f.module.catalog.task('startup-deferred-task').status, 'failed');
 });
 
-test('跨过准入期限的在途平台调用仍持有 gate，不提前返回或启动另一 attempt', async (t) => {
+durableDirectoryTest('跨过准入期限的在途平台调用仍持有 gate，不提前返回或启动另一 attempt', async (t) => {
   let now = 0;
   let intercept = false;
   let release;
@@ -483,7 +499,7 @@ test('跨过准入期限的在途平台调用仍持有 gate，不提前返回或
   assert.equal(f.module.admission.snapshot().exclusive, false);
 });
 
-test('异步共享读取在真实等待期间阻止写入，义务未完成后关闭入口并保留恢复路径', async (t) => {
+durableDirectoryTest('异步共享读取在真实等待期间阻止写入，义务未完成后关闭入口并保留恢复路径', async (t) => {
   const f = await fixture(t);
   const taskId = await prepareUncommitted(f, 'shared-reader', 'biz-op-v327:export-errors');
   let finish;
@@ -501,7 +517,7 @@ test('异步共享读取在真实等待期间阻止写入，义务未完成后�
   assert.equal((await f.module.recovery.run()).ready, false);
 });
 
-test('未接入升级权威时 UPGRADE 保持未决，不按普通无 receipt 操作自动失败', async (t) => {
+durableDirectoryTest('未接入升级权威时 UPGRADE 保持未决，不按普通无 receipt 操作自动失败', async (t) => {
   const f = await fixture(t);
   const taskId = await prepareUncommitted(f, 'upgrade', 'biz-op-v327:upgrade-preflight');
   const result = await f.module.recovery.run();
@@ -511,7 +527,7 @@ test('未接入升级权威时 UPGRADE 保持未决，不按普通无 receipt �
   assert.notEqual(f.module.catalog.task(taskId).status, 'failed');
 });
 
-test('回收中途到期保留授权和原维护 Task，下次 attempt 容忍已删除文件并完成', async (t) => {
+durableDirectoryTest('回收中途到期保留授权和原维护 Task，下次 attempt 容忍已删除文件并完成', async (t) => {
   let now = 0;
   const f = await fixture(t, { budgetOptions: { monotonicNow: () => now } });
   const id = await prepareUncommitted(f, 'partial-unlink');
@@ -540,7 +556,7 @@ test('回收中途到期保留授权和原维护 Task，下次 attempt 容忍已
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM biz_op_v327_reclaim_queue').get().n, 1);
 });
 
-test('真实 IPC 注册的十个新区间动作保持禁用，显式恢复重试接通同一 Main driver', async (t) => {
+durableDirectoryTest('真实 IPC 注册的十个新区间动作保持禁用，显式恢复重试接通同一 Main driver', async (t) => {
   const f = await fixture(t);
   const { registerBizOpV327Handlers } = require('../../../src/main-process/biz-op-v327/ipc');
   const handlers = new Map();
@@ -562,7 +578,7 @@ test('真实 IPC 注册的十个新区间动作保持禁用，显式恢复重试
   assert.equal(handlers.get('bizOpReconV327:status')().mode, 'DISABLED');
 });
 
-test('真实 Archive controller 启动先调用模块恢复，通用 sweep 不改写未决无文件 Task', async (t) => {
+durableDirectoryTest('真实 Archive controller 启动先调用模块恢复，通用 sweep 不改写未决无文件 Task', async (t) => {
   const f = await fixture(t);
   const { createArchiveCenterController } = require('../../../src/main-process/archive-center/controller');
   const taskId = await prepareUncommitted(f, 'host-reader', 'biz-op-v327:export-errors');
@@ -597,7 +613,7 @@ test('新模块绑定不能替另一个模块满足关闭观察的 Main 持久�
   assert.equal(runtime.resourceGovernor.snapshot().activeLeaseCount, 0);
 });
 
-test('收据优先仍核验 action 和 intent，不能把导入 Task 作为删除或运行重试', async (t) => {
+durableDirectoryTest('收据优先仍核验 action 和 intent，不能把导入 Task 作为删除或运行重试', async (t) => {
   const f = await fixture(t);
   const result = await importFixture(f, '2026-09-01');
   const args = { taskRunId: result.receipt.taskRunId, intentDigest: result.receipt.intentDigest };
@@ -634,7 +650,7 @@ test('4096 个真实目录任务完整枚举，4097 项在交付平台前拒绝�
     rssBytes: process.memoryUsage().rss, evaluations: budget.snapshot().evaluations }));
 });
 
-test('单来源与全量 decision 字节预算分别拒绝，后处理和文件清理均不执行', async (t) => {
+durableDirectoryTest('单来源与全量 decision 字节预算分别拒绝，后处理和文件清理均不执行', async (t) => {
   const single = await fixture(t, { budgetOptions: { limits: { ...RECOVERY_LIMITS, singleSourceBytes: 64 } } });
   await prepareUncommitted(single, 'source-bytes');
   const oversized = await single.module.recovery.run();
@@ -650,7 +666,7 @@ test('单来源与全量 decision 字节预算分别拒绝，后处理和文件�
   assert.equal(decisions.db.prepare('SELECT COUNT(*) AS n FROM biz_op_v327_abort_finalizations').get().n, 0);
 });
 
-test('最终完整扫描才出现的新任务继续阻断，不能递归发起第三次扫描', async (t) => {
+durableDirectoryTest('最终完整扫描才出现的新任务继续阻断，不能递归发起第三次扫描', async (t) => {
   let f;
   let armed = false;
   let calls = 0;

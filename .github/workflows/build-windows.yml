@@ -10,6 +10,27 @@ on:
       - '**'
 
 jobs:
+  bizop-durability-contract:
+    if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'codex/v3.2.7-')
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm ci
+      - name: Verify BizOP contracts with a real directory durability barrier
+        run: |
+          node -e "if (require('./tests/helpers/durable-directory-tests').directoryDurabilityCapability.capability !== 'supported') process.exit(1)"
+          node --test tests/unit/main-process/biz-op-v327*.test.js
+
   smoke-test:
     runs-on: windows-latest
     env:

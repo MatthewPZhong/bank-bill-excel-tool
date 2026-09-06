@@ -52,6 +52,16 @@ function createBizOpPayloadStore({ userDataDir }) {
       resolve(name);
     }
   }
+  function syncDocumentParents(target) {
+    // 新建的 task/root 目录本身也需要在其父目录中持久化，不能只同步最后一级。
+    let directory = path.dirname(target);
+    const boundary = path.resolve(userDataDir);
+    while (directory === boundary || directory.startsWith(`${boundary}${path.sep}`)) {
+      assertBarrier(fsyncDirectory(directory));
+      if (directory === boundary) break;
+      directory = path.dirname(directory);
+    }
+  }
   function writeDocument(relative, value) {
     const bytes = Buffer.from(JSON.stringify(snapshot(value, { maxBytes: MAX_MANIFEST_BYTES })));
     if (bytes.length > MAX_MANIFEST_BYTES) fail('BIZOP_MANIFEST_TOO_LARGE');
@@ -59,10 +69,14 @@ function createBizOpPayloadStore({ userDataDir }) {
     if (fs.existsSync(target)) {
       const previous = readDocument(relative);
       if (hash(previous.value) !== hash(value)) fail('BIZOP_DOCUMENT_IMMUTABLE');
+      const fd = fs.openSync(target, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+      try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+      syncDocumentParents(target);
       return { relativePath: relative, digest: previous.digest, byteSize: previous.byteSize };
     }
     const result = writeFileAtomicDurable(target, bytes);
     if (result.status !== 'committed') fail('DURABILITY_BARRIER_UNAVAILABLE');
+    syncDocumentParents(target);
     return { relativePath: relative, digest: createHash('sha256').update(bytes).digest('hex'), byteSize: bytes.length };
   }
   function readDocument(relative, expectedDigest) {

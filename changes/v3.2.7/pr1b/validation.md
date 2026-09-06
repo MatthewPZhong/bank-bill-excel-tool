@@ -49,3 +49,13 @@ npm run release-check
 - 当前可用性从目录单独回读；实际导出前的文件完整性、Publisher 与大文件封存性能在 PR2/PR4 落实。
 - Windows 本地未运行；目录持久化复用既有 durable-file 能力，宿主不支持目录屏障时必须拒绝。不能以 macOS 或注入时钟结果声称 Windows 可启用。
 - 未操作用户业务文件、旧月份侧库、发布版本；未运行目标 400万/1400万数据规模、Excel/WPS 打开或人工资金验收。
+
+## 远端 Windows 首轮与修正
+
+PR #231 首轮 run `34011443931` 的 Windows 单元阶段失败，新增成功路径实际遇到 `DURABILITY_BARRIER_UNAVAILABLE`。这是该宿主目录 fsync 不支持的直接证据；Windows 新功能仍不可启用。
+
+据此补充首次写入和同名文件重试的真实拒绝测试，修复同名文件内容相同即提前返回、可能绕过未确认屏障的问题；文件及所有 userData 内父目录均重新确认持久化。后台平台核心与 unsupported 语义不变。
+
+需要真实目录屏障的 24 项测试在不支持宿主上明确标 SKIP，保留 3 项无此依赖的测试及新增拒绝测试。增加 Ubuntu / Node 22 CI 执行完整 BizOP 成功和故障路径，执行前必须探明屏障 supported。Windows 的 SKIP 不计为功能 PASS，也不替代 PR6 的能力门禁。
+
+修正后本地 PR1b 专项：28 PASS / 0 FAIL / 0 SKIP（46.0 秒）；Windows workflow 契约：5 PASS / 2 个既有平台 SKIP / 0 FAIL；eslint 与 diff check 通过。该次未重复完整 release-check；远端修正运行待完成。
