@@ -16,9 +16,10 @@
 .bizop-field { display: flex; flex-direction: column; gap: 8px; margin-bottom: 18px; flex: 1; min-width: 170px; }
 .bizop-field input, .bizop-field select { width: 100%; box-sizing: border-box; font: inherit; }
 .bizop-results-dialog { width: min(100%, 620px); }
-.bizop-results-dialog .dialog-header, .bizop-run-dialog .dialog-header, .bizop-calendar-dialog .dialog-header { padding-left: 0; padding-right: 0; }
+.bizop-results-dialog .dialog-header, .bizop-run-dialog .dialog-header, .bizop-calendar-dialog .dialog-header, .bizop-delete-dialog .dialog-header { padding-left: 0; padding-right: 0; }
 .bizop-result-fields { display: grid; grid-template-columns: 190px minmax(0, 360px); gap: 18px; }
 .bizop-result-fields .bizop-field { min-width: 0; }
+.bizop-input-export-fields { grid-template-columns: 152px min(180px, calc((100% - 190px - 18px) / 2)); }
 .bizop-run-fields { display: grid; grid-template-columns: repeat(2, calc((100% - 18px) / 3)); gap: 18px; }
 .bizop-run-fields .bizop-field { min-width: 0; }
 .bizop-run-fields input { cursor: pointer; }

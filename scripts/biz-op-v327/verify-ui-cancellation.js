@@ -95,11 +95,11 @@ const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     }
     if (['result-export', 'publish-protected'].includes(scenario)) {
       await click('导出校验结果表'); await until("document.querySelector('dialog select')?.options.length===2");
-      await js("document.querySelector('dialog select').value='run-1'"); await click('另存为差异结果');
+      await js("document.querySelector('dialog select').value='run-1'"); await click('导出');
     }
     if (scenario === 'raw-export') {
       await click('数据管理'); await until("Boolean(target('导出'))"); await click('导出');
-      await js("[...document.querySelectorAll('dialog')].at(-1).querySelector('input[type=date]').value='2026-09-01'"); await click('选择位置并导出');
+      await js("[...document.querySelectorAll('dialog')].at(-1).querySelector('input[type=date]').value='2026-09-01'"); await click('导出');
     }
     if (['manager-export', 'delete', 'keep-delete'].includes(scenario)) {
       await click('数据管理'); await until("document.querySelector('dialog td')");

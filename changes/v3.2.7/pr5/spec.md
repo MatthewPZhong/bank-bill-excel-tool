@@ -15,3 +15,5 @@ Done when：实际 IPC 到原 Task/worker/catalog/Publisher 的导入、运行�
 2026-09-07 运行页面补充：标题左侧对齐分割线，两枚日期框宽度为原来的 2/3，移除日期区间说明；【检查所需数据】在左下角，运行和关闭在右侧。日期框只读，鼠标或键盘打开月历，每次默认展示最近成功导入的当前 OP 数据账期月份，同批次并列取最新账期。只有当前 OP head 对应 ACTIVE dataset 的日期可选，FLOW-only 日期不作为起止端点；可跳转到前后有 OP 数据的月份，无 OP 时显示空态。
 
 只读 IPC `bizOpReconV327:metadata:run-calendar` 接受可选 `month: YYYY-MM`，返回 `month/latestMonth/dates/previousMonth/nextMonth/generation`；仅查询目录，每次最多 31 个日期，不传业务明细、任意路径或创建 Task。Main、preload 和只读策略清单同时注册。月历关闭后拒绝晚到响应；日期变化使原预检失效。可选日期不代替原预检，执行前仍须核验两端 OP、区间每日流水和 generation。具体实现及验证见 [布局纠偏记录](layout-correction.md)。
+
+同日导出页面补充：移除“只导出该类型、该账期当前可用的版本。”；导出数据日期框与目标下拉框宽度分别缩为本轮调整前的 4/5 和 1/2，仍在同一行。该窗口及导出校验结果表的提交按钮均为【导出】，继续调用原选择位置和导出流程。确认删除影响标题左侧对齐下方分割线，删除预览内容与提交 mode 保留。

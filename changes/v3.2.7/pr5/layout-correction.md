@@ -20,6 +20,7 @@
 
 ### 本轮明确的界面细节
 
+- 用户继续追加：导出数据移除当前可用版本说明，日期与目标下拉框相对上一版分别缩为 4/5、1/2；输入和结果导出的提交按钮统一为“导出”；确认删除影响标题对齐分割线。复用原 currentInput/pickExport/exportObject 和删除预览回调，只增加局部宽度与标题样式。
 - 运行窗口追加要求：日期框宽度为原来的 2/3；标题对齐分割线，预检按钮置左下角，移除原业务区间说明。
 - PROBE：原生日期框只能限定连续 min/max，无法禁用月份中间缺少 OP 的日期；旧日期 factory 只有自由三下拉或全部日期单选，不提供逐月日历。采用轻量原生模态月历，日期框只读，允许鼠标或键盘打开，禁用未返回的日期。
 - 新增只读 `metadata:run-calendar`：查询当前 OP head 与 ACTIVE dataset，默认按最近成功导入时间取账期月份；同批次并列按账期倒序取值。每次只返回一月最多 31 个日期及前后有数据月份，不扫描业务明细、不创建 Task。导出与管理的“操作月份”接口保持原义。
@@ -42,17 +43,18 @@
 
 ## Evidence
 
-- 最新 `verify-ui.js`：33 PASS。实际 VCC 主面板在 1200×900、1080×760 两档与 BizOP 几何对照；两类导出弹窗横排/标题对齐、实际 VCC 预览入口和 BizOP 的文字按钮对齐；401 条三页完整可达、generation 变化重载、晚到页拒绝，以及四类导出、删除影响、草稿与旧路由。新增运行窗口标题/宽度/左下角按钮测量、默认最近导入月份、跨月导航、禁用缺失日期、重复打开、关闭后晚到响应与无 OP 空态。
+- 最新 `verify-ui.js`：33 PASS。实际 VCC 主面板在 1200×900、1080×760 两档与 BizOP 几何对照；两类导出弹窗横排/标题对齐、实际 VCC 预览入口和 BizOP 的文字按钮对齐；401 条三页完整可达、generation 变化重载、晚到页拒绝，以及四类导出、删除影响、草稿与旧路由。包括运行窗口标题/宽度/左下角按钮测量、默认最近导入月份、跨月导航、禁用缺失日期、重复打开、关闭后晚到响应与无 OP 空态。最新再验证输入导出宽度精确 4/5 与 1/2、说明移除、两个导出按钮、删除确认标题；四类导出和结果差异路由保持。
 - 最新 `verify-ui-cancellation.js`：11 PASS，真实 Electron 鼠标/键盘输入。运行场景实际通过月历选择起止日期后预检、运行和取消，分别验证鼠标与 Enter/Tab，并断言无数据日期禁用。导入取消坐标与尺寸完全等于原按钮，重复取消、晚到响应及双层模态都保持；导出原表的进度框不可见，但取消仍有正确焦点、requestId 和等待行为。
-- 最新 IPC/注册合同：`biz-op-v327-ipc.test.js`、`archive-task-policy-registry.test.js`、`archive-ipc-task-contract.test.js` 合计 36 PASS / 0 SKIP / 0 FAIL。实际临时文件、SQLite 和导入/删除链验证 OP 日期、FLOW-only 排除、较早账期后导入成为默认月、前后月份、删除后更新、参数拒绝、小响应和读取不创建 Task。Main/preload 字面量集合继续精确相等，新入口显式登记为只读排除项。
+- 运行月历提交 `7a09385c` 的 IPC/注册合同：`biz-op-v327-ipc.test.js`、`archive-task-policy-registry.test.js`、`archive-ipc-task-contract.test.js` 合计 36 PASS / 0 SKIP / 0 FAIL。实际临时文件、SQLite 和导入/删除链验证 OP 日期、FLOW-only 排除、较早账期后导入成为默认月、前后月份、删除后更新、参数拒绝、小响应和读取不创建 Task。Main/preload 字面量集合继续精确相等，新入口显式登记为只读排除项；后续导出页面精简未修改该链。
 - 前一提交 `f6a6355a` 的 `biz-op-v327-export.test.js` + `biz-op-v327-export-main.test.js`：真实 Electron Node、SQLite、XLSX 和 Task/Publisher/Archive 21 PASS / 0 SKIP / 0 FAIL，包含零差异单页、完整原表说明保留、19 列对照、封存数据不变及六类共 72 个损坏反例。差异说明政策已体现在 schema/expected/actual/Main 的同一身份中；运行月历修改没有再次修改或复跑该输出链。
 - 本轮探针时序修正：明确等待原生 close 事件移除旧窗口，导出任务实际完成，且新分类列表可操作后再点击删除；不能用旧表相同的首格日期作为新列表就绪证据。首次差异页名称篡改未匹配 XLSX 属性顺序，补上“确实修改 XML”的断言后复验通过；没有放松产品行为或拒绝条件。
 - 前轮 `b32d265c` 的 19/10 项和 `f6a6355a` 的 28/11 项结果为历史记录，不与最新 33/11 项重复相加；前轮主页面先展开再聚焦的修复保留。
 - `f6a6355a` 的 VCC 前端、预览及文档回归：58 PASS / 0 FAIL；当前 lint、git diff --check 通过。未为运行月历重跑完整 release-check。
 - 首次 IPC 回归有两项旧精确清单数量断言失败；新增只读 channel 使总数 264→265、V327 20→21、exclude 128→129。同步数量后 36 项通过，集合相等断言保留，71 个 file 和 63 个 no-file mutation 数量不变。
 - `check-vars` 命中 Important-skeleton 的 `ipcRenderer`：新增 channel 已同步 Main handler、preload 和只读策略登记，真实 IPC 及字面量精确集合检查通过。另有 renderer 局部 `dialog` 和 SQL 的 `d.state` 词法命中；按 important-variables.md 的定义，它们不是 Main 的 Electron dialog 或 renderer 全局 state，未修改原生文件选择和该全局状态。用户取消分支已由上述真实输入专项验证。
+- 导出页面精简完成后重新运行 UI 33 项、真实输入 11 项、lint 和 check-vars；后者只命中已核验的局部 dialog。运行月历提交同数量的 UI 检查不与这次重复相加。最新三张导出/删除截图已逐张查看，探针及日志分别保存在 `/tmp/bizop-export-labels-20260907` 与 `/tmp/bizop-run-calendar-20260907`。
 - 页面及数据保护复核：分类切换仍清空选择并用 loadVersion 拒绝晚到列表；四类输入导出继续查询当前对象并传 Main selectionRef；删除只在完整预览后提交原 mode，来源名仍使用 textContent。未修改金额、币种、主键、版本、目录或恢复行为，未新增资金红线项。
-- 截图见 [主面板](screenshots/layout-main.png)、[原位取消](screenshots/layout-import-cancel.png)、[数据管理](screenshots/layout-manager.png)、[输入导出](screenshots/layout-input-export.png)、[结果导出](screenshots/layout-result-export.png)、[VCC 操作列](screenshots/layout-vcc-manager.png)、[导出原表期间](screenshots/layout-manager-exporting.png)、[开始运行](screenshots/layout-run.png)、[运行月历](screenshots/layout-run-calendar.png)。截图来自隔离 Electron 中的实际组件与样式，业务 API 为夹具；未把这些检查写成真实资金或目标规模验收。
+- 截图见 [主面板](screenshots/layout-main.png)、[原位取消](screenshots/layout-import-cancel.png)、[数据管理](screenshots/layout-manager.png)、[输入导出](screenshots/layout-input-export.png)、[结果导出](screenshots/layout-result-export.png)、[删除确认](screenshots/layout-delete-impact.png)、[VCC 操作列](screenshots/layout-vcc-manager.png)、[导出原表期间](screenshots/layout-manager-exporting.png)、[开始运行](screenshots/layout-run.png)、[运行月历](screenshots/layout-run-calendar.png)。截图来自隔离 Electron 中的实际组件与样式，业务 API 为夹具；未把这些检查写成真实资金或目标规模验收。
 
 ## Remaining Unknowns
 

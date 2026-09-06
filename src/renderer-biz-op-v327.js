@@ -178,7 +178,7 @@
     async function openResults() {
       const dialog = modal('导出校验结果表', 'vcc-fin-op-export-dialog bizop-results-dialog'); const month = node('input', undefined, 'vcc-fin-op-input'); month.type = 'month'; month.value = await latestMonth();
       const choice = select([['', '请选择结果表']]); const next = button('下一页', () => load(cursor)); let cursor = null; let generation; let loadVersion = 0;
-      const exportBtn = button('另存为差异结果', async () => { if (!choice.value) throw new Error('请先选择结果表');
+      const exportBtn = button('导出', async () => { if (!choice.value) throw new Error('请先选择结果表');
         if ((await exportObject('RESULT_DIFF', choice.value))?.status === 'ok') dialog.close(); }, 'primary-btn');
       async function load(after = null) {
         const version = ++loadVersion;
@@ -197,15 +197,15 @@
     function openInputExport({ initialKind = 'OP_RAW' } = {}) {
       const dialog = modal('导出数据', 'vcc-fin-op-export-dialog bizop-results-dialog'); const kind = select([['OP_RAW', 'OP 原表'], ['OP_CHECK', 'OP 校验表'], ['FLOW_RAW', '流水原表'], ['FLOW_CHECK', '流水校验表']]);
       kind.value = initialKind;
-      const date = dateField(); const fields = node('div', undefined, 'bizop-result-fields'); fields.append(field('账期', date), field('导出目标', kind));
-      dialog.body.append(fields, node('p', '只导出该类型、该账期当前可用的版本。'));
-      dialog.footer.prepend(button('选择位置并导出', async () => {
+      const date = dateField(); const fields = node('div', undefined, 'bizop-result-fields bizop-input-export-fields'); fields.append(field('账期', date), field('导出目标', kind));
+      dialog.body.append(fields);
+      dialog.footer.prepend(button('导出', async () => {
         const current = checked(await api.currentInput({ kind: kind.value.split('_')[0], dataDate: date.value }));
         if ((await exportObject(kind.value, current.objectId))?.status === 'ok') dialog.close();
       }, 'primary-btn'));
     }
     async function showDelete(selection, refresh) {
-      const preview = checked(await api.deletePreview(selection)); const dialog = modal('确认删除影响');
+      const preview = checked(await api.deletePreview(selection)); const dialog = modal('确认删除影响', 'bizop-delete-dialog');
       dialog.body.append(node('p', `将处理 ${preview.datasets.length} 个当前输入版本；关联 ${preview.runs.length} 对历史结果（全量表与差异表一起处理）。`));
       if (preview.datasets.length) dialog.body.append(table(['输入类型', '账期', '版本', '来源文件'], preview.datasets.map((item) => [item.kind, item.dataDate, `v${item.version}`, item.originals.map((file) => file.originalName).join('、')])));
       if (preview.runs.length) dialog.body.append(table(['操作月份', '起始日期', '终止日期', '关联结果表', '原件引用'], preview.runs.map((item) => {

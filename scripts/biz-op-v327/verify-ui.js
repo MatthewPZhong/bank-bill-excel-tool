@@ -91,14 +91,18 @@ const checks = [];
   await shot('02-manager');
   await check('管理页移除刷新和下一页，底部为删除、导出、返回，单页不显示页码', `(()=>{const d=document.querySelector('dialog');return [...d.querySelectorAll('.bizop-modal-footer button')].filter(b=>!b.hidden).map(b=>b.textContent).join('|')==='删除|导出|返回'&&!d.querySelector('.bizop-page-choice').checkVisibility();})()`);
   await check('业务 OP 操作标题与导出原表文字左侧对齐', `operationAlignment(document.querySelector('dialog'))`);
-  await check('导出数据的日期和目标横排缩窄，标题对齐分割线', `(()=>{
-    controller.openInputExport();const d=[...document.querySelectorAll('dialog[open]')].at(-1),a=d.querySelector('input[type=date]').getBoundingClientRect(),b=d.querySelector('select').getBoundingClientRect();
-    return Math.abs(a.top-b.top)<1&&a.right<b.left&&a.width>=180&&a.width<=200&&b.width>=280&&b.width<=360&&Math.abs(textLeft(d.querySelector('.dialog-title'))-d.querySelector('.dialog-header').getBoundingClientRect().left)<1;
+  await check('导出数据日期缩至原宽 4/5、下拉框缩至 1/2，移除说明且按钮为导出', `(()=>{
+    controller.openInputExport();const d=[...document.querySelectorAll('dialog[open]')].at(-1),fields=d.querySelector('.bizop-input-export-fields'),date=d.querySelector('input[type=date]'),choice=d.querySelector('select');
+    fields.classList.remove('bizop-input-export-fields');const original=[date.getBoundingClientRect().width,choice.getBoundingClientRect().width];fields.classList.add('bizop-input-export-fields');
+    const a=date.getBoundingClientRect(),b=choice.getBoundingClientRect();
+    return Math.abs(a.top-b.top)<1&&a.right<b.left&&Math.abs(a.width-original[0]*4/5)<1&&Math.abs(b.width-original[1]/2)<1
+      &&Math.abs(textLeft(d.querySelector('.dialog-title'))-d.querySelector('.dialog-header').getBoundingClientRect().left)<1
+      &&!d.textContent.includes('只导出该类型、该账期当前可用的版本。')&&[...d.querySelectorAll('.bizop-modal-footer button')].map(x=>x.textContent).join('|')==='导出|关闭';
   })()`);
   await shot('02-input-export');
   await js(`(async()=>{[...document.querySelectorAll('dialog')].at(-1).close();await waitUntil(()=>document.querySelectorAll('dialog').length===1);})()`);
   for (const outputKind of ['OP_RAW', 'OP_CHECK', 'FLOW_RAW', 'FLOW_CHECK']) {
-    await check(`管理内 ${outputKind} 导出保留对应输入类型和账期`, `(async()=>{button('导出').click();await waitUntil(()=>document.querySelectorAll('dialog').length===2);const d=[...document.querySelectorAll('dialog')].at(-1);d.querySelector('select').value=${JSON.stringify(outputKind)};d.querySelector('input[type=date]').value='2026-09-01';button('选择位置并导出').click();await waitUntil(()=>!controller.busy&&fixture.calls.some(x=>x[0]==='export'&&x[1]===${JSON.stringify(outputKind)}));await waitUntil(()=>document.querySelectorAll('dialog').length===1);const current=fixture.calls.filter(x=>x[0]==='currentInput').at(-1);return current[1].kind===${JSON.stringify(outputKind.split('_')[0])}&&current[1].dataDate==='2026-09-01';})()`);
+    await check(`管理内 ${outputKind} 导出保留对应输入类型和账期`, `(async()=>{button('导出').click();await waitUntil(()=>document.querySelectorAll('dialog').length===2);const d=[...document.querySelectorAll('dialog')].at(-1);d.querySelector('select').value=${JSON.stringify(outputKind)};d.querySelector('input[type=date]').value='2026-09-01';button('导出').click();await waitUntil(()=>!controller.busy&&fixture.calls.some(x=>x[0]==='export'&&x[1]===${JSON.stringify(outputKind)}));await waitUntil(()=>document.querySelectorAll('dialog').length===1);const current=fixture.calls.filter(x=>x[0]==='currentInput').at(-1);return current[1].kind===${JSON.stringify(outputKind.split('_')[0])}&&current[1].dataDate==='2026-09-01';})()`);
   }
   await js('closeDialogs()');
   await check('移除翻页按钮后 401 条结果分三页可达，换页清空删除选择并绑定 generation', `(async()=>{
@@ -131,7 +135,7 @@ const checks = [];
   await check('数据管理列顺序，主结果导出为全量原表', `(async()=>{await controller.openManager();button('导出原表').click();await waitUntil(()=>!controller.busy&&fixture.calls.some(x=>x[0]==='export'&&x[1]==='RESULT_FULL'));return [...document.querySelectorAll('th')].map(x=>x.textContent).join('|')==='起始日期|终止日期|表名|结果版本|更新时间|操作';})()`);
   await check('原表文件名作为文本，点击删除先进入选取且不执行删除', `(async()=>{button('校验原表').click();await waitUntil(()=>document.querySelector('th:nth-child(3)')?.textContent==='来源文件'&&document.querySelector('td')?.textContent==='2026-09-01'&&!button('删除').disabled);button('删除').click();await waitUntil(()=>document.querySelector('input[type=checkbox]'));const c=document.querySelector('input[type=checkbox]');c.checked=true;c.dispatchEvent(new Event('change'));return !document.querySelector('dialog img')&&!document.querySelector('dialog').textContent.includes('选取任一来源文件')&&document.querySelector('dialog').textContent.includes('<img src=x onerror=alert(1)>.xlsx')&&!fixture.calls.some(x=>x[0]==='delete');})()`);
   await shot('02-manager-select');
-  await check('删除先完整跨月份预览，精确三个按钮', `(async()=>{button('删除').click();await waitUntil(()=>document.querySelectorAll('dialog').length===2);const d=[...document.querySelectorAll('dialog')].at(-1);return d.textContent.includes('2026-08')&&[...d.querySelectorAll('footer button,.bizop-modal-footer button')].map(x=>x.textContent).join('|')==='删除但保留结果表|删除|取消'&&!fixture.calls.some(x=>x[0]==='delete');})()`);
+  await check('删除先完整跨月份预览，精确三个按钮，确认删除影响标题对齐分割线', `(async()=>{button('删除').click();await waitUntil(()=>document.querySelectorAll('dialog').length===2);const d=[...document.querySelectorAll('dialog')].at(-1);return d.textContent.includes('2026-08')&&[...d.querySelectorAll('footer button,.bizop-modal-footer button')].map(x=>x.textContent).join('|')==='删除但保留结果表|删除|取消'&&!fixture.calls.some(x=>x[0]==='delete')&&Math.abs(textLeft(d.querySelector('.dialog-title'))-d.querySelector('.dialog-header').getBoundingClientRect().left)<1;})()`);
   await shot('03-delete-impact');
   await check('保留结果选择按 mode 提交，成功后刷新', `(async()=>{button('删除但保留结果表').click();await waitUntil(()=>fixture.calls.some(x=>x[0]==='delete'));await waitUntil(()=>!controller.busy);return fixture.calls.find(x=>x[0]==='delete')[1].mode==='KEEP_RESULTS';})()`);
   await js('closeDialogs()');
@@ -180,7 +184,7 @@ const checks = [];
   })()`);
   await shot('05-result-export');
   await js('closeDialogs()');
-  await check('主导出只按操作月份和结果表选择差异', `(async()=>{await controller.openResults();const select=document.querySelector('dialog select');select.value='run-1';button('另存为差异结果').click();await waitUntil(()=>fixture.calls.some(x=>x[0]==='export'&&x[1]==='RESULT_DIFF'));await waitUntil(()=>!controller.busy);return fixture.calls.some(x=>x[0]==='export'&&x[1]==='RESULT_DIFF');})()`);
+  await check('校验结果按钮显示导出，仍按操作月份和结果表选择差异', `(async()=>{await controller.openResults();const select=document.querySelector('dialog select');select.value='run-1';button('导出').click();await waitUntil(()=>fixture.calls.some(x=>x[0]==='export'&&x[1]==='RESULT_DIFF'));await waitUntil(()=>!controller.busy);return fixture.calls.some(x=>x[0]==='export'&&x[1]==='RESULT_DIFF');})()`);
   await js('closeDialogs()');
   await check('双击只发一次导入，取消等待实际结果后才解除 busy', `(async()=>{button('导入文件').click();button('导入文件').click();await waitUntil(()=>fixture.importResolve);button('取消导入').click();await waitUntil(()=>fixture.calls.some(x=>x[0]==='cancel'));const held=controller.busy&&button('开始运行').disabled;fixture.importResolve({status:'cancelled'});await waitUntil(()=>!controller.busy);return held&&fixture.calls.filter(x=>x[0]==='import').length===1&&!button('开始运行').disabled;})()`);
   await js(`window.desktopApi={previewCapture:true,vccFinancialOp:{async listArchivedResultMonths(){return [];}}};document.querySelector('#modalRoot').hidden=false;`);
