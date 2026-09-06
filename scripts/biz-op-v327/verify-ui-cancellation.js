@@ -50,7 +50,7 @@ const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   }
   for (const scenario of ['import', 'import-keyboard', 'run-mouse', 'run-keyboard', 'result-export', 'raw-export', 'manager-export', 'delete', 'keep-delete', 'publish-protected', 'late-cancel']) {
     const importing = scenario.startsWith('import') || scenario === 'late-cancel';
-    const cancelLabel = importing ? '取消导入' : '取消当前操作';
+    const cancelLabel = importing ? '取消导入' : '取消';
     await win.loadFile(html);
     await js(`(async()=>{
       window.fixture={cancelCalls:[],requests:[],finish:null,cancelFinish:null};

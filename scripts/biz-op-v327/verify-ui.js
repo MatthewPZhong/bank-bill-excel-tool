@@ -50,8 +50,8 @@ const checks = [];
       async pickFiles(){return {status:'ok',selectionRef:'selection-import',files:['测试.xlsx']};},
       async importFiles(value){state.calls.push(['import',value]);return new Promise(resolve=>state.importResolve=resolve);},
       async cancel(value){state.calls.push(['cancel',value]);return {status:'cancelling',message:'已请求取消，正在等待后台任务退出'};},
-      async pickExport(value){state.calls.push(['pickExport',value]);return {status:'ok',selectionRef:'selection-export'};},
-      async exportWorkbook(kind,value){state.calls.push(['export',kind,value]);return {status:'ok'};},
+      async pickExport(value){state.calls.push(['pickExport',value]);return state.pickCancelled?{status:'cancelled'}:{status:'ok',selectionRef:'selection-export'};},
+      async exportWorkbook(kind,value){state.calls.push(['export',kind,value]);if(state.holdExport)return new Promise(resolve=>state.exportResolve=resolve);return {status:'ok'};},
       async currentInput(value){state.calls.push(['currentInput',value]);return input;},
       async deletePreview(value){state.calls.push(['deletePreview',value]);return {previewId:'preview-1',selection:{datasetIds:value.datasetIds||[],runIds:value.runIds||[]},datasets:value.datasetIds?[{...input,originals}]:[],runs:[{...run,originals},{...run,objectId:'run-2',operationMonth:'2026-08',version:1,tableName:'业务OP校验结果表_2026-09-01~09-03_v1',originals}],references:{protectedAfterKeep:4,protectedAfterDelete:2,userLockedOriginals:1,sharedBlobOriginals:2}};},
       async deleteData(value){state.calls.push(['delete',value]);return {status:'ok'};}, async retryRecovery(){return {ready:true};}
@@ -64,6 +64,8 @@ const checks = [];
       height:outer.height,items:[...panel.querySelectorAll('.control-row button'),panel.querySelector('.status-box')].map(item=>{
         const r=item.getBoundingClientRect();return [r.x-outer.x,r.y-outer.y,r.width,r.height];})};};
     window.textLeft=(element)=>{const range=document.createRange();range.selectNodeContents(element);return range.getBoundingClientRect().left;};
+    window.rect=(element)=>{const r=element.getBoundingClientRect();return [r.x,r.y,r.width,r.height];};
+    window.managerButtons=()=>[...document.querySelectorAll('.vcc-fin-op-manager-footer-right button')].filter(b=>!b.hidden).map(rect);
     window.operationAlignment=(scope)=>{const table=scope.querySelector('.vcc-fin-op-manager-result-table'),link=table.querySelector('.vcc-fin-op-link-btn');return Math.abs(textLeft(table.querySelector('th:last-child'))-textLeft(link))<1&&getComputedStyle(link).backgroundColor==='rgba(0, 0, 0, 0)'&&getComputedStyle(link).borderTopWidth==='0px';};
   })()`);
   async function check(name, code) {
@@ -91,18 +93,22 @@ const checks = [];
   await shot('02-manager');
   await check('管理页移除刷新和下一页，底部为删除、导出、返回，单页不显示页码', `(()=>{const d=document.querySelector('dialog');return [...d.querySelectorAll('.bizop-modal-footer button')].filter(b=>!b.hidden).map(b=>b.textContent).join('|')==='删除|导出|返回'&&!d.querySelector('.bizop-page-choice').checkVisibility();})()`);
   await check('业务 OP 操作标题与导出原表文字左侧对齐', `operationAlignment(document.querySelector('dialog'))`);
-  await check('导出数据日期缩至原宽 4/5、下拉框缩至 1/2，移除说明且按钮为导出', `(()=>{
+  await check('导出数据收紧右边界，保留日期和下拉框尺寸，返回右侧对齐目标', `(()=>{
     controller.openInputExport();const d=[...document.querySelectorAll('dialog[open]')].at(-1),fields=d.querySelector('.bizop-input-export-fields'),date=d.querySelector('input[type=date]'),choice=d.querySelector('select');
-    fields.classList.remove('bizop-input-export-fields');const original=[date.getBoundingClientRect().width,choice.getBoundingClientRect().width];fields.classList.add('bizop-input-export-fields');
     const a=date.getBoundingClientRect(),b=choice.getBoundingClientRect();
-    return Math.abs(a.top-b.top)<1&&a.right<b.left&&Math.abs(a.width-original[0]*4/5)<1&&Math.abs(b.width-original[1]/2)<1
+    return Math.abs(a.top-b.top)<1&&a.right<b.left&&Math.abs(a.width-152)<1&&Math.abs(b.width-180)<1
+      &&Math.abs((d.getBoundingClientRect().right-b.right)-(a.left-d.getBoundingClientRect().left))<1
       &&Math.abs(textLeft(d.querySelector('.dialog-title'))-d.querySelector('.dialog-header').getBoundingClientRect().left)<1
-      &&!d.textContent.includes('只导出该类型、该账期当前可用的版本。')&&[...d.querySelectorAll('.bizop-modal-footer button')].map(x=>x.textContent).join('|')==='导出|关闭';
+      &&!d.textContent.includes('只导出该类型、该账期当前可用的版本。')&&[...d.querySelectorAll('.bizop-modal-footer button')].map(x=>x.textContent).join('|')==='导出|返回'
+      &&Math.abs(button('返回').getBoundingClientRect().right-b.right)<1;
   })()`);
   await shot('02-input-export');
   await js(`(async()=>{[...document.querySelectorAll('dialog')].at(-1).close();await waitUntil(()=>document.querySelectorAll('dialog').length===1);})()`);
   for (const outputKind of ['OP_RAW', 'OP_CHECK', 'FLOW_RAW', 'FLOW_CHECK']) {
-    await check(`管理内 ${outputKind} 导出保留对应输入类型和账期`, `(async()=>{button('导出').click();await waitUntil(()=>document.querySelectorAll('dialog').length===2);const d=[...document.querySelectorAll('dialog')].at(-1);d.querySelector('select').value=${JSON.stringify(outputKind)};d.querySelector('input[type=date]').value='2026-09-01';button('导出').click();await waitUntil(()=>!controller.busy&&fixture.calls.some(x=>x[0]==='export'&&x[1]===${JSON.stringify(outputKind)}));await waitUntil(()=>document.querySelectorAll('dialog').length===1);const current=fixture.calls.filter(x=>x[0]==='currentInput').at(-1);return current[1].kind===${JSON.stringify(outputKind.split('_')[0])}&&current[1].dataDate==='2026-09-01';})()`);
+    await check(`管理内 ${outputKind} 导出保留类型和账期，原表成功后提醒`, `(async()=>{button('导出').click();await waitUntil(()=>document.querySelectorAll('dialog').length===2);const d=[...document.querySelectorAll('dialog')].at(-1);d.querySelector('select').value=${JSON.stringify(outputKind)};d.querySelector('input[type=date]').value='2026-09-01';button('导出').click();await waitUntil(()=>!controller.busy&&fixture.calls.some(x=>x[0]==='export'&&x[1]===${JSON.stringify(outputKind)}));await waitUntil(()=>!document.querySelector('.bizop-input-export-dialog'));
+      if(${outputKind.endsWith('_RAW')}) {const notice=document.querySelector('.bizop-export-success-dialog');if(!notice?.textContent.includes(${JSON.stringify(outputKind === 'OP_RAW' ? 'OP 校验原表导出成功。' : '流水校验原表导出成功。')})||!notice.contains(document.activeElement))return false;button('确定').click();}
+      else if(document.querySelector('.bizop-export-success-dialog'))return false;
+      await waitUntil(()=>document.querySelectorAll('dialog').length===1);const current=fixture.calls.filter(x=>x[0]==='currentInput').at(-1);return current[1].kind===${JSON.stringify(outputKind.split('_')[0])}&&current[1].dataDate==='2026-09-01';})()`);
   }
   await js('closeDialogs()');
   await check('移除翻页按钮后 401 条结果分三页可达，换页清空删除选择并绑定 generation', `(async()=>{
@@ -132,18 +138,46 @@ const checks = [];
     return document.querySelector('td')?.textContent==='2026-09-01'&&document.querySelector('.bizop-page-choice').hidden;
   })()`);
   await js('(async()=>{await closeDialogs();fixture.paged=false;})()');
-  await check('数据管理列顺序，主结果导出为全量原表', `(async()=>{await controller.openManager();button('导出原表').click();await waitUntil(()=>!controller.busy&&fixture.calls.some(x=>x[0]==='export'&&x[1]==='RESULT_FULL'));return [...document.querySelectorAll('th')].map(x=>x.textContent).join('|')==='起始日期|终止日期|表名|结果版本|更新时间|操作';})()`);
+  await check('原表导出期间管理按钮位置不变，取消与删除尺寸一致，未完成不弹成功', `(async()=>{
+    await controller.openManager();fixture.holdExport=true;window.beforeManager=managerButtons();button('导出原表').click();await waitUntil(()=>fixture.exportResolve&&controller.busy);
+    const actual=managerButtons(),cancel=button('取消'),del=document.querySelector('.vcc-fin-op-manager-footer-right button');
+    return JSON.stringify(actual)===JSON.stringify(beforeManager)&&rect(cancel).slice(2).every((v,i)=>Math.abs(v-rect(del)[i+2])<1)
+      &&document.querySelector('.vcc-fin-op-manager-footer-left').contains(cancel)&&!document.querySelector('.bizop-export-success-dialog')
+      &&[...document.querySelectorAll('th')].map(x=>x.textContent).join('|')==='起始日期|终止日期|表名|结果版本|更新时间|操作';
+  })()`);
+  await shot('09-manager-exporting');
+  await check('结果原表成功后仅弹一次提醒，管理页恢复按钮并保持位置', `(async()=>{
+    fixture.exportResolve({status:'ok'});await waitUntil(()=>document.querySelector('.bizop-export-success-dialog'));
+    return !controller.busy&&document.querySelectorAll('.bizop-export-success-dialog').length===1&&document.querySelector('.bizop-export-success-dialog').textContent.includes('结果原表导出成功。')
+      &&document.activeElement===button('确定')&&JSON.stringify(managerButtons())===JSON.stringify(beforeManager);
+  })()`);
+  await shot('10-export-success');
+  await js("(async()=>{button('确定').click();await waitUntil(()=>document.querySelectorAll('dialog').length===1);fixture.holdExport=false;})()");
+  for (const outcome of [{status:'cancelled'}, {status:'error',message:'导出失败，请重试'}, {status:'ok',cleanupPending:true,pendingArchiveHandoff:true}]) {
+    await check(`原表导出 ${outcome.status}${outcome.cleanupPending ? ' 收尾未决' : ''} 的提醒不误报`, `(async()=>{
+      fixture.holdExport=true;fixture.exportResolve=null;button('导出原表').click();await waitUntil(()=>fixture.exportResolve&&controller.busy);
+      fixture.exportResolve(${JSON.stringify(outcome)});await waitUntil(()=>!controller.busy);await new Promise(r=>setTimeout(r,20));fixture.holdExport=false;
+      const notice=document.querySelector('.bizop-export-success-dialog');
+      if(${outcome.status === 'ok'}) {if(!notice?.textContent.includes('仍有归档或收尾待完成'))return false;button('确定').click();await waitUntil(()=>!document.querySelector('.bizop-export-success-dialog'));return true;}
+      return !notice&&JSON.stringify(managerButtons())===JSON.stringify(beforeManager);
+    })()`);
+  }
+  await check('取消保存位置不发起导出，也不显示成功提醒', `(async()=>{
+    fixture.pickCancelled=true;const before=fixture.calls.filter(x=>x[0]==='export').length;button('导出原表').click();await new Promise(r=>setTimeout(r,30));fixture.pickCancelled=false;
+    return !controller.busy&&fixture.calls.filter(x=>x[0]==='export').length===before&&!document.querySelector('.bizop-export-success-dialog');
+  })()`);
   await check('原表文件名作为文本，点击删除先进入选取且不执行删除', `(async()=>{button('校验原表').click();await waitUntil(()=>document.querySelector('th:nth-child(3)')?.textContent==='来源文件'&&document.querySelector('td')?.textContent==='2026-09-01'&&!button('删除').disabled);button('删除').click();await waitUntil(()=>document.querySelector('input[type=checkbox]'));const c=document.querySelector('input[type=checkbox]');c.checked=true;c.dispatchEvent(new Event('change'));return !document.querySelector('dialog img')&&!document.querySelector('dialog').textContent.includes('选取任一来源文件')&&document.querySelector('dialog').textContent.includes('<img src=x onerror=alert(1)>.xlsx')&&!fixture.calls.some(x=>x[0]==='delete');})()`);
   await shot('02-manager-select');
   await check('删除先完整跨月份预览，精确三个按钮，确认删除影响标题对齐分割线', `(async()=>{button('删除').click();await waitUntil(()=>document.querySelectorAll('dialog').length===2);const d=[...document.querySelectorAll('dialog')].at(-1);return d.textContent.includes('2026-08')&&[...d.querySelectorAll('footer button,.bizop-modal-footer button')].map(x=>x.textContent).join('|')==='删除但保留结果表|删除|取消'&&!fixture.calls.some(x=>x[0]==='delete')&&Math.abs(textLeft(d.querySelector('.dialog-title'))-d.querySelector('.dialog-header').getBoundingClientRect().left)<1;})()`);
   await shot('03-delete-impact');
   await check('保留结果选择按 mode 提交，成功后刷新', `(async()=>{button('删除但保留结果表').click();await waitUntil(()=>fixture.calls.some(x=>x[0]==='delete'));await waitUntil(()=>!controller.busy);return fixture.calls.find(x=>x[0]==='delete')[1].mode==='KEEP_RESULTS';})()`);
   await js('closeDialogs()');
-  await check('运行标题对齐分割线、日期框为原宽 2/3，检查按钮位于左下角且不显示旧说明', `(()=>{
+  await check('运行右边界收紧、保留日期框宽，检查和关闭分别对齐左右字段', `(()=>{
     controller.openRun();const d=document.querySelector('dialog'),fields=d.querySelector('.bizop-run-fields'),inputs=[...fields.querySelectorAll('input')];
-    const expected=(fields.getBoundingClientRect().width-18)/2*2/3,footer=d.querySelector('.bizop-modal-footer'),check=button('检查所需数据');
+    const expected=233.5,footer=d.querySelector('.bizop-modal-footer'),check=button('检查所需数据');
     return inputs.every(x=>x.readOnly&&Math.abs(x.getBoundingClientRect().width-expected)<1)&&Math.abs(textLeft(d.querySelector('.dialog-title'))-d.querySelector('.dialog-header').getBoundingClientRect().left)<1
-      &&footer.contains(check)&&check.getBoundingClientRect().left<footer.getBoundingClientRect().left+30&&!d.textContent.includes('OP 需要起始、终止两日');
+      &&footer.contains(check)&&Math.abs(check.getBoundingClientRect().left-inputs[0].getBoundingClientRect().left)<1
+      &&Math.abs(button('关闭').getBoundingClientRect().right-inputs[1].getBoundingClientRect().right)<1&&!d.textContent.includes('OP 需要起始、终止两日');
   })()`);
   await shot('07-run');
   await check('月历默认最近导入月份，缺数据日期禁用，前后月份只跳到有数据月份', `(async()=>{
@@ -176,11 +210,19 @@ const checks = [];
   await check('运行缺失输入可见，保留日期且不执行', `(async()=>{controller.openRun();const dates=document.querySelectorAll('dialog input[type=date]');dates[0].value='2026-09-01';dates[1].value='2026-09-03';fixture.preflightMode='missing';button('检查所需数据').click();await waitUntil(()=>document.querySelector('.bizop-feedback').textContent.includes('2026-09-02'));return dates[0].value==='2026-09-01'&&dates[1].value==='2026-09-03'&&button('确认运行').disabled&&!fixture.calls.some(x=>x[0]==='run');})()`);
   await shot('04-run-missing');
   await check('晚到预检不会覆盖用户已修改日期', `(async()=>{fixture.preflightMode='pending';button('检查所需数据').click();await waitUntil(()=>fixture.pendingPreflight);const end=document.querySelectorAll('dialog input[type=date]')[1];end.value='2026-09-04';end.dispatchEvent(new Event('change'));fixture.pendingPreflight({status:'ok',selectionRef:'old',inputs:[]});await waitUntil(()=>!button('检查所需数据').disabled);return button('确认运行').disabled;})()`);
-  await check('失败保留草稿并要求重新预检', `(async()=>{fixture.preflightMode='ok';button('检查所需数据').click();await waitUntil(()=>!button('确认运行').disabled);button('确认运行').click();await waitUntil(()=>fixture.calls.some(x=>x[0]==='run'));await waitUntil(()=>!controller.busy);return document.querySelectorAll('dialog input[type=date]')[1].value==='2026-09-04'&&document.querySelector('.bizop-feedback').textContent.includes('输入已变化');})()`);
+  await check('预检成功保留所需表格并清除旧失败反馈，不再显示多余说明', `(async()=>{
+    fixture.preflightMode='ok';button('检查所需数据').click();await waitUntil(()=>!button('确认运行').disabled);
+    return document.querySelectorAll('tbody tr').length===4&&document.querySelector('.bizop-feedback').textContent===''
+      &&document.querySelector('.bizop-table-scroll').scrollWidth<=document.querySelector('.bizop-table-scroll').clientWidth+1
+      &&!document.querySelector('.bizop-run-dialog').textContent.includes('所需输入齐全。确认后使用这些当前版本核对全部 BU。');
+  })()`);
+  await shot('11-run-ready');
+  await check('失败保留草稿并要求重新预检', `(async()=>{button('确认运行').click();await waitUntil(()=>fixture.calls.some(x=>x[0]==='run'));await waitUntil(()=>!controller.busy);return document.querySelectorAll('dialog input[type=date]')[1].value==='2026-09-04'&&document.querySelector('.bizop-feedback').textContent.includes('输入已变化');})()`);
   await js('closeDialogs()');
   await check('导出结果的月份和单选框横排缩窄，标题左侧与分割线对齐', `(async()=>{
     await controller.setSelected(true);await controller.openResults();const d=document.querySelector('dialog'),m=d.querySelector('input[type=month]').getBoundingClientRect(),s=d.querySelector('select').getBoundingClientRect(),h=d.querySelector('.dialog-header');
-    return Math.abs(m.top-s.top)<1&&m.right<s.left&&m.width>=180&&m.width<=200&&s.width>=280&&s.width<=360&&Math.abs(textLeft(d.querySelector('.dialog-title'))-h.getBoundingClientRect().left)<1;
+    return Math.abs(m.top-s.top)<1&&m.right<s.left&&m.width>=180&&m.width<=200&&s.width>=280&&s.width<=360&&Math.abs(textLeft(d.querySelector('.dialog-title'))-h.getBoundingClientRect().left)<1
+      &&Math.abs(button('关闭').getBoundingClientRect().right-s.right)<1;
   })()`);
   await shot('05-result-export');
   await js('closeDialogs()');
@@ -192,6 +234,20 @@ const checks = [];
   await check('实际 VCC 数据管理中操作标题与查看结果文字左侧对齐', `(async()=>{await __vccFinancialOpPreview.openDataManagerNoArchive();return operationAlignment(document.querySelector('#modalRoot'));})()`);
   await shot('06-vcc-manager');
   await js(`document.querySelector('#modalRoot [data-action=close]').click()`);
+  for (const zoom of [1, 1.25]) {
+    win.setSize(1080, 760); win.webContents.setZoomFactor(zoom);
+    await check(`1080 窗口 ${zoom * 100}% 缩放下紧凑弹窗左右留白相等且按钮对齐`, `(async()=>{
+      for(const open of [()=>controller.openRun(),()=>controller.openInputExport()]) {
+        await closeDialogs();open();const d=document.querySelector('dialog'),inputs=[...d.querySelectorAll('.bizop-modal-body input,.bizop-modal-body select')];
+        const a=inputs[0].getBoundingClientRect(),b=inputs[1].getBoundingClientRect(),outer=d.getBoundingClientRect();
+        const last=[...d.querySelectorAll('.bizop-modal-footer button')].at(-1).getBoundingClientRect();
+        if(Math.abs((outer.right-b.right)-(a.left-outer.left))>=1||Math.abs(last.right-b.right)>=1||outer.left<0||outer.right>innerWidth)return false;
+        if(d.classList.contains('bizop-run-dialog')&&Math.abs(button('检查所需数据').getBoundingClientRect().left-a.left)>=1)return false;
+      }
+      await closeDialogs();return true;
+    })()`);
+  }
+  win.webContents.setZoomFactor(1); win.setSize(1200, 900);
   await check('DISABLED 恢复旧路由，退出模块不出现晚到新页面', `(async()=>{fixture.mode='DISABLED';await controller.setSelected(true);const old=!document.querySelector('#legacy').hidden&&document.querySelector('#modern').hidden&&fixture.legacy===1;await controller.setSelected(false);return old&&document.querySelector('#modern').hidden;})()`);
   fs.writeFileSync(path.join(output, 'validation.json'), JSON.stringify({ pass: checks.length, fail: 0, checks, electron: process.versions.electron, fixtureApi: true }, null, 2));
   process.stdout.write(`${checks.length} PASS / 0 FAIL\n${output}\n`); win.destroy(); app.quit();

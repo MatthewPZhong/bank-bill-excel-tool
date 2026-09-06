@@ -41,7 +41,9 @@
           actionPair.insertBefore(cancelButton, importButton);
         } else {
           // showModal 会让弹窗外的控件失去交互能力；取消必须在当前最上层弹窗中。
-          (taskDialog?.footer.querySelector('.bizop-modal-actions') || taskDialog?.footer || footer).append(cancelButton);
+          cancelButton.textContent = taskDialog ? '取消' : '取消当前操作';
+          cancelButton.classList.toggle('small', Boolean(taskDialog));
+          (taskDialog?.footer.querySelector('.bizop-cancel-slot') || taskDialog?.footer.querySelector('.bizop-modal-actions') || taskDialog?.footer || footer).append(cancelButton);
         }
       }
       for (const element of [panel, ...dialogs].flatMap((scope) => [...scope.querySelectorAll('button,input,select')])) {
@@ -50,9 +52,10 @@
         else if (oldDisabled.has(element)) { element.disabled = oldDisabled.get(element); oldDisabled.delete(element); }
       }
       cancelButton.hidden = !value; cancelButton.disabled = false;
+      cancelButton.setAttribute('aria-label', value && importing ? '取消导入' : '取消当前操作');
       if (value) { updateFooter(); cancelButton.focus(); }
       else {
-        footer.append(cancelButton); cancelButton.textContent = '取消当前操作'; importButton.hidden = false; taskDialog = null;
+        footer.append(cancelButton); cancelButton.textContent = '取消当前操作'; cancelButton.classList.remove('small'); importButton.hidden = false; taskDialog = null;
         if (taskFocus?.isConnected && !taskFocus.disabled) taskFocus.focus();
         taskFocus = null;
       }
@@ -95,11 +98,19 @@
       table.append(thead, tbody); scroll.append(table); return scroll;
     }
     async function exportObject(outputKind, objectId) {
-      return perform('导出文件', async (requestId, cancelled) => {
+      const result = await perform('导出文件', async (requestId, cancelled) => {
         const picked = checked(await api.pickExport({ outputKind, objectId }));
         if (picked.status === 'cancelled' || cancelled()) return { status: 'cancelled' };
         return checked(await api.exportWorkbook(outputKind, { requestId, selectionRef: picked.selectionRef }));
       }, { dialogProgress: outputKind !== 'RESULT_FULL' });
+      const originalNames = { RESULT_FULL: '结果原表', OP_RAW: 'OP 校验原表', FLOW_RAW: '流水校验原表' };
+      if (result?.status === 'ok' && originalNames[outputKind]) {
+        const notice = modal('导出成功', 'vcc-fin-op-message-dialog bizop-export-success-dialog');
+        notice.body.append(node('p', `${originalNames[outputKind]}导出成功。`));
+        if (result.pendingArchiveHandoff || result.cleanupPending) notice.body.append(node('p', '文件已导出，仍有归档或收尾待完成，请查看任务记录。'));
+        notice.footer.firstChild.textContent = '确定'; notice.footer.firstChild.focus();
+      }
+      return result;
     }
     async function importFiles() {
       await perform('导入文件', async (requestId, cancelled) => {
@@ -166,13 +177,14 @@
           const result = checked(await api.preflight({ startDate: start.value, endDate: end.value }));
           if (version !== preflightVersion) return; preflight = result;
           details.append(table(['所需校验表', '账期', '当前版本', '来源文件'], preflight.inputs.map((item) => [item.role === 'FLOW' ? '流水校验表' : 'OP 校验表', item.dataDate, `v${item.version}`, item.originals.join('、')])));
-          dialog.feedback.textContent = '所需输入齐全。确认后使用这些当前版本核对全部 BU。'; run.disabled = false;
+          dialog.feedback.textContent = ''; run.disabled = false;
         } finally { precheck.disabled = false; }
       });
       for (const item of [start, end]) item.addEventListener('change', () => { preflightVersion += 1; preflight = null; run.disabled = true; details.replaceChildren(); });
       dialog.body.append(fields, details);
       const actions = node('div', undefined, 'bizop-modal-actions'); actions.append(run, dialog.footer.firstChild);
-      dialog.footer.replaceChildren(precheck, actions);
+      const checks = node('div', undefined, 'bizop-modal-actions'); checks.append(precheck, node('div', undefined, 'bizop-cancel-slot'));
+      dialog.footer.replaceChildren(checks, actions);
     }
     async function latestMonth() { const result = checked(await api.months({ limit: 1 })); return result.months[0] || new Date().toISOString().slice(0, 7); }
     async function openResults() {
@@ -192,17 +204,20 @@
       }
       month.addEventListener('change', () => load().catch(showError));
       const fields = node('div', undefined, 'bizop-result-fields'); fields.append(field('操作月份', month), field('结果表表名', choice));
-      dialog.body.append(fields, next); dialog.footer.prepend(exportBtn); await load();
+      const actions = node('div', undefined, 'bizop-modal-actions'); actions.append(exportBtn, dialog.footer.firstChild);
+      dialog.body.append(fields, next); dialog.footer.replaceChildren(node('div', undefined, 'bizop-cancel-slot'), actions); await load();
     }
     function openInputExport({ initialKind = 'OP_RAW' } = {}) {
-      const dialog = modal('导出数据', 'vcc-fin-op-export-dialog bizop-results-dialog'); const kind = select([['OP_RAW', 'OP 原表'], ['OP_CHECK', 'OP 校验表'], ['FLOW_RAW', '流水原表'], ['FLOW_CHECK', '流水校验表']]);
+      const dialog = modal('导出数据', 'vcc-fin-op-export-dialog bizop-results-dialog bizop-input-export-dialog'); const kind = select([['OP_RAW', 'OP 原表'], ['OP_CHECK', 'OP 校验表'], ['FLOW_RAW', '流水原表'], ['FLOW_CHECK', '流水校验表']]);
       kind.value = initialKind;
       const date = dateField(); const fields = node('div', undefined, 'bizop-result-fields bizop-input-export-fields'); fields.append(field('账期', date), field('导出目标', kind));
       dialog.body.append(fields);
-      dialog.footer.prepend(button('导出', async () => {
+      const back = dialog.footer.firstChild; back.textContent = '返回';
+      const actions = node('div', undefined, 'bizop-modal-actions'); actions.append(button('导出', async () => {
         const current = checked(await api.currentInput({ kind: kind.value.split('_')[0], dataDate: date.value }));
         if ((await exportObject(kind.value, current.objectId))?.status === 'ok') dialog.close();
-      }, 'primary-btn'));
+      }, 'primary-btn'), back);
+      dialog.footer.replaceChildren(node('div', undefined, 'bizop-cancel-slot'), actions);
     }
     async function showDelete(selection, refresh) {
       const preview = checked(await api.deletePreview(selection)); const dialog = modal('确认删除影响', 'bizop-delete-dialog');
@@ -293,7 +308,7 @@
       }
       for (const item of [month, kind]) item.addEventListener('change', () => load().catch(showError));
       pane.append(toolbar, content); layout.append(nav, pane); dialog.body.append(layout);
-      const paging = node('div', undefined, 'vcc-fin-op-manager-footer-left'); paging.append(pageField);
+      const paging = node('div', undefined, 'vcc-fin-op-manager-footer-left'); paging.append(pageField, node('div', undefined, 'bizop-cancel-slot'));
       const actions = node('div', undefined, 'vcc-fin-op-manager-footer-right');
       actions.append(choose, del, button('导出', () => openInputExport({ initialKind: view === 'RESULT' ? 'OP_RAW' : `${kind.value}_${view}` }), 'secondary-btn small'), button('返回', () => dialog.close(), 'secondary-btn small'));
       dialog.footer.classList.add('vcc-fin-op-manager-footer'); dialog.footer.replaceChildren(paging, actions);
@@ -320,7 +335,7 @@
         if (activeRequest !== requestId) return;
         cancelRequested = false; cancelButton.disabled = false; throw error;
       }
-    }); cancelButton.hidden = true;
+    }); cancelButton.hidden = true; cancelButton.setAttribute('aria-label', '取消当前操作');
     const actionPair = node('div', undefined, 'pending-action-pair'); actionPair.append(importButton, runButton);
     for (const [left, right] of [[actionPair, resultButton], [status, managerButton]]) {
       const row = node('div', undefined, 'control-row'); const leftCell = node('div', undefined, 'cell left'); const rightCell = node('div', undefined, 'cell right');

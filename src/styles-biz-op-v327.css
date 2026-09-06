@@ -17,14 +17,22 @@
 .bizop-field input, .bizop-field select { width: 100%; box-sizing: border-box; font: inherit; }
 .bizop-results-dialog { width: min(100%, 620px); }
 .bizop-results-dialog .dialog-header, .bizop-run-dialog .dialog-header, .bizop-calendar-dialog .dialog-header, .bizop-delete-dialog .dialog-header { padding-left: 0; padding-right: 0; }
-.bizop-result-fields { display: grid; grid-template-columns: 190px minmax(0, 360px); gap: 18px; }
+.bizop-result-fields, .bizop-results-dialog .bizop-modal-footer { display: grid; grid-template-columns: 190px minmax(0, 360px); gap: 18px; }
 .bizop-result-fields .bizop-field { min-width: 0; }
-.bizop-input-export-fields { grid-template-columns: 152px min(180px, calc((100% - 190px - 18px) / 2)); }
-.bizop-run-fields { display: grid; grid-template-columns: repeat(2, calc((100% - 18px) / 3)); gap: 18px; }
+/* 收紧外框，保留既有日期和目标框宽度；字段与按钮栏使用相同列。 */
+.bizop-input-export-dialog { width: min(100%, 392px); }
+.bizop-input-export-fields, .bizop-input-export-dialog .bizop-modal-footer { grid-template-columns: minmax(0, 152px) minmax(0, 180px); }
+.bizop-run-dialog { width: min(100%, 527px); }
+.bizop-run-fields, .bizop-run-dialog .bizop-modal-footer { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
 .bizop-run-fields .bizop-field { min-width: 0; }
 .bizop-run-fields input { cursor: pointer; }
-.bizop-run-dialog .bizop-modal-footer { justify-content: space-between; }
+.bizop-run-dialog .vcc-fin-op-table { min-width: 0; }
+.bizop-run-dialog .bizop-table-scroll td:nth-child(2) { white-space: nowrap; }
+.bizop-run-dialog .bizop-table-scroll td:last-child { white-space: normal; overflow-wrap: anywhere; }
 .bizop-modal-actions { display: flex; align-items: center; gap: 12px; }
+.bizop-results-dialog .bizop-modal-footer, .bizop-run-dialog .bizop-modal-footer { padding-left: 0; padding-right: 0; justify-content: start; }
+.bizop-results-dialog .bizop-modal-actions, .bizop-run-dialog .bizop-modal-actions:last-child { justify-self: end; }
+.bizop-cancel-slot { display: flex; align-items: center; }
 .bizop-calendar-dialog { width: min(100%, 380px); }
 .bizop-calendar-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
 .bizop-calendar-nav button { min-width: 38px; padding: 0; }
@@ -51,6 +59,7 @@
 .bizop-manager-dialog .bizop-table-scroll { max-height: none; margin: 0; }
 .bizop-manager-dialog .bizop-feedback { margin: 0 28px 12px; }
 .bizop-manager-dialog .bizop-modal-footer { justify-content: space-between; padding: 14px 28px; }
+.bizop-manager-dialog .vcc-fin-op-manager-footer-right { margin-left: auto; }
 .bizop-manager-filters { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
 .bizop-manager-filters label:first-child { grid-template-columns: auto 100px; }
 .bizop-page-choice { flex-direction: row; align-items: center; margin: 0; min-width: 0; font-size: 13px; }
