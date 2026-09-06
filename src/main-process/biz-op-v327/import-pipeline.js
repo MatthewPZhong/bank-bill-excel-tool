@@ -148,6 +148,7 @@ async function runImportPipeline({ payloadStore, taskRunId, intentDigest, candid
     }
     safePoint();
     if (!counters.batchRejected) references = await router.finish();
+    safePoint();
   } catch (error) {
     counters.batchRejected = true; counters.scanComplete = false;
     counters.fileErrorCount += 1;
@@ -177,6 +178,10 @@ async function runImportPipeline({ payloadStore, taskRunId, intentDigest, candid
     if (fs.existsSync(temporary)) await fs.promises.rmdir(temporary);
     await fs.promises.rmdir(payloadStore.resolve(`staging/${taskRunId}`));
   }
+  // 报告封存和空目录清理仍有异步等待。保留完整诊断，但最后收到的取消不得交付可提交文档。
+  await yieldToMessages();
+  result.cancelled = Boolean(cancelToken.cancelled);
+  if (result.cancelled) result.batchRejected = true;
   const document = payloadStore.writeDocument(`operations/${taskRunId}/${candidateRef}.json`, result);
   return { contractVersion: 1, candidateRef, rowCount: counters.acceptedRows,
     sha256: document.digest };
