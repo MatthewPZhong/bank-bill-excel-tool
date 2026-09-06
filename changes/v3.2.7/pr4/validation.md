@@ -1,5 +1,9 @@
 # PR4 验证记录
 
+2026-09-06 PR234 修复新增大 SST 回归：Electron 36.9.5 / Node 22.19.0，7 PASS / 0 FAIL / 0 SKIP，15777 ms；日志 `/tmp/bizop-pr234-sst-tests.log`。包含实际双原件 OP_RAW / FLOW_RAW 发布和磁盘缓存清理边界，全部临时合成文件。下列历史完整检查不代表本轮重跑，最终串行 PR 的 release-check 单独记录。
+
+本轮另跑既有两个导出测试文件，20 PASS / 0 FAIL / 0 SKIP，23310 ms；包含六类输出、72 项损坏注入、真实发布/取消/反馈丢失及重启恢复。与新增文件合计 27 个独立测试，日志 `/tmp/bizop-pr234-export-regression.log`。受影响文件 eslint、check-vars（无重要变量命中）、git diff --check 通过。
+
 基线 PR3 `be71707b`，macOS arm64、合成 XLSX、临时主库/归档/输出。应用保持 3.2.6，业务生产入口关闭。
 
 | 检查 | 当前实际结果 |

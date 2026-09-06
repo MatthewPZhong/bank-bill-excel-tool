@@ -1,5 +1,11 @@
 # PR1b 本地验证
 
+## PR231 评论修复复核
+
+- `ELECTRON_RUN_AS_NODE=1 node_modules/electron/dist/Electron.app/Contents/MacOS/Electron --test tests/unit/main-process/biz-op-v327.test.js`：34 PASS / 0 FAIL / 0 SKIP，46562 ms；新增 6 项覆盖 anchor/hold 真实进程退出、已有 Hold 重试、失败/取消 Task 与成功 receipt 冲突、批次冲突及旧 COMPLETE 缓存。
+- check-vars 命中局部 `state` 名称；实际改动为恢复一致性计算，未修改 renderer 全局状态、IPC 或主进程启动/退出状态。源码盲区复核：非主来源不拥有 Task/批次转换，冲突不会覆盖原 receipt 或终态 Task。
+- 本项为修复专项；整批修复完成后在最终组合分支执行完整 release-check，远端检查以修复 HEAD 为准。
+
 基线：PR1a `98976f6e69d2ad78893d050d424cbe18ee8f836a`。平台：macOS arm64、系统 Node 25.8.0、Electron 36.9.5 / Node 22.19.0。原 E5 包只读；生产开关关闭、版本仍为 3.2.6。本记录只代表本地实现与自动测试，不代表 Windows、真实业务或发布验收。
 
 ## 已完成

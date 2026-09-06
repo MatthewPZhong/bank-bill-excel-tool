@@ -1,6 +1,7 @@
 'use strict';
 
 const { ACTIONS, identity, hash, sameSource, fail } = require('./contracts');
+const { TERMINAL, taskAlignment } = require('./recovery-alignment');
 
 function createBizOpRecoveryPlan({ catalog }) {
   const { db } = catalog;
@@ -17,46 +18,61 @@ function createBizOpRecoveryPlan({ catalog }) {
     if (!task || task.taskKey !== ACTIONS[source.actionKey].taskKey || task.operationKey !== source.operationKey) {
       fail('BIZOP_RECOVERY_TASK_MISMATCH');
     }
+    const common = { ...identity(source), expectedTaskKey: task.taskKey };
+    const wrap = (transition) => ({ transition, safePayload: { phase, outcome: inspection ? inspection.outcome : 'unknown' } });
+    if (phase === 'inspection-unavailable-hold') {
+      if (activeHold && !sameSource(source, activeHold)) return [];
+      if (task.status === 'interrupted' && !task.recoveryMode && !task.recoveryAttemptId) return [];
+      if (!['prepared', 'running'].includes(task.status) || task.recoveryMode || task.recoveryAttemptId) {
+        fail('BIZOP_INSPECTION_UNAVAILABLE_TASK_CONFLICT');
+      }
+      return [wrap({ ...common, entityKind: 'task-run', command: 'mark-interrupted', expectedState: task.status,
+        failureCode: 'INSPECTOR_UNAVAILABLE', failureMessage: '业务 OP 检查器暂不可用，保留任务与恢复保护', metadataPatch: { recoveryHold: true } })];
+    }
     const finalization = db.prepare(`SELECT * FROM biz_op_v327_abort_finalizations WHERE source_kind=? AND source_ref=?`)
       .get(source.sourceKind, source.sourceRef);
     const complete = phase === 'settlement-result' && settlement && settlement.outcome === 'completed'
       || phase === 'inspection-result' && inspection && inspection.outcome === 'compensated' && finalization;
-    const unknown = phase === 'inspection-hold' || phase === 'inspector-unavailable';
+    const unknown = phase === 'inspection-hold';
     const primary = ['OPERATION', 'RECLAIM'].includes(source.boundedEvidence.category);
     const transitions = [];
-    const common = { ...identity(source), expectedTaskKey: task.taskKey };
-    const wrap = (transition) => ({ transition, safePayload: { phase, outcome: inspection ? inspection.outcome : 'unknown' } });
     const batches = db.prepare('SELECT id,task_status FROM archive_batches WHERE task_run_id=? ORDER BY id').all(task.taskRunId);
     const overlays = new Map(db.prepare('SELECT * FROM background_execution_batch_recovery_states WHERE task_run_id=?')
       .all(task.taskRunId).map((item) => [item.batch_id, item]));
     // READ/CARRIER 只收敛自己的 Hold。Task 和 Batch overlay 始终由主操作来源拥有，
     // 避免先观察读者后，主来源无法通过平台的 source identity CAS。
+    if (complete && primary && taskAlignment(catalog, source, finalization ? 'compensated' : 'committed').conflict) {
+      fail('BIZOP_RECOVERY_TERMINAL_CONFLICT');
+    }
     if (primary && (complete || unknown) && ['prepared', 'running'].includes(task.status) && !task.recoveryMode) {
       transitions.push(wrap({ ...common, entityKind: 'task-run', command: 'mark-interrupted', expectedState: task.status,
         failureCode: 'BIZOP_RECOVERY_PENDING', failureMessage: '业务 OP 正在核验持久结果和载体关闭', metadataPatch: { recoveryHold: true } }));
+    }
+    if (primary && (complete || unknown && !TERMINAL.has(task.status))) {
       for (const batch of batches) {
-        if (overlays.has(batch.id)) fail('BIZOP_BATCH_RECOVERY_CONFLICT');
+        if (overlays.has(batch.id) || !['reserved', 'running'].includes(batch.task_status)) continue;
         transitions.push(wrap({ ...common, entityKind: 'batch-overlay', command: 'mark-interrupted', batchId: batch.id,
           expectedState: null, failureCode: 'BIZOP_RECOVERY_PENDING', failureMessage: '业务 OP 正在核验持久结果和载体关闭' }));
+        overlays.set(batch.id, { state: 'interrupted' });
       }
     }
-    if (complete && primary && !['succeeded', 'failed', 'cancelled'].includes(task.status)) {
+    if (complete && primary) {
       const attempt = task.recoveryMode ? task.recoveryAttemptId : `biz-op-v327:recovery:${hash([
         source.sourceRef, finalization ? finalization.finalization_ref : inspection.evidenceHash
       ])}`;
-      if (!task.recoveryMode) {
+      if (!TERMINAL.has(task.status) && !task.recoveryMode) {
         transitions.push(wrap({ ...common, entityKind: 'task-run', command: 'begin-recovery', recoveryAttemptId: attempt,
           expectedState: 'interrupted', metadataPatch: { recoveryHold: true } }));
       }
-      transitions.push(wrap({ ...common, entityKind: 'task-run',
+      if (!TERMINAL.has(task.status)) transitions.push(wrap({ ...common, entityKind: 'task-run',
         command: finalization ? 'complete-recovery-failure' : 'complete-recovery-success', recoveryAttemptId: attempt,
         expectedState: 'running', ...(finalization ? { failureCode: 'BIZOP_NOT_COMMITTED',
           failureMessage: '业务 OP 未提交，已保留诊断并安全结束本次任务' } : {}),
         metadataPatch: { recoveryHold: false, recoveryMode: false } }));
       for (const batch of batches) {
         const overlay = overlays.get(batch.id);
-        if (overlay && overlay.state === 'resolved') continue;
-        if (!overlay || overlay.state === 'interrupted') {
+        if (!overlay || overlay.state === 'resolved') continue;
+        if (overlay.state === 'interrupted') {
           transitions.push(wrap({ ...common, entityKind: 'batch-overlay', command: 'begin-recovery',
             batchId: batch.id, expectedState: 'interrupted', recoveryAttemptId: attempt }));
         }

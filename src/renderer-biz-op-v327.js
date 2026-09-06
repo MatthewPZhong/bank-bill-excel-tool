@@ -4,6 +4,7 @@
   function createController({ api, panel, legacyPanel, restoreLegacy, document: doc = root.document }) {
     let selected = false; let routeVersion = 0; let busy = false; let activeRequest = null; let cancelRequested = false;
     let reportRef = null; let recoveryReady = false; let enabled = false; const dialogs = new Set();
+    let taskDialog = null; let taskFocus = null;
     const oldDisabled = new Map();
     function node(tag, text, className) { const item = doc.createElement(tag); if (text !== undefined) item.textContent = text;
       if (className) item.className = className; return item; }
@@ -12,7 +13,10 @@
     function field(label, control) { const wrap = node('label', undefined, 'bizop-field'); wrap.append(node('span', label), control); return wrap; }
     function select(options) { const item = node('select'); for (const [value, text] of options) { const option = node('option', text); option.value = value; item.append(option); } return item; }
     function dateField() { const item = node('input'); item.type = 'date'; return item; }
-    function message(text, tone = 'info') { status.textContent = text; status.dataset.tone = tone; }
+    function message(text, tone = 'info') {
+      status.textContent = text; status.dataset.tone = tone;
+      if (taskDialog) { taskDialog.feedback.textContent = text; taskDialog.feedback.dataset.tone = tone; }
+    }
     function checked(result) {
       if (!result || ['error', 'busy', 'blocked'].includes(result.status) || result.accepted === false) {
         const detail = result?.missing?.map((item) => `${item.kind === 'OP' ? 'OP 校验表' : '流水校验表'} ${item.dataDate}`).join('、');
@@ -27,12 +31,24 @@
     }
     function setBusy(value) {
       busy = value;
+      if (value) {
+        taskDialog = [...dialogs].filter((dialog) => dialog.open).at(-1) || null;
+        taskFocus = doc.activeElement;
+        // showModal 会让弹窗外的控件失去交互能力；取消必须在当前最上层弹窗中。
+        (taskDialog?.footer || footer).append(cancelButton);
+      }
       for (const element of [panel, ...dialogs].flatMap((scope) => [...scope.querySelectorAll('button,input,select')])) {
         if (element === cancelButton) continue;
         if (value) { if (!oldDisabled.has(element)) oldDisabled.set(element, element.disabled); element.disabled = true; }
         else if (oldDisabled.has(element)) { element.disabled = oldDisabled.get(element); oldDisabled.delete(element); }
       }
       cancelButton.hidden = !value; cancelButton.disabled = false;
+      if (value) cancelButton.focus();
+      else {
+        footer.append(cancelButton); taskDialog = null;
+        if (taskFocus?.isConnected && !taskFocus.disabled) taskFocus.focus();
+        taskFocus = null;
+      }
     }
     async function perform(label, work) {
       if (busy) return null;
@@ -191,8 +207,16 @@
       if (result?.status === 'ok') await refreshStatus(true);
     });
     const cancelButton = button('取消当前操作', async () => {
-      if (!activeRequest) return; cancelRequested = true; const result = checked(await api.cancel({ requestId: activeRequest }));
-      message(result.message || '已请求取消，正在等待后台任务退出', 'warning'); cancelButton.disabled = true;
+      if (!activeRequest || cancelRequested) return;
+      const requestId = activeRequest; cancelRequested = true; cancelButton.disabled = true;
+      try {
+        const result = checked(await api.cancel({ requestId }));
+        if (activeRequest !== requestId) return;
+        message(result.message || '已请求取消，正在等待后台任务退出', 'warning');
+      } catch (error) {
+        if (activeRequest !== requestId) return;
+        cancelRequested = false; cancelButton.disabled = false; throw error;
+      }
     }); cancelButton.hidden = true;
     toolbar.append(importButton, runButton, resultButton, inputButton, managerButton);
     const footer = node('div', undefined, 'bizop-toolbar bizop-secondary'); footer.append(reportButton, retry, cancelButton);
