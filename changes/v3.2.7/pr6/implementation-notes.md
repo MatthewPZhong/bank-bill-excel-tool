@@ -1,5 +1,7 @@
 # PR6 实施记录
 
+第二轮 R1 的终态恢复及独立关闭 CI 修复已按现有堆叠带入。本轮允许的共享核心小范围改动、真实故障证据和最终验证以 [terminal-recovery-remediation.md](terminal-recovery-remediation.md) 为准；下文保留原升级实施记录。生产仍禁用，E5 和 E01—E03 保持。
+
 ## Unknowns Register
 
 | 未知 | 分类 | 已取得证据 / 处置 |

@@ -1,5 +1,7 @@
 # PR230—235 评论修复与串行回归
 
+本文件为第一轮历史记录。第二轮 R1 的范围及最终证据见 [terminal-recovery-remediation.md](terminal-recovery-remediation.md)。
+
 2026-09-06。用户授权修复，并沿用本地提交后直接更新远端 PR 的授权。E5 与已批准 E01—E03 不变；版本保持 3.2.6，生产发布门禁保持关闭。修复在原 PR 所属分支提交，通过普通 merge 向下游传播，没有重写远端历史或合并 main。
 
 ## 修复对应关系
