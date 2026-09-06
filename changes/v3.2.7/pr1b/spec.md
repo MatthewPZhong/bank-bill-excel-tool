@@ -4,7 +4,7 @@
 
 - Goal：在本地承接 PR1a，落实 PR0-E5 的 BizOP 主库目录、不可变提交及终止收据、持久读取保护和受预算 Main 恢复闭环。
 - Context：基于 PR1a `98976f6e69d2ad78893d050d424cbe18ee8f836a`；原 E5 ZIP 只读，未修改，也不生成 E6。后续分支、提交留在本地。
-- Constraints：新业务入口保持关闭；不操作用户数据；不清理旧模块目录；不修改 StartupRecoveryCoordinator 接口、committed-only Provider 或完整数组协议；E01—E03 已获用户确认，T01 在 PR3 前冻结。
+- Constraints：新业务入口保持关闭；不操作用户数据；不清理旧模块目录；保留 StartupRecoveryCoordinator 接口、committed-only Provider 和完整数组协议；第二轮 R1 允许对终态 Task 的精确重放校验作下述限定扩展；E01—E03 已获用户确认，T01 在 PR3 前冻结。
 - Done when：真实 Task、ArchiveService、原生 worker、平台恢复下，提交反馈丢失与安全未提交两条链均能收敛；未知关闭保留保护；同库回滚、收据优先、诊断读者、累计预算及真实启动/重试绑定通过相关测试。
 
 ## 已确认事实
@@ -37,7 +37,9 @@
 
 ## 宿主与清理合同落实
 
-- Inspector 不可用的 `inspection-unavailable-hold` 阶段严格返回平台要求的 Task 中断计划，不能混入批次转换；主操作后续确定恢复时补齐缺失的批次 overlay。
+- Inspector 不可用的 `inspection-unavailable-hold` 阶段：prepared/running 返回平台要求的一条 Task 中断计划，不能混入批次转换；合法 succeeded/failed/cancelled 且不处于 recoveryMode、没有 recoveryAttemptId 时保留原终态，返回空 Task 计划。主操作后续确定恢复时补齐缺失的批次 overlay。
+- 第二轮 R1：终态后仍有 OPERATION/READ/RECLAIM 来源时，阈值故障必须按既有短事务先持久 anchor，再原子提交观察和必要 Hold。无 active Hold 的空 Task 计划仅在权威 taskState 的 taskRunId/operationKey 与当前 source 一致、状态为真实终态且没有恢复中标记时允许精确重放；不隐藏 taskState、不改写终态、不删除 anchor 绕过核验。不新增 schema/协议字段，保留其他调用者的原有路径及拒绝语义。
+- 终态来源与 receipt 冲突时，上述保护仍可恢复，但后续 Inspector 必须继续识别真实冲突并阻断；空 Task 计划不授权后处理或开门。故障恢复及进程重启后均重新执行 Inspector，Main 后处理仍依赖新的观察、收据、关闭事实和读保护。
 - 目录提交事实、Task 结果与批次最终结果必须一致，才可写 COMPLETE 或开放入口。终态矛盾返回未知并持久保留恢复保护；旧 CLOSED/COMPLETE 缓存也须重新发现此类矛盾，不能直接更新已终态 Task。
 
 - 启动早期有 BizOP 未决来源时，先完整预检并保留本次预算，到 Archive owner 可用后继续同一 attempt；不提前多跑一次全量扫描，也不重置累计预算或时钟。其他模块 owner 在该阶段之后恢复。
