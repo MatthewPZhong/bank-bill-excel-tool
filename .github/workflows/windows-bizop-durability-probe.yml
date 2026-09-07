@@ -1,0 +1,31 @@
+name: Windows BizOP Durability Probe
+on:
+  push:
+    branches: [codex/v3.2.7-windows-bizop-durability]
+    paths:
+      - scripts/biz-op-v327/probe-windows-durability.js
+      - scripts/biz-op-v327/probe-windows-durability.ps1
+      - .github/workflows/windows-bizop-durability-probe.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.19.0
+      - name: Probe Node file and directory flush access
+        run: node scripts/biz-op-v327/probe-windows-durability.js
+      - name: Probe native Windows directory handle access
+        shell: pwsh
+        run: ./scripts/biz-op-v327/probe-windows-durability.ps1
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: windows-durability-probe
+          path: outputs/windows-durability-probe/
+          if-no-files-found: error
