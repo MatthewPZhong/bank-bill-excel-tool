@@ -65,6 +65,14 @@ const checks = [];
         const r=item.getBoundingClientRect();return [r.x-outer.x,r.y-outer.y,r.width,r.height];})};};
     window.textLeft=(element)=>{const range=document.createRange();range.selectNodeContents(element);return range.getBoundingClientRect().left;};
     window.rect=(element)=>{const r=element.getBoundingClientRect();return [r.x,r.y,r.width,r.height];};
+    window.compactMetrics=(d)=>({title:getComputedStyle(d.querySelector('.dialog-title')).fontSize,weight:getComputedStyle(d.querySelector('.dialog-title')).fontWeight,
+      field:d.querySelector('label')?getComputedStyle(d.querySelector('label')).fontSize:null,
+      buttons:[...d.querySelectorAll('.dialog-actions button')].filter(x=>x.checkVisibility()).map(x=>({font:getComputedStyle(x).fontSize,height:x.getBoundingClientRect().height})),
+      width:d.getBoundingClientRect().width,height:d.getBoundingClientRect().height});
+    window.compactSamples={};window.vccSamples={};
+    window.datesFit=(d)=>[...d.querySelectorAll('tbody td:nth-child(2)')].every(cell=>{
+      const range=document.createRange();range.selectNodeContents(cell);return range.getBoundingClientRect().right<=cell.getBoundingClientRect().right-parseFloat(getComputedStyle(cell).paddingRight)+1;
+    });
     window.managerButtons=()=>[...document.querySelectorAll('.vcc-fin-op-manager-footer-right button')].filter(b=>!b.hidden).map(rect);
     window.operationAlignment=(scope)=>{const table=scope.querySelector('.vcc-fin-op-manager-result-table'),link=table.querySelector('.vcc-fin-op-link-btn');return Math.abs(textLeft(table.querySelector('th:last-child'))-textLeft(link))<1&&getComputedStyle(link).backgroundColor==='rgba(0, 0, 0, 0)'&&getComputedStyle(link).borderTopWidth==='0px';};
   })()`);
@@ -75,7 +83,11 @@ const checks = [];
       throw new Error(`${name}: ${error.message}; ${JSON.stringify(snapshot)}`);
     }
   }
-  async function shot(name) { await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))'); fs.writeFileSync(path.join(output, name + '.png'), (await win.webContents.capturePage()).toPNG()); }
+  async function shot(name) {
+    await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
+    await js('Promise.all(document.getAnimations().filter(a=>Number.isFinite(a.effect.getComputedTiming().endTime)).map(a=>a.finished.catch(()=>{}))).then(()=>undefined)');
+    fs.writeFileSync(path.join(output, name + '.png'), (await win.webContents.capturePage()).toPNG());
+  }
   await check('Main mode 路由，ACTIVE 隐藏旧页面', `(async()=>{await controller.setSelected(true);return !document.querySelector('#modern').hidden&&document.querySelector('#legacy').hidden;})()`);
   await check('初始状态欢迎语与 VCC 一致', `document.querySelector('#modern .status-box-text').textContent==='欢迎使用小助手'`);
   await check('主面板只保留 VCC 两行四个动作，输入导出不在主页面', `(()=>{const p=document.querySelector('#modern');return [...p.querySelectorAll('.control-row')].map(row=>[...row.querySelectorAll('button')].map(b=>b.textContent).join('|')).join('/')==='导入文件|开始运行|导出校验结果表/数据管理'&&p.querySelectorAll('.control-row')[1].querySelector('.cell.left .status-box')!==null&&!p.textContent.includes('导出数据')&&p.querySelector('.bizop-secondary').hidden;})()`);
@@ -93,10 +105,11 @@ const checks = [];
   await shot('02-manager');
   await check('管理页移除刷新和下一页，底部为删除、导出、返回，单页不显示页码', `(()=>{const d=document.querySelector('dialog');return [...d.querySelectorAll('.bizop-modal-footer button')].filter(b=>!b.hidden).map(b=>b.textContent).join('|')==='删除|导出|返回'&&!d.querySelector('.bizop-page-choice').checkVisibility();})()`);
   await check('业务 OP 操作标题与导出原表文字左侧对齐', `operationAlignment(document.querySelector('dialog'))`);
-  await check('导出数据收紧右边界，保留日期和下拉框尺寸，返回右侧对齐目标', `(()=>{
+  await check('导出数据缩小字段与外框，返回右侧对齐目标', `(()=>{
     controller.openInputExport();const d=[...document.querySelectorAll('dialog[open]')].at(-1),fields=d.querySelector('.bizop-input-export-fields'),date=d.querySelector('input[type=date]'),choice=d.querySelector('select');
     const a=date.getBoundingClientRect(),b=choice.getBoundingClientRect();
-    return Math.abs(a.top-b.top)<1&&a.right<b.left&&Math.abs(a.width-152)<1&&Math.abs(b.width-180)<1
+    compactSamples.export=compactMetrics(d);
+    return Math.abs(a.top-b.top)<1&&a.right<b.left&&a.width>=140&&a.width<=150&&b.width>=160&&b.width<=170
       &&Math.abs((d.getBoundingClientRect().right-b.right)-(a.left-d.getBoundingClientRect().left))<1
       &&Math.abs(textLeft(d.querySelector('.dialog-title'))-d.querySelector('.dialog-header').getBoundingClientRect().left)<1
       &&!d.textContent.includes('只导出该类型、该账期当前可用的版本。')&&[...d.querySelectorAll('.bizop-modal-footer button')].map(x=>x.textContent).join('|')==='导出|返回'
@@ -170,12 +183,21 @@ const checks = [];
   await shot('02-manager-select');
   await check('删除先完整跨月份预览，精确三个按钮，确认删除影响标题对齐分割线', `(async()=>{button('删除').click();await waitUntil(()=>document.querySelectorAll('dialog').length===2);const d=[...document.querySelectorAll('dialog')].at(-1);return d.textContent.includes('2026-08')&&[...d.querySelectorAll('footer button,.bizop-modal-footer button')].map(x=>x.textContent).join('|')==='删除但保留结果表|删除|取消'&&!fixture.calls.some(x=>x[0]==='delete')&&Math.abs(textLeft(d.querySelector('.dialog-title'))-d.querySelector('.dialog-header').getBoundingClientRect().left)<1;})()`);
   await shot('03-delete-impact');
+  await check('紧凑删除确认保留完整影响，长表可滚动且不挤出底部按钮', `(()=>{
+    const d=document.querySelector('.bizop-delete-dialog');compactSamples.delete=compactMetrics(d);
+    if(d.querySelectorAll('tbody tr').length!==3||!datesFit(d)||[...d.querySelectorAll('.bizop-table-scroll')].some(x=>x.scrollWidth>x.clientWidth+1))return false;
+    d.querySelectorAll('details').forEach(x=>x.open=true);
+    const body=d.querySelector('.bizop-modal-body'),tbody=d.querySelector('tbody');
+    for(let i=0;i<60;i++)tbody.append(tbody.firstChild.cloneNode(true));
+    const f=d.querySelector('.bizop-modal-footer').getBoundingClientRect(),outer=d.getBoundingClientRect();
+    return body.scrollHeight>body.clientHeight&&f.top>=body.getBoundingClientRect().bottom-1&&f.bottom<=outer.bottom&&outer.top>=0&&outer.bottom<=innerHeight;
+  })()`);
   await check('保留结果选择按 mode 提交，成功后刷新', `(async()=>{button('删除但保留结果表').click();await waitUntil(()=>fixture.calls.some(x=>x[0]==='delete'));await waitUntil(()=>!controller.busy);return fixture.calls.find(x=>x[0]==='delete')[1].mode==='KEEP_RESULTS';})()`);
   await js('closeDialogs()');
-  await check('运行右边界收紧、保留日期框宽，检查和关闭分别对齐左右字段', `(()=>{
+  await check('运行日期框与外框紧凑，检查和关闭分别对齐左右字段', `(()=>{
     controller.openRun();const d=document.querySelector('dialog'),fields=d.querySelector('.bizop-run-fields'),inputs=[...fields.querySelectorAll('input')];
-    const expected=233.5,footer=d.querySelector('.bizop-modal-footer'),check=button('检查所需数据');
-    return inputs.every(x=>x.readOnly&&Math.abs(x.getBoundingClientRect().width-expected)<1)&&Math.abs(textLeft(d.querySelector('.dialog-title'))-d.querySelector('.dialog-header').getBoundingClientRect().left)<1
+    const footer=d.querySelector('.bizop-modal-footer'),check=button('检查所需数据');compactSamples.run=compactMetrics(d);
+    return inputs.every(x=>x.readOnly&&x.getBoundingClientRect().width>=200&&x.getBoundingClientRect().width<=210)&&Math.abs(textLeft(d.querySelector('.dialog-title'))-d.querySelector('.dialog-header').getBoundingClientRect().left)<1
       &&footer.contains(check)&&Math.abs(check.getBoundingClientRect().left-inputs[0].getBoundingClientRect().left)<1
       &&Math.abs(button('关闭').getBoundingClientRect().right-inputs[1].getBoundingClientRect().right)<1&&!d.textContent.includes('OP 需要起始、终止两日');
   })()`);
@@ -189,6 +211,7 @@ const checks = [];
     return [...picker.querySelectorAll('[data-date]:not(:disabled)')].map(x=>x.dataset.date).join('|')==='2026-09-01|2026-09-03';
   })()`);
   await shot('08-run-calendar');
+  await js(`compactSamples.calendar=compactMetrics(document.querySelector('.bizop-calendar-dialog'))`);
   await check('只选择可用日期并回填原字段，已有字段再次打开仍定位最新导入月份', `(async()=>{
     document.querySelector('[data-date="2026-09-01"]').click();await waitUntil(()=>document.querySelectorAll('dialog').length===1);
     const input=document.querySelector('dialog input');if(input.value!=='2026-09-01')return false;
@@ -213,7 +236,7 @@ const checks = [];
   await check('预检成功保留所需表格并清除旧失败反馈，不再显示多余说明', `(async()=>{
     fixture.preflightMode='ok';button('检查所需数据').click();await waitUntil(()=>!button('确认运行').disabled);
     return document.querySelectorAll('tbody tr').length===4&&document.querySelector('.bizop-feedback').textContent===''
-      &&document.querySelector('.bizop-table-scroll').scrollWidth<=document.querySelector('.bizop-table-scroll').clientWidth+1
+      &&datesFit(document.querySelector('.bizop-run-dialog'))&&document.querySelector('.bizop-table-scroll').scrollWidth<=document.querySelector('.bizop-table-scroll').clientWidth+1
       &&!document.querySelector('.bizop-run-dialog').textContent.includes('所需输入齐全。确认后使用这些当前版本核对全部 BU。');
   })()`);
   await shot('11-run-ready');
@@ -221,7 +244,8 @@ const checks = [];
   await js('closeDialogs()');
   await check('导出结果的月份和单选框横排缩窄，标题左侧与分割线对齐', `(async()=>{
     await controller.setSelected(true);await controller.openResults();const d=document.querySelector('dialog'),m=d.querySelector('input[type=month]').getBoundingClientRect(),s=d.querySelector('select').getBoundingClientRect(),h=d.querySelector('.dialog-header');
-    return Math.abs(m.top-s.top)<1&&m.right<s.left&&m.width>=180&&m.width<=200&&s.width>=280&&s.width<=360&&Math.abs(textLeft(d.querySelector('.dialog-title'))-h.getBoundingClientRect().left)<1
+    compactSamples.results=compactMetrics(d);
+    return Math.abs(m.top-s.top)<1&&m.right<s.left&&m.width>=140&&m.width<=160&&s.width>=280&&s.width<=330&&Math.abs(textLeft(d.querySelector('.dialog-title'))-h.getBoundingClientRect().left)<1
       &&Math.abs(button('关闭').getBoundingClientRect().right-s.right)<1;
   })()`);
   await shot('05-result-export');
@@ -234,22 +258,42 @@ const checks = [];
   await check('实际 VCC 数据管理中操作标题与查看结果文字左侧对齐', `(async()=>{await __vccFinancialOpPreview.openDataManagerNoArchive();return operationAlignment(document.querySelector('#modalRoot'));})()`);
   await shot('06-vcc-manager');
   await js(`document.querySelector('#modalRoot [data-action=close]').click()`);
+  for(const hook of ['openExport','openDelete','openResultExportMonth','openImportMonth']) {
+    await js(`(async()=>{${hook==='openImportMonth'?'':'await '}__vccFinancialOpPreview.${hook}();await waitUntil(()=>document.querySelector('#modalRoot .vcc-fin-op-dialog'));vccSamples.${hook}=compactMetrics(document.querySelector('#modalRoot .vcc-fin-op-dialog'));})()`);
+    await shot(`12-vcc-${hook}`);
+    await js(`document.querySelector('#modalRoot [data-action=close]').click()`);
+  }
+  await check('业务 OP 小弹窗字体与实际 VCC 表单一致，操作按钮同 VCC 的 small 尺寸', `(()=>{
+    for(const sample of Object.values(compactSamples)) {
+      if(sample.title!==vccSamples.openImportMonth.title||sample.weight!==vccSamples.openImportMonth.weight)return false;
+      if(sample.field&&sample.field!==vccSamples.openExport.field)return false;
+      for(const ref of Object.values(vccSamples))if(sample.buttons.some(x=>x.font!==ref.buttons[0].font||Math.abs(x.height-ref.buttons[0].height)>=1))return false;
+    }
+    return compactSamples.export.width<=360&&compactSamples.run.width<=460&&compactSamples.results.width<=520&&compactSamples.delete.width<700
+      &&compactSamples.export.height<vccSamples.openExport.height&&compactSamples.run.height<vccSamples.openExport.height;
+  })()`);
   for (const zoom of [1, 1.25]) {
     win.setSize(1080, 760); win.webContents.setZoomFactor(zoom);
     await check(`1080 窗口 ${zoom * 100}% 缩放下紧凑弹窗左右留白相等且按钮对齐`, `(async()=>{
-      for(const open of [()=>controller.openRun(),()=>controller.openInputExport()]) {
-        await closeDialogs();open();const d=document.querySelector('dialog'),inputs=[...d.querySelectorAll('.bizop-modal-body input,.bizop-modal-body select')];
+      for(const open of [()=>controller.openRun(),()=>controller.openInputExport(),()=>controller.openResults()]) {
+        await closeDialogs();await open();const d=document.querySelector('dialog'),inputs=[...d.querySelectorAll('.bizop-modal-body input,.bizop-modal-body select')];
         const a=inputs[0].getBoundingClientRect(),b=inputs[1].getBoundingClientRect(),outer=d.getBoundingClientRect();
         const last=[...d.querySelectorAll('.bizop-modal-footer button')].at(-1).getBoundingClientRect();
         if(Math.abs((outer.right-b.right)-(a.left-outer.left))>=1||Math.abs(last.right-b.right)>=1||outer.left<0||outer.right>innerWidth)return false;
         if(d.classList.contains('bizop-run-dialog')&&Math.abs(button('检查所需数据').getBoundingClientRect().left-a.left)>=1)return false;
+        if(d.classList.contains('bizop-run-dialog')) {
+          inputs[0].value='2026-09-01';inputs[1].value='2026-09-03';button('检查所需数据').click();await waitUntil(()=>!button('确认运行').disabled);
+          const scroll=d.querySelector('.bizop-table-scroll'),body=d.querySelector('.bizop-modal-body'),footer=d.querySelector('.bizop-modal-footer');
+          if(!datesFit(d)||scroll.scrollWidth>scroll.clientWidth+1||body.getBoundingClientRect().bottom>footer.getBoundingClientRect().top+1||d.getBoundingClientRect().bottom>innerHeight)return false;
+        }
       }
       await closeDialogs();return true;
     })()`);
   }
   win.webContents.setZoomFactor(1); win.setSize(1200, 900);
   await check('DISABLED 恢复旧路由，退出模块不出现晚到新页面', `(async()=>{fixture.mode='DISABLED';await controller.setSelected(true);const old=!document.querySelector('#legacy').hidden&&document.querySelector('#modern').hidden&&fixture.legacy===1;await controller.setSelected(false);return old&&document.querySelector('#modern').hidden;})()`);
-  fs.writeFileSync(path.join(output, 'validation.json'), JSON.stringify({ pass: checks.length, fail: 0, checks, electron: process.versions.electron, fixtureApi: true }, null, 2));
+  const compact = await js('({bizop:compactSamples,vcc:vccSamples})');
+  fs.writeFileSync(path.join(output, 'validation.json'), JSON.stringify({ pass: checks.length, fail: 0, checks, electron: process.versions.electron, fixtureApi: true, compact }, null, 2));
   process.stdout.write(`${checks.length} PASS / 0 FAIL\n${output}\n`); win.destroy(); app.quit();
 })().catch((error) => {
   fs.writeFileSync(path.join(output, 'validation.json'), JSON.stringify({ pass: checks.length, fail: 1, checks, error: error.message }, null, 2));

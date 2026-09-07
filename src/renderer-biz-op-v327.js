@@ -10,7 +10,7 @@
       if (className) item.className = className; return item; }
     function button(text, work, className = 'secondary-btn') { const item = node('button', text, className); item.type = 'button';
       item.addEventListener('click', () => { if (busy && item !== cancelButton) return; Promise.resolve().then(work).catch(showError); }); return item; }
-    function field(label, control) { const wrap = node('label', undefined, 'bizop-field'); wrap.append(node('span', label), control); return wrap; }
+    function field(label, control) { const wrap = node('label', undefined, 'bizop-field vcc-fin-op-field'); wrap.append(node('span', label), control); return wrap; }
     function select(options) { const item = node('select', undefined, 'vcc-fin-op-input'); for (const [value, text] of options) { const option = node('option', text); option.value = value; item.append(option); } return item; }
     function dateField() { const item = node('input', undefined, 'vcc-fin-op-input'); item.type = 'date'; return item; }
     function message(text, tone = 'info') {
@@ -84,7 +84,7 @@
       const header = node('div', undefined, 'dialog-header'); const heading = node('h2', title, 'dialog-title');
       const dismiss = button('×', () => dialog.close(), 'icon-close'); dismiss.setAttribute('aria-label', '关闭'); header.append(heading, dismiss);
       const body = node('div', undefined, 'bizop-modal-body vcc-fin-op-dialog-body'); const feedback = node('p', '', 'bizop-feedback'); feedback.setAttribute('role', 'status');
-      const footer = node('div', undefined, 'bizop-modal-footer dialog-actions right'); const close = button('关闭', () => dialog.close());
+      const footer = node('div', undefined, 'bizop-modal-footer dialog-actions right'); const close = button('关闭', () => dialog.close(), 'secondary-btn small');
       footer.append(close); dialog.append(header, body, feedback, footer); dialog.feedback = feedback; dialog.body = body; dialog.footer = footer;
       dialog.addEventListener('cancel', (event) => { if (busy) event.preventDefault(); });
       dialog.addEventListener('close', () => { dialogs.delete(dialog); dialog.remove(); }); dialogs.add(dialog);
@@ -134,8 +134,8 @@
             if (!data.month) { picker.body.replaceChildren(node('p', '暂无可用 OP 数据，请先导入文件。')); return; }
             const [year, month] = data.month.split('-').map(Number);
             const caption = node('strong', `${year} 年 ${month} 月`); const nav = node('div', undefined, 'bizop-calendar-nav');
-            const previous = button('‹', () => load(data.previousMonth)); previous.setAttribute('aria-label', '上个有数据月份'); previous.disabled = !data.previousMonth;
-            const next = button('›', () => load(data.nextMonth)); next.setAttribute('aria-label', '下个有数据月份'); next.disabled = !data.nextMonth;
+            const previous = button('‹', () => load(data.previousMonth), 'secondary-btn small'); previous.setAttribute('aria-label', '上个有数据月份'); previous.disabled = !data.previousMonth;
+            const next = button('›', () => load(data.nextMonth), 'secondary-btn small'); next.setAttribute('aria-label', '下个有数据月份'); next.disabled = !data.nextMonth;
             nav.append(previous, caption, next);
             const grid = node('div', undefined, 'bizop-calendar-grid'); grid.setAttribute('role', 'group'); grid.setAttribute('aria-label', caption.textContent);
             for (const weekday of ['日', '一', '二', '三', '四', '五', '六']) grid.append(node('span', weekday, 'bizop-calendar-weekday'));
@@ -155,7 +155,7 @@
             grid.querySelector('button[aria-pressed="true"]:not(:disabled),button:not(:disabled)')?.focus();
           } catch (error) {
             if (!picker.open || version !== ownVersion) return;
-            picker.body.replaceChildren(button('重新读取日期', () => load(selectedMonth))); showError(error);
+            picker.body.replaceChildren(button('重新读取日期', () => load(selectedMonth), 'secondary-btn small')); showError(error);
           }
         }
         await load();
@@ -170,7 +170,7 @@
       const details = node('div'); const run = button('确认运行', async () => {
         const result = await perform('区间核对', (requestId) => api.run({ requestId, selectionRef: preflight.selectionRef }));
         if (result?.status === 'ok') dialog.close(); else { preflight = null; run.disabled = true; }
-      }, 'primary-btn'); let preflight = null; let preflightVersion = 0; run.disabled = true;
+      }, 'primary-btn small'); let preflight = null; let preflightVersion = 0; run.disabled = true;
       const precheck = button('检查所需数据', async () => {
         preflight = null; run.disabled = true; details.replaceChildren(); precheck.disabled = true; const version = ++preflightVersion;
         try {
@@ -179,7 +179,7 @@
           details.append(table(['所需校验表', '账期', '当前版本', '来源文件'], preflight.inputs.map((item) => [item.role === 'FLOW' ? '流水校验表' : 'OP 校验表', item.dataDate, `v${item.version}`, item.originals.join('、')])));
           dialog.feedback.textContent = ''; run.disabled = false;
         } finally { precheck.disabled = false; }
-      });
+      }, 'secondary-btn small');
       for (const item of [start, end]) item.addEventListener('change', () => { preflightVersion += 1; preflight = null; run.disabled = true; details.replaceChildren(); });
       dialog.body.append(fields, details);
       const actions = node('div', undefined, 'bizop-modal-actions'); actions.append(run, dialog.footer.firstChild);
@@ -189,9 +189,9 @@
     async function latestMonth() { const result = checked(await api.months({ limit: 1 })); return result.months[0] || new Date().toISOString().slice(0, 7); }
     async function openResults() {
       const dialog = modal('导出校验结果表', 'vcc-fin-op-export-dialog bizop-results-dialog'); const month = node('input', undefined, 'vcc-fin-op-input'); month.type = 'month'; month.value = await latestMonth();
-      const choice = select([['', '请选择结果表']]); const next = button('下一页', () => load(cursor)); let cursor = null; let generation; let loadVersion = 0;
+      const choice = select([['', '请选择结果表']]); const next = button('下一页', () => load(cursor), 'secondary-btn small'); let cursor = null; let generation; let loadVersion = 0;
       const exportBtn = button('导出', async () => { if (!choice.value) throw new Error('请先选择结果表');
-        if ((await exportObject('RESULT_DIFF', choice.value))?.status === 'ok') dialog.close(); }, 'primary-btn');
+        if ((await exportObject('RESULT_DIFF', choice.value))?.status === 'ok') dialog.close(); }, 'primary-btn small');
       async function load(after = null) {
         const version = ++loadVersion;
         choice.replaceChildren(); exportBtn.disabled = true; next.disabled = true;
@@ -216,7 +216,7 @@
       const actions = node('div', undefined, 'bizop-modal-actions'); actions.append(button('导出', async () => {
         const current = checked(await api.currentInput({ kind: kind.value.split('_')[0], dataDate: date.value }));
         if ((await exportObject(kind.value, current.objectId))?.status === 'ok') dialog.close();
-      }, 'primary-btn'), back);
+      }, 'primary-btn small'), back);
       dialog.footer.replaceChildren(node('div', undefined, 'bizop-cancel-slot'), actions);
     }
     async function showDelete(selection, refresh) {
@@ -227,7 +227,7 @@
         const originals = node('details'); originals.append(node('summary', `${item.originals.length} 个原件`));
         originals.append(node('p', item.originals.map((file) => file.originalName).join('、')));
         return [item.operationMonth, item.startDate, item.endDate, item.tableName, originals];
-      })));
+      }), 'bizop-delete-result-table'));
       const ref = preview.references;
       dialog.body.append(node('p', `保留结果时仍受保护的原件：${ref.protectedAfterKeep}；删除所列结果后仍受保护：${ref.protectedAfterDelete}。其中用户锁定 ${ref.userLockedOriginals} 个，存在其他归档引用 ${ref.sharedBlobOriginals} 个。`));
       dialog.body.append(node('p', '删除输入会同时删除该类型、该账期的原表与校验表，不恢复旧版本。其他输入、用户原文件和已另存的结果不受影响。归档原件继续按存档中心的引用、锁和保留期处理。'));
@@ -236,8 +236,8 @@
         const result = await perform('删除数据', (requestId) => api.deleteData({ requestId, previewId: preview.previewId, mode }));
         if (result?.status === 'ok') { dialog.close(); await refresh(); }
       }
-      if (!preview.selection.runIds.length) dialog.footer.append(button('删除但保留结果表', () => confirm('KEEP_RESULTS')));
-      dialog.footer.append(button('删除', () => confirm('DELETE_ASSOCIATED'), 'primary-btn bizop-danger'), button('取消', () => dialog.close()));
+      if (!preview.selection.runIds.length) dialog.footer.append(button('删除但保留结果表', () => confirm('KEEP_RESULTS'), 'secondary-btn small'));
+      dialog.footer.append(button('删除', () => confirm('DELETE_ASSOCIATED'), 'primary-btn bizop-danger small'), button('取消', () => dialog.close(), 'secondary-btn small'));
     }
     async function openManager() {
       const dialog = modal('数据管理', 'vcc-fin-op-manager-dialog bizop-manager-dialog');
