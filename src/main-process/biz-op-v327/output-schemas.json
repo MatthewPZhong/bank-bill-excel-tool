@@ -863,8 +863,23 @@
       "formulaAllowed": false,
       "formulaPolicyStatus": "E02_APPROVED",
       "rowOrder": "rowOrdinal (RESULT_DIFF filters isDifference without renumbering source ordinal)",
-      "notesSchema": "BIZOP_NOTES_V1",
-      "emptyOutputPolicy": "header-and-notes"
+      "notesSchema": null,
+      "emptyOutputPolicy": "header-only",
+      "evidenceSchemaRevision": 3
+    }
+  },
+  "outputKindVersions": {
+    "RESULT_FULL": {
+      "2": {
+        "baseColumnSchemaVersion": 1,
+        "columnOverrides": [{ "index": 14, "header": "终止期末－合计流水" }]
+      }
+    },
+    "RESULT_DIFF": {
+      "2": {
+        "baseColumnSchemaVersion": 1,
+        "columnOverrides": [{ "index": 14, "header": "终止期末－合计流水" }]
+      }
     }
   },
   "notesSchema": {

@@ -19,8 +19,13 @@ return Object.freeze(Object.entries(ACTIONS).map(([actionKey, action]) => {
     policy.artifacts.businessValidatorKey = `business-validator.${actionKey}`;
     policy.artifacts.publisherKey = `publisher.${actionKey}`;
   }
-  if (decision.ready) policy.production = { enabled: true, effectiveMode: 'thread-single', effectiveWorkerCount: 1,
-    recoveryStatus: 'proven', evidenceStatus: 'release-pass', downgradeReason: null, benchmarkEvidenceId: gates.actions[actionKey].reference };
+  if (decision.ready) {
+    policy.description = '业务 OP v3.2.7 已启用的后台执行动作';
+    policy.production = { enabled: true, effectiveMode: 'thread-single', effectiveWorkerCount: 1,
+      recoveryStatus: decision.authorizationUsed ? 'probe' : 'proven',
+      evidenceStatus: decision.authorizationUsed ? 'baseline' : 'release-pass', downgradeReason: null,
+      benchmarkEvidenceId: decision.authorizationUsed ? null : gates.actions[actionKey].reference };
+  }
   return snapshot(policy);
 }));
 }

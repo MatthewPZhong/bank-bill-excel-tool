@@ -300,6 +300,7 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'bizOpReconV327:metadata:months',
     'bizOpReconV327:metadata:list',
     'bizOpReconV327:metadata:input',
+    'bizOpReconV327:metadata:run-calendar',
     'account-mapping:check-migration-pending',
     'account-mapping:get-migration-data',
     'account-mapping:list',

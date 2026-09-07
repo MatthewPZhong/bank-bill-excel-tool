@@ -1,5 +1,29 @@
 # PR5 实施记录
 
+2026-09-07 VCC 紧凑样式追加（起点 623c4cdc）：用户认为整体结构仍臃肿，要求参照 VCC 导出数据、删除、导出月份与选择导入账期弹窗。Goal/Done when：业务 OP 对应小弹窗在字体、控件、标题和留白上缩小，之前按钮定位/成功提示均保留，更新 PR237。
+
+- PROBE 已确认：VCC 表单标签和正文 13px、输入 38px、small 按钮 36px；VCC 导入账期标题 18px/600。业务 OP 字段继承 16px，操作按钮默认 48px，标题叠加了通用顶部 padding；仅缩窄外框未消除这些差异。
+- Decisions：使用既有 VCC 字段类和公共 small 按钮，局部统一 18px 标题及紧凑 header/footer，按内容收紧六类小弹窗；保留数据管理大表结构。删除预览和运行输入清单长名称换行、长列表滚动，完整保留影响范围和原业务合同。
+- Deviation：最新明确要求缩小整体字体/结构，取代上一轮固定保留 233/152/180px 字段的约束；已先同步 spec。业务 OP 仍按日选择，不套用 VCC 月份业务语义。
+- Evidence：最终 UI 43 PASS、真实 Electron 鼠标/键盘取消 11 PASS，lint/diff 检查通过；当前 VCC 四个预览入口实测与 BizOP 表单均为 13px、小按钮均为 36px，BizOP 标题与 VCC 导入账期均为 18px/600。开始运行与输入/结果导出初始高度约 247.5px；删除确认在完整明细仍可滚动的前提下最高约 510px。1080 窗口 100%/125% 下表单边缘、运行明细日期不重叠及底部可达验证通过。
+- 视觉复核补充：缩窄后的日期最初侵入版本列，增加完整日期最小宽度，并以文字 Range 检查内容不跨列；删除/运行清单增加内容高度上限。截图等待已有有限动画结束，避免把正在恢复的按钮颜色记成最终外观。原始记录为 /tmp/bizop-ui-compact-20260907 与 /tmp/bizop-ui-compact-cancel-20260907，汇总在 button-layout-validation.json；截图已刷新。
+- check-vars：本次仅命中 renderer 局部 dialog，按 rules/important-variables.md 的明确排除复核为非 Main 全局变量；原保存位置取消和真实输入取消已通过。业务 OP 原生模态焦点、busy、请求绑定、删除 mode 和资金数据语义保持。
+- Remaining：更新 PR237 并读取远端 head/CI 状态；本轮不重跑整套 release-check 或 Windows 人工验收。
+
+2026-09-07 按钮定位补充（起点 e682bec0）：落实用户四项对齐、取消尺寸和原表导出成功提醒要求；验收为隔离 Electron 中导出前/中/后按钮坐标稳定、三个弹窗边缘对齐、成功与取消/失败正确分支，随后更新 PR237。只改前端及说明，不修改输入、输出、金额或 IPC 合同。
+
+- PROBE 已确认：setBusy 把取消按钮追加到数据管理 footer 第三个 flex 子项，破坏原有左右分组；改用左侧独立取消槽，右侧按钮组继续靠右。
+- PROBE 已确认：通用 dialog-actions 的左右 28px padding 与表单缩窄列不一致；按钮栏与表单共用列宽，取消按钮另有槽位。
+- ASSUME：用户在第 1 项同时提到结果原表与校验原表，成功提醒覆盖 RESULT_FULL、OP_RAW、FLOW_RAW 三种原表；不扩大到其它导出类型。弹窗取消显示短文案【取消】，使宽高可与【删除】一致，保留完整 aria-label 和原 requestId 取消协议。
+- Decisions：成功提醒在原操作实际结束并恢复控件后创建；只有 status=ok 才显示，pendingArchiveHandoff/cleanupPending 继续明确提示，失败/取消不报成功。需求已同步 spec.md。
+- 历史中间方案（已由上面的 VCC 紧凑样式取代）：两个弹窗由 760/620px 收紧为约 527/392px，保留运行日期约 233px、导出日期 152px、目标 180px；预检输入清单使用内容区滚动，取消槽与底部对齐继续保持。增加 1080 窗口 100%/125% 缩放的等边距检查。
+- 历史提交 623c4cdc Evidence：UI 41 PASS、真实鼠标/键盘取消 11 PASS，lint 与 diff 检查通过；导出前/中/成功后管理按钮坐标完全一致，取消与删除宽高一致，三个表单边缘误差小于 1 CSS px，原表成功/失败/取消/归档收尾未决分支通过。原始记录分别位于 `/tmp/bizop-ui-buttons-20260907` 与 `/tmp/bizop-ui-buttons-cancel-20260907`；本轮截图同步到 screenshots/。
+- check-vars：仅词法命中 renderer 局部 `dialog`。按 rules/important-variables.md §3 的明确排除，它不是 Main 的 Electron dialog；仍按“改 dialog 调用必须考虑用户取消分支”复核，保存位置取消及十一项真实输入取消检查通过。
+- Probe 修正：新增成功预检检查已建立可运行状态，后续失败探针直接点击确认运行，避免重复发起预检并误用前一轮按钮就绪状态。未放宽产品预检或失败条件。
+- 验证边界：上述 UI/取消检查使用真实组件与合成 API，不对用户真实数据执行导出或删除；本次前端调整未重跑完整 release-check 或 Windows 人工验收。
+
+2026-09-07 页面布局纠偏：此前单排主工具栏及主页面“导出数据”不符合 E5 §6 的 VCC 财务 OP 布局要求，数据管理分类下拉也偏离参考结构。修正范围、依据与验证见 [layout-correction.md](layout-correction.md)，保留原功能和恢复合同。
+
 ## Unknowns Register
 
 | 项目 | 分类 | 证据与处置 |

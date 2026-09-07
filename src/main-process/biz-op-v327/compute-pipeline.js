@@ -10,7 +10,7 @@ const { setImmediate: yieldToMessages } = require('node:timers/promises');
 const { createSynchronousCandidateWriter } = require('../../backend/sqlite-candidate-writer');
 const { readVerifiedManifest } = require('./payload-store');
 const { CELL_CONTRACT_VERSION, RULE_VERSION } = require('./import-adapter');
-const { RESULT_SCHEMA_VERSION } = require('./result-schema');
+const { RESULT_SCHEMA_VERSION, COMPUTE_RULE_VERSION } = require('./result-schema');
 const { createResultSink, configure } = require('./result-sink');
 const { intervalInputs, fingerprintOf } = require('./compute-inputs');
 const { REASONS, DESCRIPTION_FIELDS, keyOf, compareKeys, createGroup, observe, observeDescription, finishGroup } = require('./compute-group');
@@ -52,7 +52,8 @@ async function runComputePipeline({ payloadStore, taskRunId, intentDigest, candi
   }
   const root = payloadStore.readDocument(inputReference.relativePath, inputReference.digest).value;
   if (root.taskRunId !== taskRunId || root.schemaVersion !== 1 || root.cellContractVersion !== CELL_CONTRACT_VERSION
-      || root.ruleVersion !== RULE_VERSION || fingerprintOf(root) !== root.inputFingerprint) fail('BIZOP_COMPUTE_INPUT_MISMATCH');
+      || root.ruleVersion !== RULE_VERSION || root.computeRuleVersion !== COMPUTE_RULE_VERSION
+      || fingerprintOf(root) !== root.inputFingerprint) fail('BIZOP_COMPUTE_INPUT_MISMATCH');
   const required = intervalInputs(root.startDate, root.endDate);
   if (root.references.length !== required.length || root.inputs.length !== required.length
       || required.some((item, index) => item.role !== root.inputs[index].role || item.dataDate !== root.inputs[index].dataDate)) fail('BIZOP_RUN_INPUT_MISSING');
@@ -78,8 +79,9 @@ async function runComputePipeline({ payloadStore, taskRunId, intentDigest, candi
     diskCheck(); configure(db); db.exec(WORK_SCHEMA);
     inputWriter = createSynchronousCandidateWriter({ db, insertSql: `INSERT INTO working_observations VALUES (${Array(16).fill('?').join(',')})` });
     sink.note({ record_type: 'RUN_META', field_key: 'calculation', value_type: 'JSON', value_part: JSON.stringify({
-      startDate: root.startDate, endDate: root.endDate, interval: '(S,E]', reverseFlow: '出-入', difference: '起始期末-(终止期末+出-入)',
-      tolerance: '0.01', inputFingerprint: root.inputFingerprint, bus: root.bus, cellContractVersion: CELL_CONTRACT_VERSION, ruleVersion: RULE_VERSION }) });
+      startDate: root.startDate, endDate: root.endDate, interval: '(S,E]', totalFlow: '入-出', reverseEnd: '终止期末-(入-出)',
+      difference: '起始期末-(终止期末-(入-出))', tolerance: '0.01', inputFingerprint: root.inputFingerprint,
+      bus: root.bus, cellContractVersion: CELL_CONTRACT_VERSION, ruleVersion: RULE_VERSION, computeRuleVersion: COMPUTE_RULE_VERSION }) });
     const loadStarted = Date.now();
     for (let index = 0; index < root.references.length; index += 1) {
       safePoint();
@@ -212,7 +214,7 @@ async function runComputePipeline({ payloadStore, taskRunId, intentDigest, candi
     const sealStarted = Date.now();
     const token = await payloadStore.sealCandidate({ taskRunId, objectId: candidateRef, objectKind: 'RESULT', intentDigest,
       catalog: { startDate: root.startDate, endDate: root.endDate, inputs: root.inputs, bus: root.bus,
-        originalDigests: root.originalDigests, inputFingerprint: root.inputFingerprint, ruleVersion: RULE_VERSION,
+        originalDigests: root.originalDigests, inputFingerprint: root.inputFingerprint, ruleVersion: RULE_VERSION, computeRuleVersion: COMPUTE_RULE_VERSION,
         cellContractVersion: CELL_CONTRACT_VERSION, resultSchemaVersion: RESULT_SCHEMA_VERSION,
         fullRowCount: metrics.resultRows, diffRowCount: diffCount, noteRowCount: metrics.noteRows, reasonCounts }, parts: sealed.parts });
     metrics.sealMs = Date.now() - sealStarted;

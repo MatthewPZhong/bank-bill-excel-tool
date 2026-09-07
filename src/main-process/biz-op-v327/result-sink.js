@@ -5,8 +5,8 @@ const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 const { createSynchronousCandidateWriter } = require('../../backend/sqlite-candidate-writer');
 const { PART_TARGET_ROWS, PART_TARGET_BYTES } = require('./candidate-router');
-const { CELL_CONTRACT_VERSION, RULE_VERSION } = require('./import-adapter');
-const { RESULT_COLUMNS, NOTE_COLUMNS, RESULT_SCHEMA, NOTES_SCHEMA, PART_SCHEMA } = require('./result-schema');
+const { CELL_CONTRACT_VERSION } = require('./import-adapter');
+const { RESULT_COLUMNS, NOTE_COLUMNS, RESULT_SCHEMA, NOTES_SCHEMA, PART_SCHEMA, COMPUTE_RULE_VERSION } = require('./result-schema');
 const { fail } = require('./contracts');
 
 function configure(db) {
@@ -47,7 +47,7 @@ function createResultSink({ directory, objectId, taskRunId, safePoint = () => {}
     try {
       configure(db); db.exec(PART_SCHEMA); db.exec(partKind === 'RESULT' ? RESULT_SCHEMA : NOTES_SCHEMA);
       db.prepare('INSERT INTO part_meta VALUES (1,1,?,?,?,?,?,?,?,0)').run(objectId, partKind, number, taskRunId,
-        CELL_CONTRACT_VERSION, RULE_VERSION, 'STAGING');
+        CELL_CONTRACT_VERSION, COMPUTE_RULE_VERSION, 'STAGING');
       const table = partKind === 'RESULT' ? 'result_rows' : 'explanation_records';
       const fields = partKind === 'RESULT' ? RESULT_COLUMNS.length + 7 : NOTE_COLUMNS.length;
       const writer = createSynchronousCandidateWriter({ db, insertSql: `INSERT INTO ${table} VALUES (${Array(fields).fill('?').join(',')})` });

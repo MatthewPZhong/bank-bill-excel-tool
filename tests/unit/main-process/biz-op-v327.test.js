@@ -170,6 +170,7 @@ async function fixture(t, options = {}) {
   let service = null;
   const readRepository = createRecoveryControlReadRepository(db);
   const module = createBizOpV327Module({ db, userDataDir: root, readRepository,
+    releaseGates: { schemaVersion: 1, version: '3.2.7', enabled: false },
     getArchiveService: () => service, budgetOptions: options.budgetOptions });
   const inspectors = createInspectorRegistry();
   const providers = createSettlementRecoveryProviderRegistry();
@@ -713,14 +714,15 @@ durableDirectoryTest('回收中途到期保留授权和原维护 Task，下次 a
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM biz_op_v327_reclaim_queue').get().n, 1);
 });
 
-durableDirectoryTest('真实 IPC 注册的十个新区间动作保持禁用，显式恢复重试接通同一 Main driver', async (t) => {
+durableDirectoryTest('显式禁用时所有业务 IPC 包含运行日历均被阻断，恢复重试接通同一 Main driver', async (t) => {
   const f = await fixture(t);
   const { registerBizOpV327Handlers } = require('../../../src/main-process/biz-op-v327/ipc');
   const handlers = new Map();
   registerBizOpV327Handlers({ ipcMain: { handle(key, handler) {
     assert.equal(handlers.has(key), false); handlers.set(key, handler);
   } }, getModule: () => f.module, businessOperationRegistry: createBusinessOperationRegistry() });
-  assert.equal(handlers.size, 20);
+  assert.equal(handlers.size, 21);
+  assert.ok(handlers.has('bizOpReconV327:metadata:run-calendar'));
   for (const [key, handler] of handlers) {
     if (key.endsWith(':status') || key.endsWith(':retry')) continue;
     assert.throws(() => handler(), { code: 'BIZOP_V327_NOT_ENABLED' });

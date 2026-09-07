@@ -16,8 +16,8 @@ const { registerWithLegacyGuard } = require('../../../src/main-process/biz-op-v3
 const { createTaskPolicyRegistry } = require('../../../src/main-process/archive-center/task-policy-registry');
 const pendingTask = (f) => f.db.prepare("SELECT * FROM archive_task_runs WHERE task_key='bizOpReconV327:maintenance:upgrade'").get();
 
-plainTest('发布配置仍禁用；缺少任一总门禁或单个 action 证据均不创建 Task、不清旧、不放行生产 dispatch', async (t) => {
-  assert.equal(RELEASE_GATES.enabled, false); assert.ok(BIZ_OP_V327_POLICIES.every((p) => !p.production.enabled));
+plainTest('显式禁用或缺少任一总门禁、单个 action 证据均不创建 Task、不清旧、不放行生产 dispatch', async (t) => {
+  assert.equal(evaluateReleaseGates({ ...RELEASE_GATES, enabled: false }).ready, false);
   for (const key of REQUIRED_GATES) { const config = passedGates(); config[key] = { status: 'NOT RUN', reference: 'pending' }; assert.equal(evaluateReleaseGates(config).ready, false); }
   const config = passedGates(); delete config.actions['biz-op-v327:export-errors'];
   assert.equal(evaluateReleaseGates(config).ready, false);

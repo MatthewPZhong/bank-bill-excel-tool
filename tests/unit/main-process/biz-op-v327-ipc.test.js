@@ -92,6 +92,32 @@ test('月份和 keyset 分页只查询目录，旧游标和变更后的运行预
   for (const channel of w.handlers.keys()) assert.ok(registry.get(channel) || registry.classify(channel), channel);
 });
 
+test('运行月历只列当前 OP 日期，默认最近导入账期并支持跨月和删除后刷新，读取不创建 Task', async (t) => {
+  const f = await createExportHost(t); const w = wire(f);
+  assert.deepEqual((await w.call('metadata:run-calendar')).dates, []);
+  assert.equal((await w.call('metadata:run-calendar', { month: '2026-13' })).code, 'BIZOP_OPERATION_MONTH_INVALID');
+  assert.equal((await w.call('metadata:run-calendar', { kind: 'FLOW' })).code, 'BIZOP_IPC_INPUT_INVALID');
+  await seed(f);
+  const first = await w.call('metadata:run-calendar');
+  assert.equal(first.month, '2026-09'); assert.deepEqual(first.dates, ['2026-09-01', '2026-09-03']);
+  assert.ok(!first.dates.includes('2026-09-02'), '只有流水的日期不能作为 OP 端点');
+  const older = path.join(f.root, 'older-month.xlsx');
+  await writeXlsx(older, { kind: 'OP', rowCount: 1, row: () => opRow({ date: '2026-07-15', amount: '0', incoming: '0', end: '100' }) });
+  assert.equal((await f.run([older])).status, 'ok');
+  const countTasks = () => f.db.prepare('SELECT COUNT(*) AS n FROM archive_task_runs').get().n;
+  const before = countTasks();
+  const latest = await w.call('metadata:run-calendar');
+  assert.equal(latest.month, '2026-07'); assert.deepEqual(latest.dates, ['2026-07-15']); assert.equal(latest.nextMonth, '2026-09');
+  const september = await w.call('metadata:run-calendar', { month: '2026-09' });
+  assert.equal(september.previousMonth, '2026-07'); assert.equal(september.nextMonth, null); assert.equal(countTasks(), before);
+  assert.ok(Buffer.byteLength(JSON.stringify(latest)) < 4096); assert.ok(!JSON.stringify(latest).includes(f.root));
+  const current = await w.call('metadata:input', { kind: 'OP', dataDate: '2026-07-15' });
+  const preview = await w.call('delete:preview', { datasetIds: [current.objectId] });
+  assert.equal((await w.call('delete', { requestId: 'calendar-delete', previewId: preview.previewId, mode: 'KEEP_RESULTS' })).status, 'ok');
+  assert.equal((await w.call('metadata:run-calendar')).month, '2026-09');
+  assert.deepEqual((await w.call('metadata:run-calendar', { month: '2026-07' })).dates, []);
+});
+
 test('IPC 六类固定 action 与诊断导出均可发布，失败导入有真实可导出的错误报告', async (t) => {
   const f = await createExportHost(t); await seed(f, { end: '120' }); const run = await compute(f); const w = wire(f);
   for (const kind of ['OP_RAW', 'FLOW_RAW', 'OP_CHECK', 'FLOW_CHECK', 'RESULT_FULL', 'RESULT_DIFF']) {

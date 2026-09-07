@@ -334,6 +334,13 @@ class ArchiveCenterController {
       );
       error.code = 'ARCHIVE_STARTUP_OWNER_RECOVERY_FAILED';
       error.owners = ownerFailures.map((failure) => failure.ownerName);
+      error.detailLines = ownerFailures.flatMap(({ ownerName, error: failure }) => [
+        `${ownerName}：${failure && failure.code ? `[${failure.code}] ` : ''}${failure && failure.message || String(failure)}`,
+        ...(Array.isArray(failure && failure.detailLines) ? failure.detailLines : [])
+      ]);
+      error.recoveryPaths = [...new Set(ownerFailures.flatMap(({ error: failure }) => (
+        Array.isArray(failure && failure.recoveryPaths) ? failure.recoveryPaths : []
+      )))];
       throw error;
     }
     const batchFlowReplay = await this.service.replayFlowBindIntents();

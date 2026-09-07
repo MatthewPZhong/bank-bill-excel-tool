@@ -9,7 +9,7 @@ const JSZip = require('jszip');
 const { randomUUID } = require('node:crypto');
 const XLSX = require('xlsx');
 const { createHost } = require('../../helpers/biz-op-v327-host');
-const { seed, compute } = require('../../helpers/biz-op-v327-compute');
+const { seed, compute, readResult } = require('../../helpers/biz-op-v327-compute');
 const { freezeExportSource } = require('../../../src/main-process/biz-op-v327/export-inputs');
 const { runExportPipeline } = require('../../../src/main-process/biz-op-v327/export-pipeline');
 const { createExportSpool } = require('../../../src/main-process/biz-op-v327/export-spool');
@@ -39,19 +39,37 @@ test('六类真实固定输入的 expected→writer→独立 actual：完整列�
     assert.equal(result.evidence.expectedDigest, result.evidence.actualDigest, kind);
     const first = result.workbook.Sheets[result.workbook.SheetNames[0]];
     assert.equal(XLSX.utils.sheet_to_json(first, { header: 1 })[0].length, width, kind);
-    assert.ok(result.workbook.SheetNames.some((name) => name.startsWith('核对说明')), kind);
+    assert.equal(result.workbook.SheetNames.some((name) => name.startsWith('核对说明')), kind !== 'RESULT_DIFF', kind);
     assert.ok(result.evidence.metrics.peakBufferedBytes < 1024 * 1024, kind);
   }
 });
-test('零差异保持 19 列表头和说明；损坏明确 schema 在写出前拒绝', async (t) => {
+test('零差异只保留一张 19 列表头页；损坏明确 schema 在写出前拒绝', async (t) => {
   const f = await createHost(t); await seed(f); const run = await compute(f);
   const source = await sourceFor(f, 'RESULT_DIFF', run.runId);
   const result = await exported(f, source);
   assert.equal(result.evidence.dataRowCount, 0);
   assert.equal(result.workbook.SheetNames[0], '20260901_v1 VS 20260903_v1');
   assert.equal(XLSX.utils.sheet_to_json(result.workbook.Sheets[result.workbook.SheetNames[0]], { header: 1 }).length, 1);
-  assert.ok(result.evidence.noteRowCount > 0);
+  assert.equal(result.evidence.noteRowCount, 0);
+  assert.equal(result.workbook.SheetNames.length, 1);
+  assert.equal(result.evidence.identity.evidenceSchemaRevision, 3);
+  assert.equal(result.evidence.identity.notesSchemaVersion, null);
   await assert.rejects(sourceFor(f, 'GUESS_FROM_FILENAME', run.runId), { code: 'BIZOP_OUTPUT_SCHEMA_UNKNOWN' });
+});
+
+test('差异文件不附说明页，19 列异常摘要指向完整原表，封存说明不被修改', async (t) => {
+  const f = await createHost(t); await seed(f, { end: '120', count: 3 }); const run = await compute(f);
+  const before = readResult(f, run.runId);
+  const diff = await exported(f, await sourceFor(f, 'RESULT_DIFF', run.runId));
+  const full = await exported(f, await sourceFor(f, 'RESULT_FULL', run.runId));
+  const cells = (book) => XLSX.utils.sheet_to_json(book.Sheets[book.SheetNames[0]], { header: 1, defval: null })[1];
+  assert.equal(diff.workbook.SheetNames.length, 1);
+  assert.equal(diff.evidence.noteRowCount, 0);
+  assert.deepEqual(cells(diff.workbook).slice(0, 18), cells(full.workbook).slice(0, 18));
+  assert.equal(cells(diff.workbook)[18], cells(full.workbook)[18].replace('；详见核对说明:', '；完整说明见导出原表，定位:'));
+  assert.ok(full.workbook.SheetNames.includes('核对说明'));
+  assert.ok(full.evidence.noteRowCount > 0);
+  assert.deepEqual(readResult(f, run.runId), before);
 });
 
 function column(index) { let name = ''; for (let n = index; n > 0; n = Math.floor((n - 1) / 26)) name = String.fromCharCode(65 + (n - 1) % 26) + name; return name; }
@@ -94,7 +112,12 @@ test('六类分别注入首尾列、列外空格、缺行、缺账号、空变�
         const zip = await JSZip.loadAsync(fs.readFileSync(filePath));
         if (label === '额外页') zip.file('xl/workbook.xml', (await zip.file('xl/workbook.xml').async('string'))
           .replace('</sheets>', '<sheet name="偷偷增加的页" sheetId="77" r:id="rId1"/></sheets>'));
-        else {
+        else if (kind === 'RESULT_DIFF') {
+          const xml = await zip.file('xl/workbook.xml').async('string');
+          const changed = xml.replace(/(<sheet\b[^>]*\bname=")[^"]+/, '$1核对说明');
+          assert.notEqual(changed, xml, '差异页名称篡改必须实际生效');
+          zip.file('xl/workbook.xml', changed);
+        } else {
           const entry = `xl/worksheets/sheet${expected.pages.findIndex((page) => page.section === 'NOTES') + 1}.xml`;
           zip.file(entry, replaceCell(await zip.file(entry).async('string'), 'T2', '<c r="T2" t="str"><v>来源被改</v></c>'));
         }

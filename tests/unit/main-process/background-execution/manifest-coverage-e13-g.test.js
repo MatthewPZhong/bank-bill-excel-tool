@@ -73,7 +73,7 @@ test('E13-G current manifest 以独立 66 action / 73 pair authority 达到六�
   assert.equal(Object.isFrozen(current.manifest.surfaces.publishers), true);
 });
 
-test('Capability Inventory 与 Effective Production Strategy 分离，全部 capability 仍 effective legacy', () => {
+test('Capability Inventory 与 Effective Production Strategy 分离，仅新版业务 OP 十二项显式开启', () => {
   const current = harness();
   const snapshot = createEffectiveProductionStrategySnapshot(current);
   assert.deepEqual(current.capabilityInventory.counts, {
@@ -84,9 +84,15 @@ test('Capability Inventory 与 Effective Production Strategy 分离，全部 cap
   });
   assert.deepEqual(snapshot.counts, {
     actionCount: 66,
-    productionEnabledCount: 0,
-    legacyEffectiveCount: 66
+    productionEnabledCount: 12,
+    legacyEffectiveCount: 54
   });
+  for (const action of snapshot.actions) {
+    const enabled = action.actionKey.startsWith('biz-op-v327:');
+    assert.equal(action.effectiveMode, enabled ? 'thread-single' : 'legacy');
+    assert.equal(action.effectiveWorkerCount, enabled ? 1 : 0);
+    assert.equal(action.featureFlag, enabled);
+  }
 
   const acquiring = actionByKey(current.capabilityInventory, 'acquiring:run-new-eligible');
   const acquiringStrategy = actionByKey(snapshot, 'acquiring:run-new-eligible');
@@ -108,8 +114,8 @@ test('Capability Inventory 与 Effective Production Strategy 分离，全部 cap
   assert.deepEqual(validation, {
     valid: true,
     actionCount: 66,
-    productionEnabledCount: 0,
-    legacyEffectiveCount: 66
+    productionEnabledCount: 12,
+    legacyEffectiveCount: 54
   });
   assert.deepEqual(validateCapabilityInventory(current.capabilityInventory, current), {
     valid: true,

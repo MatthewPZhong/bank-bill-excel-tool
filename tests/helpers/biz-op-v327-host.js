@@ -25,7 +25,9 @@ async function createHost(t, options = {}) {
   db.exec('PRAGMA foreign_keys=ON');
   let service; let runtime;
   const readRepository = createRecoveryControlReadRepository(db);
-  const module = createBizOpV327Module({ ...options.moduleOptions, db, userDataDir: root, readRepository, getArchiveService: () => service, getRuntime: () => runtime });
+  // 普通合同夹具显式关闭自动升级；生产默认值由启用专项独立验证。
+  const module = createBizOpV327Module({ releaseGates: { schemaVersion: 1, version: '3.2.7', enabled: false },
+    ...options.moduleOptions, db, userDataDir: root, readRepository, getArchiveService: () => service, getRuntime: () => runtime });
   const inspectors = createInspectorRegistry(); const providers = createSettlementRecoveryProviderRegistry();
   module.sources.register(options.wrapInspector ? { register(key, inspect) { inspectors.register(key, options.wrapInspector(inspect)); } } : inspectors,
     providers); inspectors.freeze(); providers.freeze();

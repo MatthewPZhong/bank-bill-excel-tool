@@ -15,8 +15,12 @@ const SHEET_NAMES = Object.freeze({ OP_RAW: '业务OP校验原表', FLOW_RAW: '�
 const NULL_CELL = Object.freeze({ t: 'null', v: null, f: 'General' });
 function schemaFor(kind, version = 1) {
   const schema = kind === 'ERRORS' ? ERROR_SCHEMA : registry.outputKinds[kind];
-  if (!schema || version !== schema.columnSchemaVersion) fail('BIZOP_OUTPUT_SCHEMA_UNKNOWN');
-  return schema;
+  if (!schema || !Number.isSafeInteger(version)) fail('BIZOP_OUTPUT_SCHEMA_UNKNOWN');
+  if (version === schema.columnSchemaVersion) return schema;
+  const revision = registry.outputKindVersions?.[kind]?.[version];
+  if (!revision || revision.baseColumnSchemaVersion !== schema.columnSchemaVersion) fail('BIZOP_OUTPUT_SCHEMA_UNKNOWN');
+  return { ...schema, columnSchemaVersion: version,
+    columns: schema.columns.map((column) => ({ ...column, ...revision.columnOverrides.find((item) => item.index === column.index) })) };
 }
 function text(value) { return value == null ? NULL_CELL : { t: 'text', v: assertExcelCellTextLength(String(value)), f: '@' }; }
 function number(value, onPrecision = () => {}) {
@@ -44,10 +48,10 @@ function rawCell(source, normalized, kind, index, onPrecision) {
   return text(normalized);
 }
 function evidenceIdentity({ outputKind, columnSchemaVersion = 1, objectId, manifestDigest, maxRowsPerSheet }) {
-  schemaFor(outputKind, columnSchemaVersion);
-  return { evidenceVersion: registry.evidenceVersion, evidenceSchemaRevision: registry.evidenceSchemaRevision,
+  const schema = schemaFor(outputKind, columnSchemaVersion);
+  return { evidenceVersion: registry.evidenceVersion, evidenceSchemaRevision: schema.evidenceSchemaRevision ?? registry.evidenceSchemaRevision,
     outputKind, columnSchemaVersion, cellContractVersion: CELL_CONTRACT_VERSION, ownerId: objectId,
-    manifestDigest, maxRowsPerSheet, notesSchemaVersion: 1 };
+    manifestDigest, maxRowsPerSheet, notesSchemaVersion: schema.notesSchema === null ? null : 1 };
 }
 function outputName(kind, metadata) {
   schemaFor(kind);

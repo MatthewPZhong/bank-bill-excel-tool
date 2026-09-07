@@ -5,7 +5,7 @@ const { createTaskPolicyRegistry } = require('../archive-center/task-policy-regi
 const { collectInputs, persistInputs } = require('./compute-inputs');
 const { readVerifiedManifest } = require('./payload-store');
 const { CELL_CONTRACT_VERSION, RULE_VERSION } = require('./import-adapter');
-const { RESULT_SCHEMA_VERSION } = require('./result-schema');
+const { RESULT_SCHEMA_VERSION, COMPUTE_RULE_VERSION } = require('./result-schema');
 const { fail, hash, count } = require('./contracts');
 
 function createBizOpComputeCoordinator({ userDataDir, catalog, payloadStore, protection, admission, sources,
@@ -32,7 +32,7 @@ function createBizOpComputeCoordinator({ userDataDir, catalog, payloadStore, pro
             taskRunId = context.taskRunId;
             const op = prepareOperation({ taskRunId, operationKey: context.operationKey, actionKey: 'biz-op-v327:run-candidate',
               intent: { phase: 'interval-compute-v1', candidateRef, inputManifestRef: `operations/${taskRunId}/compute-inputs.json`, inputFingerprint: frozen.inputFingerprint,
-                startDate, endDate, ruleVersion: RULE_VERSION, cellContractVersion: CELL_CONTRACT_VERSION } });
+                startDate, endDate, ruleVersion: RULE_VERSION, computeRuleVersion: COMPUTE_RULE_VERSION, cellContractVersion: CELL_CONTRACT_VERSION } });
             const inputReference = await persistInputs({ frozen, payloadStore, getArchiveService, taskRunId });
             if (catalog.control().generation !== frozen.expectedGeneration) fail('BIZOP_GENERATION_CHANGED');
             const request = prepareDispatch({ taskContext: context, actionKey: 'biz-op-v327:run-candidate',
@@ -70,7 +70,7 @@ function createBizOpComputeCoordinator({ userDataDir, catalog, payloadStore, pro
                 || hash(info.inputs) !== hash(frozen.inputs) || hash(info.bus) !== hash(frozen.bus)
                 || hash(info.originalDigests) !== hash(frozen.originalDigests) || info.inputFingerprint !== frozen.inputFingerprint
                 || info.resultSchemaVersion !== RESULT_SCHEMA_VERSION || info.cellContractVersion !== CELL_CONTRACT_VERSION
-                || info.ruleVersion !== RULE_VERSION) fail('BIZOP_COMPUTE_RESULT_MISMATCH');
+                || info.ruleVersion !== RULE_VERSION || info.computeRuleVersion !== COMPUTE_RULE_VERSION) fail('BIZOP_COMPUTE_RESULT_MISMATCH');
             if (signal?.aborted) return { status: 'cancelled' };
             const receipt = catalog.commitRun({ taskRunId, intentDigest: op.intent_digest, candidate });
             if (afterCommit) await afterCommit(receipt);

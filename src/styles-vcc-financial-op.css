@@ -451,7 +451,11 @@
 
 .vcc-fin-op-manager-result-table th:last-child,
 .vcc-fin-op-manager-result-table td:last-child {
-  text-align: right;
+  text-align: left;
+}
+
+.vcc-fin-op-manager-result-table .vcc-fin-op-link-btn {
+  padding: 0;
 }
 
 .vcc-fin-op-opening-scroll {

@@ -34,6 +34,24 @@ function createBizOpMetadata({ catalog, admission }) {
       return { months: values.slice(0, limit), nextBefore: values.length > limit ? values[limit - 1] : null };
     });
   }
+  function runCalendar({ month: selectedMonth } = {}) {
+    if (selectedMonth !== undefined) month(selectedMonth);
+    return admission.read(() => {
+      const current = `FROM biz_op_v327_input_heads h JOIN biz_op_v327_datasets d USING(dataset_id)
+        WHERE h.kind='OP' AND d.state='ACTIVE'`;
+      const latest = db.prepare(`SELECT h.data_date ${current} ORDER BY d.activated_at DESC,h.data_date DESC LIMIT 1`).get();
+      const latestMonth = latest?.data_date.slice(0, 7) || null;
+      const visibleMonth = selectedMonth || latestMonth;
+      if (!visibleMonth) return { month: null, latestMonth, dates: [], previousMonth: null, nextMonth: null, generation: catalog.control().generation };
+      const first = `${visibleMonth}-01`; const last = `${visibleMonth}-31`;
+      const dates = db.prepare(`SELECT h.data_date ${current} AND h.data_date>=? AND h.data_date<=? ORDER BY h.data_date LIMIT 31`)
+        .all(first, last).map((row) => row.data_date);
+      const previous = db.prepare(`SELECT h.data_date ${current} AND h.data_date<? ORDER BY h.data_date DESC LIMIT 1`).get(first);
+      const next = db.prepare(`SELECT h.data_date ${current} AND h.data_date>? ORDER BY h.data_date LIMIT 1`).get(last);
+      return { month: visibleMonth, latestMonth, dates, previousMonth: previous?.data_date.slice(0, 7) || null,
+        nextMonth: next?.data_date.slice(0, 7) || null, generation: catalog.control().generation };
+    });
+  }
   function list(input) {
     const { view, kind = 'OP', operationMonth, cursor = null, limit = 200, generation } = input || {};
     if (!['RESULT', 'CHECK', 'RAW'].includes(view) || !['OP', 'FLOW'].includes(kind)) fail('BIZOP_LIST_VIEW_INVALID');
@@ -83,6 +101,6 @@ function createBizOpMetadata({ catalog, admission }) {
       return snapshot({ generation: currentGeneration, rows: rows.map(({ _cursor, ...row }) => row), nextCursor }, { maxBytes: 245760 });
     });
   }
-  return { list, listMonths, currentInput };
+  return { list, listMonths, currentInput, runCalendar };
 }
 module.exports = { createBizOpMetadata, month, pageSize };

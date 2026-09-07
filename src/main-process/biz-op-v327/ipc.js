@@ -113,6 +113,7 @@ function registerBizOpV327Handlers({ ipcMain, getModule, businessOperationRegist
     ...take(ctx.senderId, ctx.value.selectionRef, 'run') })));
   register('metadata:months', ['before', 'limit'], ({ module, value }) => module.metadata.listMonths(value));
   register('metadata:input', ['kind', 'dataDate'], ({ module, value }) => module.metadata.currentInput(value));
+  register('metadata:run-calendar', ['month'], ({ module, value }) => module.metadata.runCalendar(value));
   register('metadata:list', ['view', 'kind', 'operationMonth', 'cursor', 'limit', 'generation'], ({ module, value }) => module.metadata.list(value));
   register('delete:preview', ['datasetIds', 'runIds'], ({ module, value }) => module.previews.create(value));
   register('delete', ['requestId', 'previewId', 'mode'], (ctx) => operation(ctx, 'delete', (deps) => ctx.module.runDelete({ ...deps,
