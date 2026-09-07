@@ -16,7 +16,9 @@ const { seedLegacy } = require('../../tests/helpers/biz-op-v327-upgrade');
 const { RELEASE_GATES } = require('../../src/main-process/biz-op-v327/release-gates');
 
 const project = path.resolve(__dirname, '../..');
-const output = path.join(project, 'outputs/windows-bizop-acceptance');
+const packagedBinary = process.env.BIZOP_ACCEPTANCE_APP ? path.resolve(process.env.BIZOP_ACCEPTANCE_APP) : null;
+const expectedAppPath = packagedBinary ? path.join(path.dirname(packagedBinary), 'resources', 'app.asar') : project;
+const output = path.join(project, packagedBinary ? 'outputs/windows-bizop-packaged-acceptance' : 'outputs/windows-bizop-acceptance');
 const root = fs.mkdtempSync(path.join(os.tmpdir(), '业务OP 正常应用验收-'));
 const userData = path.join(root, 'userData');
 const documents = path.join(root, 'documents');
@@ -65,7 +67,7 @@ async function launch(label) {
   // 禁止测量/预览/打包 canary 的启动捷径进入本项验收。
   for (const key of Object.keys(env)) if (key.startsWith('APP_CAPTURE') || key.startsWith('APP_PACKAGED_RUNTIME')
       || ['ELECTRON_RUN_AS_NODE', 'APP_STARTUP_MEASURE_AUTO_QUIT'].includes(key)) delete env[key];
-  const child = spawn(require('electron'), ['--inspect=127.0.0.1:0', '.'], { cwd: project, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(packagedBinary || require('electron'), ['--inspect=127.0.0.1:0', ...(packagedBinary ? [] : ['.'])], { cwd: project, env, stdio: ['ignore', 'pipe', 'pipe'] });
   let transcript = ''; let exited = false; const stopped = once(child, 'exit').then(([code, signal]) => { exited = true; return { code, signal }; });
   child.stdout.on('data', chunk => { transcript += chunk; }); child.stderr.on('data', chunk => { transcript += chunk; });
   let cdp;
@@ -110,8 +112,9 @@ async function launch(label) {
     }, '正常主窗口');
     const renderer = expression => evaluate(`globalThis.__acceptElectron.BrowserWindow.getAllWindows().find(w => w.webContents.getURL().endsWith('index.html')).webContents.executeJavaScript(${JSON.stringify(expression)})`);
     const api = (method, ...args) => renderer(`window.desktopApi.bizOpReconV327[${JSON.stringify(method)}](...${JSON.stringify(args)})`);
-    const runtime = await evaluate("({versions:process.versions,lock:globalThis.__acceptElectron.app.hasSingleInstanceLock(),appPath:globalThis.__acceptElectron.app.getAppPath(),userData:globalThis.__acceptElectron.app.getPath('userData')})");
-    assert.equal(runtime.lock, true); assert.equal(path.resolve(runtime.appPath), project); assert.equal(runtime.userData, userData);
+    const runtime = await evaluate("({versions:process.versions,version:globalThis.__acceptElectron.app.getVersion(),isPackaged:globalThis.__acceptElectron.app.isPackaged,lock:globalThis.__acceptElectron.app.hasSingleInstanceLock(),appPath:globalThis.__acceptElectron.app.getAppPath(),userData:globalThis.__acceptElectron.app.getPath('userData')})");
+    assert.equal(runtime.lock, true); assert.equal(path.resolve(runtime.appPath), expectedAppPath); assert.equal(runtime.userData, userData);
+    assert.equal(runtime.isPackaged, Boolean(packagedBinary));
     const status = await api('status'); assert.equal(status.mode, 'ACTIVE'); assert.equal(status.recoveryReady, true);
     record(label, { runtime, status });
     return { api, evaluate, renderer, stop };
