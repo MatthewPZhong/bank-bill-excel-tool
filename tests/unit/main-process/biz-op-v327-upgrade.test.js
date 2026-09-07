@@ -107,12 +107,13 @@ for (const phase of ['MIGRATING', 'WORKER_STARTED', 'LEGACY_QUIESCED', 'LEGACY_D
   test(`真实进程退出 ${phase}，重启恢复原 Task/intent，缺失已授权文件可幂等收口`, async (t) => {
     const os = require('node:os'); const { spawnSync } = require('node:child_process');
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bizop-upgrade-crash-'));
-    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
     const crash = spawnSync(process.execPath, [path.resolve('tests/fixtures/biz-op-v327-upgrade-crash.cjs'), root, phase], {
       env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8', timeout: 30000 });
     assert.equal(crash.status, 73, crash.stderr + crash.stdout);
     const original = JSON.parse(fs.readFileSync(path.join(root, 'upgrade-evidence.json')));
     const f = await createUpgradeHost(t, { root, keep: true, expectReady: phase === 'ACTIVE' });
+    // after 按注册顺序执行；先让 Host 关闭 SQLite，再移除 Windows 上仍受锁保护的目录。
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
     const recovered = await f.module.retryRecovery(); assert.equal(recovered.ready, true, JSON.stringify(recovered));
     assert.equal(pendingTask(f).task_run_id, original.taskRunId); assert.equal(pendingTask(f).status, 'succeeded');
     assert.equal(f.module.catalog.receipt(original.taskRunId).intentDigest, original.intentDigest);

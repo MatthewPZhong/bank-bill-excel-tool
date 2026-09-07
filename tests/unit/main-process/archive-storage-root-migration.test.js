@@ -29,7 +29,7 @@ function portablePathOf(filePath) {
 }
 
 function isCanonicalBlobParentOpen(filePath, openMode) {
-  return openMode === 'r'
+  return ['r', 'r+'].includes(openMode)
     && /\/blobs\/sha256\/[0-9a-f]{2}$/i.test(portablePathOf(filePath));
 }
 
@@ -319,7 +319,8 @@ test('canonical 父目录 fsync 故障注入兼容 Windows drive/extended/UNC �
   ]) {
     assert.equal(isCanonicalBlobParentOpen(candidate, 'r'), true, candidate);
   }
-  assert.equal(isCanonicalBlobParentOpen('C:\\root\\blobs\\sha256\\af', 'r+'), false);
+  assert.equal(isCanonicalBlobParentOpen('C:\\root\\blobs\\sha256\\af', 'r+'), true);
+  assert.equal(isCanonicalBlobParentOpen('C:\\root\\blobs\\sha256\\af', 'wx'), false);
   assert.equal(isCanonicalBlobParentOpen('C:\\root\\blobs\\sha256\\gg', 'r'), false);
   assert.equal(
     isCanonicalBlobParentOpen(`C:\\root\\blobs\\sha256\\${'a'.repeat(64)}`, 'r'),
@@ -348,7 +349,7 @@ test('目标 canonical 文件或父目录 fsync 失败时绝不切换 setting', 
             && normalized.includes(`${path.sep}.staging${path.sep}`)
             && path.basename(normalized).startsWith('blob-')
           );
-          // 源 canonical 不会同步父目录；只读打开且以 SHA 分片结尾的目录
+          // 源 canonical 不会同步父目录；以宿主所需访问权限打开的 SHA 分片目录
           // 只可能是目标 canonical 发布后的父目录耐久化入口。
           const isParentFsyncTarget = Boolean(targetRoot)
             && isCanonicalBlobParentOpen(portablePath, openMode);

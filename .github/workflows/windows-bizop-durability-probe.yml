@@ -6,9 +6,26 @@ on:
 permissions:
   contents: read
 jobs:
+  normal-app:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.19.0
+      - run: npm ci
+      - name: Verify normal Electron startup and full production BizOP IPC
+        run: node scripts/biz-op-v327/verify-windows-app.js
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: windows-bizop-normal-app
+          path: outputs/windows-bizop-acceptance/
+          if-no-files-found: error
   contracts:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -18,6 +35,7 @@ jobs:
       - name: Require real Windows directory durability
         run: node -e "if (require('./tests/helpers/durable-directory-tests').directoryDurabilityCapability.capability !== 'supported') process.exit(1)"
       - name: Run every BizOP contract and affected publication contracts
+        timeout-minutes: 30
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force outputs/windows-bizop-acceptance | Out-Null
@@ -32,8 +50,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $unexpectedSkips = Select-String -Path outputs/windows-bizop-acceptance/contracts.log -Pattern '# SKIP' | Where-Object { $_.Line -notmatch 'macOS 完整 case-fold 等价目标在 prepare 前被拒绝.*# SKIP' }
           if ($unexpectedSkips) { $unexpectedSkips; throw 'Windows contract unexpectedly skipped' }
-      - name: Verify normal Electron startup and full production BizOP IPC
-        run: node scripts/biz-op-v327/verify-windows-app.js
       - uses: actions/upload-artifact@v7
         if: always()
         with:

@@ -27,7 +27,7 @@ for (const stage of ['manifest', 'afterCommit']) test(`计算 ${stage} 取消保
   let armed = false; let injected = false; let taskRunId;
   fs.promises.readdir = async function (directory, ...args) {
     const result = await readDir.call(this, directory, ...args);
-    if (stage === 'manifest' && armed && !injected && String(directory).includes('/results/')) { injected = true; abort.abort(); }
+    if (stage === 'manifest' && armed && !injected && String(directory).includes(`${path.sep}results${path.sep}`)) { injected = true; abort.abort(); }
     return result;
   };
   let result;
