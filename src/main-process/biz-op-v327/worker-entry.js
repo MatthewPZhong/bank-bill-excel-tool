@@ -72,6 +72,8 @@ async function validateCandidate(input, envelope) {
   safePoint();
   const target = path.join(plan.candidateDirectory, 'part-000001.sqlite');
   await fs.promises.copyFile(plan.originalPath, target, fs.constants.COPYFILE_EXCL);
+  // 归档原件只读，copyFile 会继承权限；仅将新建的自有候选设为可落盘，不改变原件。
+  await fs.promises.chmod(target, 0o600);
   safePoint();
   const url = pathToFileURL(target);
   url.searchParams.set('mode', 'ro'); url.searchParams.set('immutable', '1');

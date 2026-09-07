@@ -189,7 +189,8 @@ function fsyncFile(fsImpl, filePath) {
 function fsyncDirectory(fsImpl, dirPath) {
   let fd;
   try {
-    fd = fsImpl.openSync(dirPath, 'r');
+    // Windows FlushFileBuffers 同样要求目录句柄具有写访问。
+    fd = fsImpl.openSync(dirPath, process.platform === 'win32' ? 'r+' : 'r');
     fsImpl.fsyncSync(fd);
   } catch (error) {
     // Windows 对目录句柄 fsync 的支持因文件系统而异；文件 fsync + 同目录

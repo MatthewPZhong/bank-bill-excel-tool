@@ -1,15 +1,40 @@
-name: Windows BizOP Durability Probe
+name: Windows BizOP Durability Acceptance
 on:
   push:
     branches: [codex/v3.2.7-windows-bizop-durability]
-    paths:
-      - scripts/biz-op-v327/probe-windows-durability.js
-      - scripts/biz-op-v327/probe-windows-durability.ps1
-      - .github/workflows/windows-bizop-durability-probe.yml
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
+  contracts:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.19.0
+      - run: npm ci
+      - name: Require real Windows directory durability
+        run: node -e "if (require('./tests/helpers/durable-directory-tests').directoryDurabilityCapability.capability !== 'supported') process.exit(1)"
+      - name: Run every BizOP contract and affected publication contracts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force outputs/windows-bizop-acceptance | Out-Null
+          $testFiles = @(Get-ChildItem tests/unit/main-process/biz-op-v327*.test.js | ForEach-Object { $_.FullName })
+          $testFiles += 'tests/unit/main-process/background-execution/recovery-contract-c2.test.js'
+          $testFiles += 'tests/unit/toolbox-output-publication.test.js'
+          node --test --test-reporter=tap @testFiles 2>&1 | Tee-Object outputs/windows-bizop-acceptance/contracts.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (Select-String -Path outputs/windows-bizop-acceptance/contracts.log -Pattern '# SKIP') { throw 'Windows contract unexpectedly skipped' }
+      - name: Verify normal Electron startup and full production BizOP IPC
+        run: node scripts/biz-op-v327/verify-windows-app.js
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: windows-bizop-acceptance
+          path: outputs/windows-bizop-acceptance/
+          if-no-files-found: error
   probe:
     runs-on: windows-latest
     timeout-minutes: 10

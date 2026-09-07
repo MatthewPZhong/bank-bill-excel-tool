@@ -1,0 +1,172 @@
+'use strict';
+
+// 使用正常应用入口、真实单实例锁、生产门禁与 renderer IPC；仅替代原生文件选择和报错弹框。
+// 所有文件、数据库和进程均由本脚本创建，运行结果不代表目标用户设备人工验收。
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { spawn } = require('node:child_process');
+const { once } = require('node:events');
+const { setTimeout: delay } = require('node:timers/promises');
+const { randomUUID, createHash } = require('node:crypto');
+const { DatabaseSync } = require('node:sqlite');
+const { writeXlsx, opRow, flowRow } = require('../../tests/helpers/biz-op-v327-xlsx');
+const { seedLegacy } = require('../../tests/helpers/biz-op-v327-upgrade');
+const { RELEASE_GATES } = require('../../src/main-process/biz-op-v327/release-gates');
+
+const project = path.resolve(__dirname, '../..');
+const output = path.join(project, 'outputs/windows-bizop-acceptance');
+const root = fs.mkdtempSync(path.join(os.tmpdir(), '业务OP 正常应用验收-'));
+const userData = path.join(root, 'userData');
+const documents = path.join(root, 'documents');
+const exportsDir = path.join(root, 'exports');
+for (const directory of [output, userData, documents, exportsDir]) fs.mkdirSync(directory, { recursive: true });
+const evidence = { schemaVersion: 1, platform: process.platform, releaseGates: RELEASE_GATES,
+  startedAt: new Date().toISOString(), steps: [], root, status: 'RUNNING' };
+const sha = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+function record(name, value) { evidence.steps.push({ name, value }); console.log(`[bizop-app] ${name}: ${JSON.stringify(value)}`); }
+function query(sql) {
+  const db = new DatabaseSync(path.join(userData, 'tool-data.sqlite'), { readOnly: true });
+  try { return JSON.parse(JSON.stringify(db.prepare(sql).all())); } finally { db.close(); }
+}
+async function until(work, label, timeout = 120000) {
+  const end = Date.now() + timeout;
+  while (Date.now() < end) { const result = await work(); if (result) return result; await delay(200); }
+  throw new Error(`${label} 超时`);
+}
+
+async function connect(url) {
+  const socket = new WebSocket(url); const pending = new Map(); const events = new Map(); let id = 0;
+  socket.addEventListener('message', ({ data }) => {
+    const value = JSON.parse(data);
+    if (value.id) { const item = pending.get(value.id); if (!item) return; pending.delete(value.id);
+      clearTimeout(item.timer); if (value.error) item.reject(new Error(JSON.stringify(value.error))); else item.resolve(value.result); }
+    else if (events.has(value.method)) { events.get(value.method)(value.params); events.delete(value.method); }
+  });
+  await new Promise((resolve, reject) => { socket.addEventListener('open', resolve, { once: true }); socket.addEventListener('error', reject, { once: true }); });
+  function send(method, params = {}) {
+    return new Promise((resolve, reject) => { const key = ++id;
+      const timer = setTimeout(() => { pending.delete(key); reject(new Error(`调试控制超时: ${method}`)); }, 120000);
+      pending.set(key, { resolve, reject, timer }); socket.send(JSON.stringify({ id: key, method, params })); });
+  }
+  return { send, event: method => new Promise(resolve => events.set(method, resolve)), close: () => socket.close() };
+}
+async function launch(label) {
+  const env = { ...process.env, APP_USER_DATA_DIR: userData, APP_DOCUMENTS_DIR: documents,
+    APP_STARTUP_METRICS_PATH: path.join(output, `${label}-startup.json`), ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' };
+  // 禁止测量/预览/打包 canary 的启动捷径进入本项验收。
+  for (const key of Object.keys(env)) if (key.startsWith('APP_CAPTURE') || key.startsWith('APP_PACKAGED_RUNTIME')
+      || ['ELECTRON_RUN_AS_NODE', 'APP_STARTUP_MEASURE_AUTO_QUIT'].includes(key)) delete env[key];
+  const child = spawn(require('electron'), ['--inspect-brk=127.0.0.1:0', '.'], { cwd: project, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  let transcript = ''; let exited = false; const stopped = once(child, 'exit').then(([code, signal]) => { exited = true; return { code, signal }; });
+  child.stdout.on('data', chunk => { transcript += chunk; }); child.stderr.on('data', chunk => { transcript += chunk; });
+  let cdp;
+  async function stop(force = false) {
+    if (!exited) {
+      if (force || !cdp) child.kill('SIGKILL');
+      else { await evaluate("setImmediate(() => globalThis.__acceptElectron.app.quit()); true").catch(() => {}); cdp.close(); }
+      await Promise.race([stopped, delay(10000).then(() => { if (!exited) child.kill('SIGKILL'); })]);
+    }
+    cdp?.close(); fs.writeFileSync(path.join(output, `${label}-process.log`), transcript);
+    return stopped;
+  }
+  async function evaluate(expression) {
+    const result = await cdp.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
+    if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
+    return result.result.value;
+  }
+  try {
+    const url = await until(() => { if (exited) throw new Error(`应用提前退出: ${transcript}`);
+      return transcript.match(/Debugger listening on (ws:\/\/\S+)/)?.[1]; }, '主进程调试端口', 15000);
+    cdp = await connect(url); await cdp.send('Debugger.enable');
+    const paused = cdp.event('Debugger.paused'); await cdp.send('Runtime.runIfWaitingForDebugger');
+    const frame = (await paused).callFrames[0].callFrameId;
+    const setup = await cdp.send('Debugger.evaluateOnCallFrame', { callFrameId: frame, returnByValue: true, expression: `
+      globalThis.__acceptElectron = require('electron');
+      globalThis.__acceptErrors = [];
+      globalThis.__acceptElectron.dialog.showErrorBox = (title, message) => globalThis.__acceptErrors.push({title,message});
+      true` });
+    if (setup.exceptionDetails) throw new Error(JSON.stringify(setup.exceptionDetails));
+    await cdp.send('Debugger.resume');
+    await until(async () => {
+      if (exited) throw new Error(`应用启动失败: ${transcript}`);
+      const errors = await evaluate('globalThis.__acceptErrors'); if (errors.length) throw new Error(JSON.stringify(errors));
+      return evaluate("globalThis.__acceptElectron.BrowserWindow.getAllWindows().some(w => w.webContents.getURL().endsWith('index.html') && !w.webContents.isLoading())");
+    }, '正常主窗口');
+    const renderer = expression => evaluate(`globalThis.__acceptElectron.BrowserWindow.getAllWindows().find(w => w.webContents.getURL().endsWith('index.html')).webContents.executeJavaScript(${JSON.stringify(expression)})`);
+    const api = (method, ...args) => renderer(`window.desktopApi.bizOpReconV327[${JSON.stringify(method)}](...${JSON.stringify(args)})`);
+    const runtime = await evaluate("({versions:process.versions,lock:globalThis.__acceptElectron.app.hasSingleInstanceLock(),appPath:globalThis.__acceptElectron.app.getAppPath(),userData:globalThis.__acceptElectron.app.getPath('userData')})");
+    assert.equal(runtime.lock, true); assert.equal(path.resolve(runtime.appPath), project); assert.equal(runtime.userData, userData);
+    const status = await api('status'); assert.equal(status.mode, 'ACTIVE'); assert.equal(status.recoveryReady, true);
+    record(label, { runtime, status });
+    return { api, evaluate, renderer, stop };
+  } catch (error) { await stop(true); throw error; }
+}
+
+async function main() {
+  const seedDb = new DatabaseSync(path.join(userData, 'tool-data.sqlite'));
+  const old = seedLegacy({ root: userData, db: seedDb }); seedDb.close();
+  const externalSha = sha(old.external); let app;
+  try {
+    app = await launch('first-activation');
+    assert.equal(fs.existsSync(old.oldFile), false);
+    assert.equal(sha(old.external), externalSha);
+    assert.equal(query('SELECT value FROM preserve_settings')[0].value, 'unchanged');
+    const activation = query('SELECT * FROM biz_op_v327_activation');
+    assert.equal(activation[0].phase, 'ACTIVE');
+    await app.stop(); app = await launch('active-restart');
+    assert.deepEqual(query('SELECT * FROM biz_op_v327_activation'), activation);
+    assert.equal(query("SELECT COUNT(*) AS n FROM archive_task_runs WHERE task_key='bizOpReconV327:maintenance:upgrade'")[0].n, 1);
+    const files = ['期初.xlsx', '期末.xlsx', '入出金.xlsx'].map(name => path.join(root, name));
+    await writeXlsx(files[0], { kind: 'OP', rowCount: 1, row: () => opRow({ amount: '0', incoming: '0', end: '100' }) });
+    await writeXlsx(files[1], { kind: 'OP', rowCount: 1, row: () => opRow({ date: '2026-09-03', begin: '120', amount: '0', incoming: '0', end: '120' }) });
+    await writeXlsx(files[2], { rowCount: 3, row: i => flowRow({ date: i === 2 ? '2026-09-03' : '2026-09-02', amount: i === 0 ? '15' : i === 1 ? '5' : '0', direction: i === 1 ? '出' : '入' }) });
+    const hashes = files.map(sha);
+    async function importFiles(selected) {
+      await app.evaluate(`globalThis.__acceptElectron.dialog.showOpenDialog = async () => ({canceled:false,filePaths:${JSON.stringify(selected)}})`);
+      const pick = await app.api('pickFiles'); assert.equal(pick.status, 'ok');
+      return app.api('importFiles', { requestId: randomUUID(), selectionRef: pick.selectionRef });
+    }
+    const imported = await importFiles(files); assert.equal(imported.status, 'ok', JSON.stringify(imported));
+    assert.equal(imported.cleanupPending, false); record('import', imported);
+    const month = (await app.api('months', {})).months[0];
+    for (const view of ['RAW', 'CHECK']) for (const kind of ['OP', 'FLOW']) {
+      const list = await app.api('list', { view, kind, operationMonth: month });
+      assert.equal(list.rows.length, 2, JSON.stringify(list)); record(`list-${kind}-${view}`, list.rows);
+    }
+    const preflight = await app.api('preflight', { startDate: '2026-09-01', endDate: '2026-09-03' }); assert.equal(preflight.status, 'ok', JSON.stringify(preflight));
+    const run = await app.api('run', { requestId: randomUUID(), selectionRef: preflight.selectionRef });
+    assert.equal(run.status, 'ok', JSON.stringify(run)); assert.equal(run.cleanupPending, false); assert.equal(run.diffRowCount, 1); record('compute', run);
+    const op = await app.api('currentInput', { kind: 'OP', dataDate: '2026-09-01' });
+    const flow = await app.api('currentInput', { kind: 'FLOW', dataDate: '2026-09-02' });
+    const kinds = ['OP_RAW', 'FLOW_RAW', 'OP_CHECK', 'FLOW_CHECK', 'RESULT_FULL', 'RESULT_DIFF'];
+    async function exportOne(kind, objectId) {
+      const target = path.join(exportsDir, `${kind}.xlsx`);
+      await app.evaluate(`globalThis.__acceptElectron.dialog.showSaveDialog = async () => ({canceled:false,filePath:${JSON.stringify(target)}})`);
+      const pick = await app.api('pickExport', { outputKind: kind, objectId }); assert.equal(pick.status, 'ok', JSON.stringify(pick));
+      const result = await app.api('exportWorkbook', kind, { requestId: randomUUID(), selectionRef: pick.selectionRef });
+      assert.equal(result.status, 'ok', JSON.stringify(result)); assert.equal(result.cleanupPending, false); assert.ok(fs.statSync(target).size > 0);
+      if (kind.endsWith('_RAW')) assert.equal(sha(target), hashes[kind === 'OP_RAW' ? 0 : 2]);
+      record(`export-${kind}`, { ...result, sha256: sha(target), bytes: fs.statSync(target).size });
+    }
+    for (const kind of kinds) await exportOne(kind, kind.startsWith('RESULT') ? run.runId : kind.startsWith('OP') ? op.objectId : flow.objectId);
+    const bad = path.join(root, '错误金额.xlsx'); await writeXlsx(bad, { kind: 'OP', rowCount: 1, row: () => opRow({ end: '999' }) });
+    const failed = await importFiles([bad]); assert.notEqual(failed.status, 'ok'); assert.ok(failed.reportRef, JSON.stringify(failed)); record('failed-import', failed);
+    await exportOne('ERRORS', failed.reportRef);
+    const preview = await app.api('deletePreview', { datasetIds: [op.objectId] }); assert.ok(preview.previewId); assert.equal(preview.runs.length, 1);
+    const deleted = await app.api('deleteData', { requestId: randomUUID(), previewId: preview.previewId, mode: 'DELETE_ASSOCIATED' });
+    assert.equal(deleted.status, 'ok', JSON.stringify(deleted)); assert.equal(deleted.cleanupPending, false); record('delete', deleted);
+    assert.equal((await app.api('list', { view: 'RESULT', operationMonth: month })).rows.length, 0);
+    assert.deepEqual(files.map(sha), hashes); assert.equal(sha(old.external), externalSha);
+    const png = await app.evaluate("globalThis.__acceptElectron.BrowserWindow.getAllWindows().find(w => w.webContents.getURL().endsWith('index.html')).webContents.capturePage().then(image => image.toPNG().toString('base64'))");
+    fs.writeFileSync(path.join(output, 'normal-window.png'), Buffer.from(png, 'base64'));
+    await app.stop(); app = await launch('after-operations-restart');
+    assert.deepEqual(query('SELECT * FROM biz_op_v327_activation'), activation);
+    assert.equal(query('SELECT COUNT(*) AS n FROM biz_op_v327_read_pins')[0].n, 0);
+    record('preserved-files-and-restart', { originalHashes: hashes, activationTaskCount: 1 });
+    evidence.status = 'PASS';
+  } finally { if (app) await app.stop(); }
+}
+main().catch(error => { evidence.status = 'FAIL'; evidence.error = error.stack; console.error(error); process.exitCode = 1; })
+  .finally(() => { evidence.completedAt = new Date().toISOString(); fs.writeFileSync(path.join(output, 'app-acceptance.json'), JSON.stringify(evidence, null, 2)); });

@@ -204,7 +204,11 @@ function createBizOpUpgrade({ catalog, payloadStore, protection, admission, prep
         lowMemoryBehavior: 'reject', timeoutMs: 0 });
     } catch (error) {
       if (['RESOURCE_BUDGET_UNAVAILABLE', 'ADMISSION_TIMEOUT'].includes(error.code)) {
-        fail('BIZOP_ACTIVATION_RESOURCE_UNAVAILABLE', '业务 OP 升级所需内存或后台资源不足，请释放资源后重新启动');
+        const resources = runtime.resourceGovernor.snapshot();
+        const availableMiB = Math.floor(resources.available.memoryBytes / (1024 ** 2));
+        const budgetMiB = Math.floor(resources.budgets.memoryBytes / (1024 ** 2));
+        fail('BIZOP_ACTIVATION_RESOURCE_UNAVAILABLE',
+          `业务 OP 升级需要 1024 MiB 后台内存预算，当前可用 ${availableMiB} MiB（预算上限 ${budgetMiB} MiB），或后台执行槽位正被占用。请关闭不需要的程序后重新启动；现有迁移进度已保留`);
       }
       throw error;
     }

@@ -20,7 +20,8 @@ function fsyncDirectory(directoryPath, options = {}) {
   const platform = options.platform || process.platform;
   let fd;
   try {
-    fd = fileSystem.openSync(directoryPath, 'r');
+    // Windows FlushFileBuffers 要求可写目录句柄；POSIX 目录仍使用只读方式打开。
+    fd = fileSystem.openSync(directoryPath, platform === 'win32' ? 'r+' : 'r');
     fileSystem.fsyncSync(fd);
     return Object.freeze({ capability: 'supported' });
   } catch (error) {
