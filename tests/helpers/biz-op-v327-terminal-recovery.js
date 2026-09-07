@@ -13,11 +13,16 @@ function terminalRecoveryTests(terminals) {
       fs.mkdirSync(path.join(root, 'app'));
       t.after(() => fs.rmSync(root, { recursive: true, force: true }));
       for (const phase of ['create', 'recover']) {
+        // Windows 的真实文件落盘与恢复观察更慢；限制测试宿主总时长，不改变产品等待合同。
+        const timeout = process.platform === 'win32' ? 120000 : 45000;
         const child = spawnSync(process.execPath, [path.resolve(__dirname, '../fixtures/biz-op-v327-terminal-recovery.cjs'),
-          root, terminal, cut, String(withHold), phase], { encoding: 'utf8', timeout: 45000,
+          root, terminal, cut, String(withHold), phase], { encoding: 'utf8', timeout,
           env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } });
         const expected = phase === 'recover' ? 0 : { retry: 73, anchor: 75, bundle: 76 }[cut];
-        assert.equal(child.status, expected, child.stderr + child.stdout);
+        const detail = JSON.stringify({ phase, timeout, errorCode: child.error?.code, signal: child.signal }) + '\n' + child.stderr + child.stdout;
+        assert.equal(child.error, undefined, detail);
+        assert.equal(child.status, expected, detail);
+        t.diagnostic(child.stdout.trim());
       }
     });
   }

@@ -20,8 +20,8 @@
 
 ## Remaining Unknowns
 
-- 完整 Windows 业务链、正常 Electron 单实例启动与普通权限验收尚待完成。
-- 生产修复方案与全面验证尚未完成；当前不宣称已修复或 Windows 可用。
+- Windows 源码正常应用全链路已经通过；完整合同回归、打包程序与普通目标设备权限验收尚待完成。
+- 当前不宣称安装包已交付或人工验收完成。
 
 ## Implementation Findings
 
@@ -47,3 +47,13 @@
 - 测试清理问题：升级崩溃测试先注册 root 删除，后注册 Host 关闭；SST 测试先注册 Host 删除，再注册 spool 关闭。Windows EBUSY 暴露 FIFO 清理顺序，后续故障注入未正常复原产生连带错误。调整为先关闭自有 SQLite/spool 再清理，SST 生产关闭实现暂不改动，待真实 Windows 再验证。
 - 第二轮本地导出/大 SST/文件身份/归档补测 76 PASS / 0 FAIL / 0 SKIP。新增相邻超大 inode 的无损区分、可序列化性、新旧身份兼容与文件变更拒绝检查。
 - b7297de3 本地完整 release-check 已完成：7287 PASS / 3 SKIP / 0 FAIL；53 个集成脚本、2488 个检查全部通过。该结果在第二轮导出凭据修复之前，不替代后续 Windows 与最终提交完整 CI。
+
+## Final Production Code Validation
+
+- 045524a6 本地完整 release-check：7289 PASS / 3 SKIP / 0 FAIL，53 个集成脚本 2488/2488 PASS。Node 25.8.0 / macOS；生成的统计文档单独保存，不混入修复。
+- 相同提交的 macOS 正常 Electron 应用 21 个步骤 PASS。使用真实首次激活与生产配置，不再使用预激活 fixture；启动时本机空闲内存已回升至约 4.25 GiB，真实资源预检通过。此前低预算失败仍保留为独立事实。
+- Windows 正常应用 job 101689257082 / run 34105439921 实际 PASS：Windows / Electron 36.9.5 / Node 22.19.0 / 3.2.8，21 个步骤、单实例锁、首次激活、四类数据目录、计算、七类导出、删除和导入中断恢复通过；原件摘要不变，恢复任务为 failed / BIZOP_NOT_COMMITTED。
+- Linux job 101689265666 / run 34105442854：294 PASS / 0 FAIL / 0 SKIP。
+- Windows 同轮完整合同触及 30 分钟 job step 上限；已输出到 128 个真实来源恢复测试通过。已输出段只有一条 succeeded / Hold=true / retry 用例失败，子进程 45 秒后 status 为 null；邻近通过用例总耗时为 20～32 秒。该轮不能记作 PASS。
+- 据此将独立 C2 规模恢复与业务/归档合同分组，原测试文件集合和断言不减少。Windows 终态恢复测试子进程上限调整为 120 秒并同步输出阶段日志、错误码和信号，便于区分仍然卡住与实际磁盘恢复成本；POSIX 原 45 秒与生产所有等待合同不变。
+- 用户已确认“直接合并修复 PR，以 3.2.8 发布”。完整 Windows 和打包门禁通过后直接合入 main；普通用户设备、安装器和在线升级人工项目继续分别记录。
