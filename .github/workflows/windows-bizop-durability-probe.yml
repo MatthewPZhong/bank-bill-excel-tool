@@ -24,6 +24,10 @@ jobs:
           $testFiles = @(Get-ChildItem tests/unit/main-process/biz-op-v327*.test.js | ForEach-Object { $_.FullName })
           $testFiles += 'tests/unit/main-process/background-execution/recovery-contract-c2.test.js'
           $testFiles += 'tests/unit/toolbox-output-publication.test.js'
+          $testFiles += 'tests/unit/main-process/archive-service.test.js'
+          $testFiles += 'tests/unit/main-process/archive-outbox-store.test.js'
+          $testFiles += 'tests/unit/main-process/archive-storage-root-migration.test.js'
+          $testFiles += 'tests/unit/main-process/toolbox-archive-integration.test.js'
           node --test --test-reporter=tap @testFiles 2>&1 | Tee-Object outputs/windows-bizop-acceptance/contracts.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (Select-String -Path outputs/windows-bizop-acceptance/contracts.log -Pattern '# SKIP') { throw 'Windows contract unexpectedly skipped' }

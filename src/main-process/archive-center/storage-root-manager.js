@@ -124,7 +124,7 @@ async function pathExists(fsImpl, targetPath) {
 async function syncDirectory(fsImpl, directory) {
   let handle;
   try {
-    handle = await fsImpl.promises.open(directory, 'r');
+    handle = await fsImpl.promises.open(directory, process.platform === 'win32' ? 'r+' : 'r');
     await handle.sync();
   } catch (error) {
     if (!error || !['EINVAL', 'EPERM', 'EACCES', 'ENOTSUP'].includes(error.code)) throw error;

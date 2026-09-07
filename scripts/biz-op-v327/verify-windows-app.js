@@ -1,6 +1,6 @@
 'use strict';
 
-// 使用正常应用入口、真实单实例锁、生产门禁与 renderer IPC；仅替代原生文件选择和报错弹框。
+// 使用正常应用入口、真实单实例锁、生产门禁与 renderer IPC；仅替代原生文件选择。
 // 所有文件、数据库和进程均由本脚本创建，运行结果不代表目标用户设备人工验收。
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -41,16 +41,19 @@ async function connect(url) {
   socket.addEventListener('message', ({ data }) => {
     const value = JSON.parse(data);
     if (value.id) { const item = pending.get(value.id); if (!item) return; pending.delete(value.id);
-      clearTimeout(item.timer); if (value.error) item.reject(new Error(JSON.stringify(value.error))); else item.resolve(value.result); }
+      clearTimeout(item.timer); if (value.error) item.reject(new Error(`${item.method}: ${JSON.stringify(value.error)}`)); else item.resolve(value.result); }
     else if (events.has(value.method)) { events.get(value.method)(value.params); events.delete(value.method); }
   });
   await new Promise((resolve, reject) => { socket.addEventListener('open', resolve, { once: true }); socket.addEventListener('error', reject, { once: true }); });
   function send(method, params = {}) {
     return new Promise((resolve, reject) => { const key = ++id;
       const timer = setTimeout(() => { pending.delete(key); reject(new Error(`调试控制超时: ${method}`)); }, 120000);
-      pending.set(key, { resolve, reject, timer }); socket.send(JSON.stringify({ id: key, method, params })); });
+      pending.set(key, { resolve, reject, timer, method }); socket.send(JSON.stringify({ id: key, method, params })); });
   }
-  return { send, event: method => new Promise(resolve => events.set(method, resolve)), close: () => socket.close() };
+  return { send, event: method => new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { events.delete(method); reject(new Error(`调试事件超时: ${method}`)); }, 15000);
+    events.set(method, value => { clearTimeout(timer); resolve(value); });
+  }), close: () => socket.close() };
 }
 async function launch(label) {
   const env = { ...process.env, APP_USER_DATA_DIR: userData, APP_DOCUMENTS_DIR: documents,
@@ -58,40 +61,44 @@ async function launch(label) {
   // 禁止测量/预览/打包 canary 的启动捷径进入本项验收。
   for (const key of Object.keys(env)) if (key.startsWith('APP_CAPTURE') || key.startsWith('APP_PACKAGED_RUNTIME')
       || ['ELECTRON_RUN_AS_NODE', 'APP_STARTUP_MEASURE_AUTO_QUIT'].includes(key)) delete env[key];
-  const child = spawn(require('electron'), ['--inspect-brk=127.0.0.1:0', '.'], { cwd: project, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(require('electron'), ['--inspect=127.0.0.1:0', '.'], { cwd: project, env, stdio: ['ignore', 'pipe', 'pipe'] });
   let transcript = ''; let exited = false; const stopped = once(child, 'exit').then(([code, signal]) => { exited = true; return { code, signal }; });
   child.stdout.on('data', chunk => { transcript += chunk; }); child.stderr.on('data', chunk => { transcript += chunk; });
   let cdp;
   async function stop(force = false) {
     if (!exited) {
       if (force || !cdp) child.kill('SIGKILL');
-      else { await evaluate("setImmediate(() => globalThis.__acceptElectron.app.quit()); true").catch(() => {}); cdp.close(); }
+      else { await evaluate("(setImmediate(() => globalThis.__acceptElectron.app.quit()), true)").catch(() => {}); cdp.close(); }
       await Promise.race([stopped, delay(10000).then(() => { if (!exited) child.kill('SIGKILL'); })]);
     }
     cdp?.close(); fs.writeFileSync(path.join(output, `${label}-process.log`), transcript);
     return stopped;
   }
   async function evaluate(expression) {
-    const result = await cdp.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
-    if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
-    return result.result.value;
+    async function direct(source) {
+      const result = await cdp.send('Runtime.evaluate', { expression: source, returnByValue: true });
+      if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
+      return result.result.value;
+    }
+    // Electron 启动上下文切换时 inspector awaitPromise 可能报告 Promise was collected。
+    // 在主进程持有结果并显式观察完成，避免调试协议替业务 Promise 决定生存期。
+    await direct(`globalThis.__acceptPending = {done:false}; globalThis.__acceptPromise = Promise.resolve().then(() => (${expression}))
+      .then(value => {globalThis.__acceptPending = {done:true,value};}, error => {globalThis.__acceptPending = {done:true,error:String(error.stack || error)};}); true`);
+    const result = await until(() => direct('globalThis.__acceptPending?.done ? globalThis.__acceptPending : null'), '主进程求值');
+    if (result.error) throw new Error(result.error);
+    return result.value;
   }
   try {
     const url = await until(() => { if (exited) throw new Error(`应用提前退出: ${transcript}`);
       return transcript.match(/Debugger listening on (ws:\/\/\S+)/)?.[1]; }, '主进程调试端口', 15000);
-    cdp = await connect(url); await cdp.send('Debugger.enable');
-    const paused = cdp.event('Debugger.paused'); await cdp.send('Runtime.runIfWaitingForDebugger');
-    const frame = (await paused).callFrames[0].callFrameId;
-    const setup = await cdp.send('Debugger.evaluateOnCallFrame', { callFrameId: frame, returnByValue: true, expression: `
-      globalThis.__acceptElectron = require('electron');
-      globalThis.__acceptErrors = [];
-      globalThis.__acceptElectron.dialog.showErrorBox = (title, message) => globalThis.__acceptErrors.push({title,message});
-      true` });
-    if (setup.exceptionDetails) throw new Error(JSON.stringify(setup.exceptionDetails));
-    await cdp.send('Debugger.resume');
+    cdp = await connect(url);
+    // 等待正常启动器完成装载再接入，不暂停应用或改变启动顺序。
+    await delay(2000);
+    if (transcript.includes('[startup failure]')) throw new Error(transcript);
+    await evaluate(`(globalThis.__acceptElectron = process.getBuiltinModule('module').createRequire(${JSON.stringify(path.join(project, 'package.json'))})('electron'), true)`);
     await until(async () => {
       if (exited) throw new Error(`应用启动失败: ${transcript}`);
-      const errors = await evaluate('globalThis.__acceptErrors'); if (errors.length) throw new Error(JSON.stringify(errors));
+      if (transcript.includes('[startup failure]')) throw new Error(transcript);
       return evaluate("globalThis.__acceptElectron.BrowserWindow.getAllWindows().some(w => w.webContents.getURL().endsWith('index.html') && !w.webContents.isLoading())");
     }, '正常主窗口');
     const renderer = expression => evaluate(`globalThis.__acceptElectron.BrowserWindow.getAllWindows().find(w => w.webContents.getURL().endsWith('index.html')).webContents.executeJavaScript(${JSON.stringify(expression)})`);
@@ -165,6 +172,21 @@ async function main() {
     assert.deepEqual(query('SELECT * FROM biz_op_v327_activation'), activation);
     assert.equal(query('SELECT COUNT(*) AS n FROM biz_op_v327_read_pins')[0].n, 0);
     record('preserved-files-and-restart', { originalHashes: hashes, activationTaskCount: 1 });
+    const headsBeforeCrash = query('SELECT * FROM biz_op_v327_input_heads ORDER BY kind,data_date');
+    const interruptedFile = path.join(root, '中断恢复.xlsx');
+    await writeXlsx(interruptedFile, { rowCount: 20000, row: () => flowRow({ date: '2026-09-04' }) });
+    const interruptedSha = sha(interruptedFile);
+    await app.evaluate(`globalThis.__acceptElectron.dialog.showOpenDialog = async () => ({canceled:false,filePaths:[${JSON.stringify(interruptedFile)}]})`);
+    const picked = await app.api('pickFiles'); assert.equal(picked.status, 'ok');
+    await app.renderer(`(() => {window.__acceptImport = window.desktopApi.bizOpReconV327.importFiles(${JSON.stringify({ requestId: randomUUID(), selectionRef: picked.selectionRef })}); return true;})()`);
+    const interruptedTask = await until(() => query("SELECT task_run_id FROM archive_task_runs WHERE task_key='bizOpReconV327:import' AND status='running'")[0], '真实导入进入运行态');
+    await app.stop(true); app = await launch('interrupted-import-restart');
+    assert.deepEqual(query('SELECT * FROM biz_op_v327_input_heads ORDER BY kind,data_date'), headsBeforeCrash);
+    const task = query(`SELECT task_run_id,status,failure_code FROM archive_task_runs WHERE task_run_id='${interruptedTask.task_run_id}'`)[0];
+    assert.ok(['failed', 'cancelled'].includes(task.status), JSON.stringify(task));
+    assert.equal(sha(interruptedFile), interruptedSha); assert.deepEqual(files.map(sha), hashes);
+    assert.equal(query('SELECT COUNT(*) AS n FROM biz_op_v327_read_pins')[0].n, 0);
+    record('interrupted-import-recovery', task);
     evidence.status = 'PASS';
   } finally { if (app) await app.stop(); }
 }
