@@ -1938,7 +1938,11 @@ function handleStartupFailure(error) {
   }
 
   // v2.1.9 SR-log-1：启动失败兜底，日志系统不一定 ready → stderr 兜底
-  try { process.stderr.write(`[startup failure] ${error && error.stack ? error.stack : String(error)}\n`); } catch (_) {}
+  try {
+    const details = Array.isArray(error && error.detailLines) ? error.detailLines.slice(0, 20) : [];
+    const lines = [`[startup failure] ${error && error.stack ? error.stack : String(error)}`, ...details];
+    process.stderr.write(`${lines.join('\n')}\n`);
+  } catch (_) {}
 
   reportStartupFailure({
     error,
@@ -23219,7 +23223,7 @@ async function prepareApplicationForQuit(options = {}) {
       backgroundExecutionRuntimeManager.resume();
     }
     throw error;
-  })().finally(() => {
+  }).finally(() => {
     if (!quitPreparationComplete) {
       if (acquiredTransitionToken !== null
           && acquiredTransitionToken === appUpdateTransitionToken) {

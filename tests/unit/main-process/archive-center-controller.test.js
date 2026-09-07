@@ -2156,6 +2156,34 @@ test('多个模块 owner 逐项 settle，失败互不短路且分别上报', asy
   assert.equal(warnings[1][1].code, 'TOOLBOX_RECOVERY_FAILED');
 });
 
+test('模块恢复聚合错误保留内部资源明细和恢复路径，启动对话框及日志均可见', async () => {
+  const { reportStartupFailure } = require('../../../src/backend/startup-failure');
+  const capacity = Object.assign(new Error('资源不足，请释放内存后重新启动'), {
+    code: 'BIZOP_RESOURCE_BUDGET_INSUFFICIENT',
+    detailLines: ['内存：需要 1024.0 MiB，本次预算 0.0 MiB'],
+    recoveryPaths: ['/tmp/recovery.json']
+  });
+  const { controller } = createHarness({ recoverInterruptedTaskOwners: [
+    { ownerName: 'Toolbox/VCC output publications', async recover() { throw capacity; } },
+    { ownerName: '第二模块', async recover() { throw Object.assign(new Error('保持保护'), { recoveryPaths: ['/tmp/recovery.json'] }); } }
+  ] });
+  let shown; let logged; let exited;
+  await assert.rejects(controller.initialize(), (error) => {
+    assert.equal(error.code, 'ARCHIVE_STARTUP_OWNER_RECOVERY_FAILED');
+    assert.equal(error.errors[0], capacity);
+    assert.deepEqual(error.recoveryPaths, ['/tmp/recovery.json']);
+    reportStartupFailure({ error, showErrorBox(_title, message) { shown = message; },
+      appendRecord(_file, payload) { logged = payload; }, exit(code) { exited = code; } });
+    return true;
+  });
+  assert.match(shown, /Toolbox\/VCC output publications.*BIZOP_RESOURCE_BUDGET_INSUFFICIENT/);
+  assert.match(shown, /需要 1024.0 MiB，本次预算 0.0 MiB/);
+  assert.match(shown, /第二模块：保持保护/);
+  assert.equal((shown.match(/\/tmp\/recovery.json/g) || []).length, 1);
+  assert.ok(logged.details.includes(capacity.detailLines[0]));
+  assert.equal(exited, 1);
+});
+
 test('post-owner flush 成功后二次 outbox inventory 读取失败仍阻断 sweep/VCC', async () => {
   let inventoryCalls = 0;
   let sweepCalls = 0;

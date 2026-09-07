@@ -56,6 +56,27 @@ test('空授权人、日期、理由、短引用以及假验收标签均不能�
   });
 });
 
+test('授权日期必须是真实日历日期且采用完整 YYYY-MM-DD 格式', async (t) => {
+  const cases = [
+    ['2026-09-06', true], ['2024-02-29', true], ['2000-02-29', true],
+    ['2026-04-30', true], ['2026-12-31', true],
+    ['2026-02-29', false], ['2026-02-31', false], ['1900-02-29', false],
+    ['2024-02-30', false], ['2026-04-31', false], ['2026-01-32', false],
+    ['2026-00-15', false], ['2026-13-01', false], ['2026-01-00', false],
+    ['2026-9-06', false], ['2026-09-6', false], ['26-09-06', false],
+    ['2026/09/06', false], ['2026-09-06T00:00:00.000Z', false],
+    [' 2026-09-06', false], ['2026-09-06 ', false], [20260906, false]
+  ];
+  for (const [approvedAt, accepted] of cases) await t.test(String(approvedAt), () => {
+    const config = structuredClone(RELEASE_GATES);
+    config.fundsAcceptance.approvedAt = approvedAt;
+    const decision = evaluateReleaseGates(config);
+    assert.equal(decision.ready, accepted);
+    assert.deepEqual(decision.missing, accepted ? [] : ['fundsAcceptance']);
+    assert.ok(buildBizOpPolicies(config).every((policy) => policy.production.enabled === accepted));
+  });
+});
+
 test('版本、总开关和原严格 PASS 路径分别保持独立，授权不可覆盖总开关', () => {
   for (const patch of [{ enabled: false }, { version: '3.2.8' }, { schemaVersion: 2 }]) {
     assert.equal(evaluateReleaseGates({ ...RELEASE_GATES, ...patch }).ready, false);

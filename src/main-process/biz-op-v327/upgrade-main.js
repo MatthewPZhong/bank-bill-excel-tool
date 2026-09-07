@@ -12,6 +12,10 @@ const { evaluateReleaseGates, RELEASE_GATES } = require('./release-gates');
 const ACTION = 'biz-op-v327:upgrade-preflight';
 const TASK = 'bizOpReconV327:maintenance:upgrade';
 const STAGES = ['MIGRATING', 'LEGACY_QUIESCED', 'LEGACY_DB_CLEARED', 'LEGACY_FILES_RECLAIMED', 'ACTIVE'];
+function activationIntent(gatesDigest) {
+  return { schemaVersion: 1, kind: 'legacy-upgrade-v1', gatesDigest,
+    tables: [...TABLES], root: 'run-data/biz-op-recon', filePattern: 'month-YYYY-MM.sqlite[|-wal|-shm]' };
+}
 function createBizOpUpgrade({ catalog, payloadStore, protection, admission, prepareOperation, prepareDispatch,
   forgetDispatch, userDataDir, readRepository, releaseGates = RELEASE_GATES }) {
   const { db, transaction, now } = catalog;
@@ -44,7 +48,8 @@ function createBizOpUpgrade({ catalog, payloadStore, protection, admission, prep
   function guardTables() { for (const [name, sql] of tableGuards()) requireGuard(name, sql, true); }
   function verifyActive() {
     const current = row();
-    if (!decision.ready || !current || current.phase !== 'ACTIVE' || current.gates_digest !== decision.digest
+    // 当前门禁必须有效；已完成升级继续核验首次授权绑定的固定清理范围，证据补充不改写历史收据。
+    if (!decision.ready || !current || current.phase !== 'ACTIVE' || current.intent_digest !== hash(activationIntent(current.gates_digest))
         || catalog.control().mode !== 'ACTIVE' || !catalog.receipt(current.task_run_id, current.intent_digest)) fail('BIZOP_ACTIVATION_RECEIPT_MISSING');
     if (tableGuards().length !== TABLES.length * 3) fail('BIZOP_LEGACY_SCHEMA_INCOMPLETE');
     requireGuard('biz_op_v327_guard_legacy_task', taskGuard, false);
@@ -64,7 +69,8 @@ function createBizOpUpgrade({ catalog, payloadStore, protection, admission, prep
   function assertOwner() {
     const current = row(); const op = catalog.operation(current.task_run_id);
     if (!op || op.action !== 'UPGRADE' || op.intent_digest !== current.intent_digest
-        || current.gates_digest !== decision.digest || hash(payloadStore.readDocument(op.intent_rel_path).value) !== current.intent_digest) fail('BIZOP_ACTIVATION_INTENT_CONFLICT');
+        || current.intent_digest !== hash(activationIntent(current.gates_digest))
+        || hash(payloadStore.readDocument(op.intent_rel_path).value) !== current.intent_digest) fail('BIZOP_ACTIVATION_INTENT_CONFLICT');
     catalog.assertTask(op); assertLegacyRecoveryClosed(userDataDir); protection.refresh(current.task_run_id);
     if (!protection.closed(current.task_run_id)) fail('BIZOP_CARRIER_CLOSURE_PENDING');
     for (const hold of readRepository.listActiveRecoveryHolds()) {
@@ -169,7 +175,7 @@ function createBizOpUpgrade({ catalog, payloadStore, protection, admission, prep
       if (enumerate(userDataDir).length) fail('BIZOP_LEGACY_FILES_REMAIN');
       protection.completeInputObligation(context.taskRunId);
       transaction(() => {
-        stage('ACTIVE', { inventory: row().inventory_digest, gates: decision.digest });
+        stage('ACTIVE', { inventory: row().inventory_digest, gates: row().gates_digest });
         catalog.commitActivation({ taskRunId: context.taskRunId, intentDigest: row().intent_digest });
       });
       await boundary('ACTIVE');
@@ -177,8 +183,7 @@ function createBizOpUpgrade({ catalog, payloadStore, protection, admission, prep
     return { status: 'ok', phase: row().phase, taskRunId: context.taskRunId };
   }
   function begin(context) {
-    const intent = { schemaVersion: 1, kind: 'legacy-upgrade-v1', gatesDigest: decision.digest,
-      tables: [...TABLES], root: 'run-data/biz-op-recon', filePattern: 'month-YYYY-MM.sqlite[|-wal|-shm]' };
+    const intent = activationIntent(decision.digest);
     transaction(() => {
       if (catalog.control().mode !== 'DISABLED' || row()) fail('BIZOP_ACTIVATION_ALREADY_STARTED');
       const op = prepareOperation({ taskRunId: context.taskRunId, operationKey: context.operationKey, actionKey: ACTION, intent });
@@ -188,6 +193,21 @@ function createBizOpUpgrade({ catalog, payloadStore, protection, admission, prep
       db.prepare('INSERT INTO biz_op_v327_activation_stages VALUES(?,?,?,?)').run(context.taskRunId, 'MIGRATING', op.intent_digest, now());
       guardTaskCreation();
     });
+  }
+  async function acquirePrecheckCapacity() {
+    const runtime = host.getRuntime();
+    if (!runtime?.resourceGovernor) fail('BIZOP_ACTIVATION_RUNTIME_REQUIRED');
+    try {
+      // 启动阶段不能等待不可满足的固定预算；已有队列时 reject 仍会排队，必须同时限定等待时间。
+      return await runtime.resourceGovernor.acquirePhaseLease({ ownerKey: `biz-op-v327:precheck:${randomUUID()}`,
+        actionKey: ACTION, operationKey: `biz-op-v327:precheck:${randomUUID()}`, resources: EXPORT_IO_RESOURCES,
+        lowMemoryBehavior: 'reject', timeoutMs: 0 });
+    } catch (error) {
+      if (['RESOURCE_BUDGET_UNAVAILABLE', 'ADMISSION_TIMEOUT'].includes(error.code)) {
+        fail('BIZOP_ACTIVATION_RESOURCE_UNAVAILABLE', '业务 OP 升级所需内存或后台资源不足，请释放资源后重新启动');
+      }
+      throw error;
+    }
   }
   async function runAttempt({ quiesceOnly = false } = {}) {
     if (!decision.ready) {
@@ -205,15 +225,14 @@ function createBizOpUpgrade({ catalog, payloadStore, protection, admission, prep
         // 平台已标记 interrupted 时保持其恢复 overlay；完成收据后由原 Coordinator
         // 执行 begin/complete recovery，不能经 Archive 的旧接口单独改回 running。
         if (!['running', 'interrupted'].includes(original.status)) fail('BIZOP_ACTIVATION_TASK_CONFLICT');
+        // 中断后的启动同样可能需要 inspect/reclaim worker，不能绕过容量预检。
+        (await acquirePrecheckCapacity()).release('upgrade-resume-precheck-complete');
         return advance({ taskRunId: original.taskRunId, taskKey: original.taskKey, moduleId: original.moduleId,
           operationKey: original.operationKey, parentRunId: original.parentRunId }, quiesceOnly);
       }
       await host.assertStartAllowed();
       if (validateSchema(db).length !== TABLES.length) fail('BIZOP_LEGACY_SCHEMA_INCOMPLETE');
-      const runtime = host.getRuntime();
-      if (!runtime?.resourceGovernor) fail('BIZOP_ACTIVATION_RUNTIME_REQUIRED');
-      const capacity = await runtime.resourceGovernor.acquirePhaseLease({ ownerKey: `biz-op-v327:precheck:${randomUUID()}`,
-        actionKey: ACTION, operationKey: `biz-op-v327:precheck:${randomUUID()}`, resources: EXPORT_IO_RESOURCES, lowMemoryBehavior: 'queue' });
+      const capacity = await acquirePrecheckCapacity();
       try {
         const disk = fs.statfsSync(userDataDir, { bigint: true });
         const mainPath = db.prepare('PRAGMA database_list').all().find((item) => item.name === 'main')?.file;

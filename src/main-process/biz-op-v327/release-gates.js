@@ -25,6 +25,7 @@ function evidence(value) {
     && typeof value.approvedBy === 'string' && value.approvedBy.trim().length > 0
     && typeof value.approvedAt === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.approvedAt)
     && Number.isFinite(Date.parse(value.approvedAt))
+    && new Date(value.approvedAt).toISOString().slice(0, 10) === value.approvedAt
     && typeof value.reason === 'string' && value.reason.trim().length >= 8;
 }
 function evaluateReleaseGates(value = RELEASE_GATES) {
