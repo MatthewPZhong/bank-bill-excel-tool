@@ -505,6 +505,7 @@ contextBridge.exposeInMainWorld('desktopApi', {
     months: (payload) => ipcRenderer.invoke('bizOpReconV327:metadata:months', payload),
     list: (payload) => ipcRenderer.invoke('bizOpReconV327:metadata:list', payload),
     currentInput: (payload) => ipcRenderer.invoke('bizOpReconV327:metadata:input', payload),
+    runCalendar: (payload) => ipcRenderer.invoke('bizOpReconV327:metadata:run-calendar', payload),
     deletePreview: (payload) => ipcRenderer.invoke('bizOpReconV327:delete:preview', payload),
     deleteData: (payload) => ipcRenderer.invoke('bizOpReconV327:delete', payload),
     pickExport: (payload) => ipcRenderer.invoke('bizOpReconV327:export:pick', payload),

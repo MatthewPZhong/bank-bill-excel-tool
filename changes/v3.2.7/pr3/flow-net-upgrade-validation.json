@@ -1,0 +1,73 @@
+{
+  "status": "PASS",
+  "generatedAt": "2026-09-07T01:00:29.492Z",
+  "baseline": {
+    "codeDirectory": "/private/tmp/bizop-flow-net-baseline-gaiOQ3",
+    "resultSchemaVersion": "bizop-result-v1-e03",
+    "computeCodeSha256": "63383555a98e3ba2e6e88b8d26e9f74a3ce395aa99416cdf215147389f802ece",
+    "fixtureSha256": "02643c4d9f914cc33168ef406a42fb558de62013fe9f8ca648ab64751400abf5"
+  },
+  "current": {
+    "codeDirectory": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool",
+    "resultSchemaVersion": "bizop-result-v2-net-flow",
+    "computeCodeSha256": "81932fe9e653bf4446340e4f5d3e7ee1ae5419fdac6b59830f0581b0d5cec60a"
+  },
+  "caseIds": [
+    "C01",
+    "C02",
+    "C03",
+    "C04",
+    "C05",
+    "C06",
+    "C07",
+    "C08",
+    "C09",
+    "C10",
+    "C11",
+    "C12",
+    "C13",
+    "C14",
+    "C15",
+    "C16",
+    "C17"
+  ],
+  "fullRows": 17,
+  "differenceRows": 12,
+  "legacyRunId": "candidate-52205438-e3d2-4252-a23a-db0aed8496a2",
+  "newRunId": "candidate-774f15ce-df8e-4393-85be-05aa3018ba95",
+  "legacyVersion": 1,
+  "newVersion": 2,
+  "checks": {
+    "baselineApproved19Columns": true,
+    "legacyAllWorkbookCellsUnchanged": true,
+    "inputHeadsUnchanged": true,
+    "noReimport": true,
+    "newRunUsesNewFingerprint": true,
+    "onlyColumn13SignChanged": true,
+    "column14And15Unchanged": true,
+    "conclusionsReasonsAndDifferenceSetUnchanged": true,
+    "newHeaderUsesMinus": true,
+    "sameNewVersionReused": true,
+    "oldSealedRowsNotesManifestAndFileHashesUnchanged": true,
+    "zeroReadPins": true
+  },
+  "exports": {
+    "RESULT_FULL": {
+      "baseline": "/private/tmp/bizop-flow-net-upgrade-evidence/bizop-flow-net-upgrade-GLSWrh/exports/baseline-RESULT_FULL.xlsx",
+      "legacyAfterUpgrade": "/private/tmp/bizop-flow-net-upgrade-evidence/bizop-flow-net-upgrade-GLSWrh/exports/current-legacy-RESULT_FULL.xlsx",
+      "current": "/private/tmp/bizop-flow-net-upgrade-evidence/bizop-flow-net-upgrade-GLSWrh/exports/current-new-RESULT_FULL.xlsx"
+    },
+    "RESULT_DIFF": {
+      "baseline": "/private/tmp/bizop-flow-net-upgrade-evidence/bizop-flow-net-upgrade-GLSWrh/exports/baseline-RESULT_DIFF.xlsx",
+      "legacyAfterUpgrade": "/private/tmp/bizop-flow-net-upgrade-evidence/bizop-flow-net-upgrade-GLSWrh/exports/current-legacy-RESULT_DIFF.xlsx",
+      "current": "/private/tmp/bizop-flow-net-upgrade-evidence/bizop-flow-net-upgrade-GLSWrh/exports/current-new-RESULT_DIFF.xlsx"
+    }
+  },
+  "fixtureDirectory": "/private/tmp/bizop-flow-net-upgrade-evidence/bizop-flow-net-upgrade-GLSWrh",
+  "elapsedCurrentMs": 1774,
+  "runtime": {
+    "node": "24.13.0",
+    "electron": null,
+    "platform": "darwin"
+  }
+}

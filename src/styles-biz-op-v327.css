@@ -1,28 +1,86 @@
+/* 主面板复用 VCC 财务 OP 的 control-row / acquiring 布局与按钮尺寸。 */
+.bizop-v327-board .pending-action-pair > button { width: 140px; min-width: 140px; flex: 0 0 140px; }
 .bizop-toolbar { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
 .bizop-secondary { margin-top: 12px; }
-.bizop-status { margin-top: 20px; min-height: 66px; padding: 14px 18px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.bizop-v327-dialog { border: 1px solid #dedfd9; border-radius: 16px; padding: 26px; width: min(1000px, calc(100vw - 80px)); max-height: calc(100vh - 70px); color: #29372f; background: #fafbf8; box-shadow: 0 24px 90px #16281930; }
-.bizop-v327-dialog::backdrop { background: #192b254d; }
-.bizop-v327-dialog h2 { margin: 0 0 20px; font-size: 22px; }
-.bizop-modal-body { max-height: calc(100vh - 270px); overflow: auto; }
-.bizop-modal-body p { color: #56635b; line-height: 1.65; }
+.bizop-status { overflow-wrap: anywhere; }
+.bizop-status[data-tone="warning"] { color: #8a5a00; border-color: rgba(178, 116, 0, 0.42); }
+
+/* 保留原生模态的焦点/取消保护，外观使用现有 VCC 对话框、表格和数据管理样式。 */
+.bizop-v327-dialog { margin: auto; box-sizing: border-box; border: 1px solid #d7dce2; box-shadow: 0 24px 90px #16281930; }
+.bizop-v327-dialog:not([open]) { display: none; }
+.bizop-v327-dialog::backdrop { background: rgba(24, 29, 37, 0.5); }
+.bizop-v327-dialog .dialog-title { margin: 0; }
+.bizop-v327-dialog:not(.bizop-manager-dialog) { font-size: 13px; }
+.bizop-v327-dialog:not(.bizop-manager-dialog) .dialog-header { padding: 0 0 12px; margin-bottom: 14px; }
+.bizop-v327-dialog:not(.bizop-manager-dialog) .dialog-title { font-size: 18px; font-weight: 600; }
+.bizop-v327-dialog:not(.bizop-manager-dialog) .bizop-modal-footer { padding: 14px 0; gap: 10px; }
+.bizop-v327-dialog:not(.bizop-manager-dialog) .bizop-modal-body { max-height: calc(100vh - 210px); }
+.bizop-v327-dialog:not(.bizop-manager-dialog) .bizop-modal-body p { margin: 0 0 12px; line-height: 1.55; }
+.bizop-modal-body { max-height: calc(100vh - 270px); }
+.bizop-modal-body p { color: #68717d; line-height: 1.65; }
 .bizop-field-row { display: flex; gap: 18px; flex-wrap: wrap; align-items: end; }
-.bizop-field { display: flex; flex-direction: column; gap: 8px; margin-bottom: 18px; flex: 1; min-width: 170px; }
-.bizop-field input, .bizop-field select { width: 100%; box-sizing: border-box; height: 42px; border: 1px solid #cdd7cc; border-radius: 8px; background: white; padding: 8px 12px; color: #29372f; font: inherit; }
-.bizop-half { max-width: 50%; }
+.bizop-field { display: flex; flex-direction: column; gap: 7px; margin-bottom: 14px; flex: 1; min-width: 0; }
+.bizop-field input, .bizop-field select { width: 100%; box-sizing: border-box; font: inherit; }
+.bizop-results-dialog { width: min(100%, 520px); }
+.bizop-results-dialog .dialog-header, .bizop-run-dialog .dialog-header, .bizop-calendar-dialog .dialog-header, .bizop-delete-dialog .dialog-header { padding-left: 0; padding-right: 0; }
+.bizop-result-fields, .bizop-results-dialog .bizop-modal-footer { display: grid; grid-template-columns: 148px minmax(0, 1fr); gap: 10px; }
+.bizop-result-fields .bizop-field { min-width: 0; }
+/* 使用 VCC 的字体和小按钮尺寸，字段与按钮栏共用列并收紧外框。 */
+.bizop-input-export-dialog { width: min(100%, 360px); }
+.bizop-input-export-fields, .bizop-input-export-dialog .bizop-modal-footer { grid-template-columns: minmax(0, 144px) minmax(0, 1fr); }
+.bizop-run-dialog { width: min(100%, 460px); }
+.bizop-run-fields, .bizop-run-dialog .bizop-modal-footer { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.bizop-run-fields .bizop-field { min-width: 0; }
+.bizop-run-fields input { cursor: pointer; }
+.bizop-run-dialog .vcc-fin-op-table { min-width: 0; }
+.bizop-run-dialog .bizop-table-scroll td:nth-child(2) { min-width: 100px; white-space: nowrap; }
+.bizop-run-dialog .bizop-table-scroll td:last-child { white-space: normal; overflow-wrap: anywhere; }
+.bizop-run-dialog .bizop-table-scroll { max-height: min(40vh, 280px); margin: 8px 0 12px; }
+.bizop-modal-actions { display: flex; align-items: center; gap: 10px; }
+.bizop-results-dialog .bizop-modal-footer, .bizop-run-dialog .bizop-modal-footer { padding-left: 0; padding-right: 0; justify-content: start; }
+.bizop-results-dialog .bizop-modal-actions, .bizop-run-dialog .bizop-modal-actions:last-child { justify-self: end; }
+.bizop-cancel-slot { display: flex; align-items: center; }
+.bizop-calendar-dialog { width: min(100%, 340px); }
+.bizop-delete-dialog { width: min(100%, 560px); }
+.bizop-v327-dialog.bizop-delete-dialog .bizop-modal-body { max-height: min(46vh, 340px); }
+.bizop-delete-dialog .bizop-table-scroll { max-height: none; margin: 12px 0; }
+.bizop-delete-dialog .vcc-fin-op-table { min-width: 0; }
+.bizop-delete-dialog .bizop-table-scroll td { min-width: 0; }
+.bizop-delete-dialog .bizop-table-scroll td:nth-child(2), .bizop-delete-dialog .bizop-delete-result-table td:nth-child(3) { min-width: 100px; white-space: nowrap; }
+.bizop-delete-dialog .bizop-delete-result-table td:first-child { min-width: 78px; white-space: nowrap; }
+.bizop-export-success-dialog { width: min(100%, 420px); }
+.bizop-calendar-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.bizop-calendar-nav button { min-width: 38px; padding: 0; }
+.bizop-calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.bizop-calendar-weekday { text-align: center; font-size: 13px; color: #68717d; padding: 6px 0; }
+.bizop-calendar-day { border: 0; border-radius: 5px; background: transparent; color: #185ba9; padding: 0; font: inherit; cursor: pointer; }
+.bizop-calendar-day:not(:disabled):hover, .bizop-calendar-day[aria-pressed="true"] { background: #e7f0ff; }
+.bizop-calendar-day:disabled { color: #68717d; }
 .bizop-feedback { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
-.bizop-feedback[data-tone="error"], .bizop-status[data-tone="error"] { color: #a23c34; }
-.bizop-status[data-tone="warning"] { color: #86611c; }
-.bizop-modal-footer { display: flex; gap: 12px; flex-wrap: wrap; justify-content: flex-end; padding-top: 14px; border-top: 1px solid #e2e8de; }
-.bizop-table-scroll { overflow: auto; max-height: 48vh; border: 1px solid #dde4d8; border-radius: 10px; margin: 16px 0; background: white; }
-.bizop-table-scroll table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.bizop-table-scroll th { text-align: left; font-weight: 600; white-space: nowrap; position: sticky; top: 0; background: #edf2e7; }
-.bizop-table-scroll td, .bizop-table-scroll th { padding: 12px 14px; border-bottom: 1px solid #e7eae4; }
-.bizop-table-scroll td { overflow-wrap: anywhere; max-width: 410px; min-width: 60px; }
-.bizop-table-scroll tr:last-child td { border-bottom: 0; }
-.bizop-table-scroll input[type="checkbox"] { width: 18px; height: 18px; accent-color: #51734c; }
+.bizop-feedback:empty { display: none; }
+.bizop-feedback[data-tone="error"] { color: #a12b20; }
+.bizop-modal-footer { display: flex; gap: 12px; flex-wrap: wrap; justify-content: flex-end; padding-top: 14px; border-top: 1px solid #e5e8ec; flex: 0 0 auto; }
+.bizop-table-scroll { max-height: 48vh; margin: 16px 0; }
+.bizop-table-scroll td { max-width: 410px; min-width: 60px; }
+.bizop-table-scroll input[type="checkbox"] { width: 18px; height: 18px; accent-color: #2269c5; }
 .bizop-table-scroll details p { max-width: 350px; }
-.bizop-v327-dialog button { min-height: 38px; white-space: nowrap; }
-.bizop-danger { background: #974b40 !important; color: white !important; }
+.bizop-v327-dialog button { min-height: 36px; white-space: nowrap; }
+.bizop-calendar-dialog .bizop-calendar-day { min-height: 32px; height: 32px; }
+.bizop-v327-dialog .vcc-fin-op-link-btn { min-height: 0; }
+.bizop-danger { background: #a12b20 !important; color: white !important; }
 .bizop-v327-dialog button:disabled, #bizOpV327ModulePanel button:disabled { opacity: .5; cursor: default; }
-@media (max-width: 760px) { .bizop-v327-dialog { width: calc(100vw - 40px); padding: 18px; } .bizop-half { max-width: 100%; } }
+
+.bizop-manager-dialog .bizop-modal-body { display: flex; max-height: none; }
+.bizop-manager-dialog .position-manager-layout { width: 100%; }
+.bizop-manager-dialog .bizop-table-scroll { max-height: none; margin: 0; }
+.bizop-manager-dialog .bizop-feedback { margin: 0 28px 12px; }
+.bizop-manager-dialog .bizop-modal-footer { justify-content: space-between; padding: 14px 28px; }
+.bizop-manager-dialog .vcc-fin-op-manager-footer-right { margin-left: auto; }
+.bizop-manager-filters { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+.bizop-manager-filters label:first-child { grid-template-columns: auto 100px; }
+.bizop-page-choice { flex-direction: row; align-items: center; margin: 0; min-width: 0; font-size: 13px; }
+.bizop-page-choice select { width: 112px; }
+@media (max-width: 760px) {
+  .bizop-v327-dialog { max-width: calc(100vw - 32px); }
+  .bizop-manager-filters { gap: 8px; }
+}

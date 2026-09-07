@@ -7,6 +7,7 @@ const { publishDurableArtifactAsync, recoverToolboxPublicationsAsync } = require
 const { freezeWorkerBatchContext } = require('../archive-center/worker-batch-context');
 const { fsyncDirectory } = require('../background-execution/durable-file');
 const { fail, hash, snapshot } = require('./contracts');
+const { acquireBizOpPhaseLease } = require('./phase-admission');
 const PHASE = Object.freeze({ cpuSlots: 1, workerThreadSlots: 1, utilityProcessSlots: 0, ioHeavySlots: 1, memoryBytes: 1073741824 });
 
 function createBizOpPublication({ userDataDir, catalog, payloadStore, protection, getArchiveService, getRuntime }) {
@@ -52,8 +53,16 @@ function createBizOpPublication({ userDataDir, catalog, payloadStore, protection
   async function io(id, kind, work, runtime = getRuntime(), signal) {
     const bound = binding(id);
     if (!bound || !closed(id) || !protection.closed(id)) fail('BIZOP_PUBLICATION_CLOSURE_PENDING');
-    const lease = await runtime.resourceGovernor.acquirePhaseLease({ ownerKey: `biz-op-v327:publisher:${id}`,
-      actionKey: bound.actionKey, operationKey: bound.batchContext.operationKey, resources: PHASE, lowMemoryBehavior: 'queue' });
+    let lease;
+    try {
+      lease = await acquireBizOpPhaseLease(runtime, { ownerKey: `biz-op-v327:publisher:${id}`,
+        actionKey: bound.actionKey, operationKey: bound.batchContext.operationKey, resources: PHASE,
+        lowMemoryBehavior: 'queue', signal });
+    } catch (error) {
+      // 只归一尚未准入 Publisher 的用户取消；已发布结果仍走原事实核验。
+      if (kind === 'publish' && signal?.aborted && error.code === 'ADMISSION_CANCELLED') fail('BIZOP_CANCELLED');
+      throw error;
+    }
     const nonce = randomUUID(); const active = { closed: false }; live.set(nonce, active);
     let started = false;
     try {
@@ -174,7 +183,7 @@ function createBizOpPublication({ userDataDir, catalog, payloadStore, protection
     const observed = fact(id); if (observed?.state !== 'COMMITTED') return false;
     const bound = binding(id);
     const files = observed.outcome.files.map((file) => ({ artifactKey: file.artifactKey, expectedSha256: file.sha256, expectedSizeBytes: file.byteSize }));
-    const lease = await runtime.resourceGovernor.acquirePhaseLease({ ownerKey: `biz-op-v327:archive-output:${id}`,
+    const lease = await acquireBizOpPhaseLease(runtime, { ownerKey: `biz-op-v327:archive-output:${id}`,
       actionKey: bound.actionKey, operationKey: bound.batchContext.operationKey, resources: PHASE, lowMemoryBehavior: 'queue' });
     let result;
     try { result = await (settleArtifacts ? settleArtifacts({ files }) : getArchiveService().settleManifestArtifacts({ batchContext: bound.batchContext, files })); }
@@ -229,7 +238,7 @@ function createBizOpPublication({ userDataDir, catalog, payloadStore, protection
     // 共享 Publisher 仍完整观察同一 journal 根；旧 Archive owner 不得接管 BizOP
     // 的 Task 或确认清理其 receipt，尤其是本模块暂时 blocked 的启动轮次。
     const pending = db.prepare('SELECT 1 FROM biz_op_v327_publications WHERE cleanup_completed=0 LIMIT 1').get();
-    const lease = pending ? await getRuntime().resourceGovernor.acquirePhaseLease({
+    const lease = pending ? await acquireBizOpPhaseLease(getRuntime(), {
       ownerKey: 'biz-op-v327:shared-publication-observation', actionKey: 'biz-op-v327:export-result-full',
       operationKey: 'biz-op-v327:shared-publication-observation', resources: PHASE, lowMemoryBehavior: 'queue'
     }) : null;

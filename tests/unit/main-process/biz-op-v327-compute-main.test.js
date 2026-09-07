@@ -10,6 +10,8 @@ const { writeXlsx, flowRow, opRow } = require('../../helpers/biz-op-v327-xlsx');
 const { openReadonly } = require('../../../src/main-process/biz-op-v327/compute-pipeline');
 const { RESULT_COLUMNS } = require('../../../src/main-process/biz-op-v327/result-schema');
 const { cases } = require('../../fixtures/biz-op-v327-acceptance-cases.json');
+const { cases: netFlowCases } = require('../../fixtures/biz-op-v327-net-flow-expected.json');
+const netFlowExpected = new Map(netFlowCases.map((item) => [item.caseId, item.expected19Values]));
 
 const { seed, compute, readResult } = require('../../helpers/biz-op-v327-compute');
 
@@ -53,7 +55,7 @@ test('真实 XLSX 到 no-file Task/worker/RESULT：负向差额、独立说明�
   assert.equal(result.fullRowCount, 1); assert.equal(result.diffRowCount, 1);
   const saved = readResult(f, result.runId);
   assert.deepEqual(RESULT_COLUMNS.map((key) => saved.rows[0][key]), ['Alpha', '主体', '客户001', '000123', '付款', 'USD',
-    '2026-09-01', '100', '2026-09-03', '120', '10', '0', '-10', '110', '-10', null, '是', '金额不平；多个OP', '金额不平；多个OP；详见核对说明:1']);
+    '2026-09-01', '100', '2026-09-03', '120', '10', '0', '10', '110', '-10', null, '是', '金额不平；多个OP', '金额不平；多个OP；详见核对说明:1']);
   assert.equal(saved.notes.filter((row) => row.record_type === 'ROW_SOURCE').length, 3);
   assert.equal(saved.manifest.rowCount, 1); assert.equal(saved.manifest.catalog.noteRowCount, saved.notes.length);
   assert.ok(saved.manifest.parts.filter((part) => part.partKind === 'NOTES').length > 1);
@@ -94,7 +96,7 @@ test('17 个批准样例经过真实原表、公共 writer 和磁盘集合计算
   assert.equal(result.status, 'ok', JSON.stringify(result));
   const saved = readResult(f, result.runId); assert.equal(saved.rows.length, 17);
   for (let i = 0; i < cases.length; i += 1) {
-    const fixture = cases[i]; const expected = [...fixture.expected19Values];
+    const fixture = cases[i]; const expected = [...netFlowExpected.get(fixture.caseId)];
     expected[3] = `${fixture.caseId}:000123`;
     if (expected[18]) expected[18] = expected[18].replace(`:${fixture.caseId}`, `:${i + 1}`);
     assert.deepEqual(RESULT_COLUMNS.map((column) => saved.rows[i][column]), expected, fixture.caseId);

@@ -1,9 +1,10 @@
 'use strict';
 
 const { schemaFor } = require('./export-cells');
+const { resultContractFor } = require('./result-schema');
 const { fail, opaque, snapshot } = require('./contracts');
 
-async function freezeExportSource({ catalog, payloadStore, getArchiveService, outputKind, objectId, columnSchemaVersion = 1 }) {
+async function freezeExportSource({ catalog, payloadStore, getArchiveService, outputKind, objectId, columnSchemaVersion }) {
   schemaFor(outputKind, columnSchemaVersion); opaque(objectId);
   let row; let source;
   if (outputKind.startsWith('RESULT_')) {
@@ -30,6 +31,13 @@ async function freezeExportSource({ catalog, payloadStore, getArchiveService, ou
       sourceManifestDigest: row.source_manifest_digest, activatedAt: row.activated_at } };
   }
   if (!row || !source) fail('BIZOP_EXPORT_SOURCE_UNAVAILABLE');
+  if (source.objectKind === 'RESULT') {
+    const manifest = payloadStore.readDocument(row.payload_manifest_rel_path, row.payload_manifest_digest).value;
+    if (manifest.objectId !== objectId || manifest.objectKind !== 'RESULT') fail('BIZOP_EXPORT_OWNER_MISMATCH');
+    const contract = resultContractFor(manifest.catalog);
+    if (columnSchemaVersion !== undefined && columnSchemaVersion !== contract.columnSchemaVersion) fail('BIZOP_EXPORT_CONTRACT_MISMATCH');
+    columnSchemaVersion = contract.columnSchemaVersion;
+  } else if (columnSchemaVersion === undefined) columnSchemaVersion = 1;
   Object.assign(source, { outputKind, columnSchemaVersion, objectId,
     manifestRelativePath: row.payload_manifest_rel_path, manifestDigest: row.payload_manifest_digest });
   if (outputKind.endsWith('_RAW')) {

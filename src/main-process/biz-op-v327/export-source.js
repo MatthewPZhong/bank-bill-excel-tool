@@ -9,7 +9,7 @@ const { openSingleSheetRichWorkbook } = require('../../backend/xlsx-rich-reader'
 const { readVerifiedManifest } = require('./payload-store');
 const { openReadonly, verifyOriginal } = require('./compute-pipeline');
 const { detectHeader, createImportAdapter, OP_COLUMNS, FLOW_COLUMNS, CELL_CONTRACT_VERSION } = require('./import-adapter');
-const { RESULT_COLUMNS, NOTE_COLUMNS, RESULT_SCHEMA_VERSION } = require('./result-schema');
+const { RESULT_COLUMNS, NOTE_COLUMNS, resultContractFor } = require('./result-schema');
 const { schemaFor, cell, rawCell, outputName } = require('./export-cells');
 const { fail, hash } = require('./contracts');
 
@@ -21,9 +21,11 @@ async function buildExportSource({ payloadStore, source, spool, tempDirectory, c
   const isResult = source.outputKind.startsWith('RESULT_');
   const isRaw = source.outputKind.endsWith('_RAW');
   const kind = source.outputKind.split('_')[0];
-  if (isResult ? source.objectKind !== 'RESULT' || manifest.catalog.resultSchemaVersion !== RESULT_SCHEMA_VERSION
+  if (isResult ? source.objectKind !== 'RESULT'
     : source.outputKind === 'ERRORS' ? source.objectKind !== 'DIAGNOSTIC'
       : source.objectKind !== 'DATASET' || manifest.catalog.kind !== kind) fail('BIZOP_EXPORT_KIND_MISMATCH');
+  const resultContract = isResult ? resultContractFor(manifest.catalog) : null;
+  if (resultContract && resultContract.columnSchemaVersion !== source.columnSchemaVersion) fail('BIZOP_EXPORT_CONTRACT_MISMATCH');
   if (source.objectKind !== 'DIAGNOSTIC' && manifest.catalog.cellContractVersion !== CELL_CONTRACT_VERSION) fail('BIZOP_EXPORT_CONTRACT_MISMATCH');
   spool.note({ record_type: 'RUN_META', field_key: 'export', value_type: 'JSON',
     value_part: JSON.stringify({ ownerId: source.objectId, outputKind: source.outputKind, manifestDigest: source.manifestDigest,
@@ -100,7 +102,8 @@ async function buildExportSource({ payloadStore, source, spool, tempDirectory, c
       const db = openReadonly(payloadStore.resolve(path.posix.join(path.posix.dirname(source.manifestRelativePath), part.name)));
       try {
         const meta = db.prepare('SELECT * FROM part_meta').get();
-        if (meta.owner_id !== source.objectId || meta.state !== 'SEALED' || meta.row_count !== part.rowCount) fail('BIZOP_EXPORT_PART_INVALID');
+        if (meta.owner_id !== source.objectId || meta.state !== 'SEALED' || meta.row_count !== part.rowCount
+            || resultContract && meta.rule_version !== resultContract.computeRuleVersion) fail('BIZOP_EXPORT_PART_INVALID');
         const notes = isResult && part.partKind === 'NOTES';
         const table = notes ? 'explanation_records' : isResult ? 'result_rows' : kind === 'OP' ? 'op_check_rows' : 'flow_check_rows';
         let n = 0;
@@ -114,7 +117,11 @@ async function buildExportSource({ payloadStore, source, spool, tempDirectory, c
             if (row.row_ordinal !== ++seen) fail('BIZOP_EXPORT_ROW_ORDER');
             if (source.outputKind === 'RESULT_DIFF' && row.is_difference !== 1) continue;
             const fields = isResult ? RESULT_COLUMNS : kind === 'OP' ? OP_COLUMNS : FLOW_COLUMNS;
-            append(fields.map((name) => row[name]), { result_row_ordinal: isResult ? row.row_ordinal : null,
+            const values = fields.map((name) => row[name]);
+            if (source.outputKind === 'RESULT_DIFF' && typeof values[18] === 'string') {
+              values[18] = values[18].replace(/；详见核对说明:(\d+)$/u, '；完整说明见导出原表，定位:$1');
+            }
+            append(values, { result_row_ordinal: isResult ? row.row_ordinal : null,
               key_bu: row.key_bu, key_account: row.key_account, key_currency: row.key_currency,
               source_dataset_id: isResult ? null : source.objectId, source_artifact_id: row.source_artifact_id ?? null,
               source_sheet: row.source_sheet ?? null, source_row: row.source_row ?? null });

@@ -5,6 +5,7 @@ const { randomUUID } = require('node:crypto');
 const { createTaskPolicyRegistry } = require('../archive-center/task-policy-registry');
 const { freezeExportSource } = require('./export-inputs');
 const { EXPORT_IO_RESOURCES } = require('./export-publication');
+const { acquireBizOpPhaseLease } = require('./phase-admission');
 const { schemaFor, evidenceIdentity } = require('./export-cells');
 const { fail, hash, count } = require('./contracts');
 
@@ -23,14 +24,26 @@ function createBizOpExportCoordinator({ userDataDir, catalog, payloadStore, prot
       const result = await taskLifecycle.runFileTask({ policy, meta: { channel: policy.channel }, filePlanResolver: () => filePlan,
         beforeStart: async (context, fileEvidence) => {
           taskRunId = context.taskRunId; bindTask(taskRunId);
+          if (signal?.aborted) return {};
           // RAW 的既有 Archive 原件核验会计算大文件摘要，单独准入后再冻结。
           // 此时共享读取 gate 和原件 INPUT hold 已保护来源，不能在无预算 Main 阶段读取。
-          const lease = outputKind.endsWith('_RAW') ? await runtime.resourceGovernor.acquirePhaseLease({
-            ownerKey: `biz-op-v327:raw-source:${taskRunId}`, actionKey, operationKey: context.operationKey,
-            resources: EXPORT_IO_RESOURCES, lowMemoryBehavior: 'queue'
-          }) : null;
-          try { frozen = await freezeExportSource({ catalog, payloadStore, getArchiveService, outputKind, objectId }); }
+          let lease;
+          try {
+            lease = outputKind.endsWith('_RAW') ? await acquireBizOpPhaseLease(runtime, {
+              ownerKey: `biz-op-v327:raw-source:${taskRunId}`, actionKey, operationKey: context.operationKey,
+              resources: EXPORT_IO_RESOURCES, lowMemoryBehavior: 'queue', signal
+            }) : null;
+          } catch (error) {
+            // 未读来源、未登记业务 intent；交由 execute 按既有 cancelled 终态结束 Task。
+            if (signal?.aborted && error.code === 'ADMISSION_CANCELLED') return {};
+            throw error;
+          }
+          try {
+            if (signal?.aborted) return {};
+            frozen = await freezeExportSource({ catalog, payloadStore, getArchiveService, outputKind, objectId });
+          }
           finally { lease?.release('raw-archive-evidence-closed'); }
+          if (signal?.aborted) return {};
           const relativePath = `operations/${taskRunId}/export-source.json`;
           const document = payloadStore.writeDocument(relativePath, frozen);
           const sourceRef = { relativePath, digest: document.digest };
@@ -68,7 +81,9 @@ function createBizOpExportCoordinator({ userDataDir, catalog, payloadStore, prot
               || evidence.intentDigest !== op.intent_digest || evidence.sourceDigest !== hash(frozen)
               || hash(evidence.identity) !== hash(expectedIdentity) || !/^[a-f0-9]{64}$/.test(evidence.expectedDigest)
               || evidence.expectedDigest !== evidence.actualDigest || evidence.dataRowCount !== count(outcome.result.rowCount)
-              || count(evidence.sheetCount) < 2 || count(evidence.byteSize) < 1 || !/^[a-f0-9]{64}$/.test(evidence.sha256)) fail('BIZOP_EXPORT_RESULT_MISMATCH');
+              || count(evidence.sheetCount) < (expectedIdentity.notesSchemaVersion === null ? 1 : 2)
+              || expectedIdentity.notesSchemaVersion === null && count(evidence.noteRowCount) !== 0
+              || count(evidence.byteSize) < 1 || !/^[a-f0-9]{64}$/.test(evidence.sha256)) fail('BIZOP_EXPORT_RESULT_MISMATCH');
           const stat = fs.lstatSync(payloadStore.resolve(`staging/${taskRunId}/${candidateRef}/output.xlsx`));
           if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.size !== evidence.byteSize
               || ['dev', 'ino', 'size', 'mtimeMs', 'ctimeMs'].some((key) => stat[key] !== evidence.fileIdentity[key])) fail('BIZOP_EXPORT_FILE_CHANGED');

@@ -1,12 +1,13 @@
 'use strict';
 const { fail, hash } = require('./contracts');
 const { EXPORT_IO_RESOURCES } = require('./export-publication');
+const { acquireBizOpPhaseLease } = require('./phase-admission');
 
 function createDeletePreservation({ catalog, payloadStore, getArchiveService, getRuntime }) {
   async function verify(closure, { runtime = getRuntime?.(), operationKey, taskRunId, admit = () => {}, committedAt } = {}) {
     if (!closure.runs.length) return;
     if (!runtime?.resourceGovernor || !getArchiveService()) fail('BIZOP_DELETE_PRESERVATION_OWNER_REQUIRED');
-    const lease = await runtime.resourceGovernor.acquirePhaseLease({ ownerKey: `biz-op-v327:delete-preservation:${taskRunId}`,
+    const lease = await acquireBizOpPhaseLease(runtime, { ownerKey: `biz-op-v327:delete-preservation:${taskRunId}`,
       actionKey: 'biz-op-v327:delete-plan', operationKey, resources: EXPORT_IO_RESOURCES, lowMemoryBehavior: 'queue' });
     const originals = new Map();
     try {

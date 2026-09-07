@@ -11,7 +11,9 @@ on:
 
 jobs:
   bizop-durability-contract:
-    if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'codex/v3.2.7-')
+    if: >-
+      github.event_name == 'pull_request' &&
+      (startsWith(github.head_ref, 'codex/v3.2.7-') || github.head_ref == 'codex/v327-enable-bizop-production')
     runs-on: ubuntu-latest
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true

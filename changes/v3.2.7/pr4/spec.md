@@ -1,5 +1,9 @@
 # PR4 六类导出、诊断读取与唯一 Publisher
 
+2026-09-07 用户确认的输出调整：`RESULT_DIFF` 仅导出差异数据页，不附“核对说明”页；零差异时仍导出一张含 19 列表头的空结果页。`RESULT_FULL` 及其他导出继续附原说明。差异导出的第 19 列保留异常摘要，但把原“详见核对说明”定位改为指向“导出原表”；完整结果和已封存说明不变。差异的输出证据 revision 为 3、notesSchemaVersion 为 null，其他输出仍使用 revision 2。Main 仅对该输出接收单工作表及零说明行，独立回读仍检查精确页名、页数和全部单元格。
+
+以下 PR4 原验收基线按此最新调整覆盖差异说明页要求；原件核验、Main 发布、Task/Archive 以及读取保护不变。
+
 PR234 评审补充：每份 RAW 原件读取及最终输出的 actual 回读分别使用候选目录下唯一的 SST 子目录。该子目录的创建与关闭清理由既有 provider 拥有；候选目录、SQLite spool 和输出 XLSX 仍由导出 owner 拥有。内存模式不预建空目录；磁盘模式成功、取消或失败均不能递归清理父目录，连续读取不同原件也不共享 SST 所有权。
 
 Goal：六类固定对象和诊断报告经同一 Task 导出；expected → writer → 独立 actual 在一次 1 GiB 原生线程租约内顺序完成，Main 小证据核对后交给既有 Publisher，发布阶段独立计费。
@@ -10,7 +14,9 @@ Constraints：不改共享恢复核心接口；不重新实现 ZIP/样式/单元
 
 Done when：六类完整列/表头/类型/页序/说明独立回读；逐类损坏拒绝；分页和零差异有证据；真实 Publisher/Task/Archive、取消及提交反馈丢失恢复链通过。Windows、目标规模和人工资金/Excel 打开仍单独验收。
 
-输出身份采用 output-schemas.json 的 evidenceVersion / revision 2 / kind / columnSchemaVersion 1。RAW 重读固定原件日切片的完整 23/28 原列；CHECK 读取固定 12/9；RESULT 读取同一已封存 run 的 19 列与 is_difference，说明不查最新 OP。文本账号固定为文本；金额复用现有词元精度分类，无损数值或精确文本，文本回退附 PRECISION_NOTE。NULL、空文本、数字 0、文本 0 和布尔均有不同编码。
+输出身份采用 output-schemas.json 的 evidenceVersion / revision / kind / columnSchemaVersion；既有列合同为 1，差异输出的证据 revision 采用下述 revision 3。RAW 重读固定原件日切片的完整 23/28 原列；CHECK 读取固定 12/9；RESULT 读取同一已封存 run 的 19 列与 is_difference，说明不查最新 OP。文本账号固定为文本；金额复用现有词元精度分类，无损数值或精确文本，文本回退附 PRECISION_NOTE。NULL、空文本、数字 0、文本 0 和布尔均有不同编码。
+
+2026-09-07 合计流水改为入减出后，RESULT_FULL / RESULT_DIFF 从封存 manifest 自动选列合同：旧结果 `bizop-result-v1-e03` 仍为 columnSchemaVersion 1；新结果 `bizop-result-v2-net-flow` 且 computeRuleVersion 为 `bizop-interval-v2-net-flow` 时为 2，第 14 列标题改为“终止期末－合计流水”。其他列的格式、证据 revision 和说明策略不变。新旧结果均直接导出封存金额，不重算或改写旧数据；未知合同、显式列版本错配及 RESULT/NOTES 分片规则错配拒绝。具体计算与兼容验收见 PR3 spec 和 flow-net-validation.md。
 
 expected 先把有类型输出行写临时 SQLite，再按固定页序增量摘要，随后 writer 逐行消费该清单；actual 重新打开最终 XLSX，用共享 rich scanner + 磁盘 SST 逐页验证全部显式单元格（含列外空 c）。为不同表头和严格类型增加 BizOP writer 适配，不改变旧工具箱导出。
 

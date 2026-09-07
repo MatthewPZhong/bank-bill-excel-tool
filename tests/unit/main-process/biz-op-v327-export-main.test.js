@@ -54,6 +54,7 @@ test('六类均接真实 Publisher；失败导入的独立诊断也能由新读�
       .get(kind.split('_')[0]).dataset_id;
     const result = await request(f, kind, id);
     assert.equal(result.status, 'ok', JSON.stringify(result)); assert.equal(f.module.catalog.task(result.taskRunId).status, 'succeeded');
+    if (kind === 'RESULT_DIFF') { assert.equal(result.sheetCount, 1); assert.equal(result.noteRowCount, 0); }
     assert.equal(f.module.publication.record(result.taskRunId).cleanup_completed, 1);
   }
   assert.ok(rawBudgetChecks >= 2); f.service.resolveVerifiedArtifact = resolve;
