@@ -612,20 +612,24 @@ test.describe('toolbox output publication', () => {
     }
   });
 
-  test('staging 文件使用 Windows 可执行 fsync 的可写句柄', () => {
+  test('staging 文件和发布目录使用宿主可执行 fsync 的句柄', () => {
     const ctx = makeContext();
     const source = writeFile(path.join(ctx.generationDir, 'source.xlsx'), 'generated');
     const target = path.join(ctx.outputDir, 'target.xlsx');
     const fsImpl = Object.create(fs);
     const stagedFdModes = new Map();
     const syncedStageModes = [];
+    const directoryFdModes = new Map();
+    const syncedDirectoryModes = [];
 
     fsImpl.openSync = (filePath, flags, ...args) => {
       const fd = fs.openSync(filePath, flags, ...args);
       if (String(filePath).endsWith('.stage')) stagedFdModes.set(fd, flags);
+      if (fs.fstatSync(fd).isDirectory()) directoryFdModes.set(fd, flags);
       return fd;
     };
     fsImpl.fsyncSync = (fd) => {
+      if (directoryFdModes.has(fd)) syncedDirectoryModes.push(directoryFdModes.get(fd));
       const mode = stagedFdModes.get(fd);
       if (mode) {
         syncedStageModes.push(mode);
@@ -639,6 +643,7 @@ test.describe('toolbox output publication', () => {
     };
     fsImpl.closeSync = (fd) => {
       stagedFdModes.delete(fd);
+      directoryFdModes.delete(fd);
       return fs.closeSync(fd);
     };
 
@@ -653,6 +658,8 @@ test.describe('toolbox output publication', () => {
     const result = publishPreparedToolboxPublication(prepared);
 
     assert.deepEqual(syncedStageModes, ['r+']);
+    assert.ok(syncedDirectoryModes.length > 0);
+    assert.ok(syncedDirectoryModes.every((mode) => mode === (process.platform === 'win32' ? 'r+' : 'r')));
     assert.equal(result.committed, true);
     assert.equal(fs.readFileSync(target, 'utf8'), 'generated');
   });

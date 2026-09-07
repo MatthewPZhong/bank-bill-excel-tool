@@ -176,6 +176,21 @@ jobs:
         shell: pwsh
         run: ./scripts/run-windows-packaged-background-canary.ps1 -DistDirectory ./dist
 
+      - name: Verify packaged normal startup and complete BizOP workflow
+        shell: pwsh
+        run: |
+          $env:BIZOP_ACCEPTANCE_APP = (Resolve-Path 'dist/win-unpacked/清结算小助手.exe').Path
+          node scripts/biz-op-v327/verify-windows-app.js
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload packaged BizOP acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-bizop-packaged-acceptance
+          path: outputs/windows-bizop-packaged-acceptance/
+          if-no-files-found: warn
+
       - name: Stage updater-compatible assets
         run: npm run stage:update-artifacts
 

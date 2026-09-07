@@ -107,10 +107,10 @@ class ArchiveOutboxStore {
   _syncRootDirectory() {
     let handle = null;
     try {
-      handle = this.fs.openSync(this.rootDir, 'r');
+      handle = this.fs.openSync(this.rootDir, process.platform === 'win32' ? 'r+' : 'r');
       this.fs.fsyncSync(handle);
     } catch (_error) {
-      // Windows may not allow fsync on directory handles; the file itself is already durable.
+      // 文件已经落盘；保持既有目录同步失败处理，Windows 正常路径使用可写句柄真正同步。
     } finally {
       if (handle !== null) {
         try { this.fs.closeSync(handle); } catch (_closeError) {}

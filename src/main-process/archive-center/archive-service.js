@@ -476,7 +476,7 @@ class ArchiveService {
   async _syncDirectory(directory) {
     let handle;
     try {
-      handle = await this.fs.promises.open(directory, 'r');
+      handle = await this.fs.promises.open(directory, process.platform === 'win32' ? 'r+' : 'r');
       await handle.sync();
     } catch (error) {
       if (!error || !['EINVAL', 'EPERM', 'EACCES', 'ENOTSUP'].includes(error.code)) throw error;

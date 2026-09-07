@@ -73,7 +73,7 @@ async function syncStagedFile(fsModule, filePath) {
 async function syncDirectory(fsModule, directory) {
   let handle;
   try {
-    handle = await fsModule.promises.open(directory, 'r');
+    handle = await fsModule.promises.open(directory, process.platform === 'win32' ? 'r+' : 'r');
     await handle.sync();
   } catch (error) {
     if (!error || !['EINVAL', 'EPERM', 'EACCES', 'ENOTSUP'].includes(error.code)) throw error;

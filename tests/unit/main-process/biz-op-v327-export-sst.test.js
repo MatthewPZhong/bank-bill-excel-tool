@@ -74,21 +74,23 @@ for (const mode of ['cancel', 'failure']) {
     const source = await sourceFor(f, 'OP_RAW', id);
     const directory = fs.mkdtempSync(path.join(f.root, 'raw-candidate-'));
     const filename = path.join(directory, 'export-spool.sqlite');
-    const spool = createExportSpool({ filename, source }); t.after(() => spool.close());
-    const removed = observeSstCleanup(t, directory, 'sst-raw-');
-    const cancelToken = { cancelled: false }; let sampled = false;
-    const code = mode === 'cancel' ? 'BIZOP_CANCELLED' : 'INJECTED_RAW_SCAN_FAILURE';
-    await assert.rejects(buildExportSource({ payloadStore: f.module.payloadStore, source,
-      spool: { ...spool, data(...args) {
-        spool.data(...args); sampled = true; cancelToken.cancelled = mode === 'cancel';
-        throw Object.assign(new Error(code), { code });
-      } }, tempDirectory: directory, cancelToken, safePoint() {} }), { code });
-    assert.equal(sampled, true); assert.equal(removed.length, 1);
-    assert.equal(fs.existsSync(removed[0]), false); assert.ok(fs.existsSync(filename));
-    spool.note({ record_type: 'RUN_META', value_part: '关闭后 spool 仍可写入' });
-    const expected = await spool.finish(); assert.equal(expected.dataRowCount, 1);
-    assert.ok(expected.noteRowCount >= 3);
-    assert.equal(fs.existsSync(source.originals[0].filePath), true);
+    const spool = createExportSpool({ filename, source });
+    try {
+      const removed = observeSstCleanup(t, directory, 'sst-raw-');
+      const cancelToken = { cancelled: false }; let sampled = false;
+      const code = mode === 'cancel' ? 'BIZOP_CANCELLED' : 'INJECTED_RAW_SCAN_FAILURE';
+      await assert.rejects(buildExportSource({ payloadStore: f.module.payloadStore, source,
+        spool: { ...spool, data(...args) {
+          spool.data(...args); sampled = true; cancelToken.cancelled = mode === 'cancel';
+          throw Object.assign(new Error(code), { code });
+        } }, tempDirectory: directory, cancelToken, safePoint() {} }), { code });
+      assert.equal(sampled, true); assert.equal(removed.length, 1);
+      assert.equal(fs.existsSync(removed[0]), false); assert.ok(fs.existsSync(filename));
+      spool.note({ record_type: 'RUN_META', value_part: '关闭后 spool 仍可写入' });
+      const expected = await spool.finish(); assert.equal(expected.dataRowCount, 1);
+      assert.ok(expected.noteRowCount >= 3);
+      assert.equal(fs.existsSync(source.originals[0].filePath), true);
+    } finally { spool.close(); }
   });
 }
 
@@ -114,26 +116,28 @@ for (const mode of ['success', 'cancel', 'mismatch']) {
     const source = await sourceFor(f, 'OP_CHECK', id);
     const directory = fs.mkdtempSync(path.join(f.root, 'actual-candidate-'));
     const filename = path.join(directory, 'export-spool.sqlite'); const filePath = path.join(directory, 'output.xlsx');
-    const spool = createExportSpool({ filename, source }); t.after(() => spool.close());
-    const cancelToken = { cancelled: false };
-    await buildExportSource({ payloadStore: f.module.payloadStore, source, spool, tempDirectory: directory, cancelToken, safePoint() {} });
-    const expected = await spool.finish();
-    await writeExportWorkbook({ filePath, spool, expected, safePoint() {} });
-    await addLargeSharedStrings(filePath, expected, mode === 'mismatch');
-    const removed = observeSstCleanup(t, directory, 'sst-actual-');
-    let observedDisk = false;
-    const validate = () => validateExportWorkbook({ filePath, source, expected, tempDirectory: directory, cancelToken, safePoint() {
-      const child = fs.readdirSync(directory).find((name) => name.startsWith('sst-actual-'));
-      if (child) {
-        observedDisk = fs.statSync(path.join(directory, child, 'sst.bin')).size > 0;
-        if (mode === 'cancel') { cancelToken.cancelled = true; throw Object.assign(new Error('取消'), { code: 'BIZOP_CANCELLED' }); }
-      }
-    } });
-    if (mode === 'success') assert.equal((await validate()).actualDigest, expected.expectedDigest);
-    else await assert.rejects(validate(), { code: mode === 'cancel' ? 'BIZOP_CANCELLED' : 'BIZOP_OUTPUT_EVIDENCE_MISMATCH' });
-    assert.equal(observedDisk, true); assert.equal(removed.length, 1);
-    assert.equal(fs.existsSync(removed[0]), false);
-    assert.ok(fs.statSync(filePath).size > 0); assert.ok(fs.statSync(filename).size > 0);
-    spool.db.exec('CREATE TABLE surviving_spool(value TEXT)');
+    const spool = createExportSpool({ filename, source });
+    try {
+      const cancelToken = { cancelled: false };
+      await buildExportSource({ payloadStore: f.module.payloadStore, source, spool, tempDirectory: directory, cancelToken, safePoint() {} });
+      const expected = await spool.finish();
+      await writeExportWorkbook({ filePath, spool, expected, safePoint() {} });
+      await addLargeSharedStrings(filePath, expected, mode === 'mismatch');
+      const removed = observeSstCleanup(t, directory, 'sst-actual-');
+      let observedDisk = false;
+      const validate = () => validateExportWorkbook({ filePath, source, expected, tempDirectory: directory, cancelToken, safePoint() {
+        const child = fs.readdirSync(directory).find((name) => name.startsWith('sst-actual-'));
+        if (child) {
+          observedDisk = fs.statSync(path.join(directory, child, 'sst.bin')).size > 0;
+          if (mode === 'cancel') { cancelToken.cancelled = true; throw Object.assign(new Error('取消'), { code: 'BIZOP_CANCELLED' }); }
+        }
+      } });
+      if (mode === 'success') assert.equal((await validate()).actualDigest, expected.expectedDigest);
+      else await assert.rejects(validate(), { code: mode === 'cancel' ? 'BIZOP_CANCELLED' : 'BIZOP_OUTPUT_EVIDENCE_MISMATCH' });
+      assert.equal(observedDisk, true); assert.equal(removed.length, 1);
+      assert.equal(fs.existsSync(removed[0]), false);
+      assert.ok(fs.statSync(filePath).size > 0); assert.ok(fs.statSync(filename).size > 0);
+      spool.db.exec('CREATE TABLE surviving_spool(value TEXT)');
+    } finally { spool.close(); }
   });
 }

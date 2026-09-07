@@ -206,7 +206,8 @@ function createBizOpPayloadStore({ userDataDir }) {
     for (const part of parts) {
       if (!/^part-\d{6}\.(sqlite|jsonl)$/.test(part.name)) fail('BIZOP_PART_INVALID');
       const actual = await fileHash(`${staging}/${part.name}`);
-      const handle = await fs.promises.open(resolve(`${staging}/${part.name}`), 'r');
+      // 分片由本任务生成；可写句柄用于 Windows 真正落盘，不改变封存内容。
+      const handle = await fs.promises.open(resolve(`${staging}/${part.name}`), fs.constants.O_RDWR | (fs.constants.O_NOFOLLOW || 0));
       try { await handle.sync(); } finally { await handle.close(); }
       const sealedFileIdentity = fileIdentity(await fs.promises.stat(resolve(`${staging}/${part.name}`)));
       measured.push({ name: part.name, ...actual, rowCount: count(part.rowCount), sealedFileIdentity,

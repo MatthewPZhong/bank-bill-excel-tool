@@ -102,7 +102,8 @@ async function inspectFiles(userDataDir, names, quiescent, safePoint) {
   return files;
 }
 async function syncDirectory(root) {
-  const handle = await fs.promises.open(root, fs.constants.O_RDONLY);
+  // Windows 目录落盘需要写访问；删除完成后仍必须等待真实屏障成功才确认回收。
+  const handle = await fs.promises.open(root, process.platform === 'win32' ? fs.constants.O_RDWR : fs.constants.O_RDONLY);
   try { await handle.sync(); } finally { await handle.close(); }
 }
 async function reclaimFiles(userDataDir, files, safePoint) {

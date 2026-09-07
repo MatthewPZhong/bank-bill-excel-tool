@@ -1,0 +1,90 @@
+name: Windows BizOP Durability Acceptance
+on:
+  push:
+    branches: [codex/v3.2.7-windows-bizop-durability]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  normal-app:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.19.0
+      - run: npm ci
+      - name: Verify normal Electron startup and full production BizOP IPC
+        run: node scripts/biz-op-v327/verify-windows-app.js
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: windows-bizop-normal-app
+          path: outputs/windows-bizop-acceptance/
+          if-no-files-found: error
+  contracts:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [bizop, recovery, archive]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.19.0
+      - run: npm ci
+      - name: Require real Windows directory durability
+        run: node -e "if (require('./tests/helpers/durable-directory-tests').directoryDurabilityCapability.capability !== 'supported') process.exit(1)"
+      - name: Run complete ${{ matrix.group }} contracts
+        timeout-minutes: 40
+        shell: pwsh
+        env:
+          CONTRACT_GROUP: ${{ matrix.group }}
+        run: |
+          New-Item -ItemType Directory -Force outputs/windows-bizop-acceptance | Out-Null
+          switch ($env:CONTRACT_GROUP) {
+            'bizop' { $testFiles = @(Get-ChildItem tests/unit/main-process/biz-op-v327*.test.js | Where-Object { $_.Name -ne 'biz-op-v327.test.js' } | ForEach-Object { $_.FullName }) }
+            'recovery' { $testFiles = @('tests/unit/main-process/biz-op-v327.test.js', 'tests/unit/main-process/background-execution/recovery-contract-c2.test.js') }
+            'archive' {
+              $testFiles = @('tests/unit/toolbox-output-publication.test.js',
+                'tests/unit/main-process/archive-service.test.js',
+                'tests/unit/main-process/archive-outbox-store.test.js',
+                'tests/unit/main-process/archive-storage-root-migration.test.js',
+                'tests/unit/main-process/toolbox-archive-integration.test.js')
+            }
+            default { throw 'Unknown contract group' }
+          }
+          if (!$testFiles.Count) { throw 'Contract group is empty' }
+          $testFiles | Set-Content outputs/windows-bizop-acceptance/test-files.txt
+          node --test --test-reporter=tap @testFiles 2>&1 | Tee-Object outputs/windows-bizop-acceptance/contracts.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $unexpectedSkips = Select-String -Path outputs/windows-bizop-acceptance/contracts.log -Pattern '^\s*(?:not )?ok\s+\d+.*\s# SKIP(?:\s|$)' | Where-Object { $_.Line -notmatch 'macOS 完整 case-fold 等价目标在 prepare 前被拒绝.*# SKIP' }
+          if ($unexpectedSkips) { $unexpectedSkips; throw 'Windows contract unexpectedly skipped' }
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: windows-bizop-contracts-${{ matrix.group }}
+          path: outputs/windows-bizop-acceptance/
+          if-no-files-found: error
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.19.0
+      - name: Probe Node file and directory flush access
+        run: node scripts/biz-op-v327/probe-windows-durability.js
+      - name: Probe native Windows directory handle access
+        shell: pwsh
+        run: ./scripts/biz-op-v327/probe-windows-durability.ps1
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: windows-durability-probe
+          path: outputs/windows-durability-probe/
+          if-no-files-found: error

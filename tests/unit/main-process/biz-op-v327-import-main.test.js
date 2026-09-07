@@ -47,7 +47,7 @@ for (const stage of ['afterWorker', 'manifest', 'afterCommit']) test(`Main ${sta
   const readDir = fs.promises.readdir;
   fs.promises.readdir = async function (directory, ...args) {
     const result = await readDir.call(this, directory, ...args);
-    if (stage === 'manifest' && armed && !injected && String(directory).includes('/inputs/')) { injected = true; abort.abort(); }
+    if (stage === 'manifest' && armed && !injected && String(directory).includes(`${path.sep}inputs${path.sep}`)) { injected = true; abort.abort(); }
     return result;
   };
   let result;

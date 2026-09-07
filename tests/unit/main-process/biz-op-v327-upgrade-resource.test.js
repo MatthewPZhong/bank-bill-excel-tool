@@ -81,7 +81,8 @@ test('启动预算小于 1 GiB 时明确拒绝，Task、迁移 intent 和旧数�
   const { oldFile } = seedLegacy(f);
   const before = preservedState(f, oldFile);
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    await assert.rejects(boundedAttempt(f), { code: 'BIZOP_ACTIVATION_RESOURCE_UNAVAILABLE' });
+    await assert.rejects(boundedAttempt(f), { code: 'BIZOP_ACTIVATION_RESOURCE_UNAVAILABLE',
+      message: /需要 1024 MiB.*当前可用 512 MiB（预算上限 512 MiB）/ });
     assertEmptyGovernor(governor);
     assertNotStarted(f, oldFile, before);
   }

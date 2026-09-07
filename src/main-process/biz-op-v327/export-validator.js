@@ -8,6 +8,7 @@ const { canonicalizeDecimal } = require('../financial-decimal');
 const { createEvidence } = require('./export-spool');
 const { NULL_CELL, evidenceIdentity } = require('./export-cells');
 const { fail, hash } = require('./contracts');
+const { exportFileIdentity } = require('./export-file-identity');
 
 function actualCell(cell) {
   if (!cell) return NULL_CELL;
@@ -20,19 +21,18 @@ function actualCell(cell) {
 async function hashClosedFile(filePath, safePoint = () => {}) {
   const handle = await fs.promises.open(filePath, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
   try {
-    const before = await handle.stat();
-    if (!before.isFile() || before.nlink !== 1 || before.size < 1) fail('BIZOP_OUTPUT_FILE_INVALID');
+    const before = await handle.stat({ bigint: true });
+    if (!before.isFile() || before.nlink !== 1n || before.size < 1n || before.size > BigInt(Number.MAX_SAFE_INTEGER)) fail('BIZOP_OUTPUT_FILE_INVALID');
     const digest = createHash('sha256');
     for await (const bytes of handle.createReadStream({ autoClose: false })) { safePoint(); digest.update(bytes); }
-    const after = await handle.stat(); const current = await fs.promises.lstat(filePath);
-    if (['dev', 'ino', 'size', 'mtimeMs', 'ctimeMs'].some((key) => before[key] !== after[key] || before[key] !== current[key])) fail('BIZOP_OUTPUT_FILE_CHANGED');
-    return { sha256: digest.digest('hex'), byteSize: before.size,
-      fileIdentity: Object.fromEntries(['dev', 'ino', 'size', 'mtimeMs', 'ctimeMs'].map((key) => [key, before[key]])) };
+    const after = await handle.stat({ bigint: true }); const current = await fs.promises.lstat(filePath, { bigint: true });
+    if (['dev', 'ino', 'size', 'mtimeNs', 'ctimeNs'].some((key) => before[key] !== after[key] || before[key] !== current[key])) fail('BIZOP_OUTPUT_FILE_CHANGED');
+    return { sha256: digest.digest('hex'), byteSize: Number(before.size), fileIdentity: exportFileIdentity(before) };
   } finally { await handle.close(); }
 }
 async function validateExportWorkbook({ filePath, source, expected, tempDirectory, cancelToken, safePoint = () => {} }) {
   if (hash(expected.identity) !== hash(evidenceIdentity({ ...source, maxRowsPerSheet: expected.identity.maxRowsPerSheet }))) fail('BIZOP_OUTPUT_IDENTITY_INVALID');
-  const before = await fs.promises.lstat(filePath);
+  const before = await fs.promises.lstat(filePath, { bigint: true });
   if (!before.isFile() || before.isSymbolicLink()) fail('BIZOP_OUTPUT_FILE_INVALID');
   // 实际输出回读与原件读取分别拥有 SST 子目录，均不拥有候选目录和 spool。
   const workbook = await openRichWorkbook(filePath, { sstTempRoot: path.join(tempDirectory, `sst-actual-${randomUUID()}`),
@@ -64,7 +64,7 @@ async function validateExportWorkbook({ filePath, source, expected, tempDirector
   const actualDigest = evidence.finish();
   if (actualDigest !== expected.expectedDigest || dataRowCount !== expected.dataRowCount || noteRowCount !== expected.noteRowCount) fail('BIZOP_OUTPUT_EVIDENCE_MISMATCH');
   const measured = await hashClosedFile(filePath, safePoint);
-  if (['dev', 'ino', 'size', 'mtimeMs', 'ctimeMs'].some((key) => before[key] !== measured.fileIdentity[key])) fail('BIZOP_OUTPUT_FILE_CHANGED');
+  if (hash(exportFileIdentity(before)) !== hash(measured.fileIdentity)) fail('BIZOP_OUTPUT_FILE_CHANGED');
   return { actualDigest, ...measured, sheetCount: expected.pages.length, dataRowCount, noteRowCount };
 }
 module.exports = { actualCell, hashClosedFile, validateExportWorkbook };

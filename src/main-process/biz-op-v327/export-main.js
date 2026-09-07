@@ -8,6 +8,7 @@ const { EXPORT_IO_RESOURCES } = require('./export-publication');
 const { acquireBizOpPhaseLease } = require('./phase-admission');
 const { schemaFor, evidenceIdentity } = require('./export-cells');
 const { fail, hash, count } = require('./contracts');
+const { matchesExportFileIdentity } = require('./export-file-identity');
 
 function createBizOpExportCoordinator({ userDataDir, catalog, payloadStore, protection, admission, sources,
   publication, getArchiveService, prepareOperation, prepareDispatch, forgetDispatch }) {
@@ -84,9 +85,10 @@ function createBizOpExportCoordinator({ userDataDir, catalog, payloadStore, prot
               || count(evidence.sheetCount) < (expectedIdentity.notesSchemaVersion === null ? 1 : 2)
               || expectedIdentity.notesSchemaVersion === null && count(evidence.noteRowCount) !== 0
               || count(evidence.byteSize) < 1 || !/^[a-f0-9]{64}$/.test(evidence.sha256)) fail('BIZOP_EXPORT_RESULT_MISMATCH');
-          const stat = fs.lstatSync(payloadStore.resolve(`staging/${taskRunId}/${candidateRef}/output.xlsx`));
-          if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.size !== evidence.byteSize
-              || ['dev', 'ino', 'size', 'mtimeMs', 'ctimeMs'].some((key) => stat[key] !== evidence.fileIdentity[key])) fail('BIZOP_EXPORT_FILE_CHANGED');
+          const candidatePath = payloadStore.resolve(`staging/${taskRunId}/${candidateRef}/output.xlsx`);
+          const stat = fs.lstatSync(candidatePath, { bigint: true });
+          if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1n || stat.size !== BigInt(evidence.byteSize)
+              || !matchesExportFileIdentity(candidatePath, evidence.fileIdentity)) fail('BIZOP_EXPORT_FILE_CHANGED');
           let published;
           try { published = await publication.publish(taskRunId, evidence, runtime, onPublishProgress, signal); }
           catch (error) {
