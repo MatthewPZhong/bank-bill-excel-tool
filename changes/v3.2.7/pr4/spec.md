@@ -14,7 +14,9 @@ Constraints：不改共享恢复核心接口；不重新实现 ZIP/样式/单元
 
 Done when：六类完整列/表头/类型/页序/说明独立回读；逐类损坏拒绝；分页和零差异有证据；真实 Publisher/Task/Archive、取消及提交反馈丢失恢复链通过。Windows、目标规模和人工资金/Excel 打开仍单独验收。
 
-输出身份采用 output-schemas.json 的 evidenceVersion / revision 2 / kind / columnSchemaVersion 1。RAW 重读固定原件日切片的完整 23/28 原列；CHECK 读取固定 12/9；RESULT 读取同一已封存 run 的 19 列与 is_difference，说明不查最新 OP。文本账号固定为文本；金额复用现有词元精度分类，无损数值或精确文本，文本回退附 PRECISION_NOTE。NULL、空文本、数字 0、文本 0 和布尔均有不同编码。
+输出身份采用 output-schemas.json 的 evidenceVersion / revision / kind / columnSchemaVersion；既有列合同为 1，差异输出的证据 revision 采用下述 revision 3。RAW 重读固定原件日切片的完整 23/28 原列；CHECK 读取固定 12/9；RESULT 读取同一已封存 run 的 19 列与 is_difference，说明不查最新 OP。文本账号固定为文本；金额复用现有词元精度分类，无损数值或精确文本，文本回退附 PRECISION_NOTE。NULL、空文本、数字 0、文本 0 和布尔均有不同编码。
+
+2026-09-07 合计流水改为入减出后，RESULT_FULL / RESULT_DIFF 从封存 manifest 自动选列合同：旧结果 `bizop-result-v1-e03` 仍为 columnSchemaVersion 1；新结果 `bizop-result-v2-net-flow` 且 computeRuleVersion 为 `bizop-interval-v2-net-flow` 时为 2，第 14 列标题改为“终止期末－合计流水”。其他列的格式、证据 revision 和说明策略不变。新旧结果均直接导出封存金额，不重算或改写旧数据；未知合同、显式列版本错配及 RESULT/NOTES 分片规则错配拒绝。具体计算与兼容验收见 PR3 spec 和 flow-net-validation.md。
 
 expected 先把有类型输出行写临时 SQLite，再按固定页序增量摘要，随后 writer 逐行消费该清单；actual 重新打开最终 XLSX，用共享 rich scanner + 磁盘 SST 逐页验证全部显式单元格（含列外空 c）。为不同表头和严格类型增加 BizOP writer 适配，不改变旧工具箱导出。
 

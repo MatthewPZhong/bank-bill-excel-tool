@@ -51,8 +51,8 @@ function finishGroup(group, { startDate, endDate, rowOrdinal, locator = String(r
   const chosen = sourceRole === 'NONE' ? null : group[sourceRole];
   const startBalance = start.count && !start.balanceConflict ? start.balance : null;
   const endBalance = end.count && !end.balanceConflict ? end.balance : null;
-  const reverseFlow = subtract(flow.outgoing, flow.incoming);
-  const reverseEnd = endBalance === null ? null : add(endBalance, reverseFlow);
+  const totalFlow = subtract(flow.incoming, flow.outgoing);
+  const reverseEnd = endBalance === null ? null : subtract(endBalance, totalFlow);
   const difference = startBalance === null || reverseEnd === null ? null : subtract(startBalance, reverseEnd);
   const amountStatus = difference === null ? '无法计算' : compare(absoluteDecimal(difference), '0.01') > 0 ? '金额不平' : '金额相等';
   const multiple = start.count >= 2 || end.count >= 2;
@@ -67,7 +67,7 @@ function finishGroup(group, { startDate, endDate, rowOrdinal, locator = String(r
   const described = (field) => chosen?.descriptions[field].count === 1 ? chosen.descriptions[field].value : null;
   const presence = Boolean(start.count) === Boolean(end.count) ? null : `${startDate}${start.count ? '有' : '无'}，${endDate}${end.count ? '有' : '无'}`;
   const values = [chosen?.bu || flow.bu, described('entity'), described('customer_no'), group.key[1], described('account_type'),
-    group.key[2], startDate, startBalance, endDate, endBalance, flow.incoming, flow.outgoing, reverseFlow, reverseEnd, difference,
+    group.key[2], startDate, startBalance, endDate, endBalance, flow.incoming, flow.outgoing, totalFlow, reverseEnd, difference,
     presence, multiple ? '是' : '否', [amountStatus, ...labels.filter((label) => label !== '金额不平')].join('；'),
     labels.length ? `${labels.join('；')}；详见核对说明:${locator}` : null];
   const reasonBits = REASONS.reduce((bits, [code], index) => bits | (condition[code] ? 1 << index : 0), 0);

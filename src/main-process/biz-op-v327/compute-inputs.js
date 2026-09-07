@@ -3,6 +3,7 @@
 const { fail, hash, snapshot, count } = require('./contracts');
 const { CELL_CONTRACT_VERSION, RULE_VERSION } = require('./import-adapter');
 const { compareText } = require('./compute-group');
+const { COMPUTE_RULE_VERSION } = require('./result-schema');
 
 function intervalInputs(startDate, endDate) {
   function timestamp(value) {
@@ -19,8 +20,9 @@ function intervalInputs(startDate, endDate) {
   return required;
 }
 function fingerprintOf({ startDate, endDate, inputs, bus, originalDigests }) {
-  return hash({ fingerprintVersion: 1, startDate, endDate, bus, inputs,
-    originalsDigest: hash(originalDigests), cellContractVersion: CELL_CONTRACT_VERSION, ruleVersion: RULE_VERSION });
+  return hash({ fingerprintVersion: 2, startDate, endDate, bus, inputs,
+    originalsDigest: hash(originalDigests), cellContractVersion: CELL_CONTRACT_VERSION, ruleVersion: RULE_VERSION,
+    computeRuleVersion: COMPUTE_RULE_VERSION });
 }
 function collectInputs({ catalog, payloadStore, startDate, endDate }) {
   const required = intervalInputs(startDate, endDate);
@@ -86,7 +88,7 @@ async function persistInputs({ frozen, payloadStore, getArchiveService, taskRunI
   }
   const root = { schemaVersion: 1, taskRunId, startDate: frozen.startDate, endDate: frozen.endDate,
     inputs: frozen.inputs, bus: frozen.bus, originalDigests: frozen.originalDigests, inputFingerprint: frozen.inputFingerprint,
-    cellContractVersion: CELL_CONTRACT_VERSION, ruleVersion: RULE_VERSION, references };
+    cellContractVersion: CELL_CONTRACT_VERSION, ruleVersion: RULE_VERSION, computeRuleVersion: COMPUTE_RULE_VERSION, references };
   const relativePath = `operations/${taskRunId}/compute-inputs.json`;
   const written = payloadStore.writeDocument(relativePath, root);
   return { relativePath, digest: written.digest };

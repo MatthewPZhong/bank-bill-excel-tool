@@ -868,6 +868,20 @@
       "evidenceSchemaRevision": 3
     }
   },
+  "outputKindVersions": {
+    "RESULT_FULL": {
+      "2": {
+        "baseColumnSchemaVersion": 1,
+        "columnOverrides": [{ "index": 14, "header": "终止期末－合计流水" }]
+      }
+    },
+    "RESULT_DIFF": {
+      "2": {
+        "baseColumnSchemaVersion": 1,
+        "columnOverrides": [{ "index": 14, "header": "终止期末－合计流水" }]
+      }
+    }
+  },
   "notesSchema": {
     "name": "BIZOP_NOTES_V1",
     "version": 1,
