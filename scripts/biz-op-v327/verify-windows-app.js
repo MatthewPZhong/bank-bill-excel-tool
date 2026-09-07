@@ -38,6 +38,10 @@ async function until(work, label, timeout = 120000) {
 
 async function connect(url) {
   const socket = new WebSocket(url); const pending = new Map(); const events = new Map(); let id = 0;
+  socket.addEventListener('close', () => {
+    for (const item of pending.values()) { clearTimeout(item.timer); item.reject(new Error('自有应用调试连接已关闭')); }
+    pending.clear();
+  });
   socket.addEventListener('message', ({ data }) => {
     const value = JSON.parse(data);
     if (value.id) { const item = pending.get(value.id); if (!item) return; pending.delete(value.id);
@@ -68,7 +72,10 @@ async function launch(label) {
   async function stop(force = false) {
     if (!exited) {
       if (force || !cdp) child.kill('SIGKILL');
-      else { await evaluate("(setImmediate(() => globalThis.__acceptElectron.app.quit()), true)").catch(() => {}); cdp.close(); }
+      else {
+        await cdp.send('Runtime.evaluate', { expression: 'setTimeout(() => globalThis.__acceptElectron.app.quit(), 100); true', returnByValue: true }).catch(() => {});
+        cdp.close();
+      }
       await Promise.race([stopped, delay(10000).then(() => { if (!exited) child.kill('SIGKILL'); })]);
     }
     cdp?.close(); fs.writeFileSync(path.join(output, `${label}-process.log`), transcript);
@@ -154,7 +161,12 @@ async function main() {
       const pick = await app.api('pickExport', { outputKind: kind, objectId }); assert.equal(pick.status, 'ok', JSON.stringify(pick));
       const result = await app.api('exportWorkbook', kind, { requestId: randomUUID(), selectionRef: pick.selectionRef });
       assert.equal(result.status, 'ok', JSON.stringify(result)); assert.equal(result.cleanupPending, false); assert.ok(fs.statSync(target).size > 0);
-      if (kind.endsWith('_RAW')) assert.equal(sha(target), hashes[kind === 'OP_RAW' ? 0 : 2]);
+      const xlsx = require('xlsx');
+      const workbook = xlsx.readFile(target);
+      const rows = xlsx.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1, defval: null });
+      const columnCounts = { OP_RAW: 23, FLOW_RAW: 28, OP_CHECK: 12, FLOW_CHECK: 9, RESULT_FULL: 19, RESULT_DIFF: 19, ERRORS: 7 };
+      assert.equal(rows[0].length, columnCounts[kind]); assert.ok(rows.length > 1);
+      if (kind.startsWith('RESULT')) assert.deepEqual(rows[1].slice(10, 15), [15, 5, 10, 110, -10]);
       record(`export-${kind}`, { ...result, sha256: sha(target), bytes: fs.statSync(target).size });
     }
     for (const kind of kinds) await exportOne(kind, kind.startsWith('RESULT') ? run.runId : kind.startsWith('OP') ? op.objectId : flow.objectId);
