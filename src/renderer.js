@@ -1,4 +1,5 @@
 let bizOpV327Controller = null;
+let darkModeController = null;
 const DEFAULT_BACKGROUND_SETTINGS = Object.freeze({
   colorHex: '#efe8da',
   imageDataUrl: '',
@@ -1930,6 +1931,19 @@ function pickBackgroundColorFromClientPoint(clientX, clientY) {
 }
 
 function buildBackgroundStyle(backgroundSettings) {
+  const original = buildLightBackgroundStyle(backgroundSettings);
+  if (document.documentElement.dataset.theme !== 'dark') return original;
+  return {
+    ...original,
+    backgroundColor: '#111419',
+    backgroundImage: `linear-gradient(rgba(11,15,22,.72), rgba(11,15,22,.72)), ${original.backgroundImage}`,
+    backgroundSize: `auto, ${original.backgroundSize}`,
+    backgroundPosition: `center, ${original.backgroundPosition}`,
+    backgroundRepeat: `no-repeat, ${original.backgroundRepeat}`
+  };
+}
+
+function buildLightBackgroundStyle(backgroundSettings) {
   const normalized = cloneBackgroundSettings(backgroundSettings);
   const baseColor = hexToRgb(normalized.colorHex);
 
@@ -1983,8 +1997,23 @@ function applyBackgroundSettings(backgroundSettings) {
   elements.appShell.style.backgroundSize = style.backgroundSize;
   elements.appShell.style.backgroundPosition = style.backgroundPosition;
   elements.appShell.style.backgroundRepeat = style.backgroundRepeat;
-  document.body.style.background = rgbToCss(mixColor(normalized.colorHex, '#ffffff', 0.74));
+  document.body.style.background = document.documentElement.dataset.theme === 'dark'
+    ? '#111419' : rgbToCss(mixColor(normalized.colorHex, '#ffffff', 0.74));
   updateBackgroundControls(normalized);
+}
+
+function getDarkModeController() {
+  if (!darkModeController && window.DarkModeUI) {
+    darkModeController = window.DarkModeUI.createController({
+      api: window.desktopApi?.settings,
+      document,
+      onChange: () => applyBackgroundSettings(
+        state.isBackgroundPaletteOpen ? state.backgroundDraft : state.backgroundSettings
+      )
+    });
+    window.addEventListener('unload', () => darkModeController.dispose(), { once: true });
+  }
+  return darkModeController;
 }
 
 function openBackgroundPalette() {
@@ -2681,6 +2710,10 @@ function createAppUpdateSettingsDialog(options = {}) {
     </div>
     <div class="app-settings-layout">
       <nav class="app-settings-nav" aria-label="设置导航">
+        <button class="app-settings-nav-item" type="button" data-tab="appearance" aria-controls="appearancePane" aria-current="false">
+          <span class="app-settings-nav-icon" aria-hidden="true">☾</span>
+          <span>外观</span>
+        </button>
         <button class="app-settings-nav-item is-active" type="button" data-tab="update" aria-controls="appUpdatePane" aria-current="page">
           <span class="app-settings-nav-icon" aria-hidden="true">↻</span>
           <span>版本管理</span>
@@ -2693,6 +2726,7 @@ function createAppUpdateSettingsDialog(options = {}) {
       </nav>
 
       <div class="app-settings-main">
+        <section id="appearancePane" class="app-settings-pane appearance-pane" data-pane="appearance" aria-label="外观设置" hidden></section>
         <section id="appUpdatePane" class="app-settings-pane app-update-pane" data-pane="update" aria-labelledby="appUpdatePaneHeading">
           <div class="app-update-pane-scroll">
             <h3 id="appUpdatePaneHeading" class="app-settings-pane-heading">版本管理</h3>
@@ -2831,6 +2865,9 @@ function createAppUpdateSettingsDialog(options = {}) {
   `;
 
   const updatePane = dialog.querySelector('[data-pane="update"]');
+  const appearancePane = dialog.querySelector('[data-pane="appearance"]');
+  const themeController = getDarkModeController();
+  const appearanceView = themeController ? window.DarkModeUI.mountSettings(appearancePane, themeController) : null;
   const archivePane = dialog.querySelector('[data-pane="archive"]');
   const archiveBrowser = dialog.querySelector('[data-archive-view="browser"]');
   const archiveSettingsView = dialog.querySelector('[data-archive-view="settings"]');
@@ -3507,13 +3544,14 @@ function createAppUpdateSettingsDialog(options = {}) {
 
   function setSettingsTab(tab) {
     const wasArchive = archiveState.activeTab === 'archive';
-    archiveState.activeTab = tab === 'archive' ? 'archive' : 'update';
+    archiveState.activeTab = ['archive', 'appearance'].includes(tab) ? tab : 'update';
     dialog.querySelectorAll('[data-tab]').forEach((button) => {
       const active = button.dataset.tab === archiveState.activeTab;
       button.classList.toggle('is-active', active);
       button.setAttribute('aria-current', active ? 'page' : 'false');
     });
     updatePane.hidden = archiveState.activeTab !== 'update';
+    appearancePane.hidden = archiveState.activeTab !== 'appearance';
     archivePane.hidden = archiveState.activeTab !== 'archive';
     updateFooter.hidden = archiveState.activeTab !== 'update';
     if (archiveState.activeTab !== 'archive') {
@@ -3694,7 +3732,9 @@ function createAppUpdateSettingsDialog(options = {}) {
   }
 
   function closeSettingsDialog() {
+    if (themeController?.getSnapshot().saving) return false;
     if (archiveState.settingsLoading || archiveState.retentionSaving) return false;
+    appearanceView?.destroy();
     archiveState.destroyed = true;
     archiveState.retentionIntentToken += 1;
     archiveState.retentionPendingIntent = null;
@@ -8393,6 +8433,7 @@ async function handleBizOpReconExport() {
 
 async function initialize() {
   markRendererStartup(RENDERER_STARTUP_MARKS.initializeStart);
+  getDarkModeController();
   markRendererStartup(RENDERER_STARTUP_MARKS.getInfoStart);
   const info = await window.desktopApi.app.getInfo();
   markRendererStartup(RENDERER_STARTUP_MARKS.getInfoDone);
@@ -8401,6 +8442,7 @@ async function initialize() {
 }
 
 async function applyFullInfo(info) {
+  getDarkModeController()?.accept(info);
   // v2.1.13 E2：注入平台标识，CSS 以 body[data-platform="win32"] 限定 Win 端 Noto Sans SC 字体（仅 Win 生效）
   document.body.dataset.platform = (window.desktopApi && window.desktopApi.platform) || '';
   applyUiStyle();

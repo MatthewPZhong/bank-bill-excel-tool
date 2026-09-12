@@ -1,0 +1,319 @@
+{
+  "baseline": "2ba9ef14fe972363b604955636cff0c9ac53700f",
+  "releaseBefore": "e1c31139dcb7eeca3edbc12dd293e4419b56950f",
+  "sourceBranch": "codex/v3.2.9-night-mode",
+  "sourceCommit": "654ba97a24223d671d61b0737974d1b6942ceb16",
+  "integrationBranch": "release/v3.2.9",
+  "includedSourceCommits": {
+    "bizOpAutoReport": "3efe5c78e8cde10d89db90d4509d883b28d61f4f",
+    "archiveModuleRetention": "a2bd6e817a08190e82caecfe4f248054b25cae6e"
+  },
+  "commandNodeVersion": "v25.8.0",
+  "files": [
+    {
+      "path": "index.html",
+      "sha256": "fd528ab0bb9f57b0c4aa8796200cf62160bdd954fc5ca3c0210184a7e4f505fd"
+    },
+    {
+      "path": "scripts/fixtures/dark-mode-preview.js",
+      "sha256": "583307d7b3315779e07077eef693bc3e03368dca6480d11dfc9c6d97320d2ab4"
+    },
+    {
+      "path": "scripts/integration/archive-biz-op-auto-report-retention.js",
+      "sha256": "45abf28b5433ab636d23713ca2e600118c7693835a5f77014faa03c653a9cb82"
+    },
+    {
+      "path": "scripts/integration/archive-center-module-retention.js",
+      "sha256": "cdd3d023c7bfc9280800885fba7b2f09405dfdbd7bfca9c2db8df292e419a8b7"
+    },
+    {
+      "path": "scripts/integration/biz-op-auto-error-report.js",
+      "sha256": "981d3c3cf4ff5e85cb587bf562d9edd91b2034d391e21064afc9645729db3b86"
+    },
+    {
+      "path": "scripts/integration/dark-mode-schedule-settings.js",
+      "sha256": "75b6269665e2cae861009a8b153495374802ae24157f64273eecb6ac3284238f"
+    },
+    {
+      "path": "scripts/render-dark-mode-preview.js",
+      "sha256": "7776268901c5b11631c8450db47bfe264656353e5c8cb006d74a183b8d0354a4"
+    },
+    {
+      "path": "scripts/verify-app-settings-layout.js",
+      "sha256": "1ce028344e99ea2ade1d60656a94f4a77c9df54e60c01c5bfe2abc24628ed380"
+    },
+    {
+      "path": "scripts/verify-biz-op-v329-renderer-dom.js",
+      "sha256": "d1e0a50293f7785113f0323ccde2ea503b709359cc02135c7ec33099b9becb09"
+    },
+    {
+      "path": "scripts/verify-dark-mode-live.js",
+      "sha256": "e413f2046c249850b0533343848c84f6ef8c5a1ddf7e9634a5d3f7577708c644"
+    },
+    {
+      "path": "scripts/verify-dark-mode-ui.js",
+      "sha256": "f741510cc8b864d767d6b2448c6b75012fde4c6e129dd1550fb8a34fb78dc401"
+    },
+    {
+      "path": "src/backend/database.js",
+      "sha256": "e61dcc2f0371d2e37d6c352bf42c3385b11cff20f23f3443a449709a5e6ff472"
+    },
+    {
+      "path": "src/backend/database/settings-repository.js",
+      "sha256": "bf2a2605ac0f03c7a0a4ed65544884a9c0a4df27301f3679a4797185a69468fc"
+    },
+    {
+      "path": "src/main-process/archive-center/archive-service.js",
+      "sha256": "0ce0fc8f95fb561c096fd5e8b7045df937af0dba44a03476c35401449c4ab6ff"
+    },
+    {
+      "path": "src/main-process/archive-center/controller.js",
+      "sha256": "a67da1ec8446d24e45d27fdd3f859d6d669caeccab9788b9bae0103d5feebe80"
+    },
+    {
+      "path": "src/main-process/archive-center/retention-policy.js",
+      "sha256": "c425e08f6fc6c74242f08a9e3d7d28505d486d6d547173931f88bbbdbe9bfd1d"
+    },
+    {
+      "path": "src/main-process/archive-center/task-policy-registry.js",
+      "sha256": "f8b995f0d31c51767ef577e2e243dfcbdafab2faf416fb73649c35dbb50b27ec"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/auto-error-report.js",
+      "sha256": "ff46064c63e718f4e3a0c957ac94cb6a9091b2fa380a8beb6ac21ca5954ee8a6"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/export-main.js",
+      "sha256": "9c4400c8b94bb7ce64090e841ce81188d7e7873b43c20a7d32054d2586700bc2"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/import-main.js",
+      "sha256": "600e87d7b8095b65d7b9769476c1ce02f476d632692d1016ecd60e91cd8bf2c1"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/ipc.js",
+      "sha256": "9ce608db0263b633d314857248b2426921193c1a9a084efe04e6ae67147937a4"
+    },
+    {
+      "path": "src/main-process/dark-mode-scheduler.js",
+      "sha256": "c48107d1421136d2f3b7dace1374ca1d5b19b85c00beac0b9edefc572683f083"
+    },
+    {
+      "path": "src/main.js",
+      "sha256": "67ffd49d6b660ae6448205578e41c46b9f214dd52f5afe4ff444ffcc6b0ced2c"
+    },
+    {
+      "path": "src/preload.js",
+      "sha256": "7d66e30f9eb5a20b983d10270281446f4891d31b1e68aa80388e2099436bd0ca"
+    },
+    {
+      "path": "src/renderer-biz-op-v327.js",
+      "sha256": "e498d420df0c5e4657dc4b73a293a37855fba9e3656c94520f4fe952f3861314"
+    },
+    {
+      "path": "src/renderer-dark-mode.js",
+      "sha256": "e094a1a32e89a498f50e7904c292e8a21577da4044e32f97df0c932f676486ff"
+    },
+    {
+      "path": "src/renderer-dialogs.js",
+      "sha256": "ececd7914f5e729628481fd45ab43827cfe3ccd81d99af198a74bbc4b3ea5eda"
+    },
+    {
+      "path": "src/renderer-pending.js",
+      "sha256": "4c7b8e8189119e22380a17b769543ba9a1db0ab172000e62b2c9fec3041159d9"
+    },
+    {
+      "path": "src/renderer.js",
+      "sha256": "5fd945caa68fdb3d5104bdbf1bd14f598442a2994854ef6df532a55605fcf634"
+    },
+    {
+      "path": "src/shared/dark-mode-schedule.js",
+      "sha256": "3c06d66e5d3f8946cabe7b48fac620bf276cddd6dba4cdcc1952cf37527a25d5"
+    },
+    {
+      "path": "src/styles-biz-op-v327.css",
+      "sha256": "ff53411ad76cc44d1183751732ad54f5b58833891fb984f015de80b6e76ac127"
+    },
+    {
+      "path": "src/styles-dark-mode-settings.css",
+      "sha256": "6c471e6ab6204bf6e048e2e0e6f03da1cf942cbdef6472548f506f68718a914e"
+    },
+    {
+      "path": "src/styles-dark-mode.css",
+      "sha256": "b45a9dead620b079da2b0024ef7f4a61b3a03f9a645477237b2335c2c02bee1b"
+    },
+    {
+      "path": "src/styles-gemini-extra.css",
+      "sha256": "4d991eee6dc60815b12473d63ac6c9952e88f9cc5f803e9e61aaca652fefb342"
+    },
+    {
+      "path": "src/styles-gemini.css",
+      "sha256": "5ec94ce0d82d61cca953c44ea3dd782179de6c6f3de858907a064520e88789bf"
+    },
+    {
+      "path": "src/styles-vcc-financial-op.css",
+      "sha256": "2af63c8ac21fdad16c9f9916f58dca84f0f7f815ba93c6fd271e2c0a0a0a294b"
+    },
+    {
+      "path": "tests/unit/archive-center-ui-contract.test.js",
+      "sha256": "ff8338e586783c703ec4e540d6af9def5a0ffb13b36bcebf82132b1c739c478e"
+    },
+    {
+      "path": "tests/unit/dark-mode-renderer.test.js",
+      "sha256": "c8c8098775dce9dadb7d69bdcbc37f2697579bf1c143a77593585422d13a30d2"
+    },
+    {
+      "path": "tests/unit/main-process/archive-center-controller.test.js",
+      "sha256": "222a3209d909dec1b78ea6899147263a857610e41eaa4b72153d33f91b3e0622"
+    },
+    {
+      "path": "tests/unit/main-process/archive-retention-policy.test.js",
+      "sha256": "56db8a50dcbe13a3b4851f465e40d3311b5c4719320de144efeb1cc235712f58"
+    },
+    {
+      "path": "tests/unit/main-process/archive-service.test.js",
+      "sha256": "c344fef7bf7e14f47e929987ec9dbf60e95157b29629639870b8ca6b10e625d7"
+    },
+    {
+      "path": "tests/unit/main-process/archive-task-policy-registry.test.js",
+      "sha256": "9097d401cad555c726fb14ffbb14fcebba05bdc23e5804a1b98a609c450321c3"
+    },
+    {
+      "path": "tests/unit/main-process/biz-op-v327-ipc.test.js",
+      "sha256": "6b873a90560ad5356afe8df2f0ad07d5d4c4519764aa33f45f932291a382d9f2"
+    },
+    {
+      "path": "tests/unit/main-process/biz-op-v327.test.js",
+      "sha256": "bbc22ebcd87c0356a12613493ae3287bb9a99b449245abc376f1f8276ca6c96c"
+    },
+    {
+      "path": "tests/unit/main-process/biz-op-v329-auto-report.test.js",
+      "sha256": "9f8c8f9d20173f2bd1b08642d031c9cf579ee1fe8977b59824ab1d05d77956f2"
+    },
+    {
+      "path": "tests/unit/main-process/biz-op-v329-ipc.test.js",
+      "sha256": "f7d7669dea427ff73d468b36e8ad8409230ba23708bd2cf5d324009fe90dc094"
+    },
+    {
+      "path": "tests/unit/main-process/biz-op-v329-renderer.test.js",
+      "sha256": "d986d5b4ab3b19aa252157ed381258af9bb82808ad49f071373e5b483b7cfc3a"
+    },
+    {
+      "path": "tests/unit/main-process/dark-mode-scheduler.test.js",
+      "sha256": "2a9aa4ad689816bd78ffdcc48b452faf31e1eb473ef0f92278854b934b3ed52b"
+    },
+    {
+      "path": "tests/unit/renderer-vcc-financial-op.test.js",
+      "sha256": "2adc55bdd543db619f0724d4a20ab491fb5f8f8edeca8781a46e7b6d486c08ff"
+    },
+    {
+      "path": "tests/unit/shared/dark-mode-schedule.test.js",
+      "sha256": "704e53104aa7f61c00fa3464b35eeabf3b691d57e3ddd75f2c465e3e162e9e46"
+    }
+  ],
+  "verification": {
+    "finishedAt": "2026-09-12T15:03:06.276971+08:00",
+    "completeReleaseCheckPassed": false,
+    "releaseCheck": {
+      "startedAt": "2026-09-12T14:44:37.155596+08:00",
+      "finishedAt": "2026-09-12T14:55:48.836342+08:00",
+      "exitCode": 1,
+      "inputFileCount": 1399,
+      "unit": {
+        "files": 474,
+        "passed": 7381,
+        "total": 7384,
+        "failed": 0,
+        "skipped": 3
+      },
+      "integration": {
+        "scripts": 57,
+        "passedScripts": 56,
+        "failedScripts": [
+          "toolbox-large-split-multi-sheet"
+        ],
+        "passed": 2520,
+        "total": 2522
+      }
+    },
+    "toolboxMemoryRecheck": {
+      "command": "node scripts/integration/toolbox-large-split-multi-sheet.js",
+      "startedAt": "2026-09-12T14:57:19.560210+08:00",
+      "finishedAt": "2026-09-12T15:01:41.682249+08:00",
+      "exitCode": 0,
+      "configuration": "原默认50万/150万行，未改变RSS门槛或重复采样规则",
+      "passed": 31,
+      "total": 31,
+      "tier1SamplesMiB": [
+        85,
+        88,
+        90,
+        94,
+        89
+      ],
+      "tier2SamplesMiB": [
+        139,
+        131,
+        142,
+        136,
+        135
+      ],
+      "originalFailurePreserved": true
+    },
+    "darkModeUi": {
+      "configurations": 15,
+      "themeScenarios": 30,
+      "assertions": 2580,
+      "passed": true,
+      "sourceHashComparisons": 300
+    },
+    "settingsDom": {
+      "configurations": 6,
+      "combinedScenarios": 4,
+      "combinedAssertions": 73,
+      "passed": true
+    },
+    "bizOpDom": {
+      "controllerCases": 20,
+      "visualChecks": 14,
+      "passed": true,
+      "minimumContrast": {
+        "light": 5.269,
+        "dark": 7.839
+      }
+    },
+    "frozenGateInputFiles": 1399,
+    "gateInputsUnchanged": true,
+    "uiVerificationScriptsVerifiedSeparately": [
+      "scripts/verify-app-settings-layout.js",
+      "scripts/verify-biz-op-v329-renderer-dom.js"
+    ],
+    "realMainColdStartup": "BLOCKED in source evidence; not rerun for integration",
+    "windowsManualAcceptance": false,
+    "localLogDirectory": "logs/verification/release-v3.2.9/night-mode-integration",
+    "logSha256": {
+      "release-check.log": "332c00d75b72ea62c0bbc3550e2606b28b114adb8d147b0a27a5008c5a7fea52",
+      "release-check-result.json": "2b8977e5efbd93cf47e63b03d98821e7e48be18a815ab336de3388977b6ae333",
+      "release-check-inputs.json": "2b6b9cc2e959de35b80401a2b35c87b0b5e11ae462c33b9980ef3a96c673064c",
+      "toolbox-memory-recheck.log": "f478b6d0c14059b801142d08bea46ad35b2ebeda76e8dc3795e1ce39807488e0",
+      "toolbox-memory-recheck-result.json": "540825b835ccee52f2fce0741f1d567e8df328c85b00ee387ee362e50c5c4ec9",
+      "dark-mode-ui-zoom-1.log": "cd066f1e3a0660d6a0de1aa997b4cd480bf3531aa72ee64d045dfbf6a6594f1c",
+      "dark-mode-ui-zoom-1.25.log": "126762326172526cc3bc63685ba9e33ee1885dd9689864b10cdafb2201a16940",
+      "dark-mode-ui-zoom-1.5.log": "789a73be9847d61fed7081d8fda30b00e3b7f8569fd879928aac3fa1350acdc4",
+      "dark-mode-ui/ui-verification.json": "cd251835d6dc307b366fe59e5332bfbbe75f8389f741a77872e5bd7458098572",
+      "dark-mode-ui/ui-verification-webzoom-125.json": "87d2cf8b0a214e1659efaf8206e70d37f87d3f6671795c3cba4b97cd20f95358",
+      "dark-mode-ui/ui-verification-webzoom-150.json": "3b22744289bac3e1ee0a14a09dcdfb9d3be322913c557ad6e8266aaa96ad2113",
+      "app-settings/verification.log": "24ed8840946c862524f80d48d07fee053c9206f33bf8aaa2d4aa792e2d568bf5",
+      "app-settings/app-settings-verification.json": "7e19cfa1819f1dec29bd1c9b0b3e55655e7ba9293fc3243698172964ecb182fa",
+      "bizop-dom/verify.log": "b4ca6297e6931304f5022d3ea632735ddc846e8bf8bac9f93e17380575aa5eac",
+      "bizop-dom/verification.json": "7dbee16b314839de8bdf1f10f2a9d126ed906e6082b9f27b0101bdddfedc45f1"
+    }
+  },
+  "notes": [
+    "本次仅本地分支集成；首次完整门禁失败，不以专项复跑成功改写整轮结论。",
+    "工具箱原默认规模与RSS门槛均未修改；原始失败仍需在正式冻结前闭环。",
+    "runner失败时按原规则保留上轮56脚本成功清单；本次实际发现57脚本，完整输出单独保存。",
+    "源分支生成HTML保持原交付字节；35处空白行尾空格保留，其余本轮diff --check通过。",
+    "源分支GUI历史证据保留，本轮使用独立输出目录。"
+  ]
+}

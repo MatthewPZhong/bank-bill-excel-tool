@@ -161,7 +161,9 @@ test.describe('v3.1.13 设置与存档中心静态契约', () => {
     assert.match(renderer, /data-pane="archive"[^>]*hidden/);
     assert.match(renderer, /id="appUpdatePaneHeading"[^>]*>版本管理<\/h3>/);
     assert.match(renderer, /data-role="auto-update-toggle" aria-label="自动更新"/);
-    assert.match(renderer, /archiveState\.activeTab = tab === 'archive' \? 'archive' : 'update'/);
+    assert.match(renderer, /archiveState\.activeTab = \['archive', 'appearance'\]\.includes\(tab\) \? tab : 'update'/);
+    assert.match(renderer, /data-pane="appearance"[^>]*hidden/);
+    assert.match(renderer, /activeTab: 'update'/);
 
     const modulesStart = renderer.indexOf('const MODULES = Object.freeze({');
     const modulesEnd = renderer.indexOf('const RENDERER_STARTUP_MARKS', modulesStart);

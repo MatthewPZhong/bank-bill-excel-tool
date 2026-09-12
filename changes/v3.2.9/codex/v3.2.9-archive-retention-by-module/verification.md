@@ -2,6 +2,8 @@
 
 ## 本地 release 组合复验（2026-09-12）
 
+本节记录保留期限与 Biz OP 的两模块候选。后续定时深色模式三模块集成及当前门禁结果见 [release 记录](../../release.md)；本节的成功记录不能代替后续候选的完整门禁结果。
+
 - 源分支 22 个文件与修复后的完整门禁及最近独立 review 摘要逐项一致，已提交为 `a2bd6e817a08190e82caecfe4f248054b25cae6e`。本次在既有 release `896fe12d29e518ccece8afce5c3d120b1c6de5c7` 上合并，保留已纳入的 Biz OP 自动错误报告功能。
 - 生产代码自动合并成功；唯一文本冲突是自动集成清单，最终由组合全量 runner 成功后重新生成，没有手工改规则正文或合并测试数字。
 - 新增真实组合集成脚本 `scripts/integration/archive-biz-op-auto-report-retention.js`，6/6 PASS：OP/FLOW 模块期限、永久与继承、历史快照、改配置后同 Task/同 batch 恢复不重复发布、pin/hold 释放，以及存档过期清理不删除 Documents 报告。仅新增测试脚本，未因测试修改生产语义或公共 helper。

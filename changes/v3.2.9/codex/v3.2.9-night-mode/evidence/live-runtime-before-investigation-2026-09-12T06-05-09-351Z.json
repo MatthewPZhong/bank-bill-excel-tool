@@ -1,0 +1,11 @@
+{
+  "status": "BLOCKED",
+  "kind": "真实 Main + Preload + Renderer，临时数据库与真实单实例锁",
+  "resources": {
+    "freeMemoryMiB": 67.515625,
+    "totalMemoryMiB": 49152
+  },
+  "results": [],
+  "reason": "现有 BizOP 首次激活资源准入失败；未创建业务窗口，不能判定 GUI 冷启动通过",
+  "code": "BIZOP_ACTIVATION_RESOURCE_UNAVAILABLE"
+}
