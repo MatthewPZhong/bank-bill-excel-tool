@@ -3,6 +3,7 @@
 .bizop-toolbar { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
 .bizop-secondary { margin-top: 12px; }
 .bizop-status { overflow-wrap: anywhere; }
+.bizop-status .status-box-text, .bizop-feedback { white-space: pre-wrap; user-select: text; }
 .bizop-status[data-tone="warning"] { color: #8a5a00; border-color: rgba(178, 116, 0, 0.42); }
 
 /* 保留原生模态的焦点/取消保护，外观使用现有 VCC 对话框、表格和数据管理样式。 */
@@ -23,11 +24,11 @@
 .bizop-field input, .bizop-field select { width: 100%; box-sizing: border-box; font: inherit; }
 .bizop-results-dialog { width: min(100%, 520px); }
 .bizop-results-dialog .dialog-header, .bizop-run-dialog .dialog-header, .bizop-calendar-dialog .dialog-header, .bizop-delete-dialog .dialog-header { padding-left: 0; padding-right: 0; }
-.bizop-result-fields, .bizop-results-dialog .bizop-modal-footer { display: grid; grid-template-columns: 148px minmax(0, 1fr); gap: 10px; }
+.bizop-result-fields { display: grid; grid-template-columns: 148px minmax(0, 1fr); gap: 10px; }
 .bizop-result-fields .bizop-field { min-width: 0; }
-/* 使用 VCC 的字体和小按钮尺寸，字段与按钮栏共用列并收紧外框。 */
+/* 使用 VCC 的字体和小按钮尺寸，收紧输入导出弹窗外框。 */
 .bizop-input-export-dialog { width: min(100%, 360px); }
-.bizop-input-export-fields, .bizop-input-export-dialog .bizop-modal-footer { grid-template-columns: minmax(0, 144px) minmax(0, 1fr); }
+.bizop-input-export-fields { grid-template-columns: minmax(0, 144px) minmax(0, 1fr); }
 .bizop-run-dialog { width: min(100%, 460px); }
 .bizop-run-fields, .bizop-run-dialog .bizop-modal-footer { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .bizop-run-fields .bizop-field { min-width: 0; }
@@ -39,7 +40,8 @@
 .bizop-modal-actions { display: flex; align-items: center; gap: 10px; }
 .bizop-results-dialog .bizop-modal-footer, .bizop-run-dialog .bizop-modal-footer { padding-left: 0; padding-right: 0; justify-content: start; }
 .bizop-results-dialog .bizop-modal-actions, .bizop-run-dialog .bizop-modal-actions:last-child { justify-self: end; }
-.bizop-cancel-slot { display: flex; align-items: center; }
+.bizop-results-dialog .bizop-modal-footer { justify-content: flex-end; }
+.bizop-manager-dialog .vcc-fin-op-manager-footer-left:not(:has(.bizop-page-choice:not([hidden]))) { display: none; }
 .bizop-calendar-dialog { width: min(100%, 340px); }
 .bizop-delete-dialog { width: min(100%, 560px); }
 .bizop-v327-dialog.bizop-delete-dialog .bizop-modal-body { max-height: min(46vh, 340px); }

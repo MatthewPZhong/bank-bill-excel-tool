@@ -6,6 +6,7 @@ const { normalizeFilePlanV1 } = require('../archive-center/file-plan');
 const { ACTIONS, fail, opaque, snapshot, hash } = require('./contracts');
 const { collectInputs } = require('./compute-inputs');
 const { outputName } = require('./export-cells');
+const { createBizOpAutoErrorReportService } = require('./auto-error-report');
 
 const PREFIX = 'bizOpReconV327:';
 function input(value, keys) {
@@ -26,7 +27,8 @@ function compact(result) {
   return Object.fromEntries(keys.filter((key) => result?.[key] !== undefined).map((key) => [key, result[key]]));
 }
 
-function registerBizOpV327Handlers({ ipcMain, getModule, businessOperationRegistry, getTaskLifecycle, getRuntime, dialog, getWindow }) {
+function registerBizOpV327Handlers({ ipcMain, getModule, businessOperationRegistry, getTaskLifecycle, getRuntime, dialog, getWindow,
+  getStorageRoot, createAutoErrorReport = createBizOpAutoErrorReportService }) {
   const selections = new Map(); const requests = new Map(); const senderCleanup = new Set();
   function sender(event) {
     const web = event?.sender;
@@ -57,11 +59,17 @@ function registerBizOpV327Handlers({ ipcMain, getModule, businessOperationRegist
     if (!item || item.senderId !== senderId || item.kind !== kind) fail('BIZOP_SELECTION_EXPIRED', '文件选择或预检已失效，请重新选择');
     selections.delete(ref); return item.value;
   }
-  function register(suffix, keys, work) {
+  function register(suffix, keys, work, { cached = false } = {}) {
     ipcMain.handle(PREFIX + suffix, (event, raw = {}) => {
-      getModule().assertBusinessEnabled();
-      return Promise.resolve().then(() => work({ event, senderId: sender(event), value: input(raw, keys), module: getModule() })).then(response).catch(failure);
+      return Promise.resolve().then(() => {
+        const ctx = { event, senderId: sender(event), value: input(raw, keys), module: getModule() };
+        if (!cached) ctx.module.assertBusinessEnabled();
+        return work(ctx);
+      }).then(response).catch(failure);
     });
+  }
+  function registerOperation(suffix, keys, work) {
+    register(suffix, keys, (ctx) => operation(ctx, suffix, (dependencies) => work(ctx, dependencies)), { cached: true });
   }
   async function operation(ctx, kind, work) {
     prune(); const requestId = opaque(ctx.value.requestId); const key = `${ctx.senderId}:${requestId}`;
@@ -70,25 +78,52 @@ function registerBizOpV327Handlers({ ipcMain, getModule, businessOperationRegist
       if (existing.digest !== digest) fail('BIZOP_REQUEST_CONFLICT');
       return existing.promise;
     }
+    ctx.module.assertBusinessEnabled();
     if ([...requests.values()].some((item) => !item.done && item.senderId === ctx.senderId)) fail('BIZOP_REQUEST_BUSY', '当前操作正在执行，请等待完成');
     if (requests.size >= 64) {
       const old = [...requests].find(([, item]) => item.done);
       if (old) requests.delete(old[0]); else fail('BIZOP_REQUEST_LIMIT');
     }
+    // 两个真实 FilePlan Task 之间仍有恢复工作；退出须等整个导入请求收尾再关闭 runtime。
+    const registered = kind === 'import' ? businessOperationRegistry.begin({ channel: PREFIX + kind,
+      moduleKey: '业务OP数据核对', functionKey: '导入与自动保存错误报告' }) : null;
+    if (registered && !registered.accepted) return registered;
     const entry = { senderId: ctx.senderId, digest, controller: new AbortController(), done: false, control: null };
     requests.set(key, entry);
     entry.promise = Promise.resolve().then(async () => {
-      let result;
+      let result; let identity; let dependencies;
       try {
-        const dependencies = { taskLifecycle: getTaskLifecycle(), runtime: getRuntime(), signal: entry.controller.signal,
-          onControl(control) { entry.control = control; } };
+        dependencies = { taskLifecycle: getTaskLifecycle(), runtime: getRuntime(), signal: entry.controller.signal,
+          onControl(control) { entry.control = control; },
+          onTaskIdentified(value) { identity = { taskRunId: value.taskRunId, reportRef: value.reportRef }; } };
         result = compact(await work(dependencies));
       } catch (error) { result = { ...failure(error) }; }
       // 事务已提交后的回收失败只报告未决，不改写原业务结果或重放业务写入。
-      try { const recovery = await ctx.module.recovery.run(); result.cleanupPending = !recovery.ready; }
+      let recoveryReady = false;
+      try { const recovery = await ctx.module.recovery.run(); recoveryReady = recovery.ready === true; result.cleanupPending = !recoveryReady; }
       catch (_error) { result.cleanupPending = true; }
+      if (kind === 'import' && result.status !== 'ok' && result.status !== 'cancelled' && result.status !== 'busy') {
+        let exportTaskRunId;
+        try {
+          const report = await createAutoErrorReport({ module: ctx.module, getStorageRoot }).save({ ...dependencies,
+            identity, businessResult: result, recoveryReady,
+            onTaskIdentified(value) { exportTaskRunId = value.taskRunId; } });
+          if (report.errorReport) result.errorReport = report.errorReport;
+          if (typeof report.cleanupPending === 'boolean') result.cleanupPending = report.cleanupPending;
+        } catch (_error) {
+          // 最后兜底仍保留原业务结果；已登记的导出交给恢复核验，不能因异常断言文件不存在。
+          result.errorReport = exportTaskRunId
+            ? { status: 'pending', code: 'BIZOP_AUTO_REPORT_PUBLICATION_PENDING', taskRunId: exportTaskRunId,
+              message: '错误报告保存状态待恢复核验，请查看任务记录并重试恢复' }
+            : { status: 'failed', code: 'BIZOP_AUTO_REPORT_SAVE_FAILED', message: '错误报告自动保存未完成，请查看任务记录并重试' };
+          if (exportTaskRunId) result.cleanupPending = true;
+        }
+      }
       return result;
-    }).then(response).catch(failure).finally(() => { entry.done = true; entry.expires = Date.now() + 600000; });
+    }).then(response).catch(failure).finally(() => {
+      entry.done = true; entry.expires = Date.now() + 600000;
+      if (registered) businessOperationRegistry.end(registered.token);
+    });
     return entry.promise;
   }
   register('files:pick', [], async ({ senderId }) => {
@@ -100,8 +135,8 @@ function registerBizOpV327Handlers({ ipcMain, getModule, businessOperationRegist
       role: 'input', sourceOperation: PREFIX + 'import' })), outputs: [] });
     return { status: 'ok', selectionRef: issue(senderId, 'import', plan), files: picked.filePaths.map((file) => path.basename(file)) };
   });
-  register('import', ['requestId', 'selectionRef'], (ctx) => operation(ctx, 'import', (deps) => ctx.module.runImport({ ...deps,
-    filePlan: take(ctx.senderId, ctx.value.selectionRef, 'import') })));
+  registerOperation('import', ['requestId', 'selectionRef'], (ctx, deps) => ctx.module.runImport({ ...deps,
+    filePlan: take(ctx.senderId, ctx.value.selectionRef, 'import') }));
   register('run:preflight', ['startDate', 'endDate'], (ctx) => ctx.module.admission.read(() => {
     const frozen = collectInputs({ catalog: ctx.module.catalog, payloadStore: ctx.module.payloadStore, ...ctx.value });
     const value = { ...ctx.value, expectedGeneration: frozen.expectedGeneration };
@@ -109,15 +144,15 @@ function registerBizOpV327Handlers({ ipcMain, getModule, businessOperationRegist
       inputs: frozen.documents.map((item) => ({ role: item.role, dataDate: item.dataDate, version: item.inputVersion,
         originals: item.sources.map((source) => source.originalName) })) });
   }));
-  register('run', ['requestId', 'selectionRef'], (ctx) => operation(ctx, 'run', (deps) => ctx.module.runCompute({ ...deps,
-    ...take(ctx.senderId, ctx.value.selectionRef, 'run') })));
+  registerOperation('run', ['requestId', 'selectionRef'], (ctx, deps) => ctx.module.runCompute({ ...deps,
+    ...take(ctx.senderId, ctx.value.selectionRef, 'run') }));
   register('metadata:months', ['before', 'limit'], ({ module, value }) => module.metadata.listMonths(value));
   register('metadata:input', ['kind', 'dataDate'], ({ module, value }) => module.metadata.currentInput(value));
   register('metadata:run-calendar', ['month'], ({ module, value }) => module.metadata.runCalendar(value));
   register('metadata:list', ['view', 'kind', 'operationMonth', 'cursor', 'limit', 'generation'], ({ module, value }) => module.metadata.list(value));
   register('delete:preview', ['datasetIds', 'runIds'], ({ module, value }) => module.previews.create(value));
-  register('delete', ['requestId', 'previewId', 'mode'], (ctx) => operation(ctx, 'delete', (deps) => ctx.module.runDelete({ ...deps,
-    previewId: ctx.value.previewId, mode: ctx.value.mode })));
+  registerOperation('delete', ['requestId', 'previewId', 'mode'], (ctx, deps) => ctx.module.runDelete({ ...deps,
+    previewId: ctx.value.previewId, mode: ctx.value.mode }));
   register('export:pick', ['outputKind', 'objectId'], async (ctx) => {
     const { outputKind, objectId } = ctx.value; opaque(objectId);
     const suffix = String(outputKind).toLowerCase().replace('_', '-');
@@ -142,8 +177,8 @@ function registerBizOpV327Handlers({ ipcMain, getModule, businessOperationRegist
   });
   for (const { taskKey, kind } of Object.values(ACTIONS)) if (kind === 'EXPORT') {
     const suffix = taskKey.slice(PREFIX.length);
-    register(suffix, ['requestId', 'selectionRef'], (ctx) => operation(ctx, suffix, (deps) => ctx.module.runExport({ ...deps,
-      ...take(ctx.senderId, ctx.value.selectionRef, suffix) })));
+    registerOperation(suffix, ['requestId', 'selectionRef'], (ctx, deps) => ctx.module.runExport({ ...deps,
+      ...take(ctx.senderId, ctx.value.selectionRef, suffix) }));
   }
   register('task:cancel', ['requestId'], ({ senderId, value, module }) => {
     const entry = requests.get(`${senderId}:${opaque(value.requestId)}`);

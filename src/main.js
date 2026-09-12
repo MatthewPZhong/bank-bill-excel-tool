@@ -22031,7 +22031,7 @@ function flushUsageStats() {
 function registerAllIpcHandlers() {
   registerBizOpV327Handlers({ ipcMain, getModule: () => bizOpV327Module, businessOperationRegistry,
     getTaskLifecycle: () => archiveTaskLifecycle, getRuntime: () => backgroundExecutionRuntimeManager.get(),
-    dialog, getWindow: () => mainWindow });
+    dialog, getWindow: () => mainWindow, getStorageRoot });
   registerWindowHandlers();
   registerAppHandlers();
   registerAppUpdateHandlers();
