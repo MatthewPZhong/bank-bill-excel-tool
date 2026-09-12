@@ -152,6 +152,7 @@ contextBridge.exposeInMainWorld('desktopApi', {
       return () => ipcRenderer.removeListener('archive-center:entry-maintenance-failed', wrapped);
     },
     setRetentionDays: (retentionDays) => ipcRenderer.invoke('archive-center:set-retention-days', retentionDays),
+    setModuleRetentionDays: (payload) => ipcRenderer.invoke('archive-center:set-module-retention-days', payload),
     getStats: () => ipcRenderer.invoke('archive-center:get-stats')
   },
   errors: {

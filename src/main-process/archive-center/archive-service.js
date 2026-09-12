@@ -301,6 +301,9 @@ class ArchiveService {
     if (options.opener !== undefined && typeof options.opener !== 'function') {
       throw new TypeError('ArchiveService opener 必须是函数');
     }
+    if (options.resolveRetentionDays !== undefined && typeof options.resolveRetentionDays !== 'function') {
+      throw new TypeError('ArchiveService resolveRetentionDays 必须是函数');
+    }
     if (options.onSourceReleased !== undefined && typeof options.onSourceReleased !== 'function') {
       throw new TypeError('ArchiveService onSourceReleased 必须是函数');
     }
@@ -339,6 +342,7 @@ class ArchiveService {
     this.onSourceReleased = options.onSourceReleased || null;
     this.onArtifactReady = options.onArtifactReady || null;
     this.defaultRetentionDays = defaultRetentionDays;
+    this.resolveRetentionDays = options.resolveRetentionDays || null;
     this.startupMaterializationBatchSize = startupMaterializationBatchSize;
     this.verifyHashesOnStartup = options.verifyHashesOnStartup === true;
     this.repository = options.repository || createArchiveRepository(database, { now: this.now });
@@ -1099,6 +1103,18 @@ class ArchiveService {
     return initialized;
   }
 
+  _retentionDaysForPayload(payload = {}) {
+    if (payload.retentionDays !== undefined) return payload.retentionDays;
+    if (!this.resolveRetentionDays) return this.defaultRetentionDays;
+    const moduleId = payload.taskRun && payload.taskRun.moduleId
+      || payload.moduleId || payload.moduleCode;
+    const value = this.resolveRetentionDays(moduleId);
+    if (value !== null && (!Number.isSafeInteger(value) || value < 1 || value > 36500)) {
+      throw new TypeError('模块保留期限必须是 1 到 36500 的安全整数或永久');
+    }
+    return value;
+  }
+
   _taskBatchInput(payload = {}) {
     const input = {
       moduleId: payload.moduleId,
@@ -1121,12 +1137,11 @@ class ArchiveService {
     if (Object.prototype.hasOwnProperty.call(payload, 'retentionUntil')
         && payload.retentionUntil !== undefined) {
       input.retentionUntil = payload.retentionUntil;
-    } else if (payload.retentionDays === null || payload.retentionDays === 'permanent') {
-      input.retentionDays = null;
     } else {
-      input.retentionDays = payload.retentionDays === undefined
-        ? this.defaultRetentionDays
-        : Number(payload.retentionDays);
+      const retentionDays = this._retentionDaysForPayload(payload);
+      input.retentionDays = retentionDays === null || retentionDays === 'permanent'
+        ? null
+        : Number(retentionDays);
     }
     return input;
   }
@@ -1232,9 +1247,7 @@ class ArchiveService {
           moduleName: payload.moduleName,
           businessStatus: payload.businessStatus,
           locked: payload.locked,
-          retentionDays: payload.retentionDays === undefined
-            ? this.defaultRetentionDays
-            : payload.retentionDays,
+          retentionDays: this._retentionDaysForPayload(payload),
           metadata: payload.metadata
         });
       }
@@ -1367,9 +1380,7 @@ class ArchiveService {
       const result = this.repository.reserveFileTaskBatch({
         ...payload,
         metadata,
-        retentionDays: payload.retentionDays === undefined
-          ? this.defaultRetentionDays
-          : payload.retentionDays
+        retentionDays: this._retentionDaysForPayload(payload)
       });
       if (result.status === 'deleted') {
         return {

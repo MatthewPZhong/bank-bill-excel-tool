@@ -2478,13 +2478,17 @@ function archiveCenterRoleText(value) {
 }
 
 function archiveCenterRetentionText(batch) {
-  const value = batch?.retentionUntil ?? batch?.retention;
+  const value = batch && Object.prototype.hasOwnProperty.call(batch, 'retentionUntil')
+    ? batch.retentionUntil
+    : batch?.retention;
   if (value === null || value === 'permanent') return '永久';
   if (!value) return batch?.locked === true ? '已锁定' : '-';
   return batch?.locked === true ? `${String(value)}（已锁定）` : String(value);
 }
 
 function createArchiveCenterPreviewApi() {
+  let retentionDays = 180;
+  const retentionDaysByModule = { toolbox: 30, 'vcc-financial-op': null };
   const batches = [
     {
       internalId: 901,
@@ -2580,7 +2584,12 @@ function createArchiveCenterPreviewApi() {
       return {
         status: 'success',
         settings: {
-          retentionDays: 180,
+          retentionDays,
+          retentionDaysByModule: { ...retentionDaysByModule },
+          retentionModules: [
+            ...Object.values(MODULES).map(({ id, name }) => ({ id, name })),
+            { id: 'toolbox', name: '工具箱' }
+          ],
           storageRoot: storagePath,
           storageMigration: { status: 'idle', phase: '', processed: 0, total: 0 }
         }
@@ -2588,7 +2597,13 @@ function createArchiveCenterPreviewApi() {
     },
     async changeStorageLocation() { return { status: 'cancelled' }; },
     async setRetentionDays(value) {
+      retentionDays = value;
       return { status: 'success', settings: { retentionDays: value } };
+    },
+    async setModuleRetentionDays({ moduleId, retentionDays: value }) {
+      if (value === 'inherit') delete retentionDaysByModule[moduleId];
+      else retentionDaysByModule[moduleId] = value;
+      return this.getSettings();
     },
     async getStats() {
       return {
@@ -2640,9 +2655,10 @@ function createAppUpdateSettingsDialog(options = {}) {
     batches: [],
     detail: null,
     stats: null,
-    settings: { retentionDays: 60, storageRoot: '', storageMigration: null },
+    settings: { retentionDays: 60, retentionDaysByModule: {}, storageRoot: '', storageMigration: null },
     storageMigration: { status: 'idle', phase: '', processed: 0, total: 0 },
     savedRetentionValue: '60',
+    selectedRetentionModuleId: '',
     retentionIntentToken: 0,
     retentionPendingIntent: null,
     retentionSaving: false,
@@ -2777,16 +2793,28 @@ function createAppUpdateSettingsDialog(options = {}) {
 
             <div class="archive-center-settings-section">
               <h4>保留期限</h4>
-              <label class="archive-center-field archive-center-retention-field">
-                <select data-role="archive-retention-days" aria-label="保留期限">
-                  <option value="30">30 天</option>
-                  <option value="60" selected>60 天</option>
-                  <option value="90">90 天</option>
-                  <option value="180">180 天</option>
-                  <option value="365">365 天</option>
-                  <option value="permanent">永久</option>
-                </select>
-              </label>
+              <div class="archive-center-retention-fields">
+                <label class="archive-center-field archive-center-retention-module-field">
+                  <span>适用模块</span>
+                  <select data-role="archive-retention-module" aria-label="保留期限适用模块">
+                    <option value="">默认（未单独设置的模块）</option>
+                  </select>
+                </label>
+                <label class="archive-center-field archive-center-retention-field">
+                  <span>保留期限</span>
+                  <select data-role="archive-retention-days" aria-label="保留期限" aria-describedby="archiveRetentionNote">
+                    <option value="inherit" hidden disabled>跟随默认</option>
+                    <option value="30">30 天</option>
+                    <option value="60" selected>60 天</option>
+                    <option value="90">90 天</option>
+                    <option value="180">180 天</option>
+                    <option value="365">365 天</option>
+                    <option value="permanent">永久</option>
+                  </select>
+                </label>
+              </div>
+              <p id="archiveRetentionNote" class="archive-center-settings-note" data-role="archive-retention-note"></p>
+              <p class="archive-center-settings-note">修改后自动保存，仅影响之后新建的存档批次；历史批次保留原到期日。</p>
             </div>
           </section>
         </section>
@@ -2815,6 +2843,7 @@ function createAppUpdateSettingsDialog(options = {}) {
   const moduleFilter = dialog.querySelector('[data-filter="module"]');
   const batchIdFilter = dialog.querySelector('[data-filter="batch-id"]');
   const retentionSelect = dialog.querySelector('[data-role="archive-retention-days"]');
+  const retentionModuleSelect = dialog.querySelector('[data-role="archive-retention-module"]');
   const changeStorageButton = dialog.querySelector('[data-action="change-archive-storage"]');
   const storageMigrationText = dialog.querySelector('[data-role="archive-storage-migration"]');
   const closeDialogButton = dialog.querySelector('[data-action="close"]');
@@ -3053,18 +3082,42 @@ function createAppUpdateSettingsDialog(options = {}) {
     const settings = archiveState.settings && typeof archiveState.settings === 'object'
       ? archiveState.settings
       : {};
-    const retentionDays = Object.prototype.hasOwnProperty.call(settings, 'retentionDays')
+    const defaultRetentionDays = Object.prototype.hasOwnProperty.call(settings, 'retentionDays')
       ? settings.retentionDays
       : settings.defaultRetentionDays;
-    const retentionValue = retentionDays === null || retentionDays === 'permanent'
+    const moduleId = archiveState.selectedRetentionModuleId;
+    const overrides = settings.retentionDaysByModule || {};
+    const hasOverride = moduleId && Object.prototype.hasOwnProperty.call(overrides, moduleId);
+    const retentionDays = hasOverride ? overrides[moduleId] : defaultRetentionDays;
+    const retentionValue = moduleId && !hasOverride
+      ? 'inherit'
+      : retentionDays === null || retentionDays === 'permanent'
       ? 'permanent'
       : String(retentionDays ?? 60);
-    const allowedRetentionValues = new Set(['30', '60', '90', '180', '365', 'permanent']);
+    const allowedRetentionValues = new Set(['30', '60', '90', '180', '365', 'permanent', 'inherit']);
     if (!archiveState.retentionSaving && !archiveState.retentionPendingIntent) {
+      const modules = Array.isArray(settings.retentionModules)
+        ? settings.retentionModules
+        : Array.from(archiveModules, ([id, name]) => ({ id, name }));
+      retentionModuleSelect.innerHTML = '<option value="">默认（未单独设置的模块）</option>'
+        + modules.map(({ id, name }) => (
+          `<option value="${escapeHtml(id)}">${escapeHtml(name)}</option>`
+        )).join('');
+      retentionModuleSelect.value = moduleId;
+      const inheritOption = retentionSelect.querySelector('[value="inherit"]');
+      inheritOption.hidden = !moduleId;
+      inheritOption.disabled = !moduleId;
+      const defaultLabel = defaultRetentionDays === null || defaultRetentionDays === 'permanent'
+        ? '永久'
+        : `${defaultRetentionDays ?? 60} 天`;
+      inheritOption.textContent = `跟随默认（${defaultLabel}）`;
       archiveState.savedRetentionValue = allowedRetentionValues.has(retentionValue)
         ? retentionValue
         : '60';
       retentionSelect.value = archiveState.savedRetentionValue;
+      dialog.querySelector('[data-role="archive-retention-note"]').textContent = moduleId
+        ? (hasOverride ? '此模块使用单独设置的期限。' : `此模块跟随默认期限：${defaultLabel}。`)
+        : '未单独设置期限的模块均使用此默认值。';
     }
     if (settings.storageMigration && typeof settings.storageMigration === 'object') {
       archiveState.storageMigration = { ...settings.storageMigration };
@@ -3248,6 +3301,7 @@ function createAppUpdateSettingsDialog(options = {}) {
     const busy = archiveState.settingsLoading || archiveState.retentionSaving;
     returnButton.disabled = busy;
     closeDialogButton.disabled = busy;
+    retentionModuleSelect.disabled = busy;
   }
 
   function setRetentionSaving(saving) {
@@ -3256,6 +3310,7 @@ function createAppUpdateSettingsDialog(options = {}) {
   }
 
   function retentionDaysApiValue(value) {
+    if (value === 'inherit') return 'inherit';
     return value === 'permanent' ? null : Number(value);
   }
 
@@ -3266,19 +3321,34 @@ function createAppUpdateSettingsDialog(options = {}) {
       while (archiveState.retentionPendingIntent && archiveDialogAlive()) {
         const intent = archiveState.retentionPendingIntent;
         archiveState.retentionPendingIntent = null;
-        if (intent.value === archiveState.savedRetentionValue) continue;
+        if (intent.value === archiveState.savedRetentionValue) {
+          if (archiveDialogAlive()) showArchiveFeedback('保留期限已保存', 'success');
+          continue;
+        }
 
         let failure = null;
         try {
-          const result = await api.setRetentionDays(retentionDaysApiValue(intent.value));
+          const result = intent.moduleId
+            ? await api.setModuleRetentionDays({
+              moduleId: intent.moduleId,
+              retentionDays: retentionDaysApiValue(intent.value)
+            })
+            : await api.setRetentionDays(retentionDaysApiValue(intent.value));
           if (!verifyArchiveCenterAction(result, '保留期限保存失败')) {
             throw new Error('保留期限保存失败');
           }
           archiveState.savedRetentionValue = intent.value;
-          archiveState.settings = {
-            ...archiveState.settings,
-            retentionDays: retentionDaysApiValue(intent.value)
-          };
+          if (intent.moduleId) {
+            const overrides = { ...archiveState.settings.retentionDaysByModule };
+            if (intent.value === 'inherit') delete overrides[intent.moduleId];
+            else overrides[intent.moduleId] = retentionDaysApiValue(intent.value);
+            archiveState.settings = { ...archiveState.settings, retentionDaysByModule: overrides };
+          } else {
+            archiveState.settings = {
+              ...archiveState.settings,
+              retentionDays: retentionDaysApiValue(intent.value)
+            };
+          }
         } catch (error) {
           failure = error;
         }
@@ -3303,6 +3373,7 @@ function createAppUpdateSettingsDialog(options = {}) {
     } finally {
       archiveState.retentionSavePromise = null;
       setRetentionSaving(false);
+      if (archiveDialogAlive()) renderArchiveSettings();
       if (archiveState.retentionPendingIntent && archiveDialogAlive()) {
         archiveState.retentionSavePromise = drainRetentionIntents();
       }
@@ -3312,9 +3383,11 @@ function createAppUpdateSettingsDialog(options = {}) {
   function saveRetentionSelection() {
     if (archiveState.settingsLoading || archiveState.destroyed) return;
     const value = retentionSelect.value;
+    if (!archiveState.retentionSaving && value === archiveState.savedRetentionValue) return;
     archiveState.retentionIntentToken += 1;
     archiveState.retentionPendingIntent = {
       token: archiveState.retentionIntentToken,
+      moduleId: archiveState.selectedRetentionModuleId,
       value
     };
     showArchiveFeedback('正在保存保留期限…', 'info');
@@ -3328,6 +3401,9 @@ function createAppUpdateSettingsDialog(options = {}) {
     showArchiveFeedback('', 'info');
     setArchiveSettingsLoading(true);
     try {
+      // 重入设置页先等当前保存队列完成，避免旧设置快照覆盖刚保存的模块期限。
+      if (archiveState.retentionSavePromise) await archiveState.retentionSavePromise;
+      if (requestId !== archiveState.settingsRequestId || !archiveDialogAlive()) return false;
       const api = getArchiveCenterApi();
       const [settingsResult, statsResult] = await Promise.allSettled([
         api.getSettings(),
@@ -3554,6 +3630,16 @@ function createAppUpdateSettingsDialog(options = {}) {
   }
 
   function confirmArchiveBatchDelete(button) {
+    // 删除确认会替换设置弹窗，先等期限保存收口，避免中断待保存的最终选择。
+    if (archiveState.settingsLoading || archiveState.retentionSaving || archiveState.retentionPendingIntent) {
+      showArchiveFeedback(
+        archiveState.settingsLoading
+          ? '存档设置正在加载，请稍后再删除批次'
+          : '保留期限正在保存，请稍后再删除批次',
+        'info'
+      );
+      return;
+    }
     const batchId = button.dataset.batchId;
     const batchNumber = button.dataset.batchNumber || batchId;
     let confirmOverlay = null;
@@ -3695,6 +3781,15 @@ function createAppUpdateSettingsDialog(options = {}) {
     loadArchiveBatches();
   });
   retentionSelect.addEventListener('change', saveRetentionSelection);
+  retentionModuleSelect.addEventListener('change', () => {
+    if (archiveState.settingsLoading || archiveState.retentionSaving) {
+      retentionModuleSelect.value = archiveState.selectedRetentionModuleId;
+      return;
+    }
+    archiveState.selectedRetentionModuleId = retentionModuleSelect.value;
+    renderArchiveSettings();
+    showArchiveFeedback('', 'info');
+  });
 
   function selectArchiveBatch(batchId) {
     const nextBatchId = String(batchId || '');

@@ -160,6 +160,7 @@ const {
 const {
   createArchiveCenterController
 } = require('./main-process/archive-center/controller');
+const { resolveRetentionDays } = require('./main-process/archive-center/retention-policy');
 const {
   createArchiveOutboxStore
 } = require('./main-process/archive-center/outbox-store');
@@ -4719,6 +4720,9 @@ function registerArchiveCenterHandlers() {
   archiveCenterMutationIpcHandle('archive-center:set-retention-days', '保存存档设置', (_event, retentionDays) => {
     return callArchiveCenter('setRetentionDays', retentionDays);
   });
+  archiveCenterMutationIpcHandle('archive-center:set-module-retention-days', '保存模块存档设置', (_event, payload) => {
+    return callArchiveCenter('setModuleRetentionDays', payload);
+  });
   ipcMain.handle('archive-center:get-stats', () => callArchiveCenter('getStats'));
   ipcMain.handle('archive-center:start-entry-maintenance', (_event, visitId) => {
     return callArchiveCenter('startEntryMaintenance', visitId);
@@ -4900,6 +4904,7 @@ function initializeArchiveCenter() {
   const createService = (rootDir) => createArchiveService({
     database: database.db,
     rootDir,
+    resolveRetentionDays: (moduleId) => resolveRetentionDays(database, moduleId),
     opener: (filePath) => shell.openPath(filePath),
     onArtifactReady: (completed, repository) => {
       if (bizOpV327Module) bizOpV327Module.readyHold(completed, repository);

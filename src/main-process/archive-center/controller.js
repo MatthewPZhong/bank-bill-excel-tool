@@ -14,7 +14,16 @@ const {
   publicBatch
 } = require('./archive-service');
 
-const ARCHIVE_RETENTION_SETTING_KEY = 'archive_center_retention_days';
+const {
+  ALLOWED_RETENTION_DAYS,
+  ARCHIVE_RETENTION_SETTING_KEY,
+  DEFAULT_RETENTION_DAYS,
+  parseRetentionDays,
+  readRetentionDaysByModule,
+  resolveRetentionDays,
+  setModuleRetentionDays
+} = require('./retention-policy');
+const { listVisibleArchiveScopes } = require('./module-scope-registry');
 const { runStartupPhase, startStartupPhase } = require('../../backend/startup-phase');
 
 const STARTUP_DEFERRED_MAINTENANCE = Object.freeze({
@@ -32,8 +41,6 @@ const STARTUP_DEFERRED_MAINTENANCE = Object.freeze({
   ])
 });
 const ARCHIVE_TEMPLATE_EXCLUSIONS_SETTING_KEY = 'archive_center_excluded_template_ids';
-const DEFAULT_RETENTION_DAYS = 60;
-const ALLOWED_RETENTION_DAYS = new Set([30, 60, 90, 180, 365]);
 const SHA256_RE = /^[a-f0-9]{64}$/i;
 const TERMINAL_TASK_STATUSES = new Set(['succeeded', 'failed', 'cancelled']);
 
@@ -46,18 +53,6 @@ function artifactSupportsReplacementRetry(artifact) {
     && Number.isSafeInteger(expectedSizeBytes)
     && expectedSizeBytes >= 0
   );
-}
-
-function parseRetentionDays(value) {
-  if (value === null || value === 'permanent') return null;
-  const parsed = Number(value);
-  return ALLOWED_RETENTION_DAYS.has(parsed) ? parsed : DEFAULT_RETENTION_DAYS;
-}
-
-function parseStoredRetentionDays(value) {
-  if (value === null || value === undefined || value === '') return DEFAULT_RETENTION_DAYS;
-  if (value === 'permanent') return null;
-  return parseRetentionDays(value);
 }
 
 function publicFailure(result, fallbackMessage) {
@@ -262,8 +257,8 @@ class ArchiveCenterController {
     return batch;
   }
 
-  getRetentionDays() {
-    return parseStoredRetentionDays(this.database.getSetting(ARCHIVE_RETENTION_SETTING_KEY));
+  getRetentionDays(moduleId) {
+    return resolveRetentionDays(this.database, moduleId);
   }
 
   async initialize() {
@@ -868,7 +863,9 @@ class ArchiveCenterController {
       ),
       businessStatus: 'success',
       locked: payload.locked === true,
-      retentionDays: this.getRetentionDays(),
+      retentionDays: payload.retentionDays === undefined
+        ? this.getRetentionDays(payload.moduleId || payload.moduleCode)
+        : payload.retentionDays,
       metadata,
       sourceOperation,
       files
@@ -1609,6 +1606,8 @@ class ArchiveCenterController {
       status: 'success',
       settings: {
         retentionDays: this.getRetentionDays(),
+        retentionDaysByModule: readRetentionDaysByModule(this.database),
+        retentionModules: listVisibleArchiveScopes(),
         storageRoot: this.storageRootManager
           ? this.storageRootManager.getCurrentRoot()
           : this.service.rootDir,
@@ -1636,6 +1635,15 @@ class ArchiveCenterController {
       retentionDays === null ? 'permanent' : String(retentionDays)
     );
     return { status: 'success', settings: { retentionDays } };
+  }
+
+  setModuleRetentionDays(payload) {
+    try {
+      setModuleRetentionDays(this.database, payload);
+      return this.getSettings();
+    } catch (error) {
+      return publicFailure({ message: error.message }, '模块保留期限保存失败');
+    }
   }
 
   async getStats() {

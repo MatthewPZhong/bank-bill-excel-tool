@@ -16,6 +16,12 @@ const {
   createArchiveOutboxStore
 } = require('../../../src/main-process/archive-center/outbox-store');
 const {
+  ARCHIVE_MODULE_RETENTION_SETTING_KEY
+} = require('../../../src/main-process/archive-center/retention-policy');
+const {
+  listVisibleArchiveScopes
+} = require('../../../src/main-process/archive-center/module-scope-registry');
+const {
   createArchiveService
 } = require('../../../src/main-process/archive-center/archive-service');
 const {
@@ -306,6 +312,52 @@ test('保留期默认 60 天并支持新增枚举，既有合法值保持兼容'
   assert.equal(controller.setRetentionDays(45).status, 'failed');
   assert.equal(controller.setRetentionDays(null).status, 'success');
   assert.equal(settings.get(ARCHIVE_RETENTION_SETTING_KEY), 'permanent');
+});
+
+test('模块期限设置返回完整设置，未知模块拒绝，继承不改全局默认', () => {
+  const { controller, settings } = createHarness();
+  assert.equal(controller.setRetentionDays(90).status, 'success');
+  const saved = controller.setModuleRetentionDays({ moduleId: 'LINKED', retentionDays: null });
+  assert.equal(saved.status, 'success');
+  assert.equal(saved.settings.retentionDays, 90);
+  assert.deepEqual(saved.settings.retentionDaysByModule, { 'bank-statement-process': null });
+  assert.deepEqual(saved.settings.retentionModules, listVisibleArchiveScopes());
+  assert.equal(controller.getRetentionDays('bank-statement-process'), null);
+  assert.equal(controller.getRetentionDays('toolbox'), 90);
+  const before = settings.get(ARCHIVE_MODULE_RETENTION_SETTING_KEY);
+  assert.equal(controller.setModuleRetentionDays({ moduleId: 'unknown', retentionDays: 30 }).status, 'failed');
+  assert.equal(settings.get(ARCHIVE_MODULE_RETENTION_SETTING_KEY), before);
+  assert.equal(controller.setModuleRetentionDays({ moduleId: 'LINKED', retentionDays: 'inherit' }).status, 'success');
+  assert.deepEqual(controller.getSettings().settings.retentionDaysByModule, {});
+  assert.equal(controller.getRetentionDays('LINKED'), 90);
+});
+
+test('旧 sink 新建批次按模块期限，显式期限和已持久 outbox 快照优先', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-retention-outbox-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const outboxStore = createArchiveOutboxStore(directory);
+  const { controller, service } = createHarness({ outboxStore });
+  controller.setRetentionDays(90);
+  controller.setModuleRetentionDays({ moduleId: 'statement-generator', retentionDays: 30 });
+  const received = [];
+  const originalCreateBatch = service.createBatch.bind(service);
+  service.createBatch = async (payload) => {
+    received.push(payload);
+    return originalCreateBatch(payload);
+  };
+  const payload = {
+    moduleId: 'statement-generator', moduleCode: 'STATEMENT', moduleName: '网银账单生成',
+    sourceOperation: 'file:generate', files: [{ filePath: '/tmp/retention-input.xlsx', role: 'input' }]
+  };
+  for (const [index, extra] of [{}, { retentionDays: null }, { retentionDays: 180 }].entries()) {
+    await controller.sink.createBatch({ ...payload, operationKey: `retention-sink-${index}`, ...extra });
+  }
+  assert.deepEqual(received.map((value) => value.retentionDays), [30, null, 180]);
+  controller.persistOperationIntent({ ...payload, operationKey: 'retention-persisted' });
+  controller.setModuleRetentionDays({ moduleId: 'statement-generator', retentionDays: 365 });
+  assert.equal(outboxStore.list()[0].payload.retentionDays, 30);
+  await controller.flushOutbox();
+  assert.equal(received.at(-1).retentionDays, 30);
 });
 
 test('operation owner 终态 outbox 只重放 Task Run CAS，不创建空 batch', async (t) => {
@@ -700,6 +752,8 @@ test('控制器启动时将有效、损坏和空模板排除设置统一归一�
     const expectedSettings = typeof controller.changeStorageLocation === 'function'
       ? {
           retentionDays: 60,
+          retentionDaysByModule: {},
+          retentionModules: listVisibleArchiveScopes(),
           storageRoot: '/tmp/archive-center',
           storageMigration: { status: 'idle', phase: '', processed: 0, total: 0 }
         }
@@ -747,6 +801,8 @@ test('存储根 manager 先于 service 初始化，设置/变更透传且 mainte
   assert.deepEqual(calls, ['manager-initialize']);
   assert.deepEqual(controller.getSettings().settings, {
     retentionDays: 60,
+    retentionDaysByModule: {},
+    retentionModules: listVisibleArchiveScopes(),
     storageRoot: '/new/archive-root',
     storageMigration: { status: 'running', phase: 'copying', processed: 1, total: 2 }
   });
