@@ -1,21 +1,27 @@
-/* 业务 OP 区间页面：仅由 Main 返回的版本化 mode 决定显示；页面不持有文件路径或业务行。 */
+/* 业务 OP 区间页面：仅由 Main 返回的版本化 mode 决定显示；页面不持有内部文件路径或业务行。 */
 (function initBizOpV327Page(root) {
   'use strict';
   function createController({ api, panel, legacyPanel, restoreLegacy, document: doc = root.document }) {
-    let selected = false; let routeVersion = 0; let busy = false; let activeRequest = null; let cancelRequested = false;
-    let reportRef = null; let recoveryReady = false; let enabled = false; const dialogs = new Set();
+    let selected = false; let routeVersion = 0; let busy = false; let hasTaskFeedback = false;
+    let recoveryReady = false; let enabled = false; const dialogs = new Set();
     let taskDialog = null; let taskFocus = null; let showDialogProgress = true;
+    let feedback = { text: '欢迎使用小助手', tone: 'info' }; let statusReadError = '';
     const oldDisabled = new Map();
     function node(tag, text, className) { const item = doc.createElement(tag); if (text !== undefined) item.textContent = text;
       if (className) item.className = className; return item; }
     function button(text, work, className = 'secondary-btn') { const item = node('button', text, className); item.type = 'button';
-      item.addEventListener('click', () => { if (busy && item !== cancelButton) return; Promise.resolve().then(work).catch(showError); }); return item; }
+      item.addEventListener('click', () => { if (busy) return; Promise.resolve().then(work).catch(showError); }); return item; }
     function field(label, control) { const wrap = node('label', undefined, 'bizop-field vcc-fin-op-field'); wrap.append(node('span', label), control); return wrap; }
     function select(options) { const item = node('select', undefined, 'vcc-fin-op-input'); for (const [value, text] of options) { const option = node('option', text); option.value = value; item.append(option); } return item; }
     function dateField() { const item = node('input', undefined, 'vcc-fin-op-input'); item.type = 'date'; return item; }
-    function message(text, tone = 'info') {
+    function renderFeedback(dialog = showDialogProgress ? taskDialog : null) {
+      const text = [feedback.text, statusReadError].filter(Boolean).join('\n');
+      const tone = statusReadError ? 'error' : feedback.tone;
       statusText.textContent = text; status.dataset.tone = tone;
-      if (taskDialog && showDialogProgress) { taskDialog.feedback.textContent = text; taskDialog.feedback.dataset.tone = tone; }
+      if (dialog) { dialog.feedback.textContent = text; dialog.feedback.dataset.tone = tone; }
+    }
+    function message(text, tone = 'info') {
+      feedback = { text, tone }; statusReadError = ''; renderFeedback();
     }
     function updateFooter() { footer.hidden = ![...footer.children].some((item) => !item.hidden); }
     function checked(result) {
@@ -26,36 +32,40 @@
       }
       return result;
     }
+    function reportFeedback(report) {
+      if (!report) return '';
+      switch (report.status) {
+        case 'saved': return `错误报告已保存：${report.relativePath || report.fileName}${report.pendingArchiveHandoff ? '\n文件已保存，归档仍待完成。' : ''}`;
+        case 'failed': return `错误报告保存失败：${report.message || '请检查任务详情后重试'}`;
+        case 'pending': return `错误报告发布状态待核验：${report.message || '请完成恢复后查看任务详情'}`;
+        case 'unavailable': return `本次无可用的结构化错误报告：${report.message || '请根据原始错误信息处理'}`;
+        default: return '';
+      }
+    }
+    function resultFeedback(text, result) {
+      const summary = result?.summary;
+      const counts = summary && Number.isSafeInteger(summary.scannedDataRows) && Number.isSafeInteger(summary.acceptedRows)
+        ? `扫描 ${summary.scannedDataRows} 行，接受 ${summary.acceptedRows} 行` : '';
+      return [text, counts, reportFeedback(result?.errorReport), result?.cleanupPending ? '仍有收尾未决，请重试恢复。' : ''].filter(Boolean).join('\n');
+    }
     function showError(error) {
-      const text = error?.message || '操作未完成，请重试'; message(text, 'error');
+      const text = resultFeedback(error?.message || '操作未完成，请重试', error?.result); message(text, 'error');
       const dialog = [...dialogs].at(-1); if (dialog) { dialog.feedback.textContent = text; dialog.feedback.dataset.tone = 'error'; }
     }
-    function setBusy(value, importing = false) {
-      busy = value;
+    function setBusy(value) {
+      busy = value; panel.setAttribute('aria-busy', String(value));
       if (value) {
         taskDialog = [...dialogs].filter((dialog) => dialog.open).at(-1) || null;
         taskFocus = doc.activeElement;
         if (!showDialogProgress && taskDialog) taskDialog.feedback.textContent = '';
-        if (importing && !taskDialog) {
-          importButton.hidden = true; cancelButton.textContent = '取消导入';
-          actionPair.insertBefore(cancelButton, importButton);
-        } else {
-          // showModal 会让弹窗外的控件失去交互能力；取消必须在当前最上层弹窗中。
-          cancelButton.textContent = taskDialog ? '取消' : '取消当前操作';
-          cancelButton.classList.toggle('small', Boolean(taskDialog));
-          (taskDialog?.footer.querySelector('.bizop-cancel-slot') || taskDialog?.footer.querySelector('.bizop-modal-actions') || taskDialog?.footer || footer).append(cancelButton);
-        }
       }
+      taskDialog?.setAttribute('aria-busy', String(value));
       for (const element of [panel, ...dialogs].flatMap((scope) => [...scope.querySelectorAll('button,input,select')])) {
-        if (element === cancelButton) continue;
         if (value) { if (!oldDisabled.has(element)) oldDisabled.set(element, element.disabled); element.disabled = true; }
         else if (oldDisabled.has(element)) { element.disabled = oldDisabled.get(element); oldDisabled.delete(element); }
       }
-      cancelButton.hidden = !value; cancelButton.disabled = false;
-      cancelButton.setAttribute('aria-label', value && importing ? '取消导入' : '取消当前操作');
-      if (value) { updateFooter(); cancelButton.focus(); }
-      else {
-        footer.append(cancelButton); cancelButton.textContent = '取消当前操作'; cancelButton.classList.remove('small'); importButton.hidden = false; taskDialog = null;
+      if (!value) {
+        taskDialog = null;
         if (taskFocus?.isConnected && !taskFocus.disabled) taskFocus.focus();
         taskFocus = null;
       }
@@ -63,27 +73,25 @@
     }
     async function perform(label, work, { dialogProgress = true } = {}) {
       if (busy) return null;
-      showDialogProgress = dialogProgress;
-      activeRequest = `ui-${root.crypto.randomUUID()}`; cancelRequested = false;
-      setBusy(true, label === '导入文件'); message(`${label}，正在等待后台处理…`);
+      showDialogProgress = dialogProgress; hasTaskFeedback = true;
+      const requestId = `ui-${root.crypto.randomUUID()}`;
+      setBusy(true); message(`${label}，正在等待后台处理…`);
+      ((showDialogProgress ? taskDialog?.feedback : taskDialog) || status).focus();
       try {
-        const result = await work(activeRequest, () => cancelRequested);
-        if (result?.reportRef) { reportRef = result.reportRef; reportButton.hidden = false; }
-        checked(result);
-        message(result.status === 'cancelled' ? '操作已取消' : `${label}完成${result.reused ? '，使用已存在的相同结果' : ''}${result.cleanupPending ? '；仍有收尾未决，请重试恢复' : ''}`, result.cleanupPending ? 'warning' : 'success');
-        if (result.summary) message(`${label}${result.status === 'ok' ? '完成' : '未完成'}：扫描 ${result.summary.scannedDataRows} 行，接受 ${result.summary.acceptedRows} 行`, result.status === 'ok' ? 'success' : 'warning');
+        const result = checked(await work(requestId));
+        const warning = result.cleanupPending || (result.errorReport && (result.errorReport.status !== 'saved' || result.errorReport.pendingArchiveHandoff));
+        message(resultFeedback(result.status === 'cancelled' ? '操作已取消' : `${label}完成${result.reused ? '，使用已存在的相同结果' : ''}`, result),
+          warning ? 'warning' : result.status === 'cancelled' ? 'info' : 'success');
         return result;
-      } catch (error) {
-        if (error.result?.reportRef) { reportRef = error.result.reportRef; reportButton.hidden = false; }
-        showError(error); return null;
-      } finally { activeRequest = null; setBusy(false); await refreshStatus(false); }
+      } catch (error) { showError(error); return null; }
+      finally { setBusy(false); await refreshStatus(false); }
     }
     function modal(title, className = '') {
       const dialog = node('dialog', undefined, `bizop-v327-dialog vcc-fin-op-dialog ${className}`.trim());
-      dialog.setAttribute('aria-label', title);
+      dialog.setAttribute('aria-label', title); dialog.tabIndex = -1;
       const header = node('div', undefined, 'dialog-header'); const heading = node('h2', title, 'dialog-title');
       const dismiss = button('×', () => dialog.close(), 'icon-close'); dismiss.setAttribute('aria-label', '关闭'); header.append(heading, dismiss);
-      const body = node('div', undefined, 'bizop-modal-body vcc-fin-op-dialog-body'); const feedback = node('p', '', 'bizop-feedback'); feedback.setAttribute('role', 'status');
+      const body = node('div', undefined, 'bizop-modal-body vcc-fin-op-dialog-body'); const feedback = node('p', '', 'bizop-feedback'); feedback.setAttribute('role', 'status'); feedback.tabIndex = -1;
       const footer = node('div', undefined, 'bizop-modal-footer dialog-actions right'); const close = button('关闭', () => dialog.close(), 'secondary-btn small');
       footer.append(close); dialog.append(header, body, feedback, footer); dialog.feedback = feedback; dialog.body = body; dialog.footer = footer;
       dialog.addEventListener('cancel', (event) => { if (busy) event.preventDefault(); });
@@ -98,9 +106,9 @@
       table.append(thead, tbody); scroll.append(table); return scroll;
     }
     async function exportObject(outputKind, objectId) {
-      const result = await perform('导出文件', async (requestId, cancelled) => {
+      const result = await perform('导出文件', async (requestId) => {
         const picked = checked(await api.pickExport({ outputKind, objectId }));
-        if (picked.status === 'cancelled' || cancelled()) return { status: 'cancelled' };
+        if (picked.status === 'cancelled') return { status: 'cancelled' };
         return checked(await api.exportWorkbook(outputKind, { requestId, selectionRef: picked.selectionRef }));
       }, { dialogProgress: outputKind !== 'RESULT_FULL' });
       const originalNames = { RESULT_FULL: '结果原表', OP_RAW: 'OP 校验原表', FLOW_RAW: '流水校验原表' };
@@ -113,9 +121,9 @@
       return result;
     }
     async function importFiles() {
-      await perform('导入文件', async (requestId, cancelled) => {
+      await perform('导入文件', async (requestId) => {
         const picked = checked(await api.pickFiles());
-        if (picked.status === 'cancelled' || cancelled()) return { status: 'cancelled' };
+        if (picked.status === 'cancelled') return { status: 'cancelled' };
         return await api.importFiles({ requestId, selectionRef: picked.selectionRef });
       });
     }
@@ -169,7 +177,7 @@
       }
       const details = node('div'); const run = button('确认运行', async () => {
         const result = await perform('区间核对', (requestId) => api.run({ requestId, selectionRef: preflight.selectionRef }));
-        if (result?.status === 'ok') dialog.close(); else { preflight = null; run.disabled = true; }
+        if (result?.status === 'ok') dialog.close(); else { preflight = null; run.disabled = true; precheck.focus(); }
       }, 'primary-btn small'); let preflight = null; let preflightVersion = 0; run.disabled = true;
       const precheck = button('检查所需数据', async () => {
         preflight = null; run.disabled = true; details.replaceChildren(); precheck.disabled = true; const version = ++preflightVersion;
@@ -183,7 +191,7 @@
       for (const item of [start, end]) item.addEventListener('change', () => { preflightVersion += 1; preflight = null; run.disabled = true; details.replaceChildren(); });
       dialog.body.append(fields, details);
       const actions = node('div', undefined, 'bizop-modal-actions'); actions.append(run, dialog.footer.firstChild);
-      const checks = node('div', undefined, 'bizop-modal-actions'); checks.append(precheck, node('div', undefined, 'bizop-cancel-slot'));
+      const checks = node('div', undefined, 'bizop-modal-actions'); checks.append(precheck);
       dialog.footer.replaceChildren(checks, actions);
     }
     async function latestMonth() { const result = checked(await api.months({ limit: 1 })); return result.months[0] || new Date().toISOString().slice(0, 7); }
@@ -205,7 +213,7 @@
       month.addEventListener('change', () => load().catch(showError));
       const fields = node('div', undefined, 'bizop-result-fields'); fields.append(field('操作月份', month), field('结果表表名', choice));
       const actions = node('div', undefined, 'bizop-modal-actions'); actions.append(exportBtn, dialog.footer.firstChild);
-      dialog.body.append(fields, next); dialog.footer.replaceChildren(node('div', undefined, 'bizop-cancel-slot'), actions); await load();
+      dialog.body.append(fields, next); dialog.footer.replaceChildren(actions); await load();
     }
     function openInputExport({ initialKind = 'OP_RAW' } = {}) {
       const dialog = modal('导出数据', 'vcc-fin-op-export-dialog bizop-results-dialog bizop-input-export-dialog'); const kind = select([['OP_RAW', 'OP 原表'], ['OP_CHECK', 'OP 校验表'], ['FLOW_RAW', '流水原表'], ['FLOW_CHECK', '流水校验表']]);
@@ -217,7 +225,7 @@
         const current = checked(await api.currentInput({ kind: kind.value.split('_')[0], dataDate: date.value }));
         if ((await exportObject(kind.value, current.objectId))?.status === 'ok') dialog.close();
       }, 'primary-btn small'), back);
-      dialog.footer.replaceChildren(node('div', undefined, 'bizop-cancel-slot'), actions);
+      dialog.footer.replaceChildren(actions);
     }
     async function showDelete(selection, refresh) {
       const preview = checked(await api.deletePreview(selection)); const dialog = modal('确认删除影响', 'bizop-delete-dialog');
@@ -308,53 +316,46 @@
       }
       for (const item of [month, kind]) item.addEventListener('change', () => load().catch(showError));
       pane.append(toolbar, content); layout.append(nav, pane); dialog.body.append(layout);
-      const paging = node('div', undefined, 'vcc-fin-op-manager-footer-left'); paging.append(pageField, node('div', undefined, 'bizop-cancel-slot'));
+      const paging = node('div', undefined, 'vcc-fin-op-manager-footer-left'); paging.append(pageField);
       const actions = node('div', undefined, 'vcc-fin-op-manager-footer-right');
       actions.append(choose, del, button('导出', () => openInputExport({ initialKind: view === 'RESULT' ? 'OP_RAW' : `${kind.value}_${view}` }), 'secondary-btn small'), button('返回', () => dialog.close(), 'secondary-btn small'));
       dialog.footer.classList.add('vcc-fin-op-manager-footer'); dialog.footer.replaceChildren(paging, actions);
       await load();
     }
     panel.classList.remove('pending-board'); panel.classList.add('acquiring-bill-currency-board', 'bizop-v327-board');
-    const status = node('div', undefined, 'status-box bizop-status'); status.setAttribute('role', 'status');
+    const status = node('div', undefined, 'status-box bizop-status'); status.setAttribute('role', 'status'); status.tabIndex = -1;
     const statusContent = node('span', undefined, 'status-box-content'); const statusText = node('span', '欢迎使用小助手', 'status-box-text'); statusContent.append(statusText); status.append(statusContent);
     const importButton = button('导入文件', importFiles); const runButton = button('开始运行', openRun, 'primary-btn');
     const resultButton = button('导出校验结果表', openResults); const managerButton = button('数据管理', openManager);
-    const reportButton = button('导出错误报告', () => exportObject('ERRORS', reportRef)); reportButton.hidden = true;
     const retry = button('重试恢复', async () => {
       const result = await perform('恢复检查', async () => { const state = await api.retryRecovery(); return { status: state.ready ? 'ok' : 'error', message: state.ready ? '恢复已完成' : '仍有未决任务或文件，请查看任务详情后重试' }; });
       if (result?.status === 'ok') await refreshStatus(true);
     });
-    const cancelButton = button('取消当前操作', async () => {
-      if (!activeRequest || cancelRequested) return;
-      const requestId = activeRequest; cancelRequested = true; cancelButton.disabled = true;
-      try {
-        const result = checked(await api.cancel({ requestId }));
-        if (activeRequest !== requestId) return;
-        message(result.message || '已请求取消，正在等待后台任务退出', 'warning');
-      } catch (error) {
-        if (activeRequest !== requestId) return;
-        cancelRequested = false; cancelButton.disabled = false; throw error;
-      }
-    }); cancelButton.hidden = true; cancelButton.setAttribute('aria-label', '取消当前操作');
     const actionPair = node('div', undefined, 'pending-action-pair'); actionPair.append(importButton, runButton);
     for (const [left, right] of [[actionPair, resultButton], [status, managerButton]]) {
       const row = node('div', undefined, 'control-row'); const leftCell = node('div', undefined, 'cell left'); const rightCell = node('div', undefined, 'cell right');
       leftCell.append(left); rightCell.append(right); row.append(leftCell, rightCell); panel.append(row);
     }
-    const footer = node('div', undefined, 'bizop-toolbar bizop-secondary'); footer.append(reportButton, retry, cancelButton);
+    const footer = node('div', undefined, 'bizop-toolbar bizop-secondary'); footer.append(retry);
     panel.append(footer);
     async function refreshStatus(show = true) {
       if (!api) return;
       try {
         const info = await api.status(); enabled = info.mode === 'ACTIVE'; recoveryReady = info.recoveryReady === true;
-        if (!busy) for (const btn of [importButton, runButton, resultButton, managerButton, reportButton]) btn.disabled = !enabled || !recoveryReady;
+        if (!busy) for (const btn of [importButton, runButton, resultButton, managerButton]) btn.disabled = !enabled || !recoveryReady;
         retry.hidden = recoveryReady; retry.disabled = !enabled || busy;
         updateFooter();
-        if (show && !enabled) message('新区间功能正在准备，完成恢复与升级后开放入口', 'warning');
-        else if (show && !recoveryReady) message('存在未决任务或文件，完成恢复后可继续操作', 'warning');
-        else if (show) message('欢迎使用小助手');
+        if (statusReadError) { statusReadError = ''; renderFeedback([...dialogs].at(-1)); }
+        if (show && !hasTaskFeedback && !enabled) message('新区间功能正在准备，完成恢复与升级后开放入口', 'warning');
+        else if (show && !hasTaskFeedback && !recoveryReady) message('存在未决任务或文件，完成恢复后可继续操作', 'warning');
+        else if (show && !hasTaskFeedback) message('欢迎使用小助手');
         return info;
-      } catch (error) { enabled = false; for (const btn of [importButton, runButton, resultButton, managerButton, reportButton]) btn.disabled = true; showError(error); return null; }
+      } catch (error) {
+        enabled = false; for (const btn of [importButton, runButton, resultButton, managerButton, retry]) btn.disabled = true;
+        // 状态故障独立于原任务反馈，重试时替换故障提示，恢复后还原原任务结果。
+        statusReadError = `模块状态读取失败：${error?.message || '无法取得当前状态'}；请重新进入本模块重试。`;
+        renderFeedback([...dialogs].at(-1)); return null;
+      }
     }
     async function setSelected(value) {
       selected = value; const version = ++routeVersion; panel.hidden = true;

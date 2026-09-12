@@ -14,14 +14,15 @@ const { createTaskPolicyRegistry } = require('../../../src/main-process/archive-
 function wire(f, options = {}) {
   const handlers = new Map(); const sender = Object.assign(new EventEmitter(), { id: 1, mainFrame: {} });
   const window = { webContents: sender }; const event = { sender, senderFrame: sender.mainFrame };
-  let paths = []; let target = path.join(f.outputRoot, 'chosen.xlsx');
+  let paths = []; let target = path.join(f.outputRoot, 'chosen.xlsx'); const calls = { saveDialog: 0 };
   registerBizOpV327Handlers({ ipcMain: { handle(key, handler) { assert.equal(handlers.has(key), false); handlers.set(key, handler); } },
     // 仅隔离测试装配放行；生产模块仍由真实 mode 门禁控制。
     getModule: () => ({ ...f.module, assertBusinessEnabled() {}, ...options }), getTaskLifecycle: () => f.lifecycle,
-    getRuntime: () => f.runtime, getWindow: () => window, businessOperationRegistry: createBusinessOperationRegistry(),
+    getRuntime: () => f.runtime, getWindow: () => window, getStorageRoot: () => f.outputRoot,
+    businessOperationRegistry: createBusinessOperationRegistry(),
     dialog: { async showOpenDialog() { return { canceled: !paths.length, filePaths: paths }; },
-      async showSaveDialog(_window, opts) { assert.ok(opts.defaultPath.endsWith('.xlsx')); return { canceled: !target, filePath: target }; } } });
-  return { handlers, event, paths(value) { paths = value; }, target(value) { target = value; },
+      async showSaveDialog(_window, opts) { calls.saveDialog += 1; assert.ok(opts.defaultPath.endsWith('.xlsx')); return { canceled: !target, filePath: target }; } } });
+  return { handlers, event, calls, paths(value) { paths = value; }, target(value) { target = value; },
     call(key, value, from = event) { return handlers.get(`bizOpReconV327:${key}`)(from, value); } };
 }
 test('真实 IPC 导入、预检、运行、全量发布和 KEEP_RESULTS 删除，均走 TaskLifecycle 且不回传路径或数据行', async (t) => {
@@ -119,18 +120,30 @@ test('运行月历只列当前 OP 日期，默认最近导入账期并支持跨�
 });
 
 test('IPC 六类固定 action 与诊断导出均可发布，失败导入有真实可导出的错误报告', async (t) => {
-  const f = await createExportHost(t); await seed(f, { end: '120' }); const run = await compute(f); const w = wire(f);
+  const f = await createExportHost(t); await seed(f, { end: '120' }); const run = await compute(f); let ready = true;
+  const w = wire(f, { assertBusinessEnabled() {
+    if (!ready) throw Object.assign(new Error('需要恢复'), { code: 'BIZOP_RECOVERY_REQUIRED' });
+  } });
   for (const kind of ['OP_RAW', 'FLOW_RAW', 'OP_CHECK', 'FLOW_CHECK', 'RESULT_FULL', 'RESULT_DIFF']) {
     const objectId = kind.startsWith('RESULT') ? run.runId : f.db.prepare('SELECT dataset_id FROM biz_op_v327_input_heads WHERE kind=? ORDER BY data_date LIMIT 1').get(kind.split('_')[0]).dataset_id;
     w.target(path.join(f.outputRoot, `${kind}.xlsx`)); const picked = await w.call('export:pick', { outputKind: kind, objectId });
     assert.equal(picked.status, 'ok', JSON.stringify(picked));
-    const result = await w.call(`export:${kind.toLowerCase().replace('_', '-')}`, { requestId: kind, selectionRef: picked.selectionRef });
+    const channel = `export:${kind.toLowerCase().replace('_', '-')}`; const payload = { requestId: kind, selectionRef: picked.selectionRef };
+    const result = await w.call(channel, payload);
     assert.equal(result.status, 'ok', JSON.stringify(result));
+    ready = false;
+    assert.deepEqual(await w.call(channel, payload), result);
+    assert.equal((await w.call(channel, { ...payload, requestId: `${kind}-new` })).code, 'BIZOP_RECOVERY_REQUIRED');
+    ready = true;
   }
   const bad = path.join(f.root, 'bad.xlsx'); await writeXlsx(bad, { kind: 'OP', rowCount: 1, row: () => opRow({ end: '999' }) });
   w.paths([bad]); const picked = await w.call('files:pick');
   const failed = await w.call('import', { requestId: 'bad-import', selectionRef: picked.selectionRef });
   assert.equal(failed.status, 'error'); assert.ok(failed.reportRef);
+  assert.equal(failed.errorReport.status, 'saved', JSON.stringify(failed));
+  assert.equal(w.calls.saveDialog, 6, '自动报告不打开另存为');
+  assert.equal(fs.existsSync(path.join(f.outputRoot, failed.errorReport.relativePath)), true);
+  assert.equal(JSON.stringify(failed).includes(f.root), false);
   const report = await w.call('export:pick', { outputKind: 'ERRORS', objectId: failed.reportRef }); assert.equal(report.status, 'ok', JSON.stringify(report));
   assert.equal((await w.call('export:errors', { requestId: 'errors', selectionRef: report.selectionRef })).status, 'ok');
 });
