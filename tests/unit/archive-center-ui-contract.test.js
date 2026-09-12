@@ -71,7 +71,8 @@ test.describe('v3.1.13 设置与存档中心静态契约', () => {
       'archive-center:select-retry-sources',
       'archive-center:retry-batch',
       'archive-center:change-storage-location',
-      'archive-center:set-retention-days'
+      'archive-center:set-retention-days',
+      'archive-center:set-module-retention-days'
     ]) {
       assert.ok(
         main.includes(`archiveCenterMutationIpcHandle('${channel}'`),
@@ -214,6 +215,7 @@ test.describe('v3.1.13 设置与存档中心静态契约', () => {
       ['getSettings', 'archive-center:get-settings'],
       ['changeStorageLocation', 'archive-center:change-storage-location'],
       ['setRetentionDays', 'archive-center:set-retention-days'],
+      ['setModuleRetentionDays', 'archive-center:set-module-retention-days'],
       ['getStats', 'archive-center:get-stats']
     ];
 
@@ -560,6 +562,19 @@ test.describe('v3.1.13 设置与存档中心静态契约', () => {
   test('锁定批次仍显示原到期日，不误写成永久保留', () => {
     assert.match(renderer, /\$\{String\(value\)\}（已锁定）/);
     assert.doesNotMatch(renderer, /locked === true\) return '永久保留'/);
+  });
+
+  test('批次永久期限明确显示为永久，缺失期限和锁定日期分别显示', () => {
+    const start = renderer.indexOf('function archiveCenterRetentionText(batch)');
+    const end = renderer.indexOf('\nfunction ', start + 1);
+    const formatRetention = require('node:vm').runInNewContext(
+      `(${renderer.slice(start, end)})`
+    );
+    assert.equal(formatRetention({ retentionUntil: null }), '永久');
+    assert.equal(formatRetention({ retentionUntil: null, retention: '旧值' }), '永久');
+    assert.equal(formatRetention({ retentionUntil: '2026-10-01', locked: true }), '2026-10-01（已锁定）');
+    assert.equal(formatRetention({}), '-');
+    assert.equal(formatRetention({ locked: true }), '已锁定');
   });
 
   test('文件角色使用中文语义，锁定与重试按钮异常后可恢复操作', () => {

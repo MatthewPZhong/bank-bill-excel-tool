@@ -1555,6 +1555,92 @@ test('task retentionUntil=undefined 按未提供处理，显式保留期与永�
   }
 });
 
+test('模块期限解析覆盖 task 与 legacy 创建，显式快照及已有批次不被新设置改写', async () => {
+  let configuredDays = 30;
+  const resolvedModules = [];
+  const fixture = createFixture({ resolveRetentionDays(moduleId) {
+    resolvedModules.push(moduleId);
+    return configuredDays;
+  } });
+  try {
+    const legacyInput = {
+      ...batchPayload('module-retention-legacy', { moduleId: 'toolbox', moduleCode: 'TOOLBOX' }),
+      sourceOperation: 'toolbox:split',
+      files: [{ filePath: writeSource(fixture, 'module-retention.csv', 'a,b\n1,2'), role: 'input' }]
+    };
+    const legacy = await fixture.service.createBatch(legacyInput);
+    assert.equal(legacy.ok, true);
+    assert.equal(legacy.batch.retentionUntil, '2026-08-19');
+    assert.equal(resolvedModules.at(-1), 'toolbox');
+    configuredDays = 365;
+    const repeated = await fixture.service.createBatch(legacyInput);
+    assert.equal(repeated.batch.id, legacy.batch.id);
+    assert.equal(repeated.batch.retentionUntil, '2026-08-19');
+
+    const taskPayload = {
+      ...batchPayload('module-retention-task', { moduleId: 'statement-generator' }),
+      taskKey: 'file:generate', taskRunId: 'module-retention-task-run'
+    };
+    configuredDays = null;
+    const permanent = await fixture.service.reserveTaskBatch(taskPayload);
+    assert.equal(permanent.ok, true);
+    assert.equal(permanent.batch.retentionUntil, null);
+    assert.equal(resolvedModules.at(-1), 'statement-generator');
+    const callsBeforeExplicit = resolvedModules.length;
+    for (const [index, snapshot] of [
+      { retentionDays: 90 }, { retentionDays: null },
+      { retentionDays: 'permanent' }, { retentionUntil: '2027-01-01' }
+    ].entries()) {
+      const explicit = await fixture.service.reserveTaskBatch({
+        ...taskPayload, operationKey: `module-retention-explicit-${index}`,
+        taskRunId: `module-retention-explicit-run-${index}`, ...snapshot
+      });
+      assert.equal(explicit.ok, true);
+      assert.equal(explicit.batch.retentionUntil, ['2026-10-18', null, null, '2027-01-01'][index]);
+    }
+    assert.equal(resolvedModules.length, callsBeforeExplicit);
+  } finally {
+    fixture.close();
+  }
+});
+
+test('File Task 期限使用真实 taskRun 模块，显式期限优先且永久合法', async () => {
+  let configuredDays = null;
+  const resolvedModules = [];
+  const fixture = createFixture({ resolveRetentionDays(moduleId) {
+    resolvedModules.push(moduleId);
+    return configuredDays;
+  } });
+  try {
+    const taskRun = (await fixture.service.beginTaskRun({
+      moduleId: 'statement-generator', taskKey: 'file:generate',
+      taskRunId: 'module-retention-owner-task', parentRunId: 'module-retention-owner-parent',
+      operationKey: 'module-retention-owner-operation'
+    })).taskRun;
+    const manifest = artifactManifestFromFilePlan(normalizeFilePlanV1({
+      version: 1, allocation: 'eager', inputs: [],
+      outputs: [{
+        filePath: path.join(fixture.sourceDir, 'module-retention-owner.xlsx'),
+        role: 'output', sourceOperation: 'file:generate'
+      }]
+    }));
+    const payload = {
+      taskRun, manifest, moduleId: 'toolbox', moduleCode: 'STATEMENT', moduleName: '网银账单生成'
+    };
+    const first = await fixture.service.reserveFileTaskBatch(payload);
+    assert.equal(first.ok, true);
+    assert.deepEqual(resolvedModules, ['statement-generator']);
+    assert.equal(first.batch.retentionUntil, null);
+    configuredDays = 30;
+    const replayed = await fixture.service.reserveFileTaskBatch({ ...payload, retentionDays: 90 });
+    assert.equal(replayed.ok, true);
+    assert.equal(replayed.batch.retentionUntil, null);
+    assert.equal(resolvedModules.length, 1);
+  } finally {
+    fixture.close();
+  }
+});
+
 test('手工删除与 cleanupExpired 共用 active 授权，任务终结后原批次可清理', async () => {
   let currentTime = new Date(2026, 6, 1, 12, 0, 0);
   const fixture = createFixture({ now: () => currentTime });

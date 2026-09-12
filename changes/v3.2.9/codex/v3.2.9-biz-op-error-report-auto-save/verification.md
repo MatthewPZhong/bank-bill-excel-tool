@@ -2,6 +2,8 @@
 
 ## 本地 release 集成复验（2026-09-12）
 
+本节记录首次 Biz OP 合并 `896fe12d` 的候选；后续与模块保留期限的组合验证及当前结果见 [release 记录](../../release.md)。首次候选摘要和日志继续保留为历史证据。
+
 - 源分支全部 20 个功能及验证文件已提交为 `3efe5c78e8cde10d89db90d4509d883b28d61f4f`，包含下文 review 的最终反馈修复；在独立 worktree 合入 `release/v3.2.9`，无冲突。
 - `UNIT_TEST_CONCURRENCY=2 npm run release-check` 于 2026-09-12 14:00:55 +08:00 完成，exit 0 / PASS：lint、smoke 通过；470 个单测文件，7,351 PASS / 0 FAIL / 3 SKIP；54 个集成脚本全部通过，汇总 2,500/2,500。本轮命令入口 Node 为 v24.13.0。
 - 隔离 Electron 原生 DOM 10/10 PASS，按钮位置、空工具栏、长路径换行和文本选择检查通过。
