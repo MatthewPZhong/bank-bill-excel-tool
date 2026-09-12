@@ -1,0 +1,8 @@
+{
+  "at": "2026-09-12T06:05:09.353Z",
+  "freeMemoryMiB": 1533.953125,
+  "totalMemoryMiB": 49152,
+  "budgetMiB": 0,
+  "vmStat": "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free:                              156999.\nPages active:                           1306111.\nPages inactive:                         1300465.\nPages speculative:                         4691.\nPages throttled:                              0.\nPages wired down:                        251286.\nPages purgeable:                          24889.\n\"Translation faults\":               16877919782.\nPages copy-on-write:                 1189037786.\nPages zero filled:                   6683662121.\nPages reactivated:                     31031572.\nPages purged:                          38649455.\nFile-backed pages:                      1486695.\nAnonymous pages:                        1124572.\nPages stored in compressor:              400293.\nPages occupied by compressor:             81505.\nDecompressions:                         7753448.\nCompressions:                          12222294.\nPageins:                              396613826.\nPageouts:                               7052684.\nSwapins:                                1085124.\nSwapouts:                               1550860.\n",
+  "memoryPressure": "The system has 51539607552 (3145728 pages with a page size of 16384).\nSystem-wide memory free percentage: 89%\n"
+}

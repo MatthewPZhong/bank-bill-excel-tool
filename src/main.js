@@ -36,7 +36,8 @@ const os = require('node:os'); // v2.1.12 β.1-T3：多 worker D33 OOM clamp（c
 const { AsyncLocalStorage } = require('node:async_hooks');
 const XLSX = require('xlsx');
 const { performance } = require('node:perf_hooks');
-const { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, Notification, powerMonitor, shell } = require('electron');
+const { createDarkModeScheduler, THEME_BACKGROUND_COLORS } = require('./main-process/dark-mode-scheduler');
 const {
   parsePackagedRuntimeRequest
 } = require('./main-process/background-execution/canary/packaged-runtime-request');
@@ -747,6 +748,7 @@ if (!packagedRuntimeModeSelected && process.platform === 'win32') {
 }
 
 let mainWindow = null;
+let darkModeScheduler = null;
 let applicationStartupComplete = false;
 let mainWindowReady = false;
 let initialStartupWebContentsId = null;
@@ -4288,7 +4290,7 @@ function createWindow(options = {}) {
     minWidth: 1080,
     minHeight: 760,
     frame: false,
-    backgroundColor: '#f3efe6',
+    backgroundColor: THEME_BACKGROUND_COLORS[darkModeScheduler.refresh().effectiveTheme],
     show: false,
     icon: windowIcon,
     webPreferences: {
@@ -5073,6 +5075,7 @@ function registerAppHandlers() {
       previewModal: process.env.APP_CAPTURE_PATH ? (process.env.APP_PREVIEW_MODAL || '') : '',
       // v2.0.0-beta.2 F1 / v2.1.15 W4：UI 风格恒为 'Clear'（General 已弃用）；renderer 启动时立即应用
       uiStyle: database.getUiStyle() || 'Clear',
+      ...darkModeScheduler.refresh(),
       // 上次使用模块；renderer 启动时恢复
       currentModule: database.getCurrentModule() || 'statement-generator',
       // v2.1.0-beta.3 T4：对账单ReconID修复模块「账单类别」持久化（business | gateway | null）
@@ -5087,6 +5090,13 @@ function registerAppHandlers() {
   //   getUiStyle 兜底后恒返回 'Clear'，renderer 启动 applyUiStyle 仍可用。
   ipcMain.handle('settings:get-ui-style', () => {
     return database.getUiStyle() || 'Clear';
+  });
+  ipcMain.handle('settings:set-dark-mode-schedule', (_event, config) => {
+    try {
+      return { status: 'ok', ...darkModeScheduler.setSchedule(config) };
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
   });
   ipcMain.handle('settings:set-current-module', (_event, moduleId) => {
     try {
@@ -22257,6 +22267,22 @@ async function initializeApplication() {
     recoverVccStorageMigration({ journalPath: vccStorageMigrationJournalPath() });
     database = new AppDatabase(dataPath);
     database.init({ onStartupPhase: recordStartupPhase });
+    darkModeScheduler = createDarkModeScheduler({
+      readSchedule: () => database.getDarkModeSchedule(),
+      writeSchedule: (config) => database.setDarkModeSchedule(config),
+      nativeTheme,
+      getWindows: () => BrowserWindow.getAllWindows(),
+      focusSource: app,
+      powerMonitor,
+      onChanged: (snapshot) => {
+        for (const window of BrowserWindow.getAllWindows()) {
+          if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
+            window.webContents.send('settings:dark-mode-schedule-changed', snapshot);
+          }
+        }
+      }
+    });
+    darkModeScheduler.start();
     markStartupMetric(STARTUP_METRIC_MARKS.databaseReady);
     // Recovery Contract startup boundary：任何 Archive owner recovery、cleanup 或业务 IPC
     // 之前冻结注册器并预检；BizOP 未决时保留同一预算，在首个 Archive owner 阶段完成全量扫描。
@@ -23284,6 +23310,10 @@ if (!packagedRuntimeModeSelected) {
         normalQuitContinuation = true;
         app.quit();
       });
+  });
+
+  app.on('will-quit', () => {
+    if (darkModeScheduler) darkModeScheduler.stop();
   });
 
   app.on('window-all-closed', () => {

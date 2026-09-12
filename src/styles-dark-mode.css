@@ -1,0 +1,65 @@
+/* 配色来源：用户提供的 v3.2.9-dark-mode.html；布局仍由 Clear 样式负责。 */
+:root {
+ --g-blue:#4285f4;--g-purple:#9b72f2;--g-pink:#e95ea2;--g-yellow:#f6b93b;
+ --bg:#f9fafc;--bg-soft:#f1f4f9;--panel:#fff;--panel-strong:#fff;--input:#fff;
+ --line:#dbe0e8;--line-soft:#e7ebf1;--line-strong:#bec8d9;
+ --text:#202735;--muted:#5b6779;--dim:#8791a0;
+ --primary:#0b57d0;--primary-hover:#0849b4;--on-primary:#fff;--primary-soft:#e6eefe;
+ --chip-bg:#f0f3f8;--chip-active-bg:#e3edff;--chip-active-text:#164caa;
+ --danger:#b82d3a;--danger-soft:#fff0f0;--danger-border:#f4c7cb;
+ --success:#207342;--success-soft:#eaf6ef;--success-border:#bfdfca;
+ --warning:#946000;--warning-soft:#fff7e6;--warning-border:#efdcad;
+ --overlay:rgba(24,33,51,.33);--shadow-sm:0 1px 3px rgba(31,46,72,.04);
+ --shadow-md:0 8px 36px rgba(35,56,87,.055),0 1px 2px rgba(35,56,87,.03);
+ --shadow-lg:0 24px 90px rgba(12,23,43,.16);--header:rgba(249,250,252,.86);
+ --glow-a:rgba(105,152,229,.11);--glow-b:rgba(153,123,213,.07);--row-hover:#f5f8fe;
+
+ --primary-strong:var(--primary-hover);--on-danger:var(--bg);
+ --select-arrow:url("data:image/svg+xml,%3Csvg width='16' height='16' viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M7 10l5 5 5-5' fill='none' stroke='%235b6779' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+:root[data-theme="dark"] {
+ --bg:#111419;--bg-soft:#1a1e25;--panel:#1c2027;--panel-strong:#232830;--input:#191d24;
+ --line:#373e49;--line-soft:#2c323b;--line-strong:#515e71;
+ --text:#e6eaf1;--muted:#a6afbf;--dim:#778295;
+ --primary:#adc8ff;--primary-hover:#c3d7ff;--on-primary:#122c56;--primary-soft:#24354f;
+ --chip-bg:#252b35;--chip-active-bg:#24344d;--chip-active-text:#b4ceff;
+ --danger:#ffadb5;--danger-soft:#36252c;--danger-border:#65404b;
+ --success:#91d6ae;--success-soft:#20342a;--success-border:#385446;
+ --warning:#e6c17e;--warning-soft:#332d22;--warning-border:#5d4e32;
+ --overlay:rgba(3,6,11,.65);--shadow-sm:0 1px 3px rgba(0,0,0,.12);
+ --shadow-md:0 12px 40px rgba(0,0,0,.13),0 1px 2px rgba(0,0,0,.1);
+ --shadow-lg:0 24px 100px rgba(0,0,0,.5);--header:rgba(17,20,25,.88);
+ --glow-a:rgba(76,107,167,.095);--glow-b:rgba(103,79,144,.065);--row-hover:#252c37;
+ --select-arrow:url("data:image/svg+xml,%3Csvg width='16' height='16' viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M7 10l5 5 5-5' fill='none' stroke='%23a6afbf' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+/* 仅覆盖组件颜色；输入、表格与业务标记保留各自的含义。 */
+html, body { background-color: var(--bg); color: var(--text); }
+:root[data-theme="dark"] .app-shell { background-color: var(--bg); }
+.window-bar { background: var(--header); }
+.gemini-gradient { color: var(--text); }
+.modal-overlay, .vcc-fin-op-overlay, .bizop-v327-dialog::backdrop { background: var(--overlay); }
+.modal-card, .bizop-v327-dialog { box-shadow: var(--shadow-lg); }
+.primary-btn, .palette-action.solid { color: var(--on-primary); }
+.danger-btn, .pending-rule-confirm-card .danger-btn.small { color: var(--on-danger); }
+.bizop-danger { color: var(--on-danger) !important; }
+:root[data-theme="dark"] .primary-btn { box-shadow: var(--shadow-sm); }
+:root[data-theme="dark"] :where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]), select, textarea) { background-color: var(--input); color: var(--text); border-color: var(--line); }
+:root[data-theme="dark"] :is(input, select, textarea):disabled { color: var(--dim); background-color: var(--chip-bg); }
+:root[data-theme="dark"] input::placeholder, :root[data-theme="dark"] textarea::placeholder { color: var(--dim); }
+:root[data-theme="dark"] :is(button, input, select, textarea, a):focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+:root[data-theme="dark"] input[type="checkbox"], :root[data-theme="dark"] input[type="radio"] { accent-color: var(--primary); }
+:root[data-theme="dark"] .status-box[data-tone="success"], :root[data-theme="dark"] .pending-status[data-tone="success"] { color: var(--success); border-color: var(--success-border); background-color: var(--success-soft); }
+:root[data-theme="dark"] .status-box[data-tone="error"], :root[data-theme="dark"] .pending-status[data-tone="error"] { color: var(--danger); border-color: var(--danger-border); background-color: var(--danger-soft); }
+:root[data-theme="dark"] .status-box[data-tone="warning"], :root[data-theme="dark"] .new-account-status-box.is-warning { color: var(--warning); border-color: var(--warning-border); background-color: var(--warning-soft); }
+:root[data-theme="dark"] .archive-center-feedback[data-tone="error"], :root[data-theme="dark"] .archive-delete-confirm-error { color: var(--danger); border-color: var(--danger-border); background: var(--danger-soft); }
+:root[data-theme="dark"] .archive-center-feedback[data-tone="success"] { color: var(--success); border-color: var(--success-border); background: var(--success-soft); }
+:root[data-theme="dark"] .archive-center-feedback[data-tone="info"] { color: var(--primary); border-color: var(--line-strong); background: var(--primary-soft); }
+:root[data-theme="dark"] .archive-center-warning { color: var(--warning); border-color: var(--warning-border); background: var(--warning-soft); }
+:root[data-theme="dark"] .recon-id-fix-board :is(.recon-id-fix-scenario-select,.recon-id-fix-bill-category-select):disabled { background-color: var(--chip-bg); color: var(--dim); }
+:root[data-theme="dark"] .new-account-palette-trigger { background: var(--panel); }
+:root[data-theme="dark"] .data-table tbody tr:hover { background-color: var(--row-hover); }
+:root[data-theme="dark"] tr.is-editing td { background: var(--primary-soft); }
+:root[data-theme="dark"] ::-webkit-scrollbar-thumb { background-color: var(--line-strong); }
+:root[data-theme="dark"] ::-webkit-scrollbar-track { background-color: transparent; }
+:root[data-theme="dark"] ::selection { background: var(--primary-soft); color: var(--text); }

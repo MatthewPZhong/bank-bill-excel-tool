@@ -1,5 +1,9 @@
 // v2.1.9 SR-log-1 (T32h)：替换 console.warn → appendModuleLog 双写
 const { appendModuleLog } = require('../logger');
+const {
+  normalizeDarkModeSchedule,
+  validateDarkModeSchedule
+} = require('../../shared/dark-mode-schedule');
 
 function getSetting(db, settingKey) {
   const row = db
@@ -60,6 +64,23 @@ function getBackgroundConfig(db) {
 
 function setBackgroundConfig(db, backgroundConfig) {
   setSetting(db, 'background_config', JSON.stringify(backgroundConfig));
+}
+
+const DARK_MODE_SCHEDULE_KEY = 'dark_mode_schedule';
+
+function getDarkModeSchedule(db) {
+  const raw = getSetting(db, DARK_MODE_SCHEDULE_KEY);
+  try {
+    return normalizeDarkModeSchedule(raw ? JSON.parse(raw) : null);
+  } catch (_error) {
+    return normalizeDarkModeSchedule(null);
+  }
+}
+
+function setDarkModeSchedule(db, config) {
+  const valid = validateDarkModeSchedule(config);
+  setSetting(db, DARK_MODE_SCHEDULE_KEY, JSON.stringify(valid));
+  return valid;
 }
 
 const AUTO_UPDATE_ENABLED_KEY = 'auto_update_enabled';
@@ -497,6 +518,7 @@ module.exports = {
   DEFAULT_ENABLED_MODULES,
   ensureUiStyleDefault,
   getBackgroundConfig,
+  getDarkModeSchedule,
   getAutoUpdateEnabled,
   getCurrentModule,
   getEnabledModules,
@@ -507,6 +529,8 @@ module.exports = {
   listAccountMappings,
   saveAccountMappings,
   setBackgroundConfig,
+  setDarkModeSchedule,
+  DARK_MODE_SCHEDULE_KEY,
   setAutoUpdateEnabled,
   setCurrentModule,
   setEnabledModules,

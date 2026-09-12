@@ -1047,6 +1047,14 @@ class AppDatabase {
     return settingsRepository.setBackgroundConfig(this.db, backgroundConfig);
   }
 
+  getDarkModeSchedule() {
+    return settingsRepository.getDarkModeSchedule(this.db);
+  }
+
+  setDarkModeSchedule(config) {
+    return settingsRepository.setDarkModeSchedule(this.db, config);
+  }
+
   getAutoUpdateEnabled() {
     return settingsRepository.getAutoUpdateEnabled(this.db);
   }

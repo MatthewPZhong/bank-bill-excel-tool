@@ -163,6 +163,13 @@ contextBridge.exposeInMainWorld('desktopApi', {
     reset: () => ipcRenderer.invoke('background:reset')
   },
   settings: {
+    setDarkModeSchedule: (config) => ipcRenderer.invoke('settings:set-dark-mode-schedule', config),
+    onDarkModeScheduleChanged: (listener) => {
+      if (typeof listener !== 'function') return () => {};
+      const handler = (_event, snapshot) => listener(snapshot);
+      ipcRenderer.on('settings:dark-mode-schedule-changed', handler);
+      return () => ipcRenderer.removeListener('settings:dark-mode-schedule-changed', handler);
+    },
     // v2.1.15 W4：弃用 General 风格，移除「切换页面风格」入口。setUiStyle 写链路已删；
     //   getUiStyle 保留兜底（main 端恒返回 'Clear'），renderer 启动 applyUiStyle 仍可用。
     getUiStyle: () => ipcRenderer.invoke('settings:get-ui-style'),

@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark light">
+<meta name="description" content="清结算小助手 v3.2.9 夜间模式交互原型。单文件离线预览，不执行真实业务操作。">
+<title>清结算小助手 · v3.2.9 夜间模式</title>
+<!--
+  v3.2.9 夜间模式 · 独立 HTML 交互原型
+  布局参考 MatthewPZhong/bank-bill-excel-tool 的 main (package.json 3.2.8)，2026-09-12 读取。
+  index.html SHA: b93457cb81811df41052c426fcccb024d59c3972
+  src/styles-gemini.css SHA: 91187ee4b247ad899ae8204b4682f186de78e73b
+  保留：居中标题、顶部模块切换、主面板槽位、胶囊按钮、底部工具入口。
+  新增原型：主题入口、外观设置、深浅语义色及示例弹窗。不是生产代码补丁。
+  所有业务数据均为合成示例。文件选择仅取文件名，不读取、不上传、不写入、不删除文件。
+  localStorage 仅保存原型的外观模式及浅色背景偏好；不访问真实应用配置。
+-->
+<script>
+(function () {
+  var p = 'dark';
+  try { var s = localStorage.getItem('bbet-v329-preview-theme'); if (['light','dark','system'].indexOf(s) >= 0) p = s; } catch (_) {}
+  var t = p === 'system' ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : p;
+  document.documentElement.dataset.theme = t;
+  document.documentElement.style.colorScheme = t;
+  window.__themePreference = p;
+})();
+</script>
+<style>
+:root{
+ --g-blue:#4285f4;--g-purple:#9b72f2;--g-pink:#e95ea2;--g-yellow:#f6b93b;
+ --bg:#f9fafc;--bg-soft:#f1f4f9;--panel:#fff;--panel-strong:#fff;--input:#fff;
+ --line:#dbe0e8;--line-soft:#e7ebf1;--line-strong:#bec8d9;
+ --text:#202735;--muted:#5b6779;--dim:#8791a0;
+ --primary:#0b57d0;--primary-hover:#0849b4;--on-primary:#fff;--primary-soft:#e6eefe;
+ --chip-bg:#f0f3f8;--chip-active-bg:#e3edff;--chip-active-text:#164caa;
+ --danger:#b82d3a;--danger-soft:#fff0f0;--danger-border:#f4c7cb;
+ --success:#207342;--success-soft:#eaf6ef;--success-border:#bfdfca;
+ --warning:#946000;--warning-soft:#fff7e6;--warning-border:#efdcad;
+ --overlay:rgba(24,33,51,.33);--shadow-sm:0 1px 3px rgba(31,46,72,.04);
+ --shadow-md:0 8px 36px rgba(35,56,87,.055),0 1px 2px rgba(35,56,87,.03);
+ --shadow-lg:0 24px 90px rgba(12,23,43,.16);--header:rgba(249,250,252,.86);
+ --glow-a:rgba(105,152,229,.11);--glow-b:rgba(153,123,213,.07);--row-hover:#f5f8fe;
+ --radius-sm:8px;--radius-md:16px;--radius-lg:28px;--pill:999px;
+}
+:root[data-theme="dark"]{
+ --bg:#111419;--bg-soft:#1a1e25;--panel:#1c2027;--panel-strong:#232830;--input:#191d24;
+ --line:#373e49;--line-soft:#2c323b;--line-strong:#515e71;
+ --text:#e6eaf1;--muted:#a6afbf;--dim:#778295;
+ --primary:#adc8ff;--primary-hover:#c3d7ff;--on-primary:#122c56;--primary-soft:#24354f;
+ --chip-bg:#252b35;--chip-active-bg:#24344d;--chip-active-text:#b4ceff;
+ --danger:#ffadb5;--danger-soft:#36252c;--danger-border:#65404b;
+ --success:#91d6ae;--success-soft:#20342a;--success-border:#385446;
+ --warning:#e6c17e;--warning-soft:#332d22;--warning-border:#5d4e32;
+ --overlay:rgba(3,6,11,.65);--shadow-sm:0 1px 3px rgba(0,0,0,.12);
+ --shadow-md:0 12px 40px rgba(0,0,0,.13),0 1px 2px rgba(0,0,0,.1);
+ --shadow-lg:0 24px 100px rgba(0,0,0,.5);--header:rgba(17,20,25,.88);
+ --glow-a:rgba(76,107,167,.095);--glow-b:rgba(103,79,144,.065);--row-hover:#252c37;
+}
+*{box-sizing:border-box} [hidden]{display:none!important}
+html{min-height:100%;scrollbar-gutter:stable}
+body{margin:0;min-height:100vh;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;font-size:14px;line-height:1.55;color:var(--text);background:var(--bg)}
+button,input,select{font:inherit}button{cursor:pointer}button:disabled{cursor:not-allowed}button,a,input,select{ -webkit-tap-highlight-color:transparent }
+button{color:inherit}button:focus-visible,select:focus-visible,input:focus-visible,a:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--primary);outline-offset:4px}
+button{transition:background .16s,border-color .16s,color .16s,box-shadow .16s}input,select{color:var(--text)}
+::selection{background:var(--primary-soft);color:var(--text)}
+::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:var(--line-strong);border:2px solid var(--panel);border-radius:8px}::-webkit-scrollbar-track{background:transparent}
+.icon{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0;vertical-align:middle}
+.icon.sm{width:15px;height:15px}.icon.lg{width:24px;height:24px}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.app-shell{min-height:100vh;position:relative;background:radial-gradient(900px 540px at 90% 2%,var(--glow-a),transparent 65%),radial-gradient(900px 620px at 8% 96%,var(--glow-b),transparent 65%)}
+.window-bar{height:46px;border-bottom:1px solid var(--line-soft);background:var(--header);display:flex;align-items:center;justify-content:space-between;padding:0 16px 0 22px;position:relative;z-index:30}
+.window-caption{font-size:11px;letter-spacing:.08em;color:var(--muted);display:flex;align-items:center;gap:9px}.window-caption .icon{width:14px;height:14px}.caption-divider{height:10px;width:1px;background:var(--line-strong)}
+.header-right{display:flex;align-items:center;gap:16px}.window-actions{display:flex;gap:2px}.window-btn{width:34px;height:30px;border:0;background:transparent;border-radius:7px;color:var(--muted);display:grid;place-items:center}.window-btn:hover{background:var(--chip-bg);color:var(--text)}.window-btn.close-btn:hover{background:var(--danger-soft);color:var(--danger)}
+.appearance-wrap{position:relative}.appearance-trigger{display:flex;align-items:center;gap:7px;border:0;background:transparent;color:var(--muted);border-radius:8px;padding:6px 9px;font-size:12px}.appearance-trigger:hover,.appearance-trigger[aria-expanded="true"]{background:var(--chip-bg);color:var(--text)}
+.popover{position:absolute;z-index:50;background:var(--panel-strong);border:1px solid var(--line);box-shadow:var(--shadow-lg);border-radius:16px;padding:7px;min-width:200px}.theme-popover{right:0;top:calc(100% + 12px)}
+.popover-label{font-size:11px;color:var(--muted);padding:8px 11px;letter-spacing:.03em}.menu-option{width:100%;display:flex;align-items:center;gap:11px;min-height:42px;background:transparent;border:0;border-radius:10px;padding:10px 12px;text-align:left;font-size:13px}.menu-option:hover{background:var(--chip-bg)}.menu-option.selected{background:var(--primary-soft);color:var(--chip-active-text)}.menu-option .checkmark{margin-left:auto;visibility:hidden}.menu-option.selected .checkmark{visibility:visible}.menu-divider{border:0;border-top:1px solid var(--line-soft);margin:7px}
+.corner-gif-slot{position:absolute;left:24px;top:67px;width:39px;height:39px;display:grid;place-items:center;font-size:23px;border-radius:12px;background:var(--chip-bg);box-shadow:var(--shadow-sm)}
+.page-body{max-width:1000px;margin:0 auto;padding:0 40px 144px}
+.title-group{padding-top:70px;text-align:center}.page-title{font-size:46px;letter-spacing:.03em;font-weight:500;line-height:1.3;margin:0 0 13px}.title-caption{margin:0;color:var(--muted);font-size:12px;letter-spacing:.13em;font-weight:400}.title-caption .caption-dot{padding:0 9px;color:var(--dim)}
+.workspace-shell{margin-top:44px}.workspace-heading{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;gap:12px}.module-switcher{position:relative}.module-switcher-trigger{display:flex;align-items:center;gap:10px;min-height:40px;padding:0 17px;border:1px solid transparent;border-radius:999px;background:var(--chip-active-bg);color:var(--chip-active-text);font-size:14px;font-weight:500}.module-switcher-trigger:hover{border-color:var(--line-strong)}.module-switcher-trigger .caret{width:14px;height:14px;margin-left:4px;transition:transform .16s}.module-switcher-trigger[aria-expanded="true"] .caret{transform:rotate(180deg)}
+.module-switcher-menu{top:calc(100% + 10px);left:0;min-width:278px}.module-switcher-menu .menu-option{min-height:44px}.module-switcher-menu .menu-option .icon:not(.checkmark){color:var(--muted)}
+.appearance-badge{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:11px;padding-right:4px}.appearance-badge .icon{width:14px;height:14px}
+.control-board{background:var(--panel);border:1px solid var(--line-soft);border-radius:var(--radius-lg);padding:30px 32px;box-shadow:var(--shadow-md)}
+.primary-btn,.secondary-btn,.danger-btn{min-height:48px;padding:0 22px;border-radius:var(--pill);border:1px solid transparent;font-size:14px;font-weight:500;white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;gap:9px}
+.primary-btn{background:var(--primary);color:var(--on-primary)}.primary-btn:hover:not(:disabled){background:var(--primary-hover);box-shadow:var(--shadow-sm)}.primary-btn:disabled{background:var(--chip-bg);color:var(--dim);border-color:transparent;box-shadow:none}
+.secondary-btn{background:transparent;border-color:var(--line);color:var(--text)}.secondary-btn:hover:not(:disabled){background:var(--chip-bg);border-color:var(--line-strong)}.secondary-btn:disabled{color:var(--dim);border-color:var(--line-soft);background:transparent}
+.danger-btn{background:var(--danger);color:var(--bg)}.danger-btn:disabled{background:var(--chip-bg);color:var(--dim)}.small-btn{min-height:36px;padding:0 16px;font-size:12px}.text-btn{border:0;background:transparent;padding:6px 8px;border-radius:6px;color:var(--primary);font-size:12px;display:inline-flex;align-items:center;justify-content:center;gap:5px}.text-btn:hover{background:var(--primary-soft)}.text-btn.danger{color:var(--danger)}.text-btn.danger:hover{background:var(--danger-soft)}
+.fund-grid{display:grid;grid-template-columns:1.4fr 1fr;gap:18px 24px}.fund-actions{display:grid;grid-template-columns:1fr 1fr;gap:12px}.fund-status{grid-row:2 / 4;grid-column:1;align-self:stretch}.fund-scenario{grid-column:2;grid-row:2}.fund-linked{grid-column:2;grid-row:3}
+.status-box{min-height:48px;padding:15px 22px;border:1px solid var(--line-soft);border-radius:23px;background:var(--bg-soft);display:flex;align-items:center;justify-content:center;text-align:center;color:var(--muted);font-size:13px}.status-content{width:100%}.status-content strong{display:block;color:var(--text);font-weight:500;font-size:14px}.status-content p{margin:6px 0 0;font-size:12px}.status-box.state-done{background:var(--success-soft);border-color:var(--success-border)}.state-done .status-title{color:var(--success)}.status-box.state-error{background:var(--danger-soft);border-color:var(--danger-border)}.state-error .status-title{color:var(--danger)}.status-box.state-running{border-color:var(--line-strong)}
+.status-title{display:flex;align-items:center;justify-content:center;gap:8px}.progress-track{height:4px;border-radius:4px;background:var(--line);overflow:hidden;margin:12px auto 4px;width:min(100%,290px)}.progress-track span{height:100%;display:block;width:0;background:var(--primary);transition:width .18s;border-radius:4px}.spin{animation:spin 1.3s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+.statement-grid{display:grid;grid-template-columns:1fr 1.65fr 1.6fr;gap:18px}.statement-grid .status-box{padding:10px 14px}.inline-field{display:flex;align-items:center;gap:10px;min-width:0}.inline-field>label{font-size:13px;color:var(--muted);white-space:nowrap}.inline-field select{min-width:0;width:100%}.pair{display:flex;gap:10px;min-width:0}.pair>*{flex:1;min-width:0}.pair .primary-btn,.pair .secondary-btn{padding:0 14px}
+select,input[type="text"],input[type="search"],input[type="date"]{height:40px;border:1px solid var(--line);border-radius:10px;padding:0 12px;background:var(--input);outline-offset:2px;min-width:0}select{padding-right:28px}select.pill-select{height:48px;border-radius:24px}input::placeholder{color:var(--dim)}
+.position-grid{display:grid;grid-template-columns:1.35fr 1fr;gap:18px 24px}.position-select{display:flex;align-items:center;gap:10px}.position-select label{color:var(--muted);font-size:13px}.position-select select{flex:1;width:0}.position-select button{padding:0 18px}.position-config{padding-left:36px}
+.preview-console{margin-top:27px;border-top:1px solid var(--line-soft);padding-top:20px;display:flex;align-items:center;gap:15px;flex-wrap:wrap}.preview-label{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:11px;white-space:nowrap}.preview-label .icon{width:14px;height:14px}.state-options{display:flex;gap:3px;background:var(--bg-soft);border:1px solid var(--line-soft);border-radius:10px;padding:4px}.state-btn{border:0;background:transparent;font-size:11px;color:var(--muted);padding:5px 12px;border-radius:6px;min-height:29px}.state-btn:hover{color:var(--text);background:var(--chip-bg)}.state-btn[aria-pressed="true"]{background:var(--panel-strong);color:var(--text);box-shadow:0 1px 3px rgba(0,0,0,.1)}
+.preview-console .preview-open-settings{margin-left:auto;font-size:12px}.workspace-note{display:flex;align-items:flex-start;gap:6px;color:var(--muted);font-size:11px;margin-top:13px;line-height:1.7}.workspace-note .icon{margin-top:2px;width:13px;height:13px;opacity:.8}
+.page-footer{position:absolute;bottom:24px;left:26px;right:26px;display:flex;align-items:flex-end;justify-content:space-between;gap:20px}.version-text{display:flex;align-items:center;gap:9px;color:var(--muted);font-size:11px}.version-text strong{font-weight:500;letter-spacing:.02em;color:var(--text)}.version-tag{border:1px solid var(--line);border-radius:5px;padding:1px 5px;font-size:10px;color:var(--muted)}.footer-subtext{font-size:10px;letter-spacing:.04em;color:var(--muted);margin-top:7px}.background-tool{position:relative}.background-tool-actions{display:flex;gap:8px;padding:7px;background:var(--panel);border:1px solid var(--line-soft);border-radius:19px;box-shadow:var(--shadow-sm)}.palette-trigger{width:39px;height:39px;display:grid;place-items:center;background:transparent;border:1px solid transparent;border-radius:12px;color:var(--muted)}.palette-trigger:hover{background:var(--chip-bg);color:var(--text);border-color:var(--line-soft)}.palette-trigger:active{transform:translateY(1px)}.palette-trigger .icon{width:19px;height:19px}.toolbox-popover{right:0;bottom:calc(100% + 12px);min-width:235px}.toolbox-hint{font-size:11px;color:var(--muted);padding:8px 12px;line-height:1.7}
+/* Dialogs share the same semantic colors as the workspace. */
+dialog{padding:0;border:1px solid var(--line);border-radius:24px;background:var(--panel);color:var(--text);box-shadow:var(--shadow-lg);width:min(740px,calc(100vw - 40px));max-height:calc(100dvh - 64px);overflow:hidden;margin:auto}
+dialog::backdrop{background:var(--overlay);backdrop-filter:blur(6px)}dialog[open]{display:flex;flex-direction:column;animation:dialog-in .18s ease-out}@keyframes dialog-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+dialog.wide{width:min(1030px,calc(100vw - 40px))}dialog.compact{width:min(500px,calc(100vw - 40px))}
+.dialog-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:25px 28px 21px;border-bottom:1px solid var(--line-soft);flex-shrink:0}.dialog-title-group{display:flex;align-items:center;gap:12px}.dialog-title-icon{width:37px;height:37px;border:1px solid var(--line);border-radius:11px;display:grid;place-items:center;color:var(--primary);background:var(--bg-soft)}.dialog-eyebrow{font-size:10px;color:var(--muted);letter-spacing:.06em;margin-bottom:2px}.dialog-header h2{font-size:18px;font-weight:550;margin:0;line-height:1.4}.icon-btn{width:31px;height:31px;background:transparent;border:0;border-radius:9px;display:inline-grid;place-items:center;color:var(--muted)}.icon-btn:hover{background:var(--chip-bg);color:var(--text)}.dialog-body{padding:25px 28px;overflow:auto;overscroll-behavior:contain;min-height:0;scrollbar-gutter:stable}
+.dialog-footer{padding:17px 28px;border-top:1px solid var(--line-soft);display:flex;align-items:center;justify-content:space-between;gap:16px;flex-shrink:0;background:var(--panel)}.dialog-footer .primary-btn,.dialog-footer .secondary-btn,.dialog-footer .danger-btn{min-height:40px;padding:0 24px;font-size:13px}.footer-tip{font-size:11px;line-height:1.7;color:var(--muted);display:flex;align-items:center;gap:7px}.dialog-footer-right{display:flex;gap:10px;margin-left:auto}
+.section-label{font-size:13px;font-weight:550;margin:0 0 7px}.section-description{font-size:12px;color:var(--muted);line-height:1.8;margin:0 0 18px}.theme-options{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;border:0;padding:0;margin:0}.theme-choice{display:block;position:relative;border:1px solid var(--line);border-radius:14px;padding:10px;cursor:pointer;transition:border-color .15s,box-shadow .15s}.theme-choice:has(input:checked){border-color:var(--primary);box-shadow:0 0 0 1px var(--primary)}.theme-choice:hover{border-color:var(--line-strong)}.theme-choice:has(input:focus-visible){outline:2px solid var(--primary);outline-offset:4px}.theme-choice input{position:absolute;opacity:0;width:1px;height:1px}.mini-window{height:94px;border-radius:8px;border:1px solid #dfe4ec;background:#f7f9fc;overflow:hidden;position:relative;display:flex;flex-direction:column;align-items:center;--mini-panel:#fff;--mini-border:#e3e8f0;--mini-text:#9aa6ba;--mini-btn:#3b71c8}.mini-window.dark-mini{background:#13171d;border-color:#363e4a;--mini-panel:#222831;--mini-border:#363f4b;--mini-text:#aeb9ca;--mini-btn:#adc8ff}.mini-top{width:100%;height:15px;border-bottom:1px solid var(--mini-border);display:flex;gap:3px;padding:5px 6px}.mini-top i{width:3px;height:3px;border-radius:50%;background:var(--mini-text);opacity:.6}.mini-heading{height:4px;width:35%;background:var(--mini-text);margin:12px 0 8px;border-radius:3px}.mini-panel{width:78%;height:33px;background:var(--mini-panel);border:1px solid var(--mini-border);border-radius:7px;display:flex;align-items:center;gap:7px;padding:7px}.mini-panel i{height:11px;flex:1;background:var(--mini-btn);border-radius:7px}.mini-panel i+i{background:transparent;border:1px solid var(--mini-border)}.system-mini{display:grid;grid-template-columns:1fr 1fr;height:94px;border-radius:8px;overflow:hidden}.system-mini .mini-window{border-radius:0;width:100%;border:0}.system-mini .mini-panel{gap:3px;padding:4px}.theme-caption{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:11px 2px 2px;font-size:13px}.theme-caption-left{display:flex;align-items:center;gap:7px}.radio-visual{width:15px;height:15px;border-radius:50%;border:1.5px solid var(--line-strong);display:grid;place-items:center}.theme-choice:has(input:checked) .radio-visual{background:var(--primary);border-color:var(--primary)}.theme-choice:has(input:checked) .radio-visual:after{content:'';width:5px;height:5px;border-radius:50%;background:var(--on-primary)}
+.setting-separator{border:0;border-top:1px solid var(--line-soft);margin:24px 0}.setting-row{display:flex;align-items:center;justify-content:space-between;gap:16px}.setting-row strong{font-size:13px;font-weight:500;display:block}.setting-row p{font-size:12px;color:var(--muted);margin:5px 0 0}.subtle-badge{display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border:1px solid var(--line);border-radius:8px;font-size:11px;color:var(--muted);white-space:nowrap}.color-stack{display:flex;padding:3px;margin-left:8px}.color-stack i{width:23px;height:23px;border-radius:7px;border:1px solid var(--line-strong);margin-left:-5px}.color-stack i:nth-child(1){background:var(--bg)}.color-stack i:nth-child(2){background:var(--panel)}.color-stack i:nth-child(3){background:var(--panel-strong)}
+.note-box{display:flex;align-items:flex-start;gap:9px;padding:13px 15px;border:1px solid var(--line-soft);border-radius:12px;background:var(--bg-soft);color:var(--muted);font-size:12px;line-height:1.8}.note-box .icon{margin-top:2px;width:16px;height:16px}.note-box p{margin:0}.note-box.warning{background:var(--warning-soft);border-color:var(--warning-border);color:var(--warning)}.note-box.success{background:var(--success-soft);border-color:var(--success-border);color:var(--success)}.note-box.danger{background:var(--danger-soft);border-color:var(--danger-border);color:var(--danger)}.note-box + .note-box{margin-top:10px}
+.theme-behavior{margin-top:20px}.theme-footer-note{font-size:11px;color:var(--muted);line-height:1.8;margin:15px 0 0}.palette-swatches{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin:22px 0}.swatch-btn{border:1px solid var(--line);border-radius:12px;background:var(--bg-soft);padding:8px;color:var(--text);font-size:11px}.swatch-btn span{display:block;height:52px;border-radius:7px;margin-bottom:7px}.swatch-btn:disabled{opacity:.4}.swatch-btn.selected{border:2px solid var(--primary);padding:7px}.swatch-btn:not(:disabled):hover{border-color:var(--primary)}
+.toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px;flex-wrap:wrap}.toolbar-left,.toolbar-right{display:flex;align-items:center;gap:9px;flex-wrap:wrap}.toolbar select{font-size:12px}.search-shell{display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:10px;background:var(--input);padding-left:11px}.search-shell .icon{color:var(--muted);width:16px;height:16px}.search-shell input{width:205px;border:0;background:transparent;height:37px;padding-left:0;font-size:12px}.search-shell:focus-within{outline:2px solid var(--primary);outline-offset:2px}.search-shell input:focus-visible{outline:0}.table-shell{border:1px solid var(--line);border-radius:12px;overflow:auto}.data-table{border-collapse:collapse;width:100%;font-size:12px;white-space:nowrap}.data-table th{text-align:left;font-size:11px;font-weight:500;color:var(--muted);background:var(--bg-soft);padding:12px 15px;border-bottom:1px solid var(--line)}.data-table td{padding:14px 15px;border-bottom:1px solid var(--line-soft)}.data-table tbody tr:last-child td{border-bottom:0}.data-table tbody tr:hover{background:var(--row-hover)}.data-table td.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11px}.data-table .file-cell{display:flex;align-items:center;gap:9px}.file-cell .icon{color:var(--muted);width:17px;height:17px}.muted{color:var(--muted)}.num{text-align:right!important;font-variant-numeric:tabular-nums}.table-subline{display:block;color:var(--muted);font-size:10px;margin-top:4px}
+.status-badge{display:inline-flex;align-items:center;gap:6px;padding:3px 8px;border-radius:6px;border:1px solid transparent;font-size:11px;line-height:1.6}.status-badge i{width:5px;height:5px;border-radius:50%;background:currentColor}.status-badge.success{background:var(--success-soft);color:var(--success);border-color:var(--success-border)}.status-badge.warning{background:var(--warning-soft);color:var(--warning);border-color:var(--warning-border)}.status-badge.danger{background:var(--danger-soft);color:var(--danger);border-color:var(--danger-border)}.status-badge.neutral{background:var(--chip-bg);color:var(--muted);border-color:var(--line)}
+.table-foot{display:flex;align-items:center;justify-content:space-between;color:var(--muted);font-size:11px;margin:14px 0 0;gap:12px}.empty-cell{text-align:center!important;padding:40px!important;color:var(--muted)}.tab-strip{display:flex;gap:22px;border-bottom:1px solid var(--line-soft);margin:-3px 0 22px}.tab-btn{border:0;border-bottom:2px solid transparent;background:transparent;color:var(--muted);padding:0 0 12px;font-size:13px}.tab-btn.active{color:var(--primary);border-color:var(--primary)}
+.upload-zone{border:1px dashed var(--line-strong);border-radius:15px;padding:25px;text-align:center;background:var(--bg-soft);margin-bottom:17px}.upload-zone.dragover{border-color:var(--primary);background:var(--primary-soft)}.upload-zone .upload-icon{width:43px;height:43px;display:grid;place-items:center;background:var(--primary-soft);border-radius:13px;color:var(--primary);margin:0 auto 12px}.upload-zone p{margin:4px 0;font-size:13px}.upload-zone small{display:block;font-size:11px;color:var(--muted);margin:8px 0 17px}.file-list{display:grid;gap:8px}.file-item{display:flex;align-items:center;gap:10px;border:1px solid var(--line-soft);border-radius:10px;padding:11px 13px;font-size:12px}.file-item .icon{color:var(--primary)}.file-item span{overflow-wrap:anywhere;min-width:0}.file-item .status-badge{margin-left:auto;flex-shrink:0}.field-label{display:block;font-size:12px;color:var(--muted);margin:14px 0 7px}
+.component-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.component-block{border:1px solid var(--line-soft);border-radius:14px;padding:18px}.component-block h3{font-size:12px;font-weight:500;color:var(--muted);margin:0 0 14px}.component-buttons{display:flex;flex-wrap:wrap;gap:8px}.component-buttons .primary-btn,.component-buttons .secondary-btn{min-height:36px;font-size:12px;padding:0 15px}.component-block .status-badge{margin-right:4px;margin-bottom:6px}.checkbox-row{display:flex;align-items:flex-start;gap:9px;font-size:12px;color:var(--muted);margin-top:18px;cursor:pointer}.checkbox-row input{accent-color:var(--primary);margin-top:3px;width:15px;height:15px}.delete-target{margin:20px 0;padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--bg-soft)}.delete-target strong{display:block;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;font-weight:500}.delete-target p{font-size:12px;color:var(--muted);margin:5px 0 0}.delete-heading{display:flex;gap:10px;align-items:flex-start}.delete-heading .icon{color:var(--danger);margin-top:2px}.delete-heading p{margin:0;font-size:13px;line-height:1.8}
+.module-cards{display:grid;gap:10px}.module-card{width:100%;border:1px solid var(--line);background:var(--bg-soft);display:flex;align-items:center;gap:12px;padding:16px;border-radius:13px;text-align:left}.module-card:hover{border-color:var(--primary)}.module-card .icon{color:var(--primary)}.module-card strong{font-weight:500;font-size:13px}.module-card p{font-size:11px;color:var(--muted);margin:3px 0 0}.module-card .end-icon{margin-left:auto;color:var(--muted)}
+.toast{position:fixed;left:50%;bottom:95px;transform:translate(-50%,12px);background:var(--panel-strong);border:1px solid var(--line-strong);color:var(--text);border-radius:12px;box-shadow:var(--shadow-lg);padding:12px 18px;font-size:12px;max-width:calc(100vw - 32px);width:max-content;z-index:10000;opacity:0;pointer-events:none;transition:opacity .16s,transform .16s;display:flex;align-items:flex-start;gap:9px}.toast.show{opacity:1;transform:translate(-50%,0)}.toast .icon{color:var(--primary);width:16px;height:16px;margin-top:1px}.toast:popover-open{margin:0;top:auto;right:auto;display:flex}
+@media(min-height:850px){.title-group{padding-top:94px}.workspace-shell{margin-top:50px}}
+@media(min-width:1500px){.page-body{max-width:1040px}.workspace-shell{margin-top:54px}.title-group{padding-top:98px}}
+@media(max-width:900px){.page-body{padding-left:28px;padding-right:28px}.control-board{padding:26px}.statement-grid{grid-template-columns:1fr 1.35fr}.statement-grid>*:nth-child(3){grid-column:1}.statement-grid>*:nth-child(4){grid-column:2;grid-row:2}.statement-grid>*:nth-child(5){grid-column:1;grid-row:3}.statement-grid>*:nth-child(6){grid-column:2;grid-row:3}.position-grid{grid-template-columns:1fr}.position-config{padding:0}.page-title{font-size:40px}}
+@media(max-width:650px){.window-caption{font-size:10px}.window-actions{display:none}.window-bar{padding:0 14px}.header-right{gap:0}.appearance-trigger{font-size:11px}.corner-gif-slot{display:none}.page-body{padding:0 18px 140px}.title-group{padding-top:49px}.page-title{font-size:31px;margin-bottom:10px}.title-caption{font-size:10px}.workspace-shell{margin-top:32px}.workspace-heading{align-items:center}.module-switcher-trigger{font-size:12px;min-height:37px;padding:0 12px;gap:7px}.appearance-badge{font-size:10px;gap:4px}.appearance-badge .icon{display:none}.control-board{border-radius:21px;padding:19px}.fund-grid{gap:13px 13px;grid-template-columns:1.3fr 1fr}.fund-actions{gap:8px}.primary-btn,.secondary-btn{min-height:44px;font-size:12px;padding:0 13px;gap:5px}.fund-actions .icon,.fund-grid>.primary-btn .icon{display:none}.fund-actions{grid-column:1/-1}.fund-grid>.primary-btn{grid-column:2;grid-row:2}.fund-status{grid-row:2 / 5}.fund-scenario{grid-row:3}.fund-linked{grid-row:4}.status-box{font-size:12px;padding:12px}.status-content strong{font-size:12px}.status-content p{font-size:11px}.preview-console{gap:10px;margin-top:20px;padding-top:16px}.preview-label{font-size:10px}.state-options{order:3;width:100%;justify-content:space-between}.state-btn{padding:5px 10px}.workspace-note{font-size:10px}.page-footer{bottom:20px;left:18px;right:18px;gap:12px;align-items:center}.footer-subtext{display:none}.version-text{gap:6px;flex-wrap:wrap;max-width:100px}.version-tag{display:none}.background-tool-actions{padding:5px;gap:2px;border-radius:15px}.palette-trigger{width:32px;height:34px;border-radius:9px}.palette-trigger .icon{width:17px;height:17px}.statement-grid{grid-template-columns:1fr 1fr;gap:13px}.statement-grid>*:nth-child(2){grid-column:1/-1;grid-row:2}.statement-grid>*:nth-child(3){grid-column:1/-1;grid-row:4}.statement-grid>*:nth-child(4){grid-column:2;grid-row:1}.statement-grid>*:nth-child(5){grid-column:1/-1;grid-row:3}.statement-grid>*:nth-child(6){grid-column:1/-1;grid-row:5}.position-grid{gap:13px}.position-select{flex-wrap:wrap}.position-select label{font-size:12px}.position-select select{font-size:12px}.position-select button{width:100%}dialog,dialog.wide,dialog.compact{width:calc(100vw - 24px);max-height:calc(100dvh - 28px);border-radius:19px}.dialog-header{padding:18px}.dialog-body{padding:18px}.dialog-footer{padding:14px 18px;gap:10px}.dialog-footer .footer-tip{font-size:10px}.dialog-footer .primary-btn,.dialog-footer .secondary-btn{padding:0 17px;min-height:38px}.theme-options{gap:8px}.theme-choice{padding:7px}.mini-window,.system-mini{height:76px}.mini-heading{margin-top:9px}.mini-panel{height:26px}.theme-caption{font-size:11px;padding-top:9px;gap:3px}.theme-caption-left{gap:4px}.theme-caption-left .icon{display:none}.radio-visual{width:13px;height:13px}.setting-row{gap:9px}.setting-row strong{font-size:12px}.setting-row p{font-size:11px}.subtle-badge{font-size:10px}.color-stack{display:none}.component-grid{grid-template-columns:1fr}.palette-swatches{gap:6px}.swatch-btn{font-size:10px;padding:5px}.swatch-btn span{height:36px}.search-shell{width:100%}.search-shell input{width:100%}.toolbar-left,.toolbar-right{width:100%}.table-foot{font-size:10px}.dialog-eyebrow{font-size:9px}.dialog-header h2{font-size:17px}.toast{bottom:88px}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+<svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true"><defs>
+<symbol id="i-moon" viewBox="0 0 24 24"><path d="M20.8 13A9 9 0 0 1 11 3.2 9 9 0 1 0 20.8 13Z"/></symbol>
+<symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"/></symbol>
+<symbol id="i-monitor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/></symbol>
+<symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+<symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-5-5 5 5-5 5"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+<symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+<symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+<symbol id="i-square" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="1"/></symbol>
+<symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V3m-5 5 5-5 5 5M4 16v4h16v-4"/></symbol>
+<symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v13m-5-5 5 5 5-5M4 16v4h16v-4"/></symbol>
+<symbol id="i-play" viewBox="0 0 24 24"><path d="m8 4 12 8-12 8Z"/></symbol>
+<symbol id="i-settings" viewBox="0 0 24 24"><path d="m9.5 3-.6 2.2-2 .9-2-.8-2.5 4.4 1.6 1.5v2.6l-1.6 1.5 2.5 4.4 2-.8 2 .9.6 2.2h5l.6-2.2 2-.9 2 .8 2.5-4.4-1.6-1.5v-2.6l1.6-1.5-2.5-4.4-2 .8-2-.9-.6-2.2Z"/><circle cx="12" cy="12" r="3"/></symbol>
+<symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18h1a2 2 0 0 0 1.2-3.6 1.8 1.8 0 0 1 1.2-3.2H18a3 3 0 0 0 3-3C21 6.5 17 3 12 3Z"/><path d="M7.5 9h.01M11 6.5h.01M16 8h.01M6.5 13h.01" stroke-width="3"/></symbol>
+<symbol id="i-book" viewBox="0 0 24 24"><path d="M4 4h6l2 2 2-2h6v16h-6l-2 1-2-1H4Zm8 2v15"/></symbol>
+<symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
+<symbol id="i-toolbox" viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="14" rx="2"/><path d="M8 7V4h8v3M3 12h18M9 10v4m6-4v4"/></symbol>
+<symbol id="i-archive" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="5" rx="1"/><path d="M5 8v13h14V8m-10 4h6"/></symbol>
+<symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H5v20h14V7Zm0 0v5h5M8 12h8m-8 4h8"/></symbol>
+<symbol id="i-bank" viewBox="0 0 24 24"><path d="m3 8 9-5 9 5H3Zm2 3v7m7-7v7m7-7v7M3 21h18M3 18h18"/></symbol>
+<symbol id="i-exchange" viewBox="0 0 24 24"><path d="M3 7h17m-4-4 4 4-4 4M21 17H4m4-4-4 4 4 4"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></symbol>
+<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v.1"/></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6Z"/><path d="m8.5 11.5 2.5 2.5 4.5-5"/></symbol>
+<symbol id="i-alert" viewBox="0 0 24 24"><path d="m12 3 10 18H2Zm0 6v5m0 3v.1"/></symbol>
+<symbol id="i-circle-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m7.5 12 3 3 6-6"/></symbol>
+<symbol id="i-loader" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9"/></symbol>
+<symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 6h5m4 0h7M4 12h9m4 0h3M4 18h2m4 0h10M9 3v6m4 0V3m0 6v6m4-6v6M6 15v6m4-6v6"/></symbol>
+<symbol id="i-link" viewBox="0 0 24 24"><path d="m10 14 4-4M8 16l-2 2a4.2 4.2 0 0 1-6-6l5-5a4.2 4.2 0 0 1 6 0m2 1 2-2a4.2 4.2 0 0 1 6 6l-5 5a4.2 4.2 0 0 1-6 0" transform="translate(1 0) scale(.92)"/></symbol>
+<symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/></symbol>
+<symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></symbol>
+<symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6V4h6l3 3h9v14H3V6Z"/></symbol>
+<symbol id="i-spark" viewBox="0 0 24 24"><path d="m12 2 2.2 7.8L22 12l-7.8 2.2L12 22l-2.2-7.8L2 12l7.8-2.2Z" fill="url(#spark-gradient)" stroke="none"/></symbol>
+<linearGradient id="spark-gradient" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#4285F4"/><stop offset=".4" stop-color="#9B72F2"/><stop offset=".75" stop-color="#E95EA2"/><stop offset="1" stop-color="#F6B93B"/></linearGradient>
+</defs></svg>
+<div class="app-shell" id="appShell">
+ <header class="window-bar">
+  <div class="window-caption"><svg class="icon" aria-hidden="true"><use href="#i-spark"/></svg><span>清结算小助手</span><span class="caption-divider"></span><span>外观预览</span></div>
+  <div class="header-right">
+   <div class="appearance-wrap">
+    <button class="appearance-trigger" id="themeTrigger" aria-haspopup="menu" aria-expanded="false" aria-controls="themeMenu" aria-label="切换外观模式"><svg class="icon sm" aria-hidden="true"><use id="themeTriggerIcon" href="#i-moon"/></svg><span id="themeTriggerLabel">深色外观</span><svg class="icon sm" aria-hidden="true"><use href="#i-chevron"/></svg></button>
+    <div class="popover theme-popover" id="themeMenu" role="menu" aria-label="外观模式" hidden>
+     <div class="popover-label">外观模式</div>
+     <button class="menu-option" role="menuitemradio" aria-checked="false" data-theme-set="light"><svg class="icon" aria-hidden="true"><use href="#i-sun"/></svg>浅色<svg class="icon checkmark sm" aria-hidden="true"><use href="#i-check"/></svg></button>
+     <button class="menu-option selected" role="menuitemradio" aria-checked="true" data-theme-set="dark"><svg class="icon" aria-hidden="true"><use href="#i-moon"/></svg>深色<svg class="icon checkmark sm" aria-hidden="true"><use href="#i-check"/></svg></button>
+     <button class="menu-option" role="menuitemradio" aria-checked="false" data-theme-set="system"><svg class="icon" aria-hidden="true"><use href="#i-monitor"/></svg>跟随系统<svg class="icon checkmark sm" aria-hidden="true"><use href="#i-check"/></svg></button>
+     <hr class="menu-divider"><button class="menu-option" role="menuitem" data-open="appearance"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg>外观设置<svg class="icon sm" aria-hidden="true" style="margin-left:auto"><use href="#i-arrow"/></svg></button>
+    </div>
+   </div>
+   <div class="window-actions" aria-label="窗口操作样式演示">
+    <button class="window-btn" data-window-demo="最小化" aria-label="最小化（样式演示）"><svg class="icon sm" aria-hidden="true"><use href="#i-minus"/></svg></button>
+    <button class="window-btn" data-window-demo="最大化" aria-label="最大化（样式演示）"><svg class="icon sm" aria-hidden="true"><use href="#i-square"/></svg></button>
+    <button class="window-btn close-btn" data-window-demo="关闭" aria-label="关闭（样式演示）"><svg class="icon sm" aria-hidden="true"><use href="#i-close"/></svg></button>
+   </div>
+  </div>
+ </header>
+ <div class="corner-gif-slot" aria-label="原项目猫咪角标的静态占位" title="猫咪角标 · 原型使用静态占位">🐱</div>
+ <main class="page-body">
+  <div class="title-group"><h1 class="page-title">清结算小助手</h1><p class="title-caption">熟悉的工作台<span class="caption-dot">·</span>新的夜间外观</p></div>
+  <section class="workspace-shell" aria-label="业务工作区">
+   <div class="workspace-heading">
+    <div class="module-switcher">
+     <button class="module-switcher-trigger" id="moduleSwitcherBtn" aria-haspopup="menu" aria-expanded="false" aria-controls="moduleMenu"><svg class="icon" aria-hidden="true"><use href="#i-spark"/></svg><span id="currentModuleName">资金对账数据处理</span><svg class="icon caret" aria-hidden="true"><use href="#i-chevron"/></svg></button>
+     <div class="popover module-switcher-menu" id="moduleMenu" role="menu" aria-label="选择预览模块" hidden>
+      <div class="popover-label">选择预览模块</div>
+      <button class="menu-option selected" role="menuitemradio" aria-checked="true" data-module="fund"><svg class="icon" aria-hidden="true"><use href="#i-exchange"/></svg>资金对账数据处理<svg class="icon checkmark sm" aria-hidden="true"><use href="#i-check"/></svg></button>
+      <button class="menu-option" role="menuitemradio" aria-checked="false" data-module="statement"><svg class="icon" aria-hidden="true"><use href="#i-bank"/></svg>网银账单生成<svg class="icon checkmark sm" aria-hidden="true"><use href="#i-check"/></svg></button>
+      <button class="menu-option" role="menuitemradio" aria-checked="false" data-module="position"><svg class="icon" aria-hidden="true"><use href="#i-file"/></svg>平盘对账数据处理<svg class="icon checkmark sm" aria-hidden="true"><use href="#i-check"/></svg></button>
+      <hr class="menu-divider"><div class="toolbox-hint">仅列出本次原型的展示模块，不改变正式版的模块启用列表。</div>
+     </div>
+    </div>
+    <span class="appearance-badge"><svg class="icon" aria-hidden="true"><use id="modeBadgeIcon" href="#i-moon"/></svg><span id="modeBadgeText">夜间模式</span></span>
+   </div>
+   <section class="control-board" id="moduleBoard" aria-label="资金对账数据处理操作面板"></section>
+   <div class="preview-console" aria-label="仅原型可用的状态预览工具">
+    <span class="preview-label"><svg class="icon" aria-hidden="true"><use href="#i-eye"/></svg>状态预览</span>
+    <div class="state-options" role="group" aria-label="切换演示状态">
+     <button class="state-btn" data-state="idle" aria-pressed="false">初始</button>
+     <button class="state-btn" data-state="imported" aria-pressed="true">已导入</button>
+     <button class="state-btn" data-state="running" aria-pressed="false">运行中</button>
+     <button class="state-btn" data-state="done" aria-pressed="false">已完成</button>
+     <button class="state-btn" data-state="error" aria-pressed="false">异常</button>
+    </div>
+    <button class="text-btn preview-open-settings" data-open="appearance">外观设置<svg class="icon sm" aria-hidden="true"><use href="#i-arrow"/></svg></button>
+   </div>
+   <p class="workspace-note"><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg>交互原型 · 所有业务数据均为示例，不执行真实对账或文件读写。状态预览栏不属于正式业务界面。</p>
+  </section>
+ </main>
+ <footer class="page-footer">
+  <div><div class="version-text"><span>Version</span><strong>3.2.9</strong><span class="version-tag">UI PREVIEW</span></div><div class="footer-subtext">基于 v3.2.8 界面结构 · 夜间模式设计稿</div></div>
+  <div class="background-tool">
+   <div class="background-tool-actions" aria-label="工具栏">
+    <button class="palette-trigger" data-open="palette" aria-label="背景调色盘" title="背景调色盘"><svg class="icon" aria-hidden="true"><use href="#i-palette"/></svg></button>
+    <button class="palette-trigger" data-open="guide" aria-label="使用手册" title="使用手册"><svg class="icon" aria-hidden="true"><use href="#i-book"/></svg></button>
+    <button class="palette-trigger" data-open="appearance" aria-label="设置" title="设置 · 外观"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg></button>
+    <button class="palette-trigger" data-open="cabinet" aria-label="小助手功能收纳" title="小助手功能收纳"><svg class="icon" aria-hidden="true"><use href="#i-grid"/></svg></button>
+    <button class="palette-trigger" id="toolboxTrigger" aria-label="工具箱" aria-haspopup="menu" aria-expanded="false" aria-controls="toolboxMenu" title="工具箱"><svg class="icon" aria-hidden="true"><use href="#i-toolbox"/></svg></button>
+   </div>
+   <div class="popover toolbox-popover" id="toolboxMenu" role="menu" aria-label="工具箱" hidden>
+    <div class="popover-label">工具箱 · 原型预览</div>
+    <button class="menu-option" role="menuitem" data-open="archive"><svg class="icon" aria-hidden="true"><use href="#i-archive"/></svg>存档中心<svg class="icon sm" aria-hidden="true" style="margin-left:auto"><use href="#i-arrow"/></svg></button>
+    <hr class="menu-divider"><button class="menu-option" role="menuitem" data-open="components"><svg class="icon" aria-hidden="true"><use href="#i-grid"/></svg>组件样式检查<span class="version-tag" style="margin-left:auto">仅原型</span></button>
+   </div>
+  </div>
+ </footer>
+</div>
+<dialog id="appDialog" aria-labelledby="dialogTitle"></dialog>
+<dialog id="confirmDialog" class="compact" aria-labelledby="confirmTitle"></dialog>
+<input id="filePicker" type="file" accept=".xlsx,.xls,.csv" multiple hidden>
+<div id="toast" class="toast" role="status" aria-live="polite" popover="manual"></div>
+<script>
+'use strict';
+const $ = (s,root=document) => root.querySelector(s);
+const $$ = (s,root=document) => Array.from(root.querySelectorAll(s));
+const icon = (name, cls='') => `<svg class="icon ${cls}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+const esc = s => String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const modules = {fund:'资金对账数据处理',statement:'网银账单生成',position:'平盘对账数据处理'};
+const media = window.matchMedia('(prefers-color-scheme: dark)');
+let preference = window.__themePreference || 'dark';
+let lightBackground = 'default';
+const backgrounds = {default:{name:'默认',value:'#f9fafc'},mist:{name:'雾蓝',value:'#edf3fc'},sage:{name:'浅绿',value:'#eff6f2'},sand:{name:'暖白',value:'#f9f5ef'},lilac:{name:'浅紫',value:'#f3f0fa'}};
+try { const saved = localStorage.getItem('bbet-v329-preview-background'); if (Object.hasOwn(backgrounds,saved)) lightBackground = saved; } catch (_) {}
+let activeModule = 'fund', activeDialog = '', runTimer = null, progress = 0, toastTimer;
+let model = {fund:{state:'imported',files:['银行对账单_202609_示例.xlsx','网关账单_202609_示例.xlsx','业务单据_202609_示例.xlsx']},statement:{state:'idle',files:[]},position:{state:'idle',files:[]}};
+let pendingFiles = [];
+let businessSelectors={statement:'制作网银账单',position:'平盘资金性质校验'};
+const appDialog=$('#appDialog'),confirmDialog=$('#confirmDialog');
+const archives = [
+ {id:'DEMO-20260912-003',module:'资金对账数据处理',time:'2026-09-12 10:42',count:3,status:'已完成',kind:'success'},
+ {id:'DEMO-20260912-002',module:'网银账单生成',time:'2026-09-12 10:16',count:2,status:'已完成',kind:'success'},
+ {id:'DEMO-20260912-001',module:'平盘对账数据处理',time:'2026-09-12 09:58',count:4,status:'有差异',kind:'warning'},
+ {id:'DEMO-20260911-005',module:'资金对账数据处理',time:'2026-09-11 17:24',count:1,status:'失败',kind:'danger'},
+ {id:'DEMO-20260911-004',module:'网银账单生成',time:'2026-09-11 16:50',count:2,status:'已完成',kind:'success'}
+];
+const linkedFiles=[
+ {name:'银行账户映射_示例.xlsx',type:'账户映射',count:'128',time:'2026-09-12 09:30',status:'可用',kind:'success'},
+ {name:'网关账单_示例.xlsx',type:'网关账单',count:'2,640',time:'2026-09-12 09:32',status:'可用',kind:'success'},
+ {name:'业务单据_示例.xlsx',type:'业务单据',count:'1,248',time:'2026-09-12 09:33',status:'待检查',kind:'warning'},
+ {name:'账户配置_示例.xlsx',type:'账户映射',count:'24',time:'2026-09-11 16:05',status:'格式异常',kind:'danger'}
+];
+function persist(key,value){try{localStorage.setItem(key,value);return true;}catch(_){return false;}}
+function resolvedTheme(){return preference==='system'?(media.matches?'dark':'light'):preference;}
+function updateTheme(notify=false){
+ const resolved=resolvedTheme(), names={light:'浅色外观',dark:'深色外观',system:'跟随系统'}, icons={light:'sun',dark:'moon',system:'monitor'};
+ document.documentElement.dataset.theme=resolved;document.documentElement.style.colorScheme=resolved;
+ document.documentElement.style.setProperty('--bg',resolved==='light'?backgrounds[lightBackground].value:'#111419');
+ $('#themeTriggerLabel').textContent=names[preference];$('#themeTriggerIcon').setAttribute('href','#i-'+icons[preference]);
+ $('#modeBadgeIcon').setAttribute('href','#i-'+(resolved==='dark'?'moon':'sun'));
+ $('#modeBadgeText').textContent=(preference==='system'?'跟随系统 · ':'')+(resolved==='dark'?'夜间模式':'浅色模式');
+ $$('[data-theme-set]').forEach(b=>{const selected=b.dataset.themeSet===preference;b.classList.toggle('selected',selected);b.setAttribute('aria-checked',String(selected));});
+ $$('input[name="appearance"]').forEach(r=>r.checked=r.value===preference);
+ if($('#systemStatus'))$('#systemStatus').textContent='系统当前为'+(media.matches?'深色':'浅色');
+ if($('#appearanceCurrent'))$('#appearanceCurrent').textContent=resolved==='dark'?'深色背景已启用':'使用浅色背景偏好';
+ if($('#appearanceBackgroundNote'))$('#appearanceBackgroundNote').textContent=resolved==='dark'?'深色模式暂时覆盖浅色自定义背景，切回浅色后恢复。':'可在背景调色盘中设置浅色背景，独立保存，不影响深色模式。';
+ if($('#paletteModeNote')){const dark=resolved==='dark';$('#paletteModeNote').innerHTML=icon('info')+`<p>${dark?'深色模式使用统一深色背景。已保存的浅色背景不会被重置，切回浅色后恢复。':'以下颜色仅作用于浅色模式。选择后立即生效，夜间模式仍使用统一深色背景。'}</p>`;$$('[data-bg]').forEach(b=>{b.disabled=dark;b.classList.toggle('selected',b.dataset.bg===lightBackground);});}
+ if(notify)toast('已切换为'+names[preference]+(preference==='system'?'，随系统外观自动变化':''));
+}
+function setTheme(value,notify=true){if(!['light','dark','system'].includes(value))return;preference=value;const saved=persist('bbet-v329-preview-theme',value);updateTheme(notify);if(!saved)toast('外观已切换；当前浏览器不允许保存偏好，关闭页面后可能恢复默认。');}
+if(media.addEventListener)media.addEventListener('change',()=>updateTheme(false));else media.addListener(()=>updateTheme(false));
+function toast(message){const t=$('#toast');clearTimeout(toastTimer);t.innerHTML=icon('circle-check')+`<span>${esc(message)}</span>`;try{if(t.showPopover&&!t.matches(':popover-open'))t.showPopover();}catch(_){} requestAnimationFrame(()=>t.classList.add('show'));toastTimer=setTimeout(()=>{t.classList.remove('show');setTimeout(()=>{try{if(t.hidePopover&&t.matches(':popover-open'))t.hidePopover();}catch(_){}},170);},2900);}
+function closeMenus(){['themeMenu','moduleMenu','toolboxMenu'].forEach(id=>$('#'+id).hidden=true);['themeTrigger','moduleSwitcherBtn','toolboxTrigger'].forEach(id=>$('#'+id).setAttribute('aria-expanded','false'));}
+function toggleMenu(id,trigger){const wasHidden=$('#'+id).hidden;closeMenus();if(wasHidden){$('#'+id).hidden=false;trigger.setAttribute('aria-expanded','true');}}
+function button(text,action,style='secondary',disabled=false,ic=''){return `<button class="${style}-btn" data-action="${action}" ${disabled?'disabled':''}>${ic?icon(ic):''}${text}</button>`;}
+function statusMarkup(){
+ const m=model[activeModule],s=m.state,n=m.files.length||3;
+ let content='欢迎使用小助手';
+ if(s==='imported')content=`<div class="status-title"><strong>已导入 ${n} 个文件，等待运行</strong></div><p>示例文件已就绪</p>`;
+ if(s==='running')content=`<div class="status-title">${icon('loader','sm spin')}<strong>正在处理示例数据…</strong></div><div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress}"><span style="width:${progress}%"></span></div><p class="progress-label">${progress}% · 运行状态模拟</p>`;
+ if(s==='done')content=`<div class="status-title">${icon('circle-check','sm')}<strong>处理完成</strong></div><p>示例结果已就绪，可预览导出状态</p>`;
+ if(s==='error')content=`<div class="status-title">${icon('alert','sm')}<strong>处理未完成</strong></div><p>示例：文件缺少必填字段，请检查后重试。</p>`;
+ return `<div class="status-box state-${s}" role="status" aria-live="polite"><div class="status-content">${content}</div></div>`;
+}
+function renderBoard(){
+ const s=model[activeModule].state,busy=s==='running',canRun=['imported','done','error'].includes(s),canExport=s==='done';
+ let html='';
+ if(activeModule==='fund')html=`<div class="fund-grid"><div class="fund-actions">${button('导入文件','import','primary',busy,'upload')}${button('导出文件','export','secondary',!canExport)}</div>${button('开始运行','run','primary',!canRun,'play')}<div class="fund-status">${statusMarkup()}</div><div class="fund-scenario">${button('场景管理','scenarios')}</div><div class="fund-linked">${button('链接表管理','linked')}</div></div>`;
+ if(activeModule==='statement')html=`<div class="statement-grid">${button('导入文件','import','primary',busy)}<div class="inline-field"><label for="statementMode">模式</label><select id="statementMode" class="pill-select" ${busy?'disabled':''}><option>制作网银账单</option><option>导出月度余额账单</option></select></div><div class="pair">${button('导出明细','export','primary',!canExport)}${button('导出余额','export','secondary',!canExport)}</div>${button('导入模板','import-template','secondary',busy)}<div class="pair">${button('模板管理','templates')}${button('账户映射','mapping')}</div>${statusMarkup()}</div>`;
+ if(activeModule==='position')html=`<div class="position-grid"><div class="position-select"><label for="positionFunction">功能</label><select id="positionFunction" class="pill-select" ${busy?'disabled':''}><option>平盘资金性质校验</option><option>平盘对账数据处理</option><option>平盘订单销账处理</option></select>${button('开始运行','run','primary',busy)}</div><div class="pair">${button('对账数据管理','linked')}${button('链接表管理','linked')}</div><div class="pair position-config">${button('对账配置管理','scenarios')}${button('结果确认','result')}</div>${statusMarkup()}</div>`;
+ $('#moduleBoard').innerHTML=html;$('#moduleBoard').setAttribute('aria-label',modules[activeModule]+'操作面板');
+ if(activeModule==='fund'){$$('.fund-grid>.fund-scenario>.secondary-btn,.fund-grid>.fund-linked>.secondary-btn').forEach(b=>b.style.width='100%');$('.fund-status>.status-box').style.height='100%';}
+ if($('#statementMode'))$('#statementMode').value=businessSelectors.statement;if($('#positionFunction'))$('#positionFunction').value=businessSelectors.position;
+ $$('[data-state]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.state===s)));
+}
+function stopRun(){if(runTimer){clearInterval(runTimer);runTimer=null;}}
+function setState(state){if(!['idle','imported','running','done','error'].includes(state))return;stopRun();if(state==='running')progress=64;model[activeModule].state=state;renderBoard();}
+function selectModule(key){if(!Object.hasOwn(modules,key))return;stopRun();if(model[activeModule].state==='running')model[activeModule].state='imported';activeModule=key;$('#currentModuleName').textContent=modules[key];$$('[data-module]').forEach(b=>{b.classList.toggle('selected',b.dataset.module===key);if(b.hasAttribute('aria-checked'))b.setAttribute('aria-checked',String(b.dataset.module===key));});closeMenus();renderBoard();if(appDialog.open)appDialog.close();}
+function runDemo(){stopRun();progress=0;model[activeModule].state='running';renderBoard();runTimer=setInterval(()=>{progress=Math.min(100,progress+8);const bar=$('[role="progressbar"]');if(bar){bar.setAttribute('aria-valuenow',String(progress));$('span',bar).style.width=progress+'%';}if($('.progress-label'))$('.progress-label').textContent=progress+'% · 运行状态模拟';if(progress>=100){stopRun();model[activeModule].state='done';renderBoard();toast('演示运行完成。未执行真实对账。');}},160);}
+function dialogHeader(title,ic='settings',eyebrow=''){return `<header class="dialog-header"><div class="dialog-title-group"><span class="dialog-title-icon">${icon(ic)}</span><div>${eyebrow?`<div class="dialog-eyebrow">${eyebrow}</div>`:''}<h2 id="dialogTitle">${title}</h2></div></div><button class="icon-btn" data-close="app" aria-label="关闭弹窗">${icon('close')}</button></header>`;}
+function footer(left='',right='完成',action='close'){return `<footer class="dialog-footer"><div class="footer-tip">${left}</div><div class="dialog-footer-right"><button class="primary-btn" ${action==='close'?'data-close="app"':`data-action="${action}"`}>${right}</button></div></footer>`;}
+function showDialog(name,title,body,opts={}){closeMenus();activeDialog=name;appDialog.className=opts.size||'';appDialog.innerHTML=dialogHeader(title,opts.icon||'settings',opts.eyebrow||'')+`<div class="dialog-body">${body}</div>`+(opts.footer||footer(icon('shield')+'仅外观预览 · 不操作真实业务数据'));if(!appDialog.open)appDialog.showModal();$('.dialog-body',appDialog).scrollTop=0;updateTheme(false);}
+function miniWindow(dark=false){return `<div class="mini-window ${dark?'dark-mini':''}"><div class="mini-top"><i></i><i></i><i></i></div><div class="mini-heading"></div><div class="mini-panel"><i></i><i></i></div></div>`;}
+function appearanceDialog(){const choices=[['light','浅色','sun'],['dark','深色','moon'],['system','跟随系统','monitor']];showDialog('appearance','外观',`
+ <h3 class="section-label">外观模式</h3><p class="section-description">选择适合当前环境的外观。主界面、弹窗和数据表格将同步切换。</p>
+ <fieldset class="theme-options"><legend class="sr-only">选择外观模式</legend>${choices.map(([id,title,ic])=>`<label class="theme-choice"><input type="radio" name="appearance" value="${id}" ${preference===id?'checked':''}>${id==='system'?`<div class="system-mini">${miniWindow(false)}${miniWindow(true)}</div>`:miniWindow(id==='dark')}<span class="theme-caption"><span class="theme-caption-left">${icon(ic,'sm')}${title}</span><span class="radio-visual" aria-hidden="true"></span></span></label>`).join('')}</fieldset>
+ <div class="theme-behavior note-box">${icon('info')}<p>跟随系统：随操作系统的浅色／深色设置自动切换。<br><span id="systemStatus">系统当前为浅色</span>；本原型首次打开默认使用深色。</p></div>
+ <hr class="setting-separator"><div class="setting-row"><div><strong>工作区背景</strong><p id="appearanceBackgroundNote"></p></div><div class="color-stack" aria-hidden="true"><i></i><i></i><i></i></div></div>
+ <div class="setting-row" style="margin-top:14px"><span class="subtle-badge">${icon('palette','sm')}<span id="appearanceCurrent"></span></span><button class="text-btn" data-open="palette">背景调色盘${icon('arrow','sm')}</button></div>
+ <p class="theme-footer-note">外观偏好仅保存在此原型的浏览器存储中，不修改正式应用设置。主题只改变界面，不改变对账规则或导出内容。</p>`,{icon:'moon',eyebrow:'设置 / APPEARANCE',footer:`<footer class="dialog-footer"><button class="text-btn" data-action="theme-reset">恢复为跟随系统</button><div class="dialog-footer-right"><span class="footer-tip">选择即生效</span><button class="primary-btn" data-close="app">完成</button></div></footer>`});}
+function paletteDialog(){showDialog('palette','背景调色盘',`<div class="note-box" id="paletteModeNote"></div><div class="palette-swatches">${Object.entries(backgrounds).map(([id,b])=>`<button class="swatch-btn ${id===lightBackground?'selected':''}" data-bg="${id}" ${resolvedTheme()==='dark'?'disabled':''} aria-label="浅色背景：${b.name}"><span style="background:${b.value}"></span>${b.name}</button>`).join('')}</div><div class="setting-row"><span class="footer-tip">浅色背景偏好：<span id="savedBgName">${backgrounds[lightBackground].name}</span></span><button class="text-btn" data-theme-light>切换为浅色${icon('sun','sm')}</button></div><p class="theme-footer-note">原型仅展示纯色背景；正式版的背景文件导入功能不在本次原型内模拟。</p>`,{size:'compact',icon:'palette',footer:footer('<button class="text-btn" data-open="appearance">返回外观设置</button>')});}
+function importDialog(isTemplate=false){pendingFiles=[];showDialog('import',isTemplate?'导入模板':'导入文件',`<div class="upload-zone" id="uploadZone"><div class="upload-icon">${icon('upload','lg')}</div><p>拖放文件到这里，或选择本地文件</p><small>支持 .xlsx、.xls、.csv · 只显示文件名，不读取或上传内容</small><button class="secondary-btn small-btn" data-action="pick-files">选择文件</button></div><div class="file-list" id="pendingFiles"></div><div class="note-box" style="margin-top:17px">${icon('info')}<p>没有准备文件？使用内置示例即可检查导入后的按钮和状态效果。</p></div>`,{size:'compact',icon:'upload',footer:`<footer class="dialog-footer"><button class="text-btn" data-action="sample-files">使用示例文件</button><button class="primary-btn" id="confirmImport" data-action="confirm-import" disabled>确认导入</button></footer>`});const zone=$('#uploadZone');zone.addEventListener('dragover',e=>{e.preventDefault();zone.classList.add('dragover');});zone.addEventListener('dragleave',()=>zone.classList.remove('dragover'));zone.addEventListener('drop',e=>{e.preventDefault();zone.classList.remove('dragover');acceptFiles(Array.from(e.dataTransfer.files).map(f=>f.name));});}
+function acceptFiles(names){const valid=names.filter(n=>/\.(xlsx|xls|csv)$/i.test(n));if(!valid.length){toast('请选择 .xlsx、.xls 或 .csv 文件。不会读取文件内容。');return;}pendingFiles=[...new Set(valid)];renderPending();if(valid.length<names.length)toast('已忽略不支持的文件类型。');}
+function renderPending(){if(!$('#pendingFiles'))return;$('#pendingFiles').innerHTML=pendingFiles.map(n=>`<div class="file-item">${icon('file')}<span>${esc(n)}</span><span class="status-badge neutral">待导入</span></div>`).join('');$('#confirmImport').disabled=!pendingFiles.length;}
+function confirmImport(){if(!pendingFiles.length)return;stopRun();model[activeModule].files=[...pendingFiles];model[activeModule].state='imported';appDialog.close();renderBoard();toast('已记录文件名（演示）。未读取文件内容。');}
+function badge(status,kind){return `<span class="status-badge ${kind}"><i></i>${status}</span>`;}
+function linkedDialog(title='链接表管理'){showDialog('linked',title,`<div class="toolbar"><div class="toolbar-left"><label class="search-shell">${icon('search')}<input type="search" id="linkedSearch" placeholder="搜索示例文件" aria-label="搜索链接表"></label><select id="linkedFilter" aria-label="按表类型筛选"><option value="">全部类型</option><option>账户映射</option><option>网关账单</option><option>业务单据</option></select></div><button class="secondary-btn small-btn" data-action="import">${icon('upload','sm')}导入</button></div><div class="table-shell"><table class="data-table"><thead><tr><th>文件名称</th><th>类型</th><th class="num">数据行数</th><th>导入时间</th><th>状态</th><th>操作</th></tr></thead><tbody id="linkedRows"></tbody></table></div><div class="table-foot"><span id="linkedCount"></span><span>所有数据均为合成示例</span></div>`,{size:'wide',icon:'link',eyebrow:modules[activeModule]+' / 数据管理'});renderLinked();}
+function renderLinked(){const q=($('#linkedSearch')?.value||'').trim().toLowerCase(),f=$('#linkedFilter')?.value||'';const rows=linkedFiles.filter(r=>r.name.toLowerCase().includes(q)&&(!f||r.type===f));$('#linkedRows').innerHTML=rows.length?rows.map(r=>`<tr><td><span class="file-cell">${icon('file')}${r.name}</span></td><td class="muted">${r.type}</td><td class="num">${r.count}</td><td class="mono muted">${r.time}</td><td>${badge(r.status,r.kind)}</td><td><button class="text-btn" data-inspect-file="${r.name}">查看</button></td></tr>`).join(''):'<tr><td colspan="6" class="empty-cell">没有匹配的示例文件</td></tr>';$('#linkedCount').textContent=`共 ${rows.length} 条示例记录`;}
+function archiveDialog(){showDialog('archive','存档中心',`<div class="toolbar"><div class="toolbar-left"><label class="search-shell">${icon('search')}<input type="search" id="archiveSearch" placeholder="搜索批次号" aria-label="搜索批次号"></label><select id="archiveFilter" aria-label="按模块筛选"><option value="">全部模块</option>${Object.values(modules).map(m=>`<option>${m}</option>`).join('')}</select></div><span class="subtle-badge">${icon('archive','sm')}演示存档</span></div><div class="table-shell"><table class="data-table"><thead><tr><th>批次号 / 创建时间</th><th>所属模块</th><th class="num">原始文件</th><th>状态</th><th>操作</th></tr></thead><tbody id="archiveRows"></tbody></table></div><div class="table-foot"><span id="archiveCount"></span><span>删除仅移除本页演示记录，刷新后恢复</span></div>`,{size:'wide',icon:'archive',eyebrow:'工具箱 / 存档中心'});renderArchives();}
+function renderArchives(){if(!$('#archiveRows'))return;const q=($('#archiveSearch')?.value||'').trim().toLowerCase(),f=$('#archiveFilter')?.value||'';const rows=archives.filter(r=>r.id.toLowerCase().includes(q)&&(!f||r.module===f));$('#archiveRows').innerHTML=rows.length?rows.map(r=>`<tr><td class="mono">${r.id}<span class="table-subline">${r.time}</span></td><td>${r.module}</td><td class="num">${r.count} 个</td><td>${badge(r.status,r.kind)}</td><td><button class="text-btn" data-archive-detail="${r.id}">查看</button><button class="text-btn danger" data-delete="${r.id}">删除</button></td></tr>`).join(''):'<tr><td colspan="5" class="empty-cell">没有匹配的演示批次</td></tr>';$('#archiveCount').textContent=`共 ${rows.length} 个示例批次`;}
+function deleteDialog(id){const item=archives.find(r=>r.id===id);if(!item)return;confirmDialog.innerHTML=`<header class="dialog-header"><h2 id="confirmTitle">删除批次</h2><button class="icon-btn" data-close="confirm" aria-label="关闭删除确认">${icon('close')}</button></header><div class="dialog-body"><div class="delete-heading">${icon('alert')}<p>删除后，该批次的信息与原始文件将被永久删除，无法恢复。</p></div><div class="delete-target"><strong>${item.id}</strong><p>${item.module} · ${item.count} 个原始文件</p></div><div class="note-box warning">${icon('info')}<p>以上为正式删除提示的样式演示。本原型只移除示例记录，不会访问或删除磁盘上的任何文件。</p></div><label class="checkbox-row"><input type="checkbox" id="deleteAcknowledgement">我已了解此操作不可恢复</label></div><footer class="dialog-footer"><span class="footer-tip">危险操作样式预览</span><div class="dialog-footer-right"><button class="secondary-btn" data-close="confirm">取消</button><button class="danger-btn" id="deleteConfirmBtn" data-confirm-delete="${id}" disabled>永久删除</button></div></footer>`;confirmDialog.showModal();}
+function scenariosDialog(){showDialog('scenarios','场景管理',`<p class="section-description">下列名称仅用于展示表格、开关及状态颜色，不代表实际业务规则配置。</p><div class="table-shell"><table class="data-table"><thead><tr><th>场景名称</th><th>说明</th><th>状态</th><th>操作</th></tr></thead><tbody><tr><td>示例场景 01</td><td class="muted">基础配置展示</td><td>${badge('已启用','success')}</td><td><button class="text-btn" data-demo="这里仅演示场景编辑入口，不修改真实对账规则。">编辑</button></td></tr><tr><td>示例场景 02</td><td class="muted">待完善配置展示</td><td>${badge('待配置','warning')}</td><td><button class="text-btn" data-demo="这里仅演示配置入口，不修改真实对账规则。">配置</button></td></tr><tr><td>示例场景 03</td><td class="muted">停用状态展示</td><td>${badge('未启用','neutral')}</td><td><button class="text-btn" data-demo="场景启用为样式演示，不会改变运行行为。">启用</button></td></tr></tbody></table></div>`,{icon:'sliders',eyebrow:modules[activeModule]});}
+function componentsDialog(){showDialog('components','组件样式检查',`<p class="section-description">检查主题在常见组件中的表现。此页面仅用于设计验收，不是新增业务模块。</p><div class="component-grid"><section class="component-block"><h3>按钮 / 可用与禁用</h3><div class="component-buttons">${button('主要操作','demo','primary')}${button('次要操作','demo')}${button('不可用','demo','primary',true)}${button('不可用','demo','secondary',true)}</div></section><section class="component-block"><h3>状态 / 文字与颜色同时区分</h3>${badge('成功','success')}${badge('需确认','warning')}${badge('失败','danger')}${badge('等待处理','neutral')}</section><section class="component-block"><h3>输入 / 默认、聚焦、选择</h3><label class="sr-only" for="demoInput">示例输入</label><input id="demoInput" type="text" placeholder="点击查看聚焦边框" style="width:100%"><label class="sr-only" for="demoSelect">示例下拉框</label><select id="demoSelect" style="width:100%;margin-top:10px"><option>选择对账场景</option> <option>示例场景 01</option></select></section><section class="component-block"><h3>提示 / 成功与异常</h3><div class="note-box success">${icon('circle-check')}<p>示例数据检查通过。</p></div><div class="note-box danger">${icon('alert')}<p>示例：缺少必填字段。</p></div></section></div>`,{size:'wide',icon:'grid',eyebrow:'仅原型 / 主题验收',footer:`<footer class="dialog-footer"><div class="component-buttons"><button class="secondary-btn small-btn" data-component-theme="light">浅色</button><button class="secondary-btn small-btn" data-component-theme="dark">深色</button></div><button class="primary-btn" data-close="app">完成</button></footer>`});}
+function guideDialog(){showDialog('guide','原型预览说明',`<div class="module-cards"><div class="note-box">${icon('moon')}<p><strong>切换主题</strong><br>右上角可切换浅色、深色和跟随系统；右下角“设置”进入外观设置。偏好会在浏览器允许时自动保存。</p></div><div class="note-box">${icon('grid')}<p><strong>检查不同界面</strong><br>顶部模块下拉切换三种业务面板；“链接表管理”查看表格，“工具箱 → 存档中心”查看批次和删除确认。</p></div><div class="note-box">${icon('eye')}<p><strong>模拟状态</strong><br>工作区下方切换初始、已导入、运行中、已完成和异常状态。资金模块的“开始运行”只播放演示进度。</p></div><div class="note-box">${icon('shield')}<p><strong>边界</strong><br>HTML 独立运行，无网络请求。文件选择只显示文件名，不读取内容；不执行真实对账、导出或删除。本原型没有修改、创建或推送 Git 分支。</p></div></div>`,{size:'',icon:'book'});}
+function cabinetDialog(){showDialog('cabinet','小助手功能收纳',`<p class="section-description">本次原型选取以下三个已有业务面板检查夜间外观。不修改正式版的启用列表与顺序。</p><div class="module-cards">${Object.entries(modules).map(([key,title])=>`<button class="module-card" data-module="${key}">${icon(key==='fund'?'exchange':key==='statement'?'bank':'file')}<div><strong>${title}</strong><p>${key===activeModule?'当前预览模块':'切换到此模块预览'}</p></div>${icon('arrow','end-icon')}</button>`).join('')}</div>`,{size:'compact',icon:'grid'});}
+function exportDialog(){showDialog('export','导出预览',`<div class="note-box success">${icon('circle-check')}<p>已进入示例结果可导出的状态。</p></div><p class="section-description" style="margin-top:18px;margin-bottom:0">主题只影响界面外观，正式导出的表格格式不应跟随深色主题改变。此原型不包含对账引擎，不生成或保存业务文件。</p>`,{size:'compact',icon:'download'});}
+function resultDialog(){showDialog('result','结果确认',`<div class="note-box warning">${icon('info')}<p>下列数字和状态仅用于外观展示，不来自真实处理结果。</p></div><div class="table-shell" style="margin-top:18px"><table class="data-table"><thead><tr><th>示例检查项</th><th class="num">记录数</th><th>状态</th></tr></thead><tbody><tr><td>通过记录</td><td class="num">1,245</td><td>${badge('通过','success')}</td></tr><tr><td>待确认记录</td><td class="num">3</td><td>${badge('待确认','warning')}</td></tr></tbody></table></div>`,{icon:'circle-check',size:'compact'});}
+function open(name){const f={appearance:appearanceDialog,palette:paletteDialog,archive:archiveDialog,components:componentsDialog,guide:guideDialog,cabinet:cabinetDialog};if(f[name])f[name]();}
+function handleAction(action){switch(action){case'import':return importDialog();case'import-template':return importDialog(true);case'run':return runDemo();case'export':return exportDialog();case'linked':return linkedDialog();case'templates':return linkedDialog('模板管理 · 示例');case'mapping':return linkedDialog('账户映射 · 示例');case'scenarios':return scenariosDialog();case'result':return resultDialog();case'theme-reset':return setTheme('system');case'pick-files':$('#filePicker').value='';return $('#filePicker').click();case'sample-files':pendingFiles=['银行对账单_202609_示例.xlsx','网关账单_202609_示例.xlsx','业务单据_202609_示例.xlsx'];return renderPending();case'confirm-import':return confirmImport();case'demo':return toast('组件按钮交互正常；此操作仅为外观演示。');}}
+document.addEventListener('click',e=>{
+ const b=e.target.closest('button');
+ if(!b){if(!e.target.closest('.popover'))closeMenus();return;}if(b.disabled)return;
+ if(b.id==='themeTrigger')return toggleMenu('themeMenu',b);if(b.id==='moduleSwitcherBtn')return toggleMenu('moduleMenu',b);if(b.id==='toolboxTrigger')return toggleMenu('toolboxMenu',b);
+ if(b.dataset.themeSet){setTheme(b.dataset.themeSet);closeMenus();$('#themeTrigger').focus();return;}
+ if(b.hasAttribute('data-theme-light'))return setTheme('light');if(b.dataset.componentTheme)return setTheme(b.dataset.componentTheme);
+ if(b.dataset.open)return open(b.dataset.open);if(b.dataset.module)return selectModule(b.dataset.module);
+ if(b.dataset.state)return setState(b.dataset.state);if(b.dataset.action)return handleAction(b.dataset.action);
+ if(b.dataset.close)return(b.dataset.close==='confirm'?confirmDialog:appDialog).close();
+ if(b.dataset.bg){lightBackground=b.dataset.bg;const saved=persist('bbet-v329-preview-background',lightBackground);updateTheme(false);if($('#savedBgName'))$('#savedBgName').textContent=backgrounds[lightBackground].name;if(!saved)toast('背景已切换；当前浏览器不允许保存偏好。');return;}
+ if(b.dataset.delete)return deleteDialog(b.dataset.delete);
+ if(b.dataset.confirmDelete){const id=b.dataset.confirmDelete,i=archives.findIndex(r=>r.id===id);if(i>=0)archives.splice(i,1);confirmDialog.close();renderArchives();toast('演示记录已移除；未删除任何磁盘文件。');return;}
+ if(b.dataset.archiveDetail){const r=archives.find(x=>x.id===b.dataset.archiveDetail);if(r)toast(`${r.id} · ${r.module} · ${r.count} 个示例原始文件`);return;}
+ if(b.dataset.inspectFile)return toast(b.dataset.inspectFile+'：示例记录，不读取磁盘文件。');
+ if(b.dataset.demo)return toast(b.dataset.demo);
+ if(b.dataset.windowDemo)return toast('浏览器原型不控制应用窗口；此按钮仅展示'+b.dataset.windowDemo+'样式。');
+ if(!b.closest('.popover'))closeMenus();
+});
+document.addEventListener('change',e=>{if(e.target.matches('input[name="appearance"]'))setTheme(e.target.value,false);if(e.target.id==='deleteAcknowledgement')$('#deleteConfirmBtn').disabled=!e.target.checked;if(e.target.id==='linkedFilter')renderLinked();if(e.target.id==='archiveFilter')renderArchives();if(e.target.id==='statementMode')businessSelectors.statement=e.target.value;if(e.target.id==='positionFunction')businessSelectors.position=e.target.value;});
+document.addEventListener('input',e=>{if(e.target.id==='linkedSearch')renderLinked();if(e.target.id==='archiveSearch')renderArchives();});
+$('#filePicker').addEventListener('change',e=>acceptFiles(Array.from(e.target.files).map(f=>f.name)));
+// Keep file drops local to the preview; never navigate to a dropped file.
+document.addEventListener('dragover',e=>e.preventDefault());document.addEventListener('drop',e=>e.preventDefault());
+document.addEventListener('keydown',e=>{
+ const visible=$$('.popover').find(p=>!p.hidden);if(!visible)return;
+ const trigger={themeMenu:'themeTrigger',moduleMenu:'moduleSwitcherBtn',toolboxMenu:'toolboxTrigger'}[visible.id];
+ if(e.key==='Escape'){e.preventDefault();closeMenus();$('#'+trigger).focus();return;}
+ if(['ArrowDown','ArrowUp','Home','End'].includes(e.key)){e.preventDefault();const items=$$('button:not(:disabled)',visible),n=items.length;let i=items.indexOf(document.activeElement);i=e.key==='Home'?0:e.key==='End'?n-1:e.key==='ArrowDown'?(i+1+n)%n:(i-1+n)%n;items[i].focus();}
+ if(e.key==='Tab')closeMenus();
+});
+appDialog.addEventListener('close',()=>{activeDialog='';});
+[appDialog,confirmDialog].forEach(d=>d.addEventListener('click',e=>{if(e.target===d){const r=d.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)d.close();}}));
+updateTheme(false);renderBoard();
+</script>
+</body>
+</html>

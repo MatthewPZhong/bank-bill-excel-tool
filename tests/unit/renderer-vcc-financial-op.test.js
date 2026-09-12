@@ -401,9 +401,9 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     assert.match(moduleRenderer, /if \(currentVersion !== renderVersion\) return;/);
     assert.match(moduleRenderer, /row\.generatedAt \|\| row\.createdAt \|\| row\.archivedAt/);
     assert.match(sharedStyles, /\.position-manager-layout\s*\{[\s\S]*grid-template-columns:\s*156px minmax\(0, 1fr\);/);
-    assert.match(sharedStyles, /\.position-manager-nav\s*\{[\s\S]*padding:\s*12px 8px;[\s\S]*background:\s*#f8f9fa;/);
+    assert.match(sharedStyles, /\.position-manager-nav\s*\{[\s\S]*padding:\s*12px 8px;[\s\S]*background:\s*var\(--bg-soft, #f8f9fa\);/);
     assert.match(sharedStyles, /\.position-nav-item\s*\{[\s\S]*height:\s*42px;[\s\S]*border-radius:\s*6px;/);
-    assert.match(sharedStyles, /\.position-nav-item\.active\s*\{[\s\S]*background:\s*#e8f0fe;[\s\S]*font-weight:\s*600;/);
+    assert.match(sharedStyles, /\.position-nav-item\.active\s*\{[\s\S]*background:\s*var\(--primary-soft, #e8f0fe\);[\s\S]*font-weight:\s*600;/);
     assert.match(styles, /\.vcc-fin-op-manager-toolbar h3\s*\{[\s\S]*transform:\s*translateX\(11px\);/);
     assert.match(styles, /\.vcc-fin-op-manager-nav \.position-nav-item\s*\{[\s\S]*padding-left:\s*20px;/);
   });

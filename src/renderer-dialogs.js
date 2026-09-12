@@ -6493,7 +6493,7 @@
               <select class="template-select" data-role="target-channel" style="min-width: 220px;"></select>
             </div>
           </div>
-          <div data-role="loading-hint" style="margin-top: 8px; color: #888; font-size: 12px;">加载渠道列表中...</div>
+          <div data-role="loading-hint" style="margin-top: 8px; color: var(--muted); font-size: 12px;">加载渠道列表中...</div>
         </div>
         <div class="dialog-actions right">
           <button class="primary-btn small" type="button" data-action="confirm">完成</button>
@@ -6535,7 +6535,7 @@
         const filtered = channels.filter((c) => Number(c.id) !== Number(currentChannelId));
         if (filtered.length === 0) {
           loadingHint.textContent = '没有可转移到的其他渠道，请先新建渠道';
-          loadingHint.style.color = '#c00';
+          loadingHint.style.color = 'var(--danger)';
           return;
         }
         select.innerHTML = filtered.map((c) => {
@@ -6638,7 +6638,7 @@
       const head = [];
       if (admDerive.midEmpty) {
         // 中台表为空 → 顶部额外提示「请先导入中台调拨订单表」（PRD §5.3.6）。
-        head.push('<b style="color:#d93025;">请先导入中台调拨订单表。</b>');
+        head.push('<b style="color:var(--danger);">请先导入中台调拨订单表。</b>');
       }
       head.push('<b>ADM 银行对账单链接表已创建（部分行未匹配中台调拨订单）</b>');
       head.push(`以下 <b>${unmatched.length}</b> 行未匹配，调拨号 / 调拨入金金额留空：`);
@@ -6677,7 +6677,7 @@
         const missingReason = bocDerive.bankMissingReason || '';
         // missing-payment-detail：库内有 BOC 银行行但缺 Payment Detail（旧白名单时代导入）→ 提示重新导入。
         const extraHint = missingReason === 'missing-payment-detail'
-          ? '<br/><br/><b style="color:#d93025;">检测到链接表库中已有 BOC 银行对账单数据但缺少「Payment Detail」字段（早期版本导入），无法提取银行单交易编号，请重新导入 BOC 银行对账单表。</b>'
+          ? '<br/><br/><b style="color:var(--danger);">检测到链接表库中已有 BOC 银行对账单数据但缺少「Payment Detail」字段（早期版本导入），无法提取银行单交易编号，请重新导入 BOC 银行对账单表。</b>'
           : '';
         const html = 'BOC链接表已生成分组与调拨单号，但链接表库无可用的 BOC 银行对账单数据，无法回填资金对账不平表链接ID。'
           + extraHint
@@ -10272,7 +10272,7 @@
         if (fundTypeFields && shouldShowFundTypeDowngradeHint()) {
           const hint = document.createElement('div');
           hint.className = 'scenario-config-fundtype-hint';
-          hint.style.cssText = 'color:#c0392b;font-size:12px;margin-top:4px;';
+          hint.style.cssText = 'color:var(--danger);font-size:12px;margin-top:4px;';
           hint.textContent = '未找到 FundType 枚举文件（assets/FundType枚举值.xlsx），FundType 字段值暂用手动输入';
           billTypeContainer.appendChild(hint);
         }
@@ -12997,7 +12997,7 @@
           </div>
           <div class="alert-message">
             <div style="font-weight:600; font-size:15px; margin-bottom:6px;">${escapeHtmlSafe(title)}</div>
-            <div style="font-size:13px; color:#666; line-height:1.55;">${escapeHtmlSafe(detail)}</div>
+            <div style="font-size:13px; color:var(--muted); line-height:1.55;">${escapeHtmlSafe(detail)}</div>
           </div>
         </div>
         <div class="dialog-actions center">
@@ -13306,11 +13306,11 @@
           </div>
           <div class="alert-message">
             <div style="font-weight:600; font-size:15px; margin-bottom:6px;">确认流水信息</div>
-            <div style="font-size:13px; color:#666; line-height:1.8;">
+            <div style="font-size:13px; color:var(--muted); line-height:1.8;">
               流水月份：<b>${escapeHtmlSafe(String(yearMonth))}</b><br>
               导入文件：<b>${escapeHtmlSafe(String(fileCount))}</b> 个<br>
               总流水条数：<b>${escapeHtmlSafe(String(totalRows))}</b> 条<br>
-              <span style="color:#999;">确认后将统计发生额出/入。</span>
+              <span style="color:var(--muted);">确认后将统计发生额出/入。</span>
             </div>
           </div>
         </div>
@@ -13375,12 +13375,12 @@
 
       // 结果行（计算落库后显示期末OP）
       const resultBox = document.createElement('div');
-      resultBox.style.cssText = 'margin-top:10px; font-size:14px; font-weight:600; color:#1a7f37; display:none;';
+      resultBox.style.cssText = 'margin-top:10px; font-size:14px; font-weight:600; color:var(--success); display:none;';
       dialog.appendChild(resultBox);
 
       // 错误行（inline，可重试）
       const errBox = document.createElement('div');
-      errBox.style.cssText = 'margin-top:8px; font-size:12px; color:#d93025; display:none;';
+      errBox.style.cssText = 'margin-top:8px; font-size:12px; color:var(--danger); display:none;';
       dialog.appendChild(errBox);
 
       const actions = document.createElement('div');
@@ -13502,7 +13502,7 @@
         }
         viewBtn.disabled = false;
         if (!bal) {
-          resultBox.innerHTML = `<span style="color:#d93025;">未找到 ${escapeHtml(String(ym))} 的计算记录</span>`;
+          resultBox.innerHTML = `<span style="color:var(--danger);">未找到 ${escapeHtml(String(ym))} 的计算记录</span>`;
           resultBox.style.display = 'block';
           return;
         }
@@ -13875,7 +13875,7 @@
           </div>
           <div class="alert-message">
             <div style="font-weight:600; font-size:15px; margin-bottom:6px;">已导入第 1 日数据（${escapeHtmlSafe(firstDate)}）</div>
-            <div style="font-size:13px; color:#666; line-height:1.55;">是否立即导入第 2 日数据？两日数据齐备后才能进入流水对账单导入。</div>
+            <div style="font-size:13px; color:var(--muted); line-height:1.55;">是否立即导入第 2 日数据？两日数据齐备后才能进入流水对账单导入。</div>
           </div>
         </div>
         <div class="dialog-actions center">
