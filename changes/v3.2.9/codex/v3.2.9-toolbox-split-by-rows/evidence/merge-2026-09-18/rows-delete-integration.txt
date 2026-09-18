@@ -1,0 +1,3 @@
+PASS rows Worker 发布、父目录身份、真实归档和原 owner ACK
+PASS completion 重开可读、删除受管原件与 Blob、外部输入和输出完整保留
+2/2 PASS toolbox rows → archive owner completion → permanent delete

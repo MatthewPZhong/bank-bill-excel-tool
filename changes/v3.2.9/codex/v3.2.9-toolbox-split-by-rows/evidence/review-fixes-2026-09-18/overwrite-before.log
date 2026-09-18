@@ -1,0 +1,238 @@
+(node:14683) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✖ 覆盖确认期间 create 目标，Main 在任务前拒绝且保留全部文件 (4.739708ms)
+✖ Main prepare 返回后 create 目标，IPC 不能重新采集并接受新快照 (2.609333ms)
+✖ 覆盖确认期间 replace 目标，Main 在任务前拒绝且保留全部文件 (1.768292ms)
+✖ Main prepare 返回后 replace 目标，IPC 不能重新采集并接受新快照 (2.195542ms)
+✔ 取消覆盖确认不创建 File Task 或输出文件 (1.358ms)
+✔ 确认快照传至真实 Publisher：生成后 none 目标 (183.156708ms)
+✔ 确认快照传至真实 Publisher：生成后 create 目标 (50.574917ms)
+✔ 确认快照传至真实 Publisher：生成后 replace 目标 (47.4465ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 4
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 482.713708
+
+✖ failing tests:
+
+test at ../../../../../../../../private/tmp/rows-overwrite-baseline-dng60cer/tests/unit/main-process/toolbox-row-split-overwrite.test.js:59:3
+✖ 覆盖确认期间 create 目标，Main 在任务前拒绝且保留全部文件 (4.739708ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  true !== false
+  
+      at TestContext.<anonymous> (/private/tmp/rows-overwrite-baseline-dng60cer/tests/unit/main-process/toolbox-row-split-overwrite.test.js:67:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:358:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../../../../../private/tmp/rows-overwrite-baseline-dng60cer/tests/unit/main-process/toolbox-row-split-overwrite.test.js:75:3
+✖ Main prepare 返回后 create 目标，IPC 不能重新采集并接受新快照 (2.609333ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + {
+  +   allocation: 'eager',
+  +   inputs: [
+  +     {
+  +       aliasKey: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/t/rows-overwrite-test-xiw7bs/input.csv',
+  +       artifactKey: 'input-4ee7fc965513a82739ef3d5b4401ff15f578b560e9521a8f0d0222b0aaf564cf',
+  +       direction: 'input',
+  +       filePath: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/rows-overwrite-test-XIw7bs/input.csv',
+  +       originalName: 'input.csv',
+  +       role: 'input',
+  +       sourceOperation: 'toolbox:split:export',
+  +       sourceSnapshot: {
+  +         ctimeMs: 1789724167328.5725,
+  +         ino: '110955540',
+  +         mtimeMs: 1789724167328.5725,
+  +         sizeBytes: 6
+  +       }
+  +     }
+  +   ],
+  +   outputs: [
+  +     {
+  +       aliasKey: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/t/rows-overwrite-test-xiw7bs/input_按行拆分_0001.xlsx',
+  +       artifactKey: 'output-44ce6247a81ddf5aed2e05c41fa8410c8ddd0f4f5247e9e7b7f543bb68dac3b1',
+  +       direction: 'output',
+  +       filePath: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/rows-overwrite-test-XIw7bs/input_按行拆分_0001.xlsx',
+  +       originalName: 'input_按行拆分_0001.xlsx',
+  +       role: 'output',
+  +       sourceOperation: 'toolbox:split:export',
+  +       targetParentIdentity: {
+  +         aliasKey: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/t/rows-overwrite-test-xiw7bs',
+  +         canonicalRealPath: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/rows-overwrite-test-XIw7bs',
+  +         deviceId: '16777232',
+  +         identityKind: 'dev-inode',
+  +         identityReliable: true,
+  +         inode: '110955539'
+  +       },
+  +       targetSnapshot: {
+  +         exists: true,
+  +         snapshot: {
+  +           ctimeMs: 1789724167328.7322,
+  +           ino: '110955542',
+  +           mtimeMs: 1789724167328.7322,
+  +           sizeBytes: 13
+  +         }
+  +       }
+  +     },
+  +     {
+  +       aliasKey: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/t/rows-overwrite-test-xiw7bs/input_按行拆分_0002.xlsx',
+  +       artifactKey: 'output-a20a688da1195bcd3cf543ec1be072d87d5452d5fa155303c2ab8289f40c144f',
+  +       direction: 'output',
+  +       filePath: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/rows-overwrite-test-XIw7bs/input_按行拆分_0002.xlsx',
+  +       originalName: 'input_按行拆分_0002.xlsx',
+  +       role: 'output',
+  +       sourceOperation: 'toolbox:split:export',
+  +       targetParentIdentity: {
+  +         aliasKey: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/t/rows-overwrite-test-xiw7bs',
+  +         canonicalRealPath: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/rows-overwrite-test-XIw7bs',
+  +         deviceId: '16777232',
+  +         identityKind: 'dev-inode',
+  +         identityReliable: true,
+  +         inode: '110955539'
+  +       },
+  +       targetSnapshot: {
+  +         exists: true,
+  +         snapshot: {
+  +           ctimeMs: 1789724167329.5264,
+  +           ino: '110955543',
+  +           mtimeMs: 1789724167329.5264,
+  +           sizeBytes: 15
+  +         }
+  +       }
+  +     }
+  +   ],
+  +   version: 1
+  + }
+  - undefined
+  
+      at TestContext.<anonymous> (/private/tmp/rows-overwrite-baseline-dng60cer/tests/unit/main-process/toolbox-row-split-overwrite.test.js:87:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { version: 1, allocation: 'eager', inputs: [ [Object] ], outputs: [ [Object], [Object] ] },
+    expected: undefined,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../../../../../private/tmp/rows-overwrite-baseline-dng60cer/tests/unit/main-process/toolbox-row-split-overwrite.test.js:59:3
+✖ 覆盖确认期间 replace 目标，Main 在任务前拒绝且保留全部文件 (1.768292ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  true !== false
+  
+      at TestContext.<anonymous> (/private/tmp/rows-overwrite-baseline-dng60cer/tests/unit/main-process/toolbox-row-split-overwrite.test.js:67:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../../../../../private/tmp/rows-overwrite-baseline-dng60cer/tests/unit/main-process/toolbox-row-split-overwrite.test.js:75:3
+✖ Main prepare 返回后 replace 目标，IPC 不能重新采集并接受新快照 (2.195542ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + {
+  +   allocation: 'eager',
+  +   inputs: [
+  +     {
+  +       aliasKey: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/t/rows-overwrite-test-wekv5m/input.csv',
+  +       artifactKey: 'input-1b9a96f07c25469419af0261adc0a52cc570a7991855f65e3698e797f988ce58',
+  +       direction: 'input',
+  +       filePath: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/rows-overwrite-test-wEkv5m/input.csv',
+  +       originalName: 'input.csv',
+  +       role: 'input',
+  +       sourceOperation: 'toolbox:split:export',
+  +       sourceSnapshot: {
+  +         ctimeMs: 1789724167333.001,
+  +         ino: '110955550',
+  +         mtimeMs: 1789724167333.001,
+  +         sizeBytes: 6
+  +       }
+  +     }
+  +   ],
+  +   outputs: [
+  +     {
+  +       aliasKey: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/t/rows-overwrite-test-wekv5m/input_按行拆分_0001.xlsx',
+  +       artifactKey: 'output-58aa54488f96820f7244e5ef271ac968afec3c6c887b8297a3bffe96dfd137d9',
+  +       direction: 'output',
+  +       filePath: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/rows-overwrite-test-wEkv5m/input_按行拆分_0001.xlsx',
+  +       originalName: 'input_按行拆分_0001.xlsx',
+  +       role: 'output',
+  +       sourceOperation: 'toolbox:split:export',
+  +       targetParentIdentity: {
+  +         aliasKey: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/t/rows-overwrite-test-wekv5m',
+  +         canonicalRealPath: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/rows-overwrite-test-wEkv5m',
+  +         deviceId: '16777232',
+  +         identityKind: 'dev-inode',
+  +         identityReliable: true,
+  +         inode: '110955549'
+  +       },
+  +       targetSnapshot: {
+  +         exists: true,
+  +         snapshot: {
+  +           ctimeMs: 1789724167333.8018,
+  +           ino: '110955553',
+  +           mtimeMs: 1789724167333.7227,
+  +           sizeBytes: 23
+  +         }
+  +       }
+  +     },
+  +     {
+  +       aliasKey: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/t/rows-overwrite-test-wekv5m/input_按行拆分_0002.xlsx',
+  +       artifactKey: 'output-690ee88ceae05ed6d6345dcd588a40a4edbdc5175fbcf8d725b9a272d2546694',
+  +       direction: 'output',
+  +       filePath: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/rows-overwrite-test-wEkv5m/input_按行拆分_0002.xlsx',
+  +       originalName: 'input_按行拆分_0002.xlsx',
+  +       role: 'output',
+  +       sourceOperation: 'toolbox:split:export',
+  +       targetParentIdentity: {
+  +         aliasKey: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/t/rows-overwrite-test-wekv5m',
+  +         canonicalRealPath: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/rows-overwrite-test-wEkv5m',
+  +         deviceId: '16777232',
+  +         identityKind: 'dev-inode',
+  +         identityReliable: true,
+  +         inode: '110955549'
+  +       },
+  +       targetSnapshot: {
+  +         exists: false
+  +       }
+  +     }
+  +   ],
+  +   version: 1
+  + }
+  - undefined
+  
+      at TestContext.<anonymous> (/private/tmp/rows-overwrite-baseline-dng60cer/tests/unit/main-process/toolbox-row-split-overwrite.test.js:87:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { version: 1, allocation: 'eager', inputs: [ [Object] ], outputs: [ [Object], [Object] ] },
+    expected: undefined,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

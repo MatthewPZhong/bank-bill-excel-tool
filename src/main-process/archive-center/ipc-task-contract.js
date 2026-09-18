@@ -1,6 +1,7 @@
 'use strict';
 
 const {
+  assertNormalizedFilePlanV1,
   normalizeFilePlanV1
 } = require('./file-plan');
 
@@ -80,9 +81,16 @@ async function prepareIpcTaskInvocation(contract, event, args) {
       result: prepared.result === undefined ? { status: 'cancelled' } : prepared.result
     };
   }
-  const filePlan = prepared.filePlan === undefined
-    ? undefined
-    : normalizeFilePlanV1(prepared.filePlan);
+  let filePlan;
+  if (prepared.filePlan !== undefined) {
+    try {
+      // 只复用 Main 当前进程已冻结的 authority，保留覆盖确认前的目标身份。
+      filePlan = assertNormalizedFilePlanV1(prepared.filePlan);
+    } catch (error) {
+      if (error.code !== 'ARCHIVE_FILE_PLAN_AUTHORITY_INVALID') throw error;
+      filePlan = normalizeFilePlanV1(prepared.filePlan);
+    }
+  }
   return {
     ...prepared,
     ...(filePlan ? { filePlan } : {}),

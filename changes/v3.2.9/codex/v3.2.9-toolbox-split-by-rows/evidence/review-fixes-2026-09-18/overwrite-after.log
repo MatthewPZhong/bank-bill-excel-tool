@@ -1,0 +1,24 @@
+✔ 普通函数 handler 无 prepare，参数原样进入 execute (0.682083ms)
+✔ 对象 handler execute 稳定收到冻结 taskContext 与 artifact barrier (0.098917ms)
+✔ prepare 必须显式声明 proceed，禁止把业务 status 猜成门禁结果 (0.18225ms)
+✔ prepare stop 原样返回 result，输入输出路径角色分离 (0.094667ms)
+✔ prepare 是普通 eager FilePlan 的唯一规范化冻结边界 (2.469792ms)
+✔ IPC 保留 Main 冻结 authority，但不信任复制或外部注入的目标快照 (1.238375ms)
+(node:61404) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 覆盖确认期间 create 目标，Main 在任务前拒绝且保留全部文件 (4.812792ms)
+✔ Main prepare 返回后 create 目标，IPC 不能重新采集并接受新快照 (2.446ms)
+✔ 覆盖确认期间 replace 目标，Main 在任务前拒绝且保留全部文件 (2.029375ms)
+✔ Main prepare 返回后 replace 目标，IPC 不能重新采集并接受新快照 (1.860333ms)
+✔ 取消覆盖确认不创建 File Task 或输出文件 (1.603917ms)
+✔ 确认快照传至真实 Publisher：生成后 none 目标 (220.823958ms)
+✔ 确认快照传至真实 Publisher：生成后 create 目标 (51.770792ms)
+✔ 确认快照传至真实 Publisher：生成后 replace 目标 (51.147625ms)
+ℹ tests 14
+ℹ suites 0
+ℹ pass 14
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 632.202792

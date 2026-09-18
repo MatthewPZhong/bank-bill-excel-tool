@@ -194,6 +194,7 @@ test.describe('T4 toolbox-large-split-dispatch（最小真 worker 冒烟）', ()
 
     assert.ok(result && typeof result === 'object', 'scanFields 应返回对象');
     assert.deepEqual(result.headers, ['渠道', '币种', '金额'], 'headers 应为逻辑表头');
+    assert.equal(result.dataRowCount, 5, '跨 Sheet 重复表头不计入数据行数');
     assert.ok(result.valuesByField && typeof result.valuesByField === 'object', 'valuesByField 应为对象');
 
     // 渠道：ALIPAY / WECHAT / UNIONPAY（首现序、去重；sheet2 重复表头不计入）。
@@ -206,8 +207,8 @@ test.describe('T4 toolbox-large-split-dispatch（最小真 worker 冒烟）', ()
     for (const key of Object.keys(result.valuesByField)) {
       assert.ok(Array.isArray(result.valuesByField[key]), `valuesByField[${key}] 必须是 string[]`);
     }
-    assert.deepEqual(Object.keys(result).sort(), ['headers', 'valuesByField'],
-      'scanFields result 仅含 headers / valuesByField（无额外元数据字段）');
+    assert.deepEqual(Object.keys(result).sort(), ['dataRowCount', 'headers', 'valuesByField'],
+      'scanFields result 增量返回可信 dataRowCount，保留 headers / valuesByField');
   });
 
   test('B2. 真 worker 拓扑跑通 exportFilter：按字段值过滤写出 + matchedCount 正确', async () => {

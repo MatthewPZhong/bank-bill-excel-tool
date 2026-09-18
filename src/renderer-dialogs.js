@@ -11934,16 +11934,18 @@
       //   取代原生 window.alert（无前端页面、无法预览、样式不一致）。
       //   createAlertDialog 按 innerHTML 渲染 → message/明细经 escapeHtml + <br> 拼装防注入/正确换行；
       //   成功/提示 skipLogReport（不报 error 日志），失败默认 error 上报；点「确认」后回到工具箱主弹框。
-      function showToolboxAlert(message, { isError = false, lines = [] } = {}) {
+      function showToolboxAlert(message, { isError = false, lines = [], scrollable = false } = {}) {
         const safeLines = Array.isArray(lines) ? lines.filter((l) => l != null && String(l) !== '') : [];
         const html = [escapeHtml(String(message || ''))]
           .concat(safeLines.map((l) => escapeHtml(String(l))))
           .join('<br>');
-        openModal(createAlertDialog(html, {
+        const alert = createAlertDialog(html, {
           skipLogReport: !isError,
           logDomain: 'toolbox',
           onConfirm: () => openModal(overlay)
-        }));
+        });
+        if (scrollable) alert.querySelector('.alert-card').classList.add('toolbox-split-rows-result');
+        openModal(alert);
       }
 
       function buildToolboxNoticeLines(result) {
@@ -12041,13 +12043,17 @@
           openModal(createSplitFieldPickerDialog({
             headers,
             valuesByField,
-            onComplete: async ({ field, values, mode, groups } = {}) => {
+            splitReadToken: result.splitReadToken,
+            dataRowCount: result.dataRowCount,
+            maxRowSplitFiles: result.maxRowSplitFiles,
+            onComplete: async ({ field, values, mode, groups, rowsPerFile } = {}) => {
               // v3.0.8：选字段「完成」→ 直接过滤命中行另存为（一气呵成，无独立导出按钮）。
               openModal(overlay); // 先回工具箱主弹框，随后弹系统保存框
               const selectedValues = Array.isArray(values) ? values : [];
               const multipleGroups = Array.isArray(groups) ? groups : [];
               const isMultiple = mode === 'multiple';
-              if (!result.sourceFilePath || (!isMultiple && (!field || selectedValues.length === 0))
+              const isRows = mode === 'rows';
+              if (!result.sourceFilePath || (!isMultiple && !isRows && (!field || selectedValues.length === 0))
                 || (isMultiple && multipleGroups.length === 0)) {
                 setToolboxStatus('拆分失败', 'error');
                 showToolboxAlert('请选择拆分字段与至少一个值', { isError: true });
@@ -12058,7 +12064,14 @@
               setToolboxStatus('正在拆分表格');
               syncToolboxRunningUi();
               try {
-                const exportResult = await desktopApi.toolbox.splitExport(isMultiple
+                const exportResult = await desktopApi.toolbox.splitExport(isRows
+                  ? {
+                    sourceFilePath: result.sourceFilePath,
+                    splitReadToken: result.splitReadToken,
+                    mode: 'rows',
+                    rowsPerFile
+                  }
+                  : isMultiple
                   ? {
                     sourceFilePath: result.sourceFilePath,
                     splitReadToken: result.splitReadToken,
@@ -12077,7 +12090,16 @@
                 }
                 if (exportResult.status === 'success') {
                   setToolboxStatus('拆分完成', 'success');
-                  if (isMultiple) {
+                  if (isRows) {
+                    const files = Array.isArray(exportResult.files) ? exportResult.files : [];
+                    showToolboxAlert(`拆分完成，共 ${exportResult.fileCount} 个文件、${exportResult.outputDataRowCount} 行：`, {
+                      scrollable: true,
+                      lines: [
+                        ...files.map((file) => `${file.fileName}（${file.dataRowCount} 行）：${file.filePath}`),
+                        ...buildToolboxNoticeLines(exportResult)
+                      ]
+                    });
+                  } else if (isMultiple) {
                     const files = Array.isArray(exportResult.files) ? exportResult.files : [];
                     showToolboxAlert('拆分完成：', {
                       lines: [
@@ -12123,7 +12145,18 @@
     //   入参 { headers:string[], valuesByField:{[field]:string[]}, onComplete({field,values[]}), onCancel() }。
     //   边界：① 某字段无去重值（valuesByField[f] 空）→ 多选框为空且 disabled；
     //         ② 未选任何值（values=[]）→ [完成] 禁用（不允许空选导出，否则过滤命中 0 行产空 sheet）。
-    function createSplitFieldPickerDialog({ headers = [], valuesByField = {}, onComplete = null, onCancel = null } = {}) {
+    function validateRowsInput(text) {
+      const value = String(text).trim();
+      if (!value) return { valid: false, message: '请输入每份文件的数据行数' };
+      if (!/^[0-9]+$/.test(value)) return { valid: false, message: '请输入大于 0 的整数' };
+      const number = Number(value);
+      if (number <= 0) return { valid: false, message: '请输入大于 0 的整数' };
+      if (!Number.isSafeInteger(number)) return { valid: false, message: '行数过大，请输入有效范围内的整数' };
+      return { valid: true, value: number };
+    }
+
+    function createSplitFieldPickerDialog({ headers = [], valuesByField = {}, splitReadToken = '',
+      dataRowCount, maxRowSplitFiles, onComplete = null, onCancel = null } = {}) {
       const safeHeaders = Array.isArray(headers) ? headers : [];
       const safeValuesByField = (valuesByField && typeof valuesByField === 'object') ? valuesByField : {};
 
@@ -12154,7 +12187,18 @@
               <button class="new-account-currency-dropdown-btn toolbox-split-values-dropdown-btn" type="button" aria-expanded="false"> </button>
             </div>
           </div>
-          <div class="toolbox-split-picker-hint"></div>
+          <div class="toolbox-split-by-rows-row">
+            <label class="toolbox-split-by-rows-toggle">
+              <input type="checkbox" data-field="split-by-rows">
+              <span>按行拆分</span>
+            </label>
+            <span class="toolbox-split-row-count-wrap" hidden>
+              <input type="text" inputmode="numeric" data-field="rows-per-file"
+                aria-label="每份文件数据行数" placeholder="请输入行数" disabled>
+              <span>行</span>
+            </span>
+          </div>
+          <div class="toolbox-split-picker-hint" aria-live="polite"></div>
         </div>
         <div class="dialog-actions toolbox-split-picker-actions">
           <label class="toolbox-split-multiple-toggle">
@@ -12176,6 +12220,12 @@
       const cancelBtn = dialog.querySelector('[data-action="cancel"]');
       const completeBtn = dialog.querySelector('[data-action="complete"]');
       const multipleFilesCheck = dialog.querySelector('input[data-field="multiple-files-enabled"]');
+
+      const rowsCheck = dialog.querySelector('[data-field="split-by-rows"]');
+      const rowsInput = dialog.querySelector('[data-field="rows-per-file"]');
+      const rowsWrap = dialog.querySelector('.toolbox-split-row-count-wrap');
+      let rowsTouched = false;
+      let busy = false;
 
       // v3.0.8（用户要求）：值多选框改用「按钮 + 浮动勾选面板」控件，与场景管理「资金性质校验」管理页的
       //   「适用银行渠道」多选下拉同款（复用 new-account-currency-* class）。面板挂本弹框 overlay、position:fixed 定位。
@@ -12219,6 +12269,7 @@
           checkbox.type = 'checkbox';
           checkbox.checked = selectedValues.has(v);
           checkbox.addEventListener('change', () => {
+            if (rowsCheck.checked || busy) return;
             if (checkbox.checked) selectedValues.add(v);
             else selectedValues.delete(v);
             updateValuesLabel();
@@ -12267,6 +12318,7 @@
 
       // 切换字段 → 重置值列表 + 清空已选（新字段值集不同）+ 关面板 + 边界提示（字段无值则禁用下拉）。
       function refreshValues() {
+        if (rowsCheck.checked || busy) return;
         const fieldName = currentFieldName();
         currentValuesList = Array.isArray(safeValuesByField[fieldName]) ? safeValuesByField[fieldName] : [];
         selectedValues = new Set();
@@ -12281,17 +12333,60 @@
       function getSelectedValues() {
         return currentValuesList.filter((v) => selectedValues.has(v));
       }
-      function updateCompleteState() {
-        completeBtn.disabled = selectedValues.size === 0;
+      function rowsPreview() {
+        const checked = validateRowsInput(rowsInput.value);
+        if (!checked.valid) return checked;
+        if (!splitReadToken || !Number.isSafeInteger(dataRowCount) || dataRowCount < 0 ||
+            !Number.isSafeInteger(maxRowSplitFiles) || maxRowSplitFiles <= 0) {
+          return { valid: false, message: '导入计数不可用，请重新导入文件' };
+        }
+        if (dataRowCount === 0) return { valid: false, message: '文件中没有可拆分的数据行' };
+        const count = (BigInt(dataRowCount) - 1n) / BigInt(checked.value) + 1n;
+        if (count > BigInt(maxRowSplitFiles)) {
+          const minimum = (BigInt(dataRowCount) - 1n) / BigInt(maxRowSplitFiles) + 1n;
+          return { valid: false, message: `预计生成 ${count} 个文件，最多支持 ${maxRowSplitFiles} 个，请将每份行数调整为至少 ${minimum} 行。` };
+        }
+        return { valid: true, value: checked.value, fileCount: Number(count) };
       }
+
+      function updateCompleteState() {
+        const byRows = rowsCheck.checked;
+        const checked = byRows ? rowsPreview() : null;
+        fieldSelect.disabled = byRows || busy || safeHeaders.length === 0;
+        valuesDropdownBtn.disabled = byRows || busy || currentValuesList.length === 0;
+        multipleFilesCheck.disabled = byRows || busy;
+        rowsCheck.disabled = busy;
+        rowsWrap.hidden = !byRows;
+        rowsInput.disabled = !byRows || busy;
+        hintEl.textContent = byRows
+          ? ((!checked.valid && (rowsTouched || rowsInput.value.trim())) ? checked.message : '')
+          : (currentValuesList.length === 0 ? '该字段无可选值（该列为空），请改选其他字段' : '');
+        rowsInput.setAttribute('aria-invalid', String(byRows && rowsTouched && !checked.valid));
+        completeBtn.disabled = busy || (byRows ? !checked.valid : selectedValues.size === 0);
+      }
+
+      rowsCheck.addEventListener('change', () => {
+        closeValuesPanel();
+        if (rowsCheck.checked) multipleFilesCheck.checked = false;
+        updateCompleteState();
+        if (rowsCheck.checked && !rowsInput.disabled) rowsInput.focus();
+      });
+      rowsInput.addEventListener('input', () => { rowsTouched = true; updateCompleteState(); });
+      rowsInput.addEventListener('blur', () => {
+        rowsTouched = true;
+        const checked = validateRowsInput(rowsInput.value);
+        if (checked.valid) rowsInput.value = String(checked.value);
+        updateCompleteState();
+      });
 
       fieldSelect.addEventListener('change', refreshValues);
       multipleFilesCheck.addEventListener('change', () => {
-        if (!multipleFilesCheck.checked) return;
+        if (rowsCheck.checked || busy || !multipleFilesCheck.checked) return;
         closeValuesPanel();
         openModal(createMultipleSplitFieldPickerDialog({
           headers: safeHeaders,
           valuesByField: safeValuesByField,
+          splitReadToken, dataRowCount, maxRowSplitFiles,
           initialGroup: { field: currentFieldName(), values: getSelectedValues() },
           onComplete,
           onCancel
@@ -12316,6 +12411,19 @@
       });
 
       completeBtn.addEventListener('click', () => {
+        if (busy) return;
+        if (rowsCheck.checked) {
+          rowsTouched = true;
+          const checked = rowsPreview();
+          updateCompleteState();
+          if (!checked.valid) return;
+          closeValuesPanel();
+          rowsInput.value = String(checked.value);
+          busy = true;
+          updateCompleteState();
+          if (typeof onComplete === 'function') onComplete({ mode: 'rows', rowsPerFile: checked.value });
+          return;
+        }
         const values = getSelectedValues();
         if (values.length === 0) {
           hintEl.textContent = '请至少选择一个值';
@@ -12336,6 +12444,7 @@
       headers = [],
       valuesByField = {},
       initialGroup = null,
+      splitReadToken = '', dataRowCount, maxRowSplitFiles,
       onComplete = null,
       onCancel = null
     } = {}) {
@@ -12627,6 +12736,7 @@
         if (multiCheck.checked) return;
         closeValuesPanel();
         openModal(createSplitFieldPickerDialog({
+          splitReadToken, dataRowCount, maxRowSplitFiles,
           headers: safeHeaders,
           valuesByField: safeValuesByField,
           onComplete,

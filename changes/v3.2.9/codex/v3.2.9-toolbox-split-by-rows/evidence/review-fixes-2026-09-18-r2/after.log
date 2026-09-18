@@ -1,0 +1,13 @@
+(node:31490) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ rows 父目录身份贯穿真实 Main execute 与 Worker Publisher：before-generation (81.406167ms)
+✔ rows 父目录身份贯穿真实 Main execute 与 Worker Publisher：before-publication (46.930958ms)
+✔ rows 父目录身份贯穿真实 Main execute 与 Worker Publisher：unchanged (156.795833ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 442.805417

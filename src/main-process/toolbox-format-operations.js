@@ -104,8 +104,9 @@ async function abortWriters(writers, originalError) {
 async function scanToolboxSplitFields(filePath, cancelToken = null, options = {}) {
   let accumulator = null;
   let headers = null;
+  let dataRowCount = 0;
   try {
-    await streamToolboxTables(filePath, {
+    const summary = await streamToolboxTables(filePath, {
       strategy: TOOLBOX_SHEET_STRATEGIES.SPLIT,
       cancelToken,
       onHeader: (headerInfo) => {
@@ -123,11 +124,13 @@ async function scanToolboxSplitFields(filePath, cancelToken = null, options = {}
         accumulator.addRow(rowInfo.matchValues);
       }
     });
+    dataRowCount = summary.dataRowCount;
   } catch (error) {
     throw normalizeSplitEmptyError(error);
   }
   return {
     headers,
+    dataRowCount,
     valuesByField: accumulator.result()
   };
 }

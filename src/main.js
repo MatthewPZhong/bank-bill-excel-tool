@@ -587,6 +587,8 @@ const {
 const {
   generateValidateAndPublishMultiOutput
 } = require('./main-process/toolbox-background/multi-output-validator');
+const { MAX_ROW_SPLIT_FILES, publicResult: toolboxRowsPublicResult } = require('./main-process/toolbox-row-split/contracts');
+const { prepareRows: prepareToolboxRows, generateValidateAndPublishRows } = require('./main-process/toolbox-row-split/service');
 const {
   publishToolboxPublicationAsync,
   recoverToolboxPublicationsAsync
@@ -20675,13 +20677,14 @@ function assertToolboxTargetsDoNotAliasSources(sourcePaths, targetPaths) {
 
 let toolboxSplitReadContext = null;
 
-function createToolboxSplitReadContext(sourceFilePath) {
+function createToolboxSplitReadContext(sourceFilePath, dataRowCount) {
   const resolvedPath = path.resolve(String(sourceFilePath || ''));
   const snapshot = sourceSnapshotFromStat(fs.statSync(resolvedPath));
   if (!snapshot) throw new Error('拆分源文件不可读，请重新选择');
   const context = Object.freeze({
     token: randomUUID(),
     sourceFilePath: resolvedPath,
+    dataRowCount,
     snapshot: Object.freeze({ ...snapshot })
   });
   toolboxSplitReadContext = context;
@@ -20948,11 +20951,11 @@ function registerToolboxHandlers() {
       const scanResult = await shouldUseLargeChannel(sourceFilePath)
         ? await dispatchLargeSplit({ op: 'scanFields', filePath: sourceFilePath }).promise
         : await scanToolboxSplitFields(sourceFilePath);
-      const { headers, valuesByField } = scanResult || {};
+      const { headers, valuesByField, dataRowCount } = scanResult || {};
       if (!headers || headers.length === 0) {
         return { status: 'failed', message: '文件为空或不可读，请重新导入', detailLines: [] };
       }
-      const readContext = createToolboxSplitReadContext(sourceFilePath);
+      const readContext = createToolboxSplitReadContext(sourceFilePath, dataRowCount);
       if (!sourceSnapshotMatchesStat(readStartedSnapshot, fs.statSync(sourceFilePath))) {
         clearToolboxSplitReadContext(readContext);
         throw new Error('拆分源文件在读取过程中已变化，请重新选择');
@@ -20961,6 +20964,8 @@ function registerToolboxHandlers() {
         status: 'success',
         sourceFilePath: readContext.sourceFilePath,
         splitReadToken: readContext.token,
+        dataRowCount: readContext.dataRowCount,
+        maxRowSplitFiles: MAX_ROW_SPLIT_FILES,
         headers,
         valuesByField
       };
@@ -20977,14 +20982,17 @@ function registerToolboxHandlers() {
     async prepare(_event, payload = {}) {
       try {
         const readContext = requireToolboxSplitReadContext(payload);
+        if (![undefined, 'single', 'multiple', 'rows'].includes(payload.mode)) {
+          throw new Error('不支持的拆分模式');
+        }
         const { field, values } = payload;
-        if (payload.mode !== 'multiple' && !field) {
+        if (payload.mode !== 'multiple' && payload.mode !== 'rows' && !field) {
           return {
             proceed: false,
             result: { status: 'failed', message: '未选择拆分字段', detailLines: [] }
           };
         }
-        if (payload.mode !== 'multiple' && (!Array.isArray(values) || values.length === 0)) {
+        if (payload.mode !== 'multiple' && payload.mode !== 'rows' && (!Array.isArray(values) || values.length === 0)) {
           return {
             proceed: false,
             result: { status: 'failed', message: '请至少选择一个值', detailLines: [] }
@@ -20993,7 +21001,29 @@ function registerToolboxHandlers() {
         let outputPaths;
         let targetPlans = null;
         let savePath = '';
-        if (payload.mode === 'multiple') {
+        let rows = null;
+        if (payload.mode === 'rows') {
+          rows = await prepareToolboxRows(payload, readContext, {
+            metadataDirectory: app.getPath('userData'),
+            chooseDirectory: async () => {
+              const choice = await showImportOpenDialog('toolbox-split-export-directory', {
+                title: '选择拆分文件保存目录', properties: ['openDirectory', 'createDirectory']
+              });
+              return !choice.canceled && choice.filePaths && choice.filePaths[0];
+            },
+            confirmOverwrite: async (conflicts) => {
+              const choice = await dialog.showMessageBox(mainWindow, {
+                type: 'warning', buttons: ['返回', '覆盖全部'], defaultId: 0, cancelId: 0,
+                noLink: true, title: '文件已存在',
+                message: `有 ${conflicts.length} 个目标文件已存在，是否覆盖全部？`,
+                detail: conflicts.map((item) => item.fileName).join('\n')
+              });
+              return choice && choice.response === 1;
+            }
+          });
+          if (!rows) return { proceed: false, result: { status: 'cancelled' } };
+          outputPaths = rows.targets.map((item) => item.filePath);
+        } else if (payload.mode === 'multiple') {
           const groups = toolboxNormalizeMultiSplitGroups(payload.groups);
           const directoryChoice = await showImportOpenDialog('toolbox-split-export-directory', {
             title: '选择拆分文件保存目录',
@@ -21065,14 +21095,15 @@ function registerToolboxHandlers() {
           readContext,
           field,
           values,
-          targetPlans
+          targetPlans,
+          rows
         };
         const inputFiles = Object.freeze([Object.freeze({
           filePath: readContext.sourceFilePath,
           role: 'input',
           sourceOperation: 'toolbox:split:export'
         })]);
-        prepared.filePlan = {
+        prepared.filePlan = rows ? rows.filePlan : {
           version: 1,
           allocation: 'eager',
           inputs: inputFiles,
@@ -21104,6 +21135,55 @@ function registerToolboxHandlers() {
         const sourceFilePath = taskContext.fileEvidence.inputFiles[0].filePath;
         const outputPaths = taskContext.fileEvidence.filePlan.outputs
           .map((item) => item.filePath);
+        if (payload.mode === 'rows') {
+          const tempDir = fs.mkdtempSync(path.join(prepared.rows.outputDirectory, '.toolbox-rows-'));
+          let preserveTempDir = false;
+          try {
+            const generated = await generateValidateAndPublishRows({
+              runtime: backgroundExecutionRuntimeManager.get(),
+              filePlan: taskContext.fileEvidence.filePlan,
+              batchContext: taskContext.batchContext,
+              counts: prepared.rows.counts,
+              privateDirectory: tempDir,
+              metadataDirectory: app.getPath('userData'),
+              publisher: (artifacts) => publishToolboxArtifacts(
+                'split-rows', artifacts,
+                taskContext.fileEvidence.filePlan.outputs.map((output) => ({
+                  targetPath: output.filePath,
+                  expectedTargetParentIdentity: output.targetParentIdentity
+                })),
+                taskContext.batchContext, {
+                  protectedSourcePaths: [sourceFilePath],
+                  targetSnapshots: taskContext.fileEvidence.targetSnapshots,
+                  archiveInputFiles: taskContext.fileEvidence.inputFiles,
+                  settleManifestArtifacts: taskContext.settleArtifacts,
+                  fileEvidence: taskContext.fileEvidence
+                }
+              )
+            });
+            const publication = generated.publication;
+            prepared.toolboxPublicationTaskIds = [publication.taskId];
+            prepared.outputFiles = toolboxFinalOutputFiles(publication.files, 'toolbox:split:export');
+            clearToolboxSplitReadContext(readContext);
+            appendActivityLogEntry({
+              level: 'info', source: 'main', domain: 'toolbox', message: '工具箱按行拆分成功',
+              details: [
+                `输入有效行数：${prepared.rows.counts.rowCount}`,
+                `每份最多行数：${prepared.rows.counts.rowsPerFile}`,
+                `输出文件数：${publication.files.length}`,
+                ...buildToolboxAuditDetailLines(publication.files, generated.warningSummary),
+                ...(publication.warnings || [])
+              ]
+            });
+            return toolboxRowsPublicResult(prepared.rows.counts, publication.files,
+              generated.warningSummary, publication.warnings || []);
+          } catch (error) {
+            preserveTempDir = shouldPreserveToolboxTemporaryFiles(error);
+            throw error;
+          } finally {
+            if (!preserveTempDir) cleanupToolboxTemporaryDirectory(tempDir);
+          }
+        }
         if (payload.mode === 'multiple') {
           const outputDirectory = path.dirname(outputPaths[0]);
           const tempDir = fs.mkdtempSync(path.join(outputDirectory, '.toolbox-split-'));

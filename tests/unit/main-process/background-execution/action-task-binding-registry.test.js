@@ -51,7 +51,7 @@ function replacePolicyIdentity(policies, from, to) {
   policy.taskKey = to;
 }
 
-test('生产 authority 一次读取真实 TaskPolicy list 并冻结 66-action inventory digest', () => {
+test('生产 authority 一次读取真实 TaskPolicy list 并冻结 67-action inventory digest', () => {
   let listCalls = 0;
   const policies = mutableTaskPolicies();
   const registry = createActionTaskBindingRegistry({
@@ -59,9 +59,9 @@ test('生产 authority 一次读取真实 TaskPolicy list 并冻结 66-action in
   });
 
   assert.equal(listCalls, 1);
-  assert.equal(registry.summary.actionKeys.length, 66);
+  assert.equal(registry.summary.actionKeys.length, 67);
   assert.equal(registry.summary.taskPolicyInventory.length, 134);
-  assert.equal(registry.summary.pairCount, 73);
+  assert.equal(registry.summary.pairCount, 74);
   assert.equal(registry.summary.boundTaskKeyCount, 66);
   assert.equal(registry.summary.unboundTaskPolicyCount, 68);
   assert.equal(

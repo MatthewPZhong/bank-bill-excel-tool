@@ -12,7 +12,7 @@ const {
   sourceSnapshotMatchesStat
 } = require('./source-snapshot');
 const {
-  pathsAlias,
+  pathAliasKeys,
   targetPathAliasKey
 } = require('../toolbox-target-identity');
 const {
@@ -182,30 +182,40 @@ function normalizeItem(raw, direction, options) {
 
 function assertNoAliasConflict(inputs, outputs, options) {
   const items = [...inputs, ...outputs];
+  if (items.length <= 1) return;
   const seen = new Map();
+  const seenPaths = new Map();
+  const seenInodes = new Map();
+  const rejectAlias = (left, right) => {
+    throw planError(
+      'ARCHIVE_FILE_PLAN_INVALID',
+      left.direction !== right.direction
+        ? '输出目标不能覆盖或别名指向输入文件'
+        : '同一方向不能重复登记别名指向同一文件'
+    );
+  };
   for (const item of items) {
     if (seen.has(item.artifactKey)) {
       throw planError('ARCHIVE_FILE_PLAN_INVALID', '同一 manifest 的 artifactKey 必须唯一');
     }
     seen.set(item.artifactKey, item);
-  }
-  for (let leftIndex = 0; leftIndex < items.length; leftIndex += 1) {
-    for (let rightIndex = leftIndex + 1; rightIndex < items.length; rightIndex += 1) {
-      const left = items[leftIndex];
-      const right = items[rightIndex];
-      const crossDirection = left.direction !== right.direction;
-      if (pathsAlias(options.fsImpl, left.filePath, right.filePath, {
-        platform: options.platform,
-        allowMissingParentLexicalFallback: options.providedSourceSnapshotPaths.has(left.filePath)
-          || options.providedSourceSnapshotPaths.has(right.filePath)
-      })) {
-        throw planError(
-          'ARCHIVE_FILE_PLAN_INVALID',
-          crossDirection
-            ? '输出目标不能覆盖或别名指向输入文件'
-            : '同一方向不能重复登记别名指向同一文件'
-        );
-      }
+    // FilePlan 是一次身份快照；每个路径只采集一次，避免 K 个输出触发 O(K²) 磁盘访问。
+    // 使用与 pathsAlias 相同的路径键和 dev/ino，发布前仍执行既有 freshness 校验。
+    const keys = pathAliasKeys(options.fsImpl, item.filePath, {
+      platform: options.platform,
+      allowMissingParentLexicalFallback: options.providedSourceSnapshotPaths.has(item.filePath)
+    });
+    for (const key of keys) {
+      if (seenPaths.has(key)) rejectAlias(seenPaths.get(key), item);
+      seenPaths.set(key, item);
+    }
+    try {
+      const stat = options.fsImpl.lstatSync(item.filePath, { bigint: true });
+      const key = String(stat.dev) + ':' + String(stat.ino);
+      if (seenInodes.has(key)) rejectAlias(seenInodes.get(key), item);
+      seenInodes.set(key, item);
+    } catch (error) {
+      if (!error || error.code !== 'ENOENT') throw error;
     }
   }
 }

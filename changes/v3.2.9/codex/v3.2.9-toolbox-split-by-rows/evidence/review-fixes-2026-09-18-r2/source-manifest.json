@@ -1,0 +1,15 @@
+{
+  "branch": "codex/v3.2.9-toolbox-split-by-rows",
+  "head": "2ba9ef14fe972363b604955636cff0c9ac53700f",
+  "originalMainSha256": "9d5cdf9f89e8edf95db16c8cccc4b17b5ce064acc2135aefc4adda3b86aaa601",
+  "changedExistingCodeFiles": [
+    "src/main.js"
+  ],
+  "files": {
+    "src/main.js": "0709e3c293c6f167b101e2f2f95da0e10fc6532000d63eb1e6a9fd62aec910b5",
+    "tests/unit/main-process/toolbox-row-split-parent-identity.test.js": "403739c32875a79c5cbdfc1c5da1ba7ebf264e7e4493fb640d9ed365f61f49ac",
+    "changes/3.2.9/codex/v3.2.9-toolbox-split-by-rows/techdoc.md": "dd7523da26b43a3a4890411615d5ebe2b9db16003d121840b03b522b2646c03b",
+    "changes/3.2.9/codex/v3.2.9-toolbox-split-by-rows/implementation-notes.md": "633bab56c8a06f7c575d7d8164f77f25bb338a9b293643fa3483194df26afd0e",
+    "changes/3.2.9/codex/v3.2.9-toolbox-split-by-rows/review-fixes-2026-09-18-r2.md": "2a1172ae060cc21e79dddb7bc02330193fcb094d56f71114e45457944e14b569"
+  }
+}

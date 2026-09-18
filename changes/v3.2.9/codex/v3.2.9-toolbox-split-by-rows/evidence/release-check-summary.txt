@@ -1,0 +1,43 @@
+Command: PATH=/Users/pzhong/.nvm/versions/node/v24.13.0/bin:$PATH UNIT_TEST_CONCURRENCY=2 npm run release-check
+Node: 24.13.0
+Exit: 1
+Lint: PASS
+Smoke: PASS
+Integration: not reached by the chain; run separately and recorded independently.
+
+ℹ tests 7307
+ℹ suites 831
+ℹ pass 7303
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 3
+ℹ todo 0
+ℹ duration_ms 1231118.705
+
+✖ failing tests:
+
+test at tests/helpers/durable-directory-tests.js:10:10
+✖ 真实 Main 进程在提交后退出，重启恢复原 Task、原 receipt 和原版本 (30004.590833ms)
+  AssertionError [ERR_ASSERTION]: spawnSync /Users/pzhong/.nvm/versions/node/v24.13.0/bin/node ETIMEDOUT
+  
+  null !== 73
+  
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v329-toolbox-split-by-rows/tests/unit/main-process/biz-op-v327.test.js:448:10)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1106:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:788:18)
+      at Test.postRun (node:internal/test_runner/test:1235:19)
+      at Test.run (node:internal/test_runner/test:1163:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: 73,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+==== 7303/7307 PASS ====
+unit 文件数：468 | 失败用例：1 | node --test 耗时：1231118.705ms | 总耗时：1231157ms
+[run-unit-tests] 日志已落盘：/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v329-toolbox-split-by-rows/logs/unit-tests/unit-20260918-161357.log

@@ -1,0 +1,14 @@
+--- review-r2/src/main.js
++++ fixed/src/main.js
+@@ -21085,7 +21085,10 @@
+               metadataDirectory: app.getPath('userData'),
+               publisher: (artifacts) => publishToolboxArtifacts(
+                 'split-rows', artifacts,
+-                outputPaths.map((targetPath) => ({ targetPath })),
++                taskContext.fileEvidence.filePlan.outputs.map((output) => ({
++                  targetPath: output.filePath,
++                  expectedTargetParentIdentity: output.targetParentIdentity
++                })),
+                 taskContext.batchContext, {
+                   protectedSourcePaths: [sourceFilePath],
+                   targetSnapshots: taskContext.fileEvidence.targetSnapshots,
