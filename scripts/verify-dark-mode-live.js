@@ -240,6 +240,11 @@ function child() {
         const timeLayout = { original: await inspectNativeTimeLayout(web) };
         const oldGridStyle = await web.executeJavaScript(`document.querySelector('.appearance-time-grid').getAttribute('style')`);
         const oldBounds = window.getBounds();
+        const oldMinimumSize = window.getMinimumSize();
+        // Windows 首次呈现可被工作区压到小于 minSize；setBounds 会恢复最小尺寸约束。
+        const restorableBounds = { ...oldBounds,
+          width: Math.max(oldBounds.width, oldMinimumSize[0]),
+          height: Math.max(oldBounds.height, oldMinimumSize[1]) };
         const oldZoom = web.getZoomFactor();
         const settleLayout = () => web.executeJavaScript(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
         const restoreGridStyle = () => web.executeJavaScript(`(() => {
@@ -308,7 +313,7 @@ function child() {
           for (const [name, restore] of [
             ['gridInlineStyle', restoreGridStyle],
             ['zoomFactor', () => web.setZoomFactor(oldZoom)],
-            ['bounds', () => window.setBounds(oldBounds, false)],
+            ['bounds', () => window.setBounds(restorableBounds, false)],
           ]) {
             try { await restore(); }
             catch (error) { restoreErrors.push(`${name}: ${error.message}`); }
@@ -317,15 +322,18 @@ function child() {
           if (restoreErrors.length) throw new Error(`时间框取证恢复失败：${restoreErrors.join('; ')}`);
         }
         timeLayout.restoration = {
-          expectedBounds: oldBounds, actualBounds: window.getBounds(),
+          originalBounds: oldBounds, expectedBounds: restorableBounds, actualBounds: window.getBounds(),
+          minimumSizeApplied: restorableBounds.width !== oldBounds.width || restorableBounds.height !== oldBounds.height,
+          expectedMinimumSize: oldMinimumSize, actualMinimumSize: window.getMinimumSize(),
           expectedZoom: oldZoom, actualZoom: web.getZoomFactor(),
           expectedGridInlineStyle: oldGridStyle,
           actualGridInlineStyle: await web.executeJavaScript(`document.querySelector('.appearance-time-grid').getAttribute('style')`),
         };
         const restoredState = timeLayout.restoration;
-        check(['x', 'y', 'width', 'height'].every(key => restoredState.actualBounds[key] === oldBounds[key])
+        check(['x', 'y', 'width', 'height'].every(key => restoredState.actualBounds[key] === restorableBounds[key])
+          && oldMinimumSize.every((value, index) => restoredState.actualMinimumSize[index] === value)
           && Math.abs(restoredState.actualZoom - oldZoom) < 0.001
-          && restoredState.actualGridInlineStyle === oldGridStyle, '时间框取证未完整恢复 bounds / zoom / inline style');
+          && restoredState.actualGridInlineStyle === oldGridStyle, '时间框取证未恢复最小尺寸约束下的 bounds / zoom / inline style');
         timeLayout.restored = await inspectNativeTimeLayout(web);
         timeLayout.valuesUnchanged = [timeLayout.original, timeLayout.historical104,
           timeLayout.narrow150.geometry, timeLayout.restored].every(sample =>

@@ -1,0 +1,404 @@
+{
+  "candidate": "e308134cfb143d2c1fb83cfe0481a1f2a877d77e",
+  "run": "https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/35379488234",
+  "collector": "FAIL: one verifier restore-bounds assumption",
+  "productionFix": {
+    "initial": "light",
+    "original": "PASS",
+    "historical104": "FAIL",
+    "narrow150": {
+      "requested": {
+        "width": 1080,
+        "height": 760,
+        "zoomFactor": 1.5
+      },
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 1080,
+        "height": 760
+      },
+      "contentBounds": {
+        "x": 0,
+        "y": 0,
+        "width": 1080,
+        "height": 760
+      },
+      "minimumSize": [
+        1080,
+        760
+      ],
+      "zoomFactor": 1.5,
+      "viewport": {
+        "width": 720,
+        "height": 507,
+        "dpr": 1.5
+      },
+      "pane": {
+        "x": 158.6666717529297,
+        "y": 86.66667175292969,
+        "width": 532.6666870117188,
+        "height": 333.3333435058594,
+        "right": 691.3333587646484,
+        "bottom": 420.00001525878906,
+        "clientWidth": 533,
+        "scrollWidth": 533
+      },
+      "scroll": {
+        "x": 158.6666717529297,
+        "y": 86.66667175292969,
+        "width": 532.6666870117188,
+        "height": 333.3333435058594,
+        "right": 691.3333587646484,
+        "bottom": 420.00001525878906,
+        "clientWidth": 533,
+        "scrollWidth": 533
+      },
+      "grid": {
+        "x": 182.6666717529297,
+        "y": 233.33334350585938,
+        "width": 484.66668701171875,
+        "height": 73.33333587646484,
+        "right": 667.3333587646484,
+        "bottom": 306.6666793823242,
+        "clientWidth": 485,
+        "scrollWidth": 485
+      },
+      "document": {
+        "x": 0,
+        "y": 0,
+        "width": 720,
+        "height": 506.66668701171875,
+        "right": 720,
+        "bottom": 506.66668701171875,
+        "clientWidth": 720,
+        "scrollWidth": 720
+      },
+      "body": {
+        "x": 0,
+        "y": 0,
+        "width": 720,
+        "height": 506.66668701171875,
+        "right": 720,
+        "bottom": 506.66668701171875,
+        "clientWidth": 720,
+        "scrollWidth": 720
+      },
+      "gridInlineStyle": null,
+      "geometry": {
+        "status": "PASS",
+        "inputs": [
+          {
+            "role": "dark-mode-start",
+            "value": "18:20",
+            "format": "h:mm a",
+            "missing": [],
+            "violations": []
+          },
+          {
+            "role": "dark-mode-end",
+            "value": "19:20",
+            "format": "h:mm a",
+            "missing": [],
+            "violations": []
+          }
+        ]
+      }
+    },
+    "restored": "PASS",
+    "valuesUnchanged": true,
+    "restoration": {
+      "expectedBounds": {
+        "x": 0,
+        "y": 0,
+        "width": 1024,
+        "height": 720
+      },
+      "actualBounds": {
+        "x": 0,
+        "y": 0,
+        "width": 1080,
+        "height": 760
+      },
+      "expectedZoom": 1,
+      "actualZoom": 1,
+      "expectedGridInlineStyle": null,
+      "actualGridInlineStyle": null
+    },
+    "failures": [
+      "时间框取证未完整恢复 bounds / zoom / inline style"
+    ],
+    "initialDark": "NOT_RUN due first verifier failure"
+  },
+  "settings": {
+    "passed": true,
+    "groups": 6,
+    "failures": [],
+    "behavior": {
+      "scenarios": 4,
+      "assertions": 73
+    },
+    "phases": [
+      {
+        "name": "page-ready",
+        "at": 255.5,
+        "visibility": "visible"
+      },
+      {
+        "name": "retention-behavior",
+        "at": 670.5999999999767,
+        "visibility": "visible"
+      },
+      {
+        "name": "module-retention-behavior",
+        "at": 739.7999999999884,
+        "visibility": "visible"
+      },
+      {
+        "name": "retention-delete-guard",
+        "at": 1127.7999999999884,
+        "visibility": "visible"
+      },
+      {
+        "name": "theme-retention-behavior",
+        "at": 2043.2999999999884,
+        "visibility": "visible"
+      },
+      {
+        "name": "behavior-complete",
+        "at": 2913.2000000000116,
+        "visibility": "visible"
+      }
+    ],
+    "frameWaits": [
+      {
+        "startedAt": 262.20000000001164,
+        "visibility": "visible",
+        "firstFrameAt": 258.066,
+        "secondFrameAt": 319.5,
+        "elapsedMs": 234
+      },
+      {
+        "startedAt": 607.7999999999884,
+        "visibility": "visible",
+        "firstFrameAt": 632,
+        "secondFrameAt": 663.2,
+        "elapsedMs": 61.600000000034925
+      },
+      {
+        "startedAt": 955.0999999999767,
+        "visibility": "visible",
+        "firstFrameAt": 975.8,
+        "secondFrameAt": 991.4,
+        "elapsedMs": 52.20000000001164
+      },
+      {
+        "startedAt": 1199.5,
+        "visibility": "visible",
+        "firstFrameAt": 1210.1,
+        "secondFrameAt": 1257,
+        "elapsedMs": 59
+      },
+      {
+        "startedAt": 1258.7000000000116,
+        "visibility": "visible",
+        "firstFrameAt": 1272.6,
+        "secondFrameAt": 1303.9,
+        "elapsedMs": 57.29999999998836
+      },
+      {
+        "startedAt": 1337.2000000000116,
+        "visibility": "visible",
+        "firstFrameAt": 1335.1,
+        "secondFrameAt": 1366.4,
+        "elapsedMs": 35.79999999998836
+      },
+      {
+        "startedAt": 1398.2000000000116,
+        "visibility": "visible",
+        "firstFrameAt": 1397.6,
+        "secondFrameAt": 1413.2,
+        "elapsedMs": 29.5
+      },
+      {
+        "startedAt": 1462.7000000000116,
+        "visibility": "visible",
+        "firstFrameAt": 1475.7,
+        "secondFrameAt": 1491.4,
+        "elapsedMs": 44.399999999965075
+      },
+      {
+        "startedAt": 1558.4000000000233,
+        "visibility": "visible",
+        "firstFrameAt": 1553.8,
+        "secondFrameAt": 1585.1,
+        "elapsedMs": 31.899999999965075
+      },
+      {
+        "startedAt": 1625,
+        "visibility": "visible",
+        "firstFrameAt": 1647.6,
+        "secondFrameAt": 1678.8,
+        "elapsedMs": 55.59999999997672
+      },
+      {
+        "startedAt": 1730.5,
+        "visibility": "visible",
+        "firstFrameAt": 1725.8,
+        "secondFrameAt": 1757,
+        "elapsedMs": 28.70000000001164
+      },
+      {
+        "startedAt": 1792.9000000000233,
+        "visibility": "visible",
+        "firstFrameAt": 1819.5,
+        "secondFrameAt": 1835.2,
+        "elapsedMs": 55.79999999998836
+      },
+      {
+        "startedAt": 1899.4000000000233,
+        "visibility": "visible",
+        "firstFrameAt": 1897.6,
+        "secondFrameAt": 1913.2,
+        "elapsedMs": 29.099999999976717
+      },
+      {
+        "startedAt": 1961.5999999999767,
+        "visibility": "visible",
+        "firstFrameAt": 1975.7,
+        "secondFrameAt": 1991.4,
+        "elapsedMs": 42.70000000001164
+      },
+      {
+        "startedAt": 2058.4000000000233,
+        "visibility": "visible",
+        "firstFrameAt": 2053.9,
+        "secondFrameAt": 2085.1,
+        "elapsedMs": 35.29999999998836
+      },
+      {
+        "startedAt": 2094.2000000000116,
+        "visibility": "visible",
+        "firstFrameAt": 2116.4,
+        "secondFrameAt": 2132,
+        "elapsedMs": 52.09999999997672
+      },
+      {
+        "startedAt": 2157.9000000000233,
+        "visibility": "visible",
+        "firstFrameAt": 2163.3,
+        "secondFrameAt": 2194.5,
+        "elapsedMs": 43.09999999997672
+      },
+      {
+        "startedAt": 2201.2000000000116,
+        "visibility": "visible",
+        "firstFrameAt": 2241.4,
+        "secondFrameAt": 2272.6,
+        "elapsedMs": 72.20000000001164
+      },
+      {
+        "startedAt": 2334.7000000000116,
+        "visibility": "visible",
+        "firstFrameAt": 2350.7,
+        "secondFrameAt": 2366.4,
+        "elapsedMs": 46.09999999997672
+      },
+      {
+        "startedAt": 2381,
+        "visibility": "visible",
+        "firstFrameAt": 2397.6,
+        "secondFrameAt": 2428.8,
+        "elapsedMs": 51.29999999998836
+      },
+      {
+        "startedAt": 2444.7000000000116,
+        "visibility": "visible",
+        "firstFrameAt": 2460.1,
+        "secondFrameAt": 2475.7,
+        "elapsedMs": 41.09999999997672
+      },
+      {
+        "startedAt": 2486,
+        "visibility": "visible",
+        "firstFrameAt": 2507.1,
+        "secondFrameAt": 2522.7,
+        "elapsedMs": 50.20000000001164
+      },
+      {
+        "startedAt": 2597.4000000000233,
+        "visibility": "visible",
+        "firstFrameAt": 2600.8,
+        "secondFrameAt": 2632,
+        "elapsedMs": 44.699999999953434
+      },
+      {
+        "startedAt": 2653,
+        "visibility": "visible",
+        "firstFrameAt": 2663.3,
+        "secondFrameAt": 2678.9,
+        "elapsedMs": 40.70000000001164
+      },
+      {
+        "startedAt": 2705.5999999999767,
+        "visibility": "visible",
+        "firstFrameAt": 2710.1,
+        "secondFrameAt": 2741.3,
+        "elapsedMs": 39.20000000001164
+      },
+      {
+        "startedAt": 2769.2999999999884,
+        "visibility": "visible",
+        "firstFrameAt": 2757.966,
+        "secondFrameAt": 2788.3,
+        "elapsedMs": 27.900000000023283
+      },
+      {
+        "startedAt": 2809.4000000000233,
+        "visibility": "visible",
+        "firstFrameAt": 2819.5,
+        "secondFrameAt": 2835.2,
+        "elapsedMs": 38.199999999953434
+      },
+      {
+        "startedAt": 2858.5,
+        "visibility": "visible",
+        "firstFrameAt": 2866.4,
+        "secondFrameAt": 2897.7,
+        "elapsedMs": 42.59999999997672
+      },
+      {
+        "startedAt": 2927.5,
+        "visibility": "visible",
+        "firstFrameAt": 2914.366,
+        "secondFrameAt": 2944.5,
+        "elapsedMs": 28.5
+      }
+    ],
+    "presentation": {
+      "mode": "shown-inactive",
+      "before": {
+        "visible": false,
+        "minimized": false
+      },
+      "during": {
+        "visible": true,
+        "minimized": false
+      },
+      "after": {
+        "visible": true,
+        "minimized": false
+      }
+    }
+  },
+  "restoreHarnessFixMacos": {
+    "status": "BLOCKED",
+    "reason": "现有 BizOP 首次激活资源准入失败；未创建业务窗口，不能判定 GUI 冷启动通过",
+    "resources": {
+      "freeMemoryMiB": 1374.6875,
+      "totalMemoryMiB": 49152
+    },
+    "results": []
+  },
+  "restoreHarnessFix": "Expected bounds calculated before mutation from initial bounds and unchanged native minimum size. Restore CSS/zoom/minimumSize exactly; x/y exact; dimensions constrained by original native minimum. Windows two-case rerun pending."
+}
