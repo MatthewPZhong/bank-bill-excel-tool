@@ -112,7 +112,7 @@ function waitFor(test, timeoutMs = 2000) {
         return;
       }
       if (performance.now() - startedAt > timeoutMs) {
-        reject(new Error('等待设置弹窗状态超时'));
+        reject(new Error(`等待设置弹窗状态超时：${test.toString()}`));
         return;
       }
       setTimeout(inspect, 10);
@@ -140,6 +140,7 @@ function installDesktopApiStub({
   window.__moduleRetentionSaveCalls = [];
   window.__archiveListCalls = [];
   window.__archiveDeleteCalls = [];
+  window.__archiveDeletePrepareCalls = [];
   window.__themeSaveCalls = [];
   const themeListeners = new Set();
   let themeRevision = 0;
@@ -252,9 +253,15 @@ function installDesktopApiStub({
     async openFile() { return { status: 'success' }; },
     async saveAs() { return { status: 'cancelled' }; },
     async setLocked() { return { status: 'success' }; },
-    async deleteBatch(batchId) {
+    async prepareDeleteBatch(batchId) {
+      window.__archiveDeletePrepareCalls.push(batchId);
+      return { status: 'success', ok: true, confirmationToken: `fixture-delete-${batchId}`, summary: { fileCount: 1 } };
+    },
+    async listDeleteCleanupJobs() { return { status: 'success', jobs: [] }; },
+    async deleteBatch(batchId, confirmationToken) {
+      if (confirmationToken !== `fixture-delete-${batchId}`) throw new Error('删除确认凭证不匹配');
       window.__archiveDeleteCalls.push(batchId);
-      return { status: 'success', metadataDeleted: true };
+      return { status: 'success', ok: true, metadataDeleted: true, fullyDeleted: true };
     },
     async retryBatch() { return { status: 'success' }; },
     async getSettings() {

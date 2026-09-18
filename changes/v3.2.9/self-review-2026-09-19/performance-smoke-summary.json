@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "mode": "smoke",
+  "buildSha": "5001d331bb78bdb82dfaa018ee705b51681bde4f",
+  "buildIdentity": {
+    "productionDirty": false,
+    "workingTreeStatus": "M CHANGELOG.md\n M changes/v3.2.9/codex/v3.2.9-archive-center-permanent-delete/spec.md\n M changes/v3.2.9/codex/v3.2.9-archive-center-permanent-delete/techdoc.md\n M changes/v3.2.9/release.md\n M docs/USER_GUIDE.md\n M rules/integration-test-policy.md\n M scripts/verify-app-settings-layout.js\n M scripts/verify-dark-mode-live.js\n?? .github/workflows/v329-release-acceptance.yml\n?? changes/v3.2.9/release-review-2026-09-19.md\n?? changes/v3.2.9/self-review-2026-09-19/\n?? scripts/vcc-financial-op/performance-fixture.js\n?? scripts/vcc-financial-op/performance-worker.js\n?? scripts/vcc-financial-op/verify-review-performance.js",
+    "scriptSha256": {
+      "verify-review-performance.js": "a3cfdd15c04fb775c00b12973bbebb4f045d40b3d2a7fdbd1a1603d67a2eff88",
+      "performance-fixture.js": "5ea25110d4aa237ba36b3d56b972ed4008e29040aa2c7e5de3636f78052bc06d",
+      "performance-worker.js": "fdb2705e14dc6e70fccde8f13b8c4f7c845f06304763025b9c34c804f63446aa"
+    }
+  },
+  "results": [
+    {
+      "name": "smoke",
+      "code": 0,
+      "signal": null,
+      "evidencePath": "/private/tmp/v329-release-20260919-3_bafjvz/vcc-performance-final-smoke/smoke/evidence.json",
+      "automated": "PASS",
+      "acceptance": "NOT_RUN",
+      "processPeakRssBytes": 235847680,
+      "fixture": {
+        "subjects": 2,
+        "pending": 8,
+        "recharge": 12,
+        "adjustments": 4
+      },
+      "sheetCount": 19
+    }
+  ],
+  "acceptance": "NOT_RUN",
+  "pf01WorkerRss": {
+    "status": "NOT_RUN",
+    "reason": "worker_threads RSS cannot be attributed separately; total process comparison is supplemental only."
+  },
+  "manualWindowsInstalledApplication": "NOT_RUN",
+  "excelWps": "NOT_RUN",
+  "processRssComparison": {
+    "status": "NOT_RUN"
+  },
+  "requestedCasesAcceptance": "NOT_RUN",
+  "fullVccAcceptance": "NOT_RUN"
+}

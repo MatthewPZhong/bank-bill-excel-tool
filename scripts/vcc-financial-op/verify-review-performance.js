@@ -1,0 +1,263 @@
+'use strict';
+// Independent PF evidence runner. Never interprets supplemental or missing evidence as acceptance.
+// node scripts/vcc-financial-op/verify-review-performance.js --mode smoke --output <new-directory>
+// node scripts/vcc-financial-op/verify-review-performance.js --mode windows --output <new-directory> [--case pf02]
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const assert = require('node:assert/strict');
+const { spawn, execFileSync } = require('node:child_process');
+const root = path.resolve(__dirname, '../..');
+const CASES = ['pf01-100k', 'pf01-1m', 'pf02', 'pf03', 'pf04', 'cancel-prepare', 'cancel-extract', 'cancel-write', 'cancel-readback', 'cancel-drain', 'cancel-publish'];
+const json = (file, value) => fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
+const mib = 1024 * 1024;
+function baseline(directory) {
+  let disk = null, diskError = null;
+  if (process.platform === 'win32') {
+    const drive = path.parse(directory).root[0];
+    try {
+      disk = JSON.parse(execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+        `$p=Get-Partition -DriveLetter '${drive}'; $d=$p|Get-Disk; $v=Get-Volume -DriveLetter '${drive}'; $m=Get-PhysicalDisk|Where-Object {[string]$_.DeviceId -eq [string]$d.Number}; [pscustomobject]@{DiskNumber=$d.Number;DriveType=[string]$v.DriveType;MediaType=[string]$m.MediaType;SizeRemaining=$v.SizeRemaining;FileSystem=$v.FileSystem}|ConvertTo-Json -Compress`
+      ], { encoding: 'utf8', timeout: 30000 }).trim());
+    } catch (error) { diskError = error.message; }
+  }
+  const checks = { windowsX64: process.platform === 'win32' && process.arch === 'x64',
+    memory16GiB: os.totalmem() >= 15 * 1024 ** 3 && os.totalmem() <= 17 * 1024 ** 3,
+    localSsd: disk?.DriveType === 'Fixed' && disk?.MediaType === 'SSD',
+    electronLocked: process.versions.electron === '36.9.5', exceljsLocked: require('exceljs/package.json').version === '4.4.0',
+    sameVolume: true };
+  return { status: Object.values(checks).every(Boolean) ? 'PASS' : 'NOT_RUN', checks, disk, diskError,
+    platform: process.platform, arch: process.arch, osRelease: os.release(), cpu: os.cpus()[0]?.model,
+    totalMemoryBytes: os.totalmem(), electron: process.versions.electron, node: process.version,
+    exceljs: require('exceljs/package.json').version, directory,
+    sameVolumeReason: 'Inputs, business DB, temporary manifest and output are descendants of the one newly created case directory.' };
+}
+async function independentReadback(filePath, manifest, fixture, name) {
+  const { openRichWorkbook } = require('../../src/backend/xlsx-rich-reader');
+  const { SOURCE_TYPES: T, SUPPORTED_CURRENCIES: CURRENCIES, getSourceDefinition } = require('../../src/backend/vcc-financial-op/definitions');
+  const book = await openRichWorkbook(filePath, { memoryBudgetBytes: 64 * mib });
+  const pages = [];
+  try {
+    assert.equal(book.sheets.length, manifest.pages.length + 1);
+    for (let index = 0; index < manifest.pages.length; index += 1) {
+      const page = manifest.pages[index], group = JSON.parse(page.descriptor), subjectIndex = fixture.subjects.indexOf(group.subject);
+      assert.ok(subjectIndex >= 0); let count = 0, headers;
+      await book.scanSheet(index + 1, (row) => {
+        assert.ok(row.cells.every((c) => !c.hasFormula));
+        const cells = new Map(row.cells.map((c) => [c.columnIndex, c.decodedSemanticValue]));
+        if (row.rowIndex === 1) { headers = group.headers; assert.deepEqual(headers.map((_, i) => cells.get(i) ?? ''), headers); return; }
+        count += 1; const ordinal = page.start_ordinal + count - 1;
+        const value = (key) => cells.get(headers.indexOf(key));
+        if (group.sourceType === T.RECHARGE) {
+          const n = name === 'pf02' ? ordinal - 1 : subjectIndex * 6 + ordinal - 1;
+          assert.equal(value('订单号'), `0000000000000000000000R${String(n).padStart(10, '0')}`);
+          assert.equal(value('备注'), `=1+1 唯一备注 ${n}`);
+        } else if (group.sourceType === T.PENDING) {
+          const n = subjectIndex + (ordinal - 1) * fixture.subjects.length;
+          assert.equal(value('PendingBizId'), `0000000000000000000000P${String(n).padStart(10, '0')}`);
+          assert.equal(value('备注'), `=1+1 唯一长文本 ${n} ${'文本'.repeat(20)}`);
+          assert.equal(headers.length, getSourceDefinition(T.PENDING).headers.length);
+        } else if (group.sourceType === T.CHANNEL) assert.equal(value('渠道订单号'), `channel-${subjectIndex}`);
+        else if (group.sourceType === T.FEE_FX) assert.equal(value('订单号'), `fee-${subjectIndex}`);
+        else { assert.equal(value('主体'), group.subject); assert.equal(value('币种'), group.currency); }
+      });
+      assert.equal(count, page.row_count); pages.push({ name: page.name, sourceType: group.sourceType, subject: group.subject, currency: group.currency, part: page.part, rows: count });
+    }
+    const sum = (type) => pages.filter((p) => p.sourceType === type).reduce((n, p) => n + p.rows, 0);
+    assert.equal(sum(T.PENDING), fixture.spec.pending * 2); assert.equal(sum(T.RECHARGE), fixture.spec.recharge);
+    assert.equal(sum(T.CHANNEL), fixture.spec.subjects); assert.equal(sum(T.FEE_FX), fixture.spec.subjects);
+    // Independent handwritten group expectations: missing an entire source type must not
+    // pass just because E/A/X were all derived from the same incomplete manifest.
+    const expectedGroups = new Map(), actualGroups = new Map();
+    const key = (subject, currency, type) => JSON.stringify([subject, currency, type]);
+    const systemCurrencies = fixture.spec.adjustments >= fixture.spec.subjects * 9 ? CURRENCIES
+      : fixture.spec.adjustments ? ['AUD', 'CAD', 'EUR', 'USD'] : ['EUR', 'USD'];
+    for (const [index, subject] of fixture.subjects.entries()) {
+      expectedGroups.set(key(subject, 'USD', T.RECHARGE), name === 'pf02' ? 1048576 : 6);
+      expectedGroups.set(key(subject, 'USD', T.FEE_FX), 1);
+      expectedGroups.set(key(subject, 'EUR', T.CHANNEL), 1);
+      const pending = Math.floor((fixture.spec.pending - 1 - index) / fixture.spec.subjects) + 1;
+      for (const currency of ['USD', 'EUR']) expectedGroups.set(key(subject, currency, T.PENDING), pending);
+      for (const currency of systemCurrencies) expectedGroups.set(key(subject, currency, T.SYSTEM_OP), 1);
+    }
+    for (const page of pages) {
+      const groupKey = key(page.subject, page.currency, page.sourceType);
+      actualGroups.set(groupKey, (actualGroups.get(groupKey) || 0) + page.rows);
+    }
+    assert.deepEqual([...actualGroups].sort(), [...expectedGroups].sort());
+    if (name === 'pf02') {
+      assert.deepEqual(pages.filter((p) => p.sourceType === T.RECHARGE).map((p) => p.rows), [1048575, 1]);
+      assert.deepEqual(manifest.pages.filter((p) => JSON.parse(p.descriptor).sourceType === T.RECHARGE).map((p) => p.start_ordinal), [1, 1048576]);
+    }
+    if (name === 'pf03') { assert.ok(pages.length >= 500); assert.equal(fixture.spec.subjects, 200); assert.equal(manifest.projection.filter((r) => r.kind === 'adjustment').length, 10000); }
+    return { status: 'PASS', pages, sourceRowCount: pages.reduce((n, p) => n + p.rows, 0), manualExcelWps: 'NOT_RUN' };
+  } finally { await book.close(); }
+}
+async function electronCase(configPath) {
+  const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  const { app } = require('electron');
+  app.setPath('userData', path.join(config.directory, 'electron-user-data'));
+  app.setPath('sessionData', path.join(config.directory, 'electron-session-data')); app.disableHardwareAcceleration(); await app.whenReady();
+  const environment = baseline(config.directory);
+  environment.buildIdentity = config.buildIdentity;
+  environment.checks.knownBuildSha = /^[a-f0-9]{40}$/.test(config.buildSha);
+  environment.checks.cleanProduction = config.buildIdentity?.productionDirty === false;
+  environment.status = Object.values(environment.checks).every(Boolean) ? 'PASS' : 'NOT_RUN';
+  const report = { schemaVersion: 1, case: config.name, buildSha: config.buildSha, environment,
+    acceptance: 'NOT_RUN', automated: 'NOT_RUN', manualExcelWps: 'NOT_RUN', nativeDialog: 'stubbed', fullMainColdStart: 'NOT_RUN',
+    memoryAttribution: { processRss: 'All Main and worker_threads share this PID; do not add thread RSS values.',
+      independentWorkerRss: 'NOT_RUN', reason: 'Production uses worker_threads; no independent Worker RSS attribution API.',
+      sampleIntervalMs: 500, workerHeap: 'Each isolate heap/external/arrayBuffers are supplemental, not RSS.' },
+    fixtureSetup: { importedBy: 'Production inspect/resolve/importFiles/calculator',
+      seeded: ['Archive batch/artifact and fingerprint', 'Previous-month archived run and opening balances', 'Saved adjustments'],
+      excluded: ['Main import IPC and TaskLifecycle/FilePlan', 'Previous-month archive command', 'Per-adjustment mutation command performance'] },
+    sstDictionaryStress: 'NOT_RUN', syntheticTextStorage: 'inline strings; no nonempty shared-string dictionary is generated',
+    scope: 'Synthetic real import and calculation; production IPC handler, Service, original Review Worker, writer and validator; instrumentation wrapper only.' };
+  let service, db, timer; const samples = [], events = [], progress = [];
+  try {
+    if (config.mode === 'windows' && environment.status !== 'PASS') {
+      report.reason = 'Fixed Windows baseline not satisfied; no large fixture was generated.'; return report;
+    }
+    const started = Date.now();
+    const fixture = await require('./performance-fixture').createPerformanceFixture(config.directory, config.name, config.buildSha);
+    report.fixture = { ...fixture, preparationMs: Date.now() - started, adjustmentSetup: 'Persisted synthetic rows, validated by production getEffectiveRunResult; not adjustment command performance.' };
+    const { DatabaseSync } = require('node:sqlite'), { Worker } = require('node:worker_threads');
+    db = new DatabaseSync(fixture.dbPath);
+    require('../../src/backend/vcc-financial-op-db/storage-contract').assertVccStorageContract(db);
+    require('../../src/backend/vcc-financial-op-db/storage-contract').registerVccStorageWriteCapability(db);
+    const cancellation = { requestedAt: null, finishedAt: null, result: null }; let cancelPromise, manifest;
+    const cancel = () => { if (!cancelPromise) { cancellation.requestedAt = Date.now(); cancelPromise = service.cancelActiveTask().then((value) => { cancellation.finishedAt = Date.now(); cancellation.result = value; }); } };
+    service = require('../../src/main-process/vcc-financial-op-service').createVccFinancialOpService({
+      database: { db, dbPath: fixture.dbPath }, assetsDir: path.join(root, 'assets'), appVersion: '3.2.9',
+      archiveServiceProvider: () => ({ rootDir: fixture.archiveRoot }),
+      reviewWorkerFactory(filename, options) {
+        const worker = new Worker(path.join(__dirname, 'performance-worker.js'), { ...options, workerData: { ...options.workerData,
+          productionWorkerPath: filename, performanceProbe: { cancelPhase: config.name.startsWith('cancel-') ? config.name.slice(7) : null,
+            bytesPerSecond: ['pf04', 'cancel-drain'].includes(config.name) ? mib : null,
+            pauseMs: config.name === 'cancel-drain' ? 30000 : 5000, cancelOnPause: config.name === 'cancel-drain' } } });
+        worker.on('message', (message) => {
+          if (message?.type !== 'performance-probe') return;
+          events.push(message); if (message.kind === 'manifest') manifest = message;
+          if (message.kind === 'cancel-point') cancel();
+        });
+        worker.once('exit', (code) => events.push({ kind: 'worker-exit', at: Date.now(), code })); return worker;
+      }
+    });
+    // Any business/Archive DML during successful export, cancellation or cleanup fails immediately.
+    for (const { name } of db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND (name LIKE 'vcc_fin_op_%' OR name LIKE 'archive_%')").all()) {
+      for (const verb of ['INSERT', 'UPDATE', 'DELETE']) db.exec(`CREATE TRIGGER "pf_no_${verb}_${name}" BEFORE ${verb} ON "${name}" BEGIN SELECT RAISE(ABORT, 'PF export must be read-only'); END`);
+    }
+    if (global.gc) global.gc();
+    const exportStart = Date.now(); const sample = () => samples.push({ at: Date.now(), role: 'Main', pid: process.pid, memory: process.memoryUsage() });
+    sample(); timer = setInterval(sample, 500);
+    const target = path.join(config.directory, '待确认表.xlsx');
+    const handler = require('../../src/main-process/vcc-financial-op-review-ipc').createReviewExportHandler({
+      getService: () => service, getWindow: () => null, documentsPath: config.directory,
+      tempRoot: path.join(config.directory, 'review-temp'), protectedRoots: [fixture.archiveRoot],
+      dialog: { showSaveDialog: async () => ({ canceled: false, filePath: target }) } });
+    const exported = await handler({ sender: { isDestroyed: () => false, send(_channel, value) {
+      progress.push({ at: Date.now(), ...value }); if (config.name === 'cancel-publish' && value.phase === 'publishing') cancel();
+    } } }, fixture.request);
+    await cancelPromise; sample(); clearInterval(timer); timer = null;
+    Object.assign(report, { exported, elapsedMs: Date.now() - exportStart, samples, workerEvents: events, progress, cancellation,
+      businessDml: 'No business/Archive INSERT/UPDATE/DELETE permitted by temporary fixture triggers.' });
+    const processSamples = [...samples, ...events.filter((e) => e.kind === 'sample')];
+    report.processPeakRssBytes = Math.max(...processSamples.map((s) => s.memory.rss));
+    report.processBaselineRssBytes = samples[0].memory.rss;
+    if (config.name.startsWith('cancel-') && config.name !== 'cancel-publish') {
+      assert.equal(exported.status, 'cancelled', JSON.stringify(exported)); assert.equal(fs.existsSync(target), false);
+      assert.ok(cancellation.requestedAt); assert.equal(cancellation.result?.forced, false);
+      report.automated = 'PASS'; report.cancellation.stageBoundaryOnly = config.name !== 'cancel-drain';
+      report.cancellation.drainWaitProof = 'NOT_RUN';
+      report.cancellation.interruptionScope = config.name === 'cancel-drain' ? 'Output Writable paused; active SheetStream drain wait not proven' : 'Real phase entry boundary';
+      report.reason = 'Cancellation observed in real stage; phase-boundary probes do not prove all in-stage cursor and UI timings.';
+    } else {
+      assert.equal(exported.status, 'success', JSON.stringify(exported)); assert.ok(manifest);
+      assert.equal(exported.subjectCount, fixture.spec.subjects);
+      report.readback = await independentReadback(target, manifest, fixture, config.name);
+      assert.equal(report.readback.sourceRowCount, exported.sourceRowCount);
+      report.automated = 'PASS'; report.outputBytes = fs.statSync(target).size;
+      const extraction = events.find((e) => e.kind === 'stage-result' && e.phase === 'extract')?.result;
+      assert.equal(extraction?.scannedFiles, fixture.physicalFiles); report.extraction = extraction;
+      if (config.name === 'cancel-publish') { assert.ok(cancellation.requestedAt); assert.equal(cancellation.result?.status, 'completed'); }
+      if (config.name === 'pf04') {
+        const pause = events.find((e) => e.kind === 'output-paused'); assert.ok(pause, 'Output pause did not occur');
+        const summaries = events.filter((e) => e.kind === 'summary');
+        assert.ok(summaries.length >= 2, 'Missing Worker summary observations');
+        assert.ok(summaries.every((e) => Number.isFinite(e.queuePeak) && e.queuePeak >= 0), 'Invalid queue peak');
+        const queueSamples = events.filter((e) => e.kind === 'sample' && e.phase === 'write');
+        assert.ok(queueSamples.length > 0, 'No writing queue sample');
+        assert.ok(queueSamples.every((e) => ['sheet', 'zip', 'zipEngine', 'output', 'total'].every((k) => Number.isFinite(e.queues?.[k]) && e.queues[k] >= 0)), 'Missing queue metrics');
+        const peak = Math.max(...summaries.map((e) => e.queuePeak));
+        assert.ok(peak <= 24 * mib, `Observed queue peak ${peak} exceeds 8 MiB + 16 MiB single-row budget`);
+        report.backpressure = { configuredBytesPerSecond: mib, pauseMs: 5000, queuePeakBytes: peak,
+          upstreamStopProof: 'NOT_RUN', reason: 'Samples expose queues and committed rows; explicit source cursor pause/resume proof is not instrumented.' };
+      }
+    }
+    assert.deepEqual(fs.readdirSync(path.join(config.directory, 'review-temp')), []);
+    assert.equal(fs.readdirSync(config.directory).some((n) => n.startsWith('.vcc-review-')), false);
+    report.cleanup = 'PASS';
+    if (config.mode === 'windows' && config.name === 'pf02') report.acceptance = 'PASS';
+    if (config.name === 'pf03') report.structuralAcceptance = 'PASS';
+    return report;
+  } catch (error) { report.automated = 'FAIL'; report.error = { message: error.message, code: error.code, stack: error.stack }; return report; }
+  finally { if (timer) clearInterval(timer); await service?.terminate(); db?.close(); json(path.join(config.directory, 'evidence.json'), report); }
+}
+async function main() {
+  const args = process.argv.slice(2), get = (name) => { const index = args.indexOf(name); return index < 0 ? null : args[index + 1]; };
+  if (args.includes('--help')) { console.log('Usage: node scripts/vcc-financial-op/verify-review-performance.js --mode smoke|windows --output NEW_DIRECTORY [--case CASE]\nCases: ' + CASES.join(', ') + '\nExit 0=all requested acceptance passed; 2=evidence generated with NOT_RUN acceptance; 1=automated failure. Smoke exit 0 means supplemental smoke only.'); return; }
+  const mode = get('--mode') || 'smoke', requested = get('--case');
+  if (!['smoke', 'windows'].includes(mode) || (requested && !CASES.includes(requested))) throw new Error('Invalid mode/case');
+  if (mode === 'smoke' && requested && !requested.startsWith('cancel-')) throw new Error('Large cases require --mode windows; smoke only accepts cancellation cases');
+  const output = get('--output'); if (!output) throw new Error('--output NEW_DIRECTORY is required');
+  const destination = path.resolve(output); fs.mkdirSync(destination); // fail if existing, preserve previous evidence
+  let buildSha = 'unknown'; try { buildSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(); } catch (_error) { /* explicit unknown */ }
+  let productionDirty = true, workingTreeStatus = 'unknown';
+  try {
+    productionDirty = !!execFileSync('git', ['diff', '--name-only', 'HEAD', '--', 'src', 'assets', 'package.json', 'package-lock.json'], { cwd: root, encoding: 'utf8' }).trim()
+      || !!execFileSync('git', ['ls-files', '--others', '--exclude-standard', '--', 'src', 'assets', 'package.json', 'package-lock.json'], { cwd: root, encoding: 'utf8' }).trim();
+    workingTreeStatus = execFileSync('git', ['status', '--short'], { cwd: root, encoding: 'utf8' }).trim();
+  } catch (_error) { /* identity remains unverified */ }
+  const scriptSha256 = Object.fromEntries(['verify-review-performance.js', 'performance-fixture.js', 'performance-worker.js'].map((name) =>
+    [name, require('node:crypto').createHash('sha256').update(fs.readFileSync(path.join(__dirname, name))).digest('hex')]));
+  const buildIdentity = { productionDirty, workingTreeStatus, scriptSha256 };
+  const results = [];
+  for (const name of requested ? [requested] : mode === 'smoke' ? ['smoke'] : CASES) {
+    const directory = path.join(destination, name); fs.mkdirSync(directory); const configPath = path.join(directory, 'config.json');
+    json(configPath, { directory, name, mode, buildSha, buildIdentity });
+    const { code, signal } = await new Promise((resolve, reject) => {
+      const child = spawn(require('electron'), ['--js-flags=--expose-gc', __filename, '--electron-child', configPath],
+        { env: { ...process.env, ELECTRON_RUN_AS_NODE: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
+      const log = fs.createWriteStream(path.join(directory, 'run.log'), { flags: 'wx' });
+      child.stdout.on('data', (data) => log.write(data)); child.stderr.on('data', (data) => log.write(data));
+      child.once('error', (error) => { log.end(); reject(error); });
+      child.once('exit', (code, signal) => { if (signal) log.write(`Electron ended by ${signal}\n`); log.end(); resolve({ code, signal }); });
+    });
+    const evidencePath = path.join(directory, 'evidence.json');
+    const report = fs.existsSync(evidencePath) ? JSON.parse(fs.readFileSync(evidencePath, 'utf8')) : { automated: 'FAIL', error: 'Electron did not produce evidence', acceptance: 'NOT_RUN' };
+    report.childExit = { code, signal };
+    if (code !== 0 || signal) { report.automated = 'FAIL'; report.processFailure = `Electron exited with code=${code}, signal=${signal}`; }
+    json(evidencePath, report);
+    results.push({ name, code, signal, evidencePath, automated: report.automated, acceptance: report.acceptance,
+      processPeakRssBytes: report.processPeakRssBytes, fixture: report.fixture?.spec, sheetCount: report.exported?.sheetCount });
+    console.log(JSON.stringify(results.at(-1)));
+    if (code !== 0 || signal || report.automated === 'FAIL') break;
+  }
+  const small = results.find((r) => r.name === 'pf01-100k'), large = results.find((r) => r.name === 'pf01-1m');
+  const summary = { schemaVersion: 1, mode, buildSha, buildIdentity, results, acceptance: 'NOT_RUN',
+    pf01WorkerRss: { status: 'NOT_RUN', reason: 'worker_threads RSS cannot be attributed separately; total process comparison is supplemental only.' },
+    manualWindowsInstalledApplication: 'NOT_RUN', excelWps: 'NOT_RUN',
+    processRssComparison: small?.processPeakRssBytes && large?.processPeakRssBytes ? {
+      deltaBytes: large.processPeakRssBytes - small.processPeakRssBytes, budgetBytes: 256 * mib,
+      status: large.processPeakRssBytes - small.processPeakRssBytes <= 256 * mib ? 'PASS_SUPPLEMENTAL' : 'FAIL',
+      scope: 'Entire Electron Main process, including worker_threads; not isolated Worker RSS.' } : { status: 'NOT_RUN' } };
+  summary.requestedCasesAcceptance = results.every((r) => r.acceptance === 'PASS') ? 'PASS' : 'NOT_RUN';
+  summary.fullVccAcceptance = 'NOT_RUN';
+  json(path.join(destination, 'summary.json'), summary);
+  if (results.some((r) => r.automated === 'FAIL') || summary.processRssComparison.status === 'FAIL') process.exitCode = 1;
+  else if (mode === 'windows' && !results.every((r) => r.acceptance === 'PASS')) process.exitCode = 2;
+}
+if (process.versions.electron && process.argv.includes('--electron-child')) {
+  electronCase(process.argv[process.argv.indexOf('--electron-child') + 1]).then((report) => require('electron').app.exit(report.automated === 'FAIL' ? 1 : 0), (error) => { console.error(error); require('electron').app.exit(1); });
+} else if (require.main === module) main().catch((error) => { console.error(error); process.exitCode = 1; });
+module.exports = { baseline, independentReadback };

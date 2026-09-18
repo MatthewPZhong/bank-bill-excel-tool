@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "case": "pf02",
+  "buildSha": "5001d331bb78bdb82dfaa018ee705b51681bde4f",
+  "environment": {
+    "status": "NOT_RUN",
+    "checks": {
+      "windowsX64": false,
+      "memory16GiB": false,
+      "localSsd": false,
+      "electronLocked": true,
+      "exceljsLocked": true,
+      "sameVolume": true,
+      "knownBuildSha": true,
+      "cleanProduction": true
+    },
+    "disk": null,
+    "diskError": null,
+    "platform": "darwin",
+    "arch": "arm64",
+    "osRelease": "24.6.0",
+    "cpu": "Apple M4 Pro",
+    "totalMemoryBytes": 51539607552,
+    "electron": "36.9.5",
+    "node": "v22.19.0",
+    "exceljs": "4.4.0",
+    "directory": "/private/tmp/v329-release-20260919-3_bafjvz/vcc-performance-final-preflight/pf02",
+    "sameVolumeReason": "Inputs, business DB, temporary manifest and output are descendants of the one newly created case directory.",
+    "buildIdentity": {
+      "productionDirty": false,
+      "workingTreeStatus": "M CHANGELOG.md\n M changes/v3.2.9/codex/v3.2.9-archive-center-permanent-delete/spec.md\n M changes/v3.2.9/codex/v3.2.9-archive-center-permanent-delete/techdoc.md\n M changes/v3.2.9/release.md\n M docs/USER_GUIDE.md\n M rules/integration-test-policy.md\n M scripts/verify-app-settings-layout.js\n M scripts/verify-dark-mode-live.js\n?? .github/workflows/v329-release-acceptance.yml\n?? changes/v3.2.9/release-review-2026-09-19.md\n?? changes/v3.2.9/self-review-2026-09-19/\n?? scripts/vcc-financial-op/performance-fixture.js\n?? scripts/vcc-financial-op/performance-worker.js\n?? scripts/vcc-financial-op/verify-review-performance.js",
+      "scriptSha256": {
+        "verify-review-performance.js": "a3cfdd15c04fb775c00b12973bbebb4f045d40b3d2a7fdbd1a1603d67a2eff88",
+        "performance-fixture.js": "5ea25110d4aa237ba36b3d56b972ed4008e29040aa2c7e5de3636f78052bc06d",
+        "performance-worker.js": "fdb2705e14dc6e70fccde8f13b8c4f7c845f06304763025b9c34c804f63446aa"
+      }
+    }
+  },
+  "acceptance": "NOT_RUN",
+  "automated": "NOT_RUN",
+  "manualExcelWps": "NOT_RUN",
+  "nativeDialog": "stubbed",
+  "fullMainColdStart": "NOT_RUN",
+  "memoryAttribution": {
+    "processRss": "All Main and worker_threads share this PID; do not add thread RSS values.",
+    "independentWorkerRss": "NOT_RUN",
+    "reason": "Production uses worker_threads; no independent Worker RSS attribution API.",
+    "sampleIntervalMs": 500,
+    "workerHeap": "Each isolate heap/external/arrayBuffers are supplemental, not RSS."
+  },
+  "fixtureSetup": {
+    "importedBy": "Production inspect/resolve/importFiles/calculator",
+    "seeded": [
+      "Archive batch/artifact and fingerprint",
+      "Previous-month archived run and opening balances",
+      "Saved adjustments"
+    ],
+    "excluded": [
+      "Main import IPC and TaskLifecycle/FilePlan",
+      "Previous-month archive command",
+      "Per-adjustment mutation command performance"
+    ]
+  },
+  "sstDictionaryStress": "NOT_RUN",
+  "syntheticTextStorage": "inline strings; no nonempty shared-string dictionary is generated",
+  "scope": "Synthetic real import and calculation; production IPC handler, Service, original Review Worker, writer and validator; instrumentation wrapper only.",
+  "reason": "Fixed Windows baseline not satisfied; no large fixture was generated.",
+  "childExit": {
+    "code": 0,
+    "signal": null
+  }
+}

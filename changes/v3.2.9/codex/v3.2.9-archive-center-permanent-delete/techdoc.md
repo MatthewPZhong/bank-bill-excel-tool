@@ -6,15 +6,15 @@
 | --- | --- |
 | 目标版本 | `3.2.9` |
 | 适用分支 | `codex/v3.2.9-archive-center-permanent-delete` |
-| 集成目标 | `release/3.2.9` |
+| 集成目标 | `release/v3.2.9` |
 | 基线 | `v3.2.8^{commit}` = `2ba9ef14fe972363b604955636cff0c9ac53700f` |
 | 关联 Spec | [spec.md](spec.md)，REQ-01～03、ARC-DEL-01～09、AT-01～24 |
-| 文档状态 | 实现及 review 修复完成，本地自动验证通过；D-01 固定 managed-only |
-| 日期 | 2026-09-11 |
+| 文档状态 | 实现及 review 修复完成，模块历史自动验证通过，已集成 release；D-01 固定 managed-only |
+| 日期 | 2026-09-11；集成状态更新于 2026-09-19 |
 | 建议仓库路径 | `changes/v3.2.9/codex/v3.2.9-archive-center-permanent-delete/techdoc.md` |
-| 本轮执行状态 | 已在专属分支完成实现与修复，完整 release-check 通过；未提交、推送或发布，Windows/GUI 人工验收待执行 |
+| 本轮执行状态 | 已集成本地 `release/v3.2.9`；当前组合验证与发布进度见 [release.md](../../release.md)，Windows/GUI 人工验收为 NOT_RUN |
 
-> 第 0～13 节保留设计与历史审查依据：“已有”指基线源码行为，“拟新增/拟扩展”指设计约束。当前实施约定及 review 修复见第 14～15 节，最终自动验证见 validation.md。实施不得改变 D-01 删除授权范围。
+> 第 0～13 节保留设计与历史审查依据：“已有”指基线源码行为，“拟新增/拟扩展”指设计约束，初稿的“待核对”和未勾选 Checklist 不代表当前实施进度。后续实施约定及八轮 review 修复见第 14～21 节和 [implementation-notes.md](implementation-notes.md)，模块历史自动验证见 [validation.md](validation.md)；最终 release 组合门禁另行记录。实施不得改变 D-01 删除授权范围。
 
 ## 0. 技术目标与关键边界
 
@@ -490,7 +490,7 @@ Windows 文件占用行为需要 Windows 上真实复核；不能用其他系统
 
 ### 10.4 计划执行的项目门禁
 
-以下是待实施阶段执行的命令，不是本轮已经通过的结果。实施前核对最终工作树 `package.json` 的实际 scripts 和项目当前规则：
+以下是原设计保留的项目门禁要求；模块各轮执行结果见 [validation.md](validation.md)，不能替代当前 release 最终组合门禁。执行时核对最终工作树 `package.json` 的实际 scripts 和项目当前规则：
 
 ```bash
 npm run test:unit
@@ -543,9 +543,9 @@ npm run release-check
 
 ## 12. 分支与交付操作说明
 
-确定分支：`codex/v3.2.9-archive-center-permanent-delete`。集成目标：`release/3.2.9`。基线为已核实的 `v3.2.8` 正式标签提交。[R6]
+确定分支：`codex/v3.2.9-archive-center-permanent-delete`。集成目标：`release/v3.2.9`，功能现已合入该本地 release。基线为已核实的 `v3.2.8` 正式标签提交。[R6]
 
-以下命令仅供有授权的实施阶段使用，本轮未执行。已有同名分支时只核对，不运行创建或重置命令：
+以下命令保留为初稿的分支创建参考，不是当前待执行清单。开发分支和 release 已存在，本次状态同步只核对，不运行创建或重置命令：
 
 ```bash
 # 实施前核对工作区、远端和基线；不要覆盖本地未提交内容。
@@ -559,11 +559,13 @@ git rev-parse 'v3.2.8^{commit}'
 git switch -c codex/v3.2.9-archive-center-permanent-delete 'v3.2.8^{commit}'
 ```
 
-开发完成后，由已获授权的集成人员将本模块合入已有 `release/3.2.9`；本模块不直接以 main 作为功能完成后的合入目标。已有 release 的其他模块改动必须保留。[R8]
+本模块已由已获授权的集成人员合入已有 `release/v3.2.9`；本模块不直接以 main 作为功能完成后的合入目标。已有 release 的其他模块改动必须保留。[R8]
 
 本分支只维护本需求 Spec、TechDoc 与必要专项证据；`package.json`/lockfile 升版、CHANGELOG、版本功能历史和用户指南的整版汇总由 release 阶段统一协调，避免多个模块分支分别升版或宣告发布。
 
-## 13. 实施 Checklist
+## 13. 初稿实施 Checklist（历史）
+
+下表保留初稿状态供追溯；当前实现及模块回归记录见 [implementation-notes.md](implementation-notes.md)、[validation.md](validation.md)，集成与整版交付状态见 [release.md](../../release.md)。Windows/macOS 适用人工验收及最终组合门禁须分别按实际结果记录，不由历史勾选状态推定通过。
 
 - [ ] 读取真实工作树中的当前项目规则，核对基线、已有分支与并行修改。
 - [x] 关闭 Spec D-01：仅受管文件，并固定确认文案。

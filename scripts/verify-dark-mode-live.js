@@ -6,8 +6,92 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '..');
-const evidence = path.join(root, 'changes/v3.2.9/codex/v3.2.9-night-mode/evidence');
+const evidence = path.resolve(process.env.DARK_MODE_LIVE_EVIDENCE_DIR
+  || path.join(root, 'changes/v3.2.9/codex/v3.2.9-night-mode/evidence'));
 const prefix = 'DARK_MODE_LIVE_RESULT=';
+const evidenceLimit = 'did-finish-load 只验证加载完成状态；本脚本未连续采样启动全过程，不证明首帧或无闪白';
+
+async function waitForVisibleWindow(window) {
+  const deadline = Date.now() + 15000;
+  while (!window.isVisible() || window.isMinimized()) {
+    if (window.isDestroyed() || Date.now() >= deadline) throw new Error('真实 Main 窗口未正常显示');
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
+async function capturePresentedPage(window, name, settings = false) {
+  await waitForVisibleWindow(window);
+  const web = window.webContents;
+  const state = await web.executeJavaScript(`(() => {
+    const settings = ${JSON.stringify(settings)};
+    const pane = document.getElementById('appearancePane');
+    const card = pane?.closest('[role="dialog"]');
+    const viewport = { width: innerWidth, height: innerHeight, dpr: devicePixelRatio };
+    if (settings && (!pane || pane.hidden || !card?.isConnected)) throw new Error('外观设置未显示');
+    const rect = (element) => {
+      const { x, y, width, height } = element.getBoundingClientRect();
+      return { x, y, width, height };
+    };
+    const paneRect = settings ? rect(pane) : null;
+    const cardRect = settings ? rect(card) : null;
+    const points = settings ? [
+      { x: cardRect.x + cardRect.width - 80, y: cardRect.y + 20 },
+      { x: paneRect.x + paneRect.width - 12, y: paneRect.y + 12 },
+      { x: paneRect.x + paneRect.width - 12, y: paneRect.y + paneRect.height - 12 }
+    ] : [{ x: 10, y: innerHeight / 2 }];
+    const samples = points.map((point) => {
+      let element = document.elementFromPoint(point.x, point.y);
+      if (!element || (settings && !card.contains(element))) throw new Error('截图采样点不在可见设置弹窗内');
+      while (element) {
+        const color = getComputedStyle(element).backgroundColor;
+        if (color.startsWith('rgb(')) return { ...point, color };
+        element = element.parentElement;
+      }
+      throw new Error('截图采样点没有可核对的不透明背景');
+    });
+    return { viewport, paneRect, cardRect, samples, theme: document.documentElement.dataset.theme,
+      documentVisibility: document.visibilityState, appearanceVisible: settings ? !pane.hidden : null,
+      checked: settings ? document.getElementById('darkModeEnabled').checked : null };
+  })()`);
+  let frames = 0;
+  let lastChecks = [];
+  const image = await new Promise((resolve, reject) => {
+    let finished = false;
+    const finish = (error, captured) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      clearInterval(repaint);
+      web.endFrameSubscription();
+      if (error) reject(error);
+      else resolve(captured);
+    };
+    const timer = setTimeout(() => finish(new Error(`呈现帧未匹配当前 DOM：${JSON.stringify(lastChecks)}`)), 10000);
+    const repaint = setInterval(() => web.invalidate(), 100);
+    web.beginFrameSubscription(false, (captured) => {
+      try {
+        frames += 1;
+        const size = captured.getSize();
+        const bitmap = captured.toBitmap();
+        if (!size.width || !size.height || bitmap.length !== size.width * size.height * 4) return;
+        lastChecks = state.samples.map((sample) => {
+          const x = Math.min(size.width - 1, Math.round(sample.x * size.width / state.viewport.width));
+          const y = Math.min(size.height - 1, Math.round(sample.y * size.height / state.viewport.height));
+          const offset = (y * size.width + x) * 4;
+          const actual = [bitmap[offset + 2], bitmap[offset + 1], bitmap[offset]];
+          const expected = sample.color.match(/[\d.]+/g).map(Number);
+          return { x, y, expected, actual, matches: expected.every((value, index) => Math.abs(value - actual[index]) <= 3) };
+        });
+        if (lastChecks.every((sample) => sample.matches)) finish(null, captured);
+      } catch (error) { finish(error); }
+    });
+    // rAF 回调发生在提交给 compositor 之前；订阅实际呈现帧并验证弹窗像素。
+    web.invalidate();
+  });
+  fs.writeFileSync(path.join(evidence, name), image.toPNG());
+  return { file: name, imageSize: image.getSize(), presentedFrames: frames, pixelChecks: lastChecks,
+    windowVisible: window.isVisible(), windowMinimized: window.isMinimized(), ...state };
+}
 
 function parent() {
   const deadline = Date.now() + 90000;
@@ -36,6 +120,7 @@ function parent() {
         env: {
           ...process.env,
           DARK_MODE_LIVE_CHILD: '1', DARK_MODE_LIVE_INITIAL: initialTheme,
+          DARK_MODE_LIVE_EVIDENCE_DIR: evidence,
           APP_USER_DATA_DIR: userData, APP_DOCUMENTS_DIR: path.join(temp, 'Documents'),
           ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
         }
@@ -50,14 +135,14 @@ function parent() {
       if (!result.ok) throw new Error(JSON.stringify(result));
       console.log(`[dark-mode-live] ${initialTheme} startup/reload/settings PASS`);
     }
-    fs.writeFileSync(path.join(evidence, 'live-runtime.json'), JSON.stringify({ status: 'PASS', kind: '真实 Main + Preload + Renderer，临时数据库与真实单实例锁', resources, results }, null, 2));
+    fs.writeFileSync(path.join(evidence, 'live-runtime.json'), JSON.stringify({ status: 'PASS', kind: '真实 Main + Preload + Renderer，临时数据库与真实单实例锁', evidenceLimit, resources, results }, null, 2));
     console.log('==== 2/2 PASS ====');
   } catch (error) {
     const resourceBlocked = String(error).includes('BIZOP_ACTIVATION_RESOURCE_UNAVAILABLE');
     fs.writeFileSync(path.join(evidence, 'live-runtime.json'), JSON.stringify({
       status: resourceBlocked ? 'BLOCKED' : 'FAILED',
       kind: '真实 Main + Preload + Renderer，临时数据库与真实单实例锁',
-      resources, results,
+      evidenceLimit, resources, results,
       reason: resourceBlocked ? '现有 BizOP 首次激活资源准入失败；未创建业务窗口，不能判定 GUI 冷启动通过' : String(error),
       code: resourceBlocked ? 'BIZOP_ACTIVATION_RESOURCE_UNAVAILABLE' : null
     }, null, 2));
@@ -102,11 +187,16 @@ function child() {
       let assertions = 0;
       const check = (value, message) => { assertions += 1; if (!value) failures.push(message); };
       try {
+        const windowAtLoad = { visible: window.isVisible(), minimized: window.isMinimized() };
         const loadSnapshot = await web.executeJavaScript('({ theme: document.documentElement.dataset.theme, background: getComputedStyle(document.body).backgroundColor })');
         check(loadSnapshot.theme === initial, `加载完成后的主题 ${loadSnapshot.theme} != ${initial}`);
         check(nativeTheme.themeSource === initial, '原生窗口主题与加载完成后的主题不一致');
         check(app.hasSingleInstanceLock(), '真实应用未持有单实例锁');
         const initializedAt = await waitForRendererReady();
+        const windowAfterInit = { visible: window.isVisible(), minimized: window.isMinimized() };
+        assert.equal(app.getPath('userData'), process.env.APP_USER_DATA_DIR);
+        assert.equal(app.getPath('documents'), process.env.APP_DOCUMENTS_DIR);
+        const startupCapture = await capturePresentedPage(window, `live-${initial}-startup.png`);
         const result = await web.executeJavaScript(`(async () => {
           const info = await window.desktopApi.app.getInfo();
           const snapshots = [];
@@ -130,6 +220,7 @@ function child() {
         check(reloaded === 'dark', '页面重载完成后没有保持深色');
         // 等真实初始化完成，随后通过真实设置入口打开外观。
         const reinitializedAt = await waitForRendererReady();
+        const reloadCapture = await capturePresentedPage(window, `live-${initial}-reload-dark.png`);
         await web.executeJavaScript(`(async () => {
           const settingsButton = document.getElementById('settingsBtn');
           if (!settingsButton) throw new Error('初始化完成后缺少设置按钮');
@@ -141,11 +232,14 @@ function child() {
         })()`);
         const appearance = await web.executeJavaScript(`({visible: !document.getElementById('appearancePane').hidden, theme: document.documentElement.dataset.theme, checked: document.getElementById('darkModeEnabled').checked})`);
         check(appearance.visible && appearance.checked && appearance.theme === 'dark', '真实外观设置与已保存时段不同步');
-        const screenshot = await web.capturePage();
-        const imagePath = path.join(evidence, `live-${initial}-startup-dark-settings.png`);
-        fs.writeFileSync(imagePath, screenshot.toPNG());
+        const settingsCapture = await capturePresentedPage(window, `live-${initial}-startup-dark-settings.png`, true);
+        check(settingsCapture.appearanceVisible && settingsCapture.checked && settingsCapture.theme === 'dark'
+          && settingsCapture.pixelChecks.every((sample) => sample.matches), '实际呈现帧与外观设置 DOM 不一致');
         check(rendererErrors.length === 0, `Renderer 错误：${rendererErrors.join('; ')}`);
-        console.log(prefix + JSON.stringify({ ok: failures.length === 0, initial, assertions, application, loadSnapshot, initializedAt, reinitializedAt, reloaded, appearance, imageSize: screenshot.getSize(), failures, rendererErrors }));
+        console.log(prefix + JSON.stringify({ ok: failures.length === 0, initial, assertions, application,
+          isolation: { userData: app.getPath('userData'), documents: app.getPath('documents') },
+          windowAtLoad, windowAfterInit, loadSnapshot, initializedAt, reinitializedAt, reloaded, appearance,
+          startupCapture, reloadCapture, settingsCapture, evidenceLimit, failures, rendererErrors }));
         process.exitCode = failures.length ? 1 : 0;
       } catch (error) {
         console.log(prefix + JSON.stringify({ ok: false, initial, failures: [String(error.stack || error)] }));

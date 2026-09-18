@@ -1,0 +1,219 @@
+{
+  "status": "PASS",
+  "cases": [
+    {
+      "initial": "light",
+      "checks": [
+        {
+          "file": "/private/tmp/v329-release-20260919-3_bafjvz/review-snapshot/changes/v3.2.9/codex/v3.2.9-night-mode/evidence/live-light-startup-dark-settings.png",
+          "matchesCurrentAppearance": false,
+          "samples": [
+            {
+              "x": 2168,
+              "y": 196,
+              "expected": [
+                28,
+                32,
+                39
+              ],
+              "actual": [
+                18,
+                20,
+                25
+              ],
+              "matches": false
+            },
+            {
+              "x": 2302,
+              "y": 314,
+              "expected": [
+                28,
+                32,
+                39
+              ],
+              "actual": [
+                18,
+                20,
+                25
+              ],
+              "matches": false
+            },
+            {
+              "x": 2302,
+              "y": 1406,
+              "expected": [
+                28,
+                32,
+                39
+              ],
+              "actual": [
+                17,
+                20,
+                24
+              ],
+              "matches": false
+            }
+          ]
+        },
+        {
+          "file": "/private/tmp/v329-release-20260919-3_bafjvz/night-live-presented/live-light-startup-dark-settings.png",
+          "matchesCurrentAppearance": true,
+          "samples": [
+            {
+              "x": 2168,
+              "y": 196,
+              "expected": [
+                28,
+                32,
+                39
+              ],
+              "actual": [
+                29,
+                32,
+                38
+              ],
+              "matches": true
+            },
+            {
+              "x": 2302,
+              "y": 314,
+              "expected": [
+                28,
+                32,
+                39
+              ],
+              "actual": [
+                29,
+                32,
+                38
+              ],
+              "matches": true
+            },
+            {
+              "x": 2302,
+              "y": 1406,
+              "expected": [
+                28,
+                32,
+                39
+              ],
+              "actual": [
+                29,
+                32,
+                38
+              ],
+              "matches": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "initial": "dark",
+      "checks": [
+        {
+          "file": "/private/tmp/v329-release-20260919-3_bafjvz/review-snapshot/changes/v3.2.9/codex/v3.2.9-night-mode/evidence/live-dark-startup-dark-settings.png",
+          "matchesCurrentAppearance": false,
+          "samples": [
+            {
+              "x": 2168,
+              "y": 196,
+              "expected": [
+                28,
+                32,
+                39
+              ],
+              "actual": [
+                18,
+                20,
+                25
+              ],
+              "matches": false
+            },
+            {
+              "x": 2302,
+              "y": 314,
+              "expected": [
+                28,
+                32,
+                39
+              ],
+              "actual": [
+                18,
+                20,
+                25
+              ],
+              "matches": false
+            },
+            {
+              "x": 2302,
+              "y": 1406,
+              "expected": [
+                28,
+                32,
+                39
+              ],
+              "actual": [
+                17,
+                20,
+                24
+              ],
+              "matches": false
+            }
+          ]
+        },
+        {
+          "file": "/private/tmp/v329-release-20260919-3_bafjvz/night-live-presented/live-dark-startup-dark-settings.png",
+          "matchesCurrentAppearance": true,
+          "samples": [
+            {
+              "x": 2168,
+              "y": 196,
+              "expected": [
+                28,
+                32,
+                39
+              ],
+              "actual": [
+                29,
+                32,
+                38
+              ],
+              "matches": true
+            },
+            {
+              "x": 2302,
+              "y": 314,
+              "expected": [
+                28,
+                32,
+                39
+              ],
+              "actual": [
+                29,
+                32,
+                38
+              ],
+              "matches": true
+            },
+            {
+              "x": 2302,
+              "y": 1406,
+              "expected": [
+                28,
+                32,
+                39
+              ],
+              "actual": [
+                29,
+                32,
+                38
+              ],
+              "matches": true
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

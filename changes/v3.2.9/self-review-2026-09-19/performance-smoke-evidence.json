@@ -1,0 +1,1393 @@
+{
+  "schemaVersion": 1,
+  "case": "smoke",
+  "buildSha": "5001d331bb78bdb82dfaa018ee705b51681bde4f",
+  "environment": {
+    "status": "NOT_RUN",
+    "checks": {
+      "windowsX64": false,
+      "memory16GiB": false,
+      "localSsd": false,
+      "electronLocked": true,
+      "exceljsLocked": true,
+      "sameVolume": true,
+      "knownBuildSha": true,
+      "cleanProduction": true
+    },
+    "disk": null,
+    "diskError": null,
+    "platform": "darwin",
+    "arch": "arm64",
+    "osRelease": "24.6.0",
+    "cpu": "Apple M4 Pro",
+    "totalMemoryBytes": 51539607552,
+    "electron": "36.9.5",
+    "node": "v22.19.0",
+    "exceljs": "4.4.0",
+    "directory": "/private/tmp/v329-release-20260919-3_bafjvz/vcc-performance-final-smoke/smoke",
+    "sameVolumeReason": "Inputs, business DB, temporary manifest and output are descendants of the one newly created case directory.",
+    "buildIdentity": {
+      "productionDirty": false,
+      "workingTreeStatus": "M CHANGELOG.md\n M changes/v3.2.9/codex/v3.2.9-archive-center-permanent-delete/spec.md\n M changes/v3.2.9/codex/v3.2.9-archive-center-permanent-delete/techdoc.md\n M changes/v3.2.9/release.md\n M docs/USER_GUIDE.md\n M rules/integration-test-policy.md\n M scripts/verify-app-settings-layout.js\n M scripts/verify-dark-mode-live.js\n?? .github/workflows/v329-release-acceptance.yml\n?? changes/v3.2.9/release-review-2026-09-19.md\n?? changes/v3.2.9/self-review-2026-09-19/\n?? scripts/vcc-financial-op/performance-fixture.js\n?? scripts/vcc-financial-op/performance-worker.js\n?? scripts/vcc-financial-op/verify-review-performance.js",
+      "scriptSha256": {
+        "verify-review-performance.js": "a3cfdd15c04fb775c00b12973bbebb4f045d40b3d2a7fdbd1a1603d67a2eff88",
+        "performance-fixture.js": "5ea25110d4aa237ba36b3d56b972ed4008e29040aa2c7e5de3636f78052bc06d",
+        "performance-worker.js": "fdb2705e14dc6e70fccde8f13b8c4f7c845f06304763025b9c34c804f63446aa"
+      }
+    }
+  },
+  "acceptance": "NOT_RUN",
+  "automated": "PASS",
+  "manualExcelWps": "NOT_RUN",
+  "nativeDialog": "stubbed",
+  "fullMainColdStart": "NOT_RUN",
+  "memoryAttribution": {
+    "processRss": "All Main and worker_threads share this PID; do not add thread RSS values.",
+    "independentWorkerRss": "NOT_RUN",
+    "reason": "Production uses worker_threads; no independent Worker RSS attribution API.",
+    "sampleIntervalMs": 500,
+    "workerHeap": "Each isolate heap/external/arrayBuffers are supplemental, not RSS."
+  },
+  "fixtureSetup": {
+    "importedBy": "Production inspect/resolve/importFiles/calculator",
+    "seeded": [
+      "Archive batch/artifact and fingerprint",
+      "Previous-month archived run and opening balances",
+      "Saved adjustments"
+    ],
+    "excluded": [
+      "Main import IPC and TaskLifecycle/FilePlan",
+      "Previous-month archive command",
+      "Per-adjustment mutation command performance"
+    ]
+  },
+  "sstDictionaryStress": "NOT_RUN",
+  "syntheticTextStorage": "inline strings; no nonempty shared-string dictionary is generated",
+  "scope": "Synthetic real import and calculation; production IPC handler, Service, original Review Worker, writer and validator; instrumentation wrapper only.",
+  "fixture": {
+    "directory": "/private/tmp/v329-release-20260919-3_bafjvz/vcc-performance-final-smoke/smoke",
+    "dbPath": "/private/tmp/v329-release-20260919-3_bafjvz/vcc-performance-final-smoke/smoke/business.sqlite",
+    "archiveRoot": "/private/tmp/v329-release-20260919-3_bafjvz/vcc-performance-final-smoke/smoke/archive",
+    "filePath": "/private/tmp/v329-release-20260919-3_bafjvz/vcc-performance-final-smoke/smoke/多工作表性能合成样本.xlsx",
+    "spec": {
+      "subjects": 2,
+      "pending": 8,
+      "recharge": 12,
+      "adjustments": 4
+    },
+    "subjects": [
+      "主体001-长名称用于验证截断与重名哈希保存全部语义",
+      "主体002-长名称用于验证截断与重名哈希保存全部语义"
+    ],
+    "physicalFiles": 1,
+    "inputBytes": 17990,
+    "inputSha256": "513a214095687570134dab5109f27a6e281f1427cde0f8c1f5995c4d4aca16ba",
+    "inputSheetCount": 6,
+    "request": {
+      "runId": 2,
+      "expectedResultRevision": 4,
+      "expectedInputFingerprint": "1276d39a851f8de88f5659d949f543202a12ad555297bda283da0d2e0faa0b30"
+    },
+    "preparationMs": 226,
+    "adjustmentSetup": "Persisted synthetic rows, validated by production getEffectiveRunResult; not adjustment command performance."
+  },
+  "exported": {
+    "status": "success",
+    "filePath": "/private/tmp/v329-release-20260919-3_bafjvz/vcc-performance-final-smoke/smoke/待确认表.xlsx",
+    "fileName": "待确认表.xlsx",
+    "resultRevision": 4,
+    "subjectCount": 2,
+    "sheetCount": 19,
+    "sourceRowCount": 40
+  },
+  "elapsedMs": 424,
+  "samples": [
+    {
+      "at": 1789752362548,
+      "role": "Main",
+      "pid": 31487,
+      "memory": {
+        "rss": 165068800,
+        "heapTotal": 60342272,
+        "heapUsed": 23698416,
+        "external": 7359978,
+        "arrayBuffers": 0
+      }
+    },
+    {
+      "at": 1789752362972,
+      "role": "Main",
+      "pid": 31487,
+      "memory": {
+        "rss": 223002624,
+        "heapTotal": 60342272,
+        "heapUsed": 24248928,
+        "external": 5655081,
+        "arrayBuffers": 0
+      }
+    }
+  ],
+  "workerEvents": [
+    {
+      "type": "performance-probe",
+      "kind": "sample",
+      "at": 1789752362574,
+      "threadId": 1,
+      "phase": "starting",
+      "memory": {
+        "rss": 170999808,
+        "heapTotal": 5144576,
+        "heapUsed": 2615324,
+        "external": 1807255,
+        "arrayBuffers": 10379
+      },
+      "pid": 31487,
+      "rows": 0,
+      "readRows": 0,
+      "queues": {
+        "sheet": 0,
+        "zip": 0,
+        "zipEngine": 0,
+        "output": 0,
+        "total": 0
+      }
+    },
+    {
+      "type": "performance-probe",
+      "kind": "stage-start",
+      "at": 1789752362678,
+      "threadId": 1,
+      "phase": "prepare"
+    },
+    {
+      "type": "performance-probe",
+      "kind": "manifest",
+      "at": 1789752362694,
+      "threadId": 1,
+      "phase": "prepare",
+      "facts": 42,
+      "expected": 40,
+      "pages": [
+        {
+          "id": 1,
+          "group_key": "[\"主体001-长名称用于验证截断与重名哈希保存全部语义\",\"AUD\",\"system_op\",1,\"918fa27358a72d301a8ca1df04be64cbb0a07a07875b5961fd2360e3457cca1c\"]",
+          "name": "主体001-长名称用于验证截断与重名哈希保存全部-aa5884",
+          "part": 1,
+          "start_ordinal": 1,
+          "row_count": 1,
+          "identity_digest": "db5e6419204d68d321bc2084b6d51228cf8248f755afd0446c9414565d96cc81",
+          "descriptor": "{\"subject\":\"主体001-长名称用于验证截断与重名哈希保存全部语义\",\"currency\":\"AUD\",\"sourceType\":\"system_op\",\"rawContractVersion\":1,\"headers\":[\"账单日期\",\"主体\",\"业务部门\",\"币种\",\"OP发生额\",\"发生额（入）\",\"发生额（出）\",\"本期移除Pending金额\",\"调账金额\",\"OP期末余额\",\"pending余额\",\"费用项\",\"财务余额\",\"主体变动发生额\",\"财务主体余额\",\"创建时间\"],\"headerFingerprint\":\"918fa27358a72d301a8ca1df04be64cbb0a07a07875b5961fd2360e3457cca1c\",\"fullLogicalName\":\"主体001-长名称用于验证截断与重名哈希保存全部语义-AUD-系统财务OP\"}"
+        },
+        {
+          "id": 2,
+          "group_key": "[\"主体001-长名称用于验证截断与重名哈希保存全部语义\",\"CAD\",\"system_op\",1,\"918fa27358a72d301a8ca1df04be64cbb0a07a07875b5961fd2360e3457cca1c\"]",
+          "name": "主体001-长名称用于验证截断与重名哈希保存全部-8f1d03",
+          "part": 1,
+          "start_ordinal": 1,
+          "row_count": 1,
+          "identity_digest": "92353446c727af416d3401088f781f6cc13725276602b1922b7f7eeddc25fe1b",
+          "descriptor": "{\"subject\":\"主体001-长名称用于验证截断与重名哈希保存全部语义\",\"currency\":\"CAD\",\"sourceType\":\"system_op\",\"rawContractVersion\":1,\"headers\":[\"账单日期\",\"主体\",\"业务部门\",\"币种\",\"OP发生额\",\"发生额（入）\",\"发生额（出）\",\"本期移除Pending金额\",\"调账金额\",\"OP期末余额\",\"pending余额\",\"费用项\",\"财务余额\",\"主体变动发生额\",\"财务主体余额\",\"创建时间\"],\"headerFingerprint\":\"918fa27358a72d301a8ca1df04be64cbb0a07a07875b5961fd2360e3457cca1c\",\"fullLogicalName\":\"主体001-长名称用于验证截断与重名哈希保存全部语义-CAD-系统财务OP\"}"
+        },
+        {
+          "id": 3,
+          "group_key": "[\"主体001-长名称用于验证截断与重名哈希保存全部语义\",\"EUR\",\"channel\",1,\"8e57a249e44ee6e56925e2496afac72ff6ff3a9452e38ce910d4136630f35df8\"]",
+          "name": "主体001-长名称用于验证截断与重名哈希保存全部-a57809",
+          "part": 1,
+          "start_ordinal": 1,
+          "row_count": 1,
+          "identity_digest": "03e6ef1181cba449251af54123a4f13113f78b0155b9b12adcb3d731224f3eb1",
+          "descriptor": "{\"subject\":\"主体001-长名称用于验证截断与重名哈希保存全部语义\",\"currency\":\"EUR\",\"sourceType\":\"channel\",\"rawContractVersion\":1,\"headers\":[\"账单日期\",\"部门\",\"通道名称\",\"MID\",\"类型\",\"批次号\",\"结算批次号\",\"主对账id\",\"渠道订单号\",\"交易类型\",\"交易汇总金额\",\"交易金额\",\"交易币种\",\"清算金额\",\"清算手续费\",\"清算币种\",\"清算净金额\",\"汇率\",\"客户姓名\",\"客户卡号\",\"对账单解析时间\",\"交易完成时间\",\"原始对账ID\",\"备注\",\"数据来源\",\"是否参与本地对账\",\"系统创建时间\",\"系统更新时间\",\"防重号\",\"借贷方向\",\"客户编号\",\"场景\",\"账户编号\",\"billdate\",\"结算币种\",\"实际到账金额\",\"结算金额\",\"渠道手续费\"],\"headerFingerprint\":\"8e57a249e44ee6e56925e2496afac72ff6ff3a9452e38ce910d4136630f35df8\",\"fullLogicalName\":\"主体001-长名称用于验证截断与重名哈希保存全部语义-EUR-VCC通道明细\"}"
+        },
+        {
+          "id": 4,
+          "group_key": "[\"主体001-长名称用于验证截断与重名哈希保存全部语义\",\"EUR\",\"pending_archive_removal\",2,\"3a67e7e16c19a7ba79afd510aa75cdb3c4b3d5e545da407b6ff5fafdd0d9e9cf\"]",
+          "name": "主体001-长名称用于验证截断与重名哈希保存全部-a9094a",
+          "part": 1,
+          "start_ordinal": 1,
+          "row_count": 4,
+          "identity_digest": "fc08b17dacd0a5c488c75dc8dacce19ed20dce74cba928fa4ecf98e1fe2635b7",
+          "descriptor": "{\"subject\":\"主体001-长名称用于验证截断与重名哈希保存全部语义\",\"currency\":\"EUR\",\"sourceType\":\"pending_archive_removal\",\"rawContractVersion\":2,\"headers\":[\"pending类型\",\"pending资金类型\",\"账单类型\",\"billDate\",\"valueDate\",\"平账账期\",\"业务BU\",\"对手业务BU\",\"财务BU\",\"主体\",\"对账类型\",\"recon_id\",\"金额\",\"币种\",\"order_no\",\"acc_id\",\"finish_time\",\"穿透ID\",\"channel\",\"merchant_id\",\"bank_ref\",\"对账明细ID\",\"对账单ID\",\"PendingBizId\",\"备注\",\"计算金额\",\"计算币种\",\"是否拆分Pending\",\"流水_账单日期\",\"流水_公司主体\",\"流水_流水类型\",\"流水_业务部门\",\"流水_主对账ID\",\"流水_出入方向\",\"流水_流水单号\",\"流水_用户编号\",\"流水_账户编号\",\"流水_币种\",\"流水_对账金额\",\"流水_账户类型\",\"授信金额\",\"非授信金额\",\"维护人\",\"维护人BU\",\"客户所在地\",\"是否已流水替换\"],\"headerFingerprint\":\"3a67e7e16c19a7ba79afd510aa75cdb3c4b3d5e545da407b6ff5fafdd0d9e9cf\",\"fullLogicalName\":\"主体001-长名称用于验证截断与重名哈希保存全部语义-EUR-VCC_移除归档Pending账单\"}"
+        },
+        {
+          "id": 5,
+          "group_key": "[\"主体001-长名称用于验证截断与重名哈希保存全部语义\",\"EUR\",\"system_op\",1,\"918fa27358a72d301a8ca1df04be64cbb0a07a07875b5961fd2360e3457cca1c\"]",
+          "name": "主体001-长名称用于验证截断与重名哈希保存全部-a0afdf",
+          "part": 1,
+          "start_ordinal": 1,
+          "row_count": 1,
+          "identity_digest": "7c9008b5df931ce8a4b2b61ad118c9a1efc5fdb84d7f534f57bc16109db20045",
+          "descriptor": "{\"subject\":\"主体001-长名称用于验证截断与重名哈希保存全部语义\",\"currency\":\"EUR\",\"sourceType\":\"system_op\",\"rawContractVersion\":1,\"headers\":[\"账单日期\",\"主体\",\"业务部门\",\"币种\",\"OP发生额\",\"发生额（入）\",\"发生额（出）\",\"本期移除Pending金额\",\"调账金额\",\"OP期末余额\",\"pending余额\",\"费用项\",\"财务余额\",\"主体变动发生额\",\"财务主体余额\",\"创建时间\"],\"headerFingerprint\":\"918fa27358a72d301a8ca1df04be64cbb0a07a07875b5961fd2360e3457cca1c\",\"fullLogicalName\":\"主体001-长名称用于验证截断与重名哈希保存全部语义-EUR-系统财务OP\"}"
+        },
+        {
+          "id": 6,
+          "group_key": "[\"主体001-长名称用于验证截断与重名哈希保存全部语义\",\"USD\",\"recharge_refund\",1,\"8380586bc957e5f370033dc2029952ccbe0ef9e4476f64538a5edbb0a9d698de\"]",
+          "name": "主体001-长名称用于验证截断与重名哈希保存全部-5199f0",
+          "part": 1,
+          "start_ordinal": 1,
+          "row_count": 6,
+          "identity_digest": "2871c95da0db1e80e76a11076e30add2f8c59786c549f90c1307035ce83f76cb",
+          "descriptor": "{\"subject\":\"主体001-长名称用于验证截断与重名哈希保存全部语义\",\"currency\":\"USD\",\"sourceType\":\"recharge_refund\",\"rawContractVersion\":1,\"headers\":[\"穿透节点ID\",\"对账单ID\",\"BillDate\",\"业务部门\",\"对手部门\",\"订单号\",\"流水对账id\",\"单据对账id\",\"单据类型\",\"客户编号\",\"场景\",\"账户号\",\"大账号\",\"业务子类型\",\"出入方向\",\"平台\",\"公司主体\",\"我方币种\",\"我方金额\",\"授信金额\",\"非授信金额\",\"账户类型\",\"账户借贷记标识\",\"手续费\",\"extrafee\",\"fee\",\"fee1\",\"finalFee\",\"flowMoreFee\",\"fullRcvFee\",\"pobofee\",\"servicefee\",\"splitExtraFeeAmount\",\"splitFlowMoreFeeAmount\",\"splitFullRcvFeeAmount\",\"splitPoboFeeAmount\",\"splitServiceFeeAmount\",\"splitWithdrawFee\",\"优惠券\",\"bonus\",\"我方到账金额\",\"对方币种\",\"对方金额\",\"汇率\",\"createTime\",\"finishTime\",\"备注\",\"销账类型\",\"销账说明\"],\"headerFingerprint\":\"8380586bc957e5f370033dc2029952ccbe0ef9e4476f64538a5edbb0a9d698de\",\"fullLogicalName\":\"主体001-长名称用于验证截断与重名哈希保存全部语义-USD-VCC充值清退明细\"}"
+        },
+        {
+          "id": 7,
+          "group_key": "[\"主体001-长名称用于验证截断与重名哈希保存全部语义\",\"USD\",\"fee_fx\",1,\"c843cfb1e57587e75f617de6234276f4e672989c942c86590e075456d8d8d93d\"]",
+          "name": "主体001-长名称用于验证截断与重名哈希保存全部-9f1de8",
+          "part": 1,
+          "start_ordinal": 1,
+          "row_count": 1,
+          "identity_digest": "b60d7367e33d81e2e78db8e971f3c903789fa2ee2f7a211d6ce3694e8bdfdbdb",
+          "descriptor": "{\"subject\":\"主体001-长名称用于验证截断与重名哈希保存全部语义\",\"currency\":\"USD\",\"sourceType\":\"fee_fx\",\"rawContractVersion\":1,\"headers\":[\"穿透节点ID\",\"对账单ID\",\"BillDate\",\"业务部门\",\"对手部门\",\"订单号\",\"流水对账id\",\"单据对账id\",\"单据类型\",\"客户编号\",\"场景\",\"账户号\",\"大账号\",\"业务子类型\",\"出入方向\",\"平台\",\"公司主体\",\"我方币种\",\"我方金额\",\"手续费\",\"优惠券\",\"bonus\",\"我方到账金额\",\"授信金额\",\"非授信金额\",\"账户类型\",\"账户借贷记标识\",\"对方币种\",\"对方金额\",\"汇率\",\"createTime\",\"finishTime\",\"fee\",\"备注\",\"销账类型\",\"销账说明\"],\"headerFingerprint\":\"c843cfb1e57587e75f617de6234276f4e672989c942c86590e075456d8d8d93d\",\"fullLogicalName\":\"主体001-长名称用于验证截断与重名哈希保存全部语义-USD-VCC费用及换汇明细\"}"
+        },
+        {
+          "id": 8,
+          "group_key": "[\"主体001-长名称用于验证截断与重名哈希保存全部语义\",\"USD\",\"pending_archive_removal\",2,\"3a67e7e16c19a7ba79afd510aa75cdb3c4b3d5e545da407b6ff5fafdd0d9e9cf\"]",
+          "name": "主体001-长名称用于验证截断与重名哈希保存全部-8735a0",
+          "part": 1,
+          "start_ordinal": 1,
+          "row_count": 4,
+          "identity_digest": "a2fa38d7c790c702e35a4ff6296a44d514998da2a55ba5d8044042025ade0db9",
+          "descriptor": "{\"subject\":\"主体001-长名称用于验证截断与重名哈希保存全部语义\",\"currency\":\"USD\",\"sourceType\":\"pending_archive_removal\",\"rawContractVersion\":2,\"headers\":[\"pending类型\",\"pending资金类型\",\"账单类型\",\"billDate\",\"valueDate\",\"平账账期\",\"业务BU\",\"对手业务BU\",\"财务BU\",\"主体\",\"对账类型\",\"recon_id\",\"金额\",\"币种\",\"order_no\",\"acc_id\",\"finish_time\",\"穿透ID\",\"channel\",\"merchant_id\",\"bank_ref\",\"对账明细ID\",\"对账单ID\",\"PendingBizId\",\"备注\",\"计算金额\",\"计算币种\",\"是否拆分Pending\",\"流水_账单日期\",\"流水_公司主体\",\"流水_流水类型\",\"流水_业务部门\",\"流水_主对账ID\",\"流水_出入方向\",\"流水_流水单号\",\"流水_用户编号\",\"流水_账户编号\",\"流水_币种\",\"流水_对账金额\",\"流水_账户类型\",\"授信金额\",\"非授信金额\",\"维护人\",\"维护人BU\",\"客户所在地\",\"是否已流水替换\"],\"headerFingerprint\":\"3a67e7e16c19a7ba79afd510aa75cdb3c4b3d5e545da407b6ff5fafdd0d9e9cf\",\"fullLogicalName\":\"主体001-长名称用于验证截断与重名哈希保存全部语义-USD-VCC_移除归档Pending账单\"}"
+        },
+        {
+          "id": 9,
+          "group_key": "[\"主体001-长名称用于验证截断与重名哈希保存全部语义\",\"USD\",\"system_op\",1,\"918fa27358a72d301a8ca1df04be64cbb0a07a07875b5961fd2360e3457cca1c\"]",
+          "name": "主体001-长名称用于验证截断与重名哈希保存全部-baed70",
+          "part": 1,
+          "start_ordinal": 1,
+          "row_count": 1,
+          "identity_digest": "e310848014295feb3a3f5cd1f42d5c468d0284d78690fb3d1241e729dc548119",
+          "descriptor": "{\"subject\":\"主体001-长名称用于验证截断与重名哈希保存全部语义\",\"currency\":\"USD\",\"sourceType\":\"system_op\",\"rawContractVersion\":1,\"headers\":[\"账单日期\",\"主体\",\"业务部门\",\"币种\",\"OP发生额\",\"发生额（入）\",\"发生额（出）\",\"本期移除Pending金额\",\"调账金额\",\"OP期末余额\",\"pending余额\",\"费用项\",\"财务余额\",\"主体变动发生额\",\"财务主体余额\",\"创建时间\"],\"headerFingerprint\":\"918fa27358a72d301a8ca1df04be64cbb0a07a07875b5961fd2360e3457cca1c\",\"fullLogicalName\":\"主体001-长名称用于验证截断与重名哈希保存全部语义-USD-系统财务OP\"}"
+        },
+        {
+          "id": 10,
+          "group_key": "[\"主体002-长名称用于验证截断与重名哈希保存全部语义\",\"AUD\",\"system_op\",1,\"918fa27358a72d301a8ca1df04be64cbb0a07a07875b5961fd2360e3457cca1c\"]",
+          "name": "主体002-长名称用于验证截断与重名哈希保存全部-1fbf58",
+          "part": 1,
+          "start_ordinal": 1,
+          "row_count": 1,
+          "identity_digest": "df277d3e40a6727041f7ed61d88edfc45b38616f059e2dadfd8a3ef8dea9a386",
+          "descriptor": "{\"subject\":\"主体002-长名称用于验证截断与重名哈希保存全部语义\",\"currency\":\"AUD\",\"sourceType\":\"system_op\",\"rawContractVersion\":1,\"headers\":[\"账单日期\",\"主体\",\"业务部门\",\"币种\",\"OP发生额\",\"发生额（入）\",\"发生额（出）\",\"本期移除Pending金额\",\"调账金额\",\"OP期末余额\",\"pending余额\",\"费用项\",\"财务余额\",\"主体变动发生额\",\"财务主体余额\",\"创建时间\"],\"headerFingerprint\":\"918fa27358a72d301a8ca1df04be64cbb0a07a07875b5961fd2360e3457cca1c\",\"fullLogicalName\":\"主体002-长名称用于验证截断与重名哈希保存全部语义-AUD-系统财务OP\"}"
+        },
+        {
+          "id": 11,
+          "group_key": "[\"主体002-长名称用于验证截断与重名哈希保存全部语义\",\"CAD\",\"system_op\",1,\"918fa27358a72d301a8ca1df04be64cbb0a07a07875b5961fd2360e3457cca1c\"]",
+          "name": "主体002-长名称用于验证截断与重名哈希保存全部-cf3847",
+          "part": 1,
+          "start_ordinal": 1,
+          "row_count": 1,
+          "identity_digest": "8c58e492e30bab9a1f8753f1acc26dcd86ea6ac7c85290e4511e94f09cd882b1",
+          "descriptor": "{\"subject\":\"主体002-长名称用于验证截断与重名哈希保存全部语义\",\"currency\":\"CAD\",\"sourceType\":\"system_op\",\"rawContractVersion\":1,\"headers\":[\"账单日期\",\"主体\",\"业务部门\",\"币种\",\"OP发生额\",\"发生额（入）\",\"发生额（出）\",\"本期移除Pending金额\",\"调账金额\",\"OP期末余额\",\"pending余额\",\"费用项\",\"财务余额\",\"主体变动发生额\",\"财务主体余额\",\"创建时间\"],\"headerFingerprint\":\"918fa27358a72d301a8ca1df04be64cbb0a07a07875b5961fd2360e3457cca1c\",\"fullLogicalName\":\"主体002-长名称用于验证截断与重名哈希保存全部语义-CAD-系统财务OP\"}"
+        },
+        {
+          "id": 12,
+          "group_key": "[\"主体002-长名称用于验证截断与重名哈希保存全部语义\",\"EUR\",\"channel\",1,\"8e57a249e44ee6e56925e2496afac72ff6ff3a9452e38ce910d4136630f35df8\"]",
+          "name": "主体002-长名称用于验证截断与重名哈希保存全部-a96c4f",
+          "part": 1,
+          "start_ordinal": 1,
+          "row_count": 1,
+          "identity_digest": "b363cc97b94e5771a7c2bb1e740f65c6691a612ce40624bb3bacc041be5ef828",
+          "descriptor": "{\"subject\":\"主体002-长名称用于验证截断与重名哈希保存全部语义\",\"currency\":\"EUR\",\"sourceType\":\"channel\",\"rawContractVersion\":1,\"headers\":[\"账单日期\",\"部门\",\"通道名称\",\"MID\",\"类型\",\"批次号\",\"结算批次号\",\"主对账id\",\"渠道订单号\",\"交易类型\",\"交易汇总金额\",\"交易金额\",\"交易币种\",\"清算金额\",\"清算手续费\",\"清算币种\",\"清算净金额\",\"汇率\",\"客户姓名\",\"客户卡号\",\"对账单解析时间\",\"交易完成时间\",\"原始对账ID\",\"备注\",\"数据来源\",\"是否参与本地对账\",\"系统创建时间\",\"系统更新时间\",\"防重号\",\"借贷方向\",\"客户编号\",\"场景\",\"账户编号\",\"billdate\",\"结算币种\",\"实际到账金额\",\"结算金额\",\"渠道手续费\"],\"headerFingerprint\":\"8e57a249e44ee6e56925e2496afac72ff6ff3a9452e38ce910d4136630f35df8\",\"fullLogicalName\":\"主体002-长名称用于验证截断与重名哈希保存全部语义-EUR-VCC通道明细\"}"
+        },
+        {
+          "id": 13,
+          "group_key": "[\"主体002-长名称用于验证截断与重名哈希保存全部语义\",\"EUR\",\"pending_archive_removal\",2,\"3a67e7e16c19a7ba79afd510aa75cdb3c4b3d5e545da407b6ff5fafdd0d9e9cf\"]",
+          "name": "主体002-长名称用于验证截断与重名哈希保存全部-ece6fd",
+          "part": 1,
+          "start_ordinal": 1,
+          "row_count": 4,
+          "identity_digest": "2dbbeb66708f421decbf8067f7f1d34d53a14b444b666437777186bc8b2d8ec2",
+          "descriptor": "{\"subject\":\"主体002-长名称用于验证截断与重名哈希保存全部语义\",\"currency\":\"EUR\",\"sourceType\":\"pending_archive_removal\",\"rawContractVersion\":2,\"headers\":[\"pending类型\",\"pending资金类型\",\"账单类型\",\"billDate\",\"valueDate\",\"平账账期\",\"业务BU\",\"对手业务BU\",\"财务BU\",\"主体\",\"对账类型\",\"recon_id\",\"金额\",\"币种\",\"order_no\",\"acc_id\",\"finish_time\",\"穿透ID\",\"channel\",\"merchant_id\",\"bank_ref\",\"对账明细ID\",\"对账单ID\",\"PendingBizId\",\"备注\",\"计算金额\",\"计算币种\",\"是否拆分Pending\",\"流水_账单日期\",\"流水_公司主体\",\"流水_流水类型\",\"流水_业务部门\",\"流水_主对账ID\",\"流水_出入方向\",\"流水_流水单号\",\"流水_用户编号\",\"流水_账户编号\",\"流水_币种\",\"流水_对账金额\",\"流水_账户类型\",\"授信金额\",\"非授信金额\",\"维护人\",\"维护人BU\",\"客户所在地\",\"是否已流水替换\"],\"headerFingerprint\":\"3a67e7e16c19a7ba79afd510aa75cdb3c4b3d5e545da407b6ff5fafdd0d9e9cf\",\"fullLogicalName\":\"主体002-长名称用于验证截断与重名哈希保存全部语义-EUR-VCC_移除归档Pending账单\"}"
+        },
+        {
+          "id": 14,
+          "group_key": "[\"主体002-长名称用于验证截断与重名哈希保存全部语义\",\"EUR\",\"system_op\",1,\"918fa27358a72d301a8ca1df04be64cbb0a07a07875b5961fd2360e3457cca1c\"]",
+          "name": "主体002-长名称用于验证截断与重名哈希保存全部-e2ea72",
+          "part": 1,
+          "start_ordinal": 1,
+          "row_count": 1,
+          "identity_digest": "9eb32263f3070871d4c4e9d93624fa2052e98468ddf2867bfcbff8b6e52ae477",
+          "descriptor": "{\"subject\":\"主体002-长名称用于验证截断与重名哈希保存全部语义\",\"currency\":\"EUR\",\"sourceType\":\"system_op\",\"rawContractVersion\":1,\"headers\":[\"账单日期\",\"主体\",\"业务部门\",\"币种\",\"OP发生额\",\"发生额（入）\",\"发生额（出）\",\"本期移除Pending金额\",\"调账金额\",\"OP期末余额\",\"pending余额\",\"费用项\",\"财务余额\",\"主体变动发生额\",\"财务主体余额\",\"创建时间\"],\"headerFingerprint\":\"918fa27358a72d301a8ca1df04be64cbb0a07a07875b5961fd2360e3457cca1c\",\"fullLogicalName\":\"主体002-长名称用于验证截断与重名哈希保存全部语义-EUR-系统财务OP\"}"
+        },
+        {
+          "id": 15,
+          "group_key": "[\"主体002-长名称用于验证截断与重名哈希保存全部语义\",\"USD\",\"recharge_refund\",1,\"8380586bc957e5f370033dc2029952ccbe0ef9e4476f64538a5edbb0a9d698de\"]",
+          "name": "主体002-长名称用于验证截断与重名哈希保存全部-421d3c",
+          "part": 1,
+          "start_ordinal": 1,
+          "row_count": 6,
+          "identity_digest": "90a34c150f6bb44b68ebfa9c9fa45615c1355e3b6933531d48d8569de1405eb1",
+          "descriptor": "{\"subject\":\"主体002-长名称用于验证截断与重名哈希保存全部语义\",\"currency\":\"USD\",\"sourceType\":\"recharge_refund\",\"rawContractVersion\":1,\"headers\":[\"穿透节点ID\",\"对账单ID\",\"BillDate\",\"业务部门\",\"对手部门\",\"订单号\",\"流水对账id\",\"单据对账id\",\"单据类型\",\"客户编号\",\"场景\",\"账户号\",\"大账号\",\"业务子类型\",\"出入方向\",\"平台\",\"公司主体\",\"我方币种\",\"我方金额\",\"授信金额\",\"非授信金额\",\"账户类型\",\"账户借贷记标识\",\"手续费\",\"extrafee\",\"fee\",\"fee1\",\"finalFee\",\"flowMoreFee\",\"fullRcvFee\",\"pobofee\",\"servicefee\",\"splitExtraFeeAmount\",\"splitFlowMoreFeeAmount\",\"splitFullRcvFeeAmount\",\"splitPoboFeeAmount\",\"splitServiceFeeAmount\",\"splitWithdrawFee\",\"优惠券\",\"bonus\",\"我方到账金额\",\"对方币种\",\"对方金额\",\"汇率\",\"createTime\",\"finishTime\",\"备注\",\"销账类型\",\"销账说明\"],\"headerFingerprint\":\"8380586bc957e5f370033dc2029952ccbe0ef9e4476f64538a5edbb0a9d698de\",\"fullLogicalName\":\"主体002-长名称用于验证截断与重名哈希保存全部语义-USD-VCC充值清退明细\"}"
+        },
+        {
+          "id": 16,
+          "group_key": "[\"主体002-长名称用于验证截断与重名哈希保存全部语义\",\"USD\",\"fee_fx\",1,\"c843cfb1e57587e75f617de6234276f4e672989c942c86590e075456d8d8d93d\"]",
+          "name": "主体002-长名称用于验证截断与重名哈希保存全部-b41b9e",
+          "part": 1,
+          "start_ordinal": 1,
+          "row_count": 1,
+          "identity_digest": "6daa2b75c4136a49dc47e1bc51448cbf60aacd6e1b0263fa0bf689cc484eb67c",
+          "descriptor": "{\"subject\":\"主体002-长名称用于验证截断与重名哈希保存全部语义\",\"currency\":\"USD\",\"sourceType\":\"fee_fx\",\"rawContractVersion\":1,\"headers\":[\"穿透节点ID\",\"对账单ID\",\"BillDate\",\"业务部门\",\"对手部门\",\"订单号\",\"流水对账id\",\"单据对账id\",\"单据类型\",\"客户编号\",\"场景\",\"账户号\",\"大账号\",\"业务子类型\",\"出入方向\",\"平台\",\"公司主体\",\"我方币种\",\"我方金额\",\"手续费\",\"优惠券\",\"bonus\",\"我方到账金额\",\"授信金额\",\"非授信金额\",\"账户类型\",\"账户借贷记标识\",\"对方币种\",\"对方金额\",\"汇率\",\"createTime\",\"finishTime\",\"fee\",\"备注\",\"销账类型\",\"销账说明\"],\"headerFingerprint\":\"c843cfb1e57587e75f617de6234276f4e672989c942c86590e075456d8d8d93d\",\"fullLogicalName\":\"主体002-长名称用于验证截断与重名哈希保存全部语义-USD-VCC费用及换汇明细\"}"
+        },
+        {
+          "id": 17,
+          "group_key": "[\"主体002-长名称用于验证截断与重名哈希保存全部语义\",\"USD\",\"pending_archive_removal\",2,\"3a67e7e16c19a7ba79afd510aa75cdb3c4b3d5e545da407b6ff5fafdd0d9e9cf\"]",
+          "name": "主体002-长名称用于验证截断与重名哈希保存全部-8f6ace",
+          "part": 1,
+          "start_ordinal": 1,
+          "row_count": 4,
+          "identity_digest": "b9ced5d63a7dc2f37344061e44aee22897c7e9cf58a4102b5a876bbd59f1bd32",
+          "descriptor": "{\"subject\":\"主体002-长名称用于验证截断与重名哈希保存全部语义\",\"currency\":\"USD\",\"sourceType\":\"pending_archive_removal\",\"rawContractVersion\":2,\"headers\":[\"pending类型\",\"pending资金类型\",\"账单类型\",\"billDate\",\"valueDate\",\"平账账期\",\"业务BU\",\"对手业务BU\",\"财务BU\",\"主体\",\"对账类型\",\"recon_id\",\"金额\",\"币种\",\"order_no\",\"acc_id\",\"finish_time\",\"穿透ID\",\"channel\",\"merchant_id\",\"bank_ref\",\"对账明细ID\",\"对账单ID\",\"PendingBizId\",\"备注\",\"计算金额\",\"计算币种\",\"是否拆分Pending\",\"流水_账单日期\",\"流水_公司主体\",\"流水_流水类型\",\"流水_业务部门\",\"流水_主对账ID\",\"流水_出入方向\",\"流水_流水单号\",\"流水_用户编号\",\"流水_账户编号\",\"流水_币种\",\"流水_对账金额\",\"流水_账户类型\",\"授信金额\",\"非授信金额\",\"维护人\",\"维护人BU\",\"客户所在地\",\"是否已流水替换\"],\"headerFingerprint\":\"3a67e7e16c19a7ba79afd510aa75cdb3c4b3d5e545da407b6ff5fafdd0d9e9cf\",\"fullLogicalName\":\"主体002-长名称用于验证截断与重名哈希保存全部语义-USD-VCC_移除归档Pending账单\"}"
+        },
+        {
+          "id": 18,
+          "group_key": "[\"主体002-长名称用于验证截断与重名哈希保存全部语义\",\"USD\",\"system_op\",1,\"918fa27358a72d301a8ca1df04be64cbb0a07a07875b5961fd2360e3457cca1c\"]",
+          "name": "主体002-长名称用于验证截断与重名哈希保存全部-57e834",
+          "part": 1,
+          "start_ordinal": 1,
+          "row_count": 1,
+          "identity_digest": "980cba7ea9dedae69d6709110e26081dcb07818feccb86859bc13a4a8bdc3cee",
+          "descriptor": "{\"subject\":\"主体002-长名称用于验证截断与重名哈希保存全部语义\",\"currency\":\"USD\",\"sourceType\":\"system_op\",\"rawContractVersion\":1,\"headers\":[\"账单日期\",\"主体\",\"业务部门\",\"币种\",\"OP发生额\",\"发生额（入）\",\"发生额（出）\",\"本期移除Pending金额\",\"调账金额\",\"OP期末余额\",\"pending余额\",\"费用项\",\"财务余额\",\"主体变动发生额\",\"财务主体余额\",\"创建时间\"],\"headerFingerprint\":\"918fa27358a72d301a8ca1df04be64cbb0a07a07875b5961fd2360e3457cca1c\",\"fullLogicalName\":\"主体002-长名称用于验证截断与重名哈希保存全部语义-USD-系统财务OP\"}"
+        }
+      ],
+      "projection": [
+        {
+          "kind": "title",
+          "rowNumber": 1
+        },
+        {
+          "kind": "header",
+          "rowNumber": 2
+        },
+        {
+          "kind": "detail",
+          "rowNumber": 3
+        },
+        {
+          "kind": "adjustment",
+          "rowNumber": 4
+        },
+        {
+          "kind": "adjustment",
+          "rowNumber": 5
+        },
+        {
+          "kind": "detail",
+          "rowNumber": 6
+        },
+        {
+          "kind": "detail",
+          "rowNumber": 7
+        },
+        {
+          "kind": "detail",
+          "rowNumber": 8
+        },
+        {
+          "kind": "detail",
+          "rowNumber": 9
+        },
+        {
+          "kind": "detail",
+          "rowNumber": 10
+        },
+        {
+          "kind": "detail",
+          "rowNumber": 11
+        },
+        {
+          "kind": "detail",
+          "rowNumber": 12
+        },
+        {
+          "kind": "detail",
+          "rowNumber": 13
+        },
+        {
+          "kind": "summary",
+          "rowNumber": 14
+        },
+        {
+          "kind": "summary",
+          "rowNumber": 15
+        },
+        {
+          "kind": "summary",
+          "rowNumber": 16
+        },
+        {
+          "kind": "summary",
+          "rowNumber": 17
+        },
+        {
+          "kind": "spacer",
+          "rowNumber": 18
+        },
+        {
+          "kind": "title",
+          "rowNumber": 19
+        },
+        {
+          "kind": "header",
+          "rowNumber": 20
+        },
+        {
+          "kind": "detail",
+          "rowNumber": 21
+        },
+        {
+          "kind": "adjustment",
+          "rowNumber": 22
+        },
+        {
+          "kind": "adjustment",
+          "rowNumber": 23
+        },
+        {
+          "kind": "detail",
+          "rowNumber": 24
+        },
+        {
+          "kind": "detail",
+          "rowNumber": 25
+        },
+        {
+          "kind": "detail",
+          "rowNumber": 26
+        },
+        {
+          "kind": "detail",
+          "rowNumber": 27
+        },
+        {
+          "kind": "detail",
+          "rowNumber": 28
+        },
+        {
+          "kind": "detail",
+          "rowNumber": 29
+        },
+        {
+          "kind": "detail",
+          "rowNumber": 30
+        },
+        {
+          "kind": "detail",
+          "rowNumber": 31
+        },
+        {
+          "kind": "summary",
+          "rowNumber": 32
+        },
+        {
+          "kind": "summary",
+          "rowNumber": 33
+        },
+        {
+          "kind": "summary",
+          "rowNumber": 34
+        },
+        {
+          "kind": "summary",
+          "rowNumber": 35
+        }
+      ]
+    },
+    {
+      "type": "performance-probe",
+      "kind": "stage-result",
+      "at": 1789752362694,
+      "threadId": 1,
+      "phase": "prepare",
+      "result": {
+        "provenance": {
+          "schemaVersion": 1,
+          "runId": 2,
+          "resultRevision": 4,
+          "inputFingerprint": "1276d39a851f8de88f5659d949f543202a12ad555297bda283da0d2e0faa0b30",
+          "exportedAt": "2026-09-18T17:26:02.685Z",
+          "appVersion": "3.2.9"
+        },
+        "subjectCount": 2,
+        "knownInputPaths": [
+          "/private/tmp/v329-release-20260919-3_bafjvz/vcc-performance-final-smoke/smoke/多工作表性能合成样本.xlsx"
+        ]
+      }
+    },
+    {
+      "type": "performance-probe",
+      "kind": "stage-end",
+      "at": 1789752362694,
+      "threadId": 1,
+      "phase": "prepare"
+    },
+    {
+      "type": "performance-probe",
+      "kind": "sample",
+      "at": 1789752362694,
+      "threadId": 1,
+      "phase": "prepare",
+      "memory": {
+        "rss": 204275712,
+        "heapTotal": 38928384,
+        "heapUsed": 26115240,
+        "external": 5176193,
+        "arrayBuffers": 3064750
+      },
+      "pid": 31487,
+      "rows": 0,
+      "readRows": 0,
+      "queues": {
+        "sheet": 0,
+        "zip": 0,
+        "zipEngine": 0,
+        "output": 0,
+        "total": 0
+      }
+    },
+    {
+      "type": "performance-probe",
+      "kind": "summary",
+      "at": 1789752362694,
+      "threadId": 1,
+      "phase": "prepare",
+      "stages": [
+        {
+          "stage": "prepare",
+          "started": 1789752362678,
+          "finished": 1789752362694
+        }
+      ],
+      "sst": [],
+      "scans": [],
+      "rows": 0,
+      "readRows": 0,
+      "queuePeak": 0,
+      "elapsedMs": 120
+    },
+    {
+      "kind": "worker-exit",
+      "at": 1789752362696,
+      "code": 0
+    },
+    {
+      "type": "performance-probe",
+      "kind": "sample",
+      "at": 1789752362719,
+      "threadId": 2,
+      "phase": "starting",
+      "memory": {
+        "rss": 194494464,
+        "heapTotal": 5406720,
+        "heapUsed": 2620348,
+        "external": 1807255,
+        "arrayBuffers": 10379
+      },
+      "pid": 31487,
+      "rows": 0,
+      "readRows": 0,
+      "queues": {
+        "sheet": 0,
+        "zip": 0,
+        "zipEngine": 0,
+        "output": 0,
+        "total": 0
+      }
+    },
+    {
+      "type": "performance-probe",
+      "kind": "stage-start",
+      "at": 1789752362823,
+      "threadId": 2,
+      "phase": "extract"
+    },
+    {
+      "type": "performance-probe",
+      "kind": "stage-result",
+      "at": 1789752362860,
+      "threadId": 2,
+      "phase": "extract",
+      "result": {
+        "scannedFiles": 1,
+        "extracted": 42
+      }
+    },
+    {
+      "type": "performance-probe",
+      "kind": "stage-end",
+      "at": 1789752362860,
+      "threadId": 2,
+      "phase": "extract"
+    },
+    {
+      "type": "performance-probe",
+      "kind": "stage-start",
+      "at": 1789752362860,
+      "threadId": 2,
+      "phase": "write"
+    },
+    {
+      "type": "performance-probe",
+      "kind": "stage-result",
+      "at": 1789752362916,
+      "threadId": 2,
+      "phase": "write",
+      "result": {
+        "subjectCount": 2,
+        "sheetCount": 19,
+        "sourceRowCount": 40,
+        "resultRevision": 4,
+        "peakBufferedBytes": 179342,
+        "drainWaits": 0,
+        "rowCount": 93
+      }
+    },
+    {
+      "type": "performance-probe",
+      "kind": "stage-end",
+      "at": 1789752362916,
+      "threadId": 2,
+      "phase": "write"
+    },
+    {
+      "type": "performance-probe",
+      "kind": "stage-start",
+      "at": 1789752362916,
+      "threadId": 2,
+      "phase": "readback"
+    },
+    {
+      "type": "performance-probe",
+      "kind": "stage-result",
+      "at": 1789752362968,
+      "threadId": 2,
+      "phase": "readback",
+      "result": {
+        "sha256": "e68398f47b097771bfefbb13dcee3e32643608f893c62e633fded6d51f2fb8d2",
+        "byteSize": 71068,
+        "fileIdentity": {
+          "version": 2,
+          "dev": "16777232",
+          "ino": "112505622",
+          "size": "71068",
+          "mtimeNs": "1789752362915935380",
+          "ctimeNs": "1789752362915935380"
+        },
+        "sourceRowCount": 40,
+        "sheetCount": 19,
+        "subjectCount": 2,
+        "resultRevision": 4
+      }
+    },
+    {
+      "type": "performance-probe",
+      "kind": "stage-end",
+      "at": 1789752362968,
+      "threadId": 2,
+      "phase": "readback"
+    },
+    {
+      "type": "performance-probe",
+      "kind": "sample",
+      "at": 1789752362968,
+      "threadId": 2,
+      "phase": "readback",
+      "memory": {
+        "rss": 235847680,
+        "heapTotal": 61128704,
+        "heapUsed": 32387940,
+        "external": 8228108,
+        "arrayBuffers": 6114005
+      },
+      "pid": 31487,
+      "rows": 93,
+      "readRows": 140,
+      "queues": {
+        "sheet": 0,
+        "zip": 0,
+        "zipEngine": 0,
+        "output": 0,
+        "total": 0
+      }
+    },
+    {
+      "type": "performance-probe",
+      "kind": "summary",
+      "at": 1789752362968,
+      "threadId": 2,
+      "phase": "readback",
+      "stages": [
+        {
+          "stage": "extract",
+          "started": 1789752362823,
+          "finished": 1789752362860
+        },
+        {
+          "stage": "write",
+          "started": 1789752362860,
+          "finished": 1789752362916
+        },
+        {
+          "stage": "readback",
+          "started": 1789752362916,
+          "finished": 1789752362968
+        }
+      ],
+      "sst": [
+        {
+          "file": "/private/tmp/v329-release-20260919-3_bafjvz/vcc-performance-final-smoke/smoke/archive/blobs/513a214095687570134dab5109f27a6e281f1427cde0f8c1f5995c4d4aca16ba",
+          "mode": "memory",
+          "count": 0,
+          "peakMemoryBytes": null,
+          "peakCacheBytes": null
+        },
+        {
+          "file": "/private/tmp/v329-release-20260919-3_bafjvz/vcc-performance-final-smoke/smoke/.vcc-review-a339c5f4-4135-4409-8cfa-4816f339dfd1.xlsx",
+          "mode": "memory",
+          "count": 0,
+          "peakMemoryBytes": null,
+          "peakCacheBytes": null
+        }
+      ],
+      "scans": [
+        {
+          "file": "/private/tmp/v329-release-20260919-3_bafjvz/vcc-performance-final-smoke/smoke/archive/blobs/513a214095687570134dab5109f27a6e281f1427cde0f8c1f5995c4d4aca16ba",
+          "sheetIndex": 0,
+          "rows": 13
+        },
+        {
+          "file": "/private/tmp/v329-release-20260919-3_bafjvz/vcc-performance-final-smoke/smoke/archive/blobs/513a214095687570134dab5109f27a6e281f1427cde0f8c1f5995c4d4aca16ba",
+          "sheetIndex": 1,
+          "rows": 3
+        },
+        {
+          "file": "/private/tmp/v329-release-20260919-3_bafjvz/vcc-performance-final-smoke/smoke/archive/blobs/513a214095687570134dab5109f27a6e281f1427cde0f8c1f5995c4d4aca16ba",
+          "sheetIndex": 2,
+          "rows": 2
+        },
+        {
+          "file": "/private/tmp/v329-release-20260919-3_bafjvz/vcc-performance-final-smoke/smoke/archive/blobs/513a214095687570134dab5109f27a6e281f1427cde0f8c1f5995c4d4aca16ba",
+          "sheetIndex": 3,
+          "rows": 2
+        },
+        {
+          "file": "/private/tmp/v329-release-20260919-3_bafjvz/vcc-performance-final-smoke/smoke/archive/blobs/513a214095687570134dab5109f27a6e281f1427cde0f8c1f5995c4d4aca16ba",
+          "sheetIndex": 4,
+          "rows": 9
+        },
+        {
+          "file": "/private/tmp/v329-release-20260919-3_bafjvz/vcc-performance-final-smoke/smoke/archive/blobs/513a214095687570134dab5109f27a6e281f1427cde0f8c1f5995c4d4aca16ba",
+          "sheetIndex": 5,
+          "rows": 19
+        },
+        {
+          "file": "/private/tmp/v329-release-20260919-3_bafjvz/vcc-performance-final-smoke/smoke/.vcc-review-a339c5f4-4135-4409-8cfa-4816f339dfd1.xlsx",
+          "sheetIndex": 0,
+          "rows": 34
+        },
+        {
+          "file": "/private/tmp/v329-release-20260919-3_bafjvz/vcc-performance-final-smoke/smoke/.vcc-review-a339c5f4-4135-4409-8cfa-4816f339dfd1.xlsx",
+          "sheetIndex": 1,
+          "rows": 2
+        },
+        {
+          "file": "/private/tmp/v329-release-20260919-3_bafjvz/vcc-performance-final-smoke/smoke/.vcc-review-a339c5f4-4135-4409-8cfa-4816f339dfd1.xlsx",
+          "sheetIndex": 2,
+          "rows": 2
+        },
+        {
+          "file": "/private/tmp/v329-release-20260919-3_bafjvz/vcc-performance-final-smoke/smoke/.vcc-review-a339c5f4-4135-4409-8cfa-4816f339dfd1.xlsx",
+          "sheetIndex": 3,
+          "rows": 2
+        },
+        {
+          "file": "/private/tmp/v329-release-20260919-3_bafjvz/vcc-performance-final-smoke/smoke/.vcc-review-a339c5f4-4135-4409-8cfa-4816f339dfd1.xlsx",
+          "sheetIndex": 4,
+          "rows": 5
+        },
+        {
+          "file": "/private/tmp/v329-release-20260919-3_bafjvz/vcc-performance-final-smoke/smoke/.vcc-review-a339c5f4-4135-4409-8cfa-4816f339dfd1.xlsx",
+          "sheetIndex": 5,
+          "rows": 2
+        },
+        {
+          "file": "/private/tmp/v329-release-20260919-3_bafjvz/vcc-performance-final-smoke/smoke/.vcc-review-a339c5f4-4135-4409-8cfa-4816f339dfd1.xlsx",
+          "sheetIndex": 6,
+          "rows": 7
+        },
+        {
+          "file": "/private/tmp/v329-release-20260919-3_bafjvz/vcc-performance-final-smoke/smoke/.vcc-review-a339c5f4-4135-4409-8cfa-4816f339dfd1.xlsx",
+          "sheetIndex": 7,
+          "rows": 2
+        },
+        {
+          "file": "/private/tmp/v329-release-20260919-3_bafjvz/vcc-performance-final-smoke/smoke/.vcc-review-a339c5f4-4135-4409-8cfa-4816f339dfd1.xlsx",
+          "sheetIndex": 8,
+          "rows": 5
+        },
+        {
+          "file": "/private/tmp/v329-release-20260919-3_bafjvz/vcc-performance-final-smoke/smoke/.vcc-review-a339c5f4-4135-4409-8cfa-4816f339dfd1.xlsx",
+          "sheetIndex": 9,
+          "rows": 2
+        },
+        {
+          "file": "/private/tmp/v329-release-20260919-3_bafjvz/vcc-performance-final-smoke/smoke/.vcc-review-a339c5f4-4135-4409-8cfa-4816f339dfd1.xlsx",
+          "sheetIndex": 10,
+          "rows": 2
+        },
+        {
+          "file": "/private/tmp/v329-release-20260919-3_bafjvz/vcc-performance-final-smoke/smoke/.vcc-review-a339c5f4-4135-4409-8cfa-4816f339dfd1.xlsx",
+          "sheetIndex": 11,
+          "rows": 2
+        },
+        {
+          "file": "/private/tmp/v329-release-20260919-3_bafjvz/vcc-performance-final-smoke/smoke/.vcc-review-a339c5f4-4135-4409-8cfa-4816f339dfd1.xlsx",
+          "sheetIndex": 12,
+          "rows": 2
+        },
+        {
+          "file": "/private/tmp/v329-release-20260919-3_bafjvz/vcc-performance-final-smoke/smoke/.vcc-review-a339c5f4-4135-4409-8cfa-4816f339dfd1.xlsx",
+          "sheetIndex": 13,
+          "rows": 5
+        },
+        {
+          "file": "/private/tmp/v329-release-20260919-3_bafjvz/vcc-performance-final-smoke/smoke/.vcc-review-a339c5f4-4135-4409-8cfa-4816f339dfd1.xlsx",
+          "sheetIndex": 14,
+          "rows": 2
+        },
+        {
+          "file": "/private/tmp/v329-release-20260919-3_bafjvz/vcc-performance-final-smoke/smoke/.vcc-review-a339c5f4-4135-4409-8cfa-4816f339dfd1.xlsx",
+          "sheetIndex": 15,
+          "rows": 7
+        },
+        {
+          "file": "/private/tmp/v329-release-20260919-3_bafjvz/vcc-performance-final-smoke/smoke/.vcc-review-a339c5f4-4135-4409-8cfa-4816f339dfd1.xlsx",
+          "sheetIndex": 16,
+          "rows": 2
+        },
+        {
+          "file": "/private/tmp/v329-release-20260919-3_bafjvz/vcc-performance-final-smoke/smoke/.vcc-review-a339c5f4-4135-4409-8cfa-4816f339dfd1.xlsx",
+          "sheetIndex": 17,
+          "rows": 5
+        },
+        {
+          "file": "/private/tmp/v329-release-20260919-3_bafjvz/vcc-performance-final-smoke/smoke/.vcc-review-a339c5f4-4135-4409-8cfa-4816f339dfd1.xlsx",
+          "sheetIndex": 18,
+          "rows": 2
+        }
+      ],
+      "rows": 93,
+      "readRows": 140,
+      "queuePeak": 179659,
+      "elapsedMs": 249
+    },
+    {
+      "kind": "worker-exit",
+      "at": 1789752362970,
+      "code": 0
+    }
+  ],
+  "progress": [
+    {
+      "at": 1789752362550,
+      "phase": "preparing-result",
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362694,
+      "phase": "preparing-result",
+      "rows": 24,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362696,
+      "phase": "extracting-sources",
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362854,
+      "phase": "extracting-sources",
+      "rows": 42,
+      "scannedFiles": 1,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362860,
+      "phase": "writing",
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362887,
+      "phase": "writing",
+      "sheets": 2,
+      "sourceRowCount": 1,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362887,
+      "phase": "writing",
+      "sheets": 3,
+      "sourceRowCount": 2,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362888,
+      "phase": "writing",
+      "sheets": 4,
+      "sourceRowCount": 3,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362889,
+      "phase": "writing",
+      "sheets": 5,
+      "sourceRowCount": 7,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362889,
+      "phase": "writing",
+      "sheets": 6,
+      "sourceRowCount": 8,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362891,
+      "phase": "writing",
+      "sheets": 7,
+      "sourceRowCount": 14,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362892,
+      "phase": "writing",
+      "sheets": 8,
+      "sourceRowCount": 15,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362892,
+      "phase": "writing",
+      "sheets": 9,
+      "sourceRowCount": 19,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362893,
+      "phase": "writing",
+      "sheets": 10,
+      "sourceRowCount": 20,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362893,
+      "phase": "writing",
+      "sheets": 11,
+      "sourceRowCount": 21,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362893,
+      "phase": "writing",
+      "sheets": 12,
+      "sourceRowCount": 22,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362894,
+      "phase": "writing",
+      "sheets": 13,
+      "sourceRowCount": 23,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362894,
+      "phase": "writing",
+      "sheets": 14,
+      "sourceRowCount": 27,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362894,
+      "phase": "writing",
+      "sheets": 15,
+      "sourceRowCount": 28,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362895,
+      "phase": "writing",
+      "sheets": 16,
+      "sourceRowCount": 34,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362895,
+      "phase": "writing",
+      "sheets": 17,
+      "sourceRowCount": 35,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362896,
+      "phase": "writing",
+      "sheets": 18,
+      "sourceRowCount": 39,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362896,
+      "phase": "writing",
+      "sheets": 19,
+      "sourceRowCount": 40,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362916,
+      "phase": "validating",
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362930,
+      "phase": "validating",
+      "sheets": 2,
+      "sourceRowCount": 1,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362930,
+      "phase": "validating",
+      "sheets": 3,
+      "sourceRowCount": 2,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362931,
+      "phase": "validating",
+      "sheets": 4,
+      "sourceRowCount": 3,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362932,
+      "phase": "validating",
+      "sheets": 5,
+      "sourceRowCount": 7,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362933,
+      "phase": "validating",
+      "sheets": 6,
+      "sourceRowCount": 8,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362935,
+      "phase": "validating",
+      "sheets": 7,
+      "sourceRowCount": 14,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362936,
+      "phase": "validating",
+      "sheets": 8,
+      "sourceRowCount": 15,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362937,
+      "phase": "validating",
+      "sheets": 9,
+      "sourceRowCount": 19,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362938,
+      "phase": "validating",
+      "sheets": 10,
+      "sourceRowCount": 20,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362938,
+      "phase": "validating",
+      "sheets": 11,
+      "sourceRowCount": 21,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362939,
+      "phase": "validating",
+      "sheets": 12,
+      "sourceRowCount": 22,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362939,
+      "phase": "validating",
+      "sheets": 13,
+      "sourceRowCount": 23,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362941,
+      "phase": "validating",
+      "sheets": 14,
+      "sourceRowCount": 27,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362941,
+      "phase": "validating",
+      "sheets": 15,
+      "sourceRowCount": 28,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362943,
+      "phase": "validating",
+      "sheets": 16,
+      "sourceRowCount": 34,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362944,
+      "phase": "validating",
+      "sheets": 17,
+      "sourceRowCount": 35,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362945,
+      "phase": "validating",
+      "sheets": 18,
+      "sourceRowCount": 39,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362946,
+      "phase": "validating",
+      "sheets": 19,
+      "sourceRowCount": 40,
+      "action": "export-review",
+      "cancellable": true
+    },
+    {
+      "at": 1789752362970,
+      "phase": "publishing",
+      "action": "export-review",
+      "cancellable": false
+    }
+  ],
+  "cancellation": {
+    "requestedAt": null,
+    "finishedAt": null,
+    "result": null
+  },
+  "businessDml": "No business/Archive INSERT/UPDATE/DELETE permitted by temporary fixture triggers.",
+  "processPeakRssBytes": 235847680,
+  "processBaselineRssBytes": 165068800,
+  "readback": {
+    "status": "PASS",
+    "pages": [
+      {
+        "name": "主体001-长名称用于验证截断与重名哈希保存全部-aa5884",
+        "sourceType": "system_op",
+        "subject": "主体001-长名称用于验证截断与重名哈希保存全部语义",
+        "currency": "AUD",
+        "part": 1,
+        "rows": 1
+      },
+      {
+        "name": "主体001-长名称用于验证截断与重名哈希保存全部-8f1d03",
+        "sourceType": "system_op",
+        "subject": "主体001-长名称用于验证截断与重名哈希保存全部语义",
+        "currency": "CAD",
+        "part": 1,
+        "rows": 1
+      },
+      {
+        "name": "主体001-长名称用于验证截断与重名哈希保存全部-a57809",
+        "sourceType": "channel",
+        "subject": "主体001-长名称用于验证截断与重名哈希保存全部语义",
+        "currency": "EUR",
+        "part": 1,
+        "rows": 1
+      },
+      {
+        "name": "主体001-长名称用于验证截断与重名哈希保存全部-a9094a",
+        "sourceType": "pending_archive_removal",
+        "subject": "主体001-长名称用于验证截断与重名哈希保存全部语义",
+        "currency": "EUR",
+        "part": 1,
+        "rows": 4
+      },
+      {
+        "name": "主体001-长名称用于验证截断与重名哈希保存全部-a0afdf",
+        "sourceType": "system_op",
+        "subject": "主体001-长名称用于验证截断与重名哈希保存全部语义",
+        "currency": "EUR",
+        "part": 1,
+        "rows": 1
+      },
+      {
+        "name": "主体001-长名称用于验证截断与重名哈希保存全部-5199f0",
+        "sourceType": "recharge_refund",
+        "subject": "主体001-长名称用于验证截断与重名哈希保存全部语义",
+        "currency": "USD",
+        "part": 1,
+        "rows": 6
+      },
+      {
+        "name": "主体001-长名称用于验证截断与重名哈希保存全部-9f1de8",
+        "sourceType": "fee_fx",
+        "subject": "主体001-长名称用于验证截断与重名哈希保存全部语义",
+        "currency": "USD",
+        "part": 1,
+        "rows": 1
+      },
+      {
+        "name": "主体001-长名称用于验证截断与重名哈希保存全部-8735a0",
+        "sourceType": "pending_archive_removal",
+        "subject": "主体001-长名称用于验证截断与重名哈希保存全部语义",
+        "currency": "USD",
+        "part": 1,
+        "rows": 4
+      },
+      {
+        "name": "主体001-长名称用于验证截断与重名哈希保存全部-baed70",
+        "sourceType": "system_op",
+        "subject": "主体001-长名称用于验证截断与重名哈希保存全部语义",
+        "currency": "USD",
+        "part": 1,
+        "rows": 1
+      },
+      {
+        "name": "主体002-长名称用于验证截断与重名哈希保存全部-1fbf58",
+        "sourceType": "system_op",
+        "subject": "主体002-长名称用于验证截断与重名哈希保存全部语义",
+        "currency": "AUD",
+        "part": 1,
+        "rows": 1
+      },
+      {
+        "name": "主体002-长名称用于验证截断与重名哈希保存全部-cf3847",
+        "sourceType": "system_op",
+        "subject": "主体002-长名称用于验证截断与重名哈希保存全部语义",
+        "currency": "CAD",
+        "part": 1,
+        "rows": 1
+      },
+      {
+        "name": "主体002-长名称用于验证截断与重名哈希保存全部-a96c4f",
+        "sourceType": "channel",
+        "subject": "主体002-长名称用于验证截断与重名哈希保存全部语义",
+        "currency": "EUR",
+        "part": 1,
+        "rows": 1
+      },
+      {
+        "name": "主体002-长名称用于验证截断与重名哈希保存全部-ece6fd",
+        "sourceType": "pending_archive_removal",
+        "subject": "主体002-长名称用于验证截断与重名哈希保存全部语义",
+        "currency": "EUR",
+        "part": 1,
+        "rows": 4
+      },
+      {
+        "name": "主体002-长名称用于验证截断与重名哈希保存全部-e2ea72",
+        "sourceType": "system_op",
+        "subject": "主体002-长名称用于验证截断与重名哈希保存全部语义",
+        "currency": "EUR",
+        "part": 1,
+        "rows": 1
+      },
+      {
+        "name": "主体002-长名称用于验证截断与重名哈希保存全部-421d3c",
+        "sourceType": "recharge_refund",
+        "subject": "主体002-长名称用于验证截断与重名哈希保存全部语义",
+        "currency": "USD",
+        "part": 1,
+        "rows": 6
+      },
+      {
+        "name": "主体002-长名称用于验证截断与重名哈希保存全部-b41b9e",
+        "sourceType": "fee_fx",
+        "subject": "主体002-长名称用于验证截断与重名哈希保存全部语义",
+        "currency": "USD",
+        "part": 1,
+        "rows": 1
+      },
+      {
+        "name": "主体002-长名称用于验证截断与重名哈希保存全部-8f6ace",
+        "sourceType": "pending_archive_removal",
+        "subject": "主体002-长名称用于验证截断与重名哈希保存全部语义",
+        "currency": "USD",
+        "part": 1,
+        "rows": 4
+      },
+      {
+        "name": "主体002-长名称用于验证截断与重名哈希保存全部-57e834",
+        "sourceType": "system_op",
+        "subject": "主体002-长名称用于验证截断与重名哈希保存全部语义",
+        "currency": "USD",
+        "part": 1,
+        "rows": 1
+      }
+    ],
+    "sourceRowCount": 40,
+    "manualExcelWps": "NOT_RUN"
+  },
+  "outputBytes": 71068,
+  "extraction": {
+    "scannedFiles": 1,
+    "extracted": 42
+  },
+  "cleanup": "PASS",
+  "childExit": {
+    "code": 0,
+    "signal": null
+  }
+}

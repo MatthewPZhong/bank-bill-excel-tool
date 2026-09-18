@@ -1,4 +1,59 @@
-# v3.2.9 本地集成记录
+# v3.2.9 发布记录
+
+## 当前发布状态（2026-09-19）
+
+已完成六功能集成与代码自审，当前没有确认的未解决 P2 及以上产品缺陷；版本准备提交为 `5001d331bb78bdb82dfaa018ee705b51681bde4f`。完整本地门禁已通过，Windows/人工/规模验收未闭环，尚未发布、合并 main 或打正式标签。下方历史门禁保留原结论，不代表当前候选。
+
+- 任务范围：用户明确要求自审至无 P2 Finding，执行 weekly-release 全流程，最终核实本地/远端 main 均为 3.2.9。授权覆盖所需提交、推送、PR、合并、升版、正式标签及发布；不得把授权写成验收通过。
+- 目标版本/分支：`3.2.9` / `release/v3.2.9`；基线 `v3.2.8` → `2ba9ef14fe972363b604955636cff0c9ac53700f`。
+- 本轮按用户即时发版请求执行；冻结范围截止：2026-09-19T01:11:38+08:00，时区 Asia/Shanghai。Skill 的周一窗口不是自动调度，不新增计划任务。
+- 接手 release：`6bd55efe0eb1d90c16cd92f3a78e54a39a36b966` + 18 项已备份外观/文档改动，随后提交为上述版本准备提交；已有 merge 成果全部复用。
+- 本轮证据目录：`/private/tmp/v329-release-20260919-3_bafjvz/`。自审文档见 [release-review-2026-09-19.md](release-review-2026-09-19.md)。
+
+## 冻结纳入与顺延
+
+| 功能 | 合同 | 源提交 / 合并提交 |
+|---|---|---|
+| 业务 OP 自动错误报告 | [Spec](codex/v3.2.9-biz-op-error-report-auto-save/Spec-v3.2.9-biz-op-error-report-auto-save.md) / [TechDoc](codex/v3.2.9-biz-op-error-report-auto-save/TechDoc-v3.2.9-biz-op-error-report-auto-save.md) | `3efe5c78` / `896fe12d` |
+| 存档模块保留期限 | [Spec](codex/v3.2.9-archive-retention-by-module/spec.md) / [TechDoc](codex/v3.2.9-archive-retention-by-module/techdoc.md) | `a2bd6e81` / `e1c31139` |
+| 定时深色模式 | [Spec](codex/v3.2.9-night-mode/spec.md) / [TechDoc](codex/v3.2.9-night-mode/techdoc.md) | `654ba97a` / `e134cf4e` |
+| 存档永久删除 | [Spec](codex/v3.2.9-archive-center-permanent-delete/spec.md) / [TechDoc](codex/v3.2.9-archive-center-permanent-delete/techdoc.md) | `b78cf3a5` / `d3ebded6` |
+| 工具箱按行拆分 | [Spec](codex/v3.2.9-toolbox-split-by-rows/spec.md) / [TechDoc](codex/v3.2.9-toolbox-split-by-rows/techdoc.md) | `c03eeb4f` / `0b36ecb6` |
+| VCC 多 Sheet 与待确认导出 | [Spec](codex/v3.2.9-vcc-fin-op-multisheet-review-export/v3.2.9_VCC_Spec.md) / [TechDoc](codex/v3.2.9-vcc-fin-op-multisheet-review-export/v3.2.9_VCC_TechDoc.md) | `069e340c` / `6bd55efe` |
+
+另纳入 `codex/repository-organization@fd18667a6fecc6c0384dfbfa08a231cd05439354`（merge `07392111`）及本 release 已有外观修复。六项产品合同共 12 份均位于 `changes/v3.2.9/codex/`。
+
+顺延：`fund-recon-background`、`template-manager`、`toolbox-ui` 的源 ref 仍在基线，未提交实现不属于本版；主目录的账户映射设计稿和 archive-batch-lifecycle 资料保留原处，不混入。本轮没有删除任何开发分支。
+
+## weekly-release 执行清单
+
+- [x] A1/A2/B1/B3：已核实上一正式发布、现有 release、工作区及备份边界，未重建 release。
+- [x] B2：fetch 实际 origin；main 要求 `smoke-test`、`build` 严格检查，禁止强推且 admins 同样受保护。production-release 有指定用户审批，正式标签有创建/不可变规则。
+- [x] B4/B5：核对六源 SHA 均为祖先且实际实现存在；当前 `origin/main` 与基线相同并包含于 release，暂无新增 hotfix。
+- [x] C1/C2：版本和锁文件 3.2.9；同步 CHANGELOG、版本功能历史和使用手册。
+- [x] C3：核心候选 `5001d331` 已提交；后续仅文档和验收脚本修订另行记录，不将未提交内容当已发布。
+- [x] C4 本地自动门禁：完整 release-check exit 0；499 个单测文件，7,861 PASS / 0 FAIL / 3 Windows 专用 SKIP；59 个集成脚本全部通过，2,574/2,574。
+- [ ] A3/C4 平台/C5/C6：代码审查当前无 P2+；平台/人工及 VCC 完整性能门禁仍待闭环。
+- [ ] D1–D4：推送同名 release，建立 release→main PR，核验最终 head 的 Windows 检查/构建及主分支变化。
+- [ ] E1–E5：满足发布条件后进入锁定窗口、合并 PR、核实最终 main 检查、创建并核验附注 `v3.2.9`。目前未宣称仓库已被技术锁定。
+- [ ] F1–F4：标签发布 workflow、正式 Release、setup/portable/blockmap/latest.yml 与 SHA512 全部实测核验。
+- [ ] G1–G3：补齐 PR→最终 main→tag→产物追溯，保留顺延项，并在不覆盖主目录未提交资料的前提下快进本地 main。
+
+## 本轮验收状态
+
+本地完整门禁：Node 24.13.0，`UNIT_TEST_CONCURRENCY=2 npm run release-check`，日志 `release-check.log`，exit 0。lint、smoke、499 个单测文件与 59 个集成脚本通过；单测 7,861 PASS / 0 FAIL / 3 Windows 专用 SKIP，集成 2,574/2,574。原门槛 toolbox RSS 31/31，本次未复现历史失败，不改写历史结果。UI 和独立跨层探针见本轮自审；首次设置脚本旧 API 夹具失败及修复后通过均保留。
+
+门禁在核心候选 `5001d331` 开始，结束后核对 1,521 个固定输入：生产代码、依赖、单测与集成输入全部一致；仅两份独立 GUI 验证脚本变化，已分别实跑通过并重新 lint。另新增 PF runner 三文件，小导出、停写取消及平台拒绝前置核验通过；文档、证据与 runner 自动生成的集成表一并形成后续候选。详见 [evidence-summary.json](self-review-2026-09-19/evidence-summary.json)。
+
+新增 Windows 专项 evidence workflow 由草稿 PR 触发，收集原生时间输入、真实 Main、设置交互、VCC Electron/ASAR 和 PF 证据。collector 的绿色状态只表示证据步骤正常结束；exit 2 仍明确代表存在 NOT_RUN，不能替代完整验收。
+
+VCC Spec AC30/RV12 与 TechDoc §12.4 要求 Windows x64/16 GiB/SSD/Electron 36.9.5 的完整链路、Excel/WPS 和 PF01–PF05；已有组件百万行测试不能替代。真实人工验收记录已向用户询问，尚未收到；在此期间继续自动验证及候选包准备，不记录人为签字。发布前还须完成对应存档和原生系统流程的必要平台验收。逐项操作与证据字段见 [候选包人工验收清单](manual-acceptance-2026-09-19.md)。
+
+## 历史本地集成与验证记录
+
+以下为当时范围、状态和证据，保留失败与独立复跑记录；后续版本状态以上方本轮清单为准。
+
+### 2026-09-12 本地集成记录
 
 - 目标分支：`release/v3.2.9`。
 - 上一正式基线：`v3.2.8` / `2ba9ef14fe972363b604955636cff0c9ac53700f`。
