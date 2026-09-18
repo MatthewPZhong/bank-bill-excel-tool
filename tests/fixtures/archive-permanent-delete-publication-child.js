@@ -1,4 +1,5 @@
 'use strict';
+const { readIdentityStatSync } = require('../../src/main-process/archive-center/filesystem-identity');
 
 // 由存档永久删除集成测试启动；所有输出仅写入父进程传入的隔离临时目录。
 const assert = require('node:assert/strict');
@@ -84,7 +85,7 @@ async function run() {
           artifacts: [{ sourcePath: generationPath, byteSize: Buffer.byteLength(content), sha256 }],
           targets: [outputPath] });
         publishPreparedToolboxPublication(prepared);
-        const stat = fs.statSync(outputPath);
+        const stat = readIdentityStatSync(fs, outputPath, 'statSync');
         fs.writeFileSync(path.join(directory, 'publication-evidence.json'), JSON.stringify({
           taskId: `${mode}-publication`, outputPath, inputPath, sha256,
           size: stat.size, ino: String(stat.ino), mtimeMs: stat.mtimeMs

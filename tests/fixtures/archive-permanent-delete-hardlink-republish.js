@@ -1,4 +1,5 @@
 'use strict';
+const { readIdentityStatSync } = require('../../src/main-process/archive-center/filesystem-identity');
 
 // 历史硬链接残项与同 SHA 新 Blob 的跨层回归；所有材料位于独立临时目录。
 const assert = require('node:assert/strict');
@@ -64,7 +65,7 @@ async function verifyHardlinkRepublishRemainder(parentDirectory, restart = false
     // 仅在删除准入前还原历史 hardlink 格式；之后身份来自真实删除计划与发布流程。
     fs.unlinkSync(originalPath);
     fs.linkSync(canonicalPath, originalPath);
-    const original = fs.statSync(canonicalPath);
+    const original = readIdentityStatSync(fs, canonicalPath, 'statSync');
     db.prepare(`UPDATE archive_artifacts SET storage_mode = 'hardlink',
       storage_fingerprint_size_bytes = ?, storage_fingerprint_mtime_ms = ?,
       storage_fingerprint_ctime_ms = ?, storage_fingerprint_ino = ? WHERE id = ?`)
@@ -81,11 +82,11 @@ async function verifyHardlinkRepublishRemainder(parentDirectory, restart = false
     const plan = service.repository.getCleanupJob(pending.cleanupJobId).plan;
     assert.equal(plan.items.find((item) => item.kind === 'blob').state, 'deleted');
     assert.equal(fs.existsSync(canonicalPath), false);
-    assert.equal(fs.statSync(originalPath).ino, original.ino);
-    assert.equal(fs.statSync(originalPath).nlink, original.nlink - 1);
+    assert.equal(readIdentityStatSync(fs, originalPath, 'statSync').ino, original.ino);
+    assert.equal(readIdentityStatSync(fs, originalPath, 'statSync').nlink, original.nlink - 1);
     state.blockedPath = '';
     const b = await createBatch('replacement-b');
-    const published = fs.statSync(canonicalPath);
+    const published = readIdentityStatSync(fs, canonicalPath, 'statSync');
     assert.notEqual(published.ino, original.ino);
     assert.equal(b.artifact.blob.sha256, a.artifact.blob.sha256);
     assert.equal(b.artifact.blob.fingerprint.ino, String(published.ino));
@@ -99,7 +100,7 @@ async function verifyHardlinkRepublishRemainder(parentDirectory, restart = false
     assert.equal(fs.existsSync(originalPath), false);
     assert.equal(service.repository.getCleanupJob(pending.cleanupJobId), null);
     assert.ok(service.repository.getDeletionReceipt(a.batchContext.batchId));
-    assert.equal(fs.statSync(canonicalPath).ino, published.ino);
+    assert.equal(readIdentityStatSync(fs, canonicalPath, 'statSync').ino, published.ino);
     assert.equal(fs.readFileSync(canonicalPath, 'utf8'), content);
     const read = await service.resolveVerifiedArtifact(b.artifact.id);
     assert.equal(read.ok, true, JSON.stringify(read));

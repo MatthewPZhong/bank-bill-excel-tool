@@ -113,12 +113,24 @@ async function electronCase(configPath) {
       excluded: ['Main import IPC and TaskLifecycle/FilePlan', 'Previous-month archive command', 'Per-adjustment mutation command performance'] },
     sstDictionaryStress: 'NOT_RUN', syntheticTextStorage: 'inline strings; no nonempty shared-string dictionary is generated',
     scope: 'Synthetic real import and calculation; production IPC handler, Service, original Review Worker, writer and validator; instrumentation wrapper only.' };
-  let service, db, timer; const samples = [], events = [], progress = [];
+  let service, db, timer, progressTimer; const samples = [], events = [], progress = [];
+  const progressStartedAt = Date.now();
+  let progressPhase = 'fixture-preparation', lastProgressPhase, lastProgressAt = 0, progressCounters = {};
+  const logProgress = (nextPhase = progressPhase, counters = {}) => {
+    progressPhase = nextPhase;
+    for (const key of ['rows', 'readRows']) if (Number.isSafeInteger(counters[key]) && counters[key] >= 0) progressCounters[key] = counters[key];
+    const now = Date.now();
+    if (progressPhase === lastProgressPhase && now - lastProgressAt < 30000) return;
+    lastProgressAt = now; lastProgressPhase = progressPhase;
+    console.log('[vcc-pf-progress] ' + JSON.stringify({ case: config.name, phase: progressPhase,
+      elapsedMs: now - progressStartedAt, ...progressCounters }));
+  };
   try {
     if (config.mode === 'windows' && environment.status !== 'PASS') {
       report.reason = 'Fixed Windows baseline not satisfied; no large fixture was generated.'; return report;
     }
     const started = Date.now();
+    logProgress('fixture-preparation'); progressTimer = setInterval(() => logProgress(), 30000); progressTimer.unref();
     const fixture = await require('./performance-fixture').createPerformanceFixture(config.directory, config.name, config.buildSha);
     report.fixture = { ...fixture, preparationMs: Date.now() - started, adjustmentSetup: 'Persisted synthetic rows, validated by production getEffectiveRunResult; not adjustment command performance.' };
     const { DatabaseSync } = require('node:sqlite'), { Worker } = require('node:worker_threads');
@@ -134,10 +146,12 @@ async function electronCase(configPath) {
         const worker = new Worker(path.join(__dirname, 'performance-worker.js'), { ...options, workerData: { ...options.workerData,
           productionWorkerPath: filename, performanceProbe: { cancelPhase: config.name.startsWith('cancel-') ? config.name.slice(7) : null,
             bytesPerSecond: ['pf04', 'cancel-drain'].includes(config.name) ? mib : null,
-            pauseMs: config.name === 'cancel-drain' ? 30000 : 5000, cancelOnPause: config.name === 'cancel-drain' } } });
+            pauseMs: config.name === 'cancel-drain' ? 30000 : 5000, cancelOnDrain: config.name === 'cancel-drain' } } });
         worker.on('message', (message) => {
           if (message?.type !== 'performance-probe') return;
           events.push(message); if (message.kind === 'manifest') manifest = message;
+          if (message.kind === 'stage-start') logProgress(message.phase);
+          if (message.kind === 'sample') logProgress(progressPhase, message);
           if (message.kind === 'cancel-point') cancel();
         });
         worker.once('exit', (code) => events.push({ kind: 'worker-exit', at: Date.now(), code })); return worker;
@@ -168,12 +182,15 @@ async function electronCase(configPath) {
       assert.equal(exported.status, 'cancelled', JSON.stringify(exported)); assert.equal(fs.existsSync(target), false);
       assert.ok(cancellation.requestedAt); assert.equal(cancellation.result?.forced, false);
       report.automated = 'PASS'; report.cancellation.stageBoundaryOnly = config.name !== 'cancel-drain';
-      report.cancellation.drainWaitProof = 'NOT_RUN';
-      report.cancellation.interruptionScope = config.name === 'cancel-drain' ? 'Output Writable paused; active SheetStream drain wait not proven' : 'Real phase entry boundary';
-      report.reason = 'Cancellation observed in real stage; phase-boundary probes do not prove all in-stage cursor and UI timings.';
+      report.cancellation.drainWaitProof = config.name === 'cancel-drain' ? assertFlowProof(events, { cancelled: true }) : 'NOT_RUN';
+      report.cancellation.interruptionScope = config.name === 'cancel-drain' ? 'Actual SheetStream drain wait aborted while output remained paused; source cursor and handles closed' : 'Real phase entry boundary';
+      report.reason = config.name === 'cancel-drain'
+        ? 'Real drain cancellation verified; other PF05 phase and native UI acceptance remain separate.'
+        : 'Cancellation observed in real stage; phase-boundary probes do not prove all in-stage cursor and UI timings.';
     } else {
       assert.equal(exported.status, 'success', JSON.stringify(exported)); assert.ok(manifest);
       assert.equal(exported.subjectCount, fixture.spec.subjects);
+      logProgress('independent-readback');
       report.readback = await independentReadback(target, manifest, fixture, config.name);
       assert.equal(report.readback.sourceRowCount, exported.sourceRowCount);
       report.automated = 'PASS'; report.outputBytes = fs.statSync(target).size;
@@ -191,7 +208,8 @@ async function electronCase(configPath) {
         const peak = Math.max(...summaries.map((e) => e.queuePeak));
         assert.ok(peak <= 24 * mib, `Observed queue peak ${peak} exceeds 8 MiB + 16 MiB single-row budget`);
         report.backpressure = { configuredBytesPerSecond: mib, pauseMs: 5000, queuePeakBytes: peak,
-          upstreamStopProof: 'NOT_RUN', reason: 'Samples expose queues and committed rows; explicit source cursor pause/resume proof is not instrumented.' };
+          upstreamStopProof: assertFlowProof(events), reason: 'Actual SQLite pageRows cursor stopped during SheetStream drain and resumed after output/drain; original XLSX extraction had already completed.' };
+        assert.equal(report.backpressure.upstreamStopProof.sourceRows, exported.sourceRowCount);
       }
     }
     assert.deepEqual(fs.readdirSync(path.join(config.directory, 'review-temp')), []);
@@ -201,8 +219,53 @@ async function electronCase(configPath) {
     if (config.name === 'pf03') report.structuralAcceptance = 'PASS';
     return report;
   } catch (error) { report.automated = 'FAIL'; report.error = { message: error.message, code: error.code, stack: error.stack }; return report; }
-  finally { if (timer) clearInterval(timer); await service?.terminate(); db?.close(); json(path.join(config.directory, 'evidence.json'), report); }
+  finally { if (timer) clearInterval(timer); if (progressTimer) clearInterval(progressTimer); await service?.terminate(); db?.close(); json(path.join(config.directory, 'evidence.json'), report); }
 }
+// FLOW_PROOF_START
+function assertFlowProof(events, { cancelled = false } = {}) {
+  const blocked = events.filter((e) => e.kind === 'sheet-drain-blocked' && e.phase === 'write');
+  assert.ok(blocked.length, 'No actual SheetStream drain wait observed during output pause');
+  for (const item of blocked) {
+    assert.ok(['at', 'since', 'sourceRowsStart', 'sourceRowsEnd', 'row'].every((key) => Number.isFinite(item[key])), 'Missing finite drain observations');
+    assert.ok(item.sourceRowsStart > 0 && item.row > 1, 'Observed wait must be on an actual appendix data row');
+    assert.equal(item.sourceRowsStart, item.sourceRowsEnd, 'Source cursor advanced during observed drain wait');
+    assert.equal(item.pendingCommits, 1); assert.equal(item.writableNeedDrain, true); assert.equal(item.outputPaused, true);
+    assert.ok(item.originalDrainListeners > 0); assert.ok(item.at - item.since >= 100, 'Drain wait was not observed across time');
+  }
+  const summaries = events.filter((e) => e.kind === 'summary' && e.flow?.sourceRows > 0);
+  assert.equal(summaries.length, 1, 'Missing write Worker flow summary');
+  const flow = summaries[0].flow;
+  assert.ok(['sourceRows', 'sourceNextCalls', 'sourceCursors', 'pendingCommits', 'maxPendingCommits', 'nextWhileCommitPending', 'cursorReturns'].every((key) => Number.isSafeInteger(flow[key]) && flow[key] >= 0), 'Missing source cursor counters');
+  assert.equal(flow.nextWhileCommitPending, 0); assert.equal(flow.pendingCommits, 0);
+  assert.equal(flow.sourceCursors, 0); assert.equal(flow.maxPendingCommits, 1);
+  const settled = events.filter((e) => e.kind === 'sheet-drain-settled' && e.phase === 'write');
+  assert.ok(settled.length, 'Missing actual drain completion/abort evidence');
+  assert.ok(settled.every((e) => e.sourceRowsStart === e.sourceRowsEnd && e.originalDrainListenersRemoved));
+  assert.ok(events.some((e) => e.kind === 'database-closed' && e.phase === 'write' && Array.isArray(e.files) && e.files.length > 0));
+  const outputClose = events.find((e) => e.kind === 'output-closed' && e.phase === 'write');
+  assert.ok(outputClose, 'Output close was not observed');
+  if (cancelled) {
+    assert.ok(flow.cursorReturns > 0, 'Cancelled source cursor was not returned');
+    assert.equal(flow.sourceRows, flow.sourceRowsAtCancel, 'Source cursor continued after Worker received cancel');
+    assert.equal(events.some((e) => e.kind === 'output-resumed'), false, 'Cancellation depended on output resume');
+    assert.equal(outputClose.outputPaused, true);
+    assert.ok(settled.some((e) => e.aborted === true && e.drainedAt === null && e.outputResumedAt === null));
+    assert.ok(events.some((e) => e.kind === 'cancel-received' && e.sourceRows === flow.sourceRows));
+  } else {
+    const resumed = events.find((e) => e.kind === 'source-resumed');
+    assert.ok(resumed, 'Source cursor did not resume after output/drain resumed');
+    assert.ok(Number.isFinite(resumed.outputResumedAt) && Number.isFinite(resumed.drainedAt));
+    assert.ok(resumed.drainedAt >= resumed.outputResumedAt && resumed.at >= resumed.drainedAt);
+    assert.ok(resumed.sourceRows > resumed.priorSourceRows);
+    assert.ok(settled.some((e) => !e.aborted && e.outputResumedAt === resumed.outputResumedAt
+      && e.drainedAt === resumed.drainedAt && e.sourceRowsEnd === resumed.priorSourceRows));
+  }
+  return { status: 'PASS', sampledBlockedWaits: blocked.length, sourceRows: flow.sourceRows,
+    maxPendingCommits: flow.maxPendingCommits, cursorReturns: flow.cursorReturns,
+    sourceRowsAtCancel: flow.sourceRowsAtCancel, sourceResumeCount: flow.resumed };
+}
+// FLOW_PROOF_END
+
 async function main() {
   const args = process.argv.slice(2), get = (name) => { const index = args.indexOf(name); return index < 0 ? null : args[index + 1]; };
   if (args.includes('--help')) { console.log('Usage: node scripts/vcc-financial-op/verify-review-performance.js --mode smoke|windows --output NEW_DIRECTORY [--case CASE]\nCases: ' + CASES.join(', ') + '\nExit 0=all requested acceptance passed; 2=evidence generated with NOT_RUN acceptance; 1=automated failure. Smoke exit 0 means supplemental smoke only.'); return; }
@@ -234,7 +297,17 @@ async function main() {
       const child = spawn(require('electron'), ['--js-flags=--expose-gc', __filename, '--electron-child', configPath],
         { env: electronEnv, stdio: ['ignore', 'pipe', 'pipe'] });
       const log = fs.createWriteStream(path.join(directory, 'run.log'), { flags: 'wx' });
-      child.stdout.on('data', (data) => log.write(data)); child.stderr.on('data', (data) => log.write(data));
+      let progressBuffer = '';
+      child.stdout.on('data', (data) => {
+        log.write(data); progressBuffer += data.toString('utf8');
+        let newline;
+        while ((newline = progressBuffer.indexOf('\n')) >= 0) {
+          const line = progressBuffer.slice(0, newline); progressBuffer = progressBuffer.slice(newline + 1);
+          if (line.startsWith('[vcc-pf-progress] ') && line.length <= 2048) process.stdout.write(line + '\n');
+        }
+        if (progressBuffer.length > 2048) progressBuffer = progressBuffer.slice(-2048);
+      });
+      child.stderr.on('data', (data) => log.write(data));
       child.once('error', (error) => { log.end(); reject(error); });
       child.once('exit', (code, signal) => { if (signal) log.write(`Electron ended by ${signal}\n`); log.end(); resolve({ code, signal }); });
     });

@@ -360,6 +360,7 @@ async function extractReviewSources({ manifestPath, signal, onProgress }) {
           const fingerprint = await hashSourceFile(source.filePath);
           if (fingerprint.sha256 !== source.sha256 || fingerprint.sizeBytes !== source.sizeBytes) throw reviewError('archive-integrity-failure', `原件 ${source.artifactId} 内容已损坏`);
           const workbook = await openRichWorkbook(source.filePath, { memoryBudgetBytes: 64 * 1024 * 1024,
+            cacheMaxBytes: 64 * 1024 * 1024,
             cancelToken: { get cancelled() { return !!signal?.aborted; } } });
           try {
             const sheets = db.prepare('SELECT DISTINCT sheet_name,sheet_index FROM facts WHERE source_key=? ORDER BY sheet_index').all(source.sourceKey);

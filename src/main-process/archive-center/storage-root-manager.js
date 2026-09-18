@@ -1,5 +1,7 @@
 'use strict';
 
+const { identityInteger, readHandleIdentityStat, readIdentityStat, readIdentityStatSync } = require('./filesystem-identity');
+
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -52,7 +54,7 @@ class ArchiveStorageRootError extends Error {
 
 function publishedFileIdentity(stat) {
   const snapshot = sourceSnapshotFromStat(stat);
-  if (!snapshot || stat.isSymbolicLink()) throw new ArchiveStorageRootError(
+  if (!snapshot?.ino || !identityInteger(stat.dev) || stat.isSymbolicLink()) throw new ArchiveStorageRootError(
     'ARCHIVE_STORAGE_DELETE_FILE_CHANGED', '迁移发布对象不是原普通文件');
   const birthtimeMs = typeof stat.birthtimeNs === 'bigint'
     ? Number(stat.birthtimeNs / 1000000n) + Number(stat.birthtimeNs % 1000000n) / 1e6
@@ -417,7 +419,7 @@ class ArchiveStorageRootManager {
       _assertManagedRoot: () => this._assertRootDirectory(rootDir),
       _resolveManagedRelative: (value) => path.join(rootDir, ...toRelativePath(value).split('/'))
     }, relativePath, { sha256, fingerprint });
-    const root = await this.fs.promises.lstat(rootDir);
+    const root = await readIdentityStat(this.fs, rootDir);
     const result = { ...identity, root: { dev: String(root.dev), ino: String(root.ino) } };
     if (publishedIdentity) {
       assertPublishedIdentity(publishedIdentity, result);
@@ -669,7 +671,7 @@ class ArchiveStorageRootManager {
 
   async _readJson(filePath, missingValue = null) {
     try {
-      const stat = await this.fs.promises.lstat(filePath);
+      const stat = await readIdentityStat(this.fs, filePath);
       if (!stat.isFile() || stat.isSymbolicLink()) {
         throw new ArchiveStorageRootError(
           'ARCHIVE_STORAGE_METADATA_INVALID',
@@ -692,7 +694,7 @@ class ArchiveStorageRootManager {
   async _assertRootDirectory(rootDir) {
     let stat;
     try {
-      stat = await this.fs.promises.lstat(rootDir);
+      stat = await readIdentityStat(this.fs, rootDir);
     } catch (error) {
       if (error && error.code === 'ENOENT') {
         throw new ArchiveStorageRootError(
@@ -855,7 +857,7 @@ class ArchiveStorageRootManager {
           ? `${relativeDirectory}/${entry.name}`
           : entry.name;
         const absolutePath = path.join(directory, entry.name);
-        const stat = await this.fs.promises.lstat(absolutePath);
+        const stat = await readIdentityStat(this.fs, absolutePath);
         if (stat.isSymbolicLink()) {
           throw new ArchiveStorageRootError(
             'ARCHIVE_STORAGE_SYMLINK_REJECTED',
@@ -912,7 +914,7 @@ class ArchiveStorageRootManager {
       current = path.join(current, parts[index]);
       if (verifiedPaths && verifiedPaths.has(current)) continue;
       try {
-        const stat = await this.fs.promises.lstat(current);
+        const stat = await readIdentityStat(this.fs, current);
         if (stat.isSymbolicLink()) {
           throw new ArchiveStorageRootError(
             'ARCHIVE_STORAGE_SYMLINK_REJECTED',
@@ -1191,7 +1193,7 @@ class ArchiveStorageRootManager {
 
   async _existingRoot(rootDir, configured) {
     try {
-      const stat = await this.fs.promises.lstat(rootDir);
+      const stat = await readIdentityStat(this.fs, rootDir);
       if (stat.isSymbolicLink()) {
         throw new ArchiveStorageRootError(
           'ARCHIVE_STORAGE_SYMLINK_REJECTED',
@@ -1559,7 +1561,7 @@ class ArchiveStorageRootManager {
     for (const name of INTERNAL_TRANSIENT_DIRS) {
       const directory = path.join(targetRoot, name);
       if (await pathExists(this.fs, directory)) {
-        const stat = await this.fs.promises.lstat(directory);
+        const stat = await readIdentityStat(this.fs, directory);
         const entries = stat.isDirectory() && !stat.isSymbolicLink()
           ? await this.fs.promises.readdir(directory)
           : [name];
@@ -1650,8 +1652,8 @@ class ArchiveStorageRootManager {
       }
       const canonicalPath = await this._assertManagedPath(rootDir, artifact.blob.relativePath);
       try {
-        const canonicalStat = await this.fs.promises.stat(canonicalPath);
-        if (canonicalStat.dev === result.stat.dev && canonicalStat.ino === result.stat.ino) {
+        const canonicalStat = await readIdentityStat(this.fs, canonicalPath, 'stat');
+        if (String(canonicalStat.dev) === String(result.stat.dev) && String(canonicalStat.ino) === String(result.stat.ino)) {
           total += artifact.blob.sizeBytes;
         }
       } catch (error) {
@@ -1710,12 +1712,12 @@ class ArchiveStorageRootManager {
     try {
       stagedHandle = await this.fs.promises.open(stagedPath, 'r+');
       const verified = publishedFileIdentity(options.verifiedStat);
-      assertPublishedIdentity(verified, publishedFileIdentity(await stagedHandle.stat()));
+      assertPublishedIdentity(verified, publishedFileIdentity(await readHandleIdentityStat(stagedHandle)));
       const mode = options.mode == null ? verified.mode & 0o777 : options.mode;
       const changedMode = (verified.mode & 0o777) !== mode;
       if (changedMode) await stagedHandle.chmod(mode);
       await stagedHandle.sync();
-      const prepared = publishedFileIdentity(await stagedHandle.stat());
+      const prepared = publishedFileIdentity(await readHandleIdentityStat(stagedHandle));
       assertPublishedIdentity(verified, prepared, changedMode ? ['ctimeMs', 'mode'] : []);
       if ((prepared.mode & 0o777) !== mode) throw new ArchiveStorageRootError(
         'ARCHIVE_STORAGE_DELETE_FILE_CHANGED', '迁移 staging 权限与本次设置不符');
@@ -1734,24 +1736,24 @@ class ArchiveStorageRootManager {
         await targetHandle.sync();
       }
       const original = linked ? stagedHandle : targetHandle;
-      let published = publishedFileIdentity(await original.stat());
+      let published = publishedFileIdentity(await readHandleIdentityStat(original));
       if (linked) {
         assertPublishedIdentity(prepared, published, ['ctimeMs', 'nlink']);
         if (published.nlink !== prepared.nlink + 1) throw new ArchiveStorageRootError(
           'ARCHIVE_STORAGE_DELETE_FILE_CHANGED', '迁移发布的硬链接数量与原对象不符');
       } else {
-        assertPublishedIdentity(prepared, publishedFileIdentity(await stagedHandle.stat()));
+        assertPublishedIdentity(prepared, publishedFileIdentity(await readHandleIdentityStat(stagedHandle)));
       }
-      assertPublishedIdentity(published, publishedFileIdentity(this.fs.lstatSync(targetPath)));
+      assertPublishedIdentity(published, publishedFileIdentity(readIdentityStatSync(this.fs, targetPath)));
       // 只移除仍属于原 fd 的 staging 名称；同步核验与 unlink 不让出事件循环。
-      assertPublishedIdentity(publishedFileIdentity(this.fs.fstatSync(stagedHandle.fd)),
-        publishedFileIdentity(this.fs.lstatSync(stagedPath)));
+      assertPublishedIdentity(publishedFileIdentity(readIdentityStatSync(this.fs, stagedHandle.fd, 'fstatSync')),
+        publishedFileIdentity(readIdentityStatSync(this.fs, stagedPath)));
       this.fs.unlinkSync(stagedPath);
-      published = publishedFileIdentity(await original.stat());
+      published = publishedFileIdentity(await readHandleIdentityStat(original));
       if (linked) {
         assertPublishedIdentity(prepared, published, ['ctimeMs']);
       }
-      assertPublishedIdentity(published, publishedFileIdentity(this.fs.lstatSync(targetPath)));
+      assertPublishedIdentity(published, publishedFileIdentity(readIdentityStatSync(this.fs, targetPath)));
       return { ...published, root: location.root, parents: location.parents };
     } catch (error) {
       if (error?.code === 'EEXIST') throw new ArchiveStorageRootError('ARCHIVE_STORAGE_UNKNOWN_CONTENT',
@@ -2026,15 +2028,15 @@ class ArchiveStorageRootManager {
       if (!expected?.exists) throw new ArchiveStorageRootError('ARCHIVE_STORAGE_DELETE_IDENTITY_MISSING',
         '迁移目标缺少原发布身份，保留两根及恢复记录');
       try {
-        const root = this.fs.lstatSync(journal.targetRoot);
+        const root = readIdentityStatSync(this.fs, journal.targetRoot);
         if (!root.isDirectory() || root.isSymbolicLink()
             || String(root.dev) !== expected.root.dev || String(root.ino) !== expected.root.ino) changed();
         for (const parent of expected.parents) {
-          const stat = this.fs.lstatSync(path.join(journal.targetRoot, ...parent.relativePath.split('/')));
+          const stat = readIdentityStatSync(this.fs, path.join(journal.targetRoot, ...parent.relativePath.split('/')));
           if (!stat.isDirectory() || stat.isSymbolicLink()
               || String(stat.dev) !== parent.dev || String(stat.ino) !== parent.ino) changed();
         }
-        const stat = this.fs.lstatSync(path.join(journal.targetRoot, ...relativePath.split('/')));
+        const stat = readIdentityStatSync(this.fs, path.join(journal.targetRoot, ...relativePath.split('/')));
         if (!stat.isFile() || stat.isSymbolicLink() || String(stat.dev) !== expected.dev
             || String(stat.ino) !== expected.ino || Number(stat.size) !== expected.sizeBytes
             || ['mtimeMs', 'ctimeMs', 'birthtimeMs', 'mode', 'nlink']
@@ -2205,7 +2207,7 @@ class ArchiveStorageRootManager {
     for (const internal of INTERNAL_TRANSIENT_DIRS) {
       const internalPath = path.join(rootDir, internal);
       if (await pathExists(this.fs, internalPath)) {
-        const stat = await this.fs.promises.lstat(internalPath);
+        const stat = await readIdentityStat(this.fs, internalPath);
         if (stat.isSymbolicLink()) {
           throw new ArchiveStorageRootError(
             'ARCHIVE_STORAGE_SYMLINK_REJECTED',
@@ -2248,7 +2250,7 @@ class ArchiveStorageRootManager {
     } catch (error) {
       if (error && error.code === 'ENOENT') return { ok: true };
       try {
-        const rootStat = await this.fs.promises.lstat(rootDir);
+        const rootStat = await readIdentityStat(this.fs, rootDir);
         if (rootStat.isDirectory() && !rootStat.isSymbolicLink()
             && !await this._readMarker(rootDir)) {
           await this._writeMarker(rootDir);

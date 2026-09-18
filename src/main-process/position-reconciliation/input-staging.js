@@ -1,5 +1,7 @@
 'use strict';
 
+const { readIdentityStat, readIdentityStatSync } = require('../archive-center/filesystem-identity');
+
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -30,7 +32,7 @@ function normalizeStagingBatchId(value) {
 }
 
 function sourceStat(filePath) {
-  const stat = fs.statSync(filePath);
+  const stat = readIdentityStatSync(fs, filePath, 'statSync');
   if (!stat.isFile()) throw new Error(`不是普通文件：${filePath}`);
   return stat;
 }
@@ -59,7 +61,7 @@ function hashFileSha256Sync(filePath) {
 }
 
 async function sourceStatAsync(filePath) {
-  const stat = await fs.promises.stat(filePath);
+  const stat = await readIdentityStat(fs, filePath, 'stat');
   if (!stat.isFile()) throw new Error(`不是普通文件：${filePath}`);
   return stat;
 }
@@ -387,7 +389,7 @@ function pruneStagingRoot(userDataDir, {
     const target = path.join(root, entry.name);
     if (protectedBatchRoots.has(target)) continue;
     try {
-      const stat = fs.statSync(target);
+      const stat = readIdentityStatSync(fs, target, 'statSync');
       if (now - Number(stat.mtimeMs) < maxAgeMs) continue;
       fs.rmSync(target, { recursive: true, force: true });
       removed += 1;

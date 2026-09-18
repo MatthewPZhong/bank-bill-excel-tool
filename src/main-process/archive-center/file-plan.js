@@ -1,5 +1,7 @@
 'use strict';
 
+const { readIdentityStatSync } = require('./filesystem-identity');
+
 const { positionReportSourceIdentity } = require('../../backend/position-report-source-identity');
 
 const crypto = require('node:crypto');
@@ -64,12 +66,12 @@ function normalizeFreshnessFailure(value) {
 
 function targetSnapshot(fsImpl, filePath) {
   const realParentPath = fsImpl.realpathSync(path.dirname(filePath));
-  const parent = fsImpl.statSync(realParentPath);
+  const parent = readIdentityStatSync(fsImpl, realParentPath, 'statSync');
   if (!parent.isDirectory()) {
     throw planError('ARCHIVE_FILE_PLAN_INVALID', '输出父目录必须是已存在的普通目录');
   }
   try {
-    const stat = fsImpl.lstatSync(filePath);
+    const stat = readIdentityStatSync(fsImpl, filePath);
     if (stat.isSymbolicLink() || !stat.isFile()) {
       throw planError('ARCHIVE_FILE_PLAN_INVALID', '输出目标必须是可覆盖的普通文件');
     }
@@ -316,7 +318,7 @@ function assertFilePlanFresh(plan, options = {}) {
     }
     const expected = output.targetSnapshot;
     try {
-      const stat = fsImpl.lstatSync(output.filePath);
+      const stat = readIdentityStatSync(fsImpl, output.filePath);
       if (!expected.exists
           || stat.isSymbolicLink()
           || !stat.isFile()

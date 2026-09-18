@@ -709,7 +709,7 @@ function positionArchiveIntentEvidence(pending, currentCheckpoint, {
     if (file.role !== 'output') return false;
     let stat;
     try {
-      stat = statSync(file.filePath);
+      stat = statSync(file.filePath, { bigint: true });
     } catch (_error) {
       return false;
     }

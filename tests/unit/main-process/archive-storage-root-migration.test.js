@@ -1,4 +1,5 @@
 'use strict';
+const { readIdentityStatSync } = require('../../../src/main-process/archive-center/filesystem-identity');
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -328,8 +329,8 @@ test('正常迁移只流式复制 canonical，目标重新 materialize 并原子
     );
     assert.equal(after.storageMode, 'copy');
     assert.notEqual(
-      fs.statSync(managed(current.targetRoot, after.blob.relativePath)).ino,
-      fs.statSync(managed(current.targetRoot, after.storageRelativePath)).ino
+      readIdentityStatSync(fs, managed(current.targetRoot, after.blob.relativePath), 'statSync').ino,
+      readIdentityStatSync(fs, managed(current.targetRoot, after.storageRelativePath), 'statSync').ino
     );
     assert.ok(current.progress.some((item) => item.phase === 'copying'));
     assert.ok(current.progress.some((item) => item.phase === 'materializing-layout'));
@@ -1751,7 +1752,7 @@ for (const mode of ['replacement', 'same-content-replacement', 'source-replaceme
       const sourceFiles = [current.artifact.blob.relativePath, current.artifact.storageRelativePath]
         .map((relativePath) => managed(current.sourceRoot, relativePath));
       const before = [...sourceFiles, targetPath].map((filePath) => ({ filePath,
-        ino: fs.statSync(filePath).ino, content: fs.readFileSync(filePath) }));
+        ino: readIdentityStatSync(fs, filePath, 'statSync').ino, content: fs.readFileSync(filePath) }));
       const resumed = createManagerForFixture(current);
       const initialized = await resumed.manager.initialize();
       assert.equal(current.repository.getDeletionReceipt(current.artifact.batchId), null, JSON.stringify(initialized));
@@ -1760,7 +1761,7 @@ for (const mode of ['replacement', 'same-content-replacement', 'source-replaceme
       assert.equal(afterJournal.migrationId, journal.migrationId);
       assert.notEqual(afterJournal.phase, 'done');
       for (const item of before) {
-        assert.equal(fs.statSync(item.filePath).ino, item.ino);
+        assert.equal(readIdentityStatSync(fs, item.filePath, 'statSync').ino, item.ino);
         assert.deepEqual(fs.readFileSync(item.filePath), item.content);
       }
       assert.equal(resumed.manager.getMigrationState().phase, 'cleanup-pending');
@@ -1785,7 +1786,7 @@ test('pre-switch 旧 journal 缺少源 inventory 时不得将现存路径当作�
     fs.writeFileSync(current.journalPath, JSON.stringify(journal));
     const sourcePaths = [current.artifact.blob.relativePath, current.artifact.storageRelativePath]
       .map((relativePath) => managed(current.sourceRoot, relativePath));
-    const sourceInodes = sourcePaths.map((filePath) => fs.statSync(filePath).ino);
+    const sourceInodes = sourcePaths.map((filePath) => readIdentityStatSync(fs, filePath, 'statSync').ino);
     resumed = createManagerForFixture(current);
     const result = await resumed.manager.initialize();
     assert.equal(result.migrationRecovery?.code, 'ARCHIVE_STORAGE_DELETE_IDENTITY_MISSING', JSON.stringify(result));
@@ -1794,7 +1795,7 @@ test('pre-switch 旧 journal 缺少源 inventory 时不得将现存路径当作�
     assert.equal(after.sourceFileIdentities, undefined);
     assert.equal(after.sourceCleanupPaths, null);
     assert.deepEqual(after.targetPublishedPaths, []);
-    assert.deepEqual(sourcePaths.map((filePath) => fs.statSync(filePath).ino), sourceInodes);
+    assert.deepEqual(sourcePaths.map((filePath) => readIdentityStatSync(fs, filePath, 'statSync').ino), sourceInodes);
     assert.equal(current.database.getSetting(ARCHIVE_STORAGE_ROOT_SETTING_KEY), null);
   } finally {
     await current.manager.pauseBackgroundOwnershipScan();
@@ -1815,12 +1816,12 @@ test('pre-switch 旧目标无身份时保留两根，目标安全缺失后按原
     fs.writeFileSync(current.journalPath, JSON.stringify(journal));
     const sourcePath = managed(current.sourceRoot, current.artifact.blob.relativePath);
     const targetPath = managed(current.targetRoot, current.artifact.blob.relativePath);
-    const sourceInode = fs.statSync(sourcePath).ino;
-    const targetInode = fs.statSync(targetPath).ino;
+    const sourceInode = readIdentityStatSync(fs, sourcePath, 'statSync').ino;
+    const targetInode = readIdentityStatSync(fs, targetPath, 'statSync').ino;
     const refused = createManagerForFixture(current);
     assert.equal((await refused.manager.initialize()).ok, false);
-    assert.equal(fs.statSync(sourcePath).ino, sourceInode);
-    assert.equal(fs.statSync(targetPath).ino, targetInode);
+    assert.equal(readIdentityStatSync(fs, sourcePath, 'statSync').ino, sourceInode);
+    assert.equal(readIdentityStatSync(fs, targetPath, 'statSync').ino, targetInode);
     assert.equal(JSON.parse(fs.readFileSync(current.journalPath)).targetFileIdentities, undefined);
     assert.equal(current.repository.getDeletionReceipt(current.artifact.batchId), null);
     fs.unlinkSync(targetPath);
@@ -1841,7 +1842,7 @@ test('pre-switch 正常复用不重复 chmod，进度写入失败后保留原 in
     fs.mkdirSync(current.targetRoot, { recursive: true });
     assert.equal((await current.manager.changeStorageLocation()).status, 'failed');
     const targetPath = managed(current.targetRoot, current.artifact.storageRelativePath);
-    const original = fs.statSync(targetPath);
+    const original = readIdentityStatSync(fs, targetPath, 'statSync');
     const resumed = createManagerForFixture(current);
     const write = resumed.manager._writeJournal.bind(resumed.manager);
     resumed.manager._writeJournal = async (journal, phase, patch) => {
@@ -1849,12 +1850,12 @@ test('pre-switch 正常复用不重复 chmod，进度写入失败后保留原 in
       return write(journal, phase, patch);
     };
     assert.equal((await resumed.manager.initialize()).ok, false);
-    assert.equal(fs.statSync(targetPath).ino, original.ino);
-    assert.equal(fs.statSync(targetPath).ctimeMs, original.ctimeMs);
+    assert.equal(readIdentityStatSync(fs, targetPath, 'statSync').ino, original.ino);
+    assert.equal(readIdentityStatSync(fs, targetPath, 'statSync').ctimeMs, original.ctimeMs);
     const retried = createManagerForFixture(current);
     assert.equal((await retried.manager.initialize()).available, true);
     assert.equal(fs.existsSync(current.journalPath), false);
-    assert.equal(fs.statSync(targetPath).ino, original.ino);
+    assert.equal(readIdentityStatSync(fs, targetPath, 'statSync').ino, original.ino);
   } finally { current.close(); }
 });
 
@@ -1876,7 +1877,7 @@ for (const action of ['read', 'retry', 'background', 'missing-read', 'unreadable
       const canonical = managed(current.sourceRoot, current.artifact.blob.relativePath);
       fs.unlinkSync(sourcePath);
       fs.linkSync(canonical, sourcePath);
-      const initial = fs.statSync(canonical);
+      const initial = readIdentityStatSync(fs, canonical, 'statSync');
       current.database.db.prepare(`UPDATE archive_artifacts SET storage_mode = 'hardlink',
         storage_fingerprint_size_bytes = ?, storage_fingerprint_mtime_ms = ?,
         storage_fingerprint_ctime_ms = ?, storage_fingerprint_ino = ? WHERE id = ?`)
@@ -1890,10 +1891,10 @@ for (const action of ['read', 'retry', 'background', 'missing-read', 'unreadable
       await current.manager.currentService.pauseBackgroundMaterialization();
       const journalText = fs.readFileSync(current.journalPath, 'utf8');
       const journal = JSON.parse(journalText);
-      assert.equal(String(fs.statSync(sourcePath).ino), journal.sourceFileIdentities[current.artifact.storageRelativePath].ino);
+      assert.equal(String(readIdentityStatSync(fs, sourcePath, 'statSync').ino), journal.sourceFileIdentities[current.artifact.storageRelativePath].ino);
       if (action === 'missing-read') fs.unlinkSync(sourcePath);
       if (action === 'unreadable-journal') fs.writeFileSync(current.journalPath, '{');
-      const before = fs.statSync(canonical);
+      const before = readIdentityStatSync(fs, canonical, 'statSync');
       const service = current.manager.currentService;
       if (action === 'retry') {
         const retried = await service.retryBatch(current.artifact.batchId);
@@ -1915,10 +1916,10 @@ for (const action of ['read', 'retry', 'background', 'missing-read', 'unreadable
           ? 'ARCHIVE_STORAGE_METADATA_INVALID' : 'ARCHIVE_STORAGE_MIGRATION_PENDING');
       }
       assert.equal(fs.existsSync(sourcePath), action !== 'missing-read');
-      if (action !== 'missing-read') assert.equal(fs.statSync(sourcePath).ino, initial.ino);
-      assert.equal(fs.statSync(canonical).ino, before.ino);
-      assert.equal(fs.statSync(canonical).ctimeMs, before.ctimeMs);
-      assert.equal(fs.statSync(canonical).nlink, before.nlink);
+      if (action !== 'missing-read') assert.equal(readIdentityStatSync(fs, sourcePath, 'statSync').ino, initial.ino);
+      assert.equal(readIdentityStatSync(fs, canonical, 'statSync').ino, before.ino);
+      assert.equal(readIdentityStatSync(fs, canonical, 'statSync').ctimeMs, before.ctimeMs);
+      assert.equal(readIdentityStatSync(fs, canonical, 'statSync').nlink, before.nlink);
       assert.equal(fs.readFileSync(current.journalPath, 'utf8'), action === 'unreadable-journal' ? '{' : journalText);
       if (action === 'unreadable-journal') fs.writeFileSync(current.journalPath, journalText);
       restarted = createManagerForFixture(current);
@@ -1969,7 +1970,7 @@ test('迁移源历史硬链接自身清理中断后只按冻结 inventory 的链
     const canonical = managed(current.sourceRoot, current.artifact.blob.relativePath);
     fs.unlinkSync(sourcePath);
     fs.linkSync(canonical, sourcePath);
-    const stat = fs.statSync(canonical);
+    const stat = readIdentityStatSync(fs, canonical, 'statSync');
     current.database.db.prepare(`UPDATE archive_artifacts SET storage_mode = 'hardlink',
       storage_fingerprint_size_bytes = ?, storage_fingerprint_mtime_ms = ?,
       storage_fingerprint_ctime_ms = ?, storage_fingerprint_ino = ? WHERE id = ?`)
@@ -1981,7 +1982,7 @@ test('迁移源历史硬链接自身清理中断后只按冻结 inventory 的链
     failSecondSource = true;
     assert.equal((await current.manager.changeStorageLocation()).code, 'ARCHIVE_STORAGE_CLEANUP_PENDING');
     assert.equal(fs.existsSync(sourcePath), false);
-    assert.equal(fs.statSync(canonical).nlink, 1);
+    assert.equal(readIdentityStatSync(fs, canonical, 'statSync').nlink, 1);
     const resumed = createManagerForFixture(current);
     assert.equal((await resumed.manager.initialize()).available, true);
     assert.equal(fs.existsSync(current.sourceRoot), false);
@@ -2192,7 +2193,7 @@ test('切换后 old root 本身被链接替换时保留真实旧根并维持 cle
     assert.equal(result.code, 'ARCHIVE_STORAGE_CLEANUP_PENDING');
     assert.equal(current.database.getSetting(ARCHIVE_STORAGE_ROOT_SETTING_KEY), real(current.targetRoot));
     assert.equal(current.runtime.rootDir, real(current.targetRoot));
-    assert.equal(fs.lstatSync(current.sourceRoot).isSymbolicLink(), true);
+    assert.equal(readIdentityStatSync(fs, current.sourceRoot, 'lstatSync').isSymbolicLink(), true);
     assert.equal(
       fs.readFileSync(managed(movedSource, current.artifact.blob.relativePath), 'utf8'),
       'archive-root-migration-content'
@@ -2253,11 +2254,11 @@ for (const replacement of ['canonical', 'materialized']) {
         swapped = true;
         victim = managed(current.targetRoot, replacement === 'canonical'
           ? current.artifact.blob.relativePath : current.artifact.storageRelativePath);
-        const before = fs.statSync(victim);
+        const before = readIdentityStatSync(fs, victim, 'statSync');
         const temporary = path.join(current.tempDir, 'other-owner.xlsx');
         fs.writeFileSync(temporary, fs.readFileSync(victim));
         fs.renameSync(temporary, victim);
-        replacementIdentity = fs.statSync(victim);
+        replacementIdentity = readIdentityStatSync(fs, victim, 'statSync');
         assert.notEqual(replacementIdentity.ino, before.ino);
       };
       const current = await createFixture({ faultInjector(event) {
@@ -2286,7 +2287,7 @@ for (const replacement of ['canonical', 'materialized']) {
         const recovered = await resumed.manager.initialize();
         assert.equal(recovered.migrationRecovery.code, 'ARCHIVE_STORAGE_DELETE_FILE_CHANGED', JSON.stringify(recovered));
         assert.equal(current.database.getSetting(ARCHIVE_STORAGE_ROOT_SETTING_KEY), null);
-        assert.equal(fs.statSync(victim).ino, replacementIdentity.ino);
+        assert.equal(readIdentityStatSync(fs, victim, 'statSync').ino, replacementIdentity.ino);
         assert.equal(JSON.parse(fs.readFileSync(current.journalPath)).migrationId, journal.migrationId);
       } finally {
         for (const manager of [current.manager, resumed?.manager].filter(Boolean)) {
@@ -2332,11 +2333,11 @@ for (const missing of ['canonical', 'materialized']) {
         ? current.artifact.blob.relativePath : current.artifact.storageRelativePath;
       delete journal.targetFileIdentities[relativePath];
       fs.writeFileSync(current.journalPath, JSON.stringify(journal));
-      const originalInode = fs.statSync(managed(current.targetRoot, relativePath)).ino;
+      const originalInode = readIdentityStatSync(fs, managed(current.targetRoot, relativePath), 'statSync').ino;
       resumed = createManagerForFixture(current);
       const recovered = await resumed.manager.initialize();
       assert.equal(recovered.migrationRecovery.code, 'ARCHIVE_STORAGE_DELETE_IDENTITY_MISSING', JSON.stringify(recovered));
-      assert.equal(fs.statSync(managed(current.targetRoot, relativePath)).ino, originalInode);
+      assert.equal(readIdentityStatSync(fs, managed(current.targetRoot, relativePath), 'statSync').ino, originalInode);
       assert.equal(JSON.parse(fs.readFileSync(current.journalPath)).targetFileIdentities[relativePath], undefined);
       assert.equal(current.database.getSetting(ARCHIVE_STORAGE_ROOT_SETTING_KEY), null);
       assert.ok(fs.existsSync(current.sourceRoot));
@@ -2370,7 +2371,7 @@ for (const crashPoint of ['none', 'before-unlink-checkpoint', 'after-unlink-chec
         journal.targetFileIdentities[relativePath] = await current.manager._captureMigrationFile(current.targetRoot, relativePath);
       }
       fs.writeFileSync(current.journalPath, JSON.stringify(journal));
-      const originalCanonicalInode = fs.statSync(canonical).ino;
+      const originalCanonicalInode = readIdentityStatSync(fs, canonical, 'statSync').ino;
       const resumed = createManagerForFixture(current);
       managers.push(resumed.manager);
       if (crashPoint === 'before-unlink-checkpoint') {
@@ -2391,15 +2392,15 @@ for (const crashPoint of ['none', 'before-unlink-checkpoint', 'after-unlink-chec
         assert.equal(result.ok, false, JSON.stringify(result));
         assert.equal(current.database.getSetting(ARCHIVE_STORAGE_ROOT_SETTING_KEY), null);
         assert.equal(fs.existsSync(layout), false);
-        assert.equal(fs.statSync(canonical).ino, originalCanonicalInode);
+        assert.equal(readIdentityStatSync(fs, canonical, 'statSync').ino, originalCanonicalInode);
         const retried = createManagerForFixture(current);
         managers.push(retried.manager);
         assert.equal((await retried.manager.initialize()).ok, true);
       } else assert.equal(result.ok, true, JSON.stringify(result));
       assert.equal(current.database.getSetting(ARCHIVE_STORAGE_ROOT_SETTING_KEY), real(current.targetRoot));
-      assert.equal(fs.statSync(canonical).ino, originalCanonicalInode);
-      assert.notEqual(fs.statSync(layout).ino, originalCanonicalInode);
-      assert.equal(fs.statSync(canonical).nlink, 1);
+      assert.equal(readIdentityStatSync(fs, canonical, 'statSync').ino, originalCanonicalInode);
+      assert.notEqual(readIdentityStatSync(fs, layout, 'statSync').ino, originalCanonicalInode);
+      assert.equal(readIdentityStatSync(fs, canonical, 'statSync').nlink, 1);
       assert.equal(current.repository.getArtifact(current.artifact.id).storageMode, 'copy');
       assert.equal(fs.existsSync(current.journalPath), false);
     } finally {
@@ -2436,14 +2437,14 @@ for (const replacement of ['canonical', 'materialized']) {
           const other = path.join(current.tempDir, 'replacement.xlsx');
           fs.writeFileSync(other, fs.readFileSync(victim));
           fs.renameSync(other, victim);
-          replacementInode = String(fs.statSync(victim).ino);
+          replacementInode = String(readIdentityStatSync(fs, victim, 'statSync').ino);
         }
         return result;
       };
       const recovered = await resumed.manager.initialize();
       assert.equal(recovered.migrationRecovery.code, 'ARCHIVE_STORAGE_DELETE_FILE_CHANGED', JSON.stringify(recovered));
       assert.equal(current.database.getSetting(ARCHIVE_STORAGE_ROOT_SETTING_KEY), null);
-      assert.equal(String(fs.statSync(victim).ino), replacementInode);
+      assert.equal(String(readIdentityStatSync(fs, victim, 'statSync').ino), replacementInode);
       const after = JSON.parse(fs.readFileSync(current.journalPath));
       assert.equal(after.targetFileIdentities[relativePath].ino, journal.targetFileIdentities[relativePath].ino);
       assert.notEqual(after.targetFileIdentities[relativePath].ino, replacementInode);
@@ -2484,14 +2485,14 @@ for (const targetKind of ['canonical', 'materialized']) {
           const phase = targetKind === 'canonical' ? 'copying' : 'materializing-layout';
           if (!newInode && value.phase === phase && side === 'target' && checkedPath === relativePath && !result.exists) {
             fs.writeFileSync(victim, content);
-            newInode = String(fs.statSync(victim).ino);
+            newInode = String(readIdentityStatSync(fs, victim, 'statSync').ino);
           }
           return result;
         };
         const result = await resumed.manager.initialize();
         assert.equal(result.ok, false, JSON.stringify(result));
         assert.equal(current.database.getSetting(ARCHIVE_STORAGE_ROOT_SETTING_KEY), null);
-        assert.equal(String(fs.statSync(victim).ino), newInode);
+        assert.equal(String(readIdentityStatSync(fs, victim, 'statSync').ino), newInode);
         assert.deepEqual(fs.readFileSync(victim), content);
         assert.equal(JSON.parse(fs.readFileSync(current.journalPath)).migrationId, journal.migrationId);
         assert.ok(fs.existsSync(current.sourceRoot));
@@ -2524,7 +2525,7 @@ for (const targetKind of ['canonical', 'materialized']) {
         current.manager._publishMigrationTarget = async (source, target, options) => {
           if (portablePathOf(target).endsWith(`/${relativePath}`)) {
             fs.writeFileSync(target, '发布之前已经存在的其他所有者文件');
-            newInode = fs.statSync(target).ino;
+            newInode = readIdentityStatSync(fs, target, 'statSync').ino;
           }
           return publish(source, target, options);
         };
@@ -2534,7 +2535,7 @@ for (const targetKind of ['canonical', 'materialized']) {
           ? 'ARCHIVE_STORAGE_UNKNOWN_CONTENT' : 'ARCHIVE_MATERIALIZATION_FAILED', JSON.stringify(result));
         if (targetKind === 'materialized') assert.match(result.message, /ARCHIVE_STORAGE_UNKNOWN_CONTENT/);
         assert.equal(current.database.getSetting(ARCHIVE_STORAGE_ROOT_SETTING_KEY), null);
-        assert.equal(fs.statSync(victim).ino, newInode);
+        assert.equal(readIdentityStatSync(fs, victim, 'statSync').ino, newInode);
         assert.equal(fs.readFileSync(victim, 'utf8'), '发布之前已经存在的其他所有者文件');
         assert.ok(fs.existsSync(current.sourceRoot));
         const journal = JSON.parse(fs.readFileSync(current.journalPath));
@@ -2556,11 +2557,11 @@ test('不支持 hardlink 的文件系统通过 wx 原 fd 写入并刷盘，再�
       const handle = await fs.promises.open(filePath, flags, mode);
       if (targetRoot && expectedTargets.includes(filePath) && flags === 'wx') {
         created.push(filePath);
-        assert.equal(fs.fstatSync(handle.fd).mode & 0o777, 0o600);
+        assert.equal(readIdentityStatSync(fs, handle.fd, 'fstatSync').mode & 0o777, 0o600);
         const sync = handle.sync.bind(handle);
         const chmod = handle.chmod.bind(handle);
         handle.sync = async () => {
-          events.push({ path: filePath, kind: 'sync', mode: fs.fstatSync(handle.fd).mode & 0o777 });
+          events.push({ path: filePath, kind: 'sync', mode: readIdentityStatSync(fs, handle.fd, 'fstatSync').mode & 0o777 });
           return sync();
         };
         handle.chmod = async (value) => {
@@ -2586,8 +2587,8 @@ test('不支持 hardlink 的文件系统通过 wx 原 fd 写入并刷盘，再�
       assert.deepEqual(operations.map((entry) => entry.kind), ['sync', 'chmod', 'sync']);
       assert.equal(operations[0].mode, 0o600);
     }
-    const canonical = fs.statSync(managed(current.targetRoot, current.artifact.blob.relativePath));
-    const layout = fs.statSync(managed(current.targetRoot, current.artifact.storageRelativePath));
+    const canonical = readIdentityStatSync(fs, managed(current.targetRoot, current.artifact.blob.relativePath), 'statSync');
+    const layout = readIdentityStatSync(fs, managed(current.targetRoot, current.artifact.storageRelativePath), 'statSync');
     assert.notEqual(canonical.ino, layout.ino);
     assert.equal(layout.mode & 0o777, 0o444);
     assert.equal(canonical.nlink, 1);
@@ -2605,12 +2606,12 @@ for (const targetKind of ['canonical', 'materialized']) {
         let substitutedInode;
         const substitute = (target) => {
           if (!victim || target !== victim || substitutedInode) return;
-          const original = fs.statSync(target);
+          const original = readIdentityStatSync(fs, target, 'statSync');
           const sourcePath = managed(current.sourceRoot, current.artifact.blob.relativePath);
           const replacement = path.join(current.tempDir, 'same-sha-new-owner');
           fs.writeFileSync(replacement, fs.readFileSync(sourcePath));
           fs.renameSync(replacement, target);
-          substitutedInode = String(fs.statSync(target).ino);
+          substitutedInode = String(readIdentityStatSync(fs, target, 'statSync').ino);
           assert.notEqual(substitutedInode, String(original.ino));
         };
         const fsImpl = { ...fs, promises: { ...fs.promises,
@@ -2644,7 +2645,7 @@ for (const targetKind of ['canonical', 'materialized']) {
           assert.equal(result.status, 'failed', JSON.stringify(result));
           assert.ok(substitutedInode);
           assert.equal(current.database.getSetting(ARCHIVE_STORAGE_ROOT_SETTING_KEY), null);
-          assert.equal(String(fs.statSync(victim).ino), substitutedInode);
+          assert.equal(String(readIdentityStatSync(fs, victim, 'statSync').ino), substitutedInode);
           assert.equal(fs.readFileSync(victim, 'utf8'), 'archive-root-migration-content');
           const journal = JSON.parse(fs.readFileSync(current.journalPath));
           assert.equal(journal.targetFileIdentities[relativePath], undefined);

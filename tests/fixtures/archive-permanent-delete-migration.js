@@ -1,4 +1,5 @@
 'use strict';
+const { readIdentityStatSync } = require('../../src/main-process/archive-center/filesystem-identity');
 
 // 永久删除与迁移的跨层夹具：所有数据库、根目录和替代文件只创建于调用方的隔离目录。
 const assert = require('node:assert/strict');
@@ -23,7 +24,7 @@ function hashFile(filePath) {
 
 function snapshotFiles(paths) {
   return paths.filter((filePath) => fs.existsSync(filePath)).map((filePath) => ({
-    filePath, ino: String(fs.statSync(filePath).ino), hash: hashFile(filePath)
+    filePath, ino: String(readIdentityStatSync(fs, filePath, 'statSync').ino), hash: hashFile(filePath)
   }));
 }
 
@@ -114,12 +115,13 @@ async function verifyMigrationDeleteOverlap(parentDirectory, options = {}) {
     }
     const victim = path.join(targetRoot, artifact.storageRelativePath);
     if (options.replacement) {
-      const previousInode = String(fs.statSync(victim).ino);
+      const previousInode = String(readIdentityStatSync(fs, victim, 'statSync').ino);
       const replacement = path.join(isolatedDir, 'replacement.xlsx');
       fs.writeFileSync(replacement, options.replacement === 'same'
         ? fs.readFileSync(victim) : 'a different owner owns this replacement');
+      fs.chmodSync(victim, 0o600);
       fs.renameSync(replacement, victim);
-      assert.notEqual(String(fs.statSync(victim).ino), previousInode);
+      assert.notEqual(String(readIdentityStatSync(fs, victim, 'statSync').ino), previousInode);
     }
     const managedFiles = [...new Set([
       ...originalJournal.sourceCleanupPaths.map((relativePath) => path.join(sourceCanonicalRoot, relativePath)),
@@ -145,7 +147,7 @@ async function verifyMigrationDeleteOverlap(parentDirectory, options = {}) {
     } else {
       for (const saved of before) {
         assert.equal(fs.existsSync(saved.filePath), true, `迁移资格核验前不得删除：${saved.filePath}`);
-        assert.equal(String(fs.statSync(saved.filePath).ino), saved.ino);
+        assert.equal(String(readIdentityStatSync(fs, saved.filePath, 'statSync').ino), saved.ino);
         assert.equal(hashFile(saved.filePath), saved.hash);
       }
       assert.equal(repository.getDeletionReceipt(batchContext.batchId), null);
@@ -241,9 +243,10 @@ async function verifyMigrationTargetIdentity(parentDirectory, options = {}) {
     const relativePath = options.replacement === 'canonical'
       ? artifact.blob.relativePath : artifact.storageRelativePath;
     victim = path.join(runtime.targetRoot, relativePath);
-    const original = fs.statSync(victim);
+    const original = readIdentityStatSync(fs, victim, 'statSync');
     const replacement = path.join(isolatedDir, 'replacement.xlsx');
     fs.writeFileSync(replacement, fs.readFileSync(victim));
+    fs.chmodSync(victim, 0o600);
     fs.renameSync(replacement, victim);
     replacementIdentity = snapshotFiles([victim])[0];
     assert.notEqual(replacementIdentity.ino, String(original.ino));
@@ -316,7 +319,7 @@ async function verifyMigrationTargetIdentity(parentDirectory, options = {}) {
         assert.deepEqual(recovered.artifact.storageFingerprint, artifact.storageFingerprint);
       }
       for (const saved of [...originalFiles, replacementIdentity]) {
-        assert.equal(String(fs.statSync(saved.filePath).ino), saved.ino);
+        assert.equal(String(readIdentityStatSync(fs, saved.filePath, 'statSync').ino), saved.ino);
         assert.equal(hashFile(saved.filePath), saved.hash);
       }
       assert.ok(fs.existsSync(runtime.journalPath));

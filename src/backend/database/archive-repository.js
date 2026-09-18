@@ -165,6 +165,9 @@ function normalizeFingerprint(value, label = 'fingerprint') {
   }
   let ino = null;
   if (value.ino !== undefined && value.ino !== null && value.ino !== '') {
+    if (typeof value.ino === 'number' && !Number.isSafeInteger(value.ino)) {
+      throw new TypeError(`${label}.ino 不能使用已丢失精度的数字`);
+    }
     ino = String(value.ino);
     if (!/^(?:0|[1-9]\d*)$/.test(ino)) {
       throw new TypeError(`${label}.ino 必须是十进制字符串`);

@@ -1,4 +1,5 @@
 'use strict';
+const { readIdentityStatSync } = require('../../src/main-process/archive-center/filesystem-identity');
 
 // 存档中心永久删除集成验证：真实任务归属、受管文件边界、恢复凭证和维护协调。
 // 所有数据库与文件位于独立临时目录；运行：node scripts/integration/archive-center-permanent-delete.js
@@ -27,6 +28,8 @@ const { verifyBizOpHistoricalOwnerBackfill } = require('../../tests/fixtures/arc
 const { verifyPositionFilePlanDeletion } = require('../../tests/fixtures/archive-permanent-delete-position-fileplan');
 const { READONLY_OWNER_REPLACEMENTS, verifyReadonlyOwnerIdentity } = require('../../tests/fixtures/archive-permanent-delete-readonly-owner');
 
+const { verifyLargeArchiveIdentity } = require('../../tests/fixtures/archive-permanent-delete-high-identity');
+
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'integration-archive-permanent-delete-'));
 const state = { blocked: false, target: '' };
 const archiveRoot = path.join(directory, 'archive');
@@ -37,7 +40,7 @@ let service;
 let controller;
 let outboxStore;
 let passed = 0;
-const total = 49;
+const total = 50;
 
 const fsImpl = { ...fs, promises: fs.promises, unlinkSync(filePath) {
   if (state.blocked && (!state.target || state.target === filePath)) {
@@ -145,7 +148,7 @@ async function recoverPublicationAfterRestart(mode) {
     assert.ok(isolatedService.repository.getOwnerTerminalCompletion(owner));
     assert.equal(JSON.parse(fs.readFileSync(indexPath, 'utf8')).entries.length, 0);
     assert.deepEqual((await recoverToolboxPublicationsIntoArchive({ userDataDir, archiveCenter: isolatedController })).recovered, []);
-    const stat = fs.statSync(evidence.outputPath);
+    const stat = readIdentityStatSync(fs, evidence.outputPath, 'statSync');
     assert.equal(String(stat.ino), evidence.ino, '恢复不得重新发布正式输出');
     assert.equal(stat.mtimeMs, evidence.mtimeMs);
     assert.equal(stat.size, evidence.size);
@@ -192,7 +195,7 @@ function useHistoricalHardlinks(artifacts) {
     fs.unlinkSync(target);
     fs.linkSync(blobPath, target);
   }
-  const stat = fs.statSync(blobPath);
+  const stat = readIdentityStatSync(fs, blobPath, 'statSync');
   for (const artifact of artifacts) {
     db.prepare(`UPDATE archive_artifacts SET storage_mode = 'hardlink',
       storage_fingerprint_size_bytes = ?, storage_fingerprint_mtime_ms = ?,
@@ -537,12 +540,13 @@ async function legacyBatchWithUnfingerprintedBlob(key) {
     });
     await scenario('旧 Blob 没有持久指纹且被同 SHA 新 inode 替换时，永久删除拒绝且保留对象', async () => {
       const legacy = await legacyBatchWithUnfingerprintedBlob('replaced-blob');
-      const originalInode = String(fs.statSync(legacy.blobPath).ino);
+      const originalInode = String(readIdentityStatSync(fs, legacy.blobPath, 'statSync').ino);
       const originalHash = fileHash(legacy.blobPath);
       const replacementPath = path.join(directory, 'replacement-blob');
       fs.copyFileSync(legacy.blobPath, replacementPath);
+      fs.chmodSync(legacy.blobPath, 0o600);
       fs.renameSync(replacementPath, legacy.blobPath);
-      assert.notEqual(String(fs.statSync(legacy.blobPath).ino), originalInode);
+      assert.notEqual(String(readIdentityStatSync(fs, legacy.blobPath, 'statSync').ino), originalInode);
       assert.equal(fileHash(legacy.blobPath), originalHash);
       const prepared = await controller.prepareDeleteBatch(legacy.batch.id);
       assert.equal(prepared.status, 'failed', JSON.stringify(prepared));
@@ -606,6 +610,9 @@ async function legacyBatchWithUnfingerprintedBlob(key) {
     });
     await scenario('旧迁移与 V1 删除计划同时缺证，即使目标已缺失仍保留任务诊断', async () => {
       await verifyMigrationDeleteOverlap(directory, { legacyJournal: true, legacyJob: true, alreadyMissing: true });
+    });
+    await scenario('高位 dev/ino 无损删除只读副本、保护共享 Blob，重开 DB 后拒绝低位不同的同内容替换', async () => {
+      await verifyLargeArchiveIdentity(directory);
     });
     await scenario('归档延期时未执行的匿名后处理不会被恢复流程认证完成或放行删除', async () => {
       const sourcePath = path.join(directory, 'nondurable.xlsx');

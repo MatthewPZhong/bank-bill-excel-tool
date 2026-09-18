@@ -122,9 +122,9 @@ function isCrashError(error) {
     || (error && error.code === 'TOOLBOX_PUBLICATION_SIMULATED_CRASH');
 }
 
-function lstatOrNull(fsImpl, filePath) {
+function lstatOrNull(fsImpl, filePath, options) {
   try {
-    return fsImpl.lstatSync(filePath);
+    return fsImpl.lstatSync(filePath, options);
   } catch (error) {
     if (error && error.code === 'ENOENT') return null;
     throw error;
@@ -2098,7 +2098,7 @@ function makeJournal(
 function assertExpectedTargetSnapshot(runtime, entry) {
   const expected = entry.expectedTargetSnapshot;
   if (!expected) return;
-  const stat = lstatOrNull(runtime.fsImpl, entry.targetPath);
+  const stat = lstatOrNull(runtime.fsImpl, entry.targetPath, { bigint: true });
   const unchanged = expected.exists
     ? Boolean(stat && sourceSnapshotMatchesStat(expected.snapshot, stat))
     : !stat;

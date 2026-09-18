@@ -1,4 +1,5 @@
 'use strict';
+const path = require('node:path');
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -1234,11 +1235,11 @@ function positionManagedSourceFixture(repository) {
     moduleId: 'position-reconciliation-process', moduleCode: 'POSITION'
   }).batch;
   const managedRootIdentity = {
-    rootDir: '/app-data/run-data/position-reconciliation/import-staging',
-    realPath: '/app-data/run-data/position-reconciliation/import-staging', dev: '1', ino: '10'
+    rootDir: path.resolve('/app-data/run-data/position-reconciliation/import-staging'),
+    realPath: path.resolve('/app-data/run-data/position-reconciliation/import-staging'), dev: '1', ino: '10'
   };
   const managedRelativePath = 'source-job/1/source.xlsx';
-  const sourcePath = `${managedRootIdentity.rootDir}/${managedRelativePath}`;
+  const sourcePath = path.join(managedRootIdentity.rootDir, managedRelativePath);
   const sourceSnapshot = { sizeBytes: 5, mtimeMs: 1, ctimeMs: 1, ino: '17' };
   const artifact = addArtifact(repository, batch.id, {
     sourcePath, sourceOperation: 'position-reconciliation:source:prepare-import',

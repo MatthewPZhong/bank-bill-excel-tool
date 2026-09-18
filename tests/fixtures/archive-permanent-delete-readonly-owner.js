@@ -1,4 +1,5 @@
 'use strict';
+const { readIdentityStatSync } = require('../../src/main-process/archive-center/filesystem-identity');
 
 // 真实文件任务与确认删除流程；替换及进程重启均限于调用方提供的隔离目录。
 const assert = require('node:assert/strict');
@@ -45,7 +46,7 @@ async function assertDeletionBlocked(runtime, observation) {
   const owners = service.repository.listOwnedTemporaryFiles(observation.batchId);
   assert.equal(owners.length, 2);
   assert.ok(owners.every((owner) => owner.state === 'creating'), JSON.stringify(owners));
-  assert.equal(String(fs.statSync(observation.replacementPath).ino), observation.replacementInode);
+  assert.equal(String(readIdentityStatSync(fs, observation.replacementPath, 'statSync').ino), observation.replacementInode);
   assert.equal(fs.readFileSync(observation.replacementPath, 'utf8'), SOURCE_BYTES);
   assert.equal(fs.readFileSync(path.join(observation.directory, 'template.csv'), 'utf8'), SOURCE_BYTES);
   return owners;
@@ -93,37 +94,37 @@ async function verifyReadonlyOwnerIdentity(parentDirectory, options = {}) {
   let readErrorInjected = false;
   const assertFdClosed = () => {
     assert.equal(typeof creationFd, 'number');
-    assert.throws(() => fs.fstatSync(creationFd), { code: 'EBADF' }, '创建句柄应在返回及打开副本前关闭');
+    assert.throws(() => readIdentityStatSync(fs, creationFd, 'fstatSync'), { code: 'EBADF' }, '创建句柄应在返回及打开副本前关闭');
   };
   function replaceObject(filePath, replaceParent = false) {
     assert.equal(injected, false);
     injected = true;
-    const priorInode = String(fs.statSync(filePath).ino);
+    const priorInode = String(readIdentityStatSync(fs, filePath, 'statSync').ino);
     if (replaceParent) {
       const parent = path.dirname(filePath);
-      originalParentInode = String(fs.statSync(parent).ino);
+      originalParentInode = String(readIdentityStatSync(fs, parent, 'statSync').ino);
       const displaced = path.join(directory, 'displaced-copy-directory');
       fs.renameSync(parent, displaced);
       fs.mkdirSync(parent);
       fs.renameSync(path.join(displaced, path.basename(filePath)), filePath);
-      replacementParentInode = String(fs.statSync(parent).ino);
+      replacementParentInode = String(readIdentityStatSync(fs, parent, 'statSync').ino);
       assert.notEqual(replacementParentInode, originalParentInode);
-      assert.equal(String(fs.statSync(filePath).ino), priorInode, '父目录替换保留原文件 inode');
+      assert.equal(String(readIdentityStatSync(fs, filePath, 'statSync').ino), priorInode, '父目录替换保留原文件 inode');
     } else {
       const independent = path.join(directory, 'independent-copy.csv');
       fs.writeFileSync(independent, SOURCE_BYTES);
       fs.renameSync(independent, filePath);
-      assert.notEqual(String(fs.statSync(filePath).ino), priorInode);
+      assert.notEqual(String(readIdentityStatSync(fs, filePath, 'statSync').ino), priorInode);
     }
     replacementPath = filePath;
-    replacementInode = String(fs.statSync(filePath).ino);
+    replacementInode = String(readIdentityStatSync(fs, filePath, 'statSync').ino);
   }
   const fsImpl = { ...fs,
     openSync(filePath, flags, ...args) {
       const fd = fs.openSync(filePath, flags, ...args);
       if (String(filePath).includes(`${path.sep}.readonly${path.sep}`) && flags === 'wx') {
         creationFd = fd;
-        createdInode = String(fs.fstatSync(fd).ino);
+        createdInode = String(readIdentityStatSync(fs, fd, 'fstatSync').ino);
         targetPath = String(filePath).slice(0, -4);
         if (replacement === 'after-create') replaceObject(filePath);
       }
@@ -201,7 +202,7 @@ async function verifyReadonlyOwnerIdentity(parentDirectory, options = {}) {
       assert.equal(opened.code, 'ARCHIVE_EIO', JSON.stringify(opened));
       assert.equal(openerCalls, 0);
       assert.equal(sentinelFd, creationFd, '错误流 close 后必须实际复用原 fd 编号');
-      assert.ok(fs.fstatSync(sentinelFd).isFile(), 'service 不得重复关闭已由其他文件复用的 fd');
+      assert.ok(readIdentityStatSync(fs, sentinelFd, 'fstatSync').isFile(), 'service 不得重复关闭已由其他文件复用的 fd');
       fs.writeSync(sentinelFd, 'sentinel-still-open');
       assert.equal(fs.readFileSync(path.join(directory, 'sentinel.txt'), 'utf8'), 'sentinel-still-open');
       const owners = runtime.service.repository.listOwnedTemporaryFiles(batchContext.batchId);
@@ -228,7 +229,7 @@ async function verifyReadonlyOwnerIdentity(parentDirectory, options = {}) {
       assert.ok(observation.owners.every((owner) => owner.state === 'ready'));
       const owner = observation.owners.find((item) => !item.managedRelativePath.endsWith('.tmp'));
       assert.equal(owner.expectedIdentity.ino, createdInode);
-      assert.equal(String(fs.statSync(opened.filePath).ino), createdInode);
+      assert.equal(String(readIdentityStatSync(fs, opened.filePath, 'statSync').ino), createdInode);
       assert.equal(fs.readFileSync(opened.filePath, 'utf8'), SOURCE_BYTES);
     }
     fs.writeFileSync(path.join(directory, 'readonly-observation.json'), JSON.stringify(observation));

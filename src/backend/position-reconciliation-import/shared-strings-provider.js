@@ -108,13 +108,13 @@ class AdaptiveSharedStringsProvider {
     }
     // 已存在的目录（包括 cwd、符号链接和另一读取任务的目录）一律不接管。
     fs.mkdirSync(this.tempRoot, { mode: 0o700 });
-    this.tempRootIdentity = fs.lstatSync(this.tempRoot);
+    this.tempRootIdentity = fs.lstatSync(this.tempRoot, { bigint: true });
     this.binPath = path.join(this.tempRoot, 'sst.bin');
     this.idxPath = path.join(this.tempRoot, 'sst.idx');
     this.binFd = fs.openSync(this.binPath, 'wx+', 0o600);
-    this.ownedSpillFiles.push({ path: this.binPath, identity: fs.fstatSync(this.binFd) });
+    this.ownedSpillFiles.push({ path: this.binPath, identity: fs.fstatSync(this.binFd, { bigint: true }) });
     this.idxFd = fs.openSync(this.idxPath, 'wx+', 0o600);
-    this.ownedSpillFiles.push({ path: this.idxPath, identity: fs.fstatSync(this.idxFd) });
+    this.ownedSpillFiles.push({ path: this.idxPath, identity: fs.fstatSync(this.idxFd, { bigint: true }) });
     this.mode = 'disk';
     const buffered = this.values;
     this.values = [];
@@ -300,12 +300,12 @@ class AdaptiveSharedStringsProvider {
     if (this.tempRootIdentity && !this.preserveOnClose) {
       try {
         const sameIdentity = (actual, owned) => actual.dev === owned.dev && actual.ino === owned.ino;
-        const root = await fs.promises.lstat(this.tempRoot);
+        const root = await fs.promises.lstat(this.tempRoot, { bigint: true });
         if (!root.isDirectory() || !sameIdentity(root, this.tempRootIdentity)) {
           throw new PositionSharedStringsError('SST 临时目录身份已变化，停止清理');
         }
         for (const file of this.ownedSpillFiles) {
-          const actual = await fs.promises.lstat(file.path);
+          const actual = await fs.promises.lstat(file.path, { bigint: true });
           if (!actual.isFile() || !sameIdentity(actual, file.identity)) {
             throw new PositionSharedStringsError('SST 临时文件身份已变化，停止清理');
           }

@@ -1,5 +1,7 @@
 'use strict';
 
+const { readIdentityStat } = require('../../main-process/archive-center/filesystem-identity');
+
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -232,7 +234,7 @@ async function writePositionAnomalyReport({
     await workbook.commit();
     await fs.promises.rename(temporaryPath, outputPath);
     const first = await hashFileSha256Async(outputPath);
-    const stat = await fs.promises.stat(outputPath);
+    const stat = await readIdentityStat(fs, outputPath, 'stat');
     const snapshot = sourceSnapshotFromStat(stat);
     const second = await hashFileSha256Async(outputPath);
     if (!snapshot

@@ -20,7 +20,7 @@ async function prepareRows(payload, readContext, { chooseDirectory, confirmOverw
   assert(payload.mode === 'rows', '按行拆分模式非法');
   // 计数检查先于路径数组、对话框、FilePlan 和任务创建。
   const counts = planRowCounts(readContext.dataRowCount, payload.rowsPerFile);
-  assert(sourceSnapshotMatchesStat(readContext.snapshot, fs.statSync(readContext.sourceFilePath)),
+  assert(sourceSnapshotMatchesStat(readContext.snapshot, fs.statSync(readContext.sourceFilePath, { bigint: true })),
     '拆分源文件在读取后已变化，请重新选择', 'TOOLBOX_SPLIT_READ_CONTEXT_STALE');
   assertSourceBudget(readContext.sourceFilePath);
   const directory = await chooseDirectory();
@@ -145,7 +145,7 @@ async function generateValidateAndPublishRows({
     throw rowsError('TOOLBOX_ROWS_GENERATION_FAILED', '按行拆分后台生成未完成');
   }
   const validated = await validateRowsManifest(plan, input, execution.result);
-  assert(sourceSnapshotMatchesStat(source.sourceSnapshot, fs.statSync(source.filePath)),
+  assert(sourceSnapshotMatchesStat(source.sourceSnapshot, fs.statSync(source.filePath, { bigint: true })),
     '拆分源文件在生成后已变化，请重新选择', 'TOOLBOX_SPLIT_READ_CONTEXT_STALE');
   if (metadataDirectory) assertDiskSpace(metadataDirectory, ROWS_BUDGETS.maxManifestBytes);
   const publication = await publisher(validated.artifacts);

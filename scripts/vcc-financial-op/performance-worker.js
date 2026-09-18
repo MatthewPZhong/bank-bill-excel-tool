@@ -8,6 +8,28 @@ const settings = workerData.performanceProbe;
 const started = Date.now();
 let phase = 'starting', rows = 0, readRows = 0, queuePeak = 0, writerSession, output;
 const stages = [], sst = [], scans = [];
+let sourceRows = 0, sourceNextCalls = 0, sourceCursors = 0, pendingCommits = 0, maxPendingCommits = 0;
+let currentCommit, resumeCandidate, outputPaused = false, sourceRowsAtCancel = null;
+const flow = { nextWhileCommitPending: 0, blockedWaits: 0, resumed: 0, cursorReturns: 0 };
+function flowSnapshot() { return { ...flow, sourceRows, sourceNextCalls, sourceCursors, pendingCommits, maxPendingCommits, sourceRowsAtCancel }; }
+function observeDrainWait() {
+  const active = currentCommit;
+  if (!outputPaused || !active || active.done || !active.actualDrainWait || !active.stream.writableNeedDrain
+      || !active.waitRefs.some((ref) => active.stream.rawListeners('drain').includes(ref))) return;
+  if (!active.blockedAt) { active.blockedAt = Date.now(); active.blockedSourceRows = sourceRows; return; }
+  if (active.proven || Date.now() - active.blockedAt < 100) return;
+  active.proven = true; flow.blockedWaits++;
+  emit('sheet-drain-blocked', { since: active.blockedAt, sourceRowsStart: active.blockedSourceRows, sourceRowsEnd: sourceRows,
+    pendingCommits, writableNeedDrain: active.stream.writableNeedDrain, originalDrainListeners: active.waitRefs.length,
+    sheet: active.sheet, row: active.row, outputPaused });
+  if (settings.cancelOnDrain) emit('cancel-point', { requestedPhase: 'writing-real-drain', sourceRows });
+}
+const flowTimer = setInterval(observeDrainWait, 20); flowTimer.unref();
+const nativeDbClose = DatabaseSync.prototype.close;
+DatabaseSync.prototype.close = function () {
+  const files = this.prepare('PRAGMA database_list').all().map((item) => item.file);
+  const result = nativeDbClose.call(this); emit('database-closed', { files }); return result;
+};
 const emit = (kind, data) => parentPort.postMessage({ type: 'performance-probe', kind, at: Date.now(), threadId, phase, ...data });
 function queues() {
   const writer = writerSession?.writer;
@@ -18,11 +40,11 @@ function queues() {
 }
 function sample() { emit('sample', { memory: process.memoryUsage(), pid: process.pid, rows, readRows, queues: queues() }); }
 const timer = setInterval(sample, 500); timer.unref(); sample();
-parentPort.on('message', (message) => { if (message?.type === 'cancel') emit('cancel-received', { rows, readRows }); });
+parentPort.on('message', (message) => { if (message?.type === 'cancel') { sourceRowsAtCancel = sourceRows; emit('cancel-received', { rows, readRows, sourceRows }); } });
 const closePort = parentPort.close.bind(parentPort);
 parentPort.close = () => {
-  sample(); emit('summary', { stages, sst, scans, rows, readRows, queuePeak, elapsedMs: Date.now() - started });
-  clearInterval(timer); closePort();
+  sample(); emit('summary', { stages, sst, scans, rows, readRows, queuePeak, flow: flowSnapshot(), elapsedMs: Date.now() - started });
+  clearInterval(timer); clearInterval(flowTimer); closePort();
 };
 function throttledOutput(name) {
   const fd = fs.openSync(name, 'wx', 0o600); let closed = false, pendingTimer, bytes = 0, paused = false;
@@ -31,15 +53,24 @@ function throttledOutput(name) {
     write(chunk, encoding, cb) {
       let delay = Math.ceil(chunk.length * 1000 / settings.bytesPerSecond);
       if (!paused && bytes >= 65536) {
-        paused = true; delay += settings.pauseMs; emit('output-paused', { bytes, rows, readRows, pauseMs: settings.pauseMs });
-        if (settings.cancelOnPause) emit('cancel-point', { requestedPhase: 'writing-drain' });
+        paused = true; outputPaused = true; delay += settings.pauseMs; emit('output-paused', { bytes, rows, readRows, pauseMs: settings.pauseMs });
       }
-      pendingTimer = setTimeout(() => { pendingTimer = null; fs.write(fd, chunk, 0, chunk.length, null, (error, count) => {
+      pendingTimer = setTimeout(() => { pendingTimer = null;
+        if (outputPaused) {
+          outputPaused = false;
+          if (currentCommit?.proven && !currentCommit.done && currentCommit.stream.writableNeedDrain) {
+            currentCommit.outputResumedAt = Date.now();
+            emit('output-resumed-during-sheet-drain', { sourceRows, sheet: currentCommit.sheet, row: currentCommit.row });
+          }
+          emit('output-resumed', { sourceRows, rows, readRows });
+        }
+        fs.write(fd, chunk, 0, chunk.length, null, (error, count) => {
         bytes += count || 0; cb(error || (count !== chunk.length ? new Error('Short performance fixture write') : null));
       }); }, delay);
     }, final(cb) { close(cb); }, destroy(error, cb) { if (pendingTimer) clearTimeout(pendingTimer); close((closeError) => cb(error || closeError)); }
   });
-  stream.on('drain', () => emit('output-drain', { bytes, rows, readRows })); return stream;
+  stream.on('drain', () => emit('output-drain', { bytes, rows, readRows }));
+  stream.once('close', () => emit('output-closed', { outputPaused, sourceRows })); return stream;
 }
 const bounded = require('../../src/main-process/bounded-xlsx-writer');
 const originalBounded = bounded.withBoundedWorkbook;
@@ -48,7 +79,32 @@ bounded.withBoundedWorkbook = (options, callback) => originalBounded({ ...option
 }, async (session) => {
   writerSession = session;
   const commit = session.commitRow.bind(session);
-  session.commitRow = async (row) => { const pending = commit(row); rows += 1; queues(); await pending; queues(); };
+  session.commitRow = async (row) => {
+    const stream = row.worksheet.stream, priorRefs = stream.rawListeners('drain'), priorWaits = session.metrics.drainWaits;
+    const active = { stream, sheet: row.worksheet.name, row: row.number, done: false };
+    pendingCommits++; maxPendingCommits = Math.max(maxPendingCommits, pendingCommits);
+    let drainObserver;
+    try {
+      const pending = commit(row); rows++; queues();
+      active.actualDrainWait = session.metrics.drainWaits > priorWaits;
+      active.waitRefs = stream.rawListeners('drain').filter((ref) => !priorRefs.includes(ref));
+      currentCommit = active;
+      if (active.actualDrainWait) {
+        drainObserver = () => { active.drainedAt = Date.now(); };
+        stream.once('drain', drainObserver);
+      }
+      await pending; queues();
+      if (active.proven && active.outputResumedAt && active.drainedAt >= active.outputResumedAt) resumeCandidate = active;
+    } finally {
+      active.done = true; pendingCommits--;
+      if (drainObserver) stream.off('drain', drainObserver);
+      if (active.proven) emit('sheet-drain-settled', { sheet: active.sheet, row: active.row,
+        sourceRowsStart: active.blockedSourceRows, sourceRowsEnd: sourceRows,
+        outputResumedAt: active.outputResumedAt ?? null, drainedAt: active.drainedAt ?? null,
+        aborted: !!options.signal?.aborted, originalDrainListenersRemoved: active.waitRefs.every((ref) => !stream.rawListeners('drain').includes(ref)) });
+      if (currentCommit === active) currentCommit = null;
+    }
+  };
   try { return await callback(session); } finally { queues(); }
 });
 const rich = require('../../src/backend/xlsx-rich-reader');
@@ -84,6 +140,31 @@ function wrap(modulePath, exportName, stage) {
     } finally { stages.push({ stage, started: began, finished: Date.now() }); emit('stage-end', {}); }
   };
 }
+const plan = require('../../src/backend/vcc-financial-op/review-export-plan');
+const originalPageRows = plan.pageRows;
+plan.pageRows = (db, page) => {
+  const iterator = originalPageRows(db, page);
+  if (phase !== 'write') return iterator;
+  sourceCursors++; let closed = false;
+  const finish = (reason) => { if (!closed) { closed = true; sourceCursors--; emit('source-cursor-closed', { reason, sourceRows, pageId: page.id }); } };
+  return {
+    [Symbol.iterator]() { return this; },
+    next(...args) {
+      sourceNextCalls++;
+      if (pendingCommits) flow.nextWhileCommitPending++;
+      const next = iterator.next(...args);
+      if (next.done) finish('exhausted');
+      else {
+        sourceRows++;
+        if (resumeCandidate) { flow.resumed++; emit('source-resumed', { sourceRows, priorSourceRows: resumeCandidate.blockedSourceRows,
+          outputResumedAt: resumeCandidate.outputResumedAt, drainedAt: resumeCandidate.drainedAt }); resumeCandidate = null; }
+      }
+      return next;
+    },
+    return(...args) { try { return iterator.return(...args); } finally { flow.cursorReturns++; finish('return'); } },
+    throw(...args) { try { return iterator.throw(...args); } finally { finish('throw'); } }
+  };
+};
 wrap('../../src/backend/vcc-financial-op/review-export-plan', 'prepareReviewManifest', 'prepare');
 wrap('../../src/backend/vcc-financial-op/review-export-plan', 'extractReviewSources', 'extract');
 wrap('../../src/main-process/vcc-financial-op-review-writer', 'writeReviewWorkbook', 'write');

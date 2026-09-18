@@ -1,5 +1,7 @@
 'use strict';
 
+const { identityInteger, readIdentityStat } = require('./filesystem-identity');
+
 const { positionReportSourceIdentity } = require('../../backend/position-report-source-identity');
 
 const crypto = require('node:crypto');
@@ -29,8 +31,7 @@ function inside(root, candidate) {
 }
 
 function objectIdentity(stat) {
-  if (!Number.isSafeInteger(stat.dev) || stat.dev <= 0
-      || !Number.isSafeInteger(stat.ino) || stat.ino <= 0) {
+  if (!identityInteger(stat.dev) || !identityInteger(stat.ino)) {
     failure('ARCHIVE_DELETE_SOURCE_IDENTITY_UNAVAILABLE', '受管暂存文件系统无法提供可靠的对象身份');
   }
   return { dev: String(stat.dev), ino: String(stat.ino) };
@@ -147,7 +148,7 @@ function createPositionOwnedDeleteSourceResolver({ userDataPath, fsImpl = fs, pr
     for (let index = -1; index < components.length; index += 1) {
       if (index >= 0) current = path.join(current, components[index]);
       let stat;
-      try { stat = await fsImpl.promises.lstat(current); } catch (error) {
+      try { stat = await readIdentityStat(fsImpl, current); } catch (error) {
         if (error.code === 'ENOENT' && index >= STAGING_PARTS.length) {
           return { chain, missing: true, rootRealPath };
         }
@@ -257,7 +258,7 @@ function createPositionOwnedDeleteSourceResolver({ userDataPath, fsImpl = fs, pr
       const before = await directoryChain(parsed.managedRelativePath);
       if (!before.missing) {
         let stat;
-        try { stat = await fsImpl.promises.lstat(parsed.sourcePath); } catch (error) {
+        try { stat = await readIdentityStat(fsImpl, parsed.sourcePath); } catch (error) {
           if (error.code !== 'ENOENT') throw error;
         }
         if (stat) {
@@ -273,7 +274,7 @@ function createPositionOwnedDeleteSourceResolver({ userDataPath, fsImpl = fs, pr
             digest.update(chunk);
             sizeBytes += chunk.length;
           }
-          const after = await fsImpl.promises.lstat(parsed.sourcePath);
+          const after = await readIdentityStat(fsImpl, parsed.sourcePath);
           if (!sourceSnapshotMatchesStat(evidence.sourceSnapshot, after)
               || sizeBytes !== evidence.expectedSizeBytes
               || digest.digest('hex') !== evidence.expectedSha256) {

@@ -1441,7 +1441,7 @@ async function showImportOpenDialog(scope, options) {
 function createPreviewSourceFreshnessGuard(filePaths, label) {
   const snapshots = (Array.isArray(filePaths) ? filePaths : []).map((filePath) => {
     const resolvedPath = path.resolve(String(filePath || ''));
-    const snapshot = sourceSnapshotFromStat(fs.statSync(resolvedPath));
+    const snapshot = sourceSnapshotFromStat(fs.statSync(resolvedPath, { bigint: true }));
     if (!snapshot) throw new Error(`${label}源文件不可读`);
     return { filePath: resolvedPath, snapshot };
   });
@@ -1449,7 +1449,7 @@ function createPreviewSourceFreshnessGuard(filePaths, label) {
     for (const item of snapshots) {
       let stat;
       try {
-        stat = fs.statSync(item.filePath);
+        stat = fs.statSync(item.filePath, { bigint: true });
       } catch (_error) {
         throw new Error(`${label}源文件已不存在，请重新选择`);
       }
@@ -18979,7 +18979,7 @@ function writePositionPendingOperation(pending, operationToken) {
 
 function capturePositionArchiveFileSnapshot(filePath) {
   try {
-    return sourceSnapshotFromStat(fs.statSync(filePath));
+    return sourceSnapshotFromStat(fs.statSync(filePath, { bigint: true }));
   } catch (_error) {
     return null;
   }
@@ -20642,7 +20642,7 @@ async function acknowledgeToolboxPublicationReceipts(taskIds) {
 function captureToolboxTargetSnapshot(targetPath) {
   const resolvedPath = path.resolve(String(targetPath || ''));
   try {
-    const stat = fs.lstatSync(resolvedPath);
+    const stat = fs.lstatSync(resolvedPath, { bigint: true });
     const snapshot = sourceSnapshotFromStat(stat);
     if (!snapshot) throw new Error(`输出目标不是可覆盖的普通文件：${resolvedPath}`);
     return Object.freeze({ exists: true, snapshot: Object.freeze(snapshot) });
@@ -20694,7 +20694,7 @@ function assertToolboxTargetSnapshotsFresh(targetPaths, snapshots) {
   for (let index = 0; index < paths.length; index += 1) {
     let stat = null;
     try {
-      stat = fs.lstatSync(paths[index]);
+      stat = fs.lstatSync(paths[index], { bigint: true });
     } catch (error) {
       if (!error || error.code !== 'ENOENT') throw error;
     }
@@ -20719,7 +20719,7 @@ let toolboxSplitReadContext = null;
 
 function createToolboxSplitReadContext(sourceFilePath, dataRowCount) {
   const resolvedPath = path.resolve(String(sourceFilePath || ''));
-  const snapshot = sourceSnapshotFromStat(fs.statSync(resolvedPath));
+  const snapshot = sourceSnapshotFromStat(fs.statSync(resolvedPath, { bigint: true }));
   if (!snapshot) throw new Error('拆分源文件不可读，请重新选择');
   const context = Object.freeze({
     token: randomUUID(),
@@ -20750,7 +20750,7 @@ function clearToolboxSplitReadContext(context) {
 function assertToolboxSplitSourceFresh(context, sourceEvidence) {
   let stat;
   try {
-    stat = fs.statSync(context.sourceFilePath);
+    stat = fs.statSync(context.sourceFilePath, { bigint: true });
   } catch (_error) {
     clearToolboxSplitReadContext(context);
     throw new Error('拆分源文件已不存在，请重新选择');
@@ -20984,7 +20984,7 @@ function registerToolboxHandlers() {
         return { status: 'cancelled' };
       }
       const sourceFilePath = choice.filePaths[0];
-      const readStartedSnapshot = sourceSnapshotFromStat(fs.statSync(sourceFilePath));
+      const readStartedSnapshot = sourceSnapshotFromStat(fs.statSync(sourceFilePath, { bigint: true }));
       if (!readStartedSnapshot) throw new Error('拆分源文件不可读，请重新选择');
 
       // 普通与 Worker 只区分执行位置，读取、matchValue 和字段去重均走同一 style-aware facade。
@@ -20996,7 +20996,7 @@ function registerToolboxHandlers() {
         return { status: 'failed', message: '文件为空或不可读，请重新导入', detailLines: [] };
       }
       const readContext = createToolboxSplitReadContext(sourceFilePath, dataRowCount);
-      if (!sourceSnapshotMatchesStat(readStartedSnapshot, fs.statSync(sourceFilePath))) {
+      if (!sourceSnapshotMatchesStat(readStartedSnapshot, fs.statSync(sourceFilePath, { bigint: true }))) {
         clearToolboxSplitReadContext(readContext);
         throw new Error('拆分源文件在读取过程中已变化，请重新选择');
       }

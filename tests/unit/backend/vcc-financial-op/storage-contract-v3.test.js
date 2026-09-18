@@ -27,8 +27,17 @@ const legacy = baselineModule.exports;
 function fixture(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-contract-v3-'));
   const file = path.join(directory, 'test.sqlite');
-  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
-  const db = new DatabaseSync(file);
+  const connections = [];
+  const open = (options = {}) => {
+    const connection = new DatabaseSync(file, options);
+    connections.push(connection);
+    return connection;
+  };
+  t.after(() => {
+    for (const connection of connections) if (connection.isOpen) connection.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+  const db = open();
   db.exec(`PRAGMA foreign_keys = ON;
     CREATE TABLE app_settings (setting_key TEXT PRIMARY KEY, setting_value TEXT, updated_at TEXT NOT NULL);
   `);
@@ -48,7 +57,7 @@ function fixture(t) {
         '1234567890123456.123456789', 101, 201, '原始明细', 7);
   `);
   db.close();
-  return file;
+  return { file, open };
 }
 
 function contents(db) {
@@ -57,10 +66,9 @@ function contents(db) {
 }
 
 test('真实 v2 增量迁移保留全部业务行、来源 ID 与精度，支持共享原件且阻止旧连接写入', (t) => {
-  const file = fixture(t);
-  const oldWriter = new DatabaseSync(file);
+  const { file, open } = fixture(t);
+  const oldWriter = open();
   legacy.registerVccStorageWriteCapability(oldWriter);
-  t.after(() => oldWriter.close());
   const before = contents(oldWriter);
   assertVccStorageContract(oldWriter, 2);
   assert.deepEqual(upgradeVccStorageFile(file), { upgraded: true, fromVersion: 2, toVersion: 3 });
@@ -68,8 +76,7 @@ test('真实 v2 增量迁移保留全部业务行、来源 ID 与精度，支持
   assert.throws(() => oldWriter.exec("UPDATE vcc_fin_op_import_batches SET file_count = 2 WHERE id = 'batch'"),
     /no such function: vcc_storage_write_capability_v3/);
 
-  const writer = new DatabaseSync(file);
-  t.after(() => writer.close());
+  const writer = open();
   registerVccStorageWriteCapability(writer);
   assertVccStorageContract(writer);
   assert.equal(writer.prepare("SELECT count(*) AS n FROM pragma_function_list WHERE name = 'vcc_storage_write_capability_v2'").get().n, 0);
@@ -84,14 +91,14 @@ test('真实 v2 增量迁移保留全部业务行、来源 ID 与精度，支持
 
 test('v3 迁移各持久断点均完整回滚，关闭连接后可以安全重试', (t) => {
   for (const phase of ['after-indexes', 'after-guards', 'after-marker', 'before-commit']) {
-    const file = fixture(t);
-    let db = new DatabaseSync(file, { readOnly: true });
+    const { file, open } = fixture(t);
+    let db = open({ readOnly: true });
     const before = contents(db);
     db.close();
     assert.throws(() => upgradeVccStorageFile(file, {
       faultInjector: (at) => { if (at === phase) throw new Error(phase); }
     }), (error) => error.message === phase && error.persistedContractVersion === 2 && !error.migrationCommitted);
-    db = new DatabaseSync(file, { readOnly: true });
+    db = open({ readOnly: true });
     assertVccStorageContract(db, 2);
     assert.deepEqual(contents(db), before);
     db.close();
@@ -100,7 +107,7 @@ test('v3 迁移各持久断点均完整回滚，关闭连接后可以安全重�
 });
 
 test('提交后故障报告持久 v3，后续新连接校验不能伪称回滚', (t) => {
-  const file = fixture(t);
+  const { file } = fixture(t);
   assert.throws(() => upgradeVccStorageFile(file, {
     faultInjector: (phase) => { if (phase === 'after-commit') throw new Error('重新初始化失败'); }
   }), (error) => error.migrationCommitted === true && error.persistedContractVersion === 3);
@@ -114,8 +121,8 @@ test('坏 guard、错误索引及未来 marker 在迁移首写前拒绝', (t) =>
      CREATE INDEX idx_vcc_fin_op_import_sources_artifact ON vcc_fin_op_import_sources(archive_artifact_id)`,
     "UPDATE app_settings SET setting_value = '4' WHERE setting_key = 'vcc_storage_contract_version'"
   ]) {
-    const file = fixture(t);
-    const db = new DatabaseSync(file);
+    const { file, open } = fixture(t);
+    const db = open();
     db.exec(mutation);
     const before = db.prepare('SELECT type, name, sql FROM sqlite_master ORDER BY type, name').all();
     assert.throws(() => upgradeVccStorageFile(file));
@@ -125,14 +132,13 @@ test('坏 guard、错误索引及未来 marker 在迁移首写前拒绝', (t) =>
 });
 
 test('generic 初始化拒绝未迁移 v2；v3 缺 guard 时不能靠 IF NOT EXISTS 自动修补', (t) => {
-  const file = fixture(t);
-  let db = new DatabaseSync(file);
+  const { file, open } = fixture(t);
+  let db = open();
   assert.throws(() => ensureVccFinancialOpTablesSupport(db), { code: 'vcc-storage-upgrade-required' });
   assert.equal(getVccStorageContractVersion(db), 2);
   db.close();
   upgradeVccStorageFile(file);
-  db = new DatabaseSync(file);
-  t.after(() => db.close());
+  db = open();
   db.exec('DROP TRIGGER vcc_storage_contract_v3_guard_vcc_fin_op_runs_insert');
   assert.throws(() => ensureVccFinancialOpTablesSupport(db), { code: 'vcc-storage-contract-mismatch' });
   assert.equal(db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'vcc_storage_contract_v3_guard_vcc_fin_op_runs_insert'").get(), undefined);

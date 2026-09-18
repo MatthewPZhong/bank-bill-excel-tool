@@ -1,4 +1,5 @@
 'use strict';
+const { readIdentityStatSync } = require('../../../src/main-process/archive-center/filesystem-identity');
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -39,7 +40,7 @@ async function fixture() {
 }
 
 function persistedTarget(entry) {
-  const stat = fs.lstatSync(entry.rootDir);
+  const stat = readIdentityStatSync(fs, entry.rootDir, 'lstatSync');
   return {
     kind: 'owned-temp', sourceArtifactId: entry.artifactId,
     managedRelativePath: entry.managedRelativePath, sourceOwnerProof: entry.ownerProof,

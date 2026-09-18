@@ -24,9 +24,12 @@ const { operationContextFromBatch } = require('../../../src/main-process/toolbox
 const { prepareToolboxPublication, publishPreparedToolboxPublication, ToolboxPublicationCrashError } = require('../../../src/main-process/toolbox-output-publication');
 const { recoverToolboxPublicationsAsync } = require('../../../src/main-process/toolbox-output-publication-dispatch');
 
-function fixture(t) {
+function fixture(t, dispose) {
   const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-rows-test-')));
-  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  t.after(async () => {
+    if (dispose) await dispose();
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
   return directory;
 }
 
@@ -359,10 +362,12 @@ test('9 份真实 rows 输出只归属一个业务批次，原件和全部输出
   const { recoverToolboxPublicationsIntoArchive } = require('../../../src/main-process/toolbox-archive-recovery');
   const { publishToolboxPublicationAsync } = require('../../../src/main-process/toolbox-output-publication-dispatch');
   const { JOURNAL_INDEX_NAME } = require('../../../src/main-process/toolbox-output-publication');
-  const dir = fixture(t), source = path.join(dir, 'input.csv');
+  let db, runtime;
+  const dir = fixture(t, async () => {
+    try { await runtime?.shutdown(); } finally { db?.close(); }
+  }), source = path.join(dir, 'input.csv');
   fs.writeFileSync(source, 'A\n1\n2\n3\n4\n5\n6\n7\n8\n9\n');
-  const db = new DatabaseSync(path.join(dir, 'archive.sqlite')); db.exec('PRAGMA foreign_keys=ON');
-  t.after(() => db.close());
+  db = new DatabaseSync(path.join(dir, 'archive.sqlite')); db.exec('PRAGMA foreign_keys=ON');
   const userDataDir = path.join(dir, 'user-data'); fs.mkdirSync(userDataDir);
   const service = createArchiveService({ database: db, rootDir: path.join(dir, 'archive') });
   const settings = new Map();
@@ -379,8 +384,7 @@ test('9 份真实 rows 输出只归属一个业务批次，原件和全部输出
   const batchContext = { batchId: batch.id, batchNumber: batch.batchNumber, taskRunId: batch.taskRunId,
     taskKey: batch.taskKey, moduleId: batch.moduleId, parentRunId: batch.parentRunId, operationKey: batch.operationKey };
   const options = makePlan(dir, source, 9, 1);
-  const runtime = createBackgroundExecutionRuntime({ availableParallelism: 4, freeMemoryBytes: 8 * 1024 ** 3, totalMemoryBytes: 16 * 1024 ** 3 });
-  t.after(() => runtime.shutdown());
+  runtime = createBackgroundExecutionRuntime({ availableParallelism: 4, freeMemoryBytes: 8 * 1024 ** 3, totalMemoryBytes: 16 * 1024 ** 3 });
   const generated = await generateValidateAndPublishRows({ ...options, runtime, batchContext,
     publisher: (artifacts) => publishToolboxPublicationAsync({ taskId: 'rows-archive-publication',
       artifacts, targets: options.filePlan.outputs.map((item) => ({ targetPath: item.filePath, expectedTargetSnapshot: item.targetSnapshot })),

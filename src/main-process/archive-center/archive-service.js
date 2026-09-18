@@ -1,5 +1,7 @@
 'use strict';
 
+const { identityInteger, readIdentityStat, readIdentityStatSync } = require('./filesystem-identity');
+
 const crypto = require('node:crypto');
 const { buildDeletePlan, executeDeletePlan, captureFileIdentity, upgradeLegacyDeletePlan } = require('./batch-delete-plan');
 const fs = require('node:fs');
@@ -55,8 +57,7 @@ function readonlyIdentityChanged() {
 }
 
 function readonlyObjectIdentity(stat) {
-  if (!stat || stat.isSymbolicLink() || !Number.isSafeInteger(stat.dev) || stat.dev <= 0
-      || !Number.isSafeInteger(stat.ino) || stat.ino <= 0) readonlyIdentityChanged();
+  if (!stat || stat.isSymbolicLink() || !identityInteger(stat.dev) || !identityInteger(stat.ino)) readonlyIdentityChanged();
   return { dev: String(stat.dev), ino: String(stat.ino) };
 }
 
@@ -72,7 +73,7 @@ function readonlyParentIdentity(service, relativePath) {
   const parents = [];
   for (let index = 0; index < parts.length; index += 1) {
     const relative = parts.slice(0, index).join('/');
-    const stat = service.fs.lstatSync(path.join(service.rootDir, ...parts.slice(0, index)));
+    const stat = readIdentityStatSync(service.fs, path.join(service.rootDir, ...parts.slice(0, index)));
     if (!stat.isDirectory()) readonlyIdentityChanged();
     parents.push({ relativePath: relative, ...readonlyObjectIdentity(stat) });
   }
@@ -84,8 +85,8 @@ function assertReadonlyCopyIdentity(service, relativePath, fd, parents, expected
   if (JSON.stringify(readonlyParentIdentity(service, relativePath)) !== JSON.stringify(parents)) {
     readonlyIdentityChanged();
   }
-  const original = readonlyFileIdentity(service.fs.fstatSync(fd));
-  const current = readonlyFileIdentity(service.fs.lstatSync(service._resolveManagedRelative(relativePath)));
+  const original = readonlyFileIdentity(readIdentityStatSync(service.fs, fd, 'fstatSync'));
+  const current = readonlyFileIdentity(readIdentityStatSync(service.fs, service._resolveManagedRelative(relativePath)));
   if (Object.keys(original).some((key) => current[key] !== original[key]
       || (expected && expected[key] !== original[key]))
       || (expected && JSON.stringify(expected.parents) !== JSON.stringify(parents.slice(1)))) {
@@ -471,7 +472,7 @@ class ArchiveService {
 
   async _assertManagedRoot(options = {}) {
     try {
-      const rootStat = await this.fs.promises.lstat(this.rootDir);
+      const rootStat = await readIdentityStat(this.fs, this.rootDir);
       if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
         throw new ArchiveOperationError(
           'ARCHIVE_PATH_SYMLINK_REJECTED',
@@ -504,7 +505,7 @@ class ArchiveService {
     for (let index = 0; index < stop; index += 1) {
       current = path.join(current, parts[index]);
       try {
-        const stat = await this.fs.promises.lstat(current);
+        const stat = await readIdentityStat(this.fs, current);
         if (stat.isSymbolicLink()) {
           throw new ArchiveOperationError(
             'ARCHIVE_PATH_SYMLINK_REJECTED',
@@ -698,7 +699,7 @@ class ArchiveService {
     const relativePrefix = `${BLOB_ROOT_PARTS.join('/')}/${prefix}`;
     await this._assertManagedFilePath(`${relativePrefix}/.guard`, { includeLeaf: false });
     const prefixDir = this._resolveManagedRelative(relativePrefix);
-    const stat = await this.fs.promises.lstat(prefixDir);
+    const stat = await readIdentityStat(this.fs, prefixDir);
     if (!stat.isDirectory() || stat.isSymbolicLink()) {
       throw new ArchiveOperationError(
         'ARCHIVE_BLOB_PATH_INVALID',
@@ -1110,7 +1111,7 @@ class ArchiveService {
         if (this.rootEstablished) {
           let rootStat;
           try {
-            rootStat = await this.fs.promises.lstat(this.rootDir);
+            rootStat = await readIdentityStat(this.fs, this.rootDir);
           } catch (error) {
             if (!error || error.code !== 'ENOENT') throw error;
             throw new ArchiveOperationError(
@@ -1950,7 +1951,7 @@ class ArchiveService {
   async _statRegularFile(filePath, originalName) {
     let stat;
     try {
-      stat = await this.fs.promises.stat(filePath);
+      stat = await readIdentityStat(this.fs, filePath, 'stat');
     } catch (error) {
       throw new ArchiveOperationError(
         safeFailure(error, '读取', originalName).code,
@@ -2127,7 +2128,7 @@ class ArchiveService {
       }
     } else {
       try {
-        await this.fs.promises.lstat(targetPath);
+        await readIdentityStat(this.fs, targetPath);
         throw new ArchiveOperationError(
           'ARCHIVE_BLOB_UNKNOWN_CONFLICT',
           `存档内容 ${staged.sha256.slice(0, 12)} 的目标位置已有未知文件`
@@ -2206,7 +2207,7 @@ class ArchiveService {
     }
     const filePath = await this._assertManagedFilePath(relativePath);
     try {
-      this._assertNoPendingHardlinkMutation(await this.fs.promises.lstat(filePath));
+      this._assertNoPendingHardlinkMutation(await readIdentityStat(this.fs, filePath));
     } catch (error) {
       if (error.code !== 'ENOENT') throw error;
     }
@@ -3265,7 +3266,7 @@ class ArchiveService {
           );
         }
         try {
-          const targetStat = await this.fs.promises.lstat(targetPath);
+          const targetStat = await readIdentityStat(this.fs, targetPath);
           if (!targetStat.isFile() || targetStat.isSymbolicLink()) {
             throw new ArchiveOperationError(
               'ARCHIVE_SAVE_TARGET_INVALID',

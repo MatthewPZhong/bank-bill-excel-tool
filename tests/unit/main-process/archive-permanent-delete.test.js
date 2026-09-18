@@ -1,4 +1,5 @@
 'use strict';
+const { readIdentityStatSync } = require('../../../src/main-process/archive-center/filesystem-identity');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -275,7 +276,7 @@ function useHistoricalHardlinks(f, artifacts) {
     fs.unlinkSync(target);
     fs.linkSync(blobPath, target);
   }
-  const stat = fs.statSync(blobPath);
+  const stat = readIdentityStatSync(fs, blobPath, 'statSync');
   for (const artifact of artifacts) {
     f.db.prepare(`UPDATE archive_artifacts SET storage_mode = 'hardlink',
       storage_fingerprint_size_bytes = ?, storage_fingerprint_mtime_ms = ?,
@@ -295,7 +296,7 @@ test('失败输出只有预分配路径时不能认领现存未知文件，预�
     const target = path.join(f.rootDir, a.failed.storageRelativePath);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, '无关文件');
-    const before = fs.statSync(target);
+    const before = readIdentityStatSync(fs, target, 'statSync');
     for (const result of [await f.service.prepareDeleteBatch(a.batch.id),
       await f.service.deleteBatch(a.batch.id)]) {
       assert.equal(result.ok, false, JSON.stringify(result));
@@ -304,7 +305,7 @@ test('失败输出只有预分配路径时不能认领现存未知文件，预�
     assert.ok(f.service.repository.getBatch(a.batch.id));
     assert.equal(f.service.repository.listCleanupJobs().length, 0);
     assert.equal(fs.readFileSync(target, 'utf8'), '无关文件');
-    assert.equal(fs.statSync(target).ctimeMs, before.ctimeMs);
+    assert.equal(readIdentityStatSync(fs, target, 'statSync').ctimeMs, before.ctimeMs);
     assert.ok(fs.existsSync(path.join(f.rootDir, a.artifacts.find((artifact) => artifact.blob).blob.relativePath)));
   } finally { f.close(); }
 });
@@ -326,9 +327,9 @@ test('历史 hardlink 的目录文件和 Blob 都能删除，预检不改变 ino
   try {
     const a = await archive(f, 'hardlink');
     const blobPath = useHistoricalHardlinks(f, [a.artifact]);
-    const before = fs.statSync(blobPath);
+    const before = readIdentityStatSync(fs, blobPath, 'statSync');
     assert.equal((await f.service.prepareDeleteBatch(a.batch.id)).ok, true);
-    const after = fs.statSync(blobPath);
+    const after = readIdentityStatSync(fs, blobPath, 'statSync');
     assert.equal(after.ino, before.ino);
     assert.equal(after.ctimeMs, before.ctimeMs);
     assert.equal(after.mode, before.mode);
@@ -446,12 +447,12 @@ test('hardlink 受管链接删除后保留外部链接内容与权限', async ()
     const external = path.join(f.dir, 'outside-archive.xlsx');
     fs.linkSync(blobPath, external);
     useHistoricalHardlinks(f, [a.artifact]);
-    const before = fs.statSync(external);
+    const before = readIdentityStatSync(fs, external, 'statSync');
     const result = await f.service.deleteBatch(a.batch.id);
     assert.equal(result.fullyDeleted, true, JSON.stringify(result));
     assert.equal(fs.readFileSync(external, 'utf8'), 'external-hardlink');
-    assert.equal(fs.statSync(external).mode, before.mode);
-    assert.equal(fs.statSync(external).ino, before.ino);
+    assert.equal(readIdentityStatSync(fs, external, 'statSync').mode, before.mode);
+    assert.equal(readIdentityStatSync(fs, external, 'statSync').ino, before.ino);
   } finally { f.close(); }
 });
 
@@ -624,7 +625,7 @@ for (const trigger of ['read-other', 'maintenance']) {
       f.state.target = path.join(f.rootDir, a.artifact.storageRelativePath);
       const pending = await f.service.deleteBatch(a.batch.id);
       assert.equal(pending.fullyDeleted, false);
-      const before = fs.statSync(blobPath);
+      const before = readIdentityStatSync(fs, blobPath, 'statSync');
       if (trigger === 'read-other') {
         const ready = await f.service.resolveVerifiedArtifact(b.artifact.id);
         assert.equal(ready.ok, true);
@@ -634,8 +635,8 @@ for (const trigger of ['read-other', 'maintenance']) {
         const maintenance = await f.service.reconcileStartup();
         assert.ok(maintenance.consistency.failures.some((failure) => failure.code === 'ARCHIVE_DELETE_HARDLINKS_PENDING'));
       }
-      assert.equal(fs.statSync(blobPath).nlink, before.nlink);
-      assert.equal(fs.statSync(blobPath).ctimeMs, before.ctimeMs);
+      assert.equal(readIdentityStatSync(fs, blobPath, 'statSync').nlink, before.nlink);
+      assert.equal(readIdentityStatSync(fs, blobPath, 'statSync').ctimeMs, before.ctimeMs);
       assert.equal(f.service.repository.getArtifact(b.artifact.id).storageMode, 'hardlink');
       f.state.blocked = false;
       assert.equal((await f.service.retryDeleteCleanupJob(pending.cleanupJobId)).fullyDeleted, true);
@@ -654,7 +655,7 @@ test('旧硬链接清理后的同 SHA 新 inode Blob 有新持久引用时保留
   try {
     const a = await archive(f, 'hardlink-republish-old', 'republished historic');
     const blobPath = useHistoricalHardlinks(f, [a.artifact]);
-    const oldIdentity = fs.statSync(blobPath);
+    const oldIdentity = readIdentityStatSync(fs, blobPath, 'statSync');
     f.state.blocked = true;
     f.state.target = blobPath;
     const pending = await f.service.deleteBatch(a.batch.id);
@@ -664,7 +665,7 @@ test('旧硬链接清理后的同 SHA 新 inode Blob 有新持久引用时保留
     f.state.blocked = false;
     const b = await archive(f, 'hardlink-republish-new', 'republished historic');
     fs.unlinkSync(retiredPath);
-    assert.notEqual(fs.statSync(blobPath).ino, oldIdentity.ino);
+    assert.notEqual(readIdentityStatSync(fs, blobPath, 'statSync').ino, oldIdentity.ino);
     const before = f.service.repository.getArtifact(b.artifact.id).blob.fingerprint;
     const result = await f.service.retryDeleteCleanupJob(pending.cleanupJobId);
     assert.equal(result.fullyDeleted, true, JSON.stringify(result));
@@ -681,7 +682,7 @@ async function republishBlobAfterPartialHardlinkDelete(f, options = {}) {
   if (options.externalLink) fs.linkSync(blobPath, externalPath);
   useHistoricalHardlinks(f, [a.artifact]);
   const materializedPath = path.join(f.rootDir, a.artifact.storageRelativePath);
-  const original = fs.statSync(materializedPath);
+  const original = readIdentityStatSync(fs, materializedPath, 'statSync');
   f.state.blocked = true;
   f.state.target = materializedPath;
   f.state.code = options.code || 'EBUSY';
@@ -698,7 +699,7 @@ async function republishBlobAfterPartialHardlinkDelete(f, options = {}) {
   f.service.repository.updateCleanupJobProgress = update;
   assert.equal(pending.fullyDeleted, false, JSON.stringify(pending));
   assert.equal(fs.existsSync(blobPath), false);
-  assert.equal(fs.statSync(materializedPath).ino, original.ino);
+  assert.equal(readIdentityStatSync(fs, materializedPath, 'statSync').ino, original.ino);
   const deletedBlob = f.service.repository.getCleanupJob(pending.cleanupJobId).plan.items
     .find((item) => item.kind === 'blob');
   assert.equal(deletedBlob.state, options.unpersistedProgress ? 'pending' : 'deleted');
@@ -711,7 +712,7 @@ async function republishBlobAfterPartialHardlinkDelete(f, options = {}) {
   let b;
   if (options.unreferencedReplacement) fs.writeFileSync(blobPath, 'same original bytes');
   else b = await archive(f, 'partial-hardlink-new', 'same original bytes');
-  assert.notEqual(fs.statSync(blobPath).ino, original.ino);
+  assert.notEqual(readIdentityStatSync(fs, blobPath, 'statSync').ino, original.ino);
   return { a, b, pending, original, blobPath, materializedPath, externalPath };
 }
 
@@ -722,15 +723,15 @@ for (const code of ['EBUSY', 'EACCES']) {
       try {
         const current = await republishBlobAfterPartialHardlinkDelete(f, { code });
         const { a, b, pending, blobPath, materializedPath } = current;
-        const before = fs.statSync(blobPath);
+        const before = readIdentityStatSync(fs, blobPath, 'statSync');
         const fingerprint = f.service.repository.getArtifact(b.artifact.id).blob.fingerprint;
         const service = restart ? f.create() : f.service;
         if (restart) await service.initialize({ deferStartupRecovery: true, startBackgroundMaterialization: false });
         const retried = await service.retryDeleteCleanupJob(pending.cleanupJobId);
         assert.equal(retried.fullyDeleted, true, JSON.stringify(retried));
         assert.equal(fs.existsSync(materializedPath), false);
-        assert.equal(fs.statSync(blobPath).ino, before.ino);
-        assert.equal(fs.statSync(blobPath).ctimeMs, before.ctimeMs);
+        assert.equal(readIdentityStatSync(fs, blobPath, 'statSync').ino, before.ino);
+        assert.equal(readIdentityStatSync(fs, blobPath, 'statSync').ctimeMs, before.ctimeMs);
         assert.equal(fs.readFileSync(blobPath, 'utf8'), 'same original bytes');
         assert.deepEqual(service.repository.getArtifact(b.artifact.id).blob.fingerprint, fingerprint);
         assert.ok(service.repository.getBatch(b.batch.id));
@@ -776,7 +777,7 @@ for (const variant of ['unreferenced', 'missing-fingerprint', 'mismatched-finger
         f.db.prepare('UPDATE archive_cleanup_jobs SET progress_json = ? WHERE id = ?')
           .run(JSON.stringify(progress), job.id);
       }
-      const newBefore = fs.statSync(blobPath);
+      const newBefore = readIdentityStatSync(fs, blobPath, 'statSync');
       const newBytes = fs.readFileSync(blobPath);
       let retried;
       if (['forged-memory-progress', 'different-plan'].includes(variant)) {
@@ -792,9 +793,9 @@ for (const variant of ['unreferenced', 'missing-fingerprint', 'mismatched-finger
         assert.equal(retried.fullyDeleted, false, JSON.stringify(retried));
       }
       assert.ok(retried.failures.some((failure) => failure.code === 'ARCHIVE_DELETE_FILE_CHANGED'));
-      assert.equal(fs.statSync(materializedPath).ino, original.ino);
-      assert.equal(fs.statSync(blobPath).ino, newBefore.ino);
-      assert.equal(fs.statSync(blobPath).ctimeMs, newBefore.ctimeMs);
+      assert.equal(readIdentityStatSync(fs, materializedPath, 'statSync').ino, original.ino);
+      assert.equal(readIdentityStatSync(fs, blobPath, 'statSync').ino, newBefore.ino);
+      assert.equal(readIdentityStatSync(fs, blobPath, 'statSync').ctimeMs, newBefore.ctimeMs);
       assert.deepEqual(fs.readFileSync(blobPath), newBytes);
       assert.equal(f.service.repository.getDeletionReceipt(a.batch.id), null);
       assert.ok(f.service.repository.getCleanupJob(pending.cleanupJobId));
@@ -851,7 +852,7 @@ test('共享硬链接 unlink 进度落库前中断，维护不提前刷新指纹
     assert.equal(maintenance.ok, false);
     assert.deepEqual(f.service.repository.getArtifact(b.artifact.id).blob.fingerprint, oldFingerprint);
     assert.deepEqual(f.service.repository.getArtifact(b.artifact.id).storageFingerprint, oldFingerprint);
-    assert.equal(fs.statSync(blobPath).nlink, 2);
+    assert.equal(readIdentityStatSync(fs, blobPath, 'statSync').nlink, 2);
     f.service.repository.updateCleanupJobProgress = update;
     assert.equal((await f.service.retryDeleteCleanupJob(pending.cleanupJobId)).fullyDeleted, true);
     assert.equal((await f.service.deleteBatch(b.batch.id)).fullyDeleted, true);
@@ -864,15 +865,15 @@ test('正常硬链接脱钩遇共享指纹冲突时先保留原 inode，修正�
     const a = await archive(f, 'detach-cas-a', 'detach cas');
     const b = await archive(f, 'detach-cas-b', 'detach cas');
     const blobPath = useHistoricalHardlinks(f, [a.artifact, b.artifact]);
-    const before = fs.statSync(blobPath);
+    const before = readIdentityStatSync(fs, blobPath, 'statSync');
     const original = f.service.repository.getArtifact(b.artifact.id).storageFingerprint;
     f.db.prepare('UPDATE archive_artifacts SET storage_fingerprint_ctime_ms = ? WHERE id = ?')
       .run(original.ctimeMs + 123, b.artifact.id);
     const blocked = await f.service.resolveVerifiedArtifact(a.artifact.id);
     assert.equal(blocked.ok, true);
     assert.equal(blocked.repairPending, true);
-    assert.equal(fs.statSync(blobPath).nlink, before.nlink);
-    assert.equal(fs.statSync(blobPath).ctimeMs, before.ctimeMs);
+    assert.equal(readIdentityStatSync(fs, blobPath, 'statSync').nlink, before.nlink);
+    assert.equal(readIdentityStatSync(fs, blobPath, 'statSync').ctimeMs, before.ctimeMs);
     f.db.prepare('UPDATE archive_artifacts SET storage_fingerprint_ctime_ms = ? WHERE id = ?')
       .run(original.ctimeMs, b.artifact.id);
     assert.equal((await f.service.resolveVerifiedArtifact(a.artifact.id)).repairPending, false);
@@ -892,7 +893,7 @@ test('正常硬链接已脱钩但指纹事务失败时保留旧凭证，重启�
     const pending = await f.service.resolveVerifiedArtifact(a.artifact.id);
     assert.equal(pending.ok, true);
     assert.equal(pending.repairPending, true);
-    assert.equal(fs.statSync(blobPath).nlink, 1);
+    assert.equal(readIdentityStatSync(fs, blobPath, 'statSync').nlink, 1);
     assert.deepEqual(f.service.repository.getArtifact(a.artifact.id).blob.fingerprint, original);
     assert.equal((await f.service.deleteBatch(a.batch.id)).code, 'ARCHIVE_DELETE_FILE_CHANGED');
     f.db.exec('DROP TRIGGER reject_detach_fingerprint');
@@ -913,7 +914,7 @@ test('维护不能把同 SHA 不同 inode 的替代对象刷新成原 Blob 的�
     const replacement = path.join(f.dir, 'replacement');
     fs.writeFileSync(replacement, 'same bytes');
     fs.renameSync(replacement, blobPath);
-    assert.notEqual(String(fs.statSync(blobPath).ino), original.ino);
+    assert.notEqual(String(readIdentityStatSync(fs, blobPath, 'statSync').ino), original.ino);
     await f.service.reconcileStartup();
     assert.deepEqual(f.service.repository.getArtifact(a.artifact.id).blob.fingerprint, original);
     assert.equal((await f.service.deleteBatch(a.batch.id)).code, 'ARCHIVE_DELETE_FILE_CHANGED');
@@ -965,7 +966,7 @@ for (const detachedOrder of ['first', 'last']) {
       const pending = await f.service.resolveVerifiedArtifact(detached.artifact.id);
       assert.equal(pending.ok, true);
       assert.equal(pending.repairPending, true);
-      assert.equal(fs.statSync(blobPath).nlink, 2);
+      assert.equal(readIdentityStatSync(fs, blobPath, 'statSync').nlink, 2);
       f.db.exec('DROP TRIGGER reject_shared_detach');
       const restarted = f.create();
       await restarted.reconcileStartup();

@@ -1,5 +1,7 @@
 'use strict';
 
+const { identityInteger, readIdentityStat, readIdentityStatSync } = require('./filesystem-identity');
+
 const crypto = require('node:crypto');
 const path = require('node:path');
 const { normalizeSourceSnapshot, sourceSnapshotMatchesStat } = require('./source-snapshot');
@@ -17,8 +19,7 @@ function fail(code, message, detail = {}) {
 }
 
 function objectIdentity(stat) {
-  if (!stat || !Number.isSafeInteger(Number(stat.dev)) || Number(stat.dev) <= 0
-      || !Number.isSafeInteger(Number(stat.ino)) || Number(stat.ino) <= 0) {
+  if (!stat || !identityInteger(stat.dev) || !identityInteger(stat.ino)) {
     fail('ARCHIVE_DELETE_IDENTITY_UNAVAILABLE', '当前文件系统无法提供可靠的存档对象身份');
   }
   return { dev: String(stat.dev), ino: String(stat.ino) };
@@ -40,7 +41,7 @@ function managedPath(service, relativePath) {
 
 async function rootIdentity(service) {
   await service._assertManagedRoot();
-  const stat = await service.fs.promises.lstat(service.rootDir);
+  const stat = await readIdentityStat(service.fs, service.rootDir);
   return {
     rootDir: service.rootDir,
     realPath: await service.fs.promises.realpath(service.rootDir),
@@ -71,7 +72,7 @@ async function captureFileIdentity(service, relativePath, evidence = {}) {
   for (let index = 0; index < parts.length - 1; index += 1) {
     current = path.join(current, parts[index]);
     let stat;
-    try { stat = await service.fs.promises.lstat(current); } catch (error) {
+    try { stat = await readIdentityStat(service.fs, current); } catch (error) {
       if (error.code === 'ENOENT') return { exists: false, parents };
       throw error;
     }
@@ -81,7 +82,7 @@ async function captureFileIdentity(service, relativePath, evidence = {}) {
     parents.push({ relativePath: parts.slice(0, index + 1).join('/'), ...objectIdentity(stat) });
   }
   let stat;
-  try { stat = await service.fs.promises.lstat(filePath); } catch (error) {
+  try { stat = await readIdentityStat(service.fs, filePath); } catch (error) {
     if (error.code === 'ENOENT') return { exists: false, parents };
     throw error;
   }
@@ -100,7 +101,7 @@ async function captureFileIdentity(service, relativePath, evidence = {}) {
     birthtimeMs: Number(stat.birthtimeMs), nlink: Number(stat.nlink), mode: Number(stat.mode), parents
   };
   const sha256 = await digestFile(service, filePath);
-  const after = await service.fs.promises.lstat(filePath);
+  const after = await readIdentityStat(service.fs, filePath);
   if (!sameObject(identity, after) || after.size !== stat.size
       || after.mtimeMs !== stat.mtimeMs || after.ctimeMs !== stat.ctimeMs
       || after.birthtimeMs !== stat.birthtimeMs || after.nlink !== stat.nlink || after.mode !== stat.mode
@@ -112,7 +113,7 @@ async function captureFileIdentity(service, relativePath, evidence = {}) {
 
 function batchRevision(service, batch, artifacts, temps) {
   return crypto.createHash('sha256').update(JSON.stringify({
-    batch, rootDir: service.rootDir, rootIdentity: objectIdentity(service.fs.lstatSync(service.rootDir)),
+    batch, rootDir: service.rootDir, rootIdentity: objectIdentity(readIdentityStatSync(service.fs, service.rootDir)),
     archiveInstanceId: service.archiveInstanceId,
     artifacts: artifacts.map((artifact) => ({
       ...artifact, holds: service.repository.listArtifactHolds(artifact.id)
@@ -193,7 +194,7 @@ async function buildDeletePlan(service, batchId, options = {}) {
       sha256: temp.state === 'ready' ? temp.expectedIdentity?.sha256 : null,
       fingerprint: temp.state === 'ready' && temp.expectedIdentity?.exists ? {
         sizeBytes: temp.expectedIdentity.sizeBytes, mtimeMs: temp.expectedIdentity.mtimeMs,
-        ctimeMs: temp.expectedIdentity.ctimeMs, ino: Number(temp.expectedIdentity.ino)
+        ctimeMs: temp.expectedIdentity.ctimeMs, ino: temp.expectedIdentity.ino
       } : null
     }, { ownerId: temp.id });
   }
@@ -410,24 +411,24 @@ async function removeItem(service, plan, item, jobId) {
   // 在同一根串行队列内复核；同步最后核验和 unlink 避免应用自身异步回调夹入。
   // OS 级外部写入者无法由路径 API 原子排除，不能把此处称为原子身份删除。
   const fsImpl = service.fs;
-  const rootStat = fsImpl.lstatSync(service.rootDir);
+  const rootStat = readIdentityStatSync(fsImpl, service.rootDir);
   if (rootStat.isSymbolicLink() || !sameObject(plan.rootIdentity, rootStat)) {
     fail('ARCHIVE_DELETE_ROOT_CHANGED', '存档根身份发生变化');
   }
   for (const parent of expected.parents) {
-    const stat = fsImpl.lstatSync(managedPath(scoped, parent.relativePath));
+    const stat = readIdentityStatSync(fsImpl, managedPath(scoped, parent.relativePath));
     if (stat.isSymbolicLink() || !stat.isDirectory() || !sameObject(parent, stat)) {
       fail('ARCHIVE_DELETE_FILE_CHANGED', '删除目标父目录发生变化');
     }
   }
   if (item.managedRootIdentity) {
-    const managedStat = fsImpl.lstatSync(scoped.rootDir);
+    const managedStat = readIdentityStatSync(fsImpl, scoped.rootDir);
     if (managedStat.isSymbolicLink() || !managedStat.isDirectory()
         || !sameObject(item.managedRootIdentity, managedStat)) {
       fail('ARCHIVE_DELETE_ROOT_CHANGED', '受管暂存根身份发生变化');
     }
   }
-  const finalStat = fsImpl.lstatSync(filePath);
+  const finalStat = readIdentityStatSync(fsImpl, filePath);
   if (!finalStat.isFile() || finalStat.isSymbolicLink() || !sameObject(expected, finalStat)
       || finalStat.size !== expected.sizeBytes || finalStat.mtimeMs !== expected.mtimeMs
       || finalStat.ctimeMs !== actual.ctimeMs

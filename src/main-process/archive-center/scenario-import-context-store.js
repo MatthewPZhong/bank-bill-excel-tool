@@ -18,7 +18,7 @@ class ScenarioImportContextStore {
 
   captureSource(filePath) {
     const resolvedPath = path.resolve(String(filePath || ''));
-    const sourceSnapshot = sourceSnapshotFromStat(this.statSync(resolvedPath));
+    const sourceSnapshot = sourceSnapshotFromStat(this.statSync(resolvedPath, { bigint: true }));
     if (!sourceSnapshot) throw new Error('场景模板源文件不可读');
     return { filePath: resolvedPath, sourceSnapshot };
   }
@@ -63,7 +63,7 @@ class ScenarioImportContextStore {
   assertUnchanged(context) {
     let stat;
     try {
-      stat = this.statSync(context.filePath);
+      stat = this.statSync(context.filePath, { bigint: true });
     } catch (error) {
       const changed = new Error('场景模板源文件已不存在，请重新选择文件');
       changed.code = 'SCENARIO_IMPORT_SOURCE_CHANGED';

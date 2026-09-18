@@ -123,10 +123,47 @@ test('SST 目录出现无关文件时不递归删除，清理失败重复 close 
 test('SST 目录被替换时停止清理，显式保留模式仍保留自己的缓存', async (t) => {
   const { dir } = fixture(t), root = path.join(dir, 'owned');
   const provider = new AdaptiveSharedStringsProvider({ tempRoot: root, memoryBudgetBytes: 1 });
-  provider.append('spill'); fs.renameSync(root, root + '-original'); fs.mkdirSync(root);
-  fs.writeFileSync(path.join(root, 'sst.bin'), 'retain');
-  await assert.rejects(provider.close(), /身份已变化/);
+  // 模拟 NTFS 的高位文件 ID：不同整数转成 Number 后相同，不能据此认领替换文件。
+  const base = 9007199254740992n;
+  assert.equal(Number(base), Number(base + 1n));
+  const identity = (stat, ino, options) => {
+    stat.ino = options?.bigint ? ino : Number(ino);
+    return stat;
+  };
+  const originalLstatSync = fs.lstatSync.bind(fs);
+  const originalFstatSync = fs.fstatSync.bind(fs);
+  t.mock.method(fs, 'lstatSync', (file, options) => {
+    const stat = originalLstatSync(file, options);
+    return file === root ? identity(stat, base, options) : stat;
+  });
+  t.mock.method(fs, 'fstatSync', (fd, options) => {
+    const stat = originalFstatSync(fd, options);
+    if (fd === provider.binFd) return identity(stat, base + 4n, options);
+    if (fd === provider.idxFd) return identity(stat, base + 8n, options);
+    return stat;
+  });
+  provider.append('spill');
+  const originalLstat = fs.promises.lstat.bind(fs.promises);
+  let replaced = false;
+  t.mock.method(fs.promises, 'lstat', async (file, options) => {
+    if (file === root && !replaced) {
+      // Windows 不允许移动仍有打开文件的目录；在真实 close 已关句柄、
+      // 尚未核验归属时替换，仍覆盖清理最关键的路径竞争。
+      assert.equal(provider.binFd, null); assert.equal(provider.idxFd, null);
+      fs.renameSync(root, root + '-original'); fs.mkdirSync(root);
+      fs.writeFileSync(path.join(root, 'sst.bin'), 'retain');
+      fs.writeFileSync(path.join(root, 'sst.idx'), 'retain-index'); replaced = true;
+    }
+    const stat = await originalLstat(file, options);
+    if (file === root) return identity(stat, base + 1n, options);
+    if (file === path.join(root, 'sst.bin')) return identity(stat, base + 5n, options);
+    if (file === path.join(root, 'sst.idx')) return identity(stat, base + 9n, options);
+    return stat;
+  });
+  await assert.rejects(provider.close(), /临时目录身份已变化/);
+  assert.equal(replaced, true);
   assert.equal(fs.readFileSync(path.join(root, 'sst.bin'), 'utf8'), 'retain');
+  assert.equal(fs.readFileSync(path.join(root, 'sst.idx'), 'utf8'), 'retain-index');
   const preserved = new AdaptiveSharedStringsProvider({ tempRoot: path.join(dir, 'preserved'), memoryBudgetBytes: 1, preserveOnClose: true });
   preserved.append('spill'); await preserved.close();
   assert.equal(fs.existsSync(path.join(preserved.tempRoot, 'sst.bin')), true);

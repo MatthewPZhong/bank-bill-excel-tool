@@ -1,5 +1,7 @@
 'use strict';
 
+const { readIdentityStat } = require('../../main-process/archive-center/filesystem-identity');
+
 const fs = require('node:fs');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
@@ -792,9 +794,9 @@ class PositionImportLedger {
     if (fs.existsSync(`${this.ledgerPath}-journal`)) {
       throw new PositionImportLedgerError('job ledger 封存后仍存在未完成 journal');
     }
-    const before = await fs.promises.stat(this.ledgerPath);
+    const before = await readIdentityStat(fs, this.ledgerPath, 'stat');
     const hashed = await hashFileSha256Async(this.ledgerPath);
-    const after = await fs.promises.stat(this.ledgerPath);
+    const after = await readIdentityStat(fs, this.ledgerPath, 'stat');
     const snapshot = sourceSnapshotFromStat(after);
     if (!sourceSnapshotMatchesStat(sourceSnapshotFromStat(before), after) ||
         !snapshot ||
@@ -827,7 +829,7 @@ async function verifySealedLedger(evidence) {
   const expectedSize = Number(evidence && evidence.ledgerSizeBytes);
   const expectedSha = String(evidence && evidence.ledgerSha256 || '').toLowerCase();
   const expectedManifestHash = String(evidence && evidence.manifestHash || '');
-  const before = await fs.promises.stat(ledgerPath);
+  const before = await readIdentityStat(fs, ledgerPath, 'stat');
   if (!sourceSnapshotMatchesStat(expectedSnapshot, before) ||
       Number(before.size) !== expectedSize) {
     throw new PositionImportLedgerError('job ledger snapshot 或 size 不一致');
@@ -858,7 +860,7 @@ async function verifySealedLedger(evidence) {
         stableHash(manifest) !== expectedManifestHash) {
       throw new PositionImportLedgerError('job ledger manifest hash 不一致');
     }
-    const afterOpen = await fs.promises.stat(ledgerPath);
+    const afterOpen = await readIdentityStat(fs, ledgerPath, 'stat');
     const secondHash = await hashFileSha256Async(ledgerPath);
     if (!sourceSnapshotMatchesStat(expectedSnapshot, afterOpen) ||
         secondHash.sha256 !== expectedSha ||
