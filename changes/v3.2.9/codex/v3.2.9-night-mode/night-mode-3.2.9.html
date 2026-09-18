@@ -1508,8 +1508,8 @@ td .muted { color: var(--muted); }
   gap: 12px;
   margin-bottom: 12px;
 }
-.archive-center-retention-field { width: 220px; max-width: 100%; }
-.archive-center-retention-module-field { width: 280px; max-width: 100%; }
+.archive-center-retention-field { width: 132px; max-width: 100%; }
+.archive-center-retention-module-field { width: 224px; max-width: 100%; }
 .archive-delete-confirm-error {
   width: 100%;
   margin-top: 12px;
@@ -2250,6 +2250,11 @@ tr.add-row .text-action:hover { background: var(--primary-soft, #c2d7fa); }
   word-break: break-word;
 }
 .alert-message strong { color: var(--primary); font-weight: 600; }
+
+/* 按行拆分保留完整文件列表，内容滚动时确认区始终可见。 */
+.toolbox-split-rows-result .alert-body { min-height: 0; overflow-y: auto; }
+.toolbox-split-rows-result .alert-message { min-width: 0; }
+.toolbox-split-rows-result .dialog-actions { flex-shrink: 0; }
 
 /* New-account form (structure from real index.html) */
 .new-account-panel .new-account-title {
@@ -5235,6 +5240,30 @@ select.mapping-text-input {
   font-family: inherit;
   font-size: 14px;
 }
+/* v3.2.9 按行拆分：hidden 的输入不占布局空间。 */
+.toolbox-split-by-rows-row,
+.toolbox-split-by-rows-toggle,
+.toolbox-split-row-count-wrap:not([hidden]) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.toolbox-split-by-rows-row { flex-wrap: wrap; font-size: 13px; color: var(--text); }
+.toolbox-split-row-count-wrap[hidden] { display: none; }
+.toolbox-split-row-count-wrap input {
+  width: 128px;
+  min-width: 0;
+  box-sizing: border-box;
+  height: 36px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface, #fffdf8);
+}
+.toolbox-split-row-count-wrap input[aria-invalid="true"] { border-color: #d32f2f; }
+.toolbox-split-picker-card :disabled { opacity: 0.55; cursor: not-allowed; }
 /* v3.0.8（用户要求）：值多选框改用「按钮 + 浮动勾选面板」控件，外观对齐场景管理「适用银行渠道」下拉
    （new-account-currency-dropdown-btn 同款 36px 圆角按钮 + new-account-currency-dropdown-panel 浮动面板）。 */
 .toolbox-split-values-dropdown-wrap {
@@ -6096,6 +6125,7 @@ body[data-platform="win32"] .dialog-title * {
 .vcc-fin-op-review-actions-right {
   display: flex;
   align-items: center;
+  gap: 10px;
 }
 
 .vcc-fin-op-review-actions-right {
@@ -6821,8 +6851,8 @@ html, body { background-color: var(--bg); color: var(--text); }
 .appearance-enable-row input:checked { background: var(--primary); border-color: var(--primary); }
 .appearance-enable-row input:checked::after { transform: translateX(18px); background: var(--on-primary); }
 .appearance-fields:disabled { opacity: .65; }
-/* 紧凑时间框为原生时分文本、时钟按钮与两侧留白保留空间。 */
-.appearance-time-grid { display: grid; grid-template-columns: 104px 22px 104px; align-items: end; gap: 12px; margin: 24px 0; }
+/* 为原生时分、12 小时制 AM/PM、时钟按钮与两侧留白保留空间。 */
+.appearance-time-grid { display: grid; grid-template-columns: 132px 22px 132px; align-items: end; gap: 12px; margin: 24px 0; }
 .appearance-time-grid label { display: flex; flex-direction: column; gap: 10px; min-width: 0; font-size: 13px; color: var(--muted); }
 .appearance-time-grid input { width: 100%; min-width: 0; height: 44px; padding: 8px; color: var(--text); background: var(--input); border: 1px solid var(--line); border-radius: 9px; font: inherit; font-size: 14px; font-variant-numeric: tabular-nums; }
 .appearance-time-separator { align-self: end; line-height: 44px; text-align: center; color: var(--muted); }
@@ -7409,6 +7439,7 @@ html, body { background-color: var(--bg); color: var(--text); }
     
     
     
+
   <script>const DEFAULT_BACKGROUND_SETTINGS = { colorHex: '#ffffff' };
 function normalizeColorHex(colorHex) {
   const normalized = String(colorHex || '').trim().toLowerCase();

@@ -1,0 +1,1034 @@
+{
+  "candidate": "2bbf2043105bc7e6789cff024799b310b9f0f905",
+  "run": "https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/35378333591",
+  "finding": "P2: 104px native h:mm a input clips AM/PM; 132px fits, restoring104 reproduces",
+  "valuesUnchanged": true,
+  "samples": {
+    "original": {
+      "status": "FAIL",
+      "inputs": [
+        {
+          "role": "dark-mode-start",
+          "value": "18:08",
+          "format": "h:mm a",
+          "hostWidth": 104,
+          "editRect": {
+            "bottom": 294,
+            "height": 18,
+            "left": 226,
+            "right": 283.3125,
+            "top": 276,
+            "width": 57.3125
+          },
+          "clockRect": {
+            "bottom": 295.34375,
+            "height": 20.6875,
+            "left": 291.3125,
+            "right": 312,
+            "top": 274.65625,
+            "width": 20.6875
+          },
+          "missing": [],
+          "violations": [
+            "-webkit-datetime-edit-ampm-field: 字段/文字超出 -webkit-datetime-edit",
+            "-webkit-datetime-edit-ampm-field: 字段/文字侵入时钟区域"
+          ],
+          "fields": [
+            {
+              "pseudo": "-webkit-datetime-edit-hour-field",
+              "text": "06",
+              "rect": {
+                "bottom": 294,
+                "height": 18,
+                "left": 226,
+                "right": 244.8125,
+                "top": 276,
+                "width": 18.8125
+              },
+              "textRects": [
+                {
+                  "bottom": 293,
+                  "height": 16,
+                  "left": 227,
+                  "right": 243.8125,
+                  "top": 277,
+                  "width": 16.8125
+                }
+              ],
+              "violations": []
+            },
+            {
+              "pseudo": "-webkit-datetime-edit-text",
+              "text": ":",
+              "rect": {
+                "bottom": 293,
+                "height": 16,
+                "left": 244.8125,
+                "right": 253.21875,
+                "top": 277,
+                "width": 8.40625
+              },
+              "textRects": [
+                {
+                  "bottom": 293,
+                  "height": 16,
+                  "left": 244.8125,
+                  "right": 253.21875,
+                  "top": 277,
+                  "width": 8.40625
+                }
+              ],
+              "violations": []
+            },
+            {
+              "pseudo": "-webkit-datetime-edit-minute-field",
+              "text": "08",
+              "rect": {
+                "bottom": 294,
+                "height": 18,
+                "left": 253.21875,
+                "right": 272.03125,
+                "top": 276,
+                "width": 18.8125
+              },
+              "textRects": [
+                {
+                  "bottom": 293,
+                  "height": 16,
+                  "left": 254.21875,
+                  "right": 271.03125,
+                  "top": 277,
+                  "width": 16.8125
+                }
+              ],
+              "violations": []
+            },
+            {
+              "pseudo": "-webkit-datetime-edit-text",
+              "text": " ",
+              "rect": {
+                "bottom": 293,
+                "height": 16,
+                "left": 272.03125,
+                "right": 280.4375,
+                "top": 277,
+                "width": 8.40625
+              },
+              "textRects": [
+                {
+                  "bottom": 293,
+                  "height": 16,
+                  "left": 272.03125,
+                  "right": 280.4375,
+                  "top": 277,
+                  "width": 8.40625
+                }
+              ],
+              "violations": []
+            },
+            {
+              "pseudo": "-webkit-datetime-edit-ampm-field",
+              "text": "PM",
+              "rect": {
+                "bottom": 294,
+                "height": 18,
+                "left": 280.4375,
+                "right": 299.25,
+                "top": 276,
+                "width": 18.8125
+              },
+              "textRects": [
+                {
+                  "bottom": 293,
+                  "height": 16,
+                  "left": 281.4375,
+                  "right": 298.25,
+                  "top": 277,
+                  "width": 16.8125
+                }
+              ],
+              "violations": [
+                "字段/文字超出 -webkit-datetime-edit",
+                "字段/文字侵入时钟区域"
+              ]
+            }
+          ]
+        },
+        {
+          "role": "dark-mode-end",
+          "value": "19:08",
+          "format": "h:mm a",
+          "hostWidth": 104,
+          "editRect": {
+            "bottom": 294,
+            "height": 18,
+            "left": 376,
+            "right": 433.3125,
+            "top": 276,
+            "width": 57.3125
+          },
+          "clockRect": {
+            "bottom": 295.34375,
+            "height": 20.6875,
+            "left": 441.3125,
+            "right": 462,
+            "top": 274.65625,
+            "width": 20.6875
+          },
+          "missing": [],
+          "violations": [
+            "-webkit-datetime-edit-ampm-field: 字段/文字超出 -webkit-datetime-edit",
+            "-webkit-datetime-edit-ampm-field: 字段/文字侵入时钟区域"
+          ],
+          "fields": [
+            {
+              "pseudo": "-webkit-datetime-edit-hour-field",
+              "text": "07",
+              "rect": {
+                "bottom": 294,
+                "height": 18,
+                "left": 376,
+                "right": 394.8125,
+                "top": 276,
+                "width": 18.8125
+              },
+              "textRects": [
+                {
+                  "bottom": 293,
+                  "height": 16,
+                  "left": 377,
+                  "right": 393.8125,
+                  "top": 277,
+                  "width": 16.8125
+                }
+              ],
+              "violations": []
+            },
+            {
+              "pseudo": "-webkit-datetime-edit-text",
+              "text": ":",
+              "rect": {
+                "bottom": 293,
+                "height": 16,
+                "left": 394.8125,
+                "right": 403.21875,
+                "top": 277,
+                "width": 8.40625
+              },
+              "textRects": [
+                {
+                  "bottom": 293,
+                  "height": 16,
+                  "left": 394.8125,
+                  "right": 403.21875,
+                  "top": 277,
+                  "width": 8.40625
+                }
+              ],
+              "violations": []
+            },
+            {
+              "pseudo": "-webkit-datetime-edit-minute-field",
+              "text": "08",
+              "rect": {
+                "bottom": 294,
+                "height": 18,
+                "left": 403.21875,
+                "right": 422.03125,
+                "top": 276,
+                "width": 18.8125
+              },
+              "textRects": [
+                {
+                  "bottom": 293,
+                  "height": 16,
+                  "left": 404.21875,
+                  "right": 421.03125,
+                  "top": 277,
+                  "width": 16.8125
+                }
+              ],
+              "violations": []
+            },
+            {
+              "pseudo": "-webkit-datetime-edit-text",
+              "text": " ",
+              "rect": {
+                "bottom": 293,
+                "height": 16,
+                "left": 422.03125,
+                "right": 430.4375,
+                "top": 277,
+                "width": 8.40625
+              },
+              "textRects": [
+                {
+                  "bottom": 293,
+                  "height": 16,
+                  "left": 422.03125,
+                  "right": 430.4375,
+                  "top": 277,
+                  "width": 8.40625
+                }
+              ],
+              "violations": []
+            },
+            {
+              "pseudo": "-webkit-datetime-edit-ampm-field",
+              "text": "PM",
+              "rect": {
+                "bottom": 294,
+                "height": 18,
+                "left": 430.4375,
+                "right": 449.25,
+                "top": 276,
+                "width": 18.8125
+              },
+              "textRects": [
+                {
+                  "bottom": 293,
+                  "height": 16,
+                  "left": 431.4375,
+                  "right": 448.25,
+                  "top": 277,
+                  "width": 16.8125
+                }
+              ],
+              "violations": [
+                "字段/文字超出 -webkit-datetime-edit",
+                "字段/文字侵入时钟区域"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "wide132": {
+      "status": "PASS",
+      "inputs": [
+        {
+          "role": "dark-mode-start",
+          "value": "18:08",
+          "format": "h:mm a",
+          "hostWidth": 132,
+          "editRect": {
+            "bottom": 294,
+            "height": 18,
+            "left": 226,
+            "right": 311.3125,
+            "top": 276,
+            "width": 85.3125
+          },
+          "clockRect": {
+            "bottom": 295.34375,
+            "height": 20.6875,
+            "left": 319.3125,
+            "right": 340,
+            "top": 274.65625,
+            "width": 20.6875
+          },
+          "missing": [],
+          "violations": [],
+          "fields": [
+            {
+              "pseudo": "-webkit-datetime-edit-hour-field",
+              "text": "06",
+              "rect": {
+                "bottom": 294,
+                "height": 18,
+                "left": 226,
+                "right": 244.8125,
+                "top": 276,
+                "width": 18.8125
+              },
+              "textRects": [
+                {
+                  "bottom": 293,
+                  "height": 16,
+                  "left": 227,
+                  "right": 243.8125,
+                  "top": 277,
+                  "width": 16.8125
+                }
+              ],
+              "violations": []
+            },
+            {
+              "pseudo": "-webkit-datetime-edit-text",
+              "text": ":",
+              "rect": {
+                "bottom": 293,
+                "height": 16,
+                "left": 244.8125,
+                "right": 253.21875,
+                "top": 277,
+                "width": 8.40625
+              },
+              "textRects": [
+                {
+                  "bottom": 293,
+                  "height": 16,
+                  "left": 244.8125,
+                  "right": 253.21875,
+                  "top": 277,
+                  "width": 8.40625
+                }
+              ],
+              "violations": []
+            },
+            {
+              "pseudo": "-webkit-datetime-edit-minute-field",
+              "text": "08",
+              "rect": {
+                "bottom": 294,
+                "height": 18,
+                "left": 253.21875,
+                "right": 272.03125,
+                "top": 276,
+                "width": 18.8125
+              },
+              "textRects": [
+                {
+                  "bottom": 293,
+                  "height": 16,
+                  "left": 254.21875,
+                  "right": 271.03125,
+                  "top": 277,
+                  "width": 16.8125
+                }
+              ],
+              "violations": []
+            },
+            {
+              "pseudo": "-webkit-datetime-edit-text",
+              "text": " ",
+              "rect": {
+                "bottom": 293,
+                "height": 16,
+                "left": 272.03125,
+                "right": 280.4375,
+                "top": 277,
+                "width": 8.40625
+              },
+              "textRects": [
+                {
+                  "bottom": 293,
+                  "height": 16,
+                  "left": 272.03125,
+                  "right": 280.4375,
+                  "top": 277,
+                  "width": 8.40625
+                }
+              ],
+              "violations": []
+            },
+            {
+              "pseudo": "-webkit-datetime-edit-ampm-field",
+              "text": "PM",
+              "rect": {
+                "bottom": 294,
+                "height": 18,
+                "left": 280.4375,
+                "right": 299.25,
+                "top": 276,
+                "width": 18.8125
+              },
+              "textRects": [
+                {
+                  "bottom": 293,
+                  "height": 16,
+                  "left": 281.4375,
+                  "right": 298.25,
+                  "top": 277,
+                  "width": 16.8125
+                }
+              ],
+              "violations": []
+            }
+          ]
+        },
+        {
+          "role": "dark-mode-end",
+          "value": "19:08",
+          "format": "h:mm a",
+          "hostWidth": 132,
+          "editRect": {
+            "bottom": 294,
+            "height": 18,
+            "left": 404,
+            "right": 489.3125,
+            "top": 276,
+            "width": 85.3125
+          },
+          "clockRect": {
+            "bottom": 295.34375,
+            "height": 20.6875,
+            "left": 497.3125,
+            "right": 518,
+            "top": 274.65625,
+            "width": 20.6875
+          },
+          "missing": [],
+          "violations": [],
+          "fields": [
+            {
+              "pseudo": "-webkit-datetime-edit-hour-field",
+              "text": "07",
+              "rect": {
+                "bottom": 294,
+                "height": 18,
+                "left": 404,
+                "right": 422.8125,
+                "top": 276,
+                "width": 18.8125
+              },
+              "textRects": [
+                {
+                  "bottom": 293,
+                  "height": 16,
+                  "left": 405,
+                  "right": 421.8125,
+                  "top": 277,
+                  "width": 16.8125
+                }
+              ],
+              "violations": []
+            },
+            {
+              "pseudo": "-webkit-datetime-edit-text",
+              "text": ":",
+              "rect": {
+                "bottom": 293,
+                "height": 16,
+                "left": 422.8125,
+                "right": 431.21875,
+                "top": 277,
+                "width": 8.40625
+              },
+              "textRects": [
+                {
+                  "bottom": 293,
+                  "height": 16,
+                  "left": 422.8125,
+                  "right": 431.21875,
+                  "top": 277,
+                  "width": 8.40625
+                }
+              ],
+              "violations": []
+            },
+            {
+              "pseudo": "-webkit-datetime-edit-minute-field",
+              "text": "08",
+              "rect": {
+                "bottom": 294,
+                "height": 18,
+                "left": 431.21875,
+                "right": 450.03125,
+                "top": 276,
+                "width": 18.8125
+              },
+              "textRects": [
+                {
+                  "bottom": 293,
+                  "height": 16,
+                  "left": 432.21875,
+                  "right": 449.03125,
+                  "top": 277,
+                  "width": 16.8125
+                }
+              ],
+              "violations": []
+            },
+            {
+              "pseudo": "-webkit-datetime-edit-text",
+              "text": " ",
+              "rect": {
+                "bottom": 293,
+                "height": 16,
+                "left": 450.03125,
+                "right": 458.4375,
+                "top": 277,
+                "width": 8.40625
+              },
+              "textRects": [
+                {
+                  "bottom": 293,
+                  "height": 16,
+                  "left": 450.03125,
+                  "right": 458.4375,
+                  "top": 277,
+                  "width": 8.40625
+                }
+              ],
+              "violations": []
+            },
+            {
+              "pseudo": "-webkit-datetime-edit-ampm-field",
+              "text": "PM",
+              "rect": {
+                "bottom": 294,
+                "height": 18,
+                "left": 458.4375,
+                "right": 477.25,
+                "top": 276,
+                "width": 18.8125
+              },
+              "textRects": [
+                {
+                  "bottom": 293,
+                  "height": 16,
+                  "left": 459.4375,
+                  "right": 476.25,
+                  "top": 277,
+                  "width": 16.8125
+                }
+              ],
+              "violations": []
+            }
+          ]
+        }
+      ]
+    },
+    "restored": {
+      "status": "FAIL",
+      "inputs": [
+        {
+          "role": "dark-mode-start",
+          "value": "18:08",
+          "format": "h:mm a",
+          "hostWidth": 104,
+          "editRect": {
+            "bottom": 294,
+            "height": 18,
+            "left": 226,
+            "right": 283.3125,
+            "top": 276,
+            "width": 57.3125
+          },
+          "clockRect": {
+            "bottom": 295.34375,
+            "height": 20.6875,
+            "left": 291.3125,
+            "right": 312,
+            "top": 274.65625,
+            "width": 20.6875
+          },
+          "missing": [],
+          "violations": [
+            "-webkit-datetime-edit-ampm-field: 字段/文字超出 -webkit-datetime-edit",
+            "-webkit-datetime-edit-ampm-field: 字段/文字侵入时钟区域"
+          ],
+          "fields": [
+            {
+              "pseudo": "-webkit-datetime-edit-hour-field",
+              "text": "06",
+              "rect": {
+                "bottom": 294,
+                "height": 18,
+                "left": 226,
+                "right": 244.8125,
+                "top": 276,
+                "width": 18.8125
+              },
+              "textRects": [
+                {
+                  "bottom": 293,
+                  "height": 16,
+                  "left": 227,
+                  "right": 243.8125,
+                  "top": 277,
+                  "width": 16.8125
+                }
+              ],
+              "violations": []
+            },
+            {
+              "pseudo": "-webkit-datetime-edit-text",
+              "text": ":",
+              "rect": {
+                "bottom": 293,
+                "height": 16,
+                "left": 244.8125,
+                "right": 253.21875,
+                "top": 277,
+                "width": 8.40625
+              },
+              "textRects": [
+                {
+                  "bottom": 293,
+                  "height": 16,
+                  "left": 244.8125,
+                  "right": 253.21875,
+                  "top": 277,
+                  "width": 8.40625
+                }
+              ],
+              "violations": []
+            },
+            {
+              "pseudo": "-webkit-datetime-edit-minute-field",
+              "text": "08",
+              "rect": {
+                "bottom": 294,
+                "height": 18,
+                "left": 253.21875,
+                "right": 272.03125,
+                "top": 276,
+                "width": 18.8125
+              },
+              "textRects": [
+                {
+                  "bottom": 293,
+                  "height": 16,
+                  "left": 254.21875,
+                  "right": 271.03125,
+                  "top": 277,
+                  "width": 16.8125
+                }
+              ],
+              "violations": []
+            },
+            {
+              "pseudo": "-webkit-datetime-edit-text",
+              "text": " ",
+              "rect": {
+                "bottom": 293,
+                "height": 16,
+                "left": 272.03125,
+                "right": 280.4375,
+                "top": 277,
+                "width": 8.40625
+              },
+              "textRects": [
+                {
+                  "bottom": 293,
+                  "height": 16,
+                  "left": 272.03125,
+                  "right": 280.4375,
+                  "top": 277,
+                  "width": 8.40625
+                }
+              ],
+              "violations": []
+            },
+            {
+              "pseudo": "-webkit-datetime-edit-ampm-field",
+              "text": "PM",
+              "rect": {
+                "bottom": 294,
+                "height": 18,
+                "left": 280.4375,
+                "right": 299.25,
+                "top": 276,
+                "width": 18.8125
+              },
+              "textRects": [
+                {
+                  "bottom": 293,
+                  "height": 16,
+                  "left": 281.4375,
+                  "right": 298.25,
+                  "top": 277,
+                  "width": 16.8125
+                }
+              ],
+              "violations": [
+                "字段/文字超出 -webkit-datetime-edit",
+                "字段/文字侵入时钟区域"
+              ]
+            }
+          ]
+        },
+        {
+          "role": "dark-mode-end",
+          "value": "19:08",
+          "format": "h:mm a",
+          "hostWidth": 104,
+          "editRect": {
+            "bottom": 294,
+            "height": 18,
+            "left": 376,
+            "right": 433.3125,
+            "top": 276,
+            "width": 57.3125
+          },
+          "clockRect": {
+            "bottom": 295.34375,
+            "height": 20.6875,
+            "left": 441.3125,
+            "right": 462,
+            "top": 274.65625,
+            "width": 20.6875
+          },
+          "missing": [],
+          "violations": [
+            "-webkit-datetime-edit-ampm-field: 字段/文字超出 -webkit-datetime-edit",
+            "-webkit-datetime-edit-ampm-field: 字段/文字侵入时钟区域"
+          ],
+          "fields": [
+            {
+              "pseudo": "-webkit-datetime-edit-hour-field",
+              "text": "07",
+              "rect": {
+                "bottom": 294,
+                "height": 18,
+                "left": 376,
+                "right": 394.8125,
+                "top": 276,
+                "width": 18.8125
+              },
+              "textRects": [
+                {
+                  "bottom": 293,
+                  "height": 16,
+                  "left": 377,
+                  "right": 393.8125,
+                  "top": 277,
+                  "width": 16.8125
+                }
+              ],
+              "violations": []
+            },
+            {
+              "pseudo": "-webkit-datetime-edit-text",
+              "text": ":",
+              "rect": {
+                "bottom": 293,
+                "height": 16,
+                "left": 394.8125,
+                "right": 403.21875,
+                "top": 277,
+                "width": 8.40625
+              },
+              "textRects": [
+                {
+                  "bottom": 293,
+                  "height": 16,
+                  "left": 394.8125,
+                  "right": 403.21875,
+                  "top": 277,
+                  "width": 8.40625
+                }
+              ],
+              "violations": []
+            },
+            {
+              "pseudo": "-webkit-datetime-edit-minute-field",
+              "text": "08",
+              "rect": {
+                "bottom": 294,
+                "height": 18,
+                "left": 403.21875,
+                "right": 422.03125,
+                "top": 276,
+                "width": 18.8125
+              },
+              "textRects": [
+                {
+                  "bottom": 293,
+                  "height": 16,
+                  "left": 404.21875,
+                  "right": 421.03125,
+                  "top": 277,
+                  "width": 16.8125
+                }
+              ],
+              "violations": []
+            },
+            {
+              "pseudo": "-webkit-datetime-edit-text",
+              "text": " ",
+              "rect": {
+                "bottom": 293,
+                "height": 16,
+                "left": 422.03125,
+                "right": 430.4375,
+                "top": 277,
+                "width": 8.40625
+              },
+              "textRects": [
+                {
+                  "bottom": 293,
+                  "height": 16,
+                  "left": 422.03125,
+                  "right": 430.4375,
+                  "top": 277,
+                  "width": 8.40625
+                }
+              ],
+              "violations": []
+            },
+            {
+              "pseudo": "-webkit-datetime-edit-ampm-field",
+              "text": "PM",
+              "rect": {
+                "bottom": 294,
+                "height": 18,
+                "left": 430.4375,
+                "right": 449.25,
+                "top": 276,
+                "width": 18.8125
+              },
+              "textRects": [
+                {
+                  "bottom": 293,
+                  "height": 16,
+                  "left": 431.4375,
+                  "right": 448.25,
+                  "top": 277,
+                  "width": 16.8125
+                }
+              ],
+              "violations": [
+                "字段/文字超出 -webkit-datetime-edit",
+                "字段/文字侵入时钟区域"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "screenshots": [
+    "native-time-before104-windows.png",
+    "native-time-wide132-windows.png"
+  ],
+  "settings": {
+    "passed": false,
+    "failures": [
+      {
+        "viewport": {
+          "width": 1240,
+          "height": 860
+        },
+        "scaleFactor": 1,
+        "reason": "spawnSync D:\\a\\bank-bill-excel-tool\\bank-bill-excel-tool\\node_modules\\electron\\dist\\electron.exe ETIMEDOUT",
+        "stdout": "APP_SETTINGS_PHASE={\"name\":\"page-ready\",\"at\":276.1000000000058,\"visibility\":\"visible\"}\nAPP_SETTINGS_PHASE={\"name\":\"retention-behavior\",\"at\":2406.2999999999884,\"visibility\":\"visible\"}\nAPP_SETTINGS_PHASE={\"name\":\"module-retention-behavior\",\"at\":2469.1999999999825,\"visibility\":\"visible\"}\nAPP_SETTINGS_PHASE={\"name\":\"retention-delete-guard\",\"at\":4514.899999999994,\"visibility\":\"visible\"}\nAPP_SETTINGS_PHASE={\"name\":\"theme-retention-behavior\",\"at\":26441.5,\"visibility\":\"visible\"}",
+        "stderr": "(electron) 'console-message' arguments are deprecated and will be removed. Please use Event<WebContentsConsoleMessageEventParams> object instead."
+      }
+    ],
+    "layoutPassGroups": 5
+  },
+  "performanceBaseline": {
+    "status": "NOT_RUN",
+    "checks": {
+      "windowsX64": true,
+      "memory16GiB": true,
+      "localSsd": false,
+      "electronLocked": true,
+      "exceljsLocked": true,
+      "sameVolume": true,
+      "knownBuildSha": true,
+      "cleanProduction": true
+    },
+    "disk": {
+      "DiskNumber": 1,
+      "DriveType": "Fixed",
+      "MediaType": "Unspecified",
+      "SizeRemaining": 157102706688,
+      "FileSystem": "NTFS"
+    },
+    "diskError": null,
+    "platform": "win32",
+    "arch": "x64",
+    "osRelease": "10.0.26100",
+    "cpu": "AMD EPYC 7763 64-Core Processor                ",
+    "totalMemoryBytes": 17174360064,
+    "electron": "36.9.5",
+    "node": "v22.19.0",
+    "exceljs": "4.4.0",
+    "directory": "D:\\a\\bank-bill-excel-tool\\bank-bill-excel-tool\\outputs\\v329-acceptance\\performance\\pf02",
+    "sameVolumeReason": "Inputs, business DB, temporary manifest and output are descendants of the one newly created case directory.",
+    "buildIdentity": {
+      "productionDirty": false,
+      "workingTreeStatus": "?? outputs/",
+      "scriptSha256": {
+        "verify-review-performance.js": "39989140cdea4f44061ed30ae36348e65c297d0f7fec388e1673f865e8d6eae4",
+        "performance-fixture.js": "ee09b8f65f71b87e4caa490189aa9c99ed4fbb99541ac198686c971a2f238f51",
+        "performance-worker.js": "092cbbf07d92d6ba7f72645f90da023a8003f5c9a118631d8a7ffad4e0139acb"
+      }
+    }
+  },
+  "performanceAcceptance": "NOT_RUN: physical disk MediaType Unspecified; SSD baseline not proven. Other mandatory Worker RSS/SST/drain/manual items remain open.",
+  "vccElectron": {
+    "date": "2026-09-18T18:09:33.111Z",
+    "platform": "win32",
+    "electron": "36.9.5",
+    "node": "22.19.0",
+    "exceljs": "4.4.0",
+    "asar": {
+      "path": "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\vcc-review-YCfZb4\\app.asar\\assets\\VCC财务OP校验\\VCC财务OP校验结果表_模板.xlsx",
+      "hash": "48c8161484128e63a6e3e60724336f2433a8f23687695d980720c59a9dec2053",
+      "inodeBefore": 1,
+      "inodeAfter": 2,
+      "contentCachePassed": true,
+      "tamperRejected": true
+    },
+    "ipc": {
+      "status": "success",
+      "filePath": "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\vcc-review-YCfZb4\\待确认表.xlsx",
+      "fileName": "待确认表.xlsx",
+      "resultRevision": 0,
+      "subjectCount": 2,
+      "sheetCount": 15,
+      "sourceRowCount": 14
+    },
+    "formalExport": {
+      "status": "success",
+      "subjects": [
+        "乙",
+        "甲"
+      ],
+      "fileCount": 2,
+      "templatesInsideAsar": true,
+      "statusAfterArchive": "archived"
+    },
+    "nativeDialog": "stubbed",
+    "windowsExcelWps": "not-run"
+  },
+  "smokeSummary": {
+    "schemaVersion": 1,
+    "mode": "smoke",
+    "buildSha": "2bbf2043105bc7e6789cff024799b310b9f0f905",
+    "buildIdentity": {
+      "productionDirty": false,
+      "workingTreeStatus": "?? outputs/",
+      "scriptSha256": {
+        "verify-review-performance.js": "39989140cdea4f44061ed30ae36348e65c297d0f7fec388e1673f865e8d6eae4",
+        "performance-fixture.js": "ee09b8f65f71b87e4caa490189aa9c99ed4fbb99541ac198686c971a2f238f51",
+        "performance-worker.js": "092cbbf07d92d6ba7f72645f90da023a8003f5c9a118631d8a7ffad4e0139acb"
+      }
+    },
+    "results": [
+      {
+        "name": "smoke",
+        "code": 0,
+        "signal": null,
+        "evidencePath": "D:\\a\\bank-bill-excel-tool\\bank-bill-excel-tool\\outputs\\v329-acceptance\\smoke\\smoke\\evidence.json",
+        "automated": "PASS",
+        "acceptance": "NOT_RUN",
+        "processPeakRssBytes": 198696960,
+        "fixture": {
+          "subjects": 2,
+          "pending": 8,
+          "recharge": 12,
+          "adjustments": 4
+        },
+        "sheetCount": 19
+      }
+    ],
+    "acceptance": "NOT_RUN",
+    "pf01WorkerRss": {
+      "status": "NOT_RUN",
+      "reason": "worker_threads RSS cannot be attributed separately; total process comparison is supplemental only."
+    },
+    "manualWindowsInstalledApplication": "NOT_RUN",
+    "excelWps": "NOT_RUN",
+    "processRssComparison": {
+      "status": "NOT_RUN"
+    },
+    "requestedCasesAcceptance": "NOT_RUN",
+    "fullVccAcceptance": "NOT_RUN"
+  }
+}

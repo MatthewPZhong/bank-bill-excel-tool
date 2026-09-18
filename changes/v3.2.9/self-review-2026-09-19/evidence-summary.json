@@ -852,5 +852,13 @@
       "restored104": "PASS",
       "windows": "PENDING"
     }
+  },
+  "nativeTimeP2": {
+    "status": "REPAIR_IMPLEMENTED_WINDOWS_PENDING",
+    "confirmedCandidate": "2bbf2043105bc7e6789cff024799b310b9f0f905",
+    "windowsEvidence": "windows-round3-summary.json",
+    "repair": "Production time grid 132px; historical 104px diagnostic and min-window zoom150 geometry regression; generated preview synchronized.",
+    "macosEvidence": "native-time132-repair-macos.json",
+    "oldFullGateApplicability": "Historical only after production CSS change; new full gate required."
   }
 }

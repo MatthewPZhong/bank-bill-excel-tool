@@ -1,0 +1,589 @@
+{
+  "productionCss": "src/styles-dark-mode-settings.css",
+  "productionCssSha256": "2ff7549d9255896605449987cac3a1a908147f3515a59689028b626b2f721705",
+  "platform": "darwin",
+  "live": {
+    "status": "PASS",
+    "results": [
+      {
+        "initial": "light",
+        "assertions": 19,
+        "failures": [],
+        "valuesUnchanged": true,
+        "original": "PASS",
+        "historical104": "PASS",
+        "narrow150": {
+          "requested": {
+            "width": 1080,
+            "height": 760,
+            "zoomFactor": 1.5
+          },
+          "bounds": {
+            "x": 244,
+            "y": 73,
+            "width": 1080,
+            "height": 760
+          },
+          "contentBounds": {
+            "x": 244,
+            "y": 73,
+            "width": 1080,
+            "height": 760
+          },
+          "minimumSize": [
+            1080,
+            760
+          ],
+          "zoomFactor": 1.5,
+          "viewport": {
+            "width": 720,
+            "height": 506,
+            "dpr": 3
+          },
+          "pane": {
+            "x": 159,
+            "y": 87,
+            "width": 532,
+            "height": 332.66668701171875,
+            "right": 691,
+            "bottom": 419.66668701171875,
+            "clientWidth": 532,
+            "scrollWidth": 532
+          },
+          "scroll": {
+            "x": 159,
+            "y": 87,
+            "width": 532,
+            "height": 332.66668701171875,
+            "right": 691,
+            "bottom": 419.66668701171875,
+            "clientWidth": 532,
+            "scrollWidth": 532
+          },
+          "grid": {
+            "x": 183,
+            "y": 233,
+            "width": 484,
+            "height": 72,
+            "right": 667,
+            "bottom": 305,
+            "clientWidth": 484,
+            "scrollWidth": 484
+          },
+          "document": {
+            "x": 0,
+            "y": 0,
+            "width": 720,
+            "height": 506.66668701171875,
+            "right": 720,
+            "bottom": 506.66668701171875,
+            "clientWidth": 720,
+            "scrollWidth": 720
+          },
+          "body": {
+            "x": 0,
+            "y": 0,
+            "width": 720,
+            "height": 506.66668701171875,
+            "right": 720,
+            "bottom": 506.66668701171875,
+            "clientWidth": 720,
+            "scrollWidth": 720
+          },
+          "gridInlineStyle": null
+        },
+        "narrow150Geometry": "PASS",
+        "restored": "PASS",
+        "restoration": {
+          "expectedBounds": {
+            "x": 244,
+            "y": 73,
+            "width": 1240,
+            "height": 860
+          },
+          "actualBounds": {
+            "x": 244,
+            "y": 73,
+            "width": 1240,
+            "height": 860
+          },
+          "expectedZoom": 1,
+          "actualZoom": 1,
+          "expectedGridInlineStyle": null,
+          "actualGridInlineStyle": null
+        }
+      },
+      {
+        "initial": "dark",
+        "assertions": 19,
+        "failures": [],
+        "valuesUnchanged": true,
+        "original": "PASS",
+        "historical104": "PASS",
+        "narrow150": {
+          "requested": {
+            "width": 1080,
+            "height": 760,
+            "zoomFactor": 1.5
+          },
+          "bounds": {
+            "x": 244,
+            "y": 73,
+            "width": 1080,
+            "height": 760
+          },
+          "contentBounds": {
+            "x": 244,
+            "y": 73,
+            "width": 1080,
+            "height": 760
+          },
+          "minimumSize": [
+            1080,
+            760
+          ],
+          "zoomFactor": 1.5,
+          "viewport": {
+            "width": 720,
+            "height": 506,
+            "dpr": 3
+          },
+          "pane": {
+            "x": 159,
+            "y": 87,
+            "width": 532,
+            "height": 332.66668701171875,
+            "right": 691,
+            "bottom": 419.66668701171875,
+            "clientWidth": 532,
+            "scrollWidth": 532
+          },
+          "scroll": {
+            "x": 159,
+            "y": 87,
+            "width": 532,
+            "height": 332.66668701171875,
+            "right": 691,
+            "bottom": 419.66668701171875,
+            "clientWidth": 532,
+            "scrollWidth": 532
+          },
+          "grid": {
+            "x": 183,
+            "y": 233,
+            "width": 484,
+            "height": 72,
+            "right": 667,
+            "bottom": 305,
+            "clientWidth": 484,
+            "scrollWidth": 484
+          },
+          "document": {
+            "x": 0,
+            "y": 0,
+            "width": 720,
+            "height": 506.66668701171875,
+            "right": 720,
+            "bottom": 506.66668701171875,
+            "clientWidth": 720,
+            "scrollWidth": 720
+          },
+          "body": {
+            "x": 0,
+            "y": 0,
+            "width": 720,
+            "height": 506.66668701171875,
+            "right": 720,
+            "bottom": 506.66668701171875,
+            "clientWidth": 720,
+            "scrollWidth": 720
+          },
+          "gridInlineStyle": null
+        },
+        "narrow150Geometry": "PASS",
+        "restored": "PASS",
+        "restoration": {
+          "expectedBounds": {
+            "x": 244,
+            "y": 73,
+            "width": 1240,
+            "height": 860
+          },
+          "actualBounds": {
+            "x": 244,
+            "y": 73,
+            "width": 1240,
+            "height": 860
+          },
+          "expectedZoom": 1,
+          "actualZoom": 1,
+          "expectedGridInlineStyle": null,
+          "actualGridInlineStyle": null
+        }
+      }
+    ]
+  },
+  "ui": [
+    {
+      "source": "/private/tmp/v329-release-20260919-3_bafjvz/time-width132-ui/ui-verification-webzoom-125.json",
+      "sha256": "460ee0baf99b745a880663ad45c2fe3b379f2530ad30c39da8650f4a0846eeda",
+      "ok": true,
+      "groups": 3,
+      "failures": []
+    },
+    {
+      "source": "/private/tmp/v329-release-20260919-3_bafjvz/time-width132-ui/ui-verification-webzoom-150.json",
+      "sha256": "c23e4bcf369d9d48a67d11e12cd3028372642bd68fc9733760040e9bfd2d5488",
+      "ok": true,
+      "groups": 3,
+      "failures": []
+    },
+    {
+      "source": "/private/tmp/v329-release-20260919-3_bafjvz/time-width132-ui/ui-verification.json",
+      "sha256": "e14f18703168fea9639a8504aeb07f0b7938fdfb275b18a3f5dbcd97ccadf6c2",
+      "ok": true,
+      "groups": 9,
+      "failures": []
+    }
+  ],
+  "settings": {
+    "passed": true,
+    "groups": 6,
+    "failures": [],
+    "presentation": [
+      {
+        "mode": "shown-inactive",
+        "before": {
+          "visible": false,
+          "minimized": false
+        },
+        "during": {
+          "visible": true,
+          "minimized": false
+        },
+        "after": {
+          "visible": true,
+          "minimized": false
+        }
+      },
+      {
+        "mode": "shown-inactive",
+        "before": {
+          "visible": false,
+          "minimized": false
+        },
+        "during": {
+          "visible": true,
+          "minimized": false
+        },
+        "after": {
+          "visible": true,
+          "minimized": false
+        }
+      },
+      {
+        "mode": "shown-inactive",
+        "before": {
+          "visible": false,
+          "minimized": false
+        },
+        "during": {
+          "visible": true,
+          "minimized": false
+        },
+        "after": {
+          "visible": true,
+          "minimized": false
+        }
+      },
+      {
+        "mode": "shown-inactive",
+        "before": {
+          "visible": false,
+          "minimized": false
+        },
+        "during": {
+          "visible": true,
+          "minimized": false
+        },
+        "after": {
+          "visible": true,
+          "minimized": false
+        }
+      },
+      {
+        "mode": "shown-inactive",
+        "before": {
+          "visible": false,
+          "minimized": false
+        },
+        "during": {
+          "visible": true,
+          "minimized": false
+        },
+        "after": {
+          "visible": true,
+          "minimized": false
+        }
+      },
+      {
+        "mode": "shown-inactive",
+        "before": {
+          "visible": false,
+          "minimized": false
+        },
+        "during": {
+          "visible": true,
+          "minimized": false
+        },
+        "after": {
+          "visible": true,
+          "minimized": false
+        }
+      }
+    ],
+    "behavior": {
+      "scenarios": 4,
+      "assertions": 73
+    },
+    "phases": [
+      {
+        "name": "page-ready",
+        "at": 81.5,
+        "visibility": "visible"
+      },
+      {
+        "name": "retention-behavior",
+        "at": 281.30000019073486,
+        "visibility": "visible"
+      },
+      {
+        "name": "module-retention-behavior",
+        "at": 368.2000002861023,
+        "visibility": "visible"
+      },
+      {
+        "name": "retention-delete-guard",
+        "at": 859.2000002861023,
+        "visibility": "visible"
+      },
+      {
+        "name": "theme-retention-behavior",
+        "at": 2002.5,
+        "visibility": "visible"
+      },
+      {
+        "name": "behavior-complete",
+        "at": 3386.800000190735,
+        "visibility": "visible"
+      }
+    ],
+    "frameWaits": [
+      {
+        "startedAt": 84.2000002861023,
+        "visibility": "visible",
+        "firstFrameAt": 91.6,
+        "secondFrameAt": 108.2,
+        "elapsedMs": 77.7999997138977
+      },
+      {
+        "startedAt": 213.40000009536743,
+        "visibility": "visible",
+        "firstFrameAt": 208.2,
+        "secondFrameAt": 224.9,
+        "elapsedMs": 67.59999990463257
+      },
+      {
+        "startedAt": 590.9000000953674,
+        "visibility": "visible",
+        "firstFrameAt": 590.5,
+        "secondFrameAt": 675,
+        "elapsedMs": 155.59999990463257
+      },
+      {
+        "startedAt": 897.3000001907349,
+        "visibility": "visible",
+        "firstFrameAt": 883.3,
+        "secondFrameAt": 924.9,
+        "elapsedMs": 70
+      },
+      {
+        "startedAt": 967.4000000953674,
+        "visibility": "visible",
+        "firstFrameAt": 974.9,
+        "secondFrameAt": 1008.3,
+        "elapsedMs": 43.40000009536743
+      },
+      {
+        "startedAt": 1035.6000003814697,
+        "visibility": "visible",
+        "firstFrameAt": 1016.6,
+        "secondFrameAt": 1050,
+        "elapsedMs": 57.19999980926514
+      },
+      {
+        "startedAt": 1119.3000001907349,
+        "visibility": "visible",
+        "firstFrameAt": 1108.3,
+        "secondFrameAt": 1175,
+        "elapsedMs": 93.09999990463257
+      },
+      {
+        "startedAt": 1250.2000002861023,
+        "visibility": "visible",
+        "firstFrameAt": 1225,
+        "secondFrameAt": 1291.6,
+        "elapsedMs": 48.799999713897705
+      },
+      {
+        "startedAt": 1351.7000002861023,
+        "visibility": "visible",
+        "firstFrameAt": 1341.6,
+        "secondFrameAt": 1399.9,
+        "elapsedMs": 122
+      },
+      {
+        "startedAt": 1511.1000003814697,
+        "visibility": "visible",
+        "firstFrameAt": 1483.266,
+        "secondFrameAt": 1533.3,
+        "elapsedMs": 90.59999990463257
+      },
+      {
+        "startedAt": 1654.4000000953674,
+        "visibility": "visible",
+        "firstFrameAt": 1633.296,
+        "secondFrameAt": 1683.3,
+        "elapsedMs": 36.90000009536743
+      },
+      {
+        "startedAt": 1728.1000003814697,
+        "visibility": "visible",
+        "firstFrameAt": 1708.266,
+        "secondFrameAt": 1749.9,
+        "elapsedMs": 99
+      },
+      {
+        "startedAt": 1879.7000002861023,
+        "visibility": "visible",
+        "firstFrameAt": 1866.562,
+        "secondFrameAt": 1916.6,
+        "elapsedMs": 37.69999980926514
+      },
+      {
+        "startedAt": 1954.2000002861023,
+        "visibility": "visible",
+        "firstFrameAt": 1933.266,
+        "secondFrameAt": 1958.3,
+        "elapsedMs": 9
+      },
+      {
+        "startedAt": 2016.6000003814697,
+        "visibility": "visible",
+        "firstFrameAt": 2049.7,
+        "secondFrameAt": 2091.6,
+        "elapsedMs": 79.2999997138977
+      },
+      {
+        "startedAt": 2096.1000003814697,
+        "visibility": "visible",
+        "firstFrameAt": 2099.9,
+        "secondFrameAt": 2174.9,
+        "elapsedMs": 122.09999990463257
+      },
+      {
+        "startedAt": 2230.6000003814697,
+        "visibility": "visible",
+        "firstFrameAt": 2225,
+        "secondFrameAt": 2308.3,
+        "elapsedMs": 114.09999990463257
+      },
+      {
+        "startedAt": 2344.800000190735,
+        "visibility": "visible",
+        "firstFrameAt": 2341.6,
+        "secondFrameAt": 2350,
+        "elapsedMs": 36.90000009536743
+      },
+      {
+        "startedAt": 2446.4000000953674,
+        "visibility": "visible",
+        "firstFrameAt": 2433.33,
+        "secondFrameAt": 2491.6,
+        "elapsedMs": 51.40000009536743
+      },
+      {
+        "startedAt": 2497.800000190735,
+        "visibility": "visible",
+        "firstFrameAt": 2500,
+        "secondFrameAt": 2541.6,
+        "elapsedMs": 77.90000009536743
+      },
+      {
+        "startedAt": 2586.6000003814697,
+        "visibility": "visible",
+        "firstFrameAt": 2616.6,
+        "secondFrameAt": 2650,
+        "elapsedMs": 68.09999990463257
+      },
+      {
+        "startedAt": 2654.800000190735,
+        "visibility": "visible",
+        "firstFrameAt": 2658.3,
+        "secondFrameAt": 2674.9,
+        "elapsedMs": 83.40000009536743
+      },
+      {
+        "startedAt": 2801.9000000953674,
+        "visibility": "visible",
+        "firstFrameAt": 2791.562,
+        "secondFrameAt": 2816.3,
+        "elapsedMs": 23.09999990463257
+      },
+      {
+        "startedAt": 2837.800000190735,
+        "visibility": "visible",
+        "firstFrameAt": 2825,
+        "secondFrameAt": 2883.6,
+        "elapsedMs": 113.19999980926514
+      },
+      {
+        "startedAt": 2963.7000002861023,
+        "visibility": "visible",
+        "firstFrameAt": 2958.3,
+        "secondFrameAt": 3033.3,
+        "elapsedMs": 110.59999990463257
+      },
+      {
+        "startedAt": 3098.7000002861023,
+        "visibility": "visible",
+        "firstFrameAt": 3083.298,
+        "secondFrameAt": 3108.3,
+        "elapsedMs": 16.699999809265137
+      },
+      {
+        "startedAt": 3127.9000000953674,
+        "visibility": "visible",
+        "firstFrameAt": 3116.6,
+        "secondFrameAt": 3174.9,
+        "elapsedMs": 118.7000002861023
+      },
+      {
+        "startedAt": 3258.5,
+        "visibility": "visible",
+        "firstFrameAt": 3249.9,
+        "secondFrameAt": 3299.9,
+        "elapsedMs": 114.90000009536743
+      },
+      {
+        "startedAt": 3400.300000190735,
+        "visibility": "visible",
+        "firstFrameAt": 3399.896,
+        "secondFrameAt": 3408.2,
+        "elapsedMs": 14.199999809265137
+      }
+    ]
+  },
+  "windowsFixed": "PENDING",
+  "fullGateAfterProductionChange": "PENDING"
+}

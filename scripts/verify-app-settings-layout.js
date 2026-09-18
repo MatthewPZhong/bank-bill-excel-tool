@@ -100,7 +100,14 @@ function runParent() {
 }
 
 function nextFrame() {
-  return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  const sample = { startedAt: performance.now(), visibility: document.visibilityState };
+  (window.__appSettingsFrameWaits ||= []).push(sample);
+  return new Promise((resolve) => {
+    requestAnimationFrame((firstFrameAt) => requestAnimationFrame((secondFrameAt) => {
+      Object.assign(sample, { firstFrameAt, secondFrameAt, elapsedMs: performance.now() - sample.startedAt });
+      resolve();
+    }));
+  });
 }
 
 function waitFor(test, timeoutMs = 2000) {
@@ -1321,6 +1328,7 @@ async function measurePage(expectedScaleFactor, runBehavior, prepareScreenshot) 
     ok: failures.length === 0,
     failures,
     phases,
+    frameWaits: window.__appSettingsFrameWaits || [],
     loadedStyles,
     themeRetentionBehavior,
     metrics: {
@@ -1378,6 +1386,12 @@ async function runElectronChild() {
       screenWidth: width,
       screenHeight: height
     });
+    // Windows 隐藏原生窗口仍可能仅约 1 Hz 发送合成帧；保留真实 rAF，显示测试窗但不抢焦点。
+    const windowBeforePresentation = { visible: window.isVisible(), minimized: window.isMinimized() };
+    window.showInactive();
+    const windowPresented = { visible: window.isVisible(), minimized: window.isMinimized() };
+    console.log(`APP_SETTINGS_WINDOW_STATE=${JSON.stringify({ before: windowBeforePresentation, presented: windowPresented })}`);
+    if (!windowPresented.visible || windowPresented.minimized) throw new Error('交互验证窗口未实际显示或已最小化');
     const result = await window.webContents.executeJavaScript(`
       (async () => {
         ${nextFrame.toString()}
@@ -1397,6 +1411,9 @@ async function runElectronChild() {
         return (${measurePage.toString()})(${JSON.stringify(scaleFactor)}, ${JSON.stringify(runBehavior)}, ${JSON.stringify(Boolean(screenshotPath))});
       })()
     `);
+    result.presentation = { mode: 'shown-inactive', before: windowBeforePresentation,
+      during: windowPresented, after: { visible: window.isVisible(), minimized: window.isMinimized() } };
+    if (!result.presentation.after.visible || result.presentation.after.minimized) throw new Error('交互验证结束时窗口隐藏或最小化');
     if (screenshotPath && result.ok) {
       const screenshot = await window.webContents.capturePage();
       fs.mkdirSync(path.dirname(screenshotPath), { recursive: true });

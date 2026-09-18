@@ -10,8 +10,8 @@
 .appearance-enable-row input:checked { background: var(--primary); border-color: var(--primary); }
 .appearance-enable-row input:checked::after { transform: translateX(18px); background: var(--on-primary); }
 .appearance-fields:disabled { opacity: .65; }
-/* 紧凑时间框为原生时分文本、时钟按钮与两侧留白保留空间。 */
-.appearance-time-grid { display: grid; grid-template-columns: 104px 22px 104px; align-items: end; gap: 12px; margin: 24px 0; }
+/* 为原生时分、12 小时制 AM/PM、时钟按钮与两侧留白保留空间。 */
+.appearance-time-grid { display: grid; grid-template-columns: 132px 22px 132px; align-items: end; gap: 12px; margin: 24px 0; }
 .appearance-time-grid label { display: flex; flex-direction: column; gap: 10px; min-width: 0; font-size: 13px; color: var(--muted); }
 .appearance-time-grid input { width: 100%; min-width: 0; height: 44px; padding: 8px; color: var(--text); background: var(--input); border: 1px solid var(--line); border-radius: 9px; font: inherit; font-size: 14px; font-variant-numeric: tabular-nums; }
 .appearance-time-separator { align-self: end; line-height: 44px; text-align: center; color: var(--muted); }

@@ -158,11 +158,11 @@ async function inspectPage(theme, runBehavior) {
   check(cardRect.x >= -1 && cardRect.y >= -1 && cardRect.right <= innerWidth + 1 && cardRect.bottom <= innerHeight + 1,
     '设置弹窗在 viewport 内', cardRect);
   const fieldsWidth = rect(fields).width;
-  const expectedTimeWidth = 104;
+  const expectedTimeWidth = 132;
   const enableRect = rect(enableRow);
   check(startRect.right < endRect.x && Math.abs(startRect.width - expectedTimeWidth) < 1
     && Math.abs(endRect.width - expectedTimeWidth) < 1,
-    '时间框为时分文本与时钟按钮保留 104px 宽度', { startRect, endRect, fieldsWidth });
+    '时间框为时分、AM/PM 与时钟按钮保留 132px 宽度', { startRect, endRect, fieldsWidth });
   check(Math.abs(enableRect.width - Math.max(200, fieldsWidth / 4)) < 1,
     '开关框缩至原来的四分之一，小窗口保留最小可用宽度', { enableRect, fieldsWidth });
   const navItems = [...overlay.querySelectorAll('.app-settings-nav-item')];

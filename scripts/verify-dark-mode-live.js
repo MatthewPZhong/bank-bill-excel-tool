@@ -239,25 +239,101 @@ function child() {
         const { inspectNativeTimeLayout } = require('./lib/native-time-layout');
         const timeLayout = { original: await inspectNativeTimeLayout(web) };
         const oldGridStyle = await web.executeJavaScript(`document.querySelector('.appearance-time-grid').getAttribute('style')`);
+        const oldBounds = window.getBounds();
+        const oldZoom = web.getZoomFactor();
+        const settleLayout = () => web.executeJavaScript(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+        const restoreGridStyle = () => web.executeJavaScript(`(() => {
+          const grid = document.querySelector('.appearance-time-grid');
+          if (!grid) throw new Error('恢复时缺少时间框网格');
+          const oldStyle = ${JSON.stringify(oldGridStyle)};
+          if (oldStyle === null) grid.removeAttribute('style'); else grid.setAttribute('style', oldStyle);
+        })()`);
         try {
           await web.executeJavaScript(`(async () => {
-            document.querySelector('.appearance-time-grid').style.gridTemplateColumns = '132px 22px 132px';
+            document.querySelector('.appearance-time-grid').style.gridTemplateColumns = '104px 22px 104px';
             await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
           })()`);
-          timeLayout.wide132 = await inspectNativeTimeLayout(web);
-          timeLayout.wideCapture = await capturePresentedPage(window, `live-${initial}-time-width-132.png`, true);
+          timeLayout.historical104 = await inspectNativeTimeLayout(web);
+          timeLayout.historical104Capture = await capturePresentedPage(window, `live-${initial}-historical-time-width-104.png`, true);
+          check(['PASS', 'FAIL'].includes(timeLayout.historical104.status)
+            && timeLayout.historical104.inputs.length === 2
+            && timeLayout.historical104.inputs.every(input => ['PASS', 'FAIL'].includes(input.status)
+              && Array.isArray(input.missing) && input.missing.length === 0
+              && Math.abs(input.host?.rect?.width - 104) < 1),
+          '历史 104px 对照缺少有效字段几何证据');
+          // 历史对照可因 AM/PM 裁切而 FAIL；恢复生产样式后再测最窄合同窗口。
+          await restoreGridStyle();
+          window.setSize(1080, 760, false);
+          web.setZoomFactor(1.5);
+          await settleLayout();
+          const narrowPage = await web.executeJavaScript(`(() => {
+            const pane = document.getElementById('appearancePane');
+            const scroll = pane?.querySelector('.appearance-pane-scroll');
+            const grid = pane?.querySelector('.appearance-time-grid');
+            if (!pane || pane.hidden || !scroll || !grid || !document.body) throw new Error('窄窗口外观设置节点不完整');
+            const metrics = element => {
+              const { x, y, width, height, right, bottom } = element.getBoundingClientRect();
+              return { x, y, width, height, right, bottom, clientWidth: element.clientWidth, scrollWidth: element.scrollWidth };
+            };
+            return { viewport: { width: innerWidth, height: innerHeight, dpr: devicePixelRatio },
+              pane: metrics(pane), scroll: metrics(scroll), grid: metrics(grid),
+              document: metrics(document.documentElement), body: metrics(document.body),
+              gridInlineStyle: grid.getAttribute('style') };
+          })()`);
+          timeLayout.narrow150 = {
+            requested: { width: 1080, height: 760, zoomFactor: 1.5 },
+            bounds: window.getBounds(), contentBounds: window.getContentBounds(),
+            minimumSize: window.getMinimumSize(), zoomFactor: web.getZoomFactor(),
+            ...narrowPage,
+            geometry: await inspectNativeTimeLayout(web),
+          };
+          const narrow = timeLayout.narrow150;
+          check(narrow.bounds.width === 1080 && narrow.bounds.height === 760
+            && Math.abs(narrow.zoomFactor - 1.5) < 0.001
+            && Math.abs(narrow.viewport.width - narrow.contentBounds.width / 1.5) <= 1
+            && Math.abs(narrow.viewport.height - narrow.contentBounds.height / 1.5) <= 1,
+          '窄窗口实际 bounds / viewport / 页面缩放与请求不一致');
+          check(narrow.gridInlineStyle === oldGridStyle && narrow.geometry.status === 'PASS',
+            '窄窗口生产样式或原生时间内部字段完整性未通过');
+          check([narrow.pane, narrow.scroll].every(item => Number.isFinite(item.scrollWidth)
+            && Number.isFinite(item.clientWidth) && item.clientWidth > 0
+            && item.scrollWidth <= item.clientWidth + 1), '窄窗口外观 pane 存在水平溢出或缺少尺寸');
+          check([narrow.document, narrow.body].every(item => Number.isFinite(item.scrollWidth)
+            && item.scrollWidth > 0 && item.scrollWidth <= narrow.viewport.width + 1),
+          '窄窗口 document 存在水平溢出或缺少尺寸');
+          timeLayout.narrow150Capture = await capturePresentedPage(window, `live-${initial}-production-1080x760-zoom-150.png`, true);
         } finally {
-          await web.executeJavaScript(`(async () => {
-            const grid = document.querySelector('.appearance-time-grid');
-            const oldStyle = ${JSON.stringify(oldGridStyle)};
-            if (oldStyle === null) grid.removeAttribute('style'); else grid.setAttribute('style', oldStyle);
-            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-          })()`);
+          // 每项均尝试恢复，避免某个恢复异常阻止其余状态复原。
+          const restoreErrors = [];
+          for (const [name, restore] of [
+            ['gridInlineStyle', restoreGridStyle],
+            ['zoomFactor', () => web.setZoomFactor(oldZoom)],
+            ['bounds', () => window.setBounds(oldBounds, false)],
+          ]) {
+            try { await restore(); }
+            catch (error) { restoreErrors.push(`${name}: ${error.message}`); }
+          }
+          await settleLayout();
+          if (restoreErrors.length) throw new Error(`时间框取证恢复失败：${restoreErrors.join('; ')}`);
         }
+        timeLayout.restoration = {
+          expectedBounds: oldBounds, actualBounds: window.getBounds(),
+          expectedZoom: oldZoom, actualZoom: web.getZoomFactor(),
+          expectedGridInlineStyle: oldGridStyle,
+          actualGridInlineStyle: await web.executeJavaScript(`document.querySelector('.appearance-time-grid').getAttribute('style')`),
+        };
+        const restoredState = timeLayout.restoration;
+        check(['x', 'y', 'width', 'height'].every(key => restoredState.actualBounds[key] === oldBounds[key])
+          && Math.abs(restoredState.actualZoom - oldZoom) < 0.001
+          && restoredState.actualGridInlineStyle === oldGridStyle, '时间框取证未完整恢复 bounds / zoom / inline style');
         timeLayout.restored = await inspectNativeTimeLayout(web);
-        timeLayout.valuesUnchanged = [timeLayout.original, timeLayout.wide132, timeLayout.restored].every((sample) =>
-          sample.inputs.length === 2 && sample.inputs.every((input) => input.value === appearance.values[input.role === 'dark-mode-start' ? 'start' : 'end']));
-        check(timeLayout.valuesUnchanged, '时间框宽度取证改变了输入值');
+        timeLayout.valuesUnchanged = [timeLayout.original, timeLayout.historical104,
+          timeLayout.narrow150.geometry, timeLayout.restored].every(sample =>
+          sample.inputs.length === 2 && ['dark-mode-start', 'dark-mode-end'].every(role => {
+            const inputs = sample.inputs.filter(input => input.role === role);
+            return inputs.length === 1 && inputs[0].value === appearance.values[role === 'dark-mode-start' ? 'start' : 'end'];
+          }));
+        check(timeLayout.valuesUnchanged, '时间框宽度或窄窗口取证改变了输入值');
         check(timeLayout.original.status === 'PASS' && timeLayout.restored.status === 'PASS', '原生时间字段含 AM/PM 完整可见性未通过');
         check(rendererErrors.length === 0, `Renderer 错误：${rendererErrors.join('; ')}`);
         console.log(prefix + JSON.stringify({ ok: failures.length === 0, initial, assertions, application,
