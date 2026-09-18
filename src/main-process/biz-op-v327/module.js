@@ -40,7 +40,7 @@ function createBizOpV327Module({ db, userDataDir, readRepository, getArchiveServ
     return protection.canRelease(id) && (catalog.operation(id)?.action !== 'EXPORT'
       || publication.closed(id) && publication.record(id)?.cleanup_completed === 1);
   } });
-  const sources = createBizOpRecoverySources({ catalog, protection, payloadStore, readRepository, getArchiveService,
+  const sources = createBizOpRecoverySources({ catalog, protection, payloadStore, readRepository, getArchiveService, userDataDir,
     requireRecovery: admission.requireRecovery });
   const recovery = createBizOpRecoveryDriver({ catalog, sources, admission, readRepository, budgetOptions });
   const plan = createBizOpRecoveryPlan({ catalog });
@@ -190,7 +190,8 @@ function createBizOpV327Module({ db, userDataDir, readRepository, getArchiveServ
       activation.verifyActive();
       if (!admission.snapshot().recoveryReady) fail('BIZOP_RECOVERY_REQUIRED');
     },
-    getStatus: () => ({ mode: catalog.control().mode, recoveryReady: admission.snapshot().recoveryReady, activation: activation.status() }) });
+    getStatus: () => ({ mode: catalog.control().mode, recoveryReady: admission.snapshot().recoveryReady,
+      archiveOwnerBackfillPending: sources.hasHistoricalOwners(), activation: activation.status() }) });
 }
 
 module.exports = { createBizOpV327Module };

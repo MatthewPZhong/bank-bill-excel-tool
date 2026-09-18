@@ -113,11 +113,11 @@ test('main 与独立 V327 注册器的 IPC 加内部任务，与 policy/support 
   assert.equal(new Set(actual).size, actual.length, 'main 不应重复注册 literal IPC');
   assert.equal(new Set(expected).size, expected.length, 'policy/support 不应重复登记');
   assert.deepEqual(expected, actual);
-  assert.equal(actual.length, 267);
+  assert.equal(actual.length, 270);
   assert.equal(v327IpcInventory().length, 21);
   assert.equal(registry.channels('reserve').length, 71);
   assert.equal(registry.channels('no-file').length, 63);
-  assert.equal(registry.channels('exclude').length, 131);
+  assert.equal(registry.channels('exclude').length, 134);
   assert.equal(SUPPORT_ACTION_POLICIES.length, 2);
 });
 
@@ -234,15 +234,15 @@ test('71 file 与 63 no-file mutation 逐项显式分类且精确闭合', () => 
   const excludeChannels = new Set(excludeInventory);
   assert.equal(fileChannels.size, 71);
   assert.equal(noFileChannels.size, 63);
-  assert.equal(excludeInventory.length, 131);
-  assert.equal(excludeChannels.size, 131);
+  assert.equal(excludeInventory.length, 134);
+  assert.equal(excludeChannels.size, 134);
   assert.deepEqual([...fileChannels].filter((channel) => noFileChannels.has(channel)), []);
   assert.deepEqual([...fileChannels].filter((channel) => excludeChannels.has(channel)), []);
   assert.deepEqual([...noFileChannels].filter((channel) => excludeChannels.has(channel)), []);
   assert.deepEqual(new Set(registry.channels('reserve')), fileChannels);
   assert.deepEqual(new Set(registry.channels('no-file')), noFileChannels);
-  assert.equal(registry.channels('exclude').length, 131);
-  assert.equal(registry.list().length, 71 + 63 + 131);
+  assert.equal(registry.channels('exclude').length, 134);
+  assert.equal(registry.list().length, 71 + 63 + 134);
   assert.ok(EXCLUDED_CHANNELS_BY_REASON['ui-navigation'].includes('settings:set-dark-mode-schedule'));
 });
 
@@ -753,4 +753,15 @@ test('Bank BU 首次运行续接持久导入身份，显式重跑创建新 paren
   assert.deepEqual(await bankBuImportResultFlowIdentities({}, {}, {
     resolveFlowEvidence: async () => ({ identity, hasRun: false })
   }), [identity]);
+});
+
+
+test('永久删除预检和待清理列表仅查询，重试走存档维护且均不产生新 Task/批次', () => {
+  const registry = createTaskPolicyRegistry();
+  for (const channel of ['archive-center:prepare-delete-batch', 'archive-center:list-delete-cleanup-jobs']) {
+    assert.equal(registry.get(channel).batchPolicy, 'exclude');
+    assert.ok(EXCLUDED_CHANNELS_BY_REASON['read-only-query'].includes(channel));
+  }
+  assert.equal(registry.get('archive-center:retry-delete-cleanup-job').batchPolicy, 'exclude');
+  assert.ok(EXCLUDED_CHANNELS_BY_REASON['archive-center-maintenance'].includes('archive-center:retry-delete-cleanup-job'));
 });

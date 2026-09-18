@@ -16,7 +16,27 @@ const NEEDS_RECOVERY_SQL = `p.phase!='CLOSED' OR s.state!='COMPLETE'
     LEFT JOIN background_execution_batch_recovery_states o ON o.batch_id=b.id
     WHERE b.task_run_id=p.task_run_id AND (o.state IS NOT NULL AND o.state!='resolved'
       OR COALESCE(o.final_outcome,b.task_status) NOT IN ('succeeded','failed','cancelled')
-      OR (t.status='succeeded')!=(COALESCE(o.final_outcome,b.task_status)='succeeded')))`;
+      OR (t.status='succeeded')!=(COALESCE(o.final_outcome,b.task_status)='succeeded')))
+  OR (p.action='EXPORT' AND (s.input_obligation!='COMPLETE'
+    OR EXISTS (SELECT 1 FROM biz_op_v327_publications pub WHERE pub.task_run_id=p.task_run_id
+      AND (pub.acknowledged!=1 OR pub.cleanup_completed!=1))))`;
+
+// 历史 CLOSED 记录仅缺新增凭证时，不成为全模块未决业务；原 outbox 责任另行完整收集。
+// b/p/s/t 是历史分页的固定别名。此条件只枚举候选，不能替代原 owner 的完整事实校验。
+const HISTORICAL_OWNER_SQL = `p.action='EXPORT' AND NOT (${NEEDS_RECOVERY_SQL})
+    AND EXISTS (SELECT 1 FROM biz_op_v327_publications pub
+      WHERE pub.task_run_id=p.task_run_id AND (pub.commit_proof_json IS NOT NULL OR pub.state='NOT_COMMITTED'))
+    AND NOT EXISTS (SELECT 1 FROM archive_owner_terminal_completions c
+        WHERE c.batch_id=b.id AND c.terminal_status=t.status AND c.after_terminal_json='null'
+          AND c.archive_instance_id=(SELECT setting_value FROM app_settings WHERE setting_key='archive_center_instance_id')
+          AND json_extract(c.owner_json,'$.version')=1 AND json_extract(c.owner_json,'$.kind')='file-batch'
+          AND json_extract(c.owner_json,'$.batchContext.batchId')=b.id
+          AND json_extract(c.owner_json,'$.batchContext.batchNumber')=b.batch_number
+          AND json_extract(c.owner_json,'$.batchContext.taskRunId')=b.task_run_id
+          AND json_extract(c.owner_json,'$.batchContext.taskKey')=b.task_key
+          AND json_extract(c.owner_json,'$.batchContext.moduleId')=b.module_id
+          AND json_extract(c.owner_json,'$.batchContext.parentRunId')=b.parent_run_id
+          AND json_extract(c.owner_json,'$.batchContext.operationKey')=b.operation_key)`;
 
 function taskAlignment(catalog, source, outcome) {
   const task = catalog.task(source.taskRunId);
@@ -39,4 +59,4 @@ function taskAlignment(catalog, source, outcome) {
   return state;
 }
 
-module.exports = { NEEDS_RECOVERY_SQL, TERMINAL, isPrimary, taskAlignment };
+module.exports = { NEEDS_RECOVERY_SQL, HISTORICAL_OWNER_SQL, TERMINAL, isPrimary, taskAlignment };

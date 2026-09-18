@@ -2,6 +2,7 @@
 
 const crypto = require('node:crypto');
 const path = require('node:path');
+const { stableSerialize } = require('../../backend/database/archive-terminal-completion');
 const {
   outboxBatchId,
   parseOutboxBatchId
@@ -220,6 +221,11 @@ class ArchiveCenterController {
         })
       : [];
     this.outboxFlushTail = Promise.resolve();
+    this.deleteConfirmations = new Map();
+    this.activeDeleteBatchIds = new Set();
+    this.service.runDeleteWithOwnerGuard = (batchId, operation) => (
+      this.runDeleteWithOwnerGuard(batchId, operation)
+    );
     this.startupVccGateSucceeded = false;
     this.entryMaintenance = {
       status: 'idle',
@@ -412,7 +418,7 @@ class ArchiveCenterController {
       }
     }
     if (interruptedSweepSafe) {
-      const interrupted = await this.service.markInterruptedTasks({
+      const ownerRecoveryExclusions = {
         excludeBatchIds: [
           ...new Set([
             ...pendingTerminalBatchIds,
@@ -422,12 +428,21 @@ class ArchiveCenterController {
           ].map(Number).filter((batchId) => Number.isSafeInteger(batchId) && batchId > 0))
         ],
         excludeTaskRunIds: [...new Set([...pendingTerminalTaskRunIds, ...protectedRecoveryTaskRunIds])]
-      });
+      };
+      const interrupted = await this.service.markInterruptedTasks(ownerRecoveryExclusions);
       if (interrupted && interrupted.ok === false) {
         this._warn('存档中心异常任务扫尾未完成', interrupted.message || interrupted.code);
         const error = new Error(interrupted.message || '存档中心异常任务扫尾未完成');
         error.code = interrupted.code || 'ARCHIVE_STARTUP_INTERRUPTED_SWEEP_FAILED';
         throw error;
+      }
+      if (typeof this.service.recoverFileTaskOwnerCompletions === 'function') {
+        const recovered = await this.service.recoverFileTaskOwnerCompletions(ownerRecoveryExclusions);
+        if (!recovered || recovered.ok === false) {
+          const error = new Error(recovered && recovered.message || '普通 File Task 原收口责任恢复失败');
+          error.code = recovered && recovered.code || 'ARCHIVE_STARTUP_OWNER_COMPLETION_RECOVERY_FAILED';
+          throw error;
+        }
       }
     }
     const safetyRecovery = await this.service.recoverStartupSafety();
@@ -516,6 +531,17 @@ class ArchiveCenterController {
           && persistedOwner.kind === 'file-batch') {
         const terminalOutcome = normalizeTerminalOutcome(payload.terminalOutcome);
         const batchContext = persistedOwner.batchContext;
+        // 已删除批次必须先验证原 owner 的完整收口凭证，不能再调用 finishFileTask。
+        if (!this.service.repository.getBatch(batchContext.batchId)) {
+          if (this._isCompletedDeletedOwner(persistedOwner, terminalOutcome)) {
+            this.outboxStore.remove(record.id);
+            flushed += 1;
+          } else {
+            this._warn('已删除 File Task 的终态凭证不足，保留原通知等待恢复',
+              `batch=${batchContext.batchId}`);
+          }
+          continue;
+        }
         const existingTaskRun = this.service.repository.getTaskRun(batchContext.taskRunId);
         const alreadyTerminal = existingTaskRun
           && ['succeeded', 'failed', 'cancelled', 'interrupted'].includes(existingTaskRun.status);
@@ -535,10 +561,12 @@ class ArchiveCenterController {
             }
           }
         }
+        const durableOutcome = { ...terminalOutcome, metadata: { ...terminalOutcome.metadata } };
+        delete durableOutcome.metadata._archiveAfterTerminalPending;
         const terminalResult = await this.service.finishFileTask(
           batchContext.taskRunId,
           batchContext.batchId,
-          terminalOutcome
+          durableOutcome
         );
         const benignTerminal = terminalResult
           && terminalResult.ok === false
@@ -764,8 +792,32 @@ class ArchiveCenterController {
   }
 
   async _finalizeOwnerTerminal(record, terminalOutcome, terminalResult) {
-    if (!terminalOutcome.afterTerminal) return true;
-    if (!this.onTerminalIntentFlushed) {
+    const persistedOwner = record && record.payload && record.payload.owner;
+    const repository = this.service.repository;
+    if (persistedOwner && persistedOwner.version === 1 && persistedOwner.kind === 'file-batch'
+        && typeof repository.getOwnerTerminalCompletion === 'function') {
+      try {
+        const proof = repository.getOwnerTerminalCompletion(persistedOwner);
+        if (proof) {
+          if (proof.archiveInstanceId === repository.getArchiveInstanceId()
+              && proof.terminalStatus === terminalOutcome.taskStatus
+              && stableSerialize(proof.afterTerminal) === stableSerialize(terminalOutcome.afterTerminal || null)) {
+            return true;
+          }
+          this._warn('File Task 收口凭证与迟到终态通知冲突，保留原通知', `batch=${persistedOwner.batchContext.batchId}`);
+          return false;
+        }
+      } catch (error) {
+        this._warn('File Task 收口凭证读取失败，保留原通知', error.message);
+        return false;
+      }
+    }
+    if (terminalOutcome.metadata && terminalOutcome.metadata._archiveAfterTerminalPending === true) {
+      this._warn('File Task 原后处理尚未完成且缺少持久恢复路由，保留原通知',
+        persistedOwner && persistedOwner.batchContext && persistedOwner.batchContext.taskRunId || 'unknown-owner');
+      return false;
+    }
+    if (terminalOutcome.afterTerminal && !this.onTerminalIntentFlushed) {
       this._warn(
         '存档 outbox 原任务已终结但缺少 afterTerminal 路由',
         terminalOutcome.afterTerminal.route
@@ -773,19 +825,55 @@ class ArchiveCenterController {
       return false;
     }
     try {
-      await this.onTerminalIntentFlushed({
-        route: terminalOutcome.afterTerminal,
-        record,
-        created: { batch: terminalResult && terminalResult.batch || null },
-        terminalOutcome,
-        terminalResult
-      });
+      if (terminalOutcome.afterTerminal) {
+        await this.onTerminalIntentFlushed({
+          route: terminalOutcome.afterTerminal,
+          record,
+          created: { batch: terminalResult && terminalResult.batch || null },
+          terminalOutcome,
+          terminalResult
+        });
+      }
+      const owner = record && record.payload && record.payload.owner;
+      if (owner && owner.version === 1 && owner.kind === 'file-batch'
+          && typeof repository.recordOwnerTerminalCompletion === 'function') {
+        repository.recordOwnerTerminalCompletion({
+          archiveInstanceId: repository.getOrCreateArchiveInstanceId(),
+          owner: freezePersistedTaskOwner(owner, { required: true }),
+          terminalStatus: terminalOutcome.taskStatus,
+          afterTerminal: terminalOutcome.afterTerminal || null
+        });
+      }
       return true;
     } catch (error) {
       this._warn(
         '存档 outbox 原任务已终结但业务恢复收口失败',
         error && error.message ? error.message : String(error)
       );
+      return false;
+    }
+  }
+
+  _isCompletedDeletedOwner(owner, terminalOutcome) {
+    const repository = this.service.repository;
+    if (typeof repository.getOwnerTerminalCompletion !== 'function') return false;
+    try {
+      const proof = repository.getOwnerTerminalCompletion(owner);
+      if (!proof || proof.terminalStatus !== terminalOutcome.taskStatus
+          || stableSerialize(proof.afterTerminal) !== stableSerialize(terminalOutcome.afterTerminal || null)) {
+        return false;
+      }
+      const batchId = owner.batchContext.batchId;
+      const deletion = typeof repository.getDeletionReceipt === 'function'
+        ? repository.getDeletionReceipt(batchId, proof.archiveInstanceId)
+        : null;
+      const job = typeof repository.getCleanupJobForBatch === 'function'
+        ? repository.getCleanupJobForBatch(batchId)
+        : null;
+      return Boolean((deletion && deletion.archiveInstanceId === proof.archiveInstanceId)
+        || (job && job.archiveInstanceId === proof.archiveInstanceId));
+    } catch (error) {
+      this._warn('已删除 File Task 收口凭证读取失败', error.message);
       return false;
     }
   }
@@ -875,6 +963,11 @@ class ArchiveCenterController {
   _persistOutboxPayload(batchPayload) {
     if (!this.outboxStore) {
       throw new Error('存档持久 outbox 尚未初始化');
+    }
+    if (this.activeDeleteBatchIds.has(Number(batchPayload.targetBatchId))) {
+      const error = new Error('该批次正在永久删除，请在本次删除结束后重试终态登记');
+      error.code = 'ARCHIVE_DELETE_IN_PROGRESS';
+      throw error;
     }
     const existing = this.outboxStore.findByOperationKey(batchPayload.operationKey);
     if (!existing) return this.outboxStore.enqueue(batchPayload);
@@ -1427,29 +1520,222 @@ class ArchiveCenterController {
     return { status: 'success', batch: this._mapBatch(result.batch) };
   }
 
-  async deleteBatch(batchNumberOrId) {
+  _deleteOwnerInventory(batch) {
+    const records = this.outboxStore ? this.outboxStore.list() : [];
+    if (!Array.isArray(records)) throw new TypeError('终态通知清单格式非法');
+    for (const record of records) {
+      const payload = record && record.payload;
+      if (!payload || typeof payload !== 'object') throw new TypeError('终态通知损坏');
+      const owner = payload.owner
+        ? freezePersistedTaskOwner(payload.owner, { required: true })
+        : null;
+      const context = owner && (owner.batchContext || owner.operationContext);
+      const moduleId = String(context && context.moduleId || payload.moduleId || '');
+      const operationKey = String(context && context.operationKey || payload.operationKey || '');
+      const targetBatchId = Number(context && context.batchId || payload.targetBatchId);
+      const sameBatch = targetBatchId === Number(batch.id);
+      const sameOperation = operationKey && operationKey === String(batch.operationKey || '')
+        && moduleId === String(batch.moduleId || '');
+      const sameTask = context && context.taskRunId === batch.taskRunId;
+      // 无法验证 owner 归属时不把损坏/缺失身份当作空清单。
+      const ambiguous = !moduleId || !operationKey
+        || (moduleId === batch.moduleId && !Number.isSafeInteger(targetBatchId)
+          && !(context && context.taskRunId) && !this.service.repository.getOperationIssuance(
+            moduleId, operationKey
+          ));
+      if (sameBatch || sameOperation || sameTask || ambiguous) {
+        const error = new Error('该批次的任务终态或恢复通知尚未收口，请等待原任务恢复完成后重试');
+        error.code = 'ARCHIVE_DELETE_OWNER_PENDING';
+        throw error;
+      }
+    }
+    const repository = this.service.repository;
+    const taskRun = batch.taskRunId && repository.getTaskRun(batch.taskRunId);
+    if (taskRun) {
+      const owner = freezePersistedTaskOwner({ version: 1, kind: 'file-batch', batchContext: {
+        batchId: batch.id, batchNumber: batch.batchNumber,
+        taskRunId: batch.taskRunId, taskKey: batch.taskKey, moduleId: batch.moduleId,
+        parentRunId: batch.parentRunId, operationKey: batch.operationKey
+      } }, { required: true });
+      const proof = typeof repository.getOwnerTerminalCompletion === 'function'
+        ? repository.getOwnerTerminalCompletion(owner)
+        : null;
+      if (!proof || proof.archiveInstanceId !== repository.getArchiveInstanceId()
+          || proof.terminalStatus !== taskRun.status) {
+        const error = new Error('该批次缺少原任务及后处理的完整收口凭证，请先由原任务恢复入口完成收口');
+        error.code = 'ARCHIVE_DELETE_OWNER_COMPLETION_REQUIRED';
+        throw error;
+      }
+    }
+    return crypto.createHash('sha256').update(stableSerialize(records)).digest('hex');
+  }
+
+  async _assertDeleteAdmission(batch, options = {}) {
+    if (this.storageRootManager && typeof this.storageRootManager.assertDeleteAllowed === 'function') {
+      await this.storageRootManager.assertDeleteAllowed(options);
+    } else {
+      const maintenance = this._storageMaintenanceFailure('永久删除批次');
+      if (maintenance) {
+        const error = new Error(maintenance.message);
+        error.code = maintenance.code;
+        throw error;
+      }
+    }
+    if (this.getProtectedInterruptedTaskBatchIds) {
+      const inventory = await this.getProtectedInterruptedTaskBatchIds();
+      const ids = Array.isArray(inventory) ? inventory : inventory && inventory.batchIds;
+      if (!Array.isArray(ids) || inventory.sweepUnsafe === true
+          || ids.some((id) => Number(id) === Number(batch.id))
+          || (Array.isArray(inventory.taskRunIds) && inventory.taskRunIds.includes(batch.taskRunId))) {
+        const error = new Error('该批次仍有任务恢复责任，或恢复清单当前不可验证');
+        error.code = 'ARCHIVE_DELETE_OWNER_PENDING';
+        throw error;
+      }
+    }
+    return this._deleteOwnerInventory(batch);
+  }
+
+  async prepareDeleteBatch(batchNumberOrId, caller = {}) {
+    try {
+      const batchId = await this.resolveBatchId(batchNumberOrId);
+      if (!batchId) return publicFailure(null, '存档批次不存在');
+      const batch = this.service.repository.getBatch(batchId);
+      await this._assertDeleteAdmission(batch);
+      const prepared = await this.service.prepareDeleteBatch(batchId);
+      if (!prepared || prepared.ok !== true) return publicFailure(prepared, '删除预检失败');
+      const inventoryRevision = await this._assertDeleteAdmission(batch);
+      const confirmationToken = crypto.randomUUID();
+      const now = Date.now();
+      for (const [token, entry] of this.deleteConfirmations) {
+        if (entry.expiresAt < now) this.deleteConfirmations.delete(token);
+      }
+      if (this.deleteConfirmations.size >= 512) this.deleteConfirmations.delete(this.deleteConfirmations.keys().next().value);
+      this.deleteConfirmations.set(confirmationToken, {
+        batchId,
+        batchNumber: batch.batchNumber,
+        requestId: String(batchNumberOrId),
+        callerId: String(caller.senderId || 'internal'),
+        revision: prepared.revision,
+        archiveInstanceId: prepared.archiveInstanceId,
+        inventoryRevision,
+        expiresAt: now + 5 * 60 * 1000,
+        resultPromise: null
+      });
+      return {
+        status: 'success', ok: true, confirmationToken,
+        batchNumber: batch.batchNumber,
+        summary: prepared.summary,
+        sourcePolicy: 'managed-only'
+      };
+    } catch (error) {
+      return publicFailure({ code: error.code || 'ARCHIVE_DELETE_PREFLIGHT_FAILED', message: error.message }, '删除预检失败');
+    }
+  }
+
+  runDeleteWithOwnerGuard(batchId, operation, options = {}) {
+    const execute = async () => {
+      try {
+        const batch = this.service.repository.getBatch(batchId);
+        if (!batch) return { ok: false, code: 'ARCHIVE_BATCH_NOT_FOUND', message: '存档批次不存在' };
+        const inventoryRevision = await this._assertDeleteAdmission(batch, options);
+        this.activeDeleteBatchIds.add(Number(batchId));
+        return await operation({
+          ownerProof: { inventoryRevision },
+          assertOwnerReady: () => this._deleteOwnerInventory(batch)
+        });
+      } catch (error) {
+        return { ok: false, code: error.code || 'ARCHIVE_DELETE_OWNER_PENDING', message: error.message };
+      } finally {
+        this.activeDeleteBatchIds.delete(Number(batchId));
+      }
+    };
+    const run = this.outboxFlushTail.then(execute, execute);
+    this.outboxFlushTail = run.catch(() => undefined);
+    return run;
+  }
+
+  _mapDeleteResult(result) {
+    const complete = result && result.ok === true
+      && result.metadataDeleted === true && result.fullyDeleted === true;
+    if (!complete && !(result && result.metadataDeleted === true)) {
+      return { ...publicFailure(result, '永久删除存档批次失败'), ok: false, fullyDeleted: false };
+    }
+    return {
+      status: complete ? 'success' : 'partial',
+      ok: complete,
+      metadataDeleted: true,
+      fullyDeleted: complete,
+      deletionId: result.deletionId,
+      cleanupJobId: result.cleanupJobId,
+      summary: result.summary,
+      message: complete ? '存档批次已永久删除'
+        : '批次记录已删除，但仍有文件清理未完成；请在待完成删除中查看原因并重试',
+      failures: Array.isArray(result.failures) ? result.failures : []
+    };
+  }
+
+  async deleteBatch(batchNumberOrId, confirmationToken, caller = {}) {
     const maintenance = this._storageMaintenanceFailure('永久删除批次');
     if (maintenance) return maintenance;
-    const batchId = await this.resolveBatchId(batchNumberOrId);
-    if (!batchId) return publicFailure(null, '存档批次不存在');
-    const result = await this.service.deleteBatch(batchId);
-    if (result && result.metadataDeleted === true) {
-      for (const [batchNumber, mappedId] of this.batchNumberToId) {
-        if (mappedId === batchId) this.batchNumberToId.delete(batchNumber);
-      }
-      const cleanupPending = result.ok === false;
-      return {
-        status: cleanupPending ? 'partial' : 'success',
-        ok: !cleanupPending,
-        metadataDeleted: true,
-        message: cleanupPending
-          ? '批次记录已删除，但部分物理副本清理待下次启动重试'
-          : '存档批次已永久删除',
-        failures: Array.isArray(result.failures) ? result.failures : []
-      };
+    const entry = this.deleteConfirmations.get(String(confirmationToken || ''));
+    if (!entry || entry.callerId !== String(caller.senderId || 'internal')
+        || ![String(entry.batchId), entry.batchNumber, entry.requestId].includes(String(batchNumberOrId))
+        || (!entry.resultPromise && entry.expiresAt < Date.now())) {
+      return { ...publicFailure({ code: 'ARCHIVE_DELETE_CONFIRMATION_EXPIRED',
+        message: '删除确认已失效，请重新预检并确认' }), ok: false, fullyDeleted: false };
     }
-    if (!result || result.ok === false) return publicFailure(result, '永久删除存档批次失败');
-    return { status: 'success', ok: true, message: '存档批次已永久删除' };
+    if (entry.resultPromise) return entry.resultPromise;
+    const execute = async () => {
+      try {
+        const batch = this.service.repository.getBatch(entry.batchId);
+        if (!batch) return publicFailure(null, '存档批次不存在，请刷新待完成删除');
+        const inventoryRevision = await this._assertDeleteAdmission(batch);
+        if (inventoryRevision !== entry.inventoryRevision) {
+          return publicFailure({ code: 'ARCHIVE_DELETE_CONFIRMATION_EXPIRED',
+            message: '任务状态已变化，请重新预检并确认' });
+        }
+        this.activeDeleteBatchIds.add(entry.batchId);
+        const result = await this.service.deleteBatch(entry.batchId, {
+          expectedRevision: entry.revision,
+          origin: 'manual',
+          ownerProof: { inventoryRevision, archiveInstanceId: entry.archiveInstanceId },
+          assertOwnerReady: () => this._deleteOwnerInventory(batch)
+        });
+        if (result && result.metadataDeleted === true) {
+          for (const [number, mappedId] of this.batchNumberToId) {
+            if (mappedId === entry.batchId) this.batchNumberToId.delete(number);
+          }
+        }
+        return this._mapDeleteResult(result);
+      } catch (error) {
+        return { ...publicFailure({ code: error.code, message: error.message }, '永久删除失败'), ok: false, fullyDeleted: false };
+      } finally {
+        this.activeDeleteBatchIds.delete(entry.batchId);
+      }
+    };
+    const run = this.outboxFlushTail.then(execute, execute);
+    this.outboxFlushTail = run.catch(() => undefined);
+    entry.resultPromise = run;
+    return run;
+  }
+
+  async listDeleteCleanupJobs() {
+    const result = await this.service.listDeleteCleanupJobs();
+    if (!result || result.ok !== true) return publicFailure(result, '待完成删除加载失败');
+    return { status: 'success', jobs: result.jobs || [] };
+  }
+
+  async retryDeleteCleanupJob(cleanupJobId) {
+    const execute = async () => {
+      try {
+        return this._mapDeleteResult(await this.service.retryDeleteCleanupJob(cleanupJobId));
+      } catch (error) {
+        return publicFailure({ code: error.code, message: error.message }, '重试删除失败');
+      }
+    };
+    const run = this.outboxFlushTail.then(execute, execute);
+    this.outboxFlushTail = run.catch(() => undefined);
+    return run;
   }
 
   async selectRetrySources(batchNumberOrId) {
@@ -1777,9 +2063,10 @@ class ArchiveCenterController {
         this._assertRetentionGate();
         return typeof this.service.runRetentionMaintenance === 'function'
           ? this.service.runRetentionMaintenance({
+              ownerToken: entryLeaseOwnerToken,
               onProgress: (value) => progress('retention', value)
             })
-          : this.service.cleanupExpired();
+          : this.service.cleanupExpired({ ownerToken: entryLeaseOwnerToken });
       }],
       ['owned-orphans', () => this.service.runOwnedOrphanCleanup()],
       ['layout-materialization', () => this.service.runLayoutMaterializationMaintenance({

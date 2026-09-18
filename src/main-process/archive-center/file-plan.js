@@ -1,5 +1,7 @@
 'use strict';
 
+const { positionReportSourceIdentity } = require('../../backend/position-report-source-identity');
+
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -134,6 +136,15 @@ function normalizeItem(raw, direction, options) {
     } else {
       base.sourceSnapshot = snapshotFromRegularFile(fsImpl, filePath);
     }
+    if (raw.expectedSha256 !== undefined || raw.expectedSizeBytes !== undefined) {
+      if (typeof raw.expectedSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(raw.expectedSha256)
+          || !Number.isSafeInteger(raw.expectedSizeBytes) || raw.expectedSizeBytes < 0
+          || raw.expectedSizeBytes !== base.sourceSnapshot.sizeBytes) {
+        throw planError('ARCHIVE_FILE_PLAN_INVALID', '输入摘要必须包含合法 SHA-256 和与原快照一致的大小');
+      }
+      base.expectedSha256 = raw.expectedSha256;
+      base.expectedSizeBytes = raw.expectedSizeBytes;
+    }
     const freshnessFailure = normalizeFreshnessFailure(raw.freshnessFailure);
     if (freshnessFailure) base.freshnessFailure = freshnessFailure;
   } else {
@@ -141,6 +152,24 @@ function normalizeItem(raw, direction, options) {
       platform: options.platform
     });
     base.targetSnapshot = targetSnapshot(fsImpl, filePath);
+  }
+  if (raw.preGeneratedOutput !== undefined) {
+    const evidence = raw.preGeneratedOutput;
+    const snapshot = normalizeSourceSnapshot(evidence && evidence.sourceSnapshot);
+    if (!evidence || evidence.version !== 1 || evidence.kind !== 'position-anomaly-report'
+        || typeof evidence.producerArtifactKey !== 'string' || !evidence.producerArtifactKey
+        || Object.keys(evidence).some((key) => !['version', 'kind', 'producerArtifactKey', 'sourceSnapshot', 'expectedSha256', 'expectedSizeBytes'].includes(key))
+        || direction !== 'output' || base.role !== 'output'
+        || base.sourceOperation !== 'position-reconciliation:source:prepare-import'
+        || !positionReportSourceIdentity(filePath, evidence.producerArtifactKey)
+        || !snapshot?.ino || !base.targetSnapshot.exists
+        || JSON.stringify(snapshot) !== JSON.stringify(normalizeSourceSnapshot(base.targetSnapshot.snapshot))
+        || typeof evidence.expectedSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(evidence.expectedSha256)
+        || !Number.isSafeInteger(evidence.expectedSizeBytes) || evidence.expectedSizeBytes < 0
+        || evidence.expectedSizeBytes !== snapshot.sizeBytes) {
+      throw planError('ARCHIVE_FILE_PLAN_INVALID', '预先生成的平盘报告必须包含匹配原对象的完整证据');
+    }
+    base.preGeneratedOutput = Object.freeze({ ...evidence, sourceSnapshot: Object.freeze({ ...snapshot }) });
   }
   const derivedArtifactKey = artifactKeyOf(base);
   if (raw.artifactKey !== undefined

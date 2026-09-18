@@ -211,7 +211,10 @@ test.describe('v3.1.13 设置与存档中心静态契约', () => {
       ['openFile', 'archive-center:open-file'],
       ['saveAs', 'archive-center:save-as'],
       ['setLocked', 'archive-center:set-locked'],
+      ['prepareDeleteBatch', 'archive-center:prepare-delete-batch'],
       ['deleteBatch', 'archive-center:delete-batch'],
+      ['listDeleteCleanupJobs', 'archive-center:list-delete-cleanup-jobs'],
+      ['retryDeleteCleanupJob', 'archive-center:retry-delete-cleanup-job'],
       ['selectRetrySources', 'archive-center:select-retry-sources'],
       ['retryBatch', 'archive-center:retry-batch'],
       ['getSettings', 'archive-center:get-settings'],
@@ -297,7 +300,7 @@ test.describe('v3.1.13 设置与存档中心静态契约', () => {
     assert.match(renderer, /api\.openFile\(fileRefId\)/);
     assert.match(renderer, /api\.saveAs\(fileRefId\)/);
     assert.match(renderer, /getArchiveCenterApi\(\)\.setLocked\(batchId, nextLocked\)/);
-    assert.match(renderer, /getArchiveCenterApi\(\)\.deleteBatch\(batchId\)/);
+    assert.match(renderer, /getArchiveCenterApi\(\)\.deleteBatch\(batchId, prepared\.confirmationToken\)/);
     assert.match(renderer, /getArchiveCenterApi\(\)\.selectRetrySources\(batchId\)/);
     assert.match(renderer, /getArchiveCenterApi\(\)\.retryBatch\(batchId, sourcePaths\)/);
     assert.match(renderer, /getArchiveCenterApi\(\)\.changeStorageLocation\(\)/);
@@ -704,4 +707,21 @@ test.describe('v3.1.13 设置与存档中心静态契约', () => {
     assert.ok(runCalls[0].range[0] < initialWindowCalls[0].range[0]);
     assert.doesNotMatch(main, /DEFERRED_WINDOW_STARTUP|markAppInitDone|app:init-done/);
   });
+});
+
+
+test('永久删除确认先只读预检，完整结果和待完成删除入口覆盖所有模块', () => {
+  const renderer = read('src/renderer.js');
+  const start = renderer.indexOf('async function confirmArchiveBatchDelete');
+  const end = renderer.indexOf('function closeSettingsDialog', start);
+  const flow = renderer.slice(start, end);
+  assert.ok(flow.indexOf('prepareDeleteBatch(batchId)') < flow.indexOf('createConfirmDialog({'));
+  assert.ok(flow.indexOf('onConfirm: async') < flow.indexOf('deleteBatch(batchId, prepared.confirmationToken)'));
+  assert.match(flow, /该批次信息及存档中心保存的原始文件将一并删除，删除后无法恢复。/);
+  assert.doesNotMatch(flow, /该操作不会删除原始文件和用户已另存的副本/);
+  assert.match(flow, /result\?\.ok === true && metadataDeleted && result\?\.fullyDeleted === true/);
+  assert.doesNotMatch(flow, /moduleId|toolbox/);
+  assert.match(renderer, /data-role="archive-delete-cleanup-jobs"/);
+  assert.match(renderer, /retryDeleteCleanupJob\(button\.dataset\.cleanupJobId\)/);
+  assert.match(flow, /archiveState\.listRequestId \+= 1;[\s\S]*archiveState\.detailRequestId \+= 1;/);
 });

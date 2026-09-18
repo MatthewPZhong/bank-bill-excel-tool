@@ -17,6 +17,7 @@ const {
   verifyFile
 } = require('./storage-materializer');
 const { sourceSnapshotFromStat } = require('./source-snapshot');
+const { captureFileIdentity } = require('./batch-delete-plan');
 
 const ROOT_MARKER_FILE = '.archive-root.json';
 const ROOT_MARKER_TYPE = 'bank-bill-excel-tool-archive-root';
@@ -46,6 +47,24 @@ class ArchiveStorageRootError extends Error {
     this.name = 'ArchiveStorageRootError';
     this.code = code;
     this.retryable = options.retryable === true;
+  }
+}
+
+function publishedFileIdentity(stat) {
+  const snapshot = sourceSnapshotFromStat(stat);
+  if (!snapshot || stat.isSymbolicLink()) throw new ArchiveStorageRootError(
+    'ARCHIVE_STORAGE_DELETE_FILE_CHANGED', '迁移发布对象不是原普通文件');
+  const birthtimeMs = typeof stat.birthtimeNs === 'bigint'
+    ? Number(stat.birthtimeNs / 1000000n) + Number(stat.birthtimeNs % 1000000n) / 1e6
+    : Number(stat.birthtimeMs);
+  return { ...snapshot, dev: String(stat.dev), birthtimeMs, mode: Number(stat.mode), nlink: Number(stat.nlink) };
+}
+
+function assertPublishedIdentity(expected, actual, ignored = []) {
+  if (!expected || !actual || ['dev', 'ino', 'sizeBytes', 'mtimeMs', 'ctimeMs', 'birthtimeMs', 'mode', 'nlink']
+    .some((field) => !ignored.includes(field) && expected[field] !== actual[field])) {
+    throw new ArchiveStorageRootError('ARCHIVE_STORAGE_DELETE_FILE_CHANGED',
+      '迁移发布路径不再属于本次创建的原文件，保留文件及恢复记录');
   }
 }
 
@@ -227,6 +246,24 @@ function validateJournal(journal, instanceId) {
       '存档迁移缺少旧根清理证据，已停止自动处理'
     );
   }
+  for (const field of ['sourceFileIdentities', 'targetFileIdentities']) {
+    const identities = journal[field];
+    if (identities == null) continue;
+    if (typeof identities !== 'object' || Array.isArray(identities)
+        || Object.entries(identities).some(([relativePath, identity]) => (
+          toRelativePath(relativePath) !== relativePath || !identity || typeof identity !== 'object'
+          || typeof identity.exists !== 'boolean' || !Array.isArray(identity.parents)
+          || !identity.root || !identity.root.dev || !identity.root.ino
+          || (identity.exists && (!identity.dev || !identity.ino
+            || !Number.isSafeInteger(identity.sizeBytes) || identity.sizeBytes < 0
+            || !Number.isFinite(identity.mtimeMs) || !Number.isFinite(identity.ctimeMs)
+            || !Number.isFinite(identity.birthtimeMs) || !Number.isSafeInteger(identity.mode)
+            || !Number.isSafeInteger(identity.nlink) || identity.nlink < 1
+            || !/^[a-f0-9]{64}$/.test(identity.sha256)))
+        ))) {
+      throw new ArchiveStorageRootError('ARCHIVE_STORAGE_JOURNAL_INVALID', '迁移文件身份记录无效，已停止自动处理');
+    }
+  }
   return {
     ...journal,
     sourceRoot: normalizeRoot(journal.sourceRoot),
@@ -315,6 +352,234 @@ class ArchiveStorageRootManager {
   isMaintenanceRequested() {
     const state = this.runtimeDelegate.getMaintenanceState();
     return state.requested || state.active;
+  }
+
+  async hasUnresolvedMigration() {
+    // 磁盘 journal 才是迁移收口事实；锁释放或当前根明确都不能替代它。
+    return Boolean(await this._readJournal());
+  }
+
+  async assertDeleteAllowed(options = {}) {
+    const maintenance = this.runtimeDelegate.getMaintenanceState();
+    const ownedRetention = options.origin === 'retention'
+      && this.entryMaintenanceOwnerToken
+      && options.ownerToken === this.entryMaintenanceOwnerToken
+      && maintenance.requested && !maintenance.active;
+    if (this.migrationPromise || (this.isMaintenanceRequested() && !ownedRetention)) {
+      throw new ArchiveStorageRootError('ARCHIVE_STORAGE_MAINTENANCE', '存档位置正在维护，暂不能永久删除');
+    }
+    if (await this.hasUnresolvedMigration()) {
+      throw new ArchiveStorageRootError(
+        'ARCHIVE_STORAGE_MIGRATION_PENDING',
+        '存档迁移尚未安全收口，请恢复迁移后重新确认删除'
+      );
+    }
+    return true;
+  }
+
+  _migrationIdentity(journal) {
+    return {
+      migrationId: journal.migrationId,
+      archiveInstanceId: journal.archiveInstanceId,
+      sourceRoot: journal.sourceRoot,
+      targetRoot: journal.targetRoot
+    };
+  }
+
+  _jobMatchesMigration(job, journal) {
+    const expected = this._migrationIdentity(journal);
+    return Boolean(job.archiveInstanceId === journal.archiveInstanceId
+      && job.migration && Object.keys(expected).every(
+        (key) => job.migration[key] === expected[key]
+      ));
+  }
+
+  _jobItemsComplete(job) {
+    const items = job.plan && job.plan.items;
+    return Array.isArray(items) && items.every((item) => (
+      ['deleted', 'already-missing', 'preserved-shared'].includes(item.state)
+    ));
+  }
+
+  _jobRoot(job) {
+    const identity = job.plan && job.plan.rootIdentity;
+    return identity && (identity.realPath || identity.rootDir) || '';
+  }
+
+  _migrationCleanupConflict(message) {
+    return new ArchiveStorageRootError('ARCHIVE_STORAGE_DELETE_RECOVERY_CONFLICT', message);
+  }
+
+  async _captureMigrationFile(rootDir, relativePath, sha256, fingerprint, publishedIdentity) {
+    const identity = await captureFileIdentity({
+      fs: this.fs,
+      rootDir,
+      _assertManagedRoot: () => this._assertRootDirectory(rootDir),
+      _resolveManagedRelative: (value) => path.join(rootDir, ...toRelativePath(value).split('/'))
+    }, relativePath, { sha256, fingerprint });
+    const root = await this.fs.promises.lstat(rootDir);
+    const result = { ...identity, root: { dev: String(root.dev), ino: String(root.ino) } };
+    if (publishedIdentity) {
+      assertPublishedIdentity(publishedIdentity, result);
+      if (JSON.stringify(publishedIdentity.root) !== JSON.stringify(result.root)
+          || JSON.stringify(publishedIdentity.parents) !== JSON.stringify(result.parents)) {
+        throw new ArchiveStorageRootError('ARCHIVE_STORAGE_DELETE_FILE_CHANGED',
+          '迁移发布根或父目录已被替换，保留文件及恢复记录');
+      }
+    }
+    return result;
+  }
+
+  async _assertMigrationFile(journal, side, relativePath) {
+    const rootDir = journal[`${side}Root`];
+    const inventory = journal[`${side}FileIdentities`] || {};
+    const expected = inventory[relativePath];
+    const actual = await this._captureMigrationFile(rootDir, relativePath, expected?.sha256);
+    const changed = () => {
+      throw new ArchiveStorageRootError('ARCHIVE_STORAGE_DELETE_FILE_CHANGED', '迁移文件或父目录已被替换，保留两根及恢复记录');
+    };
+    if (!expected) {
+      if (actual.exists) throw new ArchiveStorageRootError('ARCHIVE_STORAGE_DELETE_IDENTITY_MISSING',
+        '旧迁移记录缺少现存文件的持久对象身份，保留两根及恢复记录');
+      return actual;
+    }
+    if (JSON.stringify(expected.root) !== JSON.stringify(actual.root)
+        || !actual.parents.every((parent) => expected.parents.some((prior) => (
+          prior.relativePath === parent.relativePath && prior.dev === parent.dev && prior.ino === parent.ino
+        )))) changed();
+    if (!actual.exists) return actual;
+    if (!expected.exists || ['dev', 'ino', 'sizeBytes', 'mtimeMs', 'sha256']
+      .some((field) => expected[field] !== actual[field])
+      || ['birthtimeMs', 'mode'].some((field) => expected[field] !== undefined && expected[field] !== actual[field])
+      || JSON.stringify(expected.parents) !== JSON.stringify(actual.parents)) changed();
+    if (expected.ctimeMs === actual.ctimeMs
+        && (expected.nlink === undefined || expected.nlink === actual.nlink)) return actual;
+    // 仅冻结 inventory 内自身已消失的硬链接能解释 unlink 的 ctime/nlink 变化。
+    if (!Number.isSafeInteger(expected.nlink) || expected.nlink < 2 || actual.nlink >= expected.nlink) changed();
+    let missing = 0;
+    for (const [siblingPath, sibling] of Object.entries(inventory)) {
+      if (siblingPath === relativePath || !sibling.exists
+          || ['dev', 'ino', 'sizeBytes', 'mtimeMs', 'ctimeMs', 'birthtimeMs', 'mode', 'nlink', 'sha256']
+            .some((field) => sibling[field] !== expected[field])) continue;
+      const current = await this._captureMigrationFile(rootDir, siblingPath, expected.sha256);
+      if (!current.exists) {
+        if (!current.parents.every((parent) => sibling.parents.some((prior) => (
+          prior.relativePath === parent.relativePath && prior.dev === parent.dev && prior.ino === parent.ino
+        )))) changed();
+        missing += 1;
+      } else if (['dev', 'ino', 'sizeBytes', 'mtimeMs', 'birthtimeMs', 'mode', 'sha256']
+        .some((field) => current[field] !== expected[field])
+        || current.ctimeMs !== actual.ctimeMs || current.nlink !== actual.nlink
+        || JSON.stringify(current.parents) !== JSON.stringify(sibling.parents)) changed();
+    }
+    if (!missing || actual.nlink !== expected.nlink - missing) changed();
+    return actual;
+  }
+
+  async _assertCleanupInventory(journal) {
+    // 在任何相关删除之前核验两根；不能先清掉原根再发现目标或旧 job 无法认证。
+    for (const job of this.repository.listCleanupJobs()) {
+      if (job.planError || job.planVersion < 2 || !job.plan
+          || job.archiveInstanceId !== journal.archiveInstanceId) {
+        throw this._migrationCleanupConflict('已有删除计划缺少可核验的原对象身份，保留两根及恢复记录');
+      }
+      const root = comparablePath(this._jobRoot(job));
+      if (![comparablePath(journal.sourceRoot), comparablePath(journal.targetRoot)].includes(root)
+          || (job.state === 'waiting-migration' && (!this._jobMatchesMigration(job, journal) || !this._jobItemsComplete(job)))) {
+        throw this._migrationCleanupConflict('已有删除计划与原迁移身份不一致，保留两根及恢复记录');
+      }
+      if (job.state === 'waiting-migration') continue;
+      if (!PRE_SWITCH_PHASES.has(journal.phase) && root === comparablePath(journal.sourceRoot)
+          && job.plan.items.some((item) => !['materialized', 'blob'].includes(item.kind)
+            || !(journal.sourceCleanupPaths || []).includes(item.managedRelativePath))) {
+        throw this._migrationCleanupConflict('旧根删除计划含迁移清理证据未覆盖的目标');
+      }
+      const inventories = new Map();
+      for (const item of job.plan.items) {
+        const originalRoot = item.managedRootIdentity || job.plan.rootIdentity;
+        if (!originalRoot?.rootDir || !originalRoot.dev || !originalRoot.ino) {
+          throw this._migrationCleanupConflict('已有删除计划缺少原根身份，保留两根及恢复记录');
+        }
+        if (!inventories.has(originalRoot.rootDir)) inventories.set(originalRoot.rootDir, {});
+        inventories.get(originalRoot.rootDir)[item.managedRelativePath] = {
+          ...item.expectedIdentity, root: { dev: originalRoot.dev, ino: originalRoot.ino }
+        };
+      }
+      for (const [originalRoot, identities] of inventories) {
+        if (comparablePath(originalRoot) === comparablePath(journal.sourceRoot)
+            && journal.sourceRootRemovalStartedAt && !await pathExists(this.fs, originalRoot)) continue;
+        for (const relativePath of Object.keys(identities)) {
+          await this._assertMigrationFile({ sourceRoot: originalRoot, sourceFileIdentities: identities }, 'source', relativePath);
+        }
+      }
+    }
+    const sourceExists = await pathExists(this.fs, journal.sourceRoot);
+    if (sourceExists) {
+      const marker = await this._readMarker(journal.sourceRoot);
+      if (marker || !journal.sourceRootRemovalStartedAt) validateMarker(marker, this.instanceId);
+      // 旧 journal 缺清单时，DB 路径只用于核验范围，不能当作新文件补造身份。
+      const sourcePaths = journal.sourceCleanupPaths || this._sourceCleanupPaths(this._evidence());
+      for (const relativePath of sourcePaths) {
+        await this._assertMigrationFile(journal, 'source', relativePath);
+      }
+    } else if (!journal.sourceRootRemovalStartedAt) {
+      throw new ArchiveStorageRootError('ARCHIVE_STORAGE_SOURCE_ROOT_OFFLINE', '旧存档位置离线，保留迁移恢复记录');
+    }
+    validateMarker(await this._readMarker(journal.targetRoot), this.instanceId);
+    const desired = new Set(this._targetPublishedPaths(this._evidence()));
+    for (const relativePath of journal.targetPublishedPaths || []) {
+      if (PRE_SWITCH_PHASES.has(journal.phase) || !desired.has(relativePath)) {
+        await this._assertMigrationFile(journal, 'target', relativePath);
+      }
+    }
+  }
+
+  async _prepareOverlappingCleanup(journal) {
+    const jobs = this.repository.listCleanupJobs();
+    await this._assertCleanupInventory(journal);
+    if (jobs.length === 0) return;
+    const stored = this.database.getSetting(ARCHIVE_STORAGE_ROOT_SETTING_KEY) || this.defaultRoot;
+    if (!PRE_SWITCH_PHASES.has(journal.phase)
+        || comparablePath(await this._existingRoot(stored, true)) !== comparablePath(journal.sourceRoot)
+        || comparablePath(this.currentService.rootDir) !== comparablePath(journal.sourceRoot)) {
+      throw this._migrationCleanupConflict('删除计划与切换前迁移的原根不一致，已保留恢复证据');
+    }
+    validateMarker(await this._readMarker(journal.sourceRoot), this.instanceId);
+    validateMarker(await this._readMarker(journal.targetRoot), this.instanceId);
+    const knownPaths = new Set(journal.sourceCleanupPaths || []);
+    for (const job of jobs) {
+      if (job.state === 'waiting-migration') {
+        if (!this._jobMatchesMigration(job, journal) || !this._jobItemsComplete(job)) {
+          throw this._migrationCleanupConflict('挂起删除计划的迁移身份或逐项完成证据不一致');
+        }
+        continue;
+      }
+      const root = this._jobRoot(job);
+      if (root && comparablePath(root) !== comparablePath(journal.sourceRoot)) {
+        throw this._migrationCleanupConflict('已有删除计划不属于原迁移源根');
+      }
+      if (!root) {
+        const paths = [
+          ...(job.materializedPaths || []),
+          ...(job.releasedBlobs || []).map((blob) => blob.relativePath)
+        ];
+        if (job.planVersion >= 2 || paths.length === 0
+            || paths.some((relativePath) => !knownPaths.has(relativePath))) {
+          throw this._migrationCleanupConflict('历史删除计划缺少可关联原迁移的路径证据');
+        }
+      }
+      const result = await this.currentService._executeCleanupJobUnlocked(job, {
+        waitForMigration: this._migrationIdentity(journal)
+      });
+      const updated = this.repository.getCleanupJob(job.id);
+      if (!updated || updated.state !== 'waiting-migration'
+          || !this._jobMatchesMigration(updated, journal) || !this._jobItemsComplete(updated)) {
+        throw this._migrationCleanupConflict(
+          result && result.message || '原根删除计划尚未完成，已停止迁移恢复'
+        );
+      }
+      await this._inject('after-delete-waiting-migration', { migrationId: journal.migrationId, jobId: job.id });
+    }
   }
 
   async beginDatabaseMaintenance(message = '数据库正在维护，请稍后重试') {
@@ -491,6 +756,10 @@ class ArchiveStorageRootManager {
     for (const job of cleanupJobs) {
       for (const relativePath of job.materializedPaths) files.add(toRelativePath(relativePath));
       for (const blob of job.releasedBlobs) files.add(toRelativePath(blob.relativePath));
+      // V2 的旧兼容数组刻意为空，所有权扫描仍须读取真实计划，避免遗失待清理文件证据。
+      for (const item of job.plan && job.plan.items || []) {
+        if (item.managedRelativePath) files.add(toRelativePath(item.managedRelativePath));
+      }
     }
     for (const file of files) {
       for (const directory of parentRelativePaths(file)) directories.add(directory);
@@ -537,7 +806,9 @@ class ArchiveStorageRootManager {
     if (!Array.isArray(knownPublished)) return;
     const desired = new Set(this._targetPublishedPaths(evidence));
     const stale = knownPublished.filter((relativePath) => !desired.has(relativePath));
+    for (const relativePath of stale) await this._assertMigrationFile(journal, 'target', relativePath);
     for (const relativePath of stale) {
+      await this._assertMigrationFile(journal, 'target', relativePath);
       const filePath = await this._assertManagedPath(journal.targetRoot, relativePath);
       await this.fs.promises.rm(filePath, { force: true });
     }
@@ -812,9 +1083,9 @@ class ArchiveStorageRootManager {
 
   async resumeDeferredCleanup(options = {}) {
     const journal = await this._readJournal();
-    if (!journal || journal.phase === 'done') {
-      if (journal && journal.phase === 'done') {
-        await this.fs.promises.rm(this.journalPath, { force: true });
+    if (!journal) {
+      if (this.repository.listCleanupJobs().some((job) => job.state === 'waiting-migration')) {
+        throw this._migrationCleanupConflict('删除计划等待的迁移完成证据缺失，已停止恢复');
       }
       return { ok: true, status: 'complete', processed: 0 };
     }
@@ -831,7 +1102,9 @@ class ArchiveStorageRootManager {
       && !this.runtimeDelegate.getMaintenanceState().active
     );
     if (ownedByEntryLease) {
-      const result = await this._finishCleanup(journal);
+      const result = journal.phase === 'done'
+        ? await this._finalizeMigrationDeletes(journal)
+        : await this._finishCleanup(journal);
       return { ...result, processed: result.ok ? 1 : 0 };
     }
     if (this.migrationPromise || this.isMaintenanceRequested()) {
@@ -843,7 +1116,9 @@ class ArchiveStorageRootManager {
     try {
       await this.waitForArchiveOperations();
       this.runtimeDelegate.activateMaintenance();
-      const result = await this._finishCleanup(journal);
+      const result = journal.phase === 'done'
+        ? await this._finalizeMigrationDeletes(journal)
+        : await this._finishCleanup(journal);
       return { ...result, processed: result.ok ? 1 : 0 };
     } finally {
       this.runtimeDelegate.releaseMaintenance();
@@ -992,9 +1267,30 @@ class ArchiveStorageRootManager {
   }
 
   async _initializeExistingService(service) {
+    service.assertManagedObjectMutationAllowed = async (relativePath) => {
+      // 读取、后台修复与作废共用冻结证据；迁移完成后自动恢复正常维护。
+      const journal = await this._readJournal();
+      if (!journal || journal.phase === 'done'
+          || comparablePath(service.rootDir) !== comparablePath(journal.sourceRoot)) return;
+      if (journal.sourceCleanupPaths == null
+          || journal.sourceCleanupPaths.includes(toRelativePath(relativePath))) {
+        throw new ArchiveStorageRootError(
+          'ARCHIVE_STORAGE_MIGRATION_PENDING',
+          '迁移恢复期间暂缓修改原存档文件，可继续读取已校验的 canonical Blob',
+          { retryable: true }
+        );
+      }
+    };
+    service.assertDeleteAllowed = (options) => this.assertDeleteAllowed(options);
+    service.getDeleteMigrationContext = async () => {
+      const journal = await this._readJournal();
+      return journal ? { ...this._migrationIdentity(journal), phase: journal.phase } : null;
+    };
+    // 历史迁移与删除重叠时由下方恢复协调驱动，不能在 Service 初始化时提前收口 job。
+    const migrationPending = await this.hasUnresolvedMigration();
     const initialized = await service.initialize({
       startBackgroundMaterialization: false,
-      deferStartupRecovery: this.deferStartupRecovery
+      deferStartupRecovery: this.deferStartupRecovery || migrationPending
     });
     if (!initialized || initialized.available === false) {
       throw new ArchiveStorageRootError(
@@ -1023,6 +1319,9 @@ class ArchiveStorageRootManager {
       if (journal) {
         initialized = await this._recover(journal, storedRoot);
       } else {
+        if (this.repository.listCleanupJobs().some((job) => job.state === 'waiting-migration')) {
+          throw this._migrationCleanupConflict('删除计划等待的迁移 journal 缺失，无法确认清理完成');
+        }
         const rootDir = await this._prepareActiveRoot(
           effectiveRoot,
           { configured: Boolean(storedRoot) }
@@ -1137,7 +1436,7 @@ class ArchiveStorageRootManager {
     return this.migrationPromise;
   }
 
-  async _assertSourceReady() {
+  async _assertSourceReady(existingJournal = null) {
     await this._assertOwnershipScanComplete(this.currentService.rootDir);
     const evidence = this._evidence();
     await this._walkOwnedRoot(this.currentService.rootDir, evidence, {
@@ -1145,7 +1444,14 @@ class ArchiveStorageRootManager {
       allowLegacyEmptyBlobShards: true
     });
     await this._verifyEvidenceFiles(this.currentService.rootDir, evidence);
-    if (this.repository.listCleanupJobs().length > 0) {
+    const blockingJobs = this.repository.listCleanupJobs().filter((job) => !(
+      existingJournal && PRE_SWITCH_PHASES.has(existingJournal.phase)
+      && job.state === 'waiting-migration'
+      && this._jobMatchesMigration(job, existingJournal)
+      && this._jobItemsComplete(job)
+      && comparablePath(this._jobRoot(job)) === comparablePath(existingJournal.sourceRoot)
+    ));
+    if (blockingJobs.length > 0) {
       throw new ArchiveStorageRootError(
         'ARCHIVE_STORAGE_SOURCE_NOT_CLEAN',
         '当前存档根仍有完整性或物理清理问题，请解决后再迁移',
@@ -1355,16 +1661,23 @@ class ArchiveStorageRootManager {
     return total;
   }
 
-  _newJournal(targetRoot, evidence) {
+  async _newJournal(targetRoot, evidence) {
     const now = new Date().toISOString();
+    const sourceCleanupPaths = this._sourceCleanupPaths(evidence);
+    const sourceFileIdentities = {};
+    for (const relativePath of sourceCleanupPaths) {
+      sourceFileIdentities[relativePath] = await this._captureMigrationFile(this.currentService.rootDir, relativePath);
+    }
     return {
       schemaVersion: MIGRATION_JOURNAL_SCHEMA_VERSION,
       migrationId: crypto.randomUUID(),
       archiveInstanceId: this.instanceId,
       sourceRoot: this.currentService.rootDir,
       targetRoot,
-      sourceCleanupPaths: this._sourceCleanupPaths(evidence),
+      sourceCleanupPaths,
+      sourceFileIdentities,
       targetPublishedPaths: [],
+      targetFileIdentities: {},
       sourceRootRemovalStartedAt: null,
       phase: 'prepared',
       startedAt: now,
@@ -1379,11 +1692,83 @@ class ArchiveStorageRootManager {
     };
   }
 
+  async _assertMissingMigrationTarget(journal, relativePath) {
+    const actual = await this._assertMigrationFile(journal, 'target', relativePath);
+    if (actual.exists) throw new ArchiveStorageRootError('ARCHIVE_STORAGE_DELETE_FILE_CHANGED',
+      '迁移目标校验失败且现存对象不可覆盖，保留两根及恢复记录');
+  }
+
+  async _publishMigrationTarget(stagedPath, targetPath, options) {
+    // 原 staging 身份来自调用方完成的 hash 校验。发布全程持有原 fd；新路径
+    // 只能排他创建，返回原 fd 身份供首次 journal capture 核对，不能现场认领。
+    const relativePath = path.relative(options.rootDir, targetPath).split(path.sep).join('/');
+    const location = await this._captureMigrationFile(options.rootDir, relativePath);
+    if (location.exists) throw new ArchiveStorageRootError('ARCHIVE_STORAGE_UNKNOWN_CONTENT',
+      '迁移发布时目标出现其他文件，保留文件及恢复记录');
+    let stagedHandle;
+    let targetHandle;
+    try {
+      stagedHandle = await this.fs.promises.open(stagedPath, 'r+');
+      const verified = publishedFileIdentity(options.verifiedStat);
+      assertPublishedIdentity(verified, publishedFileIdentity(await stagedHandle.stat()));
+      const mode = options.mode == null ? verified.mode & 0o777 : options.mode;
+      const changedMode = (verified.mode & 0o777) !== mode;
+      if (changedMode) await stagedHandle.chmod(mode);
+      await stagedHandle.sync();
+      const prepared = publishedFileIdentity(await stagedHandle.stat());
+      assertPublishedIdentity(verified, prepared, changedMode ? ['ctimeMs', 'mode'] : []);
+      if ((prepared.mode & 0o777) !== mode) throw new ArchiveStorageRootError(
+        'ARCHIVE_STORAGE_DELETE_FILE_CHANGED', '迁移 staging 权限与本次设置不符');
+      let linked = false;
+      try {
+        await this.fs.promises.link(stagedPath, targetPath);
+        linked = true;
+      } catch (error) {
+        if (!error || !['EXDEV', 'EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS'].includes(error.code)) throw error;
+        // 不支持 hardlink 时，通过排他创建的 fd 写入和刷盘。即使路径随后
+        // 被替换，写入/chmod 也只作用于原 fd，替代文件不会被覆盖或认领。
+        targetHandle = await this.fs.promises.open(targetPath, 'wx', 0o600);
+        await targetHandle.writeFile(stagedHandle.createReadStream({ autoClose: false, start: 0 }));
+        await targetHandle.sync();
+        await targetHandle.chmod(mode);
+        await targetHandle.sync();
+      }
+      const original = linked ? stagedHandle : targetHandle;
+      let published = publishedFileIdentity(await original.stat());
+      if (linked) {
+        assertPublishedIdentity(prepared, published, ['ctimeMs', 'nlink']);
+        if (published.nlink !== prepared.nlink + 1) throw new ArchiveStorageRootError(
+          'ARCHIVE_STORAGE_DELETE_FILE_CHANGED', '迁移发布的硬链接数量与原对象不符');
+      } else {
+        assertPublishedIdentity(prepared, publishedFileIdentity(await stagedHandle.stat()));
+      }
+      assertPublishedIdentity(published, publishedFileIdentity(this.fs.lstatSync(targetPath)));
+      // 只移除仍属于原 fd 的 staging 名称；同步核验与 unlink 不让出事件循环。
+      assertPublishedIdentity(publishedFileIdentity(this.fs.fstatSync(stagedHandle.fd)),
+        publishedFileIdentity(this.fs.lstatSync(stagedPath)));
+      this.fs.unlinkSync(stagedPath);
+      published = publishedFileIdentity(await original.stat());
+      if (linked) {
+        assertPublishedIdentity(prepared, published, ['ctimeMs']);
+      }
+      assertPublishedIdentity(published, publishedFileIdentity(this.fs.lstatSync(targetPath)));
+      return { ...published, root: location.root, parents: location.parents };
+    } catch (error) {
+      if (error?.code === 'EEXIST') throw new ArchiveStorageRootError('ARCHIVE_STORAGE_UNKNOWN_CONTENT',
+        '迁移发布时目标出现其他文件，保留文件及恢复记录');
+      throw error;
+    } finally {
+      if (targetHandle) await targetHandle.close();
+      if (stagedHandle) await stagedHandle.close();
+    }
+  }
+
   async _copyBlobs(journal, evidence) {
     journal = await this._writeJournal(journal, 'copying');
     const stagingDir = path.join(journal.targetRoot, '.staging');
     let copied = 0;
     for (const blob of evidence.blobs) {
+      await this._assertMigrationFile(journal, 'source', blob.relativePath);
       const sourcePath = await this._assertManagedPath(journal.sourceRoot, blob.relativePath);
       const sourceVerified = await verifyFile(sourcePath, blob, this.fs);
       if (!sourceVerified.valid) {
@@ -1395,6 +1780,8 @@ class ArchiveStorageRootManager {
       const targetPath = await this._assertManagedPath(journal.targetRoot, blob.relativePath);
       const targetOwnedByJournal = (journal.targetPublishedPaths || [])
         .includes(toRelativePath(blob.relativePath));
+      const priorTargetIdentity = targetOwnedByJournal
+        ? await this._assertMigrationFile(journal, 'target', blob.relativePath) : null;
       if (!targetOwnedByJournal && await pathExists(this.fs, targetPath)) {
         throw new ArchiveStorageRootError(
           'ARCHIVE_STORAGE_UNKNOWN_CONTENT',
@@ -1402,9 +1789,14 @@ class ArchiveStorageRootManager {
         );
       }
       const existing = await verifyFile(targetPath, blob, this.fs);
+      if (existing.valid && !priorTargetIdentity?.exists) {
+        throw new ArchiveStorageRootError('ARCHIVE_STORAGE_UNKNOWN_CONTENT',
+          '目标 canonical 出现未由原 journal 登记的文件，设置未切换');
+      }
+      let publishedIdentity;
       if (!existing.valid) {
+        await this._assertMissingMigrationTarget(journal, blob.relativePath);
         await this.fs.promises.mkdir(path.dirname(targetPath), { recursive: true });
-        await this.fs.promises.rm(targetPath, { force: true });
         const tempPath = path.join(stagingDir, `blob-${blob.id}-${crypto.randomUUID()}.tmp`);
         try {
           await pipeline(
@@ -1419,7 +1811,9 @@ class ArchiveStorageRootManager {
             );
           }
           await syncStagedFile(this.fs, tempPath);
-          await this.fs.promises.rename(tempPath, targetPath);
+          publishedIdentity = await this._publishMigrationTarget(tempPath, targetPath, {
+            rootDir: journal.targetRoot, verifiedStat: staged.stat
+          });
           await syncDirectory(this.fs, path.dirname(targetPath));
         } finally {
           try { await this.fs.promises.rm(tempPath, { force: true }); } catch (_error) {}
@@ -1431,10 +1825,16 @@ class ArchiveStorageRootManager {
         ...(journal.targetPublishedPaths || []),
         toRelativePath(blob.relativePath)
       ])].sort();
+      journal.targetFileIdentities = { ...journal.targetFileIdentities,
+        [blob.relativePath]: existing.valid
+          ? await this._assertMigrationFile(journal, 'target', blob.relativePath)
+          : await this._captureMigrationFile(journal.targetRoot, blob.relativePath, blob.sha256,
+            publishedIdentity, publishedIdentity) };
       this._emitProgress('copying', copied, evidence.blobs.length);
       journal = await this._writeJournal(journal, 'copying', {
         progress: journal.progress,
-        targetPublishedPaths: journal.targetPublishedPaths
+        targetPublishedPaths: journal.targetPublishedPaths,
+        targetFileIdentities: journal.targetFileIdentities
       });
       await this._inject('after-copy-blob', { copied, blobId: blob.id });
     }
@@ -1443,10 +1843,15 @@ class ArchiveStorageRootManager {
 
   async _materializeTarget(journal, evidence) {
     journal = await this._writeJournal(journal, 'materializing-layout');
+    const publishedIdentities = new Map();
     const materializer = this.createMaterializer({
       rootDir: journal.targetRoot,
       stagingDir: path.join(journal.targetRoot, '.staging'),
-      fs: this.fs
+      fs: this.fs,
+      publishFile: async (source, target, options) => {
+        const identity = await this._publishMigrationTarget(source, target, { ...options, rootDir: journal.targetRoot });
+        publishedIdentities.set(target, identity);
+      }
     });
     const materializations = [];
     let processed = 0;
@@ -1457,6 +1862,7 @@ class ArchiveStorageRootManager {
           'ready artifact 缺少 layout v2 证据'
         );
       }
+      await this._assertMigrationFile(journal, 'target', artifact.blob.relativePath);
       const canonicalPath = await this._assertManagedPath(
         journal.targetRoot,
         artifact.blob.relativePath
@@ -1467,6 +1873,8 @@ class ArchiveStorageRootManager {
       );
       const targetOwnedByJournal = (journal.targetPublishedPaths || [])
         .includes(toRelativePath(artifact.storageRelativePath));
+      const priorTargetIdentity = targetOwnedByJournal
+        ? await this._assertMigrationFile(journal, 'target', artifact.storageRelativePath) : null;
       if (!targetOwnedByJournal && await pathExists(this.fs, targetPath)) {
         throw new ArchiveStorageRootError(
           'ARCHIVE_STORAGE_UNKNOWN_CONTENT',
@@ -1474,13 +1882,30 @@ class ArchiveStorageRootManager {
         );
       }
       const existing = await verifyFile(targetPath, artifact.blob, this.fs);
+      if (existing.valid && !priorTargetIdentity?.exists) {
+        throw new ArchiveStorageRootError('ARCHIVE_STORAGE_UNKNOWN_CONTENT',
+          '目标目录化路径出现未由原 journal 登记的文件，设置未切换');
+      }
       let storageMode;
+      let reusedCopyIdentity = null;
+      let changedMode = false;
       if (existing.valid) {
-        const canonicalStat = await this.fs.promises.stat(canonicalPath);
+        const canonicalStat = await this.fs.promises.stat(canonicalPath, { bigint: true });
         const sharesCanonicalInode = canonicalStat.dev === existing.stat.dev
           && canonicalStat.ino === existing.stat.ino;
         if (sharesCanonicalInode) {
+          await this._assertMigrationFile(journal, 'target', artifact.storageRelativePath);
           await this.fs.promises.rm(targetPath, { force: true });
+          // 旧 journal 的同 inode 路径组证明本次 unlink；先保存剩余原对象的
+          // ctime/nlink，再用独立 copy 占用这个路径，重启不能把新 copy 当作旧链接。
+          const targetFileIdentities = { ...journal.targetFileIdentities };
+          for (const [relativePath, identity] of Object.entries(targetFileIdentities)) {
+            if (identity.exists && identity.dev === String(canonicalStat.dev)
+                && identity.ino === String(canonicalStat.ino)) {
+              targetFileIdentities[relativePath] = await this._assertMigrationFile(journal, 'target', relativePath);
+            }
+          }
+          journal = await this._writeJournal(journal, 'materializing-layout', { targetFileIdentities });
           const result = await materializer.materialize({
             artifactId: artifact.id,
             canonicalPath,
@@ -1491,10 +1916,15 @@ class ArchiveStorageRootManager {
           storageMode = result.mode;
         } else {
           storageMode = 'copy';
-          await this.fs.promises.chmod(targetPath, 0o444);
+          reusedCopyIdentity = await this._assertMigrationFile(journal, 'target', artifact.storageRelativePath);
+          if (!reusedCopyIdentity.exists) {
+            throw new ArchiveStorageRootError('ARCHIVE_STORAGE_DELETE_FILE_CHANGED', '原目录化文件消失，设置未切换');
+          }
+          changedMode = (reusedCopyIdentity.mode & 0o777) !== 0o444;
+          if (changedMode) await this.fs.promises.chmod(targetPath, 0o444);
         }
       } else {
-        await this.fs.promises.rm(targetPath, { force: true });
+        await this._assertMissingMigrationTarget(journal, artifact.storageRelativePath);
         const result = await materializer.materialize({
           artifactId: artifact.id,
           canonicalPath,
@@ -1512,6 +1942,18 @@ class ArchiveStorageRootManager {
           '目标目录化文件指纹不可用，设置未切换'
         );
       }
+      if (!reusedCopyIdentity && !publishedIdentities.has(targetPath)) throw new ArchiveStorageRootError(
+        'ARCHIVE_STORAGE_DELETE_IDENTITY_MISSING', '目录化发布缺少原 fd 身份，保留文件及恢复记录');
+      const targetIdentity = await this._captureMigrationFile(journal.targetRoot,
+        artifact.storageRelativePath, artifact.blob.sha256, storageFingerprint, publishedIdentities.get(targetPath));
+      if (reusedCopyIdentity && (['dev', 'ino', 'sizeBytes', 'mtimeMs', 'birthtimeMs', 'nlink', 'sha256',
+        ...(changedMode ? [] : ['mode', 'ctimeMs'])].some((field) => targetIdentity[field] !== reusedCopyIdentity[field])
+          || JSON.stringify(targetIdentity.root) !== JSON.stringify(reusedCopyIdentity.root)
+          || JSON.stringify(targetIdentity.parents) !== JSON.stringify(reusedCopyIdentity.parents)
+          || (changedMode && (targetIdentity.mode & 0o777) !== 0o444))) {
+        throw new ArchiveStorageRootError('ARCHIVE_STORAGE_DELETE_FILE_CHANGED',
+          '原目录化文件在复用期间被替换，保留两根及恢复记录');
+      }
       materializations.push({ artifactId: artifact.id, storageMode, storageFingerprint });
       processed += 1;
       journal.progress.materializedArtifactCount = processed;
@@ -1519,10 +1961,13 @@ class ArchiveStorageRootManager {
         ...(journal.targetPublishedPaths || []),
         toRelativePath(artifact.storageRelativePath)
       ])].sort();
+      journal.targetFileIdentities = { ...journal.targetFileIdentities,
+        [artifact.storageRelativePath]: targetIdentity };
       this._emitProgress('materializing-layout', processed, evidence.artifacts.length);
       journal = await this._writeJournal(journal, 'materializing-layout', {
         progress: journal.progress,
-        targetPublishedPaths: journal.targetPublishedPaths
+        targetPublishedPaths: journal.targetPublishedPaths,
+        targetFileIdentities: journal.targetFileIdentities
       });
       await this._inject('after-materialize-artifact', {
         processed,
@@ -1537,24 +1982,27 @@ class ArchiveStorageRootManager {
 
   async _verifyTarget(journal, evidence) {
     journal = await this._writeJournal(journal, 'verifying');
+    const blobFingerprints = [];
     let processed = 0;
     const total = evidence.blobs.length + evidence.artifacts.length;
     for (const blob of evidence.blobs) {
-      const filePath = await this._assertManagedPath(journal.targetRoot, blob.relativePath);
-      const result = await verifyFile(filePath, blob, this.fs);
-      if (!result.valid) {
+      const actual = await this._assertMigrationFile(journal, 'target', blob.relativePath);
+      if (!actual.exists || actual.sha256 !== blob.sha256 || actual.sizeBytes !== blob.sizeBytes) {
         throw new ArchiveStorageRootError(
           'ARCHIVE_STORAGE_TARGET_VERIFY_FAILED',
           '目标 canonical Blob 校验失败，设置未切换'
         );
       }
+      const identity = journal.targetFileIdentities[blob.relativePath];
+      blobFingerprints.push({ blobId: blob.id, fingerprint: {
+        sizeBytes: identity.sizeBytes, mtimeMs: identity.mtimeMs, ctimeMs: identity.ctimeMs, ino: identity.ino
+      } });
       processed += 1;
       this._emitProgress('verifying', processed, total);
     }
     for (const artifact of evidence.artifacts) {
-      const filePath = await this._assertManagedPath(journal.targetRoot, artifact.storageRelativePath);
-      const result = await verifyFile(filePath, artifact.blob, this.fs);
-      if (!result.valid) {
+      const actual = await this._assertMigrationFile(journal, 'target', artifact.storageRelativePath);
+      if (!actual.exists || actual.sha256 !== artifact.blob.sha256 || actual.sizeBytes !== artifact.blob.sizeBytes) {
         throw new ArchiveStorageRootError(
           'ARCHIVE_STORAGE_TARGET_VERIFY_FAILED',
           '目标目录化文件校验失败，设置未切换'
@@ -1563,14 +2011,48 @@ class ArchiveStorageRootManager {
       processed += 1;
       this._emitProgress('verifying', processed, total);
     }
-    return journal;
+    return { journal, blobFingerprints };
   }
 
-  async _commitSwitch(journal, materializations, targetService, expectedStoredRoot) {
+  _assertTargetCommitIdentities(journal) {
+    // 最后一次异步 hash 检查后仍可能有其他路径被替换。这里到 SQLite 提交之间
+    // 不让出事件循环；只核对 journal 原对象，绝不把现场 stat 登记为新的所有权。
+    const changed = () => {
+      throw new ArchiveStorageRootError('ARCHIVE_STORAGE_DELETE_FILE_CHANGED',
+        '迁移目标在提交前已被替换，保留两根及恢复记录');
+    };
+    for (const relativePath of journal.targetPublishedPaths || []) {
+      const expected = journal.targetFileIdentities?.[relativePath];
+      if (!expected?.exists) throw new ArchiveStorageRootError('ARCHIVE_STORAGE_DELETE_IDENTITY_MISSING',
+        '迁移目标缺少原发布身份，保留两根及恢复记录');
+      try {
+        const root = this.fs.lstatSync(journal.targetRoot);
+        if (!root.isDirectory() || root.isSymbolicLink()
+            || String(root.dev) !== expected.root.dev || String(root.ino) !== expected.root.ino) changed();
+        for (const parent of expected.parents) {
+          const stat = this.fs.lstatSync(path.join(journal.targetRoot, ...parent.relativePath.split('/')));
+          if (!stat.isDirectory() || stat.isSymbolicLink()
+              || String(stat.dev) !== parent.dev || String(stat.ino) !== parent.ino) changed();
+        }
+        const stat = this.fs.lstatSync(path.join(journal.targetRoot, ...relativePath.split('/')));
+        if (!stat.isFile() || stat.isSymbolicLink() || String(stat.dev) !== expected.dev
+            || String(stat.ino) !== expected.ino || Number(stat.size) !== expected.sizeBytes
+            || ['mtimeMs', 'ctimeMs', 'birthtimeMs', 'mode', 'nlink']
+              .some((field) => Number(stat[field]) !== expected[field])) changed();
+      } catch (error) {
+        if (error instanceof ArchiveStorageRootError) throw error;
+        changed();
+      }
+    }
+  }
+
+  async _commitSwitch(journal, materializations, targetService, expectedStoredRoot, blobFingerprints) {
+    this._assertTargetCommitIdentities(journal);
     this.repository.commitStorageRootSwitch({
       storageRoot: journal.targetRoot,
       expectedStoredRoot,
-      materializations
+      materializations,
+      blobFingerprints
     });
     this.currentService = targetService;
     this.runtimeDelegate.switchService(targetService);
@@ -1590,7 +2072,8 @@ class ArchiveStorageRootManager {
           '已存在未收口的存档迁移记录，已拒绝覆盖'
         );
       }
-      await this._assertSourceReady();
+      if (journal) await this._prepareOverlappingCleanup(journal);
+      await this._assertSourceReady(journal);
       const evidence = this._evidence();
       if (evidence.artifacts.some((artifact) => (
         !artifact.storageRelativePath
@@ -1604,7 +2087,7 @@ class ArchiveStorageRootManager {
       }
       if (!journal) {
         await this._validateTarget(targetRoot, evidence);
-        journal = this._newJournal(targetRoot, evidence);
+        journal = await this._newJournal(targetRoot, evidence);
         await atomicWriteJson(this.fs, this.journalPath, journal);
         await this._inject('after-prepared', { targetRoot });
       } else {
@@ -1614,6 +2097,13 @@ class ArchiveStorageRootManager {
           ...(Array.isArray(journal.sourceCleanupPaths) ? journal.sourceCleanupPaths : []),
           ...this._sourceCleanupPaths(evidence)
         ])].sort();
+        const previousSourcePaths = new Set(journal.sourceCleanupPaths || []);
+        const sourceFileIdentities = { ...journal.sourceFileIdentities };
+        for (const relativePath of sourceCleanupPaths) {
+          if (!previousSourcePaths.has(relativePath)) {
+            sourceFileIdentities[relativePath] = await this._captureMigrationFile(journal.sourceRoot, relativePath);
+          }
+        }
         // 先按旧 journal 的 durable progress 清掉已经发布、但当前 DB 已删除的
         // 目标副本；随后才能用当前 evidence 重置下一轮发布计划。
         await this._reconcilePreSwitchTargetInventory(journal, evidence);
@@ -1622,6 +2112,7 @@ class ArchiveStorageRootManager {
           .filter((relativePath) => desiredTargetPaths.has(relativePath));
         journal = await this._writeJournal(journal, journal.phase, {
           sourceCleanupPaths,
+          sourceFileIdentities,
           targetPublishedPaths,
           progress: {
             ...journal.progress,
@@ -1636,7 +2127,8 @@ class ArchiveStorageRootManager {
       this._emitProgress(journal.phase, 0, evidence.blobs.length + evidence.artifacts.length);
       journal = await this._copyBlobs(journal, evidence);
       const materialized = await this._materializeTarget(journal, evidence);
-      journal = await this._verifyTarget(materialized.journal, evidence);
+      const verified = await this._verifyTarget(materialized.journal, evidence);
+      journal = verified.journal;
       // Commit 之前只使用上面的只读校验；正常 Service.initialize()
       // 会修复/作废 DB 证据，只能在 setting 已指向目标根后运行。
       const targetService = this.createService(journal.targetRoot);
@@ -1644,7 +2136,8 @@ class ArchiveStorageRootManager {
         journal,
         materialized.materializations,
         targetService,
-        expectedStoredRoot
+        expectedStoredRoot,
+        verified.blobFingerprints
       );
       try {
         await this._initializeExistingService(targetService);
@@ -1704,6 +2197,7 @@ class ArchiveStorageRootManager {
     const knownFiles = journal.sourceCleanupPaths.map(toRelativePath);
     const directories = new Set(['blobs/sha256', 'blobs']);
     for (const relativePath of knownFiles) {
+      await this._assertMigrationFile(journal, 'source', relativePath);
       const filePath = await this._assertManagedPath(rootDir, relativePath);
       await this.fs.promises.rm(filePath, { force: true });
       for (const directory of parentRelativePaths(relativePath)) directories.add(directory);
@@ -1773,8 +2267,12 @@ class ArchiveStorageRootManager {
   async _finishCleanup(journal) {
     let cleanupJournal = journal;
     try {
+      await this._assertCleanupInventory(journal);
       const cleaned = await this._cleanupOldRoot(journal);
       cleanupJournal = cleaned && cleaned.journal ? cleaned.journal : journal;
+      // 历史 post-switch 重叠也可能留下已从 DB 删除批次的目标副本；它们仍由原迁移
+      // durable inventory 收口，删除执行器不得将原根路径换前缀后自行清理。
+      await this._reconcilePreSwitchTargetInventory(cleanupJournal, this._evidence());
       await this._inject('after-source-root-removed', {
         sourceRoot: cleanupJournal.sourceRoot,
         targetRoot: cleanupJournal.targetRoot
@@ -1805,6 +2303,67 @@ class ArchiveStorageRootManager {
     }
     journal = await this._writeJournal(cleanupJournal, 'done', { lastError: null });
     this._emitProgress('done', 1, 1, 'done');
+    await this._inject('after-migration-done', { migrationId: journal.migrationId });
+    return this._finalizeMigrationDeletes(journal);
+  }
+
+  async _finalizeMigrationDeletes(journal) {
+    const durable = await this._readJournal();
+    if (!durable || durable.phase !== 'done' || journal.phase !== 'done'
+        || durable.migrationId !== journal.migrationId) {
+      throw this._migrationCleanupConflict('迁移尚无耐久完成证据，不能完成关联删除');
+    }
+    const stored = this.database.getSetting(ARCHIVE_STORAGE_ROOT_SETTING_KEY) || this.defaultRoot;
+    if (comparablePath(await this._existingRoot(stored, true)) !== comparablePath(journal.targetRoot)) {
+      throw this._migrationCleanupConflict('迁移完成证据与当前存档位置不一致');
+    }
+    validateMarker(await this._readMarker(journal.targetRoot), this.instanceId);
+    await runArchiveRootOperation(journal.targetRoot, async () => {
+      const migration = this._migrationIdentity(journal);
+      for (const original of this.repository.listCleanupJobs()) {
+        let job = original;
+        if (job.state !== 'waiting-migration') {
+          const root = this._jobRoot(job);
+          if (root && comparablePath(root) === comparablePath(journal.targetRoot)) {
+            await this.currentService._executeCleanupJobUnlocked(job, { waitForMigration: migration });
+          } else if (root && comparablePath(root) === comparablePath(journal.sourceRoot)) {
+            const knownPaths = new Set(journal.sourceCleanupPaths || []);
+            const items = job.plan && job.plan.items;
+            if (!Array.isArray(items) || items.some((item) => (
+              !['materialized', 'blob'].includes(item.kind)
+              || !knownPaths.has(item.managedRelativePath)
+            ))) {
+              throw this._migrationCleanupConflict('旧根删除计划含迁移完成证据未覆盖的目标');
+            }
+            // done 证明原根已按冻结清单完成清理；不把原计划路径换为新根重跑。
+            this.repository.updateCleanupJobProgress(job.id, {
+              state: 'waiting-migration',
+              migration,
+              items: items.map((item) => ({
+                ...item,
+                state: ['deleted', 'already-missing', 'preserved-shared'].includes(item.state)
+                  ? item.state : 'already-missing'
+              }))
+            });
+          } else {
+            throw this._migrationCleanupConflict('已有删除计划缺少可核验的原根，已保留迁移完成证据');
+          }
+          job = this.repository.getCleanupJob(original.id);
+        }
+        if (!job || job.state !== 'waiting-migration'
+            || !this._jobMatchesMigration(job, journal) || !this._jobItemsComplete(job)) {
+          throw this._migrationCleanupConflict('关联删除计划尚未完成或迁移身份不一致');
+        }
+        const completed = this.repository.completeCleanupJob(job.id, {
+          migrationCompletion: { ...migration, phase: 'done' }
+        });
+        if (!completed) throw this._migrationCleanupConflict('关联删除完成事务未确认，已保留 done journal');
+        await this._inject('after-migration-delete-completed', {
+          migrationId: journal.migrationId,
+          jobId: job.id
+        });
+      }
+    });
     await this.fs.promises.rm(this.journalPath, { force: true });
     return {
       status: 'success',
@@ -1922,7 +2481,7 @@ class ArchiveStorageRootManager {
     this.currentService = target.service;
     this.runtimeDelegate.switchService(target.service);
     if (journal.phase === 'done') {
-      await this.fs.promises.rm(this.journalPath, { force: true });
+      await this._finalizeMigrationDeletes(journal);
     } else if (this.deferStartupRecovery) {
       await this._deferCleanup(journal);
     } else {

@@ -139,6 +139,19 @@ test.describe('建/开/删 + 目录自动建', () => {
 test.describe('孤儿扫描列表', () => {
   test('listSideDbFiles 目录不存在返回空', () => {
     assert.deepEqual(rds.listSideDbFiles(tmpdir, MODULE), []);
+    assert.deepEqual(rds.listSideDbFiles(tmpdir, MODULE, { strictErrors: true }), []);
+  });
+
+  test('严格恢复清单读取不把目录错误当作空清单，普通扫描保持原语义', (t) => {
+    const readdirSync = fs.readdirSync;
+    t.mock.method(fs, 'readdirSync', (directory, ...args) => {
+      if (directory === rds.moduleDir(tmpdir, MODULE)) {
+        throw Object.assign(new Error('暂时不可读'), { code: 'EACCES' });
+      }
+      return readdirSync(directory, ...args);
+    });
+    assert.deepEqual(rds.listSideDbFiles(tmpdir, MODULE), []);
+    assert.throws(() => rds.listSideDbFiles(tmpdir, MODULE, { strictErrors: true }), { code: 'EACCES' });
   });
 
   test('listSideDbFiles 列出侧库文件、跳过非法名 + wal/shm', () => {
@@ -150,6 +163,7 @@ test.describe('孤儿扫描列表', () => {
     const files = rds.listSideDbFiles(tmpdir, MODULE);
     const months = files.map((f) => f.monthKey).sort();
     assert.deepEqual(months, ['2026-03', '2026-04'], '仅列出合法侧库文件');
+    assert.deepEqual(rds.listSideDbFiles(tmpdir, MODULE, { strictErrors: true }), files);
   });
 });
 

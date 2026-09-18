@@ -1995,6 +1995,38 @@ test.describe('toolbox output publication', () => {
     assert.deepEqual(taskFiles(ctx), []);
   });
 
+  test('owner 可在 finalizing 耐久阶段登记收口凭证，重启仅保留 journal/index 收尾责任', async () => {
+    const { recoverToolboxPublicationsAsync } = require('../../src/main-process/toolbox-output-publication-dispatch');
+    const ctx = makeContext();
+    const source = writeFile(path.join(ctx.generationDir, 'source.xlsx'), 'new');
+    const target = writeFile(path.join(ctx.outputDir, 'target.xlsx'), 'old');
+    const prepared = prepareToolboxPublication({
+      taskId: 'commit-owner-finalizing', artifacts: [validatedArtifact(source)], targets: [target],
+      userDataDir: ctx.userDataDir, batchContext: BATCH_CONTEXT, requireValidatedArtifacts: true,
+      checkpoint(name) {
+        if (name === 'publish:after-committed') throw new ToolboxPublicationCrashError(name);
+      }
+    });
+    assert.throws(() => publishPreparedToolboxPublication(prepared), ToolboxPublicationCrashError);
+    const options = { userDataDir: ctx.userDataDir, deferCommittedRecovery: true,
+      acknowledgedCommittedTaskIds: ['commit-owner-finalizing'], deferCommittedFinalization: true };
+    const staged = await recoverToolboxPublicationsAsync(options);
+    assert.deepEqual(staged.recovered.map((item) => item.action), ['commit-finalization-pending']);
+    assert.equal(indexValue(ctx).entries[0].discoveryState, 'finalizing');
+    assert.ok(fs.existsSync(prepared.journalPath));
+    assert.deepEqual(taskFiles(ctx), [path.basename(prepared.journalPath)], '实际 backup/staging 已清理');
+    const rediscovered = recoverInFreshProcess(ctx.userDataDir, { deferCommittedRecovery: true });
+    assert.equal(rediscovered.recovered[0].action, 'commit-handoff-pending');
+    const restaged = recoverInFreshProcess(ctx.userDataDir, options);
+    assert.equal(restaged.recovered[0].action, 'commit-finalization-pending');
+    assert.ok(fs.existsSync(prepared.journalPath));
+    const finalized = recoverInFreshProcess(ctx.userDataDir, { ...options, deferCommittedFinalization: false });
+    assert.equal(finalized.recovered[0].action, 'commit-cleanup');
+    assert.deepEqual(indexValue(ctx).entries, []);
+    assert.deepEqual(taskFiles(ctx), []);
+    assert.equal(fs.readFileSync(target, 'utf8'), 'new');
+  });
+
   test('committed 后普通检查点异常仍返回成功，不能把已提交文件回滚', () => {
     const ctx = makeContext();
     const source = writeFile(path.join(ctx.generationDir, 'source.xlsx'), 'new');

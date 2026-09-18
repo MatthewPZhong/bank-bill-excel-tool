@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -110,6 +111,100 @@ function reserveVisibleFileTask(fixture, suffix, direction, lineageIntents = [])
   });
   return { task: fixture.repository.getTaskRun(task.taskRunId), batch: reserved.batch };
 }
+
+test('输入摘要随冻结 manifest 和批次原子保存，重启前源文件清理后仍保留原证据', (t) => {
+  const fixture = createFixture(t);
+  const expectedSha256 = crypto.createHash('sha256').update(fs.readFileSync(fixture.inputPath)).digest('hex');
+  const raw = { filePath: fixture.inputPath, role: 'input', sourceOperation: 'position-reconciliation:source:apply-import' };
+  const plain = normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs: [raw], outputs: [] });
+  const plan = normalizeFilePlanV1({ version: 1, allocation: 'eager',
+    inputs: [{ ...raw, expectedSha256, expectedSizeBytes: 5 }], outputs: [] });
+  assert.equal(plan.inputs[0].expectedSha256, expectedSha256);
+  assert.equal(plan.inputs[0].expectedSizeBytes, 5);
+  assert.equal(Object.isFrozen(plan.inputs[0]), true);
+  assert.equal(plan.inputs[0].artifactKey, plain.inputs[0].artifactKey);
+  assert.equal(artifactManifestFromFilePlan(plan).identity, artifactManifestFromFilePlan(plain).identity);
+
+  const dbPath = path.join(fixture.directory, 'durable.sqlite');
+  let db = new DatabaseSync(dbPath);
+  try {
+    let repository = createArchiveRepository(db);
+    repository.ensureSchema();
+    const taskRun = repository.beginTaskRun(taskPayload('source-evidence')).taskRun;
+    const payload = { taskRun, manifest: artifactManifestFromFilePlan(plan), moduleCode: 'TEST', moduleName: '源证据' };
+    const reserved = repository.reserveFileTaskBatch(payload);
+    fs.unlinkSync(fixture.inputPath);
+    db.close();
+    db = new DatabaseSync(dbPath);
+    repository = createArchiveRepository(db);
+    repository.ensureSchema();
+    const artifact = repository.listArtifacts(reserved.batch.id)[0];
+    assert.equal(artifact.status, 'pending');
+    assert.equal(artifact.metadata.expectedSha256, expectedSha256);
+    assert.equal(artifact.metadata.expectedSizeBytes, 5);
+    assert.deepEqual(artifact.metadata.sourceSnapshot, plan.inputs[0].sourceSnapshot);
+    assert.equal(repository.reserveFileTaskBatch(payload).created, false);
+    assert.equal(repository.getLatestIssuedBatch().batchId, reserved.batch.id);
+  } finally { db.close(); }
+});
+
+test('不完整或与原快照不符的输入摘要在归档发号前拒绝', (t) => {
+  const fixture = createFixture(t);
+  const raw = { filePath: fixture.inputPath, role: 'input', sourceOperation: 'import' };
+  const evidence = [
+    { expectedSha256: 'a'.repeat(64) },
+    { expectedSizeBytes: 5 },
+    { expectedSha256: 'not-a-sha', expectedSizeBytes: 5 },
+    { expectedSha256: 'a'.repeat(64), expectedSizeBytes: 6 },
+    { expectedSha256: 'a'.repeat(64), expectedSizeBytes: -1 }
+  ];
+  const base = normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs: [raw], outputs: [] });
+  const taskRun = fixture.repository.beginTaskRun(taskPayload('invalid-evidence')).taskRun;
+  for (const item of evidence) {
+    assert.throws(() => normalizeFilePlanV1({ version: 1, allocation: 'eager',
+      inputs: [{ ...raw, ...item }], outputs: [] }), { code: 'ARCHIVE_FILE_PLAN_INVALID' });
+    const manifest = artifactManifestFromFilePlan(base);
+    assert.throws(() => fixture.repository.reserveFileTaskBatch({ taskRun,
+      manifest: { ...manifest, inputs: [{ ...manifest.inputs[0], ...item }] }
+    }), /摘要/);
+  }
+  assert.equal(fixture.db.prepare('SELECT COUNT(*) count FROM archive_batches').get().count, 0);
+  assert.equal(fixture.db.prepare('SELECT COUNT(*) count FROM archive_operation_issuances').get().count, 0);
+  assert.equal(fixture.db.prepare('SELECT COUNT(*) count FROM archive_daily_sequences').get().count, 0);
+});
+
+test('输入摘要持久化失败回滚整个发号事务，重试才生成完整批次', (t) => {
+  const fixture = createFixture(t);
+  const plan = normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs: [{
+    filePath: fixture.inputPath, role: 'input', sourceOperation: 'import',
+    expectedSha256: 'a'.repeat(64), expectedSizeBytes: 5
+  }], outputs: [] });
+  const taskRun = fixture.repository.beginTaskRun(taskPayload('atomic-evidence')).taskRun;
+  const payload = { taskRun, manifest: artifactManifestFromFilePlan(plan) };
+  fixture.db.exec(`CREATE TEMP TRIGGER reject_input_evidence BEFORE INSERT ON archive_artifacts
+    WHEN json_extract(NEW.metadata_json, '$.expectedSha256') IS NOT NULL
+    BEGIN SELECT RAISE(ABORT, '源摘要持久化失败'); END`);
+  assert.throws(() => fixture.repository.reserveFileTaskBatch(payload), /源摘要持久化失败/);
+  for (const table of ['archive_batches', 'archive_artifacts', 'archive_operation_issuances', 'archive_daily_sequences']) {
+    assert.equal(fixture.db.prepare(`SELECT COUNT(*) count FROM ${table}`).get().count, 0);
+  }
+  fixture.db.exec('DROP TRIGGER reject_input_evidence');
+  const reserved = fixture.repository.reserveFileTaskBatch(payload);
+  assert.equal(reserved.batch.globalDailySequence, 1);
+  assert.equal(fixture.repository.listArtifacts(reserved.batch.id)[0].metadata.expectedSha256, 'a'.repeat(64));
+});
+
+test('已有缺摘要批次不因重复 reserve 被回填或重新认领源文件', (t) => {
+  const fixture = createFixture(t);
+  const raw = { filePath: fixture.inputPath, role: 'input', sourceOperation: 'import' };
+  const taskRun = fixture.repository.beginTaskRun(taskPayload('historical-evidence')).taskRun;
+  const manifest = artifactManifestFromFilePlan(normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs: [raw], outputs: [] }));
+  const reserved = fixture.repository.reserveFileTaskBatch({ taskRun, manifest });
+  const withEvidence = artifactManifestFromFilePlan(normalizeFilePlanV1({ version: 1, allocation: 'eager',
+    inputs: [{ ...raw, expectedSha256: 'a'.repeat(64), expectedSizeBytes: 5 }], outputs: [] }));
+  assert.equal(fixture.repository.reserveFileTaskBatch({ taskRun, manifest: withEvidence }).created, false);
+  assert.equal(fixture.repository.listArtifacts(reserved.batch.id)[0].metadata.expectedSha256, undefined);
+});
 
 test('Task Run 是无编号 exact-5 owner，建立本身不写 batch/issuance/sequence', (t) => {
   const { db, repository } = createFixture(t);

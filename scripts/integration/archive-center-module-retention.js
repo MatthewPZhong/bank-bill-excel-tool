@@ -172,6 +172,41 @@ async function createFileBatch(fixture, moduleId, overrides = {}) {
   return { batch: result.batch, artifact: artifacts[0], source, payload };
 }
 
+async function createCompletedFileTask(fixture, channel) {
+  const policy = createTaskPolicyRegistry().require(channel);
+  const source = fixture.writeSource(policy.scopeId);
+  const filePlan = normalizeFilePlanV1({
+    version: 1,
+    allocation: 'eager',
+    inputs: [{ ...source, sourceOperation: channel }],
+    outputs: []
+  });
+  let taskContext;
+  const result = await fixture.lifecycle.runFileTask({
+    policy,
+    filePlanResolver: () => filePlan,
+    resultClassifier: (value) => value.status === 'success' ? 'succeeded' : 'failed',
+    execute: async (context, controls) => {
+      taskContext = context;
+      const settled = await controls.settleArtifacts({
+        files: filePlan.inputs.map((item) => ({ artifactKey: item.artifactKey }))
+      });
+      assert.equal(settled.ok, true);
+      return { status: 'success' };
+    }
+  });
+  assert.equal(result.status, 'success');
+  const batch = fixture.repository.getBatch(taskContext.batchId);
+  const artifacts = fixture.repository.listArtifacts(batch.id);
+  assert.equal(batch.taskStatus, 'succeeded');
+  assert.equal(artifacts.length, 1);
+  assert.equal(artifacts[0].status, 'ready');
+  assert.ok(fixture.repository.getOwnerTerminalCompletion({
+    version: 1, kind: 'file-batch', batchContext: taskContext
+  }), '原 TaskLifecycle 完成归档及终态后持久登记收口凭证');
+  return { batch, artifact: artifacts[0], source };
+}
+
 scenario('旧全局设置兼容，14 个模块设置经 SQLite 关闭/重开保持一致', async (fixture) => {
   assert.equal(SCOPES.length, 14, '完整模块清单包含 13 个主模块和工具箱');
   assert.equal(fixture.controller.getRetentionDays(), 60);
@@ -458,11 +493,12 @@ scenario('cleanupExpired 按已建批快照区分到期/未到期/永久并尊�
   setModule(fixture, 'statement-generator', 30);
   setModule(fixture, 'bank-bu-recon', 90);
   setModule(fixture, 'toolbox', null);
-  const expired = await createFileBatch(fixture, 'statement-generator');
-  const future = await createFileBatch(fixture, 'bank-bu-recon');
-  const permanent = await createFileBatch(fixture, 'toolbox');
-  const locked = await createFileBatch(fixture, 'statement-generator', { locked: true });
-  const held = await createFileBatch(fixture, 'statement-generator');
+  const expired = await createCompletedFileTask(fixture, 'file:import');
+  const future = await createCompletedFileTask(fixture, 'bankBuRecon:import:run');
+  const permanent = await createCompletedFileTask(fixture, 'toolbox:merge');
+  const locked = await createCompletedFileTask(fixture, 'file:import');
+  assert.equal((await fixture.service.setLocked(locked.batch.id, true)).ok, true);
+  const held = await createCompletedFileTask(fixture, 'file:import');
   fixture.repository.addArtifactHold(held.artifact.id, {
     ownerModule: 'statement-generator',
     ownerType: 'retention-integration',
@@ -493,6 +529,29 @@ scenario('cleanupExpired 按已建批快照区分到期/未到期/永久并尊�
   for (const item of [expired, future, permanent, locked, held]) {
     assert.equal(fs.readFileSync(item.source.filePath, 'utf8'), item.source.content, '清理不删除外部源文件');
   }
+});
+
+scenario('legacy 已到期批次缺少原 owner 完成凭证时拒绝清理并保留记录与文件', async (fixture) => {
+  setModule(fixture, 'statement-generator', 30);
+  const legacy = await createFileBatch(fixture, 'statement-generator');
+  const batchBefore = fixture.repository.getBatch(legacy.batch.id);
+  const artifactBefore = fixture.repository.getArtifact(legacy.artifact.id);
+  const paths = [legacy.source.filePath,
+    path.join(fixture.rootDir, legacy.artifact.blob.relativePath),
+    path.join(fixture.rootDir, legacy.artifact.storageRelativePath)];
+  const contents = paths.map((filePath) => fs.readFileSync(filePath));
+  assert.equal(batchBefore.taskStatus, 'succeeded', '终态成功不能代替原 owner 收口凭证');
+  assert.equal(fixture.db.prepare('SELECT COUNT(*) AS count FROM archive_owner_terminal_completions WHERE batch_id = ?')
+    .get(legacy.batch.id).count, 0);
+  const cleaned = await fixture.service.cleanupExpired({ asOfLocalDate: '2026-02-15' });
+  assert.equal(cleaned.ok, false);
+  assert.equal(cleaned.candidateCount, 1);
+  assert.equal(cleaned.deletedBatchCount, 0);
+  assert.equal(cleaned.results[0].code, 'ARCHIVE_DELETE_OWNER_COMPLETION_REQUIRED');
+  assert.deepEqual(fixture.repository.getBatch(legacy.batch.id), batchBefore);
+  assert.deepEqual(fixture.repository.getArtifact(legacy.artifact.id), artifactBefore);
+  assert.equal(fixture.repository.getCleanupJobForBatch(legacy.batch.id), null);
+  paths.forEach((filePath, index) => assert.deepEqual(fs.readFileSync(filePath), contents[index]));
 });
 
 async function run() {

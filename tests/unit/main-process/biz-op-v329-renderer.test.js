@@ -190,7 +190,7 @@ function rendererCases(test, assert, environment) {
       assert.equal(h.status().dataset.tone, 'success'); noTaskButtons(h);
     } finally { h.close(); }
   });
-  test('失败任务与已保存报告叠加状态读取故障，恢复状态后保留原业务错误和报告', async () => {
+  test('失败任务与已保存报告叠加状态读取故障，恢复状态且历史存档待检查时保留原业务错误和报告', async () => {
     const h = await setup();
     try {
       const stateError = '模块状态读取连接中断'; const relativePath = 'error-reports/2026-09-11/本次导入错误报告.xlsx';
@@ -206,12 +206,15 @@ function rendererCases(test, assert, environment) {
       for (const text of ['导入文件', '开始运行', '导出校验结果表', '数据管理']) assert.equal(h.find(text).disabled, true);
       const combinedText = h.text();
       await h.controller.setSelected(false); await h.controller.setSelected(true); assert.equal(h.text(), combinedText);
-      h.reply.status = { mode: 'ACTIVE', recoveryReady: true };
+      h.reply.status = { mode: 'ACTIVE', recoveryReady: true, archiveOwnerBackfillPending: true };
       await h.controller.setSelected(false); await h.controller.setSelected(true);
       assert.ok(h.text().includes('本次导入未通过校验')); assert.ok(h.text().includes('BIZOP_IMPORT_REJECTED'));
       assert.ok(h.text().includes('扫描 10 行，接受 9 行')); assert.ok(h.text().includes(relativePath));
       assert.equal(h.text().includes(stateError), false); assert.equal(h.status().dataset.tone, 'error');
       for (const text of ['导入文件', '开始运行', '导出校验结果表', '数据管理']) assert.equal(h.find(text).disabled, false);
+      const archiveCheck = h.find('继续检查存档');
+      assert.equal(archiveCheck.hidden, false); assert.equal(archiveCheck.disabled, false);
+      assert.equal(h.text().includes('仍有存档记录待检查'), false);
       noTaskButtons(h);
     } finally { h.close(); }
   });

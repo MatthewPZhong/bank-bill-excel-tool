@@ -10,7 +10,7 @@ function createBizOpRecoveryDriver({ catalog, sources, admission, readRepository
   let pending = null;
   let deferredStartupBudget = null;
   let platformScanCompleted = false;
-  function openObligations() {
+  function openObligations({ includeHistoricalOwners = true } = {}) {
     const db = catalog.db;
     return Boolean(db.prepare(`SELECT 1 FROM biz_op_v327_prepared_ops p
       JOIN biz_op_v327_settlement_progress s USING(task_run_id) JOIN archive_task_runs t USING(task_run_id)
@@ -19,7 +19,9 @@ function createBizOpRecoveryDriver({ catalog, sources, admission, readRepository
       || db.prepare("SELECT 1 FROM biz_op_v327_dispatches WHERE state!='CLOSED' AND process_exit_evidence_json IS NULL LIMIT 1").get()
       || db.prepare("SELECT 1 FROM biz_op_v327_reclaim_queue WHERE state!='DONE' LIMIT 1").get()
       || db.prepare("SELECT 1 FROM biz_op_v327_recovery_followups WHERE state!='COMPLETE' LIMIT 1").get()
-      || readRepository.listActiveRecoveryHolds().some((hold) => ACTIONS[hold.actionKey]));
+      || readRepository.listActiveRecoveryHolds().some((hold) => ACTIONS[hold.actionKey])
+      || sources.hasPendingArchiveOwners()
+      || includeHistoricalOwners && sources.hasHistoricalOwners());
   }
   function progress(source) {
     const { db } = catalog;
@@ -45,6 +47,7 @@ function createBizOpRecoveryDriver({ catalog, sources, admission, readRepository
       let platformSummary = null;
       let completedSources = 0;
       let reason = null;
+      let archiveOwnerBackfill = null;
       const blockedScopes = new Set();
       async function scan() {
         budget.begin('fullScans');
@@ -120,15 +123,20 @@ function createBizOpRecoveryDriver({ catalog, sources, admission, readRepository
           // 上一轮的完整枚举就是本次最终快照；初始空快照仍需重新完整枚举。
           if (budget.snapshot().enumerations === 1) sources.collect();
           await scan();
-          if (openObligations()) reason = 'FINAL_OBLIGATIONS_PENDING';
-          else admission.markRecovered();
+          if (openObligations({ includeHistoricalOwners: false })) reason = 'FINAL_OBLIGATIONS_PENDING';
+          else {
+            // Archive 未装配的初始扫描不触碰 owner。兼容补齐独立分页，不占真实恢复预算；
+            // 缺证批次保留删除诊断，不能重新关闭已核验完成的业务入口。
+            if (!initialPlatformOnly) archiveOwnerBackfill = await sources.backfillHistoricalOwners();
+            admission.markRecovered();
+          }
         }
       } catch (error) {
         reason = error.code || 'BIZOP_RECOVERY_FAILED';
       } finally { sources.clear(); }
       return Object.freeze({ ready: admission.snapshot().recoveryReady,
         sourceCount: platformSummary?.sourceCount || 0, activeHoldCount: platformSummary?.activeHoldCount || 0,
-        ...budget.snapshot(), completedSources, blockedScopeCount: blockedScopes.size, reason });
+        ...budget.snapshot(), completedSources, blockedScopeCount: blockedScopes.size, reason, archiveOwnerBackfill });
     }, { recovery: true });
   }
   return Object.freeze({
