@@ -2,7 +2,7 @@
 
 ## 当前发布状态（2026-09-19）
 
-已完成六功能集成与代码自审，Windows 复验新增确认原生 AM/PM 裁切 P2，132px 修复已实现、待最终复验；版本准备提交为 `5001d331bb78bdb82dfaa018ee705b51681bde4f`。完整本地门禁已通过，Windows/人工/规模验收未闭环，尚未发布、合并 main 或打正式标签。下方历史门禁保留原结论，不代表当前候选。
+六功能集成后的三项 SST/高位文件身份 P2 已修复为 `30317ee5a9ad8227db0562354d20554edb9e6ae4`，局部回归与独立复审通过。本轮完整本地门禁通过：501 个单测文件，7,864 PASS / 0 FAIL / 3 Windows 专用 SKIP；59 个集成脚本，2,575/2,575。真实 drain 期间取消的 10,000 Pending 补充验证通过，43 ms 收口，无强制终止。最终 Windows 检查、候选包、完整 PF 和人工验收仍未闭环，尚未合并 main、打正式标签或发布。下方历史门禁保留原适用范围；修复证据见 [摘要](self-review-2026-09-19/runtime-repairs-summary.json)。
 
 - 任务范围：用户明确要求自审至无 P2 Finding，执行 weekly-release 全流程，最终核实本地/远端 main 均为 3.2.9。授权覆盖所需提交、推送、PR、合并、升版、正式标签及发布；不得把授权写成验收通过。
 - 目标版本/分支：`3.2.9` / `release/v3.2.9`；基线 `v3.2.8` → `2ba9ef14fe972363b604955636cff0c9ac53700f`。
@@ -31,16 +31,16 @@
 - [x] B2：fetch 实际 origin；main 要求 `smoke-test`、`build` 严格检查，禁止强推且 admins 同样受保护。production-release 有指定用户审批，正式标签有创建/不可变规则。
 - [x] B4/B5：核对六源 SHA 均为祖先且实际实现存在；当前 `origin/main` 与基线相同并包含于 release，暂无新增 hotfix。
 - [x] C1/C2：版本和锁文件 3.2.9；同步 CHANGELOG、版本功能历史和使用手册。
-- [x] C3：核心候选 `5001d331` 已提交；后续仅文档和验收脚本修订另行记录，不将未提交内容当已发布。
-- [x] C4 本地自动门禁：完整 release-check exit 0；499 个单测文件，7,861 PASS / 0 FAIL / 3 Windows 专用 SKIP；59 个集成脚本全部通过，2,574/2,574。
-- [ ] A3/C4 平台/C5/C6：新增 AM/PM 裁切 P2 修复待平台复验；人工及 VCC 完整性能门禁仍待闭环。
+- [x] C3：修复提交 `30317ee5a9ad8227db0562354d20554edb9e6ae4` 已复审；本记录所在的后续文档提交继承相同生产、依赖及测试内容，推送后另核对 PR head。
+- [x] C4 本地自动门禁：修复后 7,864 PASS / 0 FAIL / 3 Windows 专用 SKIP、59 集成脚本 2,575/2,575，lint/smoke 通过。门禁输入逐项比对；两份独立 PF 验证器另经动态验证。
+- [ ] A3/C4 平台/C5/C6：旧候选 Windows 必需检查失败；新候选 Windows、人工及 VCC 完整性能门禁仍待闭环。
 - [x] D1/D2：同名 release 已推送并建立 release→main 草稿 [PR #239](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/239)；每次推送均核对 head，候选 SHA 见 PR 及下方续做记录。
 - [ ] D3/D4：最终 head 的 Windows 检查/构建与必要验收通过后，重新核对 main 及合并条件。
 - [ ] E1–E5：满足发布条件后进入锁定窗口、合并 PR、核实最终 main 检查、创建并核验附注 `v3.2.9`。目前未宣称仓库已被技术锁定。
 - [ ] F1–F4：标签发布 workflow、正式 Release、setup/portable/blockmap/latest.yml 与 SHA512 全部实测核验。
 - [ ] G1–G3：补齐 PR→最终 main→tag→产物追溯，保留顺延项，并在不覆盖主目录未提交资料的前提下快进本地 main。
 
-## 本轮验收状态
+## 首轮验收记录与持续适用的边界
 
 本地完整门禁：Node 24.13.0，`UNIT_TEST_CONCURRENCY=2 npm run release-check`，日志 `release-check.log`，exit 0。lint、smoke、499 个单测文件与 59 个集成脚本通过；单测 7,861 PASS / 0 FAIL / 3 Windows 专用 SKIP，集成 2,574/2,574。原门槛 toolbox RSS 31/31，本次未复现历史失败，不改写历史结果。UI 和独立跨层探针见本轮自审；首次设置脚本旧 API 夹具失败及修复后通过均保留。
 
@@ -144,3 +144,8 @@ Biz OP 源分支原有 20 个未提交文件已核对归属并形成上述提交
 ## 第三轮 Windows 发现与修复
 
 `2bbf2043` 的 Windows 证据确认104px原生时间框裁切AM/PM，132px完整、恢复104px再次失败，输入值不变。生产CSS、离线预览、布局断言及TechDoc已同步132px；当前不能用之前完整门禁或旧Windows结果覆盖这次生产样式变化，待新候选重新验证。VCC ASAR与小样本已在Windows通过，PF因SSD证据不足保持NOT_RUN。设置验证器增加实际窗口呈现，保留30秒时限和原断言。详细证据及状态见[发布前自审](release-review-2026-09-19.md)。
+
+
+## SST 与 Windows 高位文件身份续做
+
+六功能集成后的三项 SST/高位文件身份 P2 已修复为 `30317ee5a9ad8227db0562354d20554edb9e6ae4`，局部回归与独立复审通过。本轮完整本地门禁通过：501 个单测文件，7,864 PASS / 0 FAIL / 3 Windows 专用 SKIP；59 个集成脚本，2,575/2,575。真实 drain 期间取消的 10,000 Pending 补充验证通过，43 ms 收口，无强制终止。最终 Windows 检查、候选包、完整 PF 和人工验收仍未闭环，尚未合并 main、打正式标签或发布。详见 [修复审查与证据](self-review-2026-09-19/runtime-repairs.md)。旧成功证据保留原适用范围，PR 保持草稿，尚未合并 main、打标签或正式发布。

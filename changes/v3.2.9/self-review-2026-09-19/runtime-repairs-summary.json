@@ -1,0 +1,66 @@
+{
+  "finishedAt": "2026-09-18T20:00:41.970216+00:00",
+  "runtime": "Node24.13.0/macOS",
+  "command": "UNIT_TEST_CONCURRENCY=2 npm run release-check",
+  "exitCode": 0,
+  "unit": {
+    "tests": 7867,
+    "pass": 7864,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 3,
+    "files": 501
+  },
+  "integration": {
+    "scripts": 59,
+    "pass": 2575,
+    "fail": 0
+  },
+  "log": "release-check-sst-identity.log",
+  "logSha256": "dee26fc40765ac8f035c9e006e95efa08501a1444695be7f11d1d20756b1afc0",
+  "frozenInputFiles": 1484,
+  "unchangedSupplementalAssets": 46,
+  "changedStandaloneVerifiers": [
+    {
+      "path": "scripts/vcc-financial-op/performance-worker.js",
+      "before": "fdb2705e14dc6e70fccde8f13b8c4f7c845f06304763025b9c34c804f63446aa",
+      "after": "34d56999ed20ebc362eee5122cd4b25742d39e9fbdb1ee115e682cafd9b9b7b7"
+    },
+    {
+      "path": "scripts/vcc-financial-op/verify-review-performance.js",
+      "before": "42f2ca5043229a6fda1181faec88e2ba8e044145c7a431c2d1fd62c568eb9bea",
+      "after": "2563e30d7cf45311365f6d4bd6f68010fceabc3d21faf8e23dbf3a0ef91a8e57"
+    }
+  ],
+  "standaloneVerification": {
+    "syntax": "PASS",
+    "eslint": "PASS",
+    "smallExport": "PASS",
+    "realDrainCancellation": "PASS",
+    "scope": "Supplemental Electron/macOS; original Windows/PF/manual acceptance stays NOT_RUN"
+  },
+  "repairCommit": "30317ee5a9ad8227db0562354d20554edb9e6ae4",
+  "candidateIdentity": {
+    "description": "The subsequent documentation-only commit inherits these verified production, dependency, test and verifier bytes. Windows checks must use its actual PR head.",
+    "verifiedFiles": 1530,
+    "inputManifestSha256": "b3eb040758358d4e3777947b451588bcc3b0bd2bfedf9ddca28d5d1632b7f685",
+    "originalRunHead": "5ffaabb0c3dcf65377e70997706290c32ed80c33",
+    "originalRunProductionDirty": true,
+    "inputManifestFile": "logs/verification/release-v3.2.9/repair-sst-file-identity/repair-verified-inputs-final.json"
+  },
+  "realDrainCancellation": {
+    "pendingRows": 10000,
+    "elapsedMs": 43,
+    "forced": false,
+    "stageBoundaryOnly": false,
+    "cleanup": "PASS",
+    "automated": "PASS",
+    "acceptance": "NOT_RUN",
+    "cursorReturns": 1,
+    "sourceRowsAtCancel": 12372,
+    "sourceRowsAfterCancel": 12372
+  },
+  "manualWindowsInstalledApplication": "NOT_RUN",
+  "excelWps": "NOT_RUN",
+  "independentWorkerRss": "NOT_RUN; original requirement unchanged, awaiting decision"
+}

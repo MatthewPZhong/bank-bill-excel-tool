@@ -2,7 +2,7 @@
 
 日期：2026-09-19。发布状态见 [release.md](release.md)，本轮审查及自动证据见 [release-review-2026-09-19.md](release-review-2026-09-19.md)。
 
-本文件是待执行清单，**没有任何人工或 Windows 性能项目被预先判为通过**。已建立草稿 [PR #239](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/239)；候选正在修复 Windows 原生时间框裁切，最终包身份待构建后绑定。自动检查、性能采样、安装包操作及 Excel/WPS 人工核对分别记录；源码脚本通过或安装包成功生成均不代替人工验收。本文件不修改各模块的需求、资源门槛或发布合同。
+本文件是待执行清单，**没有任何人工或 Windows 性能项目被预先判为通过**。已建立草稿 [PR #239](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/239)；原生时间框修复后的专项步骤通过；后续 SST 缓存和高位文件身份修复已提交为 `30317ee5a9ad8227db0562354d20554edb9e6ae4`，本地完整门禁通过。`5ffaabb0` 必需检查失败，不作为最终候选；最终包身份待新修复通过检查并构建后绑定。自动检查、性能采样、安装包操作及 Excel/WPS 人工核对分别记录；源码脚本通过或安装包成功生成均不代替人工验收。本文件不修改各模块的需求、资源门槛或发布合同。
 
 ## 1. 候选身份、环境与证据
 
@@ -12,7 +12,7 @@
 | release → main PR | [PR #239](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/239)，草稿，待必要验收完成 |
 | Windows Setup 候选包 / SHA-256 | 待补链接及摘要 |
 | Windows portable 候选包 / SHA-256 | 待补链接及摘要 |
-| 最终候选 release-check 日志 | 待补链接及退出码；当前进度见 [release.md](release.md) |
+| 最终候选 release-check 日志 | 修复内容 PASS / exit 0，7,864 单测通过、3 平台跳过，2,575 集成断言通过；日志摘要及输入身份见 [修复验证](self-review-2026-09-19/runtime-repairs-summary.json)，Windows head 另绑定 |
 | 测试者 / 复核者 / 日期和时区 | 待填 |
 | Windows 版本、build、架构 | 待填，不写“最新版” |
 | CPU / 物理内存 / SSD 型号与文件系统 | 待填 |
@@ -188,7 +188,7 @@ finally { $v329LockHandle.Dispose() }
 
 | 项目ID / 包型 / 环境 | PASS / FAIL / NOT_RUN | 实际结果与证据链接 | 测试者 / 日期 |
 |---|---|---|---|
-| 本地完整门禁 | PASS | 核心候选 `5001d331`：单测 7,861/0/3 SKIP、59 集成脚本 2,574/2,574；后续独立验证脚本及文档专项通过，内容覆盖见 [证据摘要](self-review-2026-09-19/evidence-summary.json) | 2026-09-19 自动检查 |
+| 本地完整门禁 | PASS | 修复提交 `30317ee5`：单测 7,864/0/3 SKIP、59 集成脚本 2,575/2,575；真实 drain 取消 43 ms 的本机补充验证通过，内容覆盖见 [修复摘要](self-review-2026-09-19/runtime-repairs-summary.json) | 2026-09-19 自动检查 |
 | 最终 PR Windows CI / 候选包 | NOT_RUN | 待补最终 head 的日志及候选包 | 待填 |
 | B01～B04 | NOT_RUN | 待填逐项记录 | 待填 |
 | R01～R03 | NOT_RUN | 待填逐项记录 | 待填 |
