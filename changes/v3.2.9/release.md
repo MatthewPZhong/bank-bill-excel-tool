@@ -2,7 +2,15 @@
 
 ## 当前发布状态（2026-09-19）
 
-六功能集成后的三项 SST/高位文件身份 P2 已修复为 `30317ee5a9ad8227db0562354d20554edb9e6ae4`，局部回归与独立复审通过。本轮完整本地门禁通过：501 个单测文件，7,864 PASS / 0 FAIL / 3 Windows 专用 SKIP；59 个集成脚本，2,575/2,575。真实 drain 期间取消的 10,000 Pending 补充验证通过，43 ms 收口，无强制终止。最终 Windows 检查、候选包、完整 PF 和人工验收仍未闭环，尚未合并 main、打正式标签或发布。下方历史门禁保留原适用范围；修复证据见 [摘要](self-review-2026-09-19/runtime-repairs-summary.json)。
+第三轮隔离原生 [run35400518166](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/35400518166) / head `8779c029ac94c859681d582bff378b426686dc09` 已成功：最终迁移完整121/121、永久删除集成52/52，capture产品PASS；19个运行SHA及最终五文件绑定一致，迁移close P2修复验证闭环。prefix/ArchiveService76/76、SSD45/45和readonly+position15/15复用第二轮相同代码的原生证据，不把SSD采集成功升格为介质准入。本地最终 `release-check` 正在运行（session67830），尚无结果；本记录生成时本轮候选待提交，最终门禁进行中；实际候选SHA以后续PR与外部记录为准。最终完整Windows gate/build、SSD PF、原始独立Worker RSS及Excel/WPS人工仍待完成。原PF/RSS合同未改变。详见 [第三轮冻结与验证](self-review-2026-09-19/runtime-repairs.md#第三轮-windows-迁移修复-8779c029-闭环)。以下前序记录保留各自运行时点，不替代当前候选门禁。
+
+六功能集成后的三项 SST/高位文件身份 P2 已修复为 `30317ee5a9ad8227db0562354d20554edb9e6ae4`，局部回归与独立复审通过。此前修复时点的完整本地门禁通过：501 个单测文件，7,864 PASS / 0 FAIL / 3 Windows 专用 SKIP；59 个集成脚本，2,575/2,575。真实 drain 期间取消的 10,000 Pending 补充验证通过，43 ms 收口，无强制终止。最终 Windows 检查、候选包、完整 PF 和人工验收仍未闭环，尚未合并 main、打正式标签或发布。下方历史门禁保留原适用范围；修复证据见 [摘要](self-review-2026-09-19/runtime-repairs-summary.json)。
+
+当前候选 `e47e2a6077877b76b7d5cb490d4a01034a2fec27` 的 [Windows 必需运行 35392054677](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/35392054677) 已终态失败：501 个单测文件、7,867 tests，7,819 PASS / 45 FAIL / 0 cancelled / 3 SKIP；失败为迁移 39、只读副本 4、平盘来源 2。ctime 同名用例 #1076 已在真实 Windows PASS，但单测 exit 1，集成、后续 Windows 专项及 build 未执行。完整日志与逐项审计已保存，不能把局部修复或本地门禁视为平台闭环。详见 [e47 完整门禁与差异](self-review-2026-09-19/runtime-repairs.md#e47e2a60-windows-完整门禁终态)。
+
+隔离 [Windows 短诊断 35397405456](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/35397405456)（head `382928f8`、生产基线 e47、Node22.23.2）已终态失败：SSD 专属回归 44/44、只读副本和平盘夹具 15/15 在原生 Windows PASS；实际磁盘采集因 `SAS` 枚举字符串转换失败，SSD 证明仍 NOT_RUN；迁移取证捕获了 close 后 ctime 变化，产品路径仍失败。后续采集器和迁移修复未获本次运行验证，完整门禁状态不变。详见 [短诊断原始结果](self-review-2026-09-19/runtime-repairs.md#windows-短诊断-382928f8-实际结果)。
+
+第二轮历史：迁移close/ctime第一版修复的本机记录已冻结：旧时点全文件114/114，最终新增16/16及独立14负例通过；当时定义118，未冒称完整118重跑。prefix最终9/9及全文件76/76通过；52项删除集成通过早于prefix最后二次存在确认。隔离原生 [run35399134894](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/35399134894) / head `68ed9cb7351977219e66d605b7360f0e6255ead5` 已失败：独立完整审计确认ArchiveService76/76（含prefix9项）PASS，迁移118项55 PASS/63 FAIL；合计194/131/63，无取消/skip。新增16项原生7 PASS/9 FAIL；集成36 PASS、第37项失败，后15项含新增close两例未执行。canonical未chmod但link/unlink后的writer.close仍改变ctime，第一版仅chmod假设被推翻，当时迁移P2继续修复；后续第三轮闭环见上。SSD45项及实际采集通过，虚拟机宿主介质无法证明，SSD验收仍NOT_RUN。本轮release修复未提交，19/19运行文件SHA绑定通过，完整分组审计已归档；该次失败不能宣布迁移native修复或可交付。详见 [追加修复与证据边界](self-review-2026-09-19/runtime-repairs.md#windows-close-ssd-枚举与陈旧-prefix-追加修复)。
 
 - 任务范围：用户明确要求自审至无 P2 Finding，执行 weekly-release 全流程，最终核实本地/远端 main 均为 3.2.9。授权覆盖所需提交、推送、PR、合并、升版、正式标签及发布；不得把授权写成验收通过。
 - 目标版本/分支：`3.2.9` / `release/v3.2.9`；基线 `v3.2.8` → `2ba9ef14fe972363b604955636cff0c9ac53700f`。
@@ -31,9 +39,9 @@
 - [x] B2：fetch 实际 origin；main 要求 `smoke-test`、`build` 严格检查，禁止强推且 admins 同样受保护。production-release 有指定用户审批，正式标签有创建/不可变规则。
 - [x] B4/B5：核对六源 SHA 均为祖先且实际实现存在；当前 `origin/main` 与基线相同并包含于 release，暂无新增 hotfix。
 - [x] C1/C2：版本和锁文件 3.2.9；同步 CHANGELOG、版本功能历史和使用手册。
-- [x] C3：生产修复提交 `30317ee5a9ad8227db0562354d20554edb9e6ae4` 已复审；后续 ctime 单测夹具修正及输入摘要单独记录，候选以 PR 实际 head 为准，不将工作树改动当已发布。
-- [x] C4 本地自动门禁：修复后 7,864 PASS / 0 FAIL / 3 Windows 专用 SKIP、59 集成脚本 2,575/2,575，lint/smoke 通过。门禁输入逐项比对；两份独立 PF 验证器另经动态验证。
-- [ ] A3/C4 平台/C5/C6：旧候选 Windows 必需检查失败；新候选 Windows、人工及 VCC 完整性能门禁仍待闭环。
+- [ ] C3 最终候选：旧生产修复提交 `30317ee5` 已复审；新增 migration close、prefix 与 SSD 采集修复已冻结但仍未提交 release，须在最终候选绑定完整输入与证据。
+- [ ] C4 最终内容自动门禁：旧修复时点 7,864 PASS / 0 FAIL / 3 Windows SKIP、59 集成脚本 2,575/2,575 保留原输入身份；本轮追加修复已有第三轮原生专项结果，最终本地完整门禁现为RUNNING（session67830），结果及输入一致性待收口。
+- [ ] A3/C4 平台/C5/C6：当前 `e47e2a60` Windows 必需检查已终态失败（7,819 PASS / 45 FAIL / 3 SKIP）；迁移及夹具已通过下述最终原生专项；最终完整Windows gate/build、人工与VCC完整性能门禁仍待闭环。
 - [x] D1/D2：同名 release 已推送并建立 release→main 草稿 [PR #239](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/239)；每次推送均核对 head，候选 SHA 见 PR 及下方续做记录。
 - [ ] D3/D4：最终 head 的 Windows 检查/构建与必要验收通过后，重新核对 main 及合并条件。
 - [ ] E1–E5：满足发布条件后进入锁定窗口、合并 PR、核实最终 main 检查、创建并核验附注 `v3.2.9`。目前未宣称仓库已被技术锁定。
@@ -151,3 +159,7 @@ Biz OP 源分支原有 20 个未提交文件已核对归属并形成上述提交
 六功能集成后的三项 SST/高位文件身份 P2 已修复为 `30317ee5a9ad8227db0562354d20554edb9e6ae4`，局部回归与独立复审通过。本轮完整本地门禁通过：501 个单测文件，7,864 PASS / 0 FAIL / 3 Windows 专用 SKIP；59 个集成脚本，2,575/2,575。真实 drain 期间取消的 10,000 Pending 补充验证通过，43 ms 收口，无强制终止。最终 Windows 检查、候选包、完整 PF 和人工验收仍未闭环，尚未合并 main、打正式标签或发布。详见 [修复审查与证据](self-review-2026-09-19/runtime-repairs.md)。旧成功证据保留原适用范围，PR 保持草稿，尚未合并 main、打标签或正式发布。
 
 Windows `50062ca0` 的 ctime 拒删单测暴露跨平台注入前提不可靠，后续只修改该单测并完成全文件 59/59 复验；生产和依赖不变，后续候选 Windows 完整门禁仍待通过。详见[ctime 夹具分析](self-review-2026-09-19/runtime-repairs.md#windows-ctime-回归夹具修正)。
+
+后续发现独立 PF 验证器可因 OS 磁盘编号与 PhysicalDisk DeviceId 碰巧相等而错误认证 SSD 基准（P2），已修复身份取证，44 项回归与 25 项独立探针通过；后续短诊断的原生 Windows 44/44 通过，实际采证暴露枚举转换失败，修复待复验。候选 `e47e2a60` 的 11 项 PF 仍为 NOT_RUN，SSD 和其他性能合同未放宽。详见 [SSD 准入发现与闭环](self-review-2026-09-19/runtime-repairs.md#windows-ssd-基准准入-p2)。
+
+旧候选 `50062ca0` 完整 Windows 单测最终 7,819 PASS / 45 FAIL / 0 cancelled / 3 SKIP；38 项迁移失败仍在取证，另外 6 项只读/平盘夹具已完成本机与受控修正验证，原生 Windows 待验。其余 1 项 ctime 已在 `e47e2a60` 实际 Windows 通过。集成与 build 在旧运行未执行，不能把局部结果视为最终平台通过。

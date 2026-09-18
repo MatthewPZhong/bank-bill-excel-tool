@@ -48,6 +48,9 @@ async function assertDeletionBlocked(runtime, observation) {
   assert.ok(owners.every((owner) => owner.state === 'creating'), JSON.stringify(owners));
   assert.equal(String(readIdentityStatSync(fs, observation.replacementPath, 'statSync').ino), observation.replacementInode);
   assert.equal(fs.readFileSync(observation.replacementPath, 'utf8'), SOURCE_BYTES);
+  if (observation.displacedFilePath) {
+    assert.equal(String(readIdentityStatSync(fs, observation.displacedFilePath, 'statSync').ino), observation.createdInode);
+  }
   assert.equal(fs.readFileSync(path.join(observation.directory, 'template.csv'), 'utf8'), SOURCE_BYTES);
   return owners;
 }
@@ -87,6 +90,7 @@ async function verifyReadonlyOwnerIdentity(parentDirectory, options = {}) {
   let replacementInode;
   let originalParentInode;
   let replacementParentInode;
+  let displacedFilePath;
   let injected = false;
   let finalHashStarted = false;
   let openerCalls = 0;
@@ -100,13 +104,18 @@ async function verifyReadonlyOwnerIdentity(parentDirectory, options = {}) {
     assert.equal(injected, false);
     injected = true;
     const priorInode = String(readIdentityStatSync(fs, filePath, 'statSync').ino);
+    // 先移走原对象，避免 Windows 覆盖只读目标或移动仍含打开文件的父目录。
+    displacedFilePath = path.join(directory, 'displaced-copy.csv');
+    fs.renameSync(filePath, displacedFilePath);
+    assert.equal(String(readIdentityStatSync(fs, displacedFilePath, 'statSync').ino), priorInode);
     if (replaceParent) {
       const parent = path.dirname(filePath);
       originalParentInode = String(readIdentityStatSync(fs, parent, 'statSync').ino);
       const displaced = path.join(directory, 'displaced-copy-directory');
       fs.renameSync(parent, displaced);
       fs.mkdirSync(parent);
-      fs.renameSync(path.join(displaced, path.basename(filePath)), filePath);
+      fs.renameSync(displacedFilePath, filePath);
+      displacedFilePath = null;
       replacementParentInode = String(readIdentityStatSync(fs, parent, 'statSync').ino);
       assert.notEqual(replacementParentInode, originalParentInode);
       assert.equal(String(readIdentityStatSync(fs, filePath, 'statSync').ino), priorInode, '父目录替换保留原文件 inode');
@@ -122,13 +131,19 @@ async function verifyReadonlyOwnerIdentity(parentDirectory, options = {}) {
   const fsImpl = { ...fs,
     openSync(filePath, flags, ...args) {
       const fd = fs.openSync(filePath, flags, ...args);
-      if (String(filePath).includes(`${path.sep}.readonly${path.sep}`) && flags === 'wx') {
-        creationFd = fd;
-        createdInode = String(readIdentityStatSync(fs, fd, 'fstatSync').ino);
-        targetPath = String(filePath).slice(0, -4);
-        if (replacement === 'after-create') replaceObject(filePath);
+      try {
+        if (String(filePath).includes(`${path.sep}.readonly${path.sep}`) && flags === 'wx') {
+          creationFd = fd;
+          createdInode = String(readIdentityStatSync(fs, fd, 'fstatSync').ino);
+          targetPath = String(filePath).slice(0, -4);
+          if (replacement === 'after-create') replaceObject(filePath);
+        }
+        return fd;
+      } catch (error) {
+        // 注入尚未返回时 service 未接收此 fd；夹具必须收口自己创建的句柄。
+        fs.closeSync(fd);
+        throw error;
       }
-      return fd;
     },
     createReadStream(filePath, ...args) {
       if (filePath === targetPath) finalHashStarted = true;
@@ -214,12 +229,15 @@ async function verifyReadonlyOwnerIdentity(parentDirectory, options = {}) {
     assertFdClosed();
     const observation = { directory, replacement, batchId: batchContext.batchId,
       originalToken: originalConfirmation.confirmationToken, readonlyPath: opened.filePath,
-      replacementPath, replacementInode, createdInode, originalParentInode, replacementParentInode };
+      replacementPath, replacementInode, createdInode, originalParentInode, replacementParentInode, displacedFilePath };
     if (replacement) {
       assert.equal(injected, true, `${replacement} 必须到达指定替换边界`);
       assert.equal(opened.ok, false, `${replacement} 不得登记替代对象：${JSON.stringify(opened)}`);
       assert.equal(opened.code, 'ARCHIVE_READONLY_FILE_CHANGED', JSON.stringify(opened));
       assert.equal(openerCalls, 0);
+      if (displacedFilePath) {
+        assert.equal(String(readIdentityStatSync(fs, displacedFilePath, 'statSync').ino), createdInode);
+      }
       observation.owners = await assertDeletionBlocked(runtime, observation);
     } else {
       assert.equal(opened.ok, true, JSON.stringify(opened));

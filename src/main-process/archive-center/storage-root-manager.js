@@ -1701,7 +1701,7 @@ class ArchiveStorageRootManager {
   }
 
   async _publishMigrationTarget(stagedPath, targetPath, options) {
-    // 原 staging 身份来自调用方完成的 hash 校验。发布全程持有原 fd；新路径
+    // 原 staging 身份来自调用方完成的 hash 校验。发布全程持有原对象句柄；新路径
     // 只能排他创建，返回原 fd 身份供首次 journal capture 核对，不能现场认领。
     const relativePath = path.relative(options.rootDir, targetPath).split(path.sep).join('/');
     const location = await this._captureMigrationFile(options.rootDir, relativePath);
@@ -1709,18 +1709,15 @@ class ArchiveStorageRootManager {
       '迁移发布时目标出现其他文件，保留文件及恢复记录');
     let stagedHandle;
     let targetHandle;
+    let witnessHandle;
     try {
       stagedHandle = await this.fs.promises.open(stagedPath, 'r+');
       const verified = publishedFileIdentity(options.verifiedStat);
       assertPublishedIdentity(verified, publishedFileIdentity(await readHandleIdentityStat(stagedHandle)));
       const mode = options.mode == null ? verified.mode & 0o777 : options.mode;
-      const changedMode = (verified.mode & 0o777) !== mode;
-      if (changedMode) await stagedHandle.chmod(mode);
       await stagedHandle.sync();
       const prepared = publishedFileIdentity(await readHandleIdentityStat(stagedHandle));
-      assertPublishedIdentity(verified, prepared, changedMode ? ['ctimeMs', 'mode'] : []);
-      if ((prepared.mode & 0o777) !== mode) throw new ArchiveStorageRootError(
-        'ARCHIVE_STORAGE_DELETE_FILE_CHANGED', '迁移 staging 权限与本次设置不符');
+      assertPublishedIdentity(verified, prepared);
       let linked = false;
       try {
         await this.fs.promises.link(stagedPath, targetPath);
@@ -1731,8 +1728,6 @@ class ArchiveStorageRootManager {
         // 被替换，写入/chmod 也只作用于原 fd，替代文件不会被覆盖或认领。
         targetHandle = await this.fs.promises.open(targetPath, 'wx', 0o600);
         await targetHandle.writeFile(stagedHandle.createReadStream({ autoClose: false, start: 0 }));
-        await targetHandle.sync();
-        await targetHandle.chmod(mode);
         await targetHandle.sync();
       }
       const original = linked ? stagedHandle : targetHandle;
@@ -1754,12 +1749,36 @@ class ArchiveStorageRootManager {
         assertPublishedIdentity(prepared, published, ['ctimeMs']);
       }
       assertPublishedIdentity(published, publishedFileIdentity(readIdentityStatSync(this.fs, targetPath)));
-      return { ...published, root: location.root, parents: location.parents };
+      // Windows 可在关闭写句柄时才回写本次 link/unlink 或 chmod 的 ctime。先把只读见证句柄
+      // 绑定到仍在持有的原 fd 和父链，再完成 chmod/close；最终身份从见证 fd
+      // 采集，不能关闭原 fd 后把路径上的现存文件当作本次发布对象。
+      witnessHandle = await this.fs.promises.open(targetPath, 'r');
+      assertPublishedIdentity(published, publishedFileIdentity(await readHandleIdentityStat(witnessHandle)));
+      await this._captureMigrationFile(options.rootDir, relativePath, undefined, undefined,
+        { ...published, root: location.root, parents: location.parents });
+      const changedMode = (published.mode & 0o777) !== mode;
+      if (changedMode) {
+        await original.chmod(mode);
+        await original.sync();
+      }
+      await original.close();
+      if (linked) stagedHandle = null;
+      else targetHandle = null;
+      const settled = publishedFileIdentity(await readHandleIdentityStat(witnessHandle));
+      // linked 仅在本次 link/unlink 成功且 nlink 已精确恢复后才到达这里。
+      // wx 未 chmod 的目标没有上述元数据操作，ctime 仍必须完全一致。
+      const changedFields = [...(linked || changedMode ? ['ctimeMs'] : []), ...(changedMode ? ['mode'] : [])];
+      assertPublishedIdentity(published, settled, changedFields);
+      if ((settled.mode & 0o777) !== mode) throw new ArchiveStorageRootError(
+        'ARCHIVE_STORAGE_DELETE_FILE_CHANGED', '迁移发布权限与本次设置不符');
+      assertPublishedIdentity(settled, publishedFileIdentity(readIdentityStatSync(this.fs, targetPath)));
+      return { ...settled, root: location.root, parents: location.parents };
     } catch (error) {
       if (error?.code === 'EEXIST') throw new ArchiveStorageRootError('ARCHIVE_STORAGE_UNKNOWN_CONTENT',
         '迁移发布时目标出现其他文件，保留文件及恢复记录');
       throw error;
     } finally {
+      if (witnessHandle) await witnessHandle.close();
       if (targetHandle) await targetHandle.close();
       if (stagedHandle) await stagedHandle.close();
     }

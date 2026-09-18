@@ -21,6 +21,7 @@ const { createArchiveStorageRootManager } = require('../../src/main-process/arch
 const { recoverToolboxPublicationsIntoArchive } = require('../../src/main-process/toolbox-archive-recovery');
 const { JOURNAL_INDEX_NAME } = require('../../src/main-process/toolbox-output-publication');
 const { verifyMigrationDeleteOverlap, verifyMigrationTargetIdentity } = require('../../tests/fixtures/archive-permanent-delete-migration');
+const { createMigrationCloseMetadataFs } = require('../../tests/fixtures/archive-migration-close-metadata');
 const { verifyOrdinaryOwnerRecovery } = require('../../tests/fixtures/archive-permanent-delete-owner-recovery');
 const { verifyHardlinkRepublishRemainder } = require('../../tests/fixtures/archive-permanent-delete-hardlink-republish');
 const { verifyBizOpOwnerRecovery } = require('../../tests/fixtures/archive-permanent-delete-bizop-owner');
@@ -40,7 +41,7 @@ let service;
 let controller;
 let outboxStore;
 let passed = 0;
-const total = 50;
+const total = 52;
 
 const fsImpl = { ...fs, promises: fs.promises, unlinkSync(filePath) {
   if (state.blocked && (!state.target || state.target === filePath)) {
@@ -583,6 +584,25 @@ async function legacyBatchWithUnfingerprintedBlob(key) {
     await scenario('正常迁移保持原目标身份，真实任务经确认令牌完成永久删除', async () => {
       await verifyMigrationTargetIdentity(directory, { replacement: null, restart: true });
     });
+    for (const copyFallback of [false, true]) {
+      await scenario(`迁移 ${copyFallback ? 'wx' : 'link'} 写句柄关闭回写 ctime，重开数据库后确认删除仍核对最终身份`, async () => {
+        let metadata;
+        const result = await verifyMigrationTargetIdentity(directory, { reopenBeforeDelete: true,
+          createFs(targetRoot) {
+            metadata = createMigrationCloseMetadataFs({ targetRoot, copyFallback });
+            return metadata.fsImpl;
+          },
+          verifyMigrated(runtime, artifact) {
+            const identity = readIdentityStatSync(metadata.fsImpl, path.join(runtime.targetRoot, artifact.storageRelativePath));
+            assert.equal(metadata.closedWrites.length, 1);
+            assert.equal(identity.ino, String(metadata.closedWrites[0].identity.ino));
+            assert.equal(artifact.storageFingerprint.ctimeMs, identity.ctimeMs);
+          }
+        });
+        assert.equal(result.reopenedDatabase, true);
+        assert.equal(result.fullyDeleted, true);
+      });
+    }
     for (const replacement of ['canonical', 'materialized']) {
       await scenario(`迁移提交前 ${replacement} 目标发生同内容替换，重启后保留两根及原恢复凭证`, async () => {
         await verifyMigrationTargetIdentity(directory, { replacement, restart: true });

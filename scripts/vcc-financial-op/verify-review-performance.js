@@ -7,6 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const { spawn, execFileSync } = require('node:child_process');
+const { collectDiskBaseline } = require('./performance-disk-baseline');
 const root = path.resolve(__dirname, '../..');
 const CASES = ['pf01-100k', 'pf01-1m', 'pf02', 'pf03', 'pf04', 'cancel-prepare', 'cancel-extract', 'cancel-write', 'cancel-readback', 'cancel-drain', 'cancel-publish'];
 const json = (file, value) => fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
@@ -14,16 +15,11 @@ const mib = 1024 * 1024;
 function baseline(directory) {
   let disk = null, diskError = null;
   if (process.platform === 'win32') {
-    const drive = path.parse(directory).root[0];
-    try {
-      disk = JSON.parse(execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
-        `$p=Get-Partition -DriveLetter '${drive}'; $d=$p|Get-Disk; $v=Get-Volume -DriveLetter '${drive}'; $m=Get-PhysicalDisk|Where-Object {[string]$_.DeviceId -eq [string]$d.Number}; [pscustomobject]@{DiskNumber=$d.Number;DriveType=[string]$v.DriveType;MediaType=[string]$m.MediaType;SizeRemaining=$v.SizeRemaining;FileSystem=$v.FileSystem}|ConvertTo-Json -Compress`
-      ], { encoding: 'utf8', timeout: 30000 }).trim());
-    } catch (error) { diskError = error.message; }
+    disk = collectDiskBaseline(directory); diskError = disk.error;
   }
   const checks = { windowsX64: process.platform === 'win32' && process.arch === 'x64',
     memory16GiB: os.totalmem() >= 15 * 1024 ** 3 && os.totalmem() <= 17 * 1024 ** 3,
-    localSsd: disk?.DriveType === 'Fixed' && disk?.MediaType === 'SSD',
+    localSsd: disk?.identityProof.status === 'PASS',
     electronLocked: process.versions.electron === '36.9.5', exceljsLocked: require('exceljs/package.json').version === '4.4.0',
     sameVolume: true };
   return { status: Object.values(checks).every(Boolean) ? 'PASS' : 'NOT_RUN', checks, disk, diskError,
@@ -281,7 +277,8 @@ async function main() {
       || !!execFileSync('git', ['ls-files', '--others', '--exclude-standard', '--', 'src', 'assets', 'package.json', 'package-lock.json'], { cwd: root, encoding: 'utf8' }).trim();
     workingTreeStatus = execFileSync('git', ['status', '--short'], { cwd: root, encoding: 'utf8' }).trim();
   } catch (_error) { /* identity remains unverified */ }
-  const scriptSha256 = Object.fromEntries(['verify-review-performance.js', 'performance-fixture.js', 'performance-worker.js'].map((name) =>
+  const scriptSha256 = Object.fromEntries(['verify-review-performance.js', 'performance-fixture.js', 'performance-worker.js',
+    'performance-disk-baseline.js', 'collect-performance-disk.ps1'].map((name) =>
     [name, require('node:crypto').createHash('sha256').update(fs.readFileSync(path.join(__dirname, name))).digest('hex')]));
   const buildIdentity = { productionDirty, workingTreeStatus, scriptSha256 };
   const results = [];

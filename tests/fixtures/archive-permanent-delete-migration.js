@@ -200,9 +200,9 @@ function createTargetIdentityRuntime(isolatedDir, options = {}) {
   repository.ensureSchema();
   const delegate = createArchiveRuntimeDelegate({ repository, rootDir: sourceRoot });
   const manager = createArchiveStorageRootManager({ database, repository, runtimeDelegate: delegate,
-    defaultRoot: sourceRoot, journalPath, blockedRoots: [], faultInjector: options.faultInjector,
+    defaultRoot: sourceRoot, journalPath, blockedRoots: [], faultInjector: options.faultInjector, fsImpl: options.fsImpl,
     showOpenDialog: async () => ({ canceled: false, filePaths: [targetRoot] }),
-    createService: (rootDir) => createArchiveService({ database: db, rootDir }) });
+    createService: (rootDir) => createArchiveService({ database: db, rootDir, fsImpl: options.fsImpl }) });
   const controller = createArchiveCenterController({ database, service: delegate, storageRootManager: manager,
     outboxStore: createArchiveOutboxStore(path.join(isolatedDir, 'outbox')) });
   let closed = false;
@@ -238,7 +238,9 @@ async function verifyMigrationTargetIdentity(parentDirectory, options = {}) {
   let artifact;
   let replacementIdentity;
   let victim;
-  const runtime = createTargetIdentityRuntime(isolatedDir, { faultInjector(event) {
+  // fs 代理仅用于隔离夹具；默认仍使用真实 fs，不改变业务入口。
+  const fsImpl = options.createFs?.(path.join(await fs.promises.realpath(isolatedDir), 'target-root'));
+  let runtime = createTargetIdentityRuntime(isolatedDir, { fsImpl, faultInjector(event) {
     if (event !== 'after-materialize-artifact' || !options.replacement) return;
     const relativePath = options.replacement === 'canonical'
       ? artifact.blob.relativePath : artifact.storageRelativePath;
@@ -281,9 +283,18 @@ async function verifyMigrationTargetIdentity(parentDirectory, options = {}) {
     const migrated = await runtime.manager.changeStorageLocation();
     let deleted;
     let recovered;
+    let reopenedDatabase = false;
     if (!options.replacement) {
       assert.equal(migrated.status, 'success', JSON.stringify(migrated));
       const migratedArtifact = runtime.repository.getArtifact(artifact.id);
+      if (options.reopenBeforeDelete) {
+        await runtime.close();
+        runtime = createTargetIdentityRuntime(isolatedDir, { fsImpl });
+        assert.equal((await runtime.controller.initialize()).ok, true);
+        assert.deepEqual(runtime.repository.getArtifact(artifact.id).storageFingerprint, migratedArtifact.storageFingerprint);
+        reopenedDatabase = true;
+      }
+      if (options.verifyMigrated) options.verifyMigrated(runtime, migratedArtifact);
       const prepared = await runtime.controller.prepareDeleteBatch(batchContext.batchId);
       assert.equal(prepared.ok, true, JSON.stringify(prepared));
       deleted = await runtime.controller.deleteBatch(batchContext.batchId, prepared.confirmationToken);
@@ -328,7 +339,7 @@ async function verifyMigrationTargetIdentity(parentDirectory, options = {}) {
     return { migrated: migrated.status, migrationCode: migrated.code || null,
       fullyDeleted: deleted.fullyDeleted === true, replacement: options.replacement || null,
       replacementPreserved: replacementIdentity ? fs.existsSync(victim) : null,
-      independentRestart: Boolean(recovered), recoveryCode: recovered?.recoveryCode || null };
+      independentRestart: Boolean(recovered), reopenedDatabase, recoveryCode: recovered?.recoveryCode || null };
   } finally {
     await runtime.close();
     fs.rmSync(isolatedDir, { recursive: true, force: true });
