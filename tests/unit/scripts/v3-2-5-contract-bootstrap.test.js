@@ -4,11 +4,12 @@ const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const { resolveChangesPath } = require('../../../scripts/lib/changes-paths');
 const test = require('node:test');
 
 const ROOT = path.resolve(__dirname, '../../..');
-const CHANGE_ROOT = path.join(ROOT, 'changes', '3.2.5');
-const FROZEN_ROOT = path.join(
+const CHANGE_ROOT = resolveChangesPath(ROOT, 'changes', '3.2.5');
+const FROZEN_ROOT = resolveChangesPath(
   ROOT,
   'changes',
   'background-execution-v3.2.x-contract-baseline',
@@ -17,7 +18,7 @@ const FROZEN_ROOT = path.join(
 );
 
 function read(relativePath) {
-  return fs.readFileSync(path.join(ROOT, relativePath));
+  return fs.readFileSync(resolveChangesPath(ROOT, relativePath));
 }
 
 function sha256(bytes) {

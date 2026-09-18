@@ -1,0 +1,73 @@
+[
+  {
+    "name": "job-missing-operation-key",
+    "message": {
+      "protocolVersion": 1,
+      "channel": "job",
+      "direction": "command",
+      "operation": "job:start",
+      "actionKey": "statement:import",
+      "jobId": "job-1",
+      "workerInstanceId": "worker-1",
+      "serviceGeneration": 1,
+      "unitId": null,
+      "seq": 1,
+      "context": {
+        "kind": "operation",
+        "value": {}
+      },
+      "payload": {}
+    }
+  },
+  {
+    "name": "service-control-with-job-fields-at-top",
+    "message": {
+      "protocolVersion": 1,
+      "channel": "service-control",
+      "direction": "command",
+      "operation": "executor:init",
+      "serviceKey": "service.statement",
+      "controlId": "c",
+      "workerInstanceId": "w",
+      "serviceGeneration": 1,
+      "seq": 1,
+      "jobRef": null,
+      "actionKey": "statement:import",
+      "payload": {
+        "contractVersion": 1,
+        "policyDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+        "baseLeaseId": null
+      }
+    }
+  },
+  {
+    "name": "resource-grant-without-grant-identity",
+    "message": {
+      "protocolVersion": 1,
+      "channel": "service-control",
+      "direction": "command",
+      "operation": "resource:grant",
+      "serviceKey": "service.statement",
+      "controlId": "c2",
+      "workerInstanceId": "w",
+      "serviceGeneration": 1,
+      "seq": 2,
+      "jobRef": {
+        "actionKey": "statement:import",
+        "operationKey": "op",
+        "jobId": "job",
+        "unitId": null
+      },
+      "payload": {
+        "requestId": "r",
+        "replacesReservationId": null,
+        "granted": {
+          "memoryBytes": 1,
+          "cpuSlots": 0,
+          "ioHeavySlots": 0
+        },
+        "adoptionDeadlineMs": 1
+      }
+    }
+  }
+]

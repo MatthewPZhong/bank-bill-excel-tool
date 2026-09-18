@@ -1,0 +1,547 @@
+{
+  "reportVersion": 9,
+  "generatedAt": "2026-08-22T10:53:54.947464+00:00",
+  "status": "PASS",
+  "command": "PYTHON_BIN=<python3> changes/background-execution/validation/run-validation.sh",
+  "pythonVersion": "3.14.3",
+  "jsonschemaVersion": "4.26.0",
+  "packageRoot": ".",
+  "checks": [
+    {
+      "name": "schema-meta-validation",
+      "passed": true,
+      "details": {
+        "errors": []
+      }
+    },
+    {
+      "name": "validation-runtime-version",
+      "passed": true,
+      "details": {
+        "expectedJsonschemaVersion": "4.26.0",
+        "actualJsonschemaVersion": "4.26.0",
+        "errors": []
+      }
+    },
+    {
+      "name": "full-policy-registry-schema",
+      "passed": true,
+      "details": {
+        "actionCount": 51,
+        "errors": []
+      }
+    },
+    {
+      "name": "full-policy-registry-semantic",
+      "passed": true,
+      "details": {
+        "errors": []
+      }
+    },
+    {
+      "name": "action-manifest-registry-coverage",
+      "passed": true,
+      "details": {
+        "errors": []
+      }
+    },
+    {
+      "name": "protocol-valid-fixtures",
+      "passed": true,
+      "details": {
+        "messageCount": 9,
+        "errors": []
+      }
+    },
+    {
+      "name": "recovery-source-valid-fixtures",
+      "passed": true,
+      "details": {
+        "sourceCount": 5,
+        "errors": []
+      }
+    },
+    {
+      "name": "recovery-source-invalid-fixtures-rejected",
+      "passed": true,
+      "details": {
+        "fixtures": [
+          {
+            "fixture": "critical-intent-missing-intent-id",
+            "rejected": true,
+            "schemaErrors": 1
+          },
+          {
+            "fixture": "publisher-journal-with-intent-id",
+            "rejected": true,
+            "schemaErrors": 1
+          },
+          {
+            "fixture": "target-post-image-missing-settlement-key",
+            "rejected": true,
+            "schemaErrors": 1
+          },
+          {
+            "fixture": "manual-is-not-recovery-source",
+            "rejected": true,
+            "schemaErrors": 1
+          },
+          {
+            "fixture": "legacy-receipt-hint-field",
+            "rejected": true,
+            "schemaErrors": 1
+          },
+          {
+            "fixture": "legacy-safe-evidence-field",
+            "rejected": true,
+            "schemaErrors": 1
+          },
+          {
+            "fixture": "embedded-intent-field",
+            "rejected": true,
+            "schemaErrors": 1
+          }
+        ],
+        "errors": []
+      }
+    },
+    {
+      "name": "protocol-resource-lifecycle-continuity",
+      "passed": true,
+      "details": {
+        "sequenceCount": 1,
+        "errors": []
+      }
+    },
+    {
+      "name": "cross-document-recovery-contract",
+      "passed": true,
+      "details": {
+        "errors": []
+      }
+    },
+    {
+      "name": "codex-input-contract-drift",
+      "passed": true,
+      "details": {
+        "protocolSummaryVersion": 1,
+        "jobRequiredFieldCount": 13,
+        "jobOperationCount": 15,
+        "serviceRequiredFieldCount": 11,
+        "serviceOperationCount": 13,
+        "jobRefRequiredFieldCount": 4,
+        "rendererStatusCount": 9,
+        "atomicityDocumentCount": 4,
+        "atomicRepositoryApi": "runInControlTransaction / RecoveryControlTransactionV1",
+        "errors": []
+      }
+    },
+    {
+      "name": "recovery-control-transaction-contract-drift",
+      "passed": true,
+      "details": {
+        "transactionDocumentCount": 4,
+        "criticalStateDocumentCount": 5,
+        "observationEventTypes": [
+          "inspection-completed",
+          "inspection-failed-transient",
+          "settlement-failed-transient",
+          "settlement-resumed"
+        ],
+        "taskRecoveryCommands": [
+          "begin-recovery",
+          "complete-recovery-failure",
+          "complete-recovery-success",
+          "interrupt-recovery",
+          "mark-interrupted"
+        ],
+        "batchRecoveryCommands": [
+          "begin-recovery",
+          "mark-interrupted",
+          "resolve-failure",
+          "resolve-success"
+        ],
+        "transitionEventMappingCount": 16,
+        "lifecycleRecoveryEventTypes": [
+          "batch-overlay-transitioned",
+          "critical-intent-transitioned",
+          "hold-created",
+          "hold-resolved",
+          "inspection-completed",
+          "inspection-failed-transient",
+          "interrupted-recorded",
+          "recovery-failed",
+          "recovery-interrupted",
+          "recovery-started",
+          "recovery-succeeded",
+          "settlement-failed-transient",
+          "settlement-resumed"
+        ],
+        "negativeSelfTests": [
+          {
+            "name": "missing-outer-transaction-entry",
+            "rejected": true
+          },
+          {
+            "name": "top-level-state-writer",
+            "rejected": true
+          },
+          {
+            "name": "missing-observation-writer",
+            "rejected": true
+          },
+          {
+            "name": "broadened-observation-enum",
+            "rejected": true
+          },
+          {
+            "name": "committed-to-recovered",
+            "rejected": true
+          },
+          {
+            "name": "normal-task-command-in-recovery-union",
+            "rejected": true
+          },
+          {
+            "name": "observation-state-check-removed",
+            "rejected": true
+          },
+          {
+            "name": "transition-event-map-drift",
+            "rejected": true
+          },
+          {
+            "name": "audit-lineage-column-removed",
+            "rejected": true
+          },
+          {
+            "name": "manual-observation-source-enabled",
+            "rejected": true
+          }
+        ],
+        "errors": []
+      }
+    },
+    {
+      "name": "negative-fixtures-rejected",
+      "passed": true,
+      "details": {
+        "fixtures": [
+          {
+            "fixture": "policy-action-key-mismatch.json",
+            "rejected": true,
+            "schemaErrors": 0,
+            "semanticErrors": 1
+          },
+          {
+            "fixture": "policy-artifact-without-publisher.json",
+            "rejected": true,
+            "schemaErrors": 1,
+            "semanticErrors": 1
+          },
+          {
+            "fixture": "policy-missing-static-reference.json",
+            "rejected": true,
+            "schemaErrors": 0,
+            "semanticErrors": 1
+          },
+          {
+            "fixture": "policy-publisher-journal-with-critical-intent.json",
+            "rejected": true,
+            "schemaErrors": 2,
+            "semanticErrors": 1
+          },
+          {
+            "fixture": "policy-publisher-journal-with-intent.json",
+            "rejected": true,
+            "schemaErrors": 3,
+            "semanticErrors": 1
+          },
+          {
+            "fixture": "policy-service-without-resource-control.json",
+            "rejected": true,
+            "schemaErrors": 3,
+            "semanticErrors": 2
+          },
+          {
+            "fixture": "policy-target-post-image-without-intent.json",
+            "rejected": true,
+            "schemaErrors": 3,
+            "semanticErrors": 1
+          },
+          {
+            "fixture": "policy-target-post-image-without-main-intent.json",
+            "rejected": true,
+            "schemaErrors": 2,
+            "semanticErrors": 1
+          },
+          {
+            "fixture": "policy-worker-durable-without-recovery.json",
+            "rejected": true,
+            "schemaErrors": 2,
+            "semanticErrors": 2
+          },
+          {
+            "fixture": "job-missing-operation-key",
+            "rejected": true,
+            "schemaErrors": 1
+          },
+          {
+            "fixture": "service-control-with-job-fields-at-top",
+            "rejected": true,
+            "schemaErrors": 1
+          },
+          {
+            "fixture": "resource-grant-without-grant-identity",
+            "rejected": true,
+            "schemaErrors": 1
+          },
+          {
+            "fixture": "grant-request-id-mismatch",
+            "rejected": true,
+            "schemaErrors": 0,
+            "sequenceErrors": 4
+          },
+          {
+            "fixture": "grant-jobref-mismatch",
+            "rejected": true,
+            "schemaErrors": 0,
+            "sequenceErrors": 1
+          },
+          {
+            "fixture": "adopted-grant-id-mismatch",
+            "rejected": true,
+            "schemaErrors": 0,
+            "sequenceErrors": 2
+          },
+          {
+            "fixture": "adopt-ack-before-adopted",
+            "rejected": true,
+            "schemaErrors": 0,
+            "sequenceErrors": 3
+          },
+          {
+            "fixture": "release-unknown-reservation",
+            "rejected": true,
+            "schemaErrors": 0,
+            "sequenceErrors": 5
+          },
+          {
+            "fixture": "release-before-adopt-ack",
+            "rejected": true,
+            "schemaErrors": 0,
+            "sequenceErrors": 1
+          },
+          {
+            "fixture": "service-generation-changed",
+            "rejected": true,
+            "schemaErrors": 0,
+            "sequenceErrors": 1
+          },
+          {
+            "fixture": "worker-instance-changed",
+            "rejected": true,
+            "schemaErrors": 0,
+            "sequenceErrors": 1
+          }
+        ],
+        "errors": []
+      }
+    },
+    {
+      "name": "version-action-table-canonical-values",
+      "passed": true,
+      "details": {
+        "rowCount": 58,
+        "errors": []
+      }
+    },
+    {
+      "name": "version-action-table-registry-alignment",
+      "passed": true,
+      "details": {
+        "comparedFieldCount": 287,
+        "errors": []
+      }
+    },
+    {
+      "name": "document-contract-paths",
+      "passed": true,
+      "details": {
+        "referenceCount": 81,
+        "errors": []
+      }
+    },
+    {
+      "name": "service-main-governor-boundary",
+      "passed": true,
+      "details": {
+        "errors": []
+      }
+    },
+    {
+      "name": "required-baseline-files",
+      "passed": true,
+      "details": {
+        "errors": []
+      }
+    },
+    {
+      "name": "package-hygiene",
+      "passed": true,
+      "details": {
+        "errors": []
+      }
+    },
+    {
+      "name": "normative-text-invariants",
+      "passed": true,
+      "details": {
+        "errors": []
+      }
+    },
+    {
+      "name": "validation-input-hash-coverage",
+      "passed": true,
+      "details": {
+        "inputCount": 58,
+        "errors": []
+      }
+    }
+  ],
+  "summary": {
+    "checkCount": 21,
+    "passed": 21,
+    "failed": 0,
+    "errorCount": 0,
+    "actionPolicyCount": 51,
+    "validProtocolMessageCount": 9,
+    "validProtocolSequenceCount": 1,
+    "actionTableRowCount": 58,
+    "documentContractReferenceCount": 81,
+    "validRecoverySourceCount": 5,
+    "hashedInputFileCount": 58,
+    "validationReadInputCount": 58
+  },
+  "validationReadInputs": [
+    "CODEX-SPEC.md",
+    "CODEX-TECHDOC.md",
+    "E00-F-migration-matrix.md",
+    "P0-codex-entry-contract-final-closure-report.md",
+    "P0-final-recovery-contract-closure-report.md",
+    "P0-recovery-audit-atomicity-final-closure-report.md",
+    "P0-recovery-control-transaction-observation-final-closure-report.md",
+    "P0-recovery-source-contract-final-alignment-report.md",
+    "P0-targeted-closure-report.md",
+    "README.md",
+    "changes/3.2.0/spec.md",
+    "changes/3.2.0/techdoc.md",
+    "changes/3.2.1/spec.md",
+    "changes/3.2.1/techdoc.md",
+    "changes/3.2.2/spec.md",
+    "changes/3.2.2/techdoc.md",
+    "changes/3.2.3/spec.md",
+    "changes/3.2.3/techdoc.md",
+    "changes/3.2.4/spec.md",
+    "changes/3.2.4/techdoc.md",
+    "changes/3.2.5/spec.md",
+    "changes/3.2.5/techdoc.md",
+    "changes/background-execution/E00-platform-contract-v1-spec.md",
+    "changes/background-execution/E00-platform-contract-v1-techdoc.md",
+    "changes/background-execution/README.md",
+    "changes/background-execution/platform-contract-v1.md",
+    "changes/background-execution/platform-contract-v1.schema.json",
+    "changes/background-execution/platform-lifecycle-mapping.md",
+    "changes/background-execution/platform-protocol-v1.schema.json",
+    "changes/background-execution/platform-recovery-source-v1.schema.json",
+    "changes/background-execution/v3.2.x-version-split-plan.md",
+    "changes/background-execution/validation/README.md",
+    "changes/background-execution/validation/fixtures/invalid/policy-action-key-mismatch.json",
+    "changes/background-execution/validation/fixtures/invalid/policy-artifact-without-publisher.json",
+    "changes/background-execution/validation/fixtures/invalid/policy-missing-static-reference.json",
+    "changes/background-execution/validation/fixtures/invalid/policy-publisher-journal-with-critical-intent.json",
+    "changes/background-execution/validation/fixtures/invalid/policy-publisher-journal-with-intent.json",
+    "changes/background-execution/validation/fixtures/invalid/policy-service-without-resource-control.json",
+    "changes/background-execution/validation/fixtures/invalid/policy-target-post-image-without-intent.json",
+    "changes/background-execution/validation/fixtures/invalid/policy-target-post-image-without-main-intent.json",
+    "changes/background-execution/validation/fixtures/invalid/policy-worker-durable-without-recovery.json",
+    "changes/background-execution/validation/fixtures/invalid/protocol-messages.invalid.v1.json",
+    "changes/background-execution/validation/fixtures/invalid/protocol-sequences.invalid.v1.json",
+    "changes/background-execution/validation/fixtures/invalid/recovery-sources.invalid.v1.json",
+    "changes/background-execution/validation/fixtures/valid/action-manifest.v3.2.x.json",
+    "changes/background-execution/validation/fixtures/valid/policy-registry.v3.2.x.json",
+    "changes/background-execution/validation/fixtures/valid/protocol-messages.v1.json",
+    "changes/background-execution/validation/fixtures/valid/protocol-sequences.v1.json",
+    "changes/background-execution/validation/fixtures/valid/recovery-sources.v1.json",
+    "changes/background-execution/validation/fixtures/valid/static-key-manifest.v3.2.x.json",
+    "changes/background-execution/validation/requirements-validation.txt",
+    "changes/background-execution/validation/run-validation.sh",
+    "changes/background-execution/validation/validate_background_execution_baseline.py",
+    "codex-ready-revision-manifest.json",
+    "final-recovery-contract-revision-manifest.json",
+    "implementation-notes.md",
+    "implementation-sequence.md",
+    "targeted-revision-manifest.json"
+  ],
+  "inputHashes": {
+    "CODEX-SPEC.md": "52899fd2207f4dbfae447795636eb11a6bf8e2c8f15fff387c4e1af06bd32fb6",
+    "CODEX-TECHDOC.md": "9b2dea4da992e9216b3e23e3cbe713b8dbf6711dacc27b6885c171eaba0a95a1",
+    "E00-F-migration-matrix.md": "271777b3072be15bc48f0f8151a19e6f6e879fa0d98e2f57930d86d37b537731",
+    "P0-codex-entry-contract-final-closure-report.md": "a09fc81a2f99773af9018ab64059b3728496477d227185232439256173a18949",
+    "P0-final-recovery-contract-closure-report.md": "7aa2a27a69f3805ecbd3004e44dc401eb3ab1dfca52741e961c31106b587f676",
+    "P0-recovery-audit-atomicity-final-closure-report.md": "4fb69f08de8034a5a21d3cf857b03b692084e26ed03b934e2684ade157524222",
+    "P0-recovery-control-transaction-observation-final-closure-report.md": "d37082c2e399e5565d51fdffd197f0d365861f10c3685db7d13fe7ead3327b83",
+    "P0-recovery-source-contract-final-alignment-report.md": "22f7d8d28a5878a9dc022b74fcbb0b839931265afe6c80a27e293f0fcbc24ce4",
+    "P0-targeted-closure-report.md": "dd3692e83257847cb519029939ee756bcb48b17db19b23d0bfa2856454ae9857",
+    "README.md": "2baea9ba817817192ffe790e88331150ad5661503d9623056efa3d4a1c1a4d7f",
+    "changes/3.2.0/spec.md": "1b7df052a131decc2384fab0f852d8e0ce02db42894f26038b41aa5f2d3baee7",
+    "changes/3.2.0/techdoc.md": "6e5beade40ab3f6c8742c7d5d60f22b39fc2a8a2a5760f037415bf44f03b08f5",
+    "changes/3.2.1/spec.md": "79aa57ad49904c395bb7669354336d81500ff31fa3c1daf2f459ced3ac505151",
+    "changes/3.2.1/techdoc.md": "613b40fd1b4a202af07d0629fcc400e5ac47c0bd141b16062d55ec0dd1139147",
+    "changes/3.2.2/spec.md": "0cdf28e5310733355fb51d92818dde8fd837ee06b521a4694c0c9cc43300d47f",
+    "changes/3.2.2/techdoc.md": "9fd15a46b482e6801616554978dff67a02676b437b9759e18d15fce29dcff209",
+    "changes/3.2.3/spec.md": "7b7909db9244d372b3de2ead13d3e732c210513c202e1e8c60e658091382544b",
+    "changes/3.2.3/techdoc.md": "f4268c69c1550728b7b569118e79d5901b5c9856cd6bee2ef3c75560629d398d",
+    "changes/3.2.4/spec.md": "dad81f149405281043306f7ce735f672fa20a167b4d8de751d5b254318fac2c7",
+    "changes/3.2.4/techdoc.md": "0933775b673c0023e1c273be692dbaa3e3b1aa3fab3c77192ed06be430a55829",
+    "changes/3.2.5/spec.md": "13410e4e5cf64798255cab30dd2487d4da4323eddf59d44cf2a0653e950898f2",
+    "changes/3.2.5/techdoc.md": "3fb1845979823f2c39a8e26d9d5adc5d7f3e351fda90d2f4086d6c355d17e64f",
+    "changes/background-execution/E00-platform-contract-v1-spec.md": "d89f8e2809019ddda5a76ead7ee34b8bc385d0addcb13a7c27f3369a916915cf",
+    "changes/background-execution/E00-platform-contract-v1-techdoc.md": "b9fb8a8eaf78d8c3b18eed902f186cb2c0e793d72149669dfda5f6f0c99e8530",
+    "changes/background-execution/README.md": "44a1a1cecd0e7d65c0f68ed512263e4f53a96fa66cb38c2e80845741975a0124",
+    "changes/background-execution/platform-contract-v1.md": "e635875f6a589f0918bbd651423d8d3288563d998bdbe110ba794e8a0dfff3a9",
+    "changes/background-execution/platform-contract-v1.schema.json": "affa8e7b9299ef836b1ba257255c4e404a7d11ef5c1ce3f61a12be550e75aed8",
+    "changes/background-execution/platform-lifecycle-mapping.md": "7b5f3c9ab019e390919ec76dba706b656232cfa0813d146876a9ca9eddbacb55",
+    "changes/background-execution/platform-protocol-v1.schema.json": "52b57c0faafd983595d0c35dd178636c4213ffd69848e8302d3a5ce921afe856",
+    "changes/background-execution/platform-recovery-source-v1.schema.json": "2ba68254d83cfe9736d0757c8dafa4f69cf37d1890f6952879a4bf93bfea774b",
+    "changes/background-execution/v3.2.x-version-split-plan.md": "27bbdde9beca98a6abbdc9902016e319c98e52775b46c3727014d628ba6f174a",
+    "changes/background-execution/validation/README.md": "c0f94c3109785ea4b9bbf70bdb39c7df6d4e6c25f3b25f435cd6bec37eddc1dc",
+    "changes/background-execution/validation/fixtures/invalid/policy-action-key-mismatch.json": "7892e5a2ef01c635abf111d9121a52c68292baf786e63df4f8717331729089ed",
+    "changes/background-execution/validation/fixtures/invalid/policy-artifact-without-publisher.json": "5d1135931169f7665d47f1b95f6f5617f6fe4a4fea91f3197785aefcea3b6b14",
+    "changes/background-execution/validation/fixtures/invalid/policy-missing-static-reference.json": "2a09177b436d476667545120c37cf051bb575e343de67b22a9bd006f6d8cfaf6",
+    "changes/background-execution/validation/fixtures/invalid/policy-publisher-journal-with-critical-intent.json": "3fc17323526c4c98a09a91bc08b76b96d07a2f03532abc577084b25c381da5d0",
+    "changes/background-execution/validation/fixtures/invalid/policy-publisher-journal-with-intent.json": "867b41f220452e3dd77ff81e4f602c03abab436ed188268b547fba90c0cacb3a",
+    "changes/background-execution/validation/fixtures/invalid/policy-service-without-resource-control.json": "b28aa45b64a99f068d9ba8ed0921956a085e6f8916bd8766a6783b23d87f1e97",
+    "changes/background-execution/validation/fixtures/invalid/policy-target-post-image-without-intent.json": "e34491ed97e78f9bf8f68167abaadb15292a40ab408c0ebc0341bf9843612c58",
+    "changes/background-execution/validation/fixtures/invalid/policy-target-post-image-without-main-intent.json": "1d6a716dac745c0e9b9455f3c91641db9011be15edd432dfa16b1895bf6ae183",
+    "changes/background-execution/validation/fixtures/invalid/policy-worker-durable-without-recovery.json": "4b5871987c260d57d5867a2a27549e9c537052cb0a87768f78b79f5cc0f705fa",
+    "changes/background-execution/validation/fixtures/invalid/protocol-messages.invalid.v1.json": "e44cf89208a2a333ed4da25bb371ffcae5577bd478bc7dc4723d02a2759c42fe",
+    "changes/background-execution/validation/fixtures/invalid/protocol-sequences.invalid.v1.json": "b60e56a6865f21bd0290c7cafc39cd244607b0c98fd9e67bae54b02b234df605",
+    "changes/background-execution/validation/fixtures/invalid/recovery-sources.invalid.v1.json": "e90cf102c3a7b59aec8b5f52cc83f571804723351571528754ee489e0e0501b7",
+    "changes/background-execution/validation/fixtures/valid/action-manifest.v3.2.x.json": "766bc5d5fc0796ae608ef1b6cb7d6b6d0127a23a566e48f672e6d650dcf6ca8e",
+    "changes/background-execution/validation/fixtures/valid/policy-registry.v3.2.x.json": "f79c0cc3045b48b1bd3c13a585f4ecb92203a728da9b4c6f4e23b424c922d17d",
+    "changes/background-execution/validation/fixtures/valid/protocol-messages.v1.json": "8a5c4dd5e116a26967f71fa0991947353b844cd64fa011d86bf1af02393d82ba",
+    "changes/background-execution/validation/fixtures/valid/protocol-sequences.v1.json": "0cc4d991258e197a5000d86f44c3ed03287784973b61d500a8cab7d5ec2feaf7",
+    "changes/background-execution/validation/fixtures/valid/recovery-sources.v1.json": "9d27ef3f94e049c5a4602da86bb336a69e875899383b43700fde87ab48cd504b",
+    "changes/background-execution/validation/fixtures/valid/static-key-manifest.v3.2.x.json": "214c099e16385dda3a6239c2e1087d84a952995d7754f0ca71152f2083772714",
+    "changes/background-execution/validation/requirements-validation.txt": "756cc9e506ae4ee1a6f6c0507088b5cfc0dc8ba350fb2d2d46f1ffa72033adb6",
+    "changes/background-execution/validation/run-validation.sh": "86c83695d72b888845b70d4e5662bbf4827b91ddce540b1c640826028508abcc",
+    "changes/background-execution/validation/validate_background_execution_baseline.py": "8fe66911bfb8462be605269b68000b782fa1e25e8970d60e70ed0b290cb2b61b",
+    "codex-ready-revision-manifest.json": "500d49eb08120c7c95fed9bbb89704fdf9fb7c2afcf5f92f8caa02b8e9c0fdf8",
+    "final-recovery-contract-revision-manifest.json": "b6cce4eabbdad93565505bcbe5b9ccb09223729f869a814572ab60375f5ac260",
+    "implementation-notes.md": "6693b1f9c73919f8480469a91478f3fae6ac791948eab42a8d659485a2639501",
+    "implementation-sequence.md": "a3aee173d0597fa0a84af87034f571992dbe89ca75401b73aabf0cd49cf5d4fd",
+    "targeted-revision-manifest.json": "03eafdb7d5b2bd672d7d8b4d0cea1f2ee0a130e3d70d870de09dbf50176c1f6d"
+  },
+  "errors": []
+}

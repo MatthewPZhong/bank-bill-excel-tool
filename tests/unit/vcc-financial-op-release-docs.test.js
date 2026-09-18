@@ -4,11 +4,12 @@ const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const { resolveChangesPath } = require('../../scripts/lib/changes-paths');
 const test = require('node:test');
 
 const ROOT = path.resolve(__dirname, '../..');
-const read = (relativePath) => fs.readFileSync(path.join(ROOT, relativePath), 'utf8');
-const readBuffer = (relativePath) => fs.readFileSync(path.join(ROOT, relativePath));
+const read = (relativePath) => fs.readFileSync(resolveChangesPath(ROOT, relativePath), 'utf8');
+const readBuffer = (relativePath) => fs.readFileSync(resolveChangesPath(ROOT, relativePath));
 const FROZEN_SPEC_SHA256 = '1f5f0663ee35436c8b1f7da628822a4f83a3f70db215cd5ebd60a6720bae367d';
 
 function normalizeLineEndingsForHash(value) {

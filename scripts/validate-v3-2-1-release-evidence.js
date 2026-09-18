@@ -3,6 +3,7 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const { resolveChangesPath } = require('./lib/changes-paths');
 const { isDeepStrictEqual } = require('node:util');
 
 const {
@@ -13,7 +14,7 @@ const {
 } = require('../src/main-process/pre-fund-reconciliation/mpt-import/policies');
 
 const REPOSITORY_ROOT = path.resolve(__dirname, '..');
-const SNAPSHOT_PATH = path.join(
+const SNAPSHOT_PATH = resolveChangesPath(
   REPOSITORY_ROOT,
   'changes/background-execution-r3-2-1-release-evidence/release-evidence.json'
 );
@@ -522,7 +523,7 @@ function validateReleaseEvidence(snapshot, options = {}) {
   });
   expectEqual('/releaseCheckEvidence', snapshot.releaseCheckEvidence, EXPECTED_RELEASE_CHECK);
 
-  const windowsWorkflowPath = path.join(repositoryRoot, WINDOWS_BUILD_WORKFLOW_SOURCE);
+  const windowsWorkflowPath = resolveChangesPath(repositoryRoot, WINDOWS_BUILD_WORKFLOW_SOURCE);
   if (!fs.existsSync(windowsWorkflowPath)) {
     add('/authority/windowsWorkflow', 'Windows build workflow is missing');
   } else {
@@ -626,7 +627,7 @@ function validateReleaseEvidence(snapshot, options = {}) {
         add(`/evidenceCatalog/${index}/source`, 'evidence source must stay repository-relative');
         continue;
       }
-      const sourcePath = path.join(repositoryRoot, evidence.source);
+      const sourcePath = resolveChangesPath(repositoryRoot, evidence.source);
       if (!fs.existsSync(sourcePath)) {
         add(`/evidenceCatalog/${index}/source`, 'evidence source is missing');
       } else if (sha256File(sourcePath) !== evidence.sha256) {
@@ -635,7 +636,7 @@ function validateReleaseEvidence(snapshot, options = {}) {
     }
   }
 
-  const canonical = parseJsonFile(path.join(repositoryRoot, CANONICAL_POLICY_SOURCE));
+  const canonical = parseJsonFile(resolveChangesPath(repositoryRoot, CANONICAL_POLICY_SOURCE));
   const nativePolicies = new Map([...TOOLBOX_GENERATION_POLICIES, ...PRE_FUND_MPT_POLICIES]
     .map((policy) => [policy.actionKey, policy]));
   const expectedActionKeys = Object.keys(EXPECTED_ACTION_RELEASE);
@@ -695,7 +696,7 @@ function validateReleaseEvidence(snapshot, options = {}) {
   expectEqual('/authority/pre-fund:mpt-repair-import/childrenMax',
     repairPolicy && repairPolicy.resources.compound.childrenMax, 1);
 
-  const e04Notes = fs.readFileSync(path.join(repositoryRoot, E04_NOTES_SOURCE), 'utf8');
+  const e04Notes = fs.readFileSync(resolveChangesPath(repositoryRoot, E04_NOTES_SOURCE), 'utf8');
   for (const evidenceText of ['21.096%', '8.581%', '31.682%', '105.931%', '11.706×',
     EXPECTED_E04C.externalRawEvidenceSha256, 'productionImplementationAuthorized=false']) {
     if (!e04Notes.includes(evidenceText)) {
@@ -703,7 +704,7 @@ function validateReleaseEvidence(snapshot, options = {}) {
     }
   }
 
-  const benchmark = parseJsonFile(path.join(repositoryRoot, E05_BENCHMARK_SOURCE));
+  const benchmark = parseJsonFile(resolveChangesPath(repositoryRoot, E05_BENCHMARK_SOURCE));
   expectEqual('/benchmark/gate/productionEligible', benchmark.gate.productionEligible, false);
   expectEqual('/benchmark/gate/conclusion', benchmark.gate.conclusion, EXPECTED_E05C.conclusion);
   expectEqual('/benchmark/representative/improvementPercent',

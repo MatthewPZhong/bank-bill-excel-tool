@@ -1,0 +1,138 @@
+[
+  {
+    "name": "critical-intent-missing-intent-id",
+    "source": {
+      "contractVersion": 1,
+      "sourceRef": "critical-intent:fixture",
+      "actionKey": "background-execution:canary",
+      "operationKey": "task-001/background-execution:canary/1",
+      "taskRunId": "task-001",
+      "conflictScopeKey": "scope:background-execution:canary",
+      "inspectorKey": "inspector.background-execution:canary",
+      "evidenceVersion": 1,
+      "boundedEvidence": {
+        "marker": "fixture"
+      },
+      "sourceKind": "critical-intent",
+      "intentId": null,
+      "settlementKey": null
+    }
+  },
+  {
+    "name": "publisher-journal-with-intent-id",
+    "source": {
+      "contractVersion": 1,
+      "sourceRef": "publisher-journal:fixture",
+      "actionKey": "background-execution:canary",
+      "operationKey": "task-001/background-execution:canary/1",
+      "taskRunId": "task-001",
+      "conflictScopeKey": "scope:background-execution:canary",
+      "inspectorKey": "inspector.background-execution:canary",
+      "evidenceVersion": 1,
+      "boundedEvidence": {
+        "marker": "fixture"
+      },
+      "sourceKind": "publisher-journal",
+      "intentId": "intent-forbidden",
+      "settlementKey": "settlement.background-execution:canary"
+    }
+  },
+  {
+    "name": "target-post-image-missing-settlement-key",
+    "source": {
+      "contractVersion": 1,
+      "sourceRef": "target-post-image:fixture",
+      "actionKey": "background-execution:canary",
+      "operationKey": "task-001/background-execution:canary/1",
+      "taskRunId": "task-001",
+      "conflictScopeKey": "scope:background-execution:canary",
+      "inspectorKey": "inspector.background-execution:canary",
+      "evidenceVersion": 1,
+      "boundedEvidence": {
+        "marker": "fixture"
+      },
+      "sourceKind": "target-post-image",
+      "intentId": "intent-002",
+      "settlementKey": null
+    }
+  },
+  {
+    "name": "manual-is-not-recovery-source",
+    "source": {
+      "contractVersion": 1,
+      "sourceRef": "existing-protocol:fixture",
+      "actionKey": "background-execution:canary",
+      "operationKey": "task-001/background-execution:canary/1",
+      "taskRunId": "task-001",
+      "conflictScopeKey": "scope:background-execution:canary",
+      "inspectorKey": "inspector.background-execution:canary",
+      "evidenceVersion": 1,
+      "boundedEvidence": {
+        "marker": "fixture"
+      },
+      "sourceKind": "manual",
+      "intentId": null,
+      "settlementKey": "settlement.background-execution:canary"
+    }
+  },
+  {
+    "name": "legacy-receipt-hint-field",
+    "source": {
+      "contractVersion": 1,
+      "sourceRef": "module-recovery:fixture",
+      "actionKey": "background-execution:canary",
+      "operationKey": "task-001/background-execution:canary/1",
+      "taskRunId": "task-001",
+      "conflictScopeKey": "scope:background-execution:canary",
+      "inspectorKey": "inspector.background-execution:canary",
+      "evidenceVersion": 1,
+      "boundedEvidence": {
+        "marker": "fixture"
+      },
+      "sourceKind": "module-recovery",
+      "intentId": null,
+      "settlementKey": "settlement.background-execution:canary",
+      "receiptHint": {}
+    }
+  },
+  {
+    "name": "legacy-safe-evidence-field",
+    "source": {
+      "contractVersion": 1,
+      "sourceRef": "module-recovery:fixture",
+      "actionKey": "background-execution:canary",
+      "operationKey": "task-001/background-execution:canary/1",
+      "taskRunId": "task-001",
+      "conflictScopeKey": "scope:background-execution:canary",
+      "inspectorKey": "inspector.background-execution:canary",
+      "evidenceVersion": 1,
+      "boundedEvidence": {
+        "marker": "fixture"
+      },
+      "sourceKind": "module-recovery",
+      "intentId": null,
+      "settlementKey": "settlement.background-execution:canary",
+      "safeEvidence": {}
+    }
+  },
+  {
+    "name": "embedded-intent-field",
+    "source": {
+      "contractVersion": 1,
+      "sourceRef": "module-recovery:fixture",
+      "actionKey": "background-execution:canary",
+      "operationKey": "task-001/background-execution:canary/1",
+      "taskRunId": "task-001",
+      "conflictScopeKey": "scope:background-execution:canary",
+      "inspectorKey": "inspector.background-execution:canary",
+      "evidenceVersion": 1,
+      "boundedEvidence": {
+        "marker": "fixture"
+      },
+      "sourceKind": "module-recovery",
+      "intentId": null,
+      "settlementKey": "settlement.background-execution:canary",
+      "intent": {}
+    }
+  }
+]

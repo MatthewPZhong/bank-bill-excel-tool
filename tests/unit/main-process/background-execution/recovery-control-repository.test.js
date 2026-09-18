@@ -48,7 +48,7 @@ const {
 const ROOT = path.resolve(__dirname, '../../../..');
 const CONTRACT_DIR = path.join(
   ROOT,
-  'changes/background-execution-v3.2.x-contract-baseline/changes/background-execution'
+  'changes/v3.2.0~v3.2.5/background-execution-v3.2.x-contract-baseline/changes/background-execution'
 );
 const FIXTURE = require(path.join(
   CONTRACT_DIR,

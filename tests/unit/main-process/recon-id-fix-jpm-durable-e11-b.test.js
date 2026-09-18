@@ -858,7 +858,7 @@ function assertHeldDefinitiveRecoveryState(
 
 test('JPM canonical policy保持production false，runtime固定single unit且禁止caller override', async () => {
   assert.equal(isBackgroundExecutionProductionEnabled(RECON_FIX_RUN_JPM_ACTION), false);
-  const fixture = require('../../../changes/background-execution-v3.2.x-contract-baseline/changes/background-execution/validation/fixtures/valid/policy-registry.v3.2.x.json').actions;
+  const fixture = require('../../../changes/v3.2.0~v3.2.5/background-execution-v3.2.x-contract-baseline/changes/background-execution/validation/fixtures/valid/policy-registry.v3.2.x.json').actions;
   assert.deepEqual(RECON_FIX_JPM_POLICY, fixture[RECON_FIX_RUN_JPM_ACTION]);
   const jpmResult = {
     resultKind: 'noop',

@@ -3,6 +3,7 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const { resolveChangesPath } = require('./lib/changes-paths');
 const { spawnSync } = require('node:child_process');
 const { isDeepStrictEqual } = require('node:util');
 
@@ -13,7 +14,7 @@ const EXPECTED_MAIN_REF_OID = 'b7abc2fa00838fc61a94f812c1a14c48d5d4d40f';
 const EXPECTED_TAG_REF_COUNT = 25;
 const EXPECTED_TAG_REFS_SHA256 =
   '94a09eb7ecd816876a3b2a53c09bd689fcd76d76b56d6c9d3ea83a28e7a8983f';
-const SNAPSHOT_PATH = path.join(
+const SNAPSHOT_PATH = resolveChangesPath(
   REPOSITORY_ROOT,
   'changes/background-execution-r3-2-4-release-evidence/release-evidence.json'
 );
@@ -1077,7 +1078,7 @@ function validateReleaseEvidenceWithGuard(snapshot, gitGuard, options = null) {
     const inspected = inspectGitBackedFile(EXACT_BASE, authority.source);
     if (inspected.error || inspected.blobOid !== authority.blobOid ||
         inspected.sha256 !== authority.sha256 ||
-        sha256File(path.join(REPOSITORY_ROOT, authority.source)) !== authority.sha256) {
+        sha256File(resolveChangesPath(REPOSITORY_ROOT, authority.source)) !== authority.sha256) {
       pushError(errors, '/authority/sourceAnchors/' + index, 'AUTHORITY_SOURCE_DRIFT');
     }
   }
@@ -1101,11 +1102,11 @@ function validateReleaseEvidenceWithGuard(snapshot, gitGuard, options = null) {
     }
   }
 
-  const fixture = JSON.parse(fs.readFileSync(path.join(REPOSITORY_ROOT, POLICY_FIXTURE_SOURCE), 'utf8'));
+  const fixture = JSON.parse(fs.readFileSync(resolveChangesPath(REPOSITORY_ROOT, POLICY_FIXTURE_SOURCE), 'utf8'));
   let versionedPolicyAuthority = null;
   try {
     versionedPolicyAuthority = parseStrictJson(fs.readFileSync(
-      path.join(REPOSITORY_ROOT, VERSIONED_POLICY_AUTHORITY_SOURCE),
+      resolveChangesPath(REPOSITORY_ROOT, VERSIONED_POLICY_AUTHORITY_SOURCE),
       'utf8'
     ));
   } catch {
@@ -1115,7 +1116,7 @@ function validateReleaseEvidenceWithGuard(snapshot, gitGuard, options = null) {
   if (versionedPolicyEvidence.error ||
       versionedPolicyEvidence.blobOid !== VERSIONED_POLICY_AUTHORITY.blobOid ||
       versionedPolicyEvidence.sha256 !== VERSIONED_POLICY_AUTHORITY.sha256 ||
-      sha256File(path.join(REPOSITORY_ROOT, VERSIONED_POLICY_AUTHORITY_SOURCE)) !==
+      sha256File(resolveChangesPath(REPOSITORY_ROOT, VERSIONED_POLICY_AUTHORITY_SOURCE)) !==
         VERSIONED_POLICY_AUTHORITY.sha256) {
     pushError(errors, '/authority/versionedPolicy/source', 'VERSIONED_POLICY_AUTHORITY_DRIFT');
   }

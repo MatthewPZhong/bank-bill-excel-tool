@@ -53,6 +53,7 @@ const ROOT = path.join(__dirname, '..', '..', '..');
 const POLICY_FIXTURE = path.join(
   ROOT,
   'changes',
+  'v3.2.0~v3.2.5',
   'background-execution-v3.2.x-contract-baseline',
   'changes',
   'background-execution',
