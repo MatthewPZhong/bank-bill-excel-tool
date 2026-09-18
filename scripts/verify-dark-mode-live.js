@@ -247,6 +247,28 @@ function child() {
           height: Math.max(oldBounds.height, oldMinimumSize[1]) };
         const oldZoom = web.getZoomFactor();
         const settleLayout = () => web.executeJavaScript(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+        const waitForViewport = async (bounds, zoom) => {
+          const expected = { width: bounds.width / zoom, height: bounds.height / zoom };
+          const startedAt = Date.now();
+          const samples = [];
+          let consecutive = 0;
+          let sampleCount = 0;
+          while (Date.now() - startedAt < 5000) {
+            const viewport = await web.executeJavaScript(`({ width: innerWidth, height: innerHeight, dpr: devicePixelRatio })`);
+            const actualBounds = window.getBounds();
+            const actualZoom = web.getZoomFactor();
+            sampleCount += 1;
+            samples.push({ ...viewport, actualBounds, actualZoom, elapsedMs: Date.now() - startedAt });
+            if (samples.length > 20) samples.shift();
+            consecutive = Math.abs(viewport.width - expected.width) <= 1
+              && Math.abs(viewport.height - expected.height) <= 1
+              && actualBounds.width === bounds.width && actualBounds.height === bounds.height
+              && Math.abs(actualZoom - zoom) < 0.001 ? consecutive + 1 : 0;
+            if (consecutive === 2) return { ok: true, expected, sampleCount, samples };
+            await new Promise(resolve => setTimeout(resolve, 25));
+          }
+          return { ok: false, expected, sampleCount, samples };
+        };
         const restoreGridStyle = () => web.executeJavaScript(`(() => {
           const grid = document.querySelector('.appearance-time-grid');
           if (!grid) throw new Error('恢复时缺少时间框网格');
@@ -270,6 +292,9 @@ function child() {
           await restoreGridStyle();
           window.setSize(1080, 760, false);
           web.setZoomFactor(1.5);
+          // Browser 侧 zoom getter 先更新；等待 Renderer 实际接收视觉尺寸，不能仅等固定帧数。
+          const narrowViewportWait = await waitForViewport({ width: 1080, height: 760 }, 1.5);
+          check(narrowViewportWait.ok, '窄窗口 Renderer 未在 5 秒内应用实际页面缩放');
           await settleLayout();
           const narrowPage = await web.executeJavaScript(`(() => {
             const pane = document.getElementById('appearancePane');
@@ -289,6 +314,7 @@ function child() {
             requested: { width: 1080, height: 760, zoomFactor: 1.5 },
             bounds: window.getBounds(), contentBounds: window.getContentBounds(),
             minimumSize: window.getMinimumSize(), zoomFactor: web.getZoomFactor(),
+            viewportWait: narrowViewportWait,
             ...narrowPage,
             geometry: await inspectNativeTimeLayout(web),
           };
@@ -300,6 +326,10 @@ function child() {
           '窄窗口实际 bounds / viewport / 页面缩放与请求不一致');
           check(narrow.gridInlineStyle === oldGridStyle && narrow.geometry.status === 'PASS',
             '窄窗口生产样式或原生时间内部字段完整性未通过');
+          check(narrow.geometry.inputs.length === 2 && narrow.geometry.inputs.every(input =>
+            ['width', 'height', 'dpr'].every(key => Math.abs(
+              (key === 'dpr' ? input.host?.devicePixelRatio : input.host?.viewport?.[key]) - narrow.viewport[key]) <= 0.001)),
+          '窄窗口页面与原生字段不是同一实际 viewport');
           check([narrow.pane, narrow.scroll].every(item => Number.isFinite(item.scrollWidth)
             && Number.isFinite(item.clientWidth) && item.clientWidth > 0
             && item.scrollWidth <= item.clientWidth + 1), '窄窗口外观 pane 存在水平溢出或缺少尺寸');
@@ -307,6 +337,9 @@ function child() {
             && item.scrollWidth > 0 && item.scrollWidth <= narrow.viewport.width + 1),
           '窄窗口 document 存在水平溢出或缺少尺寸');
           timeLayout.narrow150Capture = await capturePresentedPage(window, `live-${initial}-production-1080x760-zoom-150.png`, true);
+          check(['width', 'height', 'dpr'].every(key =>
+            Math.abs(timeLayout.narrow150Capture.viewport[key] - narrow.viewport[key]) <= 0.001),
+          '窄窗口截图与几何证据不是同一实际 viewport');
         } finally {
           // 每项均尝试恢复，避免某个恢复异常阻止其余状态复原。
           const restoreErrors = [];
@@ -318,6 +351,8 @@ function child() {
             try { await restore(); }
             catch (error) { restoreErrors.push(`${name}: ${error.message}`); }
           }
+          timeLayout.restoreViewportWait = await waitForViewport(restorableBounds, oldZoom);
+          check(timeLayout.restoreViewportWait.ok, '恢复时 Renderer 未在 5 秒内应用实际页面缩放');
           await settleLayout();
           if (restoreErrors.length) throw new Error(`时间框取证恢复失败：${restoreErrors.join('; ')}`);
         }

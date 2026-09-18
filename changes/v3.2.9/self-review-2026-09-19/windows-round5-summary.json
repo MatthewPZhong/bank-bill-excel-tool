@@ -1,0 +1,100 @@
+{
+  "candidate": "55967078ba964a7ef851340332e627765bfea3d4",
+  "run": "https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/35380369398",
+  "collector": "FAIL: renderer zoom propagation mixed snapshot",
+  "initial": "light",
+  "failures": [
+    "窄窗口实际 bounds / viewport / 页面缩放与请求不一致"
+  ],
+  "original": "PASS",
+  "historical104": "FAIL",
+  "restored": "PASS",
+  "narrow": {
+    "requested": {
+      "width": 1080,
+      "height": 760,
+      "zoomFactor": 1.5
+    },
+    "bounds": {
+      "x": 0,
+      "y": 0,
+      "width": 1080,
+      "height": 760
+    },
+    "contentBounds": {
+      "x": 0,
+      "y": 0,
+      "width": 1080,
+      "height": 760
+    },
+    "zoomFactor": 1.5,
+    "viewport": {
+      "width": 1080,
+      "height": 760,
+      "dpr": 1
+    }
+  },
+  "laterNativeViewport": [
+    {
+      "role": "dark-mode-start",
+      "viewport": {
+        "bottom": 507,
+        "height": 507,
+        "left": 0,
+        "right": 720,
+        "top": 0,
+        "width": 720
+      },
+      "dpr": 1.5,
+      "status": "PASS"
+    },
+    {
+      "role": "dark-mode-end",
+      "viewport": {
+        "bottom": 507,
+        "height": 507,
+        "left": 0,
+        "right": 720,
+        "top": 0,
+        "width": 720
+      },
+      "dpr": 1.5,
+      "status": "PASS"
+    }
+  ],
+  "restoration": {
+    "originalBounds": {
+      "x": 0,
+      "y": 0,
+      "width": 1024,
+      "height": 720
+    },
+    "expectedBounds": {
+      "x": 0,
+      "y": 0,
+      "width": 1080,
+      "height": 760
+    },
+    "actualBounds": {
+      "x": 0,
+      "y": 0,
+      "width": 1080,
+      "height": 760
+    },
+    "minimumSizeApplied": true,
+    "expectedMinimumSize": [
+      1080,
+      760
+    ],
+    "actualMinimumSize": [
+      1080,
+      760
+    ],
+    "expectedZoom": 1,
+    "actualZoom": 1,
+    "expectedGridInlineStyle": null,
+    "actualGridInlineStyle": null
+  },
+  "valuesUnchanged": true,
+  "fix": "Wait for requested window size, browser zoom and actual renderer viewport to agree in two consecutive samples separated by25ms; 5s wait target, original90s parent limit unchanged; keep final bounds/viewport assertions and require geometry/capture viewport agreement. Windows rerun pending."
+}

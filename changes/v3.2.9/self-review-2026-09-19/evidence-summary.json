@@ -860,6 +860,7 @@
     "repair": "Production time grid 132px; historical 104px diagnostic and min-window zoom150 geometry regression; generated preview synchronized.",
     "macosEvidence": "native-time132-repair-macos.json",
     "oldFullGateApplicability": "Historical only after production CSS change; new full gate required.",
-    "windowsRepairEvidence": "windows-round4-summary.json"
+    "windowsRepairEvidence": "windows-round4-summary.json",
+    "zoomHarnessEvidence": "windows-round5-summary.json"
   }
 }
