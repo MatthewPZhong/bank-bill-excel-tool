@@ -226,8 +226,13 @@ async function main() {
     const directory = path.join(destination, name); fs.mkdirSync(directory); const configPath = path.join(directory, 'config.json');
     json(configPath, { directory, name, mode, buildSha, buildIdentity });
     const { code, signal } = await new Promise((resolve, reject) => {
+      const electronEnv = { ...process.env };
+      // Windows 下空值仍会启用 Node 模式；移除变量及其大小写变体。
+      for (const key of Object.keys(electronEnv)) {
+        if (key.toUpperCase() === 'ELECTRON_RUN_AS_NODE') delete electronEnv[key];
+      }
       const child = spawn(require('electron'), ['--js-flags=--expose-gc', __filename, '--electron-child', configPath],
-        { env: { ...process.env, ELECTRON_RUN_AS_NODE: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
+        { env: electronEnv, stdio: ['ignore', 'pipe', 'pipe'] });
       const log = fs.createWriteStream(path.join(directory, 'run.log'), { flags: 'wx' });
       child.stdout.on('data', (data) => log.write(data)); child.stderr.on('data', (data) => log.write(data));
       child.once('error', (error) => { log.end(); reject(error); });

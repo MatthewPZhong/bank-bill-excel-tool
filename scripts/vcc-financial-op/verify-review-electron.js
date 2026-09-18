@@ -98,7 +98,12 @@ async function nodeRun() {
     fs.writeFileSync(configPath, JSON.stringify({ directory: fixture.dir, dbPath: fixture.dbPath, archiveRoot: fixture.archiveRoot,
       assetsDir: path.join(asar, 'assets'), request: fixture.request }));
     await new Promise((resolve, reject) => {
-      const child = spawn(require('electron'), [__filename, '--electron-child', configPath], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
+      const electronEnv = { ...process.env };
+      // Windows 下空值仍会启用 Node 模式；移除变量及其大小写变体。
+      for (const key of Object.keys(electronEnv)) {
+        if (key.toUpperCase() === 'ELECTRON_RUN_AS_NODE') delete electronEnv[key];
+      }
+      const child = spawn(require('electron'), [__filename, '--electron-child', configPath], { env: electronEnv, stdio: ['ignore', 'pipe', 'pipe'] });
       let output = ''; const timer = setTimeout(() => { child.kill(); reject(new Error('Electron 验收超时')); }, 120000);
       child.stdout.on('data', (chunk) => { output += chunk; process.stdout.write(chunk); });
       child.stderr.on('data', (chunk) => { output += chunk; process.stderr.write(chunk); });

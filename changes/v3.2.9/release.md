@@ -57,6 +57,15 @@ VCC Spec AC30/RV12 与 TechDoc §12.4 要求 Windows x64/16 GiB/SSD/Electron 36.
 - 验证器改用结束时间 `14:00` 严格触发两种小时制的 dark→light→dark，并将关闭排队后的新编辑固定为 `19:30`，继续严格检查最终保存及失焦保持。另记录裸控件 `20` 和区域信息，不用观测值替代产品断言。本机 16/16 通过，修正后 Windows 结果待新候选 CI；未修改生产逻辑。原始和修正证据见 [evidence-summary.json](self-review-2026-09-19/evidence-summary.json)。
 - 专项工作流的各独立检查在候选身份核验成功后继续采集，即使另一专项失败；没有 `continue-on-error`，真实失败仍令工作流失败，避免第一项失败使所有证据缺失。
 
+
+### 第二轮 Windows 与验证器修正
+
+- 候选 `66f357bd` 的 [Windows 专项](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/35376141525) 仍为 FAIL，独立检查已全部继续采集：原生键盘 16/16 通过，真实 Main 呈现 2/2、22 个断言通过；后者未测量 AM/PM 内部文字可见性。
+- 设置交互首组在 30 秒超时，其他五组布局通过。隔离隐藏窗口增加 `backgroundThrottling:false` 并记录阶段，不增加超时或减少交互断言；本机修正后 6/6、4/4 场景、73 个断言通过，Windows 待复测。
+- VCC 的 Electron/ASAR 和 PF 检查因 Windows 子进程继承空值 `ELECTRON_RUN_AS_NODE` 进入 Node 模式而启动失败。改为删除变量及其大小写变体；原导出、缓存、内容、取消和 PF 判定保留。本机在父进程变量值为 `1` 的条件下，ASAR 导出、小样本 PF 通过，非 Windows 基线仍明确 exit 2 / NOT_RUN。
+- Windows 截图中的 AM/PM 可能受 104px 时间框裁切，正在补 UA shadow DOM 字段和文字的几何证据，以及只改内存样式的 132px 对照。尚未将截图疑点写成已确认产品缺陷或已修复。
+- 证据见 [第二轮摘要](self-review-2026-09-19/windows-round2-summary.json) 和 [证据索引](self-review-2026-09-19/evidence-summary.json)。本轮尚未变更生产源码；最终候选仍须实际 Windows 检查及必要人工验收。
+
 ## 历史本地集成与验证记录
 
 以下为当时范围、状态和证据，保留失败与独立复跑记录；后续版本状态以上方本轮清单为准。

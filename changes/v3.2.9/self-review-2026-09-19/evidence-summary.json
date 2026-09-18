@@ -807,8 +807,50 @@
       "total": 16,
       "source": "native-input-locale-fixed-macos.json"
     },
-    "windowsFixed": "PENDING CI",
+    "windowsFixed": {
+      "candidate": "66f357bd0357c2be4c2256267edee637c436df20",
+      "native": "16/16 PASS",
+      "run": "https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/35376141525",
+      "summary": "windows-round2-summary.json",
+      "overall": "FAIL; settings timeout and VCC verification launch environment failures"
+    },
     "sourceSha256": "bf4409dacc9dd69a40ea6e81df27fd97f3f52a08b37287768e53d2983ef405cb",
     "workflow": "Independent evidence steps continue after other evidence failures if candidate identity step passed; no continue-on-error, failures remain job failure."
+  },
+  "windowsHarnessRepair": {
+    "productionChanged": false,
+    "settings": {
+      "file": "settings-background-fixed-macos.json",
+      "result": "6/6 layouts, 4/4 scenarios, 73 assertions PASS; timeout remains 30s"
+    },
+    "vcc": {
+      "electron": {
+        "file": "vcc-env-fixed-electron-macos.json",
+        "sha256": "4d3d68668a466cd1938252a39007c83f59690429e02152cedb350130ec10336e",
+        "parentEnvironment": "ELECTRON_RUN_AS_NODE=1"
+      },
+      "smoke": {
+        "file": "vcc-env-fixed-smoke-macos.json",
+        "sha256": "497568898ceb6030674f7ec82fc7beb14f03895f116783d7ef461cc0214e4fa5",
+        "parentEnvironment": "ELECTRON_RUN_AS_NODE=1"
+      },
+      "preflight": {
+        "file": "vcc-env-fixed-preflight-macos.json",
+        "sha256": "c5a8d9310c0ddaba6e9fe63a4e6c027265d254d996dd4c2289f291b448c514ed",
+        "parentEnvironment": "ELECTRON_RUN_AS_NODE=1"
+      }
+    },
+    "windowsRerun": "PENDING",
+    "nativeVisibility": "Pending CDP inner-field geometry and 104px/132px controlled comparison; screenshots suggest AM/PM may be clipped on Windows.",
+    "nativeGeometryMacos": {
+      "source": "native-geometry-macos.json",
+      "status": "PASS",
+      "scenarios": 2,
+      "assertions": 26,
+      "original104": "PASS",
+      "wide132": "PASS",
+      "restored104": "PASS",
+      "windows": "PENDING"
+    }
   }
 }

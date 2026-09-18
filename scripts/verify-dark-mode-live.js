@@ -230,16 +230,40 @@ function child() {
           appearanceTab.click();
           await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
         })()`);
-        const appearance = await web.executeJavaScript(`({visible: !document.getElementById('appearancePane').hidden, theme: document.documentElement.dataset.theme, checked: document.getElementById('darkModeEnabled').checked})`);
+        const appearance = await web.executeJavaScript(`({visible: !document.getElementById('appearancePane').hidden, theme: document.documentElement.dataset.theme, checked: document.getElementById('darkModeEnabled').checked,
+          values: { start: document.querySelector('[data-role="dark-mode-start"]').value, end: document.querySelector('[data-role="dark-mode-end"]').value }})`);
         check(appearance.visible && appearance.checked && appearance.theme === 'dark', '真实外观设置与已保存时段不同步');
         const settingsCapture = await capturePresentedPage(window, `live-${initial}-startup-dark-settings.png`, true);
         check(settingsCapture.appearanceVisible && settingsCapture.checked && settingsCapture.theme === 'dark'
           && settingsCapture.pixelChecks.every((sample) => sample.matches), '实际呈现帧与外观设置 DOM 不一致');
+        const { inspectNativeTimeLayout } = require('./lib/native-time-layout');
+        const timeLayout = { original: await inspectNativeTimeLayout(web) };
+        const oldGridStyle = await web.executeJavaScript(`document.querySelector('.appearance-time-grid').getAttribute('style')`);
+        try {
+          await web.executeJavaScript(`(async () => {
+            document.querySelector('.appearance-time-grid').style.gridTemplateColumns = '132px 22px 132px';
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+          })()`);
+          timeLayout.wide132 = await inspectNativeTimeLayout(web);
+          timeLayout.wideCapture = await capturePresentedPage(window, `live-${initial}-time-width-132.png`, true);
+        } finally {
+          await web.executeJavaScript(`(async () => {
+            const grid = document.querySelector('.appearance-time-grid');
+            const oldStyle = ${JSON.stringify(oldGridStyle)};
+            if (oldStyle === null) grid.removeAttribute('style'); else grid.setAttribute('style', oldStyle);
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+          })()`);
+        }
+        timeLayout.restored = await inspectNativeTimeLayout(web);
+        timeLayout.valuesUnchanged = [timeLayout.original, timeLayout.wide132, timeLayout.restored].every((sample) =>
+          sample.inputs.length === 2 && sample.inputs.every((input) => input.value === appearance.values[input.role === 'dark-mode-start' ? 'start' : 'end']));
+        check(timeLayout.valuesUnchanged, '时间框宽度取证改变了输入值');
+        check(timeLayout.original.status === 'PASS' && timeLayout.restored.status === 'PASS', '原生时间字段含 AM/PM 完整可见性未通过');
         check(rendererErrors.length === 0, `Renderer 错误：${rendererErrors.join('; ')}`);
         console.log(prefix + JSON.stringify({ ok: failures.length === 0, initial, assertions, application,
           isolation: { userData: app.getPath('userData'), documents: app.getPath('documents') },
           windowAtLoad, windowAfterInit, loadSnapshot, initializedAt, reinitializedAt, reloaded, appearance,
-          startupCapture, reloadCapture, settingsCapture, evidenceLimit, failures, rendererErrors }));
+          startupCapture, reloadCapture, settingsCapture, timeLayout, evidenceLimit, failures, rendererErrors }));
         process.exitCode = failures.length ? 1 : 0;
       } catch (error) {
         console.log(prefix + JSON.stringify({ ok: false, initial, failures: [String(error.stack || error)] }));

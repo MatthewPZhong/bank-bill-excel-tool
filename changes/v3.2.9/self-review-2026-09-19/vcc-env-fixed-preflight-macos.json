@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "mode": "windows",
+  "buildSha": "66f357bd0357c2be4c2256267edee637c436df20",
+  "buildIdentity": {
+    "productionDirty": false,
+    "workingTreeStatus": "M scripts/vcc-financial-op/verify-review-electron.js\n M scripts/vcc-financial-op/verify-review-performance.js\n M scripts/verify-app-settings-layout.js",
+    "scriptSha256": {
+      "verify-review-performance.js": "42f2ca5043229a6fda1181faec88e2ba8e044145c7a431c2d1fd62c568eb9bea",
+      "performance-fixture.js": "5ea25110d4aa237ba36b3d56b972ed4008e29040aa2c7e5de3636f78052bc06d",
+      "performance-worker.js": "fdb2705e14dc6e70fccde8f13b8c4f7c845f06304763025b9c34c804f63446aa"
+    }
+  },
+  "results": [
+    {
+      "name": "pf02",
+      "code": 0,
+      "signal": null,
+      "evidencePath": "/private/tmp/v329-release-20260919-3_bafjvz/vcc-env-fixed-preflight/pf02/evidence.json",
+      "automated": "NOT_RUN",
+      "acceptance": "NOT_RUN"
+    }
+  ],
+  "acceptance": "NOT_RUN",
+  "pf01WorkerRss": {
+    "status": "NOT_RUN",
+    "reason": "worker_threads RSS cannot be attributed separately; total process comparison is supplemental only."
+  },
+  "manualWindowsInstalledApplication": "NOT_RUN",
+  "excelWps": "NOT_RUN",
+  "processRssComparison": {
+    "status": "NOT_RUN"
+  },
+  "requestedCasesAcceptance": "NOT_RUN",
+  "fullVccAcceptance": "NOT_RUN"
+}

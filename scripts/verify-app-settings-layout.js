@@ -1201,6 +1201,13 @@ async function verifyArchiveBrowserLayout(failures) {
 
 async function measurePage(expectedScaleFactor, runBehavior, prepareScreenshot) {
   const failures = [];
+  const phases = [];
+  const recordPhase = (name) => {
+    const entry = { name, at: performance.now(), visibility: document.visibilityState };
+    phases.push(entry);
+    console.log(`APP_SETTINGS_PHASE=${JSON.stringify(entry)}`);
+  };
+  recordPhase('page-ready');
   let themeRetentionBehavior = null;
   const requiredStyles = ['fonts.css', 'styles-gemini.css', 'styles-gemini-extra.css',
     'styles-vcc-financial-op.css', 'styles-biz-op-v327.css', 'styles-dark-mode.css', 'styles-dark-mode-settings.css'];
@@ -1274,6 +1281,7 @@ async function measurePage(expectedScaleFactor, runBehavior, prepareScreenshot) 
   if (document.documentElement.scrollWidth > document.documentElement.clientWidth + 1) failures.push('深色存档设置水平溢出');
 
   if (runBehavior) {
+    recordPhase('retention-behavior');
     applyAppUpdateStatus({
       enabled: true,
       supported: true,
@@ -1291,9 +1299,13 @@ async function measurePage(expectedScaleFactor, runBehavior, prepareScreenshot) 
       failures.push(`downloaded update button text ${confirmButton.textContent}`);
     }
     await verifyArchiveRetentionBehavior(failures);
+    recordPhase('module-retention-behavior');
     await verifyArchiveModuleRetentionBehavior(failures);
+    recordPhase('retention-delete-guard');
     await verifyArchiveRetentionDeleteGuard(failures);
+    recordPhase('theme-retention-behavior');
     themeRetentionBehavior = await verifyThemeRetentionBehavior(failures);
+    recordPhase('behavior-complete');
   }
 
   if (prepareScreenshot) {
@@ -1308,6 +1320,7 @@ async function measurePage(expectedScaleFactor, runBehavior, prepareScreenshot) 
   return {
     ok: failures.length === 0,
     failures,
+    phases,
     loadedStyles,
     themeRetentionBehavior,
     metrics: {
@@ -1345,8 +1358,13 @@ async function runElectronChild() {
     show: false,
     webPreferences: {
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      // 隔离隐藏窗口仍需执行真实 rAF 交互；不让后台限频占用30秒父进程时限。
+      backgroundThrottling: false
     }
+  });
+  window.webContents.on('console-message', (_event, _level, message) => {
+    if (String(message).startsWith('APP_SETTINGS_PHASE=')) console.log(message);
   });
 
   try {
