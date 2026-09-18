@@ -790,5 +790,25 @@
     "fail": 0,
     "log": "/private/tmp/v329-release-20260919-3_bafjvz/final-release-docs-test.log",
     "logSha256": "87f63387119a5216661f98251b22bb013c1893d2e80b473e2ab7cc9309d13003"
+  },
+  "postCandidateValidation": {
+    "candidate": "d17a44ddb93c5b030f901a1cd785a26e8896544f",
+    "windowsInitialRun": "https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/35375147094",
+    "nativeInputWindowsInitial": {
+      "passed": 14,
+      "total": 16,
+      "source": "native-input-windows-initial.json",
+      "status": "FAIL"
+    },
+    "analysis": "Windows native 12-hour control produces 13:30 for first digit 1 and 14:30 then 14:00 for digits 20. Product persisted these exact native values. Verifier assumed 24-hour key interpretation. No production code change.",
+    "fix": "Theme case endTime=14:00 retains dark-light-dark for both 01:30/13:30. Queued-off case uses 19:30 with exact final/blur assertions. Added unmodified native-control digits20 observation and locale diagnostics.",
+    "macosFixed": {
+      "passed": 16,
+      "total": 16,
+      "source": "native-input-locale-fixed-macos.json"
+    },
+    "windowsFixed": "PENDING CI",
+    "sourceSha256": "bf4409dacc9dd69a40ea6e81df27fd97f3f52a08b37287768e53d2983ef405cb",
+    "workflow": "Independent evidence steps continue after other evidence failures if candidate identity step passed; no continue-on-error, failures remain job failure."
   }
 }

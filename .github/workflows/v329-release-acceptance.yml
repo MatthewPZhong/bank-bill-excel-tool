@@ -29,6 +29,7 @@ jobs:
       - run: npm ci
 
       - name: Record candidate identity
+        id: candidate
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force outputs/v329-acceptance | Out-Null
@@ -38,25 +39,31 @@ jobs:
             ConvertTo-Json | Set-Content outputs/v329-acceptance/candidate.json
 
       - name: Verify native time input
+        if: ${{ !cancelled() && steps.candidate.outcome == 'success' }}
         run: node scripts/verify-dark-mode-native-input.js outputs/v329-acceptance/native-input.json
 
       - name: Verify real Main startup and presented appearance settings
+        if: ${{ !cancelled() && steps.candidate.outcome == 'success' }}
         env:
           DARK_MODE_LIVE_EVIDENCE_DIR: outputs/v329-acceptance/live-main
         run: node scripts/verify-dark-mode-live.js
 
       - name: Verify settings and archive save interactions
+        if: ${{ !cancelled() && steps.candidate.outcome == 'success' }}
         env:
           APP_SETTINGS_LAYOUT_EVIDENCE_DIR: outputs/v329-acceptance/settings
         run: node scripts/verify-app-settings-layout.js
 
       - name: Verify VCC Electron and ASAR outputs
+        if: ${{ !cancelled() && steps.candidate.outcome == 'success' }}
         run: node scripts/vcc-financial-op/verify-review-electron.js outputs/v329-acceptance/vcc-electron
 
       - name: Verify performance runner with a small real export
+        if: ${{ !cancelled() && steps.candidate.outcome == 'success' }}
         run: node scripts/vcc-financial-op/verify-review-performance.js --mode smoke --output outputs/v329-acceptance/smoke
 
       - name: Collect fixed-baseline VCC performance evidence
+        if: ${{ !cancelled() && steps.candidate.outcome == 'success' }}
         shell: pwsh
         run: |
           node scripts/vcc-financial-op/verify-review-performance.js --mode windows --output outputs/v329-acceptance/performance

@@ -73,6 +73,8 @@ async function runChild() {
   const url = (file) => pathToFileURL(sourcePath(file)).href;
   fs.writeFileSync(fixturePath, `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><script src="${url('src/shared/dark-mode-schedule.js')}"></script><script src="${url('src/renderer-dark-mode.js')}"></script><link rel="stylesheet" href="${url('src/styles-dark-mode.css')}"><link rel="stylesheet" href="${url('src/styles-dark-mode-settings.css')}"></head><body><div id="host" style="width:700px"></div></body></html>`);
   const results = [];
+  let nativeHour20Control = null;
+  let locale = null;
   async function key(value) {
     const special = { ArrowLeft: ['ArrowLeft', 37], ArrowRight: ['ArrowRight', 39], ArrowUp: ['ArrowUp', 38], Backspace: ['Backspace', 8] };
     const [code, virtualKey] = special[value] || ['Digit' + value, value.charCodeAt(0)];
@@ -116,7 +118,8 @@ async function runChild() {
       cases.push({ name: `${field}-${segment}-save${saveDelay}-key${interval}`, saveDelay, interval, field, segment, digits, expected });
     }
   }
-  cases.push({ name: 'enabled-start-hour-save15-key100', saveDelay: 15, interval: 100, initial: { enabled: true },
+  // 原生 12 小时制首位 1 会产生 13:30，24 小时制产生 01:30；两者都必须跨过浅色再回到深色。
+  cases.push({ name: 'enabled-start-hour-save15-key100', saveDelay: 15, interval: 100, initial: { enabled: true, endTime: '14:00' },
     field: 'start', segment: 'hour', digits: '19', expected: '19:30', expectThemes: ['dark', 'light', 'dark'] });
   cases.push({ name: 'slow-two-fields', saveDelay: 200, initial: { enabled: true } },
     { name: 'disable-during-save', saveDelay: 200, initial: { enabled: true } },
@@ -130,6 +133,12 @@ async function runChild() {
     await win.loadFile(fixturePath);
     win.webContents.debugger.attach('1.3');
     await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true });
+    // 裸控件只记录平台按键解释，不将其观测值用作产品保存断言的替代预期。
+    await win.webContents.executeJavaScript(`(${installHarness.toString()})(${JSON.stringify({ control: true, saveDelay: 0 })});`);
+    const control20 = await typeDigits('start', 'hour', '20', 30);
+    nativeHour20Control = { value: control20.values['dark-mode-start'].value, events: control20.events, requests: control20.requests };
+    locale = await win.webContents.executeJavaScript(`({ language: navigator.language, languages: navigator.languages,
+      dateTimeFormat: new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: 'numeric' }).resolvedOptions() })`);
     for (const entry of selectedCases) {
       const checks = []; let during = null; let state = null;
       const check = (passed, name, detail) => checks.push({ passed: Boolean(passed), name, ...(detail === undefined ? {} : { detail }) });
@@ -171,7 +180,7 @@ async function runChild() {
           const invalidBeforeOff = entry.name === 'invalid-time-before-queued-off';
           if (invalidBeforeOff) { await focusSegment('start'); await key('Backspace'); }
           await clickSwitch();
-          if (entry.name === 'edit-time-after-queued-off') during = await typeDigits('start', 'hour', '20', 30);
+          if (entry.name === 'edit-time-after-queued-off') during = await typeDigits('start', 'hour', '19', 30);
           else if (!invalidBeforeOff) { await focusSegment('start'); await key('Backspace'); }
           during = during || await read();
           check(during.requests.length === 1 && during.inFlight === 1 && during.requests.every((request) => request.config.enabled), '后续输入发生时关闭请求仍排队', during.requests);
@@ -180,13 +189,13 @@ async function runChild() {
             'Backspace 已产生原生非法时间草稿', during.events);
           state = await settled();
           check(!state.stored.enabled && state.theme === 'light', '旧或新时间草稿均不阻止队列关闭', state.stored);
-          const expectedStart = entry.name === 'edit-time-after-queued-off' ? '20:30' : '18:30';
+          const expectedStart = entry.name === 'edit-time-after-queued-off' ? '19:30' : '18:30';
           check(state.stored.startTime === expectedStart && state.stored.endTime === '07:00',
             entry.name === 'edit-time-after-queued-off' ? '关闭之后新编辑的合法时间最终保存' : '非法时间没有替换已保存时段', state.stored);
           if (entry.name === 'edit-time-after-queued-off') {
             const beforeBlur = state.values['dark-mode-start'].value;
             await focusSegment('end'); state = await read();
-            check(beforeBlur === '20:30' && state.values['dark-mode-start'].value === '20:30', '失焦后没有回退关闭之后的输入', state.values);
+            check(beforeBlur === '19:30' && state.values['dark-mode-start'].value === '19:30', '失焦后没有回退关闭之后的输入', state.values);
           } else if (invalidBeforeOff) {
             check(state.values['dark-mode-start'].value === '18:30', '关闭前的非法草稿按原语义恢复已保存时段', state.values);
           }
@@ -203,7 +212,7 @@ async function runChild() {
       } catch (error) { check(false, '原生交互执行完成', error.stack || String(error)); state = await read().catch(() => null); }
       results.push({ name: entry.name, options: entry, passed: checks.every((item) => item.passed), checks, during, state });
     }
-    const evidence = { generatedAt: new Date().toISOString(), platform: process.platform, electron: process.versions.electron, sourceHashes,
+    const evidence = { generatedAt: new Date().toISOString(), platform: process.platform, electron: process.versions.electron, sourceHashes, locale, nativeHour20Control,
       isolation: { realMain: false, businessData: false, renderer: '真实共享 UI 与原生 type=time', input: 'CDP 键盘/鼠标，DOM.focus 选定控件；未用赋 value 或合成 change 代替时间输入', userData: '临时目录，父进程结束清理', windowsVerified: process.platform === 'win32' }, results };
     console.log(RESULT_PREFIX + JSON.stringify(evidence));
   } finally { if (win.webContents.debugger.isAttached()) win.webContents.debugger.detach(); win.destroy(); app.quit(); }

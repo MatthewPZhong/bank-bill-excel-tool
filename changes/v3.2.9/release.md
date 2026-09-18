@@ -34,7 +34,8 @@
 - [x] C3：核心候选 `5001d331` 已提交；后续仅文档和验收脚本修订另行记录，不将未提交内容当已发布。
 - [x] C4 本地自动门禁：完整 release-check exit 0；499 个单测文件，7,861 PASS / 0 FAIL / 3 Windows 专用 SKIP；59 个集成脚本全部通过，2,574/2,574。
 - [ ] A3/C4 平台/C5/C6：代码审查当前无 P2+；平台/人工及 VCC 完整性能门禁仍待闭环。
-- [ ] D1–D4：推送同名 release，建立 release→main PR，核验最终 head 的 Windows 检查/构建及主分支变化。
+- [x] D1/D2：同名 release 已推送并建立 release→main 草稿 [PR #239](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/239)；每次推送均核对 head，候选 SHA 见 PR 及下方续做记录。
+- [ ] D3/D4：最终 head 的 Windows 检查/构建与必要验收通过后，重新核对 main 及合并条件。
 - [ ] E1–E5：满足发布条件后进入锁定窗口、合并 PR、核实最终 main 检查、创建并核验附注 `v3.2.9`。目前未宣称仓库已被技术锁定。
 - [ ] F1–F4：标签发布 workflow、正式 Release、setup/portable/blockmap/latest.yml 与 SHA512 全部实测核验。
 - [ ] G1–G3：补齐 PR→最终 main→tag→产物追溯，保留顺延项，并在不覆盖主目录未提交资料的前提下快进本地 main。
@@ -48,6 +49,13 @@
 新增 Windows 专项 evidence workflow 由草稿 PR 触发，收集原生时间输入、真实 Main、设置交互、VCC Electron/ASAR 和 PF 证据。collector 的绿色状态只表示证据步骤正常结束；exit 2 仍明确代表存在 NOT_RUN，不能替代完整验收。
 
 VCC Spec AC30/RV12 与 TechDoc §12.4 要求 Windows x64/16 GiB/SSD/Electron 36.9.5 的完整链路、Excel/WPS 和 PF01–PF05；已有组件百万行测试不能替代。真实人工验收记录已向用户询问，尚未收到；在此期间继续自动验证及候选包准备，不记录人为签字。发布前还须完成对应存档和原生系统流程的必要平台验收。逐项操作与证据字段见 [候选包人工验收清单](manual-acceptance-2026-09-19.md)。
+
+## 当前候选的 Windows CI 续做
+
+- 已推送候选 `d17a44ddb93c5b030f901a1cd785a26e8896544f`，建立草稿 [PR #239](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/239)，来源 `release/v3.2.9`、目标 `main`。远端 release head 已核对相同；main 尚在 `2ba9ef14`。
+- 首次 [Windows 专项运行](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/35375147094) 为 FAIL：原生时间输入 14/16，后续专项全部跳过。原始事件显示 Windows 原生 12 小时控件将首位 `1` 解释为 `13:30`，`20` 解释为 `14:30`→`14:00`；应用完整保存了实际控件值。失败来自验证器假定 24 小时按键解释，未见生产保存丢失证据。
+- 验证器改用结束时间 `14:00` 严格触发两种小时制的 dark→light→dark，并将关闭排队后的新编辑固定为 `19:30`，继续严格检查最终保存及失焦保持。另记录裸控件 `20` 和区域信息，不用观测值替代产品断言。本机 16/16 通过，修正后 Windows 结果待新候选 CI；未修改生产逻辑。原始和修正证据见 [evidence-summary.json](self-review-2026-09-19/evidence-summary.json)。
+- 专项工作流的各独立检查在候选身份核验成功后继续采集，即使另一专项失败；没有 `continue-on-error`，真实失败仍令工作流失败，避免第一项失败使所有证据缺失。
 
 ## 历史本地集成与验证记录
 

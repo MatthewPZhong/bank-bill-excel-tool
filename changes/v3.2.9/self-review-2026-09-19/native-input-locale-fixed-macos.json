@@ -1,0 +1,6469 @@
+{
+  "generatedAt": "2026-09-18T17:41:22.215Z",
+  "platform": "darwin",
+  "electron": "36.9.5",
+  "sourceHashes": {
+    "scripts/verify-dark-mode-native-input.js": "bf4409dacc9dd69a40ea6e81df27fd97f3f52a08b37287768e53d2983ef405cb",
+    "src/shared/dark-mode-schedule.js": "3c06d66e5d3f8946cabe7b48fac620bf276cddd6dba4cdcc1952cf37527a25d5",
+    "src/renderer-dark-mode.js": "6cf39d711fb8620985d52dbf287ed2e65f9b3b920bd0a62c57b2a660e881e764",
+    "src/styles-dark-mode.css": "b45a9dead620b079da2b0024ef7f4a61b3a03f9a645477237b2335c2c02bee1b",
+    "src/styles-dark-mode-settings.css": "e054147fb2508319998a8fda2e9832b759f01c62576287543a38659d7b5d1c92"
+  },
+  "locale": {
+    "language": "en-US",
+    "languages": [
+      "en-US",
+      "en-CN",
+      "zh-Hans-CN"
+    ],
+    "dateTimeFormat": {
+      "locale": "en-US",
+      "calendar": "gregory",
+      "numberingSystem": "latn",
+      "timeZone": "Asia/Shanghai",
+      "hourCycle": "h12",
+      "hour12": true,
+      "hour": "numeric",
+      "minute": "2-digit"
+    }
+  },
+  "nativeHour20Control": {
+    "value": "20:30",
+    "events": [
+      {
+        "type": "focus",
+        "role": "dark-mode-start",
+        "value": "18:30",
+        "checked": false,
+        "disabled": false,
+        "active": true,
+        "at": 52.59999990463257
+      },
+      {
+        "type": "input",
+        "role": "dark-mode-start",
+        "value": "02:30",
+        "checked": false,
+        "disabled": false,
+        "active": true,
+        "at": 54.09999990463257
+      },
+      {
+        "type": "change",
+        "role": "dark-mode-start",
+        "value": "02:30",
+        "checked": false,
+        "disabled": false,
+        "active": true,
+        "at": 54.09999990463257
+      },
+      {
+        "type": "input",
+        "role": "dark-mode-start",
+        "value": "20:30",
+        "checked": false,
+        "disabled": false,
+        "active": true,
+        "at": 89.09999990463257
+      },
+      {
+        "type": "change",
+        "role": "dark-mode-start",
+        "value": "20:30",
+        "checked": false,
+        "disabled": false,
+        "active": false,
+        "at": 89.40000009536743
+      }
+    ],
+    "requests": []
+  },
+  "isolation": {
+    "realMain": false,
+    "businessData": false,
+    "renderer": "真实共享 UI 与原生 type=time",
+    "input": "CDP 键盘/鼠标，DOM.focus 选定控件；未用赋 value 或合成 change 代替时间输入",
+    "userData": "临时目录，父进程结束清理",
+    "windowsVerified": false
+  },
+  "results": [
+    {
+      "name": "native-control-19",
+      "options": {
+        "name": "native-control-19",
+        "control": true,
+        "saveDelay": 0,
+        "interval": 100,
+        "field": "start",
+        "segment": "hour",
+        "digits": "19",
+        "expected": "19:30"
+      },
+      "passed": true,
+      "checks": [
+        {
+          "passed": true,
+          "name": "连续数字保留完整控件值",
+          "detail": {
+            "dark-mode-start": {
+              "value": "19:30",
+              "checked": false,
+              "disabled": false,
+              "focused": true
+            }
+          }
+        },
+        {
+          "passed": true,
+          "name": "保存请求没有并发",
+          "detail": 0
+        },
+        {
+          "passed": true,
+          "name": "没有页面异常",
+          "detail": []
+        }
+      ],
+      "during": {
+        "stored": {
+          "enabled": false,
+          "startTime": "18:30",
+          "endTime": "06:00"
+        },
+        "requests": [],
+        "events": [
+          {
+            "type": "focus",
+            "role": "dark-mode-start",
+            "value": "18:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 5.399999618530273
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "01:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 6.199999809265137
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "01:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 6.199999809265137
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 108.39999961853027
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "active": false,
+            "at": 108.59999990463257
+          }
+        ],
+        "themeEvents": [
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 4.799999713897705
+          }
+        ],
+        "errors": [],
+        "inFlight": 0,
+        "maxConcurrent": 0,
+        "snapshot": {
+          "darkModeSchedule": {
+            "enabled": false,
+            "startTime": "18:30",
+            "endTime": "06:00"
+          },
+          "effectiveTheme": "light",
+          "themeRevision": 1,
+          "ready": true,
+          "saving": false
+        },
+        "theme": "light",
+        "values": {
+          "dark-mode-start": {
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "focused": true
+          }
+        },
+        "feedback": {
+          "text": ""
+        }
+      },
+      "state": {
+        "stored": {
+          "enabled": false,
+          "startTime": "18:30",
+          "endTime": "06:00"
+        },
+        "requests": [],
+        "events": [
+          {
+            "type": "focus",
+            "role": "dark-mode-start",
+            "value": "18:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 5.399999618530273
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "01:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 6.199999809265137
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "01:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 6.199999809265137
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 108.39999961853027
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "active": false,
+            "at": 108.59999990463257
+          }
+        ],
+        "themeEvents": [
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 4.799999713897705
+          }
+        ],
+        "errors": [],
+        "inFlight": 0,
+        "maxConcurrent": 0,
+        "snapshot": {
+          "darkModeSchedule": {
+            "enabled": false,
+            "startTime": "18:30",
+            "endTime": "06:00"
+          },
+          "effectiveTheme": "light",
+          "themeRevision": 1,
+          "ready": true,
+          "saving": false
+        },
+        "theme": "light",
+        "values": {
+          "dark-mode-start": {
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "focused": true
+          }
+        },
+        "feedback": {
+          "text": ""
+        }
+      }
+    },
+    {
+      "name": "start-hour-save15-key100",
+      "options": {
+        "name": "start-hour-save15-key100",
+        "saveDelay": 15,
+        "interval": 100,
+        "field": "start",
+        "segment": "hour",
+        "digits": "19",
+        "expected": "19:30"
+      },
+      "passed": true,
+      "checks": [
+        {
+          "passed": true,
+          "name": "连续数字保留完整控件值",
+          "detail": {
+            "dark-mode-enabled": {
+              "value": "on",
+              "checked": false,
+              "disabled": false,
+              "focused": false
+            },
+            "dark-mode-start": {
+              "value": "19:30",
+              "checked": false,
+              "disabled": false,
+              "focused": true
+            },
+            "dark-mode-end": {
+              "value": "06:00",
+              "checked": false,
+              "disabled": false,
+              "focused": false
+            }
+          }
+        },
+        {
+          "passed": true,
+          "name": "最终保存完整时间",
+          "detail": {
+            "enabled": false,
+            "startTime": "19:30",
+            "endTime": "06:00"
+          }
+        },
+        {
+          "passed": true,
+          "name": "连续编辑没有被保存打断焦点",
+          "detail": [
+            {
+              "type": "focus",
+              "role": "dark-mode-start",
+              "value": "18:30",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 16.5
+            },
+            {
+              "type": "input",
+              "role": "dark-mode-start",
+              "value": "01:30",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 17.799999713897705
+            },
+            {
+              "type": "change",
+              "role": "dark-mode-start",
+              "value": "01:30",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 18.09999990463257
+            },
+            {
+              "type": "input",
+              "role": "dark-mode-start",
+              "value": "19:30",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 129.19999980926514
+            },
+            {
+              "type": "change",
+              "role": "dark-mode-start",
+              "value": "19:30",
+              "checked": false,
+              "disabled": false,
+              "active": false,
+              "at": 129.59999990463257
+            }
+          ]
+        },
+        {
+          "passed": true,
+          "name": "保存请求没有并发",
+          "detail": 1
+        },
+        {
+          "passed": true,
+          "name": "没有页面异常",
+          "detail": []
+        }
+      ],
+      "during": {
+        "stored": {
+          "enabled": false,
+          "startTime": "01:30",
+          "endTime": "06:00"
+        },
+        "requests": [
+          {
+            "config": {
+              "enabled": false,
+              "startTime": "01:30",
+              "endTime": "06:00"
+            },
+            "startedAt": 18,
+            "status": "ok",
+            "finishedAt": 35.299999713897705
+          },
+          {
+            "config": {
+              "enabled": false,
+              "startTime": "19:30",
+              "endTime": "06:00"
+            },
+            "startedAt": 129.59999990463257,
+            "status": "pending"
+          }
+        ],
+        "events": [
+          {
+            "type": "focus",
+            "role": "dark-mode-start",
+            "value": "18:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 16.5
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "01:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 17.799999713897705
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "01:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 18.09999990463257
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 129.19999980926514
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "active": false,
+            "at": 129.59999990463257
+          }
+        ],
+        "themeEvents": [
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 10.299999713897705
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 35.19999980926514
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 35.299999713897705
+          }
+        ],
+        "errors": [],
+        "inFlight": 1,
+        "maxConcurrent": 1,
+        "snapshot": {
+          "darkModeSchedule": {
+            "enabled": false,
+            "startTime": "01:30",
+            "endTime": "06:00"
+          },
+          "effectiveTheme": "light",
+          "themeRevision": 2,
+          "ready": true,
+          "saving": true
+        },
+        "theme": "light",
+        "values": {
+          "dark-mode-enabled": {
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-start": {
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "focused": true
+          },
+          "dark-mode-end": {
+            "value": "06:00",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          }
+        },
+        "feedback": {
+          "hidden": true,
+          "text": ""
+        }
+      },
+      "state": {
+        "stored": {
+          "enabled": false,
+          "startTime": "19:30",
+          "endTime": "06:00"
+        },
+        "requests": [
+          {
+            "config": {
+              "enabled": false,
+              "startTime": "01:30",
+              "endTime": "06:00"
+            },
+            "startedAt": 18,
+            "status": "ok",
+            "finishedAt": 35.299999713897705
+          },
+          {
+            "config": {
+              "enabled": false,
+              "startTime": "19:30",
+              "endTime": "06:00"
+            },
+            "startedAt": 129.59999990463257,
+            "status": "ok",
+            "finishedAt": 147.69999980926514
+          }
+        ],
+        "events": [
+          {
+            "type": "focus",
+            "role": "dark-mode-start",
+            "value": "18:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 16.5
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "01:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 17.799999713897705
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "01:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 18.09999990463257
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 129.19999980926514
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "active": false,
+            "at": 129.59999990463257
+          }
+        ],
+        "themeEvents": [
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 10.299999713897705
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 35.19999980926514
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 35.299999713897705
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 147.59999990463257
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 147.69999980926514
+          }
+        ],
+        "errors": [],
+        "inFlight": 0,
+        "maxConcurrent": 1,
+        "snapshot": {
+          "darkModeSchedule": {
+            "enabled": false,
+            "startTime": "19:30",
+            "endTime": "06:00"
+          },
+          "effectiveTheme": "light",
+          "themeRevision": 3,
+          "ready": true,
+          "saving": false
+        },
+        "theme": "light",
+        "values": {
+          "dark-mode-enabled": {
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-start": {
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "focused": true
+          },
+          "dark-mode-end": {
+            "value": "06:00",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          }
+        },
+        "feedback": {
+          "hidden": true,
+          "text": ""
+        }
+      }
+    },
+    {
+      "name": "start-minute-save15-key100",
+      "options": {
+        "name": "start-minute-save15-key100",
+        "saveDelay": 15,
+        "interval": 100,
+        "field": "start",
+        "segment": "minute",
+        "digits": "45",
+        "expected": "18:45"
+      },
+      "passed": true,
+      "checks": [
+        {
+          "passed": true,
+          "name": "连续数字保留完整控件值",
+          "detail": {
+            "dark-mode-enabled": {
+              "value": "on",
+              "checked": false,
+              "disabled": false,
+              "focused": false
+            },
+            "dark-mode-start": {
+              "value": "18:45",
+              "checked": false,
+              "disabled": false,
+              "focused": true
+            },
+            "dark-mode-end": {
+              "value": "06:00",
+              "checked": false,
+              "disabled": false,
+              "focused": false
+            }
+          }
+        },
+        {
+          "passed": true,
+          "name": "最终保存完整时间",
+          "detail": {
+            "enabled": false,
+            "startTime": "18:45",
+            "endTime": "06:00"
+          }
+        },
+        {
+          "passed": true,
+          "name": "连续编辑没有被保存打断焦点",
+          "detail": [
+            {
+              "type": "focus",
+              "role": "dark-mode-start",
+              "value": "18:30",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 16
+            },
+            {
+              "type": "input",
+              "role": "dark-mode-start",
+              "value": "18:04",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 17.90000009536743
+            },
+            {
+              "type": "change",
+              "role": "dark-mode-start",
+              "value": "18:04",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 18.100000381469727
+            },
+            {
+              "type": "input",
+              "role": "dark-mode-start",
+              "value": "18:45",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 129.7000002861023
+            },
+            {
+              "type": "change",
+              "role": "dark-mode-start",
+              "value": "18:45",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 130.2000002861023
+            }
+          ]
+        },
+        {
+          "passed": true,
+          "name": "保存请求没有并发",
+          "detail": 1
+        },
+        {
+          "passed": true,
+          "name": "没有页面异常",
+          "detail": []
+        }
+      ],
+      "during": {
+        "stored": {
+          "enabled": false,
+          "startTime": "18:04",
+          "endTime": "06:00"
+        },
+        "requests": [
+          {
+            "config": {
+              "enabled": false,
+              "startTime": "18:04",
+              "endTime": "06:00"
+            },
+            "startedAt": 18,
+            "status": "ok",
+            "finishedAt": 33.5
+          },
+          {
+            "config": {
+              "enabled": false,
+              "startTime": "18:45",
+              "endTime": "06:00"
+            },
+            "startedAt": 130.2000002861023,
+            "status": "pending"
+          }
+        ],
+        "events": [
+          {
+            "type": "focus",
+            "role": "dark-mode-start",
+            "value": "18:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 16
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "18:04",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 17.90000009536743
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "18:04",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 18.100000381469727
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "18:45",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 129.7000002861023
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "18:45",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 130.2000002861023
+          }
+        ],
+        "themeEvents": [
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 14
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 33.5
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 33.5
+          }
+        ],
+        "errors": [],
+        "inFlight": 1,
+        "maxConcurrent": 1,
+        "snapshot": {
+          "darkModeSchedule": {
+            "enabled": false,
+            "startTime": "18:04",
+            "endTime": "06:00"
+          },
+          "effectiveTheme": "light",
+          "themeRevision": 2,
+          "ready": true,
+          "saving": true
+        },
+        "theme": "light",
+        "values": {
+          "dark-mode-enabled": {
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-start": {
+            "value": "18:45",
+            "checked": false,
+            "disabled": false,
+            "focused": true
+          },
+          "dark-mode-end": {
+            "value": "06:00",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          }
+        },
+        "feedback": {
+          "hidden": true,
+          "text": ""
+        }
+      },
+      "state": {
+        "stored": {
+          "enabled": false,
+          "startTime": "18:45",
+          "endTime": "06:00"
+        },
+        "requests": [
+          {
+            "config": {
+              "enabled": false,
+              "startTime": "18:04",
+              "endTime": "06:00"
+            },
+            "startedAt": 18,
+            "status": "ok",
+            "finishedAt": 33.5
+          },
+          {
+            "config": {
+              "enabled": false,
+              "startTime": "18:45",
+              "endTime": "06:00"
+            },
+            "startedAt": 130.2000002861023,
+            "status": "ok",
+            "finishedAt": 147.30000019073486
+          }
+        ],
+        "events": [
+          {
+            "type": "focus",
+            "role": "dark-mode-start",
+            "value": "18:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 16
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "18:04",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 17.90000009536743
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "18:04",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 18.100000381469727
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "18:45",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 129.7000002861023
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "18:45",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 130.2000002861023
+          }
+        ],
+        "themeEvents": [
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 14
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 33.5
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 33.5
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 147.30000019073486
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 147.40000009536743
+          }
+        ],
+        "errors": [],
+        "inFlight": 0,
+        "maxConcurrent": 1,
+        "snapshot": {
+          "darkModeSchedule": {
+            "enabled": false,
+            "startTime": "18:45",
+            "endTime": "06:00"
+          },
+          "effectiveTheme": "light",
+          "themeRevision": 3,
+          "ready": true,
+          "saving": false
+        },
+        "theme": "light",
+        "values": {
+          "dark-mode-enabled": {
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-start": {
+            "value": "18:45",
+            "checked": false,
+            "disabled": false,
+            "focused": true
+          },
+          "dark-mode-end": {
+            "value": "06:00",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          }
+        },
+        "feedback": {
+          "hidden": true,
+          "text": ""
+        }
+      }
+    },
+    {
+      "name": "end-hour-save15-key100",
+      "options": {
+        "name": "end-hour-save15-key100",
+        "saveDelay": 15,
+        "interval": 100,
+        "field": "end",
+        "segment": "hour",
+        "digits": "07",
+        "expected": "07:00"
+      },
+      "passed": true,
+      "checks": [
+        {
+          "passed": true,
+          "name": "连续数字保留完整控件值",
+          "detail": {
+            "dark-mode-enabled": {
+              "value": "on",
+              "checked": false,
+              "disabled": false,
+              "focused": false
+            },
+            "dark-mode-start": {
+              "value": "18:30",
+              "checked": false,
+              "disabled": false,
+              "focused": false
+            },
+            "dark-mode-end": {
+              "value": "07:00",
+              "checked": false,
+              "disabled": false,
+              "focused": true
+            }
+          }
+        },
+        {
+          "passed": true,
+          "name": "最终保存完整时间",
+          "detail": {
+            "enabled": false,
+            "startTime": "18:30",
+            "endTime": "07:00"
+          }
+        },
+        {
+          "passed": true,
+          "name": "连续编辑没有被保存打断焦点",
+          "detail": [
+            {
+              "type": "focus",
+              "role": "dark-mode-end",
+              "value": "06:00",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 6.900000095367432
+            },
+            {
+              "type": "input",
+              "role": "dark-mode-end",
+              "value": "00:00",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 8.400000095367432
+            },
+            {
+              "type": "change",
+              "role": "dark-mode-end",
+              "value": "00:00",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 8.400000095367432
+            },
+            {
+              "type": "input",
+              "role": "dark-mode-end",
+              "value": "07:00",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 116.40000009536743
+            },
+            {
+              "type": "change",
+              "role": "dark-mode-end",
+              "value": "07:00",
+              "checked": false,
+              "disabled": false,
+              "active": false,
+              "at": 116.7000002861023
+            }
+          ]
+        },
+        {
+          "passed": true,
+          "name": "保存请求没有并发",
+          "detail": 1
+        },
+        {
+          "passed": true,
+          "name": "没有页面异常",
+          "detail": []
+        }
+      ],
+      "during": {
+        "stored": {
+          "enabled": false,
+          "startTime": "18:30",
+          "endTime": "00:00"
+        },
+        "requests": [
+          {
+            "config": {
+              "enabled": false,
+              "startTime": "18:30",
+              "endTime": "00:00"
+            },
+            "startedAt": 8.400000095367432,
+            "status": "ok",
+            "finishedAt": 24.40000009536743
+          },
+          {
+            "config": {
+              "enabled": false,
+              "startTime": "18:30",
+              "endTime": "07:00"
+            },
+            "startedAt": 116.7000002861023,
+            "status": "pending"
+          }
+        ],
+        "events": [
+          {
+            "type": "focus",
+            "role": "dark-mode-end",
+            "value": "06:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 6.900000095367432
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-end",
+            "value": "00:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 8.400000095367432
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-end",
+            "value": "00:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 8.400000095367432
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-end",
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 116.40000009536743
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-end",
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "active": false,
+            "at": 116.7000002861023
+          }
+        ],
+        "themeEvents": [
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 5.800000190734863
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 24.40000009536743
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 24.40000009536743
+          }
+        ],
+        "errors": [],
+        "inFlight": 1,
+        "maxConcurrent": 1,
+        "snapshot": {
+          "darkModeSchedule": {
+            "enabled": false,
+            "startTime": "18:30",
+            "endTime": "00:00"
+          },
+          "effectiveTheme": "light",
+          "themeRevision": 2,
+          "ready": true,
+          "saving": true
+        },
+        "theme": "light",
+        "values": {
+          "dark-mode-enabled": {
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-start": {
+            "value": "18:30",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-end": {
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "focused": true
+          }
+        },
+        "feedback": {
+          "hidden": true,
+          "text": ""
+        }
+      },
+      "state": {
+        "stored": {
+          "enabled": false,
+          "startTime": "18:30",
+          "endTime": "07:00"
+        },
+        "requests": [
+          {
+            "config": {
+              "enabled": false,
+              "startTime": "18:30",
+              "endTime": "00:00"
+            },
+            "startedAt": 8.400000095367432,
+            "status": "ok",
+            "finishedAt": 24.40000009536743
+          },
+          {
+            "config": {
+              "enabled": false,
+              "startTime": "18:30",
+              "endTime": "07:00"
+            },
+            "startedAt": 116.7000002861023,
+            "status": "ok",
+            "finishedAt": 132.7000002861023
+          }
+        ],
+        "events": [
+          {
+            "type": "focus",
+            "role": "dark-mode-end",
+            "value": "06:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 6.900000095367432
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-end",
+            "value": "00:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 8.400000095367432
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-end",
+            "value": "00:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 8.400000095367432
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-end",
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 116.40000009536743
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-end",
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "active": false,
+            "at": 116.7000002861023
+          }
+        ],
+        "themeEvents": [
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 5.800000190734863
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 24.40000009536743
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 24.40000009536743
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 132.7000002861023
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 132.7000002861023
+          }
+        ],
+        "errors": [],
+        "inFlight": 0,
+        "maxConcurrent": 1,
+        "snapshot": {
+          "darkModeSchedule": {
+            "enabled": false,
+            "startTime": "18:30",
+            "endTime": "07:00"
+          },
+          "effectiveTheme": "light",
+          "themeRevision": 3,
+          "ready": true,
+          "saving": false
+        },
+        "theme": "light",
+        "values": {
+          "dark-mode-enabled": {
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-start": {
+            "value": "18:30",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-end": {
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "focused": true
+          }
+        },
+        "feedback": {
+          "hidden": true,
+          "text": ""
+        }
+      }
+    },
+    {
+      "name": "end-minute-save15-key100",
+      "options": {
+        "name": "end-minute-save15-key100",
+        "saveDelay": 15,
+        "interval": 100,
+        "field": "end",
+        "segment": "minute",
+        "digits": "45",
+        "expected": "06:45"
+      },
+      "passed": true,
+      "checks": [
+        {
+          "passed": true,
+          "name": "连续数字保留完整控件值",
+          "detail": {
+            "dark-mode-enabled": {
+              "value": "on",
+              "checked": false,
+              "disabled": false,
+              "focused": false
+            },
+            "dark-mode-start": {
+              "value": "18:30",
+              "checked": false,
+              "disabled": false,
+              "focused": false
+            },
+            "dark-mode-end": {
+              "value": "06:45",
+              "checked": false,
+              "disabled": false,
+              "focused": true
+            }
+          }
+        },
+        {
+          "passed": true,
+          "name": "最终保存完整时间",
+          "detail": {
+            "enabled": false,
+            "startTime": "18:30",
+            "endTime": "06:45"
+          }
+        },
+        {
+          "passed": true,
+          "name": "连续编辑没有被保存打断焦点",
+          "detail": [
+            {
+              "type": "focus",
+              "role": "dark-mode-end",
+              "value": "06:00",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 10.5
+            },
+            {
+              "type": "input",
+              "role": "dark-mode-end",
+              "value": "06:04",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 12.199999809265137
+            },
+            {
+              "type": "change",
+              "role": "dark-mode-end",
+              "value": "06:04",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 12.299999713897705
+            },
+            {
+              "type": "input",
+              "role": "dark-mode-end",
+              "value": "06:45",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 123.40000009536743
+            },
+            {
+              "type": "change",
+              "role": "dark-mode-end",
+              "value": "06:45",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 123.69999980926514
+            }
+          ]
+        },
+        {
+          "passed": true,
+          "name": "保存请求没有并发",
+          "detail": 1
+        },
+        {
+          "passed": true,
+          "name": "没有页面异常",
+          "detail": []
+        }
+      ],
+      "during": {
+        "stored": {
+          "enabled": false,
+          "startTime": "18:30",
+          "endTime": "06:04"
+        },
+        "requests": [
+          {
+            "config": {
+              "enabled": false,
+              "startTime": "18:30",
+              "endTime": "06:04"
+            },
+            "startedAt": 12.199999809265137,
+            "status": "ok",
+            "finishedAt": 28.699999809265137
+          },
+          {
+            "config": {
+              "enabled": false,
+              "startTime": "18:30",
+              "endTime": "06:45"
+            },
+            "startedAt": 123.69999980926514,
+            "status": "pending"
+          }
+        ],
+        "events": [
+          {
+            "type": "focus",
+            "role": "dark-mode-end",
+            "value": "06:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 10.5
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-end",
+            "value": "06:04",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 12.199999809265137
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-end",
+            "value": "06:04",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 12.299999713897705
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-end",
+            "value": "06:45",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 123.40000009536743
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-end",
+            "value": "06:45",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 123.69999980926514
+          }
+        ],
+        "themeEvents": [
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 8.599999904632568
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 28.699999809265137
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 28.699999809265137
+          }
+        ],
+        "errors": [],
+        "inFlight": 1,
+        "maxConcurrent": 1,
+        "snapshot": {
+          "darkModeSchedule": {
+            "enabled": false,
+            "startTime": "18:30",
+            "endTime": "06:04"
+          },
+          "effectiveTheme": "light",
+          "themeRevision": 2,
+          "ready": true,
+          "saving": true
+        },
+        "theme": "light",
+        "values": {
+          "dark-mode-enabled": {
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-start": {
+            "value": "18:30",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-end": {
+            "value": "06:45",
+            "checked": false,
+            "disabled": false,
+            "focused": true
+          }
+        },
+        "feedback": {
+          "hidden": true,
+          "text": ""
+        }
+      },
+      "state": {
+        "stored": {
+          "enabled": false,
+          "startTime": "18:30",
+          "endTime": "06:45"
+        },
+        "requests": [
+          {
+            "config": {
+              "enabled": false,
+              "startTime": "18:30",
+              "endTime": "06:04"
+            },
+            "startedAt": 12.199999809265137,
+            "status": "ok",
+            "finishedAt": 28.699999809265137
+          },
+          {
+            "config": {
+              "enabled": false,
+              "startTime": "18:30",
+              "endTime": "06:45"
+            },
+            "startedAt": 123.69999980926514,
+            "status": "ok",
+            "finishedAt": 140.59999990463257
+          }
+        ],
+        "events": [
+          {
+            "type": "focus",
+            "role": "dark-mode-end",
+            "value": "06:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 10.5
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-end",
+            "value": "06:04",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 12.199999809265137
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-end",
+            "value": "06:04",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 12.299999713897705
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-end",
+            "value": "06:45",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 123.40000009536743
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-end",
+            "value": "06:45",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 123.69999980926514
+          }
+        ],
+        "themeEvents": [
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 8.599999904632568
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 28.699999809265137
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 28.699999809265137
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 140.59999990463257
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 140.59999990463257
+          }
+        ],
+        "errors": [],
+        "inFlight": 0,
+        "maxConcurrent": 1,
+        "snapshot": {
+          "darkModeSchedule": {
+            "enabled": false,
+            "startTime": "18:30",
+            "endTime": "06:45"
+          },
+          "effectiveTheme": "light",
+          "themeRevision": 3,
+          "ready": true,
+          "saving": false
+        },
+        "theme": "light",
+        "values": {
+          "dark-mode-enabled": {
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-start": {
+            "value": "18:30",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-end": {
+            "value": "06:45",
+            "checked": false,
+            "disabled": false,
+            "focused": true
+          }
+        },
+        "feedback": {
+          "hidden": true,
+          "text": ""
+        }
+      }
+    },
+    {
+      "name": "start-hour-save200-key30",
+      "options": {
+        "name": "start-hour-save200-key30",
+        "saveDelay": 200,
+        "interval": 30,
+        "field": "start",
+        "segment": "hour",
+        "digits": "19",
+        "expected": "19:30"
+      },
+      "passed": true,
+      "checks": [
+        {
+          "passed": true,
+          "name": "连续数字保留完整控件值",
+          "detail": {
+            "dark-mode-enabled": {
+              "value": "on",
+              "checked": false,
+              "disabled": false,
+              "focused": false
+            },
+            "dark-mode-start": {
+              "value": "19:30",
+              "checked": false,
+              "disabled": false,
+              "focused": true
+            },
+            "dark-mode-end": {
+              "value": "06:00",
+              "checked": false,
+              "disabled": false,
+              "focused": false
+            }
+          }
+        },
+        {
+          "passed": true,
+          "name": "最终保存完整时间",
+          "detail": {
+            "enabled": false,
+            "startTime": "19:30",
+            "endTime": "06:00"
+          }
+        },
+        {
+          "passed": true,
+          "name": "连续编辑没有被保存打断焦点",
+          "detail": [
+            {
+              "type": "focus",
+              "role": "dark-mode-start",
+              "value": "18:30",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 15
+            },
+            {
+              "type": "input",
+              "role": "dark-mode-start",
+              "value": "01:30",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 16.800000190734863
+            },
+            {
+              "type": "change",
+              "role": "dark-mode-start",
+              "value": "01:30",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 16.90000009536743
+            },
+            {
+              "type": "input",
+              "role": "dark-mode-start",
+              "value": "19:30",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 57.80000019073486
+            },
+            {
+              "type": "change",
+              "role": "dark-mode-start",
+              "value": "19:30",
+              "checked": false,
+              "disabled": false,
+              "active": false,
+              "at": 58
+            }
+          ]
+        },
+        {
+          "passed": true,
+          "name": "保存请求没有并发",
+          "detail": 1
+        },
+        {
+          "passed": true,
+          "name": "没有页面异常",
+          "detail": []
+        }
+      ],
+      "during": {
+        "stored": {
+          "enabled": false,
+          "startTime": "18:30",
+          "endTime": "06:00"
+        },
+        "requests": [
+          {
+            "config": {
+              "enabled": false,
+              "startTime": "01:30",
+              "endTime": "06:00"
+            },
+            "startedAt": 16.90000009536743,
+            "status": "pending"
+          }
+        ],
+        "events": [
+          {
+            "type": "focus",
+            "role": "dark-mode-start",
+            "value": "18:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 15
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "01:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 16.800000190734863
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "01:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 16.90000009536743
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 57.80000019073486
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "active": false,
+            "at": 58
+          }
+        ],
+        "themeEvents": [
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 13
+          }
+        ],
+        "errors": [],
+        "inFlight": 1,
+        "maxConcurrent": 1,
+        "snapshot": {
+          "darkModeSchedule": {
+            "enabled": false,
+            "startTime": "18:30",
+            "endTime": "06:00"
+          },
+          "effectiveTheme": "light",
+          "themeRevision": 1,
+          "ready": true,
+          "saving": true
+        },
+        "theme": "light",
+        "values": {
+          "dark-mode-enabled": {
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-start": {
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "focused": true
+          },
+          "dark-mode-end": {
+            "value": "06:00",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          }
+        },
+        "feedback": {
+          "hidden": true,
+          "text": ""
+        }
+      },
+      "state": {
+        "stored": {
+          "enabled": false,
+          "startTime": "19:30",
+          "endTime": "06:00"
+        },
+        "requests": [
+          {
+            "config": {
+              "enabled": false,
+              "startTime": "01:30",
+              "endTime": "06:00"
+            },
+            "startedAt": 16.90000009536743,
+            "status": "ok",
+            "finishedAt": 219.09999990463257
+          },
+          {
+            "config": {
+              "enabled": false,
+              "startTime": "19:30",
+              "endTime": "06:00"
+            },
+            "startedAt": 219.30000019073486,
+            "status": "ok",
+            "finishedAt": 421.5
+          }
+        ],
+        "events": [
+          {
+            "type": "focus",
+            "role": "dark-mode-start",
+            "value": "18:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 15
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "01:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 16.800000190734863
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "01:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 16.90000009536743
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 57.80000019073486
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "active": false,
+            "at": 58
+          }
+        ],
+        "themeEvents": [
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 13
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 219
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 219.09999990463257
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 421.5
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 421.5
+          }
+        ],
+        "errors": [],
+        "inFlight": 0,
+        "maxConcurrent": 1,
+        "snapshot": {
+          "darkModeSchedule": {
+            "enabled": false,
+            "startTime": "19:30",
+            "endTime": "06:00"
+          },
+          "effectiveTheme": "light",
+          "themeRevision": 3,
+          "ready": true,
+          "saving": false
+        },
+        "theme": "light",
+        "values": {
+          "dark-mode-enabled": {
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-start": {
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "focused": true
+          },
+          "dark-mode-end": {
+            "value": "06:00",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          }
+        },
+        "feedback": {
+          "hidden": true,
+          "text": ""
+        }
+      }
+    },
+    {
+      "name": "start-minute-save200-key30",
+      "options": {
+        "name": "start-minute-save200-key30",
+        "saveDelay": 200,
+        "interval": 30,
+        "field": "start",
+        "segment": "minute",
+        "digits": "45",
+        "expected": "18:45"
+      },
+      "passed": true,
+      "checks": [
+        {
+          "passed": true,
+          "name": "连续数字保留完整控件值",
+          "detail": {
+            "dark-mode-enabled": {
+              "value": "on",
+              "checked": false,
+              "disabled": false,
+              "focused": false
+            },
+            "dark-mode-start": {
+              "value": "18:45",
+              "checked": false,
+              "disabled": false,
+              "focused": true
+            },
+            "dark-mode-end": {
+              "value": "06:00",
+              "checked": false,
+              "disabled": false,
+              "focused": false
+            }
+          }
+        },
+        {
+          "passed": true,
+          "name": "最终保存完整时间",
+          "detail": {
+            "enabled": false,
+            "startTime": "18:45",
+            "endTime": "06:00"
+          }
+        },
+        {
+          "passed": true,
+          "name": "连续编辑没有被保存打断焦点",
+          "detail": [
+            {
+              "type": "focus",
+              "role": "dark-mode-start",
+              "value": "18:30",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 16
+            },
+            {
+              "type": "input",
+              "role": "dark-mode-start",
+              "value": "18:04",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 17.799999713897705
+            },
+            {
+              "type": "change",
+              "role": "dark-mode-start",
+              "value": "18:04",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 18
+            },
+            {
+              "type": "input",
+              "role": "dark-mode-start",
+              "value": "18:45",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 58.799999713897705
+            },
+            {
+              "type": "change",
+              "role": "dark-mode-start",
+              "value": "18:45",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 59
+            }
+          ]
+        },
+        {
+          "passed": true,
+          "name": "保存请求没有并发",
+          "detail": 1
+        },
+        {
+          "passed": true,
+          "name": "没有页面异常",
+          "detail": []
+        }
+      ],
+      "during": {
+        "stored": {
+          "enabled": false,
+          "startTime": "18:30",
+          "endTime": "06:00"
+        },
+        "requests": [
+          {
+            "config": {
+              "enabled": false,
+              "startTime": "18:04",
+              "endTime": "06:00"
+            },
+            "startedAt": 18,
+            "status": "pending"
+          }
+        ],
+        "events": [
+          {
+            "type": "focus",
+            "role": "dark-mode-start",
+            "value": "18:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 16
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "18:04",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 17.799999713897705
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "18:04",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 18
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "18:45",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 58.799999713897705
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "18:45",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 59
+          }
+        ],
+        "themeEvents": [
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 14.399999618530273
+          }
+        ],
+        "errors": [],
+        "inFlight": 1,
+        "maxConcurrent": 1,
+        "snapshot": {
+          "darkModeSchedule": {
+            "enabled": false,
+            "startTime": "18:30",
+            "endTime": "06:00"
+          },
+          "effectiveTheme": "light",
+          "themeRevision": 1,
+          "ready": true,
+          "saving": true
+        },
+        "theme": "light",
+        "values": {
+          "dark-mode-enabled": {
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-start": {
+            "value": "18:45",
+            "checked": false,
+            "disabled": false,
+            "focused": true
+          },
+          "dark-mode-end": {
+            "value": "06:00",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          }
+        },
+        "feedback": {
+          "hidden": true,
+          "text": ""
+        }
+      },
+      "state": {
+        "stored": {
+          "enabled": false,
+          "startTime": "18:45",
+          "endTime": "06:00"
+        },
+        "requests": [
+          {
+            "config": {
+              "enabled": false,
+              "startTime": "18:04",
+              "endTime": "06:00"
+            },
+            "startedAt": 18,
+            "status": "ok",
+            "finishedAt": 219.5
+          },
+          {
+            "config": {
+              "enabled": false,
+              "startTime": "18:45",
+              "endTime": "06:00"
+            },
+            "startedAt": 219.5,
+            "status": "ok",
+            "finishedAt": 422
+          }
+        ],
+        "events": [
+          {
+            "type": "focus",
+            "role": "dark-mode-start",
+            "value": "18:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 16
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "18:04",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 17.799999713897705
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "18:04",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 18
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "18:45",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 58.799999713897705
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "18:45",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 59
+          }
+        ],
+        "themeEvents": [
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 14.399999618530273
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 219.39999961853027
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 219.5
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 422
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 422.09999990463257
+          }
+        ],
+        "errors": [],
+        "inFlight": 0,
+        "maxConcurrent": 1,
+        "snapshot": {
+          "darkModeSchedule": {
+            "enabled": false,
+            "startTime": "18:45",
+            "endTime": "06:00"
+          },
+          "effectiveTheme": "light",
+          "themeRevision": 3,
+          "ready": true,
+          "saving": false
+        },
+        "theme": "light",
+        "values": {
+          "dark-mode-enabled": {
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-start": {
+            "value": "18:45",
+            "checked": false,
+            "disabled": false,
+            "focused": true
+          },
+          "dark-mode-end": {
+            "value": "06:00",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          }
+        },
+        "feedback": {
+          "hidden": true,
+          "text": ""
+        }
+      }
+    },
+    {
+      "name": "end-hour-save200-key30",
+      "options": {
+        "name": "end-hour-save200-key30",
+        "saveDelay": 200,
+        "interval": 30,
+        "field": "end",
+        "segment": "hour",
+        "digits": "07",
+        "expected": "07:00"
+      },
+      "passed": true,
+      "checks": [
+        {
+          "passed": true,
+          "name": "连续数字保留完整控件值",
+          "detail": {
+            "dark-mode-enabled": {
+              "value": "on",
+              "checked": false,
+              "disabled": false,
+              "focused": false
+            },
+            "dark-mode-start": {
+              "value": "18:30",
+              "checked": false,
+              "disabled": false,
+              "focused": false
+            },
+            "dark-mode-end": {
+              "value": "07:00",
+              "checked": false,
+              "disabled": false,
+              "focused": true
+            }
+          }
+        },
+        {
+          "passed": true,
+          "name": "最终保存完整时间",
+          "detail": {
+            "enabled": false,
+            "startTime": "18:30",
+            "endTime": "07:00"
+          }
+        },
+        {
+          "passed": true,
+          "name": "连续编辑没有被保存打断焦点",
+          "detail": [
+            {
+              "type": "focus",
+              "role": "dark-mode-end",
+              "value": "06:00",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 15.899999618530273
+            },
+            {
+              "type": "input",
+              "role": "dark-mode-end",
+              "value": "00:00",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 17.09999990463257
+            },
+            {
+              "type": "change",
+              "role": "dark-mode-end",
+              "value": "00:00",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 17.199999809265137
+            },
+            {
+              "type": "input",
+              "role": "dark-mode-end",
+              "value": "07:00",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 53.69999980926514
+            },
+            {
+              "type": "change",
+              "role": "dark-mode-end",
+              "value": "07:00",
+              "checked": false,
+              "disabled": false,
+              "active": false,
+              "at": 53.89999961853027
+            }
+          ]
+        },
+        {
+          "passed": true,
+          "name": "保存请求没有并发",
+          "detail": 1
+        },
+        {
+          "passed": true,
+          "name": "没有页面异常",
+          "detail": []
+        }
+      ],
+      "during": {
+        "stored": {
+          "enabled": false,
+          "startTime": "18:30",
+          "endTime": "06:00"
+        },
+        "requests": [
+          {
+            "config": {
+              "enabled": false,
+              "startTime": "18:30",
+              "endTime": "00:00"
+            },
+            "startedAt": 17.199999809265137,
+            "status": "pending"
+          }
+        ],
+        "events": [
+          {
+            "type": "focus",
+            "role": "dark-mode-end",
+            "value": "06:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 15.899999618530273
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-end",
+            "value": "00:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 17.09999990463257
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-end",
+            "value": "00:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 17.199999809265137
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-end",
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 53.69999980926514
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-end",
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "active": false,
+            "at": 53.89999961853027
+          }
+        ],
+        "themeEvents": [
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 14.099999904632568
+          }
+        ],
+        "errors": [],
+        "inFlight": 1,
+        "maxConcurrent": 1,
+        "snapshot": {
+          "darkModeSchedule": {
+            "enabled": false,
+            "startTime": "18:30",
+            "endTime": "06:00"
+          },
+          "effectiveTheme": "light",
+          "themeRevision": 1,
+          "ready": true,
+          "saving": true
+        },
+        "theme": "light",
+        "values": {
+          "dark-mode-enabled": {
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-start": {
+            "value": "18:30",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-end": {
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "focused": true
+          }
+        },
+        "feedback": {
+          "hidden": true,
+          "text": ""
+        }
+      },
+      "state": {
+        "stored": {
+          "enabled": false,
+          "startTime": "18:30",
+          "endTime": "07:00"
+        },
+        "requests": [
+          {
+            "config": {
+              "enabled": false,
+              "startTime": "18:30",
+              "endTime": "00:00"
+            },
+            "startedAt": 17.199999809265137,
+            "status": "ok",
+            "finishedAt": 218.69999980926514
+          },
+          {
+            "config": {
+              "enabled": false,
+              "startTime": "18:30",
+              "endTime": "07:00"
+            },
+            "startedAt": 218.69999980926514,
+            "status": "ok",
+            "finishedAt": 420.3999996185303
+          }
+        ],
+        "events": [
+          {
+            "type": "focus",
+            "role": "dark-mode-end",
+            "value": "06:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 15.899999618530273
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-end",
+            "value": "00:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 17.09999990463257
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-end",
+            "value": "00:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 17.199999809265137
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-end",
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 53.69999980926514
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-end",
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "active": false,
+            "at": 53.89999961853027
+          }
+        ],
+        "themeEvents": [
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 14.099999904632568
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 218.59999990463257
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 218.69999980926514
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 420.2999997138977
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 420.3999996185303
+          }
+        ],
+        "errors": [],
+        "inFlight": 0,
+        "maxConcurrent": 1,
+        "snapshot": {
+          "darkModeSchedule": {
+            "enabled": false,
+            "startTime": "18:30",
+            "endTime": "07:00"
+          },
+          "effectiveTheme": "light",
+          "themeRevision": 3,
+          "ready": true,
+          "saving": false
+        },
+        "theme": "light",
+        "values": {
+          "dark-mode-enabled": {
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-start": {
+            "value": "18:30",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-end": {
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "focused": true
+          }
+        },
+        "feedback": {
+          "hidden": true,
+          "text": ""
+        }
+      }
+    },
+    {
+      "name": "end-minute-save200-key30",
+      "options": {
+        "name": "end-minute-save200-key30",
+        "saveDelay": 200,
+        "interval": 30,
+        "field": "end",
+        "segment": "minute",
+        "digits": "45",
+        "expected": "06:45"
+      },
+      "passed": true,
+      "checks": [
+        {
+          "passed": true,
+          "name": "连续数字保留完整控件值",
+          "detail": {
+            "dark-mode-enabled": {
+              "value": "on",
+              "checked": false,
+              "disabled": false,
+              "focused": false
+            },
+            "dark-mode-start": {
+              "value": "18:30",
+              "checked": false,
+              "disabled": false,
+              "focused": false
+            },
+            "dark-mode-end": {
+              "value": "06:45",
+              "checked": false,
+              "disabled": false,
+              "focused": true
+            }
+          }
+        },
+        {
+          "passed": true,
+          "name": "最终保存完整时间",
+          "detail": {
+            "enabled": false,
+            "startTime": "18:30",
+            "endTime": "06:45"
+          }
+        },
+        {
+          "passed": true,
+          "name": "连续编辑没有被保存打断焦点",
+          "detail": [
+            {
+              "type": "focus",
+              "role": "dark-mode-end",
+              "value": "06:00",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 16.699999809265137
+            },
+            {
+              "type": "input",
+              "role": "dark-mode-end",
+              "value": "06:04",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 18.90000009536743
+            },
+            {
+              "type": "change",
+              "role": "dark-mode-end",
+              "value": "06:04",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 19
+            },
+            {
+              "type": "input",
+              "role": "dark-mode-end",
+              "value": "06:45",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 58.09999990463257
+            },
+            {
+              "type": "change",
+              "role": "dark-mode-end",
+              "value": "06:45",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 58.299999713897705
+            }
+          ]
+        },
+        {
+          "passed": true,
+          "name": "保存请求没有并发",
+          "detail": 1
+        },
+        {
+          "passed": true,
+          "name": "没有页面异常",
+          "detail": []
+        }
+      ],
+      "during": {
+        "stored": {
+          "enabled": false,
+          "startTime": "18:30",
+          "endTime": "06:00"
+        },
+        "requests": [
+          {
+            "config": {
+              "enabled": false,
+              "startTime": "18:30",
+              "endTime": "06:04"
+            },
+            "startedAt": 19,
+            "status": "pending"
+          }
+        ],
+        "events": [
+          {
+            "type": "focus",
+            "role": "dark-mode-end",
+            "value": "06:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 16.699999809265137
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-end",
+            "value": "06:04",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 18.90000009536743
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-end",
+            "value": "06:04",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 19
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-end",
+            "value": "06:45",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 58.09999990463257
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-end",
+            "value": "06:45",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 58.299999713897705
+          }
+        ],
+        "themeEvents": [
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 15
+          }
+        ],
+        "errors": [],
+        "inFlight": 1,
+        "maxConcurrent": 1,
+        "snapshot": {
+          "darkModeSchedule": {
+            "enabled": false,
+            "startTime": "18:30",
+            "endTime": "06:00"
+          },
+          "effectiveTheme": "light",
+          "themeRevision": 1,
+          "ready": true,
+          "saving": true
+        },
+        "theme": "light",
+        "values": {
+          "dark-mode-enabled": {
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-start": {
+            "value": "18:30",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-end": {
+            "value": "06:45",
+            "checked": false,
+            "disabled": false,
+            "focused": true
+          }
+        },
+        "feedback": {
+          "hidden": true,
+          "text": ""
+        }
+      },
+      "state": {
+        "stored": {
+          "enabled": false,
+          "startTime": "18:30",
+          "endTime": "06:45"
+        },
+        "requests": [
+          {
+            "config": {
+              "enabled": false,
+              "startTime": "18:30",
+              "endTime": "06:04"
+            },
+            "startedAt": 19,
+            "status": "ok",
+            "finishedAt": 220.19999980926514
+          },
+          {
+            "config": {
+              "enabled": false,
+              "startTime": "18:30",
+              "endTime": "06:45"
+            },
+            "startedAt": 220.19999980926514,
+            "status": "ok",
+            "finishedAt": 422.19999980926514
+          }
+        ],
+        "events": [
+          {
+            "type": "focus",
+            "role": "dark-mode-end",
+            "value": "06:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 16.699999809265137
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-end",
+            "value": "06:04",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 18.90000009536743
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-end",
+            "value": "06:04",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 19
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-end",
+            "value": "06:45",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 58.09999990463257
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-end",
+            "value": "06:45",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 58.299999713897705
+          }
+        ],
+        "themeEvents": [
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 15
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 220.09999990463257
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 220.19999980926514
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 422.09999990463257
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 422.19999980926514
+          }
+        ],
+        "errors": [],
+        "inFlight": 0,
+        "maxConcurrent": 1,
+        "snapshot": {
+          "darkModeSchedule": {
+            "enabled": false,
+            "startTime": "18:30",
+            "endTime": "06:45"
+          },
+          "effectiveTheme": "light",
+          "themeRevision": 3,
+          "ready": true,
+          "saving": false
+        },
+        "theme": "light",
+        "values": {
+          "dark-mode-enabled": {
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-start": {
+            "value": "18:30",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-end": {
+            "value": "06:45",
+            "checked": false,
+            "disabled": false,
+            "focused": true
+          }
+        },
+        "feedback": {
+          "hidden": true,
+          "text": ""
+        }
+      }
+    },
+    {
+      "name": "enabled-start-hour-save15-key100",
+      "options": {
+        "name": "enabled-start-hour-save15-key100",
+        "saveDelay": 15,
+        "interval": 100,
+        "initial": {
+          "enabled": true,
+          "endTime": "14:00"
+        },
+        "field": "start",
+        "segment": "hour",
+        "digits": "19",
+        "expected": "19:30",
+        "expectThemes": [
+          "dark",
+          "light",
+          "dark"
+        ]
+      },
+      "passed": true,
+      "checks": [
+        {
+          "passed": true,
+          "name": "连续数字保留完整控件值",
+          "detail": {
+            "dark-mode-enabled": {
+              "value": "on",
+              "checked": true,
+              "disabled": false,
+              "focused": false
+            },
+            "dark-mode-start": {
+              "value": "19:30",
+              "checked": false,
+              "disabled": false,
+              "focused": true
+            },
+            "dark-mode-end": {
+              "value": "14:00",
+              "checked": false,
+              "disabled": false,
+              "focused": false
+            }
+          }
+        },
+        {
+          "passed": true,
+          "name": "最终保存完整时间",
+          "detail": {
+            "enabled": true,
+            "startTime": "19:30",
+            "endTime": "14:00"
+          }
+        },
+        {
+          "passed": true,
+          "name": "连续编辑没有被保存打断焦点",
+          "detail": [
+            {
+              "type": "focus",
+              "role": "dark-mode-start",
+              "value": "18:30",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 18.59999990463257
+            },
+            {
+              "type": "input",
+              "role": "dark-mode-start",
+              "value": "01:30",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 20
+            },
+            {
+              "type": "change",
+              "role": "dark-mode-start",
+              "value": "01:30",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 20.09999990463257
+            },
+            {
+              "type": "input",
+              "role": "dark-mode-start",
+              "value": "19:30",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 131.7999997138977
+            },
+            {
+              "type": "change",
+              "role": "dark-mode-start",
+              "value": "19:30",
+              "checked": false,
+              "disabled": false,
+              "active": false,
+              "at": 132.5
+            }
+          ]
+        },
+        {
+          "passed": true,
+          "name": "连续输入跨越浅深色和原生 color-scheme 切换仍完整",
+          "detail": [
+            {
+              "theme": "dark",
+              "colorScheme": "dark",
+              "at": 15.699999809265137
+            },
+            {
+              "theme": "light",
+              "colorScheme": "light",
+              "at": 37
+            },
+            {
+              "theme": "light",
+              "colorScheme": "light",
+              "at": 37
+            },
+            {
+              "theme": "dark",
+              "colorScheme": "dark",
+              "at": 150.69999980926514
+            },
+            {
+              "theme": "dark",
+              "colorScheme": "dark",
+              "at": 150.69999980926514
+            }
+          ]
+        },
+        {
+          "passed": true,
+          "name": "保存请求没有并发",
+          "detail": 1
+        },
+        {
+          "passed": true,
+          "name": "没有页面异常",
+          "detail": []
+        }
+      ],
+      "during": {
+        "stored": {
+          "enabled": true,
+          "startTime": "01:30",
+          "endTime": "14:00"
+        },
+        "requests": [
+          {
+            "config": {
+              "enabled": true,
+              "startTime": "01:30",
+              "endTime": "14:00"
+            },
+            "startedAt": 20.09999990463257,
+            "status": "ok",
+            "finishedAt": 37
+          },
+          {
+            "config": {
+              "enabled": true,
+              "startTime": "19:30",
+              "endTime": "14:00"
+            },
+            "startedAt": 132.40000009536743,
+            "status": "pending"
+          }
+        ],
+        "events": [
+          {
+            "type": "focus",
+            "role": "dark-mode-start",
+            "value": "18:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 18.59999990463257
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "01:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 20
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "01:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 20.09999990463257
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 131.7999997138977
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "active": false,
+            "at": 132.5
+          }
+        ],
+        "themeEvents": [
+          {
+            "theme": "dark",
+            "colorScheme": "dark",
+            "at": 15.699999809265137
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 37
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 37
+          }
+        ],
+        "errors": [],
+        "inFlight": 1,
+        "maxConcurrent": 1,
+        "snapshot": {
+          "darkModeSchedule": {
+            "enabled": true,
+            "startTime": "01:30",
+            "endTime": "14:00"
+          },
+          "effectiveTheme": "light",
+          "themeRevision": 2,
+          "ready": true,
+          "saving": true
+        },
+        "theme": "light",
+        "values": {
+          "dark-mode-enabled": {
+            "value": "on",
+            "checked": true,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-start": {
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "focused": true
+          },
+          "dark-mode-end": {
+            "value": "14:00",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          }
+        },
+        "feedback": {
+          "hidden": true,
+          "text": ""
+        }
+      },
+      "state": {
+        "stored": {
+          "enabled": true,
+          "startTime": "19:30",
+          "endTime": "14:00"
+        },
+        "requests": [
+          {
+            "config": {
+              "enabled": true,
+              "startTime": "01:30",
+              "endTime": "14:00"
+            },
+            "startedAt": 20.09999990463257,
+            "status": "ok",
+            "finishedAt": 37
+          },
+          {
+            "config": {
+              "enabled": true,
+              "startTime": "19:30",
+              "endTime": "14:00"
+            },
+            "startedAt": 132.40000009536743,
+            "status": "ok",
+            "finishedAt": 150.69999980926514
+          }
+        ],
+        "events": [
+          {
+            "type": "focus",
+            "role": "dark-mode-start",
+            "value": "18:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 18.59999990463257
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "01:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 20
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "01:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 20.09999990463257
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 131.7999997138977
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "active": false,
+            "at": 132.5
+          }
+        ],
+        "themeEvents": [
+          {
+            "theme": "dark",
+            "colorScheme": "dark",
+            "at": 15.699999809265137
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 37
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 37
+          },
+          {
+            "theme": "dark",
+            "colorScheme": "dark",
+            "at": 150.69999980926514
+          },
+          {
+            "theme": "dark",
+            "colorScheme": "dark",
+            "at": 150.69999980926514
+          }
+        ],
+        "errors": [],
+        "inFlight": 0,
+        "maxConcurrent": 1,
+        "snapshot": {
+          "darkModeSchedule": {
+            "enabled": true,
+            "startTime": "19:30",
+            "endTime": "14:00"
+          },
+          "effectiveTheme": "dark",
+          "themeRevision": 3,
+          "ready": true,
+          "saving": false
+        },
+        "theme": "dark",
+        "values": {
+          "dark-mode-enabled": {
+            "value": "on",
+            "checked": true,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-start": {
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "focused": true
+          },
+          "dark-mode-end": {
+            "value": "14:00",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          }
+        },
+        "feedback": {
+          "hidden": true,
+          "text": ""
+        }
+      }
+    },
+    {
+      "name": "slow-two-fields",
+      "options": {
+        "name": "slow-two-fields",
+        "saveDelay": 200,
+        "initial": {
+          "enabled": true
+        }
+      },
+      "passed": true,
+      "checks": [
+        {
+          "passed": true,
+          "name": "第二字段在先前保存未完成时编辑"
+        },
+        {
+          "passed": true,
+          "name": "慢保存期间两字段最后输入都保存",
+          "detail": {
+            "enabled": true,
+            "startTime": "19:30",
+            "endTime": "07:00"
+          }
+        },
+        {
+          "passed": true,
+          "name": "回包没有覆盖后续输入",
+          "detail": {
+            "dark-mode-enabled": {
+              "value": "on",
+              "checked": true,
+              "disabled": false,
+              "focused": false
+            },
+            "dark-mode-start": {
+              "value": "19:30",
+              "checked": false,
+              "disabled": false,
+              "focused": false
+            },
+            "dark-mode-end": {
+              "value": "07:00",
+              "checked": false,
+              "disabled": false,
+              "focused": true
+            }
+          }
+        },
+        {
+          "passed": true,
+          "name": "保存请求没有并发",
+          "detail": 1
+        },
+        {
+          "passed": true,
+          "name": "没有页面异常",
+          "detail": []
+        }
+      ],
+      "during": {
+        "stored": {
+          "enabled": true,
+          "startTime": "18:30",
+          "endTime": "06:00"
+        },
+        "requests": [
+          {
+            "config": {
+              "enabled": true,
+              "startTime": "01:30",
+              "endTime": "06:00"
+            },
+            "startedAt": 17,
+            "status": "pending"
+          }
+        ],
+        "events": [
+          {
+            "type": "focus",
+            "role": "dark-mode-start",
+            "value": "18:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 15.599999904632568
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "01:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 17
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "01:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 17.09999990463257
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 55.19999980926514
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "active": false,
+            "at": 55.40000009536743
+          },
+          {
+            "type": "blur",
+            "role": "dark-mode-start",
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "active": false,
+            "at": 57
+          },
+          {
+            "type": "focus",
+            "role": "dark-mode-end",
+            "value": "06:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 57.19999980926514
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-end",
+            "value": "00:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 58.40000009536743
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-end",
+            "value": "00:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 58.5
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-end",
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 95.59999990463257
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-end",
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "active": false,
+            "at": 96.5
+          }
+        ],
+        "themeEvents": [
+          {
+            "theme": "dark",
+            "colorScheme": "dark",
+            "at": 13.400000095367432
+          }
+        ],
+        "errors": [],
+        "inFlight": 1,
+        "maxConcurrent": 1,
+        "snapshot": {
+          "darkModeSchedule": {
+            "enabled": true,
+            "startTime": "18:30",
+            "endTime": "06:00"
+          },
+          "effectiveTheme": "dark",
+          "themeRevision": 1,
+          "ready": true,
+          "saving": true
+        },
+        "theme": "dark",
+        "values": {
+          "dark-mode-enabled": {
+            "value": "on",
+            "checked": true,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-start": {
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-end": {
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "focused": true
+          }
+        },
+        "feedback": {
+          "hidden": true,
+          "text": ""
+        }
+      },
+      "state": {
+        "stored": {
+          "enabled": true,
+          "startTime": "19:30",
+          "endTime": "07:00"
+        },
+        "requests": [
+          {
+            "config": {
+              "enabled": true,
+              "startTime": "01:30",
+              "endTime": "06:00"
+            },
+            "startedAt": 17,
+            "status": "ok",
+            "finishedAt": 219.40000009536743
+          },
+          {
+            "config": {
+              "enabled": true,
+              "startTime": "19:30",
+              "endTime": "07:00"
+            },
+            "startedAt": 219.5,
+            "status": "ok",
+            "finishedAt": 422.19999980926514
+          }
+        ],
+        "events": [
+          {
+            "type": "focus",
+            "role": "dark-mode-start",
+            "value": "18:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 15.599999904632568
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "01:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 17
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "01:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 17.09999990463257
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 55.19999980926514
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "active": false,
+            "at": 55.40000009536743
+          },
+          {
+            "type": "blur",
+            "role": "dark-mode-start",
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "active": false,
+            "at": 57
+          },
+          {
+            "type": "focus",
+            "role": "dark-mode-end",
+            "value": "06:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 57.19999980926514
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-end",
+            "value": "00:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 58.40000009536743
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-end",
+            "value": "00:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 58.5
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-end",
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 95.59999990463257
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-end",
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "active": false,
+            "at": 96.5
+          }
+        ],
+        "themeEvents": [
+          {
+            "theme": "dark",
+            "colorScheme": "dark",
+            "at": 13.400000095367432
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 219.2999997138977
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 219.40000009536743
+          },
+          {
+            "theme": "dark",
+            "colorScheme": "dark",
+            "at": 422.09999990463257
+          },
+          {
+            "theme": "dark",
+            "colorScheme": "dark",
+            "at": 422.19999980926514
+          }
+        ],
+        "errors": [],
+        "inFlight": 0,
+        "maxConcurrent": 1,
+        "snapshot": {
+          "darkModeSchedule": {
+            "enabled": true,
+            "startTime": "19:30",
+            "endTime": "07:00"
+          },
+          "effectiveTheme": "dark",
+          "themeRevision": 3,
+          "ready": true,
+          "saving": false
+        },
+        "theme": "dark",
+        "values": {
+          "dark-mode-enabled": {
+            "value": "on",
+            "checked": true,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-start": {
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-end": {
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "focused": true
+          }
+        },
+        "feedback": {
+          "hidden": true,
+          "text": ""
+        }
+      }
+    },
+    {
+      "name": "disable-during-save",
+      "options": {
+        "name": "disable-during-save",
+        "saveDelay": 200,
+        "initial": {
+          "enabled": true
+        }
+      },
+      "passed": true,
+      "checks": [
+        {
+          "passed": true,
+          "name": "关闭前真实键盘编辑已进入保存"
+        },
+        {
+          "passed": true,
+          "name": "保存中点击关闭最终关闭并转浅色",
+          "detail": {
+            "enabled": false,
+            "startTime": "19:30",
+            "endTime": "06:00"
+          }
+        },
+        {
+          "passed": true,
+          "name": "关闭保留先前在途保存成功的时段",
+          "detail": {
+            "pendingConfig": {
+              "enabled": true,
+              "startTime": "19:30",
+              "endTime": "06:00"
+            },
+            "stored": {
+              "enabled": false,
+              "startTime": "19:30",
+              "endTime": "06:00"
+            }
+          }
+        },
+        {
+          "passed": true,
+          "name": "保存请求没有并发",
+          "detail": 1
+        },
+        {
+          "passed": true,
+          "name": "没有页面异常",
+          "detail": []
+        }
+      ],
+      "during": {
+        "stored": {
+          "enabled": true,
+          "startTime": "18:30",
+          "endTime": "06:00"
+        },
+        "requests": [
+          {
+            "config": {
+              "enabled": true,
+              "startTime": "19:30",
+              "endTime": "06:00"
+            },
+            "startedAt": 11,
+            "status": "pending"
+          }
+        ],
+        "events": [
+          {
+            "type": "focus",
+            "role": "dark-mode-start",
+            "value": "18:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 9.700000286102295
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 10.900000095367432
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 11
+          }
+        ],
+        "themeEvents": [
+          {
+            "theme": "dark",
+            "colorScheme": "dark",
+            "at": 8.100000381469727
+          }
+        ],
+        "errors": [],
+        "inFlight": 1,
+        "maxConcurrent": 1,
+        "snapshot": {
+          "darkModeSchedule": {
+            "enabled": true,
+            "startTime": "18:30",
+            "endTime": "06:00"
+          },
+          "effectiveTheme": "dark",
+          "themeRevision": 1,
+          "ready": true,
+          "saving": true
+        },
+        "theme": "dark",
+        "values": {
+          "dark-mode-enabled": {
+            "value": "on",
+            "checked": true,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-start": {
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "focused": true
+          },
+          "dark-mode-end": {
+            "value": "06:00",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          }
+        },
+        "feedback": {
+          "hidden": true,
+          "text": ""
+        }
+      },
+      "state": {
+        "stored": {
+          "enabled": false,
+          "startTime": "19:30",
+          "endTime": "06:00"
+        },
+        "requests": [
+          {
+            "config": {
+              "enabled": true,
+              "startTime": "19:30",
+              "endTime": "06:00"
+            },
+            "startedAt": 11,
+            "status": "ok",
+            "finishedAt": 212
+          },
+          {
+            "config": {
+              "enabled": false,
+              "startTime": "19:30",
+              "endTime": "06:00"
+            },
+            "startedAt": 212,
+            "status": "ok",
+            "finishedAt": 414.80000019073486
+          }
+        ],
+        "events": [
+          {
+            "type": "focus",
+            "role": "dark-mode-start",
+            "value": "18:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 9.700000286102295
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 10.900000095367432
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 11
+          },
+          {
+            "type": "blur",
+            "role": "dark-mode-start",
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "active": false,
+            "at": 12.200000286102295
+          },
+          {
+            "type": "focus",
+            "role": "dark-mode-enabled",
+            "value": "on",
+            "checked": true,
+            "disabled": false,
+            "active": true,
+            "at": 12.400000095367432
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-enabled",
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 12.700000286102295
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-enabled",
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 12.700000286102295
+          }
+        ],
+        "themeEvents": [
+          {
+            "theme": "dark",
+            "colorScheme": "dark",
+            "at": 8.100000381469727
+          },
+          {
+            "theme": "dark",
+            "colorScheme": "dark",
+            "at": 211.90000009536743
+          },
+          {
+            "theme": "dark",
+            "colorScheme": "dark",
+            "at": 212
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 414.80000019073486
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 414.90000009536743
+          }
+        ],
+        "errors": [],
+        "inFlight": 0,
+        "maxConcurrent": 1,
+        "snapshot": {
+          "darkModeSchedule": {
+            "enabled": false,
+            "startTime": "19:30",
+            "endTime": "06:00"
+          },
+          "effectiveTheme": "light",
+          "themeRevision": 3,
+          "ready": true,
+          "saving": false
+        },
+        "theme": "light",
+        "values": {
+          "dark-mode-enabled": {
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "focused": true
+          },
+          "dark-mode-start": {
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-end": {
+            "value": "06:00",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          }
+        },
+        "feedback": {
+          "hidden": true,
+          "text": ""
+        }
+      }
+    },
+    {
+      "name": "edit-time-after-queued-off",
+      "options": {
+        "name": "edit-time-after-queued-off",
+        "saveDelay": 300,
+        "initial": {
+          "enabled": true
+        }
+      },
+      "passed": true,
+      "checks": [
+        {
+          "passed": true,
+          "name": "结束时间的真实按键已产生在途保存",
+          "detail": [
+            {
+              "config": {
+                "enabled": true,
+                "startTime": "18:30",
+                "endTime": "07:00"
+              },
+              "startedAt": 16.799999713897705,
+              "status": "pending"
+            }
+          ]
+        },
+        {
+          "passed": true,
+          "name": "后续输入发生时关闭请求仍排队",
+          "detail": [
+            {
+              "config": {
+                "enabled": true,
+                "startTime": "18:30",
+                "endTime": "07:00"
+              },
+              "startedAt": 16.799999713897705,
+              "status": "pending"
+            }
+          ]
+        },
+        {
+          "passed": true,
+          "name": "关闭意图没有被编辑时间覆盖",
+          "detail": {
+            "dark-mode-enabled": {
+              "value": "on",
+              "checked": false,
+              "disabled": false,
+              "focused": false
+            },
+            "dark-mode-start": {
+              "value": "19:30",
+              "checked": false,
+              "disabled": false,
+              "focused": true
+            },
+            "dark-mode-end": {
+              "value": "07:00",
+              "checked": false,
+              "disabled": false,
+              "focused": false
+            }
+          }
+        },
+        {
+          "passed": true,
+          "name": "旧或新时间草稿均不阻止队列关闭",
+          "detail": {
+            "enabled": false,
+            "startTime": "19:30",
+            "endTime": "07:00"
+          }
+        },
+        {
+          "passed": true,
+          "name": "关闭之后新编辑的合法时间最终保存",
+          "detail": {
+            "enabled": false,
+            "startTime": "19:30",
+            "endTime": "07:00"
+          }
+        },
+        {
+          "passed": true,
+          "name": "失焦后没有回退关闭之后的输入",
+          "detail": {
+            "dark-mode-enabled": {
+              "value": "on",
+              "checked": false,
+              "disabled": false,
+              "focused": false
+            },
+            "dark-mode-start": {
+              "value": "19:30",
+              "checked": false,
+              "disabled": false,
+              "focused": false
+            },
+            "dark-mode-end": {
+              "value": "07:00",
+              "checked": false,
+              "disabled": false,
+              "focused": true
+            }
+          }
+        },
+        {
+          "passed": true,
+          "name": "保存请求没有并发",
+          "detail": 1
+        },
+        {
+          "passed": true,
+          "name": "没有页面异常",
+          "detail": []
+        }
+      ],
+      "during": {
+        "stored": {
+          "enabled": true,
+          "startTime": "18:30",
+          "endTime": "06:00"
+        },
+        "requests": [
+          {
+            "config": {
+              "enabled": true,
+              "startTime": "18:30",
+              "endTime": "07:00"
+            },
+            "startedAt": 16.799999713897705,
+            "status": "pending"
+          }
+        ],
+        "events": [
+          {
+            "type": "focus",
+            "role": "dark-mode-end",
+            "value": "06:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 15.399999618530273
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-end",
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 16.799999713897705
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-end",
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 16.799999713897705
+          },
+          {
+            "type": "blur",
+            "role": "dark-mode-end",
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "active": false,
+            "at": 18
+          },
+          {
+            "type": "focus",
+            "role": "dark-mode-enabled",
+            "value": "on",
+            "checked": true,
+            "disabled": false,
+            "active": true,
+            "at": 18.09999990463257
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-enabled",
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 18.5
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-enabled",
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 18.5
+          },
+          {
+            "type": "blur",
+            "role": "dark-mode-enabled",
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "active": false,
+            "at": 18.799999713897705
+          },
+          {
+            "type": "focus",
+            "role": "dark-mode-start",
+            "value": "18:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 19
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "01:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 20.5
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "01:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 20.5
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 61.299999713897705
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "active": false,
+            "at": 61.5
+          }
+        ],
+        "themeEvents": [
+          {
+            "theme": "dark",
+            "colorScheme": "dark",
+            "at": 13.599999904632568
+          }
+        ],
+        "errors": [],
+        "inFlight": 1,
+        "maxConcurrent": 1,
+        "snapshot": {
+          "darkModeSchedule": {
+            "enabled": true,
+            "startTime": "18:30",
+            "endTime": "06:00"
+          },
+          "effectiveTheme": "dark",
+          "themeRevision": 1,
+          "ready": true,
+          "saving": true
+        },
+        "theme": "dark",
+        "values": {
+          "dark-mode-enabled": {
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-start": {
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "focused": true
+          },
+          "dark-mode-end": {
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          }
+        },
+        "feedback": {
+          "hidden": true,
+          "text": ""
+        }
+      },
+      "state": {
+        "stored": {
+          "enabled": false,
+          "startTime": "19:30",
+          "endTime": "07:00"
+        },
+        "requests": [
+          {
+            "config": {
+              "enabled": true,
+              "startTime": "18:30",
+              "endTime": "07:00"
+            },
+            "startedAt": 16.799999713897705,
+            "status": "ok",
+            "finishedAt": 317.5
+          },
+          {
+            "config": {
+              "enabled": false,
+              "startTime": "18:30",
+              "endTime": "07:00"
+            },
+            "startedAt": 317.5,
+            "status": "ok",
+            "finishedAt": 619.2999997138977
+          },
+          {
+            "config": {
+              "enabled": false,
+              "startTime": "19:30",
+              "endTime": "07:00"
+            },
+            "startedAt": 619.3999996185303,
+            "status": "ok",
+            "finishedAt": 920.5999999046326
+          }
+        ],
+        "events": [
+          {
+            "type": "focus",
+            "role": "dark-mode-end",
+            "value": "06:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 15.399999618530273
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-end",
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 16.799999713897705
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-end",
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 16.799999713897705
+          },
+          {
+            "type": "blur",
+            "role": "dark-mode-end",
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "active": false,
+            "at": 18
+          },
+          {
+            "type": "focus",
+            "role": "dark-mode-enabled",
+            "value": "on",
+            "checked": true,
+            "disabled": false,
+            "active": true,
+            "at": 18.09999990463257
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-enabled",
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 18.5
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-enabled",
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 18.5
+          },
+          {
+            "type": "blur",
+            "role": "dark-mode-enabled",
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "active": false,
+            "at": 18.799999713897705
+          },
+          {
+            "type": "focus",
+            "role": "dark-mode-start",
+            "value": "18:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 19
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "01:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 20.5
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "01:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 20.5
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 61.299999713897705
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "active": false,
+            "at": 61.5
+          },
+          {
+            "type": "blur",
+            "role": "dark-mode-start",
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "active": false,
+            "at": 1008.3999996185303
+          },
+          {
+            "type": "focus",
+            "role": "dark-mode-end",
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 1009.2999997138977
+          }
+        ],
+        "themeEvents": [
+          {
+            "theme": "dark",
+            "colorScheme": "dark",
+            "at": 13.599999904632568
+          },
+          {
+            "theme": "dark",
+            "colorScheme": "dark",
+            "at": 317.5
+          },
+          {
+            "theme": "dark",
+            "colorScheme": "dark",
+            "at": 317.5
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 619.1999998092651
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 619.2999997138977
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 920.5
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 920.5999999046326
+          }
+        ],
+        "errors": [],
+        "inFlight": 0,
+        "maxConcurrent": 1,
+        "snapshot": {
+          "darkModeSchedule": {
+            "enabled": false,
+            "startTime": "19:30",
+            "endTime": "07:00"
+          },
+          "effectiveTheme": "light",
+          "themeRevision": 4,
+          "ready": true,
+          "saving": false
+        },
+        "theme": "light",
+        "values": {
+          "dark-mode-enabled": {
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-start": {
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-end": {
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "focused": true
+          }
+        },
+        "feedback": {
+          "hidden": true,
+          "text": ""
+        }
+      }
+    },
+    {
+      "name": "invalid-time-after-queued-off",
+      "options": {
+        "name": "invalid-time-after-queued-off",
+        "saveDelay": 300,
+        "initial": {
+          "enabled": true
+        }
+      },
+      "passed": true,
+      "checks": [
+        {
+          "passed": true,
+          "name": "结束时间的真实按键已产生在途保存",
+          "detail": [
+            {
+              "config": {
+                "enabled": true,
+                "startTime": "18:30",
+                "endTime": "07:00"
+              },
+              "startedAt": 14,
+              "status": "pending"
+            }
+          ]
+        },
+        {
+          "passed": true,
+          "name": "后续输入发生时关闭请求仍排队",
+          "detail": [
+            {
+              "config": {
+                "enabled": true,
+                "startTime": "18:30",
+                "endTime": "07:00"
+              },
+              "startedAt": 14,
+              "status": "pending"
+            }
+          ]
+        },
+        {
+          "passed": true,
+          "name": "关闭意图没有被编辑时间覆盖",
+          "detail": {
+            "dark-mode-enabled": {
+              "value": "on",
+              "checked": false,
+              "disabled": false,
+              "focused": false
+            },
+            "dark-mode-start": {
+              "value": "",
+              "checked": false,
+              "disabled": false,
+              "focused": true
+            },
+            "dark-mode-end": {
+              "value": "07:00",
+              "checked": false,
+              "disabled": false,
+              "focused": false
+            }
+          }
+        },
+        {
+          "passed": true,
+          "name": "Backspace 已产生原生非法时间草稿",
+          "detail": [
+            {
+              "type": "focus",
+              "role": "dark-mode-end",
+              "value": "06:00",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 12.599999904632568
+            },
+            {
+              "type": "input",
+              "role": "dark-mode-end",
+              "value": "07:00",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 13.899999618530273
+            },
+            {
+              "type": "change",
+              "role": "dark-mode-end",
+              "value": "07:00",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 14.099999904632568
+            },
+            {
+              "type": "blur",
+              "role": "dark-mode-end",
+              "value": "07:00",
+              "checked": false,
+              "disabled": false,
+              "active": false,
+              "at": 15.699999809265137
+            },
+            {
+              "type": "focus",
+              "role": "dark-mode-enabled",
+              "value": "on",
+              "checked": true,
+              "disabled": false,
+              "active": true,
+              "at": 15.799999713897705
+            },
+            {
+              "type": "input",
+              "role": "dark-mode-enabled",
+              "value": "on",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 16.09999990463257
+            },
+            {
+              "type": "change",
+              "role": "dark-mode-enabled",
+              "value": "on",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 16.09999990463257
+            },
+            {
+              "type": "blur",
+              "role": "dark-mode-enabled",
+              "value": "on",
+              "checked": false,
+              "disabled": false,
+              "active": false,
+              "at": 16.5
+            },
+            {
+              "type": "focus",
+              "role": "dark-mode-start",
+              "value": "18:30",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 16.699999809265137
+            },
+            {
+              "type": "input",
+              "role": "dark-mode-start",
+              "value": "",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 17.699999809265137
+            },
+            {
+              "type": "change",
+              "role": "dark-mode-start",
+              "value": "",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 17.699999809265137
+            }
+          ]
+        },
+        {
+          "passed": true,
+          "name": "旧或新时间草稿均不阻止队列关闭",
+          "detail": {
+            "enabled": false,
+            "startTime": "18:30",
+            "endTime": "07:00"
+          }
+        },
+        {
+          "passed": true,
+          "name": "非法时间没有替换已保存时段",
+          "detail": {
+            "enabled": false,
+            "startTime": "18:30",
+            "endTime": "07:00"
+          }
+        },
+        {
+          "passed": true,
+          "name": "保存请求没有并发",
+          "detail": 1
+        },
+        {
+          "passed": true,
+          "name": "没有页面异常",
+          "detail": []
+        }
+      ],
+      "during": {
+        "stored": {
+          "enabled": true,
+          "startTime": "18:30",
+          "endTime": "06:00"
+        },
+        "requests": [
+          {
+            "config": {
+              "enabled": true,
+              "startTime": "18:30",
+              "endTime": "07:00"
+            },
+            "startedAt": 14,
+            "status": "pending"
+          }
+        ],
+        "events": [
+          {
+            "type": "focus",
+            "role": "dark-mode-end",
+            "value": "06:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 12.599999904632568
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-end",
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 13.899999618530273
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-end",
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 14.099999904632568
+          },
+          {
+            "type": "blur",
+            "role": "dark-mode-end",
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "active": false,
+            "at": 15.699999809265137
+          },
+          {
+            "type": "focus",
+            "role": "dark-mode-enabled",
+            "value": "on",
+            "checked": true,
+            "disabled": false,
+            "active": true,
+            "at": 15.799999713897705
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-enabled",
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 16.09999990463257
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-enabled",
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 16.09999990463257
+          },
+          {
+            "type": "blur",
+            "role": "dark-mode-enabled",
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "active": false,
+            "at": 16.5
+          },
+          {
+            "type": "focus",
+            "role": "dark-mode-start",
+            "value": "18:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 16.699999809265137
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 17.699999809265137
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 17.699999809265137
+          }
+        ],
+        "themeEvents": [
+          {
+            "theme": "dark",
+            "colorScheme": "dark",
+            "at": 11
+          }
+        ],
+        "errors": [],
+        "inFlight": 1,
+        "maxConcurrent": 1,
+        "snapshot": {
+          "darkModeSchedule": {
+            "enabled": true,
+            "startTime": "18:30",
+            "endTime": "06:00"
+          },
+          "effectiveTheme": "dark",
+          "themeRevision": 1,
+          "ready": true,
+          "saving": true
+        },
+        "theme": "dark",
+        "values": {
+          "dark-mode-enabled": {
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-start": {
+            "value": "",
+            "checked": false,
+            "disabled": false,
+            "focused": true
+          },
+          "dark-mode-end": {
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          }
+        },
+        "feedback": {
+          "hidden": true,
+          "text": ""
+        }
+      },
+      "state": {
+        "stored": {
+          "enabled": false,
+          "startTime": "18:30",
+          "endTime": "07:00"
+        },
+        "requests": [
+          {
+            "config": {
+              "enabled": true,
+              "startTime": "18:30",
+              "endTime": "07:00"
+            },
+            "startedAt": 14,
+            "status": "ok",
+            "finishedAt": 317.3999996185303
+          },
+          {
+            "config": {
+              "enabled": false,
+              "startTime": "18:30",
+              "endTime": "07:00"
+            },
+            "startedAt": 317.3999996185303,
+            "status": "ok",
+            "finishedAt": 620.7999997138977
+          }
+        ],
+        "events": [
+          {
+            "type": "focus",
+            "role": "dark-mode-end",
+            "value": "06:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 12.599999904632568
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-end",
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 13.899999618530273
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-end",
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 14.099999904632568
+          },
+          {
+            "type": "blur",
+            "role": "dark-mode-end",
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "active": false,
+            "at": 15.699999809265137
+          },
+          {
+            "type": "focus",
+            "role": "dark-mode-enabled",
+            "value": "on",
+            "checked": true,
+            "disabled": false,
+            "active": true,
+            "at": 15.799999713897705
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-enabled",
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 16.09999990463257
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-enabled",
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 16.09999990463257
+          },
+          {
+            "type": "blur",
+            "role": "dark-mode-enabled",
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "active": false,
+            "at": 16.5
+          },
+          {
+            "type": "focus",
+            "role": "dark-mode-start",
+            "value": "18:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 16.699999809265137
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 17.699999809265137
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 17.699999809265137
+          }
+        ],
+        "themeEvents": [
+          {
+            "theme": "dark",
+            "colorScheme": "dark",
+            "at": 11
+          },
+          {
+            "theme": "dark",
+            "colorScheme": "dark",
+            "at": 317.3999996185303
+          },
+          {
+            "theme": "dark",
+            "colorScheme": "dark",
+            "at": 317.3999996185303
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 620.6999998092651
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 620.7999997138977
+          }
+        ],
+        "errors": [],
+        "inFlight": 0,
+        "maxConcurrent": 1,
+        "snapshot": {
+          "darkModeSchedule": {
+            "enabled": false,
+            "startTime": "18:30",
+            "endTime": "07:00"
+          },
+          "effectiveTheme": "light",
+          "themeRevision": 3,
+          "ready": true,
+          "saving": false
+        },
+        "theme": "light",
+        "values": {
+          "dark-mode-enabled": {
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-start": {
+            "value": "",
+            "checked": false,
+            "disabled": false,
+            "focused": true
+          },
+          "dark-mode-end": {
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          }
+        },
+        "feedback": {
+          "hidden": false,
+          "text": "开始时间和结束时间必须使用 24 小时制 HH:mm 格式"
+        }
+      }
+    },
+    {
+      "name": "invalid-time-before-queued-off",
+      "options": {
+        "name": "invalid-time-before-queued-off",
+        "saveDelay": 300,
+        "initial": {
+          "enabled": true
+        }
+      },
+      "passed": true,
+      "checks": [
+        {
+          "passed": true,
+          "name": "结束时间的真实按键已产生在途保存",
+          "detail": [
+            {
+              "config": {
+                "enabled": true,
+                "startTime": "18:30",
+                "endTime": "07:00"
+              },
+              "startedAt": 16.5,
+              "status": "pending"
+            }
+          ]
+        },
+        {
+          "passed": true,
+          "name": "后续输入发生时关闭请求仍排队",
+          "detail": [
+            {
+              "config": {
+                "enabled": true,
+                "startTime": "18:30",
+                "endTime": "07:00"
+              },
+              "startedAt": 16.5,
+              "status": "pending"
+            }
+          ]
+        },
+        {
+          "passed": true,
+          "name": "关闭意图没有被编辑时间覆盖",
+          "detail": {
+            "dark-mode-enabled": {
+              "value": "on",
+              "checked": false,
+              "disabled": false,
+              "focused": true
+            },
+            "dark-mode-start": {
+              "value": "",
+              "checked": false,
+              "disabled": false,
+              "focused": false
+            },
+            "dark-mode-end": {
+              "value": "07:00",
+              "checked": false,
+              "disabled": false,
+              "focused": false
+            }
+          }
+        },
+        {
+          "passed": true,
+          "name": "Backspace 已产生原生非法时间草稿",
+          "detail": [
+            {
+              "type": "focus",
+              "role": "dark-mode-end",
+              "value": "06:00",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 15.099999904632568
+            },
+            {
+              "type": "input",
+              "role": "dark-mode-end",
+              "value": "07:00",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 16.40000009536743
+            },
+            {
+              "type": "change",
+              "role": "dark-mode-end",
+              "value": "07:00",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 16.5
+            },
+            {
+              "type": "blur",
+              "role": "dark-mode-end",
+              "value": "07:00",
+              "checked": false,
+              "disabled": false,
+              "active": false,
+              "at": 17.200000286102295
+            },
+            {
+              "type": "focus",
+              "role": "dark-mode-start",
+              "value": "18:30",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 17.40000009536743
+            },
+            {
+              "type": "input",
+              "role": "dark-mode-start",
+              "value": "",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 18.40000009536743
+            },
+            {
+              "type": "change",
+              "role": "dark-mode-start",
+              "value": "",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 18.40000009536743
+            },
+            {
+              "type": "blur",
+              "role": "dark-mode-start",
+              "value": "",
+              "checked": false,
+              "disabled": false,
+              "active": false,
+              "at": 19.09999990463257
+            },
+            {
+              "type": "focus",
+              "role": "dark-mode-enabled",
+              "value": "on",
+              "checked": true,
+              "disabled": false,
+              "active": true,
+              "at": 19.300000190734863
+            },
+            {
+              "type": "input",
+              "role": "dark-mode-enabled",
+              "value": "on",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 19.5
+            },
+            {
+              "type": "change",
+              "role": "dark-mode-enabled",
+              "value": "on",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 19.5
+            }
+          ]
+        },
+        {
+          "passed": true,
+          "name": "旧或新时间草稿均不阻止队列关闭",
+          "detail": {
+            "enabled": false,
+            "startTime": "18:30",
+            "endTime": "07:00"
+          }
+        },
+        {
+          "passed": true,
+          "name": "非法时间没有替换已保存时段",
+          "detail": {
+            "enabled": false,
+            "startTime": "18:30",
+            "endTime": "07:00"
+          }
+        },
+        {
+          "passed": true,
+          "name": "关闭前的非法草稿按原语义恢复已保存时段",
+          "detail": {
+            "dark-mode-enabled": {
+              "value": "on",
+              "checked": false,
+              "disabled": false,
+              "focused": true
+            },
+            "dark-mode-start": {
+              "value": "18:30",
+              "checked": false,
+              "disabled": false,
+              "focused": false
+            },
+            "dark-mode-end": {
+              "value": "07:00",
+              "checked": false,
+              "disabled": false,
+              "focused": false
+            }
+          }
+        },
+        {
+          "passed": true,
+          "name": "保存请求没有并发",
+          "detail": 1
+        },
+        {
+          "passed": true,
+          "name": "没有页面异常",
+          "detail": []
+        }
+      ],
+      "during": {
+        "stored": {
+          "enabled": true,
+          "startTime": "18:30",
+          "endTime": "06:00"
+        },
+        "requests": [
+          {
+            "config": {
+              "enabled": true,
+              "startTime": "18:30",
+              "endTime": "07:00"
+            },
+            "startedAt": 16.5,
+            "status": "pending"
+          }
+        ],
+        "events": [
+          {
+            "type": "focus",
+            "role": "dark-mode-end",
+            "value": "06:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 15.099999904632568
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-end",
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 16.40000009536743
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-end",
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 16.5
+          },
+          {
+            "type": "blur",
+            "role": "dark-mode-end",
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "active": false,
+            "at": 17.200000286102295
+          },
+          {
+            "type": "focus",
+            "role": "dark-mode-start",
+            "value": "18:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 17.40000009536743
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 18.40000009536743
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 18.40000009536743
+          },
+          {
+            "type": "blur",
+            "role": "dark-mode-start",
+            "value": "",
+            "checked": false,
+            "disabled": false,
+            "active": false,
+            "at": 19.09999990463257
+          },
+          {
+            "type": "focus",
+            "role": "dark-mode-enabled",
+            "value": "on",
+            "checked": true,
+            "disabled": false,
+            "active": true,
+            "at": 19.300000190734863
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-enabled",
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 19.5
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-enabled",
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 19.5
+          }
+        ],
+        "themeEvents": [
+          {
+            "theme": "dark",
+            "colorScheme": "dark",
+            "at": 13.300000190734863
+          }
+        ],
+        "errors": [],
+        "inFlight": 1,
+        "maxConcurrent": 1,
+        "snapshot": {
+          "darkModeSchedule": {
+            "enabled": true,
+            "startTime": "18:30",
+            "endTime": "06:00"
+          },
+          "effectiveTheme": "dark",
+          "themeRevision": 1,
+          "ready": true,
+          "saving": true
+        },
+        "theme": "dark",
+        "values": {
+          "dark-mode-enabled": {
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "focused": true
+          },
+          "dark-mode-start": {
+            "value": "",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-end": {
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          }
+        },
+        "feedback": {
+          "hidden": true,
+          "text": ""
+        }
+      },
+      "state": {
+        "stored": {
+          "enabled": false,
+          "startTime": "18:30",
+          "endTime": "07:00"
+        },
+        "requests": [
+          {
+            "config": {
+              "enabled": true,
+              "startTime": "18:30",
+              "endTime": "07:00"
+            },
+            "startedAt": 16.5,
+            "status": "ok",
+            "finishedAt": 318.30000019073486
+          },
+          {
+            "config": {
+              "enabled": false,
+              "startTime": "18:30",
+              "endTime": "07:00"
+            },
+            "startedAt": 318.40000009536743,
+            "status": "ok",
+            "finishedAt": 619.9000000953674
+          }
+        ],
+        "events": [
+          {
+            "type": "focus",
+            "role": "dark-mode-end",
+            "value": "06:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 15.099999904632568
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-end",
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 16.40000009536743
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-end",
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 16.5
+          },
+          {
+            "type": "blur",
+            "role": "dark-mode-end",
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "active": false,
+            "at": 17.200000286102295
+          },
+          {
+            "type": "focus",
+            "role": "dark-mode-start",
+            "value": "18:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 17.40000009536743
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 18.40000009536743
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 18.40000009536743
+          },
+          {
+            "type": "blur",
+            "role": "dark-mode-start",
+            "value": "",
+            "checked": false,
+            "disabled": false,
+            "active": false,
+            "at": 19.09999990463257
+          },
+          {
+            "type": "focus",
+            "role": "dark-mode-enabled",
+            "value": "on",
+            "checked": true,
+            "disabled": false,
+            "active": true,
+            "at": 19.300000190734863
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-enabled",
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 19.5
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-enabled",
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 19.5
+          }
+        ],
+        "themeEvents": [
+          {
+            "theme": "dark",
+            "colorScheme": "dark",
+            "at": 13.300000190734863
+          },
+          {
+            "theme": "dark",
+            "colorScheme": "dark",
+            "at": 318.30000019073486
+          },
+          {
+            "theme": "dark",
+            "colorScheme": "dark",
+            "at": 318.40000009536743
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 619.9000000953674
+          },
+          {
+            "theme": "light",
+            "colorScheme": "light",
+            "at": 620
+          }
+        ],
+        "errors": [],
+        "inFlight": 0,
+        "maxConcurrent": 1,
+        "snapshot": {
+          "darkModeSchedule": {
+            "enabled": false,
+            "startTime": "18:30",
+            "endTime": "07:00"
+          },
+          "effectiveTheme": "light",
+          "themeRevision": 3,
+          "ready": true,
+          "saving": false
+        },
+        "theme": "light",
+        "values": {
+          "dark-mode-enabled": {
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "focused": true
+          },
+          "dark-mode-start": {
+            "value": "18:30",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-end": {
+            "value": "07:00",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          }
+        },
+        "feedback": {
+          "hidden": true,
+          "text": ""
+        }
+      }
+    },
+    {
+      "name": "save-failure-keeps-focus",
+      "options": {
+        "name": "save-failure-keeps-focus",
+        "saveDelay": 15,
+        "interval": 100,
+        "failAll": true,
+        "initial": {
+          "enabled": true
+        }
+      },
+      "passed": true,
+      "checks": [
+        {
+          "passed": true,
+          "name": "保存失败保留已保存配置与主题",
+          "detail": {
+            "enabled": true,
+            "startTime": "18:30",
+            "endTime": "06:00"
+          }
+        },
+        {
+          "passed": true,
+          "name": "保存失败没有打断正在编辑的焦点",
+          "detail": [
+            {
+              "type": "focus",
+              "role": "dark-mode-start",
+              "value": "18:30",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 16.40000009536743
+            },
+            {
+              "type": "input",
+              "role": "dark-mode-start",
+              "value": "01:30",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 17.700000286102295
+            },
+            {
+              "type": "change",
+              "role": "dark-mode-start",
+              "value": "01:30",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 17.90000009536743
+            },
+            {
+              "type": "input",
+              "role": "dark-mode-start",
+              "value": "19:30",
+              "checked": false,
+              "disabled": false,
+              "active": true,
+              "at": 129.2000002861023
+            },
+            {
+              "type": "change",
+              "role": "dark-mode-start",
+              "value": "19:30",
+              "checked": false,
+              "disabled": false,
+              "active": false,
+              "at": 129.90000009536743
+            }
+          ]
+        },
+        {
+          "passed": true,
+          "name": "失败后仍可继续编辑"
+        },
+        {
+          "passed": true,
+          "name": "保存失败原因可见",
+          "detail": {
+            "hidden": false,
+            "text": "模拟外观设置保存失败"
+          }
+        },
+        {
+          "passed": true,
+          "name": "保存请求没有并发",
+          "detail": 1
+        },
+        {
+          "passed": true,
+          "name": "没有页面异常",
+          "detail": []
+        }
+      ],
+      "during": {
+        "stored": {
+          "enabled": true,
+          "startTime": "18:30",
+          "endTime": "06:00"
+        },
+        "requests": [
+          {
+            "config": {
+              "enabled": true,
+              "startTime": "01:30",
+              "endTime": "06:00"
+            },
+            "startedAt": 17.90000009536743,
+            "status": "failed",
+            "finishedAt": 34.90000009536743
+          },
+          {
+            "config": {
+              "enabled": true,
+              "startTime": "19:30",
+              "endTime": "06:00"
+            },
+            "startedAt": 129.80000019073486,
+            "status": "pending"
+          }
+        ],
+        "events": [
+          {
+            "type": "focus",
+            "role": "dark-mode-start",
+            "value": "18:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 16.40000009536743
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "01:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 17.700000286102295
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "01:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 17.90000009536743
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 129.2000002861023
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "active": false,
+            "at": 129.90000009536743
+          }
+        ],
+        "themeEvents": [
+          {
+            "theme": "dark",
+            "colorScheme": "dark",
+            "at": 14.599999904632568
+          }
+        ],
+        "errors": [],
+        "inFlight": 1,
+        "maxConcurrent": 1,
+        "snapshot": {
+          "darkModeSchedule": {
+            "enabled": true,
+            "startTime": "18:30",
+            "endTime": "06:00"
+          },
+          "effectiveTheme": "dark",
+          "themeRevision": 1,
+          "ready": true,
+          "saving": true
+        },
+        "theme": "dark",
+        "values": {
+          "dark-mode-enabled": {
+            "value": "on",
+            "checked": true,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-start": {
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "focused": true
+          },
+          "dark-mode-end": {
+            "value": "06:00",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          }
+        },
+        "feedback": {
+          "hidden": true,
+          "text": "模拟外观设置保存失败"
+        }
+      },
+      "state": {
+        "stored": {
+          "enabled": true,
+          "startTime": "18:30",
+          "endTime": "06:00"
+        },
+        "requests": [
+          {
+            "config": {
+              "enabled": true,
+              "startTime": "01:30",
+              "endTime": "06:00"
+            },
+            "startedAt": 17.90000009536743,
+            "status": "failed",
+            "finishedAt": 34.90000009536743
+          },
+          {
+            "config": {
+              "enabled": true,
+              "startTime": "19:30",
+              "endTime": "06:00"
+            },
+            "startedAt": 129.80000019073486,
+            "status": "failed",
+            "finishedAt": 146.30000019073486
+          }
+        ],
+        "events": [
+          {
+            "type": "focus",
+            "role": "dark-mode-start",
+            "value": "18:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 16.40000009536743
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "01:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 17.700000286102295
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "01:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 17.90000009536743
+          },
+          {
+            "type": "input",
+            "role": "dark-mode-start",
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "active": true,
+            "at": 129.2000002861023
+          },
+          {
+            "type": "change",
+            "role": "dark-mode-start",
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "active": false,
+            "at": 129.90000009536743
+          }
+        ],
+        "themeEvents": [
+          {
+            "theme": "dark",
+            "colorScheme": "dark",
+            "at": 14.599999904632568
+          }
+        ],
+        "errors": [],
+        "inFlight": 0,
+        "maxConcurrent": 1,
+        "snapshot": {
+          "darkModeSchedule": {
+            "enabled": true,
+            "startTime": "18:30",
+            "endTime": "06:00"
+          },
+          "effectiveTheme": "dark",
+          "themeRevision": 1,
+          "ready": true,
+          "saving": false
+        },
+        "theme": "dark",
+        "values": {
+          "dark-mode-enabled": {
+            "value": "on",
+            "checked": true,
+            "disabled": false,
+            "focused": false
+          },
+          "dark-mode-start": {
+            "value": "19:30",
+            "checked": false,
+            "disabled": false,
+            "focused": true
+          },
+          "dark-mode-end": {
+            "value": "06:00",
+            "checked": false,
+            "disabled": false,
+            "focused": false
+          }
+        },
+        "feedback": {
+          "hidden": false,
+          "text": "模拟外观设置保存失败"
+        }
+      }
+    }
+  ]
+}
