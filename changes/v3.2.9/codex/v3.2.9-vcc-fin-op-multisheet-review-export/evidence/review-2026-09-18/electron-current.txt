@@ -1,0 +1,9 @@
+(node:39062) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `Electron --trace-warnings ...` to show where the warning was created)
+(node:39062) [DEP0180] DeprecationWarning: fs.Stats constructor is deprecated.
+(node:39062) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `Electron --trace-warnings ...` to show where the warning was created)
+(node:39062) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `Electron --trace-warnings ...` to show where the warning was created)
+(node:39062) [DEP0180] DeprecationWarning: fs.Stats constructor is deprecated.
+{"date":"2026-09-18T14:51:51.023Z","platform":"darwin","electron":"36.9.5","node":"22.19.0","exceljs":"4.4.0","asar":{"path":"/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/vcc-review-jDVfqu/app.asar/assets/VCC财务OP校验/VCC财务OP校验结果表_模板.xlsx","hash":"48c8161484128e63a6e3e60724336f2433a8f23687695d980720c59a9dec2053","inodeBefore":1,"inodeAfter":2,"contentCachePassed":true,"tamperRejected":true},"ipc":{"status":"success","filePath":"/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/vcc-review-jDVfqu/待确认表.xlsx","fileName":"待确认表.xlsx","resultRevision":0,"subjectCount":2,"sheetCount":15,"sourceRowCount":14},"formalExport":{"status":"success","subjects":["乙","甲"],"fileCount":2,"templatesInsideAsar":true,"statusAfterArchive":"archived"},"nativeDialog":"stubbed","windowsExcelWps":"not-run"}

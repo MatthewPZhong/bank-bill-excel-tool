@@ -1,0 +1,231 @@
+[
+  {
+    "task": "lint",
+    "command": [
+      "npm",
+      "run",
+      "lint"
+    ],
+    "exit": 0,
+    "seconds": 2.61,
+    "log": "lint.txt"
+  },
+  {
+    "task": "smoke",
+    "command": [
+      "npm",
+      "run",
+      "smoke"
+    ],
+    "exit": 0,
+    "seconds": 5.82,
+    "log": "smoke.txt"
+  },
+  {
+    "task": "focused-unit",
+    "command": [
+      "node",
+      "--test",
+      "--test-concurrency=2",
+      "tests/unit/backend/shared-strings-ownership.test.js",
+      "tests/unit/backend/usage-stats-vcc-financial-op.test.js",
+      "tests/unit/backend/vcc-financial-op/archive-contract.test.js",
+      "tests/unit/backend/vcc-financial-op/calculator.test.js",
+      "tests/unit/backend/vcc-financial-op/dataset-deletion.test.js",
+      "tests/unit/backend/vcc-financial-op/destructive-actions.test.js",
+      "tests/unit/backend/vcc-financial-op/destructive-write.test.js",
+      "tests/unit/backend/vcc-financial-op/detail-importer.test.js",
+      "tests/unit/backend/vcc-financial-op/multisheet-import.test.js",
+      "tests/unit/backend/vcc-financial-op/mutation-guard.test.js",
+      "tests/unit/backend/vcc-financial-op/pending-contract-migration.test.js",
+      "tests/unit/backend/vcc-financial-op/pending-template-contract.test.js",
+      "tests/unit/backend/vcc-financial-op/read-snapshot.test.js",
+      "tests/unit/backend/vcc-financial-op/result-adjustments.test.js",
+      "tests/unit/backend/vcc-financial-op/result-evidence.test.js",
+      "tests/unit/backend/vcc-financial-op/result-template-contract.test.js",
+      "tests/unit/backend/vcc-financial-op/result-write.test.js",
+      "tests/unit/backend/vcc-financial-op/review-projection.test.js",
+      "tests/unit/backend/vcc-financial-op/row-mapper.test.js",
+      "tests/unit/backend/vcc-financial-op/state-model-migration.test.js",
+      "tests/unit/backend/vcc-financial-op/storage-contract-v3.test.js",
+      "tests/unit/backend/vcc-financial-op/storage-contract.test.js",
+      "tests/unit/backend/vcc-financial-op/system-op-importer.test.js",
+      "tests/unit/backend/vcc-financial-op/unarchive-gate.test.js",
+      "tests/unit/backend/vcc-financial-op/workbook-import-plan.test.js",
+      "tests/unit/main-process/archive-delete-owner-completion.test.js",
+      "tests/unit/main-process/archive-file-batch-contract.test.js",
+      "tests/unit/main-process/archive-permanent-delete.test.js",
+      "tests/unit/main-process/archive-position-fileplan-delete.test.js",
+      "tests/unit/main-process/archive-position-report-evidence.test.js",
+      "tests/unit/main-process/archive-task-lifecycle.test.js",
+      "tests/unit/main-process/archive-task-policy-registry.test.js",
+      "tests/unit/main-process/background-execution/manifest-coverage-e13-g.test.js",
+      "tests/unit/main-process/biz-op-v327-export-file-identity.test.js",
+      "tests/unit/main-process/biz-op-v327-export-main.test.js",
+      "tests/unit/main-process/biz-op-v327-export-rule-version.test.js",
+      "tests/unit/main-process/biz-op-v327-export-sst.test.js",
+      "tests/unit/main-process/biz-op-v327-export-terminal-recovery.test.js",
+      "tests/unit/main-process/biz-op-v327-export.test.js",
+      "tests/unit/main-process/bounded-xlsx-writer.test.js",
+      "tests/unit/main-process/toolbox-row-split-overwrite.test.js",
+      "tests/unit/main-process/toolbox-row-split-parent-identity.test.js",
+      "tests/unit/main-process/toolbox-row-split.test.js",
+      "tests/unit/main-process/vcc-financial-op-archive-integration.test.js",
+      "tests/unit/main-process/vcc-financial-op-archive-lineage.test.js",
+      "tests/unit/main-process/vcc-financial-op-audit-writer.test.js",
+      "tests/unit/main-process/vcc-financial-op-dataset-writer.test.js",
+      "tests/unit/main-process/vcc-financial-op-dual-writer-e12-c.test.js",
+      "tests/unit/main-process/vcc-financial-op-fileplan-handoff.test.js",
+      "tests/unit/main-process/vcc-financial-op-output-recovery.test.js",
+      "tests/unit/main-process/vcc-financial-op-read-only-export-e13-b.test.js",
+      "tests/unit/main-process/vcc-financial-op-read-service.test.js",
+      "tests/unit/main-process/vcc-financial-op-read-worker.test.js",
+      "tests/unit/main-process/vcc-financial-op-result-write-service.test.js",
+      "tests/unit/main-process/vcc-financial-op-review-export.test.js",
+      "tests/unit/main-process/vcc-financial-op-review-ipc.test.js",
+      "tests/unit/main-process/vcc-financial-op-review-legacy-error.test.js",
+      "tests/unit/main-process/vcc-financial-op-review-target.test.js",
+      "tests/unit/main-process/vcc-financial-op-service.test.js",
+      "tests/unit/main-process/vcc-financial-op-single-writer-e12-a.test.js",
+      "tests/unit/main-process/vcc-financial-op-storage-migration.test.js",
+      "tests/unit/main-process/vcc-financial-op-storage-rebuild.test.js",
+      "tests/unit/main-process/vcc-financial-op-subject-query-e12-b.test.js",
+      "tests/unit/main-process/vcc-financial-op-write-worker.test.js",
+      "tests/unit/main-process/vcc-financial-op-writer.test.js",
+      "tests/unit/renderer-vcc-financial-op.test.js",
+      "tests/unit/scripts/reset-vcc-financial-op-storage.test.js",
+      "tests/unit/shared/vcc-financial-op-difference.test.js",
+      "tests/unit/toolbox-format-shared-strings-structure.test.js",
+      "tests/unit/toolbox-format-xlsx-structure.test.js",
+      "tests/unit/toolbox-format-xlsx.test.js",
+      "tests/unit/vcc-financial-op-preview-contract.test.js",
+      "tests/unit/vcc-financial-op-release-docs.test.js"
+    ],
+    "exit": 0,
+    "seconds": 60.94,
+    "log": "focused-unit.txt"
+  },
+  {
+    "task": "vcc-financial-op-adjustment-archive-chain",
+    "command": [
+      "node",
+      "scripts/integration/vcc-financial-op-adjustment-archive-chain.js"
+    ],
+    "exit": 0,
+    "seconds": 1.18,
+    "log": "vcc-financial-op-adjustment-archive-chain.txt"
+  },
+  {
+    "task": "vcc-financial-op-effective-result",
+    "command": [
+      "node",
+      "scripts/integration/vcc-financial-op-effective-result.js"
+    ],
+    "exit": 0,
+    "seconds": 0.1,
+    "log": "vcc-financial-op-effective-result.txt"
+  },
+  {
+    "task": "vcc-financial-op-destructive-state-chain",
+    "command": [
+      "node",
+      "scripts/integration/vcc-financial-op-destructive-state-chain.js"
+    ],
+    "exit": 0,
+    "seconds": 1.31,
+    "log": "vcc-financial-op-destructive-state-chain.txt"
+  },
+  {
+    "task": "vcc-financial-op-historical-template-export",
+    "command": [
+      "node",
+      "scripts/integration/vcc-financial-op-historical-template-export.js"
+    ],
+    "exit": 0,
+    "seconds": 0.99,
+    "log": "vcc-financial-op-historical-template-export.txt"
+  },
+  {
+    "task": "biz-op-auto-error-report",
+    "command": [
+      "node",
+      "scripts/integration/biz-op-auto-error-report.js"
+    ],
+    "exit": 0,
+    "seconds": 10.01,
+    "log": "biz-op-auto-error-report.txt"
+  },
+  {
+    "task": "archive-biz-op-auto-report-retention",
+    "command": [
+      "node",
+      "scripts/integration/archive-biz-op-auto-report-retention.js"
+    ],
+    "exit": 0,
+    "seconds": 6.86,
+    "log": "archive-biz-op-auto-report-retention.txt"
+  },
+  {
+    "task": "archive-center-permanent-delete",
+    "command": [
+      "node",
+      "scripts/integration/archive-center-permanent-delete.js"
+    ],
+    "exit": 0,
+    "seconds": 25.2,
+    "log": "archive-center-permanent-delete.txt"
+  },
+  {
+    "task": "toolbox-row-split-archive-delete",
+    "command": [
+      "node",
+      "scripts/integration/toolbox-row-split-archive-delete.js"
+    ],
+    "exit": 0,
+    "seconds": 0.86,
+    "log": "toolbox-row-split-archive-delete.txt"
+  },
+  {
+    "task": "toolbox-multi-split-roundtrip",
+    "command": [
+      "node",
+      "scripts/integration/toolbox-multi-split-roundtrip.js"
+    ],
+    "exit": 0,
+    "seconds": 0.42,
+    "log": "toolbox-multi-split-roundtrip.txt"
+  },
+  {
+    "task": "position-reconciliation-side-db-parity",
+    "command": [
+      "node",
+      "scripts/integration/position-reconciliation-side-db-parity.js"
+    ],
+    "exit": 0,
+    "seconds": 0.22,
+    "log": "position-reconciliation-side-db-parity.txt"
+  },
+  {
+    "task": "fileplan-handoff-regression",
+    "exit": 0,
+    "tests": 14,
+    "log": "vcc-fileplan-handoff-tests.txt"
+  },
+  {
+    "task": "changed-files-eslint-and-code-diff-check",
+    "exit": 0,
+    "files": [
+      "src/backend/database/archive-repository.js",
+      "tests/unit/main-process/vcc-financial-op-fileplan-handoff.test.js",
+      "scripts/vcc-financial-op/verify-review-electron.js",
+      "scripts/vcc-financial-op/measure-shared-writer.js"
+    ]
+  },
+  {
+    "task": "isolated-electron-asar-export",
+    "exit": 0,
+    "log": "ui-check.txt",
+    "evidence": "electron-review-evidence.json",
+    "scope": "export path; run before handoff metadata repair; export implementation unchanged"
+  }
+]

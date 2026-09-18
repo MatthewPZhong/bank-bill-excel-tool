@@ -8,13 +8,15 @@ const {
 } = require('./definitions');
 const { normalizeYearMonth } = require('./row-mapper');
 const { inspectSourceFiles } = require('./workbook-reader');
+const { freezeHandoffV2, buildMemberFiles, membersDigest, assertArtifactMember, handoffError } = require('./import-handoff');
+const { createArchiveRepository } = require('../database/archive-repository');
 const {
   DETAIL_SOURCE_TYPES,
   importDetailGroup,
   throwIfCancelled
 } = require('./detail-importer');
 const {
-  importSystemOpGroup,
+  importSystemOpWorkbookGroup,
   systemRecordResult
 } = require('./system-op-importer');
 const repository = require('../vcc-financial-op-db/repository');
@@ -49,6 +51,7 @@ function importHandoffMismatch(message) {
 
 function freezeImportArchiveHandoffFiles(value, batchId) {
   const normalizedBatchId = normalizeImportBatchId(batchId);
+  if (value?.version === 2) return freezeHandoffV2(value, normalizedBatchId);
   if (!Array.isArray(value) || value.length === 0) {
     throw importHandoffMismatch('缺少输入文件证据');
   }
@@ -184,44 +187,62 @@ async function importFiles({
   const normalizedMonth = normalizeYearMonth(targetMonth);
   if (!normalizedMonth) throw new Error(`导入账期格式无效：${targetMonth}`);
   if (!Array.isArray(files) || files.length === 0) throw new Error('请选择至少一个原表文件');
+  const isWorkbookPlan = archiveHandoffFiles?.version === 2;
   for (const file of files) {
-    if (!file || !Object.values(SOURCE_TYPES).includes(file.sourceType)) {
+    if (!file || (!isWorkbookPlan && !Object.values(SOURCE_TYPES).includes(file.sourceType))) {
       throw new Error('存在未识别的原表文件');
     }
   }
   throwIfCancelled(shouldCancel);
   const hashedFiles = await hashSourceFiles(files);
-  const handoffDescriptors = assertImportArchiveHandoffMatches(
-    hashedFiles,
-    archiveHandoffFiles,
-    normalizedBatchId
-  );
-  const exactFiles = hashedFiles.map((file, index) => ({
-    ...file,
-    archiveArtifactId: handoffDescriptors[index].archiveArtifactId
-  }));
-  repository.createImportBatch(db, {
-    id: normalizedBatchId,
-    targetMonth: normalizedMonth,
-    fileCount: exactFiles.length
-  });
-
+  let exactFiles;
+  if (isWorkbookPlan) {
+    const handoff = freezeHandoffV2(archiveHandoffFiles, normalizedBatchId);
+    const expectedFiles = buildMemberFiles(files);
+    if (handoff.files.length !== files.length) throw handoffError('物理文件数变化');
+    exactFiles = hashedFiles.map((actual, index) => {
+      const expected = handoff.files[index];
+      if (actual.filePath !== expected.filePath || actual.sha256 !== expected.sha256 || actual.sizeBytes !== expected.sizeBytes
+          || expected.physicalFileId !== expectedFiles[index].physicalFileId
+          || membersDigest(expected.members) !== membersDigest(expectedFiles[index].members)) throw handoffError('输入文件或成员发生变化');
+      return { ...actual, fileName: expected.fileName, archiveArtifactId: expected.archiveArtifactId,
+        members: expected.members };
+    });
+  } else {
+    const descriptors = assertImportArchiveHandoffMatches(hashedFiles, archiveHandoffFiles, normalizedBatchId);
+    exactFiles = hashedFiles.map((file, index) => ({ ...file, archiveArtifactId: descriptors[index].archiveArtifactId }));
+  }
   const grouped = new Map();
   for (const file of exactFiles) {
-    if (!grouped.has(file.sourceType)) grouped.set(file.sourceType, []);
-    grouped.get(file.sourceType).push(file);
+    const members = isWorkbookPlan ? [...file.members].sort((a, b) => a.sheets[0].sheetIndex - b.sheets[0].sheetIndex)
+      : [{ sourceType: file.sourceType }];
+    for (const member of members) {
+      if (!grouped.has(member.sourceType)) grouped.set(member.sourceType, []);
+      grouped.get(member.sourceType).push({ ...file, sourceType: member.sourceType,
+        ...(isWorkbookPlan ? { sheets: member.sheets, sourceOrdinal: member.sourceOrdinal } : {}) });
+    }
   }
 
   const records = [];
   const recordIds = new Map();
+  const rowsReadByType = new Map();
+  const reportProgress = (progress) => {
+    if (progress.phase === 'reading') rowsReadByType.set(progress.sourceType,
+      Math.max(rowsReadByType.get(progress.sourceType) || 0, Number(progress.rows) || 0));
+    onProgress?.(progress);
+  };
   let outerError = null;
   try {
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      repository.createImportBatch(db, { id: normalizedBatchId, targetMonth: normalizedMonth, fileCount: exactFiles.length });
+      const archive = isWorkbookPlan ? createArchiveRepository(db) : null;
     for (const [sourceType, sourceFiles] of grouped) {
       const recordId = repository.createImportRecord(db, {
         batchId: normalizedBatchId,
         targetMonth: normalizedMonth,
         sourceType,
-        sourceFiles: sourceFiles.map((file) => path.basename(file.filePath))
+        sourceFiles: sourceFiles.map((file) => file.fileName || path.basename(file.filePath))
       });
       recordIds.set(sourceType, recordId);
       grouped.set(sourceType, sourceFiles.map((file, index) => ({
@@ -235,6 +256,23 @@ async function importFiles({
           archiveArtifactId: file.archiveArtifactId
         })
       })));
+      if (archive) {
+        for (const file of grouped.get(sourceType)) {
+          const artifact = archive.getArtifact(file.archiveArtifactId);
+          if (!artifact || artifact.status !== 'ready') throw handoffError('输入原件尚未 ready');
+          assertArtifactMember(artifact, { id: file.importSourceId, source_type: sourceType, batch_id: normalizedBatchId,
+            source_ordinal: file.sourceOrdinal, source_sha256: file.sha256, source_size_bytes: file.sizeBytes,
+            source_file_name: file.fileName }, archive.getBatch(artifact.batchId));
+          archive.addArtifactHold(file.archiveArtifactId, { ownerModule: 'vcc-financial-op', ownerType: 'vcc-import-source',
+            ownerId: String(file.importSourceId), reason: `VCC 导入来源 ${file.importSourceId} 在业务写入前保护原件` });
+        }
+      }
+    }
+      db.exec('COMMIT');
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch (_rollbackError) { /* keep primary */ }
+      recordIds.clear();
+      throw error;
     }
     for (const [sourceType, sourceFiles] of grouped) {
       throwIfCancelled(shouldCancel);
@@ -246,17 +284,19 @@ async function importFiles({
           sourceType,
           files: sourceFiles,
           recordId: recordIds.get(sourceType),
-          onProgress,
+          onProgress: reportProgress,
           shouldCancel
         });
         records.push(detailRecordResult(record, db));
       } else if (sourceType === SOURCE_TYPES.SYSTEM_OP) {
-        records.push(detailRecordResult(systemRecordResult(importSystemOpGroup({
+        records.push(detailRecordResult(systemRecordResult(await importSystemOpWorkbookGroup({
           db,
           batchId: normalizedBatchId,
           targetMonth: normalizedMonth,
           files: sourceFiles,
-          recordId: recordIds.get(sourceType)
+          recordId: recordIds.get(sourceType),
+          onProgress: reportProgress,
+          shouldCancel
         })), db));
       } else {
         throw new Error(`不支持的 VCC 财务OP原表类型：${sourceType}`);
@@ -293,8 +333,14 @@ async function importFiles({
     throw outerError;
   }
   const status = failures.length > 0 ? 'completed_with_errors' : 'success';
+  const physicalFileCount = exactFiles.length;
+  const businessSheetCount = exactFiles.reduce((count, file) => count + (file.sheets?.length || 1), 0);
+  const readRowCount = records.reduce((count, record) => count + (record.sourceType === SOURCE_TYPES.SYSTEM_OP
+    ? rowsReadByType.get(record.sourceType) || 0 : Number(record.rawCount) || 0), 0);
+  onProgress?.({ phase: 'summarizing', physicalFileCount, businessSheetCount, rows: readRowCount });
   repository.finishImportBatch(db, normalizedBatchId, status);
-  return { batchId: normalizedBatchId, targetMonth: normalizedMonth, status, records };
+  return { batchId: normalizedBatchId, targetMonth: normalizedMonth, status, records,
+    physicalFileCount, businessSheetCount, ...(isWorkbookPlan ? { readRowCount } : {}) };
 }
 
 module.exports = {

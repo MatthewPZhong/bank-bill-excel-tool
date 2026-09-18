@@ -69,7 +69,10 @@ class AdaptiveSharedStringsProvider {
     if (cacheMaxBytes !== undefined && (!Number.isSafeInteger(cacheMaxBytes) || cacheMaxBytes < 1)) {
       throw new TypeError('SST 字节缓存上限必须是正安全整数');
     }
-    this.tempRoot = path.resolve(String(tempRoot || ''));
+    // 缺省路径不能解析为 cwd；只有本实例独占创建的目录才能清理。
+    this.tempRoot = typeof tempRoot === 'string' && tempRoot.trim() ? path.resolve(tempRoot) : '';
+    this.tempRootIdentity = null;
+    this.ownedSpillFiles = [];
     this.memoryBudgetBytes = budget;
     this.lruMaxEntries = lruSize;
     this.preserveOnClose = preserveOnClose === true;
@@ -103,11 +106,15 @@ class AdaptiveSharedStringsProvider {
     if (!this.tempRoot) {
       throw new PositionSharedStringsError('SST 超过内存预算但未提供临时目录');
     }
-    fs.mkdirSync(this.tempRoot, { recursive: true, mode: 0o700 });
+    // 已存在的目录（包括 cwd、符号链接和另一读取任务的目录）一律不接管。
+    fs.mkdirSync(this.tempRoot, { mode: 0o700 });
+    this.tempRootIdentity = fs.lstatSync(this.tempRoot);
     this.binPath = path.join(this.tempRoot, 'sst.bin');
     this.idxPath = path.join(this.tempRoot, 'sst.idx');
-    this.binFd = fs.openSync(this.binPath, 'w+', 0o600);
-    this.idxFd = fs.openSync(this.idxPath, 'w+', 0o600);
+    this.binFd = fs.openSync(this.binPath, 'wx+', 0o600);
+    this.ownedSpillFiles.push({ path: this.binPath, identity: fs.fstatSync(this.binFd) });
+    this.idxFd = fs.openSync(this.idxPath, 'wx+', 0o600);
+    this.ownedSpillFiles.push({ path: this.idxPath, identity: fs.fstatSync(this.idxFd) });
     this.mode = 'disk';
     const buffered = this.values;
     this.values = [];
@@ -290,8 +297,26 @@ class AdaptiveSharedStringsProvider {
       this.closeError = new AggregateError(errors, 'SST 文件关闭未确认，保留临时文件');
       throw this.closeError;
     }
-    if (this.mode === 'disk' && !this.preserveOnClose && this.tempRoot) {
-      await fs.promises.rm(this.tempRoot, { recursive: true, force: true });
+    if (this.tempRootIdentity && !this.preserveOnClose) {
+      try {
+        const sameIdentity = (actual, owned) => actual.dev === owned.dev && actual.ino === owned.ino;
+        const root = await fs.promises.lstat(this.tempRoot);
+        if (!root.isDirectory() || !sameIdentity(root, this.tempRootIdentity)) {
+          throw new PositionSharedStringsError('SST 临时目录身份已变化，停止清理');
+        }
+        for (const file of this.ownedSpillFiles) {
+          const actual = await fs.promises.lstat(file.path);
+          if (!actual.isFile() || !sameIdentity(actual, file.identity)) {
+            throw new PositionSharedStringsError('SST 临时文件身份已变化，停止清理');
+          }
+          await fs.promises.unlink(file.path);
+        }
+        // 不递归删除；出现非本实例创建的文件时保留目录并报错。
+        await fs.promises.rmdir(this.tempRoot);
+      } catch (error) {
+        this.closeError = error;
+        throw error;
+      }
     }
   }
 }

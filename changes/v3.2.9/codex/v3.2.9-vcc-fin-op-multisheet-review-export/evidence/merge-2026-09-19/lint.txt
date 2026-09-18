@@ -1,0 +1,4 @@
+
+> bank-bill-excel-tool@3.2.8 lint
+> eslint src/
+

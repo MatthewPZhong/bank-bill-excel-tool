@@ -4,6 +4,8 @@ const crypto = require('node:crypto');
 const path = require('node:path');
 const sax = require('sax');
 const XLSX = require('xlsx');
+const { openRichWorkbook } = require('../xlsx-rich-reader');
+const { throwIfCancelled } = require('./detail-importer');
 const { canonicalizeVccAmount } = require('./amount-rules');
 const { normalizeWorksheetTarget } = require('../big-table-import/zip-reader');
 const {
@@ -569,6 +571,12 @@ function readSystemOpSnapshotCandidates(filePath, targetMonth, preferredSheetNam
     throw new Error(`${sourceFile}：系统财务OP表头位置与识别结果不一致`);
   }
 
+  return parseSystemOpSnapshotCandidates({ normalizedMonth, sourceFile, sheetName,
+    displayMatrix, rawMatrix, balanceLexicalTokens, header });
+}
+
+function parseSystemOpSnapshotCandidates({ normalizedMonth, sourceFile, sheetName,
+  displayMatrix, rawMatrix, balanceLexicalTokens, header, physicalFileId = sourceFile, sheetIndex = 0 }) {
   const rowsBySubject = new Map();
   const auditRowsBySubject = new Map();
   const invalidSubjects = new Set();
@@ -584,7 +592,8 @@ function readSystemOpSnapshotCandidates(filePath, targetMonth, preferredSheetNam
     headerRow: header.rowIndex + 1
   };
   const rememberError = (error, subject = '') => {
-    error.validationUnitKey = `${sourceFile}\u0000${subject || '<unknown-subject>'}`;
+    error.validationUnitKey = subject ? `${sourceFile}\u0000${subject}`
+      : `${physicalFileId}\u0000${sheetIndex}\u0000<unknown-subject>`;
     if (subject) {
       error.subject = subject;
       invalidSubjects.add(subject);
@@ -771,6 +780,110 @@ function readSystemOpSnapshotCandidates(filePath, targetMonth, preferredSheetNam
   return { snapshots, validationErrors, subjectAudits };
 }
 
+
+function systemOpCellValues(cell, { legacySheetJsDisplay = false } = {}) {
+  let raw = cell.cellType === 'number' ? Number(cell.rawLexicalValue)
+    : cell.cellType === 'boolean' ? cell.decodedSemanticValue === true : cell.decodedSemanticValue ?? '';
+  if (cell.cellType === 'date') {
+    // 与既有 SheetJS cellDates:false 一致，逐格转换为 Excel 序列值。
+    // parseDate(value, 1) 的时区处理保留原 ISO 日期含义，不把日期分量对象写入审计。
+    const date = new Date(cell.rawLexicalValue);
+    date.setTime(date.getTime() + date.getTimezoneOffset() * 60 * 1000);
+    if (!Number.isFinite(date.getTime())) throw new Error('系统 OP 日期单元格无效');
+    raw = XLSX.utils.aoa_to_sheet([[date]], { cellDates: false }).A1.v;
+  }
+  const display = cell.cellType === 'number' || cell.cellType === 'date'
+    ? XLSX.utils.format_cell({ t: 'n', v: raw, z: cell.sourceFormat || 'General' })
+    : cell.cellType === 'boolean' && legacySheetJsDisplay ? XLSX.utils.format_cell({ t: 'b', v: raw }) : String(raw);
+  return { raw, display };
+}
+
+async function readSystemOpSheetCandidates(file, selectedSheet, targetMonth, workbook, { onReadProgress } = {}) {
+  const normalizedMonth = normalizeYearMonth(targetMonth);
+  if (!normalizedMonth) throw new Error(`系统财务OP账期格式无效：${targetMonth}`);
+  const descriptor = workbook.sheets[selectedSheet.sheetIndex];
+  if (!descriptor || descriptor.name !== selectedSheet.sheetName || workbook.date1904) {
+    throw new Error(`${file.fileName}：系统 OP Sheet 身份或日期系统不符`);
+  }
+  const displayMatrix = [];
+  const rawMatrix = [];
+  const balanceLexicalTokens = new Map();
+  const balanceColumn = SYSTEM_OP_DEFINITION.indexes[SYSTEM_OP_DEFINITION.balanceHeader];
+  let actualRows = 0;
+  let locatedHeaderRow = selectedSheet.headerRow;
+  let header = null;
+  try {
+    await workbook.scanSheet(selectedSheet.sheetIndex, (row) => {
+      const raw = [], display = [];
+      for (const cell of row.cells) {
+        const column = cell.columnIndex;
+        if (cell.cellType === 'blank' && !cell.hasFormula) continue;
+        const value = systemOpCellValues(cell);
+        raw[column] = value.raw;
+        display[column] = value.display;
+        if (column === balanceColumn && cell.cellType === 'number') {
+          balanceLexicalTokens.set(row.rowIndex, cell.rawLexicalValue);
+        }
+      }
+      rawMatrix[row.rowIndex - 1] = raw;
+      displayMatrix[row.rowIndex - 1] = display;
+      if (headersEqual(display, SYSTEM_OP_HEADERS)) {
+        if (header || (locatedHeaderRow !== undefined && locatedHeaderRow !== row.rowIndex)) {
+          throw new Error('系统 OP 表头位置已变化或存在重复业务表头');
+        }
+        locatedHeaderRow = row.rowIndex;
+        header = { rowIndex: row.rowIndex - 1, values: normalizeHeaderRow(display) };
+      }
+      if (row.rowIndex > locatedHeaderRow && raw.some((value) => text(value))) {
+        actualRows += 1;
+        if (actualRows % 512 === 0) onReadProgress?.(actualRows);
+      }
+    });
+  } finally {
+    // 扫描已读数量独立于后续业务解析；解析失败或扫描中断仍上报已完成的行。
+    onReadProgress?.(actualRows);
+  }
+  if (!header) throw new Error('系统 OP 未找到预检指定的正式表头');
+  return { ...parseSystemOpSnapshotCandidates({ normalizedMonth, sourceFile: file.fileName || path.basename(file.filePath),
+    sheetName: selectedSheet.sheetName, sheetIndex: selectedSheet.sheetIndex, physicalFileId: file.physicalFileId,
+    displayMatrix, rawMatrix, balanceLexicalTokens, header }), actualRows };
+}
+
+async function importSystemOpWorkbookGroup(options) {
+  const prepared = [];
+  let actualRows = 0;
+  for (const file of options.files) {
+    if (!file.sheets) { prepared.push(file); continue; }
+    let workbook;
+    try {
+      workbook = await openRichWorkbook(file.filePath, { memoryBudgetBytes: 64 * 1024 * 1024,
+        cancelToken: { get cancelled() { return !!options.shouldCancel?.(); } } });
+      for (const selectedSheet of file.sheets) {
+        const rowsBeforeSheet = actualRows;
+        try {
+          const candidates = await readSystemOpSheetCandidates(file, selectedSheet, options.targetMonth, workbook, {
+            onReadProgress(sheetRows) {
+              actualRows = rowsBeforeSheet + sheetRows;
+              options.onProgress?.({ phase: 'reading', sourceType: SOURCE_TYPES.SYSTEM_OP,
+                sourceFile: file.fileName, sheetName: selectedSheet.sheetName, rows: actualRows });
+            }
+          });
+          prepared.push({ ...file, ...selectedSheet, snapshotCandidates: candidates });
+        } catch (error) {
+          if (options.shouldCancel?.()) { error.code = 'vcc-import-cancelled'; throw error; }
+          prepared.push({ ...file, ...selectedSheet, snapshotReadError: error });
+        }
+      }
+    } catch (error) {
+      if (options.shouldCancel?.()) { error.code = 'vcc-import-cancelled'; throw error; }
+      prepared.push({ ...file, snapshotReadError: error });
+    } finally { if (workbook) await workbook.close(); }
+    // 关闭会让出事件循环；继续读取下一文件或同步提交前复核取消。
+    throwIfCancelled(options.shouldCancel);
+  }
+  return importSystemOpGroup({ ...options, files: prepared });
+}
+
 function readSystemOpSnapshots(filePath, targetMonth, preferredSheetName = '') {
   const result = readSystemOpSnapshotCandidates(filePath, targetMonth, preferredSheetName);
   if (result.validationErrors.length > 0) {
@@ -883,10 +996,9 @@ function importSystemOpGroup({ db, batchId, targetMonth, files, recordId: prepar
   const validationErrors = [];
   for (const file of importFiles) {
     try {
-      const candidates = readSystemOpSnapshotCandidates(
-        file.filePath,
-        normalizedMonth,
-        file.sheetName
+      if (file.snapshotReadError) throw file.snapshotReadError;
+      const candidates = file.snapshotCandidates || readSystemOpSnapshotCandidates(
+        file.filePath, normalizedMonth, file.sheetName
       );
       snapshots.push(...candidates.snapshots.map((snapshot) => ({
         ...snapshot,
@@ -945,7 +1057,7 @@ function importSystemOpGroup({ db, batchId, targetMonth, files, recordId: prepar
   ));
   // 系统 OP 解析也是在 worker 中同步完成；在首条业务 DML 前复核完整
   // SHA/size，避免解析期间替换文件后把错误内容绑定到旧来源身份。
-  for (const file of importFiles) assertSourceFileMatchesSync(file);
+  for (const file of new Map(importFiles.map((file) => [file.filePath, file])).values()) assertSourceFileMatchesSync(file);
   const hardValidationErrors = validationErrors.filter(({ error }) => error.hardFailure);
   if (hardValidationErrors.length > 0) {
     db.exec('BEGIN IMMEDIATE');
@@ -1272,6 +1384,9 @@ function systemRecordResult(record) {
 }
 
 module.exports = {
+  systemOpCellValues,
+  readSystemOpSheetCandidates,
+  importSystemOpWorkbookGroup,
   normalizeSystemCurrency,
   displayAmountToken,
   rawNumericToken,

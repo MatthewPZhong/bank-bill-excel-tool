@@ -124,6 +124,59 @@ test('模板缺失、hash 变化和缓存对象污染均不会复用旧契约', 
   );
 });
 
+test('ASAR 虚拟 stat 身份变化不拒绝相同字节，缓存仍逐次读取并验证同一 Buffer', async (t) => {
+  const golden = fs.readFileSync(ASSET_PATH);
+  let inode = 0;
+  let lastReadBuffer;
+  let reads = 0;
+  let parses = 0;
+  t.mock.method(fs.promises, 'stat', async () => ({
+    dev: ++inode, ino: ++inode, size: golden.length, mtimeMs: ++inode, ctimeMs: ++inode,
+    isFile: () => true
+  }));
+  t.mock.method(fs.promises, 'readFile', async () => {
+    reads++;
+    lastReadBuffer = Buffer.from(golden);
+    return lastReadBuffer;
+  });
+  const prototype = Object.getPrototypeOf(new ExcelJS.Workbook().xlsx);
+  const originalLoad = prototype.load;
+  t.mock.method(prototype, 'load', async function (buffer, ...args) {
+    parses++;
+    assert.equal(buffer, lastReadBuffer);
+    return originalLoad.call(this, buffer, ...args);
+  });
+  const first = await loadResultTemplateContract({ templatePath: ASSET_PATH });
+  first.headers[0] = '污染';
+  const second = await loadResultTemplateContract({ templatePath: ASSET_PATH });
+  assert.deepEqual(second.headers, RESULT_TEMPLATE_HEADERS);
+  assert.equal(Object.hasOwn(second, 'statIdentity'), false);
+  assert.equal(reads, 2);
+  assert.equal(parses, 1);
+
+  t.mock.method(fs.promises, 'readFile', async () => Buffer.from('tampered'));
+  await assert.rejects(loadResultTemplateContract({ templatePath: ASSET_PATH }), {
+    code: 'result-template-contract-mismatch'
+  });
+  assert.equal(parses, 1);
+});
+
+test('模板目录、读取期间删除和权限/I/O 错误使用稳定错误码', async (t) => {
+  const dir = tempDir(t);
+  await assert.rejects(loadResultTemplateContract({ templatePath: dir }), {
+    code: 'result-template-missing'
+  });
+  for (const code of ['ENOENT', 'EACCES', 'EIO']) {
+    const mock = t.mock.method(fs.promises, 'readFile', async () => {
+      throw Object.assign(new Error(`read ${code}`), { code });
+    });
+    await assert.rejects(loadResultTemplateContract({ templatePath: ASSET_PATH }), {
+      code: code === 'ENOENT' ? 'result-template-missing' : 'result-template-read-failed'
+    });
+    mock.mock.restore();
+  }
+});
+
 test('调整血缘 defined name 经 ExcelJS write→reopen 完整保真', async (t) => {
   const outputPath = path.join(tempDir(t), 'lineage.xlsx');
   const workbook = new ExcelJS.Workbook();

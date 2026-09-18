@@ -1,6 +1,7 @@
 'use strict';
 
 const path = require('node:path');
+const os = require('node:os');
 const { randomUUID } = require('node:crypto');
 const { openZipWithEntries, WORKBOOK_ENTRY_NAME, WORKBOOK_RELS_ENTRY_NAME } = require('./big-table-import/zip-reader');
 const { TOOLBOX_XLSX_METADATA_LIMITS, findRelationshipEntry, parseWorkbookRelationships,
@@ -64,21 +65,26 @@ async function openRichWorkbook(filePath, options = {}, singleSheet = false) {
       themeXml: theme ? await metadata(theme, 'theme', TOOLBOX_XLSX_METADATA_LIMITS.theme) : '',
       requireStylesXml: !!styles, requireThemeXml: !!theme });
     sharedStrings = await loadSharedStringsProvider(zip, related('sharedStrings', 'xl/sharedStrings.xml'), {
-      sourceFile, tempRoot: options.sstTempRoot, memoryBudgetBytes: options.memoryBudgetBytes,
+      sourceFile, tempRoot: options.sstTempRoot ?? path.join(os.tmpdir(), `rich-xlsx-sst-${randomUUID()}`),
+      memoryBudgetBytes: options.memoryBudgetBytes,
       lruMaxEntries: options.lruMaxEntries, cacheMaxBytes: options.cacheMaxBytes,
       strictClose: true, cancelToken: options.cancelToken
     });
     let scanning = false;
-    async function scanSheet(index, onRow, onSheetMeta) {
+    async function scanSheet(index, onRow, onSheetMeta, onCellLexical) {
       if (scanning || closePromise || !sheets[index]) throw invalid('读取已关闭、并发扫描或页索引无效');
       scanning = true;
       const selected = sheets[index];
       try { return await scanXlsxSheet({ zip, sheetEntry: entries.get(selected.entryPath), sheet: selected, sourceFile,
         sourceRegistry: registry.registry, date1904: workbook.date1904, sharedStrings,
-        themeColors: registry.themeColors, cancelToken: options.cancelToken, onRow, onSheetMeta }); }
+        themeColors: registry.themeColors, cancelToken: options.cancelToken, onRow, onSheetMeta, onCellLexical }); }
       finally { scanning = false; }
     }
     return Object.freeze({ sheet, sheets: Object.freeze(sheets), date1904: workbook.date1904, sharedStrings, close,
+      getCellStyle(cell) {
+        if (cell?.effectiveStyleRef?.sourceRegistryId !== registry.registry.sourceRegistryId) throw invalid('单元格样式不属于当前工作簿');
+        return registry.registry.get(cell.effectiveStyleRef.styleRef);
+      },
       scanSheet, scan(onRow) { return scanSheet(0, onRow); } });
   } catch (error) {
     try { await close(); } catch (closeError) { throw new AggregateError([error, closeError], '工作簿读取失败且资源关闭未确认', { cause: error }); }

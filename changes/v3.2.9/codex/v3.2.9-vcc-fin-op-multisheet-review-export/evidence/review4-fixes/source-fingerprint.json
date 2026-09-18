@@ -1,0 +1,269 @@
+{
+  "recordedAt": "2026-09-18T15:06:34.295015+00:00",
+  "branch": "codex/v3.2.9-vcc-fin-op-multisheet-review-export",
+  "baseCommit": "2ba9ef14fe972363b604955636cff0c9ac53700f",
+  "fileCount": 65,
+  "files": [
+    {
+      "path": "index.html",
+      "sha256": "2da5cd77400aba23fcdbcd5ed182866083c0a4b8fce47e82ae3286a04fa9209f"
+    },
+    {
+      "path": "scripts/reset-vcc-financial-op-storage.js",
+      "sha256": "1688e0a66b38a73e49e98615e227a5b87b81bb9f29bd5877e049a2d5962d7be1"
+    },
+    {
+      "path": "scripts/vcc-financial-op/measure-shared-writer.js",
+      "sha256": "028159144ae7de515a0c03fdc224a3498e8582ce46f8c4215e4c6b9890b2e26e"
+    },
+    {
+      "path": "scripts/vcc-financial-op/verify-review-electron.js",
+      "sha256": "38dec0cc32820d8c682543cb948bdb0cdd797711e96ef05273b02f9cb2a37cb2"
+    },
+    {
+      "path": "src/backend/database.js",
+      "sha256": "2d6278c51329c642454085d77972f3d233f89e08496c6c493c98ae0e892dc6e8"
+    },
+    {
+      "path": "src/backend/database/archive-repository.js",
+      "sha256": "5c94b2572c7c2b3581dabcd8e6bd698c70255d32f761ba3a910a9be54a882cd0"
+    },
+    {
+      "path": "src/backend/position-reconciliation-import/shared-strings-provider.js",
+      "sha256": "7ad50189cd97d52673ac4f7930ae1849a2c5b4283ba891b1b03996d11f47b9f6"
+    },
+    {
+      "path": "src/backend/toolbox-format/xlsx-sheet-scanner.js",
+      "sha256": "a58e236130399f66844a5568ad3fbfcddb5fd98cbfe0c1acaf771704fa0d150d"
+    },
+    {
+      "path": "src/backend/vcc-financial-op-db/migrations.js",
+      "sha256": "0c1575af98b95b770fda0375ad75fae03618b93940d7b5ec3a0b21cf2d91e41a"
+    },
+    {
+      "path": "src/backend/vcc-financial-op-db/storage-contract.js",
+      "sha256": "fd2fa45160c98e928d6f0ecb324c91ab17045d11813aac7e5fd992ccb70fb9f3"
+    },
+    {
+      "path": "src/backend/vcc-financial-op-db/storage-upgrade.js",
+      "sha256": "b8743b36f569fac8108c302271085820a65518eb1cc0cbff839fd46e6b3caf2c"
+    },
+    {
+      "path": "src/backend/vcc-financial-op/detail-importer.js",
+      "sha256": "9e9613319affe736fce28837e7314d9617a1b0e82568c8c5235dfd3400773ec7"
+    },
+    {
+      "path": "src/backend/vcc-financial-op/import-handoff.js",
+      "sha256": "342de97df62cb412aa0a568fe541ed980b1b31293126569f77a94d1921ae9268"
+    },
+    {
+      "path": "src/backend/vcc-financial-op/import-service.js",
+      "sha256": "28ead5185b074ba2233c4ef21949b52eddd20ebe9918022366649392274208fb"
+    },
+    {
+      "path": "src/backend/vcc-financial-op/mutation-guard.js",
+      "sha256": "9ea0e65e6ab3dd598faa9c037799f72bbe2487919e275d8f9bca073ecbdff56f"
+    },
+    {
+      "path": "src/backend/vcc-financial-op/result-template-contract.js",
+      "sha256": "10863c8f9d283457c2af3507a87a5d17134d28ca2530a6254df9899108b1781a"
+    },
+    {
+      "path": "src/backend/vcc-financial-op/review-export-contract.js",
+      "sha256": "54c5b081225711f347b3ac18ab1b3c985b825a410ef4a6a4f44d0e0e01b97fec"
+    },
+    {
+      "path": "src/backend/vcc-financial-op/review-export-plan.js",
+      "sha256": "79ee4d64076e08b1cf17905746e4e3e13f55049ec2ce872453cf49d8a18d70a8"
+    },
+    {
+      "path": "src/backend/vcc-financial-op/system-op-importer.js",
+      "sha256": "66f052f3a26a5577c933324ba3a09853ee9b36bb23b1a72370d568a230acf6c2"
+    },
+    {
+      "path": "src/backend/vcc-financial-op/unarchive.js",
+      "sha256": "ac4482d889176209ec1ba0b68bdd23b7ad4f71475e49c2a1c0c0f60bfd4578d8"
+    },
+    {
+      "path": "src/backend/vcc-financial-op/workbook-import-plan.js",
+      "sha256": "60ad0544008f809cb481d0b8067b78ad894b6837e93595f8ceb9a3c3a1c29b7f"
+    },
+    {
+      "path": "src/backend/vcc-financial-op/workbook-reader.js",
+      "sha256": "c9bfe3e68af18b8d34b05f0c52da532ea2905f2dc49f5ab1c245367d5cb4f340"
+    },
+    {
+      "path": "src/backend/vcc-financial-op/worker-entry.js",
+      "sha256": "03c402989cab897cfc512ce0e0afab3d83986c70e5bea6cba932ff464ee4cca9"
+    },
+    {
+      "path": "src/backend/xlsx-rich-reader.js",
+      "sha256": "21795aa07d19b7e01550c40df6dc662cc5b57017977521096d57927ef3b37a98"
+    },
+    {
+      "path": "src/main-process/archive-center/task-policy-registry.js",
+      "sha256": "0e2e81ce5ef9ad8a349eff74a261d83522f182449f074d368a25bf924a8a3e70"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/export-writer.js",
+      "sha256": "264c88cb697a003e959e02e6dac7175edc3309b2bca0f8e73068b25295930ee1"
+    },
+    {
+      "path": "src/main-process/bounded-xlsx-writer.js",
+      "sha256": "4ac8db55f0ca796a18986632d7f3909dbc5478948fdab5c76e93522d99f514e2"
+    },
+    {
+      "path": "src/main-process/vcc-financial-op-archive-lineage.js",
+      "sha256": "cd99133fcfce3a48dc8a077b54fa1db5a7f669c4f1fded006accd5b31668aa98"
+    },
+    {
+      "path": "src/main-process/vcc-financial-op-dataset-writer.js",
+      "sha256": "01c88a30c2eb796cb9b602736fa00cbece36e3bb758c83bf519cda8b8568edb5"
+    },
+    {
+      "path": "src/main-process/vcc-financial-op-review-ipc.js",
+      "sha256": "9b4b2002a99147817f1f4779179f26b5d49230c702a9b2914c5ca84bc24177ac"
+    },
+    {
+      "path": "src/main-process/vcc-financial-op-review-target.js",
+      "sha256": "52d0eeb19f1bac540b9b61b9b04d6f65e3ed3a2ae95282d6715b696d3effef13"
+    },
+    {
+      "path": "src/main-process/vcc-financial-op-review-validator.js",
+      "sha256": "c2eaafd2090e7e4b68d56b235eebcfcd640b99d3a925784113abf74e5a3333e2"
+    },
+    {
+      "path": "src/main-process/vcc-financial-op-review-worker.js",
+      "sha256": "cba369df0ee41c1c21da10ddd872e97f15f873204292f489cdcf267484fe4c3f"
+    },
+    {
+      "path": "src/main-process/vcc-financial-op-review-writer.js",
+      "sha256": "3f66c20a3b52680bd83773a20cb81d5326cb547e40e3ee9fd3b547e2b2732295"
+    },
+    {
+      "path": "src/main-process/vcc-financial-op-service.js",
+      "sha256": "68acb668b2eda87e4cfdd98b96faa9680eaa41ec4a46bb409cffd51d69b09cf4"
+    },
+    {
+      "path": "src/main-process/vcc-financial-op-storage-migration.js",
+      "sha256": "75f7cfa6367cb43c58aaa8988808d1d4d367f1215b2d685da8bbaa23d525dbf7"
+    },
+    {
+      "path": "src/main-process/vcc-financial-op-storage-rebuild.js",
+      "sha256": "115ace190a9accaba95504771c3224345804a518505af7613677c2fec9caccfb"
+    },
+    {
+      "path": "src/main.js",
+      "sha256": "a631553ffcdf163e7f6077f1557769dff66581d91fa79c2b0b3861a10e21f5d1"
+    },
+    {
+      "path": "src/preload.js",
+      "sha256": "91253b01594b66e1104f5eed05c1d77930f5c04e4376d3e5ddb13386165e4af8"
+    },
+    {
+      "path": "src/renderer-vcc-financial-op.js",
+      "sha256": "73b7745a6f44ba13f0408ad301f5d6d37ad172d94747625601b75860557636b3"
+    },
+    {
+      "path": "src/shared/vcc-review-projection.js",
+      "sha256": "f04fad2e7596187f46f5362e085834a5835ad37bd59f9d700d8e46f615e6e66a"
+    },
+    {
+      "path": "src/styles-vcc-financial-op.css",
+      "sha256": "06ca66aed1b7747b98b4132c1fcc937b1a3d004fbee7ac621eca801c403c1215"
+    },
+    {
+      "path": "tests/helpers/vcc-review-export.js",
+      "sha256": "d989bafd4d31771071b3839bfdaa5459fe68bd7e8b524a6061d71b2f5c51d6cf"
+    },
+    {
+      "path": "tests/unit/backend/shared-strings-ownership.test.js",
+      "sha256": "9c81dc28aba1b87519c5c365d197a04f58c3077c4b5e5f1068b85f0f9f44dab3"
+    },
+    {
+      "path": "tests/unit/backend/vcc-financial-op/detail-importer.test.js",
+      "sha256": "631fb716ad56ed3f0af49d983e34ad8b6463551d71a879852438a2843ea399e2"
+    },
+    {
+      "path": "tests/unit/backend/vcc-financial-op/multisheet-import.test.js",
+      "sha256": "6a030c773bebd0d0a00728cde298c87d4577c28c15298543d80350586d30ac16"
+    },
+    {
+      "path": "tests/unit/backend/vcc-financial-op/mutation-guard.test.js",
+      "sha256": "a693b784a61219e232ecccfd6c53e2c44a44bb0218f21869270fd84f132cec62"
+    },
+    {
+      "path": "tests/unit/backend/vcc-financial-op/result-template-contract.test.js",
+      "sha256": "ce333109707b65fb22caa8ddbb33b2c5dfad6803cfafdc4098ec93342caffeda"
+    },
+    {
+      "path": "tests/unit/backend/vcc-financial-op/review-projection.test.js",
+      "sha256": "19577db9525b0c4972c5d26c477c351e800c4034c023fdfc6487bda8013f28a3"
+    },
+    {
+      "path": "tests/unit/backend/vcc-financial-op/storage-contract-v3.test.js",
+      "sha256": "ac2f01c6ccf6ddce696b0e91f2cda35fe6dfc49366ce1e45739896b91704b746"
+    },
+    {
+      "path": "tests/unit/backend/vcc-financial-op/storage-contract.test.js",
+      "sha256": "b16c52c6a6bf230ce0c5cd3133d43281ceb028cb212d7d0d862c8ce2378a1b54"
+    },
+    {
+      "path": "tests/unit/backend/vcc-financial-op/workbook-import-plan.test.js",
+      "sha256": "c7eaecc69bbc29359e26fac42e6e6e9f1f8e0ae80fcca687bdca049bcc25dc27"
+    },
+    {
+      "path": "tests/unit/main-process/archive-task-policy-registry.test.js",
+      "sha256": "fe678a68862c2c1f12f615179f94282e6592c788836b136171f39a3d6fba6749"
+    },
+    {
+      "path": "tests/unit/main-process/biz-op-v327-export-sst.test.js",
+      "sha256": "e29c80ae77b567cf8497f6b86d382ca95c5985eb6338b4ff6b6c1888207d94ea"
+    },
+    {
+      "path": "tests/unit/main-process/bounded-xlsx-writer.test.js",
+      "sha256": "0734ea850fb1f421a156fdebdb8decf4a54cf53296c3b8e3fbdae5245e413f6c"
+    },
+    {
+      "path": "tests/unit/main-process/vcc-financial-op-archive-integration.test.js",
+      "sha256": "fe50c40bd02f06c11b011b5fb328cb85f81d70022215899eb9187e3f4b074486"
+    },
+    {
+      "path": "tests/unit/main-process/vcc-financial-op-review-export.test.js",
+      "sha256": "f98ee85729a6527b4efd0d7886711fcaf493bee97a12b8985eaa057a968aca53"
+    },
+    {
+      "path": "tests/unit/main-process/vcc-financial-op-review-ipc.test.js",
+      "sha256": "52a30853444c033799452ec703f1c7c09ca7672383b3d8daf13869ad881b8364"
+    },
+    {
+      "path": "tests/unit/main-process/vcc-financial-op-review-legacy-error.test.js",
+      "sha256": "5865d08be58803f37661030d676c0b4c79c7cc093bc84831182ef090cbb21157"
+    },
+    {
+      "path": "tests/unit/main-process/vcc-financial-op-review-target.test.js",
+      "sha256": "127fe7f65c4d60ddb0e61b4ff0188544464fcb8a9b04dfe1b34cb390bd2dafc4"
+    },
+    {
+      "path": "tests/unit/main-process/vcc-financial-op-storage-migration.test.js",
+      "sha256": "0d4e7d30520d69a62337eb3e7fe8758b00b16cc225cbdbab34f0618b0047472d"
+    },
+    {
+      "path": "tests/unit/main-process/vcc-financial-op-storage-rebuild.test.js",
+      "sha256": "8ac6831807b8d440ae51102b53152d2ca9ec7519d1db8f743d2f8e096e1da088"
+    },
+    {
+      "path": "tests/unit/renderer-vcc-financial-op.test.js",
+      "sha256": "2bf93fc7a47273de5c22fa4b6655463fd4f7babdd7b7949d02071dc8b4a6d90a"
+    },
+    {
+      "path": "tests/unit/scripts/reset-vcc-financial-op-storage.test.js",
+      "sha256": "cd3f8ea98f8006c08389dcd3313d443f28031bb2ef9f8e722ba0aadce2129a37"
+    },
+    {
+      "path": "tests/unit/toolbox-format-xlsx-structure.test.js",
+      "sha256": "72d2e4ed71200ff998377c3d54c862142e2f8f4758940d652dcd79226c115965"
+    }
+  ],
+  "sourceManifestSha256": "9467b20ff1d222114174b161b97b0433b5743d31f2b91d6b92907b9ca690a6e2"
+}

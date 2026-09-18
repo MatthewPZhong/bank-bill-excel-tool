@@ -1,0 +1,15 @@
+{
+  "recordedAt": "2026-09-18T15:41:25.393957+00:00",
+  "snapshot": "/private/tmp/vcc-review5-before-w3x48hl1",
+  "files": [
+    {
+      "path": "src/backend/vcc-financial-op/system-op-importer.js",
+      "sha256": "66f052f3a26a5577c933324ba3a09853ee9b36bb23b1a72370d568a230acf6c2"
+    },
+    {
+      "path": "tests/unit/backend/vcc-financial-op/multisheet-import.test.js",
+      "sha256": "6a030c773bebd0d0a00728cde298c87d4577c28c15298543d80350586d30ac16"
+    }
+  ],
+  "priorGateFilesVerified": 65
+}

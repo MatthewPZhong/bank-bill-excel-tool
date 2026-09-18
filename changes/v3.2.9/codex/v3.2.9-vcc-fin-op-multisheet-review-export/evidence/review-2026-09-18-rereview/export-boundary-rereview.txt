@@ -1,0 +1,6 @@
+{"name":"zero-padded-zero","status":"PASS","sheetCount":8,"sourceRowCount":7,"subject":{"t":"n","v":0,"z":"000000","w":"000000"}}
+{"name":"negative-literal-prefix","status":"PASS","sheetCount":8,"sourceRowCount":7,"subject":{"t":"n","v":-123,"z":"\"ENT-\"00000;\"ENT-\"00000","w":"ENT-00123"}}
+{"name":"cached-formula-format","status":"PASS","sheetCount":8,"sourceRowCount":7,"subject":{"t":"n","v":123,"z":"\"ENT-\"00000","w":"ENT-00123"}}
+{"name":"current-boolean-false","status":"PASS","sheetCount":8,"sourceRowCount":7,"subject":{"t":"b","v":false,"z":"General","w":"FALSE"}}
+{"name":"date-display-month-raw-fallback","status":"PASS","sheetCount":8,"sourceRowCount":7,"subject":{"t":"s","v":"甲","h":"甲","z":"@","w":"甲"}}
+{"name":"historical-formatted-without-source","status":"PASS","sheetCount":8,"sourceRowCount":7,"subject":{"t":"n","v":123,"z":"0","w":"123"}}

@@ -1,0 +1,5 @@
+Error: Electron 验收失败：null
+    at ChildProcess.<anonymous> (/private/tmp/vcc-review-merge-20260919-npj2qv4n/candidate/scripts/vcc-financial-op/verify-review-electron.js:108:41)
+    at Object.onceWrapper (node:events:623:12)
+    at ChildProcess.emit (node:events:508:20)
+    at ChildProcess._handle.onexit (node:internal/child_process:294:12)

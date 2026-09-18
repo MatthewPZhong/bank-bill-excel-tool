@@ -432,7 +432,8 @@ const {
   buildVccImportArchiveHandoffFiles,
   listRecoverableVccImportArchiveBatchIds,
   recoverVccImportArchiveTasks,
-  reconcileVccImportArchiveLineageAtStartup
+  reconcileVccImportArchiveLineageAtStartup,
+  persistVccImportHandoffV2
 } = require('./main-process/vcc-financial-op-archive-lineage');
 const { vccFinancialOpErrorResult } = require('./main-process/vcc-financial-op-ipc');
 const {
@@ -15487,21 +15488,37 @@ function registerNewAccountHandlers() {
   // 四类明细和系统OP使用独立表空间；导入/计算在 worker 中执行，归档在主库事务中执行。
   // ==========================================================================
 
-  ipcMain.handle('vccFinancialOp:import:pick-files', async () => {
+  const vccImportPlans = new Map();
+  const vccImportPlanOwners = new WeakSet();
+  const { publicImportPlan, resolveImportPlan, planError: vccPlanError } = require('./backend/vcc-financial-op/workbook-import-plan');
+  ipcMain.handle('vccFinancialOp:import:pick-files', async (event) => {
+    const owner = event.sender;
+    const selectionToken = {};
+    vccImportPlans.set(owner.id, selectionToken);
+    if (!vccImportPlanOwners.has(owner)) {
+      vccImportPlanOwners.add(owner);
+      owner.once('destroyed', () => vccImportPlans.delete(owner.id));
+    }
     const choice = await showImportOpenDialog('vcc-financial-op', {
       title: '选择 VCC 财务OP校验原表（可多选）',
       filters: [{ name: 'Excel', extensions: ['xlsx'] }],
       properties: ['openFile', 'multiSelections']
     });
     if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
+      if (vccImportPlans.get(owner.id) === selectionToken) vccImportPlans.delete(owner.id);
       return { status: 'cancelled' };
     }
     try {
-      const files = await getVccFinancialOpService().inspectSelectedFiles(choice.filePaths);
-      return { status: 'success', files };
+      const plan = await getVccFinancialOpService().inspectSelectedFiles(choice.filePaths, (progress) => {
+        if (!owner.isDestroyed()) owner.send('vccFinancialOp:import:progress', progress);
+      });
+      if (owner.isDestroyed() || vccImportPlans.get(owner.id) !== selectionToken) throw vccPlanError('vcc-import-plan-stale', '文件选择已更新，请重新预检');
+      vccImportPlans.set(owner.id, plan);
+      return { status: 'success', plan: publicImportPlan(plan) };
     } catch (error) {
       return {
         status: 'error',
+        code: error && error.code || 'vcc-import-failed',
         message: error && error.message ? error.message : String(error),
         detailLines: error && Array.isArray(error.detailLines) ? error.detailLines : []
       };
@@ -15509,8 +15526,13 @@ function registerNewAccountHandlers() {
   });
 
   trackedIpcHandle('vccFinancialOp:import:apply', 'VCC财务OP校验', '导入文件', {
-    prepare: async (_event, payload = {}) => {
-      const inspectedFiles = payload.files;
+    prepare: async (event, payload = {}) => {
+      const plan = vccImportPlans.get(event.sender.id);
+      const inspectedFiles = resolveImportPlan(plan, payload);
+      await getVccFinancialOpService().validateImportPlan(plan, (progress) => {
+        if (!event.sender.isDestroyed()) event.sender.send('vccFinancialOp:import:progress', progress);
+      });
+      if (event.sender.isDestroyed() || vccImportPlans.get(event.sender.id) !== plan) throw vccPlanError('vcc-import-plan-stale', '导入计划已更新');
       const fileDescriptors = Object.freeze(inspectedFiles.map((file) => {
         const { filePath: _filePath, ...descriptor } = file;
         return Object.freeze(descriptor);
@@ -15533,12 +15555,12 @@ function registerNewAccountHandlers() {
             ...descriptor,
             filePath: fileEvidence.filePlan.inputs[index].filePath
           }));
-          return {
-            vccImportArchiveHandoffFiles: await prepareVccImportArchiveHandoff(
-              { ...payload, files },
-              batchContext
-            )
-          };
+          if (event.sender.isDestroyed() || vccImportPlans.get(event.sender.id) !== plan) throw vccPlanError('vcc-import-plan-stale', '导入计划已失效');
+          const handoff = await prepareVccImportArchiveHandoff({ files }, batchContext);
+          persistVccImportHandoffV2(vccImportArchiveRecoveryOptions().archiveRepository,
+            batchContext, fileEvidence.filePlan.inputs, handoff);
+          vccImportPlans.delete(event.sender.id);
+          return { vccImportArchiveHandoffFiles: handoff };
         }
       };
     },
@@ -15550,7 +15572,6 @@ function registerNewAccountHandlers() {
           ...descriptor,
           filePath: taskContext.fileEvidence.filePlan.inputs[index].filePath
         }));
-        const businessPayload = { ...payload, files };
         service = getVccFinancialOpService();
         const handoffFiles = taskContext.fileEvidence.vccImportArchiveHandoffFiles;
         const settled = await taskContext.settleArtifacts({
@@ -15565,10 +15586,17 @@ function registerNewAccountHandlers() {
           error.code = 'VCC_IMPORT_ARCHIVE_HANDOFF_FAILED';
           throw error;
         }
-        const workerHandoffFiles = handoffFiles.map((file, index) => Object.freeze({
-          ...file,
-          archiveArtifactId: settled.results[index].artifact.id
-        }));
+        const frozenFiles = [];
+        for (let index = 0; index < files.length; index += 1) {
+          const artifactId = settled.results[index].artifact.id;
+          const ready = await archiveCenterService.service.resolveVerifiedArtifact(artifactId);
+          if (!ready?.ok) throw Object.assign(new Error(ready?.message || '无法读取已冻结原件'), { code: ready?.code });
+          const metadata = handoffFiles[index].metadata;
+          frozenFiles.push({ ...files[index], filePath: ready.filePath, archiveArtifactId: artifactId,
+            members: metadata.vccSourceMembers });
+        }
+        const workerHandoffFiles = { version: 2, taskRunId: batchContext.taskRunId, files: frozenFiles };
+        const businessPayload = { targetMonth: payload.targetMonth, files: frozenFiles };
         const result = await service.importSelectedFiles(businessPayload, (progress) => {
           if (event && event.sender && !event.sender.isDestroyed()) {
             event.sender.send('vccFinancialOp:import:progress', progress);
@@ -15583,6 +15611,7 @@ function registerNewAccountHandlers() {
           : {};
         const businessResult = {
           status: 'error',
+          code: error && error.code || 'vcc-import-failed',
           message: error && error.message ? error.message : String(error),
           detailLines: error && Array.isArray(error.detailLines) ? error.detailLines : [],
           batchId: partial.batchId || null,
@@ -15974,6 +16003,17 @@ function registerNewAccountHandlers() {
       return { status: 'error', message: error && error.message ? error.message : String(error) };
     }
   });
+
+  supportIpcHandle('vccFinancialOp:export:review', '导出 VCC 待确认表',
+    require('./main-process/vcc-financial-op-review-ipc').createReviewExportHandler({
+      getService: () => vccFinancialOpService,
+      dialog,
+      getWindow: () => mainWindow,
+      documentsPath: app.getPath('documents'),
+      tempRoot: path.join(app.getPath('userData'), 'run-data', 'vcc-financial-op', 'review-export'),
+      protectedRoots: [app.getPath('userData'), app.getAppPath(), process.resourcesPath,
+        path.dirname(database.dbPath)]
+    }));
 
   trackedIpcHandle('vccFinancialOp:export:result', 'VCC财务OP校验', '导出校验结果表', {
     prepare: async (_event, payload = {}) => {

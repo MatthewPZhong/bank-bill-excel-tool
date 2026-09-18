@@ -1,11 +1,12 @@
 'use strict';
 
-const VCC_STORAGE_CONTRACT_VERSION = 2;
+const VCC_STORAGE_CONTRACT_VERSION = 3;
 const VCC_STORAGE_CONTRACT_SETTING_KEY = 'vcc_storage_contract_version';
-const VCC_STORAGE_WRITE_CAPABILITY_FUNCTION = 'vcc_storage_write_capability_v2';
-const VCC_STORAGE_WRITE_CAPABILITY_TOKEN = 'vcc-storage-contract-v2';
-const VCC_STORAGE_GUARD_TRIGGER_PREFIX = 'vcc_storage_contract_v2_guard_';
-const VCC_STORAGE_GUARD_ERROR_MESSAGE = 'VCC storage contract v2 write capability required';
+const VCC_STORAGE_WRITE_CAPABILITY_FUNCTION = 'vcc_storage_write_capability_v3';
+const VCC_STORAGE_WRITE_CAPABILITY_TOKEN = 'vcc-storage-contract-v3';
+const VCC_STORAGE_GUARD_TRIGGER_PREFIX = 'vcc_storage_contract_v3_guard_';
+const LEGACY_STORAGE_CONTRACT_VERSION = 2;
+const { VCC_TABLE_POLICY_REGISTRY } = require('../vcc-financial-op/mutation-policy');
 const SQL_IDENTIFIER_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 function assertDatabase(db) {
@@ -29,16 +30,20 @@ function assertTableName(tableName) {
   return name;
 }
 
-function registerVccStorageWriteCapability(db) {
+function registerStorageWriteCapability(db, version) {
   assertDatabase(db);
   if (typeof db.function !== 'function') {
     throw new Error('当前 SQLite 连接不支持 VCC storage contract 写能力注册');
   }
   db.function(
-    VCC_STORAGE_WRITE_CAPABILITY_FUNCTION,
+    `vcc_storage_write_capability_v${version}`,
     { deterministic: true },
-    () => VCC_STORAGE_WRITE_CAPABILITY_TOKEN
+    () => `vcc-storage-contract-v${version}`
   );
+}
+
+function registerVccStorageWriteCapability(db) {
+  registerStorageWriteCapability(db, VCC_STORAGE_CONTRACT_VERSION);
 }
 
 function vccTableNames(db) {
@@ -101,23 +106,24 @@ function assertEmptyVccStorageForUpgrade(db) {
   throw error;
 }
 
-function guardTriggerName(tableName, operation) {
-  return assertTableName(`${VCC_STORAGE_GUARD_TRIGGER_PREFIX}${tableName}_${operation}`);
+function guardTriggerName(tableName, operation, version) {
+  return assertTableName(`vcc_storage_contract_v${version}_guard_${tableName}_${operation}`);
 }
 
-function vccStorageGuardTriggerDefinition(tableName, operation) {
+function vccStorageGuardTriggerDefinition(tableName, operation, version = VCC_STORAGE_CONTRACT_VERSION) {
+  if (![2, 3].includes(version)) throw new TypeError('VCC 写保护版本非法');
   const name = assertTableName(tableName);
   const normalizedOperation = String(operation || '').toLowerCase();
   if (!['insert', 'update', 'delete'].includes(normalizedOperation)) {
     throw new TypeError('VCC storage guard trigger 操作非法');
   }
-  const triggerName = guardTriggerName(name, normalizedOperation);
+  const triggerName = guardTriggerName(name, normalizedOperation, version);
   const body = `
     BEFORE ${normalizedOperation.toUpperCase()} ON ${name}
     BEGIN
       SELECT CASE
-        WHEN ${VCC_STORAGE_WRITE_CAPABILITY_FUNCTION}() <> '${VCC_STORAGE_WRITE_CAPABILITY_TOKEN}'
-        THEN RAISE(ABORT, '${VCC_STORAGE_GUARD_ERROR_MESSAGE}')
+        WHEN vcc_storage_write_capability_v${version}() <> 'vcc-storage-contract-v${version}'
+        THEN RAISE(ABORT, 'VCC storage contract v${version} write capability required')
       END;
     END
   `;
@@ -130,14 +136,18 @@ function vccStorageGuardTriggerDefinition(tableName, operation) {
   });
 }
 
-function installVccStorageWriteGuards(db) {
+function installStorageWriteGuards(db, version) {
   assertDatabase(db);
-  registerVccStorageWriteCapability(db);
+  registerStorageWriteCapability(db, version);
   for (const tableName of vccTableNames(db)) {
     for (const operation of ['insert', 'update', 'delete']) {
-      db.exec(vccStorageGuardTriggerDefinition(tableName, operation).createSql);
+      db.exec(vccStorageGuardTriggerDefinition(tableName, operation, version).createSql);
     }
   }
+}
+
+function installVccStorageWriteGuards(db) {
+  installStorageWriteGuards(db, VCC_STORAGE_CONTRACT_VERSION);
 }
 
 function createSlimEffectiveRowsTable(db, tableName = 'vcc_fin_op_effective_rows') {
@@ -182,6 +192,7 @@ function createSlimEffectiveRowsTable(db, tableName = 'vcc_fin_op_effective_rows
 
 function ensureVccStorageSideTables(db) {
   assertDatabase(db);
+  const version = getVccStorageContractVersion(db);
   addColumnIfMissing(
     db,
     'vcc_fin_op_import_records',
@@ -235,7 +246,7 @@ function ensureVccStorageSideTables(db) {
       UNIQUE (import_record_id, source_ordinal)
     );
 
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_vcc_fin_op_import_sources_artifact
+    CREATE ${version >= 3 ? '' : 'UNIQUE '}INDEX IF NOT EXISTS idx_vcc_fin_op_import_sources_artifact
       ON vcc_fin_op_import_sources(archive_artifact_id)
       WHERE archive_artifact_id IS NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_vcc_fin_op_import_sources_record
@@ -348,6 +359,12 @@ function ensureVccStorageSideTables(db) {
       WHERE import_source_id IS NOT NULL;
   `);
 
+  if (version >= 3) {
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_vcc_fin_op_import_sources_record_artifact
+      ON vcc_fin_op_import_sources(import_record_id, archive_artifact_id)
+      WHERE archive_artifact_id IS NOT NULL`);
+  }
+
   // v1 数据库不会在普通启动时隐式执行物理重建。历史终态记录没有
   // import_sources，不能沿用新增列的默认 pending 冒充“输入文件待存档”。
   db.exec(`
@@ -386,29 +403,153 @@ function getVccStorageContractVersion(db) {
   return version;
 }
 
+function writeStorageContractMarker(db, version) {
+  db.prepare(`
+    INSERT INTO app_settings (setting_key, setting_value, updated_at)
+    VALUES (?, ?, datetime('now', 'localtime'))
+    ON CONFLICT(setting_key) DO UPDATE SET
+      setting_value = excluded.setting_value, updated_at = excluded.updated_at
+  `).run(VCC_STORAGE_CONTRACT_SETTING_KEY, String(version));
+}
+
+function canonicalSql(sql) {
+  return String(sql || '').replace(/\s+/g, ' ').trim().replace(/;$/, '');
+}
+
+function storageContractMismatch(detail) {
+  return Object.assign(new Error(`VCC 存储合同不完整，禁止写入：${detail}`), {
+    code: 'vcc-storage-contract-mismatch', detailLines: [detail]
+  });
+}
+
+function assertVccStorageContract(db, version = VCC_STORAGE_CONTRACT_VERSION) {
+  if (getVccStorageContractVersion(db) !== version || ![2, 3].includes(version)) {
+    throw storageContractMismatch(`marker 与 v${version} 不一致`);
+  }
+  const names = vccTableNames(db);
+  const expectedTables = Object.keys(VCC_TABLE_POLICY_REGISTRY).sort();
+  if (JSON.stringify(names) !== JSON.stringify(expectedTables)) {
+    throw storageContractMismatch('受保护表集合不一致');
+  }
+  for (const name of names) {
+    const primaryKey = db.prepare(`PRAGMA table_info(${name})`).all()
+      .filter((row) => row.pk > 0).sort((a, b) => a.pk - b.pk).map((row) => row.name);
+    if (JSON.stringify(primaryKey) !== JSON.stringify(VCC_TABLE_POLICY_REGISTRY[name].primaryKey)) {
+      throw storageContractMismatch(`${name} 主键不一致`);
+    }
+  }
+  const effectiveColumns = tableColumns(db, 'vcc_fin_op_effective_rows');
+  for (const column of ['raw_json', 'idempotency_key_raw', 'source_file']) {
+    if (effectiveColumns.has(column)) throw storageContractMismatch(`有效事实仍有旧字段 ${column}`);
+  }
+  for (const column of ['import_source_id', 'sheet_name', 'source_row', 'raw_contract_version', 'hash_version']) {
+    if (!effectiveColumns.has(column)) throw storageContractMismatch(`有效事实缺少 ${column}`);
+  }
+  const guards = db.prepare(`SELECT name, tbl_name, sql FROM sqlite_master
+    WHERE type = 'trigger' AND name GLOB 'vcc_storage_contract_*'`).all();
+  if (guards.length !== names.length * 3) throw storageContractMismatch('写保护数量或版本不一致');
+  const byName = new Map(guards.map((row) => [row.name, row]));
+  for (const name of names) {
+    for (const operation of ['insert', 'update', 'delete']) {
+      const expected = vccStorageGuardTriggerDefinition(name, operation, version);
+      const actual = byName.get(expected.name);
+      if (!actual || actual.tbl_name !== name || canonicalSql(actual.sql) !== canonicalSql(expected.sql)) {
+        throw storageContractMismatch(`非 canonical 写保护 ${expected.name}`);
+      }
+    }
+  }
+  const expectedIndexes = {
+    idx_vcc_fin_op_import_sources_artifact: `CREATE ${version === 2 ? 'UNIQUE ' : ''}INDEX idx_vcc_fin_op_import_sources_artifact ON vcc_fin_op_import_sources(archive_artifact_id) WHERE archive_artifact_id IS NOT NULL`
+  };
+  if (version === 3) {
+    expectedIndexes.idx_vcc_fin_op_import_sources_record_artifact = 'CREATE UNIQUE INDEX idx_vcc_fin_op_import_sources_record_artifact ON vcc_fin_op_import_sources(import_record_id, archive_artifact_id) WHERE archive_artifact_id IS NOT NULL';
+  }
+  for (const [name, sql] of Object.entries(expectedIndexes)) {
+    const actual = db.prepare('SELECT sql FROM sqlite_master WHERE type = ? AND name = ?').get('index', name);
+    if (!actual || canonicalSql(actual.sql) !== canonicalSql(sql)) throw storageContractMismatch(`索引 ${name}`);
+  }
+  if (version === 2 && db.prepare('SELECT 1 FROM sqlite_master WHERE name = ?')
+    .get('idx_vcc_fin_op_import_sources_record_artifact')) throw storageContractMismatch('v2 混入 v3 索引');
+  for (const [table, columns] of [
+    ['vcc_fin_op_import_sources', ['import_record_id', 'source_ordinal']],
+    ['vcc_fin_op_import_records', ['batch_id', 'source_type']]
+  ]) {
+    const unique = db.prepare(`PRAGMA index_list(${table})`).all().filter((row) => row.unique && !row.partial);
+    if (!unique.some((index) => JSON.stringify(db.prepare(`PRAGMA index_info(${assertTableName(index.name)})`)
+      .all().map((row) => row.name)) === JSON.stringify(columns))) {
+      throw storageContractMismatch(`${table} 唯一键 ${columns.join('/')}`);
+    }
+  }
+  return Object.freeze({ version, tableCount: names.length, guardCount: guards.length });
+}
+
+// 只供空 v1 建库及维护 COW 候选使用，保留明确的中间版本。
+function installVccStorageContractV2(db) {
+  if (getVccStorageContractVersion(db) !== 1) throw storageContractMismatch('v2 中间步骤要求 v1 候选库');
+  installStorageWriteGuards(db, LEGACY_STORAGE_CONTRACT_VERSION);
+  writeStorageContractMarker(db, LEGACY_STORAGE_CONTRACT_VERSION);
+  assertVccStorageContract(db, LEGACY_STORAGE_CONTRACT_VERSION);
+}
+
+function migrateVccStorageContractV3(db, { faultInjector } = {}) {
+  const currentVersion = getVccStorageContractVersion(db);
+  if (currentVersion === 3) {
+    assertVccStorageContract(db);
+    return Object.freeze({ upgraded: false, fromVersion: 3, toVersion: 3 });
+  }
+  if (currentVersion !== 2) throw storageContractMismatch('增量迁移要求完整 v2');
+  const fault = (phase) => { if (faultInjector) faultInjector(phase); };
+  db.exec('SAVEPOINT vcc_storage_contract_v3_upgrade');
+  try {
+    assertVccStorageContract(db, 2);
+    registerStorageWriteCapability(db, 2);
+    registerVccStorageWriteCapability(db);
+    db.exec(`DROP INDEX idx_vcc_fin_op_import_sources_artifact;
+      CREATE INDEX idx_vcc_fin_op_import_sources_artifact
+        ON vcc_fin_op_import_sources(archive_artifact_id) WHERE archive_artifact_id IS NOT NULL;
+      CREATE UNIQUE INDEX idx_vcc_fin_op_import_sources_record_artifact
+        ON vcc_fin_op_import_sources(import_record_id, archive_artifact_id)
+        WHERE archive_artifact_id IS NOT NULL;`);
+    fault('after-indexes');
+    for (const table of vccTableNames(db)) {
+      for (const operation of ['insert', 'update', 'delete']) {
+        db.exec(`DROP TRIGGER ${vccStorageGuardTriggerDefinition(table, operation, 2).name}`);
+      }
+    }
+    installVccStorageWriteGuards(db);
+    fault('after-guards');
+    writeStorageContractMarker(db, 3);
+    fault('after-marker');
+    assertVccStorageContract(db);
+    if (db.prepare('PRAGMA foreign_key_check').all().length) throw storageContractMismatch('foreign_key_check 失败');
+    fault('before-commit');
+    db.exec('RELEASE SAVEPOINT vcc_storage_contract_v3_upgrade');
+    return Object.freeze({ upgraded: true, fromVersion: 2, toVersion: 3 });
+  } catch (error) {
+    try {
+      db.exec('ROLLBACK TO SAVEPOINT vcc_storage_contract_v3_upgrade; RELEASE SAVEPOINT vcc_storage_contract_v3_upgrade;');
+    } catch (rollbackError) { error.rollbackError = rollbackError; }
+    throw error;
+  }
+}
+
 function setVccStorageContractVersion(db, version) {
   assertDatabase(db);
   const normalized = Number(version);
   if (normalized !== VCC_STORAGE_CONTRACT_VERSION) {
     throw new TypeError(`只能写入 VCC storage contract v${VCC_STORAGE_CONTRACT_VERSION}`);
   }
-  registerVccStorageWriteCapability(db);
-  db.exec('SAVEPOINT vcc_storage_contract_v2_install');
+  db.exec('SAVEPOINT vcc_storage_contract_install');
   try {
-    db.prepare(`
-      INSERT INTO app_settings (setting_key, setting_value, updated_at)
-      VALUES (?, ?, datetime('now', 'localtime'))
-      ON CONFLICT(setting_key) DO UPDATE SET
-        setting_value = excluded.setting_value,
-        updated_at = excluded.updated_at
-    `).run(VCC_STORAGE_CONTRACT_SETTING_KEY, String(normalized));
-    installVccStorageWriteGuards(db);
-    db.exec('RELEASE SAVEPOINT vcc_storage_contract_v2_install');
+    if (getVccStorageContractVersion(db) === 1) installVccStorageContractV2(db);
+    migrateVccStorageContractV3(db);
+    registerVccStorageWriteCapability(db);
+    db.exec('RELEASE SAVEPOINT vcc_storage_contract_install');
   } catch (error) {
     try {
       db.exec(`
-        ROLLBACK TO SAVEPOINT vcc_storage_contract_v2_install;
-        RELEASE SAVEPOINT vcc_storage_contract_v2_install;
+        ROLLBACK TO SAVEPOINT vcc_storage_contract_install;
+        RELEASE SAVEPOINT vcc_storage_contract_install;
       `);
     } catch (_rollbackError) { /* preserve original error */ }
     throw error;
@@ -432,6 +573,7 @@ function upgradeEmptyVccStorageContract(db) {
   assertDatabase(db);
   const currentVersion = getVccStorageContractVersion(db);
   if (currentVersion >= VCC_STORAGE_CONTRACT_VERSION) {
+    assertVccStorageContract(db);
     return Object.freeze({
       upgraded: false,
       fromVersion: currentVersion,
@@ -439,6 +581,7 @@ function upgradeEmptyVccStorageContract(db) {
       assessment: inspectVccStorageData(db)
     });
   }
+  if (currentVersion === 2) return migrateVccStorageContractV3(db);
   const initialAssessment = assertEmptyVccStorageForUpgrade(db);
   db.exec('SAVEPOINT vcc_empty_storage_contract_v2_upgrade');
   try {
@@ -462,7 +605,6 @@ function upgradeEmptyVccStorageContract(db) {
         );
     `);
     restoreAutoincrementSequence(db, 'vcc_fin_op_effective_rows', effectiveSequence);
-    setVccStorageContractVersion(db, VCC_STORAGE_CONTRACT_VERSION);
 
     const effectiveColumns = tableColumns(db, 'vcc_fin_op_effective_rows');
     for (const removedColumn of ['raw_json', 'idempotency_key_raw', 'source_file']) {
@@ -477,6 +619,7 @@ function upgradeEmptyVccStorageContract(db) {
       error.failures = foreignKeyFailures.slice(0, 20);
       throw error;
     }
+    setVccStorageContractVersion(db, VCC_STORAGE_CONTRACT_VERSION);
     const triggerCount = Number(db.prepare(`
       SELECT COUNT(*) AS trigger_count
       FROM sqlite_master
@@ -511,6 +654,9 @@ module.exports = {
   VCC_STORAGE_GUARD_TRIGGER_PREFIX,
   VCC_STORAGE_WRITE_CAPABILITY_FUNCTION,
   VCC_STORAGE_WRITE_CAPABILITY_TOKEN,
+  assertVccStorageContract,
+  installVccStorageContractV2,
+  migrateVccStorageContractV3,
   createSlimEffectiveRowsTable,
   assertEmptyVccStorageForUpgrade,
   ensureVccStorageSideTables,

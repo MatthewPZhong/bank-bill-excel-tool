@@ -57,7 +57,7 @@ test('一次性 reset CLI 要求绝对 source 与精确确认口令', () => {
   );
 });
 
-test('一次性 reset CLI 保留旧库备份并把活动库切为空 v2', (t) => {
+test('一次性 reset CLI 保留旧库备份并把活动库切为空 v3', (t) => {
   const directory = tempDir(t);
   const sourcePath = path.join(directory, 'tool-data.sqlite');
   const targetPath = path.join(directory, 'tool-data.sqlite.next');
@@ -86,7 +86,7 @@ test('一次性 reset CLI 保留旧库备份并把活动库切为空 v2', (t) =>
   const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
   assert.equal(report.operation, 'current-machine-vcc-v1-reset');
   assert.equal(report.before.contractVersion, 1);
-  assert.equal(report.after.contractVersion, 2);
+  assert.equal(report.after.contractVersion, 3);
   assert.equal(report.verification.nonVccTablesExactlyPreserved, true);
   assert.equal(report.verification.archiveCenterRowCountsPreserved, true);
   assert.equal(report.verification.vccTablesEmpty, true);
@@ -99,7 +99,7 @@ test('一次性 reset CLI 保留旧库备份并把活动库切为空 v2', (t) =>
 
   const active = new DatabaseSync(sourcePath, { readOnly: true });
   try {
-    assert.equal(getVccStorageContractVersion(active), 2);
+    assert.equal(getVccStorageContractVersion(active), 3);
     assert.deepEqual({ ...active.prepare('SELECT * FROM unrelated_fixture').get() }, {
       id: 1,
       payload: 'preserve-me'

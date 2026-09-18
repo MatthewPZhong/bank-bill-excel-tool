@@ -426,6 +426,7 @@
 .vcc-fin-op-review-actions-right {
   display: flex;
   align-items: center;
+  gap: 10px;
 }
 
 .vcc-fin-op-review-actions-right {

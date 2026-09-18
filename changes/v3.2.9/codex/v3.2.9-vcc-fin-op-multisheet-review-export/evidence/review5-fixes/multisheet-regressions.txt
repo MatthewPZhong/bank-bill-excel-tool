@@ -1,0 +1,26 @@
+(node:74601) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+▶ 系统 OP 异步关闭期间收到取消：不提交当前组，保留前组并停止后续工作
+  ✔ 仅系统 OP (56.0845ms)
+  ✔ 前组已提交且后组未执行 (39.250667ms)
+  ✔ 取消后不再打开下一个文件 (34.418834ms)
+✔ 系统 OP 异步关闭期间收到取消：不提交当前组，保留前组并停止后续工作 (130.226ms)
+✔ 系统 OP 最后一次读取进度同步取消，仍先完成 Reader 关闭再收口 (30.188417ms)
+✔ 同类型跨 Sheet 幂等、多主体通道及混合原件共享；来源 hold 在首行读取前已齐全 (34.354667ms)
+✔ RV02：完整甲、八币种乙、充值各 Sheet 独立，系统组精确计数并保留 18 条实际读取行 (34.385333ms)
+✔ 系统 OP 无目标账期也保留扫描行数和 Sheet 进度，其他类型照常提交 (31.663917ms)
+✔ 失败和解析成功的系统 OP Sheet 跨文件累计读取量，整组回滚也保留计数 (38.77075ms)
+✔ 系统 OP 扫描中断仍上报已完成数据行，不把未读尾部或表头计入 (22.628292ms)
+✔ 同主体九币种跨 Sheet 拆分，或八币种与完整候选并存，都不能补救该主体 (63.269708ms)
+✔ 未知主体按 Sheet 计数；主体成员或持久 metadata 损坏时来源和 hold 创建一起回滚 (34.062709ms)
+✔ 不同输入文件同名同内容：存档共用 Blob 后仍按两个物理来源导入和幂等 (30.75125ms)
+✔ 系统 OP 日期单元格与旧 Reader 等价，九币种快照正常导入 (36.47225ms)
+✔ 表头位于预览窗口外：混合类型导入后原表、校验表仍按持久成员定位 (141.186958ms)
+ℹ tests 15
+ℹ suites 0
+ℹ pass 15
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 720.22775

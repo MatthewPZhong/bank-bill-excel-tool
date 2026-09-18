@@ -1,0 +1,23 @@
+{
+  "beforeMetadata": {
+    "aliasKey": "/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/t/vcc-real-handoff-w9gpov/input.xlsx",
+    "sourceSnapshot": {
+      "sizeBytes": 15,
+      "mtimeMs": 1789748207466.5723,
+      "ctimeMs": 1789748207466.5723,
+      "ino": "112097019"
+    }
+  },
+  "outcome": "failed",
+  "code": "vcc-import-handoff-mismatch",
+  "message": "VCC 导入交接身份不符：输入成员清单已经冻结，不能改写",
+  "afterMetadata": {
+    "aliasKey": "/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/t/vcc-real-handoff-w9gpov/input.xlsx",
+    "sourceSnapshot": {
+      "sizeBytes": 15,
+      "mtimeMs": 1789748207466.5723,
+      "ctimeMs": 1789748207466.5723,
+      "ino": "112097019"
+    }
+  }
+}

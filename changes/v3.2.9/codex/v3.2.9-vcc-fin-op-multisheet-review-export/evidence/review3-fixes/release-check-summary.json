@@ -1,0 +1,34 @@
+{
+  "recordedAt": "2026-09-18T09:40:43.446121+00:00",
+  "command": "UNIT_TEST_CONCURRENCY=2 npm run release-check",
+  "exitCode": 0,
+  "branch": "codex/v3.2.9-vcc-fin-op-multisheet-review-export",
+  "baseCommit": "2ba9ef14fe972363b604955636cff0c9ac53700f",
+  "lint": "PASS",
+  "smoke": "PASS",
+  "unit": {
+    "tests": 7381,
+    "suites": 831,
+    "pass": 7378,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 3,
+    "todo": 0,
+    "durationMs": 729165.7305,
+    "fileCount": 477,
+    "runnerElapsedMs": 729200
+  },
+  "integration": {
+    "scriptsPassed": 53,
+    "assertionsPassed": 2488,
+    "assertionsFailed": 0,
+    "durationMs": 312588
+  },
+  "sourceManifestSha256": "2d4981c546b9b64d126f6fde898a9b6c76d92e53bfe2f29ff6e9ad59d81f7c85",
+  "sourceFingerprintFileSha256": "c457e051975b7602034517994328b837311c08a334c52c3b50213ae082b4c832",
+  "releaseCheckLogSha256": "121037f6e7d993f6071c7ffc9c4dcc34c8022e203cff7b5b012baabd843e0104",
+  "sourceVerifiedAfterGate": true,
+  "sourceFileCount": 65,
+  "sourceMismatches": [],
+  "unexpectedSourceChanges": []
+}

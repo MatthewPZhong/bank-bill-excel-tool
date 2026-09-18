@@ -9,6 +9,8 @@ const { resolveManagedRelative } = require('./archive-center/storage-layout');
 
 const {
   VCC_STORAGE_CONTRACT_VERSION,
+  VCC_STORAGE_GUARD_TRIGGER_PREFIX,
+  assertVccStorageContract,
   createSlimEffectiveRowsTable,
   setVccStorageContractVersion
 } = require('../backend/vcc-financial-op-db/storage-contract');
@@ -1180,11 +1182,12 @@ function assertSlimEffectiveRowsSchema(db) {
 }
 
 function assertVccGuardTriggers(db) {
+  assertVccStorageContract(db);
   const tableCount = vccTableRowCounts(db).length;
   const triggerCount = Number(db.prepare(`
     SELECT COUNT(*) AS count FROM sqlite_master
-    WHERE type = 'trigger' AND name GLOB 'vcc_storage_contract_v2_guard_*'
-  `).get().count) || 0;
+    WHERE type = 'trigger' AND name GLOB ?
+  `).get(`${VCC_STORAGE_GUARD_TRIGGER_PREFIX}*`).count) || 0;
   if (triggerCount !== tableCount * 3) {
     throw new VccStorageMigrationError(
       'vcc-storage-reset-guard-mismatch',
@@ -1607,8 +1610,9 @@ function buildVccStorageCandidate(options) {
       tables.length + 4,
       resetVccData ? '保留非 VCC 与 Archive 证据' : '刷新血缘状态'
     );
-    setVccStorageContractVersion(targetDb, VCC_STORAGE_CONTRACT_VERSION);
     createSecondarySchema(sourceDb, targetDb);
+    // 保留旧 COW 的 v1 → v2 中间步骤，由合同安装器继续升级至 v3。
+    setVccStorageContractVersion(targetDb, VCC_STORAGE_CONTRACT_VERSION);
     const userVersion = pragmaValue(sourceDb, 'user_version');
     targetDb.exec(`PRAGMA user_version = ${userVersion}`);
     processed += 1;

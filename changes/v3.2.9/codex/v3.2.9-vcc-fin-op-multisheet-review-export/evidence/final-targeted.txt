@@ -1,0 +1,92 @@
+(node:39624) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 同类型跨 Sheet 幂等、多主体通道及混合原件共享；来源 hold 在首行读取前已齐全 (69.23325ms)
+✔ RV02：完整甲、八币种乙、充值各 Sheet 独立，系统组精确计数并保留 18 条实际读取行 (44.334ms)
+✔ 同主体九币种跨 Sheet 拆分，或八币种与完整候选并存，都不能补救该主体 (83.294833ms)
+✔ 未知主体按 Sheet 计数；主体成员或持久 metadata 损坏时来源和 hold 创建一起回滚 (45.33025ms)
+✔ 不同输入文件同名同内容：存档共用 Blob 后仍按两个物理来源导入和幂等 (35.550458ms)
+(node:39625) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 活动引用按表集合聚合，null 忽略且 system-only 来源仍建立 hold 证据 (15.740916ms)
+✔ ready artifact 精确绑定后清 fallback、建立不可绕过业务锁，删除有效行后自动释放 (17.561875ms)
+✔ fallback-only 来源绑定后使用删除后引用数，不留下 stale hold (14.493ms)
+✔ artifact SHA 不符时绑定失败且 fallback 保留 (15.197ms)
+✔ v1 source 的 exact artifactId 缺失或 owner 错误时不改绑相似 metadata artifact (29.020042ms)
+✔ 业务提交 artifactId 后崩溃，启动先终结原 FileTask 再补 exact hold (137.504166ms)
+(node:39626) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 真实导入和计算 → 同快照 E/A/P → 全主体 Sheet1 与关联原表；业务库只读且原件只扫描一次 (287.833833ms)
+✔ 绑定原件被篡改时停止，不能使用残留 fallback 掩盖；输入 revision 改变拒绝旧快照 (67.907083ms)
+✔ 全部主体经已保存调整归零只生成 Sheet1；调整引用跨主体偏移正确，再次产生差异会恢复对应附页 (116.513625ms)
+✔ E/A/P 独立守恒：提取缺行、Writer 替换身份和最终 XLSX 金额/样式/附加页篡改均拒绝 (146.8285ms)
+✔ 历史 Pending 48 列与当前 46 列分别附页，旧列值原样保留，不套用当前表头 (160.353916ms)
+(node:39627) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:39627) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:39627) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ IPC handler → Service → 两阶段真实 Worker → 原子保存；无业务 DML、不创建正式批次 (603.422667ms)
+✔ 取消另存为不启动 Worker；保存期间修改结果会拦截旧 revision (64.910917ms)
+(node:39627) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:39627) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:39627) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:39627) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:39627) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:39627) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ Worker 后结果过期或目标发生变化，不替换目标 (1479.232667ms)
+(node:39627) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 取消、强制退出及服务关闭均等待 Worker 退出和清理，不执行导入恢复 (304.098208ms)
+(node:39627) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 拒绝原始输入、受管目录和任意 renderer 输出路径 (215.713959ms)
+✔ 取消后的清理失败必须显示错误与残留路径，不能返回已取消掩盖残留文件 (73.464875ms)
+(node:39628) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 发布失败恢复旧目标；恢复失败保留两份文件并给出恢复路径 (7.78975ms)
+✔ 最后 freshness 检查与 rename 不让出微任务；异步检查、候选或目标变化不能发布 (6.23475ms)
+▶ v3.1.6 VCC财务OP校验前端契约
+  ✔ 模块注册、脚本加载顺序和主面板四个动作完整 (0.747917ms)
+  ✔ 导入账期沿用业务OP日期弹窗的年月双下拉结构并对调确定取消按钮 (0.850167ms)
+  ✔ 运行账期移除可见标签并将下拉框缩至整行四分之一且与标题左对齐 (0.252833ms)
+  ✔ 导入完成不弹导入记录框并将结果摘要写入主页面状态框 (1.651667ms)
+  ✔ 导入进度纯函数区分 reading/committing 并保持取消提示优先 (10.164542ms)
+  ✔ preload 和主进程覆盖导入、取消、计算、归档、管理删除及三类导出通道 (7.751416ms)
+  ✔ 数据管理标题和左侧导航沿用平盘对账数据管理契约 (1.031583ms)
+  ✔ 数据管理左侧解归档、右侧删除导出返回，删除页使用动态统一目标与 token (1.366625ms)
+  ✔ 删除 target 切换只读本次响应缓存并满足 50ms 结构预算 (0.673208ms)
+  ✔ 解归档复用年月选择器、强制降级警示，并只在 pre-critical 开放取消 (0.945458ms)
+  ✔ 四类结果写操作呈现审计保全阶段并按 worker cancellable 控制取消 (0.160708ms)
+  ✔ 解归档提交成功后刷新失败只告警关闭，不重新开放破坏性操作 (0.267625ms)
+  ✔ 归档月份 picker 可执行状态覆盖默认最新、空列表、保存取消与失败刷新后重试 (1.052667ms)
+  ✔ 数据管理导出按账期和分组目标表预检，支持校验原表与校验表 (0.430709ms)
+  ✔ 有效原表删除后列表保留删除状态且不再打开逐行详情或显示存档小字 (0.33775ms)
+  ✔ 校验原表直接进入按单一月份筛选的七列导入记录并按异常显示导出 (0.267583ms)
+  ✔ 数据管理不再暴露 VCC 优化存储入口 (0.21275ms)
+  ✔ 异常审计仅保留六列导出入口，不再提供人工处置 (0.327833ms)
+  ✔ 结果确认读取完整后端 review、按生效差异展示并在页内带 revision 归档 (0.682333ms)
+  ✔ 完整结果渲染严格校验九币种与四类 summary，调整紧跟基础行且不在前端计算金额 (2.114041ms)
+  ✔ 结果导出复用归档月份选择器且 renderer 只提交 targetMonth (0.560875ms)
+  ✔ 已归档月份空态同步导出按钮 disabled 与 title，恢复月份时清除 title (0.241625ms)
+  ✔ 修改结果固定四级无默认级联，保存锁窗并在成功或 stale 后强制 refetch 清核对 (0.320584ms)
+  ✔ 结果操作失败策略区分临时失败、无候选、并发归档与结构性归档错误 (0.194417ms)
+  ✔ 开始运行先做五表预检，失败不启动 worker 并使用明确错误标题 (0.134542ms)
+  ✔ 运行前检查同时存在多个问题时完整展示结构化 issues (0.102084ms)
+  ✔ 缺少上月归档时提供九币种一次性期初初始化且不默认补零 (0.276542ms)
+  ✔ 宽表和低分辨率弹框具备稳定尺寸及滚动约束 (0.220875ms)
+✔ v3.1.6 VCC财务OP校验前端契约 (34.078208ms)
+ℹ tests 52
+ℹ suites 1
+ℹ pass 52
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2942.471375

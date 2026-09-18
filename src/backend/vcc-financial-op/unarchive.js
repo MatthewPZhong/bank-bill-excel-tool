@@ -373,7 +373,7 @@ function unarchiveMonth({
       WHERE id = ? AND target_month = ? AND status = 'archived'
     `).run(transactionTimestamp, runId, month).changes) || 0;
     if (updatedRuns !== 1) {
-      throw operationError('unarchive-invariant-failed', '归档结果状态未能恢复为未处理，解归档已回滚');
+      throw operationError('unarchive-invariant-failed', '归档结果状态未能恢复为待确认，解归档已回滚');
     }
     const updatedDatasets = Number(db.prepare(`
       UPDATE vcc_fin_op_datasets

@@ -92,6 +92,8 @@ const {
 } = require('./database/migrations');
 const { ensureBizOpReconTablesSupport } = require('./biz-op-recon-db/migrations');
 const { ensureVccFinancialOpTablesSupport } = require('./vcc-financial-op-db/migrations');
+const { upgradeVccStorageFile } = require('./vcc-financial-op-db/storage-upgrade');
+const { registerVccStorageWriteCapability, assertVccStorageContract } = require('./vcc-financial-op-db/storage-contract');
 const scenariosRepository = require('./database/scenarios-repository');
 const settingsRepository = require('./database/settings-repository');
 const templateRepository = require('./database/template-repository');
@@ -143,8 +145,11 @@ class AppDatabase {
     const onStartupPhase = typeof options.onStartupPhase === 'function'
       ? options.onStartupPhase
       : null;
+    try {
     runStartupPhaseSync('database-open', () => {
       fs.mkdirSync(path.dirname(this.dbPath), { recursive: true });
+      // 启动尚未开放业务入口；先用专用连接完成 v2 → v3，再创建 Main 写连接。
+      upgradeVccStorageFile(this.dbPath);
       this.db = new DatabaseSync(this.dbPath);
       this.db.exec('PRAGMA foreign_keys = ON;');
     // v2.1.7 F7-A1：全局 SQL 调优（影响 bank-bu-recon / biz-op-recon / acquiring-bill-currency 三套业务引擎）
@@ -433,6 +438,13 @@ class AppDatabase {
     this.ensureVccOpCalcTablesSupport();
     // v3.1.6：VCC财务OP校验独立持久化空间（导入审计、有效事实、快照、运行及归档）。
     this.ensureVccFinancialOpTablesSupport();
+    if (this.db.prepare("SELECT 1 FROM pragma_function_list WHERE name='vcc_storage_write_capability_v2'").get()) {
+      this.db.close(); this.db = null;
+      this.db = new DatabaseSync(this.dbPath);
+      this.db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA cache_size=-65536; PRAGMA mmap_size=268435456; PRAGMA temp_store=MEMORY;');
+      assertVccStorageContract(this.db);
+      registerVccStorageWriteCapability(this.db);
+    }
     // v2.1.3 T1：业务OP数据核对模块 4 张表（imports / flow_imports / runs / diff_rows）
     // 与 v2.1.2 bank_bu_recon_* 完全独立，调用顺序无依赖
     if (legacyMode(this.db) === 'DISABLED') {
@@ -684,6 +696,11 @@ class AppDatabase {
     runStartupPhaseSync('database-optimize', () => {
       this.db.exec('PRAGMA optimize=0x10002;');
     }, { onRecord: onStartupPhase });
+    } catch (error) {
+      // Closing drops connection-local functions even when a migration rolled back.
+      try { this.close(); } catch (closeError) { error.closeError = closeError; }
+      throw error;
+    }
   }
 
   close() {

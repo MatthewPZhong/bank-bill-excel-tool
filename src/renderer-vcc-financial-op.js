@@ -65,10 +65,15 @@
     if (cancelRequested) return null;
     const label = SOURCE_LABELS[progress.sourceType] || '原表';
     const rows = formatInteger(progress.rows);
+    const location = [progress.fileName || progress.sourceFile, progress.sheetName].filter(Boolean).join(' / ');
+    if (progress.phase === 'preflight') return { message: `正在预检 ${location || '工作簿'}：${rows} 行`, tone: 'info' };
+    if (progress.phase === 'summarizing') return {
+      message: `正在汇总导入结果：${formatInteger(progress.physicalFileCount)} 个文件，${formatInteger(progress.businessSheetCount)} 张业务 Sheet，读取 ${rows} 行`, tone: 'info'
+    };
     return {
       message: progress.phase === 'committing'
         ? `正在校验并写入 ${label}：${rows} 行`
-        : `正在导入 ${label}：${rows} 行`,
+        : `正在导入 ${label}${location ? `（${location}）` : ''}：${rows} 行`,
       tone: 'info'
     };
   }
@@ -137,6 +142,10 @@
     const filteredCount = detailTotals.filtered + systemTotals.filtered;
     const month = String(completed.targetMonth || fallbackMonth || '当前账期');
     const details = [];
+    if (Number.isSafeInteger(completed.physicalFileCount) && Number.isSafeInteger(completed.businessSheetCount)) {
+      details.push(`${formatInteger(completed.physicalFileCount)} 个文件 / ${formatInteger(completed.businessSheetCount)} 张业务 Sheet`);
+      if (Number.isSafeInteger(completed.readRowCount)) details.push(`读取 ${formatInteger(completed.readRowCount)} 行原始数据`);
+    }
     if (detailRecords.length > 0) {
       const prefix = systemRecords.length > 0 ? '明细' : '';
       details.push(`${prefix}新增 ${formatInteger(detailTotals.inserted)} 行`);
@@ -389,49 +398,54 @@
     });
   }
 
-  function assignSubjects(files) {
-    const pending = files.filter((file) => file.requiresSubject);
-    if (pending.length === 0) return Promise.resolve(files.map((file) => ({ ...file, subject: '' })));
+  function confirmImportPlan(plan) {
     return new Promise((resolve) => {
       let result = null;
-      const rows = files.map((file, index) => `
+      const sources = plan.sources || [];
+      const statusText = { ready: '可导入', empty: '空白，自动跳过', unrecognized: '无法识别，需明确排除', invalid: '结构错误，不能导入' };
+      const rows = sources.map((source, index) => `
         <div class="vcc-fin-op-file-row">
           <div class="vcc-fin-op-file-meta">
-            <strong>${escapeHtml(file.fileName)}</strong>
-            <span>${escapeHtml(SOURCE_LABELS[file.sourceType] || file.sourceType)} · ${escapeHtml(file.sheetName)}</span>
+            <strong>${escapeHtml(source.fileName)} / ${escapeHtml(source.sheetName)}</strong>
+            <span>第 ${source.sheetIndex + 1} 张 · ${source.visibility === 'visible' ? '可见' : '隐藏'} · ${escapeHtml(statusText[source.status] || source.status)}</span>
+            <span>${escapeHtml(SOURCE_LABELS[source.sourceType] || '')}${source.headerRow ? ` · 表头第 ${source.headerRow} 行` : ''}</span>
+            ${(source.diagnostics || []).map((item) => `<span>${escapeHtml(item.message)}</span>`).join('')}
           </div>
-          ${file.requiresSubject
+          ${source.status === 'ready' && source.requiresSubject
             ? `<label class="vcc-fin-op-inline-field"><span>公司主体</span><input class="vcc-fin-op-input" data-subject-index="${index}" type="text" autocomplete="off"></label>`
-            : '<span class="vcc-fin-op-subject-from-file">主体取自原表</span>'}
+            : source.status === 'unrecognized'
+              ? `<label><input type="checkbox" data-exclude-index="${index}">排除此说明页</label>`
+              : source.status === 'ready' ? '<span class="vcc-fin-op-subject-from-file">主体取自原表</span>' : ''}
         </div>
       `).join('');
-      const modal = mountDialog({
-        title: '确认原表与公司主体',
-        className: 'vcc-fin-op-subject-dialog',
-        onClose: () => resolve(result),
-        bodyHtml: `
+      const modal = mountDialog({ title: '确认工作簿与业务 Sheet', className: 'vcc-fin-op-subject-dialog',
+        onClose: () => resolve(result), bodyHtml: `
+          <p>${plan.physicalFiles.length} 个文件，${sources.length} 张 Sheet；隐藏业务 Sheet 也会导入。</p>
           <div class="vcc-fin-op-file-list">${rows}</div>
           <p class="vcc-fin-op-field-error" data-role="error" hidden></p>
           <div class="dialog-actions right">
             <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
             <button class="primary-btn small" type="button" data-action="confirm">继续导入</button>
-          </div>
-        `
-      });
+          </div>` });
       const error = modal.dialog.querySelector('[data-role="error"]');
       modal.dialog.querySelector('[data-action="cancel"]').addEventListener('click', modal.close);
       modal.dialog.querySelector('[data-action="confirm"]').addEventListener('click', () => {
-        const prepared = files.map((file, index) => {
-          const input = modal.dialog.querySelector(`[data-subject-index="${index}"]`);
-          return { ...file, subject: input ? input.value.trim() : '' };
+        const subjectBySourceId = {}, excludedSheetIds = [];
+        let message = sources.some((source) => source.status === 'invalid') ? '存在结构错误，请修正文件后重新预检' : '';
+        sources.forEach((source, index) => {
+          if (source.requiresSubject && source.status === 'ready') {
+            const value = modal.dialog.querySelector(`[data-subject-index="${index}"]`).value.trim();
+            subjectBySourceId[source.sourceId] = value;
+            if (!value) message ||= `${source.fileName} / ${source.sheetName}：请填写公司主体`;
+          }
+          if (source.status === 'unrecognized') {
+            if (modal.dialog.querySelector(`[data-exclude-index="${index}"]`).checked) excludedSheetIds.push(source.sourceId);
+            else message ||= '请明确排除无法识别的说明页，或取消后更换文件';
+          }
         });
-        const missing = prepared.filter((file) => file.requiresSubject && !file.subject);
-        if (missing.length > 0) {
-          error.textContent = 'VCC通道明细必须填写公司主体';
-          error.hidden = false;
-          return;
-        }
-        result = prepared;
+        if (!sources.some((source) => source.status === 'ready')) message ||= '没有可导入的业务 Sheet';
+        if (message) { error.textContent = message; error.hidden = false; return; }
+        result = { planId: plan.planId, subjectBySourceId, excludedSheetIds };
         modal.close();
       });
     });
@@ -440,11 +454,16 @@
   async function handleImport() {
     if (state.busy) return;
     setBusy(true, 'prepare-import');
+    let unsubscribe;
     try {
       const month = await chooseImportMonth({ title: '选择导入账期', initial: state.lastMonth });
       if (!month) return;
       setBusy(true, 'import');
       setStatus('正在识别原表…', 'info');
+      unsubscribe = api.onImportProgress((progress) => {
+        const progressStatus = buildImportProgressStatus(progress, state.cancelRequested);
+        if (progressStatus) setStatus(progressStatus.message, progressStatus.tone);
+      });
       const picked = await api.pickFiles();
       if (!picked || picked.status === 'cancelled') {
         setStatus('已取消导入', 'info');
@@ -456,23 +475,15 @@
           : [];
         throw new Error([picked.message || '原表识别失败', ...detailLines].join('\n'));
       }
-      const files = await assignSubjects(Array.isArray(picked.files) ? picked.files : []);
-      if (!files) {
+      if (!picked.plan || !Array.isArray(picked.plan.sources)) throw new Error('导入预检计划无效，请重新选择文件');
+      const importRequest = await confirmImportPlan(picked.plan);
+      if (!importRequest) {
         setStatus('已取消导入', 'info');
         return;
       }
-      const unsubscribe = api.onImportProgress((progress) => {
-        const progressStatus = buildImportProgressStatus(progress, state.cancelRequested);
-        if (progressStatus) setStatus(progressStatus.message, progressStatus.tone);
-      });
-      let result;
-      try {
-        setBusy(true, 'import');
-        setStatus('正在导入并校验幂等数据…', 'info');
-        result = await api.importFiles({ targetMonth: month, files });
-      } finally {
-        if (typeof unsubscribe === 'function') unsubscribe();
-      }
+      setBusy(true, 'import');
+      setStatus('正在导入并校验幂等数据…', 'info');
+      const result = await api.importFiles({ targetMonth: month, ...importRequest });
       const completion = buildImportCompletionStatus(result, month);
       state.lastMonth = month;
       setStatus(completion.message, completion.tone);
@@ -484,6 +495,7 @@
       setStatus(`导入失败：${error.message || error}`, 'error');
       showMessage('导入失败', error.message || String(error), 'error');
     } finally {
+      if (typeof unsubscribe === 'function') unsubscribe();
       state.cancelRequested = false;
       setBusy(false);
     }
@@ -672,73 +684,28 @@
   }
 
   function resultReviewHtml(result) {
-    const { currencies, subjects } = validateResultReview(result);
-    const summaryLabels = [
-      ['openingBalance', '期初财务OP'],
-      ['effectiveCalculatedBalance', '当月计算财务OP'],
-      ['systemBalance', '系统财务OP'],
-      ['effectiveDifference', '差异']
-    ];
-    return subjects.map((subjectResult) => {
-      const subject = subjectResult.subject || '';
-      const rows = Array.isArray(subjectResult.rows) ? subjectResult.rows : [];
-      const summaries = subjectResult.summaries || {};
-      const detailRows = rows.map((row) => {
-        const adjustment = row.type === 'adjustment';
-        const currencyAmounts = row.currencyAmounts || {};
-        return `
-          <tr class="${adjustment ? 'vcc-fin-op-adjustment-row' : 'vcc-fin-op-base-row'}">
-            <td>${escapeHtml(row.subject || subject)}</td>
-            <td>${escapeHtml(row.categoryMajor || '-')}</td>
-            <td>
-              <span>${escapeHtml(row.categoryMinor || '-')}</span>
-              <small class="vcc-fin-op-source-label">${escapeHtml(row.sourceLabel || SOURCE_LABELS[row.sourceType] || row.sourceType || '-')}</small>
-              ${adjustment ? '<span class="vcc-fin-op-adjustment-badge">人工调整</span>' : ''}
-            </td>
-            ${currencies.map((currency) => {
-              const amount = currencyAmounts[currency];
-              return `<td class="number vcc-fin-op-stat-cell">${amount === null || amount === undefined ? '-' : escapeHtml(formatAmount(amount))}</td>`;
-            }).join('')}
-            <td class="number vcc-fin-op-stat-cell">${adjustment ? escapeHtml(formatAmount(row.adjustmentAmount)) : '-'}</td>
-            <td class="vcc-fin-op-adjustment-reason">${adjustment ? escapeHtml(row.reason) : '-'}</td>
-          </tr>
-        `;
+    validateResultReview(result);
+    const projection = window.__vccReviewProjection.projectReview(result.review);
+    return projection.blocks.map((block) => {
+      const body = block.bodyRows.map((row) => {
+        if (row.kind === 'summary') return `
+          <tr class="vcc-fin-op-summary-row${row.difference ? ' difference-row' : ''}">
+            <td>${escapeHtml(row.subject)}</td><th colspan="2">${escapeHtml(row.label)}</th>
+            ${row.cells.slice(3).map((cell) => `<td class="number vcc-fin-op-stat-cell">${escapeHtml(cell.display)}</td>`).join('')}
+          </tr>`;
+        return `<tr class="${row.kind === 'adjustment' ? 'vcc-fin-op-adjustment-row' : 'vcc-fin-op-base-row'}">
+          <td>${escapeHtml(row.cells[0].display)}</td><td>${escapeHtml(row.cells[1].display)}</td>
+          <td><span>${escapeHtml(row.categoryMinor)}</span><small class="vcc-fin-op-source-label">${escapeHtml(row.sourceLabel)}</small>
+            ${row.kind === 'adjustment' ? '<span class="vcc-fin-op-adjustment-badge">人工调整</span>' : ''}</td>
+          ${row.cells.slice(3).map((cell, index) => `<td class="${index === 10 ? 'vcc-fin-op-adjustment-reason' : 'number vcc-fin-op-stat-cell'}">${escapeHtml(cell.display)}</td>`).join('')}
+        </tr>`;
       }).join('');
-      const summaryRows = summaryLabels.map(([key, label]) => {
-        const amounts = summaries[key] || {};
-        const differenceRow = key === 'effectiveDifference';
-        return `
-          <tr class="vcc-fin-op-summary-row${differenceRow ? ' difference-row' : ''}">
-            <td>${escapeHtml(subject)}</td>
-            <th colspan="2">${label}</th>
-            ${currencies.map((currency) => {
-              const amount = amounts[currency];
-              const balanced = differenceRow && isZeroAmount(amount);
-              const display = balanced ? '-' : formatAmount(amount);
-              return `<td class="number vcc-fin-op-stat-cell">${escapeHtml(display)}</td>`;
-            }).join('')}
-            <td class="vcc-fin-op-stat-cell">-</td><td>-</td>
-          </tr>
-        `;
-      }).join('');
-      return `
-        <section class="vcc-fin-op-result-section" data-subject="${escapeHtml(subject)}">
-          <h3>${escapeHtml(subject)}</h3>
-          <div class="vcc-fin-op-table-wrap">
-            <table class="vcc-fin-op-table vcc-fin-op-full-result-table">
-              <thead><tr>
-                <th>主体</th><th>大类</th><th>分类</th>
-                ${currencies.map((currency) => {
-                  const balanced = isZeroAmount(summaries.effectiveDifference[currency]);
-                  return `<th class="vcc-fin-op-stat-heading ${balanced ? 'balanced' : 'unbalanced'}">${currency}</th>`;
-                }).join('')}
-                <th class="vcc-fin-op-stat-heading">调整值</th><th>调整原因</th>
-              </tr></thead>
-              <tbody>${detailRows}${summaryRows}</tbody>
-            </table>
-          </div>
-        </section>
-      `;
+      return `<section class="vcc-fin-op-result-section" data-subject="${escapeHtml(block.subject)}">
+        <h3>${escapeHtml(block.subject)}</h3><div class="vcc-fin-op-table-wrap">
+          <table class="vcc-fin-op-table vcc-fin-op-full-result-table"><thead><tr>
+            ${projection.headers.map((header, index) => `<th${index >= 3 && index <= 11 ? ` class="vcc-fin-op-stat-heading ${block.balanced[index - 3] ? 'balanced' : 'unbalanced'}"` : index === 12 ? ' class="vcc-fin-op-stat-heading"' : ''}>${escapeHtml(header)}</th>`).join('')}
+          </tr></thead><tbody>${body}</tbody></table>
+        </div></section>`;
     }).join('');
   }
 
@@ -1090,7 +1057,7 @@
           <div class="vcc-fin-op-result-scroll" data-role="review-result"></div>
           <label class="vcc-fin-op-confirm-check" data-role="archive-confirm-row"><input type="checkbox" data-field="archive-confirm">已核对当前完整结果，确认归档</label>
           <div class="dialog-actions split vcc-fin-op-review-actions">
-            <div class="vcc-fin-op-review-actions-left"><button class="secondary-btn small" type="button" data-action="modify-result">修改结果</button></div>
+            <div class="vcc-fin-op-review-actions-left"><button class="secondary-btn small" type="button" data-action="export-review">导出待确认表</button><button class="secondary-btn small" type="button" data-action="modify-result">修改结果</button></div>
             <div class="vcc-fin-op-review-actions-right">
               <button class="secondary-btn small" type="button" data-action="cancel">关闭</button>
               <button class="primary-btn small" type="button" data-action="archive" disabled>确认归档</button>
@@ -1104,6 +1071,7 @@
       const checkbox = modal.dialog.querySelector('[data-field="archive-confirm"]');
       const archiveBtn = modal.dialog.querySelector('[data-action="archive"]');
       const modifyBtn = modal.dialog.querySelector('[data-action="modify-result"]');
+      const exportReviewBtn = modal.dialog.querySelector('[data-action="export-review"]');
       const cancelBtn = modal.dialog.querySelector('[data-action="cancel"]');
       const closeBtn = modal.dialog.querySelector('[data-action="close"]');
 
@@ -1122,6 +1090,7 @@
           confirmRow.hidden = true;
           archiveBtn.hidden = true;
           modifyBtn.hidden = true;
+          exportReviewBtn.hidden = true;
           reviewHealthy = false;
           setReviewState(error.message || String(error), 'error');
           return false;
@@ -1130,6 +1099,7 @@
         confirmRow.hidden = !editable;
         archiveBtn.hidden = !editable;
         modifyBtn.hidden = !editable;
+        exportReviewBtn.hidden = !editable;
         archiveBtn.disabled = true;
         reviewHealthy = true;
         adjustmentAvailable = editable;
@@ -1150,6 +1120,7 @@
         cancelBtn.textContent = locked && operationCancellable ? '取消操作' : '关闭';
         modifyBtn.disabled = locked || !reviewHealthy || !adjustmentAvailable
           || runStatusOf(currentResult) !== 'calculated';
+        exportReviewBtn.disabled = locked || !reviewHealthy || runStatusOf(currentResult) !== 'calculated';
         checkbox.disabled = locked || !reviewHealthy || runStatusOf(currentResult) !== 'calculated';
         archiveBtn.disabled = locked || !reviewHealthy || !checkbox.checked;
       }
@@ -1181,11 +1152,36 @@
         }
         if (!operationCancellable) return;
         setReviewCancellable(false);
-        setReviewState('正在取消归档…', 'warning');
+        setReviewState('正在取消操作并清理临时文件…', 'warning');
         try {
           await api.cancelTask();
         } catch (error) {
           setReviewState(`取消失败：${error.message || String(error)}`, 'error');
+        }
+      });
+      exportReviewBtn.addEventListener('click', async () => {
+        if (exportReviewBtn.disabled || runStatusOf(currentResult) !== 'calculated') return;
+        setReviewLocked(true);
+        setReviewState('请选择待确认表的保存位置。', 'neutral');
+        const labels = { 'preparing-result': '准备结果', 'extracting-sources': '提取原表', writing: '写入', validating: '校验', publishing: '保存' };
+        const stopProgress = api.onOperationProgress?.((progress) => {
+          if (progress?.action !== 'export-review') return;
+          setReviewCancellable(progress.cancellable === true);
+          setReviewState(`正在${labels[progress.phase] || '导出待确认表'}…`, 'warning');
+        });
+        try {
+          if (typeof api.exportReviewTable !== 'function') throw new Error('当前环境不支持待确认表导出');
+          const response = await api.exportReviewTable({ runId: currentResult.runId,
+            expectedResultRevision: currentResult.resultRevision, expectedInputFingerprint: currentResult.inputFingerprint });
+          if (!response || response.status === 'error') throw responseFailure(response, '导出待确认表失败');
+          await refetchCurrentResult(response.status === 'cancelled' ? '导出已取消。'
+            : `待确认表已保存：${response.filePath}`, response.status === 'success' ? 'success' : 'neutral');
+        } catch (error) {
+          try { await refetchCurrentResult(responseFailureDisplayMessage(error), 'error'); }
+          catch (refreshError) { reviewHealthy = false; setReviewState(refreshError.message || String(refreshError), 'error'); }
+        } finally {
+          if (typeof stopProgress === 'function') stopProgress();
+          setReviewLocked(false);
         }
       });
       modifyBtn.addEventListener('click', async () => {
@@ -1819,9 +1815,9 @@
         },
         onCompleted: async (result, entry) => {
           await refreshArchivedState();
-          setStatus(`${entry.targetMonth} 已解归档，结果恢复为未处理`, 'success');
+          setStatus(`${entry.targetMonth} 已解归档，结果恢复为待确认`, 'success');
           if (typeof onUnarchived === 'function') await onUnarchived(result, entry);
-          showMessage('解归档完成', `${entry.targetMonth} 已恢复为未处理；基础结果和调整记录均已保留。`, 'success');
+          showMessage('解归档完成', `${entry.targetMonth} 已恢复为待确认；基础结果和调整记录均已保留。`, 'success');
         }
       });
     } catch (error) {
@@ -2877,7 +2873,7 @@
           runId: 316,
           tableName: '财务OP校验结果表',
           dataStatus: hasArchive ? 'archived' : 'unprocessed',
-          dataStatusText: hasArchive ? '已归档' : '未处理',
+          dataStatusText: hasArchive ? '已归档' : '待确认',
           resultRevision: 1,
           createdAt: '2026-07-02 11:00:00',
           updatedAt: '2026-07-02 11:08:00',

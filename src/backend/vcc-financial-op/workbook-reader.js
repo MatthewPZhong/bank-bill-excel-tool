@@ -1,7 +1,6 @@
 'use strict';
 
 const crypto = require('node:crypto');
-const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const {
@@ -67,9 +66,13 @@ async function openWorkbookSheets(filePath, options = {}) {
       );
     }
     const sheets = await locateSheets(opened.zip, opened.entries);
+    const missing = sheets.filter((sheet) => !sheet.entryPath || !opened.entries.has(sheet.entryPath));
+    if (missing.length) {
+      throw new BigTableImportError(`${sourceFile}：工作表关系缺失或已损坏`, missing.map((sheet) => sheet.name));
+    }
     const resolved = sheets
       .filter((sheet) => sheet.entryPath && opened.entries.has(sheet.entryPath))
-      .map((sheet) => ({ ...sheet, entry: opened.entries.get(sheet.entryPath) }));
+      .map((sheet, sheetIndex) => ({ ...sheet, sheetIndex, entry: opened.entries.get(sheet.entryPath) }));
     if (resolved.length === 0) {
       throw new BigTableImportError(`${sourceFile}：未找到可读取的数据 sheet`, []);
     }
@@ -94,7 +97,6 @@ async function openWorkbookSheets(filePath, options = {}) {
         try {
           if (sharedStrings) await sharedStrings.close();
         } finally {
-          await fs.promises.rm(sstTempRoot, { recursive: true, force: true });
           try { opened.zip.close(); } catch (_error) { /* ignore */ }
         }
       }
@@ -103,7 +105,6 @@ async function openWorkbookSheets(filePath, options = {}) {
     if (sharedStrings) {
       try { await sharedStrings.close(); } catch (_closeError) { /* ignore */ }
     }
-    try { await fs.promises.rm(sstTempRoot, { recursive: true, force: true }); } catch (_error) { /* ignore */ }
     try { opened.zip.close(); } catch (_closeError) { /* ignore */ }
     throw error;
   }
@@ -336,7 +337,22 @@ async function inspectSourceFiles(filePaths) {
   return results;
 }
 
-async function findDetailSheet(workbook, definition) {
+async function findDetailSheet(workbook, definition, selection = {}) {
+  if (selection.sheetName !== undefined) {
+    const sheet = workbook.sheets.find((item) => item.name === selection.sheetName);
+    if (!sheet || (selection.sheetIndex !== undefined && sheet.sheetIndex !== selection.sheetIndex)) {
+      throw new BigTableImportError(`${workbook.sourceFile}：指定的 Sheet 定位已变化`, [String(selection.sheetName)]);
+    }
+    if (Number.isSafeInteger(selection.headerRow) && selection.headerRow >= 1 && selection.headerRow <= 1048576) {
+      return { sheet, headerRow: selection.headerRow, sourceType: definition.sourceType };
+    }
+    const rows = await previewSheet(workbook, sheet);
+    const headers = rows.filter((row) => headersEqual(row.values, definition.headers));
+    if (headers.length !== 1 || (selection.headerRow !== undefined && headers[0].rowR !== selection.headerRow)) {
+      throw new BigTableImportError(`${workbook.sourceFile} / ${sheet.name}：指定 Sheet 表头与导入计划不一致`, []);
+    }
+    return { sheet, headerRow: headers[0].rowR, sourceType: definition.sourceType };
+  }
   const detailMatches = [];
   const systemMatches = [];
   const legacyPendingMatches = [];
@@ -396,12 +412,23 @@ async function findDetailSheet(workbook, definition) {
   return null;
 }
 
-async function streamDetailRows(filePath, sourceType, { onDataRow, onProgress } = {}) {
-  const definition = getSourceDefinition(sourceType);
+async function streamDetailRows(filePath, sourceType, options = {}) {
+  return streamRowsWithDefinition(filePath, sourceType, options, getSourceDefinition(sourceType));
+}
+
+async function streamStoredDetailRows(filePath, sourceType, rawContractVersion, options) {
+  const { getRawContractHeaders } = require('./definitions');
+  const base = getSourceDefinition(sourceType);
+  const headers = getRawContractHeaders(sourceType, rawContractVersion);
+  return streamRowsWithDefinition(filePath, sourceType, options, { ...base, headers,
+    indexes: Object.fromEntries(headers.map((header, index) => [header, index])) });
+}
+
+async function streamRowsWithDefinition(filePath, sourceType, { onDataRow, onProgress, workbook: sharedWorkbook, ...selection } = {}, definition) {
   if (!definition) throw new Error(`不支持的明细原表类型：${sourceType}`);
-  const workbook = await openWorkbookSheets(filePath);
+  const workbook = sharedWorkbook || await openWorkbookSheets(filePath);
   try {
-    const found = await findDetailSheet(workbook, definition);
+    const found = await findDetailSheet(workbook, definition, selection);
     if (!found) {
       throw new BigTableImportError(`${workbook.sourceFile}：未找到 ${sourceType} 对应的原表 sheet`, []);
     }
@@ -435,6 +462,11 @@ async function streamDetailRows(filePath, sourceType, { onDataRow, onProgress } 
           return;
         }
         if (rowR < found.headerRow || !hasAnyCellText) return;
+        if (headersEqual(values, definition.headers)) {
+          const error = new BigTableImportError(`${workbook.sourceFile} / ${found.sheet.name}：第 ${rowR} 行存在重复业务表头`, []);
+          error.code = 'vcc-sheet-ambiguous';
+          throw error;
+        }
         rowCount += 1;
         onDataRow({
           rowR,
@@ -444,18 +476,19 @@ async function streamDetailRows(filePath, sourceType, { onDataRow, onProgress } 
           keyCellType: cellTypes && cellTypes[definition.indexes[definition.keyHeader]]
         });
         if (rowCount % 10000 === 0 && typeof onProgress === 'function') {
-          onProgress({ sourceFile: workbook.sourceFile, rowCount });
+          onProgress({ sourceFile: workbook.sourceFile, sheetName: found.sheet.name, rowCount });
         }
       }
     });
-    if (typeof onProgress === 'function') onProgress({ sourceFile: workbook.sourceFile, rowCount });
+    if (typeof onProgress === 'function') onProgress({ sourceFile: workbook.sourceFile, sheetName: found.sheet.name, rowCount });
     return { sourceFile: workbook.sourceFile, sheetName: found.sheet.name, rowCount };
   } finally {
-    await workbook.close();
+    if (!sharedWorkbook) await workbook.close();
   }
 }
 
 module.exports = {
+  streamStoredDetailRows,
   PREVIEW_COLUMN_COUNT,
   PREVIEW_MEANINGFUL_ROWS,
   openWorkbookSheets,

@@ -2515,6 +2515,42 @@ class ArchiveRepository {
     `).get(Number(batchId), key));
   }
 
+  persistInputArtifactMetadata(batchId, taskRunId, entries) {
+    return withWriteTransaction(this.db, () => {
+      const batch = this.getBatch(batchId);
+      if (!batch || batch.taskRunId !== taskRunId) throw new Error('输入成员清单的任务身份不符');
+      // FilePlan 已先冻结文件身份；业务成员清单只能附加，不能替换这部分证据。
+      const fileIdentityKeys = new Set(['aliasKey', 'sourceSnapshot', 'expectedSha256', 'expectedSizeBytes']);
+      const seen = new Set();
+      return entries.map((entry) => {
+        const artifact = this.getArtifactByKey(batchId, entry.artifactKey);
+        if (!artifact || artifact.direction !== 'input' || artifact.role !== 'input'
+            || artifact.sourceOperation !== entry.sourceOperation || artifact.originalName !== entry.originalName || seen.has(artifact.id)) {
+          throw new Error('输入成员清单与持久 manifest 身份不符');
+        }
+        seen.add(artifact.id);
+        const members = JSON.parse(normalizeMetadata(entry.metadata));
+        if (Object.keys(members).some((key) => fileIdentityKeys.has(key))) {
+          throw new Error('输入成员清单不能覆盖 FilePlan 文件身份');
+        }
+        const previousMembers = Object.fromEntries(Object.entries(artifact.metadata)
+          .filter(([key]) => !fileIdentityKeys.has(key)));
+        const previous = normalizeMetadata(previousMembers);
+        if (previous !== '{}' && stableSerialize(previousMembers) !== stableSerialize(members)) {
+          throw new Error('输入成员清单已经冻结，不能改写');
+        }
+        const metadata = { ...artifact.metadata, ...members };
+        if (previous === '{}' && Object.keys(members).length) {
+          this.db.prepare('UPDATE archive_artifacts SET metadata_json = ?, updated_at = ? WHERE id = ?')
+            .run(normalizeMetadata(metadata), this._timestamp(), artifact.id);
+        }
+        const updated = this.getArtifact(artifact.id);
+        if (stableSerialize(updated.metadata) !== stableSerialize(metadata)) throw new Error('输入成员清单回读不符');
+        return updated;
+      });
+    });
+  }
+
   getBatchDetail(batchId) {
     const batch = this.getBatch(batchId);
     if (!batch) return null;

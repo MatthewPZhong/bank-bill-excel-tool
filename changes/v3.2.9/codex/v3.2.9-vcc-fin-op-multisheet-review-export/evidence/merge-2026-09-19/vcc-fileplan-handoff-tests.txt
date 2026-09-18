@@ -1,0 +1,23 @@
+✔ 真实 FilePlan 预分配 → VCC handoff → settle → 混合工作簿导入，身份元数据保留且有效来源阻止永久删除 (103.735833ms)
+▶ 已冻结 VCC 身份、版本、成员和完整字段集不可改写；FilePlan 身份键不可由成员补丁覆盖
+  ✔ version (0.677333ms)
+  ✔ task (0.330458ms)
+  ✔ physical (0.297375ms)
+  ✔ hash (0.286584ms)
+  ✔ members (0.290666ms)
+  ✔ missing (0.28075ms)
+  ✔ alias (0.317958ms)
+  ✔ snapshot (0.270416ms)
+  ✔ expected (0.25475ms)
+  ✔ size (0.263417ms)
+✔ 已冻结 VCC 身份、版本、成员和完整字段集不可改写；FilePlan 身份键不可由成员补丁覆盖 (45.880334ms)
+✔ 已持久但不完整的 VCC 成员清单不能在重放时被补齐 (51.488542ms)
+✔ 多文件后一个成员冲突时回滚前一个新增清单，原 FilePlan metadata 不变 (60.16125ms)
+ℹ tests 14
+ℹ suites 0
+ℹ pass 14
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 395.550333

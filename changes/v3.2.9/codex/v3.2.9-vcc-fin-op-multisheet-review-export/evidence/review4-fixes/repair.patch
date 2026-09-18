@@ -1,0 +1,314 @@
+--- a/src/backend/vcc-financial-op/review-export-plan.js
++++ b/src/backend/vcc-financial-op/review-export-plan.js
+@@ -297,10 +297,14 @@
+     const stored = expected.systemRow;
+     const criticalIndexes = ['主体', '币种', '业务部门', '账单日期', SYSTEM_OP_DEFINITION.balanceHeader].map((header) => ix[header]);
+     if (criticalIndexes.some((index) => cells?.[index]?.cellType === 'error')) throw mismatch(`${fact.identity} 系统 OP 计算字段包含错误值`);
+-    const currency = normalizeLegacyStoredCurrency(String(values[ix['币种']] ?? '').trim());
+-    if (String(values[ix['主体']] ?? '').trim() !== expected.subject || currency !== expected.systemCurrency
+-        || String(values[ix['业务部门']] ?? '').trim() !== 'VCC'
+-        || monthOfDate(values[ix['账单日期']]) !== expected.target_month) throw mismatch(`${fact.identity} 系统 OP 主体/币种/账期不符`);
++    // 归属按导入时的显示值解释；下面仍独立核验原始值，输出继续使用原件单元格。
++    const displayValues = cells ? expected.headers.map((_header, index) => cells[index]
++      ? systemOpCellValues(cells[index], { legacySheetJsDisplay: expected.systemAuditContract === 'sheetjs-v1' }).display : '')
++      : stored.displayValues;
++    const currency = normalizeLegacyStoredCurrency(String(displayValues[ix['币种']] ?? '').trim());
++    if (String(displayValues[ix['主体']] ?? '').trim() !== expected.subject || currency !== expected.systemCurrency
++        || String(displayValues[ix['业务部门']] ?? '').trim() !== 'VCC'
++        || (monthOfDate(displayValues[ix['账单日期']]) || monthOfDate(values[ix['账单日期']])) !== expected.target_month) throw mismatch(`${fact.identity} 系统 OP 主体/币种/账期不符`);
+     const balanceIndex = ix[SYSTEM_OP_DEFINITION.balanceHeader];
+     const original = cells?.[balanceIndex];
+     const balance = systemAmountRead(stored.displayValues[balanceIndex], original?.cellType === 'number' ? Number(original.rawLexicalValue) : values[balanceIndex],
+@@ -322,8 +326,9 @@
+     const mapped = mapDetailRow({ sourceType: expected.source_type, values: mappingValues, targetMonth: expected.target_month,
+       assignedSubject: expected.subject, sourceFile: '', sheetName: fact.sheet_name, sourceRow: fact.source_row });
+     assertMappedLineage(expected, mapped);
+-    for (const key of ['subject', 'stat_currency', 'pending_currency', 'flow_currency']) {
+-      const property = { subject: 'subject', stat_currency: 'statCurrency', pending_currency: 'pendingCurrency', flow_currency: 'flowCurrency' }[key];
++    if (expected.subject !== mapped.subject) throw mismatch(`${fact.identity} subject 与原表不符`);
++    for (const key of ['stat_currency', 'pending_currency', 'flow_currency']) {
++      const property = { stat_currency: 'statCurrency', pending_currency: 'pendingCurrency', flow_currency: 'flowCurrency' }[key];
+       if (expected[key] != null && normalizeLegacyStoredCurrency(expected[key]) !== mapped[property]) throw mismatch(`${fact.identity} ${key} 与原表不符`);
+     }
+   }
+--- a/src/backend/vcc-financial-op/system-op-importer.js
++++ b/src/backend/vcc-financial-op/system-op-importer.js
+@@ -780,7 +780,7 @@
+ }
+ 
+ 
+-function systemOpCellValues(cell) {
++function systemOpCellValues(cell, { legacySheetJsDisplay = false } = {}) {
+   let raw = cell.cellType === 'number' ? Number(cell.rawLexicalValue)
+     : cell.cellType === 'boolean' ? cell.decodedSemanticValue === true : cell.decodedSemanticValue ?? '';
+   if (cell.cellType === 'date') {
+@@ -792,11 +792,12 @@
+     raw = XLSX.utils.aoa_to_sheet([[date]], { cellDates: false }).A1.v;
+   }
+   const display = cell.cellType === 'number' || cell.cellType === 'date'
+-    ? XLSX.utils.format_cell({ t: 'n', v: raw, z: cell.sourceFormat || 'General' }) : String(raw);
++    ? XLSX.utils.format_cell({ t: 'n', v: raw, z: cell.sourceFormat || 'General' })
++    : cell.cellType === 'boolean' && legacySheetJsDisplay ? XLSX.utils.format_cell({ t: 'b', v: raw }) : String(raw);
+   return { raw, display };
+ }
+ 
+-async function readSystemOpSheetCandidates(file, selectedSheet, targetMonth, workbook) {
++async function readSystemOpSheetCandidates(file, selectedSheet, targetMonth, workbook, { onReadProgress } = {}) {
+   const normalizedMonth = normalizeYearMonth(targetMonth);
+   if (!normalizedMonth) throw new Error(`系统财务OP账期格式无效：${targetMonth}`);
+   const descriptor = workbook.sheets[selectedSheet.sheetIndex];
+@@ -810,29 +811,37 @@
+   let actualRows = 0;
+   let locatedHeaderRow = selectedSheet.headerRow;
+   let header = null;
+-  await workbook.scanSheet(selectedSheet.sheetIndex, (row) => {
+-    const raw = [], display = [];
+-    for (const cell of row.cells) {
+-      const column = cell.columnIndex;
+-      if (cell.cellType === 'blank' && !cell.hasFormula) continue;
+-      const value = systemOpCellValues(cell);
+-      raw[column] = value.raw;
+-      display[column] = value.display;
+-      if (column === balanceColumn && cell.cellType === 'number') {
+-        balanceLexicalTokens.set(row.rowIndex, cell.rawLexicalValue);
+-      }
+-    }
+-    rawMatrix[row.rowIndex - 1] = raw;
+-    displayMatrix[row.rowIndex - 1] = display;
+-    if (headersEqual(display, SYSTEM_OP_HEADERS)) {
+-      if (header || (locatedHeaderRow !== undefined && locatedHeaderRow !== row.rowIndex)) {
+-        throw new Error('系统 OP 表头位置已变化或存在重复业务表头');
+-      }
+-      locatedHeaderRow = row.rowIndex;
+-      header = { rowIndex: row.rowIndex - 1, values: normalizeHeaderRow(display) };
+-    }
+-    if (row.rowIndex > locatedHeaderRow && raw.some((value) => text(value))) actualRows += 1;
+-  });
++  try {
++    await workbook.scanSheet(selectedSheet.sheetIndex, (row) => {
++      const raw = [], display = [];
++      for (const cell of row.cells) {
++        const column = cell.columnIndex;
++        if (cell.cellType === 'blank' && !cell.hasFormula) continue;
++        const value = systemOpCellValues(cell);
++        raw[column] = value.raw;
++        display[column] = value.display;
++        if (column === balanceColumn && cell.cellType === 'number') {
++          balanceLexicalTokens.set(row.rowIndex, cell.rawLexicalValue);
++        }
++      }
++      rawMatrix[row.rowIndex - 1] = raw;
++      displayMatrix[row.rowIndex - 1] = display;
++      if (headersEqual(display, SYSTEM_OP_HEADERS)) {
++        if (header || (locatedHeaderRow !== undefined && locatedHeaderRow !== row.rowIndex)) {
++          throw new Error('系统 OP 表头位置已变化或存在重复业务表头');
++        }
++        locatedHeaderRow = row.rowIndex;
++        header = { rowIndex: row.rowIndex - 1, values: normalizeHeaderRow(display) };
++      }
++      if (row.rowIndex > locatedHeaderRow && raw.some((value) => text(value))) {
++        actualRows += 1;
++        if (actualRows % 512 === 0) onReadProgress?.(actualRows);
++      }
++    });
++  } finally {
++    // 扫描已读数量独立于后续业务解析；解析失败或扫描中断仍上报已完成的行。
++    onReadProgress?.(actualRows);
++  }
+   if (!header) throw new Error('系统 OP 未找到预检指定的正式表头');
+   return { ...parseSystemOpSnapshotCandidates({ normalizedMonth, sourceFile: file.fileName || path.basename(file.filePath),
+     sheetName: selectedSheet.sheetName, sheetIndex: selectedSheet.sheetIndex, physicalFileId: file.physicalFileId,
+@@ -849,11 +858,15 @@
+       workbook = await openRichWorkbook(file.filePath, { memoryBudgetBytes: 64 * 1024 * 1024,
+         cancelToken: { get cancelled() { return !!options.shouldCancel?.(); } } });
+       for (const selectedSheet of file.sheets) {
++        const rowsBeforeSheet = actualRows;
+         try {
+-          const candidates = await readSystemOpSheetCandidates(file, selectedSheet, options.targetMonth, workbook);
+-          actualRows += candidates.actualRows;
+-          options.onProgress?.({ phase: 'reading', sourceType: SOURCE_TYPES.SYSTEM_OP,
+-            sourceFile: file.fileName, sheetName: selectedSheet.sheetName, rows: actualRows });
++          const candidates = await readSystemOpSheetCandidates(file, selectedSheet, options.targetMonth, workbook, {
++            onReadProgress(sheetRows) {
++              actualRows = rowsBeforeSheet + sheetRows;
++              options.onProgress?.({ phase: 'reading', sourceType: SOURCE_TYPES.SYSTEM_OP,
++                sourceFile: file.fileName, sheetName: selectedSheet.sheetName, rows: actualRows });
++            }
++          });
+           prepared.push({ ...file, ...selectedSheet, snapshotCandidates: candidates });
+         } catch (error) {
+           if (options.shouldCancel?.()) { error.code = 'vcc-import-cancelled'; throw error; }
+--- a/tests/unit/main-process/vcc-financial-op-review-ipc.test.js
++++ b/tests/unit/main-process/vcc-financial-op-review-ipc.test.js
+@@ -4,6 +4,7 @@
+ const fs = require('node:fs');
+ const path = require('node:path');
+ const { Worker } = require('node:worker_threads');
++const XLSX = require('xlsx');
+ const { createReviewFixture } = require('../../helpers/vcc-review-export');
+ const { createVccFinancialOpService } = require('../../../src/main-process/vcc-financial-op-service');
+ const { createReviewExportHandler } = require('../../../src/main-process/vcc-financial-op-review-ipc');
+@@ -43,6 +44,66 @@
+   assert.deepEqual(fs.readdirSync(path.join(f.dir, 'tasks')), []);
+   assert.equal(s.service._taskStateForTests().active, false);
+   assert.equal(f.db.prepare('SELECT status FROM vcc_fin_op_runs WHERE id=?').get(f.run.id).status, 'calculated');
++});
++
++test('主体与系统 OP 显示值按导入合同核验，真实 IPC 导出保留原始值和格式', async (t) => {
++  for (const item of [
++    { name: '数值主体的前导零', subjects: ['000123'], formattedSubject: true },
++    { name: 'CNH 与 CNY 是两个独立主体', subjects: ['CNH', 'CNY'] },
++    { name: '部门和币种使用显示值', subjects: ['甲'], formattedCoordinates: true }
++  ]) await t.test(item.name, async (t) => {
++    const f = await createReviewFixture(t, { subjects: item.subjects, beforeImport(filePath) {
++      const book = XLSX.readFile(filePath), sheet = book.Sheets['系统 OP'];
++      for (let row = 2; row <= item.subjects.length * 9 + 1; row++) {
++        if (item.formattedSubject) sheet['B' + row] = { t: 'n', v: 123, z: '000000' };
++        if (item.formattedCoordinates) {
++          sheet['C' + row] = { t: 'n', v: 1, z: '"VCC"' };
++          sheet['D' + row] = { t: 'n', v: 1, z: '"' + sheet['D' + row].v + '"' };
++        }
++      }
++      XLSX.writeFile(book, filePath);
++    } });
++    assert.ok(f.imported.records.every((record) => record.status === 'success'));
++    const snapshots = f.db.prepare('SELECT * FROM vcc_fin_op_system_snapshots').all();
++    const before = f.db.prepare('SELECT total_changes() n').get().n;
++    const s = setup(f); forbidDml(f.db);
++    try {
++      const result = await s.handler(); assert.equal(result.status, 'success', JSON.stringify(result));
++      assert.equal(result.subjectCount, item.subjects.length); assert.equal(result.sourceRowCount, 7 * item.subjects.length);
++      const book = XLSX.readFile(s.output, { cellNF: true });
++      assert.deepEqual(item.subjects.map((_subject, index) => book.Sheets['待确认表']['A' + (index * 11 + 1)].v), item.subjects);
++      const pages = book.SheetNames.slice(1).map((name) => book.Sheets[name]).filter((sheet) => sheet.E1?.v === 'OP发生额');
++      assert.equal(pages.length, 2 * item.subjects.length);
++      for (const page of pages) {
++        if (item.formattedSubject) assert.deepEqual([page.B2.t, page.B2.v, page.B2.z, page.B2.w], ['n', 123, '000000', '000123']);
++        else assert.ok(item.subjects.includes(page.B2.v));
++        if (item.formattedCoordinates) {
++          assert.deepEqual([page.C2.t, page.C2.v, page.C2.w], ['n', 1, 'VCC']);
++          assert.equal(page.D2.t, 'n'); assert.equal(page.D2.v, 1); assert.ok(['EUR', 'USD'].includes(page.D2.w));
++        }
++      }
++      assert.deepEqual(f.db.prepare('SELECT * FROM vcc_fin_op_system_snapshots').all(), snapshots);
++      assert.equal(f.db.prepare('SELECT total_changes() n').get().n, before);
++      assert.equal(f.db.prepare('SELECT status FROM vcc_fin_op_runs WHERE id=?').get(f.run.id).status, 'calculated');
++    } finally { await s.service.terminate(); }
++  });
++});
++
++test('格式化主体可导出仍须核对原始数值，错误审计不能替换既有目标', async (t) => {
++  const f = await createReviewFixture(t, { subjects: ['000123'], beforeImport(filePath) {
++    const book = XLSX.readFile(filePath);
++    for (let row = 2; row <= 10; row++) book.Sheets['系统 OP']['B' + row] = { t: 'n', v: 123, z: '000000' };
++    XLSX.writeFile(book, filePath);
++  } });
++  const snapshot = f.db.prepare('SELECT * FROM vcc_fin_op_system_snapshots').get();
++  const audit = JSON.parse(snapshot.raw_json); audit.rows[0].rawValues[1] = 999;
++  f.db.prepare('UPDATE vcc_fin_op_system_snapshots SET raw_json=? WHERE id=?').run(JSON.stringify(audit), snapshot.id);
++  const s = setup(f); forbidDml(f.db); fs.writeFileSync(s.output, 'previous target');
++  try {
++    const result = await s.handler(); assert.equal(result.code, 'vcc-review-validation-failed');
++    assert.match(result.message, /原始列 2 不符/);
++    assert.equal(fs.readFileSync(s.output, 'utf8'), 'previous target');
++  } finally { await s.service.terminate(); }
+ });
+ 
+ test('取消另存为不启动 Worker；保存期间修改结果会拦截旧 revision', async (t) => {
+--- a/tests/unit/main-process/vcc-financial-op-review-legacy-error.test.js
++++ b/tests/unit/main-process/vcc-financial-op-review-legacy-error.test.js
+@@ -13,10 +13,11 @@
+ const { writeReviewWorkbook } = require('../../../src/main-process/vcc-financial-op-review-writer');
+ const { validateReviewWorkbook } = require('../../../src/main-process/vcc-financial-op-review-validator');
+ 
+-async function legacyFixture(t, { changeAudit, changeOriginal } = {}) {
+-  const f = await createReviewFixture(t, { subjects: ['甲'] });
++async function legacyFixture(t, { changeAudit, changeOriginal, subject = '甲', subjectCell } = {}) {
++  const f = await createReviewFixture(t, { subjects: [subject] });
+   const oldFile = path.join(f.dir, 'legacy-system.xlsx');
+   const sheet = XLSX.readFile(f.filePath).Sheets['系统 OP'];
++  if (subjectCell) for (let row = 2; row <= 10; row++) sheet['B' + row] = { ...subjectCell };
+   for (let row = 2; row <= 10; row++) sheet['E' + row] = row % 2
+     ? { t: 'e', v: 42, f: 'NA()' } : { t: 'e', v: 7 };
+   const single = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(single, sheet, '系统 OP');
+@@ -69,6 +70,23 @@
+   assert.equal(f.db.prepare('SELECT total_changes() n').get().n, before);
+ });
+ 
++test('v1 系统 OP 按旧显示主体匹配，保留数值格式和布尔原类型', async (t) => {
++  for (const item of [
++    { subject: '000123', subjectCell: { t: 'n', v: 123, z: '000000' } },
++    { subject: 'TRUE', subjectCell: { t: 'b', v: true } }
++  ]) await t.test(item.subject, async (t) => {
++    const f = await legacyFixture(t, item);
++    await prepareReviewManifest(f); await extractReviewSources(f); await writeReviewWorkbook(f); await validateReviewWorkbook(f);
++    const book = XLSX.readFile(f.filePath, { cellNF: true });
++    const pages = book.SheetNames.map((name) => book.Sheets[name]).filter((sheet) => sheet.E1?.v === 'OP发生额');
++    assert.equal(pages.length, 2);
++    for (const page of pages) {
++      assert.equal(page.B2.t, item.subjectCell.t); assert.equal(page.B2.v, item.subjectCell.v);
++      assert.equal(page.B2.w, item.subject);
++    }
++  });
++});
++
+ test('旧错误兼容不放过非空审计或普通文本不符', async (t) => {
+   for (const mode of ['raw', 'display', 'ordinary-text']) await t.test(mode, async (t) => {
+     const f = await legacyFixture(t, mode === 'ordinary-text'
+--- a/tests/unit/backend/vcc-financial-op/multisheet-import.test.js
++++ b/tests/unit/backend/vcc-financial-op/multisheet-import.test.js
+@@ -104,6 +104,54 @@
+   assert.equal(Math.max(...progress.filter((p) => p.sourceType === T.RECHARGE).map((p) => p.rows)), 1);
+ });
+ 
++test('系统 OP 无目标账期也保留扫描行数和 Sheet 进度，其他类型照常提交', async (t) => {
++  const f = fixture(t);
++  const file = write(f.dir, [{ name: '旧账期', type: T.SYSTEM_OP, rows: system('甲').map((row) => ({ ...row, 账单日期: '2026-05-31' })) },
++    { name: '充值', type: T.RECHARGE, rows: [detail()] }]);
++  const request = await prepare(f, [file]), progress = []; request.onProgress = (value) => progress.push(value);
++  const result = await importFiles(request);
++  assert.equal(result.status, 'completed_with_errors');
++  assert.deepEqual(result.records.map((r) => [r.sourceType, r.status, r.insertedCount]), [[T.SYSTEM_OP, 'failed_validation', 0], [T.RECHARGE, 'success', 1]]);
++  assert.equal(result.readRowCount, 10); assert.equal(progress.at(-1).rows, 10);
++  const systemRead = progress.filter((p) => p.phase === 'reading' && p.sourceType === T.SYSTEM_OP);
++  assert.deepEqual(systemRead.map((p) => [p.sourceFile, p.sheetName, p.rows]), [['mixed.xlsx', '旧账期', 9]]);
++});
++
++test('失败和解析成功的系统 OP Sheet 跨文件累计读取量，整组回滚也保留计数', async (t) => {
++  const f = fixture(t), oldRows = system('甲').map((row) => ({ ...row, 账单日期: '2026-05-31' }));
++  const first = write(f.dir, [{ name: '旧一', type: T.SYSTEM_OP, rows: oldRows }, { name: '正常', type: T.SYSTEM_OP, rows: system('乙') }], 'first.xlsx');
++  const second = write(f.dir, [{ name: '旧二', type: T.SYSTEM_OP, rows: oldRows }, { name: '充值', type: T.RECHARGE, rows: [detail()] }], 'second.xlsx');
++  const request = await prepare(f, [first, second]), progress = []; request.onProgress = (value) => progress.push(value);
++  const result = await importFiles(request);
++  assert.equal(result.physicalFileCount, 2); assert.equal(result.businessSheetCount, 4);
++  assert.equal(result.readRowCount, 28); assert.equal(progress.at(-1).rows, 28);
++  const systemRead = progress.filter((p) => p.phase === 'reading' && p.sourceType === T.SYSTEM_OP);
++  assert.deepEqual(systemRead.map((p) => [p.sourceFile, p.sheetName, p.rows]), [['first.xlsx', '旧一', 9], ['first.xlsx', '正常', 18], ['second.xlsx', '旧二', 27]]);
++  const systemRecord = result.records.find((r) => r.sourceType === T.SYSTEM_OP);
++  assert.deepEqual([systemRecord.status, systemRecord.insertedCount, systemRecord.rolledBackCount], ['failed_validation', 0, 1]);
++  assert.equal(f.db.prepare('SELECT COUNT(*) n FROM vcc_fin_op_system_snapshots').get().n, 0);
++  assert.equal(result.records.find((r) => r.sourceType === T.RECHARGE).insertedCount, 1);
++});
++
++test('系统 OP 扫描中断仍上报已完成数据行，不把未读尾部或表头计入', async (t) => {
++  const { openRichWorkbook } = require('../../../../src/backend/xlsx-rich-reader');
++  const { readSystemOpSheetCandidates } = require('../../../../src/backend/vcc-financial-op/system-op-importer');
++  const f = fixture(t), file = write(f.dir, [{ name: '系统', type: T.SYSTEM_OP, rows: system('甲') }]);
++  const reader = await openRichWorkbook(file), progress = [];
++  const failure = new Error('injected scan failure');
++  try {
++    await assert.rejects(readSystemOpSheetCandidates({ filePath: file, fileName: 'mixed.xlsx' },
++      { sheetIndex: 0, sheetName: '系统', headerRow: 1 }, '2026-06', {
++        sheets: reader.sheets, date1904: reader.date1904,
++        scanSheet(index, onRow) { return reader.scanSheet(index, (row) => {
++          if (row.rowIndex === 6) throw failure;
++          onRow(row);
++        }); }
++      }, { onReadProgress: (rows) => progress.push(rows) }), (error) => error === failure);
++    assert.deepEqual(progress, [4]);
++  } finally { await reader.close(); }
++});
++
+ test('同主体九币种跨 Sheet 拆分，或八币种与完整候选并存，都不能补救该主体', async (t) => {
+   for (const complete of [false, true]) {
+     const f = fixture(t);
