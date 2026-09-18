@@ -39,12 +39,12 @@ async function fixture() {
   };
 }
 
-function persistedTarget(entry) {
+async function persistedTarget(entry) {
   const stat = readIdentityStatSync(fs, entry.rootDir, 'lstatSync');
   return {
     kind: 'owned-temp', sourceArtifactId: entry.artifactId,
     managedRelativePath: entry.managedRelativePath, sourceOwnerProof: entry.ownerProof,
-    managedRootIdentity: { rootDir: entry.rootDir, realPath: fs.realpathSync(entry.rootDir),
+    managedRootIdentity: { rootDir: entry.rootDir, realPath: await fs.promises.realpath(entry.rootDir),
       dev: String(stat.dev), ino: String(stat.ino) }
   };
 }
@@ -64,7 +64,7 @@ test('生产 staging 与真实归档 metadata 提供可核验来源，仅返回�
       'artifactId', 'batchId', 'expectedSha256', 'expectedSizeBytes',
       'moduleId', 'sourceOperation', 'sourcePath', 'sourceSnapshot'
     ]);
-    await resolver.assertDeletionTargetReady(persistedTarget(entries[0]));
+    await resolver.assertDeletionTargetReady(await persistedTarget(entries[0]));
     assert.deepEqual(calls, [current.batch.id, current.batch.id, current.batch.id]);
     assert.equal(fs.readFileSync(current.originalPath, 'utf8'), 'position managed staging input');
     assert.equal(fs.existsSync(current.staged.archivePath), true, 'resolver 只读，不执行删除');
@@ -107,7 +107,7 @@ test('哈希核对结束后新增引用以及持久计划重试时新增引用�
     let protectedPaths = [];
     const resolver = current.resolver(async () => protectedPaths);
     const [entry] = await resolver(current.batch, current.artifacts);
-    const target = persistedTarget(entry);
+    const target = await persistedTarget(entry);
     protectedPaths = [current.staged.archivePath];
     await assert.rejects(resolver.assertDeletionTargetReady(target), { code: 'ARCHIVE_DELETE_SOURCE_HELD' });
     assert.equal(fs.existsSync(current.staged.archivePath), true);
@@ -178,7 +178,7 @@ test('暂存父目录链接和持久计划根替换均拒绝且不触及链接�
   try {
     const resolver = current.resolver();
     const [entry] = await resolver(current.batch, current.artifacts);
-    const target = persistedTarget(entry);
+    const target = await persistedTarget(entry);
     await assert.rejects(resolver.assertDeletionTargetReady({
       ...target, managedRootIdentity: { ...target.managedRootIdentity, ino: '999999999' }
     }), { code: 'ARCHIVE_DELETE_SOURCE_ROOT_UNAVAILABLE' });

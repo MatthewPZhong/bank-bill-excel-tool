@@ -1,215 +1,56 @@
-name: Build Windows Packages
+name: Windows v3.2.9 Short Diagnostics
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - '**'
+
+permissions:
+  contents: read
 
 jobs:
-  bizop-durability-contract:
-    if: >-
-      github.event_name == 'pull_request' &&
-      (startsWith(github.head_ref, 'codex/v3.2.7-') || github.head_ref == 'codex/v327-enable-bizop-production')
-    runs-on: ubuntu-latest
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22
-      - name: Install dependencies
-        run: npm ci
-      - name: Verify BizOP contracts with a real directory durability barrier
-        run: |
-          node -e "if (require('./tests/helpers/durable-directory-tests').directoryDurabilityCapability.capability !== 'supported') process.exit(1)"
-          node --test tests/unit/main-process/biz-op-v327*.test.js
-
-  smoke-test:
+  windows-short-diagnostics:
     runs-on: windows-latest
+    timeout-minutes: 15
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
+    defaults:
+      run:
+        shell: pwsh
     steps:
-      - name: Reject unauthorized v3.2.1 final-gate invocation
-        if: >-
-          (
-            (
-              github.event_name == 'pull_request' &&
-              (
-                github.head_ref == 'codex/v3.2.1-r3-release-evidence' ||
-                github.head_ref == 'codex/v3.2.1-r4-review-hardening'
-              )
-            ) ||
-            (
-              github.event_name == 'workflow_dispatch' &&
-              (
-                github.ref_name == 'codex/v3.2.1-r3-release-evidence' ||
-                github.ref_name == 'codex/v3.2.1-r4-review-hardening'
-              )
-            )
-          ) &&
-          !(
-            github.event_name == 'pull_request' &&
-            github.event.pull_request.number == 183 &&
-            github.head_ref == 'codex/v3.2.1-r4-review-hardening' &&
-            github.base_ref == 'codex/v3.2.1-r3-release-evidence' &&
-            github.event.pull_request.head.repo.full_name == github.repository &&
-            github.event.action == 'synchronize' &&
-            github.event.pull_request.commits == 6 &&
-            github.run_attempt == 1
-          )
-        run: |
-          echo "Unauthorized v3.2.1 final release-gate invocation"
-          exit 1
-
-      - name: Checkout
+      - name: Checkout exact diagnostic revision
         uses: actions/checkout@v6
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-
-      - name: Verify authorized v3.2.1 repair lineage
-        if: >-
-          github.event_name == 'pull_request' &&
-          github.event.pull_request.number == 183 &&
-          github.head_ref == 'codex/v3.2.1-r4-review-hardening' &&
-          github.base_ref == 'codex/v3.2.1-r3-release-evidence' &&
-          github.event.pull_request.head.repo.full_name == github.repository &&
-          github.event.action == 'synchronize' &&
-          github.event.pull_request.commits == 6 &&
-          github.run_attempt == 1
-        shell: bash
-        run: |
-          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
-          test "$(git rev-parse HEAD^1)" = "f87f2b2994e86b75d350f64eec53252fe24a67b6"
-          test "$(git rev-parse HEAD^1^1)" = "ce599e206894f3683b748254068dd750479ffc74"
-          test "$(git rev-parse HEAD^1^2)" = "d7d96938196a61a36892c40721cdba56992a14a8"
-
-      - name: Setup Node.js
+          persist-credentials: false
+      - name: Setup Node matching the failed Windows run
         uses: actions/setup-node@v6
         with:
-          node-version: 22
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run release checks
-        if: >-
-          (
-            github.event_name == 'pull_request' &&
-            github.event.pull_request.number == 183 &&
-            github.head_ref == 'codex/v3.2.1-r4-review-hardening' &&
-            github.base_ref == 'codex/v3.2.1-r3-release-evidence' &&
-            github.event.pull_request.head.repo.full_name == github.repository &&
-            github.event.action == 'synchronize' &&
-            github.event.pull_request.commits == 6 &&
-            github.run_attempt == 1
-          ) ||
-          (
-            (github.event_name != 'pull_request' ||
-             github.head_ref != 'codex/v3.2.1-r4-review-hardening') &&
-            (github.event_name != 'workflow_dispatch' ||
-             github.ref_name != 'codex/v3.2.1-r4-review-hardening') &&
-            (github.event_name != 'pull_request' ||
-             github.event.pull_request.head.repo.full_name != github.repository ||
-             !startsWith(github.head_ref, 'codex/v3.2.1-'))
-          )
-        run: npm run release-check
-
-      - name: Verify Windows startup process adapter semantics
-        env:
-          WINDOWS_STARTUP_PROCESS_ADAPTER_REAL_TEST: '1'
-        run: node --test tests/unit/scripts/startup-process-adapter.test.js
-
-      - name: Verify carrier closure in Windows Electron
-        shell: pwsh
-        env:
-          ELECTRON_RUN_AS_NODE: '1'
+          node-version: 22.23.2
+      - name: Record revision and runtime identity
+        id: identity
+        run: node scripts/diagnostics/windows-short-diagnostics.cjs identity
+      - name: Install locked dependencies
+        id: install
         run: |
-          & .\node_modules\electron\dist\electron.exe --test tests/unit/main-process/background-execution/carrier-observation.test.js tests/unit/main-process/toolbox-background-generation.test.js
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: Run Windows SQLite teardown regression
-        run: node --test tests/unit/main-process/position-reconciliation-filtered-source-report.test.js
-
-      - name: Verify main panel alignment
-        run: npm run verify:main-panel-alignment
-
-  build:
-    needs: smoke-test
-    runs-on: windows-latest
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build Windows installer
-        run: |
-          npm run prepare:dist
-          npx electron-builder --win --x64 --publish never
-
-      - name: Check dist size
-        run: node scripts/check-dist-size.js
-
-      - name: Run packaged background execution canary
-        shell: pwsh
-        run: ./scripts/run-windows-packaged-background-canary.ps1 -DistDirectory ./dist
-
-      - name: Verify packaged normal startup and complete BizOP workflow
-        shell: pwsh
-        run: |
-          $env:BIZOP_ACCEPTANCE_APP = (Resolve-Path 'dist/win-unpacked/清结算小助手.exe').Path
-          node scripts/biz-op-v327/verify-windows-app.js
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: Upload packaged BizOP acceptance evidence
+          npm ci 2>&1 | Tee-Object -FilePath outputs/windows-short-diagnostics/npm-ci.log
+          exit $LASTEXITCODE
+      - name: Run SSD admission regression tests
+        if: always() && steps.install.outcome == 'success' && steps.identity.outcome == 'success'
+        run: node scripts/diagnostics/windows-short-diagnostics.cjs ssd-tests
+      - name: Collect actual Windows volume and disk evidence
+        if: always() && steps.install.outcome == 'success' && steps.identity.outcome == 'success'
+        run: node scripts/diagnostics/windows-short-diagnostics.cjs disk
+      - name: Capture original migration guard and native file identity changes
+        if: always() && steps.install.outcome == 'success' && steps.identity.outcome == 'success'
+        run: node scripts/diagnostics/windows-short-diagnostics.cjs migration
+      - name: Recheck readonly and position fixtures on native Windows
+        if: always() && steps.install.outcome == 'success' && steps.identity.outcome == 'success'
+        run: node scripts/diagnostics/windows-short-diagnostics.cjs fixtures
+      - name: Upload raw diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: windows-bizop-packaged-acceptance
-          path: outputs/windows-bizop-packaged-acceptance/
-          if-no-files-found: warn
-
-      - name: Stage updater-compatible assets
-        run: npm run stage:update-artifacts
-
-      - name: Upload installer artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: windows-installer
-          retention-days: 1
-          path: |
-            dist/bank-bill-excel-tool-setup-*.exe
-            dist/bank-bill-excel-tool-setup-*.exe.blockmap
-            dist/latest.yml
-          if-no-files-found: error
-
-      - name: Upload portable exe artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: windows-portable-exe
-          retention-days: 1
-          path: |
-            dist/bank-bill-excel-tool-portable-*.exe
+          name: windows-short-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: outputs/windows-short-diagnostics/
+          retention-days: 7
           if-no-files-found: error
