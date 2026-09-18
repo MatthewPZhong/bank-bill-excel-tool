@@ -1,5 +1,6 @@
 'use strict';
 const { readIdentityStatSync } = require('../../../src/main-process/archive-center/filesystem-identity');
+const { createMigrationCloseMetadataFs } = require('../../fixtures/archive-migration-close-metadata');
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -150,6 +151,14 @@ async function createFixture(options = {}) {
 
 function managed(rootDir, relativePath) {
   return path.join(rootDir, ...String(relativePath).split('/'));
+}
+
+function replaceFixtureFile(source, target) {
+  const previous = readIdentityStatSync(fs, target, 'statSync');
+  // Windows 不允许覆盖 readonly 路径；外部所有者先解除其保护，再真实换 inode。
+  if (process.platform === 'win32') fs.chmodSync(target, 0o600);
+  fs.renameSync(source, target);
+  assert.notEqual(readIdentityStatSync(fs, target, 'statSync').ino, previous.ino);
 }
 
 async function createHistoricalDeleteOverlap({ legacyWithoutIdentity = false } = {}) {
@@ -1741,7 +1750,7 @@ for (const mode of ['replacement', 'same-content-replacement', 'source-replaceme
         const replacement = path.join(current.tempDir, 'replacement.xlsx');
         fs.writeFileSync(replacement, mode === 'same-content-replacement'
           ? fs.readFileSync(replacedPath) : '另一个 owner 的文件');
-        fs.renameSync(replacement, replacedPath);
+        replaceFixtureFile(replacement, replacedPath);
       }
       const journal = JSON.parse(fs.readFileSync(current.journalPath));
       if (['legacy-journal', 'legacy-target-map', 'legacy-source-map'].includes(mode)) {
@@ -2257,7 +2266,7 @@ for (const replacement of ['canonical', 'materialized']) {
         const before = readIdentityStatSync(fs, victim, 'statSync');
         const temporary = path.join(current.tempDir, 'other-owner.xlsx');
         fs.writeFileSync(temporary, fs.readFileSync(victim));
-        fs.renameSync(temporary, victim);
+        replaceFixtureFile(temporary, victim);
         replacementIdentity = readIdentityStatSync(fs, victim, 'statSync');
         assert.notEqual(replacementIdentity.ino, before.ino);
       };
@@ -2306,7 +2315,7 @@ test('canonical 在复制后被替换时禁止目录化消费，即使其 SHA �
     const canonical = managed(current.targetRoot, current.artifact.blob.relativePath);
     const replacement = path.join(current.tempDir, 'replacement.xlsx');
     fs.writeFileSync(replacement, fs.readFileSync(canonical));
-    fs.renameSync(replacement, canonical);
+    replaceFixtureFile(replacement, canonical);
   } });
   try {
     await current.manager.initialize();
@@ -2436,7 +2445,7 @@ for (const replacement of ['canonical', 'materialized']) {
         if (!replacementInode && side === 'target' && checkedPath === relativePath) {
           const other = path.join(current.tempDir, 'replacement.xlsx');
           fs.writeFileSync(other, fs.readFileSync(victim));
-          fs.renameSync(other, victim);
+          replaceFixtureFile(other, victim);
           replacementInode = String(readIdentityStatSync(fs, victim, 'statSync').ino);
         }
         return result;
@@ -2548,6 +2557,7 @@ for (const targetKind of ['canonical', 'materialized']) {
 
 test('不支持 hardlink 的文件系统通过 wx 原 fd 写入并刷盘，再以同一 fd 恢复只读模式', async () => {
   let targetRoot;
+  const writableFileMode = process.platform === 'win32' ? 0o666 : 0o600;
   const created = [];
   const events = [];
   const expectedTargets = [];
@@ -2557,7 +2567,7 @@ test('不支持 hardlink 的文件系统通过 wx 原 fd 写入并刷盘，再�
       const handle = await fs.promises.open(filePath, flags, mode);
       if (targetRoot && expectedTargets.includes(filePath) && flags === 'wx') {
         created.push(filePath);
-        assert.equal(readIdentityStatSync(fs, handle.fd, 'fstatSync').mode & 0o777, 0o600);
+        assert.equal(readIdentityStatSync(fs, handle.fd, 'fstatSync').mode & 0o777, writableFileMode);
         const sync = handle.sync.bind(handle);
         const chmod = handle.chmod.bind(handle);
         handle.sync = async () => {
@@ -2584,8 +2594,9 @@ test('不支持 hardlink 的文件系统通过 wx 原 fd 写入并刷盘，再�
     assert.equal(created.length, 2);
     for (const filePath of created) {
       const operations = events.filter((entry) => entry.path === filePath);
-      assert.deepEqual(operations.map((entry) => entry.kind), ['sync', 'chmod', 'sync']);
-      assert.equal(operations[0].mode, 0o600);
+      const needsReadonly = filePath === expectedTargets[1];
+      assert.deepEqual(operations.map((entry) => entry.kind), needsReadonly ? ['sync', 'chmod', 'sync'] : ['sync']);
+      assert.equal(operations[0].mode, writableFileMode);
     }
     const canonical = readIdentityStatSync(fs, managed(current.targetRoot, current.artifact.blob.relativePath), 'statSync');
     const layout = readIdentityStatSync(fs, managed(current.targetRoot, current.artifact.storageRelativePath), 'statSync');
@@ -2596,6 +2607,142 @@ test('不支持 hardlink 的文件系统通过 wx 原 fd 写入并刷盘，再�
     assert.equal(fs.existsSync(current.journalPath), false);
   } finally { current.close(); }
 });
+
+for (const copyFallback of [false, true]) {
+  test(`迁移 ${copyFallback ? 'wx' : 'link'} 原写 fd 关闭时回写 ctime，最终原 inode 快照仍可完成迁移`, async () => {
+    let targetRoot;
+    const { fsImpl, closedWrites } = createMigrationCloseMetadataFs({ targetRoot: () => targetRoot, copyFallback });
+    const current = await createFixture({ fsImpl });
+    targetRoot = path.join(real(current.tempDir), 'target-root');
+    try {
+      await current.manager.initialize(); fs.mkdirSync(current.targetRoot);
+      const result = await current.manager.changeStorageLocation();
+      assert.equal(result.status, 'success', JSON.stringify(result));
+      const artifact = current.repository.getArtifact(current.artifact.id);
+      const target = managed(current.targetRoot, artifact.storageRelativePath);
+      const actual = readIdentityStatSync(fsImpl, target);
+      assert.equal(closedWrites.length, 1);
+      assert.equal(actual.ino, String(closedWrites[0].identity.ino));
+      assert.equal(actual.mode & 0o777, 0o444);
+      assert.equal(actual.nlink, 1);
+      assert.equal(artifact.storageFingerprint.ctimeMs, actual.ctimeMs);
+      assert.equal(fs.readFileSync(target, 'utf8'), 'archive-root-migration-content');
+      assert.equal(fs.existsSync(current.journalPath), false);
+    } finally { current.close(); }
+  });
+}
+
+for (const copyFallback of [false, true]) {
+  for (const mutation of ['replace-on-close', 'mtime-on-close', 'nlink-on-close', 'ctime-after-snapshot', 'ctime-without-chmod']) {
+    test(`迁移 ${copyFallback ? 'wx' : 'link'} close 元数据边界的 ${mutation} 仍拒绝认领并保留两根`, async () => {
+      let current, targetRoot, publishing = false, victim, mutated = false;
+      const metadata = createMigrationCloseMetadataFs({ targetRoot: () => targetRoot, copyFallback,
+        injectUnchangedClose: () => publishing && mutation === 'ctime-without-chmod',
+        afterClose(event) {
+          if (!publishing || mutated || !victim) return;
+          if (mutation === 'ctime-after-snapshot') return;
+          if (mutation === 'ctime-without-chmod') { mutated = true; return; }
+          if (!event.readonlyWritten) return;
+          const before = readIdentityStatSync(fs, victim);
+          if (mutation === 'replace-on-close') {
+            const other = path.join(current.tempDir, 'close-replacement');
+            fs.writeFileSync(other, fs.readFileSync(victim));
+            replaceFixtureFile(other, victim);
+          } else if (mutation === 'mtime-on-close') {
+            fs.utimesSync(victim, before.atimeMs / 1000, before.mtimeMs / 1000 + 1);
+            assert.notEqual(readIdentityStatSync(fs, victim).mtimeMs, before.mtimeMs);
+          } else {
+            fs.linkSync(victim, path.join(current.tempDir, 'external-hardlink'));
+            assert.equal(readIdentityStatSync(fs, victim).nlink, before.nlink + 1);
+          }
+          mutated = true;
+        }
+      });
+      current = await createFixture({ fsImpl: metadata.fsImpl });
+      targetRoot = path.join(real(current.tempDir), 'target-root');
+      try {
+        await current.manager.initialize(); fs.mkdirSync(current.targetRoot);
+        const relativePath = mutation === 'ctime-without-chmod'
+          ? current.artifact.blob.relativePath : current.artifact.storageRelativePath;
+        victim = managed(targetRoot, relativePath);
+        const publish = current.manager._publishMigrationTarget.bind(current.manager);
+        current.manager._publishMigrationTarget = async (source, target, options) => {
+          publishing = target === victim;
+          try {
+            const result = await publish(source, target, options);
+            if (publishing && mutation === 'ctime-after-snapshot') {
+              metadata.advanceCtime(fs.statSync(target, { bigint: true })); mutated = true;
+            }
+            return result;
+          } finally { publishing = false; }
+        };
+        const result = await current.manager.changeStorageLocation();
+        assert.equal(result.status, 'failed', JSON.stringify(result));
+        assert.equal(mutated, true);
+        const diagnostic = result.code + ' ' + result.message;
+        assert.match(diagnostic, /ARCHIVE_STORAGE_DELETE_FILE_CHANGED/);
+        assert.equal(current.database.getSetting(ARCHIVE_STORAGE_ROOT_SETTING_KEY), null);
+        assert.equal(fs.readFileSync(victim, 'utf8'), 'archive-root-migration-content');
+        assert.ok(fs.existsSync(current.sourceRoot));
+        const journal = JSON.parse(fs.readFileSync(current.journalPath));
+        assert.equal(journal.targetFileIdentities[relativePath], undefined);
+        assert.deepEqual(current.repository.getArtifact(current.artifact.id).storageFingerprint, current.artifact.storageFingerprint);
+      } finally { current.close(); }
+    });
+  }
+}
+
+for (const copyFallback of [false, true]) {
+  for (const replacement of ['file', 'parent']) {
+    test(`迁移 ${copyFallback ? 'wx' : 'link'} 见证 fd 打开前 ${replacement} 真实替换，拒绝登记且保留原恢复证据`, async () => {
+      let current, targetRoot, victim, publishing = false, substitutedInode;
+      const { fsImpl } = createMigrationCloseMetadataFs({ targetRoot: () => targetRoot, copyFallback });
+      const open = fsImpl.promises.open;
+      fsImpl.promises.open = async (filePath, ...args) => {
+        if (publishing && filePath === victim && args[0] === 'r' && !substitutedInode) {
+          const before = readIdentityStatSync(fs, victim);
+          if (replacement === 'file') {
+            const other = path.join(current.tempDir, 'witness-replacement');
+            fs.writeFileSync(other, fs.readFileSync(victim));
+            replaceFixtureFile(other, victim);
+          } else {
+            const parent = path.dirname(victim), detached = path.join(current.tempDir, 'detached-parent');
+            const detachedFile = path.join(current.tempDir, 'detached-witness-file');
+            const oldParent = readIdentityStatSync(fs, parent);
+            // Windows 不能移动含打开子文件的目录；先移走原文件，再真实替换空父目录。
+            fs.renameSync(victim, detachedFile);
+            fs.renameSync(parent, detached); fs.mkdirSync(parent);
+            fs.renameSync(detachedFile, victim);
+            assert.notEqual(readIdentityStatSync(fs, parent).ino, oldParent.ino);
+            assert.equal(readIdentityStatSync(fs, victim).ino, before.ino);
+          }
+          substitutedInode = readIdentityStatSync(fs, victim).ino;
+        }
+        return open(filePath, ...args);
+      };
+      current = await createFixture({ fsImpl }); targetRoot = path.join(real(current.tempDir), 'target-root');
+      try {
+        await current.manager.initialize(); fs.mkdirSync(current.targetRoot);
+        victim = managed(targetRoot, current.artifact.storageRelativePath);
+        const publish = current.manager._publishMigrationTarget.bind(current.manager);
+        current.manager._publishMigrationTarget = async (source, target, options) => {
+          publishing = target === victim;
+          try { return await publish(source, target, options); } finally { publishing = false; }
+        };
+        const result = await current.manager.changeStorageLocation();
+        assert.equal(result.status, 'failed', JSON.stringify(result));
+        assert.match(result.code + ' ' + result.message, /ARCHIVE_STORAGE_DELETE_FILE_CHANGED/);
+        assert.ok(substitutedInode);
+        assert.equal(readIdentityStatSync(fs, victim).ino, substitutedInode);
+        assert.equal(fs.readFileSync(victim, 'utf8'), 'archive-root-migration-content');
+        assert.equal(current.database.getSetting(ARCHIVE_STORAGE_ROOT_SETTING_KEY), null);
+        assert.ok(fs.existsSync(current.sourceRoot));
+        const journal = JSON.parse(fs.readFileSync(current.journalPath));
+        assert.equal(journal.targetFileIdentities[current.artifact.storageRelativePath], undefined);
+      } finally { current.close(); }
+    });
+  }
+}
 
 for (const targetKind of ['canonical', 'materialized']) {
   for (const copyFallback of [false, true]) {
@@ -2610,7 +2757,7 @@ for (const targetKind of ['canonical', 'materialized']) {
           const sourcePath = managed(current.sourceRoot, current.artifact.blob.relativePath);
           const replacement = path.join(current.tempDir, 'same-sha-new-owner');
           fs.writeFileSync(replacement, fs.readFileSync(sourcePath));
-          fs.renameSync(replacement, target);
+          replaceFixtureFile(replacement, target);
           substitutedInode = String(readIdentityStatSync(fs, target, 'statSync').ino);
           assert.notEqual(substitutedInode, String(original.ino));
         };

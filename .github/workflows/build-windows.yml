@@ -40,9 +40,15 @@ jobs:
       - name: Collect actual Windows volume and disk evidence
         if: always() && steps.install.outcome == 'success' && steps.identity.outcome == 'success'
         run: node scripts/diagnostics/windows-short-diagnostics.cjs disk
-      - name: Capture original migration guard and native file identity changes
+      - name: Capture migration guard and native file identity changes
         if: always() && steps.install.outcome == 'success' && steps.identity.outcome == 'success'
         run: node scripts/diagnostics/windows-short-diagnostics.cjs migration
+      - name: Verify complete migration suite on native Windows
+        if: always() && steps.install.outcome == 'success' && steps.identity.outcome == 'success'
+        run: node scripts/diagnostics/windows-short-diagnostics.cjs migration-tests
+      - name: Verify migration and deletion integration on native Windows
+        if: always() && steps.install.outcome == 'success' && steps.identity.outcome == 'success'
+        run: node scripts/diagnostics/windows-short-diagnostics.cjs migration-integration
       - name: Recheck readonly and position fixtures on native Windows
         if: always() && steps.install.outcome == 'success' && steps.identity.outcome == 'success'
         run: node scripts/diagnostics/windows-short-diagnostics.cjs fixtures

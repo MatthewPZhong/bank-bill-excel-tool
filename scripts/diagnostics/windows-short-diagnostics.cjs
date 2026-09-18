@@ -28,8 +28,13 @@ function identity() {
     'scripts/diagnostics/windows-short-diagnostics.cjs', 'scripts/diagnostics/probe-migration.cjs',
     'scripts/vcc-financial-op/verify-review-performance.js', 'scripts/vcc-financial-op/performance-disk-baseline.js',
     'scripts/vcc-financial-op/collect-performance-disk.ps1', 'tests/unit/scripts/vcc-review-performance-disk-baseline.test.js',
+    'tests/fixtures/vcc-disk-collector-contract.ps1',
     'tests/fixtures/archive-permanent-delete-readonly-owner.js', 'tests/unit/main-process/position-owned-delete-sources.test.js',
-    'tests/unit/main-process/archive-readonly-owner.test.js', 'src/main-process/archive-center/storage-root-manager.js'];
+    'tests/unit/main-process/archive-readonly-owner.test.js', 'tests/unit/main-process/archive-storage-root-migration.test.js',
+    'scripts/integration/archive-center-permanent-delete.js', 'tests/fixtures/archive-permanent-delete-migration.js',
+    'tests/fixtures/archive-migration-close-metadata.js',
+    'src/main-process/archive-center/storage-root-manager.js', 'src/main-process/archive-center/archive-service.js',
+    'tests/unit/main-process/archive-service.test.js'];
   const productionDiffAgainstBase = git(['diff', '--name-only', base, '--', 'src', 'assets', 'package.json', 'package-lock.json']);
   const record = { capturedAt: new Date().toISOString(), head: git(['rev-parse', 'HEAD']), base,
     workingTree: git(['status', '--short']), productionDiffAgainstBase, versions: process.versions,
@@ -38,7 +43,11 @@ function identity() {
     runner: process.env.RUNNER_NAME || null, imageOS: process.env.ImageOS || null, imageVersion: process.env.ImageVersion || null,
     sourceSha256: Object.fromEntries(names.map((name) => [name, crypto.createHash('sha256').update(fs.readFileSync(path.join(root, name))).digest('hex')])) };
   write('identity.json', record); console.log(JSON.stringify(record, null, 2));
-  if (productionDiffAgainstBase) throw new Error('诊断生产源码或依赖锁与指定基线不一致。');
+  const allowedProductionChanges = ['src/main-process/archive-center/archive-service.js',
+    'src/main-process/archive-center/storage-root-manager.js'];
+  if (JSON.stringify(productionDiffAgainstBase.split('\n').sort()) !== JSON.stringify(allowedProductionChanges)) {
+    throw new Error('第二轮诊断只允许指定迁移及陈旧目录清单修复，其他生产源码或依赖必须保持原基线。');
+  }
 }
 function disk() {
   if (process.platform !== 'win32') throw new Error('原生磁盘诊断只能在实际 Windows 上执行。');
@@ -89,13 +98,17 @@ function migration() {
 }
 function main() {
   const mode = process.argv[2];
-  if (!['identity', 'ssd-tests', 'disk', 'migration', 'fixtures'].includes(mode)) {
-    throw new Error('Usage: node scripts/diagnostics/windows-short-diagnostics.cjs identity|ssd-tests|disk|migration|fixtures [OUTPUT_DIRECTORY]');
+  if (!['identity', 'ssd-tests', 'disk', 'migration', 'migration-tests', 'migration-integration', 'fixtures'].includes(mode)) {
+    throw new Error('Usage: node scripts/diagnostics/windows-short-diagnostics.cjs identity|ssd-tests|disk|migration|migration-tests|migration-integration|fixtures [OUTPUT_DIRECTORY]');
   }
   fs.mkdirSync(output, { recursive: true });
   if (mode === 'identity') identity();
   else if (mode === 'disk') disk();
   else if (mode === 'migration') migration();
+  else if (mode === 'migration-tests') requireSuccessfulProcess(runNode('migration-tests', ['--test', '--test-reporter=tap',
+    'tests/unit/main-process/archive-storage-root-migration.test.js', 'tests/unit/main-process/archive-service.test.js'], 600000));
+  else if (mode === 'migration-integration') requireSuccessfulProcess(runNode('migration-integration', [
+    'scripts/integration/archive-center-permanent-delete.js'], 300000));
   else if (mode === 'ssd-tests') requireSuccessfulProcess(runNode('ssd-tests', ['--test', '--test-reporter=tap', 'tests/unit/scripts/vcc-review-performance-disk-baseline.test.js']));
   else requireSuccessfulProcess(runNode('platform-fixtures', ['--test', '--test-reporter=tap',
     'tests/unit/main-process/archive-readonly-owner.test.js', 'tests/unit/main-process/position-owned-delete-sources.test.js']));

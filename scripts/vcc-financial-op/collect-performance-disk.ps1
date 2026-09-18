@@ -16,27 +16,46 @@ $evidence = [ordered]@{
   volumes = @(); partitions = @(); disks = @(); osDiskInventory = @()
   physicalDisks = @(); virtualDisks = @(); error = $null
 }
+function Read-CimUInt16Evidence($instance, [string]$name) {
+  # Storage cmdlets expose display strings such as SAS/SSD through type data.
+  # Read the underlying CIM value without parsing or guessing from that display.
+  $property = $instance.CimInstanceProperties[$name]
+  $rawValue = if ($null -ne $property) { $property.Value } else { $null }
+  $cimType = if ($null -ne $property) { [string]$property.CimType } else { $null }
+  $valueType = if ($null -ne $rawValue) { $rawValue.GetType().FullName } else { $null }
+  $value = if ($cimType -eq 'UInt16' -and $rawValue -is [UInt16]) { [int]$rawValue } else { $null }
+  [ordered]@{
+    value = $value; rawValue = $rawValue; cimType = $cimType; valueType = $valueType
+    present = ($null -ne $property); displayValue = [string]$instance.$name
+  }
+}
 function Read-DiskEvidence($disk) {
+  $enums = [ordered]@{
+    BusType = Read-CimUInt16Evidence $disk 'BusType'
+    PartitionStyle = Read-CimUInt16Evidence $disk 'PartitionStyle'
+    UniqueIdFormat = Read-CimUInt16Evidence $disk 'UniqueIdFormat'
+  }
   [ordered]@{
     ObjectId = $disk.ObjectId; Number = $disk.Number; Path = $disk.Path
-    UniqueId = $disk.UniqueId; UniqueIdFormat = $disk.UniqueIdFormat
+    UniqueId = $disk.UniqueId; UniqueIdFormat = $enums.UniqueIdFormat.value
     SerialNumber = $disk.SerialNumber; Size = [string]$disk.Size
-    BusType = [int]$disk.BusType; Location = $disk.Location
-    PartitionStyle = [int]$disk.PartitionStyle
+    BusType = $enums.BusType.value; Location = $disk.Location
+    PartitionStyle = $enums.PartitionStyle.value; CimEnums = $enums
     Model = $disk.Model; Manufacturer = $disk.Manufacturer
     IsOffline = $disk.IsOffline; IsClustered = $disk.IsClustered
   }
 }
 try {
   $item = Get-Item -LiteralPath $ProbePath -Force
-  if ($item.PSIsContainer) { throw 'PF disk probe must be the existing case config file.' }
+  if ($item -isnot [IO.FileInfo]) { throw 'PF disk probe must be the existing case config file.' }
   $evidence.probePath = $item.FullName
   while ($null -ne $item) {
     $evidence.pathAncestors += [ordered]@{
       path = $item.FullName
       reparsePoint = [bool]($item.Attributes -band [IO.FileAttributes]::ReparsePoint)
     }
-    if ($item.PSIsContainer) { $item = $item.Parent } else { $item = $item.Directory }
+    # Directory/Parent return native DirectoryInfo without provider PSIsContainer.
+    if ($item -is [IO.DirectoryInfo]) { $item = $item.Parent } else { $item = $item.Directory }
   }
   try {
     $computer = Get-CimInstance -ClassName Win32_ComputerSystem
@@ -55,11 +74,13 @@ try {
   foreach ($volume in $volumes) {
     $partitions = @(Get-Partition -Volume $volume)
     foreach ($partition in $partitions) {
+      $mbrType = Read-CimUInt16Evidence $partition 'MbrType'
       $evidence.partitions += [ordered]@{
         ObjectId = $partition.ObjectId; VolumeUniqueId = $volume.UniqueId
         DiskNumber = $partition.DiskNumber; PartitionNumber = $partition.PartitionNumber
         Type = [string]$partition.Type; AccessPaths = @($partition.AccessPaths)
-        MbrType = [int]$partition.MbrType; GptType = $partition.GptType
+        MbrType = $mbrType.value; GptType = $partition.GptType
+        CimEnums = [ordered]@{ MbrType = $mbrType }
         Offset = [string]$partition.Offset; Size = [string]$partition.Size
       }
       foreach ($disk in @(Get-Disk -Partition $partition)) {
@@ -70,10 +91,15 @@ try {
   }
   $evidence.osDiskInventory = @(Get-Disk | ForEach-Object { Read-DiskEvidence $_ })
   $evidence.physicalDisks = @(Get-PhysicalDisk | ForEach-Object {
+    $enums = [ordered]@{
+      BusType = Read-CimUInt16Evidence $_ 'BusType'
+      MediaType = Read-CimUInt16Evidence $_ 'MediaType'
+      UniqueIdFormat = Read-CimUInt16Evidence $_ 'UniqueIdFormat'
+    }
     [ordered]@{ ObjectId = $_.ObjectId; DeviceId = $_.DeviceId
-      UniqueId = $_.UniqueId; UniqueIdFormat = $_.UniqueIdFormat
+      UniqueId = $_.UniqueId; UniqueIdFormat = $enums.UniqueIdFormat.value
       SerialNumber = $_.SerialNumber; Size = [string]$_.Size
-      BusType = [int]$_.BusType; MediaType = [int]$_.MediaType
+      BusType = $enums.BusType.value; MediaType = $enums.MediaType.value; CimEnums = $enums
       Model = $_.Model; Manufacturer = $_.Manufacturer; PhysicalLocation = $_.PhysicalLocation
       IsPartial = $_.IsPartial; VirtualDiskFootprint = [string]$_.VirtualDiskFootprint }
   })

@@ -699,18 +699,35 @@ class ArchiveService {
     const relativePrefix = `${BLOB_ROOT_PARTS.join('/')}/${prefix}`;
     await this._assertManagedFilePath(`${relativePrefix}/.guard`, { includeLeaf: false });
     const prefixDir = this._resolveManagedRelative(relativePrefix);
-    const stat = await readIdentityStat(this.fs, prefixDir);
-    if (!stat.isDirectory() || stat.isSymbolicLink()) {
-      throw new ArchiveOperationError(
-        'ARCHIVE_BLOB_PATH_INVALID',
-        '存档 Blob 分片目录类型无效'
-      );
+    let names;
+    try {
+      const stat = await readIdentityStat(this.fs, prefixDir);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) {
+        throw new ArchiveOperationError(
+          'ARCHIVE_BLOB_PATH_INVALID',
+          '存档 Blob 分片目录类型无效'
+        );
+      }
+      names = await this.fs.promises.readdir(prefixDir);
+    } catch (error) {
+      if (!error || error.code !== 'ENOENT') throw error;
+      // 启动时冻结的分片清单可能已被正常删除清空；只读扫描允许其消失，
+      // 但须重新核对根可用且父链无链接，不能把离线或路径替换当作空目录。
+      await this._assertManagedFilePath(`${relativePrefix}/.guard`, { includeLeaf: false });
+      try {
+        await readIdentityStat(this.fs, prefixDir);
+      } catch (confirmedMissing) {
+        if (!confirmedMissing || confirmedMissing.code !== 'ENOENT') throw confirmedMissing;
+        await this._assertManagedFilePath(`${relativePrefix}/.guard`, { includeLeaf: false });
+        return { removed: 0, reported: 0, pathHashes: [], failures: [] };
+      }
+      throw new ArchiveOperationError('ARCHIVE_BLOB_PATH_INVALID',
+        '存档 Blob 分片在扫描期间已被替换，请重试');
     }
     const pendingCleanupPaths = new Set(
       this.repository.listCleanupJobs()
         .flatMap((job) => job.releasedBlobs.map((blob) => blob.relativePath))
     );
-    const names = await this.fs.promises.readdir(prefixDir);
     let reported = 0;
     const pathHashes = [];
     const failures = [];

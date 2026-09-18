@@ -2,8 +2,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const vm = require('node:vm');
+const { execFileSync } = require('node:child_process');
 const { createRequire } = require('node:module');
 const { collectDiskBaseline, evaluateDiskEvidence } = require('../../../scripts/vcc-financial-op/performance-disk-baseline');
 
@@ -152,4 +154,48 @@ test('PowerShell 以独立 argv 接收现有 config 路径，失败和无效 JSO
   assert.equal(observed.args.includes('-Command'), false); assert.equal(observed.options.timeout, 30000);
   assert.equal(result.error, 'query unavailable'); assert.equal(result.identityProof.status, 'NOT_RUN');
   assert.equal(collectDiskBaseline(directory, { execute: () => '{broken' }).identityProof.status, 'NOT_RUN');
+});
+
+test('Windows PowerShell 采集器使用原始 CIM 枚举并完整遍历真实文件祖先', {
+  skip: process.platform !== 'win32' && '需要 Windows PowerShell；受控 Storage 对象不代替真实 CIM 查询', timeout: 30000
+}, () => {
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-disk-collector-')));
+  try {
+    const nested = path.join(root, 'nested', 'case'); fs.mkdirSync(nested, { recursive: true });
+    const config = path.join(nested, 'config.json'); fs.writeFileSync(config, '{}');
+    const output = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-File',
+      path.resolve(__dirname, '../../fixtures/vcc-disk-collector-contract.ps1'), '-CollectorPath',
+      path.resolve(__dirname, '../../../scripts/vcc-financial-op/collect-performance-disk.ps1'), '-ProbePath', config
+    ], { encoding: 'utf8', timeout: 25000, maxBuffer: 4 * 1024 * 1024 });
+    const cases = JSON.parse(output.replace(/^\uFEFF/, ''));
+    assert.deepEqual(cases.map((item) => item.case), ['sas-ssd', 'unknown-media', 'string-media', 'missing-media', 'null-mbr', 'wrong-runtime-type']);
+    const expectedAncestors = [];
+    for (let current = config; ; current = path.dirname(current)) {
+      expectedAncestors.push(current); if (path.dirname(current) === current) break;
+    }
+    for (const { evidence: raw } of cases) {
+      assert.equal(raw.error, null); assert.equal(raw.probePath, config);
+      assert.deepEqual(raw.pathAncestors, expectedAncestors.map((value) => ({ path: value, reparsePoint: false })));
+      assert.equal(raw.disks[0].BusType, 10); assert.equal(raw.osDiskInventory[0].BusType, 10);
+      assert.equal(raw.disks[0].UniqueIdFormat, 3); assert.equal(raw.physicalDisks[0].UniqueIdFormat, 3);
+      assert.deepEqual(raw.disks[0].CimEnums.BusType, { value: 10, rawValue: 10, cimType: 'UInt16',
+        valueType: 'System.UInt16', present: true, displayValue: 'SAS' });
+      assert.equal(raw.disks[0].UniqueId, raw.physicalDisks[0].UniqueId);
+      assert.equal(raw.physicalDisks[0].DeviceId, '7'); assert.equal(raw.disks[0].Number, 1);
+    }
+    const byCase = Object.fromEntries(cases.map((item) => [item.case, item.evidence]));
+    assert.equal(evaluateDiskEvidence(byCase['sas-ssd'], config).status, 'PASS');
+    assert.equal(byCase['sas-ssd'].physicalDisks[0].MediaType, 4);
+    assert.equal(byCase['unknown-media'].physicalDisks[0].MediaType, 0);
+    for (const label of ['unknown-media', 'string-media', 'missing-media', 'wrong-runtime-type']) {
+      assert.equal(evaluateDiskEvidence(byCase[label], config).status, 'NOT_RUN', label);
+      if (label !== 'unknown-media') assert.equal(byCase[label].physicalDisks[0].MediaType, null, label);
+    }
+    assert.equal(byCase['string-media'].physicalDisks[0].CimEnums.MediaType.rawValue, 'SSD');
+    assert.equal(byCase['missing-media'].physicalDisks[0].CimEnums.MediaType.present, false);
+    assert.equal(byCase['wrong-runtime-type'].physicalDisks[0].CimEnums.MediaType.valueType, 'System.String');
+    assert.equal(byCase['null-mbr'].partitions[0].MbrType, null);
+    assert.equal(byCase['null-mbr'].partitions[0].CimEnums.MbrType.rawValue, null);
+    assert.equal(evaluateDiskEvidence(byCase['null-mbr'], config).status, 'PASS');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

@@ -2442,6 +2442,84 @@ test('后台筛查保留无 durable owner 的 staging/只读副本和 SHA 形状
   }
 });
 
+for (const phase of ['before-scan', 'before-readdir']) {
+  test(`后台孤儿目录清单在 ${phase} 过期后可正常暂停`, async () => {
+    let prefixDir;
+    let armed = false;
+    const fsImpl = { ...fs, promises: { ...fs.promises,
+      async readdir(directory, ...args) {
+        if (armed && directory === prefixDir) {
+          armed = false;
+          fs.rmdirSync(directory);
+        }
+        return fs.promises.readdir(directory, ...args);
+      }
+    } };
+    const fixture = createFixture({ fsImpl });
+    try {
+      prefixDir = path.join(fixture.service.blobRoot, 'ab');
+      fs.mkdirSync(prefixDir, { recursive: true });
+      const initialized = await fixture.service.initialize({ startBackgroundMaterialization: false });
+      assert.deepEqual(initialized.consistency.orphanBlobPrefixes, ['ab']);
+      if (phase === 'before-scan') fs.rmdirSync(prefixDir);
+      else armed = true;
+      await fixture.service.pauseBackgroundMaterialization();
+      assert.equal(fs.existsSync(prefixDir), false);
+      assert.equal(fixture.service.orphanBlobPrefixCursor, 1);
+      assert.equal(fixture.repository.listBlobs().length, 0);
+    } finally { fixture.close(); }
+  });
+}
+
+for (const failure of ['offline-root', 'denied-readdir', 'symlink-prefix', 'offline-on-readdir',
+  'symlink-on-readdir', 'file-on-readdir', 'directory-on-readdir']) {
+  test(`后台孤儿目录清单过期处理仍拒绝 ${failure}`, async () => {
+    let prefixDir;
+    let external;
+    let armed = false;
+    let fixture;
+    const fsImpl = { ...fs, promises: { ...fs.promises,
+      async readdir(directory, ...args) {
+        if (armed && directory === prefixDir) {
+          if (failure === 'denied-readdir') throw Object.assign(new Error('隔离权限错误'), { code: 'EACCES' });
+          armed = false;
+          if (failure === 'offline-on-readdir') fs.rmSync(fixture.rootDir, { recursive: true });
+          else {
+            fs.rmdirSync(prefixDir);
+            if (failure === 'file-on-readdir') fs.writeFileSync(prefixDir, '替代分片文件');
+            else if (failure === 'directory-on-readdir') fs.mkdirSync(prefixDir);
+            else fs.symlinkSync(external, prefixDir, process.platform === 'win32' ? 'junction' : 'dir');
+          }
+          throw Object.assign(new Error('隔离目录枚举失效'), { code: 'ENOENT' });
+        }
+        return fs.promises.readdir(directory, ...args);
+      }
+    } };
+    fixture = createFixture({ fsImpl });
+    try {
+      prefixDir = path.join(fixture.service.blobRoot, 'ab');
+      fs.mkdirSync(prefixDir, { recursive: true });
+      external = path.join(fixture.tempDir, 'external');
+      fs.mkdirSync(external);
+      const sentinel = path.join(external, 'ab' + '0'.repeat(62));
+      fs.writeFileSync(sentinel, '未归属外部文件');
+      await fixture.service.initialize({ startBackgroundMaterialization: false });
+      if (failure === 'offline-root') fs.rmSync(fixture.rootDir, { recursive: true });
+      else if (failure === 'symlink-prefix') {
+        fs.rmdirSync(prefixDir);
+        fs.symlinkSync(external, prefixDir, process.platform === 'win32' ? 'junction' : 'dir');
+      } else armed = true;
+      const code = failure.startsWith('offline') ? 'ARCHIVE_STORAGE_ROOT_UNAVAILABLE'
+        : failure.startsWith('symlink') ? 'ARCHIVE_PATH_SYMLINK_REJECTED'
+          : failure === 'denied-readdir' ? 'EACCES' : 'ARCHIVE_BLOB_PATH_INVALID';
+      await assert.rejects(fixture.service.pauseBackgroundMaterialization(), { code });
+      assert.equal(fixture.service.orphanBlobPrefixCursor, 0);
+      assert.equal(fs.readFileSync(sentinel, 'utf8'), '未归属外部文件');
+      if (failure === 'file-on-readdir') assert.equal(fs.readFileSync(prefixDir, 'utf8'), '替代分片文件');
+    } finally { fixture.close(); }
+  });
+}
+
 test('后台指纹快路仅对新指纹候选按变化做 SHA，旧 NULL same-size 不读不回填', async () => {
   const fixture = createFixture();
   try {
