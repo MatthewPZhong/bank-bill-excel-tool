@@ -239,51 +239,36 @@ function inspectResultTemplateWorkbook(workbook, { templatePath = '' } = {}) {
   };
 }
 
-function statIdentity(stat) {
-  return [
-    stat.dev, stat.ino, stat.size,
-    stat.mtimeMs, stat.ctimeMs
-  ].join(':');
-}
-
 async function readStableTemplate(templatePath) {
-  let before;
   try {
-    before = await fs.promises.stat(templatePath);
-  } catch (error) {
-    if (error && error.code === 'ENOENT') {
-      throw new ResultTemplateContractError(
-        'result-template-missing',
-        `未找到 ${RESULT_TEMPLATE_FILE_NAME}，已停止导出。`,
-        { templatePath, detailLines: [templatePath] }
-      );
+    // ASAR 的 Stats 身份是虚拟值；固定模板的身份由实际读取的字节决定。
+    const stat = await fs.promises.stat(templatePath);
+    if (!stat.isFile()) {
+      throw Object.assign(new Error('目标不是文件'), { code: 'EISDIR' });
     }
-    throw error;
-  }
-  if (!before.isFile()) {
+    const buffer = await fs.promises.readFile(templatePath);
+    return { buffer, hash: sha256(buffer) };
+  } catch (error) {
+    const missing = ['ENOENT', 'ENOTDIR', 'EISDIR'].includes(error.code);
     throw new ResultTemplateContractError(
-      'result-template-missing',
-      `未找到 ${RESULT_TEMPLATE_FILE_NAME}，已停止导出。`,
-      { templatePath, detailLines: [templatePath] }
+      missing ? 'result-template-missing' : 'result-template-read-failed',
+      missing
+        ? `未找到 ${RESULT_TEMPLATE_FILE_NAME}，已停止导出。`
+        : `无法读取 ${RESULT_TEMPLATE_FILE_NAME}，已停止导出。`,
+      { templatePath, detailLines: [templatePath, error.message] }
     );
   }
-  const buffer = await fs.promises.readFile(templatePath);
-  const after = await fs.promises.stat(templatePath);
-  if (statIdentity(before) !== statIdentity(after)) {
-    contractMismatch(templatePath, ['读取期间模板文件发生变化，请重试']);
-  }
-  return { buffer, identity: statIdentity(after), hash: sha256(buffer) };
 }
 
 async function loadResultTemplateContract({ templatePath } = {}) {
   const resolvedPath = path.resolve(String(templatePath || ''));
-  const { buffer, identity, hash } = await readStableTemplate(resolvedPath);
+  const { buffer, hash } = await readStableTemplate(resolvedPath);
   if (hash !== RESULT_TEMPLATE_FILE_SHA256) {
     contractMismatch(resolvedPath, [
       `模板 SHA-256 不一致：期望 ${RESULT_TEMPLATE_FILE_SHA256}，实际 ${hash}`
     ]);
   }
-  const cacheKey = `${resolvedPath}:${identity}:${hash}`;
+  const cacheKey = `${resolvedPath}:${hash}`;
   const cached = contractCache.get(cacheKey);
   if (cached) return deepClone(cached);
 
@@ -297,8 +282,7 @@ async function loadResultTemplateContract({ templatePath } = {}) {
   const cachedContract = {
     ...contract,
     templatePath: resolvedPath,
-    fileSha256: hash,
-    statIdentity: identity
+    fileSha256: hash
   };
   contractCache.clear();
   contractCache.set(cacheKey, deepClone(cachedContract));

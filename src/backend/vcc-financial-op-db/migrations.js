@@ -19,6 +19,7 @@ const {
 } = require('./state-model');
 const {
   assertEmptyVccStorageForUpgrade,
+  assertVccStorageContract,
   ensureVccStorageSideTables,
   getVccStorageContractVersion,
   installVccStorageWriteGuards,
@@ -643,13 +644,17 @@ function ensureVccFinancialOpStateModelSupport(db) {
 }
 
 function ensureVccFinancialOpTablesSupport(db, options = {}) {
-  // contract-v2 的触发器调用连接本地能力函数。必须先注册再执行任何
-  // VCC DML；3.1.9 连接没有该函数，因此只能读、不能降级写。
-  registerVccStorageWriteCapability(db);
   const hasSettings = Boolean(db.prepare(`
     SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'app_settings'
   `).get());
   const storageContractVersion = hasSettings ? getVccStorageContractVersion(db) : 1;
+  if (storageContractVersion === 2) {
+    throw Object.assign(new Error('VCC 存储合同 v2 需先通过专用迁移连接升级到 v3'), {
+      code: 'vcc-storage-upgrade-required'
+    });
+  }
+  if (storageContractVersion === 3) assertVccStorageContract(db);
+  registerVccStorageWriteCapability(db);
   const shouldAutoUpgradeEmptyV1 = options.autoUpgradeEmptyV1 === true
     && hasSettings
     && storageContractVersion === 1;

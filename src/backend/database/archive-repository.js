@@ -2124,6 +2124,32 @@ class ArchiveRepository {
     `).get(Number(batchId), key));
   }
 
+  persistInputArtifactMetadata(batchId, taskRunId, entries) {
+    return withWriteTransaction(this.db, () => {
+      const batch = this.getBatch(batchId);
+      if (!batch || batch.taskRunId !== taskRunId) throw new Error('输入成员清单的任务身份不符');
+      const seen = new Set();
+      return entries.map((entry) => {
+        const artifact = this.getArtifactByKey(batchId, entry.artifactKey);
+        if (!artifact || artifact.direction !== 'input' || artifact.role !== 'input'
+            || artifact.sourceOperation !== entry.sourceOperation || artifact.originalName !== entry.originalName || seen.has(artifact.id)) {
+          throw new Error('输入成员清单与持久 manifest 身份不符');
+        }
+        seen.add(artifact.id);
+        const metadataJson = normalizeMetadata(entry.metadata);
+        const previous = normalizeMetadata(artifact.metadata);
+        if (previous !== '{}' && previous !== metadataJson) throw new Error('输入成员清单已经冻结，不能改写');
+        if (previous === '{}' && metadataJson !== '{}') {
+          this.db.prepare('UPDATE archive_artifacts SET metadata_json = ?, updated_at = ? WHERE id = ?')
+            .run(metadataJson, this._timestamp(), artifact.id);
+        }
+        const updated = this.getArtifact(artifact.id);
+        if (normalizeMetadata(updated.metadata) !== metadataJson) throw new Error('输入成员清单回读不符');
+        return updated;
+      });
+    });
+  }
+
   getBatchDetail(batchId) {
     const batch = this.getBatch(batchId);
     if (!batch) return null;

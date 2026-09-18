@@ -86,7 +86,7 @@
   - 必跑：worker-batch-context、TaskLifecycle、Acquiring resume、Position import、VCC worker、Pending 与工具箱 worker/dispatch 聚焦测试 + `npm run smoke`
 
 ### `VCC_STORAGE_CONTRACT_VERSION` / `registerVccStorageWriteCapability` / `installVccStorageWriteGuards` / `setVccStorageContractVersion`（v3.1.10 新增 Critical）
-- 定义：`src/backend/vcc-financial-op-db/storage-contract.js`；当前持久合同版本为 `2`，连接能力函数为 `vcc_storage_write_capability_v2()`，guard trigger 前缀为 `vcc_storage_contract_v2_guard_`
+- 定义：`src/backend/vcc-financial-op-db/storage-contract.js`；当前持久合同版本为 `3`，连接能力函数为 `vcc_storage_write_capability_v3()`，guard trigger 前缀为 `vcc_storage_contract_v3_guard_`（v3.2.9：v2→v3 使用专用迁移连接，成功或失败均关闭；业务连接仅注册 v3，v1 COW 保留显式 v2 中间阶段）
 - 关联功能：v3.1.10 精简 VCC 表结构、旧版降级写阻断、generic/dedicated worker 首写能力、候选库 marker 与 23 张 `vcc_fin_op_*` 表 I/U/D 保护
 - 变更 review 要点：
   - marker 与 exact trigger 安装必须在同一 SAVEPOINT 原子边界；任何表缺 trigger、错表或非 canonical SQL 都必须失败关闭

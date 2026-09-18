@@ -1,0 +1,12 @@
+(node:85178) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+BASELINE_AUDIT {"validated":true,"snapshotCount":1,"legacyRawE2":"","originalError":{"t":"e","v":7,"w":"#DIV/0!"},"contentHashEqual":true,"artifactVersion":1,"sourceSha256":"1da6e1308f1343018bb33b1af3d9d795e44e408e5a4315001257198802490b19"}
+✔ legacy single-Sheet system error, bound v1 artifact, exact baseline raw audit should remain exportable (171.338208ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 342.453167

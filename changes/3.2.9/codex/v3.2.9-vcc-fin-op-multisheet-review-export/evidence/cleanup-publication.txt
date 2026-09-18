@@ -1,0 +1,40 @@
+(node:33214) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:33214) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:33214) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ IPC handler → Service → 两阶段真实 Worker → 原子保存；无业务 DML、不创建正式批次 (518.719625ms)
+✔ 取消另存为不启动 Worker；保存期间修改结果会拦截旧 revision (63.954333ms)
+(node:33214) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:33214) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:33214) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:33214) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:33214) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:33214) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ Worker 后结果过期或目标发生变化，不替换目标 (1459.193708ms)
+(node:33214) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 取消、强制退出及服务关闭均等待 Worker 退出和清理，不执行导入恢复 (345.619959ms)
+(node:33214) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 拒绝原始输入、受管目录和任意 renderer 输出路径 (213.038ms)
+✔ 取消后的清理失败必须显示错误与残留路径，不能返回已取消掩盖残留文件 (90.429417ms)
+(node:33215) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 发布失败恢复旧目标；恢复失败保留两份文件并给出恢复路径 (9.374625ms)
+✔ 最后 freshness 检查与 rename 不让出微任务；异步检查、候选或目标变化不能发布 (6.273084ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2855.418

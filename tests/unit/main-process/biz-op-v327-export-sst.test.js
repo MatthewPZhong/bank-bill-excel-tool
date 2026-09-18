@@ -37,16 +37,17 @@ async function sourceFor(f, outputKind, objectId) {
   return freezeExportSource({ ...f.module, getArchiveService: () => f.service, outputKind, objectId });
 }
 function observeSstCleanup(t, parent, prefix) {
-  const original = fs.promises.rm; const removed = [];
-  fs.promises.rm = async function (filename, options) {
-    if (path.basename(String(filename)).startsWith(prefix)) {
-      assert.equal(path.dirname(String(filename)), parent);
-      assert.ok(fs.statSync(path.join(filename, 'sst.bin')).size > 0);
-      removed.push(String(filename));
+  const original = fs.promises.unlink; const removed = [];
+  fs.promises.unlink = async function (filename) {
+    const directory = path.dirname(String(filename));
+    if (path.basename(directory).startsWith(prefix) && path.basename(String(filename)) === 'sst.bin') {
+      assert.equal(path.dirname(directory), parent);
+      assert.ok(fs.statSync(filename).size > 0);
+      removed.push(directory);
     }
-    return original.call(this, filename, options);
+    return original.call(this, filename);
   };
-  t.after(() => { fs.promises.rm = original; });
+  t.after(() => { fs.promises.unlink = original; });
   return removed;
 }
 

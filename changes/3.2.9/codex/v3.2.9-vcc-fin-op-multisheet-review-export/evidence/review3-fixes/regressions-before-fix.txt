@@ -1,0 +1,395 @@
+Error: ENOENT: no such file or directory, open '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-Ljzumy/sacrificial-cwd/sentinel'
+    at Object.readFileSync (node:fs:439:20)
+    at [eval]:8:21 {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-Ljzumy/sacrificial-cwd/sentinel'
+}
+Error: ENOENT: no such file or directory, open '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-EDEf8T/sacrificial-cwd/sentinel'
+    at Object.readFileSync (node:fs:439:20)
+    at [eval]:8:21 {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-EDEf8T/sacrificial-cwd/sentinel'
+}
+Error: ENOENT: no such file or directory, open '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-h4jELZ/sacrificial-cwd/sentinel'
+    at Object.readFileSync (node:fs:439:20)
+    at [eval]:8:21 {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-h4jELZ/sacrificial-cwd/sentinel'
+}
+AssertionError [ERR_ASSERTION]: The input did not match the regular expression /未提供临时目录/. Input:
+
+''
+
+    at [eval]:9:12 {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: '',
+  expected: /未提供临时目录/,
+  operator: 'match',
+  diff: 'simple'
+}
+AssertionError [ERR_ASSERTION]: Expected "actual" to be strictly unequal to:
+
+'/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-ZoW67k/sacrificial-cwd'
+    at [eval]:9:53
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5) {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-ZoW67k/sacrificial-cwd',
+  expected: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-ZoW67k/sacrificial-cwd',
+  operator: 'notStrictEqual',
+  diff: 'simple'
+}
+▶ 缺省/空 SST 目录不能回退到 cwd，溢出时拒绝并保留无关文件
+  ✖ undefined (39.756542ms)
+  ✖ null (34.754583ms)
+  ✖ '' (35.729458ms)
+  ✖ ' ' (38.119042ms)
+✖ 缺省/空 SST 目录不能回退到 cwd，溢出时拒绝并保留无关文件 (148.871959ms)
+✖ 共享 Rich Reader 缺省目录逐任务独立，关闭一个不破坏另一个或 cwd (53.451416ms)
+✖ 已存在的显式 SST 目录及 VCC Reader 失败清理均不得覆盖/删除用户文件 (15.1235ms)
+✖ 同一路径第二个读取任务拒绝接管，首个 SST 仍能读取和清理 (8.104208ms)
+✖ 部分 spill 创建失败也关闭已打开句柄并清理本次目录 (2.13875ms)
+▶ SST 解析失败和取消在溢出后清理私有目录
+  ✔ parse (7.142875ms)
+  ✔ cancel (12.451292ms)
+✔ SST 解析失败和取消在溢出后清理私有目录 (19.822916ms)
+✖ SST 目录出现无关文件时不递归删除，清理失败重复 close 仍报错 (2.002125ms)
+✖ SST 目录被替换时停止清理，显式保留模式仍保留自己的缓存 (2.245458ms)
+(node:83982) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✖ v1 绑定原件的系统 OP 错误/错误公式缓存按旧空审计核验，附页输出原始错误码文本 (125.062458ms)
+▶ 旧错误兼容不放过非空审计或普通文本不符
+  ✔ raw (86.274292ms)
+  ✔ display (81.290791ms)
+  ✔ ordinary-text (73.246208ms)
+✔ 旧错误兼容不放过非空审计或普通文本不符 (241.193833ms)
+▶ 历史兼容仍拒绝主体、币种、部门、账期和余额错误，原件哈希损坏也失败
+  ✔ 主体 (72.1285ms)
+  ✔ 币种 (69.92025ms)
+  ✔ 业务部门 (69.02ms)
+  ✔ 账单日期 (70.187792ms)
+  ✔ 财务余额 (68.066458ms)
+  ✔ hash (66.988291ms)
+✔ 历史兼容仍拒绝主体、币种、部门、账期和余额错误，原件哈希损坏也失败 (416.828833ms)
+✔ v2 系统 OP 原生错误按新审计严格核验，不能套用 v1 空审计兼容 (150.866ms)
+ℹ tests 27
+ℹ suites 0
+ℹ pass 15
+ℹ fail 12
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1096.255625
+
+✖ failing tests:
+
+test at tests/unit/backend/shared-strings-ownership.test.js:38:67
+✖ undefined (39.756542ms)
+  Error: Command failed: /Users/pzhong/.nvm/versions/node/v24.13.0/bin/node -e const fs=require('node:fs'); const assert=require('node:assert/strict');
+      const {AdaptiveSharedStringsProvider}=require("/private/tmp/vcc-review3-20260918-03pkhge6/src/backend/position-reconciliation-import/shared-strings-provider.js");
+      const {openRichWorkbook}=require("/private/tmp/vcc-review3-20260918-03pkhge6/src/backend/xlsx-rich-reader.js");
+      const file="/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-Ljzumy/source.xlsx"; const cwd=process.cwd();
+      (async()=>{
+      const provider=new AdaptiveSharedStringsProvider({tempRoot:undefined,memoryBudgetBytes:1});
+      let error; try {provider.append('spill');} catch(e) {error=e;} finally {await provider.close();}
+      assert.equal(fs.readFileSync(cwd+'/sentinel','utf8'),'retain');
+      assert.match(error?.message || '', /未提供临时目录/);
+    })().catch(error=>{console.error(error);process.exitCode=1});
+  Error: ENOENT: no such file or directory, open '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-Ljzumy/sacrificial-cwd/sentinel'
+      at Object.readFileSync (node:fs:439:20)
+      at [eval]:8:21 {
+    errno: -2,
+    code: 'ENOENT',
+    syscall: 'open',
+    path: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-Ljzumy/sacrificial-cwd/sentinel'
+  }
+  
+      at genericNodeError (node:internal/errors:985:15)
+      at wrappedFn (node:internal/errors:539:14)
+      at checkExecSyncError (node:child_process:925:11)
+      at execFileSync (node:child_process:961:15)
+      at isolated (/private/tmp/vcc-review3-20260918-03pkhge6/tests/unit/backend/shared-strings-ownership.test.js:33:3)
+      at TestContext.<anonymous> (/private/tmp/vcc-review3-20260918-03pkhge6/tests/unit/backend/shared-strings-ownership.test.js:38:86)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1106:25)
+      at Test.start (node:internal/test_runner/test:1003:17)
+      at TestContext.test (node:internal/test_runner/test:378:20) {
+    status: 1,
+    signal: null,
+    output: [ null, '', "Error: ENOENT: no such file or directory, open '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-Ljzumy/sacrificial-cwd/sentinel'\n    at Object.readFileSync (node:fs:439:20)\n    at [eval]:8:21 {\n  errno: -2,\n  code: 'ENOENT',\n  syscall: 'open',\n  path: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-Ljzumy/sacrificial-cwd/sentinel'\n}\n" ],
+    pid: 83983,
+    stdout: '',
+    stderr: "Error: ENOENT: no such file or directory, open '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-Ljzumy/sacrificial-cwd/sentinel'\n    at Object.readFileSync (node:fs:439:20)\n    at [eval]:8:21 {\n  errno: -2,\n  code: 'ENOENT',\n  syscall: 'open',\n  path: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-Ljzumy/sacrificial-cwd/sentinel'\n}\n"
+  }
+
+test at tests/unit/backend/shared-strings-ownership.test.js:38:67
+✖ null (34.754583ms)
+  Error: Command failed: /Users/pzhong/.nvm/versions/node/v24.13.0/bin/node -e const fs=require('node:fs'); const assert=require('node:assert/strict');
+      const {AdaptiveSharedStringsProvider}=require("/private/tmp/vcc-review3-20260918-03pkhge6/src/backend/position-reconciliation-import/shared-strings-provider.js");
+      const {openRichWorkbook}=require("/private/tmp/vcc-review3-20260918-03pkhge6/src/backend/xlsx-rich-reader.js");
+      const file="/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-EDEf8T/source.xlsx"; const cwd=process.cwd();
+      (async()=>{
+      const provider=new AdaptiveSharedStringsProvider({tempRoot:null,memoryBudgetBytes:1});
+      let error; try {provider.append('spill');} catch(e) {error=e;} finally {await provider.close();}
+      assert.equal(fs.readFileSync(cwd+'/sentinel','utf8'),'retain');
+      assert.match(error?.message || '', /未提供临时目录/);
+    })().catch(error=>{console.error(error);process.exitCode=1});
+  Error: ENOENT: no such file or directory, open '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-EDEf8T/sacrificial-cwd/sentinel'
+      at Object.readFileSync (node:fs:439:20)
+      at [eval]:8:21 {
+    errno: -2,
+    code: 'ENOENT',
+    syscall: 'open',
+    path: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-EDEf8T/sacrificial-cwd/sentinel'
+  }
+  
+      at genericNodeError (node:internal/errors:985:15)
+      at wrappedFn (node:internal/errors:539:14)
+      at checkExecSyncError (node:child_process:925:11)
+      at execFileSync (node:child_process:961:15)
+      at isolated (/private/tmp/vcc-review3-20260918-03pkhge6/tests/unit/backend/shared-strings-ownership.test.js:33:3)
+      at TestContext.<anonymous> (/private/tmp/vcc-review3-20260918-03pkhge6/tests/unit/backend/shared-strings-ownership.test.js:38:86)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1106:25)
+      at Test.start (node:internal/test_runner/test:1003:17)
+      at TestContext.test (node:internal/test_runner/test:378:20) {
+    status: 1,
+    signal: null,
+    output: [ null, '', "Error: ENOENT: no such file or directory, open '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-EDEf8T/sacrificial-cwd/sentinel'\n    at Object.readFileSync (node:fs:439:20)\n    at [eval]:8:21 {\n  errno: -2,\n  code: 'ENOENT',\n  syscall: 'open',\n  path: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-EDEf8T/sacrificial-cwd/sentinel'\n}\n" ],
+    pid: 83984,
+    stdout: '',
+    stderr: "Error: ENOENT: no such file or directory, open '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-EDEf8T/sacrificial-cwd/sentinel'\n    at Object.readFileSync (node:fs:439:20)\n    at [eval]:8:21 {\n  errno: -2,\n  code: 'ENOENT',\n  syscall: 'open',\n  path: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-EDEf8T/sacrificial-cwd/sentinel'\n}\n"
+  }
+
+test at tests/unit/backend/shared-strings-ownership.test.js:38:67
+✖ '' (35.729458ms)
+  Error: Command failed: /Users/pzhong/.nvm/versions/node/v24.13.0/bin/node -e const fs=require('node:fs'); const assert=require('node:assert/strict');
+      const {AdaptiveSharedStringsProvider}=require("/private/tmp/vcc-review3-20260918-03pkhge6/src/backend/position-reconciliation-import/shared-strings-provider.js");
+      const {openRichWorkbook}=require("/private/tmp/vcc-review3-20260918-03pkhge6/src/backend/xlsx-rich-reader.js");
+      const file="/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-h4jELZ/source.xlsx"; const cwd=process.cwd();
+      (async()=>{
+      const provider=new AdaptiveSharedStringsProvider({tempRoot:'',memoryBudgetBytes:1});
+      let error; try {provider.append('spill');} catch(e) {error=e;} finally {await provider.close();}
+      assert.equal(fs.readFileSync(cwd+'/sentinel','utf8'),'retain');
+      assert.match(error?.message || '', /未提供临时目录/);
+    })().catch(error=>{console.error(error);process.exitCode=1});
+  Error: ENOENT: no such file or directory, open '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-h4jELZ/sacrificial-cwd/sentinel'
+      at Object.readFileSync (node:fs:439:20)
+      at [eval]:8:21 {
+    errno: -2,
+    code: 'ENOENT',
+    syscall: 'open',
+    path: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-h4jELZ/sacrificial-cwd/sentinel'
+  }
+  
+      at genericNodeError (node:internal/errors:985:15)
+      at wrappedFn (node:internal/errors:539:14)
+      at checkExecSyncError (node:child_process:925:11)
+      at execFileSync (node:child_process:961:15)
+      at isolated (/private/tmp/vcc-review3-20260918-03pkhge6/tests/unit/backend/shared-strings-ownership.test.js:33:3)
+      at TestContext.<anonymous> (/private/tmp/vcc-review3-20260918-03pkhge6/tests/unit/backend/shared-strings-ownership.test.js:38:86)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1106:25)
+      at Test.start (node:internal/test_runner/test:1003:17)
+      at TestContext.test (node:internal/test_runner/test:378:20) {
+    status: 1,
+    signal: null,
+    output: [ null, '', "Error: ENOENT: no such file or directory, open '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-h4jELZ/sacrificial-cwd/sentinel'\n    at Object.readFileSync (node:fs:439:20)\n    at [eval]:8:21 {\n  errno: -2,\n  code: 'ENOENT',\n  syscall: 'open',\n  path: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-h4jELZ/sacrificial-cwd/sentinel'\n}\n" ],
+    pid: 83985,
+    stdout: '',
+    stderr: "Error: ENOENT: no such file or directory, open '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-h4jELZ/sacrificial-cwd/sentinel'\n    at Object.readFileSync (node:fs:439:20)\n    at [eval]:8:21 {\n  errno: -2,\n  code: 'ENOENT',\n  syscall: 'open',\n  path: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-h4jELZ/sacrificial-cwd/sentinel'\n}\n"
+  }
+
+test at tests/unit/backend/shared-strings-ownership.test.js:38:67
+✖ ' ' (38.119042ms)
+  Error: Command failed: /Users/pzhong/.nvm/versions/node/v24.13.0/bin/node -e const fs=require('node:fs'); const assert=require('node:assert/strict');
+      const {AdaptiveSharedStringsProvider}=require("/private/tmp/vcc-review3-20260918-03pkhge6/src/backend/position-reconciliation-import/shared-strings-provider.js");
+      const {openRichWorkbook}=require("/private/tmp/vcc-review3-20260918-03pkhge6/src/backend/xlsx-rich-reader.js");
+      const file="/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-xHPoxn/source.xlsx"; const cwd=process.cwd();
+      (async()=>{
+      const provider=new AdaptiveSharedStringsProvider({tempRoot:' ',memoryBudgetBytes:1});
+      let error; try {provider.append('spill');} catch(e) {error=e;} finally {await provider.close();}
+      assert.equal(fs.readFileSync(cwd+'/sentinel','utf8'),'retain');
+      assert.match(error?.message || '', /未提供临时目录/);
+    })().catch(error=>{console.error(error);process.exitCode=1});
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /未提供临时目录/. Input:
+  
+  ''
+  
+      at [eval]:9:12 {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '',
+    expected: /未提供临时目录/,
+    operator: 'match',
+    diff: 'simple'
+  }
+  
+      at genericNodeError (node:internal/errors:985:15)
+      at wrappedFn (node:internal/errors:539:14)
+      at checkExecSyncError (node:child_process:925:11)
+      at execFileSync (node:child_process:961:15)
+      at isolated (/private/tmp/vcc-review3-20260918-03pkhge6/tests/unit/backend/shared-strings-ownership.test.js:33:3)
+      at TestContext.<anonymous> (/private/tmp/vcc-review3-20260918-03pkhge6/tests/unit/backend/shared-strings-ownership.test.js:38:86)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1106:25)
+      at Test.start (node:internal/test_runner/test:1003:17)
+      at TestContext.test (node:internal/test_runner/test:378:20) {
+    status: 1,
+    signal: null,
+    output: [ null, '', "AssertionError [ERR_ASSERTION]: The input did not match the regular expression /未提供临时目录/. Input:\n\n''\n\n    at [eval]:9:12 {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: '',\n  expected: /未提供临时目录/,\n  operator: 'match',\n  diff: 'simple'\n}\n" ],
+    pid: 83986,
+    stdout: '',
+    stderr: "AssertionError [ERR_ASSERTION]: The input did not match the regular expression /未提供临时目录/. Input:\n\n''\n\n    at [eval]:9:12 {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: '',\n  expected: /未提供临时目录/,\n  operator: 'match',\n  diff: 'simple'\n}\n"
+  }
+
+test at tests/unit/backend/shared-strings-ownership.test.js:46:1
+✖ 共享 Rich Reader 缺省目录逐任务独立，关闭一个不破坏另一个或 cwd (53.451416ms)
+  Error: Command failed: /Users/pzhong/.nvm/versions/node/v24.13.0/bin/node -e const fs=require('node:fs'); const assert=require('node:assert/strict');
+      const {AdaptiveSharedStringsProvider}=require("/private/tmp/vcc-review3-20260918-03pkhge6/src/backend/position-reconciliation-import/shared-strings-provider.js");
+      const {openRichWorkbook}=require("/private/tmp/vcc-review3-20260918-03pkhge6/src/backend/xlsx-rich-reader.js");
+      const file="/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-ZoW67k/source.xlsx"; const cwd=process.cwd();
+      (async()=>{
+    const a=await openRichWorkbook(file,{memoryBudgetBytes:1});
+    const b=await openRichWorkbook(file,{memoryBudgetBytes:1});
+    const first=a.sharedStrings.tempRoot, second=b.sharedStrings.tempRoot;
+    assert.equal(a.sharedStrings.mode,'disk'); assert.notEqual(first,cwd); assert.notEqual(first,second);
+    await a.close(); assert.equal(fs.existsSync(first),false);
+    const rows=[]; await b.scan(row=>rows.push(row)); assert.equal(rows.length,3);
+    await b.close(); assert.equal(fs.existsSync(second),false);
+  })().catch(error=>{console.error(error);process.exitCode=1});
+  AssertionError [ERR_ASSERTION]: Expected "actual" to be strictly unequal to:
+  
+  '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-ZoW67k/sacrificial-cwd'
+      at [eval]:9:53
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-ZoW67k/sacrificial-cwd',
+    expected: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-ZoW67k/sacrificial-cwd',
+    operator: 'notStrictEqual',
+    diff: 'simple'
+  }
+  
+      at genericNodeError (node:internal/errors:985:15)
+      at wrappedFn (node:internal/errors:539:14)
+      at checkExecSyncError (node:child_process:925:11)
+      at execFileSync (node:child_process:961:15)
+      at isolated (/private/tmp/vcc-review3-20260918-03pkhge6/tests/unit/backend/shared-strings-ownership.test.js:33:3)
+      at TestContext.<anonymous> (/private/tmp/vcc-review3-20260918-03pkhge6/tests/unit/backend/shared-strings-ownership.test.js:46:57)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1106:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:788:18)
+      at Test.postRun (node:internal/test_runner/test:1235:19) {
+    status: 1,
+    signal: null,
+    output: [ null, '', `AssertionError [ERR_ASSERTION]: Expected "actual" to be strictly unequal to:\n\n'/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-ZoW67k/sacrificial-cwd'\n    at [eval]:9:53\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5) {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-ZoW67k/sacrificial-cwd',\n  expected: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-ZoW67k/sacrificial-cwd',\n  operator: 'notStrictEqual',\n  diff: 'simple'\n}\n` ],
+    pid: 83987,
+    stdout: '',
+    stderr: `AssertionError [ERR_ASSERTION]: Expected "actual" to be strictly unequal to:\n\n'/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-ZoW67k/sacrificial-cwd'\n    at [eval]:9:53\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5) {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-ZoW67k/sacrificial-cwd',\n  expected: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/sst-ownership-ZoW67k/sacrificial-cwd',\n  operator: 'notStrictEqual',\n  diff: 'simple'\n}\n`
+  }
+
+test at tests/unit/backend/shared-strings-ownership.test.js:56:1
+✖ 已存在的显式 SST 目录及 VCC Reader 失败清理均不得覆盖/删除用户文件 (15.1235ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async TestContext.<anonymous> (/private/tmp/vcc-review3-20260918-03pkhge6/tests/unit/backend/shared-strings-ownership.test.js:63:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: /EEXIST/,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at tests/unit/backend/shared-strings-ownership.test.js:69:1
+✖ 同一路径第二个读取任务拒绝接管，首个 SST 仍能读取和清理 (8.104208ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async TestContext.<anonymous> (/private/tmp/vcc-review3-20260918-03pkhge6/tests/unit/backend/shared-strings-ownership.test.js:73:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: /EEXIST/,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at tests/unit/backend/shared-strings-ownership.test.js:79:1
+✖ 部分 spill 创建失败也关闭已打开句柄并清理本次目录 (2.13875ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  true !== false
+  
+      at TestContext.<anonymous> (/private/tmp/vcc-review3-20260918-03pkhge6/tests/unit/backend/shared-strings-ownership.test.js:90:10)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/unit/backend/shared-strings-ownership.test.js:114:1
+✖ SST 目录出现无关文件时不递归删除，清理失败重复 close 仍报错 (2.002125ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async TestContext.<anonymous> (/private/tmp/vcc-review3-20260918-03pkhge6/tests/unit/backend/shared-strings-ownership.test.js:118:3)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: { code: 'ENOTEMPTY' },
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at tests/unit/backend/shared-strings-ownership.test.js:123:1
+✖ SST 目录被替换时停止清理，显式保留模式仍保留自己的缓存 (2.245458ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async TestContext.<anonymous> (/private/tmp/vcc-review3-20260918-03pkhge6/tests/unit/backend/shared-strings-ownership.test.js:128:3)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: /身份已变化/,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at tests/unit/main-process/vcc-financial-op-review-legacy-error.test.js:57:1
+✖ v1 绑定原件的系统 OP 错误/错误公式缓存按旧空审计核验，附页输出原始错误码文本 (125.062458ms)
+  Error: S:1:2 原始列 5 不符
+      at reviewError (/private/tmp/vcc-review3-20260918-03pkhge6/src/backend/vcc-financial-op/review-export-contract.js:8:78)
+      at mismatch (/private/tmp/vcc-review3-20260918-03pkhge6/src/backend/vcc-financial-op/review-export-plan.js:26:31)
+      at validateRawFact (/private/tmp/vcc-review3-20260918-03pkhge6/src/backend/vcc-financial-op/review-export-plan.js:311:82)
+      at save (/private/tmp/vcc-review3-20260918-03pkhge6/src/backend/vcc-financial-op/review-export-plan.js:333:26)
+      at /private/tmp/vcc-review3-20260918-03pkhge6/src/backend/vcc-financial-op/review-export-plan.js:379:19
+      at finalizeRow (/private/tmp/vcc-review3-20260918-03pkhge6/src/backend/toolbox-format/xlsx-sheet-scanner.js:715:28)
+      at SAXStream.<anonymous> (/private/tmp/vcc-review3-20260918-03pkhge6/src/backend/toolbox-format/xlsx-sheet-scanner.js:1299:30)
+      at SAXStream.emit (node:events:508:28)
+      at me._parser.<computed> [as onclosetag] (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:375:17)
+      at emit (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:745:35)
+      at emitNode (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:803:5)
+      at closeTag (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:1089:7)
+      at SAXParser.write (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:1689:13)
+      at SAXStream.write (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:339:18)
+      at ReadStream.<anonymous> (/private/tmp/vcc-review3-20260918-03pkhge6/src/backend/toolbox-format/xlsx-sheet-scanner.js:1380:16)
+      at ReadStream.emit (node:events:508:28) {
+    code: 'vcc-review-validation-failed',
+    detailLines: []
+  }

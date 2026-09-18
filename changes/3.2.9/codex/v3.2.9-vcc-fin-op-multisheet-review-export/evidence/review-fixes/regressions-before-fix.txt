@@ -1,0 +1,186 @@
+Final regression tests and helper, executed against unchanged original review snapshot source. Temporary test root removed after execution.
+
+(node:92294) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 同类型跨 Sheet 幂等、多主体通道及混合原件共享；来源 hold 在首行读取前已齐全 (70.690916ms)
+✔ RV02：完整甲、八币种乙、充值各 Sheet 独立，系统组精确计数并保留 18 条实际读取行 (46.367792ms)
+✔ 同主体九币种跨 Sheet 拆分，或八币种与完整候选并存，都不能补救该主体 (84.041292ms)
+✔ 未知主体按 Sheet 计数；主体成员或持久 metadata 损坏时来源和 hold 创建一起回滚 (42.655041ms)
+✔ 不同输入文件同名同内容：存档共用 Blob 后仍按两个物理来源导入和幂等 (39.334667ms)
+✖ 系统 OP 日期单元格与旧 Reader 等价，九币种快照正常导入 (43.655833ms)
+✖ 表头位于预览窗口外：混合类型导入后原表、校验表仍按持久成员定位 (49.306917ms)
+(node:92295) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 真实导入和计算 → 同快照 E/A/P → 全主体 Sheet1 与关联原表；业务库只读且原件只扫描一次 (337.165416ms)
+✔ 绑定原件被篡改时停止，不能使用残留 fallback 掩盖；输入 revision 改变拒绝旧快照 (217.782208ms)
+✔ 全部主体经已保存调整归零只生成 Sheet1；调整引用跨主体偏移正确，再次产生差异会恢复对应附页 (266.165ms)
+✔ E/A/P 独立守恒：提取缺行、Writer 替换身份和最终 XLSX 金额/样式/附加页篡改均拒绝 (270.2785ms)
+✔ 历史 Pending 48 列与当前 46 列分别附页，旧列值原样保留，不套用当前表头 (644.626959ms)
+▶ Pending 的 CRLF、字面转义串及共享/内联文本按旧哈希核验并原值导出
+  ✖ str (438.985209ms)
+  ✔ shared (587.379666ms)
+  ✖ inline (515.38625ms)
+✖ Pending 的 CRLF、字面转义串及共享/内联文本按旧哈希核验并原值导出 (1542.51275ms)
+✖ 来源 ID 丢失时必须查导入审计的绑定证据，不能用系统 raw_json 绕过损坏原件 (461.27175ms)
+✖ 日期类型系统 OP 的导入审计可用于待确认原表重建，保留原 ISO 值 (372.305292ms)
+▶ 来源字段清空或来源记录被删除仍保留 artifact 证据时，拒绝历史降级
+  ✖ cleared-binding (548.000833ms)
+  ✖ deleted-source (86.552917ms)
+✖ 来源字段清空或来源记录被删除仍保留 artifact 证据时，拒绝历史降级 (634.934375ms)
+✔ 真正未建立来源绑定的历史系统快照继续按审计和 raw_json 导出 (125.496416ms)
+ℹ tests 22
+ℹ suites 0
+ℹ pass 12
+ℹ fail 10
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5064.166542
+
+✖ failing tests:
+
+test at tests/unit/backend/vcc-financial-op/multisheet-import.test.js:152:1
+✖ 系统 OP 日期单元格与旧 Reader 等价，九币种快照正常导入 (43.655833ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'failed_validation'
+  - 'success'
+  
+      at TestContext.<anonymous> (/private/tmp/vcc-fix-baseline-94hsvv6s/tests/unit/backend/vcc-financial-op/multisheet-import.test.js:160:10)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'failed_validation',
+    expected: 'success',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/unit/backend/vcc-financial-op/multisheet-import.test.js:168:1
+✖ 表头位于预览窗口外：混合类型导入后原表、校验表仍按持久成员定位 (49.306917ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    [
+      [
+        'success',
+        1
+      ],
+      [
+  +     'failed_validation',
+  +     0
+  -     'success',
+  -     1
+      ]
+    ]
+  
+      at TestContext.<anonymous> (/private/tmp/vcc-fix-baseline-94hsvv6s/tests/unit/backend/vcc-financial-op/multisheet-import.test.js:177:10)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ [ 'success', 1 ], [ 'failed_validation', 0 ] ],
+    expected: [ [ 'success', 1 ], [ 'success', 1 ] ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/unit/main-process/vcc-financial-op-review-export.test.js:154:13
+✖ str (438.985209ms)
+  Error: 导入记录 4 原表第 2 行与当前有效数据的幂等键或内容哈希不一致
+      at exportError (/private/tmp/vcc-review-20260918-7zrcuxox/src/main-process/vcc-financial-op-dataset-writer.js:82:17)
+      at assertMappedLineage (/private/tmp/vcc-review-20260918-7zrcuxox/src/main-process/vcc-financial-op-dataset-writer.js:694:11)
+      at validateRawFact (/private/tmp/vcc-review-20260918-7zrcuxox/src/backend/vcc-financial-op/review-export-plan.js:280:5)
+      at save (/private/tmp/vcc-review-20260918-7zrcuxox/src/backend/vcc-financial-op/review-export-plan.js:296:26)
+      at /private/tmp/vcc-review-20260918-7zrcuxox/src/backend/vcc-financial-op/review-export-plan.js:339:19
+      at finalizeRow (/private/tmp/vcc-review-20260918-7zrcuxox/src/backend/toolbox-format/xlsx-sheet-scanner.js:699:28)
+      at SAXStream.<anonymous> (/private/tmp/vcc-review-20260918-7zrcuxox/src/backend/toolbox-format/xlsx-sheet-scanner.js:1272:30)
+      at SAXStream.emit (node:events:508:28)
+      at me._parser.<computed> [as onclosetag] (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:375:17)
+      at emit (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:745:35)
+      at emitNode (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:803:5)
+      at closeTag (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:1089:7)
+      at SAXParser.write (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:1689:13)
+      at SAXStream.write (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:339:18)
+      at ReadStream.<anonymous> (/private/tmp/vcc-review-20260918-7zrcuxox/src/backend/toolbox-format/xlsx-sheet-scanner.js:1352:16)
+      at ReadStream.emit (node:events:508:28) {
+    code: 'archive-row-integrity-failure'
+  }
+
+test at tests/unit/main-process/vcc-financial-op-review-export.test.js:154:13
+✖ inline (515.38625ms)
+  Error: 导入记录 4 原表第 2 行与当前有效数据的幂等键或内容哈希不一致
+      at exportError (/private/tmp/vcc-review-20260918-7zrcuxox/src/main-process/vcc-financial-op-dataset-writer.js:82:17)
+      at assertMappedLineage (/private/tmp/vcc-review-20260918-7zrcuxox/src/main-process/vcc-financial-op-dataset-writer.js:694:11)
+      at validateRawFact (/private/tmp/vcc-review-20260918-7zrcuxox/src/backend/vcc-financial-op/review-export-plan.js:280:5)
+      at save (/private/tmp/vcc-review-20260918-7zrcuxox/src/backend/vcc-financial-op/review-export-plan.js:296:26)
+      at /private/tmp/vcc-review-20260918-7zrcuxox/src/backend/vcc-financial-op/review-export-plan.js:339:19
+      at finalizeRow (/private/tmp/vcc-review-20260918-7zrcuxox/src/backend/toolbox-format/xlsx-sheet-scanner.js:699:28)
+      at SAXStream.<anonymous> (/private/tmp/vcc-review-20260918-7zrcuxox/src/backend/toolbox-format/xlsx-sheet-scanner.js:1272:30)
+      at SAXStream.emit (node:events:508:28)
+      at me._parser.<computed> [as onclosetag] (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:375:17)
+      at emit (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:745:35)
+      at emitNode (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:803:5)
+      at closeTag (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:1089:7)
+      at SAXParser.write (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:1689:13)
+      at SAXStream.write (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:339:18)
+      at ReadStream.<anonymous> (/private/tmp/vcc-review-20260918-7zrcuxox/src/backend/toolbox-format/xlsx-sheet-scanner.js:1352:16)
+      at ReadStream.emit (node:events:508:28) {
+    code: 'archive-row-integrity-failure'
+  }
+
+test at tests/unit/main-process/vcc-financial-op-review-export.test.js:186:1
+✖ 来源 ID 丢失时必须查导入审计的绑定证据，不能用系统 raw_json 绕过损坏原件 (461.27175ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async TestContext.<anonymous> (/private/tmp/vcc-fix-baseline-94hsvv6s/tests/unit/main-process/vcc-financial-op-review-export.test.js:197:3)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: { code: 'vcc-review-source-unavailable' },
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at tests/unit/main-process/vcc-financial-op-review-export.test.js:202:1
+✖ 日期类型系统 OP 的导入审计可用于待确认原表重建，保留原 ISO 值 (372.305292ms)
+  Error: {"batchId":"review-input-task","targetMonth":"2026-06","status":"completed_with_errors","records":[{"recordId":1,"batchId":"review-input-task","targetMonth":"2026-06","sourceType":"recharge_refund","status":"success","rawCount":1,"insertedCount":1,"skippedCount":0,"invalidKeyCount":0,"conflictCount":0,"formatErrorCount":0,"rolledBackCount":0,"anomalyCount":0,"archiveState":"ready","sourceFiles":[{"id":1,"importRecordId":1,"sourceOrdinal":1,"fileName":"全部主体.xlsx","sha256":"ad1c027caebc97435bf26da33bea866ba65287858c951e7e3d5caf1049fd8884","sizeBytes":37474,"archiveArtifactId":1,"archiveState":"ready","lastErrorCode":"","lastErrorMessage":"","boundAt":"2026-09-18 15:07:29"}],"errorMessage":"","sourceLabel":"VCC充值清退明细"},{"recordId":2,"batchId":"review-input-task","targetMonth":"2026-06","sourceType":"fee_fx","status":"success","rawCount":1,"insertedCount":1,"skippedCount":0,"invalidKeyCount":0,"conflictCount":0,"formatErrorCount":0,"rolledBackCount":0,"anomalyCount":0,"archiveState":"ready","sourceFiles":[{"id":2,"importRecordId":2,"sourceOrdinal":1,"fileName":"全部主体.xlsx","sha256":"ad1c027caebc97435bf26da33bea866ba65287858c951e7e3d5caf1049fd8884","sizeBytes":37474,"archiveArtifactId":1,"archiveState":"ready","lastErrorCode":"","lastErrorMessage":"","boundAt":"2026-09-18 15:07:29"}],"errorMessage":"","sourceLabel":"VCC费用及换汇明细"},{"recordId":3,"batchId":"review-input-task","targetMonth":"2026-06","sourceType":"channel","status":"success","rawCount":1,"insertedCount":1,"skippedCount":0,"invalidKeyCount":0,"conflictCount":0,"formatErrorCount":0,"rolledBackCount":0,"anomalyCount":0,"archiveState":"ready","sourceFiles":[{"id":3,"importRecordId":3,"sourceOrdinal":1,"fileName":"全部主体.xlsx","sha256":"ad1c027caebc97435bf26da33bea866ba65287858c951e7e3d5caf1049fd8884","sizeBytes":37474,"archiveArtifactId":1,"archiveState":"ready","lastErrorCode":"","lastErrorMessage":"","boundAt":"2026-09-18 15:07:29"}],"errorMessage":"","sourceLabel":"VCC通道明细"},{"recordId":4,"batchId":"review-input-task","targetMonth":"2026-06","sourceType":"pending_archive_removal","status":"success","rawCount":1,"insertedCount":1,"skippedCount":0,"invalidKeyCount":0,"conflictCount":0,"formatErrorCount":0,"rolledBackCount":0,"anomalyCount":0,"archiveState":"ready","sourceFiles":[{"id":4,"importRecordId":4,"sourceOrdinal":1,"fileName":"全部主体.xlsx","sha256":"ad1c027caebc97435bf26da33bea866ba65287858c951e7e3d5caf1049fd8884","sizeBytes":37474,"archiveArtifactId":1,"archiveState":"ready","lastErrorCode":"","lastErrorMessage":"","boundAt":"2026-09-18 15:07:29"}],"errorMessage":"","sourceLabel":"VCC_移除归档Pending账单"},{"recordId":5,"batchId":"review-input-task","targetMonth":"2026-06","sourceType":"system_op","sourceLabel":"系统财务OP","status":"failed_validation","rawCount":1,"insertedCount":0,"skippedCount":0,"invalidKeyCount":0,"conflictCount":0,"formatErrorCount":1,"rolledBackCount":0,"anomalyCount":9,"archiveState":"ready","errorMessage":"系统财务OP已过滤异常数据：格式异常 1 个主体快照","sourceFiles":[{"id":5,"importRecordId":5,"sourceOrdinal":1,"fileName":"全部主体.xlsx","sha256":"ad1c027caebc97435bf26da33bea866ba65287858c951e7e3d5caf1049fd8884","sizeBytes":37474,"archiveArtifactId":1,"archiveState":"ready","lastErrorCode":"","lastErrorMessage":"","boundAt":"2026-09-18 15:07:29"}]}],"physicalFileCount":1,"businessSheetCount":5,"readRowCount":13}
+      at createReviewFixture (/private/tmp/vcc-fix-baseline-94hsvv6s/tests/helpers/vcc-review-export.js:62:67)
+      at async TestContext.<anonymous> (/private/tmp/vcc-fix-baseline-94hsvv6s/tests/unit/main-process/vcc-financial-op-review-export.test.js:203:13)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7)
+
+test at tests/unit/main-process/vcc-financial-op-review-export.test.js:227:13
+✖ cleared-binding (548.000833ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async TestContext.<anonymous> (/private/tmp/vcc-fix-baseline-94hsvv6s/tests/unit/main-process/vcc-financial-op-review-export.test.js:236:7)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async TestContext.<anonymous> (/private/tmp/vcc-fix-baseline-94hsvv6s/tests/unit/main-process/vcc-financial-op-review-export.test.js:227:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: { code: 'vcc-review-source-unavailable' },
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at tests/unit/main-process/vcc-financial-op-review-export.test.js:227:13
+✖ deleted-source (86.552917ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async TestContext.<anonymous> (/private/tmp/vcc-fix-baseline-94hsvv6s/tests/unit/main-process/vcc-financial-op-review-export.test.js:236:7)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async TestContext.<anonymous> (/private/tmp/vcc-fix-baseline-94hsvv6s/tests/unit/main-process/vcc-financial-op-review-export.test.js:227:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: { code: 'vcc-review-source-unavailable' },
+    operator: 'rejects',
+    diff: 'simple'
+  }

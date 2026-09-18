@@ -113,12 +113,12 @@ test('main 与独立 V327 注册器的 IPC 加内部任务，与 policy/support 
   assert.equal(new Set(actual).size, actual.length, 'main 不应重复注册 literal IPC');
   assert.equal(new Set(expected).size, expected.length, 'policy/support 不应重复登记');
   assert.deepEqual(expected, actual);
-  assert.equal(actual.length, 265);
+  assert.equal(actual.length, 266);
   assert.equal(v327IpcInventory().length, 21);
   assert.equal(registry.channels('reserve').length, 71);
   assert.equal(registry.channels('no-file').length, 63);
   assert.equal(registry.channels('exclude').length, 129);
-  assert.equal(SUPPORT_ACTION_POLICIES.length, 2);
+  assert.equal(SUPPORT_ACTION_POLICIES.length, 3);
 });
 
 test('preload 与 main 及独立 V327 注册器精确相等，新增 21 个业务和只读入口完整接通', () => {

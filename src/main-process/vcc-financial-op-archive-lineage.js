@@ -2,6 +2,7 @@
 
 const vccRepository = require('../backend/vcc-financial-op-db/repository');
 const { hashSourceFiles } = require('../backend/vcc-financial-op/source-lineage');
+const { buildMemberFiles, handoffMetadata, readHandoffMetadata, assertArtifactMember, handoffError } = require('../backend/vcc-financial-op/import-handoff');
 const {
   freezeWorkerBatchContext
 } = require('./archive-center/worker-batch-context');
@@ -22,6 +23,19 @@ async function buildVccImportArchiveHandoffFiles(args, batchContext) {
   const selectedFiles = Array.isArray(payload.files) ? payload.files : [];
   if (selectedFiles.length === 0) throw new Error('VCC 导入耐久接管缺少输入文件');
   const hashedFiles = await hashSourceFiles(selectedFiles);
+  if (selectedFiles.every((file) => Array.isArray(file.sheets))) {
+    for (let index = 0; index < hashedFiles.length; index += 1) {
+      if (hashedFiles[index].sha256 !== selectedFiles[index].sha256 || hashedFiles[index].sizeBytes !== selectedFiles[index].sizeBytes
+          || JSON.stringify(require('../backend/vcc-financial-op/workbook-import-plan').inputFileIdentity(selectedFiles[index].filePath)) !== JSON.stringify(selectedFiles[index].fileIdentity)) {
+        throw Object.assign(new Error('预检后输入文件发生变化，请重新预检'), { code: 'vcc-import-plan-stale' });
+      }
+    }
+    return Object.freeze(buildMemberFiles(hashedFiles).map((file) => Object.freeze({
+      filePath: file.filePath, role: 'input', originalName: file.fileName,
+      expectedSha256: file.sha256, expectedSizeBytes: file.sizeBytes,
+      metadata: handoffMetadata(file, batchContext.taskRunId)
+    })));
+  }
   const ordinals = new Map();
   return Object.freeze(hashedFiles.map((file) => {
     const sourceType = String(file.sourceType || '');
@@ -43,6 +57,24 @@ async function buildVccImportArchiveHandoffFiles(args, batchContext) {
       })
     });
   }));
+}
+
+function persistVccImportHandoffV2(archiveRepository, batchContext, inputs, files) {
+  try {
+    if (!Array.isArray(inputs) || inputs.length !== files.length) throw handoffError('manifest 文件数变化');
+    const entries = files.map((file, index) => ({ artifactKey: inputs[index].artifactKey,
+      sourceOperation: VCC_IMPORT_SOURCE_OPERATION, originalName: file.originalName, metadata: readHandoffMetadata(file.metadata) }));
+    const stored = archiveRepository.persistInputArtifactMetadata(batchContext.batchId, batchContext.taskRunId, entries);
+    for (let index = 0; index < stored.length; index += 1) {
+      const actual = readHandoffMetadata(stored[index].metadata);
+      if (JSON.stringify(actual) !== JSON.stringify(entries[index].metadata)
+          || stored[index].originalName !== files[index].originalName) throw handoffError('成员清单回读不符');
+    }
+    return stored;
+  } catch (error) {
+    if (error.code === 'vcc-import-handoff-mismatch') throw error;
+    throw handoffError(error.message);
+  }
 }
 
 function tableHasColumn(db, tableName, columnName) {
@@ -123,9 +155,17 @@ function bindReadyArtifact(db, archiveRepository, source, artifact, options = {}
       && String(metadata.vccSourceType || '') === String(source.source_type)
       && Number(metadata.vccSourceOrdinal) === Number(source.source_ordinal)
       && String(artifact.originalName || '') === String(source.source_file_name || '');
-  const artifactIdentityExact = options.hasPersistedArtifactIdentity === true
+  let artifactIdentityExact = options.hasPersistedArtifactIdentity === true
     ? options.persistedArtifactIdentityExact === true
     : identityExact;
+  if (metadata.vccImportHandoffVersion === 2) {
+    try {
+      assertArtifactMember(artifact, source, archiveRepository.getBatch(artifact.batchId));
+      artifactIdentityExact = true;
+    } catch (_error) { artifactIdentityExact = false; }
+  } else if (metadata.vccImportHandoffVersion != null && metadata.vccImportHandoffVersion !== 1) {
+    artifactIdentityExact = false;
+  }
   const exact = artifactIdentityExact
     && blob
     && String(blob.sha256 || '').toLowerCase() === String(source.source_sha256).toLowerCase()
@@ -224,6 +264,18 @@ function reconcileVccImportArchiveLineage({ db, archiveRepository }) {
     const metadata = artifact && artifact.metadata && typeof artifact.metadata === 'object'
       ? artifact.metadata
       : {};
+    if (metadata.vccImportHandoffVersion === 2) {
+      let handoff;
+      try { handoff = readHandoffMetadata(metadata); } catch (_error) { continue; }
+      for (const member of handoff.vccSourceMembers) {
+        const source = sourceByHandoffIdentity.get([handoff.vccImportBatchId, member.sourceType, member.sourceOrdinal].join('\u0000'));
+        if (!source || persistedArtifactSourceIds.has(Number(source.id))) continue;
+        const sourceId = Number(source.id);
+        if (artifactBySource.has(sourceId)) duplicateSourceIds.add(sourceId);
+        else artifactBySource.set(sourceId, artifact);
+      }
+      continue;
+    }
     const directSourceId = Number(metadata.vccImportSourceId);
     let source = Number.isSafeInteger(directSourceId) && directSourceId > 0
       ? sourceById.get(directSourceId)
@@ -436,6 +488,7 @@ function reconcileVccImportArchiveLineageAtStartup({ db, archiveRepository }) {
 }
 
 module.exports = {
+  persistVccImportHandoffV2,
   VCC_IMPORT_HOLD_TYPE,
   VCC_IMPORT_SOURCE_OPERATION,
   buildVccImportArchiveHandoffFiles,

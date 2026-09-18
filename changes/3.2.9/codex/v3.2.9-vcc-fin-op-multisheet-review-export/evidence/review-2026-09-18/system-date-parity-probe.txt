@@ -1,0 +1,5 @@
+{"tz":"Asia/Shanghai","token":"2026-06-30T00:00:00Z","old":{"count":1,"errors":[],"raw":46203.000497685185},"now":{"count":1,"errors":[],"raw":46203.000497685185}}
+{"tz":"Asia/Shanghai","token":"2026-07-01T00:30:00+08:00","old":{"count":1,"errors":[],"raw":46203.687997685185},"now":{"count":1,"errors":[],"raw":46203.687997685185}}
+{"tz":"Asia/Shanghai","token":"2026-06-30T23:30:00-08:00","old":"date.xlsx：未找到“账单日期”属于 2026-06 的系统财务OP数据","now":"date.xlsx：未找到“账单日期”属于 2026-06 的系统财务OP数据"}
+{"tz":"Asia/Shanghai","token":"2026-06-30T00:00:00","old":{"count":1,"errors":[],"raw":46202.66716435185},"now":{"count":1,"errors":[],"raw":46202.66716435185}}
+{"tz":"Asia/Shanghai","token":"2026-06-30","old":{"count":1,"errors":[],"raw":46203.000497685185},"now":{"count":1,"errors":[],"raw":46203.000497685185}}

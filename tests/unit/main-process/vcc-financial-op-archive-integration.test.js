@@ -195,7 +195,7 @@ test('main 用冻结 FilePlan settle exact artifact 后才把 artifactId handoff
   const handlerSource = mainSource.slice(handlerStart, handlerEnd);
   assert.match(
     handlerSource,
-    /taskContext\.settleArtifacts\([\s\S]*?archiveArtifactId: settled\.results\[index\]\.artifact\.id[\s\S]*?service\.importSelectedFiles\([\s\S]*?batchContext, workerHandoffFiles\)/
+    /taskContext\.settleArtifacts\([\s\S]*?const artifactId = settled\.results\[index\]\.artifact\.id[\s\S]*?service\.importSelectedFiles\([\s\S]*?batchContext, workerHandoffFiles\)/
   );
   assert.ok(handlerSource.indexOf('taskContext.settleArtifacts') < handlerSource.indexOf('service.importSelectedFiles'));
   assert.match(handlerSource, /filePath: taskContext\.fileEvidence\.filePlan\.inputs\[index\]\.filePath/);

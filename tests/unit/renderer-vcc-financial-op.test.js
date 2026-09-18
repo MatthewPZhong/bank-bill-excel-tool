@@ -11,6 +11,7 @@ const renderer = fs.readFileSync(path.join(ROOT, 'src/renderer.js'), 'utf8');
 const moduleRenderer = fs.readFileSync(path.join(ROOT, 'src/renderer-vcc-financial-op.js'), 'utf8');
 const preload = fs.readFileSync(path.join(ROOT, 'src/preload.js'), 'utf8');
 const main = fs.readFileSync(path.join(ROOT, 'src/main.js'), 'utf8');
+const projectionSource = fs.readFileSync(path.join(ROOT, 'src/shared/vcc-review-projection.js'), 'utf8');
 const vccService = fs.readFileSync(path.join(ROOT, 'src/main-process/vcc-financial-op-service.js'), 'utf8');
 const styles = fs.readFileSync(path.join(ROOT, 'src/styles-vcc-financial-op.css'), 'utf8');
 const sharedStyles = fs.readFileSync(path.join(ROOT, 'src/styles-gemini-extra.css'), 'utf8');
@@ -82,7 +83,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
 
   test('运行账期移除可见标签并将下拉框缩至整行四分之一且与标题左对齐', () => {
     const start = moduleRenderer.indexOf('function chooseMonth(');
-    const end = moduleRenderer.indexOf('function assignSubjects', start);
+    const end = moduleRenderer.indexOf('function confirmImportPlan', start);
     assert.ok(start >= 0 && end > start);
     const chooser = moduleRenderer.slice(start, end);
     assert.match(
@@ -261,6 +262,12 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
       formatter({ sourceType: 'recharge_refund', rows: 1 }, false),
       { message: '正在导入 VCC充值清退明细：1 行', tone: 'info' }
     );
+    assert.deepEqual(formatter({ phase: 'preflight', fileName: '混合.xlsx', sheetName: '隐藏费用', rows: 22 }, false),
+      { message: '正在预检 混合.xlsx / 隐藏费用：22 行', tone: 'info' });
+    assert.deepEqual(formatter({ phase: 'reading', sourceType: 'recharge_refund', sourceFile: '混合.xlsx', sheetName: '充值二', rows: 2 }, false),
+      { message: '正在导入 VCC充值清退明细（混合.xlsx / 充值二）：2 行', tone: 'info' });
+    assert.deepEqual(formatter({ phase: 'summarizing', physicalFileCount: 1, businessSheetCount: 6, rows: 26 }, false),
+      { message: '正在汇总导入结果：1 个文件，6 张业务 Sheet，读取 26 行', tone: 'info' });
     for (const phase of ['reading', 'committing']) {
       assert.equal(formatter({ phase, sourceType: 'recharge_refund', rows: 38197 }, true), null);
     }
@@ -268,6 +275,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     const handleImportStart = moduleRenderer.indexOf('async function handleImport()');
     const handleImportEnd = moduleRenderer.indexOf('async function handleCancelImport()', handleImportStart);
     const handleImportSource = moduleRenderer.slice(handleImportStart, handleImportEnd);
+    assert.ok(handleImportSource.indexOf('api.onImportProgress') < handleImportSource.indexOf('api.pickFiles()'), '预检之前必须订阅进度');
     assert.match(
       handleImportSource,
       /api\.onImportProgress\(\(progress\) => \{\s*const progressStatus = buildImportProgressStatus\(progress, state\.cancelRequested\);\s*if \(progressStatus\) setStatus\(progressStatus\.message, progressStatus\.tone\);\s*\}\)/
@@ -298,6 +306,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
       'vccFinancialOp:run:get',
       'vccFinancialOp:run:latest-archived',
       'vccFinancialOp:export:result',
+      'vccFinancialOp:export:review',
       'vccFinancialOp:export:import-audit'
     ];
     for (const channel of channels) {
@@ -313,7 +322,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
       assert.equal(main.includes(removedChannel), false, `main 不应保留 ${removedChannel}`);
     }
     assert.match(main, /await vccFinancialOpService\.terminate\(\)/);
-    assert.match(vccService, /return runWorker\('inspect', \{ filePaths \}\)/);
+    assert.match(vccService, /return runWorker\('inspect-plan', \{ filePaths \}/);
     assert.match(vccService, /return runResultWriteWorker\(VCC_MUTATION_OPERATIONS\.DELETE_DATA_TARGET/);
     for (const serviceCall of [
       'listArchivedResultMonths', 'previewUnarchive', 'listImportMonths',
@@ -817,14 +826,14 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
 
   test('结果确认读取完整后端 review、按生效差异展示并在页内带 revision 归档', () => {
     assert.match(moduleRenderer, /\['AUD', 'CAD', 'CNY', 'EUR', 'GBP', 'HKD', 'JPY', 'SGD', 'USD'\]/);
-    assert.match(moduleRenderer, /<th>主体<\/th><th>大类<\/th><th>分类<\/th>/);
-    assert.match(moduleRenderer, /\['effectiveCalculatedBalance', '当月计算财务OP'\]/);
-    assert.match(moduleRenderer, /\['systemBalance', '系统财务OP'\]/);
-    assert.match(moduleRenderer, /\['effectiveDifference', '差异'\]/);
-    assert.match(moduleRenderer, /row\.type === 'adjustment'/);
-    assert.match(moduleRenderer, /amount === null \|\| amount === undefined \? '-' :/);
-    assert.match(moduleRenderer, /balanced \? '-' : formatAmount\(amount\)/);
-    assert.match(moduleRenderer, /<th class="vcc-fin-op-stat-heading \$\{balanced \? 'balanced' : 'unbalanced'\}">/);
+    assert.match(projectionSource, /HEADERS = Object.freeze\(\['主体', '大类', '分类'/);
+    assert.match(projectionSource, /\['effectiveCalculatedBalance', '当月计算财务OP'\]/);
+    assert.match(projectionSource, /\['systemBalance', '系统财务OP'\]/);
+    assert.match(projectionSource, /\['effectiveDifference', '差异'\]/);
+    assert.match(projectionSource, /original\.type === 'adjustment'/);
+    assert.match(projectionSource, /value === null \|\| value === undefined/);
+    assert.match(projectionSource, /zeroAsDash && difference\.isEffectiveDifferenceZero\(value\) \? '-' : formatAmount\(value\)/);
+    assert.match(moduleRenderer, /block\.balanced\[index - 3\] \? 'balanced' : 'unbalanced'/);
     assert.match(moduleRenderer, /data-field="archive-confirm"/);
     assert.match(moduleRenderer, /class="dialog-actions split vcc-fin-op-review-actions"/);
     assert.match(moduleRenderer, /class="vcc-fin-op-review-actions-right"/);
@@ -833,7 +842,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     const reviewSource = moduleRenderer.slice(reviewStart, reviewEnd);
     assert.doesNotMatch(reviewSource, /class="dialog-actions right"/);
     assert.match(moduleRenderer, /class="number vcc-fin-op-stat-cell"/);
-    assert.match(moduleRenderer, /class="vcc-fin-op-stat-heading \$\{balanced \? 'balanced' : 'unbalanced'\}"/);
+    assert.match(moduleRenderer, /projection\.headers\.map/);
     assert.match(
       styles,
       /\.dialog-actions\.split\.vcc-fin-op-review-actions\s*\{[\s\S]*?align-items:\s*center;[\s\S]*?margin-top:\s*26px;/
@@ -871,13 +880,15 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
       'SOURCE_LABELS',
       'CURRENCIES',
       'differenceApi',
+      'window',
       `'use strict'; ${moduleRenderer.slice(start, end)}; return resultReviewHtml;`
     )(
       (value) => String(value == null ? '' : value),
       (value) => String(value),
       { recharge_refund: 'VCC充值清退明细' },
       ['AUD', 'CAD', 'CNY', 'EUR', 'GBP', 'HKD', 'JPY', 'SGD', 'USD'],
-      require('../../src/shared/vcc-financial-op-difference')
+      require('../../src/shared/vcc-financial-op-difference'),
+      { __vccReviewProjection: require('../../src/shared/vcc-review-projection') }
     );
     const currencies = ['AUD', 'CAD', 'CNY', 'EUR', 'GBP', 'HKD', 'JPY', 'SGD', 'USD'];
     const amounts = (usd, eur = '0') => Object.fromEntries(
@@ -913,7 +924,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     assert.match(output, /人工核对/);
     assert.match(output, /class="number vcc-fin-op-stat-cell">-<\/td>/);
     assert.match(output, /class="number vcc-fin-op-stat-cell">-2<\/td>/);
-    assert.match(output, /class="vcc-fin-op-stat-cell">-<\/td><td>-<\/td>/);
+    assert.match(output, /class="number vcc-fin-op-stat-cell">-<\/td><td class="vcc-fin-op-adjustment-reason">-<\/td>/);
     assert.doesNotMatch(output, /<td class="number (?:balanced|unbalanced)">/);
     assert.match(output, /<th class="vcc-fin-op-stat-heading balanced">AUD<\/th>/);
     assert.match(output, /<th class="vcc-fin-op-stat-heading unbalanced">EUR<\/th>/);
@@ -933,7 +944,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
       moduleRenderer.indexOf('function resultReviewHtml('),
       moduleRenderer.indexOf('async function requestRunAdjustment(')
     );
-    assert.match(resultFunction, /const \{ currencies, subjects \} = validateResultReview\(result\)/);
+    assert.match(resultFunction, /validateResultReview\(result\);[\s\S]*window\.__vccReviewProjection\.projectReview\(result\.review\)/);
     assert.doesNotMatch(resultFunction, /CURRENCIES\.map/);
     assert.doesNotMatch(resultFunction, /parseFloat|parseInt|Number\(/);
   });
@@ -1156,7 +1167,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     );
     assert.match(moduleRenderer, /零余额请填写 0/);
     assert.match(moduleRenderer, /确认一次性初始化/);
-    assert.match(moduleRenderer, /\['openingBalance', '期初财务OP'\]/);
+    assert.match(projectionSource, /\['openingBalance', '期初财务OP'\]/);
     assert.doesNotMatch(moduleRenderer, /overview\.openingBalances|function renderOpeningAudit/);
     assert.doesNotMatch(vccService, /openingBalances/);
   });

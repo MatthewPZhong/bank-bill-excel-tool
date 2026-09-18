@@ -1,0 +1,31 @@
+(node:74427) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+{"events":[{"event":"BEGIN IMMEDIATE","cancelled":false,"snapshots":0},{"event":"last-reading","cancelled":false,"snapshots":0},{"event":"close-start","cancelled":false,"snapshots":0},{"event":"cancel-delivered","cancelled":true,"snapshots":0},{"event":"close-complete","cancelled":true,"snapshots":0},{"event":"BEGIN IMMEDIATE","cancelled":true,"snapshots":0},{"event":"complete","cancelled":true,"snapshots":1}],"result":{"batchId":"multi-task","targetMonth":"2026-06","status":"success","records":[{"recordId":1,"batchId":"multi-task","targetMonth":"2026-06","sourceType":"system_op","sourceLabel":"系统财务OP","status":"success","rawCount":1,"insertedCount":1,"skippedCount":0,"invalidKeyCount":0,"conflictCount":0,"formatErrorCount":0,"rolledBackCount":0,"anomalyCount":0,"archiveState":"ready","errorMessage":"","sourceFiles":[{"id":1,"importRecordId":1,"sourceOrdinal":1,"fileName":"mixed.xlsx","sha256":"b3228eec280998e858e317793bb35bf5c05f47fc060044634ff674626c270f97","sizeBytes":21266,"archiveArtifactId":1,"archiveState":"ready","lastErrorCode":"","lastErrorMessage":"","boundAt":"2026-09-18 23:39:34"}]}],"physicalFileCount":1,"businessSheetCount":1,"readRowCount":9}}
+✖ real async reader close receives cancellation before business BEGIN (54.677916ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 152.869375
+
+✖ failing tests:
+
+test at changes/3.2.9/codex/v3.2.9-vcc-fin-op-multisheet-review-export/evidence/review-2026-09-18-rereview/import-async-close-cancel-probe.js:77:1
+✖ real async reader close receives cancellation before business BEGIN (54.677916ms)
+  AssertionError [ERR_ASSERTION]: real event loop delivered cancellation during async reader.close before transaction
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/3.2.9/codex/v3.2.9-vcc-fin-op-multisheet-review-export/evidence/review-2026-09-18-rereview/import-async-close-cancel-probe.js:89:9)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:358:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

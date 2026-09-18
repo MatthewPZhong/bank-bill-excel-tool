@@ -21,6 +21,11 @@ const EXCLUDE_REASON_SET = new Set(EXCLUDE_REASONS);
 
 const SUPPORT_ACTION_POLICIES = Object.freeze([
   Object.freeze({
+    channel: 'vccFinancialOp:export:review',
+    kind: 'support-action',
+    reason: 'user-document-export'
+  }),
+  Object.freeze({
     channel: 'app:save-user-guide',
     kind: 'support-action',
     reason: 'user-document-export'

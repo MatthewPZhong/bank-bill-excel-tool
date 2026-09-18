@@ -1,0 +1,91 @@
+(node:42500) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 同类型跨 Sheet 幂等、多主体通道及混合原件共享；来源 hold 在首行读取前已齐全 (89.541792ms)
+✔ RV02：完整甲、八币种乙、充值各 Sheet 独立，系统组精确计数并保留 18 条实际读取行 (41.805209ms)
+✔ 系统 OP 无目标账期也保留扫描行数和 Sheet 进度，其他类型照常提交 (34.458291ms)
+✔ 失败和解析成功的系统 OP Sheet 跨文件累计读取量，整组回滚也保留计数 (42.900084ms)
+✔ 系统 OP 扫描中断仍上报已完成数据行，不把未读尾部或表头计入 (25.814583ms)
+✔ 同主体九币种跨 Sheet 拆分，或八币种与完整候选并存，都不能补救该主体 (70.827209ms)
+✔ 未知主体按 Sheet 计数；主体成员或持久 metadata 损坏时来源和 hold 创建一起回滚 (36.836292ms)
+✔ 不同输入文件同名同内容：存档共用 Blob 后仍按两个物理来源导入和幂等 (33.96825ms)
+✔ 系统 OP 日期单元格与旧 Reader 等价，九币种快照正常导入 (39.008125ms)
+✔ 表头位于预览窗口外：混合类型导入后原表、校验表仍按持久成员定位 (154.8685ms)
+(node:42501) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:42501) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:42501) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ IPC handler → Service → 两阶段真实 Worker → 原子保存；无业务 DML、不创建正式批次 (584.246209ms)
+(node:42501) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:42501) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+▶ 主体与系统 OP 显示值按导入合同核验，真实 IPC 导出保留原始值和格式
+  ✔ 数值主体的前导零 (508.93175ms)
+(node:42501) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:42501) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✔ CNH 与 CNY 是两个独立主体 (574.928875ms)
+(node:42501) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:42501) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✔ 部门和币种使用显示值 (498.510875ms)
+✔ 主体与系统 OP 显示值按导入合同核验，真实 IPC 导出保留原始值和格式 (1582.784292ms)
+(node:42501) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:42501) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 格式化主体可导出仍须核对原始数值，错误审计不能替换既有目标 (418.136708ms)
+✔ 取消另存为不启动 Worker；保存期间修改结果会拦截旧 revision (57.913375ms)
+(node:42501) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:42501) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:42501) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:42501) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:42501) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:42501) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ Worker 后结果过期或目标发生变化，不替换目标 (1448.926125ms)
+(node:42501) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 取消、强制退出及服务关闭均等待 Worker 退出和清理，不执行导入恢复 (287.43925ms)
+(node:42501) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 拒绝原始输入、受管目录和任意 renderer 输出路径 (203.785959ms)
+✔ 取消后的清理失败必须显示错误与残留路径，不能返回已取消掩盖残留文件 (96.79975ms)
+(node:42502) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ v1 绑定原件的系统 OP 错误/错误公式缓存按旧空审计核验，附页输出原始错误码文本 (222.913083ms)
+▶ v1 系统 OP 按旧显示主体匹配，保留数值格式和布尔原类型
+  ✔ 000123 (120.575166ms)
+  ✔ TRUE (116.275083ms)
+✔ v1 系统 OP 按旧显示主体匹配，保留数值格式和布尔原类型 (237.161958ms)
+▶ 旧错误兼容不放过非空审计或普通文本不符
+  ✔ raw (80.35ms)
+  ✔ display (76.228708ms)
+  ✔ ordinary-text (81.546ms)
+✔ 旧错误兼容不放过非空审计或普通文本不符 (238.445583ms)
+▶ 历史兼容仍拒绝主体、币种、部门、账期和余额错误，原件哈希损坏也失败
+  ✔ 主体 (85.09475ms)
+  ✔ 币种 (86.797292ms)
+  ✔ 业务部门 (87.352083ms)
+  ✔ 账单日期 (91.453958ms)
+  ✔ 财务余额 (92.85225ms)
+  ✔ hash (84.838959ms)
+✔ 历史兼容仍拒绝主体、币种、部门、账期和余额错误，原件哈希损坏也失败 (528.996125ms)
+✔ v2 系统 OP 原生错误按新审计严格核验，不能套用 v1 空审计兼容 (157.47575ms)
+ℹ tests 37
+ℹ suites 0
+ℹ pass 37
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4868.394041

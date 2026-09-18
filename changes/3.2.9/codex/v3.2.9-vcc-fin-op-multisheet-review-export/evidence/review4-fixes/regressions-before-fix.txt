@@ -1,0 +1,227 @@
+(node:42517) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✖ 系统 OP 无目标账期也保留扫描行数和 Sheet 进度，其他类型照常提交 (64.924167ms)
+✖ 失败和解析成功的系统 OP Sheet 跨文件累计读取量，整组回滚也保留计数 (51.47075ms)
+✖ 系统 OP 扫描中断仍上报已完成数据行，不把未读尾部或表头计入 (29.95975ms)
+(node:42518) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:42518) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:42518) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+▶ 主体与系统 OP 显示值按导入合同核验，真实 IPC 导出保留原始值和格式
+  ✖ 数值主体的前导零 (458.648834ms)
+(node:42518) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:42518) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✖ CNH 与 CNY 是两个独立主体 (413.618291ms)
+(node:42518) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:42518) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✖ 部门和币种使用显示值 (397.81975ms)
+✖ 主体与系统 OP 显示值按导入合同核验，真实 IPC 导出保留原始值和格式 (1270.748959ms)
+(node:42518) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:42518) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✖ 格式化主体可导出仍须核对原始数值，错误审计不能替换既有目标 (415.496291ms)
+(node:42519) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+▶ v1 系统 OP 按旧显示主体匹配，保留数值格式和布尔原类型
+  ✖ 000123 (145.459791ms)
+  ✖ TRUE (120.428375ms)
+✖ v1 系统 OP 按旧显示主体匹配，保留数值格式和布尔原类型 (266.478625ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 0
+ℹ fail 11
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1871.938708
+
+✖ failing tests:
+
+test at ../../../../../private/tmp/vcc-review4-before-h95uywv6/tests/unit/backend/vcc-financial-op/multisheet-import.test.js:107:1
+✖ 系统 OP 无目标账期也保留扫描行数和 Sheet 进度，其他类型照常提交 (64.924167ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  1 !== 10
+  
+      at TestContext.<anonymous> (/private/tmp/vcc-review4-before-h95uywv6/tests/unit/backend/vcc-financial-op/multisheet-import.test.js:115:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:358:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 10,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../../private/tmp/vcc-review4-before-h95uywv6/tests/unit/backend/vcc-financial-op/multisheet-import.test.js:120:1
+✖ 失败和解析成功的系统 OP Sheet 跨文件累计读取量，整组回滚也保留计数 (51.47075ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  10 !== 28
+  
+      at TestContext.<anonymous> (/private/tmp/vcc-review4-before-h95uywv6/tests/unit/backend/vcc-financial-op/multisheet-import.test.js:127:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 10,
+    expected: 28,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../../private/tmp/vcc-review4-before-h95uywv6/tests/unit/backend/vcc-financial-op/multisheet-import.test.js:136:1
+✖ 系统 OP 扫描中断仍上报已完成数据行，不把未读尾部或表头计入 (29.95975ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+  + []
+  - [
+  -   4
+  - ]
+  
+      at TestContext.<anonymous> (/private/tmp/vcc-review4-before-h95uywv6/tests/unit/backend/vcc-financial-op/multisheet-import.test.js:151:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [],
+    expected: [ 4 ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../../private/tmp/vcc-review4-before-h95uywv6/tests/unit/main-process/vcc-financial-op-review-ipc.test.js:54:14
+✖ 数值主体的前导零 (458.648834ms)
+  AssertionError [ERR_ASSERTION]: {"status":"error","code":"vcc-review-validation-failed","message":"S:1:2 系统 OP 主体/币种/账期不符","detailLines":[]}
+  
+  'error' !== 'success'
+  
+      at TestContext.<anonymous> (/private/tmp/vcc-review4-before-h95uywv6/tests/unit/main-process/vcc-financial-op-review-ipc.test.js:71:48)
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async TestContext.<anonymous> (/private/tmp/vcc-review4-before-h95uywv6/tests/unit/main-process/vcc-financial-op-review-ipc.test.js:54:6)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:358:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'error',
+    expected: 'success',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../../private/tmp/vcc-review4-before-h95uywv6/tests/unit/main-process/vcc-financial-op-review-ipc.test.js:54:14
+✖ CNH 与 CNY 是两个独立主体 (413.618291ms)
+  AssertionError [ERR_ASSERTION]: {"status":"error","code":"vcc-review-validation-failed","message":"D:1 subject 与原表不符","detailLines":[]}
+  
+  'error' !== 'success'
+  
+      at TestContext.<anonymous> (/private/tmp/vcc-review4-before-h95uywv6/tests/unit/main-process/vcc-financial-op-review-ipc.test.js:71:48)
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async TestContext.<anonymous> (/private/tmp/vcc-review4-before-h95uywv6/tests/unit/main-process/vcc-financial-op-review-ipc.test.js:54:6)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:358:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'error',
+    expected: 'success',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../../private/tmp/vcc-review4-before-h95uywv6/tests/unit/main-process/vcc-financial-op-review-ipc.test.js:54:14
+✖ 部门和币种使用显示值 (397.81975ms)
+  AssertionError [ERR_ASSERTION]: {"status":"error","code":"vcc-review-validation-failed","message":"S:1:2 系统 OP 主体/币种/账期不符","detailLines":[]}
+  
+  'error' !== 'success'
+  
+      at TestContext.<anonymous> (/private/tmp/vcc-review4-before-h95uywv6/tests/unit/main-process/vcc-financial-op-review-ipc.test.js:71:48)
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async TestContext.<anonymous> (/private/tmp/vcc-review4-before-h95uywv6/tests/unit/main-process/vcc-financial-op-review-ipc.test.js:54:6)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:358:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'error',
+    expected: 'success',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../../private/tmp/vcc-review4-before-h95uywv6/tests/unit/main-process/vcc-financial-op-review-ipc.test.js:92:1
+✖ 格式化主体可导出仍须核对原始数值，错误审计不能替换既有目标 (415.496291ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /原始列 2 不符/. Input:
+  
+  'S:1:2 系统 OP 主体/币种/账期不符'
+  
+      at TestContext.<anonymous> (/private/tmp/vcc-review4-before-h95uywv6/tests/unit/main-process/vcc-financial-op-review-ipc.test.js:104:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'S:1:2 系统 OP 主体/币种/账期不符',
+    expected: /原始列 2 不符/,
+    operator: 'match',
+    diff: 'simple'
+  }
+
+test at ../../../../../private/tmp/vcc-review4-before-h95uywv6/tests/unit/main-process/vcc-financial-op-review-legacy-error.test.js:77:14
+✖ 000123 (145.459791ms)
+  Error: S:1:2 系统 OP 主体/币种/账期不符
+      at reviewError (/private/tmp/vcc-review4-before-h95uywv6/src/backend/vcc-financial-op/review-export-contract.js:8:78)
+      at mismatch (/private/tmp/vcc-review4-before-h95uywv6/src/backend/vcc-financial-op/review-export-plan.js:26:31)
+      at validateRawFact (/private/tmp/vcc-review4-before-h95uywv6/src/backend/vcc-financial-op/review-export-plan.js:303:77)
+      at save (/private/tmp/vcc-review4-before-h95uywv6/src/backend/vcc-financial-op/review-export-plan.js:340:26)
+      at /private/tmp/vcc-review4-before-h95uywv6/src/backend/vcc-financial-op/review-export-plan.js:386:19
+      at finalizeRow (/private/tmp/vcc-review4-before-h95uywv6/src/backend/toolbox-format/xlsx-sheet-scanner.js:715:28)
+      at SAXStream.<anonymous> (/private/tmp/vcc-review4-before-h95uywv6/src/backend/toolbox-format/xlsx-sheet-scanner.js:1299:30)
+      at SAXStream.emit (node:events:508:28)
+      at me._parser.<computed> [as onclosetag] (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:375:17)
+      at emit (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:745:35)
+      at emitNode (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:803:5)
+      at closeTag (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:1089:7)
+      at SAXParser.write (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:1689:13)
+      at SAXStream.write (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:339:18)
+      at ReadStream.<anonymous> (/private/tmp/vcc-review4-before-h95uywv6/src/backend/toolbox-format/xlsx-sheet-scanner.js:1380:16)
+      at ReadStream.emit (node:events:508:28) {
+    code: 'vcc-review-validation-failed',
+    detailLines: []
+  }
+
+test at ../../../../../private/tmp/vcc-review4-before-h95uywv6/tests/unit/main-process/vcc-financial-op-review-legacy-error.test.js:77:14
+✖ TRUE (120.428375ms)
+  Error: S:1:2 系统 OP 主体/币种/账期不符
+      at reviewError (/private/tmp/vcc-review4-before-h95uywv6/src/backend/vcc-financial-op/review-export-contract.js:8:78)
+      at mismatch (/private/tmp/vcc-review4-before-h95uywv6/src/backend/vcc-financial-op/review-export-plan.js:26:31)
+      at validateRawFact (/private/tmp/vcc-review4-before-h95uywv6/src/backend/vcc-financial-op/review-export-plan.js:303:77)
+      at save (/private/tmp/vcc-review4-before-h95uywv6/src/backend/vcc-financial-op/review-export-plan.js:340:26)
+      at /private/tmp/vcc-review4-before-h95uywv6/src/backend/vcc-financial-op/review-export-plan.js:386:19
+      at finalizeRow (/private/tmp/vcc-review4-before-h95uywv6/src/backend/toolbox-format/xlsx-sheet-scanner.js:715:28)
+      at SAXStream.<anonymous> (/private/tmp/vcc-review4-before-h95uywv6/src/backend/toolbox-format/xlsx-sheet-scanner.js:1299:30)
+      at SAXStream.emit (node:events:508:28)
+      at me._parser.<computed> [as onclosetag] (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:375:17)
+      at emit (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:745:35)
+      at emitNode (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:803:5)
+      at closeTag (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:1089:7)
+      at SAXParser.write (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:1689:13)
+      at SAXStream.write (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:339:18)
+      at ReadStream.<anonymous> (/private/tmp/vcc-review4-before-h95uywv6/src/backend/toolbox-format/xlsx-sheet-scanner.js:1380:16)
+      at ReadStream.emit (node:events:508:28) {
+    code: 'vcc-review-validation-failed',
+    detailLines: []
+  }

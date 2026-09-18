@@ -1,0 +1,25 @@
+{
+  "date": "2026-09-18T03:55:35.936Z",
+  "scope": "shared-writer-and-streaming-reader-only",
+  "fullVccMillionRowAcceptance": "not-run",
+  "platform": "darwin",
+  "node": "v24.13.0",
+  "dataRows": 1048580,
+  "columns": 49,
+  "sheetCounts": [
+    1048575,
+    5
+  ],
+  "actualCounts": [
+    1048575,
+    5
+  ],
+  "writeMs": 63224.568667,
+  "readMs": 215581.13841599997,
+  "peakRss": 248168448,
+  "processMaxRssKiB": 242656,
+  "outputBytes": 169334061,
+  "peakBufferedBytes": 162333,
+  "drainWaits": 32712,
+  "rowCount": 1048582
+}

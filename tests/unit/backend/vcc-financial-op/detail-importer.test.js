@@ -978,7 +978,6 @@ test('协作式取消只保留已读取行汇总和一条文件级失败事件',
     rechargeRow({ 订单号: 'cancel-2' }),
     rechargeRow({ 订单号: 'cancel-3' })
   ]);
-  let checks = 0;
   const progressEvents = [];
 
   await assert.rejects(
@@ -987,8 +986,7 @@ test('协作式取消只保留已读取行汇总和一条文件级失败事件',
       targetMonth: '2026-06',
       files: [fileEntry(source, SOURCE_TYPES.RECHARGE)],
       shouldCancel: () => {
-        checks += 1;
-        return checks >= 5;
+        return db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_import_staging_rows').get().n >= 1;
       },
       onProgress: (progress) => progressEvents.push({ ...progress })
     }),

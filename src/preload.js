@@ -575,6 +575,7 @@ contextBridge.exposeInMainWorld('desktopApi', {
     getRun: (payload) => ipcRenderer.invoke('vccFinancialOp:run:get', payload),
     latestArchivedRun: () => ipcRenderer.invoke('vccFinancialOp:run:latest-archived'),
     exportResult: (payload) => ipcRenderer.invoke('vccFinancialOp:export:result', payload),
+    exportReviewTable: (payload) => ipcRenderer.invoke('vccFinancialOp:export:review', payload),
     listImportMonths: () => ipcRenderer.invoke('vccFinancialOp:imports:list-months'),
     listImportRecords: (payload) => ipcRenderer.invoke('vccFinancialOp:imports:list-records', payload),
     dataManagerOverview: (payload) => ipcRenderer.invoke('vccFinancialOp:data-manager:overview', payload),

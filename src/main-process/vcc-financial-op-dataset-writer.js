@@ -22,10 +22,13 @@ const {
   pendingCanonicalValues,
   pendingContentHash
 } = require('../backend/vcc-financial-op/row-mapper');
-const { streamDetailRows } = require('../backend/vcc-financial-op/workbook-reader');
+const { streamStoredDetailRows, openWorkbookSheets } = require('../backend/vcc-financial-op/workbook-reader');
+const { openRichWorkbook } = require('../backend/xlsx-rich-reader');
 const { hashSourceFile } = require('../backend/vcc-financial-op/source-lineage');
+const { createArchiveRepository } = require('../backend/database/archive-repository');
+const { assertArtifactMember } = require('../backend/vcc-financial-op/import-handoff');
 const {
-  readSystemOpSnapshotCandidates
+  readSystemOpSheetCandidates
 } = require('../backend/vcc-financial-op/system-op-importer');
 const { writeXlsxAtomically } = require('./vcc-financial-op-output-publication');
 
@@ -723,6 +726,31 @@ function mapStoredRaw(expected, rawJson) {
   return mapped.values;
 }
 
+function storedSourceMember(db, sourceId) {
+  // 旧合同单来源没有成员清单；新合同必须从持久 artifact 验证定位，不能信任路径 DTO。
+  if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='archive_artifacts'").get()) return null;
+  const binding = db.prepare(`SELECT s.*,r.batch_id,r.source_type FROM vcc_fin_op_import_sources s
+    JOIN vcc_fin_op_import_records r ON r.id=s.import_record_id WHERE s.id=?`).get(sourceId);
+  if (!binding?.archive_artifact_id) throw exportError('archive-lineage-invalid', `导入来源 ${sourceId} 的绑定已丢失`);
+  const archive = createArchiveRepository(db);
+  const artifact = archive.getArtifact(binding.archive_artifact_id);
+  if (!artifact || artifact.status !== 'ready') throw exportError('archive-integrity-failure', `导入来源 ${sourceId} 的原件已丢失或不可用`);
+  if (artifact?.metadata?.vccImportHandoffVersion === 2) return assertArtifactMember(artifact, binding, archive.getBatch(artifact.batchId));
+  if (artifact?.metadata?.vccImportHandoffVersion != null && artifact.metadata.vccImportHandoffVersion !== 1) {
+    throw exportError('archive-lineage-invalid', '原表交接成员版本不受支持');
+  }
+  return null;
+}
+
+function storedSheetSelection(member, sheetName, rawContractVersion) {
+  if (!member) return { sheetName };
+  const selected = member.sheets.find((sheet) => sheet.sheetName === sheetName);
+  if (!selected || selected.rawContractVersion !== Number(rawContractVersion)) {
+    throw exportError('archive-row-integrity-failure', `原 Sheet ${sheetName} 不在持久来源成员中或原始结构不符`);
+  }
+  return selected;
+}
+
 async function emitReconstructedDetailRows(db, scope, archiveSources, emit) {
   for (const values of iterateLegacyDatasetRows(db, scope)) emit(values);
 
@@ -791,7 +819,7 @@ async function emitReconstructedDetailRows(db, scope, archiveSources, emit) {
       );
     }
     const expectedSheets = db.prepare(`
-      SELECT sheet_name, COUNT(*) AS row_count
+      SELECT sheet_name, MIN(raw_contract_version) AS raw_contract_version, COUNT(*) AS row_count
       FROM vcc_fin_op_effective_rows
       WHERE import_source_id = ? AND target_month = ? AND source_type = ?
       GROUP BY sheet_name
@@ -814,7 +842,12 @@ async function emitReconstructedDetailRows(db, scope, archiveSources, emit) {
       }];
     }));
     let seenCount = 0;
-    await streamDetailRows(source.filePath, scope.sourceType, {
+    const member = storedSourceMember(db, sourceId);
+    const workbook = await openWorkbookSheets(source.filePath);
+    try {
+    for (const expectedSheet of expectedSheets) {
+      await streamStoredDetailRows(source.filePath, scope.sourceType, expectedSheet.raw_contract_version, {
+      workbook, ...storedSheetSelection(member, expectedSheet.sheet_name, expectedSheet.raw_contract_version),
       onDataRow: (input) => {
         const cursor = cursors.get(input.sheetName);
         if (!cursor || cursor.next.done) return;
@@ -828,7 +861,8 @@ async function emitReconstructedDetailRows(db, scope, archiveSources, emit) {
         }
         const mapped = mapDetailRow({
           sourceType: scope.sourceType,
-          values: input.values,
+          values: scope.sourceType === SOURCE_TYPES.PENDING
+            ? pendingCanonicalValues(input.values, expected.raw_contract_version) : input.values,
           targetMonth: scope.targetMonth,
           assignedSubject: expected.subject,
           sourceFile: input.sourceFile,
@@ -843,6 +877,11 @@ async function emitReconstructedDetailRows(db, scope, archiveSources, emit) {
         cursor.next = cursor.iterator.next();
       }
     });
+    }
+    } finally {
+      for (const cursor of cursors.values()) cursor.iterator.return?.();
+      await workbook.close();
+    }
     const incompleteCursor = [...cursors.values()].find((cursor) => (
       !cursor.next.done || cursor.seenCount !== cursor.expectedCount
     ));
@@ -907,10 +946,20 @@ async function emitReconstructedSystemRows(db, scope, archiveSources, emit) {
       // 导入允许同一文件中的完整主体成功、异常主体过滤并记录 anomaly。
       // 重建只核已提交主体的完整血缘，不能让同一文件中已经审计的无关异常
       // 再次否决这些有效主体。
-      actualSnapshots = readSystemOpSnapshotCandidates(
-        source.filePath,
-        scope.targetMonth
-      ).snapshots;
+      actualSnapshots = [];
+      const member = storedSourceMember(db, sourceId);
+      const names = db.prepare('SELECT DISTINCT sheet_name FROM vcc_fin_op_system_snapshots WHERE target_month = ? AND import_source_id = ?')
+        .all(scope.targetMonth, sourceId).map((row) => row.sheet_name);
+      const workbook = await openRichWorkbook(source.filePath, { memoryBudgetBytes: 64 * 1024 * 1024 });
+      try {
+        for (const name of names) {
+          const sheetIndex = workbook.sheets.findIndex((sheet) => sheet.name === name);
+          if (sheetIndex < 0) throw new Error(`缺少系统 OP Sheet：${name}`);
+          const candidates = await readSystemOpSheetCandidates({ ...source, fileName: source.fileName || path.basename(source.filePath) },
+            { sheetIndex, ...storedSheetSelection(member, name, 1) }, scope.targetMonth, workbook);
+          actualSnapshots.push(...candidates.snapshots);
+        }
+      } finally { await workbook.close(); }
     } catch (cause) {
       const error = exportError(
         'archive-row-integrity-failure',
@@ -921,13 +970,14 @@ async function emitReconstructedSystemRows(db, scope, archiveSources, emit) {
     }
     const actualBySubject = new Map();
     for (const snapshot of actualSnapshots) {
-      if (actualBySubject.has(snapshot.subject)) {
+      const identity = `${snapshot.sheetName}\u0000${snapshot.subject}`;
+      if (actualBySubject.has(identity)) {
         throw exportError(
           'archive-row-integrity-failure',
           `系统财务OP导入来源 ${sourceId} 的主体 ${snapshot.subject} 重复`
         );
       }
-      actualBySubject.set(snapshot.subject, snapshot);
+      actualBySubject.set(identity, snapshot);
     }
     const expectedSnapshots = db.prepare(`
       SELECT id, subject, content_hash, source_file, sheet_name, source_row
@@ -936,7 +986,7 @@ async function emitReconstructedSystemRows(db, scope, archiveSources, emit) {
       ORDER BY id
     `).all(scope.targetMonth, sourceId);
     for (const expected of expectedSnapshots) {
-      const actual = actualBySubject.get(expected.subject);
+      const actual = actualBySubject.get(`${expected.sheet_name}\u0000${expected.subject}`);
       if (!actual
           || actual.contentHash !== expected.content_hash
           || actual.sheetName !== expected.sheet_name
@@ -1137,6 +1187,7 @@ async function writeDatasetWorkbook({
 }
 
 module.exports = {
+  assertMappedLineage,
   MAX_DATA_ROWS_PER_SHEET,
   EXPORT_KINDS,
   CHECK_EXPORT_DEFINITIONS,

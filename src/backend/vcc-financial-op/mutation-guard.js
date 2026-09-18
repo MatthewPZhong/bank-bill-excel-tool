@@ -10,6 +10,8 @@ const {
 } = require('./mutation-policy');
 const {
   VCC_STORAGE_GUARD_TRIGGER_PREFIX,
+  getVccStorageContractVersion,
+  assertVccStorageContract,
   registerVccStorageWriteCapability,
   vccStorageGuardTriggerDefinition
 } = require('../vcc-financial-op-db/storage-contract');
@@ -236,7 +238,9 @@ function isApprovedStorageContractTrigger(trigger) {
 
 function assertVccTriggerPolicy(db) {
   // Dedicated result/destructive workers 裸开 DatabaseSync；它们必须在首写前
-  // 经同一策略检查显式取得 contract-v2 连接能力。
+  // 经同一策略检查显式取得当前合同的连接能力。
+  const storageVersion = getVccStorageContractVersion(db);
+  if (storageVersion >= 2) assertVccStorageContract(db);
   registerVccStorageWriteCapability(db);
   const triggers = vccTriggers(db);
   const unknown = triggers.filter((trigger) => (

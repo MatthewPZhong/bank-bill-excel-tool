@@ -1,0 +1,35 @@
+{
+  "recordedAt": "2026-09-18T06:13:10.032170+00:00",
+  "command": "UNIT_TEST_CONCURRENCY=2 npm run release-check",
+  "exitCode": 0,
+  "baseCommit": "2ba9ef14fe972363b604955636cff0c9ac53700f",
+  "sourceManifestSha256": "9e8990f8ceb7c4ace9fb79c9235abeb1e5b29934b2ee6cf505c0ccbe602a367d",
+  "sourceUnchangedDuringFinalGate": true,
+  "lint": "pass",
+  "smoke": "pass",
+  "unit": {
+    "total": 7328,
+    "passed": 7325,
+    "failed": 0,
+    "skipped": 3,
+    "suites": 831,
+    "files": 475,
+    "durationMs": 734851.333125,
+    "skipReason": "Windows-only PowerShell token cleanup and two packaged canary checks on macOS"
+  },
+  "integration": {
+    "scripts": 53,
+    "assertions": 2488,
+    "passed": 2488,
+    "failed": 0,
+    "durationMs": 489926
+  },
+  "evidence": "release-check.txt",
+  "windowsInstalledAcceptance": "not-run",
+  "excelWpsAcceptance": "not-run",
+  "fullVccPF01ThroughPF05": "not-run",
+  "featureBranch": "codex/v3.2.9-vcc-fin-op-multisheet-review-export",
+  "checkoutBranchAtSourceCapture": "main",
+  "deliveryCheckoutBranch": "codex/v3.2.9-vcc-fin-op-multisheet-review-export",
+  "branchProvenance": "Source capture recorded main at the same base commit; delivery is checked out on the requested feature branch. All 59 implementation/test file hashes are unchanged. The exact checkout-switch time was not established."
+}

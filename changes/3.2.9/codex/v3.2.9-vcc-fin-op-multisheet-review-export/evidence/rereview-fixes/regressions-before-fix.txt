@@ -1,0 +1,155 @@
+(node:58680) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+▶ Pending 富文本按原导入合同核验，空 run、注音和 CDATA 不改变导出原文或历史哈希
+  ✖ trailing-selfclosing (113.961791ms)
+  ✔ trailing-explicit-empty (174.471542ms)
+  ✔ multiple-runs (116.627ms)
+  ✖ phonetic (74.499666ms)
+  ✖ cdata (67.534541ms)
+  ✖ cdata-entities (67.128875ms)
+  ✖ comment (69.446167ms)
+✖ Pending 富文本按原导入合同核验，空 run、注音和 CDATA 不改变导出原文或历史哈希 (684.641958ms)
+✖ 系统 OP 布尔原值与公式缓存按导入类型核验，附页仍写入布尔单元格 (72.490459ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 2
+ℹ fail 7
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 920.080667
+
+✖ failing tests:
+
+test at tests/unit/main-process/vcc-financial-op-review-export.test.js:196:39
+✖ trailing-selfclosing (113.961791ms)
+  Error: 导入记录 4 原表第 2 行与当前有效数据的幂等键或内容哈希不一致
+      at exportError (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/main-process/vcc-financial-op-dataset-writer.js:84:17)
+      at assertMappedLineage (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/main-process/vcc-financial-op-dataset-writer.js:696:11)
+      at validateRawFact (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/vcc-financial-op/review-export-plan.js:316:5)
+      at save (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/vcc-financial-op/review-export-plan.js:332:26)
+      at /Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/vcc-financial-op/review-export-plan.js:379:19
+      at finalizeRow (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/toolbox-format/xlsx-sheet-scanner.js:707:28)
+      at SAXStream.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/toolbox-format/xlsx-sheet-scanner.js:1282:30)
+      at SAXStream.emit (node:events:508:28)
+      at me._parser.<computed> [as onclosetag] (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:375:17)
+      at emit (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:745:35)
+      at emitNode (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:803:5)
+      at closeTag (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:1089:7)
+      at SAXParser.write (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:1689:13)
+      at SAXStream.write (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:339:18)
+      at ReadStream.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/toolbox-format/xlsx-sheet-scanner.js:1362:16)
+      at ReadStream.emit (node:events:508:28) {
+    code: 'archive-row-integrity-failure'
+  }
+
+test at tests/unit/main-process/vcc-financial-op-review-export.test.js:196:39
+✖ phonetic (74.499666ms)
+  Error: 导入记录 4 原表第 2 行与当前有效数据的幂等键或内容哈希不一致
+      at exportError (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/main-process/vcc-financial-op-dataset-writer.js:84:17)
+      at assertMappedLineage (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/main-process/vcc-financial-op-dataset-writer.js:696:11)
+      at validateRawFact (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/vcc-financial-op/review-export-plan.js:316:5)
+      at save (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/vcc-financial-op/review-export-plan.js:332:26)
+      at /Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/vcc-financial-op/review-export-plan.js:379:19
+      at finalizeRow (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/toolbox-format/xlsx-sheet-scanner.js:707:28)
+      at SAXStream.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/toolbox-format/xlsx-sheet-scanner.js:1282:30)
+      at SAXStream.emit (node:events:508:28)
+      at me._parser.<computed> [as onclosetag] (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:375:17)
+      at emit (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:745:35)
+      at emitNode (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:803:5)
+      at closeTag (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:1089:7)
+      at SAXParser.write (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:1689:13)
+      at SAXStream.write (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:339:18)
+      at ReadStream.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/toolbox-format/xlsx-sheet-scanner.js:1362:16)
+      at ReadStream.emit (node:events:508:28) {
+    code: 'archive-row-integrity-failure'
+  }
+
+test at tests/unit/main-process/vcc-financial-op-review-export.test.js:196:39
+✖ cdata (67.534541ms)
+  Error: 导入记录 4 原表第 2 行与当前有效数据的幂等键或内容哈希不一致
+      at exportError (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/main-process/vcc-financial-op-dataset-writer.js:84:17)
+      at assertMappedLineage (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/main-process/vcc-financial-op-dataset-writer.js:696:11)
+      at validateRawFact (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/vcc-financial-op/review-export-plan.js:316:5)
+      at save (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/vcc-financial-op/review-export-plan.js:332:26)
+      at /Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/vcc-financial-op/review-export-plan.js:379:19
+      at finalizeRow (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/toolbox-format/xlsx-sheet-scanner.js:707:28)
+      at SAXStream.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/toolbox-format/xlsx-sheet-scanner.js:1282:30)
+      at SAXStream.emit (node:events:508:28)
+      at me._parser.<computed> [as onclosetag] (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:375:17)
+      at emit (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:745:35)
+      at emitNode (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:803:5)
+      at closeTag (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:1089:7)
+      at SAXParser.write (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:1689:13)
+      at SAXStream.write (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:339:18)
+      at ReadStream.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/toolbox-format/xlsx-sheet-scanner.js:1362:16)
+      at ReadStream.emit (node:events:508:28) {
+    code: 'archive-row-integrity-failure'
+  }
+
+test at tests/unit/main-process/vcc-financial-op-review-export.test.js:196:39
+✖ cdata-entities (67.128875ms)
+  Error: 导入记录 4 原表第 2 行与当前有效数据的幂等键或内容哈希不一致
+      at exportError (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/main-process/vcc-financial-op-dataset-writer.js:84:17)
+      at assertMappedLineage (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/main-process/vcc-financial-op-dataset-writer.js:696:11)
+      at validateRawFact (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/vcc-financial-op/review-export-plan.js:316:5)
+      at save (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/vcc-financial-op/review-export-plan.js:332:26)
+      at /Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/vcc-financial-op/review-export-plan.js:379:19
+      at finalizeRow (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/toolbox-format/xlsx-sheet-scanner.js:707:28)
+      at SAXStream.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/toolbox-format/xlsx-sheet-scanner.js:1282:30)
+      at SAXStream.emit (node:events:508:28)
+      at me._parser.<computed> [as onclosetag] (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:375:17)
+      at emit (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:745:35)
+      at emitNode (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:803:5)
+      at closeTag (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:1089:7)
+      at SAXParser.write (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:1689:13)
+      at SAXStream.write (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:339:18)
+      at ReadStream.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/toolbox-format/xlsx-sheet-scanner.js:1362:16)
+      at ReadStream.emit (node:events:508:28) {
+    code: 'archive-row-integrity-failure'
+  }
+
+test at tests/unit/main-process/vcc-financial-op-review-export.test.js:196:39
+✖ comment (69.446167ms)
+  Error: 导入记录 4 原表第 2 行与当前有效数据的幂等键或内容哈希不一致
+      at exportError (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/main-process/vcc-financial-op-dataset-writer.js:84:17)
+      at assertMappedLineage (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/main-process/vcc-financial-op-dataset-writer.js:696:11)
+      at validateRawFact (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/vcc-financial-op/review-export-plan.js:316:5)
+      at save (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/vcc-financial-op/review-export-plan.js:332:26)
+      at /Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/vcc-financial-op/review-export-plan.js:379:19
+      at finalizeRow (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/toolbox-format/xlsx-sheet-scanner.js:707:28)
+      at SAXStream.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/toolbox-format/xlsx-sheet-scanner.js:1282:30)
+      at SAXStream.emit (node:events:508:28)
+      at me._parser.<computed> [as onclosetag] (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:375:17)
+      at emit (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:745:35)
+      at emitNode (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:803:5)
+      at closeTag (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:1089:7)
+      at SAXParser.write (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:1689:13)
+      at SAXStream.write (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:339:18)
+      at ReadStream.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/toolbox-format/xlsx-sheet-scanner.js:1362:16)
+      at ReadStream.emit (node:events:508:28) {
+    code: 'archive-row-integrity-failure'
+  }
+
+test at tests/unit/main-process/vcc-financial-op-review-export.test.js:221:1
+✖ 系统 OP 布尔原值与公式缓存按导入类型核验，附页仍写入布尔单元格 (72.490459ms)
+  Error: S:1:2 原始列 5 不符
+      at reviewError (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/vcc-financial-op/review-export-contract.js:8:78)
+      at mismatch (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/vcc-financial-op/review-export-plan.js:25:31)
+      at validateRawFact (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/vcc-financial-op/review-export-plan.js:310:82)
+      at save (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/vcc-financial-op/review-export-plan.js:332:26)
+      at /Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/vcc-financial-op/review-export-plan.js:379:19
+      at finalizeRow (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/toolbox-format/xlsx-sheet-scanner.js:707:28)
+      at SAXStream.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/toolbox-format/xlsx-sheet-scanner.js:1282:30)
+      at SAXStream.emit (node:events:508:28)
+      at me._parser.<computed> [as onclosetag] (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:375:17)
+      at emit (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:745:35)
+      at emitNode (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:803:5)
+      at closeTag (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:1089:7)
+      at SAXParser.write (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:1689:13)
+      at SAXStream.write (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/sax/lib/sax.js:339:18)
+      at ReadStream.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/src/backend/toolbox-format/xlsx-sheet-scanner.js:1362:16)
+      at ReadStream.emit (node:events:508:28) {
+    code: 'vcc-review-validation-failed',
+    detailLines: []
+  }

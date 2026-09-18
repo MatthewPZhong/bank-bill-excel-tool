@@ -1,0 +1,16 @@
+(node:74623) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+large_count {"count":1026,"read":[512,1024,1026]}
+✔ rereview: 1026 rows report bounded progress without double counting (243.129625ms)
+mid_cancel [512,512]
+✔ rereview: cancel at intermediate row progress aborts current group (148.273625ms)
+late_cancel {"cancelled":true,"error":{"code":"vcc-import-cancelled","message":"VCC 财务OP导入已取消，已读取数据未进入有效数据集"},"count":0}
+✔ rereview: cancel requested on final read event before commit (30.978666ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 520.033333

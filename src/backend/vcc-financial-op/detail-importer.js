@@ -14,7 +14,7 @@ const {
   normalizeYearMonth,
   pendingCanonicalValues
 } = require('./row-mapper');
-const { inspectSourceFiles, streamDetailRows } = require('./workbook-reader');
+const { inspectSourceFiles, streamDetailRows, openWorkbookSheets } = require('./workbook-reader');
 const {
   attachSourceIdentity,
   assertSourceFileMatchesSync,
@@ -567,17 +567,24 @@ async function importDetailGroup({
   try {
     for (const file of importFiles) {
       throwIfCancelled(shouldCancel);
-      let fileResult;
+      let workbook;
       try {
-        fileResult = await streamDetailRows(file.filePath, sourceType, {
+        workbook = await openWorkbookSheets(file.filePath);
+        for (const selectedSheet of file.sheets || [file]) {
+          throwIfCancelled(shouldCancel);
+          const fileResult = await streamDetailRows(file.filePath, sourceType, {
+          workbook,
+          sheetName: selectedSheet.sheetName,
+          sheetIndex: selectedSheet.sheetIndex,
+          headerRow: selectedSheet.headerRow,
           onDataRow: ({ rowR, values, sourceFile, sheetName, keyCellType }) => {
             throwIfCancelled(shouldCancel);
             const mapped = mapDetailRow({
               sourceType,
               values,
               targetMonth: normalizedMonth,
-              assignedSubject: file.subject,
-              sourceFile,
+              assignedSubject: selectedSheet.subject,
+              sourceFile: file.fileName || sourceFile,
               sheetName,
               sourceRow: rowR,
               keyCellType
@@ -598,19 +605,23 @@ async function importDetailGroup({
                 phase: 'reading',
                 recordId,
                 sourceType,
-                sourceFile: progress.sourceFile,
+                sourceFile: file.fileName || progress.sourceFile,
+                sheetName: progress.sheetName,
                 rows: rawCount
               });
             }
           }
-        });
+          });
+          if (fileResult.rowCount === 0) {
+            const error = new Error(`${fileResult.sourceFile} / ${selectedSheet.sheetName || fileResult.sheetName}：${SOURCE_LABELS[sourceType]}没有数据行`);
+            error.code = 'empty-source-shard';
+            throw error;
+          }
+        }
       } catch (error) {
         throw attachSourceIdentity(error, file);
-      }
-      if (fileResult.rowCount === 0) {
-        const error = new Error(`${fileResult.sourceFile}：${SOURCE_LABELS[sourceType]}没有数据行`);
-        error.code = 'empty-source-shard';
-        throw attachSourceIdentity(error, file);
+      } finally {
+        if (workbook) await workbook.close();
       }
       // 首次 SHA 记录与实际解析必须属于同一份字节内容。解析完成后、任何
       // effective 提升前再次全量核对；不一致只会留下文件级失败事件。
