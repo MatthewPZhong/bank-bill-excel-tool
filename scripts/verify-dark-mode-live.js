@@ -139,8 +139,8 @@ function child() {
           appearanceTab.click();
           await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
         })()`);
-        const appearance = await web.executeJavaScript(`({visible: !document.getElementById('appearancePane').hidden, status: document.querySelector('[data-role="dark-mode-status"]').textContent, checked: document.getElementById('darkModeEnabled').checked})`);
-        check(appearance.visible && appearance.checked && appearance.status.includes('深色'), '真实外观设置与已保存时段不同步');
+        const appearance = await web.executeJavaScript(`({visible: !document.getElementById('appearancePane').hidden, theme: document.documentElement.dataset.theme, checked: document.getElementById('darkModeEnabled').checked})`);
+        check(appearance.visible && appearance.checked && appearance.theme === 'dark', '真实外观设置与已保存时段不同步');
         const screenshot = await web.capturePage();
         const imagePath = path.join(evidence, `live-${initial}-startup-dark-settings.png`);
         fs.writeFileSync(imagePath, screenshot.toPNG());

@@ -111,6 +111,12 @@ async function inspectPage(theme, runBehavior) {
   applyBackgroundSettings(state.backgroundSettings);
   check(document.documentElement.dataset.theme === theme, '真实主题控制器应用主题', theme);
   check(Boolean(window.DarkModeSchedule && window.DarkModeUI), '共享契约及首屏主题脚本均已加载');
+  const shellBackground = getComputedStyle(elements.appShell);
+  check(theme === 'dark'
+    ? shellBackground.backgroundColor === resolvedColor('--bg') && shellBackground.backgroundImage === 'none'
+    : shellBackground.backgroundImage !== 'none',
+    '默认背景随主题切换，夜间直接使用深色底色',
+    { color: shellBackground.backgroundColor, image: shellBackground.backgroundImage });
 
   const modules = [];
   for (const module of Object.values(MODULES)) {
@@ -143,7 +149,7 @@ async function inspectPage(theme, runBehavior) {
   const start = pane.querySelector('[data-role="dark-mode-start"]');
   const end = pane.querySelector('[data-role="dark-mode-end"]');
   const feedback = pane.querySelector('[data-role="dark-mode-feedback"]');
-  const current = pane.querySelector('[data-role="dark-mode-status"]');
+  const enableRow = pane.querySelector('.appearance-enable-row');
   const fields = pane.querySelector('fieldset');
   const cardRect = rect(card);
   const startRect = rect(start);
@@ -151,8 +157,21 @@ async function inspectPage(theme, runBehavior) {
   check(!pane.hidden && !fields.disabled, '真实设置外观页已加载且可以编辑');
   check(cardRect.x >= -1 && cardRect.y >= -1 && cardRect.right <= innerWidth + 1 && cardRect.bottom <= innerHeight + 1,
     '设置弹窗在 viewport 内', cardRect);
-  check(startRect.right < endRect.x && startRect.width >= 100 && endRect.width >= 100,
-    '时间控件有足够宽度且不重叠', { startRect, endRect });
+  const fieldsWidth = rect(fields).width;
+  const expectedTimeWidth = 104;
+  const enableRect = rect(enableRow);
+  check(startRect.right < endRect.x && Math.abs(startRect.width - expectedTimeWidth) < 1
+    && Math.abs(endRect.width - expectedTimeWidth) < 1,
+    '时间框为时分文本与时钟按钮保留 104px 宽度', { startRect, endRect, fieldsWidth });
+  check(Math.abs(enableRect.width - Math.max(200, fieldsWidth / 4)) < 1,
+    '开关框缩至原来的四分之一，小窗口保留最小可用宽度', { enableRect, fieldsWidth });
+  const navItems = [...overlay.querySelectorAll('.app-settings-nav-item')];
+  check(navItems.at(-1).dataset.tab === 'appearance' && navItems.at(-1).textContent.trim().endsWith('外观设置'),
+    '外观设置位于导航末项');
+  check(!pane.querySelector('.appearance-preview,.appearance-current,.appearance-description,[data-role="dark-mode-status"]'),
+    '移除预览、状态与说明区域');
+  check(!/按本机时间自动切换|每天在设定时段使用深色|设置自动保存|界面预览/.test(pane.textContent),
+    '外观面板只保留标题、开关、时间及错误反馈');
   check(pane.scrollWidth <= pane.clientWidth + 1, '外观设置无水平滚动', { scrollWidth: pane.scrollWidth, clientWidth: pane.clientWidth });
   check(document.documentElement.scrollWidth <= innerWidth + 1, '页面无水平滚动', document.documentElement.scrollWidth);
   const palette = {};
@@ -215,10 +234,10 @@ async function inspectPage(theme, runBehavior) {
     };
     window.__darkModeGui.theme('light');
     change(enabled, true);
-    check(fields.disabled, '保存中禁用外观选项');
+    check(controller.getSnapshot().saving && !fields.disabled, '保存中保持外观选项可编辑，由队列串行保存');
     await delay(45);
-    check(document.documentElement.dataset.theme === 'dark' && /深色/.test(current.textContent), '启用定时模式立即按模拟本机 21:00 转深色');
-    behavior.push('开关真实 DOM change → controller → 模拟 IPC → 主题/状态');
+    check(document.documentElement.dataset.theme === 'dark' && controller.getSnapshot().darkModeSchedule.enabled, '启用定时模式立即按模拟本机 21:00 转深色');
+    behavior.push('开关真实 DOM change → controller → 模拟 IPC → 主题');
     const beforeFailed = JSON.stringify(controller.getSnapshot().darkModeSchedule);
     window.__darkModeGui.failNextSave = true;
     change(enabled, false);
@@ -237,6 +256,20 @@ async function inspectPage(theme, runBehavior) {
     await delay(45);
     check(document.documentElement.dataset.theme === 'light' && end.value === '07:45', '禁用立即恢复浅色并保留自定义时间');
     behavior.push('失败保留 / 等时拒绝 / 时段保存与禁用保留');
+    const savedColor = cloneBackgroundSettings({ colorHex: '#e8d4b8' });
+    state.backgroundSettings = savedColor;
+    state.backgroundDraft = cloneBackgroundSettings(savedColor);
+    applyBackgroundSettings(savedColor);
+    const colorBeforeTheme = { color: elements.appShell.style.backgroundColor, image: elements.appShell.style.backgroundImage };
+    window.__darkModeGui.theme('dark');
+    check(getComputedStyle(elements.appShell).backgroundColor === resolvedColor('--bg')
+      && elements.appShell.style.backgroundImage === 'none', '自定义纯色在夜间显示深色底色，不保留浅色渐变');
+    window.__darkModeGui.theme('light');
+    check(elements.appShell.style.backgroundColor === colorBeforeTheme.color
+      && elements.appShell.style.backgroundImage === colorBeforeTheme.image
+      && JSON.stringify(state.backgroundSettings) === JSON.stringify(savedColor)
+      && window.__darkModeGui.backgroundWrites.length === 0, '回到浅色恢复保存的背景颜色，主题切换不写背景设置');
+    behavior.push('纯色深色底色 / 返回浅色恢复原配色 / 无背景写入');
     const imageDataUrl = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><rect width="40" height="20" fill="#ddf4f0"/></svg>');
     const savedBackground = cloneBackgroundSettings({ colorHex: '#bbccdd', imageDataUrl, filePath: '/isolated/example.png', sourceFileName: 'example.png' });
     state.backgroundSettings = savedBackground;
@@ -245,15 +278,17 @@ async function inspectPage(theme, runBehavior) {
     state.backgroundDraft.sourcePath = '/isolated/draft.png';
     const draftBefore = JSON.stringify(state.backgroundDraft);
     applyBackgroundSettings(state.backgroundDraft);
+    const backgroundBeforeTheme = elements.appShell.style.backgroundImage;
     window.__darkModeGui.theme('dark');
-    check(JSON.stringify(state.backgroundDraft) === draftBefore && elements.appShell.style.backgroundImage.includes('0.72'), '转深色保留当前背景草稿并添加遮罩');
+    check(JSON.stringify(state.backgroundDraft) === draftBefore && elements.appShell.style.backgroundImage === backgroundBeforeTheme, '转深色保持背景及草稿，不增加遮罩');
     check(elements.appShell.style.backgroundSize.endsWith('cover') && elements.appShell.style.backgroundRepeat.split(',').every((value) => value.trim() === 'no-repeat'), '图片裁切与重复方式保持');
     window.__darkModeGui.theme('light');
-    check(JSON.stringify(state.backgroundDraft) === draftBefore && !elements.appShell.style.backgroundImage.includes('0.72), rgba(11'), '转浅色移除遮罩且不丢草稿');
+    check(JSON.stringify(state.backgroundDraft) === draftBefore && elements.appShell.style.backgroundImage === backgroundBeforeTheme, '转浅色保持背景且不丢草稿');
     closeBackgroundPalette();
     check(JSON.stringify(state.backgroundSettings) === JSON.stringify(savedBackground) && state.backgroundDraft.colorHex === savedBackground.colorHex && window.__darkModeGui.backgroundWrites.length === 0,
       '取消背景恢复已保存配置，主题操作不保存或重置背景');
-    behavior.push('图片背景草稿 / 日夜遮罩 / 取消 / 无背景写入');
+    behavior.push('图片背景草稿 / 主题切换不加遮罩 / 取消 / 无背景写入');
+    document.activeElement?.blur();
     window.__darkModeGui.publish({ enabled: theme === 'dark', startTime: '18:30', endTime: '06:00' });
     state.backgroundSettings = cloneBackgroundSettings({ colorHex: '#f9fafc' });
     applyBackgroundSettings(state.backgroundSettings);
@@ -263,7 +298,7 @@ async function inspectPage(theme, runBehavior) {
   return {
     theme, ok: failures.length === 0, assertions, failures, behavior, modules, palette, contrastPairs, probes,
     interactionProbes: { paletteAction, timeInputFocus },
-    layout: { card: cardRect, start: startRect, end: endRect, statusFontPx: getComputedStyle(current).fontSize },
+    layout: { card: cardRect, start: startRect, end: endRect, enable: enableRect, fieldsWidth, timeFontPx: getComputedStyle(start).fontSize },
     viewport: { width: innerWidth, height: innerHeight, dpr: devicePixelRatio, screenWidth: screen.width, screenHeight: screen.height }
   };
 }
@@ -332,6 +367,15 @@ async function runChild() {
       const name = `ui-${config.width}x${config.height}-${Math.round(config.scale * 100)}${zoomSuffix}-${theme}.png`;
       fs.writeFileSync(path.join(EVIDENCE, name), capture.toPNG());
       result.capture = { file: name, pixels: capture.getSize() };
+      if (config.width === 2560 && config.scale === 1 && zoom === 1) {
+        const { x, y, width, height } = result.layout.card;
+        const settingsCapture = await window.webContents.capturePage({
+          x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height)
+        });
+        const settingsFile = `appearance-settings-${theme}.png`;
+        fs.writeFileSync(path.join(EVIDENCE, settingsFile), settingsCapture.toPNG());
+        result.capture.settingsFile = settingsFile;
+      }
       results.push(result);
     }
     console.log(PREFIX + JSON.stringify({
@@ -390,7 +434,7 @@ function runParent() {
       '模块检查覆盖基础主面板几何和最小控件字体；不穷举业务数据状态或完整操作流程',
       '完整打开并操作的代表弹窗仅设置/外观页；账户表格和VCC组件使用真实CSS类的静态测试节点',
       '隐藏窗口启用CDP文档焦点模拟后，通过真实DOM.focus检查时间输入的可见焦点轮廓；未触发鼠标hover、OS焦点切换、完整键盘Tab顺序或屏幕阅读器',
-      '禁用覆盖保存期间fieldset禁用；未穷举所有业务按钮的disabled配色',
+      '保存期间验证fieldset保持可编辑；未穷举所有业务按钮的disabled配色',
       '对比度检查针对列出的不透明语义色组合；未量化自定义图片每个像素后的实际文字对比度',
       '所有业务desktopApi均为内存模拟，未证明Main冷启动、真实IPC、真实持久化或Windows行为'
     ], cases, failures

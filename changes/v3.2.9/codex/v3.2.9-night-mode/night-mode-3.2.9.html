@@ -158,11 +158,10 @@
   function mountSettings(host, controller) {
     host.innerHTML = `
       <div class="appearance-pane-scroll">
-        <h3 class="app-settings-pane-heading">外观</h3>
-        <p class="appearance-description">按本机时间自动切换，夜间也能舒适查看账单。</p>
+        <h3 class="app-settings-pane-heading">外观设置</h3>
         <fieldset class="appearance-fields">
           <div class="appearance-enable-row">
-            <label for="darkModeEnabled"><strong>启用定时深色模式</strong><span>每天在设定时段使用深色，时段外使用浅色。</span></label>
+            <label for="darkModeEnabled"><strong>启用定时深色模式</strong></label>
             <input id="darkModeEnabled" data-role="dark-mode-enabled" type="checkbox" role="switch" aria-label="启用定时深色模式" />
           </div>
           <div class="appearance-time-grid">
@@ -171,72 +170,91 @@
             <label>结束时间<input data-role="dark-mode-end" type="time" step="60" required aria-label="深色结束时间" /></label>
           </div>
         </fieldset>
-        <div class="appearance-current" data-role="dark-mode-status" role="status" aria-live="polite"></div>
         <p class="appearance-feedback" data-role="dark-mode-feedback" role="alert" hidden></p>
-        <div class="appearance-preview" aria-label="当前组件配色预览">
-          <div class="appearance-preview-header"><span>界面预览</span><span class="appearance-preview-badge">已完成</span></div>
-          <div class="appearance-preview-body"><span>账户与账单明细</span><span class="appearance-preview-action">查看明细</span></div>
-        </div>
-        <p class="appearance-description appearance-note">设置自动保存。关闭开关后恢复浅色，并保留时段。深色时保留自定义背景，自动叠加深色遮罩。</p>
       </div>`;
     const enabled = host.querySelector('[data-role="dark-mode-enabled"]');
     const start = host.querySelector('[data-role="dark-mode-start"]');
     const end = host.querySelector('[data-role="dark-mode-end"]');
-    const status = host.querySelector('[data-role="dark-mode-status"]');
     const feedback = host.querySelector('[data-role="dark-mode-feedback"]');
     const fields = host.querySelector('fieldset');
     const inputs = new Map([[enabled, 'enabled'], [start, 'startTime'], [end, 'endTime']]);
-    const dirty = new Set();
+    const dirty = new Map();
+    let editRevision = 0;
+    let saveRequested = false;
+    let saveLoop = null;
     let destroyed = false;
     function render(snapshot) {
       if (destroyed) return;
-      fields.disabled = snapshot.saving || !snapshot.ready;
+      // 原生 time 每输入一位就可能触发 change；禁用或重写活动框会丢失分段输入状态。
+      fields.disabled = !snapshot.ready;
       if (!dirty.has('enabled')) enabled.checked = snapshot.darkModeSchedule.enabled;
-      if (!dirty.has('startTime')) start.value = snapshot.darkModeSchedule.startTime;
-      if (!dirty.has('endTime')) end.value = snapshot.darkModeSchedule.endTime;
-      const schedule = snapshot.darkModeSchedule;
-      const span = schedule.startTime > schedule.endTime ? '次日 ' : '';
-      status.textContent = snapshot.saving ? '正在保存…'
-        : !snapshot.ready ? '正在读取外观设置…'
-          : !schedule.enabled ? '未启用 · 当前为浅色'
-            : `当前为${snapshot.effectiveTheme === 'dark' ? '深色' : '浅色'} · 每天 ${schedule.startTime} — ${span}${schedule.endTime}`;
+      for (const input of [start, end]) {
+        const field = inputs.get(input);
+        if (!dirty.has(field) && host.ownerDocument.activeElement !== input
+          && input.value !== snapshot.darkModeSchedule[field]) input.value = snapshot.darkModeSchedule[field];
+      }
     }
     const unsubscribe = controller.subscribe(render);
-    async function submit(event) {
-      dirty.add(inputs.get(event.currentTarget));
+    function showError(error) {
+      if (feedback.hidden) feedback.textContent = error.message;
+      else if (!feedback.textContent.includes(error.message)) feedback.textContent += `；${error.message}`;
+      feedback.hidden = false;
+    }
+    async function drainSaves() {
+      while (saveRequested && !destroyed) {
+        saveRequested = false;
+        const submitted = new Map(dirty);
+        const next = { ...controller.getSnapshot().darkModeSchedule };
+        // 关闭始终可用；在途保存完成后取最新已保存时段，非法草稿不能阻止恢复浅色。
+        if (dirty.has('enabled') && !enabled.checked) {
+          next.enabled = false;
+          // 关闭后的新时间编辑不属于关闭时丢弃的旧草稿，留给后续请求保存或校验。
+          for (const field of ['startTime', 'endTime']) {
+            if (submitted.get(field) > submitted.get('enabled')) {
+              submitted.delete(field);
+              saveRequested = true;
+            }
+          }
+        } else {
+          // 合并仍未保存的字段，其他字段保留最新快照，连续编辑只排队保存最终值。
+          if (dirty.has('enabled')) next.enabled = enabled.checked;
+          if (dirty.has('startTime')) next.startTime = start.value;
+          if (dirty.has('endTime')) next.endTime = end.value;
+        }
+        try {
+          shared.validateDarkModeSchedule(next);
+        } catch (error) {
+          showError(error);
+          return;
+        }
+        try {
+          await controller.save(next);
+        } catch (error) {
+          if (!destroyed) showError(error);
+        } finally {
+          // 回包只能结算本次捕获的编辑；保存期间的新输入仍由下一次请求处理。
+          for (const [field, revision] of submitted) {
+            if (dirty.get(field) === revision) dirty.delete(field);
+          }
+          render(controller.getSnapshot());
+        }
+      }
+    }
+    function markDirty(input) { dirty.set(inputs.get(input), ++editRevision); }
+    function submit(event) {
+      if (destroyed) return;
+      // 仅用户新提交清除旧错误；内部续存成功或校验失败不能掩盖先前的保存失败。
       feedback.hidden = true;
-      const focused = host.ownerDocument.activeElement;
-      // 关闭功能始终可用，不让尚未提交的无效时间阻止恢复浅色。
-      const next = { ...controller.getSnapshot().darkModeSchedule };
-      if (event.currentTarget === enabled && !enabled.checked) next.enabled = false;
-      else {
-        // 只提交本窗口编辑过的字段，保留其他窗口已更新的开关或时段。
-        if (dirty.has('enabled')) next.enabled = enabled.checked;
-        if (dirty.has('startTime')) next.startTime = start.value;
-        if (dirty.has('endTime')) next.endTime = end.value;
-      }
-      try {
-        shared.validateDarkModeSchedule(next);
-      } catch (error) {
-        feedback.textContent = error.message;
-        feedback.hidden = false;
-        return;
-      }
-      try {
-        await controller.save(next);
-      } catch (error) {
-        feedback.textContent = error.message;
-        feedback.hidden = false;
-      } finally {
-        dirty.clear();
-        render(controller.getSnapshot());
-        if (!destroyed && host.isConnected && focused?.isConnected) focused.focus();
-      }
+      markDirty(event.currentTarget);
+      saveRequested = true;
+      if (!saveLoop) saveLoop = drainSaves().finally(() => { saveLoop = null; });
+      return saveLoop;
     }
     for (const input of [enabled, start, end]) {
-      input.addEventListener('input', () => { dirty.add(inputs.get(input)); });
+      input.addEventListener('input', () => { if (!destroyed) markDirty(input); });
       input.addEventListener('change', submit);
     }
+    for (const input of [start, end]) input.addEventListener('blur', () => render(controller.getSnapshot()));
     return { destroy() { destroyed = true; unsubscribe(); } };
   }
 
@@ -1484,7 +1502,14 @@ td .muted { color: var(--muted); }
 .archive-center-storage-location-heading .secondary-btn {
   flex: 0 0 auto;
 }
-.archive-center-retention-field { width: 220px; }
+.archive-center-retention-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.archive-center-retention-field { width: 220px; max-width: 100%; }
+.archive-center-retention-module-field { width: 280px; max-width: 100%; }
 .archive-delete-confirm-error {
   width: 100%;
   margin-top: 12px;
@@ -6634,6 +6659,7 @@ body[data-platform="win32"] .dialog-title * {
 .bizop-toolbar { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
 .bizop-secondary { margin-top: 12px; }
 .bizop-status { overflow-wrap: anywhere; }
+.bizop-status .status-box-text, .bizop-feedback { white-space: pre-wrap; user-select: text; }
 .bizop-status[data-tone="warning"] { color: var(--warning, #8a5a00); border-color: rgba(178, 116, 0, 0.42); }
 
 /* 保留原生模态的焦点/取消保护，外观使用现有 VCC 对话框、表格和数据管理样式。 */
@@ -6654,11 +6680,11 @@ body[data-platform="win32"] .dialog-title * {
 .bizop-field input, .bizop-field select { width: 100%; box-sizing: border-box; font: inherit; }
 .bizop-results-dialog { width: min(100%, 520px); }
 .bizop-results-dialog .dialog-header, .bizop-run-dialog .dialog-header, .bizop-calendar-dialog .dialog-header, .bizop-delete-dialog .dialog-header { padding-left: 0; padding-right: 0; }
-.bizop-result-fields, .bizop-results-dialog .bizop-modal-footer { display: grid; grid-template-columns: 148px minmax(0, 1fr); gap: 10px; }
+.bizop-result-fields { display: grid; grid-template-columns: 148px minmax(0, 1fr); gap: 10px; }
 .bizop-result-fields .bizop-field { min-width: 0; }
-/* 使用 VCC 的字体和小按钮尺寸，字段与按钮栏共用列并收紧外框。 */
+/* 使用 VCC 的字体和小按钮尺寸，收紧输入导出弹窗外框。 */
 .bizop-input-export-dialog { width: min(100%, 360px); }
-.bizop-input-export-fields, .bizop-input-export-dialog .bizop-modal-footer { grid-template-columns: minmax(0, 144px) minmax(0, 1fr); }
+.bizop-input-export-fields { grid-template-columns: minmax(0, 144px) minmax(0, 1fr); }
 .bizop-run-dialog { width: min(100%, 460px); }
 .bizop-run-fields, .bizop-run-dialog .bizop-modal-footer { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .bizop-run-fields .bizop-field { min-width: 0; }
@@ -6670,7 +6696,8 @@ body[data-platform="win32"] .dialog-title * {
 .bizop-modal-actions { display: flex; align-items: center; gap: 10px; }
 .bizop-results-dialog .bizop-modal-footer, .bizop-run-dialog .bizop-modal-footer { padding-left: 0; padding-right: 0; justify-content: start; }
 .bizop-results-dialog .bizop-modal-actions, .bizop-run-dialog .bizop-modal-actions:last-child { justify-self: end; }
-.bizop-cancel-slot { display: flex; align-items: center; }
+.bizop-results-dialog .bizop-modal-footer { justify-content: flex-end; }
+.bizop-manager-dialog .vcc-fin-op-manager-footer-left:not(:has(.bizop-page-choice:not([hidden]))) { display: none; }
 .bizop-calendar-dialog { width: min(100%, 340px); }
 .bizop-delete-dialog { width: min(100%, 560px); }
 .bizop-v327-dialog.bizop-delete-dialog .bizop-modal-body { max-height: min(46vh, 340px); }
@@ -6784,30 +6811,22 @@ html, body { background-color: var(--bg); color: var(--text); }
 
 /* 外观设置沿用现有设置弹窗尺寸与语义颜色。 */
 .appearance-pane-scroll { overflow: auto; min-height: 0; height: 100%; padding: 24px; }
-.appearance-description { color: var(--muted); font-size: 13px; line-height: 1.8; margin: 8px 0 22px; }
+.appearance-pane-scroll .app-settings-pane-heading { margin-bottom: 20px; }
 .appearance-fields { min-width: 0; border: 0; padding: 0; margin: 0; }
-.appearance-enable-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 20px; background: var(--bg-soft); border: 1px solid var(--line-soft); border-radius: 14px; }
+.appearance-enable-row { display: flex; align-items: center; justify-content: space-between; width: 25%; min-width: 200px; max-width: 100%; gap: 12px; padding: 12px; background: var(--bg-soft); border: 1px solid var(--line-soft); border-radius: 14px; }
 .appearance-enable-row label { min-width: 0; }
 .appearance-enable-row strong { display: block; color: var(--text); font-size: 14px; font-weight: 600; }
-.appearance-enable-row label span { display: block; color: var(--muted); font-size: 12px; margin-top: 6px; line-height: 1.6; }
 .appearance-enable-row input { appearance: none; flex: 0 0 42px; width: 42px; height: 24px; margin: 0; border: 1px solid var(--line-strong); border-radius: 20px; background: var(--line-strong); position: relative; cursor: pointer; }
 .appearance-enable-row input::after { content: ''; position: absolute; width: 16px; height: 16px; top: 3px; left: 3px; border-radius: 50%; background: var(--panel); }
 .appearance-enable-row input:checked { background: var(--primary); border-color: var(--primary); }
 .appearance-enable-row input:checked::after { transform: translateX(18px); background: var(--on-primary); }
 .appearance-fields:disabled { opacity: .65; }
-.appearance-time-grid { display: grid; grid-template-columns: minmax(0,1fr) 22px minmax(0,1fr); align-items: end; gap: 12px; margin: 24px 0; }
+/* 紧凑时间框为原生时分文本、时钟按钮与两侧留白保留空间。 */
+.appearance-time-grid { display: grid; grid-template-columns: 104px 22px 104px; align-items: end; gap: 12px; margin: 24px 0; }
 .appearance-time-grid label { display: flex; flex-direction: column; gap: 10px; min-width: 0; font-size: 13px; color: var(--muted); }
-.appearance-time-grid input { width: 100%; min-width: 0; height: 44px; padding: 8px 12px; color: var(--text); background: var(--input); border: 1px solid var(--line); border-radius: 9px; font: inherit; font-size: 15px; font-variant-numeric: tabular-nums; }
+.appearance-time-grid input { width: 100%; min-width: 0; height: 44px; padding: 8px; color: var(--text); background: var(--input); border: 1px solid var(--line); border-radius: 9px; font: inherit; font-size: 14px; font-variant-numeric: tabular-nums; }
 .appearance-time-separator { align-self: end; line-height: 44px; text-align: center; color: var(--muted); }
-.appearance-current { padding: 12px 16px; border: 1px solid var(--line); background: var(--bg-soft); border-radius: 10px; color: var(--muted); font-size: 13px; line-height: 1.8; }
 .appearance-feedback { color: var(--danger); background: var(--danger-soft); border: 1px solid var(--danger-border); padding: 12px; border-radius: 9px; font-size: 13px; line-height: 1.8; }
-.appearance-preview { margin-top: 22px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; font-size: 12px; }
-.appearance-preview-header, .appearance-preview-body { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px; }
-.appearance-preview-header { background: var(--bg-soft); border-bottom: 1px solid var(--line); color: var(--muted); }
-.appearance-preview-body { background: var(--panel); color: var(--text); }
-.appearance-preview-badge { color: var(--success); background: var(--success-soft); border: 1px solid var(--success-border); padding: 3px 9px; border-radius: 6px; }
-.appearance-preview-action { background: var(--primary); color: var(--on-primary); padding: 7px 14px; border-radius: 18px; }
-.appearance-note { margin-top: 18px; margin-bottom: 0; font-size: 12px; }
 .appearance-pane-scroll input:focus { outline: 2px solid var(--primary); outline-offset: 3px; }
 </style><style>
   [hidden] { display:none!important; }
@@ -7436,16 +7455,18 @@ function rgbToCss(rgb, alpha) {
   return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
 }
 function buildBackgroundStyle(backgroundSettings) {
-  const original = buildLightBackgroundStyle(backgroundSettings);
-  if (document.documentElement.dataset.theme !== 'dark') return original;
-  return {
-    ...original,
-    backgroundColor: '#111419',
-    backgroundImage: `linear-gradient(rgba(11,15,22,.72), rgba(11,15,22,.72)), ${original.backgroundImage}`,
-    backgroundSize: `auto, ${original.backgroundSize}`,
-    backgroundPosition: `center, ${original.backgroundPosition}`,
-    backgroundRepeat: `no-repeat, ${original.backgroundRepeat}`
-  };
+  const normalized = cloneBackgroundSettings(backgroundSettings);
+  if (document.documentElement.dataset.theme === 'dark' && !normalized.imageDataUrl) {
+    // 深色主题使用自己的底色，不在浅色渐变或自定义图片上叠加遮罩。
+    return {
+      backgroundColor: '#111419',
+      backgroundImage: 'none',
+      backgroundSize: 'auto',
+      backgroundPosition: 'center',
+      backgroundRepeat: 'no-repeat'
+    };
+  }
+  return buildLightBackgroundStyle(backgroundSettings);
 }
 function buildLightBackgroundStyle(backgroundSettings) {
   const normalized = cloneBackgroundSettings(backgroundSettings);
@@ -7523,7 +7544,7 @@ function openModalShell(title, content, className = '') {
   rootNode.querySelector('[data-preview-close]').focus();
 }
 function openPreviewSettings() {
-  openModalShell('设置', '<div class="app-settings-layout"><nav class="app-settings-nav" aria-label="设置导航"><button class="app-settings-nav-item is-active" aria-current="page">☾　外观</button></nav><div class="app-settings-main"><section id="previewAppearancePane" class="app-settings-pane appearance-pane" aria-label="外观设置"></section></div></div>', 'preview-settings-card');
+  openModalShell('设置', '<div class="app-settings-layout"><nav class="app-settings-nav" aria-label="设置导航"><button class="app-settings-nav-item is-active" aria-current="page">☾　外观设置</button></nav><div class="app-settings-main"><section id="previewAppearancePane" class="app-settings-pane appearance-pane" aria-label="外观设置"></section></div></div>', 'preview-settings-card');
   settingsView = DarkModeUI.mountSettings(document.getElementById('previewAppearancePane'), themeController);
 }
 function openPreviewTable() {

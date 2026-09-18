@@ -1931,16 +1931,18 @@ function pickBackgroundColorFromClientPoint(clientX, clientY) {
 }
 
 function buildBackgroundStyle(backgroundSettings) {
-  const original = buildLightBackgroundStyle(backgroundSettings);
-  if (document.documentElement.dataset.theme !== 'dark') return original;
-  return {
-    ...original,
-    backgroundColor: '#111419',
-    backgroundImage: `linear-gradient(rgba(11,15,22,.72), rgba(11,15,22,.72)), ${original.backgroundImage}`,
-    backgroundSize: `auto, ${original.backgroundSize}`,
-    backgroundPosition: `center, ${original.backgroundPosition}`,
-    backgroundRepeat: `no-repeat, ${original.backgroundRepeat}`
-  };
+  const normalized = cloneBackgroundSettings(backgroundSettings);
+  if (document.documentElement.dataset.theme === 'dark' && !normalized.imageDataUrl) {
+    // 深色主题使用自己的底色，不在浅色渐变或自定义图片上叠加遮罩。
+    return {
+      backgroundColor: '#111419',
+      backgroundImage: 'none',
+      backgroundSize: 'auto',
+      backgroundPosition: 'center',
+      backgroundRepeat: 'no-repeat'
+    };
+  }
+  return buildLightBackgroundStyle(backgroundSettings);
 }
 
 function buildLightBackgroundStyle(backgroundSettings) {
@@ -2716,10 +2718,6 @@ function createAppUpdateSettingsDialog(options = {}) {
     </div>
     <div class="app-settings-layout">
       <nav class="app-settings-nav" aria-label="设置导航">
-        <button class="app-settings-nav-item" type="button" data-tab="appearance" aria-controls="appearancePane" aria-current="false">
-          <span class="app-settings-nav-icon" aria-hidden="true">☾</span>
-          <span>外观</span>
-        </button>
         <button class="app-settings-nav-item is-active" type="button" data-tab="update" aria-controls="appUpdatePane" aria-current="page">
           <span class="app-settings-nav-icon" aria-hidden="true">↻</span>
           <span>版本管理</span>
@@ -2728,6 +2726,10 @@ function createAppUpdateSettingsDialog(options = {}) {
         <button class="app-settings-nav-item" type="button" data-tab="archive" aria-controls="archiveCenterPane" aria-current="false">
           <span class="app-settings-nav-icon" aria-hidden="true">▤</span>
           <span>存档中心</span>
+        </button>
+        <button class="app-settings-nav-item" type="button" data-tab="appearance" aria-controls="appearancePane" aria-current="false">
+          <span class="app-settings-nav-icon" aria-hidden="true">☾</span>
+          <span>外观设置</span>
         </button>
       </nav>
 
@@ -2834,7 +2836,7 @@ function createAppUpdateSettingsDialog(options = {}) {
             </div>
 
             <div class="archive-center-settings-section">
-              <h4>保留期限</h4>
+              <h4>输入/输出文件保留期限</h4>
               <div class="archive-center-retention-fields">
                 <label class="archive-center-field archive-center-retention-module-field">
                   <span>适用模块</span>
@@ -2844,7 +2846,7 @@ function createAppUpdateSettingsDialog(options = {}) {
                 </label>
                 <label class="archive-center-field archive-center-retention-field">
                   <span>保留期限</span>
-                  <select data-role="archive-retention-days" aria-label="保留期限" aria-describedby="archiveRetentionNote">
+                  <select data-role="archive-retention-days" aria-label="保留期限">
                     <option value="inherit" hidden disabled>跟随默认</option>
                     <option value="30">30 天</option>
                     <option value="60" selected>60 天</option>
@@ -2855,8 +2857,6 @@ function createAppUpdateSettingsDialog(options = {}) {
                   </select>
                 </label>
               </div>
-              <p id="archiveRetentionNote" class="archive-center-settings-note" data-role="archive-retention-note"></p>
-              <p class="archive-center-settings-note">修改后自动保存，仅影响之后新建的存档批次；历史批次保留原到期日。</p>
             </div>
           </section>
         </section>
@@ -3211,9 +3211,6 @@ function createAppUpdateSettingsDialog(options = {}) {
         ? retentionValue
         : '60';
       retentionSelect.value = archiveState.savedRetentionValue;
-      dialog.querySelector('[data-role="archive-retention-note"]').textContent = moduleId
-        ? (hasOverride ? '此模块使用单独设置的期限。' : `此模块跟随默认期限：${defaultLabel}。`)
-        : '未单独设置期限的模块均使用此默认值。';
     }
     if (settings.storageMigration && typeof settings.storageMigration === 'object') {
       archiveState.storageMigration = { ...settings.storageMigration };

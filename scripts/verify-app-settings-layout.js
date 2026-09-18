@@ -930,7 +930,7 @@ async function verifyThemeRetentionBehavior(failures) {
     enabled.checked = true;
     enabled.dispatchEvent(new Event('change', { bubbles: true }));
     await waitFor(() => window.__themeSaveCalls.length === 1);
-    check(controller.getSnapshot().saving && appearance.querySelector('fieldset').disabled, '主题真实保存 pending 未禁用外观字段');
+    check(controller.getSnapshot().saving && !appearance.querySelector('fieldset').disabled, '主题真实保存 pending 未保持外观字段可编辑');
     await openArchiveSettings();
     changeRetentionModule(moduleId);
     check(retentionSelect().value === '90', '主题保存 pending 影响存档设置读取');
@@ -1152,6 +1152,10 @@ async function verifyArchiveBrowserLayout(failures) {
   for (const control of retentionControls) {
     const rect = control.getBoundingClientRect();
     const style = getComputedStyle(control);
+    const expectedWidth = control.dataset.role === 'archive-retention-module' ? 224 : 132;
+    if (Math.abs(rect.width - expectedWidth) > 1) {
+      failures.push(`retention control width drifted: ${control.dataset.role} ${rect.width}px`);
+    }
     if (rect.width <= 0 || rect.height <= 0 || style.visibility !== 'visible' || style.display === 'none'
         || rect.left < settingsRectBounds.left - 1 || rect.right > settingsRectBounds.right + 1
         || rect.top < paneBounds.top - 1 || rect.bottom > paneBounds.bottom + 1) {
@@ -1159,8 +1163,13 @@ async function verifyArchiveBrowserLayout(failures) {
     }
   }
   if (settingsView.scrollWidth > settingsView.clientWidth + 1) failures.push('retention settings horizontal overflow');
-  if (!/仅影响[^；。]*(新建|新增|新创建|新)[^；。]*批次/.test(settingsView.textContent)) {
-    failures.push('retention settings do not explain that changes affect new batches');
+  if (settingsView.querySelector('h4')?.textContent.trim() !== '输入/输出文件保留期限') {
+    failures.push('retention settings heading is incorrect');
+  }
+  if (settingsView.querySelector('[data-role="archive-retention-note"]')
+      || settingsView.querySelector('[aria-describedby="archiveRetentionNote"]')
+      || settingsView.textContent.includes('修改后自动保存，仅影响之后新建的存档批次；历史批次保留原到期日。')) {
+    failures.push('removed retention notes or accessibility references are still rendered');
   }
   if (document.querySelector('[data-role="archive-settings-file-total-size"]')
       || settingsView.textContent.includes('存储统计')

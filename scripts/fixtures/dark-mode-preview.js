@@ -43,7 +43,7 @@ function openModalShell(title, content, className = '') {
   rootNode.querySelector('[data-preview-close]').focus();
 }
 function openPreviewSettings() {
-  openModalShell('设置', '<div class="app-settings-layout"><nav class="app-settings-nav" aria-label="设置导航"><button class="app-settings-nav-item is-active" aria-current="page">☾　外观</button></nav><div class="app-settings-main"><section id="previewAppearancePane" class="app-settings-pane appearance-pane" aria-label="外观设置"></section></div></div>', 'preview-settings-card');
+  openModalShell('设置', '<div class="app-settings-layout"><nav class="app-settings-nav" aria-label="设置导航"><button class="app-settings-nav-item is-active" aria-current="page">☾　外观设置</button></nav><div class="app-settings-main"><section id="previewAppearancePane" class="app-settings-pane appearance-pane" aria-label="外观设置"></section></div></div>', 'preview-settings-card');
   settingsView = DarkModeUI.mountSettings(document.getElementById('previewAppearancePane'), themeController);
 }
 function openPreviewTable() {

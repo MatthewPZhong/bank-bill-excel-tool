@@ -877,8 +877,8 @@ td .muted { color: var(--muted); }
   gap: 12px;
   margin-bottom: 12px;
 }
-.archive-center-retention-field { width: 220px; max-width: 100%; }
-.archive-center-retention-module-field { width: 280px; max-width: 100%; }
+.archive-center-retention-field { width: 132px; max-width: 100%; }
+.archive-center-retention-module-field { width: 224px; max-width: 100%; }
 .archive-delete-confirm-error {
   width: 100%;
   margin-top: 12px;
