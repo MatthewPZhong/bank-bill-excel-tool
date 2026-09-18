@@ -1749,7 +1749,7 @@ class ArchiveStorageRootManager {
         assertPublishedIdentity(prepared, published, ['ctimeMs']);
       }
       assertPublishedIdentity(published, publishedFileIdentity(readIdentityStatSync(this.fs, targetPath)));
-      // Windows 可在关闭执行 chmod 的写句柄时才回写 ctime。先把只读见证句柄
+      // Windows 可在关闭写句柄时才回写本次 link/unlink 或 chmod 的 ctime。先把只读见证句柄
       // 绑定到仍在持有的原 fd 和父链，再完成 chmod/close；最终身份从见证 fd
       // 采集，不能关闭原 fd 后把路径上的现存文件当作本次发布对象。
       witnessHandle = await this.fs.promises.open(targetPath, 'r');
@@ -1765,7 +1765,10 @@ class ArchiveStorageRootManager {
       if (linked) stagedHandle = null;
       else targetHandle = null;
       const settled = publishedFileIdentity(await readHandleIdentityStat(witnessHandle));
-      assertPublishedIdentity(published, settled, changedMode ? ['ctimeMs', 'mode'] : []);
+      // linked 仅在本次 link/unlink 成功且 nlink 已精确恢复后才到达这里。
+      // wx 未 chmod 的目标没有上述元数据操作，ctime 仍必须完全一致。
+      const changedFields = [...(linked || changedMode ? ['ctimeMs'] : []), ...(changedMode ? ['mode'] : [])];
+      assertPublishedIdentity(published, settled, changedFields);
       if ((settled.mode & 0o777) !== mode) throw new ArchiveStorageRootError(
         'ARCHIVE_STORAGE_DELETE_FILE_CHANGED', '迁移发布权限与本次设置不符');
       assertPublishedIdentity(settled, publishedFileIdentity(readIdentityStatSync(this.fs, targetPath)));

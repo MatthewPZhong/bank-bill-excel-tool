@@ -155,8 +155,13 @@ function managed(rootDir, relativePath) {
 
 function replaceFixtureFile(source, target) {
   const previous = readIdentityStatSync(fs, target, 'statSync');
-  // Windows 不允许覆盖 readonly 路径；外部所有者先解除其保护，再真实换 inode。
-  if (process.platform === 'win32') fs.chmodSync(target, 0o600);
+  // Windows 不能覆盖仍有句柄打开的目标；先保留原对象于隔离目录，再放入新 inode。
+  if (process.platform === 'win32') {
+    if (!(previous.mode & 0o200)) fs.chmodSync(target, 0o600);
+    const displaced = path.join(fs.mkdtempSync(path.join(path.dirname(source), 'displaced-owner-')), 'original');
+    fs.renameSync(target, displaced);
+    assert.equal(readIdentityStatSync(fs, displaced, 'statSync').ino, previous.ino);
+  }
   fs.renameSync(source, target);
   assert.notEqual(readIdentityStatSync(fs, target, 'statSync').ino, previous.ino);
 }
@@ -2608,6 +2613,34 @@ test('不支持 hardlink 的文件系统通过 wx 原 fd 写入并刷盘，再�
   } finally { current.close(); }
 });
 
+test('close 回写夹具首次 hook 失败后，已关闭原句柄再次 close 幂等且其他真实句柄仍可写', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-close-fixture-'));
+  const hookError = new Error('首次 close 完成后的受控 hook 故障');
+  let hookCalls = 0;
+  const { fsImpl } = createMigrationCloseMetadataFs({ targetRoot: directory,
+    afterClose() { hookCalls += 1; throw hookError; } });
+  let original, other, later;
+  try {
+    original = await fsImpl.promises.open(path.join(directory, 'original'), 'wx', 0o600);
+    other = await fsImpl.promises.open(path.join(directory, 'other'), 'wx', 0o600);
+    await original.chmod(0o444);
+    await assert.rejects(original.close(), (error) => error === hookError);
+    assert.equal(original.fd, -1);
+    later = await fsImpl.promises.open(path.join(directory, 'later'), 'wx', 0o600);
+    await original.close();
+    assert.equal(hookCalls, 1);
+    await other.writeFile('other fd remains open');
+    await later.writeFile('later fd remains open');
+    assert.equal((await other.stat()).size, Buffer.byteLength('other fd remains open'));
+    assert.equal((await later.stat()).size, Buffer.byteLength('later fd remains open'));
+  } finally {
+    if (later) await later.close();
+    if (other) await other.close();
+    if (original) await original.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 for (const copyFallback of [false, true]) {
   test(`迁移 ${copyFallback ? 'wx' : 'link'} 原写 fd 关闭时回写 ctime，最终原 inode 快照仍可完成迁移`, async () => {
     let targetRoot;
@@ -2632,16 +2665,47 @@ for (const copyFallback of [false, true]) {
   });
 }
 
+test('迁移 link 未 chmod 的 canonical 在本次 link/unlink 的 close 回写后保存最终 ctime', async () => {
+  let targetRoot, publishingCanonical = false;
+  const metadata = createMigrationCloseMetadataFs({ targetRoot: () => targetRoot,
+    injectCanonicalClose: () => publishingCanonical });
+  const current = await createFixture({ fsImpl: metadata.fsImpl });
+  targetRoot = path.join(real(current.tempDir), 'target-root');
+  try {
+    await current.manager.initialize(); fs.mkdirSync(current.targetRoot);
+    const canonical = managed(targetRoot, current.artifact.blob.relativePath);
+    const publish = current.manager._publishMigrationTarget.bind(current.manager);
+    current.manager._publishMigrationTarget = async (source, target, options) => {
+      publishingCanonical = target === canonical;
+      try { return await publish(source, target, options); } finally { publishingCanonical = false; }
+    };
+    const result = await current.manager.changeStorageLocation();
+    assert.equal(result.status, 'success', JSON.stringify(result));
+    const actual = readIdentityStatSync(metadata.fsImpl, canonical);
+    const event = metadata.closedWrites.find((item) => !item.readonlyWritten);
+    assert.ok(event);
+    assert.equal(actual.ino, String(event.identity.ino));
+    assert.equal(actual.mode, Number(event.identity.mode));
+    assert.equal(actual.nlink, 1);
+    assert.equal(current.repository.getArtifact(current.artifact.id).blob.fingerprint.ctimeMs, actual.ctimeMs);
+    assert.equal(fs.readFileSync(canonical, 'utf8'), 'archive-root-migration-content');
+    assert.equal(fs.existsSync(current.journalPath), false);
+  } finally { current.close(); }
+});
+
 for (const copyFallback of [false, true]) {
-  for (const mutation of ['replace-on-close', 'mtime-on-close', 'nlink-on-close', 'ctime-after-snapshot', 'ctime-without-chmod']) {
+  const mutations = ['replace-on-close', 'mtime-on-close', 'nlink-on-close', 'ctime-after-snapshot', 'mode-without-chmod'];
+  if (copyFallback) mutations.push('ctime-without-link-or-chmod');
+  for (const mutation of mutations) {
     test(`迁移 ${copyFallback ? 'wx' : 'link'} close 元数据边界的 ${mutation} 仍拒绝认领并保留两根`, async () => {
       let current, targetRoot, publishing = false, victim, mutated = false;
       const metadata = createMigrationCloseMetadataFs({ targetRoot: () => targetRoot, copyFallback,
-        injectUnchangedClose: () => publishing && mutation === 'ctime-without-chmod',
+        injectCanonicalClose: () => publishing && ['ctime-without-link-or-chmod', 'mode-without-chmod'].includes(mutation),
         afterClose(event) {
           if (!publishing || mutated || !victim) return;
           if (mutation === 'ctime-after-snapshot') return;
-          if (mutation === 'ctime-without-chmod') { mutated = true; return; }
+          if (mutation === 'ctime-without-link-or-chmod') { mutated = true; return; }
+          if (mutation === 'mode-without-chmod') { fs.chmodSync(victim, 0o444); mutated = true; return; }
           if (!event.readonlyWritten) return;
           const before = readIdentityStatSync(fs, victim);
           if (mutation === 'replace-on-close') {
@@ -2662,7 +2726,7 @@ for (const copyFallback of [false, true]) {
       targetRoot = path.join(real(current.tempDir), 'target-root');
       try {
         await current.manager.initialize(); fs.mkdirSync(current.targetRoot);
-        const relativePath = mutation === 'ctime-without-chmod'
+        const relativePath = ['ctime-without-link-or-chmod', 'mode-without-chmod'].includes(mutation)
           ? current.artifact.blob.relativePath : current.artifact.storageRelativePath;
         victim = managed(targetRoot, relativePath);
         const publish = current.manager._publishMigrationTarget.bind(current.manager);
@@ -2769,8 +2833,14 @@ for (const targetKind of ['canonical', 'materialized']) {
           },
           async open(filePath, flags, mode) {
             const handle = await fs.promises.open(filePath, flags, mode);
-            if (copyFallback && stopAt === 'after-create' && flags === 'wx') substitute(filePath);
-            return handle;
+            try {
+              if (copyFallback && stopAt === 'after-create' && flags === 'wx') substitute(filePath);
+              return handle;
+            } catch (error) {
+              // 故障注入失败时产品尚未接管此句柄，夹具必须关闭后原样抛出。
+              await handle.close();
+              throw error;
+            }
           }
         } };
         current = await createFixture({ fsImpl });

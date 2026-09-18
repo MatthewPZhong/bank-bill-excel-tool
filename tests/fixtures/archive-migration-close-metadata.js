@@ -5,7 +5,7 @@ const path = require('node:path');
 // 私有 fs 仅在本次发布写句柄关闭后，对同一真实 dev/ino 模拟 Windows ctime 回写。
 // 其余字段始终来自真实 stat；后续实际修改仍会反映在返回值中。
 function createMigrationCloseMetadataFs({ targetRoot, copyFallback = false, afterClose,
-  injectUnchangedClose = false } = {}) {
+  injectCanonicalClose = false } = {}) {
   const offsets = new Map(), closedWrites = [];
   const key = (stat) => `${stat.dev}:${stat.ino}`;
   const advanceCtime = (stat, offset = 1000000000n) => offsets.set(key(stat), (offsets.get(key(stat)) || 0n) + offset);
@@ -32,21 +32,24 @@ function createMigrationCloseMetadataFs({ targetRoot, copyFallback = false, afte
         const stat = handle.stat.bind(handle), chmod = handle.chmod.bind(handle), close = handle.close.bind(handle);
         const root = typeof targetRoot === 'function' ? targetRoot() : targetRoot;
         const isTarget = root && String(filePath).startsWith(root + path.sep);
-        const injectUnchanged = typeof injectUnchangedClose === 'function' ? injectUnchangedClose() : injectUnchangedClose;
-        const isUnchangedWrite = injectUnchanged && isTarget && (copyFallback
+        const injectCanonical = typeof injectCanonicalClose === 'function' ? injectCanonicalClose() : injectCanonicalClose;
+        const isCanonicalWrite = injectCanonical && isTarget && (copyFallback
           ? args[0] === 'wx' && String(filePath).includes(path.join('blobs', 'sha256'))
           : args[0] === 'r+' && String(filePath).includes(path.join('.staging', 'blob-')));
         let readonlyWritten = false;
         let closePromise;
+        let actualClosed = false;
         handle.stat = async (...values) => view(await stat(...values));
         handle.chmod = async (mode) => {
           if (isTarget && mode === 0o444) readonlyWritten = true;
           return chmod(mode);
         };
         handle.close = () => {
+          if (actualClosed) return Promise.resolve();
           if (!closePromise) closePromise = (async () => {
-            const before = readonlyWritten || isUnchangedWrite ? await stat({ bigint: true }) : null;
+            const before = readonlyWritten || isCanonicalWrite ? await stat({ bigint: true }) : null;
             await close();
+            actualClosed = true;
             if (before) {
               advanceCtime(before);
               const event = { filePath, identity: before, readonlyWritten };

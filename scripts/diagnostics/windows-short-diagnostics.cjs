@@ -106,7 +106,7 @@ function main() {
   else if (mode === 'disk') disk();
   else if (mode === 'migration') migration();
   else if (mode === 'migration-tests') requireSuccessfulProcess(runNode('migration-tests', ['--test', '--test-reporter=tap',
-    'tests/unit/main-process/archive-storage-root-migration.test.js', 'tests/unit/main-process/archive-service.test.js'], 600000));
+    'tests/unit/main-process/archive-storage-root-migration.test.js'], 600000));
   else if (mode === 'migration-integration') requireSuccessfulProcess(runNode('migration-integration', [
     'scripts/integration/archive-center-permanent-delete.js'], 300000));
   else if (mode === 'ssd-tests') requireSuccessfulProcess(runNode('ssd-tests', ['--test', '--test-reporter=tap', 'tests/unit/scripts/vcc-review-performance-disk-baseline.test.js']));

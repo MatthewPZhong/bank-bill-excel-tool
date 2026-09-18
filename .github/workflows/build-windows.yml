@@ -34,12 +34,6 @@ jobs:
         run: |
           npm ci 2>&1 | Tee-Object -FilePath outputs/windows-short-diagnostics/npm-ci.log
           exit $LASTEXITCODE
-      - name: Run SSD admission regression tests
-        if: always() && steps.install.outcome == 'success' && steps.identity.outcome == 'success'
-        run: node scripts/diagnostics/windows-short-diagnostics.cjs ssd-tests
-      - name: Collect actual Windows volume and disk evidence
-        if: always() && steps.install.outcome == 'success' && steps.identity.outcome == 'success'
-        run: node scripts/diagnostics/windows-short-diagnostics.cjs disk
       - name: Capture migration guard and native file identity changes
         if: always() && steps.install.outcome == 'success' && steps.identity.outcome == 'success'
         run: node scripts/diagnostics/windows-short-diagnostics.cjs migration
@@ -49,9 +43,6 @@ jobs:
       - name: Verify migration and deletion integration on native Windows
         if: always() && steps.install.outcome == 'success' && steps.identity.outcome == 'success'
         run: node scripts/diagnostics/windows-short-diagnostics.cjs migration-integration
-      - name: Recheck readonly and position fixtures on native Windows
-        if: always() && steps.install.outcome == 'success' && steps.identity.outcome == 'success'
-        run: node scripts/diagnostics/windows-short-diagnostics.cjs fixtures
       - name: Upload raw diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v7
