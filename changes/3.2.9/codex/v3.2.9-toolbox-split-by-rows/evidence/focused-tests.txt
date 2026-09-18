@@ -1,0 +1,31 @@
+(node:43065) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 严格行数和安全整数边界；1001 份在分配路径前拒绝 (0.668292ms)
+✔ prepare 使用主进程计数；空数据/超限/非法参数不调用目录选择器 (2.441333ms)
+✔ SPLIT 计数跨隐藏 Sheet；缓存回放保留行序、文本、日期、布尔、错误、样式和重复表头 (176.1035ms)
+✔ N 是文件行数；单文件超出 Sheet 容量会续页且不增加文件 (41.857833ms)
+✔ CSV 与 BIFF 共享 rows 核心，跨块文本编号保留 (74.917292ms)
+(node:43065) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 真实后台 action 返回小描述符，9 份全部校验后才调用一次 Publisher (312.204834ms)
+✔ 第 2 个 writer 失败、缓存损坏或取消均不触发 Publisher (61.962292ms)
+✔ 缓存即使重算摘要，缺失样式引用仍会被拒绝 (36.487459ms)
+✔ 数字串摘要和 UUID 不被误判为业务账号，消息仍只有有界描述符 (0.267708ms)
+✔ 1000 份 FilePlan 的磁盘身份读取线性增长且仍拒绝输出间硬链接 (220.148041ms)
+✔ 磁盘预算失败以及旧导入快照均在任务前拒绝 (1.230167ms)
+✔ 物化读取预算在启动 CSV reader 和目录选择器之前拒绝 (0.899417ms)
+(node:43065) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 运行中的真实 rows Worker 响应 shutdown，退出后不产生正式输出 (269.837416ms)
+✔ rows 第 2 份发布时崩溃，现有 journal 在新 Worker 内恢复旧目标 (522.148708ms)
+(node:43065) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 9 份真实 rows 输出只归属一个业务批次，原件和全部输出均归档 ready 后清理 receipt (902.986958ms)
+ℹ tests 15
+ℹ suites 0
+ℹ pass 15
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 16096.047542

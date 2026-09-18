@@ -1,0 +1,15 @@
+{"phase":"planned","fileCount":1,"planMs":1}
+{"phase":"generated","fileCount":1,"elapsedMs":565}
+{"phase":"verified","fileCount":1,"planMs":1,"elapsedMs":854,"peakProcessRss":238141440,"maxMainDelayMs":40,"publicResultBytes":424,"cacheBytes":16384,"generatedBytes":6044,"maxActiveWriters":1,"peakWorkerMemoryBytes":42693634,"generationMs":31}
+{"phase":"planned","fileCount":8,"planMs":1}
+{"phase":"generated","fileCount":8,"elapsedMs":503}
+{"phase":"verified","fileCount":8,"planMs":1,"elapsedMs":1200,"peakProcessRss":261488640,"maxMainDelayMs":5,"publicResultBytes":2069,"cacheBytes":16384,"generatedBytes":48352,"maxActiveWriters":1,"peakWorkerMemoryBytes":56737681,"generationMs":228}
+{"phase":"planned","fileCount":9,"planMs":2}
+{"phase":"generated","fileCount":9,"elapsedMs":388}
+{"phase":"verified","fileCount":9,"planMs":2,"elapsedMs":1429,"peakProcessRss":276217856,"maxMainDelayMs":3,"publicResultBytes":2304,"cacheBytes":16384,"generatedBytes":54396,"maxActiveWriters":1,"peakWorkerMemoryBytes":56684425,"generationMs":148}
+{"phase":"planned","fileCount":999,"planMs":129}
+{"phase":"generated","fileCount":999,"elapsedMs":21361}
+{"phase":"verified","fileCount":999,"planMs":129,"elapsedMs":86757,"peakProcessRss":651591680,"maxMainDelayMs":166,"publicResultBytes":238846,"cacheBytes":425984,"generatedBytes":6038973,"maxActiveWriters":1,"peakWorkerMemoryBytes":68528582,"generationMs":20566}
+{"phase":"planned","fileCount":1000,"planMs":146}
+{"phase":"generated","fileCount":1000,"elapsedMs":10291}
+{"phase":"verified","fileCount":1000,"planMs":146,"elapsedMs":55437,"peakProcessRss":805060608,"maxMainDelayMs":157,"publicResultBytes":240088,"cacheBytes":425984,"generatedBytes":6045017,"maxActiveWriters":1,"peakWorkerMemoryBytes":76417891,"generationMs":9770}

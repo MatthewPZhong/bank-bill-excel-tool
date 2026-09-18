@@ -219,9 +219,10 @@ test('E04-A/B policy 与 Main source selector 保持 production false，真实�
   const activationBinding = mainSource.slice(activationStart, activationEnd);
   assert.equal((activationBinding.match(/backgroundExecutionRuntimeManager\.get\(\)/g) || []).length, 1);
   const legacySource = mainSource.replace(bizOpBinding, '').replace(bizOpIpcBinding, '').replace(activationBinding, '');
-  assert.equal((legacySource.match(/backgroundExecutionRuntimeManager\.get\(\)/g) || []).length, 14);
+  assert.equal((legacySource.match(/backgroundExecutionRuntimeManager\.get\(\)/g) || []).length, 15);
   assert.equal((mainSource.match(/generateValidateAndPublishToolboxArtifact\(\{/g) || []).length, 2);
   assert.equal((mainSource.match(/generateValidateAndPublishMultiOutput\(\{/g) || []).length, 1);
+  assert.equal((mainSource.match(/generateValidateAndPublishRows\(\{/g) || []).length, 1);
   assert.equal((mainSource.match(/production:\s*true/g) || []).length >= 3, true);
   assert.doesNotMatch(mainSource, /generateValidateAndPublishToolboxArtifact\(\{[\s\S]{0,900}?production:\s*false/);
   assert.match(mainSource, /shouldUseLargeChannel[\s\S]*?dispatchLargeSplit/);
@@ -253,6 +254,7 @@ test('E04-B runtime预算完整计入Scanner phase与一个Writer child，idle/s
     TOOLBOX_GENERATION_ACTIONS.MERGE,
     TOOLBOX_GENERATION_ACTIONS.SPLIT_SINGLE,
     TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT,
+    'toolbox:split-rows',
     'pre-fund:mpt-import',
     'pre-fund:mpt-repair-import',
     'new-account:generate',
@@ -288,7 +290,7 @@ test('E04-B runtime预算完整计入Scanner phase与一个Writer child，idle/s
     POSITION_IMPORT_ADAPTER_ACTION
   ]);
   for (const policy of runtime.policyRegistry.list()) {
-    assert.equal(policy.production.enabled, policy.actionKey.startsWith('biz-op-v327:'));
+    assert.equal(policy.production.enabled, policy.actionKey.startsWith('biz-op-v327:') || policy.actionKey === 'toolbox:split-rows');
   }
   assert.equal(snapshot.budgets.cpuSlots, 2);
   assert.equal(snapshot.budgets.workerThreadSlots, 3);

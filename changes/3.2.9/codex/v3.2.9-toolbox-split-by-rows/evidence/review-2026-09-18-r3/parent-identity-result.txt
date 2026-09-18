@@ -1,0 +1,11 @@
+(node:32872) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+{
+  "status": "failed",
+  "code": "TOOLBOX_PUBLICATION_TARGET_PARENT_CHANGED",
+  "message": "目标direct parent在确认后发生变化：/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/rows-parent-identity-EUOF1g/chosen/source_按行拆分_0001.xlsx",
+  "expectedParentInode": "111063357",
+  "actualParentInode": "111063359",
+  "movedDirectoryFiles": [],
+  "fixture": "/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/rows-parent-identity-EUOF1g"
+}

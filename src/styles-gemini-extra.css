@@ -1611,6 +1611,11 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
 }
 .alert-message strong { color: var(--primary); font-weight: 600; }
 
+/* 按行拆分保留完整文件列表，内容滚动时确认区始终可见。 */
+.toolbox-split-rows-result .alert-body { min-height: 0; overflow-y: auto; }
+.toolbox-split-rows-result .alert-message { min-width: 0; }
+.toolbox-split-rows-result .dialog-actions { flex-shrink: 0; }
+
 /* New-account form (structure from real index.html) */
 .new-account-panel .new-account-title {
   font-size: 13px; color: var(--muted); font-weight: 500;
@@ -4586,6 +4591,30 @@ select.mapping-text-input {
   font-family: inherit;
   font-size: 14px;
 }
+/* v3.2.9 按行拆分：hidden 的输入不占布局空间。 */
+.toolbox-split-by-rows-row,
+.toolbox-split-by-rows-toggle,
+.toolbox-split-row-count-wrap:not([hidden]) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.toolbox-split-by-rows-row { flex-wrap: wrap; font-size: 13px; color: var(--text); }
+.toolbox-split-row-count-wrap[hidden] { display: none; }
+.toolbox-split-row-count-wrap input {
+  width: 128px;
+  min-width: 0;
+  box-sizing: border-box;
+  height: 36px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface, #fffdf8);
+}
+.toolbox-split-row-count-wrap input[aria-invalid="true"] { border-color: #d32f2f; }
+.toolbox-split-picker-card :disabled { opacity: 0.55; cursor: not-allowed; }
 /* v3.0.8（用户要求）：值多选框改用「按钮 + 浮动勾选面板」控件，外观对齐场景管理「适用银行渠道」下拉
    （new-account-currency-dropdown-btn 同款 36px 圆角按钮 + new-account-currency-dropdown-panel 浮动面板）。 */
 .toolbox-split-values-dropdown-wrap {

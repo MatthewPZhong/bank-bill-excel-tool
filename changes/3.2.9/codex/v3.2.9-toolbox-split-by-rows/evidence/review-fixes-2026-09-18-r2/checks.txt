@@ -1,0 +1,5 @@
+本轮静态检查记录（Node 24.13.0）
+PASS: node ./node_modules/eslint/bin/eslint.js src/main.js tests/unit/main-process/toolbox-row-split-parent-identity.test.js
+PASS: node --check src/main.js
+PASS: git diff --check
+PASS: 对照第二轮审查源码清单，既有 src/scripts/tests 文件中仅 src/main.js 改变；新测试另行登记。
