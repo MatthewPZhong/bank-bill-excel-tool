@@ -1,0 +1,212 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index d8f8ee40..f4d4f318 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,5 +1,9 @@
+ # Changelog
+ 
++## 未发布
++
++- 后台执行首批开放：VCC 财务 OP 校验的“数据管理导出”和“导入异常审计导出”启用既有只读 Worker，保持单 Worker、来源核对、结果回读和统一文件发布。资金对账、网银账单生成及 VCC 校验结果导出继续原执行路径，具体接入缺口见 `changes/background-enablement-20260907`。不涉及业务数据迁移，当前运行的程序须正常重启后加载新配置；Windows 打包及真实业务人工验收另行记录。
++
+ ## 3.2.7 - 2026-09-07
+ 
+ - 业务 OP 新区间模块：复用 XLSX 富类型读取与既有后台执行平台，使用公共同步 SQLite 候选 writer；按已确认的账号、日期与高精度金额规则导入，以磁盘分片完成区间计算并保留可追溯历史结果。
+diff --git a/docs/USER_GUIDE.md b/docs/USER_GUIDE.md
+index cd678bca..33cb9062 100644
+--- a/docs/USER_GUIDE.md
++++ b/docs/USER_GUIDE.md
+@@ -2,6 +2,8 @@
+ 
+ 版本：`v3.2.7`
+ 
++> 开发中，尚未发布：VCC 财务 OP“数据管理”中的原表/校验表导出和导入异常审计导出已配置为后台执行。操作按钮与导出内容保持原样，无需重新导入或清理数据；当前运行的程序要在任务结束后正常重启，才会加载新配置。资金对账、网银账单生成及 VCC“导出校验结果表”继续使用原执行方式。Windows 打包与真实业务验收尚未完成。
++
+ > v3.2.7：启用业务 OP 区间核对，支持批量导入、所需输入检查、历史结果版本及全量/差异导出。运行、导出与删除弹窗按 VCC 样式缩小，导出按钮保持稳定并在成功后提醒；合计流水按入账减出账计算，核对差额和结论保持一致。首次从旧模块升级与新版数据的公式升级适用不同的导入说明，详见下文。
+ 
+ > v3.2.6 历史版本说明：银行对账单赋值自身支持“等于 / 包含”；提取大账号顺序时，明确识别出未维护账号会提示来源，确认后结束本次整批导入。首次使用请用脱敏样本核对匹配和账号归属。
+diff --git a/docs/VERSION_FEATURE_HISTORY.md b/docs/VERSION_FEATURE_HISTORY.md
+index 2c3e4553..1e04de39 100644
+--- a/docs/VERSION_FEATURE_HISTORY.md
++++ b/docs/VERSION_FEATURE_HISTORY.md
+@@ -1,5 +1,9 @@
+ # 版本功能变更清单
+ 
++## 未发布：后台执行首批开放（2026-09-07）
++
++按三个模块的实际调用链检查，配置开启 `vcc-financial-op:export-audit`，覆盖 VCC 财务 OP 数据管理的原表/校验表导出及导入异常审计导出。维持单 Worker、256 MiB 阶段资源、业务来源核验、Workbook 回读及唯一 Publisher；不修改业务数据库。资金对账、网银账单生成、VCC 单/多主体校验结果导出尚有 Main 接线缺口，保持原执行路径。新配置在正常重启加载后作用于后续导出；本机隔离验证不代表 Windows、目标规模或真实资金人工验收。详情见 `changes/background-enablement-20260907/spec.md`。
++
+ ## v3.2.7（2026-09-07）
+ 
+ PR1a—PR6 按顺序实现共享关闭观察、目录恢复、公共同步候选写入、区间计算、七类输出、页面/两种删除、一次性清旧与旧入口退役。原件/版本/结果/说明独立保留，历史输出可以追溯冻结输入。
+diff --git a/src/main-process/read-only-exports/vcc-financial-op/policies.js b/src/main-process/read-only-exports/vcc-financial-op/policies.js
+index bd96dbfa..8df8b850 100644
+--- a/src/main-process/read-only-exports/vcc-financial-op/policies.js
++++ b/src/main-process/read-only-exports/vcc-financial-op/policies.js
+@@ -80,13 +80,14 @@ const VCC_FINANCIAL_OP_READ_ONLY_POLICY = Object.freeze({
+   featureFlag: 'feature.vcc-financial-op:export-audit',
+   legacyStrategyKey: 'legacy.vcc-financial-op:export-audit',
+   blocker: null,
++  // 本次显式启用只读数据/异常审计导出；验收边界见 changes/background-enablement-20260907/spec.md。
+   production: Object.freeze({
+-    enabled: false,
+-    effectiveMode: 'legacy',
+-    effectiveWorkerCount: 0,
++    enabled: true,
++    effectiveMode: 'thread-single',
++    effectiveWorkerCount: 1,
+     recoveryStatus: 'probe',
+     evidenceStatus: 'baseline',
+-    downgradeReason: 'production gate not yet passed',
++    downgradeReason: null,
+     benchmarkEvidenceId: null
+   }),
+   protocolLimits: Object.freeze({
+diff --git a/tests/unit/main-process/background-execution/manifest-coverage-e13-g.test.js b/tests/unit/main-process/background-execution/manifest-coverage-e13-g.test.js
+index 0751928c..3bd72b45 100644
+--- a/tests/unit/main-process/background-execution/manifest-coverage-e13-g.test.js
++++ b/tests/unit/main-process/background-execution/manifest-coverage-e13-g.test.js
+@@ -73,7 +73,7 @@ test('E13-G current manifest 以独立 66 action / 73 pair authority 达到六
+   assert.equal(Object.isFrozen(current.manifest.surfaces.publishers), true);
+ });
+ 
+-test('Capability Inventory 与 Effective Production Strategy 分离，仅新版业务 OP 十二项显式开启', () => {
++test('Capability Inventory 与 Effective Production Strategy 分离，仅新版业务 OP 十二项及 VCC 只读审计显式开启', () => {
+   const current = harness();
+   const snapshot = createEffectiveProductionStrategySnapshot(current);
+   assert.deepEqual(current.capabilityInventory.counts, {
+@@ -84,11 +84,12 @@ test('Capability Inventory 与 Effective Production Strategy 分离，仅新版
+   });
+   assert.deepEqual(snapshot.counts, {
+     actionCount: 66,
+-    productionEnabledCount: 12,
+-    legacyEffectiveCount: 54
++    productionEnabledCount: 13,
++    legacyEffectiveCount: 53
+   });
+   for (const action of snapshot.actions) {
+-    const enabled = action.actionKey.startsWith('biz-op-v327:');
++    const enabled = action.actionKey.startsWith('biz-op-v327:') ||
++      action.actionKey === 'vcc-financial-op:export-audit';
+     assert.equal(action.effectiveMode, enabled ? 'thread-single' : 'legacy');
+     assert.equal(action.effectiveWorkerCount, enabled ? 1 : 0);
+     assert.equal(action.featureFlag, enabled);
+@@ -114,8 +115,8 @@ test('Capability Inventory 与 Effective Production Strategy 分离，仅新版
+   assert.deepEqual(validation, {
+     valid: true,
+     actionCount: 66,
+-    productionEnabledCount: 12,
+-    legacyEffectiveCount: 54
++    productionEnabledCount: 13,
++    legacyEffectiveCount: 53
+   });
+   assert.deepEqual(validateCapabilityInventory(current.capabilityInventory, current), {
+     valid: true,
+diff --git a/tests/unit/main-process/vcc-financial-op-read-only-export-e13-b.test.js b/tests/unit/main-process/vcc-financial-op-read-only-export-e13-b.test.js
+index 70f4bd92..61a05a82 100644
+--- a/tests/unit/main-process/vcc-financial-op-read-only-export-e13-b.test.js
++++ b/tests/unit/main-process/vcc-financial-op-read-only-export-e13-b.test.js
+@@ -49,6 +49,9 @@ const {
+ const {
+   createVccFinancialOpService
+ } = require('../../../src/main-process/vcc-financial-op-service');
++const {
++  publishVccFinancialOpOutputs
++} = require('../../../src/main-process/vcc-financial-op-output-recovery');
+ 
+ function createDatabaseFixture(t) {
+   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-read-only-e13-b-'));
+@@ -188,6 +191,93 @@ function batchContext(operationKey = 'vcc-e13-b-operation') {
+   });
+ }
+ 
++for (const variant of ['import-audit', 'raw', 'check']) {
++  test(`生产启用：${variant} 真实 Worker 和 Publisher 输出与原路径一致且业务库不变`, async (t) => {
++    const fixture = createDatabaseFixture(t);
++    const recordId = variant === 'import-audit'
++      ? createAuditRecord(fixture.db)
++      : createDatasetRecord(fixture.db);
++    const readSource = () => variant === 'import-audit'
++      ? freezeVccImportAuditSourceSnapshot({ db: fixture.db, recordId })
++      : freezeVccDatasetSourceSnapshot({
++          db: fixture.db, targetMonth: '2026-08', sourceType: SOURCE_TYPES.RECHARGE,
++          targetKind: variant, archiveSources: []
++        });
++    const frozen = readSource();
++    const legacyPath = path.join(fixture.directory, 'legacy.xlsx');
++    if (variant === 'import-audit') {
++      await writeImportAuditWorkbook({ db: fixture.db, recordId, outputPath: legacyPath });
++    } else {
++      await writeDatasetWorkbook({
++        db: fixture.db, targetMonth: '2026-08', sourceType: SOURCE_TYPES.RECHARGE,
++        targetKind: variant, archiveSources: [], outputPath: legacyPath,
++        expectedInspection: frozen.context.expectedInspection
++      });
++    }
++    // 比较业务表逻辑内容，避免 WAL checkpoint 使文件哈希产生无关变化。
++    const tables = fixture.db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
++      .all().map((row) => row.name);
++    const databaseSnapshot = () => JSON.stringify(tables.map((table) => [
++      table, fixture.db.prepare(`SELECT * FROM "${table.replaceAll('"', '""')}" ORDER BY rowid`).all()
++    ]));
++    const before = databaseSnapshot();
++    const runtime = createBackgroundExecutionRuntime({
++      availableParallelism: 4, totalMemoryBytes: 8 * 1024 ** 3, freeMemoryBytes: 4 * 1024 ** 3
++    });
++    const operationKey = `vcc-production-${variant}`;
++    const taskKey = variant === 'import-audit'
++      ? 'vccFinancialOp:export:import-audit'
++      : 'vccFinancialOp:data-manager:export';
++    const batch = {
++      ...batchContext(operationKey), taskKey, batchId: 77, batchNumber: '2026-09-07-001'
++    };
++    const root = fs.mkdtempSync(path.join(fixture.directory, 'production-'));
++    const plan = generationPlan(root, 'generated.xlsx');
++    const target = path.join(fixture.directory, 'published.xlsx');
++    let freshnessChecks = 0;
++    let publisherCalls = 0;
++    let handoffCalls = 0;
++    try {
++      const result = await generateValidateAndPublishVccFinancialOpExport({
++        runtime, actionKey: VCC_FINANCIAL_OP_READ_ONLY_ACTION, operationKey,
++        taskRunId: batch.taskRunId, batchContext: batch,
++        stableRunEvidence: frozen.evidence,
++        dbPathOrManagedSource: { kind: 'sqlite', mainDatabasePath: fixture.dbPath },
++        generationPlan: plan, context: frozen.context, production: true,
++        assertSourceFresh() {
++          freshnessChecks += 1;
++          return assertVccFinancialOpSourceSnapshot(readSource(), frozen.evidence);
++        },
++        async publisher(artifacts) {
++          publisherCalls += 1;
++          assert.equal(artifacts.length, 1);
++          return publishVccFinancialOpOutputs({
++            batchContext: batch, generationFilePaths: [artifacts[0].generationPath],
++            targetFilePaths: [target], targetSnapshots: [{ exists: false }],
++            expectedArtifacts: [{ byteSize: artifacts[0].byteSize, sha256: artifacts[0].sha256 }],
++            userDataDir: path.join(fixture.directory, 'user-data'),
++            settleManifestArtifacts(publication, evidence) {
++              handoffCalls += 1;
++              assert.equal(publication.files.length, 1);
++              assert.equal(evidence[0].sha256, artifacts[0].sha256);
++            }
++          });
++        }
++      });
++      assert.equal(result.publication.files[0].filePath, target);
++      assert.equal(freshnessChecks, 3);
++      assert.equal(publisherCalls, 1);
++      assert.equal(handoffCalls, 1);
++      assert.deepEqual(readWorkbookBusinessEvidence(target), readWorkbookBusinessEvidence(legacyPath));
++      assert.equal(databaseSnapshot(), before);
++    } finally {
++      const shutdown = await runtime.shutdown({ timeoutMs: 5000 });
++      assert.deepEqual(shutdown.leakedTransports, []);
++      assert.deepEqual(shutdown.errors, []);
++    }
++  });
++}
++
+ test('E13-B VCC import audit worker 与 legacy workbook 语义 golden 等价，真实 Runtime 可执行', async (t) => {
+   const fixture = createDatabaseFixture(t);
+   const recordId = createAuditRecord(fixture.db);

@@ -1,0 +1,4 @@
+interface:
+  display_name: "盲区扫描"
+  short_description: "基于代码、测试和配置证据扫描边界、失败模式、旁路、兼容性与测试盲区"
+  default_prompt: "使用 $blindspot-pass 对当前方案做一次证据型盲区扫描。"

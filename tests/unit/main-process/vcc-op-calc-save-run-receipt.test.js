@@ -229,7 +229,7 @@ test('migration 对旧 VCC DB 加法升级，FK 指向真实 run 表且可重复
 test('3.2.0 TechDoc Receipt FK 使用真实物理 run 表名', () => {
   const techdoc = fs.readFileSync(path.resolve(
     __dirname,
-    '../../../changes/background-execution-v3.2.x-contract-baseline/changes/3.2.0/techdoc.md'
+    '../../../changes/v3.2.0~v3.2.5/background-execution-v3.2.x-contract-baseline/changes/3.2.0/techdoc.md'
   ), 'utf8');
   assert.match(
     techdoc,

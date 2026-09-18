@@ -48,7 +48,7 @@ const {
 const TEMPLATE_PATH = path.resolve(__dirname, '../../../assets/余额账单模版.xlsx');
 const POLICY_FIXTURE_PATH = path.resolve(
   __dirname,
-  '../../../changes/background-execution-v3.2.x-contract-baseline/changes/background-execution/validation/fixtures/valid/policy-registry.v3.2.x.json'
+  '../../../changes/v3.2.0~v3.2.5/background-execution-v3.2.x-contract-baseline/changes/background-execution/validation/fixtures/valid/policy-registry.v3.2.x.json'
 );
 const CRASH_RECOVER_PUBLISHER_WORKER = path.resolve(
   __dirname,

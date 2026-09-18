@@ -3,12 +3,13 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { resolveChangesPath } = require('../../../scripts/lib/changes-paths');
 const test = require('node:test');
 
 const REPOSITORY_ROOT = path.resolve(__dirname, '../../..');
 
 function read(relativePath) {
-  return fs.readFileSync(path.join(REPOSITORY_ROOT, relativePath), 'utf8')
+  return fs.readFileSync(resolveChangesPath(REPOSITORY_ROOT, relativePath), 'utf8')
     .replace(/\r\n?/g, '\n');
 }
 

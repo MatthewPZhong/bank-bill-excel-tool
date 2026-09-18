@@ -1,0 +1,4 @@
+interface:
+  display_name: "实施记录"
+  short_description: "为中大型任务持续记录关键决策、低风险假设、实施偏差、验证证据和剩余未知"
+  default_prompt: "使用 $implementation-notes 为当前任务建立并维护实施记录。"

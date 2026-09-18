@@ -50,7 +50,7 @@ function parseArgs(argv) {
     runs: DEFAULT_RUNS,
     representativeRowsPerFile: DEFAULT_REPRESENTATIVE_ROWS_PER_FILE,
     smallRowsPerFile: DEFAULT_SMALL_ROWS_PER_FILE,
-    outputDir: path.resolve(__dirname, '../changes/background-execution-e05-c-prefund-parser-pool')
+    outputDir: path.resolve(__dirname, '../changes/v3.2.1/background-execution-e05-c-prefund-parser-pool')
   };
   for (let index = 0; index < argv.length; index += 1) {
     const key = argv[index];

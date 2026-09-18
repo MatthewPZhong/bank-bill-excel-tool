@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const { resolveChangesPath } = require('./lib/changes-paths');
 
 const {
   bindingSnapshot
@@ -47,7 +48,7 @@ const SOURCE_PATHS = Object.freeze([
 ]);
 
 function absolute(relativePath) {
-  return path.join(REPOSITORY_ROOT, relativePath);
+  return resolveChangesPath(REPOSITORY_ROOT, relativePath);
 }
 
 function readJson(relativePath) {

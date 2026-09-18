@@ -39,7 +39,7 @@ const {
 
 const CANONICAL_POLICY_FIXTURE = path.resolve(
   __dirname,
-  '../../../../changes/background-execution-v3.2.x-contract-baseline/changes/background-execution/validation/fixtures/valid/policy-registry.v3.2.x.json'
+  '../../../../changes/v3.2.0~v3.2.5/background-execution-v3.2.x-contract-baseline/changes/background-execution/validation/fixtures/valid/policy-registry.v3.2.x.json'
 );
 
 function operationContext(operationKey = 'operation-e13-f') {

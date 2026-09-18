@@ -74,7 +74,7 @@ const {
 const ROOT = path.join(__dirname, '..', '..', '..');
 const FIXTURE_ROOT = path.join(
   ROOT,
-  'changes/background-execution-v3.2.x-contract-baseline/changes/background-execution/validation/fixtures/valid'
+  'changes/v3.2.0~v3.2.5/background-execution-v3.2.x-contract-baseline/changes/background-execution/validation/fixtures/valid'
 );
 const POLICY_FIXTURE = path.join(FIXTURE_ROOT, 'policy-registry.v3.2.x.json');
 const STATIC_KEYS = path.join(FIXTURE_ROOT, 'static-key-manifest.v3.2.x.json');

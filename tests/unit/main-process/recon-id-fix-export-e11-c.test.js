@@ -433,7 +433,7 @@ async function mutateFirstWorksheetXml(filePath, mutate) {
 }
 
 test('canonical export policy byte-for-byte、strict bounded manifest与production false', () => {
-  const fixture = require('../../../changes/background-execution-v3.2.x-contract-baseline/changes/background-execution/validation/fixtures/valid/policy-registry.v3.2.x.json').actions;
+  const fixture = require('../../../changes/v3.2.0~v3.2.5/background-execution-v3.2.x-contract-baseline/changes/background-execution/validation/fixtures/valid/policy-registry.v3.2.x.json').actions;
   assert.deepEqual(RECON_FIX_EXPORT_POLICY, fixture[RECON_FIX_EXPORT_ACTION]);
   assert.equal(isBackgroundExecutionProductionEnabled(RECON_FIX_EXPORT_ACTION), false);
   assert.equal(validateReconFixExportResult({}), false);

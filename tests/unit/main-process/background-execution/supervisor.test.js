@@ -31,7 +31,7 @@ const { validateProtocolSequence } = require(
 );
 const canary = require('../../../../src/main-process/background-execution/canary');
 const servicePolicyFixture = require(
-  '../../../../changes/background-execution-v3.2.x-contract-baseline/changes/background-execution/validation/fixtures/valid/policy-registry.v3.2.x.json'
+  '../../../../changes/v3.2.0~v3.2.5/background-execution-v3.2.x-contract-baseline/changes/background-execution/validation/fixtures/valid/policy-registry.v3.2.x.json'
 ).actions['statement:import'];
 
 function applyServicePolicy(policy, serviceKey) {

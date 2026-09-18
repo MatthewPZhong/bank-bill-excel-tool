@@ -677,7 +677,7 @@ async function runSingleCreationProbe({
 }
 
 test('E12-A 两 action canonical policy + E12-C exact dual topology、production false 且 validator 隔离', () => {
-  const fixture = require('../../../changes/background-execution-v3.2.x-contract-baseline/changes/background-execution/validation/fixtures/valid/policy-registry.v3.2.x.json').actions;
+  const fixture = require('../../../changes/v3.2.0~v3.2.5/background-execution-v3.2.x-contract-baseline/changes/background-execution/validation/fixtures/valid/policy-registry.v3.2.x.json').actions;
   assert.deepEqual(VCC_EXPORT_SINGLE_POLICY, fixture[VCC_EXPORT_SINGLE_ACTION]);
   const expectedSubjects = fixture[VCC_EXPORT_SUBJECTS_ACTION];
   assert.deepEqual(VCC_EXPORT_SUBJECTS_POLICY, {
