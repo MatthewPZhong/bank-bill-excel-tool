@@ -6,6 +6,36 @@ const {
   recoverPendingToolboxPublications
 } = require('./toolbox-output-publication');
 
+// 与 Main 的 afterTerminal 注册共用精确入口；这些任务的后处理只负责
+// publication receipt 收尾，其他业务 owner 仍须走自己的持久恢复路由。
+const PUBLICATION_ONLY_FILE_TASKS = new Map([
+  ['toolbox:merge', 'toolbox'],
+  ['toolbox:split:export', 'toolbox'],
+  ['vccFinancialOp:data-manager:export', 'vcc-financial-op'],
+  ['vccFinancialOp:export:import-audit', 'vcc-financial-op'],
+  ['vccFinancialOp:export:result', 'vcc-financial-op'],
+  ['pending:error:export-report', 'pending-reconciliation'],
+  ['pending:diff:export-single', 'pending-reconciliation'],
+  ['pending:diff:export-aggregate', 'pending-reconciliation'],
+  ['bizOpRecon:export:date', 'biz-op-recon'],
+  ['bizOpRecon:export:date-range', 'biz-op-recon'],
+  ['pre-fund-reconciliation:export', 'pre-fund-reconciliation'],
+  ['acquiringBillCurrency:export', 'acquiring-bill-currency']
+]);
+
+function isPublicationOnlyFileTask(context = {}) {
+  return PUBLICATION_ONLY_FILE_TASKS.has(context.taskKey)
+    && PUBLICATION_ONLY_FILE_TASKS.get(context.taskKey) === context.moduleId;
+}
+
+async function acknowledgeToolboxPublicationReceipts(options = {}) {
+  const taskIds = [...new Set((Array.isArray(options.taskIds) ? options.taskIds : []).map(String))];
+  if (taskIds.length === 0) return;
+  // 正常生命周期同样通过原发布 owner 收尾；不能先删 journal/index
+  // 再让调用方写 completion，否则进程退出后没有耐久证据继续接管。
+  return recoverToolboxPublicationsIntoArchive({ ...options, taskIds });
+}
+
 function toolboxRecoveryOutputFiles(files, sourceOperation) {
   return (Array.isArray(files) ? files : []).map((file) => ({
     filePath: file.filePath,
@@ -276,6 +306,45 @@ async function recoverToolboxPublicationsIntoArchive(options = {}) {
     }
 
     const acknowledgedTaskIds = pending.map((item) => item.taskId);
+    // 仅已明确登记为 publication 后处理的入口可在这里登记收口凭证。
+    // 共享 Publisher 的其他模块继续由自己的业务 owner/持久路由登记凭证。
+    const completionPending = manifestPending.filter((item) => {
+      const context = item.batchContext;
+      if (!isPublicationOnlyFileTask(context)) return false;
+      const owner = { version: 1, kind: 'file-batch', batchContext: context };
+      const proof = archiveCenter.service.repository.getOwnerTerminalCompletion(owner);
+      if (proof && proof.afterTerminal) return false;
+      const records = archiveCenter.outboxStore.list();
+      return !records.some((record) => {
+        const payload = record && record.payload;
+        const persistedContext = payload && (payload.owner && payload.owner.batchContext || payload.batchContext);
+        return persistedContext && persistedContext.batchId === context.batchId
+          && payload.terminalOutcome && payload.terminalOutcome.afterTerminal;
+      });
+    });
+    if (completionPending.length > 0) {
+      // 先完成真实 backup/staging 清理并耐久进入既有 finalizing 阶段；
+      // 在写入 completion 前保留 journal/index，跨进程失败仍可由原 owner 接管。
+      const staged = await recoverPublications({
+        userDataDir: options.userDataDir,
+        deferCommittedRecovery: true,
+        acknowledgedCommittedTaskIds: acknowledgedTaskIds,
+        deferCommittedFinalization: true
+      });
+      const stagedByTask = new Map((staged && staged.recovered || [])
+        .map((item) => [String(item && item.taskId), item]));
+      for (const item of completionPending) {
+        if (stagedByTask.get(String(item.taskId))?.action !== 'commit-finalization-pending') {
+          throw new Error(`工具箱发布 ${item.taskId} 未形成耐久 finalizing 收口事实`);
+        }
+        const completed = await archiveCenter.service.recordFileTaskOwnerCompletion(item.batchContext, {
+          terminalStatus: 'succeeded', afterTerminal: null
+        });
+        if (!completed || completed.ok !== true) {
+          throw new Error(`工具箱发布 ${item.taskId} 的原 owner 收口凭证写入失败：${completed && completed.message || ''}`);
+        }
+      }
+    }
     const finalized = await recoverPublications({
       userDataDir: options.userDataDir,
       deferCommittedRecovery: true,
@@ -312,6 +381,8 @@ async function recoverToolboxPublicationsIntoArchive(options = {}) {
 }
 
 module.exports = {
+  acknowledgeToolboxPublicationReceipts,
+  isPublicationOnlyFileTask,
   recoverToolboxPublicationsIntoArchive,
   toolboxRecoveryInputFiles,
   toolboxRecoveryOutputFiles

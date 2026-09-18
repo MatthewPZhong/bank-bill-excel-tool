@@ -358,6 +358,26 @@ CREATE TABLE IF NOT EXISTS biz_op_v327_publications (
 );
 CREATE INDEX IF NOT EXISTS biz_op_v327_prepared_phase ON biz_op_v327_prepared_ops(phase,task_run_id);
 
+-- 历史 File Task 凭证按实例分批补齐；坏项保留诊断并在下一轮重试，不关闭业务入口。
+CREATE TABLE IF NOT EXISTS biz_op_v327_archive_owner_backfill_cursor (
+ archive_instance_id TEXT PRIMARY KEY,
+ last_batch_id INTEGER NOT NULL CHECK(last_batch_id >= 0),
+ updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS biz_op_v327_archive_owner_backfill_failures (
+ archive_instance_id TEXT NOT NULL,
+ batch_id INTEGER NOT NULL,
+ task_run_id TEXT NOT NULL,
+ error_code TEXT NOT NULL,
+ updated_at TEXT NOT NULL,
+ PRIMARY KEY(archive_instance_id,batch_id)
+);
+CREATE INDEX IF NOT EXISTS idx_biz_op_v327_archive_owner_completion_batch
+ ON archive_owner_terminal_completions(batch_id);
+-- 原 Archive 索引只覆盖非空 task_run_id；完整恢复的相关子查询不能用部分索引。
+CREATE INDEX IF NOT EXISTS idx_biz_op_v327_archive_batch_task
+ ON archive_batches(task_run_id);
+
 -- 清旧阶段收据与最终业务收据分开；仅 ACTIVE 写入普通 UPGRADE 收据。
 CREATE TABLE IF NOT EXISTS biz_op_v327_activation (
  singleton INTEGER PRIMARY KEY CHECK(singleton=1),

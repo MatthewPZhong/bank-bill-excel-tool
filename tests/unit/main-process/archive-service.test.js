@@ -97,6 +97,68 @@ function writeSource(fixture, name, content) {
   return filePath;
 }
 
+test('File Task 收口凭证核对批次及 TaskRun 完整身份，拒绝冲突且正常记录幂等', async () => {
+  const fixture = createFixture();
+  try {
+    await fixture.service.initialize();
+    const inputPath = writeSource(fixture, 'completion-input.xlsx', 'owner completion input');
+    const task = (await fixture.service.beginTaskRun({
+      taskRunId: 'completion-task', taskKey: 'toolbox:merge', moduleId: 'toolbox',
+      parentRunId: 'completion-parent', operationKey: 'completion-operation'
+    })).taskRun;
+    const manifest = artifactManifestFromFilePlan(normalizeFilePlanV1({
+      version: 1, allocation: 'eager',
+      inputs: [{ filePath: inputPath, role: 'input', sourceOperation: 'toolbox:merge' }], outputs: []
+    }));
+    const reserved = await fixture.service.reserveFileTaskBatch({
+      taskRun: task, manifest, moduleCode: 'TOOLBOX', moduleName: '工具箱'
+    });
+    const batchContext = {
+      batchId: reserved.batch.id, batchNumber: reserved.batch.batchNumber,
+      taskRunId: task.taskRunId, taskKey: task.taskKey, moduleId: task.moduleId,
+      parentRunId: task.parentRunId, operationKey: task.operationKey
+    };
+    assert.equal((await fixture.service.startFileTask(task.taskRunId, reserved.batch.id)).ok, true);
+    assert.equal((await fixture.service.settleManifestArtifacts({
+      batchContext, files: [{ artifactKey: manifest.inputs[0].artifactKey }]
+    })).durable, true);
+    assert.equal((await fixture.service.finishFileTask(task.taskRunId, reserved.batch.id,
+      { taskStatus: 'succeeded' })).ok, true);
+    const outcome = { terminalStatus: 'succeeded' };
+    const completionCount = () => fixture.db.prepare(
+      'SELECT COUNT(*) count FROM archive_owner_terminal_completions'
+    ).get().count;
+    for (const field of Object.keys(batchContext)) {
+      const conflictingContext = { ...batchContext,
+        [field]: field === 'batchId' ? batchContext.batchId + 1 : `different-${field}` };
+      const rejected = await fixture.service.recordFileTaskOwnerCompletion(conflictingContext, outcome);
+      assert.equal(rejected.code, 'ARCHIVE_OWNER_COMPLETION_IDENTITY_CONFLICT', field);
+      assert.equal(completionCount(), 0, `${field} 冲突不能留下凭证`);
+    }
+    for (const [field, column] of [
+      ['taskKey', 'task_key'], ['parentRunId', 'parent_run_id'],
+      ['moduleId', 'module_id'], ['operationKey', 'operation_key']
+    ]) {
+      fixture.db.prepare(`UPDATE archive_task_runs SET ${column} = ? WHERE task_run_id = ?`)
+        .run(`different-${field}`, task.taskRunId);
+      const rejected = await fixture.service.recordFileTaskOwnerCompletion(batchContext, outcome);
+      assert.equal(rejected.code, 'ARCHIVE_OWNER_COMPLETION_IDENTITY_CONFLICT', `TaskRun.${field}`);
+      assert.equal(completionCount(), 0, `TaskRun.${field} 冲突不能留下凭证`);
+      fixture.db.prepare(`UPDATE archive_task_runs SET ${column} = ? WHERE task_run_id = ?`)
+        .run(task[field], task.taskRunId);
+    }
+    assert.equal((await fixture.service.recordFileTaskOwnerCompletion(batchContext, outcome)).ok, true);
+    const owner = { version: 1, kind: 'file-batch', batchContext };
+    const originalProof = fixture.repository.getOwnerTerminalCompletion(owner);
+    assert.deepEqual(originalProof.owner, owner);
+    assert.equal((await fixture.service.recordFileTaskOwnerCompletion(batchContext, outcome)).ok, true);
+    assert.equal(completionCount(), 1);
+    assert.deepEqual(fixture.repository.getOwnerTerminalCompletion(owner), originalProof);
+  } finally {
+    fixture.close();
+  }
+});
+
 test('deferred 零输出不占号，跨日 promote 以实际建批日形成 running batch', async () => {
   let now = new Date(2026, 7, 17, 23, 59, 59);
   const fixture = createFixture({ now: () => now });
@@ -1058,6 +1120,7 @@ test('5001 个缺失 v2 layout 也只占用首块共享预算并由同一后台�
   const verified = [];
   const repository = {
     ensureSchema() {},
+    getOrCreateArchiveInstanceId() { return 'schema-fixture-instance'; },
     replayFlowBindIntents() { return { replayed: 0, remaining: 0 }; },
     listCleanupJobs() { return []; },
     markInterruptedArtifacts() { return { artifactCount: 0 }; },
@@ -1172,6 +1235,7 @@ test('5001 个 canonical Blob 的启动元数据校验只读取首块并由后�
   });
   const repository = {
     ensureSchema() {},
+    getOrCreateArchiveInstanceId() { return 'schema-fixture-instance'; },
     replayFlowBindIntents() { return { replayed: 0, remaining: 0 }; },
     listCleanupJobs() { return []; },
     markInterruptedArtifacts() { return { artifactCount: 0 }; },
@@ -1807,7 +1871,7 @@ test('存档失败以明确结果返回且不泄露绝对路径，修复源文�
   }
 });
 
-test('源文件仅在存档成功或批次删除后释放，失败重试期间保持可用', async () => {
+test('源文件在存档成功后释放，手动删除不运行源路径回调', async () => {
   const releasedPaths = [];
   const fixture = createFixture({
     onSourceReleased: (paths) => releasedPaths.push(...paths)
@@ -1840,7 +1904,7 @@ test('源文件仅在存档成功或批次删除后释放，失败重试期间�
 
     const deleted = await fixture.service.deleteBatch(deleteBatch.batch.id);
     assert.equal(deleted.metadataDeleted, true);
-    assert.deepEqual(releasedPaths, [retryPath, deletePath]);
+    assert.deepEqual(releasedPaths, [retryPath]);
   } finally {
     fixture.close();
   }
@@ -1904,7 +1968,7 @@ test('同一源文件仍被其它未完成 artifact 引用时不得提前释放'
     assert.deepEqual(releasedPaths, [sharedRetryPath, replacementPath]);
 
     await fixture.service.deleteBatch(secondDeleteBatch.batch.id);
-    assert.deepEqual(releasedPaths, [sharedRetryPath, replacementPath, sharedDeletePath]);
+    assert.deepEqual(releasedPaths, [sharedRetryPath, replacementPath]);
   } finally {
     fixture.close();
   }
@@ -2725,10 +2789,12 @@ test('canonical ancestor 被目录链接替换后 open/save/delete/publish 均 f
 
       const deleted = await fixture.service.deleteBatch(archived.batch.id);
 
-      assert.equal(deleted.metadataDeleted, true);
-      assert.equal(deleted.status, 'deleted-cleanup-pending');
+      assert.equal(deleted.ok, false);
+      assert.equal(deleted.code, 'ARCHIVE_PATH_SYMLINK_REJECTED');
+      assert.equal(deleted.metadataDeleted, undefined);
       assert.equal(fs.readFileSync(externalPath, 'utf8'), content);
-      assert.equal(fixture.repository.listCleanupJobs().length, 1);
+      assert.ok(fixture.repository.getBatch(archived.batch.id));
+      assert.equal(fixture.repository.listCleanupJobs().length, 0);
     } finally {
       fixture.close();
     }

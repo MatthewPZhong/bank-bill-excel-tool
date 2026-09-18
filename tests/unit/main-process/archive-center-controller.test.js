@@ -185,7 +185,10 @@ function createHarness(options = {}) {
         : { ok: false, message: 'not found' };
     },
     async setLocked(id, locked) { return { ok: true, batch: { ...repository.getBatch(id), locked } }; },
-    async deleteBatch() { return { ok: true }; },
+    async prepareDeleteBatch(id) { return { ok: true, batch: repository.getBatch(id), revision: 'test-revision', summary: { total: 1 } }; },
+    async deleteBatch() { return { ok: true, metadataDeleted: true, fullyDeleted: true }; },
+    async listDeleteCleanupJobs() { return { ok: true, jobs: [] }; },
+    async retryDeleteCleanupJob() { return { ok: true, metadataDeleted: true, fullyDeleted: true }; },
     async retryBatch(id, retryOptions = {}) {
       this.lastRetryCall = { id, options: retryOptions };
       return { ok: true, batch: repository.getBatch(id) };
@@ -606,7 +609,7 @@ test('operation/file owner cancel-wins 时迟到 success 不 finalizer、不移�
   });
   assert.equal(finalized.length, 0);
   assert.equal(service.finishTaskRunCalls.length, 1);
-  assert.equal(service.finishFileTaskCalls.length, 1);
+  assert.equal(service.finishFileTaskCalls.length, 0, '无批次且无删除收口凭证时保留通知，禁止再次 finishFileTask');
   assert.equal(outboxStore.list().length, 2);
 });
 
@@ -902,7 +905,8 @@ test('批次元数据已删除但物理清理失败时保留部分成功语义',
     failures: [{ code: 'ARCHIVE_EBUSY' }]
   });
 
-  const result = await controller.deleteBatch(created.batchNumber);
+  const prepared = await controller.prepareDeleteBatch(created.batchNumber);
+  const result = await controller.deleteBatch(created.batchNumber, prepared.confirmationToken);
   assert.equal(result.status, 'partial');
   assert.equal(result.ok, false);
   assert.equal(result.metadataDeleted, true);
@@ -2706,4 +2710,93 @@ test('outbox remaining 与 interrupted sweep 失败均 fail-closed 且不进入 
     ));
     assert.equal(hookCalls, 0);
   }
+});
+
+async function createDeleteHarness(options = {}) {
+  const harness = createHarness(options);
+  const created = await harness.controller.sink.createBatch({
+    moduleId: 'toolbox', moduleCode: 'TOOL', moduleName: '工具箱',
+    operationKey: 'delete-controller-operation', sourceOperation: 'toolbox:merge',
+    files: [{ filePath: '/tmp/delete-controller-source.xlsx', role: 'input' }]
+  });
+  return { ...harness, created };
+}
+
+test('永久删除预检只读，凭证绑定窗口和批次且缺失凭证不可执行', async () => {
+  const { controller, service, created } = await createDeleteHarness();
+  let deletes = 0;
+  service.deleteBatch = async () => { deletes += 1; return { ok: true, metadataDeleted: true, fullyDeleted: true }; };
+  const prepared = await controller.prepareDeleteBatch(created.batchNumber, { senderId: 'window-1' });
+  assert.equal(prepared.ok, true);
+  assert.equal(deletes, 0, '只读预检和用户取消不得调用删除');
+  assert.equal((await controller.deleteBatch(created.batchNumber)).code, 'ARCHIVE_DELETE_CONFIRMATION_EXPIRED');
+  assert.equal((await controller.deleteBatch(created.batchNumber, prepared.confirmationToken, { senderId: 'window-2' })).code, 'ARCHIVE_DELETE_CONFIRMATION_EXPIRED');
+  assert.equal((await controller.deleteBatch('999', prepared.confirmationToken, { senderId: 'window-1' })).code, 'ARCHIVE_DELETE_CONFIRMATION_EXPIRED');
+  assert.equal(deletes, 0);
+  const result = await controller.deleteBatch(created.batchNumber, prepared.confirmationToken, { senderId: 'window-1' });
+  assert.equal(result.fullyDeleted, true);
+  assert.equal(deletes, 1);
+});
+
+test('永久删除重复确认共用本次执行；未明确 fullyDeleted 时不得显示成功', async () => {
+  const { controller, service, created } = await createDeleteHarness();
+  let deletes = 0;
+  service.deleteBatch = async () => {
+    deletes += 1;
+    await Promise.resolve();
+    return { ok: true, metadataDeleted: true, cleanupJobId: 8, deletionId: 'delete-8' };
+  };
+  const prepared = await controller.prepareDeleteBatch(created.batchNumber);
+  const results = await Promise.all([
+    controller.deleteBatch(created.batchNumber, prepared.confirmationToken),
+    controller.deleteBatch(created.batchNumber, prepared.confirmationToken)
+  ]);
+  assert.equal(deletes, 1);
+  assert.deepEqual(results[0], results[1]);
+  assert.equal(results[0].status, 'partial');
+  assert.equal(results[0].fullyDeleted, false);
+  assert.equal(results[0].cleanupJobId, 8);
+});
+
+test('终态通知未 ACK 时预检阻止；预检后新增目标通知也阻止提交且不隐式 flush', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-delete-admission-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const outboxStore = createArchiveOutboxStore(directory);
+  const { controller, service, created } = await createDeleteHarness({ outboxStore });
+  let deletes = 0;
+  controller.flushOutbox = () => { throw new Error('预检不得 flush'); };
+  service.deleteBatch = async () => { deletes += 1; return { ok: true, metadataDeleted: true, fullyDeleted: true }; };
+  const prepared = await controller.prepareDeleteBatch(created.batchNumber);
+  outboxStore.enqueue({ moduleId: 'toolbox', operationKey: 'delete-controller-operation',
+    targetBatchId: created.batchId, files: [], terminalOutcome: { taskStatus: 'cancelled' } });
+  assert.equal((await controller.prepareDeleteBatch(created.batchNumber)).code, 'ARCHIVE_DELETE_OWNER_PENDING');
+  assert.equal((await controller.deleteBatch(created.batchNumber, prepared.confirmationToken)).code, 'ARCHIVE_DELETE_OWNER_PENDING');
+  assert.equal(deletes, 0);
+  assert.equal(outboxStore.list().length, 1);
+  assert.ok(service.repository.getBatch(created.batchId));
+});
+
+test('恢复清单损坏与未结束迁移 journal 均拒绝永久删除预检', async () => {
+  for (const kind of ['inventory', 'migration']) {
+    const options = kind === 'inventory'
+      ? { getProtectedInterruptedTaskBatchIds: async () => ({ batchIds: [], sweepUnsafe: true }) }
+      : { storageRootManager: {
+          isMaintenanceRequested: () => false,
+          assertDeleteAllowed: async () => { const error = new Error('迁移清理未完成'); error.code = 'ARCHIVE_STORAGE_MIGRATION_PENDING'; throw error; }
+        } };
+    const { controller, created } = await createDeleteHarness(options);
+    const result = await controller.prepareDeleteBatch(created.batchNumber);
+    assert.equal(result.status, 'failed');
+    assert.equal(result.code, kind === 'inventory' ? 'ARCHIVE_DELETE_OWNER_PENDING' : 'ARCHIVE_STORAGE_MIGRATION_PENDING');
+  }
+});
+
+test('待完成删除独立于批次可见性列出并重试，保留任务身份和严格完成条件', async () => {
+  const { controller, service } = createHarness();
+  service.listDeleteCleanupJobs = async () => ({ ok: true, jobs: [{ id: 91, batchId: 123, batchNumber: '已移除批次', state: 'failed' }] });
+  service.retryDeleteCleanupJob = async (id) => ({ ok: true, metadataDeleted: true, fullyDeleted: true, cleanupJobId: id, deletionId: 'completed-91' });
+  assert.equal((await controller.listDeleteCleanupJobs()).jobs[0].id, 91);
+  const result = await controller.retryDeleteCleanupJob(91);
+  assert.equal(result.fullyDeleted, true);
+  assert.equal(result.deletionId, 'completed-91');
 });

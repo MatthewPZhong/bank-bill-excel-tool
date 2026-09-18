@@ -164,11 +164,15 @@ function createStorageMaterializer(options = {}) {
         );
       }
       await syncStagedFile(fsModule, stagedPath);
-      await fsModule.promises.chmod(stagedPath, 0o444);
+      if (!options.publishFile) await fsModule.promises.chmod(stagedPath, 0o444);
       await assertNoSymlinkAncestors(fsModule, rootDir, path.dirname(targetPath));
       await fsModule.promises.mkdir(path.dirname(targetPath), { recursive: true });
       targetParentCreated = true;
-      await fsModule.promises.rename(stagedPath, targetPath);
+      if (options.publishFile) {
+        await options.publishFile(stagedPath, targetPath, { verifiedStat: staged.stat, mode: 0o444 });
+      } else {
+        await fsModule.promises.rename(stagedPath, targetPath);
+      }
       await syncDirectory(fsModule, path.dirname(targetPath));
       return { mode: 'copy', targetPath, storageRelativePath: payload.storageRelativePath };
     } catch (error) {

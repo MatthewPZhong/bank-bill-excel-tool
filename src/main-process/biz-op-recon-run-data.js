@@ -1027,6 +1027,13 @@ async function recoverMonthEndCopyIntents({ userDataDir, archiveService }) {
         }
         if (taskRun.status === 'succeeded') {
           assertTargetCopyApplied({ userDataDir, intent });
+          const owner = fileBatchOwnerForCopyIntent(archiveService, taskRun);
+          const completed = await archiveService.recordFileTaskOwnerCompletion(owner.batchContext, {
+            terminalStatus: 'succeeded', afterTerminal: null
+          });
+          if (!completed || completed.ok !== true) {
+            throw monthEndCopyConflict('Biz OP 月末复制的原 owner 收口凭证未完成');
+          }
           acknowledgeMonthEndCopyIntent({
             userDataDir,
             dataDate: intent.dataDate,
@@ -1070,6 +1077,13 @@ async function recoverMonthEndCopyIntents({ userDataDir, archiveService }) {
         );
         if (!finished || finished.ok === false) {
           throw monthEndCopyConflict('Biz OP 月末复制的 Archive terminal 未完成');
+        }
+        // target copy 已持久，剩余 ACK 仅移除控制 intent；先保存收口事实以跨重启恢复。
+        const completed = await archiveService.recordFileTaskOwnerCompletion(owner.batchContext, {
+          terminalStatus: 'succeeded', afterTerminal: null
+        });
+        if (!completed || completed.ok !== true) {
+          throw monthEndCopyConflict('Biz OP 月末复制的原 owner 收口凭证未完成');
         }
         acknowledgeMonthEndCopyIntent({
           userDataDir,

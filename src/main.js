@@ -155,6 +155,15 @@ const {
   createArchiveRuntimeDelegate
 } = require('./main-process/archive-center/archive-runtime-delegate');
 const {
+  createPositionOwnedDeleteSourceResolver,
+  positionDeleteSourceReferences
+} = require('./main-process/archive-center/position-owned-delete-sources');
+const { createPositionReportDeleteProtection } = require('./main-process/position-reconciliation/archive-report-delete-protection');
+const {
+  positionInputFilePlanEvidence,
+  positionFilePlanSettlementFiles
+} = require('./main-process/position-reconciliation/archive-file-plan-evidence');
+const {
   createArchiveStorageRootManager
 } = require('./main-process/archive-center/storage-root-manager');
 const {
@@ -585,6 +594,8 @@ const {
 } = require('./main-process/toolbox-output-publication');
 const {
   recoverToolboxPublicationsIntoArchive,
+  acknowledgeToolboxPublicationReceipts: acknowledgeToolboxPublicationReceiptsIntoArchive,
+  isPublicationOnlyFileTask,
   toolboxRecoveryOutputFiles: toolboxFinalOutputFiles
 } = require('./main-process/toolbox-archive-recovery');
 const {
@@ -4697,8 +4708,17 @@ function registerArchiveCenterHandlers() {
     }
     return callArchiveCenter('setLocked', batchId, locked);
   });
-  archiveCenterMutationIpcHandle('archive-center:delete-batch', '删除批次', (_event, batchId) => {
-    return callArchiveCenter('deleteBatch', batchId);
+  ipcMain.handle('archive-center:prepare-delete-batch', (event, batchId) => {
+    return callArchiveCenter('prepareDeleteBatch', batchId, { senderId: event.sender.id });
+  });
+  archiveCenterMutationIpcHandle('archive-center:delete-batch', '删除批次', (event, batchId, confirmationToken) => {
+    return callArchiveCenter('deleteBatch', batchId, confirmationToken, { senderId: event.sender.id });
+  });
+  ipcMain.handle('archive-center:list-delete-cleanup-jobs', () => {
+    return callArchiveCenter('listDeleteCleanupJobs');
+  });
+  archiveCenterMutationIpcHandle('archive-center:retry-delete-cleanup-job', '重试永久删除', (_event, cleanupJobId) => {
+    return callArchiveCenter('retryDeleteCleanupJob', cleanupJobId);
   });
   archiveCenterMutationIpcHandle('archive-center:select-retry-sources',
     '选择存档恢复文件',
@@ -4851,10 +4871,13 @@ function protectedInterruptedTaskBatchIds() {
   } catch (error) { return { batchIds: [], taskRunIds: [], sweepUnsafe: true, error }; }
   try {
     const pending = readPositionPendingOperation();
-    const owner = positionPendingOwner(pending);
-    if (owner.kind === 'file-batch') batchIds.add(owner.batchContext.batchId);
-  } catch (_error) {
-    // 无 pending 或证据损坏时不猜测。
+    if (pending) {
+      const owner = positionPendingOwner(pending);
+      if (owner.kind === 'file-batch') batchIds.add(owner.batchContext.batchId);
+      else taskRunIds.push(owner.operationContext.taskRunId);
+    }
+  } catch (error) {
+    return { batchIds: [...batchIds], taskRunIds, sweepUnsafe: true, error };
   }
   for (const batchId of acquiringRunData.listRecoverableArchiveBatchIds({
     userDataDir: path.dirname(database.dbPath)
@@ -4897,15 +4920,47 @@ function initializeArchiveCenter() {
     'archive-center',
     'outbox'
   ));
-  const createService = (rootDir) => createArchiveService({
-    database: database.db,
-    rootDir,
-    opener: (filePath) => shell.openPath(filePath),
-    onArtifactReady: (completed, repository) => {
-      if (bizOpV327Module) bizOpV327Module.readyHold(completed, repository);
-    },
-    onSourceReleased: cleanupPositionArchiveSourcePaths
-  });
+  const createService = (rootDir) => {
+    const service = createArchiveService({
+      database: database.db,
+      rootDir,
+      opener: (filePath) => shell.openPath(filePath),
+      onArtifactReady: (completed, repository) => {
+        if (bizOpV327Module) bizOpV327Module.readyHold(completed, repository);
+      },
+      onSourceReleased: cleanupPositionArchiveSourcePaths
+    });
+    service.runDeleteWithOwnerGuard = (batchId, operation, options) => (
+      archiveCenterService.runDeleteWithOwnerGuard(batchId, operation, options)
+    );
+    service.resolveOwnedDeleteSources = createPositionOwnedDeleteSourceResolver({
+      userDataPath: path.dirname(database.dbPath),
+      reportReferenceProvider: createPositionReportDeleteProtection({
+        userDataPath: path.dirname(database.dbPath),
+        getExpectedCheckpoint: () => database.getSetting(POSITION_SIDE_DB_CHECKPOINT_SETTING)
+          || database.getSetting(POSITION_SIDE_DB_BOOTSTRAP_SETTING)
+      }),
+      protectedPathProvider: async ({ batch, artifacts }) => {
+        // 在记录层排除本批次，不能从路径集合删元素，否则会漏掉其他批次的同路径引用。
+        const references = positionDeleteSourceReferences(service.repository, batch.id, artifacts);
+        const protectedPaths = positionPersistentStagingProtectionPaths(
+          references.protectedPaths.concat(archiveOutbox.listSourcePaths()),
+          readPositionPendingOperation()
+        );
+        if (!Array.isArray(protectedPaths)) throw new Error('平盘暂存保护清单不可验证');
+        if (positionReconciliationService) {
+          const activePaths = positionReconciliationService.activeImportStagingPaths();
+          if (!Array.isArray(activePaths)) throw new Error('平盘活动暂存保护清单不可验证');
+          protectedPaths.push(...activePaths);
+        }
+        return {
+          protectedPaths,
+          sharedPaths: references.sharedPaths
+        };
+      }
+    });
+    return service;
+  };
   const archiveRepository = createArchiveRepository(database.db);
   const runtimeService = createArchiveRuntimeDelegate({
     repository: archiveRepository,
@@ -19803,6 +19858,7 @@ function registerPositionReconciliationHandlers() {
             allocation: 'eager',
             inputs: files.map((file) => ({
               filePath: file.filePath,
+              ...positionInputFilePlanEvidence(file),
               originalName: file.originalName,
               role: 'input',
               sourceOperation: 'position-reconciliation:bank:apply-import'
@@ -19860,6 +19916,7 @@ function registerPositionReconciliationHandlers() {
             allocation: 'eager',
             inputs: files.map((file) => ({
               filePath: file.filePath,
+              ...positionInputFilePlanEvidence(file),
               originalName: file.originalName,
               role: 'input',
               sourceOperation: 'position-reconciliation:source:apply-import'
@@ -20517,21 +20574,12 @@ async function publishToolboxArtifacts(
 }
 
 async function acknowledgeToolboxPublicationReceipts(taskIds) {
-  const requested = [...new Set((Array.isArray(taskIds) ? taskIds : []).map(String))];
-  if (requested.length === 0) return;
-  const finalized = await recoverToolboxPublicationsAsync({
+  return acknowledgeToolboxPublicationReceiptsIntoArchive({
     userDataDir: app.getPath('userData'),
-    deferCommittedRecovery: true,
-    acknowledgedCommittedTaskIds: requested
+    archiveCenter: archiveCenterService,
+    recoverPublications: recoverToolboxPublicationsAsync,
+    taskIds
   });
-  const cleaned = new Set((Array.isArray(finalized && finalized.recovered)
-    ? finalized.recovered
-    : []).filter((item) => item && item.action === 'commit-cleanup')
-    .map((item) => String(item.taskId)));
-  const missing = requested.filter((taskId) => !cleaned.has(taskId));
-  if (missing.length > 0) {
-    throw new Error(`工具箱 publication receipt 未完成确认清理：${missing.join('、')}`);
-  }
 }
 
 function captureToolboxTargetSnapshot(targetPath) {
@@ -21818,14 +21866,10 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
             finalizePositionPendingAfterTaskTerminal,
             typeof prepared.afterTerminal === 'function' ? prepared.afterTerminal : null
           )
-        : (meta.channel === 'toolbox:merge' || meta.channel === 'toolbox:split:export')
-          ? () => acknowledgeToolboxPublicationReceipts(
-              prepared.toolboxPublicationTaskIds || []
-            )
-          : meta.channel.startsWith('vccFinancialOp:export:')
-              || meta.channel === 'vccFinancialOp:data-manager:export'
+        : ['toolbox', 'vcc-financial-op'].includes(policy.scopeId)
+            && isPublicationOnlyFileTask({ taskKey: policy.taskKey, moduleId: policy.scopeId })
             ? () => acknowledgeToolboxPublicationReceipts(
-                prepared.vccOutputPublicationTaskIds || []
+                prepared.toolboxPublicationTaskIds || prepared.vccOutputPublicationTaskIds || []
               )
           : (typeof prepared.afterTerminal === 'function' ? prepared.afterTerminal : null),
       afterTerminalIntent: isPositionOperation
@@ -21876,10 +21920,7 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
               { terminalForCurrentTask: true }
             );
             const settled = await controls.settleArtifacts({
-              files: [
-                ...taskContext.fileEvidence.filePlan.inputs,
-                ...taskContext.fileEvidence.filePlan.outputs
-              ].map((item) => ({ artifactKey: item.artifactKey }))
+              files: positionFilePlanSettlementFiles(taskContext.fileEvidence.filePlan)
             });
             if (settled && settled.durable === true) {
               markPositionArchiveDurable({ batchId: batchContext.batchId });

@@ -6,6 +6,7 @@ const assert = require('node:assert/strict');
 const { DatabaseSync } = require('node:sqlite');
 const { createBizOpV327Module } = require('../../src/main-process/biz-op-v327/module');
 const { createArchiveService } = require('../../src/main-process/archive-center/archive-service');
+const { createArchiveRuntimeDelegate } = require('../../src/main-process/archive-center/archive-runtime-delegate');
 const { createTaskLifecycle } = require('../../src/main-process/archive-center/task-lifecycle');
 const { createBusinessFlowResolver } = require('../../src/main-process/archive-center/business-flow-resolver');
 const { createBusinessOperationRegistry } = require('../../src/main-process/business-operation-registry');
@@ -42,6 +43,7 @@ async function createHost(t, options = {}) {
   service = createArchiveService({ database: db, rootDir: path.join(root, 'archive'),
     onArtifactReady: (artifact, repository) => module.readyHold(artifact, repository) });
   await service.initialize({ deferStartupRecovery: true });
+  if (options.archiveRuntimeDelegate) service = createArchiveRuntimeDelegate({ service });
   runtime = createNonProductionBackgroundExecutionRuntime({ bizOpV327: module.runtimeBindings,
     resourceGovernor: createResourceGovernor({ budgets: { cpuSlots: 2, workerThreadSlots: 2, utilityProcessSlots: 0,
       ioHeavySlots: 2, memoryBytes: 2 * 1024 * 1024 * 1024 } }) });

@@ -321,7 +321,7 @@
     const resultButton = button('导出校验结果表', openResults); const managerButton = button('数据管理', openManager);
     const reportButton = button('导出错误报告', () => exportObject('ERRORS', reportRef)); reportButton.hidden = true;
     const retry = button('重试恢复', async () => {
-      const result = await perform('恢复检查', async () => { const state = await api.retryRecovery(); return { status: state.ready ? 'ok' : 'error', message: state.ready ? '恢复已完成' : '仍有未决任务或文件，请查看任务详情后重试' }; });
+      const result = await perform(recoveryReady ? '存档检查' : '恢复检查', async () => { const state = await api.retryRecovery(); return { status: state.ready ? 'ok' : 'error', message: state.ready ? '本次检查已完成' : '仍有未决任务或文件，请查看任务详情后重试' }; });
       if (result?.status === 'ok') await refreshStatus(true);
     });
     const cancelButton = button('取消当前操作', async () => {
@@ -348,10 +348,13 @@
       try {
         const info = await api.status(); enabled = info.mode === 'ACTIVE'; recoveryReady = info.recoveryReady === true;
         if (!busy) for (const btn of [importButton, runButton, resultButton, managerButton, reportButton]) btn.disabled = !enabled || !recoveryReady;
-        retry.hidden = recoveryReady; retry.disabled = !enabled || busy;
+        const archiveCheckPending = info.archiveOwnerBackfillPending === true;
+        retry.hidden = recoveryReady && !archiveCheckPending; retry.disabled = !enabled || busy;
+        retry.textContent = recoveryReady ? '继续检查存档' : '重试恢复';
         updateFooter();
         if (show && !enabled) message('新区间功能正在准备，完成恢复与升级后开放入口', 'warning');
         else if (show && !recoveryReady) message('存在未决任务或文件，完成恢复后可继续操作', 'warning');
+        else if (show && archiveCheckPending) message('仍有存档记录待检查，可继续操作业务或再次检查', 'warning');
         else if (show) message('欢迎使用小助手');
         return info;
       } catch (error) { enabled = false; for (const btn of [importButton, runButton, resultButton, managerButton, reportButton]) btn.disabled = true; showError(error); return null; }

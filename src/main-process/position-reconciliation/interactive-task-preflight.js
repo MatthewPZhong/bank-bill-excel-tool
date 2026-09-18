@@ -1,5 +1,7 @@
 'use strict';
 
+const { positionInputFilePlanEvidence, positionOutputFilePlanEvidence } = require('./archive-file-plan-evidence');
+
 function positionPreflightFailure(error) {
   return {
     status: 'failed',
@@ -206,6 +208,7 @@ function createPositionSourceImportTaskContract({
             })),
             ...stagedFiles.map((file) => ({
               filePath: file.archivePath,
+              ...positionInputFilePlanEvidence(file),
               role: 'input',
               originalName: file.fileName,
               sourceOperation: 'position-reconciliation:source:prepare-import'
@@ -213,6 +216,7 @@ function createPositionSourceImportTaskContract({
           ],
           outputs: outputFiles.map((file) => ({
             filePath: file.filePath,
+            ...positionOutputFilePlanEvidence(file),
             role: 'output',
             originalName: file.originalName,
             sourceOperation: 'position-reconciliation:source:prepare-import'

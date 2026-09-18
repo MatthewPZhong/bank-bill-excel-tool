@@ -2573,7 +2573,10 @@ function createArchiveCenterPreviewApi() {
     async openFile() { return { status: 'success', message: '预览模式未打开文件' }; },
     async saveAs() { return { status: 'cancelled' }; },
     async setLocked() { return { status: 'success' }; },
-    async deleteBatch() { return { status: 'success', metadataDeleted: true }; },
+    async prepareDeleteBatch() { return { status: 'success', ok: true, confirmationToken: 'preview-confirmation', summary: { total: 2 } }; },
+    async deleteBatch() { return { status: 'success', ok: true, metadataDeleted: true, fullyDeleted: true }; },
+    async listDeleteCleanupJobs() { return { status: 'success', jobs: [] }; },
+    async retryDeleteCleanupJob() { return { status: 'success', ok: true, metadataDeleted: true, fullyDeleted: true }; },
     async selectRetrySources() { return { status: 'cancelled' }; },
     async retryBatch() { return { status: 'success' }; },
     async getSettings() {
@@ -2638,6 +2641,9 @@ function createAppUpdateSettingsDialog(options = {}) {
     settingsLoading: false,
     selectedBatchId: '',
     batches: [],
+    deleteCleanupJobs: [],
+    cleanupRequestId: 0,
+    deleteRequestId: 0,
     detail: null,
     stats: null,
     settings: { retentionDays: 60, storageRoot: '', storageMigration: null },
@@ -2728,6 +2734,8 @@ function createAppUpdateSettingsDialog(options = {}) {
                 <strong data-role="archive-file-total-size">-</strong>
               </div>
             </header>
+
+            <section class="archive-center-warning" data-role="archive-delete-cleanup-jobs" aria-label="待完成删除" hidden></section>
 
             <div class="archive-center-filters" aria-label="存档筛选">
               <label class="archive-center-field">
@@ -2854,6 +2862,57 @@ function createAppUpdateSettingsDialog(options = {}) {
         `<option value="${escapeHtml(id)}"${id === selected ? ' selected' : ''}>${escapeHtml(name)}</option>`
       ))
     ].join('');
+  }
+
+  function renderDeleteCleanupJobs() {
+    const panel = dialog.querySelector('[data-role="archive-delete-cleanup-jobs"]');
+    panel.hidden = archiveState.deleteCleanupJobs.length === 0;
+    panel.innerHTML = archiveState.deleteCleanupJobs.map((job) => {
+      const jobId = String(job.cleanupJobId ?? job.id ?? '');
+      const failures = Array.isArray(job.failures) ? job.failures : [];
+      const reason = job.message || job.lastErrorMessage
+        || failures.map((failure) => failure.message || failure.code).filter(Boolean).join('；')
+        || (job.state === 'waiting-migration' ? '等待存档位置迁移完成' : '文件清理尚未完成');
+      return `<div data-delete-cleanup-job-id="${escapeHtml(jobId)}">
+        <strong>待完成删除：${escapeHtml(job.batchNumber || String(job.batchId || ''))}</strong>
+        <p role="status">${escapeHtml(reason)}</p>
+        <button class="secondary-btn small" type="button" data-action="retry-delete-cleanup" data-cleanup-job-id="${escapeHtml(jobId)}">重试清理</button>
+      </div>`;
+    }).join('');
+  }
+
+  async function loadDeleteCleanupJobs() {
+    const requestId = ++archiveState.cleanupRequestId;
+    try {
+      const result = await getArchiveCenterApi().listDeleteCleanupJobs();
+      const jobs = readArchiveCenterPayload(result, 'jobs', []);
+      if (!Array.isArray(jobs)) throw new Error('待完成删除格式无效');
+      if (requestId !== archiveState.cleanupRequestId || archiveState.destroyed) return false;
+      archiveState.deleteCleanupJobs = jobs;
+      renderDeleteCleanupJobs();
+      return true;
+    } catch (error) {
+      if (requestId !== archiveState.cleanupRequestId || archiveState.destroyed) return false;
+      showArchiveFeedback(`待完成删除加载失败：${archiveCenterErrorText(error, '未知错误')}`);
+      return false;
+    }
+  }
+
+  async function retryDeleteCleanup(button) {
+    if (button.disabled) return;
+    button.disabled = true;
+    showArchiveFeedback('正在重试文件清理…', 'info');
+    try {
+      const result = await getArchiveCenterApi().retryDeleteCleanupJob(button.dataset.cleanupJobId);
+      const complete = result?.ok === true && result?.metadataDeleted === true && result?.fullyDeleted === true;
+      await loadDeleteCleanupJobs();
+      await loadArchiveStats();
+      showArchiveFeedback(result?.message || (complete ? '存档批次已永久删除' : '清理尚未完成，请查看原因后重试'), complete ? 'success' : 'error');
+    } catch (error) {
+      showArchiveFeedback(`重试清理失败：${archiveCenterErrorText(error, '未知错误')}`);
+    } finally {
+      if (button.isConnected) button.disabled = false;
+    }
   }
 
   function renderArchiveBatches() {
@@ -3165,6 +3224,7 @@ function createAppUpdateSettingsDialog(options = {}) {
     maintenanceDeletedBatchIds = []
   } = {}) {
     const requestId = ++archiveState.listRequestId;
+    const cleanupLoad = loadDeleteCleanupJobs();
     const filters = currentArchiveFilters();
     if (clearFeedback) showArchiveFeedback('', 'info');
     batchList.setAttribute('aria-busy', 'true');
@@ -3227,6 +3287,7 @@ function createAppUpdateSettingsDialog(options = {}) {
       showArchiveFeedback(`批次列表加载失败：${archiveCenterErrorText(error, '未知错误')}`);
       return false;
     } finally {
+      await cleanupLoad;
       if (requestId === archiveState.listRequestId) {
         batchList.removeAttribute('aria-busy');
       }
@@ -3553,44 +3614,76 @@ function createAppUpdateSettingsDialog(options = {}) {
     }
   }
 
-  function confirmArchiveBatchDelete(button) {
+  async function confirmArchiveBatchDelete(button) {
+    if (button.disabled || archiveState.destroyed || !overlay.isConnected) return;
+    const requestId = ++archiveState.deleteRequestId;
+    const isCurrentRequest = () => !archiveState.destroyed
+      && requestId === archiveState.deleteRequestId;
+    const ownsDialog = (target) => isCurrentRequest() && target?.isConnected;
     const batchId = button.dataset.batchId;
     const batchNumber = button.dataset.batchNumber || batchId;
+    button.disabled = true;
+    let prepared;
+    try {
+      prepared = await getArchiveCenterApi().prepareDeleteBatch(batchId);
+      if (!ownsDialog(overlay)) return;
+      if (!verifyArchiveCenterAction(prepared, '删除预检失败') || !prepared?.confirmationToken) return;
+    } catch (error) {
+      if (!ownsDialog(overlay)) return;
+      showArchiveFeedback(`删除预检失败：${archiveCenterErrorText(error, '未知错误')}`);
+      return;
+    } finally {
+      if (button.isConnected) button.disabled = false;
+    }
     let confirmOverlay = null;
     const restoreSettingsDialog = () => {
+      if (!ownsDialog(confirmOverlay)) return;
       queueMicrotask(() => {
+        // 共享确认框在 onCancel 返回后关闭；仅在当前请求仍有效且未打开别的弹窗时恢复。
+        if (!isCurrentRequest() || elements.modalRoot.firstElementChild) return;
         openModal(overlay);
-        requestAnimationFrame(refreshOpenAppUpdateDialog);
+        requestAnimationFrame(() => {
+          if (ownsDialog(overlay)) refreshOpenAppUpdateDialog();
+        });
       });
     };
+    const fileCount = Number(prepared.summary?.fileCount);
+    const scopeSummary = Number.isSafeInteger(fileCount) && fileCount >= 0
+      ? `<br>本次涉及 ${fileCount} 个存档文件副本。`
+      : '';
     confirmOverlay = createConfirmDialog({
-      message: `批次 <strong>${escapeHtml(batchNumber)}</strong> 将立即永久删除。该操作不会删除原始文件和用户已另存的副本。`,
+      message: `确定永久删除批次 <strong>${escapeHtml(batchNumber)}</strong> 吗？<br>该批次信息及存档中心保存的原始文件将一并删除，删除后无法恢复。${scopeSummary}`,
       confirmText: '永久删除',
       cancelText: '取消',
       onCancel: restoreSettingsDialog,
       onConfirm: async () => {
         const confirmButton = confirmOverlay.querySelector('[data-action="confirm"]');
+        if (!ownsDialog(confirmOverlay) || confirmButton.disabled) return;
+        const cancelButton = confirmOverlay.querySelector('[data-action="cancel"]');
         confirmButton.disabled = true;
+        confirmButton.textContent = '删除中…';
+        cancelButton.disabled = true;
         try {
-          const result = await getArchiveCenterApi().deleteBatch(batchId);
+          const result = await getArchiveCenterApi().deleteBatch(batchId, prepared.confirmationToken);
+          if (!ownsDialog(confirmOverlay)) return;
           const metadataDeleted = result?.metadataDeleted === true;
-          if (!metadataDeleted && !verifyArchiveCenterAction(result, '永久删除批次失败')) {
-            confirmButton.disabled = false;
-            return;
-          }
+          const fullyDeleted = result?.ok === true && metadataDeleted && result?.fullyDeleted === true;
+          if (!metadataDeleted) throw new Error(result?.message || '永久删除未完成，请重新预检并确认');
+          // 使删除前已经发出的列表/详情读取失效，避免迟到响应恢复旧卡片。
+          archiveState.listRequestId += 1;
+          archiveState.detailRequestId += 1;
           archiveState.selectedBatchId = '';
           archiveState.detail = null;
           openModal(overlay);
-          const cleanupPending = metadataDeleted && result?.ok === false;
-          showArchiveFeedback(
-            cleanupPending
-              ? '批次记录已删除，但部分物理副本清理待后台重试'
-              : (result?.message || '存档批次已永久删除'),
-            cleanupPending ? 'error' : 'success'
-          );
           await loadArchiveBatches({ clearFeedback: false });
+          if (!ownsDialog(overlay)) return;
           await loadArchiveStats();
+          if (!ownsDialog(overlay)) return;
+          showArchiveFeedback(result?.message || (fullyDeleted
+            ? '存档批次已永久删除'
+            : '批次记录已删除，但文件清理尚未完成，请在待完成删除中重试'), fullyDeleted ? 'success' : 'error');
         } catch (error) {
+          if (!ownsDialog(confirmOverlay)) return;
           let feedback = confirmOverlay.querySelector('[data-role="archive-delete-error"]');
           if (!feedback) {
             feedback = document.createElement('div');
@@ -3601,6 +3694,8 @@ function createAppUpdateSettingsDialog(options = {}) {
           }
           feedback.textContent = `永久删除失败：${archiveCenterErrorText(error, '未知错误')}`;
           confirmButton.disabled = false;
+          confirmButton.textContent = '永久删除';
+          cancelButton.disabled = false;
         }
       }
     });
@@ -3610,6 +3705,7 @@ function createAppUpdateSettingsDialog(options = {}) {
   function closeSettingsDialog() {
     if (archiveState.settingsLoading || archiveState.retentionSaving) return false;
     archiveState.destroyed = true;
+    archiveState.deleteRequestId += 1;
     archiveState.retentionIntentToken += 1;
     archiveState.retentionPendingIntent = null;
     clearTimeout(archiveState.batchFilterTimer);
@@ -3734,6 +3830,8 @@ function createAppUpdateSettingsDialog(options = {}) {
       toggleArchiveBatchLock(button);
     } else if (action === 'delete-archive-batch') {
       confirmArchiveBatchDelete(button);
+    } else if (action === 'retry-delete-cleanup') {
+      retryDeleteCleanup(button);
     } else if (action === 'retry-archive-batch') {
       retryArchiveBatch(button);
     }

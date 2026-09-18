@@ -643,10 +643,23 @@ function listMonthsDualSource({ userDataDir, mainDb }) {
 
 // 启动异常任务扫尾前，只读取已经写入侧库 chunk_progress 的 exact-seven 上下文。
 // 这些批次由显式 resume 入口恢复，不能被通用 interrupted sweep 先改成 failed；
-// 损坏或升级前无上下文的记录不猜测批次身份，仍交通用扫尾处理。
+// 升级前明确无上下文的记录不猜测批次身份；清单/已发现恢复证据不可读则阻止扫尾和删除。
 function listRecoverableArchiveBatchIds({ userDataDir }) {
   const batchIds = new Set();
-  for (const file of runDataStore.listSideDbFiles(userDataDir, MODULE)) {
+  const evidenceFailure = (cause, recoveryPath) => {
+    const error = new Error(`收单任务恢复证据当前不可验证：${cause.message || String(cause)}`);
+    error.code = 'ACQUIRING_RUN_RECOVERY_EVIDENCE_UNAVAILABLE';
+    error.cause = cause;
+    error.recoveryPaths = [recoveryPath];
+    return error;
+  };
+  let files;
+  try {
+    files = runDataStore.listSideDbFiles(userDataDir, MODULE, { strictErrors: true });
+  } catch (cause) {
+    throw evidenceFailure(cause, runDataStore.moduleDir(userDataDir, MODULE));
+  }
+  for (const file of files) {
     let db = null;
     try {
       db = new DatabaseSync(file.path, { readOnly: true });
@@ -656,20 +669,19 @@ function listRecoverableArchiveBatchIds({ userDataDir }) {
         WHERE chunk_progress IS NOT NULL
       `).all();
       for (const row of rows) {
-        try {
-          const progress = JSON.parse(row.chunk_progress);
-          if (!progress || !['partial', 'in-progress', 'data-complete', 'complete'].includes(progress.status)) {
-            continue;
-          }
-          const context = runRepo.readRunProgressBatchContext(progress);
-          const batchId = Number(context && context.batchId);
-          if (Number.isSafeInteger(batchId) && batchId > 0) batchIds.add(batchId);
-        } catch (_error) {
-          // 破坏或不兼容的恢复证据必须 fail-closed，不用它保护任何猜测批次。
+        const progress = JSON.parse(row.chunk_progress);
+        if (!progress || typeof progress !== 'object' || Array.isArray(progress)) {
+          throw new TypeError('chunk_progress 恢复证据不是对象');
         }
+        const context = runRepo.readRunProgressBatchContext(progress);
+        if (!context) continue; // 合法历史行明确没有 archive owner，不替它猜测身份。
+        if (!['partial', 'in-progress', 'data-complete', 'complete'].includes(progress.status)) {
+          throw new TypeError('chunk_progress 原 owner 的恢复状态不可验证');
+        }
+        batchIds.add(context.batchId);
       }
-    } catch (_error) {
-      // 离线/损坏的侧库无法证明恢复所有权；通用任务扫尾仍负责终结残留批次。
+    } catch (cause) {
+      throw evidenceFailure(cause, file.path);
     } finally {
       if (db) {
         try { db.close(); } catch (_error) { /* ignore */ }

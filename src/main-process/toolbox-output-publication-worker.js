@@ -34,6 +34,7 @@ function runPublicationOperation(op, payload = {}, onCheckpoint = null) {
     return recoverPendingToolboxPublications({
       userDataDir: payload.userDataDir,
       deferCommittedRecovery: payload.deferCommittedRecovery === true,
+      deferCommittedFinalization: payload.deferCommittedFinalization === true,
       acknowledgedCommittedTaskIds: payload.acknowledgedCommittedTaskIds,
       checkpoint
     });

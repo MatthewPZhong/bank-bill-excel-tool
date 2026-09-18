@@ -1114,13 +1114,14 @@ function deleteSideDbByPath(filePath) {
 
 // 列出某 module 侧库目录下所有侧库文件（孤儿扫描用）。
 //   返回 [{ fileName, monthKey, path }]；目录不存在返回 []。
-function listSideDbFiles(userDataDir, module) {
+function listSideDbFiles(userDataDir, module, options = {}) {
   assertModule(module);
   const dir = moduleDir(userDataDir, module);
   let entries;
   try {
     entries = fs.readdirSync(dir);
-  } catch (_e) {
+  } catch (error) {
+    if (options.strictErrors === true && error.code !== 'ENOENT') throw error;
     return []; // 目录不存在 → 无侧库文件
   }
   const out = [];

@@ -2009,3 +2009,14 @@ test('completed_with_errors 保持 succeeded，并在终态 CAS 同步合并审�
     }
   });
 });
+
+test('匿名后处理未执行的 FileTask terminal 失败保留待后处理事实，不能降格为无后处理', async () => {
+  const { lifecycle, calls } = createHarness({ finishFileTaskResult: { ok: false, code: 'DB_BUSY' } });
+  await lifecycle._finishFileTask(RECOVERY_CONTEXT, 'test:anonymous-after-terminal',
+    { taskStatus: 'succeeded', metadata: { visible: 1 } },
+    { deferOwnerCompletion: true, afterTerminalUnrouted: true });
+  const persisted = calls.find((call) => call[0] === 'persist-terminal-intent')[1];
+  assert.equal(persisted.terminalOutcome.metadata._archiveAfterTerminalPending, true);
+  const written = calls.find((call) => call[0] === 'finish-file-task')[3];
+  assert.deepEqual(written.metadata, { visible: 1 });
+});
