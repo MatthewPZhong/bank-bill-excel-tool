@@ -31,7 +31,7 @@
 - [x] B2：fetch 实际 origin；main 要求 `smoke-test`、`build` 严格检查，禁止强推且 admins 同样受保护。production-release 有指定用户审批，正式标签有创建/不可变规则。
 - [x] B4/B5：核对六源 SHA 均为祖先且实际实现存在；当前 `origin/main` 与基线相同并包含于 release，暂无新增 hotfix。
 - [x] C1/C2：版本和锁文件 3.2.9；同步 CHANGELOG、版本功能历史和使用手册。
-- [x] C3：修复提交 `30317ee5a9ad8227db0562354d20554edb9e6ae4` 已复审；本记录所在的后续文档提交继承相同生产、依赖及测试内容，推送后另核对 PR head。
+- [x] C3：生产修复提交 `30317ee5a9ad8227db0562354d20554edb9e6ae4` 已复审；后续 ctime 单测夹具修正及输入摘要单独记录，候选以 PR 实际 head 为准，不将工作树改动当已发布。
 - [x] C4 本地自动门禁：修复后 7,864 PASS / 0 FAIL / 3 Windows 专用 SKIP、59 集成脚本 2,575/2,575，lint/smoke 通过。门禁输入逐项比对；两份独立 PF 验证器另经动态验证。
 - [ ] A3/C4 平台/C5/C6：旧候选 Windows 必需检查失败；新候选 Windows、人工及 VCC 完整性能门禁仍待闭环。
 - [x] D1/D2：同名 release 已推送并建立 release→main 草稿 [PR #239](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/239)；每次推送均核对 head，候选 SHA 见 PR 及下方续做记录。
@@ -149,3 +149,5 @@ Biz OP 源分支原有 20 个未提交文件已核对归属并形成上述提交
 ## SST 与 Windows 高位文件身份续做
 
 六功能集成后的三项 SST/高位文件身份 P2 已修复为 `30317ee5a9ad8227db0562354d20554edb9e6ae4`，局部回归与独立复审通过。本轮完整本地门禁通过：501 个单测文件，7,864 PASS / 0 FAIL / 3 Windows 专用 SKIP；59 个集成脚本，2,575/2,575。真实 drain 期间取消的 10,000 Pending 补充验证通过，43 ms 收口，无强制终止。最终 Windows 检查、候选包、完整 PF 和人工验收仍未闭环，尚未合并 main、打正式标签或发布。详见 [修复审查与证据](self-review-2026-09-19/runtime-repairs.md)。旧成功证据保留原适用范围，PR 保持草稿，尚未合并 main、打标签或正式发布。
+
+Windows `50062ca0` 的 ctime 拒删单测暴露跨平台注入前提不可靠，后续只修改该单测并完成全文件 59/59 复验；生产和依赖不变，后续候选 Windows 完整门禁仍待通过。详见[ctime 夹具分析](self-review-2026-09-19/runtime-repairs.md#windows-ctime-回归夹具修正)。

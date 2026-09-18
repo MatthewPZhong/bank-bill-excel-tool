@@ -38,3 +38,11 @@
 这两个独立验收脚本不属于 release-check 的 lint/src、单测或集成调用链，单独语法、lint 及完整门禁后的最终 runner 动态验证均 PASS：普通 smoke 19 Sheet 回读成功；10,000 Pending 在真实 drain 等待期间取消，43 ms 收口、forced=false、stageBoundaryOnly=false、cleanup=PASS，游标 return 1 次，取消后的 sourceRows 固定为 12,372。两次均为 macOS/Electron 36.9.5 补充证据，acceptance 保持 NOT_RUN。实际测试时 HEAD 仍为 `5ffaabb0` 且 productionDirty=true；原记录保留该事实，提交后的输入哈希比对证明代码已纳入上述修复提交。原百万样本、1 MiB/s、5 秒停写、队列预算、RSS 和 Windows/人工门槛均未修改，正式 PF 仍待验。
 
 完整门禁日志 SHA-256：`dee26fc40765ac8f035c9e006e95efa08501a1444695be7f11d1d20756b1afc0`。初始固定 1,484 个输入，另核对 46 个先前清单中未变的非 ASCII 路径资源；提交时逐项比对，仅两份独立 PF 验证器使用其已单独验证的新摘要。结构化结果见 [runtime-repairs-summary.json](runtime-repairs-summary.json)。
+
+## Windows ctime 回归夹具修正
+
+候选 `50062ca02dd80947181dd042159ac851c2b8d0c1` 的 Windows 完整检查出现一项可见失败：hardlink 的 ctime 拒删用例预期保留文件，实际返回已删除。原测试只调用 `chmod(0600)`，未确认时间确实改变；[Node 文档](https://nodejs.org/api/fs.html#file-modes)说明 Windows 仅处理写权限。受控 no-op 实验复现相同结果，但没有原 Windows stat 日志，不能将其写成实测该次 ctime 未变。生产判断仍要求 ctime 一致，只有冻结计划内链接确实减少时才允许对应变化；本次未发现该判断被绕过的证据。
+
+修订仅作用于原单测：对该 fixture 的私有 fs，只将匹配真实 dev/ino 的对象 ctime 偏移；明确保持 mode、mtime、nlink、内容与两条实际路径不变。重试必须返回恰好两个 `ARCHIVE_DELETE_FILE_CHANGED`，保留两条文件及 cleanup job。该文件 59/59 PASS，hardlink 子集 13/13 PASS；只在内存移除 ctime 判断的负对照正确 FAIL，证明不靠其他字段差异通过。
+
+生产代码和依赖与 `30317ee5` 相同。完整本地门禁 7,864 PASS / 3 SKIP、集成 2,575 PASS 保留其原始执行身份；本次变动只有一个已全文件复验的测试输入，不能表述为在新提交重新跑过完整命令。最终 Windows 完整门禁须在后续候选复验，平台结论仍待完成。原始失败、受控复现和正负例位于 `logs/verification/release-v3.2.9/windows-ctime-fixture/`。

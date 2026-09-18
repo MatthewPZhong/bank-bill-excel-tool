@@ -403,13 +403,53 @@ test('hardlink 没有计划内链接缺失时，ctime 改变仍拒绝删除', as
     const blobPath = useHistoricalHardlinks(f, [a.artifact]);
     f.state.blocked = true;
     const pending = await f.service.deleteBatch(a.batch.id);
-    fs.chmodSync(blobPath, 0o600);
+    assert.equal(pending.metadataDeleted, true);
+    assert.equal(pending.fullyDeleted, false);
+    const target = path.join(f.rootDir, a.artifact.storageRelativePath);
+    const native = fs.statSync(blobPath, { bigint: true });
+    const nativeTarget = fs.statSync(target, { bigint: true });
+    assert.equal(nativeTarget.dev, native.dev); assert.equal(nativeTarget.ino, native.ino);
+    assert.equal(native.nlink, 2n); assert.equal(nativeTarget.nlink, 2n);
+    const content = fs.readFileSync(blobPath);
+    // Windows 的 chmod(0600) 对已有可写文件可能不改变 ctime。直接在本
+    // fixture 私有 fs 上只偏移同一真实对象的 ctime，确保不靠 mode 等字段拒删。
+    const originalFs = f.service.fs;
+    let injectedReads = 0;
+    const offsetCtime = (stat) => {
+      if (String(stat.dev) !== String(native.dev) || String(stat.ino) !== String(native.ino)) return stat;
+      injectedReads++;
+      if (typeof stat.ctimeNs === 'bigint') stat.ctimeNs += 1000000000n;
+      stat.ctimeMs += typeof stat.ctimeMs === 'bigint' ? 1000n : 1000;
+      stat.ctime = new Date(stat.ctime.getTime() + 1000);
+      return stat;
+    };
+    f.service.fs = { ...originalFs,
+      lstatSync(file, options) { return offsetCtime(originalFs.lstatSync(file, options)); },
+      promises: { ...originalFs.promises,
+        async lstat(file, options) { return offsetCtime(await originalFs.promises.lstat(file, options)); }
+      }
+    };
+    const before = readIdentityStatSync(fs, blobPath);
+    const changed = readIdentityStatSync(f.service.fs, blobPath);
+    assert.equal(changed.ctimeMs, before.ctimeMs + 1000);
+    for (const key of ['dev', 'ino', 'size', 'nlink', 'mode', 'mtimeMs', 'birthtimeMs']) {
+      assert.equal(changed[key], before[key], key + ' must remain unchanged');
+    }
+    injectedReads = 0;
     f.state.blocked = false;
     const result = await f.service.retryDeleteCleanupJob(pending.cleanupJobId);
     assert.equal(result.fullyDeleted, false, JSON.stringify(result));
+    assert.equal(result.failures.length, 2);
     assert.ok(result.failures.every((failure) => failure.code === 'ARCHIVE_DELETE_FILE_CHANGED'));
-    assert.equal(fs.existsSync(blobPath), true);
-    assert.equal(fs.existsSync(path.join(f.rootDir, a.artifact.storageRelativePath)), true);
+    assert.ok(injectedReads >= 4, 'both real hardlink targets must be observed before and after hashing');
+    for (const file of [blobPath, target]) {
+      const after = fs.statSync(file, { bigint: true });
+      for (const key of ['dev', 'ino', 'size', 'nlink', 'mode', 'mtimeNs', 'ctimeNs', 'birthtimeNs']) {
+        assert.equal(after[key], native[key], key + ' must remain unchanged on disk');
+      }
+      assert.deepEqual(fs.readFileSync(file), content);
+    }
+    assert.equal(f.service.repository.listCleanupJobs().length, 1);
   } finally { f.close(); }
 });
 

@@ -41,12 +41,13 @@
   },
   "repairCommit": "30317ee5a9ad8227db0562354d20554edb9e6ae4",
   "candidateIdentity": {
-    "description": "The subsequent documentation-only commit inherits these verified production, dependency, test and verifier bytes. Windows checks must use its actual PR head.",
+    "description": "Candidate 50062ca0 contains only documentation after repair 30317ee5 and matches the recorded 1530 input files. A later one-test fixture correction is separately described below; the original complete local command was not repeated for that correction.",
     "verifiedFiles": 1530,
     "inputManifestSha256": "b3eb040758358d4e3777947b451588bcc3b0bd2bfedf9ddca28d5d1632b7f685",
     "originalRunHead": "5ffaabb0c3dcf65377e70997706290c32ed80c33",
     "originalRunProductionDirty": true,
-    "inputManifestFile": "logs/verification/release-v3.2.9/repair-sst-file-identity/repair-verified-inputs-final.json"
+    "inputManifestFile": "logs/verification/release-v3.2.9/repair-sst-file-identity/repair-verified-inputs-final.json",
+    "candidateSha": "50062ca02dd80947181dd042159ac851c2b8d0c1"
   },
   "realDrainCancellation": {
     "pendingRows": 10000,
@@ -62,5 +63,31 @@
   },
   "manualWindowsInstalledApplication": "NOT_RUN",
   "excelWps": "NOT_RUN",
-  "independentWorkerRss": "NOT_RUN; original requirement unchanged, awaiting decision"
+  "independentWorkerRss": "NOT_RUN; original requirement unchanged, awaiting decision",
+  "followUpTestFixtureCorrection": {
+    "baseCandidate": "50062ca02dd80947181dd042159ac851c2b8d0c1",
+    "files": [
+      {
+        "path": "tests/unit/main-process/archive-permanent-delete.test.js",
+        "before": "6e40e8778a26cb25bccd4868937b642128ed376a58950fd65717ab52dc76727c",
+        "after": "bfb8165d4adbdc9869c77974bdce77e9c6fd4cd49e1a9a0fe237fcce7dd49e57"
+      }
+    ],
+    "productionOrDependencyChanges": false,
+    "affectedWholeUnitFile": {
+      "tests": 59,
+      "pass": 59,
+      "fail": 0,
+      "skipped": 0,
+      "runtime": "Node24.13.0/macOS"
+    },
+    "hardlinkSubset": {
+      "pass": 13,
+      "fail": 0
+    },
+    "mutationControl": "PASS: removing only ctime comparison makes the corrected test fail",
+    "fullLocalGateRerun": false,
+    "finalWindowsValidation": "PENDING",
+    "evidenceDirectory": "logs/verification/release-v3.2.9/windows-ctime-fixture/"
+  }
 }
