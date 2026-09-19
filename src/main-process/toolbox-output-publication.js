@@ -122,9 +122,9 @@ function isCrashError(error) {
     || (error && error.code === 'TOOLBOX_PUBLICATION_SIMULATED_CRASH');
 }
 
-function lstatOrNull(fsImpl, filePath) {
+function lstatOrNull(fsImpl, filePath, options) {
   try {
-    return fsImpl.lstatSync(filePath);
+    return fsImpl.lstatSync(filePath, options);
   } catch (error) {
     if (error && error.code === 'ENOENT') return null;
     throw error;
@@ -1482,7 +1482,7 @@ function rollbackUncommitted(runtime, journal) {
   }
 }
 
-function cleanupCommitted(runtime, journal) {
+function cleanupCommitted(runtime, journal, options = {}) {
   assertJournalTargetParentsOrManual(runtime, journal);
   const issues = [];
   for (const entry of journal.entries) {
@@ -1525,6 +1525,10 @@ function cleanupCommitted(runtime, journal) {
       `发布已提交，但恢复索引未能进入 finalizing：${messageOf(error)}`
     );
     return { complete: false, warnings };
+  }
+  // 原 Archive owner 必须先耐久记录已完成后处理，再释放最后的恢复证据。
+  if (options.deferCommittedFinalization === true) {
+    return { complete: true, finalizationPending: true, warnings };
   }
   try {
     assertJournalTargetParentsOrManual(runtime, journal);
@@ -1850,6 +1854,9 @@ function recoverFinalizingIntent(runtime, indexEntry, options = {}) {
   if (!committedRecoveryAccepted(options, recovered)) {
     return { ...recovered, action: 'commit-handoff-pending' };
   }
+  if (recoveredAction === 'commit-cleanup' && options.deferCommittedFinalization === true) {
+    return { ...recovered, action: 'commit-finalization-pending' };
+  }
   if (journalStat) {
     try {
       assertIndexTargetParentsOrManual(runtime, indexEntry);
@@ -1984,7 +1991,7 @@ function recoverOneJournal(runtime, indexEntry, options = {}) {
     if (!committedRecoveryAccepted(options, recovered)) {
       return { ...recovered, action: 'commit-handoff-pending' };
     }
-    const cleanup = cleanupCommitted(runtime, journal);
+    const cleanup = cleanupCommitted(runtime, journal, options);
     if (!cleanup.complete) {
       throw new ToolboxPublicationManualRecoveryError(
         `任务 ${journal.taskId} 已提交，但残留文件需人工处理`,
@@ -1994,7 +2001,9 @@ function recoverOneJournal(runtime, indexEntry, options = {}) {
         }
       );
     }
-    return { ...recovered, warnings: cleanup.warnings };
+    return { ...recovered,
+      action: cleanup.finalizationPending ? 'commit-finalization-pending' : recovered.action,
+      warnings: cleanup.warnings };
   }
   rollbackUncommitted(runtime, journal);
   return { taskId: journal.taskId, action: 'rolled-back', warnings: [] };
@@ -2089,7 +2098,7 @@ function makeJournal(
 function assertExpectedTargetSnapshot(runtime, entry) {
   const expected = entry.expectedTargetSnapshot;
   if (!expected) return;
-  const stat = lstatOrNull(runtime.fsImpl, entry.targetPath);
+  const stat = lstatOrNull(runtime.fsImpl, entry.targetPath, { bigint: true });
   const unchanged = expected.exists
     ? Boolean(stat && sourceSnapshotMatchesStat(expected.snapshot, stat))
     : !stat;

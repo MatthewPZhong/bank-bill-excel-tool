@@ -1,0 +1,114 @@
+--- previous-review/src/backend/vcc-financial-op/system-op-importer.js
++++ current-review/src/backend/vcc-financial-op/system-op-importer.js
+@@ -5,6 +5,7 @@
+ const sax = require('sax');
+ const XLSX = require('xlsx');
+ const { openRichWorkbook } = require('../xlsx-rich-reader');
++const { throwIfCancelled } = require('./detail-importer');
+ const { canonicalizeVccAmount } = require('./amount-rules');
+ const { normalizeWorksheetTarget } = require('../big-table-import/zip-reader');
+ const {
+@@ -877,6 +878,8 @@
+       if (options.shouldCancel?.()) { error.code = 'vcc-import-cancelled'; throw error; }
+       prepared.push({ ...file, snapshotReadError: error });
+     } finally { if (workbook) await workbook.close(); }
++    // 关闭会让出事件循环；继续读取下一文件或同步提交前复核取消。
++    throwIfCancelled(options.shouldCancel);
+   }
+   return importSystemOpGroup({ ...options, files: prepared });
+ }
+--- previous-review/tests/unit/backend/vcc-financial-op/multisheet-import.test.js
++++ current-review/tests/unit/backend/vcc-financial-op/multisheet-import.test.js
+@@ -60,6 +60,92 @@
+   return { db: f.db, targetMonth: '2026-06', batchId: taskRunId, files,
+     archiveHandoffFiles: { version: 2, taskRunId, files } };
+ }
++
++function observeSystemReader(t, observe) {
++  const richReader = require('../../../../src/backend/xlsx-rich-reader');
++  const originalOpen = richReader.openRichWorkbook;
++  const open = t.mock.method(richReader, 'openRichWorkbook', async (...args) => {
++    const reader = await originalOpen(...args);
++    observe('open', args[0]);
++    return { ...reader, async close() {
++      observe('close-start', args[0]);
++      await reader.close();
++      observe('close-complete', args[0]);
++    } };
++  });
++  const modules = ['system-op-importer', 'import-service'].map((name) =>
++    require.resolve('../../../../src/backend/vcc-financial-op/' + name));
++  const cached = modules.map((name) => require.cache[name]);
++  try {
++    for (const name of modules) delete require.cache[name];
++    return require(modules[1]).importFiles;
++  } finally {
++    modules.forEach((name, index) => { require.cache[name] = cached[index]; });
++    open.mock.restore();
++  }
++}
++
++test('系统 OP 异步关闭期间收到取消：不提交当前组，保留前组并停止后续工作', async (t) => {
++  for (const scenario of ['仅系统 OP', '前组已提交且后组未执行', '取消后不再打开下一个文件']) {
++    await t.test(scenario, async (t) => {
++      const f = fixture(t), hasPrior = scenario === '前组已提交且后组未执行';
++      const sheets = [
++        ...(hasPrior ? [{ name: '已提交充值', type: T.RECHARGE, rows: [detail()] }] : []),
++        { name: '系统', type: T.SYSTEM_OP, rows: system('甲') },
++        ...(hasPrior ? [{ name: '未执行通道', type: T.CHANNEL, rows: [{ 渠道订单号: 'channel-1',
++          账单日期: '2026-06-10', 通道名称: 'CITI', 交易金额: '100', 交易币种: 'USD', 借贷方向: 'in' }] }] : [])
++      ];
++      const first = write(f.dir, sheets), files = [first];
++      if (scenario === '取消后不再打开下一个文件') files.push(write(f.dir,
++        [{ name: '后续系统', type: T.SYSTEM_OP, rows: system('乙') }], 'second.xlsx'));
++      const request = await prepare(f, files), events = [], progress = [];
++      let cancelled = false, priorRows;
++      const observe = (event, filePath = first) => events.push({ event, filePath, cancelled,
++        snapshots: f.db.prepare('SELECT COUNT(*) n FROM vcc_fin_op_system_snapshots').get().n });
++      const importObserved = observeSystemReader(t, observe);
++      request.shouldCancel = () => cancelled;
++      request.onProgress = (p) => {
++        progress.push(p);
++        if (p.phase === 'reading' && p.sourceType === T.SYSTEM_OP && !priorRows) {
++          priorRows = f.db.prepare('SELECT * FROM vcc_fin_op_effective_rows ORDER BY id').all();
++          observe('last-reading');
++          setImmediate(() => { cancelled = true; observe('cancel-delivered'); });
++        }
++      };
++      let caught;
++      try { await importObserved(request); } catch (error) { caught = error; }
++      const index = (event) => events.findIndex((item) => item.event === event);
++      assert.ok(index('close-start') < index('cancel-delivered'));
++      assert.ok(index('cancel-delivered') < index('close-complete'));
++      assert.equal(f.db.prepare('SELECT COUNT(*) n FROM vcc_fin_op_system_snapshots').get().n, 0);
++      assert.equal(f.db.prepare('SELECT COUNT(*) n FROM vcc_fin_op_system_snapshot_attempts').get().n, 0);
++      assert.equal(caught?.code, 'vcc-import-cancelled');
++      assert.equal(caught.partialResult.partialCommitted, hasPrior);
++      assert.deepEqual(caught.partialResult.records.map((r) => [r.sourceType, r.status, r.insertedCount]), [
++        ...(hasPrior ? [[T.RECHARGE, 'success', 1]] : []),
++        [T.SYSTEM_OP, 'failed_validation', 0],
++        ...(hasPrior ? [[T.CHANNEL, 'failed_validation', 0]] : [])
++      ]);
++      assert.deepEqual(f.db.prepare('SELECT * FROM vcc_fin_op_effective_rows ORDER BY id').all(), priorRows);
++      assert.equal(priorRows.length, hasPrior ? 1 : 0);
++      assert.deepEqual(events.filter((event) => event.event === 'open').map((event) => event.filePath), [first]);
++      assert.ok(!progress.some((p) => p.sourceType === T.CHANNEL || p.phase === 'summarizing'));
++      assert.equal(f.db.prepare('SELECT status FROM vcc_fin_op_import_batches WHERE id=?').get(request.batchId).status, 'failed');
++    });
++  }
++});
++
++test('系统 OP 最后一次读取进度同步取消，仍先完成 Reader 关闭再收口', async (t) => {
++  const f = fixture(t), file = write(f.dir, [{ name: '系统', type: T.SYSTEM_OP, rows: system('甲') }]);
++  const request = await prepare(f, [file]), events = [];
++  const importObserved = observeSystemReader(t, (event) => events.push(event));
++  let cancelled = false;
++  request.shouldCancel = () => cancelled;
++  request.onProgress = (p) => { if (p.phase === 'reading') cancelled = true; };
++  await assert.rejects(importObserved(request), { code: 'vcc-import-cancelled' });
++  assert.deepEqual(events, ['open', 'close-start', 'close-complete']);
++  assert.equal(f.db.prepare('SELECT COUNT(*) n FROM vcc_fin_op_system_snapshots').get().n, 0);
++});
+ 
+ test('同类型跨 Sheet 幂等、多主体通道及混合原件共享；来源 hold 在首行读取前已齐全', async (t) => {
+   const f = fixture(t);

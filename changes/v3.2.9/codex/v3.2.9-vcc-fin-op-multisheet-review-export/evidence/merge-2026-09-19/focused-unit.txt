@@ -1,0 +1,1634 @@
+▶ 缺省/空 SST 目录不能回退到 cwd，溢出时拒绝并保留无关文件
+  ✔ undefined (38.367958ms)
+  ✔ null (34.676959ms)
+  ✔ '' (33.218125ms)
+  ✔ ' ' (33.088916ms)
+✔ 缺省/空 SST 目录不能回退到 cwd，溢出时拒绝并保留无关文件 (139.820833ms)
+✔ 共享 Rich Reader 缺省目录逐任务独立，关闭一个不破坏另一个或 cwd (54.022083ms)
+✔ 已存在的显式 SST 目录及 VCC Reader 失败清理均不得覆盖/删除用户文件 (15.290666ms)
+✔ 同一路径第二个读取任务拒绝接管，首个 SST 仍能读取和清理 (7.02925ms)
+✔ 部分 spill 创建失败也关闭已打开句柄并清理本次目录 (1.821917ms)
+▶ SST 解析失败和取消在溢出后清理私有目录
+  ✔ parse (6.435458ms)
+  ✔ cancel (11.979417ms)
+✔ SST 解析失败和取消在溢出后清理私有目录 (18.596542ms)
+✔ SST 目录出现无关文件时不递归删除，清理失败重复 close 仍报错 (1.80575ms)
+✔ SST 目录被替换时停止清理，显式保留模式仍保留自己的缓存 (2.161958ms)
+✔ VCC 财务OP现有成功动作及解归档/删除结果均已注册 (0.741417ms)
+✔ 修改结果写 IPC 计数，调整选项与结果读取保持不计数 (1.95375ms)
+✔ 统一删除 IPC 对 result 计“删除结果”，其他目标保留既有“删除数据” (2.250291ms)
+(node:10401) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ A-04 current-five 按 effectiveCalculatedBalance 分类，按 base archive 的反例失败关闭 (7.81775ms)
+✔ A-05 真实 v3.1.7 fixture 经 current migration 后精确分类 legacy-four (14.966917ms)
+✔ A-06 真实 fixture 副本的单一 Pending effective fact 残留归 inconsistent (12.170042ms)
+✔ A-07 input revisions 按对象语义比较，不受 JSON key order 影响 (12.712042ms)
+✔ A-08 legacy 严格区分 SQL NULL/空 fingerprint，通用 result violation 直接 inconsistent (12.433167ms)
+(node:10405) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ previousYearMonth 正确跨年 (0.660584ms)
+✔ 缺少上月归档时明确阻断且不默认补零 (10.154416ms)
+✔ 运行前预检要求四类明细和系统财务OP全部存在且逐表返回结构化状态 (5.187875ms)
+✔ 缺表与缺上月归档并存时主 code 保持缺表且一次展示全部门禁 (5.519708ms)
+✔ 运行前预检返回空表和损坏系统快照，旧 unresolved 失败记录只保留审计 (5.393792ms)
+✔ 非法系统快照与首月待初始化并存时先阻断且不写入期初 (4.91375ms)
+✔ 迁移诊断与缺表并存时诊断保持最高优先且 issues 不重复 (5.166458ms)
+✔ calculateMonth 缺少或伪造 fingerprint 时在事务和写结果前失败关闭 (4.715292ms)
+✔ worker 二次预检以输入 fingerprint 阻断预检后的数据变化 (5.163209ms)
+✔ 上月归档主体即使本月无发生额也必须延续并校验系统财务OP (7.471333ms)
+✔ 首月期初逐主体九币种一次性初始化，同值重试跳过且异值禁止改写 (7.945375ms)
+✔ 首月已初始化主体不要求重复提交，新增主体可单独初始化 (6.542708ms)
+✔ 新增主体仍必须全部提交，漏交真正缺失主体时整次回滚 (6.000583ms)
+✔ 期初初始化拒绝缺币种、超两位小数和不属于当前账期的主体 (4.497833ms)
+✔ 首月期初写入与 first_month 同事务，claim 失败时两者全部回滚 (4.6345ms)
+✔ 非首月缺少上月归档时预检、计算和人工期初均结构化阻断 (4.936875ms)
+✔ 目标账期早于 first_month 时 fail-closed (4.754417ms)
+✔ 首月迁移诊断不阻断建库，但阻断预检、计算和期初初始化 (4.837375ms)
+✔ 逐主体逐币种精确汇总四类发生额并计算系统差异 (4.973417ms)
+✔ storage contract v2 slim effective 保持计算、九币种余额与归档语义 (18.096541ms)
+✔ 历史有效明细的 CNH 只读归一为 CNY 且不改原始事实 (3.400708ms)
+✔ 旧 unresolved 失败导入不再阻断计算且无需人工处理 (5.638208ms)
+✔ 未结束导入批次阻断计算和归档，即使尚未生成原表记录 (5.663083ms)
+✔ 归档绑定计算时的数据版本，原表变化后拒绝旧结果归档 (5.407125ms)
+✔ 同账期重新计算原子替换未归档草稿 (6.701875ms)
+✔ 重算替换审计保留旧 adjustment、Pending、effective 与 fingerprint 全量证据 (8.717792ms)
+✔ 重算替换注入失败时恢复旧 run 全部子表，并单独记录 rolled_back 审计 (8.695625ms)
+✔ 重算 success audit 被 AFTER INSERT 删除时不返回假成功且旧资金事实完整回滚 (9.387416ms)
+✔ 旧结果证据采集失败时零删除并记录可诊断的 rolled_back 替换审计 (6.185083ms)
+✔ 重算失败审计写入也失败时不掩盖主异常 (5.950167ms)
+✔ 确认归档原子写入当月期末余额并统一更新数据状态 (7.840833ms)
+✔ 归档强制 revision 门禁，缺失或过期时保留生效结果等待重新核对 (5.344459ms)
+✔ 归档拒绝缺失或旧输入 fingerprint，且不存在 run 不污染审计月份 (5.524666ms)
+✔ 归档写入人工调整后的九币种余额，并成为下月唯一期初来源 (9.439375ms)
+✔ 归档提交后断言发现快照损坏时，九币种快照、run 和五类数据集全部回滚 (6.907625ms)
+✔ 归档 AFTER INSERT 篡改既有 adjustment 与基础事实时全表指纹回滚且失败可审计 (9.757791ms)
+✔ 归档 success audit 被 AFTER INSERT 篡改时不返回假成功且归档资金事实回滚 (6.963792ms)
+✔ 下月出现人工期初时归档预检 fail-closed，避免双来源 (5.573375ms)
+✔ 聚合后超过 Excel 有效数字上限时在生成可归档结果前阻断 (5.002ms)
+(node:10408) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 旧审计表可重复迁移出删除快照列与删除记录表 (6.563791ms)
+✔ 旧数据集生成时间优先从最近一次实际新增成功导入完成时间回填 (4.823166ms)
+✔ 按账期和目标原表删除有效数据，保留导入审计与人工期初并作废未归档结果 (10.73ms)
+✔ 删除系统财务OP时固化快照对比证据并保留系统导入尝试 (6.848625ms)
+✔ 历史系统快照从未重试时删除前补录 accepted 并保留完整双侧血缘 (6.905208ms)
+✔ 历史 accepted 回填被 snapshot DELETE trigger 静默篡改时整体回滚 (4.97675ms)
+▶ 系统快照删除拒绝不一致、重复或错误双侧快照的 linked accepted
+  ✔ incoming 字段不一致 (4.674958ms)
+  ✔ 重复 accepted (4.39325ms)
+  ✔ 既有侧快照字段非空但错误 (4.200417ms)
+✔ 系统快照删除拒绝不一致、重复或错误双侧快照的 linked accepted (13.497666ms)
+▶ 非 accepted linked attempt 的任一既有侧快照错值都会失败关闭
+  ✔ skip balances (4.770583ms)
+  ✔ skip raw (4.874792ms)
+  ✔ conflict source file (4.519542ms)
+  ✔ conflict sheet (5.04425ms)
+  ✔ rolled back source row (4.721417ms)
+  ✔ rolled back import record (4.329083ms)
+  ✔ rolled back imported at (4.226625ms)
+✔ 非 accepted linked attempt 的任一既有侧快照错值都会失败关闭 (32.764084ms)
+✔ 非 accepted linked attempt 空既有侧会完整物化并与本次审计共用事务时间 (5.799042ms)
+✔ 明细审计跨月错链不会被本月 source delete 物化或清空 (5.785083ms)
+✔ 系统审计跨月错链不会被本月 system snapshot delete 物化或清空 (5.573667ms)
+✔ 低层 source delete 无条件要求 preview token 与安全 generation (3.703ms)
+✔ 已归档账期和活动导入均失败关闭 (3.799542ms)
+✔ 删除中任一步失败时审计、有效数据、结果和数据集全部回滚 (5.9675ms)
+✔ 结果证据损坏时原表、run、调整和数据集零删除并记录失败目标 (5.626416ms)
+✔ success 审计写入失败时业务事实不变且仅尽力记录 rolled_back (5.075958ms)
+✔ 删除范围严格校验月份和目标表，无有效数据时不可执行 (3.146625ms)
+✔ DELETE 被触发器静默忽略时由提交前不变量校验回滚 (5.094292ms)
+✔ source delete silent trigger 篡改其他来源内容时指纹阻断并完整回滚 (6.008292ms)
+▶ 同长度 raw_json 改写在各保留事实投影中均被精确识别并回滚
+  ✔ effective raw_json (5.936417ms)
+  ✔ import row raw_json (6.44625ms)
+  ✔ import row existing_raw_json_snapshot (5.72425ms)
+  ✔ system snapshot raw_json (6.662084ms)
+  ✔ system attempt raw_json (5.66075ms)
+  ✔ system attempt existing_raw_json_snapshot (5.256792ms)
+✔ 同长度 raw_json 改写在各保留事实投影中均被精确识别并回滚 (35.99875ms)
+▶ 其他月份 run child 与 import error 通过父月份归属纳入全局回滚边界
+  ✔ run child (6.195083ms)
+  ✔ import error (5.815ms)
+✔ 其他月份 run child 与 import error 通过父月份归属纳入全局回滚边界 (12.148958ms)
+✔ 删除只标记成功类记录，失败记录保留；重导后新旧删除周期彼此独立 (8.836292ms)
+✔ 导入记录删除状态被静默忽略时有效数据与删除审计整体回滚 (5.559542ms)
+▶ source delete 在后置写入重建目标事实、dataset 或 archived run/child 时最终零残留断言回滚
+  ✔ after source delete archived run and child (4.806458ms)
+  ✔ after import update target source and dataset (5.921416ms)
+✔ source delete 在后置写入重建目标事实、dataset 或 archived run/child 时最终零残留断言回滚 (10.848416ms)
+▶ source delete 只允许单一 deletion 记录与物化阶段的 system backfill ID 集
+  ✔ success audit trigger 插入 target attempt (4.358ms)
+  ✔ import update trigger 插入额外 target attempt (5.109208ms)
+  ✔ import update trigger 插入额外 deletion record (4.742667ms)
+✔ source delete 只允许单一 deletion 记录与物化阶段的 system backfill ID 集 (14.389667ms)
+▶ source delete 允许的时间字段被非空错值篡改时整体回滚
+  ✔ dataset deletion deleted_at (4.601833ms)
+  ✔ import record dataset_deleted_at (4.848167ms)
+  ✔ system accepted backfill created_at (4.157583ms)
+✔ source delete 允许的时间字段被非空错值篡改时整体回滚 (13.765333ms)
+(node:10409) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 归档月份枚举只返回 run/archive/九币种主体/五数据集完全一致的月份 (10.612042ms)
+✔ 归档枚举拒绝多 archived run、archive run_id 和 dataset run_id 错配 (11.926042ms)
+✔ 归档余额必须逐主体逐币种等于含调整后的生效结果 (4.955958ms)
+✔ 解归档保守阻断所有后续 archived/calculated 月且绝不级联 (4.034875ms)
+✔ 后月孤立 archive 即使缺失 run 也作为依赖稳定阻断且不改资金状态 (4.487583ms)
+✔ 后月孤立 archived dataset 即使缺失 run 也排序去重阻断且不改资金状态 (3.981791ms)
+✔ 尾月解归档原子成功并保留基础结果、Pending 与调整证据 (7.301208ms)
+✔ 解归档提交时重算 token；stale 和事务故障均零业务写并留 rolled_back 审计 (6.268458ms)
+✔ 低层 unarchive 直接入口拒绝缺失或空白 confirmation generation (4.126291ms)
+✔ 解归档 silent trigger 篡改结果子表时提交前指纹阻断并完整回滚 (5.873458ms)
+✔ success audit INSERT trigger 篡改旧审计时全局指纹阻断并回滚 (6.32175ms)
+▶ 本次 success audit 的唯一行与关键序列化字段在 COMMIT 前逐项断言
+  ✔ operation type (4.827791ms)
+  ✔ target month (5.019667ms)
+  ✔ status (4.939709ms)
+  ✔ preview token (5.106125ms)
+  ✔ evidence hash (4.605542ms)
+  ✔ created at (4.938625ms)
+  ✔ extra audit row (5.423916ms)
+✔ 本次 success audit 的唯一行与关键序列化字段在 COMMIT 前逐项断言 (35.195041ms)
+▶ 删除期初/结果的后置 trigger 新建 archived run 与子表时最终全状态断言回滚
+  ✔ opening after audit (4.953583ms)
+  ✔ result after delete (4.669917ms)
+✔ 删除期初/结果的后置 trigger 新建 archived run 与子表时最终全状态断言回滚 (9.7585ms)
+▶ 解归档 run/dataset 事务时间被非空错值篡改时整体回滚
+  ✔ run updated_at (4.682333ms)
+  ✔ dataset updated_at (4.556625ms)
+✔ 解归档 run/dataset 事务时间被非空错值篡改时整体回滚 (9.361333ms)
+✔ 失败审计写入异常仅附加到主错误并可跨 worker 边界观测 (4.637667ms)
+✔ 删除首月期初整体删除全部期初和 calculated 结果，first_month 与源事实不漂移 (4.9245ms)
+✔ 统一删除入口与内部 opening/result 删除均拒绝缺失确认代次 (3.663541ms)
+✔ 首月缺少一个已被用户删除的数据集时仍允许删除期初 (5.2265ms)
+✔ 首月已归档禁止删期初；事务故障回滚期初/结果并保留失败审计 (4.507042ms)
+✔ 删除期初 silent trigger 篡改保留数据集时提交前指纹阻断并完整回滚 (5.023708ms)
+✔ 删除结果一次清空同月全部 calculated run/children/adjustments并保持源事实 (5.853167ms)
+✔ 已归档结果禁止删除；结果删除故障回滚所有 run 并留失败审计 (4.362084ms)
+✔ 删除结果 silent trigger 篡改保留期初时提交前指纹阻断并完整回滚 (4.755458ms)
+(node:10410) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ current v2 解归档忽略旧 unresolved 失败审计并按 N+7 提交 (37.09775ms)
+✔ 真实 v3.1.7 fixture 由同一生产写入口按 N+6 解归档且不创建 Pending (16.652625ms)
+✔ result delete 显式删除五张 child 后按 1+R+ΣC 删除 runs (24.7595ms)
+✔ opening delete 复用五 child 显式预算并保持 module first_month 只读 (24.338709ms)
+✔ opening delete 对多期初月与 first-month 冲突均在首写前阻断且零 rollback audit (41.619834ms)
+✔ detail source delete 在清 FK 前物化 Q 行并按 2+R+ΣC+2Q+E+D+M 删除 orphan facts (28.759125ms)
+✔ storage contract v2 slim effective 删除同步清 fallback 与异常引用且不依赖 legacy raw (50.826333ms)
+✔ system source delete 先补 B 再物化/清除 A，按固定公式保留唯一 accepted audit (24.622416ms)
+✔ source delete 在 M=0 时整事务回滚并只写一条受保护 failure audit (20.7415ms)
+✔ preview 后真实 run evidence 改变返回 state-changed，业务不删且 failure audit 可追溯 (23.050458ms)
+✔ 单一中途 fault 回滚已删五 child 与事务内 success audit (21.871ms)
+✔ 未知 VCC trigger 在首写前阻断 delete 且数据库零 failure audit (22.910125ms)
+(node:10411) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 外部 VCC import batchId 只接受与 exact7 相同的稳定文本边界 (0.7675ms)
+✔ storage contract v2 slim effective 仍可导入、幂等重放并只暂存 fallback (32.002208ms)
+✔ 五个内置校验原表模板均与当前导入契约一致 (10.318917ms)
+✔ 同一工作簿存在多张校验原表 sheet 时拒绝只读取其中一张 (2.758833ms)
+✔ 同一工作簿混有明细原表和系统财务OP时拒绝静默选择 (6.98725ms)
+✔ sharedStrings 超过预算时自适应落盘并在关闭后清理 (8.809042ms)
+✔ 1904 日期系统在导入前被明确拒绝 (1.491584ms)
+✔ 识别和正式导入使用一致的表头搜索范围 (9.8475ms)
+✔ 统一导入服务预登记多种原表后仍逐类完成有效提升 (10.327208ms)
+✔ 分类阶段拒绝新增时仍保留已完成读取的 committing 事件 (9.348333ms)
+✔ 多原表后组运行异常仍返回已提交组及全部 record 的部分结果血缘 (11.616917ms)
+✔ 同一原表重复导入时第二次全量幂等跳过且有效事实不增加 (7.746834ms)
+✔ 历史 CNY content hash 可由同位置 CNH 精确重放，历史行与 raw audit 不改写 (11.620709ms)
+✔ 新批次 CNY/CNH 同键只写一行，不同键金额按同一 CNY 分组事实入库并满足行数守恒 (8.68525ms)
+✔ 校验表生成时间仅在实际新增有效明细时刷新 (10.037041ms)
+✔ 同键异内容阻断整批且不覆盖既有有效行 (9.018916ms)
+✔ 混合精确重放、冲突和新行时只过滤异常并提升正常行 (9.3715ms)
+✔ 同批跨文件同键同内容只新增一次且幂等跳过仅累计计数 (7.688209ms)
+✔ 同批跨文件同键异内容为每条异常保留对端哈希和精确差异字段 (15.987416ms)
+✔ 通道明细同键改填公司主体时冲突明细明确标识主体差异 (8.474167ms)
+✔ 空键只过滤异常行，正常行落库并满足行数守恒 (6.59825ms)
+✔ CNH 后续金额或方向校验失败时 anomaly 仍使用独立可复算的 canonical hash (11.710583ms)
+✔ 后续分片损坏时只保留回滚计数和一条文件级失败事件 (7.108959ms)
+✔ 协作式取消只保留已读取行汇总和一条文件级失败事件 (6.72825ms)
+✔ 导入开始前取消不创建空批次或导入记录 (2.660209ms)
+✔ 业务前 handoff 多文件顺序或路径与 worker 首次 hash 不一致时零业务写入 (5.349667ms)
+✔ 解析完成后的来源 SHA 不一致时正常行不落库且只留文件级失败 (5.655709ms)
+✔ 多文件第二份最终 SHA 不一致时异常精确归属 source id/ordinal/文件名 (7.251ms)
+✔ 文件级失败拒绝关联其他 record 或 batch 的 import source (3.365708ms)
+✔ 任一选中分片只有表头时整批回滚并标明空分片文件 (8.222125ms)
+✔ Excel 数值日期单元格按 1900 日期系统识别账期 (6.122709ms)
+✔ 工作簿中的长文本键可导入，数值型键整批拒绝 (8.892375ms)
+✔ 不同原表类型使用独立幂等命名空间 (8.399083ms)
+✔ 已归档数据集允许全量幂等回放，但拒绝新增有效事实 (11.991916ms)
+✔ 整月归档后拒绝首次补入此前不存在的 Pending 数据集 (7.002958ms)
+✔ 异常退出恢复不会把暂存行提升为有效事实 (4.014417ms)
+✔ 直接升级会接管 v3.1.9 importing 宽行并转换 compact anomaly 后清理 (29.670917ms)
+✔ 运行期非预期异常立即收口当前批次且不影响其他导入记录 (6.88175ms)
+✔ 异常退出恢复会收口没有导入记录的孤立批次 (2.90525ms)
+(node:10412) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+▶ 系统 OP 异步关闭期间收到取消：不提交当前组，保留前组并停止后续工作
+  ✔ 仅系统 OP (59.297542ms)
+  ✔ 前组已提交且后组未执行 (43.306708ms)
+  ✔ 取消后不再打开下一个文件 (39.209ms)
+✔ 系统 OP 异步关闭期间收到取消：不提交当前组，保留前组并停止后续工作 (142.304083ms)
+✔ 系统 OP 最后一次读取进度同步取消，仍先完成 Reader 关闭再收口 (33.904583ms)
+✔ 同类型跨 Sheet 幂等、多主体通道及混合原件共享；来源 hold 在首行读取前已齐全 (39.007875ms)
+✔ RV02：完整甲、八币种乙、充值各 Sheet 独立，系统组精确计数并保留 18 条实际读取行 (38.987208ms)
+✔ 系统 OP 无目标账期也保留扫描行数和 Sheet 进度，其他类型照常提交 (36.168584ms)
+✔ 失败和解析成功的系统 OP Sheet 跨文件累计读取量，整组回滚也保留计数 (44.336291ms)
+✔ 系统 OP 扫描中断仍上报已完成数据行，不把未读尾部或表头计入 (28.296541ms)
+✔ 同主体九币种跨 Sheet 拆分，或八币种与完整候选并存，都不能补救该主体 (77.233708ms)
+✔ 未知主体按 Sheet 计数；主体成员或持久 metadata 损坏时来源和 hold 创建一起回滚 (39.034458ms)
+✔ 不同输入文件同名同内容：存档共用 Blob 后仍按两个物理来源导入和幂等 (36.254792ms)
+✔ 系统 OP 日期单元格与旧 Reader 等价，九币种快照正常导入 (40.506792ms)
+✔ 表头位于预览窗口外：混合类型导入后原表、校验表仍按持久成员定位 (149.379792ms)
+(node:10431) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ mutation runtime probe 验证 session、trigger、total_changes 与关闭合同 (0.800917ms)
+✔ table policy 与 migrated schema exact-match，四张大表不创建 session (4.617666ms)
+✔ 未知 VCC 表与 trigger 均在业务写入前失败关闭 (5.981875ms)
+✔ storage contract guard 仅在名称、目标表与能力 SQL 全部精确匹配时批准 (19.225916ms)
+✔ registry 保持 C1 adjustment 预算为 2 且 C1 operation 零大表 step (2.781541ms)
+✔ 未登记 step、大表 fixed scope 不匹配与额外 protected 写入分别失败关闭 (3.115166ms)
+✔ 每个 registered SQL step 的 .changes mismatch 均立即回滚 (18.184917ms)
+(node:10432) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 历史 48 列 Pending 保留 raw_json，迁为 v2 hash 后可被 46 列精确重放 (8.174292ms)
+✔ 已有 Pending v2 行再次启动时 hash、版本和 raw audit 保持不变 (4.33175ms)
+✔ 3.1.12 新导入 Pending CNH 写 hash v3，后续启动不降级或重算 (4.329792ms)
+✔ 未知 Pending raw_json 列数阻断迁移且不修改历史 hash (3.232917ms)
+✔ 极老审计表存在 Pending 行但没有 raw_json 时失败关闭 (2.018375ms)
+✔ Pending 金标准资产锁定 SHA、46 列、A1:AT1 与表头指纹 (21.188125ms)
+✔ Pending 缺列、增列、换序和下划线变化均按最新契约失败关闭 (14.866458ms)
+✔ Pending 表头位于后续行时仍拒绝 XFD 远列增列，不受预览列宽截断 (79.795291ms)
+✔ Pending 重复业务 sheet 与旧 48 列模板均明确拒绝 (5.076917ms)
+(node:10434) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ B-01 schema-ready 只接受现有合同结构，readOnly 连接拒绝一个代表 DML (19.470625ms)
+✔ B-02 current archive 集合加载复用 A 合同，并生成稳定 token v2 (14.002667ms)
+✔ B-02a 存量 CNH 归档随启动迁移为 CNY 后重新进入解归档列表 (6.387292ms)
+✔ B-03 token canonical payload 对集合顺序稳定，generation 变化必改变 token (0.445458ms)
+✔ B-04 archive 0/1/100 候选均固定十条 SQL，且不读取禁表 (4.180125ms)
+✔ B-05 active months 保留 orphan/失败审计可见性，并使用既有 effective covering index (3.219042ms)
+✔ B-06 delete targets 单次九查询派生完整 preview，单目标刷新 token 完全相同 (3.39175ms)
+(node:10435) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ rowKey 严格使用 v1 元数据元组，跨币种稳定且不受金额/run/id/顺序影响 (1.279167ms)
+✔ effective result 按主体币种叠加正负调整并保持基础结果不可变 (7.923333ms)
+✔ 调整值支持规范千分位与会计负数并拒绝零、非数和超精度 (0.51ms)
+✔ 调整选项由基础事实生成，固定九币种并移除已调整坐标 (3.863792ms)
+✔ addRunAdjustment 仅按后端 rowKey 事实落元数据并原子递增 revision (5.64625ms)
+✔ addRunAdjustment 缺失或陈旧 expectedResultRevision 均 fail-closed (3.568167ms)
+✔ 调整原因按 Unicode code point 执行 500 字边界 (9.059958ms)
+✔ 同一坐标由唯一事实锁定，不同币种可分别调整一次 (6.304916ms)
+✔ 已归档及解归档后的已用坐标保持锁定 (5.968459ms)
+✔ revision 更新故障时调整行与 updated_at 全部回滚 (3.972916ms)
+✔ 调整 AFTER INSERT 篡改既有 sequence 与基础事实时 exact allowset 回滚整笔事务 (4.161209ms)
+✔ effective result 基础行先越过 15 位再抵消时按最终发生额通过，且归档事实只读 (3.21575ms)
+✔ effective result adjustment 抵消链只在最终汇总执行 15 位校验 (3.138917ms)
+✔ effective result 对真正溢出的基础/adjustment 最终汇总返回稳定坐标错误且不改账本 (5.866041ms)
+✔ effective result 对基础加调整的真正最终溢出返回 rowKey/字段上下文且不返回部分 DTO (3.37375ms)
+✔ effective result 对跨结果行的生效发生额溢出返回 balance 字段上下文 (2.852458ms)
+✔ effective result 对 adjustment sequence 与 result_revision 事实不一致 fail-closed (5.714583ms)
+✔ effective result 拒绝伪造调整元数据、不支持币种与非规范金额 (11.09025ms)
+✔ effective result 表驱动拒绝零值、三位小数、非有限值与超有效数字金额 (14.648292ms)
+✔ effective result 拒绝未知来源和重复基础 rowKey + currency (6.115042ms)
+✔ effective result 拒绝基础行与余额坐标脱节及空基础事实 (8.092959ms)
+✔ effective result 拒绝基础余额公式或基础发生额汇总被篡改 (6.41675ms)
+✔ effective result 对不存在 run 返回 null，并拒绝无效 run id (3.058ms)
+(node:10436) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ A-01 合法 current 调整重算 rowKey、revision、基础公式和九币种生效余额 (7.029375ms)
+▶ A-02 TechDoc 明示的独立 result invariant 各用一个最小反例
+  ✔ revision/count (0.33825ms)
+  ✔ sequence 断裂 (0.304708ms)
+  ✔ rowKey 缺失 (0.233583ms)
+  ✔ 基础行 metadata 缺失 (0.217333ms)
+  ✔ metadata 错配 (0.206541ms)
+  ✔ 币种错配 (0.189625ms)
+  ✔ 基础余额公式 (0.178291ms)
+  ✔ 九币种缺失 (0.179084ms)
+✔ A-02 TechDoc 明示的独立 result invariant 各用一个最小反例 (2.250666ms)
+✔ A-03 evidence 数组输入顺序不影响稳定结果 (0.411541ms)
+✔ 结果模板金标准锁定 SHA、14 列、有效/物理区域和语义布局 (21.984792ms)
+✔ sheet、表头、语义锚点和 fill 漂移均失败关闭 (24.650666ms)
+✔ 模板缺失、hash 变化和缓存对象污染均不会复用旧契约 (6.103333ms)
+✔ ASAR 虚拟 stat 身份变化不拒绝相同字节，缓存仍逐次读取并验证同一 Buffer (4.682375ms)
+✔ 模板目录、读取期间删除和权限/I/O 错误使用稳定错误码 (0.604584ms)
+✔ 调整血缘 defined name 经 ExcelJS write→reopen 完整保真 (12.330792ms)
+✔ 调整血缘只接受完整 v1:64hex 与九币种 (0.2025ms)
+(node:10440) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ adjustment locked plan 精确提交 2 个变化并保留 immutable success evidence (36.542667ms)
+✔ archive 忽略旧 unresolved 失败审计并按 N+7 提交生效余额 (25.59525ms)
+✔ 成功写入按冻结契约公开五阶段 progress (23.933125ms)
+✔ legacy-four calculated 在 plan 前对 adjustment/archive 均返回 recalculation required 且零 DML (32.167625ms)
+✔ safe 业务失败只在原事务回滚后写 1 条受保护 rollback audit (24.225208ms)
+✔ audit-only 失败不覆盖原业务错误，也不留下 fallback audit (22.873417ms)
+✔ unsafe trigger policy 失败数据库零 failure audit (25.065667ms)
+✔ node:sqlite ERR_SQLITE_ERROR 的不安全 primary errcode 均禁止 rollback audit (161.888292ms)
+✔ 业务连接 createSession 不可信时返回 guard-unavailable 且数据库零 audit (28.569541ms)
+✔ 金额输出坚持精确往返和页面显示：15 位、16 位、极小数、正负零、尾零及科学计数法 (1.156375ms)
+✔ 所有主体按页面行序展开；四个汇总位于明细与调整之后，零差异显示短横线 (0.522917ms)
+✔ 原表文本不推断类型；公式缺缓存或历史值类型不可验证时拒绝 (0.249084ms)
+✔ 非通道明细保留前导零业务键，并按 in/out 生成有符号发生额 (1.788667ms)
+✔ 通道 CITI 使用交易金额，非 CITI 按 billdate 月末分支取值 (0.33825ms)
+✔ Pending credit/debit 两侧金额方向和错币标识符合 spec (0.224917ms)
+✔ 零值、负值、空金额和未知 Pending 类型按显式公式或异常处理 (0.318208ms)
+✔ 空业务键、跨账期、未知方向和非标准大小写币种进入互斥异常类别 (0.181583ms)
+✔ 非通道 CNH 在业务层归一 CNY，raw audit 保留原值且规范哈希兼容 CNY (0.116667ms)
+✔ 通道只归一实际参与业务的交易、清算或结算币种列 (0.410875ms)
+✔ VCC 参与币种字段矩阵仅接受 trim 后大写 CNY/CNH (0.5335ms)
+✔ 通道实际币种列一旦可确定，common 与分支后续失败也使用规范哈希 (0.576917ms)
+✔ 通道规范哈希保留导入指定主体边界，同主体 CNY/CNH 相同、换主体冲突 (0.124667ms)
+✔ 通道 invalid_key 在实际币种列可确定时仍形成 canonical anomaly hash (0.117ms)
+✔ Pending 双侧 CNH/CNY 归一后不判错币，raw audit 与规范哈希各守边界 (0.13175ms)
+✔ 历史读取边界只把精确 CNH 映射为 CNY，不放宽其他非规范币种 (0.04225ms)
+✔ 金额超过两位小数或 Excel 有效数字上限时进入格式异常且不做舍入 (0.086875ms)
+✔ 账期字段接受 YYYY-MM、YYYYMM 和 Excel 数值日期字符串 (0.152833ms)
+✔ 超长文本业务键无损保留，数值型业务键明确拒绝 (0.055625ms)
+(node:10444) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ PR2 schema 首次建库与重复迁移均幂等 (5.365708ms)
+✔ 存量小型 CNH 派生资金事实一次性迁为 CNY 且大表原始行审计保持不变 (5.423834ms)
+✔ 同一坐标同时存在 CNY 与 CNH 时迁移失败关闭且零 DML (4.493417ms)
+✔ 存量单一期初月份回填 first_month 且运行列兼容旧表 (0.887916ms)
+✔ 存量多个期初月份不改资金数据、不阻断启动，并持久化幂等诊断 (2.382375ms)
+✔ 多期初月份诊断不阻断 AppDatabase.init，启动后保留诊断供 VCC 门禁读取 (111.900916ms)
+✔ 既有 first_month 与期初月份冲突时保持原值并阻断运行 (1.242708ms)
+✔ 畸形 opening 月份不回填 first_month 且重复迁移诊断幂等 (1.095708ms)
+✔ 畸形 first_month 不会被合法期初月份覆盖 (0.786ms)
+✔ 调整账本约束坐标与序号唯一且随 run 级联删除 (2.836125ms)
+(node:10449) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 真实 v2 增量迁移保留全部业务行、来源 ID 与精度，支持共享原件且阻止旧连接写入 (38.583625ms)
+✔ v3 迁移各持久断点均完整回滚，关闭连接后可以安全重试 (144.257958ms)
+✔ 提交后故障报告持久 v3，后续新连接校验不能伪称回滚 (29.787625ms)
+✔ 坏 guard、错误索引及未来 marker 在迁移首写前拒绝 (74.728458ms)
+✔ generic 初始化拒绝未迁移 v2；v3 缺 guard 时不能靠 IF NOT EXISTS 自动修补 (29.442583ms)
+(node:10450) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ v2 side tables 把永久异常、临时 staging、fallback 与输入来源分离 (4.252584ms)
+✔ staging 自引用 partial index 对 fresh/既有 v2 幂等安装并支撑外键清理 (12.871458ms)
+✔ slim effective schema 不再永久保存 raw_json、原始键或重复文件路径 (0.242666ms)
+✔ storage contract marker 仅显式写入并拒绝未来版本 (9.448125ms)
+✔ 正式启动把 fresh/empty v1 经 v2 原子升级为空 v3 并保持二次幂等 (10.104459ms)
+✔ 已有结构但业务行为空的 v1 升级时保留 effective 自增高水位 (9.66375ms)
+✔ 非空 v1 在首笔兼容迁移前 fail-closed 且不写 marker (3.109667ms)
+✔ AppDatabase 正式启动接入非空 v1 门禁并保留原业务行 (51.807083ms)
+✔ 非空 first_month 也属于 v1 业务状态并阻止自动升级 (2.801958ms)
+✔ 空 v1 升级末端校验失败时回滚 slim schema、marker 和 guards (3.919708ms)
+✔ v1 历史终态记录没有 source 时标记 unavailable，不冒充待存档 (2.728917ms)
+✔ contract-v3 连接能力触发器允许新版连接并阻止 v3.1.9 真实 repository 降级写 (70.956584ms)
+✔ system snapshot import_source_id 补列后建立部分索引且迁移幂等 (3.763542ms)
+(node:10478) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 系统财务OP导入结果保留全部异常计数供界面汇总 (0.443333ms)
+✔ 系统财务OP正式资产逐列表头与识别契约一致 (18.538917ms)
+✔ 系统财务OP按正式行式模板读取主体、九币种和完整原始血缘 (9.128125ms)
+✔ 系统财务OP财务余额严格优先使用 Excel raw 数值并记录显示差异 (3.679625ms)
+✔ 系统财务OP raw-first 覆盖大额两位小数、公式缓存、文本会计负数和横线零值 (2.92375ms)
+✔ 系统财务OP直接按 worksheet v token 拒绝正负超精度值，避免 SheetJS Number 先吞分币 (12.210125ms)
+✔ 系统财务OP通过 workbook relationship 定位 worksheet，并保留合法精度边界 lexical 证据 (4.913125ms)
+✔ 系统财务OP缺少 OOXML lexical 时仅允许可证明分币安全的 Number fallback (0.108667ms)
+✔ 系统财务OP worksheet 重复财务余额 cell 时稳定失败关闭而不回退 Number (3.219ms)
+✔ 系统财务OP worksheet XML 为空或结构损坏时返回稳定精度错误及定位上下文 (0.237417ms)
+✔ 系统财务OP raw 数值超过两位小数或安全范围时拒绝且不舍入 (4.333041ms)
+✔ 系统财务OP表头位于第 20 行之后时识别和正式导入仍使用同一范围 (4.539792ms)
+✔ 系统财务OP缺列、多列或调换顺序均给出正式模板差异提示 (7.685875ms)
+✔ 旧 YYMMOP 横表不再被系统财务OP宽松识别 (1.934292ms)
+✔ 同一工作簿存在多处系统财务OP表头时拒绝静默选第一处 (3.291125ms)
+✔ 系统财务OP正式导入二次拒绝 1904 日期系统 (1.528541ms)
+✔ 系统财务OP按所选账期筛选，并支持一个文件形成多个主体快照 (11.227875ms)
+✔ 系统财务OP拒绝非法日期、非VCC部门、空主体和空财务余额 (8.788ms)
+✔ 系统财务OP缺失规范币种仍拒绝，CNH 作为 CNY 业务行且原始审计保留 CNH (7.377625ms)
+✔ 系统 OP 同主体 CNY+CNH 归一后仅拒绝该主体，其他完整主体继续 (6.411625ms)
+✔ 系统 OP 跨文件同主体 CNY+CNH 无论余额是否相同均主体级拒绝，完整其他主体继续 (20.057542ms)
+✔ 系统 OP 跨文件软错主体仍参与 CNY/CNH 并集且完整同主体不会旁路提升 (11.115792ms)
+✔ 系统 OP 模板外列异常先保留标准列审计并拒绝同主体全部快照 (7.74975ms)
+✔ 系统 OP 非目标月、非法日期或目标月空主体的模板外列保持单条 unknown 基线异常 (17.280167ms)
+✔ 系统 OP 跨文件纯 CNY 或纯 CNH 重复维持既有幂等分类，不误判归一双写 (15.0775ms)
+✔ 系统 OP 历史 CNY 与新 CNH 规范余额相同则幂等跳过且不改历史审计 (8.703ms)
+✔ 系统财务OP同账期同主体同内容跳过，异内容冲突不覆盖 (10.789125ms)
+✔ 系统财务OP校验表生成时间只随新增主体快照刷新 (9.935709ms)
+✔ 系统财务OP归档后允许精确重放但拒绝新增主体快照 (15.234542ms)
+✔ 同批同主体系统财务OP异内容冲突互相关联以供双侧核对 (8.737167ms)
+✔ 系统快照混合精确重放、冲突和新主体时只过滤冲突并提升新主体 (13.704458ms)
+✔ 系统快照同主体的精确重放与异内容在失败批次内分别归类 (9.697ms)
+✔ 系统财务OP跨文件格式异常只过滤异常数据并提升完整快照 (8.389792ms)
+✔ 系统财务OP同文件多主体部分格式错误时提升完整主体并过滤异常主体 (8.787958ms)
+✔ 系统 OP 多文件第二份最终 SHA/size 不一致时 failImportBatch 精确关联失败来源 (11.077125ms)
+(node:10479) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ A-09 unarchive gate 固定按 inconsistent → active → later → allowed (23.841458ms)
+✔ A-10 active/later 只改变 gate，旧 unresolved evidence 不再阻断 (14.216209ms)
+✔ 相同字节替换文件仍使预检计划过期，不只比较 hash 与大小 (19.3495ms)
+✔ 五类表头精确匹配优先，缺列、错序和额外列均无说明页排除资格 (4.506792ms)
+✔ 多 Sheet 计划包括隐藏、空白和说明页，按 Sheet 补主体且 public DTO 不泄露路径和 hash (14.908042ms)
+✔ 预览范围之后的第二表块也在提交前被发现，坏表不能通过排除绕过 (9.93975ms)
+✔ 同名物理文件不合并，排除说明后没有业务 Sheet 时不创建任务 (6.627375ms)
+✔ 显式 Sheet 定位可共用读取上下文，保留真实行号且不读取另一张同类型表 (3.121416ms)
+(node:10481) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 原 owner 收口凭证持久化完整身份，异终态和异 afterTerminal 不可覆盖 (9.376166ms)
+▶ 已删 File Task 仅在实例、完整 owner、终态和后处理证明匹配时 ACK 迟到重复通知
+  ✔ complete (105.226791ms)
+  ✔ pending-cleanup (19.970875ms)
+  ✔ missing-proof (15.5005ms)
+  ✔ different-status (12.753083ms)
+  ✔ different-route (15.424209ms)
+  ✔ different-instance (14.400708ms)
+✔ 已删 File Task 仅在实例、完整 owner、终态和后处理证明匹配时 ACK 迟到重复通知 (183.649791ms)
+✔ 终态已写但原 afterTerminal 失败时不记录收口证明、不 ACK (17.880667ms)
+✔ 真实 FileTask 正常完成后由原生命周期登记证明，删除后迟到重复终态安全 ACK (67.23975ms)
+✔ 匿名后处理尚未完成的持久通知不误认成无需后处理，内部标记不进入 Task metadata (14.937041ms)
+▶ artifact 未耐久时 eager/deferred 都保留原后处理责任，具备恢复路由才可自动收口
+  ✔ eager/anonymous (56.769125ms)
+  ✔ eager/routed (66.529208ms)
+  ✔ eager/none (60.021125ms)
+  ✔ deferred/anonymous (87.023291ms)
+  ✔ deferred/routed (75.64975ms)
+  ✔ deferred/none (79.164ms)
+✔ artifact 未耐久时 eager/deferred 都保留原后处理责任，具备恢复路由才可自动收口 (425.685ms)
+▶ 工具箱真实发布恢复在清理完成后记录 owner 凭证，凭证和 receipt 收尾中断均可重启恢复
+  ✔ none (276.905334ms)
+  ✔ before-cleanup (284.786209ms)
+  ✔ before-proof (242.091125ms)
+  ✔ after-proof (278.259458ms)
+  ✔ routed-outbox (291.919042ms)
+  ✔ routed-proof (272.765792ms)
+  ✔ unknown-owner (230.970084ms)
+✔ 工具箱真实发布恢复在清理完成后记录 owner 凭证，凭证和 receipt 收尾中断均可重启恢复 (1880.192625ms)
+✔ publication owner 仅匹配 Main 登记的精确 taskKey/moduleId，不认未知共享 Publisher 入口 (1.701459ms)
+▶ VCC 与只读导出真实 policy 的临时归档失败由原 publication 恢复，匿名通知安全 ACK 后可初始化和删除
+  ✔ vccFinancialOp:data-manager:export (223.938667ms)
+  ✔ vccFinancialOp:export:import-audit (205.923083ms)
+  ✔ vccFinancialOp:export:result (215.137375ms)
+  ✔ pending:error:export-report (204.423875ms)
+  ✔ pending:diff:export-single (213.687333ms)
+  ✔ pending:diff:export-aggregate (216.002584ms)
+  ✔ bizOpRecon:export:date (220.945208ms)
+  ✔ bizOpRecon:export:date-range (224.571792ms)
+  ✔ pre-fund-reconciliation:export (207.109542ms)
+  ✔ acquiringBillCurrency:export (240.863583ms)
+✔ VCC 与只读导出真实 policy 的临时归档失败由原 publication 恢复，匿名通知安全 ACK 后可初始化和删除 (2173.551458ms)
+(node:10482) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 输入摘要随冻结 manifest 和批次原子保存，重启前源文件清理后仍保留原证据 (80.644625ms)
+✔ 不完整或与原快照不符的输入摘要在归档发号前拒绝 (8.159584ms)
+✔ 输入摘要持久化失败回滚整个发号事务，重试才生成完整批次 (5.896666ms)
+✔ 已有缺摘要批次不因重复 reserve 被回填或重新认领源文件 (5.584625ms)
+✔ Task Run 是无编号 exact-5 owner，建立本身不写 batch/issuance/sequence (9.00475ms)
+✔ LineageIntentV1 在 lifecycle 边界排序并深冻结，v0 producer 只能为 null (0.199292ms)
+✔ Task Run 与 planned lineage 同事务建立，replay 集合一致幂等、不同则冲突 (4.781291ms)
+✔ lineage planned/terminal 写入故障与 Task Run 同事务回滚 (6.646416ms)
+✔ Task Run terminal 与 lineage 同事务提交；interrupted 保留 planned 且仅它可恢复 (5.6335ms)
+✔ related 以 visible seed 做 same-parent 与 pivot run 一跳查询，不沿共享输入递归扩散 (10.885166ms)
+✔ v0/null producer lineage 不按日期、月份或 latest 伪造输入关联 (6.624292ms)
+✔ legacy 空 parent seed 不会把所有空 parent 历史批次关联在一起 (9.70375ms)
+✔ File Batch 与非空 pending manifest 原子创建，同 manifest replay 幂等 (11.217458ms)
+✔ deferred Task Run 已 running 时 promote 原子建立 running File Batch (4.950292ms)
+✔ manifest 首批 artifact 插入失败时 batch、issuance、sequence 全部回滚 (5.129291ms)
+✔ visible query 在 SQL 分页前排除零 artifact，并保留 failed-only (6.589916ms)
+✔ public visible 查询只复用一个 repository SQL predicate fragment (0.488ms)
+✔ filePlan boundary 接受零字节普通文件，拒绝目录、symlink 和 input/output alias (5.520208ms)
+✔ FilePlan由Main冻结direct target parent identity并拒绝rename+ordinary replacement (9.566375ms)
+✔ FilePlan direct parent identity覆盖grandparent replacement并允许原对象移回 (12.634666ms)
+✔ FilePlan把0 dev/ino标记unsupported，generic freshness仍兼容 (4.299584ms)
+✔ FilePlan reserve 后 freshness 只复核冻结 input 与 target identity (4.61225ms)
+✔ FilePlan input 可继承 picker snapshot，并只在最终 freshness 使用定制失败合同 (11.725417ms)
+✔ 提供 picker snapshot 时 normalize 不读源，最终 freshness 恰好比较一次 (4.81125ms)
+✔ supplied snapshot 的父目录消失时仍形成 plan，并保留多输入与 alias 防护 (5.432959ms)
+✔ FilePlan 拒绝非法 picker snapshot，未提供 snapshot 的旧调用保持 normalize 时捕获 (5.767458ms)
+✔ task-owned 与 batch-owned flow intent 跨表幂等复用且不产生双 owner (5.620042ms)
+(node:10483) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 受管原件、输出与已打开只读副本实际清理，外部源/另存文件不变；响应丢失可查完成凭证 (113.536958ms)
+✔ 多个模块共用永久删除；共享 Blob 最后一个引用释放后才删除 (125.026417ms)
+✔ 文件占用保留可见清理任务，重启重试实际完成且不重新生成批次 (78.406833ms)
+✔ 重试时同路径替代文件保留，不能把新对象删除后宣告成功 (76.978208ms)
+✔ 预检后状态变化使确认失效；提交前 owner 复核失败时元数据和文件完整 (89.750125ms)
+✔ 存档盘离线不等于文件已经删除；重新上线按原身份重试 (118.525166ms)
+✔ 清理计划提交失败回滚所有元数据与引用，文件不受影响 (65.989166ms)
+✔ 旧计划损坏与未知版本不转为空清单，不产生完成凭证 (139.742708ms)
+✔ 登记为不存在的只读临时路径出现新对象时拒绝删除 (81.913625ms)
+✔ 并发重试共享同一完成结果，不用过期 job 再次报未完成 (68.143459ms)
+✔ 物理删除后进度写入失败，原持久计划可按缺失对象恢复 (127.481583ms)
+✔ 旧计划缺少历史对象身份时保留文件和诊断，即使同路径内容相同 (94.147458ms)
+✔ 旧计划原目标均已缺失时按原范围升级，并发重试返回同一完成身份 (82.912041ms)
+✔ 失败输出只有预分配路径时不能认领现存未知文件，预检和提交保留批次与文件 (113.347666ms)
+✔ 无归属指纹的预分配路径安全缺失时允许删除并支持重复请求 (89.312666ms)
+✔ 历史 hardlink 的目录文件和 Blob 都能删除，预检不改变 inode 或权限 (121.208916ms)
+✔ hardlink unlink 后进度尚未落库便中断，重启仍按冻结身份完成 (100.976833ms)
+✔ hardlink 的目录文件占用而 Blob 已删除时，重试完成剩余原对象 (80.3585ms)
+✔ hardlink 同路径出现相同内容的新对象时，重试仍保留替代文件 (162.941791ms)
+✔ hardlink 没有计划内链接缺失时，ctime 改变仍拒绝删除 (96.260667ms)
+✔ 多个历史 hardlink 输出共用另一有效批次的 Blob，删除只释放当前批次路径 (226.369125ms)
+✔ hardlink 受管链接删除后保留外部链接内容与权限 (94.94325ms)
+✔ 未知外部 hardlink 变化不能冒充计划内链接减少 (134.537ms)
+✔ 共享 hardlink 在 unlink-before-progress 中断后完成恢复，其他批次仍可读取和删除 (168.965292ms)
+✔ 共享 hardlink 在 fingerprint-before-progress 中断后完成恢复，其他批次仍可读取和删除 (169.366083ms)
+✔ 共享 hardlink 的同组目录文件被占用时不能提前完成 Blob 指纹收口 (148.734083ms)
+✔ 共享 hardlink 的其他批次原指纹冲突时 CAS 保留诊断且不刷新 Blob (154.263917ms)
+✔ Blob 的内容摘要不能代替目录文件缺失的原对象身份 (117.425ms)
+✔ 旧清理失败后同 SHA 的 Blob 被新批次重新发布，重试保留新引用并完成 (139.689125ms)
+✔ 共享 hardlink 的前批次清理挂起时阻止新删除，原任务恢复后再删除下一批次 (169.73025ms)
+✔ 历史共享硬链接清理挂起时 read-other 延后脱钩，原删除重试仍可收口 (218.584334ms)
+✔ 历史共享硬链接清理挂起时 maintenance 延后脱钩，原删除重试仍可收口 (225.470459ms)
+✔ 旧硬链接清理后的同 SHA 新 inode Blob 有新持久引用时保留新对象并收口 (189.694708ms)
+✔ 原 Blob 已删且同 SHA 被新批次发布后，EBUSY 目录残留在当前进程重试收口 (162.371084ms)
+✔ 原 Blob 已删且同 SHA 被新批次发布后，EBUSY 目录残留在重启重试收口 (124.112875ms)
+✔ 原 Blob 已删且同 SHA 被新批次发布后，EACCES 目录残留在当前进程重试收口 (73.411625ms)
+✔ 原 Blob 已删且同 SHA 被新批次发布后，EACCES 目录残留在重启重试收口 (75.20825ms)
+✔ 同 SHA 新 Blob 不能替代原链接的完整删除证据：unreferenced (45.416541ms)
+✔ 同 SHA 新 Blob 不能替代原链接的完整删除证据：missing-fingerprint (77.767875ms)
+✔ 同 SHA 新 Blob 不能替代原链接的完整删除证据：mismatched-fingerprint (75.017333ms)
+✔ 同 SHA 新 Blob 不能替代原链接的完整删除证据：original-inode-reappeared (75.345166ms)
+✔ 同 SHA 新 Blob 不能替代原链接的完整删除证据：parent-replaced (74.135459ms)
+✔ 同 SHA 新 Blob 不能替代原链接的完整删除证据：original-content-changed (103.323584ms)
+✔ 同 SHA 新 Blob 不能替代原链接的完整删除证据：extra-link-removed (88.968584ms)
+✔ 同 SHA 新 Blob 不能替代原链接的完整删除证据：unpersisted-progress (69.427416ms)
+✔ 同 SHA 新 Blob 不能替代原链接的完整删除证据：forged-memory-progress (70.732ms)
+✔ 同 SHA 新 Blob 不能替代原链接的完整删除证据：different-plan (71.739333ms)
+✔ 同 SHA 新 Blob 不能替代原链接的完整删除证据：already-missing (80.528208ms)
+✔ 同 SHA 新 Blob 不能替代原链接的完整删除证据：preserved-shared (74.387708ms)
+✔ 历史 Blob 无持久指纹时拒绝同 SHA 替代对象 (42.831042ms)
+✔ 历史 Blob 无持久指纹时安全缺失仍可幂等删除 (40.553416ms)
+✔ 共享硬链接 unlink 进度落库前中断，维护不提前刷新指纹，原删除仍可重放 (70.376375ms)
+✔ 正常硬链接脱钩遇共享指纹冲突时先保留原 inode，修正冲突后可读和删除 (80.730209ms)
+✔ 正常硬链接已脱钩但指纹事务失败时保留旧凭证，重启维护同原 inode 后恢复 (62.395667ms)
+✔ 维护不能把同 SHA 不同 inode 的替代对象刷新成原 Blob 的持久身份 (42.099375ms)
+✔ 旧硬链接遇新引用但 missing-new-fingerprint 时不能跳过原计划核验 (84.342833ms)
+✔ 旧硬链接遇新引用但 returned-original-link 时不能跳过原计划核验 (105.736ms)
+✔ 共享硬链接 first 项脱钩后指纹落库失败，维护逐步恢复全部引用 (98.236625ms)
+✔ 共享硬链接 last 项脱钩后指纹落库失败，维护逐步恢复全部引用 (94.444042ms)
+(node:10487) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 真实 streaming 账户确认先删 apply 批次，重启后历史共享来源仍由 prepare 批次最终清理 (930.030416ms)
+✔ 真实 FilePlan 共享来源被同内容新 inode 替换时，重启删除仍保留替代对象 (843.588292ms)
+✔ 新 Position manifest attempt-recording 后原证据持久保留，重启可删除受管来源 (33.088041ms)
+✔ 新 Position manifest interrupted-before-settle 后原证据持久保留，重启可删除受管来源 (23.297166ms)
+✔ 其他批次 sha256 冲突不能把同源引用放宽为共享保留 (78.596292ms)
+✔ 其他批次 size 冲突不能把同源引用放宽为共享保留 (80.521375ms)
+✔ 其他批次 snapshot 冲突不能把同源引用放宽为共享保留 (68.231917ms)
+✔ 其他批次 owner-instance 冲突不能把同源引用放宽为共享保留 (68.056916ms)
+✔ 其他批次 owner-identity 冲突不能把同源引用放宽为共享保留 (77.066291ms)
+✔ 其他批次 owner-missing 冲突不能把同源引用放宽为共享保留 (55.150625ms)
+✔ 其他批次 task-running 冲突不能把同源引用放宽为共享保留 (57.606166ms)
+✔ 持久删除计划后新增同源批次仍阻止物理删除，后者释放后原计划按missing重放 (93.307042ms)
+✔ 共享引用不豁免活动/恢复保护；provider两个路径数组必须完整合法 (53.52375ms)
+✔ 真实过滤行报告 原源仍存在 后重开库，原批次可永久删除 (1197.242458ms)
+✔ 真实过滤行报告 业务删除并由Main清理 后重开库，原批次可永久删除 (1344.883792ms)
+(node:10496) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 报告 attempt-recording 后原SHA和target身份已在reserve耐久保存，重启可按原owner删除 (54.106667ms)
+✔ 报告 settle-before-exit 后原SHA和target身份已在reserve耐久保存，重启可按原owner删除 (34.119167ms)
+✔ 报告reserve写入失败原子回滚发号，旧普通output不能因重试获得报告归属 (13.810625ms)
+✔ 报告证据拒绝错producer、原snapshot、大小及普通预分配输出，Repository同样拒绝绕normalizer (21.698542ms)
+✔ 报告 replacement 不得成为无引用或可清理来源 (80.594417ms)
+✔ 报告 producer-key 不得成为无引用或可清理来源 (52.623208ms)
+✔ 报告 missing-database 不得成为无引用或可清理来源 (55.562542ms)
+✔ 报告 foreign-checkpoint 不得成为无引用或可清理来源 (50.918583ms)
+✔ 报告 broken-schema 不得成为无引用或可清理来源 (56.822583ms)
+✔ 报告job保留原operation/双artifact身份，metadata删除后新增冻结引用及不可读侧库仍阻止重试 (85.161458ms)
+✔ input-only file task 原子 reserve 后默认 settle 全部 inputs 并原子终结 (6.094208ms)
+✔ 网银定制 freshness 失败统一提示、零业务执行并形成一次 failed audit (0.766042ms)
+✔ 网银父目录确认期被整体移动仍由 freshness 形成 failed audit (0.956208ms)
+✔ public freshness 后稳定替换在 reader 起点失败，保留统一 failed audit (1.036125ms)
+✔ FilePlan resolver 在 Task Run 建立后失败仍以 operation owner 终结 (0.192666ms)
+✔ File Task interrupted recovery 复用原 exact owner 与 manifest，不 begin/reserve/发新号 (0.985709ms)
+✔ file task cancel-wins 后迟到 success 不执行 afterTerminal (10.600666ms)
+✔ file task 成功但 manifest 未 durable 时只写 file-owner outbox，不提前终结 (1.053084ms)
+✔ file artifact 失败结果已耐久时直接终结为业务 succeeded，不创建永久 outbox (0.866583ms)
+✔ deferred 零输出只终结 Task Run，不预留 File Batch (0.46525ms)
+✔ deferred literal FilePlan resolver 失败以 operation owner 收口，不遗留 prepared Task Run (0.134959ms)
+✔ deferred 在正式写入前 promote，并以同一 manifest settle/终结 File Task (0.755958ms)
+✔ 严格按 BOR → reserve → started → execute → append → terminal → end 执行 (0.460334ms)
+✔ no-file Task Run 使用 exact-5 operation owner，且不进入 batch reserve/append (0.105ms)
+✔ VCC save unknown 先落 interrupted；通用 failed CAS 不得覆盖且 Renderer evidence 有界 (0.3195ms)
+✔ VCC save 普通 validation error 仍 failed；commit/replay result 仍 succeeded (0.108417ms)
+✔ lifecycle 只在 begin 边界规范化 lineage，并把同一冻结集合交给 taskContext (0.554375ms)
+▶ no-file 入口绑定、evidence、start 失败时终态 CAS 失败均写 operation owner intent
+  ✔ initial-bind (0.117667ms)
+  ✔ evidence (0.052791ms)
+  ✔ start (0.045917ms)
+✔ no-file 入口绑定、evidence、start 失败时终态 CAS 失败均写 operation owner intent (0.342625ms)
+✔ no-file initial flow bind 与 durable intent 同时失败仍终结 Task Run (0.082667ms)
+✔ no-file result identity resolve 失败只告警，但一定继续 terminal settle (0.0745ms)
+✔ no-file result bind 与 intent 同时失败改写 failed terminal；CAS 失败则写 owner outbox (0.099166ms)
+✔ no-file cancel 先到终态后，迟到 success 保持 cancelled 且不执行 afterTerminal (1.427167ms)
+✔ no-file policy 对任何 filePlan fail-fast (0.093375ms)
+✔ 显式允许的部分提交失败结果仍绑定业务身份并以 failed 收口 (0.134167ms)
+✔ toolbox reserve 失败时不进入算法或输出副作用 (0.063583ms)
+✔ toolbox freshness 在 reserve 后失败时终结原批次且不执行算法 (0.111959ms)
+✔ reserve 后业务未开始且直接终态写失败时，把 failed 意图持久化到原批次 outbox (0.095875ms)
+✔ 已持久化 batchContext 恢复直接重开原批次，不解析 flow/不 reserve/不再 started (0.090292ms)
+✔ 已持久化恢复在 beforeStart 重校验失败时不 reopen/不 fail 原批次 (0.046208ms)
+✔ legacy 稳定 operation 复用 reserved 批次时直接 mark started，不调 recovery reopen (0.071333ms)
+✔ legacy 复用非 reserved 批次时先校 freshness，失败不 reopen/不 fail 原批次 (0.072083ms)
+✔ 同进程同 batchId 双恢复时第二个 busy，不 reserve/reopen/execute/fail (0.132292ms)
+✔ 已成功批次恢复被拒绝，不执行业务也不改写终态 (0.043416ms)
+✔ IPC prepare 完成后先 BOR.begin，再在 reserve 前解析持久 flow plan (0.199958ms)
+✔ 输入证据只在 reserve 后、started 前采集并传给执行后 runtime (0.114709ms)
+✔ 异步结果 identity 完成解析后才绑定，不把 Promise 当 identity (0.083125ms)
+✔ 结果 identity 直接绑定失败时先持久化 flow-bind intent，再终结 succeeded (0.116042ms)
+✔ 预留失败时业务和 worker 均不执行，BOR 仍释放 (0.04225ms)
+✔ started 失败终结原批次且不执行业务 (0.041458ms)
+✔ started CAS 发现批次已取消时不执行业务且不强制 failed (0.035792ms)
+✔ 新流程稳定 identity 在 reserve 后、started 前立即绑定 (0.074292ms)
+✔ Bank Statement run 在 TaskRun 前绑定稳定 identity，重复 export 继承同一 parent，显式 rerun 新建 parent (1.203834ms)
+✔ 业务异常先 append/failed 收口再原样抛出 (0.113958ms)
+✔ 业务成功但文件 append 失败不覆盖业务结果 (0.092208ms)
+✔ append 已持久记录 failure 时 lifecycle 不重复 recordFailure 但仍告警 (0.059209ms)
+✔ 业务成功但 terminal 返回失败时持久化同批次终态意图并保留业务结果 (0.076041ms)
+✔ 任务终态写入和持久意图登记均失败时 fail-closed (0.105375ms)
+✔ cancel 先到、success 后到时 terminal CAS 冲突不污染 archive failure (2.624625ms)
+✔ success 先到、late cancel 冲突时不声称已取消 (0.163042ms)
+✔ recordFailure 返回 ok:false 会产生独立 warning (0.079417ms)
+✔ terminal 抛错不覆盖原始业务异常 (0.086583ms)
+✔ 取消只 CAS 活动批次，不查询 latest 或建立第二批次 (0.239334ms)
+✔ worker batch context 是可序列化冻结 DTO (0.077792ms)
+✔ result status 完全由当前 policy classifier 决定 (0.066875ms)
+✔ completed_with_errors 保持 succeeded，并在终态 CAS 同步合并审计 metadata (0.074667ms)
+✔ 匿名后处理未执行的 FileTask terminal 失败保留待后处理事实，不能降格为无后处理 (0.05525ms)
+(node:10500) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ main 与独立 V327 注册器的 IPC 加内部任务，与 policy/support 精确相等 (68.211708ms)
+✔ preload 与 main 及独立 V327 注册器精确相等，新增 21 个业务和只读入口完整接通 (47.64025ms)
+✔ 非 literal direct ipcMain.handle 只存在于已知受控 helper 定义 (32.042417ms)
+✔ reserve policy 只能经受控 helper，裸 IPC 只能是明确 exclude (36.08925ms)
+✔ 5 个真实 exclude 入口均为裸 IPC，不会误入 reserve wrapper (33.247917ms)
+✔ exclude 只允许有限原因，所有 policy 都是 literal 且无 wildcard (0.294625ms)
+✔ 71 file 与 63 no-file mutation 逐项显式分类且精确闭合 (0.228083ms)
+✔ dialog selection 显式区分 file/directory，正常 file policy 不再消费 selection 路径 (1.545125ms)
+✔ Acquiring/VCC OP operation owner 由 object handler 实际消费 exact-5 context (1.812583ms)
+✔ FILE_CHANNELS 不得包含 exclude preview/picker，scenario 只登记 apply mutation (0.201666ms)
+✔ 工具箱三通道精确登记为两 reserve、一 preview exclude (0.068708ms)
+✔ statement execute 分类器只额外接受补录余额，prepare 交互状态必须拒绝 (0.226542ms)
+✔ Pending execute 分类器不接受 need-confirm，交互结果必须停在 prepare (0.060083ms)
+✔ 大账号交互只让 import/complete reserve，preview/cancel 精确 exclude (0.035542ms)
+✔ 13 个 primary 与 1 个 toolbox utility 均有受控 task，VCC财务独立于VCCOP (0.095208ms)
+✔ VCC财务 4 file + 6 no-file + 14 exclude literal inventory 精确闭合 (0.073084ms)
+✔ VCC财务 calculate/import 新建流程，run 后续动作按稳定身份续接 (0.130334ms)
+✔ 新 run 显式创建新 flow，带持久 runId 的后续动作显式续接 (0.085541ms)
+✔ Acquiring 新 run 以 taskRunId 隔离，legacy resume 仍兼容旧 identity，export 续接精确身份 (0.375792ms)
+✔ 无文件运行/配置使用 Task Run 但不占批次号，银行对账 export 续接当前内存 run 身份 (0.191541ms)
+✔ no-file policy 经受控 helper 进入 operation-only lifecycle (34.748958ms)
+✔ no-file 最终 Hold gate 在无模块 evidence 时返回合法空对象 (1.365541ms)
+✔ 首批 simple eager file action 逐项接入 literal FilePlan 与显式 settle (4.236792ms)
+✔ Bank BU 首次运行续接持久导入身份，显式重跑创建新 parent (0.134375ms)
+✔ 永久删除预检和待清理列表仅查询，重试走存档维护且均不产生新 Task/批次 (0.048375ms)
+(node:10504) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ E13-G current manifest 以独立 67 action / 74 pair authority 达到六面 100% coverage (8.267208ms)
+✔ Capability Inventory 与 Effective Production Strategy 分离，新版业务 OP 十二项与 rows 显式开启 (7.755333ms)
+✔ PreFund deferred bank import/run 必须独立显示 legacy 策略，不得由 MPT/export 代偿 (4.118625ms)
+✔ Position import-result 只记录真实 legacy Main route，不伪造 E13-F adapter route (3.438166ms)
+✔ manifest action/surface/pair 与 production binding 集合 mutant 全部 fail closed (11.700792ms)
+✔ 重复 policy、durable 缺 inspector、artifact 缺 Publisher、service 缺资源、blocked enabled 均 fail closed (13.856209ms)
+✔ 已发布 E13-G 清单和策略快照由独立 gate 对当前模块导出复验 (909.976917ms)
+✔ 外部 feature flag 不能绕过 policy disabled，策略快照 drift 与未知 action 均被拒绝 (6.664334ms)
+✔ manifest 输入拒绝 accessor 且不执行 getter (0.198625ms)
+(node:10531) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 超过安全整数的相邻 Windows 文件身份不会合并，凭据可无损序列化 (0.985958ms)
+✔ 真实文件的新版身份、旧版安全身份与内容变更拒绝保持一致 (2.635791ms)
+(node:10533) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10533) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10533) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10533) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 真实 FilePlan Task→原生导出→有独立预算的既有 Publisher→Archive，pin 等待输入消费完成 (1403.508875ms)
+(node:10533) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10533) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10533) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 实际导出 worker 关闭后篡改候选，Main 拒绝发布并经原恢复 driver 释放 pin (1098.895125ms)
+(node:10533) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10533) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10533) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10533) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10533) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10533) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10533) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10533) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10533) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10533) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 六类均接真实 Publisher；失败导入的独立诊断也能由新读取 Task 导出 (3903.305166ms)
+✔ 真实 Main 进程退出 before-publish：原导出 Task、唯一 Publisher 事实及 pin 收口，不重算 run (1284.705042ms)
+✔ 真实 Main 进程退出 committed-before-observation：原导出 Task、唯一 Publisher 事实及 pin 收口，不重算 run (1702.0765ms)
+✔ 真实 Main 进程退出 after-publish：原导出 Task、唯一 Publisher 事实及 pin 收口，不重算 run (1643.729791ms)
+(node:10533) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10533) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10533) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 提交后异常保留 running Task；旧启动 owner 不抢接管，BizOP 恢复原发布事实 (1421.175375ms)
+(node:10533) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10533) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10533) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ Archive 输出复制失败保留已提交结果与读取 pin，重试同 Task 后完成 (1386.009542ms)
+(node:10533) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10533) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10533) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ Publisher 已确认清理而本地 ACK 写入失败，持久提交证明防止退回未提交 (1154.924542ms)
+(node:10533) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10533) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10533) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 用户目标在 FilePlan 冻结后被改写，Publisher 拒绝覆盖并保留用户的新内容 (1261.89375ms)
+(node:10533) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10533) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 实际写出后取消，原 worker 退出前存在 pin，退出后恢复候选且不覆盖旧目标 (8054.737333ms)
+(node:10533) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10533) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 诊断生产者已失败，清理仍等待新导出 Task 的 Publisher 消费完成 (813.134ms)
+(node:10533) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10533) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10533) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 原 worker 已退出、Publisher 等待容量期间取消，准入后不触碰用户目标 (1477.042625ms)
+(node:10538) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 结果列版本 1 的表头与证据保留，版本 2 只改变第 14 列减法表头 (0.958875ms)
+✔ 封存结果版本 1 自动选择对应导出合同，显式错配及 worker 错配均拒绝 (65.281ms)
+✔ 封存结果版本 1 拒绝同一 manifest 下混入其他计算规则的分片 (51.524416ms)
+✔ 封存结果版本 2 自动选择对应导出合同，显式错配及 worker 错配均拒绝 (64.376084ms)
+✔ 封存结果版本 2 拒绝同一 manifest 下混入其他计算规则的分片 (68.338917ms)
+✔ 未知或缺失计算规则的结果合同不能被默认解释成旧版 (133.791084ms)
+(node:10540) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10540) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10540) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ OP_RAW 两份真实大 SST 原件连续读取并经 Publisher 发布，缓存清理不删除候选 (7003.994209ms)
+(node:10540) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10540) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ FLOW_RAW 两份真实大 SST 原件连续读取并经 Publisher 发布，缓存清理不删除候选 (7369.218834ms)
+(node:10540) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ RAW 磁盘 SST 扫描期间 cancel，只关闭自有缓存并保留打开的 spool (1511.117042ms)
+(node:10540) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ RAW 磁盘 SST 扫描期间 failure，只关闭自有缓存并保留打开的 spool (1451.5845ms)
+(node:10540) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 实际输出回读大 SST success，输出文件与 spool 均不属于缓存清理范围 (1266.411541ms)
+(node:10540) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 实际输出回读大 SST cancel，输出文件与 spool 均不属于缓存清理范围 (1027.744958ms)
+(node:10540) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 实际输出回读大 SST mismatch，输出文件与 spool 均不属于缓存清理范围 (1014.454208ms)
+✔ 真实 succeeded / Hold=false / retry 故障恢复与独立进程重启 (1249.83775ms)
+ℹ {"phase":"create","terminal":"succeeded","cut":"retry","hold":false,"stage":"host-start","elapsedMs":0}
+{"phase":"create","terminal":"succeeded","cut":"retry","hold":false,"stage":"host-ready","elapsedMs":36}
+{"phase":"create","terminal":"succeeded","cut":"retry","hold":false,"stage":"input-ready","elapsedMs":40}
+{"phase":"create","terminal":"succeeded","cut":"retry","hold":false,"stage":"import-finished","elapsedMs":277}
+{"phase":"create","terminal":"succeeded","cut":"retry","hold":false,"stage":"export-finished","elapsedMs":634}
+{"phase":"create","terminal":"succeeded","cut":"retry","hold":false,"stage":"terminal-evidence-saved","elapsedMs":635}
+{"phase":"create","terminal":"succeeded","cut":"retry","hold":false,"stage":"anchor-prepared","elapsedMs":645}
+{"phase":"create","terminal":"succeeded","cut":"retry","hold":false,"stage":"anchor-prepared","elapsedMs":655}
+{"phase":"create","terminal":"succeeded","cut":"retry","hold":false,"stage":"unavailable-observed","elapsedMs":656}
+{"phase":"create","terminal":"succeeded","cut":"retry","hold":false,"stage":"recovery-converged","elapsedMs":738}
+ℹ {"phase":"recover","terminal":"succeeded","cut":"retry","hold":false,"stage":"host-start","elapsedMs":0}
+{"phase":"recover","terminal":"succeeded","cut":"retry","hold":false,"stage":"host-ready","elapsedMs":29}
+{"phase":"recover","terminal":"succeeded","cut":"retry","hold":false,"stage":"restart-converged","elapsedMs":31}
+原 Task/receipt/版本保持，来源收敛，重复恢复通过
+✔ 真实 succeeded / Hold=false / anchor 故障恢复与独立进程重启 (1635.366208ms)
+ℹ {"phase":"create","terminal":"succeeded","cut":"anchor","hold":false,"stage":"host-start","elapsedMs":0}
+{"phase":"create","terminal":"succeeded","cut":"anchor","hold":false,"stage":"host-ready","elapsedMs":38}
+{"phase":"create","terminal":"succeeded","cut":"anchor","hold":false,"stage":"input-ready","elapsedMs":43}
+{"phase":"create","terminal":"succeeded","cut":"anchor","hold":false,"stage":"import-finished","elapsedMs":417}
+{"phase":"create","terminal":"succeeded","cut":"anchor","hold":false,"stage":"export-finished","elapsedMs":942}
+{"phase":"create","terminal":"succeeded","cut":"anchor","hold":false,"stage":"terminal-evidence-saved","elapsedMs":943}
+{"phase":"create","terminal":"succeeded","cut":"anchor","hold":false,"stage":"anchor-prepared","elapsedMs":955}
+ℹ {"phase":"recover","terminal":"succeeded","cut":"anchor","hold":false,"stage":"host-start","elapsedMs":0}
+{"phase":"recover","terminal":"succeeded","cut":"anchor","hold":false,"stage":"host-ready","elapsedMs":220}
+{"phase":"recover","terminal":"succeeded","cut":"anchor","hold":false,"stage":"restart-converged","elapsedMs":222}
+原 Task/receipt/版本保持，来源收敛，重复恢复通过
+✔ 真实 succeeded / Hold=false / bundle 故障恢复与独立进程重启 (1630.212667ms)
+ℹ {"phase":"create","terminal":"succeeded","cut":"bundle","hold":false,"stage":"host-start","elapsedMs":0}
+{"phase":"create","terminal":"succeeded","cut":"bundle","hold":false,"stage":"host-ready","elapsedMs":37}
+{"phase":"create","terminal":"succeeded","cut":"bundle","hold":false,"stage":"input-ready","elapsedMs":42}
+{"phase":"create","terminal":"succeeded","cut":"bundle","hold":false,"stage":"import-finished","elapsedMs":587}
+{"phase":"create","terminal":"succeeded","cut":"bundle","hold":false,"stage":"export-finished","elapsedMs":1016}
+{"phase":"create","terminal":"succeeded","cut":"bundle","hold":false,"stage":"terminal-evidence-saved","elapsedMs":1016}
+{"phase":"create","terminal":"succeeded","cut":"bundle","hold":false,"stage":"anchor-prepared","elapsedMs":1027}
+{"phase":"create","terminal":"succeeded","cut":"bundle","hold":false,"stage":"control-bundle-written","elapsedMs":1030}
+ℹ {"phase":"recover","terminal":"succeeded","cut":"bundle","hold":false,"stage":"host-start","elapsedMs":0}
+{"phase":"recover","terminal":"succeeded","cut":"bundle","hold":false,"stage":"host-ready","elapsedMs":143}
+{"phase":"recover","terminal":"succeeded","cut":"bundle","hold":false,"stage":"restart-converged","elapsedMs":145}
+原 Task/receipt/版本保持，来源收敛，重复恢复通过
+✔ 真实 succeeded / Hold=true / retry 故障恢复与独立进程重启 (1753.292959ms)
+ℹ {"phase":"create","terminal":"succeeded","cut":"retry","hold":true,"stage":"host-start","elapsedMs":0}
+{"phase":"create","terminal":"succeeded","cut":"retry","hold":true,"stage":"host-ready","elapsedMs":53}
+{"phase":"create","terminal":"succeeded","cut":"retry","hold":true,"stage":"input-ready","elapsedMs":59}
+{"phase":"create","terminal":"succeeded","cut":"retry","hold":true,"stage":"import-finished","elapsedMs":435}
+{"phase":"create","terminal":"succeeded","cut":"retry","hold":true,"stage":"export-finished","elapsedMs":982}
+{"phase":"create","terminal":"succeeded","cut":"retry","hold":true,"stage":"terminal-evidence-saved","elapsedMs":983}
+{"phase":"create","terminal":"succeeded","cut":"retry","hold":true,"stage":"hold-created","elapsedMs":1034}
+{"phase":"create","terminal":"succeeded","cut":"retry","hold":true,"stage":"anchor-prepared","elapsedMs":1067}
+{"phase":"create","terminal":"succeeded","cut":"retry","hold":true,"stage":"anchor-prepared","elapsedMs":1079}
+{"phase":"create","terminal":"succeeded","cut":"retry","hold":true,"stage":"unavailable-observed","elapsedMs":1080}
+{"phase":"create","terminal":"succeeded","cut":"retry","hold":true,"stage":"recovery-converged","elapsedMs":1255}
+ℹ {"phase":"recover","terminal":"succeeded","cut":"retry","hold":true,"stage":"host-start","elapsedMs":0}
+{"phase":"recover","terminal":"succeeded","cut":"retry","hold":true,"stage":"host-ready","elapsedMs":28}
+{"phase":"recover","terminal":"succeeded","cut":"retry","hold":true,"stage":"restart-converged","elapsedMs":31}
+原 Task/receipt/版本保持，来源收敛，重复恢复通过
+✔ 真实 succeeded / Hold=true / anchor 故障恢复与独立进程重启 (1617.999625ms)
+ℹ {"phase":"create","terminal":"succeeded","cut":"anchor","hold":true,"stage":"host-start","elapsedMs":0}
+{"phase":"create","terminal":"succeeded","cut":"anchor","hold":true,"stage":"host-ready","elapsedMs":38}
+{"phase":"create","terminal":"succeeded","cut":"anchor","hold":true,"stage":"input-ready","elapsedMs":43}
+{"phase":"create","terminal":"succeeded","cut":"anchor","hold":true,"stage":"import-finished","elapsedMs":353}
+{"phase":"create","terminal":"succeeded","cut":"anchor","hold":true,"stage":"export-finished","elapsedMs":864}
+{"phase":"create","terminal":"succeeded","cut":"anchor","hold":true,"stage":"terminal-evidence-saved","elapsedMs":867}
+{"phase":"create","terminal":"succeeded","cut":"anchor","hold":true,"stage":"hold-created","elapsedMs":986}
+{"phase":"create","terminal":"succeeded","cut":"anchor","hold":true,"stage":"anchor-prepared","elapsedMs":993}
+ℹ {"phase":"recover","terminal":"succeeded","cut":"anchor","hold":true,"stage":"host-start","elapsedMs":0}
+{"phase":"recover","terminal":"succeeded","cut":"anchor","hold":true,"stage":"host-ready","elapsedMs":166}
+{"phase":"recover","terminal":"succeeded","cut":"anchor","hold":true,"stage":"restart-converged","elapsedMs":168}
+原 Task/receipt/版本保持，来源收敛，重复恢复通过
+✔ 真实 succeeded / Hold=true / bundle 故障恢复与独立进程重启 (1688.937416ms)
+ℹ {"phase":"create","terminal":"succeeded","cut":"bundle","hold":true,"stage":"host-start","elapsedMs":0}
+{"phase":"create","terminal":"succeeded","cut":"bundle","hold":true,"stage":"host-ready","elapsedMs":70}
+{"phase":"create","terminal":"succeeded","cut":"bundle","hold":true,"stage":"input-ready","elapsedMs":77}
+{"phase":"create","terminal":"succeeded","cut":"bundle","hold":true,"stage":"import-finished","elapsedMs":538}
+{"phase":"create","terminal":"succeeded","cut":"bundle","hold":true,"stage":"export-finished","elapsedMs":968}
+{"phase":"create","terminal":"succeeded","cut":"bundle","hold":true,"stage":"terminal-evidence-saved","elapsedMs":968}
+{"phase":"create","terminal":"succeeded","cut":"bundle","hold":true,"stage":"hold-created","elapsedMs":990}
+{"phase":"create","terminal":"succeeded","cut":"bundle","hold":true,"stage":"anchor-prepared","elapsedMs":998}
+{"phase":"create","terminal":"succeeded","cut":"bundle","hold":true,"stage":"control-bundle-written","elapsedMs":998}
+ℹ {"phase":"recover","terminal":"succeeded","cut":"bundle","hold":true,"stage":"host-start","elapsedMs":1}
+{"phase":"recover","terminal":"succeeded","cut":"bundle","hold":true,"stage":"host-ready","elapsedMs":204}
+{"phase":"recover","terminal":"succeeded","cut":"bundle","hold":true,"stage":"restart-converged","elapsedMs":206}
+原 Task/receipt/版本保持，来源收敛，重复恢复通过
+(node:10627) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10627) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10627) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 六类真实固定输入的 expected→writer→独立 actual：完整列、说明及分页 (1277.940167ms)
+(node:10627) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10627) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 零差异只保留一张 19 列表头页；损坏明确 schema 在写出前拒绝 (764.853041ms)
+(node:10627) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10627) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 差异文件不附说明页，19 列异常摘要指向完整原表，封存说明不被修改 (1036.64025ms)
+(node:10627) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10627) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 六类分别注入首尾列、列外空格、缺行、缺账号、空变零、去前导零、金额反号、表头、页和说明损坏均拒绝 (1701.262916ms)
+✔ 空值、空文本、数字零、文本零、布尔、公式样式文本和控制字符各自无损；高精度与说明分片可还原 (11.795041ms)
+✔ expected 摘要在千行边界可观察取消，不继续进入 writer (84.01475ms)
+(node:10627) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10627) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ actual 拒绝伪造 worksheet 关系类型，不能只看关系后缀 (930.642417ms)
+✔ 命名使用固定版本与跨年区间；极大版本和最后分页缩写后仍不超过 31 单元 (0.145709ms)
+✔ drain 等待可取消；错误和提前 close 均结束等待并释放监听器 (1.567208ms)
+✔ 慢输出保持队列有界；输出错误和提前关闭不会卡在 Workbook commit (205.725417ms)
+(node:10639) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 覆盖确认期间 create 目标，Main 在任务前拒绝且保留全部文件 (14.536542ms)
+✔ Main prepare 返回后 create 目标，IPC 不能重新采集并接受新快照 (7.908125ms)
+✔ 覆盖确认期间 replace 目标，Main 在任务前拒绝且保留全部文件 (4.702667ms)
+✔ Main prepare 返回后 replace 目标，IPC 不能重新采集并接受新快照 (13.134167ms)
+✔ 取消覆盖确认不创建 File Task 或输出文件 (8.754ms)
+✔ 确认快照传至真实 Publisher：生成后 none 目标 (226.704375ms)
+✔ 确认快照传至真实 Publisher：生成后 create 目标 (68.646708ms)
+✔ 确认快照传至真实 Publisher：生成后 replace 目标 (57.319417ms)
+(node:10641) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ rows 父目录身份贯穿真实 Main execute 与 Worker Publisher：before-generation (84.89075ms)
+✔ rows 父目录身份贯穿真实 Main execute 与 Worker Publisher：before-publication (55.001125ms)
+✔ rows 父目录身份贯穿真实 Main execute 与 Worker Publisher：unchanged (171.941792ms)
+(node:10642) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 严格行数和安全整数边界；1001 份在分配路径前拒绝 (0.612625ms)
+✔ prepare 使用主进程计数；空数据/超限/非法参数不调用目录选择器 (7.367709ms)
+✔ SPLIT 计数跨隐藏 Sheet；缓存回放保留行序、文本、日期、布尔、错误、样式和重复表头 (163.715625ms)
+✔ N 是文件行数；单文件超出 Sheet 容量会续页且不增加文件 (63.051959ms)
+✔ CSV 与 BIFF 共享 rows 核心，跨块文本编号保留 (75.126292ms)
+(node:10642) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 真实后台 action 返回小描述符，9 份全部校验后才调用一次 Publisher (286.4915ms)
+✔ 第 2 个 writer 失败、缓存损坏或取消均不触发 Publisher (61.278917ms)
+✔ 缓存即使重算摘要，缺失样式引用仍会被拒绝 (36.973833ms)
+✔ 数字串摘要和 UUID 不被误判为业务账号，消息仍只有有界描述符 (0.282917ms)
+✔ 1000 份 FilePlan 的磁盘身份读取线性增长且仍拒绝输出间硬链接 (206.793667ms)
+✔ 磁盘预算失败以及旧导入快照均在任务前拒绝 (1.2865ms)
+✔ 物化读取预算在启动 CSV reader 和目录选择器之前拒绝 (0.437666ms)
+(node:10642) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 运行中的真实 rows Worker 响应 shutdown，退出后不产生正式输出 (243.314667ms)
+✔ rows 第 2 份发布时崩溃，现有 journal 在新 Worker 内恢复旧目标 (492.807333ms)
+(node:10642) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 9 份真实 rows 输出只归属一个业务批次，原件和全部输出均归档 ready 后清理 receipt (931.147375ms)
+(node:10643) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ main 用冻结 FilePlan settle exact artifact 后才把 artifactId handoff 送入 import worker (1.86175ms)
+✔ VCC 四个 file action 统一走 FilePlan authority，三类输出以 receipt 结算全部 keys (2.686375ms)
+✔ VCC calculate Task Run 建立失败时零 worker，成功时 exact5 贯穿并绑定 run identity (7.446125ms)
+✔ VCC pre-critical cancel 终结原batch，protected等待业务终态，worker crash归为failed (6.829625ms)
+✔ VCC no-file terminal 持久失败只登记原 Task Run owner outbox (0.261041ms)
+(node:10643) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 真实 worker 强杀后按 taskRunId 恢复 partial records、成功输入和原 archive 血缘 (1223.618833ms)
+(node:10644) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 活动引用按表集合聚合，null 忽略且 system-only 来源仍建立 hold 证据 (16.19025ms)
+✔ ready artifact 精确绑定后清 fallback、建立不可绕过业务锁，删除有效行后自动释放 (18.680541ms)
+✔ fallback-only 来源绑定后使用删除后引用数，不留下 stale hold (15.110583ms)
+✔ artifact SHA 不符时绑定失败且 fallback 保留 (14.960292ms)
+✔ v1 source 的 exact artifactId 缺失或 owner 错误时不改绑相似 metadata artifact (31.261875ms)
+✔ 业务提交 artifactId 后崩溃，启动先终结原 FileTask 再补 exact hold (272.1075ms)
+(node:10645) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 异常明细只导出固定六列并保留前导零幂等键与差异字段 (30.526208ms)
+✔ 多文件第二份失败在六列导出中保持精确文件归属 (14.404541ms)
+✔ 部分成功与系统主体异常可导出，纯幂等跳过不生成逐行审计 (15.836ms)
+✔ 超过 Excel 单 sheet 行限时按同一固定表头稳定分 sheet (15.115708ms)
+✔ 显式重建前 v1 历史异常仍按六列导出且不恢复逐行成功审计 (11.564625ms)
+(node:10646) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 五类校验原表和校验表按固定表头导出当前有效数据 (99.056917ms)
+✔ 系统财务OP原表和校验表仅以 balances_json 覆盖财务余额显示值 (13.092708ms)
+✔ 数据行达到上限时自动续 sheet 且每张表重复原表头 (9.281459ms)
+✔ 无数据、活动导入和损坏血缘均失败关闭，既有目标文件不被覆盖 (5.429625ms)
+✔ 系统九币种血缘重复或 Pending 错币标记非 0/1 时拒绝导出 (4.806208ms)
+✔ 系统财务OP canonical 余额缺失、重复、非法或与读取证据不一致时失败关闭 (4.196208ms)
+✔ v2 校验原表从已核验 artifact 重建当前有效行 (71.7825ms)
+✔ 历史普通 v1 / Pending v2 的 CNY/CNH 均按 stored version 从 ready 与 fallback 强校验导出 (91.720125ms)
+✔ v2 历史血缘缺口生成不完整说明；零覆盖只生成说明 sheet (120.165041ms)
+✔ v2 artifact SHA 或定位行内容不一致时整次失败且不覆盖目标 (105.3995ms)
+✔ 已绑定 artifact 后续失败不得降级为历史部分导出 (55.246167ms)
+✔ v1 detail 与 SYSTEM_OP 一旦有 source/artifact 绑定，failed artifact 均不得借 raw_json 降级 (4.584ms)
+✔ SYSTEM_OP 新导入待存档或存档失败时从临时 raw fallback 完整导出 (14.64075ms)
+✔ SYSTEM_OP 绑定 ready artifact 后从核验文件重建，损坏文件整次失败 (32.736458ms)
+✔ SYSTEM_OP success_with_skips 绑定 artifact 后仍导出已提交的有效主体 (18.387083ms)
+✔ 二次确认后的覆盖范围变化必须在写文件前失败 (55.060417ms)
+(node:10647) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ E12-C topology/shard planner 只产生 deterministic 1/2 Writer 且 exact coverage (6.088916ms)
+✔ E12-C shard reducer completion-order independent，并拒绝重复/遗漏/错 owner (0.84325ms)
+(node:10647) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10647) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ E12-C 真实 two child Writer 与 single Writer 金额/币种/Pending/style/order 等价 (429.277708ms)
+(node:10647) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10647) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10647) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ E12-C runtime CompoundLease admits two，Main full A/B/Join 后 Publisher exactly once (462.836959ms)
+✔ E12-C 任一 shard crash 时 Main Publisher=0，并清理 exact task-private staging (25.647334ms)
+✔ E12-C child crash/cancel/duplicate late terminal/非法 SafeError 全部 fail closed 且有界收口 (2.813792ms)
+✔ E12-C malformed/oversized/private/invalid child SafeError 均 allSettled、cleanup 且 Publisher=0 (65.079416ms)
+✔ E12-C parent group 按真实时间冻结 ROOT_FIRST，后发 teardown 不覆盖且等待全组 (44.566375ms)
+(node:10672) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 真实 FilePlan 预分配 → VCC handoff → settle → 混合工作簿导入，身份元数据保留且有效来源阻止永久删除 (113.013ms)
+▶ 已冻结 VCC 身份、版本、成员和完整字段集不可改写；FilePlan 身份键不可由成员补丁覆盖
+  ✔ version (0.509625ms)
+  ✔ task (0.2785ms)
+  ✔ physical (0.25625ms)
+  ✔ hash (0.241333ms)
+  ✔ members (0.262167ms)
+  ✔ missing (0.252583ms)
+  ✔ alias (0.242333ms)
+  ✔ snapshot (0.216625ms)
+  ✔ expected (0.21225ms)
+  ✔ size (0.188ms)
+✔ 已冻结 VCC 身份、版本、成员和完整字段集不可改写；FilePlan 身份键不可由成员补丁覆盖 (37.404333ms)
+✔ 已持久但不完整的 VCC 成员清单不能在重放时被补齐 (35.454625ms)
+✔ 多文件后一个成员冲突时回滚前一个新增清单，原 FilePlan metadata 不变 (42.161791ms)
+(node:10673) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ VCC 输出用 exact7 + N 产物发布并仅在 archive handoff 后确认 receipt (4.118583ms)
+✔ VCC 正式目标 committed 后 archive handoff 失败保留 receipt 但不改写业务成功 (1.235459ms)
+✔ result/data/audit 在 actual worker committed 后硬退出均由原 exact7 批次二启接管 (759.969333ms)
+(node:10674) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10674) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ E13-B VCC import audit worker 与 legacy workbook 语义 golden 等价，真实 Runtime 可执行 (283.545583ms)
+✔ E13-B VCC import audit 仅接受有异常的终态 record，deleted audit 仍可追溯 (13.463042ms)
+✔ E13-B VCC import audit 的 record 或 anomaly 集合漂移均 fail closed (12.745542ms)
+✔ E13-B VCC import audit 的持久 source lineage 损坏时不得降级为空来源 (10.932083ms)
+✔ E13-B VCC import audit 的异常字段 JSON 损坏时不得静默导出空字段 (10.414542ms)
+✔ E13-B VCC dataset worker 保留原 SQL、排序、Workbook 与 inspection golden (23.884458ms)
+✔ E13-B VCC dataset 的来源重验与 legacy writer 共用一个 read transaction (14.06525ms)
+✔ E13-B VCC managed export 只在三次 freshness 与回读验证后调用一次 Publisher (17.778917ms)
+✔ E13-B VCC Worker 预启动取消不生成 artifact (9.944917ms)
+✔ E13-B VCC dataset 在冻结后漂移时由 Worker fail closed 且不留 artifact (11.29375ms)
+✔ E13-B VCC artifact 被篡改时 Publisher 不得执行 (15.011333ms)
+✔ E13-B VCC Publisher 失败向上传播且不产生正式目标 (18.646084ms)
+✔ E13-B VCC managed read-only export 复用模块全局串行租约 (9.135833ms)
+(node:10675) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ B-09 active month cache 按 generation 复用并在写任务释放后失效 (4.8235ms)
+✔ B-10 Main 在 read worker 返回后复核 generation 与 active task identity (3.374125ms)
+✔ B-11 结果导出初读和 runDirectTask 内二次重查都消费同一 B archive action (3.271125ms)
+(node:10676) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10676) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ B-07 unknown read action 在打开数据库前 allowlist 拒绝 (70.096042ms)
+(node:10676) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10676) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ B-08 真实 legacy fixture 在 read worker 中枚举/preview，SQL预算与主线程 lag 达标 (162.941042ms)
+(node:10676) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10676) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ B-12 真实 legacy fixture 的初读与导出租约内二次重查均可达 writer (158.0085ms)
+(node:10677) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 结果写 claim 绑定 action/generation/进程内 identity，protected 标记先于 ACK (5.948667ms)
+✔ 结果写 stale generation 与非法 action 均在创建 worker 前 fail-closed (3.170459ms)
+✔ unarchive/delete 公共入口复用同一 dedicated worker 与 generation claim (6.090542ms)
+(node:10678) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 真实导入和计算 → 同快照 E/A/P → 全主体 Sheet1 与关联原表；业务库只读且原件只扫描一次 (239.985375ms)
+✔ 绑定原件被篡改时停止，不能使用残留 fallback 掩盖；输入 revision 改变拒绝旧快照 (80.0785ms)
+✔ 全部主体经已保存调整归零只生成 Sheet1；调整引用跨主体偏移正确，再次产生差异会恢复对应附页 (124.172458ms)
+✔ E/A/P 独立守恒：提取缺行、Writer 替换身份和最终 XLSX 金额/样式/附加页篡改均拒绝 (148.164334ms)
+✔ 历史 Pending 48 列与当前 46 列分别附页，旧列值原样保留，不套用当前表头 (161.373417ms)
+▶ Pending 的 CRLF、字面转义串及共享/内联文本按旧哈希核验并原值导出
+  ✔ str (124.580708ms)
+  ✔ shared (117.088791ms)
+  ✔ inline (104.883834ms)
+✔ Pending 的 CRLF、字面转义串及共享/内联文本按旧哈希核验并原值导出 (346.9505ms)
+▶ Pending 富文本按原导入合同核验，空 run、注音和 CDATA 不改变导出原文或历史哈希
+  ✔ trailing-selfclosing (109.839667ms)
+  ✔ trailing-explicit-empty (105.152291ms)
+  ✔ multiple-runs (110.2955ms)
+  ✔ phonetic (112.664042ms)
+  ✔ cdata (121.687583ms)
+  ✔ cdata-entities (110.094542ms)
+  ✔ comment (110.7075ms)
+✔ Pending 富文本按原导入合同核验，空 run、注音和 CDATA 不改变导出原文或历史哈希 (781.046875ms)
+✔ 系统 OP 布尔原值与公式缓存按导入类型核验，附页仍写入布尔单元格 (114.776917ms)
+✔ 来源 ID 丢失时必须查导入审计的绑定证据，不能用系统 raw_json 绕过损坏原件 (74.056083ms)
+✔ 日期类型系统 OP 的导入审计可用于待确认原表重建，保留原 ISO 值 (105.600209ms)
+▶ 来源字段清空或来源记录被删除仍保留 artifact 证据时，拒绝历史降级
+  ✔ cleared-binding (64.135416ms)
+  ✔ deleted-source (61.455875ms)
+✔ 来源字段清空或来源记录被删除仍保留 artifact 证据时，拒绝历史降级 (125.789458ms)
+✔ 真正未建立来源绑定的历史系统快照继续按审计和 raw_json 导出 (113.043458ms)
+(node:10681) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10681) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10681) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ IPC handler → Service → 两阶段真实 Worker → 原子保存；无业务 DML、不创建正式批次 (565.770791ms)
+(node:10681) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10681) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+▶ 主体与系统 OP 显示值按导入合同核验，真实 IPC 导出保留原始值和格式
+  ✔ 数值主体的前导零 (506.929042ms)
+(node:10681) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10681) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✔ CNH 与 CNY 是两个独立主体 (539.14225ms)
+(node:10681) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10681) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✔ 部门和币种使用显示值 (495.322041ms)
+✔ 主体与系统 OP 显示值按导入合同核验，真实 IPC 导出保留原始值和格式 (1541.880209ms)
+(node:10681) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10681) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 格式化主体可导出仍须核对原始数值，错误审计不能替换既有目标 (401.069708ms)
+✔ 取消另存为不启动 Worker；保存期间修改结果会拦截旧 revision (76.345875ms)
+(node:10681) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10681) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10681) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10681) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10681) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10681) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ Worker 后结果过期或目标发生变化，不替换目标 (1551.665042ms)
+(node:10681) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 取消、强制退出及服务关闭均等待 Worker 退出和清理，不执行导入恢复 (330.428584ms)
+(node:10681) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 拒绝原始输入、受管目录和任意 renderer 输出路径 (365.611583ms)
+✔ 取消后的清理失败必须显示错误与残留路径，不能返回已取消掩盖残留文件 (93.991792ms)
+(node:10682) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ v1 绑定原件的系统 OP 错误/错误公式缓存按旧空审计核验，附页输出原始错误码文本 (203.766625ms)
+▶ v1 系统 OP 按旧显示主体匹配，保留数值格式和布尔原类型
+  ✔ 000123 (124.9375ms)
+  ✔ TRUE (132.124917ms)
+✔ v1 系统 OP 按旧显示主体匹配，保留数值格式和布尔原类型 (257.382791ms)
+▶ 旧错误兼容不放过非空审计或普通文本不符
+  ✔ raw (82.605417ms)
+  ✔ display (81.9675ms)
+  ✔ ordinary-text (81.459458ms)
+✔ 旧错误兼容不放过非空审计或普通文本不符 (246.370875ms)
+▶ 历史兼容仍拒绝主体、币种、部门、账期和余额错误，原件哈希损坏也失败
+  ✔ 主体 (80.45775ms)
+  ✔ 币种 (92.088875ms)
+  ✔ 业务部门 (82.983333ms)
+  ✔ 账单日期 (78.588709ms)
+  ✔ 财务余额 (76.637416ms)
+  ✔ hash (76.592916ms)
+✔ 历史兼容仍拒绝主体、币种、部门、账期和余额错误，原件哈希损坏也失败 (487.845958ms)
+✔ v2 系统 OP 原生错误按新审计严格核验，不能套用 v1 空审计兼容 (120.48ms)
+(node:10683) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 发布失败恢复旧目标；恢复失败保留两份文件并给出恢复路径 (7.796208ms)
+✔ 最后 freshness 检查与 rename 不让出微任务；异步检查、候选或目标变化不能发布 (5.225041ms)
+(node:10685) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10685) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10685) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10685) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10685) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10685) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10685) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 结果查询 token 直达 dedicated worker，调整后 refetch 并以新 token 归档 (459.438666ms)
+(node:10685) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10685) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 真实 v3.1.7 legacy preview 经 Service claim 到 dedicated worker 解归档 (148.40275ms)
+✔ 计算失败与 rolled_back 审计失败从 worker 到 IPC 保留主错误和审计上下文 (3.644458ms)
+✔ 多主体导出部分发布错误把实际文件路径交给 lifecycle 归档 (0.10175ms)
+✔ generic worker 不再承载 destructive route，dedicated worker 握手后才执行且零 migration (0.241292ms)
+✔ 运行服务拒绝缺少或无效的预检 fingerprint，且不启动 worker (2.969542ms)
+✔ calculate 仅透传允许字段且 renderer 不能伪造 worker 审计版本 (2.726667ms)
+✔ VCC import 以 exact7 taskRunId 固定 batchId，拒绝 renderer 伪造和既有批次复用 (3.122583ms)
+(node:10685) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 真实 worker 在建 batch 前拒绝同路径已归档 A 被替换为 B，全部业务表保持零写入 (338.227834ms)
+✔ VCC import cooperative error 已带 partialResult 时不被空 DB 恢复覆盖 (3.487ms)
+✔ VCC import worker error 只从当前 taskRunId batch 恢复同形 partialResult (4.701292ms)
+✔ Service 不再暴露逐行导入详情分页接口 (2.799792ms)
+✔ 数据管理概览不再暴露独立期初余额审计卡片 (2.662334ms)
+✔ 数据管理校验表返回独立生成时间 (2.62275ms)
+✔ 删除有效明细后导入记录列表仍保留文件级状态与归档字段 (7.249584ms)
+✔ 显式重建前导入记录 DTO 仍暴露 v1 历史异常的可导出数量 (3.150167ms)
+(node:10685) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10685) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 生产 v2 删除 preview 经 dedicated worker 删除 source 与未归档结果 (157.457208ms)
+(node:10685) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 数据管理有效表通过 worker 流式导出并返回工作簿元数据 (169.011292ms)
+✔ v1 detail 与 SYSTEM_OP 的 bound source 均调用 Archive 实体核验，损坏时整次拒绝 (4.185333ms)
+✔ 全局任务租约拒绝并发并仅在任务释放后推进 generation (3.049292ms)
+✔ service 在创建破坏性 worker 前按 raw payload 拒绝空串和非法 generation (3.19875ms)
+✔ 破坏性 worker 进入 critical-ready 后取消与退出只等待、不 terminate (3.076083ms)
+✔ 破坏性 worker 在事务前可协作取消且不强杀 (3.0135ms)
+✔ 窗口关闭先取消且 worker 停在未受保护 critical-ready 时，超时后可安全终止 (7.502958ms)
+(node:10685) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10685) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10685) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10685) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10685) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10685) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10685) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 无调整的历史归档仍可导出，且直接结果导出持有同一租约 (490.072083ms)
+(node:10685) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ VCC 结果导出在 durable publication 确认后才触发提前附件结算 (92.901583ms)
+(node:10709) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ staging identity 摘要即使全为数字也保留 finance-safe 审计证据 (2.320125ms)
+✔ E12-A 两 action canonical policy + E12-C exact dual topology、production false 且 validator 隔离 (0.694333ms)
+✔ canonical FilePlan 与 legacy writer 仅接受 xlsx extension，csv 在 Worker 前 fail closed (40.412709ms)
+(node:10709) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10709) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ export-subjects 真单 Writer 按 subjectIndex 输出全集，与 legacy semantic golden 等价且 Publisher=1 (496.47375ms)
+(node:10709) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ export-single 复用 one-shot core 导出 exact-one 非首主体，与 legacy specialization 等价 (267.347417ms)
+✔ Pending canonical merge projection 保留完整范围且与插入顺序无关 (0.63525ms)
+(node:10709) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10709) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ export-subjects topology 固定一个 Writer，result DTO 有界且不含主体/资金原始行 (368.941083ms)
+(node:10709) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ activeTask/taskGeneration B 变化时 fail closed 且 Publisher=0 (267.086542ms)
+(node:10709) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ run/revision/fingerprint/archive B authority 变化时 fail closed 且 Publisher=0 (215.656875ms)
+✔ artifact hash/size TOCTOU 被 Main Join 阻断，Publisher=0 且 staging 清空 (44.214709ms)
+(node:10709) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ Main Join 后 generation 被替换时 wrapper 绑定 expected identity，Publisher=0 (259.111375ms)
+✔ 自洽伪造 size/hash 的 workbook 业务篡改仍由 Main 深度回读阻断 (54.471083ms)
+✔ Result raw ZIP no-op 仅重打包 sheet1.xml 时保持合法且 Publisher=1 (69.347042ms)
+▶ raw XLSX/ExcelJS 自洽篡改 Result 文本类型、样式与完整页面布局仍在 Main Join 阻断
+  ✔ C1 header style (19.053833ms)
+  ✔ A2 subject merge master style (29.124167ms)
+  ✔ C3 ordinary classification style (25.874083ms)
+  ✔ M3 ordinary blank style (28.070209ms)
+  ✔ N3 ordinary blank style (23.157708ms)
+  ✔ row 3 hidden (19.365375ms)
+  ✔ column C hidden (20.904792ms)
+  ✔ result page orientation (17.902459ms)
+  ✔ result page margin (20.443666ms)
+  ✔ result header footer (28.12975ms)
+  ✔ result sheet state (19.015041ms)
+  ✔ pending row 2 hidden (24.109625ms)
+  ✔ pending row 2 outline (26.680583ms)
+  ✔ pending workbook sheet hidden (32.1325ms)
+  ✔ pending header footer (27.242167ms)
+  ✔ pending sheet properties (22.667542ms)
+  ✔ pending injected merge H2:I2 (25.694709ms)
+  ✔ result C1 formula cached text (29.744375ms)
+  ✔ result A2 hyperlink text (20.698333ms)
+  ✔ result B3 rich text (16.091041ms)
+  ✔ result C3 shared formula cached text (20.911917ms)
+✔ raw XLSX/ExcelJS 自洽篡改 Result 文本类型、样式与完整页面布局仍在 Main Join 阻断 (527.369959ms)
+▶ Result merge follower raw cached formula 自洽篡改仍由 Main Join 阻断且 Publisher=0
+  ✔ A3 subject follower formula (29.142375ms)
+  ✔ C2 major/minor follower shared formula (17.7765ms)
+✔ Result merge follower raw cached formula 自洽篡改仍由 Main Join 阻断且 Publisher=0 (127.292791ms)
+(node:10709) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ Publisher 失败不重试：调用恰一次，错误透传且 generation artifacts 清理 (247.411708ms)
+(node:10709) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ Publisher 人工恢复 preserve 保留全部 task-private 文件并合并有界 recoveryPaths (235.160041ms)
+(node:10709) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+▶ Publisher committed 后 generation/task-dir cleanup 失败保留成功并返回有界 pending evidence
+  ✔ generation rm EBUSY (286.747292ms)
+(node:10709) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✔ generation rm EPERM (278.287833ms)
+(node:10709) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✔ task dir rmdir EPERM (234.539958ms)
+✔ Publisher committed 后 generation/task-dir cleanup 失败保留成功并返回有界 pending evidence (799.88575ms)
+✔ Worker failure/cancel 及 transport crash 都保持 Publisher=0 并清理 task-private artifacts (28.475417ms)
+✔ forced-shutdown 等价失败只清理 exact generation 与同源 UUID tmp，不递归删除未知文件 (22.711291ms)
+✔ 真实 FS readdir EACCES 仅保留 exact task dir，恢复权限后同 cleanup owner 可清理并无碰撞重试 (23.773667ms)
+✔ task staging 拒绝 shared-root symlink、非规范 escape 与 exact child reparse (21.382ms)
+▶ task dir post-create identity/collision 失败统一由既有 cleanup owner 收口
+  ✔ post-create identity probe 一次失败后清掉精确自建目录且可重试 (20.433417ms)
+  ✔ post-mkdir freeze 发生 replacement+EIO 时不从 lexical replacement 重取删除 authority (20.883833ms)
+  ✔ post-mkdir full freeze 持续 EACCES 时保留有界人工恢复证据且不静默永久 collision (20.372ms)
+  ✔ post-create identity failure 的 task-dir rmdir 失败返回有界证据且可恢复 (22.055ms)
+  ✔ post-create generation collision 删除成功不遗留 task dir (20.524791ms)
+  ✔ post-create generation collision 删除失败返回有界恢复证据并阻断重试 (20.994875ms)
+✔ task dir post-create identity/collision 失败统一由既有 cleanup owner 收口 (143.401917ms)
+▶ cleanup 在 scan/delete/rmdir 前复核 frozen root/parent dev+ino，同路径 replacement 零触碰
+  ✔ scan 后 delete 前替换为同路径真实目录，不删除 replacement generation (20.377ms)
+  ✔ scan 后 parent 换 inode但保留原 task inode，不删除 generation (19.424375ms)
+  ✔ delete 后 rmdir 前替换为同路径真实目录，不删除 replacement task dir (19.636708ms)
+✔ cleanup 在 scan/delete/rmdir 前复核 frozen root/parent dev+ino，同路径 replacement 零触碰 (65.533167ms)
+✔ runtime 后 exact task dir 被换成 reparse 时 cleanup fail closed 且不删除外部同名文件 (22.020209ms)
+✔ Main create 后 Worker 开始前 task-root replacement fail closed、Publisher=0 且不触碰外部文件 (22.290292ms)
+✔ atomic handoff 前 task-root replacement fail closed、Publisher=0 且不删除外部同名 tmp (35.535333ms)
+(node:10709) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 冻结 task-root identity 支持普通 Windows-compatible Unicode/space 路径且成功零残留 (230.415041ms)
+✔ 普通 pre-Publisher cleanup 部分失败只上报 exact task-private 已知残留并阻断碰撞重试 (25.762708ms)
+✔ runtime 拒绝 DB/assets caller override，完成后 shutdown 无 transport/lease 残留 (21.03475ms)
+(node:10710) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 迁移 worker 复用共享错误协议并保留 cause、context 与 detailLines (0.605042ms)
+✔ worker 未经 ready/ack 直接返回候选库时 fail-closed (0.381667ms)
+✔ 维护迁移先阻止新任务并等待活动任务，再暂停存档与本地维护 (51.54425ms)
+✔ 候选构建失败保持数据库连接与旧文件，释放维护并保留明确错误 (11.896167ms)
+✔ 候选 ready 后先关闭主库并保持 mutation 门禁，再 ack worker 释放源锁 (15.923834ms)
+✔ updater lease 阻止 migration，migration 不得释放 updater 门禁 (0.604334ms)
+✔ ready 后关闭主库失败会 abort worker、恢复旧库并释放 migration lease (21.344667ms)
+✔ worker 在 ack 后崩溃时不进入原子切换，旧库保持并请求重启恢复 (17.001666ms)
+✔ 普通 VCC 存储迁移入口移除但启动 journal recovery 保留，partial 导入和存档重放先建业务锁 (0.969375ms)
+(node:10711) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ copy-on-write 重建移除逐行 raw，只迁移真正异常且保持计数与结果身份 (74.934125ms)
+✔ reset-only COW 清空全部 VCC 表并保留非 VCC、Archive 与自增高水位 (136.378708ms)
+✔ reset-only 遇到 VCC artifact hold 时保持源库不变且不创建候选 (29.282375ms)
+✔ reset journal 在切换后发现候选仍有 VCC 行时自动恢复完整 v1 (136.80175ms)
+✔ 旧版 rolled_back 文件级错误每个导入记录只迁移一条失败事件 (56.608875ms)
+✔ checkpoint、空间或复制故障发生在切换前时旧库保持 v1 且候选被清理 (34.652167ms)
+✔ 候选库与切换前新旧主文件必须显式 fsync 后才允许 rename (115.535208ms)
+✔ 候选冻结复验完成后仍持有源 BEGIN IMMEDIATE，ack 前并发 mutation 被拒绝 (59.297833ms)
+(node:10711) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 真实 worker ready/ack 协议在 coordinator ack 前保持源写锁 (105.578292ms)
+✔ import record 六类计数公式不守恒时拒绝候选库且旧库不变 (42.245875ms)
+✔ copy-on-write 保留已删除记录留下的 AUTOINCREMENT 高水位 (80.127292ms)
+✔ 历史来源仅在 flow identity、文件名、artifact、SHA 和大小唯一时绑定并建立 hold (78.177042ms)
+✔ 历史 ready artifact 的物理 SHA 不一致时不得绑定或建立 hold (58.208ms)
+✔ 历史 artifact 在首次物理校验后变化时切换前再次校验并保留旧库 (75.905459ms)
+✔ 历史来源存在同名多候选 artifact 时不猜测绑定且不建立 hold (72.826375ms)
+✔ 显式重建保留升级后未归档 fallback，并为已验证 artifact 清 fallback 与建立 hold (78.7715ms)
+✔ 原子切换先只读复验，再按用户选择保留旧库；pre-switch journal 可幂等回滚 (162.754834ms)
+✔ switching 与 switched 崩溃窗口均按 journal 唯一恢复，重开失败则恢复旧库 (596.676583ms)
+✔ 重开失败后先持久化回滚路径，候选移动后崩溃仍能恢复完整旧库 (136.883125ms)
+✔ 旧库已备份但候选仍在 target 时，回滚先接管候选再恢复旧库 (130.325167ms)
+✔ switched journal 的活动候选复验失败时恢复完整 v1 备份 (158.636708ms)
+✔ switching journal 的活动候选不可读时恢复完整 v1 备份 (130.956917ms)
+✔ recovery 删除备份后先 fsync DB 目录，删除 journal 后 fsync journal 目录，done 可幂等补删 (159.479542ms)
+(node:10712) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ E12-B 三类 subject 查询都使用 (run_id,subject) range index (5.21025ms)
+✔ subject API 与 full E12-A 目标投影完整等价，且 readCounts 不含非目标资金事实 (7.393792ms)
+✔ 合法 balance-only subject 仍由局部 balances 建立主体，不触发全 run materialize (12.960291ms)
+✔ Worker scoped authority + subject business digest 保持 E12-A authority 且不全读 finance facts (10.213125ms)
+✔ archive 时间可与 run 跨秒，subjectIndex 严格沿用 Main UTF-16 排序 (5.955917ms)
+✔ bounded archive metadata 拒绝重复/错 digest，并由 scoped A/B 绑定未分配主体漂移 (6.737375ms)
+✔ 固定目标主体增加大量非目标 adjustments 后 read count 不变且 latency 不线性增长 (44.161667ms)
+✔ 真实文件 DB 的 executeVccExportWriter 端到端走 scoped A/B 与 businessDigest (112.475292ms)
+✔ 真实 v3.1.7 four-dataset migrate 后 null fingerprint 可经 Main authority 与 Writer 出 artifact (31.75625ms)
+(node:10713) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10713) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ unknown write action 在 critical-ready 与开库前拒绝 (73.426292ms)
+(node:10713) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ critical-ready 前 cancel 不开库并返回 operation-cancelled (69.040292ms)
+(node:10713) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ critical ack 后新 worker 零 migration，缺 schema fail-closed (71.979917ms)
+(node:10713) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10713) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10713) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ operationContext 缺失或字段不全均拒绝，完整值沿用 exact-5 refreeze 合同 (212.988625ms)
+(node:10714) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ effective DTO 行模型保留基础/调整相邻顺序并使用生效汇总 (0.763042ms)
+✔ 导出每个主体一个双 Sheet 工作簿并保留固定表头与 Pending J:K (67.723791ms)
+✔ 调整行、effective 汇总、AUD/CAD fill 和 named-range 血缘可回读 (27.96025ms)
+✔ 500 字 Unicode 调整原因仅提高调整行行高并在重开后保持可验证 (19.528375ms)
+✔ 调整原因 ST_Xstring 字面量与真实 CRLF 经 semantic writer 单次编码后严格往返 (19.06325ms)
+✔ staged validator 拒绝调整目标格、M/N 结构或覆盖样式漂移 (81.876167ms)
+✔ 调整血缘拒绝多引用、跨表、区域引用、额外标记和大小写重复 (0.382458ms)
+✔ 同一基础 rowKey 的多币种调整各有唯一可逆血缘 (0.108459ms)
+✔ 结果模板缺失或 hash 漂移时不覆盖既有目标且不创建暂存/备份文件 (5.882959ms)
+✔ 超过 Excel 15 位有效数字时拒绝静默丢失金额精度 (0.141208ms)
+✔ 多主体文件名清洗冲突时生成不同输出路径 (21.537042ms)
+✔ 多主体后续写入失败时错误携带已发布文件供原任务批次登记 (8.409292ms)
+✔ durable publication 模式只写 generation 目录并返回 N 个正式目标 (8.448375ms)
+✔ 自动命名导出不会覆盖目录中已有同名文件 (14.668333ms)
+✔ 临时工作簿校验失败时保留用户原有目标文件并清理暂存文件 (0.837667ms)
+✔ 发布前数据库收口失败时不替换已有文件并清理暂存文件 (0.60325ms)
+▶ v3.1.6 VCC财务OP校验前端契约
+  ✔ 模块注册、脚本加载顺序和主面板四个动作完整 (0.739334ms)
+  ✔ 导入账期沿用业务OP日期弹窗的年月双下拉结构并对调确定取消按钮 (0.818916ms)
+  ✔ 运行账期移除可见标签并将下拉框缩至整行四分之一且与标题左对齐 (0.268292ms)
+  ✔ 导入完成不弹导入记录框并将结果摘要写入主页面状态框 (1.555375ms)
+  ✔ 导入进度纯函数区分 reading/committing 并保持取消提示优先 (8.897791ms)
+  ✔ preload 和主进程覆盖导入、取消、计算、归档、管理删除及三类导出通道 (7.281291ms)
+  ✔ 数据管理标题和左侧导航沿用平盘对账数据管理契约 (0.955667ms)
+  ✔ 数据管理左侧解归档、右侧删除导出返回，删除页使用动态统一目标与 token (1.3065ms)
+  ✔ 删除 target 切换只读本次响应缓存并满足 50ms 结构预算 (0.619125ms)
+  ✔ 解归档复用年月选择器、强制降级警示，并只在 pre-critical 开放取消 (0.919708ms)
+  ✔ 四类结果写操作呈现审计保全阶段并按 worker cancellable 控制取消 (0.15725ms)
+  ✔ 解归档提交成功后刷新失败只告警关闭，不重新开放破坏性操作 (0.255041ms)
+  ✔ 归档月份 picker 可执行状态覆盖默认最新、空列表、保存取消与失败刷新后重试 (0.944583ms)
+  ✔ 数据管理导出按账期和分组目标表预检，支持校验原表与校验表 (0.418041ms)
+  ✔ 有效原表删除后列表保留删除状态且不再打开逐行详情或显示存档小字 (0.368875ms)
+  ✔ 校验原表直接进入按单一月份筛选的七列导入记录并按异常显示导出 (0.259333ms)
+  ✔ 数据管理不再暴露 VCC 优化存储入口 (0.205333ms)
+  ✔ 异常审计仅保留六列导出入口，不再提供人工处置 (0.307167ms)
+  ✔ 结果确认读取完整后端 review、按生效差异展示并在页内带 revision 归档 (0.560375ms)
+  ✔ 完整结果渲染严格校验九币种与四类 summary，调整紧跟基础行且不在前端计算金额 (1.452375ms)
+  ✔ 结果导出复用归档月份选择器且 renderer 只提交 targetMonth (0.500875ms)
+  ✔ 已归档月份空态同步导出按钮 disabled 与 title，恢复月份时清除 title (0.206125ms)
+  ✔ 修改结果固定四级无默认级联，保存锁窗并在成功或 stale 后强制 refetch 清核对 (0.302459ms)
+  ✔ 结果操作失败策略区分临时失败、无候选、并发归档与结构性归档错误 (0.171292ms)
+  ✔ 开始运行先做五表预检，失败不启动 worker 并使用明确错误标题 (0.1285ms)
+  ✔ 运行前检查同时存在多个问题时完整展示结构化 issues (0.087542ms)
+  ✔ 缺少上月归档时提供九币种一次性期初初始化且不默认补零 (0.254792ms)
+  ✔ 宽表和低分辨率弹框具备稳定尺寸及滚动约束 (0.212417ms)
+✔ v3.1.6 VCC财务OP校验前端契约 (30.785458ms)
+(node:10716) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[VCC reset] checkpoint 0/1 正在收敛 WAL
+[VCC reset] copying 0/29 正在复制数据库
+[VCC reset] copying 1/29 app_settings
+[VCC reset] copying 2/29 vcc_fin_op_import_batches
+[VCC reset] copying 3/29 vcc_fin_op_import_records
+[VCC reset] copying 4/29 vcc_fin_op_import_rows
+[VCC reset] copying 5/29 vcc_fin_op_effective_rows
+[VCC reset] copying 6/29 vcc_fin_op_import_errors
+[VCC reset] copying 7/29 vcc_fin_op_datasets
+[VCC reset] copying 8/29 vcc_fin_op_system_snapshots
+[VCC reset] copying 9/29 vcc_fin_op_system_snapshot_attempts
+[VCC reset] copying 10/29 vcc_fin_op_runs
+[VCC reset] copying 11/29 vcc_fin_op_run_rows
+[VCC reset] copying 12/29 vcc_fin_op_run_balances
+[VCC reset] copying 13/29 vcc_fin_op_pending_summary_rows
+[VCC reset] copying 14/29 vcc_fin_op_pending_currency_totals
+[VCC reset] copying 15/29 vcc_fin_op_archives
+[VCC reset] copying 16/29 vcc_fin_op_opening_balances
+[VCC reset] copying 17/29 vcc_fin_op_dataset_deletions
+[VCC reset] copying 18/29 vcc_fin_op_import_sources
+[VCC reset] copying 19/29 vcc_fin_op_import_staging_rows
+[VCC reset] copying 20/29 vcc_fin_op_import_anomalies
+[VCC reset] copying 21/29 vcc_fin_op_effective_raw_fallback
+[VCC reset] copying 22/29 vcc_fin_op_module_state
+[VCC reset] copying 23/29 vcc_fin_op_run_adjustments
+[VCC reset] copying 24/29 vcc_fin_op_operation_audit
+[VCC reset] copying 25/29 unrelated_fixture
+[VCC reset] copying 26/29 确认 VCC 表不复制业务行
+[VCC reset] copying 27/29 保留非 VCC 与 Archive 证据
+[VCC reset] verifying 28/29 验证非 VCC 守恒与 VCC 空表
+[VCC reset] verified 29/29 候选数据库验证完成
+✔ 一次性 reset CLI 要求绝对 source 与精确确认口令 (0.455833ms)
+✔ 一次性 reset CLI 保留旧库备份并把活动库切为空 v3 (154.107125ms)
+▶ VCC 财务OP生效差异共享判定
+  ✔ 0、0.00 与 -0.00 均为零 (0.319709ms)
+  ✔ 任意正负非零规范值均不为零 (0.06275ms)
+  ✔ 非法或非字符串输入失败关闭 (0.184625ms)
+✔ VCC 财务OP生效差异共享判定 (0.926917ms)
+✔ sharedStrings 接受 Transitional/Strict，保留合法文本并忽略 phonetic 节点 (3.448625ms)
+✔ sharedStrings 接受任意合法 prefix，并继续忽略真正未知的空扩展节点/属性 (0.5525ms)
+✔ sharedStrings 按每个 t 单次解码 ST_Xstring，不跨 rich run 拼接 escape (0.286875ms)
+✔ sharedStrings 对单个 t 原始词法和 rich run 累计语义长度均提前限流 (11.039125ms)
+✔ sharedStrings 已识别元素必须精确匹配 SpreadsheetML 规范大小写 (1.802584ms)
+✔ si 必须是 sst 直属且不可嵌套 (0.454875ms)
+✔ 只采集 si/t 或 si/r/t，wrapper、rPr 和错层 r 中的 t 均 fail-closed (0.66775ms)
+✔ 合法 t 之外的非空文本值不得注入 shared string (0.140375ms)
+✔ plain si 与每个 rich r 最多一个直属 t，重复 t 不得拼接 (0.277208ms)
+✔ sharedStrings 的识别节点遇到缺失或未知 namespace 时 fail-closed (0.435583ms)
+▶ 可选词法审计跨 UTF-8 chunk 保留原 cell body，历史取值与完整语义独立
+  ✔ chunk=1 (6.561416ms)
+  ✔ chunk=5 (1.373291ms)
+  ✔ chunk=64 (0.663084ms)
+  ✔ chunk=932 (0.772917ms)
+✔ 可选词法审计跨 UTF-8 chunk 保留原 cell body，历史取值与完整语义独立 (10.223167ms)
+✔ 合法 worksheet：唯一根、唯一直接 sheetData，且只消费其直接 row (0.525375ms)
+✔ worksheet 必须是唯一根：wrapper、嵌套 worksheet 和根外注入均 fail-closed (0.8105ms)
+✔ sheetData 必须是 worksheet 的唯一直接子元素 (0.44075ms)
+✔ row 仅允许作为合法 sheetData 的直接子元素 (0.539375ms)
+✔ 单元格和值节点必须位于合法直接父节点，禁止 wrapper 注入业务值 (1.327375ms)
+✔ 布局节点必须位于合法层级且容器唯一，禁止 wrapper 注入列宽 (0.6605ms)
+✔ 合法内联 rich text、公式缓存值和列布局保持可解析 (0.320042ms)
+✔ 工作表整数、数值和布尔属性使用严格 OOXML 词法，不把损坏值当缺省值 (0.628625ms)
+✔ SpreadsheetML 命名空间严格校验，外部命名空间不能注入业务单元格 (0.841541ms)
+✔ SpreadsheetML 已知元素 local name 必须精确匹配规范大小写 (1.064709ms)
+✔ worksheet 受消费属性必须按所在元素精确匹配规范大小写 (1.735875ms)
+✔ 合法 SpreadsheetML namespace 前缀保持可解析，真正未知扩展元素与属性继续忽略 (0.29975ms)
+✔ inlineStr 不拼接同一 plain 容器或同一 rich run 的重复 t (0.271666ms)
+✔ 显式布尔词法和单元格类型必须可解释，不能静默改成 false 或文本 (0.365333ms)
+✔ 错误单元格仅接受 Excel 合法错误码，缺值或未知错误 fail-closed (0.742208ms)
+✔ 已消费整数、布尔和单元格坐标属性的显式空值不得按缺省值解释 (0.700708ms)
+✔ worksheet 对 v、f、inline t 的超长词法在累计阶段提前拒绝 (10.923ms)
+✔ cell 类型与 v/f/is 载荷必须一致，禁止静默丢弃实际 payload (0.625042ms)
+✔ 合法 inline rich text 与字符串/数值公式缓存值保持可解析 (0.382917ms)
+✔ 数值与日期 v 必须符合声明类型，不能降级成文本 (0.464625ms)
+✔ worksheet 数值单元格快速拒绝会放大 canonical 文本的极端指数 (0.691542ms)
+✔ t=d 日历或时区词法损坏时 fail-closed，不能冒充范围外日期降级 (0.927334ms)
+✔ t=d 日历合法但超 Excel 范围时保留原词法并进入文本降级 warning 链路 (0.433333ms)
+✔ 带样式但没有 v 的 t=d 保持 explicit blank，输出不产生日期降级 warning (0.146083ms)
+✔ 布局宽高只接受可由 writer 保真的正有限十进制词法 (1.171375ms)
+✔ row/col outlineLevel 仅允许 0..7 的整数 (0.405542ms)
+▶ toolbox-format xlsx pass/scanner
+  ✔ 一次 pass 解析 workbook/styles/theme/SST，并按显示顺序流式产出稀疏 ToolboxRow (15.930375ms)
+  ✔ workbook、Relationships 与 SST 接受 Strict OOXML namespace (3.045083ms)
+  ✔ workbook 与 Relationships 接受 Transitional/Strict 的任意合法 namespace prefix (0.328791ms)
+  ✔ 同一 pass 禁止并发扫描，关闭后不能继续读取 (2.265209ms)
+  ✔ 专用 SST/inline rich parser 拼正常 t run，并忽略 rPh/phoneticPr (2.079167ms)
+  ✔ inline/str 文本按独立 t/v 单次解码 ST_Xstring，不跨 rich run 合并 escape (2.152958ms)
+  ✔ 重叠 col 范围保留 XML 声明顺序，后声明范围继续覆盖前声明范围 (2.176541ms)
+  ✔ 共享字符串索引越界 fail-closed，不静默变空串 (1.82575ms)
+  ✔ row r 非严格递增、同 row 重复 cell 坐标均 fail-closed (3.84025ms)
+  ✔ 截断 worksheet/cell/row XML 必须 fail-closed，不得把已解析前缀当成功 (2.165ms)
+  ✔ 截断 workbook.xml 必须在打开阶段失败，不得只处理已解析的工作表前缀 (1.224541ms)
+  ✔ sheet 只能是唯一 sheets 容器直属，wrapper 中的额外 Sheet 不得被静默漏读 (0.926958ms)
+  ✔ workbookPr 必须是 workbook 直属且最多一个，错层或重复均 fail-closed (1.892625ms)
+  ✔ workbookPr.date1904 若存在仅接受 OOXML boolean 词法 (9.992ms)
+  ✔ workbook extLst/ext 内允许 foreign namespace 扩展同名元素 (0.145167ms)
+  ✔ foreign namespace 扩展仅能位于 workbook 直属 extLst/ext 内 (0.267625ms)
+  ✔ sheet state 缺省为 visible，三种 OOXML 枚举值均保持原值 (0.078833ms)
+  ✔ sheet state 显式非法值在打开阶段 fail-closed，不按 visible 兜底 (3.809875ms)
+  ✔ workbook 识别节点与关系 id 遇到缺失或未知 namespace 时 fail-closed (0.314292ms)
+  ✔ workbook 业务元素与已消费属性必须精确匹配规范大小写 (0.266416ms)
+  ✔ Relationships 元素与 Id/Type/Target/TargetMode 必须精确匹配规范大小写 (0.185875ms)
+  ✔ Relationships 识别节点 namespace 与 TargetMode 枚举非法时 fail-closed (0.346292ms)
+  ✔ 重复 relationship Id、工作表 r:id 和 worksheet entry path 均 fail-closed (2.780125ms)
+  ✔ 工作表名称按 Excel 语义大小写不敏感唯一，冲突时在打开阶段失败 (0.83625ms)
+  ✔ 工作表关系缺失、类型错误、外部关系或 entry 不存在均在打开阶段失败 (3.116625ms)
+  ✔ Relationship Type 必须精确命中 Office URI，同后缀恶意 URI 四类均 fail-closed (3.389542ms)
+  ✔ 已声明的 sharedStrings/styles/theme 关系异常时不得回退固定路径 (6.807834ms)
+  ✔ wrapper 中的 sharedStrings/styles/theme Relationship 不得被忽略后固定路径回退 (2.51025ms)
+  ✔ 错误 Type 的 Relationship 占用标准 metadata 路径时不得 fallback (2.207583ms)
+  ✔ sharedStrings/styles/theme 关系完全不存在时兼容规范固定 entry (1.356625ms)
+  ✔ 存在但截断的 SST/styles/theme 均 fail-closed，缺少可选 entry 仍使用默认语义 (4.903709ms)
+  ✔ 取消抛专用错误，不返回 partial success；SST >=1.2GB 在打开流前拒绝 (2.7125ms)
+  ✔ workbook/rels/styles/theme metadata part 均有中央目录与运行时双重上限 (0.353ms)
+  ✔ 高压缩超限 styles.xml 在解压前 fail-closed (125.243209ms)
+✔ toolbox-format xlsx pass/scanner (212.340208ms)
+✔ v3.1.8 VCC 关键 preview 状态均有 renderer token、mock hook 与独立脚本 (4.395292ms)
+✔ 仓库提交的 26 张 VCC preview 均为完整 PNG 且尺寸与 capture 契约一致 (2.5085ms)
+✔ zoom 与最小窗口参数只在 APP_CAPTURE_PATH preview 路径改写 BrowserWindow options (0.211667ms)
+✔ APP_PREVIEW_MODAL 只有在 APP_CAPTURE_PATH capture 模式下才暴露给 renderer (0.429542ms)
+✔ VCC 合成 preview hook 只在 preload 确认 capture 模式时挂载 (0.263083ms)
+✔ VCC capture readiness 对未知、缺失、null、throw 与 reject 全部失败关闭 (0.917459ms)
+✔ result/import/run/adjustment 生命周期 Promise 不参与 readiness 等待 (0.305375ms)
+✔ main readiness 对缺注册、悬挂、拒绝和非法结果均在超时内失败 (82.351084ms)
+✔ delete-first-month readiness 等 selector 异步刷新按钮与文案稳定后才完成 (1.838375ms)
+✔ 年份切换、非尾月与执行中预览等待异步状态后读取真实 disabled 属性 (3.232958ms)
+✔ render-modal-preview 对可选 zoom/窗口参数做边界校验后才写入 capture 环境 (0.102042ms)
+✔ preview capture 失败必须非 0 退出，不得以旧 PNG 冒充本轮产物 (0.382375ms)
+✔ preview 仅在本轮临时产物具备完整 PNG 结构时替换旧证据 (2.025417ms)
+✔ 异步 readiness 失败时即使 staged PNG 合法也不替换旧证据 (0.821542ms)
+✔ 危险按钮 disabled 在两套基础样式中均有不可点击视觉态 (11.046583ms)
+✔ VCC 用户可见结果修订术语统一为中文结果版本 (0.193167ms)
+✔ v3.1.14 人工边界与资产三元组 helper 拒绝局部旁路 (1.78575ms)
+✔ v3.1.14 正式文档锁定 VCC 修复、实际发布证据与人工边界 (7.161625ms)
+✔ v3.1.13 版本号、功能资料与正式发布证据同步工具箱、存档中心和状态框迭代 (6.584666ms)
+✔ v3.1.12 三份用户文档保留实际迭代和最终发布验收状态 (4.167458ms)
+✔ v3.1.11 三份用户文档保留正式发布证据并记录随包指南缺陷 (4.001542ms)
+✔ v3.1.10 三份用户文档保持正式发布历史和三项门禁结论 (3.811834ms)
+✔ v3.1.9 三份用户文档保持正式发布历史 (3.383292ms)
+✔ v3.1.10 记录真实库与资金不可豁免且 Windows 门禁本次未使用豁免 (0.287334ms)
+✔ v3.1.8 三份用户文档保持正式发布历史 (3.71575ms)
+✔ v3.1.8 用户手册锁定输入、调整、状态与导出契约 (1.373667ms)
+✔ 仓库内最终 Spec 只修正两处业务路径并锁定三阶段哈希证据 (1.1385ms)
+✔ Spec 冻结内容哈希跨 LF、CRLF 与 CR checkout 稳定且内容变化仍失败 (1.068791ms)
+✔ v3.1.9 VCC CNY 与异常过滤修订在 Spec 和 TechDoc 中保持一致 (0.951667ms)
+✔ v3.1.8 iteration PRD 与 PR 归档锁定人工 6/6 PASS 和正式 Release 证据 (0.890583ms)
+ℹ tests 1111
+ℹ suites 3
+ℹ pass 1111
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 60913.880375

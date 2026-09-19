@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { createHash } = require('node:crypto');
 
 const VIEWPORTS = [
   { width: 1240, height: 860 },
@@ -16,6 +17,9 @@ function runParent() {
   const electronBinary = require('electron');
   const projectRoot = path.resolve(__dirname, '..');
   const failures = [];
+  const results = [];
+  const evidenceDir = process.env.APP_SETTINGS_LAYOUT_EVIDENCE_DIR;
+  if (evidenceDir) fs.mkdirSync(evidenceDir, { recursive: true });
 
   for (const viewport of VIEWPORTS) {
     for (const scaleFactor of SCALE_FACTORS) {
@@ -32,6 +36,8 @@ function runParent() {
           APP_SETTINGS_LAYOUT_SCALE: String(scaleFactor),
           APP_SETTINGS_LAYOUT_USER_DATA: userDataDir,
           APP_SETTINGS_LAYOUT_RUN_BEHAVIOR: viewport.width === 1240 && scaleFactor === 1 ? '1' : '0',
+          APP_SETTINGS_LAYOUT_SCREENSHOT: process.env.APP_SETTINGS_LAYOUT_SCREENSHOT
+            || (evidenceDir ? path.join(evidenceDir, 'archive-settings-dark.png') : ''),
           ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
         }
       });
@@ -52,14 +58,36 @@ function runParent() {
       }
 
       const result = JSON.parse(resultLine.slice(RESULT_PREFIX.length));
+      results.push({ viewport, scaleFactor, ...result });
       console.log(
         `[app-settings-layout] ${viewport.width}x${viewport.height} @ ${scaleFactor * 100}% ` +
         `${result.ok ? 'PASS' : 'FAIL'} ` +
         `(right=${result.metrics.rightEdgeDelta.toFixed(4)}px, ` +
-        `font=${result.metrics.toggleFontSize}, dpr=${result.metrics.devicePixelRatio})`
+        `font=${result.metrics.toggleFontSize}, dpr=${result.metrics.devicePixelRatio}, ` +
+        `retentionControls=${result.metrics.retentionControlCount})`
+      );
+      if (result.screenshotPath) console.log(`[app-settings-layout] screenshot: ${result.screenshotPath}`);
+      if (result.themeRetentionBehavior) console.log(
+        `[app-settings-layout] theme/retention ${result.themeRetentionBehavior.scenarios}/4 scenarios, `
+        + `${result.themeRetentionBehavior.assertions} assertions`
       );
       if (!result.ok) failures.push({ viewport, scaleFactor, details: result.failures });
     }
+  }
+
+  if (evidenceDir) {
+    const files = ['scripts/verify-app-settings-layout.js', 'index.html', 'src/renderer.js',
+      'src/renderer-dark-mode.js', 'src/shared/dark-mode-schedule.js', 'src/styles-gemini.css',
+      'src/styles-gemini-extra.css', 'src/styles-dark-mode.css', 'src/styles-dark-mode-settings.css',
+      'src/styles-biz-op-v327.css', 'src/styles-vcc-financial-op.css'];
+    fs.writeFileSync(path.join(evidenceDir, 'app-settings-verification.json'), JSON.stringify({
+      generatedAt: new Date().toISOString(),
+      scope: '真实 index/Renderer/CSS 和主题 controller；设置 API 为内存夹具；隔离 Electron userData',
+      passed: failures.length === 0,
+      files: files.map((file) => ({ file, sha256: createHash('sha256').update(fs.readFileSync(path.join(projectRoot, file))).digest('hex') })),
+      results,
+      failures
+    }, null, 2));
   }
 
   if (failures.length > 0) {
@@ -72,7 +100,14 @@ function runParent() {
 }
 
 function nextFrame() {
-  return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  const sample = { startedAt: performance.now(), visibility: document.visibilityState };
+  (window.__appSettingsFrameWaits ||= []).push(sample);
+  return new Promise((resolve) => {
+    requestAnimationFrame((firstFrameAt) => requestAnimationFrame((secondFrameAt) => {
+      Object.assign(sample, { firstFrameAt, secondFrameAt, elapsedMs: performance.now() - sample.startedAt });
+      resolve();
+    }));
+  });
 }
 
 function waitFor(test, timeoutMs = 2000) {
@@ -84,7 +119,7 @@ function waitFor(test, timeoutMs = 2000) {
         return;
       }
       if (performance.now() - startedAt > timeoutMs) {
-        reject(new Error('等待设置弹窗状态超时'));
+        reject(new Error(`等待设置弹窗状态超时：${test.toString()}`));
         return;
       }
       setTimeout(inspect, 10);
@@ -99,9 +134,50 @@ function createDeferred() {
   return { promise, resolve };
 }
 
-function installDesktopApiStub({ retentionDays = 60, retentionHandler = null } = {}) {
+function installDesktopApiStub({
+  retentionDays = 60,
+  retentionDaysByModule = {},
+  retentionHandler = null,
+  moduleRetentionHandler = null,
+  settingsHandler = null,
+  statsHandler = null,
+  themeHandler = null
+} = {}) {
   window.__retentionSaveCalls = [];
+  window.__moduleRetentionSaveCalls = [];
   window.__archiveListCalls = [];
+  window.__archiveDeleteCalls = [];
+  window.__archiveDeletePrepareCalls = [];
+  window.__themeSaveCalls = [];
+  const themeListeners = new Set();
+  let themeRevision = 0;
+  let savedTheme = { enabled: false, startTime: '18:30', endTime: '06:00' };
+  const themeSnapshot = () => ({
+    darkModeSchedule: { ...savedTheme },
+    effectiveTheme: window.DarkModeSchedule.resolveEffectiveTheme(savedTheme, new Date(2026, 8, 12, 21, 0)),
+    themeRevision
+  });
+  window.__publishSettingsTheme = (config) => {
+    savedTheme = { ...config };
+    themeRevision += 1;
+    const snapshot = themeSnapshot();
+    for (const listener of themeListeners) listener(snapshot);
+    return snapshot;
+  };
+  const savedModuleRetentions = { ...retentionDaysByModule };
+  const retentionModules = [
+    { id: 'bank-statement-process', name: '资金对账数据处理' },
+    { id: 'vcc-financial-op', name: 'VCC财务OP校验' },
+    { id: 'bank-bu-recon', name: '月度银行对账单BU回填校验' },
+    { id: 'toolbox', name: '工具箱' }
+  ];
+  const getSavedSettings = () => ({
+    retentionDays,
+    retentionDaysByModule: { ...savedModuleRetentions },
+    retentionModules: retentionModules.map((module) => ({ ...module })),
+    storageRoot: '/very/long/archive/root/用于验证存档位置完整换行和选择/年份/月/日期/批次号',
+    storageMigration: { status: 'idle', phase: '', processed: 0, total: 0 }
+  });
   const batches = [
     {
       internalId: 101,
@@ -184,41 +260,73 @@ function installDesktopApiStub({ retentionDays = 60, retentionHandler = null } =
     async openFile() { return { status: 'success' }; },
     async saveAs() { return { status: 'cancelled' }; },
     async setLocked() { return { status: 'success' }; },
-    async deleteBatch() { return { status: 'success', metadataDeleted: true }; },
+    async prepareDeleteBatch(batchId) {
+      window.__archiveDeletePrepareCalls.push(batchId);
+      return { status: 'success', ok: true, confirmationToken: `fixture-delete-${batchId}`, summary: { fileCount: 1 } };
+    },
+    async listDeleteCleanupJobs() { return { status: 'success', jobs: [] }; },
+    async deleteBatch(batchId, confirmationToken) {
+      if (confirmationToken !== `fixture-delete-${batchId}`) throw new Error('删除确认凭证不匹配');
+      window.__archiveDeleteCalls.push(batchId);
+      return { status: 'success', ok: true, metadataDeleted: true, fullyDeleted: true };
+    },
     async retryBatch() { return { status: 'success' }; },
     async getSettings() {
-      return {
-        status: 'success',
-        settings: {
-          retentionDays,
-          storageRoot: '/very/long/archive/root/用于验证存档位置完整换行和选择/年份/月/日期/批次号',
-          storageMigration: { status: 'idle', phase: '', processed: 0, total: 0 }
-        }
-      };
+      if (typeof settingsHandler === 'function') return settingsHandler(getSavedSettings());
+      return { status: 'success', settings: getSavedSettings() };
     },
     async setRetentionDays(value) {
       window.__retentionSaveCalls.push(value);
-      if (typeof retentionHandler === 'function') return retentionHandler(value);
-      return { status: 'success', settings: { retentionDays: value } };
+      const result = typeof retentionHandler === 'function'
+        ? await retentionHandler(value)
+        : { status: 'success', settings: { retentionDays: value } };
+      if (result?.status === 'success') retentionDays = value;
+      return result;
+    },
+    async setModuleRetentionDays(payload) {
+      window.__moduleRetentionSaveCalls.push({ ...payload });
+      const result = typeof moduleRetentionHandler === 'function'
+        ? await moduleRetentionHandler(payload)
+        : { status: 'success', settings: {
+            retentionDaysByModule: payload.retentionDays === 'inherit'
+              ? {}
+              : { [payload.moduleId]: payload.retentionDays }
+          } };
+      if (result?.status === 'success') {
+        if (payload.retentionDays === 'inherit') delete savedModuleRetentions[payload.moduleId];
+        else savedModuleRetentions[payload.moduleId] = payload.retentionDays;
+      }
+      return result;
     },
     async getStats() {
-      return {
-        status: 'success',
-        stats: {
-          storagePath: '/very/long/archive/root/用于验证存档位置完整换行和选择/年份/月/日期/批次号',
-          fileTotalBytes: 1325400064,
-          runCount: 128,
-          latestBatchNumber: '2026-08-11-128',
-          latestBatchId: 128,
-          latestBatchStatus: 'succeeded',
-          migrationStatus: { status: 'idle', phase: '', processed: 0, total: 0 }
-        }
+      const stats = {
+        storagePath: '/very/long/archive/root/用于验证存档位置完整换行和选择/年份/月/日期/批次号',
+        fileTotalBytes: 1325400064,
+        runCount: 128,
+        latestBatchNumber: '2026-08-11-128',
+        latestBatchId: 128,
+        latestBatchStatus: 'succeeded',
+        migrationStatus: { status: 'idle', phase: '', processed: 0, total: 0 }
       };
+      if (typeof statsHandler === 'function') return statsHandler(stats);
+      return { status: 'success', stats };
     },
     onStorageMigrationProgress() { return () => {}; }
   };
   const desktopApi = {
     archiveCenter,
+    settings: {
+      onDarkModeScheduleChanged(listener) {
+        themeListeners.add(listener);
+        return () => themeListeners.delete(listener);
+      },
+      async setDarkModeSchedule(config) {
+        window.__themeSaveCalls.push({ ...config });
+        const result = typeof themeHandler === 'function' ? await themeHandler(config) : { status: 'ok' };
+        if (result?.status !== 'ok') return result;
+        return { status: 'ok', ...window.__publishSettingsTheme(config) };
+      }
+    },
     appUpdate: {
       async setEnabled() { return { status: 'success' }; },
       async checkNow() { return { status: 'success' }; },
@@ -229,6 +337,10 @@ function installDesktopApiStub({ retentionDays = 60, retentionHandler = null } =
     configurable: true,
     value: desktopApi
   });
+  // 每个内存夹具安装独立 API；保留真实 Renderer controller 的订阅、校验和主题绘制路径。
+  if (darkModeController) darkModeController.dispose();
+  darkModeController = null;
+  getDarkModeController().accept(themeSnapshot());
 }
 
 function openSettingsDialog() {
@@ -252,6 +364,19 @@ function changeRetention(value) {
   const select = document.querySelector('[data-role="archive-retention-days"]');
   select.value = value;
   select.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+function changeRetentionModule(moduleId) {
+  const select = document.querySelector('[data-role="archive-retention-module"]');
+  select.value = moduleId;
+  select.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+async function waitForRetentionSettled() {
+  await waitFor(() => (
+    !document.querySelector('[data-role="archive-retention-module"]').disabled
+    && !document.querySelector('[data-role="close-update-dialog"]').disabled
+  ));
 }
 
 async function verifyArchiveRetentionBehavior(failures) {
@@ -281,6 +406,9 @@ async function verifyArchiveRetentionBehavior(failures) {
   const pendingReturn = document.querySelector('[data-role="close-update-dialog"]');
   const pendingClose = document.querySelector('[data-action="close"]');
   if (!pendingReturn.disabled || !pendingClose.disabled) failures.push('pending save did not disable Return/X');
+  if (!document.querySelector('[data-role="archive-retention-module"]').disabled) {
+    failures.push('pending default save did not disable module selection');
+  }
   pendingClose.click();
   if (document.getElementById('modalRoot').childElementCount !== 1) failures.push('disabled X closed pending dialog');
   oldFailure.resolve({ status: 'failed', message: '旧请求失败不应成为最终错误' });
@@ -322,6 +450,545 @@ async function verifyArchiveRetentionBehavior(failures) {
   if (detachedFeedback.textContent !== feedbackBeforeDestroy) {
     failures.push('destroyed dialog promise wrote detached feedback');
   }
+}
+
+async function verifyArchiveModuleRetentionBehavior(failures) {
+  const bankModule = 'bank-statement-process';
+  const vccModule = 'vcc-financial-op';
+  const unusedModule = 'bank-bu-recon';
+  const retentionSelect = () => document.querySelector('[data-role="archive-retention-days"]');
+  const moduleSelect = () => document.querySelector('[data-role="archive-retention-module"]');
+  const assertSelection = (moduleId, expected, context) => {
+    changeRetentionModule(moduleId);
+    if (moduleSelect().value !== moduleId || retentionSelect().value !== expected) {
+      failures.push(`${context}: module=${moduleSelect().value}, retention=${retentionSelect().value}, expected=${expected}`);
+    }
+  };
+
+  const loadingSettings = createDeferred();
+  let loadedSettings;
+  let settingsReadCount = 0;
+  installDesktopApiStub({
+    retentionDays: 60,
+    retentionDaysByModule: { [bankModule]: 90, [vccModule]: null },
+    settingsHandler(settings) {
+      settingsReadCount += 1;
+      if (settingsReadCount > 1) return { status: 'success', settings };
+      loadedSettings = settings;
+      return loadingSettings.promise;
+    }
+  });
+  openSettingsDialog();
+  document.querySelector('.app-settings-nav-item[data-tab="archive"]').click();
+  document.querySelector('[data-action="open-archive-settings"]').click();
+  await waitFor(() => loadedSettings !== undefined);
+  if (!moduleSelect().disabled || !retentionSelect().disabled) {
+    failures.push('loading settings did not disable module and retention selections');
+  }
+  loadingSettings.resolve({ status: 'success', settings: loadedSettings });
+  await waitForRetentionSettled();
+
+  assertSelection('', '60', 'default retention did not load');
+  const defaultOptions = [...retentionSelect().options]
+    .filter((option) => !option.hidden && !option.disabled)
+    .map((option) => option.value);
+  if (JSON.stringify(defaultOptions) !== '["30","60","90","180","365","permanent"]') {
+    failures.push(`default retention options drifted: ${JSON.stringify(defaultOptions)}`);
+  }
+  assertSelection(bankModule, '90', 'bank override did not load');
+  assertSelection(vccModule, 'permanent', 'module permanent became inherited');
+  assertSelection(unusedModule, 'inherit', 'module without batches/override cannot inherit');
+  if (window.__retentionSaveCalls.length || window.__moduleRetentionSaveCalls.length) {
+    failures.push('switching retention modules unexpectedly saved settings');
+  }
+  assertSelection(bankModule, '90', 'switching modules lost bank override');
+  changeRetention('180');
+  await waitForRetentionSettled();
+  assertSelection(vccModule, 'permanent', 'partial bank save erased another module override');
+  assertSelection('', '60', 'module save changed default retention');
+  assertSelection(bankModule, '180', 'module save did not retain selected override');
+  changeRetention('permanent');
+  await waitForRetentionSettled();
+  if (window.__moduleRetentionSaveCalls.at(-1)?.retentionDays !== null) {
+    failures.push('module permanent was not sent as null');
+  }
+  assertSelection(bankModule, 'permanent', 'saved module permanent did not render');
+  changeRetention('inherit');
+  await waitForRetentionSettled();
+  if (window.__moduleRetentionSaveCalls.at(-1)?.retentionDays !== 'inherit') {
+    failures.push('module inheritance was not sent as inherit');
+  }
+  assertSelection('', '60', 'inheritance save changed default retention');
+  changeRetention('90');
+  await waitForRetentionSettled();
+  assertSelection(bankModule, 'inherit', 'default save materialized inherited module override');
+  assertSelection(vccModule, 'permanent', 'default save erased explicit permanent override');
+  assertSelection(unusedModule, 'inherit', 'default save changed unconfigured module');
+  changeRetention('365');
+  await waitForRetentionSettled();
+  const expectedModuleCalls = [
+    { moduleId: bankModule, retentionDays: 180 },
+    { moduleId: bankModule, retentionDays: null },
+    { moduleId: bankModule, retentionDays: 'inherit' },
+    { moduleId: unusedModule, retentionDays: 365 }
+  ];
+  if (JSON.stringify(window.__moduleRetentionSaveCalls) !== JSON.stringify(expectedModuleCalls)) {
+    failures.push(`module saves were misrouted: ${JSON.stringify(window.__moduleRetentionSaveCalls)}`);
+  }
+  if (JSON.stringify(window.__retentionSaveCalls) !== '[90]') {
+    failures.push(`default saves were misrouted: ${JSON.stringify(window.__retentionSaveCalls)}`);
+  }
+  document.querySelector('[data-role="close-update-dialog"]').click();
+  await waitFor(() => document.getElementById('modalRoot').childElementCount === 0);
+  openSettingsDialog();
+  await openArchiveSettings();
+  assertSelection('', '90', 'reopened default retention was not persisted');
+  assertSelection(bankModule, 'inherit', 'reopened inheritance was not persisted');
+  assertSelection(vccModule, 'permanent', 'reopened permanent override was not persisted');
+  assertSelection(unusedModule, '365', 'reopened module override was not persisted');
+  assertSelection('', '90', 'switching from reopened module lost default');
+  changeRetention('permanent');
+  await waitForRetentionSettled();
+  if (window.__retentionSaveCalls.at(-1) !== null) failures.push('default permanent was not sent as null');
+  openSettingsDialog();
+  await openArchiveSettings();
+  assertSelection('', 'permanent', 'reopened default permanent was not persisted');
+  assertSelection(bankModule, 'inherit', 'default permanent overwrote module inheritance');
+  assertSelection(unusedModule, '365', 'default permanent overwrote explicit module days');
+
+  const firstSave = createDeferred();
+  let activeSaves = 0;
+  let maxActiveSaves = 0;
+  installDesktopApiStub({
+    retentionDaysByModule: { [bankModule]: 90, [vccModule]: 365 },
+    moduleRetentionHandler(payload) {
+      activeSaves += 1;
+      maxActiveSaves = Math.max(maxActiveSaves, activeSaves);
+      const result = payload.retentionDays === 60
+        ? firstSave.promise
+        : Promise.resolve({ status: 'success', settings: {
+            retentionDaysByModule: { [payload.moduleId]: payload.retentionDays }
+          } });
+      return result.finally(() => { activeSaves -= 1; });
+    }
+  });
+  openSettingsDialog();
+  await openArchiveSettings();
+  assertSelection(bankModule, '90', 'rapid-change module did not initialize');
+  changeRetention('60');
+  await waitFor(() => window.__moduleRetentionSaveCalls.length === 1);
+  changeRetention('30');
+  changeRetention('180');
+  if (!moduleSelect().disabled || retentionSelect().disabled) {
+    failures.push('pending module save must disable module selection and allow latest retention intent');
+  }
+  const pendingReturn = document.querySelector('[data-role="close-update-dialog"]');
+  const pendingClose = document.querySelector('[data-action="close"]');
+  if (!pendingReturn.disabled || !pendingClose.disabled) failures.push('pending module save did not disable Return/X');
+  pendingReturn.click();
+  pendingClose.click();
+  if (document.getElementById('modalRoot').childElementCount !== 1) failures.push('pending module save allowed dialog close');
+  if (window.__moduleRetentionSaveCalls.length !== 1) failures.push('rapid module intents wrote concurrently');
+  firstSave.resolve({ status: 'failed', message: '旧模块请求失败不应成为最终错误' });
+  await waitFor(() => window.__moduleRetentionSaveCalls.length === 2);
+  await waitForRetentionSettled();
+  if (maxActiveSaves !== 1
+      || JSON.stringify(window.__moduleRetentionSaveCalls) !== JSON.stringify([
+        { moduleId: bankModule, retentionDays: 60 },
+        { moduleId: bankModule, retentionDays: 180 }
+      ])) {
+    failures.push(`rapid module saves did not serialize/coalesce latest intent: ${JSON.stringify(window.__moduleRetentionSaveCalls)}`);
+  }
+  if (document.querySelector('[data-role="archive-feedback"]').textContent.includes('旧模块请求失败')) {
+    failures.push('stale module failure rendered final error');
+  }
+  assertSelection(vccModule, '365', 'rapid module save erased unrelated override');
+  assertSelection(bankModule, '180', 'latest module intent did not become persisted display');
+
+  const saveAcrossReopen = createDeferred();
+  const delayedStats = createDeferred();
+  let holdStats = false;
+  let heldStats;
+  let reopenSettingsReads = 0;
+  installDesktopApiStub({
+    retentionDaysByModule: { [bankModule]: 90, [vccModule]: 365 },
+    moduleRetentionHandler: () => saveAcrossReopen.promise,
+    settingsHandler(settings) {
+      reopenSettingsReads += 1;
+      return { status: 'success', settings };
+    },
+    statsHandler(stats) {
+      if (!holdStats) return { status: 'success', stats };
+      heldStats = stats;
+      return delayedStats.promise;
+    }
+  });
+  openSettingsDialog();
+  await openArchiveSettings();
+  assertSelection(bankModule, '90', 'reopen-race module did not initialize');
+  changeRetention('180');
+  await waitFor(() => window.__moduleRetentionSaveCalls.length === 1);
+  holdStats = true;
+  document.querySelector('[data-action="back-to-archive"]').click();
+  document.querySelector('[data-action="open-archive-settings"]').click();
+  await nextFrame();
+  if (reopenSettingsReads !== 1) {
+    failures.push('reopening settings read stale retention while module save was pending');
+  }
+  saveAcrossReopen.resolve({ status: 'success', settings: { retentionDaysByModule: { [bankModule]: 180 } } });
+  await waitFor(() => heldStats !== undefined);
+  delayedStats.resolve({ status: 'success', stats: heldStats });
+  await waitForRetentionSettled();
+  assertSelection(bankModule, '180', 'slow settings reload overwrote newly saved module retention');
+  assertSelection(vccModule, '365', 'slow settings reload erased unrelated module retention');
+  holdStats = false;
+  document.querySelector('[data-role="close-update-dialog"]').click();
+  await waitFor(() => document.getElementById('modalRoot').childElementCount === 0);
+  openSettingsDialog();
+  await openArchiveSettings();
+  assertSelection(bankModule, '180', 'save across settings reopen was not persisted');
+
+  for (const rollback of [
+    { saved: { [bankModule]: 180 }, expected: '180' },
+    { saved: { [bankModule]: null }, expected: 'permanent' },
+    { saved: {}, expected: 'inherit' }
+  ]) {
+    const failedSave = createDeferred();
+    installDesktopApiStub({
+      retentionDaysByModule: { ...rollback.saved, [vccModule]: 30 },
+      moduleRetentionHandler: () => failedSave.promise
+    });
+    openSettingsDialog();
+    await openArchiveSettings();
+    assertSelection(bankModule, rollback.expected, 'rollback module did not initialize');
+    changeRetention('90');
+    await waitFor(() => window.__moduleRetentionSaveCalls.length === 1);
+    failedSave.resolve({ status: 'failed', message: '模块期限保存失败' });
+    await waitForRetentionSettled();
+    if (!document.querySelector('[data-role="archive-feedback"]').textContent.includes('模块期限保存失败')) {
+      failures.push(`module failure feedback missing for ${rollback.expected}`);
+    }
+    if (retentionSelect().value !== rollback.expected) {
+      failures.push(`failed module save did not restore ${rollback.expected}: ${retentionSelect().value}`);
+    }
+    assertSelection(vccModule, '30', 'failed module save changed unrelated override');
+    assertSelection(bankModule, rollback.expected, 'failed module save remained in saved map');
+  }
+}
+
+async function verifyArchiveRetentionDeleteGuard(failures) {
+  const moduleId = 'toolbox';
+  const otherModuleId = 'vcc-financial-op';
+  const modalRoot = document.getElementById('modalRoot');
+  const retentionSelect = () => document.querySelector('[data-role="archive-retention-days"]');
+  const feedback = () => document.querySelector('[data-role="archive-feedback"]');
+  const deleteButton = () => document.querySelector('[data-action="delete-archive-batch"][data-batch-id="102"]');
+  const returnButton = () => document.querySelector('[data-role="close-update-dialog"]');
+  const closeButton = () => document.querySelector('[data-action="close"]');
+  const openDeletableBatch = async () => {
+    document.querySelector('[data-action="back-to-archive"]').click();
+    await waitFor(() => document.querySelector('[data-batch-id="102"].archive-center-batch-item'));
+    document.querySelector('[data-batch-id="102"].archive-center-batch-item').click();
+    await waitFor(() => deleteButton() && !deleteButton().disabled);
+  };
+  const assertDeleteBlocked = async (settingsOverlay, context, expectedFeedback) => {
+    deleteButton().click();
+    await nextFrame();
+    if (!settingsOverlay.isConnected || modalRoot.firstElementChild !== settingsOverlay
+        || document.querySelector('[data-action="confirm"]')) {
+      throw new Error(`${context}: delete confirmation detached the pending settings dialog`);
+    }
+    const message = feedback();
+    if (message.hidden || message.getClientRects().length === 0 || !expectedFeedback.test(message.textContent)) {
+      failures.push(`${context}: pending delete guard feedback is not visible: ${message.textContent}`);
+    }
+    if (window.__archiveDeleteCalls.length !== 0) {
+      failures.push(`${context}: pending settings triggered delete API`);
+    }
+  };
+  const assertDeleteAvailableAndCancel = async (settingsOverlay, context) => {
+    deleteButton().click();
+    await waitFor(() => document.querySelector('[data-action="confirm"]'));
+    if (settingsOverlay.isConnected) failures.push(`${context}: normal delete confirmation did not replace settings`);
+    document.querySelector('[data-action="cancel"]').click();
+    await waitFor(() => settingsOverlay.isConnected && modalRoot.firstElementChild === settingsOverlay);
+    await nextFrame();
+    if (returnButton().disabled || closeButton().disabled) {
+      failures.push(`${context}: cancelling delete left Return/X disabled`);
+    }
+    if (window.__archiveDeleteCalls.length !== 0) failures.push(`${context}: cancelling delete called delete API`);
+  };
+
+  const loadingSettings = createDeferred();
+  let initialSettings;
+  installDesktopApiStub({
+    settingsHandler(settings) {
+      initialSettings = settings;
+      return loadingSettings.promise;
+    }
+  });
+  openSettingsDialog();
+  const loadingOverlay = modalRoot.firstElementChild;
+  document.querySelector('.app-settings-nav-item[data-tab="archive"]').click();
+  document.querySelector('[data-action="open-archive-settings"]').click();
+  await waitFor(() => initialSettings !== undefined);
+  await openDeletableBatch();
+  // 返回列表会取消本次设置加载，尚未返回的旧请求不应继续阻塞删除。
+  await assertDeleteAvailableAndCancel(loadingOverlay, 'cancelled settings load');
+  loadingSettings.resolve({ status: 'success', settings: initialSettings });
+  await nextFrame();
+  await waitForRetentionSettled();
+  await assertDeleteAvailableAndCancel(loadingOverlay, 'stale settings load completed');
+
+  for (const targetModule of ['', moduleId]) {
+    for (const failFinalSave of [false, true]) {
+      const context = `${targetModule || 'default'} ${failFinalSave ? 'failed' : 'saved'} final permanent`;
+      const firstSave = createDeferred();
+      const makeResult = (value) => targetModule
+        ? { status: 'success', settings: { retentionDaysByModule: { [targetModule]: value } } }
+        : { status: 'success', settings: { retentionDays: value } };
+      const handleSave = (value) => {
+        if (value === 30) return firstSave.promise;
+        return failFinalSave
+          ? { status: 'failed', message: '最终永久期限保存失败' }
+          : makeResult(value);
+      };
+      installDesktopApiStub({
+        retentionDays: 60,
+        retentionDaysByModule: { [moduleId]: 90, [otherModuleId]: 365 },
+        retentionHandler: handleSave,
+        moduleRetentionHandler: (payload) => handleSave(payload.retentionDays)
+      });
+      openSettingsDialog();
+      const settingsOverlay = modalRoot.firstElementChild;
+      await openArchiveSettings();
+      changeRetentionModule(targetModule);
+      changeRetention('30');
+      const saveCalls = () => targetModule ? window.__moduleRetentionSaveCalls : window.__retentionSaveCalls;
+      await waitFor(() => saveCalls().length === 1);
+      changeRetention('permanent');
+      await openDeletableBatch();
+      await assertDeleteBlocked(settingsOverlay, context, /保存/);
+      if (!returnButton().disabled || !closeButton().disabled || retentionSelect().value !== 'permanent') {
+        failures.push(`${context}: blocked delete lost final intent or released Return/X prematurely`);
+      }
+      if (saveCalls().length !== 1) failures.push(`${context}: final intent saved before first request completed`);
+      firstSave.resolve(makeResult(30));
+      await waitForRetentionSettled();
+      const expectedCalls = targetModule
+        ? [{ moduleId: targetModule, retentionDays: 30 }, { moduleId: targetModule, retentionDays: null }]
+        : [30, null];
+      if (JSON.stringify(saveCalls()) !== JSON.stringify(expectedCalls)) {
+        failures.push(`${context}: final intent was lost or misrouted: ${JSON.stringify(saveCalls())}`);
+      }
+      if ((targetModule ? window.__retentionSaveCalls : window.__moduleRetentionSaveCalls).length !== 0) {
+        failures.push(`${context}: retention save crossed API boundaries`);
+      }
+      if (failFinalSave && !feedback().textContent.includes('最终永久期限保存失败')) {
+        failures.push(`${context}: final save failure feedback is missing`);
+      }
+      const expectedValue = failFinalSave ? 30 : null;
+      const saved = (await window.desktopApi.archiveCenter.getSettings()).settings;
+      if ((targetModule ? saved.retentionDaysByModule[targetModule] : saved.retentionDays) !== expectedValue
+          || saved.retentionDaysByModule[otherModuleId] !== 365
+          || (targetModule ? saved.retentionDays !== 60 : saved.retentionDaysByModule[moduleId] !== 90)) {
+        failures.push(`${context}: persisted retention or module isolation is wrong: ${JSON.stringify(saved)}`);
+      }
+      if (retentionSelect().value !== (failFinalSave ? '30' : 'permanent')
+          || returnButton().disabled || closeButton().disabled) {
+        failures.push(`${context}: final value or Return/X did not settle`);
+      }
+      await assertDeleteAvailableAndCancel(settingsOverlay, context);
+      await openArchiveSettings();
+      if (retentionSelect().value !== (failFinalSave ? '30' : 'permanent')) {
+        failures.push(`${context}: reopening settings lost persisted final value`);
+      }
+      changeRetentionModule(otherModuleId);
+      if (retentionSelect().value !== '365') failures.push(`${context}: unrelated module display changed`);
+      returnButton().click();
+      await waitFor(() => modalRoot.childElementCount === 0);
+      openSettingsDialog();
+      await openArchiveSettings();
+      changeRetentionModule(targetModule);
+      if (retentionSelect().value !== (failFinalSave ? '30' : 'permanent')) {
+        failures.push(`${context}: reopened dialog did not use persisted final value`);
+      }
+      closeButton().click();
+      await waitFor(() => modalRoot.childElementCount === 0);
+    }
+  }
+  openSettingsDialog();
+  await openArchiveSettings();
+}
+
+async function verifyThemeRetentionBehavior(failures) {
+  const moduleId = 'toolbox';
+  const otherModule = 'vcc-financial-op';
+  const modalRoot = document.getElementById('modalRoot');
+  const retentionSelect = () => document.querySelector('[data-role="archive-retention-days"]');
+  const moduleSelect = () => document.querySelector('[data-role="archive-retention-module"]');
+  const closeButton = () => document.querySelector('[data-action="close"]');
+  const returnButton = () => document.querySelector('[data-role="close-update-dialog"]');
+  let assertions = 0;
+  let scenarios = 0;
+  const check = (condition, message) => {
+    assertions += 1;
+    if (!condition) failures.push(`theme/retention: ${message}`);
+  };
+  const sameDialog = (overlay, appearance, label) => {
+    check(overlay.isConnected && modalRoot.firstElementChild === overlay, `${label}: 原弹窗被卸载`);
+    check(document.querySelector('[data-pane="appearance"]') === appearance, `${label}: 外观 pane 被重建`);
+  };
+  const closeBlocked = async (overlay, label) => {
+    returnButton().click();
+    closeButton().click();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await nextFrame();
+    check(overlay.isConnected && modalRoot.firstElementChild === overlay, `${label}: pending 保存允许关闭`);
+  };
+
+  for (const failFinalSave of [false, true]) {
+    const firstSave = createDeferred();
+    let settingsReads = 0;
+    let activeSaves = 0;
+    let maxActiveSaves = 0;
+    installDesktopApiStub({
+      retentionDaysByModule: { [moduleId]: 90, [otherModule]: 365 },
+      settingsHandler(settings) { settingsReads += 1; return { status: 'success', settings }; },
+      async moduleRetentionHandler(payload) {
+        activeSaves += 1;
+        maxActiveSaves = Math.max(maxActiveSaves, activeSaves);
+        try {
+          if (payload.retentionDays === 30) return await firstSave.promise;
+          return failFinalSave
+            ? { status: 'failed', message: '切换主题后永久保存失败' }
+            : { status: 'success', settings: { retentionDaysByModule: { [moduleId]: null } } };
+        } finally { activeSaves -= 1; }
+      }
+    });
+    openSettingsDialog();
+    const overlay = modalRoot.firstElementChild;
+    const appearance = document.querySelector('[data-pane="appearance"]');
+    const controller = getDarkModeController();
+    await openArchiveSettings();
+    changeRetentionModule(moduleId);
+    changeRetention('30');
+    await waitFor(() => window.__moduleRetentionSaveCalls.length === 1);
+    changeRetention('permanent');
+    document.querySelector('[data-tab="appearance"]').click();
+    check(!appearance.hidden, '模块保存 pending 时可以进入外观');
+    window.__publishSettingsTheme({ enabled: true, startTime: '18:30', endTime: '06:00' });
+    await nextFrame();
+    sameDialog(overlay, appearance, '模块 pending 收到深色事件');
+    check(getDarkModeController() === controller && document.documentElement.dataset.theme === 'dark', '事件未经原主题 controller 生效');
+    check(retentionSelect().value === 'permanent' && moduleSelect().value === moduleId, '主题事件丢失最终模块期限 intent');
+    await closeBlocked(overlay, '模块保存跨 appearance');
+    document.querySelector('[data-tab="archive"]').click();
+    await waitFor(() => document.querySelector('[data-batch-id="102"].archive-center-batch-item'));
+    document.querySelector('[data-batch-id="102"].archive-center-batch-item').click();
+    await waitFor(() => document.querySelector('[data-action="delete-archive-batch"][data-batch-id="102"]'));
+    document.querySelector('[data-action="delete-archive-batch"][data-batch-id="102"]').click();
+    await nextFrame();
+    sameDialog(overlay, appearance, '模块 pending 删除闸门');
+    check(!document.querySelector('[data-action="confirm"]') && window.__archiveDeleteCalls.length === 0, '主题切换后删除闸门失效');
+    check(/保存/.test(document.querySelector('[data-role="archive-feedback"]').textContent), '删除闸门缺少 pending 反馈');
+    document.querySelector('[data-action="open-archive-settings"]').click();
+    await nextFrame();
+    check(settingsReads === 1 && window.__moduleRetentionSaveCalls.length === 1, 'reopen 未等待原保存队列');
+    check(moduleSelect().value === moduleId && retentionSelect().value === 'permanent', 'reopen 等待时改变模块或最终 intent');
+    firstSave.resolve({ status: 'success', settings: { retentionDaysByModule: { [moduleId]: 30 } } });
+    await waitFor(() => settingsReads === 2);
+    await waitForRetentionSettled();
+    const expected = failFinalSave ? 30 : null;
+    check(JSON.stringify(window.__moduleRetentionSaveCalls) === JSON.stringify([
+      { moduleId, retentionDays: 30 }, { moduleId, retentionDays: null }
+    ]) && maxActiveSaves === 1, '模块期限未按原身份串行保存 30→永久');
+    check(retentionSelect().value === (failFinalSave ? '30' : 'permanent') && moduleSelect().value === moduleId,
+      '跨主题保存成功或失败回滚显示错误');
+    const stored = (await window.desktopApi.archiveCenter.getSettings()).settings;
+    check(stored.retentionDaysByModule[moduleId] === expected && stored.retentionDaysByModule[otherModule] === 365
+      && stored.retentionDays === 60 && window.__retentionSaveCalls.length === 0, '跨主题保存修改了其他模块或默认期限');
+    check(window.__themeSaveCalls.length === 0 && controller.getSnapshot().effectiveTheme === 'dark', '外部主题事件产生多余保存或回退');
+    sameDialog(overlay, appearance, '模块队列结算');
+    document.querySelector('[data-action="back-to-archive"]').click();
+    await waitFor(() => document.querySelector('[data-action="delete-archive-batch"][data-batch-id="102"]'));
+    document.querySelector('[data-action="delete-archive-batch"][data-batch-id="102"]').click();
+    await waitFor(() => document.querySelector('[data-action="confirm"]'));
+    check(!overlay.isConnected, '模块结算后删除确认仍被误阻止');
+    document.querySelector('[data-action="cancel"]').click();
+    await waitFor(() => overlay.isConnected);
+    check(window.__archiveDeleteCalls.length === 0, '取消删除意外调用删除 API');
+    returnButton().click();
+    await waitFor(() => modalRoot.childElementCount === 0);
+    openSettingsDialog();
+    await openArchiveSettings();
+    changeRetentionModule(moduleId);
+    check(retentionSelect().value === (failFinalSave ? '30' : 'permanent'), '重开整个弹窗没有回读最终持久期限');
+    scenarios += 1;
+  }
+
+  for (const failThemeSave of [false, true]) {
+    const themeSave = createDeferred();
+    const retentionSave = createDeferred();
+    installDesktopApiStub({
+      retentionDaysByModule: { [moduleId]: 90, [otherModule]: 365 },
+      themeHandler: () => themeSave.promise,
+      moduleRetentionHandler: () => retentionSave.promise
+    });
+    openSettingsDialog();
+    const overlay = modalRoot.firstElementChild;
+    const appearance = document.querySelector('[data-pane="appearance"]');
+    const enabled = document.querySelector('[data-role="dark-mode-enabled"]');
+    const controller = getDarkModeController();
+    document.querySelector('[data-tab="appearance"]').click();
+    enabled.checked = true;
+    enabled.dispatchEvent(new Event('change', { bubbles: true }));
+    await waitFor(() => window.__themeSaveCalls.length === 1);
+    check(controller.getSnapshot().saving && !appearance.querySelector('fieldset').disabled, '主题真实保存 pending 未保持外观字段可编辑');
+    await openArchiveSettings();
+    changeRetentionModule(moduleId);
+    check(retentionSelect().value === '90', '主题保存 pending 影响存档设置读取');
+    changeRetention('30');
+    await waitFor(() => window.__moduleRetentionSaveCalls.length === 1);
+    document.querySelector('[data-tab="appearance"]').click();
+    sameDialog(overlay, appearance, '主题和期限同时保存');
+    check(document.querySelector('[data-role="dark-mode-enabled"]') === enabled && enabled.checked,
+      '返回外观重建字段或丢失主题 intent');
+    await closeBlocked(overlay, '两个保存同时 pending');
+    if (failThemeSave) {
+      retentionSave.resolve({ status: 'success', settings: { retentionDaysByModule: { [moduleId]: 30 } } });
+      await waitFor(() => !moduleSelect().disabled);
+      check(controller.getSnapshot().saving, '期限保存完成误清除主题 saving');
+      await closeBlocked(overlay, '期限已完成但主题仍 pending');
+      themeSave.resolve({ status: 'failed', message: '主题写入失败仍保留期限结果' });
+    } else {
+      themeSave.resolve({ status: 'ok' });
+      await waitFor(() => !controller.getSnapshot().saving);
+      check(moduleSelect().disabled && returnButton().disabled && closeButton().disabled,
+        '主题保存完成误解除期限保存关闭保护');
+      await closeBlocked(overlay, '主题已完成但期限仍 pending');
+      retentionSave.resolve({ status: 'success', settings: { retentionDaysByModule: { [moduleId]: 30 } } });
+    }
+    await waitFor(() => !controller.getSnapshot().saving && !moduleSelect().disabled);
+    await nextFrame();
+    check(enabled.checked === !failThemeSave && document.documentElement.dataset.theme === (failThemeSave ? 'light' : 'dark'),
+      '主题保存成功或失败回滚状态错误');
+    if (failThemeSave) check(document.querySelector('[data-role="dark-mode-feedback"]').textContent.includes('主题写入失败'),
+      '主题失败缺少反馈');
+    await openArchiveSettings();
+    check(moduleSelect().value === moduleId && retentionSelect().value === '30', '主题结算覆盖已经保存的模块期限');
+    const stored = (await window.desktopApi.archiveCenter.getSettings()).settings;
+    check(stored.retentionDays === 60 && stored.retentionDaysByModule[moduleId] === 30
+      && stored.retentionDaysByModule[otherModule] === 365, '主题与期限保存相互污染');
+    check(window.__themeSaveCalls.length === 1 && window.__moduleRetentionSaveCalls.length === 1
+      && window.__retentionSaveCalls.length === 0, '跨 pane 操作重复或错误路由保存');
+    sameDialog(overlay, appearance, '主题和期限全部结算');
+    closeButton().click();
+    await waitFor(() => modalRoot.childElementCount === 0);
+    check(!overlay.isConnected, '两个保存结算后关闭仍被阻止');
+    scenarios += 1;
+  }
+  return { scenarios, assertions };
 }
 
 async function verifyArchiveBrowserLayout(failures) {
@@ -490,6 +1157,34 @@ async function verifyArchiveBrowserLayout(failures) {
     failures.push('storage location heading/button/path are not arranged in two rows');
   }
   const settingsView = document.querySelector('[data-archive-view="settings"]');
+  const retentionControls = settingsView.querySelectorAll(
+    '[data-role="archive-retention-module"], [data-role="archive-retention-days"]'
+  );
+  if (retentionControls.length !== 2) failures.push(`retention controls missing: ${retentionControls.length}`);
+  const settingsRectBounds = settingsView.getBoundingClientRect();
+  const paneBounds = document.querySelector('[data-pane="archive"]').getBoundingClientRect();
+  for (const control of retentionControls) {
+    const rect = control.getBoundingClientRect();
+    const style = getComputedStyle(control);
+    const expectedWidth = control.dataset.role === 'archive-retention-module' ? 224 : 132;
+    if (Math.abs(rect.width - expectedWidth) > 1) {
+      failures.push(`retention control width drifted: ${control.dataset.role} ${rect.width}px`);
+    }
+    if (rect.width <= 0 || rect.height <= 0 || style.visibility !== 'visible' || style.display === 'none'
+        || rect.left < settingsRectBounds.left - 1 || rect.right > settingsRectBounds.right + 1
+        || rect.top < paneBounds.top - 1 || rect.bottom > paneBounds.bottom + 1) {
+      failures.push(`retention control is clipped or hidden: ${control.dataset.role}`);
+    }
+  }
+  if (settingsView.scrollWidth > settingsView.clientWidth + 1) failures.push('retention settings horizontal overflow');
+  if (settingsView.querySelector('h4')?.textContent.trim() !== '输入/输出文件保留期限') {
+    failures.push('retention settings heading is incorrect');
+  }
+  if (settingsView.querySelector('[data-role="archive-retention-note"]')
+      || settingsView.querySelector('[aria-describedby="archiveRetentionNote"]')
+      || settingsView.textContent.includes('修改后自动保存，仅影响之后新建的存档批次；历史批次保留原到期日。')) {
+    failures.push('removed retention notes or accessibility references are still rendered');
+  }
   if (document.querySelector('[data-role="archive-settings-file-total-size"]')
       || settingsView.textContent.includes('存储统计')
       || settingsView.textContent.includes('文件总大小')) {
@@ -511,8 +1206,29 @@ async function verifyArchiveBrowserLayout(failures) {
   }
 }
 
-async function measurePage(expectedScaleFactor, runBehavior) {
+async function measurePage(expectedScaleFactor, runBehavior, prepareScreenshot) {
   const failures = [];
+  const phases = [];
+  const recordPhase = (name) => {
+    const entry = { name, at: performance.now(), visibility: document.visibilityState };
+    phases.push(entry);
+    console.log(`APP_SETTINGS_PHASE=${JSON.stringify(entry)}`);
+  };
+  recordPhase('page-ready');
+  let themeRetentionBehavior = null;
+  const requiredStyles = ['fonts.css', 'styles-gemini.css', 'styles-gemini-extra.css',
+    'styles-vcc-financial-op.css', 'styles-biz-op-v327.css', 'styles-dark-mode.css', 'styles-dark-mode-settings.css'];
+  const loadedStyles = [...document.querySelectorAll('link[rel="stylesheet"]')]
+    .filter((link) => link.sheet && !link.disabled).map((link) => new URL(link.href).pathname.split('/').pop());
+  for (const style of requiredStyles) {
+    if (!loadedStyles.includes(style)) failures.push(`真实 index 样式未加载: ${style}`);
+  }
+  const loadedScripts = [...document.scripts].map((script) => new URL(script.src || location.href).pathname);
+  for (const script of ['/src/shared/dark-mode-schedule.js', '/src/renderer-dark-mode.js', '/src/renderer.js']) {
+    if (!loadedScripts.some((loaded) => loaded.endsWith(script))) failures.push(`真实 index 脚本未加载: ${script}`);
+  }
+  if (typeof window.DarkModeSchedule?.resolveEffectiveTheme !== 'function'
+      || typeof window.DarkModeUI?.createController !== 'function') failures.push('真实主题控制器或共享时间逻辑缺失');
   document.body.dataset.platform = 'win32';
   installDesktopApiStub();
   openSettingsDialog();
@@ -546,16 +1262,33 @@ async function measurePage(expectedScaleFactor, runBehavior) {
     '管理软件版本检查、下载与安装。',
     '开启后每次启动仅在后台检查一次，不会定时检查。',
     '按日期、模块和批次号查看已参与处理的输入文件与结果表。',
-    '锁定批次不参与自动清理。默认保留期为 90 天。',
-    '默认保留'
+    '锁定批次不参与自动清理。默认保留期为 90 天。'
   ];
   for (const text of removedTexts) {
     if (document.body.textContent.includes(text)) failures.push(`removed text remains: ${text}`);
   }
 
   await verifyArchiveBrowserLayout(failures);
+  const archiveDialog = document.getElementById('modalRoot').firstElementChild;
+  const retentionBeforeTheme = document.querySelector('[data-role="archive-retention-days"]');
+  window.__publishSettingsTheme({ enabled: true, startTime: '18:30', endTime: '06:00' });
+  await nextFrame();
+  if (document.documentElement.dataset.theme !== 'dark' || !archiveDialog.isConnected
+      || document.querySelector('[data-role="archive-retention-days"]') !== retentionBeforeTheme) {
+    failures.push('主题事件未生效或替换了原存档设置 DOM');
+  }
+  const paneBounds = document.querySelector('[data-pane="archive"]').getBoundingClientRect();
+  for (const control of document.querySelectorAll('[data-role="archive-retention-module"], [data-role="archive-retention-days"]')) {
+    const rect = control.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0 || rect.left < paneBounds.left - 1 || rect.right > paneBounds.right + 1
+        || rect.top < paneBounds.top - 1 || rect.bottom > paneBounds.bottom + 1) {
+      failures.push(`深色模块期限控件被裁切: ${control.dataset.role}`);
+    }
+  }
+  if (document.documentElement.scrollWidth > document.documentElement.clientWidth + 1) failures.push('深色存档设置水平溢出');
 
   if (runBehavior) {
+    recordPhase('retention-behavior');
     applyAppUpdateStatus({
       enabled: true,
       supported: true,
@@ -573,15 +1306,38 @@ async function measurePage(expectedScaleFactor, runBehavior) {
       failures.push(`downloaded update button text ${confirmButton.textContent}`);
     }
     await verifyArchiveRetentionBehavior(failures);
+    recordPhase('module-retention-behavior');
+    await verifyArchiveModuleRetentionBehavior(failures);
+    recordPhase('retention-delete-guard');
+    await verifyArchiveRetentionDeleteGuard(failures);
+    recordPhase('theme-retention-behavior');
+    themeRetentionBehavior = await verifyThemeRetentionBehavior(failures);
+    recordPhase('behavior-complete');
+  }
+
+  if (prepareScreenshot) {
+    installDesktopApiStub({ retentionDaysByModule: { 'vcc-financial-op': null } });
+    openSettingsDialog();
+    await openArchiveSettings();
+    changeRetentionModule('vcc-financial-op');
+    window.__publishSettingsTheme({ enabled: true, startTime: '18:30', endTime: '06:00' });
+    await nextFrame();
   }
 
   return {
     ok: failures.length === 0,
     failures,
+    phases,
+    frameWaits: window.__appSettingsFrameWaits || [],
+    loadedStyles,
+    themeRetentionBehavior,
     metrics: {
       rightEdgeDelta,
       toggleFontSize,
-      devicePixelRatio: window.devicePixelRatio
+      devicePixelRatio: window.devicePixelRatio,
+      retentionControlCount: document.querySelectorAll(
+        '[data-role="archive-retention-module"], [data-role="archive-retention-days"]'
+      ).length
     }
   };
 }
@@ -592,6 +1348,7 @@ async function runElectronChild() {
   const height = Number(process.env.APP_SETTINGS_LAYOUT_HEIGHT);
   const scaleFactor = Number(process.env.APP_SETTINGS_LAYOUT_SCALE);
   const runBehavior = process.env.APP_SETTINGS_LAYOUT_RUN_BEHAVIOR === '1';
+  const screenshotPath = runBehavior ? process.env.APP_SETTINGS_LAYOUT_SCREENSHOT : '';
 
   app.commandLine.appendSwitch('force-device-scale-factor', String(scaleFactor));
   app.disableHardwareAcceleration();
@@ -609,8 +1366,13 @@ async function runElectronChild() {
     show: false,
     webPreferences: {
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      // 隔离隐藏窗口仍需执行真实 rAF 交互；不让后台限频占用30秒父进程时限。
+      backgroundThrottling: false
     }
+  });
+  window.webContents.on('console-message', (_event, _level, message) => {
+    if (String(message).startsWith('APP_SETTINGS_PHASE=')) console.log(message);
   });
 
   try {
@@ -624,6 +1386,12 @@ async function runElectronChild() {
       screenWidth: width,
       screenHeight: height
     });
+    // Windows 隐藏原生窗口仍可能仅约 1 Hz 发送合成帧；保留真实 rAF，显示测试窗但不抢焦点。
+    const windowBeforePresentation = { visible: window.isVisible(), minimized: window.isMinimized() };
+    window.showInactive();
+    const windowPresented = { visible: window.isVisible(), minimized: window.isMinimized() };
+    console.log(`APP_SETTINGS_WINDOW_STATE=${JSON.stringify({ before: windowBeforePresentation, presented: windowPresented })}`);
+    if (!windowPresented.visible || windowPresented.minimized) throw new Error('交互验证窗口未实际显示或已最小化');
     const result = await window.webContents.executeJavaScript(`
       (async () => {
         ${nextFrame.toString()}
@@ -633,11 +1401,25 @@ async function runElectronChild() {
         ${openSettingsDialog.toString()}
         ${openArchiveSettings.toString()}
         ${changeRetention.toString()}
+        ${changeRetentionModule.toString()}
+        ${waitForRetentionSettled.toString()}
         ${verifyArchiveRetentionBehavior.toString()}
+        ${verifyArchiveModuleRetentionBehavior.toString()}
+        ${verifyArchiveRetentionDeleteGuard.toString()}
+        ${verifyThemeRetentionBehavior.toString()}
         ${verifyArchiveBrowserLayout.toString()}
-        return (${measurePage.toString()})(${JSON.stringify(scaleFactor)}, ${JSON.stringify(runBehavior)});
+        return (${measurePage.toString()})(${JSON.stringify(scaleFactor)}, ${JSON.stringify(runBehavior)}, ${JSON.stringify(Boolean(screenshotPath))});
       })()
     `);
+    result.presentation = { mode: 'shown-inactive', before: windowBeforePresentation,
+      during: windowPresented, after: { visible: window.isVisible(), minimized: window.isMinimized() } };
+    if (!result.presentation.after.visible || result.presentation.after.minimized) throw new Error('交互验证结束时窗口隐藏或最小化');
+    if (screenshotPath && result.ok) {
+      const screenshot = await window.webContents.capturePage();
+      fs.mkdirSync(path.dirname(screenshotPath), { recursive: true });
+      fs.writeFileSync(screenshotPath, screenshot.toPNG());
+      result.screenshotPath = screenshotPath;
+    }
     console.log(`${RESULT_PREFIX}${JSON.stringify(result)}`);
   } finally {
     if (window.webContents.debugger.isAttached()) window.webContents.debugger.detach();

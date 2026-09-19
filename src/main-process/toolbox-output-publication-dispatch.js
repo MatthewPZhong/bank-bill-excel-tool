@@ -229,6 +229,7 @@ function createToolboxPublicationDispatcher(options = {}) {
         {
           userDataDir: optionsForRecovery.userDataDir,
           deferCommittedRecovery: optionsForRecovery.deferCommittedRecovery === true,
+          deferCommittedFinalization: optionsForRecovery.deferCommittedFinalization === true,
           acknowledgedCommittedTaskIds: optionsForRecovery.acknowledgedCommittedTaskIds
         },
         optionsForRecovery.onProgress

@@ -1,0 +1,275 @@
+{
+  "generatedAt": "2026-09-18T17:49:44.679Z",
+  "scope": "真实 index/Renderer/CSS 和主题 controller；设置 API 为内存夹具；隔离 Electron userData",
+  "passed": true,
+  "files": [
+    {
+      "file": "scripts/verify-app-settings-layout.js",
+      "sha256": "135858a4c67fa9091b70b739e70bcd57921509e60611afc034be8c0751f0003e"
+    },
+    {
+      "file": "index.html",
+      "sha256": "839e49f6d6e9db68d61016575e8a161fb27129dda9a1126b4d781aa6c9828f16"
+    },
+    {
+      "file": "src/renderer.js",
+      "sha256": "1d921813215c1dbaa436dbe37c18543d16409d549c6b88a5175f279028425ef0"
+    },
+    {
+      "file": "src/renderer-dark-mode.js",
+      "sha256": "6cf39d711fb8620985d52dbf287ed2e65f9b3b920bd0a62c57b2a660e881e764"
+    },
+    {
+      "file": "src/shared/dark-mode-schedule.js",
+      "sha256": "3c06d66e5d3f8946cabe7b48fac620bf276cddd6dba4cdcc1952cf37527a25d5"
+    },
+    {
+      "file": "src/styles-gemini.css",
+      "sha256": "5ec94ce0d82d61cca953c44ea3dd782179de6c6f3de858907a064520e88789bf"
+    },
+    {
+      "file": "src/styles-gemini-extra.css",
+      "sha256": "62fe0ab83339b0d548e5a51921082621108eec6d38c49c35c2e3242f15106253"
+    },
+    {
+      "file": "src/styles-dark-mode.css",
+      "sha256": "b45a9dead620b079da2b0024ef7f4a61b3a03f9a645477237b2335c2c02bee1b"
+    },
+    {
+      "file": "src/styles-dark-mode-settings.css",
+      "sha256": "e054147fb2508319998a8fda2e9832b759f01c62576287543a38659d7b5d1c92"
+    },
+    {
+      "file": "src/styles-biz-op-v327.css",
+      "sha256": "ff53411ad76cc44d1183751732ad54f5b58833891fb984f015de80b6e76ac127"
+    },
+    {
+      "file": "src/styles-vcc-financial-op.css",
+      "sha256": "135cb80599ac1c9514b9ec396722def18fae3eee9cca30f22f6b8273b3fb8d5d"
+    }
+  ],
+  "results": [
+    {
+      "viewport": {
+        "width": 1240,
+        "height": 860
+      },
+      "scaleFactor": 1,
+      "ok": true,
+      "failures": [],
+      "phases": [
+        {
+          "name": "page-ready",
+          "at": 82.80000019073486,
+          "visibility": "visible"
+        },
+        {
+          "name": "retention-behavior",
+          "at": 296.7000002861023,
+          "visibility": "visible"
+        },
+        {
+          "name": "module-retention-behavior",
+          "at": 360.40000009536743,
+          "visibility": "visible"
+        },
+        {
+          "name": "retention-delete-guard",
+          "at": 728.5999999046326,
+          "visibility": "visible"
+        },
+        {
+          "name": "theme-retention-behavior",
+          "at": 1839.5999999046326,
+          "visibility": "visible"
+        },
+        {
+          "name": "behavior-complete",
+          "at": 2926,
+          "visibility": "visible"
+        }
+      ],
+      "loadedStyles": [
+        "fonts.css",
+        "styles-gemini.css",
+        "styles-gemini-extra.css",
+        "styles-vcc-financial-op.css",
+        "styles-biz-op-v327.css",
+        "styles-dark-mode.css",
+        "styles-dark-mode-settings.css"
+      ],
+      "themeRetentionBehavior": {
+        "scenarios": 4,
+        "assertions": 73
+      },
+      "metrics": {
+        "rightEdgeDelta": 0,
+        "toggleFontSize": "14px",
+        "devicePixelRatio": 1,
+        "retentionControlCount": 2
+      },
+      "screenshotPath": "/private/tmp/v329-release-20260919-3_bafjvz/settings-background-fixed/archive-settings-dark.png"
+    },
+    {
+      "viewport": {
+        "width": 1240,
+        "height": 860
+      },
+      "scaleFactor": 1.25,
+      "ok": true,
+      "failures": [],
+      "phases": [
+        {
+          "name": "page-ready",
+          "at": 75.69999980926514,
+          "visibility": "visible"
+        }
+      ],
+      "loadedStyles": [
+        "fonts.css",
+        "styles-gemini.css",
+        "styles-gemini-extra.css",
+        "styles-vcc-financial-op.css",
+        "styles-biz-op-v327.css",
+        "styles-dark-mode.css",
+        "styles-dark-mode-settings.css"
+      ],
+      "themeRetentionBehavior": null,
+      "metrics": {
+        "rightEdgeDelta": 0,
+        "toggleFontSize": "14px",
+        "devicePixelRatio": 1.25,
+        "retentionControlCount": 2
+      }
+    },
+    {
+      "viewport": {
+        "width": 1240,
+        "height": 860
+      },
+      "scaleFactor": 1.5,
+      "ok": true,
+      "failures": [],
+      "phases": [
+        {
+          "name": "page-ready",
+          "at": 74.40000009536743,
+          "visibility": "visible"
+        }
+      ],
+      "loadedStyles": [
+        "fonts.css",
+        "styles-gemini.css",
+        "styles-gemini-extra.css",
+        "styles-vcc-financial-op.css",
+        "styles-biz-op-v327.css",
+        "styles-dark-mode.css",
+        "styles-dark-mode-settings.css"
+      ],
+      "themeRetentionBehavior": null,
+      "metrics": {
+        "rightEdgeDelta": 0,
+        "toggleFontSize": "14px",
+        "devicePixelRatio": 1.5,
+        "retentionControlCount": 2
+      }
+    },
+    {
+      "viewport": {
+        "width": 1080,
+        "height": 760
+      },
+      "scaleFactor": 1,
+      "ok": true,
+      "failures": [],
+      "phases": [
+        {
+          "name": "page-ready",
+          "at": 74.2000002861023,
+          "visibility": "visible"
+        }
+      ],
+      "loadedStyles": [
+        "fonts.css",
+        "styles-gemini.css",
+        "styles-gemini-extra.css",
+        "styles-vcc-financial-op.css",
+        "styles-biz-op-v327.css",
+        "styles-dark-mode.css",
+        "styles-dark-mode-settings.css"
+      ],
+      "themeRetentionBehavior": null,
+      "metrics": {
+        "rightEdgeDelta": 0,
+        "toggleFontSize": "14px",
+        "devicePixelRatio": 1,
+        "retentionControlCount": 2
+      }
+    },
+    {
+      "viewport": {
+        "width": 1080,
+        "height": 760
+      },
+      "scaleFactor": 1.25,
+      "ok": true,
+      "failures": [],
+      "phases": [
+        {
+          "name": "page-ready",
+          "at": 75,
+          "visibility": "visible"
+        }
+      ],
+      "loadedStyles": [
+        "fonts.css",
+        "styles-gemini.css",
+        "styles-gemini-extra.css",
+        "styles-vcc-financial-op.css",
+        "styles-biz-op-v327.css",
+        "styles-dark-mode.css",
+        "styles-dark-mode-settings.css"
+      ],
+      "themeRetentionBehavior": null,
+      "metrics": {
+        "rightEdgeDelta": 0,
+        "toggleFontSize": "14px",
+        "devicePixelRatio": 1.25,
+        "retentionControlCount": 2
+      }
+    },
+    {
+      "viewport": {
+        "width": 1080,
+        "height": 760
+      },
+      "scaleFactor": 1.5,
+      "ok": true,
+      "failures": [],
+      "phases": [
+        {
+          "name": "page-ready",
+          "at": 75.40000009536743,
+          "visibility": "visible"
+        }
+      ],
+      "loadedStyles": [
+        "fonts.css",
+        "styles-gemini.css",
+        "styles-gemini-extra.css",
+        "styles-vcc-financial-op.css",
+        "styles-biz-op-v327.css",
+        "styles-dark-mode.css",
+        "styles-dark-mode-settings.css"
+      ],
+      "themeRetentionBehavior": null,
+      "metrics": {
+        "rightEdgeDelta": 0,
+        "toggleFontSize": "14px",
+        "devicePixelRatio": 1.5,
+        "retentionControlCount": 2
+      }
+    }
+  ],
+  "failures": []
+}

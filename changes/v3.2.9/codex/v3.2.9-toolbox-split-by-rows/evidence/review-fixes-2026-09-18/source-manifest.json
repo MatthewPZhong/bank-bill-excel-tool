@@ -1,0 +1,14 @@
+{
+  "branch": "codex/v3.2.9-toolbox-split-by-rows",
+  "files": {
+    "src/main.js": "9d5cdf9f89e8edf95db16c8cccc4b17b5ce064acc2135aefc4adda3b86aaa601",
+    "src/renderer-dialogs.js": "d13798c8ad40e13d61e76a18ad93b0e81db42c514675132e2acdcd3c9ff7f986",
+    "src/styles-gemini-extra.css": "66add68aaa48c9f251b533dfc2f2a5c15f82aa6650e9579526b3affcddf89cc0",
+    "src/main-process/toolbox-row-split/service.js": "9ce95f2930385f281b375ee821fb4b5cc8fb024dab1f13804adf9eda612c8088",
+    "src/main-process/archive-center/ipc-task-contract.js": "a12c3fba0860851a454043f77159c725a625f3933ccf8e671d7850819853a27d",
+    "scripts/verify-toolbox-row-split-ui.js": "c4f6aadbd90be932d73b3572545f92026d5232833cfd50070e4e6c8922b44ded",
+    "tests/unit/main-process/toolbox-row-split-overwrite.test.js": "4b26e1cfaa1871a3fb987170850f87967104206b0eb2a493d2eef8eb400e19a0",
+    "tests/unit/main-process/archive-ipc-task-contract.test.js": "33231a0693fe08aa7b51f809d142b4c2c936ba435277207fc25fbe640a7fea45",
+    "tests/unit/main-process/toolbox-multi-split-ipc.test.js": "2887a2d546d65c9dcb3c9d9b3eeaf5c5d18d5a6a43d77b6f0ebe179241b1e3f2"
+  }
+}

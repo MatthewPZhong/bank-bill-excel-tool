@@ -1,0 +1,4 @@
+interface:
+  display_name: "原型优先"
+  short_description: "用可丢弃的最小原型验证交互偏好、接口契约、数据结构或输出格式决策"
+  default_prompt: "使用 $prototype-first 为当前关键未知设计最小可丢弃原型。"

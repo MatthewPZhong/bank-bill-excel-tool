@@ -1,0 +1,91 @@
+{
+  "baseline": "2ba9ef14fe972363b604955636cff0c9ac53700f",
+  "sourceBranch": "codex/v3.2.9-biz-op-error-report-auto-save",
+  "sourceCommit": "3efe5c78e8cde10d89db90d4509d883b28d61f4f",
+  "integrationBranch": "release/v3.2.9",
+  "nodeVersion": "v24.13.0",
+  "files": [
+    {
+      "path": "scripts/integration/biz-op-auto-error-report.js",
+      "sha256": "981d3c3cf4ff5e85cb587bf562d9edd91b2034d391e21064afc9645729db3b86"
+    },
+    {
+      "path": "scripts/verify-biz-op-v329-renderer-dom.js",
+      "sha256": "ed73142c9a040cf86d51806873474eeb957d93472190434b38813bb43bb22281"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/auto-error-report.js",
+      "sha256": "ff46064c63e718f4e3a0c957ac94cb6a9091b2fa380a8beb6ac21ca5954ee8a6"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/export-main.js",
+      "sha256": "9c4400c8b94bb7ce64090e841ce81188d7e7873b43c20a7d32054d2586700bc2"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/import-main.js",
+      "sha256": "600e87d7b8095b65d7b9769476c1ce02f476d632692d1016ecd60e91cd8bf2c1"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/ipc.js",
+      "sha256": "9ce608db0263b633d314857248b2426921193c1a9a084efe04e6ae67147937a4"
+    },
+    {
+      "path": "src/main.js",
+      "sha256": "68d385e0692c1293d5e15b940ab3dd52225d013bcc0864ac79b9bb0ed738f285"
+    },
+    {
+      "path": "src/renderer-biz-op-v327.js",
+      "sha256": "e498d420df0c5e4657dc4b73a293a37855fba9e3656c94520f4fe952f3861314"
+    },
+    {
+      "path": "src/styles-biz-op-v327.css",
+      "sha256": "e56688d8c9a43a5d7661fef44f04b72a09cb239f2126afc5aeb8989cc34d4765"
+    },
+    {
+      "path": "tests/unit/main-process/biz-op-v327-ipc.test.js",
+      "sha256": "6b873a90560ad5356afe8df2f0ad07d5d4c4519764aa33f45f932291a382d9f2"
+    },
+    {
+      "path": "tests/unit/main-process/biz-op-v327.test.js",
+      "sha256": "bbc22ebcd87c0356a12613493ae3287bb9a99b449245abc376f1f8276ca6c96c"
+    },
+    {
+      "path": "tests/unit/main-process/biz-op-v329-auto-report.test.js",
+      "sha256": "9f8c8f9d20173f2bd1b08642d031c9cf579ee1fe8977b59824ab1d05d77956f2"
+    },
+    {
+      "path": "tests/unit/main-process/biz-op-v329-ipc.test.js",
+      "sha256": "f7d7669dea427ff73d468b36e8ad8409230ba23708bd2cf5d324009fe90dc094"
+    },
+    {
+      "path": "tests/unit/main-process/biz-op-v329-renderer.test.js",
+      "sha256": "d986d5b4ab3b19aa252157ed381258af9bb82808ad49f071373e5b483b7cfc3a"
+    }
+  ],
+  "verification": {
+    "finishedAt": "2026-09-12T14:00:55.268762+08:00",
+    "releaseCheck": {
+      "command": "UNIT_TEST_CONCURRENCY=2 npm run release-check",
+      "exitCode": 0,
+      "unit": {
+        "files": 470,
+        "passed": 7351,
+        "failed": 0,
+        "skipped": 3
+      },
+      "integration": {
+        "scripts": 54,
+        "passed": 2500,
+        "total": 2500
+      }
+    },
+    "rendererDom": {
+      "passed": 10,
+      "total": 10
+    },
+    "windowsExcelWpsValidated": false,
+    "releaseCheckLog": "logs/verification/release-v3.2.9/biz-op-auto-report/release-check.log",
+    "releaseCheckLogSha256": "963d46621d1f32cdc2272b8f644b581a22cb6d8e4af368bf644ab6be2622caa8",
+    "rendererDomLogSha256": "869ca39c0f5f95d82777a04b1023af2d77d02cc60cd40a67e2179ce9d2efcd92"
+  }
+}

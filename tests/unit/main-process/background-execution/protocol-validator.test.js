@@ -29,7 +29,7 @@ const {
 
 const FIXTURES = path.resolve(
   __dirname,
-  '../../../../changes/background-execution-v3.2.x-contract-baseline/changes/background-execution/validation/fixtures'
+  '../../../../changes/v3.2.0~v3.2.5/background-execution-v3.2.x-contract-baseline/changes/background-execution/validation/fixtures'
 );
 
 function fixture(relativePath) {

@@ -1,0 +1,209 @@
+[
+  {
+    "name": "statement-resource-adopt-release-close",
+    "messages": [
+      {
+        "protocolVersion": 1,
+        "channel": "service-control",
+        "direction": "command",
+        "operation": "executor:init",
+        "serviceKey": "service.statement",
+        "controlId": "ctl-init",
+        "workerInstanceId": "worker-1",
+        "serviceGeneration": 1,
+        "seq": 1,
+        "jobRef": null,
+        "payload": {
+          "contractVersion": 1,
+          "policyDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+          "baseLeaseId": "base-1"
+        }
+      },
+      {
+        "protocolVersion": 1,
+        "channel": "service-control",
+        "direction": "event",
+        "operation": "executor:ready",
+        "serviceKey": "service.statement",
+        "controlId": "ctl-ready",
+        "workerInstanceId": "worker-1",
+        "serviceGeneration": 1,
+        "seq": 1,
+        "jobRef": null,
+        "payload": {
+          "contractVersion": 1,
+          "capabilities": [
+            "resource-control-v1"
+          ]
+        }
+      },
+      {
+        "protocolVersion": 1,
+        "channel": "service-control",
+        "direction": "event",
+        "operation": "resource:request",
+        "serviceKey": "service.statement",
+        "controlId": "ctl-request",
+        "workerInstanceId": "worker-1",
+        "serviceGeneration": 1,
+        "seq": 2,
+        "jobRef": {
+          "actionKey": "statement:import",
+          "operationKey": "task-1/statement:import/1",
+          "jobId": "job-1",
+          "unitId": null
+        },
+        "payload": {
+          "requestId": "req-1",
+          "requestKind": "pending-interaction-create",
+          "requested": {
+            "memoryBytes": 1048576,
+            "cpuSlots": 0,
+            "ioHeavySlots": 0
+          },
+          "replacesReservationId": null,
+          "owner": {
+            "kind": "interaction-token",
+            "ownerKeyHash": "token-hash-1",
+            "candidateRevision": 1
+          }
+        }
+      },
+      {
+        "protocolVersion": 1,
+        "channel": "service-control",
+        "direction": "command",
+        "operation": "resource:grant",
+        "serviceKey": "service.statement",
+        "controlId": "ctl-request",
+        "workerInstanceId": "worker-1",
+        "serviceGeneration": 1,
+        "seq": 2,
+        "jobRef": {
+          "actionKey": "statement:import",
+          "operationKey": "task-1/statement:import/1",
+          "jobId": "job-1",
+          "unitId": null
+        },
+        "payload": {
+          "requestId": "req-1",
+          "grantId": "grant-1",
+          "reservationId": "reservation-1",
+          "replacesReservationId": null,
+          "granted": {
+            "memoryBytes": 1048576,
+            "cpuSlots": 0,
+            "ioHeavySlots": 0
+          },
+          "adoptionDeadlineMs": 30000
+        }
+      },
+      {
+        "protocolVersion": 1,
+        "channel": "service-control",
+        "direction": "event",
+        "operation": "resource:adopted",
+        "serviceKey": "service.statement",
+        "controlId": "ctl-adopt",
+        "workerInstanceId": "worker-1",
+        "serviceGeneration": 1,
+        "seq": 3,
+        "jobRef": {
+          "actionKey": "statement:import",
+          "operationKey": "task-1/statement:import/1",
+          "jobId": "job-1",
+          "unitId": null
+        },
+        "payload": {
+          "requestId": "req-1",
+          "grantId": "grant-1",
+          "reservationId": "reservation-1",
+          "owner": {
+            "kind": "interaction-token",
+            "ownerKeyHash": "token-hash-1",
+            "candidateRevision": 1
+          }
+        }
+      },
+      {
+        "protocolVersion": 1,
+        "channel": "service-control",
+        "direction": "command",
+        "operation": "resource:adopt-ack",
+        "serviceKey": "service.statement",
+        "controlId": "ctl-adopt",
+        "workerInstanceId": "worker-1",
+        "serviceGeneration": 1,
+        "seq": 3,
+        "jobRef": {
+          "actionKey": "statement:import",
+          "operationKey": "task-1/statement:import/1",
+          "jobId": "job-1",
+          "unitId": null
+        },
+        "payload": {
+          "requestId": "req-1",
+          "grantId": "grant-1",
+          "reservationId": "reservation-1"
+        }
+      },
+      {
+        "protocolVersion": 1,
+        "channel": "service-control",
+        "direction": "event",
+        "operation": "resource:release",
+        "serviceKey": "service.statement",
+        "controlId": "ctl-release",
+        "workerInstanceId": "worker-1",
+        "serviceGeneration": 1,
+        "seq": 4,
+        "jobRef": null,
+        "payload": {
+          "reservationId": "reservation-1",
+          "reason": "token-consumed"
+        }
+      },
+      {
+        "protocolVersion": 1,
+        "channel": "service-control",
+        "direction": "command",
+        "operation": "resource:release-ack",
+        "serviceKey": "service.statement",
+        "controlId": "ctl-release",
+        "workerInstanceId": "worker-1",
+        "serviceGeneration": 1,
+        "seq": 4,
+        "jobRef": null,
+        "payload": {
+          "reservationId": "reservation-1"
+        }
+      },
+      {
+        "protocolVersion": 1,
+        "channel": "service-control",
+        "direction": "command",
+        "operation": "executor:close",
+        "serviceKey": "service.statement",
+        "controlId": "ctl-close",
+        "workerInstanceId": "worker-1",
+        "serviceGeneration": 1,
+        "seq": 5,
+        "jobRef": null,
+        "payload": {}
+      },
+      {
+        "protocolVersion": 1,
+        "channel": "service-control",
+        "direction": "event",
+        "operation": "executor:close-ack",
+        "serviceKey": "service.statement",
+        "controlId": "ctl-close",
+        "workerInstanceId": "worker-1",
+        "serviceGeneration": 1,
+        "seq": 5,
+        "jobRef": null,
+        "payload": {}
+      }
+    ]
+  }
+]

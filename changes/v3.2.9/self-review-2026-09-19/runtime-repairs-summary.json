@@ -1,0 +1,611 @@
+{
+  "finishedAt": "2026-09-18T20:00:41.970216+00:00",
+  "runtime": "Node24.13.0/macOS",
+  "command": "UNIT_TEST_CONCURRENCY=2 npm run release-check",
+  "exitCode": 0,
+  "unit": {
+    "tests": 7867,
+    "pass": 7864,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 3,
+    "files": 501
+  },
+  "integration": {
+    "scripts": 59,
+    "pass": 2575,
+    "fail": 0
+  },
+  "log": "release-check-sst-identity.log",
+  "logSha256": "dee26fc40765ac8f035c9e006e95efa08501a1444695be7f11d1d20756b1afc0",
+  "frozenInputFiles": 1484,
+  "unchangedSupplementalAssets": 46,
+  "changedStandaloneVerifiers": [
+    {
+      "path": "scripts/vcc-financial-op/performance-worker.js",
+      "before": "fdb2705e14dc6e70fccde8f13b8c4f7c845f06304763025b9c34c804f63446aa",
+      "after": "34d56999ed20ebc362eee5122cd4b25742d39e9fbdb1ee115e682cafd9b9b7b7"
+    },
+    {
+      "path": "scripts/vcc-financial-op/verify-review-performance.js",
+      "before": "42f2ca5043229a6fda1181faec88e2ba8e044145c7a431c2d1fd62c568eb9bea",
+      "after": "2563e30d7cf45311365f6d4bd6f68010fceabc3d21faf8e23dbf3a0ef91a8e57"
+    }
+  ],
+  "standaloneVerification": {
+    "syntax": "PASS",
+    "eslint": "PASS",
+    "smallExport": "PASS",
+    "realDrainCancellation": "PASS",
+    "scope": "Supplemental Electron/macOS; original Windows/PF/manual acceptance stays NOT_RUN"
+  },
+  "repairCommit": "30317ee5a9ad8227db0562354d20554edb9e6ae4",
+  "candidateIdentity": {
+    "description": "Candidate 50062ca0 contains only documentation after repair 30317ee5 and matches the recorded 1530 input files. A later one-test fixture correction is separately described below; the original complete local command was not repeated for that correction.",
+    "verifiedFiles": 1530,
+    "inputManifestSha256": "b3eb040758358d4e3777947b451588bcc3b0bd2bfedf9ddca28d5d1632b7f685",
+    "originalRunHead": "5ffaabb0c3dcf65377e70997706290c32ed80c33",
+    "originalRunProductionDirty": true,
+    "inputManifestFile": "logs/verification/release-v3.2.9/repair-sst-file-identity/repair-verified-inputs-final.json",
+    "candidateSha": "50062ca02dd80947181dd042159ac851c2b8d0c1"
+  },
+  "realDrainCancellation": {
+    "pendingRows": 10000,
+    "elapsedMs": 43,
+    "forced": false,
+    "stageBoundaryOnly": false,
+    "cleanup": "PASS",
+    "automated": "PASS",
+    "acceptance": "NOT_RUN",
+    "cursorReturns": 1,
+    "sourceRowsAtCancel": 12372,
+    "sourceRowsAfterCancel": 12372
+  },
+  "manualWindowsInstalledApplication": "NOT_RUN",
+  "excelWps": "NOT_RUN",
+  "independentWorkerRss": "NOT_RUN; original requirement unchanged, awaiting decision",
+  "followUpTestFixtureCorrection": {
+    "baseCandidate": "50062ca02dd80947181dd042159ac851c2b8d0c1",
+    "files": [
+      {
+        "path": "tests/unit/main-process/archive-permanent-delete.test.js",
+        "before": "6e40e8778a26cb25bccd4868937b642128ed376a58950fd65717ab52dc76727c",
+        "after": "bfb8165d4adbdc9869c77974bdce77e9c6fd4cd49e1a9a0fe237fcce7dd49e57"
+      }
+    ],
+    "productionOrDependencyChanges": false,
+    "affectedWholeUnitFile": {
+      "tests": 59,
+      "pass": 59,
+      "fail": 0,
+      "skipped": 0,
+      "runtime": "Node24.13.0/macOS"
+    },
+    "hardlinkSubset": {
+      "pass": 13,
+      "fail": 0
+    },
+    "mutationControl": "PASS: removing only ctime comparison makes the corrected test fail",
+    "fullLocalGateRerun": false,
+    "finalWindowsValidation": "PASS for corrected ctime case #1076 on e47e2a60/run35392054677; complete Windows gate FAIL with 45 other cases",
+    "evidenceDirectory": "logs/verification/release-v3.2.9/windows-ctime-fixture/",
+    "windowsCaseEvidence": {
+      "run": 35392054677,
+      "candidate": "e47e2a6077877b76b7d5cb490d4a01034a2fec27",
+      "tapId": 1076,
+      "status": "PASS",
+      "durationMs": 6721.7302,
+      "logLine": 19139
+    }
+  },
+  "followUpSsdBaselineCorrection": {
+    "baseCandidate": "e47e2a6077877b76b7d5cb490d4a01034a2fec27",
+    "finding": "P2: unrelated PhysicalDisk SSD can be selected by OS disk number coincidence",
+    "files": [
+      {
+        "path": "scripts/vcc-financial-op/verify-review-performance.js",
+        "sha256": "2cf8eea10f82b69e792a9ebfe6f235951f36074a87dcdaabfec65abbcb4b8bf5"
+      },
+      {
+        "path": "scripts/vcc-financial-op/performance-disk-baseline.js",
+        "sha256": "452b005c432e68baac5f9d8aef5d83bf34c7ee8a7eb3ae19aab348a17d227ec7"
+      },
+      {
+        "path": "scripts/vcc-financial-op/collect-performance-disk.ps1",
+        "sha256": "287d275939cb9bf260a9bb08d25ccb2db5631c2ff3510a9c10c5b435adaf94b6"
+      },
+      {
+        "path": "tests/unit/scripts/vcc-review-performance-disk-baseline.test.js",
+        "sha256": "9a94e70892ee5afe63825e22f48e401dc93a72f65ff3d9c70be17120d96531fd"
+      }
+    ],
+    "unit": {
+      "tests": 44,
+      "pass": 44,
+      "fail": 0,
+      "skipped": 0
+    },
+    "independentProbe": {
+      "tests": 25,
+      "pass": 25,
+      "fail": 0
+    },
+    "electronSmoke": {
+      "platform": "darwin",
+      "sheetCount": 19,
+      "sourceRowCount": 40,
+      "automated": "PASS",
+      "readback": "PASS",
+      "cleanup": "PASS",
+      "childExit": 0,
+      "acceptance": "NOT_RUN",
+      "productionDirty": false,
+      "recordedHead": "e47e2a6077877b76b7d5cb490d4a01034a2fec27"
+    },
+    "actualWindowsCollection": "FAIL at diagnostic head382928f8/run35397405456: SAS enum display string cannot cast to Int32; SSD identity proof NOT_RUN; subsequent repair pending native validation",
+    "fullLocalGateRerun": false,
+    "contractChanged": false,
+    "evidenceDirectory": "logs/verification/release-v3.2.9/ssd-baseline-identity/",
+    "actualWindowsEvidence": {
+      "run": 35397405456,
+      "headSha": "382928f8cb0435fb69515878f1e5f9111ba74bbf",
+      "runtime": "Node22.23.2/Windows x64",
+      "ssdUnit": {
+        "tests": 44,
+        "pass": 44,
+        "fail": 0,
+        "skipped": 0
+      },
+      "collection": "FAIL",
+      "ssdProof": "NOT_RUN",
+      "evidenceDirectory": "logs/verification/release-v3.2.9/acceptance-e47e2a60/windows-short-diagnostics-382928f8/"
+    }
+  },
+  "previousCandidateWindowsFinal": {
+    "candidate": "50062ca02dd80947181dd042159ac851c2b8d0c1",
+    "run": 35390006217,
+    "unit": {
+      "tests": 7867,
+      "pass": 7819,
+      "fail": 45,
+      "cancelled": 0,
+      "skipped": 3
+    },
+    "integration": "NOT_RUN",
+    "build": "SKIPPED",
+    "families": {
+      "ctimeFixture": 1,
+      "readonlyOwner": 4,
+      "rootMigration": 38,
+      "positionDeleteSources": 2
+    }
+  },
+  "currentCandidateWindowsFinal": {
+    "candidate": "e47e2a6077877b76b7d5cb490d4a01034a2fec27",
+    "run": 35392054677,
+    "job": 105752414750,
+    "status": "completed",
+    "conclusion": "failure",
+    "completedAt": "2026-09-18T21:26:35Z",
+    "unit": {
+      "tests": 7867,
+      "pass": 7819,
+      "fail": 45,
+      "cancelled": 0,
+      "skipped": 3,
+      "files": 501
+    },
+    "lint": "PASS",
+    "smoke": "PASS",
+    "unitExitCode": 1,
+    "integration": "NOT_RUN",
+    "laterWindowsChecks": "SKIPPED",
+    "build": "SKIPPED",
+    "ctimeFixture": "PASS",
+    "families": {
+      "readonlyOwner": 4,
+      "rootMigration": 39,
+      "positionDeleteSources": 2
+    },
+    "comparisonTo50062ca0": {
+      "sharedFailures": 36,
+      "sameFailureSignature": 23,
+      "changedFailureSignature": 13,
+      "oldFailNowPass": 9,
+      "oldPassNowFail": 9,
+      "addedFailureFamilies": [
+        "rootMigration"
+      ],
+      "migrationSourceAndTestsUnchanged": true
+    },
+    "evidenceDirectory": "logs/verification/release-v3.2.9/acceptance-e47e2a60/windows-required-final/",
+    "manifestFile": "logs/verification/release-v3.2.9/acceptance-e47e2a60/windows-required-final/manifest.json"
+  },
+  "followUpWindowsShortDiagnostic": {
+    "run": 35397405456,
+    "headSha": "382928f8cb0435fb69515878f1e5f9111ba74bbf",
+    "dispatchStatus": "STARTED",
+    "recordedResult": "failure",
+    "productionBase": "e47e2a6077877b76b7d5cb490d4a01034a2fec27",
+    "scope": [
+      "migration identity diagnosis",
+      "SSD baseline collection",
+      "readonly and position fixture verification"
+    ],
+    "replacesCompleteGate": false,
+    "status": "completed",
+    "job": 105769281602,
+    "completedAt": "2026-09-18T21:35:13Z",
+    "runtime": "Node22.23.2/Windows x64",
+    "workingTree": "",
+    "productionDiffAgainstBase": "",
+    "sourceIdentity": {
+      "files": 12,
+      "matching": 12,
+      "method": "Exact git blobs with Windows CRLF checkout conversion",
+      "checkoutHeadVerified": true
+    },
+    "ssdUnit": {
+      "tests": 44,
+      "pass": 44,
+      "fail": 0,
+      "skipped": 0,
+      "exitCode": 0
+    },
+    "readonlyPositionFixtures": {
+      "tests": 15,
+      "pass": 15,
+      "fail": 0,
+      "skipped": 0,
+      "exitCode": 0
+    },
+    "diskCollection": {
+      "status": "FAIL",
+      "powershellExitCode": 0,
+      "wrapperExitCode": 1,
+      "ssdIdentityProof": "NOT_RUN",
+      "error": "Cannot convert value SAS to System.Int32"
+    },
+    "migration": {
+      "captureStatus": "PASS",
+      "productTestPassed": false,
+      "productChildExit": 1,
+      "productionGuardDifferingFields": [
+        "ctimeMs"
+      ],
+      "expectedCtimeMs": 1789767302527.9363,
+      "actualCtimeMs": 1789767302529.9492,
+      "rootAndParentsDeepEqual": true,
+      "all39FailuresExplained": false
+    },
+    "subsequentRepairValidation": "NOT_RUN",
+    "evidenceDirectory": "logs/verification/release-v3.2.9/acceptance-e47e2a60/windows-short-diagnostics-382928f8/",
+    "manifestFile": "logs/verification/release-v3.2.9/acceptance-e47e2a60/windows-short-diagnostics-382928f8/manifest.json"
+  },
+  "latestRepairState": {
+    "recordedAtUtc": "2026-09-18T22:25:42.237870+00:00",
+    "previousCommittedCandidate": "e47e2a6077877b76b7d5cb490d4a01034a2fec27",
+    "candidateStateAtRecord": "pending commit; final gate running; candidate SHA tracked by PR and external record",
+    "releaseRepairsCommittedAtRecord": false,
+    "migrationP2": "targeted native closure verified",
+    "localFinalGate": {
+      "status": "RUNNING",
+      "recordedAtUtc": "2026-09-18T22:25:42.237870+00:00",
+      "rootSession": 67830,
+      "startedAt": "2026-09-18T22:20:28.468222+00:00",
+      "baseSha": "e47e2a6077877b76b7d5cb490d4a01034a2fec27",
+      "runtime": "Node24.13.0/macOS",
+      "command": "UNIT_TEST_CONCURRENCY=2 npm run release-check",
+      "frozenInputs": 1580,
+      "inputManifestSha256": "0a13eedccdaa6f0254066105a79b3ece2026e5dd352c4d76eee43f2d6fc2e378",
+      "log": "/private/tmp/v329-release-20260919-3_bafjvz/release-check-windows-repairs.log",
+      "futureSummary": "/private/tmp/v329-release-20260919-3_bafjvz/full-gate-windows-repairs-summary.json",
+      "result": null,
+      "boundary": "Running gate has no PASS/FAIL result at this record; frozen manifest archived, growing log not copied as final evidence."
+    },
+    "windowsFinalCompleteGate": "NOT_RUN on new final release candidate",
+    "note": "Top-level old local gate, e47 complete failure and second diagnostic failure remain historical. Third diagnostic success is scoped and does not complete formal release acceptance."
+  },
+  "followUpMigrationCloseRepair": {
+    "recordedAtUtc": "2026-09-18T22:04:21.977263+00:00",
+    "releaseHeadAtRecord": "e47e2a6077877b76b7d5cb490d4a01034a2fec27",
+    "releaseRepairsCommitted": false,
+    "fullLocalGateRepeatedForTheseRepairs": false,
+    "evidenceDirectory": "logs/verification/release-v3.2.9/repair-windows-migration-close",
+    "sourceManifest": "source-manifest.json",
+    "migrationWitnessFd": {
+      "finding": "P2: native Windows close updates ctime after the published identity snapshot; normal migration fails closed",
+      "files": 5,
+      "controlledBefore": {
+        "tests": 2,
+        "pass": 0,
+        "fail": 2,
+        "cancelled": 0,
+        "skipped": 0
+      },
+      "controlledAfter": {
+        "tests": 2,
+        "pass": 2,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0
+      },
+      "wholeUnitFileEarlier": {
+        "tests": 114,
+        "pass": 114,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "scope": "102 existing + first 12 new; before final four witness-open negatives"
+      },
+      "finalAddedCases": {
+        "tests": 16,
+        "pass": 16,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0
+      },
+      "independentNegativeCases": {
+        "tests": 14,
+        "pass": 14,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0
+      },
+      "currentDefinitions": 118,
+      "current118WholeFileRerun": false,
+      "localReviewUnresolvedP2PlusAtReview": 0,
+      "nativeFollowUp": "FAIL: canonical link/unlink also changes ctime on writer close without chmod; initial repair assumption rejected, P2 remains open"
+    },
+    "ssdEnumeration": {
+      "finding": "Windows PowerShell display enum SAS cast fails; FileInfo parent walk stops early",
+      "files": 3,
+      "macosUnit": {
+        "tests": 45,
+        "pass": 44,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 1
+      },
+      "windowsPowerShellContract": "NOT_RUN in local run",
+      "actualCimCollection": "PASS reported by root from second artifact; independent audit pending",
+      "ssdBaselineAdmission": "NOT_RUN: virtual host backing media not proven"
+    },
+    "orphanPrefix": {
+      "finding": "P2: stale startup prefix list raises ENOENT on pause/close after successful managed deletion",
+      "files": 2,
+      "before": {
+        "tests": 5,
+        "pass": 3,
+        "fail": 2,
+        "cancelled": 0,
+        "skipped": 0
+      },
+      "finalTargeted": {
+        "tests": 9,
+        "pass": 9,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0
+      },
+      "finalWholeUnitFile": {
+        "tests": 76,
+        "pass": 76,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0
+      },
+      "reviewFinding": "Intermediate ENOENT fallback falsely accepted existing replacement file; resolved by explicit missing-prefix confirmation",
+      "independentTypeReplacementBefore": {
+        "rejected": null,
+        "cursor": 1
+      },
+      "independentTypeReplacementAfter": {
+        "code": "ARCHIVE_BLOB_PATH_INVALID",
+        "cursor": 0,
+        "replacementPreserved": true
+      },
+      "reviewUnresolvedP2Plus": 0
+    },
+    "integration": {
+      "script": "scripts/integration/archive-center-permanent-delete.js",
+      "pass": 52,
+      "fail": 0,
+      "scope": "Executed after initial orphan-prefix disappearance repair, before final second existence confirmation. Not a rerun on final 10-file freeze.",
+      "log": "windows-migration-diagnostics/close-repair-integration-after-prefix.log"
+    },
+    "nativeDiagnostic": {
+      "run": 35399134894,
+      "headSha": "68ed9cb7351977219e66d605b7360f0e6255ead5",
+      "status": "completed",
+      "result": "failure",
+      "isReleaseCandidateCommit": false,
+      "rootReportedResults": {
+        "ssdRegression": "45 PASS",
+        "actualDiskCollection": "success",
+        "ssdProof": "NOT_RUN: virtual machine host media not proven",
+        "migrationCapture": "product FAIL: canonical link/unlink writer.close changes ctime without chmod",
+        "migrationAndServiceSuite": {
+          "tests": 194,
+          "pass": 131,
+          "fail": 63
+        },
+        "integration": "36/52 completed; case 37 normal migration failed; new close cases not reached"
+      },
+      "evidenceBoundary": "Root read final artifact; independent grouped failure audit to follow"
+    },
+    "acceptanceBoundaries": [
+      "Latest complete required Windows run on release e47e2a60 remains FAILURE (7819 PASS,45 FAIL,3 SKIP).",
+      "Native run35399134894 failed and rejects initial chmod-only assumption; grouped independent audit follows.",
+      "No current 118-case migration whole-file run is claimed.",
+      "No final freeze complete local release-check or Windows build is claimed.",
+      "Full PF, independent Worker RSS and required Windows/Excel/WPS/manual acceptance remain incomplete."
+    ]
+  },
+  "followUpNativeMigrationCloseDiagnostic": {
+    "run": 35399134894,
+    "headSha": "68ed9cb7351977219e66d605b7360f0e6255ead5",
+    "job": 105774763495,
+    "status": "completed",
+    "conclusion": "failure",
+    "completedAt": "2026-09-18T22:00:35Z",
+    "runtime": "22.23.2/Windows x64",
+    "sourceIdentity": {
+      "files": 19,
+      "allMatched": true,
+      "method": "exact Git LF blob or CRLF checkout bytes",
+      "firstRepairFrozenFilesMatched": 10
+    },
+    "unit": {
+      "total": {
+        "tests": 194,
+        "pass": 131,
+        "fail": 63,
+        "cancelled": 0,
+        "skipped": 0
+      },
+      "service": {
+        "tests": 76,
+        "pass": 76,
+        "fail": 0
+      },
+      "migration": {
+        "tests": 118,
+        "pass": 55,
+        "fail": 63
+      },
+      "firstRepairAdded16": {
+        "pass": 7,
+        "fail": 9
+      },
+      "failureTypeCounts": {
+        "testCodeFailure": 62,
+        "subtestsFailed": 1
+      }
+    },
+    "integration": {
+      "planned": 52,
+      "pass": 36,
+      "fail": 1,
+      "notRun": 15,
+      "newCloseCases": "NOT_RUN"
+    },
+    "platformFixtures": {
+      "tests": 15,
+      "pass": 15,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "ssd": {
+      "unit": {
+        "tests": 45,
+        "pass": 45,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0
+      },
+      "actualCim": "PASS",
+      "pathAncestors": 8,
+      "proof": "NOT_RUN: virtual machine backing media unproven"
+    },
+    "productFinding": "P2 OPEN: own link/unlink metadata can change ctime on writer close without chmod; first-repair assumption rejected",
+    "evidenceDirectory": "logs/verification/release-v3.2.9/repair-windows-migration-close/native-68ed9cb",
+    "manifest": "logs/verification/release-v3.2.9/repair-windows-migration-close/native-68ed9cb/manifest.json",
+    "completeAudit": "logs/verification/release-v3.2.9/repair-windows-migration-close/native-68ed9cb/windows-second-diagnostics-complete-audit.json",
+    "replacesCompleteGate": false,
+    "build": "NOT_RUN",
+    "formalPf": "NOT_RUN",
+    "manualAcceptance": "NOT_RUN"
+  },
+  "thirdNativeMigrationCloseDiagnostic": {
+    "run": 35400518166,
+    "headSha": "8779c029ac94c859681d582bff378b426686dc09",
+    "job": 105779109165,
+    "status": "completed",
+    "conclusion": "success",
+    "completedAt": "2026-09-18T22:17:52Z",
+    "runtime": "22.23.2/Windows x64",
+    "identity": {
+      "sourceFiles": 19,
+      "matching": 19,
+      "unchangedFromSecond": 14,
+      "finalFiveMatchReleaseAndManifest": true
+    },
+    "migrationUnit": {
+      "tests": 121,
+      "pass": 121,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "topLevel": 111,
+      "nested": 10,
+      "finalAffected19": {
+        "pass": 19,
+        "fail": 0
+      },
+      "gcCloseWarnings": 0
+    },
+    "integration": {
+      "pass": 52,
+      "fail": 0,
+      "notRun": 0,
+      "newCloseCases": "both PASS"
+    },
+    "capture": {
+      "captureStatus": "PASS",
+      "productTestPassed": true,
+      "identityDiffs": [],
+      "productTest": {
+        "kind": "migration-test-result",
+        "status": 0,
+        "signal": null,
+        "error": null
+      }
+    },
+    "finalFiveManifest": {
+      "src/main-process/archive-center/storage-root-manager.js": "43d6d98ad5ba0e1b2c91d2778251625a3211a4d57199285f8212dda4b05a723c",
+      "tests/unit/main-process/archive-storage-root-migration.test.js": "866ccef6ea245c6b5943d1b843b71e187d2942873cc9fe87993d9a1434205607",
+      "tests/fixtures/archive-migration-close-metadata.js": "9bbbd2cc940829cf43ee6699fd43751b5b1315f1524707473f00852d40f3ce72",
+      "tests/fixtures/archive-permanent-delete-migration.js": "90bab8c42c441ba1a251cc8cae3f12a0bf0121b39d9e8728ebd2fe2e8b1c7fdd",
+      "scripts/integration/archive-center-permanent-delete.js": "7d8cf4d770fe80bd679b760abc98abf3036a8a14f735d0d39f706b724bff95f8"
+    },
+    "localHistory": {
+      "beforeFinalFixtureHardening": {
+        "migrationUnit": 120,
+        "integration": 52,
+        "fullFinal121Rerun": false
+      },
+      "afterFinalFixtureHardening": {
+        "affectedCases": 19,
+        "pass": 19,
+        "fullLocalGate": false
+      }
+    },
+    "reusedSecondRound": {
+      "run": 35399134894,
+      "headSha": "68ed9cb7351977219e66d605b7360f0e6255ead5",
+      "service": {
+        "tests": 76,
+        "pass": 76,
+        "prefixCases": 9
+      },
+      "ssd": {
+        "tests": 45,
+        "pass": 45,
+        "actualQuery": "PASS in second instance only",
+        "ssdProof": "NOT_RUN: virtual backing media unknown"
+      },
+      "readonlyPosition": {
+        "tests": 15,
+        "pass": 15
+      },
+      "scope": "Unchanged source hashes verified. These are prior run results, not re-execution or SSD proof for the third machine."
+    },
+    "findingStatus": "Reproduced migration close P2 CLOSED for frozen patch and native targeted checks; final release gates and acceptance incomplete",
+    "evidenceDirectory": "logs/verification/release-v3.2.9/repair-windows-migration-close/native-8779c029",
+    "manifest": "logs/verification/release-v3.2.9/repair-windows-migration-close/native-8779c029/manifest.json",
+    "audit": "logs/verification/release-v3.2.9/repair-windows-migration-close/native-8779c029/windows-third-diagnostics-audit.json",
+    "replacesFullReleaseGate": false
+  }
+}

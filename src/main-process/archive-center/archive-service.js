@@ -1,6 +1,9 @@
 'use strict';
 
+const { identityInteger, readIdentityStat, readIdentityStatSync } = require('./filesystem-identity');
+
 const crypto = require('node:crypto');
+const { buildDeletePlan, executeDeletePlan, captureFileIdentity, upgradeLegacyDeletePlan } = require('./batch-delete-plan');
 const fs = require('node:fs');
 const path = require('node:path');
 const { Transform } = require('node:stream');
@@ -46,6 +49,50 @@ class ArchiveOperationError extends Error {
     this.code = code;
     this.retryable = options.retryable === true;
   }
+}
+
+function readonlyIdentityChanged() {
+  throw new ArchiveOperationError('ARCHIVE_READONLY_FILE_CHANGED',
+    '只读副本路径不再属于本次创建的原文件，保留文件及归属记录');
+}
+
+function readonlyObjectIdentity(stat) {
+  if (!stat || stat.isSymbolicLink() || !identityInteger(stat.dev) || !identityInteger(stat.ino)) readonlyIdentityChanged();
+  return { dev: String(stat.dev), ino: String(stat.ino) };
+}
+
+function readonlyFileIdentity(stat) {
+  if (!stat.isFile()) readonlyIdentityChanged();
+  return { exists: true, ...readonlyObjectIdentity(stat), sizeBytes: Number(stat.size),
+    mtimeMs: Number(stat.mtimeMs), ctimeMs: Number(stat.ctimeMs),
+    birthtimeMs: Number(stat.birthtimeMs), nlink: Number(stat.nlink), mode: Number(stat.mode) };
+}
+
+function readonlyParentIdentity(service, relativePath) {
+  const parts = relativePath.split('/');
+  const parents = [];
+  for (let index = 0; index < parts.length; index += 1) {
+    const relative = parts.slice(0, index).join('/');
+    const stat = readIdentityStatSync(service.fs, path.join(service.rootDir, ...parts.slice(0, index)));
+    if (!stat.isDirectory()) readonlyIdentityChanged();
+    parents.push({ relativePath: relative, ...readonlyObjectIdentity(stat) });
+  }
+  return parents;
+}
+
+function assertReadonlyCopyIdentity(service, relativePath, fd, parents, expected = null) {
+  // 最终检查与 owner 落库之间不让出事件循环；SHA 相同不能替代创建 fd 的身份。
+  if (JSON.stringify(readonlyParentIdentity(service, relativePath)) !== JSON.stringify(parents)) {
+    readonlyIdentityChanged();
+  }
+  const original = readonlyFileIdentity(readIdentityStatSync(service.fs, fd, 'fstatSync'));
+  const current = readonlyFileIdentity(readIdentityStatSync(service.fs, service._resolveManagedRelative(relativePath)));
+  if (Object.keys(original).some((key) => current[key] !== original[key]
+      || (expected && expected[key] !== original[key]))
+      || (expected && JSON.stringify(expected.parents) !== JSON.stringify(parents.slice(1)))) {
+    readonlyIdentityChanged();
+  }
+  return { ...original, parents: parents.slice(1) };
 }
 
 function localDateOf(value) {
@@ -301,6 +348,9 @@ class ArchiveService {
     if (options.opener !== undefined && typeof options.opener !== 'function') {
       throw new TypeError('ArchiveService opener 必须是函数');
     }
+    if (options.resolveRetentionDays !== undefined && typeof options.resolveRetentionDays !== 'function') {
+      throw new TypeError('ArchiveService resolveRetentionDays 必须是函数');
+    }
     if (options.onSourceReleased !== undefined && typeof options.onSourceReleased !== 'function') {
       throw new TypeError('ArchiveService onSourceReleased 必须是函数');
     }
@@ -339,6 +389,7 @@ class ArchiveService {
     this.onSourceReleased = options.onSourceReleased || null;
     this.onArtifactReady = options.onArtifactReady || null;
     this.defaultRetentionDays = defaultRetentionDays;
+    this.resolveRetentionDays = options.resolveRetentionDays || null;
     this.startupMaterializationBatchSize = startupMaterializationBatchSize;
     this.verifyHashesOnStartup = options.verifyHashesOnStartup === true;
     this.repository = options.repository || createArchiveRepository(database, { now: this.now });
@@ -421,7 +472,7 @@ class ArchiveService {
 
   async _assertManagedRoot(options = {}) {
     try {
-      const rootStat = await this.fs.promises.lstat(this.rootDir);
+      const rootStat = await readIdentityStat(this.fs, this.rootDir);
       if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
         throw new ArchiveOperationError(
           'ARCHIVE_PATH_SYMLINK_REJECTED',
@@ -454,7 +505,7 @@ class ArchiveService {
     for (let index = 0; index < stop; index += 1) {
       current = path.join(current, parts[index]);
       try {
-        const stat = await this.fs.promises.lstat(current);
+        const stat = await readIdentityStat(this.fs, current);
         if (stat.isSymbolicLink()) {
           throw new ArchiveOperationError(
             'ARCHIVE_PATH_SYMLINK_REJECTED',
@@ -594,6 +645,7 @@ class ArchiveService {
             } else if (!verifyHashes && blob.fingerprint) {
               const refreshed = sourceSnapshotFromStat(finalStat);
               if (refreshed && typeof this.repository.refreshBlobFingerprint === 'function') {
+                this._assertNoPendingHardlinkMutation(finalStat);
                 this.repository.refreshBlobFingerprint(blob.id, refreshed);
               }
             }
@@ -647,18 +699,35 @@ class ArchiveService {
     const relativePrefix = `${BLOB_ROOT_PARTS.join('/')}/${prefix}`;
     await this._assertManagedFilePath(`${relativePrefix}/.guard`, { includeLeaf: false });
     const prefixDir = this._resolveManagedRelative(relativePrefix);
-    const stat = await this.fs.promises.lstat(prefixDir);
-    if (!stat.isDirectory() || stat.isSymbolicLink()) {
-      throw new ArchiveOperationError(
-        'ARCHIVE_BLOB_PATH_INVALID',
-        '存档 Blob 分片目录类型无效'
-      );
+    let names;
+    try {
+      const stat = await readIdentityStat(this.fs, prefixDir);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) {
+        throw new ArchiveOperationError(
+          'ARCHIVE_BLOB_PATH_INVALID',
+          '存档 Blob 分片目录类型无效'
+        );
+      }
+      names = await this.fs.promises.readdir(prefixDir);
+    } catch (error) {
+      if (!error || error.code !== 'ENOENT') throw error;
+      // 启动时冻结的分片清单可能已被正常删除清空；只读扫描允许其消失，
+      // 但须重新核对根可用且父链无链接，不能把离线或路径替换当作空目录。
+      await this._assertManagedFilePath(`${relativePrefix}/.guard`, { includeLeaf: false });
+      try {
+        await readIdentityStat(this.fs, prefixDir);
+      } catch (confirmedMissing) {
+        if (!confirmedMissing || confirmedMissing.code !== 'ENOENT') throw confirmedMissing;
+        await this._assertManagedFilePath(`${relativePrefix}/.guard`, { includeLeaf: false });
+        return { removed: 0, reported: 0, pathHashes: [], failures: [] };
+      }
+      throw new ArchiveOperationError('ARCHIVE_BLOB_PATH_INVALID',
+        '存档 Blob 分片在扫描期间已被替换，请重试');
     }
     const pendingCleanupPaths = new Set(
       this.repository.listCleanupJobs()
         .flatMap((job) => job.releasedBlobs.map((blob) => blob.relativePath))
     );
-    const names = await this.fs.promises.readdir(prefixDir);
     let reported = 0;
     const pathHashes = [];
     const failures = [];
@@ -717,7 +786,13 @@ class ArchiveService {
         });
         if (layout.valid && typeof this.repository.refreshStorageFingerprint === 'function') {
           const refreshed = sourceSnapshotFromStat(layout.stat);
-          if (refreshed) this.repository.refreshStorageFingerprint(artifact.id, refreshed);
+          try {
+            this._assertNoPendingHardlinkMutation(layout.stat);
+            if (refreshed) this.repository.refreshStorageFingerprint(artifact.id, refreshed);
+          } catch (error) {
+            failures.push({ code: error.code, item: `artifact-${artifact.id}` });
+            continue;
+          }
         }
       }
       const requiresIsolation = artifact.storageMode === 'hardlink';
@@ -960,6 +1035,7 @@ class ArchiveService {
     if (this.initialized) return this.initialization;
     try {
       this.repository.ensureSchema();
+      this.archiveInstanceId = this.repository.getOrCreateArchiveInstanceId();
     } catch (error) {
       this.initialized = false;
       const failure = safeFailure(error, '初始化');
@@ -1052,7 +1128,7 @@ class ArchiveService {
         if (this.rootEstablished) {
           let rootStat;
           try {
-            rootStat = await this.fs.promises.lstat(this.rootDir);
+            rootStat = await readIdentityStat(this.fs, this.rootDir);
           } catch (error) {
             if (!error || error.code !== 'ENOENT') throw error;
             throw new ArchiveOperationError(
@@ -1080,7 +1156,8 @@ class ArchiveService {
         return {
           ok: false,
           operation: operationName,
-          ...safeFailure(error, '执行')
+          ...safeFailure(error, '执行'),
+          ...(error.deleteDetails || {})
         };
       }
     });
@@ -1097,6 +1174,18 @@ class ArchiveService {
       this.resumeBackgroundMaterialization();
     }
     return initialized;
+  }
+
+  _retentionDaysForPayload(payload = {}) {
+    if (payload.retentionDays !== undefined) return payload.retentionDays;
+    if (!this.resolveRetentionDays) return this.defaultRetentionDays;
+    const moduleId = payload.taskRun && payload.taskRun.moduleId
+      || payload.moduleId || payload.moduleCode;
+    const value = this.resolveRetentionDays(moduleId);
+    if (value !== null && (!Number.isSafeInteger(value) || value < 1 || value > 36500)) {
+      throw new TypeError('模块保留期限必须是 1 到 36500 的安全整数或永久');
+    }
+    return value;
   }
 
   _taskBatchInput(payload = {}) {
@@ -1121,12 +1210,11 @@ class ArchiveService {
     if (Object.prototype.hasOwnProperty.call(payload, 'retentionUntil')
         && payload.retentionUntil !== undefined) {
       input.retentionUntil = payload.retentionUntil;
-    } else if (payload.retentionDays === null || payload.retentionDays === 'permanent') {
-      input.retentionDays = null;
     } else {
-      input.retentionDays = payload.retentionDays === undefined
-        ? this.defaultRetentionDays
-        : Number(payload.retentionDays);
+      const retentionDays = this._retentionDaysForPayload(payload);
+      input.retentionDays = retentionDays === null || retentionDays === 'permanent'
+        ? null
+        : Number(retentionDays);
     }
     return input;
   }
@@ -1232,9 +1320,7 @@ class ArchiveService {
           moduleName: payload.moduleName,
           businessStatus: payload.businessStatus,
           locked: payload.locked,
-          retentionDays: payload.retentionDays === undefined
-            ? this.defaultRetentionDays
-            : payload.retentionDays,
+          retentionDays: this._retentionDaysForPayload(payload),
           metadata: payload.metadata
         });
       }
@@ -1367,9 +1453,7 @@ class ArchiveService {
       const result = this.repository.reserveFileTaskBatch({
         ...payload,
         metadata,
-        retentionDays: payload.retentionDays === undefined
-          ? this.defaultRetentionDays
-          : payload.retentionDays
+        retentionDays: this._retentionDaysForPayload(payload)
       });
       if (result.status === 'deleted') {
         return {
@@ -1418,6 +1502,27 @@ class ArchiveService {
       'finishFileTask',
       async () => this._finishFileTaskUnlocked(taskRunId, batchId, outcome)
     );
+  }
+
+  async recordFileTaskOwnerCompletion(batchContext, outcome = {}) {
+    return this._run('recordFileTaskOwnerCompletion', async () => {
+      const batch = this.repository.getBatch(batchContext?.batchId);
+      const task = this.repository.getTaskRun(batchContext?.taskRunId);
+      const identityFields = ['taskRunId', 'taskKey', 'moduleId', 'parentRunId', 'operationKey'];
+      if (!batch || !task || batch.id !== Number(batchContext.batchId)
+          || identityFields.some((field) => batch[field] !== batchContext[field]
+            || task[field] !== batchContext[field])
+          || batch.batchNumber !== batchContext.batchNumber
+          || task.status !== outcome.terminalStatus || batch.taskStatus !== outcome.terminalStatus) {
+        return { ok: false, code: 'ARCHIVE_OWNER_COMPLETION_IDENTITY_CONFLICT',
+          message: '原任务收口身份或终态与存档记录不一致' };
+      }
+      const { freezePersistedTaskOwner } = require('./worker-operation-context');
+      const owner = freezePersistedTaskOwner({ version: 1, kind: 'file-batch', batchContext }, { required: true });
+      this.repository.recordOwnerTerminalCompletion({ archiveInstanceId: this.archiveInstanceId,
+        owner, terminalStatus: outcome.terminalStatus, afterTerminal: outcome.afterTerminal || null });
+      return { ok: true, status: 'recorded' };
+    });
   }
 
   _finishFileTaskUnlocked(taskRunId, batchId, outcome = {}) {
@@ -1863,7 +1968,7 @@ class ArchiveService {
   async _statRegularFile(filePath, originalName) {
     let stat;
     try {
-      stat = await this.fs.promises.stat(filePath);
+      stat = await readIdentityStat(this.fs, filePath, 'stat');
     } catch (error) {
       throw new ArchiveOperationError(
         safeFailure(error, '读取', originalName).code,
@@ -2040,7 +2145,7 @@ class ArchiveService {
       }
     } else {
       try {
-        await this.fs.promises.lstat(targetPath);
+        await readIdentityStat(this.fs, targetPath);
         throw new ArchiveOperationError(
           'ARCHIVE_BLOB_UNKNOWN_CONFLICT',
           `存档内容 ${staged.sha256.slice(0, 12)} 的目标位置已有未知文件`
@@ -2108,14 +2213,37 @@ class ArchiveService {
     };
   }
 
+  _assertNoPendingHardlinkMutation(stat) {
+    this.repository.assertNoPendingHardlinkMutation({ archiveInstanceId: this.archiveInstanceId,
+      rootDir: this.rootDir, dev: stat.dev, ino: stat.ino });
+  }
+
+  async _assertManagedObjectMutableUnlocked(relativePath) {
+    if (this.assertManagedObjectMutationAllowed) {
+      await this.assertManagedObjectMutationAllowed(relativePath);
+    }
+    const filePath = await this._assertManagedFilePath(relativePath);
+    try {
+      this._assertNoPendingHardlinkMutation(await readIdentityStat(this.fs, filePath));
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+  }
+
   async _invalidateBlobUnlocked(blob, failure) {
     const artifacts = this.repository.listArtifactsByBlob(blob.id);
-    const invalidated = this.repository.invalidateBlob(blob.id, failure);
     const paths = [
       ...artifacts.map((artifact) => artifact.storageRelativePath).filter(Boolean),
       blob.relativePath
     ];
     const failures = [];
+    for (const relativePath of [...new Set(paths)]) {
+      try { await this._assertManagedObjectMutableUnlocked(relativePath); } catch (error) {
+        failures.push({ code: safeFailure(error, '清理').code, item: relativePath });
+      }
+    }
+    if (failures.length) return { invalidated: false, failures };
+    const invalidated = this.repository.invalidateBlob(blob.id, failure);
     for (const relativePath of [...new Set(paths)]) {
       try {
         await this.materializer.remove(relativePath);
@@ -2188,6 +2316,7 @@ class ArchiveService {
     }
 
     try {
+      await this._assertManagedObjectMutableUnlocked(prepared.assignment.storageRelativePath);
       const existing = await this.materializer.verify(
         prepared.assignment.storageRelativePath,
         expected
@@ -2216,7 +2345,22 @@ class ArchiveService {
           };
         }
         // 历史 hardlink 在 canonical 仍可信时原地脱钩为独立 copy。
+        if (sharesCanonicalInode) {
+          this.repository.assertDetachedHardlinkFingerprints(current.blob.id,
+            sourceSnapshotFromStat(canonical.stat));
+        }
         await this.materializer.remove(prepared.assignment.storageRelativePath);
+        if (sharesCanonicalInode) {
+          const after = await this.fs.promises.lstat(canonicalPath, { bigint: true });
+          const before = canonical.stat;
+          if (after.isFile() && !after.isSymbolicLink()
+              && ['dev', 'ino', 'size', 'mtimeNs', 'birthtimeNs', 'mode']
+                .every((field) => after[field] === before[field])
+              && after.nlink === before.nlink - 1n) {
+            this.repository.refreshDetachedHardlinkFingerprints(current.blob.id,
+              sourceSnapshotFromStat(before), sourceSnapshotFromStat(after));
+          }
+        }
       }
       if (!existing.valid && existing.code !== 'ARCHIVE_LAYOUT_MISSING') {
         await this.materializer.remove(prepared.assignment.storageRelativePath);
@@ -2674,9 +2818,11 @@ class ArchiveService {
     let deletedBlobFiles = 0;
     let releasedBytes = 0;
     for (const blob of blobs) {
+      if (this.repository.findReferencedBlob({ sha256: blob.sha256, relativePath: blob.relativePath })) continue;
       let filePath;
       try {
         filePath = await this._assertManagedFilePath(blob.relativePath);
+        await this._assertManagedObjectMutableUnlocked(blob.relativePath);
         await this.fs.promises.rm(filePath, { force: true });
         deletedBlobFiles += 1;
         releasedBytes += blob.sizeBytes;
@@ -2714,94 +2860,20 @@ class ArchiveService {
     return failures;
   }
 
-  async _executeCleanupJobUnlocked(job) {
-    const materializedFailures = [];
-    let deletedMaterializedFiles = 0;
-    let expectedRelativeDir = '';
+  async _executeCleanupJobUnlocked(job, options = {}) {
     try {
-      expectedRelativeDir = batchRelativeDirectory({
-        localDate: job.localDate,
-        batchNumber: job.batchNumber
-      });
-    } catch (_error) {
-      expectedRelativeDir = '';
-    }
-    if (!expectedRelativeDir || job.layoutRelativeDir !== expectedRelativeDir) {
-      const failure = {
-        code: 'ARCHIVE_CLEANUP_PATH_INVALID',
-        item: job.batchNumber
-      };
-      this.repository.recordCleanupJobFailure(job.id, {
-        code: failure.code,
-        message: `批次 ${job.batchNumber} 的清理路径证据无效`
-      });
-      return {
-        ok: false,
-        status: 'cleanup-pending',
-        deletedMaterializedFiles: 0,
-        deletedBlobFiles: 0,
-        releasedBytes: 0,
-        failures: [failure]
-      };
-    }
-    const layoutPrefix = `${job.layoutRelativeDir}/`;
-    for (const relativePath of job.materializedPaths) {
-      if (!String(relativePath).startsWith(layoutPrefix)) {
-        materializedFailures.push({
-          code: 'ARCHIVE_CLEANUP_PATH_INVALID',
-          item: job.batchNumber
-        });
-        continue;
+      const migration = this.getDeleteMigrationContext && await this.getDeleteMigrationContext();
+      if (migration && !options.waitForMigration) {
+        return { ok: false, status: 'cleanup-pending', failures: [{ code: 'ARCHIVE_STORAGE_MIGRATION_PENDING' }] };
       }
-      try {
-        await this.materializer.remove(relativePath);
-        deletedMaterializedFiles += 1;
-      } catch (error) {
-        materializedFailures.push({
-          code: safeFailure(error, '清理目录文件').code,
-          item: job.batchNumber
-        });
-      }
+      const current = job.planVersion === 1 && !job.planError
+        ? await upgradeLegacyDeletePlan(this, job) : job;
+      return { ...await executeDeletePlan(this, current, options), deletionId: current.deletionId };
+    } catch (error) {
+      const failure = safeFailure(error, '永久删除');
+      this.repository.recordCleanupJobFailure(job.id, failure);
+      return { ok: false, status: 'cleanup-pending', failures: [failure] };
     }
-    if (materializedFailures.length > 0) {
-      this.repository.recordCleanupJobFailure(job.id, {
-        code: materializedFailures[0].code,
-        message: `批次 ${job.batchNumber} 的目录文件清理待重试`
-      });
-      return {
-        ok: false,
-        status: 'cleanup-pending',
-        deletedMaterializedFiles,
-        deletedBlobFiles: 0,
-        releasedBytes: 0,
-        failures: materializedFailures
-      };
-    }
-
-    const directoryFailures = await this._removeEmptyLayoutDirectories(job);
-    const physical = await this._removeReleasedBlobs(job.releasedBlobs);
-    const failures = [...directoryFailures, ...physical.failures];
-    if (failures.length > 0) {
-      this.repository.recordCleanupJobFailure(job.id, {
-        code: failures[0].code,
-        message: `批次 ${job.batchNumber} 的物理清理待重试`
-      });
-      return {
-        ok: false,
-        status: 'cleanup-pending',
-        deletedMaterializedFiles,
-        ...physical,
-        failures
-      };
-    }
-    this.repository.completeCleanupJob(job.id);
-    return {
-      ok: true,
-      status: 'cleaned',
-      deletedMaterializedFiles,
-      ...physical,
-      failures: []
-    };
   }
 
   async _processCleanupJobsUnlocked() {
@@ -2813,12 +2885,16 @@ class ArchiveService {
   }
 
   async _deleteBatchUnlocked(batchId, options = {}) {
-    const sourcePaths = this.repository.listArtifacts(batchId)
-      .map((artifact) => artifact.sourcePath)
-      .filter(Boolean);
-    const deleted = this.repository.deleteBatch(batchId, {
-      allowLocked: options.force === true
-    });
+    const existing = this.repository.getCleanupJobForBatch(batchId);
+    if (existing) return this._deleteCleanupResult(existing, await this._executeCleanupJobUnlocked(existing));
+    const receipt = this.repository.getDeletionReceipt(batchId, this.archiveInstanceId);
+    if (receipt) return { ok: true, status: 'deleted', metadataDeleted: true, fullyDeleted: true,
+      batchId: Number(batchId), deletionId: receipt.deletionId, failures: [] };
+    const deletePlan = await buildDeletePlan(this, batchId, options);
+    if (this.assertDeleteAllowed) await this.assertDeleteAllowed(options);
+    if (options.assertOwnerReady) options.assertOwnerReady();
+    const deleted = this.repository.deleteBatch(batchId, { deletePlan, ownerProof: options.ownerProof,
+      managedSourceTargets: deletePlan.items.filter((item) => item.sourceArtifactId) });
     if (deleted.status === 'not-found') {
       return {
         ok: false,
@@ -2865,41 +2941,96 @@ class ArchiveService {
         recoveryState: deleted.recoveryState
       };
     }
-    await this._releaseSourcePaths(sourcePaths);
-    const physical = deleted.cleanupJob
-      ? await this._executeCleanupJobUnlocked(deleted.cleanupJob)
-      : {
-          ok: true,
-          deletedMaterializedFiles: 0,
-          deletedBlobFiles: 0,
-          releasedBytes: 0,
-          failures: []
-        };
+    const physical = await this._executeCleanupJobUnlocked(deleted.cleanupJob);
     return {
-      ok: physical.ok,
-      status: physical.ok ? 'deleted' : 'deleted-cleanup-pending',
-      metadataDeleted: true,
-      batchId: Number(batchId),
+      ...this._deleteCleanupResult(deleted.cleanupJob, physical),
       artifactCount: deleted.artifactCount,
       logicalBytes: deleted.logicalBytes,
-      releasedBlobCount: deleted.releasedBlobs.length,
-      releasedBytes: physical.releasedBytes,
-      deletedMaterializedFiles: physical.deletedMaterializedFiles,
-      failures: physical.failures
+      releasedBlobCount: deleted.releasedBlobs.length
     };
   }
 
+  _deleteCleanupResult(job, physical) {
+    return { ...physical, ok: physical.ok === true,
+      status: physical.ok ? 'deleted' : 'deleted-cleanup-pending',
+      metadataDeleted: true, fullyDeleted: physical.ok === true,
+      batchId: job.batchId, deletionId: physical.deletionId || job.deletionId,
+      cleanupJobId: physical.ok ? null : job.id,
+      message: physical.ok ? '批次及受管文件已永久删除' : '批次信息已删除，文件清理未完成，请重试',
+      failures: physical.failures || [] };
+  }
+
+  async prepareDeleteBatch(batchId) {
+    return runArchiveRootOperation(this.rootDir, async () => {
+      if (!this.initialized) return { ok: false, code: 'ARCHIVE_NOT_READY', message: '存档中心尚未就绪' };
+      try {
+        const plan = await buildDeletePlan(this, batchId);
+        return { ok: true, batch: publicBatch(this.repository.getBatch(batchId)),
+          archiveInstanceId: plan.archiveInstanceId, revision: plan.batchRevision,
+          summary: { sourcePolicy: 'managed-only', fileCount: plan.items.length,
+            materializedFileCount: plan.items.filter((item) => item.kind === 'materialized').length,
+            blobCount: plan.items.filter((item) => item.kind === 'blob').length,
+            ownedTemporaryFileCount: plan.items.filter((item) => item.kind === 'owned-temp').length } };
+      } catch (error) { return { ok: false, ...safeFailure(error, '准备永久删除') }; }
+    });
+  }
+
+  async listDeleteCleanupJobs() {
+    return { ok: true, jobs: this.repository.listCleanupJobs().map((job) => ({
+      id: job.id, cleanupJobId: job.id, deletionId: job.deletionId,
+      batchId: job.batchId, batchNumber: job.batchNumber,
+      moduleId: job.plan?.moduleId || '', state: job.state || 'pending',
+      attemptCount: job.attemptCount, lastErrorCode: job.lastErrorCode,
+      lastErrorMessage: job.lastErrorMessage, fullyDeleted: false, metadataDeleted: true
+    })) };
+  }
+
+  async retryDeleteCleanupJob(jobId) {
+    const job = this.repository.getCleanupJob(jobId);
+    if (!job) return { ok: false, code: 'ARCHIVE_DELETE_JOB_NOT_FOUND', message: '清理任务不存在，请刷新列表' };
+    const result = await this._run('retryDeleteCleanupJob', async () => {
+      const current = this.repository.getCleanupJob(jobId);
+      if (!current) {
+        const receipt = this.repository.getDeletionReceipt(job.batchId, this.archiveInstanceId);
+        if (receipt && (job.deletionId ? receipt.deletionId === job.deletionId
+          : receipt.batchNumber === job.batchNumber)) return { ok: true, metadataDeleted: true,
+          fullyDeleted: true, status: 'deleted', deletionId: receipt.deletionId, cleanupJobId: null };
+        return { ok: false, code: 'ARCHIVE_DELETE_JOB_NOT_FOUND', message: '清理任务不存在，请刷新列表' };
+      }
+      if (this.assertDeleteAllowed) await this.assertDeleteAllowed();
+      return this._deleteCleanupResult(current, await this._executeCleanupJobUnlocked(current));
+    });
+    return { metadataDeleted: true, fullyDeleted: false, cleanupJobId: job.id,
+      deletionId: job.deletionId, batchId: job.batchId, ...result };
+  }
+
   async deleteBatch(batchId, options = {}) {
-    return this._run('deleteBatch', async () => this._deleteBatchUnlocked(batchId, options));
+    if (options.origin === 'retention' && this.runDeleteWithOwnerGuard) {
+      return this.runDeleteWithOwnerGuard(batchId, (guard) => this._run('deleteBatch',
+        async () => this._deleteBatchUnlocked(batchId, { ...options, ...guard })), options);
+    }
+    const result = await this._run('deleteBatch', async () => this._deleteBatchUnlocked(batchId, options));
+    if (result.ok === false && result.metadataDeleted === undefined) {
+      const job = this.repository.getCleanupJobForBatch(batchId);
+      if (job) return { ...result, metadataDeleted: true, fullyDeleted: false,
+        cleanupJobId: job.id, deletionId: job.deletionId, batchId: Number(batchId) };
+    }
+    return result;
   }
 
   async cleanupExpired(options = {}) {
-    return this._run('cleanupExpired', async () => {
+    if (!this.initialized) {
+      const ready = await this._run('prepareRetention', async () => ({ ok: true }));
+      if (!ready.ok) return ready;
+    }
+    {
       const asOfLocalDate = options.asOfLocalDate || localDateOf(options.now || this.now());
       const expired = this.repository.listExpiredBatches(asOfLocalDate);
       const results = [];
       for (const batch of expired) {
-        results.push(await this._deleteBatchUnlocked(batch.id));
+        results.push(await this.deleteBatch(batch.id, {
+          origin: 'retention', ownerToken: options.ownerToken
+        }));
       }
       return {
         ok: results.every((result) => result.ok),
@@ -2911,7 +3042,7 @@ class ArchiveService {
         releasedBytes: results.reduce((sum, result) => sum + (result.releasedBytes || 0), 0),
         results
       };
-    });
+    }
   }
 
   async getStats() {
@@ -3036,18 +3167,46 @@ class ArchiveService {
       const copyDir = path.join(this.readonlyDir, crypto.randomUUID());
       const targetPath = path.join(copyDir, safeName(ready.artifact.originalName));
       const tempPath = `${targetPath}.tmp`;
+      const relative = `${READONLY_DIR_NAME}/${path.basename(copyDir)}/${path.basename(targetPath)}`;
+      let copyFd;
+      const owner = this.repository.registerOwnedTemporaryFile(ready.artifact.batchId, {
+        artifactId: ready.artifact.id, kind: 'readonly', managedRelativePath: relative,
+        state: 'creating'
+      });
+      const tempOwner = this.repository.registerOwnedTemporaryFile(ready.artifact.batchId, {
+        artifactId: ready.artifact.id, kind: 'readonly', managedRelativePath: `${relative}.tmp`,
+        state: 'creating'
+      });
       try {
         await this._assertManagedFilePath(
           `${READONLY_DIR_NAME}/${path.basename(copyDir)}/${path.basename(targetPath)}`,
           { includeLeaf: false }
         );
+        const rootParents = readonlyParentIdentity(this, `${READONLY_DIR_NAME}/.guard`);
         await this.fs.promises.mkdir(copyDir, { recursive: true });
-        await pipeline(
-          this.fs.createReadStream(ready.filePath),
-          this.fs.createWriteStream(tempPath, { flags: 'wx', mode: 0o400 })
-        );
+        const parents = readonlyParentIdentity(this, relative);
+        if (JSON.stringify(parents.slice(0, -1)) !== JSON.stringify(rootParents)) readonlyIdentityChanged();
+        copyFd = this.fs.openSync(tempPath, 'wx', 0o400);
+        this.repository.updateOwnedTemporaryFile(tempOwner.id, {
+          expectedIdentity: assertReadonlyCopyIdentity(this, `${relative}.tmp`, copyFd, parents)
+        });
+        // 从排他创建到 ready 登记持有同一 fd，流结束不能提前失去创建身份。
+        const writer = this.fs.createWriteStream(tempPath, { fd: copyFd, autoClose: false });
+        // pipeline 失败时仍会 destroy 流并关闭 fd，不能在 finally 再关闭已复用的编号。
+        writer.once('close', () => { copyFd = undefined; });
+        await pipeline(this.fs.createReadStream(ready.filePath), writer);
+        assertReadonlyCopyIdentity(this, `${relative}.tmp`, copyFd, parents);
         await this.fs.promises.rename(tempPath, targetPath);
-        await this.fs.promises.chmod(targetPath, 0o400);
+        assertReadonlyCopyIdentity(this, relative, copyFd, parents);
+        this.fs.fchmodSync(copyFd, 0o400);
+        const expectedIdentity = await captureFileIdentity(this, relative, { sha256: ready.artifact.blob.sha256 });
+        assertReadonlyCopyIdentity(this, relative, copyFd, parents, expectedIdentity);
+        this.repository.updateOwnedTemporaryFile(owner.id, { state: 'ready',
+          expectedIdentity });
+        this.repository.updateOwnedTemporaryFile(tempOwner.id, { state: 'ready',
+          expectedIdentity: { exists: false, parents: [] } });
+        this.fs.closeSync(copyFd);
+        copyFd = undefined;
         const opener = options.opener || this.opener;
         let opened = false;
         if (opener) {
@@ -3072,12 +3231,14 @@ class ArchiveService {
           artifact: publicArtifact(ready.artifact)
         };
       } catch (error) {
-        try { await this.fs.promises.rm(copyDir, { recursive: true, force: true }); } catch (_cleanupError) {}
+        // 持久 owner 留给恢复/删除诊断，不能在登记或打开失败后递归清空目录。
         return {
           ok: false,
           status: 'failed',
           ...safeFailure(error, '生成只读副本', ready.artifact.originalName)
         };
+      } finally {
+        if (copyFd !== undefined) { try { this.fs.closeSync(copyFd); } catch (_closeError) {} }
       }
     });
   }
@@ -3122,7 +3283,7 @@ class ArchiveService {
           );
         }
         try {
-          const targetStat = await this.fs.promises.lstat(targetPath);
+          const targetStat = await readIdentityStat(this.fs, targetPath);
           if (!targetStat.isFile() || targetStat.isSymbolicLink()) {
             throw new ArchiveOperationError(
               'ARCHIVE_SAVE_TARGET_INVALID',
@@ -3591,20 +3752,23 @@ class ArchiveService {
   }
 
   async runRetentionMaintenance(options = {}) {
+    if (!this.initialized) {
+      const ready = await this._run('prepareRetention', async () => ({ ok: true }));
+      if (!ready.ok) return ready;
+    }
     const asOfLocalDate = options.asOfLocalDate || localDateOf(options.now || this.now());
     const deletedBatchIds = [];
     const results = [];
     while (true) {
-      const page = await this._run('runRetentionMaintenancePage', async () => {
-        const candidates = this.repository.listExpiredBatches(asOfLocalDate)
-          .slice(0, this.startupMaterializationBatchSize);
-        const pageResults = [];
-        for (const batch of candidates) {
-          pageResults.push(await this._deleteBatchUnlocked(batch.id));
-        }
-        return { candidates, pageResults };
-      });
-      if (!page || page.ok === false) return page;
+      const candidates = this.repository.listExpiredBatches(asOfLocalDate)
+        .slice(0, this.startupMaterializationBatchSize);
+      const pageResults = [];
+      for (const batch of candidates) {
+        pageResults.push(await this.deleteBatch(batch.id, {
+          origin: 'retention', ownerToken: options.ownerToken
+        }));
+      }
+      const page = { candidates, pageResults };
       results.push(...page.pageResults);
       deletedBatchIds.push(...page.pageResults
         .filter((result) => result.metadataDeleted)
@@ -3646,6 +3810,13 @@ class ArchiveService {
         consistency
       };
     });
+  }
+
+  async recoverFileTaskOwnerCompletions(options = {}) {
+    return this._run('recoverFileTaskOwnerCompletions', async () => ({
+      ok: true, status: 'complete',
+      ...this.repository.recoverFileTaskOwnerCompletions(options)
+    }));
   }
 
   async markInterruptedTasks(options = {}) {

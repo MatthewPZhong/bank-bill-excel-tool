@@ -1,16 +1,24 @@
 'use strict';
 
+const path = require('node:path');
+const { createArchiveOutboxStore } = require('../archive-center/outbox-store');
+const { freezePersistedTaskOwner } = require('../archive-center/worker-operation-context');
 const { normalizeRecoverySource } = require('../background-execution/recovery-source');
-const { ACTIONS, CATALOG_SCOPE, identity, sameSource, sourceKey, registryKeys, fail, hash, snapshot } = require('./contracts');
+const { ACTIONS, MODULE_ID, CATALOG_SCOPE, identity, sameSource, sourceKey, registryKeys, fail, hash, snapshot } = require('./contracts');
 const { NEEDS_RECOVERY_SQL, taskAlignment } = require('./recovery-alignment');
+const { recordExportOwnerCompletion } = require('./archive-owner-completion');
+const { createArchiveOwnerBackfill } = require('./archive-owner-backfill');
 
-function createBizOpRecoverySources({ catalog, protection, payloadStore, readRepository, getArchiveService, requireRecovery }) {
+function createBizOpRecoverySources({ catalog, protection, payloadStore, readRepository, getArchiveService, requireRecovery, userDataDir }) {
   const { db, now } = catalog;
+  const outbox = createArchiveOutboxStore(path.join(userDataDir, 'run-data', 'archive-center', 'outbox'));
   let frozenSources = null;
   let budget = null;
   let beforeFinalize = async () => {};
   let beforeCommitted = async () => {};
   let publication = null;
+  const historicalOwners = createArchiveOwnerBackfill({ catalog, getArchiveService, payloadStore, protection,
+    operationSource: (taskRunId) => makeSource(catalog.operation(taskRunId), 'OPERATION'), getPublication: () => publication });
   function installBudget(value) { budget = value; }
   function makeSource(op, category, extra = {}, reference = op.source_ref) {
     return { contractVersion: 1, sourceKind: category === 'OPERATION' ? op.source_kind : 'module-recovery',
@@ -18,6 +26,24 @@ function createBizOpRecoverySources({ catalog, protection, payloadStore, readRep
       conflictScopeKey: CATALOG_SCOPE, ...registryKeys(category === 'RECLAIM' ? 'RECLAIM' : op.action),
       intentId: null, evidenceVersion: 1,
       boundedEvidence: { category, intentDigest: op.intent_digest, ...extra } };
+  }
+  function pendingArchiveOwners() {
+    const owners = new Set();
+    // 用原 outbox 的完整性校验读取持久责任；读取失败不得降级成无 pending 的历史项。
+    for (const record of outbox.list()) {
+      const raw = record.payload.owner;
+      if (raw?.kind !== 'file-batch' || raw.batchContext?.moduleId !== MODULE_ID) continue;
+      const owner = freezePersistedTaskOwner(raw, { required: true });
+      const op = catalog.operation(owner.batchContext.taskRunId);
+      // beforeStart 尚未登记 publication 的普通终态通知仍由 Lifecycle/Controller 收口。
+      if (!op || op.action !== 'EXPORT' || !db.prepare('SELECT 1 FROM biz_op_v327_publications WHERE task_run_id=?').get(op.task_run_id)) continue;
+      const proof = catalog.archive.getOwnerTerminalCompletion(owner);
+      if (proof && proof.archiveInstanceId === catalog.archive.getArchiveInstanceId()
+          && proof.terminalStatus === record.payload.terminalOutcome?.taskStatus
+          && hash(proof.afterTerminal) === hash(record.payload.terminalOutcome?.afterTerminal || null)) continue;
+      owners.add(op.task_run_id);
+    }
+    return owners;
   }
   function collect() {
     budget.begin('enumerations');
@@ -48,6 +74,8 @@ function createBizOpRecoverySources({ catalog, protection, payloadStore, readRep
       WHERE p.action!='RECLAIM' AND (${NEEDS_RECOVERY_SQL}) ORDER BY p.task_run_id`).iterate()) {
       add(makeSource(catalog.operation(row.task_run_id), 'OPERATION'));
     }
+    // 旧 CLOSED/COMPLETE 缓存不能隐藏尚未确认的匿名终态通知，仍受真实恢复的完整预算约束。
+    for (const taskRunId of pendingArchiveOwners()) add(makeSource(catalog.operation(taskRunId), 'OPERATION'));
     for (const row of db.prepare('SELECT * FROM biz_op_v327_read_pins ORDER BY task_run_id,session_id,object_kind,object_id').iterate()) {
       const evidence = { sessionId: row.session_id, objectKind: row.object_kind, objectId: row.object_id,
         manifestDigest: row.manifest_digest, readPlanDigest: row.read_plan_digest };
@@ -261,6 +289,10 @@ function createBizOpRecoverySources({ catalog, protection, payloadStore, readRep
     if (!taskAlignment(catalog, source, current.outcome).complete) return false;
     if (db.prepare('SELECT 1 FROM biz_op_v327_read_pins WHERE task_run_id=? LIMIT 1').get(source.taskRunId)) return false;
     return catalog.transaction(() => {
+      const ownerCompletion = current.op.action === 'EXPORT'
+        && source.boundedEvidence.category === 'OPERATION'
+        ? recordExportOwnerCompletion({ catalog, service: getArchiveService(), publication, source, payloadStore, protection }) : null;
+      if (ownerCompletion && !ownerCompletion.completed) return false;
       let changes = db.prepare(`UPDATE biz_op_v327_recovery_followups SET state='COMPLETE',updated_at=?
         WHERE source_kind=? AND source_ref=? AND state!='COMPLETE'`).run(now(), source.sourceKind, source.sourceRef).changes;
       if (['OPERATION', 'RECLAIM'].includes(source.boundedEvidence.category)) {
@@ -270,7 +302,7 @@ function createBizOpRecoverySources({ catalog, protection, payloadStore, readRep
           archive_terminal_observed_at=?,updated_at=? WHERE task_run_id=? AND state!='COMPLETE'`)
           .run(now(), now(), now(), source.taskRunId).changes;
       }
-      return changes > 0;
+      return changes > 0 || ownerCompletion?.recorded === true;
     });
   }
   function register(inspectors, providers) {
@@ -286,6 +318,8 @@ function createBizOpRecoverySources({ catalog, protection, payloadStore, readRep
     }
   }
   return Object.freeze({ collect, register, installBudget, inspect, facts, finalize, syncCompletion, recordConflict,
+    hasPendingArchiveOwners: () => pendingArchiveOwners().size > 0,
+    hasHistoricalOwners: historicalOwners.exists, backfillHistoricalOwners: historicalOwners.run,
     setPublication(value) { publication = value; },
     async prepareSource(source) {
       if (catalog.operation(source.taskRunId).action !== 'EXPORT' || !publication) return;

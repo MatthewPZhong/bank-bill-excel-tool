@@ -1,0 +1,48 @@
+{
+  "recordedAt": "2026-09-18T08:38:41.065633+00:00",
+  "command": "UNIT_TEST_CONCURRENCY=2 npm run release-check",
+  "exitCode": 0,
+  "branch": "codex/v3.2.9-vcc-fin-op-multisheet-review-export",
+  "baseCommit": "2ba9ef14fe972363b604955636cff0c9ac53700f",
+  "lint": "PASS",
+  "smoke": "PASS",
+  "unit": {
+    "tests": 7354,
+    "suites": 831,
+    "pass": 7351,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 3,
+    "todo": 0,
+    "durationMs": 1168840.696,
+    "fileCount": 475,
+    "runnerElapsedMs": 1168877
+  },
+  "integration": {
+    "scriptsPassed": 53,
+    "cases": 2488,
+    "assertionsPassed": 2488,
+    "elapsedMs": 783452
+  },
+  "sourceVerification": {
+    "fileCount": 61,
+    "allFingerprintsMatch": true,
+    "noUnexpectedChangedSourceFiles": true,
+    "sourceManifestSha256": "4844ca52b624de2cdde5cc5e25064e60b841ca40f3dc4e7a0de586bc2e81c5af",
+    "manifestFileSha256": "b8e1def751a583087906a0f5d16807331caa54cd18dc0408c805c467682b4699"
+  },
+  "rawLog": "release-check.txt",
+  "rawLogSha256": "0c542cf0778dde23438c8c578b06bbd549f2a1c3e3b0b3f85fb7b84e66507f38",
+  "notExecuted": [
+    "Windows installer acceptance",
+    "Excel/WPS manual inspection",
+    "Complete VCC PF01-PF05 acceptance",
+    "Manual recovery drill"
+  ],
+  "priorEvidenceNotRerun": [
+    "Dedicated real Electron/ASAR VCC probe",
+    "Million-row shared Writer component measurement"
+  ],
+  "businessDatabaseTouched": false,
+  "committedOrPushed": false
+}

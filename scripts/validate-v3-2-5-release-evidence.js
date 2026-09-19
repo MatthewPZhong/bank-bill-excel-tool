@@ -3,6 +3,7 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const { resolveChangesPath } = require('./lib/changes-paths');
 
 const REPOSITORY_ROOT = path.resolve(__dirname, '..');
 const RELEASE = '3.2.5';
@@ -10,7 +11,7 @@ const EVIDENCE_DATE = '2026-08-31';
 const EXACT_BASE = '7f9644922fde2f521c8e09fb3f856046ff9a3f1d';
 const EVIDENCE_DIRECTORY = 'changes/background-execution-r3-2-5-release-evidence';
 const SNAPSHOT_RELATIVE_PATH = `${EVIDENCE_DIRECTORY}/release-evidence.json`;
-const SNAPSHOT_PATH = path.join(REPOSITORY_ROOT, SNAPSHOT_RELATIVE_PATH);
+const SNAPSHOT_PATH = resolveChangesPath(REPOSITORY_ROOT, SNAPSHOT_RELATIVE_PATH);
 const PACKAGE_ROOT_RELATIVE_PATH = 'changes/background-execution-v3.2.x-contract-baseline';
 
 const AUTHORITY_PATHS = Object.freeze({
@@ -119,7 +120,7 @@ const GLOBAL_EVIDENCE_REFS = Object.freeze([
 ]);
 
 function absolute(relativePath) {
-  return path.join(REPOSITORY_ROOT, relativePath);
+  return resolveChangesPath(REPOSITORY_ROOT, relativePath);
 }
 
 function readText(relativePath) {

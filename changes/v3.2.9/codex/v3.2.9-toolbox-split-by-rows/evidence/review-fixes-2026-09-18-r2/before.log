@@ -1,0 +1,83 @@
+(node:31469) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✖ rows 父目录身份贯穿真实 Main execute 与 Worker Publisher：before-generation (170.565166ms)
+✖ rows 父目录身份贯穿真实 Main execute 与 Worker Publisher：before-publication (54.365958ms)
+✖ rows 父目录身份贯穿真实 Main execute 与 Worker Publisher：unchanged (131.957125ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 0
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 513.525417
+
+✖ failing tests:
+
+test at tests/unit/main-process/toolbox-row-split-parent-identity.test.js:35:3
+✖ rows 父目录身份贯穿真实 Main execute 与 Worker Publisher：before-generation (170.565166ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'success'
+  - 'failed'
+  
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v329-toolbox-split-by-rows/tests/unit/main-process/toolbox-row-split-parent-identity.test.js:114:14)
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:358:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'success',
+    expected: 'failed',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/unit/main-process/toolbox-row-split-parent-identity.test.js:35:3
+✖ rows 父目录身份贯穿真实 Main execute 与 Worker Publisher：before-publication (54.365958ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'TOOLBOX_PUBLICATION_INVALID_FILE'
+  - 'TOOLBOX_PUBLICATION_TARGET_PARENT_CHANGED'
+                         ^
+  
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v329-toolbox-split-by-rows/tests/unit/main-process/toolbox-row-split-parent-identity.test.js:115:14)
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'TOOLBOX_PUBLICATION_INVALID_FILE',
+    expected: 'TOOLBOX_PUBLICATION_TARGET_PARENT_CHANGED',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/unit/main-process/toolbox-row-split-parent-identity.test.js:35:3
+✖ rows 父目录身份贯穿真实 Main execute 与 Worker Publisher：unchanged (131.957125ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+  + undefined
+  - {
+  -   aliasKey: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/t/rows-parent-test-cbp17a/chosen',
+  -   canonicalRealPath: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/rows-parent-test-CBp17A/chosen',
+  -   deviceId: '16777232',
+  -   identityKind: 'dev-inode',
+  -   identityReliable: true,
+  -   inode: '111040061'
+  - }
+  
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v329-toolbox-split-by-rows/tests/unit/main-process/toolbox-row-split-parent-identity.test.js:105:16)
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: { canonicalRealPath: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/rows-parent-test-CBp17A/chosen', aliasKey: '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/t/rows-parent-test-cbp17a/chosen', deviceId: '16777232', inode: '111040061', identityReliable: true, identityKind: 'dev-inode' },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

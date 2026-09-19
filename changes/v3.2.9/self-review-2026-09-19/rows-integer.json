@@ -1,0 +1,10 @@
+{
+  "status": "PASS",
+  "runtime": "v24.13.0",
+  "cases": 7031,
+  "ranges": 3509509,
+  "excessRejected": 19,
+  "publicResultFiles": 1000,
+  "publicResultBytes": 167088,
+  "boundary": "pure planning only; no generated XLSX, Publisher, GUI, capacity, or Windows acceptance"
+}

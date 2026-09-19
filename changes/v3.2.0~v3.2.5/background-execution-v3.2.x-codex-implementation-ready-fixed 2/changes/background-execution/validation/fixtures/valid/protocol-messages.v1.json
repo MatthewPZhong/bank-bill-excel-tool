@@ -1,0 +1,197 @@
+[
+  {
+    "protocolVersion": 1,
+    "channel": "job",
+    "direction": "command",
+    "operation": "job:start",
+    "actionKey": "statement:import",
+    "operationKey": "task-1/statement:import/1",
+    "jobId": "job-1",
+    "workerInstanceId": "worker-1",
+    "serviceGeneration": 1,
+    "unitId": null,
+    "seq": 1,
+    "context": {
+      "kind": "operation",
+      "value": {}
+    },
+    "payload": {}
+  },
+  {
+    "protocolVersion": 1,
+    "channel": "service-control",
+    "direction": "command",
+    "operation": "executor:init",
+    "serviceKey": "service.statement",
+    "controlId": "control-1",
+    "workerInstanceId": "worker-1",
+    "serviceGeneration": 1,
+    "seq": 1,
+    "jobRef": null,
+    "payload": {
+      "contractVersion": 1,
+      "policyDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "baseLeaseId": "lease-base-1"
+    }
+  },
+  {
+    "protocolVersion": 1,
+    "channel": "service-control",
+    "direction": "event",
+    "operation": "executor:ready",
+    "serviceKey": "service.statement",
+    "controlId": "control-ready-1",
+    "workerInstanceId": "worker-1",
+    "serviceGeneration": 1,
+    "seq": 1,
+    "jobRef": null,
+    "payload": {
+      "contractVersion": 1,
+      "capabilities": [
+        "resource-control-v1",
+        "statement-session-v1"
+      ]
+    }
+  },
+  {
+    "protocolVersion": 1,
+    "channel": "service-control",
+    "direction": "event",
+    "operation": "resource:request",
+    "serviceKey": "service.statement",
+    "controlId": "control-2",
+    "workerInstanceId": "worker-1",
+    "serviceGeneration": 1,
+    "seq": 2,
+    "jobRef": {
+      "actionKey": "statement:import",
+      "operationKey": "task-1/statement:import/1",
+      "jobId": "job-1",
+      "unitId": null
+    },
+    "payload": {
+      "requestId": "request-1",
+      "requestKind": "pending-interaction-create",
+      "requested": {
+        "memoryBytes": 1048576,
+        "cpuSlots": 0,
+        "ioHeavySlots": 0
+      },
+      "replacesReservationId": null,
+      "owner": {
+        "kind": "interaction-token",
+        "ownerKeyHash": "token-hash-1",
+        "candidateRevision": 1
+      }
+    }
+  },
+  {
+    "protocolVersion": 1,
+    "channel": "service-control",
+    "direction": "command",
+    "operation": "resource:grant",
+    "serviceKey": "service.statement",
+    "controlId": "control-2",
+    "workerInstanceId": "worker-1",
+    "serviceGeneration": 1,
+    "seq": 2,
+    "jobRef": {
+      "actionKey": "statement:import",
+      "operationKey": "task-1/statement:import/1",
+      "jobId": "job-1",
+      "unitId": null
+    },
+    "payload": {
+      "requestId": "request-1",
+      "grantId": "grant-1",
+      "reservationId": "reservation-1",
+      "replacesReservationId": null,
+      "granted": {
+        "memoryBytes": 1048576,
+        "cpuSlots": 0,
+        "ioHeavySlots": 0
+      },
+      "adoptionDeadlineMs": 30000
+    }
+  },
+  {
+    "protocolVersion": 1,
+    "channel": "service-control",
+    "serviceKey": "service.statement",
+    "workerInstanceId": "worker-1",
+    "serviceGeneration": 1,
+    "jobRef": {
+      "actionKey": "statement:import",
+      "operationKey": "task-1/statement:import/1",
+      "jobId": "job-1",
+      "unitId": null
+    },
+    "direction": "event",
+    "operation": "resource:adopted",
+    "controlId": "control-3",
+    "seq": 3,
+    "payload": {
+      "requestId": "request-1",
+      "grantId": "grant-1",
+      "reservationId": "reservation-1",
+      "owner": {
+        "kind": "interaction-token",
+        "ownerKeyHash": "token-hash-1",
+        "candidateRevision": 1
+      }
+    }
+  },
+  {
+    "protocolVersion": 1,
+    "channel": "service-control",
+    "serviceKey": "service.statement",
+    "workerInstanceId": "worker-1",
+    "serviceGeneration": 1,
+    "jobRef": {
+      "actionKey": "statement:import",
+      "operationKey": "task-1/statement:import/1",
+      "jobId": "job-1",
+      "unitId": null
+    },
+    "direction": "command",
+    "operation": "resource:adopt-ack",
+    "controlId": "control-3",
+    "seq": 3,
+    "payload": {
+      "requestId": "request-1",
+      "grantId": "grant-1",
+      "reservationId": "reservation-1"
+    }
+  },
+  {
+    "protocolVersion": 1,
+    "channel": "service-control",
+    "serviceKey": "service.statement",
+    "workerInstanceId": "worker-1",
+    "serviceGeneration": 1,
+    "jobRef": null,
+    "direction": "event",
+    "operation": "resource:release",
+    "controlId": "control-4",
+    "seq": 4,
+    "payload": {
+      "reservationId": "reservation-1",
+      "reason": "token-consumed"
+    }
+  },
+  {
+    "protocolVersion": 1,
+    "channel": "service-control",
+    "serviceKey": "service.statement",
+    "workerInstanceId": "worker-1",
+    "serviceGeneration": 1,
+    "jobRef": null,
+    "direction": "command",
+    "operation": "resource:release-ack",
+    "controlId": "control-4",
+    "seq": 4,
+    "payload": {
+      "reservationId": "reservation-1"
+    }
+  }
+]

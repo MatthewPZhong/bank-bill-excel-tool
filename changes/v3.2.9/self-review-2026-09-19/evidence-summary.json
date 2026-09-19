@@ -1,0 +1,866 @@
+{
+  "createdAt": "2026-09-18T17:09:34.223595+00:00",
+  "reviewBase": "6bd55efe0eb1d90c16cd92f3a78e54a39a36b966",
+  "coreCandidate": "5001d331bb78bdb82dfaa018ee705b51681bde4f",
+  "overlayBackup": "/private/tmp/v329-release-20260919-3_bafjvz/baseline.json",
+  "rawEvidence": "/private/tmp/v329-release-20260919-3_bafjvz",
+  "nativeInput": {
+    "platform": "darwin",
+    "electron": "36.9.5",
+    "sourceHashes": {
+      "scripts/verify-dark-mode-native-input.js": "c46e8c3d6479785131ae0116b12b4c617ead12ca733667f90fc3a4fdd7b0c8d5",
+      "src/shared/dark-mode-schedule.js": "3c06d66e5d3f8946cabe7b48fac620bf276cddd6dba4cdcc1952cf37527a25d5",
+      "src/renderer-dark-mode.js": "6cf39d711fb8620985d52dbf287ed2e65f9b3b920bd0a62c57b2a660e881e764",
+      "src/styles-dark-mode.css": "b45a9dead620b079da2b0024ef7f4a61b3a03f9a645477237b2335c2c02bee1b",
+      "src/styles-dark-mode-settings.css": "e054147fb2508319998a8fda2e9832b759f01c62576287543a38659d7b5d1c92"
+    },
+    "caseCount": 16,
+    "results": [
+      {
+        "name": "native-control-19",
+        "passed": true,
+        "failures": []
+      },
+      {
+        "name": "start-hour-save15-key100",
+        "passed": true,
+        "failures": []
+      },
+      {
+        "name": "start-minute-save15-key100",
+        "passed": true,
+        "failures": []
+      },
+      {
+        "name": "end-hour-save15-key100",
+        "passed": true,
+        "failures": []
+      },
+      {
+        "name": "end-minute-save15-key100",
+        "passed": true,
+        "failures": []
+      },
+      {
+        "name": "start-hour-save200-key30",
+        "passed": true,
+        "failures": []
+      },
+      {
+        "name": "start-minute-save200-key30",
+        "passed": true,
+        "failures": []
+      },
+      {
+        "name": "end-hour-save200-key30",
+        "passed": true,
+        "failures": []
+      },
+      {
+        "name": "end-minute-save200-key30",
+        "passed": true,
+        "failures": []
+      },
+      {
+        "name": "enabled-start-hour-save15-key100",
+        "passed": true,
+        "failures": []
+      },
+      {
+        "name": "slow-two-fields",
+        "passed": true,
+        "failures": []
+      },
+      {
+        "name": "disable-during-save",
+        "passed": true,
+        "failures": []
+      },
+      {
+        "name": "edit-time-after-queued-off",
+        "passed": true,
+        "failures": []
+      },
+      {
+        "name": "invalid-time-after-queued-off",
+        "passed": true,
+        "failures": []
+      },
+      {
+        "name": "invalid-time-before-queued-off",
+        "passed": true,
+        "failures": []
+      },
+      {
+        "name": "save-failure-keeps-focus",
+        "passed": true,
+        "failures": []
+      }
+    ]
+  },
+  "uiMatrices": [
+    {
+      "file": "/private/tmp/v329-release-20260919-3_bafjvz/night-ui/ui-verification.json",
+      "sha256": "17e066d627405ffbefcd2ff36de9f8dbe2bb86c7a4ecfc56138dc287511cd07e",
+      "ok": true,
+      "groups": 9,
+      "assertions": 1656,
+      "failures": [],
+      "limitations": [
+        "模块检查覆盖基础主面板几何和最小控件字体；不穷举业务数据状态或完整操作流程",
+        "完整打开并操作的代表弹窗仅设置/外观页；账户表格和VCC组件使用真实CSS类的静态测试节点",
+        "隐藏窗口启用CDP文档焦点模拟后，通过真实DOM.focus检查时间输入的可见焦点轮廓；未触发鼠标hover、OS焦点切换、完整键盘Tab顺序或屏幕阅读器",
+        "保存期间验证fieldset保持可编辑；未穷举所有业务按钮的disabled配色",
+        "对比度检查针对列出的不透明语义色组合；未量化自定义图片每个像素后的实际文字对比度",
+        "所有业务desktopApi均为内存模拟，未证明Main冷启动、真实IPC、真实持久化或Windows行为"
+      ]
+    },
+    {
+      "file": "/private/tmp/v329-release-20260919-3_bafjvz/night-zoom-125/ui-verification-webzoom-125.json",
+      "sha256": "f0e20bee72cedc786624e3b51127ae9623205bf9aa55f167129183112ff51ff6",
+      "ok": true,
+      "groups": 3,
+      "assertions": 552,
+      "failures": [],
+      "limitations": [
+        "模块检查覆盖基础主面板几何和最小控件字体；不穷举业务数据状态或完整操作流程",
+        "完整打开并操作的代表弹窗仅设置/外观页；账户表格和VCC组件使用真实CSS类的静态测试节点",
+        "隐藏窗口启用CDP文档焦点模拟后，通过真实DOM.focus检查时间输入的可见焦点轮廓；未触发鼠标hover、OS焦点切换、完整键盘Tab顺序或屏幕阅读器",
+        "保存期间验证fieldset保持可编辑；未穷举所有业务按钮的disabled配色",
+        "对比度检查针对列出的不透明语义色组合；未量化自定义图片每个像素后的实际文字对比度",
+        "所有业务desktopApi均为内存模拟，未证明Main冷启动、真实IPC、真实持久化或Windows行为"
+      ]
+    },
+    {
+      "file": "/private/tmp/v329-release-20260919-3_bafjvz/night-zoom-150/ui-verification-webzoom-150.json",
+      "sha256": "601a3cd946f524e6207a79534656d9a10813ee5373a5601b3ab36f89ceae2f90",
+      "ok": true,
+      "groups": 3,
+      "assertions": 552,
+      "failures": [],
+      "limitations": [
+        "模块检查覆盖基础主面板几何和最小控件字体；不穷举业务数据状态或完整操作流程",
+        "完整打开并操作的代表弹窗仅设置/外观页；账户表格和VCC组件使用真实CSS类的静态测试节点",
+        "隐藏窗口启用CDP文档焦点模拟后，通过真实DOM.focus检查时间输入的可见焦点轮廓；未触发鼠标hover、OS焦点切换、完整键盘Tab顺序或屏幕阅读器",
+        "保存期间验证fieldset保持可编辑；未穷举所有业务按钮的disabled配色",
+        "对比度检查针对列出的不透明语义色组合；未量化自定义图片每个像素后的实际文字对比度",
+        "所有业务desktopApi均为内存模拟，未证明Main冷启动、真实IPC、真实持久化或Windows行为"
+      ]
+    }
+  ],
+  "settingsLayout": {
+    "passed": true,
+    "groups": 6,
+    "failures": [],
+    "files": [
+      {
+        "file": "scripts/verify-app-settings-layout.js",
+        "sha256": "c12e20ea4a75beb9f97bbfc9265477757ae82cbc0c274d465bedd2b9202ae6af"
+      },
+      {
+        "file": "index.html",
+        "sha256": "839e49f6d6e9db68d61016575e8a161fb27129dda9a1126b4d781aa6c9828f16"
+      },
+      {
+        "file": "src/renderer.js",
+        "sha256": "1d921813215c1dbaa436dbe37c18543d16409d549c6b88a5175f279028425ef0"
+      },
+      {
+        "file": "src/renderer-dark-mode.js",
+        "sha256": "6cf39d711fb8620985d52dbf287ed2e65f9b3b920bd0a62c57b2a660e881e764"
+      },
+      {
+        "file": "src/shared/dark-mode-schedule.js",
+        "sha256": "3c06d66e5d3f8946cabe7b48fac620bf276cddd6dba4cdcc1952cf37527a25d5"
+      },
+      {
+        "file": "src/styles-gemini.css",
+        "sha256": "5ec94ce0d82d61cca953c44ea3dd782179de6c6f3de858907a064520e88789bf"
+      },
+      {
+        "file": "src/styles-gemini-extra.css",
+        "sha256": "62fe0ab83339b0d548e5a51921082621108eec6d38c49c35c2e3242f15106253"
+      },
+      {
+        "file": "src/styles-dark-mode.css",
+        "sha256": "b45a9dead620b079da2b0024ef7f4a61b3a03f9a645477237b2335c2c02bee1b"
+      },
+      {
+        "file": "src/styles-dark-mode-settings.css",
+        "sha256": "e054147fb2508319998a8fda2e9832b759f01c62576287543a38659d7b5d1c92"
+      },
+      {
+        "file": "src/styles-biz-op-v327.css",
+        "sha256": "ff53411ad76cc44d1183751732ad54f5b58833891fb984f015de80b6e76ac127"
+      },
+      {
+        "file": "src/styles-vcc-financial-op.css",
+        "sha256": "135cb80599ac1c9514b9ec396722def18fae3eee9cca30f22f6b8273b3fb8d5d"
+      }
+    ],
+    "source": "/private/tmp/v329-release-20260919-3_bafjvz/settings-layout-fixed/app-settings-verification.json",
+    "sha256": "514b42ea6b50b6e8b0ee2329a2e21a171658a9288e3f00ab408012d2347451a4"
+  },
+  "liveInitial": {
+    "data": {
+      "status": "PASS",
+      "kind": "真实 Main + Preload + Renderer，临时数据库与真实单实例锁",
+      "resources": {
+        "freeMemoryMiB": 5126.546875,
+        "totalMemoryMiB": 49152
+      },
+      "results": [
+        {
+          "ok": true,
+          "initial": "light",
+          "assertions": 10,
+          "application": {
+            "appPath": "/private/tmp/v329-release-20260919-3_bafjvz/review-snapshot",
+            "name": "bank-bill-excel-tool",
+            "version": "3.2.8"
+          },
+          "loadSnapshot": {
+            "theme": "light",
+            "background": "rgb(255, 255, 255)"
+          },
+          "initializedAt": 132.5,
+          "reinitializedAt": 38.200000286102295,
+          "reloaded": "dark",
+          "appearance": {
+            "visible": true,
+            "theme": "dark",
+            "checked": true
+          },
+          "imageSize": {
+            "width": 2480,
+            "height": 1720
+          },
+          "failures": [],
+          "rendererErrors": []
+        },
+        {
+          "ok": true,
+          "initial": "dark",
+          "assertions": 10,
+          "application": {
+            "appPath": "/private/tmp/v329-release-20260919-3_bafjvz/review-snapshot",
+            "name": "bank-bill-excel-tool",
+            "version": "3.2.8"
+          },
+          "loadSnapshot": {
+            "theme": "dark",
+            "background": "rgb(17, 20, 25)"
+          },
+          "initializedAt": 119.5,
+          "reinitializedAt": 38.5,
+          "reloaded": "dark",
+          "appearance": {
+            "visible": true,
+            "theme": "dark",
+            "checked": true
+          },
+          "imageSize": {
+            "width": 2480,
+            "height": 1720
+          },
+          "failures": [],
+          "rendererErrors": []
+        }
+      ]
+    },
+    "limitation": "DOM与真实Main启动已验证，初次capture截图帧时序另行修正；这不是无闪白证明。"
+  },
+  "fullReleaseCheck": {
+    "status": "PASS",
+    "exitCode": 0,
+    "coreCandidate": "5001d331bb78bdb82dfaa018ee705b51681bde4f",
+    "runtime": "Node 24.13.0",
+    "command": "UNIT_TEST_CONCURRENCY=2 npm run release-check",
+    "log": "/private/tmp/v329-release-20260919-3_bafjvz/release-check.log",
+    "logSha256": "c6b38abcf54f1cb0d2df3dbbd0df0753f567609e7bcbac25f9e8680a1a941e36",
+    "unit": {
+      "files": 499,
+      "total": 7864,
+      "pass": 7861,
+      "fail": 0,
+      "skip": 3
+    },
+    "integration": {
+      "scripts": 59,
+      "pass": 2574,
+      "total": 2574
+    },
+    "fixedInputCount": 1521,
+    "fixedInputs": "gate-inputs.json",
+    "fixedInputChanges": [
+      {
+        "path": "scripts/verify-app-settings-layout.js",
+        "before": "33e0ae6005de7a4b850dcb0fd34778c24aef7a9ebacce291eccd11542ef24036",
+        "after": "c12e20ea4a75beb9f97bbfc9265477757ae82cbc0c274d465bedd2b9202ae6af"
+      },
+      {
+        "path": "scripts/verify-dark-mode-live.js",
+        "before": "910dc1654d9bd7e0c2c887ccb46c82d3450c8ace4ab02697bfeea417213cf5dc",
+        "after": "23b3ea4b2a99afb2bfdd8b06a9d5078bba0fb31f7bc43612f56d6548cb1e15f1"
+      }
+    ],
+    "coverageNote": "Only independent GUI validation scripts changed; both executed successfully and linted after final changes. Production, unit/integration inputs and dependencies unchanged. New PF scripts verified separately. Final commit still requires Windows CI."
+  },
+  "manualAcceptance": "NOT_RUN; VCC AC30/RV12 and native Windows/Excel/WPS not replaced by these checks",
+  "liveFinal": {
+    "data": {
+      "status": "PASS",
+      "kind": "真实 Main + Preload + Renderer，临时数据库与真实单实例锁",
+      "evidenceLimit": "did-finish-load 只验证加载完成状态；本脚本未连续采样启动全过程，不证明首帧或无闪白",
+      "resources": {
+        "freeMemoryMiB": 3863.9375,
+        "totalMemoryMiB": 49152
+      },
+      "results": [
+        {
+          "ok": true,
+          "initial": "light",
+          "assertions": 11,
+          "application": {
+            "appPath": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool-worktrees/release-v3.2.9",
+            "name": "bank-bill-excel-tool",
+            "version": "3.2.9"
+          },
+          "isolation": {
+            "userData": "/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/night-mode-live-3iiWhe/userData",
+            "documents": "/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/night-mode-live-3iiWhe/Documents"
+          },
+          "windowAtLoad": {
+            "visible": false,
+            "minimized": false
+          },
+          "windowAfterInit": {
+            "visible": true,
+            "minimized": false
+          },
+          "loadSnapshot": {
+            "theme": "light",
+            "background": "rgb(255, 255, 255)"
+          },
+          "initializedAt": 2838.0999999046326,
+          "reinitializedAt": 36.30000019073486,
+          "reloaded": "dark",
+          "appearance": {
+            "visible": true,
+            "theme": "dark",
+            "checked": true
+          },
+          "startupCapture": {
+            "file": "live-light-startup.png",
+            "imageSize": {
+              "width": 2480,
+              "height": 1720
+            },
+            "presentedFrames": 1,
+            "pixelChecks": [
+              {
+                "x": 20,
+                "y": 860,
+                "expected": [
+                  255,
+                  255,
+                  255
+                ],
+                "actual": [
+                  255,
+                  255,
+                  255
+                ],
+                "matches": true
+              }
+            ],
+            "windowVisible": true,
+            "windowMinimized": false,
+            "viewport": {
+              "width": 1240,
+              "height": 860,
+              "dpr": 2
+            },
+            "paneRect": null,
+            "cardRect": null,
+            "samples": [
+              {
+                "x": 10,
+                "y": 430,
+                "color": "rgb(255, 255, 255)"
+              }
+            ],
+            "theme": "light",
+            "documentVisibility": "visible",
+            "appearanceVisible": null,
+            "checked": null
+          },
+          "reloadCapture": {
+            "file": "live-light-reload-dark.png",
+            "imageSize": {
+              "width": 2480,
+              "height": 1720
+            },
+            "presentedFrames": 1,
+            "pixelChecks": [
+              {
+                "x": 20,
+                "y": 860,
+                "expected": [
+                  17,
+                  20,
+                  25
+                ],
+                "actual": [
+                  18,
+                  20,
+                  25
+                ],
+                "matches": true
+              }
+            ],
+            "windowVisible": true,
+            "windowMinimized": false,
+            "viewport": {
+              "width": 1240,
+              "height": 860,
+              "dpr": 2
+            },
+            "paneRect": null,
+            "cardRect": null,
+            "samples": [
+              {
+                "x": 10,
+                "y": 430,
+                "color": "rgb(17, 20, 25)"
+              }
+            ],
+            "theme": "dark",
+            "documentVisibility": "visible",
+            "appearanceVisible": null,
+            "checked": null
+          },
+          "settingsCapture": {
+            "file": "live-light-startup-dark-settings.png",
+            "imageSize": {
+              "width": 2480,
+              "height": 1720
+            },
+            "presentedFrames": 1,
+            "pixelChecks": [
+              {
+                "x": 2168,
+                "y": 196,
+                "expected": [
+                  28,
+                  32,
+                  39
+                ],
+                "actual": [
+                  29,
+                  32,
+                  38
+                ],
+                "matches": true
+              },
+              {
+                "x": 2302,
+                "y": 314,
+                "expected": [
+                  28,
+                  32,
+                  39
+                ],
+                "actual": [
+                  29,
+                  32,
+                  38
+                ],
+                "matches": true
+              },
+              {
+                "x": 2302,
+                "y": 1406,
+                "expected": [
+                  28,
+                  32,
+                  39
+                ],
+                "actual": [
+                  29,
+                  32,
+                  38
+                ],
+                "matches": true
+              }
+            ],
+            "windowVisible": true,
+            "windowMinimized": false,
+            "viewport": {
+              "width": 1240,
+              "height": 860,
+              "dpr": 2
+            },
+            "paneRect": {
+              "x": 253,
+              "y": 145,
+              "width": 910,
+              "height": 570
+            },
+            "cardRect": {
+              "x": 76,
+              "y": 78,
+              "width": 1088,
+              "height": 704
+            },
+            "samples": [
+              {
+                "x": 1084,
+                "y": 98,
+                "color": "rgb(28, 32, 39)"
+              },
+              {
+                "x": 1151,
+                "y": 157,
+                "color": "rgb(28, 32, 39)"
+              },
+              {
+                "x": 1151,
+                "y": 703,
+                "color": "rgb(28, 32, 39)"
+              }
+            ],
+            "theme": "dark",
+            "documentVisibility": "visible",
+            "appearanceVisible": true,
+            "checked": true
+          },
+          "evidenceLimit": "did-finish-load 只验证加载完成状态；本脚本未连续采样启动全过程，不证明首帧或无闪白",
+          "failures": [],
+          "rendererErrors": []
+        },
+        {
+          "ok": true,
+          "initial": "dark",
+          "assertions": 11,
+          "application": {
+            "appPath": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool-worktrees/release-v3.2.9",
+            "name": "bank-bill-excel-tool",
+            "version": "3.2.9"
+          },
+          "isolation": {
+            "userData": "/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/night-mode-live-3iiWhe/userData",
+            "documents": "/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/night-mode-live-3iiWhe/Documents"
+          },
+          "windowAtLoad": {
+            "visible": false,
+            "minimized": false
+          },
+          "windowAfterInit": {
+            "visible": true,
+            "minimized": false
+          },
+          "loadSnapshot": {
+            "theme": "dark",
+            "background": "rgb(17, 20, 25)"
+          },
+          "initializedAt": 614.0999999046326,
+          "reinitializedAt": 38.799999713897705,
+          "reloaded": "dark",
+          "appearance": {
+            "visible": true,
+            "theme": "dark",
+            "checked": true
+          },
+          "startupCapture": {
+            "file": "live-dark-startup.png",
+            "imageSize": {
+              "width": 2480,
+              "height": 1720
+            },
+            "presentedFrames": 1,
+            "pixelChecks": [
+              {
+                "x": 20,
+                "y": 860,
+                "expected": [
+                  17,
+                  20,
+                  25
+                ],
+                "actual": [
+                  18,
+                  20,
+                  25
+                ],
+                "matches": true
+              }
+            ],
+            "windowVisible": true,
+            "windowMinimized": false,
+            "viewport": {
+              "width": 1240,
+              "height": 860,
+              "dpr": 2
+            },
+            "paneRect": null,
+            "cardRect": null,
+            "samples": [
+              {
+                "x": 10,
+                "y": 430,
+                "color": "rgb(17, 20, 25)"
+              }
+            ],
+            "theme": "dark",
+            "documentVisibility": "visible",
+            "appearanceVisible": null,
+            "checked": null
+          },
+          "reloadCapture": {
+            "file": "live-dark-reload-dark.png",
+            "imageSize": {
+              "width": 2480,
+              "height": 1720
+            },
+            "presentedFrames": 1,
+            "pixelChecks": [
+              {
+                "x": 20,
+                "y": 860,
+                "expected": [
+                  17,
+                  20,
+                  25
+                ],
+                "actual": [
+                  18,
+                  20,
+                  25
+                ],
+                "matches": true
+              }
+            ],
+            "windowVisible": true,
+            "windowMinimized": false,
+            "viewport": {
+              "width": 1240,
+              "height": 860,
+              "dpr": 2
+            },
+            "paneRect": null,
+            "cardRect": null,
+            "samples": [
+              {
+                "x": 10,
+                "y": 430,
+                "color": "rgb(17, 20, 25)"
+              }
+            ],
+            "theme": "dark",
+            "documentVisibility": "visible",
+            "appearanceVisible": null,
+            "checked": null
+          },
+          "settingsCapture": {
+            "file": "live-dark-startup-dark-settings.png",
+            "imageSize": {
+              "width": 2480,
+              "height": 1720
+            },
+            "presentedFrames": 1,
+            "pixelChecks": [
+              {
+                "x": 2168,
+                "y": 196,
+                "expected": [
+                  28,
+                  32,
+                  39
+                ],
+                "actual": [
+                  29,
+                  32,
+                  38
+                ],
+                "matches": true
+              },
+              {
+                "x": 2302,
+                "y": 314,
+                "expected": [
+                  28,
+                  32,
+                  39
+                ],
+                "actual": [
+                  29,
+                  32,
+                  38
+                ],
+                "matches": true
+              },
+              {
+                "x": 2302,
+                "y": 1406,
+                "expected": [
+                  28,
+                  32,
+                  39
+                ],
+                "actual": [
+                  29,
+                  32,
+                  38
+                ],
+                "matches": true
+              }
+            ],
+            "windowVisible": true,
+            "windowMinimized": false,
+            "viewport": {
+              "width": 1240,
+              "height": 860,
+              "dpr": 2
+            },
+            "paneRect": {
+              "x": 253,
+              "y": 145,
+              "width": 910,
+              "height": 570
+            },
+            "cardRect": {
+              "x": 76,
+              "y": 78,
+              "width": 1088,
+              "height": 704
+            },
+            "samples": [
+              {
+                "x": 1084,
+                "y": 98,
+                "color": "rgb(28, 32, 39)"
+              },
+              {
+                "x": 1151,
+                "y": 157,
+                "color": "rgb(28, 32, 39)"
+              },
+              {
+                "x": 1151,
+                "y": 703,
+                "color": "rgb(28, 32, 39)"
+              }
+            ],
+            "theme": "dark",
+            "documentVisibility": "visible",
+            "appearanceVisible": true,
+            "checked": true
+          },
+          "evidenceLimit": "did-finish-load 只验证加载完成状态；本脚本未连续采样启动全过程，不证明首帧或无闪白",
+          "failures": [],
+          "rendererErrors": []
+        }
+      ]
+    },
+    "source": "/private/tmp/v329-release-20260919-3_bafjvz/night-live-presented/live-runtime.json",
+    "sha256": "20f76af004ab4553ea9346596bb0c5c9795ff7fcaf4f81a24bf97f50b3215dfb"
+  },
+  "performanceRunner": {
+    "smoke": {
+      "summary": "performance-smoke-summary.json",
+      "evidence": "performance-smoke-evidence.json",
+      "exitCode": 0
+    },
+    "cancel": {
+      "summary": "performance-cancel-summary.json",
+      "evidence": "performance-cancel-evidence.json",
+      "exitCode": 0
+    },
+    "preflight": {
+      "summary": "performance-preflight-summary.json",
+      "evidence": "performance-preflight-evidence.json",
+      "exitCode": 2
+    },
+    "limits": "Supplemental only. Fixed Windows PF01-PF05, independent Worker RSS, SST pressure, real drain/upstream stop proof and Excel/WPS/manual installed application remain NOT_RUN."
+  },
+  "finalDocumentTests": {
+    "command": "node --test tests/unit/vcc-financial-op-release-docs.test.js",
+    "pass": 14,
+    "fail": 0,
+    "log": "/private/tmp/v329-release-20260919-3_bafjvz/final-release-docs-test.log",
+    "logSha256": "87f63387119a5216661f98251b22bb013c1893d2e80b473e2ab7cc9309d13003"
+  },
+  "postCandidateValidation": {
+    "candidate": "d17a44ddb93c5b030f901a1cd785a26e8896544f",
+    "windowsInitialRun": "https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/35375147094",
+    "nativeInputWindowsInitial": {
+      "passed": 14,
+      "total": 16,
+      "source": "native-input-windows-initial.json",
+      "status": "FAIL"
+    },
+    "analysis": "Windows native 12-hour control produces 13:30 for first digit 1 and 14:30 then 14:00 for digits 20. Product persisted these exact native values. Verifier assumed 24-hour key interpretation. No production code change.",
+    "fix": "Theme case endTime=14:00 retains dark-light-dark for both 01:30/13:30. Queued-off case uses 19:30 with exact final/blur assertions. Added unmodified native-control digits20 observation and locale diagnostics.",
+    "macosFixed": {
+      "passed": 16,
+      "total": 16,
+      "source": "native-input-locale-fixed-macos.json"
+    },
+    "windowsFixed": {
+      "candidate": "66f357bd0357c2be4c2256267edee637c436df20",
+      "native": "16/16 PASS",
+      "run": "https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/35376141525",
+      "summary": "windows-round2-summary.json",
+      "overall": "FAIL; settings timeout and VCC verification launch environment failures"
+    },
+    "sourceSha256": "bf4409dacc9dd69a40ea6e81df27fd97f3f52a08b37287768e53d2983ef405cb",
+    "workflow": "Independent evidence steps continue after other evidence failures if candidate identity step passed; no continue-on-error, failures remain job failure."
+  },
+  "windowsHarnessRepair": {
+    "productionChanged": false,
+    "settings": {
+      "file": "settings-background-fixed-macos.json",
+      "result": "6/6 layouts, 4/4 scenarios, 73 assertions PASS; timeout remains 30s"
+    },
+    "vcc": {
+      "electron": {
+        "file": "vcc-env-fixed-electron-macos.json",
+        "sha256": "4d3d68668a466cd1938252a39007c83f59690429e02152cedb350130ec10336e",
+        "parentEnvironment": "ELECTRON_RUN_AS_NODE=1"
+      },
+      "smoke": {
+        "file": "vcc-env-fixed-smoke-macos.json",
+        "sha256": "497568898ceb6030674f7ec82fc7beb14f03895f116783d7ef461cc0214e4fa5",
+        "parentEnvironment": "ELECTRON_RUN_AS_NODE=1"
+      },
+      "preflight": {
+        "file": "vcc-env-fixed-preflight-macos.json",
+        "sha256": "c5a8d9310c0ddaba6e9fe63a4e6c027265d254d996dd4c2289f291b448c514ed",
+        "parentEnvironment": "ELECTRON_RUN_AS_NODE=1"
+      }
+    },
+    "windowsRerun": "PENDING",
+    "nativeVisibility": "Pending CDP inner-field geometry and 104px/132px controlled comparison; screenshots suggest AM/PM may be clipped on Windows.",
+    "nativeGeometryMacos": {
+      "source": "native-geometry-macos.json",
+      "status": "PASS",
+      "scenarios": 2,
+      "assertions": 26,
+      "original104": "PASS",
+      "wide132": "PASS",
+      "restored104": "PASS",
+      "windows": "PENDING"
+    }
+  },
+  "nativeTimeP2": {
+    "status": "WINDOWS_PRODUCT_GEOMETRY_PASS_FINAL_TWO_SCENARIO_HARNESS_RERUN_PENDING",
+    "confirmedCandidate": "2bbf2043105bc7e6789cff024799b310b9f0f905",
+    "windowsEvidence": "windows-round3-summary.json",
+    "repair": "Production time grid 132px; historical 104px diagnostic and min-window zoom150 geometry regression; generated preview synchronized.",
+    "macosEvidence": "native-time132-repair-macos.json",
+    "oldFullGateApplicability": "Historical only after production CSS change; new full gate required.",
+    "windowsRepairEvidence": "windows-round4-summary.json",
+    "zoomHarnessEvidence": "windows-round5-summary.json"
+  }
+}

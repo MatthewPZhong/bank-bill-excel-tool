@@ -512,7 +512,7 @@ window.__rendererPending = (function () {
           ));
         } else {
           const detail = Array.isArray(result.detailLines) && result.detailLines.length > 0
-            ? '<br><span style="font-size:12px;color:#888;">' + result.detailLines.join('<br>') + '</span>'
+            ? '<br><span style="font-size:12px;color:var(--muted);">' + result.detailLines.join('<br>') + '</span>'
             : '';
           openModal(createAlertDialog('移除文件导入失败：' + (result.message || '未知错误') + detail));
         }

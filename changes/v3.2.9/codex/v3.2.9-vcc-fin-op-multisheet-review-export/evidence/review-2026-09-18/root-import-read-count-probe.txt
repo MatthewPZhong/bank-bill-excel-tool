@@ -1,0 +1,10 @@
+{"result":{"batchId":"multi-task","targetMonth":"2026-06","status":"completed_with_errors","records":[{"recordId":1,"batchId":"multi-task","targetMonth":"2026-06","sourceType":"system_op","sourceLabel":"系统财务OP","status":"failed_validation","rawCount":1,"insertedCount":0,"skippedCount":0,"invalidKeyCount":0,"conflictCount":0,"formatErrorCount":1,"rolledBackCount":0,"anomalyCount":1,"archiveState":"ready","errorMessage":"mixed.xlsx：mixed.xlsx：未找到“账单日期”属于 2026-06 的系统财务OP数据","sourceFiles":[{"id":1,"importRecordId":1,"sourceOrdinal":1,"fileName":"mixed.xlsx","sha256":"6ce5fb65a407402030527f6a33dfba846d929adc01403a26f62302b792b18c9b","sizeBytes":25688,"archiveArtifactId":1,"archiveState":"ready","lastErrorCode":"","lastErrorMessage":"","boundAt":"2026-09-18 22:53:37"}]},{"recordId":2,"batchId":"multi-task","targetMonth":"2026-06","sourceType":"recharge_refund","status":"success","rawCount":1,"insertedCount":1,"skippedCount":0,"invalidKeyCount":0,"conflictCount":0,"formatErrorCount":0,"rolledBackCount":0,"anomalyCount":0,"archiveState":"ready","sourceFiles":[{"id":2,"importRecordId":2,"sourceOrdinal":1,"fileName":"mixed.xlsx","sha256":"6ce5fb65a407402030527f6a33dfba846d929adc01403a26f62302b792b18c9b","sizeBytes":25688,"archiveArtifactId":1,"archiveState":"ready","lastErrorCode":"","lastErrorMessage":"","boundAt":"2026-09-18 22:53:37"}],"errorMessage":"","sourceLabel":"VCC充值清退明细"}],"physicalFileCount":1,"businessSheetCount":2,"readRowCount":1},"progress":[{"phase":"reading","recordId":2,"sourceType":"recharge_refund","sourceFile":"mixed.xlsx","sheetName":"充值","rows":1},{"phase":"committing","recordId":2,"sourceType":"recharge_refund","rows":1},{"phase":"summarizing","physicalFileCount":1,"businessSheetCount":2,"rows":1}]}
+✔ review probe: non-target-month system sheet read progress (74.606417ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 219.488833

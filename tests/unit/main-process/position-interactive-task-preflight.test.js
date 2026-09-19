@@ -2,9 +2,11 @@
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
+const { captureStagedInputEvidenceAsync } = require('../../../src/main-process/position-reconciliation/input-staging');
 
 const {
   createPositionRunTaskContract,
@@ -335,11 +337,16 @@ test('source reserve 失败会 abandon prepared worker/staging 且 0 apply', asy
   assert.equal(abandonCount, 1);
 });
 
-test('source mixed preflight 把全部选择、实际 staging 与 anomaly output 固定为同一 manifest', async () => {
+test('source mixed preflight 把全部选择、实际 staging 与 anomaly output 固定为同一 manifest', async (t) => {
   const selectedA = __filename;
   const selectedB = path.resolve(__dirname, '../../../src/main-process/position-reconciliation/common.js');
   const staged = path.resolve(__dirname, '../../../src/main-process/position-reconciliation/service.js');
-  const anomaly = path.resolve(__dirname, '../../../src/main-process/position-reconciliation/operation-lifecycle.js');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'position-preflight-report-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const anomaly = path.join(directory, 'run-data/position-reconciliation/import-staging/fixture-job/anomaly-report/平盘来源异常数据_fixture-job.xlsx');
+  fs.mkdirSync(path.dirname(anomaly), { recursive: true });
+  fs.writeFileSync(anomaly, 'synthetic anomaly report');
+  const evidence = await captureStagedInputEvidenceAsync(anomaly);
   const service = {
     async prepareSourceImportForLifecycle() {
       return {
@@ -357,7 +364,9 @@ test('source mixed preflight 把全部选择、实际 staging 与 anomaly output
               { status: 'ok', archivePath: staged },
               { status: 'failed', fileName: 'rejected.xlsx' }
             ],
-            outputFiles: [{ filePath: anomaly }]
+            outputFiles: [{ filePath: anomaly, artifactKey: 'source-import-anomaly-report',
+              sourceSnapshot: evidence.stagedSnapshot, expectedSha256: evidence.stagedSha256,
+              sizeBytes: evidence.stagedSizeBytes }]
           }
         }
       };

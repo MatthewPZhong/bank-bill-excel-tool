@@ -723,9 +723,15 @@ durableDirectoryTest('显式禁用时所有业务 IPC 包含运行日历均被�
   } }, getModule: () => f.module, businessOperationRegistry: createBusinessOperationRegistry() });
   assert.equal(handlers.size, 21);
   assert.ok(handlers.has('bizOpReconV327:metadata:run-calendar'));
+  const sender = { id: 1, mainFrame: {} }; const event = { sender, senderFrame: sender.mainFrame };
   for (const [key, handler] of handlers) {
     if (key.endsWith(':status') || key.endsWith(':retry')) continue;
-    assert.throws(() => handler(), { code: 'BIZOP_V327_NOT_ENABLED' });
+    // 身份/输入先于缓存及新请求门禁，禁用仍返回同一受限错误 DTO。
+    const operation = /:(import|run|delete|export:(?!pick$).+)$/.test(key);
+    const result = await handler(event, operation ? { requestId: `disabled-${key}` } : {});
+    assert.equal(result.status, 'error', key);
+    assert.equal(result.code, 'BIZOP_V327_NOT_ENABLED', key);
+    assert.equal((await handler()).code, 'BIZOP_IPC_SENDER_INVALID', key);
   }
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM archive_task_runs').get().n, 0);
   const taskId = await prepareUncommitted(f, 'retry-ipc');

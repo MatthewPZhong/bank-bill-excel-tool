@@ -3,6 +3,7 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const { resolveChangesPath } = require('./lib/changes-paths');
 const { spawnSync } = require('node:child_process');
 const { isDeepStrictEqual } = require('node:util');
 
@@ -20,7 +21,7 @@ const {
 } = require('../src/main-process/bank-bu-worker/policies');
 
 const REPOSITORY_ROOT = path.resolve(__dirname, '..');
-const SNAPSHOT_PATH = path.join(
+const SNAPSHOT_PATH = resolveChangesPath(
   REPOSITORY_ROOT,
   'changes/background-execution-r3-2-2-release-evidence/release-evidence.json'
 );
@@ -657,7 +658,7 @@ function validateGitRecord(
   if (options.currentTextPolicy === 'FROZEN_REVIEWED_BLOB') {
     return Object.freeze({ ...gitFile, currentText: gitFile.reviewedText });
   }
-  const currentPath = path.join(repositoryRoot, record.source);
+  const currentPath = resolveChangesPath(repositoryRoot, record.source);
   let currentText;
   try {
     currentText = fs.readFileSync(currentPath, 'utf8');
@@ -714,8 +715,8 @@ function validateReleaseEvidence(snapshot, options = {}) {
   expectEqual('/authorityLayering', snapshot.authorityLayering, EXPECTED_AUTHORITY_LAYERING);
   expectEqual('/dataMinimization', snapshot.dataMinimization, EXPECTED_DATA_MINIMIZATION);
 
-  const packageJson = parseJsonFile(path.join(repositoryRoot, 'package.json'));
-  const packageLock = parseJsonFile(path.join(repositoryRoot, 'package-lock.json'));
+  const packageJson = parseJsonFile(resolveChangesPath(repositoryRoot, 'package.json'));
+  const packageLock = parseJsonFile(resolveChangesPath(repositoryRoot, 'package-lock.json'));
   if (!isSupportedCurrentPackageVersion(packageJson.version)) {
     add(
       '/authority/packageVersion',
@@ -886,7 +887,7 @@ function validateReleaseEvidence(snapshot, options = {}) {
     }
   }
 
-  const canonical = parseJsonFile(path.join(repositoryRoot, CANONICAL_POLICY_SOURCE));
+  const canonical = parseJsonFile(resolveChangesPath(repositoryRoot, CANONICAL_POLICY_SOURCE));
   const actualActionKeys = Array.isArray(snapshot.actions)
     ? snapshot.actions.map((action) => action && action.actionKey)
     : [];
@@ -994,7 +995,7 @@ function validateReleaseEvidence(snapshot, options = {}) {
     });
   }
 
-  const duplicateBenchmark = parseJsonFile(path.join(repositoryRoot, DUPLICATE_BENCHMARK_SOURCE));
+  const duplicateBenchmark = parseJsonFile(resolveChangesPath(repositoryRoot, DUPLICATE_BENCHMARK_SOURCE));
   expectEqual('/authority/duplicateBenchmark', {
     improvementRatio: duplicateBenchmark.summary.improvementRatio,
     peakRssBytes: duplicateBenchmark.summary.pairedPeakRssBytes,
@@ -1014,7 +1015,7 @@ function validateReleaseEvidence(snapshot, options = {}) {
     'src/preload.js',
     'src/renderer.js',
     'src/renderer-dialogs.js'
-  ].map((source) => fs.readFileSync(path.join(repositoryRoot, source), 'utf8')).join('\n');
+  ].map((source) => fs.readFileSync(resolveChangesPath(repositoryRoot, source), 'utf8')).join('\n');
   for (const actionKey of ACTION_KEYS) {
     if (liveSource.includes(actionKey)) {
       add(

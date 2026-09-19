@@ -2,6 +2,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { statTimeMs } = require('./filesystem-identity');
 
 const PAYLOAD_PATH_KEYS = Object.freeze([
   'filePath',
@@ -42,14 +43,6 @@ function normalizeSourceSnapshot(value) {
   }
   if (inode !== undefined) snapshot.ino = inode;
   return snapshot;
-}
-
-function statTimeMs(stat, millisecondKey, nanosecondKey) {
-  if (typeof stat[nanosecondKey] === 'bigint') {
-    const nanoseconds = stat[nanosecondKey];
-    return Number(nanoseconds / 1000000n) + Number(nanoseconds % 1000000n) / 1e6;
-  }
-  return Number(stat[millisecondKey]);
 }
 
 function sourceSnapshotFromStat(stat) {
@@ -115,7 +108,7 @@ function captureArchiveSourceSnapshots(input = {}, fsImpl = fs) {
   const snapshots = new Map();
   for (const filePath of collectArchiveCandidatePaths(input)) {
     try {
-      const snapshot = sourceSnapshotFromStat(fsImpl.statSync(filePath));
+      const snapshot = sourceSnapshotFromStat(fsImpl.statSync(filePath, { bigint: true }));
       if (snapshot) snapshots.set(filePath, snapshot);
     } catch (_error) {
       // 无法快照的路径仍交给存档服务记录明确失败，不能影响原业务返回。

@@ -97,6 +97,68 @@ function writeSource(fixture, name, content) {
   return filePath;
 }
 
+test('File Task 收口凭证核对批次及 TaskRun 完整身份，拒绝冲突且正常记录幂等', async () => {
+  const fixture = createFixture();
+  try {
+    await fixture.service.initialize();
+    const inputPath = writeSource(fixture, 'completion-input.xlsx', 'owner completion input');
+    const task = (await fixture.service.beginTaskRun({
+      taskRunId: 'completion-task', taskKey: 'toolbox:merge', moduleId: 'toolbox',
+      parentRunId: 'completion-parent', operationKey: 'completion-operation'
+    })).taskRun;
+    const manifest = artifactManifestFromFilePlan(normalizeFilePlanV1({
+      version: 1, allocation: 'eager',
+      inputs: [{ filePath: inputPath, role: 'input', sourceOperation: 'toolbox:merge' }], outputs: []
+    }));
+    const reserved = await fixture.service.reserveFileTaskBatch({
+      taskRun: task, manifest, moduleCode: 'TOOLBOX', moduleName: '工具箱'
+    });
+    const batchContext = {
+      batchId: reserved.batch.id, batchNumber: reserved.batch.batchNumber,
+      taskRunId: task.taskRunId, taskKey: task.taskKey, moduleId: task.moduleId,
+      parentRunId: task.parentRunId, operationKey: task.operationKey
+    };
+    assert.equal((await fixture.service.startFileTask(task.taskRunId, reserved.batch.id)).ok, true);
+    assert.equal((await fixture.service.settleManifestArtifacts({
+      batchContext, files: [{ artifactKey: manifest.inputs[0].artifactKey }]
+    })).durable, true);
+    assert.equal((await fixture.service.finishFileTask(task.taskRunId, reserved.batch.id,
+      { taskStatus: 'succeeded' })).ok, true);
+    const outcome = { terminalStatus: 'succeeded' };
+    const completionCount = () => fixture.db.prepare(
+      'SELECT COUNT(*) count FROM archive_owner_terminal_completions'
+    ).get().count;
+    for (const field of Object.keys(batchContext)) {
+      const conflictingContext = { ...batchContext,
+        [field]: field === 'batchId' ? batchContext.batchId + 1 : `different-${field}` };
+      const rejected = await fixture.service.recordFileTaskOwnerCompletion(conflictingContext, outcome);
+      assert.equal(rejected.code, 'ARCHIVE_OWNER_COMPLETION_IDENTITY_CONFLICT', field);
+      assert.equal(completionCount(), 0, `${field} 冲突不能留下凭证`);
+    }
+    for (const [field, column] of [
+      ['taskKey', 'task_key'], ['parentRunId', 'parent_run_id'],
+      ['moduleId', 'module_id'], ['operationKey', 'operation_key']
+    ]) {
+      fixture.db.prepare(`UPDATE archive_task_runs SET ${column} = ? WHERE task_run_id = ?`)
+        .run(`different-${field}`, task.taskRunId);
+      const rejected = await fixture.service.recordFileTaskOwnerCompletion(batchContext, outcome);
+      assert.equal(rejected.code, 'ARCHIVE_OWNER_COMPLETION_IDENTITY_CONFLICT', `TaskRun.${field}`);
+      assert.equal(completionCount(), 0, `TaskRun.${field} 冲突不能留下凭证`);
+      fixture.db.prepare(`UPDATE archive_task_runs SET ${column} = ? WHERE task_run_id = ?`)
+        .run(task[field], task.taskRunId);
+    }
+    assert.equal((await fixture.service.recordFileTaskOwnerCompletion(batchContext, outcome)).ok, true);
+    const owner = { version: 1, kind: 'file-batch', batchContext };
+    const originalProof = fixture.repository.getOwnerTerminalCompletion(owner);
+    assert.deepEqual(originalProof.owner, owner);
+    assert.equal((await fixture.service.recordFileTaskOwnerCompletion(batchContext, outcome)).ok, true);
+    assert.equal(completionCount(), 1);
+    assert.deepEqual(fixture.repository.getOwnerTerminalCompletion(owner), originalProof);
+  } finally {
+    fixture.close();
+  }
+});
+
 test('deferred 零输出不占号，跨日 promote 以实际建批日形成 running batch', async () => {
   let now = new Date(2026, 7, 17, 23, 59, 59);
   const fixture = createFixture({ now: () => now });
@@ -1058,6 +1120,7 @@ test('5001 个缺失 v2 layout 也只占用首块共享预算并由同一后台�
   const verified = [];
   const repository = {
     ensureSchema() {},
+    getOrCreateArchiveInstanceId() { return 'schema-fixture-instance'; },
     replayFlowBindIntents() { return { replayed: 0, remaining: 0 }; },
     listCleanupJobs() { return []; },
     markInterruptedArtifacts() { return { artifactCount: 0 }; },
@@ -1172,6 +1235,7 @@ test('5001 个 canonical Blob 的启动元数据校验只读取首块并由后�
   });
   const repository = {
     ensureSchema() {},
+    getOrCreateArchiveInstanceId() { return 'schema-fixture-instance'; },
     replayFlowBindIntents() { return { replayed: 0, remaining: 0 }; },
     listCleanupJobs() { return []; },
     markInterruptedArtifacts() { return { artifactCount: 0 }; },
@@ -1555,6 +1619,92 @@ test('task retentionUntil=undefined 按未提供处理，显式保留期与永�
   }
 });
 
+test('模块期限解析覆盖 task 与 legacy 创建，显式快照及已有批次不被新设置改写', async () => {
+  let configuredDays = 30;
+  const resolvedModules = [];
+  const fixture = createFixture({ resolveRetentionDays(moduleId) {
+    resolvedModules.push(moduleId);
+    return configuredDays;
+  } });
+  try {
+    const legacyInput = {
+      ...batchPayload('module-retention-legacy', { moduleId: 'toolbox', moduleCode: 'TOOLBOX' }),
+      sourceOperation: 'toolbox:split',
+      files: [{ filePath: writeSource(fixture, 'module-retention.csv', 'a,b\n1,2'), role: 'input' }]
+    };
+    const legacy = await fixture.service.createBatch(legacyInput);
+    assert.equal(legacy.ok, true);
+    assert.equal(legacy.batch.retentionUntil, '2026-08-19');
+    assert.equal(resolvedModules.at(-1), 'toolbox');
+    configuredDays = 365;
+    const repeated = await fixture.service.createBatch(legacyInput);
+    assert.equal(repeated.batch.id, legacy.batch.id);
+    assert.equal(repeated.batch.retentionUntil, '2026-08-19');
+
+    const taskPayload = {
+      ...batchPayload('module-retention-task', { moduleId: 'statement-generator' }),
+      taskKey: 'file:generate', taskRunId: 'module-retention-task-run'
+    };
+    configuredDays = null;
+    const permanent = await fixture.service.reserveTaskBatch(taskPayload);
+    assert.equal(permanent.ok, true);
+    assert.equal(permanent.batch.retentionUntil, null);
+    assert.equal(resolvedModules.at(-1), 'statement-generator');
+    const callsBeforeExplicit = resolvedModules.length;
+    for (const [index, snapshot] of [
+      { retentionDays: 90 }, { retentionDays: null },
+      { retentionDays: 'permanent' }, { retentionUntil: '2027-01-01' }
+    ].entries()) {
+      const explicit = await fixture.service.reserveTaskBatch({
+        ...taskPayload, operationKey: `module-retention-explicit-${index}`,
+        taskRunId: `module-retention-explicit-run-${index}`, ...snapshot
+      });
+      assert.equal(explicit.ok, true);
+      assert.equal(explicit.batch.retentionUntil, ['2026-10-18', null, null, '2027-01-01'][index]);
+    }
+    assert.equal(resolvedModules.length, callsBeforeExplicit);
+  } finally {
+    fixture.close();
+  }
+});
+
+test('File Task 期限使用真实 taskRun 模块，显式期限优先且永久合法', async () => {
+  let configuredDays = null;
+  const resolvedModules = [];
+  const fixture = createFixture({ resolveRetentionDays(moduleId) {
+    resolvedModules.push(moduleId);
+    return configuredDays;
+  } });
+  try {
+    const taskRun = (await fixture.service.beginTaskRun({
+      moduleId: 'statement-generator', taskKey: 'file:generate',
+      taskRunId: 'module-retention-owner-task', parentRunId: 'module-retention-owner-parent',
+      operationKey: 'module-retention-owner-operation'
+    })).taskRun;
+    const manifest = artifactManifestFromFilePlan(normalizeFilePlanV1({
+      version: 1, allocation: 'eager', inputs: [],
+      outputs: [{
+        filePath: path.join(fixture.sourceDir, 'module-retention-owner.xlsx'),
+        role: 'output', sourceOperation: 'file:generate'
+      }]
+    }));
+    const payload = {
+      taskRun, manifest, moduleId: 'toolbox', moduleCode: 'STATEMENT', moduleName: '网银账单生成'
+    };
+    const first = await fixture.service.reserveFileTaskBatch(payload);
+    assert.equal(first.ok, true);
+    assert.deepEqual(resolvedModules, ['statement-generator']);
+    assert.equal(first.batch.retentionUntil, null);
+    configuredDays = 30;
+    const replayed = await fixture.service.reserveFileTaskBatch({ ...payload, retentionDays: 90 });
+    assert.equal(replayed.ok, true);
+    assert.equal(replayed.batch.retentionUntil, null);
+    assert.equal(resolvedModules.length, 1);
+  } finally {
+    fixture.close();
+  }
+});
+
 test('手工删除与 cleanupExpired 共用 active 授权，任务终结后原批次可清理', async () => {
   let currentTime = new Date(2026, 6, 1, 12, 0, 0);
   const fixture = createFixture({ now: () => currentTime });
@@ -1807,7 +1957,7 @@ test('存档失败以明确结果返回且不泄露绝对路径，修复源文�
   }
 });
 
-test('源文件仅在存档成功或批次删除后释放，失败重试期间保持可用', async () => {
+test('源文件在存档成功后释放，手动删除不运行源路径回调', async () => {
   const releasedPaths = [];
   const fixture = createFixture({
     onSourceReleased: (paths) => releasedPaths.push(...paths)
@@ -1840,7 +1990,7 @@ test('源文件仅在存档成功或批次删除后释放，失败重试期间�
 
     const deleted = await fixture.service.deleteBatch(deleteBatch.batch.id);
     assert.equal(deleted.metadataDeleted, true);
-    assert.deepEqual(releasedPaths, [retryPath, deletePath]);
+    assert.deepEqual(releasedPaths, [retryPath]);
   } finally {
     fixture.close();
   }
@@ -1904,7 +2054,7 @@ test('同一源文件仍被其它未完成 artifact 引用时不得提前释放'
     assert.deepEqual(releasedPaths, [sharedRetryPath, replacementPath]);
 
     await fixture.service.deleteBatch(secondDeleteBatch.batch.id);
-    assert.deepEqual(releasedPaths, [sharedRetryPath, replacementPath, sharedDeletePath]);
+    assert.deepEqual(releasedPaths, [sharedRetryPath, replacementPath]);
   } finally {
     fixture.close();
   }
@@ -2291,6 +2441,84 @@ test('后台筛查保留无 durable owner 的 staging/只读副本和 SHA 形状
     fixture.close();
   }
 });
+
+for (const phase of ['before-scan', 'before-readdir']) {
+  test(`后台孤儿目录清单在 ${phase} 过期后可正常暂停`, async () => {
+    let prefixDir;
+    let armed = false;
+    const fsImpl = { ...fs, promises: { ...fs.promises,
+      async readdir(directory, ...args) {
+        if (armed && directory === prefixDir) {
+          armed = false;
+          fs.rmdirSync(directory);
+        }
+        return fs.promises.readdir(directory, ...args);
+      }
+    } };
+    const fixture = createFixture({ fsImpl });
+    try {
+      prefixDir = path.join(fixture.service.blobRoot, 'ab');
+      fs.mkdirSync(prefixDir, { recursive: true });
+      const initialized = await fixture.service.initialize({ startBackgroundMaterialization: false });
+      assert.deepEqual(initialized.consistency.orphanBlobPrefixes, ['ab']);
+      if (phase === 'before-scan') fs.rmdirSync(prefixDir);
+      else armed = true;
+      await fixture.service.pauseBackgroundMaterialization();
+      assert.equal(fs.existsSync(prefixDir), false);
+      assert.equal(fixture.service.orphanBlobPrefixCursor, 1);
+      assert.equal(fixture.repository.listBlobs().length, 0);
+    } finally { fixture.close(); }
+  });
+}
+
+for (const failure of ['offline-root', 'denied-readdir', 'symlink-prefix', 'offline-on-readdir',
+  'symlink-on-readdir', 'file-on-readdir', 'directory-on-readdir']) {
+  test(`后台孤儿目录清单过期处理仍拒绝 ${failure}`, async () => {
+    let prefixDir;
+    let external;
+    let armed = false;
+    let fixture;
+    const fsImpl = { ...fs, promises: { ...fs.promises,
+      async readdir(directory, ...args) {
+        if (armed && directory === prefixDir) {
+          if (failure === 'denied-readdir') throw Object.assign(new Error('隔离权限错误'), { code: 'EACCES' });
+          armed = false;
+          if (failure === 'offline-on-readdir') fs.rmSync(fixture.rootDir, { recursive: true });
+          else {
+            fs.rmdirSync(prefixDir);
+            if (failure === 'file-on-readdir') fs.writeFileSync(prefixDir, '替代分片文件');
+            else if (failure === 'directory-on-readdir') fs.mkdirSync(prefixDir);
+            else fs.symlinkSync(external, prefixDir, process.platform === 'win32' ? 'junction' : 'dir');
+          }
+          throw Object.assign(new Error('隔离目录枚举失效'), { code: 'ENOENT' });
+        }
+        return fs.promises.readdir(directory, ...args);
+      }
+    } };
+    fixture = createFixture({ fsImpl });
+    try {
+      prefixDir = path.join(fixture.service.blobRoot, 'ab');
+      fs.mkdirSync(prefixDir, { recursive: true });
+      external = path.join(fixture.tempDir, 'external');
+      fs.mkdirSync(external);
+      const sentinel = path.join(external, 'ab' + '0'.repeat(62));
+      fs.writeFileSync(sentinel, '未归属外部文件');
+      await fixture.service.initialize({ startBackgroundMaterialization: false });
+      if (failure === 'offline-root') fs.rmSync(fixture.rootDir, { recursive: true });
+      else if (failure === 'symlink-prefix') {
+        fs.rmdirSync(prefixDir);
+        fs.symlinkSync(external, prefixDir, process.platform === 'win32' ? 'junction' : 'dir');
+      } else armed = true;
+      const code = failure.startsWith('offline') ? 'ARCHIVE_STORAGE_ROOT_UNAVAILABLE'
+        : failure.startsWith('symlink') ? 'ARCHIVE_PATH_SYMLINK_REJECTED'
+          : failure === 'denied-readdir' ? 'EACCES' : 'ARCHIVE_BLOB_PATH_INVALID';
+      await assert.rejects(fixture.service.pauseBackgroundMaterialization(), { code });
+      assert.equal(fixture.service.orphanBlobPrefixCursor, 0);
+      assert.equal(fs.readFileSync(sentinel, 'utf8'), '未归属外部文件');
+      if (failure === 'file-on-readdir') assert.equal(fs.readFileSync(prefixDir, 'utf8'), '替代分片文件');
+    } finally { fixture.close(); }
+  });
+}
 
 test('后台指纹快路仅对新指纹候选按变化做 SHA，旧 NULL same-size 不读不回填', async () => {
   const fixture = createFixture();
@@ -2725,10 +2953,12 @@ test('canonical ancestor 被目录链接替换后 open/save/delete/publish 均 f
 
       const deleted = await fixture.service.deleteBatch(archived.batch.id);
 
-      assert.equal(deleted.metadataDeleted, true);
-      assert.equal(deleted.status, 'deleted-cleanup-pending');
+      assert.equal(deleted.ok, false);
+      assert.equal(deleted.code, 'ARCHIVE_PATH_SYMLINK_REJECTED');
+      assert.equal(deleted.metadataDeleted, undefined);
       assert.equal(fs.readFileSync(externalPath, 'utf8'), content);
-      assert.equal(fixture.repository.listCleanupJobs().length, 1);
+      assert.ok(fixture.repository.getBatch(archived.batch.id));
+      assert.equal(fixture.repository.listCleanupJobs().length, 0);
     } finally {
       fixture.close();
     }

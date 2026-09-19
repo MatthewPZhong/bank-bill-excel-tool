@@ -43,7 +43,7 @@ function createBizOpImportCoordinator({ userDataDir, catalog, payloadStore, prot
     return Object.fromEntries(['scannedDataRows', 'acceptedRows', 'rowErrorCount', 'fileErrorCount',
       'collectedSamples', 'errorSamplesTruncated', 'scanComplete', 'errorCountExact'].map((key) => [key, value[key]]));
   }
-  async function runImport({ taskLifecycle, runtime, filePlan, signal, onControl, afterWorker, afterCommit, options = {} }) {
+  async function runImport({ taskLifecycle, runtime, filePlan, signal, onControl, onTaskIdentified, afterWorker, afterCommit, options = {} }) {
     return admission.exclusive(async () => {
       if (signal?.aborted) return { status: 'cancelled' };
       let taskRunId;
@@ -58,6 +58,8 @@ function createBizOpImportCoordinator({ userDataDir, catalog, payloadStore, prot
             const op = prepareOperation({ taskRunId, operationKey: context.operationKey, actionKey: 'biz-op-v327:import-candidate',
               intent: { phase: 'xlsx-import-v1', candidateRef, reportRef, cellContractVersion: CELL_CONTRACT_VERSION,
                 ruleVersion: RULE_VERSION, filePlanDigest: hash(filePlan), commitPlanRef: `operations/${taskRunId}/import-commit.json` } });
+            // 仅向本请求的 Main 编排交付真实身份；诊断是否可读仍须等关闭与恢复后核验。
+            if (onTaskIdentified) onTaskIdentified(Object.freeze({ taskRunId, reportRef }));
             const settled = await controls.settleArtifacts({ files: filePlan.inputs.map((file) => ({ artifactKey: file.artifactKey })) });
             if (!settled.ok || !settled.durable) fail('BIZOP_ORIGINAL_SETTLEMENT_FAILED');
             const originals = catalog.archive.listArtifacts(context.batchId).filter((file) => file.direction === 'input');

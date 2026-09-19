@@ -182,7 +182,7 @@ test('copy-on-write 重建移除逐行 raw，只迁移真正异常且保持计�
   const nextDb = new DatabaseSync(targetPath, { readOnly: true });
   try {
     assert.equal(storageContractVersion(oldDb), 1);
-    assert.equal(storageContractVersion(nextDb), 2);
+    assert.equal(storageContractVersion(nextDb), 3);
     const columns = new Set(nextDb.prepare(
       'PRAGMA table_info(vcc_fin_op_effective_rows)'
     ).all().map((row) => row.name));
@@ -247,7 +247,7 @@ test('copy-on-write 重建移除逐行 raw，只迁移真正异常且保持计�
   const reopened = new DatabaseSync(targetPath);
   try {
     assert.doesNotThrow(() => ensureVccFinancialOpTablesSupport(reopened));
-    assert.equal(storageContractVersion(reopened), 2);
+    assert.equal(storageContractVersion(reopened), 3);
   } finally {
     reopened.close();
   }
@@ -289,7 +289,7 @@ test('reset-only COW 清空全部 VCC 表并保留非 VCC、Archive 与自增高
 
   let targetDb = new DatabaseSync(targetPath, { readOnly: true });
   try {
-    assert.equal(storageContractVersion(targetDb), 2);
+    assert.equal(storageContractVersion(targetDb), 3);
     const nonEmptyVcc = targetDb.prepare(`
       SELECT name FROM sqlite_master
       WHERE type = 'table' AND name GLOB 'vcc_fin_op_*'
@@ -343,7 +343,7 @@ test('reset-only COW 清空全部 VCC 表并保留非 VCC、Archive 与自增高
 
   targetDb = new DatabaseSync(sourcePath, { readOnly: true });
   try {
-    assert.equal(storageContractVersion(targetDb), 2);
+    assert.equal(storageContractVersion(targetDb), 3);
     for (const row of targetDb.prepare(`
       SELECT name FROM sqlite_master
       WHERE type = 'table' AND name GLOB 'vcc_fin_op_*'
@@ -1083,7 +1083,7 @@ test('原子切换先只读复验，再按用户选择保留旧库；pre-switch 
   assert.equal(fs.existsSync(backupPath), true);
   assert.equal(fs.existsSync(journalPath), false);
   const db = new DatabaseSync(sourcePath, { readOnly: true });
-  try { assert.equal(storageContractVersion(db), 2); } finally { db.close(); }
+  try { assert.equal(storageContractVersion(db), 3); } finally { db.close(); }
 
   const secondSource = path.join(directory, 'second.sqlite');
   const secondTarget = path.join(directory, 'second.next.sqlite');
@@ -1165,7 +1165,7 @@ test('switching 与 switched 崩溃窗口均按 journal 唯一恢复，重开失
     sourcePath: switchingSource
   });
   let db = new DatabaseSync(switchingSource, { readOnly: true });
-  try { assert.equal(storageContractVersion(db), 2); } finally { db.close(); }
+  try { assert.equal(storageContractVersion(db), 3); } finally { db.close(); }
   assert.equal(fs.existsSync(switchingBackup), true);
 
   const switchedSource = path.join(directory, 'switched.sqlite');
@@ -1220,7 +1220,7 @@ test('switching 与 switched 崩溃窗口均按 journal 唯一恢复，重开失
     }
   }), (error) => error.code === 'vcc-storage-post-switch-cleanup-failed');
   db = new DatabaseSync(cleanupSource, { readOnly: true });
-  try { assert.equal(storageContractVersion(db), 2); } finally { db.close(); }
+  try { assert.equal(storageContractVersion(db), 3); } finally { db.close(); }
   assert.equal(fs.existsSync(cleanupBackup), false);
   assert.equal(fs.existsSync(cleanupJournalPath), true);
   assert.deepEqual(recoverVccStorageMigration({ journalPath: cleanupJournalPath }), {

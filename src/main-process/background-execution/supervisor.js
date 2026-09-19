@@ -1504,8 +1504,50 @@ function createExecutionSupervisor(options = {}) {
       return resources;
     }
 
+    function describeAdmissionFailure(error, required, requestedLease, reason, snapshot = null) {
+      try {
+        if (!resourceGovernor || typeof resourceGovernor.snapshot !== 'function') return error;
+        const state = snapshot || resourceGovernor.snapshot();
+        const queueCount = state.queued && state.queued.size;
+        if (!Number.isSafeInteger(queueCount) || queueCount < 0) return error;
+        // 只采集五维数值，不把租约归属、任务身份或队列 payload 带进错误信息。
+        const admission = Object.freeze({
+          schemaVersion: 1,
+          reason,
+          requestedLease,
+          required: validateResourceVector(required),
+          budgets: validateResourceVector(state.budgets),
+          activeUsage: validateResourceVector(state.activeUsage),
+          available: validateResourceVector(state.available),
+          queueCount
+        });
+        const count = (value) => value.toLocaleString('en-US', { maximumFractionDigits: 0 });
+        const format = (vector) => `CPU ${count(vector.cpuSlots)}；Worker ${count(vector.workerThreadSlots)}；` +
+          `进程 ${count(vector.utilityProcessSlots)}；IO ${count(vector.ioHeavySlots)}；` +
+          `内存 ${(vector.memoryBytes / (1024 ** 2)).toLocaleString('en-US', {
+            minimumFractionDigits: 3, maximumFractionDigits: 3
+          })} MiB`;
+        const stageLabel = { base: 'Base', phase: 'Phase', 'base-and-phase': 'Base + Phase' }[requestedLease];
+        const normalized = new SupervisorError(error.code, error.message);
+        normalized.stage = 'admission';
+        normalized.details = admission;
+        // SafeErrorV1 只支持 detailLines；数值分组及 MiB 避免被隐私过滤误认成账号。
+        normalized.detailLines = [
+          `申请阶段：${stageLabel}；队列剩余：${count(queueCount)}`,
+          `申请资源：${format(admission.required)}`,
+          `总预算：${format(admission.budgets)}`,
+          `当前占用：${format(admission.activeUsage)}`,
+          `当前可用：${format(admission.available)}`
+        ];
+        reportDiagnostic({ type: 'resource-admission-failed', code: normalized.code, admission });
+        return normalized;
+      } catch (_error) {
+        // 诊断失败不得覆盖原准入错误，也不能阻断已取得租约的清理。
+        return error;
+      }
+    }
+
     function assertSimpleResourcesFitTotalBudget({ includeBase }) {
-      if (typeof record.resourceProfileBinding !== 'function') return;
       if (!resourceGovernor || typeof resourceGovernor.snapshot !== 'function') return;
       const governorSnapshot = resourceGovernor.snapshot();
       if (!governorSnapshot || !governorSnapshot.budgets) return;
@@ -1513,10 +1555,11 @@ function createExecutionSupervisor(options = {}) {
         ? checkedAdd(policy.resources.base, record.phaseResources, 'simple admission resources')
         : record.phaseResources;
       if (!fitsWithin(required, governorSnapshot.budgets)) {
-        throw new SupervisorError(
+        throw describeAdmissionFailure(new SupervisorError(
           'RESOURCE_BUDGET_UNAVAILABLE',
           `Resource budget cannot admit ${policy.resources.profile}`
-        );
+        ), required, includeBase ? 'base-and-phase' : 'phase',
+        'total-budget-insufficient', governorSnapshot);
       }
     }
 
@@ -1578,12 +1621,24 @@ function createExecutionSupervisor(options = {}) {
     async function acquireSimpleJobResources({ includeBase }) {
       if (!resourceGovernor) return true;
       assertSimpleResourcesFitTotalBudget({ includeBase });
-      if (includeBase) {
-        const baseLease = await resourceGovernor.acquireBaseLease(admissionRequest(policy.resources.base));
-        if (!retainGrantedLease(baseLease)) return false;
+      let required = includeBase ? policy.resources.base : record.phaseResources;
+      let requestedLease = includeBase ? 'base' : 'phase';
+      try {
+        if (includeBase) {
+          const baseLease = await resourceGovernor.acquireBaseLease(admissionRequest(required));
+          if (!retainGrantedLease(baseLease)) return false;
+        }
+        required = record.phaseResources;
+        requestedLease = 'phase';
+        const phaseLease = await resourceGovernor.acquirePhaseLease(admissionRequest(required));
+        return retainGrantedLease(phaseLease);
+      } catch (error) {
+        if (error && ['ADMISSION_TIMEOUT', 'RESOURCE_BUDGET_UNAVAILABLE'].includes(error.code)) {
+          throw describeAdmissionFailure(error, required, requestedLease,
+            error.code === 'ADMISSION_TIMEOUT' ? 'admission-timeout' : 'capacity-unavailable');
+        }
+        throw error;
       }
-      const phaseLease = await resourceGovernor.acquirePhaseLease(admissionRequest(record.phaseResources));
-      return retainGrantedLease(phaseLease);
     }
 
     async function acquireCompoundResources(existingBase = null) {

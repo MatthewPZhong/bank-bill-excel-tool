@@ -1,10 +1,21 @@
 'use strict';
 
+const { positionReportSourceIdentity } = require('../position-report-source-identity');
+
 const crypto = require('node:crypto');
 const path = require('node:path');
 const {
   ensureBackgroundExecutionRecoveryControlSchema
 } = require('./background-execution-schema');
+const {
+  ensureArchiveTerminalCompletionSchema,
+  getOwnerTerminalCompletion,
+  listFileTaskOwnerRecoveries,
+  recordFileTaskOwnerRecovery,
+  recordOwnerTerminalCompletion,
+  reopenRecoveredFileTaskOwner,
+  stableSerialize
+} = require('./archive-terminal-completion');
 
 // 存档中心只在主库保存轻量元数据：
 //   archive_batches   一次业务操作对应的本地日期流水批次；
@@ -154,6 +165,9 @@ function normalizeFingerprint(value, label = 'fingerprint') {
   }
   let ino = null;
   if (value.ino !== undefined && value.ino !== null && value.ino !== '') {
+    if (typeof value.ino === 'number' && !Number.isSafeInteger(value.ino)) {
+      throw new TypeError(`${label}.ino 不能使用已丢失精度的数字`);
+    }
     ino = String(value.ino);
     if (!/^(?:0|[1-9]\d*)$/.test(ino)) {
       throw new TypeError(`${label}.ino 必须是十进制字符串`);
@@ -227,13 +241,156 @@ function parseObjectJson(value) {
   }
 }
 
-function parseArrayJson(value) {
-  try {
-    const parsed = JSON.parse(value || '[]');
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (_error) {
-    return [];
+const DELETE_ITEM_STATES = new Set([
+  'pending', 'deleted', 'already-missing', 'preserved-shared', 'blocked', 'failed'
+]);
+const COMPLETED_DELETE_ITEM_STATES = new Set(['deleted', 'already-missing', 'preserved-shared']);
+const DELETE_JOB_STATES = new Set(['pending', 'running', 'failed', 'waiting-migration']);
+
+function deletePlanError(message) {
+  const error = new Error(`永久删除计划无效：${message}`);
+  error.code = 'ARCHIVE_DELETE_PLAN_INVALID';
+  return error;
+}
+
+function strictJson(value, array = false) {
+  let parsed;
+  try { parsed = JSON.parse(value); } catch (_error) { throw deletePlanError('JSON 已损坏'); }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) !== array) {
+    throw deletePlanError(array ? '必须为数组' : '必须为对象');
   }
+  return parsed;
+}
+
+function managedDeletePath(value) {
+  if (typeof value !== 'string' || !value || value.includes('\\') || value.includes('\u0000')
+      || path.posix.isAbsolute(value) || /^[a-z]:/i.test(value)
+      || value.split('/').some((part) => !part || part === '.' || part === '..')) {
+    throw deletePlanError('受管相对路径非法');
+  }
+  return value;
+}
+
+function managedDeleteRoot(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+      || typeof value.rootDir !== 'string' || !path.isAbsolute(value.rootDir)
+      || typeof value.realPath !== 'string' || !path.isAbsolute(value.realPath)
+      || value.rootDir.includes('\u0000') || value.realPath.includes('\u0000')
+      || typeof value.dev !== 'string' || !/^[1-9]\d*$/.test(value.dev)
+      || typeof value.ino !== 'string' || !/^[1-9]\d*$/.test(value.ino)) {
+    throw deletePlanError('受管源根身份不完整');
+  }
+  return value;
+}
+
+function deleteItemPathKey(item, plan) {
+  const root = item.managedRootIdentity || plan.rootIdentity;
+  return `${root.rootDir}\u0000${managedDeletePath(item.managedRelativePath)}`;
+}
+
+function managedSourceTargetIdentity(value) {
+  return Object.fromEntries(['sourceArtifactId', 'managedRootIdentity', 'managedRelativePath',
+    'expectedIdentity', 'sourceOwnerProof'].map((field) => [field, value[field]]));
+}
+
+function validateDeletePlan(value) {
+  const plan = strictJson(JSON.stringify(value));
+  if (plan.version !== 2) throw deletePlanError('不支持的计划版本');
+  for (const field of ['deletionId', 'archiveInstanceId', 'batchNumber', 'localDate',
+    'moduleId', 'batchRevision', 'createdAt']) {
+    if (typeof plan[field] !== 'string' || !plan[field].trim()) {
+      throw deletePlanError(`缺少 ${field}`);
+    }
+  }
+  if (!Number.isSafeInteger(plan.batchId) || plan.batchId < 1
+      || !['manual', 'retention', 'legacy-recovery'].includes(plan.origin)
+      || plan.sourcePolicy !== 'managed-only') throw deletePlanError('批次或授权范围非法');
+  if (!plan.rootIdentity || typeof plan.rootIdentity !== 'object'
+      || Array.isArray(plan.rootIdentity) || Object.keys(plan.rootIdentity).length === 0
+      || !Array.isArray(plan.items)) throw deletePlanError('缺少根身份或目标清单');
+  const itemIds = new Set();
+  const paths = new Set();
+  for (const item of plan.items) {
+    if (!item || typeof item.itemId !== 'string' || !item.itemId
+        || itemIds.has(item.itemId) || !['materialized', 'blob', 'owned-temp'].includes(item.kind)
+        || !DELETE_ITEM_STATES.has(item.state)
+        || !item.expectedIdentity || typeof item.expectedIdentity !== 'object'
+        || Array.isArray(item.expectedIdentity) || Object.keys(item.expectedIdentity).length === 0) {
+      throw deletePlanError('目标身份、类型或状态非法');
+    }
+    managedDeletePath(item.managedRelativePath);
+    if (item.managedRootIdentity !== undefined || item.sourceArtifactId !== undefined
+        || item.sourceOwnerProof !== undefined) {
+      const root = managedDeleteRoot(item.managedRootIdentity);
+      if (item.kind !== 'owned-temp' || !Number.isSafeInteger(item.sourceArtifactId)
+          || item.sourceArtifactId < 1 || !item.sourceOwnerProof
+          || typeof item.sourceOwnerProof !== 'object' || Array.isArray(item.sourceOwnerProof)
+          || root.rootDir === plan.rootIdentity.rootDir || root.realPath === plan.rootIdentity.realPath) {
+        throw deletePlanError('受管源目标未绑定独立根及 artifact 归属');
+      }
+      const proof = item.sourceOwnerProof;
+      const snapshot = normalizeFingerprint(proof.sourceSnapshot);
+      const reportSource = proof.sourceKind === 'position-anomaly-report';
+      if (proof.sourceKind !== undefined && (!reportSource
+          || proof.sourceOperation !== 'position-reconciliation:source:prepare-import'
+          || typeof proof.operationKey !== 'string' || !proof.operationKey
+          || typeof proof.artifactKey !== 'string' || !proof.artifactKey
+          || typeof proof.producerArtifactKey !== 'string' || !proof.producerArtifactKey
+          || !positionReportSourceIdentity(proof.sourcePath, proof.producerArtifactKey))) {
+        throw deletePlanError('持久报告来源缺少原业务及 artifact 身份');
+      }
+      if (proof.moduleId !== 'position-reconciliation-process' || proof.moduleId !== plan.moduleId
+          || proof.batchId !== plan.batchId || proof.artifactId !== item.sourceArtifactId
+          || proof.sourcePath !== path.join(root.rootDir, item.managedRelativePath)
+          || typeof proof.sourceOperation !== 'string' || !proof.sourceOperation
+          || !snapshot || !snapshot.ino || !SHA256_RE.test(proof.expectedSha256)
+          || proof.expectedSizeBytes !== snapshot.sizeBytes
+          || ![true, false].includes(item.expectedIdentity.exists)
+          || (item.expectedIdentity.exists
+            && (stableSerialize(normalizeFingerprint(item.expectedIdentity)) !== stableSerialize(snapshot)
+              || item.expectedIdentity.sha256 !== proof.expectedSha256))) {
+        throw deletePlanError('受管源计划缺少完整原件和归属证据');
+      }
+    }
+    const pathKey = deleteItemPathKey(item, plan);
+    if (paths.has(pathKey)) throw deletePlanError('目标路径重复');
+    itemIds.add(item.itemId);
+    paths.add(pathKey);
+  }
+  return plan;
+}
+
+function validateDeleteProgress(value, plan) {
+  const progress = strictJson(JSON.stringify(value));
+  if (!Array.isArray(progress.items) || progress.items.length !== plan.items.length) {
+    throw deletePlanError('逐项进度与计划不一致');
+  }
+  const ids = new Set();
+  for (const item of progress.items) {
+    if (!item || !plan.items.some((target) => target.itemId === item.itemId)
+        || ids.has(item.itemId) || !DELETE_ITEM_STATES.has(item.state)) {
+      throw deletePlanError('逐项进度身份或状态非法');
+    }
+    ids.add(item.itemId);
+  }
+  progress.items = progress.items.map((item) => ({
+    itemId: item.itemId,
+    state: item.state,
+    ...(item.lastErrorCode ? { lastErrorCode: optionalText(item.lastErrorCode, 128) } : {}),
+    ...(item.lastErrorMessage ? { lastErrorMessage: optionalText(item.lastErrorMessage, 512) } : {})
+  }));
+  if (progress.migration !== undefined && progress.migration !== null) {
+    for (const field of ['migrationId', 'archiveInstanceId', 'sourceRoot', 'targetRoot']) {
+      if (typeof progress.migration[field] !== 'string' || !progress.migration[field]) {
+        throw deletePlanError('迁移绑定身份不完整');
+      }
+    }
+    progress.migration = Object.fromEntries(
+      ['migrationId', 'archiveInstanceId', 'sourceRoot', 'targetRoot']
+        .map((field) => [field, progress.migration[field]])
+    );
+  }
+  return progress;
 }
 
 function normalizeOriginalName(value) {
@@ -531,6 +688,60 @@ function ensureArchiveMetadataSupport(db) {
         updated_at TEXT NOT NULL
       );
     `);
+
+    addColumnsIfMissing(db, 'archive_cleanup_jobs', [
+      ['plan_version', 'plan_version INTEGER NOT NULL DEFAULT 1'],
+      ['deletion_id', 'deletion_id TEXT'],
+      ['archive_instance_id', 'archive_instance_id TEXT'],
+      ['origin', "origin TEXT NOT NULL DEFAULT 'legacy-recovery'"],
+      ['source_policy', "source_policy TEXT NOT NULL DEFAULT 'managed-only'"],
+      ['plan_json', 'plan_json TEXT'],
+      ['progress_json', 'progress_json TEXT'],
+      ['state', "state TEXT NOT NULL DEFAULT 'pending'"]
+    ]);
+    db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_archive_cleanup_jobs_deletion_id
+        ON archive_cleanup_jobs(deletion_id) WHERE deletion_id IS NOT NULL;
+      CREATE TABLE IF NOT EXISTS archive_delete_receipts (
+        deletion_id TEXT PRIMARY KEY,
+        archive_instance_id TEXT NOT NULL,
+        batch_id INTEGER NOT NULL,
+        batch_number TEXT NOT NULL,
+        module_id TEXT NOT NULL,
+        origin TEXT NOT NULL,
+        source_policy TEXT NOT NULL,
+        completed_at TEXT NOT NULL,
+        UNIQUE (archive_instance_id, batch_id)
+      );
+      CREATE TABLE IF NOT EXISTS archive_owned_temporary_files (
+        id TEXT PRIMARY KEY,
+        batch_id INTEGER NOT NULL,
+        artifact_id INTEGER,
+        archive_instance_id TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('readonly', 'staging')),
+        managed_relative_path TEXT NOT NULL,
+        expected_identity_json TEXT,
+        state TEXT NOT NULL CHECK (state IN ('creating', 'ready')),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (archive_instance_id, managed_relative_path)
+      );
+      CREATE INDEX IF NOT EXISTS idx_archive_owned_temporary_files_batch
+        ON archive_owned_temporary_files(batch_id);
+      -- 旧版本只能看到空兼容清单，且没有完成凭证时不能丢弃新版计划。
+      CREATE TRIGGER IF NOT EXISTS protect_versioned_archive_cleanup_job
+      BEFORE DELETE ON archive_cleanup_jobs
+      WHEN OLD.plan_version <> 1 AND NOT EXISTS (
+        SELECT 1 FROM archive_delete_receipts r
+        WHERE r.deletion_id = OLD.deletion_id
+          AND r.archive_instance_id = OLD.archive_instance_id
+          AND r.batch_id = OLD.batch_id
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'ARCHIVE_DELETE_PLAN_REQUIRES_CURRENT_VERSION');
+      END;
+    `);
+    ensureArchiveTerminalCompletionSchema(db);
 
     db.exec(`
       CREATE TABLE IF NOT EXISTS archive_daily_sequences (
@@ -878,17 +1089,89 @@ function mapArtifactHold(row) {
 
 function mapCleanupJob(row) {
   if (!row) return null;
-  return {
+  const result = {
     id: Number(row.id),
     batchId: Number(row.batch_id),
     batchNumber: row.batch_number,
     localDate: row.local_date,
     layoutRelativeDir: row.layout_relative_dir,
-    materializedPaths: parseArrayJson(row.materialized_paths_json),
-    releasedBlobs: parseArrayJson(row.released_blobs_json),
+    planVersion: Number(row.plan_version),
+    deletionId: row.deletion_id || null,
+    archiveInstanceId: row.archive_instance_id || null,
+    origin: row.origin,
+    sourcePolicy: row.source_policy,
+    state: row.state,
+    materializedPaths: [],
+    releasedBlobs: [],
+    plan: null,
+    progress: null,
+    migration: null,
+    planError: null,
     attemptCount: Number(row.attempt_count) || 0,
     lastErrorCode: row.last_error_code || '',
     lastErrorMessage: row.last_error_message || '',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+  try {
+    if (result.planVersion === 1) {
+      result.materializedPaths = strictJson(row.materialized_paths_json, true);
+      result.releasedBlobs = strictJson(row.released_blobs_json, true);
+      result.materializedPaths.forEach(managedDeletePath);
+      for (const blob of result.releasedBlobs) {
+        if (!blob || !SHA256_RE.test(blob.sha256)) throw deletePlanError('旧版 Blob 清单非法');
+        managedDeletePath(blob.relativePath);
+      }
+    } else if (result.planVersion === 2) {
+      const plan = validateDeletePlan(strictJson(row.plan_json));
+      if (plan.deletionId !== result.deletionId || plan.batchId !== result.batchId
+          || plan.archiveInstanceId !== result.archiveInstanceId
+          || plan.batchNumber !== result.batchNumber || plan.localDate !== result.localDate
+          || plan.origin !== result.origin || plan.sourcePolicy !== result.sourcePolicy
+          || !DELETE_JOB_STATES.has(result.state)) throw deletePlanError('计划与控制记录不一致');
+      result.progress = validateDeleteProgress(strictJson(row.progress_json), plan);
+      result.migration = result.progress.migration || null;
+      result.plan = {
+        ...plan,
+        items: plan.items.map((item) => ({
+          ...item, ...result.progress.items.find((progress) => progress.itemId === item.itemId)
+        }))
+      };
+    } else throw deletePlanError('不支持的计划版本');
+  } catch (error) {
+    result.state = 'failed';
+    result.planError = { code: 'ARCHIVE_DELETE_PLAN_INVALID', message: error.message };
+  }
+  return result;
+}
+
+function mapDeletionReceipt(row) {
+  if (!row) return null;
+  return {
+    deletionId: row.deletion_id,
+    archiveInstanceId: row.archive_instance_id,
+    batchId: Number(row.batch_id),
+    batchNumber: row.batch_number,
+    moduleId: row.module_id,
+    origin: row.origin,
+    sourcePolicy: row.source_policy,
+    fullyDeleted: true,
+    completedAt: row.completed_at
+  };
+}
+
+function mapOwnedTemporaryFile(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    batchId: Number(row.batch_id),
+    artifactId: row.artifact_id == null ? null : Number(row.artifact_id),
+    archiveInstanceId: row.archive_instance_id,
+    kind: row.kind,
+    managedRelativePath: row.managed_relative_path,
+    expectedIdentity: row.expected_identity_json == null
+      ? null : strictJson(row.expected_identity_json),
+    state: row.state,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -1021,6 +1304,57 @@ class ArchiveRepository {
   ensureSchema() {
     ensureArchiveMetadataSupport(this.db);
   }
+
+  recordOwnerTerminalCompletion(payload) {
+    return withWriteTransaction(this.db, () => recordOwnerTerminalCompletion(this.db, {
+      completedAt: this._timestamp(), ...payload
+    }));
+  }
+
+  getOwnerTerminalCompletion(owner) {
+    return getOwnerTerminalCompletion(this.db, owner);
+  }
+
+  recoverFileTaskOwnerCompletions(options = {}) {
+    const excludedBatches = new Set((options.excludeBatchIds || []).map(Number));
+    const excludedTasks = new Set((options.excludeTaskRunIds || []).map(String));
+    return withWriteTransaction(this.db, () => {
+      const instanceId = this.getArchiveInstanceId();
+      let completed = 0;
+      let pending = 0;
+      for (const recovery of listFileTaskOwnerRecoveries(this.db)) {
+        const { owner } = recovery;
+        const context = owner.batchContext;
+        if (excludedBatches.has(context.batchId) || excludedTasks.has(context.taskRunId)) {
+          pending += 1;
+          continue;
+        }
+        const batch = this.getBatch(context.batchId);
+        const task = this.getTaskRun(context.taskRunId);
+        const identityFields = ['taskRunId', 'taskKey', 'moduleId', 'parentRunId', 'operationKey'];
+        if (recovery.archiveInstanceId !== instanceId || !batch || !task
+            || batch.batchNumber !== context.batchNumber
+            || identityFields.some((field) => batch[field] !== context[field] || task[field] !== context[field])
+            || batch.taskStatus !== ({ interrupted: 'failed', prepared: 'reserved' }[task.status] || task.status)) {
+          const error = new Error('File Task 原收口责任与当前 owner 身份或终态不一致');
+          error.code = 'ARCHIVE_OWNER_RECOVERY_IDENTITY_CONFLICT';
+          throw error;
+        }
+        if (!['succeeded', 'failed', 'cancelled', 'interrupted'].includes(task.status)) {
+          pending += 1;
+          continue;
+        }
+        // 只消费批次预留事务记录的无后处理责任，不从当前状态推断旧 owner 的职责。
+        recordOwnerTerminalCompletion(this.db, {
+          archiveInstanceId: instanceId, owner, terminalStatus: task.status,
+          afterTerminal: null, completedAt: this._timestamp()
+        }, { allowInterruptedRecovery: true });
+        completed += 1;
+      }
+      return { completed, pending };
+    });
+  }
+
 
   getTaskRun(taskRunId) {
     const id = requiredText(taskRunId, 'taskRunId', 256);
@@ -1215,6 +1549,12 @@ class ArchiveRepository {
 
   getOrCreateArchiveInstanceId() {
     return withWriteTransaction(this.db, () => {
+      // 独立 Archive Service 也使用与 AppDatabase 一致的持久设置格式。
+      this.db.exec(`CREATE TABLE IF NOT EXISTS app_settings (
+        setting_key TEXT PRIMARY KEY,
+        setting_value TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )`);
       const candidate = crypto.randomUUID();
       const timestamp = this._timestamp();
       this.db.prepare(`
@@ -1235,6 +1575,21 @@ class ArchiveRepository {
       }
       return instanceId.toLowerCase();
     });
+  }
+
+  getArchiveInstanceId() {
+    const table = this.db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'app_settings'`).get();
+    if (!table) return null;
+    const raw = this.db.prepare('SELECT setting_value FROM app_settings WHERE setting_key = ?')
+      .get(ARCHIVE_INSTANCE_ID_SETTING_KEY)?.setting_value;
+    if (raw === undefined) return null;
+    const instanceId = String(raw).trim();
+    if (!UUID_RE.test(instanceId)) {
+      const error = new Error('存档实例 ID 无效，无法确认存档根所有权');
+      error.code = 'ARCHIVE_INSTANCE_ID_INVALID';
+      throw error;
+    }
+    return instanceId.toLowerCase();
   }
 
   commitStorageRootSwitch(payload = {}) {
@@ -1264,6 +1619,18 @@ class ArchiveRepository {
       }
       if (byId.has(artifactId)) throw new TypeError(`artifactId 重复：${artifactId}`);
       byId.set(artifactId, { storageMode, storageFingerprint });
+    }
+    const blobFingerprints = payload.blobFingerprints === undefined ? null : new Map();
+    if (blobFingerprints) {
+      if (!Array.isArray(payload.blobFingerprints)) throw new TypeError('blobFingerprints 必须是数组');
+      for (const item of payload.blobFingerprints) {
+        const blobId = Number(item && item.blobId);
+        const fingerprint = normalizeFingerprint(item && item.fingerprint);
+        if (!Number.isSafeInteger(blobId) || blobId < 1 || !fingerprint || blobFingerprints.has(blobId)) {
+          throw new TypeError('迁移目标 Blob 指纹身份不完整或重复');
+        }
+        blobFingerprints.set(blobId, fingerprint);
+      }
     }
 
     return withWriteTransaction(this.db, () => {
@@ -1302,6 +1669,16 @@ class ArchiveRepository {
           throw error;
         }
       }
+      if (blobFingerprints) {
+        const blobs = this.db.prepare('SELECT id, size_bytes FROM archive_blobs ORDER BY id').all();
+        if (blobs.length !== blobFingerprints.size
+            || blobs.some((blob) => !blobFingerprints.has(Number(blob.id))
+              || blobFingerprints.get(Number(blob.id)).sizeBytes !== Number(blob.size_bytes))) {
+          const error = new Error('目标 Blob 指纹未覆盖全部当前 Blob 或大小不匹配');
+          error.code = 'ARCHIVE_STORAGE_BLOB_FINGERPRINT_INCOMPLETE';
+          throw error;
+        }
+      }
 
       const timestamp = this._timestamp();
       const updateArtifact = this.db.prepare(`
@@ -1326,6 +1703,17 @@ class ArchiveRepository {
           Number(artifact.id)
         );
         if (result.changes !== 1) throw new Error(`ready artifact ${artifact.id} 更新失败`);
+      }
+      if (blobFingerprints) {
+        const updateBlob = this.db.prepare(`UPDATE archive_blobs SET
+          fingerprint_size_bytes = ?, fingerprint_mtime_ms = ?,
+          fingerprint_ctime_ms = ?, fingerprint_ino = ? WHERE id = ?`);
+        for (const [blobId, fingerprint] of blobFingerprints) {
+          if (updateBlob.run(fingerprint.sizeBytes, fingerprint.mtimeMs,
+            fingerprint.ctimeMs, fingerprint.ino || null, blobId).changes !== 1) {
+            throw new Error(`Blob ${blobId} 迁移指纹更新失败`);
+          }
+        }
       }
       this.db.prepare(`
         INSERT INTO app_settings (setting_key, setting_value, updated_at)
@@ -2100,13 +2488,19 @@ class ArchiveRepository {
     `).all(Number(blobId)).map(mapArtifact);
   }
 
-  listUnresolvedArtifactSourcePaths() {
+  listUnresolvedArtifactSourcePaths(options = {}) {
+    const excludeBatchId = options.excludeBatchId === undefined ? null : Number(options.excludeBatchId);
+    if (excludeBatchId !== null && (!Number.isSafeInteger(excludeBatchId) || excludeBatchId < 1)) {
+      throw new TypeError('excludeBatchId 必须是正安全整数');
+    }
     return this.db.prepare(`
       SELECT source_path
       FROM archive_artifacts
-      WHERE status IN ('pending', 'failed') AND source_path <> ''
+      WHERE (? = 1 OR status IN ('pending', 'failed')) AND source_path <> ''
+        AND (? IS NULL OR batch_id <> ?)
       ORDER BY id ASC
-    `).all().map((row) => String(row.source_path));
+    `).all(options.includeReady === true ? 1 : 0, excludeBatchId, excludeBatchId)
+      .map((row) => String(row.source_path));
   }
 
   getArtifact(artifactId) {
@@ -2122,6 +2516,42 @@ class ArchiveRepository {
       ${ARTIFACT_SELECT}
       WHERE a.batch_id = ? AND a.artifact_key = ?
     `).get(Number(batchId), key));
+  }
+
+  persistInputArtifactMetadata(batchId, taskRunId, entries) {
+    return withWriteTransaction(this.db, () => {
+      const batch = this.getBatch(batchId);
+      if (!batch || batch.taskRunId !== taskRunId) throw new Error('输入成员清单的任务身份不符');
+      // FilePlan 已先冻结文件身份；业务成员清单只能附加，不能替换这部分证据。
+      const fileIdentityKeys = new Set(['aliasKey', 'sourceSnapshot', 'expectedSha256', 'expectedSizeBytes']);
+      const seen = new Set();
+      return entries.map((entry) => {
+        const artifact = this.getArtifactByKey(batchId, entry.artifactKey);
+        if (!artifact || artifact.direction !== 'input' || artifact.role !== 'input'
+            || artifact.sourceOperation !== entry.sourceOperation || artifact.originalName !== entry.originalName || seen.has(artifact.id)) {
+          throw new Error('输入成员清单与持久 manifest 身份不符');
+        }
+        seen.add(artifact.id);
+        const members = JSON.parse(normalizeMetadata(entry.metadata));
+        if (Object.keys(members).some((key) => fileIdentityKeys.has(key))) {
+          throw new Error('输入成员清单不能覆盖 FilePlan 文件身份');
+        }
+        const previousMembers = Object.fromEntries(Object.entries(artifact.metadata)
+          .filter(([key]) => !fileIdentityKeys.has(key)));
+        const previous = normalizeMetadata(previousMembers);
+        if (previous !== '{}' && stableSerialize(previousMembers) !== stableSerialize(members)) {
+          throw new Error('输入成员清单已经冻结，不能改写');
+        }
+        const metadata = { ...artifact.metadata, ...members };
+        if (previous === '{}' && Object.keys(members).length) {
+          this.db.prepare('UPDATE archive_artifacts SET metadata_json = ?, updated_at = ? WHERE id = ?')
+            .run(normalizeMetadata(metadata), this._timestamp(), artifact.id);
+        }
+        const updated = this.getArtifact(artifact.id);
+        if (stableSerialize(updated.metadata) !== stableSerialize(metadata)) throw new Error('输入成员清单回读不符');
+        return updated;
+      });
+    });
   }
 
   getBatchDetail(batchId) {
@@ -2489,6 +2919,31 @@ class ArchiveRepository {
     const taskRun = payload.taskRun;
     const manifest = payload.manifest;
     const items = [...manifest.inputs, ...manifest.outputs];
+    for (const item of manifest.inputs) {
+      if (item.expectedSha256 === undefined && item.expectedSizeBytes === undefined) continue;
+      if (typeof item.expectedSha256 !== 'string' || !SHA256_RE.test(item.expectedSha256)
+          || !Number.isSafeInteger(item.expectedSizeBytes) || item.expectedSizeBytes < 0
+          || !item.sourceSnapshot || item.expectedSizeBytes !== item.sourceSnapshot.sizeBytes) {
+        throw new TypeError('输入摘要必须包含合法 SHA-256 和与原快照一致的大小');
+      }
+    }
+    for (const item of items.filter((entry) => entry.preGeneratedOutput !== undefined)) {
+      const evidence = item.preGeneratedOutput;
+      const snapshot = normalizeFingerprint(evidence && evidence.sourceSnapshot);
+      if (!evidence || evidence.version !== 1 || evidence.kind !== 'position-anomaly-report'
+          || typeof evidence.producerArtifactKey !== 'string' || !evidence.producerArtifactKey
+          || Object.keys(evidence).some((key) => !['version', 'kind', 'producerArtifactKey', 'sourceSnapshot', 'expectedSha256', 'expectedSizeBytes'].includes(key))
+          || taskRun.moduleId !== 'position-reconciliation-process' || item.direction !== 'output' || item.role !== 'output'
+          || item.sourceOperation !== 'position-reconciliation:source:prepare-import'
+          || !positionReportSourceIdentity(item.filePath, evidence.producerArtifactKey)
+          || !snapshot?.ino || item.targetSnapshot?.exists !== true
+          || stableSerialize(snapshot) !== stableSerialize(normalizeFingerprint(item.targetSnapshot.snapshot))
+          || typeof evidence.expectedSha256 !== 'string' || !SHA256_RE.test(evidence.expectedSha256)
+          || !Number.isSafeInteger(evidence.expectedSizeBytes) || evidence.expectedSizeBytes < 0
+          || evidence.expectedSizeBytes !== snapshot.sizeBytes) {
+        throw new TypeError('预先生成的平盘报告必须包含匹配原对象的完整证据');
+      }
+    }
     const moduleId = taskRun.moduleId;
     const operationKey = taskRun.operationKey;
     const taskRunId = taskRun.taskRunId;
@@ -2499,6 +2954,12 @@ class ArchiveRepository {
     const manifestIdentity = manifest.identity;
     const businessStatus = optionalText(payload.businessStatus, 64);
     const locked = payload.locked === true ? 1 : 0;
+    const ownerRecovery = payload.ownerTerminalRecovery;
+    if (ownerRecovery != null && (ownerRecovery.version !== 1
+        || ownerRecovery.kind !== 'no-after-terminal'
+        || Object.keys(ownerRecovery).some((key) => !['version', 'kind'].includes(key)))) {
+      throw new TypeError('File Task 原收口责任格式无效');
+    }
 
     return withWriteTransaction(this.db, () => {
       const persistedTask = this.getTaskRun(taskRunId);
@@ -2601,9 +3062,19 @@ class ArchiveRepository {
           normalizeMetadata({
             aliasKey: item.aliasKey,
             ...(item.direction === 'input'
-              ? { sourceSnapshot: item.sourceSnapshot }
+              ? { sourceSnapshot: item.sourceSnapshot,
+                  ...(item.expectedSha256 !== undefined ? {
+                    expectedSha256: item.expectedSha256,
+                    expectedSizeBytes: item.expectedSizeBytes
+                  } : {}) }
               : {
                   targetSnapshot: item.targetSnapshot,
+                  ...(item.preGeneratedOutput ? {
+                    preGeneratedOutput: { version: 1, kind: 'position-anomaly-report',
+                      producerArtifactKey: item.preGeneratedOutput.producerArtifactKey },
+                    expectedSha256: item.preGeneratedOutput.expectedSha256,
+                    expectedSizeBytes: item.preGeneratedOutput.expectedSizeBytes
+                  } : {}),
                   ...(item.targetParentIdentity
                     ? { targetParentIdentity: item.targetParentIdentity }
                     : {})
@@ -2618,6 +3089,14 @@ class ArchiveRepository {
         SET last_issued_batch_id = ?, last_issued_batch_number = ?, last_issued_at = ?
         WHERE local_date = ?
       `).run(batchId, batchNumber, timestamp, localDate);
+      if (ownerRecovery) {
+        recordFileTaskOwnerRecovery(this.db, {
+          archiveInstanceId: this.getOrCreateArchiveInstanceId(), createdAt: timestamp,
+          owner: { version: 1, kind: 'file-batch', batchContext: {
+            batchId, batchNumber, taskRunId, taskKey, moduleId, parentRunId, operationKey
+          } }
+        });
+      }
       return { created: true, status: 'reserved', batch: this.getBatch(batchId) };
     });
   }
@@ -2874,7 +3353,9 @@ class ArchiveRepository {
       const mismatchedField = Object.entries(expectedIdentity).find(
         ([field, value]) => String(batch[field] || '') !== String(value)
       );
-      if (mismatchedField || batch.taskRunId !== taskRun.taskRunId) {
+      if (mismatchedField || batch.taskRunId !== taskRun.taskRunId
+          || ['taskKey', 'moduleId', 'parentRunId', 'operationKey']
+            .some((field) => taskRun[field] !== expectedIdentity[field])) {
         return {
           status: 'identity-conflict',
           updated: false,
@@ -2901,6 +3382,10 @@ class ArchiveRepository {
         return { status: 'status-conflict', updated: false, batch, taskRun };
       }
 
+      reopenRecoveredFileTaskOwner(this.db, {
+        owner: { version: 1, kind: 'file-batch', batchContext: { batchId: id, ...expectedIdentity } },
+        archiveInstanceId: this.getArchiveInstanceId(), createdAt: timestamp
+      });
       const taskUpdate = this.db.prepare(`
         UPDATE archive_task_runs
         SET status = 'running', finished_at = NULL,
@@ -3712,6 +4197,142 @@ class ArchiveRepository {
     `).get(hash));
   }
 
+  findReferencedBlob({ sha256, relativePath } = {}) {
+    const hash = sha256 ? normalizeSha256(sha256) : '';
+    const filePath = relativePath ? managedDeletePath(relativePath) : '';
+    if (!hash && !filePath) throw new TypeError('必须提供 Blob hash 或受管路径');
+    return mapBlob(this.db.prepare(`
+      SELECT bl.*, COUNT(a.id) AS reference_count
+      FROM archive_blobs bl
+      JOIN archive_artifacts a ON a.blob_id = bl.id
+      WHERE bl.sha256 = ? OR bl.relative_path = ?
+      GROUP BY bl.id
+      ORDER BY bl.id LIMIT 1
+    `).get(hash, filePath));
+  }
+
+  assertNoPendingHardlinkDeleteConflicts(plan) {
+    const hardlinks = plan.items.filter((item) => item.kind === 'materialized' && !item.managedRootIdentity
+      && item.expectedIdentity.exists && item.expectedIdentity.nlink > 1 && plan.items.some((blob) =>
+        blob.kind === 'blob' && blob.expectedIdentity.exists
+          && blob.expectedIdentity.dev === item.expectedIdentity.dev
+          && blob.expectedIdentity.ino === item.expectedIdentity.ino));
+    if (!hardlinks.length) return;
+    for (const job of this.listCleanupJobs()) {
+      if (!job.plan || job.planError || job.batchId === plan.batchId
+          || job.archiveInstanceId !== plan.archiveInstanceId
+          || stableSerialize(job.plan.rootIdentity) !== stableSerialize(plan.rootIdentity)) continue;
+      if (job.plan.items.some((item) => ['materialized', 'blob'].includes(item.kind)
+          && !item.managedRootIdentity && item.expectedIdentity.exists
+          && !COMPLETED_DELETE_ITEM_STATES.has(item.state)
+          && hardlinks.some((current) => current.expectedIdentity.dev === item.expectedIdentity.dev
+            && current.expectedIdentity.ino === item.expectedIdentity.ino))) {
+        const error = new Error('共享硬链接仍有未完成清理，请先重试原清理任务');
+        error.code = 'ARCHIVE_DELETE_HARDLINKS_PENDING';
+        throw error;
+      }
+    }
+  }
+
+  assertNoPendingHardlinkMutation({ archiveInstanceId, rootDir, dev, ino }) {
+    for (const job of this.listCleanupJobs()) {
+      if (job.archiveInstanceId !== archiveInstanceId) continue;
+      if (job.planError || !job.plan) {
+        const error = new Error('同一存档根仍有无法核验的清理计划，暂缓文件修复');
+        error.code = 'ARCHIVE_DELETE_PLAN_INVALID';
+        throw error;
+      }
+      if (job.plan.rootIdentity.rootDir !== rootDir) continue;
+      if (job.plan.items.some((item) => ['materialized', 'blob'].includes(item.kind)
+          && !item.managedRootIdentity && item.expectedIdentity.exists
+          && item.expectedIdentity.nlink > 1 && !COMPLETED_DELETE_ITEM_STATES.has(item.state)
+          && item.expectedIdentity.dev === String(dev) && item.expectedIdentity.ino === String(ino))) {
+        const error = new Error('共享硬链接仍有未完成清理，暂缓目录文件修复');
+        error.code = 'ARCHIVE_DELETE_HARDLINKS_PENDING';
+        throw error;
+      }
+    }
+  }
+
+  refreshReferencedHardlinkFingerprints(jobId, itemId, actualIdentity) {
+    return withWriteTransaction(this.db, () => {
+      const job = this.getCleanupJob(jobId);
+      const item = job && !job.planError && job.plan?.items.find((target) => target.itemId === itemId);
+      const expected = item?.expectedIdentity;
+      const actual = actualIdentity;
+      const changed = () => {
+        const error = new Error('共享硬链接的持久对象身份发生变化，保留原清理任务');
+        error.code = 'ARCHIVE_DELETE_FILE_CHANGED';
+        throw error;
+      };
+      if (!item || item.kind !== 'blob' || item.managedRootIdentity || !expected.exists
+          || !actual?.exists || !Number.isSafeInteger(expected.nlink) || expected.nlink < 2
+          || !Number.isSafeInteger(actual.nlink) || actual.nlink < 1
+          || !Number.isFinite(expected.birthtimeMs) || expected.birthtimeMs <= 0
+          || ['dev', 'ino', 'sizeBytes', 'mtimeMs', 'birthtimeMs', 'mode', 'sha256']
+            .some((field) => actual[field] !== expected[field])
+          || stableSerialize(actual.parents) !== stableSerialize(expected.parents)) changed();
+      const siblings = job.plan.items.filter((candidate) => {
+        const identity = candidate.expectedIdentity;
+        return candidate.kind === 'materialized' && !candidate.managedRootIdentity
+          && identity.exists && ['dev', 'ino', 'sizeBytes', 'mtimeMs', 'ctimeMs', 'birthtimeMs', 'mode', 'nlink', 'sha256']
+            .every((field) => identity[field] === expected[field]);
+      });
+      if (!siblings.length || siblings.some((sibling) => !['deleted', 'already-missing'].includes(sibling.state))
+          || actual.nlink !== expected.nlink - siblings.length) changed();
+      const blob = this.findReferencedBlob({ sha256: item.sha256 || expected.sha256,
+        relativePath: item.managedRelativePath });
+      if (!blob || blob.sha256 !== expected.sha256 || blob.relativePath !== item.managedRelativePath) changed();
+      const oldFingerprint = normalizeFingerprint(expected);
+      const newFingerprint = normalizeFingerprint(actual);
+      const matches = (fingerprint) => fingerprint && (stableSerialize(fingerprint) === stableSerialize(oldFingerprint)
+        || stableSerialize(fingerprint) === stableSerialize(newFingerprint));
+      if (!matches(blob.fingerprint)) changed();
+      const artifacts = this.db.prepare(`${ARTIFACT_SELECT} WHERE a.blob_id = ?`).all(blob.id).map(mapArtifact);
+      const sharedArtifacts = artifacts.filter((artifact) => artifact.storageFingerprint?.ino === expected.ino);
+      if (sharedArtifacts.some((artifact) => !matches(artifact.storageFingerprint))) changed();
+      // 仅推进同一删除计划证明的 unlink 所产生的 ctime；事务内比较旧值，重放只接受相同终值。
+      this.refreshBlobFingerprint(blob.id, newFingerprint);
+      for (const artifact of sharedArtifacts) this.refreshStorageFingerprint(artifact.id, newFingerprint);
+      return { blobId: blob.id, refreshedArtifacts: sharedArtifacts.length };
+    });
+  }
+
+  assertDetachedHardlinkFingerprints(blobId, before) {
+    const previous = normalizeFingerprint(before);
+    const blob = mapBlob(this.db.prepare('SELECT * FROM archive_blobs WHERE id = ?').get(Number(blobId)));
+    if (!blob?.fingerprint) return false;
+    if (!previous?.ino || stableSerialize(blob.fingerprint) !== stableSerialize(previous)
+        || this.listArtifactsByBlob(blob.id).some((artifact) => artifact.storageFingerprint?.ino === previous.ino
+          && stableSerialize(artifact.storageFingerprint) !== stableSerialize(previous))) {
+      const error = new Error('硬链接原对象的持久指纹发生变化，暂缓目录文件修复');
+      error.code = 'ARCHIVE_DELETE_FILE_CHANGED';
+      throw error;
+    }
+    return true;
+  }
+
+  refreshDetachedHardlinkFingerprints(blobId, before, after) {
+    const previous = normalizeFingerprint(before);
+    const next = normalizeFingerprint(after);
+    if (!previous?.ino || !next?.ino || previous.ino !== next.ino
+        || previous.sizeBytes !== next.sizeBytes || previous.mtimeMs !== next.mtimeMs) {
+      throw new TypeError('硬链接脱钩必须提供相同原对象的前后指纹');
+    }
+    return withWriteTransaction(this.db, () => {
+      // 只能推进已有且仍匹配的原对象凭证；历史 NULL 指纹不能通过读取或修复补造。
+      if (!this.assertDetachedHardlinkFingerprints(blobId, previous)) return false;
+      const artifacts = this.listArtifactsByBlob(Number(blobId));
+      if (!this.refreshBlobFingerprint(blobId, next)) throw new Error('Blob 指纹推进失败');
+      for (const artifact of artifacts) {
+        if (stableSerialize(artifact.storageFingerprint) === stableSerialize(previous)) {
+          if (!this.refreshStorageFingerprint(artifact.id, next)) throw new Error('目录文件指纹推进失败');
+        }
+      }
+      return true;
+    });
+  }
+
   listBlobs() {
     return this.db.prepare(`
       SELECT bl.*, COUNT(a.id) AS reference_count
@@ -3762,6 +4383,7 @@ class ArchiveRepository {
       SET fingerprint_size_bytes = ?, fingerprint_mtime_ms = ?,
           fingerprint_ctime_ms = ?, fingerprint_ino = ?, last_verified_at = ?
       WHERE id = ?
+        AND fingerprint_ino = ?
         AND fingerprint_size_bytes IS NOT NULL
         AND fingerprint_mtime_ms IS NOT NULL
         AND fingerprint_ctime_ms IS NOT NULL
@@ -3771,7 +4393,8 @@ class ArchiveRepository {
       fingerprint.ctimeMs,
       fingerprint.ino || null,
       this._timestamp(),
-      id
+      id,
+      fingerprint.ino || null
     );
     return result.changes === 1
       ? mapBlob(this.db.prepare(`
@@ -3793,6 +4416,7 @@ class ArchiveRepository {
       SET storage_fingerprint_size_bytes = ?, storage_fingerprint_mtime_ms = ?,
           storage_fingerprint_ctime_ms = ?, storage_fingerprint_ino = ?, updated_at = ?
       WHERE id = ?
+        AND storage_fingerprint_ino = ?
         AND storage_fingerprint_size_bytes IS NOT NULL
         AND storage_fingerprint_mtime_ms IS NOT NULL
         AND storage_fingerprint_ctime_ms IS NOT NULL
@@ -3802,7 +4426,8 @@ class ArchiveRepository {
       fingerprint.ctimeMs,
       fingerprint.ino || null,
       this._timestamp(),
-      id
+      id,
+      fingerprint.ino || null
     );
     return result.changes === 1 ? this.getArtifact(id) : null;
   }
@@ -4042,6 +4667,141 @@ class ArchiveRepository {
     `).all().map(mapCleanupJob);
   }
 
+  getCleanupJob(jobId) {
+    return mapCleanupJob(this.db.prepare('SELECT * FROM archive_cleanup_jobs WHERE id = ?')
+      .get(Number(jobId)));
+  }
+
+  getCleanupJobForBatch(batchId) {
+    return mapCleanupJob(this.db.prepare('SELECT * FROM archive_cleanup_jobs WHERE batch_id = ?')
+      .get(Number(batchId)));
+  }
+
+  upgradeCleanupJobPlan(jobId, deletePlan) {
+    return withWriteTransaction(this.db, () => {
+      const job = this.getCleanupJob(jobId);
+      if (!job) return null;
+      if (job.planError) throw deletePlanError(job.planError.message);
+      if (job.planVersion === 2) return job;
+      const plan = validateDeletePlan(deletePlan);
+      const expected = new Map(job.materializedPaths.map((filePath) => [filePath, 'materialized']));
+      for (const blob of job.releasedBlobs) expected.set(blob.relativePath, 'blob');
+      if (plan.batchId !== job.batchId || plan.batchNumber !== job.batchNumber
+          || plan.localDate !== job.localDate || plan.origin !== 'legacy-recovery'
+          || plan.archiveInstanceId !== this.getArchiveInstanceId()
+          || plan.items.length !== expected.size
+          || plan.items.some((item) => expected.get(item.managedRelativePath) !== item.kind
+            || item.state !== 'pending')) throw deletePlanError('旧计划升级不得改变原授权目标');
+      this.db.prepare(`UPDATE archive_cleanup_jobs SET
+        plan_version = 2, deletion_id = ?, archive_instance_id = ?, origin = ?,
+        source_policy = ?, plan_json = ?, progress_json = ?, state = 'pending',
+        materialized_paths_json = '[]', released_blobs_json = '[]', updated_at = ?
+        WHERE id = ? AND plan_version = 1`)
+        .run(plan.deletionId, plan.archiveInstanceId, plan.origin, plan.sourcePolicy,
+          JSON.stringify(plan), JSON.stringify({ items: plan.items.map((item) => ({
+            itemId: item.itemId, state: item.state
+          })) }), this._timestamp(), Number(jobId));
+      return this.getCleanupJob(jobId);
+    });
+  }
+
+  getDeletionReceipt(batchId, archiveInstanceId = null) {
+    const row = archiveInstanceId
+      ? this.db.prepare(`SELECT * FROM archive_delete_receipts
+          WHERE batch_id = ? AND archive_instance_id = ?`).get(Number(batchId), archiveInstanceId)
+      : this.db.prepare('SELECT * FROM archive_delete_receipts WHERE batch_id = ?')
+        .get(Number(batchId));
+    return mapDeletionReceipt(row);
+  }
+
+  registerOwnedTemporaryFile(batchId, payload = {}) {
+    return withWriteTransaction(this.db, () => {
+      const batch = this.getBatch(Number(batchId));
+      if (!batch) throw deletePlanError('临时文件批次不存在');
+      const id = requiredText(payload.id || crypto.randomUUID(), 'temporaryFile.id', 128);
+      const relativePath = managedDeletePath(payload.managedRelativePath);
+      if (!['readonly', 'staging'].includes(payload.kind)) throw deletePlanError('临时文件类型非法');
+      const state = payload.state || 'creating';
+      if (!['creating', 'ready'].includes(state)) throw deletePlanError('临时文件状态非法');
+      const artifactId = payload.artifactId == null ? null : Number(payload.artifactId);
+      if (artifactId !== null && this.getArtifact(artifactId)?.batchId !== batch.id) {
+        throw deletePlanError('临时文件的 artifact 归属不匹配');
+      }
+      const identity = payload.expectedIdentity == null
+        ? null : strictJson(JSON.stringify(payload.expectedIdentity));
+      if (state === 'ready' && (!identity || Object.keys(identity).length === 0)) {
+        throw deletePlanError('ready 临时文件缺少身份');
+      }
+      const timestamp = this._timestamp();
+      this.db.prepare(`
+        INSERT INTO archive_owned_temporary_files (
+          id, batch_id, artifact_id, archive_instance_id, kind, managed_relative_path,
+          expected_identity_json, state, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(id, batch.id, artifactId, this.getOrCreateArchiveInstanceId(), payload.kind,
+        relativePath, identity ? JSON.stringify(identity) : null, state, timestamp, timestamp);
+      return this.getOwnedTemporaryFile(id);
+    });
+  }
+
+  getOwnedTemporaryFile(id) {
+    return mapOwnedTemporaryFile(this.db.prepare('SELECT * FROM archive_owned_temporary_files WHERE id = ?')
+      .get(String(id)));
+  }
+
+  listOwnedTemporaryFiles(batchId) {
+    return this.db.prepare(`SELECT * FROM archive_owned_temporary_files
+      WHERE batch_id = ? ORDER BY created_at, id`).all(Number(batchId)).map(mapOwnedTemporaryFile);
+  }
+
+  updateOwnedTemporaryFile(id, patch = {}) {
+    const current = this.getOwnedTemporaryFile(id);
+    if (!current) return null;
+    if (!this.getBatch(current.batchId)) throw deletePlanError('批次已进入删除，不能更换临时文件身份');
+    const identity = patch.expectedIdentity === undefined
+      ? current.expectedIdentity : strictJson(JSON.stringify(patch.expectedIdentity));
+    const state = patch.state || current.state;
+    if (!['creating', 'ready'].includes(state)
+        || (state === 'ready' && (!identity || Object.keys(identity).length === 0))) {
+      throw deletePlanError('临时文件状态或身份非法');
+    }
+    this.db.prepare(`UPDATE archive_owned_temporary_files
+      SET expected_identity_json = ?, state = ?, updated_at = ? WHERE id = ?`)
+      .run(identity ? JSON.stringify(identity) : null, state, this._timestamp(), String(id));
+    return this.getOwnedTemporaryFile(id);
+  }
+
+  updateCleanupJobProgress(jobId, patch = {}) {
+    return withWriteTransaction(this.db, () => {
+      const job = this.getCleanupJob(jobId);
+      if (!job) return null;
+      if (job.planError || job.planVersion !== 2) throw deletePlanError('清理任务无法写入新版进度');
+      const progress = validateDeleteProgress({ ...job.progress, ...patch }, job.plan);
+      const state = patch.state || job.state;
+      if (!DELETE_JOB_STATES.has(state)) throw deletePlanError('清理任务状态非法');
+      // 已完成项不重新打开，重试只能推进原计划，不能替换原目标或扩大授权。
+      for (const item of progress.items) {
+        const previous = job.progress.items.find((prior) => prior.itemId === item.itemId);
+        if (COMPLETED_DELETE_ITEM_STATES.has(previous.state) && previous.state !== item.state) {
+          throw deletePlanError('已完成项不能重新执行');
+        }
+      }
+      if (state === 'waiting-migration' && (!progress.migration
+          || progress.items.some((item) => !COMPLETED_DELETE_ITEM_STATES.has(item.state)))) {
+        throw deletePlanError('等待迁移需要原计划全部完成和迁移绑定');
+      }
+      if (job.state === 'waiting-migration' && (state !== job.state
+          || JSON.stringify(progress.migration) !== JSON.stringify(job.migration))) {
+        throw deletePlanError('等待迁移任务不能改绑或提前恢复');
+      }
+      delete progress.state;
+      this.db.prepare(`UPDATE archive_cleanup_jobs
+        SET progress_json = ?, state = ?, updated_at = ? WHERE id = ?`)
+        .run(JSON.stringify(progress), state, this._timestamp(), Number(jobId));
+      return this.getCleanupJob(jobId);
+    });
+  }
+
   recordCleanupJobFailure(jobId, failure = {}) {
     const id = Number(jobId);
     const code = requiredText(failure.code || 'ARCHIVE_CLEANUP_FAILED', 'failure.code', 128);
@@ -4054,7 +4814,8 @@ class ArchiveRepository {
     const result = this.db.prepare(`
       UPDATE archive_cleanup_jobs
       SET attempt_count = attempt_count + 1,
-          last_error_code = ?, last_error_message = ?, updated_at = ?
+          last_error_code = ?, last_error_message = ?, updated_at = ?,
+          state = CASE WHEN state = 'waiting-migration' THEN state ELSE 'failed' END
       WHERE id = ?
     `).run(code, message, timestamp, id);
     return result.changes === 1
@@ -4062,9 +4823,77 @@ class ArchiveRepository {
       : null;
   }
 
-  completeCleanupJob(jobId) {
+  completeCleanupJob(jobId, options = {}) {
     const id = Number(jobId);
-    return this.db.prepare('DELETE FROM archive_cleanup_jobs WHERE id = ?').run(id).changes === 1;
+    return withWriteTransaction(this.db, () => {
+      const job = this.getCleanupJob(id);
+      if (!job) return false;
+      if (job.planError) throw deletePlanError(job.planError.message);
+      if (job.planVersion === 2) {
+        if (job.progress.items.some((item) => !COMPLETED_DELETE_ITEM_STATES.has(item.state))) {
+          throw deletePlanError('仍有未完成目标，不能生成完成凭证');
+        }
+        if (job.state === 'waiting-migration') {
+          const evidence = options.migrationCompletion;
+          if (!evidence || evidence.phase !== 'done' || !job.migration
+              || ['migrationId', 'archiveInstanceId', 'sourceRoot', 'targetRoot']
+                .some((field) => evidence[field] !== job.migration[field])) {
+            throw deletePlanError('缺少匹配的迁移完成证据');
+          }
+        }
+        this.db.prepare(`INSERT INTO archive_delete_receipts (
+          deletion_id, archive_instance_id, batch_id, batch_number, module_id,
+          origin, source_policy, completed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(job.deletionId, job.archiveInstanceId, job.batchId, job.batchNumber,
+            job.plan.moduleId, job.origin, job.sourcePolicy, this._timestamp());
+        this.db.prepare(`DELETE FROM archive_owned_temporary_files
+          WHERE batch_id = ? AND archive_instance_id = ?`).run(job.batchId, job.archiveInstanceId);
+      }
+      return this.db.prepare('DELETE FROM archive_cleanup_jobs WHERE id = ?').run(id).changes === 1;
+    });
+  }
+
+  _compactDeletedTaskMetadata(batch, archiveInstanceId) {
+    if (!batch.taskRunId) return { compacted: false, reason: 'no-task' };
+    const task = this.getTaskRun(batch.taskRunId);
+    if (!task) return { compacted: false, reason: 'no-task' };
+    const owner = { version: 1, kind: 'file-batch', batchContext: {
+      batchId: batch.id, batchNumber: batch.batchNumber, taskRunId: batch.taskRunId,
+      taskKey: batch.taskKey, moduleId: batch.moduleId,
+      parentRunId: batch.parentRunId, operationKey: batch.operationKey
+    } };
+    const proof = this.getOwnerTerminalCompletion(owner);
+    if (!proof || proof.archiveInstanceId !== archiveInstanceId
+        || proof.terminalStatus !== task.status
+        || !['succeeded', 'failed', 'cancelled'].includes(task.status)) {
+      return { compacted: false, reason: 'owner-completion-unproven' };
+    }
+    if (this.db.prepare('SELECT 1 FROM archive_batches WHERE task_run_id = ? LIMIT 1')
+      .get(task.taskRunId)) return { compacted: false, reason: 'shared-task' };
+    // committed lineage 可经已删除任务连接其余批次；discarded 键仍参与同 operation 幂等校验。
+    if (this.db.prepare(`SELECT 1 FROM archive_task_lineage
+      WHERE (consumer_task_run_id = ? OR producer_task_run_id = ?)
+        AND state IN ('planned', 'committed') LIMIT 1`).get(task.taskRunId, task.taskRunId)) {
+      return { compacted: false, reason: 'active-lineage' };
+    }
+    if (this.db.prepare('SELECT 1 FROM archive_task_flow_bind_intents WHERE source_task_run_id = ? LIMIT 1')
+      .get(task.taskRunId)) return { compacted: false, reason: 'flow-bind-pending' };
+    const metadata = task.metadata || {};
+    const recoveryPending = metadata.recoveryMode === true || metadata.recoveryHold === true
+      || Boolean(metadata.recoveryAttemptId)
+      || this.db.prepare(`SELECT 1 FROM background_execution_recovery_holds
+        WHERE task_run_id = ? AND status = 'active' LIMIT 1`).get(task.taskRunId)
+      || this.db.prepare(`SELECT 1 FROM background_execution_critical_intents
+        WHERE task_run_id = ? AND state <> 'closed' LIMIT 1`).get(task.taskRunId)
+      || this.db.prepare(`SELECT 1 FROM background_execution_batch_recovery_states
+        WHERE task_run_id = ? AND state <> 'resolved' LIMIT 1`).get(task.taskRunId)
+      || this.db.prepare(`SELECT 1 FROM background_execution_recovery_observation_attempts
+        WHERE task_run_id = ? AND status = 'prepared' LIMIT 1`).get(task.taskRunId);
+    if (recoveryPending) return { compacted: false, reason: 'recovery-pending' };
+    this.db.prepare(`UPDATE archive_task_runs SET metadata_json = '{}', failure_message = NULL,
+      updated_at = ? WHERE task_run_id = ?`).run(this._timestamp(), task.taskRunId);
+    return { compacted: true, reason: 'exclusive-terminal-task' };
   }
 
   deleteBatch(batchId, options = {}) {
@@ -4073,6 +4902,16 @@ class ArchiveRepository {
     return withWriteTransaction(this.db, () => {
       const batch = this.getBatch(id);
       if (!batch) return { status: 'not-found', batchId: id, releasedBlobs: [] };
+      const deletePlan = options.deletePlan === undefined ? null : validateDeletePlan(options.deletePlan);
+      if (deletePlan && (deletePlan.batchId !== batch.id
+          || deletePlan.batchNumber !== batch.batchNumber || deletePlan.localDate !== batch.localDate
+          || deletePlan.moduleId !== batch.moduleId
+          || deletePlan.archiveInstanceId !== this.getArchiveInstanceId())) {
+        throw deletePlanError('计划与批次或存档实例身份不一致');
+      }
+      if (deletePlan?.items.some((item) => item.state !== 'pending')) {
+        throw deletePlanError('新计划项目必须等待实际清理');
+      }
       if (batch.taskStatus === BATCH_TASK_STATUSES.RESERVED
           || batch.taskStatus === BATCH_TASK_STATUSES.RUNNING) {
         return { status: 'active', batch, releasedBlobs: [] };
@@ -4147,6 +4986,75 @@ class ArchiveRepository {
         ORDER BY artifact_order ASC, id ASC
       `).all(id).map((row) => String(row.storage_relative_path));
 
+      if (deletePlan) {
+        const archiveKey = (filePath) => deleteItemPathKey({ managedRelativePath: filePath }, deletePlan);
+        const expected = new Map(materializedPaths.map((filePath) => [archiveKey(filePath), 'materialized']));
+        for (const blob of candidateBlobs) expected.set(archiveKey(blob.relative_path), 'blob');
+        for (const temp of this.listOwnedTemporaryFiles(batch.id)) {
+          if (temp.archiveInstanceId !== deletePlan.archiveInstanceId) {
+            throw deletePlanError('临时文件的存档实例不匹配');
+          }
+          expected.set(archiveKey(temp.managedRelativePath), 'owned-temp');
+        }
+        const managedSourceTargets = options.managedSourceTargets === undefined
+          ? [] : options.managedSourceTargets;
+        if (!Array.isArray(managedSourceTargets)) throw deletePlanError('受管源核定结果必须为数组');
+        for (const target of managedSourceTargets) {
+          const root = managedDeleteRoot(target && target.managedRootIdentity);
+          const filePath = path.join(root.rootDir, managedDeletePath(target.managedRelativePath));
+          const artifact = this.getArtifact(Number(target.sourceArtifactId));
+          const proof = target.sourceOwnerProof;
+          const reportSource = proof?.sourceKind === 'position-anomaly-report';
+          const snapshot = artifact && normalizeFingerprint(reportSource
+            ? artifact.metadata.targetSnapshot?.snapshot : artifact.metadata.sourceSnapshot);
+          const validDirection = reportSource
+            ? artifact?.direction === 'output' && artifact.role === 'output'
+              && artifact.sourceOperation === 'position-reconciliation:source:prepare-import'
+              && artifact.metadata.preGeneratedOutput?.version === 1
+              && artifact.metadata.preGeneratedOutput?.kind === 'position-anomaly-report'
+              && artifact.metadata.targetSnapshot?.exists === true
+              && proof.operationKey === batch.operationKey && proof.artifactKey === artifact.artifactKey
+              && proof.producerArtifactKey === artifact.metadata.preGeneratedOutput.producerArtifactKey
+              && positionReportSourceIdentity(filePath, proof.producerArtifactKey)
+            : proof?.sourceKind === undefined && artifact?.direction === 'input';
+          if (!artifact || artifact.batchId !== batch.id || !validDirection
+              || batch.moduleId !== 'position-reconciliation-process' || !proof
+              || path.basename(root.rootDir) !== 'import-staging'
+              || path.basename(path.dirname(root.rootDir)) !== 'position-reconciliation'
+              || path.basename(path.dirname(path.dirname(root.rootDir))) !== 'run-data'
+              || artifact.sourcePath !== filePath || proof.sourcePath !== artifact.sourcePath
+              || proof.moduleId !== batch.moduleId || proof.batchId !== batch.id
+              || proof.artifactId !== artifact.id || proof.sourceOperation !== artifact.sourceOperation
+              || !snapshot || !snapshot.ino
+              || stableSerialize(normalizeFingerprint(proof.sourceSnapshot)) !== stableSerialize(snapshot)
+              || !SHA256_RE.test(artifact.metadata.expectedSha256)
+              || proof.expectedSha256 !== artifact.metadata.expectedSha256
+              || proof.expectedSizeBytes !== artifact.metadata.expectedSizeBytes
+              || proof.expectedSizeBytes !== snapshot.sizeBytes) {
+            throw deletePlanError('受管源核定结果与当前 artifact 持久证据不一致');
+          }
+          if (!target.expectedIdentity || ![true, false].includes(target.expectedIdentity.exists)
+              || (target.expectedIdentity.exists
+                && (stableSerialize(normalizeFingerprint(target.expectedIdentity)) !== stableSerialize(snapshot)
+                  || target.expectedIdentity.sha256 !== proof.expectedSha256))) {
+            throw deletePlanError('受管源当前身份与原件证据不一致');
+          }
+          const key = deleteItemPathKey(target, deletePlan);
+          const planned = deletePlan.items.find((item) => deleteItemPathKey(item, deletePlan) === key);
+          if (expected.has(key) || !planned || planned.kind !== 'owned-temp'
+              || stableSerialize(managedSourceTargetIdentity(planned))
+                !== stableSerialize(managedSourceTargetIdentity(target))) {
+            throw deletePlanError('受管源计划与主进程核定目标不一致');
+          }
+          expected.set(key, 'owned-temp');
+        }
+        this.assertNoPendingHardlinkDeleteConflicts(deletePlan);
+        if (expected.size !== deletePlan.items.length
+            || deletePlan.items.some((item) => expected.get(deleteItemPathKey(item, deletePlan)) !== item.kind)) {
+          throw deletePlanError('目标清单与当前批次归属不一致');
+        }
+      }
+
       this.db.prepare('DELETE FROM archive_artifacts WHERE batch_id = ?').run(id);
       if (recoveryOverlay && recoveryOverlay.state === 'resolved') {
         const removedOverlay = this.db.prepare(`
@@ -4169,28 +5077,38 @@ class ArchiveRepository {
         releasedBlobs.push(mapBlob({ ...blob, reference_count: 0 }));
       }
       let cleanupJob = null;
-      if (materializedPaths.length > 0 || releasedBlobs.length > 0) {
+      if (deletePlan || materializedPaths.length > 0 || releasedBlobs.length > 0) {
         const timestamp = this._timestamp();
         const result = this.db.prepare(`
           INSERT INTO archive_cleanup_jobs (
             batch_id, batch_number, local_date, layout_relative_dir,
             materialized_paths_json, released_blobs_json,
             attempt_count, last_error_code, last_error_message,
-            created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, 0, NULL, NULL, ?, ?)
+            created_at, updated_at, plan_version, deletion_id, archive_instance_id,
+            origin, source_policy, plan_json, progress_json, state
+          ) VALUES (?, ?, ?, ?, ?, ?, 0, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
         `).run(
           batch.id,
           batch.batchNumber,
           batch.localDate,
           layoutRelativeDirectoryForBatch(batch),
-          JSON.stringify(materializedPaths),
-          JSON.stringify(releasedBlobs.map((blob) => ({
+          JSON.stringify(deletePlan ? [] : materializedPaths),
+          JSON.stringify(deletePlan ? [] : releasedBlobs.map((blob) => ({
             relativePath: blob.relativePath,
             sha256: blob.sha256,
             sizeBytes: blob.sizeBytes
           }))),
           timestamp,
-          timestamp
+          timestamp,
+          deletePlan ? 2 : 1,
+          deletePlan?.deletionId || null,
+          deletePlan?.archiveInstanceId || null,
+          deletePlan?.origin || 'legacy-recovery',
+          'managed-only',
+          deletePlan ? JSON.stringify(deletePlan) : null,
+          deletePlan ? JSON.stringify({ items: deletePlan.items.map((item) => ({
+            itemId: item.itemId, state: item.state
+          })) }) : null
         );
         cleanupJob = mapCleanupJob(
           this.db.prepare('SELECT * FROM archive_cleanup_jobs WHERE id = ?')
@@ -4203,7 +5121,10 @@ class ArchiveRepository {
         artifactCount,
         logicalBytes,
         releasedBlobs,
-        cleanupJob
+        cleanupJob,
+        taskMetadataCleanup: deletePlan
+          ? this._compactDeletedTaskMetadata(batch, deletePlan.archiveInstanceId)
+          : { compacted: false, reason: 'legacy-delete' }
       };
     });
   }

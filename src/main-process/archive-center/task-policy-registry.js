@@ -21,6 +21,11 @@ const EXCLUDE_REASON_SET = new Set(EXCLUDE_REASONS);
 
 const SUPPORT_ACTION_POLICIES = Object.freeze([
   Object.freeze({
+    channel: 'vccFinancialOp:export:review',
+    kind: 'support-action',
+    reason: 'user-document-export'
+  }),
+  Object.freeze({
     channel: 'app:save-user-guide',
     kind: 'support-action',
     reason: 'user-document-export'
@@ -312,6 +317,8 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'archive-center:get-settings',
     'archive-center:get-stats',
     'archive-center:list-batches',
+    'archive-center:list-delete-cleanup-jobs',
+    'archive-center:prepare-delete-batch',
     'balance-adjustment:list',
     'bank-statement:c3-candidate-count',
     'bank-statement:refund-candidate-count',
@@ -419,10 +426,12 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'archive-center:delete-batch',
     'archive-center:open-file',
     'archive-center:retry-batch',
+    'archive-center:retry-delete-cleanup-job',
     'archive-center:save-as',
     'archive-center:select-retry-sources',
     'archive-center:set-locked',
     'archive-center:set-retention-days',
+    'archive-center:set-module-retention-days',
     'archive-center:start-entry-maintenance'
   ]),
   'ui-navigation': Object.freeze([
@@ -432,6 +441,7 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'background:reset',
     'background:save',
     'settings:set-current-module',
+    'settings:set-dark-mode-schedule',
     'settings:set-enabled-modules',
     'settings:set-recon-id-fix-bill-category',
     'window:close',

@@ -1,0 +1,93 @@
+(node:74589) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+▶ 系统 OP 异步关闭期间收到取消：不提交当前组，保留前组并停止后续工作
+  ✖ 仅系统 OP (56.922459ms)
+  ✖ 前组已提交且后组未执行 (40.242542ms)
+  ✖ 取消后不再打开下一个文件 (37.15325ms)
+✖ 系统 OP 异步关闭期间收到取消：不提交当前组，保留前组并停止后续工作 (134.842417ms)
+✖ 系统 OP 最后一次读取进度同步取消，仍先完成 Reader 关闭再收口 (29.669291ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 0
+ℹ fail 5
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 259.48225
+
+✖ failing tests:
+
+test at tests/unit/backend/vcc-financial-op/multisheet-import.test.js:90:13
+✖ 仅系统 OP (56.922459ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tests/unit/backend/vcc-financial-op/multisheet-import.test.js:120:14)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tests/unit/backend/vcc-financial-op/multisheet-import.test.js:90:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:358:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/unit/backend/vcc-financial-op/multisheet-import.test.js:90:13
+✖ 前组已提交且后组未执行 (40.242542ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tests/unit/backend/vcc-financial-op/multisheet-import.test.js:120:14)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tests/unit/backend/vcc-financial-op/multisheet-import.test.js:90:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:358:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/unit/backend/vcc-financial-op/multisheet-import.test.js:90:13
+✖ 取消后不再打开下一个文件 (37.15325ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    [
+      '/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/vcc-multisheet-x7St69/mixed.xlsx',
+  +   '/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/vcc-multisheet-x7St69/second.xlsx'
+    ]
+  
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tests/unit/backend/vcc-financial-op/multisheet-import.test.js:131:14)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tests/unit/backend/vcc-financial-op/multisheet-import.test.js:90:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:358:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ '/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/vcc-multisheet-x7St69/mixed.xlsx', '/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/vcc-multisheet-x7St69/second.xlsx' ],
+    expected: [ '/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/vcc-multisheet-x7St69/mixed.xlsx' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/unit/backend/vcc-financial-op/multisheet-import.test.js:138:1
+✖ 系统 OP 最后一次读取进度同步取消，仍先完成 Reader 关闭再收口 (29.669291ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tests/unit/backend/vcc-financial-op/multisheet-import.test.js:145:3)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: { code: 'vcc-import-cancelled' },
+    operator: 'rejects',
+    diff: 'simple'
+  }

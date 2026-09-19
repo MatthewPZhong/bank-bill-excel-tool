@@ -5,6 +5,7 @@ const path = require('node:path');
 const { Worker } = require('node:worker_threads');
 
 const { deserializeError } = require('./serialize-error');
+const { upgradeVccStorageFile } = require('../backend/vcc-financial-op-db/storage-upgrade');
 
 const {
   VccStorageMigrationError,
@@ -100,7 +101,8 @@ function publicFailure(error) {
   return {
     status: 'error',
     code: error && error.code ? String(error.code) : 'vcc-storage-migration-failed',
-    message: error && error.message ? String(error.message) : String(error)
+    message: error && error.message ? String(error.message) : String(error),
+    ...(error?.persistedContractVersion ? { persistedContractVersion: error.persistedContractVersion, migrationCommitted: error.migrationCommitted } : {})
   };
 }
 
@@ -179,6 +181,18 @@ function createVccStorageMigrationCoordinator(options = {}) {
           localResume = await options.pauseLocalMaintenance();
         }
         if (typeof options.terminateVccService === 'function') await options.terminateVccService();
+        const sourceInspection = (options.inspectSource || inspectVccStorage)(sourcePath);
+        if (sourceInspection.contractVersion === 2) {
+          if (typeof options.closeDatabase !== 'function') throw new TypeError('VCC 存储迁移缺少 closeDatabase callback');
+          await options.closeDatabase(); databaseClosed = true;
+          emit({ phase: 'verifying', processed: 0, total: 1, detail: '正在迁移 VCC v2 来源绑定到 v3' });
+          const upgraded = (options.upgradeStorage || upgradeVccStorageFile)(sourcePath);
+          updateJournal(journalPath, journal, 'done');
+          fs.rmSync(journalPath, { force: true });
+          emit({ phase: 'restarting', processed: 1, total: 1, detail: 'v3 迁移完成，正在重新初始化连接' });
+          if (typeof options.relaunch === 'function') await options.relaunch({ upgraded });
+          return { status: 'success', restarting: true, contractVersion: 3 };
+        }
         const result = await runMigrationWorker({
           sourcePath,
           targetPath,

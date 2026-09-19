@@ -20,6 +20,7 @@ const {
   getVccStorageContractVersion,
   inspectVccStorageData,
   registerVccStorageWriteCapability,
+  upgradeEmptyVccStorageContract,
   setVccStorageContractVersion
 } = require('../../../../src/backend/vcc-financial-op-db/storage-contract');
 const {
@@ -162,7 +163,7 @@ test('staging 自引用 partial index 对 fresh/既有 v2 幂等安装并支撑�
     assert.match(indexSql().sql, /ON vcc_fin_op_import_staging_rows\s*\(comparison_import_row_id\)/i);
     assert.match(indexSql().sql, /WHERE comparison_import_row_id IS NOT NULL/i);
 
-    setVccStorageContractVersion(db, VCC_STORAGE_CONTRACT_VERSION);
+    upgradeEmptyVccStorageContract(db);
     db.exec('DROP INDEX idx_vcc_fin_op_staging_comparison');
     assert.equal(indexSql(), undefined);
     ensureVccStorageSideTables(db);
@@ -279,10 +280,14 @@ test('storage contract marker 仅显式写入并拒绝未来版本', () => {
       )
     `);
     assert.equal(getVccStorageContractVersion(db), 1);
+    assert.throws(() => setVccStorageContractVersion(db, VCC_STORAGE_CONTRACT_VERSION), {
+      code: 'vcc-storage-contract-mismatch'
+    });
+    ensureVccFinancialOpTablesSupport(db, { autoUpgradeEmptyV1: true });
     setVccStorageContractVersion(db, VCC_STORAGE_CONTRACT_VERSION);
-    assert.equal(getVccStorageContractVersion(db), 2);
+    assert.equal(getVccStorageContractVersion(db), 3);
     db.prepare(`
-      UPDATE app_settings SET setting_value = '3'
+      UPDATE app_settings SET setting_value = '4'
       WHERE setting_key = 'vcc_storage_contract_version'
     `).run();
     assert.throws(() => getVccStorageContractVersion(db), /高于当前程序/);
@@ -291,7 +296,7 @@ test('storage contract marker 仅显式写入并拒绝未来版本', () => {
   }
 });
 
-test('正式启动把 fresh/empty v1 原子升级为空 v2 并保持二次幂等', () => {
+test('正式启动把 fresh/empty v1 经 v2 原子升级为空 v3 并保持二次幂等', () => {
   const db = new DatabaseSync(':memory:');
   try {
     db.exec(`
@@ -316,7 +321,7 @@ test('正式启动把 fresh/empty v1 原子升级为空 v2 并保持二次幂等
     `).get().count);
     const guardCount = Number(db.prepare(`
       SELECT COUNT(*) AS count FROM sqlite_master
-      WHERE type = 'trigger' AND name LIKE 'vcc_storage_contract_v2_guard_%'
+      WHERE type = 'trigger' AND name GLOB 'vcc_storage_contract_v3_guard_*'
     `).get().count);
     assert.equal(guardCount, vccTableCount * 3);
 
@@ -511,7 +516,7 @@ test('空 v1 升级末端校验失败时回滚 slim schema、marker 和 guards',
     assert.equal(columns(db, 'vcc_fin_op_effective_rows').has('raw_json'), true);
     assert.equal(Number(db.prepare(`
       SELECT COUNT(*) AS count FROM sqlite_master
-      WHERE type = 'trigger' AND name LIKE 'vcc_storage_contract_v2_guard_%'
+      WHERE type = 'trigger' AND name GLOB 'vcc_storage_contract_*'
     `).get().count), 0);
   } finally {
     db.close();
@@ -549,7 +554,7 @@ test('v1 历史终态记录没有 source 时标记 unavailable，不冒充待存
   }
 });
 
-test('contract-v2 连接能力触发器允许新版连接并阻止 v3.1.9 真实 repository 降级写', (t) => {
+test('contract-v3 连接能力触发器允许新版连接并阻止 v3.1.9 真实 repository 降级写', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-contract-v2-guard-'));
   const dbPath = path.join(dir, 'tool-data.sqlite');
   let db = new DatabaseSync(dbPath);
@@ -567,7 +572,7 @@ test('contract-v2 连接能力触发器允许新版连接并阻止 v3.1.9 真实
       updated_at TEXT NOT NULL
     );
   `);
-  ensureVccFinancialOpTablesSupport(db);
+  ensureVccFinancialOpTablesSupport(db, { autoUpgradeEmptyV1: true });
   setVccStorageContractVersion(db, VCC_STORAGE_CONTRACT_VERSION);
   assert.doesNotThrow(() => db.prepare(`
     INSERT INTO vcc_fin_op_import_batches (id, target_month, file_count)
@@ -614,7 +619,7 @@ test('contract-v2 连接能力触发器允许新版连接并阻止 v3.1.9 真实
   ]) {
     assert.throws(
       scenario.mutate,
-      /no such function: vcc_storage_write_capability_v2/,
+      /no such function: vcc_storage_write_capability_v3/,
       scenario.name
     );
   }
@@ -625,7 +630,7 @@ test('contract-v2 连接能力触发器允许新版连接并阻止 v3.1.9 真实
     targetMonth: '2026-08',
     files: [{ filePath: systemPath, sheetName: 'System' }],
     recordId: systemRecordId
-  }), /no such function: vcc_storage_write_capability_v2/);
+  }), /no such function: vcc_storage_write_capability_v3/);
 
   registerVccStorageWriteCapability(legacyDb);
   assert.doesNotThrow(() => legacyRepository.createImportBatch(legacyDb, {

@@ -1650,6 +1650,27 @@ function createToolboxOutputWriter({
         throw error;
       }
     },
+    async release() {
+      if (state !== 'committed') throw new Error('工具箱输出尚未完成校验，不能释放');
+      const stream = writer.stream;
+      if (stream && !stream.closed) {
+        await new Promise((resolve, reject) => {
+          const cleanup = () => {
+            clearTimeout(timer);
+            stream.removeListener('close', closed);
+            stream.removeListener('error', failed);
+          };
+          const closed = () => { cleanup(); resolve(); };
+          const failed = (error) => { cleanup(); reject(error); };
+          const timer = setTimeout(() => failed(new Error('工具箱输出流未能关闭')), 5000);
+          stream.once('close', closed);
+          stream.once('error', failed);
+          // commit 已完成，关闭文件句柄不会截断尚未提交的数据。
+          stream.destroy();
+        });
+      }
+      worksheet = null;
+    },
     async abort() {
       if (state === 'aborted') return;
       const previous = state;

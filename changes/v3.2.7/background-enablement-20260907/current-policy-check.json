@@ -1,0 +1,72 @@
+{
+  "baseline": "f75e76d140c4019980c5387e715ab9a99f9e8ffe",
+  "productionEnabledCount": 12,
+  "actions": [
+    {
+      "actionKey": "fund-recon:import",
+      "registered": true,
+      "enabled": false,
+      "mode": "legacy"
+    },
+    {
+      "actionKey": "fund-recon:run",
+      "registered": true,
+      "enabled": false,
+      "mode": "legacy"
+    },
+    {
+      "actionKey": "fund-recon:export",
+      "registered": true,
+      "enabled": false,
+      "mode": "legacy"
+    },
+    {
+      "actionKey": "vcc-financial-op:export-audit",
+      "registered": true,
+      "enabled": false,
+      "mode": "legacy"
+    },
+    {
+      "actionKey": "vcc-financial-op:export-single",
+      "registered": true,
+      "enabled": false,
+      "mode": "legacy"
+    },
+    {
+      "actionKey": "vcc-financial-op:export-subjects",
+      "registered": true,
+      "enabled": false,
+      "mode": "legacy"
+    },
+    {
+      "actionKey": "statement:import",
+      "registered": false,
+      "enabled": false,
+      "mode": "legacy"
+    },
+    {
+      "actionKey": "statement:resolve-big-account",
+      "registered": false,
+      "enabled": false,
+      "mode": "legacy"
+    },
+    {
+      "actionKey": "statement:resolve-manual-balance",
+      "registered": false,
+      "enabled": false,
+      "mode": "legacy"
+    },
+    {
+      "actionKey": "statement:generate-current",
+      "registered": false,
+      "enabled": false,
+      "mode": "legacy"
+    },
+    {
+      "actionKey": "statement:generate-all",
+      "registered": false,
+      "enabled": false,
+      "mode": "legacy"
+    }
+  ]
+}

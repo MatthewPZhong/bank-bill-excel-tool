@@ -47,48 +47,48 @@ function actionByKey(collection, actionKey) {
   return collection.actions.find((action) => action.actionKey === actionKey);
 }
 
-test('E13-G current manifest 以独立 66 action / 73 pair authority 达到六面 100% coverage', () => {
+test('E13-G current manifest 以独立 67 action / 74 pair authority 达到六面 100% coverage', () => {
   const current = harness();
   const result = validateActionCoverage(current.manifest, current);
-  assert.equal(CANONICAL_ACTION_KEYS.length, 66);
-  assert.equal(LEGACY_HANDLER_PAIRS.length, 73);
+  assert.equal(CANONICAL_ACTION_KEYS.length, 67);
+  assert.equal(LEGACY_HANDLER_PAIRS.length, 74);
   assert.deepEqual(current.manifest.counts, {
-    actionCount: 66,
-    legacyPairCount: 73,
-    runtimePolicyCount: 48,
+    actionCount: 67,
+    legacyPairCount: 74,
+    runtimePolicyCount: 49,
     legacyOnlyCount: 16,
     platformCanaryCount: 2
   });
   assert.deepEqual(result, {
     valid: true,
-    actionCount: 66,
-    legacyPairCount: 73,
-    runtimePolicyCount: 48,
+    actionCount: 67,
+    legacyPairCount: 74,
+    runtimePolicyCount: 49,
     surfaceCount: 6,
-    coveredActionSurfaceCount: 396,
-    expectedActionSurfaceCount: 396,
+    coveredActionSurfaceCount: 402,
+    expectedActionSurfaceCount: 402,
     coveragePercent: 100
   });
   assert.equal(Object.isFrozen(current.manifest), true);
   assert.equal(Object.isFrozen(current.manifest.surfaces.publishers), true);
 });
 
-test('Capability Inventory 与 Effective Production Strategy 分离，仅新版业务 OP 十二项显式开启', () => {
+test('Capability Inventory 与 Effective Production Strategy 分离，新版业务 OP 十二项与 rows 显式开启', () => {
   const current = harness();
   const snapshot = createEffectiveProductionStrategySnapshot(current);
   assert.deepEqual(current.capabilityInventory.counts, {
-    actionCount: 66,
-    implementedCount: 48,
+    actionCount: 67,
+    implementedCount: 49,
     legacyOnlyCount: 16,
     platformCanaryCount: 2
   });
   assert.deepEqual(snapshot.counts, {
-    actionCount: 66,
-    productionEnabledCount: 12,
+    actionCount: 67,
+    productionEnabledCount: 13,
     legacyEffectiveCount: 54
   });
   for (const action of snapshot.actions) {
-    const enabled = action.actionKey.startsWith('biz-op-v327:');
+    const enabled = action.actionKey.startsWith('biz-op-v327:') || action.actionKey === 'toolbox:split-rows';
     assert.equal(action.effectiveMode, enabled ? 'thread-single' : 'legacy');
     assert.equal(action.effectiveWorkerCount, enabled ? 1 : 0);
     assert.equal(action.featureFlag, enabled);
@@ -113,14 +113,14 @@ test('Capability Inventory 与 Effective Production Strategy 分离，仅新版�
   const validation = validateEffectiveProductionStrategySnapshot(snapshot, current);
   assert.deepEqual(validation, {
     valid: true,
-    actionCount: 66,
-    productionEnabledCount: 12,
+    actionCount: 67,
+    productionEnabledCount: 13,
     legacyEffectiveCount: 54
   });
   assert.deepEqual(validateCapabilityInventory(current.capabilityInventory, current), {
     valid: true,
-    actionCount: 66,
-    implementedCount: 48,
+    actionCount: 67,
+    implementedCount: 49,
     legacyOnlyCount: 16,
     platformCanaryCount: 2
   });

@@ -125,6 +125,7 @@ test('维护迁移先阻止新任务并等待活动任务，再暂停存档与�
   const calls = [];
   const messages = [];
   const coordinator = createVccStorageMigrationCoordinator({
+    inspectSource: () => ({ contractVersion: 1 }),
     sourcePath,
     journalPath,
     businessOperationRegistry: registry,
@@ -170,6 +171,7 @@ test('候选构建失败保持数据库连接与旧文件，释放维护并保�
   const registry = createBusinessOperationRegistry();
   const calls = [];
   const coordinator = createVccStorageMigrationCoordinator({
+    inspectSource: () => ({ contractVersion: 1 }),
     sourcePath,
     journalPath,
     businessOperationRegistry: registry,
@@ -220,6 +222,7 @@ test('候选 ready 后先关闭主库并保持 mutation 门禁，再 ack worker 
     migratedAnomalies: 1
   };
   const coordinator = createVccStorageMigrationCoordinator({
+    inspectSource: () => ({ contractVersion: 1 }),
     sourcePath,
     journalPath,
     businessOperationRegistry: registry,
@@ -258,6 +261,7 @@ test('updater lease 阻止 migration，migration 不得释放 updater 门禁', a
   const updater = registry.beginInstallTransition('app-updater');
   const calls = [];
   const coordinator = createVccStorageMigrationCoordinator({
+    inspectSource: () => ({ contractVersion: 1 }),
     sourcePath,
     journalPath,
     businessOperationRegistry: registry,
@@ -281,6 +285,7 @@ test('ready 后关闭主库失败会 abort worker、恢复旧库并释放 migrat
   const registry = createBusinessOperationRegistry();
   const calls = [];
   const coordinator = createVccStorageMigrationCoordinator({
+    inspectSource: () => ({ contractVersion: 1 }),
     sourcePath,
     journalPath,
     businessOperationRegistry: registry,
@@ -317,6 +322,7 @@ test('worker 在 ack 后崩溃时不进入原子切换，旧库保持并请求�
   const registry = createBusinessOperationRegistry();
   const calls = [];
   const coordinator = createVccStorageMigrationCoordinator({
+    inspectSource: () => ({ contractVersion: 1 }),
     sourcePath,
     journalPath,
     businessOperationRegistry: registry,

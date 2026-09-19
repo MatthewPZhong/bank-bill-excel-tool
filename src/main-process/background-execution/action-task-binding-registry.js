@@ -6,12 +6,12 @@ const { types: { isProxy } } = require('node:util');
 const ACTION_TASK_BINDING_CONTRACT = Object.freeze({
   version: 1,
   canonicalization: 'RFC8785-JCS',
-  sha256: 'fc343385b2c99a27d5f26fce5789da405f0fdea523a9541bb7a16dd100b37fca',
-  actionCount: 66,
+  sha256: '48747e02020f01959a37c1758adb9c337c8c69143603aa34544d2735347d073f',
+  actionCount: 67,
   taskPolicyInventoryCount: 134,
   taskPolicyInventoryCanonicalization: 'RFC8785-JCS',
   taskPolicyInventorySha256: '6912c045c82d260fbe554732e886f4da9fafe01e4f3e64f8dc3b0c870055a773',
-  pairCount: 73,
+  pairCount: 74,
   boundTaskKeyCount: 66,
   unboundTaskPolicyCount: 68
 });
@@ -84,6 +84,7 @@ const ACTION_TASK_BINDINGS = Object.freeze({
   'toolbox:publish': Object.freeze(['toolbox:split:export']),
   'toolbox:split-large': Object.freeze(['toolbox:split:export']),
   'toolbox:split-multi-output': Object.freeze(['toolbox:split:export']),
+  'toolbox:split-rows': Object.freeze(['toolbox:split:export']),
   'toolbox:split-single': Object.freeze(['toolbox:split:export']),
   'vcc-financial-op:export-audit': Object.freeze(['vccFinancialOp:data-manager:export', 'vccFinancialOp:export:import-audit']),
   'vcc-financial-op:export-single': Object.freeze(['vccFinancialOp:export:result']),

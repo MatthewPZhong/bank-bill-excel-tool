@@ -145,7 +145,7 @@ describe('T4 拆表一气呵成：导入弹选字段框 + 完成即导出（无�
   test('无独立「导出文件」按钮（split-export）；splitExport 在 onComplete 内触发', () => {
     assert.ok(!fn.includes('data-action="split-export"'), '不应再有独立「导出文件」按钮');
     assert.ok(!fn.includes('splitExportBtn'), '不应再引用 splitExportBtn（按钮已删）');
-    const completeMatch = fn.match(/onComplete:\s*async \(\{ field, values(?:, mode, groups)? \}(?: = \{\})?\)/);
+    const completeMatch = fn.match(/onComplete:\s*async \(\{ field, values(?:, mode, groups(?:, rowsPerFile)?)? \}(?: = \{\})?\)/);
     const completeIdx = completeMatch ? completeMatch.index : -1;
     const exportIdx = fn.indexOf('desktopApi.toolbox.splitExport(');
     assert.ok(completeIdx >= 0, 'onComplete 应为 async（内部一气呵成导出）');
@@ -217,7 +217,7 @@ describe('T5/T6 选字段弹框：浮动勾选面板控件 + 空值/空选边界
   });
 
   test('边界②：选中值数为 0 → [完成] 禁用（不允许空选导出）', () => {
-    assert.ok(/completeBtn\.disabled\s*=\s*selectedValues\.size === 0/.test(fn),
+    assert.ok(/completeBtn\.disabled\s*=\s*busy \|\| \(byRows \? !checked\.valid : selectedValues\.size === 0\)/.test(fn),
       '未选值应禁用 [完成]（completeBtn.disabled = selectedValues.size===0）');
   });
 

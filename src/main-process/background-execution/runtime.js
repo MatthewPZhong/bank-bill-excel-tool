@@ -1,6 +1,8 @@
 'use strict';
 
 const os = require('node:os');
+const { ROWS_POLICY } = require('../toolbox-row-split/policy');
+const { ROWS_ACTION, validateRowsResult } = require('../toolbox-row-split/contracts');
 const path = require('node:path');
 
 const {
@@ -151,6 +153,7 @@ const { BIZ_OP_V327_POLICIES, validateBizOpCandidateResult, validateBizOpExportR
 const BACKGROUND_EXECUTION_POLICIES = Object.freeze([
   ...BIZ_OP_V327_POLICIES,
   ...TOOLBOX_GENERATION_POLICIES,
+  ROWS_POLICY,
   ...PRE_FUND_MPT_POLICIES,
   NEW_ACCOUNT_GENERATION_POLICY,
   NEW_ACCOUNT_SAVE_AS_POLICY,
@@ -203,6 +206,13 @@ function mergeShutdownReports(report, ...pairedReports) {
 }
 
 function entryBindingForPolicy(policy, workerRoot, duplicateStartupGate) {
+  if (policy.actionKey === ROWS_ACTION) {
+    return Object.freeze({
+      path: path.resolve(__dirname, '..', 'toolbox-row-split', 'worker-entry.js'),
+      resourceLimits: Object.freeze({ maxOldGenerationSizeMb: 640, maxYoungGenerationSizeMb: 32 }),
+      cancellationTerminalErrorCodes: Object.freeze(['TOOLBOX_GENERATION_CANCELLED'])
+    });
+  }
   if (policy.moduleId === 'biz-op-v327') return path.resolve(__dirname, '..', 'biz-op-v327', 'worker-entry.js');
   if (policy.actionKey === NEW_ACCOUNT_SAVE_AS_ACTION) {
     return runNewAccountArtifactCopyInline;
@@ -434,6 +444,8 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
       resultValidator = policy.actionKey === NEW_ACCOUNT_SAVE_AS_ACTION
         ? validateNewAccountSaveAsResult
         : validateNewAccountGenerationResult;
+    } else if (policy.actionKey === ROWS_ACTION) {
+      resultValidator = validateRowsResult;
     } else {
       resultValidator = policy.actionKey === TOOLBOX_GENERATION_ACTIONS.SPLIT_MULTI_OUTPUT
         ? validateToolboxMultiGenerationResult

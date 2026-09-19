@@ -1,4 +1,6 @@
 'use strict';
+const { readIdentityStatSync } = require('../../../src/main-process/archive-center/filesystem-identity');
+const { createMigrationCloseMetadataFs } = require('../../fixtures/archive-migration-close-metadata');
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -18,6 +20,10 @@ const {
 const {
   createArchiveRuntimeDelegate
 } = require('../../../src/main-process/archive-center/archive-runtime-delegate');
+const { buildDeletePlan } = require('../../../src/main-process/archive-center/batch-delete-plan');
+const { createArchiveCenterController } = require('../../../src/main-process/archive-center/controller');
+const { createTaskLifecycle } = require('../../../src/main-process/archive-center/task-lifecycle');
+const { normalizeFilePlanV1 } = require('../../../src/main-process/archive-center/file-plan');
 const {
   ROOT_MARKER_FILE,
   createArchiveStorageRootManager,
@@ -145,6 +151,44 @@ async function createFixture(options = {}) {
 
 function managed(rootDir, relativePath) {
   return path.join(rootDir, ...String(relativePath).split('/'));
+}
+
+function replaceFixtureFile(source, target) {
+  const previous = readIdentityStatSync(fs, target, 'statSync');
+  // Windows 不能覆盖仍有句柄打开的目标；先保留原对象于隔离目录，再放入新 inode。
+  if (process.platform === 'win32') {
+    if (!(previous.mode & 0o200)) fs.chmodSync(target, 0o600);
+    const displaced = path.join(fs.mkdtempSync(path.join(path.dirname(source), 'displaced-owner-')), 'original');
+    fs.renameSync(target, displaced);
+    assert.equal(readIdentityStatSync(fs, displaced, 'statSync').ino, previous.ino);
+  }
+  fs.renameSync(source, target);
+  assert.notEqual(readIdentityStatSync(fs, target, 'statSync').ino, previous.ino);
+}
+
+async function createHistoricalDeleteOverlap({ legacyWithoutIdentity = false } = {}) {
+  let interrupted = false;
+  const current = await createFixture({
+    faultInjector(event) {
+      if (event === 'after-copy-blob' && !interrupted) {
+        interrupted = true;
+        throw Object.assign(new Error('模拟升级前迁移中断'), { code: 'SIMULATED_CRASH' });
+      }
+    }
+  });
+  await current.manager.initialize();
+  await current.manager.currentService.setLocked(current.artifact.batchId, false);
+  const deletePlan = legacyWithoutIdentity ? null
+    : await buildDeletePlan(current.manager.currentService, current.artifact.batchId);
+  fs.mkdirSync(current.targetRoot, { recursive: true });
+  assert.equal((await current.manager.changeStorageLocation()).status, 'failed');
+  // 直接构造旧准入下已有的持久重叠；V2 对象身份在迁移开始前已采集，不能事后认领。
+  const deleted = current.repository.deleteBatch(current.artifact.batchId,
+    deletePlan ? { deletePlan } : { allowLocked: true });
+  assert.equal(deleted.status, 'deleted');
+  assert.ok(deleted.cleanupJob);
+  assert.equal(current.repository.getDeletionReceipt(current.artifact.batchId), null);
+  return current;
 }
 
 function real(rootDir) {
@@ -299,8 +343,8 @@ test('正常迁移只流式复制 canonical，目标重新 materialize 并原子
     );
     assert.equal(after.storageMode, 'copy');
     assert.notEqual(
-      fs.statSync(managed(current.targetRoot, after.blob.relativePath)).ino,
-      fs.statSync(managed(current.targetRoot, after.storageRelativePath)).ino
+      readIdentityStatSync(fs, managed(current.targetRoot, after.blob.relativePath), 'statSync').ino,
+      readIdentityStatSync(fs, managed(current.targetRoot, after.storageRelativePath), 'statSync').ino
     );
     assert.ok(current.progress.some((item) => item.phase === 'copying'));
     assert.ok(current.progress.some((item) => item.phase === 'materializing-layout'));
@@ -713,7 +757,7 @@ test('precommit Blob 失败保持 source/setting，重启从 journal 幂等续�
   }
 });
 
-test('pre-switch 恢复按 journal 目标发布清单清除已删除批次的目标残留', async () => {
+test('pre-switch 失败释放维护锁后仍拒绝新删除，恢复收口后才允许删除', async () => {
   let interrupted = false;
   const current = await createFixture({
     faultInjector(event) {
@@ -740,17 +784,27 @@ test('pre-switch 恢复按 journal 目标发布清单清除已删除批次的目
     const staleTargetBlob = managed(current.targetRoot, current.artifact.blob.relativePath);
     assert.equal(fs.existsSync(staleTargetBlob), true);
 
-    const deleted = await current.manager.currentService.deleteBatch(current.artifact.batchId, {
-      force: true
-    });
-    assert.equal(deleted.ok, true, JSON.stringify(deleted));
-    assert.equal(current.repository.getArtifact(current.artifact.id), null);
+    assert.equal(current.manager.isMaintenanceRequested(), false);
+    assert.equal(await current.manager.hasUnresolvedMigration(), true);
+    await assert.rejects(current.manager.assertDeleteAllowed(), { code: 'ARCHIVE_STORAGE_MIGRATION_PENDING' });
+    const lease = await current.manager.beginEntryMaintenance();
+    assert.equal(lease.acquired, true);
+    await assert.rejects(current.manager.assertDeleteAllowed({
+      origin: 'retention', ownerToken: lease.ownerToken
+    }), { code: 'ARCHIVE_STORAGE_MIGRATION_PENDING' });
+    await current.manager.endEntryMaintenance(lease.ownerToken);
+    const refused = await current.manager.currentService.deleteBatch(current.artifact.batchId);
+    assert.equal(refused.ok, false);
+    assert.equal(refused.code, 'ARCHIVE_STORAGE_MIGRATION_PENDING');
+    assert.ok(current.repository.getArtifact(current.artifact.id));
+    assert.equal(fs.existsSync(staleTargetBlob), true);
+    assert.equal(fs.existsSync(managed(current.sourceRoot, current.artifact.blob.relativePath)), true);
 
     const restarted = createManagerForFixture(current);
     const initialized = await restarted.manager.initialize();
     assert.equal(initialized.available, true, JSON.stringify(initialized));
     assert.equal(restarted.runtime.rootDir, real(current.targetRoot));
-    assert.equal(fs.existsSync(staleTargetBlob), false);
+    assert.equal(fs.existsSync(staleTargetBlob), true);
     assert.equal(
       fs.existsSync(current.journalPath),
       false,
@@ -758,6 +812,13 @@ test('pre-switch 恢复按 journal 目标发布清单清除已删除批次的目
         ? fs.readFileSync(current.journalPath, 'utf8')
         : 'journal removed'
     );
+    assert.equal(await restarted.manager.hasUnresolvedMigration(), false);
+    await restarted.manager.currentService.setLocked(current.artifact.batchId, false);
+    const deleted = await restarted.manager.currentService.deleteBatch(current.artifact.batchId);
+    assert.equal(deleted.fullyDeleted, true, JSON.stringify(deleted));
+    assert.equal(fs.existsSync(staleTargetBlob), false);
+    assert.equal(fs.existsSync(managed(current.targetRoot, current.artifact.storageRelativePath)), false);
+    assert.equal(fs.existsSync(current.sourceRoot), false);
   } finally {
     current.close();
   }
@@ -1039,6 +1100,114 @@ test('entry maintenance lease 阻止新归档与迁移，但 list 仍可进入�
     await current.manager.endEntryMaintenance(lease.ownerToken);
     assert.equal(current.runtime.getMaintenanceState().requested, false);
   } finally {
+    current.close();
+  }
+});
+
+test('到期删除仅接受当前 entry lease 的内部 owner，拒绝伪造、过期及迁移维护凭据', async () => {
+  const current = await createFixture();
+  try {
+    await current.manager.initialize();
+    const lease = await current.manager.beginEntryMaintenance();
+    const ownedRetention = { origin: 'retention', ownerToken: lease.ownerToken };
+    for (const options of [undefined, { origin: 'retention' },
+      { origin: 'retention', ownerToken: 'unknown-owner' },
+      { origin: 'manual', ownerToken: lease.ownerToken }]) {
+      await assert.rejects(current.manager.assertDeleteAllowed(options),
+        { code: 'ARCHIVE_STORAGE_MAINTENANCE' });
+    }
+    assert.equal(await current.manager.assertDeleteAllowed(ownedRetention), true);
+    const controller = createArchiveCenterController({
+      database: current.database, service: current.runtime, storageRootManager: current.manager
+    });
+    const externalPreflight = await controller.prepareDeleteBatch(current.artifact.batchId, {
+      senderId: 'renderer', ...ownedRetention
+    });
+    assert.equal(externalPreflight.code, 'ARCHIVE_STORAGE_MAINTENANCE');
+    const externalDelete = await controller.deleteBatch(current.artifact.batchId, 'unknown-confirmation', {
+      senderId: 'renderer', ...ownedRetention
+    });
+    assert.equal(externalDelete.code, 'ARCHIVE_STORAGE_MAINTENANCE');
+    assert.equal((await current.manager.changeStorageLocation()).status, 'busy');
+
+    current.runtime.activateMaintenance();
+    await assert.rejects(current.manager.assertDeleteAllowed(ownedRetention),
+      { code: 'ARCHIVE_STORAGE_MAINTENANCE' });
+    await current.manager.endEntryMaintenance(lease.ownerToken);
+    const nextLease = await current.manager.beginEntryMaintenance();
+    await assert.rejects(current.manager.assertDeleteAllowed(ownedRetention),
+      { code: 'ARCHIVE_STORAGE_MAINTENANCE' });
+    await current.manager.endEntryMaintenance(nextLease.ownerToken);
+    assert.notEqual(current.repository.getBatch(current.artifact.batchId), null);
+  } finally {
+    await current.manager.pauseBackgroundOwnershipScan();
+    await current.manager.currentService.pauseBackgroundMaterialization();
+    current.close();
+  }
+});
+
+test('真实入口维护通过 owner guard 删除到期批次，并继续后续维护阶段', async () => {
+  const current = await createFixture();
+  try {
+    await current.manager.initialize();
+    const events = [];
+    const controller = createArchiveCenterController({
+      database: current.database, service: current.runtime, storageRootManager: current.manager,
+      onEntryMaintenanceEvent: (eventName, payload) => events.push({ eventName, ...payload })
+    });
+    current.manager.currentService.runDeleteWithOwnerGuard = (batchId, operation, options) => (
+      controller.runDeleteWithOwnerGuard(batchId, operation, options)
+    );
+    const sourcePath = path.join(current.tempDir, 'expired-input.xlsx');
+    fs.writeFileSync(sourcePath, '独占的到期存档内容');
+    const lifecycle = createTaskLifecycle({
+      archiveService: current.runtime,
+      businessOperationRegistry: { begin: () => ({ accepted: true, token: 'entry-retention-owner' }), end() {} },
+      flowResolver: {
+        resolve: async () => ({ parentRunId: 'entry-retention-parent', source: 'new', identity: null }),
+        bind: async () => [], persistBindIntent: async () => ({ ok: true })
+      },
+      operationTracker: { appendOperationFiles: async () => ({ ok: true }) }
+    });
+    const policy = {
+      channel: 'toolbox:merge', scopeId: 'toolbox', moduleCode: 'TOOL', moduleName: '工具箱',
+      taskKey: 'toolbox:merge', startsNewFlow: true, batchPolicy: 'reserve', taskKind: 'file',
+      allocation: 'eager', resultClassifier: () => 'succeeded'
+    };
+    let batchContext;
+    const result = await lifecycle.runFileTask({
+      policy, meta: { channel: policy.channel }, taskRunId: 'entry-retention-task',
+      operationKey: 'entry-retention-operation',
+      filePlanResolver: () => normalizeFilePlanV1({ version: 1, allocation: 'eager',
+        inputs: [{ filePath: sourcePath, role: 'input', sourceOperation: policy.channel }], outputs: [] }),
+      execute: async (context) => { batchContext = context; return { status: 'success' }; }
+    });
+    assert.equal(result.status, 'success');
+    assert.equal((await current.runtime.setLocked(current.artifact.batchId, true)).ok, true);
+    current.repository.setRetentionUntil(batchContext.batchId,
+      current.repository.getBatch(batchContext.batchId).localDate);
+    current.manager.currentService.now = () => new Date('2026-12-31T12:00:00.000Z');
+    const artifact = current.repository.listArtifacts(batchContext.batchId)[0];
+    const layoutPath = managed(current.sourceRoot, artifact.storageRelativePath);
+    const blobPath = managed(current.sourceRoot, artifact.blob.relativePath);
+    assert.equal(fs.existsSync(layoutPath), true);
+    assert.equal(fs.existsSync(blobPath), true);
+    controller.startupVccGateSucceeded = true;
+
+    const maintenance = await controller._runEntryMaintenance('real-retention-lease');
+
+    assert.equal(maintenance.ok, true, JSON.stringify(maintenance));
+    assert.equal(current.repository.getBatch(batchContext.batchId), null);
+    assert.equal(fs.existsSync(layoutPath), false);
+    assert.equal(fs.existsSync(blobPath), false);
+    assert.equal(fs.readFileSync(sourcePath, 'utf8'), '独占的到期存档内容');
+    assert.equal(current.runtime.getMaintenanceState().requested, false);
+    assert.equal(events.some((event) => event.phase === 'historical-health-scan'), true);
+    assert.deepEqual(events.find((event) => event.eventName === 'completed').deletedBatchIds,
+      [batchContext.batchId]);
+  } finally {
+    await current.manager.pauseBackgroundOwnershipScan();
+    await current.manager.currentService.pauseBackgroundMaterialization();
     current.close();
   }
 });
@@ -1354,7 +1523,7 @@ test('pre-switch 自动续跑的永久目标故障不清空已恢复的 source d
   }
 });
 
-test('cleanup-pending 期间新根删除批次不会使旧根冻结清单漂移', async () => {
+test('cleanup-pending 释放维护锁后仍拒绝新删除，恢复旧根后才允许删除', async () => {
   let sourceRoot = '';
   let failFirstOldFile = false;
   const fsImpl = {
@@ -1390,17 +1559,487 @@ test('cleanup-pending 期间新根删除批次不会使旧根冻结清单漂移'
     const oldCanonical = managed(current.sourceRoot, current.artifact.blob.relativePath);
     assert.equal(fs.existsSync(oldCanonical), true);
 
-    const deleted = await current.manager.currentService.deleteBatch(current.artifact.batchId, {
-      force: true
-    });
-    assert.equal(deleted.ok, true, JSON.stringify(deleted));
-    assert.equal(current.repository.getArtifact(current.artifact.id), null);
+    assert.equal(current.manager.isMaintenanceRequested(), false);
+    await assert.rejects(current.manager.assertDeleteAllowed(), { code: 'ARCHIVE_STORAGE_MIGRATION_PENDING' });
+    const refused = await current.manager.currentService.deleteBatch(current.artifact.batchId);
+    assert.equal(refused.ok, false);
+    assert.equal(refused.code, 'ARCHIVE_STORAGE_MIGRATION_PENDING');
+    assert.ok(current.repository.getArtifact(current.artifact.id));
+    assert.equal(fs.existsSync(oldCanonical), true);
+    assert.equal(fs.existsSync(managed(current.targetRoot, current.artifact.blob.relativePath)), true);
 
     const restarted = createManagerForFixture(current);
     const initialized = await restarted.manager.initialize();
     assert.equal(initialized.available, true, JSON.stringify(initialized));
     assert.equal(fs.existsSync(current.sourceRoot), false);
     assert.equal(fs.existsSync(current.journalPath), false);
+    await restarted.manager.currentService.setLocked(current.artifact.batchId, false);
+    const deleted = await restarted.manager.currentService.deleteBatch(current.artifact.batchId);
+    assert.equal(deleted.fullyDeleted, true, JSON.stringify(deleted));
+    assert.equal(fs.existsSync(managed(current.targetRoot, current.artifact.blob.relativePath)), false);
+    assert.equal(fs.existsSync(managed(current.targetRoot, current.artifact.storageRelativePath)), false);
+  } finally {
+    current.close();
+  }
+});
+
+for (const stopAt of ['after-delete-waiting-migration', 'after-migration-done', 'after-migration-delete-completed']) {
+  test(`历史 pre-switch journal 与 cleanup job 重叠在 ${stopAt} 中断后按耐久顺序收口`, async () => {
+    const current = await createHistoricalDeleteOverlap();
+    try {
+      const originalJournal = JSON.parse(fs.readFileSync(current.journalPath, 'utf8'));
+      const restarted = createManagerForFixture(current, {
+        faultInjector(event) {
+          if (event === stopAt) throw Object.assign(new Error('恢复故障注入'), { code: 'SIMULATED_CRASH' });
+        }
+      });
+      await restarted.manager.initialize();
+      assert.equal(fs.existsSync(current.journalPath), true);
+      const checkpoint = JSON.parse(fs.readFileSync(current.journalPath, 'utf8'));
+      assert.equal(checkpoint.migrationId, originalJournal.migrationId);
+      const job = current.repository.getCleanupJobForBatch(current.artifact.batchId);
+      if (stopAt === 'after-migration-delete-completed') {
+        assert.equal(job, null);
+        assert.equal(current.repository.getDeletionReceipt(current.artifact.batchId).fullyDeleted, true);
+      } else {
+        assert.equal(job.state, 'waiting-migration', JSON.stringify(job));
+        assert.equal(job.migration.migrationId, originalJournal.migrationId);
+        assert.equal(current.repository.getDeletionReceipt(current.artifact.batchId), null);
+        assert.ok(job.plan.items.every((item) => ['deleted', 'already-missing', 'preserved-shared'].includes(item.state)));
+      }
+      if (stopAt !== 'after-delete-waiting-migration') {
+        assert.equal(checkpoint.phase, 'done');
+        assert.equal(fs.existsSync(current.sourceRoot), false);
+      } else {
+        assert.notEqual(checkpoint.phase, 'done');
+        assert.equal(fs.existsSync(managed(current.targetRoot, current.artifact.blob.relativePath)), true);
+      }
+      const resumed = createManagerForFixture(current, {
+        faultInjector(event) {
+          if (checkpoint.phase === 'done' && event === 'after-source-root-removed') {
+            throw new Error('done 阶段不得再次执行文件清理');
+          }
+        }
+      });
+      const result = await resumed.manager.initialize();
+      assert.equal(result.available, true, JSON.stringify(result));
+      assert.equal(current.repository.getCleanupJobForBatch(current.artifact.batchId), null);
+      assert.equal(current.repository.getDeletionReceipt(current.artifact.batchId).fullyDeleted, true);
+      assert.equal(fs.existsSync(current.journalPath), false);
+      assert.equal(fs.existsSync(current.sourceRoot), false);
+      assert.equal(fs.existsSync(managed(current.targetRoot, current.artifact.blob.relativePath)), false);
+      assert.equal(fs.existsSync(managed(current.targetRoot, current.artifact.storageRelativePath)), false);
+    } finally {
+      current.close();
+    }
+  });
+}
+
+test('waiting-migration 缺失原 journal 时保留 job 且不伪造完成凭证', async () => {
+  const current = await createHistoricalDeleteOverlap();
+  try {
+    const restarted = createManagerForFixture(current, {
+      faultInjector(event) {
+        if (event === 'after-delete-waiting-migration') throw new Error('模拟等待阶段中断');
+      }
+    });
+    await restarted.manager.initialize();
+    assert.equal(current.repository.getCleanupJobForBatch(current.artifact.batchId).state, 'waiting-migration');
+    fs.rmSync(current.journalPath);
+    const resumed = createManagerForFixture(current);
+    const result = await resumed.manager.initialize();
+    assert.equal(result.available, false);
+    assert.equal(result.code, 'ARCHIVE_STORAGE_DELETE_RECOVERY_CONFLICT');
+    assert.equal(current.repository.getCleanupJobForBatch(current.artifact.batchId).state, 'waiting-migration');
+    assert.equal(current.repository.getDeletionReceipt(current.artifact.batchId), null);
+    assert.equal(fs.existsSync(managed(current.targetRoot, current.artifact.blob.relativePath)), true);
+  } finally {
+    current.close();
+  }
+});
+
+test('历史 V1 job 只有路径摘要而无原对象身份时保留两类恢复记录和两根文件', async () => {
+  const current = await createHistoricalDeleteOverlap({ legacyWithoutIdentity: true });
+  try {
+    const sourceCanonical = managed(current.sourceRoot, current.artifact.blob.relativePath);
+    const targetCanonical = managed(current.targetRoot, current.artifact.blob.relativePath);
+    const sourceBytes = fs.readFileSync(sourceCanonical);
+    const targetBytes = fs.readFileSync(targetCanonical);
+    const beforeJournal = JSON.parse(fs.readFileSync(current.journalPath, 'utf8'));
+    const resumed = createManagerForFixture(current);
+    const initialized = await resumed.manager.initialize();
+    assert.equal(initialized.ok, false, JSON.stringify(initialized));
+    assert.equal(current.repository.getCleanupJobForBatch(current.artifact.batchId).planVersion, 1);
+    assert.equal(current.repository.getDeletionReceipt(current.artifact.batchId), null);
+    const afterJournal = JSON.parse(fs.readFileSync(current.journalPath, 'utf8'));
+    assert.equal(afterJournal.migrationId, beforeJournal.migrationId);
+    assert.notEqual(afterJournal.phase, 'done');
+    assert.deepEqual(fs.readFileSync(sourceCanonical), sourceBytes);
+    assert.deepEqual(fs.readFileSync(targetCanonical), targetBytes);
+    assert.equal(fs.existsSync(managed(current.sourceRoot, current.artifact.storageRelativePath)), true);
+  } finally { current.close(); }
+});
+
+test('历史 post-switch 原根计划由迁移 inventory 收口两根后才生成凭证', async () => {
+  let sourceRoot = '';
+  let failCleanup = false;
+  const fsImpl = { ...fs, promises: { ...fs.promises, async rm(filePath, options) {
+    if (failCleanup && sourceRoot && String(filePath).startsWith(`${real(sourceRoot)}${path.sep}`)) {
+      failCleanup = false;
+      throw Object.assign(new Error('模拟旧根清理中断'), { code: 'EACCES' });
+    }
+    return fs.promises.rm(filePath, options);
+  } } };
+  const current = await createFixture({ fsImpl });
+  sourceRoot = current.sourceRoot;
+  try {
+    await current.manager.initialize();
+    await current.manager.currentService.setLocked(current.artifact.batchId, false);
+    const plan = await buildDeletePlan(current.manager.currentService, current.artifact.batchId);
+    fs.mkdirSync(current.targetRoot, { recursive: true });
+    failCleanup = true;
+    assert.equal((await current.manager.changeStorageLocation()).code, 'ARCHIVE_STORAGE_CLEANUP_PENDING');
+    // 模拟升级前切换已提交的交叠状态，持久计划明确绑定旧根。
+    const deleted = current.repository.deleteBatch(current.artifact.batchId, { deletePlan: plan });
+    assert.equal(deleted.status, 'deleted');
+    const targetCanonical = managed(current.targetRoot, current.artifact.blob.relativePath);
+    assert.equal(fs.existsSync(targetCanonical), true);
+    const resumed = createManagerForFixture(current);
+    const initialized = await resumed.manager.initialize();
+    assert.equal(initialized.available, true, JSON.stringify(initialized));
+    assert.equal(current.repository.getDeletionReceipt(current.artifact.batchId).fullyDeleted, true);
+    assert.equal(current.repository.getCleanupJobForBatch(current.artifact.batchId), null);
+    assert.equal(fs.existsSync(current.sourceRoot), false);
+    assert.equal(fs.existsSync(targetCanonical), false);
+    assert.equal(fs.existsSync(managed(current.targetRoot, current.artifact.storageRelativePath)), false);
+  } finally {
+    current.close();
+  }
+});
+
+for (const mode of ['replacement', 'same-content-replacement', 'source-replacement', 'legacy-journal',
+  'legacy-target-map', 'legacy-source-map', 'legacy-job', 'unsupported-job-item']) {
+  test(`post-switch 交叠 ${mode} 在任何两根清理前拒绝并保留原恢复证据`, async () => {
+    let sourceRoot = '';
+    let failCleanup = false;
+    const fsImpl = { ...fs, promises: { ...fs.promises, async rm(filePath, options) {
+      if (failCleanup && sourceRoot && String(filePath).startsWith(`${real(sourceRoot)}${path.sep}`)) {
+        failCleanup = false;
+        throw Object.assign(new Error('模拟旧根清理中断'), { code: 'EACCES' });
+      }
+      return fs.promises.rm(filePath, options);
+    } } };
+    const current = await createFixture({ fsImpl });
+    sourceRoot = current.sourceRoot;
+    try {
+      await current.manager.initialize();
+      await current.manager.currentService.setLocked(current.artifact.batchId, false);
+      const plan = await buildDeletePlan(current.manager.currentService, current.artifact.batchId);
+      fs.mkdirSync(current.targetRoot, { recursive: true });
+      failCleanup = true;
+      assert.equal((await current.manager.changeStorageLocation()).code, 'ARCHIVE_STORAGE_CLEANUP_PENDING');
+      const deleted = current.repository.deleteBatch(current.artifact.batchId,
+        mode === 'legacy-job' ? { allowLocked: true } : { deletePlan: plan });
+      assert.equal(deleted.status, 'deleted');
+      if (mode === 'unsupported-job-item') {
+        const storedPlan = JSON.parse(current.database.db.prepare('SELECT plan_json FROM archive_cleanup_jobs WHERE id = ?')
+          .get(deleted.cleanupJob.id).plan_json);
+        storedPlan.items[0].kind = 'owned-temp';
+        current.database.db.prepare('UPDATE archive_cleanup_jobs SET plan_json = ? WHERE id = ?')
+          .run(JSON.stringify(storedPlan), deleted.cleanupJob.id);
+      }
+      const targetPath = managed(current.targetRoot, current.artifact.storageRelativePath);
+      if (mode.includes('replacement')) {
+        const replacedPath = mode === 'source-replacement'
+          ? managed(current.sourceRoot, current.artifact.storageRelativePath) : targetPath;
+        const replacement = path.join(current.tempDir, 'replacement.xlsx');
+        fs.writeFileSync(replacement, mode === 'same-content-replacement'
+          ? fs.readFileSync(replacedPath) : '另一个 owner 的文件');
+        replaceFixtureFile(replacement, replacedPath);
+      }
+      const journal = JSON.parse(fs.readFileSync(current.journalPath));
+      if (['legacy-journal', 'legacy-target-map', 'legacy-source-map'].includes(mode)) {
+        if (mode !== 'legacy-target-map') delete journal.sourceFileIdentities;
+        if (mode !== 'legacy-source-map') delete journal.targetFileIdentities;
+        fs.writeFileSync(current.journalPath, JSON.stringify(journal));
+      }
+      const sourceFiles = [current.artifact.blob.relativePath, current.artifact.storageRelativePath]
+        .map((relativePath) => managed(current.sourceRoot, relativePath));
+      const before = [...sourceFiles, targetPath].map((filePath) => ({ filePath,
+        ino: readIdentityStatSync(fs, filePath, 'statSync').ino, content: fs.readFileSync(filePath) }));
+      const resumed = createManagerForFixture(current);
+      const initialized = await resumed.manager.initialize();
+      assert.equal(current.repository.getDeletionReceipt(current.artifact.batchId), null, JSON.stringify(initialized));
+      assert.ok(current.repository.getCleanupJobForBatch(current.artifact.batchId));
+      const afterJournal = JSON.parse(fs.readFileSync(current.journalPath));
+      assert.equal(afterJournal.migrationId, journal.migrationId);
+      assert.notEqual(afterJournal.phase, 'done');
+      for (const item of before) {
+        assert.equal(readIdentityStatSync(fs, item.filePath, 'statSync').ino, item.ino);
+        assert.deepEqual(fs.readFileSync(item.filePath), item.content);
+      }
+      assert.equal(resumed.manager.getMigrationState().phase, 'cleanup-pending');
+      await resumed.manager.pauseBackgroundOwnershipScan();
+      await resumed.manager.currentService?.pauseBackgroundMaterialization();
+    } finally { current.close(); }
+  });
+}
+
+test('pre-switch 旧 journal 缺少源 inventory 时不得将现存路径当作新增身份证据', async () => {
+  const current = await createFixture({ faultInjector(event) {
+    if (event === 'after-prepared') throw new Error('准备后中断');
+  } });
+  let resumed;
+  try {
+    await current.manager.initialize();
+    fs.mkdirSync(current.targetRoot, { recursive: true });
+    assert.equal((await current.manager.changeStorageLocation()).status, 'failed');
+    const journal = JSON.parse(fs.readFileSync(current.journalPath, 'utf8'));
+    delete journal.sourceCleanupPaths;
+    delete journal.sourceFileIdentities;
+    fs.writeFileSync(current.journalPath, JSON.stringify(journal));
+    const sourcePaths = [current.artifact.blob.relativePath, current.artifact.storageRelativePath]
+      .map((relativePath) => managed(current.sourceRoot, relativePath));
+    const sourceInodes = sourcePaths.map((filePath) => readIdentityStatSync(fs, filePath, 'statSync').ino);
+    resumed = createManagerForFixture(current);
+    const result = await resumed.manager.initialize();
+    assert.equal(result.migrationRecovery?.code, 'ARCHIVE_STORAGE_DELETE_IDENTITY_MISSING', JSON.stringify(result));
+    const after = JSON.parse(fs.readFileSync(current.journalPath, 'utf8'));
+    assert.equal(after.migrationId, journal.migrationId);
+    assert.equal(after.sourceFileIdentities, undefined);
+    assert.equal(after.sourceCleanupPaths, null);
+    assert.deepEqual(after.targetPublishedPaths, []);
+    assert.deepEqual(sourcePaths.map((filePath) => readIdentityStatSync(fs, filePath, 'statSync').ino), sourceInodes);
+    assert.equal(current.database.getSetting(ARCHIVE_STORAGE_ROOT_SETTING_KEY), null);
+  } finally {
+    await current.manager.pauseBackgroundOwnershipScan();
+    await current.manager.currentService?.pauseBackgroundMaterialization();
+    if (resumed) {
+      await resumed.manager.pauseBackgroundOwnershipScan();
+      await resumed.manager.currentService?.pauseBackgroundMaterialization();
+    }
+    current.close();
+  }
+});
+
+test('pre-switch 旧目标无身份时保留两根，目标安全缺失后按原计划幂等收口', async () => {
+  const current = await createHistoricalDeleteOverlap();
+  try {
+    const journal = JSON.parse(fs.readFileSync(current.journalPath));
+    delete journal.targetFileIdentities;
+    fs.writeFileSync(current.journalPath, JSON.stringify(journal));
+    const sourcePath = managed(current.sourceRoot, current.artifact.blob.relativePath);
+    const targetPath = managed(current.targetRoot, current.artifact.blob.relativePath);
+    const sourceInode = readIdentityStatSync(fs, sourcePath, 'statSync').ino;
+    const targetInode = readIdentityStatSync(fs, targetPath, 'statSync').ino;
+    const refused = createManagerForFixture(current);
+    assert.equal((await refused.manager.initialize()).ok, false);
+    assert.equal(readIdentityStatSync(fs, sourcePath, 'statSync').ino, sourceInode);
+    assert.equal(readIdentityStatSync(fs, targetPath, 'statSync').ino, targetInode);
+    assert.equal(JSON.parse(fs.readFileSync(current.journalPath)).targetFileIdentities, undefined);
+    assert.equal(current.repository.getDeletionReceipt(current.artifact.batchId), null);
+    fs.unlinkSync(targetPath);
+    const resumed = createManagerForFixture(current);
+    assert.equal((await resumed.manager.initialize()).available, true);
+    assert.equal(current.repository.getDeletionReceipt(current.artifact.batchId).fullyDeleted, true);
+    assert.equal(fs.existsSync(current.sourceRoot), false);
+    assert.equal(fs.existsSync(current.journalPath), false);
+  } finally { current.close(); }
+});
+
+test('pre-switch 正常复用不重复 chmod，进度写入失败后保留原 inode/ctime 并可再次恢复', async () => {
+  const current = await createFixture({ faultInjector(event) {
+    if (event === 'after-materialize-artifact') throw new Error('首次迁移在目录发布后退出');
+  } });
+  try {
+    await current.manager.initialize();
+    fs.mkdirSync(current.targetRoot, { recursive: true });
+    assert.equal((await current.manager.changeStorageLocation()).status, 'failed');
+    const targetPath = managed(current.targetRoot, current.artifact.storageRelativePath);
+    const original = readIdentityStatSync(fs, targetPath, 'statSync');
+    const resumed = createManagerForFixture(current);
+    const write = resumed.manager._writeJournal.bind(resumed.manager);
+    resumed.manager._writeJournal = async (journal, phase, patch) => {
+      if (phase === 'materializing-layout' && patch?.targetFileIdentities) throw new Error('重复进度写入失败');
+      return write(journal, phase, patch);
+    };
+    assert.equal((await resumed.manager.initialize()).ok, false);
+    assert.equal(readIdentityStatSync(fs, targetPath, 'statSync').ino, original.ino);
+    assert.equal(readIdentityStatSync(fs, targetPath, 'statSync').ctimeMs, original.ctimeMs);
+    const retried = createManagerForFixture(current);
+    assert.equal((await retried.manager.initialize()).available, true);
+    assert.equal(fs.existsSync(current.journalPath), false);
+    assert.equal(readIdentityStatSync(fs, targetPath, 'statSync').ino, original.ino);
+  } finally { current.close(); }
+});
+
+for (const action of ['read', 'retry', 'background', 'missing-read', 'unreadable-journal']) {
+  test(`pre-switch 冻结源身份后 ${action} 保留原证据并可诊断恢复`, async () => {
+    let interrupted = false;
+    const current = await createFixture({ faultInjector(event) {
+      if (event === 'after-copy-blob' && !interrupted) {
+        interrupted = true;
+        throw Object.assign(new Error('复制后中断'), { code: 'SIMULATED_CRASH' });
+      }
+    } });
+    let restarted;
+    try {
+      await current.manager.initialize();
+      await current.manager.pauseBackgroundOwnershipScan();
+      await current.manager.currentService.pauseBackgroundMaterialization();
+      const sourcePath = managed(current.sourceRoot, current.artifact.storageRelativePath);
+      const canonical = managed(current.sourceRoot, current.artifact.blob.relativePath);
+      fs.unlinkSync(sourcePath);
+      fs.linkSync(canonical, sourcePath);
+      const initial = readIdentityStatSync(fs, canonical, 'statSync');
+      current.database.db.prepare(`UPDATE archive_artifacts SET storage_mode = 'hardlink',
+        storage_fingerprint_size_bytes = ?, storage_fingerprint_mtime_ms = ?,
+        storage_fingerprint_ctime_ms = ?, storage_fingerprint_ino = ? WHERE id = ?`)
+        .run(initial.size, initial.mtimeMs, initial.ctimeMs, String(initial.ino), current.artifact.id);
+      current.database.db.prepare(`UPDATE archive_blobs SET fingerprint_size_bytes = ?, fingerprint_mtime_ms = ?,
+        fingerprint_ctime_ms = ?, fingerprint_ino = ? WHERE id = ?`)
+        .run(initial.size, initial.mtimeMs, initial.ctimeMs, String(initial.ino), current.artifact.blob.id);
+      fs.mkdirSync(current.targetRoot, { recursive: true });
+      assert.equal((await current.manager.changeStorageLocation()).status, 'failed');
+      await current.manager.pauseBackgroundOwnershipScan();
+      await current.manager.currentService.pauseBackgroundMaterialization();
+      const journalText = fs.readFileSync(current.journalPath, 'utf8');
+      const journal = JSON.parse(journalText);
+      assert.equal(String(readIdentityStatSync(fs, sourcePath, 'statSync').ino), journal.sourceFileIdentities[current.artifact.storageRelativePath].ino);
+      if (action === 'missing-read') fs.unlinkSync(sourcePath);
+      if (action === 'unreadable-journal') fs.writeFileSync(current.journalPath, '{');
+      const before = readIdentityStatSync(fs, canonical, 'statSync');
+      const service = current.manager.currentService;
+      if (action === 'retry') {
+        const retried = await service.retryBatch(current.artifact.batchId);
+        assert.equal(retried.ok, false);
+        assert.equal(retried.results[0].code, 'ARCHIVE_STORAGE_MIGRATION_PENDING');
+      } else if (action === 'background') {
+        const background = await current.manager._initializeService(real(current.sourceRoot));
+        const progress = await background.service.resumeBackgroundMaterialization();
+        await background.service.pauseBackgroundMaterialization();
+        assert.equal(progress.failed > 0, true, JSON.stringify(progress));
+        assert.equal(current.repository.getArtifact(current.artifact.id).materializationErrorCode,
+          'ARCHIVE_STORAGE_MIGRATION_PENDING');
+      } else {
+        const read = await service.resolveVerifiedArtifact(current.artifact.id);
+        assert.equal(read.ok, true, JSON.stringify(read));
+        assert.equal(read.filePath, real(canonical));
+        const stored = current.repository.getArtifact(current.artifact.id);
+        assert.equal(stored.materializationErrorCode, action === 'unreadable-journal'
+          ? 'ARCHIVE_STORAGE_METADATA_INVALID' : 'ARCHIVE_STORAGE_MIGRATION_PENDING');
+      }
+      assert.equal(fs.existsSync(sourcePath), action !== 'missing-read');
+      if (action !== 'missing-read') assert.equal(readIdentityStatSync(fs, sourcePath, 'statSync').ino, initial.ino);
+      assert.equal(readIdentityStatSync(fs, canonical, 'statSync').ino, before.ino);
+      assert.equal(readIdentityStatSync(fs, canonical, 'statSync').ctimeMs, before.ctimeMs);
+      assert.equal(readIdentityStatSync(fs, canonical, 'statSync').nlink, before.nlink);
+      assert.equal(fs.readFileSync(current.journalPath, 'utf8'), action === 'unreadable-journal' ? '{' : journalText);
+      if (action === 'unreadable-journal') fs.writeFileSync(current.journalPath, journalText);
+      restarted = createManagerForFixture(current);
+      const initialized = await restarted.manager.initialize();
+      assert.equal(initialized.available, true, JSON.stringify(initialized));
+      if (action === 'missing-read') {
+        assert.equal(initialized.migrationRecovery.code, 'ARCHIVE_STORAGE_LAYOUT_INVALID');
+        assert.equal(fs.existsSync(current.journalPath), true);
+        assert.equal(fs.existsSync(sourcePath), false);
+        return;
+      }
+      assert.equal(fs.existsSync(current.journalPath), false, JSON.stringify(initialized));
+      assert.equal(fs.existsSync(current.sourceRoot), false);
+      // journal 结束后同一个 service 恢复正常修复，不遗留永久冻结。
+      const targetPath = managed(current.targetRoot, current.artifact.storageRelativePath);
+      fs.unlinkSync(targetPath);
+      const repaired = await restarted.manager.currentService.resolveVerifiedArtifact(current.artifact.id);
+      assert.equal(repaired.ok, true);
+      assert.equal(repaired.filePath, real(targetPath));
+      assert.equal(fs.readFileSync(targetPath, 'utf8'), 'archive-root-migration-content');
+    } finally {
+      await current.manager.pauseBackgroundOwnershipScan();
+      await current.manager.currentService?.pauseBackgroundMaterialization();
+      if (restarted) {
+        await restarted.manager.pauseBackgroundOwnershipScan();
+        await restarted.manager.currentService?.pauseBackgroundMaterialization();
+      }
+      current.close();
+    }
+  });
+}
+
+test('迁移源历史硬链接自身清理中断后只按冻结 inventory 的链接减少恢复', async () => {
+  let sourceRoot = '';
+  let failSecondSource = false;
+  const fsImpl = { ...fs, promises: { ...fs.promises, async rm(filePath, options) {
+    if (failSecondSource && sourceRoot && String(filePath).startsWith(`${real(sourceRoot)}${path.sep}blobs${path.sep}`)) {
+      failSecondSource = false;
+      throw Object.assign(new Error('原硬链接已删，canonical 清理中断'), { code: 'EACCES' });
+    }
+    return fs.promises.rm(filePath, options);
+  } } };
+  const current = await createFixture({ fsImpl });
+  sourceRoot = current.sourceRoot;
+  try {
+    await current.manager.initialize();
+    const sourcePath = managed(current.sourceRoot, current.artifact.storageRelativePath);
+    const canonical = managed(current.sourceRoot, current.artifact.blob.relativePath);
+    fs.unlinkSync(sourcePath);
+    fs.linkSync(canonical, sourcePath);
+    const stat = readIdentityStatSync(fs, canonical, 'statSync');
+    current.database.db.prepare(`UPDATE archive_artifacts SET storage_mode = 'hardlink',
+      storage_fingerprint_size_bytes = ?, storage_fingerprint_mtime_ms = ?,
+      storage_fingerprint_ctime_ms = ?, storage_fingerprint_ino = ? WHERE id = ?`)
+      .run(stat.size, stat.mtimeMs, stat.ctimeMs, String(stat.ino), current.artifact.id);
+    current.database.db.prepare(`UPDATE archive_blobs SET fingerprint_size_bytes = ?, fingerprint_mtime_ms = ?,
+      fingerprint_ctime_ms = ?, fingerprint_ino = ? WHERE id = ?`)
+      .run(stat.size, stat.mtimeMs, stat.ctimeMs, String(stat.ino), current.artifact.blob.id);
+    fs.mkdirSync(current.targetRoot, { recursive: true });
+    failSecondSource = true;
+    assert.equal((await current.manager.changeStorageLocation()).code, 'ARCHIVE_STORAGE_CLEANUP_PENDING');
+    assert.equal(fs.existsSync(sourcePath), false);
+    assert.equal(readIdentityStatSync(fs, canonical, 'statSync').nlink, 1);
+    const resumed = createManagerForFixture(current);
+    assert.equal((await resumed.manager.initialize()).available, true);
+    assert.equal(fs.existsSync(current.sourceRoot), false);
+    assert.equal(fs.existsSync(current.journalPath), false);
+    assert.equal(fs.readFileSync(managed(current.targetRoot, current.artifact.storageRelativePath), 'utf8'),
+      'archive-root-migration-content');
+  } finally { current.close(); }
+});
+
+test('未完成删除 job 拒绝发起新迁移，原计划清理后才放行', async () => {
+  const current = await createFixture();
+  try {
+    await current.manager.initialize();
+    await current.manager.currentService.setLocked(current.artifact.batchId, false);
+    const deletePlan = await buildDeletePlan(current.manager.currentService, current.artifact.batchId);
+    const deleted = current.repository.deleteBatch(current.artifact.batchId, { deletePlan });
+    assert.ok(deleted.cleanupJob);
+    fs.mkdirSync(current.targetRoot, { recursive: true });
+    const refused = await current.manager.changeStorageLocation();
+    assert.equal(refused.code, 'ARCHIVE_STORAGE_SOURCE_NOT_CLEAN');
+    assert.equal(fs.existsSync(current.journalPath), false);
+    assert.equal(current.runtime.rootDir, real(current.sourceRoot));
+    assert.ok(current.repository.getCleanupJobForBatch(current.artifact.batchId));
+    const cleaned = await current.manager.currentService.runOwnedOrphanCleanup();
+    assert.equal(cleaned.ok, true, JSON.stringify(cleaned));
+    const migrated = await current.manager.changeStorageLocation();
+    assert.equal(migrated.ok, true, JSON.stringify(migrated));
+    assert.equal(fs.existsSync(current.sourceRoot), false);
+  } finally {
+    current.close();
+  }
+});
+
+test('迁移 journal 损坏时只读删除门禁拒绝且保留原文件', async () => {
+  const current = await createFixture();
+  try {
+    await current.manager.initialize();
+    fs.mkdirSync(path.dirname(current.journalPath), { recursive: true });
+    fs.writeFileSync(current.journalPath, '{');
+    await assert.rejects(current.manager.assertDeleteAllowed());
+    assert.equal(fs.readFileSync(current.journalPath, 'utf8'), '{');
+    assert.ok(current.repository.getArtifact(current.artifact.id));
+    assert.equal(fs.existsSync(managed(current.sourceRoot, current.artifact.blob.relativePath)), true);
   } finally {
     current.close();
   }
@@ -1568,7 +2207,7 @@ test('切换后 old root 本身被链接替换时保留真实旧根并维持 cle
     assert.equal(result.code, 'ARCHIVE_STORAGE_CLEANUP_PENDING');
     assert.equal(current.database.getSetting(ARCHIVE_STORAGE_ROOT_SETTING_KEY), real(current.targetRoot));
     assert.equal(current.runtime.rootDir, real(current.targetRoot));
-    assert.equal(fs.lstatSync(current.sourceRoot).isSymbolicLink(), true);
+    assert.equal(readIdentityStatSync(fs, current.sourceRoot, 'lstatSync').isSymbolicLink(), true);
     assert.equal(
       fs.readFileSync(managed(movedSource, current.artifact.blob.relativePath), 'utf8'),
       'archive-root-migration-content'
@@ -1616,3 +2255,623 @@ test('删 marker 后根目录 rmdir EBUSY 必须恢复 marker 并可重启续跑
     current.close();
   }
 });
+
+
+for (const replacement of ['canonical', 'materialized']) {
+  for (const phase of ['after-materialize-artifact', 'before-commit']) {
+    test(`目标 ${replacement} 在 ${phase} 被同 SHA 的新 inode 替换后保留两根且重启不认领`, async () => {
+      let swapped = false;
+      let victim;
+      let replacementIdentity;
+      const replace = () => {
+        if (swapped) return;
+        swapped = true;
+        victim = managed(current.targetRoot, replacement === 'canonical'
+          ? current.artifact.blob.relativePath : current.artifact.storageRelativePath);
+        const before = readIdentityStatSync(fs, victim, 'statSync');
+        const temporary = path.join(current.tempDir, 'other-owner.xlsx');
+        fs.writeFileSync(temporary, fs.readFileSync(victim));
+        replaceFixtureFile(temporary, victim);
+        replacementIdentity = readIdentityStatSync(fs, victim, 'statSync');
+        assert.notEqual(replacementIdentity.ino, before.ino);
+      };
+      const current = await createFixture({ faultInjector(event) {
+        if (phase === event) replace();
+      } });
+      let resumed;
+      try {
+        await current.manager.initialize();
+        const original = current.repository.getArtifact(current.artifact.id);
+        if (phase === 'before-commit') {
+          const createService = current.manager.createService;
+          current.manager.createService = (rootDir) => { replace(); return createService(rootDir); };
+        }
+        fs.mkdirSync(current.targetRoot, { recursive: true });
+        const result = await current.manager.changeStorageLocation();
+        assert.equal(result.code, 'ARCHIVE_STORAGE_DELETE_FILE_CHANGED', JSON.stringify(result));
+        assert.equal(current.database.getSetting(ARCHIVE_STORAGE_ROOT_SETTING_KEY), null);
+        const journal = JSON.parse(fs.readFileSync(current.journalPath));
+        const relativePath = replacement === 'canonical'
+          ? current.artifact.blob.relativePath : current.artifact.storageRelativePath;
+        assert.notEqual(journal.targetFileIdentities[relativePath].ino, String(replacementIdentity.ino));
+        assert.deepEqual(current.repository.getArtifact(current.artifact.id).blob.fingerprint, original.blob.fingerprint);
+        assert.deepEqual(current.repository.getArtifact(current.artifact.id).storageFingerprint, original.storageFingerprint);
+        assert.ok(fs.existsSync(managed(current.sourceRoot, original.blob.relativePath)));
+        resumed = createManagerForFixture(current);
+        const recovered = await resumed.manager.initialize();
+        assert.equal(recovered.migrationRecovery.code, 'ARCHIVE_STORAGE_DELETE_FILE_CHANGED', JSON.stringify(recovered));
+        assert.equal(current.database.getSetting(ARCHIVE_STORAGE_ROOT_SETTING_KEY), null);
+        assert.equal(readIdentityStatSync(fs, victim, 'statSync').ino, replacementIdentity.ino);
+        assert.equal(JSON.parse(fs.readFileSync(current.journalPath)).migrationId, journal.migrationId);
+      } finally {
+        for (const manager of [current.manager, resumed?.manager].filter(Boolean)) {
+          await manager.pauseBackgroundOwnershipScan();
+          await manager.currentService?.pauseBackgroundMaterialization();
+        }
+        current.close();
+      }
+    });
+  }
+}
+
+test('canonical 在复制后被替换时禁止目录化消费，即使其 SHA 未改变', async () => {
+  const current = await createFixture({ faultInjector(event) {
+    if (event !== 'after-copy-blob') return;
+    const canonical = managed(current.targetRoot, current.artifact.blob.relativePath);
+    const replacement = path.join(current.tempDir, 'replacement.xlsx');
+    fs.writeFileSync(replacement, fs.readFileSync(canonical));
+    replaceFixtureFile(replacement, canonical);
+  } });
+  try {
+    await current.manager.initialize();
+    fs.mkdirSync(current.targetRoot);
+    assert.equal((await current.manager.changeStorageLocation()).code, 'ARCHIVE_STORAGE_DELETE_FILE_CHANGED');
+    assert.equal(fs.existsSync(managed(current.targetRoot, current.artifact.storageRelativePath)), false);
+    assert.equal(current.database.getSetting(ARCHIVE_STORAGE_ROOT_SETTING_KEY), null);
+    assert.ok(fs.existsSync(current.journalPath));
+  } finally { current.close(); }
+});
+
+for (const missing of ['canonical', 'materialized']) {
+  test(`历史 ${missing} 目标缺少原身份时不可借助同 SHA 补齐后切换`, async () => {
+    const current = await createFixture({ faultInjector(event) {
+      if (event === 'after-materialize-artifact') throw new Error('模拟发布后中断');
+    } });
+    let resumed;
+    try {
+      await current.manager.initialize();
+      fs.mkdirSync(current.targetRoot);
+      assert.equal((await current.manager.changeStorageLocation()).status, 'failed');
+      const journal = JSON.parse(fs.readFileSync(current.journalPath));
+      const relativePath = missing === 'canonical'
+        ? current.artifact.blob.relativePath : current.artifact.storageRelativePath;
+      delete journal.targetFileIdentities[relativePath];
+      fs.writeFileSync(current.journalPath, JSON.stringify(journal));
+      const originalInode = readIdentityStatSync(fs, managed(current.targetRoot, relativePath), 'statSync').ino;
+      resumed = createManagerForFixture(current);
+      const recovered = await resumed.manager.initialize();
+      assert.equal(recovered.migrationRecovery.code, 'ARCHIVE_STORAGE_DELETE_IDENTITY_MISSING', JSON.stringify(recovered));
+      assert.equal(readIdentityStatSync(fs, managed(current.targetRoot, relativePath), 'statSync').ino, originalInode);
+      assert.equal(JSON.parse(fs.readFileSync(current.journalPath)).targetFileIdentities[relativePath], undefined);
+      assert.equal(current.database.getSetting(ARCHIVE_STORAGE_ROOT_SETTING_KEY), null);
+      assert.ok(fs.existsSync(current.sourceRoot));
+    } finally {
+      for (const manager of [current.manager, resumed?.manager].filter(Boolean)) {
+        await manager.pauseBackgroundOwnershipScan();
+        await manager.currentService?.pauseBackgroundMaterialization();
+      }
+      current.close();
+    }
+  });
+}
+
+for (const crashPoint of ['none', 'before-unlink-checkpoint', 'after-unlink-checkpoint']) {
+  test(`历史目标 hardlink 转为独立 copy，在 ${crashPoint} 按原路径组证明链接减少并可重启`, async () => {
+    const current = await createFixture({ faultInjector(event) {
+      if (event === 'after-materialize-artifact') throw new Error('模拟旧版本目录发布后中断');
+    } });
+    const managers = [current.manager];
+    try {
+      await current.manager.initialize();
+      fs.mkdirSync(current.targetRoot);
+      assert.equal((await current.manager.changeStorageLocation()).status, 'failed');
+      const canonical = managed(current.targetRoot, current.artifact.blob.relativePath);
+      const layout = managed(current.targetRoot, current.artifact.storageRelativePath);
+      fs.unlinkSync(layout);
+      fs.linkSync(canonical, layout);
+      // 精确还原旧 migrator 已发布 hardlink 并在原 journal 登记两个路径的事实。
+      const journal = JSON.parse(fs.readFileSync(current.journalPath));
+      for (const relativePath of journal.targetPublishedPaths) {
+        journal.targetFileIdentities[relativePath] = await current.manager._captureMigrationFile(current.targetRoot, relativePath);
+      }
+      fs.writeFileSync(current.journalPath, JSON.stringify(journal));
+      const originalCanonicalInode = readIdentityStatSync(fs, canonical, 'statSync').ino;
+      const resumed = createManagerForFixture(current);
+      managers.push(resumed.manager);
+      if (crashPoint === 'before-unlink-checkpoint') {
+        const write = resumed.manager._writeJournal.bind(resumed.manager);
+        resumed.manager._writeJournal = (value, phase, patch) => {
+          if (patch?.targetFileIdentities?.[current.artifact.storageRelativePath]?.exists === false) {
+            throw new Error('unlink 完成而 checkpoint 尚未提交');
+          }
+          return write(value, phase, patch);
+        };
+      } else if (crashPoint === 'after-unlink-checkpoint') {
+        resumed.manager.createMaterializer = () => ({ materialize() {
+          throw new Error('checkpoint 完成而新 copy 尚未发布');
+        } });
+      }
+      const result = await resumed.manager.initialize();
+      if (crashPoint !== 'none') {
+        assert.equal(result.ok, false, JSON.stringify(result));
+        assert.equal(current.database.getSetting(ARCHIVE_STORAGE_ROOT_SETTING_KEY), null);
+        assert.equal(fs.existsSync(layout), false);
+        assert.equal(readIdentityStatSync(fs, canonical, 'statSync').ino, originalCanonicalInode);
+        const retried = createManagerForFixture(current);
+        managers.push(retried.manager);
+        assert.equal((await retried.manager.initialize()).ok, true);
+      } else assert.equal(result.ok, true, JSON.stringify(result));
+      assert.equal(current.database.getSetting(ARCHIVE_STORAGE_ROOT_SETTING_KEY), real(current.targetRoot));
+      assert.equal(readIdentityStatSync(fs, canonical, 'statSync').ino, originalCanonicalInode);
+      assert.notEqual(readIdentityStatSync(fs, layout, 'statSync').ino, originalCanonicalInode);
+      assert.equal(readIdentityStatSync(fs, canonical, 'statSync').nlink, 1);
+      assert.equal(current.repository.getArtifact(current.artifact.id).storageMode, 'copy');
+      assert.equal(fs.existsSync(current.journalPath), false);
+    } finally {
+      for (const manager of managers) {
+        await manager.pauseBackgroundOwnershipScan();
+        await manager.currentService?.pauseBackgroundMaterialization();
+      }
+      current.close();
+    }
+  });
+}
+
+
+for (const replacement of ['canonical', 'materialized']) {
+  test(`续跑 ${replacement} 在首次原身份校验后被替换时不得覆盖 journal 重新认领`, async () => {
+    const current = await createFixture({ faultInjector(event) {
+      if (event === 'after-materialize-artifact') throw new Error('原迁移已登记全部目标');
+    } });
+    let resumed;
+    try {
+      await current.manager.initialize();
+      fs.mkdirSync(current.targetRoot);
+      assert.equal((await current.manager.changeStorageLocation()).status, 'failed');
+      const journal = JSON.parse(fs.readFileSync(current.journalPath));
+      const relativePath = replacement === 'canonical'
+        ? current.artifact.blob.relativePath : current.artifact.storageRelativePath;
+      const victim = managed(current.targetRoot, relativePath);
+      resumed = createManagerForFixture(current);
+      const check = resumed.manager._assertMigrationFile.bind(resumed.manager);
+      let replacementInode;
+      resumed.manager._assertMigrationFile = async (value, side, checkedPath) => {
+        const result = await check(value, side, checkedPath);
+        if (!replacementInode && side === 'target' && checkedPath === relativePath) {
+          const other = path.join(current.tempDir, 'replacement.xlsx');
+          fs.writeFileSync(other, fs.readFileSync(victim));
+          replaceFixtureFile(other, victim);
+          replacementInode = String(readIdentityStatSync(fs, victim, 'statSync').ino);
+        }
+        return result;
+      };
+      const recovered = await resumed.manager.initialize();
+      assert.equal(recovered.migrationRecovery.code, 'ARCHIVE_STORAGE_DELETE_FILE_CHANGED', JSON.stringify(recovered));
+      assert.equal(current.database.getSetting(ARCHIVE_STORAGE_ROOT_SETTING_KEY), null);
+      assert.equal(String(readIdentityStatSync(fs, victim, 'statSync').ino), replacementInode);
+      const after = JSON.parse(fs.readFileSync(current.journalPath));
+      assert.equal(after.targetFileIdentities[relativePath].ino, journal.targetFileIdentities[relativePath].ino);
+      assert.notEqual(after.targetFileIdentities[relativePath].ino, replacementInode);
+      assert.ok(fs.existsSync(current.sourceRoot));
+    } finally {
+      for (const manager of [current.manager, resumed?.manager].filter(Boolean)) {
+        await manager.pauseBackgroundOwnershipScan();
+        await manager.currentService?.pauseBackgroundMaterialization();
+      }
+      current.close();
+    }
+  });
+}
+
+
+for (const targetKind of ['canonical', 'materialized']) {
+  for (const sameContent of [false, true]) {
+    test(`历史 ${targetKind} 在确认缺失后出现${sameContent ? '同内容' : '不同内容'}文件时保留新文件`, async () => {
+      const current = await createFixture({ faultInjector(event) {
+        if (event === 'after-materialize-artifact') throw new Error('原迁移已登记全部目标');
+      } });
+      let resumed;
+      try {
+        await current.manager.initialize();
+        fs.mkdirSync(current.targetRoot);
+        assert.equal((await current.manager.changeStorageLocation()).status, 'failed');
+        const journal = JSON.parse(fs.readFileSync(current.journalPath));
+        const relativePath = targetKind === 'canonical'
+          ? current.artifact.blob.relativePath : current.artifact.storageRelativePath;
+        const victim = managed(current.targetRoot, relativePath);
+        const content = sameContent ? fs.readFileSync(victim) : Buffer.from('其他所有者新出现的文件');
+        fs.unlinkSync(victim);
+        resumed = createManagerForFixture(current);
+        const check = resumed.manager._assertMigrationFile.bind(resumed.manager);
+        let newInode;
+        resumed.manager._assertMigrationFile = async (value, side, checkedPath) => {
+          const result = await check(value, side, checkedPath);
+          const phase = targetKind === 'canonical' ? 'copying' : 'materializing-layout';
+          if (!newInode && value.phase === phase && side === 'target' && checkedPath === relativePath && !result.exists) {
+            fs.writeFileSync(victim, content);
+            newInode = String(readIdentityStatSync(fs, victim, 'statSync').ino);
+          }
+          return result;
+        };
+        const result = await resumed.manager.initialize();
+        assert.equal(result.ok, false, JSON.stringify(result));
+        assert.equal(current.database.getSetting(ARCHIVE_STORAGE_ROOT_SETTING_KEY), null);
+        assert.equal(String(readIdentityStatSync(fs, victim, 'statSync').ino), newInode);
+        assert.deepEqual(fs.readFileSync(victim), content);
+        assert.equal(JSON.parse(fs.readFileSync(current.journalPath)).migrationId, journal.migrationId);
+        assert.ok(fs.existsSync(current.sourceRoot));
+      } finally {
+        for (const manager of [current.manager, resumed?.manager].filter(Boolean)) {
+          await manager.pauseBackgroundOwnershipScan();
+          await manager.currentService?.pauseBackgroundMaterialization();
+        }
+        current.close();
+      }
+    });
+  }
+}
+
+for (const targetKind of ['canonical', 'materialized']) {
+  for (const copyFallback of [false, true]) {
+    test(`目标 ${targetKind} 在排他发布前出现新文件，${copyFallback ? 'wx fd' : 'link'} 不覆盖且不切换`, async () => {
+      const fsImpl = { ...fs, promises: { ...fs.promises, async link(source, target) {
+        if (copyFallback) throw Object.assign(new Error('模拟文件系统不支持 hardlink'), { code: 'ENOTSUP' });
+        return fs.promises.link(source, target);
+      } } };
+      const current = await createFixture({ fsImpl });
+      try {
+        await current.manager.initialize();
+        const relativePath = targetKind === 'canonical'
+          ? current.artifact.blob.relativePath : current.artifact.storageRelativePath;
+        const victim = managed(current.targetRoot, relativePath);
+        const publish = current.manager._publishMigrationTarget.bind(current.manager);
+        let newInode;
+        current.manager._publishMigrationTarget = async (source, target, options) => {
+          if (portablePathOf(target).endsWith(`/${relativePath}`)) {
+            fs.writeFileSync(target, '发布之前已经存在的其他所有者文件');
+            newInode = readIdentityStatSync(fs, target, 'statSync').ino;
+          }
+          return publish(source, target, options);
+        };
+        fs.mkdirSync(current.targetRoot);
+        const result = await current.manager.changeStorageLocation();
+        assert.equal(result.code, targetKind === 'canonical'
+          ? 'ARCHIVE_STORAGE_UNKNOWN_CONTENT' : 'ARCHIVE_MATERIALIZATION_FAILED', JSON.stringify(result));
+        if (targetKind === 'materialized') assert.match(result.message, /ARCHIVE_STORAGE_UNKNOWN_CONTENT/);
+        assert.equal(current.database.getSetting(ARCHIVE_STORAGE_ROOT_SETTING_KEY), null);
+        assert.equal(readIdentityStatSync(fs, victim, 'statSync').ino, newInode);
+        assert.equal(fs.readFileSync(victim, 'utf8'), '发布之前已经存在的其他所有者文件');
+        assert.ok(fs.existsSync(current.sourceRoot));
+        const journal = JSON.parse(fs.readFileSync(current.journalPath));
+        assert.equal(journal.targetFileIdentities[relativePath], undefined);
+      } finally { current.close(); }
+    });
+  }
+}
+
+
+test('不支持 hardlink 的文件系统通过 wx 原 fd 写入并刷盘，再以同一 fd 恢复只读模式', async () => {
+  let targetRoot;
+  const writableFileMode = process.platform === 'win32' ? 0o666 : 0o600;
+  const created = [];
+  const events = [];
+  const expectedTargets = [];
+  const fsImpl = { ...fs, promises: { ...fs.promises,
+    async link() { throw Object.assign(new Error('模拟文件系统不支持 hardlink'), { code: 'ENOTSUP' }); },
+    async open(filePath, flags, mode) {
+      const handle = await fs.promises.open(filePath, flags, mode);
+      if (targetRoot && expectedTargets.includes(filePath) && flags === 'wx') {
+        created.push(filePath);
+        assert.equal(readIdentityStatSync(fs, handle.fd, 'fstatSync').mode & 0o777, writableFileMode);
+        const sync = handle.sync.bind(handle);
+        const chmod = handle.chmod.bind(handle);
+        handle.sync = async () => {
+          events.push({ path: filePath, kind: 'sync', mode: readIdentityStatSync(fs, handle.fd, 'fstatSync').mode & 0o777 });
+          return sync();
+        };
+        handle.chmod = async (value) => {
+          events.push({ path: filePath, kind: 'chmod', mode: value });
+          return chmod(value);
+        };
+      }
+      return handle;
+    }
+  } };
+  const current = await createFixture({ fsImpl });
+  targetRoot = path.join(real(current.tempDir), 'target-root');
+  expectedTargets.push(...[current.artifact.blob.relativePath, current.artifact.storageRelativePath]
+    .map((relativePath) => managed(targetRoot, relativePath)));
+  try {
+    await current.manager.initialize();
+    fs.mkdirSync(current.targetRoot);
+    const result = await current.manager.changeStorageLocation();
+    assert.equal(result.status, 'success', JSON.stringify(result));
+    assert.equal(created.length, 2);
+    for (const filePath of created) {
+      const operations = events.filter((entry) => entry.path === filePath);
+      const needsReadonly = filePath === expectedTargets[1];
+      assert.deepEqual(operations.map((entry) => entry.kind), needsReadonly ? ['sync', 'chmod', 'sync'] : ['sync']);
+      assert.equal(operations[0].mode, writableFileMode);
+    }
+    const canonical = readIdentityStatSync(fs, managed(current.targetRoot, current.artifact.blob.relativePath), 'statSync');
+    const layout = readIdentityStatSync(fs, managed(current.targetRoot, current.artifact.storageRelativePath), 'statSync');
+    assert.notEqual(canonical.ino, layout.ino);
+    assert.equal(layout.mode & 0o777, 0o444);
+    assert.equal(canonical.nlink, 1);
+    assert.equal(layout.nlink, 1);
+    assert.equal(fs.existsSync(current.journalPath), false);
+  } finally { current.close(); }
+});
+
+test('close 回写夹具首次 hook 失败后，已关闭原句柄再次 close 幂等且其他真实句柄仍可写', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-close-fixture-'));
+  const hookError = new Error('首次 close 完成后的受控 hook 故障');
+  let hookCalls = 0;
+  const { fsImpl } = createMigrationCloseMetadataFs({ targetRoot: directory,
+    afterClose() { hookCalls += 1; throw hookError; } });
+  let original, other, later;
+  try {
+    original = await fsImpl.promises.open(path.join(directory, 'original'), 'wx', 0o600);
+    other = await fsImpl.promises.open(path.join(directory, 'other'), 'wx', 0o600);
+    await original.chmod(0o444);
+    await assert.rejects(original.close(), (error) => error === hookError);
+    assert.equal(original.fd, -1);
+    later = await fsImpl.promises.open(path.join(directory, 'later'), 'wx', 0o600);
+    await original.close();
+    assert.equal(hookCalls, 1);
+    await other.writeFile('other fd remains open');
+    await later.writeFile('later fd remains open');
+    assert.equal((await other.stat()).size, Buffer.byteLength('other fd remains open'));
+    assert.equal((await later.stat()).size, Buffer.byteLength('later fd remains open'));
+  } finally {
+    if (later) await later.close();
+    if (other) await other.close();
+    if (original) await original.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+for (const copyFallback of [false, true]) {
+  test(`迁移 ${copyFallback ? 'wx' : 'link'} 原写 fd 关闭时回写 ctime，最终原 inode 快照仍可完成迁移`, async () => {
+    let targetRoot;
+    const { fsImpl, closedWrites } = createMigrationCloseMetadataFs({ targetRoot: () => targetRoot, copyFallback });
+    const current = await createFixture({ fsImpl });
+    targetRoot = path.join(real(current.tempDir), 'target-root');
+    try {
+      await current.manager.initialize(); fs.mkdirSync(current.targetRoot);
+      const result = await current.manager.changeStorageLocation();
+      assert.equal(result.status, 'success', JSON.stringify(result));
+      const artifact = current.repository.getArtifact(current.artifact.id);
+      const target = managed(current.targetRoot, artifact.storageRelativePath);
+      const actual = readIdentityStatSync(fsImpl, target);
+      assert.equal(closedWrites.length, 1);
+      assert.equal(actual.ino, String(closedWrites[0].identity.ino));
+      assert.equal(actual.mode & 0o777, 0o444);
+      assert.equal(actual.nlink, 1);
+      assert.equal(artifact.storageFingerprint.ctimeMs, actual.ctimeMs);
+      assert.equal(fs.readFileSync(target, 'utf8'), 'archive-root-migration-content');
+      assert.equal(fs.existsSync(current.journalPath), false);
+    } finally { current.close(); }
+  });
+}
+
+test('迁移 link 未 chmod 的 canonical 在本次 link/unlink 的 close 回写后保存最终 ctime', async () => {
+  let targetRoot, publishingCanonical = false;
+  const metadata = createMigrationCloseMetadataFs({ targetRoot: () => targetRoot,
+    injectCanonicalClose: () => publishingCanonical });
+  const current = await createFixture({ fsImpl: metadata.fsImpl });
+  targetRoot = path.join(real(current.tempDir), 'target-root');
+  try {
+    await current.manager.initialize(); fs.mkdirSync(current.targetRoot);
+    const canonical = managed(targetRoot, current.artifact.blob.relativePath);
+    const publish = current.manager._publishMigrationTarget.bind(current.manager);
+    current.manager._publishMigrationTarget = async (source, target, options) => {
+      publishingCanonical = target === canonical;
+      try { return await publish(source, target, options); } finally { publishingCanonical = false; }
+    };
+    const result = await current.manager.changeStorageLocation();
+    assert.equal(result.status, 'success', JSON.stringify(result));
+    const actual = readIdentityStatSync(metadata.fsImpl, canonical);
+    const event = metadata.closedWrites.find((item) => !item.readonlyWritten);
+    assert.ok(event);
+    assert.equal(actual.ino, String(event.identity.ino));
+    assert.equal(actual.mode, Number(event.identity.mode));
+    assert.equal(actual.nlink, 1);
+    assert.equal(current.repository.getArtifact(current.artifact.id).blob.fingerprint.ctimeMs, actual.ctimeMs);
+    assert.equal(fs.readFileSync(canonical, 'utf8'), 'archive-root-migration-content');
+    assert.equal(fs.existsSync(current.journalPath), false);
+  } finally { current.close(); }
+});
+
+for (const copyFallback of [false, true]) {
+  const mutations = ['replace-on-close', 'mtime-on-close', 'nlink-on-close', 'ctime-after-snapshot', 'mode-without-chmod'];
+  if (copyFallback) mutations.push('ctime-without-link-or-chmod');
+  for (const mutation of mutations) {
+    test(`迁移 ${copyFallback ? 'wx' : 'link'} close 元数据边界的 ${mutation} 仍拒绝认领并保留两根`, async () => {
+      let current, targetRoot, publishing = false, victim, mutated = false;
+      const metadata = createMigrationCloseMetadataFs({ targetRoot: () => targetRoot, copyFallback,
+        injectCanonicalClose: () => publishing && ['ctime-without-link-or-chmod', 'mode-without-chmod'].includes(mutation),
+        afterClose(event) {
+          if (!publishing || mutated || !victim) return;
+          if (mutation === 'ctime-after-snapshot') return;
+          if (mutation === 'ctime-without-link-or-chmod') { mutated = true; return; }
+          if (mutation === 'mode-without-chmod') { fs.chmodSync(victim, 0o444); mutated = true; return; }
+          if (!event.readonlyWritten) return;
+          const before = readIdentityStatSync(fs, victim);
+          if (mutation === 'replace-on-close') {
+            const other = path.join(current.tempDir, 'close-replacement');
+            fs.writeFileSync(other, fs.readFileSync(victim));
+            replaceFixtureFile(other, victim);
+          } else if (mutation === 'mtime-on-close') {
+            fs.utimesSync(victim, before.atimeMs / 1000, before.mtimeMs / 1000 + 1);
+            assert.notEqual(readIdentityStatSync(fs, victim).mtimeMs, before.mtimeMs);
+          } else {
+            fs.linkSync(victim, path.join(current.tempDir, 'external-hardlink'));
+            assert.equal(readIdentityStatSync(fs, victim).nlink, before.nlink + 1);
+          }
+          mutated = true;
+        }
+      });
+      current = await createFixture({ fsImpl: metadata.fsImpl });
+      targetRoot = path.join(real(current.tempDir), 'target-root');
+      try {
+        await current.manager.initialize(); fs.mkdirSync(current.targetRoot);
+        const relativePath = ['ctime-without-link-or-chmod', 'mode-without-chmod'].includes(mutation)
+          ? current.artifact.blob.relativePath : current.artifact.storageRelativePath;
+        victim = managed(targetRoot, relativePath);
+        const publish = current.manager._publishMigrationTarget.bind(current.manager);
+        current.manager._publishMigrationTarget = async (source, target, options) => {
+          publishing = target === victim;
+          try {
+            const result = await publish(source, target, options);
+            if (publishing && mutation === 'ctime-after-snapshot') {
+              metadata.advanceCtime(fs.statSync(target, { bigint: true })); mutated = true;
+            }
+            return result;
+          } finally { publishing = false; }
+        };
+        const result = await current.manager.changeStorageLocation();
+        assert.equal(result.status, 'failed', JSON.stringify(result));
+        assert.equal(mutated, true);
+        const diagnostic = result.code + ' ' + result.message;
+        assert.match(diagnostic, /ARCHIVE_STORAGE_DELETE_FILE_CHANGED/);
+        assert.equal(current.database.getSetting(ARCHIVE_STORAGE_ROOT_SETTING_KEY), null);
+        assert.equal(fs.readFileSync(victim, 'utf8'), 'archive-root-migration-content');
+        assert.ok(fs.existsSync(current.sourceRoot));
+        const journal = JSON.parse(fs.readFileSync(current.journalPath));
+        assert.equal(journal.targetFileIdentities[relativePath], undefined);
+        assert.deepEqual(current.repository.getArtifact(current.artifact.id).storageFingerprint, current.artifact.storageFingerprint);
+      } finally { current.close(); }
+    });
+  }
+}
+
+for (const copyFallback of [false, true]) {
+  for (const replacement of ['file', 'parent']) {
+    test(`迁移 ${copyFallback ? 'wx' : 'link'} 见证 fd 打开前 ${replacement} 真实替换，拒绝登记且保留原恢复证据`, async () => {
+      let current, targetRoot, victim, publishing = false, substitutedInode;
+      const { fsImpl } = createMigrationCloseMetadataFs({ targetRoot: () => targetRoot, copyFallback });
+      const open = fsImpl.promises.open;
+      fsImpl.promises.open = async (filePath, ...args) => {
+        if (publishing && filePath === victim && args[0] === 'r' && !substitutedInode) {
+          const before = readIdentityStatSync(fs, victim);
+          if (replacement === 'file') {
+            const other = path.join(current.tempDir, 'witness-replacement');
+            fs.writeFileSync(other, fs.readFileSync(victim));
+            replaceFixtureFile(other, victim);
+          } else {
+            const parent = path.dirname(victim), detached = path.join(current.tempDir, 'detached-parent');
+            const detachedFile = path.join(current.tempDir, 'detached-witness-file');
+            const oldParent = readIdentityStatSync(fs, parent);
+            // Windows 不能移动含打开子文件的目录；先移走原文件，再真实替换空父目录。
+            fs.renameSync(victim, detachedFile);
+            fs.renameSync(parent, detached); fs.mkdirSync(parent);
+            fs.renameSync(detachedFile, victim);
+            assert.notEqual(readIdentityStatSync(fs, parent).ino, oldParent.ino);
+            assert.equal(readIdentityStatSync(fs, victim).ino, before.ino);
+          }
+          substitutedInode = readIdentityStatSync(fs, victim).ino;
+        }
+        return open(filePath, ...args);
+      };
+      current = await createFixture({ fsImpl }); targetRoot = path.join(real(current.tempDir), 'target-root');
+      try {
+        await current.manager.initialize(); fs.mkdirSync(current.targetRoot);
+        victim = managed(targetRoot, current.artifact.storageRelativePath);
+        const publish = current.manager._publishMigrationTarget.bind(current.manager);
+        current.manager._publishMigrationTarget = async (source, target, options) => {
+          publishing = target === victim;
+          try { return await publish(source, target, options); } finally { publishing = false; }
+        };
+        const result = await current.manager.changeStorageLocation();
+        assert.equal(result.status, 'failed', JSON.stringify(result));
+        assert.match(result.code + ' ' + result.message, /ARCHIVE_STORAGE_DELETE_FILE_CHANGED/);
+        assert.ok(substitutedInode);
+        assert.equal(readIdentityStatSync(fs, victim).ino, substitutedInode);
+        assert.equal(fs.readFileSync(victim, 'utf8'), 'archive-root-migration-content');
+        assert.equal(current.database.getSetting(ARCHIVE_STORAGE_ROOT_SETTING_KEY), null);
+        assert.ok(fs.existsSync(current.sourceRoot));
+        const journal = JSON.parse(fs.readFileSync(current.journalPath));
+        assert.equal(journal.targetFileIdentities[current.artifact.storageRelativePath], undefined);
+      } finally { current.close(); }
+    });
+  }
+}
+
+for (const targetKind of ['canonical', 'materialized']) {
+  for (const copyFallback of [false, true]) {
+    for (const stopAt of ['after-create', 'before-first-capture']) {
+      test(`新 ${targetKind} 经 ${copyFallback ? 'wx fd' : 'link'} 发布，在 ${stopAt} 换 inode 后不能首次认领`, async () => {
+        let current;
+        let victim;
+        let substitutedInode;
+        const substitute = (target) => {
+          if (!victim || target !== victim || substitutedInode) return;
+          const original = readIdentityStatSync(fs, target, 'statSync');
+          const sourcePath = managed(current.sourceRoot, current.artifact.blob.relativePath);
+          const replacement = path.join(current.tempDir, 'same-sha-new-owner');
+          fs.writeFileSync(replacement, fs.readFileSync(sourcePath));
+          replaceFixtureFile(replacement, target);
+          substitutedInode = String(readIdentityStatSync(fs, target, 'statSync').ino);
+          assert.notEqual(substitutedInode, String(original.ino));
+        };
+        const fsImpl = { ...fs, promises: { ...fs.promises,
+          async link(source, target) {
+            if (copyFallback) throw Object.assign(new Error('模拟文件系统不支持 hardlink'), { code: 'ENOTSUP' });
+            await fs.promises.link(source, target);
+            if (stopAt === 'after-create') substitute(target);
+          },
+          async open(filePath, flags, mode) {
+            const handle = await fs.promises.open(filePath, flags, mode);
+            try {
+              if (copyFallback && stopAt === 'after-create' && flags === 'wx') substitute(filePath);
+              return handle;
+            } catch (error) {
+              // 故障注入失败时产品尚未接管此句柄，夹具必须关闭后原样抛出。
+              await handle.close();
+              throw error;
+            }
+          }
+        } };
+        current = await createFixture({ fsImpl });
+        try {
+          await current.manager.initialize();
+          fs.mkdirSync(current.targetRoot);
+          const relativePath = targetKind === 'canonical'
+            ? current.artifact.blob.relativePath : current.artifact.storageRelativePath;
+          victim = managed(real(current.targetRoot), relativePath);
+          if (stopAt === 'before-first-capture') {
+            const publish = current.manager._publishMigrationTarget.bind(current.manager);
+            current.manager._publishMigrationTarget = async (source, target, options) => {
+              const original = await publish(source, target, options);
+              substitute(target);
+              return original;
+            };
+          }
+          const result = await current.manager.changeStorageLocation();
+          assert.equal(result.status, 'failed', JSON.stringify(result));
+          assert.ok(substitutedInode);
+          assert.equal(current.database.getSetting(ARCHIVE_STORAGE_ROOT_SETTING_KEY), null);
+          assert.equal(String(readIdentityStatSync(fs, victim, 'statSync').ino), substitutedInode);
+          assert.equal(fs.readFileSync(victim, 'utf8'), 'archive-root-migration-content');
+          const journal = JSON.parse(fs.readFileSync(current.journalPath));
+          assert.equal(journal.targetFileIdentities[relativePath], undefined);
+          const after = current.repository.getArtifact(current.artifact.id);
+          assert.deepEqual(after.blob.fingerprint, current.artifact.blob.fingerprint);
+          assert.deepEqual(after.storageFingerprint, current.artifact.storageFingerprint);
+          assert.ok(fs.existsSync(current.sourceRoot));
+        } finally { current.close(); }
+      });
+    }
+  }
+}

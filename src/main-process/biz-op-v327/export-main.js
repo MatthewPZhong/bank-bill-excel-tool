@@ -13,7 +13,7 @@ const { matchesExportFileIdentity } = require('./export-file-identity');
 function createBizOpExportCoordinator({ userDataDir, catalog, payloadStore, protection, admission, sources,
   publication, getArchiveService, prepareOperation, prepareDispatch, forgetDispatch }) {
   async function runExport({ taskLifecycle, runtime, outputKind, objectId, filePlan, signal, options = {},
-    onControl, afterWorker, onPublishProgress, afterPublish }) {
+    onControl, onTaskIdentified, afterWorker, onPublishProgress, afterPublish }) {
     schemaFor(outputKind);
     const suffix = outputKind.toLowerCase().replace('_', '-');
     const actionKey = `biz-op-v327:export-${suffix}`;
@@ -25,6 +25,8 @@ function createBizOpExportCoordinator({ userDataDir, catalog, payloadStore, prot
       const result = await taskLifecycle.runFileTask({ policy, meta: { channel: policy.channel }, filePlanResolver: () => filePlan,
         beforeStart: async (context, fileEvidence) => {
           taskRunId = context.taskRunId; bindTask(taskRunId);
+          // beforeStart 也可能失败；先保留真实 Task 身份，供 Main 查询发布与恢复事实。
+          if (onTaskIdentified) onTaskIdentified(Object.freeze({ taskRunId }));
           if (signal?.aborted) return {};
           // RAW 的既有 Archive 原件核验会计算大文件摘要，单独准入后再冻结。
           // 此时共享读取 gate 和原件 INPUT hold 已保护来源，不能在无预算 Main 阶段读取。

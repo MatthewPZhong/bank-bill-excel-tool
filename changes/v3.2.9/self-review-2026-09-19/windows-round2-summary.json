@@ -1,0 +1,170 @@
+{
+  "candidate": "66f357bd0357c2be4c2256267edee637c436df20",
+  "run": "https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/35376141525",
+  "conclusion": "failure",
+  "native": {
+    "passed": 16,
+    "total": 16,
+    "locale": {
+      "language": "en-US",
+      "languages": [
+        "en-US"
+      ],
+      "dateTimeFormat": {
+        "locale": "en-US",
+        "calendar": "gregory",
+        "numberingSystem": "latn",
+        "timeZone": "UTC",
+        "hourCycle": "h12",
+        "hour12": true,
+        "hour": "numeric",
+        "minute": "2-digit"
+      }
+    },
+    "nativeHour20Control": {
+      "value": "14:00",
+      "events": [
+        {
+          "type": "focus",
+          "role": "dark-mode-start",
+          "value": "18:30",
+          "checked": false,
+          "disabled": false,
+          "active": true,
+          "at": 934.5
+        },
+        {
+          "type": "input",
+          "role": "dark-mode-start",
+          "value": "14:30",
+          "checked": false,
+          "disabled": false,
+          "active": true,
+          "at": 941.1000000000058
+        },
+        {
+          "type": "change",
+          "role": "dark-mode-start",
+          "value": "14:30",
+          "checked": false,
+          "disabled": false,
+          "active": false,
+          "at": 941.3999999999942
+        },
+        {
+          "type": "input",
+          "role": "dark-mode-start",
+          "value": "14:00",
+          "checked": false,
+          "disabled": false,
+          "active": true,
+          "at": 973.7000000000116
+        },
+        {
+          "type": "change",
+          "role": "dark-mode-start",
+          "value": "14:00",
+          "checked": false,
+          "disabled": false,
+          "active": true,
+          "at": 973.7000000000116
+        }
+      ],
+      "requests": []
+    },
+    "cases": [
+      {
+        "name": "native-control-19",
+        "passed": true
+      },
+      {
+        "name": "start-hour-save15-key100",
+        "passed": true
+      },
+      {
+        "name": "start-minute-save15-key100",
+        "passed": true
+      },
+      {
+        "name": "end-hour-save15-key100",
+        "passed": true
+      },
+      {
+        "name": "end-minute-save15-key100",
+        "passed": true
+      },
+      {
+        "name": "start-hour-save200-key30",
+        "passed": true
+      },
+      {
+        "name": "start-minute-save200-key30",
+        "passed": true
+      },
+      {
+        "name": "end-hour-save200-key30",
+        "passed": true
+      },
+      {
+        "name": "end-minute-save200-key30",
+        "passed": true
+      },
+      {
+        "name": "enabled-start-hour-save15-key100",
+        "passed": true
+      },
+      {
+        "name": "slow-two-fields",
+        "passed": true
+      },
+      {
+        "name": "disable-during-save",
+        "passed": true
+      },
+      {
+        "name": "edit-time-after-queued-off",
+        "passed": true
+      },
+      {
+        "name": "invalid-time-after-queued-off",
+        "passed": true
+      },
+      {
+        "name": "invalid-time-before-queued-off",
+        "passed": true
+      },
+      {
+        "name": "save-failure-keeps-focus",
+        "passed": true
+      }
+    ]
+  },
+  "liveMain": {
+    "assertions": 22,
+    "status": "PASS",
+    "limits": "Startup, reload and presented pane pixels only. Native AM/PM text visibility not measured; screenshot clipping is a pending layout investigation."
+  },
+  "settings": {
+    "passed": false,
+    "layoutPassGroups": 5,
+    "failures": [
+      {
+        "viewport": {
+          "width": 1240,
+          "height": 860
+        },
+        "scaleFactor": 1,
+        "reason": "spawnSync D:\\a\\bank-bill-excel-tool\\bank-bill-excel-tool\\node_modules\\electron\\dist\\electron.exe ETIMEDOUT",
+        "stdout": "",
+        "stderr": ""
+      }
+    ]
+  },
+  "vccElectron": "(node:4032) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `electron --trace-warnings ...` to show where the warning was created)\nTypeError: Cannot read properties of undefined (reading 'setPath')\n    at electronRun (D:\\a\\bank-bill-excel-tool\\bank-bill-excel-tool\\scripts\\vcc-financial-op\\verify-review-electron.js:16:7)\n    at Object.<anonymous> (D:\\a\\bank-bill-excel-tool\\bank-bill-excel-tool\\scripts\\vcc-financial-op\\verify-review-electron.js:117:32)\n    at Module._compile (node:internal/modules/cjs/loader:1714:14)\n    at Module._extensions..js (node:internal/modules/cjs/loader:1848:10)\n    at Module.load (node:internal/modules/cjs/loader:1448:32)\n    at Module._load (node:internal/modules/cjs/loader:1270:12)\n    at c._load (node:electron/js2c/node_init:2:17993)\n    at TracingChannel.traceSync (node:diagnostics_channel:322:14)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:244:24)\n    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:186:5)\nD:\\a\\bank-bill-excel-tool\\bank-bill-excel-tool\\scripts\\vcc-financial-op\\verify-review-electron.js:118\n  console.error(error); require('electron').app.exit(1);\n                                               ^\n\nTypeError: Cannot read properties of undefined (reading 'exit')\n    at D:\\a\\bank-bill-excel-tool\\bank-bill-excel-tool\\scripts\\vcc-financial-op\\verify-review-electron.js:118:48\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n\nNode.js v22.19.0\n",
+  "pfSmoke": "D:\\a\\bank-bill-excel-tool\\bank-bill-excel-tool\\node_modules\\electron\\dist\\electron.exe: bad option: --js-flags=--expose-gc\n",
+  "pfWindows": "D:\\a\\bank-bill-excel-tool\\bank-bill-excel-tool\\node_modules\\electron\\dist\\electron.exe: bad option: --js-flags=--expose-gc\n",
+  "fixedLocally": {
+    "settings": "backgroundThrottling:false + phase logs; 30s bound unchanged; 6/6, 4/4 scenarios, 73 assertions PASS on macOS",
+    "vcc": "Remove ELECTRON_RUN_AS_NODE, including case variants. Inherited value 1: ASAR export and PF smoke PASS, macOS windows preflight exit2 NOT_RUN."
+  }
+}

@@ -1,0 +1,62 @@
+[
+  {
+    "task": "lint",
+    "exit": 0,
+    "seconds": 2.64,
+    "log": "lint.txt"
+  },
+  {
+    "task": "smoke",
+    "exit": 0,
+    "seconds": 5.37,
+    "log": "smoke.txt"
+  },
+  {
+    "task": "focused-unit",
+    "exit": 0,
+    "seconds": 17.48,
+    "log": "focused-unit.txt"
+  },
+  {
+    "task": "roundtrip",
+    "exit": 0,
+    "seconds": 0.14,
+    "log": "roundtrip.txt"
+  },
+  {
+    "task": "multi-split-roundtrip",
+    "exit": 0,
+    "seconds": 0.41,
+    "log": "multi-split-roundtrip.txt"
+  },
+  {
+    "task": "rows-delete-integration",
+    "exit": 0,
+    "passed": 2,
+    "log": "rows-delete-integration.txt",
+    "node": "25.8.0"
+  },
+  {
+    "task": "isolated-electron-ui",
+    "exit": 0,
+    "scenarios": 21,
+    "copyChecks": 13,
+    "themeChecks": 4,
+    "nativeFocusChecks": 3,
+    "log": "ui-tests.jsonl"
+  },
+  {
+    "task": "row-split-capacity",
+    "exit": 0,
+    "fileCounts": [
+      1,
+      8,
+      9,
+      999,
+      1000
+    ],
+    "totalOutputFiles": 2017,
+    "log": "capacity.jsonl",
+    "node": "25.8.0"
+  }
+]

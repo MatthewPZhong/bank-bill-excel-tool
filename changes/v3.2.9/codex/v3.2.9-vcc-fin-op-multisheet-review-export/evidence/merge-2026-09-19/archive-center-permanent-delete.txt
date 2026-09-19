@@ -1,0 +1,72 @@
+(node:10748) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+PASS 预检与取消不修改记录，确认后真实删除原件、输出及只读副本并保留外部文件
+PASS 已删 owner 迟到重复终态在重启时由收口证明安全 ACK，不复活批次
+PASS 文件占用返回未完成并显示清理任务，重启后原任务重试完成
+PASS 预检后新增终态通知使确认失效，原任务收口后可重新确认
+PASS 失败输出的预分配路径出现未知文件时，完整删除入口保留批次和文件
+PASS 工具箱发布恢复完成原任务与后处理后，可通过统一入口永久删除
+PASS 入口维护持有自身 lease 时可完成到期清理和后续阶段
+PASS 真实 VCC 发布归档暂时失败，跨进程恢复后 outbox 清空并可初始化及永久删除
+PASS 正常工具箱收尾在完成凭证前退出，原发布记录跨进程收口且不重发布
+(node:10748) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10748) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10748) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10748) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10748) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+PASS BizOP 正式导出 ACK 临时失败，原 owner 恢复后 outbox 清空并完成初始化
+PASS BizOP ACK 后完成凭证前进程退出，重启沿原输出身份完成收口
+(node:10748) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10748) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10748) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10748) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10748) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+PASS BizOP 旧 binding 的业务恢复已关闭，仍可由原发布事实补齐完成凭证
+PASS BizOP 未提交导出首次终态落库失败，原补偿完成后可重启及永久删除
+PASS BizOP 已关闭的未提交导出缺少完成凭证，沿原补偿事实恢复收口
+PASS BizOP 大量历史导出分批补齐凭证，重启续跑且真实未决任务继续受保护
+PASS Position 流式导入及账户确认共享来源，先保留共享副本再由最后批次清理
+PASS Position 来源已正常回收，重启后逆序删除两个原批次不会互锁
+PASS Position 默认导入路径持久保存来源证据，重启后完成受管删除并保留外部原件
+PASS Position 过滤报告仍被业务使用时禁止删除，解除引用后清理原受管报告
+PASS Position 过滤报告经 Main 正常清理，重启后按原归属完成批次删除
+PASS 普通模板导入执行中退出，重启按原任务身份收口并允许预检和到期删除
+PASS 普通模板导入终态后退出，重启恢复原完成凭证并通过确认删除
+PASS 匿名后处理尚未执行时退出，普通任务恢复不得伪造后处理完成
+PASS 普通任务责任写入事务中退出，批次和 manifest 回滚且业务尚未执行
+PASS 原硬链接目录删除失败后同 SHA 新 Blob 发布，原任务重试可收口并保留新批次
+PASS 原硬链接残项与同 SHA 新 Blob 跨重启恢复，原任务收口且新批次可读
+PASS 历史共享硬链接删除占用期间读取另一批次，解除占用后原任务可重试完成
+PASS 历史共享硬链接删除占用期间进行维护，解除占用后原任务可重试完成
+PASS 旧 Blob 没有持久指纹且被同 SHA 新 inode 替换时，永久删除拒绝且保留对象
+PASS 旧 Blob 缺少指纹且受管文件已缺失时，保留原外部文件并幂等完成删除
+PASS 只读副本保持创建身份，关闭创建句柄后打开，重启后确认删除保留外部原件
+PASS 只读副本 after-create 替换不被登记为所有者，跨进程恢复保留文件并拒绝删除
+PASS 只读副本 after-rename 替换不被登记为所有者，跨进程恢复保留文件并拒绝删除
+PASS 只读副本 after-capture 替换不被登记为所有者，跨进程恢复保留文件并拒绝删除
+PASS 只读副本 parent-after-capture 替换不被登记为所有者，跨进程恢复保留文件并拒绝删除
+PASS 只读副本源流失败后释放创建句柄，不重复关闭其他文件已复用的 fd
+PASS 正常迁移保持原目标身份，真实任务经确认令牌完成永久删除
+PASS 迁移提交前 canonical 目标发生同内容替换，重启后保留两根及原恢复凭证
+PASS 迁移提交前 materialized 目标发生同内容替换，重启后保留两根及原恢复凭证
+PASS 迁移提交后旧根清理中断，原发布身份可恢复完成两根关联删除
+PASS 迁移后目标被 same 内容的新 inode 替换时，保留两根文件与清理凭证
+PASS 旧 path-only 迁移与删除交叠遇 same 内容替代对象，资格核验前不删任何原件
+PASS 迁移后目标被 different 内容的新 inode 替换时，保留两根文件与清理凭证
+PASS 旧 path-only 迁移与删除交叠遇 different 内容替代对象，资格核验前不删任何原件
+PASS 旧 path-only 迁移与删除交叠的现存文件缺少原身份时，保留两根等待诊断
+PASS 旧迁移没有发布身份但删除计划身份完整时，仍须保留两根现存文件
+PASS 旧迁移身份缺失但两根目标均已安全缺失时，有原身份的删除计划可幂等完成
+PASS 旧迁移与 V1 删除计划同时缺证，即使目标已缺失仍保留任务诊断
+PASS 归档延期时未执行的匿名后处理不会被恢复流程认证完成或放行删除
+==== 49/49 PASS ====

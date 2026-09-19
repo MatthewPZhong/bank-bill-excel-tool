@@ -1,0 +1,2480 @@
+{
+  "createdAt": "2026-09-12T05:38:08.883Z",
+  "ok": true,
+  "command": "DARK_MODE_UI_WEB_ZOOM=1.5 node scripts/verify-dark-mode-ui.js",
+  "interpretation": "固定窗口内容尺寸，设备缩放1，调用真实 webContents.setZoomFactor；CSS viewport相应缩小，DPR包含页面zoom；隐藏窗口不等于原生系统缩放或真实 Main 启动验证",
+  "coverageLimitations": [
+    "模块检查覆盖基础主面板几何和最小控件字体；不穷举业务数据状态或完整操作流程",
+    "完整打开并操作的代表弹窗仅设置/外观页；账户表格和VCC组件使用真实CSS类的静态测试节点",
+    "隐藏窗口启用CDP文档焦点模拟后，通过真实DOM.focus检查时间输入的可见焦点轮廓；未触发鼠标hover、OS焦点切换、完整键盘Tab顺序或屏幕阅读器",
+    "禁用覆盖保存期间fieldset禁用；未穷举所有业务按钮的disabled配色",
+    "对比度检查针对列出的不透明语义色组合；未量化自定义图片每个像素后的实际文字对比度",
+    "所有业务desktopApi均为内存模拟，未证明Main冷启动、真实IPC、真实持久化或Windows行为"
+  ],
+  "cases": [
+    {
+      "config": {
+        "width": 1080,
+        "height": 760,
+        "scale": 1,
+        "webZoom": 1.5,
+        "behavior": true
+      },
+      "ok": true,
+      "results": [
+        {
+          "theme": "light",
+          "ok": true,
+          "assertions": 78,
+          "failures": [],
+          "behavior": [],
+          "modules": [
+            {
+              "id": "statement-generator",
+              "panels": [
+                {
+                  "id": "statementModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 640,
+                  "height": 172,
+                  "right": 680,
+                  "bottom": 426.796875,
+                  "scrollWidth": 638,
+                  "clientWidth": 638
+                }
+              ],
+              "minControlFontPx": 13
+            },
+            {
+              "id": "new-account-generator",
+              "panels": [
+                {
+                  "id": "newAccountModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 640,
+                  "height": 240,
+                  "right": 680,
+                  "bottom": 494.796875,
+                  "scrollWidth": 638,
+                  "clientWidth": 638
+                }
+              ],
+              "minControlFontPx": 12
+            },
+            {
+              "id": "pending-reconciliation",
+              "panels": [
+                {
+                  "id": "pendingModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 640,
+                  "height": 234,
+                  "right": 680,
+                  "bottom": 488.796875,
+                  "scrollWidth": 638,
+                  "clientWidth": 638
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "bank-statement-process",
+              "panels": [
+                {
+                  "id": "bankStatementModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 640,
+                  "height": 300,
+                  "right": 680,
+                  "bottom": 554.796875,
+                  "scrollWidth": 638,
+                  "clientWidth": 638
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "pre-fund-reconciliation",
+              "panels": [
+                {
+                  "id": "preFundReconciliationModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 640,
+                  "height": 300,
+                  "right": 680,
+                  "bottom": 554.796875,
+                  "scrollWidth": 638,
+                  "clientWidth": 638
+                }
+              ],
+              "minControlFontPx": 13
+            },
+            {
+              "id": "duplicate-inbound-match",
+              "panels": [
+                {
+                  "id": "duplicateInboundMatchModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 640,
+                  "height": 234,
+                  "right": 680,
+                  "bottom": 488.796875,
+                  "scrollWidth": 638,
+                  "clientWidth": 638
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "position-reconciliation-process",
+              "panels": [
+                {
+                  "id": "positionReconciliationModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 640,
+                  "height": 366,
+                  "right": 680,
+                  "bottom": 620.796875,
+                  "scrollWidth": 638,
+                  "clientWidth": 638
+                }
+              ],
+              "minControlFontPx": 13
+            },
+            {
+              "id": "recon-id-fix",
+              "panels": [
+                {
+                  "id": "reconIdFixModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 640,
+                  "height": 366,
+                  "right": 680,
+                  "bottom": 620.796875,
+                  "scrollWidth": 638,
+                  "clientWidth": 638
+                }
+              ],
+              "minControlFontPx": 13
+            },
+            {
+              "id": "bank-bu-recon",
+              "panels": [
+                {
+                  "id": "bankBuReconModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 640,
+                  "height": 234,
+                  "right": 680,
+                  "bottom": 488.796875,
+                  "scrollWidth": 638,
+                  "clientWidth": 638
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "biz-op-recon",
+              "panels": [
+                {
+                  "id": "bizOpV327ModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 640,
+                  "height": 234,
+                  "right": 680,
+                  "bottom": 488.796875,
+                  "scrollWidth": 638,
+                  "clientWidth": 638
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "acquiring-bill-currency",
+              "panels": [
+                {
+                  "id": "acquiringBillCurrencyModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 640,
+                  "height": 234,
+                  "right": 680,
+                  "bottom": 488.796875,
+                  "scrollWidth": 638,
+                  "clientWidth": 638
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "vcc-op-calc",
+              "panels": [
+                {
+                  "id": "vccOpCalcModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 640,
+                  "height": 234,
+                  "right": 680,
+                  "bottom": 488.796875,
+                  "scrollWidth": 638,
+                  "clientWidth": 638
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "vcc-financial-op",
+              "panels": [
+                {
+                  "id": "vccFinancialOpModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 640,
+                  "height": 234,
+                  "right": 680,
+                  "bottom": 488.796875,
+                  "scrollWidth": 638,
+                  "clientWidth": 638
+                }
+              ],
+              "minControlFontPx": 14
+            }
+          ],
+          "palette": {
+            "--bg": "rgb(249, 250, 252)",
+            "--bg-soft": "rgb(241, 244, 249)",
+            "--panel": "rgb(255, 255, 255)",
+            "--text": "rgb(32, 39, 53)",
+            "--muted": "rgb(91, 103, 121)",
+            "--input": "rgb(255, 255, 255)",
+            "--primary": "rgb(11, 87, 208)",
+            "--on-primary": "rgb(255, 255, 255)",
+            "--danger": "rgb(184, 45, 58)",
+            "--danger-soft": "rgb(255, 240, 240)",
+            "--success": "rgb(32, 115, 66)",
+            "--success-soft": "rgb(234, 246, 239)",
+            "--warning": "rgb(148, 96, 0)",
+            "--warning-soft": "rgb(255, 247, 230)"
+          },
+          "contrastPairs": [
+            {
+              "foreground": "--text",
+              "background": "--panel",
+              "ratio": 14.967593795110997
+            },
+            {
+              "foreground": "--muted",
+              "background": "--panel",
+              "ratio": 5.736100584579226
+            },
+            {
+              "foreground": "--text",
+              "background": "--input",
+              "ratio": 14.967593795110997
+            },
+            {
+              "foreground": "--on-primary",
+              "background": "--primary",
+              "ratio": 6.386238271761161
+            },
+            {
+              "foreground": "--danger",
+              "background": "--danger-soft",
+              "ratio": 5.4609790759362
+            },
+            {
+              "foreground": "--success",
+              "background": "--success-soft",
+              "ratio": 5.268707695724642
+            },
+            {
+              "foreground": "--warning",
+              "background": "--warning-soft",
+              "ratio": 5.0094850036354455
+            }
+          ],
+          "probes": [
+            {
+              "name": "status-error",
+              "color": "rgb(184, 45, 58)",
+              "background": "rgb(255, 240, 240)"
+            },
+            {
+              "name": "status-success",
+              "color": "rgb(32, 115, 66)",
+              "background": "rgb(234, 246, 239)"
+            },
+            {
+              "name": "status-warning",
+              "color": "rgb(91, 103, 121)",
+              "background": "rgb(241, 244, 249)"
+            },
+            {
+              "name": "account-table",
+              "color": "rgb(91, 103, 121)",
+              "background": "rgba(0, 0, 0, 0)"
+            },
+            {
+              "name": "vcc-panel",
+              "color": "rgb(32, 39, 53)",
+              "background": "rgb(255, 255, 255)"
+            },
+            {
+              "name": "vcc-header",
+              "color": "rgb(32, 39, 53)",
+              "background": "rgb(241, 244, 249)"
+            },
+            {
+              "name": "vcc-difference",
+              "color": "rgb(184, 45, 58)",
+              "background": "rgb(255, 240, 240)"
+            }
+          ],
+          "interactionProbes": {
+            "paletteAction": {
+              "color": "rgb(255, 255, 255)",
+              "background": "rgb(11, 87, 208)",
+              "contrast": 6.386238271761161
+            },
+            "timeInputFocus": {
+              "active": true,
+              "focusVisible": true,
+              "outlineStyle": "solid",
+              "outlineWidth": "2px",
+              "outlineColor": "rgb(11, 87, 208)"
+            }
+          },
+          "layout": {
+            "card": {
+              "x": 28,
+              "y": 28,
+              "width": 664,
+              "height": 450.66668701171875,
+              "right": 692,
+              "bottom": 478.66668701171875
+            },
+            "start": {
+              "x": 183,
+              "y": 331.26043701171875,
+              "width": 219,
+              "height": 44,
+              "right": 402,
+              "bottom": 375.26043701171875
+            },
+            "end": {
+              "x": 448,
+              "y": 331.26043701171875,
+              "width": 219,
+              "height": 44,
+              "right": 667,
+              "bottom": 375.26043701171875
+            },
+            "statusFontPx": "13px"
+          },
+          "viewport": {
+            "width": 720,
+            "height": 506,
+            "dpr": 1.5,
+            "screenWidth": 1080,
+            "screenHeight": 760
+          },
+          "capture": {
+            "file": "ui-1080x760-100-webzoom-150-light.png",
+            "pixels": {
+              "width": 2160,
+              "height": 1520
+            }
+          }
+        },
+        {
+          "theme": "dark",
+          "ok": true,
+          "assertions": 94,
+          "failures": [],
+          "behavior": [
+            "开关真实 DOM change → controller → 模拟 IPC → 主题/状态",
+            "失败保留 / 等时拒绝 / 时段保存与禁用保留",
+            "图片背景草稿 / 日夜遮罩 / 取消 / 无背景写入"
+          ],
+          "modules": [
+            {
+              "id": "statement-generator",
+              "panels": [
+                {
+                  "id": "statementModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 640,
+                  "height": 172,
+                  "right": 680,
+                  "bottom": 426.796875,
+                  "scrollWidth": 638,
+                  "clientWidth": 638
+                }
+              ],
+              "minControlFontPx": 13
+            },
+            {
+              "id": "new-account-generator",
+              "panels": [
+                {
+                  "id": "newAccountModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 640,
+                  "height": 240,
+                  "right": 680,
+                  "bottom": 494.796875,
+                  "scrollWidth": 638,
+                  "clientWidth": 638
+                }
+              ],
+              "minControlFontPx": 12
+            },
+            {
+              "id": "pending-reconciliation",
+              "panels": [
+                {
+                  "id": "pendingModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 640,
+                  "height": 234,
+                  "right": 680,
+                  "bottom": 488.796875,
+                  "scrollWidth": 638,
+                  "clientWidth": 638
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "bank-statement-process",
+              "panels": [
+                {
+                  "id": "bankStatementModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 640,
+                  "height": 300,
+                  "right": 680,
+                  "bottom": 554.796875,
+                  "scrollWidth": 638,
+                  "clientWidth": 638
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "pre-fund-reconciliation",
+              "panels": [
+                {
+                  "id": "preFundReconciliationModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 640,
+                  "height": 300,
+                  "right": 680,
+                  "bottom": 554.796875,
+                  "scrollWidth": 638,
+                  "clientWidth": 638
+                }
+              ],
+              "minControlFontPx": 13
+            },
+            {
+              "id": "duplicate-inbound-match",
+              "panels": [
+                {
+                  "id": "duplicateInboundMatchModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 640,
+                  "height": 234,
+                  "right": 680,
+                  "bottom": 488.796875,
+                  "scrollWidth": 638,
+                  "clientWidth": 638
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "position-reconciliation-process",
+              "panels": [
+                {
+                  "id": "positionReconciliationModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 640,
+                  "height": 366,
+                  "right": 680,
+                  "bottom": 620.796875,
+                  "scrollWidth": 638,
+                  "clientWidth": 638
+                }
+              ],
+              "minControlFontPx": 13
+            },
+            {
+              "id": "recon-id-fix",
+              "panels": [
+                {
+                  "id": "reconIdFixModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 640,
+                  "height": 366,
+                  "right": 680,
+                  "bottom": 620.796875,
+                  "scrollWidth": 638,
+                  "clientWidth": 638
+                }
+              ],
+              "minControlFontPx": 13
+            },
+            {
+              "id": "bank-bu-recon",
+              "panels": [
+                {
+                  "id": "bankBuReconModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 640,
+                  "height": 234,
+                  "right": 680,
+                  "bottom": 488.796875,
+                  "scrollWidth": 638,
+                  "clientWidth": 638
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "biz-op-recon",
+              "panels": [
+                {
+                  "id": "bizOpV327ModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 640,
+                  "height": 234,
+                  "right": 680,
+                  "bottom": 488.796875,
+                  "scrollWidth": 638,
+                  "clientWidth": 638
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "acquiring-bill-currency",
+              "panels": [
+                {
+                  "id": "acquiringBillCurrencyModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 640,
+                  "height": 234,
+                  "right": 680,
+                  "bottom": 488.796875,
+                  "scrollWidth": 638,
+                  "clientWidth": 638
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "vcc-op-calc",
+              "panels": [
+                {
+                  "id": "vccOpCalcModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 640,
+                  "height": 234,
+                  "right": 680,
+                  "bottom": 488.796875,
+                  "scrollWidth": 638,
+                  "clientWidth": 638
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "vcc-financial-op",
+              "panels": [
+                {
+                  "id": "vccFinancialOpModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 640,
+                  "height": 234,
+                  "right": 680,
+                  "bottom": 488.796875,
+                  "scrollWidth": 638,
+                  "clientWidth": 638
+                }
+              ],
+              "minControlFontPx": 14
+            }
+          ],
+          "palette": {
+            "--bg": "rgb(17, 20, 25)",
+            "--bg-soft": "rgb(26, 30, 37)",
+            "--panel": "rgb(28, 32, 39)",
+            "--text": "rgb(230, 234, 241)",
+            "--muted": "rgb(166, 175, 191)",
+            "--input": "rgb(25, 29, 36)",
+            "--primary": "rgb(173, 200, 255)",
+            "--on-primary": "rgb(18, 44, 86)",
+            "--danger": "rgb(255, 173, 181)",
+            "--danger-soft": "rgb(54, 37, 44)",
+            "--success": "rgb(145, 214, 174)",
+            "--success-soft": "rgb(32, 52, 42)",
+            "--warning": "rgb(230, 193, 126)",
+            "--warning-soft": "rgb(51, 45, 34)"
+          },
+          "contrastPairs": [
+            {
+              "foreground": "--text",
+              "background": "--panel",
+              "ratio": 13.540976153124122
+            },
+            {
+              "foreground": "--muted",
+              "background": "--panel",
+              "ratio": 7.395843045473951
+            },
+            {
+              "foreground": "--text",
+              "background": "--input",
+              "ratio": 14.006537836840549
+            },
+            {
+              "foreground": "--on-primary",
+              "background": "--primary",
+              "ratio": 8.210212683191976
+            },
+            {
+              "foreground": "--danger",
+              "background": "--danger-soft",
+              "ratio": 8.160414141923559
+            },
+            {
+              "foreground": "--success",
+              "background": "--success-soft",
+              "ratio": 7.839482284110777
+            },
+            {
+              "foreground": "--warning",
+              "background": "--warning-soft",
+              "ratio": 7.987097147233194
+            }
+          ],
+          "probes": [
+            {
+              "name": "status-error",
+              "color": "rgb(255, 173, 181)",
+              "background": "rgb(54, 37, 44)"
+            },
+            {
+              "name": "status-success",
+              "color": "rgb(145, 214, 174)",
+              "background": "rgb(32, 52, 42)"
+            },
+            {
+              "name": "status-warning",
+              "color": "rgb(230, 193, 126)",
+              "background": "rgb(51, 45, 34)"
+            },
+            {
+              "name": "account-table",
+              "color": "rgb(166, 175, 191)",
+              "background": "rgba(0, 0, 0, 0)"
+            },
+            {
+              "name": "vcc-panel",
+              "color": "rgb(230, 234, 241)",
+              "background": "rgb(28, 32, 39)"
+            },
+            {
+              "name": "vcc-header",
+              "color": "rgb(230, 234, 241)",
+              "background": "rgb(26, 30, 37)"
+            },
+            {
+              "name": "vcc-difference",
+              "color": "rgb(255, 173, 181)",
+              "background": "rgb(54, 37, 44)"
+            }
+          ],
+          "interactionProbes": {
+            "paletteAction": {
+              "color": "rgb(18, 44, 86)",
+              "background": "rgb(173, 200, 255)",
+              "contrast": 8.210212683191976
+            },
+            "timeInputFocus": {
+              "active": true,
+              "focusVisible": true,
+              "outlineStyle": "solid",
+              "outlineWidth": "2px",
+              "outlineColor": "rgb(173, 200, 255)"
+            }
+          },
+          "layout": {
+            "card": {
+              "x": 28,
+              "y": 28,
+              "width": 664,
+              "height": 450.66668701171875,
+              "right": 692,
+              "bottom": 478.66668701171875
+            },
+            "start": {
+              "x": 183,
+              "y": 331.26043701171875,
+              "width": 219,
+              "height": 44,
+              "right": 402,
+              "bottom": 375.26043701171875
+            },
+            "end": {
+              "x": 448,
+              "y": 331.26043701171875,
+              "width": 219,
+              "height": 44,
+              "right": 667,
+              "bottom": 375.26043701171875
+            },
+            "statusFontPx": "13px"
+          },
+          "viewport": {
+            "width": 720,
+            "height": 506,
+            "dpr": 1.5,
+            "screenWidth": 1080,
+            "screenHeight": 760
+          },
+          "capture": {
+            "file": "ui-1080x760-100-webzoom-150-dark.png",
+            "pixels": {
+              "width": 2160,
+              "height": 1520
+            }
+          }
+        }
+      ],
+      "sourceHashes": {
+        "index.html": "fd528ab0bb9f57b0c4aa8796200cf62160bdd954fc5ca3c0210184a7e4f505fd",
+        "scripts/verify-dark-mode-ui.js": "60347f069efa73303cede3a7949ba5d399d3b23a65c29eab4bd5a427135821e0",
+        "src/shared/dark-mode-schedule.js": "3c06d66e5d3f8946cabe7b48fac620bf276cddd6dba4cdcc1952cf37527a25d5",
+        "src/renderer-dark-mode.js": "e094a1a32e89a498f50e7904c292e8a21577da4044e32f97df0c932f676486ff",
+        "src/fonts.css": "1b2c6c70fdf7114b04c025808cd17bcb3033682789fac66bc3a15426dacd5dfb",
+        "src/styles-gemini.css": "5ec94ce0d82d61cca953c44ea3dd782179de6c6f3de858907a064520e88789bf",
+        "src/styles-gemini-extra.css": "1ee92c7b4254ab7e4f972bf45ec2b63637dcc53108e0838ed9ee499b8b67b227",
+        "src/styles-vcc-financial-op.css": "2af63c8ac21fdad16c9f9916f58dca84f0f7f815ba93c6fd271e2c0a0a0a294b",
+        "src/styles-biz-op-v327.css": "7b7a9e3453f7c4aaad6933bf1d7293c31c1f72fe04cee15302cdf0ace89ddfa4",
+        "src/styles-dark-mode.css": "b45a9dead620b079da2b0024ef7f4a61b3a03f9a645477237b2335c2c02bee1b",
+        "src/styles-dark-mode-settings.css": "6c471e6ab6204bf6e048e2e0e6f03da1cf942cbdef6472548f506f68718a914e",
+        "src/shared/payment-big-accounts.js": "47d42b87195ad93a42cafcc43fc7faf26b64b868c4969b1aff1b96d9c1c197e7",
+        "src/shared/vcc-financial-op-difference.js": "6cd8d498514d99aa8fc0ac2675778378d46a1a98eecd3ba3a4ad8ce6bcb73f76",
+        "src/renderer-dialogs.js": "ececd7914f5e729628481fd45ab43827cfe3ccd81d99af198a74bbc4b3ea5eda",
+        "src/renderer-previews.js": "4fbfbdb4151e7e19e9fe9f2548dea299b8c7d0249c84f603aa5e2b3b1ba026fd",
+        "src/renderer-pending.js": "4c7b8e8189119e22380a17b769543ba9a1db0ab172000e62b2c9fec3041159d9",
+        "src/renderer-position-reconciliation.js": "e077ba51ffdae1c4a667a1150d97ee4a023017986987dd35b545157f26d68e4e",
+        "src/renderer-vcc-financial-op.js": "272712ea5b617f5a1c6f480a213d79156fce7a004b86c16ec6a432ee4a78196c",
+        "src/renderer-biz-op-v327.js": "2d676a2579c8740b83e58e6c4578485fe99f98f8708ada60c96afe0c134016d6",
+        "src/renderer.js": "dd605cecfbe52f950afa7638d4163b7cd1ccba823ee8a6a359f37250711b2b5c"
+      },
+      "rendering": {
+        "mode": "hidden-window-device-emulation",
+        "focusMode": "CDP document-focus emulation + DOM.focus; no OS focus or Tab traversal",
+        "viewportAtZoom100": {
+          "width": 1080,
+          "height": 760
+        },
+        "requestedDeviceScale": 1,
+        "webZoom": 1.5,
+        "bounds": {
+          "x": 324,
+          "y": 123,
+          "width": 1080,
+          "height": 760
+        },
+        "contentBounds": {
+          "x": 324,
+          "y": 123,
+          "width": 1080,
+          "height": 760
+        },
+        "platform": "darwin",
+        "electron": "36.9.5"
+      },
+      "isolation": {
+        "realMainLoaded": false,
+        "realBusinessApi": false,
+        "realRendererLoaded": true,
+        "realCssLoaded": true,
+        "initializer": "只有 initialize() 自动调用被停用；真实组件函数、主题 bootstrap、控制器与 CSS 全部加载",
+        "userData": "临时目录，结束清理",
+        "documents": "临时目录，结束清理"
+      }
+    },
+    {
+      "config": {
+        "width": 1240,
+        "height": 860,
+        "scale": 1,
+        "webZoom": 1.5,
+        "behavior": true
+      },
+      "ok": true,
+      "results": [
+        {
+          "theme": "light",
+          "ok": true,
+          "assertions": 78,
+          "failures": [],
+          "behavior": [],
+          "modules": [
+            {
+              "id": "statement-generator",
+              "panels": [
+                {
+                  "id": "statementModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 746.6666870117188,
+                  "height": 172,
+                  "right": 786.6666870117188,
+                  "bottom": 426.796875,
+                  "scrollWidth": 745,
+                  "clientWidth": 745
+                }
+              ],
+              "minControlFontPx": 13
+            },
+            {
+              "id": "new-account-generator",
+              "panels": [
+                {
+                  "id": "newAccountModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 746.6666870117188,
+                  "height": 240,
+                  "right": 786.6666870117188,
+                  "bottom": 494.796875,
+                  "scrollWidth": 745,
+                  "clientWidth": 745
+                }
+              ],
+              "minControlFontPx": 12
+            },
+            {
+              "id": "pending-reconciliation",
+              "panels": [
+                {
+                  "id": "pendingModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 746.6666870117188,
+                  "height": 234,
+                  "right": 786.6666870117188,
+                  "bottom": 488.796875,
+                  "scrollWidth": 745,
+                  "clientWidth": 745
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "bank-statement-process",
+              "panels": [
+                {
+                  "id": "bankStatementModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 746.6666870117188,
+                  "height": 300,
+                  "right": 786.6666870117188,
+                  "bottom": 554.796875,
+                  "scrollWidth": 745,
+                  "clientWidth": 745
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "pre-fund-reconciliation",
+              "panels": [
+                {
+                  "id": "preFundReconciliationModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 746.6666870117188,
+                  "height": 300,
+                  "right": 786.6666870117188,
+                  "bottom": 554.796875,
+                  "scrollWidth": 745,
+                  "clientWidth": 745
+                }
+              ],
+              "minControlFontPx": 13
+            },
+            {
+              "id": "duplicate-inbound-match",
+              "panels": [
+                {
+                  "id": "duplicateInboundMatchModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 746.6666870117188,
+                  "height": 234,
+                  "right": 786.6666870117188,
+                  "bottom": 488.796875,
+                  "scrollWidth": 745,
+                  "clientWidth": 745
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "position-reconciliation-process",
+              "panels": [
+                {
+                  "id": "positionReconciliationModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 746.6666870117188,
+                  "height": 366,
+                  "right": 786.6666870117188,
+                  "bottom": 620.796875,
+                  "scrollWidth": 745,
+                  "clientWidth": 745
+                }
+              ],
+              "minControlFontPx": 13
+            },
+            {
+              "id": "recon-id-fix",
+              "panels": [
+                {
+                  "id": "reconIdFixModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 746.6666870117188,
+                  "height": 366,
+                  "right": 786.6666870117188,
+                  "bottom": 620.796875,
+                  "scrollWidth": 745,
+                  "clientWidth": 745
+                }
+              ],
+              "minControlFontPx": 13
+            },
+            {
+              "id": "bank-bu-recon",
+              "panels": [
+                {
+                  "id": "bankBuReconModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 746.6666870117188,
+                  "height": 234,
+                  "right": 786.6666870117188,
+                  "bottom": 488.796875,
+                  "scrollWidth": 745,
+                  "clientWidth": 745
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "biz-op-recon",
+              "panels": [
+                {
+                  "id": "bizOpV327ModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 746.6666870117188,
+                  "height": 234,
+                  "right": 786.6666870117188,
+                  "bottom": 488.796875,
+                  "scrollWidth": 745,
+                  "clientWidth": 745
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "acquiring-bill-currency",
+              "panels": [
+                {
+                  "id": "acquiringBillCurrencyModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 746.6666870117188,
+                  "height": 234,
+                  "right": 786.6666870117188,
+                  "bottom": 488.796875,
+                  "scrollWidth": 745,
+                  "clientWidth": 745
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "vcc-op-calc",
+              "panels": [
+                {
+                  "id": "vccOpCalcModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 746.6666870117188,
+                  "height": 234,
+                  "right": 786.6666870117188,
+                  "bottom": 488.796875,
+                  "scrollWidth": 745,
+                  "clientWidth": 745
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "vcc-financial-op",
+              "panels": [
+                {
+                  "id": "vccFinancialOpModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 746.6666870117188,
+                  "height": 234,
+                  "right": 786.6666870117188,
+                  "bottom": 488.796875,
+                  "scrollWidth": 745,
+                  "clientWidth": 745
+                }
+              ],
+              "minControlFontPx": 14
+            }
+          ],
+          "palette": {
+            "--bg": "rgb(249, 250, 252)",
+            "--bg-soft": "rgb(241, 244, 249)",
+            "--panel": "rgb(255, 255, 255)",
+            "--text": "rgb(32, 39, 53)",
+            "--muted": "rgb(91, 103, 121)",
+            "--input": "rgb(255, 255, 255)",
+            "--primary": "rgb(11, 87, 208)",
+            "--on-primary": "rgb(255, 255, 255)",
+            "--danger": "rgb(184, 45, 58)",
+            "--danger-soft": "rgb(255, 240, 240)",
+            "--success": "rgb(32, 115, 66)",
+            "--success-soft": "rgb(234, 246, 239)",
+            "--warning": "rgb(148, 96, 0)",
+            "--warning-soft": "rgb(255, 247, 230)"
+          },
+          "contrastPairs": [
+            {
+              "foreground": "--text",
+              "background": "--panel",
+              "ratio": 14.967593795110997
+            },
+            {
+              "foreground": "--muted",
+              "background": "--panel",
+              "ratio": 5.736100584579226
+            },
+            {
+              "foreground": "--text",
+              "background": "--input",
+              "ratio": 14.967593795110997
+            },
+            {
+              "foreground": "--on-primary",
+              "background": "--primary",
+              "ratio": 6.386238271761161
+            },
+            {
+              "foreground": "--danger",
+              "background": "--danger-soft",
+              "ratio": 5.4609790759362
+            },
+            {
+              "foreground": "--success",
+              "background": "--success-soft",
+              "ratio": 5.268707695724642
+            },
+            {
+              "foreground": "--warning",
+              "background": "--warning-soft",
+              "ratio": 5.0094850036354455
+            }
+          ],
+          "probes": [
+            {
+              "name": "status-error",
+              "color": "rgb(184, 45, 58)",
+              "background": "rgb(255, 240, 240)"
+            },
+            {
+              "name": "status-success",
+              "color": "rgb(32, 115, 66)",
+              "background": "rgb(234, 246, 239)"
+            },
+            {
+              "name": "status-warning",
+              "color": "rgb(91, 103, 121)",
+              "background": "rgb(241, 244, 249)"
+            },
+            {
+              "name": "account-table",
+              "color": "rgb(91, 103, 121)",
+              "background": "rgba(0, 0, 0, 0)"
+            },
+            {
+              "name": "vcc-panel",
+              "color": "rgb(32, 39, 53)",
+              "background": "rgb(255, 255, 255)"
+            },
+            {
+              "name": "vcc-header",
+              "color": "rgb(32, 39, 53)",
+              "background": "rgb(241, 244, 249)"
+            },
+            {
+              "name": "vcc-difference",
+              "color": "rgb(184, 45, 58)",
+              "background": "rgb(255, 240, 240)"
+            }
+          ],
+          "interactionProbes": {
+            "paletteAction": {
+              "color": "rgb(255, 255, 255)",
+              "background": "rgb(11, 87, 208)",
+              "contrast": 6.386238271761161
+            },
+            "timeInputFocus": {
+              "active": true,
+              "focusVisible": true,
+              "outlineStyle": "solid",
+              "outlineWidth": "2px",
+              "outlineColor": "rgb(11, 87, 208)"
+            }
+          },
+          "layout": {
+            "card": {
+              "x": 28,
+              "y": 28,
+              "width": 770.6666870117188,
+              "height": 517.3333740234375,
+              "right": 798.6666870117188,
+              "bottom": 545.3333740234375
+            },
+            "start": {
+              "x": 217,
+              "y": 331.26043701171875,
+              "width": 255.33334350585938,
+              "height": 44,
+              "right": 472.3333435058594,
+              "bottom": 375.26043701171875
+            },
+            "end": {
+              "x": 518.3333740234375,
+              "y": 331.26043701171875,
+              "width": 255.33334350585938,
+              "height": 44,
+              "right": 773.6667175292969,
+              "bottom": 375.26043701171875
+            },
+            "statusFontPx": "13px"
+          },
+          "viewport": {
+            "width": 826,
+            "height": 573,
+            "dpr": 1.5,
+            "screenWidth": 1240,
+            "screenHeight": 860
+          },
+          "capture": {
+            "file": "ui-1240x860-100-webzoom-150-light.png",
+            "pixels": {
+              "width": 2480,
+              "height": 1720
+            }
+          }
+        },
+        {
+          "theme": "dark",
+          "ok": true,
+          "assertions": 94,
+          "failures": [],
+          "behavior": [
+            "开关真实 DOM change → controller → 模拟 IPC → 主题/状态",
+            "失败保留 / 等时拒绝 / 时段保存与禁用保留",
+            "图片背景草稿 / 日夜遮罩 / 取消 / 无背景写入"
+          ],
+          "modules": [
+            {
+              "id": "statement-generator",
+              "panels": [
+                {
+                  "id": "statementModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 746.6666870117188,
+                  "height": 172,
+                  "right": 786.6666870117188,
+                  "bottom": 426.796875,
+                  "scrollWidth": 745,
+                  "clientWidth": 745
+                }
+              ],
+              "minControlFontPx": 13
+            },
+            {
+              "id": "new-account-generator",
+              "panels": [
+                {
+                  "id": "newAccountModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 746.6666870117188,
+                  "height": 240,
+                  "right": 786.6666870117188,
+                  "bottom": 494.796875,
+                  "scrollWidth": 745,
+                  "clientWidth": 745
+                }
+              ],
+              "minControlFontPx": 12
+            },
+            {
+              "id": "pending-reconciliation",
+              "panels": [
+                {
+                  "id": "pendingModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 746.6666870117188,
+                  "height": 234,
+                  "right": 786.6666870117188,
+                  "bottom": 488.796875,
+                  "scrollWidth": 745,
+                  "clientWidth": 745
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "bank-statement-process",
+              "panels": [
+                {
+                  "id": "bankStatementModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 746.6666870117188,
+                  "height": 300,
+                  "right": 786.6666870117188,
+                  "bottom": 554.796875,
+                  "scrollWidth": 745,
+                  "clientWidth": 745
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "pre-fund-reconciliation",
+              "panels": [
+                {
+                  "id": "preFundReconciliationModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 746.6666870117188,
+                  "height": 300,
+                  "right": 786.6666870117188,
+                  "bottom": 554.796875,
+                  "scrollWidth": 745,
+                  "clientWidth": 745
+                }
+              ],
+              "minControlFontPx": 13
+            },
+            {
+              "id": "duplicate-inbound-match",
+              "panels": [
+                {
+                  "id": "duplicateInboundMatchModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 746.6666870117188,
+                  "height": 234,
+                  "right": 786.6666870117188,
+                  "bottom": 488.796875,
+                  "scrollWidth": 745,
+                  "clientWidth": 745
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "position-reconciliation-process",
+              "panels": [
+                {
+                  "id": "positionReconciliationModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 746.6666870117188,
+                  "height": 366,
+                  "right": 786.6666870117188,
+                  "bottom": 620.796875,
+                  "scrollWidth": 745,
+                  "clientWidth": 745
+                }
+              ],
+              "minControlFontPx": 13
+            },
+            {
+              "id": "recon-id-fix",
+              "panels": [
+                {
+                  "id": "reconIdFixModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 746.6666870117188,
+                  "height": 366,
+                  "right": 786.6666870117188,
+                  "bottom": 620.796875,
+                  "scrollWidth": 745,
+                  "clientWidth": 745
+                }
+              ],
+              "minControlFontPx": 13
+            },
+            {
+              "id": "bank-bu-recon",
+              "panels": [
+                {
+                  "id": "bankBuReconModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 746.6666870117188,
+                  "height": 234,
+                  "right": 786.6666870117188,
+                  "bottom": 488.796875,
+                  "scrollWidth": 745,
+                  "clientWidth": 745
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "biz-op-recon",
+              "panels": [
+                {
+                  "id": "bizOpV327ModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 746.6666870117188,
+                  "height": 234,
+                  "right": 786.6666870117188,
+                  "bottom": 488.796875,
+                  "scrollWidth": 745,
+                  "clientWidth": 745
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "acquiring-bill-currency",
+              "panels": [
+                {
+                  "id": "acquiringBillCurrencyModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 746.6666870117188,
+                  "height": 234,
+                  "right": 786.6666870117188,
+                  "bottom": 488.796875,
+                  "scrollWidth": 745,
+                  "clientWidth": 745
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "vcc-op-calc",
+              "panels": [
+                {
+                  "id": "vccOpCalcModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 746.6666870117188,
+                  "height": 234,
+                  "right": 786.6666870117188,
+                  "bottom": 488.796875,
+                  "scrollWidth": 745,
+                  "clientWidth": 745
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "vcc-financial-op",
+              "panels": [
+                {
+                  "id": "vccFinancialOpModulePanel",
+                  "x": 40,
+                  "y": 254.796875,
+                  "width": 746.6666870117188,
+                  "height": 234,
+                  "right": 786.6666870117188,
+                  "bottom": 488.796875,
+                  "scrollWidth": 745,
+                  "clientWidth": 745
+                }
+              ],
+              "minControlFontPx": 14
+            }
+          ],
+          "palette": {
+            "--bg": "rgb(17, 20, 25)",
+            "--bg-soft": "rgb(26, 30, 37)",
+            "--panel": "rgb(28, 32, 39)",
+            "--text": "rgb(230, 234, 241)",
+            "--muted": "rgb(166, 175, 191)",
+            "--input": "rgb(25, 29, 36)",
+            "--primary": "rgb(173, 200, 255)",
+            "--on-primary": "rgb(18, 44, 86)",
+            "--danger": "rgb(255, 173, 181)",
+            "--danger-soft": "rgb(54, 37, 44)",
+            "--success": "rgb(145, 214, 174)",
+            "--success-soft": "rgb(32, 52, 42)",
+            "--warning": "rgb(230, 193, 126)",
+            "--warning-soft": "rgb(51, 45, 34)"
+          },
+          "contrastPairs": [
+            {
+              "foreground": "--text",
+              "background": "--panel",
+              "ratio": 13.540976153124122
+            },
+            {
+              "foreground": "--muted",
+              "background": "--panel",
+              "ratio": 7.395843045473951
+            },
+            {
+              "foreground": "--text",
+              "background": "--input",
+              "ratio": 14.006537836840549
+            },
+            {
+              "foreground": "--on-primary",
+              "background": "--primary",
+              "ratio": 8.210212683191976
+            },
+            {
+              "foreground": "--danger",
+              "background": "--danger-soft",
+              "ratio": 8.160414141923559
+            },
+            {
+              "foreground": "--success",
+              "background": "--success-soft",
+              "ratio": 7.839482284110777
+            },
+            {
+              "foreground": "--warning",
+              "background": "--warning-soft",
+              "ratio": 7.987097147233194
+            }
+          ],
+          "probes": [
+            {
+              "name": "status-error",
+              "color": "rgb(255, 173, 181)",
+              "background": "rgb(54, 37, 44)"
+            },
+            {
+              "name": "status-success",
+              "color": "rgb(145, 214, 174)",
+              "background": "rgb(32, 52, 42)"
+            },
+            {
+              "name": "status-warning",
+              "color": "rgb(230, 193, 126)",
+              "background": "rgb(51, 45, 34)"
+            },
+            {
+              "name": "account-table",
+              "color": "rgb(166, 175, 191)",
+              "background": "rgba(0, 0, 0, 0)"
+            },
+            {
+              "name": "vcc-panel",
+              "color": "rgb(230, 234, 241)",
+              "background": "rgb(28, 32, 39)"
+            },
+            {
+              "name": "vcc-header",
+              "color": "rgb(230, 234, 241)",
+              "background": "rgb(26, 30, 37)"
+            },
+            {
+              "name": "vcc-difference",
+              "color": "rgb(255, 173, 181)",
+              "background": "rgb(54, 37, 44)"
+            }
+          ],
+          "interactionProbes": {
+            "paletteAction": {
+              "color": "rgb(18, 44, 86)",
+              "background": "rgb(173, 200, 255)",
+              "contrast": 8.210212683191976
+            },
+            "timeInputFocus": {
+              "active": true,
+              "focusVisible": true,
+              "outlineStyle": "solid",
+              "outlineWidth": "2px",
+              "outlineColor": "rgb(173, 200, 255)"
+            }
+          },
+          "layout": {
+            "card": {
+              "x": 28,
+              "y": 28,
+              "width": 770.6666870117188,
+              "height": 517.3333740234375,
+              "right": 798.6666870117188,
+              "bottom": 545.3333740234375
+            },
+            "start": {
+              "x": 217,
+              "y": 331.26043701171875,
+              "width": 255.33334350585938,
+              "height": 44,
+              "right": 472.3333435058594,
+              "bottom": 375.26043701171875
+            },
+            "end": {
+              "x": 518.3333740234375,
+              "y": 331.26043701171875,
+              "width": 255.33334350585938,
+              "height": 44,
+              "right": 773.6667175292969,
+              "bottom": 375.26043701171875
+            },
+            "statusFontPx": "13px"
+          },
+          "viewport": {
+            "width": 826,
+            "height": 573,
+            "dpr": 1.5,
+            "screenWidth": 1240,
+            "screenHeight": 860
+          },
+          "capture": {
+            "file": "ui-1240x860-100-webzoom-150-dark.png",
+            "pixels": {
+              "width": 2480,
+              "height": 1720
+            }
+          }
+        }
+      ],
+      "sourceHashes": {
+        "index.html": "fd528ab0bb9f57b0c4aa8796200cf62160bdd954fc5ca3c0210184a7e4f505fd",
+        "scripts/verify-dark-mode-ui.js": "60347f069efa73303cede3a7949ba5d399d3b23a65c29eab4bd5a427135821e0",
+        "src/shared/dark-mode-schedule.js": "3c06d66e5d3f8946cabe7b48fac620bf276cddd6dba4cdcc1952cf37527a25d5",
+        "src/renderer-dark-mode.js": "e094a1a32e89a498f50e7904c292e8a21577da4044e32f97df0c932f676486ff",
+        "src/fonts.css": "1b2c6c70fdf7114b04c025808cd17bcb3033682789fac66bc3a15426dacd5dfb",
+        "src/styles-gemini.css": "5ec94ce0d82d61cca953c44ea3dd782179de6c6f3de858907a064520e88789bf",
+        "src/styles-gemini-extra.css": "1ee92c7b4254ab7e4f972bf45ec2b63637dcc53108e0838ed9ee499b8b67b227",
+        "src/styles-vcc-financial-op.css": "2af63c8ac21fdad16c9f9916f58dca84f0f7f815ba93c6fd271e2c0a0a0a294b",
+        "src/styles-biz-op-v327.css": "7b7a9e3453f7c4aaad6933bf1d7293c31c1f72fe04cee15302cdf0ace89ddfa4",
+        "src/styles-dark-mode.css": "b45a9dead620b079da2b0024ef7f4a61b3a03f9a645477237b2335c2c02bee1b",
+        "src/styles-dark-mode-settings.css": "6c471e6ab6204bf6e048e2e0e6f03da1cf942cbdef6472548f506f68718a914e",
+        "src/shared/payment-big-accounts.js": "47d42b87195ad93a42cafcc43fc7faf26b64b868c4969b1aff1b96d9c1c197e7",
+        "src/shared/vcc-financial-op-difference.js": "6cd8d498514d99aa8fc0ac2675778378d46a1a98eecd3ba3a4ad8ce6bcb73f76",
+        "src/renderer-dialogs.js": "ececd7914f5e729628481fd45ab43827cfe3ccd81d99af198a74bbc4b3ea5eda",
+        "src/renderer-previews.js": "4fbfbdb4151e7e19e9fe9f2548dea299b8c7d0249c84f603aa5e2b3b1ba026fd",
+        "src/renderer-pending.js": "4c7b8e8189119e22380a17b769543ba9a1db0ab172000e62b2c9fec3041159d9",
+        "src/renderer-position-reconciliation.js": "e077ba51ffdae1c4a667a1150d97ee4a023017986987dd35b545157f26d68e4e",
+        "src/renderer-vcc-financial-op.js": "272712ea5b617f5a1c6f480a213d79156fce7a004b86c16ec6a432ee4a78196c",
+        "src/renderer-biz-op-v327.js": "2d676a2579c8740b83e58e6c4578485fe99f98f8708ada60c96afe0c134016d6",
+        "src/renderer.js": "dd605cecfbe52f950afa7638d4163b7cd1ccba823ee8a6a359f37250711b2b5c"
+      },
+      "rendering": {
+        "mode": "hidden-window-device-emulation",
+        "focusMode": "CDP document-focus emulation + DOM.focus; no OS focus or Tab traversal",
+        "viewportAtZoom100": {
+          "width": 1240,
+          "height": 860
+        },
+        "requestedDeviceScale": 1,
+        "webZoom": 1.5,
+        "bounds": {
+          "x": 244,
+          "y": 73,
+          "width": 1240,
+          "height": 860
+        },
+        "contentBounds": {
+          "x": 244,
+          "y": 73,
+          "width": 1240,
+          "height": 860
+        },
+        "platform": "darwin",
+        "electron": "36.9.5"
+      },
+      "isolation": {
+        "realMainLoaded": false,
+        "realBusinessApi": false,
+        "realRendererLoaded": true,
+        "realCssLoaded": true,
+        "initializer": "只有 initialize() 自动调用被停用；真实组件函数、主题 bootstrap、控制器与 CSS 全部加载",
+        "userData": "临时目录，结束清理",
+        "documents": "临时目录，结束清理"
+      }
+    },
+    {
+      "config": {
+        "width": 2560,
+        "height": 1440,
+        "scale": 1,
+        "webZoom": 1.5,
+        "behavior": true
+      },
+      "ok": true,
+      "results": [
+        {
+          "theme": "light",
+          "ok": true,
+          "assertions": 78,
+          "failures": [],
+          "behavior": [],
+          "modules": [
+            {
+              "id": "statement-generator",
+              "panels": [
+                {
+                  "id": "statementModulePanel",
+                  "x": 413.3333435058594,
+                  "y": 254.796875,
+                  "width": 880,
+                  "height": 172,
+                  "right": 1293.3333435058594,
+                  "bottom": 426.796875,
+                  "scrollWidth": 878,
+                  "clientWidth": 878
+                }
+              ],
+              "minControlFontPx": 13
+            },
+            {
+              "id": "new-account-generator",
+              "panels": [
+                {
+                  "id": "newAccountModulePanel",
+                  "x": 413.3333435058594,
+                  "y": 254.796875,
+                  "width": 880,
+                  "height": 240,
+                  "right": 1293.3333435058594,
+                  "bottom": 494.796875,
+                  "scrollWidth": 878,
+                  "clientWidth": 878
+                }
+              ],
+              "minControlFontPx": 12
+            },
+            {
+              "id": "pending-reconciliation",
+              "panels": [
+                {
+                  "id": "pendingModulePanel",
+                  "x": 413.3333435058594,
+                  "y": 254.796875,
+                  "width": 880,
+                  "height": 234,
+                  "right": 1293.3333435058594,
+                  "bottom": 488.796875,
+                  "scrollWidth": 878,
+                  "clientWidth": 878
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "bank-statement-process",
+              "panels": [
+                {
+                  "id": "bankStatementModulePanel",
+                  "x": 413.3333435058594,
+                  "y": 254.796875,
+                  "width": 880,
+                  "height": 300,
+                  "right": 1293.3333435058594,
+                  "bottom": 554.796875,
+                  "scrollWidth": 878,
+                  "clientWidth": 878
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "pre-fund-reconciliation",
+              "panels": [
+                {
+                  "id": "preFundReconciliationModulePanel",
+                  "x": 413.3333435058594,
+                  "y": 254.796875,
+                  "width": 880,
+                  "height": 300,
+                  "right": 1293.3333435058594,
+                  "bottom": 554.796875,
+                  "scrollWidth": 878,
+                  "clientWidth": 878
+                }
+              ],
+              "minControlFontPx": 13
+            },
+            {
+              "id": "duplicate-inbound-match",
+              "panels": [
+                {
+                  "id": "duplicateInboundMatchModulePanel",
+                  "x": 413.3333435058594,
+                  "y": 254.796875,
+                  "width": 880,
+                  "height": 234,
+                  "right": 1293.3333435058594,
+                  "bottom": 488.796875,
+                  "scrollWidth": 878,
+                  "clientWidth": 878
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "position-reconciliation-process",
+              "panels": [
+                {
+                  "id": "positionReconciliationModulePanel",
+                  "x": 413.3333435058594,
+                  "y": 254.796875,
+                  "width": 880,
+                  "height": 234,
+                  "right": 1293.3333435058594,
+                  "bottom": 488.796875,
+                  "scrollWidth": 878,
+                  "clientWidth": 878
+                }
+              ],
+              "minControlFontPx": 13
+            },
+            {
+              "id": "recon-id-fix",
+              "panels": [
+                {
+                  "id": "reconIdFixModulePanel",
+                  "x": 413.3333435058594,
+                  "y": 254.796875,
+                  "width": 880,
+                  "height": 234,
+                  "right": 1293.3333435058594,
+                  "bottom": 488.796875,
+                  "scrollWidth": 878,
+                  "clientWidth": 878
+                }
+              ],
+              "minControlFontPx": 13
+            },
+            {
+              "id": "bank-bu-recon",
+              "panels": [
+                {
+                  "id": "bankBuReconModulePanel",
+                  "x": 413.3333435058594,
+                  "y": 254.796875,
+                  "width": 880,
+                  "height": 234,
+                  "right": 1293.3333435058594,
+                  "bottom": 488.796875,
+                  "scrollWidth": 878,
+                  "clientWidth": 878
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "biz-op-recon",
+              "panels": [
+                {
+                  "id": "bizOpV327ModulePanel",
+                  "x": 413.3333435058594,
+                  "y": 254.796875,
+                  "width": 880,
+                  "height": 234,
+                  "right": 1293.3333435058594,
+                  "bottom": 488.796875,
+                  "scrollWidth": 878,
+                  "clientWidth": 878
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "acquiring-bill-currency",
+              "panels": [
+                {
+                  "id": "acquiringBillCurrencyModulePanel",
+                  "x": 413.3333435058594,
+                  "y": 254.796875,
+                  "width": 880,
+                  "height": 234,
+                  "right": 1293.3333435058594,
+                  "bottom": 488.796875,
+                  "scrollWidth": 878,
+                  "clientWidth": 878
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "vcc-op-calc",
+              "panels": [
+                {
+                  "id": "vccOpCalcModulePanel",
+                  "x": 413.3333435058594,
+                  "y": 254.796875,
+                  "width": 880,
+                  "height": 234,
+                  "right": 1293.3333435058594,
+                  "bottom": 488.796875,
+                  "scrollWidth": 878,
+                  "clientWidth": 878
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "vcc-financial-op",
+              "panels": [
+                {
+                  "id": "vccFinancialOpModulePanel",
+                  "x": 413.3333435058594,
+                  "y": 254.796875,
+                  "width": 880,
+                  "height": 234,
+                  "right": 1293.3333435058594,
+                  "bottom": 488.796875,
+                  "scrollWidth": 878,
+                  "clientWidth": 878
+                }
+              ],
+              "minControlFontPx": 14
+            }
+          ],
+          "palette": {
+            "--bg": "rgb(249, 250, 252)",
+            "--bg-soft": "rgb(241, 244, 249)",
+            "--panel": "rgb(255, 255, 255)",
+            "--text": "rgb(32, 39, 53)",
+            "--muted": "rgb(91, 103, 121)",
+            "--input": "rgb(255, 255, 255)",
+            "--primary": "rgb(11, 87, 208)",
+            "--on-primary": "rgb(255, 255, 255)",
+            "--danger": "rgb(184, 45, 58)",
+            "--danger-soft": "rgb(255, 240, 240)",
+            "--success": "rgb(32, 115, 66)",
+            "--success-soft": "rgb(234, 246, 239)",
+            "--warning": "rgb(148, 96, 0)",
+            "--warning-soft": "rgb(255, 247, 230)"
+          },
+          "contrastPairs": [
+            {
+              "foreground": "--text",
+              "background": "--panel",
+              "ratio": 14.967593795110997
+            },
+            {
+              "foreground": "--muted",
+              "background": "--panel",
+              "ratio": 5.736100584579226
+            },
+            {
+              "foreground": "--text",
+              "background": "--input",
+              "ratio": 14.967593795110997
+            },
+            {
+              "foreground": "--on-primary",
+              "background": "--primary",
+              "ratio": 6.386238271761161
+            },
+            {
+              "foreground": "--danger",
+              "background": "--danger-soft",
+              "ratio": 5.4609790759362
+            },
+            {
+              "foreground": "--success",
+              "background": "--success-soft",
+              "ratio": 5.268707695724642
+            },
+            {
+              "foreground": "--warning",
+              "background": "--warning-soft",
+              "ratio": 5.0094850036354455
+            }
+          ],
+          "probes": [
+            {
+              "name": "status-error",
+              "color": "rgb(184, 45, 58)",
+              "background": "rgb(255, 240, 240)"
+            },
+            {
+              "name": "status-success",
+              "color": "rgb(32, 115, 66)",
+              "background": "rgb(234, 246, 239)"
+            },
+            {
+              "name": "status-warning",
+              "color": "rgb(91, 103, 121)",
+              "background": "rgb(241, 244, 249)"
+            },
+            {
+              "name": "account-table",
+              "color": "rgb(91, 103, 121)",
+              "background": "rgba(0, 0, 0, 0)"
+            },
+            {
+              "name": "vcc-panel",
+              "color": "rgb(32, 39, 53)",
+              "background": "rgb(255, 255, 255)"
+            },
+            {
+              "name": "vcc-header",
+              "color": "rgb(32, 39, 53)",
+              "background": "rgb(241, 244, 249)"
+            },
+            {
+              "name": "vcc-difference",
+              "color": "rgb(184, 45, 58)",
+              "background": "rgb(255, 240, 240)"
+            }
+          ],
+          "interactionProbes": {
+            "paletteAction": {
+              "color": "rgb(255, 255, 255)",
+              "background": "rgb(11, 87, 208)",
+              "contrast": 6.386238271761161
+            },
+            "timeInputFocus": {
+              "active": true,
+              "focusVisible": true,
+              "outlineStyle": "solid",
+              "outlineWidth": "2px",
+              "outlineColor": "rgb(11, 87, 208)"
+            }
+          },
+          "layout": {
+            "card": {
+              "x": 309.3333435058594,
+              "y": 128,
+              "width": 1088,
+              "height": 704,
+              "right": 1397.3333435058594,
+              "bottom": 832
+            },
+            "start": {
+              "x": 510.3333435058594,
+              "y": 439.26043701171875,
+              "width": 408,
+              "height": 44,
+              "right": 918.3333435058594,
+              "bottom": 483.26043701171875
+            },
+            "end": {
+              "x": 964.3333740234375,
+              "y": 439.26043701171875,
+              "width": 408,
+              "height": 44,
+              "right": 1372.3333740234375,
+              "bottom": 483.26043701171875
+            },
+            "statusFontPx": "13px"
+          },
+          "viewport": {
+            "width": 1706,
+            "height": 960,
+            "dpr": 1.5,
+            "screenWidth": 2560,
+            "screenHeight": 1440
+          },
+          "capture": {
+            "file": "ui-2560x1440-100-webzoom-150-light.png",
+            "pixels": {
+              "width": 5120,
+              "height": 2880
+            }
+          }
+        },
+        {
+          "theme": "dark",
+          "ok": true,
+          "assertions": 94,
+          "failures": [],
+          "behavior": [
+            "开关真实 DOM change → controller → 模拟 IPC → 主题/状态",
+            "失败保留 / 等时拒绝 / 时段保存与禁用保留",
+            "图片背景草稿 / 日夜遮罩 / 取消 / 无背景写入"
+          ],
+          "modules": [
+            {
+              "id": "statement-generator",
+              "panels": [
+                {
+                  "id": "statementModulePanel",
+                  "x": 413.3333435058594,
+                  "y": 254.796875,
+                  "width": 880,
+                  "height": 172,
+                  "right": 1293.3333435058594,
+                  "bottom": 426.796875,
+                  "scrollWidth": 878,
+                  "clientWidth": 878
+                }
+              ],
+              "minControlFontPx": 13
+            },
+            {
+              "id": "new-account-generator",
+              "panels": [
+                {
+                  "id": "newAccountModulePanel",
+                  "x": 413.3333435058594,
+                  "y": 254.796875,
+                  "width": 880,
+                  "height": 240,
+                  "right": 1293.3333435058594,
+                  "bottom": 494.796875,
+                  "scrollWidth": 878,
+                  "clientWidth": 878
+                }
+              ],
+              "minControlFontPx": 12
+            },
+            {
+              "id": "pending-reconciliation",
+              "panels": [
+                {
+                  "id": "pendingModulePanel",
+                  "x": 413.3333435058594,
+                  "y": 254.796875,
+                  "width": 880,
+                  "height": 234,
+                  "right": 1293.3333435058594,
+                  "bottom": 488.796875,
+                  "scrollWidth": 878,
+                  "clientWidth": 878
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "bank-statement-process",
+              "panels": [
+                {
+                  "id": "bankStatementModulePanel",
+                  "x": 413.3333435058594,
+                  "y": 254.796875,
+                  "width": 880,
+                  "height": 300,
+                  "right": 1293.3333435058594,
+                  "bottom": 554.796875,
+                  "scrollWidth": 878,
+                  "clientWidth": 878
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "pre-fund-reconciliation",
+              "panels": [
+                {
+                  "id": "preFundReconciliationModulePanel",
+                  "x": 413.3333435058594,
+                  "y": 254.796875,
+                  "width": 880,
+                  "height": 300,
+                  "right": 1293.3333435058594,
+                  "bottom": 554.796875,
+                  "scrollWidth": 878,
+                  "clientWidth": 878
+                }
+              ],
+              "minControlFontPx": 13
+            },
+            {
+              "id": "duplicate-inbound-match",
+              "panels": [
+                {
+                  "id": "duplicateInboundMatchModulePanel",
+                  "x": 413.3333435058594,
+                  "y": 254.796875,
+                  "width": 880,
+                  "height": 234,
+                  "right": 1293.3333435058594,
+                  "bottom": 488.796875,
+                  "scrollWidth": 878,
+                  "clientWidth": 878
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "position-reconciliation-process",
+              "panels": [
+                {
+                  "id": "positionReconciliationModulePanel",
+                  "x": 413.3333435058594,
+                  "y": 254.796875,
+                  "width": 880,
+                  "height": 234,
+                  "right": 1293.3333435058594,
+                  "bottom": 488.796875,
+                  "scrollWidth": 878,
+                  "clientWidth": 878
+                }
+              ],
+              "minControlFontPx": 13
+            },
+            {
+              "id": "recon-id-fix",
+              "panels": [
+                {
+                  "id": "reconIdFixModulePanel",
+                  "x": 413.3333435058594,
+                  "y": 254.796875,
+                  "width": 880,
+                  "height": 234,
+                  "right": 1293.3333435058594,
+                  "bottom": 488.796875,
+                  "scrollWidth": 878,
+                  "clientWidth": 878
+                }
+              ],
+              "minControlFontPx": 13
+            },
+            {
+              "id": "bank-bu-recon",
+              "panels": [
+                {
+                  "id": "bankBuReconModulePanel",
+                  "x": 413.3333435058594,
+                  "y": 254.796875,
+                  "width": 880,
+                  "height": 234,
+                  "right": 1293.3333435058594,
+                  "bottom": 488.796875,
+                  "scrollWidth": 878,
+                  "clientWidth": 878
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "biz-op-recon",
+              "panels": [
+                {
+                  "id": "bizOpV327ModulePanel",
+                  "x": 413.3333435058594,
+                  "y": 254.796875,
+                  "width": 880,
+                  "height": 234,
+                  "right": 1293.3333435058594,
+                  "bottom": 488.796875,
+                  "scrollWidth": 878,
+                  "clientWidth": 878
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "acquiring-bill-currency",
+              "panels": [
+                {
+                  "id": "acquiringBillCurrencyModulePanel",
+                  "x": 413.3333435058594,
+                  "y": 254.796875,
+                  "width": 880,
+                  "height": 234,
+                  "right": 1293.3333435058594,
+                  "bottom": 488.796875,
+                  "scrollWidth": 878,
+                  "clientWidth": 878
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "vcc-op-calc",
+              "panels": [
+                {
+                  "id": "vccOpCalcModulePanel",
+                  "x": 413.3333435058594,
+                  "y": 254.796875,
+                  "width": 880,
+                  "height": 234,
+                  "right": 1293.3333435058594,
+                  "bottom": 488.796875,
+                  "scrollWidth": 878,
+                  "clientWidth": 878
+                }
+              ],
+              "minControlFontPx": 14
+            },
+            {
+              "id": "vcc-financial-op",
+              "panels": [
+                {
+                  "id": "vccFinancialOpModulePanel",
+                  "x": 413.3333435058594,
+                  "y": 254.796875,
+                  "width": 880,
+                  "height": 234,
+                  "right": 1293.3333435058594,
+                  "bottom": 488.796875,
+                  "scrollWidth": 878,
+                  "clientWidth": 878
+                }
+              ],
+              "minControlFontPx": 14
+            }
+          ],
+          "palette": {
+            "--bg": "rgb(17, 20, 25)",
+            "--bg-soft": "rgb(26, 30, 37)",
+            "--panel": "rgb(28, 32, 39)",
+            "--text": "rgb(230, 234, 241)",
+            "--muted": "rgb(166, 175, 191)",
+            "--input": "rgb(25, 29, 36)",
+            "--primary": "rgb(173, 200, 255)",
+            "--on-primary": "rgb(18, 44, 86)",
+            "--danger": "rgb(255, 173, 181)",
+            "--danger-soft": "rgb(54, 37, 44)",
+            "--success": "rgb(145, 214, 174)",
+            "--success-soft": "rgb(32, 52, 42)",
+            "--warning": "rgb(230, 193, 126)",
+            "--warning-soft": "rgb(51, 45, 34)"
+          },
+          "contrastPairs": [
+            {
+              "foreground": "--text",
+              "background": "--panel",
+              "ratio": 13.540976153124122
+            },
+            {
+              "foreground": "--muted",
+              "background": "--panel",
+              "ratio": 7.395843045473951
+            },
+            {
+              "foreground": "--text",
+              "background": "--input",
+              "ratio": 14.006537836840549
+            },
+            {
+              "foreground": "--on-primary",
+              "background": "--primary",
+              "ratio": 8.210212683191976
+            },
+            {
+              "foreground": "--danger",
+              "background": "--danger-soft",
+              "ratio": 8.160414141923559
+            },
+            {
+              "foreground": "--success",
+              "background": "--success-soft",
+              "ratio": 7.839482284110777
+            },
+            {
+              "foreground": "--warning",
+              "background": "--warning-soft",
+              "ratio": 7.987097147233194
+            }
+          ],
+          "probes": [
+            {
+              "name": "status-error",
+              "color": "rgb(255, 173, 181)",
+              "background": "rgb(54, 37, 44)"
+            },
+            {
+              "name": "status-success",
+              "color": "rgb(145, 214, 174)",
+              "background": "rgb(32, 52, 42)"
+            },
+            {
+              "name": "status-warning",
+              "color": "rgb(230, 193, 126)",
+              "background": "rgb(51, 45, 34)"
+            },
+            {
+              "name": "account-table",
+              "color": "rgb(166, 175, 191)",
+              "background": "rgba(0, 0, 0, 0)"
+            },
+            {
+              "name": "vcc-panel",
+              "color": "rgb(230, 234, 241)",
+              "background": "rgb(28, 32, 39)"
+            },
+            {
+              "name": "vcc-header",
+              "color": "rgb(230, 234, 241)",
+              "background": "rgb(26, 30, 37)"
+            },
+            {
+              "name": "vcc-difference",
+              "color": "rgb(255, 173, 181)",
+              "background": "rgb(54, 37, 44)"
+            }
+          ],
+          "interactionProbes": {
+            "paletteAction": {
+              "color": "rgb(18, 44, 86)",
+              "background": "rgb(173, 200, 255)",
+              "contrast": 8.210212683191976
+            },
+            "timeInputFocus": {
+              "active": true,
+              "focusVisible": true,
+              "outlineStyle": "solid",
+              "outlineWidth": "2px",
+              "outlineColor": "rgb(173, 200, 255)"
+            }
+          },
+          "layout": {
+            "card": {
+              "x": 309.3333435058594,
+              "y": 128,
+              "width": 1088,
+              "height": 704,
+              "right": 1397.3333435058594,
+              "bottom": 832
+            },
+            "start": {
+              "x": 510.3333435058594,
+              "y": 439.26043701171875,
+              "width": 408,
+              "height": 44,
+              "right": 918.3333435058594,
+              "bottom": 483.26043701171875
+            },
+            "end": {
+              "x": 964.3333740234375,
+              "y": 439.26043701171875,
+              "width": 408,
+              "height": 44,
+              "right": 1372.3333740234375,
+              "bottom": 483.26043701171875
+            },
+            "statusFontPx": "13px"
+          },
+          "viewport": {
+            "width": 1706,
+            "height": 960,
+            "dpr": 1.5,
+            "screenWidth": 2560,
+            "screenHeight": 1440
+          },
+          "capture": {
+            "file": "ui-2560x1440-100-webzoom-150-dark.png",
+            "pixels": {
+              "width": 5120,
+              "height": 2880
+            }
+          }
+        }
+      ],
+      "sourceHashes": {
+        "index.html": "fd528ab0bb9f57b0c4aa8796200cf62160bdd954fc5ca3c0210184a7e4f505fd",
+        "scripts/verify-dark-mode-ui.js": "60347f069efa73303cede3a7949ba5d399d3b23a65c29eab4bd5a427135821e0",
+        "src/shared/dark-mode-schedule.js": "3c06d66e5d3f8946cabe7b48fac620bf276cddd6dba4cdcc1952cf37527a25d5",
+        "src/renderer-dark-mode.js": "e094a1a32e89a498f50e7904c292e8a21577da4044e32f97df0c932f676486ff",
+        "src/fonts.css": "1b2c6c70fdf7114b04c025808cd17bcb3033682789fac66bc3a15426dacd5dfb",
+        "src/styles-gemini.css": "5ec94ce0d82d61cca953c44ea3dd782179de6c6f3de858907a064520e88789bf",
+        "src/styles-gemini-extra.css": "1ee92c7b4254ab7e4f972bf45ec2b63637dcc53108e0838ed9ee499b8b67b227",
+        "src/styles-vcc-financial-op.css": "2af63c8ac21fdad16c9f9916f58dca84f0f7f815ba93c6fd271e2c0a0a0a294b",
+        "src/styles-biz-op-v327.css": "7b7a9e3453f7c4aaad6933bf1d7293c31c1f72fe04cee15302cdf0ace89ddfa4",
+        "src/styles-dark-mode.css": "b45a9dead620b079da2b0024ef7f4a61b3a03f9a645477237b2335c2c02bee1b",
+        "src/styles-dark-mode-settings.css": "6c471e6ab6204bf6e048e2e0e6f03da1cf942cbdef6472548f506f68718a914e",
+        "src/shared/payment-big-accounts.js": "47d42b87195ad93a42cafcc43fc7faf26b64b868c4969b1aff1b96d9c1c197e7",
+        "src/shared/vcc-financial-op-difference.js": "6cd8d498514d99aa8fc0ac2675778378d46a1a98eecd3ba3a4ad8ce6bcb73f76",
+        "src/renderer-dialogs.js": "ececd7914f5e729628481fd45ab43827cfe3ccd81d99af198a74bbc4b3ea5eda",
+        "src/renderer-previews.js": "4fbfbdb4151e7e19e9fe9f2548dea299b8c7d0249c84f603aa5e2b3b1ba026fd",
+        "src/renderer-pending.js": "4c7b8e8189119e22380a17b769543ba9a1db0ab172000e62b2c9fec3041159d9",
+        "src/renderer-position-reconciliation.js": "e077ba51ffdae1c4a667a1150d97ee4a023017986987dd35b545157f26d68e4e",
+        "src/renderer-vcc-financial-op.js": "272712ea5b617f5a1c6f480a213d79156fce7a004b86c16ec6a432ee4a78196c",
+        "src/renderer-biz-op-v327.js": "2d676a2579c8740b83e58e6c4578485fe99f98f8708ada60c96afe0c134016d6",
+        "src/renderer.js": "dd605cecfbe52f950afa7638d4163b7cd1ccba823ee8a6a359f37250711b2b5c"
+      },
+      "rendering": {
+        "mode": "hidden-window-device-emulation",
+        "focusMode": "CDP document-focus emulation + DOM.focus; no OS focus or Tab traversal",
+        "viewportAtZoom100": {
+          "width": 2560,
+          "height": 1440
+        },
+        "requestedDeviceScale": 1,
+        "webZoom": 1.5,
+        "bounds": {
+          "x": 0,
+          "y": -18,
+          "width": 2560,
+          "height": 1440
+        },
+        "contentBounds": {
+          "x": 0,
+          "y": -18,
+          "width": 2560,
+          "height": 1440
+        },
+        "platform": "darwin",
+        "electron": "36.9.5"
+      },
+      "isolation": {
+        "realMainLoaded": false,
+        "realBusinessApi": false,
+        "realRendererLoaded": true,
+        "realCssLoaded": true,
+        "initializer": "只有 initialize() 自动调用被停用；真实组件函数、主题 bootstrap、控制器与 CSS 全部加载",
+        "userData": "临时目录，结束清理",
+        "documents": "临时目录，结束清理"
+      }
+    }
+  ],
+  "failures": []
+}

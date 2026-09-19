@@ -486,6 +486,16 @@ test('月末 source COMMIT 后崩溃由原 File Task/批次号恢复 target copy
   const restarted = createArchiveService({ database: mainDb, rootDir: originalOwner.rootDir });
   await restarted.initialize({ deferStartupRecovery: true, startBackgroundMaterialization: false });
   assert.equal(restarted.repository.getTaskRun(taskRunId).status, 'running');
+  const recordOwnerCompletion = restarted.recordFileTaskOwnerCompletion.bind(restarted);
+  restarted.recordFileTaskOwnerCompletion = async () => { throw new Error('隔离夹具模拟凭证写入失败'); };
+  await assert.rejects(bizOpReconRunData.recoverMonthEndCopyIntents({ userDataDir, archiveService: restarted }),
+    /月末复制恢复失败/);
+  assert.equal(restarted.repository.getTaskRun(taskRunId).status, 'succeeded');
+  const pendingProofDb = runDataStore.openSideDb(userDataDir, MODULE, '2026-06');
+  try {
+    assert.ok(monthEndCopyIntents.getByTaskRunId(pendingProofDb, taskRunId), '凭证失败不得丢失原恢复 intent');
+  } finally { pendingProofDb.close(); }
+  restarted.recordFileTaskOwnerCompletion = recordOwnerCompletion;
   assert.deepEqual(await bizOpReconRunData.recoverMonthEndCopyIntents({
     userDataDir,
     archiveService: restarted
@@ -497,6 +507,14 @@ test('月末 source COMMIT 后崩溃由原 File Task/批次号恢复 target copy
   assert.equal(recoveredBatch.taskStatus, 'succeeded');
   assert.equal(recoveredBatch.id, originalOwner.reserved.batch.id);
   assert.equal(recoveredBatch.batchNumber, originalOwner.reserved.batch.batchNumber);
+  const owner = { version: 1, kind: 'file-batch', batchContext: {
+    batchId: recoveredBatch.id, batchNumber: recoveredBatch.batchNumber, taskRunId,
+    taskKey: recoveredBatch.taskKey, moduleId: recoveredBatch.moduleId,
+    parentRunId: recoveredBatch.parentRunId, operationKey: recoveredBatch.operationKey
+  } };
+  const completion = restarted.repository.getOwnerTerminalCompletion(owner);
+  assert.equal(completion.terminalStatus, 'succeeded');
+  assert.equal(completion.afterTerminal, null);
   assert.deepEqual(mainDb.prepare(`
     SELECT local_date, last_sequence, last_issued_batch_id, last_issued_batch_number
     FROM archive_daily_sequences

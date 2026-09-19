@@ -1,5 +1,9 @@
 'use strict';
 
+const { readIdentityStatSync } = require('./filesystem-identity');
+
+const { positionReportSourceIdentity } = require('../../backend/position-report-source-identity');
+
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -10,7 +14,7 @@ const {
   sourceSnapshotMatchesStat
 } = require('./source-snapshot');
 const {
-  pathsAlias,
+  pathAliasKeys,
   targetPathAliasKey
 } = require('../toolbox-target-identity');
 const {
@@ -62,12 +66,12 @@ function normalizeFreshnessFailure(value) {
 
 function targetSnapshot(fsImpl, filePath) {
   const realParentPath = fsImpl.realpathSync(path.dirname(filePath));
-  const parent = fsImpl.statSync(realParentPath);
+  const parent = readIdentityStatSync(fsImpl, realParentPath, 'statSync');
   if (!parent.isDirectory()) {
     throw planError('ARCHIVE_FILE_PLAN_INVALID', '输出父目录必须是已存在的普通目录');
   }
   try {
-    const stat = fsImpl.lstatSync(filePath);
+    const stat = readIdentityStatSync(fsImpl, filePath);
     if (stat.isSymbolicLink() || !stat.isFile()) {
       throw planError('ARCHIVE_FILE_PLAN_INVALID', '输出目标必须是可覆盖的普通文件');
     }
@@ -134,6 +138,15 @@ function normalizeItem(raw, direction, options) {
     } else {
       base.sourceSnapshot = snapshotFromRegularFile(fsImpl, filePath);
     }
+    if (raw.expectedSha256 !== undefined || raw.expectedSizeBytes !== undefined) {
+      if (typeof raw.expectedSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(raw.expectedSha256)
+          || !Number.isSafeInteger(raw.expectedSizeBytes) || raw.expectedSizeBytes < 0
+          || raw.expectedSizeBytes !== base.sourceSnapshot.sizeBytes) {
+        throw planError('ARCHIVE_FILE_PLAN_INVALID', '输入摘要必须包含合法 SHA-256 和与原快照一致的大小');
+      }
+      base.expectedSha256 = raw.expectedSha256;
+      base.expectedSizeBytes = raw.expectedSizeBytes;
+    }
     const freshnessFailure = normalizeFreshnessFailure(raw.freshnessFailure);
     if (freshnessFailure) base.freshnessFailure = freshnessFailure;
   } else {
@@ -141,6 +154,24 @@ function normalizeItem(raw, direction, options) {
       platform: options.platform
     });
     base.targetSnapshot = targetSnapshot(fsImpl, filePath);
+  }
+  if (raw.preGeneratedOutput !== undefined) {
+    const evidence = raw.preGeneratedOutput;
+    const snapshot = normalizeSourceSnapshot(evidence && evidence.sourceSnapshot);
+    if (!evidence || evidence.version !== 1 || evidence.kind !== 'position-anomaly-report'
+        || typeof evidence.producerArtifactKey !== 'string' || !evidence.producerArtifactKey
+        || Object.keys(evidence).some((key) => !['version', 'kind', 'producerArtifactKey', 'sourceSnapshot', 'expectedSha256', 'expectedSizeBytes'].includes(key))
+        || direction !== 'output' || base.role !== 'output'
+        || base.sourceOperation !== 'position-reconciliation:source:prepare-import'
+        || !positionReportSourceIdentity(filePath, evidence.producerArtifactKey)
+        || !snapshot?.ino || !base.targetSnapshot.exists
+        || JSON.stringify(snapshot) !== JSON.stringify(normalizeSourceSnapshot(base.targetSnapshot.snapshot))
+        || typeof evidence.expectedSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(evidence.expectedSha256)
+        || !Number.isSafeInteger(evidence.expectedSizeBytes) || evidence.expectedSizeBytes < 0
+        || evidence.expectedSizeBytes !== snapshot.sizeBytes) {
+      throw planError('ARCHIVE_FILE_PLAN_INVALID', '预先生成的平盘报告必须包含匹配原对象的完整证据');
+    }
+    base.preGeneratedOutput = Object.freeze({ ...evidence, sourceSnapshot: Object.freeze({ ...snapshot }) });
   }
   const derivedArtifactKey = artifactKeyOf(base);
   if (raw.artifactKey !== undefined
@@ -153,30 +184,40 @@ function normalizeItem(raw, direction, options) {
 
 function assertNoAliasConflict(inputs, outputs, options) {
   const items = [...inputs, ...outputs];
+  if (items.length <= 1) return;
   const seen = new Map();
+  const seenPaths = new Map();
+  const seenInodes = new Map();
+  const rejectAlias = (left, right) => {
+    throw planError(
+      'ARCHIVE_FILE_PLAN_INVALID',
+      left.direction !== right.direction
+        ? '输出目标不能覆盖或别名指向输入文件'
+        : '同一方向不能重复登记别名指向同一文件'
+    );
+  };
   for (const item of items) {
     if (seen.has(item.artifactKey)) {
       throw planError('ARCHIVE_FILE_PLAN_INVALID', '同一 manifest 的 artifactKey 必须唯一');
     }
     seen.set(item.artifactKey, item);
-  }
-  for (let leftIndex = 0; leftIndex < items.length; leftIndex += 1) {
-    for (let rightIndex = leftIndex + 1; rightIndex < items.length; rightIndex += 1) {
-      const left = items[leftIndex];
-      const right = items[rightIndex];
-      const crossDirection = left.direction !== right.direction;
-      if (pathsAlias(options.fsImpl, left.filePath, right.filePath, {
-        platform: options.platform,
-        allowMissingParentLexicalFallback: options.providedSourceSnapshotPaths.has(left.filePath)
-          || options.providedSourceSnapshotPaths.has(right.filePath)
-      })) {
-        throw planError(
-          'ARCHIVE_FILE_PLAN_INVALID',
-          crossDirection
-            ? '输出目标不能覆盖或别名指向输入文件'
-            : '同一方向不能重复登记别名指向同一文件'
-        );
-      }
+    // FilePlan 是一次身份快照；每个路径只采集一次，避免 K 个输出触发 O(K²) 磁盘访问。
+    // 使用与 pathsAlias 相同的路径键和 dev/ino，发布前仍执行既有 freshness 校验。
+    const keys = pathAliasKeys(options.fsImpl, item.filePath, {
+      platform: options.platform,
+      allowMissingParentLexicalFallback: options.providedSourceSnapshotPaths.has(item.filePath)
+    });
+    for (const key of keys) {
+      if (seenPaths.has(key)) rejectAlias(seenPaths.get(key), item);
+      seenPaths.set(key, item);
+    }
+    try {
+      const stat = options.fsImpl.lstatSync(item.filePath, { bigint: true });
+      const key = String(stat.dev) + ':' + String(stat.ino);
+      if (seenInodes.has(key)) rejectAlias(seenInodes.get(key), item);
+      seenInodes.set(key, item);
+    } catch (error) {
+      if (!error || error.code !== 'ENOENT') throw error;
     }
   }
 }
@@ -277,7 +318,7 @@ function assertFilePlanFresh(plan, options = {}) {
     }
     const expected = output.targetSnapshot;
     try {
-      const stat = fsImpl.lstatSync(output.filePath);
+      const stat = readIdentityStatSync(fsImpl, output.filePath);
       if (!expected.exists
           || stat.isSymbolicLink()
           || !stat.isFile()

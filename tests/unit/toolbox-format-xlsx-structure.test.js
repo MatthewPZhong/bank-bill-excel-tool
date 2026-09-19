@@ -65,6 +65,48 @@ async function assertStructureFailure(xml, messagePattern) {
   );
 }
 
+test('可选词法审计跨 UTF-8 chunk 保留原 cell body，历史取值与完整语义独立', async (t) => {
+  const { cellValueFromBody } = require('../../src/backend/big-table-import/row-scanner');
+  const samples = [
+    { type: 'inlineStr', body: '<is><r><t>首😀</t></r><r><t/></r></is>', semantic: '首😀' },
+    { type: 'inlineStr', body: '<is><r><t>首</t></r><r><t></t></r></is>', semantic: '首' },
+    { type: 'inlineStr', body: '<is><t>漢字</t><rPh sb="0" eb="2"><t>かんじ</t></rPh></is>', semantic: '漢字' },
+    { type: 'inlineStr', body: '<is><t><![CDATA[甲 &amp; </t> 字面]]><!--审计-->乙&amp;末</t></is>', semantic: '甲 &amp; </t> 字面乙&末' },
+    { type: 'str', body: '<v>首_x000D_\n_x005F_x000d_&amp;#13;</v>', semantic: '首\r\n_x000d_&#13;' },
+    { type: 'str', body: '<v><![CDATA[&amp;字面]]></v>', semantic: '&amp;字面' },
+    { type: 's', body: '<v>0</v>', semantic: '共享\r\n文字' },
+    { type: 'b', body: '<v>1</v>', semantic: true },
+    { type: 'b', body: '<f>FALSE()</f><v>0</v>', semantic: false },
+    { type: 'n', body: '<v>1E2</v>', semantic: 100 },
+    { type: 'n', body: '', semantic: null }
+  ];
+  const sharedStrings = ['共享\r\n文字'];
+  const xml = '\uFEFF<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="' + TRANSITIONAL_SPREADSHEETML_NAMESPACE + '"><sheetData>'
+    + samples.map((sample, index) => '<row r="' + (index + 1) + '"><c r="A' + (index + 1) + '" t="' + sample.type + '"'
+      + (sample.body ? '>' + sample.body + '</c>' : '/>') + '</row>').join('')
+    + '</sheetData></worksheet>';
+  const bytes = Buffer.from(xml);
+  for (const chunkSize of [1, 5, 64, bytes.length]) await t.test('chunk=' + chunkSize, async () => {
+    const audited = [];
+    const zip = { openReadStream(_entry, callback) {
+      callback(null, Readable.from((function* chunks() {
+        for (let offset = 0; offset < bytes.length; offset += chunkSize) yield bytes.subarray(offset, offset + chunkSize);
+      })()));
+    } };
+    const { rows } = await scanWorksheetXml(xml, { zip, sharedStrings, onCellLexical(cell, lexical) {
+      const sample = samples[cell.rowIndex - 1];
+      assert.equal(lexical.body, sample.body);
+      assert.equal(lexical.type, sample.type);
+      assert.equal(cellValueFromBody(lexical.body, lexical.type, sharedStrings),
+        cellValueFromBody(sample.body, sample.type, sharedStrings));
+      assert.equal(cell.decodedSemanticValue, sample.semantic);
+      audited.push(cell.rowIndex);
+    } });
+    assert.equal(rows.length, samples.length);
+    assert.deepEqual(audited, samples.map((_sample, index) => index + 1));
+  });
+});
+
 test('合法 worksheet：唯一根、唯一直接 sheetData，且只消费其直接 row', async () => {
   const { rows, summary } = await scanWorksheetXml(
     '<?xml version="1.0"?>'

@@ -60,6 +60,11 @@ jobs:
           WINDOWS_STARTUP_PROCESS_ADAPTER_REAL_TEST: '1'
         run: node --test tests/unit/scripts/startup-process-adapter.test.js
 
+      - name: Verify Windows packaged canary process semantics
+        env:
+          WINDOWS_PACKAGED_CANARY_PROCESS_REAL_TEST: '1'
+        run: node --test --test-concurrency=1 tests/unit/windows-build-contract.test.js
+
       - name: Verify main panel alignment
         run: npm run verify:main-panel-alignment
 

@@ -1,0 +1,19 @@
+/* 外观设置沿用现有设置弹窗尺寸与语义颜色。 */
+.appearance-pane-scroll { overflow: auto; min-height: 0; height: 100%; padding: 24px; }
+.appearance-pane-scroll .app-settings-pane-heading { margin-bottom: 20px; }
+.appearance-fields { min-width: 0; border: 0; padding: 0; margin: 0; }
+.appearance-enable-row { display: flex; align-items: center; justify-content: space-between; width: 25%; min-width: 200px; max-width: 100%; gap: 12px; padding: 12px; background: var(--bg-soft); border: 1px solid var(--line-soft); border-radius: 14px; }
+.appearance-enable-row label { min-width: 0; }
+.appearance-enable-row strong { display: block; color: var(--text); font-size: 14px; font-weight: 600; }
+.appearance-enable-row input { appearance: none; flex: 0 0 42px; width: 42px; height: 24px; margin: 0; border: 1px solid var(--line-strong); border-radius: 20px; background: var(--line-strong); position: relative; cursor: pointer; }
+.appearance-enable-row input::after { content: ''; position: absolute; width: 16px; height: 16px; top: 3px; left: 3px; border-radius: 50%; background: var(--panel); }
+.appearance-enable-row input:checked { background: var(--primary); border-color: var(--primary); }
+.appearance-enable-row input:checked::after { transform: translateX(18px); background: var(--on-primary); }
+.appearance-fields:disabled { opacity: .65; }
+/* 为原生时分、12 小时制 AM/PM、时钟按钮与两侧留白保留空间。 */
+.appearance-time-grid { display: grid; grid-template-columns: 132px 22px 132px; align-items: end; gap: 12px; margin: 24px 0; }
+.appearance-time-grid label { display: flex; flex-direction: column; gap: 10px; min-width: 0; font-size: 13px; color: var(--muted); }
+.appearance-time-grid input { width: 100%; min-width: 0; height: 44px; padding: 8px; color: var(--text); background: var(--input); border: 1px solid var(--line); border-radius: 9px; font: inherit; font-size: 14px; font-variant-numeric: tabular-nums; }
+.appearance-time-separator { align-self: end; line-height: 44px; text-align: center; color: var(--muted); }
+.appearance-feedback { color: var(--danger); background: var(--danger-soft); border: 1px solid var(--danger-border); padding: 12px; border-radius: 9px; font-size: 13px; line-height: 1.8; }
+.appearance-pane-scroll input:focus { outline: 2px solid var(--primary); outline-offset: 3px; }

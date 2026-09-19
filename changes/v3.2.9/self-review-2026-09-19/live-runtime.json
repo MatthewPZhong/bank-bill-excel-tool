@@ -1,0 +1,455 @@
+{
+  "status": "PASS",
+  "kind": "真实 Main + Preload + Renderer，临时数据库与真实单实例锁",
+  "evidenceLimit": "did-finish-load 只验证加载完成状态；本脚本未连续采样启动全过程，不证明首帧或无闪白",
+  "resources": {
+    "freeMemoryMiB": 3863.9375,
+    "totalMemoryMiB": 49152
+  },
+  "results": [
+    {
+      "ok": true,
+      "initial": "light",
+      "assertions": 11,
+      "application": {
+        "appPath": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool-worktrees/release-v3.2.9",
+        "name": "bank-bill-excel-tool",
+        "version": "3.2.9"
+      },
+      "isolation": {
+        "userData": "/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/night-mode-live-3iiWhe/userData",
+        "documents": "/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/night-mode-live-3iiWhe/Documents"
+      },
+      "windowAtLoad": {
+        "visible": false,
+        "minimized": false
+      },
+      "windowAfterInit": {
+        "visible": true,
+        "minimized": false
+      },
+      "loadSnapshot": {
+        "theme": "light",
+        "background": "rgb(255, 255, 255)"
+      },
+      "initializedAt": 2838.0999999046326,
+      "reinitializedAt": 36.30000019073486,
+      "reloaded": "dark",
+      "appearance": {
+        "visible": true,
+        "theme": "dark",
+        "checked": true
+      },
+      "startupCapture": {
+        "file": "live-light-startup.png",
+        "imageSize": {
+          "width": 2480,
+          "height": 1720
+        },
+        "presentedFrames": 1,
+        "pixelChecks": [
+          {
+            "x": 20,
+            "y": 860,
+            "expected": [
+              255,
+              255,
+              255
+            ],
+            "actual": [
+              255,
+              255,
+              255
+            ],
+            "matches": true
+          }
+        ],
+        "windowVisible": true,
+        "windowMinimized": false,
+        "viewport": {
+          "width": 1240,
+          "height": 860,
+          "dpr": 2
+        },
+        "paneRect": null,
+        "cardRect": null,
+        "samples": [
+          {
+            "x": 10,
+            "y": 430,
+            "color": "rgb(255, 255, 255)"
+          }
+        ],
+        "theme": "light",
+        "documentVisibility": "visible",
+        "appearanceVisible": null,
+        "checked": null
+      },
+      "reloadCapture": {
+        "file": "live-light-reload-dark.png",
+        "imageSize": {
+          "width": 2480,
+          "height": 1720
+        },
+        "presentedFrames": 1,
+        "pixelChecks": [
+          {
+            "x": 20,
+            "y": 860,
+            "expected": [
+              17,
+              20,
+              25
+            ],
+            "actual": [
+              18,
+              20,
+              25
+            ],
+            "matches": true
+          }
+        ],
+        "windowVisible": true,
+        "windowMinimized": false,
+        "viewport": {
+          "width": 1240,
+          "height": 860,
+          "dpr": 2
+        },
+        "paneRect": null,
+        "cardRect": null,
+        "samples": [
+          {
+            "x": 10,
+            "y": 430,
+            "color": "rgb(17, 20, 25)"
+          }
+        ],
+        "theme": "dark",
+        "documentVisibility": "visible",
+        "appearanceVisible": null,
+        "checked": null
+      },
+      "settingsCapture": {
+        "file": "live-light-startup-dark-settings.png",
+        "imageSize": {
+          "width": 2480,
+          "height": 1720
+        },
+        "presentedFrames": 1,
+        "pixelChecks": [
+          {
+            "x": 2168,
+            "y": 196,
+            "expected": [
+              28,
+              32,
+              39
+            ],
+            "actual": [
+              29,
+              32,
+              38
+            ],
+            "matches": true
+          },
+          {
+            "x": 2302,
+            "y": 314,
+            "expected": [
+              28,
+              32,
+              39
+            ],
+            "actual": [
+              29,
+              32,
+              38
+            ],
+            "matches": true
+          },
+          {
+            "x": 2302,
+            "y": 1406,
+            "expected": [
+              28,
+              32,
+              39
+            ],
+            "actual": [
+              29,
+              32,
+              38
+            ],
+            "matches": true
+          }
+        ],
+        "windowVisible": true,
+        "windowMinimized": false,
+        "viewport": {
+          "width": 1240,
+          "height": 860,
+          "dpr": 2
+        },
+        "paneRect": {
+          "x": 253,
+          "y": 145,
+          "width": 910,
+          "height": 570
+        },
+        "cardRect": {
+          "x": 76,
+          "y": 78,
+          "width": 1088,
+          "height": 704
+        },
+        "samples": [
+          {
+            "x": 1084,
+            "y": 98,
+            "color": "rgb(28, 32, 39)"
+          },
+          {
+            "x": 1151,
+            "y": 157,
+            "color": "rgb(28, 32, 39)"
+          },
+          {
+            "x": 1151,
+            "y": 703,
+            "color": "rgb(28, 32, 39)"
+          }
+        ],
+        "theme": "dark",
+        "documentVisibility": "visible",
+        "appearanceVisible": true,
+        "checked": true
+      },
+      "evidenceLimit": "did-finish-load 只验证加载完成状态；本脚本未连续采样启动全过程，不证明首帧或无闪白",
+      "failures": [],
+      "rendererErrors": []
+    },
+    {
+      "ok": true,
+      "initial": "dark",
+      "assertions": 11,
+      "application": {
+        "appPath": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool-worktrees/release-v3.2.9",
+        "name": "bank-bill-excel-tool",
+        "version": "3.2.9"
+      },
+      "isolation": {
+        "userData": "/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/night-mode-live-3iiWhe/userData",
+        "documents": "/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/night-mode-live-3iiWhe/Documents"
+      },
+      "windowAtLoad": {
+        "visible": false,
+        "minimized": false
+      },
+      "windowAfterInit": {
+        "visible": true,
+        "minimized": false
+      },
+      "loadSnapshot": {
+        "theme": "dark",
+        "background": "rgb(17, 20, 25)"
+      },
+      "initializedAt": 614.0999999046326,
+      "reinitializedAt": 38.799999713897705,
+      "reloaded": "dark",
+      "appearance": {
+        "visible": true,
+        "theme": "dark",
+        "checked": true
+      },
+      "startupCapture": {
+        "file": "live-dark-startup.png",
+        "imageSize": {
+          "width": 2480,
+          "height": 1720
+        },
+        "presentedFrames": 1,
+        "pixelChecks": [
+          {
+            "x": 20,
+            "y": 860,
+            "expected": [
+              17,
+              20,
+              25
+            ],
+            "actual": [
+              18,
+              20,
+              25
+            ],
+            "matches": true
+          }
+        ],
+        "windowVisible": true,
+        "windowMinimized": false,
+        "viewport": {
+          "width": 1240,
+          "height": 860,
+          "dpr": 2
+        },
+        "paneRect": null,
+        "cardRect": null,
+        "samples": [
+          {
+            "x": 10,
+            "y": 430,
+            "color": "rgb(17, 20, 25)"
+          }
+        ],
+        "theme": "dark",
+        "documentVisibility": "visible",
+        "appearanceVisible": null,
+        "checked": null
+      },
+      "reloadCapture": {
+        "file": "live-dark-reload-dark.png",
+        "imageSize": {
+          "width": 2480,
+          "height": 1720
+        },
+        "presentedFrames": 1,
+        "pixelChecks": [
+          {
+            "x": 20,
+            "y": 860,
+            "expected": [
+              17,
+              20,
+              25
+            ],
+            "actual": [
+              18,
+              20,
+              25
+            ],
+            "matches": true
+          }
+        ],
+        "windowVisible": true,
+        "windowMinimized": false,
+        "viewport": {
+          "width": 1240,
+          "height": 860,
+          "dpr": 2
+        },
+        "paneRect": null,
+        "cardRect": null,
+        "samples": [
+          {
+            "x": 10,
+            "y": 430,
+            "color": "rgb(17, 20, 25)"
+          }
+        ],
+        "theme": "dark",
+        "documentVisibility": "visible",
+        "appearanceVisible": null,
+        "checked": null
+      },
+      "settingsCapture": {
+        "file": "live-dark-startup-dark-settings.png",
+        "imageSize": {
+          "width": 2480,
+          "height": 1720
+        },
+        "presentedFrames": 1,
+        "pixelChecks": [
+          {
+            "x": 2168,
+            "y": 196,
+            "expected": [
+              28,
+              32,
+              39
+            ],
+            "actual": [
+              29,
+              32,
+              38
+            ],
+            "matches": true
+          },
+          {
+            "x": 2302,
+            "y": 314,
+            "expected": [
+              28,
+              32,
+              39
+            ],
+            "actual": [
+              29,
+              32,
+              38
+            ],
+            "matches": true
+          },
+          {
+            "x": 2302,
+            "y": 1406,
+            "expected": [
+              28,
+              32,
+              39
+            ],
+            "actual": [
+              29,
+              32,
+              38
+            ],
+            "matches": true
+          }
+        ],
+        "windowVisible": true,
+        "windowMinimized": false,
+        "viewport": {
+          "width": 1240,
+          "height": 860,
+          "dpr": 2
+        },
+        "paneRect": {
+          "x": 253,
+          "y": 145,
+          "width": 910,
+          "height": 570
+        },
+        "cardRect": {
+          "x": 76,
+          "y": 78,
+          "width": 1088,
+          "height": 704
+        },
+        "samples": [
+          {
+            "x": 1084,
+            "y": 98,
+            "color": "rgb(28, 32, 39)"
+          },
+          {
+            "x": 1151,
+            "y": 157,
+            "color": "rgb(28, 32, 39)"
+          },
+          {
+            "x": 1151,
+            "y": 703,
+            "color": "rgb(28, 32, 39)"
+          }
+        ],
+        "theme": "dark",
+        "documentVisibility": "visible",
+        "appearanceVisible": true,
+        "checked": true
+      },
+      "evidenceLimit": "did-finish-load 只验证加载完成状态；本脚本未连续采样启动全过程，不证明首帧或无闪白",
+      "failures": [],
+      "rendererErrors": []
+    }
+  ]
+}

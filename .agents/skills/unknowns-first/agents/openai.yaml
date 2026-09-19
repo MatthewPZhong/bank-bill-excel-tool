@@ -1,0 +1,4 @@
+interface:
+  display_name: "未知优先"
+  short_description: "在复杂任务实施前识别关键未知，并按风险安排提问、查证、实验和保守假设"
+  default_prompt: "使用 $unknowns-first 先识别这项改动的关键未知，再给出风险优先的实施计划。"

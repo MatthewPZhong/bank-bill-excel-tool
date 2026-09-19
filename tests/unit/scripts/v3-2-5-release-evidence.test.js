@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { resolveChangesPath } = require('../../../scripts/lib/changes-paths');
 const test = require('node:test');
 
 const {
@@ -215,7 +216,7 @@ test('全部 evidence refs 指向当前树中的真实文件', () => {
   for (const action of loadSnapshot().actions) {
     for (const relativePath of action.evidenceRefs) {
       assert.equal(
-        fs.existsSync(path.join(REPOSITORY_ROOT, relativePath)),
+        fs.existsSync(resolveChangesPath(REPOSITORY_ROOT, relativePath)),
         true,
         `${action.actionKey}: ${relativePath}`
       );

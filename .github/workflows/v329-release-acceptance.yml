@@ -1,0 +1,91 @@
+name: Collect v3.2.9 Acceptance Evidence
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v329-acceptance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  feature-evidence:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'release/v3.2.9'
+    runs-on: windows-latest
+    timeout-minutes: 180
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - run: npm ci
+
+      - name: Record candidate identity
+        id: candidate
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force outputs/v329-acceptance | Out-Null
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($version -ne '3.2.9') { throw 'This evidence workflow only applies to version 3.2.9' }
+          @{ sha = (git rev-parse HEAD); version = $version; run = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"; manualExcelWps = 'NOT_RUN' } |
+            ConvertTo-Json | Set-Content outputs/v329-acceptance/candidate.json
+
+      - name: Verify native time input
+        if: ${{ !cancelled() && steps.candidate.outcome == 'success' }}
+        run: node scripts/verify-dark-mode-native-input.js outputs/v329-acceptance/native-input.json
+
+      - name: Verify real Main startup and presented appearance settings
+        if: ${{ !cancelled() && steps.candidate.outcome == 'success' }}
+        env:
+          DARK_MODE_LIVE_EVIDENCE_DIR: outputs/v329-acceptance/live-main
+        run: node scripts/verify-dark-mode-live.js
+
+      - name: Verify settings and archive save interactions
+        if: ${{ !cancelled() && steps.candidate.outcome == 'success' }}
+        env:
+          APP_SETTINGS_LAYOUT_EVIDENCE_DIR: outputs/v329-acceptance/settings
+        run: node scripts/verify-app-settings-layout.js
+
+      - name: Verify VCC Electron and ASAR outputs
+        if: ${{ !cancelled() && steps.candidate.outcome == 'success' }}
+        run: node scripts/vcc-financial-op/verify-review-electron.js outputs/v329-acceptance/vcc-electron
+
+      - name: Verify performance runner with a small real export
+        if: ${{ !cancelled() && steps.candidate.outcome == 'success' }}
+        run: node scripts/vcc-financial-op/verify-review-performance.js --mode smoke --output outputs/v329-acceptance/smoke
+
+      - name: Collect fixed-baseline VCC performance evidence
+        if: ${{ !cancelled() && steps.candidate.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          node scripts/vcc-financial-op/verify-review-performance.js --mode windows --output outputs/v329-acceptance/performance
+          $result = $LASTEXITCODE
+          if ($result -eq 2) {
+            Write-Warning 'Evidence includes NOT_RUN items. This collector result is not release acceptance; inspect summary.json and complete the missing platform/manual checks.'
+          } elseif ($result -ne 0) {
+            throw "Performance evidence runner failed with exit code $result"
+          }
+          "Performance collector exit code: $result. Manual Excel/WPS review remains NOT_RUN." >> $env:GITHUB_STEP_SUMMARY
+          $global:LASTEXITCODE = 0
+
+      - name: Upload evidence and workbooks for manual inspection
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: v329-windows-feature-evidence
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            outputs/v329-acceptance/**/*.json
+            outputs/v329-acceptance/**/*.jsonl
+            outputs/v329-acceptance/**/*.log
+            outputs/v329-acceptance/**/*.png
+            outputs/v329-acceptance/**/*.xlsx

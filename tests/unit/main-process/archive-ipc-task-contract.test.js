@@ -12,6 +12,7 @@ const {
   normalizeIpcTaskHandler,
   prepareIpcTaskInvocation
 } = require('../../../src/main-process/archive-center/ipc-task-contract');
+const { normalizeFilePlanV1, assertFilePlanFresh } = require('../../../src/main-process/archive-center/file-plan');
 
 function batchContext(batchId) {
   return Object.freeze({
@@ -151,4 +152,23 @@ test('prepare 是普通 eager FilePlan 的唯一规范化冻结边界', async (t
     prepareIpcTaskInvocation(malformed, {}, []),
     /inputs\/outputs 必须是数组/
   );
+});
+
+test('IPC 保留 Main 冻结 authority，但不信任复制或外部注入的目标快照', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-ipc-authority-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const outputPath = path.join(directory, 'output.xlsx');
+  const frozen = normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs: [],
+    outputs: [{ filePath: outputPath, role: 'output', sourceOperation: 'test:run' }] });
+  fs.writeFileSync(outputPath, 'created-after-confirmation');
+  const invoke = (filePlan) => prepareIpcTaskInvocation({
+    prepare: async () => ({ proceed: true, filePlan })
+  }, {}, []);
+  const approved = await invoke(frozen);
+  assert.equal(approved.filePlan, frozen);
+  assert.throws(() => assertFilePlanFresh(approved.filePlan), { code: 'ARCHIVE_TARGET_CHANGED' });
+  const copied = await invoke(JSON.parse(JSON.stringify(frozen)));
+  assert.notEqual(copied.filePlan, frozen);
+  assert.equal(copied.filePlan.outputs[0].targetSnapshot.exists, true);
+  assertFilePlanFresh(copied.filePlan);
 });

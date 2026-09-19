@@ -1,0 +1,12 @@
+(node:74622) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+{"events":[{"event":"BEGIN IMMEDIATE","cancelled":false,"snapshots":0},{"event":"last-reading","cancelled":false,"snapshots":0},{"event":"close-start","cancelled":false,"snapshots":0},{"event":"cancel-delivered","cancelled":true,"snapshots":0},{"event":"close-complete","cancelled":true,"snapshots":0},{"event":"BEGIN IMMEDIATE","cancelled":true,"snapshots":0},{"event":"complete","cancelled":true,"snapshots":0}],"error":{"code":"vcc-import-cancelled","message":"VCC 财务OP导入已取消，已读取数据未进入有效数据集"}}
+✔ real async reader close receives cancellation before business BEGIN (54.981375ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 151.402542

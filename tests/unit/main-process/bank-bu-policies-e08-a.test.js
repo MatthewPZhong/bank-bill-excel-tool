@@ -7,7 +7,7 @@ const { BANK_BU_POLICIES } = require(
   '../../../src/main-process/bank-bu-worker/policies'
 );
 const frozen = require(
-  '../../../changes/background-execution-v3.2.x-contract-baseline/changes/background-execution/validation/fixtures/valid/policy-registry.v3.2.x.json'
+  '../../../changes/v3.2.0~v3.2.5/background-execution-v3.2.x-contract-baseline/changes/background-execution/validation/fixtures/valid/policy-registry.v3.2.x.json'
 );
 
 test('E08-A四个policy逐字段服从冻结Platform fixture且production固定false/legacy/0', () => {

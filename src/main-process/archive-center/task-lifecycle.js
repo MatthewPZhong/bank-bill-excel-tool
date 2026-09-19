@@ -63,6 +63,19 @@ function lifecycleFailure(result, fallbackCode, fallbackMessage) {
   };
 }
 
+function pendingFileTerminalOutcome(terminalOutcome, afterTerminalUnrouted) {
+  return afterTerminalUnrouted ? {
+    ...terminalOutcome,
+    metadata: { ...terminalOutcome.metadata, _archiveAfterTerminalPending: true }
+  } : terminalOutcome;
+}
+
+function fileTaskOwnerRecovery(payload) {
+  return typeof payload.afterTerminal !== 'function' && !payload.afterTerminalIntent
+    ? { version: 1, kind: 'no-after-terminal' }
+    : null;
+}
+
 function taskPayloadMetadata(value) {
   if (value === undefined) return {};
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -206,7 +219,45 @@ class TaskLifecycle {
     return { ok: false, persisted: true, result };
   }
 
-  async _finishFileTask(context, channel, terminalOutcome) {
+  async _recordFileOwnerCompletion(context, channel, terminalOutcome) {
+    if (typeof this.archiveService.recordFileTaskOwnerCompletion !== 'function') return;
+    try {
+      const result = await this.archiveService.recordFileTaskOwnerCompletion(context, {
+        terminalStatus: terminalOutcome.taskStatus,
+        afterTerminal: terminalOutcome.afterTerminal || null
+      });
+      if (!result || result.ok === false) throw Object.assign(new Error(result && result.message || 'File Task 收口凭证写入失败'), { code: result && result.code });
+    } catch (error) {
+      this._warn({ channel, code: error.code || 'ARCHIVE_OWNER_COMPLETION_FAILED', message: error.message });
+      // 原 owner 已完成后处理；凭证写失败时保留相同终态意图，由原恢复入口收口。
+      if (this.persistTerminalIntent) await this.persistTerminalIntent({
+        owner: { version: 1, kind: 'file-batch', batchContext: context },
+        sourceOperation: channel, terminalOutcome
+      });
+    }
+  }
+
+  async _completeFileOwnerAfterTerminal(context, channel, terminalOutcome, payload, outcome) {
+    try {
+      if (typeof payload.afterTerminal === 'function') {
+        await payload.afterTerminal(outcome);
+      } else if (terminalOutcome.afterTerminal) {
+        throw new Error('原任务缺少 afterTerminal 回调，等待持久恢复路由处理');
+      }
+      await this._recordFileOwnerCompletion(context, channel, terminalOutcome);
+    } catch (error) {
+      this._warn({ channel, code: error.code || 'ARCHIVE_TASK_AFTER_TERMINAL_FAILED', message: error.message });
+      if (this.persistTerminalIntent) {
+        await this.persistTerminalIntent({
+          owner: { version: 1, kind: 'file-batch', batchContext: context },
+          sourceOperation: channel,
+          terminalOutcome: pendingFileTerminalOutcome(terminalOutcome, !terminalOutcome.afterTerminal)
+        });
+      }
+    }
+  }
+
+  async _finishFileTask(context, channel, terminalOutcome, options = {}) {
     let result;
     try {
       result = await this.archiveService.finishFileTask(
@@ -221,13 +272,18 @@ class TaskLifecycle {
         message: error && error.message || 'File Task 终态写入失败'
       };
     }
-    if (result && result.ok !== false) return { ok: true, result };
+    if (result && result.ok !== false) {
+      if (!options.deferOwnerCompletion) await this._recordFileOwnerCompletion(context, channel, terminalOutcome);
+      return { ok: true, result };
+    }
     const current = result && result.taskRun;
     if (result && result.code === 'ARCHIVE_TASK_STATUS_CONFLICT'
         && current) {
-      return current.status === terminalOutcome.taskStatus
-        ? { ok: true, benign: true, result }
-        : { ok: false, conflict: true, result };
+      if (current.status === terminalOutcome.taskStatus) {
+        if (!options.deferOwnerCompletion) await this._recordFileOwnerCompletion(context, channel, terminalOutcome);
+        return { ok: true, benign: true, result };
+      }
+      return { ok: false, conflict: true, result };
     }
     if (!this.persistTerminalIntent) {
       const error = new Error('File Task 终态写入失败且持久恢复接口不可用');
@@ -241,7 +297,7 @@ class TaskLifecycle {
         batchContext: context
       },
       sourceOperation: channel,
-      terminalOutcome
+      terminalOutcome: pendingFileTerminalOutcome(terminalOutcome, options.afterTerminalUnrouted)
     });
     if (!persisted || persisted.persisted !== true) {
       const error = new Error('File Task 终态意图未形成持久记录');
@@ -357,6 +413,7 @@ class TaskLifecycle {
             manifest,
             moduleCode: policy.moduleCode,
             moduleName: policy.moduleName,
+            ownerTerminalRecovery: fileTaskOwnerRecovery(payload),
             metadata: { ...payloadMetadata, channel: policy.channel, flowSource: flow.source }
           });
       if (!reserved || reserved.ok === false || !reserved.batch) {
@@ -561,7 +618,8 @@ class TaskLifecycle {
           },
           sourceOperation: policy.channel,
           settleFiles: settlementFiles,
-          terminalOutcome
+          terminalOutcome: pendingFileTerminalOutcome(terminalOutcome,
+            typeof payload.afterTerminal === 'function' && !payload.afterTerminalIntent)
         });
         if (!persisted || persisted.persisted !== true) {
           const error = new Error('File Task artifact 未 durable 且未形成恢复记录');
@@ -569,19 +627,15 @@ class TaskLifecycle {
           throw error;
         }
       } else {
-        const finished = await this._finishFileTask(context, policy.channel, terminalOutcome);
+        const finished = await this._finishFileTask(context, policy.channel, terminalOutcome, {
+          deferOwnerCompletion: true,
+          afterTerminalUnrouted: typeof payload.afterTerminal === 'function' && !payload.afterTerminalIntent
+        });
         terminalSettled = finished.ok === true;
       }
-      if (terminalSettled && typeof payload.afterTerminal === 'function') {
-        try {
-          await payload.afterTerminal({ context, terminalStatus, businessResult, businessError });
-        } catch (error) {
-          this._warn({
-            channel: policy.channel,
-            code: error.code || 'ARCHIVE_TASK_AFTER_TERMINAL_FAILED',
-            message: error.message || '任务终态后清理失败'
-          });
-        }
+      if (terminalSettled) {
+        await this._completeFileOwnerAfterTerminal(context, policy.channel, terminalOutcome, payload,
+          { context, terminalStatus, businessResult, businessError });
       }
       if (businessError) throw businessError;
       return businessResult;
@@ -1385,6 +1439,7 @@ class TaskLifecycle {
           manifest,
           moduleCode: policy.moduleCode,
           moduleName: policy.moduleName,
+          ownerTerminalRecovery: fileTaskOwnerRecovery(payload),
           metadata: { ...payloadMetadata, channel: policy.channel, flowSource: flow.source }
         });
         if (!reserved || reserved.ok === false || !reserved.batch) {
@@ -1559,7 +1614,8 @@ class TaskLifecycle {
           owner: { version: 1, kind: 'file-batch', batchContext },
           sourceOperation: policy.channel,
           settleFiles: settlementFiles,
-          terminalOutcome: terminalIntent
+          terminalOutcome: pendingFileTerminalOutcome(terminalIntent,
+            typeof payload.afterTerminal === 'function' && !payload.afterTerminalIntent)
         });
         if (!persisted || persisted.persisted !== true) {
           const error = new Error('Deferred File Task artifact 未 durable 且未形成恢复记录');
@@ -1569,23 +1625,20 @@ class TaskLifecycle {
         finished = { ok: false, persisted: true };
       } else {
         finished = batchContext
-          ? await this._finishFileTask(batchContext, policy.channel, terminalIntent)
+          ? await this._finishFileTask(batchContext, policy.channel, terminalIntent, {
+              deferOwnerCompletion: true,
+              afterTerminalUnrouted: typeof payload.afterTerminal === 'function' && !payload.afterTerminalIntent
+            })
           : await this._finishOperationTask(context, policy.channel, terminalIntent);
       }
-      if (finished.ok === true && typeof payload.afterTerminal === 'function') {
+      if (finished.ok === true && batchContext) {
+        await this._completeFileOwnerAfterTerminal(batchContext, policy.channel, terminalIntent, payload,
+          { context: batchContext, terminalStatus, businessResult, businessError });
+      } else if (finished.ok === true && typeof payload.afterTerminal === 'function') {
         try {
-          await payload.afterTerminal({
-            context: batchContext || context,
-            terminalStatus,
-            businessResult,
-            businessError
-          });
+          await payload.afterTerminal({ context, terminalStatus, businessResult, businessError });
         } catch (error) {
-          this._warn({
-            channel: policy.channel,
-            code: error.code || 'ARCHIVE_TASK_AFTER_TERMINAL_FAILED',
-            message: error.message || '任务终态后清理失败'
-          });
+          this._warn({ channel: policy.channel, code: error.code || 'ARCHIVE_TASK_AFTER_TERMINAL_FAILED', message: error.message });
         }
       }
       if (businessError) throw businessError;

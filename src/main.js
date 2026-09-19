@@ -36,7 +36,8 @@ const os = require('node:os'); // v2.1.12 β.1-T3：多 worker D33 OOM clamp（c
 const { AsyncLocalStorage } = require('node:async_hooks');
 const XLSX = require('xlsx');
 const { performance } = require('node:perf_hooks');
-const { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, Notification, powerMonitor, shell } = require('electron');
+const { createDarkModeScheduler, THEME_BACKGROUND_COLORS } = require('./main-process/dark-mode-scheduler');
 const {
   parsePackagedRuntimeRequest
 } = require('./main-process/background-execution/canary/packaged-runtime-request');
@@ -155,11 +156,21 @@ const {
   createArchiveRuntimeDelegate
 } = require('./main-process/archive-center/archive-runtime-delegate');
 const {
+  createPositionOwnedDeleteSourceResolver,
+  positionDeleteSourceReferences
+} = require('./main-process/archive-center/position-owned-delete-sources');
+const { createPositionReportDeleteProtection } = require('./main-process/position-reconciliation/archive-report-delete-protection');
+const {
+  positionInputFilePlanEvidence,
+  positionFilePlanSettlementFiles
+} = require('./main-process/position-reconciliation/archive-file-plan-evidence');
+const {
   createArchiveStorageRootManager
 } = require('./main-process/archive-center/storage-root-manager');
 const {
   createArchiveCenterController
 } = require('./main-process/archive-center/controller');
+const { resolveRetentionDays } = require('./main-process/archive-center/retention-policy');
 const {
   createArchiveOutboxStore
 } = require('./main-process/archive-center/outbox-store');
@@ -421,7 +432,8 @@ const {
   buildVccImportArchiveHandoffFiles,
   listRecoverableVccImportArchiveBatchIds,
   recoverVccImportArchiveTasks,
-  reconcileVccImportArchiveLineageAtStartup
+  reconcileVccImportArchiveLineageAtStartup,
+  persistVccImportHandoffV2
 } = require('./main-process/vcc-financial-op-archive-lineage');
 const { vccFinancialOpErrorResult } = require('./main-process/vcc-financial-op-ipc');
 const {
@@ -576,6 +588,8 @@ const {
 const {
   generateValidateAndPublishMultiOutput
 } = require('./main-process/toolbox-background/multi-output-validator');
+const { MAX_ROW_SPLIT_FILES, publicResult: toolboxRowsPublicResult } = require('./main-process/toolbox-row-split/contracts');
+const { prepareRows: prepareToolboxRows, generateValidateAndPublishRows } = require('./main-process/toolbox-row-split/service');
 const {
   publishToolboxPublicationAsync,
   recoverToolboxPublicationsAsync
@@ -585,6 +599,8 @@ const {
 } = require('./main-process/toolbox-output-publication');
 const {
   recoverToolboxPublicationsIntoArchive,
+  acknowledgeToolboxPublicationReceipts: acknowledgeToolboxPublicationReceiptsIntoArchive,
+  isPublicationOnlyFileTask,
   toolboxRecoveryOutputFiles: toolboxFinalOutputFiles
 } = require('./main-process/toolbox-archive-recovery');
 const {
@@ -747,6 +763,7 @@ if (!packagedRuntimeModeSelected && process.platform === 'win32') {
 }
 
 let mainWindow = null;
+let darkModeScheduler = null;
 let applicationStartupComplete = false;
 let mainWindowReady = false;
 let initialStartupWebContentsId = null;
@@ -1424,7 +1441,7 @@ async function showImportOpenDialog(scope, options) {
 function createPreviewSourceFreshnessGuard(filePaths, label) {
   const snapshots = (Array.isArray(filePaths) ? filePaths : []).map((filePath) => {
     const resolvedPath = path.resolve(String(filePath || ''));
-    const snapshot = sourceSnapshotFromStat(fs.statSync(resolvedPath));
+    const snapshot = sourceSnapshotFromStat(fs.statSync(resolvedPath, { bigint: true }));
     if (!snapshot) throw new Error(`${label}源文件不可读`);
     return { filePath: resolvedPath, snapshot };
   });
@@ -1432,7 +1449,7 @@ function createPreviewSourceFreshnessGuard(filePaths, label) {
     for (const item of snapshots) {
       let stat;
       try {
-        stat = fs.statSync(item.filePath);
+        stat = fs.statSync(item.filePath, { bigint: true });
       } catch (_error) {
         throw new Error(`${label}源文件已不存在，请重新选择`);
       }
@@ -4288,7 +4305,7 @@ function createWindow(options = {}) {
     minWidth: 1080,
     minHeight: 760,
     frame: false,
-    backgroundColor: '#f3efe6',
+    backgroundColor: THEME_BACKGROUND_COLORS[darkModeScheduler.refresh().effectiveTheme],
     show: false,
     icon: windowIcon,
     webPreferences: {
@@ -4697,8 +4714,17 @@ function registerArchiveCenterHandlers() {
     }
     return callArchiveCenter('setLocked', batchId, locked);
   });
-  archiveCenterMutationIpcHandle('archive-center:delete-batch', '删除批次', (_event, batchId) => {
-    return callArchiveCenter('deleteBatch', batchId);
+  ipcMain.handle('archive-center:prepare-delete-batch', (event, batchId) => {
+    return callArchiveCenter('prepareDeleteBatch', batchId, { senderId: event.sender.id });
+  });
+  archiveCenterMutationIpcHandle('archive-center:delete-batch', '删除批次', (event, batchId, confirmationToken) => {
+    return callArchiveCenter('deleteBatch', batchId, confirmationToken, { senderId: event.sender.id });
+  });
+  ipcMain.handle('archive-center:list-delete-cleanup-jobs', () => {
+    return callArchiveCenter('listDeleteCleanupJobs');
+  });
+  archiveCenterMutationIpcHandle('archive-center:retry-delete-cleanup-job', '重试永久删除', (_event, cleanupJobId) => {
+    return callArchiveCenter('retryDeleteCleanupJob', cleanupJobId);
   });
   archiveCenterMutationIpcHandle('archive-center:select-retry-sources',
     '选择存档恢复文件',
@@ -4718,6 +4744,9 @@ function registerArchiveCenterHandlers() {
   );
   archiveCenterMutationIpcHandle('archive-center:set-retention-days', '保存存档设置', (_event, retentionDays) => {
     return callArchiveCenter('setRetentionDays', retentionDays);
+  });
+  archiveCenterMutationIpcHandle('archive-center:set-module-retention-days', '保存模块存档设置', (_event, payload) => {
+    return callArchiveCenter('setModuleRetentionDays', payload);
   });
   ipcMain.handle('archive-center:get-stats', () => callArchiveCenter('getStats'));
   ipcMain.handle('archive-center:start-entry-maintenance', (_event, visitId) => {
@@ -4851,10 +4880,13 @@ function protectedInterruptedTaskBatchIds() {
   } catch (error) { return { batchIds: [], taskRunIds: [], sweepUnsafe: true, error }; }
   try {
     const pending = readPositionPendingOperation();
-    const owner = positionPendingOwner(pending);
-    if (owner.kind === 'file-batch') batchIds.add(owner.batchContext.batchId);
-  } catch (_error) {
-    // 无 pending 或证据损坏时不猜测。
+    if (pending) {
+      const owner = positionPendingOwner(pending);
+      if (owner.kind === 'file-batch') batchIds.add(owner.batchContext.batchId);
+      else taskRunIds.push(owner.operationContext.taskRunId);
+    }
+  } catch (error) {
+    return { batchIds: [...batchIds], taskRunIds, sweepUnsafe: true, error };
   }
   for (const batchId of acquiringRunData.listRecoverableArchiveBatchIds({
     userDataDir: path.dirname(database.dbPath)
@@ -4897,15 +4929,48 @@ function initializeArchiveCenter() {
     'archive-center',
     'outbox'
   ));
-  const createService = (rootDir) => createArchiveService({
-    database: database.db,
-    rootDir,
-    opener: (filePath) => shell.openPath(filePath),
-    onArtifactReady: (completed, repository) => {
-      if (bizOpV327Module) bizOpV327Module.readyHold(completed, repository);
-    },
-    onSourceReleased: cleanupPositionArchiveSourcePaths
-  });
+  const createService = (rootDir) => {
+    const service = createArchiveService({
+      database: database.db,
+      rootDir,
+      resolveRetentionDays: (moduleId) => resolveRetentionDays(database, moduleId),
+      opener: (filePath) => shell.openPath(filePath),
+      onArtifactReady: (completed, repository) => {
+        if (bizOpV327Module) bizOpV327Module.readyHold(completed, repository);
+      },
+      onSourceReleased: cleanupPositionArchiveSourcePaths
+    });
+    service.runDeleteWithOwnerGuard = (batchId, operation, options) => (
+      archiveCenterService.runDeleteWithOwnerGuard(batchId, operation, options)
+    );
+    service.resolveOwnedDeleteSources = createPositionOwnedDeleteSourceResolver({
+      userDataPath: path.dirname(database.dbPath),
+      reportReferenceProvider: createPositionReportDeleteProtection({
+        userDataPath: path.dirname(database.dbPath),
+        getExpectedCheckpoint: () => database.getSetting(POSITION_SIDE_DB_CHECKPOINT_SETTING)
+          || database.getSetting(POSITION_SIDE_DB_BOOTSTRAP_SETTING)
+      }),
+      protectedPathProvider: async ({ batch, artifacts }) => {
+        // 在记录层排除本批次，不能从路径集合删元素，否则会漏掉其他批次的同路径引用。
+        const references = positionDeleteSourceReferences(service.repository, batch.id, artifacts);
+        const protectedPaths = positionPersistentStagingProtectionPaths(
+          references.protectedPaths.concat(archiveOutbox.listSourcePaths()),
+          readPositionPendingOperation()
+        );
+        if (!Array.isArray(protectedPaths)) throw new Error('平盘暂存保护清单不可验证');
+        if (positionReconciliationService) {
+          const activePaths = positionReconciliationService.activeImportStagingPaths();
+          if (!Array.isArray(activePaths)) throw new Error('平盘活动暂存保护清单不可验证');
+          protectedPaths.push(...activePaths);
+        }
+        return {
+          protectedPaths,
+          sharedPaths: references.sharedPaths
+        };
+      }
+    });
+    return service;
+  };
   const archiveRepository = createArchiveRepository(database.db);
   const runtimeService = createArchiveRuntimeDelegate({
     repository: archiveRepository,
@@ -5073,6 +5138,7 @@ function registerAppHandlers() {
       previewModal: process.env.APP_CAPTURE_PATH ? (process.env.APP_PREVIEW_MODAL || '') : '',
       // v2.0.0-beta.2 F1 / v2.1.15 W4：UI 风格恒为 'Clear'（General 已弃用）；renderer 启动时立即应用
       uiStyle: database.getUiStyle() || 'Clear',
+      ...darkModeScheduler.refresh(),
       // 上次使用模块；renderer 启动时恢复
       currentModule: database.getCurrentModule() || 'statement-generator',
       // v2.1.0-beta.3 T4：对账单ReconID修复模块「账单类别」持久化（business | gateway | null）
@@ -5087,6 +5153,13 @@ function registerAppHandlers() {
   //   getUiStyle 兜底后恒返回 'Clear'，renderer 启动 applyUiStyle 仍可用。
   ipcMain.handle('settings:get-ui-style', () => {
     return database.getUiStyle() || 'Clear';
+  });
+  ipcMain.handle('settings:set-dark-mode-schedule', (_event, config) => {
+    try {
+      return { status: 'ok', ...darkModeScheduler.setSchedule(config) };
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
   });
   ipcMain.handle('settings:set-current-module', (_event, moduleId) => {
     try {
@@ -15415,21 +15488,37 @@ function registerNewAccountHandlers() {
   // 四类明细和系统OP使用独立表空间；导入/计算在 worker 中执行，归档在主库事务中执行。
   // ==========================================================================
 
-  ipcMain.handle('vccFinancialOp:import:pick-files', async () => {
+  const vccImportPlans = new Map();
+  const vccImportPlanOwners = new WeakSet();
+  const { publicImportPlan, resolveImportPlan, planError: vccPlanError } = require('./backend/vcc-financial-op/workbook-import-plan');
+  ipcMain.handle('vccFinancialOp:import:pick-files', async (event) => {
+    const owner = event.sender;
+    const selectionToken = {};
+    vccImportPlans.set(owner.id, selectionToken);
+    if (!vccImportPlanOwners.has(owner)) {
+      vccImportPlanOwners.add(owner);
+      owner.once('destroyed', () => vccImportPlans.delete(owner.id));
+    }
     const choice = await showImportOpenDialog('vcc-financial-op', {
       title: '选择 VCC 财务OP校验原表（可多选）',
       filters: [{ name: 'Excel', extensions: ['xlsx'] }],
       properties: ['openFile', 'multiSelections']
     });
     if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
+      if (vccImportPlans.get(owner.id) === selectionToken) vccImportPlans.delete(owner.id);
       return { status: 'cancelled' };
     }
     try {
-      const files = await getVccFinancialOpService().inspectSelectedFiles(choice.filePaths);
-      return { status: 'success', files };
+      const plan = await getVccFinancialOpService().inspectSelectedFiles(choice.filePaths, (progress) => {
+        if (!owner.isDestroyed()) owner.send('vccFinancialOp:import:progress', progress);
+      });
+      if (owner.isDestroyed() || vccImportPlans.get(owner.id) !== selectionToken) throw vccPlanError('vcc-import-plan-stale', '文件选择已更新，请重新预检');
+      vccImportPlans.set(owner.id, plan);
+      return { status: 'success', plan: publicImportPlan(plan) };
     } catch (error) {
       return {
         status: 'error',
+        code: error && error.code || 'vcc-import-failed',
         message: error && error.message ? error.message : String(error),
         detailLines: error && Array.isArray(error.detailLines) ? error.detailLines : []
       };
@@ -15437,8 +15526,13 @@ function registerNewAccountHandlers() {
   });
 
   trackedIpcHandle('vccFinancialOp:import:apply', 'VCC财务OP校验', '导入文件', {
-    prepare: async (_event, payload = {}) => {
-      const inspectedFiles = payload.files;
+    prepare: async (event, payload = {}) => {
+      const plan = vccImportPlans.get(event.sender.id);
+      const inspectedFiles = resolveImportPlan(plan, payload);
+      await getVccFinancialOpService().validateImportPlan(plan, (progress) => {
+        if (!event.sender.isDestroyed()) event.sender.send('vccFinancialOp:import:progress', progress);
+      });
+      if (event.sender.isDestroyed() || vccImportPlans.get(event.sender.id) !== plan) throw vccPlanError('vcc-import-plan-stale', '导入计划已更新');
       const fileDescriptors = Object.freeze(inspectedFiles.map((file) => {
         const { filePath: _filePath, ...descriptor } = file;
         return Object.freeze(descriptor);
@@ -15461,12 +15555,12 @@ function registerNewAccountHandlers() {
             ...descriptor,
             filePath: fileEvidence.filePlan.inputs[index].filePath
           }));
-          return {
-            vccImportArchiveHandoffFiles: await prepareVccImportArchiveHandoff(
-              { ...payload, files },
-              batchContext
-            )
-          };
+          if (event.sender.isDestroyed() || vccImportPlans.get(event.sender.id) !== plan) throw vccPlanError('vcc-import-plan-stale', '导入计划已失效');
+          const handoff = await prepareVccImportArchiveHandoff({ files }, batchContext);
+          persistVccImportHandoffV2(vccImportArchiveRecoveryOptions().archiveRepository,
+            batchContext, fileEvidence.filePlan.inputs, handoff);
+          vccImportPlans.delete(event.sender.id);
+          return { vccImportArchiveHandoffFiles: handoff };
         }
       };
     },
@@ -15478,7 +15572,6 @@ function registerNewAccountHandlers() {
           ...descriptor,
           filePath: taskContext.fileEvidence.filePlan.inputs[index].filePath
         }));
-        const businessPayload = { ...payload, files };
         service = getVccFinancialOpService();
         const handoffFiles = taskContext.fileEvidence.vccImportArchiveHandoffFiles;
         const settled = await taskContext.settleArtifacts({
@@ -15493,10 +15586,17 @@ function registerNewAccountHandlers() {
           error.code = 'VCC_IMPORT_ARCHIVE_HANDOFF_FAILED';
           throw error;
         }
-        const workerHandoffFiles = handoffFiles.map((file, index) => Object.freeze({
-          ...file,
-          archiveArtifactId: settled.results[index].artifact.id
-        }));
+        const frozenFiles = [];
+        for (let index = 0; index < files.length; index += 1) {
+          const artifactId = settled.results[index].artifact.id;
+          const ready = await archiveCenterService.service.resolveVerifiedArtifact(artifactId);
+          if (!ready?.ok) throw Object.assign(new Error(ready?.message || '无法读取已冻结原件'), { code: ready?.code });
+          const metadata = handoffFiles[index].metadata;
+          frozenFiles.push({ ...files[index], filePath: ready.filePath, archiveArtifactId: artifactId,
+            members: metadata.vccSourceMembers });
+        }
+        const workerHandoffFiles = { version: 2, taskRunId: batchContext.taskRunId, files: frozenFiles };
+        const businessPayload = { targetMonth: payload.targetMonth, files: frozenFiles };
         const result = await service.importSelectedFiles(businessPayload, (progress) => {
           if (event && event.sender && !event.sender.isDestroyed()) {
             event.sender.send('vccFinancialOp:import:progress', progress);
@@ -15511,6 +15611,7 @@ function registerNewAccountHandlers() {
           : {};
         const businessResult = {
           status: 'error',
+          code: error && error.code || 'vcc-import-failed',
           message: error && error.message ? error.message : String(error),
           detailLines: error && Array.isArray(error.detailLines) ? error.detailLines : [],
           batchId: partial.batchId || null,
@@ -15902,6 +16003,17 @@ function registerNewAccountHandlers() {
       return { status: 'error', message: error && error.message ? error.message : String(error) };
     }
   });
+
+  supportIpcHandle('vccFinancialOp:export:review', '导出 VCC 待确认表',
+    require('./main-process/vcc-financial-op-review-ipc').createReviewExportHandler({
+      getService: () => vccFinancialOpService,
+      dialog,
+      getWindow: () => mainWindow,
+      documentsPath: app.getPath('documents'),
+      tempRoot: path.join(app.getPath('userData'), 'run-data', 'vcc-financial-op', 'review-export'),
+      protectedRoots: [app.getPath('userData'), app.getAppPath(), process.resourcesPath,
+        path.dirname(database.dbPath)]
+    }));
 
   trackedIpcHandle('vccFinancialOp:export:result', 'VCC财务OP校验', '导出校验结果表', {
     prepare: async (_event, payload = {}) => {
@@ -18867,7 +18979,7 @@ function writePositionPendingOperation(pending, operationToken) {
 
 function capturePositionArchiveFileSnapshot(filePath) {
   try {
-    return sourceSnapshotFromStat(fs.statSync(filePath));
+    return sourceSnapshotFromStat(fs.statSync(filePath, { bigint: true }));
   } catch (_error) {
     return null;
   }
@@ -19803,6 +19915,7 @@ function registerPositionReconciliationHandlers() {
             allocation: 'eager',
             inputs: files.map((file) => ({
               filePath: file.filePath,
+              ...positionInputFilePlanEvidence(file),
               originalName: file.originalName,
               role: 'input',
               sourceOperation: 'position-reconciliation:bank:apply-import'
@@ -19860,6 +19973,7 @@ function registerPositionReconciliationHandlers() {
             allocation: 'eager',
             inputs: files.map((file) => ({
               filePath: file.filePath,
+              ...positionInputFilePlanEvidence(file),
               originalName: file.originalName,
               role: 'input',
               sourceOperation: 'position-reconciliation:source:apply-import'
@@ -20320,10 +20434,10 @@ function registerPositionReconciliationHandlers() {
 //     单文件成功 { status:'success', filePath }
 //     多文件成功 { status:'success', files:[{filePath,fileName,matchedCount}] }
 //     取消另存为 { status:'cancelled' }
-//     失败     { status:'failed', message, detailLines }（表头不一致 / 空文件 / 字段缺失 / 运行错误）
+//     失败     { status:'failed', message, detailLines, code? }（表头不一致 / 空文件 / 字段缺失 / 运行错误）
 //   trackedIpcHandle 仅在 status∈{ok,success} 时计 usage（取消/失败不计）。
 //
-// 把 catch 到的异常归一为 {status:'failed', message, detailLines}（FileValidationError / ToolboxHeaderMismatchError 带 detailLines）。
+// 把异常归一为失败结果，保留已有错误码与诊断；无错误码的旧异常仍保持原返回形状。
 function toolboxFailureResult(error) {
   const message = error && error.message ? String(error.message) : String(error);
   const detailLines = error && Array.isArray(error.detailLines) ? error.detailLines.slice() : [];
@@ -20335,7 +20449,8 @@ function toolboxFailureResult(error) {
       detailLines.push(line);
     }
   }
-  return { status: 'failed', message, detailLines };
+  return { status: 'failed', message, detailLines,
+    ...(error && typeof error.code === 'string' && error.code ? { code: error.code } : {}) };
 }
 
 function shouldPreserveToolboxTemporaryFiles(error) {
@@ -20517,27 +20632,18 @@ async function publishToolboxArtifacts(
 }
 
 async function acknowledgeToolboxPublicationReceipts(taskIds) {
-  const requested = [...new Set((Array.isArray(taskIds) ? taskIds : []).map(String))];
-  if (requested.length === 0) return;
-  const finalized = await recoverToolboxPublicationsAsync({
+  return acknowledgeToolboxPublicationReceiptsIntoArchive({
     userDataDir: app.getPath('userData'),
-    deferCommittedRecovery: true,
-    acknowledgedCommittedTaskIds: requested
+    archiveCenter: archiveCenterService,
+    recoverPublications: recoverToolboxPublicationsAsync,
+    taskIds
   });
-  const cleaned = new Set((Array.isArray(finalized && finalized.recovered)
-    ? finalized.recovered
-    : []).filter((item) => item && item.action === 'commit-cleanup')
-    .map((item) => String(item.taskId)));
-  const missing = requested.filter((taskId) => !cleaned.has(taskId));
-  if (missing.length > 0) {
-    throw new Error(`工具箱 publication receipt 未完成确认清理：${missing.join('、')}`);
-  }
 }
 
 function captureToolboxTargetSnapshot(targetPath) {
   const resolvedPath = path.resolve(String(targetPath || ''));
   try {
-    const stat = fs.lstatSync(resolvedPath);
+    const stat = fs.lstatSync(resolvedPath, { bigint: true });
     const snapshot = sourceSnapshotFromStat(stat);
     if (!snapshot) throw new Error(`输出目标不是可覆盖的普通文件：${resolvedPath}`);
     return Object.freeze({ exists: true, snapshot: Object.freeze(snapshot) });
@@ -20589,7 +20695,7 @@ function assertToolboxTargetSnapshotsFresh(targetPaths, snapshots) {
   for (let index = 0; index < paths.length; index += 1) {
     let stat = null;
     try {
-      stat = fs.lstatSync(paths[index]);
+      stat = fs.lstatSync(paths[index], { bigint: true });
     } catch (error) {
       if (!error || error.code !== 'ENOENT') throw error;
     }
@@ -20612,13 +20718,14 @@ function assertToolboxTargetsDoNotAliasSources(sourcePaths, targetPaths) {
 
 let toolboxSplitReadContext = null;
 
-function createToolboxSplitReadContext(sourceFilePath) {
+function createToolboxSplitReadContext(sourceFilePath, dataRowCount) {
   const resolvedPath = path.resolve(String(sourceFilePath || ''));
-  const snapshot = sourceSnapshotFromStat(fs.statSync(resolvedPath));
+  const snapshot = sourceSnapshotFromStat(fs.statSync(resolvedPath, { bigint: true }));
   if (!snapshot) throw new Error('拆分源文件不可读，请重新选择');
   const context = Object.freeze({
     token: randomUUID(),
     sourceFilePath: resolvedPath,
+    dataRowCount,
     snapshot: Object.freeze({ ...snapshot })
   });
   toolboxSplitReadContext = context;
@@ -20644,7 +20751,7 @@ function clearToolboxSplitReadContext(context) {
 function assertToolboxSplitSourceFresh(context, sourceEvidence) {
   let stat;
   try {
-    stat = fs.statSync(context.sourceFilePath);
+    stat = fs.statSync(context.sourceFilePath, { bigint: true });
   } catch (_error) {
     clearToolboxSplitReadContext(context);
     throw new Error('拆分源文件已不存在，请重新选择');
@@ -20878,19 +20985,19 @@ function registerToolboxHandlers() {
         return { status: 'cancelled' };
       }
       const sourceFilePath = choice.filePaths[0];
-      const readStartedSnapshot = sourceSnapshotFromStat(fs.statSync(sourceFilePath));
+      const readStartedSnapshot = sourceSnapshotFromStat(fs.statSync(sourceFilePath, { bigint: true }));
       if (!readStartedSnapshot) throw new Error('拆分源文件不可读，请重新选择');
 
       // 普通与 Worker 只区分执行位置，读取、matchValue 和字段去重均走同一 style-aware facade。
       const scanResult = await shouldUseLargeChannel(sourceFilePath)
         ? await dispatchLargeSplit({ op: 'scanFields', filePath: sourceFilePath }).promise
         : await scanToolboxSplitFields(sourceFilePath);
-      const { headers, valuesByField } = scanResult || {};
+      const { headers, valuesByField, dataRowCount } = scanResult || {};
       if (!headers || headers.length === 0) {
         return { status: 'failed', message: '文件为空或不可读，请重新导入', detailLines: [] };
       }
-      const readContext = createToolboxSplitReadContext(sourceFilePath);
-      if (!sourceSnapshotMatchesStat(readStartedSnapshot, fs.statSync(sourceFilePath))) {
+      const readContext = createToolboxSplitReadContext(sourceFilePath, dataRowCount);
+      if (!sourceSnapshotMatchesStat(readStartedSnapshot, fs.statSync(sourceFilePath, { bigint: true }))) {
         clearToolboxSplitReadContext(readContext);
         throw new Error('拆分源文件在读取过程中已变化，请重新选择');
       }
@@ -20898,6 +21005,8 @@ function registerToolboxHandlers() {
         status: 'success',
         sourceFilePath: readContext.sourceFilePath,
         splitReadToken: readContext.token,
+        dataRowCount: readContext.dataRowCount,
+        maxRowSplitFiles: MAX_ROW_SPLIT_FILES,
         headers,
         valuesByField
       };
@@ -20914,14 +21023,17 @@ function registerToolboxHandlers() {
     async prepare(_event, payload = {}) {
       try {
         const readContext = requireToolboxSplitReadContext(payload);
+        if (![undefined, 'single', 'multiple', 'rows'].includes(payload.mode)) {
+          throw new Error('不支持的拆分模式');
+        }
         const { field, values } = payload;
-        if (payload.mode !== 'multiple' && !field) {
+        if (payload.mode !== 'multiple' && payload.mode !== 'rows' && !field) {
           return {
             proceed: false,
             result: { status: 'failed', message: '未选择拆分字段', detailLines: [] }
           };
         }
-        if (payload.mode !== 'multiple' && (!Array.isArray(values) || values.length === 0)) {
+        if (payload.mode !== 'multiple' && payload.mode !== 'rows' && (!Array.isArray(values) || values.length === 0)) {
           return {
             proceed: false,
             result: { status: 'failed', message: '请至少选择一个值', detailLines: [] }
@@ -20930,7 +21042,29 @@ function registerToolboxHandlers() {
         let outputPaths;
         let targetPlans = null;
         let savePath = '';
-        if (payload.mode === 'multiple') {
+        let rows = null;
+        if (payload.mode === 'rows') {
+          rows = await prepareToolboxRows(payload, readContext, {
+            metadataDirectory: app.getPath('userData'),
+            chooseDirectory: async () => {
+              const choice = await showImportOpenDialog('toolbox-split-export-directory', {
+                title: '选择拆分文件保存目录', properties: ['openDirectory', 'createDirectory']
+              });
+              return !choice.canceled && choice.filePaths && choice.filePaths[0];
+            },
+            confirmOverwrite: async (conflicts) => {
+              const choice = await dialog.showMessageBox(mainWindow, {
+                type: 'warning', buttons: ['返回', '覆盖全部'], defaultId: 0, cancelId: 0,
+                noLink: true, title: '文件已存在',
+                message: `有 ${conflicts.length} 个目标文件已存在，是否覆盖全部？`,
+                detail: conflicts.map((item) => item.fileName).join('\n')
+              });
+              return choice && choice.response === 1;
+            }
+          });
+          if (!rows) return { proceed: false, result: { status: 'cancelled' } };
+          outputPaths = rows.targets.map((item) => item.filePath);
+        } else if (payload.mode === 'multiple') {
           const groups = toolboxNormalizeMultiSplitGroups(payload.groups);
           const directoryChoice = await showImportOpenDialog('toolbox-split-export-directory', {
             title: '选择拆分文件保存目录',
@@ -21002,14 +21136,15 @@ function registerToolboxHandlers() {
           readContext,
           field,
           values,
-          targetPlans
+          targetPlans,
+          rows
         };
         const inputFiles = Object.freeze([Object.freeze({
           filePath: readContext.sourceFilePath,
           role: 'input',
           sourceOperation: 'toolbox:split:export'
         })]);
-        prepared.filePlan = {
+        prepared.filePlan = rows ? rows.filePlan : {
           version: 1,
           allocation: 'eager',
           inputs: inputFiles,
@@ -21041,6 +21176,61 @@ function registerToolboxHandlers() {
         const sourceFilePath = taskContext.fileEvidence.inputFiles[0].filePath;
         const outputPaths = taskContext.fileEvidence.filePlan.outputs
           .map((item) => item.filePath);
+        if (payload.mode === 'rows') {
+          const tempDir = fs.mkdtempSync(path.join(prepared.rows.outputDirectory, '.toolbox-rows-'));
+          let preserveTempDir = false;
+          try {
+            const generated = await generateValidateAndPublishRows({
+              runtime: backgroundExecutionRuntimeManager.get(),
+              filePlan: taskContext.fileEvidence.filePlan,
+              batchContext: taskContext.batchContext,
+              counts: prepared.rows.counts,
+              privateDirectory: tempDir,
+              metadataDirectory: app.getPath('userData'),
+              publisher: (artifacts) => publishToolboxArtifacts(
+                'split-rows', artifacts,
+                taskContext.fileEvidence.filePlan.outputs.map((output) => ({
+                  targetPath: output.filePath,
+                  expectedTargetParentIdentity: output.targetParentIdentity
+                })),
+                taskContext.batchContext, {
+                  protectedSourcePaths: [sourceFilePath],
+                  targetSnapshots: taskContext.fileEvidence.targetSnapshots,
+                  archiveInputFiles: taskContext.fileEvidence.inputFiles,
+                  settleManifestArtifacts: taskContext.settleArtifacts,
+                  fileEvidence: taskContext.fileEvidence
+                }
+              )
+            });
+            const publication = generated.publication;
+            prepared.toolboxPublicationTaskIds = [publication.taskId];
+            prepared.outputFiles = toolboxFinalOutputFiles(publication.files, 'toolbox:split:export');
+            clearToolboxSplitReadContext(readContext);
+            appendActivityLogEntry({
+              level: 'info', source: 'main', domain: 'toolbox', message: '工具箱按行拆分成功',
+              details: [
+                `输入有效行数：${prepared.rows.counts.rowCount}`,
+                `每份最多行数：${prepared.rows.counts.rowsPerFile}`,
+                `输出文件数：${publication.files.length}`,
+                ...buildToolboxAuditDetailLines(publication.files, generated.warningSummary),
+                ...(publication.warnings || [])
+              ]
+            });
+            return toolboxRowsPublicResult(prepared.rows.counts, publication.files,
+              generated.warningSummary, publication.warnings || []);
+          } catch (error) {
+            preserveTempDir = shouldPreserveToolboxTemporaryFiles(error);
+            if (error && ['RESOURCE_BUDGET_UNAVAILABLE', 'ADMISSION_TIMEOUT'].includes(error.code)) {
+              try {
+                appendActivityLogEntry({ level: 'error', source: 'main', domain: 'toolbox',
+                  message: error.message, details: [`错误代码：${error.code}`, ...(error.detailLines || [])] });
+              } catch (_logError) { /* 日志失败不覆盖原始准入错误。 */ }
+            }
+            throw error;
+          } finally {
+            if (!preserveTempDir) cleanupToolboxTemporaryDirectory(tempDir);
+          }
+        }
         if (payload.mode === 'multiple') {
           const outputDirectory = path.dirname(outputPaths[0]);
           const tempDir = fs.mkdtempSync(path.join(outputDirectory, '.toolbox-split-'));
@@ -21818,14 +22008,10 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
             finalizePositionPendingAfterTaskTerminal,
             typeof prepared.afterTerminal === 'function' ? prepared.afterTerminal : null
           )
-        : (meta.channel === 'toolbox:merge' || meta.channel === 'toolbox:split:export')
-          ? () => acknowledgeToolboxPublicationReceipts(
-              prepared.toolboxPublicationTaskIds || []
-            )
-          : meta.channel.startsWith('vccFinancialOp:export:')
-              || meta.channel === 'vccFinancialOp:data-manager:export'
+        : ['toolbox', 'vcc-financial-op'].includes(policy.scopeId)
+            && isPublicationOnlyFileTask({ taskKey: policy.taskKey, moduleId: policy.scopeId })
             ? () => acknowledgeToolboxPublicationReceipts(
-                prepared.vccOutputPublicationTaskIds || []
+                prepared.toolboxPublicationTaskIds || prepared.vccOutputPublicationTaskIds || []
               )
           : (typeof prepared.afterTerminal === 'function' ? prepared.afterTerminal : null),
       afterTerminalIntent: isPositionOperation
@@ -21876,10 +22062,7 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
               { terminalForCurrentTask: true }
             );
             const settled = await controls.settleArtifacts({
-              files: [
-                ...taskContext.fileEvidence.filePlan.inputs,
-                ...taskContext.fileEvidence.filePlan.outputs
-              ].map((item) => ({ artifactKey: item.artifactKey }))
+              files: positionFilePlanSettlementFiles(taskContext.fileEvidence.filePlan)
             });
             if (settled && settled.durable === true) {
               markPositionArchiveDurable({ batchId: batchContext.batchId });
@@ -22031,7 +22214,7 @@ function flushUsageStats() {
 function registerAllIpcHandlers() {
   registerBizOpV327Handlers({ ipcMain, getModule: () => bizOpV327Module, businessOperationRegistry,
     getTaskLifecycle: () => archiveTaskLifecycle, getRuntime: () => backgroundExecutionRuntimeManager.get(),
-    dialog, getWindow: () => mainWindow });
+    dialog, getWindow: () => mainWindow, getStorageRoot });
   registerWindowHandlers();
   registerAppHandlers();
   registerAppUpdateHandlers();
@@ -22257,6 +22440,22 @@ async function initializeApplication() {
     recoverVccStorageMigration({ journalPath: vccStorageMigrationJournalPath() });
     database = new AppDatabase(dataPath);
     database.init({ onStartupPhase: recordStartupPhase });
+    darkModeScheduler = createDarkModeScheduler({
+      readSchedule: () => database.getDarkModeSchedule(),
+      writeSchedule: (config) => database.setDarkModeSchedule(config),
+      nativeTheme,
+      getWindows: () => BrowserWindow.getAllWindows(),
+      focusSource: app,
+      powerMonitor,
+      onChanged: (snapshot) => {
+        for (const window of BrowserWindow.getAllWindows()) {
+          if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
+            window.webContents.send('settings:dark-mode-schedule-changed', snapshot);
+          }
+        }
+      }
+    });
+    darkModeScheduler.start();
     markStartupMetric(STARTUP_METRIC_MARKS.databaseReady);
     // Recovery Contract startup boundary：任何 Archive owner recovery、cleanup 或业务 IPC
     // 之前冻结注册器并预检；BizOP 未决时保留同一预算，在首个 Archive owner 阶段完成全量扫描。
@@ -23284,6 +23483,10 @@ if (!packagedRuntimeModeSelected) {
         normalQuitContinuation = true;
         app.quit();
       });
+  });
+
+  app.on('will-quit', () => {
+    if (darkModeScheduler) darkModeScheduler.stop();
   });
 
   app.on('window-all-closed', () => {

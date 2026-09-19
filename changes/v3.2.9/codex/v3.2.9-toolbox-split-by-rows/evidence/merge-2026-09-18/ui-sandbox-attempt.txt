@@ -1,0 +1,1 @@
+/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron exited with signal SIGABRT

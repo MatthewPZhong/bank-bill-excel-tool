@@ -1,0 +1,99 @@
+# v3.2.9 发布前自审（2026-09-19）
+
+## 当前结论
+
+第三轮隔离原生 [run35400518166](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/35400518166) / head `8779c029ac94c859681d582bff378b426686dc09` 已成功：最终迁移完整121/121、永久删除集成52/52，capture产品PASS；19个运行SHA及最终五文件绑定一致，迁移close P2修复验证闭环。prefix/ArchiveService76/76、SSD45/45和readonly+position15/15复用第二轮相同代码的原生证据，不把SSD采集成功升格为介质准入。本地最终 `release-check` 正在运行（session67830），尚无结果；本记录生成时本轮候选待提交，最终门禁进行中；实际候选SHA以后续PR与外部记录为准。最终完整Windows gate/build、SSD PF、原始独立Worker RSS及Excel/WPS人工仍待完成。原PF/RSS合同未改变。详见 [第三轮冻结与验证](self-review-2026-09-19/runtime-repairs.md#第三轮-windows-迁移修复-8779c029-闭环)。以下前序记录保留各自运行时点，不替代当前候选门禁。
+
+六功能集成后的三项 SST/高位文件身份 P2 已修复为 `30317ee5a9ad8227db0562354d20554edb9e6ae4`，局部回归与独立复审通过。此前修复时点的完整本地门禁通过：501 个单测文件，7,864 PASS / 0 FAIL / 3 Windows 专用 SKIP；59 个集成脚本，2,575/2,575。真实 drain 期间取消的 10,000 Pending 补充验证通过，43 ms 收口，无强制终止。最终 Windows 检查、候选包、完整 PF 和人工验收仍未闭环，尚未合并 main、打正式标签或发布。独立复审未发现上述补丁新增 P2+；Windows 原失败是否全部闭环仍须新候选验证，当前不宣布整版已无 P2。
+
+当前候选 `e47e2a6077877b76b7d5cb490d4a01034a2fec27` 的 [Windows 必需运行 35392054677](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/35392054677) 已终态失败：501 个单测文件、7,867 tests，7,819 PASS / 45 FAIL / 0 cancelled / 3 SKIP；失败为迁移 39、只读副本 4、平盘来源 2。ctime 同名用例 #1076 已在真实 Windows PASS，但单测 exit 1，集成、后续 Windows 专项及 build 未执行。完整日志与逐项审计已保存，不能把局部修复或本地门禁视为平台闭环。详见 [e47 完整门禁与差异](self-review-2026-09-19/runtime-repairs.md#e47e2a60-windows-完整门禁终态)。
+
+隔离 [Windows 短诊断 35397405456](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/35397405456)（head `382928f8`、生产基线 e47、Node22.23.2）已终态失败：SSD 专属回归 44/44、只读副本和平盘夹具 15/15 在原生 Windows PASS；实际磁盘采集因 `SAS` 枚举字符串转换失败，SSD 证明仍 NOT_RUN；迁移取证捕获了 close 后 ctime 变化，产品路径仍失败。后续采集器和迁移修复未获本次运行验证，完整门禁状态不变。详见 [短诊断原始结果](self-review-2026-09-19/runtime-repairs.md#windows-短诊断-382928f8-实际结果)。
+
+第二轮历史：迁移close/ctime第一版修复的本机记录已冻结：旧时点全文件114/114，最终新增16/16及独立14负例通过；当时定义118，未冒称完整118重跑。prefix最终9/9及全文件76/76通过；52项删除集成通过早于prefix最后二次存在确认。隔离原生 [run35399134894](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/35399134894) / head `68ed9cb7351977219e66d605b7360f0e6255ead5` 已失败：独立完整审计确认ArchiveService76/76（含prefix9项）PASS，迁移118项55 PASS/63 FAIL；合计194/131/63，无取消/skip。新增16项原生7 PASS/9 FAIL；集成36 PASS、第37项失败，后15项含新增close两例未执行。canonical未chmod但link/unlink后的writer.close仍改变ctime，第一版仅chmod假设被推翻，当时迁移P2继续修复；后续第三轮闭环见上。SSD45项及实际采集通过，虚拟机宿主介质无法证明，SSD验收仍NOT_RUN。本轮release修复未提交，19/19运行文件SHA绑定通过，完整分组审计已归档；该次失败不能宣布迁移native修复或可交付。详见 [追加修复与证据边界](self-review-2026-09-19/runtime-repairs.md#windows-close-ssd-枚举与陈旧-prefix-追加修复)。
+
+## 审查身份与范围
+
+后续 SSD 设备编号错误准入（P2）及实际 Windows 暴露的枚举转换故障已分别修复并保留各次证据；migration close/ctime第一版被第二轮原生反证后已收紧自有link/unlink边界，第三轮最终121/121及52/52通过，prefix也有原生九项及Service全文件通过；专项修复闭环但最终完整门禁仍在推进。当前 `e47e2a60` 完整 Windows 门禁的45项失败仍是原候选终态；只读/平盘15/15、SSD45/45和迁移121/121各自有绑定输入的专项证据，均不能单独替代最终完整门禁。详见 [SSD 准入发现与闭环](self-review-2026-09-19/runtime-repairs.md#windows-ssd-基准准入-p2)。该发现不推翻已保存的 NOT_RUN，也不声称实际 runner 已发生设备错配。
+
+- 已发布基线：`v3.2.8^{commit}` = `2ba9ef14fe972363b604955636cff0c9ac53700f`，本轮 fetch 后 `origin/main` 仍相同。
+- 只读审查内容：release `6bd55efe0eb1d90c16cd92f3a78e54a39a36b966` 加已有 18 项外观/记录改动。已逐文件备份 SHA-256，未覆盖其他功能分支改动。
+- 版本准备提交：`5001d331bb78bdb82dfaa018ee705b51681bde4f`，收口既有外观修复、版本 3.2.9 和三份发布文档。后续仅追加文档/验证脚本的变动另记录并单独核验；新发现产品问题需重新回到修复与复审。
+- 六个源 SHA 均为 release 祖先；同时核对实际接口、代码和集成测试，未只按分支包含关系判断。
+
+| 功能 | 合同 | 源提交 / 合并提交 |
+|---|---|---|
+| 业务 OP 自动错误报告 | [Spec](codex/v3.2.9-biz-op-error-report-auto-save/Spec-v3.2.9-biz-op-error-report-auto-save.md) / [TechDoc](codex/v3.2.9-biz-op-error-report-auto-save/TechDoc-v3.2.9-biz-op-error-report-auto-save.md) | `3efe5c78` / `896fe12d` |
+| 存档模块保留期限 | [Spec](codex/v3.2.9-archive-retention-by-module/spec.md) / [TechDoc](codex/v3.2.9-archive-retention-by-module/techdoc.md) | `a2bd6e81` / `e1c31139` |
+| 定时深色模式 | [Spec](codex/v3.2.9-night-mode/spec.md) / [TechDoc](codex/v3.2.9-night-mode/techdoc.md) | `654ba97a` / `e134cf4e` |
+| 存档永久删除 | [Spec](codex/v3.2.9-archive-center-permanent-delete/spec.md) / [TechDoc](codex/v3.2.9-archive-center-permanent-delete/techdoc.md) | `b78cf3a5` / `d3ebded6` |
+| 工具箱按行拆分 | [Spec](codex/v3.2.9-toolbox-split-by-rows/spec.md) / [TechDoc](codex/v3.2.9-toolbox-split-by-rows/techdoc.md) | `c03eeb4f` / `0b36ecb6` |
+| VCC 多 Sheet 与待确认导出 | [Spec](codex/v3.2.9-vcc-fin-op-multisheet-review-export/v3.2.9_VCC_Spec.md) / [TechDoc](codex/v3.2.9-vcc-fin-op-multisheet-review-export/v3.2.9_VCC_TechDoc.md) | `069e340c` / `6bd55efe` |
+
+仓库整理 `codex/repository-organization@fd18667a` 经 `07392111` 纳入，含通用规则/Skill 和规范目录；不是第七项业务功能。账户映射设计稿、未提交的 fund-recon-background/template-manager/toolbox-ui 不进入本轮。
+
+## Findings 与闭环
+
+| 项目 | 结果 |
+|---|---|
+| 存档删除 Spec/TechDoc 的 `release/3.2.9` 和“未实施”状态漂移（P3） | 改为实际 `release/v3.2.9`，引用现有实施证据，保留平台 NOT_RUN；不更改删除授权或验收合同。 |
+| 设置组合脚本仍使用删除预检引入前的 API 夹具（验证缺口） | 首次 5/6 PASS、行为组等待确认框超时；确认缺少 `prepareDeleteBatch` 与清理列表接口。补齐受控 token/完整结果后 6/6 PASS，主题与期限交错保存 4/4、73 断言 PASS。无生产逻辑改动。 |
+| 真实 Main 验证脚本在 DOM 更新后截到旧画面（验证缺口） | 增加实际呈现帧订阅与 DOM/像素核对，旧图负例被拒绝、新图通过；隔离路径及真实 3.2.9 版本均检查。未修改产品代码。 |
+| 用户指南仍有 v2 当前终态、解归档“未处理”、rows 字段模式条件及报告范围描述（P3） | 按对应 Spec 修正：当前终态 v3、结果“待确认”与数据集状态分离、字段步骤加条件、报告限真实失败导入的可用诊断。保留历史说明。 |
+| 上轮 VCC FilePlan 初次 metadata 绑定阻断 | 当前 merge 已修复；本轮真实 Main handler→Service→Worker→Archive 再次通过，冻结身份未被改写。 |
+
+本轮按已授权的发布目标修复实际发现的产品缺陷并补验证；代码复审不能代替必要人工验收。
+
+Windows 首次专项发现验证器的 24 小时按键假设与原生 12 小时输入不符（14/16）。原始事件证明控件先产生 `13:30` / `14:00`，应用随后保存相同值，未见生产输入被回包覆盖。已调整夹具，保留严格主题切换和关闭后新值持久化断言，本机 16/16 通过；新候选 Windows 复验待运行。详情见 [release.md](release.md#当前候选的-windows-ci-续做)，失败证据保留。
+
+第二轮 Windows 已确认原生输入 16/16、真实 Main 启动/重载 22 断言通过；随后发现设置验证的隐藏窗口超时与两个 VCC 验证器的 Electron 启动环境问题。修正已在本机通过，Windows 待复验。另从真实截图发现 **104px 原生时间框疑似裁切 AM/PM（潜在 P2）**；既有 DOM 检查没有覆盖内部字段，正在补几何证据，未将这一疑点记为已关闭。见 [第二轮证据](self-review-2026-09-19/windows-round2-summary.json)。
+
+## 首轮实测与边界（后续修复结果见文末）
+
+| 检查 | 当前结果与边界 |
+|---|---|
+| 存档/期限独立跨层探针 | 6/6 PASS；含调用者 token、同内容换 inode、只读副本、共享 Blob 新引用、持久计划重开及维护 owner token。真实 SQLite/文件，受控故障注入。 |
+| VCC 实际 Main 导入链 | 混合三 Sheet 原件→两类来源→两份业务 hold→重开恢复→单类型释放 PASS，外部文件不变。窗口/文件对话框为夹具。 |
+| rows 独立整数探针 | 7,031 组、3,509,509 个范围、19 组超限拒绝 PASS；完整 1000 项结果 167,088 B。只证明规划/预算，不替代实际工作簿容量。 |
+| 外观原生键盘 | 16/16 场景 PASS；真实 Electron 36.9.5 time 控件/CDP 键鼠，包含慢保存、失败、关闭前后合法/非法草稿。 |
+| 日夜界面矩阵 | 15 组、30 个主题、2,760 断言 PASS；1080×760、1240×860、2560×1440，各 DPR 及 125%/150% 网页缩放。隐藏窗口/业务 API 夹具，不等于物理显示器。 |
+| 真实 Main 冷启动/重载 | 最终 3.2.9 两场景 2/2、22 断言 PASS，临时 userData/Documents、真实启动准入及单实例锁。六张实际呈现帧覆盖两种冷启动、重载和设置；逐点核对截图与 DOM。未连续采样全过程，不证明首帧或无闪白。 |
+| 完整本地门禁 | `UNIT_TEST_CONCURRENCY=2 npm run release-check` exit 0，Node 24.13.0，基于 `5001d331`；499 个单测文件，7,861 PASS / 0 FAIL / 3 SKIP；59 个集成脚本全部通过，2,574/2,574。含原门槛 toolbox RSS 31/31；自动集成清单由 runner 生成。 |
+| 最终候选内容覆盖 | 1,521 个原门禁输入中只有两份独立 GUI 验证脚本变化，已分别实跑通过并重新 lint；生产代码、依赖、单测与集成输入全部一致。新增 PF 三脚本单独语法/lint、真实小导出和停写取消通过。最终提交另由 Windows CI 验证。 |
+| 新增 PF runner 的本机核验 | 小导出 19 Sheet/40 附页行 PASS；10,000 Pending 停写取消 PASS、39 ms 收口、forced=false、清理 PASS。macOS Windows 前置核验正常 exit 2 且未生成大样本。上述均不计 PF01–PF05 正式验收；真正 drain 等待仍 NOT_RUN。 |
+| Windows/Excel/WPS/完整性能验收 | 尚未通过；不能将本地组件百万行测量、模拟对话框或 XML 回读升级为正式平台/人工 PASS。 |
+
+详细需求矩阵：[存档/期限](self-review-2026-09-19/archive.md)、[BizOP/rows](self-review-2026-09-19/bizop-toolbox.md)、[VCC](self-review-2026-09-19/vcc.md)。结构化身份与结果：[evidence-summary.json](self-review-2026-09-19/evidence-summary.json)。原始日志保留在 `/private/tmp/v329-release-20260919-3_bafjvz/`；正式 CI/候选 SHA 及后续发布状态见 [release.md](release.md)。
+
+## 发布前未完成项
+
+- 取得对应最终内容的 Windows 必需检查、构建和候选安装包证据；本地完整门禁已通过。
+- 按 VCC AC30/RV12、TechDoc §12.4 完成真实 Windows、Excel/WPS、PF01–PF05。Worker 使用同 PID 的 worker_threads，全进程 RSS 不能伪装成独立线程 RSS 或重复相加；观测缺口需明确记录，不能伪造符合原合同。
+- Windows 原生另存/覆盖/占用、存档删除重启/离线介质、实际物理显示器及真实业务内容按适用合同验收。只使用专用测试数据，用户业务库不参与本轮自动探针。
+- 待条件满足后按 weekly-release 完成受保护 PR、最终 main 检查、附注标签、发布资产及本地 main 快进。未完成前保留待验，禁止把文档更新当成验收结果。
+
+- 几何验证器处理 UA 伪属性与固定弹层零高容器后，本机真实 Main 两场景、26 个断言通过，104px / 132px / 恢复 104px 的小时、分钟、文本范围均完整，输入值不变；本机为 24 小时格式，不替代 Windows AM/PM 结果。见 [本机原生内部字段证据](self-review-2026-09-19/native-geometry-macos.json)。Windows 三处 harness 修复已独立逐行复核，原断言和失败出口均保留。
+
+
+## Windows 原生时间框 P2 修复
+
+候选 `2bbf2043` 的真实 Main 在 Windows/en-US 下显示 `h:mm a`。开始/结束框的 104px 宽度都使 AM/PM 超出 datetime-edit 裁切区并侵入时钟按钮；132px 对照完整，恢复104px再次失败，输入 `18:08` / `19:08` 全程未变。几何取证没有缺项；两张实际呈现截图与逐字段结果见 [第三轮摘要](self-review-2026-09-19/windows-round3-summary.json)。
+
+修复仅将两时间列加宽至132px，保留原生小时制、输入/保存语义和其余尺寸；重生成离线预览时同步带入已合入 release 的现有 CSS。自动回归严格要求正式宽度及恢复后字段完整，并增加1080×760窗口、150%页面缩放下的字段与横向溢出检查；104px历史对照保留为复现证据，不冒充正式结果。当前修复候选尚待新的完整门禁与 Windows 复验。
+
+同轮 VCC Electron/ASAR 与 PF小样本在Windows通过，证明启动环境修复有效；完整 PF因磁盘 MediaType=Unspecified，无法证明SSD而保持NOT_RUN。设置首组仍超时：1次双rAF约2.05秒，11次约21.93秒，26.44秒才进入主题场景。新harness在交互前显示隔离原生测试窗并记录状态/每次双rAF耗时，保留30秒上限及原断言，Windows效果待复验。
+
+本机修复验证：15组尺寸/设备缩放/页面缩放、30个主题场景全部通过；真实Main两场景、38个断言通过，包含1080×760、150%页面缩放的内部字段完整性及无横向溢出；设置6/6、73个交互断言通过。见[修复后本机证据](self-review-2026-09-19/native-time132-repair-macos.json)。Windows及本次生产样式变化后的完整门禁仍待完成。
+
+
+### 修复后的 Windows 首次复验
+
+`e308134c` 首个真实Main场景中，132px生产字段、1080×760/150%窄窗口与恢复后字段均PASS，104px对照继续复现AM/PM裁切，输入值保持不变。设置6/6、73个交互断言也在Windows通过。专项仍FAIL的唯一原因是harness要求恢复启动时被屏幕压缩到1024×720的窗口，但原生minSize1080×760使setBounds按最小尺寸恢复；并非字段裁切回归。新增严格预计算期望可恢复尺寸，保留原生minSize、zoom、inline style、位置、字段几何和值不变检查。该变更已独立复核，但本机与完整门禁同时复跑时被已有BizOP首次激活资源准入阻塞，业务窗口未创建，保留BLOCKED而不调整保护；Windows完整两场景仍待新候选复跑。详见[第四轮摘要](self-review-2026-09-19/windows-round4-summary.json)。
+
+
+`55967078` 的原生最小尺寸恢复检查通过；唯一剩余harness失败是缩放传播的混合快照：早读页面仍1080×760/DPR1，稍后同轮原生字段已720×507/DPR1.5。生产132px、历史104px复现和恢复后几何均符合预期。验证器新增固定请求尺寸/zoom与实际Renderer viewport连续两次一致的等待，并保持原断言，要求页面、原生字段及截图viewport一致；5秒未到位则失败，原90秒总限不变。没有用观测值反推期望。原失败见[第五轮摘要](self-review-2026-09-19/windows-round5-summary.json)，Windows完整两场景待新候选；本机完整门禁持续运行，未为这项验证脚本变更重启已在跑的生产门禁。
+
+
+## SST 与 Windows 高位文件身份续做
+
+六功能集成后的三项 SST/高位文件身份 P2 已修复为 `30317ee5a9ad8227db0562354d20554edb9e6ae4`，局部回归与独立复审通过。本轮完整本地门禁通过：501 个单测文件，7,864 PASS / 0 FAIL / 3 Windows 专用 SKIP；59 个集成脚本，2,575/2,575。真实 drain 期间取消的 10,000 Pending 补充验证通过，43 ms 收口，无强制终止。最终 Windows 检查、候选包、完整 PF 和人工验收仍未闭环，尚未合并 main、打正式标签或发布。详见 [修复审查与证据](self-review-2026-09-19/runtime-repairs.md)。旧成功证据保留原适用范围，PR 保持草稿，尚未合并 main、打标签或正式发布。

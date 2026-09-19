@@ -115,7 +115,10 @@ contextBridge.exposeInMainWorld('desktopApi', {
     openFile: (fileRefId) => ipcRenderer.invoke('archive-center:open-file', fileRefId),
     saveAs: (fileRefId) => ipcRenderer.invoke('archive-center:save-as', fileRefId),
     setLocked: (batchId, locked) => ipcRenderer.invoke('archive-center:set-locked', batchId, locked),
-    deleteBatch: (batchId) => ipcRenderer.invoke('archive-center:delete-batch', batchId),
+    prepareDeleteBatch: (batchId) => ipcRenderer.invoke('archive-center:prepare-delete-batch', batchId),
+    deleteBatch: (batchId, confirmationToken) => ipcRenderer.invoke('archive-center:delete-batch', batchId, confirmationToken),
+    listDeleteCleanupJobs: () => ipcRenderer.invoke('archive-center:list-delete-cleanup-jobs'),
+    retryDeleteCleanupJob: (cleanupJobId) => ipcRenderer.invoke('archive-center:retry-delete-cleanup-job', cleanupJobId),
     selectRetrySources: (batchId) => ipcRenderer.invoke('archive-center:select-retry-sources', batchId),
     retryBatch: (batchId, sourcePaths) => ipcRenderer.invoke('archive-center:retry-batch', batchId, sourcePaths),
     getSettings: () => ipcRenderer.invoke('archive-center:get-settings'),
@@ -152,6 +155,7 @@ contextBridge.exposeInMainWorld('desktopApi', {
       return () => ipcRenderer.removeListener('archive-center:entry-maintenance-failed', wrapped);
     },
     setRetentionDays: (retentionDays) => ipcRenderer.invoke('archive-center:set-retention-days', retentionDays),
+    setModuleRetentionDays: (payload) => ipcRenderer.invoke('archive-center:set-module-retention-days', payload),
     getStats: () => ipcRenderer.invoke('archive-center:get-stats')
   },
   errors: {
@@ -163,6 +167,13 @@ contextBridge.exposeInMainWorld('desktopApi', {
     reset: () => ipcRenderer.invoke('background:reset')
   },
   settings: {
+    setDarkModeSchedule: (config) => ipcRenderer.invoke('settings:set-dark-mode-schedule', config),
+    onDarkModeScheduleChanged: (listener) => {
+      if (typeof listener !== 'function') return () => {};
+      const handler = (_event, snapshot) => listener(snapshot);
+      ipcRenderer.on('settings:dark-mode-schedule-changed', handler);
+      return () => ipcRenderer.removeListener('settings:dark-mode-schedule-changed', handler);
+    },
     // v2.1.15 W4：弃用 General 风格，移除「切换页面风格」入口。setUiStyle 写链路已删；
     //   getUiStyle 保留兜底（main 端恒返回 'Clear'），renderer 启动 applyUiStyle 仍可用。
     getUiStyle: () => ipcRenderer.invoke('settings:get-ui-style'),
@@ -575,6 +586,7 @@ contextBridge.exposeInMainWorld('desktopApi', {
     getRun: (payload) => ipcRenderer.invoke('vccFinancialOp:run:get', payload),
     latestArchivedRun: () => ipcRenderer.invoke('vccFinancialOp:run:latest-archived'),
     exportResult: (payload) => ipcRenderer.invoke('vccFinancialOp:export:result', payload),
+    exportReviewTable: (payload) => ipcRenderer.invoke('vccFinancialOp:export:review', payload),
     listImportMonths: () => ipcRenderer.invoke('vccFinancialOp:imports:list-months'),
     listImportRecords: (payload) => ipcRenderer.invoke('vccFinancialOp:imports:list-records', payload),
     dataManagerOverview: (payload) => ipcRenderer.invoke('vccFinancialOp:data-manager:overview', payload),

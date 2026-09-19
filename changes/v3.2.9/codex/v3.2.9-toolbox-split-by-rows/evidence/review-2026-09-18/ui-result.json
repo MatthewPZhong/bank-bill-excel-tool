@@ -1,0 +1,252 @@
+[
+  {
+    "count": 1,
+    "focusedAfterToggle": "split-by-rows",
+    "viewport": 772,
+    "card": {
+      "top": 281,
+      "bottom": 491,
+      "left": 330,
+      "right": 750,
+      "height": 210,
+      "clientHeight": 208,
+      "scrollHeight": 208,
+      "overflowY": "hidden",
+      "minHeight": "auto"
+    },
+    "body": {
+      "top": 282,
+      "bottom": 415,
+      "left": 331,
+      "right": 749,
+      "height": 133,
+      "clientHeight": 133,
+      "scrollHeight": 133,
+      "overflowY": "visible",
+      "minHeight": "auto"
+    },
+    "button": {
+      "top": 432,
+      "bottom": 468,
+      "left": 510,
+      "right": 570,
+      "height": 36,
+      "clientHeight": 34,
+      "scrollHeight": 34,
+      "overflowY": "visible",
+      "minHeight": "auto"
+    },
+    "message": {
+      "top": 310,
+      "bottom": 407,
+      "left": 419,
+      "right": 721,
+      "height": 97,
+      "clientHeight": 97,
+      "scrollHeight": 97,
+      "overflowY": "visible",
+      "minHeight": "auto"
+    },
+    "buttonVisibleAtCenter": true
+  },
+  {
+    "count": 8,
+    "focusedAfterToggle": "split-by-rows",
+    "viewport": 772,
+    "card": {
+      "top": 36.875,
+      "bottom": 735.125,
+      "left": 330,
+      "right": 750,
+      "height": 698.25,
+      "clientHeight": 696,
+      "scrollHeight": 696,
+      "overflowY": "hidden",
+      "minHeight": "auto"
+    },
+    "body": {
+      "top": 37.875,
+      "bottom": 659.125,
+      "left": 331,
+      "right": 749,
+      "height": 621.25,
+      "clientHeight": 621,
+      "scrollHeight": 621,
+      "overflowY": "visible",
+      "minHeight": "auto"
+    },
+    "button": {
+      "top": 676.125,
+      "bottom": 712.125,
+      "left": 510,
+      "right": 570,
+      "height": 36,
+      "clientHeight": 34,
+      "scrollHeight": 34,
+      "overflowY": "visible",
+      "minHeight": "auto"
+    },
+    "message": {
+      "top": 65.875,
+      "bottom": 651.125,
+      "left": 419,
+      "right": 721,
+      "height": 585.25,
+      "clientHeight": 585,
+      "scrollHeight": 585,
+      "overflowY": "visible",
+      "minHeight": "auto"
+    },
+    "buttonVisibleAtCenter": true
+  },
+  {
+    "count": 9,
+    "focusedAfterToggle": "split-by-rows",
+    "viewport": 772,
+    "card": {
+      "top": 28,
+      "bottom": 744,
+      "left": 330,
+      "right": 750,
+      "height": 716,
+      "clientHeight": 714,
+      "scrollHeight": 766,
+      "overflowY": "hidden",
+      "minHeight": "auto"
+    },
+    "body": {
+      "top": 29,
+      "bottom": 720,
+      "left": 331,
+      "right": 749,
+      "height": 691,
+      "clientHeight": 691,
+      "scrollHeight": 691,
+      "overflowY": "visible",
+      "minHeight": "auto"
+    },
+    "button": {
+      "top": 737,
+      "bottom": 773,
+      "left": 510,
+      "right": 570,
+      "height": 36,
+      "clientHeight": 34,
+      "scrollHeight": 34,
+      "overflowY": "visible",
+      "minHeight": "auto"
+    },
+    "message": {
+      "top": 57,
+      "bottom": 712,
+      "left": 419,
+      "right": 721,
+      "height": 655,
+      "clientHeight": 655,
+      "scrollHeight": 655,
+      "overflowY": "visible",
+      "minHeight": "auto"
+    },
+    "buttonVisibleAtCenter": false
+  },
+  {
+    "count": 30,
+    "focusedAfterToggle": "split-by-rows",
+    "viewport": 772,
+    "card": {
+      "top": 28,
+      "bottom": 744,
+      "left": 330,
+      "right": 750,
+      "height": 716,
+      "clientHeight": 714,
+      "scrollHeight": 2231,
+      "overflowY": "hidden",
+      "minHeight": "auto"
+    },
+    "body": {
+      "top": 29,
+      "bottom": 2184.75,
+      "left": 331,
+      "right": 749,
+      "height": 2155.75,
+      "clientHeight": 2156,
+      "scrollHeight": 2156,
+      "overflowY": "visible",
+      "minHeight": "auto"
+    },
+    "button": {
+      "top": 2201.75,
+      "bottom": 2237.75,
+      "left": 510,
+      "right": 570,
+      "height": 36,
+      "clientHeight": 34,
+      "scrollHeight": 34,
+      "overflowY": "visible",
+      "minHeight": "auto"
+    },
+    "message": {
+      "top": 57,
+      "bottom": 2176.75,
+      "left": 419,
+      "right": 721,
+      "height": 2119.75,
+      "clientHeight": 2120,
+      "scrollHeight": 2120,
+      "overflowY": "visible",
+      "minHeight": "auto"
+    },
+    "buttonVisibleAtCenter": false
+  },
+  {
+    "count": 1000,
+    "focusedAfterToggle": "split-by-rows",
+    "viewport": 772,
+    "card": {
+      "top": 28,
+      "bottom": 744,
+      "left": 330,
+      "right": 750,
+      "height": 716,
+      "clientHeight": 714,
+      "scrollHeight": 69888,
+      "overflowY": "hidden",
+      "minHeight": "auto"
+    },
+    "body": {
+      "top": 29,
+      "bottom": 69842.25,
+      "left": 331,
+      "right": 749,
+      "height": 69813.25,
+      "clientHeight": 69813,
+      "scrollHeight": 69813,
+      "overflowY": "visible",
+      "minHeight": "auto"
+    },
+    "button": {
+      "top": 69859.25,
+      "bottom": 69895.25,
+      "left": 510,
+      "right": 570,
+      "height": 36,
+      "clientHeight": 34,
+      "scrollHeight": 34,
+      "overflowY": "visible",
+      "minHeight": "auto"
+    },
+    "message": {
+      "top": 57,
+      "bottom": 69834.25,
+      "left": 419,
+      "right": 721,
+      "height": 69777.25,
+      "clientHeight": 69777,
+      "scrollHeight": 69777,
+      "overflowY": "visible",
+      "minHeight": "auto"
+    },
+    "buttonVisibleAtCenter": false
+  }
+]

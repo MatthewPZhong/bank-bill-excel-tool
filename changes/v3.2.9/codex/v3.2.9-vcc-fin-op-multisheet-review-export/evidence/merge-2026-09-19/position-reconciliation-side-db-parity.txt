@@ -1,0 +1,5 @@
+==== 平盘资金性质校验 side DB 集成验证 ====
+(node:10919) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+==== 38/38 PASS ====

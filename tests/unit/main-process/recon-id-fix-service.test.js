@@ -404,7 +404,7 @@ function assertCleanCancelledShutdown(harness, control, result, report, activeSt
 }
 
 test('E11-A policy byte-for-byte 沿用 canonical fixture，且 production 保持 false', () => {
-  const fixture = require('../../../changes/background-execution-v3.2.x-contract-baseline/changes/background-execution/validation/fixtures/valid/policy-registry.v3.2.x.json').actions;
+  const fixture = require('../../../changes/v3.2.0~v3.2.5/background-execution-v3.2.x-contract-baseline/changes/background-execution/validation/fixtures/valid/policy-registry.v3.2.x.json').actions;
   assert.deepEqual(RECON_FIX_READONLY_POLICIES, [
     fixture[RECON_FIX_IMPORT_ACTION],
     fixture[RECON_FIX_RUN_READONLY_ACTION]

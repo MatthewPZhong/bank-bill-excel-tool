@@ -1,0 +1,1042 @@
+{
+  "status": "PASS",
+  "source": "/private/tmp/v329-release-20260919-3_bafjvz/live-native-geometry-macos-fixed/live-runtime.json",
+  "sha256": "fdbf5c3542006ff9d6b449462941bf79a9516be3973d0a329ed37338a454159e",
+  "scope": "macOS real Main; UA native time inner field geometry only; no claim of Windows or human acceptance",
+  "results": [
+    {
+      "initial": "light",
+      "assertions": 13,
+      "application": {
+        "appPath": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool-worktrees/release-v3.2.9",
+        "name": "bank-bill-excel-tool",
+        "version": "3.2.9"
+      },
+      "appearance": {
+        "visible": true,
+        "theme": "dark",
+        "checked": true,
+        "values": {
+          "start": "02:06",
+          "end": "03:06"
+        }
+      },
+      "failures": [],
+      "geometry": {
+        "original": {
+          "status": "PASS",
+          "inputs": [
+            {
+              "role": "dark-mode-start",
+              "status": "PASS",
+              "value": "02:06",
+              "format": "HH:mm",
+              "hostWidth": 104,
+              "missing": [],
+              "violations": [],
+              "fields": [
+                {
+                  "pseudo": "-webkit-datetime-edit-hour-field",
+                  "text": "02",
+                  "rect": {
+                    "bottom": 352.5,
+                    "height": 22,
+                    "left": 286,
+                    "right": 304.5234375,
+                    "top": 330.5,
+                    "width": 18.5234375
+                  },
+                  "textRects": [
+                    {
+                      "bottom": 351.5,
+                      "height": 20,
+                      "left": 287,
+                      "right": 303.5234375,
+                      "top": 331.5,
+                      "width": 16.5234375
+                    }
+                  ],
+                  "fullyContained": true
+                },
+                {
+                  "pseudo": "-webkit-datetime-edit-text",
+                  "text": ":",
+                  "rect": {
+                    "bottom": 351.5,
+                    "height": 20,
+                    "left": 304.5234375,
+                    "right": 308.2265625,
+                    "top": 331.5,
+                    "width": 3.703125
+                  },
+                  "textRects": [
+                    {
+                      "bottom": 351.5,
+                      "height": 20,
+                      "left": 304.5234375,
+                      "right": 308.2265625,
+                      "top": 331.5,
+                      "width": 3.703125
+                    }
+                  ],
+                  "fullyContained": true
+                },
+                {
+                  "pseudo": "-webkit-datetime-edit-minute-field",
+                  "text": "06",
+                  "rect": {
+                    "bottom": 352.5,
+                    "height": 22,
+                    "left": 308.2265625,
+                    "right": 326.8359375,
+                    "top": 330.5,
+                    "width": 18.609375
+                  },
+                  "textRects": [
+                    {
+                      "bottom": 351.5,
+                      "height": 20,
+                      "left": 309.2265625,
+                      "right": 325.8359375,
+                      "top": 331.5,
+                      "width": 16.609375
+                    }
+                  ],
+                  "fullyContained": true
+                }
+              ]
+            },
+            {
+              "role": "dark-mode-end",
+              "status": "PASS",
+              "value": "03:06",
+              "format": "HH:mm",
+              "hostWidth": 104,
+              "missing": [],
+              "violations": [],
+              "fields": [
+                {
+                  "pseudo": "-webkit-datetime-edit-hour-field",
+                  "text": "03",
+                  "rect": {
+                    "bottom": 352.5,
+                    "height": 22,
+                    "left": 436,
+                    "right": 454.484375,
+                    "top": 330.5,
+                    "width": 18.484375
+                  },
+                  "textRects": [
+                    {
+                      "bottom": 351.5,
+                      "height": 20,
+                      "left": 437,
+                      "right": 453.484375,
+                      "top": 331.5,
+                      "width": 16.484375
+                    }
+                  ],
+                  "fullyContained": true
+                },
+                {
+                  "pseudo": "-webkit-datetime-edit-text",
+                  "text": ":",
+                  "rect": {
+                    "bottom": 351.5,
+                    "height": 20,
+                    "left": 454.484375,
+                    "right": 458.1875,
+                    "top": 331.5,
+                    "width": 3.703125
+                  },
+                  "textRects": [
+                    {
+                      "bottom": 351.5,
+                      "height": 20,
+                      "left": 454.484375,
+                      "right": 458.1875,
+                      "top": 331.5,
+                      "width": 3.703125
+                    }
+                  ],
+                  "fullyContained": true
+                },
+                {
+                  "pseudo": "-webkit-datetime-edit-minute-field",
+                  "text": "06",
+                  "rect": {
+                    "bottom": 352.5,
+                    "height": 22,
+                    "left": 458.1875,
+                    "right": 476.796875,
+                    "top": 330.5,
+                    "width": 18.609375
+                  },
+                  "textRects": [
+                    {
+                      "bottom": 351.5,
+                      "height": 20,
+                      "left": 459.1875,
+                      "right": 475.796875,
+                      "top": 331.5,
+                      "width": 16.609375
+                    }
+                  ],
+                  "fullyContained": true
+                }
+              ]
+            }
+          ]
+        },
+        "wide132": {
+          "status": "PASS",
+          "inputs": [
+            {
+              "role": "dark-mode-start",
+              "status": "PASS",
+              "value": "02:06",
+              "format": "HH:mm",
+              "hostWidth": 132,
+              "missing": [],
+              "violations": [],
+              "fields": [
+                {
+                  "pseudo": "-webkit-datetime-edit-hour-field",
+                  "text": "02",
+                  "rect": {
+                    "bottom": 352.5,
+                    "height": 22,
+                    "left": 286,
+                    "right": 304.5234375,
+                    "top": 330.5,
+                    "width": 18.5234375
+                  },
+                  "textRects": [
+                    {
+                      "bottom": 351.5,
+                      "height": 20,
+                      "left": 287,
+                      "right": 303.5234375,
+                      "top": 331.5,
+                      "width": 16.5234375
+                    }
+                  ],
+                  "fullyContained": true
+                },
+                {
+                  "pseudo": "-webkit-datetime-edit-text",
+                  "text": ":",
+                  "rect": {
+                    "bottom": 351.5,
+                    "height": 20,
+                    "left": 304.5234375,
+                    "right": 308.2265625,
+                    "top": 331.5,
+                    "width": 3.703125
+                  },
+                  "textRects": [
+                    {
+                      "bottom": 351.5,
+                      "height": 20,
+                      "left": 304.5234375,
+                      "right": 308.2265625,
+                      "top": 331.5,
+                      "width": 3.703125
+                    }
+                  ],
+                  "fullyContained": true
+                },
+                {
+                  "pseudo": "-webkit-datetime-edit-minute-field",
+                  "text": "06",
+                  "rect": {
+                    "bottom": 352.5,
+                    "height": 22,
+                    "left": 308.2265625,
+                    "right": 326.8359375,
+                    "top": 330.5,
+                    "width": 18.609375
+                  },
+                  "textRects": [
+                    {
+                      "bottom": 351.5,
+                      "height": 20,
+                      "left": 309.2265625,
+                      "right": 325.8359375,
+                      "top": 331.5,
+                      "width": 16.609375
+                    }
+                  ],
+                  "fullyContained": true
+                }
+              ]
+            },
+            {
+              "role": "dark-mode-end",
+              "status": "PASS",
+              "value": "03:06",
+              "format": "HH:mm",
+              "hostWidth": 132,
+              "missing": [],
+              "violations": [],
+              "fields": [
+                {
+                  "pseudo": "-webkit-datetime-edit-hour-field",
+                  "text": "03",
+                  "rect": {
+                    "bottom": 352.5,
+                    "height": 22,
+                    "left": 464,
+                    "right": 482.484375,
+                    "top": 330.5,
+                    "width": 18.484375
+                  },
+                  "textRects": [
+                    {
+                      "bottom": 351.5,
+                      "height": 20,
+                      "left": 465,
+                      "right": 481.484375,
+                      "top": 331.5,
+                      "width": 16.484375
+                    }
+                  ],
+                  "fullyContained": true
+                },
+                {
+                  "pseudo": "-webkit-datetime-edit-text",
+                  "text": ":",
+                  "rect": {
+                    "bottom": 351.5,
+                    "height": 20,
+                    "left": 482.484375,
+                    "right": 486.1875,
+                    "top": 331.5,
+                    "width": 3.703125
+                  },
+                  "textRects": [
+                    {
+                      "bottom": 351.5,
+                      "height": 20,
+                      "left": 482.484375,
+                      "right": 486.1875,
+                      "top": 331.5,
+                      "width": 3.703125
+                    }
+                  ],
+                  "fullyContained": true
+                },
+                {
+                  "pseudo": "-webkit-datetime-edit-minute-field",
+                  "text": "06",
+                  "rect": {
+                    "bottom": 352.5,
+                    "height": 22,
+                    "left": 486.1875,
+                    "right": 504.796875,
+                    "top": 330.5,
+                    "width": 18.609375
+                  },
+                  "textRects": [
+                    {
+                      "bottom": 351.5,
+                      "height": 20,
+                      "left": 487.1875,
+                      "right": 503.796875,
+                      "top": 331.5,
+                      "width": 16.609375
+                    }
+                  ],
+                  "fullyContained": true
+                }
+              ]
+            }
+          ]
+        },
+        "restored": {
+          "status": "PASS",
+          "inputs": [
+            {
+              "role": "dark-mode-start",
+              "status": "PASS",
+              "value": "02:06",
+              "format": "HH:mm",
+              "hostWidth": 104,
+              "missing": [],
+              "violations": [],
+              "fields": [
+                {
+                  "pseudo": "-webkit-datetime-edit-hour-field",
+                  "text": "02",
+                  "rect": {
+                    "bottom": 352.5,
+                    "height": 22,
+                    "left": 286,
+                    "right": 304.5234375,
+                    "top": 330.5,
+                    "width": 18.5234375
+                  },
+                  "textRects": [
+                    {
+                      "bottom": 351.5,
+                      "height": 20,
+                      "left": 287,
+                      "right": 303.5234375,
+                      "top": 331.5,
+                      "width": 16.5234375
+                    }
+                  ],
+                  "fullyContained": true
+                },
+                {
+                  "pseudo": "-webkit-datetime-edit-text",
+                  "text": ":",
+                  "rect": {
+                    "bottom": 351.5,
+                    "height": 20,
+                    "left": 304.5234375,
+                    "right": 308.2265625,
+                    "top": 331.5,
+                    "width": 3.703125
+                  },
+                  "textRects": [
+                    {
+                      "bottom": 351.5,
+                      "height": 20,
+                      "left": 304.5234375,
+                      "right": 308.2265625,
+                      "top": 331.5,
+                      "width": 3.703125
+                    }
+                  ],
+                  "fullyContained": true
+                },
+                {
+                  "pseudo": "-webkit-datetime-edit-minute-field",
+                  "text": "06",
+                  "rect": {
+                    "bottom": 352.5,
+                    "height": 22,
+                    "left": 308.2265625,
+                    "right": 326.8359375,
+                    "top": 330.5,
+                    "width": 18.609375
+                  },
+                  "textRects": [
+                    {
+                      "bottom": 351.5,
+                      "height": 20,
+                      "left": 309.2265625,
+                      "right": 325.8359375,
+                      "top": 331.5,
+                      "width": 16.609375
+                    }
+                  ],
+                  "fullyContained": true
+                }
+              ]
+            },
+            {
+              "role": "dark-mode-end",
+              "status": "PASS",
+              "value": "03:06",
+              "format": "HH:mm",
+              "hostWidth": 104,
+              "missing": [],
+              "violations": [],
+              "fields": [
+                {
+                  "pseudo": "-webkit-datetime-edit-hour-field",
+                  "text": "03",
+                  "rect": {
+                    "bottom": 352.5,
+                    "height": 22,
+                    "left": 436,
+                    "right": 454.484375,
+                    "top": 330.5,
+                    "width": 18.484375
+                  },
+                  "textRects": [
+                    {
+                      "bottom": 351.5,
+                      "height": 20,
+                      "left": 437,
+                      "right": 453.484375,
+                      "top": 331.5,
+                      "width": 16.484375
+                    }
+                  ],
+                  "fullyContained": true
+                },
+                {
+                  "pseudo": "-webkit-datetime-edit-text",
+                  "text": ":",
+                  "rect": {
+                    "bottom": 351.5,
+                    "height": 20,
+                    "left": 454.484375,
+                    "right": 458.1875,
+                    "top": 331.5,
+                    "width": 3.703125
+                  },
+                  "textRects": [
+                    {
+                      "bottom": 351.5,
+                      "height": 20,
+                      "left": 454.484375,
+                      "right": 458.1875,
+                      "top": 331.5,
+                      "width": 3.703125
+                    }
+                  ],
+                  "fullyContained": true
+                },
+                {
+                  "pseudo": "-webkit-datetime-edit-minute-field",
+                  "text": "06",
+                  "rect": {
+                    "bottom": 352.5,
+                    "height": 22,
+                    "left": 458.1875,
+                    "right": 476.796875,
+                    "top": 330.5,
+                    "width": 18.609375
+                  },
+                  "textRects": [
+                    {
+                      "bottom": 351.5,
+                      "height": 20,
+                      "left": 459.1875,
+                      "right": 475.796875,
+                      "top": 331.5,
+                      "width": 16.609375
+                    }
+                  ],
+                  "fullyContained": true
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "valuesUnchanged": true
+    },
+    {
+      "initial": "dark",
+      "assertions": 13,
+      "application": {
+        "appPath": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool-worktrees/release-v3.2.9",
+        "name": "bank-bill-excel-tool",
+        "version": "3.2.9"
+      },
+      "appearance": {
+        "visible": true,
+        "theme": "dark",
+        "checked": true,
+        "values": {
+          "start": "02:06",
+          "end": "03:06"
+        }
+      },
+      "failures": [],
+      "geometry": {
+        "original": {
+          "status": "PASS",
+          "inputs": [
+            {
+              "role": "dark-mode-start",
+              "status": "PASS",
+              "value": "02:06",
+              "format": "HH:mm",
+              "hostWidth": 104,
+              "missing": [],
+              "violations": [],
+              "fields": [
+                {
+                  "pseudo": "-webkit-datetime-edit-hour-field",
+                  "text": "02",
+                  "rect": {
+                    "bottom": 352.5,
+                    "height": 22,
+                    "left": 286,
+                    "right": 304.5234375,
+                    "top": 330.5,
+                    "width": 18.5234375
+                  },
+                  "textRects": [
+                    {
+                      "bottom": 351.5,
+                      "height": 20,
+                      "left": 287,
+                      "right": 303.5234375,
+                      "top": 331.5,
+                      "width": 16.5234375
+                    }
+                  ],
+                  "fullyContained": true
+                },
+                {
+                  "pseudo": "-webkit-datetime-edit-text",
+                  "text": ":",
+                  "rect": {
+                    "bottom": 351.5,
+                    "height": 20,
+                    "left": 304.5234375,
+                    "right": 308.2265625,
+                    "top": 331.5,
+                    "width": 3.703125
+                  },
+                  "textRects": [
+                    {
+                      "bottom": 351.5,
+                      "height": 20,
+                      "left": 304.5234375,
+                      "right": 308.2265625,
+                      "top": 331.5,
+                      "width": 3.703125
+                    }
+                  ],
+                  "fullyContained": true
+                },
+                {
+                  "pseudo": "-webkit-datetime-edit-minute-field",
+                  "text": "06",
+                  "rect": {
+                    "bottom": 352.5,
+                    "height": 22,
+                    "left": 308.2265625,
+                    "right": 326.8359375,
+                    "top": 330.5,
+                    "width": 18.609375
+                  },
+                  "textRects": [
+                    {
+                      "bottom": 351.5,
+                      "height": 20,
+                      "left": 309.2265625,
+                      "right": 325.8359375,
+                      "top": 331.5,
+                      "width": 16.609375
+                    }
+                  ],
+                  "fullyContained": true
+                }
+              ]
+            },
+            {
+              "role": "dark-mode-end",
+              "status": "PASS",
+              "value": "03:06",
+              "format": "HH:mm",
+              "hostWidth": 104,
+              "missing": [],
+              "violations": [],
+              "fields": [
+                {
+                  "pseudo": "-webkit-datetime-edit-hour-field",
+                  "text": "03",
+                  "rect": {
+                    "bottom": 352.5,
+                    "height": 22,
+                    "left": 436,
+                    "right": 454.484375,
+                    "top": 330.5,
+                    "width": 18.484375
+                  },
+                  "textRects": [
+                    {
+                      "bottom": 351.5,
+                      "height": 20,
+                      "left": 437,
+                      "right": 453.484375,
+                      "top": 331.5,
+                      "width": 16.484375
+                    }
+                  ],
+                  "fullyContained": true
+                },
+                {
+                  "pseudo": "-webkit-datetime-edit-text",
+                  "text": ":",
+                  "rect": {
+                    "bottom": 351.5,
+                    "height": 20,
+                    "left": 454.484375,
+                    "right": 458.1875,
+                    "top": 331.5,
+                    "width": 3.703125
+                  },
+                  "textRects": [
+                    {
+                      "bottom": 351.5,
+                      "height": 20,
+                      "left": 454.484375,
+                      "right": 458.1875,
+                      "top": 331.5,
+                      "width": 3.703125
+                    }
+                  ],
+                  "fullyContained": true
+                },
+                {
+                  "pseudo": "-webkit-datetime-edit-minute-field",
+                  "text": "06",
+                  "rect": {
+                    "bottom": 352.5,
+                    "height": 22,
+                    "left": 458.1875,
+                    "right": 476.796875,
+                    "top": 330.5,
+                    "width": 18.609375
+                  },
+                  "textRects": [
+                    {
+                      "bottom": 351.5,
+                      "height": 20,
+                      "left": 459.1875,
+                      "right": 475.796875,
+                      "top": 331.5,
+                      "width": 16.609375
+                    }
+                  ],
+                  "fullyContained": true
+                }
+              ]
+            }
+          ]
+        },
+        "wide132": {
+          "status": "PASS",
+          "inputs": [
+            {
+              "role": "dark-mode-start",
+              "status": "PASS",
+              "value": "02:06",
+              "format": "HH:mm",
+              "hostWidth": 132,
+              "missing": [],
+              "violations": [],
+              "fields": [
+                {
+                  "pseudo": "-webkit-datetime-edit-hour-field",
+                  "text": "02",
+                  "rect": {
+                    "bottom": 352.5,
+                    "height": 22,
+                    "left": 286,
+                    "right": 304.5234375,
+                    "top": 330.5,
+                    "width": 18.5234375
+                  },
+                  "textRects": [
+                    {
+                      "bottom": 351.5,
+                      "height": 20,
+                      "left": 287,
+                      "right": 303.5234375,
+                      "top": 331.5,
+                      "width": 16.5234375
+                    }
+                  ],
+                  "fullyContained": true
+                },
+                {
+                  "pseudo": "-webkit-datetime-edit-text",
+                  "text": ":",
+                  "rect": {
+                    "bottom": 351.5,
+                    "height": 20,
+                    "left": 304.5234375,
+                    "right": 308.2265625,
+                    "top": 331.5,
+                    "width": 3.703125
+                  },
+                  "textRects": [
+                    {
+                      "bottom": 351.5,
+                      "height": 20,
+                      "left": 304.5234375,
+                      "right": 308.2265625,
+                      "top": 331.5,
+                      "width": 3.703125
+                    }
+                  ],
+                  "fullyContained": true
+                },
+                {
+                  "pseudo": "-webkit-datetime-edit-minute-field",
+                  "text": "06",
+                  "rect": {
+                    "bottom": 352.5,
+                    "height": 22,
+                    "left": 308.2265625,
+                    "right": 326.8359375,
+                    "top": 330.5,
+                    "width": 18.609375
+                  },
+                  "textRects": [
+                    {
+                      "bottom": 351.5,
+                      "height": 20,
+                      "left": 309.2265625,
+                      "right": 325.8359375,
+                      "top": 331.5,
+                      "width": 16.609375
+                    }
+                  ],
+                  "fullyContained": true
+                }
+              ]
+            },
+            {
+              "role": "dark-mode-end",
+              "status": "PASS",
+              "value": "03:06",
+              "format": "HH:mm",
+              "hostWidth": 132,
+              "missing": [],
+              "violations": [],
+              "fields": [
+                {
+                  "pseudo": "-webkit-datetime-edit-hour-field",
+                  "text": "03",
+                  "rect": {
+                    "bottom": 352.5,
+                    "height": 22,
+                    "left": 464,
+                    "right": 482.484375,
+                    "top": 330.5,
+                    "width": 18.484375
+                  },
+                  "textRects": [
+                    {
+                      "bottom": 351.5,
+                      "height": 20,
+                      "left": 465,
+                      "right": 481.484375,
+                      "top": 331.5,
+                      "width": 16.484375
+                    }
+                  ],
+                  "fullyContained": true
+                },
+                {
+                  "pseudo": "-webkit-datetime-edit-text",
+                  "text": ":",
+                  "rect": {
+                    "bottom": 351.5,
+                    "height": 20,
+                    "left": 482.484375,
+                    "right": 486.1875,
+                    "top": 331.5,
+                    "width": 3.703125
+                  },
+                  "textRects": [
+                    {
+                      "bottom": 351.5,
+                      "height": 20,
+                      "left": 482.484375,
+                      "right": 486.1875,
+                      "top": 331.5,
+                      "width": 3.703125
+                    }
+                  ],
+                  "fullyContained": true
+                },
+                {
+                  "pseudo": "-webkit-datetime-edit-minute-field",
+                  "text": "06",
+                  "rect": {
+                    "bottom": 352.5,
+                    "height": 22,
+                    "left": 486.1875,
+                    "right": 504.796875,
+                    "top": 330.5,
+                    "width": 18.609375
+                  },
+                  "textRects": [
+                    {
+                      "bottom": 351.5,
+                      "height": 20,
+                      "left": 487.1875,
+                      "right": 503.796875,
+                      "top": 331.5,
+                      "width": 16.609375
+                    }
+                  ],
+                  "fullyContained": true
+                }
+              ]
+            }
+          ]
+        },
+        "restored": {
+          "status": "PASS",
+          "inputs": [
+            {
+              "role": "dark-mode-start",
+              "status": "PASS",
+              "value": "02:06",
+              "format": "HH:mm",
+              "hostWidth": 104,
+              "missing": [],
+              "violations": [],
+              "fields": [
+                {
+                  "pseudo": "-webkit-datetime-edit-hour-field",
+                  "text": "02",
+                  "rect": {
+                    "bottom": 352.5,
+                    "height": 22,
+                    "left": 286,
+                    "right": 304.5234375,
+                    "top": 330.5,
+                    "width": 18.5234375
+                  },
+                  "textRects": [
+                    {
+                      "bottom": 351.5,
+                      "height": 20,
+                      "left": 287,
+                      "right": 303.5234375,
+                      "top": 331.5,
+                      "width": 16.5234375
+                    }
+                  ],
+                  "fullyContained": true
+                },
+                {
+                  "pseudo": "-webkit-datetime-edit-text",
+                  "text": ":",
+                  "rect": {
+                    "bottom": 351.5,
+                    "height": 20,
+                    "left": 304.5234375,
+                    "right": 308.2265625,
+                    "top": 331.5,
+                    "width": 3.703125
+                  },
+                  "textRects": [
+                    {
+                      "bottom": 351.5,
+                      "height": 20,
+                      "left": 304.5234375,
+                      "right": 308.2265625,
+                      "top": 331.5,
+                      "width": 3.703125
+                    }
+                  ],
+                  "fullyContained": true
+                },
+                {
+                  "pseudo": "-webkit-datetime-edit-minute-field",
+                  "text": "06",
+                  "rect": {
+                    "bottom": 352.5,
+                    "height": 22,
+                    "left": 308.2265625,
+                    "right": 326.8359375,
+                    "top": 330.5,
+                    "width": 18.609375
+                  },
+                  "textRects": [
+                    {
+                      "bottom": 351.5,
+                      "height": 20,
+                      "left": 309.2265625,
+                      "right": 325.8359375,
+                      "top": 331.5,
+                      "width": 16.609375
+                    }
+                  ],
+                  "fullyContained": true
+                }
+              ]
+            },
+            {
+              "role": "dark-mode-end",
+              "status": "PASS",
+              "value": "03:06",
+              "format": "HH:mm",
+              "hostWidth": 104,
+              "missing": [],
+              "violations": [],
+              "fields": [
+                {
+                  "pseudo": "-webkit-datetime-edit-hour-field",
+                  "text": "03",
+                  "rect": {
+                    "bottom": 352.5,
+                    "height": 22,
+                    "left": 436,
+                    "right": 454.484375,
+                    "top": 330.5,
+                    "width": 18.484375
+                  },
+                  "textRects": [
+                    {
+                      "bottom": 351.5,
+                      "height": 20,
+                      "left": 437,
+                      "right": 453.484375,
+                      "top": 331.5,
+                      "width": 16.484375
+                    }
+                  ],
+                  "fullyContained": true
+                },
+                {
+                  "pseudo": "-webkit-datetime-edit-text",
+                  "text": ":",
+                  "rect": {
+                    "bottom": 351.5,
+                    "height": 20,
+                    "left": 454.484375,
+                    "right": 458.1875,
+                    "top": 331.5,
+                    "width": 3.703125
+                  },
+                  "textRects": [
+                    {
+                      "bottom": 351.5,
+                      "height": 20,
+                      "left": 454.484375,
+                      "right": 458.1875,
+                      "top": 331.5,
+                      "width": 3.703125
+                    }
+                  ],
+                  "fullyContained": true
+                },
+                {
+                  "pseudo": "-webkit-datetime-edit-minute-field",
+                  "text": "06",
+                  "rect": {
+                    "bottom": 352.5,
+                    "height": 22,
+                    "left": 458.1875,
+                    "right": 476.796875,
+                    "top": 330.5,
+                    "width": 18.609375
+                  },
+                  "textRects": [
+                    {
+                      "bottom": 351.5,
+                      "height": 20,
+                      "left": 459.1875,
+                      "right": 475.796875,
+                      "top": 331.5,
+                      "width": 16.609375
+                    }
+                  ],
+                  "fullyContained": true
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "valuesUnchanged": true
+    }
+  ]
+}

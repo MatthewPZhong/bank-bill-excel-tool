@@ -5,6 +5,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const vm = require('node:vm');
+const { positionFilePlanSettlementFiles } = require('../../../src/main-process/position-reconciliation/archive-file-plan-evidence');
 
 const {
   authorizePositionImportApply,
@@ -1122,7 +1124,7 @@ test('普通来源 manifest 与 pending 文件证据不一致时禁止签发 gra
   assert.equal(pending.archiveManifestHash, undefined);
 });
 
-test('atomic Position wrapper 以完整 frozen manifest 单次 settle，不再调用 legacy result/error settle', () => {
+test('atomic Position wrapper 以完整 frozen manifest 单次 settle，不再调用 legacy result/error settle', async () => {
   const mainSource = fs.readFileSync(
     path.resolve(__dirname, '../../../src/main.js'),
     'utf8'
@@ -1133,9 +1135,58 @@ test('atomic Position wrapper 以完整 frozen manifest 单次 settle，不再�
   const end = mainSource.indexOf('\n          let result;', firstReturn + 1);
   assert.ok(start >= 0 && end > start);
   const atomic = mainSource.slice(start, end);
-  assert.match(atomic, /recordPositionFilePlanIntent\(/);
-  assert.match(atomic, /\.\.\.taskContext\.fileEvidence\.filePlan\.inputs/);
-  assert.match(atomic, /\.\.\.taskContext\.fileEvidence\.filePlan\.outputs/);
-  assert.match(atomic, /settled && settled\.durable === true/);
-  assert.doesNotMatch(atomic, /settlePositionArchiveResult|result:\s*result|error:\s*operationError/);
+  for (const mode of ['success', 'business-failure', 'archive-pending']) {
+    const calls = [];
+    const files = [];
+    const filePlan = Object.freeze({
+      inputs: Object.freeze([Object.freeze({ artifactKey: 'input-1', direction: 'input',
+        expectedSha256: 'a'.repeat(64), expectedSizeBytes: 10 })]),
+      outputs: Object.freeze([Object.freeze({ artifactKey: 'output-1', direction: 'output' })])
+    });
+    const evidence = Object.freeze({ inputs: ['original-input-evidence'] });
+    const result = { status: 'ok', cleanupPaths: ['owned-source'] };
+    const businessError = new Error('业务执行失败');
+    const execute = vm.runInNewContext(`(async () => { ${atomic} })`, {
+      useLegacyExistingBatchRecovery: false,
+      taskContext: { fileEvidence: { filePlan } },
+      prepared: { positionArchiveEvidence: evidence },
+      batchContext: { batchId: 7 },
+      positionFilePlanSettlementFiles,
+      positionReconciliationFailureResult,
+      recordPositionFilePlanIntent(plan, original) {
+        assert.equal(plan, filePlan);
+        assert.equal(original, evidence);
+        calls.push('intent');
+      },
+      async executeBusiness() {
+        calls.push('business');
+        if (mode === 'business-failure') throw businessError;
+        return result;
+      },
+      markPositionBusinessOutcome(outcome) {
+        assert.equal(outcome.status, mode === 'business-failure' ? 'failed' : 'ok');
+        calls.push('outcome');
+      },
+      controls: { async settleArtifacts(payload) {
+        calls.push('settle');
+        files.push(...payload.files);
+        return { durable: mode !== 'archive-pending' };
+      } },
+      markPositionArchiveDurable({ batchId }) { assert.equal(batchId, 7); calls.push('durable'); },
+      async cleanupPositionArchiveStaging({ cleanupPaths }) {
+        assert.deepEqual(Array.from(cleanupPaths), mode === 'business-failure' ? [] : result.cleanupPaths);
+        calls.push('cleanup');
+      },
+      markPositionArchiveIncomplete() { calls.push('incomplete'); },
+      settlePositionArchiveResult() { assert.fail('atomic 路径不能再次调用 legacy settle'); }
+    });
+    if (mode === 'business-failure') await assert.rejects(execute, (error) => error === businessError);
+    else assert.equal(await execute(), result);
+    assert.deepEqual(files, [
+      { artifactKey: 'input-1', expectedSha256: 'a'.repeat(64), expectedSizeBytes: 10 },
+      { artifactKey: 'output-1' }
+    ]);
+    assert.deepEqual(calls, ['intent', 'business', 'outcome', 'settle',
+      ...(mode === 'archive-pending' ? ['incomplete'] : ['durable', 'cleanup'])]);
+  }
 });

@@ -1,6 +1,8 @@
 'use strict';
 
 const path = require('node:path');
+const fs = require('node:fs');
+const { randomUUID } = require('node:crypto');
 const { Worker } = require('node:worker_threads');
 const { deserializeError } = require('./serialize-error');
 const {
@@ -48,6 +50,10 @@ const {
 const WORKER_PATH = path.join(__dirname, '../backend/vcc-financial-op/worker-entry.js');
 const READ_WORKER_PATH = path.join(__dirname, 'vcc-financial-op-read-worker.js');
 const RESULT_WRITE_WORKER_PATH = path.join(__dirname, 'vcc-financial-op-write-worker.js');
+const REVIEW_WORKER_PATH = path.join(__dirname, 'vcc-financial-op-review-worker.js');
+const { validateReviewRequest, assertReviewFresh, reviewError } = require('../backend/vcc-financial-op/review-export-contract');
+const { assertTargetAllowed, captureTarget, publishReviewFile } = require('./vcc-financial-op-review-target');
+const READ_ONLY_TASKS = new Set(['inspect-plan', 'revalidate-plan', 'export-review']);
 
 const IMPORT_STATUS_TEXT = Object.freeze({
   deleted: '已删除',
@@ -58,6 +64,8 @@ const IMPORT_STATUS_TEXT = Object.freeze({
   failed_validation: '失败（校验异常）',
   importing: '导入中'
 });
+
+const RESULT_STATUS_TEXT = Object.freeze({ calculated: '待确认', archived: '已归档' });
 
 const DATA_STATUS_TEXT = Object.freeze({
   unprocessed: '未处理',
@@ -163,6 +171,7 @@ function createVccFinancialOpService({
   workerFactory = (filename, options) => new Worker(filename, options),
   readWorkerFactory = (filename, options) => new Worker(filename, options),
   writeWorkerFactory = (filename, options) => new Worker(filename, options),
+  reviewWorkerFactory = (filename, options) => new Worker(filename, options),
   writeRunWorkbooksFn = writeRunWorkbooks,
   writeImportAuditWorkbookFn = writeImportAuditWorkbook,
   publishOutputFilesFn = null,
@@ -180,6 +189,7 @@ function createVccFinancialOpService({
   repository.recoverInterruptedImports(database.db);
 
   function syncImportArchiveLineage() {
+    if (activeTask?.action === 'export-review') return { available: true, skipped: true, reason: 'review-export-active' };
     try {
       const archiveRepository = typeof archiveRepositoryProvider === 'function'
         ? archiveRepositoryProvider()
@@ -327,7 +337,7 @@ function createVccFinancialOpService({
                 if (partialResult) error.partialResult = partialResult;
               } catch (_readError) { /* 保留 worker 主错误；下次启动继续恢复 */ }
             }
-          } else {
+          } else if (!['inspect-plan', 'revalidate-plan', 'export-review'].includes(action)) {
             try { repository.recoverInterruptedImports(database.db); } catch (_recoveryError) { /* 下次启动继续恢复 */ }
           }
           releaseTask(task, { type: 'error', error });
@@ -490,8 +500,12 @@ function createVccFinancialOpService({
     });
   }
 
-  async function inspectSelectedFiles(filePaths) {
-    return runWorker('inspect', { filePaths });
+  async function inspectSelectedFiles(filePaths, onProgress) {
+    return runWorker('inspect-plan', { filePaths }, onProgress);
+  }
+
+  async function validateImportPlan(plan, onProgress) {
+    return runWorker('revalidate-plan', { plan }, onProgress);
   }
 
   async function importSelectedFiles(payload, onProgress, batchContext, archiveHandoffFiles) {
@@ -548,6 +562,7 @@ function createVccFinancialOpService({
   async function cancelActiveTask(onCancellationAccepted = null) {
     const task = activeTask;
     if (!task) return { status: 'idle' };
+    if (task.action === 'export-review') return task.cancelReview();
     const worker = task.worker;
     const completion = task.completion;
     if (task.kind === 'direct' || task.protected || !worker) {
@@ -571,7 +586,7 @@ function createVccFinancialOpService({
       worker.postMessage({ type: 'cancel' });
     } catch (_error) {
       const outcome = await completion;
-      if (task.action !== 'import') repository.recoverInterruptedImports(database.db);
+      if (task.action !== 'import' && !READ_ONLY_TASKS.has(task.action)) repository.recoverInterruptedImports(database.db);
       if (outcome.type === 'result') return { status: 'completed' };
       if (outcome.error && [IMPORT_CANCELLED_CODE, 'operation-cancelled'].includes(outcome.error.code)) {
         return { status: 'cancelled', forced: false };
@@ -603,10 +618,10 @@ function createVccFinancialOpService({
         };
       }
       if (activeTask === task) await worker.terminate();
-      if (task.action !== 'import') repository.recoverInterruptedImports(database.db);
+      if (task.action !== 'import' && !READ_ONLY_TASKS.has(task.action)) repository.recoverInterruptedImports(database.db);
       return { status: 'cancelled', forced: true };
     }
-    if (task.action !== 'import') repository.recoverInterruptedImports(database.db);
+    if (task.action !== 'import' && !READ_ONLY_TASKS.has(task.action)) repository.recoverInterruptedImports(database.db);
     if (outcome.type === 'result') return { status: 'completed' };
     if (outcome.error && [IMPORT_CANCELLED_CODE, 'operation-cancelled'].includes(outcome.error.code)) {
       return { status: 'cancelled', forced: false };
@@ -841,6 +856,17 @@ function createVccFinancialOpService({
         error.code = 'archive-storage-unavailable';
         throw error;
       }
+      const archiveRepository = archiveRepositoryProvider?.() || archiveService.repository;
+      if (archiveRepository) {
+        const stored = archiveRepository.getArtifact(artifactId);
+        if (stored?.metadata?.vccImportHandoffVersion === 2) {
+          const binding = database.db.prepare(`SELECT s.*,r.batch_id,r.source_type FROM vcc_fin_op_import_sources s
+            JOIN vcc_fin_op_import_records r ON r.id=s.import_record_id WHERE s.id=?`).get(sourceId);
+          require('../backend/vcc-financial-op/import-handoff').assertArtifactMember(stored, binding, archiveRepository.getBatch(stored.batchId));
+        } else if (stored?.metadata?.vccImportHandoffVersion != null && stored.metadata.vccImportHandoffVersion !== 1) {
+          throw reviewError('archive-lineage-invalid', '原表交接成员版本不受支持');
+        }
+      }
       const artifact = await archiveService.resolveVerifiedArtifact(artifactId);
       if (!artifact || artifact.ok !== true
           || String(artifact.sha256 || '').toLowerCase() !== String(source.source_sha256).toLowerCase()
@@ -932,7 +958,7 @@ function createVccFinancialOpService({
       runId: row.id,
       tableName: '财务OP校验结果表',
       dataStatus: row.status === 'archived' ? 'archived' : 'unprocessed',
-      dataStatusText: row.status === 'archived' ? '已归档' : '未处理',
+      dataStatusText: RESULT_STATUS_TEXT[row.status] || row.status,
       resultRevision: Number(row.result_revision) || 0,
       inputFingerprint: row.input_fingerprint || null,
       createdAt: row.created_at,
@@ -1021,8 +1047,128 @@ function createVccFinancialOpService({
     return runDirectTask(action, callback);
   }
 
+  async function exportReviewTable(request, { chooseTarget, tempRoot, protectedRoots = [], onProgress } = {}) {
+    request = validateReviewRequest(request);
+    if (closing) throw reviewError('service-closing', '服务正在关闭');
+    if (activeTask) throw reviewError('active-vcc-task', '已有 VCC 任务正在运行，请稍后重试');
+    const generation = taskGeneration;
+    const run = assertReviewFresh(database.db, request);
+    if (typeof chooseTarget !== 'function') throw new TypeError('待确认表缺少原生另存为入口');
+    // No task lease or DB transaction is retained across the native dialog.
+    const choice = await chooseTarget({ targetMonth: run.target_month });
+    if (!choice || choice.canceled || !choice.filePath) return { status: 'cancelled' };
+    const task = acquireTask('export-review', { kind: 'review', expectedTaskGeneration: generation });
+    let directory, stagedPath, result, failure, forced = false;
+    const check = () => {
+      if (task.cancelRequested) throw reviewError('vcc-review-cancelled', '待确认表导出已取消');
+      if (activeTask !== task || taskGeneration !== task.baseGeneration) throw reviewError('state-changed', '导出任务已失效');
+    };
+    const progress = (data) => {
+      task.phase = data.phase;
+      // A detached window must not interrupt cleanup or change publication outcome.
+      try { onProgress?.({ ...data, action: 'export-review', cancellable: !task.protected }); } catch (_error) { /* UI detached */ }
+    };
+    task.cancelReview = async () => {
+      let timer;
+      if (!task.protected) {
+        task.cancelRequested = true;
+        try { task.worker?.postMessage({ type: 'cancel' }); } catch (_error) { /* worker exit settles */ }
+        timer = setTimeout(() => {
+          if (!task.protected && task.worker) { forced = true; task.worker.terminate().catch(() => {}); }
+        }, cancelTimeoutMs);
+      }
+      try {
+        const outcome = await task.completion;
+        return outcome.type === 'result' && outcome.result?.status !== 'cancelled'
+          ? { status: 'completed', protected: task.protected }
+          : outcome.error && outcome.error.code !== 'vcc-review-cancelled'
+            ? { status: 'error', code: outcome.error.code, message: outcome.error.message }
+            : { status: 'cancelled', forced };
+      } finally { if (timer) clearTimeout(timer); }
+    };
+    const runReviewWorker = (action, payload) => new Promise((resolve, reject) => {
+      check();
+      const worker = reviewWorkerFactory(REVIEW_WORKER_PATH, { workerData: { action, payload } });
+      task.worker = worker;
+      let reply, workerError;
+      worker.on('message', (message) => {
+        if (message?.type === 'progress') progress(message.progress);
+        else if (message?.type === 'error') workerError ||= deserializeError(message.error);
+        else if (message?.type === 'result') {
+          if (reply) workerError ||= reviewError('vcc-review-worker-protocol', 'Worker 重复返回结果');
+          reply = message.result;
+        }
+      });
+      worker.once('error', (error) => { workerError ||= error; });
+      // Wait for exit, not just the result message: file handles must be closed
+      // before Main publishes or deletes task-owned temporary files.
+      worker.once('exit', (code) => {
+        if (task.worker === worker) task.worker = null;
+        if (task.cancelRequested) reject(reviewError('vcc-review-cancelled', '待确认表导出已取消'));
+        else if (workerError) reject(workerError);
+        else if (code !== 0 || !reply) reject(reviewError('vcc-review-worker-failed', `导出 Worker 异常退出：${code}`));
+        else resolve(reply);
+      });
+    });
+    try {
+      check(); assertReviewFresh(database.db, request);
+      const archiveRoot = archiveServiceProvider?.()?.rootDir;
+      const guards = { protectedRoots: [...protectedRoots, archiveRoot, assetsDir, tempRoot].filter(Boolean) };
+      const snapshot = await captureTarget(choice.filePath, guards, check);
+      check();
+      if (!tempRoot || !path.isAbsolute(tempRoot)) throw reviewError('vcc-review-temp-invalid', '导出临时目录未配置');
+      fs.mkdirSync(tempRoot, { recursive: true });
+      directory = fs.mkdtempSync(path.join(tempRoot, 'review-'));
+      const manifestPath = path.join(directory, 'manifest.sqlite');
+      const base = { dbPath: database.dbPath, manifestPath, request, archiveRoot, assetsDir, appVersion };
+      progress({ phase: 'preparing-result' });
+      const plan = await runReviewWorker('prepare', base);
+      check();
+      assertTargetAllowed(snapshot.target, { ...guards, knownInputPaths: plan.knownInputPaths });
+      stagedPath = path.join(snapshot.parentPath, `.vcc-review-${randomUUID()}.xlsx`);
+      progress({ phase: 'extracting-sources' });
+      const written = await runReviewWorker('write', { ...base, filePath: stagedPath });
+      check();
+      task.protected = true; progress({ phase: 'publishing' });
+      const published = publishReviewFile({ stagedPath, evidence: written.evidence, snapshot,
+        assertFresh: () => { check(); assertReviewFresh(database.db, request); } });
+      result = { status: 'success', ...published, resultRevision: written.resultRevision,
+        subjectCount: written.subjectCount, sheetCount: written.sheetCount, sourceRowCount: written.sourceRowCount };
+    } catch (error) {
+      failure = error;
+      if (error.code === 'vcc-review-cancelled') result = { status: 'cancelled' };
+    } finally {
+      const cleanupFailures = [];
+      if (!failure?.preserveTemporaryFiles && stagedPath) {
+        try { fs.unlinkSync(stagedPath); } catch (error) {
+          if (error.code !== 'ENOENT') cleanupFailures.push({ error, filePath: stagedPath });
+        }
+      }
+      if (directory) {
+        try { fs.rmSync(directory, { recursive: true, force: true }); } catch (error) {
+          cleanupFailures.push({ error, filePath: directory });
+        }
+      }
+      if (cleanupFailures.length) {
+        const details = cleanupFailures.map(({ error, filePath }) => `清理失败：${filePath}（${error.code || 'I/O'}：${error.message}）`);
+        if (!failure || failure.code === 'vcc-review-cancelled') {
+          const cause = failure || cleanupFailures[0].error;
+          failure = reviewError('vcc-review-cleanup-failed', result?.status === 'success'
+            ? '文件已保存，但导出临时资源清理失败' : '导出临时资源清理失败', details);
+          failure.cause = cause;
+          if (result?.filePath) failure.detailLines.push(`已保存文件：${result.filePath}`);
+        } else failure.detailLines = [...(failure.detailLines || []), ...details];
+        failure.recoveryPaths = [...new Set([...(failure.recoveryPaths || []), ...cleanupFailures.map(({ filePath }) => filePath)])];
+      }
+      releaseTask(task, failure ? { type: 'error', error: failure } : { type: 'result', result });
+    }
+    if (failure && failure.code !== 'vcc-review-cancelled') throw failure;
+    return result;
+  }
+
   return {
     inspectSelectedFiles,
+    validateImportPlan,
     importSelectedFiles,
     calculate,
     preflightRun,
@@ -1048,6 +1194,7 @@ function createVccFinancialOpService({
     dataManagerOverview,
     latestArchivedRun,
     exportRun,
+    exportReviewTable,
     exportImportAudit,
     runManagedReadOnlyExport,
     syncImportArchiveLineage,
@@ -1073,5 +1220,6 @@ function createVccFinancialOpService({
 module.exports = {
   IMPORT_STATUS_TEXT,
   DATA_STATUS_TEXT,
+  RESULT_STATUS_TEXT,
   createVccFinancialOpService
 };

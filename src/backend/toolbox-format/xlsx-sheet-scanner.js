@@ -93,6 +93,7 @@ const OOXML_ERROR_VALUES = new Set([
   '#GETTING_DATA'
 ]);
 const EXCEL_FORMULA_MAX_UTF16_UNITS = 8192;
+const MAX_LEXICAL_CELL_XML_UTF16_UNITS = 16 * 1024 * 1024;
 
 class ToolboxXlsxFormatError extends Error {
   constructor(message, context = {}) {
@@ -529,6 +530,7 @@ async function scanXlsxSheet(options = {}) {
   } = options;
   const onSheetMeta = typeof options.onSheetMeta === 'function' ? options.onSheetMeta : null;
   const onRow = typeof options.onRow === 'function' ? options.onRow : null;
+  const onCellLexical = typeof options.onCellLexical === 'function' ? options.onCellLexical : null;
 
   if (!zip || !sheetEntry || !sourceRegistry) {
     throw new TypeError('scanXlsxSheet 需要 zip、sheetEntry 与 sourceRegistry');
@@ -538,6 +540,11 @@ async function scanXlsxSheet(options = {}) {
   }
 
   const stream = await openEntryStream(zip, sheetEntry);
+  // 明细导入按 UTF-8 读取工作表；审计入口沿用其编码，保留当前 cell 的原始 XML。
+  // SAX 与审计窗口消费同一解码字符串，位置按 UTF-16 计数，跨 chunk 不拆坏中文。
+  if (onCellLexical) stream.setEncoding('utf8');
+  let lexicalXml = '';
+  let lexicalOffset = 0;
   const columns = [];
   let defaultColWidth = null;
   let defaultRowHeight = null;
@@ -667,6 +674,15 @@ async function scanXlsxSheet(options = {}) {
       hasFormula: currentCell.formulaSeen,
       formulaLexical: currentCell.formulaSeen ? currentCell.formulaParts.join('') : null
     });
+    // 原始 body 交给调用方复用历史解析器；不能从 SAX 语义值反推 CDATA、注音或空标签。
+    // 不改变中性 cell 的语义值，也不额外读取工作表。
+    if (onCellLexical) {
+      const end = currentCell.xmlSelfClosing ? currentCell.xmlBodyStart : parser._parser.startTagPosition - 1;
+      assertLexicalCellLength(end - currentCell.xmlBodyStart);
+      const body = lexicalXml.slice(currentCell.xmlBodyStart - lexicalOffset, end - lexicalOffset);
+      const result = onCellLexical(cell, { type: currentCell.type, body });
+      if (result && typeof result.then === 'function') throw new TypeError('onCellLexical 必须是同步回调');
+    }
     currentRow.cells.set(cell.columnIndex, cell);
     currentRow.nextColumnIndex = cell.columnIndex + 1;
     explicitCellCount += 1;
@@ -711,6 +727,15 @@ async function scanXlsxSheet(options = {}) {
     normalize: false,
     xmlns: true
   });
+
+  function assertLexicalCellLength(length) {
+    if (length < 0 || length > MAX_LEXICAL_CELL_XML_UTF16_UNITS) {
+      throw new ToolboxXlsxFormatError('单元格原始 XML 超出审计读取预算', {
+        sourceFile, sheetName, rowIndex: currentRow?.rowIndex, columnIndex: currentCell?.columnIndex,
+        rawUtf16Length: length, maxRawUtf16Length: MAX_LEXICAL_CELL_XML_UTF16_UNITS
+      });
+    }
+  }
 
   parser.on('opentag', (node) => {
     const elementName = validateWorksheetElementCase(node, { sourceFile, sheetName });
@@ -1058,6 +1083,8 @@ async function scanXlsxSheet(options = {}) {
         valueParts: [],
         valueLexicalLength: 0,
         inlineParts: [],
+        xmlBodyStart: onCellLexical ? parser._parser.position : null,
+        xmlSelfClosing: node.isSelfClosing === true,
         inlineSemanticLength: 0,
         formulaParts: [],
         formulaLexicalLength: 0,
@@ -1349,7 +1376,14 @@ async function scanXlsxSheet(options = {}) {
         return;
       }
       try {
+        if (onCellLexical) lexicalXml += chunk;
         parser.write(chunk);
+        if (onCellLexical) {
+          const retainedStart = currentCell ? currentCell.xmlBodyStart : parser._parser.position;
+          lexicalXml = lexicalXml.slice(retainedStart - lexicalOffset);
+          lexicalOffset = retainedStart;
+          assertLexicalCellLength(lexicalXml.length);
+        }
       } catch (error) {
         fail(error);
       }

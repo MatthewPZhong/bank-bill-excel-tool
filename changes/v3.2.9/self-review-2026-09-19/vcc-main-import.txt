@@ -1,0 +1,33 @@
+{
+  "mainChain": {
+    "status": "success",
+    "physicalFileCount": 1,
+    "businessSheetCount": 3,
+    "records": [
+      {
+        "sourceType": "recharge_refund",
+        "insertedCount": 1
+      },
+      {
+        "sourceType": "channel",
+        "insertedCount": 2
+      }
+    ],
+    "artifactCount": 1,
+    "holds": 2,
+    "deleteCode": "ARCHIVE_BATCH_BUSINESS_HELD",
+    "phases": [
+      "preflight",
+      "reading",
+      "committing",
+      "summarizing"
+    ]
+  },
+  "reopen": {
+    "bound": 2,
+    "failed": 0,
+    "released": 1,
+    "remainingHolds": 1,
+    "metadataMembers": 2
+  }
+}

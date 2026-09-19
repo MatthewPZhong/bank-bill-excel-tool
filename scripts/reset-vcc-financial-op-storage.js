@@ -12,6 +12,8 @@ const {
   updateJournal
 } = require('../src/main-process/vcc-financial-op-storage-rebuild');
 
+const { VCC_STORAGE_CONTRACT_VERSION } = require('../src/backend/vcc-financial-op-db/storage-contract');
+
 const CONFIRMATION = 'RESET_CURRENT_MACHINE_VCC_V1';
 
 function argumentValue(args, name) {
@@ -42,7 +44,7 @@ function resolveOptions(args, now = new Date()) {
   const reportArg = argumentValue(args, '--report');
   const targetPath = targetArg
     ? path.resolve(targetArg)
-    : `${sourcePath}.vcc-reset-v2-candidate-${suffix}`;
+    : `${sourcePath}.vcc-reset-v3-candidate-${suffix}`;
   const backupPath = backupArg
     ? path.resolve(backupArg)
     : `${sourcePath}.pre-vcc-reset-${suffix}.bak`;
@@ -220,7 +222,7 @@ function runReset(options) {
       }
     });
     if (!candidate || candidate.noChange || candidate.resetVccData !== true) {
-      const error = new Error('候选库没有完成 reset-only v1→v2 重建，禁止切换');
+      const error = new Error('候选库没有完成 reset-only v1→v2→v3 重建，禁止切换');
       error.code = 'vcc-reset-candidate-invalid';
       throw error;
     }
@@ -242,9 +244,9 @@ function runReset(options) {
     switchCompleted = true;
     const activeEvidence = inspectActiveDatabase(options.sourcePath);
     const sourceEvidence = candidate.resetReadiness || {};
-    if (activeEvidence.contractVersion !== 2
+    if (activeEvidence.contractVersion !== VCC_STORAGE_CONTRACT_VERSION
         || activeEvidence.vccTableRowCounts.some((entry) => entry.rowCount !== 0)) {
-      const error = new Error('最终活动库不是 VCC 全空的 storage contract v2');
+      const error = new Error('最终活动库不是 VCC 全空的 storage contract v3');
       error.code = 'vcc-reset-final-readback-failed';
       throw error;
     }

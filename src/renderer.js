@@ -1,4 +1,5 @@
 let bizOpV327Controller = null;
+let darkModeController = null;
 const DEFAULT_BACKGROUND_SETTINGS = Object.freeze({
   colorHex: '#efe8da',
   imageDataUrl: '',
@@ -1931,6 +1932,21 @@ function pickBackgroundColorFromClientPoint(clientX, clientY) {
 
 function buildBackgroundStyle(backgroundSettings) {
   const normalized = cloneBackgroundSettings(backgroundSettings);
+  if (document.documentElement.dataset.theme === 'dark' && !normalized.imageDataUrl) {
+    // 深色主题使用自己的底色，不在浅色渐变或自定义图片上叠加遮罩。
+    return {
+      backgroundColor: '#111419',
+      backgroundImage: 'none',
+      backgroundSize: 'auto',
+      backgroundPosition: 'center',
+      backgroundRepeat: 'no-repeat'
+    };
+  }
+  return buildLightBackgroundStyle(backgroundSettings);
+}
+
+function buildLightBackgroundStyle(backgroundSettings) {
+  const normalized = cloneBackgroundSettings(backgroundSettings);
   const baseColor = hexToRgb(normalized.colorHex);
 
   if (normalized.imageDataUrl) {
@@ -1983,8 +1999,23 @@ function applyBackgroundSettings(backgroundSettings) {
   elements.appShell.style.backgroundSize = style.backgroundSize;
   elements.appShell.style.backgroundPosition = style.backgroundPosition;
   elements.appShell.style.backgroundRepeat = style.backgroundRepeat;
-  document.body.style.background = rgbToCss(mixColor(normalized.colorHex, '#ffffff', 0.74));
+  document.body.style.background = document.documentElement.dataset.theme === 'dark'
+    ? '#111419' : rgbToCss(mixColor(normalized.colorHex, '#ffffff', 0.74));
   updateBackgroundControls(normalized);
+}
+
+function getDarkModeController() {
+  if (!darkModeController && window.DarkModeUI) {
+    darkModeController = window.DarkModeUI.createController({
+      api: window.desktopApi?.settings,
+      document,
+      onChange: () => applyBackgroundSettings(
+        state.isBackgroundPaletteOpen ? state.backgroundDraft : state.backgroundSettings
+      )
+    });
+    window.addEventListener('unload', () => darkModeController.dispose(), { once: true });
+  }
+  return darkModeController;
 }
 
 function openBackgroundPalette() {
@@ -2478,13 +2509,17 @@ function archiveCenterRoleText(value) {
 }
 
 function archiveCenterRetentionText(batch) {
-  const value = batch?.retentionUntil ?? batch?.retention;
+  const value = batch && Object.prototype.hasOwnProperty.call(batch, 'retentionUntil')
+    ? batch.retentionUntil
+    : batch?.retention;
   if (value === null || value === 'permanent') return '永久';
   if (!value) return batch?.locked === true ? '已锁定' : '-';
   return batch?.locked === true ? `${String(value)}（已锁定）` : String(value);
 }
 
 function createArchiveCenterPreviewApi() {
+  let retentionDays = 180;
+  const retentionDaysByModule = { toolbox: 30, 'vcc-financial-op': null };
   const batches = [
     {
       internalId: 901,
@@ -2573,14 +2608,22 @@ function createArchiveCenterPreviewApi() {
     async openFile() { return { status: 'success', message: '预览模式未打开文件' }; },
     async saveAs() { return { status: 'cancelled' }; },
     async setLocked() { return { status: 'success' }; },
-    async deleteBatch() { return { status: 'success', metadataDeleted: true }; },
+    async prepareDeleteBatch() { return { status: 'success', ok: true, confirmationToken: 'preview-confirmation', summary: { total: 2 } }; },
+    async deleteBatch() { return { status: 'success', ok: true, metadataDeleted: true, fullyDeleted: true }; },
+    async listDeleteCleanupJobs() { return { status: 'success', jobs: [] }; },
+    async retryDeleteCleanupJob() { return { status: 'success', ok: true, metadataDeleted: true, fullyDeleted: true }; },
     async selectRetrySources() { return { status: 'cancelled' }; },
     async retryBatch() { return { status: 'success' }; },
     async getSettings() {
       return {
         status: 'success',
         settings: {
-          retentionDays: 180,
+          retentionDays,
+          retentionDaysByModule: { ...retentionDaysByModule },
+          retentionModules: [
+            ...Object.values(MODULES).map(({ id, name }) => ({ id, name })),
+            { id: 'toolbox', name: '工具箱' }
+          ],
           storageRoot: storagePath,
           storageMigration: { status: 'idle', phase: '', processed: 0, total: 0 }
         }
@@ -2588,7 +2631,13 @@ function createArchiveCenterPreviewApi() {
     },
     async changeStorageLocation() { return { status: 'cancelled' }; },
     async setRetentionDays(value) {
+      retentionDays = value;
       return { status: 'success', settings: { retentionDays: value } };
+    },
+    async setModuleRetentionDays({ moduleId, retentionDays: value }) {
+      if (value === 'inherit') delete retentionDaysByModule[moduleId];
+      else retentionDaysByModule[moduleId] = value;
+      return this.getSettings();
     },
     async getStats() {
       return {
@@ -2638,11 +2687,15 @@ function createAppUpdateSettingsDialog(options = {}) {
     settingsLoading: false,
     selectedBatchId: '',
     batches: [],
+    deleteCleanupJobs: [],
+    cleanupRequestId: 0,
+    deleteRequestId: 0,
     detail: null,
     stats: null,
-    settings: { retentionDays: 60, storageRoot: '', storageMigration: null },
+    settings: { retentionDays: 60, retentionDaysByModule: {}, storageRoot: '', storageMigration: null },
     storageMigration: { status: 'idle', phase: '', processed: 0, total: 0 },
     savedRetentionValue: '60',
+    selectedRetentionModuleId: '',
     retentionIntentToken: 0,
     retentionPendingIntent: null,
     retentionSaving: false,
@@ -2674,9 +2727,14 @@ function createAppUpdateSettingsDialog(options = {}) {
           <span class="app-settings-nav-icon" aria-hidden="true">▤</span>
           <span>存档中心</span>
         </button>
+        <button class="app-settings-nav-item" type="button" data-tab="appearance" aria-controls="appearancePane" aria-current="false">
+          <span class="app-settings-nav-icon" aria-hidden="true">☾</span>
+          <span>外观设置</span>
+        </button>
       </nav>
 
       <div class="app-settings-main">
+        <section id="appearancePane" class="app-settings-pane appearance-pane" data-pane="appearance" aria-label="外观设置" hidden></section>
         <section id="appUpdatePane" class="app-settings-pane app-update-pane" data-pane="update" aria-labelledby="appUpdatePaneHeading">
           <div class="app-update-pane-scroll">
             <h3 id="appUpdatePaneHeading" class="app-settings-pane-heading">版本管理</h3>
@@ -2729,6 +2787,8 @@ function createAppUpdateSettingsDialog(options = {}) {
               </div>
             </header>
 
+            <section class="archive-center-warning" data-role="archive-delete-cleanup-jobs" aria-label="待完成删除" hidden></section>
+
             <div class="archive-center-filters" aria-label="存档筛选">
               <label class="archive-center-field">
                 <span>日期</span>
@@ -2776,17 +2836,27 @@ function createAppUpdateSettingsDialog(options = {}) {
             </div>
 
             <div class="archive-center-settings-section">
-              <h4>保留期限</h4>
-              <label class="archive-center-field archive-center-retention-field">
-                <select data-role="archive-retention-days" aria-label="保留期限">
-                  <option value="30">30 天</option>
-                  <option value="60" selected>60 天</option>
-                  <option value="90">90 天</option>
-                  <option value="180">180 天</option>
-                  <option value="365">365 天</option>
-                  <option value="permanent">永久</option>
-                </select>
-              </label>
+              <h4>输入/输出文件保留期限</h4>
+              <div class="archive-center-retention-fields">
+                <label class="archive-center-field archive-center-retention-module-field">
+                  <span>适用模块</span>
+                  <select data-role="archive-retention-module" aria-label="保留期限适用模块">
+                    <option value="">默认（未单独设置的模块）</option>
+                  </select>
+                </label>
+                <label class="archive-center-field archive-center-retention-field">
+                  <span>保留期限</span>
+                  <select data-role="archive-retention-days" aria-label="保留期限">
+                    <option value="inherit" hidden disabled>跟随默认</option>
+                    <option value="30">30 天</option>
+                    <option value="60" selected>60 天</option>
+                    <option value="90">90 天</option>
+                    <option value="180">180 天</option>
+                    <option value="365">365 天</option>
+                    <option value="permanent">永久</option>
+                  </select>
+                </label>
+              </div>
             </div>
           </section>
         </section>
@@ -2803,6 +2873,9 @@ function createAppUpdateSettingsDialog(options = {}) {
   `;
 
   const updatePane = dialog.querySelector('[data-pane="update"]');
+  const appearancePane = dialog.querySelector('[data-pane="appearance"]');
+  const themeController = getDarkModeController();
+  const appearanceView = themeController ? window.DarkModeUI.mountSettings(appearancePane, themeController) : null;
   const archivePane = dialog.querySelector('[data-pane="archive"]');
   const archiveBrowser = dialog.querySelector('[data-archive-view="browser"]');
   const archiveSettingsView = dialog.querySelector('[data-archive-view="settings"]');
@@ -2815,6 +2888,7 @@ function createAppUpdateSettingsDialog(options = {}) {
   const moduleFilter = dialog.querySelector('[data-filter="module"]');
   const batchIdFilter = dialog.querySelector('[data-filter="batch-id"]');
   const retentionSelect = dialog.querySelector('[data-role="archive-retention-days"]');
+  const retentionModuleSelect = dialog.querySelector('[data-role="archive-retention-module"]');
   const changeStorageButton = dialog.querySelector('[data-action="change-archive-storage"]');
   const storageMigrationText = dialog.querySelector('[data-role="archive-storage-migration"]');
   const closeDialogButton = dialog.querySelector('[data-action="close"]');
@@ -2854,6 +2928,57 @@ function createAppUpdateSettingsDialog(options = {}) {
         `<option value="${escapeHtml(id)}"${id === selected ? ' selected' : ''}>${escapeHtml(name)}</option>`
       ))
     ].join('');
+  }
+
+  function renderDeleteCleanupJobs() {
+    const panel = dialog.querySelector('[data-role="archive-delete-cleanup-jobs"]');
+    panel.hidden = archiveState.deleteCleanupJobs.length === 0;
+    panel.innerHTML = archiveState.deleteCleanupJobs.map((job) => {
+      const jobId = String(job.cleanupJobId ?? job.id ?? '');
+      const failures = Array.isArray(job.failures) ? job.failures : [];
+      const reason = job.message || job.lastErrorMessage
+        || failures.map((failure) => failure.message || failure.code).filter(Boolean).join('；')
+        || (job.state === 'waiting-migration' ? '等待存档位置迁移完成' : '文件清理尚未完成');
+      return `<div data-delete-cleanup-job-id="${escapeHtml(jobId)}">
+        <strong>待完成删除：${escapeHtml(job.batchNumber || String(job.batchId || ''))}</strong>
+        <p role="status">${escapeHtml(reason)}</p>
+        <button class="secondary-btn small" type="button" data-action="retry-delete-cleanup" data-cleanup-job-id="${escapeHtml(jobId)}">重试清理</button>
+      </div>`;
+    }).join('');
+  }
+
+  async function loadDeleteCleanupJobs() {
+    const requestId = ++archiveState.cleanupRequestId;
+    try {
+      const result = await getArchiveCenterApi().listDeleteCleanupJobs();
+      const jobs = readArchiveCenterPayload(result, 'jobs', []);
+      if (!Array.isArray(jobs)) throw new Error('待完成删除格式无效');
+      if (requestId !== archiveState.cleanupRequestId || archiveState.destroyed) return false;
+      archiveState.deleteCleanupJobs = jobs;
+      renderDeleteCleanupJobs();
+      return true;
+    } catch (error) {
+      if (requestId !== archiveState.cleanupRequestId || archiveState.destroyed) return false;
+      showArchiveFeedback(`待完成删除加载失败：${archiveCenterErrorText(error, '未知错误')}`);
+      return false;
+    }
+  }
+
+  async function retryDeleteCleanup(button) {
+    if (button.disabled) return;
+    button.disabled = true;
+    showArchiveFeedback('正在重试文件清理…', 'info');
+    try {
+      const result = await getArchiveCenterApi().retryDeleteCleanupJob(button.dataset.cleanupJobId);
+      const complete = result?.ok === true && result?.metadataDeleted === true && result?.fullyDeleted === true;
+      await loadDeleteCleanupJobs();
+      await loadArchiveStats();
+      showArchiveFeedback(result?.message || (complete ? '存档批次已永久删除' : '清理尚未完成，请查看原因后重试'), complete ? 'success' : 'error');
+    } catch (error) {
+      showArchiveFeedback(`重试清理失败：${archiveCenterErrorText(error, '未知错误')}`);
+    } finally {
+      if (button.isConnected) button.disabled = false;
+    }
   }
 
   function renderArchiveBatches() {
@@ -3053,14 +3178,35 @@ function createAppUpdateSettingsDialog(options = {}) {
     const settings = archiveState.settings && typeof archiveState.settings === 'object'
       ? archiveState.settings
       : {};
-    const retentionDays = Object.prototype.hasOwnProperty.call(settings, 'retentionDays')
+    const defaultRetentionDays = Object.prototype.hasOwnProperty.call(settings, 'retentionDays')
       ? settings.retentionDays
       : settings.defaultRetentionDays;
-    const retentionValue = retentionDays === null || retentionDays === 'permanent'
+    const moduleId = archiveState.selectedRetentionModuleId;
+    const overrides = settings.retentionDaysByModule || {};
+    const hasOverride = moduleId && Object.prototype.hasOwnProperty.call(overrides, moduleId);
+    const retentionDays = hasOverride ? overrides[moduleId] : defaultRetentionDays;
+    const retentionValue = moduleId && !hasOverride
+      ? 'inherit'
+      : retentionDays === null || retentionDays === 'permanent'
       ? 'permanent'
       : String(retentionDays ?? 60);
-    const allowedRetentionValues = new Set(['30', '60', '90', '180', '365', 'permanent']);
+    const allowedRetentionValues = new Set(['30', '60', '90', '180', '365', 'permanent', 'inherit']);
     if (!archiveState.retentionSaving && !archiveState.retentionPendingIntent) {
+      const modules = Array.isArray(settings.retentionModules)
+        ? settings.retentionModules
+        : Array.from(archiveModules, ([id, name]) => ({ id, name }));
+      retentionModuleSelect.innerHTML = '<option value="">默认（未单独设置的模块）</option>'
+        + modules.map(({ id, name }) => (
+          `<option value="${escapeHtml(id)}">${escapeHtml(name)}</option>`
+        )).join('');
+      retentionModuleSelect.value = moduleId;
+      const inheritOption = retentionSelect.querySelector('[value="inherit"]');
+      inheritOption.hidden = !moduleId;
+      inheritOption.disabled = !moduleId;
+      const defaultLabel = defaultRetentionDays === null || defaultRetentionDays === 'permanent'
+        ? '永久'
+        : `${defaultRetentionDays ?? 60} 天`;
+      inheritOption.textContent = `跟随默认（${defaultLabel}）`;
       archiveState.savedRetentionValue = allowedRetentionValues.has(retentionValue)
         ? retentionValue
         : '60';
@@ -3165,6 +3311,7 @@ function createAppUpdateSettingsDialog(options = {}) {
     maintenanceDeletedBatchIds = []
   } = {}) {
     const requestId = ++archiveState.listRequestId;
+    const cleanupLoad = loadDeleteCleanupJobs();
     const filters = currentArchiveFilters();
     if (clearFeedback) showArchiveFeedback('', 'info');
     batchList.setAttribute('aria-busy', 'true');
@@ -3227,6 +3374,7 @@ function createAppUpdateSettingsDialog(options = {}) {
       showArchiveFeedback(`批次列表加载失败：${archiveCenterErrorText(error, '未知错误')}`);
       return false;
     } finally {
+      await cleanupLoad;
       if (requestId === archiveState.listRequestId) {
         batchList.removeAttribute('aria-busy');
       }
@@ -3248,6 +3396,7 @@ function createAppUpdateSettingsDialog(options = {}) {
     const busy = archiveState.settingsLoading || archiveState.retentionSaving;
     returnButton.disabled = busy;
     closeDialogButton.disabled = busy;
+    retentionModuleSelect.disabled = busy;
   }
 
   function setRetentionSaving(saving) {
@@ -3256,6 +3405,7 @@ function createAppUpdateSettingsDialog(options = {}) {
   }
 
   function retentionDaysApiValue(value) {
+    if (value === 'inherit') return 'inherit';
     return value === 'permanent' ? null : Number(value);
   }
 
@@ -3266,19 +3416,34 @@ function createAppUpdateSettingsDialog(options = {}) {
       while (archiveState.retentionPendingIntent && archiveDialogAlive()) {
         const intent = archiveState.retentionPendingIntent;
         archiveState.retentionPendingIntent = null;
-        if (intent.value === archiveState.savedRetentionValue) continue;
+        if (intent.value === archiveState.savedRetentionValue) {
+          if (archiveDialogAlive()) showArchiveFeedback('保留期限已保存', 'success');
+          continue;
+        }
 
         let failure = null;
         try {
-          const result = await api.setRetentionDays(retentionDaysApiValue(intent.value));
+          const result = intent.moduleId
+            ? await api.setModuleRetentionDays({
+              moduleId: intent.moduleId,
+              retentionDays: retentionDaysApiValue(intent.value)
+            })
+            : await api.setRetentionDays(retentionDaysApiValue(intent.value));
           if (!verifyArchiveCenterAction(result, '保留期限保存失败')) {
             throw new Error('保留期限保存失败');
           }
           archiveState.savedRetentionValue = intent.value;
-          archiveState.settings = {
-            ...archiveState.settings,
-            retentionDays: retentionDaysApiValue(intent.value)
-          };
+          if (intent.moduleId) {
+            const overrides = { ...archiveState.settings.retentionDaysByModule };
+            if (intent.value === 'inherit') delete overrides[intent.moduleId];
+            else overrides[intent.moduleId] = retentionDaysApiValue(intent.value);
+            archiveState.settings = { ...archiveState.settings, retentionDaysByModule: overrides };
+          } else {
+            archiveState.settings = {
+              ...archiveState.settings,
+              retentionDays: retentionDaysApiValue(intent.value)
+            };
+          }
         } catch (error) {
           failure = error;
         }
@@ -3303,6 +3468,7 @@ function createAppUpdateSettingsDialog(options = {}) {
     } finally {
       archiveState.retentionSavePromise = null;
       setRetentionSaving(false);
+      if (archiveDialogAlive()) renderArchiveSettings();
       if (archiveState.retentionPendingIntent && archiveDialogAlive()) {
         archiveState.retentionSavePromise = drainRetentionIntents();
       }
@@ -3312,9 +3478,11 @@ function createAppUpdateSettingsDialog(options = {}) {
   function saveRetentionSelection() {
     if (archiveState.settingsLoading || archiveState.destroyed) return;
     const value = retentionSelect.value;
+    if (!archiveState.retentionSaving && value === archiveState.savedRetentionValue) return;
     archiveState.retentionIntentToken += 1;
     archiveState.retentionPendingIntent = {
       token: archiveState.retentionIntentToken,
+      moduleId: archiveState.selectedRetentionModuleId,
       value
     };
     showArchiveFeedback('正在保存保留期限…', 'info');
@@ -3328,6 +3496,9 @@ function createAppUpdateSettingsDialog(options = {}) {
     showArchiveFeedback('', 'info');
     setArchiveSettingsLoading(true);
     try {
+      // 重入设置页先等当前保存队列完成，避免旧设置快照覆盖刚保存的模块期限。
+      if (archiveState.retentionSavePromise) await archiveState.retentionSavePromise;
+      if (requestId !== archiveState.settingsRequestId || !archiveDialogAlive()) return false;
       const api = getArchiveCenterApi();
       const [settingsResult, statsResult] = await Promise.allSettled([
         api.getSettings(),
@@ -3431,13 +3602,14 @@ function createAppUpdateSettingsDialog(options = {}) {
 
   function setSettingsTab(tab) {
     const wasArchive = archiveState.activeTab === 'archive';
-    archiveState.activeTab = tab === 'archive' ? 'archive' : 'update';
+    archiveState.activeTab = ['archive', 'appearance'].includes(tab) ? tab : 'update';
     dialog.querySelectorAll('[data-tab]').forEach((button) => {
       const active = button.dataset.tab === archiveState.activeTab;
       button.classList.toggle('is-active', active);
       button.setAttribute('aria-current', active ? 'page' : 'false');
     });
     updatePane.hidden = archiveState.activeTab !== 'update';
+    appearancePane.hidden = archiveState.activeTab !== 'appearance';
     archivePane.hidden = archiveState.activeTab !== 'archive';
     updateFooter.hidden = archiveState.activeTab !== 'update';
     if (archiveState.activeTab !== 'archive') {
@@ -3553,44 +3725,92 @@ function createAppUpdateSettingsDialog(options = {}) {
     }
   }
 
-  function confirmArchiveBatchDelete(button) {
+  async function confirmArchiveBatchDelete(button) {
+    if (button.disabled || archiveState.destroyed || !overlay.isConnected) return;
+    const settingsReadyForDelete = () => {
+      // 删除确认会替换设置弹窗，先等期限保存收口，避免中断待保存的最终选择。
+      if (archiveState.settingsLoading || archiveState.retentionSaving || archiveState.retentionPendingIntent) {
+        showArchiveFeedback(
+          archiveState.settingsLoading
+            ? '存档设置正在加载，请稍后再删除批次'
+            : '保留期限正在保存，请稍后再删除批次',
+          'info'
+        );
+        return false;
+      }
+      return true;
+    };
+    if (!settingsReadyForDelete()) return;
+    const requestId = ++archiveState.deleteRequestId;
+    const isCurrentRequest = () => !archiveState.destroyed
+      && requestId === archiveState.deleteRequestId;
+    const ownsDialog = (target) => isCurrentRequest() && target?.isConnected;
     const batchId = button.dataset.batchId;
     const batchNumber = button.dataset.batchNumber || batchId;
+    button.disabled = true;
+    let prepared;
+    try {
+      prepared = await getArchiveCenterApi().prepareDeleteBatch(batchId);
+      if (!ownsDialog(overlay)) return;
+      if (!verifyArchiveCenterAction(prepared, '删除预检失败') || !prepared?.confirmationToken) return;
+    } catch (error) {
+      if (!ownsDialog(overlay)) return;
+      showArchiveFeedback(`删除预检失败：${archiveCenterErrorText(error, '未知错误')}`);
+      return;
+    } finally {
+      if (button.isConnected) button.disabled = false;
+    }
+    // 预检等待期间仍可调整期限，替换弹窗前再次确认保存已收口。
+    if (!settingsReadyForDelete()) return;
     let confirmOverlay = null;
     const restoreSettingsDialog = () => {
+      if (!ownsDialog(confirmOverlay)) return;
       queueMicrotask(() => {
+        // 共享确认框在 onCancel 返回后关闭；仅在当前请求仍有效且未打开别的弹窗时恢复。
+        if (!isCurrentRequest() || elements.modalRoot.firstElementChild) return;
         openModal(overlay);
-        requestAnimationFrame(refreshOpenAppUpdateDialog);
+        requestAnimationFrame(() => {
+          if (ownsDialog(overlay)) refreshOpenAppUpdateDialog();
+        });
       });
     };
+    const fileCount = Number(prepared.summary?.fileCount);
+    const scopeSummary = Number.isSafeInteger(fileCount) && fileCount >= 0
+      ? `<br>本次涉及 ${fileCount} 个存档文件副本。`
+      : '';
     confirmOverlay = createConfirmDialog({
-      message: `批次 <strong>${escapeHtml(batchNumber)}</strong> 将立即永久删除。该操作不会删除原始文件和用户已另存的副本。`,
+      message: `确定永久删除批次 <strong>${escapeHtml(batchNumber)}</strong> 吗？<br>该批次信息及存档中心保存的原始文件将一并删除，删除后无法恢复。${scopeSummary}`,
       confirmText: '永久删除',
       cancelText: '取消',
       onCancel: restoreSettingsDialog,
       onConfirm: async () => {
         const confirmButton = confirmOverlay.querySelector('[data-action="confirm"]');
+        if (!ownsDialog(confirmOverlay) || confirmButton.disabled) return;
+        const cancelButton = confirmOverlay.querySelector('[data-action="cancel"]');
         confirmButton.disabled = true;
+        confirmButton.textContent = '删除中…';
+        cancelButton.disabled = true;
         try {
-          const result = await getArchiveCenterApi().deleteBatch(batchId);
+          const result = await getArchiveCenterApi().deleteBatch(batchId, prepared.confirmationToken);
+          if (!ownsDialog(confirmOverlay)) return;
           const metadataDeleted = result?.metadataDeleted === true;
-          if (!metadataDeleted && !verifyArchiveCenterAction(result, '永久删除批次失败')) {
-            confirmButton.disabled = false;
-            return;
-          }
+          const fullyDeleted = result?.ok === true && metadataDeleted && result?.fullyDeleted === true;
+          if (!metadataDeleted) throw new Error(result?.message || '永久删除未完成，请重新预检并确认');
+          // 使删除前已经发出的列表/详情读取失效，避免迟到响应恢复旧卡片。
+          archiveState.listRequestId += 1;
+          archiveState.detailRequestId += 1;
           archiveState.selectedBatchId = '';
           archiveState.detail = null;
           openModal(overlay);
-          const cleanupPending = metadataDeleted && result?.ok === false;
-          showArchiveFeedback(
-            cleanupPending
-              ? '批次记录已删除，但部分物理副本清理待后台重试'
-              : (result?.message || '存档批次已永久删除'),
-            cleanupPending ? 'error' : 'success'
-          );
           await loadArchiveBatches({ clearFeedback: false });
+          if (!ownsDialog(overlay)) return;
           await loadArchiveStats();
+          if (!ownsDialog(overlay)) return;
+          showArchiveFeedback(result?.message || (fullyDeleted
+            ? '存档批次已永久删除'
+            : '批次记录已删除，但文件清理尚未完成，请在待完成删除中重试'), fullyDeleted ? 'success' : 'error');
         } catch (error) {
+          if (!ownsDialog(confirmOverlay)) return;
           let feedback = confirmOverlay.querySelector('[data-role="archive-delete-error"]');
           if (!feedback) {
             feedback = document.createElement('div');
@@ -3601,6 +3821,8 @@ function createAppUpdateSettingsDialog(options = {}) {
           }
           feedback.textContent = `永久删除失败：${archiveCenterErrorText(error, '未知错误')}`;
           confirmButton.disabled = false;
+          confirmButton.textContent = '永久删除';
+          cancelButton.disabled = false;
         }
       }
     });
@@ -3608,8 +3830,11 @@ function createAppUpdateSettingsDialog(options = {}) {
   }
 
   function closeSettingsDialog() {
+    if (themeController?.getSnapshot().saving) return false;
     if (archiveState.settingsLoading || archiveState.retentionSaving) return false;
+    appearanceView?.destroy();
     archiveState.destroyed = true;
+    archiveState.deleteRequestId += 1;
     archiveState.retentionIntentToken += 1;
     archiveState.retentionPendingIntent = null;
     clearTimeout(archiveState.batchFilterTimer);
@@ -3695,6 +3920,15 @@ function createAppUpdateSettingsDialog(options = {}) {
     loadArchiveBatches();
   });
   retentionSelect.addEventListener('change', saveRetentionSelection);
+  retentionModuleSelect.addEventListener('change', () => {
+    if (archiveState.settingsLoading || archiveState.retentionSaving) {
+      retentionModuleSelect.value = archiveState.selectedRetentionModuleId;
+      return;
+    }
+    archiveState.selectedRetentionModuleId = retentionModuleSelect.value;
+    renderArchiveSettings();
+    showArchiveFeedback('', 'info');
+  });
 
   function selectArchiveBatch(batchId) {
     const nextBatchId = String(batchId || '');
@@ -3734,6 +3968,8 @@ function createAppUpdateSettingsDialog(options = {}) {
       toggleArchiveBatchLock(button);
     } else if (action === 'delete-archive-batch') {
       confirmArchiveBatchDelete(button);
+    } else if (action === 'retry-delete-cleanup') {
+      retryDeleteCleanup(button);
     } else if (action === 'retry-archive-batch') {
       retryArchiveBatch(button);
     }
@@ -8298,6 +8534,7 @@ async function handleBizOpReconExport() {
 
 async function initialize() {
   markRendererStartup(RENDERER_STARTUP_MARKS.initializeStart);
+  getDarkModeController();
   markRendererStartup(RENDERER_STARTUP_MARKS.getInfoStart);
   const info = await window.desktopApi.app.getInfo();
   markRendererStartup(RENDERER_STARTUP_MARKS.getInfoDone);
@@ -8306,6 +8543,7 @@ async function initialize() {
 }
 
 async function applyFullInfo(info) {
+  getDarkModeController()?.accept(info);
   // v2.1.13 E2：注入平台标识，CSS 以 body[data-platform="win32"] 限定 Win 端 Noto Sans SC 字体（仅 Win 生效）
   document.body.dataset.platform = (window.desktopApi && window.desktopApi.platform) || '';
   applyUiStyle();

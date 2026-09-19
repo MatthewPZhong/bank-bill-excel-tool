@@ -47,6 +47,7 @@ function enableStorageContractV2(db) {
       updated_at TEXT NOT NULL
     )
   `);
+  ensureVccFinancialOpTablesSupport(db, { autoUpgradeEmptyV1: true });
   setVccStorageContractVersion(db, VCC_STORAGE_CONTRACT_VERSION);
 }
 

@@ -4,6 +4,7 @@ const { parentPort, workerData } = require('node:worker_threads');
 const { DatabaseSync } = require('node:sqlite');
 const { ensureVccFinancialOpTablesSupport } = require('../vcc-financial-op-db/migrations');
 const { inspectFiles, importFiles } = require('./import-service');
+const { inspectWorkbookImportPlan, revalidateImportPlan } = require('./workbook-import-plan');
 const { calculateMonth } = require('./calculator');
 const { writeDatasetWorkbook } = require('../../main-process/vcc-financial-op-dataset-writer');
 const { serializeError } = require('../../main-process/serialize-error');
@@ -52,6 +53,10 @@ async function run() {
           )
         }
     : rawPayload;
+  const inspectionOptions = { shouldCancel: () => cancelRequested,
+    onProgress: (progress) => parentPort.postMessage({ type: 'progress', progress }) };
+  if (action === 'inspect-plan') return inspectWorkbookImportPlan(payload.filePaths, inspectionOptions);
+  if (action === 'revalidate-plan') { await revalidateImportPlan(payload.plan, inspectionOptions); return { valid: true }; }
   const db = openDb(workerData.dbPath);
   try {
     if (action === 'inspect') {

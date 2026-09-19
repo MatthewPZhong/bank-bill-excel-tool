@@ -8,6 +8,7 @@ const { freezeWorkerBatchContext } = require('../archive-center/worker-batch-con
 const { fsyncDirectory } = require('../background-execution/durable-file');
 const { fail, hash, snapshot } = require('./contracts');
 const { acquireBizOpPhaseLease } = require('./phase-admission');
+const { archiveOwnerBinding } = require('./archive-owner-completion');
 const PHASE = Object.freeze({ cpuSlots: 1, workerThreadSlots: 1, utilityProcessSlots: 0, ioHeavySlots: 1, memoryBytes: 1073741824 });
 
 function createBizOpPublication({ userDataDir, catalog, payloadStore, protection, getArchiveService, getRuntime }) {
@@ -27,6 +28,7 @@ function createBizOpPublication({ userDataDir, catalog, payloadStore, protection
     const id = context.taskRunId;
     const value = { schemaVersion: 1, taskRunId: id, actionKey: catalog.operation(id).action_key, intentDigest, sourceDigest,
       candidateRef, publisherTaskId: `biz-op-v327-export-${id}`, output, targetSnapshot,
+      archiveOwnerCompletion: archiveOwnerBinding(getArchiveService(), output),
       batchContext: freezeWorkerBatchContext(context, { required: true }) };
     const relative = `operations/${id}/publication-binding.json`;
     const document = payloadStore.writeDocument(relative, value);

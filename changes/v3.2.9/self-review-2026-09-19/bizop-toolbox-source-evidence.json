@@ -1,0 +1,163 @@
+{
+  "head": "6bd55efe0eb1d90c16cd92f3a78e54a39a36b966",
+  "snapshot": "/private/tmp/v329-release-20260919-3_bafjvz/review-snapshot",
+  "findingsP2OrHigher": [],
+  "fullGate": "root-owned; not run by this subagent",
+  "files": [
+    {
+      "path": "AGENTS.md",
+      "size": 6220,
+      "sha256": "1a22d8a2440a5931da1611dd2460bf353c19d208a9e298aaceb162683932c53c"
+    },
+    {
+      "path": "CODEX.md",
+      "size": 7021,
+      "sha256": "2d1c0bd326cbacfc03c0f8e708899e9c9a776c62df343b4d3d36d269dfca9772"
+    },
+    {
+      "path": "changes/v3.2.9/codex/v3.2.9-biz-op-error-report-auto-save/Spec-v3.2.9-biz-op-error-report-auto-save.md",
+      "size": 20034,
+      "sha256": "efc1133fb860f1ffd830167b73c87db8a9bd36c2c7e1a27ff3988f9c22be65c6"
+    },
+    {
+      "path": "changes/v3.2.9/codex/v3.2.9-biz-op-error-report-auto-save/TechDoc-v3.2.9-biz-op-error-report-auto-save.md",
+      "size": 45791,
+      "sha256": "ef7fe0ed725b16013f5b7d728ead98cd41a3b0952d7a7de5826632ac8e096f68"
+    },
+    {
+      "path": "changes/v3.2.9/codex/v3.2.9-toolbox-split-by-rows/implementation-notes.md",
+      "size": 11328,
+      "sha256": "633bab56c8a06f7c575d7d8164f77f25bb338a9b293643fa3483194df26afd0e"
+    },
+    {
+      "path": "changes/v3.2.9/codex/v3.2.9-toolbox-split-by-rows/spec.md",
+      "size": 23123,
+      "sha256": "fbd32136a8481daea5ef1b0ba54060554b54844ff4539445c4f53db0d7ae19be"
+    },
+    {
+      "path": "changes/v3.2.9/codex/v3.2.9-toolbox-split-by-rows/techdoc.md",
+      "size": 41008,
+      "sha256": "dd7523da26b43a3a4890411615d5ebe2b9db16003d121840b03b522b2646c03b"
+    },
+    {
+      "path": "scripts/integration/archive-biz-op-auto-report-retention.js",
+      "size": 14211,
+      "sha256": "45abf28b5433ab636d23713ca2e600118c7693835a5f77014faa03c653a9cb82"
+    },
+    {
+      "path": "scripts/integration/biz-op-auto-error-report.js",
+      "size": 23901,
+      "sha256": "981d3c3cf4ff5e85cb587bf562d9edd91b2034d391e21064afc9645729db3b86"
+    },
+    {
+      "path": "scripts/integration/toolbox-row-split-archive-delete.js",
+      "size": 13283,
+      "sha256": "c3d54ff12f70781afc403e4eb92e393a6677138ab0667ae5cebc2cf45ba1cb34"
+    },
+    {
+      "path": "src/main-process/background-execution/supervisor.js",
+      "size": 87709,
+      "sha256": "b98b065bfb237c5cd2bb768c6091da9815ea26865e44768f8c56b69f87163681"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/auto-error-report.js",
+      "size": 12179,
+      "sha256": "ff46064c63e718f4e3a0c957ac94cb6a9091b2fa380a8beb6ac21ca5954ee8a6"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/import-main.js",
+      "size": 11759,
+      "sha256": "600e87d7b8095b65d7b9769476c1ce02f476d632692d1016ecd60e91cd8bf2c1"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/ipc.js",
+      "size": 14142,
+      "sha256": "9ce608db0263b633d314857248b2426921193c1a9a084efe04e6ae67147937a4"
+    },
+    {
+      "path": "src/main-process/toolbox-output-writer.js",
+      "size": 64269,
+      "sha256": "8765e81bb52523b9169597f53390c37356f5085ff1b4c129c195ed96cdad7a3f"
+    },
+    {
+      "path": "src/main-process/toolbox-row-split/cache.js",
+      "size": 9582,
+      "sha256": "5338a4ce07438d0bd615afdcaa4a59b567b67336dc27ba1da61ffe2c11fee9da"
+    },
+    {
+      "path": "src/main-process/toolbox-row-split/contracts.js",
+      "size": 9343,
+      "sha256": "5bac1d09365d1f915d30be0d5d809f8ce14bb0edfb9270868d684144afbfbe5c"
+    },
+    {
+      "path": "src/main-process/toolbox-row-split/executor.js",
+      "size": 5345,
+      "sha256": "1b67092d18ebac877caa313cef8da896563e4184ecbb0ef1e281de790b97adf2"
+    },
+    {
+      "path": "src/main-process/toolbox-row-split/policy.js",
+      "size": 1336,
+      "sha256": "bacb43da3f7eea9cd720717e1283705df887091b866bdb0f7460c904a9d63982"
+    },
+    {
+      "path": "src/main-process/toolbox-row-split/service.js",
+      "size": 10435,
+      "sha256": "9ce95f2930385f281b375ee821fb4b5cc8fb024dab1f13804adf9eda612c8088"
+    },
+    {
+      "path": "src/main-process/toolbox-row-split/worker-entry.js",
+      "size": 274,
+      "sha256": "9f86422323a0b053a83e085e63d4065e67b69564ce5a50f6df9e74a1b90d5617"
+    },
+    {
+      "path": "src/main.js",
+      "size": 986857,
+      "sha256": "65b387b86f6bea739cc43e2f9159c659eb249017d572a562a425db8241babc54"
+    },
+    {
+      "path": "src/renderer-biz-op-v327.js",
+      "size": 31825,
+      "sha256": "b4168ca68a224cf653120ed30bb649b214cf0f637bc14caa62edfdff373676b4"
+    },
+    {
+      "path": "src/renderer-dialogs.js",
+      "size": 714445,
+      "sha256": "e11f08695d73c85f3050794c4d9fffbbf246d60ecfb033726a8b39dc414c1d43"
+    },
+    {
+      "path": "src/styles-gemini-extra.css",
+      "size": 152550,
+      "sha256": "62fe0ab83339b0d548e5a51921082621108eec6d38c49c35c2e3242f15106253"
+    },
+    {
+      "path": "tests/unit/main-process/biz-op-v329-auto-report.test.js",
+      "size": 22361,
+      "sha256": "9f8c8f9d20173f2bd1b08642d031c9cf579ee1fe8977b59824ab1d05d77956f2"
+    },
+    {
+      "path": "tests/unit/main-process/biz-op-v329-ipc.test.js",
+      "size": 10504,
+      "sha256": "f7d7669dea427ff73d468b36e8ad8409230ba23708bd2cf5d324009fe90dc094"
+    },
+    {
+      "path": "tests/unit/main-process/biz-op-v329-renderer.test.js",
+      "size": 24065,
+      "sha256": "d88d61cae7bc7253fc7231d7c932758cbb88ecb78623482a7379d5a170f5e0fb"
+    },
+    {
+      "path": "tests/unit/main-process/toolbox-row-split-overwrite.test.js",
+      "size": 7759,
+      "sha256": "4b26e1cfaa1871a3fb987170850f87967104206b0eb2a493d2eef8eb400e19a0"
+    },
+    {
+      "path": "tests/unit/main-process/toolbox-row-split-parent-identity.test.js",
+      "size": 7651,
+      "sha256": "403739c32875a79c5cbdfc1c5da1ba7ebf264e7e4493fb640d9ed365f61f49ac"
+    },
+    {
+      "path": "tests/unit/main-process/toolbox-row-split.test.js",
+      "size": 24388,
+      "sha256": "d8352f7a7e1ebde944046db6eccc0b0ead239b5eb5e09c8f21375cd33a0451d7"
+    }
+  ]
+}
