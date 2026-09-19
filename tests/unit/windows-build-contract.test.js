@@ -563,7 +563,8 @@ test('packaged background canary 仅在 GitHub-hosted Windows 的 RUNNER_TEMP �
 });
 
 test('Windows packaged canary 对报告前已退出进程快速返回专用 safe code', {
-  skip: process.platform !== 'win32'
+  // 真实计时在独立 Windows 步骤执行，避免与全量单测争用调度资源。
+  skip: process.platform !== 'win32' || process.env.WINDOWS_PACKAGED_CANARY_PROCESS_REAL_TEST !== '1'
 }, (t) => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'packaged-canary-early-exit-'));
   t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
@@ -678,4 +679,27 @@ test('真实 Windows 进程探针不与全量单测并发，只由专用工作�
     adapterTest,
     /process\.env\.WINDOWS_STARTUP_PROCESS_ADAPTER_REAL_TEST !== '1'/
   );
+  const canaryTest = read('tests/unit/windows-build-contract.test.js');
+  assert.match(
+    canaryTest,
+    /skip: process\.platform !== 'win32' \|\| process\.env\.WINDOWS_PACKAGED_CANARY_PROCESS_REAL_TEST !== '1'/
+  );
+  for (const workflowPath of ['.github/workflows/build-windows.yml', '.github/workflows/release-windows.yml']) {
+    const workflow = read(workflowPath);
+    assert.match(
+      workflow,
+      /Verify Windows packaged canary process semantics\s*\n\s*env:\s*\n\s*WINDOWS_PACKAGED_CANARY_PROCESS_REAL_TEST: '1'\s*\n\s*run: node --test --test-concurrency=1 tests\/unit\/windows-build-contract\.test\.js/,
+      `${workflowPath} 必须独立执行真实 canary 计时探针`
+    );
+    assert.equal(
+      (workflow.match(/WINDOWS_PACKAGED_CANARY_PROCESS_REAL_TEST:/g) || []).length,
+      1,
+      `${workflowPath} 仅允许在独立步骤开启真实 canary 计时探针`
+    );
+    assert.ok(
+      workflow.indexOf('Run release checks') !== -1 &&
+        workflow.indexOf('Run release checks') < workflow.indexOf('Verify Windows packaged canary process semantics'),
+      `${workflowPath} 必须在全量 release-check 结束后串行执行真实 canary 计时探针`
+    );
+  }
 });

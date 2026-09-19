@@ -171,3 +171,9 @@ Windows `50062ca0` 的 ctime 拒删单测暴露跨平台注入前提不可靠，
 后续发现独立 PF 验证器可因 OS 磁盘编号与 PhysicalDisk DeviceId 碰巧相等而错误认证 SSD 基准（P2），已修复身份取证，44 项回归与 25 项独立探针通过；后续短诊断的原生 Windows 44/44 通过，实际采证暴露枚举转换失败，修复待复验。候选 `e47e2a60` 的 11 项 PF 仍为 NOT_RUN，SSD 和其他性能合同未放宽。详见 [SSD 准入发现与闭环](self-review-2026-09-19/runtime-repairs.md#windows-ssd-基准准入-p2)。
 
 旧候选 `50062ca0` 完整 Windows 单测最终 7,819 PASS / 45 FAIL / 0 cancelled / 3 SKIP；38 项迁移失败仍在取证，另外 6 项只读/平盘夹具已完成本机与受控修正验证，原生 Windows 待验。其余 1 项 ctime 已在 `e47e2a60` 实际 Windows 通过。集成与 build 在旧运行未执行，不能把局部结果视为最终平台通过。
+
+## Windows canary 计时用例隔离（2026-09-19）
+
+候选 `834b504e` 的 Windows 必需检查完成 8,104 个单测：8,100 PASS、1 FAIL、3 SKIP。唯一失败是 canary 已退出进程用例已取得预期 safe code，但耗时 3.0508927 秒超过测试的 2 秒上限；构建因此跳过。该日志不能唯一证明具体调度、JIT 或 IO 延迟来源。
+
+本次将真实计时探针移至 build/release 两个工作流的完整门禁之后独立串行执行，保留真实进程、500 ms 宽限、2 秒上限、5 秒报告期限及 15 秒外层超时。生产代码、资源预算及 RSS 合同不变。后续验证与合并状态见 [canary 隔离修复记录](self-review-2026-09-19/canary-process-isolation.md)；用户已明确授权在 GitHub 必需检查通过后合入远端 main，人工/PF 验收继续按实际状态保留 NOT_RUN。
