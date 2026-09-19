@@ -2,7 +2,7 @@
 
 日期：2026-09-19。发布状态见 [release.md](release.md)，本轮审查及自动证据见 [release-review-2026-09-19.md](release-review-2026-09-19.md)。
 
-本文件是待执行清单，**没有任何人工或 Windows 性能项目被预先判为通过**。已建立草稿 [PR #239](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/239)；原生时间框修复后的专项步骤通过；后续 SST 缓存和高位文件身份修复已提交为 `30317ee5a9ad8227db0562354d20554edb9e6ae4`，本地完整门禁通过。`5ffaabb0` 必需检查失败，不作为最终候选；最终包身份待新修复通过检查并构建后绑定。自动检查、性能采样、安装包操作及 Excel/WPS 人工核对分别记录；源码脚本通过或安装包成功生成均不代替人工验收。本文件不修改各模块的需求、资源门槛或发布合同。
+本文件是待执行清单，**没有任何人工或 Windows 性能项目被预先判为通过**。草稿 [PR #239](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/239) 保留本轮全部功能。旧候选 `af58af73` 的 Windows 检查/构建已通过，但新增 RSS 指标修订与按行拆分准入修复后，须使用新候选的检查、包身份及人工记录；旧失败和通过记录均保留历史，不充当新候选证据。自动检查、性能采样、安装包操作及 Excel/WPS 人工核对分别记录；源码脚本通过或安装包成功生成均不代替人工验收。本文件不另行改变各模块需求、资源门槛或发布合同，RSS 合同修订以已同步的 Spec/TechDoc 为准。
 
 ## 1. 候选身份、环境与证据
 
@@ -12,7 +12,7 @@
 | release → main PR | [PR #239](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/239)，草稿，待必要验收完成 |
 | Windows Setup 候选包 / SHA-256 | 待补链接及摘要 |
 | Windows portable 候选包 / SHA-256 | 待补链接及摘要 |
-| 最终候选 release-check 日志 | 修复内容 PASS / exit 0，7,864 单测通过、3 平台跳过，2,575 集成断言通过；日志摘要及输入身份见 [修复验证](self-review-2026-09-19/runtime-repairs-summary.json)，Windows head 另绑定 |
+| 最终候选 release-check 日志 | 本轮 RSS/准入修复内容 PASS / exit 0；8100 单测 PASS、4 Windows SKIP、0 FAIL；60 个集成脚本全 PASS，报告计数2579/2579；[本地摘要](../../logs/verification/release-v3.2.9/rows-admission-fix/verification-summary.json)。实际 Windows 包与候选 SHA 另绑定 |
 | 测试者 / 复核者 / 日期和时区 | 待填 |
 | Windows 版本、build、架构 | 待填，不写“最新版” |
 | CPU / 物理内存 / SSD 型号与文件系统 | 待填 |
@@ -62,15 +62,15 @@ Get-FileHash -Algorithm SHA256 -LiteralPath "C:\验收\本次输出.xlsx"
 
 | 项目 | 当前采集能力与缺口 |
 |---|---|
-| 独立导出 Worker 峰值 RSS | Main 与 `worker_threads` 共用 PID；`process.memoryUsage().rss` 是整个进程。线程 heap/external 不是 RSS，不能相加同 PID RSS，也不能用进程峰值替换 PF01 的原合同门槛。缺少符合合同的独立归因证据时为 `NOT_RUN`。 |
+| 导出宿主进程峰值 RSS | 2026-09-19按用户委托修订为TechDoc §12.4.1 `host-process-rss-v1`。Main与worker_threads共用PID，独立采样线程只计一次进程RSS；准备另进程退出后新启测量宿主。两规模绝对峰值差及基线校正增长差均≤256 MiB，基线漂移≤32 MiB；缺原始采样、身份或覆盖不得PASS，heap/external不替代RSS。旧独立Worker RSS项由本明确修订取代。 |
 | SST 字典压力 | 当前合成输入使用 inline strings，没有非空 shared-string 字典；高基数文本不等于 SST 压力。缺失指标为 null，不能当 0 或通过。 |
-| PF04 上游停止/恢复读取 | 已有限速、暂停、队列采样及回读；源游标完整暂停/恢复证据仍缺失。 |
-| PF05 真正 drain 等待 | `cancel-drain` 观察的是输出 Writable 暂停后取消，尚未证明此刻生产 SheetStream 正在等待 drain；其他取消点在真实阶段入口，未覆盖每个阶段内部的全部游标边界。 |
+| PF04 上游停止/恢复读取 | runner 已检查实际 SheetStream drain 阻塞时 SQLite pageRows 游标不前进、输出恢复/drain 后游标再推进；原 XLSX 提取在此之前已完成。采集能力不等于最终 Windows PF04 已通过。 |
+| PF05 真正 drain 等待 | `cancel-drain` 已检查真实 SheetStream drain 等待中取消、无输出恢复依赖、源游标及句柄关闭；本机合成 10,000 行补充实测通过，正式 Windows PF05 仍 NOT_RUN。其他取消点仅在真实阶段入口，未覆盖各阶段内部所有边界。 |
 | 人工、原生和安装版 | Excel/WPS 打开、真实另存为/占用/覆盖、真实界面忙态解除、安装版及完整 Main 冷启动均不能由此脚本代替。 |
 
 ### 3.2 固定机器与执行命令
 
-正式 PF 基准使用 **Windows x64、16 GiB 内存、SSD、本地同卷**，Electron **36.9.5**、ExcelJS **4.4.0** 和最终候选锁定依赖。记录实际 CPU、Windows/Excel/WPS 版本、可用空间、完整构建 SHA 和三份 runner 文件摘要。两种 PF01 规模必须在同一机器、同一构建、相同启动条件下执行。runner 的 15～17 GiB 检测范围仅容纳操作系统报告差异，不能把 32 GiB 或其他配置写成规定基准。
+正式 PF 基准使用 **Windows x64、16 GiB 内存、SSD、本地同卷**，Electron **36.9.5**、ExcelJS **4.4.0** 和最终候选锁定依赖。记录实际 CPU、Windows/Excel/WPS 版本、可用空间、完整构建 SHA 和全部采集/比较脚本的摘要。两种 PF01 规模必须在同一机器、同一构建、相同启动条件下执行。runner 的 15～17 GiB 检测范围仅容纳操作系统报告差异，不能把 32 GiB 或其他配置写成规定基准。
 
 在与候选包同一提交的干净验收源码副本准备依赖；`src/`、`assets/`、package 文件不能有已跟踪或未跟踪改动。不要在已完成的证据目录继续覆盖运行。下列命令均由测试者执行，本清单创建时未运行。
 
@@ -108,13 +108,13 @@ node scripts/vcc-financial-op/verify-review-performance.js --mode smoke --case c
 |---|---|
 | 0 | 小 smoke 自动检查通过，或所选正式单项已满足脚本声明的子项；继续查看 summary/evidence 的 `NOT_RUN`。单独 PF02 的 0 不等于整版验收通过。 |
 | 1 | 自动断言失败、进程异常/信号退出或附加进程 RSS 预算失败；保存日志，先定位，不能勾选通过。 |
-| 2 | 已生成记录但仍有 `NOT_RUN`。环境不符时不生成大样本；整套执行后也可能因独立 Worker RSS或其他缺口返回 2。不得改记为验收 PASS。独立 collector 工作流可将“证据已收集”记为成功，但必须保留 NOT_RUN，不代表发布门禁通过。 |
+| 2 | 已生成记录但仍有 `NOT_RUN`。环境不符时不生成大样本；整套执行后也可能因宿主RSS配对身份/采样不足或其他缺口返回 2。不得改记为验收 PASS。独立 collector 工作流可将“证据已收集”记为成功，但必须保留 NOT_RUN，不代表发布门禁通过。 |
 
-证据必须保留 `summary.json`、各 case 的 `config.json`、`evidence.json`、`run.log`、合成输入/输出及 SHA-256。文档中的“采集完成”与“验收通过”分开填写。自动全仓门禁引用最终候选 `release-check` 日志即可；没有新变更、失败或疑点时不为填写本清单重复运行。
+证据必须保留 `summary.json`、各 case 的 `config.json`、`fixture-preparation.json`、`fixture-run.log`、`evidence.json`、`process-rss.jsonl`、`run.log`、合成输入/输出及 SHA-256；缺少原始准备记录或原始采样不能复算为PASS。文档中的“采集完成”与“验收通过”分开填写。自动全仓门禁引用最终候选 `release-check` 日志即可；没有新变更、失败或疑点时不为填写本清单重复运行。
 
 ### 3.3 PF01～PF05 完成条件
 
-- [ ] **PF01 / RV12**：100,000 与 1,000,000 行，保持文件数、主体数、差异坐标、结构和 Sheet 数相同；长 ID、高基数文本、Pending 双币种均被保留，E/A/X 一致。取得符合合同的独立导出 Worker 绝对峰值 RSS，并证明百万行相对十万行增加 ≤256 MiB。现有进程总 RSS 比较仅补充，本项当前 `NOT_RUN`。
+- [ ] **PF01 / RV12**：100,000 与 1,000,000 行，保持文件数、主体数、差异坐标、结构和 Sheet 数相同；长 ID、高基数文本、Pending 双币种均被保留，E/A/X 一致。取得符合host-process-rss-v1的两例原始JSONL及独立复算结果，绝对峰值差与基线校正增长差均≤256 MiB，基线漂移≤32 MiB，固定元数据/构建/环境相同。准备隔离、500ms采样目标与750ms最大间隔、起止覆盖均通过才可勾选；旧样本不可追认为本合同PASS。
 - [ ] **PF02**：一组恰好 1,048,576 条数据，真实输出 1,048,575 + 1 两页，各页恰有表头；顺序、身份、其他正常组及系统 OP 固定预期均完整。保留分页边界行和完整清单。
 - [ ] **PF03 / AC30**：200 主体、至少 500 个有数据附页、10,000 条已保存调整；完整生成及回读，Excel 和 WPS 分别核对主体、调整、长表名、批注、引用与打印。元数据占用单列，不以 PF01 的固定元数据假设解释它。当前人工部分 `NOT_RUN`。
 - [ ] **PF04**：百万行、1 MiB/s 限速及一次暂停；观测各 XML/ZIP/输出队列、行批次、SST、暂存和句柄。验证输入批次 ≤512 行或4 MiB、单行 ≤16 MiB、活动 XML/ZIP 队列8 MiB且至多一条单行瞬时超额、SST64 MiB及固定句柄边界；证明停写时上游停止读取，恢复后无丢行或无界 Promise。当前 SST 字典压力与上游停读证明 `NOT_RUN`，不能仅以峰值 ≤24 MiB 代替全部条件。
@@ -180,7 +180,7 @@ finally { $v329LockHandle.Dispose() }
 - [ ] **V04 / AC21～23、RV05～07、RV11**：真实原生覆盖确认、目标被Excel/WPS占用、中文/长文件名、权限不足及受控失败；无假成功，旧目标不变或可恢复路径明确。尝试受保护目标时拒绝且文件不变；结果/输入变化后拒绝旧快照发布。业务DB只读证据与页面状态一起保存，不能只看输出文件。
 - [ ] **V05 / AC25～29、RV10**：在含合成历史数据的v2副本升级候选，记录v3合同和迁移前后业务/来源/结果/调整守恒；保留旧来源兼容，混合文件只冻结一次。旧程序不得写v3；非空v1不在普通启动清空。提交前失败与提交后连接初始化失败分别核验，不手改marker降级；回退仅用符合合同的程序或升级前完整测试备份。
 - [ ] **V06 / AC27～30**：从真实Windows候选包运行正式结果导出和待确认导出，验证实际ASAR内置模板、原生保存、覆盖/占用及Excel/WPS打开。源码Electron/ASAR专项日志作为补充，不能替代已安装候选运行。
-- [ ] **V07 / AC30、RV12**：将第3节完整PF原始数据和Windows安装版/Excel/WPS人工记录一起交付。独立Worker RSS、SST、真实drain或任一必须项仍未完成时，本项保持未勾选；不把小样本、其他机器或仅进程总RSS写成全部通过。
+- [ ] **V07 / AC30、RV12**：将第3节完整PF原始数据和Windows安装版/Excel/WPS人工记录一起交付。host-process-rss-v1配对验收、SST、真实drain或任一必须项仍未完成时，本项保持未勾选；不把小样本、其他机器或仅RSS单项通过写成全部通过。
 
 ## 5. 结果填写与验收结论
 

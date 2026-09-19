@@ -102,3 +102,12 @@
 ## 未执行的验收
 
 尚未完成 Windows 上 Excel/WPS 人工打开、真实业务 Main 的系统对话框全流程、Windows/网络卷锁文件及断电恢复验收；不将本机自动化通过等同发布许可。未做提交、推送、PR、合并或发版。
+
+
+## 2026-09-19：按行拆分准入超时修复
+
+- 依据：用户报告 `Admission request timed out after 5000ms`；实际错误日志缺少当时 Governor 快照，因此不将当前机器可用内存回推为历史唯一原因。
+- 已复现：静态 rows 需 1 GiB，但 Governor 总配额仅 768 MiB 时，原 Supervisor 跳过总预算预检，空闲状态仍等满 5000 ms 后失败；此时生成 Worker 尚未启动。
+- 修复：静态/动态 simple job 共用总预算预检；不可能满足时立即拒绝，真实临时占用继续有界等待。补充中文资源诊断、可选错误码和 Main 活动日志，不改变资源预约、系统预留、源件/正式目标保护或发布协议。
+- 验证边界：真实 Supervisor/Governor 专项 133/133 PASS；错误传播 6/6 PASS；真实 Main/Runtime/rows Worker/Publisher Worker 集成 2/2 PASS，其中不足配额无 Worker 启动、无正式发布，旧目标和源件保持不变，足额生成三份并回读 2/2/1 数据行。完整门禁、独立复审和 UI 结果在本轮审查文档中按最终状态记录。
+- 契约边界：Governor 总配额仍在 runtime 创建时冻结；关闭其他程序不会动态重算当前配额，提示在释放资源后重启。未操作用户正在运行的 Electron 或真实数据；没有补签 Windows PF 或 Excel/WPS 人工验收。

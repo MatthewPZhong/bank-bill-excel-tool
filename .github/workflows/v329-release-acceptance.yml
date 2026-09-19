@@ -85,6 +85,7 @@ jobs:
           if-no-files-found: error
           path: |
             outputs/v329-acceptance/**/*.json
+            outputs/v329-acceptance/**/*.jsonl
             outputs/v329-acceptance/**/*.log
             outputs/v329-acceptance/**/*.png
             outputs/v329-acceptance/**/*.xlsx

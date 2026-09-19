@@ -347,6 +347,13 @@ for partIndex = 0…K−1：
 
 资源策略的并发约束是任务内的；整机多个任务是否同时准入继续受平台全局资源管理，不另外开无限线程池，也不把“每任务一个 writer”误当作全进程只有一个 writer。
 
+2026-09-19 准入修订：rows 实际 `thread-single` 策略维持 1 CPU / 1 Worker / 1 IO / 1 GiB Phase 预约、零 Base。Supervisor 的 simple job 总预算预检同时覆盖静态策略与动态估算策略；在取得 Base 前检查 Base + Phase 是否可容纳，超额返回 `RESOURCE_BUDGET_UNAVAILABLE`，不启动生成 Worker。临时占用保持既有优先级排队规则、有界 5000 ms 排队、取消与租约释放，等待耗尽仍返回 `ADMISSION_TIMEOUT`。
+
+诊断仅采集五维资源数值、申请阶段、失败原因与队列数量，不携带任务身份、租约归属或文件路径。内部诊断保留结构化数值，跨协议仍采用原 `SafeErrorV1` 的 `code/message/stage/detailLines` 四字段；数值使用分组和 MiB，避免被账号隐私过滤误判。rows service 将两类错误转为中文，Main 返回可选 `code`、原 `detailLines` 并写活动日志；普通无错误码的失败返回形状保持不变。
+
+平台内存总配额按 runtime 创建时的内存快照计算并冻结；此修订不动态刷新配额，不调整 2 GiB 系统预留或 rows 1 GiB 预约。因此释放外部程序内存后，若旧 runtime 的总配额仍不足，须重启应用重新计算。截图事件没有当时的资源快照，不能据当前内存状态断言历史事件唯一原因。本轮验证覆盖静态总预算不足、暂时争用、真实生成与发布，以及源件/旧目标保护；不替代实际 Windows、Excel/WPS 或大规模性能验收。
+
+
 #### 6.3.2 内部传递与验证
 
 大体量的保真行、样式注册表与缓存记录不跨 IPC。完整 FilePlan/产物清单可使用任务私有清单文件，消息只传 task/attempt、版本、清单引用、字节数与完整性描述等有界元数据。清单引用须由主进程分配并校验任务归属，不能接受任意路径或 renderer 自报的缓存文件。

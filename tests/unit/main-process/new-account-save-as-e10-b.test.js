@@ -955,24 +955,48 @@ test('真实 runtime 获取/释放 I/O lease，不占 CPU/Worker；预算拒绝�
   const rejectedFixture = await generatedFixture(rejectedRoot);
   const rejectedOptions = saveAsOptions(rejectedRoot, rejectedFixture);
   const rejectedInput = createNewAccountSaveAsInput(rejectedOptions);
+  const rejectedDiagnostics = [];
   const rejectedRuntime = createBackgroundExecutionRuntime({
     availableParallelism: 4,
     freeMemoryBytes: 1,
     totalMemoryBytes: 1,
     memoryHardCeilingBytes: 1,
-    systemReserveBytes: 0
+    systemReserveBytes: 0,
+    diagnostics: (event) => rejectedDiagnostics.push(event)
   });
-  const rejected = await rejectedRuntime.execute({
-    actionKey: NEW_ACCOUNT_SAVE_AS_ACTION,
-    operationKey: rejectedOptions.operationKey,
-    context: rejectedOptions.context,
-    input: rejectedInput,
-    initTimeoutMs: 0
-  });
-  assert.equal(rejected.outcome, 'transport-lost');
-  assert.equal(rejected.error.code, 'ADMISSION_TIMEOUT');
-  assert.equal(fs.existsSync(rejectedOptions.stagingPath), false);
-  await rejectedRuntime.shutdown({ timeoutMs: 10000 });
+  try {
+    const rejected = await rejectedRuntime.execute({
+      actionKey: NEW_ACCOUNT_SAVE_AS_ACTION,
+      operationKey: rejectedOptions.operationKey,
+      context: rejectedOptions.context,
+      input: rejectedInput,
+      initTimeoutMs: 0
+    });
+    assert.equal(rejected.outcome, 'transport-lost');
+    assert.equal(rejected.error.code, 'RESOURCE_BUDGET_UNAVAILABLE');
+    assert.equal(rejected.error.stage, 'admission');
+    assert.equal(fs.existsSync(rejectedOptions.stagingPath), false);
+    // 固定总预算连静态资源都无法容纳时，应在排队和授予任何租约前直接拒绝。
+    const failures = rejectedDiagnostics.filter((event) => event.type === 'resource-admission-failed');
+    assert.equal(failures.length, 1);
+    assert.equal(failures[0].code, 'RESOURCE_BUDGET_UNAVAILABLE');
+    assert.equal(failures[0].admission.reason, 'total-budget-insufficient');
+    assert.equal(failures[0].admission.requestedLease, 'base-and-phase');
+    assert.deepEqual(failures[0].admission.required, SAVE_AS_RESOURCES);
+    assert.equal(failures[0].admission.budgets.memoryBytes, 1);
+    assert.equal(failures[0].admission.available.memoryBytes, 1);
+    assert.equal(failures[0].admission.queueCount, 0);
+    const rejectedSnapshot = rejectedRuntime.resourceGovernor.snapshot();
+    assert.equal(rejectedSnapshot.budgets.memoryBytes, 1);
+    assert.equal(rejectedSnapshot.diagnostics.granted, 0);
+    assert.equal(rejectedSnapshot.diagnostics.released, 0);
+    assert.equal(rejectedSnapshot.activeLeaseCount, 0);
+    assert.equal(rejectedSnapshot.queued.size, 0);
+    assert.ok(Object.values(rejectedSnapshot.activeUsage).every((value) => value === 0));
+    assert.equal(rejectedDiagnostics.some((event) => event.type === 'resource-granted'), false);
+  } finally {
+    await rejectedRuntime.shutdown({ timeoutMs: 10000 });
+  }
 });
 
 test('既有 singleton FIFO Publisher 实际发布一次，正式目标与 E10-A bytes/digests 完全一致', async () => {

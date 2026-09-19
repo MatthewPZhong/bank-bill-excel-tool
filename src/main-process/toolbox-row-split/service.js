@@ -116,6 +116,22 @@ async function validateRowsManifest(plan, input, result) {
   return { artifacts: Object.freeze(artifacts), warningSummary, metrics: manifest.metrics };
 }
 
+function rowsAdmissionError(error) {
+  if (!error || !['RESOURCE_BUDGET_UNAVAILABLE', 'ADMISSION_TIMEOUT'].includes(error.code)) return error;
+  const insufficient = error.code === 'RESOURCE_BUDGET_UNAVAILABLE';
+  error.message = insufficient
+    ? '按行拆分暂时无法启动：后台资源配额不足。'
+    : '按行拆分等待后台资源超时，请稍后重试。';
+  error.detailLines = [
+    '本次尚未开始生成拆分文件。',
+    ...(Array.isArray(error.detailLines) ? error.detailLines : []),
+    insufficient
+      ? '后台总配额在应用启动时计算；若总配额低于所需值，请关闭暂不使用的程序，释放内存后重新启动应用。'
+      : '请等待其他后台任务完成后重试；若持续出现，请保留以上资源信息便于排查。'
+  ];
+  return error;
+}
+
 async function generateValidateAndPublishRows({
   runtime, filePlan, batchContext, counts, privateDirectory, metadataDirectory, publisher
 }) {
@@ -138,10 +154,13 @@ async function generateValidateAndPublishRows({
   const planPath = path.join(plan.privateDirectory, 'plan.json');
   const input = { version: 1, planPath, tokenId: plan.attemptId,
     planDescriptor: writePrivateJson(planPath, plan, ROWS_BUDGETS.maxPlanBytes) };
-  const execution = await runtime.execute({ actionKey: ROWS_ACTION, operationKey: context.operationKey,
-    production: true, context: { kind: 'operation', value: context }, input });
+  let execution;
+  try {
+    execution = await runtime.execute({ actionKey: ROWS_ACTION, operationKey: context.operationKey,
+      production: true, context: { kind: 'operation', value: context }, input });
+  } catch (error) { throw rowsAdmissionError(error); }
   if (!execution || execution.outcome !== 'completed' || execution.terminalSource !== 'job:done') {
-    if (execution && execution.error) throw fromProtocolError(execution.error);
+    if (execution && execution.error) throw rowsAdmissionError(fromProtocolError(execution.error));
     throw rowsError('TOOLBOX_ROWS_GENERATION_FAILED', '按行拆分后台生成未完成');
   }
   const validated = await validateRowsManifest(plan, input, execution.result);

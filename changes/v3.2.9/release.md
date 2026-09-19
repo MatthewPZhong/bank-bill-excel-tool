@@ -2,6 +2,14 @@
 
 ## 当前发布状态（2026-09-19）
 
+Worker RSS冲突已由用户明确委托处理；本轮采用[TechDoc §12.4.1](codex/v3.2.9-vcc-fin-op-multisheet-review-export/v3.2.9_VCC_TechDoc.md)的宿主进程RSS合同，实施/验证状态见[决策记录](codex/v3.2.9-vcc-fin-op-multisheet-review-export/implementation-notes.md)。生产架构、样本规模和256 MiB预算保留，正式Windows性能与Office验收仍须另行完成。下列“独立Worker RSS待决/合同未改”描述均为本次修订前的历史，不代表当前待决状态；新验证器专项189项（188 PASS、1平台SKIP）、真实Electron导出/取消及独立定点复审通过；不能把历史af58包或本机小样本直接认作正式Windows性能验收通过。
+
+按行拆分准入修复已完成本地定点验证：静态总预算不足即拒绝，临时占用保留有界等待，中文提示包含五维配额信息。真实 Main/Runtime/Worker/Publisher 集成 2/2 PASS；故障用例未启动 Worker、未发布并保留旧目标，足额用例三份回读 2/2/1 行。该隔离复现不能证明用户 11:32 事件的历史资源状态；源码专项、UI 与完整本地门禁的最终结果见 [本轮审查](codex/v3.2.9-toolbox-split-by-rows/review-admission-2026-09-19.md)。RSS 与准入改动将一并形成新候选，旧 af58 的 Windows 绿灯不覆盖新候选；当前 PR 仍为草稿，main 未合并。
+
+Node 24.13.0 下 `UNIT_TEST_CONCURRENCY=2 npm run release-check` 完整 PASS / exit 0：507 个单测文件、8104 项中 8100 PASS / 0 FAIL / 4 Windows 专用 SKIP；60 个集成脚本全部通过，59 个有计数脚本合计 2579/2579，另 1 个无计数。lint/smoke 通过，1542 份冻结的代码、依赖及验证输入核对未变。 本轮生产代码及测试已冻结，候选 SHA 随本记录提交并在 PR/外部身份清单中绑定；Windows CI 将针对新候选重新执行。
+
+### 修订前的发布记录
+
 第三轮隔离原生 [run35400518166](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/35400518166) / head `8779c029ac94c859681d582bff378b426686dc09` 已成功：最终迁移完整121/121、永久删除集成52/52，capture产品PASS；19个运行SHA及最终五文件绑定一致，迁移close P2修复验证闭环。prefix/ArchiveService76/76、SSD45/45和readonly+position15/15复用第二轮相同代码的原生证据，不把SSD采集成功升格为介质准入。本地最终 `release-check` 正在运行（session67830），尚无结果；本记录生成时本轮候选待提交，最终门禁进行中；实际候选SHA以后续PR与外部记录为准。最终完整Windows gate/build、SSD PF、原始独立Worker RSS及Excel/WPS人工仍待完成。原PF/RSS合同未改变。详见 [第三轮冻结与验证](self-review-2026-09-19/runtime-repairs.md#第三轮-windows-迁移修复-8779c029-闭环)。以下前序记录保留各自运行时点，不替代当前候选门禁。
 
 六功能集成后的三项 SST/高位文件身份 P2 已修复为 `30317ee5a9ad8227db0562354d20554edb9e6ae4`，局部回归与独立复审通过。此前修复时点的完整本地门禁通过：501 个单测文件，7,864 PASS / 0 FAIL / 3 Windows 专用 SKIP；59 个集成脚本，2,575/2,575。真实 drain 期间取消的 10,000 Pending 补充验证通过，43 ms 收口，无强制终止。最终 Windows 检查、候选包、完整 PF 和人工验收仍未闭环，尚未合并 main、打正式标签或发布。下方历史门禁保留原适用范围；修复证据见 [摘要](self-review-2026-09-19/runtime-repairs-summary.json)。
@@ -39,9 +47,9 @@
 - [x] B2：fetch 实际 origin；main 要求 `smoke-test`、`build` 严格检查，禁止强推且 admins 同样受保护。production-release 有指定用户审批，正式标签有创建/不可变规则。
 - [x] B4/B5：核对六源 SHA 均为祖先且实际实现存在；当前 `origin/main` 与基线相同并包含于 release，暂无新增 hotfix。
 - [x] C1/C2：版本和锁文件 3.2.9；同步 CHANGELOG、版本功能历史和使用手册。
-- [ ] C3 最终候选：旧生产修复提交 `30317ee5` 已复审；新增 migration close、prefix 与 SSD 采集修复已冻结但仍未提交 release，须在最终候选绑定完整输入与证据。
-- [ ] C4 最终内容自动门禁：旧修复时点 7,864 PASS / 0 FAIL / 3 Windows SKIP、59 集成脚本 2,575/2,575 保留原输入身份；本轮追加修复已有第三轮原生专项结果，最终本地完整门禁现为RUNNING（session67830），结果及输入一致性待收口。
-- [ ] A3/C4 平台/C5/C6：当前 `e47e2a60` Windows 必需检查已终态失败（7,819 PASS / 45 FAIL / 3 SKIP）；迁移及夹具已通过下述最终原生专项；最终完整Windows gate/build、人工与VCC完整性能门禁仍待闭环。
+- [x] C3 最终候选内容：RSS 与按行拆分准入修复已冻结、独立复审，本记录随候选提交；完整 SHA 由 PR 与外部输入清单绑定。
+- [x] C4 最终内容本地自动门禁：Node 24.13.0 下 `UNIT_TEST_CONCURRENCY=2 npm run release-check` 完整 PASS / exit 0：507 个单测文件、8104 项中 8100 PASS / 0 FAIL / 4 Windows 专用 SKIP；60 个集成脚本全部通过，59 个有计数脚本合计 2579/2579，另 1 个无计数。lint/smoke 通过，1542 份冻结的代码、依赖及验证输入核对未变。
+- [ ] A3/C4 平台/C5/C6：旧 af58 Windows 门禁与构建已成功；新候选须重新核验。正式 Windows PF 与必要 Windows/Excel/WPS 人工验收仍未完成，RSS 指标决策已解决。
 - [x] D1/D2：同名 release 已推送并建立 release→main 草稿 [PR #239](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/239)；每次推送均核对 head，候选 SHA 见 PR 及下方续做记录。
 - [ ] D3/D4：最终 head 的 Windows 检查/构建与必要验收通过后，重新核对 main 及合并条件。
 - [ ] E1–E5：满足发布条件后进入锁定窗口、合并 PR、核实最终 main 检查、创建并核验附注 `v3.2.9`。目前未宣称仓库已被技术锁定。

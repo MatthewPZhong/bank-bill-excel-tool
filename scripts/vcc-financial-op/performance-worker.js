@@ -30,7 +30,7 @@ DatabaseSync.prototype.close = function () {
   const files = this.prepare('PRAGMA database_list').all().map((item) => item.file);
   const result = nativeDbClose.call(this); emit('database-closed', { files }); return result;
 };
-const emit = (kind, data) => parentPort.postMessage({ type: 'performance-probe', kind, at: Date.now(), threadId, phase, ...data });
+const emit = (kind, data) => parentPort.postMessage({ type: 'performance-probe', kind, at: Date.now(), pid: process.pid, threadId, phase, ...data });
 function queues() {
   const writer = writerSession?.writer;
   const value = (stream) => stream ? (stream.readableLength || 0) + (stream.writableLength || 0) : 0;
@@ -38,7 +38,7 @@ function queues() {
     zip: value(writer?.zip), zipEngine: value(writer?.zip?._module?.engine), output: value(output) };
   q.total = Object.values(q).reduce((a, b) => a + b, 0); queuePeak = Math.max(queuePeak, q.total); return q;
 }
-function sample() { emit('sample', { memory: process.memoryUsage(), pid: process.pid, rows, readRows, queues: queues() }); }
+function sample() { emit('sample', { memory: (() => { const { rss: _processRss, ...memory } = process.memoryUsage(); return memory; })(), pid: process.pid, rows, readRows, queues: queues() }); }
 const timer = setInterval(sample, 500); timer.unref(); sample();
 parentPort.on('message', (message) => { if (message?.type === 'cancel') { sourceRowsAtCancel = sourceRows; emit('cancel-received', { rows, readRows, sourceRows }); } });
 const closePort = parentPort.close.bind(parentPort);

@@ -20434,10 +20434,10 @@ function registerPositionReconciliationHandlers() {
 //     单文件成功 { status:'success', filePath }
 //     多文件成功 { status:'success', files:[{filePath,fileName,matchedCount}] }
 //     取消另存为 { status:'cancelled' }
-//     失败     { status:'failed', message, detailLines }（表头不一致 / 空文件 / 字段缺失 / 运行错误）
+//     失败     { status:'failed', message, detailLines, code? }（表头不一致 / 空文件 / 字段缺失 / 运行错误）
 //   trackedIpcHandle 仅在 status∈{ok,success} 时计 usage（取消/失败不计）。
 //
-// 把 catch 到的异常归一为 {status:'failed', message, detailLines}（FileValidationError / ToolboxHeaderMismatchError 带 detailLines）。
+// 把异常归一为失败结果，保留已有错误码与诊断；无错误码的旧异常仍保持原返回形状。
 function toolboxFailureResult(error) {
   const message = error && error.message ? String(error.message) : String(error);
   const detailLines = error && Array.isArray(error.detailLines) ? error.detailLines.slice() : [];
@@ -20449,7 +20449,8 @@ function toolboxFailureResult(error) {
       detailLines.push(line);
     }
   }
-  return { status: 'failed', message, detailLines };
+  return { status: 'failed', message, detailLines,
+    ...(error && typeof error.code === 'string' && error.code ? { code: error.code } : {}) };
 }
 
 function shouldPreserveToolboxTemporaryFiles(error) {
@@ -21219,6 +21220,12 @@ function registerToolboxHandlers() {
               generated.warningSummary, publication.warnings || []);
           } catch (error) {
             preserveTempDir = shouldPreserveToolboxTemporaryFiles(error);
+            if (error && ['RESOURCE_BUDGET_UNAVAILABLE', 'ADMISSION_TIMEOUT'].includes(error.code)) {
+              try {
+                appendActivityLogEntry({ level: 'error', source: 'main', domain: 'toolbox',
+                  message: error.message, details: [`错误代码：${error.code}`, ...(error.detailLines || [])] });
+              } catch (_logError) { /* 日志失败不覆盖原始准入错误。 */ }
+            }
             throw error;
           } finally {
             if (!preserveTempDir) cleanupToolboxTemporaryDirectory(tempDir);
