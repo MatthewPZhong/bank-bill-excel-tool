@@ -1,6 +1,6 @@
 # v3.2.10 本地集成记录
 
-当前已纳入 G1 应用恢复、G4 共用 XLSX、G5 BizOP 查询边界、G6 存储与执行分离。下方分批保留各次集成证据；最新组合见「G4/G6/G5 三模块合入」。G2/G3/G7/G8 尚未纳入本次集成。
+当前已纳入 G1 应用恢复、G2 业务任务适配器、G4 共用 XLSX、G5 BizOP 查询边界、G6 存储与执行分离。下方分批保留各次集成证据；最新组合见「G2 business-task-adapters 合入」。G3/G7/G8 尚未纳入本次集成。
 
 ## application-recovery 合入
 
@@ -85,3 +85,49 @@
 - G6 已记录的共享 prepared 包装器第二 gate / initialize 异常未调用 onAbandon 的基线缺口仍属于 G2 后续范围，本次没有把它当作已修复。
 - 完整自动门禁不替代 Windows 文件占用/安装包、Electron 真实 GUI 对账/取消/续跑、Excel/WPS 人工验收；本次未进行这些平台验收。
 - 原各模块 Spec/TechDoc、实施与审查记录保留其原时点的“未提交/未集成”描述，当前集成事实以本文与 Git 历史为准。现行 67 actions 与历史 54 actions 的独立 manifest 上下文差异继续沿用原证据说明，没有改写历史冻结产物。
+
+## G2 business-task-adapters 合入
+
+2026-09-21，按用户要求将 `codex/v3.2.10-business-task-adapters` 合入既有 release；之前 G1/G4/G5/G6 成果全部保留。源工作区以 G1 合并提交 `5ccbf3f022488026f725a5111be00422a04ce221` 为固定依赖，交付实现原本未提交。本次将本模块 114 个文件冻结提交，保留该工作区 29 个无关未跟踪设计副本。
+
+| 项目 | 实际记录 |
+| --- | --- |
+| 合并前 release | `320d20df68bdeb175060ed37513a2fe5f23436bc` |
+| G2 功能提交 | `3e203858ea49fc2935f5ab847de8af7f793d356a` |
+| 合并提交 / 受验组合 | `8b12a6d5fd71b70ade58b9b6e7a347e29dbe8d05` |
+| 合并方式 | `--no-ff`；代码自动合并，导航及生成清单冲突按下述方式处理 |
+| release 工作区 | `/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10` |
+
+### 本批内容与组合核验
+
+- G2 最新启动补测快照 46/46 SHA-256 与冻结源一致；其旧完整门禁及后续 63/63 集成记录作为来源证据保留，不冒充此次组合运行。
+- Main 自动合并结果精确等于 G2 Main 加上既有 G6 worker failure listener 锁所有权修复。公共任务入口迁入 task adapter 与 prepared resource scope，G1 恢复依赖保留；第二 gate / Archive initialize 抛错后的 onAbandon 收口由 G2 对应回归覆盖。
+- 除 AGENTS、版本索引、测试清单和 Main 外，G2 110 个文件逐字节一致；此前 release 的 317 个非交集文件保持原内容。见 [组合核验](evidence/merge-g2/composition-audit.json)。
+- 仅两处冲突：`AGENTS.md` 同时保留 XLSX 与任务适配器入口；`integration-test-policy.md` 第七节前的规则正文一致，先保留 release 旧生成清单，最终由全部集成通过后的 runner 自动刷新。版本索引同步所有已集成模块。
+- 主工作区保持 `main@11086a3c`，原 97 个未跟踪文件的内容不变；G2 源工作区的 114 个模块文件和 29 个范围外设计副本均保持冻结字节。见 [工作区保留核验](evidence/merge-g2/workspace-preservation.json)。
+
+### 本批组合验证
+
+`UNIT_TEST_CONCURRENCY=2 npm run release-check` 对上述合并提交完整执行，**PASS，exit 0**。环境为 macOS arm64 / Node v25.8.0；2026-09-21 00:07:51—00:26:03（Asia/Shanghai），约 18 分 12 秒。
+
+| 检查 | 本次实际结果 |
+| --- | --- |
+| lint / smoke | 全部 PASS |
+| 完整单测 | 530 个文件，8439 项中 8435 PASS、0 FAIL、0 CANCELLED、4 Windows 条件 SKIP、0 TODO |
+| 全量集成 | 66/66 脚本通过；可解析的断言汇总 2664/2664，单个未输出计数的历史脚本按 exit 0 判定 |
+| G2 prepared 资源回归 | 第二 gate、Archive initialize、adapter 构建、生命周期拒绝、延迟 cleanup / exit tail 等实际入口测试通过 |
+| G2 task-adapter recovery | 4/4 PASS |
+| G2 production Position startup recovery | 3/3 PASS |
+| G1 / G4 / G5 / G6 专项集成 | 应用恢复 4/4、共享 XLSX 51/51、BizOP 查询边界 9/9、Acquiring worker 边界 14/14，均 PASS |
+
+四项跳过为真实 Windows PowerShell/CIM 及 packaged canary 场景；具体名称见 [单测摘要](evidence/merge-g2/unit-summary.json)。
+
+完整日志见 [release-check.log](evidence/merge-g2/release-check.log)，运行环境、起止时间、退出码及摘要见 [release-check-result.json](evidence/merge-g2/release-check-result.json)。记录提交仅同步版本状态、证据和 runner 生成的测试清单，源码、测试、执行脚本及依赖对象与受验组合一致，见 [validated-input-objects.json](evidence/merge-g2/validated-input-objects.json)。
+
+### 本批状态与验收边界
+
+- 当前已集成 G1/G2/G4/G5/G6；G3/G7/G8 未纳入。G2 的 `ARCH-TASK-ADAPTER` 机器规则激活仍待 G8 后续联合验收，现有 composition 单测和完整门禁不代替该激活。
+- 上批记录中归属 G2 的 prepare 后第二 gate / initialize 资源清理缺口已由本批实现及对应回归承接；上方旧记录保留其当时状态。
+- 真实 Electron 进程强杀与 GUI、Windows 文件锁及安装包、Excel/WPS 人工验收未执行；确定性 Node 恢复集成不等同这些平台验收。
+- G2 原 Spec/TechDoc、实施与审查证据保留历史“未提交/未集成”及分轮验证描述，当前集成事实以本节和 Git 历史为准。原独立 manifest 现行与历史 actions 上下文差异保持原记录。
+- 本次仅本地合并，未推送、未开 PR、未合入 main、未升版、未创建标签或发布。

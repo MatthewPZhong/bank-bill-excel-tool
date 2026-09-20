@@ -1,0 +1,17 @@
+{
+  "tests": 8439,
+  "suites": 831,
+  "pass": 8435,
+  "fail": 0,
+  "cancelled": 0,
+  "skipped": 4,
+  "todo": 0,
+  "duration_ms": 543080.18,
+  "fileCount": 530,
+  "skippedCases": [
+    "﹣ Windows CI 真实 PowerShell snapshot→token cleanup 语义 (0.071ms) # SKIP",
+    "﹣ Windows PowerShell 采集器使用原始 CIM 枚举并完整遍历真实文件祖先 (0.22925ms) # 需要 Windows PowerShell；受控 Storage 对象不代替真实 CIM 查询",
+    "﹣ Windows packaged canary 对报告前已退出进程快速返回专用 safe code (0.051292ms) # SKIP",
+    "﹣ Windows packaged canary 的 Setup 失败诊断仅返回固定退出/落地/身份枚举 (0.031708ms) # SKIP"
+  ]
+}

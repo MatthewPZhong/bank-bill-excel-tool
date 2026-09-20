@@ -1,0 +1,22 @@
+{
+  "codex/v3.2.10-application-recovery": {
+    "sha": "856c9dce8ae4c381229e37b5b236e2e2f776921d",
+    "included": true
+  },
+  "codex/v3.2.10-shared-xlsx-infrastructure": {
+    "sha": "a4d91d173945cc42fcd9593f56504060c98f9d47",
+    "included": true
+  },
+  "codex/v3.2.10-storage-execution-separation": {
+    "sha": "ed1cb2d73418fe1279cac96acd91090492555be3",
+    "included": true
+  },
+  "codex/v3.2.10-bizop-query-boundaries": {
+    "sha": "e4389aafb07fc3d40c74af106abb2875981d07eb",
+    "included": true
+  },
+  "codex/v3.2.10-business-task-adapters": {
+    "sha": "3e203858ea49fc2935f5ab847de8af7f793d356a",
+    "included": true
+  }
+}
