@@ -1,0 +1,25 @@
+--- a/src/main.js
++++ b/src/main.js
+@@ -22829,10 +22829,9 @@
+ 
+     // v2.1.10 A3 Phase 2 T14：注册 worker pool failure listener
+     //   - worker exit (code≠0) / error 事件 → pool 自动 reject activeJob + 调本回调
+-    //   - 主进程职责：① 释放 op lock；② Notification 通知用户；③ activity log；④ 下次 dispatch cold-start（pool 自动 — workerInstance=null）
+-    //   - hadActiveJob=true：有 job 正在跑挂掉 → 必须释放 op lock（caller IPC handler catch 也会 release，
+-    //     但 failure 路径走 reject 后 caller catch 释放；此处兜底释放防 caller 异常路径漏释）
+-    //   - 当 caller 已 release（reject 路径正常走完）则此处 release 是 no-op（lock.inFlight=false 时 release 幂等）
++    //   - 主进程职责：Notification 通知、activity log、hadActiveJob 时 partial 兜底；下次 dispatch 由 pool cold-start。
++    //   - operation lock 由取得该锁的 prepare 所返回的 releaseLock 在 execute finally / onAbandon 释放。
++    //   - failure listener 没有所属 prepare 身份；idle worker 失败不得释放另一轮已经取得的锁。
+     try {
+       runCheckWorkerPool.setFailureListener((info) => {
+         try {
+@@ -22848,8 +22847,6 @@
+             stack: info && info.cause && info.cause.stack ? info.cause.stack : undefined
+           });
+         } catch (_logErr) { /* swallow */ }
+-        // 释放 op lock（防 caller catch 漏释；release 内部不抛错 — 状态置为 inFlight=false）
+-        try { releaseAcquiringBillCurrencyOpLock(); } catch (_lockErr) { /* swallow */ }
+         // v2.1.10 SR-FIX-1 round 2 P1-7：worker crash 时主进程兜底设 chunk_progress='partial'
+         //   触发场景：worker 跑到 chunk M/N 突然 process.exit(1) / OOM / SIGKILL → catch 块（runCheckCore L367-394）不执行
+         //     → chunk_progress 停留在 'in-progress'（onChunkDone 写的最后一次值）

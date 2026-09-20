@@ -1,0 +1,19 @@
+{
+  "branch": "codex/v3.2.10-storage-execution-separation",
+  "head": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "committed": false,
+  "codeFiles": 23,
+  "codeSnapshotDrift": [],
+  "mainChange": "用户已确认的failureListener锁归属最小修复，3增6删",
+  "poolUnchanged": true,
+  "historicalManifestMatchesHead": {
+    "changes/v3.2.5/e13-g-action-manifest.json": true,
+    "changes/v3.2.5/e13-g-capability-inventory.json": true,
+    "changes/v3.2.5/e13-g-production-strategy-snapshot.json": true,
+    "changes/v3.2.5/e13-g-coverage-report.json": true
+  },
+  "featureDesign": "本worktree Spec D8/AC-08、TechDoc §4.4及总索引G6入口已同步批准范围；未写主工作区设计原件",
+  "diffCheckExitCode": 0,
+  "releaseCheck": "PASS exit 0; unit 8165 PASS / 0 FAIL / 4 SKIP; integration all 61 PASS, 2593 counted assertions",
+  "generatedIntegrationPolicyOnlySectionSevenChanged": true
+}

@@ -1,0 +1,16 @@
+UTC: 2026-09-20T11:59:28.789389+00:00
+Worktree: /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-storage-execution-separation
+Branch: codex/v3.2.10-storage-execution-separation
+HEAD: 11086a3cbf632a30adbcfa796e4cd81810c5aef9
+Implementation: uncommitted working-tree files; baseline production source was unchanged during A1 fixture capture.
+Node: v25.8.0
+
+SHA256 current VCC slice files:
+b6418c0b9e07dae1b9e0cc91391bf900c8bbe4f924cb84edc309c79159c37fcc  src/backend/vcc-financial-op/content-hash-contract.js
+901ccbb0af4b128d9cb60d55e329b23eb45aa725614a8f7be0cc62ad8308861d  src/backend/vcc-financial-op/mapped-lineage-contract.js
+b8046bb5fb0d2fb5b509de23244ec3e1268fefabe55236f2e5e98d71059d90d5  src/backend/vcc-financial-op/row-mapper.js
+ad51bfd1b2c83c87582bae90ebcf6a30cd16b98d8d95ee420b5d84dd3f8c519b  src/backend/vcc-financial-op/review-export-plan.js
+017ccbe8186ace7f60d5c22e57c761d3fc77f636c2f3f7e74c20415c60c0ce29  src/main-process/vcc-financial-op-dataset-writer.js
+a79fbdee27f862aeb4547132169ca012cf52b5ec805c10b2bca5c3c760d9154f  tests/unit/backend/vcc-financial-op/mapped-lineage-contract.test.js
+de4dfe2c6e432ed0a60866c0d0164a4d6b546bbba7190a28884e7647f98ff736  tests/unit/backend/vcc-financial-op/fixtures/lineage-contract-baseline.json
+354f0cecce6d8c36940082efdc347a20bf40a11b83e401a0b6430400585741f1  src/backend/vcc-financial-op/README.md

@@ -1,0 +1,1608 @@
+--- /dev/null
++++ b/src/backend/vcc-financial-op/content-hash-contract.js
+@@ -0,0 +1,49 @@
++'use strict';
++
++const crypto = require('node:crypto');
++const {
++  SOURCE_TYPES,
++  PENDING_RAW_CONTRACT_V1,
++  PENDING_RAW_CONTRACT_V2,
++  PENDING_HEADERS,
++  PENDING_V1_HEADERS
++} = require('./definitions');
++
++const HASH_VERSION = 2;
++const PENDING_HASH_VERSION = 3;
++
++function contentHash(sourceType, rawJson, assignedSubject) {
++  const payload = sourceType === SOURCE_TYPES.CHANNEL
++    ? JSON.stringify({ raw: rawJson, assignedSubject: String(assignedSubject == null ? '' : assignedSubject).trim() })
++    : rawJson;
++  return crypto.createHash('sha256').update(payload, 'utf8').digest('hex');
++}
++
++function pendingCanonicalValues(values, rawContractVersion) {
++  const source = Array.isArray(values) ? values : [];
++  const version = Number(rawContractVersion);
++  if (version === PENDING_RAW_CONTRACT_V2 && source.length === PENDING_HEADERS.length) {
++    return [...source];
++  }
++  if (version === PENDING_RAW_CONTRACT_V1 && source.length === PENDING_V1_HEADERS.length) {
++    const byHeader = Object.fromEntries(PENDING_V1_HEADERS.map((header, index) => [header, source[index]]));
++    return PENDING_HEADERS.map((header) => byHeader[header]);
++  }
++  throw new Error(
++    `Pending 原始契约 v${version || 'unknown'} 字段数无效：${source.length}`
++  );
++}
++
++function pendingContentHash(values, rawContractVersion) {
++  return crypto.createHash('sha256')
++    .update(JSON.stringify(pendingCanonicalValues(values, rawContractVersion)), 'utf8')
++    .digest('hex');
++}
++
++module.exports = {
++  HASH_VERSION,
++  PENDING_HASH_VERSION,
++  contentHash,
++  pendingCanonicalValues,
++  pendingContentHash
++};
+--- /dev/null
++++ b/src/backend/vcc-financial-op/mapped-lineage-contract.js
+@@ -0,0 +1,60 @@
++'use strict';
++
++const { SOURCE_TYPES } = require('./definitions');
++const {
++  HASH_VERSION,
++  PENDING_HASH_VERSION,
++  contentHash,
++  pendingContentHash
++} = require('./content-hash-contract');
++
++const LEGACY_DETAIL_HASH_VERSION = 1;
++const LEGACY_PENDING_HASH_VERSION = 2;
++
++function exportError(code, message) {
++  const error = new Error(message);
++  error.code = code;
++  return error;
++}
++
++function mappedContentHashForStoredVersion(expected, mapped) {
++  const storedVersion = Number(expected.hash_version);
++  if (expected.source_type === SOURCE_TYPES.PENDING) {
++    if (storedVersion === PENDING_HASH_VERSION) return mapped.contentHash;
++    if (storedVersion === LEGACY_PENDING_HASH_VERSION) {
++      return pendingContentHash(mapped.values, mapped.rawContractVersion);
++    }
++  } else {
++    if (storedVersion === HASH_VERSION) return mapped.contentHash;
++    if (storedVersion === LEGACY_DETAIL_HASH_VERSION) {
++      return contentHash(
++        expected.source_type,
++        JSON.stringify(mapped.values),
++        expected.subject
++      );
++    }
++  }
++  throw exportError(
++    'archive-row-integrity-failure',
++    `导入记录 ${expected.import_record_id} 原表第 ${expected.source_row} 行使用未知内容哈希版本 ${expected.hash_version}`
++  );
++}
++
++function assertMappedLineage(expected, mapped) {
++  const reconstructedContentHash = mapped.disposition
++    ? null
++    : mappedContentHashForStoredVersion(expected, mapped);
++  if (mapped.disposition
++      || mapped.idempotencyKey !== expected.idempotency_key
++      || reconstructedContentHash !== expected.content_hash) {
++    throw exportError(
++      'archive-row-integrity-failure',
++      `导入记录 ${expected.import_record_id} 原表第 ${expected.source_row} 行与当前有效数据的幂等键或内容哈希不一致`
++    );
++  }
++}
++
++module.exports = {
++  assertMappedLineage,
++  mappedContentHashForStoredVersion
++};
+--- a/src/backend/vcc-financial-op/row-mapper.js
++++ b/src/backend/vcc-financial-op/row-mapper.js
+@@ -1,6 +1,5 @@
+ 'use strict';
+ 
+-const crypto = require('node:crypto');
+ const { normalizeDateExportValue } = require('../file-service/normalizers');
+ const {
+   subtractCanonicalDecimals
+@@ -11,13 +10,16 @@
+   SUPPORTED_CURRENCIES,
+   PENDING_RAW_CONTRACT_V1,
+   PENDING_RAW_CONTRACT_V2,
+-  PENDING_HEADERS,
+-  PENDING_V1_HEADERS,
+   getSourceDefinition
+ } = require('./definitions');
+ 
+-const HASH_VERSION = 2;
+-const PENDING_HASH_VERSION = 3;
++const {
++  HASH_VERSION,
++  PENDING_HASH_VERSION,
++  contentHash,
++  pendingCanonicalValues,
++  pendingContentHash
++} = require('./content-hash-contract');
+ const INCOMING_CURRENCY_SET = new Set([...SUPPORTED_CURRENCIES, 'CNH']);
+ const TEXT_CELL_TYPES = new Set(['s', 'inlineStr', 'str']);
+ 
+@@ -108,34 +110,6 @@
+ 
+ function rowValue(values, definition, header) {
+   return values[definition.indexes[header]];
+-}
+-
+-function contentHash(sourceType, rawJson, assignedSubject) {
+-  const payload = sourceType === SOURCE_TYPES.CHANNEL
+-    ? JSON.stringify({ raw: rawJson, assignedSubject: text(assignedSubject) })
+-    : rawJson;
+-  return crypto.createHash('sha256').update(payload, 'utf8').digest('hex');
+-}
+-
+-function pendingCanonicalValues(values, rawContractVersion) {
+-  const source = Array.isArray(values) ? values : [];
+-  const version = Number(rawContractVersion);
+-  if (version === PENDING_RAW_CONTRACT_V2 && source.length === PENDING_HEADERS.length) {
+-    return [...source];
+-  }
+-  if (version === PENDING_RAW_CONTRACT_V1 && source.length === PENDING_V1_HEADERS.length) {
+-    const byHeader = Object.fromEntries(PENDING_V1_HEADERS.map((header, index) => [header, source[index]]));
+-    return PENDING_HEADERS.map((header) => byHeader[header]);
+-  }
+-  throw new Error(
+-    `Pending 原始契约 v${version || 'unknown'} 字段数无效：${source.length}`
+-  );
+-}
+-
+-function pendingContentHash(values, rawContractVersion) {
+-  return crypto.createHash('sha256')
+-    .update(JSON.stringify(pendingCanonicalValues(values, rawContractVersion)), 'utf8')
+-    .digest('hex');
+ }
+ 
+ function canonicalCurrencyCellValue(value) {
+--- a/src/backend/vcc-financial-op/review-export-plan.js
++++ b/src/backend/vcc-financial-op/review-export-plan.js
+@@ -14,7 +14,7 @@
+ const { mapDetailRow, pendingCanonicalValues, monthOfDate } = require('./row-mapper');
+ const { systemAmountRead, systemOpCellValues } = require('./system-op-importer');
+ const { cellValueFromBody } = require('../big-table-import/row-scanner');
+-const { assertMappedLineage } = require('../../main-process/vcc-financial-op-dataset-writer');
++const { assertMappedLineage } = require('./mapped-lineage-contract');
+ const { hashSourceFile } = require('./source-lineage');
+ const { openRichWorkbook } = require('../xlsx-rich-reader');
+ const { assertReviewFresh, framedDigest, rawCell, historicCell, comparableCell, reviewError } = require('./review-export-contract');
+--- a/src/main-process/vcc-financial-op-dataset-writer.js
++++ b/src/main-process/vcc-financial-op-dataset-writer.js
+@@ -14,14 +14,11 @@
+ } = require('../backend/vcc-financial-op/definitions');
+ const { canonicalizeVccAmount } = require('../backend/vcc-financial-op/amount-rules');
+ const {
+-  HASH_VERSION,
+-  PENDING_HASH_VERSION,
+   mapDetailRow,
+   normalizeYearMonth,
+-  contentHash,
+-  pendingCanonicalValues,
+-  pendingContentHash
++  pendingCanonicalValues
+ } = require('../backend/vcc-financial-op/row-mapper');
++const { assertMappedLineage } = require('../backend/vcc-financial-op/mapped-lineage-contract');
+ const { streamStoredDetailRows, openWorkbookSheets } = require('../backend/vcc-financial-op/workbook-reader');
+ const { openRichWorkbook } = require('../backend/xlsx-rich-reader');
+ const { hashSourceFile } = require('../backend/vcc-financial-op/source-lineage');
+@@ -34,8 +31,6 @@
+ 
+ const MAX_DATA_ROWS_PER_SHEET = 1048575;
+ const WORKBOOK_ABORT_TIMEOUT_MS = 2000;
+-const LEGACY_DETAIL_HASH_VERSION = 1;
+-const LEGACY_PENDING_HASH_VERSION = 2;
+ const EXPORT_KINDS = Object.freeze({ RAW: 'raw', CHECK: 'check' });
+ const ALLOWED_SOURCE_TYPES = new Set(Object.values(SOURCE_TYPES));
+ 
+@@ -661,43 +656,6 @@
+   return scope.targetKind === EXPORT_KINDS.RAW
+     ? rawValues
+     : detailCheckValues(expected, rawValues);
+-}
+-
+-function mappedContentHashForStoredVersion(expected, mapped) {
+-  const storedVersion = Number(expected.hash_version);
+-  if (expected.source_type === SOURCE_TYPES.PENDING) {
+-    if (storedVersion === PENDING_HASH_VERSION) return mapped.contentHash;
+-    if (storedVersion === LEGACY_PENDING_HASH_VERSION) {
+-      return pendingContentHash(mapped.values, mapped.rawContractVersion);
+-    }
+-  } else {
+-    if (storedVersion === HASH_VERSION) return mapped.contentHash;
+-    if (storedVersion === LEGACY_DETAIL_HASH_VERSION) {
+-      return contentHash(
+-        expected.source_type,
+-        JSON.stringify(mapped.values),
+-        expected.subject
+-      );
+-    }
+-  }
+-  throw exportError(
+-    'archive-row-integrity-failure',
+-    `导入记录 ${expected.import_record_id} 原表第 ${expected.source_row} 行使用未知内容哈希版本 ${expected.hash_version}`
+-  );
+-}
+-
+-function assertMappedLineage(expected, mapped) {
+-  const reconstructedContentHash = mapped.disposition
+-    ? null
+-    : mappedContentHashForStoredVersion(expected, mapped);
+-  if (mapped.disposition
+-      || mapped.idempotencyKey !== expected.idempotency_key
+-      || reconstructedContentHash !== expected.content_hash) {
+-    throw exportError(
+-      'archive-row-integrity-failure',
+-      `导入记录 ${expected.import_record_id} 原表第 ${expected.source_row} 行与当前有效数据的幂等键或内容哈希不一致`
+-    );
+-  }
+ }
+ 
+ function mapStoredRaw(expected, rawJson) {
+--- /dev/null
++++ b/tests/unit/backend/vcc-financial-op/mapped-lineage-contract.test.js
+@@ -0,0 +1,149 @@
++'use strict';
++
++const test = require('node:test');
++const assert = require('node:assert/strict');
++const path = require('node:path');
++const { spawnSync } = require('node:child_process');
++const baseline = require('./fixtures/lineage-contract-baseline.json');
++const { SOURCE_TYPES } = require('../../../../src/backend/vcc-financial-op/definitions');
++const mapper = require('../../../../src/backend/vcc-financial-op/row-mapper');
++const hashContract = require('../../../../src/backend/vcc-financial-op/content-hash-contract');
++const { assertMappedLineage, mappedContentHashForStoredVersion } = require('../../../../src/backend/vcc-financial-op/mapped-lineage-contract');
++const writer = require('../../../../src/main-process/vcc-financial-op-dataset-writer');
++
++for (const fixture of baseline.fixtures) {
++  test(`固定旧实现 fixture：${fixture.name}`, () => {
++    const mapped = mapper.mapDetailRow(fixture.input);
++    assert.equal(mapped.disposition, null);
++    assert.equal(mapped.contentHash, fixture.mapped.contentHash);
++    assert.deepEqual(mapped.values, fixture.mapped.values);
++    assert.equal(mapped.idempotencyKey, fixture.mapped.idempotencyKey);
++    assert.equal(assertMappedLineage(fixture.expected, mapped), undefined);
++    assert.equal(mappedContentHashForStoredVersion(fixture.expected, mapped), fixture.expected.content_hash);
++  });
++}
++
++for (const fixture of baseline.rawContracts) {
++  test(`Pending raw v${fixture.version} 保持字段顺序、文本和固定 hash`, () => {
++    const canonical = mapper.pendingCanonicalValues(fixture.values, String(fixture.version));
++    assert.deepEqual(canonical, fixture.canonical);
++    assert.notEqual(canonical, fixture.values);
++    assert.equal(mapper.pendingContentHash(fixture.values, fixture.version), fixture.hash);
++    const expected = { ...baseline.fixtures.find(f => f.expected.source_type === SOURCE_TYPES.PENDING).expected,
++      hash_version: 2, content_hash: fixture.hash };
++    const mapped = { ...baseline.fixtures.find(f => f.expected.source_type === SOURCE_TYPES.PENDING).mapped,
++      values: fixture.values, rawContractVersion: fixture.version };
++    assert.equal(assertMappedLineage(expected, mapped), undefined);
++  });
++}
++
++test('CHANNEL 主体按原 trim/null/数值规则参与 hash；其他类型忽略主体', () => {
++  for (const fixture of baseline.channelSubjects) {
++    assert.equal(mapper.contentHash(SOURCE_TYPES.CHANNEL, baseline.channelRaw, fixture.subject), fixture.hash);
++  }
++  assert.equal(mapper.contentHash(SOURCE_TYPES.RECHARGE, baseline.channelRaw, 'PPHK'),
++    mapper.contentHash(SOURCE_TYPES.RECHARGE, baseline.channelRaw, 'PPSG'));
++  assert.notEqual(baseline.channelSubjects[0].hash, baseline.channelSubjects[1].hash);
++});
++
++test('Pending 原始版本/字段数无效保持完整错误文案', () => {
++  for (const [values, version, message] of [
++    [[], 1, 'Pending 原始契约 v1 字段数无效：0'],
++    [[], 2, 'Pending 原始契约 v2 字段数无效：0'],
++    [null, 'bad', 'Pending 原始契约 vunknown 字段数无效：0'],
++    [baseline.rawContracts[0].values, 2, 'Pending 原始契约 v2 字段数无效：48'],
++    [baseline.rawContracts[1].values, 1, 'Pending 原始契约 v1 字段数无效：46'],
++    [baseline.rawContracts[1].values, 9, 'Pending 原始契约 v9 字段数无效：46']
++  ]) {
++    assert.throws(() => mapper.pendingCanonicalValues(values, version), { message });
++    assert.throws(() => mapper.pendingContentHash(values, version), { message });
++  }
++});
++
++const mismatch = {
++  code: 'archive-row-integrity-failure',
++  message: '导入记录 17 原表第 2 行与当前有效数据的幂等键或内容哈希不一致'
++};
++
++test('disposition、幂等键和内容不一致均拒绝；未知版本保留独立错误', () => {
++  for (const fixture of baseline.fixtures) {
++    for (const change of [{ disposition: 'invalid' }, { idempotencyKey: 'other' }]) {
++      assert.throws(() => assertMappedLineage(fixture.expected, { ...fixture.mapped, ...change }), mismatch);
++    }
++    assert.throws(() => assertMappedLineage({ ...fixture.expected, content_hash: 'invalid' }, fixture.mapped), mismatch);
++    assert.throws(() => assertMappedLineage({ ...fixture.expected, hash_version: 99 }, fixture.mapped), {
++      code: 'archive-row-integrity-failure',
++      message: '导入记录 17 原表第 2 行使用未知内容哈希版本 99'
++    });
++  }
++});
++
++test('disposition 先于未知版本；未知版本和旧 Pending 原始结构错误先于键失配', () => {
++  const fixture = baseline.fixtures.find(f => f.expected.source_type === SOURCE_TYPES.PENDING);
++  const unknown = { ...fixture.expected, hash_version: 99 };
++  assert.throws(() => assertMappedLineage(unknown, { ...fixture.mapped, disposition: 'invalid' }), mismatch);
++  assert.throws(() => assertMappedLineage(unknown, { ...fixture.mapped, idempotencyKey: 'other' }), {
++    code: 'archive-row-integrity-failure',
++    message: '导入记录 17 原表第 2 行使用未知内容哈希版本 99'
++  });
++  const malformed = { ...fixture.mapped, values: [], idempotencyKey: 'other' };
++  assert.throws(() => assertMappedLineage(fixture.expected, malformed), {
++    message: 'Pending 原始契约 v2 字段数无效：0'
++  });
++  assert.throws(() => assertMappedLineage(fixture.expected, { ...malformed, disposition: 'invalid' }), mismatch);
++});
++
++
++test('兼容导出保持同一函数对象和版本常量，没有第二份实现', () => {
++  for (const name of ['HASH_VERSION', 'PENDING_HASH_VERSION', 'contentHash', 'pendingCanonicalValues', 'pendingContentHash']) {
++    assert.equal(mapper[name], hashContract[name], name);
++  }
++  assert.equal(hashContract.HASH_VERSION, 2);
++  assert.equal(hashContract.PENDING_HASH_VERSION, 3);
++  assert.equal(writer.assertMappedLineage, assertMappedLineage);
++});
++
++test('纯合同的冷加载闭包只允许 node:crypto 和两个合同及 definitions', () => {
++  const root = path.resolve(__dirname, '../../../../src/backend/vcc-financial-op');
++  const script = `
++    const Module = require('node:module');
++    const assert = require('node:assert/strict');
++    const root = ${JSON.stringify(root)};
++    const allowed = new Set(['node:crypto', ...['definitions', 'content-hash-contract', 'mapped-lineage-contract'].map(name => root + '/' + name + '.js')]);
++    const loaded = new Set();
++    const original = Module._load;
++    Module._load = function(request, parent, isMain) {
++      const resolved = Module._resolveFilename(request, parent);
++      if (!allowed.has(resolved)) throw new Error('纯合同加载了禁止依赖：' + resolved);
++      loaded.add(resolved);
++      return original.call(this, request, parent, isMain);
++    };
++    const hash = require(root + '/content-hash-contract.js');
++    const lineage = require(root + '/mapped-lineage-contract.js');
++    assert.equal(typeof hash.contentHash('recharge_refund', '[]'), 'string');
++    assert.equal(lineage.assertMappedLineage({ source_type: 'recharge_refund', hash_version: 2, idempotency_key: 'key', content_hash: 'hash' }, { idempotencyKey: 'key', contentHash: 'hash' }), undefined);
++    assert.deepEqual([...loaded].sort(), [...allowed].sort());
++    process.stdout.write('pure dependency closure PASS');
++  `;
++  const result = spawnSync(process.execPath, ['-e', script], { encoding: 'utf8' });
++  assert.equal(result.status, 0, result.stderr || result.error?.message);
++  assert.equal(result.stdout, 'pure dependency closure PASS');
++});
++
++test('review plan 冷加载不再加载 dataset writer', () => {
++  const planPath = require.resolve('../../../../src/backend/vcc-financial-op/review-export-plan');
++  const writerPath = require.resolve('../../../../src/main-process/vcc-financial-op-dataset-writer');
++  const script = `
++    const Module = require('node:module');
++    const original = Module._load;
++    Module._load = function(request, parent, isMain) {
++      if (Module._resolveFilename(request, parent) === ${JSON.stringify(writerPath)}) throw new Error('review plan 仍加载 dataset writer');
++      return original.call(this, request, parent, isMain);
++    };
++    require(${JSON.stringify(planPath)});
++    process.stdout.write('review dependency direction PASS');
++  `;
++  const result = spawnSync(process.execPath, ['-e', script], { encoding: 'utf8' });
++  assert.equal(result.status, 0, result.stderr || result.error?.message);
++  assert.equal(result.stdout, 'review dependency direction PASS');
++});
+--- /dev/null
++++ b/tests/unit/backend/vcc-financial-op/fixtures/lineage-contract-baseline.json
+@@ -0,0 +1,1156 @@
++{
++  "provenance": "由未修改的 main@11086a3cbf632a30adbcfa796e4cd81810c5aef9 运行生成；后续测试只读取固定输出，不重写 fixture。",
++  "fixtures": [
++    {
++      "name": "recharge_refund-hash-v1",
++      "input": {
++        "sourceType": "recharge_refund",
++        "values": [
++          "",
++          "",
++          "2026-06-09",
++          "VCC",
++          "OPS",
++          " 000123 ",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "充值",
++          "in",
++          "",
++          "PPHK",
++          " CNH ",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "1.25",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "首行\r\n次行\\n尾行",
++          "",
++          ""
++        ],
++        "targetMonth": "2026-06",
++        "assignedSubject": " PPHK ",
++        "sourceFile": "fixture.xlsx",
++        "sheetName": "Sheet1",
++        "sourceRow": 2,
++        "keyCellType": "s"
++      },
++      "mapped": {
++        "values": [
++          "",
++          "",
++          "2026-06-09",
++          "VCC",
++          "OPS",
++          " 000123 ",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "充值",
++          "in",
++          "",
++          "PPHK",
++          " CNH ",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "1.25",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "首行\r\n次行\\n尾行",
++          "",
++          ""
++        ],
++        "rawContractVersion": 1,
++        "idempotencyKey": "000123",
++        "disposition": null,
++        "contentHash": "bd8fa0d9a9b8ae4d1faedd2fd0da8fce0bc59cd0dc1d2f797b3f1d531caa28bc"
++      },
++      "expected": {
++        "source_type": "recharge_refund",
++        "hash_version": 1,
++        "subject": " PPHK ",
++        "import_record_id": 17,
++        "source_row": 2,
++        "idempotency_key": "000123",
++        "content_hash": "e8f4e46c733b58a208c203ae2189b292937e51326cf8197985a0bb5def327b17"
++      }
++    },
++    {
++      "name": "recharge_refund-hash-v2",
++      "input": {
++        "sourceType": "recharge_refund",
++        "values": [
++          "",
++          "",
++          "2026-06-09",
++          "VCC",
++          "OPS",
++          " 000123 ",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "充值",
++          "in",
++          "",
++          "PPHK",
++          " CNH ",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "1.25",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "首行\r\n次行\\n尾行",
++          "",
++          ""
++        ],
++        "targetMonth": "2026-06",
++        "assignedSubject": " PPHK ",
++        "sourceFile": "fixture.xlsx",
++        "sheetName": "Sheet1",
++        "sourceRow": 2,
++        "keyCellType": "s"
++      },
++      "mapped": {
++        "values": [
++          "",
++          "",
++          "2026-06-09",
++          "VCC",
++          "OPS",
++          " 000123 ",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "充值",
++          "in",
++          "",
++          "PPHK",
++          " CNH ",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "1.25",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "首行\r\n次行\\n尾行",
++          "",
++          ""
++        ],
++        "rawContractVersion": 1,
++        "idempotencyKey": "000123",
++        "disposition": null,
++        "contentHash": "bd8fa0d9a9b8ae4d1faedd2fd0da8fce0bc59cd0dc1d2f797b3f1d531caa28bc"
++      },
++      "expected": {
++        "source_type": "recharge_refund",
++        "hash_version": 2,
++        "subject": " PPHK ",
++        "import_record_id": 17,
++        "source_row": 2,
++        "idempotency_key": "000123",
++        "content_hash": "bd8fa0d9a9b8ae4d1faedd2fd0da8fce0bc59cd0dc1d2f797b3f1d531caa28bc"
++      }
++    },
++    {
++      "name": "fee_fx-hash-v1",
++      "input": {
++        "sourceType": "fee_fx",
++        "values": [
++          "",
++          "",
++          "2026-06-09",
++          "VCC",
++          "OPS",
++          " 000123 ",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "充值",
++          "in",
++          "",
++          "PPHK",
++          " CNH ",
++          "",
++          "",
++          "",
++          "",
++          "1.25",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "首行\r\n次行\\n尾行",
++          "",
++          ""
++        ],
++        "targetMonth": "2026-06",
++        "assignedSubject": " PPHK ",
++        "sourceFile": "fixture.xlsx",
++        "sheetName": "Sheet1",
++        "sourceRow": 2,
++        "keyCellType": "s"
++      },
++      "mapped": {
++        "values": [
++          "",
++          "",
++          "2026-06-09",
++          "VCC",
++          "OPS",
++          " 000123 ",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "充值",
++          "in",
++          "",
++          "PPHK",
++          " CNH ",
++          "",
++          "",
++          "",
++          "",
++          "1.25",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "首行\r\n次行\\n尾行",
++          "",
++          ""
++        ],
++        "rawContractVersion": 1,
++        "idempotencyKey": "000123",
++        "disposition": null,
++        "contentHash": "dbcbea276cab2f8a92915490c15e33358ce447036adac4b42633b7df2fb166a4"
++      },
++      "expected": {
++        "source_type": "fee_fx",
++        "hash_version": 1,
++        "subject": " PPHK ",
++        "import_record_id": 17,
++        "source_row": 2,
++        "idempotency_key": "000123",
++        "content_hash": "71dc20cf9297110140b0c7866b1b8bfc3764bf3bdf573acf725dc9912bbab090"
++      }
++    },
++    {
++      "name": "fee_fx-hash-v2",
++      "input": {
++        "sourceType": "fee_fx",
++        "values": [
++          "",
++          "",
++          "2026-06-09",
++          "VCC",
++          "OPS",
++          " 000123 ",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "充值",
++          "in",
++          "",
++          "PPHK",
++          " CNH ",
++          "",
++          "",
++          "",
++          "",
++          "1.25",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "首行\r\n次行\\n尾行",
++          "",
++          ""
++        ],
++        "targetMonth": "2026-06",
++        "assignedSubject": " PPHK ",
++        "sourceFile": "fixture.xlsx",
++        "sheetName": "Sheet1",
++        "sourceRow": 2,
++        "keyCellType": "s"
++      },
++      "mapped": {
++        "values": [
++          "",
++          "",
++          "2026-06-09",
++          "VCC",
++          "OPS",
++          " 000123 ",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "充值",
++          "in",
++          "",
++          "PPHK",
++          " CNH ",
++          "",
++          "",
++          "",
++          "",
++          "1.25",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "首行\r\n次行\\n尾行",
++          "",
++          ""
++        ],
++        "rawContractVersion": 1,
++        "idempotencyKey": "000123",
++        "disposition": null,
++        "contentHash": "dbcbea276cab2f8a92915490c15e33358ce447036adac4b42633b7df2fb166a4"
++      },
++      "expected": {
++        "source_type": "fee_fx",
++        "hash_version": 2,
++        "subject": " PPHK ",
++        "import_record_id": 17,
++        "source_row": 2,
++        "idempotency_key": "000123",
++        "content_hash": "dbcbea276cab2f8a92915490c15e33358ce447036adac4b42633b7df2fb166a4"
++      }
++    },
++    {
++      "name": "channel-hash-v1",
++      "input": {
++        "sourceType": "channel",
++        "values": [
++          "2026-06-09",
++          "",
++          "CITI",
++          "",
++          "",
++          "",
++          "",
++          "",
++          " 000123 ",
++          "",
++          "",
++          "1.25",
++          " CNH ",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "首行\r\n次行\\n尾行",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "in",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          ""
++        ],
++        "targetMonth": "2026-06",
++        "assignedSubject": " PPHK ",
++        "sourceFile": "fixture.xlsx",
++        "sheetName": "Sheet1",
++        "sourceRow": 2,
++        "keyCellType": "s"
++      },
++      "mapped": {
++        "values": [
++          "2026-06-09",
++          "",
++          "CITI",
++          "",
++          "",
++          "",
++          "",
++          "",
++          " 000123 ",
++          "",
++          "",
++          "1.25",
++          " CNH ",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "首行\r\n次行\\n尾行",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "in",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          ""
++        ],
++        "rawContractVersion": 1,
++        "idempotencyKey": "000123",
++        "disposition": null,
++        "contentHash": "724ac5968edc69ec7f5729f2b839bba715c7ff23e31b5092d1a29eb1a37ead4a"
++      },
++      "expected": {
++        "source_type": "channel",
++        "hash_version": 1,
++        "subject": " PPHK ",
++        "import_record_id": 17,
++        "source_row": 2,
++        "idempotency_key": "000123",
++        "content_hash": "9f7f2a9ac7546aa10a6c6c89a4107c0beca14e6a4589d9d06e2d3def4a602933"
++      }
++    },
++    {
++      "name": "channel-hash-v2",
++      "input": {
++        "sourceType": "channel",
++        "values": [
++          "2026-06-09",
++          "",
++          "CITI",
++          "",
++          "",
++          "",
++          "",
++          "",
++          " 000123 ",
++          "",
++          "",
++          "1.25",
++          " CNH ",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "首行\r\n次行\\n尾行",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "in",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          ""
++        ],
++        "targetMonth": "2026-06",
++        "assignedSubject": " PPHK ",
++        "sourceFile": "fixture.xlsx",
++        "sheetName": "Sheet1",
++        "sourceRow": 2,
++        "keyCellType": "s"
++      },
++      "mapped": {
++        "values": [
++          "2026-06-09",
++          "",
++          "CITI",
++          "",
++          "",
++          "",
++          "",
++          "",
++          " 000123 ",
++          "",
++          "",
++          "1.25",
++          " CNH ",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "首行\r\n次行\\n尾行",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "in",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          ""
++        ],
++        "rawContractVersion": 1,
++        "idempotencyKey": "000123",
++        "disposition": null,
++        "contentHash": "724ac5968edc69ec7f5729f2b839bba715c7ff23e31b5092d1a29eb1a37ead4a"
++      },
++      "expected": {
++        "source_type": "channel",
++        "hash_version": 2,
++        "subject": " PPHK ",
++        "import_record_id": 17,
++        "source_row": 2,
++        "idempotency_key": "000123",
++        "content_hash": "724ac5968edc69ec7f5729f2b839bba715c7ff23e31b5092d1a29eb1a37ead4a"
++      }
++    },
++    {
++      "name": "pending_archive_removal-hash-v2",
++      "input": {
++        "sourceType": "pending_archive_removal",
++        "values": [
++          "",
++          "",
++          "",
++          "",
++          "",
++          "2026-06",
++          "",
++          "",
++          "",
++          "PPHK",
++          "VCC_clearing_credit",
++          "",
++          "1.25",
++          " CNH ",
++          "",
++          "",
++          "",
++          "",
++          "CITI",
++          "",
++          "",
++          "",
++          "",
++          " 000123 ",
++          "首行\r\n次行\\n尾行",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          " CNH ",
++          "1.25",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          ""
++        ],
++        "targetMonth": "2026-06",
++        "assignedSubject": " PPHK ",
++        "sourceFile": "fixture.xlsx",
++        "sheetName": "Sheet1",
++        "sourceRow": 2,
++        "keyCellType": "s"
++      },
++      "mapped": {
++        "values": [
++          "",
++          "",
++          "",
++          "",
++          "",
++          "2026-06",
++          "",
++          "",
++          "",
++          "PPHK",
++          "VCC_clearing_credit",
++          "",
++          "1.25",
++          " CNH ",
++          "",
++          "",
++          "",
++          "",
++          "CITI",
++          "",
++          "",
++          "",
++          "",
++          " 000123 ",
++          "首行\r\n次行\\n尾行",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          " CNH ",
++          "1.25",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          ""
++        ],
++        "rawContractVersion": 2,
++        "idempotencyKey": "000123",
++        "disposition": null,
++        "contentHash": "4b8acafe4e1e57eb69ddf5304875208b06cab93286f542c095de5497f9747821"
++      },
++      "expected": {
++        "source_type": "pending_archive_removal",
++        "hash_version": 2,
++        "subject": " PPHK ",
++        "import_record_id": 17,
++        "source_row": 2,
++        "idempotency_key": "000123",
++        "content_hash": "6aa6292562c1a15a58bf6dc4864b16df256816f355471304e84c4a7b51428ab4"
++      }
++    },
++    {
++      "name": "pending_archive_removal-hash-v3",
++      "input": {
++        "sourceType": "pending_archive_removal",
++        "values": [
++          "",
++          "",
++          "",
++          "",
++          "",
++          "2026-06",
++          "",
++          "",
++          "",
++          "PPHK",
++          "VCC_clearing_credit",
++          "",
++          "1.25",
++          " CNH ",
++          "",
++          "",
++          "",
++          "",
++          "CITI",
++          "",
++          "",
++          "",
++          "",
++          " 000123 ",
++          "首行\r\n次行\\n尾行",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          " CNH ",
++          "1.25",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          ""
++        ],
++        "targetMonth": "2026-06",
++        "assignedSubject": " PPHK ",
++        "sourceFile": "fixture.xlsx",
++        "sheetName": "Sheet1",
++        "sourceRow": 2,
++        "keyCellType": "s"
++      },
++      "mapped": {
++        "values": [
++          "",
++          "",
++          "",
++          "",
++          "",
++          "2026-06",
++          "",
++          "",
++          "",
++          "PPHK",
++          "VCC_clearing_credit",
++          "",
++          "1.25",
++          " CNH ",
++          "",
++          "",
++          "",
++          "",
++          "CITI",
++          "",
++          "",
++          "",
++          "",
++          " 000123 ",
++          "首行\r\n次行\\n尾行",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          " CNH ",
++          "1.25",
++          "",
++          "",
++          "",
++          "",
++          "",
++          "",
++          ""
++        ],
++        "rawContractVersion": 2,
++        "idempotencyKey": "000123",
++        "disposition": null,
++        "contentHash": "4b8acafe4e1e57eb69ddf5304875208b06cab93286f542c095de5497f9747821"
++      },
++      "expected": {
++        "source_type": "pending_archive_removal",
++        "hash_version": 3,
++        "subject": " PPHK ",
++        "import_record_id": 17,
++        "source_row": 2,
++        "idempotency_key": "000123",
++        "content_hash": "4b8acafe4e1e57eb69ddf5304875208b06cab93286f542c095de5497f9747821"
++      }
++    }
++  ],
++  "rawContracts": [
++    {
++      "version": 1,
++      "values": [
++        "",
++        "",
++        "",
++        "",
++        "",
++        "2026-06",
++        "",
++        "",
++        "",
++        "PPHK",
++        "VCC_clearing_credit",
++        "",
++        "1.25",
++        " CNH ",
++        "",
++        "",
++        "",
++        "",
++        "CITI",
++        "",
++        "",
++        "",
++        "",
++        " 000123 ",
++        "首行\r\n次行\\n尾行",
++        "",
++        "",
++        "",
++        "",
++        "",
++        "",
++        "",
++        "",
++        "",
++        "",
++        "",
++        "",
++        "历史人工值",
++        "999.99",
++        " CNH ",
++        "1.25",
++        "",
++        "",
++        "",
++        "",
++        "",
++        "",
++        ""
++      ],
++      "canonical": [
++        "",
++        "",
++        "",
++        "",
++        "",
++        "2026-06",
++        "",
++        "",
++        "",
++        "PPHK",
++        "VCC_clearing_credit",
++        "",
++        "1.25",
++        " CNH ",
++        "",
++        "",
++        "",
++        "",
++        "CITI",
++        "",
++        "",
++        "",
++        "",
++        " 000123 ",
++        "首行\r\n次行\\n尾行",
++        "",
++        "",
++        "",
++        "",
++        "",
++        "",
++        "",
++        "",
++        "",
++        "",
++        "",
++        "",
++        " CNH ",
++        "1.25",
++        "",
++        "",
++        "",
++        "",
++        "",
++        "",
++        ""
++      ],
++      "hash": "6aa6292562c1a15a58bf6dc4864b16df256816f355471304e84c4a7b51428ab4"
++    },
++    {
++      "version": 2,
++      "values": [
++        "",
++        "",
++        "",
++        "",
++        "",
++        "2026-06",
++        "",
++        "",
++        "",
++        "PPHK",
++        "VCC_clearing_credit",
++        "",
++        "1.25",
++        " CNH ",
++        "",
++        "",
++        "",
++        "",
++        "CITI",
++        "",
++        "",
++        "",
++        "",
++        " 000123 ",
++        "首行\r\n次行\\n尾行",
++        "",
++        "",
++        "",
++        "",
++        "",
++        "",
++        "",
++        "",
++        "",
++        "",
++        "",
++        "",
++        " CNH ",
++        "1.25",
++        "",
++        "",
++        "",
++        "",
++        "",
++        "",
++        ""
++      ],
++      "canonical": [
++        "",
++        "",
++        "",
++        "",
++        "",
++        "2026-06",
++        "",
++        "",
++        "",
++        "PPHK",
++        "VCC_clearing_credit",
++        "",
++        "1.25",
++        " CNH ",
++        "",
++        "",
++        "",
++        "",
++        "CITI",
++        "",
++        "",
++        "",
++        "",
++        " 000123 ",
++        "首行\r\n次行\\n尾行",
++        "",
++        "",
++        "",
++        "",
++        "",
++        "",
++        "",
++        "",
++        "",
++        "",
++        "",
++        "",
++        " CNH ",
++        "1.25",
++        "",
++        "",
++        "",
++        "",
++        "",
++        "",
++        ""
++      ],
++      "hash": "6aa6292562c1a15a58bf6dc4864b16df256816f355471304e84c4a7b51428ab4"
++    }
++  ],
++  "channelRaw": "[\" CNH \",\"首行\\r\\n次行\\\\n尾行\",\"000123\"]",
++  "channelSubjects": [
++    {
++      "subject": " PPHK ",
++      "hash": "355502776bea56f101ef0206007208ada3ba982423f9690be285862efdeb7921"
++    },
++    {
++      "subject": "PPSG",
++      "hash": "efbf4a8649ec8c9f454818466ef5df4235b4797ed6fb7e35f2b7a105f5208a19"
++    },
++    {
++      "subject": "",
++      "hash": "893fc6d08f122c966ca7190bd42768fc9b4433432b116d14d789038e5c6ad2bc"
++    },
++    {
++      "subject": null,
++      "hash": "893fc6d08f122c966ca7190bd42768fc9b4433432b116d14d789038e5c6ad2bc"
++    },
++    {
++      "subject": 0,
++      "hash": "b41580bd6f6cd38516a8cced26bde3dafb7a7a9c09a78bbba9ca7569be41c95d"
++    }
++  ]
++}
+--- /dev/null
++++ b/src/backend/vcc-financial-op/README.md
+@@ -0,0 +1,31 @@
++# VCC 纯 hash 与映射血缘合同
++
++本页记录已经落地的纯合同入口；VCC 文件读取、数据存储、行映射和导出仍由各自模块负责。设计与阶段证据分别见 [G6 Spec](../../../changes/v3.2.10/codex/v3.2.10-storage-execution-separation/spec.md)、[TechDoc](../../../changes/v3.2.10/codex/v3.2.10-storage-execution-separation/techdoc.md) 和[实施记录](../../../changes/v3.2.10/codex/v3.2.10-storage-execution-separation/implementation-notes.md)。
++
++## 当前入口与边界
++
++| 入口 | 唯一职责与允许依赖 | 副作用与限制 |
++| --- | --- | --- |
++| [content-hash-contract.js](content-hash-contract.js) | 导出 `HASH_VERSION`、`PENDING_HASH_VERSION`、`contentHash`、`pendingCanonicalValues`、`pendingContentHash`；只依赖 `node:crypto` 与 [definitions.js](definitions.js)。 | 输入值计算与复制；不得依赖 row-mapper、文件系统、数据库、worker、Electron、Excel 库。 |
++| [mapped-lineage-contract.js](mapped-lineage-contract.js) | 导出 `assertMappedLineage(expected, mapped)` 与 `mappedContentHashForStoredVersion(expected, mapped)`；只依赖 content-hash-contract 与 definitions。 | 不写入状态、不重算或更新存储中的 hash；不读取原文件，不打开数据库，不执行导出。 |
++| [row-mapper.js](row-mapper.js) | 保留日期、币种、金额映射及业务行构造，使用并直接重导出 hash 合同函数和常量。 | 此模块仍可能通过日期规范化加载 Excel 库；只需纯 hash 的新调用方应直接引用 content-hash-contract。 |
++| [dataset writer](../../main-process/vcc-financial-op-dataset-writer.js) / [review-export-plan.js](review-export-plan.js) | 原路径负责读取/重建及导出编排，直接调用同一个 assertMappedLineage。 | IO/DB 权限仍属于原编排模块；纯校验不获得读取、发布、存储或资源关闭权限。review plan 不再为校验加载 writer。 |
++
++## 保持的行为与兼容
++
++普通 hash 版本仍为 `2`，Pending hash 版本仍为 `3`。普通旧版本 `1` 与 Pending 旧版本 `2` 按原算法重建；Pending 原始合同 `1`/`2` 保留各自字段数量与映射顺序。CHANNEL 主体仍以原有空值转空串、`String`、`trim` 规则进入 JSON payload；原值、金额和币种规范化顺序未调整。
++
++`assertMappedLineage` 成功返回 `undefined`；失败保留 `archive-row-integrity-failure` 及原中文信息。存在 `disposition` 时先报告不一致；无 disposition 时先识别 hash 版本/重建旧 hash，再比较幂等键与内容，保留原错误优先级。
++
++row-mapper 的旧导出及 dataset writer 的 `assertMappedLineage` 直接引用新模块函数对象，保留现有生产、测试和脚本调用兼容。迁移前先清点这些消费者；没有完成调用方迁移与兼容评估时不能删除。纯合同没有第二份兼容函数正文，也不会通过兼容导出重复校验。
++
++## 验证与后续维护
++
++- [固定 hash/lineage 合同测试](../../../tests/unit/backend/vcc-financial-op/mapped-lineage-contract.test.js)：固定基线输出、所有旧新版本、Pending 字段错误、异常优先级、兼容对象 identity、纯依赖冷加载，以及 review plan 不加载 writer。
++- [row mapper 测试](../../../tests/unit/backend/vcc-financial-op/row-mapper.test.js)、[Pending 历史迁移测试](../../../tests/unit/backend/vcc-financial-op/pending-contract-migration.test.js)：验证既有映射及历史兼容路径。
++- [dataset writer 测试](../../../tests/unit/main-process/vcc-financial-op-dataset-writer.test.js)、[review export 测试](../../../tests/unit/main-process/vcc-financial-op-review-export.test.js)：真实临时 SQLite/XLSX 的导出、原件血缘、旧版本和异常路径。
++- [调整及归档链集成测试](../../../scripts/integration/vcc-financial-op-adjustment-archive-chain.js)：保留真实导入、归档和 dataset 导出管线；实际执行结果见实施记录。
++
++本分支尚未集成 G8，`architecture/boundaries.json` 与 `legacy-allowlist.json` 尚不存在；当前冷加载检查已经约束纯模块的实际依赖。G8 集成时由其维护者登记已落地的两纯模块及传递依赖，不将本页作为机器规则已激活的证据。
++
++G4 并行改动由 XLSX 公共入口负责读取机制及资源/预算；G6 负责 hash/lineage 函数及其 imports。合并两个分支时同时保留上述改动，并针对合并内容重跑相关管线；本分支没有预先合入 G4。

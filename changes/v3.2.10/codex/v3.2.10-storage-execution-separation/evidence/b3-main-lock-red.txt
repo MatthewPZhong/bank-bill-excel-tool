@@ -1,0 +1,93 @@
+✖ Main acquiringBillCurrency:run：真实 idle failure 不释放下一 prepare 的锁 (21.564625ms)
+✖ Main acquiringBillCurrency:run：真实 active failure 经所属 execute finally 解锁 (16.2515ms)
+✔ Main acquiringBillCurrency:run：normal 经真实 execute finally 释放且旧 owner 幂等 (14.696041ms)
+✔ Main acquiringBillCurrency:run：cancel 经真实 execute finally 释放且旧 owner 幂等 (14.674292ms)
+✔ Main acquiringBillCurrency:run：prepare 后 onAbandon 释放一次且不清下一 owner (2.228583ms)
+✖ Main acquiringBillCurrency:run:resume：真实 idle failure 不释放下一 prepare 的锁 (16.192334ms)
+✖ Main acquiringBillCurrency:run:resume：真实 active failure 经所属 execute finally 解锁 (14.718708ms)
+✔ Main acquiringBillCurrency:run:resume：normal 经真实 execute finally 释放且旧 owner 幂等 (14.70925ms)
+✔ Main acquiringBillCurrency:run:resume：cancel 经真实 execute finally 释放且旧 owner 幂等 (15.078791ms)
+✔ Main acquiringBillCurrency:run:resume：prepare 后 onAbandon 释放一次且不清下一 owner (1.82375ms)
+✔ Main resume prepare 业务预检失败：持锁异常分支自行释放 (2.032666ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 7
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1204.312833
+
+✖ failing tests:
+
+test at tests/unit/main-process/acquiring-main-lock-ownership.test.js:163:3
+✖ Main acquiringBillCurrency:run：真实 idle failure 不释放下一 prepare 的锁 (21.564625ms)
+  AssertionError [ERR_ASSERTION]: idle failure callback 不拥有当前 prepare 的锁
+  
+  false !== true
+  
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-storage-execution-separation/tests/unit/main-process/acquiring-main-lock-ownership.test.js:173:14)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/unit/main-process/acquiring-main-lock-ownership.test.js:186:3
+✖ Main acquiringBillCurrency:run：真实 active failure 经所属 execute finally 解锁 (16.2515ms)
+  AssertionError [ERR_ASSERTION]: callback 不得抢在所属 execute finally 前解锁
+  
+  false !== true
+  
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-storage-execution-separation/tests/unit/main-process/acquiring-main-lock-ownership.test.js:200:14)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/unit/main-process/acquiring-main-lock-ownership.test.js:163:3
+✖ Main acquiringBillCurrency:run:resume：真实 idle failure 不释放下一 prepare 的锁 (16.192334ms)
+  AssertionError [ERR_ASSERTION]: idle failure callback 不拥有当前 prepare 的锁
+  
+  false !== true
+  
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-storage-execution-separation/tests/unit/main-process/acquiring-main-lock-ownership.test.js:173:14)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/unit/main-process/acquiring-main-lock-ownership.test.js:186:3
+✖ Main acquiringBillCurrency:run:resume：真实 active failure 经所属 execute finally 解锁 (14.718708ms)
+  AssertionError [ERR_ASSERTION]: callback 不得抢在所属 execute finally 前解锁
+  
+  false !== true
+  
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-storage-execution-separation/tests/unit/main-process/acquiring-main-lock-ownership.test.js:200:14)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

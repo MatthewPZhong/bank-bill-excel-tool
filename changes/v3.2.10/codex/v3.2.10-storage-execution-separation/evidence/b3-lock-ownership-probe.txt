@@ -1,0 +1,137 @@
+{
+  "recordedAt": "2026-09-20T11:59:05.289Z",
+  "node": "v25.8.0",
+  "platform": "darwin/arm64",
+  "worktree": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-storage-execution-separation",
+  "head": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "mainSha256": "9599755bf4d548dea1ba5a676926af12ea153f19960e8406115aabd7e3011a3f",
+  "poolSha256": "0560ace07f044cb6f1121c7a05ab6cb2a697aec73c669ef5cb2b2de735dae0d9",
+  "idleFailure": {
+    "extraction": {
+      "lock": {
+        "startLine": 1586,
+        "endLine": 1610,
+        "sha256": "7f9160205b217df5e4f1bb38806294ab1bfc0f4613e894d79f6581e18d1189f1"
+      },
+      "listener": {
+        "startLine": 22837,
+        "endLine": 22931,
+        "sha256": "0a2c694935907add5e9fb620ec68b08584972de16ea5901ff7783784fd90209e"
+      }
+    },
+    "before": {
+      "workerAlive": true,
+      "initialized": true,
+      "busy": false,
+      "activeJobId": null,
+      "dbPath": "/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/g6-b3-lock-probe-4zCN8W/idle.sqlite",
+      "lastBusyEndTs": 0
+    },
+    "firstPrepare": {
+      "acquired": true
+    },
+    "hadActiveJob": false,
+    "failureSource": "exit",
+    "lockAfterIdleFailure": {
+      "inFlight": false,
+      "operation": null,
+      "monthKey": null
+    },
+    "secondPrepare": {
+      "acquired": true
+    },
+    "defectConfirmed": true,
+    "scope": "真实 idle worker exit + 实际 Main 锁/回调；复现两个 prepare 均获同一模块锁，不声称已经证明两个活跃 MW 同目录重叠"
+  },
+  "nestedExit": {
+    "results": [
+      {
+        "mode": "uncaught-error",
+        "exitCode": 1,
+        "errorObserved": true,
+        "incrementsDuringError": 0,
+        "incrementsAfterExit": 0
+      },
+      {
+        "mode": "process.exit",
+        "exitCode": 1,
+        "errorObserved": false,
+        "incrementsDuringError": null,
+        "incrementsAfterExit": 0
+      },
+      {
+        "mode": "terminate",
+        "exitCode": 1,
+        "errorObserved": false,
+        "incrementsDuringError": null,
+        "incrementsAfterExit": 0
+      },
+      {
+        "mode": "uncaught-error",
+        "exitCode": 1,
+        "errorObserved": true,
+        "incrementsDuringError": 0,
+        "incrementsAfterExit": 0
+      },
+      {
+        "mode": "process.exit",
+        "exitCode": 1,
+        "errorObserved": false,
+        "incrementsDuringError": null,
+        "incrementsAfterExit": 0
+      },
+      {
+        "mode": "terminate",
+        "exitCode": 1,
+        "errorObserved": false,
+        "incrementsDuringError": null,
+        "incrementsAfterExit": 0
+      }
+    ],
+    "scope": "真实 Node nested worker 的 SAB 持续自增探针；未见 error/exit 后继续写入，仅是当前 Node/macOS 实测，不冒充 Electron/Windows 保证"
+  },
+  "concurrentDispatch": {
+    "whenSecondSettled": {
+      "first": {
+        "state": "pending"
+      },
+      "second": {
+        "state": "rejected",
+        "message": "worker 正在执行 jobId=job-1789905546048-iztc，拒绝并发 run"
+      },
+      "pool": {
+        "workerAlive": true,
+        "initialized": true,
+        "busy": false,
+        "activeJobId": null,
+        "dbPath": "/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/g6-b3-lock-probe-4zCN8W/dispatch.sqlite",
+        "lastBusyEndTs": 1789905546062
+      }
+    },
+    "afterWork": {
+      "first": {
+        "state": "pending"
+      },
+      "second": {
+        "state": "rejected",
+        "message": "worker 正在执行 jobId=job-1789905546048-iztc，拒绝并发 run"
+      },
+      "pool": {
+        "workerAlive": true,
+        "initialized": true,
+        "busy": false,
+        "activeJobId": null,
+        "dbPath": "/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/g6-b3-lock-probe-4zCN8W/dispatch.sqlite",
+        "lastBusyEndTs": 1789905546062
+      },
+      "persistedRuns": [
+        {
+          "id": 1,
+          "chunk_progress": "{\"lastCompletedChunkIndex\":5,\"totalChunks\":6,\"status\":\"complete\",\"chunkSize\":40,\"outputIntent\":{\"diffFilePath\":\"/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/g6-b3-lock-probe-4zCN8W/exports/2026-09-20/acquiring-bill-currency/acquiring-bill-currency-2026-04-diff-195906.xlsx\",\"reportFilePath\":\"/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/g6-b3-lock-probe-4zCN8W/exports/2026-09-20/acquiring-bill-currency/acquiring-bill-currency-2026-04-diff-195906.xlsx\"}}"
+        }
+      ],
+      "diffCount": 240
+    },
+    "scope": "模拟两个已放行 prepare 的 execute 同时调用真实 pool/worker/session；worker 内部 activeJob 会拒绝第二个 run，本探针未证明两个 MW 同目录并行；记录 pool activeJob 提前检查/覆盖造成的悬空 caller"
+  }
+}

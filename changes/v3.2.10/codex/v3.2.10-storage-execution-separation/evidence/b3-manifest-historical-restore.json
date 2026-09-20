@@ -1,0 +1,10 @@
+{
+  "reason": "现有生成器会把已发布v3.2.5快照从54 actions升级到当前67 actions；该语义更新不属于本次Main最小修复，已按生成前SHA及HEAD恢复仅本次写入。",
+  "restored": [
+    "changes/v3.2.5/e13-g-action-manifest.json",
+    "changes/v3.2.5/e13-g-capability-inventory.json",
+    "changes/v3.2.5/e13-g-production-strategy-snapshot.json",
+    "changes/v3.2.5/e13-g-coverage-report.json"
+  ],
+  "rejectedGeneratedFiles": "manifest-current-rejected-write"
+}

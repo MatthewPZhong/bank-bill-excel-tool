@@ -1,0 +1,32 @@
+{
+  "changes/v3.2.5/e13-g-action-manifest.json": {
+    "wholeSha256": "14106dd53b82640db9a5101f52ceeef99534f2b1b522250209d9f2906686890a",
+    "semanticsWithoutSourceHashesSha256": "b87521b7fc0dd607c3d41c4e6bc5d2f81392a859ab20726554f925541a320377",
+    "sourceHashes": null
+  },
+  "changes/v3.2.5/e13-g-capability-inventory.json": {
+    "wholeSha256": "c0f0c73cfb6c237fd4a1ad3570f246167d73a8103aaa13e889885add2a61da8d",
+    "semanticsWithoutSourceHashesSha256": "f490dfc913dffa571560dd2e9c69aa8e2a89da6f8af8bafc50a6b57c6a756678",
+    "sourceHashes": null
+  },
+  "changes/v3.2.5/e13-g-production-strategy-snapshot.json": {
+    "wholeSha256": "744aa1905a2daa4b0493bd3a32b380391d7d1608759ae34bafca38db47523a5d",
+    "semanticsWithoutSourceHashesSha256": "8803f7b5e0bc3fe566023b0145d56d99d22a5d4d511984f952cd1aa51e05687a",
+    "sourceHashes": null
+  },
+  "changes/v3.2.5/e13-g-coverage-report.json": {
+    "wholeSha256": "5d1e2df304f82a449f84413602b1c24787a4103853e0898487a4cfa0289e19c4",
+    "semanticsWithoutSourceHashesSha256": "d7b5caf662d3ba13c04ae756d027e16d1dbb4a2cda203de1788d35546946a84f",
+    "sourceHashes": {
+      "scripts/check-background-execution-manifest.js": "0d366c2784482a67292a50a180d5ede98528d02f2116ba2e05f98a2be1256269",
+      "src/main.js": "760c972a6ff6a566ceb44f6f0a88fd104f3c0650e3c8402293019a9cf7a7bb28",
+      "src/main-process/archive-center/task-policy-registry.js": "5107edd2d2d76ca1284b304143b9852770676916bfdc6a0450b53ae488ed961f",
+      "src/main-process/background-execution/action-task-binding-registry.js": "12a3024adad79df33581d192b9fb66494a6c6a72fd9c127b3fe4adc6f8455713",
+      "src/main-process/background-execution/action-manifest.js": "f4055f69a62d901d423ce0d5497bd841d5dc13b2fa826789513cbb10ce1a280c",
+      "src/main-process/background-execution/capability-inventory.js": "658f0857b3ab1fc3520cf3184522dfa1da62a44bfe61bde7d29811710d66fd9c",
+      "src/main-process/background-execution/coverage-check.js": "9ba93ac7ae5bbad5a15a72586a8ad85ebdd2b2896974c5361f05e6f6fb9b7387",
+      "src/main-process/background-execution/production-strategy-snapshot.js": "da5ff1358221b0cd68c7a6e474d741fed9ecd688da71cc02b5e53aa93c3ab121",
+      "src/main-process/background-execution/runtime.js": "678ef87678aa2198486d337d0ebbdae547fb395d0ab2e465604d76c2e4b0eb89"
+    }
+  }
+}

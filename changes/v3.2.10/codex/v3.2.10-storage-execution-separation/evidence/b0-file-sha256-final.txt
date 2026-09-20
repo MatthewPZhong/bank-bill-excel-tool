@@ -1,0 +1,3 @@
+883a642741f47aa16f1a5e608c8a83a41e3bb3b14e4b7043eabba5053efb1ad1  src/main-process/run-check-multiworker.js
+777b6978995fc002a518f3430a21a1070bc5471cc1b2b5e07b2504d1045efa8c  tests/unit/main-process/run-check-multiworker.test.js
+039f2fe489a1d1624b3d266e0a558e0db090c1403d54057cf0057a31337d17db  tests/unit/main-process/__fixtures__/multiworker-exit-barrier-worker.js

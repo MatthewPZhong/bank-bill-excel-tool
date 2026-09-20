@@ -1,0 +1,57 @@
+▶ β.1-T2 多 worker contract（Group A：repository 级 byte-for-byte）
+  ✔ A1.[~50 行 / chunkSize 10（5 chunks 跨边界）] M=2 🔴 多 worker == 单 worker 逐行一致 (33.364958ms)
+  ✔ A1.[~50 行 / chunkSize 10（5 chunks 跨边界）] M=4 🔴 多 worker == 单 worker 逐行一致 (28.650791ms)
+  ✔ A1.[500 行 / chunkSize 100（5 chunks 跨边界）] M=2 🔴 多 worker == 单 worker 逐行一致 (33.084709ms)
+  ✔ A1.[500 行 / chunkSize 100（5 chunks 跨边界）] M=4 🔴 多 worker == 单 worker 逐行一致 (34.450291ms)
+  ✔ A1.[500 行 / chunkSize 50（10 chunks 喂饱 M=4）] M=2 🔴 多 worker == 单 worker 逐行一致 (41.382334ms)
+  ✔ A1.[500 行 / chunkSize 50（10 chunks 喂饱 M=4）] M=4 🔴 多 worker == 单 worker 逐行一致 (41.157041ms)
+  ✔ A1.[5000 行 / chunkSize 500（10 chunks）] M=2 🔴 多 worker == 单 worker 逐行一致 (97.643084ms)
+  ✔ A1.[5000 行 / chunkSize 500（10 chunks）] M=4 🔴 多 worker == 单 worker 逐行一致 (92.019584ms)
+  ✔ A1.[5000 行 / chunkSize 137（非整除边界）] M=2 🔴 多 worker == 单 worker 逐行一致 (159.450875ms)
+  ✔ A1.[5000 行 / chunkSize 137（非整除边界）] M=4 🔴 多 worker == 单 worker 逐行一致 (401.5465ms)
+  ✔ A2. 单 chunk（chunkSize >= 总行数）🔴 byte-for-byte 一致 (21.575917ms)
+  ✔ A3. 0 diff（全匹配）→ 两路均 0 行 + totalChunks/lastCompletedChunkIndex 一致 (32.661459ms)
+  ✔ A4. 空表（0 bill 行）→ totalChunks=0 / lastCompletedChunkIndex=-1（与单 worker 一致，不起 worker） (2.836666ms)
+  ✔ A6. 🔴 worker crash（reader 阶段）→ reject + 本 run diff_rows 清空（不留半套数据） (20.124167ms)
+  ✔ A7. 🔴 失败清理范围：DELETE 仅清本 run（runId=2），不误伤 runId=1 的有效 diff (22.959834ms)
+  ✔ A5. 三方一致：单 worker vs M=2 vs M=4 同一份数据 diff_rows 逐行相等 (318.442667ms)
+✔ β.1-T2 多 worker contract（Group A：repository 级 byte-for-byte） (1382.771083ms)
+▶ β.1-T2 多 worker contract（Group B：runCheckCore 级 gate）
+  ✔ B1.[60 bill] 🔴 runCheckCore 多 worker(M=2) == 单 worker baseline 逐行一致 (554.275333ms)
+  ✔ B1.[600 bill] 🔴 runCheckCore 多 worker(M=2) == 单 worker baseline 逐行一致 (780.914542ms)
+  ✔ B4. 🔴 C2：resume(从 chunk 0)重跑前清本 run 残留 diff_rows（MW 崩/cancel mid-merge 不致翻倍） (284.191917ms)
+  ✔ B2. gate 回退：workerCount=4 但无 dbPath → 走单 worker（结果正确 + chunk_progress complete） (318.207334ms)
+  ✔ B3. default workerCount（不传）== 显式 workerCount=1（都单 worker，diff_rows 一致） (565.154209ms)
+✔ β.1-T2 多 worker contract（Group B：runCheckCore 级 gate） (2503.061833ms)
+✔ 参数验证先于 COUNT：insertDiffRowsByJoinMultiWorker: runId 必填且为 number (1.373333ms)
+✔ 参数验证先于 COUNT：insertDiffRowsByJoinMultiWorker: runId 必填且为 number (0.062209ms)
+✔ 参数验证先于 COUNT：insertDiffRowsByJoinMultiWorker: runId 必填且为 number (0.047083ms)
+✔ 参数验证先于 COUNT：insertDiffRowsByJoinMultiWorker: runId 必填且为 number (0.049917ms)
+✔ 参数验证先于 COUNT：insertDiffRowsByJoinMultiWorker: monthKey 必填 (0.061041ms)
+✔ 参数验证先于 COUNT：insertDiffRowsByJoinMultiWorker: chunkSize 必须为正整数，收到：0 (0.048333ms)
+✔ 参数验证先于 COUNT：insertDiffRowsByJoinMultiWorker: chunkSize 必须为正整数，收到：1.5 (0.044ms)
+✔ 参数验证先于 COUNT：insertDiffRowsByJoinMultiWorker: dbPath 必填（worker 各自 open 只读 connection） (0.422709ms)
+✔ 参数验证先于 COUNT：insertDiffRowsByJoinMultiWorker: dbPath 必填（worker 各自 open 只读 connection） (0.056917ms)
+✔ 参数验证先于 COUNT：insertDiffRowsByJoinMultiWorker: workerCount 必须 ≥1 整数，收到："2" (0.101333ms)
+✔ 参数验证先于 COUNT：insertDiffRowsByJoinMultiWorker: workerCount 必须 ≥1 整数，收到：0 (0.050958ms)
+✔ 参数验证先于 COUNT：insertDiffRowsByJoinMultiWorker: tempDir 必填 (0.045833ms)
+✔ 参数验证先于 COUNT：insertDiffRowsByJoinMultiWorker: tempDir 必填 (0.035292ms)
+✔ 兼容数值字符串 chunkSize、truthy number runId/monthKey 与未 trim 路径，空表摘要不变 (0.471291ms)
+✔ service 一次装配计划/执行；数值转换、冻结上下文、取消与进度保留；reader进度不等提交 (3.932042ms)
+✔ reader-crash：executor退出屏障未完成不清run/结算，清理失败保原错误对象 (0.47875ms)
+✔ merge-interrupted：executor退出屏障未完成不清run/结算，清理失败保原错误对象 (0.211458ms)
+✔ CancelError：executor退出屏障未完成不清run/结算，清理失败保原错误对象 (0.156625ms)
+✔ COUNT/计划失败先于 executor 且不误清历史 run (0.073125ms)
+✔ repository只构造现有SQL计划与清理事务，不再导出worker wrapper (0.110375ms)
+✔ repository失败清理事务原语：成功 (0.108625ms)
+✔ repository失败清理事务原语：BEGIN (0.079625ms)
+✔ repository失败清理事务原语：DELETE (0.0405ms)
+✔ repository失败清理事务原语：COMMIT (0.028917ms)
+ℹ tests 45
+ℹ suites 2
+ℹ pass 45
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4149.393208

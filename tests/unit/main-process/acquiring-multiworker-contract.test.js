@@ -5,7 +5,7 @@
 //
 // 三方对比：
 //   ① 单 worker  runRepo.insertDiffRowsByJoinChunked（生产 byte-for-byte 真理源）
-//   ② 多 worker  runRepo.insertDiffRowsByJoinMultiWorker（M=2 / M=4，plan-b）
+//   ② 多 worker  multiworkerService.insertDiffRows（M=2 / M=4，plan-b）
 //   ③ 主进程直跑 session.runCheckCore（单 worker baseline vs 多 worker gate，端到端集成）
 //
 // 断言：diff_rows 按 `ORDER BY id ASC`（物理插入顺序）取回，逐行四列严格相等 + 行数相等。
@@ -13,7 +13,7 @@
 // 覆盖：
 //   - 多档数据集（~50 / 500 / 5000 bill 行，混币种制造 diff）
 //   - 跨 chunk 边界（chunkSize < 总行数）/ 单 chunk（chunkSize >= 总行数）/ 0 diff / 空表
-//   - Group A：repository 级（fixture schema + 真实表名，直接调两个 repo 函数；快、确定性）
+//   - Group A：repository 级（fixture schema + 真实表名，直接调repository 与 service；快、确定性）
 //   - Group B：runCheckCore 级（真实 AppDatabase + 真实 import，验 gate 分流 + 自适应分片 + chunk_progress complete）
 //
 // 自包含：Group A 模块内造小 fixture sqlite（真实 acquiring 表名子集）；Group B 复用 session import 链路。
@@ -30,6 +30,8 @@ const ExcelJS = require('exceljs');
 
 const runRepo = require('../../../src/backend/acquiring-bill-currency-db/run-repository');
 const mw = require('../../../src/main-process/run-check-multiworker');
+const { createAcquiringMultiworkerService } = require('../../../src/main-process/acquiring-bill-currency-multiworker-service');
+const multiworkerService = createAcquiringMultiworkerService({ runRepository: runRepo, executeWriteSplitChunks: mw.runWriteSplitChunks });
 const session = require('../../../src/main-process/acquiring-bill-currency-session');
 
 // ─────────────────────────────────────────────────────────────────
@@ -191,8 +193,8 @@ function countTempParts(dir) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// Group A — repository 级三方 byte-for-byte
-//   单 worker insertDiffRowsByJoinChunked（runId=1） vs 多 worker insertDiffRowsByJoinMultiWorker（runId=2/3）
+// Group A — repository/service 级三方 byte-for-byte
+//   单 worker insertDiffRowsByJoinChunked（runId=1） vs 多 worker multiworkerService.insertDiffRows（runId=2/3）
 //   覆盖多档 × M=2/4 × chunk 边界。
 // ─────────────────────────────────────────────────────────────────
 test.describe('β.1-T2 多 worker contract（Group A：repository 级 byte-for-byte）', () => {
@@ -220,7 +222,7 @@ test.describe('β.1-T2 多 worker contract（Group A：repository 级 byte-for-b
           assert.ok(baseRows.length > 0, `baseline diff 应 > 0（实际 ${baseRows.length}）`);
 
           // ② 多 worker（runId=2）
-          const mwRes = await runRepo.insertDiffRowsByJoinMultiWorker(ctx.db, {
+          const mwRes = await multiworkerService.insertDiffRows(ctx.db, {
             runId: 2, monthKey: MONTH_KEY, chunkSize: cfg.chunkSize,
             dbPath: ctx.dbPath, workerCount: M, tempDir,
           });
@@ -254,7 +256,7 @@ test.describe('β.1-T2 多 worker contract（Group A：repository 级 byte-for-b
     try {
       const base = runRepo.insertDiffRowsByJoinChunked(ctx.db, { runId: 1, monthKey: MONTH_KEY, chunkSize: 100000 });
       const baseRows = dumpDiffRows(ctx.db, 1);
-      const mwRes = await runRepo.insertDiffRowsByJoinMultiWorker(ctx.db, {
+      const mwRes = await multiworkerService.insertDiffRows(ctx.db, {
         runId: 2, monthKey: MONTH_KEY, chunkSize: 100000, dbPath: ctx.dbPath, workerCount: 4, tempDir,
       });
       assert.equal(mwRes.totalChunks, 1, 'totalChunks=1（单 chunk）');
@@ -275,7 +277,7 @@ test.describe('β.1-T2 多 worker contract（Group A：repository 级 byte-for-b
       const base = runRepo.insertDiffRowsByJoinChunked(ctx.db, { runId: 1, monthKey: MONTH_KEY, chunkSize: 100 });
       const baseRows = dumpDiffRows(ctx.db, 1);
       assert.equal(baseRows.length, 0, 'baseline 0 diff');
-      const mwRes = await runRepo.insertDiffRowsByJoinMultiWorker(ctx.db, {
+      const mwRes = await multiworkerService.insertDiffRows(ctx.db, {
         runId: 2, monthKey: MONTH_KEY, chunkSize: 100, dbPath: ctx.dbPath, workerCount: 4, tempDir,
       });
       assert.equal(mwRes.totalInsertedDiffRows, 0, '多 worker 0 diff');
@@ -296,7 +298,7 @@ test.describe('β.1-T2 多 worker contract（Group A：repository 级 byte-for-b
       const base = runRepo.insertDiffRowsByJoinChunked(ctx.db, { runId: 1, monthKey: MONTH_KEY, chunkSize: 100 });
       assert.equal(base.totalChunks, 0, 'baseline totalChunks=0');
       assert.equal(base.lastCompletedChunkIndex, -1, 'baseline lastCompletedChunkIndex=-1');
-      const mwRes = await runRepo.insertDiffRowsByJoinMultiWorker(ctx.db, {
+      const mwRes = await multiworkerService.insertDiffRows(ctx.db, {
         runId: 2, monthKey: MONTH_KEY, chunkSize: 100, dbPath: ctx.dbPath, workerCount: 4, tempDir,
       });
       assert.equal(mwRes.totalChunks, 0, '多 worker totalChunks=0');
@@ -327,7 +329,7 @@ test.describe('β.1-T2 多 worker contract（Group A：repository 级 byte-for-b
 
       let rejectErr;
       try {
-        await runRepo.insertDiffRowsByJoinMultiWorker(ctx.db, {
+        await multiworkerService.insertDiffRows(ctx.db, {
           runId: 2, monthKey: MONTH_KEY, chunkSize: 100, dbPath: ctx.dbPath, workerCount: 2, tempDir,
         });
       } catch (e) { rejectErr = e; }
@@ -360,7 +362,7 @@ test.describe('β.1-T2 多 worker contract（Group A：repository 级 byte-for-b
       mw.__test_only_set_worker_script__(crashWorker);
       let rejectErr;
       try {
-        await runRepo.insertDiffRowsByJoinMultiWorker(ctx.db, {
+        await multiworkerService.insertDiffRows(ctx.db, {
           runId: 2, monthKey: MONTH_KEY, chunkSize: 100, dbPath: ctx.dbPath, workerCount: 2, tempDir,
         });
       } catch (e) { rejectErr = e; }
@@ -385,10 +387,10 @@ test.describe('β.1-T2 多 worker contract（Group A：repository 级 byte-for-b
     try {
       const chunkSize = 73; // 非整除 → ceil(2000/73)=28 chunks，喂饱并行 + 末 chunk 非满
       runRepo.insertDiffRowsByJoinChunked(ctx.db, { runId: 1, monthKey: MONTH_KEY, chunkSize });
-      await runRepo.insertDiffRowsByJoinMultiWorker(ctx.db, {
+      await multiworkerService.insertDiffRows(ctx.db, {
         runId: 2, monthKey: MONTH_KEY, chunkSize, dbPath: ctx.dbPath, workerCount: 2, tempDir: tempDir2,
       });
-      await runRepo.insertDiffRowsByJoinMultiWorker(ctx.db, {
+      await multiworkerService.insertDiffRows(ctx.db, {
         runId: 3, monthKey: MONTH_KEY, chunkSize, dbPath: ctx.dbPath, workerCount: 4, tempDir: tempDir4,
       });
       const r1 = dumpDiffRows(ctx.db, 1);
@@ -514,7 +516,7 @@ test.describe('β.1-T2 多 worker contract（Group B：runCheckCore 级 gate）'
         });
         const snapA = snapshotRun(A.db.db);
 
-        // B：多 worker（workerCount=2 + dbPath + tempDir → 走 insertDiffRowsByJoinMultiWorker）
+        // B：多 worker（workerCount=2 + dbPath + tempDir → 走 multiworkerService.insertDiffRows）
         //   v2.1.12 β.1-T3：__forceMultiWorkerForTest 跳过 D31 行数闸（小 fixture 不足 100w 否则会回退单 worker，
         //     GroupB 就失去多 worker 覆盖）；chunkSize:50 与 A 对齐 → billCount/50 个 chunk（≥2）真正跑 M=2 并行。
         const rb = await session.runCheckCore({
@@ -552,7 +554,7 @@ test.describe('β.1-T2 多 worker contract（Group B：runCheckCore 级 gate）'
   }
 
   // 🔴 B4 C2（self-review）：resume(lastCompletedChunkIndex=-1) 从 chunk 0 重跑前清本 run 残留 diff_rows
-  //   背景：MW run 在 merge 期被硬杀/cancel-terminate/OOM（不经 insertDiffRowsByJoinMultiWorker 的 catch DELETE）
+  //   背景：MW run 在 merge 期被硬杀/cancel-terminate/OOM（不经 multiworkerService.insertDiffRows 的 catch DELETE）
   //   → 部分 chunk 已 COMMIT 残留 + MW 不逐 chunk 标 chunk_progress（恒 -1）→ resume 单 worker 从 0 全跑，
   //   而 clearRunsByMonth 仅在 !isResume → 不清 → diff_rows 翻倍。C2 修复：resumeFromChunkIndex===0 时先清本 run。
   test('B4. 🔴 C2：resume(从 chunk 0)重跑前清本 run 残留 diff_rows（MW 崩/cancel mid-merge 不致翻倍）', async () => {

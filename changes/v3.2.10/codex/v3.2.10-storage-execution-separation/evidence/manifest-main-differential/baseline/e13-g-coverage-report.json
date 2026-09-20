@@ -1,0 +1,50 @@
+{
+  "reportVersion": 1,
+  "release": "v3.2.5",
+  "workItem": "E13-G",
+  "contractAuthority": {
+    "contractVersion": 1,
+    "revision": 2,
+    "genesis": false,
+    "approvalStatus": "PENDING_HUMAN_REVIEW",
+    "bindingMapSha256": "5c9ee53437d487a94ddb0f0d236dec7b07d4545452c9ebe3c6e98593de209ff2",
+    "expectedPairCount": 61,
+    "expectedProvenanceCount": 61
+  },
+  "coverage": {
+    "valid": true,
+    "actionCount": 67,
+    "legacyPairCount": 74,
+    "runtimePolicyCount": 49,
+    "surfaceCount": 6,
+    "coveredActionSurfaceCount": 402,
+    "expectedActionSurfaceCount": 402,
+    "coveragePercent": 100
+  },
+  "capabilityInventory": {
+    "valid": true,
+    "actionCount": 67,
+    "implementedCount": 49,
+    "legacyOnlyCount": 16,
+    "platformCanaryCount": 2
+  },
+  "productionStrategy": {
+    "valid": true,
+    "actionCount": 67,
+    "productionEnabledCount": 13,
+    "legacyEffectiveCount": 54
+  },
+  "humanRedlineReviewStatus": "PENDING_HUMAN_REVIEW",
+  "productionEnablementAllowed": false,
+  "sourceHashes": {
+    "scripts/check-background-execution-manifest.js": "2e23562e537d30eff4b034c2c3f3db29cf1efe0c4557d4ac7b48a480ec608ec1",
+    "src/main.js": "9599755bf4d548dea1ba5a676926af12ea153f19960e8406115aabd7e3011a3f",
+    "src/main-process/archive-center/task-policy-registry.js": "52b94f6acddaf775427136b95b9c0f46957b11a0f6124e1473a4562d1a1ecdb0",
+    "src/main-process/background-execution/action-task-binding-registry.js": "d00c70b534347cd9efbe71933f5ae7141cd60529ed104b9521aa9f388a5efc33",
+    "src/main-process/background-execution/action-manifest.js": "ac47bcbbdb47220007b1f53d8a53fd7f938bc5d10b870635d861389dde13ef4f",
+    "src/main-process/background-execution/capability-inventory.js": "658f0857b3ab1fc3520cf3184522dfa1da62a44bfe61bde7d29811710d66fd9c",
+    "src/main-process/background-execution/coverage-check.js": "9ba93ac7ae5bbad5a15a72586a8ad85ebdd2b2896974c5361f05e6f6fb9b7387",
+    "src/main-process/background-execution/production-strategy-snapshot.js": "da5ff1358221b0cd68c7a6e474d741fed9ecd688da71cc02b5e53aa93c3ab121",
+    "src/main-process/background-execution/runtime.js": "7f540302f104975aadf67e6536a8573455e64c324db417fd85f1b256cc3493d2"
+  }
+}

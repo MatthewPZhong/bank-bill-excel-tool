@@ -1,0 +1,47 @@
+src/backend/vcc-financial-op-db/migrations.js:14:} = require('../vcc-financial-op/row-mapper');
+src/backend/vcc-financial-op/calculator.js:16:const { normalizeYearMonth } = require('./row-mapper');
+src/backend/vcc-financial-op/system-op-importer.js:25:} = require('./row-mapper');
+src/backend/vcc-financial-op/operation-state.js:5:const { normalizeYearMonth } = require('./row-mapper');
+src/backend/vcc-financial-op/import-service.js:9:const { normalizeYearMonth } = require('./row-mapper');
+src/backend/vcc-financial-op/dataset-deletion.js:4:const { normalizeYearMonth } = require('./row-mapper');
+tests/unit/main-process/vcc-financial-op-dataset-writer.test.js:25:} = require('../../../src/backend/vcc-financial-op/row-mapper');
+src/backend/vcc-financial-op/mapped-lineage-contract.js:9:} = require('./content-hash-contract');
+src/backend/vcc-financial-op/mapped-lineage-contract.js:20:function mappedContentHashForStoredVersion(expected, mapped) {
+src/backend/vcc-financial-op/mapped-lineage-contract.js:43:function assertMappedLineage(expected, mapped) {
+src/backend/vcc-financial-op/mapped-lineage-contract.js:46:    : mappedContentHashForStoredVersion(expected, mapped);
+src/backend/vcc-financial-op/mapped-lineage-contract.js:58:  assertMappedLineage,
+src/backend/vcc-financial-op/mapped-lineage-contract.js:59:  mappedContentHashForStoredVersion
+src/main-process/vcc-financial-op-dataset-writer.js:20:} = require('../backend/vcc-financial-op/row-mapper');
+src/main-process/vcc-financial-op-dataset-writer.js:21:const { assertMappedLineage } = require('../backend/vcc-financial-op/mapped-lineage-contract');
+src/main-process/vcc-financial-op-dataset-writer.js:683:  assertMappedLineage(expected, mapped);
+src/main-process/vcc-financial-op-dataset-writer.js:831:        assertMappedLineage(expected, mapped);
+src/main-process/vcc-financial-op-dataset-writer.js:1148:  assertMappedLineage,
+src/main-process/vcc-financial-op-service.js:21:const { normalizeYearMonth } = require('../backend/vcc-financial-op/row-mapper');
+src/backend/vcc-financial-op/detail-importer.js:16:} = require('./row-mapper');
+tests/unit/main-process/vcc-financial-op-review-export.test.js:17:const { pendingContentHash } = require('../../../src/backend/vcc-financial-op/row-mapper');
+src/backend/vcc-financial-op/read-snapshot.js:7:const { normalizeYearMonth } = require('./row-mapper');
+tests/unit/backend/vcc-financial-op/row-mapper.test.js:15:} = require('../../../../src/backend/vcc-financial-op/row-mapper');
+src/backend/vcc-financial-op/row-mapper.js:22:} = require('./content-hash-contract');
+src/backend/vcc-financial-op/review-export-plan.js:14:const { mapDetailRow, pendingCanonicalValues, monthOfDate } = require('./row-mapper');
+src/backend/vcc-financial-op/review-export-plan.js:17:const { assertMappedLineage } = require('./mapped-lineage-contract');
+src/backend/vcc-financial-op/review-export-plan.js:328:    assertMappedLineage(expected, mapped);
+tests/unit/backend/vcc-financial-op/detail-importer.test.js:30:const { mapDetailRow } = require('../../../../src/backend/vcc-financial-op/row-mapper');
+tests/unit/backend/vcc-financial-op/mapped-lineage-contract.test.js:9:const mapper = require('../../../../src/backend/vcc-financial-op/row-mapper');
+tests/unit/backend/vcc-financial-op/mapped-lineage-contract.test.js:10:const hashContract = require('../../../../src/backend/vcc-financial-op/content-hash-contract');
+tests/unit/backend/vcc-financial-op/mapped-lineage-contract.test.js:11:const { assertMappedLineage, mappedContentHashForStoredVersion } = require('../../../../src/backend/vcc-financial-op/mapped-lineage-contract');
+tests/unit/backend/vcc-financial-op/mapped-lineage-contract.test.js:21:    assert.equal(assertMappedLineage(fixture.expected, mapped), undefined);
+tests/unit/backend/vcc-financial-op/mapped-lineage-contract.test.js:22:    assert.equal(mappedContentHashForStoredVersion(fixture.expected, mapped), fixture.expected.content_hash);
+tests/unit/backend/vcc-financial-op/mapped-lineage-contract.test.js:36:    assert.equal(assertMappedLineage(expected, mapped), undefined);
+tests/unit/backend/vcc-financial-op/mapped-lineage-contract.test.js:71:      assert.throws(() => assertMappedLineage(fixture.expected, { ...fixture.mapped, ...change }), mismatch);
+tests/unit/backend/vcc-financial-op/mapped-lineage-contract.test.js:73:    assert.throws(() => assertMappedLineage({ ...fixture.expected, content_hash: 'invalid' }, fixture.mapped), mismatch);
+tests/unit/backend/vcc-financial-op/mapped-lineage-contract.test.js:74:    assert.throws(() => assertMappedLineage({ ...fixture.expected, hash_version: 99 }, fixture.mapped), {
+tests/unit/backend/vcc-financial-op/mapped-lineage-contract.test.js:84:  assert.throws(() => assertMappedLineage(unknown, { ...fixture.mapped, disposition: 'invalid' }), mismatch);
+tests/unit/backend/vcc-financial-op/mapped-lineage-contract.test.js:85:  assert.throws(() => assertMappedLineage(unknown, { ...fixture.mapped, idempotencyKey: 'other' }), {
+tests/unit/backend/vcc-financial-op/mapped-lineage-contract.test.js:90:  assert.throws(() => assertMappedLineage(fixture.expected, malformed), {
+tests/unit/backend/vcc-financial-op/mapped-lineage-contract.test.js:93:  assert.throws(() => assertMappedLineage(fixture.expected, { ...malformed, disposition: 'invalid' }), mismatch);
+tests/unit/backend/vcc-financial-op/mapped-lineage-contract.test.js:103:  assert.equal(writer.assertMappedLineage, assertMappedLineage);
+tests/unit/backend/vcc-financial-op/mapped-lineage-contract.test.js:112:    const allowed = new Set(['node:crypto', ...['definitions', 'content-hash-contract', 'mapped-lineage-contract'].map(name => root + '/' + name + '.js')]);
+tests/unit/backend/vcc-financial-op/mapped-lineage-contract.test.js:121:    const hash = require(root + '/content-hash-contract.js');
+tests/unit/backend/vcc-financial-op/mapped-lineage-contract.test.js:122:    const lineage = require(root + '/mapped-lineage-contract.js');
+tests/unit/backend/vcc-financial-op/mapped-lineage-contract.test.js:124:    assert.equal(lineage.assertMappedLineage({ source_type: 'recharge_refund', hash_version: 2, idempotency_key: 'key', content_hash: 'hash' }, { idempotencyKey: 'key', contentHash: 'hash' }), undefined);
+tests/unit/backend/vcc-financial-op/pending-contract-migration.test.js:19:} = require('../../../../src/backend/vcc-financial-op/row-mapper');

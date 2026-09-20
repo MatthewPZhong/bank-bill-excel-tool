@@ -1,0 +1,22 @@
+✔ 固定旧实现 fixture：recharge_refund-hash-v1 (2.268ms)
+✔ 固定旧实现 fixture：recharge_refund-hash-v2 (0.317208ms)
+✔ 固定旧实现 fixture：fee_fx-hash-v1 (0.081958ms)
+✔ 固定旧实现 fixture：fee_fx-hash-v2 (0.08075ms)
+✔ 固定旧实现 fixture：channel-hash-v1 (0.140792ms)
+✔ 固定旧实现 fixture：channel-hash-v2 (0.069041ms)
+✔ 固定旧实现 fixture：pending_archive_removal-hash-v2 (0.246959ms)
+✔ 固定旧实现 fixture：pending_archive_removal-hash-v3 (0.096583ms)
+✔ Pending raw v1 保持字段顺序、文本和固定 hash (0.24825ms)
+✔ Pending raw v2 保持字段顺序、文本和固定 hash (0.120084ms)
+✔ CHANNEL 主体按原 trim/null/数值规则参与 hash；其他类型忽略主体 (0.082708ms)
+✔ Pending 原始版本/字段数无效保持完整错误文案 (0.288708ms)
+✔ disposition、幂等键和内容不一致均拒绝；未知版本保留独立错误 (0.259042ms)
+✔ disposition 先于未知版本；未知版本和旧 Pending 原始结构错误先于键失配 (0.085666ms)
+ℹ tests 14
+ℹ suites 0
+ℹ pass 14
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 210.625292

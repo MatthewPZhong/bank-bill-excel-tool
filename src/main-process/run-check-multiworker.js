@@ -22,7 +22,7 @@
 //
 // 与 POC 的差异（生产化加固）：
 //   1. SQL 不写死 —— selectSql / partColumns 由调用方注入（业务无关；T-b1-2 接入时传 run-repository 同款 SELECT）
-//   2. crash recovery —— worker 'error'/'exit' 事件 → reject 该 worker 在跑的 chunk → 整体 reject（plan-b 全有或全无）
+//   2. crash recovery —— worker 'error'/'exit' 事件 → reject 该 worker 在跑的 chunk → 整体 reject
 //   3. temp db 清理 —— 无论成功/失败/crash，finally 清掉所有已知 temp db 文件（不泄漏）
 //   4. PRAGMA / 错误序列化 —— 复用 serialize-error.js + 与 run-check-worker.js 同款 6 条 PRAGMA（worker 文件内）
 //   5. workerCount 由调用方传入（模块不决定默认值 —— OOM 降级 / 甜点 M=4 由 caller 按 settings + 行数决策）
@@ -31,7 +31,7 @@
 //   - 不访问 Electron API；不持有 idle timer；不直写 activity log
 //   - onProgress 回调透传给 caller（caller 负责聚合到 IPC progress / activity log）
 //
-// 本模块此刻无生产调用方（T-b1-2 才接入 runCheckCore）—— 纯新增、零回归。
+// 生产由 Acquiring 调用链装配；执行器只拥有本次 worker 组及派发 part，不推进 run 状态。
 
 'use strict';
 
@@ -71,71 +71,123 @@ function __test_only_set_worker_script__(scriptPath) {
 //        常驻 pool（跨 run 复用）由上层 run-check-worker-pool 范式负责，β.1 框架不在此处耦合。
 // ─────────────────────────────────────────────────────────────────
 
-// 启动单个 worker 并发 init（指向只读主源 dbPath + 注入 selectSql / partColumns）
-function startWorker(dbPath, selectSql, partColumns, batchContext, initTimeoutMs) {
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    let timer = null;
-    let worker;
-    try {
-      worker = new Worker(resolveWorkerScript());
-    } catch (e) {
-      return reject(e);
+// 每组立即登记所有已创建线程；初始化结果与退出所有权分别维护。
+function createWorkerGroup(closeTimeoutMs, batchContext) {
+  const group = { records: [], firstError: null, stopped: false, closeTimeoutMs,
+    taskRunId: batchContext && batchContext.taskRunId };
+  group.fail = (error) => {
+    if (!group.firstError) group.firstError = error;
+    group.stopped = true;
+    for (const record of group.records) {
+      if (record.cancelInit) record.cancelInit(group.firstError);
+      stopWorker(record, closeTimeoutMs);
     }
-    const cleanup = () => {
-      if (timer) { clearTimeout(timer); timer = null; }
+  };
+  return group;
+}
+
+function registerWorker(group, worker) {
+  let resolveExit;
+  const record = { worker, workerId: worker.threadId, exited: false, initSettled: false,
+    stopPromise: null, stopping: false, terminateStarted: false, shutdownErrors: [],
+    exitPromise: new Promise((resolve) => { resolveExit = resolve; }) };
+  group.records.push(record);
+  const onError = (error) => {
+    if (record.onError) record.onError(error);
+    else if (!record.stopping) group.fail(new Error(`multiworker worker error 事件：${error.message}`));
+  };
+  record.confirmExit = (code) => {
+    if (record.exited) return;
+    record.exited = true;
+    record.exitCode = code;
+    resolveExit();
+    worker.off('error', onError);
+    if (record.onExit) record.onExit(code);
+    else if (!record.stopping) group.fail(new Error(`multiworker worker 意外 exit（code=${code}）`));
+  };
+  worker.on('error', onError);
+  worker.once('exit', record.confirmExit);
+  record.reportShutdownError = (phase, error) => {
+    record.shutdownErrors.push({ phase, error });
+    process.emitWarning(
+      `multiworker shutdown worker=${record.workerId} taskRunId=${group.taskRunId || 'unassigned'} phase=${phase}: ${error.message}`,
+      { code: 'MULTIWORKER_TERMINATE_FAILED' }
+    );
+  };
+  return record;
+}
+
+// 启动只表达 init 就绪/失败；任何失败交给组停止，退出屏障由 finally 持有。
+function startWorker(group, dbPath, selectSql, partColumns, batchContext, initTimeoutMs) {
+  if (group.stopped) return Promise.reject(group.firstError);
+  let record;
+  try {
+    record = registerWorker(group, new Worker(resolveWorkerScript()));
+  } catch (error) {
+    group.fail(error);
+    return Promise.reject(error);
+  }
+  const { worker } = record;
+  return new Promise((resolve, reject) => {
+    let timer;
+    const finish = (error) => {
+      if (record.initSettled) return;
+      record.initSettled = true;
+      clearTimeout(timer);
       worker.off('message', onMsg);
-      worker.off('error', onError);
-      worker.off('exit', onExit);
+      record.onError = null;
+      record.onExit = null;
+      record.cancelInit = null;
+      if (error) reject(error);
+      else resolve(record);
     };
     const onMsg = (msg) => {
       if (!msg || typeof msg !== 'object') return;
-      if (msg.type === 'init-done') {
-        if (settled) return;
-        settled = true; cleanup(); resolve(worker);
-      } else if (msg.type === 'init-error') {
-        if (settled) return;
-        settled = true; cleanup();
-        try { worker.terminate(); } catch (_e) { /* swallow */ }
-        reject(deserializeFromMessage(msg.error));
-      }
+      if (msg.type === 'init-done') finish(group.stopped ? group.firstError : null);
+      else if (msg.type === 'init-error') group.fail(deserializeFromMessage(msg.error));
     };
-    const onError = (err) => {
-      if (settled) return;
-      settled = true; cleanup();
-      try { worker.terminate(); } catch (_e) { /* swallow */ }
-      reject(new Error(`multiworker init 期 error 事件：${err && err.message ? err.message : String(err)}`));
-    };
-    const onExit = (code) => {
-      if (settled) return;
-      settled = true; cleanup();
-      reject(new Error(`multiworker init 期意外 exit（code=${code}）`));
-    };
+    record.cancelInit = finish;
+    record.onError = (error) => group.fail(new Error(`multiworker init 期 error 事件：${error && error.message ? error.message : String(error)}`));
+    record.onExit = (code) => group.fail(new Error(`multiworker init 期意外 exit（code=${code}）`));
     worker.on('message', onMsg);
-    worker.once('error', onError);
-    worker.once('exit', onExit);
     timer = setTimeout(() => {
-      if (settled) return;
-      settled = true; cleanup();
-      try { worker.terminate(); } catch (_e) { /* swallow */ }
-      reject(new Error(`multiworker init 超时（${initTimeoutMs}ms）— 强制 terminate`));
+      group.fail(new Error(`multiworker init 超时（${initTimeoutMs}ms）— 强制 terminate`));
     }, initTimeoutMs);
-    worker.postMessage({ type: 'init', dbPath, selectSql, partColumns, batchContext });
+    try { worker.postMessage({ type: 'init', dbPath, selectSql, partColumns, batchContext }); }
+    catch (error) { group.fail(error); }
   });
 }
 
-// 关闭一组 worker（发 close → 等 exit；超时 terminate 兜底）
-//   ⚠️ 已 exit 的 worker（crash 路径，标记 w.__exited）直接跳过 —— 否则对死 worker 等 'exit' 事件
-//      永远不触发（事件已过），白白阻塞到 timeout（crash case 的 5s 卡顿来源）
-async function closePool(workers, timeoutMs = 5000) {
-  await Promise.all(workers.map((w) => new Promise((resolve) => {
-    if (!w || w.__exited) return resolve();
-    let done = false;
-    const finish = () => { if (done) return; done = true; resolve(); };
-    const timer = setTimeout(() => { try { w.terminate(); } catch (_e) { /* swallow */ } finish(); }, timeoutMs);
-    w.on('exit', () => { clearTimeout(timer); finish(); });
-    try { w.postMessage({ type: 'close' }); } catch (_e) { clearTimeout(timer); try { w.terminate(); } catch (_e2) {} finish(); }
-  })));
+// closeTimeout 只是优雅关闭期限；terminate 的发出、抛错或 reject 均不是退出确认。
+function stopWorker(record, timeoutMs) {
+  if (record.stopPromise) return record.stopPromise;
+  record.stopping = true;
+  record.stopPromise = (async () => {
+    if (record.exited) return;
+    let timer;
+    const terminate = () => {
+      if (record.exited || record.terminateStarted) return;
+      record.terminateStarted = true;
+      clearTimeout(timer);
+      try {
+        Promise.resolve(record.worker.terminate()).then(record.confirmExit, (error) => {
+          if (!record.exited) record.reportShutdownError('terminate', error);
+        });
+      } catch (error) {
+        if (!record.exited) record.reportShutdownError('terminate', error);
+      }
+    };
+    timer = setTimeout(terminate, timeoutMs);
+    try { record.worker.postMessage({ type: 'close' }); }
+    catch (_error) { terminate(); }
+    await record.exitPromise;
+    clearTimeout(timer);
+  })();
+  return record.stopPromise;
+}
+
+async function closePool(records, timeoutMs = 5000) {
+  await Promise.all(records.map((record) => stopWorker(record, timeoutMs)));
 }
 
 // 清理所有 temp db 文件（含 WAL/SHM 旁文件）—— 无论成功/失败/crash 都调，防泄漏
@@ -217,11 +269,11 @@ function mergeTempDbsInOrder(db, {
  * @param {string} opts.tempDir             temp db 存放目录（caller 提供；模块只写 part-<ci>.sqlite，清理也在此）
  * @param {function} [opts.onProgress]      (ev) => void，ev = { completedChunks, totalChunks, chunkIndex, rowCount }
  * @param {number} [opts.initTimeoutMs]     单 worker init 超时（默认 10000，与单 worker pool 一致）
- * @param {number} [opts.closeTimeoutMs]    pool shutdown 超时（默认 5000）
+ * @param {number} [opts.closeTimeoutMs]    优雅关闭期限（默认 5000）；超时后仍等待真实退出
  * @returns {Promise<{ insertedRows:number, totalChunks:number, workerCount:number }>}
  *
- * 失败语义（plan-b 全有或全无）：任一 worker chunk 失败 / crash → reject（已 ATTACH 部分不汇总）；
- *   temp db 文件无论成败都在 finally 清理。调用方负责事务/重跑保护（本模块不写 run 表）。
+ * 失败语义：reader 失败不开始汇总；merge 逐 chunk 事务，失败可能保留此前已合并的行。
+ *   finally 确认全部已创建 worker 退出后清理本次派发的 part；调用方负责按 run 清理/续跑。
  */
 async function runWriteSplitChunks(opts) {
   const {
@@ -310,40 +362,46 @@ async function runWriteSplitChunks(opts) {
   const effectiveWorkerCount = Math.min(workerCount, totalChunks);
 
   const tempPaths = new Array(totalChunks).fill(undefined); // tempPaths[chunkIndex] = temp db 路径
-  let workers = [];
+  const group = createWorkerGroup(closeTimeoutMs, batchContext);
 
   try {
     // ── 启动 effectiveWorkerCount 个 worker（并发 init）──
-    workers = await Promise.all(
+    const initResults = await Promise.allSettled(
       Array.from({ length: effectiveWorkerCount }, () => (
-        startWorker(dbPath, selectSql, partColumns, batchContext, initTimeoutMs)
+        startWorker(group, dbPath, selectSql, partColumns, batchContext, initTimeoutMs)
       ))
     );
-    // 持久 exit 标记 —— crash 路径下 closePool 据此跳过已死 worker（不空等 'exit' 事件到 timeout）
-    for (const w of workers) {
-      w.__exited = false;
-      w.once('exit', () => { w.__exited = true; });
-    }
+    if (group.firstError) throw group.firstError;
+    const workers = initResults.map((result) => result.value);
 
     // ── reader 阶段：worker 池领 chunk 写各自 temp db（round-robin 队列）──
     //   chunk 派发顺序无所谓（汇总按 chunkIndex 升序）；每 worker 同时只跑 1 个 chunk。
     let nextIdx = 0;
     let completedChunks = 0;
-    // 任一 chunk 失败/crash 即置 aborted —— 存活 worker loop 领新 chunk 前自停，
+    // 任一 chunk 失败/crash 即停止本组派发 —— 存活 worker loop 领新 chunk 前自停，
     //   防 crash 后存活 worker 继续写新 temp 文件、与 finally 的 cleanup 竞争造成 temp 泄漏。
-    let aborted = false;
-    let firstError = null;
 
     // 把一个 chunk 任务包成 Promise；同时挂 worker 级 error/exit 监听 → crash 时 reject 本 chunk
-    function dispatchChunkToWorker(worker, chunkSpec) {
+    function dispatchChunkToWorker(record, chunkSpec) {
+      const { worker } = record;
       return new Promise((resolve, reject) => {
         let settled = false;
         const jobId = `c-${chunkSpec.chunkIndex}`;
         const tempDbPath = path.join(tempDir, `part-${chunkSpec.chunkIndex}.sqlite`);
         const cleanup = () => {
           worker.off('message', onMsg);
-          worker.off('error', onErr);
-          worker.off('exit', onExit);
+          record.onError = null;
+          record.onExit = null;
+        };
+        const fail = (error) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          tempPaths[chunkSpec.chunkIndex] = tempDbPath;
+          // Node 的 worker error 与 exit 可能在同一调用栈发出；首错必须同步登记，
+          // 不能等 await 的 catch，否则后续 exit 会先覆盖原 reader 错误。
+          group.fail(error);
+          reject(error);
         };
         const onMsg = (msg) => {
           if (!msg || msg.jobId !== jobId) return;
@@ -353,55 +411,46 @@ async function runWriteSplitChunks(opts) {
             tempPaths[chunkSpec.chunkIndex] = msg.tempDbPath;
             resolve(msg);
           } else if (msg.type === 'error') {
-            if (settled) return;
-            settled = true; cleanup();
-            // worker 即使 chunk 出错也已 / 可能已建 temp 文件 — 记下路径供 finally 清理
-            tempPaths[chunkSpec.chunkIndex] = tempDbPath;
-            reject(deserializeFromMessage(msg.error));
+            fail(deserializeFromMessage(msg.error));
           }
         };
         const onErr = (err) => {
-          if (settled) return;
-          settled = true; cleanup();
-          tempPaths[chunkSpec.chunkIndex] = tempDbPath;
-          reject(new Error(`multiworker chunk=${chunkSpec.chunkIndex} worker error 事件：${err && err.message ? err.message : String(err)}`));
+          fail(new Error(`multiworker chunk=${chunkSpec.chunkIndex} worker error 事件：${err && err.message ? err.message : String(err)}`));
         };
         const onExit = (code) => {
-          if (settled) return;
-          if (code === 0) return; // 正常 close 不该在跑 chunk 时发生；忽略由其他路径处理
-          settled = true; cleanup();
-          tempPaths[chunkSpec.chunkIndex] = tempDbPath;
-          const e = new Error(`multiworker chunk=${chunkSpec.chunkIndex} worker 异常 exit（code=${code}）`);
-          e.workerFailureSource = 'exit';
-          reject(e);
+          const error = new Error(`multiworker chunk=${chunkSpec.chunkIndex} worker 异常 exit（code=${code}）`);
+          error.workerFailureSource = 'exit';
+          fail(error);
         };
         worker.on('message', onMsg);
-        worker.once('error', onErr);
-        worker.once('exit', onExit);
-        worker.postMessage({
+        record.onError = onErr;
+        record.onExit = onExit;
+        // 发送失败也可能已创建部分资源，始终只登记本次派发的精确路径。
+        tempPaths[chunkSpec.chunkIndex] = tempDbPath;
+        if (record.exited) { onExit(record.exitCode); return; }
+        try { worker.postMessage({
           type: 'select-chunk-to-temp',
           jobId,
           chunkIndex: chunkSpec.chunkIndex,
           bindParams: chunkSpec.bindParams,
           tempDbPath,
-        });
+        }); } catch (error) {
+          fail(error);
+        }
       });
     }
 
     async function workerLoop(worker) {
       while (true) {
-        if (aborted) break; // 已有 chunk 失败 → 停止领新 chunk（不再写新 temp）
+        if (group.stopped) break; // 已有 chunk 失败 → 停止领新 chunk（不再写新 temp）
         // PR #57 review P2：cancel 响应（与单 worker run-repository.js:279 同语义，每 chunk 之间 check）。
         //   cancelToken.cancelled → 停止派发新 chunk + abort（reader 阶段中止 → 下方 merge 不执行 → 无 diff_rows
         //   写入；catch 仍 clearDiffRowsByRunId 兜底）。cancel 延迟 ≤ 在飞 chunk 完成时间（受自适应分片约束）。
         //   修 review「MW 仅在全部 worker 完成+提交后才查取消、违反手册 <5s」。
         if (cancelToken && cancelToken.cancelled) {
-          if (!aborted) {
-            aborted = true;
-            const e = new Error('multiworker cancelled');
-            e.name = 'CancelError'; // 与 session CancelError 同名识别（跨模块不用 instanceof）
-            firstError = e;
-          }
+          const e = new Error('multiworker cancelled');
+          e.name = 'CancelError'; // 与 session CancelError 同名识别（跨模块不用 instanceof）
+          group.fail(e);
           break;
         }
         const i = nextIdx++;
@@ -411,9 +460,9 @@ async function runWriteSplitChunks(opts) {
         try {
           res = await dispatchChunkToWorker(worker, chunkSpec);
         } catch (err) {
-          // 记下首个错误 + 置 aborted；不在 loop 内 throw（用 allSettled 等所有 loop 收尾后统一 reject，
+          // 记下首个错误并停止本组；不在 loop 内 throw（用 allSettled 等所有 loop 收尾后统一 reject，
           //   保证 finally cleanup 时没有 loop 还在写 temp 文件）
-          if (!aborted) { aborted = true; firstError = err; }
+          group.fail(err);
           break;
         }
         completedChunks++;
@@ -430,11 +479,11 @@ async function runWriteSplitChunks(opts) {
       }
     }
 
-    // 等所有 loop 收尾（allSettled — 不会因首个失败而提前继续主流程）；任一失败则统一 reject（plan-b 全有或全无）
-    await Promise.all(workers.map((w) => workerLoop(w)));
-    if (aborted) {
-      throw firstError || new Error('multiworker reader 阶段失败（未知原因）');
-    }
+    // 等所有 loop 收尾（allSettled — 不会因首个失败而提前继续主流程）；reader 任一失败则拒绝并跳过汇总
+    const loopResults = await Promise.allSettled(workers.map((record) => workerLoop(record)));
+    const failedLoop = loopResults.find((result) => result.status === 'rejected');
+    if (failedLoop) group.fail(failedLoop.reason);
+    if (group.firstError) throw group.firstError;
 
     // ── writer 阶段：主进程单一 connection 串行按 chunkIndex 升序 ATTACH 汇总（🔴 顺序不变量）──
     const insertedRows = mergeTempDbsInOrder(db, {
@@ -448,7 +497,7 @@ async function runWriteSplitChunks(opts) {
     return { insertedRows, totalChunks, workerCount: effectiveWorkerCount };
   } finally {
     // 1. 关 worker 池（即使中途 reject，也要回收子线程）
-    try { await closePool(workers, closeTimeoutMs); } catch (_e) { /* swallow */ }
+    await closePool(group.records, closeTimeoutMs);
     // 2. 清 temp db（无论成功/失败/crash 都清 — 不泄漏）
     cleanupTempFiles(tempPaths);
   }
@@ -472,9 +521,7 @@ module.exports = {
   // 测试 / 高级用法导出
   __test_only__: {
     mergeTempDbsInOrder,
-    closePool,
     cleanupTempFiles,
-    startWorker,
     PART_TABLE,
   },
   __test_only_set_worker_script__,

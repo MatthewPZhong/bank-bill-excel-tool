@@ -1,0 +1,37 @@
+UTC: 2026-09-20T12:31:44.847579+00:00
+Workdir: /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-storage-execution-separation
+Scope: rerun only the two release-gate Pending cancellation failures, without source/test changes.
+Original failure locations: mature-action-adapters.test.js:567 and :588; assertions expected cancelled, actual failed.
+Original gate does not expose the underlying result.error, so disk exhaustion is not established as the cause for these two failures.
+
+Disk before:
+Filesystem      Size    Used   Avail Capacity iused ifree %iused  Mounted on
+/dev/disk3s5   460Gi   438Gi   1.9Gi   100%    2.9M   20M   13%   /System/Volumes/Data
+
+Source identity vs HEAD:
+tests/unit/main-process/background-execution/mature-action-adapters.test.js: matches_HEAD=True; sha256=5e9ba03d0c85c721a5cc8b748c1b8543772006d79783d404e5a8713c82e2a723
+src/main-process/background-execution/mature-action-adapters.js: matches_HEAD=True; sha256=fa1c56f8fda7f12a9bc6ca262d41fa2ae1479b9584c83271246c71a15b369832
+src/main-process/background-execution/supervisor.js: matches_HEAD=True; sha256=a45002a39fc613327d8f46e1f25ac83f91238ef1ca7b96774d440ec975314835
+src/main-process/big-table-import-dispatch.js: matches_HEAD=True; sha256=c6eaf4b2a9725997274290a3b2a298f7f3aee1bf4f384f21ea5ef97738690940
+
+Command: ['node', '--test', '--test-name-pattern=^Supervisor(?: shutdown)? 经真实 Pending mature binding 取消 Worker 导入', 'tests/unit/main-process/background-execution/mature-action-adapters.test.js']
+
+Raw stdout/stderr:
+✔ Supervisor 经真实 Pending mature binding 取消 Worker 导入：以真实终止证据落 cancelled 并回滚覆盖事务 (156.92175ms)
+✔ Supervisor shutdown 经真实 Pending mature binding 取消 Worker 导入并报告 cancelled job (125.78525ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 513.037375
+
+Exit code: 0
+
+Disk after:
+Filesystem      Size    Used   Avail Capacity iused ifree %iused  Mounted on
+/dev/disk3s5   460Gi   438Gi   1.8Gi   100%    2.9M   19M   13%   /System/Volumes/Data
+
+Interpretation: targeted current-source recheck only; does not replace or mark PASS the failed full release-check.

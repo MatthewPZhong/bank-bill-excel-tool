@@ -1,0 +1,15 @@
+PASS 单 worker 基线有 40 行按物理 id 排序的 diff
+PASS M=2 C1 跨 run 重建，逐行及物理顺序等价
+PASS M=2 caller 根/无关文件/未派发旧 part 保留
+PASS M=2 输出发布完成后才 complete
+PASS M=4 C1 跨 run 重建，逐行及物理顺序等价
+PASS M=4 caller 根/无关文件/未派发旧 part 保留
+PASS M=4 输出发布完成后才 complete
+PASS 取消真实多 worker 后 partial / -1 / 无 diff
+PASS 取消结束才可复用 caller 目录，精确清理保持
+PASS 取消后从 0 单 worker resume，与基线逐行一致
+PASS 部分 merge 与 cleanup 失败保留首错误及已提交残留，不宣称 run 原子性
+PASS merge/cleanup 失败后的结束清理仅影响本次 part
+PASS 部分 COMMIT 残留从 0 单 worker resume 不重复计入
+PASS resume 复用 runId，发布后 complete
+==== 14/14 PASS ====

@@ -1,0 +1,36 @@
+▶ run-check-multiworker（plan-b write-splitting）
+  ✔ 1.M=1 🔴 byte-for-byte：多 worker 产出 == 单 worker 逐 chunk INSERT...SELECT 逐行一致 (743.253542ms)
+  ✔ 1.M=2 🔴 byte-for-byte：多 worker 产出 == 单 worker 逐 chunk INSERT...SELECT 逐行一致 (678.73425ms)
+  ✔ 1.M=4 🔴 byte-for-byte：多 worker 产出 == 单 worker 逐 chunk INSERT...SELECT 逐行一致 (746.513833ms)
+  ✔ 2. 🔴 chunkIndex 升序汇总：temp db 乱序排布也按 chunkIndex 0..N-1 升序汇总插入 (438.309042ms)
+  ✔ 3. 退化：chunk 数=1（单 chunk）byte-for-byte 一致 + effectiveWorkerCount 收敛 (191.583625ms)
+  ✔ 4. worker crash（reader 阶段 process.exit(1)）→ reject + temp db 不泄漏 (170.46525ms)
+  ✔ 5. 无 SQLITE_BUSY：M=4 / 多 chunk 并行不触发写锁冲突 (958.564416ms)
+  ✔ 6. onProgress：completedChunks 单调递增至 totalChunks (512.239458ms)
+  ✔ 7. 空 chunks（0 行）→ insertedRows=0 短路返回 (77.362708ms)
+  ✔ 8. 入参校验：非法 workerCount / 列数不匹配 / 非法列名 / chunkIndex 越界都抛错 (68.459958ms)
+  ✔ 9. worker.buildPartTableSql 拒绝非法列名 + seq 列固定 (0.190042ms)
+  ✔ 10. 🔴 C1：tempDir 残留 part-0.sqlite 含垃圾行 → 写前清除，不污染 merge（byte-for-byte） (287.234959ms)
+  ✔ 11. P2 cancel：运行中 cancelToken 取消 → 中止(CancelError) + 不汇总(0行) + temp 不泄漏 (103.370041ms)
+✔ run-check-multiworker（plan-b write-splitting） (4979.3475ms)
+✔ B0 部分 init 失败：全部已创建真实 worker 退出前 executor 不得结算 (93.335875ms)
+✔ B0 构造失败：保留已创建线程，关闭幂等且退出前不结算 (49.51875ms)
+✔ B0 init postMessage 抛错：保留已创建线程，关闭幂等且退出前不结算 (65.02425ms)
+✔ B0 init timeout：保留已创建线程，关闭幂等且退出前不结算 (129.217584ms)
+✔ B0 init error 事件：保留已创建线程，关闭幂等且退出前不结算 (192.023375ms)
+✔ B0 晚到 init-done：保留已创建线程，关闭幂等且退出前不结算 (154.614042ms)
+✔ B0 close timeout 后 terminate 延迟：真实退出前保持 part 和外层资源 (351.81125ms)
+✔ B0 close postMessage 抛错：真实退出前保持 part 和外层资源 (263.61575ms)
+✔ B0 terminate reject 后迟到 exit：真实退出前保持 part 和外层资源 (228.433416ms)
+✔ B0 terminate 抛错后迟到 exit：真实退出前保持 part 和外层资源 (171.444625ms)
+✔ B0 chunk postMessage 抛错：停止派发并等待所有真实线程退出 (138.920291ms)
+✔ B0 chunk 途中 code=0 真实退出：拒绝未完成 chunk 并收口其他线程 (286.649ms)
+✔ B0 真实内存受限 worker 同栈 error→exit：保留 chunk 原始 error 优先级 (133.341208ms)
+ℹ tests 26
+ℹ suites 1
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 7322.344125

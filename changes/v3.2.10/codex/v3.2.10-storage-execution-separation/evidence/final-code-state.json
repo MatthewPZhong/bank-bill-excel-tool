@@ -1,0 +1,30 @@
+{
+  "branch": "codex/v3.2.10-storage-execution-separation",
+  "head": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "committed": false,
+  "files": {
+    "AGENTS.md": "9035c6d3dfed40f6c0f667da93eb8719f9779fcd1e78506a74736780781b9382",
+    "rules/integration-test-policy.md": "6334eeb05c6d6214b3be166633080d252ca3bdeb427ecddfa78976434335f9ec",
+    "scripts/integration/acquiring-worker-boundary.js": "18c644fc4dbdf6d62747f2a06d1a08401244c22a73a319ff7f9e81ea510de6c4",
+    "src/backend/acquiring-bill-currency-db/README.md": "abb180032dcbc197afc3a56c79d8ca40d42ff7e5d5106762af93dcf759943de2",
+    "src/backend/acquiring-bill-currency-db/run-repository.js": "9b9e4335d6d7c8707b5fae738b1e57da5922cb7700ae0cdb373bdaf01860b0e2",
+    "src/backend/vcc-financial-op/README.md": "354f0cecce6d8c36940082efdc347a20bf40a11b83e401a0b6430400585741f1",
+    "src/backend/vcc-financial-op/content-hash-contract.js": "b6418c0b9e07dae1b9e0cc91391bf900c8bbe4f924cb84edc309c79159c37fcc",
+    "src/backend/vcc-financial-op/mapped-lineage-contract.js": "901ccbb0af4b128d9cb60d55e329b23eb45aa725614a8f7be0cc62ad8308861d",
+    "src/backend/vcc-financial-op/review-export-plan.js": "ad51bfd1b2c83c87582bae90ebcf6a30cd16b98d8d95ee420b5d84dd3f8c519b",
+    "src/backend/vcc-financial-op/row-mapper.js": "b8046bb5fb0d2fb5b509de23244ec3e1268fefabe55236f2e5e98d71059d90d5",
+    "src/main-process/acquiring-bill-currency-multiworker-service.js": "de73507e249dfe9e5bc5f8fc40b3171553b302d2a23159372683603212d5e5be",
+    "src/main-process/acquiring-bill-currency-session.js": "7d5f0a7c29e56b1f4b4a36f8b8128402bc5b15909987e3e7cdb93dc4b2db8f90",
+    "src/main-process/run-check-multiworker.js": "883a642741f47aa16f1a5e608c8a83a41e3bb3b14e4b7043eabba5053efb1ad1",
+    "src/main-process/vcc-financial-op-dataset-writer.js": "017ccbe8186ace7f60d5c22e57c761d3fc77f636c2f3f7e74c20415c60c0ce29",
+    "src/main.js": "8e189ff35f1a5d79447a94881f5896958c5c89870e725c0a0fba27d95bd7bd56",
+    "tests/unit/backend/vcc-financial-op/fixtures/lineage-contract-baseline.json": "de4dfe2c6e432ed0a60866c0d0164a4d6b546bbba7190a28884e7647f98ff736",
+    "tests/unit/backend/vcc-financial-op/mapped-lineage-contract.test.js": "a79fbdee27f862aeb4547132169ca012cf52b5ec805c10b2bca5c3c760d9154f",
+    "tests/unit/main-process/__fixtures__/acquiring-main-lock-worker.js": "d7dae74a9e1f2af8f602cae44e6b6691f821669c906db5573d8d65c85342c322",
+    "tests/unit/main-process/__fixtures__/multiworker-exit-barrier-worker.js": "039f2fe489a1d1624b3d266e0a558e0db090c1403d54057cf0057a31337d17db",
+    "tests/unit/main-process/acquiring-main-lock-ownership.test.js": "ccb4569a2ce5ab257f9deb29bfc530b3b85becaeba24240cc644200469e39d63",
+    "tests/unit/main-process/acquiring-multiworker-contract.test.js": "1c29abd77766bdbd96f3dc202b5604c50fb939aa2244bf9e225afc138c59e621",
+    "tests/unit/main-process/acquiring-multiworker-service.test.js": "574f0ab0c7c89a5173d921e9f55f2568c8e2662500320ca9e31ba18d3734d2f7",
+    "tests/unit/main-process/run-check-multiworker.test.js": "777b6978995fc002a518f3430a21a1070bc5471cc1b2b5e07b2504d1045efa8c"
+  }
+}
