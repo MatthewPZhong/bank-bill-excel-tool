@@ -1,0 +1,1753 @@
+{
+  "head": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "dirty": true,
+  "scope": "当前直接属性访问与 SQL 调用位置的 AST 清点；非 G8 别名闭包检查器",
+  "g8": "未接入，未声明 active",
+  "protectedScopes": [
+    "compute-inputs.js",
+    "export-inputs.js",
+    "import-main.js",
+    "delete-preview.js:createBizOpDeletePreview.collect"
+  ],
+  "violations": [],
+  "legalPreviewCommands": [
+    {
+      "file": "src/main-process/biz-op-v327/delete-preview.js",
+      "functionPath": "createBizOpDeletePreview.get",
+      "line": 70,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT * FROM biz_op_v327_delete_previews WHERE preview_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/delete-preview.js",
+      "functionPath": "createBizOpDeletePreview.create",
+      "line": 81,
+      "api": "prepare",
+      "expression": "db.prepare('DELETE FROM biz_op_v327_delete_previews WHERE expires_at<? AND confirmed_task_id IS NULL')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/delete-preview.js",
+      "functionPath": "createBizOpDeletePreview.create",
+      "line": 82,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT COUNT(*) AS n FROM biz_op_v327_delete_previews WHERE confirmed_task_id IS NULL')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/delete-preview.js",
+      "functionPath": "createBizOpDeletePreview.create",
+      "line": 85,
+      "api": "prepare",
+      "expression": "db.prepare('INSERT INTO biz_op_v327_delete_previews(preview_id,generation,closure_json,closure_digest,created_at,expires_at) VALUES (?,?,?,?,?,?)')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/delete-preview.js",
+      "functionPath": "createBizOpDeletePreview.bind",
+      "line": 106,
+      "api": "prepare",
+      "expression": "db.prepare('UPDATE biz_op_v327_delete_previews SET confirmed_task_id=?,confirmed_mode=? WHERE preview_id=? AND confirmed_task_id IS NULL')"
+    }
+  ],
+  "remainingSql": [
+    {
+      "file": "src/main-process/biz-op-v327/archive-owner-backfill.js",
+      "functionPath": "createArchiveOwnerBackfill",
+      "line": 17,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT 1 ${HISTORICAL_FROM} WHERE ${HISTORICAL_OWNER_SQL} LIMIT 1`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/archive-owner-backfill.js",
+      "functionPath": "createArchiveOwnerBackfill.run",
+      "line": 24,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT last_batch_id FROM biz_op_v327_archive_owner_backfill_cursor WHERE archive_instance_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/archive-owner-backfill.js",
+      "functionPath": "createArchiveOwnerBackfill.run",
+      "line": 26,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT b.id,b.task_run_id ${HISTORICAL_FROM}\n        WHERE b.id>? AND (${HISTORICAL_OWNER_SQL}) ORDER BY b.id LIMIT ?`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/archive-owner-backfill.js",
+      "functionPath": "createArchiveOwnerBackfill.run",
+      "line": 33,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT 1 ${HISTORICAL_FROM} WHERE b.id=? AND (${HISTORICAL_OWNER_SQL})`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/archive-owner-backfill.js",
+      "functionPath": "createArchiveOwnerBackfill.run",
+      "line": 49,
+      "api": "prepare",
+      "expression": "db.prepare(`INSERT INTO biz_op_v327_archive_owner_backfill_failures\n              (archive_instance_id,batch_id,task_run_id,error_code,updated_at) VALUES (?,?,?,?,?)\n              ON CONFLICT(archive_instance_id,batch_id) DO UPDATE SET task_run_id=excluded.task_run_id,\n                error_code=excluded.error_code,updated_at=excluded.updated_at`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/archive-owner-backfill.js",
+      "functionPath": "createArchiveOwnerBackfill.run",
+      "line": 55,
+      "api": "prepare",
+      "expression": "db.prepare('DELETE FROM biz_op_v327_archive_owner_backfill_failures WHERE archive_instance_id=? AND batch_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/archive-owner-backfill.js",
+      "functionPath": "createArchiveOwnerBackfill.run",
+      "line": 58,
+      "api": "prepare",
+      "expression": "db.prepare(`INSERT INTO biz_op_v327_archive_owner_backfill_cursor (archive_instance_id,last_batch_id,updated_at)\n            VALUES (?,?,?) ON CONFLICT(archive_instance_id) DO UPDATE SET last_batch_id=excluded.last_batch_id,updated_at=excluded.updated_at`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/archive-owner-completion.js",
+      "functionPath": "compensatedCleanupComplete",
+      "line": 16,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT * FROM biz_op_v327_abort_finalizations WHERE source_kind=? AND source_ref=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/archive-owner-completion.js",
+      "functionPath": "compensatedCleanupComplete",
+      "line": 18,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT * FROM biz_op_v327_recovery_followups WHERE source_kind=? AND source_ref=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/archive-owner-completion.js",
+      "functionPath": "compensatedCleanupComplete",
+      "line": 41,
+      "api": "prepare",
+      "expression": "db.prepare(\"SELECT * FROM biz_op_v327_reclaim_queue WHERE payload_kind='ABORTED_STAGE' AND object_id=?\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/archive-owner-completion.js",
+      "functionPath": "unpublishedOwnerCompletion",
+      "line": 73,
+      "api": "prepare",
+      "expression": "catalog.db.prepare('SELECT 1 FROM biz_op_v327_dispatches WHERE task_run_id=? LIMIT 1')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/archive-owner-completion.js",
+      "functionPath": "unpublishedOwnerCompletion",
+      "line": 76,
+      "api": "prepare",
+      "expression": "catalog.db.prepare('SELECT id FROM archive_batches WHERE task_run_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/archive-owner-completion.js",
+      "functionPath": "recordExportOwnerCompletion",
+      "line": 130,
+      "api": "prepare",
+      "expression": "catalog.db.prepare('SELECT * FROM background_execution_batch_recovery_states WHERE batch_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/auto-error-report.js",
+      "functionPath": "createBizOpAutoErrorReportService.diagnostic",
+      "line": 61,
+      "api": "prepare",
+      "expression": "module.catalog.db.prepare(`SELECT d.*,l.sealed_manifest_rel_path\n        FROM biz_op_v327_diagnostic_reports d JOIN biz_op_v327_diagnostic_lifecycle l USING(report_ref)\n        WHERE report_ref=? AND state='READY'`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/auto-error-report.js",
+      "functionPath": "createBizOpAutoErrorReportService.diagnostic",
+      "line": 79,
+      "api": "prepare",
+      "expression": "module.catalog.db.prepare(`SELECT job_id,session_id FROM biz_op_v327_dispatches\n        WHERE task_run_id=? AND plan_digest=?`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/candidate-router.js",
+      "functionPath": "configure",
+      "line": 17,
+      "api": "exec",
+      "expression": "db.exec('PRAGMA foreign_keys=ON; PRAGMA encoding=\"UTF-8\"; PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; PRAGMA temp_store=FILE; PRAGMA cache_size=-16384')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/candidate-router.js",
+      "functionPath": "createPartSchema",
+      "line": 22,
+      "api": "exec",
+      "expression": "db.exec(`CREATE TABLE part_meta(singleton INTEGER PRIMARY KEY CHECK(singleton=1), payload_schema_version INTEGER NOT NULL,\n    owner_id TEXT NOT NULL, part_kind TEXT NOT NULL, part_number INTEGER NOT NULL, producer_task_id TEXT NOT NULL,\n    cell_contract_version TEXT NOT NULL, rule_version TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('STAGING','SEALED')), row_count INTEGER NOT NULL);\n    CREATE TABLE ${tableFor(route.kind)}(row_ordinal INTEGER PRIMARY KEY CHECK(row_ordinal>=1),\n    ${columns.map((name) => `${name} TEXT NOT NULL${name === 'direction' ? \" CHECK(direction IN ('入','出'))\" : ''}`).join(',')},\n    key_bu TEXT COLLATE BINARY NOT NULL, key_account TEXT COLLATE BINARY NOT NULL, key_currency TEXT COLLATE BINARY NOT NULL,\n    source_artifact_id INTEGER NOT NULL CHECK(source_artifact_id>0), source_file_order INTEGER NOT NULL CHECK(source_file_order>=0),\n    source_sheet TEXT NOT NULL, source_row INTEGER NOT NULL CHECK(source_row>=2));`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/candidate-router.js",
+      "functionPath": "createPartSchema",
+      "line": 30,
+      "api": "prepare",
+      "expression": "db.prepare('INSERT INTO part_meta VALUES (1,1,?,?,?,?,?,?,?,0)')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/candidate-router.js",
+      "functionPath": "createCandidateRouter",
+      "line": 143,
+      "api": "exec",
+      "expression": "db.exec(`CREATE INDEX ${prefix}_rows_key ON ${table}(key_bu,key_account,key_currency,row_ordinal);\n              CREATE INDEX ${prefix}_rows_source ON ${table}(source_artifact_id,source_sheet,source_row)`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/candidate-router.js",
+      "functionPath": "createCandidateRouter",
+      "line": 145,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT count(*) AS n FROM ${table}`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/candidate-router.js",
+      "functionPath": "createCandidateRouter",
+      "line": 146,
+      "api": "prepare",
+      "expression": "db.prepare('PRAGMA quick_check')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/candidate-router.js",
+      "functionPath": "createCandidateRouter",
+      "line": 147,
+      "api": "prepare",
+      "expression": "db.prepare(\"UPDATE part_meta SET state='SEALED',row_count=? WHERE singleton=1\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog-queries.js",
+      "functionPath": "createBizOpCatalogQueries.readActiveDataset",
+      "line": 8,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT d.* FROM biz_op_v327_input_heads h JOIN biz_op_v327_datasets d USING(dataset_id)\n      WHERE h.kind=? AND h.data_date=? AND d.state='ACTIVE'`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog-queries.js",
+      "functionPath": "createBizOpCatalogQueries.iterateDatasetSources",
+      "line": 15,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT * FROM biz_op_v327_dataset_sources WHERE dataset_id=? ORDER BY source_file_order')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog-queries.js",
+      "functionPath": "createBizOpCatalogQueries.readExportObject",
+      "line": 23,
+      "api": "prepare",
+      "expression": "db.prepare(\"SELECT * FROM biz_op_v327_runs WHERE run_id=? AND state='PUBLISHED'\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog-queries.js",
+      "functionPath": "createBizOpCatalogQueries.readExportObject",
+      "line": 27,
+      "api": "prepare",
+      "expression": "db.prepare(\"SELECT role,input_version FROM biz_op_v327_run_inputs WHERE run_id=? AND role IN ('START_OP','END_OP')\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog-queries.js",
+      "functionPath": "createBizOpCatalogQueries.readExportObject",
+      "line": 34,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT d.*,l.sealed_manifest_rel_path AS payload_manifest_rel_path,d.manifest_digest AS payload_manifest_digest\n        FROM biz_op_v327_diagnostic_reports d JOIN biz_op_v327_diagnostic_lifecycle l USING(report_ref)\n        WHERE report_ref=? AND state='READY'`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog-queries.js",
+      "functionPath": "createBizOpCatalogQueries.readExportObject",
+      "line": 40,
+      "api": "prepare",
+      "expression": "db.prepare(\"SELECT * FROM biz_op_v327_datasets WHERE dataset_id=? AND state='ACTIVE' AND kind=?\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog-queries.js",
+      "functionPath": "createBizOpCatalogQueries.readActiveDatasetForDelete",
+      "line": 48,
+      "api": "prepare",
+      "expression": "db.prepare(\"SELECT * FROM biz_op_v327_datasets WHERE dataset_id=? AND state='ACTIVE'\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog-queries.js",
+      "functionPath": "createBizOpCatalogQueries.iteratePublishedRunIdsUsingDataset",
+      "line": 53,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT DISTINCT r.run_id FROM biz_op_v327_runs r JOIN biz_op_v327_run_inputs i USING(run_id)\n      WHERE i.dataset_id=? AND r.state='PUBLISHED'`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog-queries.js",
+      "functionPath": "createBizOpCatalogQueries.readPublishedRunForDelete",
+      "line": 57,
+      "api": "prepare",
+      "expression": "db.prepare(\"SELECT * FROM biz_op_v327_runs WHERE run_id=? AND state='PUBLISHED'\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog-queries.js",
+      "functionPath": "createBizOpCatalogQueries.iterateRunArtifacts",
+      "line": 62,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT * FROM biz_op_v327_run_artifacts WHERE run_id=? ORDER BY artifact_id')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog-queries.js",
+      "functionPath": "createBizOpCatalogQueries.readDispatchesForPlan",
+      "line": 67,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT * FROM biz_op_v327_dispatches WHERE task_run_id=? AND plan_digest=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog-queries.js",
+      "functionPath": "createBizOpCatalogQueries.readDiagnosticByRef",
+      "line": 70,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT * FROM biz_op_v327_diagnostic_reports WHERE report_ref=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog",
+      "line": 15,
+      "api": "exec",
+      "expression": "db.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'))"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog",
+      "line": 16,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT schema_version FROM biz_op_v327_control WHERE singleton=1')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog",
+      "line": 22,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT * FROM biz_op_v327_control WHERE singleton=1')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog",
+      "line": 23,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT p.*,s.action_key,s.task_key,s.operation_key,\n    s.source_ref,s.source_kind,s.input_obligation,s.state AS settlement_state FROM biz_op_v327_prepared_ops p\n    JOIN biz_op_v327_settlement_progress s USING(task_run_id) WHERE p.task_run_id=?`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.receipt",
+      "line": 39,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT * FROM biz_op_v327_receipts WHERE task_run_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.receiptState",
+      "line": 52,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT state FROM biz_op_v327_datasets WHERE dataset_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.receiptState",
+      "line": 54,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT state FROM biz_op_v327_runs WHERE run_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.prepare",
+      "line": 86,
+      "api": "prepare",
+      "expression": "db.prepare(`INSERT INTO biz_op_v327_prepared_ops\n        (task_run_id,action,phase,expected_generation,intent_digest,intent_rel_path,created_at,updated_at)\n        VALUES (?,?,'PREPARING',?,?,?,?,?)`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.prepare",
+      "line": 90,
+      "api": "prepare",
+      "expression": "db.prepare(`INSERT INTO biz_op_v327_settlement_progress\n        (task_run_id,action_key,task_key,operation_key,source_kind,source_ref,intent_digest,business_fact,state,updated_at)\n        VALUES (?,?,?,?,?,?,?,'UNKNOWN','OPEN',?)`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.releaseOwnedHolds",
+      "line": 117,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT artifact_id FROM archive_artifact_holds\n      WHERE owner_module=? AND owner_type=? AND owner_id=?`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.version",
+      "line": 123,
+      "api": "prepare",
+      "expression": "db.prepare(`INSERT INTO biz_op_v327_version_counters(scope,key1,key2,last_version) VALUES (?,?,?,1)\n      ON CONFLICT(scope,key1,key2) DO UPDATE SET last_version=last_version+1 RETURNING last_version`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.addReceipt",
+      "line": 128,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT 1 FROM biz_op_v327_abort_finalizations WHERE source_kind=? AND source_ref=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.addReceipt",
+      "line": 130,
+      "api": "prepare",
+      "expression": "db.prepare(`INSERT INTO biz_op_v327_receipts\n      (task_run_id,action,intent_digest,generation_after,outcome_json,committed_at) VALUES (?,?,?,?,?,?)`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.addReceipt",
+      "line": 133,
+      "api": "prepare",
+      "expression": "db.prepare(\"UPDATE biz_op_v327_prepared_ops SET phase='SETTLING',updated_at=? WHERE task_run_id=?\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.addReceipt",
+      "line": 135,
+      "api": "prepare",
+      "expression": "db.prepare(\"UPDATE biz_op_v327_settlement_progress SET business_fact='COMMITTED',updated_at=? WHERE task_run_id=?\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.addReceipt",
+      "line": 137,
+      "api": "prepare",
+      "expression": "db.prepare('UPDATE biz_op_v327_control SET generation=? WHERE singleton=1')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.enqueueReclaim",
+      "line": 142,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT * FROM biz_op_v327_reclaim_queue WHERE payload_kind=? AND object_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.enqueueReclaim",
+      "line": 160,
+      "api": "prepare",
+      "expression": "db.prepare(`INSERT INTO biz_op_v327_prepared_ops\n      (task_run_id,action,phase,expected_generation,intent_digest,intent_rel_path,created_at,updated_at)\n      VALUES (?,'RECLAIM','SEALED',?,?,?,?,?)`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.enqueueReclaim",
+      "line": 164,
+      "api": "prepare",
+      "expression": "db.prepare(`INSERT INTO biz_op_v327_settlement_progress\n      (task_run_id,action_key,task_key,operation_key,source_kind,source_ref,intent_digest,business_fact,state,input_obligation,updated_at)\n      VALUES (?,'biz-op-v327:reclaim',?,?,'module-recovery',?,?,'UNKNOWN','OPEN','COMPLETE',?)`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.enqueueReclaim",
+      "line": 169,
+      "api": "prepare",
+      "expression": "db.prepare(`INSERT INTO biz_op_v327_reclaim_queue\n      (reclaim_id,owner_task_run_id,payload_kind,object_id,manifest_digest,plan_rel_path,receipt_task_run_id,state,created_at)\n        VALUES (?,?,?,?,?,?,?,'PENDING',?)`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.commitImport",
+      "line": 192,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT 1 FROM biz_op_v327_abort_finalizations WHERE task_run_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.commitImport",
+      "line": 205,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT d.* FROM biz_op_v327_input_heads h JOIN biz_op_v327_datasets d USING(dataset_id)\n          WHERE h.kind=? AND h.data_date=?`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.commitImport",
+      "line": 214,
+      "api": "prepare",
+      "expression": "db.prepare(`INSERT INTO biz_op_v327_datasets\n          (dataset_id,kind,data_date,public_version,state,input_fingerprint,source_manifest_digest,\n           payload_manifest_rel_path,payload_manifest_digest,row_count,producer_task_id,activated_at)\n          VALUES (?,?,?,?,'ACTIVE',?,?,?,?,?,?,?)`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.commitImport",
+      "line": 226,
+      "api": "prepare",
+      "expression": "db.prepare(`INSERT INTO biz_op_v327_dataset_sources\n            (dataset_id,artifact_id,source_sha256,source_file_name,source_file_order,source_sheet_name,slice_date,normalized_bu,row_count)\n            VALUES (?,?,?,?,?,?,?,?,?)`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.commitImport",
+      "line": 231,
+      "api": "prepare",
+      "expression": "db.prepare(`INSERT INTO biz_op_v327_input_heads(kind,data_date,dataset_id,published_generation) VALUES (?,?,?,?)\n          ON CONFLICT(kind,data_date) DO UPDATE SET dataset_id=excluded.dataset_id,published_generation=excluded.published_generation`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.commitImport",
+      "line": 235,
+      "api": "prepare",
+      "expression": "db.prepare(\"UPDATE biz_op_v327_datasets SET state='RETIRED',retired_at=? WHERE dataset_id=?\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.commitImport",
+      "line": 238,
+      "api": "prepare",
+      "expression": "db.prepare('DELETE FROM biz_op_v327_dataset_sources WHERE dataset_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.commitRun",
+      "line": 277,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT d.* FROM biz_op_v327_input_heads h JOIN biz_op_v327_datasets d USING(dataset_id)\n          WHERE h.data_date=? AND d.dataset_id=? AND h.kind=?`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.commitRun",
+      "line": 284,
+      "api": "prepare",
+      "expression": "db.prepare(\"SELECT * FROM biz_op_v327_runs WHERE input_fingerprint=? AND state='PUBLISHED'\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.commitRun",
+      "line": 289,
+      "api": "prepare",
+      "expression": "db.prepare(`INSERT INTO biz_op_v327_runs\n        (run_id,start_date,end_date,result_version,input_fingerprint,rule_version,state,payload_manifest_rel_path,\n         payload_manifest_digest,full_row_count,diff_row_count,producer_task_id,operation_month,published_at)\n        VALUES (?,?,?,?,?,?,'PUBLISHED',?,?,?,?,?,?,?)`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.commitRun",
+      "line": 296,
+      "api": "prepare",
+      "expression": "db.prepare(`INSERT INTO biz_op_v327_run_inputs(run_id,role,data_date,dataset_id,input_version,source_manifest_digest)\n          VALUES (?,?,?,?,?,?)`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.commitRun",
+      "line": 298,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT * FROM biz_op_v327_dataset_sources WHERE dataset_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.commitRun",
+      "line": 302,
+      "api": "prepare",
+      "expression": "db.prepare('INSERT INTO biz_op_v327_run_artifacts(run_id,artifact_id,source_sha256,source_file_name) VALUES (?,?,?,?)')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.commitDelete",
+      "line": 338,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT * FROM biz_op_v327_delete_previews WHERE preview_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.commitDelete",
+      "line": 346,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT DISTINCT r.run_id FROM biz_op_v327_runs r\n            JOIN biz_op_v327_run_inputs i USING(run_id) WHERE i.dataset_id=? AND r.state='PUBLISHED'`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.commitDelete",
+      "line": 353,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT * FROM biz_op_v327_datasets WHERE dataset_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.commitDelete",
+      "line": 355,
+      "api": "prepare",
+      "expression": "db.prepare('DELETE FROM biz_op_v327_input_heads WHERE dataset_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.commitDelete",
+      "line": 356,
+      "api": "prepare",
+      "expression": "db.prepare(\"UPDATE biz_op_v327_datasets SET state='DELETED',retired_at=COALESCE(retired_at,?) WHERE dataset_id=?\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.commitDelete",
+      "line": 359,
+      "api": "prepare",
+      "expression": "db.prepare('DELETE FROM biz_op_v327_dataset_sources WHERE dataset_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.commitDelete",
+      "line": 364,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT * FROM biz_op_v327_runs WHERE run_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.commitDelete",
+      "line": 366,
+      "api": "prepare",
+      "expression": "db.prepare(\"UPDATE biz_op_v327_runs SET state='DELETED',deleted_at=COALESCE(deleted_at,?) WHERE run_id=?\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.commitDelete",
+      "line": 368,
+      "api": "prepare",
+      "expression": "db.prepare('DELETE FROM biz_op_v327_run_artifacts WHERE run_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.commitActivation",
+      "line": 380,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT * FROM biz_op_v327_activation WHERE singleton=1')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.commitActivation",
+      "line": 383,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT 1 FROM biz_op_v327_activation_files WHERE reclaimed=0 LIMIT 1')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/catalog.js",
+      "functionPath": "createBizOpCatalog.commitActivation",
+      "line": 385,
+      "api": "prepare",
+      "expression": "db.prepare(\"UPDATE biz_op_v327_control SET mode='ACTIVE',cleanup_completed_at=?,activated_at=? WHERE singleton=1\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/compute-main.js",
+      "functionPath": "createBizOpComputeCoordinator.runCompute",
+      "line": 18,
+      "api": "prepare",
+      "expression": "catalog.db.prepare(\"SELECT * FROM biz_op_v327_runs WHERE input_fingerprint=? AND state='PUBLISHED'\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/compute-pipeline.js",
+      "functionPath": "openReadonly",
+      "line": 30,
+      "api": "exec",
+      "expression": "db.exec('PRAGMA temp_store=FILE; PRAGMA cache_size=-16384')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/compute-pipeline.js",
+      "functionPath": "runComputePipeline",
+      "line": 79,
+      "api": "exec",
+      "expression": "db.exec(WORK_SCHEMA)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/compute-pipeline.js",
+      "functionPath": "runComputePipeline",
+      "line": 114,
+      "api": "prepare",
+      "expression": "reader.prepare('SELECT * FROM part_meta WHERE singleton=1')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/compute-pipeline.js",
+      "functionPath": "runComputePipeline",
+      "line": 119,
+      "api": "prepare",
+      "expression": "reader.prepare(`SELECT * FROM ${table} ORDER BY row_ordinal`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/compute-pipeline.js",
+      "functionPath": "runComputePipeline",
+      "line": 143,
+      "api": "exec",
+      "expression": "db.exec('CREATE INDEX observations_key ON working_observations(key_bu,key_account,key_currency,role,observation_ordinal)')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/compute-pipeline.js",
+      "functionPath": "runComputePipeline",
+      "line": 146,
+      "api": "exec",
+      "expression": "db.exec(`INSERT INTO working_description_values\n        SELECT key_bu,key_account,key_currency,'${field}',CASE WHEN ${field} IS NULL OR ${field}='' THEN 1 ELSE 0 END,\n        COALESCE(${field},''),MAX(role='START_OP'),MAX(role='END_OP') FROM working_observations WHERE role!='FLOW'\n        GROUP BY key_bu,key_account,key_currency,CASE WHEN ${field} IS NULL OR ${field}='' THEN 1 ELSE 0 END,COALESCE(${field},'')`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/compute-pipeline.js",
+      "functionPath": "runComputePipeline",
+      "line": 155,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT * FROM working_description_values ORDER BY key_bu,key_account,key_currency,field_key,null_flag,normalized_value')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/compute-pipeline.js",
+      "functionPath": "runComputePipeline",
+      "line": 177,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT * FROM working_observations ORDER BY key_bu,key_account,key_currency,role,observation_ordinal')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/delete-preservation.js",
+      "functionPath": "createDeletePreservation.verify",
+      "line": 16,
+      "api": "prepare",
+      "expression": "catalog.db.prepare('SELECT * FROM biz_op_v327_runs WHERE run_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/delete-preservation.js",
+      "functionPath": "createDeletePreservation.verify",
+      "line": 18,
+      "api": "prepare",
+      "expression": "catalog.db.prepare(`SELECT 1 FROM biz_op_v327_receipts r,\n          json_each(r.outcome_json,'$.runIds') v WHERE r.action='DELETE' AND r.committed_at>=? AND r.task_run_id!=? AND v.value=? LIMIT 1`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/delete-preservation.js",
+      "functionPath": "createDeletePreservation.verify",
+      "line": 24,
+      "api": "prepare",
+      "expression": "catalog.db.prepare(`SELECT artifact_id AS artifactId,source_file_name AS originalName,source_sha256 AS sha256\n          FROM biz_op_v327_run_artifacts WHERE run_id=? ORDER BY artifact_id`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/delete-preservation.js",
+      "functionPath": "createDeletePreservation.committed",
+      "line": 46,
+      "api": "prepare",
+      "expression": "catalog.db.prepare('SELECT * FROM biz_op_v327_delete_previews WHERE preview_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/delete-preview.js",
+      "functionPath": "createBizOpDeletePreview.get",
+      "line": 70,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT * FROM biz_op_v327_delete_previews WHERE preview_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/delete-preview.js",
+      "functionPath": "createBizOpDeletePreview.create",
+      "line": 81,
+      "api": "prepare",
+      "expression": "db.prepare('DELETE FROM biz_op_v327_delete_previews WHERE expires_at<? AND confirmed_task_id IS NULL')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/delete-preview.js",
+      "functionPath": "createBizOpDeletePreview.create",
+      "line": 82,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT COUNT(*) AS n FROM biz_op_v327_delete_previews WHERE confirmed_task_id IS NULL')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/delete-preview.js",
+      "functionPath": "createBizOpDeletePreview.create",
+      "line": 85,
+      "api": "prepare",
+      "expression": "db.prepare('INSERT INTO biz_op_v327_delete_previews(preview_id,generation,closure_json,closure_digest,created_at,expires_at) VALUES (?,?,?,?,?,?)')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/delete-preview.js",
+      "functionPath": "createBizOpDeletePreview.bind",
+      "line": 106,
+      "api": "prepare",
+      "expression": "db.prepare('UPDATE biz_op_v327_delete_previews SET confirmed_task_id=?,confirmed_mode=? WHERE preview_id=? AND confirmed_task_id IS NULL')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/export-publication.js",
+      "functionPath": "createBizOpPublication",
+      "line": 17,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT * FROM biz_op_v327_publications WHERE task_run_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/export-publication.js",
+      "functionPath": "createBizOpPublication.register",
+      "line": 35,
+      "api": "prepare",
+      "expression": "db.prepare(`INSERT INTO biz_op_v327_publications(task_run_id,binding_rel_path,binding_digest,state,updated_at)\n      VALUES (?,?,?,'NOT_STARTED',?)`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/export-publication.js",
+      "functionPath": "createBizOpPublication.io",
+      "line": 73,
+      "api": "prepare",
+      "expression": "db.prepare(`UPDATE biz_op_v327_publications SET state='STARTED',attempt_nonce=?,owner_pid=?,owner_instance=?,\n        closure_json=NULL,closure_digest=NULL,updated_at=? WHERE task_run_id=?`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/export-publication.js",
+      "functionPath": "createBizOpPublication.io",
+      "line": 83,
+      "api": "prepare",
+      "expression": "db.prepare(`UPDATE biz_op_v327_publications SET state='CLOSED_UNKNOWN',closure_json=?,closure_digest=?,updated_at=?\n          WHERE task_run_id=? AND attempt_nonce=?`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/export-publication.js",
+      "functionPath": "createBizOpPublication.saveOutcome",
+      "line": 113,
+      "api": "prepare",
+      "expression": "db.prepare('UPDATE biz_op_v327_publications SET commit_proof_json=?,commit_proof_digest=? WHERE task_run_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/export-publication.js",
+      "functionPath": "createBizOpPublication.saveOutcome",
+      "line": 116,
+      "api": "prepare",
+      "expression": "db.prepare(`UPDATE biz_op_v327_publications SET state=?,outcome_json=?,outcome_digest=?,input_consumed=1,updated_at=?\n      WHERE task_run_id=?`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/export-publication.js",
+      "functionPath": "createBizOpPublication.completeInput",
+      "line": 181,
+      "api": "prepare",
+      "expression": "db.prepare(\"UPDATE biz_op_v327_settlement_progress SET input_obligation='COMPLETE',updated_at=? WHERE task_run_id=?\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/export-publication.js",
+      "functionPath": "createBizOpPublication.settle",
+      "line": 194,
+      "api": "prepare",
+      "expression": "db.prepare('UPDATE biz_op_v327_publications SET archive_settled=1,updated_at=? WHERE task_run_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/export-publication.js",
+      "functionPath": "createBizOpPublication.acknowledge",
+      "line": 211,
+      "api": "prepare",
+      "expression": "db.prepare('UPDATE biz_op_v327_publications SET acknowledged=1,updated_at=? WHERE task_run_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/export-publication.js",
+      "functionPath": "createBizOpPublication.cleanupStage",
+      "line": 237,
+      "api": "prepare",
+      "expression": "db.prepare('UPDATE biz_op_v327_publications SET cleanup_completed=1,updated_at=? WHERE task_run_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/export-publication.js",
+      "functionPath": "createBizOpPublication.recoverOtherOwners",
+      "line": 242,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT 1 FROM biz_op_v327_publications WHERE cleanup_completed=0 LIMIT 1')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/export-source.js",
+      "functionPath": "buildExportSource",
+      "line": 104,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT * FROM part_meta')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/export-source.js",
+      "functionPath": "buildExportSource",
+      "line": 110,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT * FROM ${table} ORDER BY ${notes ? 'note_ordinal' : 'row_ordinal'}`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/export-spool.js",
+      "functionPath": "createExportSpool",
+      "line": 23,
+      "api": "exec",
+      "expression": "db.exec('CREATE TABLE export_rows(section TEXT NOT NULL,ordinal INTEGER NOT NULL,cells TEXT NOT NULL,PRIMARY KEY(section,ordinal)) WITHOUT ROWID')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/export-spool.js",
+      "functionPath": "createExportSpool.rows",
+      "line": 69,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT * FROM export_rows WHERE section=? AND ordinal>? AND ordinal<=? ORDER BY ordinal')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/import-adapter.js",
+      "functionPath": "dateText",
+      "line": 56,
+      "api": "exec",
+      "expression": "/^(\\d{4})([-/])(\\d{1,2})\\2(\\d{1,2})(?:[ T](\\d{2}):(\\d{2})(?::(\\d{2})(?:\\.\\d{1,9})?)?)?$/.exec(token)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/ipc.js",
+      "functionPath": "registerBizOpV327Handlers",
+      "line": 163,
+      "api": "prepare",
+      "expression": "db.prepare(\"SELECT start_date AS startDate,end_date AS endDate,result_version AS version FROM biz_op_v327_runs WHERE run_id=? AND state='PUBLISHED'\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/ipc.js",
+      "functionPath": "registerBizOpV327Handlers",
+      "line": 165,
+      "api": "prepare",
+      "expression": "db.prepare(\"SELECT report_ref FROM biz_op_v327_diagnostic_reports WHERE report_ref=? AND state='READY'\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/ipc.js",
+      "functionPath": "registerBizOpV327Handlers",
+      "line": 167,
+      "api": "prepare",
+      "expression": "db.prepare(\"SELECT data_date AS dataDate,public_version AS version FROM biz_op_v327_datasets WHERE dataset_id=? AND kind=? AND state='ACTIVE'\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/metadata.js",
+      "functionPath": "createBizOpMetadata.currentInput",
+      "line": 20,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT d.dataset_id AS objectId,d.public_version AS version FROM biz_op_v327_input_heads h\n        JOIN biz_op_v327_datasets d USING(dataset_id) WHERE h.kind=? AND h.data_date=? AND d.state='ACTIVE'`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/metadata.js",
+      "functionPath": "createBizOpMetadata.listMonths",
+      "line": 29,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT operation_month FROM (\n        SELECT substr(activated_at,1,7) AS operation_month FROM biz_op_v327_datasets WHERE state='ACTIVE'\n        UNION SELECT operation_month FROM biz_op_v327_runs WHERE state='PUBLISHED')\n        WHERE (? IS NULL OR operation_month<?) ORDER BY operation_month DESC LIMIT ?`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/metadata.js",
+      "functionPath": "createBizOpMetadata.runCalendar",
+      "line": 42,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT h.data_date ${current} ORDER BY d.activated_at DESC,h.data_date DESC LIMIT 1`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/metadata.js",
+      "functionPath": "createBizOpMetadata.runCalendar",
+      "line": 47,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT h.data_date ${current} AND h.data_date>=? AND h.data_date<=? ORDER BY h.data_date LIMIT 31`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/metadata.js",
+      "functionPath": "createBizOpMetadata.runCalendar",
+      "line": 49,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT h.data_date ${current} AND h.data_date<? ORDER BY h.data_date DESC LIMIT 1`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/metadata.js",
+      "functionPath": "createBizOpMetadata.runCalendar",
+      "line": 50,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT h.data_date ${current} AND h.data_date>? ORDER BY h.data_date LIMIT 1`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/metadata.js",
+      "functionPath": "createBizOpMetadata.list",
+      "line": 75,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT * FROM biz_op_v327_runs WHERE state='PUBLISHED' AND operation_month=?\n          AND (published_at<? OR (published_at=? AND run_id>?)) ORDER BY published_at DESC,run_id LIMIT ?`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/metadata.js",
+      "functionPath": "createBizOpMetadata.list",
+      "line": 86,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT d.*${raw ? ',s.source_file_name,s.source_file_order' : ''}\n          FROM biz_op_v327_datasets d ${raw ? 'JOIN biz_op_v327_dataset_sources s USING(dataset_id)' : ''}\n          WHERE d.state='ACTIVE' AND d.kind=? AND substr(d.activated_at,1,7)=? AND\n          (d.activated_at<? OR (d.activated_at=? AND d.dataset_id>?)\n          OR (d.activated_at=? AND d.dataset_id=? AND ${order}>?))\n          ORDER BY d.activated_at DESC,d.dataset_id${raw ? ',s.source_file_order' : ''} LIMIT ?`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/module.js",
+      "functionPath": "createBizOpV327Module.prepareOperation",
+      "line": 57,
+      "api": "prepare",
+      "expression": "catalog.prepare({ taskRunId, actionKey, operationKey, intent, intentRelPath: relative,\n      expectedGeneration: catalog.control().generation })"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/module.js",
+      "functionPath": "createBizOpV327Module.protectedTasks",
+      "line": 165,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT p.task_run_id FROM biz_op_v327_prepared_ops p\n      WHERE p.phase!='CLOSED' OR EXISTS (SELECT 1 FROM biz_op_v327_read_pins r WHERE r.task_run_id=p.task_run_id)\n      OR EXISTS (SELECT 1 FROM biz_op_v327_dispatches d WHERE d.task_run_id=p.task_run_id AND d.state!='CLOSED'\n        AND d.process_exit_evidence_json IS NULL)`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/module.js",
+      "functionPath": "createBizOpV327Module.protectedTasks",
+      "line": 171,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT id FROM archive_batches WHERE task_run_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/module.js",
+      "functionPath": "createBizOpV327Module.protectedTasks",
+      "line": 174,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT task_run_id FROM archive_task_runs WHERE module_id='biz-op-recon'\n        AND task_key GLOB 'bizOpRecon:*' AND status NOT IN ('succeeded','failed','cancelled')`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/module.js",
+      "functionPath": "createBizOpV327Module.protectedTasks",
+      "line": 178,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT id FROM archive_batches WHERE task_run_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/read-protection.js",
+      "functionPath": "createBizOpReadProtection.dispatch",
+      "line": 16,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT * FROM biz_op_v327_dispatches WHERE task_run_id=? AND session_id=? AND job_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/read-protection.js",
+      "functionPath": "createBizOpReadProtection.assertReadable",
+      "line": 27,
+      "api": "prepare",
+      "expression": "db.prepare(\"SELECT payload_manifest_digest AS digest FROM biz_op_v327_datasets WHERE dataset_id=? AND state='ACTIVE'\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/read-protection.js",
+      "functionPath": "createBizOpReadProtection.assertReadable",
+      "line": 29,
+      "api": "prepare",
+      "expression": "db.prepare(\"SELECT payload_manifest_digest AS digest FROM biz_op_v327_runs WHERE run_id=? AND state='PUBLISHED'\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/read-protection.js",
+      "functionPath": "createBizOpReadProtection.assertReadable",
+      "line": 31,
+      "api": "prepare",
+      "expression": "db.prepare(\"SELECT manifest_digest AS digest FROM biz_op_v327_diagnostic_reports WHERE report_ref=? AND state='READY'\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/read-protection.js",
+      "functionPath": "createBizOpReadProtection.beforeDispatch",
+      "line": 39,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT 1 FROM biz_op_v327_abort_finalizations WHERE task_run_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/read-protection.js",
+      "functionPath": "createBizOpReadProtection.beforeDispatch",
+      "line": 51,
+      "api": "prepare",
+      "expression": "db.prepare(`INSERT INTO biz_op_v327_dispatches\n        (task_run_id,session_id,job_id,action_key,task_key,operation_key,worker_instance_id,\n         runtime_instance_id,process_instance_id,owner_pid,dispatch_nonce,carrier_kind,plan_digest,state,created_at,updated_at)\n        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'STARTING',?,?)`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/read-protection.js",
+      "functionPath": "createBizOpReadProtection.beforeDispatch",
+      "line": 59,
+      "api": "prepare",
+      "expression": "db.prepare(`INSERT INTO biz_op_v327_read_pins\n          (task_run_id,session_id,object_kind,object_id,manifest_digest,read_plan_digest,state,created_at,updated_at)\n          VALUES (?,?,?,?,?,?,'ACTIVE',?,?) ON CONFLICT(task_run_id,session_id,object_kind,object_id) DO NOTHING`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/read-protection.js",
+      "functionPath": "createBizOpReadProtection.beforeDispatch",
+      "line": 64,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT * FROM biz_op_v327_read_pins\n          WHERE task_run_id=? AND session_id=? AND object_kind=? AND object_id=?`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/read-protection.js",
+      "functionPath": "createBizOpReadProtection.beforeDispatch",
+      "line": 68,
+      "api": "prepare",
+      "expression": "db.prepare(`INSERT INTO biz_op_v327_pin_dispatches(task_run_id,session_id,object_kind,object_id,job_id)\n          VALUES (?,?,?,?,?)`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/read-protection.js",
+      "functionPath": "createBizOpReadProtection.persistObservation",
+      "line": 87,
+      "api": "prepare",
+      "expression": "db.prepare(`UPDATE biz_op_v327_dispatches SET state=?,closure_observation_seq=?,closure_disposition=?,\n      closure_evidence_digest=?,closure_evidence_json=?,updated_at=? WHERE task_run_id=? AND session_id=? AND job_id=?`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/read-protection.js",
+      "functionPath": "createBizOpReadProtection.refresh",
+      "line": 104,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT * FROM biz_op_v327_dispatches WHERE task_run_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/read-protection.js",
+      "functionPath": "createBizOpReadProtection.refresh",
+      "line": 118,
+      "api": "prepare",
+      "expression": "db.prepare('UPDATE biz_op_v327_dispatches SET process_exit_evidence_json=?,updated_at=? WHERE dispatch_nonce=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/read-protection.js",
+      "functionPath": "createBizOpReadProtection.closed",
+      "line": 141,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT * FROM biz_op_v327_dispatches WHERE task_run_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/read-protection.js",
+      "functionPath": "createBizOpReadProtection.closureDigest",
+      "line": 146,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT dispatch_nonce,closure_evidence_digest,process_exit_evidence_json\n      FROM biz_op_v327_dispatches WHERE task_run_id=? ORDER BY dispatch_nonce`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/read-protection.js",
+      "functionPath": "createBizOpReadProtection.completeInputObligation",
+      "line": 154,
+      "api": "prepare",
+      "expression": "db.prepare(\"UPDATE biz_op_v327_settlement_progress SET input_obligation='COMPLETE',updated_at=? WHERE task_run_id=?\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/read-protection.js",
+      "functionPath": "createBizOpReadProtection.releasePins",
+      "line": 164,
+      "api": "prepare",
+      "expression": "db.prepare('DELETE FROM biz_op_v327_pin_dispatches WHERE task_run_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/read-protection.js",
+      "functionPath": "createBizOpReadProtection.releasePins",
+      "line": 165,
+      "api": "prepare",
+      "expression": "db.prepare('DELETE FROM biz_op_v327_read_pins WHERE task_run_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/read-protection.js",
+      "functionPath": "createBizOpReadProtection.registerDiagnostic",
+      "line": 171,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT * FROM biz_op_v327_dispatches WHERE task_run_id=? AND job_id=? AND session_id=?`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/read-protection.js",
+      "functionPath": "createBizOpReadProtection.registerDiagnostic",
+      "line": 177,
+      "api": "prepare",
+      "expression": "db.prepare(`INSERT INTO biz_op_v327_diagnostic_reports\n        (report_ref,task_run_id,producer_job_id,producer_session_id,manifest_digest,report_rel_path,\n         sample_count,sample_bytes,scan_complete,error_count_exact,state,created_at)\n        VALUES (?,?,?,?,?,?,?,?,?,?,'READY',?)`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/read-protection.js",
+      "functionPath": "createBizOpReadProtection.registerDiagnostic",
+      "line": 182,
+      "api": "prepare",
+      "expression": "db.prepare(`INSERT INTO biz_op_v327_diagnostic_lifecycle(report_ref,sealed_manifest_rel_path,updated_at)\n        VALUES (?,?,?)`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/read-protection.js",
+      "functionPath": "createBizOpReadProtection.retireDiagnostic",
+      "line": 189,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT d.*,l.sealed_manifest_rel_path FROM biz_op_v327_diagnostic_reports d\n        JOIN biz_op_v327_diagnostic_lifecycle l USING(report_ref) WHERE report_ref=?`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/read-protection.js",
+      "functionPath": "createBizOpReadProtection.retireDiagnostic",
+      "line": 192,
+      "api": "prepare",
+      "expression": "db.prepare(\"UPDATE biz_op_v327_diagnostic_reports SET state='RETIRED' WHERE report_ref=?\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/read-protection.js",
+      "functionPath": "createBizOpReadProtection.retireDiagnostic",
+      "line": 193,
+      "api": "prepare",
+      "expression": "db.prepare('UPDATE biz_op_v327_diagnostic_lifecycle SET retired_at=COALESCE(retired_at,?),updated_at=? WHERE report_ref=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/reclaim.js",
+      "functionPath": "createBizOpReclaimer.authorize",
+      "line": 13,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT 1 FROM biz_op_v327_read_pins WHERE object_kind=? AND object_id=? LIMIT 1')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/reclaim.js",
+      "functionPath": "createBizOpReclaimer.authorize",
+      "line": 16,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT * FROM biz_op_v327_datasets WHERE dataset_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/reclaim.js",
+      "functionPath": "createBizOpReclaimer.authorize",
+      "line": 18,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT 1 FROM biz_op_v327_input_heads WHERE dataset_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/reclaim.js",
+      "functionPath": "createBizOpReclaimer.authorize",
+      "line": 20,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT * FROM biz_op_v327_diagnostic_reports WHERE report_ref=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/reclaim.js",
+      "functionPath": "createBizOpReclaimer.authorize",
+      "line": 24,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT * FROM biz_op_v327_runs WHERE run_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/reclaim.js",
+      "functionPath": "createBizOpReclaimer.authorize",
+      "line": 29,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT 1 FROM biz_op_v327_abort_finalizations WHERE task_run_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/reclaim.js",
+      "functionPath": "createBizOpReclaimer.authorize",
+      "line": 37,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT 1 FROM biz_op_v327_datasets WHERE dataset_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/reclaim.js",
+      "functionPath": "createBizOpReclaimer.authorize",
+      "line": 38,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT 1 FROM biz_op_v327_runs WHERE run_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/reclaim.js",
+      "functionPath": "createBizOpReclaimer.authorize",
+      "line": 39,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT 1 FROM biz_op_v327_read_pins WHERE object_id=? LIMIT 1')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/reclaim.js",
+      "functionPath": "createBizOpReclaimer",
+      "line": 47,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT * FROM biz_op_v327_reclaim_queue WHERE reclaim_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/reclaim.js",
+      "functionPath": "createBizOpReclaimer",
+      "line": 82,
+      "api": "prepare",
+      "expression": "db.prepare(\"UPDATE biz_op_v327_reclaim_queue SET state='RECLAIMING',authorization_digest=? WHERE reclaim_id=? AND state='PENDING'\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/reclaim.js",
+      "functionPath": "createBizOpReclaimer",
+      "line": 95,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT 1 FROM biz_op_v327_datasets WHERE dataset_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/reclaim.js",
+      "functionPath": "createBizOpReclaimer",
+      "line": 96,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT 1 FROM biz_op_v327_runs WHERE run_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/reclaim.js",
+      "functionPath": "createBizOpReclaimer",
+      "line": 124,
+      "api": "prepare",
+      "expression": "db.prepare(\"UPDATE biz_op_v327_reclaim_queue SET state='DONE',completed_at=? WHERE reclaim_id=? AND state='RECLAIMING'\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/reclaim.js",
+      "functionPath": "createBizOpReclaimer",
+      "line": 148,
+      "api": "prepare",
+      "expression": "db.prepare(\"UPDATE biz_op_v327_datasets SET state='DELETED' WHERE dataset_id=? AND state='RETIRED'\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/reclaim.js",
+      "functionPath": "createBizOpReclaimer",
+      "line": 150,
+      "api": "prepare",
+      "expression": "db.prepare(\"UPDATE biz_op_v327_diagnostic_reports SET state='DELETED' WHERE report_ref=? AND state='RETIRED'\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/reclaim.js",
+      "functionPath": "createBizOpReclaimer",
+      "line": 151,
+      "api": "prepare",
+      "expression": "db.prepare('UPDATE biz_op_v327_diagnostic_lifecycle SET deleted_at=?,updated_at=? WHERE report_ref=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/reclaim.js",
+      "functionPath": "createBizOpReclaimer",
+      "line": 154,
+      "api": "prepare",
+      "expression": "db.prepare(\"UPDATE biz_op_v327_reclaim_queue SET state='DONE',completed_at=? WHERE reclaim_id=? AND state='RECLAIMING'\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/recovery-alignment.js",
+      "functionPath": "taskAlignment",
+      "line": 47,
+      "api": "prepare",
+      "expression": "catalog.db.prepare(`SELECT b.task_status,o.state,o.final_outcome,o.source_kind,o.source_ref\n    FROM archive_batches b LEFT JOIN background_execution_batch_recovery_states o ON o.batch_id=b.id\n    WHERE b.task_run_id=?`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/recovery-driver.js",
+      "functionPath": "createBizOpRecoveryDriver.openObligations",
+      "line": 15,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT 1 FROM biz_op_v327_prepared_ops p\n      JOIN biz_op_v327_settlement_progress s USING(task_run_id) JOIN archive_task_runs t USING(task_run_id)\n      WHERE ${NEEDS_RECOVERY_SQL} LIMIT 1`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/recovery-driver.js",
+      "functionPath": "createBizOpRecoveryDriver.openObligations",
+      "line": 18,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT 1 FROM biz_op_v327_read_pins LIMIT 1')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/recovery-driver.js",
+      "functionPath": "createBizOpRecoveryDriver.openObligations",
+      "line": 19,
+      "api": "prepare",
+      "expression": "db.prepare(\"SELECT 1 FROM biz_op_v327_dispatches WHERE state!='CLOSED' AND process_exit_evidence_json IS NULL LIMIT 1\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/recovery-driver.js",
+      "functionPath": "createBizOpRecoveryDriver.openObligations",
+      "line": 20,
+      "api": "prepare",
+      "expression": "db.prepare(\"SELECT 1 FROM biz_op_v327_reclaim_queue WHERE state!='DONE' LIMIT 1\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/recovery-driver.js",
+      "functionPath": "createBizOpRecoveryDriver.openObligations",
+      "line": 21,
+      "api": "prepare",
+      "expression": "db.prepare(\"SELECT 1 FROM biz_op_v327_recovery_followups WHERE state!='COMPLETE' LIMIT 1\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/recovery-driver.js",
+      "functionPath": "createBizOpRecoveryDriver.progress",
+      "line": 32,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT 1 FROM biz_op_v327_abort_finalizations WHERE source_kind=? AND source_ref=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/recovery-driver.js",
+      "functionPath": "createBizOpRecoveryDriver.progress",
+      "line": 34,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT COUNT(*) AS n FROM biz_op_v327_read_pins WHERE task_run_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/recovery-driver.js",
+      "functionPath": "createBizOpRecoveryDriver.progress",
+      "line": 36,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT state FROM biz_op_v327_reclaim_queue WHERE reclaim_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/recovery-plan.js",
+      "functionPath": "createBizOpRecoveryPlan.plan",
+      "line": 34,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT * FROM biz_op_v327_abort_finalizations WHERE source_kind=? AND source_ref=?`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/recovery-plan.js",
+      "functionPath": "createBizOpRecoveryPlan.plan",
+      "line": 41,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT id,task_status FROM archive_batches WHERE task_run_id=? ORDER BY id')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/recovery-plan.js",
+      "functionPath": "createBizOpRecoveryPlan.plan",
+      "line": 42,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT * FROM background_execution_batch_recovery_states WHERE task_run_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/recovery-sources.js",
+      "functionPath": "createBizOpRecoverySources.pendingArchiveOwners",
+      "line": 39,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT 1 FROM biz_op_v327_publications WHERE task_run_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/recovery-sources.js",
+      "functionPath": "createBizOpRecoverySources.collect",
+      "line": 71,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT p.task_run_id FROM biz_op_v327_prepared_ops p\n      JOIN biz_op_v327_settlement_progress s USING(task_run_id)\n      JOIN archive_task_runs t USING(task_run_id)\n      WHERE p.action!='RECLAIM' AND (${NEEDS_RECOVERY_SQL}) ORDER BY p.task_run_id`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/recovery-sources.js",
+      "functionPath": "createBizOpRecoverySources.collect",
+      "line": 79,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT * FROM biz_op_v327_read_pins ORDER BY task_run_id,session_id,object_kind,object_id')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/recovery-sources.js",
+      "functionPath": "createBizOpRecoverySources.collect",
+      "line": 85,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT * FROM biz_op_v327_dispatches\n      WHERE state!='CLOSED' AND process_exit_evidence_json IS NULL ORDER BY task_run_id,dispatch_nonce`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/recovery-sources.js",
+      "functionPath": "createBizOpRecoverySources.collect",
+      "line": 90,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT q.* FROM biz_op_v327_reclaim_queue q\n      JOIN archive_task_runs t ON t.task_run_id=q.owner_task_run_id\n      WHERE q.state!='DONE' OR t.status!='succeeded' ORDER BY q.reclaim_id`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/recovery-sources.js",
+      "functionPath": "createBizOpRecoverySources.collect",
+      "line": 95,
+      "api": "prepare",
+      "expression": "db.prepare(\"SELECT source_json FROM biz_op_v327_recovery_followups WHERE state!='COMPLETE'\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/recovery-sources.js",
+      "functionPath": "createBizOpRecoverySources.collect",
+      "line": 102,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT source_json FROM biz_op_v327_recovery_followups WHERE source_kind=? AND source_ref=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/recovery-sources.js",
+      "functionPath": "createBizOpRecoverySources.collect",
+      "line": 108,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT 1 FROM biz_op_v327_dispatches WHERE task_run_id=? AND dispatch_nonce=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/recovery-sources.js",
+      "functionPath": "createBizOpRecoverySources.collect",
+      "line": 114,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT reclaim_id FROM biz_op_v327_reclaim_queue WHERE owner_task_run_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/recovery-sources.js",
+      "functionPath": "createBizOpRecoverySources.finalization",
+      "line": 124,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT * FROM biz_op_v327_abort_finalizations WHERE source_kind=? AND source_ref=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/recovery-sources.js",
+      "functionPath": "createBizOpRecoverySources.facts",
+      "line": 140,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT * FROM biz_op_v327_reclaim_queue WHERE reclaim_id=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/recovery-sources.js",
+      "functionPath": "createBizOpRecoverySources.facts",
+      "line": 143,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT 1 FROM biz_op_v327_read_pins WHERE object_kind=? AND object_id=? LIMIT 1')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/recovery-sources.js",
+      "functionPath": "createBizOpRecoverySources.recoverCommitted",
+      "line": 185,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT id FROM archive_batches WHERE task_run_id=? ORDER BY id')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/recovery-sources.js",
+      "functionPath": "createBizOpRecoverySources.finalize",
+      "line": 236,
+      "api": "prepare",
+      "expression": "db.prepare(`INSERT INTO biz_op_v327_recovery_followups\n        (source_kind,source_ref,task_run_id,action_key,operation_key,intent_digest,inspection_evidence_digest,\n         source_json,state,finalization_ref,updated_at) VALUES (?,?,?,?,?,?,?,?,'CONTROL_PENDING',?,?)\n         ON CONFLICT(source_kind,source_ref) DO NOTHING`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/recovery-sources.js",
+      "functionPath": "createBizOpRecoverySources.finalize",
+      "line": 241,
+      "api": "prepare",
+      "expression": "db.prepare(`INSERT INTO biz_op_v327_abort_finalizations\n        (finalization_ref,source_kind,source_ref,task_run_id,action_key,operation_key,intent_digest,\n         inspection_evidence_digest,closure_manifest_digest,terminal_reason,cleanup_plan_digest,cleanup_plan_rel_path,finalized_at)\n        VALUES (?,?,?,?,?,?,?,?,?,'FAILED',?,?,?) ON CONFLICT(source_kind,source_ref) DO NOTHING`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/recovery-sources.js",
+      "functionPath": "createBizOpRecoverySources.recordConflict",
+      "line": 270,
+      "api": "prepare",
+      "expression": "db.prepare(\"UPDATE biz_op_v327_prepared_ops SET phase='HOLD',updated_at=? WHERE task_run_id=? AND phase!='HOLD'\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/recovery-sources.js",
+      "functionPath": "createBizOpRecoverySources.recordConflict",
+      "line": 272,
+      "api": "prepare",
+      "expression": "db.prepare(`UPDATE biz_op_v327_settlement_progress SET state='RECOVERY_BLOCKED',\n        task_terminal_observed_at=NULL,archive_terminal_observed_at=NULL,updated_at=? WHERE task_run_id=? AND state!='RECOVERY_BLOCKED'`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/recovery-sources.js",
+      "functionPath": "createBizOpRecoverySources.syncCompletion",
+      "line": 290,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT 1 FROM biz_op_v327_read_pins WHERE task_run_id=? LIMIT 1')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/recovery-sources.js",
+      "functionPath": "createBizOpRecoverySources.syncCompletion",
+      "line": 296,
+      "api": "prepare",
+      "expression": "db.prepare(`UPDATE biz_op_v327_recovery_followups SET state='COMPLETE',updated_at=?\n        WHERE source_kind=? AND source_ref=? AND state!='COMPLETE'`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/recovery-sources.js",
+      "functionPath": "createBizOpRecoverySources.syncCompletion",
+      "line": 299,
+      "api": "prepare",
+      "expression": "db.prepare(\"UPDATE biz_op_v327_prepared_ops SET phase='CLOSED',updated_at=? WHERE task_run_id=? AND phase!='CLOSED'\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/recovery-sources.js",
+      "functionPath": "createBizOpRecoverySources.syncCompletion",
+      "line": 301,
+      "api": "prepare",
+      "expression": "db.prepare(`UPDATE biz_op_v327_settlement_progress SET state='COMPLETE',task_terminal_observed_at=?,\n          archive_terminal_observed_at=?,updated_at=? WHERE task_run_id=? AND state!='COMPLETE'`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/result-sink.js",
+      "functionPath": "configure",
+      "line": 13,
+      "api": "exec",
+      "expression": "db.exec('PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; PRAGMA temp_store=FILE; PRAGMA cache_size=-16384')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/result-sink.js",
+      "functionPath": "createResultSink.close",
+      "line": 29,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT count(*) AS n FROM ${table}`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/result-sink.js",
+      "functionPath": "createResultSink.close",
+      "line": 30,
+      "api": "exec",
+      "expression": "db.exec('CREATE INDEX result_rows_diff ON result_rows(is_difference,row_ordinal)')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/result-sink.js",
+      "functionPath": "createResultSink.close",
+      "line": 31,
+      "api": "exec",
+      "expression": "db.exec('CREATE INDEX explanation_by_result ON explanation_records(result_row_ordinal,record_type,note_ordinal); CREATE INDEX explanation_by_source ON explanation_records(source_artifact_id,source_sheet,source_row,note_ordinal)')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/result-sink.js",
+      "functionPath": "createResultSink.close",
+      "line": 32,
+      "api": "prepare",
+      "expression": "db.prepare('PRAGMA quick_check')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/result-sink.js",
+      "functionPath": "createResultSink.close",
+      "line": 33,
+      "api": "prepare",
+      "expression": "db.prepare(\"UPDATE part_meta SET state='SEALED',row_count=?\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/result-sink.js",
+      "functionPath": "createResultSink.open",
+      "line": 48,
+      "api": "exec",
+      "expression": "db.exec(PART_SCHEMA)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/result-sink.js",
+      "functionPath": "createResultSink.open",
+      "line": 48,
+      "api": "exec",
+      "expression": "db.exec(partKind === 'RESULT' ? RESULT_SCHEMA : NOTES_SCHEMA)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/result-sink.js",
+      "functionPath": "createResultSink.open",
+      "line": 49,
+      "api": "prepare",
+      "expression": "db.prepare('INSERT INTO part_meta VALUES (1,1,?,?,?,?,?,?,?,0)')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/upgrade-legacy.js",
+      "functionPath": "triggers",
+      "line": 53,
+      "api": "prepare",
+      "expression": "expected.prepare(\"SELECT name,sql FROM sqlite_master WHERE type='trigger'\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/upgrade-legacy.js",
+      "functionPath": "validateSchema",
+      "line": 59,
+      "api": "prepare",
+      "expression": "db.prepare(\"SELECT name FROM sqlite_master WHERE type='table'\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/upgrade-legacy.js",
+      "functionPath": "validateSchema",
+      "line": 63,
+      "api": "prepare",
+      "expression": "db.prepare(`PRAGMA foreign_key_list(${quoted})`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/upgrade-legacy.js",
+      "functionPath": "validateSchema",
+      "line": 69,
+      "api": "prepare",
+      "expression": "db.prepare(\"SELECT name,tbl_name,sql FROM sqlite_master WHERE type='trigger'\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/upgrade-legacy.js",
+      "functionPath": "validateSchema",
+      "line": 74,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT 1 FROM biz_op_recon_runs\n      WHERE archive_contract_version=1 AND archive_terminal_ack_at IS NULL LIMIT 1`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/upgrade-legacy.js",
+      "functionPath": "validateSchema",
+      "line": 76,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT 1 FROM biz_op_recon_month_end_copy_intents LIMIT 1')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/upgrade-legacy.js",
+      "functionPath": "inspectFiles",
+      "line": 94,
+      "api": "prepare",
+      "expression": "db.prepare('PRAGMA quick_check')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/upgrade-main.js",
+      "functionPath": "createBizOpUpgrade",
+      "line": 23,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT * FROM biz_op_v327_activation WHERE singleton=1')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/upgrade-main.js",
+      "functionPath": "createBizOpUpgrade.stage",
+      "line": 28,
+      "api": "prepare",
+      "expression": "db.prepare('INSERT INTO biz_op_v327_activation_stages VALUES(?,?,?,?)')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/upgrade-main.js",
+      "functionPath": "createBizOpUpgrade.stage",
+      "line": 29,
+      "api": "prepare",
+      "expression": "db.prepare('UPDATE biz_op_v327_activation SET phase=?,updated_at=? WHERE singleton=1')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/upgrade-main.js",
+      "functionPath": "createBizOpUpgrade.tableGuards",
+      "line": 36,
+      "api": "prepare",
+      "expression": "db.prepare(\"SELECT 1 FROM sqlite_master WHERE type='table' AND name=?\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/upgrade-main.js",
+      "functionPath": "createBizOpUpgrade.requireGuard",
+      "line": 43,
+      "api": "prepare",
+      "expression": "db.prepare(\"SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/upgrade-main.js",
+      "functionPath": "createBizOpUpgrade.requireGuard",
+      "line": 44,
+      "api": "exec",
+      "expression": "db.exec(sql)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/upgrade-main.js",
+      "functionPath": "createBizOpUpgrade.assertLegacySettled",
+      "line": 60,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT 1 FROM archive_task_flow_bind_intents i JOIN archive_task_runs t ON t.task_run_id=i.source_task_run_id\n      WHERE t.module_id='biz-op-recon' AND t.task_key GLOB 'bizOpRecon:*' LIMIT 1`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/upgrade-main.js",
+      "functionPath": "createBizOpUpgrade.assertLegacySettled",
+      "line": 62,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT 1 FROM archive_flow_bind_intents i JOIN archive_batches b ON b.id=i.source_batch_id\n        WHERE b.module_id='biz-op-recon' AND b.task_key GLOB 'bizOpRecon:*' LIMIT 1`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/upgrade-main.js",
+      "functionPath": "createBizOpUpgrade.assertLegacySettled",
+      "line": 64,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT 1 FROM archive_task_runs WHERE module_id='biz-op-recon' AND task_key GLOB 'bizOpRecon:*'\n      AND status NOT IN ('succeeded','failed','cancelled') LIMIT 1`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/upgrade-main.js",
+      "functionPath": "createBizOpUpgrade.assertLegacySettled",
+      "line": 66,
+      "api": "prepare",
+      "expression": "db.prepare(`SELECT 1 FROM archive_batches WHERE module_id='biz-op-recon' AND task_key GLOB 'bizOpRecon:*'\n      AND (task_status NOT IN ('succeeded','failed','cancelled') OR archive_status!='complete') LIMIT 1`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/upgrade-main.js",
+      "functionPath": "createBizOpUpgrade.assertOwner",
+      "line": 79,
+      "api": "prepare",
+      "expression": "db.prepare(\"SELECT 1 FROM biz_op_v327_prepared_ops WHERE task_run_id!=? AND phase!='CLOSED' LIMIT 1\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/upgrade-main.js",
+      "functionPath": "createBizOpUpgrade.assertOwner",
+      "line": 80,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT 1 FROM biz_op_v327_read_pins LIMIT 1')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/upgrade-main.js",
+      "functionPath": "createBizOpUpgrade",
+      "line": 109,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT * FROM biz_op_v327_activation_files WHERE task_run_id=? ORDER BY file_name')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/upgrade-main.js",
+      "functionPath": "createBizOpUpgrade.assertFileReferences",
+      "line": 115,
+      "api": "prepare",
+      "expression": "db.prepare(\"SELECT source_path FROM archive_artifacts WHERE status!='ready'\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/upgrade-main.js",
+      "functionPath": "createBizOpUpgrade.advance",
+      "line": 139,
+      "api": "prepare",
+      "expression": "db.prepare('INSERT INTO biz_op_v327_activation_files(task_run_id,file_name,identity_json,sha256) VALUES(?,?,?,?)')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/upgrade-main.js",
+      "functionPath": "createBizOpUpgrade.advance",
+      "line": 142,
+      "api": "exec",
+      "expression": "db.exec(`DELETE FROM ${table}`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/upgrade-main.js",
+      "functionPath": "createBizOpUpgrade.advance",
+      "line": 144,
+      "api": "prepare",
+      "expression": "db.prepare('UPDATE biz_op_v327_activation SET inventory_digest=? WHERE singleton=1')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/upgrade-main.js",
+      "functionPath": "createBizOpUpgrade.advance",
+      "line": 164,
+      "api": "prepare",
+      "expression": "db.prepare('UPDATE biz_op_v327_activation_files SET reclaimed=1 WHERE task_run_id=? AND file_name=?')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/upgrade-main.js",
+      "functionPath": "createBizOpUpgrade.begin",
+      "line": 190,
+      "api": "prepare",
+      "expression": "db.prepare(`INSERT INTO biz_op_v327_activation(singleton,task_run_id,intent_digest,gates_digest,phase,updated_at) VALUES(1,?,?,?,'MIGRATING',?)`)"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/upgrade-main.js",
+      "functionPath": "createBizOpUpgrade.begin",
+      "line": 192,
+      "api": "prepare",
+      "expression": "db.prepare(\"UPDATE biz_op_v327_control SET mode='MIGRATING',activation_task_id=? WHERE singleton=1\")"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/upgrade-main.js",
+      "functionPath": "createBizOpUpgrade.begin",
+      "line": 193,
+      "api": "prepare",
+      "expression": "db.prepare('INSERT INTO biz_op_v327_activation_stages VALUES(?,?,?,?)')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/upgrade-main.js",
+      "functionPath": "createBizOpUpgrade.runAttempt",
+      "line": 242,
+      "api": "prepare",
+      "expression": "db.prepare('PRAGMA database_list')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/worker-entry.js",
+      "functionPath": "validateCandidate",
+      "line": 83,
+      "api": "prepare",
+      "expression": "db.prepare('PRAGMA quick_check')"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/worker-entry.js",
+      "functionPath": "validateCandidate",
+      "line": 85,
+      "api": "prepare",
+      "expression": "db.prepare('SELECT COUNT(*) AS n FROM candidate_rows')"
+    }
+  ]
+}

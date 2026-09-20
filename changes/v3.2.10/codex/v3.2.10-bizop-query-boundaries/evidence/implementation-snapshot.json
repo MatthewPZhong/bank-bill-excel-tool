@@ -1,0 +1,122 @@
+{
+  "capturedAtUtc": "2026-09-20T12:10:54.665584+00:00",
+  "workdir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-bizop-query-boundaries",
+  "branch": "codex/v3.2.10-bizop-query-boundaries",
+  "head": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "dirty": true,
+  "scope": "代码、测试及现行规则入口差异；复制的设计输入、实施记录和证据单独保存",
+  "files": [
+    {
+      "path": "AGENTS.md",
+      "bytes": 6324,
+      "sha256": "5d91d20300a6ffc59eb128541a765506a2c3ed7be63cb5b664faf4bff653743a",
+      "state": "modified"
+    },
+    {
+      "path": "scripts/integration/biz-op-query-boundary.js",
+      "bytes": 31131,
+      "sha256": "35cdebab389c43e96c5d366f61cd32d227a982405dab192d41dab7c7d41448aa",
+      "state": "added"
+    },
+    {
+      "path": "src/backend/database/archive-repository.js",
+      "bytes": 218942,
+      "sha256": "c4dc444507ace2c1f65d84c1f7d0fdbf6f153474caac07b663289aad06174424",
+      "state": "modified"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/README.md",
+      "bytes": 7800,
+      "sha256": "7d289045f908639ab7e704ae3489366f4a7000572d9ab5afa7101f41c3159468",
+      "state": "added"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/catalog-queries.js",
+      "bytes": 5321,
+      "sha256": "3388945cd54045a4cd3bcab27a24f5c766be60522564ae1feda8a1bf6c7669a1",
+      "state": "added"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/catalog.js",
+      "bytes": 26095,
+      "sha256": "3c7d739ee0ae476db5851d44a36e047fd4e44461eb96f5a5ab635ad9656e639e",
+      "state": "modified"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/compute-inputs.js",
+      "bytes": 6642,
+      "sha256": "ef9e1c4a28a00ca38a8e133cdad09e1ba4196a3178b1e90b104e9961846b1ae4",
+      "state": "modified"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/delete-preview.js",
+      "bytes": 7353,
+      "sha256": "18094d55312d9e97538d234e69d63bf06a13dd35c30de3b46bdf4b6a956ac6cb",
+      "state": "modified"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/export-inputs.js",
+      "bytes": 2502,
+      "sha256": "c3a77294113eec7dad77ad9e7290f77cf013f9469cf5dba0410077c66e361eb4",
+      "state": "modified"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/import-main.js",
+      "bytes": 11513,
+      "sha256": "2d1f62c3e764c2e9e3600ab701ed47767d109c468a4ff25b2d0aeb4de09f3196",
+      "state": "modified"
+    },
+    {
+      "path": "tests/fixtures/biz-op-query-boundary/11086a3c/compute-inputs.js",
+      "bytes": 6974,
+      "sha256": "b06df216c03ad67bcca7258c78d860e49b7b0d6117b79a92c1d76c266e790f78",
+      "state": "added"
+    },
+    {
+      "path": "tests/fixtures/biz-op-query-boundary/11086a3c/delete-preview.js",
+      "bytes": 7864,
+      "sha256": "2cd0dc8dd6a5f457ad87eeb393a596251165cbd580297af6a588935154c7415b",
+      "state": "added"
+    },
+    {
+      "path": "tests/fixtures/biz-op-query-boundary/11086a3c/export-inputs.js",
+      "bytes": 4248,
+      "sha256": "e7b2b2317b5258dd368933734f0f0eaa54663319d70315064a4864d63fafe1ad",
+      "state": "added"
+    },
+    {
+      "path": "tests/unit/backend/archive-blob-reference-query.test.js",
+      "bytes": 4859,
+      "sha256": "501ba854e85d2668368acea6e7b278ea83fb18cbb9afde794b868240a1656a9b",
+      "state": "added"
+    },
+    {
+      "path": "tests/unit/main-process/biz-op-v327-catalog-queries.test.js",
+      "bytes": 18501,
+      "sha256": "e79939a354ed1a19f2c8714d20629f3ec6dcefd39ee44d039064f94af3d03359",
+      "state": "added"
+    },
+    {
+      "path": "tests/unit/main-process/biz-op-v327-export-rule-version.test.js",
+      "bytes": 8916,
+      "sha256": "8f83dc6966e171b2957224bbe1a056f7ffd082f9bf1cbd5dee198d446d03bee4",
+      "state": "modified"
+    },
+    {
+      "path": "tests/unit/main-process/biz-op-v327-import-query.test.js",
+      "bytes": 4156,
+      "sha256": "64d18897004d26aa5ee1c753bf8719f15c75286cb140878b751a21bc2b081546",
+      "state": "added"
+    },
+    {
+      "path": "tests/unit/main-process/biz-op-v329-auto-report.test.js",
+      "bytes": 22375,
+      "sha256": "f6ee118a5bba5faf09475230b8a235df6e2ab3fa253c349efe15ae2f87201c1d",
+      "state": "modified"
+    }
+  ],
+  "patchSha256": "8acff678b2ce04e939734ad57d81dadf0a7fd019620816991cab46fc8084ce21",
+  "integrationScriptSha256": "35cdebab389c43e96c5d366f61cd32d227a982405dab192d41dab7c7d41448aa",
+  "committed": false,
+  "integrated": false
+}

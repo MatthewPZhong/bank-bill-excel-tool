@@ -1,0 +1,38 @@
+✖ 导出 beforeStart 来源冻结失败前交付真实 Task 身份，无需 runtime.start (2.67275ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 122.120417
+
+✖ failing tests:
+
+test at tests/unit/main-process/biz-op-v329-auto-report.test.js:322:1
+✖ 导出 beforeStart 来源冻结失败前交付真实 Task 身份，无需 runtime.start (2.67275ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /source unavailable/. Input:
+  
+  "TypeError: Cannot read properties of undefined (reading 'readExportObject')"
+  
+      at async TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-bizop-query-boundaries/tests/unit/main-process/biz-op-v329-auto-report.test.js:327:3)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: TypeError: Cannot read properties of undefined (reading 'readExportObject')
+        at freezeExportSource (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-bizop-query-boundaries/src/main-process/biz-op-v327/export-inputs.js:9:34)
+        at beforeStart (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-bizop-query-boundaries/src/main-process/biz-op-v327/export-main.js:46:28)
+        at Object.runFileTask (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-bizop-query-boundaries/tests/unit/main-process/biz-op-v329-auto-report.test.js:329:56)
+        at /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-bizop-query-boundaries/src/main-process/biz-op-v327/export-main.js:25:42
+        at Object.readTask (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-bizop-query-boundaries/tests/unit/main-process/biz-op-v329-auto-report.test.js:324:92)
+        at Object.runExport (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-bizop-query-boundaries/src/main-process/biz-op-v327/export-main.js:22:22)
+        at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-bizop-query-boundaries/tests/unit/main-process/biz-op-v329-auto-report.test.js:327:36)
+        at Test.runInAsyncScope (node:async_hooks:226:14)
+        at Test.run (node:internal/test_runner/test:1201:25)
+        at Test.start (node:internal/test_runner/test:1096:17),
+    expected: /source unavailable/,
+    operator: 'rejects',
+    diff: 'simple'
+  }

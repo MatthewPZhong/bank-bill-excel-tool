@@ -1,0 +1,162 @@
+{
+  "primaryRoot": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool",
+  "files": [
+    {
+      "path": "changes/architecture-coupling/2026-09-20/governance-plan-coverage-review.md",
+      "sha256": "77d6174e358fa8f29348b69fcdec28a811fabb3ae43836bf59c65f86781f1642",
+      "primarySha256": "77d6174e358fa8f29348b69fcdec28a811fabb3ae43836bf59c65f86781f1642",
+      "sameAsPrimary": true
+    },
+    {
+      "path": "changes/architecture-coupling/2026-09-20/review.md",
+      "sha256": "3b1167ab7dbddfcf3cea897318c6db00ef5635f68f46c81a90eadca790a92cc4",
+      "primarySha256": "3b1167ab7dbddfcf3cea897318c6db00ef5635f68f46c81a90eadca790a92cc4",
+      "sameAsPrimary": true
+    },
+    {
+      "path": "changes/architecture-coupling/2026-09-20/system-design-evidence/ui-interaction-probe.json",
+      "sha256": "51c96a64b0cadb1302fa3c3a9c47cd2f240e6abe55dde55a9e6e2919550f862d",
+      "primarySha256": "51c96a64b0cadb1302fa3c3a9c47cd2f240e6abe55dde55a9e6e2919550f862d",
+      "sameAsPrimary": true
+    },
+    {
+      "path": "changes/architecture-coupling/2026-09-20/system-design-evidence/verification.json",
+      "sha256": "909cc7249a3df6104646122f81a9571c9397b8c12de21908d179a2e1af341157",
+      "primarySha256": "909cc7249a3df6104646122f81a9571c9397b8c12de21908d179a2e1af341157",
+      "sameAsPrimary": true
+    },
+    {
+      "path": "changes/architecture-coupling/2026-09-20/system-design-followup.md",
+      "sha256": "180846ef26d2eac7d8973d30f5f98acb67e113f35c9a868db09953f7b23b00d1",
+      "primarySha256": "180846ef26d2eac7d8973d30f5f98acb67e113f35c9a868db09953f7b23b00d1",
+      "sameAsPrimary": true
+    },
+    {
+      "path": "changes/archive-batch-lifecycle/baseline-change.md",
+      "sha256": "f83691eb46b891096f44e7758360d23f724de8ba3a24ac3811c4ca0f599a063c",
+      "primarySha256": "f83691eb46b891096f44e7758360d23f724de8ba3a24ac3811c4ca0f599a063c",
+      "sameAsPrimary": true
+    },
+    {
+      "path": "changes/v3.2.10/README.md",
+      "sha256": "e449cbbb6f150b65b91459f2e40883bc4373d35e6dc0baf69898de4b56339121",
+      "primarySha256": "9d32565d6d969ff812c7c7dc96079148d9aeecffb53f2966b1e0d9e5eb56975a",
+      "sameAsPrimary": false
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-application-recovery/spec.md",
+      "sha256": "a7a6a76f65129f64e1215be1036ef256b95c8b6638154cecf259fcbf69a8e015",
+      "primarySha256": "a7a6a76f65129f64e1215be1036ef256b95c8b6638154cecf259fcbf69a8e015",
+      "sameAsPrimary": true
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-application-recovery/techdoc.md",
+      "sha256": "c1f01e42bdcc51ad6c5738420d31d3edbb91b40b786a9f4d53ae5bc016b86e3f",
+      "primarySha256": "c1f01e42bdcc51ad6c5738420d31d3edbb91b40b786a9f4d53ae5bc016b86e3f",
+      "sameAsPrimary": true
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/spec.md",
+      "sha256": "40cd1d7f7b60dc38cb0ec570f1e06d097a36755d19b6477799ccb8e656d08ed1",
+      "primarySha256": "40cd1d7f7b60dc38cb0ec570f1e06d097a36755d19b6477799ccb8e656d08ed1",
+      "sameAsPrimary": true
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/techdoc.md",
+      "sha256": "a3f05ca08266bd374e83a5f7ffbea4d1993a8823fe53897b9eeefd38346f3527",
+      "primarySha256": "a3f05ca08266bd374e83a5f7ffbea4d1993a8823fe53897b9eeefd38346f3527",
+      "sameAsPrimary": true
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-bizop-query-boundaries/spec.md",
+      "sha256": "13f5862b467266a4bb8bc1199e90a1eb7cccbcb78070bead88d3564c177d81c0",
+      "primarySha256": "13f5862b467266a4bb8bc1199e90a1eb7cccbcb78070bead88d3564c177d81c0",
+      "sameAsPrimary": true
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-bizop-query-boundaries/techdoc.md",
+      "sha256": "46a9245067e69fa1a0797a1ec9c609567b3b5cfd50b5c824b3701731a0c99ba3",
+      "primarySha256": "46a9245067e69fa1a0797a1ec9c609567b3b5cfd50b5c824b3701731a0c99ba3",
+      "sameAsPrimary": true
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-business-task-adapters/spec.md",
+      "sha256": "3da1fd494bea35c4c76d000eb8c126b8638d586a320ae795592b2b957c1d28f8",
+      "primarySha256": "3da1fd494bea35c4c76d000eb8c126b8638d586a320ae795592b2b957c1d28f8",
+      "sameAsPrimary": true
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-business-task-adapters/techdoc.md",
+      "sha256": "e2ab99aa3dc21123a5be00a5cc3900c12e1c91173a87877590d8bf204ac93c84",
+      "primarySha256": "e2ab99aa3dc21123a5be00a5cc3900c12e1c91173a87877590d8bf204ac93c84",
+      "sameAsPrimary": true
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-execution-descriptors/spec.md",
+      "sha256": "b57b4e61765bceeaa7b46123b7be04b7afd5bd075f258be191c62e20d93d478c",
+      "primarySha256": "b57b4e61765bceeaa7b46123b7be04b7afd5bd075f258be191c62e20d93d478c",
+      "sameAsPrimary": true
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-execution-descriptors/techdoc.md",
+      "sha256": "bb3bede82b77aaacc98468dae533b3340756c09ce32f62b9fd1e706daafcbd49",
+      "primarySha256": "bb3bede82b77aaacc98468dae533b3340756c09ce32f62b9fd1e706daafcbd49",
+      "sameAsPrimary": true
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/spec.md",
+      "sha256": "a6d5867c99180648325c7fddb537440ea963d5afc1afc2d8117beef56990e3b3",
+      "primarySha256": "a6d5867c99180648325c7fddb537440ea963d5afc1afc2d8117beef56990e3b3",
+      "sameAsPrimary": true
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/techdoc.md",
+      "sha256": "b200c6faf1ef6b01513f4106c6345c735bea235587bda105e626584dd3022cc0",
+      "primarySha256": "b200c6faf1ef6b01513f4106c6345c735bea235587bda105e626584dd3022cc0",
+      "sameAsPrimary": true
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-shared-xlsx-infrastructure/spec.md",
+      "sha256": "6cb978388c50e35baf50fbaf2f082eca1b10f17808f111322ae3df2952505d91",
+      "primarySha256": "6cb978388c50e35baf50fbaf2f082eca1b10f17808f111322ae3df2952505d91",
+      "sameAsPrimary": true
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-shared-xlsx-infrastructure/techdoc.md",
+      "sha256": "7786bb05fd68c2431b8c4624a36f5672fe32ef2a10bd370bc87d19227883410c",
+      "primarySha256": "7786bb05fd68c2431b8c4624a36f5672fe32ef2a10bd370bc87d19227883410c",
+      "sameAsPrimary": true
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-storage-execution-separation/spec.md",
+      "sha256": "046854b1c4573dda6f281ffc37caae184e264883ea35ea58a6810550e28ea7e8",
+      "primarySha256": "046854b1c4573dda6f281ffc37caae184e264883ea35ea58a6810550e28ea7e8",
+      "sameAsPrimary": true
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-storage-execution-separation/techdoc.md",
+      "sha256": "683971ee22adc8fdc2f73840836d6ae5ff402dd83f8b23c716cdaac655127b3a",
+      "primarySha256": "683971ee22adc8fdc2f73840836d6ae5ff402dd83f8b23c716cdaac655127b3a",
+      "sameAsPrimary": true
+    },
+    {
+      "path": "changes/v3.2.10/documentation-validation.json",
+      "sha256": "7ea976333bb44731936f9114fe0e868bd1ec783a7d288c12a6e354d28acc02eb",
+      "primarySha256": "7ea976333bb44731936f9114fe0e868bd1ec783a7d288c12a6e354d28acc02eb",
+      "sameAsPrimary": true
+    },
+    {
+      "path": "changes/v3.2.10/review-response.md",
+      "sha256": "35c5ecd928ee37989e58737f43fb26fc5761187d2f9e7783cc836a68f6f2afdb",
+      "primarySha256": "35c5ecd928ee37989e58737f43fb26fc5761187d2f9e7783cc836a68f6f2afdb",
+      "sameAsPrimary": true
+    },
+    {
+      "path": "changes/v3.2.9/codex/v3.2.9-account-mapping-management/spec.md",
+      "sha256": "d8ba970a2649e277ea3a22fbd966d15c52c197928dd97700f5abc737113e6256",
+      "primarySha256": "d8ba970a2649e277ea3a22fbd966d15c52c197928dd97700f5abc737113e6256",
+      "sameAsPrimary": true
+    }
+  ],
+  "intentionalLocalUpdate": "changes/v3.2.10/README.md 仅补 G5 实施入口与状态，其余设计正文未改"
+}

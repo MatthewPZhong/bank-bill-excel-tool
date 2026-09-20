@@ -23,6 +23,9 @@
 `CLAUDE.md` 不作为 Codex 的独立必读来源。同层级旧文档/Skill 与本版的读取、委派或触发安排冲突时，说明并以本版为准；专项业务约束不因此免除。
 
 ## 项目与架构摘要
+
+模块现行说明：[BizOP catalog 查询与命令边界](src/main-process/biz-op-v327/README.md)。
+
 网银账单生成小助手：导入 Excel/CSV 账单，按模板映射列，导出标准化明细与余额 Excel。技术栈：Electron 36、原生 JavaScript、SQLite（`node:sqlite` 的 `DatabaseSync`）、SheetJS/XLSX；依赖版本以 `package.json` 为准。
 
 - Renderer（`index.html`、`src/renderer.js`、`src/renderer-dialogs.js`）经 `src/preload.js` 的 `window.desktopApi` 连接 `src/main.js` 的 IPC 与业务编排。修改跨模块大文件时读相关逻辑与调用方，不强制通读全文件。

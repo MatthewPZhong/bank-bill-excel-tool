@@ -1,0 +1,302 @@
+diff --git a/AGENTS.md b/AGENTS.md
+index 77280797..a2b4b4dc 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -23,6 +23,9 @@
+ `CLAUDE.md` 不作为 Codex 的独立必读来源。同层级旧文档/Skill 与本版的读取、委派或触发安排冲突时，说明并以本版为准；专项业务约束不因此免除。
+ 
+ ## 项目与架构摘要
++
++模块现行说明：[BizOP catalog 查询与命令边界](src/main-process/biz-op-v327/README.md)。
++
+ 网银账单生成小助手：导入 Excel/CSV 账单，按模板映射列，导出标准化明细与余额 Excel。技术栈：Electron 36、原生 JavaScript、SQLite（`node:sqlite` 的 `DatabaseSync`）、SheetJS/XLSX；依赖版本以 `package.json` 为准。
+ 
+ - Renderer（`index.html`、`src/renderer.js`、`src/renderer-dialogs.js`）经 `src/preload.js` 的 `window.desktopApi` 连接 `src/main.js` 的 IPC 与业务编排。修改跨模块大文件时读相关逻辑与调用方，不强制通读全文件。
+diff --git a/src/backend/database/archive-repository.js b/src/backend/database/archive-repository.js
+index 09d7a8fc..2f2fb609 100644
+--- a/src/backend/database/archive-repository.js
++++ b/src/backend/database/archive-repository.js
+@@ -2488,6 +2488,12 @@ class ArchiveRepository {
+     `).all(Number(blobId)).map(mapArtifact);
+   }
+ 
++  hasOtherArtifactForBlob(blobId, artifactId) {
++    return Boolean(this.db.prepare(
++      'SELECT 1 FROM archive_artifacts WHERE blob_id=? AND id!=? LIMIT 1'
++    ).get(blobId, artifactId));
++  }
++
+   listUnresolvedArtifactSourcePaths(options = {}) {
+     const excludeBatchId = options.excludeBatchId === undefined ? null : Number(options.excludeBatchId);
+     if (excludeBatchId !== null && (!Number.isSafeInteger(excludeBatchId) || excludeBatchId < 1)) {
+diff --git a/src/main-process/biz-op-v327/catalog.js b/src/main-process/biz-op-v327/catalog.js
+index 5278ef76..a7a93fd8 100644
+--- a/src/main-process/biz-op-v327/catalog.js
++++ b/src/main-process/biz-op-v327/catalog.js
+@@ -7,6 +7,7 @@ const { createArchiveRepository, withWriteTransaction } = require('../../backend
+ const { ACTIONS, MODULE_ID, fail, opaque, digest, count, hash, snapshot } = require('./contracts');
+ const { readVerifiedManifest } = require('./payload-store');
+ const { intervalInputs } = require('./compute-inputs');
++const { createBizOpCatalogQueries } = require('./catalog-queries');
+ 
+ function createBizOpCatalog(db, { assertCommitReady }) {
+   const archive = createArchiveRepository(db);
+@@ -15,6 +16,7 @@ function createBizOpCatalog(db, { assertCommitReady }) {
+   if (db.prepare('SELECT schema_version FROM biz_op_v327_control WHERE singleton=1').get().schema_version !== 1) {
+     fail('BIZOP_SCHEMA_UNSUPPORTED');
+   }
++  const queries = createBizOpCatalogQueries({ db });
+   const transaction = (fn) => withWriteTransaction(db, fn);
+   const now = () => new Date().toISOString();
+   const control = () => db.prepare('SELECT * FROM biz_op_v327_control WHERE singleton=1').get();
+@@ -384,7 +386,7 @@ function createBizOpCatalog(db, { assertCommitReady }) {
+       return receipt;
+     });
+   }
+-  return Object.freeze({ db, archive, transaction, now, control, operation, task, assertTask, prepare,
++  return Object.freeze({ db, archive, queries, transaction, now, control, operation, task, assertTask, prepare,
+     receipt, receiptState, readyHold, original, releaseOwnedHolds, version, enqueueReclaim, commitImport,
+     commitRun, deleteIntent, commitDelete, commitActivation });
+ }
+diff --git a/src/main-process/biz-op-v327/compute-inputs.js b/src/main-process/biz-op-v327/compute-inputs.js
+index acab514f..407a5725 100644
+--- a/src/main-process/biz-op-v327/compute-inputs.js
++++ b/src/main-process/biz-op-v327/compute-inputs.js
+@@ -30,34 +30,33 @@ function collectInputs({ catalog, payloadStore, startDate, endDate }) {
+   let metadataCount = required.length;
+   const selected = [];
+   for (const item of required) {
+-    const dataset = catalog.db.prepare(`SELECT d.* FROM biz_op_v327_input_heads h JOIN biz_op_v327_datasets d USING(dataset_id)
+-      WHERE h.kind=? AND h.data_date=? AND d.state='ACTIVE'`).get(item.kind, item.dataDate);
++    const dataset = catalog.queries.readActiveDataset(item.kind, item.dataDate);
+     if (!dataset) { missing.push(item); continue; }
+     selected.push({ item, dataset });
+   }
+   if (missing.length) throw Object.assign(new Error('所选区间缺少必需的校验表，未开始核对'), { code: 'BIZOP_RUN_INPUT_MISSING', missing: snapshot(missing) });
+   for (const { item, dataset } of selected) {
+-    const reference = { role: item.role, dataDate: item.dataDate, datasetId: dataset.dataset_id,
+-      inputVersion: dataset.public_version, sourceManifestDigest: dataset.source_manifest_digest };
++    const reference = { role: item.role, dataDate: item.dataDate, datasetId: dataset.datasetId,
++      inputVersion: dataset.publicVersion, sourceManifestDigest: dataset.sourceManifestDigest };
+     const sources = [];
+-    for (const source of catalog.db.prepare('SELECT * FROM biz_op_v327_dataset_sources WHERE dataset_id=? ORDER BY source_file_order').iterate(dataset.dataset_id)) {
++    for (const source of catalog.queries.iterateDatasetSources(dataset.datasetId)) {
+       if (++metadataCount > 4096) fail('BIZOP_RUN_INPUT_BUDGET');
+-      const artifact = catalog.archive.getArtifact(source.artifact_id);
+-      if (!artifact || artifact.status !== 'ready' || artifact.blob?.sha256 !== source.source_sha256) fail('BIZOP_RUN_ORIGINAL_UNAVAILABLE');
+-      const hold = catalog.archive.listArtifactHolds(source.artifact_id).some((value) => value.ownerModule === 'biz-op-recon'
+-        && value.ownerType === 'v327-input' && value.ownerId === dataset.dataset_id);
++      const artifact = catalog.archive.getArtifact(source.artifactId);
++      if (!artifact || artifact.status !== 'ready' || artifact.blob?.sha256 !== source.sha256) fail('BIZOP_RUN_ORIGINAL_UNAVAILABLE');
++      const hold = catalog.archive.listArtifactHolds(source.artifactId).some((value) => value.ownerModule === 'biz-op-recon'
++        && value.ownerType === 'v327-input' && value.ownerId === dataset.datasetId);
+       if (!hold) fail('BIZOP_RUN_ORIGINAL_UNPROTECTED');
+-      bus.add(source.normalized_bu); originals.set(source.artifact_id, source.source_sha256);
+-      sources.push({ artifactId: source.artifact_id, sha256: source.source_sha256, originalName: source.source_file_name,
+-        order: source.source_file_order, sheetName: source.source_sheet_name, bu: source.normalized_bu, rowCount: source.row_count });
++      bus.add(source.bu); originals.set(source.artifactId, source.sha256);
++      sources.push({ artifactId: source.artifactId, sha256: source.sha256, originalName: source.originalName,
++        order: source.order, sheetName: source.sheetName, bu: source.bu, rowCount: source.rowCount });
+     }
+-    if (!sources.length || sources.reduce((sum, source) => sum + count(source.rowCount), 0) !== dataset.row_count) fail('BIZOP_RUN_SOURCE_COUNT_MISMATCH');
+-    const manifest = payloadStore.readDocument(dataset.payload_manifest_rel_path, dataset.payload_manifest_digest).value;
+-    if (manifest.objectId !== dataset.dataset_id || manifest.objectKind !== 'DATASET' || manifest.rowCount !== dataset.row_count
+-        || manifest.catalog.sourceManifestDigest !== dataset.source_manifest_digest
++    if (!sources.length || sources.reduce((sum, source) => sum + count(source.rowCount), 0) !== dataset.rowCount) fail('BIZOP_RUN_SOURCE_COUNT_MISMATCH');
++    const manifest = payloadStore.readDocument(dataset.manifestRelativePath, dataset.manifestDigest).value;
++    if (manifest.objectId !== dataset.datasetId || manifest.objectKind !== 'DATASET' || manifest.rowCount !== dataset.rowCount
++        || manifest.catalog.sourceManifestDigest !== dataset.sourceManifestDigest
+         || manifest.catalog.cellContractVersion !== CELL_CONTRACT_VERSION || manifest.catalog.ruleVersion !== RULE_VERSION) fail('BIZOP_RUN_INPUT_CONTRACT_MISMATCH');
+-    documents.push({ ...reference, kind: item.kind, rowCount: dataset.row_count, sources,
+-      manifestRelativePath: dataset.payload_manifest_rel_path, manifestDigest: dataset.payload_manifest_digest });
++    documents.push({ ...reference, kind: item.kind, rowCount: dataset.rowCount, sources,
++      manifestRelativePath: dataset.manifestRelativePath, manifestDigest: dataset.manifestDigest });
+   }
+   const inputs = documents.map(({ role, dataDate, datasetId, inputVersion, sourceManifestDigest }) => ({ role, dataDate, datasetId, inputVersion, sourceManifestDigest }));
+   const actualBus = [...bus].sort(compareText);
+diff --git a/src/main-process/biz-op-v327/delete-preview.js b/src/main-process/biz-op-v327/delete-preview.js
+index d7267103..36d6fbf6 100644
+--- a/src/main-process/biz-op-v327/delete-preview.js
++++ b/src/main-process/biz-op-v327/delete-preview.js
+@@ -10,7 +10,7 @@ function normalizeSelection({ datasetIds = [], runIds = [] } = {}) {
+   return { datasetIds: [...new Set(datasetIds.map((id) => opaque(id)))].sort(), runIds: [...new Set(runIds.map((id) => opaque(id)))].sort() };
+ }
+ function createBizOpDeletePreview({ catalog, admission }) {
+-  const { db, now } = catalog;
++  const { db, now, queries } = catalog;
+   function collect(input) {
+     const selection = normalizeSelection(input); const generation = catalog.control().generation;
+     const runIds = new Set(selection.runIds); const artifacts = new Set(); let bytes = 0; let evaluated = 0;
+@@ -20,29 +20,28 @@ function createBizOpDeletePreview({ catalog, admission }) {
+       return value;
+     };
+     const datasets = selection.datasetIds.map((id) => {
+-      const row = db.prepare("SELECT * FROM biz_op_v327_datasets WHERE dataset_id=? AND state='ACTIVE'").get(id);
++      const row = queries.readActiveDatasetForDelete(id);
+       if (!row) fail('BIZOP_DELETE_SELECTION_CHANGED', '选取的数据已被覆盖或删除，请重新选取');
+       const originals = [];
+-      for (const item of db.prepare('SELECT artifact_id,source_file_name,source_sha256 FROM biz_op_v327_dataset_sources WHERE dataset_id=? ORDER BY source_file_order').iterate(id)) {
+-        artifacts.add(item.artifact_id); originals.push(charge({ artifactId: item.artifact_id, originalName: item.source_file_name, sha256: item.source_sha256 }));
++      for (const item of queries.iterateDatasetSources(id)) {
++        artifacts.add(item.artifactId); originals.push(charge({ artifactId: item.artifactId, originalName: item.originalName, sha256: item.sha256 }));
+       }
+-      for (const related of db.prepare(`SELECT DISTINCT r.run_id FROM biz_op_v327_runs r JOIN biz_op_v327_run_inputs i USING(run_id)
+-        WHERE i.dataset_id=? AND r.state='PUBLISHED'`).iterate(id)) {
+-        runIds.add(related.run_id); if (runIds.size > 4096) fail('BIZOP_DELETE_PREVIEW_LIMIT');
++      for (const related of queries.iteratePublishedRunIdsUsingDataset(id)) {
++        runIds.add(related); if (runIds.size > 4096) fail('BIZOP_DELETE_PREVIEW_LIMIT');
+       }
+-      return charge({ objectId: id, kind: row.kind, dataDate: row.data_date, version: row.public_version,
+-        operationMonth: row.activated_at.slice(0, 7), originals });
++      return charge({ objectId: id, kind: row.kind, dataDate: row.dataDate, version: row.publicVersion,
++        operationMonth: row.activatedAt.slice(0, 7), originals });
+     });
+     const runs = [...runIds].sort().map((id) => {
+-      const row = db.prepare("SELECT * FROM biz_op_v327_runs WHERE run_id=? AND state='PUBLISHED'").get(id);
++      const row = queries.readPublishedRunForDelete(id);
+       if (!row) fail('BIZOP_DELETE_SELECTION_CHANGED', '选取的结果表已被删除，请重新选取');
+       const originals = [];
+-      for (const item of db.prepare('SELECT * FROM biz_op_v327_run_artifacts WHERE run_id=? ORDER BY artifact_id').iterate(id)) {
+-        artifacts.add(item.artifact_id); originals.push(charge({ artifactId: item.artifact_id, originalName: item.source_file_name, sha256: item.source_sha256 }));
++      for (const item of queries.iterateRunArtifacts(id)) {
++        artifacts.add(item.artifactId); originals.push(charge({ artifactId: item.artifactId, originalName: item.originalName, sha256: item.sha256 }));
+       }
+-      return charge({ objectId: id, startDate: row.start_date, endDate: row.end_date, version: row.result_version,
+-        manifestDigest: row.payload_manifest_digest,
+-        operationMonth: row.operation_month, tableName: outputName('RESULT_DIFF', { startDate: row.start_date, endDate: row.end_date, version: row.result_version }),
++      return charge({ objectId: id, startDate: row.startDate, endDate: row.endDate, version: row.resultVersion,
++        manifestDigest: row.manifestDigest,
++        operationMonth: row.operationMonth, tableName: outputName('RESULT_DIFF', { startDate: row.startDate, endDate: row.endDate, version: row.resultVersion }),
+         directlySelected: selection.runIds.includes(id), originals });
+     });
+     const inputOwners = new Set(selection.datasetIds);
+@@ -51,7 +50,7 @@ function createBizOpDeletePreview({ catalog, admission }) {
+       const artifact = catalog.archive.getArtifact(id); if (!artifact) fail('BIZOP_DELETE_ORIGINAL_CHANGED');
+       const locked = catalog.archive.getBatch(artifact.batchId).locked;
+       // 当前 artifact 的业务保护与相同 blob 的其他归档引用分别计数；本模块从不删除归档文件。
+-      if (artifact.blobId && db.prepare('SELECT 1 FROM archive_artifacts WHERE blob_id=? AND id!=? LIMIT 1').get(artifact.blobId, id)) references.sharedBlobOriginals += 1;
++      if (artifact.blobId && catalog.archive.hasOtherArtifactForBlob(artifact.blobId, id)) references.sharedBlobOriginals += 1;
+       if (locked) references.userLockedOriginals += 1;
+       let keep = locked; let remove = locked;
+       for (const hold of catalog.archive.listArtifactHolds(id)) {
+diff --git a/src/main-process/biz-op-v327/export-inputs.js b/src/main-process/biz-op-v327/export-inputs.js
+index 79180129..517184b6 100644
+--- a/src/main-process/biz-op-v327/export-inputs.js
++++ b/src/main-process/biz-op-v327/export-inputs.js
+@@ -6,40 +6,19 @@ const { fail, opaque, snapshot } = require('./contracts');
+ 
+ async function freezeExportSource({ catalog, payloadStore, getArchiveService, outputKind, objectId, columnSchemaVersion }) {
+   schemaFor(outputKind, columnSchemaVersion); opaque(objectId);
+-  let row; let source;
+-  if (outputKind.startsWith('RESULT_')) {
+-    row = catalog.db.prepare("SELECT * FROM biz_op_v327_runs WHERE run_id=? AND state='PUBLISHED'").get(objectId);
+-    if (row) source = { objectKind: 'RESULT', metadata: { version: row.result_version,
+-      startDate: row.start_date, endDate: row.end_date, inputFingerprint: row.input_fingerprint, publishedAt: row.published_at } };
+-    if (source) {
+-      const endpoints = catalog.db.prepare("SELECT role,input_version FROM biz_op_v327_run_inputs WHERE run_id=? AND role IN ('START_OP','END_OP')").all(objectId);
+-      if (endpoints.length !== 2) fail('BIZOP_EXPORT_INPUT_METADATA_MISSING');
+-      source.metadata.startInputVersion = endpoints.find((item) => item.role === 'START_OP')?.input_version;
+-      source.metadata.endInputVersion = endpoints.find((item) => item.role === 'END_OP')?.input_version;
+-      if (!source.metadata.startInputVersion || !source.metadata.endInputVersion) fail('BIZOP_EXPORT_INPUT_METADATA_MISSING');
+-    }
+-  } else if (outputKind === 'ERRORS') {
+-    row = catalog.db.prepare(`SELECT d.*,l.sealed_manifest_rel_path AS payload_manifest_rel_path,d.manifest_digest AS payload_manifest_digest
+-      FROM biz_op_v327_diagnostic_reports d JOIN biz_op_v327_diagnostic_lifecycle l USING(report_ref)
+-      WHERE report_ref=? AND state='READY'`).get(objectId);
+-    if (row) source = { objectKind: 'DIAGNOSTIC', metadata: { producerTaskRunId: row.task_run_id,
+-      scanComplete: Boolean(row.scan_complete), errorCountExact: Boolean(row.error_count_exact), sampleCount: row.sample_count } };
+-  } else {
+-    row = catalog.db.prepare("SELECT * FROM biz_op_v327_datasets WHERE dataset_id=? AND state='ACTIVE' AND kind=?")
+-      .get(objectId, outputKind.split('_')[0]);
+-    if (row) source = { objectKind: 'DATASET', metadata: { version: row.public_version, dataDate: row.data_date,
+-      sourceManifestDigest: row.source_manifest_digest, activatedAt: row.activated_at } };
+-  }
+-  if (!row || !source) fail('BIZOP_EXPORT_SOURCE_UNAVAILABLE');
++  const object = catalog.queries.readExportObject(outputKind, objectId);
++  if (!object) fail('BIZOP_EXPORT_SOURCE_UNAVAILABLE');
++  // 按原位置装配快照字段，避免查询的内部字段透传到导出合同。
++  const source = { objectKind: object.objectKind, metadata: object.metadata };
+   if (source.objectKind === 'RESULT') {
+-    const manifest = payloadStore.readDocument(row.payload_manifest_rel_path, row.payload_manifest_digest).value;
++    const manifest = payloadStore.readDocument(object.manifestRelativePath, object.manifestDigest).value;
+     if (manifest.objectId !== objectId || manifest.objectKind !== 'RESULT') fail('BIZOP_EXPORT_OWNER_MISMATCH');
+     const contract = resultContractFor(manifest.catalog);
+     if (columnSchemaVersion !== undefined && columnSchemaVersion !== contract.columnSchemaVersion) fail('BIZOP_EXPORT_CONTRACT_MISMATCH');
+     columnSchemaVersion = contract.columnSchemaVersion;
+   } else if (columnSchemaVersion === undefined) columnSchemaVersion = 1;
+   Object.assign(source, { outputKind, columnSchemaVersion, objectId,
+-    manifestRelativePath: row.payload_manifest_rel_path, manifestDigest: row.payload_manifest_digest });
++    manifestRelativePath: object.manifestRelativePath, manifestDigest: object.manifestDigest });
+   if (outputKind.endsWith('_RAW')) {
+     const manifest = payloadStore.readDocument(source.manifestRelativePath, source.manifestDigest).value;
+     source.originals = [];
+diff --git a/src/main-process/biz-op-v327/import-main.js b/src/main-process/biz-op-v327/import-main.js
+index 9bec2fae..de4b65c2 100644
+--- a/src/main-process/biz-op-v327/import-main.js
++++ b/src/main-process/biz-op-v327/import-main.js
+@@ -23,11 +23,10 @@ function createBizOpImportCoordinator({ userDataDir, catalog, payloadStore, prot
+     if (typeof manifest.catalog.scanComplete !== 'boolean' || typeof manifest.catalog.errorCountExact !== 'boolean'
+         || count(manifest.catalog.collectedSamples) > 1000 || count(manifest.catalog.sampleBytes) > 8388608
+         || manifest.parts.length !== 1 || manifest.parts[0].byteSize !== manifest.catalog.sampleBytes) fail('BIZOP_REPORT_SUMMARY_MISMATCH');
+-    const carriers = catalog.db.prepare('SELECT * FROM biz_op_v327_dispatches WHERE task_run_id=? AND plan_digest=?')
+-      .all(taskRunId, manifest.catalog.producerPlanDigest);
++    const carriers = catalog.queries.readDispatchesForPlan(taskRunId, manifest.catalog.producerPlanDigest);
+     if (carriers.length !== 1) fail('BIZOP_REPORT_OWNER_MISMATCH');
+     const carrier = carriers[0];
+-    const existing = catalog.db.prepare('SELECT * FROM biz_op_v327_diagnostic_reports WHERE report_ref=?').get(intent.reportRef);
++    const existing = catalog.queries.readDiagnosticByRef(intent.reportRef);
+     if (existing) {
+       if (existing.task_run_id !== taskRunId || existing.manifest_digest !== document.digest
+           || existing.producer_job_id !== carrier.job_id || existing.producer_session_id !== carrier.session_id) fail('BIZOP_REPORT_OWNER_MISMATCH');
+@@ -109,7 +108,7 @@ function createBizOpImportCoordinator({ userDataDir, catalog, payloadStore, prot
+                 || count(imported.scannedDataRows) !== count(imported.acceptedRows) + count(imported.rowErrorCount)
+                 || count(imported.collectedSamples) > 1000 || count(imported.sampleBytes) > 8388608) fail('BIZOP_IMPORT_RESULT_MISMATCH');
+             count(imported.fileErrorCount);
+-            const registeredReport = catalog.db.prepare('SELECT manifest_digest FROM biz_op_v327_diagnostic_reports WHERE report_ref=?').get(reportRef);
++            const registeredReport = catalog.queries.readDiagnosticByRef(reportRef);
+             if (!registeredReport || registeredReport.manifest_digest !== imported.reportManifestDigest) fail('BIZOP_REPORT_SUMMARY_MISMATCH');
+             const summary = summaryOf(imported);
+             if (imported.cancelled || imported.batchRejected || !imported.scanComplete || !imported.errorCountExact || imported.rowErrorCount || imported.fileErrorCount) {
+@@ -141,7 +140,7 @@ function createBizOpImportCoordinator({ userDataDir, catalog, payloadStore, prot
+         if (taskRunId && catalog.receipt(taskRunId)) {
+           sources.syncCompletion(sources.operationSource(taskRunId));
+           // 成功批次的空诊断通过既有真实维护 Task 回收，不留下无主文件。
+-          const report = catalog.db.prepare('SELECT * FROM biz_op_v327_diagnostic_reports WHERE report_ref=?').get(reportRef);
++          const report = catalog.queries.readDiagnosticByRef(reportRef);
+           if (report && report.sample_count === 0) protection.retireDiagnostic(reportRef, taskRunId);
+         } else if (taskRunId) admission.requireRecovery();
+         return result;
+diff --git a/tests/unit/main-process/biz-op-v327-export-rule-version.test.js b/tests/unit/main-process/biz-op-v327-export-rule-version.test.js
+index 15404313..23fe749b 100644
+--- a/tests/unit/main-process/biz-op-v327-export-rule-version.test.js
++++ b/tests/unit/main-process/biz-op-v327-export-rule-version.test.js
+@@ -1,5 +1,7 @@
+ 'use strict';
+ 
++const { createBizOpCatalogQueries } = require('../../../src/main-process/biz-op-v327/catalog-queries');
++
+ const test = require('node:test');
+ const { durableDirectoryTest } = require('../../helpers/durable-directory-tests');
+ const assert = require('node:assert/strict');
+@@ -74,7 +76,7 @@ async function sealedResult(t, version, { partRuleVersion, catalogPatch = {} } =
+   db.prepare('INSERT INTO biz_op_v327_runs VALUES (?,?,?,?,?,?,?,?,?)')
+     .run(objectId, 'PUBLISHED', 1, '2026-08-08', '2026-08-10', '2'.repeat(64), '2026-09-07T00:00:00Z', manifest.relativePath, manifest.digest);
+   for (const input of inputs) db.prepare('INSERT INTO biz_op_v327_run_inputs VALUES (?,?,?)').run(objectId, input.role, input.inputVersion);
+-  return { root, objectId, manifest, values, payloadStore, catalog: { db } };
++  return { root, objectId, manifest, values, payloadStore, catalog: { db, queries: createBizOpCatalogQueries({ db }) } };
+ }
+ 
+ function recordingSpool() {
+diff --git a/tests/unit/main-process/biz-op-v329-auto-report.test.js b/tests/unit/main-process/biz-op-v329-auto-report.test.js
+index d2a59750..633ab3d1 100644
+--- a/tests/unit/main-process/biz-op-v329-auto-report.test.js
++++ b/tests/unit/main-process/biz-op-v329-auto-report.test.js
+@@ -323,7 +323,7 @@ test('导出 beforeStart 来源冻结失败前交付真实 Task 身份，无需
+   const identities = []; const order = [];
+   const coordinator = createBizOpExportCoordinator({ admission: { readTask: (_id, work) => work({ bindTask(id) {
+     assert.equal(id, 'real-export-task'); order.push('bind'); } }) },
+-  catalog: { db: { prepare() { throw new Error('source unavailable'); } } } });
++  catalog: { queries: { readExportObject() { throw new Error('source unavailable'); } } } });
+   await assert.rejects(coordinator.runExport({ outputKind: 'ERRORS', objectId: 'report-one',
+     filePlan: { inputs: [], outputs: [{}] }, runtime: { start() { assert.fail('来源未验证不可启动 worker'); } },
+     taskLifecycle: { runFileTask: ({ beforeStart }) => beforeStart({ taskRunId: 'real-export-task' }, {}) },

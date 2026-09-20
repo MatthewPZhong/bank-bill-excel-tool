@@ -1,0 +1,70 @@
+{
+  "head": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "dirty": true,
+  "workdir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-bizop-query-boundaries",
+  "platform": "darwin",
+  "arch": "arm64",
+  "node": "v25.8.0",
+  "groups": [
+    {
+      "name": "Archive 引用与仓储",
+      "command": "node --test tests/unit/backend/archive-blob-reference-query.test.js tests/unit/backend/database/archive-repository.test.js",
+      "tests": 35,
+      "pass": 35,
+      "fail": 0,
+      "skip": 0,
+      "exitCode": 0,
+      "evidence": "review.md §3，执行工具结果摘要"
+    },
+    {
+      "name": "领域 query",
+      "command": "node --test tests/unit/main-process/biz-op-v327-catalog-queries.test.js",
+      "tests": 11,
+      "pass": 11,
+      "fail": 0,
+      "skip": 0,
+      "exitCode": 0,
+      "evidence": "执行工具结果摘要，覆盖 fixture/预算/readonly/iterator"
+    },
+    {
+      "name": "协调器和准入",
+      "command": "node --test tests/unit/main-process/biz-op-v327-compute-main.test.js tests/unit/main-process/biz-op-v327-export-main.test.js tests/unit/main-process/biz-op-v327-export-rule-version.test.js tests/unit/main-process/biz-op-v327-delete-main.test.js tests/unit/main-process/biz-op-v327-import-main.test.js tests/unit/main-process/biz-op-v327-phase-admission.test.js",
+      "tests": 58,
+      "pass": 58,
+      "fail": 0,
+      "skip": 0,
+      "exitCode": 0,
+      "evidence": "coordinator-tests.log"
+    },
+    {
+      "name": "诊断查询负向",
+      "command": "node --test tests/unit/main-process/biz-op-v327-import-query.test.js",
+      "tests": 3,
+      "pass": 3,
+      "fail": 0,
+      "skip": 0,
+      "exitCode": 0,
+      "evidence": "import-query-tests.log"
+    },
+    {
+      "name": "自动报告调用兼容",
+      "command": "node --test tests/unit/main-process/biz-op-v329-auto-report.test.js",
+      "tests": 46,
+      "pass": 46,
+      "fail": 0,
+      "skip": 0,
+      "exitCode": 0,
+      "evidence": "auto-report-tests.log"
+    }
+  ],
+  "unitTotals": {
+    "tests": 153,
+    "pass": 153,
+    "fail": 0,
+    "skip": 0
+  },
+  "integration": "integration-tests.log 与 integration-snapshot.json 单独计场景组",
+  "sourceSnapshot": "implementation-snapshot.json",
+  "releaseCheckExecuted": false,
+  "knownBaselineFailure": "baseline-action-manifest.json"
+}

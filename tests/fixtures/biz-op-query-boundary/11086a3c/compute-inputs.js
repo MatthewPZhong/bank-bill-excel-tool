@@ -30,33 +30,34 @@ function collectInputs({ catalog, payloadStore, startDate, endDate }) {
   let metadataCount = required.length;
   const selected = [];
   for (const item of required) {
-    const dataset = catalog.queries.readActiveDataset(item.kind, item.dataDate);
+    const dataset = catalog.db.prepare(`SELECT d.* FROM biz_op_v327_input_heads h JOIN biz_op_v327_datasets d USING(dataset_id)
+      WHERE h.kind=? AND h.data_date=? AND d.state='ACTIVE'`).get(item.kind, item.dataDate);
     if (!dataset) { missing.push(item); continue; }
     selected.push({ item, dataset });
   }
   if (missing.length) throw Object.assign(new Error('所选区间缺少必需的校验表，未开始核对'), { code: 'BIZOP_RUN_INPUT_MISSING', missing: snapshot(missing) });
   for (const { item, dataset } of selected) {
-    const reference = { role: item.role, dataDate: item.dataDate, datasetId: dataset.datasetId,
-      inputVersion: dataset.publicVersion, sourceManifestDigest: dataset.sourceManifestDigest };
+    const reference = { role: item.role, dataDate: item.dataDate, datasetId: dataset.dataset_id,
+      inputVersion: dataset.public_version, sourceManifestDigest: dataset.source_manifest_digest };
     const sources = [];
-    for (const source of catalog.queries.iterateDatasetSources(dataset.datasetId)) {
+    for (const source of catalog.db.prepare('SELECT * FROM biz_op_v327_dataset_sources WHERE dataset_id=? ORDER BY source_file_order').iterate(dataset.dataset_id)) {
       if (++metadataCount > 4096) fail('BIZOP_RUN_INPUT_BUDGET');
-      const artifact = catalog.archive.getArtifact(source.artifactId);
-      if (!artifact || artifact.status !== 'ready' || artifact.blob?.sha256 !== source.sha256) fail('BIZOP_RUN_ORIGINAL_UNAVAILABLE');
-      const hold = catalog.archive.listArtifactHolds(source.artifactId).some((value) => value.ownerModule === 'biz-op-recon'
-        && value.ownerType === 'v327-input' && value.ownerId === dataset.datasetId);
+      const artifact = catalog.archive.getArtifact(source.artifact_id);
+      if (!artifact || artifact.status !== 'ready' || artifact.blob?.sha256 !== source.source_sha256) fail('BIZOP_RUN_ORIGINAL_UNAVAILABLE');
+      const hold = catalog.archive.listArtifactHolds(source.artifact_id).some((value) => value.ownerModule === 'biz-op-recon'
+        && value.ownerType === 'v327-input' && value.ownerId === dataset.dataset_id);
       if (!hold) fail('BIZOP_RUN_ORIGINAL_UNPROTECTED');
-      bus.add(source.bu); originals.set(source.artifactId, source.sha256);
-      sources.push({ artifactId: source.artifactId, sha256: source.sha256, originalName: source.originalName,
-        order: source.order, sheetName: source.sheetName, bu: source.bu, rowCount: source.rowCount });
+      bus.add(source.normalized_bu); originals.set(source.artifact_id, source.source_sha256);
+      sources.push({ artifactId: source.artifact_id, sha256: source.source_sha256, originalName: source.source_file_name,
+        order: source.source_file_order, sheetName: source.source_sheet_name, bu: source.normalized_bu, rowCount: source.row_count });
     }
-    if (!sources.length || sources.reduce((sum, source) => sum + count(source.rowCount), 0) !== dataset.rowCount) fail('BIZOP_RUN_SOURCE_COUNT_MISMATCH');
-    const manifest = payloadStore.readDocument(dataset.manifestRelativePath, dataset.manifestDigest).value;
-    if (manifest.objectId !== dataset.datasetId || manifest.objectKind !== 'DATASET' || manifest.rowCount !== dataset.rowCount
-        || manifest.catalog.sourceManifestDigest !== dataset.sourceManifestDigest
+    if (!sources.length || sources.reduce((sum, source) => sum + count(source.rowCount), 0) !== dataset.row_count) fail('BIZOP_RUN_SOURCE_COUNT_MISMATCH');
+    const manifest = payloadStore.readDocument(dataset.payload_manifest_rel_path, dataset.payload_manifest_digest).value;
+    if (manifest.objectId !== dataset.dataset_id || manifest.objectKind !== 'DATASET' || manifest.rowCount !== dataset.row_count
+        || manifest.catalog.sourceManifestDigest !== dataset.source_manifest_digest
         || manifest.catalog.cellContractVersion !== CELL_CONTRACT_VERSION || manifest.catalog.ruleVersion !== RULE_VERSION) fail('BIZOP_RUN_INPUT_CONTRACT_MISMATCH');
-    documents.push({ ...reference, kind: item.kind, rowCount: dataset.rowCount, sources,
-      manifestRelativePath: dataset.manifestRelativePath, manifestDigest: dataset.manifestDigest });
+    documents.push({ ...reference, kind: item.kind, rowCount: dataset.row_count, sources,
+      manifestRelativePath: dataset.payload_manifest_rel_path, manifestDigest: dataset.payload_manifest_digest });
   }
   const inputs = documents.map(({ role, dataDate, datasetId, inputVersion, sourceManifestDigest }) => ({ role, dataDate, datasetId, inputVersion, sourceManifestDigest }));
   const actualBus = [...bus].sort(compareText);
