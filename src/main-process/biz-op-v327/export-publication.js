@@ -3,25 +3,29 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
-const { publishDurableArtifactAsync, recoverToolboxPublicationsAsync } = require('../toolbox-output-publication-dispatch');
+const { publishDurableArtifactAsync } = require('../toolbox-output-publication-dispatch');
+const { createBizOpPublicationOwner, EXPORT_IO_RESOURCES: PHASE } = require('./publication-owner');
+const { isPublicationRecoveryObservation } = require('../publication-recovery/coordinator');
 const { freezeWorkerBatchContext } = require('../archive-center/worker-batch-context');
 const { fsyncDirectory } = require('../background-execution/durable-file');
 const { fail, hash, snapshot } = require('./contracts');
 const { acquireBizOpPhaseLease } = require('./phase-admission');
 const { archiveOwnerBinding } = require('./archive-owner-completion');
-const PHASE = Object.freeze({ cpuSlots: 1, workerThreadSlots: 1, utilityProcessSlots: 0, ioHeavySlots: 1, memoryBytes: 1073741824 });
 
-function createBizOpPublication({ userDataDir, catalog, payloadStore, protection, getArchiveService, getRuntime }) {
+function createBizOpPublication({ userDataDir, catalog, payloadStore, protection, getArchiveService, getRuntime,
+  publishArtifact = publishDurableArtifactAsync }) {
   const { db, now } = catalog;
   const instance = randomUUID(); const live = new Map();
+  let recovery;
   const record = (id) => db.prepare('SELECT * FROM biz_op_v327_publications WHERE task_run_id=?').get(id);
   function binding(id) {
     const row = record(id); if (!row) return null;
     const value = payloadStore.readDocument(row.binding_rel_path, row.binding_digest).value;
     const op = catalog.operation(id);
-    if (value.taskRunId !== id || value.intentDigest !== op?.intent_digest || value.actionKey !== op.action_key
+    if (!op || value.taskRunId !== id || value.intentDigest !== op.intent_digest || value.actionKey !== op.action_key
         || value.batchContext.taskRunId !== id || value.batchContext.operationKey !== op.operation_key) fail('BIZOP_PUBLICATION_BINDING_INVALID');
     catalog.assertTask(op);
+    payloadStore.readDocument(op.intent_rel_path, op.intent_digest);
     return value;
   }
   function register({ context, intentDigest, sourceDigest, candidateRef, output, targetSnapshot }) {
@@ -66,16 +70,17 @@ function createBizOpPublication({ userDataDir, catalog, payloadStore, protection
       throw error;
     }
     const nonce = randomUUID(); const active = { closed: false }; live.set(nonce, active);
-    let started = false;
+    let started = false; let borrowed;
     try {
       // 排队等容量时仍接受取消；准入后先复查，再登记或调用 Publisher。
       if (signal?.aborted) fail('BIZOP_CANCELLED');
+      borrowed = publicationOwner.issueBorrowedObservation({ taskRunId: id, attemptNonce: nonce, kind });
       db.prepare(`UPDATE biz_op_v327_publications SET state='STARTED',attempt_nonce=?,owner_pid=?,owner_instance=?,
         closure_json=NULL,closure_digest=NULL,updated_at=? WHERE task_run_id=?`).run(nonce, process.pid, instance, now(), id);
       started = true;
       // 公共 dispatcher 的 Promise 只有原发布/必要恢复 worker 全部真实 exit 才结算。
       // 不使用超时 race；挂起期间继续持有本次租约和全部输入 pin。
-      try { return await work(); }
+      try { return await work(borrowed.capability); }
       finally {
         active.closed = true;
         const observation = { schemaVersion: 1, taskRunId: id, attemptNonce: nonce, dispatcher: 'toolbox-singleton',
@@ -84,6 +89,7 @@ function createBizOpPublication({ userDataDir, catalog, payloadStore, protection
           WHERE task_run_id=? AND attempt_nonce=?`).run(JSON.stringify(observation), hash(observation), now(), id, nonce);
       }
     } finally {
+      borrowed?.close();
       if (!started || active.closed) lease.release('publisher-actual-exit');
       if (!started || closure(record(id))) live.delete(nonce);
     }
@@ -119,7 +125,7 @@ function createBizOpPublication({ userDataDir, catalog, payloadStore, protection
   async function publish(id, evidence, runtime, onProgress, signal) {
     const bound = binding(id);
     if (record(id).state !== 'NOT_STARTED') fail('BIZOP_PUBLICATION_RETRY_REQUIRES_RECOVERY');
-    const result = await io(id, 'publish', () => publishDurableArtifactAsync({ userDataDir,
+    const result = await io(id, 'publish', (observation) => publishArtifact({ userDataDir, observation,
       taskId: bound.publisherTaskId, batchContext: bound.batchContext, archiveInputFiles: [], allowEmptyArchiveInputs: true,
       artifacts: [{ outputId: bound.output.artifactKey,
         sourcePath: payloadStore.resolve(`staging/${id}/${bound.candidateRef}/output.xlsx`),
@@ -162,15 +168,17 @@ function createBizOpPublication({ userDataDir, catalog, payloadStore, protection
     const bound = binding(id);
     if (!bound || !closed(id) || !protection.closed(id)) return;
     const neverStarted = record(id).state === 'NOT_STARTED';
-    const result = await io(id, 'recover', () => recoverToolboxPublicationsAsync({
-      userDataDir, deferCommittedRecovery: true }), runtime || getRuntime());
+    const facade = requireRecovery();
+    const result = await io(id, 'recover', (observation) => facade.recover({
+      reason: 'business-retry', taskIds: [bound.publisherTaskId], observation }), runtime || getRuntime());
     const entry = result.recovered.find((value) => value.taskId === bound.publisherTaskId);
-    if (result.skippedActive?.includes(bound.publisherTaskId)) fail('BIZOP_PUBLICATION_CLOSURE_PENDING');
+    if (isPending(result, bound.publisherTaskId)) fail('BIZOP_PUBLICATION_CLOSURE_PENDING');
     if (entry?.action === 'commit-handoff-pending') {
       const value = committedOutcome(id, { ...entry, committed: true }); saveOutcome(id, 'COMMITTED', value);
     } else {
       if (entry && !['rolled-back', 'cancelled', 'cancelled-preparing', 'cancelled-prepared'].includes(entry.action)) fail('BIZOP_PUBLICATION_RECOVERY_UNKNOWN');
-      // 原 dispatcher 从未提交或权威完整恢复后没有该任务的未决 journal；不重新发布。
+      if (!entry && !verifiedAbsence(result, bound.publisherTaskId)) fail('BIZOP_PUBLICATION_RECOVERY_UNKNOWN');
+      // 明确回滚/取消不依赖 absence；仅缺记录时要求本次受信任全根观察。
       saveOutcome(id, 'NOT_COMMITTED', { taskId: bound.publisherTaskId, inputConsumed: true,
         recoveredAction: entry?.action || (neverStarted ? 'not-started' : 'no-open-journal') });
     }
@@ -202,10 +210,14 @@ function createBizOpPublication({ userDataDir, catalog, payloadStore, protection
     if (observed.state === 'COMMITTED') {
       if (!row.archive_settled || catalog.task(id).status !== 'succeeded') return false;
       const bound = binding(id);
-      const result = await io(id, 'acknowledge', () => recoverToolboxPublicationsAsync({ userDataDir,
-        deferCommittedRecovery: true, acknowledgedCommittedTaskIds: [bound.publisherTaskId] }), runtime || getRuntime());
+      const facade = requireRecovery();
+      const result = await io(id, 'acknowledge', (observation) => facade.recover({ reason: 'receipt-ack',
+        taskIds: [bound.publisherTaskId], acknowledgedCommittedTaskIds: [bound.publisherTaskId], observation }), runtime || getRuntime());
       const item = result.recovered.find((entry) => entry.taskId === bound.publisherTaskId);
-      if (item && item.action !== 'commit-cleanup' || result.skippedActive?.includes(bound.publisherTaskId)) fail('BIZOP_PUBLICATION_ACK_PENDING');
+      if (isPending(result, bound.publisherTaskId) || (item ? item.action !== 'commit-cleanup'
+        : !verifiedAbsence(result, bound.publisherTaskId))) fail('BIZOP_PUBLICATION_ACK_PENDING');
+      // IO 期间 durable proof/终态可被别的调用改变，确认前再次核验全部领域前置。
+      if (!publicationOwner.hasAcknowledgementProof(id) || !closed(id) || fact(id).digest !== observed.digest) fail('BIZOP_PUBLICATION_ACK_PENDING');
       saveOutcome(id, 'COMMITTED', observed.outcome);
     }
     db.prepare('UPDATE biz_op_v327_publications SET acknowledged=1,updated_at=? WHERE task_run_id=?').run(now(), id);
@@ -236,21 +248,25 @@ function createBizOpPublication({ userDataDir, catalog, payloadStore, protection
     }
     db.prepare('UPDATE biz_op_v327_publications SET cleanup_completed=1,updated_at=? WHERE task_run_id=?').run(now(), id);
   }
-  async function recoverOtherOwners(options) {
-    // 共享 Publisher 仍完整观察同一 journal 根；旧 Archive owner 不得接管 BizOP
-    // 的 Task 或确认清理其 receipt，尤其是本模块暂时 blocked 的启动轮次。
-    const pending = db.prepare('SELECT 1 FROM biz_op_v327_publications WHERE cleanup_completed=0 LIMIT 1').get();
-    const lease = pending ? await acquireBizOpPhaseLease(getRuntime(), {
-      ownerKey: 'biz-op-v327:shared-publication-observation', actionKey: 'biz-op-v327:export-result-full',
-      operationKey: 'biz-op-v327:shared-publication-observation', resources: PHASE, lowMemoryBehavior: 'queue'
-    }) : null;
-    try {
-      if (options.deferCommittedRecovery !== true
-          || options.acknowledgedCommittedTaskIds?.some((id) => String(id).startsWith('biz-op-v327-export-'))) fail('BIZOP_PUBLICATION_OWNER_REQUIRED');
-      const result = await recoverToolboxPublicationsAsync(options);
-      return { ...result, recovered: result.recovered.filter((item) => !item.taskId.startsWith('biz-op-v327-export-')) };
-    } finally { lease?.release('shared-publication-observation-closed'); }
+  function requireRecovery() {
+    if (!recovery) fail('PUBLICATION_RECOVERY_AUTHORITY_REQUIRED');
+    return recovery;
   }
-  return { register, publish, reconcile, fact, closed, completeInput, settle, acknowledge, record, binding, recoverOtherOwners };
+  function bindRecovery(facade) {
+    if (!facade || typeof facade.recover !== 'function' || recovery && recovery !== facade) fail('PUBLICATION_RECOVERY_AUTHORITY_REQUIRED');
+    recovery = facade;
+  }
+  function isPending(result, taskId) {
+    return result.skippedActive?.includes(taskId) || result.deferred?.some((item) => item.taskId === taskId);
+  }
+  function verifiedAbsence(result, taskId) {
+    const observed = result.observation;
+    return isPublicationRecoveryObservation(observed) && observed.complete === true
+      && observed.root === path.resolve(userDataDir) && observed.requestedTaskIds.includes(taskId)
+      && observed.absentTaskIds.includes(taskId);
+  }
+  const publication = { register, publish, reconcile, fact, closed, completeInput, settle, acknowledge, record, binding, bindRecovery };
+  const publicationOwner = createBizOpPublicationOwner({ userDataDir, catalog, protection, publication, getRuntime });
+  return { ...publication, publicationOwner };
 }
 module.exports = { createBizOpPublication, EXPORT_IO_RESOURCES: PHASE };

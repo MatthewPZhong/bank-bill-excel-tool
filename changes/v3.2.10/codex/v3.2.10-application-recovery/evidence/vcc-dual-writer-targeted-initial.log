@@ -1,0 +1,24 @@
+✖ E12-C runtime CompoundLease admits two，Main full A/B/Join 后 Publisher exactly once (657.674292ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 938.558125
+
+✖ failing tests:
+
+test at tests/unit/main-process/vcc-financial-op-dual-writer-e12-c.test.js:407:1
+✖ E12-C runtime CompoundLease admits two，Main full A/B/Join 后 Publisher exactly once (657.674292ms)
+  Error: VCC 发布需要受限 Archive recovery facade
+      at publishVccFinancialOpOutputs (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/vcc-financial-op-output-recovery.js:50:25)
+      at generateValidateAndPublishVccExport (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/vcc-financial-op-output/dispatch.js:764:31)
+      at async TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/tests/unit/main-process/vcc-financial-op-dual-writer-e12-c.test.js:447:20)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    code: 'PUBLICATION_RECOVERY_AUTHORITY_REQUIRED',
+    preserveTemporaryFiles: true,
+    recoveryPaths: [ '/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/vcc-e12-c-gPYg0x/runtime-staging/vcc-export-a6fbdfaafa1fc2ae2179435d088257ed/000-58bb119c35513a45.xlsx', '/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/vcc-e12-c-gPYg0x/runtime-staging/vcc-export-a6fbdfaafa1fc2ae2179435d088257ed/001-fc686c314491e1f6.xlsx', '/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/vcc-e12-c-gPYg0x/runtime-staging/vcc-export-a6fbdfaafa1fc2ae2179435d088257ed/002-a56362a10c816abf.xlsx', '/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/vcc-e12-c-gPYg0x/runtime-staging/vcc-export-a6fbdfaafa1fc2ae2179435d088257ed/003-92f089f2a70df5d9.xlsx' ]
+  }

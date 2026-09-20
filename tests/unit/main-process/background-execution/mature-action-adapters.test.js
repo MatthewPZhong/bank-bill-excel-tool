@@ -508,6 +508,7 @@ test('Pending/BizOP 共用 adapter 只追加冻结并行度，业务 options/res
 
 test('Toolbox generation/publisher/recovery 严格分层，recover 不触发 generation 或 publish', async () => {
   const calls = { generation: 0, publish: 0, recover: 0 };
+  let recoveryRequest;
   const bindings = createMatureActionAdapterBindings({
     toolboxSplit: {
       dispatch(input) {
@@ -517,7 +518,7 @@ test('Toolbox generation/publisher/recovery 严格分层，recover 不触发 gen
     },
     toolboxPublication: {
       publish(options) { calls.publish += 1; return Promise.resolve({ taskId: options.taskId }); },
-      recover(options) { calls.recover += 1; return Promise.resolve({ recovered: [], userDataDir: options.userDataDir }); }
+      recover(options) { calls.recover += 1; recoveryRequest = options; return Promise.resolve({ recovered: [], deferred: [], skippedActive: [] }); }
     }
   });
 
@@ -532,9 +533,27 @@ test('Toolbox generation/publisher/recovery 严格分层，recover 不触发 gen
   calls.generation = 0;
   calls.publish = 0;
   await bindings[MATURE_ACTION_KEYS.toolboxPublish].dispatch({
-    input: { lifecycleOperation: 'recover', options: { userDataDir: '/tmp/toolbox-user-data' } }
+    input: { lifecycleOperation: 'recover', options: { reason: 'receipt-ack', taskIds: ['publish-1'],
+      acknowledgedCommittedTaskIds: ['publish-1'], deferCommittedFinalization: true } }
   });
   assert.deepEqual(calls, { generation: 0, publish: 0, recover: 1 });
+  assert.deepEqual(recoveryRequest, { reason: 'receipt-ack', taskIds: ['publish-1'],
+    acknowledgedCommittedTaskIds: ['publish-1'], deferCommittedFinalization: true, onProgress: undefined });
+});
+
+test('Toolbox mature recovery 缺 facade 或请求自选 root/owner/capability 均在业务调用前拒绝', () => {
+  let calls = 0;
+  const make = (toolboxPublication) => createMatureActionAdapterBindings({ toolboxPublication })[MATURE_ACTION_KEYS.toolboxPublish];
+  const absent = make({ publish() { calls += 1; } });
+  assert.throws(() => absent.dispatch({ input: { lifecycleOperation: 'recover', options: { taskIds: ['p'] } } }),
+    (error) => error.code === 'PUBLICATION_RECOVERY_AUTHORITY_REQUIRED' && error.preserveTemporaryFiles === true);
+  const controlled = make({ publish() { calls += 1; }, recover() { calls += 1; } });
+  for (const options of [{ root: '/tmp/other' }, { userDataDir: '/tmp/other' }, { ownerId: 'biz-op-v327' },
+    { observation: { verifyScope: () => true, release() {} } }]) {
+    assert.throws(() => controlled.dispatch({ input: { lifecycleOperation: 'recover', options } }),
+      (error) => error.code === 'PUBLICATION_RECOVERY_GRANT_INVALID' && error.preserveTemporaryFiles === true);
+  }
+  assert.equal(calls, 0);
 });
 
 test('全部 mature action 机器可证 production=false，默认 IPC 仍直达既有 dispatcher', () => {

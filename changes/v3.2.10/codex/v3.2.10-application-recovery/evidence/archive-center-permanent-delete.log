@@ -1,0 +1,22 @@
+PASS 预检与取消不修改记录，确认后真实删除原件、输出及只读副本并保留外部文件
+PASS 已删 owner 迟到重复终态在重启时由收口证明安全 ACK，不复活批次
+PASS 文件占用返回未完成并显示清理任务，重启后原任务重试完成
+PASS 预检后新增终态通知使确认失效，原任务收口后可重新确认
+PASS 失败输出的预分配路径出现未知文件时，完整删除入口保留批次和文件
+PASS 工具箱发布恢复完成原任务与后处理后，可通过统一入口永久删除
+PASS 入口维护持有自身 lease 时可完成到期清理和后续阶段
+PASS 真实 VCC 发布归档暂时失败，跨进程恢复后 outbox 清空并可初始化及永久删除
+PASS 正常工具箱收尾在完成凭证前退出，原发布记录跨进程收口且不重发布
+PASS BizOP 正式导出 ACK 临时失败，原 owner 恢复后 outbox 清空并完成初始化
+PASS BizOP ACK 后完成凭证前进程退出，重启沿原输出身份完成收口
+PASS BizOP 旧 binding 的业务恢复已关闭，仍可由原发布事实补齐完成凭证
+PASS BizOP 未提交导出首次终态落库失败，原补偿完成后可重启及永久删除
+PASS BizOP 已关闭的未提交导出缺少完成凭证，沿原补偿事实恢复收口
+PASS BizOP 大量历史导出分批补齐凭证，重启续跑且真实未决任务继续受保护
+PositionReconciliationError: 平盘导入可用磁盘空间不足，未修改现有数据
+    at fatalError (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/position-reconciliation/import-dispatch.js:52:17)
+    at ChildProcess.onMessage (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/position-reconciliation/import-dispatch.js:341:25)
+    at ChildProcess.emit (node:events:508:20)
+    at emit (node:internal/child_process:956:14)
+    at process.processTicksAndRejections (node:internal/process/task_queues:91:21)
+==== 15/52 PASS ====

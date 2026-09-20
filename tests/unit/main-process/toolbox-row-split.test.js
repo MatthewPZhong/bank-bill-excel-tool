@@ -21,8 +21,8 @@ const { openCache } = require('../../../src/main-process/toolbox-row-split/cache
 const { assertFinanceSafeValue } = require('../../../src/main-process/background-execution/error-codec');
 const { validateRowsResult } = require('../../../src/main-process/toolbox-row-split/contracts');
 const { operationContextFromBatch } = require('../../../src/main-process/toolbox-background/generation-validator');
-const { prepareToolboxPublication, publishPreparedToolboxPublication, ToolboxPublicationCrashError } = require('../../../src/main-process/toolbox-output-publication');
-const { recoverToolboxPublicationsAsync } = require('../../../src/main-process/toolbox-output-publication-dispatch');
+const { prepareToolboxPublication, publishPreparedToolboxPublication, ToolboxPublicationCrashError, createTestPublicationHarness } = require('../../helpers/publication-authority');
+const { createArchivePublicationOwner } = require('../../../src/main-process/publication-recovery/archive-owner');
 
 function fixture(t, dispose) {
   const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-rows-test-')));
@@ -349,7 +349,7 @@ test('rows 第 2 份发布时崩溃，现有 journal 在新 Worker 内恢复旧�
       return publishPreparedToolboxPublication(prepared);
     } }), /crash/i);
   assert.equal(publisherCalls, 1);
-  await recoverToolboxPublicationsAsync({ userDataDir });
+  await createTestPublicationHarness(userDataDir).recovery.recover({ reason: 'business-retry' });
   for (const target of targets) assert.equal(fs.readFileSync(target.filePath, 'utf8'), 'old-' + target.partIndex);
   assert.equal(fs.readFileSync(source, 'utf8'), 'A\n1\n2\n3\n4\n5\n6\n7\n8\n9\n');
 });
@@ -360,7 +360,6 @@ test('9 份真实 rows 输出只归属一个业务批次，原件和全部输出
   const { createArchiveOutboxStore } = require('../../../src/main-process/archive-center/outbox-store');
   const { createArchiveRepository } = require('../../../src/backend/database/archive-repository');
   const { recoverToolboxPublicationsIntoArchive } = require('../../../src/main-process/toolbox-archive-recovery');
-  const { publishToolboxPublicationAsync } = require('../../../src/main-process/toolbox-output-publication-dispatch');
   const { JOURNAL_INDEX_NAME } = require('../../../src/main-process/toolbox-output-publication');
   let db, runtime;
   const dir = fixture(t, async () => {
@@ -376,6 +375,12 @@ test('9 份真实 rows 输出只归属一个业务批次，原件和全部输出
     database: { getSetting: (key) => settings.get(key) || null,
       setSetting: (key, value) => settings.set(key, value), listTemplates: () => [] } });
   await controller.initialize();
+  const publicationHost = createTestPublicationHarness(userDataDir, {
+    owners: [createArchivePublicationOwner({ getArchiveCenter: () => controller })]
+  });
+  const publishToolboxPublicationAsync = (options) => publicationHost.dispatcher.publish({
+    ...options, requireArchiveHandoff: true, requireValidatedArtifacts: true
+  });
   const reserved = await service.reserveTaskBatch({ moduleId: 'toolbox', moduleCode: 'TOOLBOX', moduleName: '工具箱',
     operationKey: 'rows-archive-test', taskKey: 'toolbox:split:export', taskRunId: 'rows-archive-run', parentRunId: 'rows-archive-parent' });
   assert.equal(reserved.ok, true);
@@ -391,7 +396,7 @@ test('9 份真实 rows 输出只归属一个业务批次，原件和全部输出
       userDataDir, batchContext, archiveInputFiles: options.filePlan.inputs, protectedSourcePaths: [source] }) });
   assert.equal(JSON.parse(fs.readFileSync(path.join(userDataDir, JOURNAL_INDEX_NAME))).entries.length, 1);
   await recoverToolboxPublicationsIntoArchive({ userDataDir, archiveCenter: controller,
-    recoverPublications: recoverToolboxPublicationsAsync, taskIds: [generated.publication.taskId] });
+    recoverPublications: publicationHost.recovery.recover, taskIds: [generated.publication.taskId] });
   const detail = createArchiveRepository(db).getBatchDetail(reserved.batchId);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM archive_batches').get().count, 1);
   assert.equal(detail.taskStatus, 'succeeded');

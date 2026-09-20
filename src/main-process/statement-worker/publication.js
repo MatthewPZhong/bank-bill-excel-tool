@@ -6,10 +6,7 @@ const path = require('node:path');
 const { assertFilePlanFresh } = require('../archive-center/file-plan');
 const { canonicalizeJson } = require('../background-execution/canonical-json-v1');
 const { pathsAlias } = require('../toolbox-target-identity');
-const {
-  prepareToolboxPublication,
-  publishPreparedToolboxPublication
-} = require('../toolbox-output-publication');
+const { recoveryError } = require('../publication-recovery/worker-authority');
 const {
   createMainExpectedArtifactDescriptors,
   fileSha256,
@@ -165,6 +162,7 @@ function journalPublisher({
   userDataDir,
   technicalArtifacts,
   stagingRoot,
+  publishPublication,
   fsImpl = fs,
   options = {}
 }) {
@@ -198,7 +196,10 @@ function journalPublisher({
       runtimeOptions[key] = options[key];
     }
   }
-  const prepared = prepareToolboxPublication({
+  if (typeof publishPublication !== 'function') {
+    throw recoveryError('PUBLICATION_RECOVERY_AUTHORITY_REQUIRED', userDataDir, 'Statement publication seam 未注入受控 Publisher');
+  }
+  return publishPublication({
     ...runtimeOptions,
     fsImpl,
     taskId,
@@ -208,7 +209,6 @@ function journalPublisher({
     requireValidatedArtifacts: true,
     requireArchiveHandoff: false
   });
-  return publishPreparedToolboxPublication(prepared);
 }
 
 function cleanupStatementStagingResources({ stagingRoot, resourceIds, fsImpl = fs }) {
@@ -255,6 +255,7 @@ async function validateAndPublishStatementGeneration(options = {}) {
     taskId,
     userDataDir,
     publisher = journalPublisher,
+    publishPublication,
     publisherOptions = {},
     balanceTemplatePath,
     fsImpl = fs
@@ -277,7 +278,8 @@ async function validateAndPublishStatementGeneration(options = {}) {
       technicalArtifacts,
       stagingRoot,
       fsImpl,
-      options: publisherOptions
+      options: publisherOptions,
+      publishPublication
     });
     return Object.freeze({
       artifacts: Object.freeze(technicalArtifacts.map(({ artifact }) => artifact)),

@@ -1,0 +1,10 @@
+✔ plain prepared 对象不能把历史 prepared journal 重新提交，五类恢复材料零写 (154.559291ms)
+✔ 成功 prepare 的私有 provenance 拒绝复制/重绑定，合法发布只能消费一次 (361.505041ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 642.534708

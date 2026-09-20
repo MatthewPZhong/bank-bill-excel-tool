@@ -1,0 +1,261 @@
+{
+  "branch": "codex/v3.2.10-application-recovery",
+  "head": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "worktree": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery",
+  "state": "uncommitted",
+  "scope": "source/tests/scripts/rules/AGENTS only; version docs and evidence logs separate",
+  "files": [
+    {
+      "path": "AGENTS.md",
+      "sha256": "27114408793c1ca42791c2c6465c3ffcd05503ee4254ab237424532e6c7d8286"
+    },
+    {
+      "path": "rules/integration-test-policy.md",
+      "sha256": "85936d44dc57d59e0603ed399e3b9b19eaf27adb089b5b10e6797fa1bcb3f0f9"
+    },
+    {
+      "path": "scripts/integration/application-recovery-governance.js",
+      "sha256": "afcd781d24e2b1a5a2129d61716d3278e6959565a72b0d34dc6364c328871d05"
+    },
+    {
+      "path": "scripts/integration/archive-center-permanent-delete.js",
+      "sha256": "e0cf3ee9522398410d8889e8da602c01703bfcfb53d887a01d9216a5a931f405"
+    },
+    {
+      "path": "scripts/integration/toolbox-row-split-admission.js",
+      "sha256": "7dec481253d6c64d0dde5c01d3d2eacb402cad63295222a26d9621c99e0fc744"
+    },
+    {
+      "path": "scripts/integration/toolbox-row-split-archive-delete.js",
+      "sha256": "eaba9e0e6381167d7c2baacc11113f9226854e75ba8b28718bbb36bc0ea49a80"
+    },
+    {
+      "path": "scripts/verify-toolbox-row-split-capacity.js",
+      "sha256": "d529aefe55c61f5eb2fd85f9511d3cfaf784e115df7e26cd97cd6c809974e3ee"
+    },
+    {
+      "path": "src/main-process/application-recovery/README.md",
+      "sha256": "e5e88aa99729036ffc324fd7ef2db97e3c28c567b51da3f15d2d7170e5ee2ed6"
+    },
+    {
+      "path": "src/main-process/application-recovery/composition.js",
+      "sha256": "6aca4c1509bd88307e7652584aa12175cb9a432e90df1ca08939f3ea4724b207"
+    },
+    {
+      "path": "src/main-process/application-recovery/coordinator.js",
+      "sha256": "611a60b697b4fa5e8f6d6f7b9dc1242f73a7b1517dcf7c882f1300cf74ac6fbc"
+    },
+    {
+      "path": "src/main-process/background-execution/runtime.js",
+      "sha256": "d8e0ee43a1357663f097e2e6f6b65f2beccee208876df539ae7bcb637cd51a65"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/export-publication.js",
+      "sha256": "dec8482356db625906e77d524b6bbe6f4ac9263f12ecf97a5f7858da15b496dd"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/module.js",
+      "sha256": "eeb619ff07bece284b8306b7a7e4ecf77573e8d0abfb58a52f445a9ddb10b3b6"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/publication-owner.js",
+      "sha256": "3b2f7e5dbff90a84be9458776ae5abcefbb19d15c0cbb2dc7ab62c8db2f8a747"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/recovery-driver.js",
+      "sha256": "9e975898019c7d4f6371bed1250618a7e9e626f2453f90764311d007144ce9e6"
+    },
+    {
+      "path": "src/main-process/biz-op-v327/recovery-participant.js",
+      "sha256": "0272b22567fcbf044fab2af0dd35082c347744a293f2d1a6f2c1457557b27b85"
+    },
+    {
+      "path": "src/main-process/new-account/artifact-copy.js",
+      "sha256": "c9241ee986df5b4a4947f7a5dc2b8fbbad89d859b67648bf8a30e0e3edece050"
+    },
+    {
+      "path": "src/main-process/publication-recovery/archive-owner.js",
+      "sha256": "4759ea8f7df2ccefda2555a4d52f2a8fd139a2cc5fbe1b5f7f688ccf45bd581c"
+    },
+    {
+      "path": "src/main-process/publication-recovery/coordinator.js",
+      "sha256": "b939ae75bbedcccd60ca18e466095ae4ce0dcc3cdb63ca361a2d577ee6828147"
+    },
+    {
+      "path": "src/main-process/publication-recovery/worker-authority.js",
+      "sha256": "07b444fab1d65cf9c911574bc08a3b8e3166c223595115e91090380dee17ccba"
+    },
+    {
+      "path": "src/main-process/statement-worker/publication.js",
+      "sha256": "6204ebc7f73b28a2dfabc3cc49a86bf0bcaa92d4cfa46fdf52f215a6f13e5ab4"
+    },
+    {
+      "path": "src/main-process/toolbox-archive-recovery.js",
+      "sha256": "b2f4a88a7596bb35d0d38e2a4688ac796f33773bf02a0ca99127b7e0d3c64bda"
+    },
+    {
+      "path": "src/main-process/toolbox-output-publication-dispatch.js",
+      "sha256": "c691f97b82b1112faba935135e34612c051c6c24021a73d672180500a93956a3"
+    },
+    {
+      "path": "src/main-process/toolbox-output-publication-worker.js",
+      "sha256": "6049a034b8d71ffee37f958b336ad9b98d1f3996be5bf57d2d98bcb7cd7b0bcc"
+    },
+    {
+      "path": "src/main-process/toolbox-output-publication.js",
+      "sha256": "b5f71e9e32f84cd558041c3607ccf6357307e6a24280c1a5423130c76edf1dd1"
+    },
+    {
+      "path": "src/main-process/vcc-financial-op-output-recovery.js",
+      "sha256": "260cf931c1a70d289668d7e5ccc0d64f0b54f1211a6e62656111ec5c0ad12d31"
+    },
+    {
+      "path": "src/main.js",
+      "sha256": "ec9e3a80a784e48bcae74bdc5a2f85fde43cdd78d4c5ebf58db9d442aa8d7034"
+    },
+    {
+      "path": "tests/fixtures/archive-permanent-delete-publication-child.js",
+      "sha256": "0c24ce12188156c57375cfb3f1878034ee2bdb4a532b08729351821d3d8c8023"
+    },
+    {
+      "path": "tests/helpers/biz-op-v327-host.js",
+      "sha256": "5bcd539e089ca5b32298e18a6251feb42f5730a2c509b009b806de20f56ee987"
+    },
+    {
+      "path": "tests/helpers/publication-authority.js",
+      "sha256": "9dc05d979a600385b1197f993b555ed42f77358ed079741ab62b99709e8a903f"
+    },
+    {
+      "path": "tests/unit/duplicate-inbound-match-wiring.test.js",
+      "sha256": "979b788942d388c72f4b2ad14f586083c93bd76a384015b24b9a244af8f152a2"
+    },
+    {
+      "path": "tests/unit/main-process/__fixtures__/toolbox-publication-stub-busy.js",
+      "sha256": "47393efe37753454ab57e5206511f66f9f88d961a6481b174e1b8bd7f5e41de1"
+    },
+    {
+      "path": "tests/unit/main-process/__fixtures__/toolbox-publication-stub-crash-recover.js",
+      "sha256": "83d18f3bc00f537cce805cd673259705e0591716aedba2ffac6ef9c3fd0abab5"
+    },
+    {
+      "path": "tests/unit/main-process/__fixtures__/toolbox-publication-stub-delayed-exit.js",
+      "sha256": "9b2f8814a93db43d50fc08a3bc709147b73c54ee2a752b27e27fac26c80bdecc"
+    },
+    {
+      "path": "tests/unit/main-process/__fixtures__/toolbox-publication-stub-lifecycle.js",
+      "sha256": "778246065ce000e6278f822fe64c500b177eb235fab8b3b7d51f912608f74722"
+    },
+    {
+      "path": "tests/unit/main-process/application-recovery.test.js",
+      "sha256": "ea15dce7e146b6dcd8b2483d6aa8587f5833dd5fe51c82f80efaaf96e41c8aed"
+    },
+    {
+      "path": "tests/unit/main-process/archive-delete-owner-completion.test.js",
+      "sha256": "7837043b6316cf642c1ed2c247c2c3ceb419e4910b71ac6f3d3eb28376694b40"
+    },
+    {
+      "path": "tests/unit/main-process/background-execution/mature-action-adapters.test.js",
+      "sha256": "09dd7c7140fc471c49db2dda24711ca17749ff5b1920393c354963d5c288d69c"
+    },
+    {
+      "path": "tests/unit/main-process/biz-op-archive-lineage.test.js",
+      "sha256": "49731fcf17bd2d979fc7f1e2d3e64067d7f8c59b6b34b2882a9718a629db963f"
+    },
+    {
+      "path": "tests/unit/main-process/biz-op-v327-export-main.test.js",
+      "sha256": "2dd7b37dc9df1ca0e9889866c74bd39b9fe6e1602fd95a10362130edf3c5106d"
+    },
+    {
+      "path": "tests/unit/main-process/biz-op-v327-phase-admission.test.js",
+      "sha256": "24e721115d0df709e3ad291a2be054b40224610c6501e59449826d14650d461b"
+    },
+    {
+      "path": "tests/unit/main-process/biz-op-v327-publication-owner.test.js",
+      "sha256": "261997c8422eb68c6e9803b90abbc2d6ee4507dcefb3fdebbe8ff003ca76532f"
+    },
+    {
+      "path": "tests/unit/main-process/biz-op-v327-startup-resource-recovery.test.js",
+      "sha256": "45b87fef6d72dd99089f71315d2fc961bdcedeab9c2e77ec7f0672e91c436314"
+    },
+    {
+      "path": "tests/unit/main-process/biz-op-v327.test.js",
+      "sha256": "1df5a7c2eda575cf9e9cb544357ce3b3276b007fe8b2e45157f6d6fd178d6c2f"
+    },
+    {
+      "path": "tests/unit/main-process/new-account-save-as-e10-b.test.js",
+      "sha256": "b8c128780b31e0579ec06fbe6d5fcb6169c92105d133df8bf4ab68330ad049ec"
+    },
+    {
+      "path": "tests/unit/main-process/publication-recovery-archive-owner.test.js",
+      "sha256": "e04224c83d236184ad73937f819d7ad5465034cb14b1d01c4084095720ab6be8"
+    },
+    {
+      "path": "tests/unit/main-process/publication-recovery-owner.test.js",
+      "sha256": "b4ca850fa2c71b4719bb1bf91ebdb935db884916e548cec8b3fa2d08671c3b5c"
+    },
+    {
+      "path": "tests/unit/main-process/publication-recovery-producer-contracts.test.js",
+      "sha256": "9da25d3c4567d9fa9cae6d89ebf179275d0abe82f6d155d628185e72641481f5"
+    },
+    {
+      "path": "tests/unit/main-process/recon-id-fix-export-e11-c.test.js",
+      "sha256": "d57476918531d85d179ff0aa724fe2ddb00ca8cc9a70acff52cac0e7c21165ab"
+    },
+    {
+      "path": "tests/unit/main-process/statement-generation-e09-c.test.js",
+      "sha256": "bccf206785ade924330ba36a8fb3c2dd387003b708f95f2af43df9da20cc6646"
+    },
+    {
+      "path": "tests/unit/main-process/toolbox-archive-integration.test.js",
+      "sha256": "8c8907371608ee29ecb473e67172fc7b14ce4a19c42dfdc1aa7a13feccc778d0"
+    },
+    {
+      "path": "tests/unit/main-process/toolbox-multi-split-ipc.test.js",
+      "sha256": "26025b2a7d69aa4f515e1c6356842973fbc9d6ed64827647f7f71fea02f48f50"
+    },
+    {
+      "path": "tests/unit/main-process/toolbox-output-publication-dispatch.test.js",
+      "sha256": "8e7fea9f6a9f3fe569b2341c8e0d8d9764c7c18f21ef6ae6560abe21a5d5ef16"
+    },
+    {
+      "path": "tests/unit/main-process/toolbox-row-split-overwrite.test.js",
+      "sha256": "b8228f0ba09e3bb2b10a9b809d62632ff2d68800e7850f35d8205910f2bda6ed"
+    },
+    {
+      "path": "tests/unit/main-process/toolbox-row-split-parent-identity.test.js",
+      "sha256": "cd9bb3f1478932468b65c84630c59bd7c7027ec0499cb95e67550f4699805298"
+    },
+    {
+      "path": "tests/unit/main-process/toolbox-row-split.test.js",
+      "sha256": "3d0d2a35e195fa300e14cca0933d1edf60f8106d1b089a01efde9fd9ec52d8ac"
+    },
+    {
+      "path": "tests/unit/main-process/vcc-financial-op-dual-writer-e12-c.test.js",
+      "sha256": "f787a4bbec78bf5ccc1c9ce362faa8ba2592cc7923c5b95c4ef646b4d5161ff2"
+    },
+    {
+      "path": "tests/unit/main-process/vcc-financial-op-output-recovery.test.js",
+      "sha256": "1fc81dada1422505edc66b1e403d7f65345e08bfb28775c1ed7fa9431557a244"
+    },
+    {
+      "path": "tests/unit/main-process/vcc-financial-op-single-writer-e12-a.test.js",
+      "sha256": "005f8886ea6d0e37fd458cf00fc32e8d9b43cb12183bae284df14abcdd0132ba"
+    },
+    {
+      "path": "tests/unit/main-process/vcc-financial-op-storage-migration.test.js",
+      "sha256": "52f9433a140b0ac2448c63682fa1016ca1e9b5e8ef19663c63ed9bd3f0ab6dbb"
+    },
+    {
+      "path": "tests/unit/main-startup-contract.test.js",
+      "sha256": "c7b0fa5f8379d4ebc24209b369613eb9cd6e1fe839b74b044e3f082d7a9221f8"
+    },
+    {
+      "path": "tests/unit/renderer-pre-fund-reconciliation.test.js",
+      "sha256": "504300d8e1568151b3638364a07c11d1ce8a116fc6ade7dae57056196cb4847a"
+    },
+    {
+      "path": "tests/unit/toolbox-output-publication.test.js",
+      "sha256": "b77de647305c1edb86a150aca981a2d761f76c0602ea45fb729ebd1663cd141d"
+    }
+  ]
+}

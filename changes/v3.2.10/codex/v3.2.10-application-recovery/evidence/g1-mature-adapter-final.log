@@ -1,0 +1,20 @@
+✔ 生产 topology inspector 同步复用 engine 并行度算法并拒绝空文件批次 (1.986416ms)
+✔ Pending mature adapter admission 前冻结 Parser topology，root+children 精确计费且不创建 wrapper Worker (18.31175ms)
+✔ Pending mature 正常终态等待共享 engine termination barrier 后才释放 CompoundLease (1.772792ms)
+✔ Governor downgrade 后只把获批 childCount 透传 engine，禁止按 inspect 上限再扩容 (1.418292ms)
+✔ Pending/BizOP 共用 adapter 只追加冻结并行度，业务 options/result/error/cancel 原样透传 (0.973584ms)
+✔ Toolbox generation/publisher/recovery 严格分层，recover 不触发 generation 或 publish (0.263292ms)
+✔ Toolbox mature recovery 缺 facade 或请求自选 root/owner/capability 均在业务调用前拒绝 (0.189291ms)
+✔ 全部 mature action 机器可证 production=false，默认 IPC 仍直达既有 dispatcher (2.849625ms)
+✔ Supervisor 经真实 Pending mature binding 取消 Worker 导入：以真实终止证据落 cancelled 并回滚覆盖事务 (359.322333ms)
+✔ Supervisor shutdown 经真实 Pending mature binding 取消 Worker 导入并报告 cancelled job (240.139958ms)
+✔ Supervisor 已投递 cancel 后真实 Worker 先返回非取消 error 仍落 failed (52.029042ms)
+✔ native existing-critical-protocol 仍 fail-closed，不借 main-settlement seam 扩张 Worker commit (0.250666ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1007.569708

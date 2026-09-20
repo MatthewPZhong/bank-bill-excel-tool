@@ -1,0 +1,25 @@
+✔ 真实 startup seam 完成 DB→IPC 后才建窗并等待 ready-to-show (157.675958ms)
+✔ binding exact require 是首个可执行 statement，真实 loader 执行完整允许前缀 (302.928917ms)
+✔ 失败销毁隐藏窗口后只走 native failure，activate/second-instance 不旁路屏障 (0.7735ms)
+✔ startup-total 覆盖 usage 尝试，但 usage 初始化仍 warning + default 非阻塞降级 (59.071ms)
+✔ 两阶段 init API 与 loading 合同已从产品全链删除 (2.868167ms)
+✔ SQLite 使用 exact optimize 且产品数据库初始化无无参数 ANALYZE (0.145167ms)
+✔ 主初始化不重复执行 VCC gate，Archive post-outbox hook 是唯一启动入口 (1.559625ms)
+▶ 前置资金对账 UI / preload / IPC 接线
+  ✔ 页面包含完整控件、收敛 MPT 入口且 3.0.14 只展示缺网关账单 (0.8575ms)
+  ✔ 五槽位结构与资金对账数据处理一致，状态框保持原跨行尺寸 (0.493209ms)
+  ✔ renderer 注册模块、状态刷新、按钮处理和事件解绑 (0.776417ms)
+  ✔ preload 的 12 个 invoke 与 3 个进度通道和 main handler 对齐 (5.310833ms)
+  ✔ run/export 精确血缘与 startup owner 顺序在 main seam 闭合 (2.931625ms)
+  ✔ 临时链接表首页复用标准链接表结构，且不提供账户映射 (0.456333ms)
+  ✔ 临时删除框复用标准删除框结构，并改走临时表日期范围接口 (1.025292ms)
+  ✔ 临时链接表按钮把既有 MPT 导入处理传入管理弹窗 (0.287959ms)
+✔ 前置资金对账 UI / preload / IPC 接线 (12.841959ms)
+ℹ tests 15
+ℹ suites 1
+ℹ pass 15
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 612.835125

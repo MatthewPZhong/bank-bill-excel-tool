@@ -1,0 +1,10 @@
+✔ 现有journal Publisher对current/all多artifact执行全有或全无并在失败后清理generation (1157.612ms)
+✔ all scope全量0输出以rowCounts+warning可观测并通过相同Publisher边界发布header-only workbook (712.948542ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2139.269209

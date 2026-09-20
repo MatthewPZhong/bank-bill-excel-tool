@@ -21,7 +21,8 @@ const { createBackgroundExecutionRuntime } = require('../../src/main-process/bac
 const { scanToolboxSplitFields } = require('../../src/main-process/toolbox-format-operations');
 const { prepareRows, generateValidateAndPublishRows } = require('../../src/main-process/toolbox-row-split/service');
 const { publicResult } = require('../../src/main-process/toolbox-row-split/contracts');
-const { publishToolboxPublicationAsync, recoverToolboxPublicationsAsync } = require('../../src/main-process/toolbox-output-publication-dispatch');
+const { createTestPublicationHarness } = require('../../tests/helpers/publication-authority');
+const { createArchivePublicationOwner } = require('../../src/main-process/publication-recovery/archive-owner');
 const { JOURNAL_INDEX_NAME } = require('../../src/main-process/toolbox-output-publication');
 const { acknowledgeToolboxPublicationReceipts: acknowledgeToolboxPublicationReceiptsIntoArchive,
   recoverToolboxPublicationsIntoArchive, toolboxRecoveryOutputFiles } = require('../../src/main-process/toolbox-archive-recovery');
@@ -75,6 +76,8 @@ async function run() {
     const outboxStore = createArchiveOutboxStore(path.join(directory, 'outbox'));
     const controller = createArchiveCenterController({ service, outboxStore,
       database: { getSetting: () => null, setSetting() {} } });
+    const publication = createTestPublicationHarness(userDataDir, {
+      owners: [createArchivePublicationOwner({ getArchiveCenter: () => controller })], ownerId: 'archive-publication' });
     const sourcePath = path.join(directory, 'source.xlsx');
     const expectedRows = [[1, '00001'], [2, '00002'], [3, '00003'], [4, '00004'], [5, '00005']];
     const sourceBook = new ExcelJS.Workbook();
@@ -98,7 +101,9 @@ async function run() {
       dialog: { showMessageBox: async () => { throw new Error('新输出目录不应提示覆盖'); } },
       prepareToolboxRows: prepareRows, generateValidateAndPublishRows,
       backgroundExecutionRuntimeManager: { get: () => runtime },
-      publishToolboxPublicationAsync, recoverToolboxPublicationsAsync,
+      publishToolboxPublicationAsync: (options) => publication.dispatcher.publish({ ...options,
+        requireArchiveHandoff: true, requireValidatedArtifacts: true }),
+      recoverArchivePublications: publication.recovery.recover,
       acknowledgeToolboxPublicationReceiptsIntoArchive, recoverToolboxPublicationsIntoArchive,
       archiveCenterService: controller, toolboxFinalOutputFiles: toolboxRecoveryOutputFiles,
       toolboxRowsPublicResult: publicResult,

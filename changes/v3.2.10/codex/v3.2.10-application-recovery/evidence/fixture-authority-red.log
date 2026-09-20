@@ -1,0 +1,198 @@
+✖ 真实 journal Publisher 一次提交 main+unmatched 且保留原批次 recovery receipt (248.292875ms)
+✖ 双artifact Publisher kill后沿用journal recovery：未提交回滚、已提交按原批次恢复 (202.802ms)
+✖ 确认快照传至真实 Publisher：生成后 none 目标 (109.085708ms)
+✖ 确认快照传至真实 Publisher：生成后 create 目标 (71.985083ms)
+✖ 确认快照传至真实 Publisher：生成后 replace 目标 (83.785292ms)
+✖ rows 父目录身份贯穿真实 Main execute 与 Worker Publisher：before-generation (113.390875ms)
+✖ rows 父目录身份贯穿真实 Main execute 与 Worker Publisher：before-publication (72.156625ms)
+✖ rows 父目录身份贯穿真实 Main execute 与 Worker Publisher：unchanged (87.074833ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 0
+ℹ fail 8
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 735.8095
+
+✖ failing tests:
+
+test at tests/unit/main-process/recon-id-fix-export-e11-c.test.js:1318:1
+✖ 真实 journal Publisher 一次提交 main+unmatched 且保留原批次 recovery receipt (248.292875ms)
+  Error: 共享发布 dispatcher 未绑定 owner authority
+      at recoveryError (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/publication-recovery/worker-authority.js:18:17)
+      at requireAuthority (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/toolbox-output-publication-dispatch.js:124:27)
+      at Object.publish (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/toolbox-output-publication-dispatch.js:213:7)
+      at publishToolboxPublicationAsync (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/toolbox-output-publication-dispatch.js:239:28)
+      at publishReconFixExportArtifacts (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/recon-id-fix-service/export-operation.js:429:10)
+      at generateValidateAndPublishReconFixExport (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/recon-id-fix-service/export-operation.js:497:33)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/tests/unit/main-process/recon-id-fix-export-e11-c.test.js:1325:20)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    code: 'PUBLICATION_RECOVERY_AUTHORITY_REQUIRED',
+    preserveTemporaryFiles: true,
+    recoveryPaths: [ '/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/recon-export-e11-c-22IMeT/user-data/toolbox-publish-journal-index.json' ]
+  }
+
+test at tests/unit/main-process/recon-id-fix-export-e11-c.test.js:1396:1
+✖ 双artifact Publisher kill后沿用journal recovery：未提交回滚、已提交按原批次恢复 (202.802ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'PUBLICATION_RECOVERY_AUTHORITY_REQUIRED'
+  - 'TOOLBOX_PUBLICATION_WORKER_FAILED'
+  
+      at Object.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/tests/unit/main-process/recon-id-fix-export-e11-c.test.js:1438:18)
+      at expectedException (node:assert:553:17)
+      at expectsError (node:assert:678:21)
+      at strict.rejects (node:assert:744:3)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/tests/unit/main-process/recon-id-fix-export-e11-c.test.js:1437:9)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'PUBLICATION_RECOVERY_AUTHORITY_REQUIRED',
+    expected: 'TOOLBOX_PUBLICATION_WORKER_FAILED',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/unit/main-process/toolbox-row-split-overwrite.test.js:102:3
+✖ 确认快照传至真实 Publisher：生成后 none 目标 (109.085708ms)
+  Error: 共享发布 dispatcher 未绑定 owner authority
+      at recoveryError (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/publication-recovery/worker-authority.js:18:17)
+      at requireAuthority (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/toolbox-output-publication-dispatch.js:124:27)
+      at Object.publish (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/toolbox-output-publication-dispatch.js:213:7)
+      at publishToolboxPublicationAsync (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/toolbox-output-publication-dispatch.js:239:28)
+      at publisher (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/tests/unit/main-process/toolbox-row-split-overwrite.test.js:121:16)
+      at generateValidateAndPublishRows (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/toolbox-row-split/service.js:170:29)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/tests/unit/main-process/toolbox-row-split-overwrite.test.js:126:22)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    code: 'PUBLICATION_RECOVERY_AUTHORITY_REQUIRED',
+    preserveTemporaryFiles: true,
+    recoveryPaths: [ '/private/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/rows-overwrite-test-BwuUl0/user-data/toolbox-publish-journal-index.json' ]
+  }
+
+test at tests/unit/main-process/toolbox-row-split-overwrite.test.js:102:3
+✖ 确认快照传至真实 Publisher：生成后 create 目标 (71.985083ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /目标.*变化/. Input:
+  
+  'Error: 共享发布 dispatcher 未绑定 owner authority'
+  
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/tests/unit/main-process/toolbox-row-split-overwrite.test.js:130:7)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: Error: 共享发布 dispatcher 未绑定 owner authority
+        at recoveryError (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/publication-recovery/worker-authority.js:18:17)
+        at requireAuthority (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/toolbox-output-publication-dispatch.js:124:27)
+        at Object.publish (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/toolbox-output-publication-dispatch.js:213:7)
+        at publishToolboxPublicationAsync (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/toolbox-output-publication-dispatch.js:239:28)
+        at publisher (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/tests/unit/main-process/toolbox-row-split-overwrite.test.js:121:16)
+        at generateValidateAndPublishRows (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/toolbox-row-split/service.js:170:29)
+        at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+        at async waitForActual (node:assert:621:5)
+        at async strict.rejects (node:assert:744:25)
+        at async TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/tests/unit/main-process/toolbox-row-split-overwrite.test.js:130:7)
+        at async Test.run (node:internal/test_runner/test:1208:7)
+        at async Test.processPendingSubtests (node:internal/test_runner/test:831:7),
+    expected: /目标.*变化/,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at tests/unit/main-process/toolbox-row-split-overwrite.test.js:102:3
+✖ 确认快照传至真实 Publisher：生成后 replace 目标 (83.785292ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /目标.*变化/. Input:
+  
+  'Error: 共享发布 dispatcher 未绑定 owner authority'
+  
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/tests/unit/main-process/toolbox-row-split-overwrite.test.js:130:7)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: Error: 共享发布 dispatcher 未绑定 owner authority
+        at recoveryError (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/publication-recovery/worker-authority.js:18:17)
+        at requireAuthority (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/toolbox-output-publication-dispatch.js:124:27)
+        at Object.publish (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/toolbox-output-publication-dispatch.js:213:7)
+        at publishToolboxPublicationAsync (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/toolbox-output-publication-dispatch.js:239:28)
+        at publisher (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/tests/unit/main-process/toolbox-row-split-overwrite.test.js:121:16)
+        at generateValidateAndPublishRows (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/toolbox-row-split/service.js:170:29)
+        at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+        at async waitForActual (node:assert:621:5)
+        at async strict.rejects (node:assert:744:25)
+        at async TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/tests/unit/main-process/toolbox-row-split-overwrite.test.js:130:7)
+        at async Test.run (node:internal/test_runner/test:1208:7)
+        at async Test.processPendingSubtests (node:internal/test_runner/test:831:7),
+    expected: /目标.*变化/,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at tests/unit/main-process/toolbox-row-split-parent-identity.test.js:35:3
+✖ rows 父目录身份贯穿真实 Main execute 与 Worker Publisher：before-generation (113.390875ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'PUBLICATION_RECOVERY_AUTHORITY_REQUIRED'
+  - 'TOOLBOX_PUBLICATION_TARGET_PARENT_CHANGED'
+  
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/tests/unit/main-process/toolbox-row-split-parent-identity.test.js:115:14)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'PUBLICATION_RECOVERY_AUTHORITY_REQUIRED',
+    expected: 'TOOLBOX_PUBLICATION_TARGET_PARENT_CHANGED',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/unit/main-process/toolbox-row-split-parent-identity.test.js:35:3
+✖ rows 父目录身份贯穿真实 Main execute 与 Worker Publisher：before-publication (72.156625ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'PUBLICATION_RECOVERY_AUTHORITY_REQUIRED'
+  - 'TOOLBOX_PUBLICATION_TARGET_PARENT_CHANGED'
+  
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/tests/unit/main-process/toolbox-row-split-parent-identity.test.js:115:14)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'PUBLICATION_RECOVERY_AUTHORITY_REQUIRED',
+    expected: 'TOOLBOX_PUBLICATION_TARGET_PARENT_CHANGED',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/unit/main-process/toolbox-row-split-parent-identity.test.js:35:3
+✖ rows 父目录身份贯穿真实 Main execute 与 Worker Publisher：unchanged (87.074833ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'failed'
+  - 'success'
+  
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/tests/unit/main-process/toolbox-row-split-parent-identity.test.js:97:14)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'failed',
+    expected: 'success',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

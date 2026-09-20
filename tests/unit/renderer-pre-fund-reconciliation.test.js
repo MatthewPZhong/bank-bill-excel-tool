@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { createApplicationRecoveryComposition } = require('../../src/main-process/application-recovery/composition');
 
 const root = path.resolve(__dirname, '../..');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
@@ -139,7 +140,7 @@ test.describe('前置资金对账 UI / preload / IPC 接线', () => {
     }
   });
 
-  test('run/export 精确血缘与 startup owner 顺序在 main seam 闭合', () => {
+  test('run/export 精确血缘与 startup owner 顺序在 main seam 闭合', async () => {
     const runStart = main.indexOf("trackedIpcHandle('pre-fund-reconciliation:run'");
     const exportStart = main.indexOf("trackedIpcHandle('pre-fund-reconciliation:export'");
     const exportEnd = main.indexOf('\nfunction getDuplicateInboundMatchService()', exportStart);
@@ -170,14 +171,40 @@ test.describe('前置资金对账 UI / preload / IPC 接线', () => {
       'execute 不得按后来 lastRun/latest 重选业务 run'
     );
 
-    const pendingOwner = main.indexOf("ownerName: 'Pending runs'");
-    const bizOwner = main.indexOf("ownerName: 'Biz OP runs'");
-    const preFundOwner = main.indexOf("ownerName: 'Pre-fund runs'");
-    const positionOwner = main.indexOf("ownerName: 'Position'");
-    assert.ok(pendingOwner < bizOwner && bizOwner < preFundOwner && preFundOwner < positionOwner);
-    const archiveAwait = main.indexOf('if (archiveCenterInitializationPromise) await archiveCenterInitializationPromise;');
-    const cleanupSchedule = main.indexOf('schedulePreFundReconciliationStartupCleanup();', archiveAwait);
-    assert.ok(archiveAwait >= 0 && cleanupSchedule > archiveAwait);
+    const ownerCalls = [];
+    const application = createApplicationRecoveryComposition({
+      platform: { scanAndRecover() {}, recoverSource() {} },
+      bizOpModule: {
+        recovery: { bindPlatform() {}, run: async () => ({}), openObligations: () => false },
+        activation: { needed: () => false }
+      },
+      recoverPendingRuns: () => { ownerCalls.push('pending'); },
+      recoverLegacyBizOpRuns: () => { ownerCalls.push('legacy-biz'); },
+      recoverPreFundRuns: () => { ownerCalls.push('pre-fund'); },
+      recoverPosition: () => { ownerCalls.push('position'); },
+      recoverToolboxVccPublications() {}, recoverVccImportTerminal() {}, reconcileVccImportLineage() {}
+    });
+    assert.deepEqual(application.archiveOwnerHooks().map((owner) => owner.ownerName), [
+      'biz-op-v327', 'Pending runs', 'Biz OP runs', 'Pre-fund runs', 'Position',
+      'Toolbox/VCC output publications', 'VCC import terminal'
+    ]);
+    for (const owner of application.archiveOwnerHooks()) await owner.recover();
+    for (const owner of application.archiveOwnerHooks()) await owner.recover();
+    assert.deepEqual(ownerCalls, ['pending', 'legacy-biz', 'pre-fund', 'position']);
+    for (const [participant, recovery] of [
+      ['recoverPendingRuns', 'recoverPendingRunsBeforeInterruptedSweep'],
+      ['recoverLegacyBizOpRuns', 'recoverBizOpRunsBeforeInterruptedSweep'],
+      ['recoverPreFundRuns', 'recoverPreFundRunsBeforeInterruptedSweep'],
+      ['recoverPosition', 'recoverPositionPendingBeforeInterruptedSweep']
+    ]) {
+      assert.equal((main.match(new RegExp(`${participant}:\\s*${recovery}`, 'g')) || []).length, 1);
+    }
+    assert.match(main, /recoverInterruptedTaskOwners:\s*applicationRecoveryCoordinator\.archiveOwnerHooks\(\)/);
+    const initialization = main.slice(main.indexOf('async function initializeApplication()'));
+    const archiveAwait = initialization.indexOf('await archiveCenterInitializationPromise');
+    const completeRecovery = initialization.indexOf('applicationRecoveryCoordinator.completeArchiveInitialization(', archiveAwait);
+    const cleanupSchedule = initialization.indexOf('schedulePreFundReconciliationStartupCleanup();', archiveAwait);
+    assert.ok(archiveAwait >= 0 && completeRecovery > archiveAwait && cleanupSchedule > completeRecovery);
   });
 
   test('临时链接表首页复用标准链接表结构，且不提供账户映射', () => {

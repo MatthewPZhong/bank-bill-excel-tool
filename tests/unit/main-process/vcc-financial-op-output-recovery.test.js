@@ -29,10 +29,7 @@ const {
 const {
   recoverToolboxPublicationsIntoArchive
 } = require('../../../src/main-process/toolbox-archive-recovery');
-const {
-  createToolboxPublicationDispatcher,
-  recoverToolboxPublicationsAsync
-} = require('../../../src/main-process/toolbox-output-publication-dispatch');
+const { createTestPublicationHarness } = require('../../helpers/publication-authority');
 
 const BATCH_CONTEXT = Object.freeze({
   batchId: 77,
@@ -187,7 +184,7 @@ test('result/data/audit 在 actual worker committed 后硬退出均由原 exact7
       '__fixtures__',
       'toolbox-publication-stub-crash-recover.js'
     );
-    const dispatcher = createToolboxPublicationDispatcher({ workerScriptPath: crashWorker });
+    const { dispatcher, recovery } = createTestPublicationHarness(userDataDir, { dispatcherOptions: { workerScriptPath: crashWorker } });
     const publication = await dispatcher.publish({
       taskId: `committed-crash-recover-${index}`,
       artifacts: [{
@@ -227,7 +224,7 @@ test('result/data/audit 在 actual worker committed 后硬退出均由原 exact7
         recover: () => recoverToolboxPublicationsIntoArchive({
           userDataDir,
           archiveCenter: controller,
-          recoverPublications: recoverToolboxPublicationsAsync
+          recoverPublications: recovery.recover
         })
       }],
       getProtectedInterruptedTaskBatchIds: () => []
@@ -245,4 +242,21 @@ test('result/data/audit 在 actual worker committed 后硬退出均由原 exact7
     assert.equal(createArchiveRepository(db).getBatchDetail(reserved.batchId).artifacts.length, 1);
     db.close();
   }
+});
+
+test('VCC 缺少受控 facade 在文件读取和 Publisher 之前拒绝并保留原 generation', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-output-no-authority-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const generated = path.join(root, 'generation.xlsx');
+  const target = path.join(root, 'target.xlsx');
+  fs.writeFileSync(generated, '待验证产物');
+  let published = 0;
+  await assert.rejects(publishVccFinancialOpOutputs({
+    userDataDir: root, batchContext: BATCH_CONTEXT, generationFilePaths: [generated],
+    targetFilePaths: [target], targetSnapshots: [{ exists: false }],
+    publishPublication: async () => { published += 1; }
+  }), { code: 'PUBLICATION_RECOVERY_AUTHORITY_REQUIRED', preserveTemporaryFiles: true });
+  assert.equal(published, 0);
+  assert.equal(fs.readFileSync(generated, 'utf8'), '待验证产物');
+  assert.equal(fs.existsSync(target), false);
 });

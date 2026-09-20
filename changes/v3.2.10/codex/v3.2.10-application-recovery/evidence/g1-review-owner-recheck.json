@@ -1,0 +1,22 @@
+[
+  {
+    "kind": "position",
+    "taskKey": "position-reconciliation:run:export",
+    "permission": "ack-finalize"
+  },
+  {
+    "kind": "position",
+    "taskConflictPermission": null,
+    "taskConflictDisposition": "defer"
+  },
+  {
+    "kind": "new-account",
+    "taskKey": "new-account:export",
+    "permission": "ack-finalize"
+  },
+  {
+    "kind": "new-account",
+    "taskConflictPermission": null,
+    "taskConflictDisposition": "defer"
+  }
+]

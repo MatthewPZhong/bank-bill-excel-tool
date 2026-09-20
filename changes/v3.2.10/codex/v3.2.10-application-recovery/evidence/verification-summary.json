@@ -1,0 +1,90 @@
+{
+  "branch": "codex/v3.2.10-application-recovery",
+  "baseHead": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "worktree": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery",
+  "sourceState": "HEAD plus uncommitted diff; source-snapshot.json",
+  "implementationSlices": {
+    "G1-T1": {
+      "implementation": "implemented",
+      "verification": "passed",
+      "integration": "not-integrated"
+    },
+    "G1-T2": {
+      "implementation": "implemented",
+      "verification": "passed",
+      "integration": "not-integrated"
+    },
+    "G1-T3": {
+      "implementation": "implemented",
+      "verification": "passed",
+      "integration": "not-integrated"
+    },
+    "G1-T4": {
+      "implementation": "implemented",
+      "verification": "passed",
+      "integration": "not-integrated"
+    },
+    "G1-T5": {
+      "implementation": "implemented",
+      "verification": "passed",
+      "integration": "not-integrated"
+    }
+  },
+  "releaseCheck": {
+    "command": "UNIT_TEST_CONCURRENCY=2 npm run release-check",
+    "exitCode": 0,
+    "status": "PASS",
+    "lint": "PASS",
+    "smoke": "PASS",
+    "unit": {
+      "total": 8171,
+      "passed": 8167,
+      "failed": 0,
+      "cancelled": 0,
+      "skipped": 4,
+      "skipReason": "Windows PowerShell/CIM and packaged canary requirements"
+    },
+    "integration": {
+      "scripts": 61,
+      "passedScripts": 61,
+      "failedScripts": 0,
+      "reportedCaseCount": 2583
+    },
+    "log": "release-check-final.log"
+  },
+  "initialReleaseCheck": {
+    "exitCode": 1,
+    "total": 8170,
+    "passed": 8138,
+    "failed": 28,
+    "skipped": 4,
+    "log": "release-check-initial.log",
+    "disposition": "migration fixtures repaired; task-generated historical snapshot changes reverted; isolated environmental reruns passed; final full gate passed"
+  },
+  "reviewFindings": {
+    "R1": "closed",
+    "R2": "closed",
+    "R3": "closed",
+    "R4": "closed"
+  },
+  "notPerformed": [
+    "commit/push/PR/merge/version/release",
+    "integration into G2/G7/G8 or release branch",
+    "real Electron isolated cold startup",
+    "Windows real locks/installed package/platform durability",
+    "Excel/WPS manual acceptance",
+    "1000-output capacity experiment rerun"
+  ],
+  "standaloneManifestChecker": {
+    "status": "known-baseline-conflict",
+    "baselineReproduced": true,
+    "baselineCommit": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+    "generatedActionsBaseline": 67,
+    "generatedActionsCurrent": 67,
+    "frozenHistoricalActions": 54,
+    "manifestBindingPolicySetsUnchanged": true,
+    "historicalFilesEqualHead": true,
+    "evidence": "manifest-baseline-triage.json",
+    "note": "Independent standalone command, not part of release-check; sourceHashes naturally differ for changed Main/runtime."
+  }
+}

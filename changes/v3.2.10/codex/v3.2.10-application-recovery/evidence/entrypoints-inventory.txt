@@ -1,0 +1,89 @@
+G1 publication 最终入口库存与独立只读核对
+工作目录：/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery
+日期：2026-09-20；范围为此时未提交工作树，不代表 release-check 或平台验收。
+
+结论与责任链：
+1. src 生产 raw prepare/recover 调用只存在 toolbox-output-publication-worker.js。dispatcher 在固定 root 的同一 FIFO 项中执行 discover -> 全 owner authorize -> execute；core 在任何恢复写入前完整复验五类文件材料。
+2. publication-recovery/coordinator.js 先 acquireObservation，后 runAuthorizedRecovery enqueue；dispatcher.publish 同样先 acquire，后 enqueue。transport-error 在失败 worker 真 exit 后调用队列内部 primitive，无二次 enqueue/二次 admission。
+3. toolbox-archive-recovery 与 NewAccount 无默认 raw recovery fallback；Main 的启动/live ack/VCC/NewAccount 与 mature 装配使用 recoverArchivePublications -> forOwner('archive-publication').recover；BizOP 使用 bindRecovery(facade) 与私有 observation。
+4. Statement disabled seam journalPublisher 仅调用显式 publishPublication；缺注入拒绝并保留 staging。原 production-disabled 策略保留。
+5. recoverToolboxPublicationsAsync/recoverOtherOwners 在 src 无调用或定义。dispatcher.recover 仍保留 AUTHORITY_REQUIRED 拒绝门面，不是已删除方法。
+6. 独立核对发现并修复潜在低层旁路：publishPreparedToolboxPublication 原先可接受 plain prepared 对象重新提交历史 prepared journal；RED 证据为新增测试 Missing expected exception。现改为私有 WeakMap 成功 prepare provenance，发布仅消费一次并校验 task/root/journal scope；未授权 plain/复制/已消费对象在读取 journal 前拒绝，改身份拒绝。
+7. README 两处精确性修正已交主 Agent：completeArchiveInitialization 实际无参数；raw async export 已删除但 dispatcher.recover 保留失败关闭门面。README 队列、lease、四级 permission 与 observation 描述和实现一致。
+8. 本 Agent 早期 exec 会话 35360/56097/25477/6550/60438/4132 已逐个确认退出并关闭会话；不存在需终止的本 Agent 作业，未触碰其他进程。6550/4132 是早期已修复失败记录，不能当最终 PASS。
+
+分支与 HEAD：
+codex/v3.2.10-application-recovery
+11086a3cbf632a30adbcfa796e4cd81810c5aef9
+
+src 原始入口/authority 库存：
+src/main-process/toolbox-output-publication.js:71: * 以便下一次 recoverPendingToolboxPublications 验证真正的崩溃恢复路径。
+src/main-process/toolbox-output-publication.js:2086:function recoverPendingToolboxPublications(options = {}) {
+src/main-process/toolbox-output-publication.js:2511:function prepareToolboxPublication(options = {}) {
+src/main-process/toolbox-output-publication.js:2941:function publishPreparedToolboxPublication(prepared) {
+src/main-process/toolbox-output-publication.js:3268:  prepareToolboxPublication,
+src/main-process/toolbox-output-publication.js:3269:  publishPreparedToolboxPublication,
+src/main-process/toolbox-output-publication.js:3270:  recoverPendingToolboxPublications
+src/main-process/publication-recovery/coordinator.js:30:  if (!root || !dispatcher || typeof dispatcher.bindRecoveryAuthority !== 'function'
+src/main-process/publication-recovery/coordinator.js:31:      || typeof dispatcher.runAuthorizedRecovery !== 'function' || !Array.isArray(owners) || !owners.length) throw invalid();
+src/main-process/publication-recovery/coordinator.js:179:      dispatcher.bindRecoveryAuthority(authority);
+src/main-process/publication-recovery/coordinator.js:190:            return await dispatcher.runAuthorizedRecovery({ authority, request,
+src/main-process/publication-recovery/worker-authority.js:28:function createWorkerAuthority(key) {
+src/main-process/publication-recovery/worker-authority.js:54:module.exports = { canonical, digest, recoveryError, createWorkerAuthority, seal, verify };
+src/main-process/toolbox-output-publication-worker.js:4:const { createWorkerAuthority, recoveryError } = require('./publication-recovery/worker-authority');
+src/main-process/toolbox-output-publication-worker.js:6:  ? createWorkerAuthority(workerData.publicationRecoveryKey) : null;
+src/main-process/toolbox-output-publication-worker.js:8:  prepareToolboxPublication,
+src/main-process/toolbox-output-publication-worker.js:9:  publishPreparedToolboxPublication,
+src/main-process/toolbox-output-publication-worker.js:10:  recoverPendingToolboxPublications,
+src/main-process/toolbox-output-publication-worker.js:20:    const prepared = prepareToolboxPublication({
+src/main-process/toolbox-output-publication-worker.js:36:    return publishPreparedToolboxPublication(prepared);
+src/main-process/toolbox-output-publication-worker.js:38:  if (op === 'discover-recovery') {
+src/main-process/toolbox-output-publication-worker.js:41:  if (op === 'execute-recovery') {
+src/main-process/toolbox-output-publication-worker.js:42:    return recoverPendingToolboxPublications({ userDataDir: payload.userDataDir,
+src/main-process/toolbox-output-publication-dispatch.js:141:    const snapshot = await worker('discover-recovery', { userDataDir: authority.root }, request.onProgress);
+src/main-process/toolbox-output-publication-dispatch.js:143:    const result = await worker('execute-recovery', { userDataDir: authority.root,
+src/main-process/toolbox-output-publication-dispatch.js:198:    bindRecoveryAuthority(value) {
+src/main-process/toolbox-output-publication-dispatch.js:205:    runAuthorizedRecovery({ authority: callerAuthority, request, authorizeSnapshot } = {}) {
+
+生产 facade/装配入口：
+src/main-process/vcc-financial-op-output-recovery.js:11:  recoverToolboxPublicationsIntoArchive
+src/main-process/vcc-financial-op-output-recovery.js:98:  const publishPublication = options.publishPublication || publishToolboxPublicationAsync;
+src/main-process/vcc-financial-op-output-recovery.js:101:    || recoverToolboxPublicationsIntoArchive;
+src/main-process/vcc-financial-op-output-recovery.js:102:  const publication = await publishPublication({
+src/main-process/new-account/artifact-copy.js:772:async function acknowledgeNewAccountSaveAsPublication(options = {}) {
+src/main-process/new-account/artifact-copy.js:811:  acknowledgeNewAccountSaveAsPublication,
+src/main-process/statement-worker/publication.js:165:  publishPublication,
+src/main-process/statement-worker/publication.js:199:  if (typeof publishPublication !== 'function') {
+src/main-process/statement-worker/publication.js:202:  return publishPublication({
+src/main-process/statement-worker/publication.js:258:    publishPublication,
+src/main-process/statement-worker/publication.js:282:      publishPublication
+src/main-process/biz-op-v327/export-publication.js:255:  function bindRecovery(facade) {
+src/main.js:604:  recoverToolboxPublicationsIntoArchive,
+src/main.js:605:  acknowledgeToolboxPublicationReceipts: acknowledgeToolboxPublicationReceiptsIntoArchive,
+src/main.js:805:function recoverArchivePublications(options) {
+src/main.js:846:  toolboxPublication: { recover: recoverArchivePublications },
+src/main.js:961:    ? acknowledgeToolboxPublicationReceipts(prepared.readOnlyExportPublicationTaskIds || [])
+src/main.js:1196:    recoverPublications: recoverArchivePublications,
+src/main.js:1338:        recoverPublications: recoverArchivePublications,
+src/main.js:20572:      await recoverToolboxPublicationsIntoArchive({
+src/main.js:20575:        recoverPublications: recoverArchivePublications,
+src/main.js:20603:async function acknowledgeToolboxPublicationReceipts(taskIds) {
+src/main.js:20604:  return acknowledgeToolboxPublicationReceiptsIntoArchive({
+src/main.js:20607:    recoverPublications: recoverArchivePublications,
+src/main.js:20740:    const result = await recoverToolboxPublicationsIntoArchive({
+src/main.js:20743:      recoverPublications: recoverArchivePublications
+src/main.js:21982:            ? () => acknowledgeToolboxPublicationReceipts(
+src/main.js:22308:  bizOpV327Module.publication.bindRecovery(publicationRecoveryCoordinator.forOwner('biz-op-v327'));
+
+测试及隔离验证脚本引用文件（不属于生产 raw 旁路）：
+tests/helpers/publication-authority.js
+tests/unit/toolbox-output-publication.test.js
+scripts/integration/application-recovery-governance.js
+tests/unit/main-process/__fixtures__/toolbox-publication-stub-crash-recover.js
+tests/unit/main-process/toolbox-multi-split-ipc.test.js
+tests/unit/main-process/publication-recovery-owner.test.js
+tests/unit/main-process/toolbox-row-split.test.js
+tests/unit/main-process/new-account-save-as-e10-b.test.js
+tests/unit/main-process/toolbox-archive-integration.test.js
+tests/unit/main-process/statement-generation-e09-c.test.js
+tests/unit/main-process/archive-delete-owner-completion.test.js

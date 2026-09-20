@@ -23,6 +23,7 @@ const {
 const {
   createStartupRecoveryCoordinator
 } = require('./main-process/background-execution/startup-recovery-coordinator');
+const { createApplicationRecoveryComposition } = require('./main-process/application-recovery/composition');
 const {
   createRecoveryHoldGate
 } = require('./main-process/background-execution/recovery-hold-gate');
@@ -592,8 +593,10 @@ const { MAX_ROW_SPLIT_FILES, publicResult: toolboxRowsPublicResult } = require('
 const { prepareRows: prepareToolboxRows, generateValidateAndPublishRows } = require('./main-process/toolbox-row-split/service');
 const {
   publishToolboxPublicationAsync,
-  recoverToolboxPublicationsAsync
+  getDefaultToolboxPublicationDispatcher
 } = require('./main-process/toolbox-output-publication-dispatch');
+const { createPublicationRecoveryCoordinator } = require('./main-process/publication-recovery/coordinator');
+const { createArchivePublicationOwner } = require('./main-process/publication-recovery/archive-owner');
 const {
   JOURNAL_INDEX_NAME
 } = require('./main-process/toolbox-output-publication');
@@ -797,6 +800,16 @@ let appUpdaterStartupScheduled = false;
 let appUpdateTransitionToken = null;
 let archiveCenterService = null;
 let bizOpV327Module = null;
+let publicationRecoveryCoordinator = null;
+
+function recoverArchivePublications(options) {
+  if (!publicationRecoveryCoordinator) {
+    throw Object.assign(new Error('发布恢复协调器尚未装配'), {
+      code: 'PUBLICATION_RECOVERY_AUTHORITY_REQUIRED', preserveTemporaryFiles: true
+    });
+  }
+  return publicationRecoveryCoordinator.forOwner('archive-publication').recover(options);
+}
 let archiveStorageRootManager = null;
 let archiveCenterInitializationPromise = null;
 let toolboxStartupRecoveryError = null;
@@ -806,7 +819,7 @@ let recoveryControlReadRepository = null;
 let recoveryHoldGate = null;
 let preFundMptHoldGate = null;
 let preFundMptWorkerDurableCoordinator = null;
-let duplicateStartupRecoveryReady = false;
+let applicationRecoveryCoordinator = null;
 let reconFixJpmHoldGate = null;
 let backgroundWorkerDurableCoordinator = null;
 
@@ -830,6 +843,7 @@ function runReconFixJpmAdmMutationBoundary(work) {
 
 let archiveOperationTail = Promise.resolve();
 const backgroundExecutionRuntimeManager = createBackgroundExecutionRuntimeManager({
+  toolboxPublication: { recover: recoverArchivePublications },
   bizOpV327Provider: () => bizOpV327Module && bizOpV327Module.runtimeBindings,
   workerDurableCoordinatorProvider: () => backgroundWorkerDurableCoordinator,
   reconFixJpmDatabasePathProvider: () => database && database.dbPath,
@@ -846,7 +860,7 @@ const backgroundExecutionRuntimeManager = createBackgroundExecutionRuntimeManage
     : null,
   duplicateStartupGateProvider: () => Object.freeze({
     contractVersion: DUPLICATE_STARTUP_GATE_CONTRACT_VERSION,
-    startupRecoveryReady: duplicateStartupRecoveryReady
+    startupRecoveryReady: applicationRecoveryCoordinator?.snapshot().platformScanCompleted === true
   })
 });
 
@@ -1179,6 +1193,7 @@ async function publishManagedVccFinancialOpArtifact(artifacts, prepared, taskCon
     throw new Error('VCC Financial OP read-only export 必须精确生成一个 artifact');
   }
   return publishVccFinancialOpOutputs({
+    recoverPublications: recoverArchivePublications,
     batchContext: taskContext.batchContext,
     generationFilePaths: [artifacts[0].generationPath],
     targetFilePaths: [outputs[0].filePath],
@@ -1320,6 +1335,7 @@ function getVccFinancialOpService() {
       buildSha: buildInfo.commit,
       publishOutputFilesFn: (payload) => publishVccFinancialOpOutputs({
         ...payload,
+        recoverPublications: recoverArchivePublications,
         userDataDir: app.getPath('userData'),
         archiveCenter: archiveCenterService,
         onHandoffPending: (error) => {
@@ -5010,55 +5026,8 @@ function initializeArchiveCenter() {
     onOutboxFlushed: cleanupPositionArchiveSourcePaths,
     resolveOutboxTerminalIntent: resolvePositionOutboxTerminalIntent,
     onTerminalIntentFlushed: finalizeArchiveTerminalIntent,
-    recoverInterruptedTaskOwners: [
-      {
-        ownerName: 'biz-op-v327',
-        async recover() {
-          if (bizOpV327Module?.activation.needed()) await bizOpV327Module.activation.run({ quiesceOnly: true });
-          if (bizOpV327Module && !bizOpV327Module.activation.needed() && bizOpV327Module.recovery.openObligations()) {
-            const result = await bizOpV327Module.recovery.run();
-            duplicateStartupRecoveryReady = bizOpV327Module.recovery.hasCompletedPlatformScan();
-            appendActivityLogEntry({ level: result.ready ? 'info' : 'warning', source: 'main',
-              domain: 'biz-op-v327-recovery', message: result.ready ? '业务 OP 恢复完成' : '业务 OP 保留恢复保护',
-              details: [JSON.stringify(result)] });
-          }
-        }
-      },
-      {
-        ownerName: 'Pending runs',
-        recover: recoverPendingRunsBeforeInterruptedSweep
-      },
-      {
-        ownerName: 'Biz OP runs',
-        recover: recoverBizOpRunsBeforeInterruptedSweep
-      },
-      {
-        ownerName: 'Pre-fund runs',
-        recover: recoverPreFundRunsBeforeInterruptedSweep
-      },
-      {
-        ownerName: 'Position',
-        recover: recoverPositionPendingBeforeInterruptedSweep
-      },
-      {
-        // Toolbox 与 VCC 正式输出共用同一 durable publication receipt 恢复根。
-        ownerName: 'Toolbox/VCC output publications',
-        recover: async () => {
-          await recoverToolboxPublicationsAtStartup();
-        }
-      },
-      {
-        ownerName: 'VCC import terminal',
-        recover: recoverVccImportBeforeInterruptedSweep
-      }
-    ],
-    postOutboxStartupHooks: [{
-      hookName: 'BizOP activation and recovery',
-      async run() { if (bizOpV327Module?.activation.needed()) return bizOpV327Module.retryRecovery(); }
-    }, {
-      hookName: 'VCC import lineage/hold reconcile',
-      run: reconcileVccImportArchiveBeforeRetentionCleanup
-    }],
+    recoverInterruptedTaskOwners: applicationRecoveryCoordinator.archiveOwnerHooks(),
+    postOutboxStartupHooks: applicationRecoveryCoordinator.postOutboxHooks(),
     getProtectedInterruptedTaskBatchIds: protectedInterruptedTaskBatchIds,
     onStartupPhase: recordStartupPhase,
     onEntryMaintenanceEvent: (eventName, payload) => {
@@ -18760,7 +18729,7 @@ function registerPreFundReconciliationHandlers() {
 }
 
 function assertDuplicateInboundMatchStartupAvailable() {
-  if (!duplicateStartupRecoveryReady || !recoveryHoldGate) {
+  if (!applicationRecoveryCoordinator?.snapshot().platformScanCompleted || !recoveryHoldGate) {
     throw Object.assign(new Error('重复入金启动恢复门禁尚未完成'), {
       code: 'DUPLICATE_STARTUP_RECOVERY_UNAVAILABLE'
     });
@@ -20603,7 +20572,7 @@ async function publishToolboxArtifacts(
       await recoverToolboxPublicationsIntoArchive({
         userDataDir: app.getPath('userData'),
         archiveCenter: archiveCenterService,
-        recoverPublications: recoverToolboxPublicationsAsync,
+        recoverPublications: recoverArchivePublications,
         taskIds: [publication.taskId]
       });
     }
@@ -20635,7 +20604,7 @@ async function acknowledgeToolboxPublicationReceipts(taskIds) {
   return acknowledgeToolboxPublicationReceiptsIntoArchive({
     userDataDir: app.getPath('userData'),
     archiveCenter: archiveCenterService,
-    recoverPublications: recoverToolboxPublicationsAsync,
+    recoverPublications: recoverArchivePublications,
     taskIds
   });
 }
@@ -20771,7 +20740,7 @@ async function recoverToolboxPublicationsAtStartup() {
     const result = await recoverToolboxPublicationsIntoArchive({
       userDataDir: app.getPath('userData'),
       archiveCenter: archiveCenterService,
-      recoverPublications: (options) => bizOpV327Module.publication.recoverOtherOwners(options)
+      recoverPublications: recoverArchivePublications
     });
     const recovered = Array.isArray(result.recovered) ? result.recovered : [];
     if (recovered.length > 0) {
@@ -22238,7 +22207,6 @@ function registerAllIpcHandlers() {
 
 async function initializeBackgroundExecutionRecovery() {
   if (!database || !database.db) throw new Error('Recovery Coordinator 要求 Main control DB 已初始化');
-  duplicateStartupRecoveryReady = false;
   recoveryControlReadRepository = createRecoveryControlReadRepository(database.db);
   const inspectorRegistry = createInspectorRegistry();
   const providerRegistry = createSettlementRecoveryProviderRegistry();
@@ -22328,11 +22296,34 @@ async function initializeBackgroundExecutionRecovery() {
       ];
     }
   });
-  bizOpV327Module.recovery.bindPlatform(coordinator);
-  const summary = await bizOpV327Module.recovery.run({ initialPlatformOnly: true });
-  if (summary.reason && summary.reason !== 'ARCHIVE_OWNER_PHASE_REQUIRED') {
-    throw Object.assign(new Error('业务 OP 恢复预检未通过，已保留启动保护'), { code: summary.reason });
-  }
+  publicationRecoveryCoordinator = createPublicationRecoveryCoordinator({
+    userDataDir: path.dirname(database.dbPath),
+    dispatcher: getDefaultToolboxPublicationDispatcher(),
+    owners: [
+      bizOpV327Module.publication.publicationOwner,
+      createArchivePublicationOwner({ getArchiveCenter: () => archiveCenterService })
+    ]
+  });
+  publicationRecoveryCoordinator.bindDispatcherAuthority();
+  bizOpV327Module.publication.bindRecovery(publicationRecoveryCoordinator.forOwner('biz-op-v327'));
+  applicationRecoveryCoordinator = createApplicationRecoveryComposition({
+    platform: coordinator,
+    bizOpModule: bizOpV327Module,
+    recoverPendingRuns: recoverPendingRunsBeforeInterruptedSweep,
+    recoverLegacyBizOpRuns: recoverBizOpRunsBeforeInterruptedSweep,
+    recoverPreFundRuns: recoverPreFundRunsBeforeInterruptedSweep,
+    recoverPosition: recoverPositionPendingBeforeInterruptedSweep,
+    recoverToolboxVccPublications: recoverToolboxPublicationsAtStartup,
+    recoverVccImportTerminal: recoverVccImportBeforeInterruptedSweep,
+    reconcileVccImportLineage: reconcileVccImportArchiveBeforeRetentionCleanup,
+    onBizOpRecovery(result) {
+      appendActivityLogEntry({ level: result.ready ? 'info' : 'warning', source: 'main',
+        domain: 'biz-op-v327-recovery', message: result.ready ? '业务 OP 恢复完成' : '业务 OP 保留恢复保护',
+        details: [JSON.stringify(result)] });
+    }
+  });
+  const preflight = await applicationRecoveryCoordinator.preflight();
+  const summary = preflight.participantResults.find((entry) => entry.id === 'biz-op-v327').result;
   for (const hold of recoveryControlReadRepository.listActiveRecoveryHolds()) {
     const taskKeys = actionTaskBindingRegistry.allowedTaskKeys(hold.actionKey);
     if (!Array.isArray(taskKeys) || taskKeys.length === 0) {
@@ -22390,7 +22381,6 @@ async function initializeBackgroundExecutionRecovery() {
       `activeHolds=${summary.activeHoldCount}`
     ]
   });
-  duplicateStartupRecoveryReady = bizOpV327Module.recovery.hasCompletedPlatformScan();
   return summary;
 }
 
@@ -22459,7 +22449,12 @@ async function initializeApplication() {
     markStartupMetric(STARTUP_METRIC_MARKS.databaseReady);
     // Recovery Contract startup boundary：任何 Archive owner recovery、cleanup 或业务 IPC
     // 之前冻结注册器并预检；BizOP 未决时保留同一预算，在首个 Archive owner 阶段完成全量扫描。
-    await initializeBackgroundExecutionRecovery();
+    try {
+      await initializeBackgroundExecutionRecovery();
+    } catch (error) {
+      applicationRecoveryCoordinator?.failArchiveInitialization(error);
+      throw error;
+    }
     initializeAppUpdaterService();
     try {
       pendingDb = openPendingDb(app.getPath('userData'));
@@ -22476,13 +22471,14 @@ async function initializeApplication() {
       }
       throw pendingDbErr;
     }
-    initializeArchiveCenter();
-    // 存档 journal 必须先按 DB setting 收敛到唯一根，才允许 Position 等启动恢复消费者放行。
-    // 初始化抛错会由现有 startup failure 入口退出；不得把已切换 service 上的
-    // outbox/recovery 失败吞成 unavailable 后继续放行业务。
-    if (archiveCenterInitializationPromise) await archiveCenterInitializationPromise;
-    if (!bizOpV327Module.recovery.hasCompletedPlatformScan()) {
-      throw Object.assign(new Error('启动恢复尚未完成平台完整扫描'), { code: 'BACKGROUND_RECOVERY_SCAN_PENDING' });
+    try {
+      initializeArchiveCenter();
+      // 唯一 Archive 初始化 Promise 完成后，由应用层确认平台扫描事实。
+      const initialized = await archiveCenterInitializationPromise;
+      applicationRecoveryCoordinator.completeArchiveInitialization(initialized);
+    } catch (error) {
+      applicationRecoveryCoordinator.failArchiveInitialization(error);
+      throw error;
     }
     // Controller 会保留 owner 批次并继续扫尾其它孤儿；Toolbox 固定恢复根损坏
     // 仍沿用既有 fail-closed 启动合同，不能放行新的工具箱任务。

@@ -5,7 +5,7 @@ const test = require('node:test');
 const { acquireBizOpPhaseLease, BIZ_OP_RESOURCE_WAIT_MS } = require('../../../src/main-process/biz-op-v327/phase-admission');
 const { createResourceGovernor, closeResourceGovernor } = require('../../../src/main-process/background-execution/resource-governor');
 const { createPlatformResourceBudgets } = require('../../../src/main-process/background-execution/resource-budget');
-const { createBizOpPublication, EXPORT_IO_RESOURCES } = require('../../../src/main-process/biz-op-v327/export-publication');
+const { createBizOpPublicationOwner, EXPORT_IO_RESOURCES } = require('../../../src/main-process/biz-op-v327/publication-owner');
 
 const budgets = { cpuSlots: 2, workerThreadSlots: 2, utilityProcessSlots: 0, ioHeavySlots: 2, memoryBytes: 2 * 1024 ** 3 };
 const request = { ownerKey: 'test-phase', actionKey: 'biz-op-v327:export-result-diff',
@@ -32,13 +32,13 @@ test('当前平台内存公式得到零预算，真实共享恢复入口立即�
     freeMemoryBytes: 978108416 });
   const { governor, runtime } = fixture(platform);
   let reads = 0;
-  const publication = createBizOpPublication({ catalog: { now: Date.now, db: {
+  const owner = createBizOpPublicationOwner({ userDataDir: '/tmp/bizop-phase-resource', catalog: { now: Date.now, db: {
     prepare(sql) {
       assert.match(sql, /SELECT 1 FROM biz_op_v327_publications WHERE cleanup_completed=0/);
       return { get() { reads += 1; return { pending: true }; } };
     }
   } }, getRuntime: () => runtime });
-  await assert.rejects(publication.recoverOtherOwners({ deferCommittedRecovery: true }), (error) => {
+  await assert.rejects(owner.acquireObservation({ root: '/tmp/bizop-phase-resource', ownerId: 'archive-publication', reason: 'startup', taskIds: [] }), (error) => {
     assert.equal(error.code, 'BIZOP_RESOURCE_BUDGET_INSUFFICIENT');
     assert.match(error.detailLines.join('\n'), /需要 1024.0 MiB，本次预算 0.0 MiB/);
     return true;

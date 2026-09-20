@@ -386,5 +386,6 @@ test('普通 VCC 存储迁移入口移除但启动 journal recovery 保留，par
   const startup = MAIN_SOURCE.slice(startupStart, startupEnd);
   assert.doesNotMatch(startup, /syncImportArchiveLineage\(/,
     '主初始化不得在 Archive post-outbox hook 后重复建立 hold');
-  assert.match(MAIN_SOURCE, /postOutboxStartupHooks:\s*\[\{[\s\S]*?reconcileVccImportArchiveBeforeRetentionCleanup/);
+  assert.match(MAIN_SOURCE, /reconcileVccImportLineage: reconcileVccImportArchiveBeforeRetentionCleanup/);
+  // post-outbox 顺序在 application-recovery.test.js 通过真实 Controller 执行验证。
 });

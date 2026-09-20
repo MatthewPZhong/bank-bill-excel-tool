@@ -552,10 +552,8 @@ test('Biz main seam 冻结三源/export locator，run 与月末 copy owner 排�
     /freezeRangeRunSelection\(\{[\s\S]*?runLocators:\s*selection\.runLocators[\s\S]*?lineageIntents:\s*selection\.lineageIntents/);
   assert.match(mainSource,
     /buildFrozenRangeExportDb\(\{[\s\S]*?runLocators:\s*\[runLocator\]/);
-  const ownerStart = mainSource.indexOf('recoverInterruptedTaskOwners: [');
-  const ownerEnd = mainSource.indexOf('postOutboxStartupHooks:', ownerStart);
-  const owners = mainSource.slice(ownerStart, ownerEnd);
-  assert.ok(owners.indexOf("ownerName: 'Pending runs'") < owners.indexOf("ownerName: 'Biz OP runs'"));
+  assert.match(mainSource, /recoverLegacyBizOpRuns: recoverBizOpRunsBeforeInterruptedSweep/);
+  // owner 顺序由 application-recovery.test.js 的公开 composition + Controller 行为测试覆盖。
   const bizOwnerStart = mainSource.indexOf('function recoverBizOpRunsBeforeInterruptedSweep(');
   const bizOwnerEnd = mainSource.indexOf('function recoverPreFundRunsBeforeInterruptedSweep()', bizOwnerStart);
   const bizOwner = mainSource.slice(bizOwnerStart, bizOwnerEnd);

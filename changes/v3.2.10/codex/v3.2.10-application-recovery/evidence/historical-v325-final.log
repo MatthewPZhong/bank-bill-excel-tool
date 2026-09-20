@@ -1,0 +1,33 @@
+✔ R3.2.5 canonical release evidence 与 deterministic authority model 一致 (19.982958ms)
+✔ contract package checksum 精确覆盖除 checksum 自身外的 74 个普通文件 (2.899125ms)
+✔ package 新增或漏列普通文件时 checksum fail closed (1.487458ms)
+✔ package 文件 bytes 漂移时 checksum fail closed (0.995583ms)
+✔ checksum 伪造目录中不存在的额外文件时 fail closed (1.684291ms)
+✔ checksum 重复、乱序、目录逃逸或非普通文件均 fail closed (7.021916ms)
+✔ 54 actions 精确分成 36 implemented、16 legacy-only、2 platform canary (0.400333ms)
+✔ E13-A～F 17 actions 与历史/legacy/canary assignment 无重叠且覆盖完整 (0.341291ms)
+✔ 每个 action 都有九类独立证据字段和唯一 fixture (0.40775ms)
+✔ 全部 evidence refs 指向当前树中的真实文件 (1.121875ms)
+✔ 所有 action 的 effective strategy 与 production decision 都保持 legacy/0/false (0.3165ms)
+✔ Windows、真实样本、观察窗口及资金/恢复人工门禁未被伪造为 PASS (0.284291ms)
+✔ release-check/check-vars/scan:vars 仅记录用户要求跳过 (0.297333ms)
+✔ 缺失 action 的 snapshot fail closed (10.367375ms)
+✔ 额外 action 的 snapshot fail closed (10.026583ms)
+✔ 重复 action 与 fixture fail closed (9.893334ms)
+✔ production mode 或 worker count 被启用时 fail closed (10.156209ms)
+✔ production decision 被启用时 fail closed (10.259458ms)
+✔ Windows 未执行却写 PASS 时 fail closed (9.587083ms)
+✔ 资金或恢复人工复核被伪造为 PASS 时 fail closed (9.301959ms)
+✔ 未开始的观察窗口被伪造稳定时 fail closed (9.1905ms)
+✔ 不存在的 action evidence ref fail closed (9.952458ms)
+✔ package 或 lock 不是 3.2.5 时 fail closed (11.016125ms)
+✔ 后续 3.2.6 版本不能冒充 R3.2.5 的发布证据 (9.272834ms)
+✔ 发布文档伪造 production 或资金人工 PASS 时 fail closed (5.7135ms)
+ℹ tests 25
+ℹ suites 0
+ℹ pass 25
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 227.136583

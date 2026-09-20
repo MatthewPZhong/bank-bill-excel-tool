@@ -1,0 +1,138 @@
+▶ toolbox output publication
+  ✔ required target parent等于fixed recovery root时在journal/index/target写入前稳定拒绝 (10.185125ms)
+  ✔ required target parent位于fixed recovery root内部时在journal/index/target写入前稳定拒绝 (6.885333ms)
+  ✔ required target parent是fixed recovery root祖先时在journal/index/target写入前稳定拒绝 (4.224ms)
+  ✔ multi-target任一required parent与recovery root冲突时全批Publisher=0 (4.687ms)
+  ✔ fixed recovery root的普通sibling仍可正常guarded publication (159.381708ms)
+  ✔ fixed recovery root之外的独立目录仍可正常guarded publication (109.651583ms)
+  ✔ guarded committed-before-settle由fresh recovery唯一接管且不二次发布 (244.965708ms)
+  ✔ required direct-parent evidence在preflight前已漂移时不创建journal或target (1.299167ms)
+  ✔ direct parent在prepare:before-generation-inspect被ordinary replacement后绝不发布 (2.401583ms)
+  ✔ direct parent在prepare:after-staged被ordinary replacement后绝不发布 (32.528917ms)
+  ✔ direct parent在publish:before-target-mutation被ordinary replacement后绝不发布 (70.47425ms)
+  ✔ direct parent在publish:before-publish被ordinary replacement后绝不发布 (68.713792ms)
+  ✔ direct parent在publish:after-final-target-verify-before-commit被ordinary replacement后绝不发布 (92.252125ms)
+  ✔ 每个existing target backup rename紧前复核direct parent identity (72.506ms)
+  ✔ prepare返回后、publish读journal前parent replacement仍由index evidence进入Hold (47.052209ms)
+  ✔ journal持久exact parent identity；恢复漂移进入manual且旧journal仍兼容 (165.228125ms)
+  ✔ direct parent原对象移走再移回后prepared recovery合法 (132.391666ms)
+  ✔ journal parent identity被删改时index anchor阻断恢复且不触碰target (76.595125ms)
+  ✔ 输出目标别名输入源时在任何正式覆盖前 fail-closed (7.326ms)
+  ✔ 覆盖确认后的 absent→created 与 existing→changed 均在 publication 快照前拒绝 (14.203458ms)
+  ✔ staging 文件和发布目录使用宿主可执行 fsync 的句柄 (165.212792ms)
+  ✖ 生产发布要求写后校验摘要，并拒绝校验后发生变化的 generation (4.376042ms)
+  ✔ staging 发布后正式目标摘要漂移不得报告 committed (139.609209ms)
+  ✔ 单目标在 after-publish 被无异常改写时，整批最终复核阻止 committed (412.486375ms)
+  ✔ 多目标后续发布期间改写已发布目标时，最终复核回滚已知目标并保留未知文件 (1076.646ms)
+  ✔ staged 发布紧前并发新建正式目标时拒绝覆盖且保留未知文件 (148.362792ms)
+  ✔ 原子 stage link 内并发新建正式目标时拒绝覆盖未知文件 (129.500959ms)
+  ✔ 原子 backup link 内并发新建备份路径时拒绝覆盖两端未知文件 (80.581042ms)
+  ✔ rollback 的 backup restore link 内并发新建 target 时保留未知 target 与原备份 (113.037125ms)
+  ✔ backup 建链后源路径被替换时不 unlink 未知 target (105.095458ms)
+  ✔ stage 建链后源路径被替换时不 unlink 未知 staging 且回滚正式目标 (129.050625ms)
+  ✔ hardlink 身份的 ino=0 时 fail-closed 且不 unlink 任一端 (136.138416ms)
+  ✔ 超过安全整数的相邻 inode 保持精确，源替换后不误 unlink 外部文件 (93.00825ms)
+  ✔ backup 建链后、源 unlink 前崩溃可由新进程清掉重复 link 并保留原目标 (227.828584ms)
+  ✔ stage 建链后、源 unlink 前崩溃可由新进程回滚 target 与重复 staging (234.08575ms)
+  ✔ 文件系统不支持 hardlink 时 fail-closed 且不回退覆盖型 rename (121.546375ms)
+  ✔ 多输出先完整 prepare，再统一发布并保留结果 metadata (223.389834ms)
+  ✔ prepare 的 staging 校验失败时不修改正式目标且清掉任务文件 (56.537916ms)
+  ✔ 固定 index、journal 与所有 target/staging/backup 跨项 alias 碰撞在 preflight 拒绝 (3.693542ms)
+  ✔ artifact 与 target 相同或 target 位于 generation 目录时均在 preflight 拒绝 (1.596042ms)
+  ✔ Unicode NFC 与 NFD 目标按当前平台身份规则 prepare 与发布 (0.912583ms)
+  ✔ macOS 完整 case-fold 等价目标在 prepare 前被拒绝 (1.930583ms)
+  ✔ index rename 已发生但耐久化调用报错时，prepare 能识别登记结果并完整取消 (34.967916ms)
+  ✔ preparing intent 在各 prepare 崩溃点均由新进程发现并只清任务文件 (442.732667ms)
+  ✔ copy 中途崩溃产生的 partial staging 可由新进程清理且不触碰 target (128.547334ms)
+  ✔ preparing index 的 staging 路径被篡改时 fail-closed，不删除其它目录文件 (15.61725ms)
+  ✔ publish 只接受 journal 与 index 均完整 prepared，preparing intent 不触碰 target (134.393125ms)
+  ✔ 没有 discoveryState 的存量 v1 prepared index 只允许人工恢复且不触碰文件 (48.704042ms)
+  ✔ 在线发布中途失败会逆序回滚全部目标 (206.718167ms)
+  ✔ rollback 后 journal 删除失败保留 rollback-finalizing index 并可独立收尾 (153.236125ms)
+  ✔ rollback 两个 index 收尾失败窗口都向用户展示 generation 恢复路径 (274.038792ms)
+  ✔ 崩溃在 backup rename 与 journal 更新之间，下次恢复仍找回旧文件 (131.934875ms)
+  ✔ 崩溃在 staged 发布与 journal 更新之间，按文件 hash 识别并回滚 (169.650333ms)
+  ✔ 最后一项 published 后及整批最终复核前崩溃均保持未 committed，并由新进程回滚 (492.839167ms)
+  ✔ committed journal 已落盘后崩溃只做收尾，不回滚新文件 (145.683583ms)
+  ✔ committed owner 未确认耐久接管时保留 journal，确认后才释放 (151.868125ms)
+  ✖ owner 可在 finalizing 耐久阶段登记收口凭证，重启仅保留 journal/index 收尾责任 (106.630375ms)
+  ✔ committed 后普通检查点异常仍返回成功，不能把已提交文件回滚 (132.971333ms)
+  ✔ committed 后 index 原子更新失败时返回成功并保留恢复职责供下次收尾 (138.073208ms)
+  ✔ committed 后 journal 删除失败时固定 finalizing index 保留恢复职责 (158.881584ms)
+  ✔ committed journal 已删除但 index 删除失败时 finalizing intent 可独立收尾 (132.601833ms)
+  ✔ 崩溃后正式目标被外部改写时进入 manual-recovery，绝不删除外部文件 (146.478084ms)
+  ✔ index 指向缺失 journal 时保留 index 并阻断恢复和新任务 (3.385334ms)
+  ✔ journal 路径结构被篡改时 fail-closed，不按篡改路径删除文件 (83.679583ms)
+  ✔ 新式 prepared index 与崩溃 journal 的 target 锚点不一致时绝不删除同 hash victim (113.849709ms)
+  ✔ 存量 v1 崩溃 journal 重定向到同 hash victim 时 manual-only 且零文件改动 (147.043375ms)
+  ✔ journal 中 NFC/NFD 目标别名碰撞时恢复入口 fail-closed (92.444833ms)
+  ✔ 恢复索引中的 NFC/NFD journal 别名碰撞会阻断恢复 (0.681542ms)
+  ✔ 恢复索引把 target/stage/backup/journal 锚到固定 indexPath 时在读取阶段 fail-closed (0.851667ms)
+  ✔ prepare 后目标被外部创建时取消任务并保留外部目标 (80.906917ms)
+  ✔ prepared 取消时 journal 删除失败保留 cancelling index 并可由下次恢复收尾 (76.206042ms)
+  ✔ prepared 取消会在移除固定 index 前 fsync 每个 staging 所在目录 (86.622667ms)
+  ✔ 进程内 active task 会保留恢复资格并阻止相同 target 被二次 reserve (107.132ms)
+  ✔ 进程内 reservation 按当前平台区分 NFC/NFD 目标 (122.694167ms)
+  ✔ 下一次 prepare 自动恢复上次崩溃任务，再准备新目标 (254.663708ms)
+  ✔ prepare 已登记 index 但尚未发布时崩溃，只清任务 staging，不检查或修改目标 (73.377167ms)
+  ✔ dispose 只清理 generation 源文件，不删除正式目标 (0.751542ms)
+✖ toolbox output publication (9520.727833ms)
+ℹ tests 77
+ℹ suites 1
+ℹ pass 75
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 9656.35
+
+✖ failing tests:
+
+test at tests/unit/toolbox-output-publication.test.js:667:3
+✖ 生产发布要求写后校验摘要，并拒绝校验后发生变化的 generation (4.376042ms)
+  AssertionError [ERR_ASSERTION]: The validation function is expected to return "true". Received false
+  
+  Caught error:
+  
+  Error: 发布预检证明已消费
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/tests/unit/toolbox-output-publication.test.js:686:12)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Suite.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: Error: 发布预检证明已消费
+        at recoveryError (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/publication-recovery/worker-authority.js:18:17)
+        at verify (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/publication-recovery/worker-authority.js:48:13)
+        at Object.recoverPendingToolboxPublications (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/toolbox-output-publication.js:2070:18)
+        at recoverPendingToolboxPublications (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/tests/helpers/publication-authority.js:46:15)
+        at prepareToolboxPublication (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/tests/helpers/publication-authority.js:52:20)
+        at /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/tests/unit/toolbox-output-publication.test.js:687:13
+        at getActual (node:assert:586:5)
+        at assert.throws (node:assert:734:24)
+        at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/tests/unit/toolbox-output-publication.test.js:686:12)
+        at Test.runInAsyncScope (node:async_hooks:226:14),
+    operator: 'throws',
+    diff: 'simple'
+  }
+
+test at tests/unit/toolbox-output-publication.test.js:1998:3
+✖ owner 可在 finalizing 耐久阶段登记收口凭证，重启仅保留 journal/index 收尾责任 (106.630375ms)
+  Error: raw recover 已停用；请使用 owner recovery facade
+      at recoveryError (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/publication-recovery/worker-authority.js:18:17)
+      at Object.recover (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/toolbox-output-publication-dispatch.js:230:29)
+      at recoverToolboxPublicationsAsync (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/toolbox-output-publication-dispatch.js:260:28)
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/tests/unit/toolbox-output-publication.test.js:2013:26)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Suite.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    code: 'PUBLICATION_RECOVERY_AUTHORITY_REQUIRED',
+    preserveTemporaryFiles: true,
+    recoveryPaths: [ '/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/toolbox-publication-IRsUgZ/user-data/toolbox-publish-journal-index.json' ]
+  }
