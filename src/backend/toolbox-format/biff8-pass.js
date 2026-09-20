@@ -7,8 +7,8 @@ const {
   createToolboxCell,
   createToolboxRow,
   createToolboxSheetMeta
-} = require('./model');
-const { SourceStyleRegistry } = require('./style-registry');
+} = require('../xlsx/model');
+const { SourceStyleRegistry } = require('../xlsx/style-registry');
 const {
   readBiff8Overlay,
   createBiff8GridResolver,

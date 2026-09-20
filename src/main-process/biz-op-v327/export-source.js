@@ -5,7 +5,7 @@ const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const readline = require('node:readline');
 const { setImmediate: yieldMessages } = require('node:timers/promises');
-const { openSingleSheetRichWorkbook } = require('../../backend/xlsx-rich-reader');
+const { openSingleSheetRichWorkbook } = require('../../backend/xlsx/rich-workbook');
 const { readVerifiedManifest } = require('./payload-store');
 const { openReadonly, verifyOriginal } = require('./compute-pipeline');
 const { detectHeader, createImportAdapter, OP_COLUMNS, FLOW_COLUMNS, CELL_CONTRACT_VERSION } = require('./import-adapter');
@@ -53,9 +53,9 @@ async function buildExportSource({ payloadStore, source, spool, tempDirectory, c
       safePoint();
       await verifyOriginal(original, safePoint);
       const before = await fs.promises.stat(original.filePath);
-      // 读取器拥有并递归删除 SST 目录；每份原件只交付独立子目录的所有权。
+      // 每份原件只交付独立 SST 子目录；读取器仅清理身份匹配的登记文件和空目录。
       const workbook = await openSingleSheetRichWorkbook(original.filePath, { sstTempRoot: path.join(tempDirectory, `sst-raw-${randomUUID()}`),
-        memoryBudgetBytes: 32 * 1024 * 1024, cacheMaxBytes: 32 * 1024 * 1024, cancelToken });
+        memoryBudgetBytes: 32 * 1024 * 1024, lruMaxEntries: 8192, cacheMaxBytes: 32 * 1024 * 1024, cancelToken });
       let selected = 0; const adapter = createImportAdapter(kind);
       try {
         if (workbook.sheet.name !== original.sheetName) fail('BIZOP_EXPORT_ORIGINAL_CHANGED');

@@ -2,7 +2,7 @@
 //
 // 背景：原 reader.js 用 SheetJS XLSX.readFile 全量进内存（sheet_to_json header:1），
 // 用户实际导入百万行 xlsx 会撞 SheetJS V8 512MB 字符串上限（静默返回空 / 卡）。
-// 本文件提供等价的流式 reader（仿已验证范式 pending-import/streaming-xlsx-reader +
+// 本文件提供等价的流式 reader（仿已验证范式 xlsx/legacy/streaming-xlsx-reader +
 // vcc-op-calc-import/reader），内存常数（边解压 zip entry 边扫 <row>），不全量载入。
 //
 // 🔴 数据完整性红线：本 reader 必须与 reader.js（SheetJS 版）byte-level 同输出
@@ -52,9 +52,9 @@ const {
   parseRowXml,
   readSharedStrings,
   lettersToIndex
-} = require('../pending-import/streaming-xlsx-reader');
+} = require('../xlsx/legacy/streaming-xlsx-reader');
 // v3.0.4 块 A · A1：JSZip loadAsync 前的入口尺寸预检（≥2^31 抛明确中文错误，预检自身失败 fail-open）。
-const { assertXlsxEntriesUnderLimit } = require('../pending-import/xlsx-size-preflight');
+const { assertXlsxEntriesUnderLimit } = require('../xlsx/legacy/entry-size-preflight');
 
 function xmlAttrUnescape(s) {
   if (s.indexOf('&') < 0) return s;

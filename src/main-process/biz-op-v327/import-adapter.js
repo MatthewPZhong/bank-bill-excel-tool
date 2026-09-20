@@ -1,7 +1,7 @@
 'use strict';
 
 const { BIZ_OP_HEADERS, FLOW_HEADERS } = require('../../backend/biz-op-recon-db/columns');
-const { classifyExcelNumberFormat } = require('../../backend/toolbox-format/number-date');
+const { classifyExcelNumberFormat } = require('../../backend/xlsx/number-date');
 const { canonicalizeDecimal, addCanonicalDecimals, subtractCanonicalDecimals,
   compareCanonicalDecimals, absoluteDecimal } = require('../financial-decimal');
 

@@ -11,8 +11,8 @@ const { writeXlsx, flowRow, opRow } = require('../../helpers/biz-op-v327-xlsx');
 const { createBizOpPayloadStore, readVerifiedManifest } = require('../../../src/main-process/biz-op-v327/payload-store');
 const { runImportPipeline } = require('../../../src/main-process/biz-op-v327/import-pipeline');
 const { accountText, dateText } = require('../../../src/main-process/biz-op-v327/import-adapter');
-const { openSingleSheetRichWorkbook } = require('../../../src/backend/xlsx-rich-reader');
-const { AdaptiveSharedStringsProvider } = require('../../../src/backend/position-reconciliation-import/shared-strings-provider');
+const { openSingleSheetRichWorkbook } = require('../../../src/backend/xlsx/rich-workbook');
+const { AdaptiveSharedStringsProvider } = require('../../../src/backend/xlsx/shared-strings-provider');
 
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bizop-import-'));

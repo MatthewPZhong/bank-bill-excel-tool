@@ -37,7 +37,7 @@ const {
   TOOLBOX_MAX_COL_COUNT
 } = streamIO;
 const { writeWorkbookRows } = require('../../../src/backend/file-service');
-const { readXlsxStreamed } = require('../../../src/backend/pending-import/streaming-xlsx-reader');
+const { readXlsxStreamed } = require('../../../src/backend/xlsx/legacy/streaming-xlsx-reader');
 
 // 模拟流式 .xlsx reader 把一行补到固定列宽（colCount）——尾部全是字面 '' padding。
 //   emit 收到的恒是 colCount 宽数组，padding 与「源真实空 cell」字面同为 ''；emit 须裁到表头宽（保留表头宽以内）。

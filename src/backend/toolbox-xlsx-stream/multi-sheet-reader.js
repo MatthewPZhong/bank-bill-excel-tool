@@ -13,8 +13,8 @@
 //   - 纯 Node、worker 安全：不 require electron / main.js / 任何带 Electron 依赖的 main-process 重模块
 //     （本模块将在 worker_threads 内被调用）。
 //   - 绝不调用 zip-reader.openWorkbook（它对 ≥2 sheet 显式 throw，本模块要读多 sheet）。
-//   - 绝不 import pending-import/streaming-xlsx-reader.js（隔离铁律）。只复用 big-table-import 的
-//     zip-reader（openZipWithEntries / locateSheets / loadSharedStrings）+ row-scanner（scanSheetRows）。
+//   - 绝不 import xlsx/legacy/streaming-xlsx-reader.js（隔离铁律）。只复用 xlsx/zip-reader
+//     （openZipWithEntries / locateSheets / loadSharedStrings）+ big-table-import/row-scanner（scanSheetRows）。
 //
 // 多 sheet 续页语义（TECHDOC v3.0.9 §三③ / PRD §5.1.4，权威）：
 //   - 表头 = 第一个「非空」sheet 的首个「有意义行」（按 locateSheets 显示序，非物理 sheetN.xml 编号序）。
@@ -36,7 +36,7 @@ const {
   openZipWithEntries,
   locateSheets,
   loadSharedStrings
-} = require('../big-table-import/zip-reader');
+} = require('../xlsx/zip-reader');
 const { scanSheetRows } = require('../big-table-import/row-scanner');
 const {
   normalizeCell,

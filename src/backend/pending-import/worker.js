@@ -22,7 +22,7 @@ const {
   identityFromPendingDatasetSeed
 } = require('../pending-db/dataset-identity');
 const { validateHeaders, computeRowHash } = require('./validator');
-const { readXlsxStreamed } = require('./streaming-xlsx-reader');
+const { readXlsxStreamed } = require('../xlsx/legacy/streaming-xlsx-reader');
 const monthRepo = require('../pending-db/month-repository');
 const {
   freezeWorkerBatchContext

@@ -15,7 +15,7 @@
 //     expected.length 列被截断 → 流内定位不到表头 → 返回 matched:false，caller 抛「未匹配表头」错
 //     （安全失败，绝不静默错位落库；该边界为 PR-2 已知限制）。
 //   返回 { matched }：matched=false = 整条流读完未定位到表头行（由 caller 记 write-error）。
-const { readXlsxStreamed } = require('../backend/pending-import/streaming-xlsx-reader');
+const { readXlsxStreamed } = require('../backend/xlsx/legacy/streaming-xlsx-reader');
 const { normalizeCell, isRowMeaningful } = require('../backend/file-service/common');
 
 async function streamLinkedRowsToInsert(filePath, signature, insertOne, transform) {

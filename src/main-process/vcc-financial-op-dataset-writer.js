@@ -23,7 +23,7 @@ const {
   pendingContentHash
 } = require('../backend/vcc-financial-op/row-mapper');
 const { streamStoredDetailRows, openWorkbookSheets } = require('../backend/vcc-financial-op/workbook-reader');
-const { openRichWorkbook } = require('../backend/xlsx-rich-reader');
+const { openRichWorkbook } = require('../backend/xlsx/rich-workbook');
 const { hashSourceFile } = require('../backend/vcc-financial-op/source-lineage');
 const { createArchiveRepository } = require('../backend/database/archive-repository');
 const { assertArtifactMember } = require('../backend/vcc-financial-op/import-handoff');
@@ -950,7 +950,7 @@ async function emitReconstructedSystemRows(db, scope, archiveSources, emit) {
       const member = storedSourceMember(db, sourceId);
       const names = db.prepare('SELECT DISTINCT sheet_name FROM vcc_fin_op_system_snapshots WHERE target_month = ? AND import_source_id = ?')
         .all(scope.targetMonth, sourceId).map((row) => row.sheet_name);
-      const workbook = await openRichWorkbook(source.filePath, { memoryBudgetBytes: 64 * 1024 * 1024 });
+      const workbook = await openRichWorkbook(source.filePath, { memoryBudgetBytes: 64 * 1024 * 1024, lruMaxEntries: 8192 });
       try {
         for (const name of names) {
           const sheetIndex = workbook.sheets.findIndex((sheet) => sheet.name === name);

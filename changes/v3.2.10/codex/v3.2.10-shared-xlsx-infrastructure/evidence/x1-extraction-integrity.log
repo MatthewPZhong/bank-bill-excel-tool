@@ -1,0 +1,9 @@
+PASS excel-text.js byte-identical to baseline implementation
+PASS ooxml-namespaces.js byte-identical to baseline implementation
+PASS number-date.js byte-identical to baseline implementation
+PASS model.js byte-identical to baseline implementation
+PASS style-registry.js byte-identical to baseline implementation
+PASS xlsx-sheet-scanner.js byte-identical to baseline implementation
+PASS zip-reader.js byte-identical to baseline implementation
+PASS metadata/SST helpers byte-identical to baseline block
+PASS Toolbox class/open/exports byte-identical to baseline block

@@ -1,6 +1,6 @@
 'use strict';
 
-const { BUILTIN_NUMBER_FORMATS } = require('./number-date');
+const { BUILTIN_NUMBER_FORMATS } = require('../xlsx/number-date');
 
 const BIFF8_MAX_RECORD_PAYLOAD = 8224;
 const BIFF8_MAX_THEME_LOGICAL_BYTES = 16 * 1024 * 1024;

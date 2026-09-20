@@ -62,7 +62,7 @@ async function prepare(f, paths, taskRunId = 'multi-task') {
 }
 
 function observeSystemReader(t, observe) {
-  const richReader = require('../../../../src/backend/xlsx-rich-reader');
+  const richReader = require('../../../../src/backend/xlsx/rich-workbook');
   const originalOpen = richReader.openRichWorkbook;
   const open = t.mock.method(richReader, 'openRichWorkbook', async (...args) => {
     const reader = await originalOpen(...args);
@@ -220,7 +220,7 @@ test('失败和解析成功的系统 OP Sheet 跨文件累计读取量，整组�
 });
 
 test('系统 OP 扫描中断仍上报已完成数据行，不把未读尾部或表头计入', async (t) => {
-  const { openRichWorkbook } = require('../../../../src/backend/xlsx-rich-reader');
+  const { openRichWorkbook } = require('../../../../src/backend/xlsx/rich-workbook');
   const { readSystemOpSheetCandidates } = require('../../../../src/backend/vcc-financial-op/system-op-importer');
   const f = fixture(t), file = write(f.dir, [{ name: '系统', type: T.SYSTEM_OP, rows: system('甲') }]);
   const reader = await openRichWorkbook(file), progress = [];

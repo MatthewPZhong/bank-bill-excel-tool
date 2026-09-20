@@ -8,7 +8,7 @@ const {
   applyTint,
   parseOoxmlStyles,
   parseThemeColors
-} = require('../../src/backend/toolbox-format/style-registry');
+} = require('../../src/backend/xlsx/style-registry');
 
 const TRANSITIONAL_SPREADSHEETML =
   'http://schemas.openxmlformats.org/spreadsheetml/2006/main';

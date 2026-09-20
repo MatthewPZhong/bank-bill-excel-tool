@@ -9,8 +9,8 @@
 // 进程边界（🔴 纯 Node，worker 安全）：
 //   - 不访问任何 Electron API；只 require：
 //       ./split-scan-fields（T3）/ ./split-export-filter（T3）—— 读路径全走 T1 multi-sheet-reader
-//         的 yauzl 流式解析，绝不 require 隔离铁律禁区的 pending-import 银行专表流式读取器；
-//       ../pending-import/xlsx-size-preflight（collectEntrySizes，纯 yauzl）—— sharedStrings 护栏；
+//         的 yauzl 流式解析，绝不 require 隔离铁律禁区的 xlsx/legacy 银行专表读取器；
+//       ../xlsx/legacy/entry-size-preflight（collectEntrySizes，纯 yauzl）—— sharedStrings 护栏；
 //       ../../main-process/serialize-error（serializeError，通用工具，与 engine-worker-entry 同口径）。
 //   - team-lead 已核 toolbox-xlsx-stream 整链 electron-free（T3 头注已记）。
 //
@@ -90,7 +90,7 @@ function isExplainedError(err) {
 async function assertSharedStringsUnderLimit(filePath, deps = {}) {
   const collectEntrySizes = typeof deps.collectEntrySizes === 'function'
     ? deps.collectEntrySizes
-    : require('../pending-import/xlsx-size-preflight').collectEntrySizes;
+    : require('../xlsx/legacy/entry-size-preflight').collectEntrySizes;
 
   let sizes;
   try {

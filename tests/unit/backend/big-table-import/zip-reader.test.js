@@ -6,7 +6,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 
-const zipReader = require('../../../../src/backend/big-table-import/zip-reader');
+const zipReader = require('../../../../src/backend/xlsx/zip-reader');
 const fx = require('./_fixtures');
 const { writeMultiSheetXlsx, writeRawSheetXlsx, colLetter } = fx;
 

@@ -23,9 +23,9 @@ const {
 } = require('../file-service/common');
 const { FLOW_HEADERS, FLOW_DB_COLUMNS } = require('../vcc-op-calc-db/columns');
 const { validateFlowHeaders } = require('./validator');
-const { parseRowXml, readSharedStrings, lettersToIndex } = require('../pending-import/streaming-xlsx-reader');
+const { parseRowXml, readSharedStrings, lettersToIndex } = require('../xlsx/legacy/streaming-xlsx-reader');
 // v3.0.4 块 A · A1：JSZip loadAsync 前的入口尺寸预检（≥2^31 抛明确中文错误，预检自身失败 fail-open）。
-const { assertXlsxEntriesUnderLimit } = require('../pending-import/xlsx-size-preflight');
+const { assertXlsxEntriesUnderLimit } = require('../xlsx/legacy/entry-size-preflight');
 
 const ERROR_CODE = 'VCC_OP_CALC_FLOW_HEADER_MISMATCH';
 const TEMPLATE_LABEL = '流水对账单';

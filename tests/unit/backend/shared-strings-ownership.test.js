@@ -7,8 +7,8 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const XLSX = require('xlsx');
 const JSZip = require('jszip');
-const { AdaptiveSharedStringsProvider } = require('../../../src/backend/position-reconciliation-import/shared-strings-provider');
-const { openRichWorkbook } = require('../../../src/backend/xlsx-rich-reader');
+const { AdaptiveSharedStringsProvider } = require('../../../src/backend/xlsx/shared-strings-provider');
+const { openRichWorkbook } = require('../../../src/backend/xlsx/rich-workbook');
 const { openWorkbookSheets } = require('../../../src/backend/vcc-financial-op/workbook-reader');
 
 function fixture(t) {
@@ -26,8 +26,8 @@ function isolated(t, body) {
   const f = fixture(t), cwd = path.join(f.dir, 'sacrificial-cwd');
   fs.mkdirSync(cwd); fs.writeFileSync(path.join(cwd, 'sentinel'), 'retain');
   const script = `const fs=require('node:fs'); const assert=require('node:assert/strict');
-    const {AdaptiveSharedStringsProvider}=require(${JSON.stringify(require.resolve('../../../src/backend/position-reconciliation-import/shared-strings-provider'))});
-    const {openRichWorkbook}=require(${JSON.stringify(require.resolve('../../../src/backend/xlsx-rich-reader'))});
+    const {AdaptiveSharedStringsProvider}=require(${JSON.stringify(require.resolve('../../../src/backend/xlsx/shared-strings-provider'))});
+    const {openRichWorkbook}=require(${JSON.stringify(require.resolve('../../../src/backend/xlsx/rich-workbook'))});
     const file=${JSON.stringify(f.file)}; const cwd=process.cwd();
     (async()=>{${body}})().catch(error=>{console.error(error);process.exitCode=1});`;
   execFileSync(process.execPath, ['-e', script], { cwd, encoding: 'utf8', timeout: 30000 });

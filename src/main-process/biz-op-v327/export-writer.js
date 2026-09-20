@@ -1,7 +1,7 @@
 'use strict';
 
 const { withBoundedWorkbook } = require('../bounded-xlsx-writer');
-const { encodeExcelStXstring } = require('../../backend/toolbox-format/excel-text');
+const { encodeExcelStXstring } = require('../../backend/xlsx/excel-text');
 const { fail } = require('./contracts');
 
 async function writeExportWorkbook({ filePath, spool, expected, safePoint }) {

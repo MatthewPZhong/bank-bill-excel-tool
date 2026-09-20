@@ -1,0 +1,248 @@
+
+> bank-bill-excel-tool@3.2.9 test:integration
+> node scripts/integration-runner.js
+
+==== integration runner: 61 个脚本 ====
+
+[integration] ▶ acquiring-bill-currency-idle-cleanup ... PASS 38/38 (9891ms)
+
+[integration] ▶ acquiring-bill-currency-n4-migration ... PASS 128/128 (7086ms)
+
+[integration] ▶ acquiring-engine-migration ... PASS 45/45 (35368ms)
+
+[integration] ▶ acquiring-index-slim-v2 ... PASS 22/22 (2411ms)
+
+[integration] ▶ acquiring-side-db-parity ... PASS 19/19 (2589ms)
+
+[integration] ▶ archive-biz-op-auto-report-retention ... PASS 6/6 (34726ms)
+
+[integration] ▶ archive-center-module-retention ... PASS 11/11 (12417ms)
+
+[integration] ▶ archive-center-permanent-delete ... FAIL (145075ms)
+  --- stdout (tail) ---
+  PASS 预检与取消不修改记录，确认后真实删除原件、输出及只读副本并保留外部文件
+  PASS 已删 owner 迟到重复终态在重启时由收口证明安全 ACK，不复活批次
+  PASS 文件占用返回未完成并显示清理任务，重启后原任务重试完成
+  PASS 预检后新增终态通知使确认失效，原任务收口后可重新确认
+  PASS 失败输出的预分配路径出现未知文件时，完整删除入口保留批次和文件
+  PASS 工具箱发布恢复完成原任务与后处理后，可通过统一入口永久删除
+  PASS 入口维护持有自身 lease 时可完成到期清理和后续阶段
+  PASS 真实 VCC 发布归档暂时失败，跨进程恢复后 outbox 清空并可初始化及永久删除
+  PASS 正常工具箱收尾在完成凭证前退出，原发布记录跨进程收口且不重发布
+  PASS BizOP 正式导出 ACK 临时失败，原 owner 恢复后 outbox 清空并完成初始化
+  PASS BizOP ACK 后完成凭证前进程退出，重启沿原输出身份完成收口
+  PASS BizOP 旧 binding 的业务恢复已关闭，仍可由原发布事实补齐完成凭证
+  PASS BizOP 未提交导出首次终态落库失败，原补偿完成后可重启及永久删除
+  PASS BizOP 已关闭的未提交导出缺少完成凭证，沿原补偿事实恢复收口
+  PASS BizOP 大量历史导出分批补齐凭证，重启续跑且真实未决任务继续受保护
+  ==== 15/52 PASS ====
+  
+  --- stderr (tail) ---
+  PositionReconciliationError: 平盘导入可用磁盘空间不足，未修改现有数据
+      at fatalError (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-shared-xlsx-infrastructure/src/main-process/position-reconciliation/import-dispatch.js:52:17)
+      at ChildProcess.onMessage (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-shared-xlsx-infrastructure/src/main-process/position-reconciliation/import-dispatch.js:341:25)
+      at ChildProcess.emit (node:events:508:20)
+      at emit (node:internal/child_process:956:14)
+      at process.processTicksAndRejections (node:internal/process/task_queues:91:21)
+  
+
+[integration] ▶ background-execution-pure-compute-canary ... PASS 9/9 (145ms)
+
+[integration] ▶ background-execution-recovery-canary ... PASS 9/9 (248ms)
+
+[integration] ▶ background-execution-recovery-control ... PASS 27/27 (377ms)
+
+[integration] ▶ bank-bu-background-dual-parser ... PASS 9/9 (392ms)
+
+[integration] ▶ bank-bu-background-single-jobs ... PASS 21/21 (1447ms)
+
+[integration] ▶ bank-bu-recon-side-db-parity ... PASS 17/17 (1793ms)
+
+[integration] ▶ bank-statement-hit-scenario-report ... PASS 49/49 (303ms)
+
+[integration] ▶ bank-statement-many-to-many-review-sheet ... PASS 33/33 (308ms)
+
+[integration] ▶ bank-statement-universal-import-routing ... PASS 20/20 (1653ms)
+
+[integration] ▶ big-table-import-engine ... PASS 19/19 (8222ms)
+
+[integration] ▶ biz-op-auto-error-report ... PASS 12/12 (41058ms)
+
+[integration] ▶ biz-op-recon-side-db-parity ... PASS 16/16 (1658ms)
+
+[integration] ▶ bizop-flow-engine-migration ... PASS 73/73 (7903ms)
+
+[integration] ▶ dark-mode-schedule-settings ... PASS 6/6 (938ms)
+
+[integration] ▶ duplicate-inbound-match-end-to-end ... PASS 31/31 (2149ms)
+
+[integration] ▶ fund-transfer-recon-account-mapping ... PASS 19/19 (1127ms)
+
+[integration] ▶ gateway-channel-filter-equivalence ... PASS 23/23 (1481ms)
+
+[integration] ▶ linked-fx-open7-stale-hit-e2e ... PASS 27/27 (1149ms)
+
+[integration] ▶ linked-table-delete-by-range-tablekey ... PASS 73/73 (1273ms)
+
+[integration] ▶ new-account-balance-statement ... PASS 36/36 (289ms)
+
+[integration] ▶ pending-data-reconciliation ... PASS 33/33 (56ms)
+
+[integration] ▶ pending-engine-migration ... PASS 57/57 (9444ms)
+
+[integration] ▶ pending-removal-reconcile ... PASS 62/62 (280ms)
+
+[integration] ▶ position-reconciliation-side-db-parity ... PASS 38/38 (738ms)
+
+[integration] ▶ pre-fund-reconciliation-output-contract ... PASS 15/15 (336ms)
+
+[integration] ▶ pre-fund-reconciliation-side-db-parity ... PASS 69/69 (1163ms)
+
+[integration] ▶ refund-backfill-yellow-fill-e2e ... PASS 258/258 (228ms)
+
+[integration] ▶ shared-xlsx-boundary ... PASS 51/51 (4273ms)
+
+[integration] ▶ statement-generation-pipeline ... PASS 45/45 (285ms)
+
+[integration] ▶ toolbox-large-file-stream ... PASS 50/50 (174220ms)
+
+[integration] ▶ toolbox-large-split-multi-sheet ... FAIL (98603ms)
+  --- stdout (tail) ---
+  ==== 工具箱大文件按字段拆分 · 多 sheet 隔离 worker 通道 端到端验证 ====
+  规模：A 部分两档 500,000 / 1,500,000 行（跨 3 物理 sheet）；B 部分真 worker 小规模。700 万级由 PRD §7 P0 手测覆盖。
+  
+  内存门禁自校验：8→23MB 通过、8→24MB 拒绝；9→26MB 通过、9→27MB 与 13→39MB 严格线性拒绝；32→72MB 通过、32→73/96MB 拒绝；49→97MB 通过、49→98/147MB 拒绝；交错 [48,49,48]→[96,97,97] 通过、稳定 48→97MB 拒绝；82→139MB 通过、82→140MB 拒绝；150MB 任一样本绝对上限独立拒绝。
+  
+  ── A. 直驱 backend 模块（大规模 + 内存恒定）──────────────────────
+  A1 生成 tier1 多 sheet 夹具（500,000 行，perSheet=166,668）...
+     物理 sheet 数=3，文件大小=11.1MB，注入命中数（channel=ALIPAY）=100,000
+     scanFields：13554ms，RSS 扫描前=98MB 峰值=175MB 增量=76MB
+     exportFilter：matchedCount=100,000
+  A2 生成 tier2 多 sheet 夹具（1,500,000 行，perSheet=500,001）...
+     物理 sheet 数=3，文件大小=33.5MB，注入命中数=300,000
+     scanFields：40492ms，RSS 扫描前=96MB 峰值=240MB 增量=143MB
+     内存恒定对比：行数 ×3.0；RSS 中位增量 tier1=76MB → tier2=143MB（样本数=1，tier1=[76]MB，tier2=[143]MB）（measurable-growth，relative预算=138MB，absolute预算=133MB，effective预算=133MB，独立中位预算 margin=+10MB/取整容差≤1MB，paired effective预算 margin 中位数=+10MB，paired 线性 margin 中位数=-85MB）
+  A3 输出分 sheet 验证（全命中 + 小 maxRowsPerSheet 确定性触发 writeRowsStreamed 分物理 sheet）...
+     输出物理 sheet 数=3（2500/1000 → 期望 ≥3）
+  
+  ── B. 真 worker 拓扑（真 dispatchLargeSplit → new Worker → backend）──────
+  B 生成 worker 夹具（6000 行，物理 sheet 数=3，注入命中数=1200）...
+  B1 真 worker scanFields（new Worker → done→resolve）...
+  B2 真 worker exportFilter（new Worker → done→resolve + 产物 readback）...
+  
+  ==== 30/31 PASS ====
+  
+  --- stderr (tail) ---
+  
+  FAILURES:
+    - A 内存恒定·亚线性：measurable-growth 的 tier2 RSS 中位增量 143MB；独立中位预算 margin +10MB ≤ 取整容差 1MB；paired effective预算 margin 中位数 +10MB ≤ 0MB，paired 线性 margin 中位数 -85MB < 0MB（relative预算 138MB，absolute预算 133MB，effective预算 133MB，线性外推 228MB）
+  
+
+[integration] ▶ toolbox-multi-sheet-merge ... PASS 16/16 (19448ms)
+
+[integration] ▶ toolbox-multi-split-roundtrip ... PASS 17/17 (1084ms)
+
+[integration] ▶ toolbox-roundtrip ... PASS 30/30 (382ms)
+
+[integration] ▶ toolbox-row-split-admission ... PASS 2/2 (1814ms)
+
+[integration] ▶ toolbox-row-split-archive-delete ... PASS 2/2 (3278ms)
+
+[integration] ▶ v2.1.10-a3-phase1 ... PASS 40/40 (22011ms)
+
+[integration] ▶ v2.1.10-a3-phase2 ... PASS 56/56 (25092ms)
+
+[integration] ▶ v2.1.10-a4-phase3 ... PASS 75/75 (94951ms)
+
+[integration] ▶ v2.1.10-n4-cont-1-phase4 ... PASS 33/33 (24762ms)
+
+[integration] ▶ v2.1.10-n4-cont-2-phase5 ... PASS 43/43 (11811ms)
+
+[integration] ▶ v2.1.12-beta-multiworker-nested ... PASS (no count) (8203ms)
+
+[integration] ▶ v2.1.9-n5-end-to-end ... PASS 68/68 (933ms)
+
+[integration] ▶ v2.1.9-n5-migration ... PASS 67/67 (2351ms)
+
+[integration] ▶ v2.1.9-sr-fix-1-coverage ... PASS 148/148 (1488ms)
+
+[integration] ▶ v2.1.9-sr-log-1 ... PASS 33/33 (413ms)
+
+[integration] ▶ v3.0.0-linked-streaming-import ... PASS 19/19 (1019ms)
+
+[integration] ▶ v3.0.1-linked-gateway-upsert ... PASS 40/40 (1294ms)
+
+[integration] ▶ v3.0.4-boc-dispatch-order-fix ... PASS 31/31 (6436ms)
+
+[integration] ▶ vcc-financial-op-adjustment-archive-chain ... PASS 226/226 (2236ms)
+
+[integration] ▶ vcc-financial-op-destructive-state-chain ... PASS 77/77 (2892ms)
+
+[integration] ▶ vcc-financial-op-effective-result ... PASS 19/19 (590ms)
+
+[integration] ▶ vcc-financial-op-historical-template-export ... PASS 29/29 (1923ms)
+
+==== 汇总（847513ms 总耗时）====
+  ✓ acquiring-bill-currency-idle-cleanup 38/38 (9891ms)
+  ✓ acquiring-bill-currency-n4-migration 128/128 (7086ms)
+  ✓ acquiring-engine-migration 45/45 (35368ms)
+  ✓ acquiring-index-slim-v2 22/22 (2411ms)
+  ✓ acquiring-side-db-parity 19/19 (2589ms)
+  ✓ archive-biz-op-auto-report-retention 6/6 (34726ms)
+  ✓ archive-center-module-retention 11/11 (12417ms)
+  ✗ archive-center-permanent-delete 15/52 (145075ms)
+  ✓ background-execution-pure-compute-canary 9/9 (145ms)
+  ✓ background-execution-recovery-canary 9/9 (248ms)
+  ✓ background-execution-recovery-control 27/27 (377ms)
+  ✓ bank-bu-background-dual-parser 9/9 (392ms)
+  ✓ bank-bu-background-single-jobs 21/21 (1447ms)
+  ✓ bank-bu-recon-side-db-parity 17/17 (1793ms)
+  ✓ bank-statement-hit-scenario-report 49/49 (303ms)
+  ✓ bank-statement-many-to-many-review-sheet 33/33 (308ms)
+  ✓ bank-statement-universal-import-routing 20/20 (1653ms)
+  ✓ big-table-import-engine 19/19 (8222ms)
+  ✓ biz-op-auto-error-report 12/12 (41058ms)
+  ✓ biz-op-recon-side-db-parity 16/16 (1658ms)
+  ✓ bizop-flow-engine-migration 73/73 (7903ms)
+  ✓ dark-mode-schedule-settings 6/6 (938ms)
+  ✓ duplicate-inbound-match-end-to-end 31/31 (2149ms)
+  ✓ fund-transfer-recon-account-mapping 19/19 (1127ms)
+  ✓ gateway-channel-filter-equivalence 23/23 (1481ms)
+  ✓ linked-fx-open7-stale-hit-e2e 27/27 (1149ms)
+  ✓ linked-table-delete-by-range-tablekey 73/73 (1273ms)
+  ✓ new-account-balance-statement 36/36 (289ms)
+  ✓ pending-data-reconciliation 33/33 (56ms)
+  ✓ pending-engine-migration 57/57 (9444ms)
+  ✓ pending-removal-reconcile 62/62 (280ms)
+  ✓ position-reconciliation-side-db-parity 38/38 (738ms)
+  ✓ pre-fund-reconciliation-output-contract 15/15 (336ms)
+  ✓ pre-fund-reconciliation-side-db-parity 69/69 (1163ms)
+  ✓ refund-backfill-yellow-fill-e2e 258/258 (228ms)
+  ✓ shared-xlsx-boundary 51/51 (4273ms)
+  ✓ statement-generation-pipeline 45/45 (285ms)
+  ✓ toolbox-large-file-stream 50/50 (174220ms)
+  ✗ toolbox-large-split-multi-sheet 30/31 (98603ms)
+  ✓ toolbox-multi-sheet-merge 16/16 (19448ms)
+  ✓ toolbox-multi-split-roundtrip 17/17 (1084ms)
+  ✓ toolbox-roundtrip 30/30 (382ms)
+  ✓ toolbox-row-split-admission 2/2 (1814ms)
+  ✓ toolbox-row-split-archive-delete 2/2 (3278ms)
+  ✓ v2.1.10-a3-phase1 40/40 (22011ms)
+  ✓ v2.1.10-a3-phase2 56/56 (25092ms)
+  ✓ v2.1.10-a4-phase3 75/75 (94951ms)
+  ✓ v2.1.10-n4-cont-1-phase4 33/33 (24762ms)
+  ✓ v2.1.10-n4-cont-2-phase5 43/43 (11811ms)
+  ✓ v2.1.12-beta-multiworker-nested (no count) (8203ms)
+  ✓ v2.1.9-n5-end-to-end 68/68 (933ms)
+  ✓ v2.1.9-n5-migration 67/67 (2351ms)
+  ✓ v2.1.9-sr-fix-1-coverage 148/148 (1488ms)
+  ✓ v2.1.9-sr-log-1 33/33 (413ms)
+  ✓ v3.0.0-linked-streaming-import 19/19 (1019ms)
+  ✓ v3.0.1-linked-gateway-upsert 40/40 (1294ms)
+  ✓ v3.0.4-boc-dispatch-order-fix 31/31 (6436ms)
+  ✓ vcc-financial-op-adjustment-archive-chain 226/226 (2236ms)
+  ✓ vcc-financial-op-destructive-state-chain 77/77 (2892ms)
+  ✓ vcc-financial-op-effective-result 19/19 (590ms)
+  ✓ vcc-financial-op-historical-template-export 29/29 (1923ms)
+
+2 个集成脚本失败，integration test FAIL

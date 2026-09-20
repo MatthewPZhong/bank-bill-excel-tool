@@ -1,0 +1,20 @@
+{
+  "baseline": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "startedAt": "2026-09-20T12:33:10.314741+00:00",
+  "node": "v25.8.0",
+  "environment": {
+    "NODE_OPTIONS": null,
+    "TBX_T7_TIER1_ROWS": null,
+    "TBX_T7_TIER2_ROWS": null
+  },
+  "loadAverage": [
+    4.68017578125,
+    5.8203125,
+    7.14892578125
+  ],
+  "diskFreeBytes": 2063179776,
+  "identicalTestScript": true,
+  "exitCode": 0,
+  "finishedAt": "2026-09-20T12:34:29.882994+00:00",
+  "diskFreeBytesAfter": 2058797056
+}

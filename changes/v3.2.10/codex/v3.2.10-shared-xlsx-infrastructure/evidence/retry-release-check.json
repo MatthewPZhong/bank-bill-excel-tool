@@ -1,0 +1,21 @@
+{
+  "command": "UNIT_TEST_CONCURRENCY=2 npm run release-check",
+  "startedAt": "2026-09-20T12:34:46.118875+00:00",
+  "workdir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-shared-xlsx-infrastructure",
+  "diskFreeBytesBefore": 2056044544,
+  "loadAverageBefore": [
+    4.66162109375,
+    5.53173828125,
+    6.89453125
+  ],
+  "status": "passed",
+  "processId": 10501,
+  "exitCode": 0,
+  "finishedAt": "2026-09-20T12:55:51.795972+00:00",
+  "diskFreeBytesAfter": 12058546176,
+  "loadAverageAfter": [
+    8.68798828125,
+    7.9541015625,
+    7.5537109375
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "recordedAt": "2026-09-20T12:56:53.074119+00:00",
+  "sourceSnapshot": "final-source-snapshot.json",
+  "filesVerified": 92,
+  "sourceDrift": [],
+  "codeDiffSha256": "c65b1e27b184876413878b0b299676bfdafb47076576a6b370028060bf78f86a",
+  "generatedPolicy": {
+    "path": "rules/integration-test-policy.md",
+    "producer": "scripts/integration-runner.js",
+    "sha256": "5eddf4e9c38f08939b2f8bf759c852084ca36346671fd6a491571ced372e609b",
+    "diff": "retry-policy.diff"
+  },
+  "evidenceSha256": {
+    "retry-unit-cases.log": "a1cf8b40d5c7f7b40ad02389b0e5690df273eacd42734d9ab195cf8acd2b11a4",
+    "retry-archive-center-permanent-delete.log": "ee3fadc585fd500fcdaa623841b0d5e78c6525fdf0efcf07940b482dd8e8559d",
+    "retry-toolbox-large-split-multi-sheet.log": "1bd5cb81e92984f99ee63bdf240e9d79bb9a7b84de7635a336e5857238b26cf6",
+    "retry-toolbox-baseline.log": "32af8239202221aa20e27f0f2a90100dd319af69aa8d4ea7269edbd35f2346ff",
+    "retry-release-check.log": "da68c216f5554fd6050642630f1717cb004703cb0229a7d97826a853bbcb352c"
+  }
+}

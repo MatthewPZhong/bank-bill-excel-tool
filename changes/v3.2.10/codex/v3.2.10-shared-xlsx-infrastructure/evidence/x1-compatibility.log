@@ -1,0 +1,18 @@
+✔ excel-text 旧入口与公共入口共享同一导出对象 (1.359334ms)
+✔ ooxml-namespaces 旧入口与公共入口共享同一导出对象 (0.415ms)
+✔ number-date 旧入口与公共入口共享同一导出对象 (0.454083ms)
+✔ model 旧入口与公共入口共享同一导出对象 (0.543542ms)
+✔ style-registry 旧入口与公共入口共享同一导出对象 (2.026167ms)
+✔ xlsx-sheet-scanner 旧入口与公共入口共享同一导出对象 (0.631ms)
+✔ ZIP 旧入口保留全部导出和 BigTableImportError constructor 身份 (1.90975ms)
+✔ Toolbox 装配转发既有 metadata/SST helper，公共模块不暴露业务装配 (4.499292ms)
+✔ 公共 metadata 解析错误仍可通过旧业务 constructor 判断 (0.29575ms)
+✔ 公共叶子、ZIP 与 workbook-parts 的运行时依赖闭包不载入业务源码 (0.24525ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 10
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 79.1045

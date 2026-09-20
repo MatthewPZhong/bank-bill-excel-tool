@@ -1,0 +1,180 @@
+{
+  "recordedAt": "2026-09-20T12:56:53.074119+00:00",
+  "sourceSnapshot": "final-source-snapshot.json",
+  "sourceUnchangedAfterVerification": true,
+  "sourceDrift": [],
+  "platform": "darwin",
+  "node": "v25.8.0",
+  "dependencyLayout": "worktree node_modules symlink to existing primary workspace dependencies; no installation",
+  "baselineContracts": {
+    "reader": {
+      "passed": 20
+    },
+    "consumerOptions": {
+      "passed": 8
+    }
+  },
+  "focused": {
+    "x1Existing": 125,
+    "x1Identity": 10,
+    "readerContracts": 26,
+    "sstContractsAndOwnership": 21,
+    "consumerOptions": 8,
+    "consumerMigrationRegression": 78,
+    "sharedXlsxIntegrationAssertions": 51
+  },
+  "initialUnit": {
+    "exitCode": 1,
+    "tests": 8143,
+    "passed": 8134,
+    "failed": 5,
+    "skipped": 4,
+    "cause": "missing worktree-local node_modules path"
+  },
+  "dependencyLayoutRecheck": {
+    "exitCode": 0,
+    "tests": 18,
+    "passed": 16,
+    "failed": 0,
+    "skipped": 2
+  },
+  "releaseCheck": {
+    "command": "UNIT_TEST_CONCURRENCY=2 npm run release-check",
+    "startedAt": "2026-09-20T12:34:46.118875+00:00",
+    "workdir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-shared-xlsx-infrastructure",
+    "diskFreeBytesBefore": 2056044544,
+    "loadAverageBefore": [
+      4.66162109375,
+      5.53173828125,
+      6.89453125
+    ],
+    "status": "passed",
+    "processId": 10501,
+    "exitCode": 0,
+    "finishedAt": "2026-09-20T12:55:51.795972+00:00",
+    "diskFreeBytesAfter": 12058546176,
+    "loadAverageAfter": [
+      8.68798828125,
+      7.9541015625,
+      7.5537109375
+    ],
+    "lint": "passed",
+    "smoke": "passed",
+    "unit": {
+      "tests": 8155,
+      "passed": 8151,
+      "failed": 0,
+      "skipped": 4,
+      "skipScope": "Windows PowerShell/CIM/packaged canary checks",
+      "files": 512,
+      "durationMs": 702175.664167
+    },
+    "log": "retry-release-check.log"
+  },
+  "integration": {
+    "command": "npm run test:integration (invoked by release-check)",
+    "exitCode": 0,
+    "scripts": 61,
+    "passed": 61,
+    "failed": [],
+    "assertions": 2630,
+    "passedAssertions": 2630,
+    "durationMs": 541693,
+    "log": "retry-release-check.log",
+    "details": {
+      "archive-center-permanent-delete": "52/52 PASS",
+      "toolbox-large-file-stream": "50/50 PASS",
+      "toolbox-large-split-multi-sheet": "31/31 PASS",
+      "shared-xlsx-boundary": "51/51 PASS"
+    },
+    "assertionCountScope": {
+      "scriptsReportingCounts": 60,
+      "scriptsWithoutCounts": [
+        "v2.1.12-beta-multiworker-nested"
+      ],
+      "meaning": "2630 is the sum of reported assertion counts; all 61 scripts exited zero"
+    }
+  },
+  "notExecuted": [
+    "Windows file occupancy/spill/manual acceptance",
+    "Excel/WPS export acceptance",
+    "dedicated forced-worker-terminate platform acceptance",
+    "G6/G8/release composition"
+  ],
+  "integrationState": "not integrated",
+  "gitMutation": "no commit/push/merge/PR/version/tag/release",
+  "priorRuns": [
+    {
+      "recordedAt": "2026-09-20T12:20:50.102478+00:00",
+      "releaseCheck": {
+        "command": "UNIT_TEST_CONCURRENCY=4 npm run release-check",
+        "exitCode": 130,
+        "status": "interrupted-not-passed",
+        "lint": "passed",
+        "smoke": "passed",
+        "unit": "incomplete; two observed failed cases passed targeted current and baseline probes",
+        "reason": "work volume only 392 MiB available; stop test process group with SIGINT",
+        "completeUnitSummary": null
+      },
+      "integration": {
+        "command": "npm run test:integration",
+        "exitCode": 1,
+        "scripts": 61,
+        "passed": 59,
+        "failed": [
+          "archive-center-permanent-delete",
+          "toolbox-large-split-multi-sheet"
+        ],
+        "details": {
+          "archive-center-permanent-delete": "Position import disk-space gate rejected; 15/52 assertions reached",
+          "toolbox-large-split-multi-sheet": "30/31 assertions passed; tier2 RSS growth 143 MiB exceeds effective 133 MiB budget by 10 MiB"
+        }
+      },
+      "summary": "verification-summary-before-retry.json"
+    }
+  ],
+  "retryProbes": {
+    "unitCases": {
+      "passed": 3,
+      "exitCode": 0,
+      "log": "retry-unit-cases.log"
+    },
+    "archive": {
+      "passed": 52,
+      "exitCode": 0,
+      "log": "retry-archive-center-permanent-delete.log"
+    },
+    "toolboxCurrent": {
+      "passed": 31,
+      "exitCode": 0,
+      "tier1DeltaMiB": 95,
+      "tier2DeltaMiB": 134,
+      "effectiveBudgetMiB": 152,
+      "log": "retry-toolbox-large-split-multi-sheet.log"
+    },
+    "toolboxBaseline": {
+      "ref": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+      "passed": 31,
+      "exitCode": 0,
+      "tier1DeltaMiB": 91,
+      "tier2DeltaMiB": 136,
+      "effectiveBudgetMiB": 148,
+      "log": "retry-toolbox-baseline.log"
+    },
+    "interpretation": "Original memory gate failure not reproduced in this paired retry or the full gate; prior failure retained, no claim that its cause is proven environmental."
+  },
+  "generatedPolicy": {
+    "path": "rules/integration-test-policy.md",
+    "producer": "scripts/integration-runner.js",
+    "sha256": "5eddf4e9c38f08939b2f8bf759c852084ca36346671fd6a491571ced372e609b",
+    "diff": "retry-policy.diff"
+  },
+  "evidenceConsistencyReview": {
+    "status": "passed",
+    "sourceFilesVerified": 92,
+    "retryLogsVerified": 5,
+    "sourceDrift": [],
+    "priorFailuresPreserved": true,
+    "platformAndIntegrationLimitsPreserved": true
+  }
+}

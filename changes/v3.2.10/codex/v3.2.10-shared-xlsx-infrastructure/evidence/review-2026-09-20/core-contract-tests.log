@@ -1,0 +1,46 @@
+✔ excel-text 旧入口与公共入口共享同一导出对象 (1.046958ms)
+✔ ooxml-namespaces 旧入口与公共入口共享同一导出对象 (0.357459ms)
+✔ number-date 旧入口与公共入口共享同一导出对象 (0.517417ms)
+✔ model 旧入口与公共入口共享同一导出对象 (0.355334ms)
+✔ style-registry 旧入口与公共入口共享同一导出对象 (2.083292ms)
+✔ xlsx-sheet-scanner 旧入口与公共入口共享同一导出对象 (0.597291ms)
+✔ ZIP 旧入口保留全部导出和 BigTableImportError constructor 身份 (1.976125ms)
+✔ Toolbox 装配转发既有 metadata/SST helper，公共模块不暴露业务装配 (4.28025ms)
+✔ 公共 metadata 解析错误仍可通过旧业务 constructor 判断 (0.299ms)
+✔ 公共叶子、ZIP 与 workbook-parts 的运行时依赖闭包不载入业务源码 (0.244625ms)
+✔ legacy 兼容旧入口转发同一导出对象与函数 (0.758791ms)
+✔ legacy 冻结行顺序、连续一基回调行号、列宽和 inline/escape 行值 (13.941917ms)
+✔ legacy 空 SST 返回 null，存在的富文本 SST 保留字符串数组合同 (0.708708ms)
+✔ legacy 仅正整数 maxRows 启用截断，等于实际行数仍报告 truncated (11.190666ms)
+✔ legacy 同步逐行调用且忽略回调返回的 Promise/thenable (2.52725ms)
+✔ 同一 XLSX 的 legacy 数字投影与 rich lexical/稀疏行号有意不同 (9.411292ms)
+✔ rich 兼容旧入口转发同一导出对象与函数 (0.771958ms)
+✔ rich 单页入口将隐藏页计入声明页数，先于损坏 styles/SST 拒绝 (14.680166ms)
+✔ rich 保留声明 sheet 顺序、隐藏状态、1904 日期系统及原始数字 lexical (8.543125ms)
+▶ rich 拒绝重复目标、外部目标、缺失关系和缺失 worksheet
+  ✔ 重复目标 (3.02625ms)
+  ✔ 外部目标 (2.191583ms)
+  ✔ 缺失关系 (2.156041ms)
+  ✔ 缺失 worksheet (1.9855ms)
+✔ rich 拒绝重复目标、外部目标、缺失关系和缺失 worksheet (9.753917ms)
+✔ rich 重复 relationship Id 保留原解析错误类型和 code (2.147875ms)
+✔ rich maxSheets 保留 1..4096 安全整数预算校验 (5.115917ms)
+✔ rich 不接受其他 workbook 的样式引用 (4.504958ms)
+✔ rich 拒绝并发 scan、非法页和 close 后 scan，close 缓存同一 Promise (6.337667ms)
+▶ rich 各原有同步 callback 返回 thenable 按原 TypeError 拒绝且不等待
+  ✔ onRow (8.039375ms)
+  ✔ onCellLexical (9.085084ms)
+  ✔ onSheetMeta (6.918125ms)
+✔ rich 各原有同步 callback 返回 thenable 按原 TypeError 拒绝且不等待 (24.309042ms)
+✔ rich SST 构建失败清理已溢出的私有目录 (20.901791ms)
+✔ rich 扫描中取消保留原取消错误，并在 caller await close 后清理 spill (16.519542ms)
+✔ rich 关闭先 SST 后 ZIP，双失败汇总真实错误并缓存 rejected Promise (0.583042ms)
+✔ rich 构建失败仍关闭 ZIP，关闭再次失败保留原 cause 和 AggregateError (0.19925ms)
+ℹ tests 36
+ℹ suites 0
+ℹ pass 36
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 196.834667

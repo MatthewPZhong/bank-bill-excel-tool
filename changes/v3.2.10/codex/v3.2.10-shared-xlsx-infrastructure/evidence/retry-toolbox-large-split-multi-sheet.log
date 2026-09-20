@@ -1,0 +1,23 @@
+==== 工具箱大文件按字段拆分 · 多 sheet 隔离 worker 通道 端到端验证 ====
+规模：A 部分两档 500,000 / 1,500,000 行（跨 3 物理 sheet）；B 部分真 worker 小规模。700 万级由 PRD §7 P0 手测覆盖。
+
+内存门禁自校验：8→23MB 通过、8→24MB 拒绝；9→26MB 通过、9→27MB 与 13→39MB 严格线性拒绝；32→72MB 通过、32→73/96MB 拒绝；49→97MB 通过、49→98/147MB 拒绝；交错 [48,49,48]→[96,97,97] 通过、稳定 48→97MB 拒绝；82→139MB 通过、82→140MB 拒绝；150MB 任一样本绝对上限独立拒绝。
+
+── A. 直驱 backend 模块（大规模 + 内存恒定）──────────────────────
+A1 生成 tier1 多 sheet 夹具（500,000 行，perSheet=166,668）...
+   物理 sheet 数=3，文件大小=11.1MB，注入命中数（channel=ALIPAY）=100,000
+   scanFields：11619ms，RSS 扫描前=92MB 峰值=186MB 增量=95MB
+   exportFilter：matchedCount=100,000
+A2 生成 tier2 多 sheet 夹具（1,500,000 行，perSheet=500,001）...
+   物理 sheet 数=3，文件大小=33.5MB，注入命中数=300,000
+   scanFields：33734ms，RSS 扫描前=97MB 峰值=230MB 增量=134MB
+   内存恒定对比：行数 ×3.0；RSS 中位增量 tier1=95MB → tier2=134MB（样本数=1，tier1=[95]MB，tier2=[134]MB）（measurable-growth，relative预算=166.5MB，absolute预算=152MB，effective预算=152MB，独立中位预算 margin=-18MB/取整容差≤1MB，paired effective预算 margin 中位数=-18MB，paired 线性 margin 中位数=-151MB）
+A3 输出分 sheet 验证（全命中 + 小 maxRowsPerSheet 确定性触发 writeRowsStreamed 分物理 sheet）...
+   输出物理 sheet 数=3（2500/1000 → 期望 ≥3）
+
+── B. 真 worker 拓扑（真 dispatchLargeSplit → new Worker → backend）──────
+B 生成 worker 夹具（6000 行，物理 sheet 数=3，注入命中数=1200）...
+B1 真 worker scanFields（new Worker → done→resolve）...
+B2 真 worker exportFilter（new Worker → done→resolve + 产物 readback）...
+
+==== 31/31 PASS ====

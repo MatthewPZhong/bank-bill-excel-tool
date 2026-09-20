@@ -1,0 +1,64 @@
+G4 release-check 两个失败case的最小定向复验
+时间：2026-09-20T12:11:20.477Z
+工作目录：/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-shared-xlsx-infrastructure
+Node：v25.8.0
+最终门禁仍在运行，以下单例顺序执行，不启动整套测试。
+
+命令：node "--test" "--test-name-pattern" "^真实过滤行报告 业务删除并由Main清理 后重开库，原批次可永久删除$" "tests/unit/main-process/archive-position-fileplan-delete.test.js"
+exitCode=0
+✔ 真实过滤行报告 业务删除并由Main清理 后重开库，原批次可永久删除 (5458.448083ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5769.686667
+
+命令：node "--test" "--test-name-pattern" "^cleanup外部lock使连续shutdown保持non-clean，解除后同一owner重试真实删除并clean$" "tests/unit/main-process/bank-bu-dual-parser-e08-b.test.js"
+exitCode=0
+✔ cleanup外部lock使连续shutdown保持non-clean，解除后同一owner重试真实删除并clean (332.901333ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 511.096583
+
+精确基线对照：git archive 11086a3cbf632a30adbcfa796e4cd81810c5aef9；两例仍按顺序单独运行。
+
+命令：node "--test" "--test-name-pattern" "^真实过滤行报告 业务删除并由Main清理 后重开库，原批次可永久删除$" "/private/tmp/g4-case-baseline-GkVh02/tests/unit/main-process/archive-position-fileplan-delete.test.js"
+exitCode=0
+✔ 真实过滤行报告 业务删除并由Main清理 后重开库，原批次可永久删除 (6542.849667ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6804.148334
+
+命令：node "--test" "--test-name-pattern" "^cleanup外部lock使连续shutdown保持non-clean，解除后同一owner重试真实删除并clean$" "/private/tmp/g4-case-baseline-GkVh02/tests/unit/main-process/bank-bu-dual-parser-e08-b.test.js"
+exitCode=0
+✔ cleanup外部lock使连续shutdown保持non-clean，解除后同一owner重试真实删除并clean (529.959959ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 701.1045
+
+调查结论（截至本次定向复验）：
+- 当前 G4 与精确 11086a3c 基线的两个 case 各执行一次，四次均 1/1 PASS；没有修改生产代码、测试或历史快照。临时基线树已清理。
+- 当前 Position case 5458 ms，基线 6543 ms；当前 BankBU case 333 ms，基线 530 ms。未针对耗时作性能结论。
+- 两个测试文件、Position fixture、BankBU worker 和 external-parser-finalization 均无 G4 diff。
+- BankBU 使用 bank-bu-recon-import/reader 的 SheetJS XLSX 路线，未走本次新公共 reader。测试 393/400/408 行分别给 shutdown 1000ms deadline；external-parser-finalization.js 201..210 在截止后返回 FINALIZATION_TIMEOUT，而测试要求 FINALIZATION_FAILED，确有负载敏感分支。
+- Position 涉及新公共 scanner/provider，已核对只是 import/default来源迁移，scanner正文逐字相同。该例单独复验未失败，没有足够证据确定全套执行中哪个阶段失败。
+- 原 release-check 在调查时仍运行，日志只有 case 失败标题，尚未输出原错误栈；因此目前仅判定“定向未复现、无 G4 行为回归证据”，不能把两条失败直接定性为纯时序，也不能将原完整门禁FAIL改写为PASS。
+- 若原错误栈后续确认固定deadline或来源文件快照问题，应据实际栈补充分类；本次不机械重跑整套用例。

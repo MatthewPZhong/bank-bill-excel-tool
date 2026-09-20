@@ -22,16 +22,16 @@
 //   以便单测覆盖该导出来构造任意 Map（如无法真实造出的 ≥1.5GB 场景），同时保持「只依赖这一个导出」。
 
 const path = require('node:path');
-const sizePreflight = require('../backend/pending-import/xlsx-size-preflight');
+const sizePreflight = require('../backend/xlsx/legacy/entry-size-preflight');
 const {
   openZipWithEntries
-} = require('../backend/big-table-import/zip-reader');
+} = require('../backend/xlsx/zip-reader');
 const {
   findRelationshipEntry,
   parseWorkbookRelationships,
   parseWorkbookXml,
   readToolboxMetadataEntryAsString
-} = require('../backend/toolbox-format/xlsx-pass');
+} = require('../backend/xlsx/workbook-parts');
 const { detectToolboxInputKind } = require('./toolbox-input-kind');
 
 // 单 worksheet 解压尺寸 ≥ 该阈值 → 判为大文件（即便物理只有 1 个 sheet）。

@@ -13,7 +13,7 @@ const { extractHeaders } = require('../../../src/backend/file-service/readers');
 const {
   locateSheets,
   openZipWithEntries
-} = require('../../../src/backend/big-table-import/zip-reader');
+} = require('../../../src/backend/xlsx/zip-reader');
 const {
   prepareNewAccountGeneration,
   readBackAndValidate,
