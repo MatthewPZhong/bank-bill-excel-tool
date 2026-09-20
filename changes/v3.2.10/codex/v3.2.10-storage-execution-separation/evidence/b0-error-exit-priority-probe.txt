@@ -1,0 +1,39 @@
+{
+  "label": "main@11086a3c",
+  "sha256": "11fb377a13c3169b66c404b44685f1c42426870d8dd2b43ea9649b883bec3f3e",
+  "events": [
+    {
+      "type": "error",
+      "code": "ERR_WORKER_OUT_OF_MEMORY",
+      "message": "Worker terminated due to reaching memory limit: JS heap out of memory"
+    },
+    {
+      "type": "exit",
+      "code": 1
+    }
+  ],
+  "caught": {
+    "name": "Error",
+    "message": "multiworker chunk=0 worker error 事件：Worker terminated due to reaching memory limit: JS heap out of memory"
+  }
+}
+{
+  "label": "current-working-tree",
+  "sha256": "0b7a64361dbadc1c560f59ad2271fb2ac93162957f421ec2b463a0b478329a66",
+  "events": [
+    {
+      "type": "error",
+      "code": "ERR_WORKER_OUT_OF_MEMORY",
+      "message": "Worker terminated due to reaching memory limit: JS heap out of memory"
+    },
+    {
+      "type": "exit",
+      "code": 1
+    }
+  ],
+  "caught": {
+    "name": "Error",
+    "message": "multiworker worker 意外 exit（code=1）"
+  }
+}
+Current retains first worker error: false

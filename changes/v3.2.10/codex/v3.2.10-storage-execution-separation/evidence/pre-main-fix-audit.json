@@ -1,0 +1,12 @@
+{
+  "branch": "codex/v3.2.10-storage-execution-separation",
+  "head": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "codeFiles": 19,
+  "drift": [],
+  "designOriginalsUnchanged": {
+    "spec.md": true,
+    "techdoc.md": true
+  },
+  "mainAndPoolDiffExitCode": 0,
+  "diffCheckExitCode": 0
+}

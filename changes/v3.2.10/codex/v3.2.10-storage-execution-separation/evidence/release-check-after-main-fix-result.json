@@ -1,0 +1,27 @@
+{
+  "command": "UNIT_TEST_CONCURRENCY=2 npm run release-check",
+  "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-storage-execution-separation",
+  "exitCode": 0,
+  "lint": "PASS",
+  "smoke": "PASS",
+  "unit": {
+    "tests": 8169,
+    "suites": 831,
+    "pass": 8165,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 4,
+    "todo": 0,
+    "files": 510,
+    "durationMs": 516496.867958
+  },
+  "integration": {
+    "status": "PASS",
+    "scripts": 61,
+    "countedAssertions": 2593,
+    "durationMs": 530491,
+    "legacyScriptsWithoutCount": 1
+  },
+  "log": "release-check-after-main-fix.txt",
+  "previousFailureLogPreserved": "release-check.txt"
+}

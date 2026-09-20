@@ -68,3 +68,5 @@
 
 ## 模块现行说明
 - [应用恢复与共享发布恢复](src/main-process/application-recovery/README.md)：应用阶段、平台扫描事实、participant/owner 接口、授权与调用边界。
+- [VCC 纯 hash 与映射血缘合同](src/backend/vcc-financial-op/README.md)：纯函数依赖、旧导出兼容与验证入口。
+- [Acquiring 仓储与多 worker 执行边界](src/backend/acquiring-bill-currency-db/README.md)：repository/service/executor 职责、真实退出屏障、partial/resume 与受管 part 合同。

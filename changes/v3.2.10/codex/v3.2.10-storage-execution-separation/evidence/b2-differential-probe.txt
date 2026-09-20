@@ -1,0 +1,55 @@
+{
+  "recordedAt": "2026-09-20T12:07:49.615Z",
+  "head": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "worktree": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-storage-execution-separation",
+  "node": "v25.8.0",
+  "platform": "darwin/arm64",
+  "sourceSha256": {
+    "headRepository": "71f3036187da5a1d19acdeac6566688497a7b5e7ab54a8cb49c7441e790e2579",
+    "currentRepository": "9b9e4335d6d7c8707b5fae738b1e57da5922cb7700ae0cdb373bdaf01860b0e2",
+    "currentService": "de73507e249dfe9e5bc5f8fc40b3171553b302d2a23159372683603212d5e5be",
+    "currentSession": "7d5f0a7c29e56b1f4b4a36f8b8128402bc5b15909987e3e7cdb93dc4b2db8f90"
+  },
+  "structure": {
+    "removedExports": [
+      "insertDiffRowsByJoinMultiWorker"
+    ],
+    "addedExports": [
+      "buildMultiworkerPlan",
+      "cleanupFailedMultiworkerRun"
+    ],
+    "retainedFunctionCount": 25,
+    "changedRetainedFunctions": [],
+    "selectSqlEqual": true,
+    "partColumnsEqual": true,
+    "targetColumnsEqual": true
+  },
+  "matrix": {
+    "totalRows": [
+      0,
+      5
+    ],
+    "modes": [
+      "success",
+      "progress",
+      "execute-error",
+      "COUNT",
+      "BEGIN",
+      "DELETE",
+      "COMMIT",
+      "ROLLBACK"
+    ],
+    "parameterCaseCount": 14
+  },
+  "differentialCases": 224,
+  "result": "all equivalent",
+  "comparedObservations": [
+    "参数验证错误优先级/name/message/code",
+    "COUNT/DELETE/BEGIN/COMMIT/ROLLBACK调用序列",
+    "executor计划字段、chunk参数与调用次数",
+    "progress结构及回调异常吞吐",
+    "返回摘要与执行主异常对象身份"
+  ],
+  "scope": "受控 executor/DB 的旧新差分；真实 worker/SQLite/XLSX 集成和 Main 锁问题另行验证"
+}
+224/224 PASS

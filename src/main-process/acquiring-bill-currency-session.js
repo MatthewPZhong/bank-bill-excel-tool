@@ -23,6 +23,12 @@ const { Worker } = require('node:worker_threads');
 const importReader = require('../backend/acquiring-bill-currency-import/reader-handrolled');
 const importRepo = require('../backend/acquiring-bill-currency-db/import-repository');
 const runRepo = require('../backend/acquiring-bill-currency-db/run-repository');
+const { createAcquiringMultiworkerService } = require('./acquiring-bill-currency-multiworker-service');
+const multiworkerExecutor = require('./run-check-multiworker');
+const multiworkerService = createAcquiringMultiworkerService({
+  runRepository: runRepo,
+  executeWriteSplitChunks: multiworkerExecutor.runWriteSplitChunks,
+});
 // v2.1.9 SR-log-1 (T32h)：替换 console.warn/error → appendModuleLog 双写
 const { appendModuleLog } = require('../backend/logger');
 
@@ -550,7 +556,7 @@ function adaptiveChunkSizeForMultiWorker({ totalBillRows, workerCount, requested
 //   - 新增可选入参 workerCount（default 1）/ dbPath / tempDir
 //   - stage 4' 三路分流：
 //       ① isResume（resumeFromChunkIndex>0）→ 单 worker insertDiffRowsByJoinChunked（决策 A：resume 不碰多 worker）
-//       ② 全新 run + workerCount>1 + 有 dbPath → 多 worker insertDiffRowsByJoinMultiWorker（plan-b）
+//       ② 全新 run + workerCount>1 + 有 dbPath → 多 worker multiworkerService.insertDiffRows（plan-b）
 //       ③ workerCount<=1 / 无 dbPath → 单 worker（D31 回退兜底；default 即此路 → 现有调用零行为变化）
 //   - 🔴 workerCount default=1：所有现有 caller（run-check-worker.js 不传 → undefined → 1）永远走单 worker，byte-for-byte 不变
 //   - 自适应分片（spec §4 末注 / D31）：多 worker 路径若 caller 没显式给小 chunkSize（即用默认 100000），
@@ -774,14 +780,13 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
       });
 
       // tempDir：caller 提供则用；否则临时建（finally 清）
-      const mw = require('./run-check-multiworker');
       let mwTempDir = tempDir;
       if (!mwTempDir) {
-        mwTempDir = mw.makeTempDir(`mw-acquiring-run-${runId}-`);
+        mwTempDir = multiworkerExecutor.makeTempDir(`mw-acquiring-run-${runId}-`);
         ownedTempDir = mwTempDir;
       }
 
-      chunkedResult = await runRepo.insertDiffRowsByJoinMultiWorker(db, {
+      chunkedResult = await multiworkerService.insertDiffRows(db, {
         runId,
         monthKey,
         chunkSize: mwChunkSize,
@@ -822,7 +827,7 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
     } else {
       // ── 单 worker 路径（resume / workerCount<=1 / 无 dbPath）—— 行为完全不变（D31 回退兜底）──
       // 🔴 v2.1.12 β.1 self-review C2（资金红线）：resume 从 chunk 0 重跑前，先清本 run 已有 diff_rows。
-      //   背景：MW run 在 merge 期被硬杀 / cancel 硬 terminate / OOM（不经 insertDiffRowsByJoinMultiWorker
+      //   背景：MW run 在 merge 期被硬杀 / cancel 硬 terminate / OOM（不经 multiworkerService.insertDiffRows
       //   的 catch DELETE）→ 部分 chunk 已 COMMIT 残留；且 MW 不逐 chunk 标 chunk_progress（恒 -1）→
       //   resumeFromChunkIndex=0。此时单 worker 从 chunk 0 全跑，而 clearRunsByMonth 仅在 !isResume 执行
       //   → 不清 → diff_rows 翻倍（对账多算）。
@@ -900,7 +905,7 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
     // v2.1.12 β.1-T2：多 worker 临时 tempDir 清理（caller 未传 tempDir 时本函数建的）。
     //   无论成功/失败/cancel 都清；runWriteSplitChunks 内部已清 part-*.sqlite，这里清外层目录。
     if (ownedTempDir) {
-      try { require('./run-check-multiworker').cleanupDir(ownedTempDir); } catch (_e) { /* swallow */ }
+      try { multiworkerExecutor.cleanupDir(ownedTempDir); } catch (_e) { /* swallow */ }
     }
   }
 

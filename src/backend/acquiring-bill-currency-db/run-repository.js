@@ -190,7 +190,7 @@ function clearRunsByMonth(db, monthKey) {
 }
 
 // 🔴 v2.1.12 β.1 self-review C2（资金红线）：清掉某 run 已插入的 diff_rows（只清本 run，不动 runs 行 / 别的 run）。
-//   用于：① MW 汇总半途失败的 catch 兜底（见 insertDiffRowsByJoinMultiWorker）；
+//   用于：① MW 汇总半途失败的 catch 兜底（见 cleanupFailedMultiworkerRun）；
 //        ② resume 从 chunk 0 重跑前清残留——MW run 在 merge 期被硬杀/cancel-terminate/OOM（不经 catch）
 //           会留下部分已 COMMIT 的 chunk + chunk_progress 恒 -1 → resume 单 worker 从 0 全跑，
 //           若不先清则 diff_rows 翻倍。resumeFromChunkIndex===0（无可信已完成 chunk）时调用即安全。
@@ -389,147 +389,37 @@ function insertDiffRowsByJoinChunked(db, {
   };
 }
 
-// ⚠️ 资金红线 ⚠️ — v2.1.12 β.1-T2 — 多 worker write-splitting 入口（plan-b）
-//
-// 决策 A（spec §4 D-β-1）：**只服务全新 run**；resume run 由 caller gate 走单 worker（本函数不处理 resume）。
-//
-// 与单 worker insertDiffRowsByJoinChunked 的关系：
-//   - totalChunks 口径完全一致（COUNT(*) bill WHERE month_key / chunkSize 向上取整）
-//   - 每 chunk 的 [monthKey, limit, offset] 与单 worker chunkStmt.run(runId, monthKey, cs, offset) 一致
-//   - chunkIndex 0..N-1 升序汇总 → byte-for-byte 等价单 worker 逐 chunk INSERT...SELECT
-//   - run_id 由 prefixValues=[runId] 在主进程汇总 INSERT 时注入（SELECT-only SQL 内不含 run_id）
-//
-// 失败保守处理（任务要点 5 — 不留半套数据）：
-//   runWriteSplitChunks 是「全有或全无」：reader 阶段任一 worker 失败 → reject（汇总未执行）；
-//   但汇总阶段（mergeTempDbsInOrder）按 chunk 升序逐个独立 BEGIN/COMMIT —— 若汇总到第 K 个 chunk 失败，
-//   前 K-1 个已 COMMIT 会残留。故本函数在 catch 里**主动清掉本 run 已插入的 diff_rows**（DELETE WHERE run_id），
-//   再透传错误。caller（runCheckCore）据此标 chunk_progress 让后续走单 worker 重跑。务必不留半套数据。
-//
-// 入参：
-//   - db                  : 主进程目标 DB connection（汇总 INSERT + 失败清理；caller 持有）
-//   - { runId, monthKey } : 与单 worker 一致
-//   - chunkSize           : 单 chunk 行数（caller 自适应分片后注入；正整数）
-//   - dbPath              : 主源 sqlite 路径（worker 各自 open 只读 connection）
-//   - workerCount         : worker 数 M（caller 按 settings/行数/OOM 决策；必须 ≥1）
-//   - tempDir             : temp db 存放目录（caller 提供 run 专属目录；模块写 part-<ci>.sqlite）
-//   - onChunkDone         : 可选，每 chunk 汇总进度回调 { chunkIndex, totalChunks, processedRows?, insertedDiffRows?, elapsedMs? }
-//                           （与单 worker onChunkDone 同名，便于 caller 复用 chunk_progress 更新逻辑；
-//                            注：多 worker 的「完成」语义 = reader 完成该 chunk，processedRows 为本 chunk SELECT 命中前的 bill 行数估算）
-//
-// 返回（与单 worker insertDiffRowsByJoinChunked 同形状）：
-//   { totalChunks, totalProcessedBillRows, totalInsertedDiffRows, lastCompletedChunkIndex }
-//   - lastCompletedChunkIndex = totalChunks - 1（成功路径全跑完）；-1 表示 0 chunk
-async function insertDiffRowsByJoinMultiWorker(db, {
-  runId,
-  monthKey,
-  chunkSize,
-  dbPath,
-  workerCount,
-  tempDir,
-  batchContext,
-  onChunkDone = null,
-  cancelToken = null,
-} = {}) {
-  if (!runId || typeof runId !== 'number') {
-    throw new Error('insertDiffRowsByJoinMultiWorker: runId 必填且为 number');
-  }
-  if (!monthKey) {
-    throw new Error('insertDiffRowsByJoinMultiWorker: monthKey 必填');
-  }
-  const cs = Number(chunkSize);
-  if (!Number.isInteger(cs) || cs < 1) {
-    throw new Error(`insertDiffRowsByJoinMultiWorker: chunkSize 必须为正整数，收到：${JSON.stringify(chunkSize)}`);
-  }
-  if (!dbPath || typeof dbPath !== 'string') {
-    throw new Error('insertDiffRowsByJoinMultiWorker: dbPath 必填（worker 各自 open 只读 connection）');
-  }
-  if (!Number.isInteger(workerCount) || workerCount < 1) {
-    throw new Error(`insertDiffRowsByJoinMultiWorker: workerCount 必须 ≥1 整数，收到：${JSON.stringify(workerCount)}`);
-  }
-  if (!tempDir || typeof tempDir !== 'string') {
-    throw new Error('insertDiffRowsByJoinMultiWorker: tempDir 必填');
-  }
-
-  // 步骤 1：totalChunks 口径与单 worker 完全一致
+// 多 worker 计划只读取 COUNT 并构造 SQL 参数，不创建 worker、run 或 chunk_progress。
+// 参数由应用 service 按旧 wrapper 顺序完整验证，chunkSize 已归一化为正整数。
+function buildMultiworkerPlan(db, { runId, monthKey, chunkSize }) {
   const totalBillRows = db.prepare(`
     SELECT COUNT(*) AS c FROM ${BILL_TABLE} WHERE month_key = ?
   `).get(monthKey).c;
-  const totalChunks = totalBillRows === 0 ? 0 : Math.ceil(totalBillRows / cs);
-
-  // 0 chunk 边界（空 bill 表）— 与单 worker 返回一致，不起 worker
-  if (totalChunks === 0) {
-    return {
-      totalChunks: 0,
-      totalProcessedBillRows: 0,
-      totalInsertedDiffRows: 0,
-      lastCompletedChunkIndex: -1,
-    };
-  }
-
-  // 步骤 2：build chunks 列表（chunkIndex 0..N-1 + [monthKey, limit, offset]，与单 worker offset 口径一致）
+  const totalChunks = totalBillRows === 0 ? 0 : Math.ceil(totalBillRows / chunkSize);
   const chunks = [];
   for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
-    chunks.push({ chunkIndex, bindParams: [monthKey, cs, chunkIndex * cs] });
+    chunks.push({ chunkIndex, bindParams: [monthKey, chunkSize, chunkIndex * chunkSize] });
   }
-
-  // 步骤 3：调多 worker 执行器（lazy require 避免循环依赖 / 启动开销）
-  const mw = require('../../main-process/run-check-multiworker');
-  const selectSql = buildSelectOnlyChunkSql();
-
-  let result;
-  try {
-    result = await mw.runWriteSplitChunks({
-      db,
-      dbPath,
-      workerCount,
-      chunks,
-      selectSql,
-      partColumns: MULTIWORKER_PART_COLUMNS,
-      targetTable: DIFF_TABLE,
-      targetColumns: MULTIWORKER_TARGET_COLUMNS,
-      prefixValues: [runId],
-      tempDir,
-      batchContext,
-      cancelToken, // PR #57 review P2：cancel 响应透传到 worker 调度（停派发+abort）
-      onProgress: (ev) => {
-        // 透传到单 worker 同名 onChunkDone（caller 复用 chunk_progress 更新）
-        if (typeof onChunkDone === 'function') {
-          try {
-            onChunkDone({
-              chunkIndex: ev.chunkIndex,
-              totalChunks: ev.totalChunks,
-              processedRows: Math.min(cs, totalBillRows - ev.chunkIndex * cs),
-              insertedDiffRows: ev.rowCount,
-              elapsedMs: 0,
-            });
-          } catch (_e) { /* 回调抛错不阻塞主流程 */ }
-        }
-      },
-    });
-  } catch (mwErr) {
-    // 🔴 失败保守处理：清掉本 run 已插入的 diff_rows（防汇总半途 COMMIT 残留），再透传错误。
-    //   单独 BEGIN/COMMIT；清理失败也不掩盖原始 mwErr（清理错仅吞，原错优先抛）。
-    try {
-      db.exec('BEGIN');
-      try {
-        clearDiffRowsByRunId(db, runId);
-        db.exec('COMMIT');
-      } catch (_delInner) {
-        try { db.exec('ROLLBACK'); } catch (_e) { /* swallow */ }
-      }
-    } catch (_delOuter) {
-      // BEGIN 都失败（事务状态异常）— 吞掉，优先抛原始 mwErr
-    }
-    throw mwErr;
-  }
-
-  // 成功路径：全部 chunk 跑完
   return {
-    totalChunks,
-    totalProcessedBillRows: totalBillRows,
-    totalInsertedDiffRows: result.insertedRows,
-    lastCompletedChunkIndex: totalChunks - 1,
+    totalBillRows, totalChunks, chunks,
+    selectSql: buildSelectOnlyChunkSql(),
+    partColumns: MULTIWORKER_PART_COLUMNS,
+    targetTable: DIFF_TABLE,
+    targetColumns: MULTIWORKER_TARGET_COLUMNS,
+    prefixValues: [runId],
   };
+}
+
+// 保留原失败清理事务及 run_id 范围；错误交给 service 保留原执行异常。
+function cleanupFailedMultiworkerRun(db, { runId }) {
+  db.exec('BEGIN');
+  try {
+    clearDiffRowsByRunId(db, runId);
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch (_rollbackError) { /* 原清理错误优先 */ }
+    throw error;
+  }
 }
 
 // v2.1.10 A4 T19 — chunk_progress 列读写 API（JSON 序列化）
@@ -812,7 +702,8 @@ module.exports = {
   // v2.1.10 A4 T18 / T19：chunked 分批 + chunk_progress
   insertDiffRowsByJoinChunked,
   // v2.1.12 β.1-T2：多 worker write-splitting 入口（plan-b）+ SELECT-only SQL（共用 body 防漂移）
-  insertDiffRowsByJoinMultiWorker,
+  buildMultiworkerPlan,
+  cleanupFailedMultiworkerRun,
   buildSelectOnlyChunkSql,
   MULTIWORKER_PART_COLUMNS,
   MULTIWORKER_TARGET_COLUMNS,

@@ -1,0 +1,19 @@
+✔ Main acquiringBillCurrency:run：真实 idle failure 不释放下一 prepare 的锁 (20.183458ms)
+✔ Main acquiringBillCurrency:run：真实 active failure 经所属 execute finally 解锁 (15.531583ms)
+✔ Main acquiringBillCurrency:run：normal 经真实 execute finally 释放且旧 owner 幂等 (14.386583ms)
+✔ Main acquiringBillCurrency:run：cancel 经真实 execute finally 释放且旧 owner 幂等 (15.557292ms)
+✔ Main acquiringBillCurrency:run：prepare 后 onAbandon 释放一次且不清下一 owner (3.386083ms)
+✔ Main acquiringBillCurrency:run:resume：真实 idle failure 不释放下一 prepare 的锁 (15.958292ms)
+✔ Main acquiringBillCurrency:run:resume：真实 active failure 经所属 execute finally 解锁 (15.166416ms)
+✔ Main acquiringBillCurrency:run:resume：normal 经真实 execute finally 释放且旧 owner 幂等 (13.915083ms)
+✔ Main acquiringBillCurrency:run:resume：cancel 经真实 execute finally 释放且旧 owner 幂等 (14.498458ms)
+✔ Main acquiringBillCurrency:run:resume：prepare 后 onAbandon 释放一次且不清下一 owner (2.139667ms)
+✔ Main resume prepare 业务预检失败：持锁异常分支自行释放 (1.9385ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1199.227542

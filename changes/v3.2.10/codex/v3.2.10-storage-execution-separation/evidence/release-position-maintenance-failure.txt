@@ -1,0 +1,138 @@
+✔ 来源删除按月份分批执行并依赖 FK cascade 清理链接行 (199.066792ms)
+✔ 银行删除只提交实际命中 scope，空选择结果不推进 checkpoint (102.146ms)
+✔ FundTransfer 映射重建逐行派生 0/hidden/visible 双腿且取消整体回滚 (198.313375ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 625.659
+
+依赖同源检查（静态入口加载）：
+{
+  "checkedAt": "2026-09-20T12:21:58.200Z",
+  "node": "v25.8.0",
+  "platform": "darwin/arm64",
+  "head": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "loadedLocalSourceCount": 15,
+  "allSameAsHead": true,
+  "changed": [],
+  "files": [
+    {
+      "file": "src/backend/file-service/common.js",
+      "headBlob": "a9da0fd71934fa10a606062255af844a5203ede3",
+      "currentBlob": "a9da0fd71934fa10a606062255af844a5203ede3",
+      "equal": true
+    },
+    {
+      "file": "src/backend/file-service/normalizers.js",
+      "headBlob": "11482d85b590754b7a56c8184fdaeb2485b07e4e",
+      "currentBlob": "11482d85b590754b7a56c8184fdaeb2485b07e4e",
+      "equal": true
+    },
+    {
+      "file": "src/backend/position-reconciliation-import/constants.js",
+      "headBlob": "63fd393bab8fe2ceb3f5fd6672f25d8f46ecf28f",
+      "currentBlob": "63fd393bab8fe2ceb3f5fd6672f25d8f46ecf28f",
+      "equal": true
+    },
+    {
+      "file": "src/backend/position-reconciliation-import/disk-space-gate.js",
+      "headBlob": "ad041db38c1728f5d270c492cd7f1dc0992d26db",
+      "currentBlob": "ad041db38c1728f5d270c492cd7f1dc0992d26db",
+      "equal": true
+    },
+    {
+      "file": "src/backend/position-reconciliation-import/maintenance-writer.js",
+      "headBlob": "b86f38494caf33c6d7401b9935f68e35585d2c4e",
+      "currentBlob": "b86f38494caf33c6d7401b9935f68e35585d2c4e",
+      "equal": true
+    },
+    {
+      "file": "src/constants/bank-statement-fields.js",
+      "headBlob": "ca85309554b9a34b9b5077965528d3a0c18b02ca",
+      "currentBlob": "ca85309554b9a34b9b5077965528d3a0c18b02ca",
+      "equal": true
+    },
+    {
+      "file": "src/main-process/archive-center/filesystem-identity.js",
+      "headBlob": "ac9933875283cfb1abdca33ce8fac7a37baf23bb",
+      "currentBlob": "ac9933875283cfb1abdca33ce8fac7a37baf23bb",
+      "equal": true
+    },
+    {
+      "file": "src/main-process/archive-center/source-snapshot.js",
+      "headBlob": "ac00e294fad9f99c5f470537ca13420bc028286a",
+      "currentBlob": "ac00e294fad9f99c5f470537ca13420bc028286a",
+      "equal": true
+    },
+    {
+      "file": "src/main-process/position-reconciliation/common.js",
+      "headBlob": "a396341b90bd315cc19da665c35e5cbd5b1bed62",
+      "currentBlob": "a396341b90bd315cc19da665c35e5cbd5b1bed62",
+      "equal": true
+    },
+    {
+      "file": "src/main-process/position-reconciliation/constants.js",
+      "headBlob": "d2a3963ab9ea17d12050b1a14b4ea23b211e482a",
+      "currentBlob": "d2a3963ab9ea17d12050b1a14b4ea23b211e482a",
+      "equal": true
+    },
+    {
+      "file": "src/main-process/position-reconciliation/derivation.js",
+      "headBlob": "efc42b73922984bafb5770c08cd6046ebf88708b",
+      "currentBlob": "efc42b73922984bafb5770c08cd6046ebf88708b",
+      "equal": true
+    },
+    {
+      "file": "src/main-process/position-reconciliation/large-import-schema.js",
+      "headBlob": "6ccc23b44e039f9c6180e0d838725d3372c1f52b",
+      "currentBlob": "6ccc23b44e039f9c6180e0d838725d3372c1f52b",
+      "equal": true
+    },
+    {
+      "file": "src/main-process/position-reconciliation/side-db-mutation.js",
+      "headBlob": "3c43c8d4e1df80b529f0d27e4f064b1fe5f59aec",
+      "currentBlob": "3c43c8d4e1df80b529f0d27e4f064b1fe5f59aec",
+      "equal": true
+    },
+    {
+      "file": "src/main-process/position-reconciliation/source-summary-cache.js",
+      "headBlob": "1aaf0401080c53c775a68835e319d975bd718019",
+      "currentBlob": "1aaf0401080c53c775a68835e319d975bd718019",
+      "equal": true
+    },
+    {
+      "file": "src/main-process/position-reconciliation/store.js",
+      "headBlob": "4bd87979658e73822e368c0eb8d51b771b02b3e7",
+      "currentBlob": "4bd87979658e73822e368c0eb8d51b771b02b3e7",
+      "equal": true
+    },
+    {
+      "file": "tests/unit/backend/position-reconciliation-maintenance-writer.test.js",
+      "headBlob": "13af5ecaa370e58e51950639c36c5663602c41e3",
+      "currentBlob": "13af5ecaa370e58e51950639c36c5663602c41e3",
+      "equal": true
+    }
+  ]
+}
+
+HEAD隔离源树执行（git archive HEAD src + 原测试；node_modules复用既有依赖；cwd仍为G6 worktree）：
+/tmp/g6-position-head-PLKtph
+✔ 来源删除按月份分批执行并依赖 FK cascade 清理链接行 (27.075666ms)
+✔ 银行删除只提交实际命中 scope，空选择结果不推进 checkpoint (15.402125ms)
+✔ FundTransfer 映射重建逐行派生 0/hidden/visible 双腿且取消整体回滚 (18.113417ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 186.239083
+
+结论边界：
+当前单文件3/3 PASS，HEAD隔离源树3/3 PASS。维护入口15个本地依赖及测试正文均与HEAD同源，未加载本次G6受改模块。未复现全门禁三个失败，不能写成稳定基线失败或宣称失败已修复。
+候选环境因素：2026-09-20T12:22:46.699Z os.tmpdir磁盘可用 939753472 字节。disk-space-gate.js固定512MiB安全余量；三个正常维护调用未注入availableBytes，会读实时statfs。本观察未证明原失败根因。全unit末尾错误详情在本探针结束时尚未输出，应按最终门禁日志补核。
