@@ -1,0 +1,47 @@
+PASS 账单真实 legacy 预读保持行序、数值投影与截断
+PASS Toolbox 真实装配保持类型/lexical 与业务 legacy 投影
+PASS Position 真实银行行映射、低预算 spill 与取消清理
+PASS VCC 真实 Pending 明细保留 key 类型及 shared workbook 关闭责任
+PASS BizOP 真实 rich reader→adapter→候选 SQLite 输出与资源清理
+PASS rich 普通取消、await close 与真实子进程自然退出
+FAIL 生产代码没有新增或遗留的公共 XLSX 旧 API 入边: AssertionError [ERR_ASSERTION]: 生产路径弃用 API 入边
++ actual - expected
+
++ [
++   "backend/big-table-import/engine.js:206 Definition for rule 'import/no-dynamic-require' was not found.",
++   "backend/big-table-import/engine.js:206 Unused eslint-disable directive (no problems were reported from 'global-require').",
++   "backend/big-table-import/import-worker.js:273 Definition for rule 'import/no-dynamic-require' was not found.",
++   "backend/big-table-import/import-worker.js:273 Unused eslint-disable directive (no problems were reported from 'global-require').",
++   "backend/toolbox-format/biff8-pass.js:398 Unused eslint-disable directive (no problems were reported from 'no-await-in-loop').",
++   "backend/toolbox-format/csv-pass.js:205 Unused eslint-disable directive (no problems were reported from 'no-await-in-loop').",
++   "main-process/recon-id-fix-service/export-operation.js:373 Unused eslint-disable directive (no problems were reported from 'no-await-in-loop').",
++   "main-process/recon-id-fix-service/export-operation.js:378 Unused eslint-disable directive (no problems were reported from 'no-await-in-loop').",
++   "main-process/toolbox-background/multi-output-validator.js:165 Unused eslint-disable directive (no problems were reported from 'no-await-in-loop').",
++   "main-process/toolbox-background/multi-output-validator.js:170 Unused eslint-disable directive (no problems were reported from 'no-await-in-loop').",
++   "main-process/toolbox-background/output-writer-core.js:104 Unused eslint-disable directive (no problems were reported from 'no-await-in-loop').",
++   "main-process/toolbox-format-io.js:154 Unused eslint-disable directive (no problems were reported from 'no-await-in-loop').",
++   "main-process/toolbox-format-operations.js:86 Unused eslint-disable directive (no problems were reported from 'no-await-in-loop').",
++   "main-process/toolbox-format-operations.js:289 Unused eslint-disable directive (no problems were reported from 'no-await-in-loop').",
++   "main-process/toolbox-merge-io.js:292 Unused eslint-disable directive (no problems were reported from 'no-await-in-loop').",
++   "main-process/toolbox-output-writer.js:76 Unused eslint-disable directive (no problems were reported from 'global-require').",
++   "main-process/toolbox-output-writer.js:78 Unused eslint-disable directive (no problems were reported from 'global-require').",
++   "main-process/toolbox-output-writer.js:286 Unused eslint-disable directive (no problems were reported from 'global-require').",
++   "main-process/toolbox-output-writer.js:517 Unused eslint-disable directive (no problems were reported from 'global-require').",
++   "main-process/toolbox-output-writer.js:1264 Unused eslint-disable directive (no problems were reported from 'no-await-in-loop').",
++   "main-process/toolbox-row-split/executor.js:52 Unused eslint-disable directive (no problems were reported from 'no-await-in-loop').",
++   "main-process/toolbox-row-split/executor.js:60 Unused eslint-disable directive (no problems were reported from 'no-await-in-loop').",
++   "main-process/toolbox-row-split/executor.js:63 Unused eslint-disable directive (no problems were reported from 'no-await-in-loop').",
++   "main-process/vcc-financial-op-output/dispatch.js:666 Unused eslint-disable directive (no problems were reported from 'no-await-in-loop').",
++   "main-process/vcc-financial-op-output/dispatch.js:670 Unused eslint-disable directive (no problems were reported from 'no-await-in-loop').",
++   "main-process/vcc-financial-op-output/writer-core.js:191 Unused eslint-disable directive (no problems were reported from 'no-await-in-loop').",
++   "main-process/vcc-financial-op-writer.js:1267 Unused eslint-disable directive (no problems were reported from 'no-await-in-loop').",
++   "renderer-dialogs.js:1332 Unused eslint-disable directive (no problems were reported from 'no-console')."
++ ]
+- []
+
+    at equal (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-shared-xlsx-infrastructure/scripts/integration/shared-xlsx-boundary.js:33:10)
+    at /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-shared-xlsx-infrastructure/scripts/integration/shared-xlsx-boundary.js:273:7
+    at group (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-shared-xlsx-infrastructure/scripts/integration/shared-xlsx-boundary.js:45:15)
+    at run (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-shared-xlsx-infrastructure/scripts/integration/shared-xlsx-boundary.js:257:11)
+PASS 公共 XLSX 全部模块的源码依赖闭包不反向载入业务
+==== 45/46 PASS ====

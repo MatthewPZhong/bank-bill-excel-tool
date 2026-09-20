@@ -31,7 +31,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const ExcelJS = require('exceljs');
-const { readXlsxStreamed } = require('../backend/pending-import/streaming-xlsx-reader');
+const { readXlsxStreamed } = require('../backend/xlsx/legacy/streaming-xlsx-reader');
 const {
   isRowMeaningful,
   normalizeCell,

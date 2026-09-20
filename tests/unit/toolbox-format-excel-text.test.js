@@ -9,7 +9,7 @@ const {
   assertExcelCellTextLength,
   decodeExcelStXstring,
   encodeExcelStXstring
-} = require('../../src/backend/toolbox-format/excel-text');
+} = require('../../src/backend/xlsx/excel-text');
 
 test('ST_Xstring 单次解码并保护大小写 escape 字面量', () => {
   assert.equal(decodeExcelStXstring('_x0041_'), 'A');

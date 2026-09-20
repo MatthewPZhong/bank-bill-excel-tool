@@ -9,7 +9,7 @@ const yazl = require('yazl');
 
 const {
   openZipWithEntries
-} = require('../../src/backend/big-table-import/zip-reader');
+} = require('../../src/backend/xlsx/zip-reader');
 const {
   openToolboxXlsxPass
 } = require('../../src/backend/toolbox-format');

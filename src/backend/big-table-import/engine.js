@@ -23,7 +23,7 @@
 
 const path = require('node:path');
 const { validateContract, ContractValidationError } = require('./contract');
-const zipReader = require('./zip-reader');
+const zipReader = require('../xlsx/zip-reader');
 const rowScanner = require('./row-scanner');
 const pipeline = require('./pipeline');
 

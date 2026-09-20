@@ -16,7 +16,7 @@ const {
   parseDecimalLexical,
   parseOoxmlWallClock,
   serial1904To1900
-} = require('../../src/backend/toolbox-format/number-date');
+} = require('../../src/backend/xlsx/number-date');
 
 test.describe('toolbox-format number-date', () => {
   test('locale-dependent built-in 日期/时间格式展开为明确中文格式，未知 id 不降级 General', () => {

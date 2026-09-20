@@ -1,0 +1,5 @@
+Observed work-volume availability at stop: 392 MiB (460 GiB volume, 100% capacity).
+G4 release-check unique node:test PID 55182 / process group 43898 received SIGINT; exec exitCode=130.
+Standalone integration completed exitCode=1; dependency layout recheck completed exitCode=0.
+After stopping G4 verification the volume reported 803 MiB available.
+Only the identified G4 process group was signalled. No system/global data cleanup was performed.

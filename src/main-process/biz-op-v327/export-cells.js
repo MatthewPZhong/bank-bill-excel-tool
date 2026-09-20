@@ -2,8 +2,8 @@
 
 const registry = require('./output-schemas.json');
 const { canonicalizeDecimal } = require('../financial-decimal');
-const { classifyNumericOutput } = require('../../backend/toolbox-format/number-date');
-const { assertExcelCellTextLength } = require('../../backend/toolbox-format/excel-text');
+const { classifyNumericOutput } = require('../../backend/xlsx/number-date');
+const { assertExcelCellTextLength } = require('../../backend/xlsx/excel-text');
 const { CELL_CONTRACT_VERSION } = require('./import-adapter');
 const { fail } = require('./contracts');
 

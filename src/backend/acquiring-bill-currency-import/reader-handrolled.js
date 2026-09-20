@@ -18,7 +18,7 @@
 // 与 reader.js（sax）逐项对齐的关键语义（已用对照测试钉死，见 contract test #7）：
 //   数字型 cell（t="n" / 无 t / t="b" / t="d" / t="e"）—— 取 <v> 原始文本（仅实体解码），
 //     绝不 parseFloat、绝不 String(Number)、绝不 bool→TRUE/FALSE 转换。
-//     ⚠️ 这正是不能复用 pending-import/streaming-xlsx-reader.parseRowXml 的原因：
+//     ⚠️ 这正是不能复用 xlsx/legacy/streaming-xlsx-reader.parseRowXml 的原因：
 //        它对 number 做 parseFloat→String("1000.00")→"1000" 会丢小数改写金额；
 //        对 inlineStr 多个 <t> 做拼接（sax 只取最后一个）；对 bool 转 TRUE/FALSE。
 //   inlineStr / str cell —— 取 cell body 内「最后一个被采集标签」(<t> 或 <v>) 的内容，实体解码。
@@ -68,7 +68,7 @@
 
 const path = require('node:path');
 const { StringDecoder } = require('node:string_decoder');
-const { xmlUnescape } = require('../pending-import/streaming-xlsx-reader');
+const { xmlUnescape } = require('../xlsx/legacy/streaming-xlsx-reader');
 const { FLOW_HEADERS, BILL_HEADERS, FLOW_KEY_COLUMN_INDICES, BILL_KEY_COLUMN_INDICES } = require('../acquiring-bill-currency-db/columns');
 const { validateFlowHeaders, validateBillHeaders, extractMonthKey } = require('./validator');
 const importRepo = require('../acquiring-bill-currency-db/import-repository');

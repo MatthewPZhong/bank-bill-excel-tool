@@ -1,0 +1,1274 @@
+{
+  "baseline": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "staticScope": "tracked src/tests/scripts literal require and require.resolve; dynamic/mock references separately recorded below",
+  "entries": [
+    {
+      "file": "scripts/benchmark-position-import.js",
+      "line": 16,
+      "request": "../src/backend/big-table-import/zip-reader",
+      "oldTarget": "src/backend/big-table-import/zip-reader.js",
+      "newTarget": "src/backend/xlsx/zip-reader.js",
+      "category": "scripts",
+      "status": "compatibility"
+    },
+    {
+      "file": "scripts/integration/pending-removal-reconcile.js",
+      "line": 35,
+      "request": "../../src/backend/pending-import/streaming-xlsx-reader",
+      "oldTarget": "src/backend/pending-import/streaming-xlsx-reader.js",
+      "newTarget": "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+      "category": "scripts",
+      "status": "compatibility"
+    },
+    {
+      "file": "scripts/integration/toolbox-large-file-stream.js",
+      "line": 30,
+      "request": "../../src/backend/big-table-import/zip-reader",
+      "oldTarget": "src/backend/big-table-import/zip-reader.js",
+      "newTarget": "src/backend/xlsx/zip-reader.js",
+      "category": "scripts",
+      "status": "compatibility"
+    },
+    {
+      "file": "scripts/integration/toolbox-large-split-multi-sheet.js",
+      "line": 50,
+      "request": "../../src/backend/pending-import/xlsx-size-preflight",
+      "oldTarget": "src/backend/pending-import/xlsx-size-preflight.js",
+      "newTarget": "src/backend/xlsx/legacy/entry-size-preflight.js",
+      "category": "scripts",
+      "status": "compatibility"
+    },
+    {
+      "file": "scripts/poc/v2.1.12-acquiring-import-parser-compare.js",
+      "line": 61,
+      "request": "../../src/backend/pending-import/streaming-xlsx-reader",
+      "oldTarget": "src/backend/pending-import/streaming-xlsx-reader.js",
+      "newTarget": "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+      "category": "scripts",
+      "status": "compatibility"
+    },
+    {
+      "file": "scripts/poc/v2.1.12-acquiring-import-parser-compare.js",
+      "line": 86,
+      "request": "../../src/backend/pending-import/streaming-xlsx-reader",
+      "oldTarget": "src/backend/pending-import/streaming-xlsx-reader.js",
+      "newTarget": "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+      "category": "scripts",
+      "status": "compatibility"
+    },
+    {
+      "file": "scripts/poc/v2.1.12-acquiring-import-parser-compare.js",
+      "line": 241,
+      "request": "../../src/backend/pending-import/streaming-xlsx-reader",
+      "oldTarget": "src/backend/pending-import/streaming-xlsx-reader.js",
+      "newTarget": "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+      "category": "scripts",
+      "status": "compatibility"
+    },
+    {
+      "file": "scripts/test-v2.0.0-streaming-diff.js",
+      "line": 12,
+      "request": "../src/backend/pending-import/streaming-xlsx-reader",
+      "oldTarget": "src/backend/pending-import/streaming-xlsx-reader.js",
+      "newTarget": "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+      "category": "scripts",
+      "status": "compatibility"
+    },
+    {
+      "file": "scripts/test-v3.0.0-linked-streaming-parity.js",
+      "line": 46,
+      "request": "../src/backend/pending-import/streaming-xlsx-reader",
+      "oldTarget": "src/backend/pending-import/streaming-xlsx-reader.js",
+      "newTarget": "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+      "category": "scripts",
+      "status": "compatibility"
+    },
+    {
+      "file": "scripts/vcc-financial-op/measure-shared-writer.js",
+      "line": 8,
+      "request": "../../src/backend/xlsx-rich-reader",
+      "oldTarget": "src/backend/xlsx-rich-reader.js",
+      "newTarget": "src/backend/xlsx/rich-workbook.js",
+      "category": "scripts",
+      "status": "compatibility"
+    },
+    {
+      "file": "scripts/vcc-financial-op/performance-worker.js",
+      "line": 110,
+      "request": "../../src/backend/xlsx-rich-reader",
+      "oldTarget": "src/backend/xlsx-rich-reader.js",
+      "newTarget": "src/backend/xlsx/rich-workbook.js",
+      "category": "scripts",
+      "status": "compatibility"
+    },
+    {
+      "file": "scripts/vcc-financial-op/verify-review-performance.js",
+      "line": 35,
+      "request": "../../src/backend/xlsx-rich-reader",
+      "oldTarget": "src/backend/xlsx-rich-reader.js",
+      "newTarget": "src/backend/xlsx/rich-workbook.js",
+      "category": "scripts",
+      "status": "compatibility"
+    },
+    {
+      "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+      "line": 71,
+      "request": "../pending-import/streaming-xlsx-reader",
+      "oldTarget": "src/backend/pending-import/streaming-xlsx-reader.js",
+      "newTarget": "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/backend/big-table-import/engine.js",
+      "line": 26,
+      "request": "./zip-reader",
+      "oldTarget": "src/backend/big-table-import/zip-reader.js",
+      "newTarget": "src/backend/xlsx/zip-reader.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/backend/big-table-import/import-worker.js",
+      "line": 39,
+      "request": "./zip-reader",
+      "oldTarget": "src/backend/big-table-import/zip-reader.js",
+      "newTarget": "src/backend/xlsx/zip-reader.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/backend/biz-op-recon-import/reader-streamed.js",
+      "line": 55,
+      "request": "../pending-import/streaming-xlsx-reader",
+      "oldTarget": "src/backend/pending-import/streaming-xlsx-reader.js",
+      "newTarget": "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/backend/biz-op-recon-import/reader-streamed.js",
+      "line": 57,
+      "request": "../pending-import/xlsx-size-preflight",
+      "oldTarget": "src/backend/pending-import/xlsx-size-preflight.js",
+      "newTarget": "src/backend/xlsx/legacy/entry-size-preflight.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/backend/file-service/readers.js",
+      "line": 14,
+      "request": "../pending-import/streaming-xlsx-reader",
+      "oldTarget": "src/backend/pending-import/streaming-xlsx-reader.js",
+      "newTarget": "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/backend/pending-import/streaming-xlsx-reader.js",
+      "line": 19,
+      "request": "./xlsx-size-preflight",
+      "oldTarget": "src/backend/pending-import/xlsx-size-preflight.js",
+      "newTarget": "src/backend/xlsx/legacy/entry-size-preflight.js",
+      "category": "production",
+      "status": "implementation-extraction"
+    },
+    {
+      "file": "src/backend/pending-import/worker.js",
+      "line": 25,
+      "request": "./streaming-xlsx-reader",
+      "oldTarget": "src/backend/pending-import/streaming-xlsx-reader.js",
+      "newTarget": "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/backend/position-reconciliation-import/shared-strings-provider.js",
+      "line": 10,
+      "request": "../toolbox-format/excel-text",
+      "oldTarget": "src/backend/toolbox-format/excel-text.js",
+      "newTarget": "src/backend/xlsx/excel-text.js",
+      "category": "production",
+      "status": "implementation-extraction"
+    },
+    {
+      "file": "src/backend/position-reconciliation-import/shared-strings-provider.js",
+      "line": 13,
+      "request": "../toolbox-format/xlsx-pass",
+      "oldTarget": "src/backend/toolbox-format/xlsx-pass.js",
+      "newTarget": "src/backend/xlsx/workbook-parts.js",
+      "category": "production",
+      "status": "implementation-extraction"
+    },
+    {
+      "file": "src/backend/position-reconciliation-import/xlsx-reader.js",
+      "line": 10,
+      "request": "../big-table-import/zip-reader",
+      "oldTarget": "src/backend/big-table-import/zip-reader.js",
+      "newTarget": "src/backend/xlsx/zip-reader.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/backend/position-reconciliation-import/xlsx-reader.js",
+      "line": 18,
+      "request": "../toolbox-format/xlsx-pass",
+      "oldTarget": "src/backend/toolbox-format/xlsx-pass.js",
+      "newTarget": "src/backend/xlsx/workbook-parts.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/backend/position-reconciliation-import/xlsx-reader.js",
+      "line": 22,
+      "request": "../toolbox-format/xlsx-sheet-scanner",
+      "oldTarget": "src/backend/toolbox-format/xlsx-sheet-scanner.js",
+      "newTarget": "src/backend/xlsx/xlsx-sheet-scanner.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/backend/position-reconciliation-import/xlsx-reader.js",
+      "line": 25,
+      "request": "../toolbox-format/style-registry",
+      "oldTarget": "src/backend/toolbox-format/style-registry.js",
+      "newTarget": "src/backend/xlsx/style-registry.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/backend/position-reconciliation-import/xlsx-reader.js",
+      "line": 28,
+      "request": "../toolbox-format/number-date",
+      "oldTarget": "src/backend/toolbox-format/number-date.js",
+      "newTarget": "src/backend/xlsx/number-date.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/backend/position-reconciliation-import/xlsx-reader.js",
+      "line": 44,
+      "request": "./shared-strings-provider",
+      "oldTarget": "src/backend/position-reconciliation-import/shared-strings-provider.js",
+      "newTarget": "src/backend/xlsx/shared-strings-provider.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/backend/toolbox-format/biff8-pass.js",
+      "line": 10,
+      "request": "./model",
+      "oldTarget": "src/backend/toolbox-format/model.js",
+      "newTarget": "src/backend/xlsx/model.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/backend/toolbox-format/biff8-pass.js",
+      "line": 11,
+      "request": "./style-registry",
+      "oldTarget": "src/backend/toolbox-format/style-registry.js",
+      "newTarget": "src/backend/xlsx/style-registry.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/backend/toolbox-format/biff8-records.js",
+      "line": 3,
+      "request": "./number-date",
+      "oldTarget": "src/backend/toolbox-format/number-date.js",
+      "newTarget": "src/backend/xlsx/number-date.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/backend/toolbox-format/csv-pass.js",
+      "line": 12,
+      "request": "./model",
+      "oldTarget": "src/backend/toolbox-format/model.js",
+      "newTarget": "src/backend/xlsx/model.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/backend/toolbox-format/csv-pass.js",
+      "line": 13,
+      "request": "./style-registry",
+      "oldTarget": "src/backend/toolbox-format/style-registry.js",
+      "newTarget": "src/backend/xlsx/style-registry.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/backend/toolbox-format/index.js",
+      "line": 4,
+      "request": "./excel-text",
+      "oldTarget": "src/backend/toolbox-format/excel-text.js",
+      "newTarget": "src/backend/xlsx/excel-text.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/backend/toolbox-format/index.js",
+      "line": 5,
+      "request": "./model",
+      "oldTarget": "src/backend/toolbox-format/model.js",
+      "newTarget": "src/backend/xlsx/model.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/backend/toolbox-format/index.js",
+      "line": 6,
+      "request": "./number-date",
+      "oldTarget": "src/backend/toolbox-format/number-date.js",
+      "newTarget": "src/backend/xlsx/number-date.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/backend/toolbox-format/index.js",
+      "line": 7,
+      "request": "./style-registry",
+      "oldTarget": "src/backend/toolbox-format/style-registry.js",
+      "newTarget": "src/backend/xlsx/style-registry.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/backend/toolbox-format/index.js",
+      "line": 8,
+      "request": "./xlsx-pass",
+      "oldTarget": "src/backend/toolbox-format/xlsx-pass.js",
+      "newTarget": "src/backend/xlsx/workbook-parts.js",
+      "category": "production",
+      "status": "retained-domain-assembly"
+    },
+    {
+      "file": "src/backend/toolbox-format/index.js",
+      "line": 9,
+      "request": "./xlsx-sheet-scanner",
+      "oldTarget": "src/backend/toolbox-format/xlsx-sheet-scanner.js",
+      "newTarget": "src/backend/xlsx/xlsx-sheet-scanner.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/backend/toolbox-format/model.js",
+      "line": 10,
+      "request": "./number-date",
+      "oldTarget": "src/backend/toolbox-format/number-date.js",
+      "newTarget": "src/backend/xlsx/number-date.js",
+      "category": "production",
+      "status": "implementation-extraction"
+    },
+    {
+      "file": "src/backend/toolbox-format/style-registry.js",
+      "line": 7,
+      "request": "./number-date",
+      "oldTarget": "src/backend/toolbox-format/number-date.js",
+      "newTarget": "src/backend/xlsx/number-date.js",
+      "category": "production",
+      "status": "implementation-extraction"
+    },
+    {
+      "file": "src/backend/toolbox-format/style-registry.js",
+      "line": 15,
+      "request": "./ooxml-namespaces",
+      "oldTarget": "src/backend/toolbox-format/ooxml-namespaces.js",
+      "newTarget": "src/backend/xlsx/ooxml-namespaces.js",
+      "category": "production",
+      "status": "implementation-extraction"
+    },
+    {
+      "file": "src/backend/toolbox-format/xlsx-pass.js",
+      "line": 10,
+      "request": "../big-table-import/zip-reader",
+      "oldTarget": "src/backend/big-table-import/zip-reader.js",
+      "newTarget": "src/backend/xlsx/zip-reader.js",
+      "category": "production",
+      "status": "implementation-extraction"
+    },
+    {
+      "file": "src/backend/toolbox-format/xlsx-pass.js",
+      "line": 13,
+      "request": "./style-registry",
+      "oldTarget": "src/backend/toolbox-format/style-registry.js",
+      "newTarget": "src/backend/xlsx/style-registry.js",
+      "category": "production",
+      "status": "implementation-extraction"
+    },
+    {
+      "file": "src/backend/toolbox-format/xlsx-pass.js",
+      "line": 18,
+      "request": "./excel-text",
+      "oldTarget": "src/backend/toolbox-format/excel-text.js",
+      "newTarget": "src/backend/xlsx/excel-text.js",
+      "category": "production",
+      "status": "implementation-extraction"
+    },
+    {
+      "file": "src/backend/toolbox-format/xlsx-pass.js",
+      "line": 27,
+      "request": "./ooxml-namespaces",
+      "oldTarget": "src/backend/toolbox-format/ooxml-namespaces.js",
+      "newTarget": "src/backend/xlsx/ooxml-namespaces.js",
+      "category": "production",
+      "status": "implementation-extraction"
+    },
+    {
+      "file": "src/backend/toolbox-format/xlsx-pass.js",
+      "line": 32,
+      "request": "./xlsx-sheet-scanner",
+      "oldTarget": "src/backend/toolbox-format/xlsx-sheet-scanner.js",
+      "newTarget": "src/backend/xlsx/xlsx-sheet-scanner.js",
+      "category": "production",
+      "status": "implementation-extraction"
+    },
+    {
+      "file": "src/backend/toolbox-format/xlsx-sheet-scanner.js",
+      "line": 8,
+      "request": "./model",
+      "oldTarget": "src/backend/toolbox-format/model.js",
+      "newTarget": "src/backend/xlsx/model.js",
+      "category": "production",
+      "status": "implementation-extraction"
+    },
+    {
+      "file": "src/backend/toolbox-format/xlsx-sheet-scanner.js",
+      "line": 14,
+      "request": "./number-date",
+      "oldTarget": "src/backend/toolbox-format/number-date.js",
+      "newTarget": "src/backend/xlsx/number-date.js",
+      "category": "production",
+      "status": "implementation-extraction"
+    },
+    {
+      "file": "src/backend/toolbox-format/xlsx-sheet-scanner.js",
+      "line": 19,
+      "request": "./ooxml-namespaces",
+      "oldTarget": "src/backend/toolbox-format/ooxml-namespaces.js",
+      "newTarget": "src/backend/xlsx/ooxml-namespaces.js",
+      "category": "production",
+      "status": "implementation-extraction"
+    },
+    {
+      "file": "src/backend/toolbox-format/xlsx-sheet-scanner.js",
+      "line": 26,
+      "request": "./excel-text",
+      "oldTarget": "src/backend/toolbox-format/excel-text.js",
+      "newTarget": "src/backend/xlsx/excel-text.js",
+      "category": "production",
+      "status": "implementation-extraction"
+    },
+    {
+      "file": "src/backend/toolbox-xlsx-stream/large-split-worker.js",
+      "line": 93,
+      "request": "../pending-import/xlsx-size-preflight",
+      "oldTarget": "src/backend/pending-import/xlsx-size-preflight.js",
+      "newTarget": "src/backend/xlsx/legacy/entry-size-preflight.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+      "line": 39,
+      "request": "../big-table-import/zip-reader",
+      "oldTarget": "src/backend/big-table-import/zip-reader.js",
+      "newTarget": "src/backend/xlsx/zip-reader.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/backend/vcc-financial-op/review-export-contract.js",
+      "line": 5,
+      "request": "../toolbox-format/number-date",
+      "oldTarget": "src/backend/toolbox-format/number-date.js",
+      "newTarget": "src/backend/xlsx/number-date.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/backend/vcc-financial-op/review-export-contract.js",
+      "line": 6,
+      "request": "../toolbox-format/excel-text",
+      "oldTarget": "src/backend/toolbox-format/excel-text.js",
+      "newTarget": "src/backend/xlsx/excel-text.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/backend/vcc-financial-op/review-export-plan.js",
+      "line": 19,
+      "request": "../xlsx-rich-reader",
+      "oldTarget": "src/backend/xlsx-rich-reader.js",
+      "newTarget": "src/backend/xlsx/rich-workbook.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/backend/vcc-financial-op/system-op-importer.js",
+      "line": 7,
+      "request": "../xlsx-rich-reader",
+      "oldTarget": "src/backend/xlsx-rich-reader.js",
+      "newTarget": "src/backend/xlsx/rich-workbook.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/backend/vcc-financial-op/system-op-importer.js",
+      "line": 10,
+      "request": "../big-table-import/zip-reader",
+      "oldTarget": "src/backend/big-table-import/zip-reader.js",
+      "newTarget": "src/backend/xlsx/zip-reader.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/backend/vcc-financial-op/workbook-import-plan.js",
+      "line": 6,
+      "request": "../xlsx-rich-reader",
+      "oldTarget": "src/backend/xlsx-rich-reader.js",
+      "newTarget": "src/backend/xlsx/rich-workbook.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/backend/vcc-financial-op/workbook-reader.js",
+      "line": 12,
+      "request": "../big-table-import/zip-reader",
+      "oldTarget": "src/backend/big-table-import/zip-reader.js",
+      "newTarget": "src/backend/xlsx/zip-reader.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/backend/vcc-financial-op/workbook-reader.js",
+      "line": 16,
+      "request": "../position-reconciliation-import/shared-strings-provider",
+      "oldTarget": "src/backend/position-reconciliation-import/shared-strings-provider.js",
+      "newTarget": "src/backend/xlsx/shared-strings-provider.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/backend/vcc-financial-op/workbook-reader.js",
+      "line": 17,
+      "request": "../toolbox-format/xlsx-pass",
+      "oldTarget": "src/backend/toolbox-format/xlsx-pass.js",
+      "newTarget": "src/backend/xlsx/workbook-parts.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/backend/vcc-op-calc-import/reader.js",
+      "line": 26,
+      "request": "../pending-import/streaming-xlsx-reader",
+      "oldTarget": "src/backend/pending-import/streaming-xlsx-reader.js",
+      "newTarget": "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/backend/vcc-op-calc-import/reader.js",
+      "line": 28,
+      "request": "../pending-import/xlsx-size-preflight",
+      "oldTarget": "src/backend/pending-import/xlsx-size-preflight.js",
+      "newTarget": "src/backend/xlsx/legacy/entry-size-preflight.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/backend/xlsx-rich-reader.js",
+      "line": 6,
+      "request": "./big-table-import/zip-reader",
+      "oldTarget": "src/backend/big-table-import/zip-reader.js",
+      "newTarget": "src/backend/xlsx/zip-reader.js",
+      "category": "production",
+      "status": "implementation-extraction"
+    },
+    {
+      "file": "src/backend/xlsx-rich-reader.js",
+      "line": 8,
+      "request": "./toolbox-format/xlsx-pass",
+      "oldTarget": "src/backend/toolbox-format/xlsx-pass.js",
+      "newTarget": "src/backend/xlsx/workbook-parts.js",
+      "category": "production",
+      "status": "implementation-extraction"
+    },
+    {
+      "file": "src/backend/xlsx-rich-reader.js",
+      "line": 9,
+      "request": "./toolbox-format/style-registry",
+      "oldTarget": "src/backend/toolbox-format/style-registry.js",
+      "newTarget": "src/backend/xlsx/style-registry.js",
+      "category": "production",
+      "status": "implementation-extraction"
+    },
+    {
+      "file": "src/backend/xlsx-rich-reader.js",
+      "line": 10,
+      "request": "./toolbox-format/xlsx-sheet-scanner",
+      "oldTarget": "src/backend/toolbox-format/xlsx-sheet-scanner.js",
+      "newTarget": "src/backend/xlsx/xlsx-sheet-scanner.js",
+      "category": "production",
+      "status": "implementation-extraction"
+    },
+    {
+      "file": "src/backend/xlsx-rich-reader.js",
+      "line": 11,
+      "request": "./position-reconciliation-import/shared-strings-provider",
+      "oldTarget": "src/backend/position-reconciliation-import/shared-strings-provider.js",
+      "newTarget": "src/backend/xlsx/shared-strings-provider.js",
+      "category": "production",
+      "status": "implementation-extraction"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/export-cells.js",
+      "line": 5,
+      "request": "../../backend/toolbox-format/number-date",
+      "oldTarget": "src/backend/toolbox-format/number-date.js",
+      "newTarget": "src/backend/xlsx/number-date.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/export-cells.js",
+      "line": 6,
+      "request": "../../backend/toolbox-format/excel-text",
+      "oldTarget": "src/backend/toolbox-format/excel-text.js",
+      "newTarget": "src/backend/xlsx/excel-text.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/export-source.js",
+      "line": 8,
+      "request": "../../backend/xlsx-rich-reader",
+      "oldTarget": "src/backend/xlsx-rich-reader.js",
+      "newTarget": "src/backend/xlsx/rich-workbook.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/export-validator.js",
+      "line": 6,
+      "request": "../../backend/xlsx-rich-reader",
+      "oldTarget": "src/backend/xlsx-rich-reader.js",
+      "newTarget": "src/backend/xlsx/rich-workbook.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/export-writer.js",
+      "line": 4,
+      "request": "../../backend/toolbox-format/excel-text",
+      "oldTarget": "src/backend/toolbox-format/excel-text.js",
+      "newTarget": "src/backend/xlsx/excel-text.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/import-adapter.js",
+      "line": 4,
+      "request": "../../backend/toolbox-format/number-date",
+      "oldTarget": "src/backend/toolbox-format/number-date.js",
+      "newTarget": "src/backend/xlsx/number-date.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/main-process/biz-op-v327/import-pipeline.js",
+      "line": 7,
+      "request": "../../backend/xlsx-rich-reader",
+      "oldTarget": "src/backend/xlsx-rich-reader.js",
+      "newTarget": "src/backend/xlsx/rich-workbook.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/main-process/duplicate-inbound-match/document-statement-reader.js",
+      "line": 16,
+      "request": "../../backend/big-table-import/zip-reader",
+      "oldTarget": "src/backend/big-table-import/zip-reader.js",
+      "newTarget": "src/backend/xlsx/zip-reader.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/main-process/linked-table-stream-source.js",
+      "line": 18,
+      "request": "../backend/pending-import/streaming-xlsx-reader",
+      "oldTarget": "src/backend/pending-import/streaming-xlsx-reader.js",
+      "newTarget": "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/main-process/new-account/generation-core.js",
+      "line": 12,
+      "request": "../../backend/big-table-import/zip-reader",
+      "oldTarget": "src/backend/big-table-import/zip-reader.js",
+      "newTarget": "src/backend/xlsx/zip-reader.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/main-process/position-reconciliation/filtered-source-report.js",
+      "line": 25,
+      "request": "../../backend/toolbox-format/xlsx-sheet-scanner",
+      "oldTarget": "src/backend/toolbox-format/xlsx-sheet-scanner.js",
+      "newTarget": "src/backend/xlsx/xlsx-sheet-scanner.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/main-process/recon-id-fix-service/artifact-evidence.js",
+      "line": 9,
+      "request": "../../backend/big-table-import/zip-reader",
+      "oldTarget": "src/backend/big-table-import/zip-reader.js",
+      "newTarget": "src/backend/xlsx/zip-reader.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/main-process/toolbox-background/route-db-contract.js",
+      "line": 13,
+      "request": "../../backend/toolbox-format/model",
+      "oldTarget": "src/backend/toolbox-format/model.js",
+      "newTarget": "src/backend/xlsx/model.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/main-process/toolbox-background/route-db-contract.js",
+      "line": 14,
+      "request": "../../backend/toolbox-format/style-registry",
+      "oldTarget": "src/backend/toolbox-format/style-registry.js",
+      "newTarget": "src/backend/xlsx/style-registry.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/main-process/toolbox-large-split-router.js",
+      "line": 25,
+      "request": "../backend/pending-import/xlsx-size-preflight",
+      "oldTarget": "src/backend/pending-import/xlsx-size-preflight.js",
+      "newTarget": "src/backend/xlsx/legacy/entry-size-preflight.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/main-process/toolbox-large-split-router.js",
+      "line": 28,
+      "request": "../backend/big-table-import/zip-reader",
+      "oldTarget": "src/backend/big-table-import/zip-reader.js",
+      "newTarget": "src/backend/xlsx/zip-reader.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/main-process/toolbox-large-split-router.js",
+      "line": 34,
+      "request": "../backend/toolbox-format/xlsx-pass",
+      "oldTarget": "src/backend/toolbox-format/xlsx-pass.js",
+      "newTarget": "src/backend/xlsx/workbook-parts.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/main-process/toolbox-output-writer.js",
+      "line": 11,
+      "request": "../backend/big-table-import/zip-reader",
+      "oldTarget": "src/backend/big-table-import/zip-reader.js",
+      "newTarget": "src/backend/xlsx/zip-reader.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/main-process/toolbox-output-writer.js",
+      "line": 18,
+      "request": "../backend/toolbox-format/ooxml-namespaces",
+      "oldTarget": "src/backend/toolbox-format/ooxml-namespaces.js",
+      "newTarget": "src/backend/xlsx/ooxml-namespaces.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/main-process/toolbox-output-writer.js",
+      "line": 21,
+      "request": "../backend/toolbox-format/model",
+      "oldTarget": "src/backend/toolbox-format/model.js",
+      "newTarget": "src/backend/xlsx/model.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/main-process/toolbox-output-writer.js",
+      "line": 24,
+      "request": "../backend/toolbox-format/xlsx-pass",
+      "oldTarget": "src/backend/toolbox-format/xlsx-pass.js",
+      "newTarget": "src/backend/xlsx/workbook-parts.js",
+      "category": "production",
+      "status": "retained-domain-assembly"
+    },
+    {
+      "file": "src/main-process/toolbox-output-writer.js",
+      "line": 29,
+      "request": "../backend/toolbox-format/excel-text",
+      "oldTarget": "src/backend/toolbox-format/excel-text.js",
+      "newTarget": "src/backend/xlsx/excel-text.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/main-process/toolbox-output-writer.js",
+      "line": 287,
+      "request": "../backend/toolbox-format/model",
+      "oldTarget": "src/backend/toolbox-format/model.js",
+      "newTarget": "src/backend/xlsx/model.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/main-process/toolbox-output-writer.js",
+      "line": 518,
+      "request": "../backend/toolbox-format/style-registry",
+      "oldTarget": "src/backend/toolbox-format/style-registry.js",
+      "newTarget": "src/backend/xlsx/style-registry.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/main-process/toolbox-stream-io.js",
+      "line": 34,
+      "request": "../backend/pending-import/streaming-xlsx-reader",
+      "oldTarget": "src/backend/pending-import/streaming-xlsx-reader.js",
+      "newTarget": "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/main-process/vcc-financial-op-dataset-writer.js",
+      "line": 26,
+      "request": "../backend/xlsx-rich-reader",
+      "oldTarget": "src/backend/xlsx-rich-reader.js",
+      "newTarget": "src/backend/xlsx/rich-workbook.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/main-process/vcc-financial-op-review-validator.js",
+      "line": 5,
+      "request": "../backend/xlsx-rich-reader",
+      "oldTarget": "src/backend/xlsx-rich-reader.js",
+      "newTarget": "src/backend/xlsx/rich-workbook.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/main-process/vcc-financial-op-review-validator.js",
+      "line": 6,
+      "request": "../backend/big-table-import/zip-reader",
+      "oldTarget": "src/backend/big-table-import/zip-reader.js",
+      "newTarget": "src/backend/xlsx/zip-reader.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/main-process/vcc-financial-op-review-validator.js",
+      "line": 7,
+      "request": "../backend/toolbox-format/excel-text",
+      "oldTarget": "src/backend/toolbox-format/excel-text.js",
+      "newTarget": "src/backend/xlsx/excel-text.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/main-process/vcc-financial-op-review-validator.js",
+      "line": 8,
+      "request": "../backend/toolbox-format/number-date",
+      "oldTarget": "src/backend/toolbox-format/number-date.js",
+      "newTarget": "src/backend/xlsx/number-date.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/main-process/vcc-financial-op-review-validator.js",
+      "line": 10,
+      "request": "../backend/toolbox-format/style-registry",
+      "oldTarget": "src/backend/toolbox-format/style-registry.js",
+      "newTarget": "src/backend/xlsx/style-registry.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/main-process/vcc-financial-op-review-writer.js",
+      "line": 5,
+      "request": "../backend/toolbox-format/excel-text",
+      "oldTarget": "src/backend/toolbox-format/excel-text.js",
+      "newTarget": "src/backend/xlsx/excel-text.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/main-process/vcc-financial-op-writer.js",
+      "line": 33,
+      "request": "../backend/toolbox-format/excel-text",
+      "oldTarget": "src/backend/toolbox-format/excel-text.js",
+      "newTarget": "src/backend/xlsx/excel-text.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "src/main-process/vcc-financial-op-writer.js",
+      "line": 39,
+      "request": "../backend/toolbox-format/ooxml-namespaces",
+      "oldTarget": "src/backend/toolbox-format/ooxml-namespaces.js",
+      "newTarget": "src/backend/xlsx/ooxml-namespaces.js",
+      "category": "production",
+      "status": "migrated-to-public"
+    },
+    {
+      "file": "tests/unit/backend/big-table-import/row-scanner-four-way-contract.test.js",
+      "line": 38,
+      "request": "../../../../src/backend/big-table-import/zip-reader",
+      "oldTarget": "src/backend/big-table-import/zip-reader.js",
+      "newTarget": "src/backend/xlsx/zip-reader.js",
+      "category": "tests",
+      "status": "migrated-to-public-test-target"
+    },
+    {
+      "file": "tests/unit/backend/big-table-import/zip-reader.test.js",
+      "line": 9,
+      "request": "../../../../src/backend/big-table-import/zip-reader",
+      "oldTarget": "src/backend/big-table-import/zip-reader.js",
+      "newTarget": "src/backend/xlsx/zip-reader.js",
+      "category": "tests",
+      "status": "migrated-to-public-test-target"
+    },
+    {
+      "file": "tests/unit/backend/pending-import/streaming-xlsx-reader.test.js",
+      "line": 9,
+      "request": "../../../../src/backend/pending-import/streaming-xlsx-reader",
+      "oldTarget": "src/backend/pending-import/streaming-xlsx-reader.js",
+      "newTarget": "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+      "category": "tests",
+      "status": "migrated-to-public-test-target"
+    },
+    {
+      "file": "tests/unit/backend/pending-import/xlsx-size-preflight.test.js",
+      "line": 23,
+      "request": "../../../../src/backend/pending-import/xlsx-size-preflight",
+      "oldTarget": "src/backend/pending-import/xlsx-size-preflight.js",
+      "newTarget": "src/backend/xlsx/legacy/entry-size-preflight.js",
+      "category": "tests",
+      "status": "migrated-to-public-test-target"
+    },
+    {
+      "file": "tests/unit/backend/shared-strings-ownership.test.js",
+      "line": 10,
+      "request": "../../../src/backend/position-reconciliation-import/shared-strings-provider",
+      "oldTarget": "src/backend/position-reconciliation-import/shared-strings-provider.js",
+      "newTarget": "src/backend/xlsx/shared-strings-provider.js",
+      "category": "tests",
+      "status": "migrated-to-public-test-target"
+    },
+    {
+      "file": "tests/unit/backend/shared-strings-ownership.test.js",
+      "line": 11,
+      "request": "../../../src/backend/xlsx-rich-reader",
+      "oldTarget": "src/backend/xlsx-rich-reader.js",
+      "newTarget": "src/backend/xlsx/rich-workbook.js",
+      "category": "tests",
+      "status": "migrated-to-public-test-target"
+    },
+    {
+      "file": "tests/unit/backend/shared-strings-ownership.test.js",
+      "line": 29,
+      "request": "../../../src/backend/position-reconciliation-import/shared-strings-provider",
+      "oldTarget": "src/backend/position-reconciliation-import/shared-strings-provider.js",
+      "newTarget": "src/backend/xlsx/shared-strings-provider.js",
+      "category": "tests",
+      "status": "migrated-to-public-test-target"
+    },
+    {
+      "file": "tests/unit/backend/shared-strings-ownership.test.js",
+      "line": 30,
+      "request": "../../../src/backend/xlsx-rich-reader",
+      "oldTarget": "src/backend/xlsx-rich-reader.js",
+      "newTarget": "src/backend/xlsx/rich-workbook.js",
+      "category": "tests",
+      "status": "migrated-to-public-test-target"
+    },
+    {
+      "file": "tests/unit/backend/vcc-financial-op/multisheet-import.test.js",
+      "line": 65,
+      "request": "../../../../src/backend/xlsx-rich-reader",
+      "oldTarget": "src/backend/xlsx-rich-reader.js",
+      "newTarget": "src/backend/xlsx/rich-workbook.js",
+      "category": "tests",
+      "status": "migrated-to-public-test-target"
+    },
+    {
+      "file": "tests/unit/backend/vcc-financial-op/multisheet-import.test.js",
+      "line": 223,
+      "request": "../../../../src/backend/xlsx-rich-reader",
+      "oldTarget": "src/backend/xlsx-rich-reader.js",
+      "newTarget": "src/backend/xlsx/rich-workbook.js",
+      "category": "tests",
+      "status": "migrated-to-public-test-target"
+    },
+    {
+      "file": "tests/unit/main-process/biz-op-v327-import.test.js",
+      "line": 14,
+      "request": "../../../src/backend/xlsx-rich-reader",
+      "oldTarget": "src/backend/xlsx-rich-reader.js",
+      "newTarget": "src/backend/xlsx/rich-workbook.js",
+      "category": "tests",
+      "status": "migrated-to-public-test-target"
+    },
+    {
+      "file": "tests/unit/main-process/biz-op-v327-import.test.js",
+      "line": 15,
+      "request": "../../../src/backend/position-reconciliation-import/shared-strings-provider",
+      "oldTarget": "src/backend/position-reconciliation-import/shared-strings-provider.js",
+      "newTarget": "src/backend/xlsx/shared-strings-provider.js",
+      "category": "tests",
+      "status": "migrated-to-public-test-target"
+    },
+    {
+      "file": "tests/unit/main-process/new-account-strict-readback.test.js",
+      "line": 16,
+      "request": "../../../src/backend/big-table-import/zip-reader",
+      "oldTarget": "src/backend/big-table-import/zip-reader.js",
+      "newTarget": "src/backend/xlsx/zip-reader.js",
+      "category": "tests",
+      "status": "migrated-to-public-test-target"
+    },
+    {
+      "file": "tests/unit/main-process/toolbox-background-route-db.test.js",
+      "line": 20,
+      "request": "../../../src/backend/toolbox-format/model",
+      "oldTarget": "src/backend/toolbox-format/model.js",
+      "newTarget": "src/backend/xlsx/model.js",
+      "category": "tests",
+      "status": "migrated-to-public-test-target"
+    },
+    {
+      "file": "tests/unit/main-process/toolbox-background-route-db.test.js",
+      "line": 21,
+      "request": "../../../src/backend/toolbox-format/style-registry",
+      "oldTarget": "src/backend/toolbox-format/style-registry.js",
+      "newTarget": "src/backend/xlsx/style-registry.js",
+      "category": "tests",
+      "status": "migrated-to-public-test-target"
+    },
+    {
+      "file": "tests/unit/main-process/toolbox-large-split-router.test.js",
+      "line": 22,
+      "request": "../../../src/backend/pending-import/xlsx-size-preflight",
+      "oldTarget": "src/backend/pending-import/xlsx-size-preflight.js",
+      "newTarget": "src/backend/xlsx/legacy/entry-size-preflight.js",
+      "category": "tests",
+      "status": "migrated-to-public-test-target"
+    },
+    {
+      "file": "tests/unit/main-process/toolbox-stream-io.test.js",
+      "line": 40,
+      "request": "../../../src/backend/pending-import/streaming-xlsx-reader",
+      "oldTarget": "src/backend/pending-import/streaming-xlsx-reader.js",
+      "newTarget": "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+      "category": "tests",
+      "status": "migrated-to-public-test-target"
+    },
+    {
+      "file": "tests/unit/main-process/vcc-financial-op-review-sst-budget.test.js",
+      "line": 69,
+      "request": "../../../src/backend/xlsx-rich-reader",
+      "oldTarget": "src/backend/xlsx-rich-reader.js",
+      "newTarget": "src/backend/xlsx/rich-workbook.js",
+      "category": "tests",
+      "status": "migrated-to-public-test-target"
+    },
+    {
+      "file": "tests/unit/toolbox-format-duplicate-zip-entry.test.js",
+      "line": 12,
+      "request": "../../src/backend/big-table-import/zip-reader",
+      "oldTarget": "src/backend/big-table-import/zip-reader.js",
+      "newTarget": "src/backend/xlsx/zip-reader.js",
+      "category": "tests",
+      "status": "migrated-to-public-test-target"
+    },
+    {
+      "file": "tests/unit/toolbox-format-excel-text.test.js",
+      "line": 12,
+      "request": "../../src/backend/toolbox-format/excel-text",
+      "oldTarget": "src/backend/toolbox-format/excel-text.js",
+      "newTarget": "src/backend/xlsx/excel-text.js",
+      "category": "tests",
+      "status": "migrated-to-public-test-target"
+    },
+    {
+      "file": "tests/unit/toolbox-format-model.test.js",
+      "line": 15,
+      "request": "../../src/backend/toolbox-format/model",
+      "oldTarget": "src/backend/toolbox-format/model.js",
+      "newTarget": "src/backend/xlsx/model.js",
+      "category": "tests",
+      "status": "migrated-to-public-test-target"
+    },
+    {
+      "file": "tests/unit/toolbox-format-number-date.test.js",
+      "line": 19,
+      "request": "../../src/backend/toolbox-format/number-date",
+      "oldTarget": "src/backend/toolbox-format/number-date.js",
+      "newTarget": "src/backend/xlsx/number-date.js",
+      "category": "tests",
+      "status": "migrated-to-public-test-target"
+    },
+    {
+      "file": "tests/unit/toolbox-format-shared-strings-structure.test.js",
+      "line": 9,
+      "request": "../../src/backend/toolbox-format/xlsx-sheet-scanner",
+      "oldTarget": "src/backend/toolbox-format/xlsx-sheet-scanner.js",
+      "newTarget": "src/backend/xlsx/xlsx-sheet-scanner.js",
+      "category": "tests",
+      "status": "migrated-to-public-test-target"
+    },
+    {
+      "file": "tests/unit/toolbox-format-shared-strings-structure.test.js",
+      "line": 12,
+      "request": "../../src/backend/toolbox-format/xlsx-pass",
+      "oldTarget": "src/backend/toolbox-format/xlsx-pass.js",
+      "newTarget": "src/backend/xlsx/workbook-parts.js",
+      "category": "tests",
+      "status": "migrated-to-public-test-target"
+    },
+    {
+      "file": "tests/unit/toolbox-format-style-structure.test.js",
+      "line": 11,
+      "request": "../../src/backend/toolbox-format/style-registry",
+      "oldTarget": "src/backend/toolbox-format/style-registry.js",
+      "newTarget": "src/backend/xlsx/style-registry.js",
+      "category": "tests",
+      "status": "migrated-to-public-test-target"
+    },
+    {
+      "file": "tests/unit/toolbox-format-style.test.js",
+      "line": 15,
+      "request": "../../src/backend/toolbox-format/style-registry",
+      "oldTarget": "src/backend/toolbox-format/style-registry.js",
+      "newTarget": "src/backend/xlsx/style-registry.js",
+      "category": "tests",
+      "status": "migrated-to-public-test-target"
+    },
+    {
+      "file": "tests/unit/toolbox-format-style.test.js",
+      "line": 19,
+      "request": "../../src/backend/toolbox-format/model",
+      "oldTarget": "src/backend/toolbox-format/model.js",
+      "newTarget": "src/backend/xlsx/model.js",
+      "category": "tests",
+      "status": "migrated-to-public-test-target"
+    },
+    {
+      "file": "tests/unit/toolbox-format-xlsx-structure.test.js",
+      "line": 11,
+      "request": "../../src/backend/toolbox-format/xlsx-sheet-scanner",
+      "oldTarget": "src/backend/toolbox-format/xlsx-sheet-scanner.js",
+      "newTarget": "src/backend/xlsx/xlsx-sheet-scanner.js",
+      "category": "tests",
+      "status": "migrated-to-public-test-target"
+    },
+    {
+      "file": "tests/unit/toolbox-format-xlsx-structure.test.js",
+      "line": 14,
+      "request": "../../src/backend/toolbox-format/style-registry",
+      "oldTarget": "src/backend/toolbox-format/style-registry.js",
+      "newTarget": "src/backend/xlsx/style-registry.js",
+      "category": "tests",
+      "status": "migrated-to-public-test-target"
+    },
+    {
+      "file": "tests/unit/toolbox-format-xlsx-structure.test.js",
+      "line": 18,
+      "request": "../../src/backend/toolbox-format/model",
+      "oldTarget": "src/backend/toolbox-format/model.js",
+      "newTarget": "src/backend/xlsx/model.js",
+      "category": "tests",
+      "status": "migrated-to-public-test-target"
+    }
+  ],
+  "retainedCompatibilityPolicy": "Historical tests/scripts may use shim paths; remove only once whole-repository references are zero and corresponding compatibility verification has passed. Production may retain Toolbox assembly imports but must import shared helpers from xlsx directly.",
+  "dynamicReferences": [
+    "tests/unit/scripts/v3-2-3-release-evidence.test.js: old zip-reader string retained solely as a historical Git fixture ignored-entry injection path; it is not a require or production mock."
+  ],
+  "deprecatedApis": {
+    "src/backend/big-table-import/zip-reader.js": "src/backend/xlsx/zip-reader.js",
+    "src/backend/pending-import/streaming-xlsx-reader.js": "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+    "src/backend/pending-import/xlsx-size-preflight.js": "src/backend/xlsx/legacy/entry-size-preflight.js",
+    "src/backend/xlsx-rich-reader.js": "src/backend/xlsx/rich-workbook.js",
+    "src/backend/toolbox-format/excel-text.js": "src/backend/xlsx/excel-text.js",
+    "src/backend/toolbox-format/xlsx-pass.js": "src/backend/xlsx/workbook-parts.js",
+    "src/backend/toolbox-format/xlsx-sheet-scanner.js": "src/backend/xlsx/xlsx-sheet-scanner.js",
+    "src/backend/toolbox-format/style-registry.js": "src/backend/xlsx/style-registry.js",
+    "src/backend/toolbox-format/number-date.js": "src/backend/xlsx/number-date.js",
+    "src/backend/position-reconciliation-import/shared-strings-provider.js": "src/backend/xlsx/shared-strings-provider.js",
+    "src/backend/toolbox-format/model.js": "src/backend/xlsx/model.js",
+    "src/backend/toolbox-format/ooxml-namespaces.js": "src/backend/xlsx/ooxml-namespaces.js"
+  },
+  "aggregateConsumers": [
+    {
+      "file": "src/main-process/toolbox-format-io.js",
+      "oldTarget": "src/backend/toolbox-format/index.js",
+      "sharedSymbols": [
+        "TOOLBOX_PROJECTION_PROFILES",
+        "normalizeCell",
+        "projectToolboxRowValues",
+        "toMatchValue"
+      ],
+      "newTarget": "src/backend/xlsx/model.js",
+      "domainSymbols": [
+        "openToolboxBiff8Pass",
+        "openToolboxCsvPass",
+        "openToolboxXlsxPass"
+      ],
+      "status": "shared symbols migrated; assembly imports now target domain files directly"
+    }
+  ],
+  "testPathMigrations": [
+    "tests/unit/toolbox-format-shared-strings-structure.test.js",
+    "tests/unit/toolbox-format-number-date.test.js",
+    "tests/unit/toolbox-format-model.test.js",
+    "tests/unit/toolbox-format-style.test.js",
+    "tests/unit/toolbox-format-style-structure.test.js",
+    "tests/unit/toolbox-format-excel-text.test.js",
+    "tests/unit/toolbox-format-duplicate-zip-entry.test.js",
+    "tests/unit/toolbox-format-xlsx-structure.test.js",
+    "tests/unit/main-process/toolbox-background-route-db.test.js",
+    "tests/unit/main-process/biz-op-v327-import.test.js",
+    "tests/unit/main-process/vcc-financial-op-review-sst-budget.test.js",
+    "tests/unit/main-process/new-account-strict-readback.test.js",
+    "tests/unit/main-process/toolbox-stream-io.test.js",
+    "tests/unit/main-process/toolbox-large-split-router.test.js",
+    "tests/unit/backend/shared-strings-ownership.test.js",
+    "tests/unit/backend/xlsx/consumer-options.test.js",
+    "tests/unit/backend/vcc-financial-op/multisheet-import.test.js",
+    "tests/unit/backend/pending-import/streaming-xlsx-reader.test.js",
+    "tests/unit/backend/pending-import/xlsx-size-preflight.test.js",
+    "tests/unit/backend/big-table-import/zip-reader.test.js",
+    "tests/unit/backend/big-table-import/row-scanner-four-way-contract.test.js"
+  ],
+  "retainedCompatibilityTests": [
+    "tests/unit/backend/xlsx/infrastructure-compatibility.test.js",
+    "tests/unit/backend/xlsx/legacy-compatibility.test.js",
+    "tests/unit/backend/xlsx/rich-workbook-contract.test.js",
+    "tests/unit/backend/xlsx/shared-strings-contract.test.js"
+  ],
+  "notes": [
+    "Baseline entries retain their original paths and line numbers for comparison; status records current migration disposition.",
+    "consumer-options baseline 8/8 PASS used git archive 11086a3c with the same behavioral assertions and old import paths before test entrypaths migrated.",
+    "Toolbox xlsx-pass remains a valid domain assembly dependency only for openToolboxXlsxPass/ToolboxXlsxPass; shared helper consumers migrated."
+  ]
+}

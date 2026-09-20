@@ -2,8 +2,8 @@
 const { createHash } = require('node:crypto');
 const { preflightCalculation } = require('./calculator');
 const { getEffectiveRunResult } = require('./result-adjustments');
-const { classifyNumericOutput, decimalComparable } = require('../toolbox-format/number-date');
-const { assertExcelCellTextLength } = require('../toolbox-format/excel-text');
+const { classifyNumericOutput, decimalComparable } = require('../xlsx/number-date');
+const { assertExcelCellTextLength } = require('../xlsx/excel-text');
 
 function reviewError(code, message, detailLines = []) { return Object.assign(new Error(message), { code, detailLines }); }
 function validateReviewRequest(request) {

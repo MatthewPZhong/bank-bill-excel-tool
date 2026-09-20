@@ -9,7 +9,7 @@ const { FileValidationError, normalizeCell } = require('../../backend/file-servi
 const {
   locateSheets,
   openZipWithEntries
-} = require('../../backend/big-table-import/zip-reader');
+} = require('../../backend/xlsx/zip-reader');
 const { extractHeaders } = require('../../backend/file-service/readers');
 const { parseDateValue, parseNumericValue } = require('../../backend/file-service/normalizers');
 const { writeBalanceWorkbook } = require('../../backend/file-service');

@@ -4,10 +4,10 @@ const crypto = require('node:crypto');
 const path = require('node:path');
 const sax = require('sax');
 const XLSX = require('xlsx');
-const { openRichWorkbook } = require('../xlsx-rich-reader');
+const { openRichWorkbook } = require('../xlsx/rich-workbook');
 const { throwIfCancelled } = require('./detail-importer');
 const { canonicalizeVccAmount } = require('./amount-rules');
-const { normalizeWorksheetTarget } = require('../big-table-import/zip-reader');
+const { normalizeWorksheetTarget } = require('../xlsx/zip-reader');
 const {
   SOURCE_TYPES,
   SOURCE_LABELS,
@@ -856,7 +856,7 @@ async function importSystemOpWorkbookGroup(options) {
     if (!file.sheets) { prepared.push(file); continue; }
     let workbook;
     try {
-      workbook = await openRichWorkbook(file.filePath, { memoryBudgetBytes: 64 * 1024 * 1024,
+      workbook = await openRichWorkbook(file.filePath, { memoryBudgetBytes: 64 * 1024 * 1024, lruMaxEntries: 8192,
         cancelToken: { get cancelled() { return !!options.shouldCancel?.(); } } });
       for (const selectedSheet of file.sheets) {
         const rowsBeforeSheet = actualRows;

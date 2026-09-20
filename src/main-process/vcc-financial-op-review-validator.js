@@ -2,12 +2,12 @@
 const path = require('node:path');
 const sax = require('sax');
 const { DatabaseSync } = require('node:sqlite');
-const { openRichWorkbook } = require('../backend/xlsx-rich-reader');
-const { openZipWithEntries } = require('../backend/big-table-import/zip-reader');
-const { decodeExcelStXstring } = require('../backend/toolbox-format/excel-text');
-const { decimalComparable } = require('../backend/toolbox-format/number-date');
+const { openRichWorkbook } = require('../backend/xlsx/rich-workbook');
+const { openZipWithEntries } = require('../backend/xlsx/zip-reader');
+const { decodeExcelStXstring } = require('../backend/xlsx/excel-text');
+const { decimalComparable } = require('../backend/xlsx/number-date');
 const { hashClosedFile } = require('./biz-op-v327/export-validator');
-const { normalizeStaticStyle, stableSignature, resolveColorSpec } = require('../backend/toolbox-format/style-registry');
+const { normalizeStaticStyle, stableSignature, resolveColorSpec } = require('../backend/xlsx/style-registry');
 const { loadResultTemplateContract, RESULT_TEMPLATE_FILE_NAME } = require('../backend/vcc-financial-op/result-template-contract');
 const { getMeta, pageRows, safePoint } = require('../backend/vcc-financial-op/review-export-plan');
 const { outputProjectionCells, expectedDefinedNames, noteForPage } = require('./vcc-financial-op-review-writer');
@@ -151,7 +151,7 @@ async function validateReviewWorkbook({ filePath, manifestPath, assetsDir = path
   try {
     const projection = getMeta(db, 'projection'), provenance = getMeta(db, 'provenance');
     const pages = db.prepare('SELECT p.*,g.descriptor,a.content_digest FROM pages p JOIN groups g USING(group_key) JOIN page_actual a ON a.page_id=p.id ORDER BY p.id').all();
-    workbook = await openRichWorkbook(filePath, { memoryBudgetBytes: 64 * 1024 * 1024, cancelToken: { get cancelled() { return !!signal?.aborted; } } });
+    workbook = await openRichWorkbook(filePath, { memoryBudgetBytes: 64 * 1024 * 1024, lruMaxEntries: 8192, cancelToken: { get cancelled() { return !!signal?.aborted; } } });
     if (workbook.date1904 || workbook.sheets.length !== pages.length + 1
         || JSON.stringify(workbook.sheets.map((s) => s.name)) !== JSON.stringify(['待确认表', ...pages.map((p) => p.name)])
         || workbook.sheets.some((s) => s.state !== 'visible')) throw failure('工作簿 Sheet 名称、顺序、可见性或日期系统不符');

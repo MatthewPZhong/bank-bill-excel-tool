@@ -1,0 +1,2363 @@
+TAP version 13
+# Subtest: big-table-import row-scanner 四方 harness（🔴🔴 A=sax ≡ B=手写全列 ≡ C=P1b白名单 ≡ D=引擎字节层）
+    # Subtest: \#1 flow 正常多行（ExcelJS → sharedStrings 路径）
+    ok 1 - \#1 flow 正常多行（ExcelJS → sharedStrings 路径）
+      ---
+      duration_ms: 70.628333
+      type: 'test'
+      ...
+    # Subtest: \#3 含全空数据行（四方都跳过）
+    ok 2 - \#3 含全空数据行（四方都跳过）
+      ---
+      duration_ms: 42.895833
+      type: 'test'
+      ...
+    # Subtest: \#4 稀疏行号（r=2 / r=5 跳号，rowIndex 用真实行号）
+    ok 3 - \#4 稀疏行号（r=2 / r=5 跳号，rowIndex 用真实行号）
+      ---
+      duration_ms: 31.387583
+      type: 'test'
+      ...
+    # Subtest: \#5 中文 + XML 实体（inlineStr 手工 fixture）
+    ok 4 - \#5 中文 + XML 实体（inlineStr 手工 fixture）
+      ---
+      duration_ms: 24.865833
+      type: 'test'
+      ...
+    # Subtest: \#6 含 sharedStrings(t="s")（金额共享串保留小数 / 中文 / 重复引用）
+    ok 5 - \#6 含 sharedStrings(t="s")（金额共享串保留小数 / 中文 / 重复引用）
+      ---
+      duration_ms: 14.140583
+      type: 'test'
+      ...
+    # Subtest: \#7 number cell（取值语义对齐 sax，非 parseFloat 改写）
+    ok 6 - \#7 number cell（取值语义对齐 sax，非 parseFloat 改写）
+      ---
+      duration_ms: 23.724916
+      type: 'test'
+      ...
+    # Subtest: \#10b 白名单内外列都有值（白名单外列裁剪路径恒空）
+    ok 7 - \#10b 白名单内外列都有值（白名单外列裁剪路径恒空）
+      ---
+      duration_ms: 22.009875
+      type: 'test'
+      ...
+    # Subtest: \#11 SST 索引指向空串（ExcelJS 空 cell 形态）→ 该行作空行跳过
+    ok 8 - \#11 SST 索引指向空串（ExcelJS 空 cell 形态）→ 该行作空行跳过
+      ---
+      duration_ms: 16.268375
+      type: 'test'
+      ...
+    # Subtest: \#12 自闭合空 row（<row r=3/>）→ 四方跳过
+    ok 9 - \#12 自闭合空 row（<row r=3/>）→ 四方跳过
+      ---
+      duration_ms: 21.159833
+      type: 'test'
+      ...
+    # Subtest: \#14 大行号前缀碰撞（r="AC1" 不命中 r="AC12"）+ 同列重复取最后
+    ok 10 - \#14 大行号前缀碰撞（r="AC1" 不命中 r="AC12"）+ 同列重复取最后
+      ---
+      duration_ms: 23.992083
+      type: 'test'
+      ...
+    1..10
+ok 1 - big-table-import row-scanner 四方 harness（🔴🔴 A=sax ≡ B=手写全列 ≡ C=P1b白名单 ≡ D=引擎字节层）
+  ---
+  duration_ms: 292.438958
+  type: 'suite'
+  ...
+# Subtest: big-table-import zip-reader
+    # Subtest: 多 sheet → openWorkbook 显式报错，message 含全部 sheet 名 + 单 sheet 口径
+    ok 1 - 多 sheet → openWorkbook 显式报错，message 含全部 sheet 名 + 单 sheet 口径
+      ---
+      duration_ms: 9.062625
+      type: 'test'
+      ...
+    # Subtest: 三 sheet → 报错列出 3 个 sheet 名
+    ok 2 - 三 sheet → 报错列出 3 个 sheet 名
+      ---
+      duration_ms: 2.561083
+      type: 'test'
+      ...
+    # Subtest: 单 sheet → openWorkbook 正常定位 sheetEntry（rels 正解，非硬编码）
+    ok 3 - 单 sheet → openWorkbook 正常定位 sheetEntry（rels 正解，非硬编码）
+      ---
+      duration_ms: 1.667625
+      type: 'test'
+      ...
+    # Subtest: 单 sheet（无 workbook.xml，仅 sheet1.xml）→ 兜底定位 sheet1.xml
+    ok 4 - 单 sheet（无 workbook.xml，仅 sheet1.xml）→ 兜底定位 sheet1.xml
+      ---
+      duration_ms: 1.239167
+      type: 'test'
+      ...
+    # Subtest: loadSharedStrings：无 SST entry → 空数组；有 SST → 解析出串表
+    ok 5 - loadSharedStrings：无 SST entry → 空数组；有 SST → 解析出串表
+      ---
+      duration_ms: 3.420459
+      type: 'test'
+      ...
+    1..5
+ok 2 - big-table-import zip-reader
+  ---
+  duration_ms: 18.613041
+  type: 'suite'
+  ...
+# Subtest: parseRowXml: r 为第一个属性（基线，不回归）
+ok 3 - parseRowXml: r 为第一个属性（基线，不回归）
+  ---
+  duration_ms: 0.85425
+  type: 'test'
+  ...
+# Subtest: parseRowXml: 🔴 s 在 r 之前的 styled cell — 金额不漏读（Critical 回归）
+ok 4 - parseRowXml: 🔴 s 在 r 之前的 styled cell — 金额不漏读（Critical 回归）
+  ---
+  duration_ms: 0.05575
+  type: 'test'
+  ...
+# Subtest: parseRowXml: t 在 r 之前的 shared string cell — 类型正确解析
+ok 5 - parseRowXml: t 在 r 之前的 shared string cell — 类型正确解析
+  ---
+  duration_ms: 0.044834
+  type: 'test'
+  ...
+# Subtest: parseRowXml: 多属性任意顺序(s,t,r) + 大额金额精确（资金红线）
+ok 6 - parseRowXml: 多属性任意顺序(s,t,r) + 大额金额精确（资金红线）
+  ---
+  duration_ms: 0.047
+  type: 'test'
+  ...
+# Subtest: parseRowXml: 自闭合空 cell <c r=".."/> 不影响相邻列
+ok 7 - parseRowXml: 自闭合空 cell <c r=".."/> 不影响相邻列
+  ---
+  duration_ms: 0.0525
+  type: 'test'
+  ...
+# Subtest: parseRowXml: 自闭合 cell 属性顺序无关 <c s=.. r=../>
+ok 8 - parseRowXml: 自闭合 cell 属性顺序无关 <c s=.. r=../>
+  ---
+  duration_ms: 0.044833
+  type: 'test'
+  ...
+# Subtest: parseRowXml: <v xml:space="preserve"> 含空格字符串不丢（BUG3 回归）
+ok 9 - parseRowXml: <v xml:space="preserve"> 含空格字符串不丢（BUG3 回归）
+  ---
+  duration_ms: 0.057334
+  type: 'test'
+  ...
+# Subtest: parseRowXml: <v> 带属性的数字单元格不漏读（资金红线，<v> 属性容忍）
+ok 10 - parseRowXml: <v> 带属性的数字单元格不漏读（资金红线，<v> 属性容忍）
+  ---
+  duration_ms: 0.034292
+  type: 'test'
+  ...
+# Subtest: 正常文件：所有 entry 在限内 → 不抛
+ok 11 - 正常文件：所有 entry 在限内 → 不抛
+  ---
+  duration_ms: 6.500959
+  type: 'test'
+  ...
+# Subtest: ≥2^31：中央目录 uncompressedSize 改成 2^31 → 抛 FileValidationError 含中文指引
+ok 12 - ≥2^31：中央目录 uncompressedSize 改成 2^31 → 抛 FileValidationError 含中文指引
+  ---
+  duration_ms: 1.749541
+  type: 'test'
+  ...
+# Subtest: 损坏 zip：非合法 zip → fail-open 放行（不抛）
+ok 13 - 损坏 zip：非合法 zip → fail-open 放行（不抛）
+  ---
+  duration_ms: 0.596541
+  type: 'test'
+  ...
+# Subtest: zip64：32 位字段 0xffffffff + zip64 extra field 真值 ≥2^31 → 抛（走 64 位无符号正解）
+ok 14 - zip64：32 位字段 0xffffffff + zip64 extra field 真值 ≥2^31 → 抛（走 64 位无符号正解）
+  ---
+  duration_ms: 2.287417
+  type: 'test'
+  ...
+# Subtest: 多 sheet：目标 sheet 小 + 其他 sheet 超限 + sheetEntryNames 只含目标 sheet → 放行（不误伤）
+ok 15 - 多 sheet：目标 sheet 小 + 其他 sheet 超限 + sheetEntryNames 只含目标 sheet → 放行（不误伤）
+  ---
+  duration_ms: 1.67325
+  type: 'test'
+  ...
+# Subtest: 多 sheet：目标 sheet 本身超限 + sheetEntryNames 含目标 sheet → 仍拦
+ok 16 - 多 sheet：目标 sheet 本身超限 + sheetEntryNames 含目标 sheet → 仍拦
+  ---
+  duration_ms: 1.397666
+  type: 'test'
+  ...
+# Subtest: sharedStrings 恒检：sst 超限 + sheetEntryNames 只含某 sheet → 仍拦（三个调用方都 inflate sst）
+ok 17 - sharedStrings 恒检：sst 超限 + sheetEntryNames 只含某 sheet → 仍拦（三个调用方都 inflate sst）
+  ---
+  duration_ms: 0.934917
+  type: 'test'
+  ...
+# Subtest: 缺省/空 SST 目录不能回退到 cwd，溢出时拒绝并保留无关文件
+    # Subtest: undefined
+    ok 1 - undefined
+      ---
+      duration_ms: 66.988208
+      type: 'test'
+      ...
+    # Subtest: null
+    ok 2 - null
+      ---
+      duration_ms: 61.781
+      type: 'test'
+      ...
+    # Subtest: ''
+    ok 3 - ''
+      ---
+      duration_ms: 60.303208
+      type: 'test'
+      ...
+    # Subtest: ' '
+    ok 4 - ' '
+      ---
+      duration_ms: 60.423334
+      type: 'test'
+      ...
+    1..4
+ok 18 - 缺省/空 SST 目录不能回退到 cwd，溢出时拒绝并保留无关文件
+  ---
+  duration_ms: 250.203458
+  type: 'test'
+  ...
+# Subtest: 共享 Rich Reader 缺省目录逐任务独立，关闭一个不破坏另一个或 cwd
+ok 19 - 共享 Rich Reader 缺省目录逐任务独立，关闭一个不破坏另一个或 cwd
+  ---
+  duration_ms: 79.149167
+  type: 'test'
+  ...
+# Subtest: 已存在的显式 SST 目录及 VCC Reader 失败清理均不得覆盖/删除用户文件
+ok 20 - 已存在的显式 SST 目录及 VCC Reader 失败清理均不得覆盖/删除用户文件
+  ---
+  duration_ms: 15.095375
+  type: 'test'
+  ...
+# Subtest: 同一路径第二个读取任务拒绝接管，首个 SST 仍能读取和清理
+ok 21 - 同一路径第二个读取任务拒绝接管，首个 SST 仍能读取和清理
+  ---
+  duration_ms: 8.547333
+  type: 'test'
+  ...
+# Subtest: 部分 spill 创建失败也关闭已打开句柄并清理本次目录
+ok 22 - 部分 spill 创建失败也关闭已打开句柄并清理本次目录
+  ---
+  duration_ms: 2.911125
+  type: 'test'
+  ...
+# Subtest: SST 解析失败和取消在溢出后清理私有目录
+    # Subtest: parse
+    ok 1 - parse
+      ---
+      duration_ms: 6.999333
+      type: 'test'
+      ...
+    # Subtest: cancel
+    ok 2 - cancel
+      ---
+      duration_ms: 10.753375
+      type: 'test'
+      ...
+    1..2
+ok 23 - SST 解析失败和取消在溢出后清理私有目录
+  ---
+  duration_ms: 17.989833
+  type: 'test'
+  ...
+# Subtest: SST 目录出现无关文件时不递归删除，清理失败重复 close 仍报错
+ok 24 - SST 目录出现无关文件时不递归删除，清理失败重复 close 仍报错
+  ---
+  duration_ms: 2.042584
+  type: 'test'
+  ...
+# Subtest: SST 目录被替换时停止清理，显式保留模式仍保留自己的缓存
+ok 25 - SST 目录被替换时停止清理，显式保留模式仍保留自己的缓存
+  ---
+  duration_ms: 2.675459
+  type: 'test'
+  ...
+# Subtest: toolbox-xlsx-stream multi-sheet-reader
+    # Subtest: 乱序多 sheet：workbook <sheet> 显示序 ≠ 物理 sheetN.xml 编号 → 按显示序读对（表头 + 数据顺序）
+    ok 1 - 乱序多 sheet：workbook <sheet> 显示序 ≠ 物理 sheetN.xml 编号 → 按显示序读对（表头 + 数据顺序）
+      ---
+      duration_ms: 12.373
+      type: 'test'
+      ...
+    # Subtest: 重复表头跳过：每个后续 sheet 首行 = 表头 → 仅一次表头回调，数据不含表头
+    ok 2 - 重复表头跳过：每个后续 sheet 首行 = 表头 → 仅一次表头回调，数据不含表头
+      ---
+      duration_ms: 2.703084
+      type: 'test'
+      ...
+    # Subtest: 仅首页有表头：后续 sheet 无重复表头行，首行即数据 → 首行也当数据不丢
+    ok 3 - 仅首页有表头：后续 sheet 无重复表头行，首行即数据 → 首行也当数据不丢
+      ---
+      duration_ms: 2.106333
+      type: 'test'
+      ...
+    # Subtest: 列序冲突：后续 sheet 首行列数「多于」表头 → 抛 ToolboxHeaderMismatchError（带 name + detailLines）
+    ok 4 - 列序冲突：后续 sheet 首行列数「多于」表头 → 抛 ToolboxHeaderMismatchError（带 name + detailLines）
+      ---
+      duration_ms: 1.755875
+      type: 'test'
+      ...
+    # Subtest: 续页参差短行不误报：后续 sheet 无重复表头、首行比表头短（尾部空列）→ 当数据行不丢、不报错
+    ok 5 - 续页参差短行不误报：后续 sheet 无重复表头、首行比表头短（尾部空列）→ 当数据行不丢、不报错
+      ---
+      duration_ms: 1.347833
+      type: 'test'
+      ...
+    # Subtest: 续页首行 = 表头列数（内容不同）仍当数据行（边界：列数相等非冲突）
+    ok 6 - 续页首行 = 表头列数（内容不同）仍当数据行（边界：列数相等非冲突）
+      ---
+      duration_ms: 1.284875
+      type: 'test'
+      ...
+    # Subtest: 空 sheet 跳过：第一个 sheet 完全为空（无有意义行）→ 表头取下一个非空 sheet 首行
+    ok 7 - 空 sheet 跳过：第一个 sheet 完全为空（无有意义行）→ 表头取下一个非空 sheet 首行
+      ---
+      duration_ms: 1.518208
+      type: 'test'
+      ...
+    # Subtest: 完全无 sheetData 的空 sheet（<sheetData/>）也跳过
+    ok 8 - 完全无 sheetData 的空 sheet（<sheetData/>）也跳过
+      ---
+      duration_ms: 1.50475
+      type: 'test'
+      ...
+    # Subtest: 跨 sheet rowR 重置：每个 sheet 各自 <row r="1"> 起 → 表头判定按「每 sheet 首个有意义行」而非全局 rowR===1
+    ok 9 - 跨 sheet rowR 重置：每个 sheet 各自 <row r="1"> 起 → 表头判定按「每 sheet 首个有意义行」而非全局 rowR===1
+      ---
+      duration_ms: 2.075291
+      type: 'test'
+      ...
+    # Subtest: 跨 sheet rowR 重置（数据从非 r=1 起）：后续 sheet 首个有意义行在 r=5 也能被识别
+    ok 10 - 跨 sheet rowR 重置（数据从非 r=1 起）：后续 sheet 首个有意义行在 r=5 也能被识别
+      ---
+      duration_ms: 1.612083
+      type: 'test'
+      ...
+    # Subtest: 已知边界：数据行恰等于表头 → 被当重复表头跳过（显式记录、不视为 bug）
+    ok 11 - 已知边界：数据行恰等于表头 → 被当重复表头跳过（显式记录、不视为 bug）
+      ---
+      duration_ms: 1.292792
+      type: 'test'
+      ...
+    # Subtest: 归一化口径：表头 / 值带前后空格被 trim；前导全空行 + 纯空格行视为空行跳过
+    ok 12 - 归一化口径：表头 / 值带前后空格被 trim；前导全空行 + 纯空格行视为空行跳过
+      ---
+      duration_ms: 1.033375
+      type: 'test'
+      ...
+    # Subtest: cancelToken：中途取消 → 停止读后续行 / 后续 sheet（不读完全部）
+    ok 13 - cancelToken：中途取消 → 停止读后续行 / 后续 sheet（不读完全部）
+      ---
+      duration_ms: 1.165375
+      type: 'test'
+      ...
+    # Subtest: cancelToken 在 onHeaderRow 内置位 → 当前 sheet 立即停 + 后续 sheet 不读（peek 提前停机制，codex P2）
+    ok 14 - cancelToken 在 onHeaderRow 内置位 → 当前 sheet 立即停 + 后续 sheet 不读（peek 提前停机制，codex P2）
+      ---
+      duration_ms: 1.299458
+      type: 'test'
+      ...
+    # Subtest: 返回 summary：sheetCount / dataRowCount / headerFound 正确
+    ok 15 - 返回 summary：sheetCount / dataRowCount / headerFound 正确
+      ---
+      duration_ms: 1.253042
+      type: 'test'
+      ...
+    # Subtest: 数据行 values 是「按列索引的数组」（非对象）原样透传给 onDataRow
+    ok 16 - 数据行 values 是「按列索引的数组」（非对象）原样透传给 onDataRow
+      ---
+      duration_ms: 1.056042
+      type: 'test'
+      ...
+    # Subtest: sharedStrings（t="s"）跨 sheet 共享一次加载：值正确解码
+    ok 17 - sharedStrings（t="s"）跨 sheet 共享一次加载：值正确解码
+      ---
+      duration_ms: 2.446333
+      type: 'test'
+      ...
+    1..17
+ok 26 - toolbox-xlsx-stream multi-sheet-reader
+  ---
+  duration_ms: 38.855708
+  type: 'suite'
+  ...
+# Subtest: toolbox-xlsx-stream strict workbook sheet tables
+    # Subtest: 每张可见非空 sheet 都回调独立表头，数据按 workbook 显示序透传
+    ok 1 - 每张可见非空 sheet 都回调独立表头，数据按 workbook 显示序透传
+      ---
+      duration_ms: 2.138666
+      type: 'test'
+      ...
+    # Subtest: 隐藏、深度隐藏和空 sheet 跳过；前导空行忽略；仅表头 sheet 仍参与
+    ok 2 - 隐藏、深度隐藏和空 sheet 跳过；前导空行忽略；仅表头 sheet 仍参与
+      ---
+      duration_ms: 2.267166
+      type: 'test'
+      ...
+    # Subtest: 可见 sheet 关系缺失时 fail closed，不静默跳过
+    ok 3 - 可见 sheet 关系缺失时 fail closed，不静默跳过
+      ---
+      duration_ms: 0.912792
+      type: 'test'
+      ...
+    1..3
+ok 27 - toolbox-xlsx-stream strict workbook sheet tables
+  ---
+  duration_ms: 5.406875
+  type: 'suite'
+  ...
+# Subtest: 系统 OP 异步关闭期间收到取消：不提交当前组，保留前组并停止后续工作
+    # Subtest: 仅系统 OP
+    ok 1 - 仅系统 OP
+      ---
+      duration_ms: 66.966084
+      type: 'test'
+      ...
+    # Subtest: 前组已提交且后组未执行
+    ok 2 - 前组已提交且后组未执行
+      ---
+      duration_ms: 52.952458
+      type: 'test'
+      ...
+    # Subtest: 取消后不再打开下一个文件
+    ok 3 - 取消后不再打开下一个文件
+      ---
+      duration_ms: 47.299
+      type: 'test'
+      ...
+    1..3
+ok 28 - 系统 OP 异步关闭期间收到取消：不提交当前组，保留前组并停止后续工作
+  ---
+  duration_ms: 167.913208
+  type: 'test'
+  ...
+# Subtest: 系统 OP 最后一次读取进度同步取消，仍先完成 Reader 关闭再收口
+ok 29 - 系统 OP 最后一次读取进度同步取消，仍先完成 Reader 关闭再收口
+  ---
+  duration_ms: 40.833709
+  type: 'test'
+  ...
+# Subtest: 同类型跨 Sheet 幂等、多主体通道及混合原件共享；来源 hold 在首行读取前已齐全
+ok 30 - 同类型跨 Sheet 幂等、多主体通道及混合原件共享；来源 hold 在首行读取前已齐全
+  ---
+  duration_ms: 48.671
+  type: 'test'
+  ...
+# Subtest: RV02：完整甲、八币种乙、充值各 Sheet 独立，系统组精确计数并保留 18 条实际读取行
+ok 31 - RV02：完整甲、八币种乙、充值各 Sheet 独立，系统组精确计数并保留 18 条实际读取行
+  ---
+  duration_ms: 45.558542
+  type: 'test'
+  ...
+# Subtest: 系统 OP 无目标账期也保留扫描行数和 Sheet 进度，其他类型照常提交
+ok 32 - 系统 OP 无目标账期也保留扫描行数和 Sheet 进度，其他类型照常提交
+  ---
+  duration_ms: 43.464708
+  type: 'test'
+  ...
+# Subtest: 失败和解析成功的系统 OP Sheet 跨文件累计读取量，整组回滚也保留计数
+ok 33 - 失败和解析成功的系统 OP Sheet 跨文件累计读取量，整组回滚也保留计数
+  ---
+  duration_ms: 52.153042
+  type: 'test'
+  ...
+# Subtest: 系统 OP 扫描中断仍上报已完成数据行，不把未读尾部或表头计入
+ok 34 - 系统 OP 扫描中断仍上报已完成数据行，不把未读尾部或表头计入
+  ---
+  duration_ms: 32.86025
+  type: 'test'
+  ...
+# Subtest: 同主体九币种跨 Sheet 拆分，或八币种与完整候选并存，都不能补救该主体
+ok 35 - 同主体九币种跨 Sheet 拆分，或八币种与完整候选并存，都不能补救该主体
+  ---
+  duration_ms: 84.228042
+  type: 'test'
+  ...
+# Subtest: 未知主体按 Sheet 计数；主体成员或持久 metadata 损坏时来源和 hold 创建一起回滚
+ok 36 - 未知主体按 Sheet 计数；主体成员或持久 metadata 损坏时来源和 hold 创建一起回滚
+  ---
+  duration_ms: 46.122334
+  type: 'test'
+  ...
+# Subtest: 不同输入文件同名同内容：存档共用 Blob 后仍按两个物理来源导入和幂等
+ok 37 - 不同输入文件同名同内容：存档共用 Blob 后仍按两个物理来源导入和幂等
+  ---
+  duration_ms: 43.326208
+  type: 'test'
+  ...
+# Subtest: 系统 OP 日期单元格与旧 Reader 等价，九币种快照正常导入
+ok 38 - 系统 OP 日期单元格与旧 Reader 等价，九币种快照正常导入
+  ---
+  duration_ms: 49.026208
+  type: 'test'
+  ...
+# Subtest: 表头位于预览窗口外：混合类型导入后原表、校验表仍按持久成员定位
+ok 39 - 表头位于预览窗口外：混合类型导入后原表、校验表仍按持久成员定位
+  ---
+  duration_ms: 168.851958
+  type: 'test'
+  ...
+# Subtest: 系统财务OP导入结果保留全部异常计数供界面汇总
+ok 40 - 系统财务OP导入结果保留全部异常计数供界面汇总
+  ---
+  duration_ms: 0.897375
+  type: 'test'
+  ...
+# Subtest: 系统财务OP正式资产逐列表头与识别契约一致
+ok 41 - 系统财务OP正式资产逐列表头与识别契约一致
+  ---
+  duration_ms: 17.709958
+  type: 'test'
+  ...
+# Subtest: 系统财务OP按正式行式模板读取主体、九币种和完整原始血缘
+ok 42 - 系统财务OP按正式行式模板读取主体、九币种和完整原始血缘
+  ---
+  duration_ms: 10.373459
+  type: 'test'
+  ...
+# Subtest: 系统财务OP财务余额严格优先使用 Excel raw 数值并记录显示差异
+ok 43 - 系统财务OP财务余额严格优先使用 Excel raw 数值并记录显示差异
+  ---
+  duration_ms: 4.9425
+  type: 'test'
+  ...
+# Subtest: 系统财务OP raw-first 覆盖大额两位小数、公式缓存、文本会计负数和横线零值
+ok 44 - 系统财务OP raw-first 覆盖大额两位小数、公式缓存、文本会计负数和横线零值
+  ---
+  duration_ms: 3.701083
+  type: 'test'
+  ...
+# Subtest: 系统财务OP直接按 worksheet v token 拒绝正负超精度值，避免 SheetJS Number 先吞分币
+ok 45 - 系统财务OP直接按 worksheet v token 拒绝正负超精度值，避免 SheetJS Number 先吞分币
+  ---
+  duration_ms: 13.261625
+  type: 'test'
+  ...
+# Subtest: 系统财务OP通过 workbook relationship 定位 worksheet，并保留合法精度边界 lexical 证据
+ok 46 - 系统财务OP通过 workbook relationship 定位 worksheet，并保留合法精度边界 lexical 证据
+  ---
+  duration_ms: 4.652541
+  type: 'test'
+  ...
+# Subtest: 系统财务OP缺少 OOXML lexical 时仅允许可证明分币安全的 Number fallback
+ok 47 - 系统财务OP缺少 OOXML lexical 时仅允许可证明分币安全的 Number fallback
+  ---
+  duration_ms: 0.121042
+  type: 'test'
+  ...
+# Subtest: 系统财务OP worksheet 重复财务余额 cell 时稳定失败关闭而不回退 Number
+ok 48 - 系统财务OP worksheet 重复财务余额 cell 时稳定失败关闭而不回退 Number
+  ---
+  duration_ms: 4.471875
+  type: 'test'
+  ...
+# Subtest: 系统财务OP worksheet XML 为空或结构损坏时返回稳定精度错误及定位上下文
+ok 49 - 系统财务OP worksheet XML 为空或结构损坏时返回稳定精度错误及定位上下文
+  ---
+  duration_ms: 0.288042
+  type: 'test'
+  ...
+# Subtest: 系统财务OP raw 数值超过两位小数或安全范围时拒绝且不舍入
+ok 50 - 系统财务OP raw 数值超过两位小数或安全范围时拒绝且不舍入
+  ---
+  duration_ms: 6.250125
+  type: 'test'
+  ...
+# Subtest: 系统财务OP表头位于第 20 行之后时识别和正式导入仍使用同一范围
+ok 51 - 系统财务OP表头位于第 20 行之后时识别和正式导入仍使用同一范围
+  ---
+  duration_ms: 5.492
+  type: 'test'
+  ...
+# Subtest: 系统财务OP缺列、多列或调换顺序均给出正式模板差异提示
+ok 52 - 系统财务OP缺列、多列或调换顺序均给出正式模板差异提示
+  ---
+  duration_ms: 8.128208
+  type: 'test'
+  ...
+# Subtest: 旧 YYMMOP 横表不再被系统财务OP宽松识别
+ok 53 - 旧 YYMMOP 横表不再被系统财务OP宽松识别
+  ---
+  duration_ms: 1.577042
+  type: 'test'
+  ...
+# Subtest: 同一工作簿存在多处系统财务OP表头时拒绝静默选第一处
+ok 54 - 同一工作簿存在多处系统财务OP表头时拒绝静默选第一处
+  ---
+  duration_ms: 3.742875
+  type: 'test'
+  ...
+# Subtest: 系统财务OP正式导入二次拒绝 1904 日期系统
+ok 55 - 系统财务OP正式导入二次拒绝 1904 日期系统
+  ---
+  duration_ms: 1.787
+  type: 'test'
+  ...
+# Subtest: 系统财务OP按所选账期筛选，并支持一个文件形成多个主体快照
+ok 56 - 系统财务OP按所选账期筛选，并支持一个文件形成多个主体快照
+  ---
+  duration_ms: 11.847666
+  type: 'test'
+  ...
+# Subtest: 系统财务OP拒绝非法日期、非VCC部门、空主体和空财务余额
+ok 57 - 系统财务OP拒绝非法日期、非VCC部门、空主体和空财务余额
+  ---
+  duration_ms: 10.032334
+  type: 'test'
+  ...
+# Subtest: 系统财务OP缺失规范币种仍拒绝，CNH 作为 CNY 业务行且原始审计保留 CNH
+ok 58 - 系统财务OP缺失规范币种仍拒绝，CNH 作为 CNY 业务行且原始审计保留 CNH
+  ---
+  duration_ms: 9.191125
+  type: 'test'
+  ...
+# Subtest: 系统 OP 同主体 CNY+CNH 归一后仅拒绝该主体，其他完整主体继续
+ok 59 - 系统 OP 同主体 CNY+CNH 归一后仅拒绝该主体，其他完整主体继续
+  ---
+  duration_ms: 7.981209
+  type: 'test'
+  ...
+# Subtest: 系统 OP 跨文件同主体 CNY+CNH 无论余额是否相同均主体级拒绝，完整其他主体继续
+ok 60 - 系统 OP 跨文件同主体 CNY+CNH 无论余额是否相同均主体级拒绝，完整其他主体继续
+  ---
+  duration_ms: 22.245042
+  type: 'test'
+  ...
+# Subtest: 系统 OP 跨文件软错主体仍参与 CNY/CNH 并集且完整同主体不会旁路提升
+ok 61 - 系统 OP 跨文件软错主体仍参与 CNY/CNH 并集且完整同主体不会旁路提升
+  ---
+  duration_ms: 11.243708
+  type: 'test'
+  ...
+# Subtest: 系统 OP 模板外列异常先保留标准列审计并拒绝同主体全部快照
+ok 62 - 系统 OP 模板外列异常先保留标准列审计并拒绝同主体全部快照
+  ---
+  duration_ms: 8.222042
+  type: 'test'
+  ...
+# Subtest: 系统 OP 非目标月、非法日期或目标月空主体的模板外列保持单条 unknown 基线异常
+ok 63 - 系统 OP 非目标月、非法日期或目标月空主体的模板外列保持单条 unknown 基线异常
+  ---
+  duration_ms: 19.964875
+  type: 'test'
+  ...
+# Subtest: 系统 OP 跨文件纯 CNY 或纯 CNH 重复维持既有幂等分类，不误判归一双写
+ok 64 - 系统 OP 跨文件纯 CNY 或纯 CNH 重复维持既有幂等分类，不误判归一双写
+  ---
+  duration_ms: 16.403583
+  type: 'test'
+  ...
+# Subtest: 系统 OP 历史 CNY 与新 CNH 规范余额相同则幂等跳过且不改历史审计
+ok 65 - 系统 OP 历史 CNY 与新 CNH 规范余额相同则幂等跳过且不改历史审计
+  ---
+  duration_ms: 9.032417
+  type: 'test'
+  ...
+# Subtest: 系统财务OP同账期同主体同内容跳过，异内容冲突不覆盖
+ok 66 - 系统财务OP同账期同主体同内容跳过，异内容冲突不覆盖
+  ---
+  duration_ms: 12.148833
+  type: 'test'
+  ...
+# Subtest: 系统财务OP校验表生成时间只随新增主体快照刷新
+ok 67 - 系统财务OP校验表生成时间只随新增主体快照刷新
+  ---
+  duration_ms: 11.155458
+  type: 'test'
+  ...
+# Subtest: 系统财务OP归档后允许精确重放但拒绝新增主体快照
+ok 68 - 系统财务OP归档后允许精确重放但拒绝新增主体快照
+  ---
+  duration_ms: 15.00025
+  type: 'test'
+  ...
+# Subtest: 同批同主体系统财务OP异内容冲突互相关联以供双侧核对
+ok 69 - 同批同主体系统财务OP异内容冲突互相关联以供双侧核对
+  ---
+  duration_ms: 9.033416
+  type: 'test'
+  ...
+# Subtest: 系统快照混合精确重放、冲突和新主体时只过滤冲突并提升新主体
+ok 70 - 系统快照混合精确重放、冲突和新主体时只过滤冲突并提升新主体
+  ---
+  duration_ms: 16.213916
+  type: 'test'
+  ...
+# Subtest: 系统快照同主体的精确重放与异内容在失败批次内分别归类
+ok 71 - 系统快照同主体的精确重放与异内容在失败批次内分别归类
+  ---
+  duration_ms: 12.348334
+  type: 'test'
+  ...
+# Subtest: 系统财务OP跨文件格式异常只过滤异常数据并提升完整快照
+ok 72 - 系统财务OP跨文件格式异常只过滤异常数据并提升完整快照
+  ---
+  duration_ms: 9.063542
+  type: 'test'
+  ...
+# Subtest: 系统财务OP同文件多主体部分格式错误时提升完整主体并过滤异常主体
+ok 73 - 系统财务OP同文件多主体部分格式错误时提升完整主体并过滤异常主体
+  ---
+  duration_ms: 10.122167
+  type: 'test'
+  ...
+# Subtest: 系统 OP 多文件第二份最终 SHA/size 不一致时 failImportBatch 精确关联失败来源
+ok 74 - 系统 OP 多文件第二份最终 SHA/size 不一致时 failImportBatch 精确关联失败来源
+  ---
+  duration_ms: 13.12575
+  type: 'test'
+  ...
+# Subtest: OP_RAW 两份真实大 SST 原件连续读取并经 Publisher 发布，缓存清理不删除候选
+ok 75 - OP_RAW 两份真实大 SST 原件连续读取并经 Publisher 发布，缓存清理不删除候选
+  ---
+  duration_ms: 6589.345583
+  type: 'test'
+  ...
+# Subtest: FLOW_RAW 两份真实大 SST 原件连续读取并经 Publisher 发布，缓存清理不删除候选
+ok 76 - FLOW_RAW 两份真实大 SST 原件连续读取并经 Publisher 发布，缓存清理不删除候选
+  ---
+  duration_ms: 6877.398375
+  type: 'test'
+  ...
+# Subtest: RAW 磁盘 SST 扫描期间 cancel，只关闭自有缓存并保留打开的 spool
+ok 77 - RAW 磁盘 SST 扫描期间 cancel，只关闭自有缓存并保留打开的 spool
+  ---
+  duration_ms: 1466.888041
+  type: 'test'
+  ...
+# Subtest: RAW 磁盘 SST 扫描期间 failure，只关闭自有缓存并保留打开的 spool
+ok 78 - RAW 磁盘 SST 扫描期间 failure，只关闭自有缓存并保留打开的 spool
+  ---
+  duration_ms: 2244.660375
+  type: 'test'
+  ...
+# Subtest: 实际输出回读大 SST success，输出文件与 spool 均不属于缓存清理范围
+ok 79 - 实际输出回读大 SST success，输出文件与 spool 均不属于缓存清理范围
+  ---
+  duration_ms: 1658.989333
+  type: 'test'
+  ...
+# Subtest: 实际输出回读大 SST cancel，输出文件与 spool 均不属于缓存清理范围
+ok 80 - 实际输出回读大 SST cancel，输出文件与 spool 均不属于缓存清理范围
+  ---
+  duration_ms: 1502.190292
+  type: 'test'
+  ...
+# Subtest: 实际输出回读大 SST mismatch，输出文件与 spool 均不属于缓存清理范围
+ok 81 - 实际输出回读大 SST mismatch，输出文件与 spool 均不属于缓存清理范围
+  ---
+  duration_ms: 1608.657375
+  type: 'test'
+  ...
+# Subtest: 六类真实固定输入的 expected→writer→独立 actual：完整列、说明及分页
+ok 82 - 六类真实固定输入的 expected→writer→独立 actual：完整列、说明及分页
+  ---
+  duration_ms: 914.553833
+  type: 'test'
+  ...
+# Subtest: 零差异只保留一张 19 列表头页；损坏明确 schema 在写出前拒绝
+ok 83 - 零差异只保留一张 19 列表头页；损坏明确 schema 在写出前拒绝
+  ---
+  duration_ms: 676.701
+  type: 'test'
+  ...
+# Subtest: 差异文件不附说明页，19 列异常摘要指向完整原表，封存说明不被修改
+ok 84 - 差异文件不附说明页，19 列异常摘要指向完整原表，封存说明不被修改
+  ---
+  duration_ms: 944.092166
+  type: 'test'
+  ...
+# Subtest: 六类分别注入首尾列、列外空格、缺行、缺账号、空变零、去前导零、金额反号、表头、页和说明损坏均拒绝
+ok 85 - 六类分别注入首尾列、列外空格、缺行、缺账号、空变零、去前导零、金额反号、表头、页和说明损坏均拒绝
+  ---
+  duration_ms: 1290.691125
+  type: 'test'
+  ...
+# Subtest: 空值、空文本、数字零、文本零、布尔、公式样式文本和控制字符各自无损；高精度与说明分片可还原
+ok 86 - 空值、空文本、数字零、文本零、布尔、公式样式文本和控制字符各自无损；高精度与说明分片可还原
+  ---
+  duration_ms: 12.468583
+  type: 'test'
+  ...
+# Subtest: expected 摘要在千行边界可观察取消，不继续进入 writer
+ok 87 - expected 摘要在千行边界可观察取消，不继续进入 writer
+  ---
+  duration_ms: 28.841375
+  type: 'test'
+  ...
+# Subtest: actual 拒绝伪造 worksheet 关系类型，不能只看关系后缀
+ok 88 - actual 拒绝伪造 worksheet 关系类型，不能只看关系后缀
+  ---
+  duration_ms: 710.939041
+  type: 'test'
+  ...
+# Subtest: 命名使用固定版本与跨年区间；极大版本和最后分页缩写后仍不超过 31 单元
+ok 89 - 命名使用固定版本与跨年区间；极大版本和最后分页缩写后仍不超过 31 单元
+  ---
+  duration_ms: 0.127833
+  type: 'test'
+  ...
+# Subtest: 最后 DATASET 封存/清理期间取消，最终文档独立标记拒绝并保留诊断
+ok 90 - 最后 DATASET 封存/清理期间取消，最终文档独立标记拒绝并保留诊断
+  ---
+  duration_ms: 93.190417
+  type: 'test'
+  ...
+# Subtest: 最后 DIAGNOSTIC 封存/清理期间取消，最终文档独立标记拒绝并保留诊断
+ok 91 - 最后 DIAGNOSTIC 封存/清理期间取消，最终文档独立标记拒绝并保留诊断
+  ---
+  duration_ms: 66.699834
+  type: 'test'
+  ...
+# Subtest: 最后 CLEANUP 封存/清理期间取消，最终文档独立标记拒绝并保留诊断
+ok 92 - 最后 CLEANUP 封存/清理期间取消，最终文档独立标记拒绝并保留诊断
+  ---
+  duration_ms: 64.167541
+  type: 'test'
+  ...
+# Subtest: 真实富类型 reader → adapter → 单连接 router → 公共 writer 处理 8205 行及 OP/FLOW 混批
+ok 93 - 真实富类型 reader → adapter → 单连接 router → 公共 writer 处理 8205 行及 OP/FLOW 混批
+  ---
+  duration_ms: 1853.4065
+  type: 'test'
+  ...
+# Subtest: 隐藏第二页在坏 SST 之前拒绝，reader 关闭真实 ZIP
+ok 94 - 隐藏第二页在坏 SST 之前拒绝，reader 关闭真实 ZIP
+  ---
+  duration_ms: 12.083709
+  type: 'test'
+  ...
+# Subtest: 后文件第 28 列公式整批拒绝；5 个坏行仅采 2 个仍完整计数
+ok 95 - 后文件第 28 列公式整批拒绝；5 个坏行仅采 2 个仍完整计数
+  ---
+  duration_ms: 68.612292
+  type: 'test'
+  ...
+# Subtest: 发现坏行后 XML 损坏标为至少 N，不把样本未截断当完整总数
+ok 96 - 发现坏行后 XML 损坏标为至少 N，不把样本未截断当完整总数
+  ---
+  duration_ms: 35.1665
+  type: 'test'
+  ...
+# Subtest: OP 23 列尾部错误与文件内多 BU/多日期拒绝；等于 0.01 的边界精确通过
+ok 97 - OP 23 列尾部错误与文件内多 BU/多日期拒绝；等于 0.01 的边界精确通过
+  ---
+  duration_ms: 55.981667
+  type: 'test'
+  ...
+# Subtest: E01 数值身份与 E02 日期系统不使用本机时区或丢失前导零
+ok 98 - E01 数值身份与 E02 日期系统不使用本机时区或丢失前导零
+  ---
+  duration_ms: 0.517084
+  type: 'test'
+  ...
+# Subtest: 真实 XLSX 日期序号须具备日期格式，1900/1904 与八位日期文本均按批准 E02 解析
+ok 99 - 真实 XLSX 日期序号须具备日期格式，1900/1904 与八位日期文本均按批准 E02 解析
+  ---
+  duration_ms: 110.488458
+  type: 'test'
+  ...
+# Subtest: SST 中文/emoji 字节与条目双限、超大单条不缓存、命中不重复收费，旧默认保持
+ok 100 - SST 中文/emoji 字节与条目双限、超大单条不缓存、命中不重复收费，旧默认保持
+  ---
+  duration_ms: 3.304375
+  type: 'test'
+  ...
+# Subtest: 交错日期切换真实关闭连接，跨 16 个小分片保持原始行定位和金额词元
+ok 101 - 交错日期切换真实关闭连接，跨 16 个小分片保持原始行定位和金额词元
+  ---
+  duration_ms: 310.076
+  type: 'test'
+  ...
+# Subtest: SST 双限模式随机读取和索引截断拒绝，关闭错误保留文件且重复 close 不伪报成功
+ok 102 - SST 双限模式随机读取和索引截断拒绝，关闭错误保留文件且重复 close 不伪报成功
+  ---
+  duration_ms: 4.057209
+  type: 'test'
+  ...
+# Subtest: 候选 COMMIT 反馈丢失保留原始不确定错误，关闭不再用状态错误覆盖它
+ok 103 - 候选 COMMIT 反馈丢失保留原始不确定错误，关闭不再用状态错误覆盖它
+  ---
+  duration_ms: 101.001166
+  type: 'test'
+  ...
+# Subtest: numeric leading-zero账户不能被流式字符串解码伪装为原账号
+ok 104 - numeric leading-zero账户不能被流式字符串解码伪装为原账号
+  ---
+  duration_ms: 36.011917
+  type: 'test'
+  ...
+# Subtest: boolean账户不能被流式字符串1伪装为原账号
+ok 105 - boolean账户不能被流式字符串1伪装为原账号
+  ---
+  duration_ms: 11.928667
+  type: 'test'
+  ...
+# Subtest: outer row与cell ref行号错位必须fail closed
+ok 106 - outer row与cell ref行号错位必须fail closed
+  ---
+  duration_ms: 8.60475
+  type: 'test'
+  ...
+# Subtest: strict t=d原始空白必须fail closed，canonical/Zulu仍与legacy raw业务回读等价
+ok 107 - strict t=d原始空白必须fail closed，canonical/Zulu仍与legacy raw业务回读等价
+  ---
+  duration_ms: 27.537792
+  type: 'test'
+  ...
+# Subtest: cell ref必须canonical回编码，D02/长前导零不能冒充D2
+ok 108 - cell ref必须canonical回编码，D02/长前导零不能冒充D2
+  ---
+  duration_ms: 11.975167
+  type: 'test'
+  ...
+# Subtest: outer row r=02按旧raw数值语义兼容，canonical cell refs仍保持业务等价
+ok 109 - outer row r=02按旧raw数值语义兼容，canonical cell refs仍保持业务等价
+  ---
+  duration_ms: 7.140083
+  type: 'test'
+  ...
+# Subtest: Reviewer反例：dimension A1:I1截断真实业务行时旧raw与strict均拒绝
+ok 110 - Reviewer反例：dimension A1:I1截断真实业务行时旧raw与strict均拒绝
+  ---
+  duration_ms: 6.408917
+  type: 'test'
+  ...
+# Subtest: strict dimension拒绝missing/duplicate/expanded/shifted/reversed/out-of-range/absolute/multi-area
+ok 111 - strict dimension拒绝missing/duplicate/expanded/shifted/reversed/out-of-range/absolute/multi-area
+  ---
+  duration_ms: 28.330583
+  type: 'test'
+  ...
+# Subtest: merge refs必须canonical回编码并拒绝端点前导零
+ok 112 - merge refs必须canonical回编码并拒绝端点前导零
+  ---
+  duration_ms: 13.010667
+  type: 'test'
+  ...
+# Subtest: strict dimension接受empty A1、冻结header-only尾随空行与真实1-row writer
+ok 113 - strict dimension接受empty A1、冻结header-only尾随空行与真实1-row writer
+  ---
+  duration_ms: 12.632167
+  type: 'test'
+  ...
+# Subtest: strict dimension used range计入merge、styled blank、formula cached与multi-letter trailing cell
+ok 114 - strict dimension used range计入merge、styled blank、formula cached与multi-letter trailing cell
+  ---
+  duration_ms: 5.315584
+  type: 'test'
+  ...
+# Subtest: Main authority边界拒绝超列cell、styled blank、merge与dimension，exact列和header-only保持兼容
+ok 115 - Main authority边界拒绝超列cell、styled blank、merge与dimension，exact列和header-only保持兼容
+  ---
+  duration_ms: 17.100208
+  type: 'test'
+  ...
+# Subtest: Main authority动态内容禁令拒绝formula cached，generic raw oracle继续兼容
+ok 116 - Main authority动态内容禁令拒绝formula cached，generic raw oracle继续兼容
+  ---
+  duration_ms: 3.593
+  type: 'test'
+  ...
+# Subtest: strict typed projection与旧SheetJS raw oracle覆盖全部合法cell type/formula cached
+ok 117 - strict typed projection与旧SheetJS raw oracle覆盖全部合法cell type/formula cached
+  ---
+  duration_ms: 4.498167
+  type: 'test'
+  ...
+# Subtest: strict projection与旧oracle保持XML实体、多字母列、blank/missing/sparse rows/cells等价
+ok 118 - strict projection与旧oracle保持XML实体、多字母列、blank/missing/sparse rows/cells等价
+  ---
+  duration_ms: 3.428
+  type: 'test'
+  ...
+# Subtest: strict projection拒绝row/cell缺失、重复、乱序、错位和Excel范围越界坐标
+ok 119 - strict projection拒绝row/cell缺失、重复、乱序、错位和Excel范围越界坐标
+  ---
+  duration_ms: 23.509625
+  type: 'test'
+  ...
+# Subtest: strict projection拒绝shared越界、非法type payload、非有限/unsafe数值和无cache公式
+ok 120 - strict projection拒绝shared越界、非法type payload、非有限/unsafe数值和无cache公式
+  ---
+  duration_ms: 26.138667
+  type: 'test'
+  ...
+# Subtest: strict projection拒绝截断XML与未知实体
+ok 121 - strict projection拒绝截断XML与未知实体
+  ---
+  duration_ms: 15.366458
+  type: 'test'
+  ...
+# Subtest: 平盘导入读取器
+    # Subtest: 银行46/49列和XLS均可读取，49列旧审计不会进入工作数据
+    ok 1 - 银行46/49列和XLS均可读取，49列旧审计不会进入工作数据
+      ---
+      duration_ms: 14.884167
+      type: 'test'
+      ...
+    # Subtest: 银行空表、重复BizId和非法日期整批拒绝
+    ok 2 - 银行空表、重复BizId和非法日期整批拒绝
+      ---
+      duration_ms: 6.259792
+      type: 'test'
+      ...
+    # Subtest: 同文件完全重复主键折叠，内容冲突拒绝
+    ok 3 - 同文件完全重复主键折叠，内容冲突拒绝
+      ---
+      duration_ms: 6.501875
+      type: 'test'
+      ...
+    # Subtest: 同批跨文件重复主键和多份账户快照均拒绝后续文件
+    ok 4 - 同批跨文件重复主键和多份账户快照均拒绝后续文件
+      ---
+      duration_ms: 6.155791
+      type: 'test'
+      ...
+    # Subtest: 坏行错误包含文件、sheet、Excel行号和字段
+    ok 5 - 坏行错误包含文件、sheet、Excel行号和字段
+      ---
+      duration_ms: 1.8755
+      type: 'test'
+      ...
+    # Subtest: 数据区空白行不压缩后续银行和原始表的物理行号
+    ok 6 - 数据区空白行不压缩后续银行和原始表的物理行号
+      ---
+      duration_ms: 3.419834
+      type: 'test'
+      ...
+    # Subtest: 稀疏工作表只返回非空行并保留物理行号
+    ok 7 - 稀疏工作表只返回非空行并保留物理行号
+      ---
+      duration_ms: 32.424292
+      type: 'test'
+      ...
+    1..7
+ok 122 - 平盘导入读取器
+  ---
+  duration_ms: 72.257875
+  type: 'suite'
+  ...
+# Subtest: Route DB v1 codec golden 保留 row/header/style，并拒绝未知codec版本
+ok 123 - Route DB v1 codec golden 保留 row/header/style，并拒绝未知codec版本
+  ---
+  duration_ms: 2.3455
+  type: 'test'
+  ...
+# Subtest: Windows目录fsync unsupported 会阻断Route DB seal，不伪造durability
+ok 124 - Windows目录fsync unsupported 会阻断Route DB seal，不伪造durability
+  ---
+  duration_ms: 5.43525
+  type: 'test'
+  ...
+# Subtest: Route DB manifest与DB seal共享同一directory barrier且unsupported保持fail closed
+ok 125 - Route DB manifest与DB seal共享同一directory barrier且unsupported保持fail closed
+  ---
+  duration_ms: 9.025792
+  type: 'test'
+  ...
+# Subtest: Scanner等待Writer exit barrier；message后非0/transport error不能冒充成功
+ok 126 - Scanner等待Writer exit barrier；message后非0/transport error不能冒充成功
+  ---
+  duration_ms: 2.845916
+  type: 'test'
+  ...
+# Subtest: E04-B managed单组保持legacy值/格式与零命中语义，Main验证后每次Publisher恰好一次
+ok 127 - E04-B managed单组保持legacy值/格式与零命中语义，Main验证后每次Publisher恰好一次
+  ---
+  duration_ms: 872.647
+  type: 'test'
+  ...
+# Subtest: E04-B真实Scanner→sealed Route DB→单Writer与legacy输出等价，Main join后Publisher恰好一次
+ok 128 - E04-B真实Scanner→sealed Route DB→单Writer与legacy输出等价，Main join后Publisher恰好一次
+  ---
+  duration_ms: 479.061625
+  type: 'test'
+  ...
+# Subtest: Main拒绝Route DB/generation与FilePlan路径别名，失败发生在runtime和Publisher之前
+ok 129 - Main拒绝Route DB/generation与FilePlan路径别名，失败发生在runtime和Publisher之前
+  ---
+  duration_ms: 5.420625
+  type: 'test'
+  ...
+# Subtest: Writer独立复核sealed Route DB，非法route mask失败并清理全部generation产物
+ok 130 - Writer独立复核sealed Route DB，非法route mask失败并清理全部generation产物
+  ---
+  duration_ms: 447.025791
+  type: 'test'
+  ...
+# Subtest: Route DB codec在BIFF8/CSV真实Scanner与Writer路径保持行序和长编号
+ok 131 - Route DB codec在BIFF8/CSV真实Scanner与Writer路径保持行序和长编号
+  ---
+  duration_ms: 789.369958
+  type: 'test'
+  ...
+# Subtest: 常量自检：阈值 = 1.5GB（1610612736）
+ok 132 - 常量自检：阈值 = 1.5GB（1610612736）
+  ---
+  duration_ms: 0.859292
+  type: 'test'
+  ...
+# Subtest: 🔴 单 sheet 小 .xlsx → false（关键回归锁：普通通道零回归）
+ok 133 - 🔴 单 sheet 小 .xlsx → false（关键回归锁：普通通道零回归）
+  ---
+  duration_ms: 0.331708
+  type: 'test'
+  ...
+# Subtest: 多 sheet（2 worksheet）.xlsx → true（大通道）
+ok 134 - 多 sheet（2 worksheet）.xlsx → true（大通道）
+  ---
+  duration_ms: 0.215458
+  type: 'test'
+  ...
+# Subtest: 多 sheet（3 worksheet）小尺寸 .xlsx → true（worksheet 数优先于尺寸）
+ok 135 - 多 sheet（3 worksheet）小尺寸 .xlsx → true（worksheet 数优先于尺寸）
+  ---
+  duration_ms: 0.086041
+  type: 'test'
+  ...
+# Subtest: 单 worksheet 解压 = 1.5GB（恰等阈值，≥）→ true
+ok 136 - 单 worksheet 解压 = 1.5GB（恰等阈值，≥）→ true
+  ---
+  duration_ms: 0.174792
+  type: 'test'
+  ...
+# Subtest: 单 worksheet 解压 > 1.5GB → true
+ok 137 - 单 worksheet 解压 > 1.5GB → true
+  ---
+  duration_ms: 0.20125
+  type: 'test'
+  ...
+# Subtest: 单 worksheet 解压 < 1.5GB（阈值 -1）→ false
+ok 138 - 单 worksheet 解压 < 1.5GB（阈值 -1）→ false
+  ---
+  duration_ms: 0.312542
+  type: 'test'
+  ...
+# Subtest: 常量自检：sharedStrings 阈值 = 1.2GB（1288490188）
+ok 139 - 常量自检：sharedStrings 阈值 = 1.2GB（1288490188）
+  ---
+  duration_ms: 0.062417
+  type: 'test'
+  ...
+# Subtest: 单 sheet 小 worksheet 但 sharedStrings ≥1.2GB → true（codex P2：高基数长文本 SST 也走大通道，避免小路径 JSZip 全量载 SST OOM）
+ok 140 - 单 sheet 小 worksheet 但 sharedStrings ≥1.2GB → true（codex P2：高基数长文本 SST 也走大通道，避免小路径 JSZip 全量载 SST OOM）
+  ---
+  duration_ms: 0.166084
+  type: 'test'
+  ...
+# Subtest: 单 sheet sharedStrings 略低于 1.2GB（阈值 -1）→ false（🔴 小文件零回归）
+ok 141 - 单 sheet sharedStrings 略低于 1.2GB（阈值 -1）→ false（🔴 小文件零回归）
+  ---
+  duration_ms: 0.3045
+  type: 'test'
+  ...
+# Subtest: .csv → false（fail-closed，不调 collectEntrySizes）
+ok 142 - .csv → false（fail-closed，不调 collectEntrySizes）
+  ---
+  duration_ms: 0.196083
+  type: 'test'
+  ...
+# Subtest: .xls → false（fail-closed，不调 collectEntrySizes）
+ok 143 - .xls → false（fail-closed，不调 collectEntrySizes）
+  ---
+  duration_ms: 0.088625
+  type: 'test'
+  ...
+# Subtest: collectEntrySizes 抛异常 → false（fail-closed）
+ok 144 - collectEntrySizes 抛异常 → false（fail-closed）
+  ---
+  duration_ms: 0.158833
+  type: 'test'
+  ...
+# Subtest: 空路径 / null / undefined → false（fail-closed）
+ok 145 - 空路径 / null / undefined → false（fail-closed）
+  ---
+  duration_ms: 0.0405
+  type: 'test'
+  ...
+# Subtest: 0 个 worksheet（仅 sharedStrings）→ false（fail-closed）
+ok 146 - 0 个 worksheet（仅 sharedStrings）→ false（fail-closed）
+  ---
+  duration_ms: 0.06425
+  type: 'test'
+  ...
+# Subtest: 单 worksheet 尺寸非数字 → false（fail-closed）
+ok 147 - 单 worksheet 尺寸非数字 → false（fail-closed）
+  ---
+  duration_ms: 0.060458
+  type: 'test'
+  ...
+# Subtest: collectEntrySizes 返回非 Map → false（fail-closed）
+ok 148 - collectEntrySizes 返回非 Map → false（fail-closed）
+  ---
+  duration_ms: 0.066167
+  type: 'test'
+  ...
+# Subtest: .XLSX（大写）单 sheet 小 → false（扩展名大小写不敏感且 fail-closed）
+ok 149 - .XLSX（大写）单 sheet 小 → false（扩展名大小写不敏感且 fail-closed）
+  ---
+  duration_ms: 0.059458
+  type: 'test'
+  ...
+# Subtest: 真实夹具：单 sheet 小 .xlsx（真实 collectEntrySizes）→ false
+ok 150 - 真实夹具：单 sheet 小 .xlsx（真实 collectEntrySizes）→ false
+  ---
+  duration_ms: 11.314583
+  type: 'test'
+  ...
+# Subtest: 真实夹具：多 sheet .xlsx（真实 collectEntrySizes）→ true
+ok 151 - 真实夹具：多 sheet .xlsx（真实 collectEntrySizes）→ true
+  ---
+  duration_ms: 3.613166
+  type: 'test'
+  ...
+# Subtest: 真实夹具：worksheet relationship 指向 customA/customB.xml 仍进入大通道
+ok 152 - 真实夹具：worksheet relationship 指向 customA/customB.xml 仍进入大通道
+  ---
+  duration_ms: 3.603084
+  type: 'test'
+  ...
+# Subtest: 真实夹具：扩展名为 .xls 的多 Sheet OOXML 仍按 magic 进入大通道
+ok 153 - 真实夹具：扩展名为 .xls 的多 Sheet OOXML 仍按 magic 进入大通道
+  ---
+  duration_ms: 2.494375
+  type: 'test'
+  ...
+# Subtest: 真实夹具：扩展名为 .xlsx 的 OLE2 BIFF8 不进入 ZIP Worker
+ok 154 - 真实夹具：扩展名为 .xlsx 的 OLE2 BIFF8 不进入 ZIP Worker
+  ---
+  duration_ms: 2.047458
+  type: 'test'
+  ...
+# Subtest: 真实夹具：.csv（真实路径）→ false
+ok 155 - 真实夹具：.csv（真实路径）→ false
+  ---
+  duration_ms: 0.549167
+  type: 'test'
+  ...
+# Subtest: buildColumnFormatPlan（by-name 字段分组，大小写敏感）
+    # Subtest: 数字/日期/文本字段各归类；未命中字段不在 plan
+    ok 1 - 数字/日期/文本字段各归类；未命中字段不在 plan
+      ---
+      duration_ms: 0.311583
+      type: 'test'
+      ...
+    # Subtest: 大小写敏感（balance / billdate 小写不命中）
+    ok 2 - 大小写敏感（balance / billdate 小写不命中）
+      ---
+      duration_ms: 0.04575
+      type: 'test'
+      ...
+    # Subtest: 同名字段重复 → 每个匹配列都纳入
+    ok 3 - 同名字段重复 → 每个匹配列都纳入
+      ---
+      duration_ms: 0.045541
+      type: 'test'
+      ...
+    1..3
+ok 156 - buildColumnFormatPlan（by-name 字段分组，大小写敏感）
+  ---
+  duration_ms: 0.647458
+  type: 'suite'
+  ...
+# Subtest: buildNumericCellSpec（移植 writers.js buildNumericCellValue）
+    # Subtest: ≤2 位小数 → number + numFmt 0.00
+    ok 1 - ≤2 位小数 → number + numFmt 0.00
+      ---
+      duration_ms: 0.768167
+      type: 'test'
+      ...
+    # Subtest: >2 位小数 → number 不套 numFmt（保留原始精度显示）
+    ok 2 - >2 位小数 → number 不套 numFmt（保留原始精度显示）
+      ---
+      duration_ms: 0.056459
+      type: 'test'
+      ...
+    # Subtest: 有效数字 >15 位 → 文本（防 Excel 15 位精度截断，如长卡号/订单号）
+    ok 3 - 有效数字 >15 位 → 文本（防 Excel 15 位精度截断，如长卡号/订单号）
+      ---
+      duration_ms: 0.044333
+      type: 'test'
+      ...
+    # Subtest: 解析不出数字 → null（调用方降级原样字符串）
+    ok 4 - 解析不出数字 → null（调用方降级原样字符串）
+      ---
+      duration_ms: 0.051334
+      type: 'test'
+      ...
+    1..4
+ok 157 - buildNumericCellSpec（移植 writers.js buildNumericCellValue）
+  ---
+  duration_ms: 1.014083
+  type: 'suite'
+  ...
+# Subtest: buildFormattedRow（决策① by-name 格式化）
+    # Subtest: 数字字段 → number 值 + 0.00 numFmt 补丁
+    ok 1 - 数字字段 → number 值 + 0.00 numFmt 补丁
+      ---
+      duration_ms: 0.122292
+      type: 'test'
+      ...
+    # Subtest: 日期字段 → Excel serial 值 + 日期 numFmt 补丁
+    ok 2 - 日期字段 → Excel serial 值 + 日期 numFmt 补丁
+      ---
+      duration_ms: 0.494584
+      type: 'test'
+      ...
+    # Subtest: 文本字段 → 字符串值 + @ numFmt 补丁（强制文本，防长数字溢出）
+    ok 3 - 文本字段 → 字符串值 + @ numFmt 补丁（强制文本，防长数字溢出）
+      ---
+      duration_ms: 0.05725
+      type: 'test'
+      ...
+    # Subtest: 空值不套格式（保留原值，无 patch）
+    ok 4 - 空值不套格式（保留原值，无 patch）
+      ---
+      duration_ms: 0.109083
+      type: 'test'
+      ...
+    # Subtest: 未命中字段列原样透传字符串
+    ok 5 - 未命中字段列原样透传字符串
+      ---
+      duration_ms: 0.137916
+      type: 'test'
+      ...
+    # Subtest: 数字字段解析失败 → 原样字符串（不套格式）
+    ok 6 - 数字字段解析失败 → 原样字符串（不套格式）
+      ---
+      duration_ms: 0.047125
+      type: 'test'
+      ...
+    1..6
+ok 158 - buildFormattedRow（决策① by-name 格式化）
+  ---
+  duration_ms: 1.090291
+  type: 'suite'
+  ...
+# Subtest: readHeaderRowStreamed（口径 = extractHeaders）
+    # Subtest: .xlsx：首行表头 trim + normalize
+    ok 1 - .xlsx：首行表头 trim + normalize
+      ---
+      duration_ms: 11.414166
+      type: 'test'
+      ...
+    # Subtest: .xlsx：尾部空表头单元格被裁（取到最后非空止）
+    ok 2 - .xlsx：尾部空表头单元格被裁（取到最后非空止）
+      ---
+      duration_ms: 2.465166
+      type: 'test'
+      ...
+    # Subtest: .csv 回退：同样 trim + normalize 首行
+    ok 3 - .csv 回退：同样 trim + normalize 首行
+      ---
+      duration_ms: 0.49475
+      type: 'test'
+      ...
+    # Subtest: 空文件 → 抛 ToolboxStreamEmptyError
+    ok 4 - 空文件 → 抛 ToolboxStreamEmptyError
+      ---
+      duration_ms: 2.213334
+      type: 'test'
+      ...
+    1..4
+ok 159 - readHeaderRowStreamed（口径 = extractHeaders）
+  ---
+  duration_ms: 16.706833
+  type: 'suite'
+  ...
+# Subtest: streamDataRows（切表头 + 其余原样透传）
+    # Subtest: .xlsx：表头回调一次 + 数据行逐个喂
+    ok 1 - .xlsx：表头回调一次 + 数据行逐个喂
+      ---
+      duration_ms: 1.873917
+      type: 'test'
+      ...
+    # Subtest: .xlsx：中间空行原样透传（不丢，纯行级搬运口径）
+    ok 2 - .xlsx：中间空行原样透传（不丢，纯行级搬运口径）
+      ---
+      duration_ms: 1.816084
+      type: 'test'
+      ...
+    # Subtest: .csv 回退：切表头 + 透传数据行
+    ok 3 - .csv 回退：切表头 + 透传数据行
+      ---
+      duration_ms: 0.217916
+      type: 'test'
+      ...
+    1..3
+ok 160 - streamDataRows（切表头 + 其余原样透传）
+  ---
+  duration_ms: 3.974416
+  type: 'suite'
+  ...
+# Subtest: F1 乱序多 sheet 护栏（canStreamXlsx + readHeaderRowStreamed/streamDataRows 回退）
+    # Subtest: fixture 自证：SheetNames[0]=B（BH）而物理 sheet1.xml=A（AH），确有分叉
+    ok 1 - fixture 自证：SheetNames[0]=B（BH）而物理 sheet1.xml=A（AH），确有分叉
+      ---
+      duration_ms: 7.486166
+      type: 'test'
+      ...
+    # Subtest: canStreamXlsx：多 sheet → false（回退全量 readRows）
+    ok 2 - canStreamXlsx：多 sheet → false（回退全量 readRows）
+      ---
+      duration_ms: 2.190292
+      type: 'test'
+      ...
+    # Subtest: canStreamXlsx：物理单 sheet → true（不退化 BUG3 流式修复）
+    ok 3 - canStreamXlsx：物理单 sheet → true（不退化 BUG3 流式修复）
+      ---
+      duration_ms: 0.935458
+      type: 'test'
+      ...
+    # Subtest: canStreamXlsx：.csv → false（非 .xlsx 不流式）
+    ok 4 - canStreamXlsx：.csv → false（非 .xlsx 不流式）
+      ---
+      duration_ms: 0.135084
+      type: 'test'
+      ...
+    # Subtest: readHeaderRowStreamed：乱序多 sheet 取 SheetNames[0]=B 的表头 [BH]，不是物理 sheet1.xml=A 的 [AH]
+    ok 5 - readHeaderRowStreamed：乱序多 sheet 取 SheetNames[0]=B 的表头 [BH]，不是物理 sheet1.xml=A 的 [AH]
+      ---
+      duration_ms: 3.3715
+      type: 'test'
+      ...
+    # Subtest: streamDataRows：乱序多 sheet 喂出 B 的数据行 [b1]，不是 A 的 [a1]
+    ok 6 - streamDataRows：乱序多 sheet 喂出 B 的数据行 [b1]，不是 A 的 [a1]
+      ---
+      duration_ms: 4.347708
+      type: 'test'
+      ...
+    # Subtest: 物理单 sheet .xlsx 仍走流式且内容正确（BUG3 修复未退化）
+    ok 7 - 物理单 sheet .xlsx 仍走流式且内容正确（BUG3 修复未退化）
+      ---
+      duration_ms: 5.206792
+      type: 'test'
+      ...
+    1..7
+ok 161 - F1 乱序多 sheet 护栏（canStreamXlsx + readHeaderRowStreamed/streamDataRows 回退）
+  ---
+  duration_ms: 23.843458
+  type: 'suite'
+  ...
+# Subtest: sanitizeSheetName
+    # Subtest: Excel 禁用字符 → -，长度 ≤ 31
+    ok 1 - Excel 禁用字符 → -，长度 ≤ 31
+      ---
+      duration_ms: 0.084042
+      type: 'test'
+      ...
+    1..1
+ok 162 - sanitizeSheetName
+  ---
+  duration_ms: 0.118291
+  type: 'suite'
+  ...
+# Subtest: writeRowsStreamed（流式写 + readback）
+    # Subtest: 表头 + 数据行写出，readback 内容一致
+    ok 1 - 表头 + 数据行写出，readback 内容一致
+      ---
+      duration_ms: 14.295
+      type: 'test'
+      ...
+    # Subtest: MAX 常量 = Excel 单 sheet 数据行硬上限 1048575
+    ok 2 - MAX 常量 = Excel 单 sheet 数据行硬上限 1048575
+      ---
+      duration_ms: 0.055458
+      type: 'test'
+      ...
+    # Subtest: 0 emit（拆表 0 命中场景底层）→ dataRowCount=0 + 单 sheet 仅表头（handler 据此不产文件）
+    ok 3 - 0 emit（拆表 0 命中场景底层）→ dataRowCount=0 + 单 sheet 仅表头（handler 据此不产文件）
+      ---
+      duration_ms: 3.919875
+      type: 'test'
+      ...
+    # Subtest: 决策②：数据行超阈值自动开 sub-sheet (2)(3)（maxRowsPerSheet 小阈值确定性验证）
+    ok 4 - 决策②：数据行超阈值自动开 sub-sheet (2)(3)（maxRowsPerSheet 小阈值确定性验证）
+      ---
+      duration_ms: 4.208459
+      type: 'test'
+      ...
+    # Subtest: 决策① cell 级对拍：流式输出 ≡ 全量 writeWorkbookRows（t/v/z 逐格相同，覆盖空行/纯空白/超宽边界）
+    ok 5 - 决策① cell 级对拍：流式输出 ≡ 全量 writeWorkbookRows（t/v/z 逐格相同，覆盖空行/纯空白/超宽边界）
+      ---
+      duration_ms: 10.418167
+      type: 'test'
+      ...
+    # Subtest: 问题1：全空数据行写出后 readback 仍在 + readback 行数 == dataRowCount
+    ok 6 - 问题1：全空数据行写出后 readback 仍在 + readback 行数 == dataRowCount
+      ---
+      duration_ms: 2.92075
+      type: 'test'
+      ...
+    # Subtest: 问题1：尾部纯空白 cell 字面保真（不被 trim 裁掉）
+    ok 7 - 问题1：尾部纯空白 cell 字面保真（不被 trim 裁掉）
+      ---
+      duration_ms: 2.460708
+      type: 'test'
+      ...
+    # Subtest: 问题1：超表头宽真实内容保留到最末非 padding 列（罕见异常数据）
+    ok 8 - 问题1：超表头宽真实内容保留到最末非 padding 列（罕见异常数据）
+      ---
+      duration_ms: 2.689125
+      type: 'test'
+      ...
+    1..8
+ok 163 - writeRowsStreamed（流式写 + readback）
+  ---
+  duration_ms: 41.164291
+  type: 'suite'
+  ...
+# Subtest: computeKeepWidth（裁到 max(headerWidth, 最末非 padding 列+1)）
+    # Subtest: 常态：行真实内容 ≤ 表头宽（尾部 padding）→ keepWidth = headerWidth
+    ok 1 - 常态：行真实内容 ≤ 表头宽（尾部 padding）→ keepWidth = headerWidth
+      ---
+      duration_ms: 0.079167
+      type: 'test'
+      ...
+    # Subtest: 全空行（全是 padding）→ keepWidth = headerWidth（不裁成 0，保留表头宽个空 cell）
+    ok 2 - 全空行（全是 padding）→ keepWidth = headerWidth（不裁成 0，保留表头宽个空 cell）
+      ---
+      duration_ms: 0.030875
+      type: 'test'
+      ...
+    # Subtest: 纯空白尾 cell（headerWidth 内）→ keepWidth = headerWidth（保留）
+    ok 3 - 纯空白尾 cell（headerWidth 内）→ keepWidth = headerWidth（保留）
+      ---
+      duration_ms: 0.034834
+      type: 'test'
+      ...
+    # Subtest: 纯空白 cell 字面非空 → 算非 padding，可撑宽超表头宽（与全量 aoa_to_sheet 一致）
+    ok 4 - 纯空白 cell 字面非空 → 算非 padding，可撑宽超表头宽（与全量 aoa_to_sheet 一致）
+      ---
+      duration_ms: 0.030375
+      type: 'test'
+      ...
+    # Subtest: 超表头宽真实内容 → keepWidth 扩到最末非 padding 列
+    ok 5 - 超表头宽真实内容 → keepWidth 扩到最末非 padding 列
+      ---
+      duration_ms: 0.029625
+      type: 'test'
+      ...
+    1..5
+ok 164 - computeKeepWidth（裁到 max(headerWidth, 最末非 padding 列+1)）
+  ---
+  duration_ms: 0.257958
+  type: 'suite'
+  ...
+# Subtest: writeRowsToMultipleFilesStreamed（一次源遍历，多输出）
+    # Subtest: 交叉过滤允许同一行进入多个文件，零命中仍生成表头
+    ok 1 - 交叉过滤允许同一行进入多个文件，零命中仍生成表头
+      ---
+      duration_ms: 7.740583
+      type: 'test'
+      ...
+    # Subtest: 源遍历失败会清理全部临时输出
+    ok 2 - 源遍历失败会清理全部临时输出
+      ---
+      duration_ms: 2.236084
+      type: 'test'
+      ...
+    # Subtest: 后续 writer 初始化失败会关闭并清理已创建的输出
+    ok 3 - 后续 writer 初始化失败会关闭并清理已创建的输出
+      ---
+      duration_ms: 0.619334
+      type: 'test'
+      ...
+    1..3
+ok 165 - writeRowsToMultipleFilesStreamed（一次源遍历，多输出）
+  ---
+  duration_ms: 10.674541
+  type: 'suite'
+  ...
+# Subtest: 问题2：readHeaderRowStreamed 早停（不扫全文件）
+    # Subtest: 大文件读表头：底层 onRow 调用次数有界（<= TOOLBOX_HEADER_SCAN_MAX_ROWS）且 << 总行数
+    ok 1 - 大文件读表头：底层 onRow 调用次数有界（<= TOOLBOX_HEADER_SCAN_MAX_ROWS）且 << 总行数
+      ---
+      duration_ms: 20.282333
+      type: 'test'
+      ...
+    # Subtest: TOOLBOX_HEADER_SCAN_MAX_ROWS 为小正数（不是 0/负数——否则退化为全量扫描）
+    ok 2 - TOOLBOX_HEADER_SCAN_MAX_ROWS 为小正数（不是 0/负数——否则退化为全量扫描）
+      ---
+      duration_ms: 0.098542
+      type: 'test'
+      ...
+    1..2
+ok 166 - 问题2：readHeaderRowStreamed 早停（不扫全文件）
+  ---
+  duration_ms: 20.434708
+  type: 'suite'
+  ...
+# Subtest: VCC 真实 SST 落盘后 1100 条长中文原文准确提取，内存及字节缓存均受 64 MiB 约束
+ok 167 - VCC 真实 SST 落盘后 1100 条长中文原文准确提取，内存及字节缓存均受 64 MiB 约束
+  ---
+  duration_ms: 62090.894917
+  type: 'test'
+  ...
+# {"pendingRows":1100,"physicalFiles":1,"guardedBusinessTables":48,"independentConnectionGuardsVerified":true,"mode":"disk","count":1271,"memoryBudgetBytes":67108864,"cacheMaxBytes":67108864,"peakMemoryBytes":67051201,"peakCacheBytes":67049348,"cacheBytes":67040564,"cacheEntries":719,"utf16Bytes":44668588,"cacheCharge":67040564,"closed":true,"cacheCleared":true,"spillRemoved":true}
+# Subtest: 工具箱 strict opener 拒绝重复 ZIP entry，避免同一路径出现两套业务值
+ok 168 - 工具箱 strict opener 拒绝重复 ZIP entry，避免同一路径出现两套业务值
+  ---
+  duration_ms: 16.730166
+  type: 'test'
+  ...
+# Subtest: 共享 ZIP reader 默认契约保持首项优先，只有 strict 调用方启用拒绝
+ok 169 - 共享 ZIP reader 默认契约保持首项优先，只有 strict 调用方启用拒绝
+  ---
+  duration_ms: 7.55625
+  type: 'test'
+  ...
+# Subtest: ST_Xstring 单次解码并保护大小写 escape 字面量
+ok 170 - ST_Xstring 单次解码并保护大小写 escape 字面量
+  ---
+  duration_ms: 0.744834
+  type: 'test'
+  ...
+# Subtest: ST_Xstring 往返保留控制字符、CRLF、DEL 与 emoji
+ok 171 - ST_Xstring 往返保留控制字符、CRLF、DEL 与 emoji
+  ---
+  duration_ms: 0.115041
+  type: 'test'
+  ...
+# Subtest: Excel 文本上限按 UTF-16 code unit 保守计数，拒绝未配对代理项
+ok 172 - Excel 文本上限按 UTF-16 code unit 保守计数，拒绝未配对代理项
+  ---
+  duration_ms: 0.461375
+  type: 'test'
+  ...
+# Subtest: toolbox-format model
+    # Subtest: ToolboxRow 使用按列排序的稀疏显式单元格，重复坐标最后一个生效
+    ok 1 - ToolboxRow 使用按列排序的稀疏显式单元格，重复坐标最后一个生效
+      ---
+      duration_ms: 0.528333
+      type: 'test'
+      ...
+    # Subtest: XLSX matchValue 使用普通工具箱旧路径 projection 后 trim
+    ok 2 - XLSX matchValue 使用普通工具箱旧路径 projection 后 trim
+      ---
+      duration_ms: 0.629125
+      type: 'test'
+      ...
+    # Subtest: 输出投影保护长数字，数值日期 1904→1900，公式只用缓存值
+    ok 3 - 输出投影保护长数字，数值日期 1904→1900，公式只用缓存值
+      ---
+      duration_ms: 0.850584
+      type: 'test'
+      ...
+    # Subtest: 无效 t=d 降级文本并产生最多 20 条有界 warning
+    ok 4 - 无效 t=d 降级文本并产生最多 20 条有界 warning
+      ---
+      duration_ms: 0.287834
+      type: 'test'
+      ...
+    1..4
+ok 173 - toolbox-format model
+  ---
+  duration_ms: 2.841875
+  type: 'suite'
+  ...
+# Subtest: toolbox-format number-date
+    # Subtest: locale-dependent built-in 日期/时间格式展开为明确中文格式，未知 id 不降级 General
+    ok 1 - locale-dependent built-in 日期/时间格式展开为明确中文格式，未知 id 不降级 General
+      ---
+      duration_ms: 0.787875
+      type: 'test'
+      ...
+    # Subtest: 科学词法转 canonical plain decimal，保留符号和有效小数位
+    ok 2 - 科学词法转 canonical plain decimal，保留符号和有效小数位
+      ---
+      duration_ms: 0.469541
+      type: 'test'
+      ...
+    # Subtest: 仅 Excel 15 位安全数写 number，其余写 canonical text + @
+    ok 3 - 仅 Excel 15 位安全数写 number，其余写 canonical text + @
+      ---
+      duration_ms: 0.523208
+      type: 'test'
+      ...
+    # Subtest: General/科学格式按有效小数位生成非科学格式，不把词法尾零变成末尾小数点
+    ok 4 - General/科学格式按有效小数位生成非科学格式，不把词法尾零变成末尾小数点
+      ---
+      duration_ms: 0.397
+      type: 'test'
+      ...
+    # Subtest: canonical plain decimal 受 Excel 单元格文本上限约束，极端指数快速 fail-closed
+    ok 5 - canonical plain decimal 受 Excel 单元格文本上限约束，极端指数快速 fail-closed
+      ---
+      duration_ms: 0.397208
+      type: 'test'
+      ...
+    # Subtest: 日期格式分类跳过引号、转义、颜色和条件，识别 elapsed time
+    ok 6 - 日期格式分类跳过引号、转义、颜色和条件，识别 elapsed time
+      ---
+      duration_ms: 0.533458
+      type: 'test'
+      ...
+    # Subtest: 1904 serial 用十进制定点加 1462，不经过浮点
+    ok 7 - 1904 serial 用十进制定点加 1462，不经过浮点
+      ---
+      duration_ms: 0.132041
+      type: 'test'
+      ...
+    # Subtest: OOXML t=d 按 wall-clock 转 1900 serial，忽略 Z/offset 且不使用本地时区
+    ok 8 - OOXML t=d 按 wall-clock 转 1900 serial，忽略 Z/offset 且不使用本地时区
+      ---
+      duration_ms: 0.289917
+      type: 'test'
+      ...
+    1..8
+ok 174 - toolbox-format number-date
+  ---
+  duration_ms: 4.265542
+  type: 'suite'
+  ...
+# Subtest: sharedStrings 接受 Transitional/Strict，保留合法文本并忽略 phonetic 节点
+ok 175 - sharedStrings 接受 Transitional/Strict，保留合法文本并忽略 phonetic 节点
+  ---
+  duration_ms: 5.024875
+  type: 'test'
+  ...
+# Subtest: sharedStrings 接受任意合法 prefix，并继续忽略真正未知的空扩展节点/属性
+ok 176 - sharedStrings 接受任意合法 prefix，并继续忽略真正未知的空扩展节点/属性
+  ---
+  duration_ms: 0.615917
+  type: 'test'
+  ...
+# Subtest: sharedStrings 按每个 t 单次解码 ST_Xstring，不跨 rich run 拼接 escape
+ok 177 - sharedStrings 按每个 t 单次解码 ST_Xstring，不跨 rich run 拼接 escape
+  ---
+  duration_ms: 0.286917
+  type: 'test'
+  ...
+# Subtest: sharedStrings 对单个 t 原始词法和 rich run 累计语义长度均提前限流
+ok 178 - sharedStrings 对单个 t 原始词法和 rich run 累计语义长度均提前限流
+  ---
+  duration_ms: 9.948667
+  type: 'test'
+  ...
+# Subtest: sharedStrings 已识别元素必须精确匹配 SpreadsheetML 规范大小写
+ok 179 - sharedStrings 已识别元素必须精确匹配 SpreadsheetML 规范大小写
+  ---
+  duration_ms: 1.660458
+  type: 'test'
+  ...
+# Subtest: si 必须是 sst 直属且不可嵌套
+ok 180 - si 必须是 sst 直属且不可嵌套
+  ---
+  duration_ms: 0.354208
+  type: 'test'
+  ...
+# Subtest: 只采集 si/t 或 si/r/t，wrapper、rPr 和错层 r 中的 t 均 fail-closed
+ok 181 - 只采集 si/t 或 si/r/t，wrapper、rPr 和错层 r 中的 t 均 fail-closed
+  ---
+  duration_ms: 1.124583
+  type: 'test'
+  ...
+# Subtest: 合法 t 之外的非空文本值不得注入 shared string
+ok 182 - 合法 t 之外的非空文本值不得注入 shared string
+  ---
+  duration_ms: 0.214208
+  type: 'test'
+  ...
+# Subtest: plain si 与每个 rich r 最多一个直属 t，重复 t 不得拼接
+ok 183 - plain si 与每个 rich r 最多一个直属 t，重复 t 不得拼接
+  ---
+  duration_ms: 0.327959
+  type: 'test'
+  ...
+# Subtest: sharedStrings 的识别节点遇到缺失或未知 namespace 时 fail-closed
+ok 184 - sharedStrings 的识别节点遇到缺失或未知 namespace 时 fail-closed
+  ---
+  duration_ms: 0.991916
+  type: 'test'
+  ...
+# Subtest: 合法 styles.xml：严格直属层级、缺省 count、常见扩展与 custom indexed palette 保持兼容
+ok 185 - 合法 styles.xml：严格直属层级、缺省 count、常见扩展与 custom indexed palette 保持兼容
+  ---
+  duration_ms: 3.967542
+  type: 'test'
+  ...
+# Subtest: styleSheet 根与直属 section：wrapper、重复和错层 recognized section 均 fail-closed
+ok 186 - styleSheet 根与直属 section：wrapper、重复和错层 recognized section 均 fail-closed
+  ---
+  duration_ms: 0.462708
+  type: 'test'
+  ...
+# Subtest: style section 条目只能是对应 section 的直接子元素
+ok 187 - style section 条目只能是对应 section 的直接子元素
+  ---
+  duration_ms: 0.546583
+  type: 'test'
+  ...
+# Subtest: font/fill/border/xf 的可消费属性必须位于合法直接父节点
+ok 188 - font/fill/border/xf 的可消费属性必须位于合法直接父节点
+  ---
+  duration_ms: 0.417584
+  type: 'test'
+  ...
+# Subtest: 同一组件内重复的 recognised 单值元素 fail-closed
+ok 189 - 同一组件内重复的 recognised 单值元素 fail-closed
+  ---
+  duration_ms: 0.418208
+  type: 'test'
+  ...
+# Subtest: 声明的 section count 必须是非负安全整数并等于直属条目数
+ok 190 - 声明的 section count 必须是非负安全整数并等于直属条目数
+  ---
+  duration_ms: 0.403208
+  type: 'test'
+  ...
+# Subtest: 低 numFmtId 仅接受 Excel 物理 FORMAT 区间，受保护 built-in 不得覆盖
+ok 191 - 低 numFmtId 仅接受 Excel 物理 FORMAT 区间，受保护 built-in 不得覆盖
+  ---
+  duration_ms: 1.370209
+  type: 'test'
+  ...
+# Subtest: styles.xml 已识别元素与已消费属性必须精确匹配规范 camelCase
+ok 192 - styles.xml 已识别元素与已消费属性必须精确匹配规范 camelCase
+  ---
+  duration_ms: 0.555166
+  type: 'test'
+  ...
+# Subtest: 已解析 boolean 属性只接受 0/1/true/false 词法
+ok 193 - 已解析 boolean 属性只接受 0/1/true/false 词法
+  ---
+  duration_ms: 0.447958
+  type: 'test'
+  ...
+# Subtest: styles/theme 接受 Transitional/Strict 任意合法 prefix 与真正未知扩展
+ok 194 - styles/theme 接受 Transitional/Strict 任意合法 prefix 与真正未知扩展
+  ---
+  duration_ms: 0.778416
+  type: 'test'
+  ...
+# Subtest: strict SpreadsheetML/DrawingML 命名空间保持兼容，错误 URN 完整结构 fail-closed
+ok 195 - strict SpreadsheetML/DrawingML 命名空间保持兼容，错误 URN 完整结构 fail-closed
+  ---
+  duration_ms: 0.329584
+  type: 'test'
+  ...
+# Subtest: 已消费数值与枚举接受常见合法值且拒绝显式无效值
+ok 196 - 已消费数值与枚举接受常见合法值且拒绝显式无效值
+  ---
+  duration_ms: 0.654209
+  type: 'test'
+  ...
+# Subtest: 已消费数值先校验 XML lexical，不接受 Number() 可解析的伪十进制或空白
+ok 197 - 已消费数值先校验 XML lexical，不接受 Number() 可解析的伪十进制或空白
+  ---
+  duration_ms: 0.314167
+  type: 'test'
+  ...
+# Subtest: 合法 theme.xml：唯一直属 themeElements/clrScheme，并兼容根级扩展
+ok 198 - 合法 theme.xml：唯一直属 themeElements/clrScheme，并兼容根级扩展
+  ---
+  duration_ms: 0.1245
+  type: 'test'
+  ...
+# Subtest: srgbClr/sysClr 的未实现 DrawingML color transform 必须 fail-closed
+ok 199 - srgbClr/sysClr 的未实现 DrawingML color transform 必须 fail-closed
+  ---
+  duration_ms: 0.171667
+  type: 'test'
+  ...
+# Subtest: theme.xml 已识别 DrawingML 元素与颜色属性必须精确匹配规范 camelCase
+ok 200 - theme.xml 已识别 DrawingML 元素与颜色属性必须精确匹配规范 camelCase
+  ---
+  duration_ms: 0.243125
+  type: 'test'
+  ...
+# Subtest: themeElements 与主 clrScheme 必须唯一且为合法直接子元素
+ok 201 - themeElements 与主 clrScheme 必须唯一且为合法直接子元素
+  ---
+  duration_ms: 0.220416
+  type: 'test'
+  ...
+# Subtest: toolbox-format style registry
+    # Subtest: theme/indexed/tint 先解析为明确 ARGB
+    ok 1 - theme/indexed/tint 先解析为明确 ARGB
+      ---
+      duration_ms: 2.5125
+      type: 'test'
+      ...
+    # Subtest: OOXML XF 按 xfId/apply* 解析完整有效样式并去重
+    ok 2 - OOXML XF 按 xfId/apply* 解析完整有效样式并去重
+      ---
+      duration_ms: 2.632709
+      type: 'test'
+      ...
+    # Subtest: OOXML textRotation 135/255 转成 ExcelJS 的 -45/vertical，非法值 fail-closed
+    ok 3 - OOXML textRotation 135/255 转成 ExcelJS 的 -45/vertical，非法值 fail-closed
+      ---
+      duration_ms: 2.013583
+      type: 'test'
+      ...
+    # Subtest: 截断 styles/theme 必须 fail-closed，日期 XF 不得因 styles 截断退回 General
+    ok 4 - 截断 styles/theme 必须 fail-closed，日期 XF 不得因 styles 截断退回 General
+      ---
+      duration_ms: 0.36425
+      type: 'test'
+      ...
+    # Subtest: theme 颜色槽不允许嵌套串色、重复声明或无法固化的系统色
+    ok 5 - theme 颜色槽不允许嵌套串色、重复声明或无法固化的系统色
+      ---
+      duration_ms: 0.161625
+      type: 'test'
+      ...
+    # Subtest: 存在的 theme.xml 必须完整声明全部必需颜色槽，不得用默认主题色混补
+    ok 6 - 存在的 theme.xml 必须完整声明全部必需颜色槽，不得用默认主题色混补
+      ---
+      duration_ms: 0.906667
+      type: 'test'
+      ...
+    # Subtest: font/fill/border 的显式 OOXML 颜色严格校验来源、范围、冲突和未知属性
+    ok 7 - font/fill/border 的显式 OOXML 颜色严格校验来源、范围、冲突和未知属性
+      ---
+      duration_ms: 1.461
+      type: 'test'
+      ...
+    # Subtest: 来源样式优先级固定为 cell → custom row → column → default
+    ok 8 - 来源样式优先级固定为 cell → custom row → column → default
+      ---
+      duration_ms: 0.122917
+      type: 'test'
+      ...
+    # Subtest: 损坏的 XF component/parent 引用 fail-closed，不静默套默认样式
+    ok 9 - 损坏的 XF component/parent 引用 fail-closed，不静默套默认样式
+      ---
+      duration_ms: 0.302125
+      type: 'test'
+      ...
+    # Subtest: locale-dependent built-in numFmt 保留日期语义，未知 built-in id fail-closed
+    ok 10 - locale-dependent built-in numFmt 保留日期语义，未知 built-in id fail-closed
+      ---
+      duration_ms: 0.662417
+      type: 'test'
+      ...
+    # Subtest: OutputStyleRegistry 按最终 component/XF 签名去重并在变更前执行预算
+    ok 11 - OutputStyleRegistry 按最终 component/XF 签名去重并在变更前执行预算
+      ---
+      duration_ms: 0.338292
+      type: 'test'
+      ...
+    1..11
+ok 202 - toolbox-format style registry
+  ---
+  duration_ms: 12.21375
+  type: 'suite'
+  ...
+# Subtest: 可选词法审计跨 UTF-8 chunk 保留原 cell body，历史取值与完整语义独立
+    # Subtest: chunk=1
+    ok 1 - chunk=1
+      ---
+      duration_ms: 7.327
+      type: 'test'
+      ...
+    # Subtest: chunk=5
+    ok 2 - chunk=5
+      ---
+      duration_ms: 1.446917
+      type: 'test'
+      ...
+    # Subtest: chunk=64
+    ok 3 - chunk=64
+      ---
+      duration_ms: 0.773375
+      type: 'test'
+      ...
+    # Subtest: chunk=932
+    ok 4 - chunk=932
+      ---
+      duration_ms: 0.584208
+      type: 'test'
+      ...
+    1..4
+ok 203 - 可选词法审计跨 UTF-8 chunk 保留原 cell body，历史取值与完整语义独立
+  ---
+  duration_ms: 11.186834
+  type: 'test'
+  ...
+# Subtest: 合法 worksheet：唯一根、唯一直接 sheetData，且只消费其直接 row
+ok 204 - 合法 worksheet：唯一根、唯一直接 sheetData，且只消费其直接 row
+  ---
+  duration_ms: 0.725875
+  type: 'test'
+  ...
+# Subtest: worksheet 必须是唯一根：wrapper、嵌套 worksheet 和根外注入均 fail-closed
+ok 205 - worksheet 必须是唯一根：wrapper、嵌套 worksheet 和根外注入均 fail-closed
+  ---
+  duration_ms: 0.939875
+  type: 'test'
+  ...
+# Subtest: sheetData 必须是 worksheet 的唯一直接子元素
+ok 206 - sheetData 必须是 worksheet 的唯一直接子元素
+  ---
+  duration_ms: 0.602833
+  type: 'test'
+  ...
+# Subtest: row 仅允许作为合法 sheetData 的直接子元素
+ok 207 - row 仅允许作为合法 sheetData 的直接子元素
+  ---
+  duration_ms: 0.738875
+  type: 'test'
+  ...
+# Subtest: 单元格和值节点必须位于合法直接父节点，禁止 wrapper 注入业务值
+ok 208 - 单元格和值节点必须位于合法直接父节点，禁止 wrapper 注入业务值
+  ---
+  duration_ms: 1.504166
+  type: 'test'
+  ...
+# Subtest: 布局节点必须位于合法层级且容器唯一，禁止 wrapper 注入列宽
+ok 209 - 布局节点必须位于合法层级且容器唯一，禁止 wrapper 注入列宽
+  ---
+  duration_ms: 0.937334
+  type: 'test'
+  ...
+# Subtest: 合法内联 rich text、公式缓存值和列布局保持可解析
+ok 210 - 合法内联 rich text、公式缓存值和列布局保持可解析
+  ---
+  duration_ms: 0.412459
+  type: 'test'
+  ...
+# Subtest: 工作表整数、数值和布尔属性使用严格 OOXML 词法，不把损坏值当缺省值
+ok 211 - 工作表整数、数值和布尔属性使用严格 OOXML 词法，不把损坏值当缺省值
+  ---
+  duration_ms: 1.383292
+  type: 'test'
+  ...
+# Subtest: SpreadsheetML 命名空间严格校验，外部命名空间不能注入业务单元格
+ok 212 - SpreadsheetML 命名空间严格校验，外部命名空间不能注入业务单元格
+  ---
+  duration_ms: 0.554167
+  type: 'test'
+  ...
+# Subtest: SpreadsheetML 已知元素 local name 必须精确匹配规范大小写
+ok 213 - SpreadsheetML 已知元素 local name 必须精确匹配规范大小写
+  ---
+  duration_ms: 0.770666
+  type: 'test'
+  ...
+# Subtest: worksheet 受消费属性必须按所在元素精确匹配规范大小写
+ok 214 - worksheet 受消费属性必须按所在元素精确匹配规范大小写
+  ---
+  duration_ms: 1.840666
+  type: 'test'
+  ...
+# Subtest: 合法 SpreadsheetML namespace 前缀保持可解析，真正未知扩展元素与属性继续忽略
+ok 215 - 合法 SpreadsheetML namespace 前缀保持可解析，真正未知扩展元素与属性继续忽略
+  ---
+  duration_ms: 0.364
+  type: 'test'
+  ...
+# Subtest: inlineStr 不拼接同一 plain 容器或同一 rich run 的重复 t
+ok 216 - inlineStr 不拼接同一 plain 容器或同一 rich run 的重复 t
+  ---
+  duration_ms: 0.346917
+  type: 'test'
+  ...
+# Subtest: 显式布尔词法和单元格类型必须可解释，不能静默改成 false 或文本
+ok 217 - 显式布尔词法和单元格类型必须可解释，不能静默改成 false 或文本
+  ---
+  duration_ms: 0.4125
+  type: 'test'
+  ...
+# Subtest: 错误单元格仅接受 Excel 合法错误码，缺值或未知错误 fail-closed
+ok 218 - 错误单元格仅接受 Excel 合法错误码，缺值或未知错误 fail-closed
+  ---
+  duration_ms: 1.310708
+  type: 'test'
+  ...
+# Subtest: 已消费整数、布尔和单元格坐标属性的显式空值不得按缺省值解释
+ok 219 - 已消费整数、布尔和单元格坐标属性的显式空值不得按缺省值解释
+  ---
+  duration_ms: 0.857583
+  type: 'test'
+  ...
+# Subtest: worksheet 对 v、f、inline t 的超长词法在累计阶段提前拒绝
+ok 220 - worksheet 对 v、f、inline t 的超长词法在累计阶段提前拒绝
+  ---
+  duration_ms: 10.323542
+  type: 'test'
+  ...
+# Subtest: cell 类型与 v/f/is 载荷必须一致，禁止静默丢弃实际 payload
+ok 221 - cell 类型与 v/f/is 载荷必须一致，禁止静默丢弃实际 payload
+  ---
+  duration_ms: 0.641958
+  type: 'test'
+  ...
+# Subtest: 合法 inline rich text 与字符串/数值公式缓存值保持可解析
+ok 222 - 合法 inline rich text 与字符串/数值公式缓存值保持可解析
+  ---
+  duration_ms: 0.242333
+  type: 'test'
+  ...
+# Subtest: 数值与日期 v 必须符合声明类型，不能降级成文本
+ok 223 - 数值与日期 v 必须符合声明类型，不能降级成文本
+  ---
+  duration_ms: 0.495167
+  type: 'test'
+  ...
+# Subtest: worksheet 数值单元格快速拒绝会放大 canonical 文本的极端指数
+ok 224 - worksheet 数值单元格快速拒绝会放大 canonical 文本的极端指数
+  ---
+  duration_ms: 0.736333
+  type: 'test'
+  ...
+# Subtest: t=d 日历或时区词法损坏时 fail-closed，不能冒充范围外日期降级
+ok 225 - t=d 日历或时区词法损坏时 fail-closed，不能冒充范围外日期降级
+  ---
+  duration_ms: 0.8775
+  type: 'test'
+  ...
+# Subtest: t=d 日历合法但超 Excel 范围时保留原词法并进入文本降级 warning 链路
+ok 226 - t=d 日历合法但超 Excel 范围时保留原词法并进入文本降级 warning 链路
+  ---
+  duration_ms: 0.6435
+  type: 'test'
+  ...
+# Subtest: 带样式但没有 v 的 t=d 保持 explicit blank，输出不产生日期降级 warning
+ok 227 - 带样式但没有 v 的 t=d 保持 explicit blank，输出不产生日期降级 warning
+  ---
+  duration_ms: 0.221625
+  type: 'test'
+  ...
+# Subtest: 布局宽高只接受可由 writer 保真的正有限十进制词法
+ok 228 - 布局宽高只接受可由 writer 保真的正有限十进制词法
+  ---
+  duration_ms: 2.027792
+  type: 'test'
+  ...
+# Subtest: row/col outlineLevel 仅允许 0..7 的整数
+ok 229 - row/col outlineLevel 仅允许 0..7 的整数
+  ---
+  duration_ms: 0.475875
+  type: 'test'
+  ...
+# Subtest: toolbox-format xlsx pass/scanner
+    # Subtest: 一次 pass 解析 workbook/styles/theme/SST，并按显示顺序流式产出稀疏 ToolboxRow
+    ok 1 - 一次 pass 解析 workbook/styles/theme/SST，并按显示顺序流式产出稀疏 ToolboxRow
+      ---
+      duration_ms: 23.535083
+      type: 'test'
+      ...
+    # Subtest: workbook、Relationships 与 SST 接受 Strict OOXML namespace
+    ok 2 - workbook、Relationships 与 SST 接受 Strict OOXML namespace
+      ---
+      duration_ms: 9.524209
+      type: 'test'
+      ...
+    # Subtest: workbook 与 Relationships 接受 Transitional/Strict 的任意合法 namespace prefix
+    ok 3 - workbook 与 Relationships 接受 Transitional/Strict 的任意合法 namespace prefix
+      ---
+      duration_ms: 0.56225
+      type: 'test'
+      ...
+    # Subtest: 同一 pass 禁止并发扫描，关闭后不能继续读取
+    ok 4 - 同一 pass 禁止并发扫描，关闭后不能继续读取
+      ---
+      duration_ms: 9.722375
+      type: 'test'
+      ...
+    # Subtest: 专用 SST/inline rich parser 拼正常 t run，并忽略 rPh/phoneticPr
+    ok 5 - 专用 SST/inline rich parser 拼正常 t run，并忽略 rPh/phoneticPr
+      ---
+      duration_ms: 9.153167
+      type: 'test'
+      ...
+    # Subtest: inline/str 文本按独立 t/v 单次解码 ST_Xstring，不跨 rich run 合并 escape
+    ok 6 - inline/str 文本按独立 t/v 单次解码 ST_Xstring，不跨 rich run 合并 escape
+      ---
+      duration_ms: 7.589125
+      type: 'test'
+      ...
+    # Subtest: 重叠 col 范围保留 XML 声明顺序，后声明范围继续覆盖前声明范围
+    ok 7 - 重叠 col 范围保留 XML 声明顺序，后声明范围继续覆盖前声明范围
+      ---
+      duration_ms: 11.170709
+      type: 'test'
+      ...
+    # Subtest: 共享字符串索引越界 fail-closed，不静默变空串
+    ok 8 - 共享字符串索引越界 fail-closed，不静默变空串
+      ---
+      duration_ms: 11.044542
+      type: 'test'
+      ...
+    # Subtest: row r 非严格递增、同 row 重复 cell 坐标均 fail-closed
+    ok 9 - row r 非严格递增、同 row 重复 cell 坐标均 fail-closed
+      ---
+      duration_ms: 14.75325
+      type: 'test'
+      ...
+    # Subtest: 截断 worksheet/cell/row XML 必须 fail-closed，不得把已解析前缀当成功
+    ok 10 - 截断 worksheet/cell/row XML 必须 fail-closed，不得把已解析前缀当成功
+      ---
+      duration_ms: 4.72
+      type: 'test'
+      ...
+    # Subtest: 截断 workbook.xml 必须在打开阶段失败，不得只处理已解析的工作表前缀
+    ok 11 - 截断 workbook.xml 必须在打开阶段失败，不得只处理已解析的工作表前缀
+      ---
+      duration_ms: 7.256416
+      type: 'test'
+      ...
+    # Subtest: sheet 只能是唯一 sheets 容器直属，wrapper 中的额外 Sheet 不得被静默漏读
+    ok 12 - sheet 只能是唯一 sheets 容器直属，wrapper 中的额外 Sheet 不得被静默漏读
+      ---
+      duration_ms: 7.844083
+      type: 'test'
+      ...
+    # Subtest: workbookPr 必须是 workbook 直属且最多一个，错层或重复均 fail-closed
+    ok 13 - workbookPr 必须是 workbook 直属且最多一个，错层或重复均 fail-closed
+      ---
+      duration_ms: 13.065791
+      type: 'test'
+      ...
+    # Subtest: workbookPr.date1904 若存在仅接受 OOXML boolean 词法
+    ok 14 - workbookPr.date1904 若存在仅接受 OOXML boolean 词法
+      ---
+      duration_ms: 51.683166
+      type: 'test'
+      ...
+    # Subtest: workbook extLst/ext 内允许 foreign namespace 扩展同名元素
+    ok 15 - workbook extLst/ext 内允许 foreign namespace 扩展同名元素
+      ---
+      duration_ms: 0.198959
+      type: 'test'
+      ...
+    # Subtest: foreign namespace 扩展仅能位于 workbook 直属 extLst/ext 内
+    ok 16 - foreign namespace 扩展仅能位于 workbook 直属 extLst/ext 内
+      ---
+      duration_ms: 0.356167
+      type: 'test'
+      ...
+    # Subtest: sheet state 缺省为 visible，三种 OOXML 枚举值均保持原值
+    ok 17 - sheet state 缺省为 visible，三种 OOXML 枚举值均保持原值
+      ---
+      duration_ms: 0.100958
+      type: 'test'
+      ...
+    # Subtest: sheet state 显式非法值在打开阶段 fail-closed，不按 visible 兜底
+    ok 18 - sheet state 显式非法值在打开阶段 fail-closed，不按 visible 兜底
+      ---
+      duration_ms: 24.441166
+      type: 'test'
+      ...
+    # Subtest: workbook 识别节点与关系 id 遇到缺失或未知 namespace 时 fail-closed
+    ok 19 - workbook 识别节点与关系 id 遇到缺失或未知 namespace 时 fail-closed
+      ---
+      duration_ms: 0.436667
+      type: 'test'
+      ...
+    # Subtest: workbook 业务元素与已消费属性必须精确匹配规范大小写
+    ok 20 - workbook 业务元素与已消费属性必须精确匹配规范大小写
+      ---
+      duration_ms: 0.319
+      type: 'test'
+      ...
+    # Subtest: Relationships 元素与 Id/Type/Target/TargetMode 必须精确匹配规范大小写
+    ok 21 - Relationships 元素与 Id/Type/Target/TargetMode 必须精确匹配规范大小写
+      ---
+      duration_ms: 0.228583
+      type: 'test'
+      ...
+    # Subtest: Relationships 识别节点 namespace 与 TargetMode 枚举非法时 fail-closed
+    ok 22 - Relationships 识别节点 namespace 与 TargetMode 枚举非法时 fail-closed
+      ---
+      duration_ms: 0.268208
+      type: 'test'
+      ...
+    # Subtest: 重复 relationship Id、工作表 r:id 和 worksheet entry path 均 fail-closed
+    ok 23 - 重复 relationship Id、工作表 r:id 和 worksheet entry path 均 fail-closed
+      ---
+      duration_ms: 14.8265
+      type: 'test'
+      ...
+    # Subtest: 工作表名称按 Excel 语义大小写不敏感唯一，冲突时在打开阶段失败
+    ok 24 - 工作表名称按 Excel 语义大小写不敏感唯一，冲突时在打开阶段失败
+      ---
+      duration_ms: 3.784375
+      type: 'test'
+      ...
+    # Subtest: 工作表关系缺失、类型错误、外部关系或 entry 不存在均在打开阶段失败
+    ok 25 - 工作表关系缺失、类型错误、外部关系或 entry 不存在均在打开阶段失败
+      ---
+      duration_ms: 11.297667
+      type: 'test'
+      ...
+    # Subtest: Relationship Type 必须精确命中 Office URI，同后缀恶意 URI 四类均 fail-closed
+    ok 26 - Relationship Type 必须精确命中 Office URI，同后缀恶意 URI 四类均 fail-closed
+      ---
+      duration_ms: 24.881375
+      type: 'test'
+      ...
+    # Subtest: 已声明的 sharedStrings/styles/theme 关系异常时不得回退固定路径
+    ok 27 - 已声明的 sharedStrings/styles/theme 关系异常时不得回退固定路径
+      ---
+      duration_ms: 49.787416
+      type: 'test'
+      ...
+    # Subtest: wrapper 中的 sharedStrings/styles/theme Relationship 不得被忽略后固定路径回退
+    ok 28 - wrapper 中的 sharedStrings/styles/theme Relationship 不得被忽略后固定路径回退
+      ---
+      duration_ms: 13.224458
+      type: 'test'
+      ...
+    # Subtest: 错误 Type 的 Relationship 占用标准 metadata 路径时不得 fallback
+    ok 29 - 错误 Type 的 Relationship 占用标准 metadata 路径时不得 fallback
+      ---
+      duration_ms: 11.234667
+      type: 'test'
+      ...
+    # Subtest: sharedStrings/styles/theme 关系完全不存在时兼容规范固定 entry
+    ok 30 - sharedStrings/styles/theme 关系完全不存在时兼容规范固定 entry
+      ---
+      duration_ms: 10.194375
+      type: 'test'
+      ...
+    # Subtest: 存在但截断的 SST/styles/theme 均 fail-closed，缺少可选 entry 仍使用默认语义
+    ok 31 - 存在但截断的 SST/styles/theme 均 fail-closed，缺少可选 entry 仍使用默认语义
+      ---
+      duration_ms: 27.044458
+      type: 'test'
+      ...
+    # Subtest: 取消抛专用错误，不返回 partial success；SST >=1.2GB 在打开流前拒绝
+    ok 32 - 取消抛专用错误，不返回 partial success；SST >=1.2GB 在打开流前拒绝
+      ---
+      duration_ms: 13.067084
+      type: 'test'
+      ...
+    # Subtest: workbook/rels/styles/theme metadata part 均有中央目录与运行时双重上限
+    ok 33 - workbook/rels/styles/theme metadata part 均有中央目录与运行时双重上限
+      ---
+      duration_ms: 0.459791
+      type: 'test'
+      ...
+    # Subtest: 高压缩超限 styles.xml 在解压前 fail-closed
+    ok 34 - 高压缩超限 styles.xml 在解压前 fail-closed
+      ---
+      duration_ms: 130.303958
+      type: 'test'
+      ...
+    1..34
+ok 230 - toolbox-format xlsx pass/scanner
+  ---
+  duration_ms: 519.381375
+  type: 'suite'
+  ...
+1..230
+# tests 368
+# suites 20
+# pass 368
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 75431.673875

@@ -20,7 +20,7 @@ const {
   assertXlsxEntriesUnderLimit,
   SIZE_LIMIT_BYTES,
   collectEntrySizes
-} = require('../../../../src/backend/pending-import/xlsx-size-preflight');
+} = require('../../../../src/backend/xlsx/legacy/entry-size-preflight');
 
 // 临时目录管理（跑完清理）。
 const tmpDirs = [];

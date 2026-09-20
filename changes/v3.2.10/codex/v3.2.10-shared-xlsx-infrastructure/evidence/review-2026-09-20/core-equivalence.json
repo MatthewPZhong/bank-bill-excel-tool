@@ -1,0 +1,78 @@
+{
+  "base": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "files": [
+    {
+      "baseline_path": "src/backend/pending-import/streaming-xlsx-reader.js",
+      "snapshot_path": "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+      "byte_identical": false,
+      "baseline_sha256": "b3c60a42d351c1db1c4428cd5023719d381766275540977db1063cb8e176a4c6",
+      "snapshot_sha256": "d25bbee4e6e02307b34f224f3355b99feabb8620a6c73952b6072ea1da2d02dc"
+    },
+    {
+      "baseline_path": "src/backend/pending-import/xlsx-size-preflight.js",
+      "snapshot_path": "src/backend/xlsx/legacy/entry-size-preflight.js",
+      "byte_identical": false,
+      "baseline_sha256": "f18498ba7f7b4cd1999947753604972933dcb4c44f711a0ca2c87572f043ebce",
+      "snapshot_sha256": "77ada2f7f31b99dbc9b35fe2ccb0803757c5965da2df031113c5a2dc003f8258"
+    },
+    {
+      "baseline_path": "src/backend/xlsx-rich-reader.js",
+      "snapshot_path": "src/backend/xlsx/rich-workbook.js",
+      "byte_identical": false,
+      "baseline_sha256": "21795aa07d19b7e01550c40df6dc662cc5b57017977521096d57927ef3b37a98",
+      "snapshot_sha256": "6bd588a274177a3fba881e20000572f894e014f840a8cb45bdf7d4f2552ab944"
+    },
+    {
+      "baseline_path": "src/backend/big-table-import/zip-reader.js",
+      "snapshot_path": "src/backend/xlsx/zip-reader.js",
+      "byte_identical": true,
+      "baseline_sha256": "2b3d3bfb7f95867263fccd700257a852edaecad5153b89157d19b40e4cbd75b1",
+      "snapshot_sha256": "2b3d3bfb7f95867263fccd700257a852edaecad5153b89157d19b40e4cbd75b1"
+    },
+    {
+      "baseline_path": "src/backend/toolbox-format/excel-text.js",
+      "snapshot_path": "src/backend/xlsx/excel-text.js",
+      "byte_identical": true,
+      "baseline_sha256": "e685c59e3b0f2054d69f5f057aa33dfd20bac7076d49e08916eb2715137e6f80",
+      "snapshot_sha256": "e685c59e3b0f2054d69f5f057aa33dfd20bac7076d49e08916eb2715137e6f80"
+    },
+    {
+      "baseline_path": "src/backend/toolbox-format/ooxml-namespaces.js",
+      "snapshot_path": "src/backend/xlsx/ooxml-namespaces.js",
+      "byte_identical": true,
+      "baseline_sha256": "6567cb492247f222f1b4979d8d2779db65b74775c4364ae6c1821065c0ab543b",
+      "snapshot_sha256": "6567cb492247f222f1b4979d8d2779db65b74775c4364ae6c1821065c0ab543b"
+    },
+    {
+      "baseline_path": "src/backend/toolbox-format/number-date.js",
+      "snapshot_path": "src/backend/xlsx/number-date.js",
+      "byte_identical": true,
+      "baseline_sha256": "cc6679d8cb7c1707a7314dbbf91b1e4ef8066b1ddbf88b1394d40ddbf9976555",
+      "snapshot_sha256": "cc6679d8cb7c1707a7314dbbf91b1e4ef8066b1ddbf88b1394d40ddbf9976555"
+    },
+    {
+      "baseline_path": "src/backend/toolbox-format/model.js",
+      "snapshot_path": "src/backend/xlsx/model.js",
+      "byte_identical": true,
+      "baseline_sha256": "2731774546381a40230d10f7f7294c2f9a216fbcd86dc2156bb2edd3ab3bf8dc",
+      "snapshot_sha256": "2731774546381a40230d10f7f7294c2f9a216fbcd86dc2156bb2edd3ab3bf8dc"
+    },
+    {
+      "baseline_path": "src/backend/toolbox-format/style-registry.js",
+      "snapshot_path": "src/backend/xlsx/style-registry.js",
+      "byte_identical": true,
+      "baseline_sha256": "e2b0a71c99eb14bd7f28d1e7369d3efe85ced006876ae42779f2705e1afc47ad",
+      "snapshot_sha256": "e2b0a71c99eb14bd7f28d1e7369d3efe85ced006876ae42779f2705e1afc47ad"
+    },
+    {
+      "baseline_path": "src/backend/toolbox-format/xlsx-sheet-scanner.js",
+      "snapshot_path": "src/backend/xlsx/xlsx-sheet-scanner.js",
+      "byte_identical": true,
+      "baseline_sha256": "a58e236130399f66844a5568ad3fbfcddb5fd98cbfe0c1acaf771704fa0d150d",
+      "snapshot_sha256": "a58e236130399f66844a5568ad3fbfcddb5fd98cbfe0c1acaf771704fa0d150d"
+    }
+  ],
+  "parts_body_byte_identical": true,
+  "assembly_body_byte_identical": true,
+  "non_identical_file_manual_review": "legacy: require path and comment correction only; entry-size-preflight: require path only; rich-workbook: six require paths only"
+}

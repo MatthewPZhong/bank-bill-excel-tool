@@ -8,14 +8,14 @@ const test = require('node:test');
 const {
   ToolboxXlsxFormatError,
   scanXlsxSheet
-} = require('../../src/backend/toolbox-format/xlsx-sheet-scanner');
+} = require('../../src/backend/xlsx/xlsx-sheet-scanner');
 const {
   SourceStyleRegistry
-} = require('../../src/backend/toolbox-format/style-registry');
+} = require('../../src/backend/xlsx/style-registry');
 const {
   createWarningCollector,
   projectOutputCell
-} = require('../../src/backend/toolbox-format/model');
+} = require('../../src/backend/xlsx/model');
 
 const TRANSITIONAL_SPREADSHEETML_NAMESPACE =
   'http://schemas.openxmlformats.org/spreadsheetml/2006/main';

@@ -1,0 +1,9 @@
+PASS 账单真实 legacy 预读保持行序、数值投影与截断
+PASS Toolbox 真实装配保持类型/lexical 与业务 legacy 投影
+PASS Position 真实银行行映射、低预算 spill 与取消清理
+PASS VCC 真实 Pending 明细保留 key 类型及 shared workbook 关闭责任
+PASS BizOP 真实 rich reader→adapter→候选 SQLite 输出与资源清理
+PASS rich 普通取消、await close 与真实子进程自然退出
+PASS 生产代码没有新增或遗留的公共 XLSX 旧 API 入边
+PASS 公共 XLSX 全部模块的源码依赖闭包不反向载入业务
+==== 51/51 PASS ====

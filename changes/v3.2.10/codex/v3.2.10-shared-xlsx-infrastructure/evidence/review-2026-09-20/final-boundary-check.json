@@ -1,0 +1,10 @@
+{
+  "checkedAt": "2026-09-20T13:47:18.155911+00:00",
+  "branch": "codex/v3.2.10-shared-xlsx-infrastructure",
+  "head": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "frozenOverlayFiles": 121,
+  "sourceDrift": [],
+  "sourceEdits": false,
+  "committed": false,
+  "pushed": false
+}

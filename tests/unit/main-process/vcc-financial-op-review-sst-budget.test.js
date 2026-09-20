@@ -66,7 +66,7 @@ async function rewrite(filePath) {
 
 
 test('VCC 真实 SST 落盘后 1100 条长中文原文准确提取，内存及字节缓存均受 64 MiB 约束', async (t) => {
-  const reader = require('../../../src/backend/xlsx-rich-reader');
+  const reader = require('../../../src/backend/xlsx/rich-workbook');
   const originalOpen = reader.openRichWorkbook;
   const observations = [];
   let extracting = false;

@@ -22,7 +22,7 @@ const {
 } = require('../../backend/position-reconciliation-import/xlsx-reader');
 const {
   scanXlsxSheet
-} = require('../../backend/toolbox-format/xlsx-sheet-scanner');
+} = require('../../backend/xlsx/xlsx-sheet-scanner');
 const {
   COLUMN_WIDTHS,
   DETAIL_META_HEADERS,

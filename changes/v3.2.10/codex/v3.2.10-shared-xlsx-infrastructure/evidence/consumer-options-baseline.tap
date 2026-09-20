@@ -1,0 +1,17 @@
+▶ 消费方有效预算、覆盖规则和 R3/R4 差异保持固定基线合同
+  ✔ L1 三个生产入口保留各自列宽与 maxRows，legacy 不接 adaptive (106.349333ms)
+  ✔ L2 helper 消费者保留原解析差异，T1 仍自行装配并完整加载 SST (35.896542ms)
+  ✔ Position 保留 undefined 默认、Number 转换、null 拒绝及本域关闭规则 (81.24875ms)
+  ✔ VCC S1 保留 undefined 默认、Number 转换、null 拒绝及本域关闭规则 (31.141834ms)
+  ✔ R1 BizOP import 在真实管线保留 ?? 与 undefined 的不同覆盖优先级 (1952.440875ms)
+  ✔ R2 BizOP RAW 单页读取和输出多页验证各自保持 32 MiB 与私有临时根 (1705.68675ms)
+  ✔ R3 和 R4 四处 VCC 真实导入、原件导出、待确认导出保留不同 cache 和取消桥接 (1941.810666ms)
+✔ 消费方有效预算、覆盖规则和 R3/R4 差异保持固定基线合同 (5866.118042ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6026.580167

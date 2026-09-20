@@ -36,7 +36,7 @@ const {
   freezeWorkerBatchContext
 } = require('../../main-process/archive-center/worker-batch-context');
 
-const zipReader = require('./zip-reader');
+const zipReader = require('../xlsx/zip-reader');
 const rowScanner = require('./row-scanner');
 const { validateContract } = require('./contract');
 

@@ -10,8 +10,8 @@ const {
   createToolboxCell,
   createToolboxRow,
   createToolboxSheetMeta
-} = require('../../backend/toolbox-format/model');
-const { normalizeStaticStyle } = require('../../backend/toolbox-format/style-registry');
+} = require('../../backend/xlsx/model');
+const { normalizeStaticStyle } = require('../../backend/xlsx/style-registry');
 
 const ROUTE_DB_SCHEMA_VERSION = 1;
 const ROUTE_DB_CODEC_VERSION = 1;

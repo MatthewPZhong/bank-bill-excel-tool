@@ -16,7 +16,7 @@ const { systemAmountRead, systemOpCellValues } = require('./system-op-importer')
 const { cellValueFromBody } = require('../big-table-import/row-scanner');
 const { assertMappedLineage } = require('../../main-process/vcc-financial-op-dataset-writer');
 const { hashSourceFile } = require('./source-lineage');
-const { openRichWorkbook } = require('../xlsx-rich-reader');
+const { openRichWorkbook } = require('../xlsx/rich-workbook');
 const { assertReviewFresh, framedDigest, rawCell, historicCell, comparableCell, reviewError } = require('./review-export-contract');
 
 const TYPES = Object.values(SOURCE_TYPES);
@@ -359,7 +359,7 @@ async function extractReviewSources({ manifestPath, signal, onProgress }) {
               || !fs.realpathSync(source.filePath).startsWith(`${fs.realpathSync(source.archiveRoot)}${path.sep}`)) throw unavailable('存档原件不是受管普通文件');
           const fingerprint = await hashSourceFile(source.filePath);
           if (fingerprint.sha256 !== source.sha256 || fingerprint.sizeBytes !== source.sizeBytes) throw reviewError('archive-integrity-failure', `原件 ${source.artifactId} 内容已损坏`);
-          const workbook = await openRichWorkbook(source.filePath, { memoryBudgetBytes: 64 * 1024 * 1024,
+          const workbook = await openRichWorkbook(source.filePath, { memoryBudgetBytes: 64 * 1024 * 1024, lruMaxEntries: 8192,
             cacheMaxBytes: 64 * 1024 * 1024,
             cancelToken: { get cancelled() { return !!signal?.aborted; } } });
           try {

@@ -1,0 +1,26 @@
+✔ E13-G current manifest 以独立 67 action / 74 pair authority 达到六面 100% coverage (11.189416ms)
+✔ Capability Inventory 与 Effective Production Strategy 分离，新版业务 OP 十二项与 rows 显式开启 (11.631167ms)
+✔ PreFund deferred bank import/run 必须独立显示 legacy 策略，不得由 MPT/export 代偿 (17.246375ms)
+✔ Position import-result 只记录真实 legacy Main route，不伪造 E13-F adapter route (7.263958ms)
+✔ manifest action/surface/pair 与 production binding 集合 mutant 全部 fail closed (22.311958ms)
+✔ 重复 policy、durable 缺 inspector、artifact 缺 Publisher、service 缺资源、blocked enabled 均 fail closed (18.872084ms)
+✔ 已发布 E13-G 清单和策略快照由独立 gate 对当前模块导出复验 (75715.758333ms)
+✔ 外部 feature flag 不能绕过 policy disabled，策略快照 drift 与未知 action 均被拒绝 (10.160459ms)
+✔ manifest 输入拒绝 accessor 且不执行 getter (0.28225ms)
+✔ R3.2.3 历史 exact evidence 在原提交和原分支上完整复验 (139526.632208ms)
+✔ R3.2.4 历史 exact evidence 在原提交和 PR 分支上完整复验 (638150.005875ms)
+✔ Windows PR final release-check只允许#183一次性Windows unit修复synchronize并checkout exact head (1.417666ms)
+✔ Windows 本地与发布构建全部锁定 x64，避免检查陈旧 win-unpacked (1.736125ms)
+✔ Windows assisted per-user installer 锁定 NSIS access-violation 修复版本与模板 (9.038083ms)
+✔ packaged background canary 仅在 GitHub-hosted Windows 的 RUNNER_TEMP 写入，并审计 exact 产品身份 (27.394875ms)
+﹣ Windows packaged canary 对报告前已退出进程快速返回专用 safe code (0.058792ms) # SKIP
+﹣ Windows packaged canary 的 Setup 失败诊断仅返回固定退出/落地/身份枚举 (0.035375ms) # SKIP
+✔ 真实 Windows 进程探针不与全量单测并发，只由专用工作流环境显式开启 (1.021667ms)
+ℹ tests 18
+ℹ suites 0
+ℹ pass 16
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 2
+ℹ todo 0
+ℹ duration_ms 638286.320208

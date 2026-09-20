@@ -12,11 +12,11 @@ const {
   createSourceStyleRegistryFromOoxml,
   parseThemeColors,
   resolveColorSpec
-} = require('../../src/backend/toolbox-format/style-registry');
+} = require('../../src/backend/xlsx/style-registry');
 const {
   createToolboxCell,
   projectOutputCell
-} = require('../../src/backend/toolbox-format/model');
+} = require('../../src/backend/xlsx/model');
 
 const THEME_XML = '<?xml version="1.0"?>'
   + '<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'

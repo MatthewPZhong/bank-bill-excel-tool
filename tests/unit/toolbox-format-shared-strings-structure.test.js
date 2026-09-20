@@ -6,10 +6,10 @@ const test = require('node:test');
 
 const {
   ToolboxXlsxFormatError
-} = require('../../src/backend/toolbox-format/xlsx-sheet-scanner');
+} = require('../../src/backend/xlsx/xlsx-sheet-scanner');
 const {
   loadToolboxSharedStrings
-} = require('../../src/backend/toolbox-format/xlsx-pass');
+} = require('../../src/backend/xlsx/workbook-parts');
 
 const TRANSITIONAL_SPREADSHEETML_NAMESPACE =
   'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
