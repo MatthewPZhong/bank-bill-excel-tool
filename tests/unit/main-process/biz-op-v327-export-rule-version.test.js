@@ -1,5 +1,7 @@
 'use strict';
 
+const { createBizOpCatalogQueries } = require('../../../src/main-process/biz-op-v327/catalog-queries');
+
 const test = require('node:test');
 const { durableDirectoryTest } = require('../../helpers/durable-directory-tests');
 const assert = require('node:assert/strict');
@@ -74,7 +76,7 @@ async function sealedResult(t, version, { partRuleVersion, catalogPatch = {} } =
   db.prepare('INSERT INTO biz_op_v327_runs VALUES (?,?,?,?,?,?,?,?,?)')
     .run(objectId, 'PUBLISHED', 1, '2026-08-08', '2026-08-10', '2'.repeat(64), '2026-09-07T00:00:00Z', manifest.relativePath, manifest.digest);
   for (const input of inputs) db.prepare('INSERT INTO biz_op_v327_run_inputs VALUES (?,?,?)').run(objectId, input.role, input.inputVersion);
-  return { root, objectId, manifest, values, payloadStore, catalog: { db } };
+  return { root, objectId, manifest, values, payloadStore, catalog: { db, queries: createBizOpCatalogQueries({ db }) } };
 }
 
 function recordingSpool() {

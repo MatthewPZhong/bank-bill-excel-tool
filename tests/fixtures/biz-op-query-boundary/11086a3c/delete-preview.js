@@ -10,7 +10,7 @@ function normalizeSelection({ datasetIds = [], runIds = [] } = {}) {
   return { datasetIds: [...new Set(datasetIds.map((id) => opaque(id)))].sort(), runIds: [...new Set(runIds.map((id) => opaque(id)))].sort() };
 }
 function createBizOpDeletePreview({ catalog, admission }) {
-  const { db, now, queries } = catalog;
+  const { db, now } = catalog;
   function collect(input) {
     const selection = normalizeSelection(input); const generation = catalog.control().generation;
     const runIds = new Set(selection.runIds); const artifacts = new Set(); let bytes = 0; let evaluated = 0;
@@ -20,28 +20,29 @@ function createBizOpDeletePreview({ catalog, admission }) {
       return value;
     };
     const datasets = selection.datasetIds.map((id) => {
-      const row = queries.readActiveDatasetForDelete(id);
+      const row = db.prepare("SELECT * FROM biz_op_v327_datasets WHERE dataset_id=? AND state='ACTIVE'").get(id);
       if (!row) fail('BIZOP_DELETE_SELECTION_CHANGED', '选取的数据已被覆盖或删除，请重新选取');
       const originals = [];
-      for (const item of queries.iterateDatasetSources(id)) {
-        artifacts.add(item.artifactId); originals.push(charge({ artifactId: item.artifactId, originalName: item.originalName, sha256: item.sha256 }));
+      for (const item of db.prepare('SELECT artifact_id,source_file_name,source_sha256 FROM biz_op_v327_dataset_sources WHERE dataset_id=? ORDER BY source_file_order').iterate(id)) {
+        artifacts.add(item.artifact_id); originals.push(charge({ artifactId: item.artifact_id, originalName: item.source_file_name, sha256: item.source_sha256 }));
       }
-      for (const related of queries.iteratePublishedRunIdsUsingDataset(id)) {
-        runIds.add(related); if (runIds.size > 4096) fail('BIZOP_DELETE_PREVIEW_LIMIT');
+      for (const related of db.prepare(`SELECT DISTINCT r.run_id FROM biz_op_v327_runs r JOIN biz_op_v327_run_inputs i USING(run_id)
+        WHERE i.dataset_id=? AND r.state='PUBLISHED'`).iterate(id)) {
+        runIds.add(related.run_id); if (runIds.size > 4096) fail('BIZOP_DELETE_PREVIEW_LIMIT');
       }
-      return charge({ objectId: id, kind: row.kind, dataDate: row.dataDate, version: row.publicVersion,
-        operationMonth: row.activatedAt.slice(0, 7), originals });
+      return charge({ objectId: id, kind: row.kind, dataDate: row.data_date, version: row.public_version,
+        operationMonth: row.activated_at.slice(0, 7), originals });
     });
     const runs = [...runIds].sort().map((id) => {
-      const row = queries.readPublishedRunForDelete(id);
+      const row = db.prepare("SELECT * FROM biz_op_v327_runs WHERE run_id=? AND state='PUBLISHED'").get(id);
       if (!row) fail('BIZOP_DELETE_SELECTION_CHANGED', '选取的结果表已被删除，请重新选取');
       const originals = [];
-      for (const item of queries.iterateRunArtifacts(id)) {
-        artifacts.add(item.artifactId); originals.push(charge({ artifactId: item.artifactId, originalName: item.originalName, sha256: item.sha256 }));
+      for (const item of db.prepare('SELECT * FROM biz_op_v327_run_artifacts WHERE run_id=? ORDER BY artifact_id').iterate(id)) {
+        artifacts.add(item.artifact_id); originals.push(charge({ artifactId: item.artifact_id, originalName: item.source_file_name, sha256: item.source_sha256 }));
       }
-      return charge({ objectId: id, startDate: row.startDate, endDate: row.endDate, version: row.resultVersion,
-        manifestDigest: row.manifestDigest,
-        operationMonth: row.operationMonth, tableName: outputName('RESULT_DIFF', { startDate: row.startDate, endDate: row.endDate, version: row.resultVersion }),
+      return charge({ objectId: id, startDate: row.start_date, endDate: row.end_date, version: row.result_version,
+        manifestDigest: row.payload_manifest_digest,
+        operationMonth: row.operation_month, tableName: outputName('RESULT_DIFF', { startDate: row.start_date, endDate: row.end_date, version: row.result_version }),
         directlySelected: selection.runIds.includes(id), originals });
     });
     const inputOwners = new Set(selection.datasetIds);
@@ -50,7 +51,7 @@ function createBizOpDeletePreview({ catalog, admission }) {
       const artifact = catalog.archive.getArtifact(id); if (!artifact) fail('BIZOP_DELETE_ORIGINAL_CHANGED');
       const locked = catalog.archive.getBatch(artifact.batchId).locked;
       // 当前 artifact 的业务保护与相同 blob 的其他归档引用分别计数；本模块从不删除归档文件。
-      if (artifact.blobId && catalog.archive.hasOtherArtifactForBlob(artifact.blobId, id)) references.sharedBlobOriginals += 1;
+      if (artifact.blobId && db.prepare('SELECT 1 FROM archive_artifacts WHERE blob_id=? AND id!=? LIMIT 1').get(artifact.blobId, id)) references.sharedBlobOriginals += 1;
       if (locked) references.userLockedOriginals += 1;
       let keep = locked; let remove = locked;
       for (const hold of catalog.archive.listArtifactHolds(id)) {

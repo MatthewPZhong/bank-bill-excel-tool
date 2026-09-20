@@ -323,7 +323,7 @@ test('导出 beforeStart 来源冻结失败前交付真实 Task 身份，无需 
   const identities = []; const order = [];
   const coordinator = createBizOpExportCoordinator({ admission: { readTask: (_id, work) => work({ bindTask(id) {
     assert.equal(id, 'real-export-task'); order.push('bind'); } }) },
-  catalog: { db: { prepare() { throw new Error('source unavailable'); } } } });
+  catalog: { queries: { readExportObject() { throw new Error('source unavailable'); } } } });
   await assert.rejects(coordinator.runExport({ outputKind: 'ERRORS', objectId: 'report-one',
     filePlan: { inputs: [], outputs: [{}] }, runtime: { start() { assert.fail('来源未验证不可启动 worker'); } },
     taskLifecycle: { runFileTask: ({ beforeStart }) => beforeStart({ taskRunId: 'real-export-task' }, {}) },

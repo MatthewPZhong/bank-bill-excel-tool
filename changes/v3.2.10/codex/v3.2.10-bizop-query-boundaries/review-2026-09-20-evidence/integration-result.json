@@ -1,0 +1,9 @@
+{
+  "command": [
+    "node",
+    "scripts/integration/biz-op-query-boundary.js"
+  ],
+  "exitCode": 0,
+  "elapsedSeconds": 10.33,
+  "log": "review-integration.log"
+}

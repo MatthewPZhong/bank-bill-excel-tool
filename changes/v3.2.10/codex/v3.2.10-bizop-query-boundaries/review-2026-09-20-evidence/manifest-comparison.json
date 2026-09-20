@@ -1,0 +1,18 @@
+{
+  "current": {
+    "exitCode": 1,
+    "cwd": "/private/tmp/bizop-query-review-20260920-7uphg1r9"
+  },
+  "baseline": {
+    "exitCode": 1,
+    "cwd": "/private/tmp/bizop-query-base-20260920-8d6veonb"
+  },
+  "allExpectedArtifactsEqual": true,
+  "artifactEquality": {
+    "manifest": true,
+    "capabilityInventory": true,
+    "productionStrategy": true,
+    "coverageReport": true
+  },
+  "expectedActionCount": null
+}

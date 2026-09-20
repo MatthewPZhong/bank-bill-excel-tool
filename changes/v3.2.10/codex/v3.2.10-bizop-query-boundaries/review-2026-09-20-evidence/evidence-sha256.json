@@ -1,0 +1,18 @@
+{
+  "integration-result.json": "edba5132df97a17ff8041b82d762f51808bc3a1fa6d4ae8837198d1577a5a121",
+  "integration.txt": "f6ffb6e79e95f4bc4fc6b27da520ec8533f82434ed470ca45427977e6aad36bf",
+  "lint-result.json": "e3e87f9076425614d2d7c2f8a496edfb95a52c95f9d6547121221c64fe764517",
+  "lint.txt": "c396d49d3be1db82282d6b91bc9412269ecdb1f1a25a6777cb572d10d240e182",
+  "manifest-baseline-expected.json": "aa1e1528ccdb01957e676775bd1b7ad85ab3372fd73ce7c4d1b6b27f3a310132",
+  "manifest-baseline.txt": "317f47f6e6eb4806513d82877ae1b4c680f3dcd5ea3cb26f6bdd3e25a0494708",
+  "manifest-comparison.json": "7dcd9541d1eabb749cd8d99b0d8b639ac9fba166aa69a3edcaf0b8a8e55a2e6f",
+  "manifest-current-expected.json": "aa1e1528ccdb01957e676775bd1b7ad85ab3372fd73ce7c4d1b6b27f3a310132",
+  "manifest-current.txt": "917b2ee88b43f44ca5555c325fd711542476023bc44542a4549acf22e56d1044",
+  "query-boundary-inventory.json": "c74372b4142b18d7b351273561564c5ec4874d041d53012f89f3e66f3a4a834a",
+  "reviewed-files.tar.gz": "b3c4dde91e7802f941144e4db9def8e5aa04903659dfbbffcfae6027357b012a",
+  "snapshot.json": "01e87de9402bca0641213ccc5e7b7b17c570d320b8ea02dd6d115156c14a59bd",
+  "tracked-changes.patch": "730c6e59b8ccc2424ca9524f7c4aaa1320e17655839c2d0d0ed5a11aa4d31400",
+  "unit-result.json": "41fe3b1acc476e9bb1e66a82c2942cffd0462c1b21c7ba9d43974f06d1afb27d",
+  "unit.txt": "766b450555fa391c1c46b186064e9324c09227bc1147d27d70f4c4de70939dad",
+  "verification.json": "b9baa16395fb8b71058525b0f3aa6aa115a0f564a289bf60ad91055b2e8bed9a"
+}

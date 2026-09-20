@@ -1,0 +1,39 @@
+G5 BizOP 查询边界集成验证：审查修正后的最终执行证据
+
+本文件转存已观察到的最终9/9 PASS、SKIP0工具输出，未为证据落盘额外重复运行测试。
+本次重跑原因：审查要求补齐完整JSON序列化相等、RAW两个oracle相同故障初态和实际修复bytes断言，以及空诊断真实维护回收事实；同步真实目录fsync能力分流与本地临时目录清理。
+此前已保存的9/9来源保留在integration-snapshot.json的supersededEvidence；历史首轮8/8不能代替最终结果。
+
+实际命令：node scripts/integration/biz-op-query-boundary.js
+工作目录：/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-bizop-query-boundaries
+运行环境：Node.js v25.8.0；darwin；arm64；OS release 24.6.0
+Git HEAD：11086a3cbf632a30adbcfa796e4cd81810c5aef9（包含本功能未提交改动）
+环境及文件摘要采集时间：2026-09-20T12:08:38.466Z
+时间边界：以上为证据落盘前环境快照时间，并非补造的测试开始/结束时间。
+SHA256范围：脚本及三份固定基线fixture，见integration-snapshot.json。
+
+工具返回完整转存（按顺序；tool字段标明调用名称）：
+{"tool":"exec_command","chunk_id":"db9c6b","wall_time_seconds":1.001336667,"session_id":31955,"original_token_count":11,"output":"宿主真实目录 fsync 能力：supported\n"}
+{"tool":"write_stdin","chunk_id":"a986ad","wall_time_seconds":5.001898917,"session_id":31955,"original_token_count":101,"output":"PASS 真实导入、计算与六类导出的完整快照和删除闭包等价，文件可完整读回\nPASS 真实异常导入后 READY 诊断完整导出等价，成功导入的空诊断走原维护回收\nPASS 缺失、状态、hold、hash、行数、manifest 与 RESULT 端点错误完整等价\nPASS RAW 真实目录副本按原规则修复，目录与 canonical Blob 均损坏时拒绝且错误等价\n"}
+{"tool":"write_stdin","chunk_id":"1516c5","wall_time_seconds":0.000010833,"exit_code":0,"original_token_count":152,"output":"PASS 锁、其他 owner 与任意状态共享 blob 改变完整删除闭包；确认过期、复用及 generation 继续生效\nPASS 选择上限 4096（去重前）、空选择与非法引用维持同一错误\nPASS 删除 charge 字节 49152 通过、49153 拒绝，完整结果与基线一致\nPASS 删除闭包精确 65536 字节通过、65537 拒绝，预览响应和 64 个上限保留\nPASS 真实 SQLite 来源迭代恰好 4096 元数据通过；第 4097 条停止且关闭 iterator\n\n==== 9/9 PASS ====\nSKIP 0/9；跳过项不计入 PASS，未执行的平台成功路径不属于本轮验证结果。\n"}
+
+本轮完整stdout：
+宿主真实目录 fsync 能力：supported
+PASS 真实导入、计算与六类导出的完整快照和删除闭包等价，文件可完整读回
+PASS 真实异常导入后 READY 诊断完整导出等价，成功导入的空诊断走原维护回收
+PASS 缺失、状态、hold、hash、行数、manifest 与 RESULT 端点错误完整等价
+PASS RAW 真实目录副本按原规则修复，目录与 canonical Blob 均损坏时拒绝且错误等价
+PASS 锁、其他 owner 与任意状态共享 blob 改变完整删除闭包；确认过期、复用及 generation 继续生效
+PASS 选择上限 4096（去重前）、空选择与非法引用维持同一错误
+PASS 删除 charge 字节 49152 通过、49153 拒绝，完整结果与基线一致
+PASS 删除闭包精确 65536 字节通过、65537 拒绝，预览响应和 64 个上限保留
+PASS 真实 SQLite 来源迭代恰好 4096 元数据通过；第 4097 条停止且关闭 iterator
+
+==== 9/9 PASS ====
+SKIP 0/9；跳过项不计入 PASS，未执行的平台成功路径不属于本轮验证结果。
+
+最终退出码：0
+工具wall_time_seconds是各次调用等待时间，不等于整轮执行耗时。
+本机真实目录fsync能力为supported，9组全部执行、无SKIP。Windows真实能力和运行未执行，不能将能力分流代码等同Windows通过。
+脚本拥有临时userData及兄弟outputs并在finally清理。共有helper若在注册关闭回调前初始化失败，句柄不能由调用方取得；本脚本仍尝试删除，若被开放句柄阻塞则报清理失败，不宣称已完全清理。
+未执行Windows/Excel/WPS/GUI/安装包验收；本证据为macOS本地集成验证。

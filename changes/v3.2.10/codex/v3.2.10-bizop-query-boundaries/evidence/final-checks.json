@@ -1,0 +1,10 @@
+{
+  "filesChecked": 7,
+  "missingLocalLinks": [],
+  "gitDiffCheckExitCode": 0,
+  "reviewProductionHashes": "7/7 matched",
+  "designCopies": 26,
+  "modifiedDesignInputs": [
+    "changes/v3.2.10/README.md"
+  ]
+}

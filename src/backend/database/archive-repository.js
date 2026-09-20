@@ -2488,6 +2488,12 @@ class ArchiveRepository {
     `).all(Number(blobId)).map(mapArtifact);
   }
 
+  hasOtherArtifactForBlob(blobId, artifactId) {
+    return Boolean(this.db.prepare(
+      'SELECT 1 FROM archive_artifacts WHERE blob_id=? AND id!=? LIMIT 1'
+    ).get(blobId, artifactId));
+  }
+
   listUnresolvedArtifactSourcePaths(options = {}) {
     const excludeBatchId = options.excludeBatchId === undefined ? null : Number(options.excludeBatchId);
     if (excludeBatchId !== null && (!Number.isSafeInteger(excludeBatchId) || excludeBatchId < 1)) {
