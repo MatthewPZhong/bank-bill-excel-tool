@@ -1,0 +1,59 @@
+{
+  "executedAt": "2026-09-20T13:08:23.948Z",
+  "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters",
+  "scope": [
+    "tests/helpers/archive-aware-operation-harness.js",
+    "tests/unit/main-process/archive-aware-prepared-resource-entry.test.js",
+    "tests/unit/main-process/prepared-resource-scope.test.js",
+    "tests/unit/main-process/task-adapters.test.js"
+  ],
+  "rule": "将项目 no-undef 规则显式用于本次四个测试文件；不是 npm run lint 或 release-check",
+  "errors": 0,
+  "warnings": 0,
+  "results": [
+    {
+      "filePath": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters/tests/helpers/archive-aware-operation-harness.js",
+      "messages": [],
+      "suppressedMessages": [],
+      "errorCount": 0,
+      "fatalErrorCount": 0,
+      "warningCount": 0,
+      "fixableErrorCount": 0,
+      "fixableWarningCount": 0,
+      "usedDeprecatedRules": []
+    },
+    {
+      "filePath": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters/tests/unit/main-process/archive-aware-prepared-resource-entry.test.js",
+      "messages": [],
+      "suppressedMessages": [],
+      "errorCount": 0,
+      "fatalErrorCount": 0,
+      "warningCount": 0,
+      "fixableErrorCount": 0,
+      "fixableWarningCount": 0,
+      "usedDeprecatedRules": []
+    },
+    {
+      "filePath": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters/tests/unit/main-process/prepared-resource-scope.test.js",
+      "messages": [],
+      "suppressedMessages": [],
+      "errorCount": 0,
+      "fatalErrorCount": 0,
+      "warningCount": 0,
+      "fixableErrorCount": 0,
+      "fixableWarningCount": 0,
+      "usedDeprecatedRules": []
+    },
+    {
+      "filePath": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters/tests/unit/main-process/task-adapters.test.js",
+      "messages": [],
+      "suppressedMessages": [],
+      "errorCount": 0,
+      "fatalErrorCount": 0,
+      "warningCount": 0,
+      "fixableErrorCount": 0,
+      "fixableWarningCount": 0,
+      "usedDeprecatedRules": []
+    }
+  ]
+}

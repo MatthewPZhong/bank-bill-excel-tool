@@ -5,6 +5,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { createApplicationRecoveryComposition } = require('../../src/main-process/application-recovery/composition');
+const { createTerminalRouteRegistry } = require('../../src/main-process/archive-center/terminal-route-registry');
+const { createPreFundTerminalRouteRegistration, preFundRunTerminalRoute } = require('../../src/main-process/pre-fund-archive-lineage');
 
 const root = path.resolve(__dirname, '../..');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
@@ -152,7 +154,28 @@ test.describe('前置资金对账 UI / preload / IPC 接线', () => {
     assert.match(runHandler, /lineageIntents:\s*plan\.lineageIntents/);
     assert.match(runHandler, /expectedDatasets:\s*plan\.expectedDatasets/);
     assert.match(runHandler, /taskRunId:\s*taskContext\.operationContext\.taskRunId/);
-    assert.match(runHandler, /terminalStatus === 'succeeded'[\s\S]*acknowledgeRunByTaskRun/);
+    assert.match(runHandler, /afterTerminal:\s*terminalRouteRegistry\.createAfterTerminal\(preFundRunTerminalRoute\(taskRunId\)\)/);
+    assert.match(runHandler, /afterTerminalIntent:\s*preFundRunTerminalRoute\(taskRunId\)/);
+    assert.match(main, /createPreFundTerminalRouteRegistration\(\{\s*getService:\s*getPreFundReconciliationService\s*\}\)/);
+    const acknowledged = [];
+    const terminalRoutes = createTerminalRouteRegistry([createPreFundTerminalRouteRegistration({
+      getService: () => ({ acknowledgeRunByTaskRun: (taskRunId) => acknowledged.push(taskRunId) })
+    })]);
+    const context = {
+      taskRunId: 'pre-fund-run-fixture', taskKey: 'pre-fund-reconciliation:run',
+      moduleId: 'pre-fund-reconciliation', parentRunId: 'pre-fund-flow', operationKey: 'pre-fund-operation'
+    };
+    const afterTerminal = terminalRoutes.createAfterTerminal(preFundRunTerminalRoute(context.taskRunId));
+    for (const terminalStatus of ['failed', 'cancelled']) {
+      await afterTerminal({ context, terminalStatus });
+    }
+    assert.deepEqual(acknowledged, [], '未成功终态不得 ACK receipt');
+    await afterTerminal({ context, terminalStatus: 'succeeded' });
+    assert.deepEqual(acknowledged, [context.taskRunId]);
+    await assert.rejects(afterTerminal({
+      context: { ...context, taskRunId: 'other-task' }, terminalStatus: 'succeeded'
+    }), /owner/);
+    assert.deepEqual(acknowledged, [context.taskRunId], 'owner 冲突不得确认另一任务 receipt');
     assert.match(
       runHandler,
       /catch \(error\)[\s\S]*preservePreFundRunOwnerAfterMirrorCompensationFailure\([\s\S]*taskContext\.operationContext\.taskRunId[\s\S]*preFundFailureResult\(error\)/

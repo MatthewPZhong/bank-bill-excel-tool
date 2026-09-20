@@ -1,0 +1,14 @@
+✔ main 用冻结 FilePlan settle exact artifact 后才把 artifactId handoff 送入 import worker (2.133125ms)
+✔ VCC 四个 file action 统一走 FilePlan authority，三类输出以 receipt 结算全部 keys (8.517917ms)
+✔ VCC calculate Task Run 建立失败时零 worker，成功时 exact5 贯穿并绑定 run identity (7.806959ms)
+✔ VCC pre-critical cancel 终结原batch，protected等待业务终态，worker crash归为failed (5.191542ms)
+✔ VCC no-file terminal 持久失败只登记原 Task Run owner outbox (0.2865ms)
+✔ 真实 worker 强杀后按 taskRunId 恢复 partial records、成功输入和原 archive 血缘 (1229.928042ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1480.330458

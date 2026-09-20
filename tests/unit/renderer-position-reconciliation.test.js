@@ -21,6 +21,15 @@ const rendererDialogs = fs.readFileSync(path.join(ROOT, 'src', 'renderer-dialogs
 const preload = fs.readFileSync(path.join(ROOT, 'src', 'preload.js'), 'utf8');
 const previews = fs.readFileSync(path.join(ROOT, 'src', 'renderer-previews.js'), 'utf8');
 const mainProcess = fs.readFileSync(path.join(ROOT, 'src', 'main.js'), 'utf8');
+const positionTaskOwner = fs.readFileSync(
+  path.join(ROOT, 'src/main-process/position-reconciliation/task-owner.js'), 'utf8'
+);
+const positionTaskAdapter = fs.readFileSync(
+  path.join(ROOT, 'src/main-process/position-reconciliation/task-adapter.js'), 'utf8'
+);
+const taskAdapterComposition = fs.readFileSync(
+  path.join(ROOT, 'src/main-process/task-adapter-composition.js'), 'utf8'
+);
 const operationLifecycle = fs.readFileSync(
   path.join(
     ROOT,
@@ -540,33 +549,42 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
     assert.match(mainProcess, /expectedPendingOperation:\s*pendingSideDbOperation/);
     assert.match(mainProcess, /initialSideDbCheckpoint,/);
     assert.match(mainProcess, /POSITION_SIDE_DB_BOOTSTRAP_SETTING/);
-    assert.match(mainProcess, /POSITION_SIDE_DB_PENDING_SETTING/);
-    assert.match(mainProcess, /positionReconciliationOperationContext\.run/);
+    assert.match(mainProcess, /const pendingSideDbOperation = positionTaskOwner\.readPositionPendingRaw\(\)/);
+    assert.match(mainProcess, /positionTaskOwner\.completePositionServiceInitialization\(checkpoint\)/);
+    assert.match(positionTaskOwner, /POSITION_SIDE_DB_PENDING_SETTING/);
+    assert.match(positionTaskOwner, /positionReconciliationOperationContext\.run/);
     assert.match(
-      mainProcess,
-      /JSON\.stringify\(checkpoint\)/
+      positionTaskOwner,
+      /writeSetting\(POSITION_SIDE_DB_CHECKPOINT_SETTING, JSON\.stringify\(checkpoint\)\)/
     );
-    assert.match(mainProcess, /channel\.startsWith\('position-reconciliation:'\)/);
-    assert.match(mainProcess, /syncPositionReconciliationCheckpoint\(\)/);
+    assert.match(mainProcess, /createBusinessTaskAdapterRegistry\(\{[\s\S]*?positionOwner: positionTaskOwner/);
+    assert.match(taskAdapterComposition, /'position-reconciliation-process': 'position-reconciliation'/);
+    assert.match(taskAdapterComposition, /createPositionTaskAdapter\(\{ owner: positionOwner,/);
+    const entryStart = mainProcess.indexOf('async function runArchiveAwareOperation(');
+    const entryEnd = mainProcess.indexOf('function runRegisteredBusinessOperation(', entryStart);
+    const entry = mainProcess.slice(entryStart, entryEnd);
+    assert.match(entry, /taskAdapterRegistry\.resolve\(policy\.taskKey\)\.createInvocation\(/);
+    assert.doesNotMatch(entry, /startsWith\(['"]position-reconciliation:/);
+    assert.match(positionTaskOwner, /syncPositionReconciliationCheckpoint\(\)/);
   });
 
   test('平盘写操作独占执行，并在 checkpoint 同步前校验 token 与存档持久性', () => {
-    assert.match(mainProcess, /if \(positionReconciliationOperationActive\)/);
-    assert.match(mainProcess, /const unresolvedPending = database\.getSetting\(POSITION_SIDE_DB_PENDING_SETTING\)/);
-    assert.match(mainProcess, /runPositionOperationLifecycle\(\{/);
+    assert.match(positionTaskOwner, /if \(positionReconciliationOperationActive\)/);
+    assert.match(positionTaskOwner, /const unresolvedPending = readSetting\(POSITION_SIDE_DB_PENDING_SETTING\)/);
+    assert.match(positionTaskOwner, /runPositionOperationLifecycle\(\{/);
     assert.match(operationLifecycle, /persistedPending\.operationToken !== operationToken/);
     assert.match(operationLifecycle, /persistedPending\.archiveState !== 'durable'/);
     assert.match(operationLifecycle, /pendingBeforeClear\.operationToken !== operationToken/);
-    const recoveryStart = mainProcess.indexOf('function persistPositionArchiveIntentIfNeeded');
-    const recoveryEnd = mainProcess.indexOf('function recoverPositionArchiveIntent', recoveryStart);
-    const recoveryFlow = mainProcess.slice(recoveryStart, recoveryEnd);
+    const recoveryStart = positionTaskOwner.indexOf('function persistPositionArchiveIntentIfNeeded');
+    const recoveryEnd = positionTaskOwner.indexOf('function recoverPositionArchiveIntent', recoveryStart);
+    const recoveryFlow = positionTaskOwner.slice(recoveryStart, recoveryEnd);
     assert.match(
       recoveryFlow,
-      /const owner = positionPendingOwner\(pending\);[\s\S]*if \(manifestOwned\) \{[\s\S]*archiveCenterService\.persistTaskTerminalIntent\(\{[\s\S]*settleFiles: files\.map\(\(file\) => \(\{[\s\S]*artifactKey: file\.artifactKey/
+      /const owner = positionPendingOwner\(pending\);[\s\S]*if \(manifestOwned\) \{[\s\S]*getArchiveCenter\(\)\.persistTaskTerminalIntent\(\{[\s\S]*settleFiles: files\.map\(\(file\) => \(\{[\s\S]*artifactKey: file\.artifactKey/
     );
     assert.match(
       recoveryFlow,
-      /if \(owner\.kind !== 'file-batch'\)[\s\S]*archiveCenterService\.persistAppendIntent\(\{\s*batchContext: owner\.batchContext,/
+      /if \(owner\.kind !== 'file-batch'\)[\s\S]*getArchiveCenter\(\)\.persistAppendIntent\(\{\s*batchContext: owner\.batchContext,/
     );
     assert.match(recoveryFlow, /缺少原任务 batchContext，禁止建立幽灵批次/);
     assert.doesNotMatch(
@@ -575,17 +593,17 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
       '平盘恢复只能向 pending 原 batch 追加，不得建批或猜 latest'
     );
     assert.match(
-      mainProcess,
+      positionTaskOwner,
       /const files = requirePositionPendingArchiveFiles\(pending\);[\s\S]*const archiveRequired = pending\.archiveRequired[\s\S]*positionArchiveIntentEvidence\(pending, currentCheckpoint\)/
     );
     assert.match(operationLifecycle, /requirePositionPendingArchiveFiles\(persistedPending\);/);
-    assert.match(mainProcess, /businessState:\s*'running'/);
+    assert.match(positionTaskOwner, /businessState:\s*'running'/);
     assert.match(
-      mainProcess,
+      positionTaskOwner,
       /function markPositionBusinessOutcome\(result, \{ terminalForCurrentTask = false \} = \{\}\)/
     );
     assert.match(
-      mainProcess,
+      positionTaskOwner,
       /positionBusinessStateForResult\(terminalResult, SUCCESS_STATUSES\)/
     );
     assert.match(operationLifecycle, /result && result\.archiveDeferred === true/);
@@ -593,8 +611,10 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
     assert.match(operationLifecycle, /const outputPublished = files\.some/);
     assert.match(operationLifecycle, /sourceSnapshotMatchesStat\(file\.beforeSnapshot, stat\)/);
     assert.match(operationLifecycle, /archiveResult && archiveResult\.handled === false/);
-    assert.match(mainProcess, /settlePositionArchiveResult\(\{/);
-    assert.match(mainProcess, /persistCurrentPositionArchiveIntentIfNeeded\(\)/);
+    assert.match(positionTaskAdapter, /settlePositionArchiveResult\(\{/);
+    assert.match(positionTaskAdapter, /persistRecovery: owner\.persistCurrentPositionArchiveIntentIfNeeded/);
+    assert.match(positionTaskOwner, /function persistCurrentPositionArchiveIntentIfNeeded\(\)/);
+    assert.match(positionTaskAdapter, /admitPosition:[\s\S]*?owner\.runPositionReconciliationOperation\(/);
     assert.match(operationLifecycle, /markDurable\(recoveryIntent \|\| archiveResult\)/);
     assert.match(
       operationLifecycle,

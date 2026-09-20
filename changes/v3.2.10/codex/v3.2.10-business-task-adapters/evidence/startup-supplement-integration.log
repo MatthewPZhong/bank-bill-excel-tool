@@ -1,0 +1,276 @@
+
+> bank-bill-excel-tool@3.2.9 test:integration
+> node scripts/integration-runner.js
+
+==== integration runner: 63 个脚本 ====
+
+[integration] ▶ acquiring-bill-currency-idle-cleanup ... PASS 38/38 (877ms)
+
+[integration] ▶ acquiring-bill-currency-n4-migration ... PASS 128/128 (540ms)
+
+[integration] ▶ acquiring-engine-migration ... PASS 45/45 (4612ms)
+
+[integration] ▶ acquiring-index-slim-v2 ... PASS 22/22 (199ms)
+
+[integration] ▶ acquiring-side-db-parity ... PASS 19/19 (565ms)
+
+[integration] ▶ application-recovery-governance ... PASS 4/4 (772ms)
+
+[integration] ▶ archive-biz-op-auto-report-retention ... PASS 6/6 (7195ms)
+
+[integration] ▶ archive-center-module-retention ... PASS 11/11 (1325ms)
+
+[integration] ▶ archive-center-permanent-delete ... PASS 52/52 (28151ms)
+
+[integration] ▶ background-execution-pure-compute-canary ... PASS 9/9 (103ms)
+
+[integration] ▶ background-execution-recovery-canary ... PASS 9/9 (114ms)
+
+[integration] ▶ background-execution-recovery-control ... PASS 27/27 (88ms)
+
+[integration] ▶ bank-bu-background-dual-parser ... PASS 9/9 (261ms)
+
+[integration] ▶ bank-bu-background-single-jobs ... PASS 21/21 (490ms)
+
+[integration] ▶ bank-bu-recon-side-db-parity ... PASS 17/17 (304ms)
+
+[integration] ▶ bank-statement-hit-scenario-report ... PASS 49/49 (208ms)
+
+[integration] ▶ bank-statement-many-to-many-review-sheet ... PASS 33/33 (215ms)
+
+[integration] ▶ bank-statement-universal-import-routing ... PASS 20/20 (283ms)
+
+[integration] ▶ big-table-import-engine ... PASS 19/19 (7516ms)
+
+[integration] ▶ biz-op-auto-error-report ... PASS 12/12 (9850ms)
+
+[integration] ▶ biz-op-recon-side-db-parity ... PASS 16/16 (350ms)
+
+[integration] ▶ bizop-flow-engine-migration ... PASS 73/73 (5150ms)
+
+[integration] ▶ dark-mode-schedule-settings ... PASS 6/6 (218ms)
+
+[integration] ▶ duplicate-inbound-match-end-to-end ... PASS 31/31 (396ms)
+
+[integration] ▶ fund-transfer-recon-account-mapping ... PASS 19/19 (201ms)
+
+[integration] ▶ gateway-channel-filter-equivalence ... PASS 23/23 (220ms)
+
+[integration] ▶ linked-fx-open7-stale-hit-e2e ... PASS 27/27 (196ms)
+
+[integration] ▶ linked-table-delete-by-range-tablekey ... PASS 73/73 (209ms)
+
+[integration] ▶ new-account-balance-statement ... PASS 36/36 (234ms)
+
+[integration] ▶ pending-data-reconciliation ... PASS 33/33 (53ms)
+
+[integration] ▶ pending-engine-migration ... PASS 57/57 (5349ms)
+
+[integration] ▶ pending-removal-reconcile ... PASS 62/62 (200ms)
+
+[integration] ▶ position-reconciliation-side-db-parity ... PASS 38/38 (260ms)
+
+[integration] ▶ position-startup-task-recovery ... PASS 3/3 (2307ms)
+
+[integration] ▶ pre-fund-reconciliation-output-contract ... PASS 15/15 (279ms)
+
+[integration] ▶ pre-fund-reconciliation-side-db-parity ... PASS 69/69 (338ms)
+
+[integration] ▶ refund-backfill-yellow-fill-e2e ... PASS 258/258 (211ms)
+
+[integration] ▶ statement-generation-pipeline ... PASS 45/45 (245ms)
+
+[integration] ▶ task-adapter-recovery ... PASS 4/4 (447ms)
+
+[integration] ▶ toolbox-large-file-stream ... PASS 50/50 (131870ms)
+
+[integration] ▶ toolbox-large-split-multi-sheet ... PASS 31/31 (258692ms)
+
+[integration] ▶ toolbox-multi-sheet-merge ... PASS 16/16 (15027ms)
+
+[integration] ▶ toolbox-multi-split-roundtrip ... PASS 17/17 (477ms)
+
+[integration] ▶ toolbox-roundtrip ... PASS 30/30 (183ms)
+
+[integration] ▶ toolbox-row-split-admission ... PASS 2/2 (809ms)
+
+[integration] ▶ toolbox-row-split-archive-delete ... PASS 2/2 (1043ms)
+
+[integration] ▶ v2.1.10-a3-phase1 ... PASS 40/40 (2935ms)
+
+[integration] ▶ v2.1.10-a3-phase2 ... PASS 56/56 (2137ms)
+
+[integration] ▶ v2.1.10-a4-phase3 ... PASS 75/75 (14834ms)
+
+[integration] ▶ v2.1.10-n4-cont-1-phase4 ... PASS 33/33 (828ms)
+
+[integration] ▶ v2.1.10-n4-cont-2-phase5 ... PASS 43/43 (542ms)
+
+[integration] ▶ v2.1.12-beta-multiworker-nested ... PASS (no count) (2846ms)
+
+[integration] ▶ v2.1.9-n5-end-to-end ... PASS 68/68 (229ms)
+
+[integration] ▶ v2.1.9-n5-migration ... PASS 67/67 (222ms)
+
+[integration] ▶ v2.1.9-sr-fix-1-coverage ... PASS 148/148 (264ms)
+
+[integration] ▶ v2.1.9-sr-log-1 ... PASS 33/33 (196ms)
+
+[integration] ▶ v3.0.0-linked-streaming-import ... PASS 19/19 (230ms)
+
+[integration] ▶ v3.0.1-linked-gateway-upsert ... PASS 40/40 (238ms)
+
+[integration] ▶ v3.0.4-boc-dispatch-order-fix ... PASS 31/31 (258ms)
+
+[integration] ▶ vcc-financial-op-adjustment-archive-chain ... PASS 226/226 (1288ms)
+
+[integration] ▶ vcc-financial-op-destructive-state-chain ... PASS 77/77 (1490ms)
+
+[integration] ▶ vcc-financial-op-effective-result ... PASS 19/19 (137ms)
+
+[integration] ▶ vcc-financial-op-historical-template-export ... PASS 29/29 (1089ms)
+
+==== 汇总（518395ms 总耗时）====
+  ✓ acquiring-bill-currency-idle-cleanup 38/38 (877ms)
+  ✓ acquiring-bill-currency-n4-migration 128/128 (540ms)
+  ✓ acquiring-engine-migration 45/45 (4612ms)
+  ✓ acquiring-index-slim-v2 22/22 (199ms)
+  ✓ acquiring-side-db-parity 19/19 (565ms)
+  ✓ application-recovery-governance 4/4 (772ms)
+  ✓ archive-biz-op-auto-report-retention 6/6 (7195ms)
+  ✓ archive-center-module-retention 11/11 (1325ms)
+  ✓ archive-center-permanent-delete 52/52 (28151ms)
+  ✓ background-execution-pure-compute-canary 9/9 (103ms)
+  ✓ background-execution-recovery-canary 9/9 (114ms)
+  ✓ background-execution-recovery-control 27/27 (88ms)
+  ✓ bank-bu-background-dual-parser 9/9 (261ms)
+  ✓ bank-bu-background-single-jobs 21/21 (490ms)
+  ✓ bank-bu-recon-side-db-parity 17/17 (304ms)
+  ✓ bank-statement-hit-scenario-report 49/49 (208ms)
+  ✓ bank-statement-many-to-many-review-sheet 33/33 (215ms)
+  ✓ bank-statement-universal-import-routing 20/20 (283ms)
+  ✓ big-table-import-engine 19/19 (7516ms)
+  ✓ biz-op-auto-error-report 12/12 (9850ms)
+  ✓ biz-op-recon-side-db-parity 16/16 (350ms)
+  ✓ bizop-flow-engine-migration 73/73 (5150ms)
+  ✓ dark-mode-schedule-settings 6/6 (218ms)
+  ✓ duplicate-inbound-match-end-to-end 31/31 (396ms)
+  ✓ fund-transfer-recon-account-mapping 19/19 (201ms)
+  ✓ gateway-channel-filter-equivalence 23/23 (220ms)
+  ✓ linked-fx-open7-stale-hit-e2e 27/27 (196ms)
+  ✓ linked-table-delete-by-range-tablekey 73/73 (209ms)
+  ✓ new-account-balance-statement 36/36 (234ms)
+  ✓ pending-data-reconciliation 33/33 (53ms)
+  ✓ pending-engine-migration 57/57 (5349ms)
+  ✓ pending-removal-reconcile 62/62 (200ms)
+  ✓ position-reconciliation-side-db-parity 38/38 (260ms)
+  ✓ position-startup-task-recovery 3/3 (2307ms)
+  ✓ pre-fund-reconciliation-output-contract 15/15 (279ms)
+  ✓ pre-fund-reconciliation-side-db-parity 69/69 (338ms)
+  ✓ refund-backfill-yellow-fill-e2e 258/258 (211ms)
+  ✓ statement-generation-pipeline 45/45 (245ms)
+  ✓ task-adapter-recovery 4/4 (447ms)
+  ✓ toolbox-large-file-stream 50/50 (131870ms)
+  ✓ toolbox-large-split-multi-sheet 31/31 (258692ms)
+  ✓ toolbox-multi-sheet-merge 16/16 (15027ms)
+  ✓ toolbox-multi-split-roundtrip 17/17 (477ms)
+  ✓ toolbox-roundtrip 30/30 (183ms)
+  ✓ toolbox-row-split-admission 2/2 (809ms)
+  ✓ toolbox-row-split-archive-delete 2/2 (1043ms)
+  ✓ v2.1.10-a3-phase1 40/40 (2935ms)
+  ✓ v2.1.10-a3-phase2 56/56 (2137ms)
+  ✓ v2.1.10-a4-phase3 75/75 (14834ms)
+  ✓ v2.1.10-n4-cont-1-phase4 33/33 (828ms)
+  ✓ v2.1.10-n4-cont-2-phase5 43/43 (542ms)
+  ✓ v2.1.12-beta-multiworker-nested (no count) (2846ms)
+  ✓ v2.1.9-n5-end-to-end 68/68 (229ms)
+  ✓ v2.1.9-n5-migration 67/67 (222ms)
+  ✓ v2.1.9-sr-fix-1-coverage 148/148 (264ms)
+  ✓ v2.1.9-sr-log-1 33/33 (196ms)
+  ✓ v3.0.0-linked-streaming-import 19/19 (230ms)
+  ✓ v3.0.1-linked-gateway-upsert 40/40 (238ms)
+  ✓ v3.0.4-boc-dispatch-order-fix 31/31 (258ms)
+  ✓ vcc-financial-op-adjustment-archive-chain 226/226 (1288ms)
+  ✓ vcc-financial-op-destructive-state-chain 77/77 (1490ms)
+  ✓ vcc-financial-op-effective-result 19/19 (137ms)
+  ✓ vcc-financial-op-historical-template-export 29/29 (1089ms)
+
+[SR-policy-1] rules/integration-test-policy.md §七 已自动同步
+
+=== 当前清单 ===
+## 七、当前集成测试清单（自动同步）
+
+<!-- auto-generated by scripts/integration-runner.js, last-updated: 2026-09-20T23:59:59+08:00 -->
+<!-- DO NOT EDIT MANUALLY — modify scripts/integration/*.js then re-run `npm run test:integration` -->
+
+| 脚本 | 用例数 | 断言数 | 耗时 (ms) |
+|---|---|---|---|
+| `acquiring-bill-currency-idle-cleanup.js` | 38 | 38 | 877 |
+| `acquiring-bill-currency-n4-migration.js` | 128 | 128 | 540 |
+| `acquiring-engine-migration.js` | 45 | 45 | 4612 |
+| `acquiring-index-slim-v2.js` | 22 | 22 | 199 |
+| `acquiring-side-db-parity.js` | 19 | 19 | 565 |
+| `application-recovery-governance.js` | 4 | 4 | 772 |
+| `archive-biz-op-auto-report-retention.js` | 6 | 6 | 7195 |
+| `archive-center-module-retention.js` | 11 | 11 | 1325 |
+| `archive-center-permanent-delete.js` | 52 | 52 | 28151 |
+| `background-execution-pure-compute-canary.js` | 9 | 9 | 103 |
+| `background-execution-recovery-canary.js` | 9 | 9 | 114 |
+| `background-execution-recovery-control.js` | 27 | 27 | 88 |
+| `bank-bu-background-dual-parser.js` | 9 | 9 | 261 |
+| `bank-bu-background-single-jobs.js` | 21 | 21 | 490 |
+| `bank-bu-recon-side-db-parity.js` | 17 | 17 | 304 |
+| `bank-statement-hit-scenario-report.js` | 49 | 49 | 208 |
+| `bank-statement-many-to-many-review-sheet.js` | 33 | 33 | 215 |
+| `bank-statement-universal-import-routing.js` | 20 | 20 | 283 |
+| `big-table-import-engine.js` | 19 | 19 | 7516 |
+| `biz-op-auto-error-report.js` | 12 | 12 | 9850 |
+| `biz-op-recon-side-db-parity.js` | 16 | 16 | 350 |
+| `bizop-flow-engine-migration.js` | 73 | 73 | 5150 |
+| `dark-mode-schedule-settings.js` | 6 | 6 | 218 |
+| `duplicate-inbound-match-end-to-end.js` | 31 | 31 | 396 |
+| `fund-transfer-recon-account-mapping.js` | 19 | 19 | 201 |
+| `gateway-channel-filter-equivalence.js` | 23 | 23 | 220 |
+| `linked-fx-open7-stale-hit-e2e.js` | 27 | 27 | 196 |
+| `linked-table-delete-by-range-tablekey.js` | 73 | 73 | 209 |
+| `new-account-balance-statement.js` | 36 | 36 | 234 |
+| `pending-data-reconciliation.js` | 33 | 33 | 53 |
+| `pending-engine-migration.js` | 57 | 57 | 5349 |
+| `pending-removal-reconcile.js` | 62 | 62 | 200 |
+| `position-reconciliation-side-db-parity.js` | 38 | 38 | 260 |
+| `position-startup-task-recovery.js` | 3 | 3 | 2307 |
+| `pre-fund-reconciliation-output-contract.js` | 15 | 15 | 279 |
+| `pre-fund-reconciliation-side-db-parity.js` | 69 | 69 | 338 |
+| `refund-backfill-yellow-fill-e2e.js` | 258 | 258 | 211 |
+| `statement-generation-pipeline.js` | 45 | 45 | 245 |
+| `task-adapter-recovery.js` | 4 | 4 | 447 |
+| `toolbox-large-file-stream.js` | 50 | 50 | 131870 |
+| `toolbox-large-split-multi-sheet.js` | 31 | 31 | 258692 |
+| `toolbox-multi-sheet-merge.js` | 16 | 16 | 15027 |
+| `toolbox-multi-split-roundtrip.js` | 17 | 17 | 477 |
+| `toolbox-roundtrip.js` | 30 | 30 | 183 |
+| `toolbox-row-split-admission.js` | 2 | 2 | 809 |
+| `toolbox-row-split-archive-delete.js` | 2 | 2 | 1043 |
+| `v2.1.10-a3-phase1.js` | 40 | 40 | 2935 |
+| `v2.1.10-a3-phase2.js` | 56 | 56 | 2137 |
+| `v2.1.10-a4-phase3.js` | 75 | 75 | 14834 |
+| `v2.1.10-n4-cont-1-phase4.js` | 33 | 33 | 828 |
+| `v2.1.10-n4-cont-2-phase5.js` | 43 | 43 | 542 |
+| `v2.1.12-beta-multiworker-nested.js` | - | - | 2846 |
+| `v2.1.9-n5-end-to-end.js` | 68 | 68 | 229 |
+| `v2.1.9-n5-migration.js` | 67 | 67 | 222 |
+| `v2.1.9-sr-fix-1-coverage.js` | 148 | 148 | 264 |
+| `v2.1.9-sr-log-1.js` | 33 | 33 | 196 |
+| `v3.0.0-linked-streaming-import.js` | 19 | 19 | 230 |
+| `v3.0.1-linked-gateway-upsert.js` | 40 | 40 | 238 |
+| `v3.0.4-boc-dispatch-order-fix.js` | 31 | 31 | 258 |
+| `vcc-financial-op-adjustment-archive-chain.js` | 226 | 226 | 1288 |
+| `vcc-financial-op-destructive-state-chain.js` | 77 | 77 | 1490 |
+| `vcc-financial-op-effective-result.js` | 19 | 19 | 137 |
+| `vcc-financial-op-historical-template-export.js` | 29 | 29 | 1089 |
+| **合计** | **2590** | **2590** | **518395** |
+
+> 同步策略：runner 末尾全 PASS 时 in-place 替换本章节；任一脚本 FAIL → 本章节不更新（避免被损坏数据覆盖）。
+
+
+全部 63 个集成脚本通过 ✓

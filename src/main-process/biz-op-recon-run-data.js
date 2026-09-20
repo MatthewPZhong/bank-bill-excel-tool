@@ -1189,7 +1189,35 @@ function reconcileOrphans({ userDataDir, mainDb }) {
   return stats;
 }
 
+function normalizeBizOpRunTerminalRoute(value) {
+  const taskRunId = String(value.taskRunId || '').trim();
+  if (!taskRunId) throw new TypeError('Biz OP terminal route.taskRunId 为空');
+  return { route: 'biz-op-run', taskRunId };
+}
+
+function createBizOpRunTerminalRouteRegistration({
+  getUserDataDir, getMainDb, assertLegacyAvailable, withLegacyRecovery
+}) {
+  if ([getUserDataDir, getMainDb, assertLegacyAvailable, withLegacyRecovery]
+    .some((capability) => typeof capability !== 'function')) {
+    throw new TypeError('Biz OP terminal route 缺少受限 legacy recovery 能力');
+  }
+  return Object.freeze({
+    route: 'biz-op-run',
+    normalize: normalizeBizOpRunTerminalRoute,
+    finalize(payload) {
+      assertLegacyAvailable();
+      const userDataDir = getUserDataDir();
+      return withLegacyRecovery(userDataDir, () => finalizeRunTerminalIntent({
+        ...payload, userDataDir, mainDb: getMainDb()
+      }));
+    }
+  });
+}
+
 module.exports = {
+  createBizOpRunTerminalRouteRegistration,
+  normalizeBizOpRunTerminalRoute,
   MODULE,
   monthOf,
   runBizOpImport,

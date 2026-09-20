@@ -1,0 +1,2021 @@
+{
+  "head": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "counts": {
+    "no-file": 63,
+    "eager": 69,
+    "deferred": 2,
+    "exclude": 134
+  },
+  "policies": [
+    {
+      "channel": "account-mapping:distribute-migration",
+      "taskKey": "account-mapping:distribute-migration",
+      "moduleId": "statement-generator",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "account-mapping:save",
+      "taskKey": "account-mapping:save",
+      "moduleId": "statement-generator",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "balance-adjustment:save",
+      "taskKey": "balance-adjustment:save",
+      "moduleId": "statement-generator",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "big-account-mode:save",
+      "taskKey": "big-account-mode:save",
+      "moduleId": "statement-generator",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "big-account-order:save",
+      "taskKey": "big-account-order:save",
+      "moduleId": "statement-generator",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "big-account:import-bank-info",
+      "taskKey": "big-account:import-bank-info",
+      "moduleId": "statement-generator",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "big-account:save-own-accounts",
+      "taskKey": "big-account:save-own-accounts",
+      "moduleId": "statement-generator",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "file:complete-big-account-selection",
+      "taskKey": "file:complete-big-account-selection",
+      "moduleId": "statement-generator",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "file:export-balance",
+      "taskKey": "file:export-balance",
+      "moduleId": "statement-generator",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "file:export-detail",
+      "taskKey": "file:export-detail",
+      "moduleId": "statement-generator",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "file:import",
+      "taskKey": "file:import",
+      "moduleId": "statement-generator",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "file:save-balance-seed",
+      "taskKey": "file:save-balance-seed",
+      "moduleId": "statement-generator",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "monthly-balance:assemble",
+      "taskKey": "monthly-balance:assemble",
+      "moduleId": "statement-generator",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "deferred",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "monthly-balance:export",
+      "taskKey": "monthly-balance:export",
+      "moduleId": "statement-generator",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "template:save-mappings",
+      "taskKey": "template:save-mappings",
+      "moduleId": "statement-generator",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "template:clear-bill-split-merge-groups",
+      "taskKey": "template:clear-bill-split-merge-groups",
+      "moduleId": "statement-generator",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "template:delete",
+      "taskKey": "template:delete",
+      "moduleId": "statement-generator",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "template:delete-bill-split-row",
+      "taskKey": "template:delete-bill-split-row",
+      "moduleId": "statement-generator",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "template:export-bundle",
+      "taskKey": "template:export-bundle",
+      "moduleId": "statement-generator",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "template:import",
+      "taskKey": "template:import",
+      "moduleId": "statement-generator",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "template:import-bundle",
+      "taskKey": "template:import-bundle",
+      "moduleId": "statement-generator",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "template:rename",
+      "taskKey": "template:rename",
+      "moduleId": "statement-generator",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "template:save-amount-split-rules",
+      "taskKey": "template:save-amount-split-rules",
+      "moduleId": "statement-generator",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "template:save-bill-split-amount-rules",
+      "taskKey": "template:save-bill-split-amount-rules",
+      "moduleId": "statement-generator",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "template:save-bill-split-mappings",
+      "taskKey": "template:save-bill-split-mappings",
+      "moduleId": "statement-generator",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "template:save-bill-split-merge-group",
+      "taskKey": "template:save-bill-split-merge-group",
+      "moduleId": "statement-generator",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "template:save-bill-split-meta",
+      "taskKey": "template:save-bill-split-meta",
+      "moduleId": "statement-generator",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "template:save-bill-split-row",
+      "taskKey": "template:save-bill-split-row",
+      "moduleId": "statement-generator",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "template:save-bill-split-row-count",
+      "taskKey": "template:save-bill-split-row-count",
+      "moduleId": "statement-generator",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "template:save-filename-fixed-field",
+      "taskKey": "template:save-filename-fixed-field",
+      "moduleId": "statement-generator",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "template:set-child-parent",
+      "taskKey": "template:set-child-parent",
+      "moduleId": "statement-generator",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "template:set-parent-status",
+      "taskKey": "template:set-parent-status",
+      "moduleId": "statement-generator",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "new-account:export",
+      "taskKey": "new-account:export",
+      "moduleId": "new-account-generator",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "new-account:generate",
+      "taskKey": "new-account:generate",
+      "moduleId": "new-account-generator",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "deferred",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bank-statement:batch-import",
+      "taskKey": "bank-statement:batch-import",
+      "moduleId": "bank-statement-process",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bank-statement:export",
+      "taskKey": "bank-statement:export",
+      "moduleId": "bank-statement-process",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bank-statement:import",
+      "taskKey": "bank-statement:import",
+      "moduleId": "bank-statement-process",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bank-statement:run",
+      "taskKey": "bank-statement:run",
+      "moduleId": "bank-statement-process",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "channels:create",
+      "taskKey": "channels:create",
+      "moduleId": "bank-statement-process",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "channels:delete",
+      "taskKey": "channels:delete",
+      "moduleId": "bank-statement-process",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "channels:update",
+      "taskKey": "channels:update",
+      "moduleId": "bank-statement-process",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "fund-transfer-account-mapping:save",
+      "taskKey": "fund-transfer-account-mapping:save",
+      "moduleId": "bank-statement-process",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "gateway-recon:import",
+      "taskKey": "gateway-recon:import",
+      "moduleId": "bank-statement-process",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "scenarios:batch-delete",
+      "taskKey": "scenarios:batch-delete",
+      "moduleId": "bank-statement-process",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "scenarios:create",
+      "taskKey": "scenarios:create",
+      "moduleId": "bank-statement-process",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "scenarios:delete",
+      "taskKey": "scenarios:delete",
+      "moduleId": "bank-statement-process",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "scenarios:export-bundle",
+      "taskKey": "scenarios:export-bundle",
+      "moduleId": "bank-statement-process",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "scenarios:import-bundle-apply",
+      "taskKey": "scenarios:import-bundle-apply",
+      "moduleId": "bank-statement-process",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "scenarios:set-applicable-channels",
+      "taskKey": "scenarios:set-applicable-channels",
+      "moduleId": "bank-statement-process",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "scenarios:toggle-enabled",
+      "taskKey": "scenarios:toggle-enabled",
+      "moduleId": "bank-statement-process",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "scenarios:transfer",
+      "taskKey": "scenarios:transfer",
+      "moduleId": "bank-statement-process",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "scenarios:update",
+      "taskKey": "scenarios:update",
+      "moduleId": "bank-statement-process",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "linked-table:delete-by-date-range",
+      "taskKey": "linked-table:delete-by-date-range",
+      "moduleId": "bank-statement-process",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "linked-table:import",
+      "taskKey": "linked-table:import",
+      "moduleId": "bank-statement-process",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "recon-id-fix:clear-session",
+      "taskKey": "recon-id-fix:clear-session",
+      "moduleId": "recon-id-fix",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "recon-id-fix:export",
+      "taskKey": "recon-id-fix:export",
+      "moduleId": "recon-id-fix",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "recon-id-fix:import",
+      "taskKey": "recon-id-fix:import",
+      "moduleId": "recon-id-fix",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "recon-id-fix:run",
+      "taskKey": "recon-id-fix:run",
+      "moduleId": "recon-id-fix",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "pending:diff:export-aggregate",
+      "taskKey": "pending:diff:export-aggregate",
+      "moduleId": "pending-reconciliation",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "pending:diff:export-single",
+      "taskKey": "pending:diff:export-single",
+      "moduleId": "pending-reconciliation",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "pending:error:export-report",
+      "taskKey": "pending:error:export-report",
+      "moduleId": "pending-reconciliation",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "pending:import:start",
+      "taskKey": "pending:import:start",
+      "moduleId": "pending-reconciliation",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "pending:reconcile:run",
+      "taskKey": "pending:reconcile:run",
+      "moduleId": "pending-reconciliation",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "pending:removed:import",
+      "taskKey": "pending:removed:import",
+      "moduleId": "pending-reconciliation",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "pending:rule:save",
+      "taskKey": "pending:rule:save",
+      "moduleId": "pending-reconciliation",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bankBuRecon:export:aggregate",
+      "taskKey": "bankBuRecon:export:aggregate",
+      "moduleId": "bank-bu-recon",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bankBuRecon:export:single",
+      "taskKey": "bankBuRecon:export:single",
+      "moduleId": "bank-bu-recon",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bankBuRecon:import:run",
+      "taskKey": "bankBuRecon:import:run",
+      "moduleId": "bank-bu-recon",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bankBuRecon:run",
+      "taskKey": "bankBuRecon:run",
+      "moduleId": "bank-bu-recon",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bizOpReconV327:import",
+      "taskKey": "bizOpReconV327:import",
+      "moduleId": "biz-op-recon",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bizOpReconV327:run",
+      "taskKey": "bizOpReconV327:run",
+      "moduleId": "biz-op-recon",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bizOpReconV327:delete",
+      "taskKey": "bizOpReconV327:delete",
+      "moduleId": "biz-op-recon",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bizOpReconV327:maintenance:upgrade",
+      "taskKey": "bizOpReconV327:maintenance:upgrade",
+      "moduleId": "biz-op-recon",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bizOpReconV327:maintenance:reclaim",
+      "taskKey": "bizOpReconV327:maintenance:reclaim",
+      "moduleId": "biz-op-recon",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bizOpReconV327:export:op-raw",
+      "taskKey": "bizOpReconV327:export:op-raw",
+      "moduleId": "biz-op-recon",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bizOpReconV327:export:flow-raw",
+      "taskKey": "bizOpReconV327:export:flow-raw",
+      "moduleId": "biz-op-recon",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bizOpReconV327:export:op-check",
+      "taskKey": "bizOpReconV327:export:op-check",
+      "moduleId": "biz-op-recon",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bizOpReconV327:export:flow-check",
+      "taskKey": "bizOpReconV327:export:flow-check",
+      "moduleId": "biz-op-recon",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bizOpReconV327:export:result-full",
+      "taskKey": "bizOpReconV327:export:result-full",
+      "moduleId": "biz-op-recon",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bizOpReconV327:export:result-diff",
+      "taskKey": "bizOpReconV327:export:result-diff",
+      "moduleId": "biz-op-recon",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bizOpReconV327:export:errors",
+      "taskKey": "bizOpReconV327:export:errors",
+      "moduleId": "biz-op-recon",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bizOpRecon:export:date",
+      "taskKey": "bizOpRecon:export:date",
+      "moduleId": "biz-op-recon",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bizOpRecon:export:date-range",
+      "taskKey": "bizOpRecon:export:date-range",
+      "moduleId": "biz-op-recon",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bizOpRecon:import:run-biz-op",
+      "taskKey": "bizOpRecon:import:run-biz-op",
+      "moduleId": "biz-op-recon",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bizOpRecon:import:run-flow",
+      "taskKey": "bizOpRecon:import:run-flow",
+      "moduleId": "biz-op-recon",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bizOpRecon:run",
+      "taskKey": "bizOpRecon:run",
+      "moduleId": "biz-op-recon",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "vccOpCalc:import:scan",
+      "taskKey": "vccOpCalc:import:scan",
+      "moduleId": "vcc-op-calc",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "vccOpCalc:run:compute-amounts",
+      "taskKey": "vccOpCalc:run:compute-amounts",
+      "moduleId": "vcc-op-calc",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "vccOpCalc:run:save",
+      "taskKey": "vccOpCalc:run:save",
+      "moduleId": "vcc-op-calc",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "vccFinancialOp:data-manager:delete",
+      "taskKey": "vccFinancialOp:data-manager:delete",
+      "moduleId": "vcc-financial-op",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "vccFinancialOp:data-manager:export",
+      "taskKey": "vccFinancialOp:data-manager:export",
+      "moduleId": "vcc-financial-op",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": true
+    },
+    {
+      "channel": "vccFinancialOp:export:import-audit",
+      "taskKey": "vccFinancialOp:export:import-audit",
+      "moduleId": "vcc-financial-op",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": true
+    },
+    {
+      "channel": "vccFinancialOp:export:result",
+      "taskKey": "vccFinancialOp:export:result",
+      "moduleId": "vcc-financial-op",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": true
+    },
+    {
+      "channel": "vccFinancialOp:import:apply",
+      "taskKey": "vccFinancialOp:import:apply",
+      "moduleId": "vcc-financial-op",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "vccFinancialOp:opening:initialize",
+      "taskKey": "vccFinancialOp:opening:initialize",
+      "moduleId": "vcc-financial-op",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "vccFinancialOp:run:adjustment-add",
+      "taskKey": "vccFinancialOp:run:adjustment-add",
+      "moduleId": "vcc-financial-op",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "vccFinancialOp:run:archive",
+      "taskKey": "vccFinancialOp:run:archive",
+      "moduleId": "vcc-financial-op",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "vccFinancialOp:run:calculate",
+      "taskKey": "vccFinancialOp:run:calculate",
+      "moduleId": "vcc-financial-op",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "vccFinancialOp:run:unarchive",
+      "taskKey": "vccFinancialOp:run:unarchive",
+      "moduleId": "vcc-financial-op",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "acquiringBillCurrency:clearMonth",
+      "taskKey": "acquiringBillCurrency:clearMonth",
+      "moduleId": "acquiring-bill-currency",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "acquiringBillCurrency:export",
+      "taskKey": "acquiringBillCurrency:export",
+      "moduleId": "acquiring-bill-currency",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "acquiringBillCurrency:importBill",
+      "taskKey": "acquiringBillCurrency:importBill",
+      "moduleId": "acquiring-bill-currency",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "acquiringBillCurrency:importFlow",
+      "taskKey": "acquiringBillCurrency:importFlow",
+      "moduleId": "acquiring-bill-currency",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "acquiringBillCurrency:run",
+      "taskKey": "acquiringBillCurrency:run",
+      "moduleId": "acquiring-bill-currency",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "acquiringBillCurrency:run:resume",
+      "taskKey": "acquiringBillCurrency:run:resume",
+      "moduleId": "acquiring-bill-currency",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "pre-fund-reconciliation:export",
+      "taskKey": "pre-fund-reconciliation:export",
+      "moduleId": "pre-fund-reconciliation",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "pre-fund-reconciliation:import-bank",
+      "taskKey": "pre-fund-reconciliation:import-bank",
+      "moduleId": "pre-fund-reconciliation",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "pre-fund-reconciliation:run",
+      "taskKey": "pre-fund-reconciliation:run",
+      "moduleId": "pre-fund-reconciliation",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "pre-fund-reconciliation:temp:clear",
+      "taskKey": "pre-fund-reconciliation:temp:clear",
+      "moduleId": "pre-fund-reconciliation",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "pre-fund-reconciliation:temp:delete",
+      "taskKey": "pre-fund-reconciliation:temp:delete",
+      "moduleId": "pre-fund-reconciliation",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "pre-fund-reconciliation:temp:delete-by-date-range",
+      "taskKey": "pre-fund-reconciliation:temp:delete-by-date-range",
+      "moduleId": "pre-fund-reconciliation",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "pre-fund-reconciliation:import-mpt",
+      "taskKey": "pre-fund-reconciliation:import-mpt",
+      "moduleId": "pre-fund-reconciliation",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "pre-fund-reconciliation:mpt-errors:export",
+      "taskKey": "pre-fund-reconciliation:mpt-errors:export",
+      "moduleId": "pre-fund-reconciliation",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "pre-fund-reconciliation:mpt-errors:repair",
+      "taskKey": "pre-fund-reconciliation:mpt-errors:repair",
+      "moduleId": "pre-fund-reconciliation",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "duplicate-inbound-match:export",
+      "taskKey": "duplicate-inbound-match:export",
+      "moduleId": "duplicate-inbound-match",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "duplicate-inbound-match:import-files",
+      "taskKey": "duplicate-inbound-match:import-files",
+      "moduleId": "duplicate-inbound-match",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "duplicate-inbound-match:run",
+      "taskKey": "duplicate-inbound-match:run",
+      "moduleId": "duplicate-inbound-match",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "position-reconciliation:bank:apply-import",
+      "taskKey": "position-reconciliation:bank:apply-import",
+      "moduleId": "position-reconciliation-process",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "position-reconciliation:bank:delete",
+      "taskKey": "position-reconciliation:bank:delete",
+      "moduleId": "position-reconciliation-process",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "position-reconciliation:bank:export",
+      "taskKey": "position-reconciliation:bank:export",
+      "moduleId": "position-reconciliation-process",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "position-reconciliation:mappings:save",
+      "taskKey": "position-reconciliation:mappings:save",
+      "moduleId": "position-reconciliation-process",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "position-reconciliation:run",
+      "taskKey": "position-reconciliation:run",
+      "moduleId": "position-reconciliation-process",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "position-reconciliation:run:confirm",
+      "taskKey": "position-reconciliation:run:confirm",
+      "moduleId": "position-reconciliation-process",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "position-reconciliation:run:export",
+      "taskKey": "position-reconciliation:run:export",
+      "moduleId": "position-reconciliation-process",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "position-reconciliation:run:export-filtered",
+      "taskKey": "position-reconciliation:run:export-filtered",
+      "moduleId": "position-reconciliation-process",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "position-reconciliation:run:import-result",
+      "taskKey": "position-reconciliation:run:import-result",
+      "moduleId": "position-reconciliation-process",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "position-reconciliation:linked:export",
+      "taskKey": "position-reconciliation:linked:export",
+      "moduleId": "position-reconciliation-process",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "position-reconciliation:raw:export",
+      "taskKey": "position-reconciliation:raw:export",
+      "moduleId": "position-reconciliation-process",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "position-reconciliation:source:apply-import",
+      "taskKey": "position-reconciliation:source:apply-import",
+      "moduleId": "position-reconciliation-process",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "position-reconciliation:source:delete",
+      "taskKey": "position-reconciliation:source:delete",
+      "moduleId": "position-reconciliation-process",
+      "taskKind": "no-file",
+      "batchPolicy": "no-file",
+      "allocation": "none",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "position-reconciliation:source:export-anomaly",
+      "taskKey": "position-reconciliation:source:export-anomaly",
+      "moduleId": "position-reconciliation-process",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "position-reconciliation:source:prepare-import",
+      "taskKey": "position-reconciliation:source:prepare-import",
+      "moduleId": "position-reconciliation-process",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "toolbox:merge",
+      "taskKey": "toolbox:merge",
+      "moduleId": "toolbox",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": true
+    },
+    {
+      "channel": "toolbox:split:export",
+      "taskKey": "toolbox:split:export",
+      "moduleId": "toolbox",
+      "taskKind": "file",
+      "batchPolicy": "reserve",
+      "allocation": "eager",
+      "mainReceiptHook": true
+    },
+    {
+      "channel": "bizOpReconV327:status",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bizOpReconV327:metadata:months",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bizOpReconV327:metadata:list",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bizOpReconV327:metadata:input",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bizOpReconV327:metadata:run-calendar",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "account-mapping:check-migration-pending",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "account-mapping:get-migration-data",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "account-mapping:list",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "acquiringBillCurrency:listMonths",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "acquiringBillCurrency:sessionStatus",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "app-update:get-status",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "app:get-info",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "archive-center:get-batch",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "archive-center:get-settings",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "archive-center:get-stats",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "archive-center:list-batches",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "archive-center:list-delete-cleanup-jobs",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "archive-center:prepare-delete-batch",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "balance-adjustment:list",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bank-statement:c3-candidate-count",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bank-statement:refund-candidate-count",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bank-statement:session-status",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bankBuRecon:months:list",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bankBuRecon:run:history",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bankBuRecon:run:list-ready-months",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bankBuRecon:run:list-success-months",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bankBuRecon:status",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "big-account-mode:load",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "big-account-order:load",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "big-account:get-with-own",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bizOpRecon:bu:list",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bizOpRecon:export:list-success-dates",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bizOpRecon:import:check-single-day",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bizOpRecon:run:history",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bizOpRecon:run:list-ready-dates",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bizOpRecon:status",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "channels:list",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "duplicate-inbound-match:session-status",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "fund-transfer-account-mapping:list",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "linked-table:count-by-date-range",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "linked-table:list",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "linked-table:row-count",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "pending:columns",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "pending:diff:latest-run-for",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "pending:diff:runs-for-month-pair",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "pending:diff:runs-list",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "pending:months:list",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "pending:rule:get",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "position-reconciliation:data-manager",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "position-reconciliation:linked-manager",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "position-reconciliation:mappings:list",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "position-reconciliation:status",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "pre-fund-reconciliation:session-status",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "pre-fund-reconciliation:temp:count-by-date-range",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "pre-fund-reconciliation:temp:list",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "recon-id-fix:session-status",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "scenarios:fund-type-enum",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "scenarios:gateway-recon-headers",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "scenarios:get",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "scenarios:get-applicable-channels",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "scenarios:list",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "settings:get-enabled-modules",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "settings:get-ui-style",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "template:get-amount-split-rules",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "template:get-bill-split-config",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "template:get-mappings",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "template:list",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "template:list-children",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "vccOpCalc:balance:get",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "vccOpCalc:balance:list-months",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "vccFinancialOp:data-manager:delete-targets",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "vccFinancialOp:data-manager:overview",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "vccFinancialOp:imports:list-months",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "vccFinancialOp:imports:list-records",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "vccFinancialOp:run:adjustment-options",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "vccFinancialOp:run:archived-months",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "vccFinancialOp:run:get",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "vccFinancialOp:run:latest-archived",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bizOpReconV327:files:pick",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bizOpReconV327:export:pick",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "background:select-file",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bankBuRecon:export:pick-save-path",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bankBuRecon:import:pick-bank-file",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bankBuRecon:import:pick-pending-file",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bizOpRecon:export:pick-save-path",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bizOpRecon:import:open-error-report-folder",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bizOpRecon:import:pick-biz-op-file",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bizOpRecon:import:pick-flow-file",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "pending:import:pick-files",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "pending:removed:pick-files",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "scenarios:import-bundle",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "vccOpCalc:import:pick-files",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "vccFinancialOp:import:pick-files",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "position-reconciliation:bank:prepare-import",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bizOpReconV327:run:preflight",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bizOpReconV327:delete:preview",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "file:extract-big-account-order",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "template:preview-delete-bill-split-row",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "toolbox:split:read",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "vccFinancialOp:data-manager:delete-preview",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "vccFinancialOp:data-manager:export-preview",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "vccFinancialOp:run:preflight",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "vccFinancialOp:run:unarchive-preview",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bizOpReconV327:task:cancel",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "acquiringBillCurrency:run:cancel",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "file:cancel-big-account-selection",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "position-reconciliation:bank:cancel-import",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "position-reconciliation:import:cancel",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "position-reconciliation:source:cancel-import",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "vccFinancialOp:task:cancel",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "bizOpReconV327:recovery:retry",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "archive-center:change-storage-location",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "archive-center:delete-batch",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "archive-center:open-file",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "archive-center:retry-batch",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "archive-center:retry-delete-cleanup-job",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "archive-center:save-as",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "archive-center:select-retry-sources",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "archive-center:set-locked",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "archive-center:set-retention-days",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "archive-center:set-module-retention-days",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "archive-center:start-entry-maintenance",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "app-update:check-now",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "app-update:restart-and-install",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "app-update:set-enabled",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "background:reset",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "background:save",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "settings:set-current-module",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "settings:set-dark-mode-schedule",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "settings:set-enabled-modules",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "settings:set-recon-id-fix-bill-category",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "window:close",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "window:minimize",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    },
+    {
+      "channel": "window:toggle-maximize",
+      "taskKind": "exclude",
+      "batchPolicy": "exclude",
+      "mainReceiptHook": false
+    }
+  ]
+}

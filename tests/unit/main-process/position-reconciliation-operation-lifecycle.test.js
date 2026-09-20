@@ -5,8 +5,9 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const vm = require('node:vm');
-const { positionFilePlanSettlementFiles } = require('../../../src/main-process/position-reconciliation/archive-file-plan-evidence');
+const { createPositionTaskOwner } = require('../../../src/main-process/position-reconciliation/task-owner');
+const { createPositionTaskAdapter } = require('../../../src/main-process/position-reconciliation/task-adapter');
+const { POSITION_SIDE_DB_PENDING_SETTING } = require('../../../src/main-process/position-reconciliation/constants');
 
 const {
   authorizePositionImportApply,
@@ -1020,68 +1021,90 @@ test('含过滤行的普通来源在 grant 前同时持久化异常报告证据'
   );
 });
 
-test('主进程异常报告存档意图保留预检声明的输入依赖', () => {
-  const mainSource = fs.readFileSync(
-    path.resolve(__dirname, '../../../src/main.js'),
-    'utf8'
-  );
-  const start = mainSource.indexOf('function recordPositionArchiveIntentFiles');
-  const end = mainSource.indexOf('\nfunction markPositionBusinessOutcome', start);
-  assert.ok(start >= 0 && end > start, '应能定位主进程存档意图转换函数');
-  const implementation = mainSource.slice(start, end);
-  assert.match(
-    implementation,
-    /requiredInputPaths:\s*descriptor\.requiredInputPaths/,
-    '异常报告 requiredInputPaths 必须进入 pending，不能在主进程转换时丢失'
-  );
-  assert.match(
-    implementation,
-    /function recordPositionArchiveIntentFiles\(filePaths, role, explicitOperationToken = ''\)/,
-    'utilityProcess 授权回调必须能显式传入 pending operation token'
-  );
-  assert.match(
-    implementation,
-    /explicitOperationToken \|\| \(context && context\.operationToken\)/,
-    '显式 owner token 应优先于可能丢失的 AsyncLocalStorage 上下文'
-  );
+function createTaskOwnerFixture({ settings = new Map(), events = [], archiveRequired = true } = {}) {
+  const service = { persistenceCheckpoint: () => checkpoint(5), listCommittedOperationInputs: () => [] };
+  const center = {
+    persistTaskTerminalIntent(intent) { events.push(['outbox', intent]); }
+  };
+  return createPositionTaskOwner({
+    readSetting: (key) => settings.get(key) || '',
+    writeSetting(key, value) {
+      settings.set(key, value);
+      if (key === POSITION_SIDE_DB_PENDING_SETTING) events.push(['pending', value && JSON.parse(value)]);
+    },
+    settingsAvailable: () => true,
+    getDatabasePath: () => '',
+    getCurrentService: () => service,
+    getService: () => service,
+    getArchiveCenter: () => center,
+    initializeArchiveCenter: () => center,
+    getTaskLifecycle: () => ({ cancelActive(predicate, message) { events.push(['cancel', predicate, message]); } }),
+    getTaskPolicy: () => ({ scopeId: 'position-reconciliation-process' }),
+    supportsArchiveChannel: () => archiveRequired
+  });
+}
+
+test('Position owner 异常报告存档意图保留输入依赖，显式 token 优先于 ALS', async () => {
+  const settings = new Map();
+  const owner = createTaskOwnerFixture({ settings, archiveRequired: false });
+  const result = await owner.runPositionReconciliationOperation('position-reconciliation:import', async () => {
+    assert.equal(owner.currentOperationToken(), 'context-token');
+    settings.set(POSITION_SIDE_DB_PENDING_SETTING, JSON.stringify({
+      operationToken: 'explicit-owner', archiveRequired: true, archiveFiles: []
+    }));
+    owner.recordPositionArchiveIntentFiles([{
+      filePath: '/tmp/position-anomaly-report.xlsx', beforeSnapshot: null,
+      requiredInputPaths: ['/tmp/position-input.xlsx'], artifactKey: 'anomaly-report',
+      sourceOperation: 'import', metadata: { reportType: 'anomaly' }
+    }], 'output', 'explicit-owner');
+    const pending = owner.readPositionPendingOperation();
+    assert.equal(pending.operationToken, 'explicit-owner');
+    assert.deepEqual(pending.archiveFiles[0].requiredInputPaths, [path.resolve('/tmp/position-input.xlsx')]);
+    assert.equal(pending.archiveFiles[0].artifactKey, 'anomaly-report');
+    assert.equal(pending.archiveFiles[0].metadata.reportType, 'anomaly');
+    return { status: 'success' };
+  }, { operationToken: 'context-token' });
+  // 此测试故意切换 pending owner；旧 invocation 不能回头同步另一 owner 的 checkpoint。
+  assert.equal(result.status, 'failed');
+  assert.match(result.message, /所有权已变化/);
 });
 
-test('atomic Position 在业务前登记 frozen manifest，取消 ACK 接原批次 CAS', () => {
-  const mainSource = fs.readFileSync(
-    path.resolve(__dirname, '../../../src/main.js'),
-    'utf8'
-  );
-  const wrapperStart = mainSource.indexOf('const executePositionBusiness');
-  const atomicStart = mainSource.indexOf('if (!useLegacyExistingBatchRecovery) {', wrapperStart);
-  const businessStart = mainSource.indexOf('result = await executeBusiness(taskContext)', atomicStart);
-  const intentStart = mainSource.indexOf('recordPositionFilePlanIntent(', atomicStart);
-  assert.ok(atomicStart >= 0 && intentStart > atomicStart && businessStart > intentStart);
-  assert.match(
-    mainSource,
-    /const runFileLifecycle = !useLegacyExistingBatchRecovery[\s\S]*?runFileTask\.bind\(archiveTaskLifecycle\)/
-  );
-  assert.doesNotMatch(mainSource, /recordPositionArchiveIntentFiles\(\[prepared\.savePath\]/);
-  const cancelStart = mainSource.indexOf("ipcMain.handle('position-reconciliation:import:cancel'");
-  const cancelEndOffset = mainSource.slice(cancelStart).search(
-    /trackedIpcHandle\(\r?\n\s*'position-reconciliation:mappings:save'/
-  );
-  const cancelEnd = cancelEndOffset < 0 ? -1 : cancelStart + cancelEndOffset;
-  const cancel = mainSource.slice(cancelStart, cancelEnd);
-  assert.match(cancel, /cancelActiveImport\([\s\S]*persistPositionCancellationAccepted\(active\)/);
-  const persistenceStart = mainSource.indexOf('function persistPositionCancellationAccepted');
-  const persistenceEnd = mainSource.indexOf('\nfunction markPositionArchiveDurable', persistenceStart);
-  assert.ok(persistenceStart >= 0 && persistenceEnd > persistenceStart);
-  const persistence = mainSource.slice(persistenceStart, persistenceEnd);
-  assert.ok(
-    persistence.indexOf('writePositionPendingOperation(cancellation, operationToken)')
-      < persistence.indexOf('center.persistTaskTerminalIntent'),
-    '取消 ACK 必须先写主库 pending，再写 Archive terminal outbox'
-  );
-  assert.ok(
-    persistence.indexOf('center.persistTaskTerminalIntent')
-      < persistence.indexOf('archiveTaskLifecycle.cancelActive'),
-    '两份耐久意图必须先于原批次 CAS'
-  );
+test('atomic Position 在业务前登记 frozen manifest，取消 ACK 耐久后才请求原批次 CAS', async () => {
+  const events = [];
+  const owner = createTaskOwnerFixture({ events });
+  const invocation = createPositionTaskAdapter({ owner, createOperationToken: () => 'position-cancel-token' })
+    .createInvocation({
+      meta: { channel: 'position-reconciliation:source:import' }, policy: { batchPolicy: 'file' },
+      prepared: {}, args: []
+    });
+  const context = {
+    batchId: 7, batchNumber: 'batch-7', taskRunId: 'position-cancel-token',
+    taskKey: 'position-reconciliation:source:import', moduleId: 'position-reconciliation-process',
+    parentRunId: 'position-parent', operationKey: 'position:position-cancel-token:import'
+  };
+  const filePlan = Object.freeze({
+    inputs: Object.freeze([Object.freeze({ filePath: '/tmp/position-cancel-source.xlsx',
+      artifactKey: 'input-1', sourceOperation: 'import', sourceSnapshot: INPUT_EVIDENCE.sourceSnapshot })]),
+    outputs: Object.freeze([])
+  });
+  const controls = { settleArtifacts: async () => ({ durable: true }) };
+  const result = await invocation.execute({
+    taskContext: { batchContext: context, fileEvidence: { filePlan } }, controls,
+    markExecuteStarted() { events.push(['execute-started']); },
+    async executeBusiness() {
+      assert.equal(owner.readPositionPendingOperation().archiveFiles[0].artifactKey, 'input-1');
+      owner.persistPositionCancellationAccepted(owner.activeOperation());
+      return { status: 'cancelled' };
+    }
+  });
+  assert.equal(result.status, 'cancelled');
+  const cancellationIndex = events.findIndex(([kind, value]) => kind === 'pending'
+    && value.terminalOutcome && value.terminalOutcome.taskStatus === 'cancelled');
+  const outboxIndex = events.findIndex(([kind]) => kind === 'outbox');
+  const cancelIndex = events.findIndex(([kind]) => kind === 'cancel');
+  assert.ok(cancellationIndex >= 0 && cancellationIndex < outboxIndex && outboxIndex < cancelIndex);
+  assert.deepEqual(events[outboxIndex][1].owner.batchContext, context);
+  assert.equal(events[cancelIndex][1](context), true);
 });
 
 test('普通来源 manifest 与 pending 文件证据不一致时禁止签发 grant', () => {
@@ -1124,17 +1147,7 @@ test('普通来源 manifest 与 pending 文件证据不一致时禁止签发 gra
   assert.equal(pending.archiveManifestHash, undefined);
 });
 
-test('atomic Position wrapper 以完整 frozen manifest 单次 settle，不再调用 legacy result/error settle', async () => {
-  const mainSource = fs.readFileSync(
-    path.resolve(__dirname, '../../../src/main.js'),
-    'utf8'
-  );
-  const wrapperStart = mainSource.indexOf('const executePositionBusiness');
-  const start = mainSource.indexOf('if (!useLegacyExistingBatchRecovery) {', wrapperStart);
-  const firstReturn = mainSource.indexOf('return result;', start);
-  const end = mainSource.indexOf('\n          let result;', firstReturn + 1);
-  assert.ok(start >= 0 && end > start);
-  const atomic = mainSource.slice(start, end);
+test('atomic Position adapter 以完整 frozen manifest 单次 settle，不再调用 legacy result/error settle', async () => {
   for (const mode of ['success', 'business-failure', 'archive-pending']) {
     const calls = [];
     const files = [];
@@ -1146,39 +1159,45 @@ test('atomic Position wrapper 以完整 frozen manifest 单次 settle，不再�
     const evidence = Object.freeze({ inputs: ['original-input-evidence'] });
     const result = { status: 'ok', cleanupPaths: ['owned-source'] };
     const businessError = new Error('业务执行失败');
-    const execute = vm.runInNewContext(`(async () => { ${atomic} })`, {
-      useLegacyExistingBatchRecovery: false,
-      taskContext: { fileEvidence: { filePlan } },
-      prepared: { positionArchiveEvidence: evidence },
-      batchContext: { batchId: 7 },
-      positionFilePlanSettlementFiles,
-      positionReconciliationFailureResult,
+    const owner = {
+      terminalRegistration: { finalize: async () => {} },
+      runPositionReconciliationOperation: (_channel, operation) => operation(),
       recordPositionFilePlanIntent(plan, original) {
         assert.equal(plan, filePlan);
         assert.equal(original, evidence);
         calls.push('intent');
       },
-      async executeBusiness() {
-        calls.push('business');
-        if (mode === 'business-failure') throw businessError;
-        return result;
-      },
-      markPositionBusinessOutcome(outcome) {
+      markPositionBusinessOutcome(outcome, options) {
         assert.equal(outcome.status, mode === 'business-failure' ? 'failed' : 'ok');
+        assert.equal(options.terminalForCurrentTask, true);
         calls.push('outcome');
       },
-      controls: { async settleArtifacts(payload) {
-        calls.push('settle');
-        files.push(...payload.files);
-        return { durable: mode !== 'archive-pending' };
-      } },
       markPositionArchiveDurable({ batchId }) { assert.equal(batchId, 7); calls.push('durable'); },
       async cleanupPositionArchiveStaging({ cleanupPaths }) {
         assert.deepEqual(Array.from(cleanupPaths), mode === 'business-failure' ? [] : result.cleanupPaths);
         calls.push('cleanup');
       },
       markPositionArchiveIncomplete() { calls.push('incomplete'); },
-      settlePositionArchiveResult() { assert.fail('atomic 路径不能再次调用 legacy settle'); }
+      persistCurrentPositionArchiveIntentIfNeeded() { assert.fail('atomic 路径不能调用 legacy recovery'); }
+    };
+    const invocation = createPositionTaskAdapter({ owner }).createInvocation({
+      meta: { channel: 'position-reconciliation:source:import' }, policy: { batchPolicy: 'file' },
+      prepared: { positionArchiveEvidence: evidence }, args: []
+    });
+    const execute = () => invocation.execute({
+      taskContext: { fileEvidence: { filePlan }, batchContext: { batchId: 7 } },
+      controls: { async settleArtifacts(payload) {
+        assert.deepEqual(Object.keys(payload), ['files']);
+        calls.push('settle');
+        files.push(...payload.files);
+        return { durable: mode !== 'archive-pending' };
+      } },
+      markExecuteStarted() {},
+      async executeBusiness() {
+        calls.push('business');
+        if (mode === 'business-failure') throw businessError;
+        return result;
+      }
     });
     if (mode === 'business-failure') await assert.rejects(execute, (error) => error === businessError);
     else assert.equal(await execute(), result);

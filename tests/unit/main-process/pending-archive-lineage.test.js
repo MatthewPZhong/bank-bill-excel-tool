@@ -572,10 +572,7 @@ test('Pending main seam 贯穿 dataset/run identity、frozen export selection �
     /pendingAggregateRunSelection\(pendingDb\)[\s\S]*?runIds:\s*selection\.runIds[\s\S]*?lineageIntents:\s*selection\.lineageIntents/);
   assert.match(mainSource,
     /exportAggregateRuns\([\s\S]*?prepared\.runIds[\s\S]*?taskContext\.fileEvidence\.filePlan\.outputs\[0\]\.filePath/);
-  assert.match(mainSource,
-    /typeof prepared\.afterTerminal === 'function' \? prepared\.afterTerminal : null/);
-  assert.match(mainSource,
-    /prepared\.afterTerminalIntent \|\| null/);
+  // prepared hook/intent 透传由 task-adapters.test.js 的公开 invocation 行为验证。
   assert.equal((mainSource.match(/\.map\(publicPendingRun\)/g) || []).length, 2);
   assert.match(mainSource,
     /pending:diff:latest-run-for[\s\S]*?return publicPendingRun\(/);

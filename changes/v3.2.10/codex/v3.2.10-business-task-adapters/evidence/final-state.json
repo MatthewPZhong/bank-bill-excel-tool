@@ -1,0 +1,43 @@
+{
+  "observedAt": "2026-09-20T13:09:15.278845+00:00",
+  "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters",
+  "head": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "branch": "codex/v3.2.10-business-task-adapters",
+  "release": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "g1Branch": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "g1IntegratedCommit": null,
+  "g1DependencyReady": false,
+  "trackedDiff": "",
+  "sourceHashesUnchanged": true,
+  "newTestFiles": [
+    "tests/helpers/archive-aware-operation-harness.js",
+    "tests/unit/main-process/archive-aware-prepared-resource-entry.test.js",
+    "tests/unit/main-process/prepared-resource-scope.test.js",
+    "tests/unit/main-process/task-adapters.test.js"
+  ],
+  "testLines": 663,
+  "diffCheck": [
+    {
+      "path": "tests/helpers/archive-aware-operation-harness.js",
+      "exitCode": 1,
+      "output": ""
+    },
+    {
+      "path": "tests/unit/main-process/archive-aware-prepared-resource-entry.test.js",
+      "exitCode": 1,
+      "output": ""
+    },
+    {
+      "path": "tests/unit/main-process/prepared-resource-scope.test.js",
+      "exitCode": 1,
+      "output": ""
+    },
+    {
+      "path": "tests/unit/main-process/task-adapters.test.js",
+      "exitCode": 1,
+      "output": ""
+    }
+  ],
+  "missingNewDocumentLinks": [],
+  "copiedDesignInputs": 37
+}

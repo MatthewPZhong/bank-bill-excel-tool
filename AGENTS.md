@@ -31,6 +31,8 @@
 - 主进程的 `lastGeneratedExports`、`statementImportSessions`、`lastFileImportContext` 不跨重启持久化；渲染层使用 `state`、DOM 缓存 `elements`，弹窗由 JS 动态创建，无独立 HTML 模板。
 - 模板、映射、设置存 SQLite；导出、错误报告、余额种子和日志存文件系统。这里不是所有对账模块的存储清单。
 
+- 业务任务适配、prepare 资源所有权与终态路由入口见 [`src/main-process/task-adapters/README.md`](src/main-process/task-adapters/README.md)。
+
 ## 常用命令
 以实际 `package.json.scripts` 为准；配置与文档不符时核实并说明。
 

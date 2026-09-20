@@ -206,7 +206,7 @@ test('共享引用不豁免活动/恢复保护；provider两个路径数组必�
 });
 
 for (const sourceMissing of [false, true]) {
-  test(`真实过滤行报告 ${sourceMissing ? '业务删除并由Main清理' : '原源仍存在'} 后重开库，原批次可永久删除`, async () => {
+  test(`真实过滤行报告 ${sourceMissing ? '业务删除并由Position owner清理' : '原源仍存在'} 后重开库，原批次可永久删除`, async () => {
     const result = await verifyPositionFilePlanDeletion(os.tmpdir(), {
       engine: 'streaming', anomalyReport: true, sourceMissing, restart: true
     });

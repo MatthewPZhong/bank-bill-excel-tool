@@ -1,0 +1,190 @@
+{
+  "sourceRoot": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool",
+  "copied": [
+    {
+      "path": "changes/v3.2.10/README.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/README.md",
+      "sha256": "9d32565d6d969ff812c7c7dc96079148d9aeecffb53f2966b1e0d9e5eb56975a"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-business-task-adapters/spec.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-business-task-adapters/spec.md",
+      "sha256": "3da1fd494bea35c4c76d000eb8c126b8638d586a320ae795592b2b957c1d28f8"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-business-task-adapters/techdoc.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-business-task-adapters/techdoc.md",
+      "sha256": "e2ab99aa3dc21123a5be00a5cc3900c12e1c91173a87877590d8bf204ac93c84"
+    },
+    {
+      "path": "changes/v3.2.10/review-response.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/review-response.md",
+      "sha256": "35c5ecd928ee37989e58737f43fb26fc5761187d2f9e7783cc836a68f6f2afdb"
+    },
+    {
+      "path": "changes/architecture-coupling/2026-09-20/review.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/architecture-coupling/2026-09-20/review.md",
+      "sha256": "3b1167ab7dbddfcf3cea897318c6db00ef5635f68f46c81a90eadca790a92cc4"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-application-recovery/spec.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-application-recovery/spec.md",
+      "sha256": "a7a6a76f65129f64e1215be1036ef256b95c8b6638154cecf259fcbf69a8e015"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-application-recovery/techdoc.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-application-recovery/techdoc.md",
+      "sha256": "c1f01e42bdcc51ad6c5738420d31d3edbb91b40b786a9f4d53ae5bc016b86e3f"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/spec.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-renderer-boundaries/spec.md",
+      "sha256": "a6d5867c99180648325c7fddb537440ea963d5afc1afc2d8117beef56990e3b3"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/techdoc.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-renderer-boundaries/techdoc.md",
+      "sha256": "b200c6faf1ef6b01513f4106c6345c735bea235587bda105e626584dd3022cc0"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-shared-xlsx-infrastructure/spec.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-shared-xlsx-infrastructure/spec.md",
+      "sha256": "6cb978388c50e35baf50fbaf2f082eca1b10f17808f111322ae3df2952505d91"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-shared-xlsx-infrastructure/techdoc.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-shared-xlsx-infrastructure/techdoc.md",
+      "sha256": "7786bb05fd68c2431b8c4624a36f5672fe32ef2a10bd370bc87d19227883410c"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-bizop-query-boundaries/spec.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-bizop-query-boundaries/spec.md",
+      "sha256": "13f5862b467266a4bb8bc1199e90a1eb7cccbcb78070bead88d3564c177d81c0"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-bizop-query-boundaries/techdoc.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-bizop-query-boundaries/techdoc.md",
+      "sha256": "46a9245067e69fa1a0797a1ec9c609567b3b5cfd50b5c824b3701731a0c99ba3"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-storage-execution-separation/spec.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-storage-execution-separation/spec.md",
+      "sha256": "046854b1c4573dda6f281ffc37caae184e264883ea35ea58a6810550e28ea7e8"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-storage-execution-separation/techdoc.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-storage-execution-separation/techdoc.md",
+      "sha256": "683971ee22adc8fdc2f73840836d6ae5ff402dd83f8b23c716cdaac655127b3a"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-execution-descriptors/spec.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-execution-descriptors/spec.md",
+      "sha256": "b57b4e61765bceeaa7b46123b7be04b7afd5bd075f258be191c62e20d93d478c"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-execution-descriptors/techdoc.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-execution-descriptors/techdoc.md",
+      "sha256": "bb3bede82b77aaacc98468dae533b3340756c09ce32f62b9fd1e706daafcbd49"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/spec.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-architecture-guardrails/spec.md",
+      "sha256": "40cd1d7f7b60dc38cb0ec570f1e06d097a36755d19b6477799ccb8e656d08ed1"
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/techdoc.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-architecture-guardrails/techdoc.md",
+      "sha256": "a3f05ca08266bd374e83a5f7ffbea4d1993a8823fe53897b9eeefd38346f3527"
+    },
+    {
+      "path": "changes/archive-batch-lifecycle/baseline-change.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/archive-batch-lifecycle/baseline-change.md",
+      "sha256": "f83691eb46b891096f44e7758360d23f724de8ba3a24ac3811c4ca0f599a063c"
+    },
+    {
+      "path": "changes/v3.2.9/codex/v3.2.9-account-mapping-management/spec.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.9/codex/v3.2.9-account-mapping-management/spec.md",
+      "sha256": "d8ba970a2649e277ea3a22fbd966d15c52c197928dd97700f5abc737113e6256"
+    },
+    {
+      "path": "changes/v3.2.10/documentation-validation.json",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/documentation-validation.json",
+      "sha256": "7ea976333bb44731936f9114fe0e868bd1ec783a7d288c12a6e354d28acc02eb"
+    },
+    {
+      "path": "changes/architecture-coupling/2026-09-20/evidence/dependencies.json",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/architecture-coupling/2026-09-20/evidence/dependencies.json",
+      "sha256": "2e569c0d7ed6441ff1aab661f0a29e4eee4d3947e6163a1093360815034dc9f5"
+    },
+    {
+      "path": "changes/archive-batch-lifecycle/baseline.json",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/archive-batch-lifecycle/baseline.json",
+      "sha256": "50fc06666c80fe15eb5e7468dafb1851caf2b37bb0cc902319e8d9ba60fc1598"
+    },
+    {
+      "path": "changes/archive-batch-lifecycle/inventory.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/archive-batch-lifecycle/inventory.md",
+      "sha256": "6caacd4e9bbed5f02f430a485e52cdbbb85a3b6d34fa2f41bfbaf1f617a2707c"
+    },
+    {
+      "path": "changes/v3.2.9/codex/v3.2.9-account-mapping-management/techdoc.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.9/codex/v3.2.9-account-mapping-management/techdoc.md",
+      "sha256": "c734f1d1def353cec20e7084fb2ee9d6c55bcf2663367b0732dfc6ca46cecd56"
+    },
+    {
+      "path": "changes/v3.2.9/codex/v3.2.9-account-mapping-management/account-mapping-management.html",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.9/codex/v3.2.9-account-mapping-management/account-mapping-management.html",
+      "sha256": "276871b961bb84313b25ec0f81e9af31996ae7793e8d6938b46fe91436cd46be"
+    },
+    {
+      "path": "changes/v3.2.9/codex/v3.2.9-account-mapping-management/verification.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.9/codex/v3.2.9-account-mapping-management/verification.md",
+      "sha256": "958c7d3a8bb8710abbb02194f10fbd4de25ed74b04b768945f91759dbf10384f"
+    },
+    {
+      "path": "changes/v3.2.9/codex/v3.2.9-account-mapping-management/evidence/preview-checks.json",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.9/codex/v3.2.9-account-mapping-management/evidence/preview-checks.json",
+      "sha256": "01b401dafc2179ea13cb8041a4afe9f9c5e55ce29107b13b82fb89b6f3745ee9"
+    },
+    {
+      "path": "changes/v3.2.9/codex/v3.2.9-account-mapping-management/verify-preview.cjs",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.9/codex/v3.2.9-account-mapping-management/verify-preview.cjs",
+      "sha256": "a1cacf7266b2fa293ba40b6d5994a9c75ef39370b59698531b6be36a0c1f3ab1"
+    },
+    {
+      "path": "changes/v3.2.9/codex/v3.2.9-account-mapping-management/evidence/default-1240x860.png",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.9/codex/v3.2.9-account-mapping-management/evidence/default-1240x860.png",
+      "sha256": "aa00ff78146ab00d92fdefe57645ddcf23e23d20e8a770d6b24c4f0257cdf408"
+    },
+    {
+      "path": "changes/v3.2.9/codex/v3.2.9-account-mapping-management/evidence/inline-edit-1240x860.png",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.9/codex/v3.2.9-account-mapping-management/evidence/inline-edit-1240x860.png",
+      "sha256": "d4ef86f0ce65eb9c908eeb40dc826e679e38af28d33e6fb4ccecd60f76c848c5"
+    },
+    {
+      "path": "changes/v3.2.9/codex/v3.2.9-account-mapping-management/evidence/migration-conflicts-1240x860.png",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.9/codex/v3.2.9-account-mapping-management/evidence/migration-conflicts-1240x860.png",
+      "sha256": "d26e27d6d5720e3607cff4bbd6de7e2feecbb708da5ec0f35c6ecbd73b0ad5ba"
+    },
+    {
+      "path": "changes/v3.2.9/codex/v3.2.9-account-mapping-management/evidence/layout-1080x760.png",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.9/codex/v3.2.9-account-mapping-management/evidence/layout-1080x760.png",
+      "sha256": "63c98b11e3621e297aefb74dd367355c7309466d0f82cc1838e324626b3916ae"
+    },
+    {
+      "path": "changes/v3.2.9/codex/v3.2.9-account-mapping-management/evidence/layout-1240x860.png",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.9/codex/v3.2.9-account-mapping-management/evidence/layout-1240x860.png",
+      "sha256": "aa00ff78146ab00d92fdefe57645ddcf23e23d20e8a770d6b24c4f0257cdf408"
+    },
+    {
+      "path": "changes/v3.2.9/codex/v3.2.9-account-mapping-management/evidence/layout-2560x1440.png",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.9/codex/v3.2.9-account-mapping-management/evidence/layout-2560x1440.png",
+      "sha256": "45ea1cd56f87ede53749a270ed5309850796e603b91a05d091812b95c90e7a8e"
+    },
+    {
+      "path": "changes/v3.2.9/codex/v3.2.9-account-mapping-management/example-import.json",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.9/codex/v3.2.9-account-mapping-management/example-import.json",
+      "sha256": "2e686a0e997dc0129792925331bd77992ce138897dafd9893e1b4d54a28a318e"
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "observedAt": "2026-09-20T11:52:25.452Z",
+  "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters",
+  "branch": "codex/v3.2.10-business-task-adapters",
+  "head": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "main": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "tag": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "release": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "g1Branch": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "g1IntegratedCommit": null,
+  "g1DependencyReady": false,
+  "sources": [
+    {
+      "path": "src/main.js",
+      "sha256": "9599755bf4d548dea1ba5a676926af12ea153f19960e8406115aabd7e3011a3f"
+    },
+    {
+      "path": "src/main-process/archive-center/controller.js",
+      "sha256": "0898ebfdb1d8270472883fe285e1788ff3f082e67e80c50318908ff2f03be59b"
+    },
+    {
+      "path": "src/main-process/archive-center/task-policy-registry.js",
+      "sha256": "52b94f6acddaf775427136b95b9c0f46957b11a0f6124e1473a4562d1a1ecdb0"
+    },
+    {
+      "path": "src/main-process/archive-center/ipc-task-contract.js",
+      "sha256": "a12c3fba0860851a454043f77159c725a625f3933ccf8e671d7850819853a27d"
+    },
+    {
+      "path": "src/main-process/archive-center/task-lifecycle.js",
+      "sha256": "b417f50bc3d8ae6b5889d391d8caa85a042956cb5ef3cd303fa2f512900eb330"
+    },
+    {
+      "path": "src/main-process/position-reconciliation/interactive-task-preflight.js",
+      "sha256": "7a4e913f75b04cf8c2a1e8902955c4f5745572d466e0bfb132a26ec123e08f32"
+    },
+    {
+      "path": "src/main-process/toolbox-archive-recovery.js",
+      "sha256": "dfaffa7f4568b4c1d06ff6f03f4aec8f31a4fe3b320c5e896117c68610e23d7b"
+    }
+  ]
+}

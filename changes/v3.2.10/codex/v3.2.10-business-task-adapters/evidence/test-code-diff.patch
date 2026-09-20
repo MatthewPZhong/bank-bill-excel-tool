@@ -1,0 +1,687 @@
+diff --git a/tests/helpers/archive-aware-operation-harness.js b/tests/helpers/archive-aware-operation-harness.js
+new file mode 100644
+index 00000000..d6e5c534
+--- /dev/null
++++ b/tests/helpers/archive-aware-operation-harness.js
+@@ -0,0 +1,148 @@
++'use strict';
++
++const assert = require('node:assert/strict');
++const { AsyncLocalStorage } = require('node:async_hooks');
++const fs = require('node:fs');
++const path = require('node:path');
++const vm = require('node:vm');
++const ipcTaskContract = require('../../src/main-process/archive-center/ipc-task-contract');
++const { createTaskPolicyRegistry } = require('../../src/main-process/archive-center/task-policy-registry');
++const {
++  executeAfterPositionAdmission,
++  runWithPreparedResourceCleanup
++} = require('../../src/main-process/position-reconciliation/interactive-task-preflight');
++const {
++  positionReconciliationFailureResult,
++  settlePositionArchiveResult
++} = require('../../src/main-process/position-reconciliation/operation-lifecycle');
++const { positionFilePlanSettlementFiles } = require('../../src/main-process/position-reconciliation/archive-file-plan-evidence');
++const { composePositionTerminalSettlement } = require('../../src/main-process/read-only-exports/position/settlement');
++const { isPublicationOnlyFileTask } = require('../../src/main-process/toolbox-archive-recovery');
++
++const MAIN_PATH = path.resolve(__dirname, '../../src/main.js');
++const mainSource = fs.readFileSync(MAIN_PATH, 'utf8');
++const entryStart = mainSource.indexOf('function trackArchiveOperationPromise(');
++const entryEnd = mainSource.indexOf('\nfunction runRegisteredBusinessOperation(', entryStart);
++assert.ok(entryStart >= 0 && entryEnd > entryStart, 'Main 公共入口提取边界必须存在');
++const entrySource = mainSource.slice(entryStart, entryEnd);
++
++// 执行 Main 原函数和真实 prepared/helper 合同；外部 lifecycle、Hold gate、Archive、
++// 领域存储及文件读取都是可注入协作者。本夹具不启动 Electron，也不证明 BOR/DB/GUI 集成。
++function createArchiveAwareOperationHarness(options = {}) {
++  const calls = [];
++  const lifecycleOptions = [];
++  const counts = { gate: 0, initialize: 0, lifecycle: 0, business: 0, admission: 0 };
++  const channel = options.channel || 'template:rename';
++  const registry = createTaskPolicyRegistry();
++  const policy = options.policy || registry.require(channel);
++  const ownerContext = options.ownerContext || {
++    taskRunId: 'task-fixture',
++    taskKey: channel,
++    moduleId: policy.scopeId,
++    parentRunId: 'parent-fixture',
++    operationKey: 'operation-fixture',
++    ...(policy.batchPolicy === 'reserve' ? { batchId: 17, batchNumber: 'batch-fixture' } : {})
++  };
++  const controls = options.controls || {
++    fileEvidence: { filePlan: { inputs: [], outputs: [] } },
++    async settleArtifacts() { calls.push('settle'); return { durable: true }; }
++  };
++  const runLifecycle = (method, input) => {
++    calls.push(method);
++    counts.lifecycle += 1;
++    lifecycleOptions.push({ method, input });
++    if (options.runLifecycle) return options.runLifecycle(input, { method, ownerContext, controls, calls });
++    return (async () => {
++      await input.beforeStart(ownerContext, controls.fileEvidence);
++      const result = await input.execute(ownerContext, controls);
++      if (input.afterTerminal) await input.afterTerminal({ result, context: ownerContext });
++      return result;
++    })();
++  };
++  const lifecycle = Object.fromEntries([
++    'runOperationOnly', 'runFileTask', 'runDeferredFileTask', 'run'
++  ].map((method) => [method, (input) => runLifecycle(method, input)]));
++  const record = (name) => (...args) => { calls.push({ name, args }); };
++  const context = vm.createContext({
++    ...ipcTaskContract,
++    executeAfterPositionAdmission,
++    runWithPreparedResourceCleanup,
++    positionReconciliationFailureResult,
++    positionFilePlanSettlementFiles,
++    settlePositionArchiveResult,
++    composePositionTerminalSettlement,
++    isPublicationOnlyFileTask,
++    archiveOperationContext: new AsyncLocalStorage(),
++    archiveOperationTail: Promise.resolve(),
++    taskPolicyRegistry: { get: (taskKey) => taskKey === channel ? policy : registry.get(taskKey) },
++    archiveCenterService: options.initialize || options.initializeError ? null : {},
++    archiveTaskLifecycle: options.lifecycleUnavailable ? null : lifecycle,
++    initializeArchiveCenter() {
++      calls.push('initialize');
++      counts.initialize += 1;
++      if (options.initializeError) throw options.initializeError;
++      return options.initialize ? options.initialize() : {};
++    },
++    assertTaskPolicyNotHeld(actualPolicy, prepared) {
++      counts.gate += 1;
++      calls.push(`gate:${counts.gate}`);
++      if (options.gate) options.gate(actualPolicy, prepared, counts.gate);
++    },
++    randomUUID: () => 'position-token-fixture',
++    runWithStatementConfirmedSourceSnapshots: (_channel, _taskContext, execute) => execute(),
++    resolveArchiveFlowEvidence: async () => null,
++    resolveTaskFlowPlan: async () => ({ startsNewFlow: false, flowIdentity: null }),
++    runPositionReconciliationOperation(_channel, execute, identity) {
++      counts.admission += 1;
++      calls.push('position-admission');
++      return options.admitPosition ? options.admitPosition(execute, identity) : execute();
++    },
++    recordPositionFilePlanIntent: record('position-intent'),
++    markPositionBusinessOutcome: record('position-outcome'),
++    markPositionArchiveDurable: record('position-durable'),
++    markPositionArchiveIncomplete: record('position-incomplete'),
++    cleanupPositionArchiveStaging: record('position-cleanup'),
++    persistCurrentPositionArchiveIntentIfNeeded: record('position-persist-recovery'),
++    reportArchiveFailure: record('archive-failure'),
++    finalizePositionPendingAfterTaskTerminal: record('position-finalize'),
++    acknowledgeToolboxPublicationReceipts: record('receipt-acknowledge'),
++    captureArchiveSourceSnapshots: ({ selectedPaths }) => selectedPaths.map((filePath) => ({ filePath })),
++    resolveOperationInputPaths: ({ prepared }) => prepared.inputPaths,
++    ...options.bindings
++  });
++  vm.runInContext(entrySource, context, { filename: MAIN_PATH });
++
++  return {
++    calls,
++    counts,
++    policy,
++    lifecycleOptions,
++    getTail: () => context.archiveOperationTail,
++    run(handler, invocation = {}) {
++      const execute = typeof handler === 'function' ? handler : handler.execute;
++      const countedExecute = (...args) => {
++        counts.business += 1;
++        calls.push('business');
++        return execute(...args);
++      };
++      const countedHandler = typeof handler === 'function'
++        ? countedExecute
++        : { ...handler, execute: countedExecute };
++      return context.runArchiveAwareOperation(
++        invocation.meta || { channel, functionKey: '入口测试' },
++        invocation.event || {},
++        invocation.args || [],
++        countedHandler
++      );
++    }
++  };
++}
++
++function deferred() {
++  let resolve;
++  let reject;
++  const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
++  return { promise, resolve, reject };
++}
++
++module.exports = { createArchiveAwareOperationHarness, deferred };
+diff --git a/tests/unit/main-process/archive-aware-prepared-resource-entry.test.js b/tests/unit/main-process/archive-aware-prepared-resource-entry.test.js
+new file mode 100644
+index 00000000..abb31b9b
+--- /dev/null
++++ b/tests/unit/main-process/archive-aware-prepared-resource-entry.test.js
+@@ -0,0 +1,282 @@
++'use strict';
++
++const assert = require('node:assert/strict');
++const test = require('node:test');
++const {
++  createArchiveAwareOperationHarness,
++  deferred
++} = require('../../helpers/archive-aware-operation-harness');
++
++// TODO 仍执行目标断言，不把 11086a3c 的漏收口锁成正确行为。
++// G1 固定接口集成后，用 G2_T1_REQUIRE_TARGET=1 将这些断言升级为失败门禁。
++const target = {
++  todo: process.env.G2_T1_REQUIRE_TARGET === '1'
++    ? false
++    : 'G2-T2 待实施；G1 固定接口尚未集成，当前为目标 fixture'
++};
++const codedError = (code) => Object.assign(new Error(code), { code });
++
++function resourceContract(options = {}) {
++  const counts = { prepare: 0, abandon: 0, beforeStart: 0 };
++  const handler = {
++    async prepare() {
++      counts.prepare += 1;
++      return {
++        proceed: true,
++        ...options.prepared,
++        async onAbandon() {
++          counts.abandon += 1;
++          if (options.abandon) await options.abandon();
++        },
++        async beforeStart(...args) {
++          counts.beforeStart += 1;
++          return options.beforeStart ? options.beforeStart(...args) : {};
++        }
++      };
++    },
++    execute: options.execute || (() => ({ status: 'success' }))
++  };
++  return { counts, handler };
++}
++
++function assertNotExecuted(harness) {
++  assert.equal(harness.counts.business, 0);
++  assert.equal(harness.counts.admission, 0);
++}
++
++test('真实入口：首次 Hold gate 拒绝发生在 prepare 之前', async () => {
++  const error = codedError('RECOVERY_HOLD_ACTIVE');
++  const harness = createArchiveAwareOperationHarness({ gate() { throw error; } });
++  const resource = resourceContract();
++  await assert.rejects(harness.run(resource.handler), (actual) => actual === error);
++  assert.equal(resource.counts.prepare, 0);
++  assert.equal(resource.counts.abandon, 0);
++  assert.equal(harness.counts.lifecycle, 0);
++  assertNotExecuted(harness);
++});
++
++test('真实入口：prepare 取消原样返回，prepare 自身释放资源且不进入 lifecycle', async () => {
++  const harness = createArchiveAwareOperationHarness();
++  const cancelled = { status: 'cancelled', source: 'prepare' };
++  let prepareReleased = 0;
++  let abandonCalls = 0;
++  const result = await harness.run({
++    async prepare() {
++      try {
++        return { proceed: false, result: cancelled, onAbandon() { abandonCalls += 1; } };
++      } finally {
++        prepareReleased += 1;
++      }
++    },
++    execute() { throw new Error('取消后不应执行'); }
++  });
++  assert.equal(result, cancelled);
++  assert.equal(prepareReleased, 1);
++  assert.equal(abandonCalls, 0);
++  assert.equal(harness.counts.gate, 1);
++  assert.equal(harness.counts.lifecycle, 0);
++  assertNotExecuted(harness);
++});
++
++test('真实入口：prepare 抛错保留原异常，资源仍由 prepare 自身收口', async () => {
++  const harness = createArchiveAwareOperationHarness();
++  const error = codedError('PREPARE_REJECTED');
++  let prepareReleased = 0;
++  await assert.rejects(harness.run({
++    async prepare() {
++      try { throw error; } finally { prepareReleased += 1; }
++    },
++    execute() { throw new Error('prepare 失败后不应执行'); }
++  }), (actual) => actual === error);
++  assert.equal(prepareReleased, 1);
++  assert.equal(harness.counts.gate, 1);
++  assert.equal(harness.counts.lifecycle, 0);
++  assertNotExecuted(harness);
++});
++
++for (const scenario of ['second-gate', 'archive-initialize']) {
++  test(`目标：prepare 成功后 ${scenario} 失败须 abandon 一次并保留原异常`, target, async () => {
++    const error = codedError(scenario === 'second-gate' ? 'RECOVERY_HOLD_ACTIVE' : 'ARCHIVE_INIT_FAILED');
++    const harness = createArchiveAwareOperationHarness(scenario === 'second-gate'
++      ? { gate(_policy, _prepared, number) { if (number === 2) throw error; } }
++      : { initializeError: error });
++    const resource = resourceContract();
++    await assert.rejects(harness.run(resource.handler), (actual) => actual === error);
++    assertNotExecuted(harness);
++    assert.equal(harness.counts.lifecycle, 0);
++    assert.equal(resource.counts.abandon, 1, 'prepare 成功后的资源须进入唯一收口范围');
++  });
++
++  test(`目标：${scenario} 与 cleanup 双异常时保留前置原异常且不重试清理`, target, async () => {
++    const error = codedError(scenario === 'second-gate' ? 'RECOVERY_HOLD_ACTIVE' : 'ARCHIVE_INIT_FAILED');
++    const cleanupError = codedError('PREPARED_CLEANUP_FAILED');
++    const harness = createArchiveAwareOperationHarness(scenario === 'second-gate'
++      ? { gate(_policy, _prepared, number) { if (number === 2) throw error; } }
++      : { initializeError: error });
++    const resource = resourceContract({ abandon() { throw cleanupError; } });
++    await assert.rejects(harness.run(resource.handler), (actual) => actual === error);
++    await harness.getTail();
++    assertNotExecuted(harness);
++    assert.equal(harness.counts.lifecycle, 0);
++    assert.equal(resource.counts.abandon, 1);
++  });
++}
++
++test('真实入口：lifecycle 不可用沿用失败结果并 abandon 一次', async () => {
++  const harness = createArchiveAwareOperationHarness({ lifecycleUnavailable: true });
++  const resource = resourceContract();
++  const result = await harness.run(resource.handler);
++  assert.equal(result.status, 'failed');
++  assert.equal(result.code, 'ARCHIVE_TASK_LIFECYCLE_UNAVAILABLE');
++  assert.equal(resource.counts.abandon, 1);
++  assert.equal(harness.counts.lifecycle, 0);
++  assertNotExecuted(harness);
++});
++
++test('真实入口：lifecycle 不可用且清理抛错时沿用 cleanup error 优先级', async () => {
++  const cleanupError = codedError('PREPARED_CLEANUP_FAILED');
++  const harness = createArchiveAwareOperationHarness({ lifecycleUnavailable: true });
++  const resource = resourceContract({ abandon() { throw cleanupError; } });
++  await assert.rejects(harness.run(resource.handler), (actual) => actual === cleanupError);
++  assert.equal(resource.counts.abandon, 1);
++  assertNotExecuted(harness);
++});
++
++test('真实入口：第三次 Hold gate 拒绝先于 prepared.beforeStart，abandon 一次', async () => {
++  const error = codedError('RECOVERY_HOLD_ACTIVE');
++  const harness = createArchiveAwareOperationHarness({
++    gate(_policy, _prepared, number) { if (number === 3) throw error; }
++  });
++  const resource = resourceContract();
++  await assert.rejects(harness.run(resource.handler), (actual) => actual === error);
++  assert.equal(harness.counts.gate, 3);
++  assert.equal(harness.counts.lifecycle, 1);
++  assert.equal(resource.counts.beforeStart, 0);
++  assert.equal(resource.counts.abandon, 1);
++  assertNotExecuted(harness);
++});
++
++test('真实入口：prepared.beforeStart 拒绝尚未接管执行，abandon 一次', async () => {
++  const error = codedError('PREPARED_BEFORE_START_FAILED');
++  const harness = createArchiveAwareOperationHarness();
++  const resource = resourceContract({ beforeStart() { throw error; } });
++  await assert.rejects(harness.run(resource.handler), (actual) => actual === error);
++  assert.equal(resource.counts.beforeStart, 1);
++  assert.equal(resource.counts.abandon, 1);
++  assertNotExecuted(harness);
++});
++
++test('真实入口：已进入 lifecycle 的 beforeStart 与 cleanup 双异常沿用 cleanup 优先级', async () => {
++  const error = codedError('PREPARED_BEFORE_START_FAILED');
++  const cleanupError = codedError('PREPARED_CLEANUP_FAILED');
++  const harness = createArchiveAwareOperationHarness();
++  const resource = resourceContract({
++    beforeStart() { throw error; },
++    abandon() { throw cleanupError; }
++  });
++  await assert.rejects(harness.run(resource.handler), (actual) => actual === cleanupError);
++  await harness.getTail();
++  assert.equal(resource.counts.abandon, 1);
++  assertNotExecuted(harness);
++});
++
++test('真实入口：lifecycle 提前返回 busy 时不接管资源，abandon 一次', async () => {
++  const busy = { status: 'busy', message: '测试用 lifecycle 拒绝' };
++  const harness = createArchiveAwareOperationHarness({ runLifecycle() { return Promise.resolve(busy); } });
++  const resource = resourceContract();
++  assert.equal(await harness.run(resource.handler), busy);
++  assert.equal(resource.counts.abandon, 1);
++  assertNotExecuted(harness);
++});
++
++test('真实入口：Position admission 拒绝尚未接管资源，也不做业务 settlement', async () => {
++  const busy = { status: 'busy' };
++  const harness = createArchiveAwareOperationHarness({
++    channel: 'position-reconciliation:run',
++    admitPosition() { return busy; },
++    // 终态后置由 TaskLifecycle 决定；本例只运行真实入口的 execute 回调。
++    async runLifecycle(input, { ownerContext, controls }) {
++      await input.beforeStart(ownerContext);
++      return input.execute(ownerContext, controls);
++    }
++  });
++  const resource = resourceContract();
++  assert.equal(await harness.run(resource.handler), busy);
++  assert.equal(harness.counts.business, 0);
++  assert.equal(harness.counts.admission, 1);
++  assert.equal(resource.counts.abandon, 1);
++  assert.equal(harness.calls.some((call) => call === 'settle' || call.name === 'position-outcome'), false);
++});
++
++for (const channel of ['template:rename', 'position-reconciliation:run']) {
++  for (const fails of [false, true]) {
++    test(`真实入口：${channel} 执行接管后${fails ? '抛错' : '成功'}不再 abandon`, async () => {
++      const error = codedError('BUSINESS_FAILED');
++      const result = { status: 'success' };
++      const harness = createArchiveAwareOperationHarness({ channel });
++      const resource = resourceContract({ execute() { if (fails) throw error; return result; } });
++      if (fails) await assert.rejects(harness.run(resource.handler), (actual) => actual === error);
++      else assert.equal(await harness.run(resource.handler), result);
++      assert.equal(harness.counts.business, 1);
++      assert.equal(resource.counts.abandon, 0);
++      assert.equal(harness.counts.gate, 3);
++    });
++  }
++}
++
++test('真实入口：lifecycle 拒绝后的延迟 abandon 纳入 archiveOperationTail', async () => {
++  const cleanupStarted = deferred();
++  const cleanupRelease = deferred();
++  const error = codedError('PREPARED_BEFORE_START_FAILED');
++  const harness = createArchiveAwareOperationHarness();
++  const resource = resourceContract({
++    beforeStart() { throw error; },
++    async abandon() { cleanupStarted.resolve(); await cleanupRelease.promise; }
++  });
++  const result = assert.rejects(harness.run(resource.handler), (actual) => actual === error);
++  await cleanupStarted.promise;
++  let tailSettled = false;
++  const tail = harness.getTail().then(() => { tailSettled = true; });
++  await new Promise((resolve) => setImmediate(resolve));
++  try {
++    assert.equal(tailSettled, false, '退出等待必须覆盖清理 Promise');
++    assert.equal(resource.counts.abandon, 1);
++  } finally {
++    cleanupRelease.resolve();
++    await result;
++    await tail;
++  }
++});
++
++test('目标：lifecycle 不可用路径的延迟 abandon 也须纳入 archiveOperationTail', target, async () => {
++  const cleanupStarted = deferred();
++  const cleanupRelease = deferred();
++  const harness = createArchiveAwareOperationHarness({ lifecycleUnavailable: true });
++  const resource = resourceContract({
++    async abandon() { cleanupStarted.resolve(); await cleanupRelease.promise; }
++  });
++  const result = harness.run(resource.handler);
++  await cleanupStarted.promise;
++  let tailSettled = false;
++  const tail = harness.getTail().then(() => { tailSettled = true; });
++  await new Promise((resolve) => setImmediate(resolve));
++  try {
++    assert.equal(tailSettled, false, '退出等待须覆盖 prepare 成功后的全部资源收口');
++  } finally {
++    cleanupRelease.resolve();
++    assert.equal((await result).code, 'ARCHIVE_TASK_LIFECYCLE_UNAVAILABLE');
++    await tail;
++    assert.equal(resource.counts.abandon, 1);
++  }
++});
++
++test('目标：真实入口同步调用 lifecycle 抛错也须 abandon 一次', target, async () => {
++  const error = codedError('LIFECYCLE_SYNC_FAILED');
++  const harness = createArchiveAwareOperationHarness({ runLifecycle() { throw error; } });
++  const resource = resourceContract();
++  await assert.rejects(harness.run(resource.handler), (actual) => actual === error);
++  assertNotExecuted(harness);
++  assert.equal(resource.counts.abandon, 1);
++});
++
++test.todo('G2-T2：adapter 构建失败须 abandon 一次；当前生产注册点不存在，待真实接线后补执行断言');
+diff --git a/tests/unit/main-process/prepared-resource-scope.test.js b/tests/unit/main-process/prepared-resource-scope.test.js
+new file mode 100644
+index 00000000..46259200
+--- /dev/null
++++ b/tests/unit/main-process/prepared-resource-scope.test.js
+@@ -0,0 +1,87 @@
++'use strict';
++
++// G2-T1：固定旧 wrapper 的错误合同，显式复现目标修复；不表示 scope 已实现。
++// G2-T2 建立中立 scope 后迁移这些行为断言，删除旧导出时不要保留生产 shim。
++const assert = require('node:assert/strict');
++const test = require('node:test');
++const {
++  runWithPreparedResourceCleanup
++} = require('../../../src/main-process/position-reconciliation/interactive-task-preflight');
++
++function deferred() {
++  let resolve;
++  const promise = new Promise((done) => { resolve = done; });
++  return { promise, resolve };
++}
++
++test('接管前异步失败会等待 abandon，成功清理后保留同一原错误', async () => {
++  const operationError = Object.assign(new Error('准入失败'), { code: 'ADMISSION_REJECTED' });
++  const cleanupEntered = deferred();
++  const releaseCleanup = deferred();
++  let attempts = 0;
++  let settled = false;
++  const operation = runWithPreparedResourceCleanup({
++    async onAbandon() {
++      attempts += 1;
++      cleanupEntered.resolve();
++      await releaseCleanup.promise;
++    }
++  }, async () => { throw operationError; });
++  const observed = operation.then(
++    () => { settled = true; },
++    (error) => { settled = true; return error; }
++  );
++  try {
++    await cleanupEntered.promise;
++    assert.equal(attempts, 1);
++    assert.equal(settled, false);
++  } finally {
++    releaseCleanup.resolve();
++  }
++  assert.equal(await observed, operationError);
++  assert.equal(attempts, 1);
++});
++
++test('已有 lifecycle finally 双异常继续以 cleanup error 为主，且不自动重试', async () => {
++  const operationError = new Error('beforeStart 失败');
++  const cleanupError = Object.assign(new Error('暂存清理失败'), { code: 'CLEANUP_FAILED' });
++  let attempts = 0;
++  const operation = runWithPreparedResourceCleanup({
++    async onAbandon() { attempts += 1; throw cleanupError; }
++  }, async () => { throw operationError; });
++  await assert.rejects(operation, (error) => error === cleanupError);
++  await assert.rejects(operation, (error) => error === cleanupError);
++  assert.equal(attempts, 1);
++});
++
++test('接管后业务失败不调用通用 abandon', async () => {
++  const operationError = new Error('业务失败，领域保留恢复证据');
++  let attempts = 0;
++  const operation = runWithPreparedResourceCleanup({
++    async onAbandon() { attempts += 1; }
++  }, async (markExecuteStarted) => {
++    markExecuteStarted();
++    throw operationError;
++  });
++  await assert.rejects(operation, (error) => error === operationError);
++  assert.equal(attempts, 0);
++});
++
++// 使用实际旧 wrapper 执行目标断言。TODO 失败是已知缺口，绝不计为修复通过。
++// G2_T1_REQUIRE_TARGET=1 将目标断言变为失败门禁，便于后续确认修复已生效。
++test('目标：同步 work 抛错也必须 abandon 一次', {
++  todo: process.env.G2_T1_REQUIRE_TARGET === '1' ? false : 'G2-T2 待实现：旧 Promise.resolve(run()) 漏收口'
++}, async () => {
++  const original = new Error('同步构建失败');
++  let attempts = 0;
++  let received;
++  try {
++    await runWithPreparedResourceCleanup({
++      async onAbandon() { attempts += 1; }
++    }, () => { throw original; });
++  } catch (error) {
++    received = error;
++  }
++  assert.equal(received, original);
++  assert.equal(attempts, 1);
++});
+diff --git a/tests/unit/main-process/task-adapters.test.js b/tests/unit/main-process/task-adapters.test.js
+new file mode 100644
+index 00000000..48b454a4
+--- /dev/null
++++ b/tests/unit/main-process/task-adapters.test.js
+@@ -0,0 +1,146 @@
++'use strict';
++
++// G2-T1：通过实际 Main 公共函数固定迁移前合同；registry/adapter 尚未进入生产。
++// deferred/legacy Position 是兼容能力夹具，不代表当前存在这些生产 taskKey。
++const assert = require('node:assert/strict');
++const test = require('node:test');
++const { createTaskPolicyRegistry } = require('../../../src/main-process/archive-center/task-policy-registry');
++const { createArchiveAwareOperationHarness } = require('../../helpers/archive-aware-operation-harness');
++
++const positionFile = createTaskPolicyRegistry().require('position-reconciliation:bank:export');
++const cases = [
++  { name: 'eager', channel: positionFile.channel, method: 'runFileTask' },
++  { name: 'deferred 兼容能力', channel: positionFile.channel, method: 'runDeferredFileTask',
++    policy: { ...positionFile, allocation: 'deferred' } },
++  { name: 'no-file', channel: 'position-reconciliation:run', method: 'runOperationOnly' },
++  { name: 'legacy 兼容能力', channel: positionFile.channel, method: 'run', legacy: true }
++];
++
++for (const scenario of cases) {
++  for (const explicit of [false, true]) {
++    test(`Position ${scenario.name} 保留 ${explicit ? '显式 prepared' : '生成 token'} 身份优先级`, async () => {
++      const prepared = {
++        proceed: true,
++        ...(scenario.legacy ? { legacyExistingBatchRecovery: true, recovery: { batchId: 17 } } : {}),
++        ...(explicit ? { taskRunId: 'prepared-task', operationKey: 'prepared-operation' } : {})
++      };
++      const harness = createArchiveAwareOperationHarness({
++        ...scenario,
++        runLifecycle: async () => ({ status: 'busy' })
++      });
++      await harness.run({ prepare: () => prepared, execute: () => assert.fail('仅检查传给生命周期的身份') });
++      const { method, input } = harness.lifecycleOptions[0];
++      assert.equal(method, scenario.method);
++      assert.equal(input.taskRunId, explicit ? 'prepared-task' : 'position-token-fixture');
++      assert.equal(input.operationKey, explicit ? 'prepared-operation'
++        : `position:position-token-fixture:${scenario.channel}`);
++      assert.equal(input.afterTerminalIntent.route, 'position-reconciliation');
++      assert.equal(input.afterTerminalIntent.operationToken, 'position-token-fixture');
++      if (scenario.legacy) {
++        assert.equal(input.recovery, prepared.recovery);
++        assert.equal(input.filePlanResolver, null);
++      }
++      assert.equal(harness.counts.business, 0);
++    });
++  }
++}
++
++test('普通任务直接透传 prepared hooks、身份和 args，不调用 Position admission', async () => {
++  const afterTerminal = () => {};
++  const afterTerminalIntent = { route: 'pending-run', taskRunId: 'prepared-task' };
++  const args = [{ id: 8 }];
++  const harness = createArchiveAwareOperationHarness({ runLifecycle: async () => ({ status: 'busy' }) });
++  await harness.run({
++    prepare: () => ({ proceed: true, args, afterTerminal, afterTerminalIntent,
++      taskRunId: 'prepared-task', operationKey: 'prepared-operation' }),
++    execute: () => assert.fail('仅检查接线')
++  });
++  const input = harness.lifecycleOptions[0].input;
++  assert.equal(input.afterTerminal, afterTerminal);
++  assert.equal(input.afterTerminalIntent, afterTerminalIntent);
++  assert.equal(input.args, args);
++  assert.equal(input.taskRunId, 'prepared-task');
++  assert.equal(input.operationKey, 'prepared-operation');
++  assert.equal(harness.counts.admission, 0);
++});
++
++test('Position finalizer 先执行，prepared afterTerminal 后执行；第一步失败不继续', async () => {
++  const order = [];
++  const error = new Error('pending owner 不匹配');
++  let rejectFinalizer = false;
++  const harness = createArchiveAwareOperationHarness({
++    channel: 'position-reconciliation:run',
++    bindings: { finalizePositionPendingAfterTaskTerminal: async () => {
++      order.push('position');
++      if (rejectFinalizer) throw error;
++    } },
++    runLifecycle: async () => ({ status: 'busy' })
++  });
++  await harness.run({ prepare: () => ({ proceed: true, afterTerminal: () => order.push('prepared') }),
++    execute: () => assert.fail('仅检查接线') });
++  const hook = harness.lifecycleOptions[0].input.afterTerminal;
++  await hook({});
++  assert.deepEqual(order, ['position', 'prepared']);
++  rejectFinalizer = true;
++  await assert.rejects(hook({}), (actual) => actual === error);
++  assert.deepEqual(order, ['position', 'prepared', 'position']);
++});
++
++for (const channel of ['toolbox:merge', 'toolbox:split:export',
++  'vccFinancialOp:data-manager:export', 'vccFinancialOp:export:import-audit', 'vccFinancialOp:export:result']) {
++  test(`${channel} receipt hook 优先于 prepared hook，并保留空 toolbox 数组优先级`, async () => {
++    const acknowledgements = [];
++    const harness = createArchiveAwareOperationHarness({ channel,
++      runLifecycle: async () => ({ status: 'busy' }),
++      bindings: { acknowledgeToolboxPublicationReceipts: (ids) => acknowledgements.push(ids) }
++    });
++    const toolboxIds = [];
++    await harness.run({ prepare: () => ({ proceed: true,
++      toolboxPublicationTaskIds: toolboxIds, vccOutputPublicationTaskIds: ['vcc-id'],
++      afterTerminal: () => assert.fail('publication-only 不调用 prepared hook') }),
++    execute: () => assert.fail('仅检查接线') });
++    await harness.lifecycleOptions[0].input.afterTerminal({});
++    assert.equal(acknowledgements.length, 1);
++    assert.equal(acknowledgements[0], toolboxIds);
++  });
++}
++
++test('其他 publication-only 领域仍透传 prepared hook，不扩大公共 receipt 确认范围', async () => {
++  const afterTerminal = () => {};
++  const harness = createArchiveAwareOperationHarness({ channel: 'pending:error:export-report',
++    runLifecycle: async () => ({ status: 'busy' }) });
++  await harness.run({ prepare: () => ({ proceed: true, afterTerminal }), execute: () => {} });
++  assert.equal(harness.lifecycleOptions[0].input.afterTerminal, afterTerminal);
++});
++
++for (const durable of [true, false]) {
++  test(`Position manifest durable=${durable} 时保持结果及清理边界`, async () => {
++    const harness = createArchiveAwareOperationHarness({ channel: positionFile.channel,
++      controls: { fileEvidence: { filePlan: { inputs: [], outputs: [] } },
++        settleArtifacts: async () => ({ durable }) }
++    });
++    const result = { status: 'ok', cleanupPaths: ['/受管暂存/fixture'] };
++    let abandon = 0;
++    assert.equal(await harness.run({ prepare: () => ({ proceed: true, onAbandon: () => { abandon += 1; } }),
++      execute: () => result }), result);
++    const names = harness.calls.filter((call) => call && call.name).map((call) => call.name);
++    assert.deepEqual(names, durable
++      ? ['position-intent', 'position-outcome', 'position-durable', 'position-cleanup', 'position-finalize']
++      : ['position-intent', 'position-outcome', 'position-incomplete', 'position-finalize']);
++    assert.equal(abandon, 0);
++  });
++}
++
++test('Position current wrapper 业务与 settlement 双异常保留 settlement 优先，通用 abandon 不接管', async () => {
++  const businessError = new Error('业务失败');
++  const settlementError = new Error('manifest settlement 失败');
++  let abandon = 0;
++  const harness = createArchiveAwareOperationHarness({ channel: positionFile.channel,
++    controls: { fileEvidence: { filePlan: { inputs: [], outputs: [] } },
++      settleArtifacts: async () => { throw settlementError; } }
++  });
++  await assert.rejects(harness.run({ prepare: () => ({ proceed: true, onAbandon: () => { abandon += 1; } }),
++    execute: () => { throw businessError; } }), (actual) => actual === settlementError);
++  assert.equal(abandon, 0);
++  assert.equal(harness.calls.some((call) => call && call.name === 'position-cleanup'), false);
++});

@@ -7,6 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { DatabaseSync } = require('node:sqlite');
+const { createPositionTaskOwner } = require('../../../src/main-process/position-reconciliation/task-owner');
 
 const {
   createArchiveCenterController
@@ -152,14 +153,15 @@ function buildPositionPendingRecoveryOwner({ database, getService, recoveryPromi
   assert.ok(start >= 0 && end > start, '应定位 Position pending owner recovery');
   const source = mainSource.slice(start, end);
   return Function(
-    'database',
-    'POSITION_SIDE_DB_PENDING_SETTING',
+    'positionTaskOwner',
     'getPositionReconciliationService',
     'positionPendingRecoveryPromise',
     `${source}\nreturn recoverPositionPendingBeforeInterruptedSweep;`
   )(
-    database,
-    'position_reconciliation_side_db_pending_v1',
+    createPositionTaskOwner({
+      settingsAvailable: () => Boolean(database && database.db),
+      readSetting: (key) => database.getSetting(key)
+    }),
     getService,
     recoveryPromise
   );

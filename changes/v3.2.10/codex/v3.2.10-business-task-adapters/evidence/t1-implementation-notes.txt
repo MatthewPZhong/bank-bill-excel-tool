@@ -1,0 +1,85 @@
+# G2 业务任务适配器实施记录
+
+> 2026-09-20。本文件是 G2 切片状态的唯一索引。Spec / TechDoc 保留原设计审查时的内容；它们的“未创建/未实施”元数据是设计快照，当前实施事实以本记录为准。
+
+## 当前结论与代码边界
+
+本轮按用户指定的依赖未就绪分支，交付 G2-T1 的现状核对、可运行特征测试与目标失败 fixture；**未开始生产适配迁移，G2 整体未完成**。
+
+- 工作目录：`/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters`。
+- 分支：`codex/v3.2.10-business-task-adapters`；创建基线及当前 HEAD 均为 `11086a3cbf632a30adbcfa796e4cd81810c5aef9`，等于本地 main 和附注标签 `v3.2.9^{}`。
+- 开始及收口复核：`release/v3.2.10` 与 `codex/v3.2.10-application-recovery` 仍为上述 SHA，release 不包含 `src/main-process/application-recovery/` 或 `publication-recovery/`。G1 分支存在不等于接口已经固定并集成。
+- **已纳入的 G1 集成 SHA：无**。不可把共同的 v3.2.9 基线填写为 G1 依赖 SHA；不能从 G1 未提交目录拷贝生产实现绕过依赖。
+- 源码与已跟踪测试均未改动；新增测试/证据/设计快照为未提交差异。未提交、推送、合并、开 PR、升版或发布。
+- 依据：[Spec](spec.md)、[TechDoc](techdoc.md)、[总索引 §2.2、§6.2–§6.4](../../README.md)。原主工作区的未提交设计与必要引用闭包已复制，原文未改，来源及 SHA-256 见 [design-inputs.json](evidence/design-inputs.json)。其中历史预览/扫描材料仅为输入引用，不是本轮运行证据。
+
+## 切片状态
+
+| 切片 / 本次范围 | 实现状态 | 验证状态 | 集成状态 |
+| --- | --- | --- | --- |
+| G2-T1：基线核对及测试准备 | 进行中；本轮准备代码已落地，adapter 构建失败 fixture 尚待真实入口 | 部分通过：原有 173 通过；新增 37 通过，7 个已复现目标缺口，1 个 TODO 未执行 | 未集成 |
+| G2-T2：registry、passthrough、prepared scope 与公共入口迁移 | 未开始；等待 G1 固定集成提交 | 未执行 | 未集成 |
+| G2-T3：Position owner / adapter | 未开始 | 未执行 | 未集成 |
+| G2-T4：四个 terminal routes、Toolbox/VCC receipt adapters | 未开始 | 未执行 | 未集成 |
+| G2-T5：移除 shim、边界激活、G1+G2 组合重启 | 未开始 | 未执行 | 未集成 |
+
+T1 不标为切片完成，TODO 及已知目标失败也不计入 G2 AC 通过；设计通过、测试准备通过和生产修复通过分别记录。
+
+## G2-T1 五项交付记录
+
+### 职责与边界
+
+本次没有生产职责迁移。真实公共入口仍在 [Main](../../../../src/main.js) 的 `runArchiveAwareOperation`（21849），继续直接处理 Position 分派、admission、outcome、settlement 和 cleanup；TaskLifecycle 仍拥有 task/batch/outbox。四 route 解析仍在 [Controller](../../../../src/main-process/archive-center/controller.js) 的 `normalizeTerminalOutcome`（108），replay finalizer 仍由 Main（19501）分派。计划中的 task-owner / registry / scope 均不能描述为现行生产接口。
+
+新增 [公共入口夹具](../../../../tests/helpers/archive-aware-operation-harness.js) 从当前 Main 提取并执行 `trackArchiveOperationPromise` 和 `runArchiveAwareOperation` 原文，复用真实 IPC prepared contract / 原 preflight helper；不复制入口实现。Hold、Archive、lifecycle、领域服务等外围依赖使用测试协作者。夹具的允许用途是入口接线及局部行为验证，不能证明真实 BOR/DB/worker/GUI/重启恢复，更不能证明 AC-01 已消除 Position 依赖。
+
+### 调用方与兼容
+
+- [动态 task inventory](evidence/task-policy-inventory.json)：268 policies = 69 eager 文件 + 2 deferred 文件 + 63 no-file + 134 exclude；后续 adapter 显式绑定须覆盖 134 个受控 task。exclude 不进入公共受控执行器。
+- Position 当前生产 task 为 10 eager + 5 no-file。deferred 生产项是 `monthly-balance:assemble` / `new-account:generate`；`legacyExistingBatchRecovery` 当前实际生产设置来自 Acquiring resume。新增 Position deferred/legacy 用例验证公共兼容能力，不虚构当前 Position 生产 producer。
+- 公共 Toolbox/VCC receipt hook 的精确五项为 `toolbox:merge`、`toolbox:split:export`、`vccFinancialOp:data-manager:export`、`vccFinancialOp:export:import-audit`、`vccFinancialOp:export:result`。其他域即使在 publication-only 表内，仍受 Main scope 条件限制并保留 prepared hook。
+- 生产调用方全部待迁；本轮不新增兼容转发，不删除原 preflight 导出。新增测试临时引用旧 helper，G2-T2/T5 应连同既有测试迁入中立资源模块后再删除 shim，不能为保测试而保留生产旁路。
+- 四个历史 route 永久保留为兼容数据合同；它们不是可随 shim 删除的入口。详细清单见 [基线与调用方](baseline-inventory.md)。
+
+### 业务行为
+
+依据 Spec G2-AC-02/03/04/06/09 与 TechDoc §2–§4：
+
+- 固定 eager/deferred/no-file/legacy 的生命周期选择，prepared 显式 taskRunId/operationKey 优先，Position route 仍保存本次生成 token；不得擅自“修正”历史身份组合。
+- 固定 Position finalizer 先于 prepared afterTerminal，前者失败不执行后者；五项 publication-only hook 优先于 prepared hook，并保留空 `toolboxPublicationTaskIds` 数组优先于 VCC 数组的既有语义。
+- 固定 prepare 取消/抛错、三次 gate、beforeStart 与 admission 接管点、durable 前后 cleanup 边界；接管后通用 abandon 为零。
+- 已有 lifecycle finally 双异常保持 cleanup error 优先；current Position 内层 settlement 抛错先于原业务错误传播。更外层 owner/checkpoint 的错误归一仍须由 T3 验证，不以本次 stub 代替。
+- 明确待修复：第二 gate / Archive 初始化在原 wrapper 外；同步调用 `run` 逃过 `Promise.resolve(run())`；lifecycle 不可用虽会 cleanup，但其延迟 cleanup 未纳入退出 tail。后者是新 scope 覆盖整个 prepare 后 Promise 的必需验证，不改原失败码和 cleanup-error 优先级。
+- adapter 构建尚无生产入口，保留一个明确 TODO；未伪造构建 hook，未将基线漏清理写成正确行为。
+
+### 验证证据
+
+平台为 macOS 15.7.4 arm64，Node v25.8.0；均从本 worktree 显式执行，使用临时或模拟资源，不启动应用、不接触真实业务数据。
+
+| 验证 | 实际结果 | 证据及限制 |
+| --- | --- | --- |
+| 七组既有 Position / IPC contract / TaskLifecycle / Controller / Toolbox 测试 | 173 pass，0 fail，exit 0 | [命令和环境](evidence/baseline-tests.json)、[完整 TAP](evidence/baseline-tests.tap)；覆盖基线，不是 G2 新实现验收 |
+| 三个新增测试文件，默认模式 | 45 tests = 37 pass + 8 TODO，exit 0 | [命令、输入摘要](evidence/preparation-tests.json)、[完整 TAP](evidence/preparation-tests.tap)；7 项 TODO 实际执行后断言失败，另 1 项未执行 |
+| 同一套测试，`G2_T1_REQUIRE_TARGET=1` | 37 pass、7 fail、1 TODO，exit 1 | [缺口探针 TAP](evidence/target-gap-probe.tap)；预期失败用于证明基线缺口，不能称为通过门禁 |
+| 四个新增测试文件的 `no-undef` 检查 | 0 errors、0 warnings | [检查结果](evidence/test-lint.json)；显式将项目规则应用于测试，不冒充仅扫描 src 的 npm run lint |
+| 独立测试准备审查 | 未发现阻塞当前准备交付的必改项 | [review.md](review.md)；审查不代替实现后的运行验证 |
+
+新增 [task-adapters.test.js](../../../../tests/unit/main-process/task-adapters.test.js)、[prepared-resource-scope.test.js](../../../../tests/unit/main-process/prepared-resource-scope.test.js)、[archive-aware-prepared-resource-entry.test.js](../../../../tests/unit/main-process/archive-aware-prepared-resource-entry.test.js)。新增测试内容摘要与基线源文件摘要分别绑定证据；不只用 HEAD 表示 dirty 内容。
+
+四个新增测试/夹具共 663 行；完整 [代码差异](evidence/test-code-diff.patch) 可独立审阅。收口时未发现 whitespace 错误，新文档本地链接均可达，已跟踪文件差异为空，关键生产源码摘要与基线一致；[最终状态](evidence/final-state.json)记录再次复核的分支及依赖 SHA。
+
+未执行：G1+G2 组合恢复集成、真实数据库/受管文件崩溃重启、生产 adapter 构建故障、真实 Electron GUI、Windows 占用/退出、Excel/WPS、完整 `release-check`。原因是生产迁移未开始、固定 G1 依赖缺失；本轮不声明 PR-ready 或正式 GUI 交付。
+
+### 当前规则入口
+
+当前仍以根 [AGENTS.md](../../../../AGENTS.md) 的架构/按需读取入口和 [CODEX.md](../../../../CODEX.md) 的决策、协作、验证章节为准；专项集成约束见 [integration-test-policy.md](../../../../rules/integration-test-policy.md)。本次只有测试准备，生产职责未变化，**无需更新**上述正文或新增 `src/main-process/task-adapters/README.md` 导航，以免把拟新增模块写成现状。首个实际职责迁移切片必须按总索引 §6.4 建立该模块说明并在根添加导航。
+
+G8 尚未集成；`ARCH-TASK-ADAPTER` 未激活，无本次例外变更。不能虚构机器配置或用静态依赖通过替代三次 gate/资源收口验证。激活及 shim 例外移除归属 G2-T5 与 G8 实际集成。
+
+## 决策、剩余事项与回退
+
+1. **BLOCK（仅生产迁移）**：等待 G1 经 `release/v3.2.10` 集成并固定接口。后续读取实际 release SHA、G1 实施/验证记录和公开接口，验证 ancestry 及来源后纳入本分支；记录真正的依赖 SHA。当前不自动提交或合并 G1。
+2. **PROBE / G2-T1、T2**：依赖到位后将 adapter 构建 TODO 改成真实入口故障测试；新增 scope 单飞、重复收口、释放失败快照、诊断和前置 tail 的目标断言。移除 TODO 标记并要求全部目标通过，不能只依赖默认 exit 0。
+3. **G2-T3、T4**：继续迁移领域 owner、全部 hooks 和四历史 route，补身份冲突/重复 replay、legacy activation guard、pending/receipt 保留等真实领域及集成验证。
+4. **G2-T5**：删除达成移除条件的 shim，补 G1+G2 两次重启幂等与可用的边界检查；集成 G8 后同步配置与现行说明。正式交付/PR-ready 前运行覆盖最终内容的 release-check，平台人工项单列。
+5. 回退本轮只需移除本分支新增的测试和实施证据；复制的设计输入须按来源清单辨认。没有生产代码、存储、IPC、schema 或业务行为变化；不触及主工作区和其他 worktree 的用户材料。后续生产切片按 TechDoc §5 整体回退接线，并等待退出屏障，不删除 pending/journal/receipt/outbox。

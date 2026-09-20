@@ -1,0 +1,738 @@
+{
+  "head": "5ccbf3f022488026f725a5111be00422a04ce221",
+  "runtime": "v25.8.0",
+  "unitTests": {
+    "tests": 103,
+    "pass": 103,
+    "fail": 0
+  },
+  "policyCount": 268,
+  "controlledCount": 134,
+  "counts": {
+    "passthrough": 107,
+    "vcc-financial-op": 10,
+    "position-reconciliation": 15,
+    "toolbox": 2
+  },
+  "receiptHooks": [
+    "vccFinancialOp:data-manager:export",
+    "vccFinancialOp:export:import-audit",
+    "vccFinancialOp:export:result",
+    "toolbox:merge",
+    "toolbox:split:export"
+  ],
+  "bindings": [
+    {
+      "taskKey": "account-mapping:distribute-migration",
+      "scopeId": "statement-generator",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "account-mapping:save",
+      "scopeId": "statement-generator",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "balance-adjustment:save",
+      "scopeId": "statement-generator",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "big-account-mode:save",
+      "scopeId": "statement-generator",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "big-account-order:save",
+      "scopeId": "statement-generator",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "big-account:import-bank-info",
+      "scopeId": "statement-generator",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "big-account:save-own-accounts",
+      "scopeId": "statement-generator",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "file:complete-big-account-selection",
+      "scopeId": "statement-generator",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "file:export-balance",
+      "scopeId": "statement-generator",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "file:export-detail",
+      "scopeId": "statement-generator",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "file:import",
+      "scopeId": "statement-generator",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "file:save-balance-seed",
+      "scopeId": "statement-generator",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "monthly-balance:assemble",
+      "scopeId": "statement-generator",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "monthly-balance:export",
+      "scopeId": "statement-generator",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "template:save-mappings",
+      "scopeId": "statement-generator",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "template:clear-bill-split-merge-groups",
+      "scopeId": "statement-generator",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "template:delete",
+      "scopeId": "statement-generator",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "template:delete-bill-split-row",
+      "scopeId": "statement-generator",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "template:export-bundle",
+      "scopeId": "statement-generator",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "template:import",
+      "scopeId": "statement-generator",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "template:import-bundle",
+      "scopeId": "statement-generator",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "template:rename",
+      "scopeId": "statement-generator",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "template:save-amount-split-rules",
+      "scopeId": "statement-generator",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "template:save-bill-split-amount-rules",
+      "scopeId": "statement-generator",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "template:save-bill-split-mappings",
+      "scopeId": "statement-generator",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "template:save-bill-split-merge-group",
+      "scopeId": "statement-generator",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "template:save-bill-split-meta",
+      "scopeId": "statement-generator",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "template:save-bill-split-row",
+      "scopeId": "statement-generator",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "template:save-bill-split-row-count",
+      "scopeId": "statement-generator",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "template:save-filename-fixed-field",
+      "scopeId": "statement-generator",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "template:set-child-parent",
+      "scopeId": "statement-generator",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "template:set-parent-status",
+      "scopeId": "statement-generator",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "new-account:export",
+      "scopeId": "new-account-generator",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "new-account:generate",
+      "scopeId": "new-account-generator",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "bank-statement:batch-import",
+      "scopeId": "bank-statement-process",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "bank-statement:export",
+      "scopeId": "bank-statement-process",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "bank-statement:import",
+      "scopeId": "bank-statement-process",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "bank-statement:run",
+      "scopeId": "bank-statement-process",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "channels:create",
+      "scopeId": "bank-statement-process",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "channels:delete",
+      "scopeId": "bank-statement-process",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "channels:update",
+      "scopeId": "bank-statement-process",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "fund-transfer-account-mapping:save",
+      "scopeId": "bank-statement-process",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "gateway-recon:import",
+      "scopeId": "bank-statement-process",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "scenarios:batch-delete",
+      "scopeId": "bank-statement-process",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "scenarios:create",
+      "scopeId": "bank-statement-process",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "scenarios:delete",
+      "scopeId": "bank-statement-process",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "scenarios:export-bundle",
+      "scopeId": "bank-statement-process",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "scenarios:import-bundle-apply",
+      "scopeId": "bank-statement-process",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "scenarios:set-applicable-channels",
+      "scopeId": "bank-statement-process",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "scenarios:toggle-enabled",
+      "scopeId": "bank-statement-process",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "scenarios:transfer",
+      "scopeId": "bank-statement-process",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "scenarios:update",
+      "scopeId": "bank-statement-process",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "linked-table:delete-by-date-range",
+      "scopeId": "bank-statement-process",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "linked-table:import",
+      "scopeId": "bank-statement-process",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "recon-id-fix:clear-session",
+      "scopeId": "recon-id-fix",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "recon-id-fix:export",
+      "scopeId": "recon-id-fix",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "recon-id-fix:import",
+      "scopeId": "recon-id-fix",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "recon-id-fix:run",
+      "scopeId": "recon-id-fix",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "pending:diff:export-aggregate",
+      "scopeId": "pending-reconciliation",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "pending:diff:export-single",
+      "scopeId": "pending-reconciliation",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "pending:error:export-report",
+      "scopeId": "pending-reconciliation",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "pending:import:start",
+      "scopeId": "pending-reconciliation",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "pending:reconcile:run",
+      "scopeId": "pending-reconciliation",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "pending:removed:import",
+      "scopeId": "pending-reconciliation",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "pending:rule:save",
+      "scopeId": "pending-reconciliation",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "bankBuRecon:export:aggregate",
+      "scopeId": "bank-bu-recon",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "bankBuRecon:export:single",
+      "scopeId": "bank-bu-recon",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "bankBuRecon:import:run",
+      "scopeId": "bank-bu-recon",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "bankBuRecon:run",
+      "scopeId": "bank-bu-recon",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "bizOpReconV327:import",
+      "scopeId": "biz-op-recon",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "bizOpReconV327:run",
+      "scopeId": "biz-op-recon",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "bizOpReconV327:delete",
+      "scopeId": "biz-op-recon",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "bizOpReconV327:maintenance:upgrade",
+      "scopeId": "biz-op-recon",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "bizOpReconV327:maintenance:reclaim",
+      "scopeId": "biz-op-recon",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "bizOpReconV327:export:op-raw",
+      "scopeId": "biz-op-recon",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "bizOpReconV327:export:flow-raw",
+      "scopeId": "biz-op-recon",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "bizOpReconV327:export:op-check",
+      "scopeId": "biz-op-recon",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "bizOpReconV327:export:flow-check",
+      "scopeId": "biz-op-recon",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "bizOpReconV327:export:result-full",
+      "scopeId": "biz-op-recon",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "bizOpReconV327:export:result-diff",
+      "scopeId": "biz-op-recon",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "bizOpReconV327:export:errors",
+      "scopeId": "biz-op-recon",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "bizOpRecon:export:date",
+      "scopeId": "biz-op-recon",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "bizOpRecon:export:date-range",
+      "scopeId": "biz-op-recon",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "bizOpRecon:import:run-biz-op",
+      "scopeId": "biz-op-recon",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "bizOpRecon:import:run-flow",
+      "scopeId": "biz-op-recon",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "bizOpRecon:run",
+      "scopeId": "biz-op-recon",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "vccOpCalc:import:scan",
+      "scopeId": "vcc-op-calc",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "vccOpCalc:run:compute-amounts",
+      "scopeId": "vcc-op-calc",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "vccOpCalc:run:save",
+      "scopeId": "vcc-op-calc",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "vccFinancialOp:data-manager:delete",
+      "scopeId": "vcc-financial-op",
+      "adapterId": "vcc-financial-op"
+    },
+    {
+      "taskKey": "vccFinancialOp:data-manager:export",
+      "scopeId": "vcc-financial-op",
+      "adapterId": "vcc-financial-op"
+    },
+    {
+      "taskKey": "vccFinancialOp:export:import-audit",
+      "scopeId": "vcc-financial-op",
+      "adapterId": "vcc-financial-op"
+    },
+    {
+      "taskKey": "vccFinancialOp:export:result",
+      "scopeId": "vcc-financial-op",
+      "adapterId": "vcc-financial-op"
+    },
+    {
+      "taskKey": "vccFinancialOp:import:apply",
+      "scopeId": "vcc-financial-op",
+      "adapterId": "vcc-financial-op"
+    },
+    {
+      "taskKey": "vccFinancialOp:opening:initialize",
+      "scopeId": "vcc-financial-op",
+      "adapterId": "vcc-financial-op"
+    },
+    {
+      "taskKey": "vccFinancialOp:run:adjustment-add",
+      "scopeId": "vcc-financial-op",
+      "adapterId": "vcc-financial-op"
+    },
+    {
+      "taskKey": "vccFinancialOp:run:archive",
+      "scopeId": "vcc-financial-op",
+      "adapterId": "vcc-financial-op"
+    },
+    {
+      "taskKey": "vccFinancialOp:run:calculate",
+      "scopeId": "vcc-financial-op",
+      "adapterId": "vcc-financial-op"
+    },
+    {
+      "taskKey": "vccFinancialOp:run:unarchive",
+      "scopeId": "vcc-financial-op",
+      "adapterId": "vcc-financial-op"
+    },
+    {
+      "taskKey": "acquiringBillCurrency:clearMonth",
+      "scopeId": "acquiring-bill-currency",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "acquiringBillCurrency:export",
+      "scopeId": "acquiring-bill-currency",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "acquiringBillCurrency:importBill",
+      "scopeId": "acquiring-bill-currency",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "acquiringBillCurrency:importFlow",
+      "scopeId": "acquiring-bill-currency",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "acquiringBillCurrency:run",
+      "scopeId": "acquiring-bill-currency",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "acquiringBillCurrency:run:resume",
+      "scopeId": "acquiring-bill-currency",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "pre-fund-reconciliation:export",
+      "scopeId": "pre-fund-reconciliation",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "pre-fund-reconciliation:import-bank",
+      "scopeId": "pre-fund-reconciliation",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "pre-fund-reconciliation:run",
+      "scopeId": "pre-fund-reconciliation",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "pre-fund-reconciliation:temp:clear",
+      "scopeId": "pre-fund-reconciliation",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "pre-fund-reconciliation:temp:delete",
+      "scopeId": "pre-fund-reconciliation",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "pre-fund-reconciliation:temp:delete-by-date-range",
+      "scopeId": "pre-fund-reconciliation",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "pre-fund-reconciliation:import-mpt",
+      "scopeId": "pre-fund-reconciliation",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "pre-fund-reconciliation:mpt-errors:export",
+      "scopeId": "pre-fund-reconciliation",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "pre-fund-reconciliation:mpt-errors:repair",
+      "scopeId": "pre-fund-reconciliation",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "duplicate-inbound-match:export",
+      "scopeId": "duplicate-inbound-match",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "duplicate-inbound-match:import-files",
+      "scopeId": "duplicate-inbound-match",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "duplicate-inbound-match:run",
+      "scopeId": "duplicate-inbound-match",
+      "adapterId": "passthrough"
+    },
+    {
+      "taskKey": "position-reconciliation:bank:apply-import",
+      "scopeId": "position-reconciliation-process",
+      "adapterId": "position-reconciliation"
+    },
+    {
+      "taskKey": "position-reconciliation:bank:delete",
+      "scopeId": "position-reconciliation-process",
+      "adapterId": "position-reconciliation"
+    },
+    {
+      "taskKey": "position-reconciliation:bank:export",
+      "scopeId": "position-reconciliation-process",
+      "adapterId": "position-reconciliation"
+    },
+    {
+      "taskKey": "position-reconciliation:mappings:save",
+      "scopeId": "position-reconciliation-process",
+      "adapterId": "position-reconciliation"
+    },
+    {
+      "taskKey": "position-reconciliation:run",
+      "scopeId": "position-reconciliation-process",
+      "adapterId": "position-reconciliation"
+    },
+    {
+      "taskKey": "position-reconciliation:run:confirm",
+      "scopeId": "position-reconciliation-process",
+      "adapterId": "position-reconciliation"
+    },
+    {
+      "taskKey": "position-reconciliation:run:export",
+      "scopeId": "position-reconciliation-process",
+      "adapterId": "position-reconciliation"
+    },
+    {
+      "taskKey": "position-reconciliation:run:export-filtered",
+      "scopeId": "position-reconciliation-process",
+      "adapterId": "position-reconciliation"
+    },
+    {
+      "taskKey": "position-reconciliation:run:import-result",
+      "scopeId": "position-reconciliation-process",
+      "adapterId": "position-reconciliation"
+    },
+    {
+      "taskKey": "position-reconciliation:linked:export",
+      "scopeId": "position-reconciliation-process",
+      "adapterId": "position-reconciliation"
+    },
+    {
+      "taskKey": "position-reconciliation:raw:export",
+      "scopeId": "position-reconciliation-process",
+      "adapterId": "position-reconciliation"
+    },
+    {
+      "taskKey": "position-reconciliation:source:apply-import",
+      "scopeId": "position-reconciliation-process",
+      "adapterId": "position-reconciliation"
+    },
+    {
+      "taskKey": "position-reconciliation:source:delete",
+      "scopeId": "position-reconciliation-process",
+      "adapterId": "position-reconciliation"
+    },
+    {
+      "taskKey": "position-reconciliation:source:export-anomaly",
+      "scopeId": "position-reconciliation-process",
+      "adapterId": "position-reconciliation"
+    },
+    {
+      "taskKey": "position-reconciliation:source:prepare-import",
+      "scopeId": "position-reconciliation-process",
+      "adapterId": "position-reconciliation"
+    },
+    {
+      "taskKey": "toolbox:merge",
+      "scopeId": "toolbox",
+      "adapterId": "toolbox"
+    },
+    {
+      "taskKey": "toolbox:split:export",
+      "scopeId": "toolbox",
+      "adapterId": "toolbox"
+    }
+  ],
+  "files": [
+    {
+      "path": "src/main.js",
+      "sha256": "eb9b1248ff51862e5d7a89c3cec7c1b913fe6d61c13a735685d9379f795ad6e3"
+    },
+    {
+      "path": "src/main-process/task-adapter-composition.js",
+      "sha256": "17ddb9f3a25204766811c8fd73f4521f37af552da168c214cc705f0fe0fecee7"
+    },
+    {
+      "path": "src/main-process/task-adapters/registry.js",
+      "sha256": "63b29148c4c8e047f2bbf111d7e2eeb4407fd9618ec0982b07354dc16b7c702b"
+    },
+    {
+      "path": "src/main-process/task-adapters/prepared-resources.js",
+      "sha256": "9c26573afee90d6ef479bffa1fea061dc23ccb02dc79391169a11d8dd92fea7e"
+    },
+    {
+      "path": "src/main-process/task-adapters/passthrough.js",
+      "sha256": "f508ed0418d6af9a50d1af7f547f706c1afa090bba9a42ec384557daa085245c"
+    },
+    {
+      "path": "src/main-process/toolbox-background/task-adapter.js",
+      "sha256": "b42be48a5793635086142544b8911a6f34e034f23d2ec75e520389b21a67d065"
+    },
+    {
+      "path": "src/main-process/vcc-financial-op-output/task-adapter.js",
+      "sha256": "057dc88ac22b89f138dc2d4555ba9e11de3e3bfffffb2c033395e8594e41c8ad"
+    },
+    {
+      "path": "src/main-process/archive-center/task-lifecycle.js",
+      "sha256": "b417f50bc3d8ae6b5889d391d8caa85a042956cb5ef3cd303fa2f512900eb330"
+    },
+    {
+      "path": "src/main-process/archive-center/ipc-task-contract.js",
+      "sha256": "a12c3fba0860851a454043f77159c725a625f3933ccf8e671d7850819853a27d"
+    },
+    {
+      "path": "src/main-process/toolbox-archive-recovery.js",
+      "sha256": "b2f4a88a7596bb35d0d38e2a4688ac796f33773bf02a0ca99127b7e0d3c64bda"
+    }
+  ]
+}

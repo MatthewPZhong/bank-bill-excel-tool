@@ -1,0 +1,9 @@
+✔ VCC 四个 file action 统一走 FilePlan authority，三类输出以 receipt 结算全部 keys (8.961542ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 232.198792

@@ -6,13 +6,13 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
+const { createPreparedResourceScope } = require('../../../src/main-process/task-adapters/prepared-resources');
 const { captureStagedInputEvidenceAsync } = require('../../../src/main-process/position-reconciliation/input-staging');
 
 const {
   createPositionRunTaskContract,
   createPositionSourceImportTaskContract,
-  executeAfterPositionAdmission,
-  runWithPreparedResourceCleanup
+  executeAfterPositionAdmission
 } = require('../../../src/main-process/position-reconciliation/interactive-task-preflight');
 const {
   createIpcTaskContext,
@@ -123,14 +123,16 @@ async function invoke(contract, args, harness) {
   const lifecycleRun = prepared.filePlan
     ? harness.lifecycle.runFileTask.bind(harness.lifecycle)
     : harness.lifecycle.run.bind(harness.lifecycle);
-  const result = await runWithPreparedResourceCleanup(prepared, (markExecuteStarted) => (
-    lifecycleRun({
+  const scope = createPreparedResourceScope(prepared);
+  const result = await scope.run(() => {
+    scope.enterLifecycle();
+    return lifecycleRun({
       policy: POLICY,
       meta: { channel: POLICY.channel },
       prepared,
       filePlanResolver: prepared.filePlan ? () => prepared.filePlan : undefined,
       execute: (batchContext, controls) => {
-        markExecuteStarted();
+        scope.markExecuteStarted();
         return executeIpcTaskInvocation(
           normalized,
           {},
@@ -139,8 +141,8 @@ async function invoke(contract, args, harness) {
           createIpcTaskContext(batchContext, controls)
         );
       }
-    })
-  ));
+    });
+  });
   return { prepared, result };
 }
 
@@ -400,11 +402,11 @@ test('position outer 拒绝时 abandon；实际进入业务 callback 后正常�
   const prepared = {
     async onAbandon() { abandonCount += 1; }
   };
-  const rejected = await runWithPreparedResourceCleanup(
-    prepared,
-    (markExecuteStarted) => executeAfterPositionAdmission({
+  const rejectedScope = createPreparedResourceScope(prepared);
+  const rejected = await rejectedScope.run(
+    () => executeAfterPositionAdmission({
       isPositionOperation: true,
-      markExecuteStarted,
+      markExecuteStarted: rejectedScope.markExecuteStarted,
       execute: () => { executeCount += 1; return { status: 'ok' }; },
       admitPosition: () => ({ status: 'failed', code: 'position-operation-busy' })
     })
@@ -413,11 +415,11 @@ test('position outer 拒绝时 abandon；实际进入业务 callback 后正常�
   assert.equal(executeCount, 0);
   assert.equal(abandonCount, 1);
 
-  const executed = await runWithPreparedResourceCleanup(
-    prepared,
-    (markExecuteStarted) => executeAfterPositionAdmission({
+  const executedScope = createPreparedResourceScope(prepared);
+  const executed = await executedScope.run(
+    () => executeAfterPositionAdmission({
       isPositionOperation: true,
-      markExecuteStarted,
+      markExecuteStarted: executedScope.markExecuteStarted,
       execute: () => { executeCount += 1; return { status: 'ok' }; },
       admitPosition: (operation) => operation()
     })

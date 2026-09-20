@@ -1,0 +1,72 @@
+{
+  "runs": [
+    {
+      "name": "preparation-tests",
+      "executedAt": "2026-09-20T13:04:34.877150+00:00",
+      "command": [
+        "node",
+        "--test",
+        "--test-reporter=tap",
+        "tests/unit/main-process/archive-aware-prepared-resource-entry.test.js",
+        "tests/unit/main-process/prepared-resource-scope.test.js",
+        "tests/unit/main-process/task-adapters.test.js"
+      ],
+      "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters",
+      "env": {},
+      "exitCode": 0,
+      "expectedExitCode": 0,
+      "summary": [
+        "# tests 45",
+        "# pass 37",
+        "# fail 0",
+        "# skipped 0",
+        "# todo 8"
+      ],
+      "log": "preparation-tests.tap"
+    },
+    {
+      "name": "target-gap-probe",
+      "executedAt": "2026-09-20T13:04:35.077752+00:00",
+      "command": [
+        "node",
+        "--test",
+        "--test-reporter=tap",
+        "tests/unit/main-process/archive-aware-prepared-resource-entry.test.js",
+        "tests/unit/main-process/prepared-resource-scope.test.js",
+        "tests/unit/main-process/task-adapters.test.js"
+      ],
+      "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters",
+      "env": {
+        "G2_T1_REQUIRE_TARGET": "1"
+      },
+      "exitCode": 1,
+      "expectedExitCode": 1,
+      "summary": [
+        "# tests 45",
+        "# pass 37",
+        "# fail 7",
+        "# skipped 0",
+        "# todo 1"
+      ],
+      "log": "target-gap-probe.tap"
+    }
+  ],
+  "testInputs": [
+    {
+      "path": "tests/unit/main-process/archive-aware-prepared-resource-entry.test.js",
+      "sha256": "8531215875edf5ef44c1b101eeec60ce3dc4a7a47c0124dfac6bea26d49d4b37"
+    },
+    {
+      "path": "tests/unit/main-process/prepared-resource-scope.test.js",
+      "sha256": "2dfaee5a590074a7090f746f3acb3185b16d1dba9d4fb290a9f6e2875f55aca6"
+    },
+    {
+      "path": "tests/unit/main-process/task-adapters.test.js",
+      "sha256": "2a39b6c94d1d649ab20b67aff74c40dd6b30466a5961d730568523ebe37ca6f5"
+    },
+    {
+      "path": "tests/helpers/archive-aware-operation-harness.js",
+      "sha256": "944e273bc2aa8572ab38721cf2c252fd51b90385602c99cb782d4bfcf3757a94"
+    }
+  ]
+}
