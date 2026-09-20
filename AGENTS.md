@@ -37,6 +37,7 @@
 ## 模块资料入口
 
 - [XLSX 公共基础设施](src/backend/xlsx/README.md)：两类 reader 能力、预算/关闭/临时资源所有权、兼容入口与代表性测试。
+- [业务任务适配、prepare 资源所有权与终态路由](src/main-process/task-adapters/README.md)：registry、领域 owner、资源交接及 live/replay 收口。
 
 ## 常用命令
 以实际 `package.json.scripts` 为准；配置与文档不符时核实并说明。

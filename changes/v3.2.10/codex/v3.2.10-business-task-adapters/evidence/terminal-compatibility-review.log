@@ -1,0 +1,48 @@
+G2-T4 独立只读审查证据
+
+工作目录：/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters
+固定 G1 基线：5ccbf3f022488026f725a5111be00422a04ce221
+当前源文件 hash、探针 hash、执行时间与逐样本结果：terminal-compatibility-probe.json
+可重跑探针：terminal-compatibility-probe.js
+
+审查结论：本次范围内未发现阻断生产迁移的必改缺陷。
+这是代码与定向自动化证据，不代表真实 Electron / Windows / Excel / WPS 验收。
+
+1. 历史 route 正常化兼容
+- git show 固定 G1 的 src/main-process/archive-center/controller.js，提取其真实 normalizeTerminalOutcome。
+- 当前 Controller 的 normalizeTerminalOutcome 使用真实 registry 及四个领域 normalizer。
+- 四个 route 的身份 trim、空值、非法值、多余字段，以及三种终态，共 162 个普通持久数据样本。
+- 原始执行与本次整理后的独立重跑均为 162 样本、0 差异、PASS。
+- 比较范围包含返回 JSON 与异常 name/message；不以本探针证明数据库回放。
+- 入口：controller.js:107；terminal-route-registry.js:59。
+
+2. operation finalizer / live-replay 接线
+- 查看固定 G1 与当前 git diff：三个既有 finalizer 正文未改变，新增 normalize 与 registration factory。
+- Pending：src/main-process/pending-archive-lineage.js:152。
+- Pre-fund：src/main-process/pre-fund-archive-lineage.js:187。
+- Biz OP：src/main-process/biz-op-recon-run-data.js:869。
+- 真实 terminalResult.taskRun.status 仍优先于 intent；非 succeeded 不 ACK；成功时要求 operation owner.taskRunId 与 route 匹配。
+- Controller 两个回放位置均走成对注册 finalizer：controller.js:665、795。
+- Main 三条 live hook：src/main.js:13979、14936、18462。
+- 读取真实 createTaskPolicyRegistry().require() 的结果：pending:reconcile:run、bizOpRecon:run、pre-fund-reconciliation:run 均 taskKind=no-file、batchPolicy=no-file。
+- TaskLifecycle 的 no-file 入口创建 exact-5 operation context，因此 registry.createAfterTerminal 的身份验证不会拒绝这些合法生产形状。
+
+3. Biz OP legacy 限制
+- Main:1291 装配四条历史 route；Main:1297 保留 mode=ACTIVE 与 LEGACY_DB_CLEARED/LEGACY_FILES_RECLAIMED guard。
+- 注册工厂：biz-op-recon-run-data.js:1198；仍经 withLegacyRecovery，live/replay 使用同一领域 finalizer。
+- 定向测试中的真实主库/侧库 receipt ACK、重复回放和恢复连接实际关闭用例通过。
+
+4. Toolbox / VCC receipt
+- toolbox-background/task-adapter.js:6 与 vcc-financial-op-output/task-adapter.js:6 保留 exact taskKey/scope publication-only 条件。
+- 无文件任务透传 prepared hook；保留 toolboxPublicationTaskIds || vccOutputPublicationTaskIds || [] 优先级，包括空 toolbox 数组优先。
+- ACK 仍经 toolbox-archive-recovery.js:27，并保留 verifyArchiveHandoff（:90）等原 owner、task/batch 与 durable 检查。
+- 五个 publication-only hook 的兼容测试均通过。
+
+已执行的定向测试命令（此日志为执行结果摘录，不冒充完整 TAP）：
+NODE_PATH=/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules node --test tests/unit/main-process/archive-terminal-route-registry.test.js tests/unit/main-process/archive-center-controller.test.js tests/unit/main-process/pending-archive-lineage.test.js tests/unit/main-process/pre-fund-archive-lineage.test.js tests/unit/main-process/biz-op-archive-lineage.test.js tests/unit/main-process/task-adapters.test.js tests/unit/main-process/toolbox-archive-integration.test.js
+
+当时结果：134 tests，133 pass，1 fail，0 skipped，0 todo。
+唯一失败：toolbox-archive-integration.test.js:259 的旧 Main VM 夹具没有注入 positionTaskOwner，导致 ReferenceError: positionTaskOwner is not defined。
+该失败已报告主 Agent，由其他执行者修复；本次证据整理没有重跑上述 134 测试，也不将后续修复结果算作本独立审查的亲自复测。
+
+本次补证据仅创建 probe.js、probe.json 与本日志，没有修改生产代码或测试。

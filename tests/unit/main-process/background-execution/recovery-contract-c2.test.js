@@ -7,6 +7,8 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { DatabaseSync } = require('node:sqlite');
+const { createArchiveAwareOperationHarness } = require('../../../helpers/archive-aware-operation-harness');
+const { createTaskPolicyRegistry } = require('../../../../src/main-process/archive-center/task-policy-registry');
 
 const {
   ensureArchiveMetadataSupport
@@ -1314,6 +1316,11 @@ test('产品 Main 真实等待 Recovery Coordinator 后才 initializeArchiveCent
     source.indexOf('function assertTaskPolicyNotHeld(')
   );
   assert.equal(initializeRecovery.includes('catch ('), false);
+  assert.match(initializeRecovery, /createApplicationRecoveryComposition\(\{\s*platform: coordinator/);
+  assert.match(initializeRecovery, /await applicationRecoveryCoordinator\.preflight\(\)/);
+  const composition = fs.readFileSync(path.join(ROOT, 'src/main-process/application-recovery/composition.js'), 'utf8');
+  assert.match(composition, /bizOpModule\.recovery\.bindPlatform\(coordinator\.platformFacade\)/);
+  assert.match(body, /applicationRecoveryCoordinator\.completeArchiveInitialization\(initialized\)/);
 });
 
 test('Recovery Hold gate 读取 Main control DB；真实 Archive 入口在 prepare/admission/beforeStart 三处复核', () => {
@@ -1363,12 +1370,89 @@ test('Recovery Hold gate 读取 Main control DB；真实 Archive 入口在 prepa
   const archiveAdmission = body.indexOf('archiveTaskLifecycle.run');
   assert.ok(firstGate >= 0 && firstGate < prepare);
   assert.ok(prepare < secondGate && secondGate < archiveAdmission);
-  assert.ok(body.match(/assertTaskPolicyNotHeld\(policy, (?:null|prepared)\)/g).length >= 4);
+  assert.equal(body.match(/assertTaskPolicyNotHeld\(policy, (?:null|prepared)\)/g).length, 3);
+  const beforeStart = body.indexOf('beforeStart: async');
+  const thirdGate = body.indexOf('assertTaskPolicyNotHeld(policy, prepared)', secondGate + 1);
+  const preparedHook = body.indexOf('prepared.beforeStart', beforeStart);
+  assert.ok(beforeStart < thirdGate && thirdGate < preparedHook);
+  const scopeRun = body.indexOf('resourceScope.run(async');
+  assert.ok(prepare < scopeRun && scopeRun < secondGate);
+  assert.ok(body.indexOf('resourceScope.enterLifecycle()') < body.indexOf('return runLifecycle(payload)'));
   assert.match(source, /PRE_FUND_SCOPED_HOLD_TASK_KEYS[\s\S]*?prepared === null\) return true/);
   assert.match(source, /PREFUND_RECOVERY_SCOPE_UNAVAILABLE/);
   assert.match(source, /RECOVERY_HOLD_ACTION_UNBOUND/);
   assert.match(source, /allowedTaskKeys\(hold\.actionKey\)/);
 });
+
+
+const positionFilePolicy = createTaskPolicyRegistry().require('position-reconciliation:bank:export');
+for (const shape of [
+  { name: 'eager', channel: positionFilePolicy.channel },
+  { name: 'deferred', channel: positionFilePolicy.channel, policy: { ...positionFilePolicy, allocation: 'deferred' } },
+  { name: 'legacy', channel: positionFilePolicy.channel, legacy: true },
+  { name: 'no-file', channel: 'position-reconciliation:run' }
+]) {
+  for (const rejectionGate of [1, 2, 3, null]) {
+    test(`真实公共入口 ${shape.name} ${rejectionGate ? `第 ${rejectionGate} 次 Hold gate 拒绝` : '三次 gate 通过'}保持领域与资源时序`, async () => {
+      const db = openDb();
+      const gate = createRecoveryHoldGate(createRecoveryControlReadRepository(db));
+      let preparedCount = 0;
+      let abandonCount = 0;
+      let preparedHookCount = 0;
+      const seenPrepared = [];
+      const harness = createArchiveAwareOperationHarness({
+        ...shape,
+        gate(_policy, prepared, call) {
+          seenPrepared.push(prepared);
+          if (call === rejectionGate) {
+            writeTransition(db, {
+              entityKind: 'recovery-hold', command: 'create-or-get', input: {
+                contractVersion: 1, holdId: 'hold-entry', sourceKind: 'manual', sourceRef: 'manual:entry',
+                intentId: null, actionKey: 'statement:generate-current', operationKey: 'operation-entry',
+                taskRunId: 'task-entry', conflictScopeKey: 'scope:entry', reasonCode: 'MANUAL_REVIEW',
+                safeSummary: { reasonCode: 'MANUAL_REVIEW' },
+                evidenceHash: canonicalSha256({ reasonCode: 'MANUAL_REVIEW' })
+              }
+            });
+          }
+          gate.assertNoRecoveryHold({ conflictScopeKey: 'scope:entry' });
+        }
+      });
+      try {
+        const operation = harness.run({
+          prepare() {
+            preparedCount += 1;
+            return { proceed: true, legacyExistingBatchRecovery: shape.legacy === true,
+              onAbandon() { abandonCount += 1; },
+              beforeStart() { preparedHookCount += 1; return {}; } };
+          },
+          execute: () => ({ status: 'ok' })
+        });
+        if (rejectionGate) {
+          await assert.rejects(operation, { code: 'RECOVERY_HOLD_ACTIVE', holdId: 'hold-entry' });
+          assert.equal(harness.counts.business, 0);
+          assert.equal(harness.counts.admission, 0);
+          assert.equal(preparedHookCount, 0);
+          assert.equal(preparedCount, rejectionGate === 1 ? 0 : 1);
+          assert.equal(abandonCount, rejectionGate === 1 ? 0 : 1);
+          assert.equal(harness.counts.lifecycle, rejectionGate === 3 ? 1 : 0);
+          assert.equal(harness.counts.gate, rejectionGate);
+        } else {
+          assert.equal((await operation).status, 'ok');
+          assert.equal(harness.counts.gate, 3);
+          assert.equal(harness.counts.business, 1);
+          assert.equal(harness.counts.admission, 1);
+          assert.equal(preparedHookCount, 1);
+          assert.equal(abandonCount, 0);
+        }
+        assert.equal(seenPrepared[0], null);
+        if (seenPrepared.length > 1) assert.equal(seenPrepared[1].proceed, true);
+        if (seenPrepared.length > 2) assert.equal(seenPrepared[1], seenPrepared[2]);
+        await harness.getTail();
+      } finally { db.close(); }
+    });
+  }
+}
 
 test('target post-image hash 辅助证据使用 raw bytes SHA-256', () => {
   const bytes = Buffer.from('post-image', 'utf8');

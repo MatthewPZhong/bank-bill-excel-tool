@@ -1,0 +1,1049 @@
+TAP version 13
+# Subtest: tracker sink 建批次、归档文件并向 UI 映射批次号与文件字段
+ok 1 - tracker sink 建批次、归档文件并向 UI 映射批次号与文件字段
+  ---
+  duration_ms: 2.055916
+  type: 'test'
+  ...
+# Subtest: tracked batch 无候选文件时不建批次、不发 pseudo batch 且不写 outbox
+ok 2 - tracked batch 无候选文件时不建批次、不发 pseudo batch 且不写 outbox
+  ---
+  duration_ms: 1.878916
+  type: 'test'
+  ...
+# Subtest: 保留期默认 60 天并支持新增枚举，既有合法值保持兼容
+ok 3 - 保留期默认 60 天并支持新增枚举，既有合法值保持兼容
+  ---
+  duration_ms: 0.172292
+  type: 'test'
+  ...
+# Subtest: 模块期限设置返回完整设置，未知模块拒绝，继承不改全局默认
+ok 4 - 模块期限设置返回完整设置，未知模块拒绝，继承不改全局默认
+  ---
+  duration_ms: 0.238833
+  type: 'test'
+  ...
+# Subtest: 旧 sink 新建批次按模块期限，显式期限和已持久 outbox 快照优先
+ok 5 - 旧 sink 新建批次按模块期限，显式期限和已持久 outbox 快照优先
+  ---
+  duration_ms: 41.654167
+  type: 'test'
+  ...
+# Subtest: operation owner 终态 outbox 只重放 Task Run CAS，不创建空 batch
+ok 6 - operation owner 终态 outbox 只重放 Task Run CAS，不创建空 batch
+  ---
+  duration_ms: 19.239667
+  type: 'test'
+  ...
+# Subtest: operation owner 取消终态重放后执行 finalizer，失败时保留 outbox 供二启重试
+ok 7 - operation owner 取消终态重放后执行 finalizer，失败时保留 outbox 供二启重试
+  ---
+  duration_ms: 15.220834
+  type: 'test'
+  ...
+# Subtest: Position terminal route 拒绝空 operationToken 且不写 outbox
+ok 8 - Position terminal route 拒绝空 operationToken 且不写 outbox
+  ---
+  duration_ms: 0.911
+  type: 'test'
+  ...
+# Subtest: Pending operation terminal route 以 TaskRun identity 持久并在重放后调用 finalizer
+ok 9 - Pending operation terminal route 以 TaskRun identity 持久并在重放后调用 finalizer
+  ---
+  duration_ms: 16.606542
+  type: 'test'
+  ...
+# Subtest: Pre-fund terminal route 只规范非空 TaskRun identity
+ok 10 - Pre-fund terminal route 只规范非空 TaskRun identity
+  ---
+  duration_ms: 29.94125
+  type: 'test'
+  ...
+# Subtest: operation/file owner cancel-wins 时迟到 success 不 finalizer、不移除 outbox
+ok 11 - operation/file owner cancel-wins 时迟到 success 不 finalizer、不移除 outbox
+  ---
+  duration_ms: 34.673584
+  type: 'test'
+  ...
+# Subtest: failed/no-receipt terminal outbox 重放只收口 TaskRun，Pending/Biz finalizer 均无业务副作用
+ok 12 - failed/no-receipt terminal outbox 重放只收口 TaskRun，Pending/Biz finalizer 均无业务副作用
+  ---
+  duration_ms: 47.781459
+  type: 'test'
+  ...
+# Subtest: 控制器启动时将有效、损坏和空模板排除设置统一归一化为空数组
+ok 13 - 控制器启动时将有效、损坏和空模板排除设置统一归一化为空数组
+  ---
+  duration_ms: 0.182208
+  type: 'test'
+  ...
+# Subtest: 存储根 manager 先于 service 初始化，设置/变更透传且 maintenance 阻止删除重试
+ok 14 - 存储根 manager 先于 service 初始化，设置/变更透传且 maintenance 阻止删除重试
+  ---
+  duration_ms: 0.727333
+  type: 'test'
+  ...
+# Subtest: 公开统计 DTO 精确投影 ready 总量、运行次数、不可回退 latest 与迁移状态
+ok 15 - 公开统计 DTO 精确投影 ready 总量、运行次数、不可回退 latest 与迁移状态
+  ---
+  duration_ms: 0.153083
+  type: 'test'
+  ...
+# Subtest: 模板排除控制器方法与 main/preload IPC 桥接已移除
+ok 16 - 模板排除控制器方法与 main/preload IPC 桥接已移除
+  ---
+  duration_ms: 2.19025
+  type: 'test'
+  ...
+# Subtest: 单个文件归档失败保留批次并返回可见告警，不抛业务异常
+ok 17 - 单个文件归档失败保留批次并返回可见告警，不抛业务异常
+  ---
+  duration_ms: 0.131875
+  type: 'test'
+  ...
+# Subtest: 另存为取消不写文件，成功时使用原文件名作为默认名
+ok 18 - 另存为取消不写文件，成功时使用原文件名作为默认名
+  ---
+  duration_ms: 0.249
+  type: 'test'
+  ...
+# Subtest: 批次元数据已删除但物理清理失败时保留部分成功语义
+ok 19 - 批次元数据已删除但物理清理失败时保留部分成功语义
+  ---
+  duration_ms: 0.346625
+  type: 'test'
+  ...
+# Subtest: 业务完成后源文件已变化的批次要求重新执行业务，不提供无效重试
+ok 20 - 业务完成后源文件已变化的批次要求重新执行业务，不提供无效重试
+  ---
+  duration_ms: 0.062708
+  type: 'test'
+  ...
+# Subtest: 未产出 output 与业务失败但归档输入完整均提示从原入口重跑
+ok 21 - 未产出 output 与业务失败但归档输入完整均提示从原入口重跑
+  ---
+  duration_ms: 0.276792
+  type: 'test'
+  ...
+# Subtest: 源文件变化但保留业务摘要时允许选择等价副本，且不向页面暴露摘要
+ok 22 - 源文件变化但保留业务摘要时允许选择等价副本，且不向页面暴露摘要
+  ---
+  duration_ms: 0.383416
+  type: 'test'
+  ...
+# Subtest: 普通可重试错误保持原路径重试模式
+ok 23 - 普通可重试错误保持原路径重试模式
+  ---
+  duration_ms: 0.121334
+  type: 'test'
+  ...
+# Subtest: 混合重试部分成功时返回计数和明确提示
+ok 24 - 混合重试部分成功时返回计数和明确提示
+  ---
+  duration_ms: 0.134375
+  type: 'test'
+  ...
+# Subtest: controller 使用真实 ArchiveService 拒绝错误副本并接受同字节副本
+ok 25 - controller 使用真实 ArchiveService 拒绝错误副本并接受同字节副本
+  ---
+  duration_ms: 63.666125
+  type: 'test'
+  ...
+# Subtest: 存档主库暂不可用时写入 outbox，跨重启重放后解除源文件保护
+ok 26 - 存档主库暂不可用时写入 outbox，跨重启重放后解除源文件保护
+  ---
+  duration_ms: 49.7505
+  type: 'test'
+  ...
+# Subtest: 已永久删除 operation 的 outbox 跨重启后明确丢弃且不复活批次
+ok 27 - 已永久删除 operation 的 outbox 跨重启后明确丢弃且不复活批次
+  ---
+  duration_ms: 124.8475
+  type: 'test'
+  ...
+# Subtest: outbox 重放为部分失败正式批次时不得释放失败文件源路径
+ok 28 - outbox 重放为部分失败正式批次时不得释放失败文件源路径
+  ---
+  duration_ms: 44.073208
+  type: 'test'
+  ...
+# Subtest: outbox 重放在附件元数据登记前失败时保留任务和源文件
+ok 29 - outbox 重放在附件元数据登记前失败时保留任务和源文件
+  ---
+  duration_ms: 33.815708
+  type: 'test'
+  ...
+# Subtest: 部分附件 ready 且后续登记失败时终态保持不完整，原附件恢复后才完成
+ok 30 - 部分附件 ready 且后续登记失败时终态保持不完整，原附件恢复后才完成
+  ---
+  duration_ms: 78.4875
+  type: 'test'
+  ...
+# Subtest: 终态 outbox 按附件、原 task CAS、业务 finalizer、remove 顺序重放且不建 ghost batch
+ok 31 - 终态 outbox 按附件、原 task CAS、业务 finalizer、remove 顺序重放且不建 ghost batch
+  ---
+  duration_ms: 126.666375
+  type: 'test'
+  ...
+# Subtest: legacy outbox 无 owner/target 且 files=[] 时拒绝发号并保留诊断记录
+ok 32 - legacy outbox 无 owner/target 且 files=[] 时拒绝发号并保留诊断记录
+  ---
+  duration_ms: 18.175458
+  type: 'test'
+  ...
+# Subtest: 正式建批或追加的 artifact 与 outbox 同时失败时不得宣称可重试
+ok 33 - 正式建批或追加的 artifact 与 outbox 同时失败时不得宣称可重试
+  ---
+  duration_ms: 0.248416
+  type: 'test'
+  ...
+# Subtest: 同一平盘恢复操作重复登记时复用 outbox 并补齐新文件
+ok 34 - 同一平盘恢复操作重复登记时复用 outbox 并补齐新文件
+  ---
+  duration_ms: 42.679875
+  type: 'test'
+  ...
+# Subtest: 启动先重放持久终态，再扫尾无终态任务；未重放终态的目标批次保持 active
+ok 35 - 启动先重放持久终态，再扫尾无终态任务；未重放终态的目标批次保持 active
+  ---
+  duration_ms: 45.292333
+  type: 'test'
+  ...
+# Subtest: 启动先给模块 owner 恢复原批次，再仅扫尾无人认领任务
+ok 36 - 启动先给模块 owner 恢复原批次，再仅扫尾无人认领任务
+  ---
+  duration_ms: 3.778583
+  type: 'test'
+  ...
+# Subtest: 模块 owner 恢复失败时保留其原批次且仍扫尾其他孤儿任务
+ok 37 - 模块 owner 恢复失败时保留其原批次且仍扫尾其他孤儿任务
+  ---
+  duration_ms: 4.410416
+  type: 'test'
+  ...
+# Subtest: 多个模块 owner 逐项 settle，失败互不短路且分别上报
+ok 38 - 多个模块 owner 逐项 settle，失败互不短路且分别上报
+  ---
+  duration_ms: 0.378875
+  type: 'test'
+  ...
+# Subtest: 模块恢复聚合错误保留内部资源明细和恢复路径，启动对话框及日志均可见
+ok 39 - 模块恢复聚合错误保留内部资源明细和恢复路径，启动对话框及日志均可见
+  ---
+  duration_ms: 0.664292
+  type: 'test'
+  ...
+# Subtest: post-owner flush 成功后二次 outbox inventory 读取失败仍阻断 sweep/VCC
+ok 40 - post-owner flush 成功后二次 outbox inventory 读取失败仍阻断 sweep/VCC
+  ---
+  duration_ms: 0.165625
+  type: 'test'
+  ...
+# Subtest: startup hook 严格位于 owner/outbox/flow/sweep/interrupted artifact 状态收口后，物理维护不进入启动
+ok 41 - startup hook 严格位于 owner/outbox/flow/sweep/interrupted artifact 状态收口后，物理维护不进入启动
+  ---
+  duration_ms: 0.381083
+  type: 'test'
+  ...
+# Subtest: 无 StorageRootManager 时 defer 初始化后只完成安全恢复并返回 PR4 维护边界
+ok 42 - 无 StorageRootManager 时 defer 初始化后只完成安全恢复并返回 PR4 维护边界
+  ---
+  duration_ms: 0.1245
+  type: 'test'
+  ...
+# Subtest: 首次 entry maintenance 立即返回、同进程去重并按 version=1 八阶段顺序完成
+ok 43 - 首次 entry maintenance 立即返回、同进程去重并按 version=1 八阶段顺序完成
+  ---
+  duration_ms: 1.908916
+  type: 'test'
+  ...
+# Subtest: entry maintenance 失败仅允许离开后以新 visit 重试
+ok 44 - entry maintenance 失败仅允许离开后以新 visit 重试
+  ---
+  duration_ms: 0.741709
+  type: 'test'
+  ...
+# Subtest: 公开 entry maintenance 的历史 Blob inventory 每页拒绝被链接替换的 managed ancestor
+ok 45 - 公开 entry maintenance 的历史 Blob inventory 每页拒绝被链接替换的 managed ancestor
+  ---
+  duration_ms: 17.572916
+  type: 'test'
+  ...
+# Subtest: ownership scan 的 failed status 不得误报 completed，新 visit 才可重试
+ok 46 - ownership scan 的 failed status 不得误报 completed，新 visit 才可重试
+  ---
+  duration_ms: 0.746292
+  type: 'test'
+  ...
+# Subtest: retention 轻门禁拒绝缺失 VCC 成功证据、outbox intent 与活动任务且不二次 reconcile
+ok 47 - retention 轻门禁拒绝缺失 VCC 成功证据、outbox intent 与活动任务且不二次 reconcile
+  ---
+  duration_ms: 2.151291
+  type: 'test'
+  ...
+# Subtest: 存档 root unavailable 或 ok:false 均在 outbox/窗口 admission 前 fail-closed
+ok 48 - 存档 root unavailable 或 ok:false 均在 outbox/窗口 admission 前 fail-closed
+  ---
+  duration_ms: 0.153708
+  type: 'test'
+  ...
+# Subtest: 恢复批次清单读取失败时跳过通用扫尾并 fail-closed 阻止启动
+ok 49 - 恢复批次清单读取失败时跳过通用扫尾并 fail-closed 阻止启动
+  ---
+  duration_ms: 0.728458
+  type: 'test'
+  ...
+# Subtest: outbox remaining 与 interrupted sweep 失败均 fail-closed 且不进入 VCC gate
+ok 50 - outbox remaining 与 interrupted sweep 失败均 fail-closed 且不进入 VCC gate
+  ---
+  duration_ms: 0.166334
+  type: 'test'
+  ...
+# Subtest: 永久删除预检只读，凭证绑定窗口和批次且缺失凭证不可执行
+ok 51 - 永久删除预检只读，凭证绑定窗口和批次且缺失凭证不可执行
+  ---
+  duration_ms: 0.177084
+  type: 'test'
+  ...
+# Subtest: 永久删除重复确认共用本次执行；未明确 fullyDeleted 时不得显示成功
+ok 52 - 永久删除重复确认共用本次执行；未明确 fullyDeleted 时不得显示成功
+  ---
+  duration_ms: 0.134375
+  type: 'test'
+  ...
+# Subtest: 终态通知未 ACK 时预检阻止；预检后新增目标通知也阻止提交且不隐式 flush
+ok 53 - 终态通知未 ACK 时预检阻止；预检后新增目标通知也阻止提交且不隐式 flush
+  ---
+  duration_ms: 10.891542
+  type: 'test'
+  ...
+# Subtest: 恢复清单损坏与未结束迁移 journal 均拒绝永久删除预检
+ok 54 - 恢复清单损坏与未结束迁移 journal 均拒绝永久删除预检
+  ---
+  duration_ms: 0.168958
+  type: 'test'
+  ...
+# Subtest: 待完成删除独立于批次可见性列出并重试，保留任务身份和严格完成条件
+ok 55 - 待完成删除独立于批次可见性列出并重试，保留任务身份和严格完成条件
+  ---
+  duration_ms: 0.112708
+  type: 'test'
+  ...
+# Subtest: 普通函数 handler 无 prepare，参数原样进入 execute
+ok 56 - 普通函数 handler 无 prepare，参数原样进入 execute
+  ---
+  duration_ms: 1.732
+  type: 'test'
+  ...
+# Subtest: 对象 handler execute 稳定收到冻结 taskContext 与 artifact barrier
+ok 57 - 对象 handler execute 稳定收到冻结 taskContext 与 artifact barrier
+  ---
+  duration_ms: 0.117125
+  type: 'test'
+  ...
+# Subtest: prepare 必须显式声明 proceed，禁止把业务 status 猜成门禁结果
+ok 58 - prepare 必须显式声明 proceed，禁止把业务 status 猜成门禁结果
+  ---
+  duration_ms: 0.202542
+  type: 'test'
+  ...
+# Subtest: prepare stop 原样返回 result，输入输出路径角色分离
+ok 59 - prepare stop 原样返回 result，输入输出路径角色分离
+  ---
+  duration_ms: 0.093875
+  type: 'test'
+  ...
+# Subtest: prepare 是普通 eager FilePlan 的唯一规范化冻结边界
+ok 60 - prepare 是普通 eager FilePlan 的唯一规范化冻结边界
+  ---
+  duration_ms: 3.748375
+  type: 'test'
+  ...
+# Subtest: IPC 保留 Main 冻结 authority，但不信任复制或外部注入的目标快照
+ok 61 - IPC 保留 Main 冻结 authority，但不信任复制或外部注入的目标快照
+  ---
+  duration_ms: 1.662917
+  type: 'test'
+  ...
+# Subtest: input-only file task 原子 reserve 后默认 settle 全部 inputs 并原子终结
+ok 62 - input-only file task 原子 reserve 后默认 settle 全部 inputs 并原子终结
+  ---
+  duration_ms: 4.787542
+  type: 'test'
+  ...
+# Subtest: 网银定制 freshness 失败统一提示、零业务执行并形成一次 failed audit
+ok 63 - 网银定制 freshness 失败统一提示、零业务执行并形成一次 failed audit
+  ---
+  duration_ms: 1.308958
+  type: 'test'
+  ...
+# Subtest: 网银父目录确认期被整体移动仍由 freshness 形成 failed audit
+ok 64 - 网银父目录确认期被整体移动仍由 freshness 形成 failed audit
+  ---
+  duration_ms: 4.670375
+  type: 'test'
+  ...
+# Subtest: public freshness 后稳定替换在 reader 起点失败，保留统一 failed audit
+ok 65 - public freshness 后稳定替换在 reader 起点失败，保留统一 failed audit
+  ---
+  duration_ms: 6.966833
+  type: 'test'
+  ...
+# Subtest: FilePlan resolver 在 Task Run 建立后失败仍以 operation owner 终结
+ok 66 - FilePlan resolver 在 Task Run 建立后失败仍以 operation owner 终结
+  ---
+  duration_ms: 0.27425
+  type: 'test'
+  ...
+# Subtest: File Task interrupted recovery 复用原 exact owner 与 manifest，不 begin/reserve/发新号
+ok 67 - File Task interrupted recovery 复用原 exact owner 与 manifest，不 begin/reserve/发新号
+  ---
+  duration_ms: 14.726125
+  type: 'test'
+  ...
+# Subtest: file task cancel-wins 后迟到 success 不执行 afterTerminal
+ok 68 - file task cancel-wins 后迟到 success 不执行 afterTerminal
+  ---
+  duration_ms: 14.416875
+  type: 'test'
+  ...
+# Subtest: file task 成功但 manifest 未 durable 时只写 file-owner outbox，不提前终结
+ok 69 - file task 成功但 manifest 未 durable 时只写 file-owner outbox，不提前终结
+  ---
+  duration_ms: 5.403459
+  type: 'test'
+  ...
+# Subtest: file artifact 失败结果已耐久时直接终结为业务 succeeded，不创建永久 outbox
+ok 70 - file artifact 失败结果已耐久时直接终结为业务 succeeded，不创建永久 outbox
+  ---
+  duration_ms: 6.463208
+  type: 'test'
+  ...
+# Subtest: deferred 零输出只终结 Task Run，不预留 File Batch
+ok 71 - deferred 零输出只终结 Task Run，不预留 File Batch
+  ---
+  duration_ms: 0.57675
+  type: 'test'
+  ...
+# Subtest: deferred literal FilePlan resolver 失败以 operation owner 收口，不遗留 prepared Task Run
+ok 72 - deferred literal FilePlan resolver 失败以 operation owner 收口，不遗留 prepared Task Run
+  ---
+  duration_ms: 0.14
+  type: 'test'
+  ...
+# Subtest: deferred 在正式写入前 promote，并以同一 manifest settle/终结 File Task
+ok 73 - deferred 在正式写入前 promote，并以同一 manifest settle/终结 File Task
+  ---
+  duration_ms: 1.451417
+  type: 'test'
+  ...
+# Subtest: 严格按 BOR → reserve → started → execute → append → terminal → end 执行
+ok 74 - 严格按 BOR → reserve → started → execute → append → terminal → end 执行
+  ---
+  duration_ms: 0.60175
+  type: 'test'
+  ...
+# Subtest: no-file Task Run 使用 exact-5 operation owner，且不进入 batch reserve/append
+ok 75 - no-file Task Run 使用 exact-5 operation owner，且不进入 batch reserve/append
+  ---
+  duration_ms: 0.11775
+  type: 'test'
+  ...
+# Subtest: VCC save unknown 先落 interrupted；通用 failed CAS 不得覆盖且 Renderer evidence 有界
+ok 76 - VCC save unknown 先落 interrupted；通用 failed CAS 不得覆盖且 Renderer evidence 有界
+  ---
+  duration_ms: 0.369209
+  type: 'test'
+  ...
+# Subtest: VCC save 普通 validation error 仍 failed；commit/replay result 仍 succeeded
+ok 77 - VCC save 普通 validation error 仍 failed；commit/replay result 仍 succeeded
+  ---
+  duration_ms: 0.224708
+  type: 'test'
+  ...
+# Subtest: lifecycle 只在 begin 边界规范化 lineage，并把同一冻结集合交给 taskContext
+ok 78 - lifecycle 只在 begin 边界规范化 lineage，并把同一冻结集合交给 taskContext
+  ---
+  duration_ms: 0.168333
+  type: 'test'
+  ...
+# Subtest: no-file 入口绑定、evidence、start 失败时终态 CAS 失败均写 operation owner intent
+    # Subtest: initial-bind
+    ok 1 - initial-bind
+      ---
+      duration_ms: 0.217333
+      type: 'test'
+      ...
+    # Subtest: evidence
+    ok 2 - evidence
+      ---
+      duration_ms: 0.064584
+      type: 'test'
+      ...
+    # Subtest: start
+    ok 3 - start
+      ---
+      duration_ms: 0.055042
+      type: 'test'
+      ...
+    1..3
+ok 79 - no-file 入口绑定、evidence、start 失败时终态 CAS 失败均写 operation owner intent
+  ---
+  duration_ms: 0.528333
+  type: 'test'
+  ...
+# Subtest: no-file initial flow bind 与 durable intent 同时失败仍终结 Task Run
+ok 80 - no-file initial flow bind 与 durable intent 同时失败仍终结 Task Run
+  ---
+  duration_ms: 0.1035
+  type: 'test'
+  ...
+# Subtest: no-file result identity resolve 失败只告警，但一定继续 terminal settle
+ok 81 - no-file result identity resolve 失败只告警，但一定继续 terminal settle
+  ---
+  duration_ms: 0.104708
+  type: 'test'
+  ...
+# Subtest: no-file result bind 与 intent 同时失败改写 failed terminal；CAS 失败则写 owner outbox
+ok 82 - no-file result bind 与 intent 同时失败改写 failed terminal；CAS 失败则写 owner outbox
+  ---
+  duration_ms: 0.131125
+  type: 'test'
+  ...
+# Subtest: no-file cancel 先到终态后，迟到 success 保持 cancelled 且不执行 afterTerminal
+ok 83 - no-file cancel 先到终态后，迟到 success 保持 cancelled 且不执行 afterTerminal
+  ---
+  duration_ms: 2.551625
+  type: 'test'
+  ...
+# Subtest: no-file policy 对任何 filePlan fail-fast
+ok 84 - no-file policy 对任何 filePlan fail-fast
+  ---
+  duration_ms: 0.118916
+  type: 'test'
+  ...
+# Subtest: 显式允许的部分提交失败结果仍绑定业务身份并以 failed 收口
+ok 85 - 显式允许的部分提交失败结果仍绑定业务身份并以 failed 收口
+  ---
+  duration_ms: 0.180041
+  type: 'test'
+  ...
+# Subtest: toolbox reserve 失败时不进入算法或输出副作用
+ok 86 - toolbox reserve 失败时不进入算法或输出副作用
+  ---
+  duration_ms: 0.079083
+  type: 'test'
+  ...
+# Subtest: toolbox freshness 在 reserve 后失败时终结原批次且不执行算法
+ok 87 - toolbox freshness 在 reserve 后失败时终结原批次且不执行算法
+  ---
+  duration_ms: 0.136208
+  type: 'test'
+  ...
+# Subtest: reserve 后业务未开始且直接终态写失败时，把 failed 意图持久化到原批次 outbox
+ok 88 - reserve 后业务未开始且直接终态写失败时，把 failed 意图持久化到原批次 outbox
+  ---
+  duration_ms: 0.119792
+  type: 'test'
+  ...
+# Subtest: 已持久化 batchContext 恢复直接重开原批次，不解析 flow/不 reserve/不再 started
+ok 89 - 已持久化 batchContext 恢复直接重开原批次，不解析 flow/不 reserve/不再 started
+  ---
+  duration_ms: 0.115917
+  type: 'test'
+  ...
+# Subtest: 已持久化恢复在 beforeStart 重校验失败时不 reopen/不 fail 原批次
+ok 90 - 已持久化恢复在 beforeStart 重校验失败时不 reopen/不 fail 原批次
+  ---
+  duration_ms: 0.061083
+  type: 'test'
+  ...
+# Subtest: legacy 稳定 operation 复用 reserved 批次时直接 mark started，不调 recovery reopen
+ok 91 - legacy 稳定 operation 复用 reserved 批次时直接 mark started，不调 recovery reopen
+  ---
+  duration_ms: 0.087167
+  type: 'test'
+  ...
+# Subtest: legacy 复用非 reserved 批次时先校 freshness，失败不 reopen/不 fail 原批次
+ok 92 - legacy 复用非 reserved 批次时先校 freshness，失败不 reopen/不 fail 原批次
+  ---
+  duration_ms: 0.082209
+  type: 'test'
+  ...
+# Subtest: 同进程同 batchId 双恢复时第二个 busy，不 reserve/reopen/execute/fail
+ok 93 - 同进程同 batchId 双恢复时第二个 busy，不 reserve/reopen/execute/fail
+  ---
+  duration_ms: 0.132292
+  type: 'test'
+  ...
+# Subtest: 已成功批次恢复被拒绝，不执行业务也不改写终态
+ok 94 - 已成功批次恢复被拒绝，不执行业务也不改写终态
+  ---
+  duration_ms: 0.047542
+  type: 'test'
+  ...
+# Subtest: IPC prepare 完成后先 BOR.begin，再在 reserve 前解析持久 flow plan
+ok 95 - IPC prepare 完成后先 BOR.begin，再在 reserve 前解析持久 flow plan
+  ---
+  duration_ms: 0.207875
+  type: 'test'
+  ...
+# Subtest: 输入证据只在 reserve 后、started 前采集并传给执行后 runtime
+ok 96 - 输入证据只在 reserve 后、started 前采集并传给执行后 runtime
+  ---
+  duration_ms: 0.1185
+  type: 'test'
+  ...
+# Subtest: 异步结果 identity 完成解析后才绑定，不把 Promise 当 identity
+ok 97 - 异步结果 identity 完成解析后才绑定，不把 Promise 当 identity
+  ---
+  duration_ms: 0.099875
+  type: 'test'
+  ...
+# Subtest: 结果 identity 直接绑定失败时先持久化 flow-bind intent，再终结 succeeded
+ok 98 - 结果 identity 直接绑定失败时先持久化 flow-bind intent，再终结 succeeded
+  ---
+  duration_ms: 0.125
+  type: 'test'
+  ...
+# Subtest: 预留失败时业务和 worker 均不执行，BOR 仍释放
+ok 99 - 预留失败时业务和 worker 均不执行，BOR 仍释放
+  ---
+  duration_ms: 0.047375
+  type: 'test'
+  ...
+# Subtest: started 失败终结原批次且不执行业务
+ok 100 - started 失败终结原批次且不执行业务
+  ---
+  duration_ms: 0.047583
+  type: 'test'
+  ...
+# Subtest: started CAS 发现批次已取消时不执行业务且不强制 failed
+ok 101 - started CAS 发现批次已取消时不执行业务且不强制 failed
+  ---
+  duration_ms: 0.043
+  type: 'test'
+  ...
+# Subtest: 新流程稳定 identity 在 reserve 后、started 前立即绑定
+ok 102 - 新流程稳定 identity 在 reserve 后、started 前立即绑定
+  ---
+  duration_ms: 0.090667
+  type: 'test'
+  ...
+# Subtest: Bank Statement run 在 TaskRun 前绑定稳定 identity，重复 export 继承同一 parent，显式 rerun 新建 parent
+ok 103 - Bank Statement run 在 TaskRun 前绑定稳定 identity，重复 export 继承同一 parent，显式 rerun 新建 parent
+  ---
+  duration_ms: 6.469041
+  type: 'test'
+  ...
+# Subtest: 业务异常先 append/failed 收口再原样抛出
+ok 104 - 业务异常先 append/failed 收口再原样抛出
+  ---
+  duration_ms: 0.27225
+  type: 'test'
+  ...
+# Subtest: 业务成功但文件 append 失败不覆盖业务结果
+ok 105 - 业务成功但文件 append 失败不覆盖业务结果
+  ---
+  duration_ms: 0.170541
+  type: 'test'
+  ...
+# Subtest: append 已持久记录 failure 时 lifecycle 不重复 recordFailure 但仍告警
+ok 106 - append 已持久记录 failure 时 lifecycle 不重复 recordFailure 但仍告警
+  ---
+  duration_ms: 0.082584
+  type: 'test'
+  ...
+# Subtest: 业务成功但 terminal 返回失败时持久化同批次终态意图并保留业务结果
+ok 107 - 业务成功但 terminal 返回失败时持久化同批次终态意图并保留业务结果
+  ---
+  duration_ms: 0.095166
+  type: 'test'
+  ...
+# Subtest: 任务终态写入和持久意图登记均失败时 fail-closed
+ok 108 - 任务终态写入和持久意图登记均失败时 fail-closed
+  ---
+  duration_ms: 0.143042
+  type: 'test'
+  ...
+# Subtest: cancel 先到、success 后到时 terminal CAS 冲突不污染 archive failure
+ok 109 - cancel 先到、success 后到时 terminal CAS 冲突不污染 archive failure
+  ---
+  duration_ms: 2.023208
+  type: 'test'
+  ...
+# Subtest: success 先到、late cancel 冲突时不声称已取消
+ok 110 - success 先到、late cancel 冲突时不声称已取消
+  ---
+  duration_ms: 0.233542
+  type: 'test'
+  ...
+# Subtest: recordFailure 返回 ok:false 会产生独立 warning
+ok 111 - recordFailure 返回 ok:false 会产生独立 warning
+  ---
+  duration_ms: 0.122125
+  type: 'test'
+  ...
+# Subtest: terminal 抛错不覆盖原始业务异常
+ok 112 - terminal 抛错不覆盖原始业务异常
+  ---
+  duration_ms: 0.148042
+  type: 'test'
+  ...
+# Subtest: 取消只 CAS 活动批次，不查询 latest 或建立第二批次
+ok 113 - 取消只 CAS 活动批次，不查询 latest 或建立第二批次
+  ---
+  duration_ms: 0.377292
+  type: 'test'
+  ...
+# Subtest: worker batch context 是可序列化冻结 DTO
+ok 114 - worker batch context 是可序列化冻结 DTO
+  ---
+  duration_ms: 0.111708
+  type: 'test'
+  ...
+# Subtest: result status 完全由当前 policy classifier 决定
+ok 115 - result status 完全由当前 policy classifier 决定
+  ---
+  duration_ms: 0.077292
+  type: 'test'
+  ...
+# Subtest: completed_with_errors 保持 succeeded，并在终态 CAS 同步合并审计 metadata
+ok 116 - completed_with_errors 保持 succeeded，并在终态 CAS 同步合并审计 metadata
+  ---
+  duration_ms: 0.13075
+  type: 'test'
+  ...
+# Subtest: 匿名后处理未执行的 FileTask terminal 失败保留待后处理事实，不能降格为无后处理
+ok 117 - 匿名后处理未执行的 FileTask terminal 失败保留待后处理事实，不能降格为无后处理
+  ---
+  duration_ms: 0.078
+  type: 'test'
+  ...
+# Subtest: position run replace 首调/取消 0 BOR，opaque 确认后恰好一次 lifecycle/run
+ok 118 - position run replace 首调/取消 0 BOR，opaque 确认后恰好一次 lifecycle/run
+  ---
+  duration_ms: 2.283166
+  type: 'test'
+  ...
+# Subtest: position run 选择校验在 lifecycle 前失败
+ok 119 - position run 选择校验在 lifecycle 前失败
+  ---
+  duration_ms: 0.143458
+  type: 'test'
+  ...
+# Subtest: position renderer replace 二次请求只含 contextId + confirmReplace
+ok 120 - position renderer replace 二次请求只含 contextId + confirmReplace
+  ---
+  duration_ms: 1.36025
+  type: 'test'
+  ...
+# Subtest: source picker cancel 在 getService/BOR/reserve 前停止
+ok 121 - source picker cancel 在 getService/BOR/reserve 前停止
+  ---
+  duration_ms: 0.1895
+  type: 'test'
+  ...
+# Subtest: source account-only、ordinary 与 mixed 均由真实输入 File Task 收口
+ok 122 - source account-only、ordinary 与 mixed 均由真实输入 File Task 收口
+  ---
+  duration_ms: 1.929667
+  type: 'test'
+  ...
+# Subtest: source reserve 失败会 abandon prepared worker/staging 且 0 apply
+ok 123 - source reserve 失败会 abandon prepared worker/staging 且 0 apply
+  ---
+  duration_ms: 7.310292
+  type: 'test'
+  ...
+# Subtest: source mixed preflight 把全部选择、实际 staging 与 anomaly output 固定为同一 manifest
+ok 124 - source mixed preflight 把全部选择、实际 staging 与 anomaly output 固定为同一 manifest
+  ---
+  duration_ms: 10.194708
+  type: 'test'
+  ...
+# Subtest: position outer 拒绝时 abandon；实际进入业务 callback 后正常执行且不 abandon
+ok 125 - position outer 拒绝时 abandon；实际进入业务 callback 后正常执行且不 abandon
+  ---
+  duration_ms: 0.1855
+  type: 'test'
+  ...
+# Subtest: E13-B Position run worker 与 legacy workbook 语义 golden 等价，真实 Runtime 可执行
+ok 126 - E13-B Position run worker 与 legacy workbook 语义 golden 等价，真实 Runtime 可执行
+  ---
+  duration_ms: 394.652292
+  type: 'test'
+  ...
+# Subtest: E13-B Position stale checkpoint fail closed，差异空集不产生 artifact
+ok 127 - E13-B Position stale checkpoint fail closed，差异空集不产生 artifact
+  ---
+  duration_ms: 63.230833
+  type: 'test'
+  ...
+# Subtest: E13-B Position filtered worker 保留异常报告血缘并与 legacy workbook 等价
+ok 128 - E13-B Position filtered worker 保留异常报告血缘并与 legacy workbook 等价
+  ---
+  duration_ms: 119.355
+  type: 'test'
+  ...
+# Subtest: E13-B Position managed export 先验证后单次 Publisher，发布后元数据失败仅告警
+ok 129 - E13-B Position managed export 先验证后单次 Publisher，发布后元数据失败仅告警
+  ---
+  duration_ms: 121.106209
+  type: 'test'
+  ...
+# Subtest: E13-B Position 终态先收口 pending，再 ACK managed Publisher receipt
+ok 130 - E13-B Position 终态先收口 pending，再 ACK managed Publisher receipt
+  ---
+  duration_ms: 0.209
+  type: 'test'
+  ...
+# Subtest: 用户取消导入返回 cancelled，其他异常仍返回 failed
+ok 131 - 用户取消导入返回 cancelled，其他异常仍返回 failed
+  ---
+  duration_ms: 1.461042
+  type: 'test'
+  ...
+# Subtest: worker 接受 no-file 取消后把 operation owner cancelled 意图写入 pending，供崩溃恢复
+ok 132 - worker 接受 no-file 取消后把 operation owner cancelled 意图写入 pending，供崩溃恢复
+  ---
+  duration_ms: 0.36675
+  type: 'test'
+  ...
+# Subtest: interrupted operation owner 启动恢复先 reopen running 再写终态
+ok 133 - interrupted operation owner 启动恢复先 reopen running 再写终态
+  ---
+  duration_ms: 0.13175
+  type: 'test'
+  ...
+# Subtest: 暂存保护集合同时包含持久 outbox 与当前主库 pending 输入
+ok 134 - 暂存保护集合同时包含持久 outbox 与当前主库 pending 输入
+  ---
+  duration_ms: 0.242958
+  type: 'test'
+  ...
+# Subtest: 存档完成后会等待异步清理结束再返回业务结果
+ok 135 - 存档完成后会等待异步清理结束再返回业务结果
+  ---
+  duration_ms: 2.260291
+  type: 'test'
+  ...
+# Subtest: 账户表 prepare 不建空存档且清除 pending，apply 后正式存档并推进 checkpoint
+ok 136 - 账户表 prepare 不建空存档且清除 pending，apply 后正式存档并推进 checkpoint
+  ---
+  duration_ms: 0.4245
+  type: 'test'
+  ...
+# Subtest: 输出已发布但业务状态落库失败时登记 outbox、保留文件并清除 pending
+ok 137 - 输出已发布但业务状态落库失败时登记 outbox、保留文件并清除 pending
+  ---
+  duration_ms: 5.143416
+  type: 'test'
+  ...
+# Subtest: 存档失败已形成持久重试后清理函数只处理未受保护暂存
+ok 138 - 存档失败已形成持久重试后清理函数只处理未受保护暂存
+  ---
+  duration_ms: 0.162542
+  type: 'test'
+  ...
+# Subtest: 正式存档与持久重试都失败时原样返回业务成功并保留 incomplete pending
+ok 139 - 正式存档与持久重试都失败时原样返回业务成功并保留 incomplete pending
+  ---
+  duration_ms: 0.132916
+  type: 'test'
+  ...
+# Subtest: 启动恢复按持久 succeeded outcome 终结原 task
+ok 140 - 启动恢复按持久 succeeded outcome 终结原 task
+  ---
+  duration_ms: 0.429917
+  type: 'test'
+  ...
+# Subtest: 启动恢复按持久 cancelled outcome 终结原 task
+ok 141 - 启动恢复按持久 cancelled outcome 终结原 task
+  ---
+  duration_ms: 0.0825
+  type: 'test'
+  ...
+# Subtest: 启动恢复按持久真实异常 outcome 终结原 task 为 failed
+ok 142 - 启动恢复按持久真实异常 outcome 终结原 task 为 failed
+  ---
+  duration_ms: 0.07275
+  type: 'test'
+  ...
+# Subtest: 新 manifest owner 启动恢复只用 finishFileTask 收口原 TaskRun 与批次
+ok 143 - 新 manifest owner 启动恢复只用 finishFileTask 收口原 TaskRun 与批次
+  ---
+  duration_ms: 0.092542
+  type: 'test'
+  ...
+# Subtest: 启动恢复仅把与目标一致的既有终态视为幂等，冲突终态 fail-closed
+ok 144 - 启动恢复仅把与目标一致的既有终态视为幂等，冲突终态 fail-closed
+  ---
+  duration_ms: 0.237083
+  type: 'test'
+  ...
+# Subtest: 启动恢复通过 raw repository 读不到原批次时失败
+ok 145 - 启动恢复通过 raw repository 读不到原批次时失败
+  ---
+  duration_ms: 0.127166
+  type: 'test'
+  ...
+# Subtest: 启动恢复拒绝终结与持久 batchContext 身份不一致的批次
+ok 146 - 启动恢复拒绝终结与持久 batchContext 身份不一致的批次
+  ---
+  duration_ms: 0.065625
+  type: 'test'
+  ...
+# Subtest: output-only 平盘导出恢复无需伪造 input 提交凭证
+ok 147 - output-only 平盘导出恢复无需伪造 input 提交凭证
+  ---
+  duration_ms: 0.109583
+  type: 'test'
+  ...
+# Subtest: 损坏存档文件清单在任何 archive 状态下都禁止同步 checkpoint 和清除 pending
+ok 148 - 损坏存档文件清单在任何 archive 状态下都禁止同步 checkpoint 和清除 pending
+  ---
+  duration_ms: 0.202541
+  type: 'test'
+  ...
+# Subtest: 恢复 input 只复用 pending 的解析时证据，不重新抓取当前文件快照
+ok 149 - 恢复 input 只复用 pending 的解析时证据，不重新抓取当前文件快照
+  ---
+  duration_ms: 0.089458
+  type: 'test'
+  ...
+# Subtest: 恢复只保留 side DB 已提交的文件级输入，prepared 输入不存档也不阻断已提交输入
+ok 150 - 恢复只保留 side DB 已提交的文件级输入，prepared 输入不存档也不阻断已提交输入
+  ---
+  duration_ms: 0.305625
+  type: 'test'
+  ...
+# Subtest: 部分提交恢复遇到未声明输入依赖的旧输出时 fail closed
+ok 151 - 部分提交恢复遇到未声明输入依赖的旧输出时 fail closed
+  ---
+  duration_ms: 0.11875
+  type: 'test'
+  ...
+# Subtest: 恢复文件级提交凭证与 pending 不一致时 fail closed
+ok 152 - 恢复文件级提交凭证与 pending 不一致时 fail closed
+  ---
+  duration_ms: 0.133417
+  type: 'test'
+  ...
+# Subtest: 恢复前暂存输入字节变化时 fail closed，不允许继续登记恢复意图
+ok 153 - 恢复前暂存输入字节变化时 fail closed，不允许继续登记恢复意图
+  ---
+  duration_ms: 9.403875
+  type: 'test'
+  ...
+# Subtest: 普通来源 apply 只有在 manifest 文件证据持久化后才签发 grant
+ok 154 - 普通来源 apply 只有在 manifest 文件证据持久化后才签发 grant
+  ---
+  duration_ms: 0.482042
+  type: 'test'
+  ...
+# Subtest: 含过滤行的普通来源在 grant 前同时持久化异常报告证据
+ok 155 - 含过滤行的普通来源在 grant 前同时持久化异常报告证据
+  ---
+  duration_ms: 0.296291
+  type: 'test'
+  ...
+# Subtest: 主进程异常报告存档意图保留预检声明的输入依赖
+ok 156 - 主进程异常报告存档意图保留预检声明的输入依赖
+  ---
+  duration_ms: 2.050583
+  type: 'test'
+  ...
+# Subtest: atomic Position 在业务前登记 frozen manifest，取消 ACK 接原批次 CAS
+ok 157 - atomic Position 在业务前登记 frozen manifest，取消 ACK 接原批次 CAS
+  ---
+  duration_ms: 2.372
+  type: 'test'
+  ...
+# Subtest: 普通来源 manifest 与 pending 文件证据不一致时禁止签发 grant
+ok 158 - 普通来源 manifest 与 pending 文件证据不一致时禁止签发 grant
+  ---
+  duration_ms: 0.177208
+  type: 'test'
+  ...
+# Subtest: atomic Position wrapper 以完整 frozen manifest 单次 settle，不再调用 legacy result/error settle
+ok 159 - atomic Position wrapper 以完整 frozen manifest 单次 settle，不再调用 legacy result/error settle
+  ---
+  duration_ms: 3.367708
+  type: 'test'
+  ...
+# Subtest: split read 只走裸 preview IPC，merge/export 的全部 dialog 在 execute 前完成
+ok 160 - split read 只走裸 preview IPC，merge/export 的全部 dialog 在 execute 前完成
+  ---
+  duration_ms: 1.136209
+  type: 'test'
+  ...
+# Subtest: committed 恢复输出携 exact7 回原批次，output descriptor 显式标记方向
+ok 161 - committed 恢复输出携 exact7 回原批次，output descriptor 显式标记方向
+  ---
+  duration_ms: 0.386958
+  type: 'test'
+  ...
+# Subtest: Position owner 等待实际异步恢复，失败时保留 pending 并阻止 generic sweep
+ok 162 - Position owner 等待实际异步恢复，失败时保留 pending 并阻止 generic sweep
+  ---
+  duration_ms: 37.556792
+  type: 'test'
+  ...
+# Subtest: after-committed 崩溃首次完整启动即归档 ready + task succeeded，第二次启动幂等
+ok 163 - after-committed 崩溃首次完整启动即归档 ready + task succeeded，第二次启动幂等
+  ---
+  duration_ms: 342.291541
+  type: 'test'
+  ...
+# Subtest: Position owner 失败仍完成 Toolbox 同次恢复，但统一阻断启动且不丢旧 artifact
+ok 164 - Position owner 失败仍完成 Toolbox 同次恢复，但统一阻断启动且不丢旧 artifact
+  ---
+  duration_ms: 491.22
+  type: 'test'
+  ...
+# Subtest: 损坏 outbox 不短路 Toolbox owner 且阻断新发布，修复后重启保全旧 artifact
+ok 165 - 损坏 outbox 不短路 Toolbox owner 且阻断新发布，修复后重启保全旧 artifact
+  ---
+  duration_ms: 325.846208
+  type: 'test'
+  ...
+# Subtest: 正常 worker committed 后 receipt 保留 N 个输入与全部输出，存档接管完整后才清理
+ok 166 - 正常 worker committed 后 receipt 保留 N 个输入与全部输出，存档接管完整后才清理
+  ---
+  duration_ms: 646.777834
+  type: 'test'
+  ...
+# Subtest: 工具箱 publication cancel-wins 后迟到 success 不 ACK committed receipt
+ok 167 - 工具箱 publication cancel-wins 后迟到 success 不 ACK committed receipt
+  ---
+  duration_ms: 0.364042
+  type: 'test'
+  ...
+# Subtest: 恢复索引首读 EIO 时 sweepUnsafe 阻止通用扫尾，二启完成原批次恢复
+ok 168 - 恢复索引首读 EIO 时 sweepUnsafe 阻止通用扫尾，二启完成原批次恢复
+  ---
+  duration_ms: 299.063709
+  type: 'test'
+  ...
+# Subtest: split read context 新读覆盖旧读，取消导出可重试同一 token
+ok 169 - split read context 新读覆盖旧读，取消导出可重试同一 token
+  ---
+  duration_ms: 1.252958
+  type: 'test'
+  ...
+# Subtest: split export freshness 发现源变化后清除 token，要求重新选择
+ok 170 - split export freshness 发现源变化后清除 token，要求重新选择
+  ---
+  duration_ms: 0.860292
+  type: 'test'
+  ...
+1..170
+# tests 173
+# suites 0
+# pass 173
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2236.575916

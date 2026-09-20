@@ -1,0 +1,16 @@
+{
+  "checkedAt": "2026-09-20T15:45:36.860963+00:00",
+  "branch": "codex/v3.2.10-business-task-adapters",
+  "head": "5ccbf3f022488026f725a5111be00422a04ce221",
+  "baselineSnapshot": "source-snapshot.json",
+  "productionFiles": 15,
+  "productionDrift": [],
+  "g8Boundary": {
+    "id": "business-task-adapters",
+    "rule": "ARCH-TASK-ADAPTER",
+    "state": "pending",
+    "observedPath": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-architecture-guardrails/architecture/boundaries.json",
+    "futureOwner": "G8 integration per changes/v3.2.10/README.md section 6.2"
+  },
+  "scope": "test and acceptance evidence supplement"
+}

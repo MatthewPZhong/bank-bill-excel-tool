@@ -202,7 +202,24 @@ function finalizePreFundTerminalIntent({ route, record, terminalOutcome, termina
   return service.acknowledgeRunByTaskRun(route.taskRunId);
 }
 
+function normalizePreFundTerminalRoute(value) {
+  const taskRunId = String(value.taskRunId || '').trim();
+  if (!taskRunId) throw new TypeError('Pre-fund terminal route.taskRunId 为空');
+  return { route: 'pre-fund-run', taskRunId };
+}
+
+function createPreFundTerminalRouteRegistration({ getService }) {
+  if (typeof getService !== 'function') throw new TypeError('Pre-fund terminal route 缺少 getService');
+  return Object.freeze({
+    route: 'pre-fund-run',
+    normalize: normalizePreFundTerminalRoute,
+    finalize: (payload) => finalizePreFundTerminalIntent({ ...payload, service: getService() })
+  });
+}
+
 module.exports = {
+  createPreFundTerminalRouteRegistration,
+  normalizePreFundTerminalRoute,
   PRE_FUND_MODULE_ID,
   PRE_FUND_RUN_TASK_KEY,
   finalizePreFundTerminalIntent,

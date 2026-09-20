@@ -190,9 +190,25 @@ test.describe('run-check-worker-pool', () => {
     const wrapperEnd = mainSource.indexOf('function runRegisteredBusinessOperation', wrapperStart);
     const wrapperSource = mainSource.slice(wrapperStart, wrapperEnd);
     assert.match(wrapperSource, /recovery:\s*prepared\.recovery \|\| undefined/);
-    assert.match(wrapperSource, /taskRunId:\s*prepared\.taskRunId \|\|/);
-    assert.match(wrapperSource, /operationKey:\s*prepared\.operationKey \|\|/);
+    assert.match(wrapperSource, /taskRunId:\s*adapterInvocation\.identity\.taskRunId/);
+    assert.match(wrapperSource, /operationKey:\s*adapterInvocation\.identity\.operationKey/);
     assert.match(wrapperSource, /flowPlanResolver:\s*prepared\.flowPlan/);
+    const { createBusinessTaskAdapterRegistry } = require('../../../src/main-process/task-adapter-composition');
+    const { createTaskPolicyRegistry } = require('../../../src/main-process/archive-center/task-policy-registry');
+    const resumePolicy = createTaskPolicyRegistry().require('acquiringBillCurrency:run:resume');
+    const adapters = createBusinessTaskAdapterRegistry({ policies: [resumePolicy], positionOwner: {},
+      acknowledgeReceipts() {}, reportArchiveFailure() {} });
+    const resumeAdapter = adapters.resolve(resumePolicy.taskKey);
+    assert.equal(resumeAdapter.id, 'passthrough', 'Acquiring 继续透传原 prepared 身份，不新增领域 owner');
+    assert.deepEqual(resumeAdapter.createInvocation({ prepared: {
+      taskRunId: WORKER_BATCH_CONTEXT.taskRunId, operationKey: WORKER_BATCH_CONTEXT.operationKey
+    } }).identity, {
+      taskRunId: WORKER_BATCH_CONTEXT.taskRunId, operationKey: WORKER_BATCH_CONTEXT.operationKey
+    });
+    assert.deepEqual(resumeAdapter.createInvocation({ prepared: {} }).identity, {
+      taskRunId: undefined, operationKey: undefined
+    }, '未显式携带身份时继续由 TaskLifecycle 分配');
+
 
     const ctx = await setupTmpDb();
     let sideDb;

@@ -1,0 +1,47 @@
+{
+  "checkedAt": "2026-09-20T14:50:30.235828+00:00",
+  "branch": "codex/v3.2.10-business-task-adapters",
+  "head": "5ccbf3f022488026f725a5111be00422a04ce221",
+  "workdir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters",
+  "sourceSnapshotMatches": true,
+  "fileCount": 44,
+  "validation": "complete local release-check PASS; exit 0",
+  "unit": {
+    "tests": 8304,
+    "suites": 831,
+    "pass": 8300,
+    "fail": 0,
+    "cancelled": 0,
+    "skip": 4,
+    "todo": 0
+  },
+  "unperformed": [
+    "Windows/Electron GUI and process-kill platform acceptance",
+    "Excel/WPS and packaged installer acceptance",
+    "G8 machine rule activation",
+    "G2 commit/push/release integration/PR/version/release"
+  ],
+  "gitStatus": " M AGENTS.md\n M changes/v3.2.10/README.md\n M rules/integration-test-policy.md\n M src/main-process/archive-center/controller.js\n M src/main-process/biz-op-recon-run-data.js\n M src/main-process/pending-archive-lineage.js\n M src/main-process/position-reconciliation/interactive-task-preflight.js\n M src/main-process/pre-fund-archive-lineage.js\n M src/main.js\n M tests/fixtures/archive-permanent-delete-position-fileplan.js\n M tests/unit/archive-center-ui-contract.test.js\n M tests/unit/main-process/archive-center-controller.test.js\n M tests/unit/main-process/archive-delete-owner-completion.test.js\n M tests/unit/main-process/archive-file-owner-recovery.test.js\n M tests/unit/main-process/archive-position-fileplan-delete.test.js\n M tests/unit/main-process/archive-task-policy-registry.test.js\n M tests/unit/main-process/background-execution/recovery-contract-c2.test.js\n M tests/unit/main-process/biz-op-archive-lineage.test.js\n M tests/unit/main-process/pending-archive-lineage.test.js\n M tests/unit/main-process/position-interactive-task-preflight.test.js\n M tests/unit/main-process/position-reconciliation-operation-lifecycle.test.js\n M tests/unit/main-process/run-check-worker-pool.test.js\n M tests/unit/main-process/statement-big-account-preview.test.js\n M tests/unit/main-process/toolbox-archive-integration.test.js\n M tests/unit/main-process/vcc-financial-op-archive-integration.test.js\n M tests/unit/renderer-position-reconciliation.test.js\n M tests/unit/renderer-pre-fund-reconciliation.test.js\n?? changes/architecture-coupling/2026-09-20/evidence/\n?? changes/archive-batch-lifecycle/\n?? changes/v3.2.10/codex/v3.2.10-architecture-guardrails/\n?? changes/v3.2.10/codex/v3.2.10-bizop-query-boundaries/\n?? changes/v3.2.10/codex/v3.2.10-business-task-adapters/\n?? changes/v3.2.10/codex/v3.2.10-execution-descriptors/\n?? changes/v3.2.10/codex/v3.2.10-renderer-boundaries/\n?? changes/v3.2.10/codex/v3.2.10-shared-xlsx-infrastructure/\n?? changes/v3.2.10/codex/v3.2.10-storage-execution-separation/\n?? changes/v3.2.9/codex/v3.2.9-account-mapping-management/\n?? scripts/integration/task-adapter-recovery.js\n?? src/main-process/archive-center/terminal-route-registry.js\n?? src/main-process/position-reconciliation/task-adapter.js\n?? src/main-process/position-reconciliation/task-owner.js\n?? src/main-process/task-adapter-composition.js\n?? src/main-process/task-adapters/\n?? src/main-process/toolbox-background/task-adapter.js\n?? src/main-process/vcc-financial-op-output/task-adapter.js\n?? tests/helpers/archive-aware-operation-harness.js\n?? tests/helpers/archive-terminal-routes.js\n?? tests/unit/main-process/archive-aware-prepared-resource-entry.test.js\n?? tests/unit/main-process/archive-terminal-route-registry.test.js\n?? tests/unit/main-process/position-task-adapter.test.js\n?? tests/unit/main-process/prepared-resource-scope.test.js\n?? tests/unit/main-process/task-adapter-composition.test.js\n?? tests/unit/main-process/task-adapter-registry.test.js\n?? tests/unit/main-process/task-adapters.test.js\n",
+  "integration": {
+    "scripts": 62,
+    "passed": 62,
+    "failed": 0,
+    "reportedAssertions": 2587,
+    "durationMs": 526172,
+    "countBoundary": "one historical nested-worker script reports no numeric assertion count"
+  },
+  "diffCheck": "PASS",
+  "codePatchReverseCheck": "PASS",
+  "implementation": "G2-T1 through G2-T5 complete",
+  "integrationStatus": "G2 uncommitted and not integrated into release; fixed G1 dependency already incorporated",
+  "documentationLinks": {
+    "checked": 136,
+    "broken": 0
+  },
+  "codePatch": {
+    "path": "code-diff.patch",
+    "fileCount": 44,
+    "sha256": "90e8c4425012205c054aff03cae9a0d44f4c455719276af7db06726a3cc80148",
+    "coverage": "all changed tracked and untracked files under src/tests/scripts"
+  }
+}

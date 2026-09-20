@@ -167,7 +167,24 @@ function finalizePendingTerminalIntent({ route, record, terminalOutcome, termina
   return acknowledgePendingRunByTaskRun(db, route.taskRunId);
 }
 
+function normalizePendingTerminalRoute(value) {
+  const taskRunId = String(value.taskRunId || '').trim();
+  if (!taskRunId) throw new TypeError('Pending terminal route.taskRunId 为空');
+  return { route: 'pending-run', taskRunId };
+}
+
+function createPendingTerminalRouteRegistration({ getDb }) {
+  if (typeof getDb !== 'function') throw new TypeError('Pending terminal route 缺少 getDb');
+  return Object.freeze({
+    route: 'pending-run',
+    normalize: normalizePendingTerminalRoute,
+    finalize: (payload) => finalizePendingTerminalIntent({ ...payload, db: getDb() })
+  });
+}
+
 module.exports = {
+  createPendingTerminalRouteRegistration,
+  normalizePendingTerminalRoute,
   PENDING_MODULE_ID,
   PENDING_RUN_TASK_KEY,
   acknowledgePendingRun,

@@ -1,0 +1,57 @@
+{
+  "checkedAt": "2026-09-20T16:01:25.952189+00:00",
+  "branch": "codex/v3.2.10-business-task-adapters",
+  "head": "5ccbf3f022488026f725a5111be00422a04ce221",
+  "workdir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters",
+  "sourceSnapshotMatches": true,
+  "fileCount": 46,
+  "validation": "requested startup supplement PASS; complete integration 63/63 PASS; historical full release-check preserved",
+  "unperformed": [
+    "Windows/Electron GUI and process-kill platform acceptance",
+    "Excel/WPS and packaged installer acceptance",
+    "G8 machine rule activation",
+    "G2 commit/push/release integration/PR/version/release"
+  ],
+  "gitStatus": " M AGENTS.md\n M changes/v3.2.10/README.md\n M rules/integration-test-policy.md\n M src/main-process/archive-center/controller.js\n M src/main-process/biz-op-recon-run-data.js\n M src/main-process/pending-archive-lineage.js\n M src/main-process/position-reconciliation/interactive-task-preflight.js\n M src/main-process/pre-fund-archive-lineage.js\n M src/main.js\n M tests/fixtures/archive-permanent-delete-position-fileplan.js\n M tests/unit/archive-center-ui-contract.test.js\n M tests/unit/main-process/archive-center-controller.test.js\n M tests/unit/main-process/archive-delete-owner-completion.test.js\n M tests/unit/main-process/archive-file-owner-recovery.test.js\n M tests/unit/main-process/archive-position-fileplan-delete.test.js\n M tests/unit/main-process/archive-task-policy-registry.test.js\n M tests/unit/main-process/background-execution/recovery-contract-c2.test.js\n M tests/unit/main-process/biz-op-archive-lineage.test.js\n M tests/unit/main-process/pending-archive-lineage.test.js\n M tests/unit/main-process/position-interactive-task-preflight.test.js\n M tests/unit/main-process/position-reconciliation-operation-lifecycle.test.js\n M tests/unit/main-process/run-check-worker-pool.test.js\n M tests/unit/main-process/statement-big-account-preview.test.js\n M tests/unit/main-process/toolbox-archive-integration.test.js\n M tests/unit/main-process/vcc-financial-op-archive-integration.test.js\n M tests/unit/renderer-position-reconciliation.test.js\n M tests/unit/renderer-pre-fund-reconciliation.test.js\n?? changes/architecture-coupling/2026-09-20/evidence/\n?? changes/archive-batch-lifecycle/\n?? changes/v3.2.10/codex/v3.2.10-architecture-guardrails/\n?? changes/v3.2.10/codex/v3.2.10-bizop-query-boundaries/\n?? changes/v3.2.10/codex/v3.2.10-business-task-adapters/\n?? changes/v3.2.10/codex/v3.2.10-execution-descriptors/\n?? changes/v3.2.10/codex/v3.2.10-renderer-boundaries/\n?? changes/v3.2.10/codex/v3.2.10-shared-xlsx-infrastructure/\n?? changes/v3.2.10/codex/v3.2.10-storage-execution-separation/\n?? changes/v3.2.9/codex/v3.2.9-account-mapping-management/\n?? scripts/integration/position-startup-task-recovery.js\n?? scripts/integration/task-adapter-recovery.js\n?? src/main-process/archive-center/terminal-route-registry.js\n?? src/main-process/position-reconciliation/task-adapter.js\n?? src/main-process/position-reconciliation/task-owner.js\n?? src/main-process/task-adapter-composition.js\n?? src/main-process/task-adapters/\n?? src/main-process/toolbox-background/task-adapter.js\n?? src/main-process/vcc-financial-op-output/task-adapter.js\n?? tests/helpers/archive-aware-operation-harness.js\n?? tests/helpers/archive-terminal-routes.js\n?? tests/helpers/position-startup-recovery-harness.js\n?? tests/unit/main-process/archive-aware-prepared-resource-entry.test.js\n?? tests/unit/main-process/archive-terminal-route-registry.test.js\n?? tests/unit/main-process/position-task-adapter.test.js\n?? tests/unit/main-process/prepared-resource-scope.test.js\n?? tests/unit/main-process/task-adapter-composition.test.js\n?? tests/unit/main-process/task-adapter-registry.test.js\n?? tests/unit/main-process/task-adapters.test.js\n",
+  "diffCheck": "PASS",
+  "codePatchReverseCheck": "PASS",
+  "implementation": "production migration complete; V1 startup evidence supplemented; G2-T5 G8 joint acceptance still pending",
+  "integrationStatus": "G2 uncommitted and not integrated into release; fixed G1 dependency already incorporated",
+  "documentationLinks": {
+    "checked": 159,
+    "broken": 0
+  },
+  "codePatch": {
+    "path": "code-diff.patch",
+    "fileCount": 46,
+    "sha256": "65a2412f151ce7d58268416add1bbe8c9746faf5a4c1d42bfc97ec5911947335",
+    "coverage": "all changed tracked and untracked files under src/tests/scripts"
+  },
+  "sourceSnapshot": "startup-supplement-source-snapshot.json",
+  "historicalReleaseCheck": "release-check.log",
+  "fullReleaseCheckRerun": false,
+  "targetedStartup": {
+    "passed": 3,
+    "total": 3,
+    "exitCode": 0
+  },
+  "integration": {
+    "command": "npm run test:integration",
+    "exitCode": 0,
+    "status": "PASS",
+    "scripts": 63,
+    "passed": 63,
+    "failed": 0,
+    "reportedAssertions": 2590,
+    "durationMs": 518395,
+    "evidence": "startup-supplement-integration.log",
+    "countBoundary": "one historical nested-worker script has no numeric assertion count"
+  },
+  "mutationSensitivity": {
+    "baseline": "3/3 PASS",
+    "killedByExpectedBehaviorAssertions": 2,
+    "total": 2,
+    "sourceUnchanged": true,
+    "evidence": "startup-mutation-results.json"
+  }
+}

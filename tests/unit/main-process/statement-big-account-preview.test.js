@@ -998,7 +998,7 @@ test('public freshness 通过后稳定替换 v2，reader 起点仍绑定 confirm
   );
   assert.match(
     functionSource('runArchiveAwareOperation'),
-    /const executeBusiness = \(taskContext\) => runWithStatementConfirmedSourceSnapshots\(/
+    /executeBusiness:\s*\(\) => runWithStatementConfirmedSourceSnapshots\(\s*meta\.channel, taskContext,\s*\(\) => executeIpcTaskInvocation\(contract, event, prepared, effectiveArgs, taskContext\)/
   );
 });
 

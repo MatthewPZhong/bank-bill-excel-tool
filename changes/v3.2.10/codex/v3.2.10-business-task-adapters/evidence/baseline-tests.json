@@ -1,0 +1,21 @@
+{
+  "startedAt": "2026-09-20T11:51:34.187178+00:00",
+  "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters",
+  "head": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "command": [
+    "node",
+    "--test",
+    "--test-reporter=tap",
+    "tests/unit/main-process/position-interactive-task-preflight.test.js",
+    "tests/unit/main-process/position-reconciliation-operation-lifecycle.test.js",
+    "tests/unit/main-process/archive-ipc-task-contract.test.js",
+    "tests/unit/main-process/archive-task-lifecycle.test.js",
+    "tests/unit/main-process/archive-center-controller.test.js",
+    "tests/unit/main-process/toolbox-archive-integration.test.js",
+    "tests/unit/main-process/position-read-only-export-e13-b.test.js"
+  ],
+  "exitCode": 0,
+  "platform": "macOS-15.7.4-arm64-arm-64bit-Mach-O",
+  "node": "v25.8.0",
+  "log": "baseline-tests.tap"
+}

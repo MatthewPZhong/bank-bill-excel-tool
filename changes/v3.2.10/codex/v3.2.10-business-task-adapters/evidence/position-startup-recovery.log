@@ -1,0 +1,4 @@
+PASS 真实提交和 pending、零 outbox：生产启动补原身份 intent，等待 durable 后 sweep，二次启动幂等
+PASS 真实 side DB checkpoint token 不符：生产入口失败关闸、零 sweep 并保留 pending 与受管材料
+PASS 原任务 durable 后 pending 清理失败：生产启动保留 outbox，下一次启动按原 owner 收口
+==== 3/3 PASS ====

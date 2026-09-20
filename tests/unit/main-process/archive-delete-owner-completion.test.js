@@ -8,7 +8,7 @@ const test = require('node:test');
 const { createTestPublicationHarness } = require('../../helpers/publication-authority');
 const { DatabaseSync } = require('node:sqlite');
 const { createArchiveRepository } = require('../../../src/backend/database/archive-repository');
-const { createArchiveCenterController } = require('../../../src/main-process/archive-center/controller');
+const { createArchiveControllerWithRoutes: createArchiveCenterController } = require('../../helpers/archive-terminal-routes');
 const { createArchiveOutboxStore } = require('../../../src/main-process/archive-center/outbox-store');
 
 const owner = {

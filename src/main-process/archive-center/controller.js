@@ -1,6 +1,8 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const { assertTerminalRouteRegistry, createTerminalRouteRegistry } = require('./terminal-route-registry');
+const EMPTY_TERMINAL_ROUTE_REGISTRY = createTerminalRouteRegistry([]);
 const path = require('node:path');
 const { stableSerialize } = require('../../backend/database/archive-terminal-completion');
 const {
@@ -102,7 +104,7 @@ function outboxFilesHaveDurableArtifacts(record, created) {
   return filesHaveDurableArtifacts(files, created);
 }
 
-function normalizeTerminalOutcome(value) {
+function normalizeTerminalOutcome(value, terminalRouteRegistry) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new TypeError('任务终态意图格式非法');
   }
@@ -114,33 +116,7 @@ function normalizeTerminalOutcome(value) {
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
     throw new TypeError('任务终态意图 metadata 必须是对象');
   }
-  let afterTerminal = null;
-  if (value.afterTerminal !== undefined && value.afterTerminal !== null) {
-    if (typeof value.afterTerminal !== 'object' || Array.isArray(value.afterTerminal)) {
-      throw new TypeError('任务终态意图 afterTerminal 格式非法');
-    }
-    const route = String(value.afterTerminal.route || '').trim();
-    if (!route) throw new TypeError('任务终态意图 afterTerminal.route 为空');
-    if (route === 'position-reconciliation') {
-      const operationToken = String(value.afterTerminal.operationToken || '').trim();
-      if (!operationToken) throw new TypeError('Position terminal route.operationToken 为空');
-      afterTerminal = { route, operationToken };
-    } else if (route === 'pending-run') {
-      const taskRunId = String(value.afterTerminal.taskRunId || '').trim();
-      if (!taskRunId) throw new TypeError('Pending terminal route.taskRunId 为空');
-      afterTerminal = { route, taskRunId };
-    } else if (route === 'biz-op-run') {
-      const taskRunId = String(value.afterTerminal.taskRunId || '').trim();
-      if (!taskRunId) throw new TypeError('Biz OP terminal route.taskRunId 为空');
-      afterTerminal = { route, taskRunId };
-    } else if (route === 'pre-fund-run') {
-      const taskRunId = String(value.afterTerminal.taskRunId || '').trim();
-      if (!taskRunId) throw new TypeError('Pre-fund terminal route.taskRunId 为空');
-      afterTerminal = { route, taskRunId };
-    } else {
-      throw new TypeError(`不支持的任务终态 afterTerminal route：${route}`);
-    }
-  }
+  const afterTerminal = terminalRouteRegistry.normalize(value.afterTerminal);
   return {
     taskStatus,
     code: String(value.code || ''),
@@ -178,9 +154,10 @@ class ArchiveCenterController {
     this.resolveOutboxTerminalIntent = typeof options.resolveOutboxTerminalIntent === 'function'
       ? options.resolveOutboxTerminalIntent
       : null;
-    this.onTerminalIntentFlushed = typeof options.onTerminalIntentFlushed === 'function'
-      ? options.onTerminalIntentFlushed
-      : null;
+    this.terminalRouteRegistry = assertTerminalRouteRegistry(
+      options.terminalRouteRegistry === undefined
+        ? EMPTY_TERMINAL_ROUTE_REGISTRY : options.terminalRouteRegistry
+    );
     this.onEntryMaintenanceEvent = typeof options.onEntryMaintenanceEvent === 'function'
       ? options.onEntryMaintenanceEvent
       : null;
@@ -509,7 +486,7 @@ class ArchiveCenterController {
         ? freezePersistedTaskOwner(payload.owner, { required: true })
         : null;
       if (persistedOwner && persistedOwner.kind === 'operation') {
-        const terminalOutcome = normalizeTerminalOutcome(payload.terminalOutcome);
+        const terminalOutcome = normalizeTerminalOutcome(payload.terminalOutcome, this.terminalRouteRegistry);
         const terminalResult = await this._replayOperationTerminal(
           persistedOwner.operationContext,
           terminalOutcome
@@ -529,7 +506,7 @@ class ArchiveCenterController {
       if (persistedOwner
           && persistedOwner.version === 1
           && persistedOwner.kind === 'file-batch') {
-        const terminalOutcome = normalizeTerminalOutcome(payload.terminalOutcome);
+        const terminalOutcome = normalizeTerminalOutcome(payload.terminalOutcome, this.terminalRouteRegistry);
         const batchContext = persistedOwner.batchContext;
         // 已删除批次必须先验证原 owner 的完整收口凭证，不能再调用 finishFileTask。
         if (!this.service.repository.getBatch(batchContext.batchId)) {
@@ -646,7 +623,7 @@ class ArchiveCenterController {
         ? replayRecord.payload
         : payload;
       let terminalOutcome = replayPayload.terminalOutcome
-        ? normalizeTerminalOutcome(replayPayload.terminalOutcome)
+        ? normalizeTerminalOutcome(replayPayload.terminalOutcome, this.terminalRouteRegistry)
         : null;
       if (!operationDeleted
           && !terminalOutcome
@@ -656,7 +633,7 @@ class ArchiveCenterController {
         try {
           const resolved = await this.resolveOutboxTerminalIntent(replayRecord, created);
           if (resolved) {
-            terminalOutcome = normalizeTerminalOutcome(resolved);
+            terminalOutcome = normalizeTerminalOutcome(resolved, this.terminalRouteRegistry);
             replayRecord = this.outboxStore.merge(record.id, {
               targetBatchId: resolvedBatchId,
               terminalOutcome
@@ -684,12 +661,8 @@ class ArchiveCenterController {
           continue;
         }
         if (terminalOutcome.afterTerminal) {
-          if (!this.onTerminalIntentFlushed) {
-            this._warn('存档 outbox 原任务已终结但缺少 afterTerminal 路由', terminalOutcome.afterTerminal.route);
-            continue;
-          }
           try {
-            await this.onTerminalIntentFlushed({
+            await this.terminalRouteRegistry.finalize({
               route: terminalOutcome.afterTerminal,
               record: replayRecord,
               created,
@@ -817,16 +790,9 @@ class ArchiveCenterController {
         persistedOwner && persistedOwner.batchContext && persistedOwner.batchContext.taskRunId || 'unknown-owner');
       return false;
     }
-    if (terminalOutcome.afterTerminal && !this.onTerminalIntentFlushed) {
-      this._warn(
-        '存档 outbox 原任务已终结但缺少 afterTerminal 路由',
-        terminalOutcome.afterTerminal.route
-      );
-      return false;
-    }
     try {
       if (terminalOutcome.afterTerminal) {
-        await this.onTerminalIntentFlushed({
+        await this.terminalRouteRegistry.finalize({
           route: terminalOutcome.afterTerminal,
           record,
           created: { batch: terminalResult && terminalResult.batch || null },
@@ -1066,7 +1032,7 @@ class ArchiveCenterController {
       }, files),
       targetBatchId: batch.id,
       ...(payload.terminalOutcome
-        ? { terminalOutcome: normalizeTerminalOutcome(payload.terminalOutcome) }
+        ? { terminalOutcome: normalizeTerminalOutcome(payload.terminalOutcome, this.terminalRouteRegistry) }
         : {})
     };
     const record = this._persistOutboxPayload(retryPayload);
@@ -1083,7 +1049,7 @@ class ArchiveCenterController {
     const owner = payload.owner
       ? freezePersistedTaskOwner(payload.owner, { required: true })
       : freezePersistedTaskOwner(payload.batchContext, { required: true });
-    const terminalOutcome = normalizeTerminalOutcome(payload.terminalOutcome);
+    const terminalOutcome = normalizeTerminalOutcome(payload.terminalOutcome, this.terminalRouteRegistry);
     const sourceOperation = String(payload.sourceOperation || 'archive');
     const ownerContext = owner.kind === 'operation'
       ? owner.operationContext

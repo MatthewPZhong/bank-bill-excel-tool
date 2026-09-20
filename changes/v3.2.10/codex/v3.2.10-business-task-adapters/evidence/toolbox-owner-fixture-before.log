@@ -1,0 +1,26 @@
+✖ Position owner 等待实际异步恢复，失败时保留 pending 并阻止 generic sweep (13.674708ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 97.290042
+
+✖ failing tests:
+
+test at tests/unit/main-process/toolbox-archive-integration.test.js:259:1
+✖ Position owner 等待实际异步恢复，失败时保留 pending 并阻止 generic sweep (13.674708ms)
+  Error [AggregateError]: 模块恢复尚未完成耐久接管，已阻止业务启动
+      at ArchiveCenterController.initialize (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters/src/main-process/archive-center/controller.js:309:21) {
+    code: 'ARCHIVE_STARTUP_OWNER_RECOVERY_FAILED',
+    owners: [ 'Position' ],
+    detailLines: [ 'Position：positionTaskOwner is not defined' ],
+    recoveryPaths: [],
+    [errors]: [
+      ReferenceError: positionTaskOwner is not defined
+          at Object.recoverPositionPendingBeforeInterruptedSweep [as recover] (eval at buildPositionPendingRecoveryOwner (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters/tests/unit/main-process/toolbox-archive-integration.test.js:154:10), <anonymous>:4:15)
+          at ArchiveCenterController.initialize (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-business-task-adapters/src/main-process/archive-center/controller.js:290:23)
+    ]
+  }

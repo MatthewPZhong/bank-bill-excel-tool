@@ -1,0 +1,19 @@
+✔ split read 只走裸 preview IPC，merge/export 的全部 dialog 在 execute 前完成 (1.044209ms)
+✔ committed 恢复输出携 exact7 回原批次，output descriptor 显式标记方向 (0.898ms)
+✔ Position owner 等待实际异步恢复，失败时保留 pending 并阻止 generic sweep (34.904958ms)
+✔ after-committed 崩溃首次完整启动即归档 ready + task succeeded，第二次启动幂等 (448.894667ms)
+✔ Position owner 失败仍完成 Toolbox 同次恢复，但统一阻断启动且不丢旧 artifact (565.01625ms)
+✔ 损坏 outbox 不短路 Toolbox owner 且阻断新发布，修复后重启保全旧 artifact (555.861042ms)
+✔ 正常 worker committed 后 receipt 保留 N 个输入与全部输出，存档接管完整后才清理 (947.222209ms)
+✔ 工具箱 publication cancel-wins 后迟到 success 不 ACK committed receipt (0.252375ms)
+✔ 恢复索引首读 EIO 时 sweepUnsafe 阻止通用扫尾，二启完成原批次恢复 (477.56275ms)
+✔ split read context 新读覆盖旧读，取消导出可重试同一 token (9.210291ms)
+✔ split export freshness 发现源变化后清除 token，要求重新选择 (1.387375ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3179.921417

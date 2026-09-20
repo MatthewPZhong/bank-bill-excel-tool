@@ -254,16 +254,6 @@ function createPositionSourceImportTaskContract({
   };
 }
 
-function runWithPreparedResourceCleanup(prepared, run) {
-  let executeStarted = false;
-  const markExecuteStarted = () => { executeStarted = true; };
-  return Promise.resolve(run(markExecuteStarted)).finally(async () => {
-    if (!executeStarted && prepared && typeof prepared.onAbandon === 'function') {
-      await prepared.onAbandon();
-    }
-  });
-}
-
 function executeAfterPositionAdmission({
   isPositionOperation,
   markExecuteStarted,
@@ -286,6 +276,5 @@ module.exports = {
   createPositionSourceImportTaskContract,
   executeAfterPositionAdmission,
   positionPreflightFailure,
-  preparePositionRunSubmission,
-  runWithPreparedResourceCleanup
+  preparePositionRunSubmission
 };

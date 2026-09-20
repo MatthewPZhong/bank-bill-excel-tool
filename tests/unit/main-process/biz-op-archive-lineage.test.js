@@ -561,7 +561,7 @@ test('Biz main seam 冻结三源/export locator，run 与月末 copy owner 排�
     bizOwner.indexOf('recoverRunReceipts') < bizOwner.indexOf('recoverMonthEndCopyIntents'),
     '先恢复 Biz run receipt，再恢复月末 copy intent'
   );
-  assert.match(mainSource, /withLegacyRecovery\([\s\S]*?bizOpReconRunData\.finalizeRunTerminalIntent\(/);
+  // terminal legacy recovery 能力由 archive-terminal-route-registry.test.js 的实际注册行为覆盖。
   const runHandlerStart = mainSource.indexOf("trackedIpcHandle('bizOpRecon:run'");
   const runHandlerEnd = mainSource.indexOf("ipcMain.handle('bizOpRecon:export:list-success-dates'", runHandlerStart);
   assert.doesNotMatch(mainSource.slice(runHandlerStart, runHandlerEnd), /runLocator\s*}/);
@@ -680,4 +680,56 @@ test('Biz run 从 head 校验到三表读取/receipt 写入共享 snapshot，并
   }), /locked|busy/i);
   assert.equal(runs.getRunByArchiveTaskRunId(db, 'biz-run-race'), null);
   assert.equal(datasetHeads.getHead(db, 'flow', '2026-05-22').datasetId, 'flow-concurrent');
+});
+
+test('Biz terminal registry 的 live 和 replay 共用主侧库 ACK，并在恢复连接实际关闭后返回', async (t) => {
+  const { createTerminalRouteRegistry } = require('../../../src/main-process/archive-center/terminal-route-registry');
+  const { legacyMode, retiredError, withLegacyRecovery, assertLegacyRecoveryClosed } = require('../../../src/backend/biz-op-legacy-guard');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'biz-terminal-registry-'));
+  const appDb = new AppDatabase(path.join(directory, 'tool-data.sqlite'));
+  appDb.init();
+  t.after(() => { appDb.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  const taskRunId = 'biz-terminal-task';
+  const sideResult = seedSideRun(directory, taskRunId);
+  const relPath = runDataStore.sideDbRelPath(runDataStore.MODULE_BIZ_OP, '2026-05');
+  runData.upsertMainRunMirror(appDb.db, { date: '2026-05-22', buName: 'BU-A', relPath,
+    stats: sideResult.stats, status: 'success', archiveTaskRunId: taskRunId });
+  let activationPhase = '';
+  const registry = createTerminalRouteRegistry([runData.createBizOpRunTerminalRouteRegistration({
+    getUserDataDir: () => directory,
+    getMainDb: () => appDb.db,
+    assertLegacyAvailable() {
+      if (legacyMode(appDb.db) === 'ACTIVE'
+          || ['LEGACY_DB_CLEARED', 'LEGACY_FILES_RECLAIMED'].includes(activationPhase)) throw retiredError();
+    },
+    withLegacyRecovery
+  })]);
+  const route = lineage.bizOpRunTerminalRoute(taskRunId);
+  const context = { taskRunId, taskKey: lineage.BIZ_OP_RUN_TASK_KEY, moduleId: lineage.BIZ_OP_MODULE_ID,
+    parentRunId: 'biz-terminal-parent', operationKey: 'biz-terminal-operation' };
+  const record = { payload: { owner: { version: 1, kind: 'operation', operationContext: context } } };
+  await assert.rejects(registry.createAfterTerminal(route)({ context: { ...context, taskRunId: 'wrong' },
+    terminalStatus: 'succeeded' }), /owner/);
+  assert.equal(runs.getRunByArchiveTaskRunId(appDb.db, taskRunId).archive_terminal_ack_at, null);
+  await registry.createAfterTerminal(route)({ context, terminalStatus: 'succeeded' });
+  assertLegacyRecoveryClosed(directory);
+  const mainAck = runs.getRunByArchiveTaskRunId(appDb.db, taskRunId).archive_terminal_ack_at;
+  assert.ok(mainAck);
+  const sideDb = runDataStore.openExistingSideDb(runDataStore.resolveFromRel(directory, relPath));
+  let sideAck;
+  try { sideAck = runs.getRunByArchiveTaskRunId(sideDb, taskRunId).archive_terminal_ack_at; }
+  finally { sideDb.close(); }
+  assert.ok(sideAck);
+  await registry.finalize({ route, record, terminalOutcome: { taskStatus: 'succeeded' } });
+  assertLegacyRecoveryClosed(directory);
+  assert.equal(runs.getRunByArchiveTaskRunId(appDb.db, taskRunId).archive_terminal_ack_at, mainAck);
+  const replayedSideDb = runDataStore.openExistingSideDb(runDataStore.resolveFromRel(directory, relPath));
+  try { assert.equal(runs.getRunByArchiveTaskRunId(replayedSideDb, taskRunId).archive_terminal_ack_at, sideAck); }
+  finally { replayedSideDb.close(); }
+  for (activationPhase of ['LEGACY_DB_CLEARED', 'LEGACY_FILES_RECLAIMED']) {
+    await assert.rejects(registry.createAfterTerminal(route)({ context, terminalStatus: 'succeeded' }),
+      { code: 'BIZOP_LEGACY_RETIRED' });
+    await assert.rejects(registry.finalize({ route, record, terminalOutcome: { taskStatus: 'succeeded' } }),
+      { code: 'BIZOP_LEGACY_RETIRED' });
+  }
 });
