@@ -1,0 +1,5 @@
+PASS 合法历史 committed receipt 两次 SQLite 重启只接管一次，平台 ready 独立记录
+PASS 未知 owner prepared 从实际 startup/live 路径拒绝且五类材料摘要不变
+PASS 未知 owner committed 从实际 startup/live 路径拒绝且五类材料摘要不变
+PASS 真实发布 worker committed 后退出，transport 授权拒绝未知 owner 并保留 receipt
+==== 4/4 PASS ====

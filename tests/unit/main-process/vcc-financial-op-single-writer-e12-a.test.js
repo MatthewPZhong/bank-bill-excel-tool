@@ -68,6 +68,9 @@ const {
   assertXlsxOutputPath
 } = require('../../../src/main-process/vcc-financial-op-output-publication');
 
+// Writer fixture 不建立 durable publication；显式 facade 不能推断合成 publisher 已完成恢复。
+async function recoverWriterFixturePublications() { throw new Error('Writer fixture 没有 publication 恢复证明'); }
+
 const ASSETS_DIR = path.resolve(__dirname, '../../../assets');
 
 function identityDigestEvidence(digest) {
@@ -619,6 +622,7 @@ async function runManaged({ harness, actionKey, selectedSubjectIndexes, suffix }
   let publisherCalls = 0;
   let publishedDigests = null;
   const result = await generateValidateAndPublishVccExport({
+    recoverPublications: recoverWriterFixturePublications,
     actionKey,
     runtime: harness.runtime,
     expectedAuthority: harness.snapshot.authority,
@@ -660,6 +664,7 @@ async function runSingleCreationProbe({
   publishPublication
 }) {
   return generateValidateAndPublishVccExport({
+    recoverPublications: recoverWriterFixturePublications,
     actionKey: VCC_EXPORT_SINGLE_ACTION,
     runtime,
     expectedAuthority: harness.snapshot.authority,
@@ -736,6 +741,7 @@ test('canonical FilePlan 与 legacy writer 仅接受 xlsx extension，csv 在 Wo
   let workerCalls = 0;
   let publisherCalls = 0;
   await assert.rejects(generateValidateAndPublishVccExport({
+    recoverPublications: recoverWriterFixturePublications,
     actionKey: VCC_EXPORT_SINGLE_ACTION,
     runtime: { async execute() { workerCalls += 1; } },
     expectedAuthority: harness.snapshot.authority,
@@ -880,6 +886,7 @@ test('activeTask/taskGeneration B 变化时 fail closed 且 Publisher=0', async 
   let taskReads = 0;
   let publisherCalls = 0;
   await assert.rejects(generateValidateAndPublishVccExport({
+    recoverPublications: recoverWriterFixturePublications,
     actionKey: VCC_EXPORT_SINGLE_ACTION,
     runtime: harness.runtime,
     expectedAuthority: harness.snapshot.authority,
@@ -912,6 +919,7 @@ test('run/revision/fingerprint/archive B authority 变化时 fail closed 且 Pub
   let snapshotReads = 0;
   let publisherCalls = 0;
   await assert.rejects(generateValidateAndPublishVccExport({
+    recoverPublications: recoverWriterFixturePublications,
     actionKey: VCC_EXPORT_SINGLE_ACTION,
     runtime: harness.runtime,
     expectedAuthority: harness.snapshot.authority,
@@ -949,6 +957,7 @@ test('artifact hash/size TOCTOU 被 Main Join 阻断，Publisher=0 且 staging �
   const batch = batchContext('single');
   let publisherCalls = 0;
   await assert.rejects(generateValidateAndPublishVccExport({
+    recoverPublications: recoverWriterFixturePublications,
     actionKey: VCC_EXPORT_SINGLE_ACTION,
     runtime: {
       async execute(request) {
@@ -986,6 +995,7 @@ test('Main Join 后 generation 被替换时 wrapper 绑定 expected identity，P
   let snapshotReads = 0;
   let publisherCalls = 0;
   await assert.rejects(generateValidateAndPublishVccExport({
+    recoverPublications: recoverWriterFixturePublications,
     actionKey: VCC_EXPORT_SINGLE_ACTION,
     runtime: harness.runtime,
     expectedAuthority: harness.snapshot.authority,
@@ -1022,6 +1032,7 @@ test('自洽伪造 size/hash 的 workbook 业务篡改仍由 Main 深度回读�
   const batch = batchContext('single');
   let publisherCalls = 0;
   await assert.rejects(generateValidateAndPublishVccExport({
+    recoverPublications: recoverWriterFixturePublications,
     actionKey: VCC_EXPORT_SINGLE_ACTION,
     runtime: {
       async execute(request) {
@@ -1073,6 +1084,7 @@ test('Result raw ZIP no-op 仅重打包 sheet1.xml 时保持合法且 Publisher=
   let publisherCalls = 0;
   let publishedSourcePaths = [];
   const result = await generateValidateAndPublishVccExport({
+    recoverPublications: recoverWriterFixturePublications,
     actionKey: VCC_EXPORT_SINGLE_ACTION,
     runtime: {
       async execute(request) {
@@ -1162,6 +1174,7 @@ test('raw XLSX/ExcelJS 自洽篡改 Result 文本类型、样式与完整页面�
       const batch = batchContext(suffix);
       let publisherCalls = 0;
       await assert.rejects(generateValidateAndPublishVccExport({
+    recoverPublications: recoverWriterFixturePublications,
         actionKey: VCC_EXPORT_SINGLE_ACTION,
         runtime: {
           async execute(request) {
@@ -1234,6 +1247,7 @@ test('Result merge follower raw cached formula 自洽篡改仍由 Main Join 阻�
       let publisherCalls = 0;
       const publishedSourcePaths = [];
       await assert.rejects(generateValidateAndPublishVccExport({
+    recoverPublications: recoverWriterFixturePublications,
         actionKey: VCC_EXPORT_SINGLE_ACTION,
         runtime: {
           async execute(request) {
@@ -1291,6 +1305,7 @@ test('Publisher 失败不重试：调用恰一次，错误透传且 generation a
   const batch = batchContext('single');
   let publisherCalls = 0;
   await assert.rejects(generateValidateAndPublishVccExport({
+    recoverPublications: recoverWriterFixturePublications,
     actionKey: VCC_EXPORT_SINGLE_ACTION,
     runtime: harness.runtime,
     expectedAuthority: harness.snapshot.authority,
@@ -1325,6 +1340,7 @@ test('Publisher 人工恢复 preserve 保留全部 task-private 文件并合并�
   let caught = null;
   try {
     await generateValidateAndPublishVccExport({
+    recoverPublications: recoverWriterFixturePublications,
       actionKey: VCC_EXPORT_SINGLE_ACTION,
       runtime: harness.runtime,
       expectedAuthority: harness.snapshot.authority,
@@ -1397,6 +1413,7 @@ test('Publisher committed 后 generation/task-dir cleanup 失败保留成功并�
       let result;
       try {
         result = await generateValidateAndPublishVccExport({
+    recoverPublications: recoverWriterFixturePublications,
           actionKey: VCC_EXPORT_SINGLE_ACTION,
           runtime: {
             async execute(request) {
@@ -1447,6 +1464,7 @@ test('Publisher committed 后 generation/task-dir cleanup 失败保留成功并�
 
       let retryWorkerCalls = 0;
       await assert.rejects(generateValidateAndPublishVccExport({
+    recoverPublications: recoverWriterFixturePublications,
         actionKey: VCC_EXPORT_SINGLE_ACTION,
         runtime: { async execute() { retryWorkerCalls += 1; } },
         expectedAuthority: harness.snapshot.authority,
@@ -1534,6 +1552,7 @@ test('Worker failure/cancel 及 transport crash 都保持 Publisher=0 并清理 
   const batch = batchContext('single');
   let publisherCalls = 0;
   await assert.rejects(generateValidateAndPublishVccExport({
+    recoverPublications: recoverWriterFixturePublications,
     actionKey: VCC_EXPORT_SINGLE_ACTION,
     runtime: {
       async execute(request) {
@@ -1578,6 +1597,7 @@ test('forced-shutdown 等价失败只清理 exact generation 与同源 UUID tmp�
   let lookalikePath = null;
   const unrelatedPath = path.join(stagingDirectory, 'unrelated.keep');
   await assert.rejects(generateValidateAndPublishVccExport({
+    recoverPublications: recoverWriterFixturePublications,
     actionKey: VCC_EXPORT_SINGLE_ACTION,
     runtime: {
       async execute(request) {
@@ -1638,6 +1658,7 @@ test('真实 FS readdir EACCES 仅保留 exact task dir，恢复权限后同 cle
   let caught = null;
   try {
     await generateValidateAndPublishVccExport({
+    recoverPublications: recoverWriterFixturePublications,
       actionKey: VCC_EXPORT_SINGLE_ACTION,
       runtime: {
         async execute(request) {
@@ -1705,6 +1726,7 @@ test('真实 FS readdir EACCES 仅保留 exact task dir，恢复权限后同 cle
 
   let retryWorkerCalls = 0;
   await assert.rejects(generateValidateAndPublishVccExport({
+    recoverPublications: recoverWriterFixturePublications,
     actionKey: VCC_EXPORT_SINGLE_ACTION,
     runtime: {
       async execute() {
@@ -2331,6 +2353,7 @@ test('runtime 后 exact task dir 被换成 reparse 时 cleanup fail closed 且�
   let caught = null;
   try {
     await generateValidateAndPublishVccExport({
+    recoverPublications: recoverWriterFixturePublications,
       actionKey: VCC_EXPORT_SINGLE_ACTION,
       runtime: {
         async execute(request) {
@@ -2392,6 +2415,7 @@ test('Main create 后 Worker 开始前 task-root replacement fail closed、Publi
   let caught = null;
   try {
     await generateValidateAndPublishVccExport({
+    recoverPublications: recoverWriterFixturePublications,
       actionKey: VCC_EXPORT_SINGLE_ACTION,
       runtime: {
         async execute(request) {
@@ -2476,6 +2500,7 @@ test('atomic handoff 前 task-root replacement fail closed、Publisher=0 且不�
   let caught = null;
   try {
     await generateValidateAndPublishVccExport({
+    recoverPublications: recoverWriterFixturePublications,
       actionKey: VCC_EXPORT_SINGLE_ACTION,
       runtime: {
         async execute(request) {
@@ -2569,6 +2594,7 @@ test('冻结 task-root identity 支持普通 Windows-compatible Unicode/space �
   const plan = filePlan(harness.root, 1, 'windows-compatible-identity');
   const batch = batchContext('windows-compatible-identity');
   const result = await generateValidateAndPublishVccExport({
+    recoverPublications: recoverWriterFixturePublications,
     actionKey: VCC_EXPORT_SINGLE_ACTION,
     runtime: harness.runtime,
     expectedAuthority: harness.snapshot.authority,
@@ -2615,6 +2641,7 @@ test('普通 pre-Publisher cleanup 部分失败只上报 exact task-private 已�
   };
   try {
     await generateValidateAndPublishVccExport({
+    recoverPublications: recoverWriterFixturePublications,
       actionKey: VCC_EXPORT_SUBJECTS_ACTION,
       runtime: {
         async execute(request) {
@@ -2665,6 +2692,7 @@ test('普通 pre-Publisher cleanup 部分失败只上报 exact task-private 已�
 
   let retryWorkerCalls = 0;
   await assert.rejects(generateValidateAndPublishVccExport({
+    recoverPublications: recoverWriterFixturePublications,
     actionKey: VCC_EXPORT_SUBJECTS_ACTION,
     runtime: { async execute() { retryWorkerCalls += 1; } },
     expectedAuthority: harness.snapshot.authority,

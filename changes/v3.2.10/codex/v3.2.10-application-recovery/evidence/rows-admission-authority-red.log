@@ -1,0 +1,7 @@
+PASS 768 MiB 预算立即拒绝 1 GiB rows：30.8 ms，零 Worker/Publisher，原件和旧目标保留
+AssertionError [ERR_ASSERTION]: 必须由 Main finally 清理本次私有目录
+
+0 !== 1
+
+    at runCase (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/scripts/integration/toolbox-row-split-admission.js:117:12)
+    at async run (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/scripts/integration/toolbox-row-split-admission.js:165:3)

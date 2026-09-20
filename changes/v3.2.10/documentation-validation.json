@@ -1,0 +1,455 @@
+{
+  "schema_version": 4,
+  "checked_at_utc": "2026-09-20T11:31:31.946091+00:00",
+  "scope": "Third independent design review closure registration; status records only; approved Spec/TechDoc content unchanged",
+  "result": "PASS",
+  "baseline": {
+    "head": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+    "v3.2.9": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+    "release/v3.2.10_observed": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+    "planned_feature_branches_currently_present": [],
+    "git_refs_modified_by_this_task": false
+  },
+  "counts": {
+    "specs": 8,
+    "techdocs": 8,
+    "markdown_files": 18,
+    "local_links_checked": 246,
+    "acceptance_criteria": 92,
+    "original_acceptance_criteria": 75,
+    "added_acceptance_criteria": 17,
+    "added_in_this_revision": 0,
+    "common_completion_cross_references": 40,
+    "common_completion_anchors": 3
+  },
+  "checks": {
+    "expected_pairs_present": true,
+    "metadata_and_baseline": true,
+    "local_file_links_and_line_bounds": true,
+    "acceptance_technical_table_coverage": true,
+    "tracked_files_unchanged": true,
+    "code_fences_and_whitespace": true,
+    "markdown_fragment_targets": true,
+    "original_acceptance_ids_preserved": true,
+    "all_branches_reference_common_completion": true,
+    "previous_89_acceptance_ids_preserved": true,
+    "third_review_approved_16_contract_hashes_match": true,
+    "status_registration_scope_only": true
+  },
+  "documents": [
+    {
+      "governance": "G1",
+      "branch": "codex/v3.2.10-application-recovery",
+      "spec": "codex/v3.2.10-application-recovery/spec.md",
+      "techdoc": "codex/v3.2.10-application-recovery/techdoc.md",
+      "acceptance_count": 9,
+      "mapped_in_technical_tables": [
+        "G1-AC-01",
+        "G1-AC-02",
+        "G1-AC-03",
+        "G1-AC-04",
+        "G1-AC-05",
+        "G1-AC-06",
+        "G1-AC-07",
+        "G1-AC-08",
+        "G1-AC-09"
+      ]
+    },
+    {
+      "governance": "G8",
+      "branch": "codex/v3.2.10-architecture-guardrails",
+      "spec": "codex/v3.2.10-architecture-guardrails/spec.md",
+      "techdoc": "codex/v3.2.10-architecture-guardrails/techdoc.md",
+      "acceptance_count": 22,
+      "mapped_in_technical_tables": [
+        "G8-AC-01",
+        "G8-AC-02",
+        "G8-AC-03",
+        "G8-AC-04",
+        "G8-AC-05",
+        "G8-AC-06",
+        "G8-AC-07",
+        "G8-AC-08",
+        "G8-AC-09",
+        "G8-AC-10",
+        "G8-AC-11",
+        "G8-AC-12",
+        "G8-AC-13",
+        "G8-AC-14",
+        "G8-AC-15",
+        "G8-AC-16",
+        "G8-AC-17",
+        "G8-AC-18",
+        "G8-AC-19",
+        "G8-AC-20",
+        "G8-AC-21",
+        "G8-AC-22"
+      ]
+    },
+    {
+      "governance": "G5",
+      "branch": "codex/v3.2.10-bizop-query-boundaries",
+      "spec": "codex/v3.2.10-bizop-query-boundaries/spec.md",
+      "techdoc": "codex/v3.2.10-bizop-query-boundaries/techdoc.md",
+      "acceptance_count": 8,
+      "mapped_in_technical_tables": [
+        "G5-AC-01",
+        "G5-AC-02",
+        "G5-AC-03",
+        "G5-AC-04",
+        "G5-AC-05",
+        "G5-AC-06",
+        "G5-AC-07",
+        "G5-AC-08"
+      ]
+    },
+    {
+      "governance": "G2",
+      "branch": "codex/v3.2.10-business-task-adapters",
+      "spec": "codex/v3.2.10-business-task-adapters/spec.md",
+      "techdoc": "codex/v3.2.10-business-task-adapters/techdoc.md",
+      "acceptance_count": 9,
+      "mapped_in_technical_tables": [
+        "G2-AC-01",
+        "G2-AC-02",
+        "G2-AC-03",
+        "G2-AC-04",
+        "G2-AC-05",
+        "G2-AC-06",
+        "G2-AC-07",
+        "G2-AC-08",
+        "G2-AC-09"
+      ]
+    },
+    {
+      "governance": "G7",
+      "branch": "codex/v3.2.10-execution-descriptors",
+      "spec": "codex/v3.2.10-execution-descriptors/spec.md",
+      "techdoc": "codex/v3.2.10-execution-descriptors/techdoc.md",
+      "acceptance_count": 8,
+      "mapped_in_technical_tables": [
+        "G7-AC-01",
+        "G7-AC-02",
+        "G7-AC-03",
+        "G7-AC-04",
+        "G7-AC-05",
+        "G7-AC-06",
+        "G7-AC-07",
+        "G7-AC-08"
+      ]
+    },
+    {
+      "governance": "G3",
+      "branch": "codex/v3.2.10-renderer-boundaries",
+      "spec": "codex/v3.2.10-renderer-boundaries/spec.md",
+      "techdoc": "codex/v3.2.10-renderer-boundaries/techdoc.md",
+      "acceptance_count": 20,
+      "mapped_in_technical_tables": [
+        "G3-AC-01",
+        "G3-AC-02",
+        "G3-AC-03",
+        "G3-AC-04",
+        "G3-AC-05",
+        "G3-AC-06",
+        "G3-AC-07",
+        "G3-AC-08",
+        "G3-AC-09",
+        "G3-AC-10",
+        "G3-AC-11",
+        "G3-AC-12",
+        "G3-AC-13",
+        "G3-AC-14",
+        "G3-AC-15",
+        "G3-AC-16",
+        "G3-AC-17",
+        "G3-AC-18",
+        "G3-AC-19",
+        "G3-AC-20"
+      ]
+    },
+    {
+      "governance": "G4",
+      "branch": "codex/v3.2.10-shared-xlsx-infrastructure",
+      "spec": "codex/v3.2.10-shared-xlsx-infrastructure/spec.md",
+      "techdoc": "codex/v3.2.10-shared-xlsx-infrastructure/techdoc.md",
+      "acceptance_count": 8,
+      "mapped_in_technical_tables": [
+        "G4-AC-01",
+        "G4-AC-02",
+        "G4-AC-03",
+        "G4-AC-04",
+        "G4-AC-05",
+        "G4-AC-06",
+        "G4-AC-07",
+        "G4-AC-08"
+      ]
+    },
+    {
+      "governance": "G6",
+      "branch": "codex/v3.2.10-storage-execution-separation",
+      "spec": "codex/v3.2.10-storage-execution-separation/spec.md",
+      "techdoc": "codex/v3.2.10-storage-execution-separation/techdoc.md",
+      "acceptance_count": 8,
+      "mapped_in_technical_tables": [
+        "G6-AC-01",
+        "G6-AC-02",
+        "G6-AC-03",
+        "G6-AC-04",
+        "G6-AC-05",
+        "G6-AC-06",
+        "G6-AC-07",
+        "G6-AC-08"
+      ]
+    }
+  ],
+  "document_fingerprints": {
+    "README.md": {
+      "sha256": "9d32565d6d969ff812c7c7dc96079148d9aeecffb53f2966b1e0d9e5eb56975a",
+      "bytes": 23115,
+      "lines": 183
+    },
+    "codex/v3.2.10-application-recovery/spec.md": {
+      "sha256": "a7a6a76f65129f64e1215be1036ef256b95c8b6638154cecf259fcbf69a8e015",
+      "bytes": 12065,
+      "lines": 91
+    },
+    "codex/v3.2.10-application-recovery/techdoc.md": {
+      "sha256": "c1f01e42bdcc51ad6c5738420d31d3edbb91b40b786a9f4d53ae5bc016b86e3f",
+      "bytes": 33471,
+      "lines": 253
+    },
+    "codex/v3.2.10-architecture-guardrails/spec.md": {
+      "sha256": "40cd1d7f7b60dc38cb0ec570f1e06d097a36755d19b6477799ccb8e656d08ed1",
+      "bytes": 16906,
+      "lines": 128
+    },
+    "codex/v3.2.10-architecture-guardrails/techdoc.md": {
+      "sha256": "a3f05ca08266bd374e83a5f7ffbea4d1993a8823fe53897b9eeefd38346f3527",
+      "bytes": 47549,
+      "lines": 353
+    },
+    "codex/v3.2.10-bizop-query-boundaries/spec.md": {
+      "sha256": "13f5862b467266a4bb8bc1199e90a1eb7cccbcb78070bead88d3564c177d81c0",
+      "bytes": 7759,
+      "lines": 92
+    },
+    "codex/v3.2.10-bizop-query-boundaries/techdoc.md": {
+      "sha256": "46a9245067e69fa1a0797a1ec9c609567b3b5cfd50b5c824b3701731a0c99ba3",
+      "bytes": 12315,
+      "lines": 159
+    },
+    "codex/v3.2.10-business-task-adapters/spec.md": {
+      "sha256": "3da1fd494bea35c4c76d000eb8c126b8638d586a320ae795592b2b957c1d28f8",
+      "bytes": 10586,
+      "lines": 89
+    },
+    "codex/v3.2.10-business-task-adapters/techdoc.md": {
+      "sha256": "e2ab99aa3dc21123a5be00a5cc3900c12e1c91173a87877590d8bf204ac93c84",
+      "bytes": 20790,
+      "lines": 179
+    },
+    "codex/v3.2.10-execution-descriptors/spec.md": {
+      "sha256": "b57b4e61765bceeaa7b46123b7be04b7afd5bd075f258be191c62e20d93d478c",
+      "bytes": 9955,
+      "lines": 83
+    },
+    "codex/v3.2.10-execution-descriptors/techdoc.md": {
+      "sha256": "bb3bede82b77aaacc98468dae533b3340756c09ce32f62b9fd1e706daafcbd49",
+      "bytes": 24126,
+      "lines": 187
+    },
+    "codex/v3.2.10-renderer-boundaries/spec.md": {
+      "sha256": "a6d5867c99180648325c7fddb537440ea963d5afc1afc2d8117beef56990e3b3",
+      "bytes": 21557,
+      "lines": 171
+    },
+    "codex/v3.2.10-renderer-boundaries/techdoc.md": {
+      "sha256": "b200c6faf1ef6b01513f4106c6345c735bea235587bda105e626584dd3022cc0",
+      "bytes": 52210,
+      "lines": 351
+    },
+    "codex/v3.2.10-shared-xlsx-infrastructure/spec.md": {
+      "sha256": "6cb978388c50e35baf50fbaf2f082eca1b10f17808f111322ae3df2952505d91",
+      "bytes": 9975,
+      "lines": 96
+    },
+    "codex/v3.2.10-shared-xlsx-infrastructure/techdoc.md": {
+      "sha256": "7786bb05fd68c2431b8c4624a36f5672fe32ef2a10bd370bc87d19227883410c",
+      "bytes": 16034,
+      "lines": 165
+    },
+    "codex/v3.2.10-storage-execution-separation/spec.md": {
+      "sha256": "046854b1c4573dda6f281ffc37caae184e264883ea35ea58a6810550e28ea7e8",
+      "bytes": 11021,
+      "lines": 98
+    },
+    "codex/v3.2.10-storage-execution-separation/techdoc.md": {
+      "sha256": "683971ee22adc8fdc2f73840836d6ae5ff402dd83f8b23c716cdaac655127b3a",
+      "bytes": 21318,
+      "lines": 198
+    },
+    "review-response.md": {
+      "sha256": "35c5ecd928ee37989e58737f43fb26fc5761187d2f9e7783cc836a68f6f2afdb",
+      "bytes": 16949,
+      "lines": 89
+    }
+  },
+  "manual_cross_review": {
+    "completed": true,
+    "scope": "R9 incremental metadata contract and G8 historical JSON repair design only; no runtime tests",
+    "previous_round_completed": true,
+    "resolved": [
+      "G8 history enumeration includes repair manifest and referenced snapshot/evidence changes",
+      "G8 only complete historically valid bindings pin repaired hash; invalid typo may be corrected forward",
+      "R9 ID reuse, service epoch, write overlap, late reads, uncertain settlement and behavior ACs have no remaining must-fix in bounded cross-review",
+      "G8 final complete-binding and history-enumeration edits rechecked"
+    ],
+    "external_reviewer_reapproval": true,
+    "external_review_scope": "Third independent design review only; no runtime or release acceptance"
+  },
+  "previous_document_check": {
+    "checked_at_utc": "2026-09-20T11:20:15.122895+00:00",
+    "counts": {
+      "specs": 8,
+      "techdocs": 8,
+      "markdown_files": 18,
+      "local_links_checked": 242,
+      "acceptance_criteria": 92,
+      "original_acceptance_criteria": 75,
+      "added_acceptance_criteria": 17,
+      "added_in_this_revision": 3,
+      "common_completion_cross_references": 40,
+      "common_completion_anchors": 3
+    },
+    "scope": "Second-round review response: R9 scenario metadata and G8 malformed history recovery design; structural checks only"
+  },
+  "validation_method": {
+    "links": "Enumerate all Markdown files; check local path existence, one-based line bounds and fragment targets",
+    "acceptance": "Parse Spec AC table IDs and TechDoc table IDs/ranges, verify original 75 IDs remain and new IDs map",
+    "worktree": "git rev-parse HEAD and baseline refs; git diff --name-only HEAD; git diff --cached --name-only; git branch --list codex/v3.2.10-*",
+    "file_integrity": "SHA256 for each final Markdown document; tracked files unchanged, target docs are untracked",
+    "semantic_limits": "Does not execute designed tests, AST scanner, policy-history fixtures or prove runtime safety"
+  },
+  "input_review": {
+    "path": "/Users/pzhong/.codex/visualizations/2026/09/20/01a0bcfc-1a52-71f1-9e0b-2a0ad414bdb0/v3.2.10-governance-third-review/review.md",
+    "modified": false,
+    "baseline_probes_rerun": false
+  },
+  "not_executed": [
+    "production implementation",
+    "new governance unit/integration tests",
+    "architecture scanner or real Git history fixtures",
+    "release-check",
+    "Windows Electron GUI acceptance",
+    "Excel/WPS or installer acceptance",
+    "branch creation/commit/push/PR/version bump"
+  ],
+  "errors": [],
+  "revision": {
+    "changed_markdown_files": [
+      {
+        "path": "README.md",
+        "previous_sha256": "c3ecd1d11889aab6f2ab208d0b737a29fcf2b7961379a46aa5f8d78142da8a36",
+        "sha256": "9d32565d6d969ff812c7c7dc96079148d9aeecffb53f2966b1e0d9e5eb56975a"
+      },
+      {
+        "path": "review-response.md",
+        "previous_sha256": "3c9f9d6d794a1bcd32d4eb175f3dd68bcfb9b3adbc32bea9d86753edc8f67179",
+        "sha256": "35c5ecd928ee37989e58737f43fb26fc5761187d2f9e7783cc836a68f6f2afdb"
+      }
+    ],
+    "added_acceptance_ids": [],
+    "change_type": "design review closure status registration",
+    "closed_design_findings": [
+      "R1",
+      "R2",
+      "R3",
+      "R4",
+      "R5",
+      "R6",
+      "R7",
+      "R8",
+      "R9"
+    ],
+    "closed_nonblocking_suggestions": [
+      "G8 malformed historical JSON controlled recovery"
+    ],
+    "production_implementation_started": false,
+    "probe_rerun": false
+  },
+  "previous_revision": {
+    "changed_markdown_files": [
+      {
+        "path": "README.md",
+        "previous_sha256": "e23a1516defb991e6ff0cf9a64e6768f15dd19b0d80206c648449a671b8c33f4",
+        "sha256": "c3ecd1d11889aab6f2ab208d0b737a29fcf2b7961379a46aa5f8d78142da8a36"
+      },
+      {
+        "path": "codex/v3.2.10-architecture-guardrails/spec.md",
+        "previous_sha256": "3cfdf195e5e19c71bd0dd1ddff7d8cd43cd8120e2df7d015c4a58744867b7168",
+        "sha256": "40cd1d7f7b60dc38cb0ec570f1e06d097a36755d19b6477799ccb8e656d08ed1"
+      },
+      {
+        "path": "codex/v3.2.10-architecture-guardrails/techdoc.md",
+        "previous_sha256": "3b36cea9bad7636e1a5dc3de1a39a7ecb8f28e046be5d8808db59d306fd5692d",
+        "sha256": "a3f05ca08266bd374e83a5f7ffbea4d1993a8823fe53897b9eeefd38346f3527"
+      },
+      {
+        "path": "codex/v3.2.10-renderer-boundaries/spec.md",
+        "previous_sha256": "2a37e03c2a51a80d6d20e8446b0a110fac65afd634ef07a701113dc6b874ac18",
+        "sha256": "a6d5867c99180648325c7fddb537440ea963d5afc1afc2d8117beef56990e3b3"
+      },
+      {
+        "path": "codex/v3.2.10-renderer-boundaries/techdoc.md",
+        "previous_sha256": "805a54cdc453a22c25de2d75a7ea197daaff97c3782832c4ef7d7d9484db0e72",
+        "sha256": "b200c6faf1ef6b01513f4106c6345c735bea235587bda105e626584dd3022cc0"
+      },
+      {
+        "path": "review-response.md",
+        "previous_sha256": "1b403bee4a7247e7eb435d215463e1d8c4443e2917fd7be8246f3e54a7cc2344",
+        "sha256": "3c9f9d6d794a1bcd32d4eb175f3dd68bcfb9b3adbc32bea9d86753edc8f67179"
+      }
+    ],
+    "added_acceptance_ids": [
+      "G3-AC-19",
+      "G3-AC-20",
+      "G8-AC-22"
+    ],
+    "original_review_items": "R1-R8 closed at design level by second independent review",
+    "new_items": "R9 and G8 nonblocking clarification revised; awaiting external re-review",
+    "probe_rerun": false
+  },
+  "independent_design_review": {
+    "status": "PASS_DESIGN_ONLY",
+    "report": "/Users/pzhong/.codex/visualizations/2026/09/20/01a0bcfc-1a52-71f1-9e0b-2a0ad414bdb0/v3.2.10-governance-third-review/review.md",
+    "report_sha256": "abe1d157c562034a6228108efe0a629621d8fe4e4bd9e1a005acb81556cccfa7",
+    "input_state": "/Users/pzhong/.codex/visualizations/2026/09/20/01a0bcfc-1a52-71f1-9e0b-2a0ad414bdb0/v3.2.10-governance-third-review/input-state.json",
+    "verification": "/Users/pzhong/.codex/visualizations/2026/09/20/01a0bcfc-1a52-71f1-9e0b-2a0ad414bdb0/v3.2.10-governance-third-review/verification.json",
+    "source_baseline": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+    "accepted_spec_techdoc_count": 16,
+    "accepted_spec_techdoc_sha256": {
+      "changes/v3.2.10/codex/v3.2.10-execution-descriptors/spec.md": "b57b4e61765bceeaa7b46123b7be04b7afd5bd075f258be191c62e20d93d478c",
+      "changes/v3.2.10/codex/v3.2.10-execution-descriptors/techdoc.md": "bb3bede82b77aaacc98468dae533b3340756c09ce32f62b9fd1e706daafcbd49",
+      "changes/v3.2.10/codex/v3.2.10-bizop-query-boundaries/spec.md": "13f5862b467266a4bb8bc1199e90a1eb7cccbcb78070bead88d3564c177d81c0",
+      "changes/v3.2.10/codex/v3.2.10-bizop-query-boundaries/techdoc.md": "46a9245067e69fa1a0797a1ec9c609567b3b5cfd50b5c824b3701731a0c99ba3",
+      "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/spec.md": "40cd1d7f7b60dc38cb0ec570f1e06d097a36755d19b6477799ccb8e656d08ed1",
+      "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/techdoc.md": "a3f05ca08266bd374e83a5f7ffbea4d1993a8823fe53897b9eeefd38346f3527",
+      "changes/v3.2.10/codex/v3.2.10-storage-execution-separation/spec.md": "046854b1c4573dda6f281ffc37caae184e264883ea35ea58a6810550e28ea7e8",
+      "changes/v3.2.10/codex/v3.2.10-storage-execution-separation/techdoc.md": "683971ee22adc8fdc2f73840836d6ae5ff402dd83f8b23c716cdaac655127b3a",
+      "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/spec.md": "a6d5867c99180648325c7fddb537440ea963d5afc1afc2d8117beef56990e3b3",
+      "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/techdoc.md": "b200c6faf1ef6b01513f4106c6345c735bea235587bda105e626584dd3022cc0",
+      "changes/v3.2.10/codex/v3.2.10-business-task-adapters/spec.md": "3da1fd494bea35c4c76d000eb8c126b8638d586a320ae795592b2b957c1d28f8",
+      "changes/v3.2.10/codex/v3.2.10-business-task-adapters/techdoc.md": "e2ab99aa3dc21123a5be00a5cc3900c12e1c91173a87877590d8bf204ac93c84",
+      "changes/v3.2.10/codex/v3.2.10-shared-xlsx-infrastructure/spec.md": "6cb978388c50e35baf50fbaf2f082eca1b10f17808f111322ae3df2952505d91",
+      "changes/v3.2.10/codex/v3.2.10-shared-xlsx-infrastructure/techdoc.md": "7786bb05fd68c2431b8c4624a36f5672fe32ef2a10bd370bc87d19227883410c",
+      "changes/v3.2.10/codex/v3.2.10-application-recovery/spec.md": "a7a6a76f65129f64e1215be1036ef256b95c8b6638154cecf259fcbf69a8e015",
+      "changes/v3.2.10/codex/v3.2.10-application-recovery/techdoc.md": "c1f01e42bdcc51ad6c5738420d31d3edbb91b40b786a9f4d53ae5bc016b86e3f"
+    },
+    "reviewed_markdown_count": 18,
+    "reviewed_link_count": 242,
+    "reviewed_acceptance_count": 92,
+    "must_fix_findings_remaining": 0,
+    "implementation_acceptance": false,
+    "scope_note": "README/review-response/validation updated after independent review only to register closure; all 16 accepted contract files unchanged"
+  }
+}

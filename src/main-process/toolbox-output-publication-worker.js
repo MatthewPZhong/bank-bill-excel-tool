@@ -1,10 +1,14 @@
 'use strict';
 
-const { isMainThread, parentPort } = require('node:worker_threads');
+const { isMainThread, parentPort, workerData } = require('node:worker_threads');
+const { createWorkerAuthority, recoveryError } = require('./publication-recovery/worker-authority');
+const workerAuthority = workerData && workerData.publicationRecoveryKey
+  ? createWorkerAuthority(workerData.publicationRecoveryKey) : null;
 const {
   prepareToolboxPublication,
   publishPreparedToolboxPublication,
-  recoverPendingToolboxPublications
+  recoverPendingToolboxPublications,
+  discoverToolboxPublicationRecovery
 } = require('./toolbox-output-publication');
 const { serializeError } = require('./serialize-error');
 const { freezeWorkerBatchContext } = require('./archive-center/worker-batch-context');
@@ -14,6 +18,8 @@ function runPublicationOperation(op, payload = {}, onCheckpoint = null) {
   if (op === 'publish') {
     const batchContext = freezeWorkerBatchContext(payload.batchContext, { required: true });
     const prepared = prepareToolboxPublication({
+      workerAuthority,
+      preflight: payload.preflight,
       taskId: payload.taskId,
       artifacts: payload.artifacts,
       targets: payload.targets,
@@ -29,15 +35,15 @@ function runPublicationOperation(op, payload = {}, onCheckpoint = null) {
     });
     return publishPreparedToolboxPublication(prepared);
   }
+  if (op === 'discover-recovery') {
+    return discoverToolboxPublicationRecovery({ userDataDir: payload.userDataDir });
+  }
+  if (op === 'execute-recovery') {
+    return recoverPendingToolboxPublications({ userDataDir: payload.userDataDir,
+      authorization: payload.authorization, workerAuthority, checkpoint });
+  }
   if (op === 'recover') {
-    if (payload.batchContext) freezeWorkerBatchContext(payload.batchContext, { required: true });
-    return recoverPendingToolboxPublications({
-      userDataDir: payload.userDataDir,
-      deferCommittedRecovery: payload.deferCommittedRecovery === true,
-      deferCommittedFinalization: payload.deferCommittedFinalization === true,
-      acknowledgedCommittedTaskIds: payload.acknowledgedCommittedTaskIds,
-      checkpoint
-    });
+    throw recoveryError('PUBLICATION_RECOVERY_AUTHORITY_REQUIRED', payload.userDataDir, 'worker raw recover 已停用');
   }
   throw new Error(`未知的工具箱发布 worker 操作：${String(op)}`);
 }

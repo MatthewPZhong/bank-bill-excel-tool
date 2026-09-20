@@ -1,0 +1,10 @@
+✔ VCC 真实 SST 落盘后 1100 条长中文原文准确提取，内存及字节缓存均受 64 MiB 约束 (16973.840959ms)
+ℹ {"pendingRows":1100,"physicalFiles":1,"guardedBusinessTables":48,"independentConnectionGuardsVerified":true,"mode":"disk","count":1271,"memoryBudgetBytes":67108864,"cacheMaxBytes":67108864,"peakMemoryBytes":67051201,"peakCacheBytes":67049348,"cacheBytes":67040564,"cacheEntries":719,"utf16Bytes":44668588,"cacheCharge":67040564,"closed":true,"cacheCleared":true,"spillRemoved":true}
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 17064.094416

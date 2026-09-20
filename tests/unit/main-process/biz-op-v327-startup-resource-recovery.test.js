@@ -7,7 +7,22 @@ const path = require('node:path');
 const { createExportHost, request } = require('../../helpers/biz-op-v327-export');
 const { seed, compute } = require('../../helpers/biz-op-v327-compute');
 const { createBizOpPublication } = require('../../../src/main-process/biz-op-v327/export-publication');
+const { createToolboxPublicationDispatcher } = require('../../../src/main-process/toolbox-output-publication-dispatch');
+const { createPublicationRecoveryCoordinator } = require('../../../src/main-process/publication-recovery/coordinator');
+const { createArchivePublicationOwner } = require('../../../src/main-process/publication-recovery/archive-owner');
 const { createResourceGovernor } = require('../../../src/main-process/background-execution/resource-governor');
+
+function publicationWithRuntime(f, getRuntime) {
+  const dispatcher = createToolboxPublicationDispatcher();
+  const publication = createBizOpPublication({ catalog: f.module.catalog, payloadStore: f.module.payloadStore,
+    protection: f.module.protection, userDataDir: f.root, getArchiveService: () => f.service, getRuntime,
+    publishArtifact: dispatcher.publish.bind(dispatcher) });
+  const recovery = createPublicationRecoveryCoordinator({ userDataDir: f.root, dispatcher,
+    owners: [publication.publicationOwner, createArchivePublicationOwner({ getArchiveCenter: () => ({ service: f.service }) })] });
+  recovery.bindDispatcherAuthority();
+  publication.bindRecovery(recovery.forOwner('biz-op-v327'));
+  return { publication, recovery };
+}
 
 test('真实未发布导出在零预算恢复时保留任务和 pin，资源足够后原任务可收口', async (t) => {
   const f = await createExportHost(t); await seed(f); const run = await compute(f);
@@ -22,13 +37,12 @@ test('真实未发布导出在零预算恢复时保留任务和 pin，资源足�
   let runtime = { resourceGovernor: createResourceGovernor({ budgets: {
     cpuSlots: 2, workerThreadSlots: 2, utilityProcessSlots: 0, ioHeavySlots: 2, memoryBytes: 0
   } }) };
-  const publication = createBizOpPublication({ catalog: f.module.catalog, payloadStore: f.module.payloadStore,
-    protection: f.module.protection, userDataDir: f.root, getArchiveService: () => f.service, getRuntime: () => runtime });
+  const { publication, recovery } = publicationWithRuntime(f, () => runtime);
   f.module.sources.setPublication(publication);
   const blocked = await f.module.recovery.run();
   assert.equal(blocked.ready, false);
   assert.equal(blocked.reason, 'BIZOP_RESOURCE_BUDGET_INSUFFICIENT');
-  await assert.rejects(publication.recoverOtherOwners({ userDataDir: f.root, deferCommittedRecovery: true }),
+  await assert.rejects(recovery.forOwner('archive-publication').recover({ reason: 'startup' }),
     { code: 'BIZOP_RESOURCE_BUDGET_INSUFFICIENT' });
   assert.equal(JSON.stringify(publication.record(taskId)), before);
   assert.equal(pinCount(), 1);
@@ -54,10 +68,9 @@ test('真实已发布导出在零预算归档时保留提交证明，重试完�
   let runtime = { resourceGovernor: createResourceGovernor({ budgets: {
     cpuSlots: 2, workerThreadSlots: 2, utilityProcessSlots: 0, ioHeavySlots: 2, memoryBytes: 0
   } }) };
-  const publication = createBizOpPublication({ catalog: f.module.catalog, payloadStore: f.module.payloadStore,
-    protection: f.module.protection, userDataDir: f.root, getArchiveService: () => f.service, getRuntime: () => runtime });
+  const { publication, recovery } = publicationWithRuntime(f, () => runtime);
   await assert.rejects(publication.settle(taskId), { code: 'BIZOP_RESOURCE_BUDGET_INSUFFICIENT' });
-  await assert.rejects(publication.recoverOtherOwners({ userDataDir: f.root, deferCommittedRecovery: true }),
+  await assert.rejects(recovery.forOwner('archive-publication').recover({ reason: 'startup' }),
     { code: 'BIZOP_RESOURCE_BUDGET_INSUFFICIENT' });
   assert.equal(JSON.stringify(publication.record(taskId)), before);
   assert.equal(f.db.prepare('SELECT COUNT(*) n FROM biz_op_v327_read_pins WHERE task_run_id=?').get(taskId).n, 1);

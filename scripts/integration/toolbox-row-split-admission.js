@@ -17,7 +17,7 @@ const { ROWS_POLICY } = require('../../src/main-process/toolbox-row-split/policy
 const { prepareIpcTaskInvocation, createIpcTaskContext } = require('../../src/main-process/archive-center/ipc-task-contract');
 const { sourceSnapshotFromStat, sourceSnapshotMatchesStat } = require('../../src/main-process/archive-center/source-snapshot');
 const { pathsAlias } = require('../../src/main-process/toolbox-target-identity');
-const { publishToolboxPublicationAsync } = require('../../src/main-process/toolbox-output-publication-dispatch');
+const { createTestPublicationHarness } = require('../../tests/helpers/publication-authority');
 const { toolboxRecoveryOutputFiles } = require('../../src/main-process/toolbox-archive-recovery');
 
 // 只在内存统一 Git checkout 换行；执行当前源码，避免复制一份 Main rows 实现。
@@ -54,6 +54,8 @@ async function runCase(memoryBytes, shouldSucceed) {
   const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'rows-admission-')));
   const outputDirectory = path.join(directory, 'output'), userDataDir = path.join(directory, 'userdata');
   fs.mkdirSync(outputDirectory); fs.mkdirSync(userDataDir);
+  // 批次/归档回执原本就是合成夹具；仅隔离脚本装配测试 owner，不放宽生产证明。
+  const publication = createTestPublicationHarness(userDataDir);
   const diagnostics = [], workers = [], cleanup = [], activity = [];
   const runtime = createBackgroundExecutionRuntime({ availableParallelism: 4, freeMemoryBytes: 8 * 1024 ** 3,
     totalMemoryBytes: 16 * 1024 ** 3, memoryHardCeilingBytes: memoryBytes,
@@ -88,8 +90,10 @@ async function runCase(memoryBytes, shouldSucceed) {
       prepareToolboxRows: prepareRows, generateValidateAndPublishRows,
       backgroundExecutionRuntimeManager: { get: () => runtime },
       async publishToolboxPublicationAsync(options) {
-        publisherCalls++; return publishToolboxPublicationAsync(options);
+        publisherCalls++;
+        return publication.dispatcher.publish({ ...options, requireArchiveHandoff: true, requireValidatedArtifacts: true });
       },
+      recoverArchivePublications: publication.recovery.recover,
       toolboxRowsPublicResult: publicResult, toolboxFinalOutputFiles: toolboxRecoveryOutputFiles,
       appendActivityLogEntry: (entry) => activity.push(entry), buildToolboxAuditDetailLines: () => []
     };

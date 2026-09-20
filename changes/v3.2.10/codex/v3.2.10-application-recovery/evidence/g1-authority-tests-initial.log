@@ -1,0 +1,101 @@
+✔ 原 owner 收口凭证持久化完整身份，异终态和异 afterTerminal 不可覆盖 (190.793959ms)
+▶ 已删 File Task 仅在实例、完整 owner、终态和后处理证明匹配时 ACK 迟到重复通知
+  ✔ complete (231.200083ms)
+  ✔ pending-cleanup (155.067916ms)
+  ✔ missing-proof (159.732083ms)
+  ✔ different-status (303.450292ms)
+  ✔ different-route (371.102625ms)
+  ✔ different-instance (401.542625ms)
+✔ 已删 File Task 仅在实例、完整 owner、终态和后处理证明匹配时 ACK 迟到重复通知 (1623.342708ms)
+✔ 终态已写但原 afterTerminal 失败时不记录收口证明、不 ACK (342.796459ms)
+✔ 真实 FileTask 正常完成后由原生命周期登记证明，删除后迟到重复终态安全 ACK (982.674125ms)
+✔ 匿名后处理尚未完成的持久通知不误认成无需后处理，内部标记不进入 Task metadata (239.816541ms)
+▶ artifact 未耐久时 eager/deferred 都保留原后处理责任，具备恢复路由才可自动收口
+  ✔ eager/anonymous (853.946041ms)
+  ✔ eager/routed (530.502792ms)
+  ✔ eager/none (586.226ms)
+  ✔ deferred/anonymous (588.524917ms)
+  ✔ deferred/routed (449.846334ms)
+  ✔ deferred/none (531.983333ms)
+✔ artifact 未耐久时 eager/deferred 都保留原后处理责任，具备恢复路由才可自动收口 (3542.990583ms)
+▶ 工具箱真实发布恢复在清理完成后记录 owner 凭证，凭证和 receipt 收尾中断均可重启恢复
+  ✔ none (1561.941875ms)
+  ✔ before-cleanup (1684.131167ms)
+  ✔ before-proof (1319.500708ms)
+  ✔ after-proof (1367.162917ms)
+  ✔ routed-outbox (1072.145958ms)
+  ✔ routed-proof (1048.324458ms)
+  ✔ unknown-owner (965.371625ms)
+✔ 工具箱真实发布恢复在清理完成后记录 owner 凭证，凭证和 receipt 收尾中断均可重启恢复 (9020.08375ms)
+✔ publication owner 仅匹配 Main 登记的精确 taskKey/moduleId，不认未知共享 Publisher 入口 (3.032708ms)
+▶ VCC 与只读导出真实 policy 的临时归档失败由原 publication 恢复，匿名通知安全 ACK 后可初始化和删除
+  ✔ vccFinancialOp:data-manager:export (1056.861458ms)
+  ✔ vccFinancialOp:export:import-audit (1069.958875ms)
+  ✔ vccFinancialOp:export:result (1058.523541ms)
+  ✔ pending:error:export-report (1084.390541ms)
+  ✔ pending:diff:export-single (1039.336292ms)
+  ✔ pending:diff:export-aggregate (1152.396542ms)
+  ✔ bizOpRecon:export:date (988.199584ms)
+  ✔ bizOpRecon:export:date-range (1268.623875ms)
+  ✔ pre-fund-reconciliation:export (1197.405375ms)
+  ✔ acquiringBillCurrency:export (969.707625ms)
+✔ VCC 与只读导出真实 policy 的临时归档失败由原 publication 恢复，匿名通知安全 ACK 后可初始化和删除 (10887.125667ms)
+✔ preparing 未知 owner：五类材料摘要不变、没有 execute worker (108.144792ms)
+✔ preparing 冲突 owner：五类材料摘要不变、没有 execute worker (121.236708ms)
+✔ prepared 未知 owner：五类材料摘要不变、没有 execute worker (174.285ms)
+✔ prepared 冲突 owner：五类材料摘要不变、没有 execute worker (149.026709ms)
+✔ publishing 未知 owner：五类材料摘要不变、没有 execute worker (205.868625ms)
+✔ publishing 冲突 owner：五类材料摘要不变、没有 execute worker (271.896416ms)
+✔ committed 未知 owner：五类材料摘要不变、没有 execute worker (338.970792ms)
+✔ committed 冲突 owner：五类材料摘要不变、没有 execute worker (412.152583ms)
+✔ finalizing 未知 owner：五类材料摘要不变、没有 execute worker (404.890167ms)
+✔ finalizing 冲突 owner：五类材料摘要不变、没有 execute worker (378.821375ms)
+✔ 缺 grant、错误 owner identity、错误 permission 先验证全部记录，合法前项不 cleanup (372.972292ms)
+✔ 发现后第二条 target 内容漂移：第一条 journal/stage 也零写 (383.3175ms)
+✔ raw recover、伪造 authority、raw prepare 不获得任何文件写权限 (136.792375ms)
+✔ observe-committed 即使 ack 标志被错误带入也不能 cleanup；ack-stage 保留 receipt，finalize 才清理 (399.843958ms)
+✖ 缺 lineage 不隐式确认 committed：无 context 的合成历史记录仍保留 receipt (305.283833ms)
+✔ deferred 全根保留，absence 仅显式请求且真正不存在，不能伪造 complete (200.94825ms)
+✔ owner registry 缺失、重复和不成对方法在任何扫描前拒绝 (1.844084ms)
+▶ toolbox output publication worker dispatch
+  ✔ 未绑定 dispatcher 与 raw recover 在任何 worker 之前拒绝 (1.3625ms)
+  ✔ 正式 publish exact-7 仍在 structured-clone receiver 校验 (166.798167ms)
+  ✔ FIFO 覆盖 discover/authorize/execute 两 worker 且同步 busy 不阻塞主线程 heartbeat (665.14175ms)
+  ✔ 真实发布 worker 目标 rename 后退出，当前 FIFO 内自动授权恢复 (625.102875ms)
+  ✔ 真实发布 worker 提交后退出，当前 FIFO 内自动授权恢复 (546.107625ms)
+  ✔ transport-error：全部 worker 真 exit 后才释放 observation lease 和 FIFO (110.603375ms)
+  ✔ business-error：全部 worker 真 exit 后才释放 observation lease 和 FIFO (81.309584ms)
+  ✔ normal：全部 worker 真 exit 后才释放 observation lease 和 FIFO (78.978709ms)
+  ✔ 真实 worker 的人工恢复错误跨线程保留临时目录保护与恢复路径 (35.757333ms)
+  ✔ 真实 worker 完成已验证大产物发布，主线程定时器持续执行 (10574.266833ms)
+  ✔ 真实 worker 哈希 256MiB 产物期间目标 A→B，二次确认拒绝覆盖且不留 committed receipt (350.888208ms)
+✔ toolbox output publication worker dispatch (13237.805958ms)
+ℹ tests 66
+ℹ suites 1
+ℹ pass 65
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 26942.933291
+
+✖ failing tests:
+
+test at tests/unit/main-process/publication-recovery-owner.test.js:131:1
+✖ 缺 lineage 不隐式确认 committed：无 context 的合成历史记录仍保留 receipt (305.283833ms)
+  Error [ToolboxPublicationManualRecoveryError]: 任务 task-committed 的恢复索引与 journal 锚点不一致，拒绝触碰任何文件
+      at throwDiscoverableAnchorMismatch (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/toolbox-output-publication.js:1618:9)
+      at /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/toolbox-output-publication.js:2043:7
+      at Array.map (<anonymous>)
+      at discoverRecoveryInternal (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/toolbox-output-publication.js:2033:33)
+      at /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/toolbox-output-publication.js:2072:45
+      at withLifecycleMutex (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/toolbox-output-publication.js:91:12)
+      at Object.discoverToolboxPublicationRecovery (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/src/main-process/toolbox-output-publication.js:2072:10)
+      at materials (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/tests/unit/main-process/publication-recovery-owner.test.js:46:25)
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery/tests/unit/main-process/publication-recovery-owner.test.js:139:18)
+      at Test.runInAsyncScope (node:async_hooks:226:14) {
+    code: 'TOOLBOX_PUBLICATION_MANUAL_RECOVERY',
+    detailLines: [ '任务：task-committed', 'journal：/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/publication-authority-6e0vCc/task-committed-out/.toolbox-publish-task-committed-b72c34f7-2262-4660-81cb-94a330bc576d.journal.json', '请人工核对 index 与 journal 中的 nonce、userDataDir 及 target/staging/backup 路径。' ],
+    recoveryPaths: [ '/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/publication-authority-6e0vCc/toolbox-publish-journal-index.json', '/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/publication-authority-6e0vCc/task-committed-out/.toolbox-publish-task-committed-b72c34f7-2262-4660-81cb-94a330bc576d.journal.json', '/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/publication-authority-6e0vCc/task-committed-out/result.xlsx', '/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/publication-authority-6e0vCc/task-committed-out/.toolbox-publish-b72c34f7-2262-4660-81cb-94a330bc576d-1.stage', '/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/publication-authority-6e0vCc/task-committed-out/.toolbox-publish-b72c34f7-2262-4660-81cb-94a330bc576d-1.backup' ],
+    preserveTemporaryFiles: true
+  }

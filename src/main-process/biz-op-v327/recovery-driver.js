@@ -9,7 +9,6 @@ function createBizOpRecoveryDriver({ catalog, sources, admission, readRepository
   let platform = null;
   let pending = null;
   let deferredStartupBudget = null;
-  let platformScanCompleted = false;
   function openObligations({ includeHistoricalOwners = true } = {}) {
     const db = catalog.db;
     return Boolean(db.prepare(`SELECT 1 FROM biz_op_v327_prepared_ops p
@@ -53,7 +52,6 @@ function createBizOpRecoveryDriver({ catalog, sources, admission, readRepository
         budget.begin('fullScans');
         // 不使用 Promise.race：调用越过准入期限时继续持有 gate，等待真实返回。
         const summary = await platform.scanAndRecover();
-        platformScanCompleted = true;
         const bytes = Buffer.byteLength(JSON.stringify(summary.decisions || []));
         if (bytes > budget.limits.decisionBytes) budget.reject('BIZOP_RECOVERY_DECISIONS_LIMIT');
         platformSummary = { sourceCount: summary.sourceCount, activeHoldCount: summary.activeHoldCount };
@@ -150,7 +148,7 @@ function createBizOpRecoveryDriver({ catalog, sources, admission, readRepository
       if (pending) return pending;
       pending = runAttempt(options).finally(() => { pending = null; });
       return pending;
-    }, openObligations, hasCompletedPlatformScan: () => platformScanCompleted
+    }, openObligations
   });
 }
 

@@ -14,11 +14,8 @@ const { createArchiveOutboxStore } = require('../../src/main-process/archive-cen
 const { createTaskLifecycle } = require('../../src/main-process/archive-center/task-lifecycle');
 const { createTaskPolicyRegistry } = require('../../src/main-process/archive-center/task-policy-registry');
 const { normalizeFilePlanV1 } = require('../../src/main-process/archive-center/file-plan');
-const {
-  prepareToolboxPublication,
-  publishPreparedToolboxPublication,
-  recoverPendingToolboxPublications
-} = require('../../src/main-process/toolbox-output-publication');
+const { createTestPublicationHarness } = require('../helpers/publication-authority');
+const { createArchivePublicationOwner } = require('../../src/main-process/publication-recovery/archive-owner');
 const { acknowledgeToolboxPublicationReceipts: acknowledgeToolboxPublicationReceiptsIntoArchive }
   = require('../../src/main-process/toolbox-archive-recovery');
 
@@ -38,13 +35,15 @@ async function run() {
     database: { getSetting: () => null, setSetting() {} }, service,
     outboxStore: createArchiveOutboxStore(path.join(directory, 'outbox'))
   });
+  const publication = createTestPublicationHarness(userDataDir, {
+    owners: [createArchivePublicationOwner({ getArchiveCenter: () => controller })], ownerId: 'archive-publication' });
   // 运行 Main 实际 wrapper，避免只验证 helper 而遗漏正常入口接线。
   const mainSource = fs.readFileSync(path.resolve(__dirname, '../../src/main.js'), 'utf8');
   const acknowledgeSource = mainSource.match(/async function acknowledgeToolboxPublicationReceipts\(taskIds\) \{[\s\S]*?\n\}/);
   assert.ok(acknowledgeSource, 'Main 应保留正常发布 receipt 收口入口');
   const acknowledge = vm.runInNewContext(`(${acknowledgeSource[0]})`, {
     app: { getPath: () => userDataDir }, archiveCenterService: controller,
-    recoverToolboxPublicationsAsync: recoverPendingToolboxPublications,
+    recoverArchivePublications: publication.recovery.recover,
     acknowledgeToolboxPublicationReceiptsIntoArchive
   });
   const generationPath = path.join(directory, 'generation', 'generated.xlsx');
@@ -76,15 +75,18 @@ async function run() {
   try {
     const result = await lifecycle.runFileTask({ policy,
       taskRunId: `${mode}-task`, operationKey: `${mode}-operation`, filePlanResolver: () => plan,
-      execute: async (batchContext) => {
+      execute: async (batchContext, controls) => {
         fs.writeFileSync(path.join(directory, 'owner.json'), JSON.stringify({ version: 1, kind: 'file-batch', batchContext }));
-        const prepared = prepareToolboxPublication({ taskId: `${mode}-publication`, userDataDir, batchContext,
+        await publication.dispatcher.publish({ taskId: `${mode}-publication`, userDataDir, batchContext,
           requireArchiveHandoff: true, requireValidatedArtifacts: true,
           allowEmptyArchiveInputs: mode === 'vcc-nondurable', archiveInputFiles: plan.inputs,
           protectedSourcePaths: plan.inputs.map((file) => file.filePath),
           artifacts: [{ sourcePath: generationPath, byteSize: Buffer.byteLength(content), sha256 }],
           targets: [outputPath] });
-        publishPreparedToolboxPublication(prepared);
+        await controls.settleArtifacts({ files: [
+          ...plan.inputs.map((file) => ({ artifactKey: file.artifactKey })),
+          ...plan.outputs.map((file) => ({ artifactKey: file.artifactKey, expectedSha256: sha256, expectedSizeBytes: Buffer.byteLength(content) }))
+        ] });
         const stat = readIdentityStatSync(fs, outputPath, 'statSync');
         fs.writeFileSync(path.join(directory, 'publication-evidence.json'), JSON.stringify({
           taskId: `${mode}-publication`, outputPath, inputPath, sha256,

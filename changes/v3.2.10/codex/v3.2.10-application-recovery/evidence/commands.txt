@@ -1,0 +1,79 @@
+所有命令均使用独立工作目录：
+/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery
+
+应用/Archive 组合（112/112）：
+node --test tests/unit/duplicate-inbound-match-wiring.test.js tests/unit/main-process/application-recovery.test.js tests/unit/main-process/archive-center-controller.test.js tests/unit/main-process/biz-op-archive-lineage.test.js tests/unit/main-process/duplicate-inbound-match/startup-recovery.test.js tests/unit/main-process/vcc-financial-op-storage-migration.test.js
+日志：g1-application-stable-tests.log
+
+NewAccount/VCC（121/121）：
+node --test tests/unit/main-process/new-account-save-as-e10-b.test.js tests/unit/main-process/vcc-financial-op-output-recovery.test.js tests/unit/main-process/vcc-financial-op-single-writer-e12-a.test.js
+日志：g1-newaccount-vcc-tests.log
+
+BizOP（36/36）：
+node --test tests/unit/main-process/biz-op-v327-export-main.test.js tests/unit/main-process/biz-op-v327-phase-admission.test.js tests/unit/main-process/biz-op-v327-publication-owner.test.js tests/unit/main-process/biz-op-v327-startup-resource-recovery.test.js
+日志：bizop-publication-combined.log
+
+Archive/rows（33/33）：
+node --test tests/unit/main-process/publication-recovery-archive-owner.test.js tests/unit/main-process/toolbox-row-split.test.js tests/unit/main-process/toolbox-multi-split-ipc.test.js
+日志：g1-archive-rows-tests.log
+
+Toolbox Archive（11/11）：
+node --test tests/unit/main-process/toolbox-archive-integration.test.js
+日志：g1-toolbox-archive.log
+
+实际 producer 合同（3/3）：
+node --test tests/unit/main-process/publication-recovery-producer-contracts.test.js
+日志：g1-review-producer-contracts.log
+
+Statement dormant seam（22/22）：
+node --test tests/unit/main-process/statement-generation-e09-c.test.js
+日志：g1-statement-seam.log
+
+最终 publisher/core/owner/dispatcher/mature（R4 后重新执行）：
+node --test --test-concurrency=1 tests/unit/main-process/publication-recovery-owner.test.js tests/unit/toolbox-output-publication.test.js tests/unit/main-process/toolbox-output-publication-dispatch.test.js tests/unit/main-process/background-execution/mature-action-adapters.test.js
+日志：publication-final-tests.log
+
+最终恢复集成：
+node scripts/integration/application-recovery-governance.js
+日志：governance-final-integration.log
+
+rows 删除集成（2/2）：
+node scripts/integration/toolbox-row-split-archive-delete.js
+日志：toolbox-row-split-archive-delete.log
+
+扩展 Archive 删除（15/52 后磁盘准入阻塞）：
+node scripts/integration/archive-center-permanent-delete.js
+日志：archive-center-permanent-delete.log
+
+生成与核验现行 manifest：
+node scripts/check-background-execution-manifest.js --write
+node scripts/check-background-execution-manifest.js
+日志：manifest-final.log
+
+最终静态检查：
+npm run lint
+git diff --check
+日志：lint-final.log、diff-check-final.log
+
+完整门禁（初始，最终状态以实施记录为准）：
+UNIT_TEST_CONCURRENCY=4 npm run release-check
+日志：release-check-initial.log
+
+完整门禁失败后的定向迁移/复验：
+node --test tests/unit/main-process/toolbox-row-split-overwrite.test.js tests/unit/main-process/toolbox-row-split-parent-identity.test.js tests/unit/main-process/recon-id-fix-export-e11-c.test.js
+node --test tests/unit/main-startup-contract.test.js tests/unit/renderer-pre-fund-reconciliation.test.js
+node --test tests/unit/main-process/vcc-financial-op-dual-writer-e12-c.test.js
+node --test tests/unit/scripts/v3-2-5-release-evidence.test.js
+node --test --test-concurrency=1 tests/unit/main-process/vcc-financial-op-review-sst-budget.test.js
+node --test --test-name-pattern='R3.2.3 历史 exact evidence' tests/unit/scripts/v3-2-3-release-evidence.test.js
+
+现行manifest-current仅为本次生成的观察证据；changes/v3.2.5的四个冻结JSON最终与HEAD相同。不要把早先 --write PASS 当作当前历史文件通过现行checker。
+
+自动发现集成脚本最终补查与迁移：
+node scripts/integration/toolbox-row-split-admission.js
+日志：rows-admission-authority-red.log / rows-admission-authority-green.log
+
+最终完整门禁（exit 0）：
+UNIT_TEST_CONCURRENCY=2 npm run release-check
+单测8167 passed/0 failed/4 Windows skipped；61/61集成脚本PASS，可解析清单计数2583。
+日志：release-check-final.log

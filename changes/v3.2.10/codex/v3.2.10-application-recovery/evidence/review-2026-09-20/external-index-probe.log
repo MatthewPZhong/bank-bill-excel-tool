@@ -1,0 +1,20 @@
+{
+  "root": "/private/tmp/recovery-drift-fixture-LAJeDx",
+  "identified": [
+    "known",
+    "unknown"
+  ],
+  "exits": [
+    "discover-recovery",
+    "execute-recovery",
+    "publish",
+    "discover-recovery"
+  ],
+  "published": true,
+  "nextTarget": "next-new",
+  "remainingRecords": [
+    "unknown",
+    "next"
+  ],
+  "explicitRecovery": "PUBLICATION_RECOVERY_OWNER_UNKNOWN"
+}

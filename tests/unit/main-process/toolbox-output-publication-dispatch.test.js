@@ -7,7 +7,6 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const {
-  DEFAULT_WORKER_ENTRY,
   createToolboxPublicationDispatcher
 } = require('../../../src/main-process/toolbox-output-publication-dispatch');
 
@@ -57,267 +56,134 @@ const BATCH_CONTEXT = Object.freeze({
   operationKey: 'toolbox:merge:toolbox-task-2'
 });
 
+const { createTestPublicationHarness, createTestPublicationOwner } = require('../../helpers/publication-authority');
 test.describe('toolbox output publication worker dispatch', () => {
-  test('正式发布 exact7 只在 structured-clone receiver 校验，恢复扫描不伪造新批次', async () => {
-    const dispatcher = createToolboxPublicationDispatcher();
-    await assert.rejects(
-      dispatcher.publish({ taskId: 'missing-context' }),
-      /batchContext 缺失/
-    );
-    await assert.rejects(
-      dispatcher.publish({
-        taskId: 'partial-context',
-        batchContext: { batchId: 1 }
-      }),
-      /exact-7/
-    );
-    const root = makeRoot('toolbox-dispatch-recovery-');
-    try {
-      await dispatcher.recover({ userDataDir: root });
-    } finally {
-      fs.rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  test('FIFO 串行发布/恢复作业，同步忙 worker 不阻塞主线程 heartbeat', async () => {
-    const dispatcher = createToolboxPublicationDispatcher({
-      workerScriptPath: BUSY_WORKER
-    });
-    const starts = [];
-    let heartbeatTicks = 0;
-    const timer = setInterval(() => {
-      heartbeatTicks += 1;
-    }, 10);
-    const startedAt = Date.now();
-    try {
-      const first = dispatcher.recover({
-        userDataDir: 'first',
-        onProgress(payload) {
-          if (payload.checkpoint === 'start') starts.push(payload.context);
-        }
-      });
-      const second = dispatcher.recover({
-        userDataDir: 'second',
-        onProgress(payload) {
-          if (payload.checkpoint === 'start') starts.push(payload.context);
-        }
-      });
-      await Promise.all([first, second]);
-    } finally {
-      clearInterval(timer);
-    }
-
-    assert.deepEqual(starts.map((item) => item.label), ['first', 'second']);
-    assert.ok(
-      starts[1].startedAt - starts[0].startedAt >= 100,
-      '第二个 worker 必须等第一个作业结束后才能启动'
-    );
-    assert.ok(Date.now() - startedAt >= 250);
-    assert.ok(heartbeatTicks >= 10, `主线程 heartbeat 应持续执行，实际 ${heartbeatTicks} 次`);
-  });
-
-  test('发布 worker 异常退出时先在同一队列项执行恢复，再向调用方返回失败', async () => {
-    const root = makeRoot('toolbox-publication-dispatch-crash-');
-    const generationDir = path.join(root, 'generation');
-    const outputDir = path.join(root, 'output');
-    const userDataDir = path.join(root, 'user-data');
-    fs.mkdirSync(generationDir, { recursive: true });
-    fs.mkdirSync(outputDir, { recursive: true });
-    const sourcePath = path.join(generationDir, 'result.xlsx');
-    const targetPath = path.join(outputDir, 'result.xlsx');
-    fs.writeFileSync(sourcePath, 'generated-v2');
-    fs.writeFileSync(targetPath, 'original-v1');
-    const sourceStat = fs.statSync(sourcePath);
-    const dispatcher = createToolboxPublicationDispatcher({
-      workerScriptPath: CRASH_RECOVER_WORKER
-    });
-    try {
-      await assert.rejects(
-        dispatcher.publish({
-          taskId: 'crash-then-recover',
-          artifacts: [{
-            sourcePath,
-            byteSize: sourceStat.size,
-            sha256: sha256File(sourcePath)
-          }],
-          targets: [{ targetPath }],
-          userDataDir,
-          batchContext: BATCH_CONTEXT,
-          requireValidatedArtifacts: true
-        }),
-        (error) => {
-          assert.equal(error.name, 'ToolboxPublicationWorkerError');
-          assert.match(error.message, /worker.*退出|worker.*异常/i);
-          assert.ok(
-            error.detailLines.some((line) => line.includes('已执行自动恢复'))
-          );
-          return true;
-        }
-      );
-      assert.equal(
-        fs.readFileSync(path.join(userDataDir, 'recovery-ran.txt'), 'utf8'),
-        'recovered'
-      );
-      assert.equal(fs.readFileSync(targetPath, 'utf8'), 'original-v1');
-      const residualPublicationFiles = fs.readdirSync(outputDir)
-        .filter((name) => name.startsWith('.toolbox-publish-'));
-      assert.deepEqual(residualPublicationFiles, []);
-      const index = JSON.parse(fs.readFileSync(
-        path.join(userDataDir, 'toolbox-publish-journal-index.json'),
-        'utf8'
-      ));
-      assert.deepEqual(index.entries, []);
-    } finally {
-      fs.rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  test('worker 在 committed 后退出时，恢复 exact7 与输出描述并向原 lifecycle 报成功', async () => {
-    const root = makeRoot('toolbox-publication-dispatch-committed-');
-    const generationDir = path.join(root, 'generation');
-    const outputDir = path.join(root, 'output');
-    const userDataDir = path.join(root, 'user-data');
-    fs.mkdirSync(generationDir, { recursive: true });
-    fs.mkdirSync(outputDir, { recursive: true });
-    const sourcePath = path.join(generationDir, 'result.xlsx');
-    const targetPath = path.join(outputDir, 'result.xlsx');
-    fs.writeFileSync(sourcePath, 'generated-v2');
-    fs.writeFileSync(targetPath, 'original-v1');
-    const sourceStat = fs.statSync(sourcePath);
-    const dispatcher = createToolboxPublicationDispatcher({
-      workerScriptPath: CRASH_RECOVER_WORKER
-    });
-    try {
-      const result = await dispatcher.publish({
-        taskId: 'committed-crash-recover',
-        artifacts: [{
-          sourcePath,
-          byteSize: sourceStat.size,
-          sha256: sha256File(sourcePath),
-          fileName: 'result.xlsx'
-        }],
-        targets: [{ targetPath }],
-        userDataDir,
-        batchContext: BATCH_CONTEXT,
-        requireValidatedArtifacts: true
-      });
-      assert.equal(result.committed, true);
-      assert.equal(result.recoveredAfterWorkerExit, true);
-      assert.deepEqual(result.batchContext, BATCH_CONTEXT);
-      assert.deepEqual(
-        result.files.map((file) => [file.role, file.sourceOperation, file.filePath]),
-        [['output', 'toolbox:merge', targetPath]]
-      );
-      assert.equal(fs.readFileSync(targetPath, 'utf8'), 'generated-v2');
-    } finally {
-      fs.rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  test('transport error 必须等原 worker exit 后才启动 recovery worker', async () => {
+  test('未绑定 dispatcher 与 raw recover 在任何 worker 之前拒绝', async () => {
     const events = [];
-    const dispatcher = createToolboxPublicationDispatcher({
-      workerScriptPath: LIFECYCLE_WORKER,
-      onWorkerExit({ op }) {
-        events.push(`exit:${op}`);
-      }
-    });
+    const dispatcher = createToolboxPublicationDispatcher({ onWorkerExit: () => events.push('exit') });
+    await assert.rejects(dispatcher.publish({ taskId: 'missing-authority', userDataDir: '/tmp/unused' }), { code: 'PUBLICATION_RECOVERY_AUTHORITY_REQUIRED' });
+    await assert.rejects(dispatcher.recover({ userDataDir: '/tmp/unused' }), { code: 'PUBLICATION_RECOVERY_AUTHORITY_REQUIRED' });
+    assert.deepEqual(events, []);
+  });
 
-    await assert.rejects(
-      dispatcher.publish({
-        taskId: 'transport-error',
-        artifacts: [],
-        targets: [],
-        userDataDir: 'transport-recovery-root',
-        batchContext: BATCH_CONTEXT,
-        onProgress(payload) {
-          if (payload.checkpoint === 'start') {
-            events.push(`start:${payload.context.label}`);
-          }
+  test('正式 publish exact-7 仍在 structured-clone receiver 校验', async () => {
+    const root = makeRoot('publication-exact7-');
+    const { dispatcher, recovery } = createTestPublicationHarness(root);
+    try {
+      await assert.rejects(dispatcher.publish({ taskId: 'missing-context' }), /batchContext 缺失/);
+      await assert.rejects(dispatcher.publish({ taskId: 'partial-context', batchContext: { batchId: 1 } }), /exact-7/);
+      const result = await recovery.recover({ reason: 'startup', taskIds: ['absent'] });
+      assert.deepEqual(result.observation.absentTaskIds, ['absent']);
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test('FIFO 覆盖 discover/authorize/execute 两 worker 且同步 busy 不阻塞主线程 heartbeat', async () => {
+    const root = makeRoot('publication-fifo-');
+    const events = [];
+    const { recovery } = createTestPublicationHarness(root, { dispatcherOptions: {
+      workerScriptPath: BUSY_WORKER, onWorkerExit({ op }) { events.push(`exit:${op}`); }
+    } });
+    let ticks = 0;
+    const timer = setInterval(() => { ticks += 1; }, 10);
+    const onProgress = () => events.push('start');
+    try {
+      await Promise.all([recovery.recover({ reason: 'startup', onProgress }), recovery.recover({ reason: 'business-retry', onProgress })]);
+      assert.deepEqual(events, ['start', 'exit:discover-recovery', 'start', 'exit:execute-recovery',
+        'start', 'exit:discover-recovery', 'start', 'exit:execute-recovery']);
+      assert.ok(ticks >= 20);
+    } finally { clearInterval(timer); fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
+  for (const committed of [false, true]) {
+    test(`真实发布 worker ${committed ? '提交后' : '目标 rename 后'}退出，当前 FIFO 内自动授权恢复`, async () => {
+      const root = makeRoot('publication-crash-');
+      const generation = path.join(root, 'generation');
+      fs.mkdirSync(generation);
+      const sourcePath = path.join(generation, 'source.xlsx');
+      const outputDir = path.join(root, 'out');
+      fs.mkdirSync(outputDir);
+      const targetPath = path.join(outputDir, 'result.xlsx');
+      fs.writeFileSync(sourcePath, 'new'); fs.writeFileSync(targetPath, 'old');
+      const events = [];
+      const { dispatcher } = createTestPublicationHarness(path.join(root, 'user-data'), { dispatcherOptions: {
+        workerScriptPath: CRASH_RECOVER_WORKER, onWorkerExit({ op }) { events.push(op); }
+      } });
+      try {
+        const promise = dispatcher.publish({ taskId: committed ? 'committed-crash-recover' : 'crash-then-recover',
+          artifacts: [{ sourcePath, byteSize: 3, sha256: sha256File(sourcePath) }], targets: [{ targetPath }],
+          batchContext: BATCH_CONTEXT, requireValidatedArtifacts: true });
+        if (committed) {
+          const result = await promise;
+          assert.equal(result.recoveredAfterWorkerExit, true);
+          assert.equal(result.pendingArchiveHandoff, true);
+          assert.deepEqual(result.batchContext, BATCH_CONTEXT);
+        } else {
+          await assert.rejects(promise, (error) => error.isToolboxPublicationTransportError === true && error.detailLines.some((line) => line.includes('授权恢复')));
         }
-      }),
-      (error) => {
-        assert.equal(error.name, 'ToolboxPublicationWorkerError');
-        assert.ok(error.detailLines.some((line) => line.includes('已执行自动恢复')));
-        return true;
-      }
-    );
-
-    assert.deepEqual(events, [
-      'start:transport-error',
-      'exit:publish',
-      'start:transport-recovery-root',
-      'exit:recover'
-    ]);
-  });
-
-  test('正常 done 后必须等 worker exit 才释放下一个 FIFO 作业', async () => {
-    const events = [];
-    const dispatcher = createToolboxPublicationDispatcher({
-      workerScriptPath: LIFECYCLE_WORKER,
-      onWorkerExit({ op }) {
-        events.push(`exit:${op}`);
-      }
+        assert.equal(fs.readFileSync(targetPath, 'utf8'), committed ? 'new' : 'old');
+        assert.deepEqual(events, ['discover-recovery', 'execute-recovery', 'publish', 'discover-recovery', 'execute-recovery']);
+      } finally { fs.rmSync(root, { recursive: true, force: true }); }
     });
-    const onProgress = (payload) => {
-      if (payload.checkpoint === 'start') {
-        events.push(`start:${payload.context.label}`);
-      }
-    };
+  }
 
-    const first = dispatcher.recover({
-      userDataDir: 'normal-first',
-      onProgress
+  for (const mode of ['transport-error', 'business-error', 'normal']) {
+    test(`${mode}：全部 worker 真 exit 后才释放 observation lease 和 FIFO`, async () => {
+      const root = makeRoot('publication-exit-');
+      const events = [];
+      const owner = createTestPublicationOwner({ async acquireObservation(request) {
+        events.push(`acquire:${request.reason}`);
+        return { verifyScope: () => true, release() { events.push(`release:${request.reason}`); } };
+      } });
+      const { dispatcher, recovery } = createTestPublicationHarness(root, { owners: [owner], dispatcherOptions: {
+        workerScriptPath: LIFECYCLE_WORKER, onWorkerExit({ op }) { events.push(`exit:${op}`); }
+      } });
+      try {
+        const first = dispatcher.publish({ taskId: mode, batchContext: BATCH_CONTEXT,
+          onProgress(payload) { events.push(`start:${payload.context.label.split(':')[0]}`); } });
+        const second = recovery.recover({ reason: 'business-retry', onProgress(payload) { events.push(`next:${payload.context.label.split(':')[0]}`); } });
+        if (mode === 'normal') await first;
+        else await assert.rejects(first, mode === 'business-error' ? /business error/ : /worker/);
+        await second;
+        const publishExit = events.indexOf('exit:publish');
+        const nextStart = events.indexOf('next:discover-recovery');
+        assert.ok(publishExit >= 0 && nextStart > publishExit);
+        const firstRelease = events.indexOf('release:publish-preflight');
+        assert.ok(firstRelease > publishExit);
+        if (mode === 'transport-error') {
+          assert.ok(events.slice(publishExit + 1, firstRelease).includes('exit:execute-recovery'));
+          assert.equal(events.filter((event) => event === 'acquire:publish-preflight').length, 1);
+          assert.equal(events.filter((event) => event.includes('acquire:transport')).length, 0);
+        }
+        assert.ok(events.lastIndexOf('exit:execute-recovery') < events.indexOf('release:business-retry'));
+      } finally { fs.rmSync(root, { recursive: true, force: true }); }
     });
-    const second = dispatcher.recover({
-      userDataDir: 'normal-second',
-      onProgress
-    });
-    await Promise.all([first, second]);
+  }
 
-    assert.deepEqual(events, [
-      'start:normal-first',
-      'exit:recover',
-      'start:normal-second',
-      'exit:recover'
-    ]);
-  });
-
-  test('business error 后必须等 worker exit 才释放下一个 FIFO 作业', async () => {
-    const events = [];
-    const dispatcher = createToolboxPublicationDispatcher({
-      workerScriptPath: LIFECYCLE_WORKER,
-      onWorkerExit({ op }) {
-        events.push(`exit:${op}`);
-      }
-    });
-    const onProgress = (payload) => {
-      if (payload.checkpoint === 'start') {
-        events.push(`start:${payload.context.label}`);
-      }
-    };
-
-    const failed = dispatcher.publish({
-      taskId: 'business-error',
-      artifacts: [],
-      targets: [],
-      userDataDir: 'business-error-root',
-      batchContext: BATCH_CONTEXT,
-      onProgress
-    });
-    const next = dispatcher.recover({
-      userDataDir: 'after-business-error',
-      onProgress
-    });
-    await assert.rejects(failed, /lifecycle fixture business error/);
-    await next;
-
-    assert.deepEqual(events, [
-      'start:business-error',
-      'exit:publish',
-      'start:after-business-error',
-      'exit:recover'
-    ]);
+  test('done/terminate Promise 先结算但真实 exit 延迟时，lease 和公共 Promise 继续保持', async () => {
+    const { Worker } = require('node:worker_threads');
+    const originalTerminate = Worker.prototype.terminate;
+    const root = makeRoot('publication-delayed-exit-');
+    let doneCount = 0; let exitCount = 0; let released = false; let settled = false;
+    // 模拟 terminate 请求已接受但尚未 exit；真实线程由 close 后延时自行退出。
+    Worker.prototype.terminate = function terminateAccepted() { return Promise.resolve(0); };
+    const owner = createTestPublicationOwner({ async acquireObservation() {
+      return { verifyScope: () => true, release() { released = true; assert.equal(exitCount, 2); } };
+    } });
+    const { recovery } = createTestPublicationHarness(root, { owners: [owner], dispatcherOptions: {
+      workerScriptPath: path.join(__dirname, '__fixtures__/toolbox-publication-stub-delayed-exit.js'),
+      onWorkerExit() { exitCount += 1; }
+    } });
+    try {
+      const pending = recovery.recover({ reason: 'startup', onProgress() { doneCount += 1; } })
+        .then(() => { settled = true; });
+      await new Promise((resolve) => setTimeout(resolve, 75));
+      assert.equal(doneCount, 1);
+      assert.equal(exitCount, 0);
+      assert.equal(released, false);
+      assert.equal(settled, false);
+      await pending;
+      assert.equal(doneCount, 2); assert.equal(exitCount, 2); assert.equal(released, true);
+    } finally { Worker.prototype.terminate = originalTerminate; fs.rmSync(root, { recursive: true, force: true }); }
   });
 
   test('真实 worker 的人工恢复错误跨线程保留临时目录保护与恢复路径', async () => {
@@ -336,13 +202,11 @@ test.describe('toolbox output publication worker dispatch', () => {
         createdAt: '2026-07-30T00:00:00.000Z'
       }]
     }));
-    const dispatcher = createToolboxPublicationDispatcher({
-      workerScriptPath: DEFAULT_WORKER_ENTRY
-    });
+    const { dispatcher, recovery } = createTestPublicationHarness(userDataDir);
 
     try {
       await assert.rejects(
-        dispatcher.recover({ userDataDir }),
+        recovery.recover({ reason: 'startup' }),
         (error) => {
           assert.equal(error.name, 'ToolboxPublicationManualRecoveryError');
           assert.equal(error.preserveTemporaryFiles, true);
@@ -371,9 +235,7 @@ test.describe('toolbox output publication worker dispatch', () => {
     fs.ftruncateSync(fd, size);
     fs.closeSync(fd);
     const sha256 = sha256File(sourcePath);
-    const dispatcher = createToolboxPublicationDispatcher({
-      workerScriptPath: DEFAULT_WORKER_ENTRY
-    });
+    const { dispatcher } = createTestPublicationHarness(userDataDir);
     let heartbeatTicks = 0;
     const timer = setInterval(() => {
       heartbeatTicks += 1;
@@ -432,9 +294,7 @@ test.describe('toolbox output publication worker dispatch', () => {
         ino: targetStat.ino
       }
     };
-    const dispatcher = createToolboxPublicationDispatcher({
-      workerScriptPath: DEFAULT_WORKER_ENTRY
-    });
+    const { dispatcher } = createTestPublicationHarness(userDataDir);
     let targetReplaced = false;
     try {
       await assert.rejects(

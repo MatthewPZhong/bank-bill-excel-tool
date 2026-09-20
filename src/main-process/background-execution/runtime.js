@@ -364,6 +364,7 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr
     options.duplicateStartupGate
   );
   const matureActionBindings = createMatureActionAdapterBindings({
+    toolboxPublication: options.toolboxPublication,
     acquiring: {
       userDataDir: options.userDataDir,
       mainDb: options.acquiringMainDb,

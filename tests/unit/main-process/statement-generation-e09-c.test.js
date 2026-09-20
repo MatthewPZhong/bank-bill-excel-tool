@@ -59,8 +59,8 @@ const {
 } = require('../../../src/main-process/statement-worker/generation-contracts');
 const {
   cleanupStatementStagingResources,
-  journalPublisher,
-  validateAndPublishStatementGeneration,
+  journalPublisher: controlledJournalPublisher,
+  validateAndPublishStatementGeneration: controlledValidateAndPublish,
   validateBusinessArtifacts,
   validateTechnicalArtifacts
 } = require('../../../src/main-process/statement-worker/publication');
@@ -70,6 +70,18 @@ const {
   createStatementBusinessEvidence,
   createStatementCellContractEvidence
 } = require('../../../src/main-process/statement-worker/artifact-descriptor');
+
+// disabled E09-C seam 使用显式测试 authority，生产入口不再直调 raw Publisher。
+const fixturePublication = require('../../helpers/publication-authority');
+function fixturePublish(options) {
+  return fixturePublication.publishPreparedToolboxPublication(fixturePublication.prepareToolboxPublication(options));
+}
+function journalPublisher(options) {
+  return controlledJournalPublisher({ ...options, publishPublication: fixturePublish });
+}
+function validateAndPublishStatementGeneration(options) {
+  return controlledValidateAndPublish({ ...options, publishPublication: fixturePublish });
+}
 
 const ROOT = path.join(__dirname, '..', '..', '..');
 const FIXTURE_ROOT = path.join(
@@ -2447,4 +2459,10 @@ test('generation request/manifest严格限制artifact顺序、相对resource与b
       size: MAX_ARTIFACT_BYTES + 1
     }]
   }), false);
+});
+
+test('disabled Statement Publisher seam 缺 authority 时保留 staging 且不创建 journal', () => {
+  assert.throws(() => controlledJournalPublisher({ taskId: 'disabled', userDataDir: '/tmp/statement-disabled-authority',
+    technicalArtifacts: [], stagingRoot: '/tmp/statement-disabled-authority' }),
+  (error) => error.code === 'PUBLICATION_RECOVERY_AUTHORITY_REQUIRED' && error.preserveTemporaryFiles === true);
 });

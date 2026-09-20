@@ -5,8 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const {
-  publishToolboxPublicationAsync,
-  recoverToolboxPublicationsAsync
+  publishToolboxPublicationAsync
 } = require('./toolbox-output-publication-dispatch');
 const {
   recoverToolboxPublicationsIntoArchive
@@ -47,6 +46,11 @@ function normalizedExpectedArtifact(value, index) {
 }
 
 async function publishVccFinancialOpOutputs(options = {}) {
+  if (typeof options.recoverPublications !== 'function') {
+    throw Object.assign(new Error('VCC 发布需要受限 Archive recovery facade'), {
+      code: 'PUBLICATION_RECOVERY_AUTHORITY_REQUIRED', preserveTemporaryFiles: true
+    });
+  }
   const batchContext = options.batchContext;
   const generationPaths = Array.isArray(options.generationFilePaths)
     ? options.generationFilePaths.map((filePath) => path.resolve(String(filePath || '')))
@@ -92,7 +96,7 @@ async function publishVccFinancialOpOutputs(options = {}) {
   });
   const taskId = `vcc-output-${batchContext.taskRunId}-${crypto.randomUUID()}`;
   const publishPublication = options.publishPublication || publishToolboxPublicationAsync;
-  const recoverPublications = options.recoverPublications || recoverToolboxPublicationsAsync;
+  const recoverPublications = options.recoverPublications;
   const recoverIntoArchive = options.recoverIntoArchive
     || recoverToolboxPublicationsIntoArchive;
   const publication = await publishPublication({

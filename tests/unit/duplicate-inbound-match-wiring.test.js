@@ -219,13 +219,12 @@ test.describe('重复入金匹配 UI / preload / IPC 接线', () => {
     );
     const inspectorFreezeAt = recovery.indexOf('inspectorRegistry.freeze()');
     const providerFreezeAt = recovery.indexOf('providerRegistry.freeze()');
-    const scanAt = recovery.indexOf('await bizOpV327Module.recovery.run({ initialPlatformOnly: true })');
-    const readyAt = recovery.lastIndexOf('duplicateStartupRecoveryReady = bizOpV327Module.recovery.hasCompletedPlatformScan()');
+    const scanAt = recovery.indexOf('await applicationRecoveryCoordinator.preflight()');
     assert.ok(registerManualInspectorAt >= 0 && registerManualInspectorAt < inspectorFreezeAt);
     assert.ok(registerDuplicateInspectorAt >= 0 && registerDuplicateInspectorAt < inspectorFreezeAt);
     assert.ok(registerManualProviderAt >= 0 && registerManualProviderAt < providerFreezeAt);
     assert.ok(registerDuplicateProviderAt >= 0 && registerDuplicateProviderAt < providerFreezeAt);
-    assert.ok(inspectorFreezeAt < scanAt && providerFreezeAt < scanAt && scanAt < readyAt);
+    assert.ok(inspectorFreezeAt < scanAt && providerFreezeAt < scanAt);
 
     const getter = extractFunction(main, 'getDuplicateInboundMatchService');
     assert.ok(
@@ -233,12 +232,30 @@ test.describe('重复入金匹配 UI / preload / IPC 接线', () => {
         getter.indexOf('createDuplicateInboundMatchService({')
     );
     const initialize = extractFunction(main, 'initializeApplication');
-    assert.match(initialize, /await archiveCenterInitializationPromise;[\s\S]*?hasCompletedPlatformScan\(\)[\s\S]*?BACKGROUND_RECOVERY_SCAN_PENDING/);
-    assert.match(extractFunction(main, 'initializeArchiveCenter'), /ownerName: 'biz-op-v327'[\s\S]*?await bizOpV327Module.recovery.run\(\)[\s\S]*?duplicateStartupRecoveryReady = bizOpV327Module.recovery.hasCompletedPlatformScan\(\)/);
+    assert.match(initialize, /await archiveCenterInitializationPromise;[\s\S]*?applicationRecoveryCoordinator\.completeArchiveInitialization\(initialized\)/);
+    assert.match(extractFunction(main, 'initializeArchiveCenter'), /recoverInterruptedTaskOwners: applicationRecoveryCoordinator\.archiveOwnerHooks\(\)/);
     assert.ok(
       initialize.indexOf('await initializeBackgroundExecutionRecovery()') <
         initialize.indexOf('schedulePreFundReconciliationStartupCleanup()')
     );
+  });
+
+
+  test('Duplicate 从应用 snapshot 读取扫描事实，活动 hold 始终阻断', () => {
+    const gate = new Function('applicationRecoveryCoordinator', 'recoveryHoldGate', 'DUPLICATE_STARTUP_CONFLICT_SCOPE_KEY',
+      `${extractFunction(main, 'assertDuplicateInboundMatchStartupAvailable')} return assertDuplicateInboundMatchStartupAvailable;`);
+    let completed = false; let held = false; let checks = 0;
+    const app = { snapshot: () => ({ platformScanCompleted: completed }) };
+    const assertReady = gate(app, { assertNoRecoveryHold({ conflictScopeKey }) {
+      assert.equal(conflictScopeKey, 'duplicate-scope'); checks += 1;
+      if (held) throw Object.assign(new Error('Hold active'), { code: 'RECOVERY_HOLD_ACTIVE' });
+    } }, 'duplicate-scope');
+    assert.throws(assertReady, { code: 'DUPLICATE_STARTUP_RECOVERY_UNAVAILABLE' });
+    assert.equal(checks, 0);
+    completed = true; held = true;
+    assert.throws(assertReady, { code: 'RECOVERY_HOLD_ACTIVE' });
+    held = false; assert.equal(assertReady(), true);
+    assert.equal(checks, 2);
   });
 
   test('main handlers 对取消、失败、进度和锁释放执行真实契约', async () => {

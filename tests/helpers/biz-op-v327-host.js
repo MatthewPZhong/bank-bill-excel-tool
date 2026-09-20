@@ -4,6 +4,9 @@ const path = require('node:path');
 const os = require('node:os');
 const assert = require('node:assert/strict');
 const { DatabaseSync } = require('node:sqlite');
+const { createToolboxPublicationDispatcher } = require('../../src/main-process/toolbox-output-publication-dispatch');
+const { createPublicationRecoveryCoordinator } = require('../../src/main-process/publication-recovery/coordinator');
+const { createArchivePublicationOwner } = require('../../src/main-process/publication-recovery/archive-owner');
 const { createBizOpV327Module } = require('../../src/main-process/biz-op-v327/module');
 const { createArchiveService } = require('../../src/main-process/archive-center/archive-service');
 const { createArchiveRuntimeDelegate } = require('../../src/main-process/archive-center/archive-runtime-delegate');
@@ -25,10 +28,11 @@ async function createHost(t, options = {}) {
   const db = new DatabaseSync(path.join(root, options.dbFileName || 'main.sqlite'));
   db.exec('PRAGMA foreign_keys=ON');
   let service; let runtime;
+  const publicationDispatcher = createToolboxPublicationDispatcher();
   const readRepository = createRecoveryControlReadRepository(db);
   // 普通合同夹具显式关闭自动升级；生产默认值由启用专项独立验证。
   const module = createBizOpV327Module({ releaseGates: { schemaVersion: 1, version: '3.2.7', enabled: false },
-    ...options.moduleOptions, db, userDataDir: root, readRepository, getArchiveService: () => service, getRuntime: () => runtime });
+    ...options.moduleOptions, publicationPublish: publicationDispatcher.publish.bind(publicationDispatcher), db, userDataDir: root, readRepository, getArchiveService: () => service, getRuntime: () => runtime });
   const inspectors = createInspectorRegistry(); const providers = createSettlementRecoveryProviderRegistry();
   module.sources.register(options.wrapInspector ? { register(key, inspect) { inspectors.register(key, options.wrapInspector(inspect)); } } : inspectors,
     providers); inspectors.freeze(); providers.freeze();
@@ -44,6 +48,13 @@ async function createHost(t, options = {}) {
     onArtifactReady: (artifact, repository) => module.readyHold(artifact, repository) });
   await service.initialize({ deferStartupRecovery: true });
   if (options.archiveRuntimeDelegate) service = createArchiveRuntimeDelegate({ service });
+  const publicationRecovery = createPublicationRecoveryCoordinator({ userDataDir: root,
+    dispatcher: publicationDispatcher, owners: [module.publication.publicationOwner,
+      createArchivePublicationOwner({ getArchiveCenter: () => ({ service }) })] });
+  publicationRecovery.bindDispatcherAuthority();
+  const publicationFacade = publicationRecovery.forOwner('biz-op-v327');
+  module.publication.bindRecovery(options.wrapPublicationRecovery
+    ? options.wrapPublicationRecovery(publicationFacade, { module, db, service, root }) : publicationFacade);
   runtime = createNonProductionBackgroundExecutionRuntime({ bizOpV327: module.runtimeBindings,
     resourceGovernor: createResourceGovernor({ budgets: { cpuSlots: 2, workerThreadSlots: 2, utilityProcessSlots: 0,
       ioHeavySlots: 2, memoryBytes: 2 * 1024 * 1024 * 1024 } }) });
@@ -52,7 +63,7 @@ async function createHost(t, options = {}) {
   t.after(async () => { await runtime.shutdown({ timeoutMs: 5000 }); db.close(); if (!options.keep) fs.rmSync(root, { recursive: true, force: true }); });
   if (options.beforeBootstrap) options.beforeBootstrap({ module, db, service });
   const bootstrap = await module.recovery.run(); assert.equal(bootstrap.ready, options.expectReady !== false, JSON.stringify(bootstrap));
-  return { root, db, module, service, runtime, lifecycle, bootstrap,
+  return { root, db, module, service, runtime, lifecycle, bootstrap, publicationDispatcher, publicationRecovery,
     run(files, extra = {}) { return module.runImport({ taskLifecycle: lifecycle, runtime,
       filePlan: normalizeFilePlanV1({ version: 1, allocation: 'eager', inputs: files.map((filePath) => ({ filePath,
         role: 'input', sourceOperation: 'bizOpReconV327:import' })), outputs: [] }), ...extra }); } };

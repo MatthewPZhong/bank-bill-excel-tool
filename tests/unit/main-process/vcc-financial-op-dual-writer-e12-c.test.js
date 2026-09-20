@@ -66,6 +66,10 @@ const {
 
 const ASSETS_DIR = path.resolve(__dirname, '../../../assets');
 
+async function rejectUnexpectedPublicationRecovery() {
+  assert.fail('双 Writer 测试未建立 publication journal，不允许恢复或伪造 owner proof');
+}
+
 function seedArchivedRun(db, subjects) {
   const targetMonth = '2026-06';
   const archivedAt = '2026-08-01 09:00:00';
@@ -445,6 +449,7 @@ test('E12-C runtime CompoundLease admits two，Main full A/B/Join 后 Publisher 
   let publisherCalls = 0;
   try {
     const result = await generateValidateAndPublishVccExport({
+      recoverPublications: rejectUnexpectedPublicationRecovery,
       actionKey: VCC_EXPORT_SUBJECTS_ACTION,
       runtime,
       expectedAuthority: harness.snapshot.authority,
@@ -538,6 +543,7 @@ test('E12-C 任一 shard crash 时 Main Publisher=0，并清理 exact task-priva
   };
   let publisherCalls = 0;
   await assert.rejects(generateValidateAndPublishVccExport({
+    recoverPublications: rejectUnexpectedPublicationRecovery,
     actionKey: VCC_EXPORT_SUBJECTS_ACTION,
     runtime,
     expectedAuthority: harness.snapshot.authority,
@@ -719,6 +725,7 @@ test('E12-C malformed/oversized/private/invalid child SafeError 均 allSettled�
       }
     };
     await assert.rejects(generateValidateAndPublishVccExport({
+      recoverPublications: rejectUnexpectedPublicationRecovery,
       actionKey: VCC_EXPORT_SUBJECTS_ACTION,
       runtime,
       expectedAuthority: harness.snapshot.authority,

@@ -1,0 +1,22 @@
+▶ toolbox output publication worker dispatch
+  ✔ 未绑定 dispatcher 与 raw recover 在任何 worker 之前拒绝 (1.269458ms)
+  ✔ 正式 publish exact-7 仍在 structured-clone receiver 校验 (158.398167ms)
+  ✔ FIFO 覆盖 discover/authorize/execute 两 worker 且同步 busy 不阻塞主线程 heartbeat (664.897083ms)
+  ✔ 真实发布 worker 目标 rename 后退出，当前 FIFO 内自动授权恢复 (415.151708ms)
+  ✔ 真实发布 worker 提交后退出，当前 FIFO 内自动授权恢复 (324.256375ms)
+  ✔ transport-error：全部 worker 真 exit 后才释放 observation lease 和 FIFO (104.577083ms)
+  ✔ business-error：全部 worker 真 exit 后才释放 observation lease 和 FIFO (77.662917ms)
+  ✔ normal：全部 worker 真 exit 后才释放 observation lease 和 FIFO (84.745917ms)
+  ✔ done/terminate Promise 先结算但真实 exit 延迟时，lease 和公共 Promise 继续保持 (274.162ms)
+  ✔ 真实 worker 的人工恢复错误跨线程保留临时目录保护与恢复路径 (29.729459ms)
+  ✔ 真实 worker 完成已验证大产物发布，主线程定时器持续执行 (4700.064625ms)
+  ✔ 真实 worker 哈希 256MiB 产物期间目标 A→B，二次确认拒绝覆盖且不留 committed receipt (417.262125ms)
+✔ toolbox output publication worker dispatch (7254.027208ms)
+ℹ tests 12
+ℹ suites 1
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 7351.660167

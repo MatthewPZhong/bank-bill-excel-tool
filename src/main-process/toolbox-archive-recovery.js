@@ -2,10 +2,6 @@
 
 const path = require('node:path');
 
-const {
-  recoverPendingToolboxPublications
-} = require('./toolbox-output-publication');
-
 // 与 Main 的 afterTerminal 注册共用精确入口；这些任务的后处理只负责
 // publication receipt 收尾，其他业务 owner 仍须走自己的持久恢复路由。
 const PUBLICATION_ONLY_FILE_TASKS = new Map([
@@ -144,7 +140,40 @@ function verifyArchiveHandoff(archiveCenter, item, files) {
   return detail;
 }
 
+function aggregateRecoverySummaries(summaries) {
+  const recovered = new Map();
+  const deferred = new Map();
+  const skippedActive = new Set();
+  const observations = [];
+  for (const summary of summaries) {
+    for (const item of summary.deferred || []) deferred.set(`${item.ownerId}\0${item.taskId}`, item);
+    for (const taskId of summary.skippedActive || []) skippedActive.add(taskId);
+    for (const item of summary.recovered || []) {
+      recovered.set(`${item.ownerId}\0${item.taskId}`, item);
+      if (item.action === 'commit-cleanup') {
+        deferred.delete(`${item.ownerId}\0${item.taskId}`);
+        skippedActive.delete(item.taskId);
+      }
+    }
+    if (summary.observation) observations.push(summary.observation);
+    if (summary.observations) observations.push(...summary.observations);
+  }
+  return { recovered: [...recovered.values()], deferred: [...deferred.values()],
+    skippedActive: [...skippedActive], observations };
+}
+
+function assertRecoverySummary(summary) {
+  if (!summary || !Array.isArray(summary.recovered) || !Array.isArray(summary.deferred)
+      || !Array.isArray(summary.skippedActive) || !summary.observation
+      || summary.observation.complete !== true) {
+    throw Object.assign(new Error('发布恢复缺少完整观察证明'), {
+      code: 'PUBLICATION_RECOVERY_AUTHORITY_REQUIRED', preserveTemporaryFiles: true
+    });
+  }
+}
+
 async function recoverToolboxPublicationsIntoArchive(options = {}) {
+  const summaries = [];
   try {
     const archiveCenter = options.archiveCenter;
     if (!archiveCenter
@@ -152,10 +181,31 @@ async function recoverToolboxPublicationsIntoArchive(options = {}) {
         || typeof archiveCenter.flushOutbox !== 'function') {
       throw new TypeError('工具箱恢复需要 ArchiveCenter 持久追加与重放入口');
     }
-    const recoverPublications = options.recoverPublications || recoverPendingToolboxPublications;
+    if (typeof options.recoverPublications !== 'function') {
+      throw Object.assign(new Error('发布恢复需要受限 owner facade'), {
+        code: 'PUBLICATION_RECOVERY_AUTHORITY_REQUIRED', preserveTemporaryFiles: true
+      });
+    }
+    const recoverPublications = async (request) => {
+      const summary = await options.recoverPublications(request);
+      assertRecoverySummary(summary);
+      summaries.push(summary);
+      const requested = new Set(request.taskIds || []);
+      const pending = summary.deferred.filter((item) => item.ownerId === 'archive-publication'
+        && (request.reason === 'startup' || requested.has(item.taskId)));
+      const active = summary.skippedActive.filter((taskId) => requested.has(taskId));
+      if (pending.length || active.length) {
+        throw Object.assign(new Error('发布 owner 尚未放行恢复，已保留 receipt 和临时文件'), {
+          code: 'TOOLBOX_ARCHIVE_HANDOFF_INCOMPLETE',
+          deferred: pending, skippedActive: active,
+          recoveryPaths: pending.flatMap((item) => item.recoveryPaths || [])
+        });
+      }
+      return summary;
+    };
     const discovered = await recoverPublications({
-      userDataDir: options.userDataDir,
-      deferCommittedRecovery: true
+      reason: options.reason || (options.taskIds ? 'live-handoff' : 'startup'),
+      ...(options.taskIds ? { taskIds: options.taskIds } : {})
     });
     const requestedTaskIds = Array.isArray(options.taskIds)
       ? new Set(options.taskIds.map(String))
@@ -326,8 +376,8 @@ async function recoverToolboxPublicationsIntoArchive(options = {}) {
       // 先完成真实 backup/staging 清理并耐久进入既有 finalizing 阶段；
       // 在写入 completion 前保留 journal/index，跨进程失败仍可由原 owner 接管。
       const staged = await recoverPublications({
-        userDataDir: options.userDataDir,
-        deferCommittedRecovery: true,
+        reason: 'receipt-ack',
+        taskIds: acknowledgedTaskIds,
         acknowledgedCommittedTaskIds: acknowledgedTaskIds,
         deferCommittedFinalization: true
       });
@@ -346,8 +396,8 @@ async function recoverToolboxPublicationsIntoArchive(options = {}) {
       }
     }
     const finalized = await recoverPublications({
-      userDataDir: options.userDataDir,
-      deferCommittedRecovery: true,
+      reason: 'receipt-ack',
+      taskIds: acknowledgedTaskIds,
       acknowledgedCommittedTaskIds: acknowledgedTaskIds
     });
     const finalizedByTask = new Map(
@@ -360,19 +410,17 @@ async function recoverToolboxPublicationsIntoArchive(options = {}) {
         throw new Error(`工具箱发布 ${taskId} 的 receipt 未完成确认清理`);
       }
     }
-    return {
-      recovered: [
-        ...(Array.isArray(discovered.recovered)
-          ? discovered.recovered.filter((item) => item.action !== 'commit-handoff-pending')
-          : []),
-        ...(Array.isArray(finalized && finalized.recovered) ? finalized.recovered : [])
-      ],
-      skippedActive: [
-        ...(Array.isArray(discovered.skippedActive) ? discovered.skippedActive : []),
-        ...(Array.isArray(finalized && finalized.skippedActive) ? finalized.skippedActive : [])
-      ]
-    };
+    return aggregateRecoverySummaries(summaries);
   } catch (error) {
+    const aggregate = aggregateRecoverySummaries(summaries);
+    error.recoverySummary = aggregate;
+    error.deferred = aggregate.deferred;
+    error.skippedActive = aggregate.skippedActive;
+    error.observations = aggregate.observations;
+    error.recoveryPaths = [...new Set([
+      ...(error.recoveryPaths || []),
+      ...aggregate.deferred.flatMap((item) => item.recoveryPaths || [])
+    ])];
     throw startupBlockingRecoveryError(
       '工具箱 publication receipt 尚未由存档中心完整接管，已保留并阻止继续发布',
       error
@@ -381,6 +429,9 @@ async function recoverToolboxPublicationsIntoArchive(options = {}) {
 }
 
 module.exports = {
+  PUBLICATION_ONLY_FILE_TASKS,
+  aggregateRecoverySummaries,
+  verifyArchiveHandoff,
   acknowledgeToolboxPublicationReceipts,
   isPublicationOnlyFileTask,
   recoverToolboxPublicationsIntoArchive,

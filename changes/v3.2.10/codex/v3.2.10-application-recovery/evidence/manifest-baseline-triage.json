@@ -1,0 +1,147 @@
+{
+  "baselineCommit": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "workdir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-application-recovery",
+  "method": "git archive exact baseline source and frozen artifacts into disposable /private/tmp snapshot; run unchanged checker without --write; node_modules is a read-only dependency reference to existing workspace installation",
+  "baselineCheckerCommand": [
+    "node",
+    "/private/tmp/g1-manifest-baseline-fm4cw4iw/scripts/check-background-execution-manifest.js"
+  ],
+  "baselineCheckerExitCode": 1,
+  "baselineAssertionObserved": true,
+  "baselineErrorExcerpt": "\nnode:assert:149\n  throw new AssertionError(obj);\n  ^\n\nAssertionError [ERR_ASSERTION]: E13-G Action Manifest drift\n+ actual - expected\n... Skipped lines\n\n  {\n    actions: [\n      {\n        actionKey: 'acquiring:copy-existing-diff',\n        capabilityStatus: 'runtime-policy',\n...\n      {\n-       actionKey: 'biz-op-v327:delete-plan',\n-       capabilityStatus: 'runtime-policy',\n-       handlerRoute: 'legacy-main',\n-       legacyTaskKeys: [\n-         'bizOpReconV327:delete'\n-       ],\n-       runtimeRouteEnabled: true\n-     },\n-     {\n-       actionKey: 'biz-op-v327:export-errors',\n-       capabilityStatus: 'runtime-policy',\n-       handlerRoute: 'legacy-main',\n-       legacyTaskKeys: [\n-         'bizOpReconV327:export:errors'\n-       ],\n-       runtimeRouteEnabled: true\n-     },\n-     {\n-       actionKey: 'biz-op-v327:export-flow-check',\n-       capabilityStatus: 'runtime-policy',\n-       handlerRoute: 'legacy-main',\n-       legacyTaskKeys: [",
+  "baseline": {
+    "manifestActionCount": 67,
+    "frozenActionCount": 54,
+    "additionalActions": [
+      "biz-op-v327:delete-plan",
+      "biz-op-v327:export-errors",
+      "biz-op-v327:export-flow-check",
+      "biz-op-v327:export-flow-raw",
+      "biz-op-v327:export-op-check",
+      "biz-op-v327:export-op-raw",
+      "biz-op-v327:export-result-diff",
+      "biz-op-v327:export-result-full",
+      "biz-op-v327:import-candidate",
+      "biz-op-v327:reclaim",
+      "biz-op-v327:run-candidate",
+      "biz-op-v327:upgrade-preflight",
+      "toolbox:split-rows"
+    ],
+    "manifestDigest": "0673eea9b5c70a9064249fc33e2d52c388179777e4cc076eef4b50cf59542bab",
+    "bindingDigest": "5f711b217a560a6cc07f001321ff99d7a19693214ff24ca5b7cc4ebca5cbd962",
+    "policiesDigest": "26cd905f8f9562ad99ecc0774162511be1f9498e2953192a3b502feb046b82eb",
+    "coverage": {
+      "valid": true,
+      "actionCount": 67,
+      "legacyPairCount": 74,
+      "runtimePolicyCount": 49,
+      "surfaceCount": 6,
+      "coveredActionSurfaceCount": 402,
+      "expectedActionSurfaceCount": 402,
+      "coveragePercent": 100
+    }
+  },
+  "current": {
+    "manifestActionCount": 67,
+    "frozenActionCount": 54,
+    "additionalActions": [
+      "biz-op-v327:delete-plan",
+      "biz-op-v327:export-errors",
+      "biz-op-v327:export-flow-check",
+      "biz-op-v327:export-flow-raw",
+      "biz-op-v327:export-op-check",
+      "biz-op-v327:export-op-raw",
+      "biz-op-v327:export-result-diff",
+      "biz-op-v327:export-result-full",
+      "biz-op-v327:import-candidate",
+      "biz-op-v327:reclaim",
+      "biz-op-v327:run-candidate",
+      "biz-op-v327:upgrade-preflight",
+      "toolbox:split-rows"
+    ],
+    "manifestDigest": "0673eea9b5c70a9064249fc33e2d52c388179777e4cc076eef4b50cf59542bab",
+    "bindingDigest": "5f711b217a560a6cc07f001321ff99d7a19693214ff24ca5b7cc4ebca5cbd962",
+    "policiesDigest": "26cd905f8f9562ad99ecc0774162511be1f9498e2953192a3b502feb046b82eb",
+    "coverage": {
+      "valid": true,
+      "actionCount": 67,
+      "legacyPairCount": 74,
+      "runtimePolicyCount": 49,
+      "surfaceCount": 6,
+      "coveredActionSurfaceCount": 402,
+      "expectedActionSurfaceCount": 402,
+      "coveragePercent": 100
+    }
+  },
+  "sameSourceEvidence": {
+    "scripts/check-background-execution-manifest.js": {
+      "baselineSha256": "2e23562e537d30eff4b034c2c3f3db29cf1efe0c4557d4ac7b48a480ec608ec1",
+      "currentSha256": "2e23562e537d30eff4b034c2c3f3db29cf1efe0c4557d4ac7b48a480ec608ec1",
+      "same": true
+    },
+    "scripts/lib/changes-paths.js": {
+      "baselineSha256": "d9a004e22b92481a83a31a946e9d7b0c0a7b76f1e2f6e84c7f48d215abd81445",
+      "currentSha256": "d9a004e22b92481a83a31a946e9d7b0c0a7b76f1e2f6e84c7f48d215abd81445",
+      "same": true
+    },
+    "src/main-process/background-execution/action-task-binding-registry.js": {
+      "baselineSha256": "d00c70b534347cd9efbe71933f5ae7141cd60529ed104b9521aa9f388a5efc33",
+      "currentSha256": "d00c70b534347cd9efbe71933f5ae7141cd60529ed104b9521aa9f388a5efc33",
+      "same": true
+    },
+    "src/main-process/background-execution/action-manifest.js": {
+      "baselineSha256": "ac47bcbbdb47220007b1f53d8a53fd7f938bc5d10b870635d861389dde13ef4f",
+      "currentSha256": "ac47bcbbdb47220007b1f53d8a53fd7f938bc5d10b870635d861389dde13ef4f",
+      "same": true
+    },
+    "src/main-process/archive-center/task-policy-registry.js": {
+      "baselineSha256": "52b94f6acddaf775427136b95b9c0f46957b11a0f6124e1473a4562d1a1ecdb0",
+      "currentSha256": "52b94f6acddaf775427136b95b9c0f46957b11a0f6124e1473a4562d1a1ecdb0",
+      "same": true
+    },
+    "src/main-process/background-execution/capability-inventory.js": {
+      "baselineSha256": "658f0857b3ab1fc3520cf3184522dfa1da62a44bfe61bde7d29811710d66fd9c",
+      "currentSha256": "658f0857b3ab1fc3520cf3184522dfa1da62a44bfe61bde7d29811710d66fd9c",
+      "same": true
+    },
+    "src/main-process/background-execution/coverage-check.js": {
+      "baselineSha256": "9ba93ac7ae5bbad5a15a72586a8ad85ebdd2b2896974c5361f05e6f6fb9b7387",
+      "currentSha256": "9ba93ac7ae5bbad5a15a72586a8ad85ebdd2b2896974c5361f05e6f6fb9b7387",
+      "same": true
+    },
+    "src/main-process/background-execution/production-strategy-snapshot.js": {
+      "baselineSha256": "da5ff1358221b0cd68c7a6e474d741fed9ecd688da71cc02b5e53aa93c3ab121",
+      "currentSha256": "da5ff1358221b0cd68c7a6e474d741fed9ecd688da71cc02b5e53aa93c3ab121",
+      "same": true
+    }
+  },
+  "runtimeDiff": "diff --git a/src/main-process/background-execution/runtime.js b/src/main-process/background-execution/runtime.js\nindex b7931ece..0a3f0f28 100644\n--- a/src/main-process/background-execution/runtime.js\n+++ b/src/main-process/background-execution/runtime.js\n@@ -364,6 +364,7 @@ function createBackgroundExecutionRuntimeInternal(options, resourceGovernorOverr\n     options.duplicateStartupGate\n   );\n   const matureActionBindings = createMatureActionAdapterBindings({\n+    toolboxPublication: options.toolboxPublication,\n     acquiring: {\n       userDataDir: options.userDataDir,\n       mainDb: options.acquiringMainDb,\n",
+  "historicalArtifacts": {
+    "changes/v3.2.5/e13-g-action-manifest.json": {
+      "baselineSha256": "14106dd53b82640db9a5101f52ceeef99534f2b1b522250209d9f2906686890a",
+      "beforeSha256": "14106dd53b82640db9a5101f52ceeef99534f2b1b522250209d9f2906686890a",
+      "afterSha256": "14106dd53b82640db9a5101f52ceeef99534f2b1b522250209d9f2906686890a",
+      "sameAsBaselineAndUnchanged": true
+    },
+    "changes/v3.2.5/e13-g-capability-inventory.json": {
+      "baselineSha256": "c0f0c73cfb6c237fd4a1ad3570f246167d73a8103aaa13e889885add2a61da8d",
+      "beforeSha256": "c0f0c73cfb6c237fd4a1ad3570f246167d73a8103aaa13e889885add2a61da8d",
+      "afterSha256": "c0f0c73cfb6c237fd4a1ad3570f246167d73a8103aaa13e889885add2a61da8d",
+      "sameAsBaselineAndUnchanged": true
+    },
+    "changes/v3.2.5/e13-g-production-strategy-snapshot.json": {
+      "baselineSha256": "744aa1905a2daa4b0493bd3a32b380391d7d1608759ae34bafca38db47523a5d",
+      "beforeSha256": "744aa1905a2daa4b0493bd3a32b380391d7d1608759ae34bafca38db47523a5d",
+      "afterSha256": "744aa1905a2daa4b0493bd3a32b380391d7d1608759ae34bafca38db47523a5d",
+      "sameAsBaselineAndUnchanged": true
+    },
+    "changes/v3.2.5/e13-g-coverage-report.json": {
+      "baselineSha256": "5d1e2df304f82a449f84413602b1c24787a4103853e0898487a4cfa0289e19c4",
+      "beforeSha256": "5d1e2df304f82a449f84413602b1c24787a4103853e0898487a4cfa0289e19c4",
+      "afterSha256": "5d1e2df304f82a449f84413602b1c24787a4103853e0898487a4cfa0289e19c4",
+      "sameAsBaselineAndUnchanged": true
+    }
+  },
+  "snapshotRemovedAfterProbe": true,
+  "conclusion": "The 67-current-actions vs 54-frozen-actions mismatch and default checker failure already exist at 11086a3c; G1 does not change the generated action manifest, bindings or policy set. Current coverage-report source hashes also naturally change with G1 main/runtime edits, a separate source-fingerprint difference."
+}

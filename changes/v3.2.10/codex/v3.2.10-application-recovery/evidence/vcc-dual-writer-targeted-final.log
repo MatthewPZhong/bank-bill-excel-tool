@@ -1,0 +1,16 @@
+✔ E12-C topology/shard planner 只产生 deterministic 1/2 Writer 且 exact coverage (6.220666ms)
+✔ E12-C shard reducer completion-order independent，并拒绝重复/遗漏/错 owner (0.797625ms)
+✔ E12-C 真实 two child Writer 与 single Writer 金额/币种/Pending/style/order 等价 (737.296791ms)
+✔ E12-C runtime CompoundLease admits two，Main full A/B/Join 后 Publisher exactly once (788.3155ms)
+✔ E12-C 任一 shard crash 时 Main Publisher=0，并清理 exact task-private staging (244.238084ms)
+✔ E12-C child crash/cancel/duplicate late terminal/非法 SafeError 全部 fail closed 且有界收口 (3.489ms)
+✔ E12-C malformed/oversized/private/invalid child SafeError 均 allSettled、cleanup 且 Publisher=0 (342.6735ms)
+✔ E12-C parent group 按真实时间冻结 ROOT_FIRST，后发 teardown 不覆盖且等待全组 (289.503709ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2693.552292

@@ -11,6 +11,7 @@ const { Worker } = require('node:worker_threads');
 const { setTimeout: delay } = require('node:timers/promises');
 const { spawnSync } = require('node:child_process');
 const { performance } = require('node:perf_hooks');
+const { createApplicationRecoveryCoordinator } = require('../../../src/main-process/application-recovery/coordinator');
 const { createBizOpV327Module } = require('../../../src/main-process/biz-op-v327/module');
 const { createArchiveService } = require('../../../src/main-process/archive-center/archive-service');
 const { createTaskLifecycle } = require('../../../src/main-process/archive-center/task-lifecycle');
@@ -181,7 +182,10 @@ async function fixture(t, options = {}) {
     observationAttemptRepository: createRecoveryObservationAttemptRepository(db),
     recoveryControlRepository: createRecoveryControlRepository(db), resolveTaskState: module.plan.taskState,
     planTransitions: module.plan.plan, sleep: async () => {}, transientAttempts: 1 });
-  module.recovery.bindPlatform(options.wrapPlatform ? options.wrapPlatform(platform) : platform);
+  const applicationRecovery = createApplicationRecoveryCoordinator({
+    platform: options.wrapPlatform ? options.wrapPlatform(platform) : platform, participants: []
+  });
+  module.recovery.bindPlatform(applicationRecovery.platformFacade);
   service = createArchiveService({ database: db, rootDir: path.join(root, 'archive'), onArtifactReady(completed, repository) {
     module.readyHold(completed, repository);
     if (options.afterReady) options.afterReady(completed, repository);
@@ -194,10 +198,10 @@ async function fixture(t, options = {}) {
     flowResolver: createBusinessFlowResolver({ archiveService: service }),
     operationTracker: { async appendOperationFiles() { return { archiveFailed: false }; } } });
   t.after(async () => { await runtime.shutdown({ timeoutMs: 5000 }); db.close(); fs.rmSync(root, { recursive: true, force: true }); });
-  if (options.beforeBootstrap) await options.beforeBootstrap({ module, db, service });
+  if (options.beforeBootstrap) await options.beforeBootstrap({ module, db, service, applicationRecovery });
   const bootstrap = await module.recovery.run();
   assert.equal(bootstrap.ready, options.expectReady !== false, JSON.stringify(bootstrap));
-  return { root, db, module, service, runtime, lifecycle, platform, readRepository, bootstrap };
+  return { root, db, module, service, runtime, lifecycle, platform, readRepository, bootstrap, applicationRecovery };
 }
 
 test('目录屏障不可用时首次及同名文件重试均拒绝，不建立业务提交收据', async (t) => {
@@ -608,7 +612,7 @@ durableDirectoryTest('失败报告的两个真实 reader 独立持 pin，produce
 });
 
 durableDirectoryTest('启动预检与 Archive owner 延续同一累计预算，全量扫描总计两次', async (t) => {
-  const f = await fixture(t, { async beforeBootstrap({ module, service }) {
+  const f = await fixture(t, { async beforeBootstrap({ module, service, applicationRecovery }) {
     const taskRunId = 'startup-deferred-task';
     await service.beginTaskRun({ taskRunId, operationKey: 'startup-operation', moduleId: 'biz-op-recon',
       taskKey: 'bizOpReconV327:run', parentRunId: 'startup-parent' });
@@ -619,10 +623,10 @@ durableDirectoryTest('启动预检与 Archive owner 延续同一累计预算，�
     assert.equal(early.reason, 'ARCHIVE_OWNER_PHASE_REQUIRED');
     assert.equal(early.fullScans, 0);
     assert.equal(early.enumerations, 1);
-    assert.equal(module.recovery.hasCompletedPlatformScan(), false);
+    assert.equal(applicationRecovery.snapshot().platformScanCompleted, false);
   } });
   assert.equal(f.bootstrap.fullScans, 2);
-  assert.equal(f.module.recovery.hasCompletedPlatformScan(), true);
+  assert.equal(f.applicationRecovery.snapshot().platformScanCompleted, true);
   assert.equal(f.bootstrap.enumerations, 3);
   assert.equal(f.bootstrap.normalized, 2);
   assert.equal(f.module.catalog.task('startup-deferred-task').status, 'failed');

@@ -13,7 +13,7 @@ const { prepareIpcTaskInvocation } = require('../../../src/main-process/archive-
 const { prepareRows, generateValidateAndPublishRows } = require('../../../src/main-process/toolbox-row-split/service');
 const { executeRowsGeneration } = require('../../../src/main-process/toolbox-row-split/executor');
 const { publicResult } = require('../../../src/main-process/toolbox-row-split/contracts');
-const { publishToolboxPublicationAsync } = require('../../../src/main-process/toolbox-output-publication-dispatch');
+const { createTestPublicationHarness } = require('../../helpers/publication-authority');
 
 const main = fs.readFileSync(path.join(__dirname, '../../../src/main.js'), 'utf8');
 function section(startText, endText) {
@@ -41,6 +41,7 @@ for (const stage of ['before-generation', 'before-publication', 'unchanged']) {
     const moved = path.join(directory, 'chosen-moved');
     const userDataDir = path.join(directory, 'user-data');
     fs.mkdirSync(output); fs.mkdirSync(userDataDir);
+    const { dispatcher } = createTestPublicationHarness(userDataDir);
     fs.writeFileSync(path.join(output, 'original.txt'), 'keep-original');
     const readContext = { sourceFilePath: source, dataRowCount: 2,
       snapshot: sourceSnapshotFromStat(fs.statSync(source)) };
@@ -69,7 +70,7 @@ for (const stage of ['before-generation', 'before-publication', 'unchanged']) {
         // 全部产物已校验、Main wrapper 已组装请求，尚未进入 Worker 发布。
         // 连同原生产布局下的 generation 目录一起重命名，不迁移临时产物来绕过检查。
         if (stage === 'before-publication') replaceParent();
-        try { return await publishToolboxPublicationAsync(options); }
+        try { return await dispatcher.publish({ ...options, requireArchiveHandoff: true, requireValidatedArtifacts: true }); }
         catch (error) { publicationError = error; throw error; }
       },
       backgroundExecutionRuntimeManager: { get: () => ({ async execute(request) {

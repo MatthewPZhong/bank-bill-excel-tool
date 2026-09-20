@@ -1,0 +1,44 @@
+✔ 真实 FilePlan Task→原生导出→有独立预算的既有 Publisher→Archive，pin 等待输入消费完成 (3012.258834ms)
+✔ 实际导出 worker 关闭后篡改候选，Main 拒绝发布并经原恢复 driver 释放 pin (2815.193541ms)
+✔ 六类均接真实 Publisher；失败导入的独立诊断也能由新读取 Task 导出 (8012.021041ms)
+✔ 真实 Main 进程退出 before-publish：原导出 Task、唯一 Publisher 事实及 pin 收口，不重算 run (2695.755875ms)
+✔ 真实 Main 进程退出 committed-before-observation：原导出 Task、唯一 Publisher 事实及 pin 收口，不重算 run (3438.562791ms)
+✔ 真实 Main 进程退出 after-publish：原导出 Task、唯一 Publisher 事实及 pin 收口，不重算 run (2757.680834ms)
+✔ 提交后异常保留 running Task；旧启动 owner 不抢接管，BizOP 恢复原发布事实 (2258.076167ms)
+✔ Archive 输出复制失败保留已提交结果与读取 pin，重试同 Task 后完成 (2564.196792ms)
+✔ Publisher 已确认清理而本地 ACK 写入失败，持久提交证明防止退回未提交 (2144.507458ms)
+✔ 用户目标在 FilePlan 冻结后被改写，Publisher 拒绝覆盖并保留用户的新内容 (3525.902ms)
+✔ 实际写出后取消，原 worker 退出前存在 pin，退出后恢复候选且不覆盖旧目标 (16916.265417ms)
+✔ 诊断生产者已失败，清理仍等待新导出 Task 的 Publisher 消费完成 (4521.701292ms)
+✔ 原 worker 已退出、Publisher 等待容量期间取消，准入后不触碰用户目标 (7996.936292ms)
+✔ 当前平台内存公式得到零预算，真实共享恢复入口立即拒绝且不开始 I/O (1.423333ms)
+✔ 非零但不足的固定预算和槽位不足都不能排入永远无法满足的队列 (1.047416ms)
+✔ 已有队列时永久不足仍立即拒绝，不改变原队列或资源持有者 (1.165292ms)
+✔ 暂时竞争在 5 秒内释放后继续；拿到 lease 后不因等待期限到达而提前释放 (2.207917ms)
+✔ 排队满 5 秒后明确失败并移除；后来释放容量不会迟到执行或泄露 lease (0.511083ms)
+✔ 取消和 shutdown 保留原错误，零预算不掩盖已关闭或已取消的请求 (0.469125ms)
+✔ 真实已提交 BizOP receipt deferred：ACK_PENDING 前零 acknowledgement 写入和零 staging cleanup (2896.607917ms)
+✔ 真实已提交 BizOP receipt skippedActive：ACK_PENDING 前零 acknowledgement 写入和零 staging cleanup (2530.750667ms)
+✔ 真实已提交 BizOP receipt no-observation：ACK_PENDING 前零 acknowledgement 写入和零 staging cleanup (2759.594958ms)
+✔ 真实已提交 BizOP receipt forged-absence：ACK_PENDING 前零 acknowledgement 写入和零 staging cleanup (2650.303167ms)
+✔ 真实已提交 BizOP receipt non-finalized：ACK_PENDING 前零 acknowledgement 写入和零 staging cleanup (2208.703458ms)
+✔ BizOP reconcile 的明确 rolled-back 不要求额外 absence 证明 (1749.344542ms)
+✔ BizOP reconcile 的明确 cancelled 不要求额外 absence 证明 (1859.175875ms)
+✔ BizOP reconcile 的明确 cancelled-preparing 不要求额外 absence 证明 (2387.782917ms)
+✔ BizOP reconcile 的明确 cancelled-prepared 不要求额外 absence 证明 (1596.593667ms)
+✔ BizOP reconcile 空结果缺可信 absence 或 task deferred 都保留 UNKNOWN，不能记 NOT_COMMITTED (1861.162833ms)
+✔ 借用 observation 绑定本次 task/nonce/kind 和进入前 closure，真实恢复与 ack 不自阻塞、不二次申请 (2066.202583ms)
+✔ BizOP owner 需持久 binding/intent/exact-7，领域 HOLD 只 defer，未知与冲突零修改 (1813.171125ms)
+✔ 可信完整 absence 仍要求原 Archive artifact proof；缺 proof 时不补写 acknowledged，恢复 proof 后幂等成功 (2320.586833ms)
+✔ 真实未发布导出在零预算恢复时保留任务和 pin，资源足够后原任务可收口 (3084.409125ms)
+✔ 真实已发布导出在零预算归档时保留提交证明，重试完成原任务且不重复发布 (3157.878958ms)
+✔ 真实 Publisher 排队期间取消立即退出，不等资源释放且保留原目标 (3262.255542ms)
+✔ 真实 RAW 来源准入排队期间取消，不读取原件、不创建发布记录且任务记为取消 (1322.062084ms)
+ℹ tests 36
+ℹ suites 0
+ℹ pass 36
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 62962.088292
