@@ -1,0 +1,31 @@
+{
+  "shared-xlsx-infrastructure": {
+    "selectedFiles": 148,
+    "matched": 144,
+    "composedFiles": [
+      "AGENTS.md",
+      "rules/integration-test-policy.md",
+      "src/backend/vcc-financial-op/review-export-plan.js",
+      "src/main-process/vcc-financial-op-dataset-writer.js"
+    ]
+  },
+  "storage-execution-separation": {
+    "selectedFiles": 109,
+    "matched": 104,
+    "composedFiles": [
+      "AGENTS.md",
+      "rules/integration-test-policy.md",
+      "src/backend/vcc-financial-op/review-export-plan.js",
+      "src/main-process/vcc-financial-op-dataset-writer.js",
+      "src/main.js"
+    ]
+  },
+  "bizop-query-boundaries": {
+    "selectedFiles": 57,
+    "matched": 56,
+    "composedFiles": [
+      "AGENTS.md"
+    ]
+  },
+  "candidate": "49ac95a80bf884a0bfdc2f53ecbfdb4dd982819e"
+}

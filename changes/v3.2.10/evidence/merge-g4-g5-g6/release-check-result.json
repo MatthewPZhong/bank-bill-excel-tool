@@ -1,0 +1,32 @@
+{
+  "command": "UNIT_TEST_CONCURRENCY=2 npm run release-check",
+  "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+  "candidate": "49ac95a80bf884a0bfdc2f53ecbfdb4dd982819e",
+  "startedAt": "2026-09-20T13:58:30.598314+00:00",
+  "finishedAt": "2026-09-20T14:25:08.542233+00:00",
+  "exitCode": 0,
+  "seconds": 1597.94,
+  "log": "release-check.log",
+  "unit": {
+    "tests": 8306,
+    "suites": 831,
+    "pass": 8302,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 4,
+    "todo": 0,
+    "duration_ms": 1007244.716875
+  },
+  "integration": {
+    "scripts": 64,
+    "passed": 64,
+    "failed": 0,
+    "reportedAssertionCount": 2657
+  },
+  "logSha256": "9d14f8ada951e983e43ac95acbd7198f69c6e6abf700d568522159464217d514",
+  "runtime": {
+    "node": "v25.8.0",
+    "platform": "darwin",
+    "arch": "arm64"
+  }
+}

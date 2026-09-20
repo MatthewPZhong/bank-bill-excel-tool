@@ -6,16 +6,16 @@
 | 文档日期 | 2026-09-20 |
 | 用户已确认 | G1–G8 每项独立 Spec / TechDoc；按 v3.2.9 的功能分支目录组织；写清具体模块、接口、职责、迁移与验收 |
 | 设计及源码基线 | `main@11086a3cbf632a30adbcfa796e4cd81810c5aef9`；本地附注标签 `v3.2.9` 指向同一提交 |
-| 集成分支 | `release/v3.2.10` 已存在，交付前复核为 `11086a3cbf632a30adbcfa796e4cd81810c5aef9`，与 v3.2.9 一致；见 §2 |
-| 功能分支状态 | G1 已在独立 worktree 建立；其他项按各自实施记录核实，下表保留计划名称 |
-| 交付状态 | 第三轮独立设计审查通过；本分支 G1 已实施，实际验证/集成状态见下方 G1 实施记录；其余项不据此判定完成 |
+| 集成分支 | `release/v3.2.10`；本轮 G1/G4/G5/G6 组合源码提交为 `49ac95a80bf884a0bfdc2f53ecbfdb4dd982819e`，后续记录提交及验证见 [本地集成记录](release.md) |
+| 功能分支状态 | G1、G4、G5、G6 已逐项合入；G2/G3/G7/G8 未纳入本次集成，下表保留计划名称 |
+| 交付状态 | 设计审查、模块实施与 release 组合验证分开记录；本次本地集成不代表正式发布或平台人工验收通过 |
 | 独立审查修订 | R1–R9 及 G8 历史损坏配置恢复建议均在设计层关闭，无已知待修必改项；处置、验收映射和三轮依据见 [修订记录](review-response.md)，独立报告保持原状 |
 | 依据 | [模块耦合审查](../architecture-coupling/2026-09-20/review.md)及该目录的静态扫描、局部探针证据 |
 | 格式参考 | [v3.2.9 按行拆分 Spec](../v3.2.9/codex/v3.2.9-toolbox-split-by-rows/spec.md)、[TechDoc](../v3.2.9/codex/v3.2.9-toolbox-split-by-rows/techdoc.md)的元数据、行为合同、分阶段实施和验收结构 |
 
-本功能分支的 G1 实施状态见 [实施记录](codex/v3.2.10-application-recovery/implementation-notes.md)，现行职责说明见 [应用恢复入口](../../src/main-process/application-recovery/README.md)。下文第三轮设计审查状态保留为原设计基线；其余治理项未随 G1 实施。
+已纳入模块的实施记录：[G1](codex/v3.2.10-application-recovery/implementation-notes.md)、[G4](codex/v3.2.10-shared-xlsx-infrastructure/implementation-notes.md)、[G5](codex/v3.2.10-bizop-query-boundaries/implementation-notes.md)、[G6](codex/v3.2.10-storage-execution-separation/implementation-notes.md)。这些材料保留各功能实施时点的记录；当前集成 SHA、冲突处理与组合验证以 [release.md](release.md) 为准。下文第三轮设计审查状态保留为原设计基线。
 
-本工作树只带入 G1 及直接引用的审查材料；其他治理项的未提交设计仍从[主工作区总索引](/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/README.md)读取。下列其他功能的相对链接待各功能文档集成后在本树可用，不表示这些项已实施。
+本工作树已带入 G1/G4/G5/G6 及各自审查材料；G2/G3/G7/G8 的设计仍从[主工作区总索引](/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/README.md)读取。下列未集成功能的相对链接待各功能文档集成后在本树可用，不表示这些项已实施。
 
 ## 1. 功能分支与交付文件
 
@@ -176,9 +176,9 @@ G8 尚未集成时，相关切片仍须完成自己的行为验证，并按原�
 | G1 恢复协调切片 | [src/main-process/application-recovery/README.md](../../src/main-process/application-recovery/README.md)（本功能分支已建立） | 应用/平台/业务恢复事实归属、participant 顺序、publication owner 调用入口与失败边界；跨 publication-recovery 的说明由此链接其实际代码。 |
 | G2 任务适配切片 | `src/main-process/task-adapters/README.md` | registry、领域 task-owner、prepared 资源、live/replay terminal routes 的职责和调用关系；引用实际 Position/Archive 入口。 |
 | G3 Renderer 切片 | `src/renderer/README.md` | shell/controller/modalHost 各自写权限、脚本装配、导航/销毁协议；只把完成的 R 切片写为现状，保留剩余旧域说明。 |
-| G4 XLSX 切片 | `src/backend/xlsx/README.md` | 两类 reader 的适用入口和能力差异、预算/关闭/临时资源所有权、旧 shim 现状；不把目录提取写成性能升级。 |
-| G5 BizOP 查询切片 | `src/main-process/biz-op-v327/README.md` | queries 与 commands 的边界、catalog.db 合法保留者、Archive 查询入口及准入/预算归属；仅补本项涉及的实际内容。 |
-| G6 VCC / Acquiring 切片 | VCC：`src/backend/vcc-financial-op/README.md`；Acquiring：`src/backend/acquiring-bill-currency-db/README.md` | 分别记录纯 hash/lineage 合同，以及 repository/service/executor 的实际入口、B0 退出屏障、partial/resume/清理顺序；已有存储专项约束只引用，语义未变时不机械改写。 |
+| G4 XLSX 切片 | [src/backend/xlsx/README.md](../../src/backend/xlsx/README.md)（已集成） | 两类 reader 的适用入口和能力差异、预算/关闭/临时资源所有权、旧 shim 现状；不把目录提取写成性能升级。 |
+| G5 BizOP 查询切片 | [src/main-process/biz-op-v327/README.md](../../src/main-process/biz-op-v327/README.md)（已集成） | queries 与 commands 的边界、catalog.db 合法保留者、Archive 查询入口及准入/预算归属；仅补本项涉及的实际内容。 |
+| G6 VCC / Acquiring 切片 | [VCC](../../src/backend/vcc-financial-op/README.md)、[Acquiring](../../src/backend/acquiring-bill-currency-db/README.md)（已集成） | 分别记录纯 hash/lineage 合同，以及 repository/service/executor 的实际入口、B0 退出屏障、partial/resume/清理顺序；已有存储专项约束只引用，语义未变时不机械改写。 |
 | G7 描述符切片 | `src/main-process/execution-descriptors/README.md` | 静态装配、独立 authority、各 registry 所有权和新增 action 的真实步骤；引用 G1/G2 说明，不另定义生命周期。 |
 | G8 检查器切片 | `architecture/README.md` | 检查命令、配置入口、覆盖盲区、激活/例外/退役规则及消费者维护方式；机器正文仍在 `boundaries.json`、`legacy-allowlist.json`，人读说明只解释与链接。 |
 

@@ -1,0 +1,40 @@
+[
+  {
+    "scope": "G1 Main recovery",
+    "sourceCommit": "856c9dce8ae4c381229e37b5b236e2e2f776921d",
+    "paths": [
+      "src/main.js"
+    ],
+    "reversePatchCheckExitCode": 0,
+    "stderr": ""
+  },
+  {
+    "scope": "G6 Main lock",
+    "sourceCommit": "ed1cb2d73418fe1279cac96acd91090492555be3",
+    "paths": [
+      "src/main.js"
+    ],
+    "reversePatchCheckExitCode": 0,
+    "stderr": ""
+  },
+  {
+    "scope": "G4 VCC readers",
+    "sourceCommit": "a4d91d173945cc42fcd9593f56504060c98f9d47",
+    "paths": [
+      "src/backend/vcc-financial-op/review-export-plan.js",
+      "src/main-process/vcc-financial-op-dataset-writer.js"
+    ],
+    "reversePatchCheckExitCode": 0,
+    "stderr": ""
+  },
+  {
+    "scope": "G6 VCC contracts",
+    "sourceCommit": "ed1cb2d73418fe1279cac96acd91090492555be3",
+    "paths": [
+      "src/backend/vcc-financial-op/review-export-plan.js",
+      "src/main-process/vcc-financial-op-dataset-writer.js"
+    ],
+    "reversePatchCheckExitCode": 0,
+    "stderr": ""
+  }
+]
