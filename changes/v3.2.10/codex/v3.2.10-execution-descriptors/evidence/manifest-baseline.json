@@ -1,0 +1,9 @@
+{
+  "command": "npm run check:background-execution-manifest",
+  "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-execution-descriptors",
+  "head": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "finishedAt": "2026-09-20T16:06:15.630944+00:00",
+  "elapsedSeconds": 0.421,
+  "exitCode": 1,
+  "evidence": "manifest-baseline.log"
+}

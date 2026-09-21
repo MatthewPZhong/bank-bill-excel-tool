@@ -20,7 +20,7 @@ const {
 const backgroundExecution = require('../../../../src/main-process/background-execution');
 const {
   createTaskPolicyRegistry
-} = require('../../../../src/main-process/archive-center/task-policy-registry');
+} = require('../../../../src/main-process/execution-descriptors/composition');
 
 function mutableTaskPolicies() {
   return createTaskPolicyRegistry().list().map((policy) => ({ ...policy }));

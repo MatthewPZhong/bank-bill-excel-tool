@@ -2,7 +2,9 @@
 
 const fs = require('node:fs');
 const { randomUUID } = require('node:crypto');
-const { createTaskPolicyRegistry } = require('../archive-center/task-policy-registry');
+const {
+  createTaskPolicyRegistry
+} = require('../execution-descriptors/composition');
 const { freezeExportSource } = require('./export-inputs');
 const { EXPORT_IO_RESOURCES } = require('./export-publication');
 const { acquireBizOpPhaseLease } = require('./phase-admission');

@@ -557,7 +557,8 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
       positionTaskOwner,
       /writeSetting\(POSITION_SIDE_DB_CHECKPOINT_SETTING, JSON\.stringify\(checkpoint\)\)/
     );
-    assert.match(mainProcess, /createBusinessTaskAdapterRegistry\(\{[\s\S]*?positionOwner: positionTaskOwner/);
+    assert.match(mainProcess, /const executionTaskComposition = createExecutionTaskComposition\(\{[\s\S]*?positionOwner: positionTaskOwner/);
+    assert.match(mainProcess, /const \{ taskAdapterRegistry, terminalRouteRegistry \} = executionTaskComposition/);
     assert.match(taskAdapterComposition, /'position-reconciliation-process': 'position-reconciliation'/);
     assert.match(taskAdapterComposition, /createPositionTaskAdapter\(\{ owner: positionOwner,/);
     const entryStart = mainProcess.indexOf('async function runArchiveAwareOperation(');

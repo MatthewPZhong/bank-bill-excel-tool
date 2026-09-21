@@ -1,0 +1,8 @@
+{
+  "policyCount": 49,
+  "bindingDifferences": []
+}
+{"label":"old","production":false,"spawned":1,"outcome":"transport-lost","error":{"code":"PROBE_REACHED_ADAPTER","message":"reached adapter","stage":"spawn","detailLines":[]}}
+{"label":"new","production":false,"spawned":1,"outcome":"transport-lost","error":{"code":"PROBE_REACHED_ADAPTER","message":"reached adapter","stage":"spawn","detailLines":[]}}
+{"label":"old","production":true,"spawned":0,"thrown":{"code":"POLICY_PRODUCTION_DISABLED","message":"Execution policy is not enabled in production: toolbox:merge"}}
+{"label":"new","production":true,"spawned":0,"thrown":{"code":"POLICY_PRODUCTION_DISABLED","message":"Execution policy is not enabled in production: toolbox:merge"}}

@@ -7,7 +7,7 @@
 | 入口 | 职责与调用方 |
 | --- | --- |
 | [registry.js](registry.js) | `createTaskAdapterRegistry({ adapters, taskBindings })` 冻结注册表及注册项；只按显式 taskKey 查找。重复或缺失注册失败；未知受控任务返回 `TASK_ADAPTER_UNBOUND`，无默认 fallback。 |
-| [task-adapter-composition.js](../task-adapter-composition.js) | Main 启动时静态装配四种 adapter，并从既有 policy 清单生成全部受控 taskKey 的显式绑定；exclude 不绑定。领域依赖只允许在该装配层和领域模块。新增受控任务必须核对其 scope、适配行为和 binding 测试。 |
+| [task-adapter-composition.js](../task-adapter-composition.js) | 提供 `createBusinessTaskAdapterRegistrations` 冻结快照，原 registry 工厂复用该入口。Main 经 [G7 composition](../execution-descriptors/composition.js) 聚合四种 adapter，并从既有 policy 清单生成全部受控 taskKey 的显式绑定；exclude 不绑定。领域依赖只允许在该装配层和领域模块。新增受控任务必须核对其 scope、适配行为和 binding 测试。 |
 | [passthrough.js](passthrough.js) | 透传 prepared 身份、hook、intent；在真实业务闭包执行前标记接管。没有显式身份仍由 TaskLifecycle 生成。 |
 | [prepared-resources.js](prepared-resources.js) | prepare 返回 `proceed:true` 后立即建立唯一 scope；只调用 prepared 原有 `onAbandon`，不推测文件路径、不替代领域清理。 |
 | [Position owner](../position-reconciliation/task-owner.js) / [adapter](../position-reconciliation/task-adapter.js) | owner 持有 operation context/active state、pending/checkpoint、恢复意图和受管暂存清理；adapter 持有 invocation token 并组合 admission、业务、settlement、终态。设置与服务访问由 Main 注入，数据位置不变。 |

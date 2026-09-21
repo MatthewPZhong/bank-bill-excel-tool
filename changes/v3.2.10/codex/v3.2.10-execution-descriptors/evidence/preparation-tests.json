@@ -1,0 +1,20 @@
+{
+  "command": "node --test tests/unit/main-process/execution-descriptor-resource-profiles.test.js tests/unit/main-process/execution-descriptor-archive-baseline.test.js",
+  "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-execution-descriptors",
+  "head": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "node": "v25.8.0",
+  "platform": "macOS-15.7.4-arm64-arm-64bit-Mach-O",
+  "finishedAt": "2026-09-20T16:11:20.248082+00:00",
+  "elapsedSeconds": 0.487,
+  "exitCode": 0,
+  "evidence": "preparation-tests.tap",
+  "sha256": {
+    "tests/helpers/execution-descriptor-runtime-baseline.js": "3dab50d7d8bf3010bdcb850f1e71d16143dee7001f598e7b10b906f252afca70",
+    "tests/helpers/execution-descriptor-archive-baseline.js": "bd38a806d4d5d180f17bab95ecaf6f178334a1fd34216cd14c014041fa6aef93",
+    "tests/unit/main-process/execution-descriptor-resource-profiles.test.js": "42c9b24be1d41f34b564c02622fcfeeba0100f8f641659331dbd3cd63fe417fd",
+    "tests/unit/main-process/execution-descriptor-archive-baseline.test.js": "cf8451f8f436c518668d284682f0c38280b8efa3d2317764d0752be397baab98",
+    "tests/fixtures/execution-descriptors/runtime-baseline.json": "d24d05717fffa6d35907b59e7b5cfedd31376f322c305011040916edf51acb62",
+    "tests/fixtures/execution-descriptors/archive-baseline.json": "85810651eb811347ec3990b46ef446e8955c85c16e94d039fd0ffd3a792317b9"
+  },
+  "productionDiff": ""
+}

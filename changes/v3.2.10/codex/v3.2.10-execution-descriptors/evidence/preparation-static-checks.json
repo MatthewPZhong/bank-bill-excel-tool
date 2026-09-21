@@ -1,0 +1,110 @@
+{
+  "checkedAt": "2026-09-20T16:13:12.082105+00:00",
+  "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-execution-descriptors",
+  "lintScope": "将仓库已有 no-undef 规则显式应用于新增四个 CommonJS 测试文件；原 npm lint 仅覆盖 src。",
+  "lint": [
+    {
+      "file": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-execution-descriptors/tests/helpers/execution-descriptor-runtime-baseline.js",
+      "errorCount": 0,
+      "warningCount": 0,
+      "messages": []
+    },
+    {
+      "file": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-execution-descriptors/tests/helpers/execution-descriptor-archive-baseline.js",
+      "errorCount": 0,
+      "warningCount": 0,
+      "messages": []
+    },
+    {
+      "file": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-execution-descriptors/tests/unit/main-process/execution-descriptor-resource-profiles.test.js",
+      "errorCount": 0,
+      "warningCount": 0,
+      "messages": []
+    },
+    {
+      "file": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-execution-descriptors/tests/unit/main-process/execution-descriptor-archive-baseline.test.js",
+      "errorCount": 0,
+      "warningCount": 0,
+      "messages": []
+    }
+  ],
+  "syntax": [
+    {
+      "file": "tests/helpers/execution-descriptor-runtime-baseline.js",
+      "exitCode": 0,
+      "output": ""
+    },
+    {
+      "file": "tests/helpers/execution-descriptor-archive-baseline.js",
+      "exitCode": 0,
+      "output": ""
+    },
+    {
+      "file": "tests/unit/main-process/execution-descriptor-resource-profiles.test.js",
+      "exitCode": 0,
+      "output": ""
+    },
+    {
+      "file": "tests/unit/main-process/execution-descriptor-archive-baseline.test.js",
+      "exitCode": 0,
+      "output": ""
+    }
+  ],
+  "whitespace": [
+    {
+      "file": "tests/helpers/execution-descriptor-runtime-baseline.js",
+      "exitCode": 1,
+      "output": "",
+      "passed": true
+    },
+    {
+      "file": "tests/helpers/execution-descriptor-archive-baseline.js",
+      "exitCode": 1,
+      "output": "",
+      "passed": true
+    },
+    {
+      "file": "tests/unit/main-process/execution-descriptor-resource-profiles.test.js",
+      "exitCode": 1,
+      "output": "",
+      "passed": true
+    },
+    {
+      "file": "tests/unit/main-process/execution-descriptor-archive-baseline.test.js",
+      "exitCode": 1,
+      "output": "",
+      "passed": true
+    },
+    {
+      "file": "tests/fixtures/execution-descriptors/runtime-baseline.json",
+      "exitCode": 1,
+      "output": "",
+      "passed": true
+    },
+    {
+      "file": "tests/fixtures/execution-descriptors/archive-baseline.json",
+      "exitCode": 1,
+      "output": "",
+      "passed": true
+    },
+    {
+      "file": "tests/fixtures/execution-descriptors/README.md",
+      "exitCode": 1,
+      "output": "",
+      "passed": true
+    },
+    {
+      "file": "changes/v3.2.10/codex/v3.2.10-execution-descriptors/implementation-notes.md",
+      "exitCode": 1,
+      "output": "",
+      "passed": true
+    },
+    {
+      "file": "changes/v3.2.10/codex/v3.2.10-execution-descriptors/registry-inventory.md",
+      "exitCode": 1,
+      "output": "",
+      "passed": true
+    }
+  ],
+  "whitespaceExitCodeMeaning": "--no-index 比较 /dev/null 与新增文件时 exit 1 表示存在文件差异；whitespace 诊断为空且 exit 0/1 判定通过，其他返回码或任何诊断判失败。"
+}

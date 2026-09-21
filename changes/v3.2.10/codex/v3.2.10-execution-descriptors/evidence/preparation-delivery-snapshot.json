@@ -1,0 +1,133 @@
+{
+  "recordedAt": "2026-09-20T16:14:08.616364+00:00",
+  "branch": "codex/v3.2.10-execution-descriptors",
+  "worktree": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-execution-descriptors",
+  "refs": {
+    "HEAD": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+    "release/v3.2.10": "8b12a6d5fd71b70ade58b9b6e7a347e29dbe8d05",
+    "codex/v3.2.10-business-task-adapters": "3e203858ea49fc2935f5ab847de8af7f793d356a"
+  },
+  "trackedDiff": "",
+  "designInputsUnchanged": true,
+  "testFilesMatchTestedHashes": true,
+  "status": [
+    "?? changes/architecture-coupling/",
+    "?? changes/archive-batch-lifecycle/",
+    "?? changes/v3.2.10/",
+    "?? changes/v3.2.9/codex/v3.2.9-account-mapping-management/",
+    "?? tests/fixtures/execution-descriptors/",
+    "?? tests/helpers/execution-descriptor-archive-baseline.js",
+    "?? tests/helpers/execution-descriptor-runtime-baseline.js",
+    "?? tests/unit/main-process/execution-descriptor-archive-baseline.test.js",
+    "?? tests/unit/main-process/execution-descriptor-resource-profiles.test.js"
+  ],
+  "implementationStatus": "G7-T1a 测试准备已实现；G7-T1 剩余及 T2-T5 未开始",
+  "validationStatus": "新增 43/43、既有 69/69；基线 manifest 命令 FAIL，诊断已记录",
+  "integrationStatus": "未集成；G2 尚无 release 集成提交",
+  "files": {
+    "tests/helpers/execution-descriptor-runtime-baseline.js": {
+      "sha256": "3dab50d7d8bf3010bdcb850f1e71d16143dee7001f598e7b10b906f252afca70",
+      "bytes": 8953
+    },
+    "tests/helpers/execution-descriptor-archive-baseline.js": {
+      "sha256": "bd38a806d4d5d180f17bab95ecaf6f178334a1fd34216cd14c014041fa6aef93",
+      "bytes": 2258
+    },
+    "tests/fixtures/execution-descriptors/runtime-baseline.json": {
+      "sha256": "d24d05717fffa6d35907b59e7b5cfedd31376f322c305011040916edf51acb62",
+      "bytes": 393739
+    },
+    "tests/fixtures/execution-descriptors/archive-baseline.json": {
+      "sha256": "85810651eb811347ec3990b46ef446e8955c85c16e94d039fd0ffd3a792317b9",
+      "bytes": 226949
+    },
+    "tests/unit/main-process/execution-descriptor-resource-profiles.test.js": {
+      "sha256": "42c9b24be1d41f34b564c02622fcfeeba0100f8f641659331dbd3cd63fe417fd",
+      "bytes": 11087
+    },
+    "tests/unit/main-process/execution-descriptor-archive-baseline.test.js": {
+      "sha256": "cf8451f8f436c518668d284682f0c38280b8efa3d2317764d0752be397baab98",
+      "bytes": 8126
+    },
+    "tests/fixtures/execution-descriptors/README.md": {
+      "sha256": "ad7fff38930052ec712b02f6fc7c3c308593e46c5e426701b1d5db7fdb9a1834",
+      "bytes": 2421
+    },
+    "changes/v3.2.10/codex/v3.2.10-execution-descriptors/evidence/consumer-inventory.json": {
+      "sha256": "e4b7bf79c5c851e19caea5b672af882d5ef5cc53b255915515ecb2e5487c155d",
+      "bytes": 88766
+    },
+    "changes/v3.2.10/codex/v3.2.10-execution-descriptors/evidence/dependency-verification.json": {
+      "sha256": "68a9fc7c33c595f0f1b17236a9900bb01095faf65833f17c9f1a02fd27fab477",
+      "bytes": 8471
+    },
+    "changes/v3.2.10/codex/v3.2.10-execution-descriptors/evidence/design-inputs.json": {
+      "sha256": "cfea2fa444a674596bdfc93a591fc1d33c4dde7cf32209512ac3e88fd31cf312",
+      "bytes": 6778
+    },
+    "changes/v3.2.10/codex/v3.2.10-execution-descriptors/evidence/existing-registry-tests-retry.json": {
+      "sha256": "bf08e4c433573745192ea148c0fa2594f0fc134a298a4836c233ff43947c3e7e",
+      "bytes": 869
+    },
+    "changes/v3.2.10/codex/v3.2.10-execution-descriptors/evidence/existing-registry-tests-retry.log": {
+      "sha256": "e7fc353f3bbee60ac51f913d7d1784dd858a2d4fd64593a7add66f5ee0bf0b05",
+      "bytes": 7035
+    },
+    "changes/v3.2.10/codex/v3.2.10-execution-descriptors/evidence/existing-registry-tests.json": {
+      "sha256": "d02bda7d3880513f60c688bc2a45079895356dd97cd919d3b1eb7a96bb958b5a",
+      "bytes": 620
+    },
+    "changes/v3.2.10/codex/v3.2.10-execution-descriptors/evidence/existing-registry-tests.log": {
+      "sha256": "544da8f6123c2981494be5fb1bb6bd40cf5d9e511fb57ebc71f2a6a5761014a4",
+      "bytes": 10349
+    },
+    "changes/v3.2.10/codex/v3.2.10-execution-descriptors/evidence/manifest-baseline-diagnosis.json": {
+      "sha256": "657536e728046025af984a7436923dd3479fa0d7c3d14d1bf0a839c8bf5dbb9d",
+      "bytes": 2040
+    },
+    "changes/v3.2.10/codex/v3.2.10-execution-descriptors/evidence/manifest-baseline.json": {
+      "sha256": "ea51af735b059a8bef4b692463139da6166d45c1803e103904f95ee667c845c3",
+      "bytes": 357
+    },
+    "changes/v3.2.10/codex/v3.2.10-execution-descriptors/evidence/manifest-baseline.log": {
+      "sha256": "b1ee495657a07ef5ff0afb2e8ddec76a3790f195a15280aa8cb9ebc07962e57f",
+      "bytes": 164287
+    },
+    "changes/v3.2.10/codex/v3.2.10-execution-descriptors/evidence/preparation-static-checks.json": {
+      "sha256": "ac922508df8172883664f8decdab9dde4fa32ac7a088c4f76d9e49a7ecf43f06",
+      "bytes": 3499
+    },
+    "changes/v3.2.10/codex/v3.2.10-execution-descriptors/evidence/preparation-tests.json": {
+      "sha256": "b964b8a4985440a5501752c1fa175110030025473ee12f4591cd48086bc56c9f",
+      "bytes": 1401
+    },
+    "changes/v3.2.10/codex/v3.2.10-execution-descriptors/evidence/preparation-tests.tap": {
+      "sha256": "a4aec3b934ba6e485bdb1793753d2e5da2b5b72b15b7967191cf40795105ee94",
+      "bytes": 3995
+    },
+    "changes/v3.2.10/codex/v3.2.10-execution-descriptors/evidence/test-code.diff": {
+      "sha256": "4d460402e08029bf401a97bf48e307250cebf366a62763b45cbafa5f3d963a8b",
+      "bytes": 676191
+    },
+    "changes/v3.2.10/codex/v3.2.10-execution-descriptors/implementation-notes.md": {
+      "sha256": "9dfdd18d2b12b44f781cf298828345a8d4424c462634e812129ff9b395cd3eaf",
+      "bytes": 9219
+    },
+    "changes/v3.2.10/codex/v3.2.10-execution-descriptors/preparation-review.md": {
+      "sha256": "6f4f096bbceb9e040c70d6cd384a5c8f807255f1ab205fd3c632be3bf66cc38b",
+      "bytes": 2207
+    },
+    "changes/v3.2.10/codex/v3.2.10-execution-descriptors/registry-inventory.md": {
+      "sha256": "f064303437e4970cc395ac6f0d49c584cecf0a06038bd95a2ce7d49368539fe9",
+      "bytes": 7122
+    },
+    "changes/v3.2.10/codex/v3.2.10-execution-descriptors/spec.md": {
+      "sha256": "b57b4e61765bceeaa7b46123b7be04b7afd5bd075f258be191c62e20d93d478c",
+      "bytes": 9955
+    },
+    "changes/v3.2.10/codex/v3.2.10-execution-descriptors/techdoc.md": {
+      "sha256": "bb3bede82b77aaacc98468dae533b3340756c09ce32f62b9fd1e706daafcbd49",
+      "bytes": 24126
+    }
+  }
+}

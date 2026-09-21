@@ -22,7 +22,7 @@ const { normalizeStaticStyle } = require('../../../src/backend/xlsx/style-regist
 const { exportToolboxMultiFilters } = require('../../../src/main-process/toolbox-format-operations');
 const {
   createBackgroundExecutionRuntime
-} = require('../../../src/main-process/background-execution/runtime');
+} = require('../../../src/main-process/execution-descriptors/composition');
 const {
   createWorkerThreadAdapter
 } = require('../../../src/main-process/background-execution/adapters/worker-thread-adapter');

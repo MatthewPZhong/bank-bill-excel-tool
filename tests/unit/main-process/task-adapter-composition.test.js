@@ -6,7 +6,9 @@ const path = require('node:path');
 const test = require('node:test');
 const acorn = require('acorn');
 const { createBusinessTaskAdapterRegistry } = require('../../../src/main-process/task-adapter-composition');
-const { createTaskPolicyRegistry } = require('../../../src/main-process/archive-center/task-policy-registry');
+const {
+  createTaskPolicyRegistry
+} = require('../../../src/main-process/execution-descriptors/composition');
 
 const sourceRoot = path.resolve(__dirname, '../../../src');
 

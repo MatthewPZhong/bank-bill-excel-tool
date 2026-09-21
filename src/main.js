@@ -23,7 +23,7 @@ const {
 const {
   createStartupRecoveryCoordinator
 } = require('./main-process/background-execution/startup-recovery-coordinator');
-const { createApplicationRecoveryComposition } = require('./main-process/application-recovery/composition');
+const { createApplicationRecoveryComposition } = require('./main-process/execution-descriptors/composition');
 const {
   createRecoveryHoldGate
 } = require('./main-process/background-execution/recovery-hold-gate');
@@ -114,10 +114,14 @@ const {
   selectSuccessfulPathsByResultIndex
 } = require('./main-process/archive-center/operation-tracker');
 const {
-  SUPPORT_ACTION_POLICIES,
-  createBankStatementRunFlowIdentity,
-  createTaskPolicyRegistry
+  SUPPORT_ACTION_POLICIES
 } = require('./main-process/archive-center/task-policy-registry');
+const {
+  createBankStatementRunFlowIdentity
+} = require('./main-process/fund-recon-worker/archive-task-policies');
+const {
+  createTaskPolicyRegistry
+} = require('./main-process/execution-descriptors/composition');
 const { createBusinessFlowResolver } = require('./main-process/archive-center/business-flow-resolver');
 const {
   createTaskLifecycle
@@ -258,8 +262,7 @@ const {
   PositionReconciliationError
 } = require('./main-process/position-reconciliation/common');
 const { createPositionTaskOwner } = require('./main-process/position-reconciliation/task-owner');
-const { createTerminalRouteRegistry } = require('./main-process/archive-center/terminal-route-registry');
-const { createBusinessTaskAdapterRegistry } = require('./main-process/task-adapter-composition');
+const { createExecutionTaskComposition } = require('./main-process/execution-descriptors/composition');
 const { createPreparedResourceScope } = require('./main-process/task-adapters/prepared-resources');
 const {
   createPositionRunTaskContract,
@@ -493,7 +496,7 @@ const {
 } = require('./main-process/toolbox-multi-split');
 const {
   createBackgroundExecutionRuntimeManager
-} = require('./main-process/background-execution/runtime');
+} = require('./main-process/execution-descriptors/composition');
 const {
   PENDING_READ_ONLY_ACTIONS
 } = require('./main-process/read-only-exports/pending/policies');
@@ -1288,7 +1291,7 @@ const positionTaskOwner = createPositionTaskOwner({
     archiveOperationTracker && archiveOperationTracker.supportsChannel(channel)
   )
 });
-const terminalRouteRegistry = createTerminalRouteRegistry([
+const terminalRouteRegistrations = [
   positionTaskOwner.terminalRegistration,
   createPendingTerminalRouteRegistration({ getDb: () => pendingDb }),
   bizOpReconRunData.createBizOpRunTerminalRouteRegistration({
@@ -1302,15 +1305,16 @@ const terminalRouteRegistry = createTerminalRouteRegistry([
     withLegacyRecovery
   }),
   createPreFundTerminalRouteRegistration({ getService: getPreFundReconciliationService })
-]);
+];
 const businessOperationRegistry = createBusinessOperationRegistry();
 const taskPolicyRegistry = createTaskPolicyRegistry();
-const taskAdapterRegistry = createBusinessTaskAdapterRegistry({
-  policies: taskPolicyRegistry.list(),
+const executionTaskComposition = createExecutionTaskComposition({
+  terminalRoutes: terminalRouteRegistrations,
   positionOwner: positionTaskOwner,
   acknowledgeReceipts: acknowledgeToolboxPublicationReceipts,
   reportArchiveFailure
 });
+const { taskAdapterRegistry, terminalRouteRegistry } = executionTaskComposition;
 // Recovery adapter 只能消费这个启动期 frozen exact host。先一次性冻结 binding authority，
 // 再允许 initializeApplication 建 DB，之后才注册 IPC；任一 authority 漂移在基础设施前失败。
 const taskPolicyBindingHost = Object.freeze({

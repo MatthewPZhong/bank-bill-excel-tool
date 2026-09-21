@@ -1,0 +1,43 @@
+{
+  "authorityUnchanged": true,
+  "results": [
+    {
+      "scenario": "baseline",
+      "status": "ACCEPTED",
+      "runtimeCount": 49,
+      "productionCount": 13,
+      "target": "toolbox:merge",
+      "targetProduction": false,
+      "catalogProduction": false
+    },
+    {
+      "scenario": "drop-runtime-policy",
+      "status": "ACCEPTED",
+      "runtimeCount": 48,
+      "productionCount": 13,
+      "target": "toolbox:merge",
+      "targetProduction": null,
+      "catalogProduction": false
+    },
+    {
+      "scenario": "enable-production",
+      "status": "ACCEPTED",
+      "runtimeCount": 49,
+      "productionCount": 14,
+      "target": "toolbox:merge",
+      "targetProduction": true,
+      "catalogProduction": false,
+      "runnableProduction": "toolbox:merge"
+    },
+    {
+      "scenario": "register-legacy-production",
+      "status": "ACCEPTED",
+      "runtimeCount": 50,
+      "productionCount": 14,
+      "target": "toolbox:split-large",
+      "targetProduction": true,
+      "catalogProduction": false,
+      "runnableProduction": "toolbox:split-large"
+    }
+  ]
+}

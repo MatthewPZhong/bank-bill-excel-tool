@@ -10,7 +10,9 @@ const { createArchiveService } = require('../../../src/main-process/archive-cent
 const { createArchiveCenterController } = require('../../../src/main-process/archive-center/controller');
 const { createArchiveOutboxStore } = require('../../../src/main-process/archive-center/outbox-store');
 const { createTaskLifecycle } = require('../../../src/main-process/archive-center/task-lifecycle');
-const { createTaskPolicyRegistry } = require('../../../src/main-process/archive-center/task-policy-registry');
+const {
+  createTaskPolicyRegistry
+} = require('../../../src/main-process/execution-descriptors/composition');
 const { normalizeFilePlanV1 } = require('../../../src/main-process/archive-center/file-plan');
 const { stageInputFiles } = require('../../../src/main-process/position-reconciliation/input-staging');
 const { positionInputFilePlanEvidence, positionFilePlanSettlementFiles } = require('../../../src/main-process/position-reconciliation/archive-file-plan-evidence');

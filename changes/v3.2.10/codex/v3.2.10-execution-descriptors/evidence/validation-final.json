@@ -1,0 +1,116 @@
+{
+  "recordedAt": "2026-09-20T17:53:41.800130+00:00",
+  "base": "8b12a6d5fd71b70ade58b9b6e7a347e29dbe8d05",
+  "branch": "codex/v3.2.10-execution-descriptors",
+  "sourceSnapshot": "source-snapshot.json",
+  "sourceSnapshotSha256": "8caa84153bb4a81a1353f17026912e5d00ec0200517bb40c83251f0f9b4bd384",
+  "environment": {
+    "platform": "macOS-15.7.4-arm64-arm-64bit-Mach-O",
+    "node": "v25.8.0",
+    "dependencies": "existing main-workspace node_modules symlink; no installation"
+  },
+  "releaseCheck": {
+    "command": "UNIT_TEST_CONCURRENCY=4 npm run release-check",
+    "workdir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-execution-descriptors",
+    "status": "PASS",
+    "log": "review-fix-20260921/release-check.txt",
+    "lint": "PASS",
+    "unit": {
+      "files": 538,
+      "tests": 8533,
+      "passed": 8529,
+      "failed": 0,
+      "skipped": 4,
+      "elapsedMs": 399408,
+      "nodeTestElapsedMs": 399352.829709
+    },
+    "integration": {
+      "scripts": 67,
+      "passedScripts": 67,
+      "checks": 2668,
+      "passedChecks": 2668,
+      "elapsedMs": 530328
+    },
+    "exitCode": 0,
+    "smoke": "PASS",
+    "logSha256": "a7f1a65cc2298e7fd1d5094414608efd987c9cf0d2682cb2cd3431a46f9f17e5"
+  },
+  "focused": {
+    "reviewFixes": {
+      "tests": 21,
+      "passed": 21,
+      "log": "review-fix-20260921/fixes-focused.tap",
+      "logSha256": "d2f1b39ed39dd42766050edc145575ee5c2a26527a659244b928e602c444865e"
+    },
+    "descriptorAndSupervisor": {
+      "tests": 171,
+      "passed": 171,
+      "log": "review-fix-20260921/descriptor-supervisor.tap",
+      "logSha256": "71103e0963c13d2a68c543218a6fb0c1a6399c3e6266d899e8006b72c3ea75cc"
+    },
+    "legacyMixedDispatch": {
+      "tests": 12,
+      "passed": 12,
+      "overlap": "11 overlap P3 focused; 1 original BizOP regression",
+      "log": "review-fix-20260921/p3-mixed-gate-green.tap",
+      "logSha256": "b7b5df02f74acbc3e80745e38fdb56e62d0041c27c52ece107c14febfe17eb9d"
+    },
+    "manifest": {
+      "command": "node scripts/check-background-execution-manifest.js",
+      "exitCode": 0,
+      "surfaces": 402,
+      "pairs": 74,
+      "productionEnabled": 13,
+      "log": "review-fix-20260921/manifest.txt",
+      "sourceHashCount": 42,
+      "logSha256": "c789b860df33fa0273dcf241fafbcad0e14944b3ed0fae804abcb9e66fa26d4a"
+    }
+  },
+  "historicalFailure": {
+    "initialImplementation": "unit-implementation.txt",
+    "reviewFixFirstGate": "review-fix-20260921/release-check-first-attempt.txt:8527/8532,1failed,4skipped; original mixed BizOP authorization contract; fixed without changing old assertions"
+  },
+  "notExecuted": [
+    "G8 configuration activation (dependency not integrated)",
+    "Windows PowerShell/CIM and packaged carriers",
+    "Electron GUI, Excel/WPS, installer manual acceptance"
+  ],
+  "independentReview": "../review-fix-2026-09-21.md",
+  "status": "R1/R2修复后完整本地门禁PASS，未提交/未集成",
+  "historicalValidation": "review-fix-20260921/before-validation-final.json",
+  "carrierAndRecoveryIntegration": {
+    "source": "review-fix-20260921/release-check.txt",
+    "execution-descriptor-governance": {
+      "passed": 4,
+      "checks": 4
+    },
+    "application-recovery-governance": {
+      "passed": 4,
+      "checks": 4
+    },
+    "task-adapter-recovery": {
+      "passed": 4,
+      "checks": 4
+    },
+    "position-startup-task-recovery": {
+      "passed": 3,
+      "checks": 3
+    },
+    "background-execution-recovery-control": {
+      "passed": 27,
+      "checks": 27
+    }
+  },
+  "sourceUnchangedDuringFinalGate": {
+    "all133Files": true,
+    "reviewFix9Files": true,
+    "manifest42Files": true
+  },
+  "artifactChecks": {
+    "trackedWhitespace": "PASS",
+    "newSourceWhitespaceFiles": 43,
+    "localDocumentLinks": 91,
+    "localDocumentLinksCheckedBy": "independent reviewer 84 paths/anchors/lines; root rechecked all current file targets after final log links added",
+    "implementationFiveRequirements": "R1/R2 both recorded"
+  }
+}

@@ -18,7 +18,7 @@ const {
 } = require('../../../../src/backend/database/background-execution-schema');
 const {
   createBackgroundExecutionRuntime
-} = require('../../../../src/main-process/background-execution/runtime');
+} = require('../../../../src/main-process/execution-descriptors/composition');
 const {
   createWorkerThreadAdapter
 } = require('../../../../src/main-process/background-execution/adapters/worker-thread-adapter');

@@ -9,7 +9,9 @@ const { seed, compute } = require('../../helpers/biz-op-v327-compute');
 const { writeXlsx, flowRow, opRow } = require('../../helpers/biz-op-v327-xlsx');
 const { registerBizOpV327Handlers } = require('../../../src/main-process/biz-op-v327/ipc');
 const { createBusinessOperationRegistry } = require('../../../src/main-process/business-operation-registry');
-const { createTaskPolicyRegistry } = require('../../../src/main-process/archive-center/task-policy-registry');
+const {
+  createTaskPolicyRegistry
+} = require('../../../src/main-process/execution-descriptors/composition');
 
 function wire(f, options = {}) {
   const handlers = new Map(); const sender = Object.assign(new EventEmitter(), { id: 1, mainFrame: {} });

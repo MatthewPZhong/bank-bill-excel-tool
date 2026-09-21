@@ -26,7 +26,7 @@ const {
 } = require('../../src/main-process/background-execution/canonical-json-v1');
 const {
   createBackgroundExecutionRuntime
-} = require('../../src/main-process/background-execution/runtime');
+} = require('../../src/main-process/execution-descriptors/composition');
 const {
   MAX_RECORDS,
   NEW_ACCOUNT_GENERATION_ACTION

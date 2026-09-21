@@ -9,7 +9,7 @@ const { isDeepStrictEqual } = require('node:util');
 
 const {
   BACKGROUND_EXECUTION_POLICIES
-} = require('../src/main-process/background-execution/runtime');
+} = require('../src/main-process/execution-descriptors/policy-catalog');
 const {
   FUND_RECON_POLICIES
 } = require('../src/main-process/fund-recon-worker/policies');

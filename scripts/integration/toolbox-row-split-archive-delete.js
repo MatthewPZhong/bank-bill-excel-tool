@@ -13,11 +13,15 @@ const { createArchiveService } = require('../../src/main-process/archive-center/
 const { createArchiveCenterController } = require('../../src/main-process/archive-center/controller');
 const { createArchiveOutboxStore } = require('../../src/main-process/archive-center/outbox-store');
 const { createTaskLifecycle } = require('../../src/main-process/archive-center/task-lifecycle');
-const { createTaskPolicyRegistry } = require('../../src/main-process/archive-center/task-policy-registry');
+const {
+  createTaskPolicyRegistry
+} = require('../../src/main-process/execution-descriptors/composition');
 const { prepareIpcTaskInvocation, createIpcTaskContext } = require('../../src/main-process/archive-center/ipc-task-contract');
 const { sourceSnapshotFromStat, sourceSnapshotMatchesStat } = require('../../src/main-process/archive-center/source-snapshot');
 const { pathsAlias } = require('../../src/main-process/toolbox-target-identity');
-const { createBackgroundExecutionRuntime } = require('../../src/main-process/background-execution/runtime');
+const {
+  createBackgroundExecutionRuntime
+} = require('../../src/main-process/execution-descriptors/composition');
 const { scanToolboxSplitFields } = require('../../src/main-process/toolbox-format-operations');
 const { prepareRows, generateValidateAndPublishRows } = require('../../src/main-process/toolbox-row-split/service');
 const { publicResult } = require('../../src/main-process/toolbox-row-split/contracts');

@@ -4,7 +4,9 @@ const path = require('node:path');
 
 const { resolveArchiveScope } = require('./module-scope-registry');
 const { sourceSnapshotForPath } = require('./source-snapshot');
-const { createTaskPolicyRegistry } = require('./task-policy-registry');
+const {
+  createTaskPolicyRegistry
+} = require('../execution-descriptors/composition');
 
 function moduleDescriptor(scopeKey) {
   const scope = resolveArchiveScope(scopeKey);

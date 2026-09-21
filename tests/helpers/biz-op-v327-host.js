@@ -14,7 +14,9 @@ const { createTaskLifecycle } = require('../../src/main-process/archive-center/t
 const { createBusinessFlowResolver } = require('../../src/main-process/archive-center/business-flow-resolver');
 const { createBusinessOperationRegistry } = require('../../src/main-process/business-operation-registry');
 const { normalizeFilePlanV1 } = require('../../src/main-process/archive-center/file-plan');
-const { createNonProductionBackgroundExecutionRuntime } = require('../../src/main-process/background-execution/runtime');
+const {
+  createNonProductionBackgroundExecutionRuntime
+} = require('../../src/main-process/execution-descriptors/composition');
 const { createResourceGovernor } = require('../../src/main-process/background-execution/resource-governor');
 const { createInspectorRegistry } = require('../../src/main-process/background-execution/inspector-registry');
 const { createSettlementRecoveryProviderRegistry } = require('../../src/main-process/background-execution/settlement-recovery-provider-registry');

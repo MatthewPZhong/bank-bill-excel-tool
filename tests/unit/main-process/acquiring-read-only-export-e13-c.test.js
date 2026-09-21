@@ -38,9 +38,11 @@ const {
   bindingSnapshot
 } = require('../../../src/main-process/background-execution/action-task-binding-registry');
 const {
-  BACKGROUND_EXECUTION_POLICIES,
+  BACKGROUND_EXECUTION_POLICIES
+} = require('../../../src/main-process/execution-descriptors/policy-catalog');
+const {
   createBackgroundExecutionRuntime
-} = require('../../../src/main-process/background-execution/runtime');
+} = require('../../../src/main-process/execution-descriptors/composition');
 
 function createGenerationPlan(root, name) {
   return Object.freeze({

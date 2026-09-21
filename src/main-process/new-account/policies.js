@@ -1,7 +1,6 @@
 'use strict';
 
-const { NEW_ACCOUNT_GENERATION_ACTION } = require('./generation-contract');
-const { NEW_ACCOUNT_SAVE_AS_ACTION } = require('./artifact-copy');
+const { NEW_ACCOUNT_GENERATION_ACTION, NEW_ACCOUNT_SAVE_AS_ACTION } = require('./generation-contract');
 const { MIN_NEW_ACCOUNT_GENERATION_MEMORY_BYTES } = require('./resource-estimator');
 
 const ZERO_RESOURCES = Object.freeze({

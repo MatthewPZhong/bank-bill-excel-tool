@@ -1,0 +1,5 @@
+
+> bank-bill-excel-tool@3.2.9 check:background-execution-manifest
+> node scripts/check-background-execution-manifest.js
+
+E13-G manifest gate PASS: 402/402 surfaces, 74 legacy pairs, 13 production enabled

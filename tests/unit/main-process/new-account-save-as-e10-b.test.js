@@ -10,9 +10,11 @@ const XLSX = require('xlsx');
 
 const { normalizeFilePlanV1 } = require('../../../src/main-process/archive-center/file-plan');
 const {
-  createBackgroundExecutionRuntime,
+  createBackgroundExecutionRuntime
+} = require('../../../src/main-process/execution-descriptors/composition');
+const {
   isBackgroundExecutionProductionEnabled
-} = require('../../../src/main-process/background-execution/runtime');
+} = require('../../../src/main-process/execution-descriptors/policy-catalog');
 const {
   createJobEnvelope
 } = require('../../../src/main-process/background-execution/protocol');

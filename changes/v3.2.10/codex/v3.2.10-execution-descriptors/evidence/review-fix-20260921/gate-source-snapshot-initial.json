@@ -1,0 +1,16 @@
+{
+  "recordedAt": "2026-09-20T17:24:06.356268+00:00",
+  "head": "8b12a6d5fd71b70ade58b9b6e7a347e29dbe8d05",
+  "sha256": {
+    "src/main-process/background-execution/approved-execution-baseline.js": "603e6d4cf87dfd6218a61e55fba7f2960b06b6563aee8171d74f5dfaf64ae9a5",
+    "src/main-process/background-execution/approved-execution-baseline.json": "2dfaf3fcc4014fa8b71a225a0eed1787a9c2d814e41d2d586003233ca9a2241b",
+    "src/main-process/background-execution/runtime.js": "62a110aa4ddd561d18675bceea648ec4b925a957a3a2a1524f78b174532cc6d0",
+    "src/main-process/background-execution/supervisor.js": "6d634a7146fcddadc59ac5d1d148aed235be758c85985a63517bf6b42d14f012",
+    "src/main-process/execution-descriptors/contract.js": "5d05799bd4de91b2a7ed6c0674a72d4711bb9c1c77bf720787ee540e24c0751c",
+    "src/main-process/execution-descriptors/composition.js": "2a6cc12e6c154c401284423b2bd55ee9d916f564d42776ef673e20b57dee78f7",
+    "scripts/check-background-execution-manifest.js": "c2d162201db521d6d3ddd9f55852fb948134a1f185b9fa4a59c0a38fda92d9ec",
+    "tests/unit/main-process/execution-descriptor-production-baseline.test.js": "6c082e4ff02f86077bfbdaecf03a52f220111a577e45f87d7a0537ad2b966fea",
+    "tests/unit/main-process/execution-descriptor-dispatch-compatibility.test.js": "9a4f8a94ce377ca6c19e9b6a68fe2e2d4d6c7cddd4d95e5187cfc6d83c69490a"
+  },
+  "scope": "本次R1/R2修复9个源码/测试文件；旧内容按用户隔离快照与修复前128文件摘要核验，Supervisor旧内容来自HEAD"
+}

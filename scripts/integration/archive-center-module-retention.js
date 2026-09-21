@@ -42,7 +42,7 @@ const {
 } = require('../../src/main-process/archive-center/operation-tracker');
 const {
   createTaskPolicyRegistry
-} = require('../../src/main-process/archive-center/task-policy-registry');
+} = require('../../src/main-process/execution-descriptors/composition');
 const {
   createBusinessOperationRegistry
 } = require('../../src/main-process/business-operation-registry');

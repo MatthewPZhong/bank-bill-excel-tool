@@ -18,7 +18,7 @@ const {
 } = require('../../../src/main-process/archive-center/task-lifecycle');
 const {
   createTaskPolicyRegistry
-} = require('../../../src/main-process/archive-center/task-policy-registry');
+} = require('../../../src/main-process/execution-descriptors/composition');
 const {
   createVccFinancialOpService
 } = require('../../../src/main-process/vcc-financial-op-service');

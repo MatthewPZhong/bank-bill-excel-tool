@@ -14,7 +14,7 @@ const {
 } = require('../../../src/main-process/bank-statement-io');
 const {
   createBackgroundExecutionRuntime
-} = require('../../../src/main-process/background-execution/runtime');
+} = require('../../../src/main-process/execution-descriptors/composition');
 const {
   FUND_RECON_ACTIONS,
   validateFundReconImportResult

@@ -9,7 +9,9 @@ const os = require('node:os');
 const path = require('node:path');
 const { randomUUID, createHash } = require('node:crypto');
 const ExcelJS = require('exceljs');
-const { createBackgroundExecutionRuntime } = require('../../src/main-process/background-execution/runtime');
+const {
+  createBackgroundExecutionRuntime
+} = require('../../src/main-process/execution-descriptors/composition');
 const { scanToolboxSplitFields } = require('../../src/main-process/toolbox-format-operations');
 const { prepareRows, generateValidateAndPublishRows } = require('../../src/main-process/toolbox-row-split/service');
 const { publicResult, buildRowTargets, planRowCounts } = require('../../src/main-process/toolbox-row-split/contracts');

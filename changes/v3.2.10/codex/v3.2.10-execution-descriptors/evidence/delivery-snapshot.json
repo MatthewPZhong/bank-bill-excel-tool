@@ -1,0 +1,25 @@
+{
+  "recordedAt": "2026-09-20T17:53:41.800130+00:00",
+  "branch": "codex/v3.2.10-execution-descriptors",
+  "head": "8b12a6d5fd71b70ade58b9b6e7a347e29dbe8d05",
+  "status": "R1/P2、R2/P3修复已实现；完整本地门禁PASS；未提交、未集成release",
+  "source": "HEAD + dirty including untracked files",
+  "sourceSnapshot": "source-snapshot.json",
+  "sourceSnapshotSha256": "8caa84153bb4a81a1353f17026912e5d00ec0200517bb40c83251f0f9b4bd384",
+  "validation": "validation-final.json",
+  "validationSha256": "edd96233a96b1e54f86826e9ef72498a26468b47de288ad0bb8e8d93e729a010",
+  "codeDiff": "code.diff",
+  "codeDiffSha256": "dc49f181b20780dab950411b6c107fe74c7ba21df38b472315efdda3d4274aa5",
+  "reviewFixDiff": "review-fix-20260921/fix-code.diff",
+  "reviewFixDiffSha256": "9c6993d649e24f17c2726706bb915eb394bf6ccbad417ce737a843eaf4613b94",
+  "approvedBaselineProvenance": "review-fix-20260921/approved-baseline-provenance.json",
+  "independentReview": "../review-fix-2026-09-21.md",
+  "implementationRecord": "../implementation-notes.md#review-fixes",
+  "historicalDelivery": "review-fix-20260921/before-delivery-snapshot.json",
+  "notExecuted": [
+    "G8 configuration activation (dependency not integrated)",
+    "Windows PowerShell/CIM and packaged carriers",
+    "Electron GUI, Excel/WPS, installer manual acceptance"
+  ],
+  "integrationState": "G1/G2已在固定8b12a6d5；本G7差异未提交或集成；G8待联合激活"
+}

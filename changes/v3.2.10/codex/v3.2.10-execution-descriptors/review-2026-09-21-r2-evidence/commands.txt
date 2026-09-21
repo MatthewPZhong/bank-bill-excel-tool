@@ -1,0 +1,12 @@
+工作目录：/private/tmp/execution-descriptors-review-20260921-r2
+node --test tests/unit/main-process/execution-descriptor-*.test.js tests/unit/main-process/background-execution/supervisor.test.js tests/unit/main-process/background-execution/carrier-observation.test.js tests/unit/main-process/biz-op-v327.test.js
+node scripts/integration/execution-descriptor-governance.js
+npm run check:background-execution-manifest
+
+来源验证：git archive 8b12a6d5fd71b70ade58b9b6e7a347e29dbe8d05 src
+node baseline-provenance-check.cjs /private/tmp/g7-r2-baseline-8b12a6d5 /private/tmp/execution-descriptors-review-20260921-r2
+node r1-closure.cjs
+node getter-lifecycle.cjs
+
+原分支只读差异检查：git diff --check HEAD
+已有修复后 release-check 的133个文件hash、source-snapshot hash及完整日志hash全部核对一致；本次不重复全量门禁。

@@ -8,7 +8,9 @@ const path = require('node:path');
 const test = require('node:test');
 const { DatabaseSync } = require('node:sqlite');
 const { createArchiveAwareOperationHarness } = require('../../../helpers/archive-aware-operation-harness');
-const { createTaskPolicyRegistry } = require('../../../../src/main-process/archive-center/task-policy-registry');
+const {
+  createTaskPolicyRegistry
+} = require('../../../../src/main-process/execution-descriptors/composition');
 
 const {
   ensureArchiveMetadataSupport

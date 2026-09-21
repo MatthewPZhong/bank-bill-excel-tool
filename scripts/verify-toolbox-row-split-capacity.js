@@ -7,7 +7,9 @@ const os = require('node:os');
 const path = require('node:path');
 const ExcelJS = require('exceljs');
 const { normalizeFilePlanV1 } = require('../src/main-process/archive-center/file-plan');
-const { createBackgroundExecutionRuntime } = require('../src/main-process/background-execution/runtime');
+const {
+  createBackgroundExecutionRuntime
+} = require('../src/main-process/execution-descriptors/composition');
 const { createTestPublicationHarness } = require('../tests/helpers/publication-authority');
 const { scanToolboxSplitFields } = require('../src/main-process/toolbox-format-operations');
 const { planRowCounts, buildRowTargets, publicResult } = require('../src/main-process/toolbox-row-split/contracts');

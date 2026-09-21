@@ -6,7 +6,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const ipcTaskContract = require('../../src/main-process/archive-center/ipc-task-contract');
-const { createTaskPolicyRegistry } = require('../../src/main-process/archive-center/task-policy-registry');
+const {
+  createTaskPolicyRegistry
+} = require('../../src/main-process/execution-descriptors/composition');
 
 const { createPreparedResourceScope } = require('../../src/main-process/task-adapters/prepared-resources');
 const { createTaskAdapterRegistry } = require('../../src/main-process/task-adapters/registry');

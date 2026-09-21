@@ -13,7 +13,9 @@ const { sourceSnapshotFromStat } = require('../../../src/main-process/archive-ce
 const { normalizeFilePlanV1 } = require('../../../src/main-process/archive-center/file-plan');
 const { scanToolboxSplitFields } = require('../../../src/main-process/toolbox-format-operations');
 const { createToolboxOutputWriter } = require('../../../src/main-process/toolbox-output-writer');
-const { createBackgroundExecutionRuntime } = require('../../../src/main-process/background-execution/runtime');
+const {
+  createBackgroundExecutionRuntime
+} = require('../../../src/main-process/execution-descriptors/composition');
 const { ROWS_BUDGETS, planRowCounts, buildRowTargets, validatePlan, writePrivateJson, readPrivateJson, sha256 } = require('../../../src/main-process/toolbox-row-split/contracts');
 const { prepareRows, generateValidateAndPublishRows } = require('../../../src/main-process/toolbox-row-split/service');
 const { executeRowsGeneration } = require('../../../src/main-process/toolbox-row-split/executor');

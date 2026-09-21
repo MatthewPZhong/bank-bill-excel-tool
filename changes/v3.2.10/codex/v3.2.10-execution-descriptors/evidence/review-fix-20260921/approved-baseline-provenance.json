@@ -1,0 +1,16 @@
+{
+  "sourceCommit": "8b12a6d5fd71b70ade58b9b6e7a347e29dbe8d05",
+  "source": "git archive 固定 release 原 runtime；不读取当前 descriptor/catalog 生成期望",
+  "runtimePolicyCount": 49,
+  "productionEnabled": 13,
+  "frozen11086FixtureMatches": true,
+  "fixtureSha256": "d24d05717fffa6d35907b59e7b5cfedd31376f322c305011040916edf51acb62",
+  "approvedBaselineSha256": "2dfaf3fcc4014fa8b71a225a0eed1787a9c2d814e41d2d586003233ca9a2241b",
+  "sourceHashes": {
+    "runtime.js": "d8e0ee43a1357663f097e2e6f6b65f2beccee208876df539ae7bcb637cd51a65",
+    "action-task-binding-registry.js": "d00c70b534347cd9efbe71933f5ae7141cd60529ed104b9521aa9f388a5efc33",
+    "action-manifest.js": "ac47bcbbdb47220007b1f53d8a53fd7f938bc5d10b870635d861389dde13ef4f",
+    "capability-inventory.js": "658f0857b3ab1fc3520cf3184522dfa1da62a44bfe61bde7d29811710d66fd9c",
+    "production-strategy-snapshot.js": "da5ff1358221b0cd68c7a6e474d741fed9ecd688da71cc02b5e53aa93c3ab121"
+  }
+}

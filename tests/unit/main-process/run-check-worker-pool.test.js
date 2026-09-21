@@ -194,7 +194,9 @@ test.describe('run-check-worker-pool', () => {
     assert.match(wrapperSource, /operationKey:\s*adapterInvocation\.identity\.operationKey/);
     assert.match(wrapperSource, /flowPlanResolver:\s*prepared\.flowPlan/);
     const { createBusinessTaskAdapterRegistry } = require('../../../src/main-process/task-adapter-composition');
-    const { createTaskPolicyRegistry } = require('../../../src/main-process/archive-center/task-policy-registry');
+    const {
+  createTaskPolicyRegistry
+} = require('../../../src/main-process/execution-descriptors/composition');
     const resumePolicy = createTaskPolicyRegistry().require('acquiringBillCurrency:run:resume');
     const adapters = createBusinessTaskAdapterRegistry({ policies: [resumePolicy], positionOwner: {},
       acknowledgeReceipts() {}, reportArchiveFailure() {} });

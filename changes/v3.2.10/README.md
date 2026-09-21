@@ -6,16 +6,16 @@
 | 文档日期 | 2026-09-20 |
 | 用户已确认 | G1–G8 每项独立 Spec / TechDoc；按 v3.2.9 的功能分支目录组织；写清具体模块、接口、职责、迁移与验收 |
 | 设计及源码基线 | `main@11086a3cbf632a30adbcfa796e4cd81810c5aef9`；本地附注标签 `v3.2.9` 指向同一提交 |
-| 集成分支 | `release/v3.2.10`；本轮 G1/G4/G5/G6 组合源码提交为 `49ac95a80bf884a0bfdc2f53ecbfdb4dd982819e`，后续记录提交及验证见 [本地集成记录](release.md) |
-| 功能分支状态 | G1、G4、G5、G6 已逐项合入；G2/G3/G7/G8 未纳入本次集成，下表保留计划名称 |
+| 集成分支 | `release/v3.2.10`；本 G7 功能分支纳入固定依赖 `8b12a6d5fd71b70ade58b9b6e7a347e29dbe8d05`（G1/G2/G4/G5/G6），[固定依赖证据](codex/v3.2.10-execution-descriptors/evidence/dependency-integration.json)；release 自身记录见 [release.md](release.md) |
+| 功能分支状态 | 上述固定依赖已含 G1/G2/G4/G5/G6；G7 在本功能分支实施、未集成，见 [实施记录](codex/v3.2.10-execution-descriptors/implementation-notes.md)；G3/G8 未纳入此固定依赖 |
 | 交付状态 | 设计审查、模块实施与 release 组合验证分开记录；本次本地集成不代表正式发布或平台人工验收通过 |
 | 独立审查修订 | R1–R9 及 G8 历史损坏配置恢复建议均在设计层关闭，无已知待修必改项；处置、验收映射和三轮依据见 [修订记录](review-response.md)，独立报告保持原状 |
 | 依据 | [模块耦合审查](../architecture-coupling/2026-09-20/review.md)及该目录的静态扫描、局部探针证据 |
 | 格式参考 | [v3.2.9 按行拆分 Spec](../v3.2.9/codex/v3.2.9-toolbox-split-by-rows/spec.md)、[TechDoc](../v3.2.9/codex/v3.2.9-toolbox-split-by-rows/techdoc.md)的元数据、行为合同、分阶段实施和验收结构 |
 
-已纳入模块的实施记录：[G1](codex/v3.2.10-application-recovery/implementation-notes.md)、[G4](codex/v3.2.10-shared-xlsx-infrastructure/implementation-notes.md)、[G5](codex/v3.2.10-bizop-query-boundaries/implementation-notes.md)、[G6](codex/v3.2.10-storage-execution-separation/implementation-notes.md)。这些材料保留各功能实施时点的记录；当前集成 SHA、冲突处理与组合验证以 [release.md](release.md) 为准。下文第三轮设计审查状态保留为原设计基线。
+已纳入模块的实施记录：[G1](codex/v3.2.10-application-recovery/implementation-notes.md)、[G2](codex/v3.2.10-business-task-adapters/implementation-notes.md)、[G4](codex/v3.2.10-shared-xlsx-infrastructure/implementation-notes.md)、[G5](codex/v3.2.10-bizop-query-boundaries/implementation-notes.md)、[G6](codex/v3.2.10-storage-execution-separation/implementation-notes.md)。这些材料保留各功能实施时点的记录；当前集成 SHA、冲突处理与组合验证以 [release.md](release.md) 为准。下文第三轮设计审查状态保留为原设计基线。
 
-本工作树已带入 G1/G4/G5/G6 及各自审查材料；G2/G3/G7/G8 的设计仍从[主工作区总索引](/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/README.md)读取。下列未集成功能的相对链接待各功能文档集成后在本树可用，不表示这些项已实施。
+本 G7 工作树采用上述已集成依赖的材料；G7 及必要引用设计从用户指定的[主工作区总索引](/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/README.md)读取并带入。G7 当前事实见本功能实施记录，G3/G8 的设计副本不表示实现已集成。下文 §2.1 与设计审查段落保留原调查/设计时点，当前固定 SHA 以上表为准。
 
 ## 1. 功能分支与交付文件
 
@@ -169,7 +169,7 @@ G8 尚未集成时，相关切片仍须完成自己的行为验证，并按原�
 
 当前既有项目入口是根 [AGENTS.md](../../AGENTS.md) 的架构摘要/资料入口及 [CODEX.md](../../CODEX.md) 的工作流/资料索引；长期专项约束继续以对应 `rules/` 正文为准，例如 [run 级存储约定](../../rules/run-scoped-data-policy.md)。版本 Spec/TechDoc 保存设计合同，切片记录保存实施证据，模块现行说明保存已经落地的职责与使用方式，三者互相链接。
 
-下表是实施时的默认落点；本 release 已建立 G1、G2、G4、G5、G6 入口，G3/G7/G8 模块 README 仍为拟新增，不能作为已存在的规则入口。首个涉及该模块实际职责的切片建立说明；若届时已有覆盖同一职责的权威说明，则复用该说明，并在本表和切片记录中更新准确路径，避免两份正文。记录模块实际入口、状态/副作用归属、允许/禁止依赖、当前兼容接口及代表性测试链接即可，不复制完整版本设计。
+下表是实施时的默认落点；本 release 已建立 G1、G2、G4、G5、G6 入口，G7 在功能分支已建立说明，G3/G8 模块 README 仍为拟新增，不能作为已存在的规则入口。首个涉及该模块实际职责的切片建立说明；若届时已有覆盖同一职责的权威说明，则复用该说明，并在本表和切片记录中更新准确路径，避免两份正文。记录模块实际入口、状态/副作用归属、允许/禁止依赖、当前兼容接口及代表性测试链接即可，不复制完整版本设计。
 
 | 治理项 / 维护者 | 默认人读现行说明入口（实施时建立或复用） | 切片应同步的内容 |
 | --- | --- | --- |
@@ -179,7 +179,7 @@ G8 尚未集成时，相关切片仍须完成自己的行为验证，并按原�
 | G4 XLSX 切片 | [src/backend/xlsx/README.md](../../src/backend/xlsx/README.md)（已集成） | 两类 reader 的适用入口和能力差异、预算/关闭/临时资源所有权、旧 shim 现状；不把目录提取写成性能升级。 |
 | G5 BizOP 查询切片 | [src/main-process/biz-op-v327/README.md](../../src/main-process/biz-op-v327/README.md)（已集成） | queries 与 commands 的边界、catalog.db 合法保留者、Archive 查询入口及准入/预算归属；仅补本项涉及的实际内容。 |
 | G6 VCC / Acquiring 切片 | [VCC](../../src/backend/vcc-financial-op/README.md)、[Acquiring](../../src/backend/acquiring-bill-currency-db/README.md)（已集成） | 分别记录纯 hash/lineage 合同，以及 repository/service/executor 的实际入口、B0 退出屏障、partial/resume/清理顺序；已有存储专项约束只引用，语义未变时不机械改写。 |
-| G7 描述符切片 | `src/main-process/execution-descriptors/README.md` | 静态装配、独立 authority、各 registry 所有权和新增 action 的真实步骤；引用 G1/G2 说明，不另定义生命周期。 |
+| G7 描述符切片 | [src/main-process/execution-descriptors/README.md](../../src/main-process/execution-descriptors/README.md)（功能分支已建立，未集成） | 静态装配、独立 authority、各 registry 所有权和新增 action 的真实步骤；引用 G1/G2 说明，不另定义生命周期。 |
 | G8 检查器切片 | `architecture/README.md` | 检查命令、配置入口、覆盖盲区、激活/例外/退役规则及消费者维护方式；机器正文仍在 `boundaries.json`、`legacy-allowlist.json`，人读说明只解释与链接。 |
 
 每份说明首次落地时，在根 `AGENTS.md` 的资料入口增加链接或更新其已有导读位置；只添加导航，不重复模块规则正文。后续修改职责/接口/兼容或验证入口的切片，更新对应模块说明；更名或移动时同步导读和消费者引用。已有合适上层模块索引时可通过该索引承接，并在切片记录留下从根入口到该说明的路径。

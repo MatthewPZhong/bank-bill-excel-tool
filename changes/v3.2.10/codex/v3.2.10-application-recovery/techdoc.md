@@ -255,3 +255,7 @@ G7 只能引用本稿 participant/coordinator 接口并汇总注册，不改变�
 沿用本稿既有阶段及任务 ID，按[切片完成标准](../../README.md#slice-completion)逐项交付。优先复用本功能目录已有的 `implementation-notes.md` / `verification.md`；首次实施且没有适用记录时建立 `implementation-notes.md`，使用[实施记录与状态要求](../../README.md#slice-record)中的最小字段，避免同一事实多处维护。设计 AC 和测试计划与实际迁移状态、执行结果分别记录，本次不建立实施记录占位文件。
 
 按[各治理项现行规则入口映射](../../README.md#current-rule-entrypoints)同步本切片影响的规则正文和入口链接。只有职责已在实际生产调用路径落地的模块才能记为现行入口，尚未实现的模块继续标为拟新增；不影响规则时，在切片记录中写明无需更新及原因。本次为文档要求补充，不表示生产实现、边界激活或验证已经完成。
+
+## G7 消费的注册快照入口（实施补充）
+
+`application-recovery/composition.js` 导出 `createApplicationRecoveryParticipants(context)` 和固定 `RECOVERY_PARTICIPANT_ORDER`，供 G7 聚合已有注册项；`createApplicationRecoveryComposition` 可消费显式 `participants`，必须与原固定顺序完整一致，否则在创建 coordinator 前拒绝。默认调用仍使用同一注册快照工厂。此补充只提取既有 registrations，恢复执行、phase、owner proof、publication 授权和副作用仍归 G1 原 coordinator，不引入第二套恢复路径。G7 拆分/重新聚合后须按该 G1 顺序传回，不能由 descriptor 枚举顺序决定启动次序。
