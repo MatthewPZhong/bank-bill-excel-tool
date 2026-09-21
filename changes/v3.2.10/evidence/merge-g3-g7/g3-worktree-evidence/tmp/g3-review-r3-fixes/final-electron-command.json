@@ -1,0 +1,10 @@
+{
+  "cwd": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries",
+  "command": [
+    "node",
+    "scripts/test-renderer-lifecycle.js"
+  ],
+  "exitCode": 0,
+  "elapsedSeconds": 18.961,
+  "log": "final-electron.log"
+}

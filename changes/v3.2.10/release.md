@@ -1,6 +1,6 @@
 # v3.2.10 本地集成记录
 
-当前已纳入 G1 应用恢复、G2 业务任务适配器、G4 共用 XLSX、G5 BizOP 查询边界、G6 存储与执行分离。下方分批保留各次集成证据；最新组合见「G2 business-task-adapters 合入」。G3/G7/G8 尚未纳入本次集成。
+当前已纳入 G1 应用恢复、G2 业务任务适配器、G3 Renderer 边界、G4 共用 XLSX、G5 BizOP 查询边界、G6 存储与执行分离、G7 执行描述符。下方分批保留各次集成证据；最新组合见「G3 Renderer / G7 execution-descriptors 合入」。G8 尚未纳入本次集成。
 
 ## application-recovery 合入
 
@@ -131,3 +131,47 @@
 - 真实 Electron 进程强杀与 GUI、Windows 文件锁及安装包、Excel/WPS 人工验收未执行；确定性 Node 恢复集成不等同这些平台验收。
 - G2 原 Spec/TechDoc、实施与审查证据保留历史“未提交/未集成”及分轮验证描述，当前集成事实以本节和 Git 历史为准。原独立 manifest 现行与历史 actions 上下文差异保持原记录。
 - 本次仅本地合并，未推送、未开 PR、未合入 main、未升版、未创建标签或发布。
+
+## G3 Renderer / G7 execution-descriptors 合入
+
+2026-09-21，按用户要求将以下两个分支依次合入既有 `release/v3.2.10`。合并前 release 为 `1c0051ed1f98434aabf6bd82150de716059dc982`，已包含 G1/G2/G4/G5/G6；源实现均为工作区差异，本次先固定各模块内容再合并。
+
+| 模块 | 功能分支 | 功能提交 | 合并提交 |
+| --- | --- | --- | --- |
+| G3 Renderer 状态与弹窗边界 | `codex/v3.2.10-renderer-boundaries` | `611af431493668df02fff98bdcda0b47c4080f20` | `a85dbee2021c9e810f0274d66c3d027474c4a1c8` |
+| G7 执行与归档描述符 | `codex/v3.2.10-execution-descriptors` | `6a7d23c4ea062f90021fc670e8a1654ad8d2ad26` | `9602a1fa482203e11bfde8cd6a73b8f552243d95` |
+
+两次合并均使用 `--no-ff`，组合受验候选为 `9602a1fa482203e11bfde8cd6a73b8f552243d95`。当前已纳入 G1—G7，G8 未纳入。本批仅本地集成，未推送、未开 PR、未合入 main、未升版或创建标签。
+
+### 内容、冲突与证据保护
+
+- G3 冻结提交 188 个模块文件；最新第四轮复审的 3,100 项输入中，源码/测试/脚本无漂移，仅实施记录后来接收复审结论。G7 冻结提交 243 个模块文件，最终门禁源码快照 133/133 匹配。见 [来源证据核对](evidence/merge-g3-g7/source-evidence-audit.json)。
+- 代码与测试自动合并；实际冲突仅为根 AGENTS 模块导航、版本索引和集成测试自动生成清单。导航同时保留所有模块，版本索引按 release 当前状态更新；政策第七节前正文一致，最终清单由全部集成通过后的 runner 自动生成。
+- 五个 G3/既有模块交叉测试，以及两个 G3/G7 交叉测试，双方补丁均可在组合内容上通过只读反向适用检查。合并候选中 G3 的 180 个、G7 的 238 个非交集文件与冻结源逐字节一致。见 [组合核验](evidence/merge-g3-g7/composition-audit.json)、[G3 交叉补丁](evidence/merge-g3-g7/g3-overlap-check.json)、[G7 交叉补丁](evidence/merge-g3-g7/g7-overlap-check.json)。
+- 主工作区保持 `main@11086a3c`，原 130 个未跟踪文件内容不变；G3/G7 源工作区分别保留 2/6 个范围外设计副本。见 [工作区保留核验](evidence/merge-g3-g7/workspace-preservation.json)。
+- G3 实施记录原有 77 个证据文件位于被忽略的临时目录，本批逐字节归档约 17 MB，并仅调整实施记录中的 77 处证据链接。旧失败、被拒绝的运行、历史补丁和原始输出均保留，未改写为 PASS。G7 TechDoc 的 G8 设计引用改为主工作区既有设计路径，没有混入 G8 文件。归档清单见 [manifest.json](evidence/merge-g3-g7/g3-worktree-evidence/manifest.json)。
+
+### 本批组合验证
+
+`UNIT_TEST_CONCURRENCY=1 npm run release-check` 对上述组合完整执行，**PASS，exit 0**。macOS arm64 / Node v25.8.0；2026-09-21 10:47:39—11:13:35（Asia/Shanghai），约 25 分 56 秒。
+
+| 检查 | 本次实际结果 |
+| --- | --- |
+| lint / smoke | 全部 PASS |
+| 完整单测 | 551 个文件，8777 项中 8773 PASS、0 FAIL、0 CANCELLED、4 Windows 条件 SKIP、0 TODO |
+| 全量集成 | 68/68 脚本通过；runner 可解析断言汇总 2874/2874，未输出计数的历史脚本按 exit 0 判定 |
+| G3 隔离 Electron lifecycle | 206/206 PASS，真实 DOM/生产工厂，受控业务 API |
+| G7 execution-descriptor governance | 4/4 PASS，真实载体及既有装配/授权合同 |
+| G3 既有单测缺口 | 1024 个真实 Task 来源通过（约 84 秒）；R3.2.4 原提交/PR 历史 evidence 复验通过（约 87 秒） |
+| 当前 manifest 独立校验 | 402/402 PASS、74 legacy pairs、13 production enabled；批准基线未改 |
+
+G3 早先完整门禁因磁盘风险被自动审批拒绝。本次先确认无其他大型测试并发，在已获准的合并组合上采用单文件串行单测，并在剩余磁盘低于 2 GiB 时仅终止本次测试进程组。开始余量 7.396 GiB，本轮最低观测 6.583 GiB，保护未触发；没有排除此前的两项测试。旧失败/拒绝记录保留，新 PASS 只对应本次组合。四项跳过仍为真实 Windows PowerShell/CIM 和 packaged canary；具体名称见 [单测摘要](evidence/merge-g3-g7/unit-summary.json)。
+
+完整日志见 [release-check.log](evidence/merge-g3-g7/release-check.log)，环境、起止时间、退出码、计数与磁盘保护记录见 [release-check-result.json](evidence/merge-g3-g7/release-check-result.json)。后续记录提交仅同步文档链接、版本状态、证据及 runner 生成清单；源码、测试、执行脚本、页面入口、lint 与依赖配置对象保持受验候选一致，见 [validated-input-objects.json](evidence/merge-g3-g7/validated-input-objects.json)。
+
+### 当前仍未完成的验收
+
+- **G3 记录的资金相关人工复核仍未执行。** R01 来源绑定修复的自动化使用合成 Excel、真实 parser/session 和内存 SQLite；需人工核对界面确认账期、输入期初、Main snapshot、逐文件明细和落库 receipt 的一致性，不能据自动测试宣称真实资金数据已验收。原要求见 [G3 实施记录的资金复核说明](codex/v3.2.10-renderer-boundaries/implementation-notes.md#资金人工复核与剩余门禁)。
+- 隔离 Electron 工厂使用受控 API，不等于产品 Main 两阶段写入、模板库同步、Task/日志的完整端到端验收；Windows/Excel/WPS/安装包及真实用户数据故障恢复人工验收未执行。G3 第四轮额外三项独立探针因执行器异常未完成的记录保留，不计为通过。
+- G8 未集成；`ARCH-TASK-ADAPTER`、`ARCH-DESCRIPTOR-COMPOSITION` 等机器规则的激活及联合验收仍待后续。当前自动测试不代替规则激活。
+- 原各模块文档中的“未提交/未集成”和分轮验证保留其原时点含义；当前 Git 集成与组合验证以本节为准。G7 当前 manifest 检查独立通过，早期 manifest 历史差异记录不追溯改写。

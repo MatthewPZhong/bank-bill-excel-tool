@@ -1,0 +1,562 @@
+TAP version 13
+# Subtest: E11-A policy byte-for-byte 沿用 canonical fixture，且 production 保持 false
+ok 1 - E11-A policy byte-for-byte 沿用 canonical fixture，且 production 保持 false
+  ---
+  duration_ms: 2.041042
+  type: 'test'
+  ...
+# Subtest: phase-extension 预检先于 XLSX.readFile，超出 policy 上限时 fail closed
+ok 2 - phase-extension 预检先于 XLSX.readFile，超出 policy 上限时 fail closed
+  ---
+  duration_ms: 16.170083
+  type: 'test'
+  ...
+# Subtest: standard Service golden 等价，revision/busy/stale/JPM 边界不越界
+ok 3 - standard Service golden 等价，revision/busy/stale/JPM 边界不越界
+  ---
+  duration_ms: 10.652666
+  type: 'test'
+  ...
+# Subtest: unsafe integer 仅投影到 evidence，数值型长单号/大金额与 legacy golden 等价
+ok 4 - unsafe integer 仅投影到 evidence，数值型长单号/大金额与 legacy golden 等价
+  ---
+  duration_ms: 5.417875
+  type: 'test'
+  ...
+# Subtest: scenario 变化先失效旧 result，再原子 adopt 新 result
+ok 5 - scenario 变化先失效旧 result，再原子 adopt 新 result
+  ---
+  duration_ms: 3.978542
+  type: 'test'
+  ...
+# Subtest: BOC Service 只读 golden 等价，DB evidence 变化会锁定失效旧 result
+ok 6 - BOC Service 只读 golden 等价，DB evidence 变化会锁定失效旧 result
+  ---
+  duration_ms: 8.119792
+  type: 'test'
+  ...
+# Subtest: ordinary gateway C4 managed/legacy golden 保持金额币种行数且 phase 回收
+ok 7 - ordinary gateway C4 managed/legacy golden 保持金额币种行数且 phase 回收
+  ---
+  duration_ms: 189.737334
+  type: 'test'
+  ...
+# Subtest: import parse 失败仍先获 phase 准入并在 error terminal 前回收
+ok 8 - import parse 失败仍先获 phase 准入并在 error terminal 前回收
+  ---
+  duration_ms: 159.387458
+  type: 'test'
+  ...
+# Subtest: real ServiceHost 复用单 owner，close/crash 升 generation 并回收 lease
+ok 9 - real ServiceHost 复用单 owner，close/crash 升 generation 并回收 lease
+  ---
+  duration_ms: 469.951458
+  type: 'test'
+  ...
+# Subtest: active import shutdown 在 parse 后安全点取消，且无 late/double terminal 或资源泄漏
+ok 10 - active import shutdown 在 parse 后安全点取消，且无 late/double terminal 或资源泄漏
+  ---
+  duration_ms: 156.707209
+  type: 'test'
+  ...
+# Subtest: phase grant/adoption-in-flight shutdown 收口后再取消且不泄漏
+ok 11 - phase grant/adoption-in-flight shutdown 收口后再取消且不泄漏
+  ---
+  duration_ms: 147.594875
+  type: 'test'
+  ...
+# Subtest: active run shutdown 等 invalidation adoption 收口后在 result 前取消
+ok 12 - active run shutdown 等 invalidation adoption 收口后在 result 前取消
+  ---
+  duration_ms: 163.66125
+  type: 'test'
+  ...
+# Subtest: adopt-ack 后 terminal-in-flight shutdown race 幂等收口且不泄漏
+ok 13 - adopt-ack 后 terminal-in-flight shutdown race 幂等收口且不泄漏
+  ---
+  duration_ms: 1504.083834
+  type: 'test'
+  ...
+# Subtest: E11-A legacy/live 边界不被后续 ReconFix Worker tranche 改写
+ok 14 - E11-A legacy/live 边界不被后续 ReconFix Worker tranche 改写
+  ---
+  duration_ms: 2.045417
+  type: 'test'
+  ...
+# Subtest: AC19 真实 SQLite gateway-recon-id-fix → 同 ID extract-recon-id，旧 list/get 晚到后 update
+ok 15 - AC19 真实 SQLite gateway-recon-id-fix → 同 ID extract-recon-id，旧 list/get 晚到后 update
+  ---
+  duration_ms: 9.024
+  type: 'test'
+  ...
+# Subtest: AC19 真实 SQLite gateway-recon-id-fix → 同 ID extract-recon-id，旧 list/get 晚到后 toggle
+ok 16 - AC19 真实 SQLite gateway-recon-id-fix → 同 ID extract-recon-id，旧 list/get 晚到后 toggle
+  ---
+  duration_ms: 3.128125
+  type: 'test'
+  ...
+# Subtest: AC19 真实 SQLite gateway-recon-id-fix → 同 ID extract-recon-id，旧 list/get 晚到后 delete
+ok 17 - AC19 真实 SQLite gateway-recon-id-fix → 同 ID extract-recon-id，旧 list/get 晚到后 delete
+  ---
+  duration_ms: 2.981583
+  type: 'test'
+  ...
+# Subtest: AC19 真实 SQLite extract-recon-id → 同 ID gateway-recon-id-fix，旧 list/get 晚到后 update
+ok 18 - AC19 真实 SQLite extract-recon-id → 同 ID gateway-recon-id-fix，旧 list/get 晚到后 update
+  ---
+  duration_ms: 2.388
+  type: 'test'
+  ...
+# Subtest: AC19 真实 SQLite extract-recon-id → 同 ID gateway-recon-id-fix，旧 list/get 晚到后 toggle
+ok 19 - AC19 真实 SQLite extract-recon-id → 同 ID gateway-recon-id-fix，旧 list/get 晚到后 toggle
+  ---
+  duration_ms: 2.389333
+  type: 'test'
+  ...
+# Subtest: AC19 真实 SQLite extract-recon-id → 同 ID gateway-recon-id-fix，旧 list/get 晚到后 delete
+ok 20 - AC19 真实 SQLite extract-recon-id → 同 ID gateway-recon-id-fix，旧 list/get 晚到后 delete
+  ---
+  duration_ms: 2.308083
+  type: 'test'
+  ...
+# Subtest: 完整矩阵：extract-recon-id 单类 transfer 仍双清
+ok 21 - 完整矩阵：extract-recon-id 单类 transfer 仍双清
+  ---
+  duration_ms: 2.215292
+  type: 'test'
+  ...
+# Subtest: 完整矩阵：extract-recon-id 单类 batchDelete 仍双清
+ok 22 - 完整矩阵：extract-recon-id 单类 batchDelete 仍双清
+  ---
+  duration_ms: 1.986584
+  type: 'test'
+  ...
+# Subtest: 完整矩阵：gateway-recon-id-fix 单类 transfer 仍双清
+ok 23 - 完整矩阵：gateway-recon-id-fix 单类 transfer 仍双清
+  ---
+  duration_ms: 1.973875
+  type: 'test'
+  ...
+# Subtest: 完整矩阵：gateway-recon-id-fix 单类 batchDelete 仍双清
+ok 24 - 完整矩阵：gateway-recon-id-fix 单类 batchDelete 仍双清
+  ---
+  duration_ms: 2.023084
+  type: 'test'
+  ...
+# Subtest: 默认不可信 service 的 resync 只清 Main 真正失效域，未命中域保留导出反馈
+ok 25 - 默认不可信 service 的 resync 只清 Main 真正失效域，未命中域保留导出反馈
+  ---
+  duration_ms: 3.5915
+  type: 'test'
+  ...
+# Subtest: AC20 补 get 跨另一写，get 原响应仍返回，单次 update 按 resync 拉齐真实 Main
+ok 26 - AC20 补 get 跨另一写，get 原响应仍返回，单次 update 按 resync 拉齐真实 Main
+  ---
+  duration_ms: 2.59775
+  type: 'test'
+  ...
+# Subtest: AC20 A/B 写响应逆序：两次真实写分别只调用一次，旧证据不恢复
+ok 27 - AC20 A/B 写响应逆序：两次真实写分别只调用一次，旧证据不恢复
+  ---
+  duration_ms: 2.607875
+  type: 'test'
+  ...
+# Subtest: AC20 未知 invoke 结算后成功 list/get/enter/服务重建均不能恢复分类信任
+ok 28 - AC20 未知 invoke 结算后成功 list/get/enter/服务重建均不能恢复分类信任
+  ---
+  duration_ms: 2.701375
+  type: 'test'
+  ...
+# Subtest: 渠道 create/update/delete 及无变更关闭不触碰两域结果、按钮、导出反馈
+ok 29 - 渠道 create/update/delete 及无变更关闭不触碰两域结果、按钮、导出反馈
+  ---
+  duration_ms: 1.913667
+  type: 'test'
+  ...
+# Subtest: deleted:false、明确写失败不广播成功失效，保留两域反馈
+ok 30 - deleted:false、明确写失败不广播成功失效，保留两域反馈
+  ---
+  duration_ms: 1.884083
+  type: 'test'
+  ...
+# Subtest: 控制器 leave blocked 不变更代次；允许离页后旧状态响应不能覆盖 A/B/A 的新结果
+ok 31 - 控制器 leave blocked 不变更代次；允许离页后旧状态响应不能覆盖 A/B/A 的新结果
+  ---
+  duration_ms: 1.657459
+  type: 'test'
+  ...
+# Subtest: 共享 run 失败通知仍重读 Main，银行普通结果与导出反馈保持
+ok 32 - 共享 run 失败通知仍重读 Main，银行普通结果与导出反馈保持
+  ---
+  duration_ms: 1.642833
+  type: 'test'
+  ...
+# Subtest: 导出请求在途收到确定失效，晚到成功不能恢复旧反馈
+ok 33 - 导出请求在途收到确定失效，晚到成功不能恢复旧反馈
+  ---
+  duration_ms: 1.6095
+  type: 'test'
+  ...
+# Subtest: 离页后的在途导入不写 UI、不弹告警，dispose 重复调用只清一次订阅
+ok 34 - 离页后的在途导入不写 UI、不弹告警，dispose 重复调用只清一次订阅
+  ---
+  duration_ms: 1.6515
+  type: 'test'
+  ...
+# Subtest: AC20 补读期间 delete/create，旧合法类别 get 晚到不得成为确定 scope
+ok 35 - AC20 补读期间 delete/create，旧合法类别 get 晚到不得成为确定 scope
+  ---
+  duration_ms: 2.759417
+  type: 'test'
+  ...
+# Subtest: AC20 补读期间 applyImport，旧合法类别 get 晚到不得成为确定 scope
+ok 36 - AC20 补读期间 applyImport，旧合法类别 get 晚到不得成为确定 scope
+  ---
+  duration_ms: 2.548291
+  type: 'test'
+  ...
+# Subtest: applyImport importedCount=0 真实 Main handler 仍双清；后续单项重取类别
+ok 37 - applyImport importedCount=0 真实 Main handler 仍双清；后续单项重取类别
+  ---
+  duration_ms: 1.977333
+  type: 'test'
+  ...
+# Subtest: 适用渠道保存成功后 priority 更新失败，保留前一步银行失效且 Recon 保持
+ok 38 - 适用渠道保存成功后 priority 更新失败，保留前一步银行失效且 Recon 保持
+  ---
+  duration_ms: 1.855333
+  type: 'test'
+  ...
+# Subtest: 银行运行提醒保持退款 → C3 → 实际运行顺序，点击直接运行不吞 C3
+ok 39 - 银行运行提醒保持退款 → C3 → 实际运行顺序，点击直接运行不吞 C3
+  ---
+  duration_ms: 2.469958
+  type: 'test'
+  ...
+# Subtest: 银行批量导入保留纯失败摘要和原导出；linked 成功撤销旧结果
+ok 40 - 银行批量导入保留纯失败摘要和原导出；linked 成功撤销旧结果
+  ---
+  duration_ms: 2.051375
+  type: 'test'
+  ...
+# Subtest: 银行后台写跨离页/重进后完成，从 Main 重读且进度只退订一次
+ok 41 - 银行后台写跨离页/重进后完成，从 Main 重读且进度只退订一次
+  ---
+  duration_ms: 1.716792
+  type: 'test'
+  ...
+# Subtest: service dispose 后旧 list/get 交付不影响重建 service；查询成功也仅 resync
+ok 42 - service dispose 后旧 list/get 交付不影响重建 service；查询成功也仅 resync
+  ---
+  duration_ms: 2.309833
+  type: 'test'
+  ...
+# Subtest: create 回包期间插入渠道写不能播种；后续 toggle 补读得到实际类别
+ok 43 - create 回包期间插入渠道写不能播种；后续 toggle 补读得到实际类别
+  ---
+  duration_ms: 2.134208
+  type: 'test'
+  ...
+# Subtest: batchDelete 使未删除 ID 的元数据也失效；下一单项只补读一次
+ok 44 - batchDelete 使未删除 ID 的元数据也失效；下一单项只补读一次
+  ---
+  duration_ms: 2.577458
+  type: 'test'
+  ...
+# Subtest: 初次 enter 保留欢迎文案；重复 enter 不重复绑定事件，状态读取失败禁用导出并报错
+ok 45 - 初次 enter 保留欢迎文案；重复 enter 不重复绑定事件，状态读取失败禁用导出并报错
+  ---
+  duration_ms: 2.07625
+  type: 'test'
+  ...
+# Subtest: 单项命令使用已证明的实际类别：extract-recon-id
+ok 46 - 单项命令使用已证明的实际类别：extract-recon-id
+  ---
+  duration_ms: 2.665917
+  type: 'test'
+  ...
+# Subtest: 单项命令使用已证明的实际类别：offset-bill-mark
+ok 47 - 单项命令使用已证明的实际类别：offset-bill-mark
+  ---
+  duration_ms: 0.169375
+  type: 'test'
+  ...
+# Subtest: 单项命令使用已证明的实际类别：gateway-recon-join
+ok 48 - 单项命令使用已证明的实际类别：gateway-recon-join
+  ---
+  duration_ms: 0.127083
+  type: 'test'
+  ...
+# Subtest: 单项命令使用已证明的实际类别：builtin-fixed
+ok 49 - 单项命令使用已证明的实际类别：builtin-fixed
+  ---
+  duration_ms: 0.138
+  type: 'test'
+  ...
+# Subtest: 单项命令使用已证明的实际类别：recon-id-fix
+ok 50 - 单项命令使用已证明的实际类别：recon-id-fix
+  ---
+  duration_ms: 0.09775
+  type: 'test'
+  ...
+# Subtest: 单项命令使用已证明的实际类别：gateway-recon-id-fix
+ok 51 - 单项命令使用已证明的实际类别：gateway-recon-id-fix
+  ---
+  duration_ms: 0.13825
+  type: 'test'
+  ...
+# Subtest: 单项命令使用已证明的实际类别：future-category
+ok 52 - 单项命令使用已证明的实际类别：future-category
+  ---
+  duration_ms: 0.1435
+  type: 'test'
+  ...
+# Subtest: create 取 dispatch 时提交的类别，不受后续草稿修改影响
+ok 53 - create 取 dispatch 时提交的类别，不受后续草稿修改影响
+  ---
+  duration_ms: 0.149
+  type: 'test'
+  ...
+# Subtest: ID 复用 recon-id-fix → extract-recon-id 后旧 list/get 不污染 update
+ok 54 - ID 复用 recon-id-fix → extract-recon-id 后旧 list/get 不污染 update
+  ---
+  duration_ms: 0.185291
+  type: 'test'
+  ...
+# Subtest: ID 复用 recon-id-fix → extract-recon-id 后旧 list/get 不污染 toggleEnabled
+ok 55 - ID 复用 recon-id-fix → extract-recon-id 后旧 list/get 不污染 toggleEnabled
+  ---
+  duration_ms: 0.158417
+  type: 'test'
+  ...
+# Subtest: ID 复用 recon-id-fix → extract-recon-id 后旧 list/get 不污染 deleteOne
+ok 56 - ID 复用 recon-id-fix → extract-recon-id 后旧 list/get 不污染 deleteOne
+  ---
+  duration_ms: 0.131708
+  type: 'test'
+  ...
+# Subtest: ID 复用 extract-recon-id → recon-id-fix 后旧 list/get 不污染 update
+ok 57 - ID 复用 extract-recon-id → recon-id-fix 后旧 list/get 不污染 update
+  ---
+  duration_ms: 0.08125
+  type: 'test'
+  ...
+# Subtest: ID 复用 extract-recon-id → recon-id-fix 后旧 list/get 不污染 toggleEnabled
+ok 58 - ID 复用 extract-recon-id → recon-id-fix 后旧 list/get 不污染 toggleEnabled
+  ---
+  duration_ms: 0.090959
+  type: 'test'
+  ...
+# Subtest: ID 复用 extract-recon-id → recon-id-fix 后旧 list/get 不污染 deleteOne
+ok 59 - ID 复用 extract-recon-id → recon-id-fix 后旧 list/get 不污染 deleteOne
+  ---
+  duration_ms: 0.061459
+  type: 'test'
+  ...
+# Subtest: 补读跨 delete-create 即使合法晚到也 resync，原写只发一次
+ok 60 - 补读跨 delete-create 即使合法晚到也 resync，原写只发一次
+  ---
+  duration_ms: 0.105959
+  type: 'test'
+  ...
+# Subtest: 补读跨 applyImport 即使合法晚到也 resync，原写只发一次
+ok 61 - 补读跨 applyImport 即使合法晚到也 resync，原写只发一次
+  ---
+  duration_ms: 0.070834
+  type: 'test'
+  ...
+# Subtest: A/B 交错写顺序返回均不猜类别，失败 B 也不恢复 A 证据
+ok 62 - A/B 交错写顺序返回均不猜类别，失败 B 也不恢复 A 证据
+  ---
+  duration_ms: 0.090125
+  type: 'test'
+  ...
+# Subtest: A/B 交错写逆序返回均不猜类别，失败 B 也不恢复 A 证据
+ok 63 - A/B 交错写逆序返回均不猜类别，失败 B 也不恢复 A 证据
+  ---
+  duration_ms: 0.04675
+  type: 'test'
+  ...
+# Subtest: 写入期间发出的 get 在结算后返回也不能播种
+ok 64 - 写入期间发出的 get 在结算后返回也不能播种
+  ---
+  duration_ms: 0.109083
+  type: 'test'
+  ...
+# Subtest: batchDelete 清整份分类缓存，固定结果 scope 不依赖缓存
+ok 65 - batchDelete 清整份分类缓存，固定结果 scope 不依赖缓存
+  ---
+  duration_ms: 0.101458
+  type: 'test'
+  ...
+# Subtest: applyImport 清整份分类缓存，固定结果 scope 不依赖缓存
+ok 66 - applyImport 清整份分类缓存，固定结果 scope 不依赖缓存
+  ---
+  duration_ms: 0.044916
+  type: 'test'
+  ...
+# Subtest: transfer 清整份分类缓存，固定结果 scope 不依赖缓存
+ok 67 - transfer 清整份分类缓存，固定结果 scope 不依赖缓存
+  ---
+  duration_ms: 0.045042
+  type: 'test'
+  ...
+# Subtest: setApplicableChannels 清整份分类缓存，固定结果 scope 不依赖缓存
+ok 68 - setApplicableChannels 清整份分类缓存，固定结果 scope 不依赖缓存
+  ---
+  duration_ms: 0.076625
+  type: 'test'
+  ...
+# Subtest: channels.create 清整份分类缓存，固定结果 scope 不依赖缓存
+ok 69 - channels.create 清整份分类缓存，固定结果 scope 不依赖缓存
+  ---
+  duration_ms: 0.455542
+  type: 'test'
+  ...
+# Subtest: channels.update 清整份分类缓存，固定结果 scope 不依赖缓存
+ok 70 - channels.update 清整份分类缓存，固定结果 scope 不依赖缓存
+  ---
+  duration_ms: 0.053833
+  type: 'test'
+  ...
+# Subtest: channels.deleteOne 清整份分类缓存，固定结果 scope 不依赖缓存
+ok 71 - channels.deleteOne 清整份分类缓存，固定结果 scope 不依赖缓存
+  ---
+  duration_ms: 0.044625
+  type: 'test'
+  ...
+# Subtest: 渠道写在单项写期间交错，使该写证据失效，但渠道事件不清结果
+ok 72 - 渠道写在单项写期间交错，使该写证据失效，但渠道事件不清结果
+  ---
+  duration_ms: 0.058125
+  type: 'test'
+  ...
+# Subtest: create 回包跨写不播种，之后仍须 get 取证
+ok 73 - create 回包跨写不播种，之后仍须 get 取证
+  ---
+  duration_ms: 0.051667
+  type: 'test'
+  ...
+# Subtest: 明确 failed 不广播且不回滚写前分类缓存
+ok 74 - 明确 failed 不广播且不回滚写前分类缓存
+  ---
+  duration_ms: 0.054417
+  type: 'test'
+  ...
+# Subtest: 明确 cancelled 不广播且不回滚写前分类缓存
+ok 75 - 明确 cancelled 不广播且不回滚写前分类缓存
+  ---
+  duration_ms: 0.026416
+  type: 'test'
+  ...
+# Subtest: reject 后成功查询、页面刷新与重建 service 均不能恢复信任
+ok 76 - reject 后成功查询、页面刷新与重建 service 均不能恢复信任
+  ---
+  duration_ms: 0.249917
+  type: 'test'
+  ...
+# Subtest: malformed 后成功查询、页面刷新与重建 service 均不能恢复信任
+ok 77 - malformed 后成功查询、页面刷新与重建 service 均不能恢复信任
+  ---
+  duration_ms: 0.036417
+  type: 'test'
+  ...
+# Subtest: unknown-status 后成功查询、页面刷新与重建 service 均不能恢复信任
+ok 78 - unknown-status 后成功查询、页面刷新与重建 service 均不能恢复信任
+  ---
+  duration_ms: 0.032875
+  type: 'test'
+  ...
+# Subtest: 新服务默认不可信，成功 list/get 不是 Main 启动收口证明
+ok 79 - 新服务默认不可信，成功 list/get 不是 Main 启动收口证明
+  ---
+  duration_ms: 0.058916
+  type: 'test'
+  ...
+# Subtest: dispose 后旧 list/get 及旧写不能通知或恢复新 service，且不重发写
+ok 80 - dispose 后旧 list/get 及旧写不能通知或恢复新 service，且不重发写
+  ---
+  duration_ms: 0.107959
+  type: 'test'
+  ...
+# Subtest: 非法字段/部分 list 不进入缓存，明确不存在不伪造普通类别
+ok 81 - 非法字段/部分 list 不进入缓存，明确不存在不伪造普通类别
+  ---
+  duration_ms: 0.051083
+  type: 'test'
+  ...
+# Subtest: 只读预检/导出与无变更关闭不清结果；事件深冻结且通道 ID 去重
+ok 82 - 只读预检/导出与无变更关闭不清结果；事件深冻结且通道 ID 去重
+  ---
+  duration_ms: 0.142042
+  type: 'test'
+  ...
+# Subtest: 连续适用渠道成功后 priority 失败，第一项通知和原参数保留
+ok 83 - 连续适用渠道成功后 priority 失败，第一项通知和原参数保留
+  ---
+  duration_ms: 0.059959
+  type: 'test'
+  ...
+# Subtest: 通知者异常不改写业务成功响应，不阻止下一条事件
+ok 84 - 通知者异常不改写业务成功响应，不阻止下一条事件
+  ---
+  duration_ms: 0.070708
+  type: 'test'
+  ...
+# Subtest: router 按 scope/事件 kind 通知，频道配置与仅关闭保持结果；重复和退订生效
+ok 85 - router 按 scope/事件 kind 通知，频道配置与仅关闭保持结果；重复和退订生效
+  ---
+  duration_ms: 0.176458
+  type: 'test'
+  ...
+# Subtest: 共享会话五个命名 API 原参原结果，mutation 结算唯一通知，不复制结果
+ok 86 - 共享会话五个命名 API 原参原结果，mutation 结算唯一通知，不复制结果
+  ---
+  duration_ms: 0.272958
+  type: 'test'
+  ...
+# Subtest: 经典脚本只声明明确命名空间，加载阶段不触发 IPC
+ok 87 - 经典脚本只声明明确命名空间，加载阶段不触发 IPC
+  ---
+  duration_ms: 0.922583
+  type: 'test'
+  ...
+# Subtest: create 不合法提交类别却成功的矛盾响应进入 sticky resync
+ok 88 - create 不合法提交类别却成功的矛盾响应进入 sticky resync
+  ---
+  duration_ms: 0.052042
+  type: 'test'
+  ...
+# Subtest: 共享写通知来源取 dispatch 快照，不取回包时已改的 UI payload
+ok 89 - 共享写通知来源取 dispatch 快照，不取回包时已改的 UI payload
+  ---
+  duration_ms: 0.053209
+  type: 'test'
+  ...
+# Subtest: 全生产 JS 的原始场景/渠道 API 只在 root 各注入同一 service 一次，无直接或别名写旁路
+ok 90 - 全生产 JS 的原始场景/渠道 API 只在 root 各注入同一 service 一次，无直接或别名写旁路
+  ---
+  duration_ms: 1.384375
+  type: 'test'
+  ...
+# Subtest: 唯一 root service 传给场景工厂，全部八项场景写和三项渠道写在该入口下调用
+ok 91 - 唯一 root service 传给场景工厂，全部八项场景写和三项渠道写在该入口下调用
+  ---
+  duration_ms: 9.018125
+  type: 'test'
+  ...
+# Subtest: 边界扫描能识别解构、多级别名、计算属性及bind，不以单文件正则代替审计
+ok 92 - 边界扫描能识别解构、多级别名、计算属性及bind，不以单文件正则代替审计
+  ---
+  duration_ms: 0.378875
+  type: 'test'
+  ...
+1..92
+# tests 92
+# suites 0
+# pass 92
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3131.190625

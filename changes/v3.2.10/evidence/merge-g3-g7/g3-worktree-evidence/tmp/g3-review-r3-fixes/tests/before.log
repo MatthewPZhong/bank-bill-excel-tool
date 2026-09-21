@@ -1,0 +1,311 @@
+PASS 账户映射 A/B 交错读取只显示并保存 B 的账户身份
+PASS 账户映射加载中及失败不保存旧模板行，重读合法空映射后可保存
+PASS 账户映射保存冻结模板身份且只发一次，失败告警返回原稿可重试
+PASS 账户映射结束后的迟到读取不修改旧 DOM 或新窗口
+PASS 模板管理关闭后迟到 success 不替换新弹窗
+PASS 模板管理关闭后迟到 error 不替换新弹窗
+PASS 模板管理正常读取仍进入实际映射编辑窗
+PASS 迁移分配保存 busy 阻止关闭及重复提交，失败返回可重试，成功一次完成
+PASS 迁移强制结束后后台成功保留反馈，不关闭新窗或重新触发配置入口
+PASS 模板管理最新修改请求胜出，错误告警关闭返回同一管理层
+PASS 账户映射和迁移 IPC reject 解除 busy，错误留在原层且不自动重试
+PASS 模板 rename 写后返回只属于原窗口，busy/重复门控不截断后台刷新
+PASS 模板 import 写后返回只属于原窗口，busy/重复门控不截断后台刷新
+PASS 模板 delete 写后返回只属于原窗口，busy/重复门控不截断后台刷新
+PASS 模板 mappingSave 写后返回只属于原窗口，busy/重复门控不截断后台刷新
+PASS 映射主/子关系后续写入使用提交时快照，原窗结束也完成已确定关系链
+PASS 模板删除取消返回原管理层，成功后刷新管理层且不重挂旧确认
+PASS 配置子窗 amount 保存失败可重试，busy 禁止返回，结束后的成功不调用旧父回调
+PASS 配置子窗 splitMapping 保存失败可重试，busy 禁止返回，结束后的成功不调用旧父回调
+PASS 配置子窗 addon 保存失败可重试，busy 禁止返回，结束后的成功不调用旧父回调
+PASS 拆分账单规则写入原 split 表，成功后回到原行管理父层且保持规则
+PASS 手工余额后续队列和旧简单选择的后台完成不接管新窗，仍处理原结果
+PASS 主模板身份确认未结束不提交中间态，窗口结束后不弹迟到原生确认
+PASS 手工余额覆盖确认成功后父子一起结束，下一补录项继续原队列
+PASS 减少拆分份数的确认保存同步锁住父子、根替换和导航，重复确认一次写
+PASS 增加拆分份数的直接保存同样拒绝重复点击和父层关闭
+PASS 拆分份数写入失败保留确认及父稿可重试，取消零额外写入
+PASS 拆分份数强制销毁后的后台结算不写旧 DOM、不关闭新窗口
+PASS RR01 有合并组删行只发一次原参数，写中父子及根替换/导航均拒绝
+PASS RR01 无组有效预检直接删除，重复预检只启动一次删除并锁父层
+PASS RR01 close后旧预检无组晚到，零删除且不操作新栈
+PASS RR01 close后旧预检有组晚到，零删除且不操作新栈
+PASS RR01 replace后旧预检无组晚到，零删除且不操作新栈
+PASS RR01 replace后旧预检有组晚到，零删除且不操作新栈
+PASS RR01 不同行预检逆序返回只保留最新预检，旧结果不确认或删除错位序号
+PASS RR01 其他行写入开始并结算后，早先未发送删除的预检仍永久失效
+PASS RR01 预检失败/reject不当作无组合，反馈后允许重新预检并取消
+PASS RR01 删除失败和reject保留父/确认草稿供重试，取消不额外写
+PASS RR01 已发送删除success在force dispose后结算，旧DOM/新窗不续接
+PASS RR01 已发送删除failed在force dispose后结算，旧DOM/新窗不续接
+PASS RR01 已发送删除cancelled在force dispose后结算，旧DOM/新窗不续接
+PASS RR01 行重绘/序号重排后旧行节点事件不再写入或预检
+PASS RR01 单行完成共用父写锁，跨类型写入口受阻且旧DOM不接纳迟到结果
+PASS RR01 取消全部合并组共用父写锁，跨类型写入口受阻且旧DOM不接纳迟到结果
+PASS RR01 保存合并组共用父写锁，跨类型写入口受阻且旧DOM不接纳迟到结果
+PASS RR01 正负号元信息共用父写锁，跨类型写入口受阻且旧DOM不接纳迟到结果
+PASS RR01 指定正负号账单清空共用父写锁，跨类型写入口受阻且旧DOM不接纳迟到结果
+PASS RR01 指定字段账单清空共用父写锁，跨类型写入口受阻且旧DOM不接纳迟到结果
+PASS RR01 按字段规则子层保存共享父锁，失败重试成功后返回同一父层
+PASS RR01 signed已发送互斥写链在force dispose后完成配套写，撤销UI续接
+PASS RR01 clear-rules已发送互斥写链在force dispose后完成配套写，撤销UI续接
+PASS RR01 清空正负号后准备打开规则窗，force dispose后不新建子层
+PASS RR01 实际映射→行管理异步返回保持原子层，禁止重复返回及普通关闭旁路
+PASS RR01 实际行管理返回读取期间强制销毁，旧回调不能关父层后来新开的行管理
+PASS RR01 mousedown收起指定账单面板触发同一meta写锁，结束后旧事件不再写
+PASS RR01 返回回调失败解锁并显示错误，原窗口可重试且旧忽略参数回调兼容
+PASS RR01 公共关闭后重开行管理先读Main最新行数，读取失败不复用旧缓存
+PASS RR01 打开行管理的读取乱序/父层结束只接纳当前请求，不打开幽灵子层
+PASS RR01 父映射写开始且已结束后旧打开读取仍失效，不仅检查回包时busy
+PASS RR01 打开读取中入口取消使旧请求失效，不能复活旧打开意图
+PASS RR01 打开读取中入口取消再启用使旧请求失效，不能复活旧打开意图
+PASS R3-01 byField首步failed不提交元信息，独立存储保留原规则并可重试成功
+PASS R3-01 byField首步reject不提交元信息，独立存储保留原规则并可重试成功
+PASS R3-01 byField在rules在途销毁仍完成两次独立提交，旧DOM和新栈不续接
+PASS R3-01 byField在meta在途销毁仍完成两次独立提交，旧DOM和新栈不续接
+PASS R3-01 signed在rules在途销毁仍完成两次独立提交，旧DOM和新栈不续接
+PASS R3-01 signed在meta在途销毁仍完成两次独立提交，旧DOM和新栈不续接
+67/80 PASS
+FAIL R3-01 signed首步failed不提交元信息，独立存储保留原规则并可重试成功: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
++ actual - expected
+... Skipped lines
+
+  {
+    byField: '',
+    byFieldDisabled: true,
+    manageHidden: true,
+    meta: {
+...
+    signed: 'Amount',
++   signedDisabled: true
+-   signedDisabled: false
+  }
+
+    at assertRuleChainSucceeded (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/scripts/renderer-lifecycle/fixtures/configuration-dialogs.js:537:12)
+    at async /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/scripts/renderer-lifecycle/fixtures/configuration-dialogs.js:552:5
+    at async test (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/tmp/g3-review-r3-fixes/tests/electron-before.cjs:56:11)
+    at async module.exports (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/scripts/renderer-lifecycle/fixtures/configuration-dialogs.js:541:84)
+    at async /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/tmp/g3-review-r3-fixes/tests/electron-before.cjs:65:5
+FAIL R3-01 signed首步reject不提交元信息，独立存储保留原规则并可重试成功: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
++ actual - expected
+... Skipped lines
+
+  {
+    byField: '',
+    byFieldDisabled: true,
+    manageHidden: true,
+    meta: {
+...
+    signed: 'Amount',
++   signedDisabled: true
+-   signedDisabled: false
+  }
+
+    at assertRuleChainSucceeded (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/scripts/renderer-lifecycle/fixtures/configuration-dialogs.js:537:12)
+    at async /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/scripts/renderer-lifecycle/fixtures/configuration-dialogs.js:552:5
+    at async test (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/tmp/g3-review-r3-fixes/tests/electron-before.cjs:56:11)
+    at async module.exports (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/scripts/renderer-lifecycle/fixtures/configuration-dialogs.js:541:84)
+    at async /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/tmp/g3-review-r3-fixes/tests/electron-before.cjs:65:5
+FAIL R3-01 byField清规则成功后元信息failed接纳已提交事实，旧规则不复活且能重试: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
++ actual - expected
+... Skipped lines
+
+  {
+    byField: '',
+    byFieldDisabled: false,
++   manageHidden: false,
+-   manageHidden: true,
+    meta: {
+      byFieldAmountTargetSeqNos: [
+        1
+      ],
+      signedAmountSourceField: '',
+...
+    signed: '',
++   signedDisabled: true
+-   signedDisabled: false
+  }
+
+    at /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/scripts/renderer-lifecycle/fixtures/configuration-dialogs.js:566:12
+    at async test (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/tmp/g3-review-r3-fixes/tests/electron-before.cjs:56:11)
+    at async module.exports (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/scripts/renderer-lifecycle/fixtures/configuration-dialogs.js:555:96)
+    at async /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/tmp/g3-review-r3-fixes/tests/electron-before.cjs:65:5
+FAIL R3-01 byField清规则成功后元信息reject接纳已提交事实，旧规则不复活且能重试: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
++ actual - expected
+... Skipped lines
+
+  {
+    byField: '',
+    byFieldDisabled: false,
++   manageHidden: false,
+-   manageHidden: true,
+    meta: {
+      byFieldAmountTargetSeqNos: [
+        1
+      ],
+      signedAmountSourceField: '',
+...
+    signed: '',
++   signedDisabled: true
+-   signedDisabled: false
+  }
+
+    at /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/scripts/renderer-lifecycle/fixtures/configuration-dialogs.js:566:12
+    at async test (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/tmp/g3-review-r3-fixes/tests/electron-before.cjs:56:11)
+    at async module.exports (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/scripts/renderer-lifecycle/fixtures/configuration-dialogs.js:555:96)
+    at async /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/tmp/g3-review-r3-fixes/tests/electron-before.cjs:65:5
+FAIL R3-01 byField清规则成功后元信息cancelled接纳已提交事实，旧规则不复活且能重试: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
++ actual - expected
+... Skipped lines
+
+  {
+    byField: '',
+    byFieldDisabled: false,
++   manageHidden: false,
+-   manageHidden: true,
+    meta: {
+      byFieldAmountTargetSeqNos: [
+        1
+      ],
+      signedAmountSourceField: '',
+...
+    signed: '',
++   signedDisabled: true
+-   signedDisabled: false
+  }
+
+    at /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/scripts/renderer-lifecycle/fixtures/configuration-dialogs.js:566:12
+    at async test (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/tmp/g3-review-r3-fixes/tests/electron-before.cjs:56:11)
+    at async module.exports (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/scripts/renderer-lifecycle/fixtures/configuration-dialogs.js:555:96)
+    at async /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/tmp/g3-review-r3-fixes/tests/electron-before.cjs:65:5
+FAIL R3-01 signed清规则成功后元信息failed接纳已提交事实，旧规则不复活且能重试: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
++ actual - expected
+... Skipped lines
+
+  {
++   byField: '是',
+-   byField: '',
+    byFieldDisabled: false,
++   manageHidden: false,
+-   manageHidden: true,
+    meta: {
+      byFieldAmountTargetSeqNos: [
+        1
+      ],
+      signedAmountSourceField: '',
+...
+    rules: [],
++   signed: 'Amount',
++   signedDisabled: true
+-   signed: '',
+-   signedDisabled: false
+  }
+
+    at /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/scripts/renderer-lifecycle/fixtures/configuration-dialogs.js:566:12
+    at async test (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/tmp/g3-review-r3-fixes/tests/electron-before.cjs:56:11)
+    at async module.exports (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/scripts/renderer-lifecycle/fixtures/configuration-dialogs.js:555:96)
+    at async /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/tmp/g3-review-r3-fixes/tests/electron-before.cjs:65:5
+FAIL R3-01 signed清规则成功后元信息reject接纳已提交事实，旧规则不复活且能重试: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
++ actual - expected
+... Skipped lines
+
+  {
++   byField: '是',
+-   byField: '',
+    byFieldDisabled: false,
++   manageHidden: false,
+-   manageHidden: true,
+    meta: {
+      byFieldAmountTargetSeqNos: [
+        1
+      ],
+      signedAmountSourceField: '',
+...
+    rules: [],
++   signed: 'Amount',
++   signedDisabled: true
+-   signed: '',
+-   signedDisabled: false
+  }
+
+    at /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/scripts/renderer-lifecycle/fixtures/configuration-dialogs.js:566:12
+    at async test (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/tmp/g3-review-r3-fixes/tests/electron-before.cjs:56:11)
+    at async module.exports (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/scripts/renderer-lifecycle/fixtures/configuration-dialogs.js:555:96)
+    at async /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/tmp/g3-review-r3-fixes/tests/electron-before.cjs:65:5
+FAIL R3-01 signed清规则成功后元信息cancelled接纳已提交事实，旧规则不复活且能重试: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
++ actual - expected
+... Skipped lines
+
+  {
++   byField: '是',
+-   byField: '',
+    byFieldDisabled: false,
++   manageHidden: false,
+-   manageHidden: true,
+    meta: {
+      byFieldAmountTargetSeqNos: [
+        1
+      ],
+      signedAmountSourceField: '',
+...
+    rules: [],
++   signed: 'Amount',
++   signedDisabled: true
+-   signed: '',
+-   signedDisabled: false
+  }
+
+    at /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/scripts/renderer-lifecycle/fixtures/configuration-dialogs.js:566:12
+    at async test (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/tmp/g3-review-r3-fixes/tests/electron-before.cjs:56:11)
+    at async module.exports (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/scripts/renderer-lifecycle/fixtures/configuration-dialogs.js:555:96)
+    at async /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/tmp/g3-review-r3-fixes/tests/electron-before.cjs:65:5
+FAIL R3-01 byField元信息已落地但返回failed时重读持久化事实，同时保留原失败: AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+0 !== 1
+
+    at /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/scripts/renderer-lifecycle/fixtures/configuration-dialogs.js:598:12
+    at async test (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/tmp/g3-review-r3-fixes/tests/electron-before.cjs:56:11)
+    at async module.exports (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/scripts/renderer-lifecycle/fixtures/configuration-dialogs.js:593:74)
+    at async /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/tmp/g3-review-r3-fixes/tests/electron-before.cjs:65:5
+FAIL R3-01 signed元信息已落地但返回reject时重读持久化事实，同时保留原失败: AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+0 !== 1
+
+    at /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/scripts/renderer-lifecycle/fixtures/configuration-dialogs.js:598:12
+    at async test (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/tmp/g3-review-r3-fixes/tests/electron-before.cjs:56:11)
+    at async module.exports (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/scripts/renderer-lifecycle/fixtures/configuration-dialogs.js:593:74)
+    at async /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/tmp/g3-review-r3-fixes/tests/electron-before.cjs:65:5
+FAIL R3-01 首步已落地但reject不发第二步，重读接受规则已清的真实状态: AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+0 !== 1
+
+    at /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/scripts/renderer-lifecycle/fixtures/configuration-dialogs.js:609:12
+    at async test (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/tmp/g3-review-r3-fixes/tests/electron-before.cjs:56:11)
+    at async module.exports (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/scripts/renderer-lifecycle/fixtures/configuration-dialogs.js:603:3)
+    at async /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/tmp/g3-review-r3-fixes/tests/electron-before.cjs:65:5
+FAIL R3-01 部分成功后重读失败保留已确认清规则及原错误，行内未提交草稿不丢失: AssertionError [ERR_ASSERTION]: The input did not match the regular expression /重读|重新打开/. Input:
+
+'\n' +
+  '        \n' +
+  '          \n' +
+  '            \n' +
+  '          \n' +
+  '          元信息提交失败\n' +
+  '        \n' +
+  '        \n' +
+  '          确认\n' +
+  '        \n' +
+  '      '
+
+    at /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/scripts/renderer-lifecycle/fixtures/configuration-dialogs.js:618:12
+    at async test (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/tmp/g3-review-r3-fixes/tests/electron-before.cjs:56:11)
+    at async module.exports (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/scripts/renderer-lifecycle/fixtures/configuration-dialogs.js:613:3)
+    at async /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/tmp/g3-review-r3-fixes/tests/electron-before.cjs:65:5
+FAIL R3-01 失败后的配置重读仍持父写锁，force dispose后旧回包不恢复原UI: AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+0 !== 1
+
+    at /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/scripts/renderer-lifecycle/fixtures/configuration-dialogs.js:636:12
+    at async test (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/tmp/g3-review-r3-fixes/tests/electron-before.cjs:56:11)
+    at async module.exports (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/scripts/renderer-lifecycle/fixtures/configuration-dialogs.js:632:3)
+    at async /Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries/tmp/g3-review-r3-fixes/tests/electron-before.cjs:65:5

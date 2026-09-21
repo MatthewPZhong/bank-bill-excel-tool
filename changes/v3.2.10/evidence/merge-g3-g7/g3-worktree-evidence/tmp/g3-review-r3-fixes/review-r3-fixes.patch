@@ -1,0 +1,428 @@
+diff --git a/changes/v3.2.10/codex/v3.2.10-renderer-boundaries/implementation-notes.md b/changes/v3.2.10/codex/v3.2.10-renderer-boundaries/implementation-notes.md
+index a8230c12..1c2abb27 100644
+--- a/changes/v3.2.10/codex/v3.2.10-renderer-boundaries/implementation-notes.md
++++ b/changes/v3.2.10/codex/v3.2.10-renderer-boundaries/implementation-notes.md
+@@ -6,7 +6,7 @@
+ - worktree：`/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries`。
+ - 基线与当前 HEAD：`11086a3cbf632a30adbcfa796e4cd81810c5aef9`（本地 main / v3.2.9）。全部实施差异未提交；没有推送、PR、合并、升版或发布。
+ - 输入：从用户指定主工作区读取并复制 G3 Spec/TechDoc、总索引及 review-response。其他治理项与审查报告保留主工作区绝对链接，避免副本索引指向不存在的材料；未改主工作区输入文件。
+-- 当前状态：第二轮复审RR01删行生命周期（P2）及RR02状态恢复反馈（P3）已修复；最终冻结组合649项受影响单测、187项隔离Electron工厂、lint和smoke均通过，RR01独立复核已收口。上轮两个P1与原反例闭合结论保留；R06／整项G3仍未标为全部验收完成，资金人工复核、完整release-check及产品／平台验收缺口保留。当前证据以末尾第二轮整改记录为准。
++- 当前状态：第三轮审查新增R3-01金额规则部分成功缓存问题已修复；最终649项受影响单测、206项隔离Electron工厂、lint及smoke全部通过，独立复核5/5通过；此前RR01／RR02及上轮原反例闭合结论保留。R06／整项G3仍未标为全部验收完成，资金人工复核、完整release-check及产品／平台验收缺口保留。当前证据以末尾第三轮整改记录为准。
+ 
+ “集成状态”指合入 release／其他治理功能分支；本 worktree 内的生产装配已完成。下表及 R1–R5 正文保留首轮实施事实，修后当前证据以末尾审查整改记录为准。
+ 
+@@ -264,3 +264,45 @@ G8仍未集成，配置/激活和例外无变化。当前人读入口由AGENTS
+ 实施记录、TechDoc §5.2及Renderer README已落实本轮五项事实。本轮实际代码和相称自动验证完成，release集成未执行；R06／整项G3不据此标为全部验收完成。原资金人工复核、完整release-check及两项高占用单测复验、真实产品Main端到端（含computeAmounts的Task／日志）、Windows／Excel／WPS／安装包、release及跨治理集成缺口仍保留。本轮没有重试此前因ENOSPC／共享磁盘资源被自动审批拒绝的完整门禁；只运行上表覆盖修复的本地组合，没有访问真实业务目录或删除真实模板。
+ 
+ 交付：[相对第二轮复审快照的整改补丁](../../../../tmp/g3-review-r2-fixes/review-r2-fixes.patch)、[本轮差异统计](../../../../tmp/g3-review-r2-fixes/review-r2-fixes-stat.txt)、[相对11086a3c的完整功能补丁](../../../../tmp/g3-review-r2-fixes/renderer-boundaries-current.patch)、[当前文件和日志哈希](../../../../tmp/g3-review-r2-fixes/final-manifest.json)。本次回退可按整改补丁精确恢复到第二轮审查前内容，不涉及数据迁移或真实数据回滚；未提交、推送、开PR、合并、升版或发布。
++
++
++<a id="review-r3-remediation"></a>
++
++## 第三轮复审整改（R3-01，2026-09-21）
++
++依据：[第三轮审查](review-2026-09-20-r3.md)。复用原worktree与11086a3c未提交基线；开始前核对上轮123个文件哈希，并冻结本轮139个Git可见变更文件与65个审查／证据文件的[修前清单](../../../../tmp/g3-review-r3-fixes/before-manifest.json)。R3-01按本轮审查确认的新回归记录，RR01／RR02原反例闭合结论保留。
++
++| 余项／父切片 | 实现状态 | 验证状态 | 集成状态 |
++| --- | --- | --- | --- |
++| R3-01 清空金额规则后元数据失败／R06、R1、R5 | 已实现 | 专项80/80、独立5/5、最终649项单测及206项工厂通过 | 未集成 |
++
++**职责与边界。** createBillSplitRowsDialog内部的saveAmountConfiguration负责两条金额互斥写链的结算与金额事实恢复；所有写和恢复读取仍处于父会话runWrite锁内。重读和展示只属于原handle，强制销毁不终止已提交配套写、不更新旧DOM。Main和仓储仍各自提交规则及元数据，没有新增事务、回滚或自动重试。
++
++**调用方与兼容。** 由signed切换、byField清空两个既有监听消费，仍调用既有saveBillSplitAmountRules、saveBillSplitMeta和getBillSplitConfig。工厂入参、Dialogs命名转发、mapping父子返回与所有业务写参数保持。runWrite增加仅工厂内部使用的结算投影回调，在恢复disabled快照后执行；互斥控件完整重算，避免成功重试后遗留旧禁用状态。重试启用signed时始终清除旧byField目标序号，不以规则是否已被前次清空决定目标清理，避免目标并集错误扩大行禁用范围。
++
++**业务行为。** 第一阶段已成功时第二阶段报错，界面不能继续使用已删除规则；失败后优先重读实际规则／元数据，同时保留原失败提示。Main数据库写后模板文件同步也可能报错，因此failed／reject不等于未提交；第一阶段未明确成功时不继续元数据写。恢复不采用返回的billSplitRows覆盖本地行草稿。重读失败时只接纳已明确成功的阶段，告知关闭重开并暂停当前窗口写入，普通关闭仍允许；恢复读取未结算期间继续busy防重与阻止关闭。对应AC-03／13／14，未调整金额算法或存储合同。
++
++**当前规则入口。** AGENTS → [Renderer README](../../../../src/renderer/README.md)“弹窗入口与权限”；[TechDoc §5.3](techdoc.md#review-r3-partial-save)同步独立提交和恢复边界。Spec、三轮审查及其全部证据保持原样。G8未集成，无active规则或例外变化；Main／仓储业务规则正文无需改写。
++
++### 验证证据与交付状态
++
++专项与最终组合存在包含关系，不重复相加；真实Electron DOM／工厂配合受控API，不等同产品Main全链路。
++
++**中间证据。** 首候选配置工厂77/80通过，3条signed主动重试发现旧byField目标序号未清理；独立复核确认目标并集会使额外行被禁用，已修复既有meta payload的清理条件。曾将这3条预期放宽的中间80/80已作废并单独保留，不作为闭合证据；最终用例恢复严格空byField目标断言，并检查signed目标为第2行时第1行可编辑、第2行受限。早期fixture返回不可序列化handle的4条测试执行错误也保留，修正后不计产品反例。
++
++**专项前后对照。** 同一最终fixture使用修前生产快照为67/80 PASS（原61项全通过，新增19项中13项失败）；最终生产为80/80 PASS。[专项记录](../../../../tmp/g3-review-r3-fixes/tests/result.md)、[修前日志](../../../../tmp/g3-review-r3-fixes/tests/before.log)、[修后日志](../../../../tmp/g3-review-r3-fixes/tests/after.log)、[同组与源码哈希核对](../../../../tmp/g3-review-r3-fixes/tests/verification.json)记录两个阶段失败／reject／cancelled、落库后报错、销毁交错、重读失败锁写但可关闭及行草稿保持。
++
++独立复核原四组修前0/4、修后4/4；另用候选源码证明signed目标残留0/1，最终合计5/5。[独立复核文档](../../../../tmp/g3-review-r3-fixes/review/stage-acceptance-audit.md)保存原仓储探针复跑、真实工厂合成状态探针、候选重试反例和最终源码SHA。修后API由状态型替身控制，真实仓储仅为原独立提交探针；不将两者合称产品Main端到端。
++
++**最终组合。** [冻结清单](../../../../tmp/g3-review-r3-fixes/frozen-code.json)涵盖96个实现／测试／模块说明文件，最终检查后逐一核对。全部命令明确使用本记录开头worktree，源码和测试执行后未改。
++
++| 最终执行 | 结果 | 证据 |
++| --- | --- | --- |
++| `node --test --test-concurrency=2`，42个受影响文件 | **649/649 PASS，0 fail／skipped** | [日志](../../../../tmp/g3-review-r3-fixes/final-unit.log)、[精确命令](../../../../tmp/g3-review-r3-fixes/final-unit-command.json)；包含R9及全场景写边界，非全仓unit |
++| `node scripts/test-renderer-lifecycle.js`，全部工厂 | **206/206 PASS** | [日志](../../../../tmp/g3-review-r3-fixes/final-electron.log)、[命令](../../../../tmp/g3-review-r3-fixes/final-electron-command.json)；含配置80项，与专项不重复累计 |
++| `npm run lint`、`npm run smoke` | **PASS，均exit 0** | [lint](../../../../tmp/g3-review-r3-fixes/final-lint.log)、[smoke](../../../../tmp/g3-review-r3-fixes/final-smoke.log)；专项另覆盖fixture lint与语法 |
++| 差异／哈希／文档链接 | **PASS** | [检查日志](../../../../tmp/g3-review-r3-fixes/final-checks.log)、[交付清单](../../../../tmp/g3-review-r3-fixes/final-manifest.json)；65份三轮审查／证据及Spec原样保留；Main／backend／package／lock无改动 |
++
++实施记录、TechDoc §5.3及当前Renderer规则入口已同步本轮五项事实。此次仅改5个Git可见文件：配置工厂、其fixture和3份现行说明。本轮代码与适用自动验证完成，集成未执行；R06／整项G3仍不标为全部验收完成。完整release-check、两项历史高占用单测复验、真实产品Main全链路、Windows／Excel／WPS／安装包、此前资金人工复核及release／跨治理集成缺口继续保留；本轮没有访问真实业务数据，也没有重试此前因ENOSPC／共享磁盘资源而被自动审批拒绝的完整门禁。
++
++交付：[相对第三轮审查快照的整改补丁](../../../../tmp/g3-review-r3-fixes/review-r3-fixes.patch)、[5文件差异统计](../../../../tmp/g3-review-r3-fixes/review-r3-fixes-stat.txt)、[相对11086a3c的完整功能补丁](../../../../tmp/g3-review-r3-fixes/renderer-boundaries-current.patch)、[当前文件与运行哈希清单](../../../../tmp/g3-review-r3-fixes/final-manifest.json)。整改补丁可精确还原本轮修改，不涉及数据库回滚。分支及HEAD保持原值，未提交、推送、开PR、合并、升版或发布。
+diff --git a/changes/v3.2.10/codex/v3.2.10-renderer-boundaries/techdoc.md b/changes/v3.2.10/codex/v3.2.10-renderer-boundaries/techdoc.md
+index f4564b2d..9f35bd02 100644
+--- a/changes/v3.2.10/codex/v3.2.10-renderer-boundaries/techdoc.md
++++ b/changes/v3.2.10/codex/v3.2.10-renderer-boundaries/techdoc.md
+@@ -232,6 +232,19 @@ R2 可以先对 R3–R5 未迁出域包装旧 refresh/restore；适配器只接
+ 
+ 该补充落实既有已关闭视图不发新写、busy防重及读取恢复合同；五项事实、前后验证与未完成验收见[第二轮整改记录](implementation-notes.md#review-r2-remediation)。
+ 
++<a id="review-r3-partial-save"></a>
++
++### 5.3 第三轮复审的金额配置部分成功补充（2026-09-21）
++
++规则与元数据沿用既有两个独立提交；Main在数据库落库后同步模板文件仍可能报错，不能把failed或reject解释为数据库回滚。拆分父会话的signed／byField清规则链共用saveAmountConfiguration，仍由runWrite持有唯一提交资格：
++
++- 第一阶段明确成功才继续一次原元数据写；失败不自动重试、不补偿、不续发未获成功确认的下一阶段。已经开始的配套写按原快照结算，销毁视图不截断后台写链。
++- 任一阶段失败且原视图仍有效时，在同一busy内调用既有getBillSplitConfig重新读取事实。结算后先恢复控件，再同步规则和元数据、入口显隐及互斥资格；原错误提示保留。恢复仅接纳金额配置，不用返回的持久化行覆盖未提交的行草稿。
++- 用户重试启用signed时，无论规则是否已由上次操作清空，都清除旧byField目标序号，避免两类目标并集错误扩大金额列禁用范围；仍不自动重试。
++- 重读也失败时，仅接纳明确成功的阶段，提示关闭后重新打开确认；该会话暂停配置写入，但允许正常关闭。迟到读取与结算不得修改已销毁视图、弹出旧提示或接管新窗口。
++
++原工厂参数、父子返回、Preload／Main接口、独立提交与业务参数保持；本补充修复Renderer与已提交事实不一致。当前规则入口见Renderer README，实施、验证与集成状态见[第三轮整改记录](implementation-notes.md#review-r3-remediation)。
++
+ ## 6. 场景结果与共享会话（R3）
+ 
+ ### 6.1 摘要由 Renderer 命令服务生成，IPC 保持
+diff --git a/scripts/renderer-lifecycle/fixtures/configuration-dialogs.js b/scripts/renderer-lifecycle/fixtures/configuration-dialogs.js
+index 706e49ac..01144118 100644
+--- a/scripts/renderer-lifecycle/fixtures/configuration-dialogs.js
++++ b/scripts/renderer-lifecycle/fixtures/configuration-dialogs.js
+@@ -296,13 +296,13 @@ module.exports = async ({ js, load, reset, assert, test }) => {
+     assert.deepEqual(await js('({settled:cfg.rowSettled,newTop:cfg.newHandle.isTop(),unchanged:cfg.oldMarkup===cfg.overlay.innerHTML})'),{settled:1,newTop:true,unchanged:true});
+   });
+ 
+-  async function setupRowWrites({ groups=[9], completed=false, rules=false, signed=false }={}) {
++  async function setupRowWrites({ groups=[9], completed=false, rules=false, signed=false, signedTargets=null }={}) {
+     await setup();
+     await js(`
+       cfg.rowTemplate={id:7,name:'删行测试模板',headers:['Currency','Amount']};
+       cfg.rows=[{seqNo:1,rowStatus:${JSON.stringify(completed?'completed':'draft')},currencySourceField:'Currency',creditSourceField:'',debitSourceField:''},{seqNo:2,rowStatus:${JSON.stringify(completed?'completed':'draft')},currencySourceField:'Currency',creditSourceField:'',debitSourceField:''}];
+       cfg.groups=${JSON.stringify(groups)};cfg.settled=[];cfg.initialRules=${rules?'cfg.rules':'[]'};
+-      cfg.meta={signedAmountSourceField:${JSON.stringify(signed?'Amount':'')},signedAmountTargetSeqNos:${signed?'[1]':'[]'},byFieldAmountTargetSeqNos:${rules?'[1]':'[]'}};
++      cfg.meta={signedAmountSourceField:${JSON.stringify(signed?'Amount':'')},signedAmountTargetSeqNos:${signedTargets===null?(signed?'[1]':'[]'):JSON.stringify(signedTargets)},byFieldAmountTargetSeqNos:${rules?'[1]':'[]'}};
+       const methodNames={previewDeleteBillSplitRow:'preview',deleteBillSplitRow:'deleteRow',saveBillSplitRow:'saveRow',saveBillSplitRowCount:'rowCount',clearBillSplitMergeGroups:'clearMerge',saveBillSplitMergeGroup:'saveMerge',saveBillSplitMeta:'rowMeta',saveBillSplitAmountRules:'rowRules'};
+       for(const [method,name] of Object.entries(methodNames)) cfg.api.templates[method]=payload=>cfg.invoke(name,[structuredClone(payload)],name==='preview'?{status:'success',dissolvedGroups:cfg.groups}:name==='deleteRow'||name==='rowCount'?{status:'success',currentRows:cfg.rows.slice(0,1)}:{status:'success'}).then(result=>{cfg.settled.push(name);return result;});
+       cfg.api.templates.getBillSplitConfig=id=>cfg.invoke('rowRefresh',[id],{status:'success',billSplitRows:cfg.rows,billSplitAmountRules:cfg.initialRules,billSplitMeta:cfg.meta});
+@@ -499,4 +499,146 @@ module.exports = async ({ js, load, reset, assert, test }) => {
+     if(enableAgain) {await js('cfg.openRowsButton.click();');await tick();assert.equal(await js('cfg.top().querySelectorAll(".bill-split-rows-table tbody tr").length'),2);}
+   });
+ 
++  // R3-01：规则与元信息是两个独立提交；成功阶段改变真实测试存储，失败不回滚前一步。
++  async function setupPartialRuleWrite(kind, signedTargets=null) {
++    await setupRowWrites({rules:true,signedTargets});
++    await js(`
++      cfg.calls=[];cfg.commits=[];cfg.readCalls=0;cfg.commitBeforeReply={};
++      cfg.store={rules:structuredClone(cfg.initialRules),meta:structuredClone(cfg.meta)};
++      cfg.first=cfg.defer();cfg.second=cfg.defer();cfg.gates={rowRules:[cfg.first],rowMeta:[cfg.second]};
++      cfg.persist=async(name,payload)=>{
++        const frozen=structuredClone(payload);cfg.calls.push({name,args:[frozen]});
++        const commit=()=>{
++          if(name==='rowRules')cfg.store.rules=structuredClone(frozen.amountSplitRules);
++          else {const {templateId,...meta}=frozen;cfg.store.meta=meta;}
++          cfg.commits.push({name,payload:frozen});
++        };
++        // 模拟数据库已提交、后续模板库同步失败；接口返回失败不代表回滚。
++        const earlyCommit=cfg.commitBeforeReply[name];if(earlyCommit)commit();
++        const gate=cfg.gates[name].shift();const result=gate?await gate.promise:{status:'success'};
++        if(result?.status==='success'&&!earlyCommit)commit();
++        return result;
++      };
++      cfg.api.templates.saveBillSplitAmountRules=payload=>cfg.persist('rowRules',payload);
++      cfg.api.templates.saveBillSplitMeta=payload=>cfg.persist('rowMeta',payload);
++      cfg.api.templates.getBillSplitConfig=async()=>{cfg.readCalls++;if(cfg.configReadGate)await cfg.configReadGate.promise;if(cfg.configReadFailure)throw new Error('配置重读连接失败');return {status:'success',billSplitRows:structuredClone(cfg.rows),billSplitAmountRules:structuredClone(cfg.store.rules),billSplitMeta:structuredClone(cfg.store.meta)};};
++      cfg.byField=cfg.overlay.querySelector('.bill-split-by-field-select');
++      cfg.signed=cfg.overlay.querySelector('.bill-split-signed-select');
++      cfg.manage=cfg.overlay.querySelector('.bill-split-amount-rules-manage-btn');
++      // signed 入口在规则存在时通常 disabled；合成 change 覆盖它仍须遵守的相邻写链合同。
++      cfg.beginChain=()=>{const select=${kind==='signed'?'cfg.signed':'cfg.byField'};select.value=${JSON.stringify(kind==='signed'?'Amount':'')};select.dispatchEvent(new Event('change'));};
++      cfg.chainState=()=>({rules:structuredClone(cfg.store.rules),meta:structuredClone(cfg.store.meta),manageHidden:cfg.manage.hidden,byField:cfg.byField.value,signed:cfg.signed.value,signedDisabled:cfg.signed.disabled,byFieldDisabled:cfg.byField.disabled});
++      void 0;
++    `);
++  }
++  const originalRuleMeta={signedAmountSourceField:'',signedAmountTargetSeqNos:[],byFieldAmountTargetSeqNos:[1]};
++  async function assertRuleChainSucceeded(kind, signedTargets=[]) {
++    const finalMeta={signedAmountSourceField:kind==='signed'?'Amount':'',signedAmountTargetSeqNos:signedTargets,byFieldAmountTargetSeqNos:[]};
++    assert.deepEqual(await js('cfg.chainState()'),{rules:[],meta:finalMeta,manageHidden:true,byField:'',signed:finalMeta.signedAmountSourceField,signedDisabled:false,byFieldDisabled:kind==='signed'});
++    assert.equal(await js('cfg.handle.isTop()'),true);
++    assert.deepEqual(await js('cfg.errors'),[]);
++  }
++  for(const kind of ['byField','signed']) for(const status of ['failed','reject']) await test(`R3-01 ${kind}首步${status}不提交元信息，独立存储保留原规则并可重试成功`,async()=>{
++    await setupPartialRuleWrite(kind);
++    await js(`cfg.beginChain();${status==='reject'?"cfg.first.reject(new Error('规则提交连接失败'));":"cfg.first.resolve({status:'failed',message:'规则提交失败'});"}`);await tick();
++    assert.match(await js('cfg.top().textContent'),/规则提交.*失败/);
++    assert.deepEqual(await js('cfg.store.rules'),await js('cfg.initialRules'));
++    assert.deepEqual(await js('cfg.store.meta'),originalRuleMeta);
++    assert.equal(await js('cfg.calls.filter(call=>call.name==="rowMeta").length'),0);
++    assert.deepEqual(await js('cfg.commits'),[]);
++    await js('cfg.host.closeTop();cfg.manage.click();');await tick();
++    assert.deepEqual(await js('Array.from(cfg.top().querySelectorAll(".rule-condition-value"),node=>node.value)'),['C','D']);
++    await js('cfg.host.closeTop();cfg.beginChain();cfg.second.resolve({status:"success"});');await tick();
++    await assertRuleChainSucceeded(kind);
++    assert.deepEqual(await js('cfg.commits.map(entry=>entry.name)'),['rowRules','rowMeta']);
++  });
++  for(const kind of ['byField','signed']) for(const status of ['failed','reject','cancelled']) await test(`R3-01 ${kind}清规则成功后元信息${status}接纳已提交事实，旧规则不复活且能重试`,async()=>{
++    const initialMeta={...originalRuleMeta,signedAmountTargetSeqNos:kind==='signed'?[2]:[]};
++    await setupPartialRuleWrite(kind,initialMeta.signedAmountTargetSeqNos);
++    await js('cfg.beginChain();cfg.first.resolve({status:"success"});');await tick();
++    assert.deepEqual(await js('cfg.store'),{rules:[],meta:initialMeta});
++    assert.deepEqual(await js('({close:cfg.handle.close().status,parent:cfg.parent.close().status,metaCalls:cfg.calls.filter(call=>call.name==="rowMeta").length})'),{close:'blocked',parent:'blocked',metaCalls:1});
++    await js('cfg.beginChain();');
++    assert.equal(await js('cfg.calls.filter(call=>call.name==="rowMeta").length'),1);
++    await js(status==='reject'?"cfg.second.reject(new Error('元信息提交连接失败'));":`cfg.second.resolve({status:${JSON.stringify(status)},message:'元信息提交${status}'});`);await tick();
++    assert.match(await js('cfg.top().textContent'),/元信息提交/);
++    await js('cfg.host.closeTop();');
++    assert.deepEqual(await js('cfg.chainState()'),{rules:[],meta:initialMeta,manageHidden:true,byField:'',signed:'',signedDisabled:false,byFieldDisabled:false});
++    assert.deepEqual(await js('Array.from(cfg.overlay.querySelectorAll(".bill-split-credit-select,.bill-split-debit-select"),node=>node.disabled)'),[false,false,false,false]);
++    assert.equal(await js('cfg.overlay.querySelector(".bill-split-by-field-target-seq-label").hidden&&cfg.overlay.querySelector(".bill-split-by-field-target-seq-picker").hidden'),true);
++    await js('cfg.byField.value="是";cfg.byField.dispatchEvent(new Event("change"));');await tick();
++    assert.deepEqual(await js('Array.from(cfg.top().querySelectorAll(".rule-condition-value"),node=>node.value)'),['','']);
++    await js('cfg.top().querySelector("[data-action=cancel]").click();cfg.beginChain();');await tick();
++    await assertRuleChainSucceeded(kind,initialMeta.signedAmountTargetSeqNos);
++    if(kind==='signed') assert.deepEqual(await js('Array.from(cfg.overlay.querySelectorAll(".bill-split-credit-select,.bill-split-debit-select"),node=>node.disabled)'),[false,false,true,true]);
++    assert.deepEqual(await js('cfg.commits.map(entry=>entry.name)'),kind==='signed'?['rowRules','rowMeta']:['rowRules','rowRules','rowMeta']);
++    assert.equal(await js('cfg.calls.filter(call=>call.name==="rowMeta").length'),2);
++  });
++  for(const kind of ['byField','signed']) for(const stage of ['rules','meta']) await test(`R3-01 ${kind}在${stage}在途销毁仍完成两次独立提交，旧DOM和新栈不续接`,async()=>{
++    await setupPartialRuleWrite(kind);
++    await js('cfg.beginChain();');
++    if(stage==='meta'){await js('cfg.first.resolve({status:"success"});');await tick();}
++    await js('cfg.handle.dispose();cfg.detachedMarkup=cfg.overlay.innerHTML;cfg.detachedState=cfg.chainState();cfg.nextHandle=cfg.other();void 0;');
++    if(stage==='rules'){await js('cfg.first.resolve({status:"success"});');await tick();}
++    assert.equal(await js('cfg.calls.filter(call=>call.name==="rowMeta").length'),1);
++    await js('cfg.second.resolve({status:"success"});');await tick();
++    const expectedMeta={signedAmountSourceField:kind==='signed'?'Amount':'',signedAmountTargetSeqNos:[],byFieldAmountTargetSeqNos:[]};
++    assert.deepEqual(await js('cfg.store'),{rules:[],meta:expectedMeta});
++    assert.deepEqual(await js('cfg.commits.map(entry=>entry.name)'),['rowRules','rowMeta']);
++    assert.equal(await js('cfg.readCalls'),0);
++    assert.deepEqual(await js('({unchanged:cfg.detachedMarkup===cfg.overlay.innerHTML,newTop:cfg.nextHandle.isTop(),oldOpen:cfg.handle.isOpen(),calls:cfg.calls.map(entry=>entry.name),errors:cfg.errors})'),{unchanged:true,newTop:true,oldOpen:false,calls:['rowRules','rowMeta'],errors:[]});
++    assert.deepEqual(await js('({manageHidden:cfg.manage.hidden,byField:cfg.byField.value,signed:cfg.signed.value,signedDisabled:cfg.signed.disabled,byFieldDisabled:cfg.byField.disabled})'),await js('(({manageHidden,byField,signed,signedDisabled,byFieldDisabled})=>({manageHidden,byField,signed,signedDisabled,byFieldDisabled}))(cfg.detachedState)'));
++  });
++
++  for(const [kind,status] of [['byField','failed'],['signed','reject']]) await test(`R3-01 ${kind}元信息已落地但返回${status}时重读持久化事实，同时保留原失败`,async()=>{
++    await setupPartialRuleWrite(kind);
++    await js('cfg.commitBeforeReply.rowMeta=true;cfg.beginChain();cfg.first.resolve({status:"success"});');await tick();
++    await js(status==='reject'?"cfg.second.reject(new Error('元信息提交后模板库同步失败'));":"cfg.second.resolve({status:'failed',message:'元信息提交后模板库同步失败'});");await tick();
++    assert.match(await js('cfg.top().textContent'),/元信息提交后模板库同步失败/);
++    assert.equal(await js('cfg.readCalls'),1);
++    await js('cfg.host.closeTop();');
++    await assertRuleChainSucceeded(kind);
++    assert.deepEqual(await js('cfg.commits.map(entry=>entry.name)'),['rowRules','rowMeta']);
++  });
++  await test('R3-01 首步已落地但reject不发第二步，重读接受规则已清的真实状态',async()=>{
++    await setupPartialRuleWrite('byField');
++    await js('cfg.commitBeforeReply.rowRules=true;cfg.beginChain();cfg.first.reject(new Error("规则提交后模板库同步失败"));');await tick();
++    assert.match(await js('cfg.top().textContent'),/规则提交后模板库同步失败/);
++    assert.deepEqual(await js('cfg.commits.map(entry=>entry.name)'),['rowRules']);
++    assert.equal(await js('cfg.calls.filter(entry=>entry.name==="rowMeta").length'),0);
++    assert.equal(await js('cfg.readCalls'),1);
++    await js('cfg.host.closeTop();');
++    assert.deepEqual(await js('cfg.chainState()'),{rules:[],meta:originalRuleMeta,manageHidden:true,byField:'',signed:'',signedDisabled:false,byFieldDisabled:false});
++  });
++  await test('R3-01 部分成功后重读失败保留已确认清规则及原错误，行内未提交草稿不丢失',async()=>{
++    await setupPartialRuleWrite('byField');
++    await js('cfg.draftCurrency=cfg.overlay.querySelector(".bill-split-currency-select");cfg.draftCurrency.value="Amount";cfg.draftCurrency.dispatchEvent(new Event("change"));cfg.configReadFailure=true;cfg.beginChain();cfg.first.resolve({status:"success"});');await tick();
++    await js('cfg.second.resolve({status:"failed",message:"元信息提交失败"});');await tick();
++    assert.match(await js('cfg.top().textContent'),/元信息提交失败/);
++    assert.match(await js('cfg.top().textContent'),/重读|重新打开/);
++    await js('cfg.host.closeTop();');
++    assert.deepEqual(await js('cfg.chainState()'),{rules:[],meta:originalRuleMeta,manageHidden:true,byField:'',signed:'',signedDisabled:true,byFieldDisabled:true});
++    assert.equal(await js('cfg.overlay.querySelector(".bill-split-currency-select").value'),'Amount');
++    assert.equal(await js('cfg.readCalls'),1);
++    assert.deepEqual(await js('cfg.commits.map(entry=>entry.name)'),['rowRules']);
++    assert.equal(await js('Array.from(cfg.overlay.querySelectorAll("button,input,select,textarea")).filter(node=>!node.matches(".icon-close,.bill-split-rows-done-btn")).every(node=>node.disabled)'),true);
++    assert.equal(await js('!cfg.overlay.querySelector(".icon-close").disabled&&!cfg.overlay.querySelector(".bill-split-rows-done-btn").disabled'),true);
++    await js('cfg.beginChain();cfg.overlay.querySelector(".bill-split-row-complete-btn").dispatchEvent(new Event("click"));');await tick();
++    assert.equal(await js('cfg.calls.length'),2);
++    await js('cfg.overlay.querySelector(".bill-split-rows-done-btn").click();');
++    assert.equal(await js('!cfg.handle.isOpen()&&cfg.parent.isTop()'),true);
++  });
++
++  await test('R3-01 失败后的配置重读仍持父写锁，force dispose后旧回包不恢复原UI',async()=>{
++    await setupPartialRuleWrite('byField');
++    await js('cfg.configReadGate=cfg.defer();cfg.beginChain();cfg.first.resolve({status:"success"});');await tick();
++    await js('cfg.second.resolve({status:"failed",message:"元信息提交失败"});');await tick();
++    assert.equal(await js('cfg.readCalls'),1);
++    assert.deepEqual(await js('({own:cfg.handle.close().status,parent:cfg.parent.close().status})'),{own:'blocked',parent:'blocked'});
++    await js('cfg.beginChain();');assert.equal(await js('cfg.calls.length'),2);
++    await js('cfg.handle.dispose();cfg.detachedMarkup=cfg.overlay.innerHTML;cfg.nextHandle=cfg.other();cfg.configReadGate.resolve();void 0;');await tick();
++    assert.deepEqual(await js('({unchanged:cfg.detachedMarkup===cfg.overlay.innerHTML,newTop:cfg.nextHandle.isTop(),oldOpen:cfg.handle.isOpen(),errors:cfg.errors})'),{unchanged:true,newTop:true,oldOpen:false,errors:[]});
++    assert.deepEqual(await js('cfg.store'),{rules:[],meta:originalRuleMeta});
++  });
++
+ };
+diff --git a/src/renderer/README.md b/src/renderer/README.md
+index dac9f909..162adc49 100644
+--- a/src/renderer/README.md
++++ b/src/renderer/README.md
+@@ -37,6 +37,7 @@ Statement 没有既有的公开 `sessionStatus` IPC。本次保留本窗口已
+ - [dialogs/toolbox.js](dialogs/toolbox.js) 持有本次 splitReadToken/来源/草稿，选择层只拥有控件。单项/行数/多文件转换保留父会话；同步冻结 payload 并锁定提交后只发送一次原 splitExport。取消不导出、不添加 Main 清理 IPC。
+ - [dialogs/configuration.js](dialogs/configuration.js) 拥有模板、映射、大账号、余额及迁移草稿。数据读取校验视图及请求代次；写入期间沿用对应 busy/确认语义；旧窗口不能接管新窗口。
+ - 功能收纳的 `onCommit` 保存并接纳 Main 返回的启用列表；同步 busy 阻止导航，原 handle 正常提交关闭后才执行 `onCommitted` 导航。强制销毁不取消已提交写，也不授予旧窗新的导航权限。账单拆分配置的行编辑、单行删除、份数、合并组、金额元数据及规则子层共享父会话提交锁与关闭资格；写入开始使旧删除预检失效。预检失败不删除，原窗口关闭或行重绘后的迟到预检不能续发删除；已提交的配套写继续结算，旧视图不能接管新窗口。父映射窗口每次打开拆分子层前重读配置，父会话、请求和父写代次均有效才挂载，失败不使用旧缓存。按钮返回在异步onClose期间保持原拆分子层并锁定关闭；onClose可选资格上下文只允许原层仍有效的回调更新父缓存，随后精确结束原拆分子层。
++- 拆分金额规则与元数据各自提交；`saveAmountConfiguration`在同一父会话提交锁内处理signed／byField清规则链。失败时重读已保存的金额配置，保留原失败提示及未提交的行草稿；不把failed／reject当回滚，不自动重试业务写。重读失败仅接纳已明确成功阶段，暂停本窗口配置写入并提示关闭重开；关闭仍可用。恢复读取和结算均受原handle资格约束。
+ - [dialogs/scenarios.js](dialogs/scenarios.js) 拥有场景草稿、筛选与渠道选项。临时确认用子层，返回保持父草稿；视图订阅在自己的 scope 中释放。
+ 
+ ## 场景命令、失效与共享会话
+diff --git a/src/renderer/dialogs/configuration.js b/src/renderer/dialogs/configuration.js
+index 0f1161d7..7f195d23 100644
+--- a/src/renderer/dialogs/configuration.js
++++ b/src/renderer/dialogs/configuration.js
+@@ -3964,18 +3964,19 @@
+       const templateId = template.id;
+       let activeWrite = null;
+       let closing = false;
++      let configurationNeedsReload = false;
+       let deletePreviewEpoch = 0;
+       const parentHandle = () => modalBridge.host.getHandle(overlay);
+       const isCurrent = (target = overlay) => Boolean(parentHandle()?.isOpen() && modalBridge.host.getHandle(target)?.isTop());
+-      const canInteract = () => !activeWrite && !closing && isCurrent();
++      const canInteract = () => !configurationNeedsReload && !activeWrite && !closing && isCurrent();
+       registerModal(overlay, {
+         canClose: () => !activeWrite && !closing,
+         onDispose() { ++deletePreviewEpoch; }
+       });
+ 
+       // 此父会话的所有写入口（含确认/规则子层）共用一次提交资格。
+-      async function runWrite(write, { target = overlay, onSuccess, showFailure = true } = {}) {
+-        if (activeWrite || closing || !isCurrent(target)) return { status: 'blocked' };
++      async function runWrite(write, { target = overlay, onSuccess, onSettled, showFailure = true } = {}) {
++        if (configurationNeedsReload || activeWrite || closing || !isCurrent(target)) return { status: 'blocked' };
+         const operation = { target, parent: parentHandle(), handle: modalBridge.host.getHandle(target) };
+         activeWrite = operation;
+         ++deletePreviewEpoch;
+@@ -3995,6 +3996,7 @@
+         }
+         // Main 已发出的写与配套写照常结算；仅撤销旧窗口的 UI 续接。
+         if (!isCurrent(target)) return result;
++        onSettled?.(result);
+         if (result?.status === 'success') onSuccess?.(result, operation.handle);
+         else if (showFailure) pushModal(operation.handle, () => createAlertDialog(result?.message || '保存失败', { onConfirm: null }));
+         return result;
+@@ -4244,14 +4246,8 @@
+       function applyBillSplit2WayExclusion() {
+         const enabled = isAmountSourceColumnEnabled();
+         // 副区域状态
+-        if (currentBillSplitMeta.signedAmountSourceField) {
+-          byFieldSelect.disabled = true;
+-        } else if (currentAmountRules.length > 0) {
+-          signedSelect.disabled = true;
+-        } else {
+-          signedSelect.disabled = false;
+-          byFieldSelect.disabled = false;
+-        }
++        signedSelect.disabled = currentAmountRules.length > 0;
++        byFieldSelect.disabled = Boolean(currentBillSplitMeta.signedAmountSourceField);
+         // Credit/Debit 列清空（仅被指定的行，或没勾选指定功能时全部清空）
+         if (enabled) {
+           const hasTargetSeq = signedTargetSeqCheckbox.checked || byFieldTargetSeqCheckbox.checked;
+@@ -4577,28 +4573,70 @@
+         });
+       });
+ 
+-      // 互斥配置链在提交时捕获全部参数；已开始后不因前端销毁截断配套写。
+-      signedSelect.addEventListener('change', async () => {
+-        if (!canInteract()) return;
+-        const newValue = signedSelect.value;
+-        const clearRules = Boolean(newValue && currentAmountRules.length);
+-        const payload = snapshotMeta({ signedAmountSourceField: newValue,
+-          signedAmountTargetSeqNos: newValue ? currentBillSplitMeta.signedAmountTargetSeqNos.slice() : [],
+-          byFieldAmountTargetSeqNos: clearRules ? [] : currentBillSplitMeta.byFieldAmountTargetSeqNos.slice() });
++      async function saveAmountConfiguration(payload, { clearRules = false } = {}) {
++        let rulesCleared = false;
++        let persisted = null;
++        let reloadFailed = false;
+         await runWrite(async () => {
+-          if (clearRules) {
+-            const cleared = await api.templates.saveBillSplitAmountRules({ templateId, amountSplitRules: [] });
+-            if (cleared?.status !== 'success') return cleared;
++          let result;
++          try {
++            if (clearRules) {
++              result = await api.templates.saveBillSplitAmountRules({ templateId, amountSplitRules: [] });
++              rulesCleared = result?.status === 'success';
++            }
++            if (!clearRules || rulesCleared) result = await api.templates.saveBillSplitMeta(payload);
++          } catch (error) { result = { status: 'error', message: error?.message || '保存失败' }; }
++          // 两次保存独立提交；连 failed/reject 也可能发生在落库后的模板文件同步阶段。
++          // 只读当前配置，不重试业务写；已销毁视图不再发起恢复读取。
++          if (result?.status !== 'success' && isCurrent()) {
++            try {
++              const latest = await api.templates.getBillSplitConfig(templateId);
++              if (latest?.status !== 'success' || !Array.isArray(latest.billSplitAmountRules)
++                || !latest.billSplitMeta || typeof latest.billSplitMeta !== 'object') throw new Error('读取配置失败');
++              persisted = latest;
++            } catch (_error) {
++              reloadFailed = true;
++              result = { ...result, message: `${result?.message || '保存失败'}\n当前配置未能重新读取，请关闭后重新打开以确认。` };
++            }
+           }
+-          return api.templates.saveBillSplitMeta(payload);
+-        }, { onSuccess() {
+-          if (clearRules) currentAmountRules = [];
+-          currentBillSplitMeta = { ...payload };
++          return result;
++        }, { onSettled(result) {
++          // 必须在 runWrite 恢复旧 disabled 快照之后，按每个已提交阶段重新投影。
++          if (persisted) {
++            currentAmountRules = persisted.billSplitAmountRules.map(rule => ({ ...rule }));
++            currentBillSplitMeta = {
++              signedAmountSourceField: String(persisted.billSplitMeta.signedAmountSourceField || ''),
++              signedAmountTargetSeqNos: (persisted.billSplitMeta.signedAmountTargetSeqNos || []).slice(),
++              byFieldAmountTargetSeqNos: (persisted.billSplitMeta.byFieldAmountTargetSeqNos || []).slice()
++            };
++          } else {
++            if (rulesCleared) currentAmountRules = [];
++            if (result?.status === 'success') currentBillSplitMeta = { ...payload };
++          }
++          configurationNeedsReload = reloadFailed;
++          signedSelect.value = currentBillSplitMeta.signedAmountSourceField;
+           byFieldSelect.value = currentAmountRules.length ? '是' : '';
+           amountRulesManageBtn.hidden = !currentAmountRules.length;
+           initTargetSeqUI();
++          // 恢复读取只接纳金额规则/元信息，保留 currentRows 内尚未提交的行草稿。
+           rerenderTable();
++          if (configurationNeedsReload) {
++            dialog.querySelectorAll('button, input, select, textarea').forEach(element => {
++              if (!element.matches('.icon-close, .bill-split-rows-done-btn')) element.disabled = true;
++            });
++          }
+         } });
++      }
++
++      // 互斥配置链在提交时捕获全部参数；已开始后不因前端销毁截断配套写。
++      signedSelect.addEventListener('change', async () => {
++        if (!canInteract()) return;
++        const newValue = signedSelect.value;
++        const clearRules = Boolean(newValue && currentAmountRules.length);
++        const payload = snapshotMeta({ signedAmountSourceField: newValue,
++          signedAmountTargetSeqNos: newValue ? currentBillSplitMeta.signedAmountTargetSeqNos.slice() : [],
++          byFieldAmountTargetSeqNos: newValue ? [] : currentBillSplitMeta.byFieldAmountTargetSeqNos.slice() });
++        await saveAmountConfiguration(payload, { clearRules });
+       });
+ 
+       byFieldSelect.addEventListener('change', async () => {
+@@ -4616,17 +4654,7 @@
+           } else openBillSplitAmountRulesSubDialog();
+         } else {
+           const payload = snapshotMeta({ byFieldAmountTargetSeqNos: [] });
+-          await runWrite(async () => {
+-            const cleared = await api.templates.saveBillSplitAmountRules({ templateId, amountSplitRules: [] });
+-            if (cleared?.status !== 'success') return cleared;
+-            return api.templates.saveBillSplitMeta(payload);
+-          }, { onSuccess() {
+-            currentAmountRules = [];
+-            currentBillSplitMeta = { ...payload };
+-            amountRulesManageBtn.hidden = true;
+-            initTargetSeqUI();
+-            rerenderTable();
+-          } });
++          await saveAmountConfiguration(payload, { clearRules: true });
+         }
+       });
+ 
+@@ -4661,7 +4689,7 @@
+       }
+ 
+       async function closeRows() {
+-        if (!canInteract()) return;
++        if (activeWrite || closing || !isCurrent()) return;
+         const handle = parentHandle();
+         if (typeof onClose !== 'function') { closeModal(handle); return; }
+         // 父调用方需要先读取最新配置；等待期间保留原子层，拒绝其他关闭和写入。

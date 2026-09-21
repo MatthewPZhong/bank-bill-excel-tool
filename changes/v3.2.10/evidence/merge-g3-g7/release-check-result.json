@@ -1,0 +1,51 @@
+{
+  "candidate": "9602a1fa482203e11bfde8cd6a73b8f552243d95",
+  "command": "UNIT_TEST_CONCURRENCY=1 npm run release-check",
+  "startedAt": "2026-09-21T02:47:39.372200+00:00",
+  "platform": "macOS-15.7.4-arm64-arm-64bit-Mach-O",
+  "node": "v25.8.0",
+  "workdir": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/release-v3.2.10",
+  "diskGuardMinimumGiB": 2,
+  "initialFreeGiB": 7.396,
+  "completedAt": "2026-09-21T03:13:35.416431+00:00",
+  "exitCode": 0,
+  "durationSeconds": 1556.11,
+  "minimumObservedFreeGiB": 6.583,
+  "diskGuardStopped": false,
+  "lint": "PASS",
+  "smoke": "PASS",
+  "unit": {
+    "tests": 8777,
+    "suites": 828,
+    "pass": 8773,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 4,
+    "todo": 0,
+    "duration_ms": 942116.421166,
+    "fileCount": 551,
+    "skippedCases": [
+      "﹣ Windows CI 真实 PowerShell snapshot→token cleanup 语义 (0.049583ms) # SKIP",
+      "﹣ Windows PowerShell 采集器使用原始 CIM 枚举并完整遍历真实文件祖先 (0.218875ms) # 需要 Windows PowerShell；受控 Storage 对象不代替真实 CIM 查询",
+      "﹣ Windows packaged canary 对报告前已退出进程快速返回专用 safe code (0.053917ms) # SKIP",
+      "﹣ Windows packaged canary 的 Setup 失败诊断仅返回固定退出/落地/身份枚举 (0.032875ms) # SKIP"
+    ],
+    "formerlyIncompleteG3Cases": [
+      "✔ 1024 个真实 Task 来源使用两次全量扫描及 3N 次 Inspector (84314.763583ms)",
+      "✔ R3.2.4 历史 exact evidence 在原提交和 PR 分支上完整复验 (86947.203125ms)"
+    ]
+  },
+  "integration": {
+    "scripts": 68,
+    "passed": 68,
+    "failed": 0,
+    "reportedAssertions": 2874,
+    "reportedPassedAssertions": 2874,
+    "durationMs": 600475,
+    "countBoundary": "One historical nested-worker script has no numeric assertion count; every script exited 0",
+    "rendererLifecycle": "206/206 PASS",
+    "executionDescriptors": "4/4 PASS"
+  },
+  "manifestGate": "402/402 PASS; 74 legacy pairs; 13 production enabled",
+  "logSha256": "a22ffbb4c882607433f79c017c0ff45ca9ad7521cc87bd156c5caf844cabd987"
+}

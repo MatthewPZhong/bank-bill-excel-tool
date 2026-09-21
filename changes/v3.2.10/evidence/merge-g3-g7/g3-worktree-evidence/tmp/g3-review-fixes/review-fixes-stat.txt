@@ -1,0 +1,20 @@
+ .../implementation-notes.md                        |   65 +++
+ .../codex/v3.2.10-renderer-boundaries/techdoc.md   |   15 +
+ .../renderer-lifecycle/fixtures/app-settings.js    |   34 +
+ .../fixtures/application-shell.js                  |   82 ++++
+ .../fixtures/configuration-dialogs.js              |   45 ++
+ .../fixtures/existing-controllers.js               |   29 +
+ .../renderer-lifecycle/fixtures/shared-dialogs.js  |  122 +++++
+ src/renderer-biz-op-v327.js                        |   47 ++
+ src/renderer-dialogs.js                            |   86 +++-
+ src/renderer.js                                    |    6 
+ src/renderer/README.md                             |    7 
+ src/renderer/controllers/bank-statement.js         |   11 
+ src/renderer/controllers/recon-id-fix.js           |   13 -
+ src/renderer/controllers/vcc-op-calc.js            |  396 ++++++++++++-----
+ src/renderer/dialogs/app-settings.js               |    6 
+ src/renderer/dialogs/configuration.js              |   65 ++-
+ .../unit/main-process/biz-op-v329-renderer.test.js |   70 +++
+ .../renderer/scenario-controller-feedback.test.js  |  130 ++++++
+ .../renderer/vcc-op-calc-source-binding.test.js    |  458 ++++++++++++++++++++
+ 19 files changed, 1479 insertions(+), 208 deletions(-)

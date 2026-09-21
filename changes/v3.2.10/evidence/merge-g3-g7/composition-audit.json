@@ -1,0 +1,28 @@
+{
+  "G3": {
+    "filesOutsideOverlap": 180,
+    "mismatches": []
+  },
+  "G7": {
+    "filesOutsideOverlap": 238,
+    "mismatches": []
+  },
+  "candidate": "9602a1fa482203e11bfde8cd6a73b8f552243d95",
+  "G3Merge": "a85dbee2021c9e810f0274d66c3d027474c4a1c8",
+  "sharedFiles": [
+    "AGENTS.md",
+    "changes/v3.2.10/README.md",
+    "rules/integration-test-policy.md",
+    "tests/unit/archive-center-ui-contract.test.js",
+    "tests/unit/duplicate-inbound-match-wiring.test.js",
+    "tests/unit/main-process/pre-fund-reconciliation/mpt-mixed-lifecycle-e05-p0.test.js",
+    "tests/unit/main-process/statement-big-account-preview.test.js",
+    "tests/unit/renderer-position-reconciliation.test.js",
+    "tests/unit/renderer-pre-fund-reconciliation.test.js"
+  ],
+  "manifestGate": "402/402 PASS; 74 pairs; 13 enabled",
+  "policyRulesUnchanged": true,
+  "freeGiB": 7.41,
+  "noConcurrentTestProcessesObserved": true,
+  "recordedAt": "2026-09-21T02:46:58.080789+00:00"
+}

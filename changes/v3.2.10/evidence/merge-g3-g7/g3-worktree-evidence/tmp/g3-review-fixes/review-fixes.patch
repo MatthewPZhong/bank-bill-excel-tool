@@ -1,0 +1,2273 @@
+diff --git a/changes/v3.2.10/codex/v3.2.10-renderer-boundaries/implementation-notes.md b/changes/v3.2.10/codex/v3.2.10-renderer-boundaries/implementation-notes.md
+index db95ee79..22d07e43 100644
+--- a/changes/v3.2.10/codex/v3.2.10-renderer-boundaries/implementation-notes.md
++++ b/changes/v3.2.10/codex/v3.2.10-renderer-boundaries/implementation-notes.md
+@@ -6,9 +6,9 @@
+ - worktree：`/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-renderer-boundaries`。
+ - 基线与当前 HEAD：`11086a3cbf632a30adbcfa796e4cd81810c5aef9`（本地 main / v3.2.9）。全部实施差异未提交；没有推送、PR、合并、升版或发布。
+ - 输入：从用户指定主工作区读取并复制 G3 Spec/TechDoc、总索引及 review-response。其他治理项与审查报告保留主工作区绝对链接，避免副本索引指向不存在的材料；未改主工作区输入文件。
+-- 当前状态：R1–R5 的生产装配和独立复查修复均已落地；最终过滤单测、lint、smoke及完整integration runner已通过；完整release-check重跑被自动审批拒绝，产品与平台验收仍有缺口。实现状态不能替代必要验证或 release 集成状态。
++- 当前状态：首轮 R1–R5 已落地；2026-09-20 实现审查发现 R01–R06 六项缺陷，六项代码修复已实现，冻结后623项受影响单测及154项隔离Electron工厂通过；R01人工财务复核与整项验收仍未完成，不能沿用首轮测试通过宣布全部验收完成。本轮状态见末尾“审查整改记录”；完整release-check和产品／平台验收缺口保留。
+ 
+-“集成状态”指合入 release／其他治理功能分支；本 worktree 内的生产装配已完成。
++“集成状态”指合入 release／其他治理功能分支；本 worktree 内的生产装配已完成。下表及 R1–R5 正文保留首轮实施事实，修后当前证据以末尾审查整改记录为准。
+ 
+ | 切片 | 实现状态 | 验证状态 | 集成状态 |
+ | --- | --- | --- | --- |
+@@ -118,7 +118,7 @@
+ | 18 | [toolbox](../../../../scripts/renderer-lifecycle/fixtures/toolbox.js)：原token三种payload、切换、取消、双击、stale、最终资源清理 |
+ | 19 / 20 | [真实仓储ID复用及交错](../../../../tests/unit/renderer/scenario-change-routing.test.js)、[元数据屏障](../../../../tests/unit/renderer/scenario-command-service.test.js)：双向复用、晚到list/get、交错/未知写、dispose重建不恢复信任 |
+ 
+-## 最终验证与剩余事项
++## 首轮实施验证与剩余事项（审查前快照）
+ 
+ 测试时94个变更代码/测试/脚本文件的哈希保存在 [验证快照](../../../../tmp/g3-delivery/verified-code-sha256.json)。结束前核对一致；之后只在三份文件校正旧挂载注释或删除空行缩进，Acorn AST 比较完全一致，见 [无语义变更证明](../../../../tmp/g3-delivery/comment-whitespace-proof.json)，涉及文件再次lint通过。最终交付哈希另存 [delivery-manifest.json](../../../../tmp/g3-delivery/delivery-manifest.json)。文档本地链接检查没有缺失。
+ 
+@@ -148,4 +148,61 @@ node --test --test-concurrency=2 --test-skip-pattern='1024 个真实 Task 来源
+ 
+ 回退按完整功能切片撤回源模块与根装配、script顺序和相应测试/规则入口；不涉及数据迁移或线上数据回滚。跨G1/G2/G5/G8等集成按后续用户指令执行，不从其他功能worktree自行合并。
+ 
+-交付产物：[完整未提交补丁（含新增文件及本项文档）](../../../../tmp/g3-delivery/renderer-boundaries.patch)、[差异统计](../../../../tmp/g3-delivery/diff-stat.txt)、[验证清单与文件哈希](../../../../tmp/g3-delivery/delivery-manifest.json)。补丁仅表达本分支相对上述HEAD的本地差异，不产生提交或集成动作。
++首轮交付产物（审查前快照）：[完整未提交补丁（含新增文件及本项文档）](../../../../tmp/g3-delivery/renderer-boundaries.patch)、[差异统计](../../../../tmp/g3-delivery/diff-stat.txt)、[验证清单与文件哈希](../../../../tmp/g3-delivery/delivery-manifest.json)。补丁仅表达本分支相对上述HEAD的本地差异，不产生提交或集成动作。
++
++<a id="review-remediation"></a>
++
++## 审查整改记录（R01–R06）
++
++依据：[2026-09-20 实现审查](review-2026-09-20.md)。保留原报告、脚本和日志，不把修前反例改写为通过。整改仍在同一功能worktree，HEAD仍为11086a3c；修前110个现有变更／审查文件的哈希与本轮源文件备份位于 [修复前清单](../../../../tmp/g3-review-fixes/before-manifest.json)。原资金算法、Main接口及真实业务数据不属于本次修改范围。
++
++| 审查项／所属切片 | 实现 | 验证 | release集成 |
++| --- | --- | --- | --- |
++| R01 来源绑定／R4 VCC OP | 已实现 | 自动验证通过；资金人工复核未完成 | 未集成 |
++| R02 默认存档入口／R1 | 已实现 | 默认依赖、实际根装配及组合回归通过 | 未集成 |
++| R03 场景下拉恢复／R3 | 已实现 | 原反例、新矩阵及最终组合通过 | 未集成 |
++| R04 后台任务反馈／R4 BizOP | 已实现 | 原反例、后台与选择／恢复矩阵及最终组合通过 | 未集成 |
++| R05 隐藏域失效反馈／R3 | 已实现 | 原两方向反例、新矩阵及最终组合通过 | 未集成 |
++| R06 写窗busy协议／R1、R5 | 已实现 | 收纳／拆分父子、正常导航及最终组合通过 | 未集成 |
++
++### 整改职责、调用闭合与前后行为
++
++**R01／R4 VCC OP（AC-09/13）。** scan之前先清旧保存资格，来源对象与操作锁跨导航保留；F1确认、计算及F2期初只属于该来源。旧扫描未确认就离页时只保存事实和继续说明，不能复活旧F2。已确认compute和已提交save保留真实结算。重入、打开F2及提交前经既有computeAmounts核对月份、totals、perFile；提交仍只有beginOp，不从Renderer传回旧金额覆盖Main。调用方仍为本域controller及原F1/F2工厂；工厂新增可选canClose，将域资格与本地computing合并为一次登记，避免覆盖busy条件。金额算法、schema及公开IPC无需更新；该既有核对IPC产生Task/活动日志，已在[TechDoc §5.1](techdoc.md#vcc-source-settlement)记录。当前规则入口更新为Renderer README的VCC来源段。证据与资损风险分级见[来源验证说明](../../../../tmp/g3-review-fixes/vcc/README.md)。
++
++**R02／R1 正式存档入口（AC-13/17）。** 默认依赖从外层窄API读取，使用archiveApi局部变量，消除TDZ；显式override只作兼容路径。工厂专项验证无override的列表、统计、保留期及父子删除；实际index/Preload/设置按钮再覆盖正式调用链。只改API取值，不改变删除token、存储目录或删除资格，因此专项业务规则正文无需更新；入口与资源协议仍在Renderer README。
++
++**R03、R05／R3 场景资格及反馈（AC-13/15）。** 两controller独占busy与失效待重绘状态。ReconID每次按busy、当前类别及合法场景完整计算disabled；确定失效在隐藏时保留resultFeedbackInvalidated，成功重读Main后消费，失败读取不能吞标记。修后下拉在成功/失败/取消/reject结算恢复合法资格，返回已失效域清除旧导出成功反馈。原command service、scope矩阵、resync、未命中域、仅关闭与明确写失败的兼容语义保持；没有新增调用方或公开API。当前Renderer README已更新，完整35项矩阵及五项事实见[场景修复说明](../../../../tmp/g3-review-fixes/scenarios/results.md)。
++
++**R04／R4 BizOP（AC-09/13）。** controller的feedback保存已提交任务的真实终态，页面代次仅控制DOM/弹窗续接；enter恢复busy、可用状态和已结算反馈。相邻调用方复查发现旧picker和retryRecovery也返回null，现以独立abandonedSelection废弃尚未提交的文件/保存位置选择并恢复此前反馈，已提交恢复检查则先归一真实ready。没有新增IPC、重试业务写或取消已提交后台任务；perform全部消费者保持原结果/后续界面资格。原Electron断言“返回后不显示旧任务错误”与本次已确认合同冲突，已改为显示真实错误且无旧窗复活、一次调用；修前失败记录保留。当前规则入口已更新为Renderer README的后台反馈段。
++
++**R06／R1、R5 写入弹窗（AC-03/14）。** 功能收纳和拆分份数将同步提交锁与host的canClose连接，父子和根替换遵守同一资格；保存完成只操作原handle。收纳onCommit仍负责保存及Main启用列表接纳，新增可选onCommitted在原handle正常提交关闭后导航/重绘；取消、失败、force dispose不调用。实际root装配保留“停用当前模块→切Main返回列表首项”。拆分减少份数的确认及增加份数的直接写均仅一次提交，保持原templateId/nextN、失败重试和取消行为。此前旧入口遗漏和本轮F2迟到DOM补修均记录为有意修复，不声称原行为完全不变。当前规则入口为Renderer README弹窗权限段；[工厂说明及证据](../../../../tmp/g3-review-fixes/modals/README.md)保存完整调用兼容与测试。
++
++G8仍未集成，配置/激活和例外无变化。当前人读入口由AGENTS→Renderer README导航；新增技术细节同步TechDoc §5.1，Spec及原审查报告保持原样。首轮完整门禁与平台限制不会被局部整改通过覆盖。
++
++### 本轮最终验证
++
++最终96个代码／脚本／测试文件以[冻结哈希](../../../../tmp/g3-review-fixes/frozen-code.json)执行验证，完成后逐一核对无漂移。各组修前反例保留；所有命令工作目录均为本功能worktree。
++
++| 本轮执行 | 结果 | 证据与范围 |
++| --- | --- | --- |
++| 42个受影响单测文件，`node --test --test-concurrency=2` | **623/623 PASS，0 fail、0 skipped** | [最终日志](../../../../tmp/g3-review-fixes/final-unit.log)、[完整命令与退出码](../../../../tmp/g3-review-fixes/final-unit-command.json)；包括已迁移原测试、Renderer边界、R9及本次新增回归，不是全仓unit |
++| `node scripts/test-renderer-lifecycle.js` | **154/154 PASS** | [全部工厂日志](../../../../tmp/g3-review-fixes/final-electron.log)；实际index/Preload/控制器/F1/F2、默认存档、收纳正常导航，API受控 |
++| `npm run lint` | **PASS** | [日志](../../../../tmp/g3-review-fixes/final-lint.log) |
++| `npm run smoke` | **PASS** | [日志](../../../../tmp/g3-review-fixes/final-smoke.log) |
++| R01真实parser/session/SQLite | 新25项＋原域33项＝**58/58**，含在最终unit | [资金来源日志](../../../../tmp/g3-review-fixes/vcc/after-focused.log)：B未确认不能保存；重新确认后08账期、900发生额、100期初、1000期末，B逐文件明细及receipt hash一致 |
++| R03/R05原审查反例 | 修前0/3，修后**3/3 PASS**；新矩阵35项 | [原探针修后日志](../../../../tmp/g3-review-fixes/scenarios/after-probes.log)、[矩阵说明](../../../../tmp/g3-review-fixes/scenarios/results.md) |
++| R04原审查探针 | 修前停留“等待后台”；修后保留真实失败，一次导入、busy=false | [修前](../../../../tmp/g3-review-fixes/bizop/before-review-probe.log)、[修后](../../../../tmp/g3-review-fixes/bizop/after-review-probe.log)；13个新增背景／选择／恢复用例与旧业务／恢复组合29/29，含在最终unit |
++| R02/R06及F2正式工厂 | 原默认/busy反例修前成立；整改后父子、双击、失败、force dispose均通过 | [弹窗前后证据](../../../../tmp/g3-review-fixes/modals/README.md)；F2新增8项，修前6项失败、修后17/17（含原9项），均纳入154项 |
++| 哈希、差异、链接与保护检查 | **PASS** | [交付清单](../../../../tmp/g3-review-fixes/final-manifest.json)、[差异检查](../../../../tmp/g3-review-fixes/final-checks.log)；原审查/证据与Spec无改动，Main/backend/package/lock无新增变更 |
++
++实际根F1/F2和SQLite验证是两层独立证据：前者用受控API验证正式DOM/参数/导航，后者运行真实解析、会话、存储及receipt但使用记录型弹窗。没有把两者合称完整产品Main端到端。
++
++本轮只执行与Renderer修复影响相称的组合验证，没有重复全仓unit或完整integration-runner；此前623项以外的测试、历史61脚本通过属于首轮快照。未运行的完整门禁和平台项继续保留。
++
++交付：[相对审查快照的整改补丁](../../../../tmp/g3-review-fixes/review-fixes.patch)、[整改差异统计](../../../../tmp/g3-review-fixes/review-fixes-stat.txt)、[当前完整功能补丁](../../../../tmp/g3-review-fixes/renderer-boundaries-current.patch)、[当前文件与日志哈希清单](../../../../tmp/g3-review-fixes/final-manifest.json)。全部为未提交差异；本次回退可按整改补丁精确撤回到审查前状态，不触及真实数据。
++
++### 资金人工复核与剩余门禁
++
++**⚠️ 资金红线，请人工复核。** [reconciliation-blindspot-pass](/Users/pzhong/Desktop/Project/bank-bill-excel-tool/.agents/skills/reconciliation-blindspot-pass/SKILL.md)要求“命中资金红线时标注 `⚠️ 资金红线，请人工复核`，不得仅凭自动测试宣布安全”；CODEX.md也要求资金损失红线发现人工复核。R01的自动化仅使用合成Excel、真实parser/session及内存SQLite。需人工核对界面确认账期、输入期初、Main snapshot、逐文件明细和落库receipt的一致性；当前没有访问真实业务数据，不能推断既有真实数据是否受影响。
++
++完整release-check、两项高占用单测复验、真实产品Main启动（含新增computeAmounts核对的Task/日志）、Windows/Excel/WPS/安装包以及release/跨治理集成仍未完成。本轮未重试此前因ENOSPC和共享磁盘空间被自动审批拒绝的完整门禁，也没有将历史61脚本通过升级为本轮完整集成通过。
+diff --git a/changes/v3.2.10/codex/v3.2.10-renderer-boundaries/techdoc.md b/changes/v3.2.10/codex/v3.2.10-renderer-boundaries/techdoc.md
+index 15a07476..9dc2cd3c 100644
+--- a/changes/v3.2.10/codex/v3.2.10-renderer-boundaries/techdoc.md
++++ b/changes/v3.2.10/codex/v3.2.10-renderer-boundaries/techdoc.md
+@@ -204,6 +204,21 @@ router 注册静态 moduleId→controller，注册完成后冻结；未知模块
+ 
+ R2 可以先对 R3–R5 未迁出域包装旧 refresh/restore；适配器只接命名旧函数，不导出 state。各行完成后删除对应 adapter 和根状态字段，防止两份可变事实并存。事件只绑定在本域 panel 或自己拥有的 modal；全局应用菜单/快捷键由壳显式转发命令，不让控制器查询其他域按钮。
+ 
++<a id="vcc-source-settlement"></a>
++
++### 5.1 实现审查后的来源与结算补充（2026-09-20）
++
++依据实现审查 R01/R04，落实既有 AC-09/13，不改变金额算法、数据库结构或公开 IPC：
++
++- VCC OP 每次实际 scan 前先撤销旧保存资格，以本域每次扫描对象和跨导航操作锁绑定所选文件、F1确认、统计与F2期初。未确认扫描即使后台已完成，离页后也不得恢复旧来源的F2；重新导入确认后才可保存。F2闭包绑定该来源及自身handle，同文件同金额的新scan也使旧F2失效。
++- 已确认来源在重入、打开F2及提交save前通过现有computeAmounts核对月份、完整totals及逐文件metadata。该值用于探测漂移，不能充当不可变文件身份；当前DTO不提供scanId或内容hash。实际Main该IPC读取缓存，同时创建tracked Task和活动日志，新增核对带来的记录需在真实产品Main验收中核对。保存仍只传用户原始beginOp，实际金额和receipt由Main原链路处理。
++- F2工厂本地提交锁与controller提供的关闭资格合并后交给宿主；普通关闭遵守busy，强制销毁只撤销旧UI续接。已提交save继续结算，但旧节点不能被迟到结果更新。
++- BizOP区分已提交任务与尚未提交的选择。前者的最终反馈归controller保留、重入展示；后者若过期，仅废弃选择并恢复此前反馈，不续发写入、不伪造任务失败。恢复检查也先保存真实ready结算，再限制旧页面后续动作。
++
++收纳弹窗的onCommit负责持久化和Main启用列表接纳；新增可选onCommitted仅在原handle正常提交关闭后导航和重绘。这样保留停用当前模块后切换首个启用模块的行为，同时不绕过保存中的关闭预检。强制销毁不授权该回调。
++
++实现、验证及资金人工复核状态见[实施记录的审查整改](implementation-notes.md#review-remediation)，不以本段技术说明替代运行证据。
++
+ ## 6. 场景结果与共享会话（R3）
+ 
+ ### 6.1 摘要由 Renderer 命令服务生成，IPC 保持
+diff --git a/scripts/renderer-lifecycle/fixtures/app-settings.js b/scripts/renderer-lifecycle/fixtures/app-settings.js
+index dd71e538..ee0f59c7 100644
+--- a/scripts/renderer-lifecycle/fixtures/app-settings.js
++++ b/scripts/renderer-lifecycle/fixtures/app-settings.js
+@@ -2,19 +2,20 @@
+ 
+ // 真实设置/公共确认工厂；仅使用可控 API，不删除真实数据。
+ module.exports = async ({ js, load, reset, assert, test }) => {
+-  async function setup() {
++  async function setup({ useOverride = false, selectBatch = true } = {}) {
+     await reset();
+     await load('src/renderer/dialogs/toolbox.js');
+     await load('src/renderer-dialogs.js');
+     await load('src/renderer/dialogs/app-settings.js');
+     await js(`
+-      window.__settingsTest = { subscriptions: 0, disposals: 0, prepares: [], deletes: [], lists: 0 };
++      window.__settingsTest = { subscriptions: 0, disposals: 0, prepares: [], deletes: [], lists: 0, stats: 0, settings: 0 };
+       window.desktopApi = {};
++      window.fixtureSettingsApi = {};
+       window.fixtureHost = window.__rendererModalHost;
+       window.fixtureBridge = window.__rendererModalBridge;
+       window.fixtureDialogs = window.__createTestRendererDialogs({ modalBridge: fixtureBridge, state: {}, elements: {}, desktopApi: window.desktopApi, appConstants: {} });
+       window.fixtureSettings = window.__appSettingsDialogs.createAppSettingsDialogs({
+-        api: {}, modalBridge: fixtureBridge,
++        api: fixtureSettingsApi, modalBridge: fixtureBridge,
+         modules: { bankStatementProcess: {id:'bank-statement-process',name:'资金对账'}, vccFinancialOp:{id:'vcc-financial-op',name:'VCC'} },
+         ui: { escapeHtml: value => String(value), createConfirmDialog: fixtureDialogs.createConfirmDialog,
+           getDarkModeController: () => null, mountAppearanceSettings: () => null,
+@@ -22,8 +23,13 @@ module.exports = async ({ js, load, reset, assert, test }) => {
+           refreshOpenAppUpdateDialog() {}, restartAndInstallAppUpdate() {} }
+       });
+       window.fixtureApi = fixtureSettings.createArchiveCenterPreviewApi();
++      fixtureSettingsApi.archiveCenter = fixtureApi;
+       const originalList = fixtureApi.listBatches;
+       fixtureApi.listBatches = async (...args) => { __settingsTest.lists++; return originalList(...args); };
++      for (const [name,counter] of [['getSettings','settings'],['getStats','stats']]) {
++        const original = fixtureApi[name];
++        fixtureApi[name] = async (...args) => { __settingsTest[counter]++; return original.apply(fixtureApi,args); };
++      }
+       for (const name of ['onStorageMigrationProgress','onEntryMaintenanceCompleted','onEntryMaintenanceFailed']) {
+         fixtureApi[name] = () => { __settingsTest.subscriptions++; return () => __settingsTest.disposals++; };
+       }
+@@ -31,16 +37,34 @@ module.exports = async ({ js, load, reset, assert, test }) => {
+       fixtureApi.deleteBatch = (id, token) => { __settingsTest.deletes.push([id, token]); return new Promise(resolve => window.resolveDelete = resolve); };
+       window.settingsOverlay = null;
+       window.settingsHandle = fixtureBridge.openModal(() => {
+-        settingsOverlay = fixtureSettings.createAppUpdateSettingsDialog({archiveCenterApi:fixtureApi});
++        settingsOverlay = fixtureSettings.createAppUpdateSettingsDialog(${useOverride ? '{archiveCenterApi:fixtureApi}' : ''});
+         return settingsOverlay;
+       }).handle;
+       settingsOverlay.querySelector('[data-tab="archive"]').click();
+     `);
+     await js(`new Promise(resolve => setTimeout(resolve, 20))`);
+-    await js(`settingsOverlay.querySelector('[data-batch-id="902"]').click()`);
++    if (selectBatch) await js(`settingsOverlay.querySelector('[data-batch-id="902"]').click()`);
+     await js(`new Promise(resolve => setTimeout(resolve, 10))`);
+   }
+ 
++  await test('正式默认设置依赖无需 override 即可读取存档列表、统计和保留期', async () => {
++    await setup({selectBatch:false});
++    assert.equal(await js('__settingsTest.lists'),1);
++    assert.equal(await js('__settingsTest.stats>0'),true);
++    assert.doesNotMatch(await js(`settingsOverlay.querySelector('[data-role="archive-feedback"]').textContent`),/Cannot access|加载失败/);
++    assert.equal(await js(`!!settingsOverlay.querySelector('[data-batch-id="902"]')`),true);
++    await js(`settingsOverlay.querySelector('[data-action="open-archive-settings"]').click()`);
++    await js('new Promise(resolve=>setTimeout(resolve,10))');
++    assert.equal(await js(`settingsOverlay.querySelector('[data-role="archive-retention-days"]').disabled`),false);
++    assert.equal(await js('__settingsTest.settings>0'),true);
++    assert.deepEqual(await js('__testErrors'),[]);
++  });
++  await test('显式存档 API override 仍兼容', async () => {
++    await setup({useOverride:true});
++    assert.equal(await js('__settingsTest.lists'),1);
++    assert.equal(await js('settingsHandle.isTop()'),true);
++  });
++
+   await test('设置父会话在删除确认取消后保留，零删除且最终退订一次', async () => {
+     await setup();
+     await js(`settingsOverlay.querySelector('[data-action="delete-archive-batch"]').click()`);
+diff --git a/scripts/renderer-lifecycle/fixtures/application-shell.js b/scripts/renderer-lifecycle/fixtures/application-shell.js
+index 150f58c2..2133dc72 100644
+--- a/scripts/renderer-lifecycle/fixtures/application-shell.js
++++ b/scripts/renderer-lifecycle/fixtures/application-shell.js
+@@ -165,6 +165,88 @@ module.exports = async ({ js, load, reset, assert, test }) => {
+     await clean();
+   });
+ 
++  await test('正式 VCC F1/F2：B重扫离页后不能用A确认保存，重新确认B后期初与显示来源一致', async () => {
++    await js(`(async()=>{
++      window.shellVccSelected='A';window.shellVccDelay=false;window.shellVccSaved=[];window.shellVccCache=null;
++      shellResponses['vccOpCalc:import:pick-files']=()=>({status:'success',filePaths:['/fixture/'+shellVccSelected+'.xlsx']});
++      shellResponses['vccOpCalc:import:scan']=()=>{
++        const b=shellVccSelected==='B';const yearMonth=b?'2026-08':'2026-07';const amount=b?'900.00':'10.00';
++        shellVccCache={yearMonth,totals:{totalOut:'0.00',totalIn:amount,totalAmount:amount,currency:'CNY'},
++          perFile:[{fileName:shellVccSelected+'.xlsx',rowCount:1,totalOut:'0.00',totalIn:amount,totalAmount:amount,currency:'CNY'}]};
++        const reply={status:'success',yearMonth,totalRows:1,fileCount:1};
++        return shellVccDelay?new Promise(resolve=>window.shellVccFinish=()=>resolve(reply)):reply;
++      };
++      shellResponses['vccOpCalc:run:compute-amounts']=()=>shellVccCache?{status:'success',...structuredClone(shellVccCache)}:{status:'error',message:'无统计结果'};
++      shellResponses['vccOpCalc:run:save']=({beginOp})=>{
++        const saved={yearMonth:shellVccCache.yearMonth,fileName:shellVccCache.perFile[0].fileName,beginOp,totalAmount:shellVccCache.totals.totalAmount};
++        shellVccSaved.push(saved);shellVccCache=null;
++        return {status:'success',yearMonth:saved.yearMonth,beginOp,endOp:'1000.00'};
++      };
++      shellResponses['vccOpCalc:balance:list-months']=()=>shellVccSaved.map(item=>item.yearMonth);
++      await setCurrentModule('vcc-op-calc',{persist:false}).ready;
++      document.getElementById('vccOpCalcImportBtn').click();
++    })()`); await flush();
++    assert.match(await js(`document.querySelector('[data-preview-modal="vcc-op-calc-confirm"]').textContent`),/2026-07/);
++    await js(`document.querySelector('[data-preview-modal="vcc-op-calc-confirm"] [data-action="confirm"]').click();`); await flush();
++    await js(`document.getElementById('vccOpCalcRunBtn').click();`); await flush();
++    assert.match(await js(`document.querySelector('[data-preview-modal="vcc-op-calc-compute"]').textContent`),/2026-07[\s\S]*10\.00/);
++    await js(`
++      [...document.querySelectorAll('[data-preview-modal="vcc-op-calc-compute"] button')].find(button=>button.textContent==='取消').click();
++      shellVccSelected='B';shellVccDelay=true;document.getElementById('vccOpCalcImportBtn').click();
++    `); await flush();
++    await js(`(async()=>{await setCurrentModule('statement-generator',{persist:false}).ready;shellVccFinish();})()`); await flush();
++    await js(`(async()=>{await setCurrentModule('vcc-op-calc',{persist:false}).ready;})()`); await flush();
++    assert.equal(await js(`document.getElementById('vccOpCalcRunBtn').disabled`),true);
++    assert.equal(await js(`document.getElementById('modalRoot').children.length`),0);
++    assert.equal(await js(`shellVccSaved.length`),0);
++    assert.match(await js(`document.getElementById('vccOpCalcStatusBox').textContent`),/2026-08[\s\S]*尚未确认/);
++    await js(`shellVccDelay=false;document.getElementById('vccOpCalcImportBtn').click();`); await flush();
++    assert.match(await js(`document.querySelector('[data-preview-modal="vcc-op-calc-confirm"]').textContent`),/2026-08/);
++    await js(`document.querySelector('[data-preview-modal="vcc-op-calc-confirm"] [data-action="confirm"]').click();`); await flush();
++    await js(`document.getElementById('vccOpCalcRunBtn').click();`); await flush();
++    assert.match(await js(`document.querySelector('[data-preview-modal="vcc-op-calc-compute"]').textContent`),/2026-08[\s\S]*900\.00/);
++    await js(`(()=>{
++      const dialog=document.querySelector('[data-preview-modal="vcc-op-calc-compute"]');const input=dialog.querySelector('input');
++      input.value='100.00';input.dispatchEvent(new Event('input',{bubbles:true}));
++      [...dialog.querySelectorAll('button')].find(button=>button.textContent==='计算').click();
++    })()`); await flush();
++    assert.deepEqual(await js(`shellVccSaved`),[{yearMonth:'2026-08',fileName:'B.xlsx',beginOp:'100.00',totalAmount:'900.00'}]);
++    assert.deepEqual(await js(`shellCalls.filter(call=>call.channel==='vccOpCalc:run:save').map(call=>call.args)`),[[{beginOp:'100.00'}]]);
++    assert.match(await js(`document.querySelector('[data-preview-modal="vcc-op-calc-compute"]').textContent`),/期末OP = 1000\.00（已保存）/);
++    await js(`modalHost.closeTop();void 0;`); await clean();
++  });
++
++  await test('正式设置默认入口点击存档，使用实际 Preload 依赖读取列表', async () => {
++    const before = await js(`shellCalls.filter(call=>call.channel==='archive-center:list-batches').length`);
++    await js(`document.getElementById('settingsBtn').click();`); await flush();
++    await js(`document.querySelector('[data-tab="archive"]').click();`); await flush();
++    assert.equal(await js(`shellCalls.filter(call=>call.channel==='archive-center:list-batches').length`),before+1);
++    assert.doesNotMatch(await js(`document.getElementById('archiveCenterPane').textContent`),/加载失败|before initialization/);
++    await js(`modalHost.closeTop();void 0;`); await clean();
++  });
++
++  await test('正式收纳保存时拒绝导航，正常关闭后按 Main 启用列表切换被停用模块', async () => {
++    await js(`(async()=>{
++      await setCurrentModule('statement-generator',{persist:false}).ready;
++      window.shellCabinetWrite=new Promise(resolve=>window.shellCabinetFinish=resolve);
++      shellResponses['settings:set-enabled-modules']=()=>shellCabinetWrite;
++      document.getElementById('moduleCabinetBtn').click();
++      document.querySelector('.module-cabinet-item[data-module-id="statement-generator"]').click();
++      document.querySelector('.module-cabinet-card [data-action="disable"]').click();
++      document.querySelector('.module-cabinet-card [data-action="confirm"]').click();
++    })()`); await flush();
++    assert.equal(await js(`setCurrentModule('new-account-generator').status`),'blocked');
++    assert.equal(await js(`getModuleRouter().getCurrentModuleId()`),'statement-generator');
++    assert.equal(await js(`shellCalls.filter(call=>call.channel==='settings:set-enabled-modules').length`),1);
++    await js(`shellCabinetFinish({status:'ok',enabledModules:['new-account-generator','pending-reconciliation']});`); await flush();
++    assert.equal(await js(`getModuleRouter().getCurrentModuleId()`),'new-account-generator');
++    assert.equal(await js(`document.getElementById('modalRoot').children.length`),0);
++    assert.equal(await js(`document.getElementById('newAccountModulePanel').hidden`),false);
++    assert.deepEqual(await js(`state.enabledModules`),['new-account-generator','pending-reconciliation']);
++    assert.deepEqual(await js(`shellCalls.filter(call=>call.channel==='settings:set-current-module').at(-1).args`),['new-account-generator']);
++    await clean();
++  });
++
+   await test('应用销毁只清理一次：订阅取消、静态事件停用、旧通知不再写界面', async () => {
+     await js(`(async()=>{
+       await setCurrentModule('new-account-generator',{persist:false}).ready;
+diff --git a/scripts/renderer-lifecycle/fixtures/configuration-dialogs.js b/scripts/renderer-lifecycle/fixtures/configuration-dialogs.js
+index 5d4c06dd..e214ed5f 100644
+--- a/scripts/renderer-lifecycle/fixtures/configuration-dialogs.js
++++ b/scripts/renderer-lifecycle/fixtures/configuration-dialogs.js
+@@ -6,6 +6,7 @@ module.exports = async ({ js, load, reset, assert, test }) => {
+   async function setup() {
+     await reset();
+     await load('src/renderer/dialogs/toolbox.js');
++    await load('src/renderer/module-router.js');
+     await load('src/renderer-dialogs.js');
+     await js(`
+       window.cfg={calls:[],feedback:[],next:{},done:0,applied:0,errors:[],
+@@ -251,4 +252,48 @@ module.exports = async ({ js, load, reset, assert, test }) => {
+     assert.deepEqual(await js(`cfg.calls.filter(call=>call.name==='seed')[1].args`),[{contextId:'seed-context',confirmOverwrite:true}]);
+   });
+ 
++  async function setupRowCount(nextN=1) {
++    await setup();
++    await js(`
++      cfg.rows=[{seqNo:1,rowStatus:'draft',currencySourceField:'Currency'},{seqNo:2,rowStatus:'draft',currencySourceField:'Currency'}];
++      cfg.rowWrite=cfg.defer();cfg.rowSettled=0;cfg.api.templates.saveBillSplitRowCount=payload=>{cfg.calls.push({name:'rowCount',args:[payload]});return cfg.rowWrite.promise.then(result=>{cfg.rowSettled++;return result;});};
++      cfg.router=ModuleRouter.createModuleRouter({defaultModuleId:'application',modules:['application','other'].map(id=>({id,controller:{enter:()=>({status:'ready'}),leave:()=>cfg.host.closeOwner('application','navigation').status==='blocked'?{status:'blocked'}:{status:'left'},dispose(){}}}))});cfg.router.navigate('application',{persist:false});
++      cfg.parent=cfg.other();cfg.handle=cfg.bridge.pushModal(cfg.parent,()=>cfg.dialogs.createBillSplitRowsDialog({template:{id:7,name:'模板',headers:['Currency']},initialRows:cfg.rows})).handle;
++      cfg.overlay=cfg.top();cfg.input=cfg.overlay.querySelector('.bill-split-row-count-input');cfg.button=cfg.overlay.querySelector('.bill-split-row-count-done-btn');
++      cfg.input.value=${JSON.stringify(String(nextN))};cfg.button.click();cfg.confirm=cfg.host.getTop();cfg.confirmOverlay=cfg.top();void 0;
++    `);
++  }
++  await test('减少拆分份数的确认保存同步锁住父子、根替换和导航，重复确认一次写',async()=>{
++    await setupRowCount();await js(`cfg.confirmButton=cfg.confirmOverlay.querySelector('[data-action="confirm"]');cfg.confirmButton.click();cfg.confirmButton.dispatchEvent(new Event('click'));`);
++    assert.deepEqual(await js(`({calls:cfg.calls.filter(call=>call.name==='rowCount').length,disabled:cfg.confirmButton.disabled,root:cfg.bridge.openModal(()=>{throw new Error('不能创建');}).status,parent:cfg.parent.close().status,rows:cfg.handle.close().status,confirm:cfg.confirm.close().status,navigate:cfg.router.navigate('other').status})`),
++      {calls:1,disabled:true,root:'blocked',parent:'blocked',rows:'blocked',confirm:'blocked',navigate:'blocked'});
++    await js(`cfg.rowWrite.resolve({status:'success',currentRows:cfg.rows.slice(0,1)});`);await tick();
++    assert.deepEqual(await js(`({args:cfg.calls.find(call=>call.name==='rowCount').args,rows:cfg.overlay.querySelectorAll('.bill-split-rows-table tbody tr').length,rowsTop:cfg.handle.isTop(),confirmOpen:cfg.confirm.isOpen(),settled:cfg.rowSettled})`),
++      {args:[{templateId:7,nextN:1}],rows:1,rowsTop:true,confirmOpen:false,settled:1});
++  });
++  await test('增加拆分份数的直接保存同样拒绝重复点击和父层关闭',async()=>{
++    await setupRowCount(3);await js(`cfg.button.dispatchEvent(new Event('click'));`);
++    assert.equal(await js(`cfg.calls.filter(call=>call.name==='rowCount').length`),1);
++    assert.equal(await js('cfg.handle.close().status'),'blocked');
++    await js(`cfg.rowWrite.resolve({status:'success',currentRows:[...cfg.rows,{seqNo:3,rowStatus:'draft'}]});`);await tick();
++    assert.equal(await js(`cfg.handle.isTop()&&!cfg.button.disabled&&cfg.overlay.querySelectorAll('.bill-split-rows-table tbody tr').length===3`),true);
++  });
++  await test('拆分份数写入失败保留确认及父稿可重试，取消零额外写入',async()=>{
++    await setupRowCount();await js(`cfg.confirmOverlay.querySelector('[data-action="confirm"]').click();cfg.rowWrite.resolve({status:'failed',message:'保存份数失败'});`);await tick();
++    assert.match(await js('cfg.top().textContent'),/保存份数失败/);
++    await js('cfg.host.closeTop();');
++    assert.equal(await js(`cfg.confirm.isTop()&&!cfg.confirmOverlay.querySelector('[data-action="confirm"]').disabled`),true);
++    await js(`cfg.rowWrite=cfg.defer();cfg.confirmOverlay.querySelector('[data-action="confirm"]').click();cfg.rowWrite.reject(new Error('连接失败'));`);await tick();
++    assert.match(await js('cfg.top().textContent'),/连接失败/);
++    await js(`cfg.host.closeTop();cfg.confirmOverlay.querySelector('[data-action="cancel"]').click();`);
++    assert.equal(await js(`cfg.handle.isTop()&&cfg.overlay.querySelectorAll('.bill-split-rows-table tbody tr').length===2`),true);
++    assert.equal(await js(`cfg.calls.filter(call=>call.name==='rowCount').length`),2);
++    await setupRowCount();await js(`cfg.confirmOverlay.querySelector('[data-action="cancel"]').click();`);
++    assert.equal(await js(`cfg.handle.isTop()&&cfg.calls.filter(call=>call.name==='rowCount').length===0`),true);
++  });
++  await test('拆分份数强制销毁后的后台结算不写旧 DOM、不关闭新窗口',async()=>{
++    await setupRowCount();await js(`cfg.confirmOverlay.querySelector('[data-action="confirm"]').click();cfg.handle.dispose();cfg.oldMarkup=cfg.overlay.innerHTML;cfg.newHandle=cfg.bridge.openModal(()=>cfg.dialogs.createAlertDialog('新窗口')).handle;cfg.rowWrite.resolve({status:'success',currentRows:[]});`);await tick();
++    assert.deepEqual(await js('({settled:cfg.rowSettled,newTop:cfg.newHandle.isTop(),unchanged:cfg.oldMarkup===cfg.overlay.innerHTML})'),{settled:1,newTop:true,unchanged:true});
++  });
++
+ };
+diff --git a/scripts/renderer-lifecycle/fixtures/existing-controllers.js b/scripts/renderer-lifecycle/fixtures/existing-controllers.js
+index 633f7249..773c0ac9 100644
+--- a/scripts/renderer-lifecycle/fixtures/existing-controllers.js
++++ b/scripts/renderer-lifecycle/fixtures/existing-controllers.js
+@@ -15,6 +15,28 @@ module.exports = async ({ js, load, reset, assert, test }) => {
+       fixture.button=(text,scope=document)=>{const button=[...scope.querySelectorAll('button')].find(button=>button.textContent===text);if(!button)throw new Error('找不到按钮 '+text);return button;}; void 0;`);
+   }
+ 
++  for (const succeeded of [true, false]) {
++    await test(`BizOP 实际页面离开后${succeeded ? '成功' : '失败'}结算，返回显示原任务结果且不重复导入`, async () => {
++      await setup();
++      const result = await js(`(async()=>{
++        await fixture.controller.enter();fixture.pending=fixture.deferred();fixture.reply.importFiles=()=>fixture.pending.promise;
++        fixture.button('导入文件').click();await fixture.tick();const waiting=document.querySelector('.status-box-text').textContent;
++        const left=fixture.controller.leave();
++        if(!${succeeded})await fixture.controller.enter();
++        fixture.pending.resolve(${succeeded} ? {status:'ok',summary:{scannedDataRows:3,acceptedRows:3}} : {status:'error',message:'导入失败，文件没有保存'});
++        await fixture.tick();await fixture.tick();
++        const hiddenUnchanged=${succeeded} ? document.querySelector('.status-box-text').textContent===waiting : true;
++        if(${succeeded})await fixture.controller.enter();
++        return {left:left.status,hiddenUnchanged,text:document.querySelector('.status-box-text').textContent,
++          busy:fixture.controller.busy,ariaBusy:document.getElementById('panel').getAttribute('aria-busy'),
++          disabled:fixture.button('导入文件').disabled,imports:fixture.calls.filter(call=>call.name==='importFiles').length,
++          dialogs:document.getElementById('modalRoot').children.length,errors:window.__testErrors};
++      })()`);
++      assert.deepEqual(result,{left:'left',hiddenUnchanged:true,text:succeeded?'导入文件完成\n扫描 3 行，接受 3 行':'导入失败，文件没有保存',
++        busy:false,ariaBusy:'false',disabled:false,imports:1,dialogs:0,errors:[]});
++    });
++  }
++
+   await test('BizOP v327 工厂无 IPC；mode DISABLED 委托旧控制器，leave/dispose 统一收尾', async () => {
+     await setup();
+     const result = await js(`(async()=>{
+@@ -79,18 +101,19 @@ module.exports = async ({ js, load, reset, assert, test }) => {
+     assert.deepEqual(result, { late: 'stale', panel: true, legacy: true, legacyCalls: 0 });
+   });
+ 
+-  await test('BizOP v327 无 modal 后台导入允许离开，返回早于完成只读 Main 恢复', async () => {
++  await test('BizOP v327 无 modal 后台导入允许离开，返回早于完成仍接纳任务结算且不复活旧窗', async () => {
+     await setup();
+     const result = await js(`(async()=>{
+       await fixture.controller.enter();fixture.importing=fixture.deferred();fixture.reply.importFiles=()=>fixture.importing.promise;
+       fixture.button('导入文件').click();await fixture.tick();const left=fixture.controller.leave();await fixture.controller.enter();
+       fixture.importing.resolve({status:'error',message:'旧任务错误'});await fixture.tick();await fixture.tick();
+-      return {left:left.status,disabled:fixture.button('导入文件').disabled,status:document.querySelector('.bizop-status').textContent,reads:fixture.calls.filter(c=>c.name==='status').length,errors:window.__testErrors};
++      return {left:left.status,disabled:fixture.button('导入文件').disabled,status:document.querySelector('.bizop-status').textContent,reads:fixture.calls.filter(c=>c.name==='status').length,imports:fixture.calls.filter(c=>c.name==='importFiles').length,dialogs:document.getElementById('modalRoot').children.length,errors:window.__testErrors};
+     })()`);
+     assert.equal(result.left, 'left');
+     assert.equal(result.disabled, false);
+-    assert.doesNotMatch(result.status, /旧任务错误/);
++    assert.match(result.status, /旧任务错误/);
+     assert.equal(result.reads, 3);
++    assert.equal(result.imports, 1); assert.equal(result.dialogs, 0);
+     assert.deepEqual(result.errors, []);
+   });
+   await test('BizOP v327 删除预检晚到时不得重开已关闭的管理父层', async () => {
+diff --git a/scripts/renderer-lifecycle/fixtures/shared-dialogs.js b/scripts/renderer-lifecycle/fixtures/shared-dialogs.js
+index 656b8d32..97b425e0 100644
+--- a/scripts/renderer-lifecycle/fixtures/shared-dialogs.js
++++ b/scripts/renderer-lifecycle/fixtures/shared-dialogs.js
+@@ -73,4 +73,126 @@ module.exports = async ({ js, load, reset, assert, test }) => {
+     })()`);
+     assert.deepEqual(result,{reads:0,logs:0,mapping:'blocked',alert:'blocked'});
+   });
++  async function setupCabinet() {
++    await reset();
++    await load('src/renderer/dialogs/toolbox.js');await load('src/renderer-dialogs.js');await load('src/renderer/module-router.js');
++    await js(`
++      window.cab={calls:[],after:[],persisted:[],navigation:[],feedback:[],defer(){let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};}};
++      cab.host=__rendererModalHost;cab.bridge=__modalBridge.createModalBridge({host:cab.host,getOwner:()=> 'one'});
++      cab.dialogs=__createTestRendererDialogs({modalBridge:cab.bridge,state:{},elements:{},desktopApi:{},setStatus:(...args)=>cab.feedback.push(args)});
++      cab.router=ModuleRouter.createModuleRouter({defaultModuleId:'one',persistCurrentModule:id=>cab.navigation.push(id),modules:['one','two'].map(id=>({id,controller:{
++        enter:()=>({status:'ready'}),leave:()=>cab.host.closeOwner('one','navigation').status==='blocked'?{status:'blocked'}:{status:'left'},dispose(){}}}))});
++      cab.router.navigate('one',{persist:false});
++      cab.write=cab.defer();cab.parent=cab.bridge.openModal(()=>cab.dialogs.createAlertDialog('收纳父窗口')).handle;
++      cab.handle=cab.bridge.pushModal(cab.parent,()=>cab.dialogs.createModuleCabinetDialog({enabledModules:['one','two'],allModules:[{id:'one',name:'一'},{id:'two',name:'二'}],
++        onCommit:ids=>{cab.calls.push([...ids]);return cab.write.promise.then(ok=>{if(ok)cab.persisted.push([...ids]);return ok;});},
++        onCommitted:ids=>{cab.after.push({ids:[...ids],closed:!cab.handle.isOpen()});if(cab.failAfter)throw new Error('导航刷新异常');}
++      })).handle;cab.overlay=document.getElementById('modalRoot').lastElementChild;cab.button=cab.overlay.querySelector('[data-action="confirm"]');void 0;
++    `);
++  }
++  const cabinetTick=()=>js('new Promise(resolve=>setTimeout(resolve,5))');
++  await test('收纳保存中同步拒绝父子关闭、根替换和导航，重复确认仅一次调用',async()=>{
++    await setupCabinet();await js('cab.button.click();cab.button.dispatchEvent(new Event("click"));');
++    assert.deepEqual(await js(`({calls:cab.calls.length,disabled:cab.button.disabled,root:cab.bridge.openModal(()=>{throw new Error('不能执行工厂');}).status,parent:cab.parent.close().status,child:cab.handle.close().status,navigation:cab.router.navigate('two').status,current:cab.router.getCurrentModuleId(),persist:cab.navigation.length})`),
++      {calls:1,disabled:true,root:'blocked',parent:'blocked',child:'blocked',navigation:'blocked',current:'one',persist:0});
++    await js('cab.write.resolve(true);');await cabinetTick();
++    assert.deepEqual(await js('({after:cab.after,parentTop:cab.parent.isTop(),open:cab.handle.isOpen()})'),{after:[{ids:['one','two'],closed:true}],parentTop:true,open:false});
++  });
++  await test('收纳强制销毁后后台仍保存事实，但不关闭新窗、不触发旧导航回调',async()=>{
++    await setupCabinet();await js(`cab.button.click();cab.handle.dispose();cab.markup=cab.overlay.innerHTML;cab.newHandle=cab.bridge.openModal(()=>cab.dialogs.createAlertDialog('新窗口')).handle;cab.write.resolve(true);`);await cabinetTick();
++    assert.deepEqual(await js('({persisted:cab.persisted,after:cab.after,newTop:cab.newHandle.isTop(),unchanged:cab.markup===cab.overlay.innerHTML})'),{persisted:[['one','two']],after:[],newTop:true,unchanged:true});
++  });
++  await test('收纳调用失败保留草稿和错误，重试成功后仅一次 onCommitted；取消不保存',async()=>{
++    await setupCabinet();await js(`cab.button.click();cab.write.reject(new Error('设置服务异常'));`);await cabinetTick();
++    assert.equal(await js('cab.handle.isTop()&&!cab.button.disabled'),true);
++    assert.match(await js('cab.overlay.querySelector(".module-cabinet-error").textContent'),/设置服务异常/);
++    await js(`cab.write=cab.defer();cab.button.click();cab.write.resolve(false);`);await cabinetTick();
++    assert.match(await js('cab.overlay.querySelector(".module-cabinet-error").textContent'),/保存模块设置失败/);
++    await js(`cab.write=cab.defer();cab.button.click();cab.write.resolve(true);`);await cabinetTick();
++    assert.equal(await js('cab.after.length'),1);
++    await setupCabinet();await js(`cab.overlay.querySelector('[data-action="cancel"]').click();`);
++    assert.deepEqual(await js('({calls:cab.calls.length,parent:cab.parent.isTop(),open:cab.handle.isOpen()})'),{calls:0,parent:true,open:false});
++  });
++
++  await test('收纳已保存后的导航回调抛错明确反馈，保留保存成功事实',async()=>{
++    await setupCabinet();await js('cab.failAfter=true;cab.button.click();cab.write.resolve(true);');await cabinetTick();
++    assert.deepEqual(await js('cab.persisted'),[['one','two']]);
++    assert.equal(await js('cab.after.length===1&&!cab.handle.isOpen()&&cab.parent.isTop()'),true);
++    assert.match(await js('cab.feedback[0][0]'),/模块设置已保存.*导航刷新异常/);
++  });
++
++  async function setupVccCompute({ controlledClose = false } = {}) {
++    await reset();
++    await load('src/renderer/dialogs/toolbox.js');await load('src/renderer-dialogs.js');
++    await js(`
++      window.vcc={calls:[],settled:[],closes:0,allowed:${!controlledClose},defer(){let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};}};
++      vcc.host=__rendererModalHost;vcc.bridge=__modalBridge.createModalBridge({host:vcc.host,getOwner:()=> 'vcc-op-calc'});
++      vcc.dialogs=__createTestRendererDialogs({modalBridge:vcc.bridge,state:{},elements:{},desktopApi:{}});
++      vcc.write=vcc.defer();vcc.parent=vcc.bridge.openModal(()=>vcc.dialogs.createAlertDialog('计算父窗口')).handle;
++      vcc.handle=vcc.bridge.pushModal(vcc.parent,()=>vcc.dialogs.createVccOpCalcComputeDialog({yearMonth:'2026-07',totals:{totalOut:'0.00',totalIn:'10.00',totalAmount:'10.00',currency:'CNY'},
++        canClose:()=>vcc.allowed,onCompute:begin=>{vcc.calls.push(begin);return vcc.write.promise.then(result=>{vcc.settled.push(result);return result;});},onClose:()=>vcc.closes++
++      })).handle;vcc.overlay=document.getElementById('modalRoot').lastElementChild;vcc.input=vcc.overlay.querySelector('input');
++      [vcc.compute,vcc.cancel]=vcc.overlay.querySelectorAll('button');vcc.input.value='000.0100';vcc.input.dispatchEvent(new Event('input'));void 0;
++    `);
++  }
++  const vccTick=()=>js('new Promise(resolve=>setTimeout(resolve,5))');
++  await test('真实 VCC F1 先关闭再确认仍归属原 scan，不被 closed 微任务误取消',async()=>{
++    await reset('<section id="vccPanel"><button id="vccOpCalcImportBtn"></button><button id="vccOpCalcRunBtn"></button><button id="vccOpCalcShowBalanceBtn"></button><div id="vccOpCalcStatusBox"></div></section><div id="modalRoot"></div>');
++    await load('src/renderer/dialogs/toolbox.js');await load('src/renderer-dialogs.js');await load('src/renderer/controllers/vcc-op-calc.js');
++    await js(`
++      window.flow={compute:0,saves:[]};flow.dialogs=__createTestRendererDialogs({modalBridge:__rendererModalBridge,state:{},elements:{},desktopApi:{}});
++      flow.controller=__vccOpCalcController.createVccOpCalcController({panel:document.getElementById('vccPanel'),api:{
++        pickFiles:async()=>({status:'success',filePaths:['/synthetic/A.xlsx']}),scan:async()=>({status:'success',yearMonth:'2026-07',totalRows:1,fileCount:1}),
++        computeAmounts:async()=>{flow.compute++;return {status:'success',yearMonth:'2026-07',totals:{totalAmount:'10.00'},perFile:[{fileName:'A.xlsx',rowCount:1}]};},
++        save:async payload=>{flow.saves.push(payload);return {status:'success',yearMonth:'2026-07',beginOp:'100.00',endOp:'110.00'};},listBalanceMonths:async()=>[]
++      },ui:{modalHost:__rendererModalHost,modalBridge:__rendererModalBridge,status:(node,text)=>node.textContent=text,alert:flow.dialogs.createAlertDialog,
++        createVccOpCalcConfirmDialog:flow.dialogs.createVccOpCalcConfirmDialog,createVccOpCalcComputeDialog:flow.dialogs.createVccOpCalcComputeDialog,createVccOpCalcShowBalanceDialog:flow.dialogs.createVccOpCalcShowBalanceDialog}});
++      (async()=>{await flow.controller.enter();await flow.controller.commands.import();flow.f1=__rendererModalHost.getTop();document.querySelector('[data-action="confirm"]').click();})();void 0;
++    `);await vccTick();
++    assert.deepEqual(await js('({compute:flow.compute,open:flow.f1.isOpen(),disabled:document.getElementById("vccOpCalcRunBtn").disabled})'),{compute:1,open:false,disabled:false});
++    await js('flow.controller.commands.run().then(()=>undefined)');
++    assert.match(await js('document.getElementById("modalRoot").textContent'),/计算期末OP（2026-07）/);
++    await js('flow.controller.dispose()');
++  });
++  await test('真实 VCC F2 提交锁拒绝双击、父子关闭、根替换及离页关闭；期初原样交给回调',async()=>{
++    await setupVccCompute();await js('vcc.compute.click();vcc.compute.dispatchEvent(new Event("click"));');
++    assert.deepEqual(await js(`({calls:vcc.calls,root:vcc.bridge.openModal(()=>vcc.dialogs.createAlertDialog('错误替换')).status,parent:vcc.parent.close().status,child:vcc.handle.close().status,navigation:vcc.host.closeOwner('vcc-op-calc','navigation').status})`),
++      {calls:['000.0100'],root:'blocked',parent:'blocked',child:'blocked',navigation:'blocked'});
++    await js('vcc.write.resolve({status:"success",endOp:"10.01"});');await vccTick();
++    assert.match(await js('vcc.overlay.textContent'),/期末OP = 10.01（已保存）/);
++    await js('vcc.cancel.click();');
++    assert.deepEqual(await js('({open:vcc.handle.isOpen(),parent:vcc.parent.isTop(),closes:vcc.closes})'),{open:false,parent:true,closes:1});
++  });
++  for (const status of ['success','error','cancelled']) {
++    await test(`真实 VCC F2 强制销毁后 ${status} 仍完成回调，不改旧 DOM 或新栈`,async()=>{
++      await setupVccCompute();
++      await js(`vcc.compute.click();vcc.handle.dispose();vcc.markup=vcc.overlay.innerHTML;vcc.next=vcc.bridge.openModal(()=>vcc.dialogs.createAlertDialog('新窗口')).handle;vcc.write.resolve({status:${JSON.stringify(status)},endOp:'10.01',message:'合成结算'});`);await vccTick();
++      assert.deepEqual(await js('({calls:vcc.calls.length,settled:vcc.settled.length,unchanged:vcc.markup===vcc.overlay.innerHTML,newTop:vcc.next.isTop(),closes:vcc.closes})'),
++        {calls:1,settled:1,unchanged:true,newTop:true,closes:0});
++    });
++  }
++  await test('真实 VCC F2 回调 reject/失败可重试，取消不再次计算',async()=>{
++    await setupVccCompute();await js('vcc.compute.click();vcc.write.reject(new Error("保存服务异常"));');await vccTick();
++    assert.equal(await js('vcc.handle.isTop()&&!vcc.input.disabled&&!vcc.compute.disabled'),true);
++    assert.match(await js('vcc.overlay.textContent'),/保存服务异常/);
++    await js('vcc.write=vcc.defer();vcc.compute.click();vcc.write.resolve({status:"error",message:"后端金额校验失败"});');await vccTick();
++    assert.match(await js('vcc.overlay.textContent'),/后端金额校验失败/);
++    await js('vcc.cancel.click();');
++    assert.deepEqual(await js('({calls:vcc.calls.length,closes:vcc.closes,open:vcc.handle.isOpen()})'),{calls:2,closes:1,open:false});
++  });
++  await test('真实 VCC F2 旧已关闭节点的事件不提交、不关闭新窗口',async()=>{
++    await setupVccCompute();
++    await js(`vcc.handle.close();vcc.markup=vcc.overlay.innerHTML;vcc.next=vcc.bridge.openModal(()=>vcc.dialogs.createAlertDialog('新窗口')).handle;vcc.compute.dispatchEvent(new Event('click'));vcc.cancel.dispatchEvent(new Event('click'));vcc.input.dispatchEvent(new Event('input'));`);
++    assert.deepEqual(await js('({calls:vcc.calls.length,newTop:vcc.next.isTop(),closes:vcc.closes,unchanged:vcc.markup===vcc.overlay.innerHTML})'),{calls:0,newTop:true,closes:0,unchanged:true});
++  });
++  await test('真实 VCC F2 保留注入的领域关闭资格，并与自身提交锁合成',async()=>{
++    await setupVccCompute({controlledClose:true});
++    assert.equal(await js('vcc.handle.close().status'),'blocked');
++    await js('vcc.allowed=true;vcc.compute.click();');
++    assert.equal(await js('vcc.handle.close().status'),'blocked');
++    await js('vcc.write.resolve({status:"error",message:"保存失败"});');await vccTick();
++    await js('vcc.allowed=false;');assert.equal(await js('vcc.handle.close().status'),'blocked');
++    await js('vcc.allowed=true;vcc.cancel.click();');assert.equal(await js('!vcc.handle.isOpen()&&vcc.closes===1'),true);
++  });
++
+ };
+diff --git a/src/renderer-biz-op-v327.js b/src/renderer-biz-op-v327.js
+index c6991843..ff88159a 100644
+--- a/src/renderer-biz-op-v327.js
++++ b/src/renderer-biz-op-v327.js
+@@ -12,6 +12,7 @@
+     let recoveryReady = false; let enabled = false; const dialogs = new Set();
+     let taskDialog = null; let taskFocus = null; let showDialogProgress = true;
+     let feedback = { text: '欢迎使用小助手', tone: 'info' }; let statusReadError = '';
++    const abandonedSelection = Symbol('abandoned-selection');
+     const oldDisabled = new Map();
+     function node(tag, text, className) { const item = doc.createElement(tag); if (text !== undefined) item.textContent = text;
+       if (className) item.className = className; return item; }
+@@ -34,9 +35,14 @@
+       statusText.textContent = text; status.dataset.tone = tone;
+       if (dialog) { dialog.feedback.textContent = text; dialog.feedback.dataset.tone = tone; }
+     }
++    // 已提交任务的结算属于控制器；页面代次只限制渲染和弹窗续接。
++    function rememberFeedback(text, tone = 'info', dialog = null) {
++      if (disposed) return;
++      feedback = { text, tone }; statusReadError = ''; renderFeedback(dialog);
++    }
+     function message(text, tone = 'info') {
+       if (!live()) return;
+-      feedback = { text, tone }; statusReadError = ''; renderFeedback();
++      rememberFeedback(text, tone, showDialogProgress ? taskDialog : null);
+     }
+     function updateFooter() { footer.hidden = ![...footer.children].some((item) => !item.hidden); }
+     function checked(result) {
+@@ -47,6 +53,16 @@
+       }
+       return result;
+     }
++    // 选择阶段还没有提交业务写；过期的选择及其错误不能被当成后台任务结算。
++    async function readSelection(pick, current) {
++      try {
++        const result = await pick();
++        return current() ? checked(result) : abandonedSelection;
++      } catch (error) {
++        if (!current()) return abandonedSelection;
++        throw error;
++      }
++    }
+     function reportFeedback(report) {
+       if (!report) return '';
+       switch (report.status) {
+@@ -92,6 +108,7 @@
+       if (!live(actionGeneration)) return null;
+ 
+       if (busy) return null;
++      const previousFeedback = feedback; const previousHasTaskFeedback = hasTaskFeedback;
+       showDialogProgress = dialogProgress; hasTaskFeedback = true;
+       const requestId = `ui-${root.crypto.randomUUID()}`;
+       const originatingHandle = modalHost.getTop();
+@@ -99,13 +116,21 @@
+       setBusy(true); message(`${label}，正在等待后台处理…`);
+       ((showDialogProgress ? taskDialog?.feedback : taskDialog) || status).focus();
+       try {
+-        const result = checked(await work(requestId));
+-        if (!taskCurrent()) { needsRefresh = true; return null; }
++        const response = await work(requestId);
++        if (response === abandonedSelection) {
++          hasTaskFeedback = previousHasTaskFeedback;
++          rememberFeedback(previousFeedback.text, previousFeedback.tone);
++          return null;
++        }
++        const result = checked(response);
++        const current = taskCurrent();
+         const warning = result.cleanupPending || (result.errorReport && (result.errorReport.status !== 'saved' || result.errorReport.pendingArchiveHandoff));
+-        message(resultFeedback(result.status === 'cancelled' ? '操作已取消' : `${label}完成${result.reused ? '，使用已存在的相同结果' : ''}`, result),
+-          warning ? 'warning' : result.status === 'cancelled' ? 'info' : 'success');
++        rememberFeedback(resultFeedback(result.status === 'cancelled' ? '操作已取消' : `${label}完成${result.reused ? '，使用已存在的相同结果' : ''}`, result),
++          warning ? 'warning' : result.status === 'cancelled' ? 'info' : 'success', current && showDialogProgress ? taskDialog : null);
++        if (!current) { needsRefresh = true; return null; }
+         return result;
+       } catch (error) {
++        rememberFeedback(resultFeedback(error?.message || '操作未完成，请重试', error?.result), 'error');
+         if (!taskCurrent()) { needsRefresh = true; return null; }
+         showError(error); return null; }
+       finally { setBusy(false); if (live()) await refreshStatus(false);
+@@ -151,8 +176,9 @@
+         const actionGeneration = renderGeneration;
+         if (!live(actionGeneration)) return null;
+ 
+-        const picked = checked(await api.pickExport({ outputKind, objectId }));
+-        if (!live(actionGeneration) || (originatingHandle && !originatingHandle.isOpen())) { needsRefresh = true; return null; }
++        const picked = await readSelection(() => api.pickExport({ outputKind, objectId }),
++          () => live(actionGeneration) && (!originatingHandle || originatingHandle.isOpen()));
++        if (picked === abandonedSelection) return picked;
+         if (picked.status === 'cancelled') return { status: 'cancelled' };
+         return checked(await api.exportWorkbook(outputKind, { requestId, selectionRef: picked.selectionRef }));
+       }, { dialogProgress: outputKind !== 'RESULT_FULL' });
+@@ -176,8 +202,8 @@
+         const actionGeneration = renderGeneration;
+         if (!live(actionGeneration)) return null;
+ 
+-        const picked = checked(await api.pickFiles());
+-        if (!live(actionGeneration)) { needsRefresh = true; return null; }
++        const picked = await readSelection(() => api.pickFiles(), () => live(actionGeneration));
++        if (picked === abandonedSelection) return picked;
+         if (picked.status === 'cancelled') return { status: 'cancelled' };
+         return await api.importFiles({ requestId, selectionRef: picked.selectionRef });
+       });
+@@ -457,7 +483,7 @@
+         const actionGeneration = renderGeneration;
+         if (!live(actionGeneration)) return null;
+         const state = await api.retryRecovery();
+-        if (!live(actionGeneration)) { needsRefresh = true; return null; } return { status: state.ready ? 'ok' : 'error', message: state.ready ? '本次检查已完成' : '仍有未决任务或文件，请查看任务详情后重试' }; });
++        return { status: state.ready ? 'ok' : 'error', message: state.ready ? '本次检查已完成' : '仍有未决任务或文件，请查看任务详情后重试' }; });
+       if (!live(actionGeneration)) { needsRefresh = true; return null; }
+       if (result?.status === 'ok') await refreshStatus(true);
+       if (!live(actionGeneration)) { needsRefresh = true; return null; }
+@@ -503,6 +529,7 @@
+       if (disposed) return { status: 'stale' };
+       selected = true; const version = ++routeVersion; ++renderGeneration;
+       panel.hidden = true; legacyPanel.hidden = true;
++      setBusy(busy); renderFeedback(null);
+       if (!api) { usingLegacy = true; legacyPanel.hidden = false; await restoreLegacy(); return { status: 'ready' }; }
+       const info = await refreshStatus();
+       if (version !== routeVersion || !selected || disposed) return { status: 'stale' };
+diff --git a/src/renderer-dialogs.js b/src/renderer-dialogs.js
+index 4b50ec90..519779dd 100644
+--- a/src/renderer-dialogs.js
++++ b/src/renderer-dialogs.js
+@@ -1363,7 +1363,7 @@
+     //   Fix1.5：闲置区排序由 String.length 改为视觉宽度（CJK 字符算 2，其他算 1）
+     //   round 1 self-review I3：onCommit 失败显示 inline error 行 + 保留弹窗 / workingEnabled，用户可重试
+     //   round 1 self-review I4：onCommit 期间 committing flag 锁定 cancel 路径，防 in-flight race
+-    function createModuleCabinetDialog({ enabledModules, allModules, onCommit }) {
++    function createModuleCabinetDialog({ enabledModules, allModules, onCommit, onCommitted }) {
+       const originalEnabled = Array.isArray(enabledModules) ? [...enabledModules] : [];
+       let workingEnabled = [...originalEnabled];
+       const safeAllModules = Array.isArray(allModules) ? allModules : [];
+@@ -1377,6 +1377,7 @@
+       const overlay = document.createElement('div');
+       overlay.className = 'modal-overlay';
+       overlay.dataset.previewModal = 'module-cabinet';
++      registerModal(overlay, { canClose: () => !committing });
+ 
+       const card = document.createElement('div');
+       card.className = 'modal-card module-cabinet-card';
+@@ -1420,7 +1421,7 @@
+       // round 1 self-review I4：committing 期间禁止取消（防 IPC in-flight race）
+       function cancelAndClose() {
+         if (committing) return;
+-        closeModal();
++        closeModal(overlay, { status: 'cancelled', reason: 'cancel' });
+       }
+       closeBtn.addEventListener('click', cancelAndClose);
+       cancelBtn.addEventListener('click', cancelAndClose);
+@@ -1435,6 +1436,9 @@
+         confirmBtn.disabled = active;
+         cancelBtn.disabled = active;
+         closeBtn.disabled = active;
++        idleListEl.inert = active;
++        enabledListEl.inert = active;
++        updateControls();
+         if (active) {
+           overlay.classList.add('is-committing');
+         } else {
+@@ -1447,23 +1451,38 @@
+       //   round 1 self-review I4：committing flag 锁定 cancel 路径
+       //   round 2 self-review I-new-7：try/finally 重构，committing reset 集中到一处
+       confirmBtn.addEventListener('click', async () => {
++        const handle = modalBridge.host.getHandle(overlay);
++        if (committing || !handle?.isTop()) return;
++        const submittedIds = [...workingEnabled];
+         setCommittingState(true);
+         errorEl.classList.remove('is-visible');
+         errorEl.textContent = '';
++        let ok = false;
++        let failureMessage = '';
+         try {
+-          const ok = await onCommit(workingEnabled);
+-          if (ok) {
+-            closeModal();
+-            return;
+-          }
+-          errorEl.textContent = '保存模块设置失败，请稍后重试。';
+-          errorEl.classList.add('is-visible');
++          // 已提交的保存仍由调用方完整完成；其结果不依赖窗口是否继续存在。
++          ok = await onCommit([...submittedIds]);
++          if (!ok) failureMessage = '保存模块设置失败，请稍后重试。';
+         } catch (err) {
+-          errorEl.textContent = `保存失败：${(err && err.message) || '未知错误'}`;
+-          errorEl.classList.add('is-visible');
++          failureMessage = `保存失败：${(err && err.message) || '未知错误'}`;
+         } finally {
+-          // 成功路径已 closeModal 销毁 DOM，下面 reset 仍跑但无副作用（disabled 写到已分离 element 不影响 UI）
+-          setCommittingState(false);
++          committing = false;
++          if (handle.isOpen()) setCommittingState(false);
++        }
++        if (!handle.isOpen() || !handle.isTop()) return;
++        if (!ok) {
++          errorEl.textContent = failureMessage;
++          errorEl.classList.add('is-visible');
++          return;
++        }
++        const closed = closeModal(handle, { status: 'submitted', value: submittedIds });
++        // 成功关闭后才执行返回/导航；强制销毁的旧窗口没有后续 UI 授权。
++        if (closed.status === 'closed' && typeof onCommitted === 'function') {
++          try { await onCommitted([...submittedIds]); } catch (error) {
++            const message = `模块设置已保存，但刷新界面失败：${error?.message || '未知错误'}`;
++            if (typeof setStatus === 'function') setStatus(message, 'error');
++            else console.error(message);
++          }
+         }
+       });
+ 
+@@ -1536,6 +1555,7 @@
+             li.appendChild(handle);
+             li.draggable = true;
+             li.addEventListener('dragstart', (ev) => {
++              if (committing) { ev.preventDefault(); return; }
+               cabinetState.dragSourceId = id;
+               ev.dataTransfer.effectAllowed = 'move';
+               ev.dataTransfer.setData('text/plain', id);
+@@ -1550,6 +1570,7 @@
+               li.classList.remove('is-drag-over');
+             });
+             li.addEventListener('drop', (ev) => {
++              if (committing) { ev.preventDefault(); return; }
+               ev.preventDefault();
+               li.classList.remove('is-drag-over');
+               const draggedId = cabinetState.dragSourceId;
+@@ -1574,6 +1595,7 @@
+           }
+ 
+           li.addEventListener('click', () => {
++            if (committing) return;
+             // Fix1.4：再次点击同一选中行 → 取消选中（toggle）
+             const isSameSelected =
+               cabinetState.selectedRegion === region && cabinetState.selectedModuleId === id;
+@@ -1597,10 +1619,10 @@
+       }
+ 
+       function updateControls() {
+-        moveEnableBtn.disabled =
++        moveEnableBtn.disabled = committing ||
+           cabinetState.selectedRegion !== 'idle' || !cabinetState.selectedModuleId;
+         // O3 拍板：启用区至少保留 1 个 → 仅剩 1 时禁用 ⬅️
+-        moveDisableBtn.disabled =
++        moveDisableBtn.disabled = committing ||
+           cabinetState.selectedRegion !== 'enabled' ||
+           !cabinetState.selectedModuleId ||
+           workingEnabled.length <= 1;
+@@ -1615,10 +1637,12 @@
+       }
+ 
+       moveEnableBtn.addEventListener('click', () => {
++        if (committing) return;
+         if (cabinetState.selectedRegion !== 'idle' || !cabinetState.selectedModuleId) return;
+         applyLocal([...workingEnabled, cabinetState.selectedModuleId]);
+       });
+       moveDisableBtn.addEventListener('click', () => {
++        if (committing) return;
+         if (cabinetState.selectedRegion !== 'enabled' || !cabinetState.selectedModuleId) return;
+         if (workingEnabled.length <= 1) return;
+         applyLocal(workingEnabled.filter((x) => x !== cabinetState.selectedModuleId));
+@@ -2303,10 +2327,21 @@
+ 
+     // F2 计算框（点「开始运行」弹）：只读发生额出/入/总额 → 输入期初OP → 点「计算」即落库
+     //   onCompute(beginOp) 返回 { status:'success', endOp } | { status:'error', message }（resolve，不抛）
+-    function createVccOpCalcComputeDialog({ totals = {}, yearMonth = '', onCompute, onClose } = {}) {
++    function createVccOpCalcComputeDialog({ totals = {}, yearMonth = '', onCompute, onClose, canClose = () => true } = {}) {
+       const overlay = document.createElement('div');
+       overlay.className = 'modal-overlay';
+       overlay.dataset.previewModal = 'vcc-op-calc-compute';
++      let handle = null;
++      let computing = false;
++      let completed = false;
++      const events = new AbortController();
++      const isCurrent = () => handle?.isOpen() && handle.isTop();
++      registerModal(overlay, {
++        // 领域来源锁和本视图提交锁共同决定关闭资格，不互相覆盖。
++        canClose: (reason) => !computing && canClose(reason),
++        onMount(opened) { handle = opened; },
++        onDispose() { events.abort(); }
++      });
+ 
+       const dialog = document.createElement('div');
+       dialog.className = 'modal-card pending-reconcile-dialog';
+@@ -2361,9 +2396,10 @@
+       cancelBtn.type = 'button';
+       cancelBtn.textContent = '取消';
+       cancelBtn.addEventListener('click', () => {
+-        closeModal();
+-        if (typeof onClose === 'function') onClose();
+-      });
++        if (!isCurrent() || computing) return;
++        const closed = closeModal(handle);
++        if (closed.status === 'closed' && typeof onClose === 'function') onClose();
++      }, { signal: events.signal });
+ 
+       const computeBtn = document.createElement('button');
+       computeBtn.className = 'primary-btn small';
+@@ -2372,13 +2408,16 @@
+       computeBtn.disabled = true;  // 期初OP 空时禁用（基本前端校验，不解析金额）
+ 
+       input.addEventListener('input', () => {
++        if (!isCurrent() || computing || completed) return;
+         computeBtn.disabled = input.value.trim() === '';
+         errBox.style.display = 'none';
+-      });
++      }, { signal: events.signal });
+ 
+       computeBtn.addEventListener('click', async () => {
++        if (!isCurrent() || computing || completed) return;
+         const beginOp = input.value.trim();
+         if (beginOp === '') return;
++        computing = true;
+         computeBtn.disabled = true;
+         input.disabled = true;
+         errBox.style.display = 'none';
+@@ -2387,8 +2426,13 @@
+           res = typeof onCompute === 'function' ? await onCompute(beginOp) : null;
+         } catch (e) {
+           res = { status: 'error', message: e && e.message ? e.message : String(e) };
++        } finally {
++          computing = false;
+         }
++        // 已提交的 Main 写照常结算；只有原存活窗口接纳展示结果。
++        if (!isCurrent()) return;
+         if (res && res.status === 'success') {
++          completed = true;
+           resultBox.textContent = `期末OP = ${res.endOp}（已保存）`;
+           resultBox.style.display = 'block';
+           computeBtn.style.display = 'none';   // 落库完成，收起计算按钮
+@@ -2399,7 +2443,7 @@
+           computeBtn.disabled = false;
+           input.disabled = false;
+         }
+-      });
++      }, { signal: events.signal });
+ 
+       actions.appendChild(computeBtn);
+       actions.appendChild(cancelBtn);
+diff --git a/src/renderer.js b/src/renderer.js
+index fe5dc96c..2057c412 100644
+--- a/src/renderer.js
++++ b/src/renderer.js
+@@ -1769,12 +1769,16 @@ async function applyFullInfo(info) {
+           state.enabledModules = Array.isArray(result.enabledModules) && result.enabledModules.length > 0
+             ? [...result.enabledModules]
+             : [...nextEnabledIds];
++          return true;
++        },
++        onCommitted: () => {
++          if (applicationDisposed) return;
++          // 保存资格由原弹窗持有；正常关闭后再导航，避免被其 busy 关闭预检拒绝。
+           // O4 拍板：若 currentModule 被移出启用列表 → 自动切到启用区第 1 个（persist=true 写回 DB）
+           if (!state.enabledModules.includes(state.currentModule)) {
+             setCurrentModule(state.enabledModules[0], { persist: true });
+           }
+           renderTopModuleSwitcher();
+-          return true;
+         }
+       }));
+     }, { signal: shellAbort.signal });
+diff --git a/src/renderer/README.md b/src/renderer/README.md
+index 1c276821..7c771f0d 100644
+--- a/src/renderer/README.md
++++ b/src/renderer/README.md
+@@ -21,6 +21,10 @@
+ 
+ 现有 Preload 的 Pending 进度和窗口最大化订阅现返回只移除自身监听的清理函数，和其他订阅一致；保持原频道/参数/payload及旧忽略返回值的调用兼容。控制器/壳在 dispose 退订；旧回调还保留 disposed 屏障。
+ 
++VCC OP 每次实际 scan 前撤销旧保存资格，以独立扫描对象及跨导航操作锁绑定F1、统计与F2。未确认的后台扫描不能恢复旧F2；已确认来源在重入、打开F2及save前通过既有computeAmounts探测漂移，保存仍只传beginOp。月份/金额/逐文件核对值不充当不可变文件身份；该IPC还会产生Main Task/活动日志，真实产品验收单独记录。F2将本地提交锁与域关闭资格合并，已销毁视图不接纳迟到DOM更新。
++
++BizOP 将已提交导入／恢复检查的最终反馈保存在控制器，离页只阻止旧 DOM 和弹窗续接，重入显示真实结算；尚未提交的过期文件／保存位置选择使用单独的废弃终态，恢复此前反馈，不伪造后台失败或继续提交。
++
+ Statement 没有既有的公开 `sessionStatus` IPC。本次保留本窗口已确认的 Main 命令结果；后台成功恢复按钮/反馈，等待选择的结果只保存原 context，用户再次点击原按钮继续，不自动复活旧弹窗、不再发一次导入。未新增恢复 IPC 或猜测磁盘结果。
+ 
+ ## 弹窗入口与权限
+@@ -32,6 +36,7 @@ Statement 没有既有的公开 `sessionStatus` IPC。本次保留本窗口已
+ - [dialogs/app-settings.js](dialogs/app-settings.js) 拥有期限保存队列、批次读取代次及父设置会话。删除子层只持有原 batchId/token，期限保存未结算不得预检/确认，删除提交中祖先不可关闭。
+ - [dialogs/toolbox.js](dialogs/toolbox.js) 持有本次 splitReadToken/来源/草稿，选择层只拥有控件。单项/行数/多文件转换保留父会话；同步冻结 payload 并锁定提交后只发送一次原 splitExport。取消不导出、不添加 Main 清理 IPC。
+ - [dialogs/configuration.js](dialogs/configuration.js) 拥有模板、映射、大账号、余额及迁移草稿。数据读取校验视图及请求代次；写入期间沿用对应 busy/确认语义；旧窗口不能接管新窗口。
++- 功能收纳的 `onCommit` 保存并接纳 Main 返回的启用列表；同步 busy 阻止导航，原 handle 正常提交关闭后才执行 `onCommitted` 导航。强制销毁不取消已提交写，也不授予旧窗新的导航权限。账单拆分份数的父层和确认层共享提交锁及关闭资格。
+ - [dialogs/scenarios.js](dialogs/scenarios.js) 拥有场景草稿、筛选与渠道选项。临时确认用子层，返回保持父草稿；视图订阅在自己的 scope 中释放。
+ 
+ ## 场景命令、失效与共享会话
+@@ -40,7 +45,7 @@ Statement 没有既有的公开 `sessionStatus` IPC。本次保留本窗口已
+ 
+ service 私有维护 metadataEpoch、活动写集合、id/category 与 revision；读开始/返回均检查同一 service、同 epoch、无活动写及可信 writer 边界。写开始和结算均失效元数据；未知结算永久撤销该实例的信任，成功查询不能恢复。现有 IPC 无 Main 生命周期身份和旧 writer 完成证明，生产 `writerBoundaryTrusted:false`；依赖旧类别的成功写发 `scenarios-resync-required`，不谎称确定清了哪域；固定 scope 命令仍遵守 Main 原矩阵，不额外重试业务写。
+ 
+-[scenario-change-router.js](scenario-change-router.js) 只消费明确 scope：Bank 普通结果对应 bank-statement；ReconID 及 Bank 网关展示对应 recon-id-fix。未知范围暂禁不确定导出并重读；仅关闭场景窗口只刷新列表，不清结果或已导出反馈。渠道变更只通知配置选项订阅，不使结果失效。
++[scenario-change-router.js](scenario-change-router.js) 只消费明确 scope：Bank 普通结果对应 bank-statement；ReconID 及 Bank 网关展示对应 recon-id-fix。未知范围暂禁不确定导出并重读；仅关闭场景窗口只刷新列表，不清结果或已导出反馈。渠道变更只通知配置选项订阅，不使结果失效。确定失效发生在隐藏域时记录待重绘事实，下一次成功读取 Main 状态后清除旧导出反馈；读取失败不吞掉该事实。ReconID 场景下拉每次按 busy 与当前类别的可选场景计算资格，不把旧 disabled 值当业务状态。
+ 
+ [shared-recon-session.js](shared-recon-session.js) 仅透传原 ReconID `import/run/clearSession/export/sessionStatus` 并通知结算；保留参数与 `originModuleId`，不复制会话明细或引擎。Bank 与 ReconID 依赖同一实例。
+ 
+diff --git a/src/renderer/controllers/bank-statement.js b/src/renderer/controllers/bank-statement.js
+index 26b40703..7ed012db 100644
+--- a/src/renderer/controllers/bank-statement.js
++++ b/src/renderer/controllers/bank-statement.js
+@@ -25,6 +25,8 @@
+     let resultEpoch = 0;
+     let uncertain = true;
+     let needsRefresh = true;
++    // 结果清空与DOM重绘可能分属不同页面代次；隐藏时保留待重绘事实。
++    let resultFeedbackInvalidated = false;
+     let lastRevision = 0;
+     let flowBusy = false;
+     const live = (generation = renderGeneration) => !disposed && active && generation === renderGeneration;
+@@ -52,6 +54,7 @@
+     function render(updateStatus = true) {
+       if (!live()) return;
+       updateBankStatementUi({ updateStatus });
++      if (updateStatus) resultFeedbackInvalidated = false;
+     }
+     function updateBankStatementRunBtnDisabled() {
+       if (!live() || !elements.bankStatementRunBtn) return;
+@@ -95,7 +98,7 @@
+         if (!status.hasProcessingResult) state.bankStatementExport = null;
+         uncertain = false;
+         needsRefresh = false;
+-        render(updateStatus || lostResult);
++        render(updateStatus || lostResult || resultFeedbackInvalidated);
+         return true;
+       } catch (error) {
+         if (!live(generation) || request !== statusGeneration) return false;
+@@ -677,7 +680,11 @@
+           ++statusGeneration;
+           uncertain = true;
+           needsRefresh = true;
+-          if (definite) { state.processingResult = null; state.bankStatementExport = null; }
++          if (definite) {
++            resultFeedbackInvalidated = true;
++            state.processingResult = null;
++            state.bankStatementExport = null;
++          }
+           render(definite);
+           if (live()) void refreshBankStatementStatus({ updateStatus: definite });
+         }
+diff --git a/src/renderer/controllers/recon-id-fix.js b/src/renderer/controllers/recon-id-fix.js
+index ddf79528..db3c8375 100644
+--- a/src/renderer/controllers/recon-id-fix.js
++++ b/src/renderer/controllers/recon-id-fix.js
+@@ -24,6 +24,8 @@
+     let uncertain = true;
+     let busy = false;
+     let needsRefresh = true;
++    // 结果清空与DOM重绘可能分属不同页面代次；隐藏时保留待重绘事实。
++    let resultFeedbackInvalidated = false;
+     let lastRevision = 0;
+     const live = (generation = renderGeneration) => !disposed && active && generation === renderGeneration;
+     const reportError = (error) => { if (ui.reportError) ui.reportError(error); };
+@@ -39,6 +41,7 @@
+     function render(updateStatus = true) {
+       if (!live()) return;
+       updateReconIdFixUi({ updateStatus });
++      if (updateStatus) resultFeedbackInvalidated = false;
+       if (elements.reconIdFixImportBtn) elements.reconIdFixImportBtn.disabled ||= busy;
+       if (elements.reconIdFixRunBtn) elements.reconIdFixRunBtn.disabled ||= busy || uncertain || needsRefresh;
+       if (elements.reconIdFixExportBtn) elements.reconIdFixExportBtn.disabled ||= busy || uncertain || needsRefresh;
+@@ -46,7 +49,12 @@
+         elements.reconIdFixBillCategorySelect.value = state.reconIdFixBillCategory || '';
+         elements.reconIdFixBillCategorySelect.disabled = busy;
+       }
+-      if (elements.reconIdFixScenarioSelect) elements.reconIdFixScenarioSelect.disabled ||= busy;
++      if (elements.reconIdFixScenarioSelect) {
++        const category = state.reconIdFixBillCategory === 'gateway' ? 'gateway-recon-id-fix'
++          : state.reconIdFixBillCategory === 'business' ? 'recon-id-fix' : null;
++        const hasChoices = !!category && state.reconIdFixScenarios.some(scenario => scenario.category === category);
++        elements.reconIdFixScenarioSelect.disabled = busy || !hasChoices;
++      }
+     }
+     function markStale(definite) {
+       ++resultEpoch;
+@@ -54,6 +62,7 @@
+       uncertain = true;
+       needsRefresh = true;
+       if (definite) {
++        resultFeedbackInvalidated = true;
+         state.reconIdFixResult = null;
+         state.reconIdFixExport = null;
+       }
+@@ -78,7 +87,7 @@
+         if (!status.hasResult) state.reconIdFixExport = null;
+         uncertain = false;
+         needsRefresh = false;
+-        render(updateStatus || lostResult);
++        render(updateStatus || lostResult || resultFeedbackInvalidated);
+         return true;
+       } catch (error) {
+         if (!live(generation) || request !== statusGeneration) return false;
+diff --git a/src/renderer/controllers/vcc-op-calc.js b/src/renderer/controllers/vcc-op-calc.js
+index 3a8eaad6..55e1efed 100644
+--- a/src/renderer/controllers/vcc-op-calc.js
++++ b/src/renderer/controllers/vcc-op-calc.js
+@@ -12,6 +12,11 @@
+     let disposed = false;
+     let renderGeneration = 0;
+     let needsRefresh = true;
++    // scan 会替换 Main 的唯一 compute snapshot。来源归属不能随导航 generation 丢失。
++    let currentSource = null;
++    let sourceOperation = null;
++    let feedback = null;
++    let pendingErrorReport = null;
+     const requests = Object.create(null);
+     const modalHandles = new Set();
+     const removers = [];
+@@ -75,8 +80,9 @@
+       totals: null             // computeAmounts 返回的 totals（供 F2 展示）
+     };
+ 
+-    function setVccOpCalcStatus(message, tone = 'info') {
+-      if (!elements.vccOpCalcStatusBox) return;
++    function setVccOpCalcStatus(message, tone = 'info', generation = renderGeneration) {
++      feedback = { message, tone };
++      if (!live(generation) || !elements.vccOpCalcStatusBox) return;
+       updateStatusBox(elements.vccOpCalcStatusBox, message, tone, {
+         idleTitle: '欢迎使用小助手'
+       });
+@@ -84,13 +90,91 @@
+ 
+     function applyVccOpCalcButtonState() {
+       if (!live()) return;
+-      if (elements.vccOpCalcImportBtn) elements.vccOpCalcImportBtn.disabled = false;  // 永远 enable
++      if (elements.vccOpCalcImportBtn) elements.vccOpCalcImportBtn.disabled = !!sourceOperation;
+       // 「开始运行」：已统计完成但未落库的当前会话才亮（spec §2.3）
+-      if (elements.vccOpCalcRunBtn) elements.vccOpCalcRunBtn.disabled = !vccOpCalcState.scanned;
++      if (elements.vccOpCalcRunBtn) elements.vccOpCalcRunBtn.disabled = !!sourceOperation || !vccOpCalcState.scanned;
+       // 「显示余额」：后端至少 1 条已计算月份
+       if (elements.vccOpCalcShowBalanceBtn) elements.vccOpCalcShowBalanceBtn.disabled = vccOpCalcState.balanceMonthsCount === 0;
+     }
+ 
++    function clearSaveableSource() {
++      currentSource = null;
++      Object.assign(vccOpCalcState, { scanned: false, yearMonth: '', totalRows: 0, fileCount: 0, totals: null });
++    }
++
++    function snapshotKey(result) {
++      const entries = (value) => Object.entries(value || {}).sort(([left], [right]) => left.localeCompare(right));
++      // 这是现有 IPC 可见事实的核对值，不是文件身份。身份由本域独占的 scan 对象与操作锁维护。
++      return JSON.stringify([result.yearMonth, entries(result.totals), (result.perFile || []).map(entries)]);
++    }
++
++    function startSourceOperation(kind) {
++      if (!live() || sourceOperation) return null;
++      const operation = { kind, generation: renderGeneration };
++      sourceOperation = operation;
++      applyVccOpCalcButtonState();
++      return operation;
++    }
++
++    function renderSettledFeedback() {
++      if (!live()) return;
++      if (feedback) setVccOpCalcStatus(feedback.message, feedback.tone);
++      if (pendingErrorReport) {
++        const report = pendingErrorReport;
++        pendingErrorReport = null;
++        showVccOpCalcErrorReport(report.errorRows, report.errorCount);
++      }
++      applyVccOpCalcButtonState();
++    }
++
++    async function finishSourceOperation(operation) {
++      if (sourceOperation !== operation) return;
++      sourceOperation = null;
++      needsRefresh = true;
++      if (!live()) return;
++      // A/B/A 中旧回调只结算领域事实；当前访问重新读取 Main，不能直接采用旧页面回包。
++      if (!live(operation.generation)) {
++        await refreshCurrentFacts();
++      } else {
++        renderSettledFeedback();
++      }
++    }
++
++    async function readConfirmedSource(source) {
++      const result = await domainApi.computeAmounts()
++        .catch((error) => ({ status: 'error', message: error?.message || String(error) }));
++      if (currentSource !== source || !source?.confirmed) return { status: 'stale' };
++      if (result?.status !== 'success' || snapshotKey(result) !== source.key) {
++        clearSaveableSource();
++        const message = result?.status !== 'success'
++          ? `统计状态读取失败：${result?.message || '无统计结果'}。请重新导入文件并确认。`
++          : '统计来源已变化，请重新导入文件并确认。';
++        return { status: 'error', message };
++      }
++      return { status: 'success' };
++    }
++
++    async function refreshCurrentFacts() {
++      const generation = renderGeneration;
++      const source = currentSource;
++      let sourceResult;
++      if (source?.confirmed && !sourceOperation) {
++        const operation = startSourceOperation('verify');
++        if (operation) {
++          try {
++            sourceResult = await readConfirmedSource(source);
++            if (sourceResult.status === 'error') setVccOpCalcStatus(sourceResult.message, 'error', generation);
++          } finally {
++            await finishSourceOperation(operation);
++          }
++        }
++      }
++      if (!live(generation)) return { status: 'stale' };
++      renderSettledFeedback();
++      const balances = await refreshVccOpCalcButtonAvailability();
++      return balances || (sourceResult?.status === 'error' ? sourceResult : undefined);
++    }
++
+     async function refreshVccOpCalcButtonAvailability() {
+       const viewGeneration = renderGeneration;
+       const request = requests.balances = (requests.balances || 0) + 1;
+@@ -115,142 +199,190 @@
+ 
+     // 「导入文件」：pickFiles → scan → F1 确认 → computeAmounts（统计发生额）
+     async function handleVccOpCalcImport() {
+-      const viewGeneration = renderGeneration;
+-      const request = requests.import = (requests.import || 0) + 1;
+-      if (!live(viewGeneration) || request !== requests.import) { needsRefresh = true; return { status: 'stale' }; }
+-
+-      const pickRes = await domainApi.pickFiles().catch(() => null);
+-      if (!live(viewGeneration) || request !== requests.import) { needsRefresh = true; return { status: 'stale' }; }
+-      if (!pickRes || pickRes.status === 'cancelled') {
+-        setVccOpCalcStatus('已取消选择文件', 'info');
+-        return;
+-      }
+-      if (pickRes.status !== 'success' || !Array.isArray(pickRes.filePaths) || pickRes.filePaths.length === 0) {
+-        setVccOpCalcStatus(pickRes.message || '选择文件失败', 'error');
+-        return;
+-      }
+-
+-      // v2.1.12 流式改造（spec §9）：大文件读取期间订阅进度事件，状态框流式更新；finally 退订防 listener 泄漏
+-      setVccOpCalcStatus(`正在读取 ${pickRes.filePaths.length} 个文件...`, 'info');
+-      let unsubscribeProgress = null;
+-      if (typeof domainApi.onScanProgress === 'function') {
+-        unsubscribeProgress = subscribeProgress('onScanProgress', (data) => {
+-          const rows = (data && data.rows) || 0;
+-          setVccOpCalcStatus(`正在读取大文件… 已处理 ${(rows / 10000).toFixed(1)} 万行`, 'info');
+-        });
+-      }
+-      let scanRes;
++      if (!live()) return { status: 'stale' };
++      if (sourceOperation) return { status: 'blocked', message: '当前流水操作尚未完成' };
++      // 已打开的 F2 不得在重扫后继续提交旧期初；busy 写入仍由同一 host 拒绝关闭。
++      if (ui.modalHost.closeOwner(owner, 'replaced')?.status === 'blocked') return { status: 'blocked' };
++      const operation = startSourceOperation('import');
++      if (!operation) return { status: 'blocked' };
++      const generation = operation.generation;
+       try {
+-        scanRes = await domainApi
+-          .scan({ filePaths: pickRes.filePaths })
+-          .catch((e) => ({ status: 'error', message: e && e.message ? e.message : String(e) }));
+-        if (!live(viewGeneration) || request !== requests.import) { needsRefresh = true; return { status: 'stale' }; }
+-      } finally {
+-        if (typeof unsubscribeProgress === 'function') unsubscribeProgress();
+-      }
++        const pickRes = await domainApi.pickFiles().catch(() => null);
++        if (!live(generation)) return { status: 'stale' };
++        if (!pickRes || pickRes.status === 'cancelled') {
++          // 尚未发送 scan，Main 来源没有改变，保留已经确认的当前流水。
++          setVccOpCalcStatus('已取消选择文件', 'info', generation);
++          return { status: 'cancelled' };
++        }
++        if (pickRes.status !== 'success' || !Array.isArray(pickRes.filePaths) || pickRes.filePaths.length === 0) {
++          setVccOpCalcStatus(pickRes.message || '选择文件失败', 'error', generation);
++          return { status: 'error' };
++        }
+ 
+-      if (scanRes.status === 'rejected') {
+-        vccOpCalcState.scanned = false;
+-        applyVccOpCalcButtonState();
+-        showVccOpCalcErrorReport(scanRes.errorRows, scanRes.errorCount);
+-        setVccOpCalcStatus('导入被拒绝：数据存在异常（见错误报告）', 'error');
+-        return;
+-      }
+-      if (scanRes.status !== 'success') {
+-        vccOpCalcState.scanned = false;
++        // 必须先撤销旧保存资格，再发送会替换 Main snapshot 的 scan；失败或取消也不能复活旧 F2。
++        clearSaveableSource();
++        pendingErrorReport = null;
++        const source = { confirmed: false, key: null,
++          fileNames: pickRes.filePaths.map((filePath) => String(filePath).split(/[\\/]/).at(-1)) };
++        currentSource = source;
+         applyVccOpCalcButtonState();
+-        const detail = scanRes.detailLines && scanRes.detailLines.length > 0 ? '\n' + scanRes.detailLines.join('\n') : '';
+-        setVccOpCalcStatus(`导入失败：${scanRes.message || '未知错误'}${detail}`, 'error');
+-        return;
+-      }
+-
+-      // scan 成功 → 弹 F1 确认框（展示月份 + 条数）
+-      openModal(() => createVccOpCalcConfirmDialog({
+-        yearMonth: scanRes.yearMonth,
+-        totalRows: scanRes.totalRows,
+-        fileCount: scanRes.fileCount,
+-        onConfirm: async () => {
+-          const viewGeneration = renderGeneration;
+-          const request = requests.confirmImport = (requests.confirmImport || 0) + 1;
+-          if (!live(viewGeneration) || request !== requests.confirmImport) { needsRefresh = true; return { status: 'stale' }; }
+-
+-          // F1 确认 → 后台统计发生额（computeAmounts，复用 main 会话缓存的 rows）
+-          setVccOpCalcStatus('正在统计发生额...', 'info');
+-          const compRes = await domainApi
+-            .computeAmounts()
+-            .catch((e) => ({ status: 'error', message: e && e.message ? e.message : String(e) }));
+-          if (!live(viewGeneration) || request !== requests.confirmImport) { needsRefresh = true; return { status: 'stale' }; }
+-          if (compRes.status === 'rejected') {
+-            vccOpCalcState.scanned = false;
+-            applyVccOpCalcButtonState();
+-            showVccOpCalcErrorReport(compRes.errorRows);
+-            setVccOpCalcStatus('统计被拒绝：数据存在异常（见错误报告）', 'error');
+-            return;
+-          }
+-          if (compRes.status !== 'success') {
+-            vccOpCalcState.scanned = false;
+-            applyVccOpCalcButtonState();
+-            setVccOpCalcStatus(`统计失败：${compRes.message || '未知错误'}`, 'error');
+-            return;
++        setVccOpCalcStatus(`正在读取 ${pickRes.filePaths.length} 个文件...`, 'info', generation);
++        const unsubscribeProgress = subscribeProgress('onScanProgress', (data) => {
++          const rows = (data && data.rows) || 0;
++          setVccOpCalcStatus(`正在读取大文件… 已处理 ${(rows / 10000).toFixed(1)} 万行`, 'info', generation);
++        });
++        let scanRes;
++        try {
++          scanRes = await domainApi.scan({ filePaths: pickRes.filePaths })
++            .catch((error) => ({ status: 'error', message: error?.message || String(error) }));
++        } finally {
++          unsubscribeProgress();
++        }
++        if (currentSource !== source) return { status: 'stale' };
++        if (scanRes?.status !== 'success') {
++          clearSaveableSource();
++          if (scanRes?.status === 'rejected') {
++            pendingErrorReport = { errorRows: scanRes.errorRows, errorCount: scanRes.errorCount };
++            setVccOpCalcStatus('导入被拒绝：数据存在异常（见错误报告）', 'error', generation);
++          } else if (scanRes?.status === 'cancelled') {
++            setVccOpCalcStatus('已取消导入，请重新选择文件。', 'info', generation);
++          } else {
++            const detail = scanRes?.detailLines?.length ? '\n' + scanRes.detailLines.join('\n') : '';
++            setVccOpCalcStatus(`导入失败：${scanRes?.message || '未知错误'}${detail}`, 'error', generation);
+           }
+-          // 统计完成 → 缓存 totals + 亮「开始运行」
+-          vccOpCalcState.scanned = true;
+-          vccOpCalcState.yearMonth = compRes.yearMonth;
+-          vccOpCalcState.totals = compRes.totals;
+-          vccOpCalcState.fileCount = scanRes.fileCount;
+-          vccOpCalcState.totalRows = scanRes.totalRows;
+-          applyVccOpCalcButtonState();
+-          const t = compRes.totals || {};
+-          setVccOpCalcStatus(
+-            `统计完成：${compRes.yearMonth}：发生额出 ${t.totalOut}：发生额入 ${t.totalIn}：总发生额 ${t.totalAmount} — 点「开始运行」输入期初OP`,
+-            'success'
+-          );
+-        },
+-        onCancel: () => {
+-          setVccOpCalcStatus('已取消导入', 'info');
++          return scanRes || { status: 'error' };
+         }
+-      }));
++
++        if (!live(generation)) {
++          // scan 已完成，但 F1 尚未确认。保存真实结算反馈，重入要求重新导入，绝不恢复旧 ready。
++          clearSaveableSource();
++          setVccOpCalcStatus(`${scanRes.yearMonth} 读取完成，尚未确认流水信息。请重新导入文件并确认。`, 'info', generation);
++          return scanRes;
++        }
++        let decided = false;
++        const cancelConfirmation = () => {
++          if (decided || currentSource !== source) return;
++          decided = true;
++          clearSaveableSource();
++          setVccOpCalcStatus('已取消导入', 'info', generation);
++          applyVccOpCalcButtonState();
++        };
++        const opened = openModal(() => createVccOpCalcConfirmDialog({
++          yearMonth: scanRes.yearMonth,
++          totalRows: scanRes.totalRows,
++          fileCount: scanRes.fileCount,
++          onConfirm: async () => {
++            if (decided || currentSource !== source || !live(generation)) return { status: 'stale' };
++            const computing = startSourceOperation('compute');
++            if (!computing) return { status: 'blocked' };
++            decided = true;
++            try {
++              setVccOpCalcStatus('正在统计发生额...', 'info', generation);
++              const compRes = await domainApi.computeAmounts()
++                .catch((error) => ({ status: 'error', message: error?.message || String(error) }));
++              if (currentSource !== source) return { status: 'stale' };
++              const filesMatch = !Array.isArray(compRes?.perFile) || (
++                compRes.perFile.length === scanRes.fileCount
++                && compRes.perFile.every((file, index) => file.fileName === source.fileNames[index])
++                && compRes.perFile.reduce((count, file) => count + file.rowCount, 0) === scanRes.totalRows
++              );
++              if (compRes?.status !== 'success' || compRes.yearMonth !== scanRes.yearMonth || !compRes.totals || !filesMatch) {
++                clearSaveableSource();
++                if (compRes?.status === 'rejected') {
++                  pendingErrorReport = { errorRows: compRes.errorRows, errorCount: compRes.errorCount };
++                  setVccOpCalcStatus('统计被拒绝：数据存在异常（见错误报告）', 'error', generation);
++                } else if (compRes?.status === 'cancelled') {
++                  setVccOpCalcStatus('已取消统计，请重新导入文件并确认。', 'info', generation);
++                } else {
++                  setVccOpCalcStatus(`统计失败：${compRes?.message || '流水来源已变化，请重新导入文件并确认。'}`, 'error', generation);
++                }
++                return compRes?.status === 'success' ? { status: 'error' } : compRes;
++              }
++              // 业务确认归属于这一次 scan，即使离页也保存结算，DOM 则服从原页面 generation。
++              source.confirmed = true;
++              source.key = snapshotKey(compRes);
++              Object.assign(vccOpCalcState, {
++                scanned: true, yearMonth: compRes.yearMonth, totals: compRes.totals,
++                fileCount: scanRes.fileCount, totalRows: scanRes.totalRows
++              });
++              const t = compRes.totals;
++              setVccOpCalcStatus(`统计完成：${compRes.yearMonth}：发生额出 ${t.totalOut}：发生额入 ${t.totalIn}：总发生额 ${t.totalAmount} — 点「开始运行」输入期初OP`, 'success', generation);
++              return compRes;
++            } finally {
++              await finishSourceOperation(computing);
++            }
++          },
++          onCancel: cancelConfirmation
++        }));
++        if (opened.status === 'opened') opened.handle.closed.then(cancelConfirmation);
++        else cancelConfirmation();
++        return opened;
++      } finally {
++        await finishSourceOperation(operation);
++      }
+     }
+ 
+-    // 「开始运行」：弹 F2（展示发生额 + 输入期初OP），点「计算」即调 save 落库（资金红线🔴 后端算 endOp）
++    // 「开始运行」：F2 绑定当前已确认 scan；只将用户输入的 beginOp 传给 Main。
+     async function handleVccOpCalcRun() {
+-      const viewGeneration = renderGeneration;
+-      const request = requests.run = (requests.run || 0) + 1;
+-      if (!live(viewGeneration) || request !== requests.run) { needsRefresh = true; return { status: 'stale' }; }
+-
+-      if (!vccOpCalcState.scanned || !vccOpCalcState.totals) {
++      if (!live()) return { status: 'stale' };
++      if (sourceOperation) return { status: 'blocked', message: '当前流水操作尚未完成' };
++      const source = currentSource;
++      const generation = renderGeneration;
++      if (!source?.confirmed || !vccOpCalcState.scanned || !vccOpCalcState.totals) {
+         openModal(() => createAlertDialog('请先用「导入文件」选择流水并完成统计。'));
+-        return;
++        return { status: 'error' };
+       }
+-      openModal(() => createVccOpCalcComputeDialog({
+-        totals: vccOpCalcState.totals,
+-        yearMonth: vccOpCalcState.yearMonth,
+-        onCompute: async (beginOp) => {
+-          const viewGeneration = renderGeneration;
+-          const request = requests.compute = (requests.compute || 0) + 1;
+-          if (!live(viewGeneration) || request !== requests.compute) { needsRefresh = true; return { status: 'stale' }; }
+-
+-          // 资金红线🔴：beginOp 原样透传后端，后端整数分算 endOp = beginOp + 发生额 + 原子落库
+-          const saveRes = await domainApi
+-            .save({ beginOp })
+-            .catch((e) => ({ status: 'error', message: e && e.message ? e.message : String(e) }));
+-          if (!live(viewGeneration) || request !== requests.compute) { needsRefresh = true; return { status: 'stale' }; }
+-          if (saveRes && saveRes.status === 'success') {
+-            // 落库成功 → 清会话态（灭「开始运行」）+ 刷新「显示余额」
+-            vccOpCalcState.scanned = false;
+-            vccOpCalcState.totals = null;
+-            setVccOpCalcStatus(
+-              `${saveRes.yearMonth} 运行完成：期初OP ${saveRes.beginOp} → 期末OP ${saveRes.endOp}（已保存）`,
+-              'success'
+-            );
+-            await refreshVccOpCalcButtonAvailability();
+-            if (!live(viewGeneration) || request !== requests.compute) { needsRefresh = true; return { status: 'stale' }; }
+-            return { status: 'success', endOp: saveRes.endOp };
+-          }
+-          return { status: 'error', message: (saveRes && saveRes.message) ? saveRes.message : '保存失败' };
+-        },
+-        onClose: () => {}
+-      }));
++      const checking = startSourceOperation('verify');
++      let checked;
++      try {
++        checked = await readConfirmedSource(source);
++        if (checked.status === 'error') setVccOpCalcStatus(checked.message, 'error', generation);
++      } finally {
++        await finishSourceOperation(checking);
++      }
++      if (!live(generation) || currentSource !== source) return checked;
++      let handle = null;
++      const opened = openModal(() => {
++        const overlay = createVccOpCalcComputeDialog({
++          totals: vccOpCalcState.totals,
++          yearMonth: vccOpCalcState.yearMonth,
++          canClose: () => sourceOperation?.kind !== 'save',
++          onCompute: async (beginOp) => {
++            if (!handle?.isOpen() || !live(generation) || currentSource !== source || !source.confirmed) {
++              return { status: 'error', message: '统计来源已失效，请重新导入文件并确认。' };
++            }
++            const saving = startSourceOperation('save');
++            if (!saving) return { status: 'blocked', message: '当前流水操作尚未完成' };
++            try {
++              const verified = await readConfirmedSource(source);
++              if (verified.status !== 'success') {
++                if (verified.message) setVccOpCalcStatus(verified.message, 'error', generation);
++                return verified;
++              }
++              // 核对等待中若 handle 被最终销毁，只放弃尚未发出的写；已经发出的 save 必须记录真实结算。
++              if (!handle.isOpen() || !live(generation)) return { status: 'stale' };
++              const saveRes = await domainApi.save({ beginOp })
++                .catch((error) => ({ status: 'error', message: error?.message || String(error) }));
++              if (saveRes?.status === 'success') {
++                clearSaveableSource();
++                setVccOpCalcStatus(`${saveRes.yearMonth} 运行完成：期初OP ${saveRes.beginOp} → 期末OP ${saveRes.endOp}（已保存）`, 'success', generation);
++                if (live(generation)) await refreshVccOpCalcButtonAvailability();
++                return { status: 'success', endOp: saveRes.endOp };
++              }
++              const message = saveRes?.message || (saveRes?.status === 'cancelled' ? '已取消保存' : '保存失败');
++              setVccOpCalcStatus(message, saveRes?.status === 'cancelled' ? 'info' : 'error', generation);
++              // 失败保持重试入口；每次重试仍先读取 Main 核对来源，不能重放未知的旧快照。
++              return { status: saveRes?.status === 'cancelled' ? 'cancelled' : 'error', message };
++            } finally {
++              await finishSourceOperation(saving);
++            }
++          },
++          onClose: () => {}
++        });
++        return overlay;
++      });
++      if (opened.status === 'opened') handle = opened.handle;
++      return opened;
+     }
+ 
+     // 「显示余额」：弹 F3（月份下拉 + 查看），查看调 getBalance
+@@ -318,7 +450,7 @@
+       active = true;
+       const generation = ++renderGeneration;
+       applyVccOpCalcButtonState();
+-      const result = await refreshVccOpCalcButtonAvailability();
++      const result = await refreshCurrentFacts();
+       if (!live(generation)) return { status: 'stale' };
+       needsRefresh = result?.status === 'error' || result?.status === 'stale';
+       return needsRefresh ? result : { status: 'ready' };
+@@ -335,7 +467,7 @@
+     }
+     function invalidate() {
+       needsRefresh = true;
+-      if (live()) return refreshVccOpCalcButtonAvailability();
++      if (live()) return refreshCurrentFacts();
+       return Promise.resolve({ status: 'stale' });
+     }
+     function dispose() {
+diff --git a/src/renderer/dialogs/app-settings.js b/src/renderer/dialogs/app-settings.js
+index 8ba69c48..ecbf425e 100644
+--- a/src/renderer/dialogs/app-settings.js
++++ b/src/renderer/dialogs/app-settings.js
+@@ -547,9 +547,9 @@ function createAppUpdateSettingsDialog(options = {}) {
+   let unsubscribeEntryMaintenanceFailed = null;
+ 
+   function getArchiveCenterApi() {
+-    const api = archiveCenterApi || api.archiveCenter;
+-    if (!api) throw new Error('存档中心服务暂不可用');
+-    return api;
++    const archiveApi = archiveCenterApi || api.archiveCenter;
++    if (!archiveApi) throw new Error('存档中心服务暂不可用');
++    return archiveApi;
+   }
+ 
+   function showArchiveFeedback(message, tone = 'error') {
+diff --git a/src/renderer/dialogs/configuration.js b/src/renderer/dialogs/configuration.js
+index 0da32dbb..e38e6f68 100644
+--- a/src/renderer/dialogs/configuration.js
++++ b/src/renderer/dialogs/configuration.js
+@@ -4401,8 +4401,12 @@
+         } catch (_error) { /* ignore */ }
+       }
+ 
+-      // N 完成按钮
++      // 份数写入同时约束行管理父层和减少份数确认子层的关闭资格。
++      let rowCountSaving = false;
++      registerModal(overlay, { canClose: () => !rowCountSaving });
+       nDoneBtn.addEventListener('click', async () => {
++        const parentHandle = modalBridge.host.getHandle(overlay);
++        if (rowCountSaving || !parentHandle?.isTop()) return;
+         const nextN = Number(nInput.value);
+         if (!Number.isInteger(nextN) || nextN < 1 || nextN > 99) {
+           pushAlert(overlay, () => createAlertDialog('拆分账单份数必须为 1 ~ 99 之间的整数', {
+@@ -4412,36 +4416,49 @@
+         }
+         const currentM = currentRows.length;
+ 
+-        async function doPersist(finalN) {
++        async function doPersist(finalN, targetHandle = parentHandle, targetOverlay = overlay) {
++          if (rowCountSaving || !parentHandle.isOpen() || !targetHandle?.isTop()) return false;
++          rowCountSaving = true;
++          const controls = Array.from(new Set([
++            ...dialog.querySelectorAll('button, input, select, textarea'),
++            ...targetOverlay.querySelectorAll('button, input, select, textarea')
++          ])).map(element => [element, element.disabled]);
++          controls.forEach(([element]) => { element.disabled = true; });
++          let result;
+           try {
+-            const result = await api.templates.saveBillSplitRowCount({
+-              templateId: template.id,
+-              nextN: finalN
+-            });
+-            if (result && result.status === 'success') {
+-              currentRows = result.currentRows || [];
+-              rerenderTable();
+-              return true;
+-            } else {
+-              pushAlert(overlay, () => createAlertDialog(result?.message || '保存失败', {
+-                onConfirm: null
+-              }));
+-            }
++            result = await api.templates.saveBillSplitRowCount({ templateId: template.id, nextN: finalN });
+           } catch (error) {
+-            console.error(error);
++            result = { status: 'failed', message: error.message || '保存拆分份数失败' };
++          } finally {
++            rowCountSaving = false;
++            if (parentHandle.isOpen()) controls.forEach(([element, disabled]) => {
++              if (element.isConnected) element.disabled = disabled;
++            });
++          }
++          // Main 写入已结算；旧视图只放弃自己的渲染和关闭，不接管新的弹窗。
++          if (!parentHandle.isOpen() || !targetHandle.isOpen() || !targetHandle.isTop()) return false;
++          if (result?.status === 'success') {
++            currentRows = result.currentRows || [];
++            rerenderTable();
++            return true;
+           }
++          pushModal(targetHandle, () => createAlertDialog(result?.message || '保存失败', { onConfirm: null }));
+           return false;
+         }
+ 
+         if (nextN < currentM) {
+-          pushModal(overlay, () => createConfirmDialog({
+-            message: `确认删除最下方的 ${currentM - nextN} 行？已填数据会丢失`,
+-            confirmText: '确认',
+-            cancelText: '取消',
+-            onConfirm: async () => {
+-              if (await doPersist(nextN)) returnToModal(overlay);
+-            }
+-          }));
++          pushModal(parentHandle, () => {
++            const confirmation = createConfirmDialog({
++              message: `确认删除最下方的 ${currentM - nextN} 行？已填数据会丢失`,
++              confirmText: '确认', cancelText: '取消',
++              onConfirm: async () => {
++                const handle = modalBridge.host.getHandle(confirmation);
++                if (await doPersist(nextN, handle, confirmation)) closeModal(handle, { status: 'submitted' });
++              }
++            });
++            registerModal(confirmation, { canClose: () => !rowCountSaving });
++            return confirmation;
++          });
+         } else if (nextN > currentM) {
+           await doPersist(nextN);
+         }
+diff --git a/tests/unit/main-process/biz-op-v329-renderer.test.js b/tests/unit/main-process/biz-op-v329-renderer.test.js
+index 8b82ab5b..baba69da 100644
+--- a/tests/unit/main-process/biz-op-v329-renderer.test.js
++++ b/tests/unit/main-process/biz-op-v329-renderer.test.js
+@@ -89,6 +89,7 @@ function createHarness(window) {
+     currentInput: { status: 'ok', objectId: 'input-1' },
+     deletePreview: { status: 'ok', previewId: 'delete-1', datasets: [], runs: [], selection: { runIds: ['run-1'] }, references: { protectedAfterKeep: 1, protectedAfterDelete: 0, userLockedOriginals: 0, sharedBlobOriginals: 0 } },
+     deleteData: { status: 'ok' },
++    retryRecovery: { ready: true },
+     cancel: { status: 'ok' }
+   };
+   const reply = { ...defaults };
+@@ -120,6 +121,75 @@ function rendererCases(test, assert, environment) {
+     assert.equal(h.count('cancel'), 0);
+   }
+   async function setup() { const h = await environment(); await h.controller.setSelected(true); return h; }
++  for (const [name, result, expected, tone] of [
++    ['成功', { status: 'ok', summary: { scannedDataRows: 3, acceptedRows: 3 } }, '导入文件完成\n扫描 3 行，接受 3 行', 'success'],
++    ['失败', { status: 'error', message: '导入失败，文件没有保存', errorReport: { status: 'saved', relativePath: 'error-reports/test.xlsx' } }, '导入失败，文件没有保存\n错误报告已保存：error-reports/test.xlsx', 'error'],
++    ['取消', { status: 'cancelled' }, '操作已取消', 'info'],
++    ['连接异常', new Error('后台连接中断'), '后台连接中断', 'error']
++  ]) {
++    for (const reenterBeforeSettlement of [false, true]) {
++      test(`导入离页后${name}结算，${reenterBeforeSettlement ? '先返回再结算' : '先结算再返回'}保留最终反馈及一次调用`, async () => {
++        const h = await setup();
++        try {
++          const pending = h.deferred(); h.reply.importFiles = () => pending.promise;
++          await h.click('导入文件');
++          const waiting = h.text(); assert.equal(h.controller.busy, true);
++          assert.equal(h.controller.leave().status, 'left');
++          if (reenterBeforeSettlement) {
++            await h.controller.enter(); assert.equal(h.find('导入文件').disabled, true);
++          }
++          if (result instanceof Error) pending.reject(result); else pending.resolve(result);
++          await h.flush();
++          assert.equal(h.controller.busy, false);
++          if (!reenterBeforeSettlement) {
++            assert.equal(h.text(), waiting, '隐藏页面不渲染旧访问的结果');
++            await h.controller.enter();
++          }
++          assert.equal(h.text(), expected); assert.equal(h.status().dataset.tone, tone);
++          assert.equal(h.panel.getAttribute('aria-busy'), 'false');
++          assert.equal(h.find('导入文件').disabled, false); assert.equal(h.count('importFiles'), 1);
++          await h.controller.setSelected(false); await h.controller.setSelected(true);
++          assert.equal(h.text(), expected, '重新读可用状态不能抹掉后台任务结算');
++          h.reply.importFiles = { status: 'ok' }; await h.click('导入文件');
++          assert.equal(h.count('importFiles'), 2); assert.equal(h.text(), '导入文件完成');
++        } finally { h.close(); }
++      });
++    }
++  }
++  for (const selection of [{ status: 'ok', selectionRef: 'late-input' }, { status: 'cancelled' }, new Error('旧选择读取失败')]) {
++    test(`未提交的旧导入选择${selection.status || '异常'}在离页后废弃，保留此前任务反馈`, async () => {
++      const h = await setup();
++      try {
++        await h.click('导入文件'); const previous = h.text();
++        const pending = h.deferred(); h.reply.pickFiles = () => pending.promise;
++        await h.click('导入文件'); h.controller.leave(); await h.controller.enter();
++        if (selection instanceof Error) pending.reject(selection); else pending.resolve(selection);
++        await h.flush();
++        assert.equal(h.count('importFiles'), 1, '旧选择不能续发导入');
++        assert.equal(h.text(), previous); assert.equal(h.status().dataset.tone, 'success');
++        assert.equal(h.controller.busy, false); assert.equal(h.find('导入文件').disabled, false);
++        assert.equal(h.doc.querySelectorAll('dialog').length, 0);
++      } finally { h.close(); }
++    });
++  }
++  for (const ready of [true, false]) {
++    test(`恢复检查离页后的真实 ready=${ready}结算不被旧页面代次改写`, async () => {
++      const h = await environment();
++      try {
++        h.reply.status = { mode: 'ACTIVE', recoveryReady: false };
++        await h.controller.enter();
++        const pending = h.deferred(); h.reply.retryRecovery = () => pending.promise;
++        await h.click('重试恢复'); assert.equal(h.count('retryRecovery'), 1);
++        h.controller.leave(); await h.controller.enter();
++        h.reply.status = { mode: 'ACTIVE', recoveryReady: ready };
++        pending.resolve({ ready }); await h.flush();
++        assert.equal(h.text(), ready ? '恢复检查完成' : '仍有未决任务或文件，请查看任务详情后重试');
++        assert.equal(h.status().dataset.tone, ready ? 'success' : 'error');
++        assert.equal(h.find('导入文件').disabled, !ready);
++        assert.equal(h.count('retryRecovery'), 1); assert.equal(h.controller.busy, false);
++      } finally { h.close(); }
++    });
++  }
+   test('初始和重新进入 ACTIVE 页面无手动报告或任务取消节点，保留模式路由', async () => {
+     const h = await setup();
+     try {
+diff --git a/tests/unit/renderer/scenario-controller-feedback.test.js b/tests/unit/renderer/scenario-controller-feedback.test.js
+new file mode 100644
+index 00000000..2abe0459
+--- /dev/null
++++ b/tests/unit/renderer/scenario-controller-feedback.test.js
+@@ -0,0 +1,130 @@
++'use strict';
++const test = require('node:test');
++const assert = require('node:assert/strict');
++const { createMainHarness, deferred } = require('../../helpers/scenario-main-harness');
++const { createScenarioCommandService } = require('../../../src/renderer/scenario-command-service');
++const { createScenarioChangeRouter } = require('../../../src/renderer/scenario-change-router');
++const { createSharedReconSession } = require('../../../src/renderer/shared-recon-session');
++const { createBankStatementController } = require('../../../src/renderer/controllers/bank-statement');
++const { createReconIdFixController } = require('../../../src/renderer/controllers/recon-id-fix');
++
++const payload = (category, name) => ({ category, name, priority: 1, enabled: true, config: {} });
++async function flush() { for (let n = 0; n < 12; n++) await Promise.resolve(); }
++function panel(ids) {
++  const controls = Object.fromEntries(ids.map(id => [id, {
++    textContent: '欢迎使用小助手', value: '', innerHTML: '', disabled: false, dataset: {},
++    addEventListener() {}, removeEventListener() {}
++  }]));
++  return { controls, querySelector(selector) { assert.ok(controls[selector.slice(1)], `禁止域外DOM ${selector}`); return controls[selector.slice(1)]; } };
++}
++function fixture(t) {
++  const main = createMainHarness();
++  const bankId = main.database.createScenario(payload('extract-recon-id', '反馈测试银行')).id;
++  const reconId = main.database.createScenario(payload('gateway-recon-id-fix', '反馈测试网关')).id;
++  const bankPanel = panel(['bankStatementScenarioBtn', 'bankStatementImportBtn', 'bankStatementRunBtn', 'bankStatementExportBtn', 'bankStatementStatusBox', 'bankStatementLinkedTableBtn']);
++  const reconPanel = panel(['reconIdFixBillCategorySelect', 'reconIdFixScenarioRow', 'reconIdFixManageScenariosBtn', 'reconIdFixImportBtn', 'reconIdFixScenarioSelect', 'reconIdFixRunBtn', 'reconIdFixExportBtn', 'reconIdFixStatusBox']);
++  const events = [];
++  let router;
++  const service = createScenarioCommandService({ scenariosApi: main.scenariosApi, channelsApi: main.channelsApi,
++    writerBoundaryTrusted: false, publish(event) { events.push(event); router.route(event); } });
++  const shared = createSharedReconSession({ api: main.reconApi });
++  const config = { scenarios: { list: service.scenarios.list } };
++  const ui = { status(element, text, tone) { element.textContent = text; element.dataset.tone = tone; },
++    reportError() {}, alert() { return {}; }, modalHost: { openRoot(factory) { factory(); return { status: 'opened' }; }, closeOwner() { return { status: 'closed' }; } } };
++  const bank = createBankStatementController({ api: main.bankApi, panel: bankPanel, config, sharedReconSession: shared, ui });
++  const recon = createReconIdFixController({ api: { setReconIdFixBillCategory: async () => ({ status: 'ok' }) }, panel: reconPanel, config, sharedReconSession: shared, ui });
++  router = createScenarioChangeRouter({ bankStatement: bank, reconIdFix: recon, scenarioSubscribers: [() => recon.reloadScenarios({ updateStatus: false })] });
++  const f = { main, service, bank, recon, bankId, reconId, config, events,
++    bankBox: bankPanel.controls.bankStatementStatusBox, bankExport: bankPanel.controls.bankStatementExportBtn,
++    reconBox: reconPanel.controls.reconIdFixStatusBox, reconExport: reconPanel.controls.reconIdFixExportBtn,
++    select: reconPanel.controls.reconIdFixScenarioSelect,
++    async ready() {
++      await Promise.all([bank.enter(), recon.enter()]);
++      main.setResults();
++      await Promise.all([bank.refreshStatus(), recon.refreshStatus()]);
++      await Promise.all([bank.commands.export(), recon.commands.export()]);
++      assertState(f, true, true);
++    }
++  };
++  t.after(() => { bank.dispose(); recon.dispose(); router.dispose(); service.dispose(); shared.dispose(); main.dispose(); });
++  return f;
++}
++function assertState(f, bank, recon) {
++  assert.deepEqual(f.main.results(), { bank, recon });
++  for (const [domain, expected] of [['bank', bank], ['recon', recon]]) {
++    assert.equal(f[domain + 'Export'].disabled, !expected, `${domain} 导出资格应与 Main 一致`);
++    assert.equal(f[domain + 'Box'].textContent.includes('已导出'), expected, `${domain} 已导出反馈按实际失效域保留/撤回`);
++  }
++}
++
++for (const operation of ['import', 'run', 'export']) {
++  for (const outcome of ['ok', 'failed', 'cancelled', 'reject']) {
++    test(`R03 ${operation} ${outcome} 收尾重算场景可选资格，不残留busy禁用`, async t => {
++      const f = fixture(t); await f.ready();
++      assert.equal(f.select.disabled, false, '有可选场景，空闲时应可选择');
++      const pending = deferred();
++      let calls = 0;
++      f.main.reconApi[operation] = () => { calls++; return pending.promise; };
++      const action = f.recon.commands[operation]();
++      assert.equal(f.select.disabled, true, '命令在途不能修改场景');
++      if (outcome === 'reject') pending.reject(new Error('测试传输失败'));
++      else pending.resolve({ status: outcome, mainFileName: 'recon-output.xlsx', message: '测试结算' });
++      await action; await flush();
++      assert.equal(calls, 1);
++      assert.equal(f.select.disabled, false, '命令已结算，不应继续沿用在途disabled');
++    });
++  }
++}
++for (const unavailable of ['empty', 'failed', 'category']) {
++  test(`R03 ${unavailable} 无合法场景资格，busy收尾仍保持下拉禁用`, async t => {
++    const f = fixture(t); await f.ready();
++    const pending = deferred(); f.main.reconApi.export = () => pending.promise;
++    const action = f.recon.commands.export();
++    if (unavailable === 'category') {
++      f.recon.applyPreviewCategory('business');
++    } else {
++      f.config.scenarios.list = async () => unavailable === 'empty' ? { status: 'ok', scenarios: [] } : { status: 'failed', message: '列表读取失败' };
++      await f.recon.reloadScenarios();
++    }
++    pending.resolve({ status: 'cancelled' }); await action;
++    assert.equal(f.select.disabled, true, '不能因busy结束把无选项/不匹配类别的选择框打开');
++  });
++}
++
++const mutations = {
++  batchDelete: async f => { assert.equal((await f.service.scenarios.batchDelete([f.bankId])).status, 'ok'); return [false, false]; },
++  applyImport: async f => { assert.equal((await f.service.scenarios.applyImport(...f.main.prepareImport({ channels: [] }))).status, 'ok'); return [false, false]; },
++  bankCreate: async f => { assert.equal((await f.service.scenarios.create(payload('extract-recon-id', '隐藏期新银行'))).status, 'ok'); return [false, true]; },
++  reconCreate: async f => { assert.equal((await f.service.scenarios.create(payload('gateway-recon-id-fix', '隐藏期新网关'))).status, 'ok'); return [true, false]; },
++  bankResync: async f => { assert.equal((await f.service.scenarios.toggleEnabled(f.bankId, false)).status, 'ok'); assert.equal(f.events.at(-1).kind, 'scenarios-resync-required'); return [false, true]; },
++  reconResync: async f => { assert.equal((await f.service.scenarios.toggleEnabled(f.reconId, false)).status, 'ok'); assert.equal(f.events.at(-1).kind, 'scenarios-resync-required'); return [true, false]; },
++  closed: async f => { f.service.closed(); return [true, true]; },
++  failed: async f => { assert.equal((await f.service.scenarios.update(f.bankId, { priority: 9 })).status, 'failed'); return [true, true]; },
++  channels: async f => { assert.equal((await f.service.channels.create({ name: '仅改渠道', ownerLocation: 'HK' })).status, 'ok'); return [true, true]; }
++};
++for (const hidden of ['bank', 'recon']) {
++  for (const [name, mutate] of Object.entries(mutations)) {
++    test(`R05 隐藏${hidden} → ${name} → enter，反馈和按钮按Main同步，未命中域保持`, async t => {
++      const f = fixture(t); await f.ready();
++      const oldText = f[hidden + 'Box'].textContent;
++      f[hidden].leave();
++      const expected = await mutate(f); await flush();
++      assert.equal(f[hidden + 'Box'].textContent, oldText, '隐藏时不得直接写旧面板');
++      await f[hidden].enter();
++      assertState(f, ...expected);
++    });
++  }
++  test(`R05 ${hidden}确定失效后首次重读失败，后续静默成功仍清已失效反馈`, async t => {
++    const f = fixture(t); await f.ready(); f[hidden].leave();
++    await mutations.batchDelete(f); await flush();
++    const api = hidden === 'bank' ? f.main.bankApi : f.main.reconApi;
++    const original = api.sessionStatus;
++    api.sessionStatus = async () => ({ status: 'failed', message: '暂时无法读取' });
++    await f[hidden].enter();
++    assert.match(f[hidden + 'Box'].textContent, /暂时无法读取/);
++    api.sessionStatus = original;
++    await f[hidden].refreshStatus({ updateStatus: false });
++    assert.doesNotMatch(f[hidden + 'Box'].textContent, /暂时无法读取|已导出/);
++    assertState(f, false, false);
++  });
++}
+diff --git a/tests/unit/renderer/vcc-op-calc-source-binding.test.js b/tests/unit/renderer/vcc-op-calc-source-binding.test.js
+new file mode 100644
+index 00000000..856a4fb0
+--- /dev/null
++++ b/tests/unit/renderer/vcc-op-calc-source-binding.test.js
+@@ -0,0 +1,458 @@
++'use strict';
++
++const assert = require('node:assert/strict');
++const test = require('node:test');
++const fs = require('node:fs');
++const os = require('node:os');
++const path = require('node:path');
++const { DatabaseSync } = require('node:sqlite');
++const ExcelJS = require('exceljs');
++const { createModalDom } = require('../../helpers/modal-dom');
++const { createModalHost } = require('../../../src/renderer/modal-host');
++const { createModalBridge } = require('../../../src/renderer/modal-bridge');
++const { createVccOpCalcController } = require(process.env.VCC_OP_CALC_CONTROLLER_PATH
++  || '../../../src/renderer/controllers/vcc-op-calc');
++const { FLOW_HEADERS } = require('../../../src/backend/vcc-op-calc-db/columns');
++const { createVccOpCalcSession } = require('../../../src/main-process/vcc-op-calc-session');
++const { hashVccOpComputeSnapshot } = require('../../../src/main-process/vcc-op-calc/save-run-contract');
++const { ensureVccOpCalcTablesSupport } = require('../../../src/backend/database/migrations');
++
++function deferred() {
++  let resolve;
++  let reject;
++  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
++  return { promise, resolve, reject };
++}
++
++async function harness(t) {
++  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-source-binding-'));
++  const db = new DatabaseSync(':memory:');
++  ensureVccOpCalcTablesSupport(db);
++  const session = createVccOpCalcSession({ getDb: () => db });
++  const files = {};
++  // 仅合成数据：A 与 C 金额、账期相同，文件不同；D 触发现有整批拒绝。
++  for (const [name, month, amount, direction] of [
++    ['A', '2026-07', '10.00', '入'], ['B', '2026-08', '900.00', '入'],
++    ['C', '2026-07', '10.00', '入'], ['D', '2026-08', '5.00', '非法方向']
++  ]) {
++    const wb = new ExcelJS.Workbook();
++    const ws = wb.addWorksheet('Flow');
++    ws.addRow(FLOW_HEADERS.slice());
++    const row = new Array(FLOW_HEADERS.length).fill('');
++    row[1] = month + '-15'; row[8] = direction; row[13] = amount; row[14] = 'CNY';
++    ws.addRow(row);
++    files[name] = path.join(tmp, name + '.xlsx');
++    await wb.xlsx.writeFile(files[name]);
++  }
++  const dom = createModalDom();
++  const host = createModalHost({ root: dom.root, document: dom.document });
++  const bridge = createModalBridge({ host });
++  const nodes = new Map();
++  const views = [];
++  const calls = [];
++  const controls = {};
++  const releases = [];
++  let selected = 'A';
++  let writes = 0;
++  const defaults = {
++    pickFiles: async () => ({ status: 'success', filePaths: [files[selected]] }),
++    scan: async ({ filePaths }) => {
++      const result = await session.streamScanAndCompute(filePaths);
++      return result.ok
++        ? { status: 'success', yearMonth: result.yearMonth, totalRows: result.totalRows, fileCount: filePaths.length }
++        : { status: 'rejected', errorRows: result.errorRows, errorCount: result.errorCount };
++    },
++    computeAmounts: async () => {
++      const cache = session.getComputeCache();
++      return cache ? { status: 'success', ...cache } : { status: 'error', message: '无统计结果（请先导入文件）' };
++    },
++    save: async ({ beginOp }) => {
++      const id = ++writes;
++      try {
++        return { status: 'success', ...session.saveRun({ beginOp, operationOwner: {
++          taskRunId: 'vcc-source-test-' + id, taskKey: 'vccOpCalc:run:save', moduleId: 'vcc-op-calc',
++          parentRunId: 'vcc-source-parent-' + id, operationKey: 'vcc-source-operation-' + id
++        } }) };
++      } catch (error) { return { status: 'error', message: error.message }; }
++    },
++    listBalanceMonths: async () => session.listCalculatedMonths().map((month) => month.yearMonth),
++    getBalance: async ({ yearMonth }) => session.getMonthResult(yearMonth),
++    onScanProgress: () => () => {}
++  };
++  const api = Object.fromEntries(Object.entries(defaults).map(([name, fn]) => [name, (...args) => {
++    calls.push({ name, args });
++    return (controls[name] || fn)(...args);
++  }]));
++  function dialog(name, options) {
++    const view = dom.createDialog();
++    Object.assign(view, { name, options });
++    bridge.registerModal(view.overlay, { dialog: view.dialog, canClose: options.canClose });
++    views.push(view);
++    return view.overlay;
++  }
++  const panel = { querySelector(selector) {
++    assert.match(selector, /^#vccOpCalc/);
++    if (!nodes.has(selector)) {
++      const node = dom.document.createElement('button');
++      node.textContent = '';
++      nodes.set(selector, node);
++    }
++    return nodes.get(selector);
++  } };
++  const ui = {
++    modalHost: host, modalBridge: bridge,
++    status: (node, message, tone) => { node.textContent = message; node.tone = tone; },
++    alert: (message) => dialog('alert', { message }),
++    createVccOpCalcConfirmDialog: (options) => dialog('F1', options),
++    createVccOpCalcComputeDialog: (options) => dialog('F2', options),
++    createVccOpCalcShowBalanceDialog: (options) => dialog('F3', options)
++  };
++  const controller = createVccOpCalcController({ api, panel, ui });
++  t.after(() => { controller.dispose(); for (const release of releases) release(); db.close(); fs.rmSync(tmp, { recursive: true, force: true }); });
++  const h = {
++    controller, session, db, files, controls, defaults, calls, views, host, bridge, dom,
++    select: (name) => { selected = name; },
++    node: (suffix) => nodes.get('#vccOpCalc' + suffix),
++    status: () => nodes.get('#vccOpCalcStatusBox').textContent,
++    rows: () => db.prepare('SELECT year_month,begin_op,total_amount,end_op FROM vcc_op_calc_runs ORDER BY id').all().map((row) => ({ ...row })),
++    count: (name) => calls.filter((call) => call.name === name).length,
++    async import(name = selected) { selected = name; return controller.commands.import(); },
++    async confirm(view = views.at(-1)) {
++      assert.equal(view.name, 'F1');
++      bridge.closeModal(view.overlay, { status: 'submitted', value: true });
++      return view.options.onConfirm();
++    },
++    async ready(name = selected) { await h.import(name); await h.confirm(); },
++    async f2() { await controller.commands.run(); const view = views.at(-1); assert.equal(view.name, 'F2'); return view; },
++    hold(name, after = true) {
++      const started = deferred();
++      const response = deferred();
++      releases.push(response.resolve);
++      controls[name] = async (...args) => {
++        const result = after ? await defaults[name](...args) : null;
++        started.resolve();
++        await response.promise;
++        return after ? result : defaults[name](...args);
++      };
++      return { started: started.promise, release: response.resolve };
++    }
++  };
++  await controller.enter();
++  return h;
++}
++
++test('R01：后台重扫 B 后不得恢复 A 的 F2；重新确认 B 后显示、期初、Main、SQLite 一致', async (t) => {
++  const h = await harness(t);
++  await h.ready('A');
++  const delayed = h.hold('scan');
++  const importing = h.import('B');
++  await delayed.started;
++  assert.equal(h.controller.leave().status, 'left');
++  delayed.release();
++  await importing;
++  await h.controller.enter();
++  assert.equal(h.node('RunBtn').disabled, true);
++  assert.match(h.status(), /2026-08.*尚未确认/);
++  await h.controller.commands.run();
++  assert.equal(h.views.at(-1).name, 'alert');
++  assert.equal(h.count('save'), 0);
++  assert.deepEqual(h.rows(), []);
++  delete h.controls.scan;
++  await h.ready('B');
++  const f2 = await h.f2();
++  const mainCache = h.session.getComputeCache();
++  assert.equal(f2.options.yearMonth, mainCache.yearMonth);
++  assert.deepEqual(f2.options.totals, mainCache.totals);
++  const saved = await f2.options.onCompute('100.00');
++  assert.deepEqual(saved, { status: 'success', endOp: '1000.00' });
++  assert.deepEqual(h.rows(), [{ year_month: '2026-08', begin_op: '100.00', total_amount: '900.00', end_op: '1000.00' }]);
++  const fileRows = h.db.prepare('SELECT file_name,row_count,amount_out,amount_in,amount FROM vcc_op_calc_run_files').all().map((row) => ({ ...row }));
++  assert.deepEqual(fileRows, [{ file_name: 'B.xlsx', row_count: 1, amount_out: '0.00', amount_in: '900.00', amount: '900.00' }]);
++  const receipt = h.db.prepare('SELECT year_month,input_file_count,compute_snapshot_hash FROM vcc_op_operation_receipts').get();
++  assert.equal(receipt.year_month, '2026-08');
++  assert.equal(receipt.input_file_count, 1);
++  assert.equal(receipt.compute_snapshot_hash, hashVccOpComputeSnapshot(mainCache).computeSnapshotHash);
++  t.diagnostic(JSON.stringify({ displayed: { yearMonth: f2.options.yearMonth, totalAmount: f2.options.totals.totalAmount }, beginOp: '100.00', storedRows: h.rows(), fileRows, receipt }));
++});
++
++test('返回早于 scan 结束：仍禁用旧保存，晚到成功只结算未确认状态，不打开 F1', async (t) => {
++  const h = await harness(t);
++  await h.ready();
++  const delayed = h.hold('scan');
++  const importing = h.import('B');
++  await delayed.started;
++  h.controller.leave();
++  await h.controller.enter();
++  const views = h.views.length;
++  assert.equal(h.node('RunBtn').disabled, true);
++  assert.equal((await h.controller.commands.import()).status, 'blocked');
++  delayed.release(); await importing;
++  assert.equal(h.views.length, views);
++  assert.equal(h.node('RunBtn').disabled, true);
++  assert.equal(h.node('ImportBtn').disabled, false);
++  assert.match(h.status(), /2026-08.*尚未确认/);
++});
++
++test('重扫成功后必须确认新 F1；F1 取消不能复活旧 A 保存资格', async (t) => {
++  const h = await harness(t);
++  await h.ready(); await h.import('B');
++  assert.equal(h.node('RunBtn').disabled, true);
++  const f1 = h.views.at(-1);
++  assert.equal(f1.options.yearMonth, '2026-08');
++  h.bridge.closeModal(f1.overlay); f1.options.onCancel();
++  await h.controller.commands.run();
++  assert.equal(h.count('save'), 0);
++  assert.equal(h.count('computeAmounts'), 1);
++  assert.equal(h.node('RunBtn').disabled, true);
++  h.controller.leave(); await h.controller.enter();
++  assert.equal(h.node('RunBtn').disabled, true);
++});
++
++test('F1 通过导航关闭也收尾取消；旧确认回调不能开始统计', async (t) => {
++  const h = await harness(t);
++  await h.import();
++  const f1 = h.views.at(-1);
++  h.controller.leave(); await h.controller.enter();
++  const before = h.count('computeAmounts');
++  await f1.options.onConfirm();
++  assert.equal(h.count('computeAmounts'), before);
++  assert.equal(h.node('RunBtn').disabled, true);
++});
++
++test('文件选择取消未改变 Main 来源：旧已确认 A 仍可按原金额保存', async (t) => {
++  const h = await harness(t);
++  await h.ready();
++  h.controls.pickFiles = async () => ({ status: 'cancelled' });
++  await h.import();
++  assert.equal(h.count('scan'), 1);
++  assert.equal(h.node('RunBtn').disabled, false);
++  const f2 = await h.f2();
++  await f2.options.onCompute('000.0100');
++  assert.deepEqual(h.calls.find((call) => call.name === 'save').args, [{ beginOp: '000.0100' }]);
++  assert.deepEqual(h.rows(), [{ year_month: '2026-07', begin_op: '0.01', total_amount: '10.00', end_op: '10.01' }]);
++});
++
++for (const outcome of ['cancelled', 'error', 'rejected']) {
++  test(`已打开 F2 后重扫 ${outcome}：旧回调不保存，返回模块不恢复旧 ready`, async (t) => {
++    const h = await harness(t);
++    await h.ready(); const f2 = await h.f2();
++    if (outcome !== 'rejected') h.controls.scan = async () => {
++      h.session.clearCache();
++      return { status: outcome, message: '合成扫描失败' };
++    };
++    await h.import(outcome === 'rejected' ? 'D' : 'B');
++    await f2.options.onCompute('100.00');
++    assert.equal(h.count('save'), 0);
++    assert.equal(h.node('RunBtn').disabled, true);
++    assert.equal(h.session.getComputeCache(), null);
++    h.controller.leave(); await h.controller.enter();
++    assert.equal(h.node('RunBtn').disabled, true);
++    assert.match(h.status(), outcome === 'cancelled' ? /已取消导入/ : outcome === 'error' ? /合成扫描失败/ : /导入被拒绝/);
++  });
++}
++
++test('同文件同金额重扫并确认也属于新来源，已关闭旧 F2 不得借新来源提交', async (t) => {
++  const h = await harness(t);
++  await h.ready(); const old = await h.f2();
++  await h.ready('A');
++  await old.options.onCompute('100.00');
++  assert.equal(h.count('save'), 0);
++  const fresh = await h.f2();
++  await fresh.options.onCompute('5.00');
++  assert.deepEqual(h.rows(), [{ year_month: '2026-07', begin_op: '5.00', total_amount: '10.00', end_op: '15.00' }]);
++});
++
++for (const stage of ['enter', 'F2', 'save']) {
++  test(`Main 同账期同金额但不同文件来源，在 ${stage} 核对时拒绝旧确认`, async (t) => {
++    const h = await harness(t);
++    await h.ready();
++    const f2 = stage === 'save' ? await h.f2() : null;
++    await h.session.streamScanAndCompute([h.files.C]);
++    if (stage === 'enter') { h.controller.leave(); await h.controller.enter(); }
++    else if (stage === 'F2') await h.controller.commands.run();
++    else await f2.options.onCompute('100.00');
++    assert.equal(h.count('save'), 0);
++    assert.equal(h.node('RunBtn').disabled, true);
++    assert.match(h.status(), /统计来源已变化/);
++    assert.deepEqual(h.rows(), []);
++  });
++}
++
++for (const returnEarly of [false, true]) {
++  test(`F1 已确认的统计在离页后完成，${returnEarly ? '提前返回后重新核对' : '再次进入核对'}正确来源`, async (t) => {
++    const h = await harness(t);
++    await h.import('B');
++    const delayed = h.hold('computeAmounts');
++    const computing = h.confirm();
++    await delayed.started;
++    h.controller.leave();
++    if (returnEarly) await h.controller.enter();
++    delayed.release(); await computing;
++    delete h.controls.computeAmounts;
++    if (!returnEarly) await h.controller.enter();
++    assert.equal(h.node('RunBtn').disabled, false);
++    assert.match(h.status(), /2026-08/);
++    const f2 = await h.f2();
++    assert.equal(f2.options.yearMonth, '2026-08');
++    await f2.options.onCompute('100.00');
++    assert.equal(h.rows()[0].end_op, '1000.00');
++  });
++}
++
++test('统计失败在离页后保留真实失败反馈；重入禁用保存并可重新导入', async (t) => {
++  const h = await harness(t);
++  await h.import('B');
++  const pending = deferred();
++  h.controls.computeAmounts = () => pending.promise;
++  const computing = h.confirm();
++  h.controller.leave();
++  pending.resolve({ status: 'error', message: '合成统计读取失败' });
++  await computing; await h.controller.enter();
++  assert.equal(h.node('RunBtn').disabled, true);
++  assert.match(h.status(), /合成统计读取失败/);
++  delete h.controls.computeAmounts;
++  await h.ready('B');
++  assert.equal(h.node('RunBtn').disabled, false);
++});
++
++test('保存前来源核对等待时销毁 F2，不发送尚未提交的 save', async (t) => {
++  const h = await harness(t);
++  await h.ready(); const f2 = await h.f2();
++  const delayed = h.hold('computeAmounts');
++  const saving = f2.options.onCompute('100.00');
++  await delayed.started;
++  h.host.getHandle(f2.overlay).dispose();
++  h.controller.leave();
++  delayed.release(); await saving;
++  assert.equal(h.count('save'), 0);
++  assert.deepEqual(h.rows(), []);
++});
++
++for (const leaveMode of ['leave', 'dispose']) {
++  test(`已经提交的 save 在 ${leaveMode} 后仍返回真实成功；不重复写或恢复旧 ready`, async (t) => {
++    const h = await harness(t);
++    await h.ready('B'); const f2 = await h.f2();
++    const delayed = h.hold('save');
++    const saving = f2.options.onCompute('100.00');
++    await delayed.started;
++    assert.equal((await h.controller.commands.import()).status, 'blocked');
++    assert.equal((await f2.options.onCompute('200.00')).status, 'blocked');
++    assert.equal(h.controller.leave().status, 'blocked');
++    assert.equal(h.host.openRoot(() => h.dom.createDialog(), { owner: 'other' }).status, 'blocked');
++    if (leaveMode === 'dispose') h.controller.dispose();
++    else {
++      h.host.getHandle(f2.overlay).dispose();
++      assert.equal(h.controller.leave().status, 'left');
++      await h.controller.enter();
++    }
++    const hiddenFeedback = h.status();
++    delayed.release();
++    assert.deepEqual(await saving, { status: 'success', endOp: '1000.00' });
++    assert.equal(h.count('save'), 1);
++    assert.equal(h.rows().length, 1);
++    if (leaveMode === 'dispose') assert.equal(h.status(), hiddenFeedback);
++    else {
++      assert.equal(h.node('RunBtn').disabled, true);
++      assert.equal(h.node('ShowBalanceBtn').disabled, false);
++      assert.match(h.status(), /2026-08.*已保存/);
++    }
++  });
++}
++
++test('后端期初校验失败允许原来源重试，不在 Renderer 做金额运算或伪造成功', async (t) => {
++  const h = await harness(t);
++  await h.ready(); const f2 = await h.f2();
++  const rejected = await f2.options.onCompute('not-money');
++  assert.equal(rejected.status, 'error');
++  assert.match(rejected.message, /期初OP 无效/);
++  assert.deepEqual(h.rows(), []);
++  assert.equal(h.node('RunBtn').disabled, false);
++  const saved = await f2.options.onCompute('-10.01');
++  assert.deepEqual(saved, { status: 'success', endOp: '-0.01' });
++  assert.deepEqual(h.rows(), [{ year_month: '2026-07', begin_op: '-10.01', total_amount: '10.00', end_op: '-0.01' }]);
++});
++
++test('F1 确认前 Main 换成同月同金额的 C，不能把 C 当作所选 A 确认', async (t) => {
++  const h = await harness(t);
++  await h.import('A');
++  await h.session.streamScanAndCompute([h.files.C]);
++  await h.confirm();
++  assert.equal(h.node('RunBtn').disabled, true);
++  assert.match(h.status(), /统计失败.*来源已变化/);
++  assert.equal(h.count('save'), 0);
++});
++
++test('已确认来源在 enter 核对期间再次 A/B/A，旧核对结束后当前访问恢复按钮', async (t) => {
++  const h = await harness(t);
++  await h.ready(); h.controller.leave();
++  const delayed = h.hold('computeAmounts');
++  const oldEntry = h.controller.enter();
++  await delayed.started;
++  h.controller.leave(); await h.controller.enter();
++  assert.equal(h.node('RunBtn').disabled, true);
++  delayed.release();
++  assert.equal((await oldEntry).status, 'stale');
++  assert.equal(h.node('RunBtn').disabled, false);
++  assert.equal(h.node('ImportBtn').disabled, false);
++  assert.match(h.status(), /2026-07/);
++});
++
++test('后台整批拒绝保留错误行与总数，重入显示失败而非原有就绪', async (t) => {
++  const h = await harness(t);
++  await h.ready();
++  const delayed = h.hold('scan');
++  const importing = h.import('D');
++  await delayed.started; h.controller.leave();
++  delayed.release(); await importing;
++  await h.controller.enter();
++  assert.equal(h.node('RunBtn').disabled, true);
++  assert.equal(h.views.at(-1).name, 'alert');
++  assert.match(h.views.at(-1).options.message, /共 1 处异常/);
++  assert.match(h.views.at(-1).options.message, /D.xlsx.*第 2 行/);
++  assert.equal(h.count('save'), 0);
++});
++
++for (const outcome of ['error', 'cancelled']) {
++  test(`保存 ${outcome} 在离页后保留最终结算，不保留虚假运行中或自动重试写`, async (t) => {
++    const h = await harness(t);
++    await h.ready(); const f2 = await h.f2();
++    const submitted = deferred();
++    const response = deferred();
++    h.controls.save = async () => { submitted.resolve(); return response.promise; };
++    const saving = f2.options.onCompute('100.00');
++    await submitted.promise;
++    h.host.getHandle(f2.overlay).dispose(); h.controller.leave();
++    response.resolve({ status: outcome, message: outcome === 'error' ? '合成保存失败' : '已取消保存' });
++    const result = await saving;
++    assert.equal(result.status, outcome);
++    await h.controller.enter();
++    assert.match(h.status(), outcome === 'error' ? /合成保存失败/ : /已取消保存/);
++    assert.equal(h.count('save'), 1);
++    assert.deepEqual(h.rows(), []);
++    assert.equal(h.node('RunBtn').disabled, false);
++  });
++}
++
++test('统计取消在离页后保留取消反馈；新的多文件同月导入仍保持逐文件血缘', async (t) => {
++  const h = await harness(t);
++  await h.import();
++  const response = deferred();
++  h.controls.computeAmounts = () => response.promise;
++  const computing = h.confirm();
++  h.controller.leave();
++  response.resolve({ status: 'cancelled' }); await computing;
++  await h.controller.enter();
++  assert.equal(h.node('RunBtn').disabled, true);
++  assert.match(h.status(), /已取消统计/);
++  delete h.controls.computeAmounts;
++  h.controls.pickFiles = async () => ({ status: 'success', filePaths: [h.files.C, h.files.A] });
++  await h.import();
++  assert.equal(h.views.at(-1).options.fileCount, 2);
++  await h.confirm();
++  const f2 = await h.f2();
++  assert.equal(f2.options.totals.totalAmount, '20.00');
++  await f2.options.onCompute('-0.01');
++  const files = h.db.prepare('SELECT file_name FROM vcc_op_calc_run_files ORDER BY id').all().map((row) => row.file_name);
++  assert.deepEqual(files, ['C.xlsx', 'A.xlsx']);
++  assert.deepEqual(h.rows(), [{ year_month: '2026-07', begin_op: '-0.01', total_amount: '20.00', end_op: '19.99' }]);
++});

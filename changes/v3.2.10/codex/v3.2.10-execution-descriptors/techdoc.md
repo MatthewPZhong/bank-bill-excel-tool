@@ -29,7 +29,7 @@ G8 的最终公共机制检查覆盖 `background-execution/runtime.js`、`backgr
 
 ## 2. 内部 descriptor 合同
 
-上述最终公共机制边界对应 G8 的 `ARCH-DESCRIPTOR-COMPOSITION`，正式规则及正反例见 [G8 TechDoc](../v3.2.10-architecture-guardrails/techdoc.md#governance-rules)；本项 G7-T5 负责更新实际消费者、删除精确兼容例外并激活。
+上述最终公共机制边界对应 G8 的 `ARCH-DESCRIPTOR-COMPOSITION`，正式规则及正反例见 [G8 TechDoc](/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-architecture-guardrails/techdoc.md#governance-rules)；本项 G7-T5 负责更新实际消费者、删除精确兼容例外并激活。
 
 ```js
 createModuleExecutionDescriptor(mainContext) => ({

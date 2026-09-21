@@ -1,0 +1,10 @@
+{
+  "files": 77,
+  "bytes": 17190175,
+  "documents": [
+    "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/implementation-notes.md",
+    "changes/v3.2.10/codex/v3.2.10-execution-descriptors/techdoc.md"
+  ],
+  "relocatedLinks": 77,
+  "g8DesignLink": "main worktree design; no G8 implementation included"
+}

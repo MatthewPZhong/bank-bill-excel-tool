@@ -105,7 +105,7 @@
 | --- | --- |
 | 01 / 02 / 03 / 06 | [modal-host](../../../../tests/unit/renderer/modal-host.test.js)：事务关闭、异常清理、busy、焦点/Tab/Escape/遮罩；[vcc-position](../../../../scripts/renderer-lifecycle/fixtures/vcc-position.js)验证实际VCC月份Promise经公共替换恰好取消一次 |
 | 04 / 05 | [shared-dialogs](../../../../scripts/renderer-lifecycle/fixtures/shared-dialogs.js)、[configuration-dialogs](../../../../scripts/renderer-lifecycle/fixtures/configuration-dialogs.js)：实际父子层、合法空表、失败禁保存、旧读取 |
-| 07 | [application-shell](../../../../scripts/renderer-lifecycle/fixtures/application-shell.js)、[vcc-position](../../../../scripts/renderer-lifecycle/fixtures/vcc-position.js)：实际脚本加载、公共/独立工厂同host；[生产挂载入口清单](../../../../tmp/g3-delivery/logs/modal-root-inventory.log)定位全部modalRoot引用、唯一宿主append/remove |
+| 07 | [application-shell](../../../../scripts/renderer-lifecycle/fixtures/application-shell.js)、[vcc-position](../../../../scripts/renderer-lifecycle/fixtures/vcc-position.js)：实际脚本加载、公共/独立工厂同host；[生产挂载入口清单](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-delivery/logs/modal-root-inventory.log)定位全部modalRoot引用、唯一宿主append/remove |
 | 08 / 09 | [module-router](../../../../tests/unit/renderer/module-router.test.js)、[r4-domain](../../../../tests/unit/renderer/r4-domain-controllers.test.js)、[r4-controllers](../../../../tests/unit/renderer/r4-controllers.test.js)及各域Electron fixture：重复导航、晚到、dispose |
 | 10 | [scenario-command-service](../../../../tests/unit/renderer/scenario-command-service.test.js)、[scenario-change-routing](../../../../tests/unit/renderer/scenario-change-routing.test.js)：命令矩阵/失败/关闭 |
 | 11 | [共享会话及真实Main接缝](../../../../tests/unit/renderer/scenario-change-routing.test.js)：同session来源身份、共享网关结果、实际Preload转换；原Recon Service golden继续保留 |
@@ -120,7 +120,7 @@
 
 ## 首轮实施验证与剩余事项（审查前快照）
 
-测试时94个变更代码/测试/脚本文件的哈希保存在 [验证快照](../../../../tmp/g3-delivery/verified-code-sha256.json)。结束前核对一致；之后只在三份文件校正旧挂载注释或删除空行缩进，Acorn AST 比较完全一致，见 [无语义变更证明](../../../../tmp/g3-delivery/comment-whitespace-proof.json)，涉及文件再次lint通过。最终交付哈希另存 [delivery-manifest.json](../../../../tmp/g3-delivery/delivery-manifest.json)。文档本地链接检查没有缺失。
+测试时94个变更代码/测试/脚本文件的哈希保存在 [验证快照](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-delivery/verified-code-sha256.json)。结束前核对一致；之后只在三份文件校正旧挂载注释或删除空行缩进，Acorn AST 比较完全一致，见 [无语义变更证明](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-delivery/comment-whitespace-proof.json)，涉及文件再次lint通过。最终交付哈希另存 [delivery-manifest.json](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-delivery/delivery-manifest.json)。文档本地链接检查没有缺失。
 
 完整 `release-check` 重跑在执行前被环境自动审批拒绝，理由是此前历史Git clone测试已有ENOSPC证据、共享磁盘仅约11GiB可用；不能通过改名或间接执行绕过。获准的安全替代为：显式排除“1024 个真实 Task 来源”及“R3.2.4 历史 exact evidence”的其余单测（文件并发2），另行执行lint、smoke和按原清单发现的完整integration-runner。两项排除仅适用于单测。这些分项结果不等于完整release-check通过。
 
@@ -128,13 +128,13 @@
 
 | 验证 | 最终结果 | 证据 |
 | --- | --- | --- |
-| `npm run lint` | PASS；注释整理后涉及三文件追加lint同样PASS | [完整lint](../../../../tmp/g3-delivery/logs/g3-lint-final.log)、[注释整理lint](../../../../tmp/g3-delivery/logs/comment-cleanup-lint.log) |
-| `npm run smoke` | PASS，保留原业务断言并按迁移后函数位置取证 | [smoke日志](../../../../tmp/g3-delivery/logs/g3-smoke-final.log) |
-| 全单测文件，显式排除两项、并发2 | 8,248 tests：8,244 PASS / 0 FAIL / 4 SKIPPED；358.05秒。两项名称过滤的测试未执行，不计作通过 | [最终unit日志](../../../../tmp/g3-delivery/logs/g3-unit-filtered-final.log) |
-| `npm run test:integration` | 61个脚本全部PASS；可解析计数合计2,710/2,710，另有1个脚本退出成功但未输出计数；Renderer生命周期131/131；脚本耗时合计579.882秒 | [完整集成日志](../../../../tmp/g3-delivery/logs/g3-integration-final.log)；runner自动同步[集成规则§七](../../../../rules/integration-test-policy.md#七当前集成测试清单自动同步) |
-| AC19/20及全部场景写入口 | service44、实际Main/SQLite/controller31、写入口审计3均通过；已包括在最终unit中 | [专项92项日志（另含原ReconService14）](../../../../tmp/g3-delivery/logs/g3-ac-audit.log)、[最终unit日志](../../../../tmp/g3-delivery/logs/g3-unit-filtered-final.log) |
-| 生产弹窗写入口扫描 | 当前modalRoot引用为根装配/只读观察/预览；唯一root挂载/overlay移除在modal-host | [扫描结果](../../../../tmp/g3-delivery/logs/modal-root-inventory.log)；命令为 `rg -n 'modalRoot|overlay\.remove\(|modal-root' src --glob '*.js'`，补查host的root.appendChild/record.overlay.remove |
-| 完整 `npm run release-check` | 未完成：最初smoke失败已修；重跑在执行前被自动审批拒绝，未开始 | [首次真实执行日志](../../../../tmp/g3-delivery/logs/g3-release-check-smoke-before.log)；拒绝原因见上文，不能以分项结果改写为PASS |
+| `npm run lint` | PASS；注释整理后涉及三文件追加lint同样PASS | [完整lint](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-delivery/logs/g3-lint-final.log)、[注释整理lint](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-delivery/logs/comment-cleanup-lint.log) |
+| `npm run smoke` | PASS，保留原业务断言并按迁移后函数位置取证 | [smoke日志](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-delivery/logs/g3-smoke-final.log) |
+| 全单测文件，显式排除两项、并发2 | 8,248 tests：8,244 PASS / 0 FAIL / 4 SKIPPED；358.05秒。两项名称过滤的测试未执行，不计作通过 | [最终unit日志](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-delivery/logs/g3-unit-filtered-final.log) |
+| `npm run test:integration` | 61个脚本全部PASS；可解析计数合计2,710/2,710，另有1个脚本退出成功但未输出计数；Renderer生命周期131/131；脚本耗时合计579.882秒 | [完整集成日志](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-delivery/logs/g3-integration-final.log)；runner自动同步[集成规则§七](../../../../rules/integration-test-policy.md#七当前集成测试清单自动同步) |
+| AC19/20及全部场景写入口 | service44、实际Main/SQLite/controller31、写入口审计3均通过；已包括在最终unit中 | [专项92项日志（另含原ReconService14）](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-delivery/logs/g3-ac-audit.log)、[最终unit日志](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-delivery/logs/g3-unit-filtered-final.log) |
+| 生产弹窗写入口扫描 | 当前modalRoot引用为根装配/只读观察/预览；唯一root挂载/overlay移除在modal-host | [扫描结果](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-delivery/logs/modal-root-inventory.log)；命令为 `rg -n 'modalRoot|overlay\.remove\(|modal-root' src --glob '*.js'`，补查host的root.appendChild/record.overlay.remove |
+| 完整 `npm run release-check` | 未完成：最初smoke失败已修；重跑在执行前被自动审批拒绝，未开始 | [首次真实执行日志](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-delivery/logs/g3-release-check-smoke-before.log)；拒绝原因见上文，不能以分项结果改写为PASS |
 | 产品Main启动／正式GUI | 本次隔离产品预览在Renderer加载前失败，`BIZOP_ACTIVATION_STARTUP_REQUIRED`；未取得产品Main端到端证据 | 受控API的131项Electron工厂测试不替代此项 |
 | Windows／Excel／WPS／安装包 | 未执行 | 本轮在macOS做源码、Node和隔离Electron验证 |
 
@@ -148,13 +148,13 @@ node --test --test-concurrency=2 --test-skip-pattern='1024 个真实 Task 来源
 
 回退按完整功能切片撤回源模块与根装配、script顺序和相应测试/规则入口；不涉及数据迁移或线上数据回滚。跨G1/G2/G5/G8等集成按后续用户指令执行，不从其他功能worktree自行合并。
 
-首轮交付产物（审查前快照）：[完整未提交补丁（含新增文件及本项文档）](../../../../tmp/g3-delivery/renderer-boundaries.patch)、[差异统计](../../../../tmp/g3-delivery/diff-stat.txt)、[验证清单与文件哈希](../../../../tmp/g3-delivery/delivery-manifest.json)。补丁仅表达本分支相对上述HEAD的本地差异，不产生提交或集成动作。
+首轮交付产物（审查前快照）：[完整未提交补丁（含新增文件及本项文档）](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-delivery/renderer-boundaries.patch)、[差异统计](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-delivery/diff-stat.txt)、[验证清单与文件哈希](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-delivery/delivery-manifest.json)。补丁仅表达本分支相对上述HEAD的本地差异，不产生提交或集成动作。
 
 <a id="review-remediation"></a>
 
 ## 审查整改记录（R01–R06）
 
-依据：[2026-09-20 实现审查](review-2026-09-20.md)。保留原报告、脚本和日志，不把修前反例改写为通过。整改仍在同一功能worktree，HEAD仍为11086a3c；修前110个现有变更／审查文件的哈希与本轮源文件备份位于 [修复前清单](../../../../tmp/g3-review-fixes/before-manifest.json)。原资金算法、Main接口及真实业务数据不属于本次修改范围。
+依据：[2026-09-20 实现审查](review-2026-09-20.md)。保留原报告、脚本和日志，不把修前反例改写为通过。整改仍在同一功能worktree，HEAD仍为11086a3c；修前110个现有变更／审查文件的哈希与本轮源文件备份位于 [修复前清单](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/before-manifest.json)。原资金算法、Main接口及真实业务数据不属于本次修改范围。
 
 | 审查项／所属切片 | 实现 | 验证 | release集成 |
 | --- | --- | --- | --- |
@@ -167,39 +167,39 @@ node --test --test-concurrency=2 --test-skip-pattern='1024 个真实 Task 来源
 
 ### 整改职责、调用闭合与前后行为
 
-**R01／R4 VCC OP（AC-09/13）。** scan之前先清旧保存资格，来源对象与操作锁跨导航保留；F1确认、计算及F2期初只属于该来源。旧扫描未确认就离页时只保存事实和继续说明，不能复活旧F2。已确认compute和已提交save保留真实结算。重入、打开F2及提交前经既有computeAmounts核对月份、totals、perFile；提交仍只有beginOp，不从Renderer传回旧金额覆盖Main。调用方仍为本域controller及原F1/F2工厂；工厂新增可选canClose，将域资格与本地computing合并为一次登记，避免覆盖busy条件。金额算法、schema及公开IPC无需更新；该既有核对IPC产生Task/活动日志，已在[TechDoc §5.1](techdoc.md#vcc-source-settlement)记录。当前规则入口更新为Renderer README的VCC来源段。证据与资损风险分级见[来源验证说明](../../../../tmp/g3-review-fixes/vcc/README.md)。
+**R01／R4 VCC OP（AC-09/13）。** scan之前先清旧保存资格，来源对象与操作锁跨导航保留；F1确认、计算及F2期初只属于该来源。旧扫描未确认就离页时只保存事实和继续说明，不能复活旧F2。已确认compute和已提交save保留真实结算。重入、打开F2及提交前经既有computeAmounts核对月份、totals、perFile；提交仍只有beginOp，不从Renderer传回旧金额覆盖Main。调用方仍为本域controller及原F1/F2工厂；工厂新增可选canClose，将域资格与本地computing合并为一次登记，避免覆盖busy条件。金额算法、schema及公开IPC无需更新；该既有核对IPC产生Task/活动日志，已在[TechDoc §5.1](techdoc.md#vcc-source-settlement)记录。当前规则入口更新为Renderer README的VCC来源段。证据与资损风险分级见[来源验证说明](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/vcc/README.md)。
 
 **R02／R1 正式存档入口（AC-13/17）。** 默认依赖从外层窄API读取，使用archiveApi局部变量，消除TDZ；显式override只作兼容路径。工厂专项验证无override的列表、统计、保留期及父子删除；实际index/Preload/设置按钮再覆盖正式调用链。只改API取值，不改变删除token、存储目录或删除资格，因此专项业务规则正文无需更新；入口与资源协议仍在Renderer README。
 
-**R03、R05／R3 场景资格及反馈（AC-13/15）。** 两controller独占busy与失效待重绘状态。ReconID每次按busy、当前类别及合法场景完整计算disabled；确定失效在隐藏时保留resultFeedbackInvalidated，成功重读Main后消费，失败读取不能吞标记。修后下拉在成功/失败/取消/reject结算恢复合法资格，返回已失效域清除旧导出成功反馈。原command service、scope矩阵、resync、未命中域、仅关闭与明确写失败的兼容语义保持；没有新增调用方或公开API。当前Renderer README已更新，完整35项矩阵及五项事实见[场景修复说明](../../../../tmp/g3-review-fixes/scenarios/results.md)。
+**R03、R05／R3 场景资格及反馈（AC-13/15）。** 两controller独占busy与失效待重绘状态。ReconID每次按busy、当前类别及合法场景完整计算disabled；确定失效在隐藏时保留resultFeedbackInvalidated，成功重读Main后消费，失败读取不能吞标记。修后下拉在成功/失败/取消/reject结算恢复合法资格，返回已失效域清除旧导出成功反馈。原command service、scope矩阵、resync、未命中域、仅关闭与明确写失败的兼容语义保持；没有新增调用方或公开API。当前Renderer README已更新，完整35项矩阵及五项事实见[场景修复说明](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/scenarios/results.md)。
 
 **R04／R4 BizOP（AC-09/13）。** controller的feedback保存已提交任务的真实终态，页面代次仅控制DOM/弹窗续接；enter恢复busy、可用状态和已结算反馈。相邻调用方复查发现旧picker和retryRecovery也返回null，现以独立abandonedSelection废弃尚未提交的文件/保存位置选择并恢复此前反馈，已提交恢复检查则先归一真实ready。没有新增IPC、重试业务写或取消已提交后台任务；perform全部消费者保持原结果/后续界面资格。原Electron断言“返回后不显示旧任务错误”与本次已确认合同冲突，已改为显示真实错误且无旧窗复活、一次调用；修前失败记录保留。当前规则入口已更新为Renderer README的后台反馈段。
 
-**R06／R1、R5 写入弹窗（AC-03/14）。** 功能收纳和拆分份数将同步提交锁与host的canClose连接，父子和根替换遵守同一资格；保存完成只操作原handle。收纳onCommit仍负责保存及Main启用列表接纳，新增可选onCommitted在原handle正常提交关闭后导航/重绘；取消、失败、force dispose不调用。实际root装配保留“停用当前模块→切Main返回列表首项”。拆分减少份数的确认及增加份数的直接写均仅一次提交，保持原templateId/nextN、失败重试和取消行为。此前旧入口遗漏和本轮F2迟到DOM补修均记录为有意修复，不声称原行为完全不变。当前规则入口为Renderer README弹窗权限段；[工厂说明及证据](../../../../tmp/g3-review-fixes/modals/README.md)保存完整调用兼容与测试。
+**R06／R1、R5 写入弹窗（AC-03/14）。** 功能收纳和拆分份数将同步提交锁与host的canClose连接，父子和根替换遵守同一资格；保存完成只操作原handle。收纳onCommit仍负责保存及Main启用列表接纳，新增可选onCommitted在原handle正常提交关闭后导航/重绘；取消、失败、force dispose不调用。实际root装配保留“停用当前模块→切Main返回列表首项”。拆分减少份数的确认及增加份数的直接写均仅一次提交，保持原templateId/nextN、失败重试和取消行为。此前旧入口遗漏和本轮F2迟到DOM补修均记录为有意修复，不声称原行为完全不变。当前规则入口为Renderer README弹窗权限段；[工厂说明及证据](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/modals/README.md)保存完整调用兼容与测试。
 
 G8仍未集成，配置/激活和例外无变化。当前人读入口由AGENTS→Renderer README导航；新增技术细节同步TechDoc §5.1，Spec及原审查报告保持原样。首轮完整门禁与平台限制不会被局部整改通过覆盖。
 
 ### 本轮最终验证
 
-最终96个代码／脚本／测试文件以[冻结哈希](../../../../tmp/g3-review-fixes/frozen-code.json)执行验证，完成后逐一核对无漂移。各组修前反例保留；所有命令工作目录均为本功能worktree。
+最终96个代码／脚本／测试文件以[冻结哈希](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/frozen-code.json)执行验证，完成后逐一核对无漂移。各组修前反例保留；所有命令工作目录均为本功能worktree。
 
 | 本轮执行 | 结果 | 证据与范围 |
 | --- | --- | --- |
-| 42个受影响单测文件，`node --test --test-concurrency=2` | **623/623 PASS，0 fail、0 skipped** | [最终日志](../../../../tmp/g3-review-fixes/final-unit.log)、[完整命令与退出码](../../../../tmp/g3-review-fixes/final-unit-command.json)；包括已迁移原测试、Renderer边界、R9及本次新增回归，不是全仓unit |
-| `node scripts/test-renderer-lifecycle.js` | **154/154 PASS** | [全部工厂日志](../../../../tmp/g3-review-fixes/final-electron.log)；实际index/Preload/控制器/F1/F2、默认存档、收纳正常导航，API受控 |
-| `npm run lint` | **PASS** | [日志](../../../../tmp/g3-review-fixes/final-lint.log) |
-| `npm run smoke` | **PASS** | [日志](../../../../tmp/g3-review-fixes/final-smoke.log) |
-| R01真实parser/session/SQLite | 新25项＋原域33项＝**58/58**，含在最终unit | [资金来源日志](../../../../tmp/g3-review-fixes/vcc/after-focused.log)：B未确认不能保存；重新确认后08账期、900发生额、100期初、1000期末，B逐文件明细及receipt hash一致 |
-| R03/R05原审查反例 | 修前0/3，修后**3/3 PASS**；新矩阵35项 | [原探针修后日志](../../../../tmp/g3-review-fixes/scenarios/after-probes.log)、[矩阵说明](../../../../tmp/g3-review-fixes/scenarios/results.md) |
-| R04原审查探针 | 修前停留“等待后台”；修后保留真实失败，一次导入、busy=false | [修前](../../../../tmp/g3-review-fixes/bizop/before-review-probe.log)、[修后](../../../../tmp/g3-review-fixes/bizop/after-review-probe.log)；13个新增背景／选择／恢复用例与旧业务／恢复组合29/29，含在最终unit |
-| R02/R06及F2正式工厂 | 原默认/busy反例修前成立；整改后父子、双击、失败、force dispose均通过 | [弹窗前后证据](../../../../tmp/g3-review-fixes/modals/README.md)；F2新增8项，修前6项失败、修后17/17（含原9项），均纳入154项 |
-| 哈希、差异、链接与保护检查 | **PASS** | [交付清单](../../../../tmp/g3-review-fixes/final-manifest.json)、[差异检查](../../../../tmp/g3-review-fixes/final-checks.log)；原审查/证据与Spec无改动，Main/backend/package/lock无新增变更 |
+| 42个受影响单测文件，`node --test --test-concurrency=2` | **623/623 PASS，0 fail、0 skipped** | [最终日志](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/final-unit.log)、[完整命令与退出码](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/final-unit-command.json)；包括已迁移原测试、Renderer边界、R9及本次新增回归，不是全仓unit |
+| `node scripts/test-renderer-lifecycle.js` | **154/154 PASS** | [全部工厂日志](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/final-electron.log)；实际index/Preload/控制器/F1/F2、默认存档、收纳正常导航，API受控 |
+| `npm run lint` | **PASS** | [日志](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/final-lint.log) |
+| `npm run smoke` | **PASS** | [日志](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/final-smoke.log) |
+| R01真实parser/session/SQLite | 新25项＋原域33项＝**58/58**，含在最终unit | [资金来源日志](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/vcc/after-focused.log)：B未确认不能保存；重新确认后08账期、900发生额、100期初、1000期末，B逐文件明细及receipt hash一致 |
+| R03/R05原审查反例 | 修前0/3，修后**3/3 PASS**；新矩阵35项 | [原探针修后日志](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/scenarios/after-probes.log)、[矩阵说明](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/scenarios/results.md) |
+| R04原审查探针 | 修前停留“等待后台”；修后保留真实失败，一次导入、busy=false | [修前](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/bizop/before-review-probe.log)、[修后](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/bizop/after-review-probe.log)；13个新增背景／选择／恢复用例与旧业务／恢复组合29/29，含在最终unit |
+| R02/R06及F2正式工厂 | 原默认/busy反例修前成立；整改后父子、双击、失败、force dispose均通过 | [弹窗前后证据](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/modals/README.md)；F2新增8项，修前6项失败、修后17/17（含原9项），均纳入154项 |
+| 哈希、差异、链接与保护检查 | **PASS** | [交付清单](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/final-manifest.json)、[差异检查](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/final-checks.log)；原审查/证据与Spec无改动，Main/backend/package/lock无新增变更 |
 
 实际根F1/F2和SQLite验证是两层独立证据：前者用受控API验证正式DOM/参数/导航，后者运行真实解析、会话、存储及receipt但使用记录型弹窗。没有把两者合称完整产品Main端到端。
 
 本轮只执行与Renderer修复影响相称的组合验证，没有重复全仓unit或完整integration-runner；此前623项以外的测试、历史61脚本通过属于首轮快照。未运行的完整门禁和平台项继续保留。
 
-交付：[相对审查快照的整改补丁](../../../../tmp/g3-review-fixes/review-fixes.patch)、[整改差异统计](../../../../tmp/g3-review-fixes/review-fixes-stat.txt)、[当前完整功能补丁](../../../../tmp/g3-review-fixes/renderer-boundaries-current.patch)、[当前文件与日志哈希清单](../../../../tmp/g3-review-fixes/final-manifest.json)。全部为未提交差异；本次回退可按整改补丁精确撤回到审查前状态，不触及真实数据。
+交付：[相对审查快照的整改补丁](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/review-fixes.patch)、[整改差异统计](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/review-fixes-stat.txt)、[当前完整功能补丁](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/renderer-boundaries-current.patch)、[当前文件与日志哈希清单](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-fixes/final-manifest.json)。全部为未提交差异；本次回退可按整改补丁精确撤回到审查前状态，不触及真实数据。
 
 ### 资金人工复核与剩余门禁
 
@@ -211,7 +211,7 @@ G8仍未集成，配置/激活和例外无变化。当前人读入口由AGENTS�
 
 ## 第二轮复审整改（RR01 / RR02）
 
-依据：[第二轮复审](review-2026-09-20-r2.md)。继续复用原功能worktree及11086a3c未提交基线；修前逐一确认上轮112个交付文件未漂移，并保存本轮123个变更／审查文件的[修前哈希与备份清单](../../../../tmp/g3-review-r2-fixes/before-manifest.json)。两轮审查报告及其证据保持原样。上轮R01–R05及收纳／份数原反例的闭合结论保留，不把两项旧余项归为已确认的新回归。
+依据：[第二轮复审](review-2026-09-20-r2.md)。继续复用原功能worktree及11086a3c未提交基线；修前逐一确认上轮112个交付文件未漂移，并保存本轮123个变更／审查文件的[修前哈希与备份清单](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/before-manifest.json)。两轮审查报告及其证据保持原样。上轮R01–R05及收纳／份数原反例的闭合结论保留，不把两项旧余项归为已确认的新回归。
 
 | 余项／父切片 | 实现状态 | 验证状态 | 集成状态 |
 | --- | --- | --- | --- |
@@ -222,11 +222,11 @@ G8仍未集成，配置/激活和例外无变化。当前人读入口由AGENTS�
 
 ### 职责、兼容与业务行为
 
-**RR01／R06、R1、R5（AC-03／14）。** [configuration.js](../../../../src/renderer/dialogs/configuration.js)中的createBillSplitRowsDialog以父会话runWrite持有统一活动写资格；覆盖行完成／编辑、删行确认／直删、增减份数、合并组保存／清空、金额目标元数据、signed／byField互斥链及规则子层保存。原独立rowCountSaving仅覆盖份数，现被同会话统一资格替代；7种写API／10类入口的实际调用清单见[独立写入口审查](../../../../tmp/g3-review-r2-fixes/deletion/write-entry-audit.md)。扫描证明调用归属，真实工厂回归证明相应行为，二者不相互替代。
+**RR01／R06、R1、R5（AC-03／14）。** [configuration.js](../../../../src/renderer/dialogs/configuration.js)中的createBillSplitRowsDialog以父会话runWrite持有统一活动写资格；覆盖行完成／编辑、删行确认／直删、增减份数、合并组保存／清空、金额目标元数据、signed／byField互斥链及规则子层保存。原独立rowCountSaving仅覆盖份数，现被同会话统一资格替代；7种写API／10类入口的实际调用清单见[独立写入口审查](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/deletion/write-entry-audit.md)。扫描证明调用归属，真实工厂回归证明相应行为，二者不相互替代。
 
 删除预检保存请求代次、原行节点和原行对象资格，关闭、替换、销毁、其他写开始或行重绘后不能继续新删除；最新有效无组预检仍直接删除，有组预检保留组解散确认。预检失败或reject不再按空组合直删，这是落实错误与取消区分的有意修复。写入同步锁住父子关闭及控件，同参数双击仅一次提交；失败保留原窗口供重试。已经发出的互斥配套写按提交快照继续，强制销毁仅撤销旧DOM、弹窗和后续读取／交互续接。
 
-**调用方与兼容。** 生产仍由映射管理的openBillSplitRowsDialogFromMain以push打开；现每次打开前重读getBillSplitConfig，按父handle、入口是否启用、打开请求与父写代次校验，读取失败不回退旧缓存。工厂原入参字段、Renderer Dialogs命名转发和renderer-previews入口保留；onClose新增可选只读资格上下文{isCurrent()}，旧忽略参数的回调兼容，实际mapping调用方已接入。按钮返回在onClose等待期间保持拆分子层并锁定普通关闭与写入，回调完成后精确结束原层；force子层销毁后的回调不能更新父缓存或关闭新层。原templateId、seqNo、nextN、合并组确认、Main的currentRows／dissolvedGroups结果保持；Main处理器与实际仓储不修改。实际声明位置和调用方见[调用清单](../../../../tmp/g3-review-r2-fixes/caller-inventory.log)。
+**调用方与兼容。** 生产仍由映射管理的openBillSplitRowsDialogFromMain以push打开；现每次打开前重读getBillSplitConfig，按父handle、入口是否启用、打开请求与父写代次校验，读取失败不回退旧缓存。工厂原入参字段、Renderer Dialogs命名转发和renderer-previews入口保留；onClose新增可选只读资格上下文{isCurrent()}，旧忽略参数的回调兼容，实际mapping调用方已接入。按钮返回在onClose等待期间保持拆分子层并锁定普通关闭与写入，回调完成后精确结束原层；force子层销毁后的回调不能更新父缓存或关闭新层。原templateId、seqNo、nextN、合并组确认、Main的currentRows／dissolvedGroups结果保持；Main处理器与实际仓储不修改。实际声明位置和调用方见[调用清单](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/caller-inventory.log)。
 
 **RR02／R3（Spec §4／§5，AC-09／13／15）。** BankStatement与ReconID各自私有保存lastStatusFeedback和statusReadFeedback。sessionStatus错误仅暂时覆盖原有效反馈；有效成功后撤回仍占据状态框的读取错误，确定失效则按Main结果重绘。正常业务、导入进度或其他读取提示会取消旧恢复资格，不能在后续静默成功时回放较旧文本。连续失败、快速进出、并行读取、R9重同步未命中域、已失效导出和较新反馈交错均按原页面／读取代次验证。构造、enter／leave、commands、共享session及根装配接口不变，不新增跨域状态或镜像会话。
 
@@ -237,40 +237,40 @@ G8仍未集成，配置/激活和例外无变化。当前人读入口由AGENTS�
 | 范围 | 修前证据 | 修后专项证据 |
 | --- | --- | --- |
 | 原独立删行探针 | 2种缺陷均复现：确认双击2次删除、父层可关闭；预检关闭后仍发1次删除 | 对应序列及相邻入口纳入真实工厂新增回归；不改写原探针“exit 0表示复现缺陷”的含义 |
-| 拆分配置实际工厂 | 原28项＋新增24项＝52项，33 PASS／19 FAIL | 52/52 PASS，受控API＋真实Electron DOM；命令、退出码及说明见[删除整改证据](../../../../tmp/g3-review-r2-fixes/deletion/result.md) |
+| 拆分配置实际工厂 | 原28项＋新增24项＝52项，33 PASS／19 FAIL | 52/52 PASS，受控API＋真实Electron DOM；命令、退出码及说明见[删除整改证据](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/deletion/result.md) |
 | 原独立状态恢复探针 | 7项，5 PASS／2 FAIL | 7/7 PASS，原脚本及用户日志未改 |
-| 两域反馈矩阵 | 原35项＋新增26项＝61项，41 PASS／20 FAIL | 61/61 PASS；加Main路由、service、进度及状态显示组合164/164，0 skipped；见[状态整改证据](../../../../tmp/g3-review-r2-fixes/status/results.md) |
+| 两域反馈矩阵 | 原35项＋新增26项＝61项，41 PASS／20 FAIL | 61/61 PASS；加Main路由、service、进度及状态显示组合164/164，0 skipped；见[状态整改证据](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/status/results.md) |
 
 专项组包含关系不重复相加。RR02使用真实controller、Main handler／内存SQLite harness及一次故障注入；RR01使用真实Electron工厂与受控API，没有删除真实模板。两者都不覆盖产品Main完整TaskLifecycle或平台验收。最终冻结组合与交付哈希见下段。
 
 **独立复核补充。** 本轮新增“先关子层再await父onClose”的候选实现被真实父子组合证明会使旧回调关闭新子层，已恢复安全顺序并添加回调资格；该候选反例与后续修复记录单独保留，没有归为用户此前快照的缺陷。公共handle关闭后父缓存仍为2行、Main已3行的重开问题，在本轮修前快照也成立；现由每次开窗前重读修复。新增异步开窗还须在入口关闭／重新启用时使旧读失效，不能仅依据最终按钮显示值。上述定点复核、原序列及执行快照见独立审查文档，不扩称全仓弹窗均已验收。
 
-首轮组合已执行649项单测和185项工厂并通过，lint通过；smoke有2项B5-4静态定位失败，因为RR02将业务反馈记录与writeStatusBox透传分开，原审计仍要求updateStatusBox直接调用ui.status。已保持原格式化要求并核对update→write→ui.status传参链，更新同一smoke断言；入口迟到读修复完成后已复跑下述最终组合。首轮日志及代码哈希保存在[阶段证据目录](../../../../tmp/g3-review-r2-fixes/pre-final-adjustments)。
+首轮组合已执行649项单测和185项工厂并通过，lint通过；smoke有2项B5-4静态定位失败，因为RR02将业务反馈记录与writeStatusBox透传分开，原审计仍要求updateStatusBox直接调用ui.status。已保持原格式化要求并核对update→write→ui.status传参链，更新同一smoke断言；入口迟到读修复完成后已复跑下述最终组合。首轮日志及代码哈希保存在[阶段证据目录](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/pre-final-adjustments)。
 
 ### 最终冻结验证与交付
 
 最后两条“读取中改为否／否→是”的定点用例在修前59/61、独立0/2均复现；入口change推进打开请求代次，并在开始／回包时检查hidden和disabled后，配置工厂**61/61**（原28＋新增33）、独立探针**2/2**通过。独立审查§10已核对最终两文件SHA与实际执行一致；既有公共close缓存缺口和本次候选异步边界分别归档，没有混称本轮新回归或历史已通过。
 
-96个实现／验证及模块说明文件按[最终冻结清单](../../../../tmp/g3-review-r2-fixes/frozen-code.json)执行下面四项检查；结束后再次逐一核对。期间只更新实施／设计记录及交付产物，未再修改生产代码和测试。所有命令均使用本记录开头的worktree。
+96个实现／验证及模块说明文件按[最终冻结清单](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/frozen-code.json)执行下面四项检查；结束后再次逐一核对。期间只更新实施／设计记录及交付产物，未再修改生产代码和测试。所有命令均使用本记录开头的worktree。
 
 | 最终执行 | 实际结果 | 证据与边界 |
 | --- | --- | --- |
-| `node --test --test-concurrency=2`，42个受影响文件 | **649/649 PASS，0 fail、0 skipped** | [日志](../../../../tmp/g3-review-r2-fixes/final-unit.log)、[精确参数与退出码](../../../../tmp/g3-review-r2-fixes/final-unit-command.json)；含R9、全部场景写边界、上轮VCC／BizOP及本轮新增反馈26项，不是全仓unit |
-| `node scripts/test-renderer-lifecycle.js`，全部工厂 | **187/187 PASS** | [日志](../../../../tmp/g3-review-r2-fixes/final-electron.log)、[命令与退出码](../../../../tmp/g3-review-r2-fixes/final-electron-command.json)；含配置61项，真实DOM／工厂／index／Preload，API受控 |
-| `npm run lint` | **PASS** | [日志](../../../../tmp/g3-review-r2-fixes/final-lint.log)；退出码0 |
-| `npm run smoke` | **PASS** | [日志](../../../../tmp/g3-review-r2-fixes/final-smoke.log)；B5状态格式化27/27，退出码0，原两项静态定位失败已修 |
-| 差异、哈希、保护与文档链接 | **PASS** | [交付清单](../../../../tmp/g3-review-r2-fixes/final-manifest.json)、[检查日志](../../../../tmp/g3-review-r2-fixes/final-checks.log)；Git可见的两轮审查／证据及Spec保留修前哈希，Main／backend／package／lock相对HEAD无差异，Preload相对本轮修前不变 |
+| `node --test --test-concurrency=2`，42个受影响文件 | **649/649 PASS，0 fail、0 skipped** | [日志](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/final-unit.log)、[精确参数与退出码](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/final-unit-command.json)；含R9、全部场景写边界、上轮VCC／BizOP及本轮新增反馈26项，不是全仓unit |
+| `node scripts/test-renderer-lifecycle.js`，全部工厂 | **187/187 PASS** | [日志](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/final-electron.log)、[命令与退出码](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/final-electron-command.json)；含配置61项，真实DOM／工厂／index／Preload，API受控 |
+| `npm run lint` | **PASS** | [日志](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/final-lint.log)；退出码0 |
+| `npm run smoke` | **PASS** | [日志](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/final-smoke.log)；B5状态格式化27/27，退出码0，原两项静态定位失败已修 |
+| 差异、哈希、保护与文档链接 | **PASS** | [交付清单](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/final-manifest.json)、[检查日志](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/final-checks.log)；Git可见的两轮审查／证据及Spec保留修前哈希，Main／backend／package／lock相对HEAD无差异，Preload相对本轮修前不变 |
 
 实施记录、TechDoc §5.2及Renderer README已落实本轮五项事实。本轮实际代码和相称自动验证完成，release集成未执行；R06／整项G3不据此标为全部验收完成。原资金人工复核、完整release-check及两项高占用单测复验、真实产品Main端到端（含computeAmounts的Task／日志）、Windows／Excel／WPS／安装包、release及跨治理集成缺口仍保留。本轮没有重试此前因ENOSPC／共享磁盘资源被自动审批拒绝的完整门禁；只运行上表覆盖修复的本地组合，没有访问真实业务目录或删除真实模板。
 
-交付：[相对第二轮复审快照的整改补丁](../../../../tmp/g3-review-r2-fixes/review-r2-fixes.patch)、[本轮差异统计](../../../../tmp/g3-review-r2-fixes/review-r2-fixes-stat.txt)、[相对11086a3c的完整功能补丁](../../../../tmp/g3-review-r2-fixes/renderer-boundaries-current.patch)、[当前文件和日志哈希](../../../../tmp/g3-review-r2-fixes/final-manifest.json)。本次回退可按整改补丁精确恢复到第二轮审查前内容，不涉及数据迁移或真实数据回滚；未提交、推送、开PR、合并、升版或发布。
+交付：[相对第二轮复审快照的整改补丁](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/review-r2-fixes.patch)、[本轮差异统计](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/review-r2-fixes-stat.txt)、[相对11086a3c的完整功能补丁](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/renderer-boundaries-current.patch)、[当前文件和日志哈希](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r2-fixes/final-manifest.json)。本次回退可按整改补丁精确恢复到第二轮审查前内容，不涉及数据迁移或真实数据回滚；未提交、推送、开PR、合并、升版或发布。
 
 
 <a id="review-r3-remediation"></a>
 
 ## 第三轮复审整改（R3-01，2026-09-21）
 
-依据：[第三轮审查](review-2026-09-20-r3.md)。复用原worktree与11086a3c未提交基线；开始前核对上轮123个文件哈希，并冻结本轮139个Git可见变更文件与65个审查／证据文件的[修前清单](../../../../tmp/g3-review-r3-fixes/before-manifest.json)。R3-01按本轮审查确认的新回归记录，RR01／RR02原反例闭合结论保留。
+依据：[第三轮审查](review-2026-09-20-r3.md)。复用原worktree与11086a3c未提交基线；开始前核对上轮123个文件哈希，并冻结本轮139个Git可见变更文件与65个审查／证据文件的[修前清单](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r3-fixes/before-manifest.json)。R3-01按本轮审查确认的新回归记录，RR01／RR02原反例闭合结论保留。
 
 | 余项／父切片 | 实现状态 | 验证状态 | 集成状态 |
 | --- | --- | --- | --- |
@@ -290,22 +290,22 @@ G8仍未集成，配置/激活和例外无变化。当前人读入口由AGENTS�
 
 **中间证据。** 首候选配置工厂77/80通过，3条signed主动重试发现旧byField目标序号未清理；独立复核确认目标并集会使额外行被禁用，已修复既有meta payload的清理条件。曾将这3条预期放宽的中间80/80已作废并单独保留，不作为闭合证据；最终用例恢复严格空byField目标断言，并检查signed目标为第2行时第1行可编辑、第2行受限。早期fixture返回不可序列化handle的4条测试执行错误也保留，修正后不计产品反例。
 
-**专项前后对照。** 同一最终fixture使用修前生产快照为67/80 PASS（原61项全通过，新增19项中13项失败）；最终生产为80/80 PASS。[专项记录](../../../../tmp/g3-review-r3-fixes/tests/result.md)、[修前日志](../../../../tmp/g3-review-r3-fixes/tests/before.log)、[修后日志](../../../../tmp/g3-review-r3-fixes/tests/after.log)、[同组与源码哈希核对](../../../../tmp/g3-review-r3-fixes/tests/verification.json)记录两个阶段失败／reject／cancelled、落库后报错、销毁交错、重读失败锁写但可关闭及行草稿保持。
+**专项前后对照。** 同一最终fixture使用修前生产快照为67/80 PASS（原61项全通过，新增19项中13项失败）；最终生产为80/80 PASS。[专项记录](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r3-fixes/tests/result.md)、[修前日志](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r3-fixes/tests/before.log)、[修后日志](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r3-fixes/tests/after.log)、[同组与源码哈希核对](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r3-fixes/tests/verification.json)记录两个阶段失败／reject／cancelled、落库后报错、销毁交错、重读失败锁写但可关闭及行草稿保持。
 
-独立复核原四组修前0/4、修后4/4；另用候选源码证明signed目标残留0/1，最终合计5/5。[独立复核文档](../../../../tmp/g3-review-r3-fixes/review/stage-acceptance-audit.md)保存原仓储探针复跑、真实工厂合成状态探针、候选重试反例和最终源码SHA。修后API由状态型替身控制，真实仓储仅为原独立提交探针；不将两者合称产品Main端到端。
+独立复核原四组修前0/4、修后4/4；另用候选源码证明signed目标残留0/1，最终合计5/5。[独立复核文档](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r3-fixes/review/stage-acceptance-audit.md)保存原仓储探针复跑、真实工厂合成状态探针、候选重试反例和最终源码SHA。修后API由状态型替身控制，真实仓储仅为原独立提交探针；不将两者合称产品Main端到端。
 
-**最终组合。** [冻结清单](../../../../tmp/g3-review-r3-fixes/frozen-code.json)涵盖96个实现／测试／模块说明文件，最终检查后逐一核对。全部命令明确使用本记录开头worktree，源码和测试执行后未改。
+**最终组合。** [冻结清单](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r3-fixes/frozen-code.json)涵盖96个实现／测试／模块说明文件，最终检查后逐一核对。全部命令明确使用本记录开头worktree，源码和测试执行后未改。
 
 | 最终执行 | 结果 | 证据 |
 | --- | --- | --- |
-| `node --test --test-concurrency=2`，42个受影响文件 | **649/649 PASS，0 fail／skipped** | [日志](../../../../tmp/g3-review-r3-fixes/final-unit.log)、[精确命令](../../../../tmp/g3-review-r3-fixes/final-unit-command.json)；包含R9及全场景写边界，非全仓unit |
-| `node scripts/test-renderer-lifecycle.js`，全部工厂 | **206/206 PASS** | [日志](../../../../tmp/g3-review-r3-fixes/final-electron.log)、[命令](../../../../tmp/g3-review-r3-fixes/final-electron-command.json)；含配置80项，与专项不重复累计 |
-| `npm run lint`、`npm run smoke` | **PASS，均exit 0** | [lint](../../../../tmp/g3-review-r3-fixes/final-lint.log)、[smoke](../../../../tmp/g3-review-r3-fixes/final-smoke.log)；专项另覆盖fixture lint与语法 |
-| 差异／哈希／文档链接 | **PASS** | [检查日志](../../../../tmp/g3-review-r3-fixes/final-checks.log)、[交付清单](../../../../tmp/g3-review-r3-fixes/final-manifest.json)；65份三轮审查／证据及Spec原样保留；Main／backend／package／lock无改动 |
+| `node --test --test-concurrency=2`，42个受影响文件 | **649/649 PASS，0 fail／skipped** | [日志](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r3-fixes/final-unit.log)、[精确命令](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r3-fixes/final-unit-command.json)；包含R9及全场景写边界，非全仓unit |
+| `node scripts/test-renderer-lifecycle.js`，全部工厂 | **206/206 PASS** | [日志](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r3-fixes/final-electron.log)、[命令](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r3-fixes/final-electron-command.json)；含配置80项，与专项不重复累计 |
+| `npm run lint`、`npm run smoke` | **PASS，均exit 0** | [lint](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r3-fixes/final-lint.log)、[smoke](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r3-fixes/final-smoke.log)；专项另覆盖fixture lint与语法 |
+| 差异／哈希／文档链接 | **PASS** | [检查日志](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r3-fixes/final-checks.log)、[交付清单](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r3-fixes/final-manifest.json)；65份三轮审查／证据及Spec原样保留；Main／backend／package／lock无改动 |
 
 实施记录、TechDoc §5.3及当前Renderer规则入口已同步本轮五项事实。此次仅改5个Git可见文件：配置工厂、其fixture和3份现行说明。本轮代码与适用自动验证完成，集成未执行；R06／整项G3仍不标为全部验收完成。完整release-check、两项历史高占用单测复验、真实产品Main全链路、Windows／Excel／WPS／安装包、此前资金人工复核及release／跨治理集成缺口继续保留；本轮没有访问真实业务数据，也没有重试此前因ENOSPC／共享磁盘资源而被自动审批拒绝的完整门禁。
 
-交付：[相对第三轮审查快照的整改补丁](../../../../tmp/g3-review-r3-fixes/review-r3-fixes.patch)、[5文件差异统计](../../../../tmp/g3-review-r3-fixes/review-r3-fixes-stat.txt)、[相对11086a3c的完整功能补丁](../../../../tmp/g3-review-r3-fixes/renderer-boundaries-current.patch)、[当前文件与运行哈希清单](../../../../tmp/g3-review-r3-fixes/final-manifest.json)。整改补丁可精确还原本轮修改，不涉及数据库回滚。分支及HEAD保持原值，未提交、推送、开PR、合并、升版或发布。
+交付：[相对第三轮审查快照的整改补丁](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r3-fixes/review-r3-fixes.patch)、[5文件差异统计](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r3-fixes/review-r3-fixes-stat.txt)、[相对11086a3c的完整功能补丁](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r3-fixes/renderer-boundaries-current.patch)、[当前文件与运行哈希清单](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r3-fixes/final-manifest.json)。整改补丁可精确还原本轮修改，不涉及数据库回滚。分支及HEAD保持原值，未提交、推送、开PR、合并、升版或发布。
 
 
 <a id="review-r4-acceptance"></a>
@@ -325,4 +325,4 @@ G8仍未集成，配置/激活和例外无变化。当前人读入口由AGENTS�
 
 **职责、调用兼容、业务行为及当前规则入口。** 本次没有实现或合同变动，沿用[第三轮整改的五项事实](#review-r3-remediation)、[TechDoc §5.3](techdoc.md#review-r3-partial-save)及AGENTS → [Renderer README](../../../../src/renderer/README.md)。这些规则正文无需更新；G8仍未集成，无active配置／例外变动。第四轮“无新增确认缺陷”仅覆盖报告范围，不扩大为全仓或全部平台验收。
 
-**剩余项。** 完整release-check及既有高占用单测复验、真实产品Main两阶段提交／模板库同步／Task和日志全链路、Windows／Excel／WPS／安装包、此前资金人工复核、release与跨治理集成仍未完成。R3-01标为已修复；R06／整项G3不标为全部验收完成。原整改补丁与哈希保留原交付快照含义；本次文档接收差异及保护核对见[接收检查记录](../../../../tmp/g3-review-r4-record/checks.json)。未提交、推送、开PR、合并、升版或发布。
+**剩余项。** 完整release-check及既有高占用单测复验、真实产品Main两阶段提交／模板库同步／Task和日志全链路、Windows／Excel／WPS／安装包、此前资金人工复核、release与跨治理集成仍未完成。R3-01标为已修复；R06／整项G3不标为全部验收完成。原整改补丁与哈希保留原交付快照含义；本次文档接收差异及保护核对见[接收检查记录](../../evidence/merge-g3-g7/g3-worktree-evidence/tmp/g3-review-r4-record/checks.json)。未提交、推送、开PR、合并、升版或发布。
