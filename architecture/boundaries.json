@@ -1,0 +1,4461 @@
+{
+  "schemaVersion": 1,
+  "factBaseline": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "bootstrap": {
+    "factBaseline": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+    "mode": "first-introduction"
+  },
+  "boundaries": [
+    {
+      "id": "production-graph",
+      "governance": "G8",
+      "owner": "codex/v3.2.10-architecture-guardrails",
+      "state": "active",
+      "rules": [
+        "ARCH-CYCLE",
+        "ARCH-STATIC-COVERAGE"
+      ],
+      "entrypoints": [],
+      "allowedLocal": [],
+      "allowedExternal": [],
+      "requiredConsumers": [],
+      "activationEvidence": [],
+      "protectedScopes": [],
+      "restrictedApis": [],
+      "allowedSites": [],
+      "compositionEntrypoints": [],
+      "globals": [],
+      "factory": null,
+      "allowedApiFields": {},
+      "deprecatedEntrypoints": [],
+      "directory": null
+    },
+    {
+      "id": "platform-core",
+      "governance": "G8",
+      "owner": "codex/v3.2.10-architecture-guardrails",
+      "state": "active",
+      "rules": [
+        "ARCH-PLATFORM-CORE"
+      ],
+      "entrypoints": [
+        "src/main-process/background-execution/resource-governor.js",
+        "src/main-process/background-execution/resource-lease.js",
+        "src/main-process/background-execution/admission-queue.js"
+      ],
+      "allowedLocal": [
+        "src/main-process/background-execution/resource-governor.js",
+        "src/main-process/background-execution/resource-lease.js",
+        "src/main-process/background-execution/admission-queue.js"
+      ],
+      "allowedExternal": [
+        "node:crypto"
+      ],
+      "requiredConsumers": [],
+      "activationEvidence": [],
+      "protectedScopes": [],
+      "restrictedApis": [],
+      "allowedSites": [],
+      "compositionEntrypoints": [],
+      "globals": [],
+      "factory": null,
+      "allowedApiFields": {},
+      "deprecatedEntrypoints": [],
+      "directory": null
+    },
+    {
+      "id": "vcc-mapped-lineage",
+      "governance": "G6",
+      "owner": "codex/v3.2.10-storage-execution-separation",
+      "state": "pending",
+      "rules": [
+        "ARCH-PURE-LINEAGE"
+      ],
+      "entrypoints": [
+        "src/backend/vcc-financial-op/mapped-lineage-contract.js",
+        "src/backend/vcc-financial-op/content-hash-contract.js"
+      ],
+      "allowedLocal": [
+        "src/backend/vcc-financial-op/mapped-lineage-contract.js",
+        "src/backend/vcc-financial-op/content-hash-contract.js",
+        "src/backend/vcc-financial-op/definitions.js"
+      ],
+      "allowedExternal": [
+        "node:crypto"
+      ],
+      "requiredConsumers": [
+        {
+          "from": "src/backend/vcc-financial-op/review-export-plan.js",
+          "to": "src/backend/vcc-financial-op/mapped-lineage-contract.js",
+          "kind": "require",
+          "importedNames": [
+            "assertMappedLineage"
+          ]
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-dataset-writer.js",
+          "to": "src/backend/vcc-financial-op/mapped-lineage-contract.js",
+          "kind": "require",
+          "importedNames": [
+            "assertMappedLineage"
+          ]
+        },
+        {
+          "from": "src/backend/vcc-financial-op/row-mapper.js",
+          "to": "src/backend/vcc-financial-op/content-hash-contract.js",
+          "kind": "require",
+          "importedNames": [
+            "HASH_VERSION",
+            "PENDING_HASH_VERSION",
+            "contentHash",
+            "pendingCanonicalValues",
+            "pendingContentHash"
+          ]
+        }
+      ],
+      "activationEvidence": [
+        "tests/unit/backend/vcc-financial-op/mapped-lineage-contract.test.js",
+        "tests/unit/main-process/vcc-financial-op-dataset-writer.test.js"
+      ],
+      "protectedScopes": [],
+      "restrictedApis": [],
+      "allowedSites": [],
+      "compositionEntrypoints": [],
+      "globals": [],
+      "factory": null,
+      "allowedApiFields": {},
+      "deprecatedEntrypoints": [],
+      "directory": null
+    },
+    {
+      "id": "renderer-modal-owner",
+      "governance": "G3",
+      "owner": "codex/v3.2.10-renderer-boundaries",
+      "state": "pending",
+      "rules": [
+        "ARCH-MODAL-OWNER"
+      ],
+      "entrypoints": [
+        "src/renderer/modal-host.js"
+      ],
+      "allowedLocal": [
+        "src/renderer/modal-host.js"
+      ],
+      "allowedExternal": [],
+      "requiredConsumers": [
+        {
+          "from": "src/renderer.js",
+          "to": "src/renderer/modal-host.js",
+          "kind": "classic-global",
+          "importedNames": []
+        },
+        {
+          "from": "src/renderer-dialogs.js",
+          "to": "src/renderer/modal-host.js",
+          "kind": "classic-global",
+          "importedNames": []
+        }
+      ],
+      "activationEvidence": [
+        "tests/unit/renderer/modal-host.test.js",
+        "tests/unit/renderer/modal-host-integration.test.js"
+      ],
+      "protectedScopes": [],
+      "restrictedApis": [],
+      "allowedSites": [],
+      "compositionEntrypoints": [],
+      "globals": [
+        {
+          "path": "src/renderer/modal-host.js",
+          "exportsGlobal": [
+            "__modalHost"
+          ],
+          "consumesGlobals": []
+        }
+      ],
+      "factory": null,
+      "allowedApiFields": {},
+      "deprecatedEntrypoints": [],
+      "directory": null
+    },
+    {
+      "id": "renderer-bank-statement",
+      "governance": "G3",
+      "owner": "codex/v3.2.10-renderer-boundaries",
+      "state": "pending",
+      "rules": [
+        "ARCH-RENDERER-SCOPE"
+      ],
+      "entrypoints": [
+        "src/renderer/controllers/bank-statement.js"
+      ],
+      "allowedLocal": [
+        "src/renderer/controllers/bank-statement.js",
+        "src/renderer/modal-host.js",
+        "src/renderer/module-router.js",
+        "src/renderer/scenario-command-service.js",
+        "src/renderer/scenario-change-router.js",
+        "src/renderer/shared-recon-session.js",
+        "src/renderer/configuration-services.js"
+      ],
+      "allowedExternal": [],
+      "requiredConsumers": [
+        {
+          "from": "src/renderer.js",
+          "to": "src/renderer/controllers/bank-statement.js",
+          "kind": "classic-global",
+          "importedNames": []
+        }
+      ],
+      "activationEvidence": [
+        "tests/unit/renderer/controller-contract.test.js"
+      ],
+      "protectedScopes": [],
+      "restrictedApis": [],
+      "allowedSites": [],
+      "compositionEntrypoints": [],
+      "globals": [
+        {
+          "path": "src/renderer/controllers/bank-statement.js",
+          "exportsGlobal": [
+            "__bankStatementController"
+          ],
+          "consumesGlobals": []
+        }
+      ],
+      "factory": {
+        "path": "src/renderer/controllers/bank-statement.js",
+        "name": "createBankStatementController",
+        "parameters": [
+          "api",
+          "panel",
+          "ui",
+          "config",
+          "sharedReconSession"
+        ]
+      },
+      "allowedApiFields": {
+        "api": [
+          "batchImport",
+          "c3CandidateCount",
+          "export",
+          "import",
+          "importGatewayRecon",
+          "onImportProgress",
+          "onRunProgress",
+          "refundCandidateCount",
+          "run",
+          "sessionStatus"
+        ],
+        "panel": [
+          "querySelector",
+          "querySelectorAll"
+        ],
+        "ui": [
+          "modalHost",
+          "alert",
+          "confirm",
+          "status",
+          "reportError"
+        ],
+        "config": [
+          "templates",
+          "accounts",
+          "currencies",
+          "subscribe"
+        ]
+      },
+      "deprecatedEntrypoints": [],
+      "directory": null
+    },
+    {
+      "id": "renderer-recon-id-fix",
+      "governance": "G3",
+      "owner": "codex/v3.2.10-renderer-boundaries",
+      "state": "pending",
+      "rules": [
+        "ARCH-RENDERER-SCOPE"
+      ],
+      "entrypoints": [
+        "src/renderer/controllers/recon-id-fix.js"
+      ],
+      "allowedLocal": [
+        "src/renderer/controllers/recon-id-fix.js",
+        "src/renderer/modal-host.js",
+        "src/renderer/module-router.js",
+        "src/renderer/scenario-command-service.js",
+        "src/renderer/scenario-change-router.js",
+        "src/renderer/shared-recon-session.js",
+        "src/renderer/configuration-services.js"
+      ],
+      "allowedExternal": [],
+      "requiredConsumers": [
+        {
+          "from": "src/renderer.js",
+          "to": "src/renderer/controllers/recon-id-fix.js",
+          "kind": "classic-global",
+          "importedNames": []
+        }
+      ],
+      "activationEvidence": [
+        "tests/unit/renderer/controller-contract.test.js"
+      ],
+      "protectedScopes": [],
+      "restrictedApis": [],
+      "allowedSites": [],
+      "compositionEntrypoints": [],
+      "globals": [
+        {
+          "path": "src/renderer/controllers/recon-id-fix.js",
+          "exportsGlobal": [
+            "__reconIdFixController"
+          ],
+          "consumesGlobals": []
+        }
+      ],
+      "factory": {
+        "path": "src/renderer/controllers/recon-id-fix.js",
+        "name": "createReconIdFixController",
+        "parameters": [
+          "api",
+          "panel",
+          "ui",
+          "config",
+          "sharedReconSession"
+        ]
+      },
+      "allowedApiFields": {
+        "api": [
+          "clearSession",
+          "export",
+          "import",
+          "run",
+          "sessionStatus"
+        ],
+        "panel": [
+          "querySelector",
+          "querySelectorAll"
+        ],
+        "ui": [
+          "modalHost",
+          "alert",
+          "confirm",
+          "status",
+          "reportError"
+        ],
+        "config": [
+          "templates",
+          "accounts",
+          "currencies",
+          "subscribe"
+        ]
+      },
+      "deprecatedEntrypoints": [],
+      "directory": null
+    },
+    {
+      "id": "renderer-pre-fund",
+      "governance": "G3",
+      "owner": "codex/v3.2.10-renderer-boundaries",
+      "state": "pending",
+      "rules": [
+        "ARCH-RENDERER-SCOPE"
+      ],
+      "entrypoints": [
+        "src/renderer/controllers/pre-fund.js"
+      ],
+      "allowedLocal": [
+        "src/renderer/controllers/pre-fund.js",
+        "src/renderer/modal-host.js",
+        "src/renderer/module-router.js",
+        "src/renderer/scenario-command-service.js",
+        "src/renderer/scenario-change-router.js",
+        "src/renderer/shared-recon-session.js",
+        "src/renderer/configuration-services.js"
+      ],
+      "allowedExternal": [],
+      "requiredConsumers": [
+        {
+          "from": "src/renderer.js",
+          "to": "src/renderer/controllers/pre-fund.js",
+          "kind": "classic-global",
+          "importedNames": []
+        }
+      ],
+      "activationEvidence": [
+        "tests/unit/renderer/controller-contract.test.js"
+      ],
+      "protectedScopes": [],
+      "restrictedApis": [],
+      "allowedSites": [],
+      "compositionEntrypoints": [],
+      "globals": [
+        {
+          "path": "src/renderer/controllers/pre-fund.js",
+          "exportsGlobal": [
+            "__preFundReconciliationController"
+          ],
+          "consumesGlobals": []
+        }
+      ],
+      "factory": {
+        "path": "src/renderer/controllers/pre-fund.js",
+        "name": "createPreFundController",
+        "parameters": [
+          "api",
+          "panel",
+          "ui",
+          "config"
+        ]
+      },
+      "allowedApiFields": {
+        "api": [
+          "clearTemp",
+          "countTempByDateRange",
+          "deleteTempBatch",
+          "deleteTempByDateRange",
+          "export",
+          "exportMptErrors",
+          "importBank",
+          "importMpt",
+          "listTempBatches",
+          "onExportProgress",
+          "onImportProgress",
+          "onRunProgress",
+          "repairMptErrors",
+          "run",
+          "sessionStatus"
+        ],
+        "panel": [
+          "querySelector",
+          "querySelectorAll"
+        ],
+        "ui": [
+          "modalHost",
+          "alert",
+          "confirm",
+          "status",
+          "reportError"
+        ],
+        "config": [
+          "templates",
+          "accounts",
+          "currencies",
+          "subscribe"
+        ]
+      },
+      "deprecatedEntrypoints": [],
+      "directory": null
+    },
+    {
+      "id": "renderer-bank-bu",
+      "governance": "G3",
+      "owner": "codex/v3.2.10-renderer-boundaries",
+      "state": "pending",
+      "rules": [
+        "ARCH-RENDERER-SCOPE"
+      ],
+      "entrypoints": [
+        "src/renderer/controllers/bank-bu.js"
+      ],
+      "allowedLocal": [
+        "src/renderer/controllers/bank-bu.js",
+        "src/renderer/modal-host.js",
+        "src/renderer/module-router.js",
+        "src/renderer/scenario-command-service.js",
+        "src/renderer/scenario-change-router.js",
+        "src/renderer/shared-recon-session.js",
+        "src/renderer/configuration-services.js"
+      ],
+      "allowedExternal": [],
+      "requiredConsumers": [
+        {
+          "from": "src/renderer.js",
+          "to": "src/renderer/controllers/bank-bu.js",
+          "kind": "classic-global",
+          "importedNames": []
+        }
+      ],
+      "activationEvidence": [
+        "tests/unit/renderer/controller-contract.test.js"
+      ],
+      "protectedScopes": [],
+      "restrictedApis": [],
+      "allowedSites": [],
+      "compositionEntrypoints": [],
+      "globals": [
+        {
+          "path": "src/renderer/controllers/bank-bu.js",
+          "exportsGlobal": [
+            "__bankBuReconController"
+          ],
+          "consumesGlobals": []
+        }
+      ],
+      "factory": {
+        "path": "src/renderer/controllers/bank-bu.js",
+        "name": "createBankBuController",
+        "parameters": [
+          "api",
+          "panel",
+          "ui",
+          "config"
+        ]
+      },
+      "allowedApiFields": {
+        "api": [
+          "exportAggregate",
+          "exportSingle",
+          "listMonths",
+          "listReadyMonths",
+          "listRuns",
+          "listSuccessMonths",
+          "pickBankFile",
+          "pickPendingFile",
+          "pickSavePath",
+          "run",
+          "runImport",
+          "status"
+        ],
+        "panel": [
+          "querySelector",
+          "querySelectorAll"
+        ],
+        "ui": [
+          "modalHost",
+          "alert",
+          "confirm",
+          "status",
+          "reportError"
+        ],
+        "config": [
+          "templates",
+          "accounts",
+          "currencies",
+          "subscribe"
+        ]
+      },
+      "deprecatedEntrypoints": [],
+      "directory": null
+    },
+    {
+      "id": "renderer-duplicate-inbound",
+      "governance": "G3",
+      "owner": "codex/v3.2.10-renderer-boundaries",
+      "state": "pending",
+      "rules": [
+        "ARCH-RENDERER-SCOPE"
+      ],
+      "entrypoints": [
+        "src/renderer/controllers/duplicate-inbound.js"
+      ],
+      "allowedLocal": [
+        "src/renderer/controllers/duplicate-inbound.js",
+        "src/renderer/modal-host.js",
+        "src/renderer/module-router.js",
+        "src/renderer/scenario-command-service.js",
+        "src/renderer/scenario-change-router.js",
+        "src/renderer/shared-recon-session.js",
+        "src/renderer/configuration-services.js"
+      ],
+      "allowedExternal": [],
+      "requiredConsumers": [
+        {
+          "from": "src/renderer.js",
+          "to": "src/renderer/controllers/duplicate-inbound.js",
+          "kind": "classic-global",
+          "importedNames": []
+        }
+      ],
+      "activationEvidence": [
+        "tests/unit/renderer/controller-contract.test.js"
+      ],
+      "protectedScopes": [],
+      "restrictedApis": [],
+      "allowedSites": [],
+      "compositionEntrypoints": [],
+      "globals": [
+        {
+          "path": "src/renderer/controllers/duplicate-inbound.js",
+          "exportsGlobal": [
+            "__duplicateInboundMatchController"
+          ],
+          "consumesGlobals": []
+        }
+      ],
+      "factory": {
+        "path": "src/renderer/controllers/duplicate-inbound.js",
+        "name": "createDuplicateInboundController",
+        "parameters": [
+          "api",
+          "panel",
+          "ui",
+          "config"
+        ]
+      },
+      "allowedApiFields": {
+        "api": [
+          "export",
+          "importFiles",
+          "onExportProgress",
+          "onImportProgress",
+          "onRunProgress",
+          "run",
+          "sessionStatus"
+        ],
+        "panel": [
+          "querySelector",
+          "querySelectorAll"
+        ],
+        "ui": [
+          "modalHost",
+          "alert",
+          "confirm",
+          "status",
+          "reportError"
+        ],
+        "config": [
+          "templates",
+          "accounts",
+          "currencies",
+          "subscribe"
+        ]
+      },
+      "deprecatedEntrypoints": [],
+      "directory": null
+    },
+    {
+      "id": "renderer-acquiring",
+      "governance": "G3",
+      "owner": "codex/v3.2.10-renderer-boundaries",
+      "state": "pending",
+      "rules": [
+        "ARCH-RENDERER-SCOPE"
+      ],
+      "entrypoints": [
+        "src/renderer/controllers/acquiring.js"
+      ],
+      "allowedLocal": [
+        "src/renderer/controllers/acquiring.js",
+        "src/renderer/modal-host.js",
+        "src/renderer/module-router.js",
+        "src/renderer/scenario-command-service.js",
+        "src/renderer/scenario-change-router.js",
+        "src/renderer/shared-recon-session.js",
+        "src/renderer/configuration-services.js"
+      ],
+      "allowedExternal": [],
+      "requiredConsumers": [
+        {
+          "from": "src/renderer.js",
+          "to": "src/renderer/controllers/acquiring.js",
+          "kind": "classic-global",
+          "importedNames": []
+        }
+      ],
+      "activationEvidence": [
+        "tests/unit/renderer/controller-contract.test.js"
+      ],
+      "protectedScopes": [],
+      "restrictedApis": [],
+      "allowedSites": [],
+      "compositionEntrypoints": [],
+      "globals": [
+        {
+          "path": "src/renderer/controllers/acquiring.js",
+          "exportsGlobal": [
+            "__acquiringBillCurrencyController"
+          ],
+          "consumesGlobals": []
+        }
+      ],
+      "factory": {
+        "path": "src/renderer/controllers/acquiring.js",
+        "name": "createAcquiringController",
+        "parameters": [
+          "api",
+          "panel",
+          "ui",
+          "config"
+        ]
+      },
+      "allowedApiFields": {
+        "api": [
+          "clearMonth",
+          "export",
+          "importBill",
+          "importFlow",
+          "listMonths",
+          "onCleanupBackgroundToast",
+          "onImportProgress",
+          "onRunProgress",
+          "run",
+          "runCancel",
+          "runResume",
+          "sessionStatus"
+        ],
+        "panel": [
+          "querySelector",
+          "querySelectorAll"
+        ],
+        "ui": [
+          "modalHost",
+          "alert",
+          "confirm",
+          "status",
+          "reportError"
+        ],
+        "config": [
+          "templates",
+          "accounts",
+          "currencies",
+          "subscribe"
+        ]
+      },
+      "deprecatedEntrypoints": [],
+      "directory": null
+    },
+    {
+      "id": "renderer-vcc-op-calc",
+      "governance": "G3",
+      "owner": "codex/v3.2.10-renderer-boundaries",
+      "state": "pending",
+      "rules": [
+        "ARCH-RENDERER-SCOPE"
+      ],
+      "entrypoints": [
+        "src/renderer/controllers/vcc-op-calc.js"
+      ],
+      "allowedLocal": [
+        "src/renderer/controllers/vcc-op-calc.js",
+        "src/renderer/modal-host.js",
+        "src/renderer/module-router.js",
+        "src/renderer/scenario-command-service.js",
+        "src/renderer/scenario-change-router.js",
+        "src/renderer/shared-recon-session.js",
+        "src/renderer/configuration-services.js"
+      ],
+      "allowedExternal": [],
+      "requiredConsumers": [
+        {
+          "from": "src/renderer.js",
+          "to": "src/renderer/controllers/vcc-op-calc.js",
+          "kind": "classic-global",
+          "importedNames": []
+        }
+      ],
+      "activationEvidence": [
+        "tests/unit/renderer/controller-contract.test.js"
+      ],
+      "protectedScopes": [],
+      "restrictedApis": [],
+      "allowedSites": [],
+      "compositionEntrypoints": [],
+      "globals": [
+        {
+          "path": "src/renderer/controllers/vcc-op-calc.js",
+          "exportsGlobal": [
+            "__vccOpCalcController"
+          ],
+          "consumesGlobals": []
+        }
+      ],
+      "factory": {
+        "path": "src/renderer/controllers/vcc-op-calc.js",
+        "name": "createVccOpCalcController",
+        "parameters": [
+          "api",
+          "panel",
+          "ui",
+          "config"
+        ]
+      },
+      "allowedApiFields": {
+        "api": [
+          "computeAmounts",
+          "getBalance",
+          "listBalanceMonths",
+          "onScanProgress",
+          "pickFiles",
+          "save",
+          "scan"
+        ],
+        "panel": [
+          "querySelector",
+          "querySelectorAll"
+        ],
+        "ui": [
+          "modalHost",
+          "alert",
+          "confirm",
+          "status",
+          "reportError"
+        ],
+        "config": [
+          "templates",
+          "accounts",
+          "currencies",
+          "subscribe"
+        ]
+      },
+      "deprecatedEntrypoints": [],
+      "directory": null
+    },
+    {
+      "id": "renderer-biz-op-legacy",
+      "governance": "G3",
+      "owner": "codex/v3.2.10-renderer-boundaries",
+      "state": "pending",
+      "rules": [
+        "ARCH-RENDERER-SCOPE"
+      ],
+      "entrypoints": [
+        "src/renderer/controllers/biz-op-legacy.js"
+      ],
+      "allowedLocal": [
+        "src/renderer/controllers/biz-op-legacy.js",
+        "src/renderer/modal-host.js",
+        "src/renderer/module-router.js",
+        "src/renderer/scenario-command-service.js",
+        "src/renderer/scenario-change-router.js",
+        "src/renderer/shared-recon-session.js",
+        "src/renderer/configuration-services.js"
+      ],
+      "allowedExternal": [],
+      "requiredConsumers": [
+        {
+          "from": "src/renderer.js",
+          "to": "src/renderer/controllers/biz-op-legacy.js",
+          "kind": "classic-global",
+          "importedNames": []
+        }
+      ],
+      "activationEvidence": [
+        "tests/unit/renderer/controller-contract.test.js"
+      ],
+      "protectedScopes": [],
+      "restrictedApis": [],
+      "allowedSites": [],
+      "compositionEntrypoints": [],
+      "globals": [
+        {
+          "path": "src/renderer/controllers/biz-op-legacy.js",
+          "exportsGlobal": [
+            "__bizOpReconController"
+          ],
+          "consumesGlobals": []
+        }
+      ],
+      "factory": {
+        "path": "src/renderer/controllers/biz-op-legacy.js",
+        "name": "createBizOpLegacyController",
+        "parameters": [
+          "api",
+          "panel",
+          "ui",
+          "config"
+        ]
+      },
+      "allowedApiFields": {
+        "api": [
+          "checkSingleDay",
+          "exportDate",
+          "exportDateRange",
+          "listBu",
+          "listReadyDates",
+          "listSuccessDates",
+          "openErrorReportFolder",
+          "pickBizOpFile",
+          "pickFlowFile",
+          "pickSavePath",
+          "run",
+          "runBizOpImport",
+          "runFlowImport",
+          "runHistory",
+          "status"
+        ],
+        "panel": [
+          "querySelector",
+          "querySelectorAll"
+        ],
+        "ui": [
+          "modalHost",
+          "alert",
+          "confirm",
+          "status",
+          "reportError"
+        ],
+        "config": [
+          "templates",
+          "accounts",
+          "currencies",
+          "subscribe"
+        ]
+      },
+      "deprecatedEntrypoints": [],
+      "directory": null
+    },
+    {
+      "id": "renderer-statement",
+      "governance": "G3",
+      "owner": "codex/v3.2.10-renderer-boundaries",
+      "state": "pending",
+      "rules": [
+        "ARCH-RENDERER-SCOPE"
+      ],
+      "entrypoints": [
+        "src/renderer/controllers/statement.js"
+      ],
+      "allowedLocal": [
+        "src/renderer/controllers/statement.js",
+        "src/renderer/modal-host.js",
+        "src/renderer/module-router.js",
+        "src/renderer/scenario-command-service.js",
+        "src/renderer/scenario-change-router.js",
+        "src/renderer/shared-recon-session.js",
+        "src/renderer/configuration-services.js"
+      ],
+      "allowedExternal": [],
+      "requiredConsumers": [
+        {
+          "from": "src/renderer.js",
+          "to": "src/renderer/controllers/statement.js",
+          "kind": "classic-global",
+          "importedNames": []
+        }
+      ],
+      "activationEvidence": [
+        "tests/unit/renderer/controller-contract.test.js"
+      ],
+      "protectedScopes": [],
+      "restrictedApis": [],
+      "allowedSites": [],
+      "compositionEntrypoints": [],
+      "globals": [
+        {
+          "path": "src/renderer/controllers/statement.js",
+          "exportsGlobal": [
+            "__statementController"
+          ],
+          "consumesGlobals": []
+        }
+      ],
+      "factory": {
+        "path": "src/renderer/controllers/statement.js",
+        "name": "createStatementController",
+        "parameters": [
+          "api",
+          "panel",
+          "ui",
+          "config"
+        ]
+      },
+      "allowedApiFields": {
+        "api": [
+          "assemble",
+          "cancelBigAccountSelection",
+          "completeBigAccountSelection",
+          "export",
+          "exportBalance",
+          "exportDetail",
+          "exportLast",
+          "extractBigAccountOrder",
+          "importFile",
+          "saveBalanceSeed"
+        ],
+        "panel": [
+          "querySelector",
+          "querySelectorAll"
+        ],
+        "ui": [
+          "modalHost",
+          "alert",
+          "confirm",
+          "status",
+          "reportError"
+        ],
+        "config": [
+          "templates",
+          "accounts",
+          "currencies",
+          "subscribe"
+        ]
+      },
+      "deprecatedEntrypoints": [],
+      "directory": null
+    },
+    {
+      "id": "renderer-new-account",
+      "governance": "G3",
+      "owner": "codex/v3.2.10-renderer-boundaries",
+      "state": "pending",
+      "rules": [
+        "ARCH-RENDERER-SCOPE"
+      ],
+      "entrypoints": [
+        "src/renderer/controllers/new-account.js"
+      ],
+      "allowedLocal": [
+        "src/renderer/controllers/new-account.js",
+        "src/renderer/modal-host.js",
+        "src/renderer/module-router.js",
+        "src/renderer/scenario-command-service.js",
+        "src/renderer/scenario-change-router.js",
+        "src/renderer/shared-recon-session.js",
+        "src/renderer/configuration-services.js"
+      ],
+      "allowedExternal": [],
+      "requiredConsumers": [
+        {
+          "from": "src/renderer.js",
+          "to": "src/renderer/controllers/new-account.js",
+          "kind": "classic-global",
+          "importedNames": []
+        }
+      ],
+      "activationEvidence": [
+        "tests/unit/renderer/controller-contract.test.js"
+      ],
+      "protectedScopes": [],
+      "restrictedApis": [],
+      "allowedSites": [],
+      "compositionEntrypoints": [],
+      "globals": [
+        {
+          "path": "src/renderer/controllers/new-account.js",
+          "exportsGlobal": [
+            "__newAccountController"
+          ],
+          "consumesGlobals": []
+        }
+      ],
+      "factory": {
+        "path": "src/renderer/controllers/new-account.js",
+        "name": "createNewAccountController",
+        "parameters": [
+          "api",
+          "panel",
+          "ui",
+          "config"
+        ]
+      },
+      "allowedApiFields": {
+        "api": [
+          "exportFile",
+          "generate"
+        ],
+        "panel": [
+          "querySelector",
+          "querySelectorAll"
+        ],
+        "ui": [
+          "modalHost",
+          "alert",
+          "confirm",
+          "status",
+          "reportError"
+        ],
+        "config": [
+          "templates",
+          "accounts",
+          "currencies",
+          "subscribe"
+        ]
+      },
+      "deprecatedEntrypoints": [],
+      "directory": null
+    },
+    {
+      "id": "renderer-pending",
+      "governance": "G3",
+      "owner": "codex/v3.2.10-renderer-boundaries",
+      "state": "pending",
+      "rules": [
+        "ARCH-RENDERER-SCOPE"
+      ],
+      "entrypoints": [
+        "src/renderer-pending.js"
+      ],
+      "allowedLocal": [
+        "src/renderer-pending.js",
+        "src/renderer/modal-host.js",
+        "src/renderer/module-router.js",
+        "src/renderer/scenario-command-service.js",
+        "src/renderer/scenario-change-router.js",
+        "src/renderer/shared-recon-session.js",
+        "src/renderer/configuration-services.js"
+      ],
+      "allowedExternal": [],
+      "requiredConsumers": [
+        {
+          "from": "src/renderer.js",
+          "to": "src/renderer-pending.js",
+          "kind": "classic-global",
+          "importedNames": []
+        }
+      ],
+      "activationEvidence": [
+        "tests/unit/renderer/controller-contract.test.js"
+      ],
+      "protectedScopes": [],
+      "restrictedApis": [],
+      "allowedSites": [],
+      "compositionEntrypoints": [],
+      "globals": [
+        {
+          "path": "src/renderer-pending.js",
+          "exportsGlobal": [
+            "__rendererPending"
+          ],
+          "consumesGlobals": []
+        }
+      ],
+      "factory": {
+        "path": "src/renderer-pending.js",
+        "name": "createRendererPending",
+        "parameters": [
+          "api",
+          "panel",
+          "ui",
+          "config"
+        ]
+      },
+      "allowedApiFields": {
+        "api": [
+          "diff",
+          "exportErrorReport",
+          "getColumns",
+          "getRule",
+          "listMonths",
+          "onImportProgress",
+          "pickFiles",
+          "reconcile",
+          "removed",
+          "saveRule",
+          "startImport"
+        ],
+        "panel": [
+          "querySelector",
+          "querySelectorAll"
+        ],
+        "ui": [
+          "modalHost",
+          "alert",
+          "confirm",
+          "status",
+          "reportError"
+        ],
+        "config": [
+          "templates",
+          "accounts",
+          "currencies",
+          "subscribe"
+        ]
+      },
+      "deprecatedEntrypoints": [],
+      "directory": null
+    },
+    {
+      "id": "renderer-position",
+      "governance": "G3",
+      "owner": "codex/v3.2.10-renderer-boundaries",
+      "state": "pending",
+      "rules": [
+        "ARCH-RENDERER-SCOPE"
+      ],
+      "entrypoints": [
+        "src/renderer-position-reconciliation.js"
+      ],
+      "allowedLocal": [
+        "src/renderer-position-reconciliation.js",
+        "src/renderer/modal-host.js",
+        "src/renderer/module-router.js",
+        "src/renderer/scenario-command-service.js",
+        "src/renderer/scenario-change-router.js",
+        "src/renderer/shared-recon-session.js",
+        "src/renderer/configuration-services.js"
+      ],
+      "allowedExternal": [],
+      "requiredConsumers": [
+        {
+          "from": "src/renderer.js",
+          "to": "src/renderer-position-reconciliation.js",
+          "kind": "classic-global",
+          "importedNames": []
+        }
+      ],
+      "activationEvidence": [
+        "tests/unit/renderer/controller-contract.test.js"
+      ],
+      "protectedScopes": [],
+      "restrictedApis": [],
+      "allowedSites": [],
+      "compositionEntrypoints": [],
+      "globals": [
+        {
+          "path": "src/renderer-position-reconciliation.js",
+          "exportsGlobal": [
+            "__positionReconciliation"
+          ],
+          "consumesGlobals": []
+        }
+      ],
+      "factory": {
+        "path": "src/renderer-position-reconciliation.js",
+        "name": "createPositionReconciliationUI",
+        "parameters": [
+          "api",
+          "panel",
+          "ui",
+          "config"
+        ]
+      },
+      "allowedApiFields": {
+        "api": [
+          "applyBankImport",
+          "applySourceImport",
+          "cancelActiveImport",
+          "cancelBankImport",
+          "cancelSourceImport",
+          "confirmRun",
+          "dataManager",
+          "deleteBank",
+          "deleteSource",
+          "exportBank",
+          "exportLinked",
+          "exportRaw",
+          "exportRun",
+          "exportRunFiltered",
+          "exportSourceAnomaly",
+          "importRunResult",
+          "linkedManager",
+          "listMappings",
+          "onImportProgress",
+          "prepareBankImport",
+          "prepareSourceImport",
+          "run",
+          "saveMappings",
+          "status"
+        ],
+        "panel": [
+          "querySelector",
+          "querySelectorAll"
+        ],
+        "ui": [
+          "modalHost",
+          "alert",
+          "confirm",
+          "status",
+          "reportError"
+        ],
+        "config": [
+          "templates",
+          "accounts",
+          "currencies",
+          "subscribe"
+        ]
+      },
+      "deprecatedEntrypoints": [],
+      "directory": null
+    },
+    {
+      "id": "renderer-vcc-financial-op",
+      "governance": "G3",
+      "owner": "codex/v3.2.10-renderer-boundaries",
+      "state": "pending",
+      "rules": [
+        "ARCH-RENDERER-SCOPE"
+      ],
+      "entrypoints": [
+        "src/renderer-vcc-financial-op.js"
+      ],
+      "allowedLocal": [
+        "src/renderer-vcc-financial-op.js",
+        "src/renderer/modal-host.js",
+        "src/renderer/module-router.js",
+        "src/renderer/scenario-command-service.js",
+        "src/renderer/scenario-change-router.js",
+        "src/renderer/shared-recon-session.js",
+        "src/renderer/configuration-services.js"
+      ],
+      "allowedExternal": [],
+      "requiredConsumers": [
+        {
+          "from": "src/renderer.js",
+          "to": "src/renderer-vcc-financial-op.js",
+          "kind": "classic-global",
+          "importedNames": []
+        }
+      ],
+      "activationEvidence": [
+        "tests/unit/renderer/controller-contract.test.js"
+      ],
+      "protectedScopes": [],
+      "restrictedApis": [],
+      "allowedSites": [],
+      "compositionEntrypoints": [],
+      "globals": [
+        {
+          "path": "src/renderer-vcc-financial-op.js",
+          "exportsGlobal": [
+            "__vccFinancialOp"
+          ],
+          "consumesGlobals": []
+        }
+      ],
+      "factory": {
+        "path": "src/renderer-vcc-financial-op.js",
+        "name": "createVccFinancialOpController",
+        "parameters": [
+          "api",
+          "panel",
+          "ui",
+          "config"
+        ]
+      },
+      "allowedApiFields": {
+        "api": [
+          "addRunAdjustment",
+          "archive",
+          "calculate",
+          "cancelTask",
+          "dataManagerOverview",
+          "deleteDataTarget",
+          "deleteDataset",
+          "exportDataset",
+          "exportImportAudit",
+          "exportResult",
+          "exportReviewTable",
+          "getRun",
+          "importFiles",
+          "initializeOpening",
+          "latestArchivedRun",
+          "listAdjustmentOptions",
+          "listArchivedResultMonths",
+          "listDeleteTargets",
+          "listImportMonths",
+          "listImportRecords",
+          "onImportProgress",
+          "onOperationProgress",
+          "pickFiles",
+          "preflightRun",
+          "previewDataTargetDeletion",
+          "previewDatasetDeletion",
+          "previewDatasetExport",
+          "previewUnarchive",
+          "unarchiveMonth"
+        ],
+        "panel": [
+          "querySelector",
+          "querySelectorAll"
+        ],
+        "ui": [
+          "modalHost",
+          "alert",
+          "confirm",
+          "status",
+          "reportError"
+        ],
+        "config": [
+          "templates",
+          "accounts",
+          "currencies",
+          "subscribe"
+        ]
+      },
+      "deprecatedEntrypoints": [],
+      "directory": null
+    },
+    {
+      "id": "renderer-biz-op-v327",
+      "governance": "G3",
+      "owner": "codex/v3.2.10-renderer-boundaries",
+      "state": "pending",
+      "rules": [
+        "ARCH-RENDERER-SCOPE"
+      ],
+      "entrypoints": [
+        "src/renderer-biz-op-v327.js"
+      ],
+      "allowedLocal": [
+        "src/renderer-biz-op-v327.js",
+        "src/renderer/modal-host.js",
+        "src/renderer/module-router.js",
+        "src/renderer/scenario-command-service.js",
+        "src/renderer/scenario-change-router.js",
+        "src/renderer/shared-recon-session.js",
+        "src/renderer/configuration-services.js"
+      ],
+      "allowedExternal": [],
+      "requiredConsumers": [
+        {
+          "from": "src/renderer.js",
+          "to": "src/renderer-biz-op-v327.js",
+          "kind": "classic-global",
+          "importedNames": []
+        }
+      ],
+      "activationEvidence": [
+        "tests/unit/renderer/controller-contract.test.js"
+      ],
+      "protectedScopes": [],
+      "restrictedApis": [],
+      "allowedSites": [],
+      "compositionEntrypoints": [],
+      "globals": [
+        {
+          "path": "src/renderer-biz-op-v327.js",
+          "exportsGlobal": [
+            "__bizOpReconV327"
+          ],
+          "consumesGlobals": []
+        }
+      ],
+      "factory": {
+        "path": "src/renderer-biz-op-v327.js",
+        "name": "createBizOpV327Controller",
+        "parameters": [
+          "api",
+          "panel",
+          "ui",
+          "config"
+        ]
+      },
+      "allowedApiFields": {
+        "api": [
+          "cancel",
+          "currentInput",
+          "deleteData",
+          "deletePreview",
+          "exportWorkbook",
+          "importFiles",
+          "list",
+          "months",
+          "pickExport",
+          "pickFiles",
+          "preflight",
+          "retryRecovery",
+          "run",
+          "runCalendar",
+          "status"
+        ],
+        "panel": [
+          "querySelector",
+          "querySelectorAll"
+        ],
+        "ui": [
+          "modalHost",
+          "alert",
+          "confirm",
+          "status",
+          "reportError"
+        ],
+        "config": [
+          "templates",
+          "accounts",
+          "currencies",
+          "subscribe"
+        ]
+      },
+      "deprecatedEntrypoints": [],
+      "directory": null
+    },
+    {
+      "id": "renderer-dialog-scenarios",
+      "governance": "G3",
+      "owner": "codex/v3.2.10-renderer-boundaries",
+      "state": "pending",
+      "rules": [
+        "ARCH-RENDERER-SCOPE"
+      ],
+      "entrypoints": [
+        "src/renderer/dialogs/scenarios.js"
+      ],
+      "allowedLocal": [
+        "src/renderer/dialogs/scenarios.js",
+        "src/renderer/modal-host.js",
+        "src/renderer/module-router.js",
+        "src/renderer/scenario-command-service.js",
+        "src/renderer/scenario-change-router.js",
+        "src/renderer/shared-recon-session.js",
+        "src/renderer/configuration-services.js"
+      ],
+      "allowedExternal": [],
+      "requiredConsumers": [
+        {
+          "from": "src/renderer.js",
+          "to": "src/renderer/dialogs/scenarios.js",
+          "kind": "classic-global",
+          "importedNames": []
+        }
+      ],
+      "activationEvidence": [
+        "tests/unit/renderer/controller-contract.test.js"
+      ],
+      "protectedScopes": [],
+      "restrictedApis": [],
+      "allowedSites": [],
+      "compositionEntrypoints": [],
+      "globals": [
+        {
+          "path": "src/renderer/dialogs/scenarios.js",
+          "exportsGlobal": [
+            "__scenariosDialogs"
+          ],
+          "consumesGlobals": []
+        }
+      ],
+      "factory": {
+        "path": "src/renderer/dialogs/scenarios.js",
+        "name": "createScenariosDialogs",
+        "parameters": [
+          "api",
+          "panel",
+          "ui",
+          "config",
+          "scenarioCommands"
+        ]
+      },
+      "allowedApiFields": {
+        "api": [
+          "scenarios.list",
+          "scenarios.get",
+          "scenarios.getFundTypeEnum",
+          "scenarios.getGatewayReconHeaders",
+          "scenarios.getApplicableChannels",
+          "channels.list",
+          "linkedTable.list"
+        ],
+        "panel": [
+          "querySelector",
+          "querySelectorAll"
+        ],
+        "ui": [
+          "modalHost",
+          "alert",
+          "confirm",
+          "status",
+          "reportError"
+        ],
+        "config": [
+          "templates",
+          "accounts",
+          "currencies",
+          "subscribe"
+        ]
+      },
+      "deprecatedEntrypoints": [],
+      "directory": null
+    },
+    {
+      "id": "renderer-dialog-configuration",
+      "governance": "G3",
+      "owner": "codex/v3.2.10-renderer-boundaries",
+      "state": "pending",
+      "rules": [
+        "ARCH-RENDERER-SCOPE"
+      ],
+      "entrypoints": [
+        "src/renderer/dialogs/configuration.js"
+      ],
+      "allowedLocal": [
+        "src/renderer/dialogs/configuration.js",
+        "src/renderer/modal-host.js",
+        "src/renderer/module-router.js",
+        "src/renderer/scenario-command-service.js",
+        "src/renderer/scenario-change-router.js",
+        "src/renderer/shared-recon-session.js",
+        "src/renderer/configuration-services.js"
+      ],
+      "allowedExternal": [],
+      "requiredConsumers": [
+        {
+          "from": "src/renderer.js",
+          "to": "src/renderer/dialogs/configuration.js",
+          "kind": "classic-global",
+          "importedNames": []
+        }
+      ],
+      "activationEvidence": [
+        "tests/unit/renderer/controller-contract.test.js"
+      ],
+      "protectedScopes": [],
+      "restrictedApis": [],
+      "allowedSites": [],
+      "compositionEntrypoints": [],
+      "globals": [
+        {
+          "path": "src/renderer/dialogs/configuration.js",
+          "exportsGlobal": [
+            "__configurationDialogs"
+          ],
+          "consumesGlobals": []
+        }
+      ],
+      "factory": {
+        "path": "src/renderer/dialogs/configuration.js",
+        "name": "createConfigurationDialogs",
+        "parameters": [
+          "api",
+          "panel",
+          "ui",
+          "config"
+        ]
+      },
+      "allowedApiFields": {
+        "api": [
+          "templates",
+          "accountMappings",
+          "bigAccount",
+          "balanceAdjustment",
+          "monthlyBalance"
+        ],
+        "panel": [
+          "querySelector",
+          "querySelectorAll"
+        ],
+        "ui": [
+          "modalHost",
+          "alert",
+          "confirm",
+          "status",
+          "reportError"
+        ],
+        "config": [
+          "templates",
+          "accounts",
+          "currencies",
+          "subscribe"
+        ]
+      },
+      "deprecatedEntrypoints": [],
+      "directory": null
+    },
+    {
+      "id": "renderer-services",
+      "governance": "G3",
+      "owner": "codex/v3.2.10-renderer-boundaries",
+      "state": "pending",
+      "rules": [
+        "ARCH-RENDERER-SCOPE"
+      ],
+      "entrypoints": [
+        "src/renderer/module-router.js",
+        "src/renderer/scenario-command-service.js",
+        "src/renderer/scenario-change-router.js",
+        "src/renderer/shared-recon-session.js",
+        "src/renderer/configuration-services.js"
+      ],
+      "allowedLocal": [
+        "src/renderer/modal-host.js",
+        "src/renderer/module-router.js",
+        "src/renderer/scenario-command-service.js",
+        "src/renderer/scenario-change-router.js",
+        "src/renderer/shared-recon-session.js",
+        "src/renderer/configuration-services.js"
+      ],
+      "allowedExternal": [],
+      "requiredConsumers": [
+        {
+          "from": "src/main.js",
+          "to": "src/renderer/module-router.js",
+          "kind": "classic-global",
+          "importedNames": []
+        }
+      ],
+      "activationEvidence": [
+        "tests/unit/renderer/module-router.test.js",
+        "tests/unit/renderer/scenario-change-routing.test.js"
+      ],
+      "protectedScopes": [],
+      "restrictedApis": [],
+      "allowedSites": [],
+      "compositionEntrypoints": [],
+      "globals": [],
+      "factory": null,
+      "allowedApiFields": {},
+      "deprecatedEntrypoints": [],
+      "directory": null
+    },
+    {
+      "id": "shared-xlsx",
+      "governance": "G4",
+      "owner": "codex/v3.2.10-shared-xlsx-infrastructure",
+      "state": "pending",
+      "rules": [
+        "ARCH-XLSX-INFRA"
+      ],
+      "entrypoints": [
+        "src/backend/xlsx/rich-workbook.js",
+        "src/backend/xlsx/shared-strings-provider.js",
+        "src/backend/xlsx/zip-reader.js",
+        "src/backend/xlsx/workbook-parts.js",
+        "src/backend/xlsx/excel-text.js",
+        "src/backend/xlsx/ooxml-namespaces.js",
+        "src/backend/xlsx/number-date.js",
+        "src/backend/xlsx/model.js",
+        "src/backend/xlsx/style-registry.js",
+        "src/backend/xlsx/xlsx-sheet-scanner.js",
+        "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+        "src/backend/xlsx/legacy/entry-size-preflight.js"
+      ],
+      "allowedLocal": [
+        "src/backend/xlsx/rich-workbook.js",
+        "src/backend/xlsx/shared-strings-provider.js",
+        "src/backend/xlsx/zip-reader.js",
+        "src/backend/xlsx/workbook-parts.js",
+        "src/backend/xlsx/excel-text.js",
+        "src/backend/xlsx/ooxml-namespaces.js",
+        "src/backend/xlsx/number-date.js",
+        "src/backend/xlsx/model.js",
+        "src/backend/xlsx/style-registry.js",
+        "src/backend/xlsx/xlsx-sheet-scanner.js",
+        "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+        "src/backend/xlsx/legacy/entry-size-preflight.js"
+      ],
+      "allowedExternal": [
+        "node:*",
+        "yauzl",
+        "sax",
+        "jszip"
+      ],
+      "requiredConsumers": [
+        {
+          "from": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+          "to": "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "xmlUnescape"
+          ]
+        },
+        {
+          "from": "src/backend/biz-op-recon-import/reader-streamed.js",
+          "to": "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "lettersToIndex",
+            "parseRowXml",
+            "readSharedStrings"
+          ]
+        },
+        {
+          "from": "src/backend/file-service/readers.js",
+          "to": "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "readXlsxStreamed"
+          ]
+        },
+        {
+          "from": "src/backend/pending-import/worker.js",
+          "to": "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "readXlsxStreamed"
+          ]
+        },
+        {
+          "from": "src/backend/vcc-op-calc-import/reader.js",
+          "to": "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "lettersToIndex",
+            "parseRowXml",
+            "readSharedStrings"
+          ]
+        },
+        {
+          "from": "src/main-process/linked-table-stream-source.js",
+          "to": "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "readXlsxStreamed"
+          ]
+        },
+        {
+          "from": "src/main-process/toolbox-stream-io.js",
+          "to": "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "readXlsxStreamed"
+          ]
+        },
+        {
+          "from": "src/backend/biz-op-recon-import/reader-streamed.js",
+          "to": "src/backend/xlsx/legacy/entry-size-preflight.js",
+          "kind": "require",
+          "importedNames": [
+            "assertXlsxEntriesUnderLimit"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-xlsx-stream/large-split-worker.js",
+          "to": "src/backend/xlsx/legacy/entry-size-preflight.js",
+          "kind": "require",
+          "importedNames": [
+            "collectEntrySizes"
+          ]
+        },
+        {
+          "from": "src/backend/vcc-op-calc-import/reader.js",
+          "to": "src/backend/xlsx/legacy/entry-size-preflight.js",
+          "kind": "require",
+          "importedNames": [
+            "assertXlsxEntriesUnderLimit"
+          ]
+        },
+        {
+          "from": "src/main-process/toolbox-large-split-router.js",
+          "to": "src/backend/xlsx/legacy/entry-size-preflight.js",
+          "kind": "require",
+          "importedNames": []
+        },
+        {
+          "from": "src/backend/vcc-financial-op/review-export-plan.js",
+          "to": "src/backend/xlsx/rich-workbook.js",
+          "kind": "require",
+          "importedNames": [
+            "openRichWorkbook"
+          ]
+        },
+        {
+          "from": "src/backend/vcc-financial-op/system-op-importer.js",
+          "to": "src/backend/xlsx/rich-workbook.js",
+          "kind": "require",
+          "importedNames": [
+            "openRichWorkbook"
+          ]
+        },
+        {
+          "from": "src/backend/vcc-financial-op/workbook-import-plan.js",
+          "to": "src/backend/xlsx/rich-workbook.js",
+          "kind": "require",
+          "importedNames": [
+            "openRichWorkbook"
+          ]
+        },
+        {
+          "from": "src/main-process/biz-op-v327/export-source.js",
+          "to": "src/backend/xlsx/rich-workbook.js",
+          "kind": "require",
+          "importedNames": [
+            "openSingleSheetRichWorkbook"
+          ]
+        },
+        {
+          "from": "src/main-process/biz-op-v327/export-validator.js",
+          "to": "src/backend/xlsx/rich-workbook.js",
+          "kind": "require",
+          "importedNames": [
+            "openRichWorkbook"
+          ]
+        },
+        {
+          "from": "src/main-process/biz-op-v327/import-pipeline.js",
+          "to": "src/backend/xlsx/rich-workbook.js",
+          "kind": "require",
+          "importedNames": [
+            "openSingleSheetRichWorkbook"
+          ]
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-dataset-writer.js",
+          "to": "src/backend/xlsx/rich-workbook.js",
+          "kind": "require",
+          "importedNames": [
+            "openRichWorkbook"
+          ]
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-review-validator.js",
+          "to": "src/backend/xlsx/rich-workbook.js",
+          "kind": "require",
+          "importedNames": [
+            "openRichWorkbook"
+          ]
+        },
+        {
+          "from": "src/backend/position-reconciliation-import/xlsx-reader.js",
+          "to": "src/backend/xlsx/shared-strings-provider.js",
+          "kind": "require",
+          "importedNames": [
+            "loadSharedStringsProvider"
+          ]
+        },
+        {
+          "from": "src/backend/vcc-financial-op/workbook-reader.js",
+          "to": "src/backend/xlsx/shared-strings-provider.js",
+          "kind": "require",
+          "importedNames": [
+            "loadSharedStringsProvider"
+          ]
+        },
+        {
+          "from": "src/backend/big-table-import/engine.js",
+          "to": "src/backend/xlsx/zip-reader.js",
+          "kind": "require",
+          "importedNames": []
+        },
+        {
+          "from": "src/backend/big-table-import/import-worker.js",
+          "to": "src/backend/xlsx/zip-reader.js",
+          "kind": "require",
+          "importedNames": []
+        },
+        {
+          "from": "src/backend/position-reconciliation-import/xlsx-reader.js",
+          "to": "src/backend/xlsx/zip-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "WORKBOOK_ENTRY_NAME",
+            "WORKBOOK_RELS_ENTRY_NAME",
+            "openZipWithEntries"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-format/xlsx-pass.js",
+          "to": "src/backend/xlsx/zip-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "WORKBOOK_ENTRY_NAME",
+            "WORKBOOK_RELS_ENTRY_NAME",
+            "openZipWithEntries"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+          "to": "src/backend/xlsx/zip-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "loadSharedStrings",
+            "locateSheets",
+            "openZipWithEntries"
+          ]
+        },
+        {
+          "from": "src/backend/vcc-financial-op/system-op-importer.js",
+          "to": "src/backend/xlsx/zip-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "normalizeWorksheetTarget"
+          ]
+        },
+        {
+          "from": "src/backend/vcc-financial-op/workbook-reader.js",
+          "to": "src/backend/xlsx/zip-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "BigTableImportError",
+            "WORKBOOK_ENTRY_NAME",
+            "locateSheets",
+            "openZipWithEntries",
+            "readEntryAsString"
+          ]
+        },
+        {
+          "from": "src/main-process/duplicate-inbound-match/document-statement-reader.js",
+          "to": "src/backend/xlsx/zip-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "WORKBOOK_ENTRY_NAME",
+            "locateSheets"
+          ]
+        },
+        {
+          "from": "src/main-process/new-account/generation-core.js",
+          "to": "src/backend/xlsx/zip-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "locateSheets",
+            "openZipWithEntries"
+          ]
+        },
+        {
+          "from": "src/main-process/recon-id-fix-service/artifact-evidence.js",
+          "to": "src/backend/xlsx/zip-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "openZipWithEntries",
+            "readEntryAsString"
+          ]
+        },
+        {
+          "from": "src/main-process/toolbox-large-split-router.js",
+          "to": "src/backend/xlsx/zip-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "openZipWithEntries"
+          ]
+        },
+        {
+          "from": "src/main-process/toolbox-output-writer.js",
+          "to": "src/backend/xlsx/zip-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "openZipWithEntries",
+            "readEntryAsString"
+          ]
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-review-validator.js",
+          "to": "src/backend/xlsx/zip-reader.js",
+          "kind": "require",
+          "importedNames": [
+            "openZipWithEntries"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-format/index.js",
+          "to": "src/backend/xlsx/excel-text.js",
+          "kind": "require",
+          "importedNames": []
+        },
+        {
+          "from": "src/backend/toolbox-format/xlsx-pass.js",
+          "to": "src/backend/xlsx/excel-text.js",
+          "kind": "require",
+          "importedNames": [
+            "assertExcelCellTextLength",
+            "assertExcelStXstringRawLength",
+            "decodeExcelStXstring"
+          ]
+        },
+        {
+          "from": "src/backend/vcc-financial-op/review-export-contract.js",
+          "to": "src/backend/xlsx/excel-text.js",
+          "kind": "require",
+          "importedNames": [
+            "assertExcelCellTextLength"
+          ]
+        },
+        {
+          "from": "src/main-process/biz-op-v327/export-cells.js",
+          "to": "src/backend/xlsx/excel-text.js",
+          "kind": "require",
+          "importedNames": [
+            "assertExcelCellTextLength"
+          ]
+        },
+        {
+          "from": "src/main-process/biz-op-v327/export-writer.js",
+          "to": "src/backend/xlsx/excel-text.js",
+          "kind": "require",
+          "importedNames": [
+            "encodeExcelStXstring"
+          ]
+        },
+        {
+          "from": "src/main-process/toolbox-output-writer.js",
+          "to": "src/backend/xlsx/excel-text.js",
+          "kind": "require",
+          "importedNames": [
+            "ToolboxExcelTextError",
+            "assertExcelCellTextLength",
+            "encodeExcelStXstring"
+          ]
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-review-validator.js",
+          "to": "src/backend/xlsx/excel-text.js",
+          "kind": "require",
+          "importedNames": [
+            "decodeExcelStXstring"
+          ]
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-review-writer.js",
+          "to": "src/backend/xlsx/excel-text.js",
+          "kind": "require",
+          "importedNames": [
+            "encodeExcelStXstring"
+          ]
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-writer.js",
+          "to": "src/backend/xlsx/excel-text.js",
+          "kind": "require",
+          "importedNames": [
+            "encodeExcelStXstring"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-format/xlsx-pass.js",
+          "to": "src/backend/xlsx/ooxml-namespaces.js",
+          "kind": "require",
+          "importedNames": [
+            "OFFICE_RELATIONSHIP_NAMESPACES",
+            "PACKAGE_RELATIONSHIP_NAMESPACES",
+            "SPREADSHEETML_NAMESPACES",
+            "exactSaxLocalName",
+            "namespaceAllowed",
+            "normalizedSaxAttributes",
+            "saxAttributeIdentity"
+          ]
+        },
+        {
+          "from": "src/main-process/toolbox-output-writer.js",
+          "to": "src/backend/xlsx/ooxml-namespaces.js",
+          "kind": "require",
+          "importedNames": [
+            "OFFICE_RELATIONSHIP_NAMESPACES",
+            "PACKAGE_RELATIONSHIP_NAMESPACES",
+            "SPREADSHEETML_NAMESPACES",
+            "namespaceAllowed",
+            "saxAttributeValue"
+          ]
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-writer.js",
+          "to": "src/backend/xlsx/ooxml-namespaces.js",
+          "kind": "require",
+          "importedNames": [
+            "SPREADSHEETML_NAMESPACES",
+            "exactSaxLocalName",
+            "namespaceAllowed",
+            "normalizedSaxAttributes"
+          ]
+        },
+        {
+          "from": "src/backend/position-reconciliation-import/xlsx-reader.js",
+          "to": "src/backend/xlsx/number-date.js",
+          "kind": "require",
+          "importedNames": [
+            "classifyExcelNumberFormat"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-format/biff8-records.js",
+          "to": "src/backend/xlsx/number-date.js",
+          "kind": "require",
+          "importedNames": [
+            "BUILTIN_NUMBER_FORMATS"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-format/index.js",
+          "to": "src/backend/xlsx/number-date.js",
+          "kind": "require",
+          "importedNames": []
+        },
+        {
+          "from": "src/backend/vcc-financial-op/review-export-contract.js",
+          "to": "src/backend/xlsx/number-date.js",
+          "kind": "require",
+          "importedNames": [
+            "classifyNumericOutput",
+            "decimalComparable"
+          ]
+        },
+        {
+          "from": "src/main-process/biz-op-v327/export-cells.js",
+          "to": "src/backend/xlsx/number-date.js",
+          "kind": "require",
+          "importedNames": [
+            "classifyNumericOutput"
+          ]
+        },
+        {
+          "from": "src/main-process/biz-op-v327/import-adapter.js",
+          "to": "src/backend/xlsx/number-date.js",
+          "kind": "require",
+          "importedNames": [
+            "classifyExcelNumberFormat"
+          ]
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-review-validator.js",
+          "to": "src/backend/xlsx/number-date.js",
+          "kind": "require",
+          "importedNames": [
+            "decimalComparable"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-format/biff8-pass.js",
+          "to": "src/backend/xlsx/model.js",
+          "kind": "require",
+          "importedNames": [
+            "createToolboxCell",
+            "createToolboxRow",
+            "createToolboxSheetMeta"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-format/csv-pass.js",
+          "to": "src/backend/xlsx/model.js",
+          "kind": "require",
+          "importedNames": [
+            "createToolboxCell",
+            "createToolboxRow",
+            "createToolboxSheetMeta"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-format/index.js",
+          "to": "src/backend/xlsx/model.js",
+          "kind": "require",
+          "importedNames": []
+        },
+        {
+          "from": "src/main-process/toolbox-background/route-db-contract.js",
+          "to": "src/backend/xlsx/model.js",
+          "kind": "require",
+          "importedNames": [
+            "createToolboxCell",
+            "createToolboxRow",
+            "createToolboxSheetMeta"
+          ]
+        },
+        {
+          "from": "src/main-process/toolbox-output-writer.js",
+          "to": "src/backend/xlsx/model.js",
+          "kind": "require",
+          "importedNames": [
+            "normalizeCell"
+          ]
+        },
+        {
+          "from": "src/main-process/toolbox-output-writer.js",
+          "to": "src/backend/xlsx/model.js",
+          "kind": "require",
+          "importedNames": [
+            "projectOutputCell"
+          ]
+        },
+        {
+          "from": "src/backend/position-reconciliation-import/xlsx-reader.js",
+          "to": "src/backend/xlsx/style-registry.js",
+          "kind": "require",
+          "importedNames": [
+            "createSourceStyleRegistryFromOoxml"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-format/biff8-pass.js",
+          "to": "src/backend/xlsx/style-registry.js",
+          "kind": "require",
+          "importedNames": [
+            "SourceStyleRegistry"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-format/csv-pass.js",
+          "to": "src/backend/xlsx/style-registry.js",
+          "kind": "require",
+          "importedNames": [
+            "SourceStyleRegistry"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-format/index.js",
+          "to": "src/backend/xlsx/style-registry.js",
+          "kind": "require",
+          "importedNames": []
+        },
+        {
+          "from": "src/backend/toolbox-format/xlsx-pass.js",
+          "to": "src/backend/xlsx/style-registry.js",
+          "kind": "require",
+          "importedNames": [
+            "createSourceStyleRegistryFromOoxml"
+          ]
+        },
+        {
+          "from": "src/main-process/toolbox-background/route-db-contract.js",
+          "to": "src/backend/xlsx/style-registry.js",
+          "kind": "require",
+          "importedNames": [
+            "normalizeStaticStyle"
+          ]
+        },
+        {
+          "from": "src/main-process/toolbox-output-writer.js",
+          "to": "src/backend/xlsx/style-registry.js",
+          "kind": "require",
+          "importedNames": [
+            "OutputStyleRegistry"
+          ]
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-review-validator.js",
+          "to": "src/backend/xlsx/style-registry.js",
+          "kind": "require",
+          "importedNames": [
+            "normalizeStaticStyle",
+            "resolveColorSpec",
+            "stableSignature"
+          ]
+        },
+        {
+          "from": "src/backend/position-reconciliation-import/xlsx-reader.js",
+          "to": "src/backend/xlsx/xlsx-sheet-scanner.js",
+          "kind": "require",
+          "importedNames": [
+            "ToolboxXlsxFormatError",
+            "scanXlsxSheet"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-format/index.js",
+          "to": "src/backend/xlsx/xlsx-sheet-scanner.js",
+          "kind": "require",
+          "importedNames": []
+        },
+        {
+          "from": "src/backend/toolbox-format/xlsx-pass.js",
+          "to": "src/backend/xlsx/xlsx-sheet-scanner.js",
+          "kind": "require",
+          "importedNames": [
+            "ToolboxXlsxCancelledError",
+            "ToolboxXlsxFormatError",
+            "scanXlsxSheet"
+          ]
+        },
+        {
+          "from": "src/main-process/position-reconciliation/filtered-source-report.js",
+          "to": "src/backend/xlsx/xlsx-sheet-scanner.js",
+          "kind": "require",
+          "importedNames": [
+            "scanXlsxSheet"
+          ]
+        },
+        {
+          "from": "src/backend/position-reconciliation-import/xlsx-reader.js",
+          "to": "src/backend/xlsx/workbook-parts.js",
+          "kind": "require",
+          "importedNames": [
+            "TOOLBOX_XLSX_METADATA_LIMITS",
+            "findRelationshipEntry",
+            "parseWorkbookRelationships",
+            "parseWorkbookXml",
+            "readToolboxMetadataEntryAsString"
+          ]
+        },
+        {
+          "from": "src/backend/toolbox-format/index.js",
+          "to": "src/backend/xlsx/workbook-parts.js",
+          "kind": "require",
+          "importedNames": []
+        },
+        {
+          "from": "src/backend/vcc-financial-op/workbook-reader.js",
+          "to": "src/backend/xlsx/workbook-parts.js",
+          "kind": "require",
+          "importedNames": [
+            "parseWorkbookXml"
+          ]
+        },
+        {
+          "from": "src/main-process/toolbox-large-split-router.js",
+          "to": "src/backend/xlsx/workbook-parts.js",
+          "kind": "require",
+          "importedNames": [
+            "findRelationshipEntry",
+            "parseWorkbookRelationships",
+            "parseWorkbookXml",
+            "readToolboxMetadataEntryAsString"
+          ]
+        }
+      ],
+      "activationEvidence": [
+        "tests/unit/backend/xlsx/legacy-compatibility.test.js",
+        "tests/unit/backend/xlsx/rich-workbook-contract.test.js",
+        "tests/unit/backend/xlsx/consumer-options.test.js",
+        "tests/unit/backend/xlsx/shared-strings-contract.test.js"
+      ],
+      "protectedScopes": [],
+      "restrictedApis": [],
+      "allowedSites": [],
+      "compositionEntrypoints": [],
+      "globals": [],
+      "factory": null,
+      "allowedApiFields": {},
+      "deprecatedEntrypoints": [
+        {
+          "path": "src/backend/pending-import/streaming-xlsx-reader.js",
+          "replacementPaths": [
+            "src/backend/xlsx/legacy/streaming-xlsx-reader.js"
+          ],
+          "exportNames": null,
+          "existingConsumers": [
+            {
+              "from": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+              "kind": "require",
+              "importedNames": [
+                "xmlUnescape"
+              ]
+            },
+            {
+              "from": "src/backend/biz-op-recon-import/reader-streamed.js",
+              "kind": "require",
+              "importedNames": [
+                "lettersToIndex",
+                "parseRowXml",
+                "readSharedStrings"
+              ]
+            },
+            {
+              "from": "src/backend/file-service/readers.js",
+              "kind": "require",
+              "importedNames": [
+                "readXlsxStreamed"
+              ]
+            },
+            {
+              "from": "src/backend/pending-import/worker.js",
+              "kind": "require",
+              "importedNames": [
+                "readXlsxStreamed"
+              ]
+            },
+            {
+              "from": "src/backend/vcc-op-calc-import/reader.js",
+              "kind": "require",
+              "importedNames": [
+                "lettersToIndex",
+                "parseRowXml",
+                "readSharedStrings"
+              ]
+            },
+            {
+              "from": "src/main-process/linked-table-stream-source.js",
+              "kind": "require",
+              "importedNames": [
+                "readXlsxStreamed"
+              ]
+            },
+            {
+              "from": "src/main-process/toolbox-stream-io.js",
+              "kind": "require",
+              "importedNames": [
+                "readXlsxStreamed"
+              ]
+            }
+          ],
+          "state": "compat",
+          "retirementEvidence": []
+        },
+        {
+          "path": "src/backend/pending-import/xlsx-size-preflight.js",
+          "replacementPaths": [
+            "src/backend/xlsx/legacy/entry-size-preflight.js"
+          ],
+          "exportNames": null,
+          "existingConsumers": [
+            {
+              "from": "src/backend/biz-op-recon-import/reader-streamed.js",
+              "kind": "require",
+              "importedNames": [
+                "assertXlsxEntriesUnderLimit"
+              ]
+            },
+            {
+              "from": "src/backend/pending-import/streaming-xlsx-reader.js",
+              "kind": "require",
+              "importedNames": [
+                "assertXlsxEntriesUnderLimit"
+              ]
+            },
+            {
+              "from": "src/backend/toolbox-xlsx-stream/large-split-worker.js",
+              "kind": "require",
+              "importedNames": [
+                "collectEntrySizes"
+              ]
+            },
+            {
+              "from": "src/backend/vcc-op-calc-import/reader.js",
+              "kind": "require",
+              "importedNames": [
+                "assertXlsxEntriesUnderLimit"
+              ]
+            },
+            {
+              "from": "src/main-process/toolbox-large-split-router.js",
+              "kind": "require",
+              "importedNames": []
+            }
+          ],
+          "state": "compat",
+          "retirementEvidence": []
+        },
+        {
+          "path": "src/backend/xlsx-rich-reader.js",
+          "replacementPaths": [
+            "src/backend/xlsx/rich-workbook.js"
+          ],
+          "exportNames": null,
+          "existingConsumers": [
+            {
+              "from": "src/backend/vcc-financial-op/review-export-plan.js",
+              "kind": "require",
+              "importedNames": [
+                "openRichWorkbook"
+              ]
+            },
+            {
+              "from": "src/backend/vcc-financial-op/system-op-importer.js",
+              "kind": "require",
+              "importedNames": [
+                "openRichWorkbook"
+              ]
+            },
+            {
+              "from": "src/backend/vcc-financial-op/workbook-import-plan.js",
+              "kind": "require",
+              "importedNames": [
+                "openRichWorkbook"
+              ]
+            },
+            {
+              "from": "src/main-process/biz-op-v327/export-source.js",
+              "kind": "require",
+              "importedNames": [
+                "openSingleSheetRichWorkbook"
+              ]
+            },
+            {
+              "from": "src/main-process/biz-op-v327/export-validator.js",
+              "kind": "require",
+              "importedNames": [
+                "openRichWorkbook"
+              ]
+            },
+            {
+              "from": "src/main-process/biz-op-v327/import-pipeline.js",
+              "kind": "require",
+              "importedNames": [
+                "openSingleSheetRichWorkbook"
+              ]
+            },
+            {
+              "from": "src/main-process/vcc-financial-op-dataset-writer.js",
+              "kind": "require",
+              "importedNames": [
+                "openRichWorkbook"
+              ]
+            },
+            {
+              "from": "src/main-process/vcc-financial-op-review-validator.js",
+              "kind": "require",
+              "importedNames": [
+                "openRichWorkbook"
+              ]
+            }
+          ],
+          "state": "compat",
+          "retirementEvidence": []
+        },
+        {
+          "path": "src/backend/position-reconciliation-import/shared-strings-provider.js",
+          "replacementPaths": [
+            "src/backend/xlsx/shared-strings-provider.js"
+          ],
+          "exportNames": null,
+          "existingConsumers": [
+            {
+              "from": "src/backend/position-reconciliation-import/xlsx-reader.js",
+              "kind": "require",
+              "importedNames": [
+                "loadSharedStringsProvider"
+              ]
+            },
+            {
+              "from": "src/backend/vcc-financial-op/workbook-reader.js",
+              "kind": "require",
+              "importedNames": [
+                "loadSharedStringsProvider"
+              ]
+            },
+            {
+              "from": "src/backend/xlsx-rich-reader.js",
+              "kind": "require",
+              "importedNames": [
+                "loadSharedStringsProvider"
+              ]
+            }
+          ],
+          "state": "compat",
+          "retirementEvidence": []
+        },
+        {
+          "path": "src/backend/big-table-import/zip-reader.js",
+          "replacementPaths": [
+            "src/backend/xlsx/zip-reader.js"
+          ],
+          "exportNames": null,
+          "existingConsumers": [
+            {
+              "from": "src/backend/big-table-import/engine.js",
+              "kind": "require",
+              "importedNames": []
+            },
+            {
+              "from": "src/backend/big-table-import/import-worker.js",
+              "kind": "require",
+              "importedNames": []
+            },
+            {
+              "from": "src/backend/position-reconciliation-import/xlsx-reader.js",
+              "kind": "require",
+              "importedNames": [
+                "WORKBOOK_ENTRY_NAME",
+                "WORKBOOK_RELS_ENTRY_NAME",
+                "openZipWithEntries"
+              ]
+            },
+            {
+              "from": "src/backend/toolbox-format/xlsx-pass.js",
+              "kind": "require",
+              "importedNames": [
+                "WORKBOOK_ENTRY_NAME",
+                "WORKBOOK_RELS_ENTRY_NAME",
+                "openZipWithEntries"
+              ]
+            },
+            {
+              "from": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+              "kind": "require",
+              "importedNames": [
+                "loadSharedStrings",
+                "locateSheets",
+                "openZipWithEntries"
+              ]
+            },
+            {
+              "from": "src/backend/vcc-financial-op/system-op-importer.js",
+              "kind": "require",
+              "importedNames": [
+                "normalizeWorksheetTarget"
+              ]
+            },
+            {
+              "from": "src/backend/vcc-financial-op/workbook-reader.js",
+              "kind": "require",
+              "importedNames": [
+                "BigTableImportError",
+                "WORKBOOK_ENTRY_NAME",
+                "locateSheets",
+                "openZipWithEntries",
+                "readEntryAsString"
+              ]
+            },
+            {
+              "from": "src/backend/xlsx-rich-reader.js",
+              "kind": "require",
+              "importedNames": [
+                "WORKBOOK_ENTRY_NAME",
+                "WORKBOOK_RELS_ENTRY_NAME",
+                "openZipWithEntries"
+              ]
+            },
+            {
+              "from": "src/main-process/duplicate-inbound-match/document-statement-reader.js",
+              "kind": "require",
+              "importedNames": [
+                "WORKBOOK_ENTRY_NAME",
+                "locateSheets"
+              ]
+            },
+            {
+              "from": "src/main-process/new-account/generation-core.js",
+              "kind": "require",
+              "importedNames": [
+                "locateSheets",
+                "openZipWithEntries"
+              ]
+            },
+            {
+              "from": "src/main-process/recon-id-fix-service/artifact-evidence.js",
+              "kind": "require",
+              "importedNames": [
+                "openZipWithEntries",
+                "readEntryAsString"
+              ]
+            },
+            {
+              "from": "src/main-process/toolbox-large-split-router.js",
+              "kind": "require",
+              "importedNames": [
+                "openZipWithEntries"
+              ]
+            },
+            {
+              "from": "src/main-process/toolbox-output-writer.js",
+              "kind": "require",
+              "importedNames": [
+                "openZipWithEntries",
+                "readEntryAsString"
+              ]
+            },
+            {
+              "from": "src/main-process/vcc-financial-op-review-validator.js",
+              "kind": "require",
+              "importedNames": [
+                "openZipWithEntries"
+              ]
+            }
+          ],
+          "state": "compat",
+          "retirementEvidence": []
+        },
+        {
+          "path": "src/backend/toolbox-format/excel-text.js",
+          "replacementPaths": [
+            "src/backend/xlsx/excel-text.js"
+          ],
+          "exportNames": null,
+          "existingConsumers": [
+            {
+              "from": "src/backend/position-reconciliation-import/shared-strings-provider.js",
+              "kind": "require",
+              "importedNames": [
+                "EXCEL_CELL_TEXT_MAX_UTF16_UNITS",
+                "assertExcelCellTextLength"
+              ]
+            },
+            {
+              "from": "src/backend/toolbox-format/index.js",
+              "kind": "require",
+              "importedNames": []
+            },
+            {
+              "from": "src/backend/toolbox-format/xlsx-pass.js",
+              "kind": "require",
+              "importedNames": [
+                "assertExcelCellTextLength",
+                "assertExcelStXstringRawLength",
+                "decodeExcelStXstring"
+              ]
+            },
+            {
+              "from": "src/backend/toolbox-format/xlsx-sheet-scanner.js",
+              "kind": "require",
+              "importedNames": [
+                "EXCEL_CELL_TEXT_MAX_UTF16_UNITS",
+                "EXCEL_ST_XSTRING_MAX_RAW_UTF16_UNITS",
+                "assertExcelCellTextLength",
+                "assertExcelStXstringRawLength",
+                "decodeExcelStXstring"
+              ]
+            },
+            {
+              "from": "src/backend/vcc-financial-op/review-export-contract.js",
+              "kind": "require",
+              "importedNames": [
+                "assertExcelCellTextLength"
+              ]
+            },
+            {
+              "from": "src/main-process/biz-op-v327/export-cells.js",
+              "kind": "require",
+              "importedNames": [
+                "assertExcelCellTextLength"
+              ]
+            },
+            {
+              "from": "src/main-process/biz-op-v327/export-writer.js",
+              "kind": "require",
+              "importedNames": [
+                "encodeExcelStXstring"
+              ]
+            },
+            {
+              "from": "src/main-process/toolbox-output-writer.js",
+              "kind": "require",
+              "importedNames": [
+                "ToolboxExcelTextError",
+                "assertExcelCellTextLength",
+                "encodeExcelStXstring"
+              ]
+            },
+            {
+              "from": "src/main-process/vcc-financial-op-review-validator.js",
+              "kind": "require",
+              "importedNames": [
+                "decodeExcelStXstring"
+              ]
+            },
+            {
+              "from": "src/main-process/vcc-financial-op-review-writer.js",
+              "kind": "require",
+              "importedNames": [
+                "encodeExcelStXstring"
+              ]
+            },
+            {
+              "from": "src/main-process/vcc-financial-op-writer.js",
+              "kind": "require",
+              "importedNames": [
+                "encodeExcelStXstring"
+              ]
+            }
+          ],
+          "state": "compat",
+          "retirementEvidence": []
+        },
+        {
+          "path": "src/backend/toolbox-format/ooxml-namespaces.js",
+          "replacementPaths": [
+            "src/backend/xlsx/ooxml-namespaces.js"
+          ],
+          "exportNames": null,
+          "existingConsumers": [
+            {
+              "from": "src/backend/toolbox-format/style-registry.js",
+              "kind": "require",
+              "importedNames": [
+                "DRAWINGML_NAMESPACES",
+                "SPREADSHEETML_NAMESPACES",
+                "exactSaxLocalName",
+                "namespaceAllowed",
+                "normalizedSaxAttributes",
+                "saxAttributeIdentity"
+              ]
+            },
+            {
+              "from": "src/backend/toolbox-format/xlsx-pass.js",
+              "kind": "require",
+              "importedNames": [
+                "OFFICE_RELATIONSHIP_NAMESPACES",
+                "PACKAGE_RELATIONSHIP_NAMESPACES",
+                "SPREADSHEETML_NAMESPACES",
+                "exactSaxLocalName",
+                "namespaceAllowed",
+                "normalizedSaxAttributes",
+                "saxAttributeIdentity"
+              ]
+            },
+            {
+              "from": "src/backend/toolbox-format/xlsx-sheet-scanner.js",
+              "kind": "require",
+              "importedNames": [
+                "SPREADSHEETML_NAMESPACES",
+                "namespaceAllowed",
+                "normalizedSaxAttributes"
+              ]
+            },
+            {
+              "from": "src/main-process/toolbox-output-writer.js",
+              "kind": "require",
+              "importedNames": [
+                "OFFICE_RELATIONSHIP_NAMESPACES",
+                "PACKAGE_RELATIONSHIP_NAMESPACES",
+                "SPREADSHEETML_NAMESPACES",
+                "namespaceAllowed",
+                "saxAttributeValue"
+              ]
+            },
+            {
+              "from": "src/main-process/vcc-financial-op-writer.js",
+              "kind": "require",
+              "importedNames": [
+                "SPREADSHEETML_NAMESPACES",
+                "exactSaxLocalName",
+                "namespaceAllowed",
+                "normalizedSaxAttributes"
+              ]
+            }
+          ],
+          "state": "compat",
+          "retirementEvidence": []
+        },
+        {
+          "path": "src/backend/toolbox-format/number-date.js",
+          "replacementPaths": [
+            "src/backend/xlsx/number-date.js"
+          ],
+          "exportNames": null,
+          "existingConsumers": [
+            {
+              "from": "src/backend/position-reconciliation-import/xlsx-reader.js",
+              "kind": "require",
+              "importedNames": [
+                "classifyExcelNumberFormat"
+              ]
+            },
+            {
+              "from": "src/backend/toolbox-format/biff8-records.js",
+              "kind": "require",
+              "importedNames": [
+                "BUILTIN_NUMBER_FORMATS"
+              ]
+            },
+            {
+              "from": "src/backend/toolbox-format/index.js",
+              "kind": "require",
+              "importedNames": []
+            },
+            {
+              "from": "src/backend/toolbox-format/model.js",
+              "kind": "require",
+              "importedNames": [
+                "classifyExcelNumberFormat",
+                "classifyNumericOutput",
+                "gregorianTupleToExcelSerial",
+                "parseDecimalLexical",
+                "serial1904To1900"
+              ]
+            },
+            {
+              "from": "src/backend/toolbox-format/style-registry.js",
+              "kind": "require",
+              "importedNames": [
+                "getBuiltinNumberFormat",
+                "isBuiltinNumberFormat"
+              ]
+            },
+            {
+              "from": "src/backend/toolbox-format/xlsx-sheet-scanner.js",
+              "kind": "require",
+              "importedNames": [
+                "classifyNumericOutput",
+                "decimalComparable",
+                "parseDecimalLexical",
+                "parseOoxmlWallClock"
+              ]
+            },
+            {
+              "from": "src/backend/vcc-financial-op/review-export-contract.js",
+              "kind": "require",
+              "importedNames": [
+                "classifyNumericOutput",
+                "decimalComparable"
+              ]
+            },
+            {
+              "from": "src/main-process/biz-op-v327/export-cells.js",
+              "kind": "require",
+              "importedNames": [
+                "classifyNumericOutput"
+              ]
+            },
+            {
+              "from": "src/main-process/biz-op-v327/import-adapter.js",
+              "kind": "require",
+              "importedNames": [
+                "classifyExcelNumberFormat"
+              ]
+            },
+            {
+              "from": "src/main-process/vcc-financial-op-review-validator.js",
+              "kind": "require",
+              "importedNames": [
+                "decimalComparable"
+              ]
+            }
+          ],
+          "state": "compat",
+          "retirementEvidence": []
+        },
+        {
+          "path": "src/backend/toolbox-format/model.js",
+          "replacementPaths": [
+            "src/backend/xlsx/model.js"
+          ],
+          "exportNames": null,
+          "existingConsumers": [
+            {
+              "from": "src/backend/toolbox-format/biff8-pass.js",
+              "kind": "require",
+              "importedNames": [
+                "createToolboxCell",
+                "createToolboxRow",
+                "createToolboxSheetMeta"
+              ]
+            },
+            {
+              "from": "src/backend/toolbox-format/csv-pass.js",
+              "kind": "require",
+              "importedNames": [
+                "createToolboxCell",
+                "createToolboxRow",
+                "createToolboxSheetMeta"
+              ]
+            },
+            {
+              "from": "src/backend/toolbox-format/index.js",
+              "kind": "require",
+              "importedNames": []
+            },
+            {
+              "from": "src/backend/toolbox-format/xlsx-sheet-scanner.js",
+              "kind": "require",
+              "importedNames": [
+                "createToolboxCell",
+                "createToolboxRow",
+                "createToolboxSheetMeta"
+              ]
+            },
+            {
+              "from": "src/main-process/toolbox-background/route-db-contract.js",
+              "kind": "require",
+              "importedNames": [
+                "createToolboxCell",
+                "createToolboxRow",
+                "createToolboxSheetMeta"
+              ]
+            },
+            {
+              "from": "src/main-process/toolbox-output-writer.js",
+              "kind": "require",
+              "importedNames": [
+                "normalizeCell"
+              ]
+            },
+            {
+              "from": "src/main-process/toolbox-output-writer.js",
+              "kind": "require",
+              "importedNames": [
+                "projectOutputCell"
+              ]
+            }
+          ],
+          "state": "compat",
+          "retirementEvidence": []
+        },
+        {
+          "path": "src/backend/toolbox-format/style-registry.js",
+          "replacementPaths": [
+            "src/backend/xlsx/style-registry.js"
+          ],
+          "exportNames": null,
+          "existingConsumers": [
+            {
+              "from": "src/backend/position-reconciliation-import/xlsx-reader.js",
+              "kind": "require",
+              "importedNames": [
+                "createSourceStyleRegistryFromOoxml"
+              ]
+            },
+            {
+              "from": "src/backend/toolbox-format/biff8-pass.js",
+              "kind": "require",
+              "importedNames": [
+                "SourceStyleRegistry"
+              ]
+            },
+            {
+              "from": "src/backend/toolbox-format/csv-pass.js",
+              "kind": "require",
+              "importedNames": [
+                "SourceStyleRegistry"
+              ]
+            },
+            {
+              "from": "src/backend/toolbox-format/index.js",
+              "kind": "require",
+              "importedNames": []
+            },
+            {
+              "from": "src/backend/toolbox-format/xlsx-pass.js",
+              "kind": "require",
+              "importedNames": [
+                "createSourceStyleRegistryFromOoxml"
+              ]
+            },
+            {
+              "from": "src/backend/xlsx-rich-reader.js",
+              "kind": "require",
+              "importedNames": [
+                "createSourceStyleRegistryFromOoxml"
+              ]
+            },
+            {
+              "from": "src/main-process/toolbox-background/route-db-contract.js",
+              "kind": "require",
+              "importedNames": [
+                "normalizeStaticStyle"
+              ]
+            },
+            {
+              "from": "src/main-process/toolbox-output-writer.js",
+              "kind": "require",
+              "importedNames": [
+                "OutputStyleRegistry"
+              ]
+            },
+            {
+              "from": "src/main-process/vcc-financial-op-review-validator.js",
+              "kind": "require",
+              "importedNames": [
+                "normalizeStaticStyle",
+                "resolveColorSpec",
+                "stableSignature"
+              ]
+            }
+          ],
+          "state": "compat",
+          "retirementEvidence": []
+        },
+        {
+          "path": "src/backend/toolbox-format/xlsx-sheet-scanner.js",
+          "replacementPaths": [
+            "src/backend/xlsx/xlsx-sheet-scanner.js"
+          ],
+          "exportNames": null,
+          "existingConsumers": [
+            {
+              "from": "src/backend/position-reconciliation-import/xlsx-reader.js",
+              "kind": "require",
+              "importedNames": [
+                "ToolboxXlsxFormatError",
+                "scanXlsxSheet"
+              ]
+            },
+            {
+              "from": "src/backend/toolbox-format/index.js",
+              "kind": "require",
+              "importedNames": []
+            },
+            {
+              "from": "src/backend/toolbox-format/xlsx-pass.js",
+              "kind": "require",
+              "importedNames": [
+                "ToolboxXlsxCancelledError",
+                "ToolboxXlsxFormatError",
+                "scanXlsxSheet"
+              ]
+            },
+            {
+              "from": "src/backend/xlsx-rich-reader.js",
+              "kind": "require",
+              "importedNames": [
+                "scanXlsxSheet"
+              ]
+            },
+            {
+              "from": "src/main-process/position-reconciliation/filtered-source-report.js",
+              "kind": "require",
+              "importedNames": [
+                "scanXlsxSheet"
+              ]
+            }
+          ],
+          "state": "compat",
+          "retirementEvidence": []
+        },
+        {
+          "path": "src/backend/toolbox-format/xlsx-pass.js",
+          "replacementPaths": [
+            "src/backend/xlsx/workbook-parts.js"
+          ],
+          "exportNames": [
+            "TOOLBOX_MAX_SHARED_STRINGS_UNCOMPRESSED_BYTES",
+            "TOOLBOX_XLSX_METADATA_LIMITS",
+            "assertToolboxSharedStringsSize",
+            "findRelationshipEntry",
+            "loadToolboxSharedStrings",
+            "normalizeRelationshipTarget",
+            "parseWorkbookRelationships",
+            "parseWorkbookXml",
+            "relationshipTypeAllowed",
+            "readToolboxMetadataEntryAsString"
+          ],
+          "existingConsumers": [
+            {
+              "from": "src/backend/position-reconciliation-import/shared-strings-provider.js",
+              "kind": "require",
+              "importedNames": [
+                "loadToolboxSharedStrings"
+              ]
+            },
+            {
+              "from": "src/backend/position-reconciliation-import/xlsx-reader.js",
+              "kind": "require",
+              "importedNames": [
+                "TOOLBOX_XLSX_METADATA_LIMITS",
+                "findRelationshipEntry",
+                "parseWorkbookRelationships",
+                "parseWorkbookXml",
+                "readToolboxMetadataEntryAsString"
+              ]
+            },
+            {
+              "from": "src/backend/toolbox-format/index.js",
+              "kind": "require",
+              "importedNames": []
+            },
+            {
+              "from": "src/backend/vcc-financial-op/workbook-reader.js",
+              "kind": "require",
+              "importedNames": [
+                "parseWorkbookXml"
+              ]
+            },
+            {
+              "from": "src/backend/xlsx-rich-reader.js",
+              "kind": "require",
+              "importedNames": [
+                "TOOLBOX_XLSX_METADATA_LIMITS",
+                "findRelationshipEntry",
+                "parseWorkbookRelationships",
+                "parseWorkbookXml",
+                "readToolboxMetadataEntryAsString",
+                "relationshipTypeAllowed"
+              ]
+            },
+            {
+              "from": "src/main-process/toolbox-large-split-router.js",
+              "kind": "require",
+              "importedNames": [
+                "findRelationshipEntry",
+                "parseWorkbookRelationships",
+                "parseWorkbookXml",
+                "readToolboxMetadataEntryAsString"
+              ]
+            }
+          ],
+          "state": "compat",
+          "retirementEvidence": []
+        }
+      ],
+      "directory": "src/backend/xlsx"
+    },
+    {
+      "id": "publication-recovery-entry",
+      "governance": "G1",
+      "owner": "codex/v3.2.10-application-recovery",
+      "state": "pending",
+      "rules": [
+        "ARCH-PUBLICATION-RECOVERY-ENTRY"
+      ],
+      "entrypoints": [
+        "src/main-process/publication-recovery/coordinator.js",
+        "src/main-process/publication-recovery/archive-owner.js"
+      ],
+      "allowedLocal": [
+        "src/main-process/publication-recovery/coordinator.js",
+        "src/main-process/publication-recovery/archive-owner.js"
+      ],
+      "allowedExternal": [],
+      "requiredConsumers": [
+        {
+          "from": "src/main.js",
+          "to": "src/main-process/publication-recovery/coordinator.js",
+          "kind": "require",
+          "importedNames": []
+        }
+      ],
+      "activationEvidence": [
+        "tests/unit/main-process/publication-recovery-owner.test.js",
+        "tests/unit/main-process/publication-recovery-entrypoints.test.js"
+      ],
+      "protectedScopes": [
+        {
+          "path": "src/main-process/toolbox-output-publication-dispatch.js",
+          "functionPath": null
+        },
+        {
+          "path": "src/main-process/toolbox-output-publication-worker.js",
+          "functionPath": null
+        },
+        {
+          "path": "src/main-process/toolbox-output-publication.js",
+          "functionPath": "prepareToolboxPublication"
+        }
+      ],
+      "restrictedApis": [
+        {
+          "path": "src/main-process/toolbox-output-publication.js",
+          "exportNames": [
+            "recoverPendingToolboxPublications"
+          ],
+          "operations": [
+            "recoverPendingInternal"
+          ]
+        },
+        {
+          "path": "src/main-process/toolbox-output-publication-worker.js",
+          "exportNames": null,
+          "operations": [
+            "recover"
+          ]
+        },
+        {
+          "path": "src/main-process/toolbox-output-publication-dispatch.js",
+          "exportNames": [
+            "recoverToolboxPublicationsAsync"
+          ],
+          "operations": [
+            "recover"
+          ]
+        }
+      ],
+      "allowedSites": [
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "from": "src/main-process/toolbox-output-publication.js",
+          "functionPath": "recoverPendingToolboxPublications.<anonymous:1>",
+          "callee": "recoverPendingInternal",
+          "evidenceId": "5bbba2914b4cb1d64c4bb66fab9fbe866cfe79aa27718edea985679629ece487",
+          "reason": "raw recovery API 的内部受互斥锁保护实现调用；prepare 的隐式调用不享有此许可"
+        },
+        {
+          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+          "from": "src/main-process/toolbox-output-publication-dispatch.js",
+          "functionPath": "runWorkerJob.<anonymous:1>.<anonymous:4>",
+          "callee": "onWorkerExit",
+          "evidenceId": "ab2f86aeb298c450cbd7c00111eda42c2674625ec54750a7dd852fdae0544f5b",
+          "reason": "worker exit 事件的通知回调仅报告 jobId/op/code；它不发送 worker operation，不执行恢复。"
+        }
+      ],
+      "compositionEntrypoints": [],
+      "globals": [],
+      "factory": null,
+      "allowedApiFields": {},
+      "deprecatedEntrypoints": [],
+      "directory": null
+    },
+    {
+      "id": "bizop-recovery-private",
+      "governance": "G1",
+      "owner": "codex/v3.2.10-application-recovery",
+      "state": "pending",
+      "rules": [
+        "ARCH-BIZOP-RECOVERY-PRIVATE"
+      ],
+      "entrypoints": [
+        "src/main-process/biz-op-v327/recovery-driver.js",
+        "src/main-process/biz-op-v327/recovery-sources.js",
+        "src/main-process/biz-op-v327/recovery-budget.js",
+        "src/main-process/biz-op-v327/recovery-plan.js",
+        "src/main-process/biz-op-v327/recovery-alignment.js",
+        "src/main-process/biz-op-v327/export-publication.js",
+        "src/main-process/biz-op-v327/recovery-participant.js",
+        "src/main-process/biz-op-v327/publication-owner.js"
+      ],
+      "allowedLocal": [
+        "src/main-process/biz-op-v327/recovery-driver.js",
+        "src/main-process/biz-op-v327/recovery-sources.js",
+        "src/main-process/biz-op-v327/recovery-budget.js",
+        "src/main-process/biz-op-v327/recovery-plan.js",
+        "src/main-process/biz-op-v327/recovery-alignment.js",
+        "src/main-process/biz-op-v327/export-publication.js",
+        "src/main-process/biz-op-v327/recovery-participant.js",
+        "src/main-process/biz-op-v327/publication-owner.js"
+      ],
+      "allowedExternal": [],
+      "requiredConsumers": [
+        {
+          "from": "src/main.js",
+          "to": "src/main-process/biz-op-v327/recovery-driver.js",
+          "kind": "require",
+          "importedNames": []
+        }
+      ],
+      "activationEvidence": [
+        "tests/unit/main-process/application-recovery.test.js",
+        "tests/unit/main-process/publication-recovery-owner.test.js"
+      ],
+      "protectedScopes": [],
+      "restrictedApis": [
+        {
+          "path": "src/main-process/biz-op-v327/recovery-driver.js",
+          "exportNames": null,
+          "operations": []
+        },
+        {
+          "path": "src/main-process/biz-op-v327/recovery-sources.js",
+          "exportNames": null,
+          "operations": []
+        },
+        {
+          "path": "src/main-process/biz-op-v327/recovery-budget.js",
+          "exportNames": null,
+          "operations": []
+        },
+        {
+          "path": "src/main-process/biz-op-v327/recovery-plan.js",
+          "exportNames": null,
+          "operations": []
+        },
+        {
+          "path": "src/main-process/biz-op-v327/recovery-alignment.js",
+          "exportNames": null,
+          "operations": []
+        },
+        {
+          "path": "src/main-process/biz-op-v327/export-publication.js",
+          "exportNames": null,
+          "operations": []
+        },
+        {
+          "path": "src/main-process/biz-op-v327/recovery-participant.js",
+          "exportNames": null,
+          "operations": []
+        },
+        {
+          "path": "src/main-process/biz-op-v327/publication-owner.js",
+          "exportNames": null,
+          "operations": []
+        }
+      ],
+      "allowedSites": [],
+      "compositionEntrypoints": [
+        {
+          "path": "src/main-process/application-recovery/composition.js",
+          "importedNames": [
+            "createBizOpRecoveryParticipant"
+          ],
+          "allowedTargets": [
+            "src/main-process/biz-op-v327/recovery-participant.js"
+          ]
+        },
+        {
+          "path": "src/main-process/publication-recovery/composition.js",
+          "importedNames": [
+            "createBizOpPublicationOwner"
+          ],
+          "allowedTargets": [
+            "src/main-process/biz-op-v327/publication-owner.js"
+          ]
+        },
+        {
+          "path": "src/main.js",
+          "importedNames": [
+            "createBizOpV327Module"
+          ],
+          "allowedTargets": [
+            "src/main-process/biz-op-v327/module.js"
+          ]
+        },
+        {
+          "path": "src/main.js",
+          "importedNames": [
+            "registerBizOpV327Handlers"
+          ],
+          "allowedTargets": [
+            "src/main-process/biz-op-v327/ipc.js"
+          ]
+        }
+      ],
+      "globals": [],
+      "factory": null,
+      "allowedApiFields": {},
+      "deprecatedEntrypoints": [],
+      "directory": null
+    },
+    {
+      "id": "business-task-adapters",
+      "governance": "G2",
+      "owner": "codex/v3.2.10-business-task-adapters",
+      "state": "pending",
+      "rules": [
+        "ARCH-TASK-ADAPTER"
+      ],
+      "entrypoints": [
+        "src/main-process/archive-center/task-lifecycle.js",
+        "src/main-process/archive-center/ipc-task-contract.js",
+        "src/main-process/task-adapters/registry.js",
+        "src/main-process/task-adapters/passthrough.js",
+        "src/main-process/task-adapters/prepared-resources.js",
+        "src/main-process/archive-center/terminal-route-registry.js"
+      ],
+      "allowedLocal": [
+        "src/main-process/archive-center/task-lifecycle.js",
+        "src/main-process/archive-center/ipc-task-contract.js",
+        "src/main-process/task-adapters/registry.js",
+        "src/main-process/task-adapters/passthrough.js",
+        "src/main-process/task-adapters/prepared-resources.js",
+        "src/main-process/archive-center/terminal-route-registry.js"
+      ],
+      "allowedExternal": [],
+      "requiredConsumers": [
+        {
+          "from": "src/main.js",
+          "to": "src/main-process/task-adapters/registry.js",
+          "kind": "require",
+          "importedNames": []
+        }
+      ],
+      "activationEvidence": [
+        "tests/unit/main-process/task-adapters.test.js",
+        "tests/unit/main-process/prepared-resource-scope.test.js",
+        "tests/unit/main-process/archive-aware-prepared-resource-entry.test.js",
+        "tests/unit/main-process/position-task-adapter.test.js",
+        "tests/unit/main-process/archive-terminal-route-registry.test.js"
+      ],
+      "protectedScopes": [
+        {
+          "path": "src/main-process/archive-center/task-lifecycle.js",
+          "functionPath": null
+        },
+        {
+          "path": "src/main-process/archive-center/ipc-task-contract.js",
+          "functionPath": null
+        },
+        {
+          "path": "src/main-process/task-adapters/registry.js",
+          "functionPath": null
+        },
+        {
+          "path": "src/main-process/task-adapters/passthrough.js",
+          "functionPath": null
+        },
+        {
+          "path": "src/main-process/task-adapters/prepared-resources.js",
+          "functionPath": null
+        },
+        {
+          "path": "src/main-process/archive-center/terminal-route-registry.js",
+          "functionPath": null
+        },
+        {
+          "path": "src/main.js",
+          "functionPath": "runArchiveAwareOperation"
+        }
+      ],
+      "restrictedApis": [
+        {
+          "path": "src/main-process/position-reconciliation/interactive-task-preflight.js",
+          "exportNames": null,
+          "operations": []
+        },
+        {
+          "path": "src/main-process/position-reconciliation/task-owner.js",
+          "exportNames": null,
+          "operations": []
+        },
+        {
+          "path": "src/main-process/position-reconciliation/task-adapter.js",
+          "exportNames": null,
+          "operations": []
+        },
+        {
+          "path": "src/main.js",
+          "exportNames": [],
+          "operations": [
+            "recordPositionFilePlanIntent",
+            "markPositionBusinessOutcome",
+            "markPositionArchiveDurable",
+            "cleanupPositionArchiveStaging",
+            "markPositionArchiveIncomplete",
+            "settlePositionArchiveResult",
+            "runPositionReconciliationOperation"
+          ]
+        }
+      ],
+      "allowedSites": [
+        {
+          "rule": "ARCH-TASK-ADAPTER",
+          "from": "src/main.js",
+          "functionPath": "finalizeRecoveredPositionPending",
+          "callee": "getBatch",
+          "evidenceId": "3ca09ca56e0ad2c69db30be9cfcce7b356ae16f4f91cb151f4fcb769e9abad6c",
+          "reason": "读取 Archive repository 批次状态用于终态收口；不是 Position 私有 pending/settlement API，准确位置保持既有公共协调职责。"
+        },
+        {
+          "rule": "ARCH-TASK-ADAPTER",
+          "from": "src/main.js",
+          "functionPath": "getPositionReconciliationService",
+          "callee": "flushOutbox",
+          "evidenceId": "f07be0037f18623d8a5f95557f0d7bd699ccc0fb6804dd2f4a58768991c8db77",
+          "reason": "领域 service 构造时触发 Archive 公共 outbox 刷新；该准确公共调用不属于 Position 私有状态操作。"
+        },
+        {
+          "rule": "ARCH-TASK-ADAPTER",
+          "from": "src/main.js",
+          "functionPath": "positionArchiveProtectedStagingPaths",
+          "callee": "protectedPaths.concat",
+          "evidenceId": "26691b6ae5b3b19a1c38c6055a92823ada270ce6ad8b6f38e2a85f397336502e",
+          "reason": "拼接持久保护路径数组与已用 Array.isArray 核对的活动路径；此处是数据拼接而非调用领域状态机。"
+        },
+        {
+          "rule": "ARCH-TASK-ADAPTER",
+          "from": "src/main.js",
+          "functionPath": "assertTaskPolicyNotHeld",
+          "callee": "actionTaskBindingRegistry.allowedTaskKeys",
+          "evidenceId": "10256647bfc2b1371366ab741e088aeab85075b5c4547384f43eee2c8cd85d07",
+          "reason": "读取启动期 initializeActionTaskBindingStartup 返回的绑定注册表，属于公共 task policy 查询，不改变 Position 状态。"
+        }
+      ],
+      "compositionEntrypoints": [],
+      "globals": [],
+      "factory": null,
+      "allowedApiFields": {},
+      "deprecatedEntrypoints": [],
+      "directory": null
+    },
+    {
+      "id": "bizop-query-q1",
+      "governance": "G5",
+      "owner": "codex/v3.2.10-bizop-query-boundaries",
+      "state": "pending",
+      "rules": [
+        "ARCH-BIZOP-QUERY"
+      ],
+      "entrypoints": [
+        "src/main-process/biz-op-v327/catalog-queries.js",
+        "src/backend/database/archive-repository.js"
+      ],
+      "allowedLocal": [
+        "src/main-process/biz-op-v327/catalog-queries.js",
+        "src/backend/database/archive-repository.js"
+      ],
+      "allowedExternal": [],
+      "requiredConsumers": [
+        {
+          "from": "src/main-process/biz-op-v327/delete-preview.js",
+          "to": "src/main-process/biz-op-v327/catalog-queries.js",
+          "kind": "require",
+          "importedNames": []
+        }
+      ],
+      "activationEvidence": [
+        "tests/unit/main-process/biz-op-v327-delete-main.test.js",
+        "tests/unit/backend/archive-blob-reference-query.test.js"
+      ],
+      "protectedScopes": [
+        {
+          "path": "src/main-process/biz-op-v327/delete-preview.js",
+          "functionPath": "createBizOpDeletePreview.collect"
+        }
+      ],
+      "restrictedApis": [],
+      "allowedSites": [],
+      "compositionEntrypoints": [],
+      "globals": [],
+      "factory": null,
+      "allowedApiFields": {},
+      "deprecatedEntrypoints": [],
+      "directory": null
+    },
+    {
+      "id": "bizop-query-q2",
+      "governance": "G5",
+      "owner": "codex/v3.2.10-bizop-query-boundaries",
+      "state": "pending",
+      "rules": [
+        "ARCH-BIZOP-QUERY"
+      ],
+      "entrypoints": [
+        "src/main-process/biz-op-v327/catalog-queries.js"
+      ],
+      "allowedLocal": [
+        "src/main-process/biz-op-v327/catalog-queries.js",
+        "src/backend/database/archive-repository.js"
+      ],
+      "allowedExternal": [],
+      "requiredConsumers": [
+        {
+          "from": "src/main-process/biz-op-v327/compute-inputs.js",
+          "to": "src/main-process/biz-op-v327/catalog-queries.js",
+          "kind": "require",
+          "importedNames": []
+        },
+        {
+          "from": "src/main-process/biz-op-v327/export-inputs.js",
+          "to": "src/main-process/biz-op-v327/catalog-queries.js",
+          "kind": "require",
+          "importedNames": []
+        }
+      ],
+      "activationEvidence": [
+        "tests/unit/main-process/biz-op-v327-catalog-queries.test.js",
+        "tests/unit/main-process/biz-op-v327-compute-main.test.js",
+        "tests/unit/main-process/biz-op-v327-export-main.test.js"
+      ],
+      "protectedScopes": [
+        {
+          "path": "src/main-process/biz-op-v327/compute-inputs.js",
+          "functionPath": null
+        },
+        {
+          "path": "src/main-process/biz-op-v327/export-inputs.js",
+          "functionPath": null
+        }
+      ],
+      "restrictedApis": [],
+      "allowedSites": [],
+      "compositionEntrypoints": [],
+      "globals": [],
+      "factory": null,
+      "allowedApiFields": {},
+      "deprecatedEntrypoints": [],
+      "directory": null
+    },
+    {
+      "id": "bizop-query-q3",
+      "governance": "G5",
+      "owner": "codex/v3.2.10-bizop-query-boundaries",
+      "state": "pending",
+      "rules": [
+        "ARCH-BIZOP-QUERY"
+      ],
+      "entrypoints": [
+        "src/main-process/biz-op-v327/catalog-queries.js"
+      ],
+      "allowedLocal": [
+        "src/main-process/biz-op-v327/catalog-queries.js",
+        "src/backend/database/archive-repository.js"
+      ],
+      "allowedExternal": [],
+      "requiredConsumers": [
+        {
+          "from": "src/main-process/biz-op-v327/import-main.js",
+          "to": "src/main-process/biz-op-v327/catalog-queries.js",
+          "kind": "require",
+          "importedNames": []
+        },
+        {
+          "from": "src/main-process/biz-op-v327/delete-preview.js",
+          "to": "src/main-process/biz-op-v327/catalog-queries.js",
+          "kind": "require",
+          "importedNames": []
+        }
+      ],
+      "activationEvidence": [
+        "tests/unit/main-process/biz-op-v327-catalog-queries.test.js",
+        "tests/unit/main-process/biz-op-v327-delete-main.test.js",
+        "tests/unit/main-process/biz-op-v327-import-main.test.js"
+      ],
+      "protectedScopes": [
+        {
+          "path": "src/main-process/biz-op-v327/import-main.js",
+          "functionPath": null
+        },
+        {
+          "path": "src/main-process/biz-op-v327/delete-preview.js",
+          "functionPath": null
+        }
+      ],
+      "restrictedApis": [],
+      "allowedSites": [
+        {
+          "rule": "ARCH-BIZOP-QUERY",
+          "from": "src/main-process/biz-op-v327/delete-preview.js",
+          "functionPath": "createBizOpDeletePreview.get",
+          "callee": "catalog.db.prepare",
+          "evidenceId": "fc155a4e475bc7d8598f1112c027bebdde3639241d7ee2976165c6f2ec548033",
+          "reason": "delete-preview 自有预览表 command 及附属读取，业务事实 collect 不在许可内"
+        },
+        {
+          "rule": "ARCH-BIZOP-QUERY",
+          "from": "src/main-process/biz-op-v327/delete-preview.js",
+          "functionPath": "createBizOpDeletePreview.create.<anonymous:1>.<anonymous:1>",
+          "callee": "catalog.db.prepare",
+          "evidenceId": "1ea23db0c8bf76164da5095cdb073e14ca2ff86b4bdb81ecb4caea3e535e0acc",
+          "reason": "delete-preview 自有预览表 command 及附属读取，业务事实 collect 不在许可内"
+        },
+        {
+          "rule": "ARCH-BIZOP-QUERY",
+          "from": "src/main-process/biz-op-v327/delete-preview.js",
+          "functionPath": "createBizOpDeletePreview.create.<anonymous:1>.<anonymous:1>",
+          "callee": "catalog.db.prepare",
+          "evidenceId": "1382b0f194d1d64a84ec238e38c416660fa3c3330aaf095f3098fcaea7e1aebb",
+          "reason": "delete-preview 自有预览表 command 及附属读取，业务事实 collect 不在许可内"
+        },
+        {
+          "rule": "ARCH-BIZOP-QUERY",
+          "from": "src/main-process/biz-op-v327/delete-preview.js",
+          "functionPath": "createBizOpDeletePreview.create.<anonymous:1>.<anonymous:1>",
+          "callee": "catalog.db.prepare",
+          "evidenceId": "9ebac702f51f07d70a2459e3b7613f51ded2af2b18dd42bbc397da6f3296b2fb",
+          "reason": "delete-preview 自有预览表 command 及附属读取，业务事实 collect 不在许可内"
+        },
+        {
+          "rule": "ARCH-BIZOP-QUERY",
+          "from": "src/main-process/biz-op-v327/delete-preview.js",
+          "functionPath": "createBizOpDeletePreview.bind",
+          "callee": "catalog.db.prepare",
+          "evidenceId": "07ef8ecccdb4a1faa7a9a47475f50d90ea8f8093768e0dd8c51d7977b94b41eb",
+          "reason": "delete-preview 自有预览表 command 及附属读取，业务事实 collect 不在许可内"
+        }
+      ],
+      "compositionEntrypoints": [],
+      "globals": [],
+      "factory": null,
+      "allowedApiFields": {},
+      "deprecatedEntrypoints": [],
+      "directory": null
+    },
+    {
+      "id": "descriptor-composition",
+      "governance": "G7",
+      "owner": "codex/v3.2.10-execution-descriptors",
+      "state": "pending",
+      "rules": [
+        "ARCH-DESCRIPTOR-COMPOSITION"
+      ],
+      "entrypoints": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/background-execution/execution-policy-registry.js",
+        "src/main-process/archive-center/task-policy-registry.js",
+        "src/main-process/archive-center/task-policy-common.js",
+        "src/main-process/execution-descriptors/contract.js"
+      ],
+      "allowedLocal": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/background-execution/execution-policy-registry.js",
+        "src/main-process/archive-center/task-policy-registry.js",
+        "src/main-process/archive-center/task-policy-common.js",
+        "src/main-process/execution-descriptors/contract.js"
+      ],
+      "allowedExternal": [],
+      "requiredConsumers": [
+        {
+          "from": "src/main.js",
+          "to": "src/main-process/execution-descriptors/composition.js",
+          "kind": "require",
+          "importedNames": []
+        }
+      ],
+      "activationEvidence": [
+        "tests/unit/main-process/execution-descriptor-contract.test.js",
+        "tests/unit/main-process/execution-descriptor-equivalence.test.js",
+        "tests/unit/main-process/execution-descriptor-resource-profiles.test.js",
+        "tests/unit/main-process/execution-descriptor-extension.test.js"
+      ],
+      "protectedScopes": [
+        {
+          "path": "src/main-process/background-execution/runtime.js",
+          "functionPath": null
+        },
+        {
+          "path": "src/main-process/background-execution/execution-policy-registry.js",
+          "functionPath": null
+        },
+        {
+          "path": "src/main-process/archive-center/task-policy-registry.js",
+          "functionPath": null
+        },
+        {
+          "path": "src/main-process/archive-center/task-policy-common.js",
+          "functionPath": null
+        },
+        {
+          "path": "src/main-process/execution-descriptors/contract.js",
+          "functionPath": null
+        }
+      ],
+      "restrictedApis": [
+        {
+          "path": "src/main-process/execution-descriptors/composition.js",
+          "exportNames": null,
+          "operations": []
+        },
+        {
+          "path": "src/main-process/execution-descriptors/policy-catalog.js",
+          "exportNames": null,
+          "operations": []
+        },
+        {
+          "path": "src/main-process/execution-descriptors/mature-adapters.js",
+          "exportNames": null,
+          "operations": []
+        },
+        {
+          "path": "src/main-process/execution-descriptors/legacy-task-policies.js",
+          "exportNames": null,
+          "operations": []
+        }
+      ],
+      "allowedSites": [
+        {
+          "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+          "from": "src/main-process/background-execution/adapters/utility-process-adapter.js",
+          "functionPath": "defaultUtilityFork",
+          "callee": "worker",
+          "evidenceId": "3fb82f8495d7bceddb496330511ceaccfab5586a9197b991d70841464286a72e",
+          "reason": "通用 carrier 仅执行 composition 注入的完整静态登记 worker 目标；此许可不允许 require/import 领域实现"
+        },
+        {
+          "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+          "from": "src/main-process/background-execution/adapters/worker-thread-adapter.js",
+          "functionPath": "createWorkerThreadAdapter.start",
+          "callee": "worker",
+          "evidenceId": "3008d867b786a78697f73245cff4afa4de5afee76d75053ba5961c0f2d0f4574",
+          "reason": "通用 carrier 仅执行 composition 注入的完整静态登记 worker 目标；此许可不允许 require/import 领域实现"
+        }
+      ],
+      "compositionEntrypoints": [
+        {
+          "path": "src/main-process/execution-descriptors/composition.js",
+          "importedNames": [
+            "createExecutionDescriptor",
+            "createToolboxExecutionDescriptor",
+            "createPreFundExecutionDescriptor",
+            "createNewAccountExecutionDescriptor",
+            "createFundReconExecutionDescriptor",
+            "createDuplicateInboundExecutionDescriptor",
+            "createReconIdFixExecutionDescriptor",
+            "createVccExecutionDescriptor",
+            "createPositionExecutionDescriptor",
+            "createBizOpExecutionDescriptor"
+          ],
+          "allowedTargets": [
+            "src/main-process/toolbox-background/execution-descriptor.js",
+            "src/main-process/pre-fund-reconciliation/execution-descriptor.js",
+            "src/main-process/new-account/execution-descriptor.js",
+            "src/main-process/fund-recon-worker/execution-descriptor.js",
+            "src/main-process/duplicate-inbound-match/execution-descriptor.js",
+            "src/main-process/recon-id-fix-service/execution-descriptor.js",
+            "src/main-process/vcc-financial-op-output/execution-descriptor.js",
+            "src/main-process/position-reconciliation/execution-descriptor.js",
+            "src/main-process/biz-op-v327/execution-descriptor.js"
+          ]
+        },
+        {
+          "path": "src/main-process/execution-descriptors/policy-catalog.js",
+          "importedNames": [],
+          "allowedTargets": []
+        },
+        {
+          "path": "src/main-process/execution-descriptors/mature-adapters.js",
+          "importedNames": [],
+          "allowedTargets": []
+        },
+        {
+          "path": "src/main-process/execution-descriptors/legacy-task-policies.js",
+          "importedNames": [],
+          "allowedTargets": []
+        }
+      ],
+      "globals": [],
+      "factory": null,
+      "allowedApiFields": {},
+      "deprecatedEntrypoints": [],
+      "directory": null
+    },
+    {
+      "id": "renderer-dialog-app-settings",
+      "governance": "G3",
+      "owner": "codex/v3.2.10-renderer-boundaries",
+      "state": "pending",
+      "rules": [
+        "ARCH-RENDERER-SCOPE"
+      ],
+      "entrypoints": [
+        "src/renderer/dialogs/app-settings.js"
+      ],
+      "allowedLocal": [
+        "src/renderer/modal-host.js",
+        "src/renderer/module-router.js",
+        "src/renderer/scenario-command-service.js",
+        "src/renderer/scenario-change-router.js",
+        "src/renderer/shared-recon-session.js",
+        "src/renderer/configuration-services.js",
+        "src/renderer/dialogs/app-settings.js"
+      ],
+      "allowedExternal": [],
+      "requiredConsumers": [
+        {
+          "from": "src/renderer-dialogs.js",
+          "to": "src/renderer/dialogs/app-settings.js",
+          "kind": "classic-global",
+          "importedNames": []
+        }
+      ],
+      "activationEvidence": [
+        "tests/unit/renderer/controller-contract.test.js"
+      ],
+      "protectedScopes": [],
+      "restrictedApis": [],
+      "allowedSites": [],
+      "compositionEntrypoints": [],
+      "globals": [
+        {
+          "path": "src/renderer/dialogs/app-settings.js",
+          "exportsGlobal": [
+            "__appSettingsDialogs"
+          ],
+          "consumesGlobals": []
+        }
+      ],
+      "factory": {
+        "path": "src/renderer/dialogs/app-settings.js",
+        "name": "createAppSettingsDialogs",
+        "parameters": [
+          "api",
+          "ui",
+          "config"
+        ]
+      },
+      "allowedApiFields": {
+        "api": [
+          "listBatches",
+          "getBatch",
+          "openFile",
+          "saveAs",
+          "setLocked",
+          "prepareDeleteBatch",
+          "deleteBatch",
+          "listDeleteCleanupJobs",
+          "retryDeleteCleanupJob",
+          "selectRetrySources",
+          "retryBatch",
+          "getSettings",
+          "changeStorageLocation",
+          "onStorageMigrationProgress",
+          "startEntryMaintenance",
+          "onEntryMaintenanceProgress",
+          "onEntryMaintenanceCompleted",
+          "onEntryMaintenanceFailed",
+          "setRetentionDays",
+          "setModuleRetentionDays",
+          "getStats"
+        ],
+        "panel": [
+          "querySelector",
+          "querySelectorAll"
+        ],
+        "ui": [
+          "modalHost",
+          "alert",
+          "confirm",
+          "status",
+          "reportError"
+        ],
+        "config": [
+          "templates",
+          "accounts",
+          "currencies",
+          "subscribe"
+        ]
+      },
+      "deprecatedEntrypoints": [],
+      "directory": null
+    },
+    {
+      "id": "renderer-dialog-toolbox",
+      "governance": "G3",
+      "owner": "codex/v3.2.10-renderer-boundaries",
+      "state": "pending",
+      "rules": [
+        "ARCH-RENDERER-SCOPE"
+      ],
+      "entrypoints": [
+        "src/renderer/dialogs/toolbox.js"
+      ],
+      "allowedLocal": [
+        "src/renderer/modal-host.js",
+        "src/renderer/module-router.js",
+        "src/renderer/scenario-command-service.js",
+        "src/renderer/scenario-change-router.js",
+        "src/renderer/shared-recon-session.js",
+        "src/renderer/configuration-services.js",
+        "src/renderer/dialogs/toolbox.js"
+      ],
+      "allowedExternal": [],
+      "requiredConsumers": [
+        {
+          "from": "src/renderer-dialogs.js",
+          "to": "src/renderer/dialogs/toolbox.js",
+          "kind": "classic-global",
+          "importedNames": []
+        }
+      ],
+      "activationEvidence": [
+        "tests/unit/renderer/controller-contract.test.js"
+      ],
+      "protectedScopes": [],
+      "restrictedApis": [],
+      "allowedSites": [],
+      "compositionEntrypoints": [],
+      "globals": [
+        {
+          "path": "src/renderer/dialogs/toolbox.js",
+          "exportsGlobal": [
+            "__toolboxDialogs"
+          ],
+          "consumesGlobals": []
+        }
+      ],
+      "factory": {
+        "path": "src/renderer/dialogs/toolbox.js",
+        "name": "createToolboxDialogs",
+        "parameters": [
+          "api",
+          "ui",
+          "config"
+        ]
+      },
+      "allowedApiFields": {
+        "api": [
+          "merge",
+          "splitRead",
+          "splitExport"
+        ],
+        "panel": [
+          "querySelector",
+          "querySelectorAll"
+        ],
+        "ui": [
+          "modalHost",
+          "alert",
+          "confirm",
+          "status",
+          "reportError"
+        ],
+        "config": [
+          "templates",
+          "accounts",
+          "currencies",
+          "subscribe"
+        ]
+      },
+      "deprecatedEntrypoints": [],
+      "directory": null
+    }
+  ],
+  "generatedModules": [
+    {
+      "from": "src/main.js",
+      "specifier": "./build-info",
+      "target": "src/build-info.js",
+      "generator": "scripts/gen-build-info.js"
+    },
+    {
+      "from": "src/main-process/acquiring-bill-currency-writer.js",
+      "specifier": "../build-info",
+      "target": "src/build-info.js",
+      "generator": "scripts/gen-build-info.js"
+    }
+  ],
+  "dynamicLoads": [
+    {
+      "from": "src/backend/big-table-import/engine.js",
+      "functionPath": "importFiles",
+      "evidenceId": "720e0351ce0ff50c20d70a1de687dc65bd893fa5876d889d495d300101e97988",
+      "allowedTargets": [
+        "src/backend/acquiring-bill-currency-import/contract-bill.js",
+        "src/backend/acquiring-bill-currency-import/contract-flow.js",
+        "src/backend/biz-op-recon-import/contract-flow.js",
+        "src/backend/pending-import/contract-pending.js"
+      ],
+      "reason": "固定基线 engine/import-worker 由 acquiring/pending/biz-op session 与 acquiring adapter 传入的四个业务契约；目标集合来自当前全部生产 contractModulePath 消费链。"
+    },
+    {
+      "from": "src/backend/big-table-import/import-worker.js",
+      "functionPath": "<anonymous:2>",
+      "evidenceId": "720e0351ce0ff50c20d70a1de687dc65bd893fa5876d889d495d300101e97988",
+      "allowedTargets": [
+        "src/backend/acquiring-bill-currency-import/contract-bill.js",
+        "src/backend/acquiring-bill-currency-import/contract-flow.js",
+        "src/backend/biz-op-recon-import/contract-flow.js",
+        "src/backend/pending-import/contract-pending.js"
+      ],
+      "reason": "固定基线 engine/import-worker 由 acquiring/pending/biz-op session 与 acquiring adapter 传入的四个业务契约；目标集合来自当前全部生产 contractModulePath 消费链。"
+    },
+    {
+      "from": "src/main-process/acquiring-bill-currency-session.js",
+      "functionPath": null,
+      "evidenceId": "d7692afb57a48f7c1e882fc4d1a63d861bce253c3f68cbb7893d3429d87ae01b",
+      "allowedTargets": [
+        "src/backend/acquiring-bill-currency-import/contract-flow.js"
+      ],
+      "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+    },
+    {
+      "from": "src/main-process/acquiring-bill-currency-session.js",
+      "functionPath": null,
+      "evidenceId": "d26ef436770f557c8d871b9d5ff4c9f65139cd3b6a54c596f444bd7282f84c8a",
+      "allowedTargets": [
+        "src/backend/acquiring-bill-currency-import/contract-bill.js"
+      ],
+      "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+    },
+    {
+      "from": "src/main-process/acquiring-bill-currency-session.js",
+      "functionPath": null,
+      "evidenceId": "942b4e26ad17c002934f81d336009d780d68c972d555a62f50c9ebe519e5fd03",
+      "allowedTargets": [
+        "src/backend/big-table-import/engine-worker-entry.js"
+      ],
+      "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+    },
+    {
+      "from": "src/main-process/acquiring-bill-currency-session.js",
+      "functionPath": "dispatchEngineImport.<anonymous:1>",
+      "evidenceId": "8a599d2b8ea2201a1fcd803751f93fab1bf474fca591eca81e3db360cefcd64e",
+      "allowedTargets": [
+        "src/backend/big-table-import/engine-worker-entry.js"
+      ],
+      "reason": "固定基线 dispatcher 默认 worker 路径；参数/测试 override 不构成新增生产目标，生产消费者新增目标时必须同步合同。"
+    },
+    {
+      "from": "src/main-process/acquiring-bill-currency-session.js",
+      "functionPath": "peekImportTarget",
+      "evidenceId": "867a2b13fd5adc06f87d9cabf9e85a04ac45eb47030b47d0b06e91c2245e2910",
+      "allowedTargets": [
+        "src/backend/acquiring-bill-currency-import/contract-bill.js",
+        "src/backend/acquiring-bill-currency-import/contract-flow.js"
+      ],
+      "reason": "固定基线 peekImportTarget 仅在 kind flow/bill 两个已知契约路径间选择。"
+    },
+    {
+      "from": "src/main-process/background-execution/adapters/acquiring-adapter.js",
+      "functionPath": null,
+      "evidenceId": "2689e4bb2443a253fdb3ecb929e0eb0e389a81ac9f2829b04977c24ef8baf32b",
+      "allowedTargets": [
+        "src/backend/acquiring-bill-currency-import/contract-flow.js"
+      ],
+      "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+    },
+    {
+      "from": "src/main-process/background-execution/adapters/acquiring-adapter.js",
+      "functionPath": null,
+      "evidenceId": "05c58ae9aad227903f078eb4c849602c98525606b3aa6118b16f8f4c7f8f4a7b",
+      "allowedTargets": [
+        "src/backend/acquiring-bill-currency-import/contract-bill.js"
+      ],
+      "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+    },
+    {
+      "from": "src/main-process/background-execution/adapters/utility-process-adapter.js",
+      "functionPath": "defaultUtilityFork",
+      "evidenceId": "3fb82f8495d7bceddb496330511ceaccfab5586a9197b991d70841464286a72e",
+      "allowedTargets": [
+        "src/main-process/background-execution/canary/durable-worker.js",
+        "src/main-process/background-execution/canary/pure-compute-worker.js",
+        "src/main-process/biz-op-v327/worker-entry.js",
+        "src/main-process/duplicate-inbound-match/worker-entry.js",
+        "src/main-process/fund-recon-worker/worker-entry.js",
+        "src/main-process/new-account/worker-entry.js",
+        "src/main-process/pre-fund-reconciliation/mpt-import/writer-worker-entry.js",
+        "src/main-process/read-only-exports/acquiring/worker-entry.js",
+        "src/main-process/read-only-exports/biz-op/worker-entry.js",
+        "src/main-process/read-only-exports/pending/worker-entry.js",
+        "src/main-process/read-only-exports/position/worker-entry.js",
+        "src/main-process/read-only-exports/pre-fund/worker-entry.js",
+        "src/main-process/read-only-exports/vcc-financial-op/worker-entry.js",
+        "src/main-process/recon-id-fix-service/worker-entry.js",
+        "src/main-process/toolbox-background/merge-worker-entry.js",
+        "src/main-process/toolbox-background/route-scanner-worker-entry.js",
+        "src/main-process/toolbox-background/split-worker-entry.js",
+        "src/main-process/toolbox-row-split/worker-entry.js",
+        "src/main-process/vcc-financial-op-output/single-writer-worker-entry.js",
+        "src/main-process/vcc-financial-op-output/writer-worker-entry.js"
+      ],
+      "reason": "固定基线 runtime.entryBindingForPolicy 与 packaged canary 注册的明确 worker 入口集合；平台 adapter 只传递登记的入口，新增装配必须同步此合同。"
+    },
+    {
+      "from": "src/main-process/background-execution/adapters/worker-thread-adapter.js",
+      "functionPath": "createWorkerThreadAdapter.start",
+      "evidenceId": "3008d867b786a78697f73245cff4afa4de5afee76d75053ba5961c0f2d0f4574",
+      "allowedTargets": [
+        "src/main-process/background-execution/canary/durable-worker.js",
+        "src/main-process/background-execution/canary/pure-compute-worker.js",
+        "src/main-process/biz-op-v327/worker-entry.js",
+        "src/main-process/duplicate-inbound-match/worker-entry.js",
+        "src/main-process/fund-recon-worker/worker-entry.js",
+        "src/main-process/new-account/worker-entry.js",
+        "src/main-process/pre-fund-reconciliation/mpt-import/writer-worker-entry.js",
+        "src/main-process/read-only-exports/acquiring/worker-entry.js",
+        "src/main-process/read-only-exports/biz-op/worker-entry.js",
+        "src/main-process/read-only-exports/pending/worker-entry.js",
+        "src/main-process/read-only-exports/position/worker-entry.js",
+        "src/main-process/read-only-exports/pre-fund/worker-entry.js",
+        "src/main-process/read-only-exports/vcc-financial-op/worker-entry.js",
+        "src/main-process/recon-id-fix-service/worker-entry.js",
+        "src/main-process/toolbox-background/merge-worker-entry.js",
+        "src/main-process/toolbox-background/route-scanner-worker-entry.js",
+        "src/main-process/toolbox-background/split-worker-entry.js",
+        "src/main-process/toolbox-row-split/worker-entry.js",
+        "src/main-process/vcc-financial-op-output/single-writer-worker-entry.js",
+        "src/main-process/vcc-financial-op-output/writer-worker-entry.js"
+      ],
+      "reason": "固定基线 runtime.entryBindingForPolicy 与 packaged canary 注册的明确 worker 入口集合；平台 adapter 只传递登记的入口，新增装配必须同步此合同。"
+    },
+    {
+      "from": "src/main-process/background-execution/canary/index.js",
+      "functionPath": null,
+      "evidenceId": "e16a09980c47cb2f3901fe622f749969497f10fad721f0e3828102f9cbd553e5",
+      "allowedTargets": [
+        "src/main-process/background-execution/canary/pure-compute-worker.js"
+      ],
+      "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+    },
+    {
+      "from": "src/main-process/background-execution/canary/packaged-runtime-runner.js",
+      "functionPath": null,
+      "evidenceId": "734f123c1f689fb31eed74c2afd63e815755ba6d6ac37449fa3f85686180ee72",
+      "allowedTargets": [
+        "src/main-process/background-execution/canary/canary-schema.js"
+      ],
+      "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+    },
+    {
+      "from": "src/main-process/background-execution/canary/packaged-runtime-runner.js",
+      "functionPath": null,
+      "evidenceId": "be6c1eca16cafc99cf09d6c53d8435405f3dfea53df66f6ac8fa72112e9ce005",
+      "allowedTargets": [
+        "src/main-process/background-execution/canary/durable-worker.js"
+      ],
+      "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+    },
+    {
+      "from": "src/main-process/big-table-import-dispatch.js",
+      "functionPath": null,
+      "evidenceId": "942b4e26ad17c002934f81d336009d780d68c972d555a62f50c9ebe519e5fd03",
+      "allowedTargets": [
+        "src/backend/big-table-import/engine-worker-entry.js"
+      ],
+      "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+    },
+    {
+      "from": "src/main-process/big-table-import-dispatch.js",
+      "functionPath": "dispatchEngineImportHandle.<anonymous:1>",
+      "evidenceId": "34227fdeff96fb08de5f499d9da93cc50ece971976c665f76ab5739a0ca3848c",
+      "allowedTargets": [
+        "src/backend/big-table-import/engine-worker-entry.js"
+      ],
+      "reason": "固定基线 dispatcher 默认 worker 路径；参数/测试 override 不构成新增生产目标，生产消费者新增目标时必须同步合同。"
+    },
+    {
+      "from": "src/main-process/biz-op-recon-session.js",
+      "functionPath": null,
+      "evidenceId": "2625a3783ded16bf6e682e03c46b69ee76365f7afb899b9c51430006da3218ba",
+      "allowedTargets": [
+        "src/backend/biz-op-recon-import/contract-flow.js"
+      ],
+      "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+    },
+    {
+      "from": "src/main-process/pending-session.js",
+      "functionPath": null,
+      "evidenceId": "f2654d32e2cdba86fe91312934c0437226f0f7d489d109e89f2e4973a51c6c7c",
+      "allowedTargets": [
+        "src/backend/pending-import/contract-pending.js"
+      ],
+      "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+    },
+    {
+      "from": "src/main-process/position-reconciliation/import-dispatch.js",
+      "functionPath": null,
+      "evidenceId": "6d55f45561e871a8cec3144648d1a5327d2004af5305bcf4e0d24bfc549fc7c2",
+      "allowedTargets": [
+        "src/backend/position-reconciliation-import/worker-entry.js"
+      ],
+      "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+    },
+    {
+      "from": "src/main-process/position-reconciliation/import-dispatch.js",
+      "functionPath": "dispatchPositionImportPreflight",
+      "evidenceId": "1c788c503f99844777e824808ad57946966527055ee1c8ebec1e0795066875be",
+      "allowedTargets": [
+        "src/backend/position-reconciliation-import/worker-entry.js"
+      ],
+      "reason": "固定基线 dispatcher 默认 worker 路径；参数/测试 override 不构成新增生产目标，生产消费者新增目标时必须同步合同。"
+    },
+    {
+      "from": "src/main-process/position-reconciliation/import-dispatch.js",
+      "functionPath": "dispatchPositionImportPreflight",
+      "evidenceId": "c4d1c12af9af512bfb4ae5da0665a73b52f062af9a6ef2802797fbcbe1c28dc1",
+      "allowedTargets": [
+        "src/backend/position-reconciliation-import/worker-entry.js"
+      ],
+      "reason": "固定基线 dispatcher 默认 worker 路径；参数/测试 override 不构成新增生产目标，生产消费者新增目标时必须同步合同。"
+    },
+    {
+      "from": "src/main-process/run-check-multiworker.js",
+      "functionPath": "startWorker.<anonymous:1>",
+      "evidenceId": "ff92d9b23731f8dd4f8ff730bd0ffd2290b9c0a2e75c588734fbe7d2ab54e565",
+      "allowedTargets": [
+        "src/main-process/run-check-multiworker-worker.js"
+      ],
+      "reason": "固定基线 dispatcher 默认 worker 路径；参数/测试 override 不构成新增生产目标，生产消费者新增目标时必须同步合同。"
+    },
+    {
+      "from": "src/main-process/run-check-worker-pool.js",
+      "functionPath": "coldStartWorker",
+      "evidenceId": "ff92d9b23731f8dd4f8ff730bd0ffd2290b9c0a2e75c588734fbe7d2ab54e565",
+      "allowedTargets": [
+        "src/main-process/run-check-worker.js"
+      ],
+      "reason": "固定基线 dispatcher 默认 worker 路径；参数/测试 override 不构成新增生产目标，生产消费者新增目标时必须同步合同。"
+    },
+    {
+      "from": "src/main-process/toolbox-background/route-scanner-core.js",
+      "functionPath": "runOutputWriter.<anonymous:1>",
+      "evidenceId": "b4750256954d70374bb83a2d092ee4a780ce30d6177dbb7a389aea51ebba1a90",
+      "allowedTargets": [
+        "src/main-process/toolbox-background/output-writer-worker-entry.js"
+      ],
+      "reason": "固定基线 dispatcher 默认 worker 路径；参数/测试 override 不构成新增生产目标，生产消费者新增目标时必须同步合同。"
+    },
+    {
+      "from": "src/main-process/toolbox-large-split-dispatch.js",
+      "functionPath": null,
+      "evidenceId": "261f056a90e99b55737b47600b8481a73f0afba4a39236c9dbdd3efe4292a654",
+      "allowedTargets": [
+        "src/backend/toolbox-xlsx-stream/large-split-worker.js"
+      ],
+      "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+    },
+    {
+      "from": "src/main-process/toolbox-large-split-dispatch.js",
+      "functionPath": "dispatchLargeSplit.<anonymous:1>",
+      "evidenceId": "fb3341122df5e40616f96e6c0a153cc008dc36b21c0187f5680f82312b3377cd",
+      "allowedTargets": [
+        "src/backend/toolbox-xlsx-stream/large-split-worker.js"
+      ],
+      "reason": "固定基线 dispatcher 默认 worker 路径；参数/测试 override 不构成新增生产目标，生产消费者新增目标时必须同步合同。"
+    },
+    {
+      "from": "src/main-process/toolbox-output-publication-dispatch.js",
+      "functionPath": null,
+      "evidenceId": "65530a123558e57be009c0bf8acd5080c728e9fd44e528c44973fb50d2abacee",
+      "allowedTargets": [
+        "src/main-process/toolbox-output-publication-worker.js"
+      ],
+      "reason": "固定基线 require.resolve 的静态字符串目标；只读解析路径，不执行生产模块。"
+    },
+    {
+      "from": "src/main-process/toolbox-output-publication-dispatch.js",
+      "functionPath": "runWorkerJob.<anonymous:1>",
+      "evidenceId": "b0a2253ddf72c309706e091e302cb27ce15eb58c4aeaa26c2c26a7dcd191f5fb",
+      "allowedTargets": [
+        "src/main-process/toolbox-output-publication-worker.js"
+      ],
+      "reason": "固定基线 dispatcher 默认 worker 路径；参数/测试 override 不构成新增生产目标，生产消费者新增目标时必须同步合同。"
+    },
+    {
+      "from": "src/main-process/vcc-financial-op-service.js",
+      "functionPath": "createVccFinancialOpService.<anonymous:1>",
+      "evidenceId": "337edca2e4b86094ad57c71b5b9aca23b43ed4065cf62ffc3344efb2c234f716",
+      "allowedTargets": [
+        "src/backend/vcc-financial-op/worker-entry.js"
+      ],
+      "reason": "固定基线 createVccFinancialOpService 默认 factory，仅由同文件 WORKER_PATH/READ_WORKER_PATH/RESULT_WRITE_WORKER_PATH/REVIEW_WORKER_PATH 对应生产调用传入；测试注入不纳入生产集合。"
+    },
+    {
+      "from": "src/main-process/vcc-financial-op-service.js",
+      "functionPath": "createVccFinancialOpService.<anonymous:2>",
+      "evidenceId": "337edca2e4b86094ad57c71b5b9aca23b43ed4065cf62ffc3344efb2c234f716",
+      "allowedTargets": [
+        "src/main-process/vcc-financial-op-read-worker.js"
+      ],
+      "reason": "固定基线 createVccFinancialOpService 默认 factory，仅由同文件 WORKER_PATH/READ_WORKER_PATH/RESULT_WRITE_WORKER_PATH/REVIEW_WORKER_PATH 对应生产调用传入；测试注入不纳入生产集合。"
+    },
+    {
+      "from": "src/main-process/vcc-financial-op-service.js",
+      "functionPath": "createVccFinancialOpService.<anonymous:3>",
+      "evidenceId": "337edca2e4b86094ad57c71b5b9aca23b43ed4065cf62ffc3344efb2c234f716",
+      "allowedTargets": [
+        "src/main-process/vcc-financial-op-write-worker.js"
+      ],
+      "reason": "固定基线 createVccFinancialOpService 默认 factory，仅由同文件 WORKER_PATH/READ_WORKER_PATH/RESULT_WRITE_WORKER_PATH/REVIEW_WORKER_PATH 对应生产调用传入；测试注入不纳入生产集合。"
+    },
+    {
+      "from": "src/main-process/vcc-financial-op-service.js",
+      "functionPath": "createVccFinancialOpService.<anonymous:4>",
+      "evidenceId": "337edca2e4b86094ad57c71b5b9aca23b43ed4065cf62ffc3344efb2c234f716",
+      "allowedTargets": [
+        "src/main-process/vcc-financial-op-review-worker.js"
+      ],
+      "reason": "固定基线 createVccFinancialOpService 默认 factory，仅由同文件 WORKER_PATH/READ_WORKER_PATH/RESULT_WRITE_WORKER_PATH/REVIEW_WORKER_PATH 对应生产调用传入；测试注入不纳入生产集合。"
+    },
+    {
+      "from": "src/main-process/vcc-financial-op-storage-migration.js",
+      "functionPath": "runMigrationWorker",
+      "evidenceId": "a4d363e9024350c7fd6ba115edc99c3566bd3efc067c9ff2d3648cfebb405b9d",
+      "allowedTargets": [
+        "src/main-process/vcc-financial-op-storage-migration-worker.js"
+      ],
+      "reason": "固定基线 dispatcher 默认 worker 路径；参数/测试 override 不构成新增生产目标，生产消费者新增目标时必须同步合同。"
+    }
+  ],
+  "policyChanges": []
+}

@@ -1,0 +1,20 @@
+{
+  "tested-code-manifest.json": {
+    "files": 16,
+    "drift": []
+  },
+  "verified-manifest.json": {
+    "files": 23,
+    "drift": []
+  },
+  "trailingWhitespace": [],
+  "brokenLinks": [],
+  "gitDiffCheck": {
+    "exitCode": 0,
+    "output": ""
+  },
+  "primary": {
+    "originalFiles": 429,
+    "drift": []
+  }
+}

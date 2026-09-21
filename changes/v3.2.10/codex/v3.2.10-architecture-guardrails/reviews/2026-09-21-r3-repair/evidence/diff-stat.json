@@ -1,0 +1,32 @@
+[
+  {
+    "file": "scripts/architecture/contracts.js",
+    "added": 20,
+    "removed": 9
+  },
+  {
+    "file": "scripts/architecture/scan.js",
+    "added": 11,
+    "removed": 3
+  },
+  {
+    "file": "scripts/architecture/rules.js",
+    "added": 1,
+    "removed": 1
+  },
+  {
+    "file": "tests/unit/architecture/review-round3.test.js",
+    "added": 136,
+    "removed": 0
+  },
+  {
+    "file": "architecture/README.md",
+    "added": 4,
+    "removed": 2
+  },
+  {
+    "file": "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md",
+    "added": 15,
+    "removed": 3
+  }
+]

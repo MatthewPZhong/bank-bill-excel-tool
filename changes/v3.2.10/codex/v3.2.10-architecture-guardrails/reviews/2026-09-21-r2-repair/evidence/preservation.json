@@ -1,0 +1,22 @@
+{
+  "main": {
+    "originalFiles": 293,
+    "changedOriginalFiles": []
+  },
+  "worktree": {
+    "originalFiles": 85,
+    "changedOriginalFiles": [
+      "architecture/README.md",
+      "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md",
+      "scripts/architecture/contracts.js",
+      "scripts/architecture/rules.js",
+      "scripts/architecture/scan.js"
+    ]
+  },
+  "unexpectedChangedOriginalFiles": [],
+  "productionDiff": [],
+  "head": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "branch": "codex/v3.2.10-architecture-guardrails",
+  "configUnchanged": true,
+  "sourceReviewMatchesOriginal": true
+}

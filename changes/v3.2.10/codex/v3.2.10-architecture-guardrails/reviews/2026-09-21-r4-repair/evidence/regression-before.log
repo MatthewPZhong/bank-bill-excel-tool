@@ -1,0 +1,28 @@
+✖ R4-01 同文件受限操作经返回成员调用，与直接/包装调用一致拒绝 (15.660584ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 94.894833
+
+✖ failing tests:
+
+test at tests/unit/architecture/review-round4.test.js:30:1
+✖ R4-01 同文件受限操作经返回成员调用，与直接/包装调用一致拒绝 (15.660584ms)
+  AssertionError [ERR_ASSERTION]: []
+      at denied (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-architecture-guardrails/tests/unit/architecture/review-round4.test.js:27:29)
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-architecture-guardrails/tests/unit/architecture/review-round4.test.js:32:31)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.start (node:internal/test_runner/test:1096:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:385:17) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }

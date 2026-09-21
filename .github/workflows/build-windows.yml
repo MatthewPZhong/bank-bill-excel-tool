@@ -102,7 +102,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Resolve architecture policy comparison
+        id: architecture-policy
+        env:
+          ARCHITECTURE_EVENT_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event_name == 'push' && github.ref_type != 'tag' && github.event.before || '' }}
+          ARCHITECTURE_EXPECTED_HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: node scripts/architecture/ci-policy-base.js
+
       - name: Run release checks
+        env:
+          ARCHITECTURE_BASE_REF: ${{ steps.architecture-policy.outputs.base }}
         if: >-
           (
             github.event_name == 'pull_request' &&

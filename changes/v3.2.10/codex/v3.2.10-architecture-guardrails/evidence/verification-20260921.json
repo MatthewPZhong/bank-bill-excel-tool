@@ -1,0 +1,49 @@
+{
+  "platform": "darwin-arm64",
+  "node": "v25.8.0",
+  "worktree": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-architecture-guardrails",
+  "branch": "codex/v3.2.10-architecture-guardrails",
+  "head": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "state": "HEAD + dirty；未提交、未集成",
+  "releaseCheck": {
+    "command": "UNIT_TEST_CONCURRENCY=2 npm run release-check",
+    "exitCode": 0,
+    "log": "release-check-final-20260921.log",
+    "stages": [
+      "lint",
+      "check:architecture",
+      "smoke",
+      "test:unit",
+      "test:integration"
+    ],
+    "unit": {
+      "tests": 8188,
+      "pass": 8184,
+      "fail": 0,
+      "skipped": 4
+    },
+    "integration": {
+      "scripts": 60,
+      "passedAssertions": 2579,
+      "failedScripts": 0
+    }
+  },
+  "architectureTests": {
+    "command": "node --test tests/unit/architecture/*.test.js",
+    "tests": 84,
+    "passed": 84,
+    "failed": 0,
+    "skipped": 0,
+    "log": "architecture-tests-20260921.log"
+  },
+  "frozenCodeManifest": "frozen-code-manifest-20260921.json",
+  "implementationDrift": [],
+  "primaryCheckedFiles": 130,
+  "primaryModifiedFiles": [],
+  "businessSourceDiff": [],
+  "generatedDocumentation": "仅撤回 integration runner 自动重写的耗时表；保留既有内容和 §六门禁顺序修改，完整本轮结果在日志。",
+  "remaining": [
+    "G8 未合入 release；固定 release 激活预检未通过，需对齐配置/消费者/合法装配/证据和归因诊断后激活",
+    "Windows/GitHub 实机、Electron GUI、Excel/WPS 人工验收未执行；不由本地自动门禁替代"
+  ]
+}

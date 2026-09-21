@@ -61,3 +61,7 @@
 - 本轮 `release/<版本号>` 与独立模块分支以已确认的上一正式发布标签对应提交为基线，不直接沿用旧 release 分支的浮动末端；发布前核对并纳入最新 `origin/main` 的必要更新。模块分支先合入本轮 release，再通过 `release/<版本号> -> main` 的 PR 正式合并；已有集成成果直接核验复用，不重建或清空分支。
 - 正式发布标签使用附注标签 `v<版本号>`，仅在 `release/<版本号>` 的 PR 合入远端 `main` 且最终检查通过后，创建到当前 `origin/main` 的提交并推送。
 - 每次发布同步更新 `CHANGELOG.md`、`docs/VERSION_FEATURE_HISTORY.md`、`docs/USER_GUIDE.md`。
+
+## 架构检查资料入口
+
+- [架构边界检查](architecture/README.md)：配置、运行命令、历史防倒退、激活与兼容入口维护。

@@ -1,0 +1,4632 @@
+{
+  "schemaVersion": 1,
+  "factBaseline": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "policyComparedWith": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "policyHistory": {
+    "roots": [
+      "11086a3cbf632a30adbcfa796e4cd81810c5aef9"
+    ],
+    "commitsExamined": 1,
+    "distinctPolicyBlobs": 0,
+    "bootstrapCommit": null,
+    "historicalActiveIds": [],
+    "historicalRetiredEntrypoints": [],
+    "appliedPolicyChanges": [],
+    "historyRepairsApplied": [],
+    "diagnostics": []
+  },
+  "coverage": {
+    "scannedFiles": 685,
+    "parsedFiles": 685,
+    "literalEdges": 2254,
+    "workerEdges": 64,
+    "globalEdges": 5,
+    "unresolved": 2,
+    "dynamicSites": 33,
+    "parseErrors": 0,
+    "pendingBoundaries": [
+      "bizop-query-q2",
+      "bizop-query-q3",
+      "publication-recovery-entry",
+      "renderer-acquiring",
+      "renderer-bank-bu",
+      "renderer-bank-statement",
+      "renderer-biz-op-legacy",
+      "renderer-dialog-app-settings",
+      "renderer-dialog-configuration",
+      "renderer-dialog-scenarios",
+      "renderer-dialog-toolbox",
+      "renderer-duplicate-inbound",
+      "renderer-modal-owner",
+      "renderer-new-account",
+      "renderer-pre-fund",
+      "renderer-recon-id-fix",
+      "renderer-services",
+      "renderer-statement",
+      "renderer-vcc-op-calc",
+      "shared-xlsx",
+      "vcc-mapped-lineage"
+    ],
+    "partialBoundaries": [
+      "bizop-query-q1",
+      "bizop-recovery-private",
+      "business-task-adapters",
+      "descriptor-composition",
+      "renderer-biz-op-v327",
+      "renderer-pending",
+      "renderer-position",
+      "renderer-vcc-financial-op"
+    ]
+  },
+  "violations": [
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/ipc-task-contract.js",
+      "to": null,
+      "line": 100,
+      "column": 8,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "e4ca60edac74ebc60cb498e7526730dc08ec7c7353f5e86e1c39e31729345861",
+      "functionPath": "prepareIpcTaskInvocation"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/ipc-task-contract.js",
+      "to": null,
+      "line": 101,
+      "column": 49,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "3d8b07370710bc7d60efd2a3132a4128afc31a9152c1c16ceb8a0d28fe81be32",
+      "functionPath": "prepareIpcTaskInvocation"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/ipc-task-contract.js",
+      "to": null,
+      "line": 102,
+      "column": 55,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "9dcf31a26e4324e61b823ddf72dcbf9728af5b280e33f70b7a0791773b0653ab",
+      "functionPath": "prepareIpcTaskInvocation"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1007,
+      "column": 14,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "2444cea77a4b6be6c45b2fe7481d357a29dd06362a23ff38359477c357dd2bf7",
+      "functionPath": "run"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1032,
+      "column": 41,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "03cf1c18947eb6c49268e1e78c35617c7f02d9b4187f0fdbb9b96eb4c4e295c8",
+      "functionPath": "run.settleArtifacts.<anonymous:1>"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1039,
+      "column": 31,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "97071aae3a6b31d7e306f25c26d67f0174c80f8f13cc1423d0cdb662b7196fc4",
+      "functionPath": "run.settleArtifacts.<anonymous:1>.invoke"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1049,
+      "column": 38,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "a2c5f9e8bfcbd8acdc1402dfa6d317440d7a1e035ebe2a0d46d0943ef15a2fff",
+      "functionPath": "run.settleArtifacts.<anonymous:1>"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1054,
+      "column": 26,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "31ab225a9da3f0be91e1addcbb4554096f03edc0ce10b32238f6dc2a5493d43f",
+      "functionPath": "run.settleArtifacts.<anonymous:1>.invoke"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1060,
+      "column": 18,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "f34198482ae42b4e7eb8aa1050519295822d9aa9c842faff4f7aa00980808e75",
+      "functionPath": "run.settleArtifacts.<anonymous:1>.invoke"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1082,
+      "column": 31,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "5e8ed2233e18a41308739456a4d0b0a1d629e335912e3f5438cd4494b954d85f",
+      "functionPath": "run"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1084,
+      "column": 16,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "58241fc976287d8b9d1e5382400db4406355360449d7d49fc048d1d38f0ffb13",
+      "functionPath": "run.<anonymous:1>"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1104,
+      "column": 38,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "694c934a04cd2644fccde97086ab1947a31b1b529f6000661bdceee4ab30fa5a",
+      "functionPath": "run"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1110,
+      "column": 37,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "9bd5147c3135124925629b9fcdf63116b75d67f9f21ae596289de5f3d97edd74",
+      "functionPath": "run.invoke"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1116,
+      "column": 16,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "689209121b01134bc1e8ec4d3fc637500a150e5cbfbcd361817eae8676cf76fa",
+      "functionPath": "run"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1123,
+      "column": 38,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "284f0aa6240bae8d84467555d748b324d4fe9fa379722b48d2bd528fe78e48dd",
+      "functionPath": "run.invoke"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1131,
+      "column": 22,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "e1bc22b0a82b279142d8aa30f4bf7e0ba019d68f8e66ec16e048b11069b4b526",
+      "functionPath": "run.invoke"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1153,
+      "column": 38,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "cb14edc5e09005d1ed88f085ce3867d5922a0555f7fff9fa5a781428ed049e1d",
+      "functionPath": "run"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1159,
+      "column": 35,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "e1b786691ba93e3a392dd37308e45e5e8c89a41c24d15bd7dd5eb92953ee8b26",
+      "functionPath": "run.invoke"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1181,
+      "column": 29,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "4a3791345cbd6bed08a7dbb12926535a3083b8d2d907679206ffaa88f9db1689",
+      "functionPath": "run.terminalCall"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1194,
+      "column": 29,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "0aa7b21df3365218562eecd54cc36de4623da23304f4c4a210bc871523c316cf",
+      "functionPath": "run.terminalCall"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1206,
+      "column": 29,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "1a8dcd7ba1e23b6f2a3cb453b7939c6fa0c6a901027da251a649a9ba349801f7",
+      "functionPath": "run.terminalCall"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1213,
+      "column": 36,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "b859ca93562df350bfed459f35f95632ce821fe48ee3407731f30907079ff7c3",
+      "functionPath": "run"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1233,
+      "column": 28,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "272c327a15bc24624bad463ce5becea5edcf7c673cb7d1e1ab47132376599df2",
+      "functionPath": "run"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1255,
+      "column": 14,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "81a2a6eaa3e99dc227cce3c9539fed5fa0d1b85df74c1a28059b997b97f66b6b",
+      "functionPath": "run"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1261,
+      "column": 18,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "2bb0590a4774d7f2aaa17443d768cb1c8a8b87146439095db3fe1db2c562a96e",
+      "functionPath": "run.invoke"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1276,
+      "column": 19,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "d3351bbbbbaf00ee3004273a22d512a58918a342d5c6bb5c4e6f05f7ad773b6a",
+      "functionPath": "run"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1277,
+      "column": 35,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "2b6de33516fd8adf87d97a00c8aac3c01911d0c2e1a3907f9bd868e681081130",
+      "functionPath": "run"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1278,
+      "column": 6,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "6835bd0823312431dd09905b8e41805a8191e802aa32c2ab8d97f500972fe98a",
+      "functionPath": "run"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1283,
+      "column": 11,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "500f4a91100a8c5fbe8c977c4daeebf7d565e1e9a0ff757763ccad43f857a104",
+      "functionPath": "runOperationOnly"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1287,
+      "column": 11,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "7cf5da614acf66a847839fea3a33ca0890b444f140212d1302d55362513f8be7",
+      "functionPath": "runDeferredFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1315,
+      "column": 22,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "fed0343dbe428288dd748cb31b7d4909bcbf9a3b2ba4ad031670679501d07216",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1324,
+      "column": 27,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "8704042e216fd186414488e4958c034495a66c6a29d95db299f120d385cde4ae",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1331,
+      "column": 25,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "314cf75d641e39d196f9653e0b7f7c19c6b9d92df0e5dd8ec3b474e36e93dbc3",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1337,
+      "column": 24,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "b2e9f2beddf9597a42b503ead6948b7becf0a2b3279b062beba3233a07965afb",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1337,
+      "column": 52,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "89fb0b57fb486b15085313d8d11cb98b35830877fcec7de94d331a19a2f3db3d",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1338,
+      "column": 27,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "e8d926dd8e25565b29b22908dbef2afc6079825f4a2f9c5d9aa862cba57c534c",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1341,
+      "column": 18,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "eb12bde455a398dcb69c899a9b129ad6a46634f35806c16a8fa2c72afec16b4d",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1344,
+      "column": 26,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "5e7c76f56127061545a3e065f6ab88a8bc2a19bf009173d0abf2042b4b2c8a99",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1363,
+      "column": 34,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "0dc4e41b7cdd13a43195276b741247a980796820257b2e506c520370d4e4e1f0",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1366,
+      "column": 16,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "a95a2882b6d38ca1735539369c97cdba69a2c356dd54fa0b2860d9d4b86a433d",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1380,
+      "column": 6,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "be493685d1decbe167eb61826033abeb1aee3173351e11ce64ce8f02133ae0af",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1383,
+      "column": 34,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "03430cc0e79d5609bde92075049b544dd9d333c1113e08a37172cc0e762ea9d5",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1390,
+      "column": 16,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "b52f30180fd16f0c53da448e16fa05c27d350da92808e2c3506c7ad6028c5df1",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1408,
+      "column": 33,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "2f321650cfba9cc0beba65cc2c1edbe7a497525f244ddb6db06a77771e2e1982",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1416,
+      "column": 16,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "b06c183ff4b1b6b9fd0ae7c9641553e6e308aee21f7e53b8d1d20f2c15c34d9b",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1424,
+      "column": 28,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "dee913cdd9964b781d0483d183b70cdfcc6d7593651af34b225c47531c7273b3",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1426,
+      "column": 14,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "5935c94d7a323edbbc0edb2fb7fafc1fa45faf63ffc3c157661c7c0224de0114",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1437,
+      "column": 31,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "2f1b45efdcd19b6a674656ae5aba57872624b8e74db19425891c127865462900",
+      "functionPath": "_runTaskWithoutInitialBatch.ensureFileBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 144,
+      "column": 11,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "25a1701a49cf9acf65ec2bf223436379555170f227b632bd0cb096bcb56d08cc",
+      "functionPath": "getContext"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1461,
+      "column": 8,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "dacdd2251d24a335628f92f265b28eabc174050340524776b6e9d7d574e580d8",
+      "functionPath": "_runTaskWithoutInitialBatch.ensureFileBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1462,
+      "column": 8,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "5b1d6782c60d5672287819a368811421788f29c4a48f02e4fde66cf0790dc31a",
+      "functionPath": "_runTaskWithoutInitialBatch.ensureFileBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1463,
+      "column": 8,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "cee8a6acaaee3c4a7b604c7c700973d89f98f19519cfef480f5b2830b69d02f5",
+      "functionPath": "_runTaskWithoutInitialBatch.ensureFileBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1470,
+      "column": 30,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "9d090eefe3ac9019d603d9167c774dc742446646a713a96ba88f49fc2a580c79",
+      "functionPath": "_runTaskWithoutInitialBatch.settleArtifacts"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1480,
+      "column": 31,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "d17c7d3b3135e3abf94b0cc970ba7509b157c820719181af6ed5bb12832c3b71",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1482,
+      "column": 16,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "636dc5f6c918db9013a40b88dfe6151c00e25c852986b2d14d4ac13b1a539734",
+      "functionPath": "_runTaskWithoutInitialBatch.<anonymous:1>"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 149,
+      "column": 10,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "abd7d5237ed91b7ecf391c6b1aea3a2d1b659fad57dead793e5e27e7931dc95c",
+      "functionPath": "_warn"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1502,
+      "column": 14,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "1c8f8fa56a7c209d8f5e360e00caa0cd0dbcf6c00ac616fe71ac56e290794a6e",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1510,
+      "column": 10,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "dddc4115333a819162a1e962863533f74f319504bcb45ad1ee57d38a1e1192d3",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1524,
+      "column": 29,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "9bd5147c3135124925629b9fcdf63116b75d67f9f21ae596289de5f3d97edd74",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1526,
+      "column": 10,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "e023b3bf70318568561c9ee52f6a692b2c8ff7e0f183e3b17d10d43c2bb0f508",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1534,
+      "column": 20,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "1111e2902b510b374ccaed7caa83b7faecf122b31c08842e9073d0e713e9450b",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1535,
+      "column": 20,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "d7bdcfe980fbc479e8f0730c0ede857d92b64f2519fd16f94322a663b05b373b",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1537,
+      "column": 12,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "9d002829c6ed39584d99b54f4e14ea6a9054ba09ab02c5e9f77809ebe8ee0ac2",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 154,
+      "column": 29,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "e797803bad8ce54728b3e948b17457096fb23106d62b7e36190633b7d8d6438d",
+      "functionPath": "_recordArchiveFailure"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1545,
+      "column": 12,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "73f2f5bebf4634ad1224f59e31d8c75c6d29e8e4c901cf7231bb81ce7449dfd5",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1559,
+      "column": 41,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "e1b786691ba93e3a392dd37308e45e5e8c89a41c24d15bd7dd5eb92953ee8b26",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1570,
+      "column": 10,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "27b90f18f14f086ee8a8fb10bb6f3a66c4ee42782728669d7add396a42e7b286",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 160,
+      "column": 8,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "9c7b5f6f887733dd99b2e415446f6e3feea470e33865f28ca3712f7859f0ccaa",
+      "functionPath": "_recordArchiveFailure"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1613,
+      "column": 32,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "5babdeb36bfcc2034c30eef756ac65eecc0864bad854ac2504fd48b4aa52a8b1",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1628,
+      "column": 18,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "717addf2a835a642ab0c061644806b406f64d94c1dc6bd9e2a4ce14dcb45a5dc",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1632,
+      "column": 18,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "1a1dddf09dc6277d681c210faba42c24619671f5b0cedde82a2ffba1a511763b",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1635,
+      "column": 14,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "663577d3a5d133ee3335232d36adb3af76a0ca70da09a7be746e5a1f4866b19d",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1639,
+      "column": 16,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "68368c9f98bce9af860e290072122273259549d55c1a5e98c80eda055b82ca50",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1641,
+      "column": 10,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "196b0fd44e719eb92cd2c442c4d1f68fa1e1d8c24d73bfc0e1e6a28be41f0e21",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1647,
+      "column": 19,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "d3351bbbbbaf00ee3004273a22d512a58918a342d5c6bb5c4e6f05f7ad773b6a",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1649,
+      "column": 8,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "a41d8fba9220fc4282067a45e788056bc103fe4bf32a6c543d4b6ef076250812",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1650,
+      "column": 8,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "27875d80b6d4136833e9a52e517c1038e2b8f058c68fe1a807091645efc669fe",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1652,
+      "column": 6,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "6835bd0823312431dd09905b8e41805a8191e802aa32c2ab8d97f500972fe98a",
+      "functionPath": "_runTaskWithoutInitialBatch"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1657,
+      "column": 20,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "f533f0d60ca6e0eb54461156a4c4f339f3fd2c9b309f170966ffec6be51f0257",
+      "functionPath": "cancelActive"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1657,
+      "column": 24,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "6b33347fe402f7f1d533f8a687851b887a93cecde56370bca9432838f60a03d8",
+      "functionPath": "cancelActive"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1665,
+      "column": 39,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "c510ce15f76de8a5cbcdf3a056e62ba8512ea20c638c631530b8c4cfbf2eb223",
+      "functionPath": "cancelActive"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 167,
+      "column": 6,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "a7ddca60f02057c4e3e546499317cd987f893109ca00a9d3c6dcf1b21db5c9d7",
+      "functionPath": "_recordArchiveFailure"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1673,
+      "column": 14,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "e484741c1ac605d5cdda96ee7293d339f206f02dcbc73318064f9b8598aa8c7e",
+      "functionPath": "cancelActive"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1675,
+      "column": 16,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "fb56f783a6361780acf9f77f4269768e689596704765530a22bd7ab66c0fda8d",
+      "functionPath": "cancelActive"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 1680,
+      "column": 16,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "f42626afbfc95553c1600867c0c5609196b99373c40eee611cb3798ca009a4a4",
+      "functionPath": "cancelActive"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 178,
+      "column": 21,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "e484741c1ac605d5cdda96ee7293d339f206f02dcbc73318064f9b8598aa8c7e",
+      "functionPath": "_finishOperationTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 19,
+      "column": 17,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "0c2d6879150425cac4e79650e7f54ed701e7288fb14cc1d2bd85b248c9753bf2",
+      "functionPath": "taskResultStatus"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 19,
+      "column": 17,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "a8364e442e4e06804c3219ecf6c393ada16f9731821581cdedfe8918b94241e2",
+      "functionPath": "taskResultStatus"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 20,
+      "column": 7,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "5e429a3f4ecd6717d5b2b717807082d92562ab8dbf7c7f8b6b782fb356643a9d",
+      "functionPath": "taskResultStatus"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 202,
+      "column": 28,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "15f534d643da930226b9393c8aba4c7ea7162cf118d3b1e886c3f0ca8834d3a0",
+      "functionPath": "_finishOperationTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 225,
+      "column": 27,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "90aa0266d413ec14bce894cb64fbbe9a3fbcdb55480b67154e8e3059e6c3361b",
+      "functionPath": "_recordFileOwnerCompletion"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 231,
+      "column": 6,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "e5fd2047affbf582ba06798b8abfe08be0941350cedb66084925a7ea3654436b",
+      "functionPath": "_recordFileOwnerCompletion"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 233,
+      "column": 44,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "00aa95e4547ac9b4c0e5ddc2017ab29afa83547fab79b59cf0f453d6dee714f9",
+      "functionPath": "_recordFileOwnerCompletion"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 247,
+      "column": 12,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "7fa662c17c57be6ff4badd27b915636a1dc15444a9bf62f71bb718968a63d3b9",
+      "functionPath": "_completeFileOwnerAfterTerminal"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 249,
+      "column": 6,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "397ea008d44375db9a524c6021726dfa4a1d853a2d3d894cb3b0215989cc4dae",
+      "functionPath": "_completeFileOwnerAfterTerminal"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 251,
+      "column": 14,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "2da780522eac2c412322cf135c222876a4809722337214cc1478bf2b891f8d43",
+      "functionPath": "_completeFileOwnerAfterTerminal"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 263,
+      "column": 21,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "fb56f783a6361780acf9f77f4269768e689596704765530a22bd7ab66c0fda8d",
+      "functionPath": "_finishFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 276,
+      "column": 47,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "7fa662c17c57be6ff4badd27b915636a1dc15444a9bf62f71bb718968a63d3b9",
+      "functionPath": "_finishFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 283,
+      "column": 49,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "74f0f29b4f6522a0a7a6ccf2fc702729256bc9ecfe33e713cfbe6d48a4ba1188",
+      "functionPath": "_finishFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 293,
+      "column": 28,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "f3e4defd77cb7561fe9d146f8a012cf7cc18ba12cf02d1cb48a4eccfbb229b0e",
+      "functionPath": "_finishFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 324,
+      "column": 22,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "fed0343dbe428288dd748cb31b7d4909bcbf9a3b2ba4ad031670679501d07216",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 349,
+      "column": 18,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "8704042e216fd186414488e4958c034495a66c6a29d95db299f120d385cde4ae",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 354,
+      "column": 21,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "f07edcd5441f59b800e3eb09c41283d5ac9f39930d815648d3f5c19519f0568e",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 360,
+      "column": 26,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "b2e9f2beddf9597a42b503ead6948b7becf0a2b3279b062beba3233a07965afb",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 360,
+      "column": 54,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "89fb0b57fb486b15085313d8d11cb98b35830877fcec7de94d331a19a2f3db3d",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 361,
+      "column": 29,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "e8d926dd8e25565b29b22908dbef2afc6079825f4a2f9c5d9aa862cba57c534c",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 364,
+      "column": 20,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "eb12bde455a398dcb69c899a9b129ad6a46634f35806c16a8fa2c72afec16b4d",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 367,
+      "column": 22,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "5e7c76f56127061545a3e065f6ab88a8bc2a19bf009173d0abf2042b4b2c8a99",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 383,
+      "column": 25,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "0dc4e41b7cdd13a43195276b741247a980796820257b2e506c520370d4e4e1f0",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 387,
+      "column": 16,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "0adc23c66280aee2469ae1f8a79b0c824941b30fc02f6a30553af631fc8b6275",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 408,
+      "column": 16,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "656c0a8579dc4179bb5edb776d47d7d6983bf0dda155121176671ddc77fe65dc",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 411,
+      "column": 16,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "2f1b45efdcd19b6a674656ae5aba57872624b8e74db19425891c127865462900",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 421,
+      "column": 16,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "4d2f28fdcf4e35478abefa9616f427cb7b9652c0b716ba93ca2a71193be8af11",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 435,
+      "column": 6,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "be493685d1decbe167eb61826033abeb1aee3173351e11ce64ce8f02133ae0af",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 436,
+      "column": 6,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "b39c75acdc64812cdd8dd5e3b42c7cce7f3a437e7d1d4cb9336dc573ebb33e47",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 437,
+      "column": 6,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "45831ec5da094f9600acf4c59d0f98b283a5d92e5dc578e33e3d5034c069a4df",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 440,
+      "column": 34,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "0c9d625b9e221692286b73f194d44a2d738c5e1d300bcae4a0c99e42c1da6829",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 447,
+      "column": 16,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "8ecd36f544d1dca51e90404b99044aa4a208be86a4c43c7d53fe998c16fdde71",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 460,
+      "column": 39,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "de31ed0ec3f420e7354c1677fe9e42a74e2dd38641f0615bbe6637f167df5c4e",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 465,
+      "column": 14,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "30926ea821b3e9cbaccf59c5c24a3c375a2f053e51745343af5241bcdd22921c",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 475,
+      "column": 33,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "b95639d5f33a3151c8ff477be9fe78bed3601ba17120c88953d8233881369e0e",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 483,
+      "column": 16,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "9b6048df65595ed945f01fbcc8b04109da1366dd204ad6115ac2b3d5b26a8886",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 492,
+      "column": 28,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "4d05be25fda1b9d08a7a55437b3932ab0f809c52d4c1e9424663fef2e34cda9f",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 494,
+      "column": 14,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "a6963d081a60f40bbf822f901780256c81a29e8bda364474e9dc6f7ef04a2981",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 508,
+      "column": 30,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "0f1717a4898b328a8812ed533e335ebf884f65814e597985f879fdbe3e3d4bc0",
+      "functionPath": "runFileTask.settleArtifacts"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 518,
+      "column": 31,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "e29e3c5e91b88ba4dec4bd19ee15327576cadee896c9578836ada32011833239",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 520,
+      "column": 16,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "64e83b435b338a1ad33580f14f1af78f1e33c60ba15a06ab03ca346213271e22",
+      "functionPath": "runFileTask.<anonymous:2>"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 536,
+      "column": 14,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "1c8f8fa56a7c209d8f5e360e00caa0cd0dbcf6c00ac616fe71ac56e290794a6e",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 539,
+      "column": 15,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "047f7970e94d54b60e78d7b8ee7f8dd15db5ec8739497567326ba3b4d2e63582",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 542,
+      "column": 8,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "dddc4115333a819162a1e962863533f74f319504bcb45ad1ee57d38a1e1192d3",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 552,
+      "column": 35,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "9bd5147c3135124925629b9fcdf63116b75d67f9f21ae596289de5f3d97edd74",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 554,
+      "column": 37,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "155840ad6c3b7d09d1bc37f67f49d47795396ee5e84b64df8aa9712aa2a309d9",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 556,
+      "column": 14,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "9d002829c6ed39584d99b54f4e14ea6a9054ba09ab02c5e9f77809ebe8ee0ac2",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 567,
+      "column": 10,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "98064e6849907db4a1a61edeafdbc05757b44bbca0f2641c3442f1064deb3c99",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 578,
+      "column": 41,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "5947b1065150cc9d18b741a1d0dce26ddde0b24ca48defe568f23f68f40083d6",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 589,
+      "column": 10,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "27bde9b1be5a113ced33f3cf7d36dc56a19a7f8ba5cecb850475bd3abf7f8064",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 613,
+      "column": 32,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "fc19627baf31a5769e7a39c28261a6ffeb9b26ef3eb6511830bf6c16c2aceb4b",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 630,
+      "column": 31,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "893dee5e5bb7cdf25c624216c850bb7d2767e1dcc90aa091cb1e1d7149a8da20",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 637,
+      "column": 14,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "82e09ea2b2a8d96ed3d67390c8827ab517fd9ed2ad5674df66ba9ef78c92bf6f",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 644,
+      "column": 8,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "d3351bbbbbaf00ee3004273a22d512a58918a342d5c6bb5c4e6f05f7ad773b6a",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 645,
+      "column": 8,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "011b2fd4be262fcafb068559e34d8267e3dc6f3daa28c9b24cba8439ce7ee03f",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 646,
+      "column": 8,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "0fc32a58e3730d5cb820aa616c37710d54b8bc1fe0709de42061a73bd4d00fa0",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 648,
+      "column": 6,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "6835bd0823312431dd09905b8e41805a8191e802aa32c2ab8d97f500972fe98a",
+      "functionPath": "runFileTask"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 654,
+      "column": 28,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "284f0aa6240bae8d84467555d748b324d4fe9fa379722b48d2bd528fe78e48dd",
+      "functionPath": "_bindFileFlowIdentities"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 663,
+      "column": 30,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "e1bc22b0a82b279142d8aa30f4bf7e0ba019d68f8e66ec16e048b11069b4b526",
+      "functionPath": "_bindFileFlowIdentities"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 679,
+      "column": 28,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "9e52ad521bd1db90d418c539444fd7e565f52deb6c8effaa6d5634de2f4202e3",
+      "functionPath": "_bindOperationFlowIdentities"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 689,
+      "column": 30,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "bb1d7785a9c24c1f07b739efaa6102fdd6e955aef5664b6c854fdaf0572ce746",
+      "functionPath": "_bindOperationFlowIdentities"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 734,
+      "column": 12,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "8c56ef9b8015f58f726ae033270ed0ea401fb5eacf2e890ffcc5e7fa18d40f29",
+      "functionPath": "_settleArchiveCall"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 736,
+      "column": 4,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "acb34111899e42a5c5dee38e45bc1876f44e47a7e7b9ebd25ff73242e11c5c8f",
+      "functionPath": "_settleArchiveCall"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 742,
+      "column": 34,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "a5d171e32e92fd32ab762caa62267243ee1b8191beaad8d623fdb1f4367342a7",
+      "functionPath": "_settlePreExecutionFailure"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 747,
+      "column": 20,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "405873a17f184367cdef02cc552ae0ad77a496a98896577e3f2707464b404348",
+      "functionPath": "_settlePreExecutionFailure.invoke"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 755,
+      "column": 30,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "961c7880e487b704452700e86540a18909fc16ccb8369ad87e82ee5e323ba576",
+      "functionPath": "_settlePreExecutionFailure"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 805,
+      "column": 10,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "a83085432360ce69763efe359aab1af81a4b1f7b32fe856b0acbe738e6318e3b",
+      "functionPath": "run"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 809,
+      "column": 6,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "a2969925179ddf4749f675c12b58677ed472aeb1373132ce13acfd6d20f089cd",
+      "functionPath": "run"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 812,
+      "column": 22,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "fed0343dbe428288dd748cb31b7d4909bcbf9a3b2ba4ad031670679501d07216",
+      "functionPath": "run"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 814,
+      "column": 35,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "98f1e42cd81aac6cf05cf8272cbd3c456b118a62a0265954d114957dfa69d1bf",
+      "functionPath": "run"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 832,
+      "column": 40,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "7a3067dbefec8bb09c968a1fa5e560e88e2f52f02d18f9067e4f47f613d88396",
+      "functionPath": "run"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 841,
+      "column": 31,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "7d6860f5159ba371ea4a5ff6b40e48d491f0c8560b95f9a684da50230ede2431",
+      "functionPath": "run"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 856,
+      "column": 29,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "8704042e216fd186414488e4958c034495a66c6a29d95db299f120d385cde4ae",
+      "functionPath": "run"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 863,
+      "column": 21,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "314cf75d641e39d196f9653e0b7f7c19c6b9d92df0e5dd8ec3b474e36e93dbc3",
+      "functionPath": "run"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 869,
+      "column": 26,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "b2e9f2beddf9597a42b503ead6948b7becf0a2b3279b062beba3233a07965afb",
+      "functionPath": "run"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 869,
+      "column": 54,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "89fb0b57fb486b15085313d8d11cb98b35830877fcec7de94d331a19a2f3db3d",
+      "functionPath": "run"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 870,
+      "column": 29,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "e8d926dd8e25565b29b22908dbef2afc6079825f4a2f9c5d9aa862cba57c534c",
+      "functionPath": "run"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 871,
+      "column": 31,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "828149c8d783a3a29d29e8a8c98e3a86d55d3bee89ae4c0137354fa71b24f72a",
+      "functionPath": "run"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 896,
+      "column": 14,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "69b38b73685bce4e5597404cf89a79026497942e278e72aecf75828a5b8ea50b",
+      "functionPath": "run"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 900,
+      "column": 10,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "0a620e568682bf14326e456224f628936adf16977fa30e0303065f4f236e29ae",
+      "functionPath": "run"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 908,
+      "column": 6,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "be493685d1decbe167eb61826033abeb1aee3173351e11ce64ce8f02133ae0af",
+      "functionPath": "run"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 911,
+      "column": 34,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "2af05445972856f28fb89baed3715092f98d30a0bffd768272e9a2d4e00b1854",
+      "functionPath": "run"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 916,
+      "column": 24,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "76f28972d4ad40c80e0c60009fdb6e21ca176df3fe535c6fba6e31c2d1a52f43",
+      "functionPath": "run.invoke"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 924,
+      "column": 16,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "9aa8cdcd4da695b48ce70d7643b5d460def415cb94f9802c6a706629a799a52c",
+      "functionPath": "run"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 940,
+      "column": 38,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "2f321650cfba9cc0beba65cc2c1edbe7a497525f244ddb6db06a77771e2e1982",
+      "functionPath": "run"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 953,
+      "column": 16,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "d56fc007c0107c92d534470a425f4052adc63cb9a9982dea761b93cdd625fddc",
+      "functionPath": "run"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 968,
+      "column": 31,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "8d03d820e3e532655a88de4c97a1e17e884ac564e2b6451d35b4aab775298a0d",
+      "functionPath": "run"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 980,
+      "column": 8,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "091cd02585129407904bac7ad50587220ff435059b2397d45174de3d54b58ac9",
+      "functionPath": "run"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main-process/archive-center/task-lifecycle.js",
+      "to": null,
+      "line": 986,
+      "column": 26,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "6577e67ac84b046a12a6a28fe4017089f899597b2134837775939acfede21556",
+      "functionPath": "run"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 1416,
+      "column": 23,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "251427ec19d3727e11aa37529080e9839f11a1798b18bab8cc6b25a50abe68dc",
+      "functionPath": "showImportOpenDialog"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 1417,
+      "column": 29,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "6ca0fbe72e3096112d79317fce09a5f6f5a762132c2073db3e9914e47c55662b",
+      "functionPath": "showImportOpenDialog"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 1431,
+      "column": 4,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "e944befc124124d3c7af4dcd35fbd19d823025602cececc93e4f45ea4928ddd1",
+      "functionPath": "showImportOpenDialog"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 1435,
+      "column": 18,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "dd54d7a9fe6a8a3f48db0c0dc983aa68e32cac546cdee54249c910b3bb9ae939",
+      "functionPath": "showImportOpenDialog"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 1516,
+      "column": 33,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "9f3a621b693f46263b4e01305bafda8270a9f800dc37654513c805af6b87e8ca",
+      "functionPath": "runWithStatementConfirmedSourceSnapshots"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 1765,
+      "column": 2,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "2dc33d955e9c249363712f112a670d4b19fb4a9ef0bd86675ee9009802bb4fc0",
+      "functionPath": "markStartupMetric"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 18990,
+      "column": 25,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "6a366724f279ec80c0ff6d40643db705dec84f2437ba9cbdf5142670cc126a20",
+      "functionPath": "recordPositionArchiveIntentFiles"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 18999,
+      "column": 4,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "126debfb58d87b33a6eb7ad625b3a595e10946bf639fe77877901422f4875320",
+      "functionPath": "recordPositionArchiveIntentFiles"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 19004,
+      "column": 6,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "eb66bc2ac4b24a60a338611b2b1090d7332d004c447b0e6372a250b76d471fe7",
+      "functionPath": "recordPositionArchiveIntentFiles"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 19010,
+      "column": 20,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "9760bcb3e2d1e59653160fa868f264a50510b0da170f752ca6c25ad6ce4d146c",
+      "functionPath": "recordPositionArchiveIntentFiles"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 19014,
+      "column": 8,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "a678c6337847c3dab3d4b9e43529da336f6b712266be7720a1625b81e1e82845",
+      "functionPath": "recordPositionArchiveIntentFiles"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 19019,
+      "column": 22,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "aa1c25bf5477ecdce5a8e9f90d11075a0022cea329a10f3b813747f99da035de",
+      "functionPath": "recordPositionArchiveIntentFiles"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 19023,
+      "column": 23,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "265b068b9a5040e1611b0b734bc80b2a175b972915a42964769ea109c58d9cf1",
+      "functionPath": "recordPositionArchiveIntentFiles"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 19024,
+      "column": 27,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "2a18434e356abe68cc252cd382e9fe4f9fc67072b1da70525f9a398841049458",
+      "functionPath": "recordPositionArchiveIntentFiles"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 19038,
+      "column": 23,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "e9d39425ad7025d45f2db3d06a62b9a2a9a2fb95979fa9d45421eae5b303524b",
+      "functionPath": "recordPositionArchiveIntentFiles"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 19039,
+      "column": 27,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "aa7a0904486e3f52cdba0137bcfff26e7ceec761eb65d72f2c70a48607185e4f",
+      "functionPath": "recordPositionArchiveIntentFiles"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 19049,
+      "column": 4,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "a0a63b1e899ed50ab27a82a9c38e1be36ac177f6a0e7d7170eb8a03f62e5e038",
+      "functionPath": "recordPositionArchiveIntentFiles"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 19050,
+      "column": 4,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "b82d126938433f419d658bef140775b412bb0d792c5cf15b2a76aad391f66331",
+      "functionPath": "recordPositionArchiveIntentFiles"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 19425,
+      "column": 25,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "26978f0aee0226225ddb240b2ba16547d554f9ebaf13e0868f7bd76abc7f6a7f",
+      "functionPath": "positionOutboxTerminalIntent"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 19682,
+      "column": 41,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "26c0b482b401389e4efa2e4df60da097925b81ab0478139a8de4ed7bdb288c61",
+      "functionPath": "getPositionReconciliationService"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 19682,
+      "column": 41,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "7d22e00511e79451f4b794bd4634ef933daa75e27e6a265f2d7657642dd0c828",
+      "functionPath": "getPositionReconciliationService"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 20783,
+      "column": 17,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "192d9bced75d70ada23d47785f5556ce08f35d79962a6003a955ae640ce3a946",
+      "functionPath": "recoverToolboxPublicationsAtStartup"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 21753,
+      "column": 18,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "a4b5bc819ddc8336531f424bd509fffa56d52cccff2b2584bc3142f3e6985859",
+      "functionPath": "cleanupPositionArchiveSourcePaths"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 21760,
+      "column": 4,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "5544bdea5ed5ff477dbca925271b25cb7e386e63ddcc3ff2d1e3ac483dc3ad23",
+      "functionPath": "cleanupPositionArchiveSourcePaths"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 21761,
+      "column": 4,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "0c9cf71806e77c3c31d94109b7f304fa4158cc1d990d773321d8bf8c0885c708",
+      "functionPath": "cleanupPositionArchiveSourcePaths"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 21767,
+      "column": 6,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "52d242c11ad5952487e9d8070f43204ea300049e28f28de28946eb46cdbaeea2",
+      "functionPath": "cleanupPositionArchiveSourcePaths"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 21806,
+      "column": 24,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "62e493793eb84ee136ce4e99ea71bf231fdb98784251ae816e6168875d2b5c88",
+      "functionPath": "resolveArchiveFlowEvidence"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 21845,
+      "column": 25,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "393c42d0ec2261718a2daaec1560c076c493422c51c31f60392583b3e3d6f048",
+      "functionPath": "trackArchiveOperationPromise"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 21860,
+      "column": 9,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "1c270f8af15015aa78f4007e892202a5eb60db833288fedacc8d3f5cb491d3f1",
+      "functionPath": "runArchiveAwareOperation.<anonymous:1>"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 21921,
+      "column": 45,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "41e9cb8f2e51b95a0d1317355c5d9eaa966c95ee735fc4f1919dc8647ac9d839",
+      "functionPath": "runArchiveAwareOperation.<anonymous:1>.<anonymous:1>.<anonymous:3>"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 21928,
+      "column": 35,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "a2bc0ce589412a5c80146d858d1162eb0eee9fed522ba33715e5c9189f8ed56c",
+      "functionPath": "runArchiveAwareOperation.<anonymous:1>.<anonymous:1>.<anonymous:4>"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 21978,
+      "column": 27,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "eba13616e6b988a7316717c93e58c579450969a728643e2ea3718de3f2577958",
+      "functionPath": "runArchiveAwareOperation.<anonymous:1>.<anonymous:2>.<anonymous:1>"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 21997,
+      "column": 41,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "41e9cb8f2e51b95a0d1317355c5d9eaa966c95ee735fc4f1919dc8647ac9d839",
+      "functionPath": "runArchiveAwareOperation.<anonymous:1>.<anonymous:2>.<anonymous:5>"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 22004,
+      "column": 31,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "a2bc0ce589412a5c80146d858d1162eb0eee9fed522ba33715e5c9189f8ed56c",
+      "functionPath": "runArchiveAwareOperation.<anonymous:1>.<anonymous:2>.<anonymous:6>"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 22011,
+      "column": 10,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "4fe2113bdb4f951d4457e2380cf93188763bad29fa675e76e4a81b7f69cbb3cc",
+      "functionPath": "runArchiveAwareOperation.<anonymous:1>.<anonymous:2>"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 22408,
+      "column": 6,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "57c09afca5a4e6ee41176346b994397117ab6f85406a9b5f7ce1ce047bcc3484",
+      "functionPath": "assertTaskPolicyNotHeld"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 22430,
+      "column": 8,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "a00f4ca301959dcf3138f4e752b2ff5caaa6f3cb1c8b9aba18fb5a9100742b12",
+      "functionPath": "assertTaskPolicyNotHeld"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 5113,
+      "column": 39,
+      "message": "受保护编排的调用别名无法完整解释",
+      "evidenceId": "9641c73b48a7fe7d1daf81a1fc734be90c167e90f4465be9798414386ff437d1",
+      "functionPath": "initializeArchiveCenter"
+    }
+  ],
+  "matchedExceptions": [
+    {
+      "rule": "ARCH-BIZOP-QUERY",
+      "boundaryId": "bizop-query-q1",
+      "from": "src/main-process/biz-op-v327/delete-preview.js",
+      "to": null,
+      "line": 54,
+      "column": 29,
+      "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+      "evidenceId": "b2873c0fc07d3f0f5eb99684fedb3ea8695586a83b1e371e98a1268ac681e111",
+      "functionPath": "createBizOpDeletePreview.collect",
+      "exceptionId": "baseline-bizop-query-001"
+    },
+    {
+      "rule": "ARCH-BIZOP-QUERY",
+      "boundaryId": "bizop-query-q2",
+      "from": "src/main-process/biz-op-v327/compute-inputs.js",
+      "to": null,
+      "line": 33,
+      "column": 20,
+      "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+      "evidenceId": "45a4b60fa642f7caf511fcd7cc2b7930ce5bc6a81c1183dbc4d1e34c3bed51aa",
+      "functionPath": "collectInputs",
+      "exceptionId": "baseline-bizop-query-002"
+    },
+    {
+      "rule": "ARCH-BIZOP-QUERY",
+      "boundaryId": "bizop-query-q2",
+      "from": "src/main-process/biz-op-v327/compute-inputs.js",
+      "to": null,
+      "line": 43,
+      "column": 25,
+      "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+      "evidenceId": "b04f90690b853847040c1baa40a64a8a27a7e6252eed1149a3709a71729e0aef",
+      "functionPath": "collectInputs",
+      "exceptionId": "baseline-bizop-query-003"
+    },
+    {
+      "rule": "ARCH-BIZOP-QUERY",
+      "boundaryId": "bizop-query-q2",
+      "from": "src/main-process/biz-op-v327/export-inputs.js",
+      "to": null,
+      "line": 11,
+      "column": 10,
+      "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+      "evidenceId": "c2c1543beab7f6f4bfd76ac6602d7d2a9c8d1c1ac27fe2392472f8f454aadc49",
+      "functionPath": "freezeExportSource",
+      "exceptionId": "baseline-bizop-query-004"
+    },
+    {
+      "rule": "ARCH-BIZOP-QUERY",
+      "boundaryId": "bizop-query-q2",
+      "from": "src/main-process/biz-op-v327/export-inputs.js",
+      "to": null,
+      "line": 15,
+      "column": 24,
+      "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+      "evidenceId": "0f4b4a29d947034948c71dd1e83a788b7908fead27523d97163a7ce2ccabacf6",
+      "functionPath": "freezeExportSource",
+      "exceptionId": "baseline-bizop-query-005"
+    },
+    {
+      "rule": "ARCH-BIZOP-QUERY",
+      "boundaryId": "bizop-query-q2",
+      "from": "src/main-process/biz-op-v327/export-inputs.js",
+      "to": null,
+      "line": 22,
+      "column": 10,
+      "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+      "evidenceId": "cef7c30c5d658479d348fd3ad1f1733ae754d8d352901e03c17f4d3c75b973f1",
+      "functionPath": "freezeExportSource",
+      "exceptionId": "baseline-bizop-query-006"
+    },
+    {
+      "rule": "ARCH-BIZOP-QUERY",
+      "boundaryId": "bizop-query-q2",
+      "from": "src/main-process/biz-op-v327/export-inputs.js",
+      "to": null,
+      "line": 28,
+      "column": 10,
+      "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+      "evidenceId": "246f37044b7d1352c1817d35a69611c4e384a4300aa4d91ff1fe8fbe96c4e87b",
+      "functionPath": "freezeExportSource",
+      "exceptionId": "baseline-bizop-query-007"
+    },
+    {
+      "rule": "ARCH-BIZOP-QUERY",
+      "boundaryId": "bizop-query-q3",
+      "from": "src/main-process/biz-op-v327/delete-preview.js",
+      "to": null,
+      "line": 23,
+      "column": 18,
+      "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+      "evidenceId": "b346456c71d884fb63468ee7e04be84af1e920e5ae609535b3958be7087cf37a",
+      "functionPath": "createBizOpDeletePreview.collect.<anonymous:1>",
+      "exceptionId": "baseline-bizop-query-008"
+    },
+    {
+      "rule": "ARCH-BIZOP-QUERY",
+      "boundaryId": "bizop-query-q3",
+      "from": "src/main-process/biz-op-v327/delete-preview.js",
+      "to": null,
+      "line": 26,
+      "column": 25,
+      "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+      "evidenceId": "a6557e6585374f978ce6fb7015fedcf9400321c548557ce91a5afd17d4717483",
+      "functionPath": "createBizOpDeletePreview.collect.<anonymous:1>",
+      "exceptionId": "baseline-bizop-query-009"
+    },
+    {
+      "rule": "ARCH-BIZOP-QUERY",
+      "boundaryId": "bizop-query-q3",
+      "from": "src/main-process/biz-op-v327/delete-preview.js",
+      "to": null,
+      "line": 29,
+      "column": 28,
+      "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+      "evidenceId": "b4689ef4f25bb9feff4506ed95ac6658ed9fb35746439c066bb55509f054812c",
+      "functionPath": "createBizOpDeletePreview.collect.<anonymous:1>",
+      "exceptionId": "baseline-bizop-query-010"
+    },
+    {
+      "rule": "ARCH-BIZOP-QUERY",
+      "boundaryId": "bizop-query-q3",
+      "from": "src/main-process/biz-op-v327/delete-preview.js",
+      "to": null,
+      "line": 37,
+      "column": 18,
+      "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+      "evidenceId": "bdbf8ae6f250d7b7bc07c892809730de86a2231948e34d9f22f27c3876d4e5a2",
+      "functionPath": "createBizOpDeletePreview.collect.<anonymous:2>",
+      "exceptionId": "baseline-bizop-query-011"
+    },
+    {
+      "rule": "ARCH-BIZOP-QUERY",
+      "boundaryId": "bizop-query-q3",
+      "from": "src/main-process/biz-op-v327/delete-preview.js",
+      "to": null,
+      "line": 40,
+      "column": 25,
+      "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+      "evidenceId": "ba6332cf5f68f113dec3406d08f1a5b0cdd9fcb2902cc42f87167a3a550f3f5b",
+      "functionPath": "createBizOpDeletePreview.collect.<anonymous:2>",
+      "exceptionId": "baseline-bizop-query-012"
+    },
+    {
+      "rule": "ARCH-BIZOP-QUERY",
+      "boundaryId": "bizop-query-q3",
+      "from": "src/main-process/biz-op-v327/delete-preview.js",
+      "to": null,
+      "line": 54,
+      "column": 29,
+      "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+      "evidenceId": "b2873c0fc07d3f0f5eb99684fedb3ea8695586a83b1e371e98a1268ac681e111",
+      "functionPath": "createBizOpDeletePreview.collect",
+      "exceptionId": "baseline-bizop-query-001"
+    },
+    {
+      "rule": "ARCH-BIZOP-QUERY",
+      "boundaryId": "bizop-query-q3",
+      "from": "src/main-process/biz-op-v327/import-main.js",
+      "to": null,
+      "line": 112,
+      "column": 37,
+      "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+      "evidenceId": "f0771f9df92f43700ec9f2ff4b02002f7fac49830e44665f4bd173c0603d4f8c",
+      "functionPath": "createBizOpImportCoordinator.runImport.<anonymous:1>.execute",
+      "exceptionId": "baseline-bizop-query-013"
+    },
+    {
+      "rule": "ARCH-BIZOP-QUERY",
+      "boundaryId": "bizop-query-q3",
+      "from": "src/main-process/biz-op-v327/import-main.js",
+      "to": null,
+      "line": 144,
+      "column": 25,
+      "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+      "evidenceId": "454e6bbfa7cd8a2b6280061397a39b32946e13ad3e50050ffd888014c5f56711",
+      "functionPath": "createBizOpImportCoordinator.runImport.<anonymous:1>",
+      "exceptionId": "baseline-bizop-query-014"
+    },
+    {
+      "rule": "ARCH-BIZOP-QUERY",
+      "boundaryId": "bizop-query-q3",
+      "from": "src/main-process/biz-op-v327/import-main.js",
+      "to": null,
+      "line": 26,
+      "column": 21,
+      "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+      "evidenceId": "ace1f1dffe35cbff3d8f80a64ec069755bc07dbe304220b15a31c680b00698fc",
+      "functionPath": "createBizOpImportCoordinator.restoreDiagnostic",
+      "exceptionId": "baseline-bizop-query-015"
+    },
+    {
+      "rule": "ARCH-BIZOP-QUERY",
+      "boundaryId": "bizop-query-q3",
+      "from": "src/main-process/biz-op-v327/import-main.js",
+      "to": null,
+      "line": 30,
+      "column": 21,
+      "message": "读取协调器不得通过原始 DB 读取事实；使用 query facade / Archive repository",
+      "evidenceId": "454e6bbfa7cd8a2b6280061397a39b32946e13ad3e50050ffd888014c5f56711",
+      "functionPath": "createBizOpImportCoordinator.restoreDiagnostic",
+      "exceptionId": "baseline-bizop-query-016"
+    },
+    {
+      "rule": "ARCH-CYCLE",
+      "boundaryId": null,
+      "from": "src/backend/biz-op-recon-import/import-worker.js",
+      "to": "src/main-process/biz-op-recon-session.js",
+      "line": 49,
+      "column": 4,
+      "message": "生产依赖形成循环：src/backend/biz-op-recon-import/import-worker.js → src/main-process/biz-op-recon-session.js → src/backend/biz-op-recon-import/import-worker.js",
+      "dependencyPath": [
+        "src/backend/biz-op-recon-import/import-worker.js",
+        "src/main-process/biz-op-recon-session.js",
+        "src/backend/biz-op-recon-import/import-worker.js"
+      ],
+      "evidenceId": "a6247d7e51da79199b73635f3ec09a02c7fdc204edbce418b0a14b7e44162ecc",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "addOneDay",
+        "assertBizOpMonthEndAdmission",
+        "assertNoPendingMonthEndCopy",
+        "normalizeBu",
+        "recordMonthEndCopyIntent"
+      ],
+      "cycleEdges": [
+        {
+          "from": "src/backend/biz-op-recon-import/import-worker.js",
+          "to": "src/main-process/biz-op-recon-session.js",
+          "kind": "require"
+        },
+        {
+          "from": "src/main-process/biz-op-recon-session.js",
+          "to": "src/backend/biz-op-recon-import/import-worker.js",
+          "kind": "worker"
+        }
+      ],
+      "edgeKinds": [
+        "require",
+        "worker"
+      ],
+      "literalCycle": false,
+      "exceptionId": "baseline-cycle-001"
+    },
+    {
+      "rule": "ARCH-CYCLE",
+      "boundaryId": null,
+      "from": "src/main-process/background-execution/adapters/worker-thread-adapter.js",
+      "to": "src/main-process/vcc-financial-op-output/writer-worker-entry.js",
+      "line": 98,
+      "column": 21,
+      "message": "生产依赖形成循环：src/main-process/background-execution/adapters/worker-thread-adapter.js → src/main-process/vcc-financial-op-output/writer-worker-entry.js → src/main-process/background-execution/adapters/worker-thread-adapter.js",
+      "dependencyPath": [
+        "src/main-process/background-execution/adapters/worker-thread-adapter.js",
+        "src/main-process/vcc-financial-op-output/writer-worker-entry.js",
+        "src/main-process/background-execution/adapters/worker-thread-adapter.js"
+      ],
+      "evidenceId": "69a3dcf14692fc4e083e6341f4366b184b6fe550ee8c13f3c541167c93e87e8c",
+      "functionPath": "createWorkerThreadAdapter.start",
+      "kind": "worker",
+      "cycleEdges": [
+        {
+          "from": "src/main-process/background-execution/adapters/worker-thread-adapter.js",
+          "to": "src/main-process/vcc-financial-op-output/writer-worker-entry.js",
+          "kind": "worker"
+        },
+        {
+          "from": "src/main-process/vcc-financial-op-output/writer-worker-entry.js",
+          "to": "src/main-process/background-execution/adapters/worker-thread-adapter.js",
+          "kind": "require"
+        }
+      ],
+      "edgeKinds": [
+        "require",
+        "worker"
+      ],
+      "literalCycle": false,
+      "exceptionId": "baseline-cycle-002"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/adapters/acquiring-adapter.js",
+      "to": "src/backend/acquiring-bill-currency-import/contract-bill.js",
+      "line": 32,
+      "column": 27,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/background-execution/mature-action-adapters.js",
+        "src/main-process/background-execution/adapters/acquiring-adapter.js",
+        "src/backend/acquiring-bill-currency-import/contract-bill.js"
+      ],
+      "evidenceId": "05c58ae9aad227903f078eb4c849602c98525606b3aa6118b16f8f4c7f8f4a7b",
+      "functionPath": null,
+      "kind": "require",
+      "exceptionId": "baseline-descriptor-composition-001"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/adapters/acquiring-adapter.js",
+      "to": "src/backend/acquiring-bill-currency-import/contract-flow.js",
+      "line": 29,
+      "column": 27,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/background-execution/mature-action-adapters.js",
+        "src/main-process/background-execution/adapters/acquiring-adapter.js",
+        "src/backend/acquiring-bill-currency-import/contract-flow.js"
+      ],
+      "evidenceId": "2689e4bb2443a253fdb3ecb929e0eb0e389a81ac9f2829b04977c24ef8baf32b",
+      "functionPath": null,
+      "kind": "require",
+      "exceptionId": "baseline-descriptor-composition-002"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/adapters/acquiring-adapter.js",
+      "to": "src/backend/run-data-store.js",
+      "line": 13,
+      "column": 21,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/background-execution/mature-action-adapters.js",
+        "src/main-process/background-execution/adapters/acquiring-adapter.js",
+        "src/backend/run-data-store.js"
+      ],
+      "evidenceId": "6b4c26c2bbe6b7e0fb9b707bc277fddd2779f271566ba6b5a063eeee38af829c",
+      "functionPath": null,
+      "kind": "require",
+      "exceptionId": "baseline-descriptor-composition-003"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/adapters/acquiring-adapter.js",
+      "to": "src/main-process/acquiring-bill-currency-run-data.js",
+      "line": 11,
+      "column": 16,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/background-execution/mature-action-adapters.js",
+        "src/main-process/background-execution/adapters/acquiring-adapter.js",
+        "src/main-process/acquiring-bill-currency-run-data.js"
+      ],
+      "evidenceId": "e54bc532507c390d405cc2c1fbe9eb246d87597b423534919fb97c3a47c4ccc6",
+      "functionPath": null,
+      "kind": "require",
+      "exceptionId": "baseline-descriptor-composition-004"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/adapters/acquiring-adapter.js",
+      "to": "src/main-process/acquiring-bill-currency-session.js",
+      "line": 16,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/background-execution/mature-action-adapters.js",
+        "src/main-process/background-execution/adapters/acquiring-adapter.js",
+        "src/main-process/acquiring-bill-currency-session.js"
+      ],
+      "evidenceId": "bc9eca563f765a1e0851cde710b857aa0d85bbfbd20c1c4d4cfb9a05c663e9a8",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "shouldFallbackToSingleWorker"
+      ],
+      "exceptionId": "baseline-descriptor-composition-005"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/adapters/position-import-adapter.js",
+      "to": "src/backend/position-reconciliation-import/constants.js",
+      "line": 9,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/background-execution/mature-action-adapters.js",
+        "src/main-process/background-execution/adapters/position-import-adapter.js",
+        "src/backend/position-reconciliation-import/constants.js"
+      ],
+      "evidenceId": "b45b3ba31cbd80a2e24e25131e2a247d24da19f99b4088c39bf8a28eb04568e1",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "POSITION_IMPORT_COMMANDS",
+        "POSITION_IMPORT_ENGINES",
+        "POSITION_IMPORT_STREAMING_SOURCE_ALLOWLIST"
+      ],
+      "exceptionId": "baseline-descriptor-composition-006"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/adapters/position-import-adapter.js",
+      "to": "src/main-process/position-reconciliation/import-dispatch.js",
+      "line": 13,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/background-execution/mature-action-adapters.js",
+        "src/main-process/background-execution/adapters/position-import-adapter.js",
+        "src/main-process/position-reconciliation/import-dispatch.js"
+      ],
+      "evidenceId": "05f0a0aba48f7350cddf8c20073860a8801459a1ccf3d734bb7193ef179b2da2",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "dispatchPositionImportPreflight",
+        "dispatchPositionLargeImportSchemaMigration"
+      ],
+      "exceptionId": "baseline-descriptor-composition-007"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/adapters/position-import-adapter.js",
+      "to": "src/main-process/position-reconciliation/side-db-mutation.js",
+      "line": 17,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/background-execution/mature-action-adapters.js",
+        "src/main-process/background-execution/adapters/position-import-adapter.js",
+        "src/main-process/position-reconciliation/side-db-mutation.js"
+      ],
+      "evidenceId": "d9f50fbb1d054900115abe15c81a387d7ee972f51b54e935b5fc11635c1d21ce",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "normalizePositionCheckpoint",
+        "positionCheckpointsEqual"
+      ],
+      "exceptionId": "baseline-descriptor-composition-008"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/mature-action-adapters.js",
+      "to": "src/main-process/toolbox-large-split-dispatch.js",
+      "line": 8,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/background-execution/mature-action-adapters.js",
+        "src/main-process/toolbox-large-split-dispatch.js"
+      ],
+      "evidenceId": "4ac21682142562c0e04593191ee2b12bde072d9d1ed34fa6af5c1479e46070d4",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "createToolboxLargeSplitMatureBinding"
+      ],
+      "exceptionId": "baseline-descriptor-composition-009"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/mature-action-adapters.js",
+      "to": "src/main-process/toolbox-output-publication-dispatch.js",
+      "line": 11,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/background-execution/mature-action-adapters.js",
+        "src/main-process/toolbox-output-publication-dispatch.js"
+      ],
+      "evidenceId": "ac7d73a61c6cabf3ac38a89bc3d89c9f090889f47f1a3d910d277d710072f15d",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "createToolboxPublicationMatureBinding"
+      ],
+      "exceptionId": "baseline-descriptor-composition-010"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/position-import-adapter-policy.js",
+      "to": "src/backend/position-reconciliation-import/constants.js",
+      "line": 5,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/background-execution/position-import-adapter-policy.js",
+        "src/backend/position-reconciliation-import/constants.js"
+      ],
+      "evidenceId": "3e85014831cc1b2387b923d79f9fed9878b0406f00685f055a9b31dc3feb1b41",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "POSITION_IMPORT_COMMANDS"
+      ],
+      "exceptionId": "baseline-descriptor-composition-011"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/biz-op-v327/policies.js",
+      "line": 151,
+      "column": 90,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/biz-op-v327/policies.js"
+      ],
+      "evidenceId": "4a95f813316bd7faf251baa93b1220bd42eda9bfe36dcdb8b55a8988cefcb4cc",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "BIZ_OP_V327_POLICIES",
+        "validateBizOpCandidateResult",
+        "validateBizOpExportResult"
+      ],
+      "exceptionId": "baseline-descriptor-composition-012"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/duplicate-inbound-match/policies.js",
+      "line": 62,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/duplicate-inbound-match/policies.js"
+      ],
+      "evidenceId": "8a21bae375b8bb00a3f88e9f8d6a398b3185f9c614ab39c31d2a4af3ec5cee12",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "DUPLICATE_ACTIONS",
+        "DUPLICATE_POLICIES",
+        "DUPLICATE_SERVICE_KEY",
+        "validateDuplicateExportResult",
+        "validateDuplicateImportResult",
+        "validateDuplicateRunResult"
+      ],
+      "exceptionId": "baseline-descriptor-composition-013"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/duplicate-inbound-match/startup-gate.js",
+      "line": 65,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/duplicate-inbound-match/startup-gate.js"
+      ],
+      "evidenceId": "433aabad491e7650fe7c0ad4cb6e64db736c413bc35b16c6aa5f4636239c3dc9",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "normalizeDuplicateStartupGateDescriptor"
+      ],
+      "exceptionId": "baseline-descriptor-composition-014"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/duplicate-inbound-match/topology.js",
+      "line": 68,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/duplicate-inbound-match/topology.js"
+      ],
+      "evidenceId": "3ddb05566bc1791e53b27c669b5f1ae4e3994413506362aac008c6c8c2fabd36",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "createDuplicatePairedTopologyPlanner"
+      ],
+      "exceptionId": "baseline-descriptor-composition-015"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/fund-recon-worker/policies.js",
+      "line": 54,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/fund-recon-worker/policies.js"
+      ],
+      "evidenceId": "1febba07a1baa37381141901c0e2ac2a9e99f8f647ff964ed00b8e641ddf71b0",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "FUND_RECON_POLICIES",
+        "FUND_RECON_SERVICE_KEY",
+        "validateFundReconExportResult",
+        "validateFundReconImportResult",
+        "validateFundReconRunResult"
+      ],
+      "exceptionId": "baseline-descriptor-composition-016"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/new-account/artifact-copy.js",
+      "line": 44,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/new-account/artifact-copy.js"
+      ],
+      "evidenceId": "c7d03512c1b607bfb007ae7e5436d23ed48b87749848fa468bf4bca76b24cc80",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "NEW_ACCOUNT_SAVE_AS_ACTION",
+        "runNewAccountArtifactCopyInline",
+        "validateNewAccountSaveAsResult"
+      ],
+      "exceptionId": "baseline-descriptor-composition-017"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/new-account/generation-contract.js",
+      "line": 35,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/new-account/generation-contract.js"
+      ],
+      "evidenceId": "e2984a3b4759a4d281a603b58b90cc6bf91f8f27a8982d98b8e838447d937bca",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "validateNewAccountGenerationResult"
+      ],
+      "exceptionId": "baseline-descriptor-composition-018"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/new-account/policies.js",
+      "line": 39,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/new-account/policies.js"
+      ],
+      "evidenceId": "33c953ea743fd8776bb492366cbe9fc43095a9f288ba37ed4e528a94dbaf6541",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "NEW_ACCOUNT_GENERATION_POLICY",
+        "NEW_ACCOUNT_SAVE_AS_POLICY"
+      ],
+      "exceptionId": "baseline-descriptor-composition-019"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/new-account/resource-estimator.js",
+      "line": 47,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/new-account/resource-estimator.js"
+      ],
+      "evidenceId": "3bed6318001e92b34c1f8214862de32dbbf3ae35423b3b160bedc529f7c03749",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "estimateNewAccountGenerationPhaseResources"
+      ],
+      "exceptionId": "baseline-descriptor-composition-020"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/pre-fund-reconciliation/mpt-import/policies.js",
+      "line": 29,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/pre-fund-reconciliation/mpt-import/policies.js"
+      ],
+      "evidenceId": "7d30aa8c68be25053f6836810e93bd4f30b11dbcb61be8a0e43864d5593cd9ba",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "PRE_FUND_MPT_IMPORT_ACTION",
+        "PRE_FUND_MPT_POLICIES",
+        "PRE_FUND_MPT_REPAIR_ACTION",
+        "validatePreFundMptImportResult",
+        "validatePreFundMptRepairResult"
+      ],
+      "exceptionId": "baseline-descriptor-composition-021"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/pre-fund-reconciliation/mpt-import/topology.js",
+      "line": 32,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/pre-fund-reconciliation/mpt-import/topology.js"
+      ],
+      "evidenceId": "8c60b544f581b05e1552d8bee881668abed6f6a73639a8cbb5d8352088009a3e",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "createPreFundMptTopologyPlanner"
+      ],
+      "exceptionId": "baseline-descriptor-composition-022"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/read-only-exports/acquiring/executor.js",
+      "line": 130,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/read-only-exports/acquiring/executor.js"
+      ],
+      "evidenceId": "6405a6fb0e006bac3f925dd6a7a84f258a07dc3398a304ebff0b0da9bf75d804",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "runAcquiringExistingDiffCopyInline"
+      ],
+      "exceptionId": "baseline-descriptor-composition-023"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/read-only-exports/acquiring/policies.js",
+      "line": 127,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/read-only-exports/acquiring/policies.js"
+      ],
+      "evidenceId": "998cb73625995d36794e2195053af165852cb3b223590bf1be07750b77c4148e",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "ACQUIRING_EXPORT_ACTIONS",
+        "ACQUIRING_EXPORT_ACTION_SET",
+        "ACQUIRING_EXPORT_POLICIES",
+        "validateAcquiringExportResult"
+      ],
+      "exceptionId": "baseline-descriptor-composition-024"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/read-only-exports/biz-op/policies.js",
+      "line": 109,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/read-only-exports/biz-op/policies.js"
+      ],
+      "evidenceId": "2e697cf37252e53ec12c236d5d31720344263c83f30b1f40d9280b77023e5e3d",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "BIZ_OP_READ_ONLY_ACTION_SET",
+        "BIZ_OP_READ_ONLY_POLICIES",
+        "validateBizOpReadOnlyExportResult"
+      ],
+      "exceptionId": "baseline-descriptor-composition-025"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/read-only-exports/pending/policies.js",
+      "line": 104,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/read-only-exports/pending/policies.js"
+      ],
+      "evidenceId": "2e6d8f26883d76195584957e381a75dcea5bdcc1c72304c7b16732e5b3b0122d",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "PENDING_READ_ONLY_ACTIONS",
+        "PENDING_READ_ONLY_POLICIES",
+        "validatePendingReadOnlyExportResult"
+      ],
+      "exceptionId": "baseline-descriptor-composition-026"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/read-only-exports/position/policies.js",
+      "line": 117,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/read-only-exports/position/policies.js"
+      ],
+      "evidenceId": "3bb033dc700acc150d87fbfef75634d705e8e7797259b6f081784824304ab7d7",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "POSITION_READ_ONLY_POLICY",
+        "validatePositionReadOnlyExportResult"
+      ],
+      "exceptionId": "baseline-descriptor-composition-027"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/read-only-exports/pre-fund/policies.js",
+      "line": 113,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/read-only-exports/pre-fund/policies.js"
+      ],
+      "evidenceId": "2ff724feb6544aa6c5581d8515c2c2317ca91aab924379eced5459247cea478a",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "PRE_FUND_READ_ONLY_POLICIES",
+        "validatePreFundReadOnlyExportResult"
+      ],
+      "exceptionId": "baseline-descriptor-composition-028"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/read-only-exports/vcc-financial-op/policies.js",
+      "line": 121,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/read-only-exports/vcc-financial-op/policies.js"
+      ],
+      "evidenceId": "d412fdbb8e6aec94fecadee79d0386d91dd2803d5b801a8aadad5cffbec90b4d",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "VCC_FINANCIAL_OP_READ_ONLY_POLICY",
+        "validateVccFinancialOpReadOnlyExportResult"
+      ],
+      "exceptionId": "baseline-descriptor-composition-029"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/recon-id-fix-service/evidence-settlement-admission.js",
+      "line": 88,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/recon-id-fix-service/evidence-settlement-admission.js"
+      ],
+      "evidenceId": "560f43f7df1427341fc9a6b2f37882da1201e3ed0ec5304c8ec0e730f25d3fa8",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "createReconFixEvidenceSettlementAdmission"
+      ],
+      "exceptionId": "baseline-descriptor-composition-030"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/recon-id-fix-service/jpm-database-authority.js",
+      "line": 85,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/recon-id-fix-service/jpm-database-authority.js"
+      ],
+      "evidenceId": "ff8f59e3d09fe1827579619c0cd51161d74f6e094e51f0228b7f290f49eb0727",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "createReconFixJpmDatabaseAuthority"
+      ],
+      "exceptionId": "baseline-descriptor-composition-031"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/recon-id-fix-service/policies.js",
+      "line": 82,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/recon-id-fix-service/policies.js"
+      ],
+      "evidenceId": "ba1c10af8a03e22134ad7b7490c9930e03315949b33942a9326a43899bf3eb00",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "RECON_FIX_EXPORT_ACTION",
+        "RECON_FIX_JPM_UNIT_ID",
+        "RECON_FIX_POLICIES",
+        "RECON_FIX_RUN_JPM_ACTION",
+        "RECON_FIX_SERVICE_KEY",
+        "validateReconFixExportResult",
+        "validateReconFixJpmResult",
+        "validateReconFixServiceResult"
+      ],
+      "exceptionId": "baseline-descriptor-composition-032"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/toolbox-background/generation-contract.js",
+      "line": 19,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/toolbox-background/generation-contract.js"
+      ],
+      "evidenceId": "3bc7ebc9a6d4d5b4b2612f0237ba1907af66d81da9e731da8c915ec9697f03df",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "TOOLBOX_GENERATION_ACTIONS",
+        "validateToolboxGenerationResult",
+        "validateToolboxMultiGenerationResult"
+      ],
+      "exceptionId": "baseline-descriptor-composition-033"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/toolbox-background/policies.js",
+      "line": 22,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/toolbox-background/policies.js"
+      ],
+      "evidenceId": "60cc6fac01abe7e0ff085d740f8a1440805d4465c321c2e95036d4e1161832e1",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "TOOLBOX_GENERATION_POLICIES"
+      ],
+      "exceptionId": "baseline-descriptor-composition-034"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/toolbox-row-split/contracts.js",
+      "line": 5,
+      "column": 44,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/toolbox-row-split/contracts.js"
+      ],
+      "evidenceId": "ba4641d2badd9fede9cbbdfeb9a339eb0f09516ede6f92df56d659ac31843fc3",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "ROWS_ACTION",
+        "validateRowsResult"
+      ],
+      "exceptionId": "baseline-descriptor-composition-035"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/toolbox-row-split/policy.js",
+      "line": 4,
+      "column": 24,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/toolbox-row-split/policy.js"
+      ],
+      "evidenceId": "b367f21794f990bedff15558baaffa098be17a69263755f90166e920f7058f28",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "ROWS_POLICY"
+      ],
+      "exceptionId": "baseline-descriptor-composition-036"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/vcc-financial-op-output/policies.js",
+      "line": 96,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/vcc-financial-op-output/policies.js"
+      ],
+      "evidenceId": "19e71aec4231a5fd93f46c88a959b7b67b038afbd0e2dc4188ee10e21c20cd82",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "VCC_EXPORT_SINGLE_ACTION",
+        "VCC_EXPORT_SINGLE_POLICY",
+        "VCC_EXPORT_SUBJECTS_ACTION",
+        "VCC_EXPORT_SUBJECTS_POLICY",
+        "validateVccExportSingleResult",
+        "validateVccExportSubjectsResult"
+      ],
+      "exceptionId": "baseline-descriptor-composition-037"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/background-execution/runtime.js",
+      "to": "src/main-process/vcc-financial-op-output/topology.js",
+      "line": 99,
+      "column": 4,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/vcc-financial-op-output/topology.js"
+      ],
+      "evidenceId": "04de1b24deff5f1395368d28659ca69788673f54c8850ba6f46fdf3d0906d403",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "createVccExportTopologyPlanner"
+      ],
+      "exceptionId": "baseline-descriptor-composition-038"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/big-table-import-dispatch.js",
+      "to": "src/backend/big-table-import/engine-worker-entry.js",
+      "line": 24,
+      "column": 28,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/background-execution/mature-action-adapters.js",
+        "src/main-process/big-table-import-dispatch.js",
+        "src/backend/big-table-import/engine-worker-entry.js"
+      ],
+      "evidenceId": "942b4e26ad17c002934f81d336009d780d68c972d555a62f50c9ebe519e5fd03",
+      "functionPath": null,
+      "kind": "require",
+      "exceptionId": "baseline-descriptor-composition-039"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/big-table-import-dispatch.js",
+      "to": "src/backend/big-table-import/engine-worker-entry.js",
+      "line": 78,
+      "column": 15,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/background-execution/mature-action-adapters.js",
+        "src/main-process/big-table-import-dispatch.js",
+        "src/backend/big-table-import/engine-worker-entry.js"
+      ],
+      "evidenceId": "34227fdeff96fb08de5f499d9da93cc50ece971976c665f76ab5739a0ca3848c",
+      "functionPath": "dispatchEngineImportHandle.<anonymous:1>",
+      "kind": "worker",
+      "exceptionId": "baseline-descriptor-composition-040"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/big-table-import-dispatch.js",
+      "to": "src/backend/big-table-import/pipeline.js",
+      "line": 17,
+      "column": 31,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/background-execution/mature-action-adapters.js",
+        "src/main-process/big-table-import-dispatch.js",
+        "src/backend/big-table-import/pipeline.js"
+      ],
+      "evidenceId": "9c55c9692a432806b7a2940a6fec752b277f446ada7da3946686113f61982886",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "computeMaxParallel"
+      ],
+      "exceptionId": "baseline-descriptor-composition-041"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/run-check-worker.js",
+      "to": "src/backend/logger.js",
+      "line": 147,
+      "column": 17,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/background-execution/mature-action-adapters.js",
+        "src/main-process/background-execution/adapters/acquiring-adapter.js",
+        "src/main-process/run-check-worker-pool.js",
+        "src/main-process/run-check-worker.js",
+        "src/backend/logger.js"
+      ],
+      "evidenceId": "07b1eabf47676134ceac89e992650482397d2344cc80c02d24198848708b09b5",
+      "functionPath": null,
+      "kind": "require",
+      "exceptionId": "baseline-descriptor-composition-042"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/run-check-worker.js",
+      "to": "src/main-process/acquiring-bill-currency-session.js",
+      "line": 169,
+      "column": 20,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/background-execution/mature-action-adapters.js",
+        "src/main-process/background-execution/adapters/acquiring-adapter.js",
+        "src/main-process/run-check-worker-pool.js",
+        "src/main-process/run-check-worker.js",
+        "src/main-process/acquiring-bill-currency-session.js"
+      ],
+      "evidenceId": "0bf48c944fc883d42f4227cee20d6132537db34c6ba66768044d849711cf96f7",
+      "functionPath": "runCheckInWorker",
+      "kind": "require",
+      "exceptionId": "baseline-descriptor-composition-043"
+    },
+    {
+      "rule": "ARCH-DESCRIPTOR-COMPOSITION",
+      "boundaryId": "descriptor-composition",
+      "from": "src/main-process/run-check-worker.js",
+      "to": "src/main-process/acquiring-bill-currency-session.js",
+      "line": 242,
+      "column": 24,
+      "message": "公共机制不能反向装配领域或 catalog",
+      "dependencyPath": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/background-execution/mature-action-adapters.js",
+        "src/main-process/background-execution/adapters/acquiring-adapter.js",
+        "src/main-process/run-check-worker-pool.js",
+        "src/main-process/run-check-worker.js",
+        "src/main-process/acquiring-bill-currency-session.js"
+      ],
+      "evidenceId": "0bf48c944fc883d42f4227cee20d6132537db34c6ba66768044d849711cf96f7",
+      "functionPath": "<anonymous:2>",
+      "kind": "require",
+      "exceptionId": "baseline-descriptor-composition-043"
+    },
+    {
+      "rule": "ARCH-MODAL-OWNER",
+      "boundaryId": "renderer-modal-owner",
+      "from": "src/renderer-dialogs.js",
+      "to": null,
+      "line": 280,
+      "column": 6,
+      "message": "modalRoot 的挂载、移除和清空必须经 modalHost",
+      "evidenceId": "e868dddd32e927d4793521143426eb7ad2dbac169b7ddc02cf8e73c34f518815",
+      "functionPath": "initRendererDialogs.createRendererDialogs.closeModal",
+      "exceptionId": "baseline-modal-owner-001"
+    },
+    {
+      "rule": "ARCH-MODAL-OWNER",
+      "boundaryId": "renderer-modal-owner",
+      "from": "src/renderer-dialogs.js",
+      "to": null,
+      "line": 284,
+      "column": 6,
+      "message": "modalRoot 的挂载、移除和清空必须经 modalHost",
+      "evidenceId": "e868dddd32e927d4793521143426eb7ad2dbac169b7ddc02cf8e73c34f518815",
+      "functionPath": "initRendererDialogs.createRendererDialogs.openModal",
+      "exceptionId": "baseline-modal-owner-002"
+    },
+    {
+      "rule": "ARCH-MODAL-OWNER",
+      "boundaryId": "renderer-modal-owner",
+      "from": "src/renderer-dialogs.js",
+      "to": null,
+      "line": 285,
+      "column": 6,
+      "message": "modalRoot 的挂载、移除和清空必须经 modalHost",
+      "evidenceId": "a41abed442d4dd62ec4eb9bf10f1018bbb6406d5c867c3dcab95bf64bb5e202c",
+      "functionPath": "initRendererDialogs.createRendererDialogs.openModal",
+      "exceptionId": "baseline-modal-owner-003"
+    },
+    {
+      "rule": "ARCH-MODAL-OWNER",
+      "boundaryId": "renderer-modal-owner",
+      "from": "src/renderer-dialogs.js",
+      "to": null,
+      "line": 5656,
+      "column": 87,
+      "message": "modalRoot 的挂载、移除和清空必须经 modalHost",
+      "evidenceId": "36d3e7b2411a228b493681c1a631275d99baa2465b4c3baedbb5f4a502145821",
+      "functionPath": "initRendererDialogs.createRendererDialogs.createFundTransferAccountMappingDialog.showNestedAlert.<anonymous:1>",
+      "exceptionId": "baseline-modal-owner-004"
+    },
+    {
+      "rule": "ARCH-MODAL-OWNER",
+      "boundaryId": "renderer-modal-owner",
+      "from": "src/renderer-dialogs.js",
+      "to": null,
+      "line": 5658,
+      "column": 8,
+      "message": "modalRoot 的挂载、移除和清空必须经 modalHost",
+      "evidenceId": "9889dc57335750c454b6e38f2b6b207484ecb48c89b4a7b830b6734ab9203119",
+      "functionPath": "initRendererDialogs.createRendererDialogs.createFundTransferAccountMappingDialog.showNestedAlert",
+      "exceptionId": "baseline-modal-owner-005"
+    },
+    {
+      "rule": "ARCH-MODAL-OWNER",
+      "boundaryId": "renderer-modal-owner",
+      "from": "src/renderer-dialogs.js",
+      "to": null,
+      "line": 7232,
+      "column": 8,
+      "message": "modalRoot 的挂载、移除和清空必须经 modalHost",
+      "evidenceId": "137f4e57351fdf16efac6408420f5b1226dc9bb8f69a356e5e67c1aa5d1ce3e3",
+      "functionPath": "initRendererDialogs.createRendererDialogs.createLinkedTableManagerDialog.<anonymous:1>",
+      "exceptionId": "baseline-modal-owner-006"
+    },
+    {
+      "rule": "ARCH-MODAL-OWNER",
+      "boundaryId": "renderer-modal-owner",
+      "from": "src/renderer-position-reconciliation.js",
+      "to": null,
+      "line": 104,
+      "column": 21,
+      "message": "modalRoot 的挂载、移除和清空必须经 modalHost",
+      "evidenceId": "875bfcd38f384acc6d6c1e8d065135cd18f22f87a61cdcc9e22dd74f92d705af",
+      "functionPath": "initPositionReconciliationRenderer.createPositionReconciliationUI.showArchiveUnavailable",
+      "exceptionId": "baseline-modal-owner-007"
+    },
+    {
+      "rule": "ARCH-MODAL-OWNER",
+      "boundaryId": "renderer-modal-owner",
+      "from": "src/renderer-position-reconciliation.js",
+      "to": null,
+      "line": 1078,
+      "column": 52,
+      "message": "modalRoot 的挂载、移除和清空必须经 modalHost",
+      "evidenceId": "36d3e7b2411a228b493681c1a631275d99baa2465b4c3baedbb5f4a502145821",
+      "functionPath": "initPositionReconciliationRenderer.createPositionReconciliationUI.openMappingsDialog.showNestedAlert.<anonymous:1>",
+      "exceptionId": "baseline-modal-owner-008"
+    },
+    {
+      "rule": "ARCH-MODAL-OWNER",
+      "boundaryId": "renderer-modal-owner",
+      "from": "src/renderer-position-reconciliation.js",
+      "to": null,
+      "line": 1083,
+      "column": 23,
+      "message": "modalRoot 的挂载、移除和清空必须经 modalHost",
+      "evidenceId": "58b5320bf7115642be2f50815e568e372cc1cdc2981681fa733f52225b291c18",
+      "functionPath": "initPositionReconciliationRenderer.createPositionReconciliationUI.openMappingsDialog.showNestedAlert",
+      "exceptionId": "baseline-modal-owner-009"
+    },
+    {
+      "rule": "ARCH-MODAL-OWNER",
+      "boundaryId": "renderer-modal-owner",
+      "from": "src/renderer-position-reconciliation.js",
+      "to": null,
+      "line": 1222,
+      "column": 21,
+      "message": "modalRoot 的挂载、移除和清空必须经 modalHost",
+      "evidenceId": "65f35c65a20e08e3db7b32c063d22472b7d2203345913dd063275ec5d92df05b",
+      "functionPath": "initPositionReconciliationRenderer.createPositionReconciliationUI.openMappingsDialog",
+      "exceptionId": "baseline-modal-owner-010"
+    },
+    {
+      "rule": "ARCH-MODAL-OWNER",
+      "boundaryId": "renderer-modal-owner",
+      "from": "src/renderer-position-reconciliation.js",
+      "to": null,
+      "line": 1274,
+      "column": 21,
+      "message": "modalRoot 的挂载、移除和清空必须经 modalHost",
+      "evidenceId": "65f35c65a20e08e3db7b32c063d22472b7d2203345913dd063275ec5d92df05b",
+      "functionPath": "initPositionReconciliationRenderer.createPositionReconciliationUI.openRawExportDialog",
+      "exceptionId": "baseline-modal-owner-011"
+    },
+    {
+      "rule": "ARCH-MODAL-OWNER",
+      "boundaryId": "renderer-modal-owner",
+      "from": "src/renderer-position-reconciliation.js",
+      "to": null,
+      "line": 1442,
+      "column": 21,
+      "message": "modalRoot 的挂载、移除和清空必须经 modalHost",
+      "evidenceId": "65f35c65a20e08e3db7b32c063d22472b7d2203345913dd063275ec5d92df05b",
+      "functionPath": "initPositionReconciliationRenderer.createPositionReconciliationUI.openLinkedExportDialog",
+      "exceptionId": "baseline-modal-owner-012"
+    },
+    {
+      "rule": "ARCH-MODAL-OWNER",
+      "boundaryId": "renderer-modal-owner",
+      "from": "src/renderer-vcc-financial-op.js",
+      "to": null,
+      "line": 209,
+      "column": 4,
+      "message": "modalRoot 的挂载、移除和清空必须经 modalHost",
+      "evidenceId": "ac0b48b310ccd33247083979eca0cbb25944da3ec697e09d9aff5de413596ee3",
+      "functionPath": "<anonymous:1>.mountDialog",
+      "exceptionId": "baseline-modal-owner-013"
+    },
+    {
+      "rule": "ARCH-MODAL-OWNER",
+      "boundaryId": "renderer-modal-owner",
+      "from": "src/renderer-vcc-financial-op.js",
+      "to": null,
+      "line": 216,
+      "column": 6,
+      "message": "modalRoot 的挂载、移除和清空必须经 modalHost",
+      "evidenceId": "34633392c1de136e29f043a71a36f079ba8e016fca94dc14d41ca30be37680ef",
+      "functionPath": "<anonymous:1>.mountDialog.close",
+      "exceptionId": "baseline-modal-owner-014"
+    },
+    {
+      "rule": "ARCH-MODAL-OWNER",
+      "boundaryId": "renderer-modal-owner",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 4029,
+      "column": 2,
+      "message": "modalRoot 的挂载、移除和清空必须经 modalHost",
+      "evidenceId": "e868dddd32e927d4793521143426eb7ad2dbac169b7ddc02cf8e73c34f518815",
+      "functionPath": "legacyCloseModal",
+      "exceptionId": "baseline-modal-owner-015"
+    },
+    {
+      "rule": "ARCH-MODAL-OWNER",
+      "boundaryId": "renderer-modal-owner",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 4033,
+      "column": 2,
+      "message": "modalRoot 的挂载、移除和清空必须经 modalHost",
+      "evidenceId": "e868dddd32e927d4793521143426eb7ad2dbac169b7ddc02cf8e73c34f518815",
+      "functionPath": "legacyOpenModal",
+      "exceptionId": "baseline-modal-owner-016"
+    },
+    {
+      "rule": "ARCH-MODAL-OWNER",
+      "boundaryId": "renderer-modal-owner",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 4034,
+      "column": 2,
+      "message": "modalRoot 的挂载、移除和清空必须经 modalHost",
+      "evidenceId": "a41abed442d4dd62ec4eb9bf10f1018bbb6406d5c867c3dcab95bf64bb5e202c",
+      "functionPath": "legacyOpenModal",
+      "exceptionId": "baseline-modal-owner-017"
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main-process/biz-op-v327/export-publication.js",
+      "to": "src/main-process/toolbox-output-publication-dispatch.js",
+      "line": 6,
+      "column": 73,
+      "message": "受限恢复 API 的引入/透传必须登记准确授权装配位置",
+      "evidenceId": "ac7d73a61c6cabf3ac38a89bc3d89c9f090889f47f1a3d910d277d710072f15d",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "publishDurableArtifactAsync",
+        "recoverToolboxPublicationsAsync"
+      ],
+      "exceptionId": "baseline-publication-recovery-entry-001"
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main-process/biz-op-v327/export-publication.js",
+      "to": null,
+      "line": 165,
+      "column": 49,
+      "message": "恢复副作用仅允许准确登记的授权 dispatcher 事务调用",
+      "evidenceId": "d8d38861e3e1975b893ab6aa67def1791397fc9d72de68f0e2fdf185c9349d29",
+      "functionPath": "createBizOpPublication.reconcile.<anonymous:1>",
+      "exceptionId": "baseline-publication-recovery-entry-002"
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main-process/biz-op-v327/export-publication.js",
+      "to": null,
+      "line": 205,
+      "column": 55,
+      "message": "恢复副作用仅允许准确登记的授权 dispatcher 事务调用",
+      "evidenceId": "8010d95a58df5da7ec34019f6606d2d308ebd198691261a55e90cc9e5c26a009",
+      "functionPath": "createBizOpPublication.acknowledge.<anonymous:1>",
+      "exceptionId": "baseline-publication-recovery-entry-003"
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main-process/biz-op-v327/export-publication.js",
+      "to": null,
+      "line": 250,
+      "column": 27,
+      "message": "恢复副作用仅允许准确登记的授权 dispatcher 事务调用",
+      "evidenceId": "d7dcb1dc75af8cb073223f7ef2038700260ae63e4496e945d9f8c635aa837f18",
+      "functionPath": "createBizOpPublication.recoverOtherOwners",
+      "exceptionId": "baseline-publication-recovery-entry-004"
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main-process/new-account/artifact-copy.js",
+      "to": "src/main-process/toolbox-output-publication-dispatch.js",
+      "line": 33,
+      "column": 4,
+      "message": "受限恢复 API 的引入/透传必须登记准确授权装配位置",
+      "evidenceId": "ac7d73a61c6cabf3ac38a89bc3d89c9f090889f47f1a3d910d277d710072f15d",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "publishDurableArtifactAsync",
+        "recoverToolboxPublicationsAsync"
+      ],
+      "exceptionId": "baseline-publication-recovery-entry-005"
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main-process/toolbox-archive-recovery.js",
+      "to": "src/main-process/toolbox-output-publication.js",
+      "line": 7,
+      "column": 4,
+      "message": "受限恢复 API 的引入/透传必须登记准确授权装配位置",
+      "evidenceId": "30bbe89cb848f9e356b9f721a92ac6ea3b811e15ac253a725bd485275c43c997",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "recoverPendingToolboxPublications"
+      ],
+      "exceptionId": "baseline-publication-recovery-entry-006"
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main-process/toolbox-output-publication-dispatch.js",
+      "to": null,
+      "line": 130,
+      "column": 33,
+      "message": "恢复副作用仅允许准确登记的授权 dispatcher 事务调用",
+      "evidenceId": "b250ff24d989f08b8eefd452c265b60b1ab6fa12c2348302c8bf1eb854b803d7",
+      "functionPath": "createToolboxPublicationDispatcher.execute",
+      "exceptionId": "baseline-publication-recovery-entry-007"
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main-process/toolbox-output-publication-dispatch.js",
+      "to": null,
+      "line": 227,
+      "column": 13,
+      "message": "恢复副作用仅允许准确登记的授权 dispatcher 事务调用",
+      "evidenceId": "81bd5e54bf8caa785cce6ed7b5a1076b65cad9fbf177185e608da35f2cbe22db",
+      "functionPath": "createToolboxPublicationDispatcher.recover",
+      "exceptionId": "baseline-publication-recovery-entry-008"
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main-process/toolbox-output-publication-worker.js",
+      "to": "src/main-process/toolbox-output-publication.js",
+      "line": 8,
+      "column": 4,
+      "message": "受限恢复 API 的引入/透传必须登记准确授权装配位置",
+      "evidenceId": "30bbe89cb848f9e356b9f721a92ac6ea3b811e15ac253a725bd485275c43c997",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "prepareToolboxPublication",
+        "publishPreparedToolboxPublication",
+        "recoverPendingToolboxPublications"
+      ],
+      "exceptionId": "baseline-publication-recovery-entry-009"
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main-process/toolbox-output-publication-worker.js",
+      "to": null,
+      "line": 34,
+      "column": 11,
+      "message": "恢复副作用仅允许准确登记的授权 dispatcher 事务调用",
+      "evidenceId": "1464925089e36a963ec4f1984bb65b6b1d8f0a451176657f0cea92ea3a9e43f5",
+      "functionPath": "runPublicationOperation",
+      "exceptionId": "baseline-publication-recovery-entry-010"
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main-process/toolbox-output-publication.js",
+      "to": null,
+      "line": 2412,
+      "column": 28,
+      "message": "恢复副作用仅允许准确登记的授权 dispatcher 事务调用",
+      "evidenceId": "dea59e26b5fb56c2637f65df1f491cb1d1b120c40da2acaff0f22efc14b0efa3",
+      "functionPath": "prepareToolboxPublication.<anonymous:1>",
+      "exceptionId": "baseline-publication-recovery-entry-011"
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main-process/vcc-financial-op-output-recovery.js",
+      "to": "src/main-process/toolbox-output-publication-dispatch.js",
+      "line": 10,
+      "column": 4,
+      "message": "受限恢复 API 的引入/透传必须登记准确授权装配位置",
+      "evidenceId": "c2a002c4931b68e54dbe82c8449150f5d2efb4308e9acfb3b9d4026cb4feac06",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "publishToolboxPublicationAsync",
+        "recoverToolboxPublicationsAsync"
+      ],
+      "exceptionId": "baseline-publication-recovery-entry-012"
+    },
+    {
+      "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main.js",
+      "to": "src/main-process/toolbox-output-publication-dispatch.js",
+      "line": 596,
+      "column": 4,
+      "message": "受限恢复 API 的引入/透传必须登记准确授权装配位置",
+      "evidenceId": "cbbc6cc591636950cab0f6145c3575279a1c5e7c875698dd4247c5f5d48db9d6",
+      "functionPath": null,
+      "kind": "require",
+      "importedNames": [
+        "publishToolboxPublicationAsync",
+        "recoverToolboxPublicationsAsync"
+      ],
+      "exceptionId": "baseline-publication-recovery-entry-013"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-biz-op-v327",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 1652,
+      "column": 28,
+      "message": "工厂字段 api 不能注入完整可变对象或不透明 alias",
+      "evidenceId": "1f4b6a360836ae71a9a372ca6813a15e821bff3eff71f6429bfb30f6f06fa10b",
+      "functionPath": "setCurrentModule",
+      "exceptionId": "baseline-renderer-scope-001"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-biz-op-v327",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 1652,
+      "column": 28,
+      "message": "工厂字段 legacyPanel 不能注入完整可变对象或不透明 alias",
+      "evidenceId": "1f4b6a360836ae71a9a372ca6813a15e821bff3eff71f6429bfb30f6f06fa10b",
+      "functionPath": "setCurrentModule",
+      "exceptionId": "baseline-renderer-scope-001"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-biz-op-v327",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 1652,
+      "column": 28,
+      "message": "工厂注入了未授权字段 legacyPanel",
+      "evidenceId": "1f4b6a360836ae71a9a372ca6813a15e821bff3eff71f6429bfb30f6f06fa10b",
+      "functionPath": "setCurrentModule",
+      "exceptionId": "baseline-renderer-scope-001"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-biz-op-v327",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 1652,
+      "column": 28,
+      "message": "工厂注入了未授权字段 restoreLegacy",
+      "evidenceId": "1f4b6a360836ae71a9a372ca6813a15e821bff3eff71f6429bfb30f6f06fa10b",
+      "functionPath": "setCurrentModule",
+      "exceptionId": "baseline-renderer-scope-001"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-pending",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 622,
+      "column": 24,
+      "message": "工厂字段 closeModal 不能注入完整可变对象或不透明 alias",
+      "evidenceId": "7545a873eb39c9809a48a79e1284e40059cf13660ce41704647c49f02e5a0522",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-002"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-pending",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 622,
+      "column": 24,
+      "message": "工厂字段 createAlertDialog 不能注入完整可变对象或不透明 alias",
+      "evidenceId": "7545a873eb39c9809a48a79e1284e40059cf13660ce41704647c49f02e5a0522",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-002"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-pending",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 622,
+      "column": 24,
+      "message": "工厂字段 createConfirmDialog 不能注入完整可变对象或不透明 alias",
+      "evidenceId": "7545a873eb39c9809a48a79e1284e40059cf13660ce41704647c49f02e5a0522",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-002"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-pending",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 622,
+      "column": 24,
+      "message": "工厂字段 desktopApi 不能注入完整可变对象或不透明 alias",
+      "evidenceId": "7545a873eb39c9809a48a79e1284e40059cf13660ce41704647c49f02e5a0522",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-002"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-pending",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 622,
+      "column": 24,
+      "message": "工厂字段 elements 不能注入完整可变对象或不透明 alias",
+      "evidenceId": "7545a873eb39c9809a48a79e1284e40059cf13660ce41704647c49f02e5a0522",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-002"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-pending",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 622,
+      "column": 24,
+      "message": "工厂字段 openModal 不能注入完整可变对象或不透明 alias",
+      "evidenceId": "7545a873eb39c9809a48a79e1284e40059cf13660ce41704647c49f02e5a0522",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-002"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-pending",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 622,
+      "column": 24,
+      "message": "工厂字段 state 不能注入完整可变对象或不透明 alias",
+      "evidenceId": "7545a873eb39c9809a48a79e1284e40059cf13660ce41704647c49f02e5a0522",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-002"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-pending",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 622,
+      "column": 24,
+      "message": "工厂注入了未授权字段 closeModal",
+      "evidenceId": "7545a873eb39c9809a48a79e1284e40059cf13660ce41704647c49f02e5a0522",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-002"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-pending",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 622,
+      "column": 24,
+      "message": "工厂注入了未授权字段 createAlertDialog",
+      "evidenceId": "7545a873eb39c9809a48a79e1284e40059cf13660ce41704647c49f02e5a0522",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-002"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-pending",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 622,
+      "column": 24,
+      "message": "工厂注入了未授权字段 createConfirmDialog",
+      "evidenceId": "7545a873eb39c9809a48a79e1284e40059cf13660ce41704647c49f02e5a0522",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-002"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-pending",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 622,
+      "column": 24,
+      "message": "工厂注入了未授权字段 desktopApi",
+      "evidenceId": "7545a873eb39c9809a48a79e1284e40059cf13660ce41704647c49f02e5a0522",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-002"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-pending",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 622,
+      "column": 24,
+      "message": "工厂注入了未授权字段 elements",
+      "evidenceId": "7545a873eb39c9809a48a79e1284e40059cf13660ce41704647c49f02e5a0522",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-002"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-pending",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 622,
+      "column": 24,
+      "message": "工厂注入了未授权字段 openModal",
+      "evidenceId": "7545a873eb39c9809a48a79e1284e40059cf13660ce41704647c49f02e5a0522",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-002"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-pending",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 622,
+      "column": 24,
+      "message": "工厂注入了未授权字段 state",
+      "evidenceId": "7545a873eb39c9809a48a79e1284e40059cf13660ce41704647c49f02e5a0522",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-002"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-position",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 633,
+      "column": 4,
+      "message": "工厂字段 api 不能注入完整可变对象或不透明 alias",
+      "evidenceId": "adb41b7d3995302441fb8d118d46e0441183cee8413d84285f2591e881cd8dc2",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-003"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-position",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 633,
+      "column": 4,
+      "message": "工厂字段 closeModal 不能注入完整可变对象或不透明 alias",
+      "evidenceId": "adb41b7d3995302441fb8d118d46e0441183cee8413d84285f2591e881cd8dc2",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-003"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-position",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 633,
+      "column": 4,
+      "message": "工厂字段 createAlertDialog 不能注入完整可变对象或不透明 alias",
+      "evidenceId": "adb41b7d3995302441fb8d118d46e0441183cee8413d84285f2591e881cd8dc2",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-003"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-position",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 633,
+      "column": 4,
+      "message": "工厂字段 createConfirmDialog 不能注入完整可变对象或不透明 alias",
+      "evidenceId": "adb41b7d3995302441fb8d118d46e0441183cee8413d84285f2591e881cd8dc2",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-003"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-position",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 633,
+      "column": 4,
+      "message": "工厂字段 modalRoot 不能注入完整可变对象或不透明 alias",
+      "evidenceId": "adb41b7d3995302441fb8d118d46e0441183cee8413d84285f2591e881cd8dc2",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-003"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-position",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 633,
+      "column": 4,
+      "message": "工厂字段 openModal 不能注入完整可变对象或不透明 alias",
+      "evidenceId": "adb41b7d3995302441fb8d118d46e0441183cee8413d84285f2591e881cd8dc2",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-003"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-position",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 633,
+      "column": 4,
+      "message": "工厂注入了未授权字段 closeModal",
+      "evidenceId": "adb41b7d3995302441fb8d118d46e0441183cee8413d84285f2591e881cd8dc2",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-003"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-position",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 633,
+      "column": 4,
+      "message": "工厂注入了未授权字段 createAlertDialog",
+      "evidenceId": "adb41b7d3995302441fb8d118d46e0441183cee8413d84285f2591e881cd8dc2",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-003"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-position",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 633,
+      "column": 4,
+      "message": "工厂注入了未授权字段 createConfirmDialog",
+      "evidenceId": "adb41b7d3995302441fb8d118d46e0441183cee8413d84285f2591e881cd8dc2",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-003"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-position",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 633,
+      "column": 4,
+      "message": "工厂注入了未授权字段 modalRoot",
+      "evidenceId": "adb41b7d3995302441fb8d118d46e0441183cee8413d84285f2591e881cd8dc2",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-003"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-position",
+      "from": "src/renderer.js",
+      "to": null,
+      "line": 633,
+      "column": 4,
+      "message": "工厂注入了未授权字段 openModal",
+      "evidenceId": "adb41b7d3995302441fb8d118d46e0441183cee8413d84285f2591e881cd8dc2",
+      "functionPath": null,
+      "exceptionId": "baseline-renderer-scope-003"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-vcc-financial-op",
+      "from": "src/renderer-vcc-financial-op.js",
+      "to": null,
+      "line": 3023,
+      "column": 23,
+      "message": "控制器只能消费显式 scoped API，不能读取完整 desktopApi",
+      "evidenceId": "38ae1a75c9f1dd3a3d68c0abac07cdd9348c50578953c619d5c0bbc7e6c59dbf",
+      "functionPath": "<anonymous:1>",
+      "exceptionId": "baseline-renderer-scope-004"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-vcc-financial-op",
+      "from": "src/renderer-vcc-financial-op.js",
+      "to": null,
+      "line": 3023,
+      "column": 23,
+      "message": "控制器只能消费显式 scoped API，不能读取完整 desktopApi",
+      "evidenceId": "3f38aa7c230db5e94e5b5c2a19481440141a21c535782b1be1c21f6b9e4fa74f",
+      "functionPath": "<anonymous:1>",
+      "exceptionId": "baseline-renderer-scope-005"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-vcc-financial-op",
+      "from": "src/renderer-vcc-financial-op.js",
+      "to": null,
+      "line": 4,
+      "column": 14,
+      "message": "控制器只能消费显式 scoped API，不能读取完整 desktopApi",
+      "evidenceId": "ab363c14d671d2f083a339de4228dc7aab8cb785bf710dcf36dbfbd244b3e271",
+      "functionPath": "<anonymous:1>",
+      "exceptionId": "baseline-renderer-scope-006"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-vcc-financial-op",
+      "from": "src/renderer-vcc-financial-op.js",
+      "to": null,
+      "line": 4,
+      "column": 35,
+      "message": "控制器只能消费显式 scoped API，不能读取完整 desktopApi",
+      "evidenceId": "8cada5240f6a3ee1f22d06109382d81204e7f6e29e33b135c9fbf435bf1734a8",
+      "functionPath": "<anonymous:1>",
+      "exceptionId": "baseline-renderer-scope-007"
+    },
+    {
+      "rule": "ARCH-RENDERER-SCOPE",
+      "boundaryId": "renderer-vcc-financial-op",
+      "from": "src/renderer-vcc-financial-op.js",
+      "to": null,
+      "line": 4,
+      "column": 35,
+      "message": "控制器只能消费显式 scoped API，不能读取完整 desktopApi",
+      "evidenceId": "d5095915439bab422141c91a5475ded01ac82d02ef19060e1cd99d5ec707e787",
+      "functionPath": "<anonymous:1>",
+      "exceptionId": "baseline-renderer-scope-008"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main-process/toolbox-output-publication-dispatch.js",
+      "to": null,
+      "line": 108,
+      "column": 6,
+      "message": "受保护 worker operation 无法完整解释，须登记准确授权调用或使用可解析操作",
+      "evidenceId": "3420e9da5eca5d5ceaba4892b7f4b35ce02f1cac7bd0ae70071ebdefce14b5ad",
+      "functionPath": "runWorkerJob.<anonymous:1>",
+      "exceptionId": "baseline-recovery-dynamic-operation-108"
+    },
+    {
+      "rule": "ARCH-STATIC-COVERAGE",
+      "boundaryId": "publication-recovery-entry",
+      "from": "src/main-process/toolbox-output-publication-dispatch.js",
+      "to": null,
+      "line": 124,
+      "column": 19,
+      "message": "受保护 worker operation 无法完整解释，须登记准确授权调用或使用可解析操作",
+      "evidenceId": "950debb2b71c4842305e3692cc3d91c23c84e53c02a5a93e2e92d4d31d267228",
+      "functionPath": "createToolboxPublicationDispatcher.execute",
+      "exceptionId": "baseline-recovery-dynamic-operation-124"
+    },
+    {
+      "rule": "ARCH-TASK-ADAPTER",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 21905,
+      "column": 31,
+      "message": "通用具名编排直接调用 Position 私有能力",
+      "dependencyPath": [
+        "src/main.js",
+        "src/main-process/position-reconciliation/interactive-task-preflight.js"
+      ],
+      "evidenceId": "c7c2baf04fd55498f3c8aef713491d02c1c394b2dbeacd550d987d469f9ef873",
+      "functionPath": "runArchiveAwareOperation.<anonymous:1>",
+      "exceptionId": "baseline-task-adapter-001"
+    },
+    {
+      "rule": "ARCH-TASK-ADAPTER",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 21948,
+      "column": 19,
+      "message": "通用具名编排直接调用 Position 私有能力",
+      "dependencyPath": [
+        "src/main.js",
+        "src/main-process/position-reconciliation/interactive-task-preflight.js"
+      ],
+      "evidenceId": "7f9a1d49111564db798022fc3a87f50afa77be3ccf09275256601e6ad51e2383",
+      "functionPath": "runArchiveAwareOperation.<anonymous:1>.<anonymous:1>.execute",
+      "exceptionId": "baseline-task-adapter-002"
+    },
+    {
+      "rule": "ARCH-TASK-ADAPTER",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 21952,
+      "column": 44,
+      "message": "通用编排不得直接调用本文件 Position 私有状态操作",
+      "evidenceId": "134e92a37eeee514492390c7bf10d2030542d68a107ccc0bd2e685c774ade2e9",
+      "functionPath": "runArchiveAwareOperation.<anonymous:1>.<anonymous:1>.execute.admitPosition",
+      "exceptionId": "baseline-task-adapter-003"
+    },
+    {
+      "rule": "ARCH-TASK-ADAPTER",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 21970,
+      "column": 29,
+      "message": "通用具名编排直接调用 Position 私有能力",
+      "dependencyPath": [
+        "src/main.js",
+        "src/main-process/position-reconciliation/interactive-task-preflight.js"
+      ],
+      "evidenceId": "091ea592fa5712395938c4c00535735c4f51160b8b27957a53470e3fc5b3e2d5",
+      "functionPath": "runArchiveAwareOperation.<anonymous:1>",
+      "exceptionId": "baseline-task-adapter-004"
+    },
+    {
+      "rule": "ARCH-TASK-ADAPTER",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 22049,
+      "column": 12,
+      "message": "通用编排不得直接调用本文件 Position 私有状态操作",
+      "evidenceId": "0cc798dd0f5a361219b10fa6f5c84cba39a92bf0d4e6b7d0d050dd7b90df5018",
+      "functionPath": "runArchiveAwareOperation.<anonymous:1>.<anonymous:2>.execute.executePositionBusiness",
+      "exceptionId": "baseline-task-adapter-005"
+    },
+    {
+      "rule": "ARCH-TASK-ADAPTER",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 22060,
+      "column": 12,
+      "message": "通用编排不得直接调用本文件 Position 私有状态操作",
+      "evidenceId": "efbb70520e22c439925a980b5ca7222b9a1f7f1f28355c4690a6da25d9438e88",
+      "functionPath": "runArchiveAwareOperation.<anonymous:1>.<anonymous:2>.execute.executePositionBusiness",
+      "exceptionId": "baseline-task-adapter-006"
+    },
+    {
+      "rule": "ARCH-TASK-ADAPTER",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 22068,
+      "column": 14,
+      "message": "通用编排不得直接调用本文件 Position 私有状态操作",
+      "evidenceId": "c3886895bcbb1371afe2559663e469cc4e3f88668a3bb12c5e0949f5dadb4d97",
+      "functionPath": "runArchiveAwareOperation.<anonymous:1>.<anonymous:2>.execute.executePositionBusiness",
+      "exceptionId": "baseline-task-adapter-007"
+    },
+    {
+      "rule": "ARCH-TASK-ADAPTER",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 22069,
+      "column": 20,
+      "message": "通用编排不得直接调用本文件 Position 私有状态操作",
+      "evidenceId": "26202aa7b30b64f33a03c83f4720e713a5a230129a11f516151a995f49704130",
+      "functionPath": "runArchiveAwareOperation.<anonymous:1>.<anonymous:2>.execute.executePositionBusiness",
+      "exceptionId": "baseline-task-adapter-008"
+    },
+    {
+      "rule": "ARCH-TASK-ADAPTER",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 22075,
+      "column": 14,
+      "message": "通用编排不得直接调用本文件 Position 私有状态操作",
+      "evidenceId": "2243fb1e36f1fc4cf283d73642b0898adcb0da044dbcd6e5571b352c9979e2f1",
+      "functionPath": "runArchiveAwareOperation.<anonymous:1>.<anonymous:2>.execute.executePositionBusiness",
+      "exceptionId": "baseline-task-adapter-009"
+    },
+    {
+      "rule": "ARCH-TASK-ADAPTER",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 22093,
+      "column": 10,
+      "message": "通用编排不得直接调用本文件 Position 私有状态操作",
+      "evidenceId": "8d991db49bc06457a453f5e15c6fb9a4f04d1d825221e4760f152bb22a831255",
+      "functionPath": "runArchiveAwareOperation.<anonymous:1>.<anonymous:2>.execute.executePositionBusiness",
+      "exceptionId": "baseline-task-adapter-010"
+    },
+    {
+      "rule": "ARCH-TASK-ADAPTER",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 22100,
+      "column": 38,
+      "message": "通用编排不得直接调用本文件 Position 私有状态操作",
+      "evidenceId": "7e886dafaa2b9536345f6da84526ccde96fc90fe10df6880744f9cf28f103e91",
+      "functionPath": "runArchiveAwareOperation.<anonymous:1>.<anonymous:2>.execute.executePositionBusiness",
+      "exceptionId": "baseline-task-adapter-011"
+    },
+    {
+      "rule": "ARCH-TASK-ADAPTER",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 22113,
+      "column": 15,
+      "message": "通用具名编排直接调用 Position 私有能力",
+      "dependencyPath": [
+        "src/main.js",
+        "src/main-process/position-reconciliation/interactive-task-preflight.js"
+      ],
+      "evidenceId": "08b7f2fc8b9b01d626d9b017a8678be27fc58074133c508c8c83dbb253a428c1",
+      "functionPath": "runArchiveAwareOperation.<anonymous:1>.<anonymous:2>.execute",
+      "exceptionId": "baseline-task-adapter-012"
+    },
+    {
+      "rule": "ARCH-TASK-ADAPTER",
+      "boundaryId": "business-task-adapters",
+      "from": "src/main.js",
+      "to": null,
+      "line": 22119,
+      "column": 40,
+      "message": "通用编排不得直接调用本文件 Position 私有状态操作",
+      "evidenceId": "50ee41b9670d0d8d86e88e2e0416c72af34c1896b526c97152268ecf7636e265",
+      "functionPath": "runArchiveAwareOperation.<anonymous:1>.<anonymous:2>.execute.admitPosition",
+      "exceptionId": "baseline-task-adapter-013"
+    }
+  ],
+  "staleExceptions": [],
+  "activeBoundaries": [
+    "platform-core",
+    "production-graph"
+  ],
+  "limitations": [
+    "静态依赖图不完整证明运行时 IPC、callback 注入、任意别名/反射、共享对象内部写入或数据库业务语义。",
+    "动态加载仅覆盖静态可解析目标及准确登记的目标集；未解释位置必须诊断。",
+    "Classic global 仅覆盖已登记工厂、支持的全局读取与脚本顺序；普通 DOM 和宿主之外的对象生命期须由行为测试证明。",
+    "pending/partial 边界和 activationEvidence 文件存在不代表对应治理已通过行为、GUI 或平台验收。",
+    "历史修复只核对 Git 身份、内容 hash、schema 和审查材料存在；最小语法修复的语义保持仍须人工 review。"
+  ]
+}

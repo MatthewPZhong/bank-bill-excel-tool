@@ -162,7 +162,7 @@
     "test:unit": "node scripts/run-unit-tests.js",
     "test:unit:coverage": "node scripts/run-unit-tests.js --coverage",
     "test:integration": "node scripts/integration-runner.js",
-    "release-check": "npm run lint && npm run smoke && npm run test:unit && npm run test:integration",
+    "release-check": "npm run lint && npm run check:architecture && npm run smoke && npm run test:unit && npm run test:integration",
     "test:v1.5.2": "node scripts/test-v1.5.2-backend.js",
     "test:v1.5.2:sm": "node scripts/test-v1.5.2-state-machine.js",
     "test:v2.0.0:pending-import": "node scripts/test-v2.0.0-pending-import.js",
@@ -185,7 +185,8 @@
     "generate:v3.1.7-payment-r5s2-fixed-sample": "node scripts/generate-v3.1.7-payment-r5s2-fixed-sample.js",
     "scan:vars": "node scripts/scan-vars.js",
     "check:vars": "node scripts/check-vars.js",
-    "check:vars:release": "node scripts/check-vars.js --since \"v3.1.9^{commit}\" --include-minor"
+    "check:vars:release": "node scripts/check-vars.js --since \"v3.1.9^{commit}\" --include-minor",
+    "check:architecture": "node scripts/check-architecture.js"
   },
   "build": {
     "appId": "com.openai.bankbillexceltool",
@@ -251,6 +252,7 @@
   "devDependencies": {
     "@electron/asar": "^3.4.1",
     "@napi-rs/canvas": "^0.1.97",
+    "acorn": "8.17.0",
     "electron": "^36.0.0",
     "electron-builder": "^26.15.7",
     "eslint": "^9.39.4",

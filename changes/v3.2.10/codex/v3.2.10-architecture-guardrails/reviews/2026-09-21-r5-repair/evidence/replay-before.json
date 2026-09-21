@@ -1,0 +1,215 @@
+{
+  "meaning": "旧缺陷与控制组已复现",
+  "tooling": "/private/tmp/g8-r5-fixes-before/replay-tooling",
+  "temporary": "/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/g8-r5-identity-FfQQfu",
+  "results": [
+    {
+      "name": "r4-original-closed",
+      "source": "function settlePositionArchiveResult(){calls.push('settled');}function createService(){return {settle:settlePositionArchiveResult};}const service=createService();function runArchiveAwareOperation(){service.settle();}",
+      "runtimeCalls": [
+        "settled"
+      ],
+      "violations": [
+        {
+          "rule": "ARCH-TASK-ADAPTER",
+          "boundaryId": "business-task-adapters",
+          "from": "src/main.js",
+          "to": null,
+          "line": 1,
+          "column": 198,
+          "message": "通用编排不得直接调用本文件 Position 私有状态操作",
+          "evidenceId": "63c43e854b87f2d4e703241eb7555ba589bc36ecf025056de1c4dd12fa388ed8",
+          "functionPath": "runArchiveAwareOperation"
+        }
+      ],
+      "dynamicSites": [],
+      "origins": {
+        "known": true,
+        "modules": [],
+        "functions": [
+          "settlePositionArchiveResult",
+          "createService"
+        ],
+        "unresolvedReturn": false
+      }
+    },
+    {
+      "name": "imported-reference-gap",
+      "source": "const {settlePositionArchiveResult}=require('./main-process/position-reconciliation/operation-lifecycle');function createService(){return {settle:settlePositionArchiveResult};}const service=createService();function runArchiveAwareOperation(){service.settle();}",
+      "runtimeCalls": [
+        "settled"
+      ],
+      "violations": [],
+      "dynamicSites": [],
+      "origins": {
+        "known": true,
+        "modules": [
+          "src/main-process/position-reconciliation/operation-lifecycle.js"
+        ],
+        "functions": [
+          "createService"
+        ],
+        "unresolvedReturn": false
+      }
+    },
+    {
+      "name": "imported-direct-control",
+      "source": "const {settlePositionArchiveResult}=require('./main-process/position-reconciliation/operation-lifecycle');function runArchiveAwareOperation(){settlePositionArchiveResult();}",
+      "runtimeCalls": [
+        "settled"
+      ],
+      "violations": [
+        {
+          "rule": "ARCH-TASK-ADAPTER",
+          "boundaryId": "business-task-adapters",
+          "from": "src/main.js",
+          "to": null,
+          "line": 1,
+          "column": 142,
+          "message": "通用编排不得直接调用本文件 Position 私有状态操作",
+          "evidenceId": "03472e44a7532cdaf4142c09e95f18bb554bdd92731dc39bd08c7ccc7d64fbdd",
+          "functionPath": "runArchiveAwareOperation"
+        }
+      ],
+      "dynamicSites": [],
+      "origins": {
+        "known": true,
+        "modules": [
+          "src/main-process/position-reconciliation/operation-lifecycle.js"
+        ],
+        "functions": []
+      }
+    },
+    {
+      "name": "imported-wrapper-control",
+      "source": "const {settlePositionArchiveResult}=require('./main-process/position-reconciliation/operation-lifecycle');function createService(){return {settle(){settlePositionArchiveResult();}};}const service=createService();function runArchiveAwareOperation(){service.settle();}",
+      "runtimeCalls": [
+        "settled"
+      ],
+      "violations": [
+        {
+          "rule": "ARCH-TASK-ADAPTER",
+          "boundaryId": "business-task-adapters",
+          "from": "src/main.js",
+          "to": null,
+          "line": 1,
+          "column": 148,
+          "message": "通用编排不得直接调用本文件 Position 私有状态操作",
+          "evidenceId": "03472e44a7532cdaf4142c09e95f18bb554bdd92731dc39bd08c7ccc7d64fbdd",
+          "functionPath": "createService.settle"
+        }
+      ],
+      "dynamicSites": [],
+      "origins": {
+        "known": true,
+        "modules": [],
+        "functions": [
+          "createService.settle",
+          "createService"
+        ],
+        "unresolvedReturn": false
+      }
+    },
+    {
+      "name": "factory-binding-direct-gap",
+      "source": "function makeSettlement(){return function performSettlement(){calls.push('settled');};}const settlePositionArchiveResult=makeSettlement();function runArchiveAwareOperation(){settlePositionArchiveResult();}",
+      "runtimeCalls": [
+        "settled"
+      ],
+      "violations": [],
+      "dynamicSites": [],
+      "origins": {
+        "known": true,
+        "modules": [],
+        "functions": [
+          "makeSettlement.performSettlement",
+          "makeSettlement"
+        ],
+        "unresolvedReturn": false
+      }
+    },
+    {
+      "name": "factory-binding-service-gap",
+      "source": "function makeSettlement(){return function performSettlement(){calls.push('settled');};}const settlePositionArchiveResult=makeSettlement();function createService(){return {settle:settlePositionArchiveResult};}const service=createService();function runArchiveAwareOperation(){service.settle();}",
+      "runtimeCalls": [
+        "settled"
+      ],
+      "violations": [],
+      "dynamicSites": [],
+      "origins": {
+        "known": true,
+        "modules": [],
+        "functions": [
+          "makeSettlement.performSettlement",
+          "makeSettlement",
+          "createService"
+        ],
+        "unresolvedReturn": false
+      }
+    },
+    {
+      "name": "named-expression-control",
+      "source": "const settlePositionArchiveResult=function performSettlement(){calls.push('settled');};function runArchiveAwareOperation(){settlePositionArchiveResult();}",
+      "runtimeCalls": [
+        "settled"
+      ],
+      "violations": [
+        {
+          "rule": "ARCH-TASK-ADAPTER",
+          "boundaryId": "business-task-adapters",
+          "from": "src/main.js",
+          "to": null,
+          "line": 1,
+          "column": 123,
+          "message": "通用编排不得直接调用本文件 Position 私有状态操作",
+          "evidenceId": "03472e44a7532cdaf4142c09e95f18bb554bdd92731dc39bd08c7ccc7d64fbdd",
+          "functionPath": "runArchiveAwareOperation"
+        }
+      ],
+      "dynamicSites": [],
+      "origins": {
+        "known": true,
+        "modules": [],
+        "functions": [
+          "performSettlement"
+        ]
+      }
+    },
+    {
+      "name": "pure-factory-control",
+      "source": "function makePure(){return function performPure(){calls.push('pure');};}const executePure=makePure();function runArchiveAwareOperation(){executePure();}",
+      "runtimeCalls": [
+        "pure"
+      ],
+      "violations": [],
+      "dynamicSites": [],
+      "origins": {
+        "known": true,
+        "modules": [],
+        "functions": [
+          "makePure.performPure",
+          "makePure"
+        ],
+        "unresolvedReturn": false
+      }
+    },
+    {
+      "name": "pure-service-control",
+      "source": "const {settlePositionArchiveResult}=require('./main-process/position-reconciliation/operation-lifecycle');function createService(){return {settle:settlePositionArchiveResult,execute(){calls.push('pure');}};}const service=createService();function runArchiveAwareOperation(){service.execute();}",
+      "runtimeCalls": [
+        "pure"
+      ],
+      "violations": [],
+      "dynamicSites": [],
+      "origins": {
+        "known": true,
+        "modules": [],
+        "functions": [
+          "createService.execute",
+          "createService"
+        ],
+        "unresolvedReturn": false
+      }
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "scripts/check-architecture.js": "63d987f6defba96c1783da99ed22e98c03aea2006914be7dee0626b59c76fa57",
+  "scripts/architecture/ci-policy-base.js": "4c4bf7555e331f2e65694b24478dbf950fc43ef909002e107cfa05522840a463",
+  "scripts/architecture/contracts.js": "0c97114005105733bda745fcdcd15eb0a21790c67298e3edde7e2020e18bdb86",
+  "scripts/architecture/policy-history.js": "37cf09e2f74592921c2d4dd8ec2a9b5e3cd6ac12b93858b377213a12b6c55ab2",
+  "scripts/architecture/rules.js": "d762f2c1a236e0bc4608ecbc52c50ace0ffd2989245f1d262ef284e3a6459af3",
+  "scripts/architecture/scan.js": "73662f3c94a020c4af480ac144f72273f4ddc5266f29e08b9e0b4ee6adc0bcea",
+  "scripts/architecture/schema.js": "d5436ddd4b6e97c259be62a086b5ccac6537fdcc77f0ba2dc8a60e8474f6874f",
+  "tests/unit/architecture/adversarial.test.js": "368bf1576ffbb1b0146635c6e95ac33dfa2b57016a808f208fa96e783976ed1e",
+  "tests/unit/architecture/cli.test.js": "b4b2e9a645868bbb7f595839e4c98047f5bb2292060eeac9e75bf64652aee159",
+  "tests/unit/architecture/policy-history.test.js": "268c8c7725484d12789489cba516e3c888d886c95a58f564abdad0a04967a486",
+  "tests/unit/architecture/review-regressions.test.js": "cfb173514327d33c17b108762b4dc46da309c1b57af0ff5de7b5a44262f59b1c",
+  "tests/unit/architecture/review-round2.test.js": "67aa37ee1adad306ca17760aa2e0c9d2aaaaa688539289924a3689cabb73e977",
+  "tests/unit/architecture/review-round3.test.js": "b00daf46c1b5ae94201225f040b4e0dffd2bd5dfc93e83feeb3bb7c5e79d7552",
+  "tests/unit/architecture/review-round4.test.js": "de13062a96528f458c5170b96e1032572bafb396bcfa6f9dd95d90636de1806d",
+  "tests/unit/architecture/rules.test.js": "f18922a4f95b3b01a65724ce498ddd875053f463d0353d2bfa6e71ba344d6f23",
+  "tests/unit/architecture/scan.test.js": "3769e64aef6d049d484348c6741e6a1a785869da4130cfed9ae1b99f3419d6e9",
+  "tests/unit/architecture/fixtures/policy-repository.js": "33e522d0016720658213fc7c2626dc1512084f668d3dc75f4924d4ff93b0a30b"
+}

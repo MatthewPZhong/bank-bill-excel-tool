@@ -1,0 +1,22 @@
+[
+  {
+    "file": "scripts/architecture/rules.js",
+    "added": 12,
+    "removed": 3
+  },
+  {
+    "file": "tests/unit/architecture/review-round4.test.js",
+    "added": 106,
+    "removed": 0
+  },
+  {
+    "file": "architecture/README.md",
+    "added": 3,
+    "removed": 1
+  },
+  {
+    "file": "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md",
+    "added": 15,
+    "removed": 3
+  }
+]

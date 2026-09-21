@@ -1,0 +1,73 @@
+{
+  "files": 17,
+  "results": [
+    {
+      "file": "scripts/check-architecture.js",
+      "messages": []
+    },
+    {
+      "file": "scripts/architecture/ci-policy-base.js",
+      "messages": []
+    },
+    {
+      "file": "scripts/architecture/contracts.js",
+      "messages": []
+    },
+    {
+      "file": "scripts/architecture/policy-history.js",
+      "messages": []
+    },
+    {
+      "file": "scripts/architecture/rules.js",
+      "messages": []
+    },
+    {
+      "file": "scripts/architecture/scan.js",
+      "messages": []
+    },
+    {
+      "file": "scripts/architecture/schema.js",
+      "messages": []
+    },
+    {
+      "file": "tests/unit/architecture/adversarial.test.js",
+      "messages": []
+    },
+    {
+      "file": "tests/unit/architecture/cli.test.js",
+      "messages": []
+    },
+    {
+      "file": "tests/unit/architecture/policy-history.test.js",
+      "messages": []
+    },
+    {
+      "file": "tests/unit/architecture/review-regressions.test.js",
+      "messages": []
+    },
+    {
+      "file": "tests/unit/architecture/review-round2.test.js",
+      "messages": []
+    },
+    {
+      "file": "tests/unit/architecture/review-round3.test.js",
+      "messages": []
+    },
+    {
+      "file": "tests/unit/architecture/review-round4.test.js",
+      "messages": []
+    },
+    {
+      "file": "tests/unit/architecture/rules.test.js",
+      "messages": []
+    },
+    {
+      "file": "tests/unit/architecture/scan.test.js",
+      "messages": []
+    },
+    {
+      "file": "tests/unit/architecture/fixtures/policy-repository.js",
+      "messages": []
+    }
+  ]
+}

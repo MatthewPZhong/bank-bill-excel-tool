@@ -1,0 +1,258 @@
+✖ R2-01 工厂来源检查传递闭包；局部 getter 的 const/let 返回值同样受保护 (20.82725ms)
+✖ R2-02 bound postMessage 保留消息及部分实参；未知操作失败关闭 (1.468375ms)
+✖ R2-03 bound prepare/exec 保留 DB 身份；getter 后的别名不能隐藏 SQL (2.213875ms)
+✖ R2-04 单个 DOM panel 来源合法；document/全局根/动态节点/API 注入仍拒绝 (2.658917ms)
+✖ R2-05 scoped API 可以精确挑选方法，不能夹带完整 API/namespace/未授权成员 (1.496625ms)
+✖ R2-06 active 工厂按公开导出解析具名表达式、const alias、对象导出；私有同名不算 (254.946333ms)
+✖ R2-07 前序同步 provider 确定先于 async consumer，反向和异步 provider 不保证 (4.548375ms)
+✖ R2-08 fork 两种 options 重载尊重静态 cwd，与真实子进程一致 (89.059833ms)
+✖ R2-09 textarea/title/raw text 内的伪 template 结束标记不激活惰性脚本 (1.709209ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 0
+ℹ fail 9
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 455.293208
+
+✖ failing tests:
+
+test at tests/unit/architecture/review-round2.test.js:48:1
+✖ R2-01 工厂来源检查传递闭包；局部 getter 的 const/let 返回值同样受保护 (20.82725ms)
+  AssertionError [ERR_ASSERTION]: []
+      at denied (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-architecture-guardrails/tests/unit/architecture/review-round2.test.js:34:41)
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-architecture-guardrails/tests/unit/architecture/review-round2.test.js:57:5)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.start (node:internal/test_runner/test:1096:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:385:17) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at tests/unit/architecture/review-round2.test.js:62:1
+✖ R2-02 bound postMessage 保留消息及部分实参；未知操作失败关闭 (1.468375ms)
+  AssertionError [ERR_ASSERTION]: []
+      at denied (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-architecture-guardrails/tests/unit/architecture/review-round2.test.js:34:41)
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-architecture-guardrails/tests/unit/architecture/review-round2.test.js:71:5)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at tests/unit/architecture/review-round2.test.js:77:1
+✖ R2-03 bound prepare/exec 保留 DB 身份；getter 后的别名不能隐藏 SQL (2.213875ms)
+  AssertionError [ERR_ASSERTION]: []
+      at denied (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-architecture-guardrails/tests/unit/architecture/review-round2.test.js:34:41)
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-architecture-guardrails/tests/unit/architecture/review-round2.test.js:86:5)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at tests/unit/architecture/review-round2.test.js:91:1
+✖ R2-04 单个 DOM panel 来源合法；document/全局根/动态节点/API 注入仍拒绝 (2.658917ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+  + [
+  +   {
+  +     boundaryId: 'review',
+  +     column: 60,
+  +     evidenceId: 'd55d7e68f8f8e68db6e18c58af40d2e4c70790602b88233916c5c54a9665b354',
+  +     from: 'src/shell.js',
+  +     functionPath: null,
+  +     line: 1,
+  +     message: '工厂字段 panel 不能注入完整可变对象或不透明 alias',
+  +     rule: 'ARCH-RENDERER-SCOPE',
+  +     to: null
+  +   }
+  + ]
+  - []
+  
+      at clean (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-architecture-guardrails/tests/unit/architecture/review-round2.test.js:33:32)
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-architecture-guardrails/tests/unit/architecture/review-round2.test.js:93:5)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ { rule: 'ARCH-RENDERER-SCOPE', boundaryId: 'review', from: 'src/shell.js', to: null, line: 1, column: 60, message: '工厂字段 panel 不能注入完整可变对象或不透明 alias', evidenceId: 'd55d7e68f8f8e68db6e18c58af40d2e4c70790602b88233916c5c54a9665b354', functionPath: null } ],
+    expected: [],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/unit/architecture/review-round2.test.js:101:1
+✖ R2-05 scoped API 可以精确挑选方法，不能夹带完整 API/namespace/未授权成员 (1.496625ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+  + [
+  +   {
+  +     boundaryId: 'review',
+  +     column: 0,
+  +     evidenceId: '7196993e4d7402ca47744a7fd50790f7e18bf39f2959c7fbf567d61fec8b6bdf',
+  +     from: 'src/shell.js',
+  +     functionPath: null,
+  +     line: 1,
+  +     message: 'scoped api.import 的方法来源无法解释',
+  +     rule: 'ARCH-STATIC-COVERAGE',
+  +     to: null
+  +   }
+  + ]
+  - []
+  
+      at clean (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-architecture-guardrails/tests/unit/architecture/review-round2.test.js:33:32)
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-architecture-guardrails/tests/unit/architecture/review-round2.test.js:106:6)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ { rule: 'ARCH-STATIC-COVERAGE', boundaryId: 'review', from: 'src/shell.js', to: null, line: 1, column: 0, message: 'scoped api.import 的方法来源无法解释', evidenceId: '7196993e4d7402ca47744a7fd50790f7e18bf39f2959c7fbf567d61fec8b6bdf', functionPath: null } ],
+    expected: [],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/unit/architecture/review-round2.test.js:114:1
+✖ R2-06 active 工厂按公开导出解析具名表达式、const alias、对象导出；私有同名不算 (254.946333ms)
+  AssertionError [ERR_ASSERTION]: 架构检查：失败；解析 6/6 文件；字面量本地边 1；worker 边 0；global 边 0。
+  覆盖：未解析 0；动态位置 0；active 3；pending 29；partial 0。
+  历史：对比 b467a33264fa112f486392a814a041e01df82782；检查 1 个提交；修复绑定 0。
+  [ARCH-STATIC-COVERAGE] src/entry.js:0:0 已激活工厂缺少实际定义或生产调用，请同步迁移登记
+  待激活：bizop-query-q1、bizop-query-q2、bizop-query-q3、bizop-recovery-private、business-task-adapters、descriptor-composition、publication-recovery-entry、renderer-acquiring、renderer-bank-bu、renderer-bank-statement、renderer-biz-op-legacy、renderer-biz-op-v327、renderer-dialog-app-settings、renderer-dialog-configuration、renderer-dialog-scenarios、renderer-dialog-toolbox、renderer-duplicate-inbound、renderer-modal-owner、renderer-new-account、renderer-pending、renderer-position、renderer-pre-fund、renderer-recon-id-fix、renderer-services、renderer-statement、renderer-vcc-financial-op、renderer-vcc-op-calc、shared-xlsx、vcc-mapped-lineage
+  静态覆盖边界：扫描通过不代表 IPC、回调、共享状态、业务恢复或 GUI 验收完成；详见 architecture/README.md。
+  
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-architecture-guardrails/tests/unit/architecture/review-round2.test.js:123:75)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/unit/architecture/review-round2.test.js:134:1
+✖ R2-07 前序同步 provider 确定先于 async consumer，反向和异步 provider 不保证 (4.548375ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+  + [
+  +   {
+  +     boundaryId: 'consumer',
+  +     column: 0,
+  +     from: 'src/controller.js',
+  +     functionPath: null,
+  +     line: 0,
+  +     message: '全局服务 service 未在消费者之前加载',
+  +     rule: 'ARCH-RENDERER-SCOPE',
+  +     to: 'src/service.js'
+  +   }
+  + ]
+  - []
+  
+      at clean (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-architecture-guardrails/tests/unit/architecture/review-round2.test.js:33:32)
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-architecture-guardrails/tests/unit/architecture/review-round2.test.js:135:3)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ { rule: 'ARCH-RENDERER-SCOPE', boundaryId: 'consumer', from: 'src/controller.js', to: 'src/service.js', line: 0, column: 0, message: '全局服务 service 未在消费者之前加载', functionPath: null } ],
+    expected: [],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/unit/architecture/review-round2.test.js:143:1
+✖ R2-08 fork 两种 options 重载尊重静态 cwd，与真实子进程一致 (89.059833ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    [
+  +   'src/worker.cjs'
+  -   'src/jobs/src/worker.cjs'
+    ]
+  
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-architecture-guardrails/tests/unit/architecture/review-round2.test.js:151:28)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'src/worker.cjs' ],
+    expected: [ 'src/jobs/src/worker.cjs' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/unit/architecture/review-round2.test.js:155:1
+✖ R2-09 textarea/title/raw text 内的伪 template 结束标记不激活惰性脚本 (1.709209ms)
+  AssertionError [ERR_ASSERTION]: textarea
+  + actual - expected
+  
+    [
+  +   'src/service.js',
+      'src/controller.js'
+    ]
+  
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-architecture-guardrails/tests/unit/architecture/review-round2.test.js:158:36)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [ 'src/service.js', 'src/controller.js' ],
+    expected: [ 'src/controller.js' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
