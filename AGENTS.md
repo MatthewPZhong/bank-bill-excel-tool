@@ -77,3 +77,7 @@
 - [Acquiring 仓储与多 worker 执行边界](src/backend/acquiring-bill-currency-db/README.md)：repository/service/executor 职责、真实退出屏障、partial/resume 与受管 part 合同。
 
 - G7 执行与归档静态装配：[execution-descriptors/README.md](src/main-process/execution-descriptors/README.md)。
+
+## 架构检查资料入口
+
+- [架构边界检查](architecture/README.md)：配置、运行命令、历史防倒退、激活与兼容入口维护。

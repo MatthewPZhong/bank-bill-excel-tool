@@ -1,0 +1,47 @@
+{
+  "primary": {
+    "root": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool",
+    "existingDirtyPaths": 643,
+    "changedExistingPaths": [],
+    "headUnchanged": true,
+    "branchUnchanged": true,
+    "statusUnchanged": true
+  },
+  "target": {
+    "root": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-architecture-guardrails",
+    "existingDirtyPaths": 129,
+    "changedExistingPaths": [
+      "architecture/README.md",
+      "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/implementation-notes.md",
+      "scripts/architecture/contracts.js",
+      "scripts/architecture/rules.js",
+      "scripts/architecture/scan.js"
+    ],
+    "headUnchanged": true,
+    "branchUnchanged": true,
+    "statusUnchanged": true,
+    "newPaths": [
+      "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/reviews/2026-09-21-r5-repair/evidence/README.md",
+      "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/reviews/2026-09-21-r5-repair/evidence/architecture-check.json",
+      "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/reviews/2026-09-21-r5-repair/evidence/delivery-check.json",
+      "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/reviews/2026-09-21-r5-repair/evidence/diff-stat.json",
+      "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/reviews/2026-09-21-r5-repair/evidence/no-undef.json",
+      "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/reviews/2026-09-21-r5-repair/evidence/preservation.json",
+      "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/reviews/2026-09-21-r5-repair/evidence/repair-diff.patch",
+      "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/reviews/2026-09-21-r5-repair/evidence/replay-after.json",
+      "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/reviews/2026-09-21-r5-repair/evidence/replay-before.json",
+      "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/reviews/2026-09-21-r5-repair/evidence/replay-identity.cjs",
+      "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/reviews/2026-09-21-r5-repair/evidence/replay-review-original.cjs",
+      "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/reviews/2026-09-21-r5-repair/evidence/tested-code-manifest.json",
+      "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/reviews/2026-09-21-r5-repair/evidence/verification.json",
+      "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/reviews/2026-09-21-r5-repair/evidence/verified-manifest.json",
+      "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/reviews/2026-09-21-r5-repair/repair-review.md",
+      "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/reviews/2026-09-21-r5-repair/source-review.md",
+      "tests/unit/architecture/review-round5.test.js"
+    ],
+    "unexpectedNewPaths": []
+  },
+  "productionDiff": "",
+  "configUnchanged": true,
+  "sourceReviewCopyIdentical": true
+}

@@ -1,0 +1,257 @@
+{
+  "factBaseline": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "sourceStatus": "",
+  "coverage": {
+    "scannedFiles": 685,
+    "parsedFiles": 685,
+    "literalEdges": 2254,
+    "workerEdges": 10,
+    "globalEdges": 0,
+    "unresolved": 2,
+    "dynamicSites": 33,
+    "parseErrors": 0
+  },
+  "commonLiteralGraph": {
+    "previous": 2254,
+    "current": 2254,
+    "added": [],
+    "removed": [],
+    "sha256": "8f4da13c643f64f80f2890f98f5fcf7e38569b278746f1b2e7c44737706358a1"
+  },
+  "extraCoverage": {
+    "modalWriteSites": 17,
+    "dynamicSites": [
+      {
+        "from": "src/backend/big-table-import/engine.js",
+        "functionPath": "importFiles",
+        "kind": "require",
+        "evidenceId": "720e0351ce0ff50c20d70a1de687dc65bd893fa5876d889d495d300101e97988"
+      },
+      {
+        "from": "src/backend/big-table-import/import-worker.js",
+        "functionPath": "<anonymous:2>",
+        "kind": "require",
+        "evidenceId": "720e0351ce0ff50c20d70a1de687dc65bd893fa5876d889d495d300101e97988"
+      },
+      {
+        "from": "src/main-process/acquiring-bill-currency-session.js",
+        "functionPath": null,
+        "kind": "loader-alias",
+        "evidenceId": "d7692afb57a48f7c1e882fc4d1a63d861bce253c3f68cbb7893d3429d87ae01b"
+      },
+      {
+        "from": "src/main-process/acquiring-bill-currency-session.js",
+        "functionPath": null,
+        "kind": "loader-alias",
+        "evidenceId": "d26ef436770f557c8d871b9d5ff4c9f65139cd3b6a54c596f444bd7282f84c8a"
+      },
+      {
+        "from": "src/main-process/acquiring-bill-currency-session.js",
+        "functionPath": null,
+        "kind": "loader-alias",
+        "evidenceId": "942b4e26ad17c002934f81d336009d780d68c972d555a62f50c9ebe519e5fd03"
+      },
+      {
+        "from": "src/main-process/acquiring-bill-currency-session.js",
+        "functionPath": "dispatchEngineImport.<anonymous:1>",
+        "kind": "worker",
+        "evidenceId": "8a599d2b8ea2201a1fcd803751f93fab1bf474fca591eca81e3db360cefcd64e"
+      },
+      {
+        "from": "src/main-process/acquiring-bill-currency-session.js",
+        "functionPath": "peekImportTarget",
+        "kind": "require",
+        "evidenceId": "867a2b13fd5adc06f87d9cabf9e85a04ac45eb47030b47d0b06e91c2245e2910"
+      },
+      {
+        "from": "src/main-process/background-execution/adapters/acquiring-adapter.js",
+        "functionPath": null,
+        "kind": "loader-alias",
+        "evidenceId": "2689e4bb2443a253fdb3ecb929e0eb0e389a81ac9f2829b04977c24ef8baf32b"
+      },
+      {
+        "from": "src/main-process/background-execution/adapters/acquiring-adapter.js",
+        "functionPath": null,
+        "kind": "loader-alias",
+        "evidenceId": "05c58ae9aad227903f078eb4c849602c98525606b3aa6118b16f8f4c7f8f4a7b"
+      },
+      {
+        "from": "src/main-process/background-execution/adapters/utility-process-adapter.js",
+        "functionPath": "defaultUtilityFork",
+        "kind": "worker",
+        "evidenceId": "3fb82f8495d7bceddb496330511ceaccfab5586a9197b991d70841464286a72e"
+      },
+      {
+        "from": "src/main-process/background-execution/adapters/worker-thread-adapter.js",
+        "functionPath": "createWorkerThreadAdapter.start",
+        "kind": "worker",
+        "evidenceId": "3008d867b786a78697f73245cff4afa4de5afee76d75053ba5961c0f2d0f4574"
+      },
+      {
+        "from": "src/main-process/background-execution/canary/index.js",
+        "functionPath": null,
+        "kind": "loader-alias",
+        "evidenceId": "e16a09980c47cb2f3901fe622f749969497f10fad721f0e3828102f9cbd553e5"
+      },
+      {
+        "from": "src/main-process/background-execution/canary/packaged-runtime-runner.js",
+        "functionPath": null,
+        "kind": "loader-alias",
+        "evidenceId": "734f123c1f689fb31eed74c2afd63e815755ba6d6ac37449fa3f85686180ee72"
+      },
+      {
+        "from": "src/main-process/background-execution/canary/packaged-runtime-runner.js",
+        "functionPath": null,
+        "kind": "loader-alias",
+        "evidenceId": "be6c1eca16cafc99cf09d6c53d8435405f3dfea53df66f6ac8fa72112e9ce005"
+      },
+      {
+        "from": "src/main-process/big-table-import-dispatch.js",
+        "functionPath": null,
+        "kind": "loader-alias",
+        "evidenceId": "942b4e26ad17c002934f81d336009d780d68c972d555a62f50c9ebe519e5fd03"
+      },
+      {
+        "from": "src/main-process/big-table-import-dispatch.js",
+        "functionPath": "dispatchEngineImportHandle.<anonymous:1>",
+        "kind": "worker",
+        "evidenceId": "34227fdeff96fb08de5f499d9da93cc50ece971976c665f76ab5739a0ca3848c"
+      },
+      {
+        "from": "src/main-process/biz-op-recon-session.js",
+        "functionPath": null,
+        "kind": "loader-alias",
+        "evidenceId": "2625a3783ded16bf6e682e03c46b69ee76365f7afb899b9c51430006da3218ba"
+      },
+      {
+        "from": "src/main-process/pending-session.js",
+        "functionPath": null,
+        "kind": "loader-alias",
+        "evidenceId": "f2654d32e2cdba86fe91312934c0437226f0f7d489d109e89f2e4973a51c6c7c"
+      },
+      {
+        "from": "src/main-process/position-reconciliation/import-dispatch.js",
+        "functionPath": null,
+        "kind": "loader-alias",
+        "evidenceId": "6d55f45561e871a8cec3144648d1a5327d2004af5305bcf4e0d24bfc549fc7c2"
+      },
+      {
+        "from": "src/main-process/position-reconciliation/import-dispatch.js",
+        "functionPath": "dispatchPositionImportPreflight",
+        "kind": "worker",
+        "evidenceId": "1c788c503f99844777e824808ad57946966527055ee1c8ebec1e0795066875be"
+      },
+      {
+        "from": "src/main-process/position-reconciliation/import-dispatch.js",
+        "functionPath": "dispatchPositionImportPreflight",
+        "kind": "worker",
+        "evidenceId": "c4d1c12af9af512bfb4ae5da0665a73b52f062af9a6ef2802797fbcbe1c28dc1"
+      },
+      {
+        "from": "src/main-process/run-check-multiworker.js",
+        "functionPath": "startWorker.<anonymous:1>",
+        "kind": "worker",
+        "evidenceId": "ff92d9b23731f8dd4f8ff730bd0ffd2290b9c0a2e75c588734fbe7d2ab54e565"
+      },
+      {
+        "from": "src/main-process/run-check-worker-pool.js",
+        "functionPath": "coldStartWorker",
+        "kind": "worker",
+        "evidenceId": "ff92d9b23731f8dd4f8ff730bd0ffd2290b9c0a2e75c588734fbe7d2ab54e565"
+      },
+      {
+        "from": "src/main-process/toolbox-background/route-scanner-core.js",
+        "functionPath": "runOutputWriter.<anonymous:1>",
+        "kind": "worker",
+        "evidenceId": "b4750256954d70374bb83a2d092ee4a780ce30d6177dbb7a389aea51ebba1a90"
+      },
+      {
+        "from": "src/main-process/toolbox-large-split-dispatch.js",
+        "functionPath": null,
+        "kind": "loader-alias",
+        "evidenceId": "261f056a90e99b55737b47600b8481a73f0afba4a39236c9dbdd3efe4292a654"
+      },
+      {
+        "from": "src/main-process/toolbox-large-split-dispatch.js",
+        "functionPath": "dispatchLargeSplit.<anonymous:1>",
+        "kind": "worker",
+        "evidenceId": "fb3341122df5e40616f96e6c0a153cc008dc36b21c0187f5680f82312b3377cd"
+      },
+      {
+        "from": "src/main-process/toolbox-output-publication-dispatch.js",
+        "functionPath": null,
+        "kind": "loader-alias",
+        "evidenceId": "65530a123558e57be009c0bf8acd5080c728e9fd44e528c44973fb50d2abacee"
+      },
+      {
+        "from": "src/main-process/toolbox-output-publication-dispatch.js",
+        "functionPath": "runWorkerJob.<anonymous:1>",
+        "kind": "worker",
+        "evidenceId": "b0a2253ddf72c309706e091e302cb27ce15eb58c4aeaa26c2c26a7dcd191f5fb"
+      },
+      {
+        "from": "src/main-process/vcc-financial-op-service.js",
+        "functionPath": "createVccFinancialOpService.<anonymous:1>",
+        "kind": "worker",
+        "evidenceId": "337edca2e4b86094ad57c71b5b9aca23b43ed4065cf62ffc3344efb2c234f716"
+      },
+      {
+        "from": "src/main-process/vcc-financial-op-service.js",
+        "functionPath": "createVccFinancialOpService.<anonymous:2>",
+        "kind": "worker",
+        "evidenceId": "337edca2e4b86094ad57c71b5b9aca23b43ed4065cf62ffc3344efb2c234f716"
+      },
+      {
+        "from": "src/main-process/vcc-financial-op-service.js",
+        "functionPath": "createVccFinancialOpService.<anonymous:3>",
+        "kind": "worker",
+        "evidenceId": "337edca2e4b86094ad57c71b5b9aca23b43ed4065cf62ffc3344efb2c234f716"
+      },
+      {
+        "from": "src/main-process/vcc-financial-op-service.js",
+        "functionPath": "createVccFinancialOpService.<anonymous:4>",
+        "kind": "worker",
+        "evidenceId": "337edca2e4b86094ad57c71b5b9aca23b43ed4065cf62ffc3344efb2c234f716"
+      },
+      {
+        "from": "src/main-process/vcc-financial-op-storage-migration.js",
+        "functionPath": "runMigrationWorker",
+        "kind": "worker",
+        "evidenceId": "a4d363e9024350c7fd6ba115edc99c3566bd3efc067c9ff2d3648cfebb405b9d"
+      }
+    ],
+    "unresolved": [
+      {
+        "from": "src/main-process/acquiring-bill-currency-writer.js",
+        "line": 36,
+        "column": 18,
+        "source": {
+          "line": 36,
+          "column": 18
+        },
+        "functionPath": null,
+        "evidenceId": "cca21f893ba8f712fab98cb09241b61f66a1b3395a278af9630e6fd86cc46474",
+        "occurrence": 0,
+        "kind": "require",
+        "specifier": "../build-info",
+        "reason": "missing"
+      },
+      {
+        "from": "src/main.js",
+        "line": 330,
+        "column": 18,
+        "source": {
+          "line": 330,
+          "column": 18
+        },
+        "functionPath": null,
+        "evidenceId": "963a00193e8ef0330d3e3a9695e2fe63051805fc82b9d80035c35ca1dcbadaaa",
+        "occurrence": 0,
+        "kind": "require",
+        "specifier": "./build-info",
+        "reason": "missing"
+      }
+    ]
+  },
+  "scope": "字面量图与旧报告共同口径逐边对照；worker、dynamic、global单列，不宣称运行时业务隔离。"
+}

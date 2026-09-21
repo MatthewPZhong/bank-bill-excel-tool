@@ -1,0 +1,109 @@
+{
+  "revision": "2026-09-21-r2-repair",
+  "worktree": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-architecture-guardrails",
+  "branch": "codex/v3.2.10-architecture-guardrails",
+  "head": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "content": "HEAD plus uncommitted implementation",
+  "implementationStatus": "R2-01 through R2-09 repaired",
+  "validationStatus": "specialized tests passed; independent rereview pending",
+  "integrationStatus": "not integrated",
+  "runtime": {
+    "node": "v25.8.0",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "regressionsBefore": {
+    "tests": 9,
+    "pass": 0,
+    "fail": 9
+  },
+  "architectureTests": {
+    "command": "node --test tests/unit/architecture/*.test.js",
+    "exitCode": 0,
+    "tests": 114,
+    "pass": 114,
+    "fail": 0,
+    "skipped": 0,
+    "newGroups": 14
+  },
+  "architectureCheck": {
+    "exitCode": 0,
+    "coverage": {
+      "scannedFiles": 685,
+      "parsedFiles": 685,
+      "literalEdges": 2254,
+      "workerEdges": 64,
+      "globalEdges": 5,
+      "unresolved": 2,
+      "dynamicSites": 33,
+      "parseErrors": 0,
+      "pendingBoundaries": [
+        "bizop-query-q2",
+        "bizop-query-q3",
+        "publication-recovery-entry",
+        "renderer-acquiring",
+        "renderer-bank-bu",
+        "renderer-bank-statement",
+        "renderer-biz-op-legacy",
+        "renderer-dialog-app-settings",
+        "renderer-dialog-configuration",
+        "renderer-dialog-scenarios",
+        "renderer-dialog-toolbox",
+        "renderer-duplicate-inbound",
+        "renderer-modal-owner",
+        "renderer-new-account",
+        "renderer-pre-fund",
+        "renderer-recon-id-fix",
+        "renderer-services",
+        "renderer-statement",
+        "renderer-vcc-op-calc",
+        "shared-xlsx",
+        "vcc-mapped-lineage"
+      ],
+      "partialBoundaries": [
+        "bizop-query-q1",
+        "bizop-recovery-private",
+        "business-task-adapters",
+        "descriptor-composition",
+        "renderer-biz-op-v327",
+        "renderer-pending",
+        "renderer-position",
+        "renderer-vcc-financial-op"
+      ]
+    },
+    "active": 2,
+    "violations": 0,
+    "staleExceptions": 0,
+    "matchedExceptionIds": 114,
+    "matchedDiagnostics": 142
+  },
+  "noUndef": {
+    "files": 15,
+    "errors": 0,
+    "initialHarnessError": "Initial helper used removed eslintrc env keys with flat-config Linter; corrected helper configuration without source changes."
+  },
+  "configurationChanged": false,
+  "fullReleaseCheckThisRevision": false,
+  "notRun": [
+    "independent rereview",
+    "Electron GUI",
+    "Windows workflow",
+    "installer",
+    "Excel/WPS",
+    "release integration activation"
+  ],
+  "gitActions": {
+    "commit": false,
+    "push": false,
+    "merge": false,
+    "pullRequest": false,
+    "versionBump": false,
+    "release": false
+  },
+  "postTestNormalization": {
+    "file": "scripts/architecture/scan.js",
+    "change": "removed trailing whitespace only",
+    "astEqual": true,
+    "evidence": "whitespace-normalization.json"
+  }
+}

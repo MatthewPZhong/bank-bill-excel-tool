@@ -1,0 +1,621 @@
+{
+  "releaseCommit": "9602a1fa482203e11bfde8cd6a73b8f552243d95",
+  "g8Head": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "g8State": "HEAD + dirty；未提交、未集成",
+  "branches": [
+    {
+      "branch": "codex/v3.2.10-application-recovery",
+      "head": "856c9dce8ae4c381229e37b5b236e2e2f776921d",
+      "integratedAtFixedRelease": true
+    },
+    {
+      "branch": "codex/v3.2.10-business-task-adapters",
+      "head": "3e203858ea49fc2935f5ab847de8af7f793d356a",
+      "integratedAtFixedRelease": true
+    },
+    {
+      "branch": "codex/v3.2.10-renderer-boundaries",
+      "head": "611af431493668df02fff98bdcda0b47c4080f20",
+      "integratedAtFixedRelease": true
+    },
+    {
+      "branch": "codex/v3.2.10-shared-xlsx-infrastructure",
+      "head": "a4d91d173945cc42fcd9593f56504060c98f9d47",
+      "integratedAtFixedRelease": true
+    },
+    {
+      "branch": "codex/v3.2.10-bizop-query-boundaries",
+      "head": "e4389aafb07fc3d40c74af106abb2875981d07eb",
+      "integratedAtFixedRelease": true
+    },
+    {
+      "branch": "codex/v3.2.10-storage-execution-separation",
+      "head": "ed1cb2d73418fe1279cac96acd91090492555be3",
+      "integratedAtFixedRelease": true
+    },
+    {
+      "branch": "codex/v3.2.10-execution-descriptors",
+      "head": "6a7d23c4ea062f90021fc670e8a1654ad8d2ad26",
+      "integratedAtFixedRelease": true
+    }
+  ],
+  "status": "固定 release 只读预检；此登记不是 active 配置，也不是完整 release-check 证据",
+  "coverage": {
+    "scannedFiles": 765,
+    "parsedFiles": 765,
+    "literalEdges": 2404,
+    "workerEdges": 62,
+    "globalEdges": 13,
+    "unresolved": 2,
+    "dynamicSites": 33,
+    "parseErrors": 0
+  },
+  "diagnosticCounts": {
+    "ARCH-BIZOP-QUERY": 1486,
+    "ARCH-DESCRIPTOR-COMPOSITION": 38,
+    "ARCH-PUBLICATION-RECOVERY-ENTRY": 2,
+    "ARCH-RENDERER-SCOPE": 114,
+    "ARCH-STATIC-COVERAGE": 104,
+    "ARCH-TASK-ADAPTER": 4
+  },
+  "staleExceptionIds": [
+    "baseline-bizop-query-001",
+    "baseline-bizop-query-002",
+    "baseline-bizop-query-003",
+    "baseline-bizop-query-004",
+    "baseline-bizop-query-005",
+    "baseline-bizop-query-006",
+    "baseline-bizop-query-007",
+    "baseline-bizop-query-008",
+    "baseline-bizop-query-009",
+    "baseline-bizop-query-010",
+    "baseline-bizop-query-011",
+    "baseline-bizop-query-012",
+    "baseline-bizop-query-013",
+    "baseline-bizop-query-014",
+    "baseline-bizop-query-015",
+    "baseline-bizop-query-016",
+    "baseline-descriptor-composition-001",
+    "baseline-descriptor-composition-002",
+    "baseline-descriptor-composition-003",
+    "baseline-descriptor-composition-004",
+    "baseline-descriptor-composition-005",
+    "baseline-descriptor-composition-006",
+    "baseline-descriptor-composition-007",
+    "baseline-descriptor-composition-008",
+    "baseline-descriptor-composition-009",
+    "baseline-descriptor-composition-010",
+    "baseline-descriptor-composition-011",
+    "baseline-descriptor-composition-012",
+    "baseline-descriptor-composition-013",
+    "baseline-descriptor-composition-014",
+    "baseline-descriptor-composition-015",
+    "baseline-descriptor-composition-016",
+    "baseline-descriptor-composition-017",
+    "baseline-descriptor-composition-018",
+    "baseline-descriptor-composition-019",
+    "baseline-descriptor-composition-020",
+    "baseline-descriptor-composition-021",
+    "baseline-descriptor-composition-022",
+    "baseline-descriptor-composition-023",
+    "baseline-descriptor-composition-024",
+    "baseline-descriptor-composition-025",
+    "baseline-descriptor-composition-026",
+    "baseline-descriptor-composition-027",
+    "baseline-descriptor-composition-028",
+    "baseline-descriptor-composition-029",
+    "baseline-descriptor-composition-030",
+    "baseline-descriptor-composition-031",
+    "baseline-descriptor-composition-032",
+    "baseline-descriptor-composition-033",
+    "baseline-descriptor-composition-034",
+    "baseline-descriptor-composition-035",
+    "baseline-descriptor-composition-036",
+    "baseline-descriptor-composition-037",
+    "baseline-descriptor-composition-038",
+    "baseline-descriptor-composition-039",
+    "baseline-descriptor-composition-040",
+    "baseline-descriptor-composition-041",
+    "baseline-descriptor-composition-042",
+    "baseline-descriptor-composition-043",
+    "baseline-modal-owner-001",
+    "baseline-modal-owner-002",
+    "baseline-modal-owner-003",
+    "baseline-modal-owner-004",
+    "baseline-modal-owner-005",
+    "baseline-modal-owner-006",
+    "baseline-modal-owner-007",
+    "baseline-modal-owner-008",
+    "baseline-modal-owner-009",
+    "baseline-modal-owner-010",
+    "baseline-modal-owner-011",
+    "baseline-modal-owner-012",
+    "baseline-modal-owner-013",
+    "baseline-modal-owner-014",
+    "baseline-modal-owner-015",
+    "baseline-modal-owner-016",
+    "baseline-modal-owner-017",
+    "baseline-publication-recovery-entry-001",
+    "baseline-publication-recovery-entry-002",
+    "baseline-publication-recovery-entry-003",
+    "baseline-publication-recovery-entry-004",
+    "baseline-publication-recovery-entry-005",
+    "baseline-publication-recovery-entry-006",
+    "baseline-publication-recovery-entry-007",
+    "baseline-publication-recovery-entry-008",
+    "baseline-publication-recovery-entry-009",
+    "baseline-publication-recovery-entry-010",
+    "baseline-publication-recovery-entry-011",
+    "baseline-publication-recovery-entry-012",
+    "baseline-publication-recovery-entry-013",
+    "baseline-renderer-scope-001",
+    "baseline-renderer-scope-002",
+    "baseline-renderer-scope-003",
+    "baseline-renderer-scope-004",
+    "baseline-renderer-scope-005",
+    "baseline-renderer-scope-006",
+    "baseline-renderer-scope-007",
+    "baseline-renderer-scope-008",
+    "baseline-task-adapter-001",
+    "baseline-task-adapter-002",
+    "baseline-task-adapter-003",
+    "baseline-task-adapter-004",
+    "baseline-task-adapter-005",
+    "baseline-task-adapter-006",
+    "baseline-task-adapter-007",
+    "baseline-task-adapter-008",
+    "baseline-task-adapter-009",
+    "baseline-task-adapter-010",
+    "baseline-task-adapter-011",
+    "baseline-task-adapter-012",
+    "baseline-task-adapter-013"
+  ],
+  "boundaries": [
+    {
+      "id": "production-graph",
+      "governance": "G8",
+      "featureBranchState": "active",
+      "entrypointsPresent": [],
+      "entrypointsMissing": [],
+      "evidenceMissing": [],
+      "diagnostics": 0,
+      "next": "已在基线分支执行；release 合入时重跑完整检查"
+    },
+    {
+      "id": "platform-core",
+      "governance": "G8",
+      "featureBranchState": "active",
+      "entrypointsPresent": [
+        "src/main-process/background-execution/resource-governor.js",
+        "src/main-process/background-execution/resource-lease.js",
+        "src/main-process/background-execution/admission-queue.js"
+      ],
+      "entrypointsMissing": [],
+      "evidenceMissing": [],
+      "diagnostics": 0,
+      "next": "已在基线分支执行；release 合入时重跑完整检查"
+    },
+    {
+      "id": "vcc-mapped-lineage",
+      "governance": "G6",
+      "featureBranchState": "pending",
+      "entrypointsPresent": [
+        "src/backend/vcc-financial-op/mapped-lineage-contract.js",
+        "src/backend/vcc-financial-op/content-hash-contract.js"
+      ],
+      "entrypointsMissing": [],
+      "evidenceMissing": [],
+      "diagnostics": 0,
+      "next": "在集成候选中对齐真实公开入口/消费者/工厂/授权位置，删除过期例外，完成规则正反例与行为证据后激活；本分支无这些生产实现，保持 pending"
+    },
+    {
+      "id": "renderer-modal-owner",
+      "governance": "G3",
+      "featureBranchState": "pending",
+      "entrypointsPresent": [
+        "src/renderer/modal-host.js"
+      ],
+      "entrypointsMissing": [],
+      "evidenceMissing": [
+        "tests/unit/renderer/modal-host-integration.test.js"
+      ],
+      "diagnostics": 1,
+      "next": "在集成候选中对齐真实公开入口/消费者/工厂/授权位置，删除过期例外，完成规则正反例与行为证据后激活；本分支无这些生产实现，保持 pending"
+    },
+    {
+      "id": "renderer-bank-statement",
+      "governance": "G3",
+      "featureBranchState": "pending",
+      "entrypointsPresent": [
+        "src/renderer/controllers/bank-statement.js"
+      ],
+      "entrypointsMissing": [],
+      "evidenceMissing": [
+        "tests/unit/renderer/controller-contract.test.js"
+      ],
+      "diagnostics": 7,
+      "next": "在集成候选中对齐真实公开入口/消费者/工厂/授权位置，删除过期例外，完成规则正反例与行为证据后激活；本分支无这些生产实现，保持 pending"
+    },
+    {
+      "id": "renderer-recon-id-fix",
+      "governance": "G3",
+      "featureBranchState": "pending",
+      "entrypointsPresent": [
+        "src/renderer/controllers/recon-id-fix.js"
+      ],
+      "entrypointsMissing": [],
+      "evidenceMissing": [
+        "tests/unit/renderer/controller-contract.test.js"
+      ],
+      "diagnostics": 7,
+      "next": "在集成候选中对齐真实公开入口/消费者/工厂/授权位置，删除过期例外，完成规则正反例与行为证据后激活；本分支无这些生产实现，保持 pending"
+    },
+    {
+      "id": "renderer-pre-fund",
+      "governance": "G3",
+      "featureBranchState": "pending",
+      "entrypointsPresent": [
+        "src/renderer/controllers/pre-fund.js"
+      ],
+      "entrypointsMissing": [],
+      "evidenceMissing": [
+        "tests/unit/renderer/controller-contract.test.js"
+      ],
+      "diagnostics": 4,
+      "next": "在集成候选中对齐真实公开入口/消费者/工厂/授权位置，删除过期例外，完成规则正反例与行为证据后激活；本分支无这些生产实现，保持 pending"
+    },
+    {
+      "id": "renderer-bank-bu",
+      "governance": "G3",
+      "featureBranchState": "pending",
+      "entrypointsPresent": [
+        "src/renderer/controllers/bank-bu.js"
+      ],
+      "entrypointsMissing": [],
+      "evidenceMissing": [
+        "tests/unit/renderer/controller-contract.test.js"
+      ],
+      "diagnostics": 7,
+      "next": "在集成候选中对齐真实公开入口/消费者/工厂/授权位置，删除过期例外，完成规则正反例与行为证据后激活；本分支无这些生产实现，保持 pending"
+    },
+    {
+      "id": "renderer-duplicate-inbound",
+      "governance": "G3",
+      "featureBranchState": "pending",
+      "entrypointsPresent": [
+        "src/renderer/controllers/duplicate-inbound.js"
+      ],
+      "entrypointsMissing": [],
+      "evidenceMissing": [
+        "tests/unit/renderer/controller-contract.test.js"
+      ],
+      "diagnostics": 4,
+      "next": "在集成候选中对齐真实公开入口/消费者/工厂/授权位置，删除过期例外，完成规则正反例与行为证据后激活；本分支无这些生产实现，保持 pending"
+    },
+    {
+      "id": "renderer-acquiring",
+      "governance": "G3",
+      "featureBranchState": "pending",
+      "entrypointsPresent": [
+        "src/renderer/controllers/acquiring.js"
+      ],
+      "entrypointsMissing": [],
+      "evidenceMissing": [
+        "tests/unit/renderer/controller-contract.test.js"
+      ],
+      "diagnostics": 5,
+      "next": "在集成候选中对齐真实公开入口/消费者/工厂/授权位置，删除过期例外，完成规则正反例与行为证据后激活；本分支无这些生产实现，保持 pending"
+    },
+    {
+      "id": "renderer-vcc-op-calc",
+      "governance": "G3",
+      "featureBranchState": "pending",
+      "entrypointsPresent": [
+        "src/renderer/controllers/vcc-op-calc.js"
+      ],
+      "entrypointsMissing": [],
+      "evidenceMissing": [
+        "tests/unit/renderer/controller-contract.test.js"
+      ],
+      "diagnostics": 6,
+      "next": "在集成候选中对齐真实公开入口/消费者/工厂/授权位置，删除过期例外，完成规则正反例与行为证据后激活；本分支无这些生产实现，保持 pending"
+    },
+    {
+      "id": "renderer-biz-op-legacy",
+      "governance": "G3",
+      "featureBranchState": "pending",
+      "entrypointsPresent": [
+        "src/renderer/controllers/biz-op-legacy.js"
+      ],
+      "entrypointsMissing": [],
+      "evidenceMissing": [
+        "tests/unit/renderer/controller-contract.test.js"
+      ],
+      "diagnostics": 9,
+      "next": "在集成候选中对齐真实公开入口/消费者/工厂/授权位置，删除过期例外，完成规则正反例与行为证据后激活；本分支无这些生产实现，保持 pending"
+    },
+    {
+      "id": "renderer-statement",
+      "governance": "G3",
+      "featureBranchState": "pending",
+      "entrypointsPresent": [
+        "src/renderer/controllers/statement.js"
+      ],
+      "entrypointsMissing": [],
+      "evidenceMissing": [
+        "tests/unit/renderer/controller-contract.test.js"
+      ],
+      "diagnostics": 22,
+      "next": "在集成候选中对齐真实公开入口/消费者/工厂/授权位置，删除过期例外，完成规则正反例与行为证据后激活；本分支无这些生产实现，保持 pending"
+    },
+    {
+      "id": "renderer-new-account",
+      "governance": "G3",
+      "featureBranchState": "pending",
+      "entrypointsPresent": [
+        "src/renderer/controllers/new-account.js"
+      ],
+      "entrypointsMissing": [],
+      "evidenceMissing": [
+        "tests/unit/renderer/controller-contract.test.js"
+      ],
+      "diagnostics": 5,
+      "next": "在集成候选中对齐真实公开入口/消费者/工厂/授权位置，删除过期例外，完成规则正反例与行为证据后激活；本分支无这些生产实现，保持 pending"
+    },
+    {
+      "id": "renderer-pending",
+      "governance": "G3",
+      "featureBranchState": "pending",
+      "entrypointsPresent": [
+        "src/renderer-pending.js"
+      ],
+      "entrypointsMissing": [],
+      "evidenceMissing": [
+        "tests/unit/renderer/controller-contract.test.js"
+      ],
+      "diagnostics": 1,
+      "next": "在集成候选中对齐真实公开入口/消费者/工厂/授权位置，删除过期例外，完成规则正反例与行为证据后激活；本分支无这些生产实现，保持 pending"
+    },
+    {
+      "id": "renderer-position",
+      "governance": "G3",
+      "featureBranchState": "pending",
+      "entrypointsPresent": [
+        "src/renderer-position-reconciliation.js"
+      ],
+      "entrypointsMissing": [],
+      "evidenceMissing": [
+        "tests/unit/renderer/controller-contract.test.js"
+      ],
+      "diagnostics": 10,
+      "next": "在集成候选中对齐真实公开入口/消费者/工厂/授权位置，删除过期例外，完成规则正反例与行为证据后激活；本分支无这些生产实现，保持 pending"
+    },
+    {
+      "id": "renderer-vcc-financial-op",
+      "governance": "G3",
+      "featureBranchState": "pending",
+      "entrypointsPresent": [
+        "src/renderer-vcc-financial-op.js"
+      ],
+      "entrypointsMissing": [],
+      "evidenceMissing": [
+        "tests/unit/renderer/controller-contract.test.js"
+      ],
+      "diagnostics": 6,
+      "next": "在集成候选中对齐真实公开入口/消费者/工厂/授权位置，删除过期例外，完成规则正反例与行为证据后激活；本分支无这些生产实现，保持 pending"
+    },
+    {
+      "id": "renderer-biz-op-v327",
+      "governance": "G3",
+      "featureBranchState": "pending",
+      "entrypointsPresent": [
+        "src/renderer-biz-op-v327.js"
+      ],
+      "entrypointsMissing": [],
+      "evidenceMissing": [
+        "tests/unit/renderer/controller-contract.test.js"
+      ],
+      "diagnostics": 4,
+      "next": "在集成候选中对齐真实公开入口/消费者/工厂/授权位置，删除过期例外，完成规则正反例与行为证据后激活；本分支无这些生产实现，保持 pending"
+    },
+    {
+      "id": "renderer-dialog-scenarios",
+      "governance": "G3",
+      "featureBranchState": "pending",
+      "entrypointsPresent": [
+        "src/renderer/dialogs/scenarios.js"
+      ],
+      "entrypointsMissing": [],
+      "evidenceMissing": [
+        "tests/unit/renderer/controller-contract.test.js"
+      ],
+      "diagnostics": 1,
+      "next": "在集成候选中对齐真实公开入口/消费者/工厂/授权位置，删除过期例外，完成规则正反例与行为证据后激活；本分支无这些生产实现，保持 pending"
+    },
+    {
+      "id": "renderer-dialog-configuration",
+      "governance": "G3",
+      "featureBranchState": "pending",
+      "entrypointsPresent": [
+        "src/renderer/dialogs/configuration.js"
+      ],
+      "entrypointsMissing": [],
+      "evidenceMissing": [
+        "tests/unit/renderer/controller-contract.test.js"
+      ],
+      "diagnostics": 13,
+      "next": "在集成候选中对齐真实公开入口/消费者/工厂/授权位置，删除过期例外，完成规则正反例与行为证据后激活；本分支无这些生产实现，保持 pending"
+    },
+    {
+      "id": "renderer-services",
+      "governance": "G3",
+      "featureBranchState": "pending",
+      "entrypointsPresent": [
+        "src/renderer/module-router.js",
+        "src/renderer/scenario-command-service.js",
+        "src/renderer/scenario-change-router.js",
+        "src/renderer/shared-recon-session.js",
+        "src/renderer/configuration-services.js"
+      ],
+      "entrypointsMissing": [],
+      "evidenceMissing": [],
+      "diagnostics": 0,
+      "next": "在集成候选中对齐真实公开入口/消费者/工厂/授权位置，删除过期例外，完成规则正反例与行为证据后激活；本分支无这些生产实现，保持 pending"
+    },
+    {
+      "id": "shared-xlsx",
+      "governance": "G4",
+      "featureBranchState": "pending",
+      "entrypointsPresent": [
+        "src/backend/xlsx/rich-workbook.js",
+        "src/backend/xlsx/shared-strings-provider.js",
+        "src/backend/xlsx/zip-reader.js",
+        "src/backend/xlsx/workbook-parts.js",
+        "src/backend/xlsx/excel-text.js",
+        "src/backend/xlsx/ooxml-namespaces.js",
+        "src/backend/xlsx/number-date.js",
+        "src/backend/xlsx/model.js",
+        "src/backend/xlsx/style-registry.js",
+        "src/backend/xlsx/xlsx-sheet-scanner.js",
+        "src/backend/xlsx/legacy/streaming-xlsx-reader.js",
+        "src/backend/xlsx/legacy/entry-size-preflight.js"
+      ],
+      "entrypointsMissing": [],
+      "evidenceMissing": [],
+      "diagnostics": 0,
+      "next": "在集成候选中对齐真实公开入口/消费者/工厂/授权位置，删除过期例外，完成规则正反例与行为证据后激活；本分支无这些生产实现，保持 pending"
+    },
+    {
+      "id": "publication-recovery-entry",
+      "governance": "G1",
+      "featureBranchState": "pending",
+      "entrypointsPresent": [
+        "src/main-process/publication-recovery/coordinator.js",
+        "src/main-process/publication-recovery/archive-owner.js"
+      ],
+      "entrypointsMissing": [],
+      "evidenceMissing": [
+        "tests/unit/main-process/publication-recovery-entrypoints.test.js"
+      ],
+      "diagnostics": 2,
+      "next": "在集成候选中对齐真实公开入口/消费者/工厂/授权位置，删除过期例外，完成规则正反例与行为证据后激活；本分支无这些生产实现，保持 pending"
+    },
+    {
+      "id": "bizop-recovery-private",
+      "governance": "G1",
+      "featureBranchState": "pending",
+      "entrypointsPresent": [
+        "src/main-process/biz-op-v327/recovery-driver.js",
+        "src/main-process/biz-op-v327/recovery-sources.js",
+        "src/main-process/biz-op-v327/recovery-budget.js",
+        "src/main-process/biz-op-v327/recovery-plan.js",
+        "src/main-process/biz-op-v327/recovery-alignment.js",
+        "src/main-process/biz-op-v327/export-publication.js",
+        "src/main-process/biz-op-v327/recovery-participant.js",
+        "src/main-process/biz-op-v327/publication-owner.js"
+      ],
+      "entrypointsMissing": [],
+      "evidenceMissing": [],
+      "diagnostics": 0,
+      "next": "在集成候选中对齐真实公开入口/消费者/工厂/授权位置，删除过期例外，完成规则正反例与行为证据后激活；本分支无这些生产实现，保持 pending"
+    },
+    {
+      "id": "business-task-adapters",
+      "governance": "G2",
+      "featureBranchState": "pending",
+      "entrypointsPresent": [
+        "src/main-process/archive-center/task-lifecycle.js",
+        "src/main-process/archive-center/ipc-task-contract.js",
+        "src/main-process/task-adapters/registry.js",
+        "src/main-process/task-adapters/passthrough.js",
+        "src/main-process/task-adapters/prepared-resources.js",
+        "src/main-process/archive-center/terminal-route-registry.js"
+      ],
+      "entrypointsMissing": [],
+      "evidenceMissing": [],
+      "diagnostics": 4,
+      "next": "在集成候选中对齐真实公开入口/消费者/工厂/授权位置，删除过期例外，完成规则正反例与行为证据后激活；本分支无这些生产实现，保持 pending"
+    },
+    {
+      "id": "bizop-query-q1",
+      "governance": "G5",
+      "featureBranchState": "pending",
+      "entrypointsPresent": [
+        "src/main-process/biz-op-v327/catalog-queries.js",
+        "src/backend/database/archive-repository.js"
+      ],
+      "entrypointsMissing": [],
+      "evidenceMissing": [],
+      "diagnostics": 0,
+      "next": "在集成候选中对齐真实公开入口/消费者/工厂/授权位置，删除过期例外，完成规则正反例与行为证据后激活；本分支无这些生产实现，保持 pending"
+    },
+    {
+      "id": "bizop-query-q2",
+      "governance": "G5",
+      "featureBranchState": "pending",
+      "entrypointsPresent": [
+        "src/main-process/biz-op-v327/catalog-queries.js"
+      ],
+      "entrypointsMissing": [],
+      "evidenceMissing": [],
+      "diagnostics": 0,
+      "next": "在集成候选中对齐真实公开入口/消费者/工厂/授权位置，删除过期例外，完成规则正反例与行为证据后激活；本分支无这些生产实现，保持 pending"
+    },
+    {
+      "id": "bizop-query-q3",
+      "governance": "G5",
+      "featureBranchState": "pending",
+      "entrypointsPresent": [
+        "src/main-process/biz-op-v327/catalog-queries.js"
+      ],
+      "entrypointsMissing": [],
+      "evidenceMissing": [],
+      "diagnostics": 1571,
+      "next": "在集成候选中对齐真实公开入口/消费者/工厂/授权位置，删除过期例外，完成规则正反例与行为证据后激活；本分支无这些生产实现，保持 pending"
+    },
+    {
+      "id": "descriptor-composition",
+      "governance": "G7",
+      "featureBranchState": "pending",
+      "entrypointsPresent": [
+        "src/main-process/background-execution/runtime.js",
+        "src/main-process/background-execution/execution-policy-registry.js",
+        "src/main-process/archive-center/task-policy-registry.js",
+        "src/main-process/archive-center/task-policy-common.js",
+        "src/main-process/execution-descriptors/contract.js"
+      ],
+      "entrypointsMissing": [],
+      "evidenceMissing": [],
+      "diagnostics": 38,
+      "next": "在集成候选中对齐真实公开入口/消费者/工厂/授权位置，删除过期例外，完成规则正反例与行为证据后激活；本分支无这些生产实现，保持 pending"
+    },
+    {
+      "id": "renderer-dialog-app-settings",
+      "governance": "G3",
+      "featureBranchState": "pending",
+      "entrypointsPresent": [
+        "src/renderer/dialogs/app-settings.js"
+      ],
+      "entrypointsMissing": [],
+      "evidenceMissing": [
+        "tests/unit/renderer/controller-contract.test.js"
+      ],
+      "diagnostics": 14,
+      "next": "在集成候选中对齐真实公开入口/消费者/工厂/授权位置，删除过期例外，完成规则正反例与行为证据后激活；本分支无这些生产实现，保持 pending"
+    },
+    {
+      "id": "renderer-dialog-toolbox",
+      "governance": "G3",
+      "featureBranchState": "pending",
+      "entrypointsPresent": [
+        "src/renderer/dialogs/toolbox.js"
+      ],
+      "entrypointsMissing": [],
+      "evidenceMissing": [
+        "tests/unit/renderer/controller-contract.test.js"
+      ],
+      "diagnostics": 4,
+      "next": "在集成候选中对齐真实公开入口/消费者/工厂/授权位置，删除过期例外，完成规则正反例与行为证据后激活；本分支无这些生产实现，保持 pending"
+    }
+  ]
+}

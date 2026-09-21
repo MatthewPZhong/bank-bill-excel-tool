@@ -1,0 +1,715 @@
+--- a/scripts/architecture/scan.js
++++ b/scripts/architecture/scan.js
+@@ -191,15 +191,15 @@
+       functions.set(node, functionPath);
+       if (node.id) declare(node.id, current, { kind: 'function', init: node });
+       for (const param of node.params) declare(param, current, { kind: 'parameter', init: null });
+-    } else if (node.type === 'BlockStatement' || node.type === 'CatchClause' || node.type === 'ForStatement' || node.type === 'ForOfStatement' || node.type === 'ForInStatement' || node.type === 'SwitchStatement') {
+-      current = { type: node.type === 'CatchClause' ? 'catch' : 'block', parent: scope, bindings: new Map(), functionPath: scope.functionPath };
++    } else if (node.type === 'StaticBlock' || node.type === 'BlockStatement' || node.type === 'CatchClause' || node.type === 'ForStatement' || node.type === 'ForOfStatement' || node.type === 'ForInStatement' || node.type === 'SwitchStatement') {
++      current = { type: node.type === 'StaticBlock' ? 'static-block' : node.type === 'CatchClause' ? 'catch' : 'block', parent: scope, bindings: new Map(), functionPath: scope.functionPath };
+       if (node.type === 'CatchClause') declare(node.param, current, { kind: 'parameter', init: null });
+     }
+     scopeFor.set(node, current);
+     nodes.push(node);
+     if (node.type === 'VariableDeclaration') {
+       let target = current;
+-      if (node.kind === 'var') while (target.parent && !['function', 'program'].includes(target.type)) target = target.parent;
++      if (node.kind === 'var') while (target.parent && !['function', 'program', 'static-block'].includes(target.type)) target = target.parent;
+       for (const declaration of node.declarations) declare(declaration.id, target, { kind: node.kind, init: declaration.init });
+     }
+     if (node.type === 'ClassDeclaration' && node.id) declare(node.id, current, { kind: 'class', init: null });
+@@ -242,6 +242,7 @@
+   const describeValue = (node, seen = new Set()) => {
+     if (!node) return unknown('missing');
+     if (node.type === 'ChainExpression' || node.type === 'AwaitExpression') return describe(node.expression || node.argument, seen);
++    if (node.type === 'Literal' && node.regex) return { kind: 'regexp' };
+     if (node.type === 'Literal') return { kind: 'literal', value: typeof node.value === 'bigint' ? String(node.value) : node.value };
+     if (node.type === 'TemplateLiteral') {
+       const expressions = node.expressions.map((expression) => describe(expression, seen));
+@@ -317,7 +318,7 @@
+       }
+       if (callee.kind === 'reference' && callee.rootFree && ['Object.freeze', 'Object.seal'].includes(callee.chain.join('.')) && args.length === 1) return args[0];
+       if (callee.kind === 'reference' && callee.module === 'node:path' && ['join', 'resolve'].includes(callee.chain.at(-1)) && args.length && args.every((arg) => arg.kind === 'literal' && typeof arg.value === 'string')) {
+-        return { kind: 'literal', value: path[callee.chain.at(-1)](...args.map((arg) => arg.value)), pathValue: true };
++        return { kind: 'literal', value: callee.chain.at(-1) === 'resolve' ? path.resolve(root, ...args.map((arg) => arg.value)) : path.join(...args.map((arg) => arg.value)), pathValue: true };
+       }
+       if (node.type === 'NewExpression' && callee.rootFree && callee.chain?.join('.') === 'URL' && args[0]?.kind === 'literal' && args[1]?.chain?.join('.') === 'import.meta.url') {
+         return { kind: 'literal', value: path.resolve(root, path.dirname(from), args[0].value), pathValue: true };
+@@ -353,10 +354,10 @@
+     lookup: (name, node) => lookup(name, scopeFor.get(node)), walk: (visitor) => nodes.forEach(visitor) };
+ }
+ 
+-// 有限 HTML tokenizer：跳过注释和 script 原文，保留真实标签顺序。
++// 有限 HTML tokenizer：跳过注释、惰性 template 内容和 script 原文，保留执行模式。
+ function parseScripts(html) {
+   const scripts = [];
+-  let index = 0;
++  let index = 0; let templateDepth = 0;
+   while (index < html.length) {
+     if (html.startsWith('<!--', index)) {
+       const end = html.indexOf('-->', index + 4);
+@@ -375,7 +376,9 @@
+     if (end >= html.length) throw new Error('HTML 标签或属性未关闭');
+     const tag = html.slice(start + 1, end);
+     index = end + 1;
++    if (/^\s*\/template\s*$/i.test(tag)) { templateDepth = Math.max(0, templateDepth - 1); continue; }
+     const name = /^\s*([a-zA-Z][\w:-]*)\b/.exec(tag);
++    if (name?.[1].toLowerCase() === 'template') { templateDepth++; continue; }
+     if (!name || name[1].toLowerCase() !== 'script') continue;
+     const attrs = {}; let offset = name[0].length;
+     while (offset < tag.length) {
+@@ -393,8 +396,8 @@
+     if (!closing) throw new Error('script 标签未关闭');
+     const line = html.slice(0, start).split('\n').length;
+     const column = start - (html.lastIndexOf('\n', start) + 1);
+-    const executable = !attrs.type || ['module', 'text/javascript', 'application/javascript'].includes(attrs.type.toLowerCase());
+-    if (executable && attrs.src !== undefined) scripts.push({ src: attrs.src, line, column, type: attrs.type || 'classic', async: Object.hasOwn(attrs, 'async'), defer: Object.hasOwn(attrs, 'defer') });
++    const executable = templateDepth === 0 && (!attrs.type || ['module', 'text/javascript', 'application/javascript'].includes(attrs.type.toLowerCase()));
++    if (executable && attrs.src !== undefined) scripts.push({ src: attrs.src, line, column, type: attrs.type?.toLowerCase() || 'classic', async: Object.hasOwn(attrs, 'async'), defer: Object.hasOwn(attrs, 'defer') });
+     else if (executable && html.slice(index, closing.index).trim()) scripts.push({ inline: true, line, column });
+     index = closing.index + closing[0].length;
+   }
+@@ -429,7 +432,7 @@
+   const globalNames = new Set(providers.map((item) => item.name));
+   const addEdge = (from, specifier, kind, node, analysis, extra = {}) => {
+     const location = analysis.site(node);
+-    const resolved = resolveSpecifier(root, from, specifier);
++    const resolved = resolveSpecifier(root, kind === 'worker' ? 'index.html' : from, specifier);
+     if (resolved.error) {
+       result.unresolved.push({ ...location, kind, specifier, reason: resolved.error });
+       return;
+@@ -498,7 +501,7 @@
+         const args = node.arguments.map((argument) => describe(argument));
+         const chain = callee.chain || [];
+         const operation = args[0]?.kind === 'literal' ? args[0].value : args.find((arg) => arg.kind === 'object' && arg.properties.operation)?.properties.operation?.value;
+-        const call = { ...location, type: node.type === 'NewExpression' ? 'new' : 'call', callee: chain.join('.'), chain, args, operation, reference: callee,
++        const call = { ...location, type: node.type === 'NewExpression' ? 'new' : 'call', callee: chain.join('.'), chain, method: node.callee.type === 'MemberExpression' ? propertyName(node.callee.property) : null, args, operation, reference: callee,
+           binding: callee.module ? { from: callee.module, importedNames: callee.importedNames } : null };
+         result.sites.push(call);
+         if (callee.kind === 'reference' && callee.rootFree && REQUIRE_CHAINS.has(chain.join('.'))) {
+--- a/scripts/architecture/rules.js
++++ b/scripts/architecture/rules.js
+@@ -3,6 +3,7 @@
+ const fs = require('node:fs');
+ const crypto = require('node:crypto');
+ const path = require('node:path');
++const { scopeContains, valueCandidates, factoryCalls, factoryPresent, callableOrigins } = require('./contracts');
+ const { RULES, validateBoundaries, validateAllowlist } = require('./schema');
+ const PURE_FORBIDDEN = /(?:^node:(?:fs(?:\/promises)?|sqlite|worker_threads|child_process)|^(?:electron|xlsx|exceljs)(?:\/|$)|(?:^|\/)(?:[^/]*writer[^/]*|row-mapper)\.[cm]?js$)/;
+ const DOMAIN = /(?:^src\/backend\/(?!file-service\/common\.js)|^src\/main-process\/(?:biz-op|position|acquiring|vcc|pending|bank-bu|new-account|pre-fund|recon-id|toolbox-|fund-recon|duplicate-inbound|read-only-exports))/;
+@@ -10,12 +11,11 @@
+ const fp = value => value.functionPath === undefined ? null : value.functionPath;
+ const sorted = values => [...values].sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+ function scopeMatches(site, scope) {
+-  return site.from === scope.path && (scope.functionPath === null || fp(site) === scope.functionPath
+-    || (fp(site) || '').startsWith(`${scope.functionPath}.`));
++  return scopeContains(scope, { path: site.from, functionPath: fp(site) });
+ }
+ function siteAllowed(boundary, rule, site) {
+   return boundary.allowedSites.some(s => s.rule === rule && s.from === site.from
+-    && s.functionPath === fp(site) && s.callee === site.callee && s.evidenceId === site.evidenceId);
++    && s.functionPath === fp(site) && s.callee === (site.callee || site.method) && s.evidenceId === site.evidenceId);
+ }
+ function cycles(edges) {
+   const graph = new Map();
+@@ -135,6 +135,9 @@
+           emit('ARCH-STATIC-COVERAGE', boundary, { from: scope.path, functionPath: scope.functionPath }, '已激活边界的保护文件或具名函数不存在，请同步迁移登记');
+         }
+       }
++      if (boundary.factory && (!factoryPresent(scan, boundary.factory) || !factoryCalls(scan, boundary.factory).length)) {
++        emit('ARCH-STATIC-COVERAGE', boundary, { from: boundary.factory.path }, '已激活工厂缺少实际定义或生产调用，请同步迁移登记');
++      }
+       for (const evidence of boundary.activationEvidence) if (!exists(evidence)) emit('ARCH-STATIC-COVERAGE', boundary, { from: evidence }, '已激活边界缺少行为验证入口');
+       if (boundary.governance !== 'G8' && !boundary.requiredConsumers.length) emit('ARCH-STATIC-COVERAGE', boundary, {}, '治理边界激活必须登记真实生产消费者');
+       if (boundary.governance !== 'G8' && !boundary.activationEvidence.length) emit('ARCH-STATIC-COVERAGE', boundary, {}, '治理边界激活必须登记行为验证入口');
+@@ -182,19 +185,27 @@
+       const full = boundary.protectedScopes.filter(s => s.functionPath === null && files.has(s.path)).map(s => s.path);
+       const denied = e => boundary.restrictedApis.some(a => a.path === e.to);
+       closure(full, (edge, route) => { if (denied(edge)) emit('ARCH-TASK-ADAPTER', boundary, edge, '通用任务机制不能依赖 Position 私有状态机', route); });
+-      const reachableScopes = boundary.protectedScopes.filter(s => s.functionPath !== null).map(s => ({ ...s }));
++      const reachableScopes = boundary.protectedScopes.map(s => ({ ...s }));
+       for (let i = 0; i < reachableScopes.length; i += 1) {
+         for (const site of sites.filter(s => ['call', 'new'].includes(s.type) && scopeMatches(s, reachableScopes[i]))) {
+-          const localFunction = site.reference && site.reference.functionPath;
+-          if (localFunction && !reachableScopes.some(s => s.path === site.from && s.functionPath === localFunction)) reachableScopes.push({ path: site.from, functionPath: localFunction });
++          for (const value of valueCandidates(site.reference)) {
++            const localFunction = value.functionPath;
++            if (localFunction && !reachableScopes.some(s => s.path === site.from && s.functionPath === localFunction)) reachableScopes.push({ path: site.from, functionPath: localFunction });
++          }
+         }
+       }
+       for (const site of sites.filter(s => ['call', 'new'].includes(s.type) && reachableScopes.some(p => scopeMatches(s, p)))) {
+-        const module = site.binding && site.binding.from;
+-        if (module) closure([module], (edge, route) => { if (denied(edge)) emit('ARCH-TASK-ADAPTER', boundary, site, '通用具名编排经 helper 加载 Position 私有状态机', [site.from, ...route]); });
+-        if (module && denied({ to: module })) emit('ARCH-TASK-ADAPTER', boundary, site, '通用具名编排直接调用 Position 私有能力', [site.from, module]);
+-        if (boundary.restrictedApis.some(a => a.path === site.from && a.operations.includes(site.callee))) emit('ARCH-TASK-ADAPTER', boundary, site, '通用编排不得直接调用本文件 Position 私有状态操作');
+-        if (site.reference && site.reference.opaque && /Position|position/.test(site.callee || '')) emit('ARCH-STATIC-COVERAGE', boundary, site, '受保护编排的 Position 调用别名无法解释');
++        if (siteAllowed(boundary, 'ARCH-TASK-ADAPTER', site)) continue;
++        const candidates = valueCandidates(site.reference);
++        const origins = callableOrigins(site.reference);
++        for (const module of new Set(origins.modules)) if (denied({ to: module })) emit('ARCH-TASK-ADAPTER', boundary, site, '通用具名编排经工厂取得受限私有能力', [site.from, module]);
++        for (const value of candidates) {
++          const module = value.module;
++          if (module) closure([module], (edge, route) => { if (denied(edge)) emit('ARCH-TASK-ADAPTER', boundary, site, '通用具名编排经 helper 加载 Position 私有状态机', [site.from, ...route]); });
++          if (module && denied({ to: module })) emit('ARCH-TASK-ADAPTER', boundary, site, '通用具名编排直接调用 Position 私有能力', [site.from, module]);
++          if (boundary.restrictedApis.some(a => a.path === site.from && a.operations.includes((value.chain || []).join('.')))) emit('ARCH-TASK-ADAPTER', boundary, site, '通用编排不得直接调用本文件 Position 私有状态操作');
++        }
++        if (!origins.known && candidates.some(value => value.opaque)) emit('ARCH-STATIC-COVERAGE', boundary, site, '受保护编排的调用别名无法完整解释');
+       }
+     }
+     if (rules.includes('ARCH-BIZOP-RECOVERY-PRIVATE')) {
+@@ -224,10 +235,32 @@
+         const module = site.binding && site.binding.from; const names = site.binding && site.binding.importedNames || [];
+         const restricted = boundary.restrictedApis.find(a => a.path === module && (a.exportNames === null || names.some(n => a.exportNames.includes(n))));
+         const internal = boundary.restrictedApis.find(a => a.path === site.from && a.operations.includes(site.callee));
+-        const workerRecover = ((site.args || []).some(a => a.kind === 'literal' && a.value === 'recover') || (site.args || []).some(a => a.kind === 'object' && ['op', 'operation', 'lifecycleOperation'].some(k => a.properties[k] && a.properties[k].value === 'recover')))
+-          && (boundary.protectedScopes.some(s => scopeMatches(site, s)) || ['postMessage', 'dispatch'].includes((site.chain || []).at(-1)));
++        const method = site.method || (site.chain || []).at(-1);
++        const governed = boundary.protectedScopes.some(s => scopeMatches(site, s));
++        const messageCall = ['postMessage', 'dispatch'].includes(method);
++        const operations = [];
++        let unknownOperation = false;
++        const inspectMessage = value => {
++          if (!value) { unknownOperation = true; return; }
++          if (value.kind === 'candidates') { value.values.forEach(inspectMessage); return; }
++          if (value.kind !== 'object') { unknownOperation = true; return; }
++          if (messageCall && (value.spreads || []).length) unknownOperation = true;
++          for (const key of ['op', 'operation', 'lifecycleOperation']) if (value.properties[key]) operations.push(value.properties[key]);
++        };
++        if (governed || messageCall) {
++          for (const arg of site.args || []) {
++            if (arg.kind === 'object') inspectMessage(arg);
++            if (arg.kind === 'literal' || (arg.kind === 'candidates' && valueCandidates(arg).some(value => value.kind === 'literal' && value.value === 'recover'))) operations.push(arg);
++          }
++          if (messageCall) inspectMessage(site.args?.[0]);
++          if (method === 'runWorkerJob') operations.push(site.args?.[1]);
++        }
++        const values = operations.flatMap(value => valueCandidates(value));
++        if (operations.some(value => !value) || values.some(value => value.opaque || !['literal', 'candidates'].includes(value.kind))) unknownOperation = true;
++        const workerRecover = values.some(value => value.kind === 'literal' && value.value === 'recover');
++        if (siteAllowed(boundary, 'ARCH-PUBLICATION-RECOVERY-ENTRY', site)) continue;
++        if (unknownOperation && governed) emit('ARCH-STATIC-COVERAGE', boundary, site, '受保护 worker operation 无法完整解释，须登记准确授权调用或使用可解析操作');
+         if (!restricted && !internal && !workerRecover) continue;
+-        if (siteAllowed(boundary, 'ARCH-PUBLICATION-RECOVERY-ENTRY', site)) continue;
+         emit('ARCH-PUBLICATION-RECOVERY-ENTRY', boundary, site, '恢复副作用仅允许准确登记的授权 dispatcher 事务调用');
+       }
+     }
+@@ -239,7 +272,7 @@
+         const helper = helpers.has(site.from) && !scopeFiles.includes(site.from) && !boundary.allowedLocal.includes(site.from);
+         if (!direct && !helper) continue;
+         if (siteAllowed(boundary, 'ARCH-BIZOP-QUERY', site)) continue;
+-        if (site.type === 'call' && /\.(?:prepare|exec)$/.test(site.callee || '') && site.reference && site.reference.opaque) emit('ARCH-STATIC-COVERAGE', boundary, site, '受保护读取作用域的 DB alias 来源无法解释');
++        if (site.type === 'call' && ['prepare', 'exec'].includes(site.method || (site.chain || []).at(-1)) && !(site.method === 'exec' && site.reference?.object?.kind === 'regexp') && valueCandidates(site.reference).some(value => value.opaque || ['unknown', 'call-result'].includes(value.kind))) emit('ARCH-STATIC-COVERAGE', boundary, site, '受保护读取作用域的 DB alias 来源无法解释');
+         if (site.type === 'db-operation') {
+           const sql = site.args && site.args[0];
+           const query = sql && sql.kind === 'literal' && typeof sql.value === 'string' ? sql.value : null;
+@@ -262,7 +295,7 @@
+         if (site.type === 'global-read' && (site.chain || []).includes('desktopApi')) emit('ARCH-RENDERER-SCOPE', boundary, site, '控制器只能消费显式 scoped API，不能读取完整 desktopApi');
+       }
+       checkClosure('ARCH-RENDERER-SCOPE', edge => edge.external === false && (boundary.allowedLocal.includes(edge.to) || starts.includes(edge.to)));
+-      if (boundary.factory) for (const site of sites.filter(s => s.type === 'call' && (s.callee || '').split('.').pop() === boundary.factory.name)) {
++      if (boundary.factory) for (const site of factoryCalls(scan, boundary.factory)) {
+         const input = site.args && site.args[0];
+         if (!input || input.kind !== 'object') { emit('ARCH-STATIC-COVERAGE', boundary, site, '工厂入参必须是可解释的具名依赖对象'); continue; }
+         if ((input.spreads || []).length) emit('ARCH-STATIC-COVERAGE', boundary, site, '工厂依赖对象 spread 不能确定字段与来源');
+@@ -271,24 +304,45 @@
+           const name = property.name || property.key; let value = property.value || property;
+           if (value.kind === 'call-result' && (value.callee.chain || []).join('.') === 'Object.freeze' && value.args.length === 1) value = value.args[0];
+           if (!boundary.factory.parameters.includes(name) || ['state', 'elements', 'desktopApi'].includes(name)) emit('ARCH-RENDERER-SCOPE', boundary, site, `工厂注入了未授权字段 ${name}`);
+-          if (value.kind === 'unknown' || value.opaque || (value.spreads || []).length || (value.chain || []).some(n => ['state', 'elements', 'desktopApi'].includes(n))) emit('ARCH-RENDERER-SCOPE', boundary, site, `工厂字段 ${name} 不能注入完整可变对象或不透明 alias`);
++          if (['unknown', 'call-result', 'candidates'].includes(value.kind) || (boundary.allowedApiFields[name] && value.kind !== 'object') || value.opaque || (value.spreads || []).length || (value.chain || []).some(n => ['state', 'elements', 'desktopApi'].includes(n))) emit('ARCH-RENDERER-SCOPE', boundary, site, `工厂字段 ${name} 不能注入完整可变对象或不透明 alias`);
+           if (boundary.allowedApiFields[name] && value.kind === 'reference' && value.bindingScope === 'program') emit('ARCH-STATIC-COVERAGE', boundary, site, `scoped ${name} 的引用未提供可解释方法集合`);
+           if (boundary.allowedApiFields[name] && value.kind === 'object') {
+-            const fields = Array.isArray(value.properties) ? value.properties.map(p => p.name || p.key) : Object.keys(value.properties || {});
+-            for (const field of fields) if (!boundary.allowedApiFields[name].includes(field)) emit('ARCH-RENDERER-SCOPE', boundary, site, `scoped ${name} 未授权字段 ${field}`);
++            const allowed = boundary.allowedApiFields[name];
++            const inspectFields = (object, prefix = '') => {
++              if (object.kind !== 'object' || (object.spreads || []).length) {
++                emit('ARCH-STATIC-COVERAGE', boundary, site, `scoped ${name}${prefix ? '.' + prefix : ''} 未提供可解释方法集合`); return;
++              }
++              for (const [key, member] of Object.entries(object.properties)) {
++                const field = prefix ? `${prefix}.${key}` : key;
++                if (allowed.some(method => method.startsWith(`${field}.`))) inspectFields(member, field);
++                else if (!allowed.includes(field)) emit('ARCH-RENDERER-SCOPE', boundary, site, `scoped ${name} 未授权字段 ${field}`);
++                else if (member.opaque || ['unknown', 'call-result', 'candidates', 'object'].includes(member.kind) ||
++                  (member.chain || []).some(part => ['state', 'elements', 'desktopApi'].includes(part))) emit('ARCH-STATIC-COVERAGE', boundary, site, `scoped ${name}.${field} 的方法来源无法解释`);
++              }
++            };
++            inspectFields(value);
+           }
+         }
+       }
+     }
+-    const scripts = (scan.scripts || []).map(s => typeof s === 'string' ? s : s.path || s.src || s.to);
++    const scripts = scan.scripts || [];
++    const loads = file => scripts.filter(script => script.path === file);
++    const guaranteedBefore = (provider, consumer) => {
++      // module 可能含顶层 await，async 没有可保证的先行关系。
++      if (provider.async || consumer.async || provider.type === 'module') return false;
++      const consumerDeferred = consumer.defer || consumer.type === 'module';
++      if (!provider.defer && consumerDeferred) return true;
++      if (provider.defer && !consumerDeferred) return false;
++      return provider.order < consumer.order;
++    };
+     for (const global of boundary.globals) if (files.has(global.path)) {
+-      if (!scripts.includes(global.path)) emit('ARCH-STATIC-COVERAGE', boundary, { from: global.path }, '经典脚本入口尚未被 index.html 生产装配');
++      if (!loads(global.path).length) emit('ARCH-STATIC-COVERAGE', boundary, { from: global.path }, '经典脚本入口尚未被 index.html 生产装配');
+       if (boundary.state === 'active' || global.path.startsWith('src/renderer/')) for (const name of global.exportsGlobal) {
+         if (!(scan.globals || []).some(s => s.from === global.path && s.type === 'global-write' && ((s.chain || []).slice(1).join('.') === name || s.name === name))) emit('ARCH-STATIC-COVERAGE', boundary, { from: global.path }, `登记的全局工厂 ${name} 没有实际导出`);
+       }
+       for (const name of global.consumesGlobals) {
+         const provider = allBoundaries.flatMap(b => b.globals).find(g => g.exportsGlobal.includes(name));
+-        if (!provider || scripts.indexOf(provider.path) < 0 || scripts.indexOf(provider.path) >= scripts.indexOf(global.path)) emit('ARCH-RENDERER-SCOPE', boundary, { from: global.path, to: provider && provider.path }, `全局服务 ${name} 未在消费者之前加载`);
++        if (!provider || !loads(global.path).length || !loads(global.path).every(consumer => loads(provider.path).some(producer => guaranteedBefore(producer, consumer)))) emit('ARCH-RENDERER-SCOPE', boundary, { from: global.path, to: provider && provider.path }, `全局服务 ${name} 未在消费者之前加载`);
+       }
+     }
+     for (const old of boundary.deprecatedEntrypoints) {
+--- a/scripts/architecture/policy-history.js
++++ b/scripts/architecture/policy-history.js
+@@ -1,4 +1,5 @@
+ 'use strict';
++const { scopeContains, factoryCalls, factoryPresent } = require('./contracts');
+ 
+ const fs = require('node:fs');
+ const path = require('node:path');
+@@ -317,11 +318,17 @@
+   }
+ 
+   function currentMigrationValid(oldBoundary, field, value) {
++    if (field === 'factory' && value) {
++      const graph = getCurrentScan();
++      if (!factoryPresent(graph, value) || !factoryCalls(graph, value).length) return false;
++      const old = oldBoundary.factory;
++      if (old && old.name !== value.name && factoryCalls(graph, old).length) return false;
++      if (old && old.path !== value.path && factoryPresent(graph, old)) return false;
++    }
+     if (field === 'protectedScopes') {
+       if (!value.every(scopePresent)) return false;
+       for (const oldScope of oldBoundary.protectedScopes) {
+-        const stillProtected = value.some((scope) => scope.path === oldScope.path && (scope.functionPath === null || scope.functionPath === oldScope.functionPath ||
+-          (oldScope.functionPath !== null && oldScope.functionPath.startsWith(`${scope.functionPath}.`))));
++        const stillProtected = value.some((scope) => scopeContains(scope, oldScope));
+         // 旧函数/文件仍在时继续保留保护；兼容期可以同时登记旧、新范围。
+         if (!stillProtected && scopePresent(oldScope)) return false;
+       }
+@@ -393,7 +400,7 @@
+       && Object.keys(oldValue).every(name => Object.hasOwn(nextValue, name))
+       && Object.entries(nextValue).every(([name, methods]) => includesAll(oldValue[name], methods));
+     if (field === 'compositionEntrypoints') return Array.isArray(nextValue) && nextValue.every((site) => oldValue.some((previous) => previous.path === site.path && includesAll(previous.importedNames, site.importedNames) && includesAll(previous.allowedTargets, site.allowedTargets)));
+-    if (field === 'protectedScopes') return Array.isArray(nextValue) && oldValue.every((scope) => nextValue.some((candidate) => candidate.path === scope.path && (candidate.functionPath === null || same(candidate.functionPath, scope.functionPath))));
++    if (field === 'protectedScopes') return Array.isArray(nextValue) && oldValue.every((scope) => nextValue.some((candidate) => scopeContains(candidate, scope)));
+     if (field === 'restrictedApis') return Array.isArray(nextValue) && oldValue.every((api) => nextValue.some((candidate) => candidate.path === api.path && (candidate.exportNames === null || (api.exportNames !== null && includesAll(candidate.exportNames, api.exportNames))) && includesAll(candidate.operations || [], api.operations || [])));
+     return false;
+   }
+--- /dev/null
++++ b/scripts/architecture/contracts.js
+@@ -0,0 +1,41 @@
++'use strict';
++
++// 执行规则和历史防倒退必须使用相同的词法包含关系。
++function scopeContains(outer, inner) {
++  return outer.path === inner.path && (outer.functionPath === null || outer.functionPath === inner.functionPath ||
++    (inner.functionPath !== null && inner.functionPath.startsWith(`${outer.functionPath}.`)));
++}
++
++function valueCandidates(value, seen = new Set()) {
++  if (!value || seen.has(value)) return [];
++  const next = new Set([...seen, value]);
++  return [value, ...(value.alternatives || value.values || []).flatMap(item => valueCandidates(item, next))];
++}
++
++function factoryCalls(scan, factory) {
++  return scan.sites.filter(site => site.type === 'call' && valueCandidates(site.reference).some(value =>
++    (value.chain || []).at(-1) === factory.name || value.functionPath?.split('.').at(-1) === factory.name));
++}
++
++function factoryPresent(scan, factory) {
++  const analysis = scan.analyses.get(factory.path);
++  return Boolean(analysis && [...analysis.functionNodes.keys()].some(name => name.split('.').at(-1) === factory.name));
++}
++
++// 参数代表显式注入合同；工厂结果保留创建者来源，不能靠局部变量命名判断能力。
++function callableOrigins(value, seen = new Set()) {
++  if (!value || seen.has(value)) return { known: false, modules: [] };
++  const next = new Set([...seen, value]);
++  const choices = value.alternatives || value.values;
++  if (choices) {
++    const origins = choices.map(item => callableOrigins(item, next));
++    return { known: choices.length > 0 && origins.every(item => item.known), modules: origins.flatMap(item => item.modules) };
++  }
++  if (value.reason === 'member-base') return callableOrigins(value.object, next);
++  if (value.kind === 'call-result') return value.callee?.module ? { known: true, modules: [value.callee.module] } : { known: false, modules: [] };
++  if (value.module) return { known: true, modules: [value.module] };
++  return { known: Boolean(value.functionPath || value.bindingKind === 'parameter' ||
++    value.kind === 'literal' || value.kind === 'regexp'), modules: [] };
++}
++
++module.exports = { scopeContains, valueCandidates, factoryCalls, factoryPresent, callableOrigins };
+--- /dev/null
++++ b/tests/unit/architecture/review-regressions.test.js
+@@ -0,0 +1,236 @@
++'use strict';
++const assert = require('node:assert/strict');
++const test = require('node:test');
++const fs = require('node:fs');
++const path = require('node:path');
++const os = require('node:os');
++const { spawnSync } = require('node:child_process');
++const vm = require('node:vm');
++const { scan } = require('../../../scripts/architecture/scan');
++const { evaluateRules } = require('../../../scripts/architecture/rules');
++const { createPolicyRepository } = require('./fixtures/policy-repository');
++const cliPath = path.resolve(__dirname, '../../../scripts/check-architecture.js');
++const baseline = '1'.repeat(40);
++function boundary(rule, overrides = {}) {
++  return { id: 'review', governance: 'G8', owner: 'fixture', state: 'pending', rules: [rule], entrypoints: [],
++    allowedLocal: [], allowedExternal: [], requiredConsumers: [], activationEvidence: [], protectedScopes: [],
++    restrictedApis: [], allowedSites: [], compositionEntrypoints: [], globals: [], factory: null,
++    allowedApiFields: {}, deprecatedEntrypoints: [], directory: null, ...overrides };
++}
++function fixture(t, files, boundaries, configure = () => {}) {
++  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'g8-review-regression-'));
++  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
++  for (const [name, source] of Object.entries(files)) {
++    fs.mkdirSync(path.dirname(path.join(root, name)), { recursive: true }); fs.writeFileSync(path.join(root, name), source);
++  }
++  const config = { schemaVersion: 1, factBaseline: baseline, bootstrap: { factBaseline: baseline, mode: 'first-introduction' },
++    boundaries: [].concat(boundaries), generatedModules: [], dynamicLoads: [], policyChanges: [] };
++  const scanned = scan(root, config);
++  const allowlist = { schemaVersion: 1, factBaseline: baseline, exceptions: [] };
++  configure({config, allowlist, scanned, root});
++  return { root, scanned, result: evaluateRules(scanned, config, allowlist, { root }) };
++}
++const clean = result => assert.deepEqual(result.violations, []);
++const denied = (result, rule) => assert.ok(result.violations.some(v => v.rule === rule), JSON.stringify(result.violations));
++function cli(f) {
++  const run = spawnSync(process.execPath, [cliPath, '--root', f.root], { cwd: f.root, encoding: 'utf8' });
++  assert.ifError(run.error); return run;
++}
++
++test('R1 StaticBlock 的 var/let 只遮蔽块内 require，块外真实 fs 仍受保护', t => {
++  const b = boundary('ARCH-PLATFORM-CORE', { entrypoints: ['src/core.js'], allowedLocal: ['src/core.js'] });
++  for (const declaration of ['var', 'let', 'const']) {
++    const local = `class C { static { ${declaration} require = () => {}; require('node:fs'); } }`;
++    clean(fixture(t, { 'src/core.js': local }, b).result);
++    const source = `${local}\nmodule.exports = typeof require('node:fs').readFileSync;`;
++    const module = { exports: null }; vm.runInNewContext(source, { require, module }); assert.equal(module.exports, 'function');
++    const f = fixture(t, { 'src/core.js': source }, b);
++    assert.equal(f.scanned.edges.filter(e => e.to === 'node:fs').length, 1);
++    denied(f.result, 'ARCH-PLATFORM-CORE');
++  }
++});
++
++test('R2 factory 仅改配置、替代未使用和旧调用残留均不能迁移；真实迁移 CLI 通过', t => {
++  const f = createPolicyRepository(t);
++  f.boundary.rules = ['ARCH-RENDERER-SCOPE'];
++  f.boundary.factory = { path: 'src/entry.js', name: 'createProbe', parameters: ['api'] };
++  f.boundary.allowedApiFields = { api: ['read'] };
++  f.write('src/entry.js', 'window.createProbe = function(options) { return options; };');
++  f.write('src/shell.js', 'window.createProbe({api: {read() { return 1; }}});');
++  f.save(); const s1 = f.commit('S1 激活真实工厂'); assert.equal(cli(f).status, 0);
++  const old = structuredClone(f.boundary.factory);
++  f.boundary.factory.name = 'createReplacement';
++  f.change(s1, 'factory', old, structuredClone(f.boundary.factory));
++  f.write('src/shell.js', 'window.createProbe({state: {}, api: {write() {}}});'); f.save();
++  assert.equal(cli(f).status, 1, '仅配置改名不能解禁');
++  f.write('src/entry.js', 'window.createReplacement = function(options) { return options; };');
++  assert.equal(cli(f).status, 1, '替代存在但旧消费仍在');
++  f.write('src/shell.js', 'window.createReplacement({api: {read() {}}});');
++  assert.equal(cli(f).status, 0, '定义与真实消费者一起迁移');
++  f.write('src/shell.js', 'window.createReplacement({api: {write() {}}});');
++  assert.equal(cli(f).status, 1, '新入口保持方法限制');
++});
++
++test('R2 active 工厂定义或生产调用消失要报告覆盖错误', t => {
++  const b = boundary('ARCH-RENDERER-SCOPE', { state: 'active', entrypoints: ['src/controller.js'],
++    factory: { path: 'src/controller.js', name: 'createProbe', parameters: ['api'] }, allowedApiFields: { api: ['read'] } });
++  for (const files of [
++    { 'src/controller.js': '', 'src/shell.js': 'window.createProbe({api: {read() {}}});' },
++    { 'src/controller.js': 'window.createProbe = function(options) { return options; };' }
++  ]) denied(fixture(t, files, b).result, 'ARCH-STATIC-COVERAGE');
++});
++
++test('R3 worker operation 候选含 recover 被拒绝，未知值失败关闭，纯 publish 允许', t => {
++  const b = boundary('ARCH-PUBLICATION-RECOVERY-ENTRY', { protectedScopes: [{ path: 'src/dispatch.js', functionPath: null }] });
++  for (const expression of ["'recover'", "flag ? 'recover' : 'publish'", "flag && 'recover'"]) {
++    const source = `function unauthorized(worker, flag) { worker.postMessage({op: ${expression}, payload: {}}); }`;
++    const messages = []; const context = { worker: { postMessage: x => messages.push(x.op) } };
++    vm.runInNewContext(source + '; unauthorized(worker, true);', context); assert.equal(messages[0], 'recover');
++    denied(fixture(t, { 'src/dispatch.js': source }, b).result, 'ARCH-PUBLICATION-RECOVERY-ENTRY');
++  }
++  for (const source of [
++    'function go(worker, op) { worker.postMessage({op}); }',
++    'function go(worker, message) { worker.postMessage(message); }',
++    'function go(op) { runWorkerJob("worker", op, {}); }'
++  ]) denied(fixture(t, { 'src/dispatch.js': source }, b).result, 'ARCH-STATIC-COVERAGE');
++  clean(fixture(t, { 'src/dispatch.js': "function go(worker, flag) { worker.postMessage({op: flag ? 'publish' : 'prepare'}); }" }, b).result);
++});
++
++test('R4 具名任务作用域按来源检查 mutable alias 和本地 helper，不依赖 Position 变量名', t => {
++  const b = boundary('ARCH-TASK-ADAPTER', { protectedScopes: [{ path: 'src/main.js', functionPath: 'runArchiveAwareOperation' }],
++    restrictedApis: [{ path: 'src/position.js', exportNames: ['settle'], operations: [] }] });
++  for (const alias of ['const settle = position.settle;', 'let settle = position.settle;', 'let settle; settle = position.settle;', 'function helper(){position.settle();} let settle = helper;']) {
++    const source = `const position = require('./position'); ${alias} function runArchiveAwareOperation(){settle();}`;
++    let calls = 0; vm.runInNewContext(source + '; runArchiveAwareOperation();', { require: () => ({ settle: () => calls++ }) }); assert.equal(calls, 1);
++    denied(fixture(t, { 'src/main.js': source, 'src/position.js': 'exports.settle=()=>{};' }, b).result, 'ARCH-TASK-ADAPTER');
++  }
++  clean(fixture(t, { 'src/main.js': 'function runArchiveAwareOperation(adapter){adapter.execute();}' }, b).result);
++});
++
++test('R5 getter 的 DB 句柄保留方法身份并失败关闭，query facade 允许', t => {
++  const b = boundary('ARCH-BIZOP-QUERY', { protectedScopes: [{ path: 'src/query.js', functionPath: 'read' }] });
++  const source = "function getHandle(catalog){return catalog.db;} function read(catalog){const handle=getHandle(catalog);return handle.prepare('SELECT * FROM facts').all();}";
++  const sql = []; vm.runInNewContext(source + '; read(catalog);', { catalog: { db: { prepare: x => { sql.push(x); return {all: () => []}; } } } });
++  assert.deepEqual(sql, ['SELECT * FROM facts']);
++  denied(fixture(t, { 'src/query.js': source }, b).result, 'ARCH-STATIC-COVERAGE');
++  denied(fixture(t, { 'src/query.js': "function read(catalog){return catalog.db.prepare('SELECT * FROM facts').all();}" }, b).result, 'ARCH-BIZOP-QUERY');
++  clean(fixture(t, { 'src/query.js': 'function read(catalog){return catalog.queries.find();}' }, b).result);
++});
++
++function rendererBoundary() {
++  return boundary('ARCH-RENDERER-SCOPE', { entrypoints: ['src/controller.js'],
++    factory: { path: 'src/controller.js', name: 'createProbe', parameters: ['api'] }, allowedApiFields: { api: ['scenarios.list'] } });
++}
++test('R6 scoped API 不接受 helper 返回值、条件对象及嵌套 full API', t => {
++  for (const api of ['window.desktopApi', 'getApi()', 'flag ? {scenarios:{list(){}}} : getApi()', '{scenarios: getApi()}', '{scenarios: window.desktopApi}']) {
++    const f = fixture(t, { 'src/controller.js': 'window.createProbe = options => options;',
++      'src/shell.js': `function getApi(){return window.desktopApi;} window.createProbe({api: ${api}});` }, rendererBoundary());
++    assert.ok(f.result.violations.some(v => ['ARCH-RENDERER-SCOPE', 'ARCH-STATIC-COVERAGE'].includes(v.rule)), api);
++  }
++});
++
++test('R7 装配依据执行模式：defer/module/async 不能当作同步先行脚本', t => {
++  const service = boundary('ARCH-RENDERER-SCOPE', { id: 'service', entrypoints: ['src/service.js'], globals: [{ path: 'src/service.js', exportsGlobal: ['service'], consumesGlobals: [] }] });
++  const consumer = boundary('ARCH-RENDERER-SCOPE', { id: 'consumer', entrypoints: ['src/controller.js'], allowedLocal: ['src/service.js'], globals: [{ path: 'src/controller.js', exportsGlobal: [], consumesGlobals: ['service'] }] });
++  const sources = { 'src/service.js': 'window.service={read(){}};', 'src/controller.js': 'window.service.read();' };
++  for (const mode of ['defer', 'type="module"', 'async']) {
++    denied(fixture(t, { ...sources, 'index.html': `<script ${mode} src="src/service.js"></script><script src="src/controller.js"></script>` }, [service, consumer]).result, 'ARCH-RENDERER-SCOPE');
++  }
++  for (const html of [
++    '<script src="src/service.js"></script><script src="src/controller.js"></script>',
++    '<script defer src="src/service.js"></script><script defer src="src/controller.js"></script>',
++    '<script defer src="src/controller.js"></script><script src="src/service.js"></script>'
++  ]) clean(fixture(t, { ...sources, 'index.html': html }, [service, consumer]).result);
++  for (const html of [
++    '<template><script src="src/service.js"></script></template><script src="src/controller.js"></script>',
++    '<template><template></template><script src="src/service.js"></script></template><script src="src/controller.js"></script>'
++  ]) denied(fixture(t, { ...sources, 'index.html': html }, [service, consumer]).result, 'ARCH-STATIC-COVERAGE');
++});
++
++test('R8 Worker 相对路径按仓库 cwd，与真实 Node Worker 结果一致而非 launcher 目录', t => {
++  const f = fixture(t, {
++    'src/launcher.cjs': "const {Worker}=require('node:worker_threads'); new Worker('./src/worker.cjs');",
++    'src/worker.cjs': "console.log('worker-ran');",
++    'src/src/worker.cjs': "throw new Error('wrong base');"
++  }, boundary('ARCH-CYCLE'));
++  const runtime = spawnSync(process.execPath, ['src/launcher.cjs'], {cwd: f.root, encoding: 'utf8', timeout: 10000});
++  assert.equal(runtime.status, 0, runtime.stderr); assert.match(runtime.stdout, /worker-ran/);
++  clean(f.result);
++  assert.deepEqual(f.scanned.edges.filter(e => e.kind === 'worker').map(e => e.to), ['src/worker.cjs']);
++});
++
++test('R9 dotted API 白名单逐叶匹配，合法嵌套方法通过，额外方法/spread 失败', t => {
++  for (const [api, valid] of [
++    ['{scenarios: {list() {return [];}}}', true],
++    ['Object.freeze({scenarios: Object.freeze({list(){}})})', true],
++    ['{scenarios: {list(){}, write(){}}}', false],
++    ['{scenarios: {...other, list(){}}}', false],
++    ['{scenarios: {get list(){return other;}}}', false]
++  ]) {
++    const f = fixture(t, { 'src/controller.js': 'window.createProbe = options => options;', 'src/shell.js': `window.createProbe({api: ${api}});` }, rendererBoundary());
++    if (valid) clean(f.result); else assert.ok(f.result.violations.length, api);
++  }
++});
++
++test('R10 父函数扩大保护 CLI 通过，反向缩小和同前缀兄弟范围拒绝', t => {
++  const f = createPolicyRepository(t);
++  f.boundary.rules = ['ARCH-BIZOP-QUERY'];
++  f.boundary.protectedScopes = [{path: 'src/entry.js', functionPath: 'collect.inner'}];
++  f.write('src/entry.js', 'function collect(){function inner(){} function innerOther(){}}');
++  f.save(); f.commit('S1 激活嵌套函数'); assert.equal(cli(f).status, 0);
++  f.boundary.protectedScopes[0].functionPath = 'collect'; f.save(); assert.equal(cli(f).status, 0);
++  f.commit('S2 扩大保护到父函数');
++  f.boundary.protectedScopes[0].functionPath = 'collect.inner'; f.save(); assert.equal(cli(f).status, 1);
++  f.boundary.protectedScopes[0].functionPath = 'collect.innerOther'; f.save(); assert.equal(cli(f).status, 1);
++});
++
++
++test('R3 精确历史动态 op 不能复制到新函数或在 active 沿用，退出通知仅准确允许', t => {
++  const source = 'function send(worker, op){worker.postMessage({op});}';
++  const b = boundary('ARCH-PUBLICATION-RECOVERY-ENTRY', { protectedScopes: [{path:'src/dispatch.js',functionPath:null}] });
++  let saved;
++  clean(fixture(t, {'src/dispatch.js':source}, b, ({scanned,allowlist}) => {
++    const site = scanned.sites.find(s => s.type === 'call');
++    saved = {id:'old-op',rule:'ARCH-STATIC-COVERAGE',from:site.from,evidenceId:site.evidenceId,functionPath:site.functionPath,
++      originalCommit:baseline,reason:'固定基线旧动态操作待授权迁移',governance:'G1',removeWhen:'完成授权事务并激活后删除'};
++    allowlist.exceptions.push(saved);
++  }).result);
++  denied(fixture(t, {'src/dispatch.js':source.replace('send(', 'other(')}, b, ({allowlist}) => allowlist.exceptions.push(saved)).result, 'ARCH-STATIC-COVERAGE');
++  denied(fixture(t, {'src/dispatch.js':source}, {...b,state:'active',governance:'G1'}, ({allowlist}) => allowlist.exceptions.push(saved)).result, 'ARCH-STATIC-COVERAGE');
++  const notification = 'function onExit(notify, op){notify({op});}';
++  let exact;
++  clean(fixture(t, {'src/dispatch.js':notification}, b, ({scanned,config}) => {
++    const site = scanned.sites.find(s => s.type === 'call');
++    exact={rule:'ARCH-PUBLICATION-RECOVERY-ENTRY',from:site.from,functionPath:site.functionPath,callee:site.callee,evidenceId:site.evidenceId,reason:'退出通知不发送 worker 指令'};
++    config.boundaries[0].allowedSites=[exact];
++  }).result);
++  denied(fixture(t, {'src/dispatch.js':notification.replace('notify({op})', 'notify({op: "recover"})')}, {...b,allowedSites:[exact]}).result, 'ARCH-PUBLICATION-RECOVERY-ENTRY');
++});
++
++test('R4 未知 factory 可变别名失败关闭，明确的参数默认回调通过', t => {
++  const b=boundary('ARCH-TASK-ADAPTER',{protectedScopes:[{path:'src/task.js',functionPath:'run'}]});
++  denied(fixture(t,{'src/task.js':'let settle = unknownFactory(); function run(){settle();}'},b).result,'ARCH-STATIC-COVERAGE');
++  clean(fixture(t,{'src/task.js':'function run(options){const {execute = () => {}} = options; execute();}'},b).result);
++});
++
++test('R4 合法调用精确登记不能传给同函数的另一个 AST 位置', t => {
++  const b=boundary('ARCH-TASK-ADAPTER',{protectedScopes:[{path:'src/task.js',functionPath:'run'}]});
++  let saved;
++  clean(fixture(t,{'src/task.js':'function run(){let values = getPaths();values = values.concat([]);}'},b,({scanned,config})=>{
++    const site=scanned.sites.find(s=>s.type==='call'&&s.method==='concat');
++    saved={rule:'ARCH-TASK-ADAPTER',from:site.from,functionPath:site.functionPath,callee:site.callee||site.method,evidenceId:site.evidenceId,reason:'已核对数组拼接职责'};
++    config.boundaries[0].allowedSites=[saved];
++  }).result);
++  denied(fixture(t,{'src/task.js':'function run(){let values = getPaths();values = values.concat([other]);}'},{...b,allowedSites:[saved]}).result,'ARCH-STATIC-COVERAGE');
++});
++
++test('R5 RegExp.exec 是合法文本解析，不与未知 handle.exec 混同', t => {
++  const b=boundary('ARCH-BIZOP-QUERY',{protectedScopes:[{path:'src/query.js',functionPath:null}]});
++  clean(fixture(t,{'src/query.js':'function read(text){const date = /[0-9]+/;return date.exec(text);}'},b).result);
++  denied(fixture(t,{'src/query.js':'function read(){return getHandle().exec("SELECT 1");}'},b).result,'ARCH-STATIC-COVERAGE');
++});
++
++test('R8 path.resolve 的相对参数使用扫描根目录，不受检查器进程 cwd 影响', t => {
++  const f=fixture(t,{'src/launcher.js':"const {Worker}=require('node:worker_threads');const path=require('node:path');new Worker(path.resolve('src/worker.js'));",'src/worker.js':''},boundary('ARCH-CYCLE'));
++  clean(f.result);assert.deepEqual(f.scanned.edges.filter(e=>e.kind==='worker').map(e=>e.to),['src/worker.js']);
++});
+--- a/architecture/boundaries.json
++++ b/architecture/boundaries.json
+@@ -3290,6 +3290,14 @@
+           "callee": "recoverPendingInternal",
+           "evidenceId": "5bbba2914b4cb1d64c4bb66fab9fbe866cfe79aa27718edea985679629ece487",
+           "reason": "raw recovery API 的内部受互斥锁保护实现调用；prepare 的隐式调用不享有此许可"
++        },
++        {
++          "rule": "ARCH-PUBLICATION-RECOVERY-ENTRY",
++          "from": "src/main-process/toolbox-output-publication-dispatch.js",
++          "functionPath": "runWorkerJob.<anonymous:1>.<anonymous:4>",
++          "callee": "onWorkerExit",
++          "evidenceId": "ab2f86aeb298c450cbd7c00111eda42c2674625ec54750a7dd852fdae0544f5b",
++          "reason": "worker exit 事件的通知回调仅报告 jobId/op/code；它不发送 worker operation，不执行恢复。"
+         }
+       ],
+       "compositionEntrypoints": [],
+@@ -3528,7 +3536,40 @@
+           ]
+         }
+       ],
+-      "allowedSites": [],
++      "allowedSites": [
++        {
++          "rule": "ARCH-TASK-ADAPTER",
++          "from": "src/main.js",
++          "functionPath": "finalizeRecoveredPositionPending",
++          "callee": "getBatch",
++          "evidenceId": "3ca09ca56e0ad2c69db30be9cfcce7b356ae16f4f91cb151f4fcb769e9abad6c",
++          "reason": "读取 Archive repository 批次状态用于终态收口；不是 Position 私有 pending/settlement API，准确位置保持既有公共协调职责。"
++        },
++        {
++          "rule": "ARCH-TASK-ADAPTER",
++          "from": "src/main.js",
++          "functionPath": "getPositionReconciliationService",
++          "callee": "flushOutbox",
++          "evidenceId": "f07be0037f18623d8a5f95557f0d7bd699ccc0fb6804dd2f4a58768991c8db77",
++          "reason": "领域 service 构造时触发 Archive 公共 outbox 刷新；该准确公共调用不属于 Position 私有状态操作。"
++        },
++        {
++          "rule": "ARCH-TASK-ADAPTER",
++          "from": "src/main.js",
++          "functionPath": "positionArchiveProtectedStagingPaths",
++          "callee": "protectedPaths.concat",
++          "evidenceId": "26691b6ae5b3b19a1c38c6055a92823ada270ce6ad8b6f38e2a85f397336502e",
++          "reason": "拼接持久保护路径数组与已用 Array.isArray 核对的活动路径；此处是数据拼接而非调用领域状态机。"
++        },
++        {
++          "rule": "ARCH-TASK-ADAPTER",
++          "from": "src/main.js",
++          "functionPath": "assertTaskPolicyNotHeld",
++          "callee": "actionTaskBindingRegistry.allowedTaskKeys",
++          "evidenceId": "10256647bfc2b1371366ab741e088aeab85075b5c4547384f43eee2c8cd85d07",
++          "reason": "读取启动期 initializeActionTaskBindingStartup 返回的绑定注册表，属于公共 task policy 查询，不改变 Position 状态。"
++        }
++      ],
+       "compositionEntrypoints": [],
+       "globals": [],
+       "factory": null,
+--- a/architecture/legacy-allowlist.json
++++ b/architecture/legacy-allowlist.json
+@@ -1441,6 +1441,28 @@
+       "removeWhen": "G2 对应生产迁移完成并取得行为验证；删除准确旧入口和本条记录",
+       "evidenceId": "50ee41b9670d0d8d86e88e2e0416c72af34c1896b526c97152268ecf7636e265",
+       "functionPath": "runArchiveAwareOperation.<anonymous:1>.<anonymous:2>.execute.admitPosition"
++    },
++    {
++      "id": "baseline-recovery-dynamic-operation-108",
++      "rule": "ARCH-STATIC-COVERAGE",
++      "from": "src/main-process/toolbox-output-publication-dispatch.js",
++      "originalCommit": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
++      "reason": "v3.2.9 旧 worker transport 从参数转发 op，尚未拥有 G1 授权事务合同；新检查发现的固定基线覆盖债务。",
++      "governance": "G1",
++      "removeWhen": "G1 在固定 release 候选完成授权 dispatcher 迁移并验证该位置后删除；active 不允许沿用本例外。",
++      "evidenceId": "3420e9da5eca5d5ceaba4892b7f4b35ce02f1cac7bd0ae70071ebdefce14b5ad",
++      "functionPath": "runWorkerJob.<anonymous:1>"
++    },
++    {
++      "id": "baseline-recovery-dynamic-operation-124",
++      "rule": "ARCH-STATIC-COVERAGE",
++      "from": "src/main-process/toolbox-output-publication-dispatch.js",
++      "originalCommit": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
++      "reason": "v3.2.9 旧 execute 向 runWorkerJob 转发动态 op；G1 激活时须以实际授权事务或静态候选替代。",
++      "governance": "G1",
++      "removeWhen": "G1 在固定 release 候选完成授权 dispatcher 迁移并验证该位置后删除；active 不允许沿用本例外。",
++      "evidenceId": "950debb2b71c4842305e3692cc3d91c23c84e53c02a5a93e2e92d4d31d267228",
++      "functionPath": "createToolboxPublicationDispatcher.execute"
+     }
+   ]
+ }
+--- a/architecture/README.md
++++ b/architecture/README.md
+@@ -22,6 +22,7 @@
+ - [check-architecture.js](../scripts/check-architecture.js)：唯一 CLI、事件参数、报告和退出码。
+ - [scan.js](../scripts/architecture/scan.js)：枚举、Acorn AST、支持的词法绑定与静态值、依赖边、DOM／全局／操作位置；不执行业务。
+ - [rules.js](../scripts/architecture/rules.js)：循环、闭包、调用位置、装配与激活约束；消费扫描结果，不写基线。
++- [contracts.js](../scripts/architecture/contracts.js)：执行规则与历史校验共享的词法范围包含关系、工厂存在性/调用识别和别名来源。
+ - [schema.js](../scripts/architecture/schema.js)：严格配置结构；新增具有规则语义的字段必须同步历史比较和负向测试。
+ - [policy-history.js](../scripts/architecture/policy-history.js)：只读 Git 全父链配置、历史保护底线、迁移证据链与损坏 JSON 的受控重建。
+ - [ci-policy-base.js](../scripts/architecture/ci-policy-base.js)：核对 checkout 身份并选取真实 CI 事件对比值；缺失／零 before 失败。
+@@ -52,6 +53,8 @@
+ 
+ 必需入口／消费者、保护范围、受限 API／operation、工厂与全局合同、允许集合、允许调用／装配、激活证据和例外都参与历史强度比较。删除 `allowedApiFields.api` 会移除方法约束，不能当作收紧；禁止全部方法应保留 `api: []`。治理归属参与执行强度，active 后不能改归属绕过证据或例外限制。已退役入口的成员、消费者与证据约束在所属边界仍 pending 时也保持。active 的具名保护函数必须真实存在，更名须同步登记和迁移证据。
+ 
++工厂 active 时核对 factory.path 内的具名定义与实际生产调用；工厂改名的迁移必须同时迁移旧调用，替代不存在或旧调用残留时，即使 policyChanges 结构正确也失败。保护范围从 `collect.inner` 扩大到 `collect` 按词法祖先关系视为收紧；执行匹配与历史比较共用同一函数，反向缩小仍失败。
++
+ 合法入口迁移使用精确 `policyChanges`，绑定 sourceCommit、sourcePolicyBlob、boundaryId、field、from、to、reason、designDoc。多次迁移须符合父链顺序，允许有准确版本证据的 A→B→A；不能借变更链豁免纯模块禁止能力或 active／retired 状态底线。
+ 
+ 历史 `boundaries.json`／`legacy-allowlist.json` 的 JSON 语法损坏默认失败；当前树修好并不能自动忘记损坏历史。只在确需恢复时新增 `policy-history-repairs.json` 及 `policy-history-repairs/<originalBlob>.json`，不预建空清单。按 [TechDoc §5.4](../changes/v3.2.10/codex/v3.2.10-architecture-guardrails/techdoc.md#policy-history-repair) 绑定准确 path／blob／sourceCommits、完整最小语法修复快照、SHA-256 和 reviewEvidence。重建仍完整参加相同历史底线，不允许空配置、弱化配置借道或替换已生效的修复绑定。
+@@ -62,6 +65,18 @@
+ 
+ 静态检查覆盖字面量及支持的常量传播 require/import/export、已解释 worker 路径、登记的 classic global、根节点写入和受保护操作位置。报告保留文件／边数、未解析／动态位置、active／pending／partial、例外和历史修复来源。
+ 
++当前支持与失败关闭的边界：
++
++- `StaticBlock` 同时建立词法作用域和 var 边界；块内同名 require 不遮蔽块外 Node require。
++- Worker/fork 相对路径按仓库根运行 cwd 解析；`path.resolve` 的相对参数以扫描根为准，`__dirname` 和 `new URL(..., import.meta.url)` 保持模块目录语义。应用使用不同运行 cwd 时，应使用可解析绝对路径或准确动态目标合同；本工具不推断进程启动后的任意 chdir。
++- 受保护 worker operation 遍历条件候选，含 recover 的候选受授权位置限制；无法解释的 operation 报 coverage。历史 transport 的两个动态转发位置保留准确 v3.2.9 AST 例外，G1 激活前清理，不代表已证明授权。
++- 通用任务按别名来源候选检查模块及本地 helper；可变别名的未解释来源报 coverage，不靠变量是否含 Position 判断。显式注入参数与已知工厂来源仍按其合同/受限入口检查；任意运行时回调内容不由此静态证明。
++- DB getter 返回值无法解释时，保留 prepare/exec 的语法方法身份并报 coverage。明确的 RegExp.exec 属于文本解析，不作为 DB 查询。
++- 工厂注入的 scoped 对象必须提供可解释方法集合；不透明 helper 返回值/候选对象拒绝。allowedApiFields 的点分名称按嵌套叶路径检查，额外方法、嵌套 spread、getter 和完整 desktopApi 均不能借层级藏入。
++- script 装配区分同步与 defer：同步 provider 可以先于延迟 consumer，同组 defer 依文档顺序；async 或 module provider 不能据标签位置认定先行，module 顶层 await 等无法保证的关系拒绝。template 内脚本不计为已加载。
++
++上述收紧对应 [R1–R10 回归](../tests/unit/architecture/review-regressions.test.js)。五处准确合法调用使用 allowedSites 保留职责说明；两处 G1 历史动态操作使用 legacy-allowlist 保留移除条件，两者不可混用。登记变化和原始基线核对见[本轮修复复核](../changes/v3.2.10/codex/v3.2.10-architecture-guardrails/reviews/2026-09-21-repair/repair-review.md)。
++
+ IPC、任意 callback 注入、任意数据流／反射、共享对象内部写入、SQL 的业务过滤含义、资源真实退出、恢复授权时序及 GUI 生命周期不由 AST 完整证明。未解释的受保护结构失败关闭；报告中的盲区不能写成零风险。相关业务验收由 G1–G7 自己的真实测试负责；Windows／Excel／WPS／安装包验收按实际影响另外记录。
+ 
+ 代表性自动验证入口：[scanner](../tests/unit/architecture/scan.test.js)、[rules](../tests/unit/architecture/rules.test.js)、[policy-history](../tests/unit/architecture/policy-history.test.js)、[CLI 与 CI](../tests/unit/architecture/cli.test.js)。实际运行结果及未完成项只在本轮实施记录登记。

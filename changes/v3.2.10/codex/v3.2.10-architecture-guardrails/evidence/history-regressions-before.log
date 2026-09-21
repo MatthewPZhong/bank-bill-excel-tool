@@ -1,0 +1,66 @@
+✖ 保护字段完整比较：scope、operation、规则、消费者、证据、全局及装配不能放宽 (2405.269625ms)
+✖ 未全域激活时退役入口仍保留成员、替代入口和证据约束 (343.04825ms)
+✖ active 保护函数更名却不更新登记时不能静默失去扫描范围 (13.016ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 0
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2829.828875
+
+✖ failing tests:
+
+test at tests/unit/architecture/policy-history.test.js:86:1
+✖ 保护字段完整比较：scope、operation、规则、消费者、证据、全局及装配不能放宽 (2405.269625ms)
+  AssertionError [ERR_ASSERTION]: []
+      at hasViolation (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-architecture-guardrails/tests/unit/architecture/policy-history.test.js:16:47)
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-architecture-guardrails/tests/unit/architecture/policy-history.test.js:110:5)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.start (node:internal/test_runner/test:1096:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:385:17) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at tests/unit/architecture/policy-history.test.js:117:1
+✖ 未全域激活时退役入口仍保留成员、替代入口和证据约束 (343.04825ms)
+  AssertionError [ERR_ASSERTION]: []
+      at hasViolation (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-architecture-guardrails/tests/unit/architecture/policy-history.test.js:16:47)
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-architecture-guardrails/tests/unit/architecture/policy-history.test.js:126:5)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at tests/unit/architecture/rules.test.js:32:1
+✖ active 保护函数更名却不更新登记时不能静默失去扫描范围 (13.016ms)
+  AssertionError [ERR_ASSERTION]: []
+      at denied (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-architecture-guardrails/tests/unit/architecture/rules.test.js:27:40)
+      at TestContext.<anonymous> (/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-architecture-guardrails/tests/unit/architecture/rules.test.js:36:3)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.start (node:internal/test_runner/test:1096:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:385:17) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }

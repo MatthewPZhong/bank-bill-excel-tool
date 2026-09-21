@@ -1,0 +1,245 @@
+{
+  "factBaseline": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "files": [
+    {
+      "path": "changes/v3.2.10/README.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/README.md",
+      "sha256": "9d32565d6d969ff812c7c7dc96079148d9aeecffb53f2966b1e0d9e5eb56975a",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-application-recovery/spec.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-application-recovery/spec.md",
+      "sha256": "a7a6a76f65129f64e1215be1036ef256b95c8b6638154cecf259fcbf69a8e015",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-application-recovery/techdoc.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-application-recovery/techdoc.md",
+      "sha256": "c1f01e42bdcc51ad6c5738420d31d3edbb91b40b786a9f4d53ae5bc016b86e3f",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/spec.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-architecture-guardrails/spec.md",
+      "sha256": "40cd1d7f7b60dc38cb0ec570f1e06d097a36755d19b6477799ccb8e656d08ed1",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-architecture-guardrails/techdoc.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-architecture-guardrails/techdoc.md",
+      "sha256": "a3f05ca08266bd374e83a5f7ffbea4d1993a8823fe53897b9eeefd38346f3527",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-bizop-query-boundaries/spec.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-bizop-query-boundaries/spec.md",
+      "sha256": "13f5862b467266a4bb8bc1199e90a1eb7cccbcb78070bead88d3564c177d81c0",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-bizop-query-boundaries/techdoc.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-bizop-query-boundaries/techdoc.md",
+      "sha256": "46a9245067e69fa1a0797a1ec9c609567b3b5cfd50b5c824b3701731a0c99ba3",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-business-task-adapters/spec.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-business-task-adapters/spec.md",
+      "sha256": "3da1fd494bea35c4c76d000eb8c126b8638d586a320ae795592b2b957c1d28f8",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-business-task-adapters/techdoc.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-business-task-adapters/techdoc.md",
+      "sha256": "e2ab99aa3dc21123a5be00a5cc3900c12e1c91173a87877590d8bf204ac93c84",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-execution-descriptors/spec.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-execution-descriptors/spec.md",
+      "sha256": "b57b4e61765bceeaa7b46123b7be04b7afd5bd075f258be191c62e20d93d478c",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-execution-descriptors/techdoc.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-execution-descriptors/techdoc.md",
+      "sha256": "bb3bede82b77aaacc98468dae533b3340756c09ce32f62b9fd1e706daafcbd49",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/spec.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-renderer-boundaries/spec.md",
+      "sha256": "a6d5867c99180648325c7fddb537440ea963d5afc1afc2d8117beef56990e3b3",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-renderer-boundaries/techdoc.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-renderer-boundaries/techdoc.md",
+      "sha256": "b200c6faf1ef6b01513f4106c6345c735bea235587bda105e626584dd3022cc0",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-shared-xlsx-infrastructure/spec.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-shared-xlsx-infrastructure/spec.md",
+      "sha256": "6cb978388c50e35baf50fbaf2f082eca1b10f17808f111322ae3df2952505d91",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-shared-xlsx-infrastructure/techdoc.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-shared-xlsx-infrastructure/techdoc.md",
+      "sha256": "7786bb05fd68c2431b8c4624a36f5672fe32ef2a10bd370bc87d19227883410c",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-storage-execution-separation/spec.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-storage-execution-separation/spec.md",
+      "sha256": "046854b1c4573dda6f281ffc37caae184e264883ea35ea58a6810550e28ea7e8",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/v3.2.10/codex/v3.2.10-storage-execution-separation/techdoc.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/codex/v3.2.10-storage-execution-separation/techdoc.md",
+      "sha256": "683971ee22adc8fdc2f73840836d6ae5ff402dd83f8b23c716cdaac655127b3a",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/v3.2.10/documentation-validation.json",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/documentation-validation.json",
+      "sha256": "7ea976333bb44731936f9114fe0e868bd1ec783a7d288c12a6e354d28acc02eb",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/v3.2.10/review-response.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/v3.2.10/review-response.md",
+      "sha256": "35c5ecd928ee37989e58737f43fb26fc5761187d2f9e7783cc836a68f6f2afdb",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/architecture-coupling/2026-09-20/.system-design-followup.md.swp",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/architecture-coupling/2026-09-20/.system-design-followup.md.swp",
+      "sha256": "c551277d3261f0de847d887624e3b0a4eb65032144ca91c4b9565df826fcd93e",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/architecture-coupling/2026-09-20/evidence/analyzer.json",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/architecture-coupling/2026-09-20/evidence/analyzer.json",
+      "sha256": "c42481538d8be6fe9a7fb43971297fddb0ca8dc99600dd1c0cdee75d9d1069ab",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/architecture-coupling/2026-09-20/evidence/baseline.json",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/architecture-coupling/2026-09-20/evidence/baseline.json",
+      "sha256": "7a80b0fc82e36a2154628e7d8bd912914bb62c2dd85a6ebdc638bb163ab44357",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/architecture-coupling/2026-09-20/evidence/dependencies.json",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/architecture-coupling/2026-09-20/evidence/dependencies.json",
+      "sha256": "2e569c0d7ed6441ff1aab661f0a29e4eee4d3947e6163a1093360815034dc9f5",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/architecture-coupling/2026-09-20/evidence/metrics-summary.json",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/architecture-coupling/2026-09-20/evidence/metrics-summary.json",
+      "sha256": "061daa00140683d6a01ccb63669003b452e2ed06055faa0cd546b6b0943ecae9",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/architecture-coupling/2026-09-20/evidence/modal-lifecycle-probe.cjs",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/architecture-coupling/2026-09-20/evidence/modal-lifecycle-probe.cjs",
+      "sha256": "44011431f483020c27b014f51b90b29a825f0c4561f4c27713f303c98b844fdf",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/architecture-coupling/2026-09-20/evidence/modal-lifecycle-probe.json",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/architecture-coupling/2026-09-20/evidence/modal-lifecycle-probe.json",
+      "sha256": "9a66070a7475aad68a65a6b20228bea74b622357b830f293bcaf2266a3006f00",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/architecture-coupling/2026-09-20/evidence/module-groups.json",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/architecture-coupling/2026-09-20/evidence/module-groups.json",
+      "sha256": "15f436da91079f023c378801295c46cde0a87703cde643f3aac33180ac07a8b9",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/architecture-coupling/2026-09-20/evidence/preload-constants-probe.cjs",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/architecture-coupling/2026-09-20/evidence/preload-constants-probe.cjs",
+      "sha256": "882129b50bff761141356328b3d36801ac6123c3ee7684b67a30af389478c191",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/architecture-coupling/2026-09-20/evidence/preload-constants-probe.json",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/architecture-coupling/2026-09-20/evidence/preload-constants-probe.json",
+      "sha256": "6803a6b4bb71a6d5a5ab7c27caa760602b5e5da9b4ed126f1aae074240b085d4",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/architecture-coupling/2026-09-20/evidence/scan-dependencies.cjs",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/architecture-coupling/2026-09-20/evidence/scan-dependencies.cjs",
+      "sha256": "1f3478c4bd55d789e562c44688484a254f0f1f2155f9205c0f4e05102575358b",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/architecture-coupling/2026-09-20/evidence/verification.json",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/architecture-coupling/2026-09-20/evidence/verification.json",
+      "sha256": "a26d5c18b38c799efd738e8abfd1e0aff7a6e7d4aa4438e79ebb7d849c338ebc",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/architecture-coupling/2026-09-20/governance-plan-coverage-review.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/architecture-coupling/2026-09-20/governance-plan-coverage-review.md",
+      "sha256": "77d6174e358fa8f29348b69fcdec28a811fabb3ae43836bf59c65f86781f1642",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/architecture-coupling/2026-09-20/review.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/architecture-coupling/2026-09-20/review.md",
+      "sha256": "3b1167ab7dbddfcf3cea897318c6db00ef5635f68f46c81a90eadca790a92cc4",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/architecture-coupling/2026-09-20/system-design-evidence/archive-recovery-tests.tap",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/architecture-coupling/2026-09-20/system-design-evidence/archive-recovery-tests.tap",
+      "sha256": "b5f83f794b3a2613f2caa703de36b68a34166f7114cd5e5301f1ed54f0605846",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/architecture-coupling/2026-09-20/system-design-evidence/execution-contracts-tests.log",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/architecture-coupling/2026-09-20/system-design-evidence/execution-contracts-tests.log",
+      "sha256": "8ff9240919ef21ca273fd4a22b53f3d605a9e488aaa96abbe0529a0b28401a3b",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/architecture-coupling/2026-09-20/system-design-evidence/historical-manifest-recheck.tap",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/architecture-coupling/2026-09-20/system-design-evidence/historical-manifest-recheck.tap",
+      "sha256": "0a06ccefceff3b128fffcd1750d84867f4955d20780df237068615d5360b2e1b",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/architecture-coupling/2026-09-20/system-design-evidence/ui-interaction-probe.cjs",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/architecture-coupling/2026-09-20/system-design-evidence/ui-interaction-probe.cjs",
+      "sha256": "c8bcc056bf4be3d3c0b4c2408b6966403b8f910c4f2dcf3191bf07dee8bbd778",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/architecture-coupling/2026-09-20/system-design-evidence/ui-interaction-probe.json",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/architecture-coupling/2026-09-20/system-design-evidence/ui-interaction-probe.json",
+      "sha256": "51c96a64b0cadb1302fa3c3a9c47cd2f240e6abe55dde55a9e6e2919550f862d",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/architecture-coupling/2026-09-20/system-design-evidence/verification.json",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/architecture-coupling/2026-09-20/system-design-evidence/verification.json",
+      "sha256": "909cc7249a3df6104646122f81a9571c9397b8c12de21908d179a2e1af341157",
+      "matchesSource": true
+    },
+    {
+      "path": "changes/architecture-coupling/2026-09-20/system-design-followup.md",
+      "source": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/changes/architecture-coupling/2026-09-20/system-design-followup.md",
+      "sha256": "180846ef26d2eac7d8973d30f5f98acb67e113f35c9a868db09953f7b23b00d1",
+      "matchesSource": true
+    }
+  ]
+}

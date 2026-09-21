@@ -1,0 +1,6 @@
+架构检查：通过；解析 685/685 文件；字面量本地边 2254；worker 边 64；global 边 5。
+覆盖：未解析 2；动态位置 33；active 2；pending 21；partial 8。
+历史：对比 11086a3cbf632a30adbcfa796e4cd81810c5aef9；检查 1 个提交；修复绑定 0。
+待激活：bizop-query-q2、bizop-query-q3、publication-recovery-entry、renderer-acquiring、renderer-bank-bu、renderer-bank-statement、renderer-biz-op-legacy、renderer-dialog-app-settings、renderer-dialog-configuration、renderer-dialog-scenarios、renderer-dialog-toolbox、renderer-duplicate-inbound、renderer-modal-owner、renderer-new-account、renderer-pre-fund、renderer-recon-id-fix、renderer-services、renderer-statement、renderer-vcc-op-calc、shared-xlsx、vcc-mapped-lineage
+部分入口存在：bizop-query-q1、bizop-recovery-private、business-task-adapters、descriptor-composition、renderer-biz-op-v327、renderer-pending、renderer-position、renderer-vcc-financial-op
+静态覆盖边界：扫描通过不代表 IPC、回调、共享状态、业务恢复或 GUI 验收完成；详见 architecture/README.md。

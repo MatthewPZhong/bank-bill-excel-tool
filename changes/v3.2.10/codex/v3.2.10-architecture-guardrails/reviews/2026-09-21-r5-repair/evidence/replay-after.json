@@ -1,0 +1,278 @@
+{
+  "meaning": "原缺陷已拒绝，控制组符合预期",
+  "tooling": "/Users/pzhong/Desktop/Project/bank-bill-excel-tool/tmp/worktrees/v3210-architecture-guardrails",
+  "temporary": "/var/folders/8_/r_04ysrs4tl47cg09y9sdc000000gn/T/g8-r5-identity-PRp7h8",
+  "results": [
+    {
+      "name": "r4-original-closed",
+      "source": "function settlePositionArchiveResult(){calls.push('settled');}function createService(){return {settle:settlePositionArchiveResult};}const service=createService();function runArchiveAwareOperation(){service.settle();}",
+      "runtimeCalls": [
+        "settled"
+      ],
+      "violations": [
+        {
+          "rule": "ARCH-TASK-ADAPTER",
+          "boundaryId": "business-task-adapters",
+          "from": "src/main.js",
+          "to": null,
+          "line": 1,
+          "column": 198,
+          "message": "通用编排不得直接调用本文件 Position 私有状态操作",
+          "evidenceId": "63c43e854b87f2d4e703241eb7555ba589bc36ecf025056de1c4dd12fa388ed8",
+          "functionPath": "runArchiveAwareOperation"
+        }
+      ],
+      "dynamicSites": [],
+      "origins": {
+        "known": true,
+        "modules": [],
+        "functions": [
+          "settlePositionArchiveResult",
+          "createService"
+        ],
+        "targets": [
+          "[\"local\",\"src/main.js\",0]"
+        ],
+        "unresolvedReturn": false
+      }
+    },
+    {
+      "name": "imported-reference-gap",
+      "source": "const {settlePositionArchiveResult}=require('./main-process/position-reconciliation/operation-lifecycle');function createService(){return {settle:settlePositionArchiveResult};}const service=createService();function runArchiveAwareOperation(){service.settle();}",
+      "runtimeCalls": [
+        "settled"
+      ],
+      "violations": [
+        {
+          "rule": "ARCH-TASK-ADAPTER",
+          "boundaryId": "business-task-adapters",
+          "from": "src/main.js",
+          "to": null,
+          "line": 1,
+          "column": 242,
+          "message": "通用编排不得直接调用本文件 Position 私有状态操作",
+          "evidenceId": "63c43e854b87f2d4e703241eb7555ba589bc36ecf025056de1c4dd12fa388ed8",
+          "functionPath": "runArchiveAwareOperation"
+        }
+      ],
+      "dynamicSites": [],
+      "origins": {
+        "known": true,
+        "modules": [
+          "src/main-process/position-reconciliation/operation-lifecycle.js"
+        ],
+        "functions": [
+          "createService"
+        ],
+        "targets": [
+          "[\"module\",\"src/main-process/position-reconciliation/operation-lifecycle.js\",\"settlePositionArchiveResult\"]"
+        ],
+        "unresolvedReturn": false
+      }
+    },
+    {
+      "name": "imported-direct-control",
+      "source": "const {settlePositionArchiveResult}=require('./main-process/position-reconciliation/operation-lifecycle');function runArchiveAwareOperation(){settlePositionArchiveResult();}",
+      "runtimeCalls": [
+        "settled"
+      ],
+      "violations": [
+        {
+          "rule": "ARCH-TASK-ADAPTER",
+          "boundaryId": "business-task-adapters",
+          "from": "src/main.js",
+          "to": null,
+          "line": 1,
+          "column": 142,
+          "message": "通用编排不得直接调用本文件 Position 私有状态操作",
+          "evidenceId": "03472e44a7532cdaf4142c09e95f18bb554bdd92731dc39bd08c7ccc7d64fbdd",
+          "functionPath": "runArchiveAwareOperation"
+        }
+      ],
+      "dynamicSites": [],
+      "origins": {
+        "known": true,
+        "modules": [
+          "src/main-process/position-reconciliation/operation-lifecycle.js"
+        ],
+        "functions": [],
+        "targets": [
+          "[\"module\",\"src/main-process/position-reconciliation/operation-lifecycle.js\",\"settlePositionArchiveResult\"]"
+        ]
+      }
+    },
+    {
+      "name": "imported-wrapper-control",
+      "source": "const {settlePositionArchiveResult}=require('./main-process/position-reconciliation/operation-lifecycle');function createService(){return {settle(){settlePositionArchiveResult();}};}const service=createService();function runArchiveAwareOperation(){service.settle();}",
+      "runtimeCalls": [
+        "settled"
+      ],
+      "violations": [
+        {
+          "rule": "ARCH-TASK-ADAPTER",
+          "boundaryId": "business-task-adapters",
+          "from": "src/main.js",
+          "to": null,
+          "line": 1,
+          "column": 148,
+          "message": "通用编排不得直接调用本文件 Position 私有状态操作",
+          "evidenceId": "03472e44a7532cdaf4142c09e95f18bb554bdd92731dc39bd08c7ccc7d64fbdd",
+          "functionPath": "createService.settle"
+        }
+      ],
+      "dynamicSites": [],
+      "origins": {
+        "known": true,
+        "modules": [],
+        "functions": [
+          "createService.settle",
+          "createService"
+        ],
+        "targets": [
+          "[\"local\",\"src/main.js\",145]"
+        ],
+        "unresolvedReturn": false
+      }
+    },
+    {
+      "name": "factory-binding-direct-gap",
+      "source": "function makeSettlement(){return function performSettlement(){calls.push('settled');};}const settlePositionArchiveResult=makeSettlement();function runArchiveAwareOperation(){settlePositionArchiveResult();}",
+      "runtimeCalls": [
+        "settled"
+      ],
+      "violations": [
+        {
+          "rule": "ARCH-TASK-ADAPTER",
+          "boundaryId": "business-task-adapters",
+          "from": "src/main.js",
+          "to": null,
+          "line": 1,
+          "column": 174,
+          "message": "通用编排不得直接调用本文件 Position 私有状态操作",
+          "evidenceId": "03472e44a7532cdaf4142c09e95f18bb554bdd92731dc39bd08c7ccc7d64fbdd",
+          "functionPath": "runArchiveAwareOperation"
+        }
+      ],
+      "dynamicSites": [],
+      "origins": {
+        "known": true,
+        "modules": [],
+        "functions": [
+          "makeSettlement.performSettlement",
+          "makeSettlement"
+        ],
+        "targets": [
+          "[\"local\",\"src/main.js\",33]"
+        ],
+        "unresolvedReturn": false
+      }
+    },
+    {
+      "name": "factory-binding-service-gap",
+      "source": "function makeSettlement(){return function performSettlement(){calls.push('settled');};}const settlePositionArchiveResult=makeSettlement();function createService(){return {settle:settlePositionArchiveResult};}const service=createService();function runArchiveAwareOperation(){service.settle();}",
+      "runtimeCalls": [
+        "settled"
+      ],
+      "violations": [
+        {
+          "rule": "ARCH-TASK-ADAPTER",
+          "boundaryId": "business-task-adapters",
+          "from": "src/main.js",
+          "to": null,
+          "line": 1,
+          "column": 274,
+          "message": "通用编排不得直接调用本文件 Position 私有状态操作",
+          "evidenceId": "63c43e854b87f2d4e703241eb7555ba589bc36ecf025056de1c4dd12fa388ed8",
+          "functionPath": "runArchiveAwareOperation"
+        }
+      ],
+      "dynamicSites": [],
+      "origins": {
+        "known": true,
+        "modules": [],
+        "functions": [
+          "makeSettlement.performSettlement",
+          "makeSettlement",
+          "createService"
+        ],
+        "targets": [
+          "[\"local\",\"src/main.js\",33]"
+        ],
+        "unresolvedReturn": false
+      }
+    },
+    {
+      "name": "named-expression-control",
+      "source": "const settlePositionArchiveResult=function performSettlement(){calls.push('settled');};function runArchiveAwareOperation(){settlePositionArchiveResult();}",
+      "runtimeCalls": [
+        "settled"
+      ],
+      "violations": [
+        {
+          "rule": "ARCH-TASK-ADAPTER",
+          "boundaryId": "business-task-adapters",
+          "from": "src/main.js",
+          "to": null,
+          "line": 1,
+          "column": 123,
+          "message": "通用编排不得直接调用本文件 Position 私有状态操作",
+          "evidenceId": "03472e44a7532cdaf4142c09e95f18bb554bdd92731dc39bd08c7ccc7d64fbdd",
+          "functionPath": "runArchiveAwareOperation"
+        }
+      ],
+      "dynamicSites": [],
+      "origins": {
+        "known": true,
+        "modules": [],
+        "functions": [
+          "performSettlement"
+        ],
+        "targets": [
+          "[\"local\",\"src/main.js\",34]"
+        ]
+      }
+    },
+    {
+      "name": "pure-factory-control",
+      "source": "function makePure(){return function performPure(){calls.push('pure');};}const executePure=makePure();function runArchiveAwareOperation(){executePure();}",
+      "runtimeCalls": [
+        "pure"
+      ],
+      "violations": [],
+      "dynamicSites": [],
+      "origins": {
+        "known": true,
+        "modules": [],
+        "functions": [
+          "makePure.performPure",
+          "makePure"
+        ],
+        "targets": [
+          "[\"local\",\"src/main.js\",27]"
+        ],
+        "unresolvedReturn": false
+      }
+    },
+    {
+      "name": "pure-service-control",
+      "source": "const {settlePositionArchiveResult}=require('./main-process/position-reconciliation/operation-lifecycle');function createService(){return {settle:settlePositionArchiveResult,execute(){calls.push('pure');}};}const service=createService();function runArchiveAwareOperation(){service.execute();}",
+      "runtimeCalls": [
+        "pure"
+      ],
+      "violations": [],
+      "dynamicSites": [],
+      "origins": {
+        "known": true,
+        "modules": [],
+        "functions": [
+          "createService.execute",
+          "createService"
+        ],
+        "targets": [
+          "[\"local\",\"src/main.js\",181]"
+        ],
+        "unresolvedReturn": false
+      }
+    }
+  ]
+}

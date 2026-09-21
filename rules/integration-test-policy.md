@@ -110,7 +110,7 @@ run().catch((e) => { console.error('FATAL', e); process.exit(1); });
 
 ## 六、release-check 一键 gate
 
-`npm run release-check` = `lint && smoke && test:unit && test:integration`
+`npm run release-check` = `lint && check:architecture && smoke && test:unit && test:integration`
 
 **发版前 hard gate**：
 - 任何一个 fail → 整个流程红 → 不能进入 GUI 手测 / 提 PR
@@ -121,7 +121,7 @@ run().catch((e) => { console.error('FATAL', e); process.exit(1); });
 **本地与 CI 使用同一门禁**：
 - 开发者可在 macOS / Windows / Linux 本地手动触发；Windows PR/Release workflow 也执行同一个完整命令
 - `&&` 串联在 npm scripts 中由 shell（macOS/Linux：sh；Windows：cmd.exe）执行，三平台均支持短路语义
-- 跑完确认 ESLint、`smoke test passed`、unit `N/N PASS` 与「全部 N 个集成脚本通过 ✓」四段证据
+- 跑完确认 ESLint、`check:architecture`、`smoke test passed`、unit `N/N PASS` 与「全部 N 个集成脚本通过 ✓」五段证据
 
 ## 七、当前集成测试清单（自动同步）
 

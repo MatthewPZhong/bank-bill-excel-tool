@@ -1,0 +1,26 @@
+{
+  "head": "11086a3cbf632a30adbcfa796e4cd81810c5aef9",
+  "files": {
+    ".github/workflows/build-windows.yml": "0899797cacdeeb49736fe08f8d20b5a142d8c7419141327cdfdba826da3c13c7",
+    ".github/workflows/release-windows.yml": "ea1cf2a29ca61267c78e8052ff926abca56cc34f83dd7f3c13c11d6f046b6d6f",
+    "AGENTS.md": "22d5aa3f2790e0f223f8a4591d5798188eb8b1cb160b66681579a520363a157a",
+    "architecture/README.md": "f2ee62bf6a430e79585d9168f3809d50fd287e6d3aa6e0d1597a70331e2d70b0",
+    "architecture/boundaries.json": "343796424d8e0ef93d7fcbd6b117d1df6ee30bde23358614f899de15806c71de",
+    "architecture/legacy-allowlist.json": "80e9aeb21f7c01797f19da6104365ac581abe8a2804f998e687d036137d539a4",
+    "package-lock.json": "3c84e156bb25c3265aae4d4d3063413f8ba4811c726c07d3c94eb807a4ae00c7",
+    "package.json": "63cdb3a9ed58725f7d7d38cac0278133167d4536d3491431b4b6c81664636ed0",
+    "rules/integration-test-policy.md": "971e40e93a02386dc1f81dac400e1a5eb81a779114c40e1a855d763d466e54fb",
+    "scripts/architecture/ci-policy-base.js": "4c4bf7555e331f2e65694b24478dbf950fc43ef909002e107cfa05522840a463",
+    "scripts/architecture/policy-history.js": "ba7fa0d0505f53e171240bab8a75e310d5343a4b13db588fa9160619c5eca8d1",
+    "scripts/architecture/rules.js": "b318af1c822b7a2b550b5cced89b0796063cbcbb654d6c7da4f1b9ee2e3227f9",
+    "scripts/architecture/scan.js": "dd1355a6a30c4ca0475d1e2da026680012c4d4bdee1132e951552878fc74d773",
+    "scripts/architecture/schema.js": "d5436ddd4b6e97c259be62a086b5ccac6537fdcc77f0ba2dc8a60e8474f6874f",
+    "scripts/check-architecture.js": "63d987f6defba96c1783da99ed22e98c03aea2006914be7dee0626b59c76fa57",
+    "tests/unit/architecture/adversarial.test.js": "368bf1576ffbb1b0146635c6e95ac33dfa2b57016a808f208fa96e783976ed1e",
+    "tests/unit/architecture/cli.test.js": "b4b2e9a645868bbb7f595839e4c98047f5bb2292060eeac9e75bf64652aee159",
+    "tests/unit/architecture/fixtures/policy-repository.js": "33e522d0016720658213fc7c2626dc1512084f668d3dc75f4924d4ff93b0a30b",
+    "tests/unit/architecture/policy-history.test.js": "268c8c7725484d12789489cba516e3c888d886c95a58f564abdad0a04967a486",
+    "tests/unit/architecture/rules.test.js": "f18922a4f95b3b01a65724ce498ddd875053f463d0353d2bfa6e71ba344d6f23",
+    "tests/unit/architecture/scan.test.js": "3769e64aef6d049d484348c6741e6a1a785869da4130cfed9ae1b99f3419d6e9"
+  }
+}
